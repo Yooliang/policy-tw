@@ -12,13 +12,13 @@ const router = useRouter()
 const { policies, politicians } = useSupabase()
 const hasVoted = ref(false)
 
-const policyId = computed(() => route.params.policyId as string)
+const policyId = computed(() => Number(route.params.policyId))
 const policy = computed(() => policies.value.find(p => p.id === policyId.value))
 const politician = computed(() => policy.value ? politicians.value.find(c => c.id === policy.value!.politicianId) : null)
 
 const otherPolicies = computed(() =>
   politician.value
-    ? policies.value.filter(p => p.politicianId === politician.value!.id && p.id !== policyId.value).slice(0, 3)
+    ? policies.value.filter(p => p.politicianId === politician.value!.id && p.id !== policy.value?.id).slice(0, 3)
     : []
 )
 
@@ -108,16 +108,16 @@ const handleVote = () => {
                     @click="router.push(`/policy/${p!.id}`)"
                   >
                     <div :class="`w-16 h-16 rounded-full border-4 flex items-center justify-center bg-white transition-all z-10
-                      ${p!.id === policyId ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
+                      ${p!.id === policy?.id ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
                       <img :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :alt="politicians.find(pol => pol.id === p!.politicianId)?.name" class="w-full h-full rounded-full object-cover p-0.5" />
                     </div>
                     <div class="mt-4 text-center">
                       <span class="text-xs font-bold text-slate-400 block mb-1">{{ p!.proposedDate.split('-')[0] }}</span>
-                      <h4 :class="`font-bold text-sm mb-1 ${p!.id === policyId ? 'text-blue-700' : 'text-slate-700'}`">
+                      <h4 :class="`font-bold text-sm mb-1 ${p!.id === policy?.id ? 'text-blue-700' : 'text-slate-700'}`">
                         {{ politicians.find(pol => pol.id === p!.politicianId)?.name }}
                       </h4>
                       <div :class="`text-xs px-2 py-1 rounded-full border inline-block
-                        ${p!.id === policyId ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`">
+                        ${p!.id === policy?.id ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`">
                         {{ p!.status === 'Achieved' ? '完成階段' : p!.status === 'In Progress' ? '執行階段' : '規劃階段' }}
                       </div>
                       <div v-if="index < policyChain.length - 1" class="hidden md:block absolute top-8 -right-1/2 translate-x-1/2 z-0">

@@ -18,7 +18,7 @@ const COMMUNITY_TAGS = ['居住正義', '交通', '教育', '經濟', '環保']
 
 const LS_KEY = 'zhengjian_discussion_likes'
 
-const likedIds = ref<string[]>([])
+const likedIds = ref<number[]>([])
 
 onMounted(() => {
   try {
@@ -27,7 +27,7 @@ onMounted(() => {
   } catch { /* ignore */ }
 })
 
-function toggleLike(id: string, e: Event) {
+function toggleLike(id: number, e: Event) {
   e.stopPropagation()
   const idx = likedIds.value.indexOf(id)
   if (idx >= 0) {
@@ -38,7 +38,7 @@ function toggleLike(id: string, e: Event) {
   localStorage.setItem(LS_KEY, JSON.stringify(likedIds.value))
 }
 
-function isLiked(id: string) {
+function isLiked(id: number) {
   return likedIds.value.includes(id)
 }
 

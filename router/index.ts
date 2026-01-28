@@ -29,7 +29,7 @@ const router = createRouter({
     },
     {
       path: '/election-2026',
-      redirect: '/election/election-2026',
+      redirect: '/election/1',
     },
     {
       path: '/politician/:politicianId',

@@ -25,7 +25,7 @@ export enum ElectionType {
 }
 
 export interface Election {
-  id: string;
+  id: number;
   name: string;
   shortName: string;
   startDate: string;
@@ -42,16 +42,16 @@ export enum PoliticianStatus {
 }
 
 export interface Politician {
-  id: string;
+  id: number;
   name: string;
   party: PoliticalParty;
   status?: PoliticianStatus;
   electionType?: ElectionType;
   position: string;
-  avatarUrl: string;
+  avatarUrl?: string;
   region: string;
   subRegion?: string;
-  electionIds?: string[];
+  electionIds?: number[];
   slogan?: string;
   bio?: string;
   education?: string[];
@@ -59,15 +59,15 @@ export interface Politician {
 }
 
 export interface TrackingLog {
-  id: string;
+  id: number;
   date: string;
   event: string;
   description?: string;
 }
 
 export interface Policy {
-  id: string;
-  politicianId: string;
+  id: number;
+  politicianId: number;
   title: string;
   description: string;
   category: string; // e.g., "Traffic", "Welfare"
@@ -79,7 +79,7 @@ export interface Policy {
   logs: TrackingLog[];
   aiAnalysis?: string; // Daily summary
   supportCount?: number; // Only for Campaign Pledges
-  relatedPolicyIds?: string[]; // IDs of predecessor or successor policies (Cross-term tracking)
+  relatedPolicyIds?: number[]; // IDs of predecessor or successor policies (Cross-term tracking)
 }
 
 export interface DonationMethod {
@@ -97,7 +97,7 @@ export interface DiscussionAuthor {
 }
 
 export interface CommentReply {
-  id: string;
+  id: number;
   author: DiscussionAuthor;
   content: string;
   likes: number;
@@ -105,7 +105,7 @@ export interface CommentReply {
 }
 
 export interface DiscussionComment {
-  id: string;
+  id: number;
   author: DiscussionAuthor;
   content: string;
   likes: number;
@@ -114,8 +114,8 @@ export interface DiscussionComment {
 }
 
 export interface Discussion {
-  id: string;
-  policyId: string;
+  id: number;
+  policyId: number;
   policyTitle: string;
   author: DiscussionAuthor;
   title: string;

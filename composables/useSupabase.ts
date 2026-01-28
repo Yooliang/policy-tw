@@ -65,7 +65,7 @@ function mapPolicy(row: any): Policy {
       event: l.event,
       description: l.description || undefined,
     })),
-    relatedPolicyIds: (row.related_policy_ids || []).filter((id: any) => typeof id === 'string'),
+    relatedPolicyIds: (row.related_policy_ids || []).filter((id: any) => typeof id === 'number'),
   }
 }
 
@@ -127,7 +127,7 @@ async function fetchAll() {
     ])
 
     // Map elections with their types
-    const typesByElection: Record<string, string[]> = {}
+    const typesByElection: Record<number, string[]> = {}
     for (const row of electionTypesRes.data || []) {
       if (!typesByElection[row.election_id]) typesByElection[row.election_id] = []
       typesByElection[row.election_id].push(row.type)
@@ -151,7 +151,7 @@ async function fetchAll() {
 }
 
 // Helper functions (same API as constants.ts)
-function getElectionById(id: string): Election | undefined {
+function getElectionById(id: number): Election | undefined {
   return elections.value.find(e => e.id === id)
 }
 

@@ -13,11 +13,11 @@ const route = useRoute()
 const router = useRouter()
 const { discussions, policies } = useSupabase()
 
-const discussionId = computed(() => route.params.discussionId as string)
+const discussionId = computed(() => Number(route.params.discussionId))
 const discussion = computed(() => discussions.value.find(d => d.id === discussionId.value))
 const policy = computed(() => policies.value.find(p => p.id === discussion.value?.policyId))
 const relatedDiscussions = computed(() =>
-  discussions.value.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussionId.value)
+  discussions.value.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussion.value?.id)
 )
 
 const commentSort = ref<'latest' | 'hot'>('latest')
@@ -40,8 +40,8 @@ const totalCommentCount = computed(() => {
 const LS_DISC = 'zhengjian_discussion_likes'
 const LS_COMM = 'zhengjian_comment_likes'
 
-const likedDiscussions = ref<string[]>([])
-const likedComments = ref<string[]>([])
+const likedDiscussions = ref<number[]>([])
+const likedComments = ref<number[]>([])
 
 onMounted(() => {
   try {
@@ -67,18 +67,18 @@ function isDiscussionLiked() {
   return discussion.value ? likedDiscussions.value.includes(discussion.value.id) : false
 }
 
-function toggleCommentLike(id: string) {
+function toggleCommentLike(id: number) {
   const idx = likedComments.value.indexOf(id)
   if (idx >= 0) likedComments.value.splice(idx, 1)
   else likedComments.value.push(id)
   localStorage.setItem(LS_COMM, JSON.stringify(likedComments.value))
 }
 
-function isCommentLiked(id: string) {
+function isCommentLiked(id: number) {
   return likedComments.value.includes(id)
 }
 
-function getCommentLikeCount(baseLikes: number, id: string) {
+function getCommentLikeCount(baseLikes: number, id: number) {
   return baseLikes + (isCommentLiked(id) ? 1 : 0)
 }
 
@@ -88,8 +88,8 @@ function getDiscussionLikeCount() {
 }
 
 // collapse state for replies
-const collapsedComments = ref<Set<string>>(new Set())
-function toggleReplies(commentId: string) {
+const collapsedComments = ref<Set<number>>(new Set())
+function toggleReplies(commentId: number) {
   if (collapsedComments.value.has(commentId)) {
     collapsedComments.value.delete(commentId)
   } else {

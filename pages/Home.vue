@@ -8,7 +8,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 const router = useRouter()
 const { policies, politicians, loading } = useSupabase()
-const checkpointIds = ref<string[]>([])
+const checkpointIds = ref<number[]>([])
 
 const loadCheckpoints = () => {
   checkpointIds.value = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')

@@ -12,7 +12,7 @@ const router = useRouter()
 const { politicians, policies } = useSupabase()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
-const politician = computed(() => politicians.value.find(c => c.id === route.params.politicianId))
+const politician = computed(() => politicians.value.find(c => c.id === Number(route.params.politicianId)))
 const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
 const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
 </script>

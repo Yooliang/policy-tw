@@ -12,7 +12,7 @@ const searchTerm = ref('')
 
 const relayCases = computed(() => {
   const cases: any[] = []
-  const visitedPolicyIds = new Set<string>()
+  const visitedPolicyIds = new Set<number>()
 
   policies.value.forEach(policy => {
     if (visitedPolicyIds.has(policy.id)) return

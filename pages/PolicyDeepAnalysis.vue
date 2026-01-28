@@ -17,12 +17,12 @@ const router = useRouter()
 const { policies, politicians } = useSupabase()
 const sourceUrl = ref('')
 
-const policyId = computed(() => route.params.policyId as string)
+const policyId = computed(() => Number(route.params.policyId))
 const selectedPolicy = computed(() => policies.value.find(p => p.id === policyId.value))
 
 const relayChain = computed(() => {
   if (!selectedPolicy.value) return []
-  const visited = new Set<string>()
+  const visited = new Set<number>()
   const queue = [selectedPolicy.value.id]
   while (queue.length > 0) {
     const id = queue.shift()!
@@ -104,7 +104,7 @@ const isLevelActive = (levelType: ElectionType, idx: number) => {
   return (politician.value.electionType === levelType) || (politician.value.electionType === ElectionType.MAYOR && idx === 0)
 }
 
-const isPoliticianSelected = (politicianId: string) => {
+const isPoliticianSelected = (politicianId: number) => {
   return relayChain.value.some(p => p.politicianId === politicianId && p.id === policyId.value)
 }
 </script>

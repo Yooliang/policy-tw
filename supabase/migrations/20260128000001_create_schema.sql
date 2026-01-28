@@ -54,7 +54,7 @@ CREATE TABLE locations (
 -- ============================================================
 
 CREATE TABLE elections (
-  id TEXT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   short_name TEXT NOT NULL,
   start_date DATE NOT NULL,
@@ -64,13 +64,13 @@ CREATE TABLE elections (
 
 CREATE TABLE election_types (
   id SERIAL PRIMARY KEY,
-  election_id TEXT NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
+  election_id INTEGER NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
   type election_type NOT NULL,
   UNIQUE(election_id, type)
 );
 
 CREATE TABLE politicians (
-  id TEXT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   party political_party NOT NULL,
   status politician_status DEFAULT 'politician',
@@ -78,7 +78,7 @@ CREATE TABLE politicians (
   position TEXT NOT NULL,
   region TEXT NOT NULL,
   sub_region TEXT,
-  avatar_url TEXT NOT NULL,
+  avatar_url TEXT,
   slogan TEXT,
   bio TEXT,
   education TEXT[],
@@ -87,14 +87,14 @@ CREATE TABLE politicians (
 
 CREATE TABLE politician_elections (
   id SERIAL PRIMARY KEY,
-  politician_id TEXT NOT NULL REFERENCES politicians(id) ON DELETE CASCADE,
-  election_id TEXT NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
+  politician_id INTEGER NOT NULL REFERENCES politicians(id) ON DELETE CASCADE,
+  election_id INTEGER NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
   UNIQUE(politician_id, election_id)
 );
 
 CREATE TABLE policies (
-  id TEXT PRIMARY KEY,
-  politician_id TEXT NOT NULL REFERENCES politicians(id) ON DELETE CASCADE,
+  id SERIAL PRIMARY KEY,
+  politician_id INTEGER NOT NULL REFERENCES politicians(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   category TEXT NOT NULL,
@@ -108,8 +108,8 @@ CREATE TABLE policies (
 );
 
 CREATE TABLE tracking_logs (
-  id TEXT PRIMARY KEY,
-  policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+  id SERIAL PRIMARY KEY,
+  policy_id INTEGER NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   event TEXT NOT NULL,
   description TEXT
@@ -117,19 +117,19 @@ CREATE TABLE tracking_logs (
 
 CREATE TABLE related_policies (
   id SERIAL PRIMARY KEY,
-  policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
-  related_policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+  policy_id INTEGER NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+  related_policy_id INTEGER NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
   UNIQUE(policy_id, related_policy_id),
   CHECK(policy_id <> related_policy_id)
 );
 
 CREATE TABLE discussions (
-  id TEXT PRIMARY KEY,
-  policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+  id SERIAL PRIMARY KEY,
+  policy_id INTEGER NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
   policy_title TEXT NOT NULL,
   author_id TEXT NOT NULL,
   author_name TEXT NOT NULL,
-  author_avatar_url TEXT NOT NULL,
+  author_avatar_url TEXT,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   likes INTEGER DEFAULT 0,
@@ -140,22 +140,22 @@ CREATE TABLE discussions (
 );
 
 CREATE TABLE discussion_comments (
-  id TEXT PRIMARY KEY,
-  discussion_id TEXT NOT NULL REFERENCES discussions(id) ON DELETE CASCADE,
+  id SERIAL PRIMARY KEY,
+  discussion_id INTEGER NOT NULL REFERENCES discussions(id) ON DELETE CASCADE,
   author_id TEXT NOT NULL,
   author_name TEXT NOT NULL,
-  author_avatar_url TEXT NOT NULL,
+  author_avatar_url TEXT,
   content TEXT NOT NULL,
   likes INTEGER DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
 CREATE TABLE comment_replies (
-  id TEXT PRIMARY KEY,
-  comment_id TEXT NOT NULL REFERENCES discussion_comments(id) ON DELETE CASCADE,
+  id SERIAL PRIMARY KEY,
+  comment_id INTEGER NOT NULL REFERENCES discussion_comments(id) ON DELETE CASCADE,
   author_id TEXT NOT NULL,
   author_name TEXT NOT NULL,
-  author_avatar_url TEXT NOT NULL,
+  author_avatar_url TEXT,
   content TEXT NOT NULL,
   likes INTEGER DEFAULT 0,
   created_at TEXT NOT NULL

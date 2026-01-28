@@ -30,7 +30,7 @@ const router = useRouter()
 const route = useRoute()
 const { politicians, policies, locations, categories, getElectionById } = useSupabase()
 
-const electionId = computed(() => route.params.electionId as string)
+const electionId = computed(() => Number(route.params.electionId))
 const election = computed(() => getElectionById(electionId.value))
 
 const selectedRegion = ref('All')
@@ -107,23 +107,23 @@ const comparisonPool = computed(() =>
   )
 )
 
-const politicianAId = ref('')
-const politicianBId = ref('')
+const politicianAId = ref(0)
+const politicianBId = ref(0)
 
 watch([() => selectedRegion.value, () => comparisonLevel.value], () => {
   if (comparisonPool.value.length > 0) {
     politicianAId.value = comparisonPool.value[0].id
     politicianBId.value = comparisonPool.value.length > 1 ? comparisonPool.value[1].id : comparisonPool.value[0].id
   } else {
-    politicianAId.value = ''
-    politicianBId.value = ''
+    politicianAId.value = 0
+    politicianBId.value = 0
   }
 }, { immediate: true })
 
 const politicianA = computed(() => politicians.value.find(c => c.id === politicianAId.value))
 const politicianB = computed(() => politicians.value.find(c => c.id === politicianBId.value))
 
-const getPledge = (cId: string, category: string) =>
+const getPledge = (cId: number, category: string) =>
   policies.value.find(p => p.politicianId === cId && p.status === PolicyStatus.CAMPAIGN && (p.category === category || p.tags.includes(category)))
 
 const electionLevels = [

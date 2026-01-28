@@ -13,7 +13,7 @@ const selectedLocation = ref('All')
 const selectedCategory = ref('All')
 const searchTerm = ref('')
 const showCheckpointsOnly = ref(false)
-const checkpoints = ref<string[]>([])
+const checkpoints = ref<number[]>([])
 
 const loadCheckpoints = () => {
   checkpoints.value = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
