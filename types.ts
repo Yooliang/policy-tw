@@ -81,3 +81,41 @@ export interface DonationMethod {
   details: string;
   icon: string;
 }
+
+export interface DiscussionAuthor {
+  id: string;
+  name: string;
+  avatarUrl: string;
+}
+
+export interface CommentReply {
+  id: string;
+  author: DiscussionAuthor;
+  content: string;
+  likes: number;
+  createdAt: string;
+}
+
+export interface DiscussionComment {
+  id: string;
+  author: DiscussionAuthor;
+  content: string;
+  likes: number;
+  createdAt: string;
+  replies: CommentReply[];
+}
+
+export interface Discussion {
+  id: string;
+  policyId: string;
+  policyTitle: string;
+  author: DiscussionAuthor;
+  title: string;
+  content: string;
+  likes: number;
+  tags: string[];
+  createdAt: string;
+  createdAtTs: number;
+  viewCount: number;
+  comments: DiscussionComment[];
+}

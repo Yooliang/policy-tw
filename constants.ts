@@ -1,4 +1,4 @@
-import { Candidate, Election, Policy, PolicyStatus, PoliticalParty, ElectionType } from './types';
+import { Candidate, Discussion, Election, Policy, PolicyStatus, PoliticalParty, ElectionType } from './types';
 
 export const ELECTIONS: Election[] = [
   {
@@ -714,3 +714,240 @@ export const POLICIES: Policy[] = [
 
 export const CATEGORIES = ['Urban Planning', 'Welfare', 'Traffic', 'Economy', 'Education', 'Environment'];
 export const LOCATIONS = ['台北市', '新北市', '高雄市', '新竹市', '台中市', '台南市', '新竹縣'];
+
+export const DISCUSSIONS: Discussion[] = [
+  {
+    id: 'disc-1',
+    policyId: 'cp2',
+    policyTitle: '社宅租金全面八折',
+    author: { id: 'u1', name: 'Citizen_Taiwan', avatarUrl: 'https://ui-avatars.com/api/?name=CT&background=3b82f6&color=fff' },
+    title: '關於社宅租金八折的財源疑問',
+    content: '雖然這項政見聽起來很吸引人，但我很擔心市府的財政負擔。目前的社宅維護成本已經很高了，如果收入減少，會不會影響未來的社宅興建速度？有無具體的替代財源方案？\n\n根據主計處資料，台北市社宅每年維護成本約 12 億，若租金打八折，預計損失 3 億收入。這筆缺口要從哪裡補？\n\n希望候選人能提出詳細的財務規劃，而不只是喊口號。',
+    likes: 342,
+    tags: ['居住正義', '經濟'],
+    createdAt: '2小時前',
+    createdAtTs: Date.now() - 2 * 3600 * 1000,
+    viewCount: 2150,
+    comments: [
+      {
+        id: 'c1-1',
+        author: { id: 'u2', name: 'HousingExpert', avatarUrl: 'https://ui-avatars.com/api/?name=HE&background=10b981&color=fff' },
+        content: '好問題！其實可以參考新加坡的 HDB 模式，政府透過土地增值回收成本。但台灣的土地制度完全不同，直接套用有困難。',
+        likes: 89,
+        createdAt: '1小時前',
+        replies: [
+          {
+            id: 'r1-1-1',
+            author: { id: 'u3', name: 'PolicyNerd', avatarUrl: 'https://ui-avatars.com/api/?name=PN&background=8b5cf6&color=fff' },
+            content: '同意。台灣的社宅問題不只是租金，還有地點和品質。很多社宅蓋在偏遠的地方，就算免費也沒人要住。',
+            likes: 34,
+            createdAt: '45分鐘前',
+          },
+          {
+            id: 'r1-1-2',
+            author: { id: 'u1', name: 'Citizen_Taiwan', avatarUrl: 'https://ui-avatars.com/api/?name=CT&background=3b82f6&color=fff' },
+            content: '沒錯，選址才是關鍵。如果能在捷運站附近蓋社宅，即使租金只打九折也會搶破頭。',
+            likes: 56,
+            createdAt: '30分鐘前',
+          },
+        ],
+      },
+      {
+        id: 'c1-2',
+        author: { id: 'u4', name: '台北租屋族', avatarUrl: 'https://ui-avatars.com/api/?name=TR&background=f59e0b&color=fff' },
+        content: '身為一個月薪 35K 的上班族，我真的很需要社宅。目前租一間套房就要 12000，如果能打八折省下的錢可以改善生活品質。支持這個政策！',
+        likes: 156,
+        createdAt: '1.5小時前',
+        replies: [],
+      },
+      {
+        id: 'c1-3',
+        author: { id: 'u5', name: 'FinanceWatch', avatarUrl: 'https://ui-avatars.com/api/?name=FW&background=ef4444&color=fff' },
+        content: '財源問題確實是硬傷。候選人應該公布完整的財務模型，不然就只是選舉支票。',
+        likes: 72,
+        createdAt: '50分鐘前',
+        replies: [],
+      },
+    ],
+  },
+  {
+    id: 'disc-2',
+    policyId: 'p1',
+    policyTitle: '台北大建設 - 都更加速',
+    author: { id: 'u6', name: 'UrbanWatcher', avatarUrl: 'https://ui-avatars.com/api/?name=UW&background=06b6d4&color=fff' },
+    title: '台北大建設都更速度真的有變快嗎？',
+    content: '我家住在信義區的老公寓，雖然看到政策說要降門檻，但實際整合的時候建商態度還是很保守。有沒有人有實際參與公辦都更的經驗可以分享？\n\n我們社區已經開了三次說明會，但整合率只有 60%，離法定門檻還差很遠。到底是政策還沒落實，還是我們社區的條件不夠好？',
+    likes: 128,
+    tags: ['居住正義', '交通'],
+    createdAt: '5小時前',
+    createdAtTs: Date.now() - 5 * 3600 * 1000,
+    viewCount: 1580,
+    comments: [
+      {
+        id: 'c2-1',
+        author: { id: 'u7', name: '建築師阿明', avatarUrl: 'https://ui-avatars.com/api/?name=AM&background=059669&color=fff' },
+        content: '整合率 60% 其實已經不錯了。根據我的經驗，最後 10% 通常是最難的。建議找專業的都更顧問公司，他們比較知道如何處理釘子戶的問題。',
+        likes: 45,
+        createdAt: '4小時前',
+        replies: [
+          {
+            id: 'r2-1-1',
+            author: { id: 'u6', name: 'UrbanWatcher', avatarUrl: 'https://ui-avatars.com/api/?name=UW&background=06b6d4&color=fff' },
+            content: '謝謝建議！請問有推薦的都更顧問公司嗎？',
+            likes: 12,
+            createdAt: '3.5小時前',
+          },
+        ],
+      },
+      {
+        id: 'c2-2',
+        author: { id: 'u8', name: '萬華居民', avatarUrl: 'https://ui-avatars.com/api/?name=WH&background=d946ef&color=fff' },
+        content: '我們萬華這邊的都更案已經談了五年了，到現在連建照都還沒申請。所謂的「加速」根本感受不到。',
+        likes: 67,
+        createdAt: '3小時前',
+        replies: [],
+      },
+    ],
+  },
+  {
+    id: 'disc-3',
+    policyId: 'cp3',
+    policyTitle: '新竹輕軌立即動工',
+    author: { id: 'u9', name: 'TrafficGeek', avatarUrl: 'https://ui-avatars.com/api/?name=TG&background=0891b2&color=fff' },
+    title: '新竹輕軌路線規劃建議',
+    content: '目前的路線規劃似乎沒有經過人口最密集的住宅區，主要是服務園區上班族。建議可以考慮支線延伸到竹北舊市區，這樣才能真正解決週末的交通問題。\n\n附上我自己畫的建議路線圖（僅供參考）：\n- 主線：高鐵新竹站 → 竹科 → 清大 → 新竹火車站\n- 支線 A：竹北舊市區 → 高鐵站\n- 支線 B：關埔重劃區 → 竹科\n\n這樣可以同時服務通勤族和一般市民。',
+    likes: 89,
+    tags: ['交通', '教育'],
+    createdAt: '1天前',
+    createdAtTs: Date.now() - 24 * 3600 * 1000,
+    viewCount: 980,
+    comments: [
+      {
+        id: 'c3-1',
+        author: { id: 'u10', name: '竹科工程師', avatarUrl: 'https://ui-avatars.com/api/?name=ZK&background=7c3aed&color=fff' },
+        content: '身為每天塞光復路的工程師，我舉雙手贊成。但重點是「立即動工」的承諾能兌現嗎？之前的輕軌計畫已經喊了十幾年。',
+        likes: 38,
+        createdAt: '20小時前',
+        replies: [
+          {
+            id: 'r3-1-1',
+            author: { id: 'u9', name: 'TrafficGeek', avatarUrl: 'https://ui-avatars.com/api/?name=TG&background=0891b2&color=fff' },
+            content: '這就是為什麼我們需要一個有執行力的市長。光是喊口號沒有用，要有具體的時程表和預算規劃。',
+            likes: 21,
+            createdAt: '18小時前',
+          },
+        ],
+      },
+      {
+        id: 'c3-2',
+        author: { id: 'u11', name: '新竹媽媽', avatarUrl: 'https://ui-avatars.com/api/?name=MO&background=ec4899&color=fff' },
+        content: '支線 A 如果能延伸到竹北文化中心附近就更好了，很多親子活動都在那邊舉辦，每次開車停車都很崩潰。',
+        likes: 29,
+        createdAt: '16小時前',
+        replies: [],
+      },
+      {
+        id: 'c3-3',
+        author: { id: 'u12', name: 'BudgetHawk', avatarUrl: 'https://ui-avatars.com/api/?name=BH&background=64748b&color=fff' },
+        content: '支線越多，預算越膨脹。建議先做好主線再說，不要一開始就畫大餅。',
+        likes: 15,
+        createdAt: '12小時前',
+        replies: [],
+      },
+    ],
+  },
+  {
+    id: 'disc-4',
+    policyId: 'cp4',
+    policyTitle: '國中小營養午餐免費',
+    author: { id: 'u13', name: 'Teacher_Wang', avatarUrl: 'https://ui-avatars.com/api/?name=TW&background=f97316&color=fff' },
+    title: '營養午餐免費政策的排擠效應',
+    content: '身為一線教師，我支持減輕家長負擔。但更希望經費能用在提升食材品質，而不是全額免費但吃得很差。\n\n目前學校營養午餐一餐大約 55 元，其中食材成本佔 35 元。如果要全面免費，又要維持品質，每年至少需要額外 8 億的預算。\n\n建議改為「弱勢家庭全額補助 + 一般家庭補助一半」，這樣更符合公平正義的精神。',
+    likes: 210,
+    tags: ['教育', '經濟'],
+    createdAt: '1天前',
+    createdAtTs: Date.now() - 26 * 3600 * 1000,
+    viewCount: 3200,
+    comments: [
+      {
+        id: 'c4-1',
+        author: { id: 'u14', name: '家長會長老陳', avatarUrl: 'https://ui-avatars.com/api/?name=LC&background=0d9488&color=fff' },
+        content: '老師說得很中肯。全面免費聽起來很棒，但如果品質下降，反而會讓家長更不放心。不如把錢花在有機食材和營養師上。',
+        likes: 98,
+        createdAt: '22小時前',
+        replies: [
+          {
+            id: 'r4-1-1',
+            author: { id: 'u15', name: '營養師小美', avatarUrl: 'https://ui-avatars.com/api/?name=XM&background=a855f7&color=fff' },
+            content: '完全同意！很多學校的營養午餐根本沒有經過專業營養師把關，先解決品質問題比較實在。',
+            likes: 45,
+            createdAt: '20小時前',
+          },
+        ],
+      },
+      {
+        id: 'c4-2',
+        author: { id: 'u16', name: '雙寶媽', avatarUrl: 'https://ui-avatars.com/api/?name=SM&background=e11d48&color=fff' },
+        content: '兩個小孩一個月午餐費要 2400，真的是不小的負擔。如果能免費當然最好，但前提是品質不能變差。',
+        likes: 76,
+        createdAt: '18小時前',
+        replies: [],
+      },
+      {
+        id: 'c4-3',
+        author: { id: 'u17', name: 'DataDriven', avatarUrl: 'https://ui-avatars.com/api/?name=DD&background=1e40af&color=fff' },
+        content: '參考日本的「給食」制度，每餐只要 250 日圓（約台幣 55 元），但營養品質非常高。關鍵在於集中採購降低成本。',
+        likes: 112,
+        createdAt: '14小時前',
+        replies: [
+          {
+            id: 'r4-3-1',
+            author: { id: 'u13', name: 'Teacher_Wang', avatarUrl: 'https://ui-avatars.com/api/?name=TW&background=f97316&color=fff' },
+            content: '日本的模式確實值得參考，但他們的學校營養師配置密度比台灣高很多。制度面的改革才是根本。',
+            likes: 33,
+            createdAt: '10小時前',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'disc-5',
+    policyId: 'p5',
+    policyTitle: '半導體 S 廊帶',
+    author: { id: 'u18', name: '楠梓在地人', avatarUrl: 'https://ui-avatars.com/api/?name=NZ&background=16a34a&color=fff' },
+    title: '台積電設廠後楠梓的房價與生活品質變化',
+    content: '台積電宣布在楠梓設廠後，周邊房價已經飆漲了 30% 以上。身為在地居民，一方面期待就業機會增加，另一方面擔心生活環境惡化。\n\n最近施工噪音很大，上下班時間交通也變得更塞了。不知道市府有沒有具體的因應措施？\n\n也想問問其他楠梓的朋友，你們覺得台積電設廠對在地是利大於弊還是弊大於利？',
+    likes: 178,
+    tags: ['經濟', '環保'],
+    createdAt: '3小時前',
+    createdAtTs: Date.now() - 3 * 3600 * 1000,
+    viewCount: 2800,
+    comments: [
+      {
+        id: 'c5-1',
+        author: { id: 'u19', name: '高雄產業觀察', avatarUrl: 'https://ui-avatars.com/api/?name=KS&background=ea580c&color=fff' },
+        content: '從產業面來看，台積電帶動的供應鏈效應非常可觀。但政府必須做好配套，否則就是讓居民承擔發展的代價。',
+        likes: 67,
+        createdAt: '2.5小時前',
+        replies: [
+          {
+            id: 'r5-1-1',
+            author: { id: 'u18', name: '楠梓在地人', avatarUrl: 'https://ui-avatars.com/api/?name=NZ&background=16a34a&color=fff' },
+            content: '對啊，我們不反對發展，但至少施工期間的噪音管制和交通疏導要做好。目前完全感受不到。',
+            likes: 42,
+            createdAt: '2小時前',
+          },
+        ],
+      },
+      {
+        id: 'c5-2',
+        author: { id: 'u20', name: '房產分析師', avatarUrl: 'https://ui-avatars.com/api/?name=FA&background=4f46e5&color=fff' },
+        content: '楠梓房價從均價 18 萬漲到 25 萬，漲幅確實驚人。但要注意，很多是預售屋的價格，實際成交可能沒有那麼誇張。',
+        likes: 53,
+        createdAt: '1.5小時前',
+        replies: [],
+      },
+    ],
+  },
+];

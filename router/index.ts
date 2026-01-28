@@ -40,6 +40,10 @@ const router = createRouter({
       component: () => import('../pages/Community.vue'),
     },
     {
+      path: '/community/:discussionId',
+      component: () => import('../pages/DiscussionDetail.vue'),
+    },
+    {
       path: '/donation',
       component: () => import('../pages/Donation.vue'),
     },
