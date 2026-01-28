@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CANDIDATES } from '../../constants'
+import { useSupabase } from '../../composables/useSupabase'
 import { ElectionType, type Policy } from '../../types'
 import { ArrowDown } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
@@ -11,11 +11,12 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const { politicians } = useSupabase()
 
 const getPoliciesByLevel = (type: ElectionType) =>
   props.policies.filter(p =>
     p.tags.includes(props.tag) &&
-    CANDIDATES.find(c => c.id === p.candidateId)?.electionType === type
+    politicians.value.find(c => c.id === p.politicianId)?.electionType === type
   )
 
 const mayors = computed(() => getPoliciesByLevel(ElectionType.MAYOR))
@@ -66,8 +67,8 @@ const levels = computed(() => [
                 :class="`bg-white border-l-4 ${level.colorBorder} shadow-sm border-y border-r border-slate-100 p-4 rounded-r-lg hover:shadow-md cursor-pointer transition-all`"
               >
                 <div class="flex items-center gap-2 mb-2">
-                  <img :src="CANDIDATES.find(can => can.id === p.candidateId)?.avatarUrl" class="w-6 h-6 rounded-full" />
-                  <span class="text-sm font-bold text-navy-900">{{ CANDIDATES.find(can => can.id === p.candidateId)?.name }}</span>
+                  <img :src="politicians.find(can => can.id === p.politicianId)?.avatarUrl" class="w-6 h-6 rounded-full" />
+                  <span class="text-sm font-bold text-navy-900">{{ politicians.find(can => can.id === p.politicianId)?.name }}</span>
                 </div>
                 <h4 class="font-bold text-sm text-navy-900 line-clamp-2">{{ p.title }}</h4>
               </div>

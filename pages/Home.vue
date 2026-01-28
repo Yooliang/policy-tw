@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { POLICIES, CANDIDATES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import { ArrowRight, Activity, Users, FileCheck, Vote, Star, TrendingUp } from 'lucide-vue-next'
 import { RouterLink, useRouter } from 'vue-router'
 
 const router = useRouter()
+const { policies, politicians, loading } = useSupabase()
 const checkpointIds = ref<string[]>([])
 
 const loadCheckpoints = () => {
@@ -23,15 +24,15 @@ onUnmounted(() => {
 })
 
 const checkpointPolicies = computed(() =>
-  POLICIES.filter(p => checkpointIds.value.includes(p.id)).slice(0, 3)
+  policies.value.filter(p => checkpointIds.value.includes(p.id)).slice(0, 3)
 )
 
-const statusData = [
-  { name: '已實現', value: POLICIES.filter(p => p.status === 'Achieved').length, color: '#10b981' },
-  { name: '進行中', value: POLICIES.filter(p => p.status === 'In Progress').length, color: '#3b82f6' },
-  { name: '滯後', value: POLICIES.filter(p => p.status === 'Stalled').length, color: '#f59e0b' },
-  { name: '提出', value: POLICIES.filter(p => p.status === 'Proposed').length, color: '#94a3b8' },
-]
+const statusData = computed(() => [
+  { name: '已實現', value: policies.value.filter(p => p.status === 'Achieved').length, color: '#10b981' },
+  { name: '進行中', value: policies.value.filter(p => p.status === 'In Progress').length, color: '#3b82f6' },
+  { name: '滯後', value: policies.value.filter(p => p.status === 'Stalled').length, color: '#f59e0b' },
+  { name: '提出', value: policies.value.filter(p => p.status === 'Proposed').length, color: '#94a3b8' },
+])
 
 const categoryData = [
   { name: '交通', count: 12 },
@@ -41,7 +42,7 @@ const categoryData = [
   { name: '教育', count: 7 },
 ]
 
-const recentPolicies = POLICIES.slice(0, 3)
+const recentPolicies = computed(() => policies.value.slice(0, 3))
 
 const barOptions = {
   chart: { type: 'bar' as const, toolbar: { show: false } },
@@ -62,17 +63,17 @@ const barOptions = {
 }
 const barSeries = [{ name: 'count', data: categoryData.map(d => d.count) }]
 
-const donutOptions = {
+const donutOptions = computed(() => ({
   chart: { type: 'donut' as const },
-  labels: statusData.map(d => d.name),
-  colors: statusData.map(d => d.color),
+  labels: statusData.value.map(d => d.name),
+  colors: statusData.value.map(d => d.color),
   stroke: { show: false },
   legend: { show: false },
   plotOptions: { pie: { donut: { size: '70%' } } },
   dataLabels: { enabled: false },
   tooltip: { theme: 'light' },
-}
-const donutSeries = statusData.map(d => d.value)
+}))
+const donutSeries = computed(() => statusData.value.map(d => d.value))
 </script>
 
 <template>
@@ -137,9 +138,9 @@ const donutSeries = statusData.map(d => d.value)
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
         <template v-for="p in checkpointPolicies" :key="p.id">
             <PolicyCard
-            v-if="CANDIDATES.find(can => can.id === p.candidateId)"
+            v-if="politicians.find(pol => pol.id === p.politicianId)"
             :policy="p"
-            :candidate="CANDIDATES.find(can => can.id === p.candidateId)!"
+            :politician="politicians.find(pol => pol.id === p.politicianId)!"
             :on-click="() => router.push(`/policy/${p.id}`)"
             />
         </template>
@@ -161,9 +162,9 @@ const donutSeries = statusData.map(d => d.value)
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
           <template v-for="policy in recentPolicies" :key="policy.id">
             <PolicyCard
-              v-if="CANDIDATES.find(c => c.id === policy.candidateId)"
+              v-if="politicians.find(c => c.id === policy.politicianId)"
               :policy="policy"
-              :candidate="CANDIDATES.find(c => c.id === policy.candidateId)!"
+              :politician="politicians.find(c => c.id === policy.politicianId)!"
               :on-click="() => router.push(`/policy/${policy.id}`)"
             />
           </template>

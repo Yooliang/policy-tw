@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { POLICIES, CANDIDATES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
@@ -14,10 +14,11 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { policies, politicians } = useSupabase()
 const sourceUrl = ref('')
 
 const policyId = computed(() => route.params.policyId as string)
-const selectedPolicy = computed(() => POLICIES.find(p => p.id === policyId.value))
+const selectedPolicy = computed(() => policies.value.find(p => p.id === policyId.value))
 
 const relayChain = computed(() => {
   if (!selectedPolicy.value) return []
@@ -27,28 +28,28 @@ const relayChain = computed(() => {
     const id = queue.shift()!
     if (visited.has(id)) continue
     visited.add(id)
-    const p = POLICIES.find(pol => pol.id === id)
+    const p = policies.value.find(pol => pol.id === id)
     if (!p) continue
     // follow outgoing links
     p.relatedPolicyIds?.forEach(rid => { if (!visited.has(rid)) queue.push(rid) })
     // follow incoming links
-    POLICIES.forEach(other => {
+    policies.value.forEach(other => {
       if (other.relatedPolicyIds?.includes(id) && !visited.has(other.id)) queue.push(other.id)
     })
   }
-  return POLICIES.filter(p => visited.has(p.id))
+  return policies.value.filter(p => visited.has(p.id))
     .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
 })
 
-const candidate = computed(() => selectedPolicy.value ? CANDIDATES.find(c => c.id === selectedPolicy.value!.candidateId) : null)
+const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => c.id === selectedPolicy.value!.politicianId) : null)
 
-const allCandidates = computed(() => {
-  const ids = new Set(relayChain.value.map(p => p.candidateId))
-  return CANDIDATES.filter(c => ids.has(c.id))
+const allPoliticians = computed(() => {
+  const ids = new Set(relayChain.value.map(p => p.politicianId))
+  return politicians.value.filter(c => ids.has(c.id))
 })
 
 const isLevelActiveForChain = (levelType: ElectionType, idx: number) => {
-  return allCandidates.value.some(c =>
+  return allPoliticians.value.some(c =>
     c.electionType === levelType || (c.electionType === ElectionType.MAYOR && idx === 0)
   )
 }
@@ -66,15 +67,15 @@ const LEVEL_ORDER: Record<string, number> = {
 const allLogs = computed(() => {
   return relayChain.value
     .flatMap(p => {
-      const c = CANDIDATES.find(c => c.id === p.candidateId)
+      const c = politicians.value.find(c => c.id === p.politicianId)
       const level = c?.electionType ? (LEVEL_ORDER[c.electionType] ?? 0) : 0
       return p.logs.map(log => ({
         ...log,
         policyId: p.id,
         policyTitle: p.title,
-        candidateId: p.candidateId,
-        candidateName: c?.name || '',
-        candidateAvatar: c?.avatarUrl || '',
+        politicianId: p.politicianId,
+        politicianName: c?.name || '',
+        politicianAvatar: c?.avatarUrl || '',
         isSelected: p.id === policyId.value,
         level,
       }))
@@ -82,8 +83,8 @@ const allLogs = computed(() => {
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 })
 
-const getCandidatesForLevel = (levelType: ElectionType, idx: number) => {
-  return allCandidates.value.filter(c =>
+const getPoliticiansForLevel = (levelType: ElectionType, idx: number) => {
+  return allPoliticians.value.filter(c =>
     c.electionType === levelType || (!c.electionType && levelType === ElectionType.MAYOR && idx === 0)
   )
 }
@@ -99,17 +100,17 @@ const HIERARCHY_LEVELS = [
 ]
 
 const isLevelActive = (levelType: ElectionType, idx: number) => {
-  if (!candidate.value) return false
-  return (candidate.value.electionType === levelType) || (candidate.value.electionType === ElectionType.MAYOR && idx === 0)
+  if (!politician.value) return false
+  return (politician.value.electionType === levelType) || (politician.value.electionType === ElectionType.MAYOR && idx === 0)
 }
 
-const isCandidateSelected = (candidateId: string) => {
-  return relayChain.value.some(p => p.candidateId === candidateId && p.id === policyId.value)
+const isPoliticianSelected = (politicianId: string) => {
+  return relayChain.value.some(p => p.politicianId === politicianId && p.id === policyId.value)
 }
 </script>
 
 <template>
-  <div v-if="selectedPolicy && candidate" class="bg-slate-50 min-h-screen pb-20 text-left">
+  <div v-if="selectedPolicy && politician" class="bg-slate-50 min-h-screen pb-20 text-left">
 
     <Hero :back-action="() => router.push('/analysis')">
       <template #icon><Database :size="400" class="text-blue-500" /></template>
@@ -229,7 +230,7 @@ const isCandidateSelected = (candidateId: string) => {
                     </div>
                     <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ log.description }}</p>
 
-                    <!-- Hover: absolute card overlay wrapping content + candidate info -->
+                    <!-- Hover: absolute card overlay wrapping content + politician info -->
                     <div class="hidden group-hover/log:block absolute inset-x-[-12px] top-[-8px] z-40 bg-white rounded-xl shadow-lg ring-1 ring-slate-200 px-3 py-2 pointer-events-none">
                       <div class="flex items-center justify-between mb-1">
                         <h4 :class="`font-black ${log.isSelected ? 'text-navy-900 text-lg' : log.level === 0 ? 'text-slate-600 text-lg' : 'text-slate-500 text-base'}`">{{ log.event }}</h4>
@@ -237,9 +238,9 @@ const isCandidateSelected = (candidateId: string) => {
                       </div>
                       <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ log.description }}</p>
                       <div class="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
-                        <img :src="log.candidateAvatar" class="w-6 h-6 rounded-full border border-white shadow-sm shrink-0" />
-                        <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.candidateName }}</span>
-                        <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ CANDIDATES.find(c => c.id === log.candidateId)?.position }}</span>
+                        <img :src="log.politicianAvatar" class="w-6 h-6 rounded-full border border-white shadow-sm shrink-0" />
+                        <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.politicianName }}</span>
+                        <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ politicians.find(c => c.id === log.politicianId)?.position }}</span>
                         <span class="text-[10px] text-slate-300">·</span>
                         <span :class="`text-xs font-bold whitespace-nowrap ${log.isSelected ? 'text-blue-600' : 'text-slate-500'}`">{{ log.policyTitle }}</span>
                       </div>
@@ -270,18 +271,18 @@ const isCandidateSelected = (candidateId: string) => {
 
                 <div v-if="isLevelActiveForChain(level.type, idx)" class="space-y-3">
                   <div
-                    v-for="c in getCandidatesForLevel(level.type, idx)"
+                    v-for="c in getPoliticiansForLevel(level.type, idx)"
                     :key="c.id"
                     :class="`flex items-center gap-3 p-2 rounded-xl transition-all duration-300
-                      ${isCandidateSelected(c.id) ? 'bg-blue-50 ring-2 ring-blue-500' : 'opacity-40 grayscale hover:opacity-70 hover:grayscale-0 cursor-pointer'}`"
-                    @click="!isCandidateSelected(c.id) && router.push(`/analysis/${relayChain.find(p => p.candidateId === c.id)?.id}`)"
+                      ${isPoliticianSelected(c.id) ? 'bg-blue-50 ring-2 ring-blue-500' : 'opacity-40 grayscale hover:opacity-70 hover:grayscale-0 cursor-pointer'}`"
+                    @click="!isPoliticianSelected(c.id) && router.push(`/analysis/${relayChain.find(p => p.politicianId === c.id)?.id}`)"
                   >
                     <img
                       :src="c.avatarUrl"
-                      :class="`w-10 h-10 rounded-full border-2 shadow-sm ${isCandidateSelected(c.id) ? 'border-blue-500' : 'border-slate-200'}`"
+                      :class="`w-10 h-10 rounded-full border-2 shadow-sm ${isPoliticianSelected(c.id) ? 'border-blue-500' : 'border-slate-200'}`"
                     />
                     <div class="flex-1">
-                      <div :class="`text-sm font-black ${isCandidateSelected(c.id) ? 'text-navy-900' : 'text-slate-400'}`">{{ c.name }}</div>
+                      <div :class="`text-sm font-black ${isPoliticianSelected(c.id) ? 'text-navy-900' : 'text-slate-400'}`">{{ c.name }}</div>
                       <div class="text-[11px] text-slate-400 font-bold">{{ c.position }}</div>
                     </div>
                   </div>

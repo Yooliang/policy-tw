@@ -7,7 +7,7 @@ import PoliticianGrid from './election/PoliticianGrid.vue'
 import PoliticianDropdown from './election/PoliticianDropdown.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import Hero from '../components/Hero.vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale, Swords,
@@ -27,12 +27,7 @@ const CATEGORY_MAP: { [key: string]: string } = {
 }
 
 const router = useRouter()
-const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById } = useSupabase()
-
-const electionId = computed(() => route.params.electionId as string)
-const election = computed(() => getElectionById(electionId.value))
-
+const { politicians, policies, locations, categories } = useSupabase()
 const selectedRegion = ref('All')
 const viewMode = ref<'politicians' | 'pledges' | 'issues' | 'comparison'>('politicians')
 const selectedIssueCategory = ref('All')
@@ -43,16 +38,13 @@ const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台�
 const OTHER_LOCATIONS = computed(() => locations.value.filter(loc => !SIX_CAPITALS.includes(loc)))
 
 const timeLeft = computed(() => {
-  if (!election.value) return { days: 0 }
-  const difference = +new Date(election.value.electionDate) - +new Date()
+  const difference = +new Date('2026-11-28') - +new Date()
   return { days: difference > 0 ? Math.floor(difference / (1000 * 60 * 60 * 24)) : 0 }
 })
 
-const electionPoliticians = computed(() =>
-  politicians.value.filter(c => c.electionIds?.includes(electionId.value))
-)
+const politicians2026 = computed(() => politicians.value.filter(c => c.electionIds?.includes('election-2026')))
 const filteredPoliticians = computed(() =>
-  selectedRegion.value === 'All' ? electionPoliticians.value : electionPoliticians.value.filter(c => c.region === selectedRegion.value)
+  selectedRegion.value === 'All' ? politicians2026.value : politicians2026.value.filter(c => c.region === selectedRegion.value)
 )
 
 const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.MAYOR || !c.electionType))
@@ -63,15 +55,13 @@ const repPoliticians = computed(() => filteredPoliticians.value.filter(c => c.el
 const indigenousRepPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.INDIGENOUS_DISTRICT_REP))
 const chiefPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.CHIEF))
 
-const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.map(c => c.id)))
-
 const allCampaignPolicies = computed(() =>
-  policies.value.filter(p => p.status === PolicyStatus.CAMPAIGN && electionPoliticianIds.value.has(p.politicianId) && (selectedRegion.value === 'All' || politicians.value.find(c => c.id === p.politicianId)?.region === selectedRegion.value))
+  policies.value.filter(p => p.status === PolicyStatus.CAMPAIGN && (selectedRegion.value === 'All' || politicians.value.find(c => c.id === p.politicianId)?.region === selectedRegion.value))
 )
 
 // Issues mode
 const regionPolicies = computed(() =>
-  policies.value.filter(p => p.status === PolicyStatus.CAMPAIGN && electionPoliticianIds.value.has(p.politicianId) && (selectedRegion.value === 'All' || politicians.value.find(c => c.id === p.politicianId)?.region === selectedRegion.value))
+  policies.value.filter(p => p.status === PolicyStatus.CAMPAIGN && (selectedRegion.value === 'All' || politicians.value.find(c => c.id === p.politicianId)?.region === selectedRegion.value))
 )
 
 const categoryFilteredPolicies = computed(() =>
@@ -101,7 +91,7 @@ watch([() => selectedIssueCategory.value, () => selectedRegion.value, availableT
 // Comparison mode
 const comparisonPool = computed(() =>
   politicians.value.filter(c =>
-    c.electionIds?.includes(electionId.value) &&
+    c.electionIds?.includes('election-2026') &&
     (c.electionType === comparisonLevel.value || (!c.electionType && comparisonLevel.value === ElectionType.MAYOR)) &&
     (selectedRegion.value === 'All' || c.region === selectedRegion.value)
   )
@@ -138,7 +128,7 @@ const electionLevels = [
 </script>
 
 <template>
-  <div v-if="election" class="bg-slate-50 min-h-screen">
+  <div class="bg-slate-50 min-h-screen">
 
     <Hero full-width>
       <template #title>
@@ -165,7 +155,6 @@ const electionLevels = [
 
       <!-- View Mode Tabs in default slot (overlapping white bar) -->
       <div class="flex items-center justify-between gap-4">
-        <h2 class="text-lg font-bold text-navy-900 whitespace-nowrap shrink-0">{{ election.name }}</h2>
         <div class="flex bg-slate-100 p-1 rounded-lg shrink-0 overflow-x-auto">
           <button @click="viewMode = 'politicians'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><LayoutGrid :size="16" /> 候選人</button>
           <button @click="viewMode = 'pledges'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'pledges' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Megaphone :size="16" /> 競選承諾</button>
@@ -294,15 +283,6 @@ const electionLevels = [
           </template>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- Election not found -->
-  <div v-else class="bg-slate-50 min-h-screen flex items-center justify-center">
-    <div class="text-center">
-      <Vote :size="64" class="mx-auto mb-4 text-slate-300" />
-      <h2 class="text-2xl font-bold text-navy-900 mb-2">找不到此選舉</h2>
-      <p class="text-slate-500">請確認網址是否正確。</p>
     </div>
   </div>
 </template>

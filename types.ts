@@ -34,10 +34,18 @@ export interface Election {
   types: ElectionType[];
 }
 
-export interface Candidate {
+export enum PoliticianStatus {
+  INCUMBENT = 'incumbent',       // 現任
+  POLITICIAN = 'politician',       // 已登記參選
+  POTENTIAL = 'potential',       // 潛在人選（尚未宣布）
+  FORMER = 'former',             // 前任
+}
+
+export interface Politician {
   id: string;
   name: string;
   party: PoliticalParty;
+  status?: PoliticianStatus;
   electionType?: ElectionType;
   position: string;
   avatarUrl: string;
@@ -59,7 +67,7 @@ export interface TrackingLog {
 
 export interface Policy {
   id: string;
-  candidateId: string;
+  politicianId: string;
   title: string;
   description: string;
   category: string; // e.g., "Traffic", "Welfare"

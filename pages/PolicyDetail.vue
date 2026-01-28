@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { POLICIES, CANDIDATES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
@@ -9,21 +9,22 @@ import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft,
 
 const route = useRoute()
 const router = useRouter()
+const { policies, politicians } = useSupabase()
 const hasVoted = ref(false)
 
 const policyId = computed(() => route.params.policyId as string)
-const policy = computed(() => POLICIES.find(p => p.id === policyId.value))
-const candidate = computed(() => policy.value ? CANDIDATES.find(c => c.id === policy.value!.candidateId) : null)
+const policy = computed(() => policies.value.find(p => p.id === policyId.value))
+const politician = computed(() => policy.value ? politicians.value.find(c => c.id === policy.value!.politicianId) : null)
 
 const otherPolicies = computed(() =>
-  candidate.value
-    ? POLICIES.filter(p => p.candidateId === candidate.value!.id && p.id !== policyId.value).slice(0, 3)
+  politician.value
+    ? policies.value.filter(p => p.politicianId === politician.value!.id && p.id !== policyId.value).slice(0, 3)
     : []
 )
 
 const policyChain = computed(() => {
   if (!policy.value?.relatedPolicyIds) return []
-  const relatedPolicies = POLICIES.filter(p =>
+  const relatedPolicies = policies.value.filter(p =>
     policy.value!.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.value!.id)
   ).sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
 
@@ -41,32 +42,32 @@ const handleVote = () => {
 </script>
 
 <template>
-  <div v-if="policy && candidate" class="bg-slate-50 min-h-screen">
+  <div v-if="policy && politician" class="bg-slate-50 min-h-screen">
     <Hero>
       <template #icon><FileText :size="400" class="text-blue-500" /></template>
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
-          <div class="relative cursor-pointer" @click="router.push(`/candidate/${candidate.id}`)">
-            <img :src="candidate.avatarUrl" :alt="candidate.name" class="w-28 h-28 md:w-36 md:h-36 rounded-full border-4 border-white shadow-xl" />
+          <div class="relative cursor-pointer" @click="router.push(`/politician/${politician.id}`)">
+            <img :src="politician.avatarUrl" :alt="politician.name" class="w-28 h-28 md:w-36 md:h-36 rounded-full border-4 border-white shadow-xl" />
             <span :class="`absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white border-2 border-white shadow-md
-              ${candidate.party === '國民黨' ? 'bg-blue-600' :
-                candidate.party === '民進黨' ? 'bg-green-600' :
-                candidate.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
-              {{ candidate.party[0] }}
+              ${politician.party === '國民黨' ? 'bg-blue-600' :
+                politician.party === '民進黨' ? 'bg-green-600' :
+                politician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
+              {{ politician.party[0] }}
             </span>
           </div>
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-3">
               <StatusBadge :status="policy.status" />
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><Tag :size="14" /> {{ policy.category }}</span>
-              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ candidate.region }}</span>
+              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
             </div>
             <h1 class="text-3xl md:text-4xl font-black text-white leading-tight mb-3">{{ policy.title }}</h1>
             <div class="flex flex-wrap items-center gap-4 text-sm text-slate-300">
               <span class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
               <span class="flex items-center gap-1"><Activity :size="16" /> 更新：{{ policy.lastUpdated }}</span>
-              <span class="flex items-center gap-1 cursor-pointer hover:text-white" @click="router.push(`/candidate/${candidate.id}`)">
-                {{ candidate.name }} · {{ candidate.position }}
+              <span class="flex items-center gap-1 cursor-pointer hover:text-white" @click="router.push(`/politician/${politician.id}`)">
+                {{ politician.name }} · {{ politician.position }}
               </span>
             </div>
           </div>
@@ -108,12 +109,12 @@ const handleVote = () => {
                   >
                     <div :class="`w-16 h-16 rounded-full border-4 flex items-center justify-center bg-white transition-all z-10
                       ${p!.id === policyId ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
-                      <img :src="CANDIDATES.find(can => can.id === p!.candidateId)?.avatarUrl" :alt="CANDIDATES.find(can => can.id === p!.candidateId)?.name" class="w-full h-full rounded-full object-cover p-0.5" />
+                      <img :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :alt="politicians.find(pol => pol.id === p!.politicianId)?.name" class="w-full h-full rounded-full object-cover p-0.5" />
                     </div>
                     <div class="mt-4 text-center">
                       <span class="text-xs font-bold text-slate-400 block mb-1">{{ p!.proposedDate.split('-')[0] }}</span>
                       <h4 :class="`font-bold text-sm mb-1 ${p!.id === policyId ? 'text-blue-700' : 'text-slate-700'}`">
-                        {{ CANDIDATES.find(can => can.id === p!.candidateId)?.name }}
+                        {{ politicians.find(pol => pol.id === p!.politicianId)?.name }}
                       </h4>
                       <div :class="`text-xs px-2 py-1 rounded-full border inline-block
                         ${p!.id === policyId ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`">
@@ -207,11 +208,11 @@ const handleVote = () => {
         <!-- Sidebar -->
         <div class="lg:col-span-1 space-y-6">
           <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24">
-            <div class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors" @click="router.push(`/candidate/${candidate.id}`)">
-              <img :src="candidate.avatarUrl" :alt="candidate.name" class="w-16 h-16 rounded-full border-2 border-slate-100" />
+            <div class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors" @click="router.push(`/politician/${politician.id}`)">
+              <img :src="politician.avatarUrl" :alt="politician.name" class="w-16 h-16 rounded-full border-2 border-slate-100" />
               <div>
-                <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ candidate.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
-                <p class="text-sm text-slate-500">{{ candidate.position }}</p>
+                <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ politician.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
+                <p class="text-sm text-slate-500">{{ politician.position }}</p>
               </div>
             </div>
 
@@ -235,23 +236,23 @@ const handleVote = () => {
               <div class="pt-4 border-t border-slate-100">
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
                 <span :class="`inline-block px-3 py-1 rounded text-sm font-bold
-                  ${candidate.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
-                    candidate.party === '民進黨' ? 'bg-green-50 text-green-700' :
-                    candidate.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
-                  {{ candidate.party }}
+                  ${politician.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
+                    politician.party === '民進黨' ? 'bg-green-50 text-green-700' :
+                    politician.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
+                  {{ politician.party }}
                 </span>
               </div>
 
               <div class="pt-4 border-t border-slate-100">
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">選區</h4>
-                <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ candidate.region }}</p>
+                <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ politician.region }}</p>
               </div>
 
               <div class="pt-4 border-t border-slate-100">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h3>
                 <ul class="space-y-3">
-                  <template v-if="candidate.experience?.length">
-                    <li v-for="(exp, i) in candidate.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
+                  <template v-if="politician.experience?.length">
+                    <li v-for="(exp, i) in politician.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
                   </template>
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>
@@ -260,8 +261,8 @@ const handleVote = () => {
               <div class="pt-4 border-t border-slate-100">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
                 <ul class="space-y-3">
-                  <template v-if="candidate.education?.length">
-                    <li v-for="(edu, i) in candidate.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
+                  <template v-if="politician.education?.length">
+                    <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
                   </template>
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>
@@ -286,7 +287,7 @@ const handleVote = () => {
                   </div>
                   <button
                     v-if="otherPolicies.length >= 3"
-                    @click="router.push(`/candidate/${candidate.id}`)"
+                    @click="router.push(`/politician/${politician.id}`)"
                     class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
                   >
                     查看更多 <ChevronRight :size="12" />

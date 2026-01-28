@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CANDIDATES, POLICIES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
@@ -9,36 +9,37 @@ import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, Us
 
 const route = useRoute()
 const router = useRouter()
+const { politicians, policies } = useSupabase()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
-const candidate = computed(() => CANDIDATES.find(c => c.id === route.params.candidateId))
-const campaignPledges = computed(() => candidate.value ? POLICIES.filter(p => p.candidateId === candidate.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
-const historicalPolicies = computed(() => candidate.value ? POLICIES.filter(p => p.candidateId === candidate.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
+const politician = computed(() => politicians.value.find(c => c.id === route.params.politicianId))
+const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
+const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
 </script>
 
 <template>
-  <div v-if="candidate" class="bg-slate-50 min-h-screen">
+  <div v-if="politician" class="bg-slate-50 min-h-screen">
     <Hero>
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
           <div class="relative">
-            <img :src="candidate.avatarUrl" :alt="candidate.name" class="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-white shadow-xl" />
+            <img :src="politician.avatarUrl" :alt="politician.name" class="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-white shadow-xl" />
             <span :class="`absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white border-2 border-white shadow-md
-              ${candidate.party === '國民黨' ? 'bg-blue-600' :
-                candidate.party === '民進黨' ? 'bg-green-600' :
-                candidate.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
-              {{ candidate.party[0] }}
+              ${politician.party === '國民黨' ? 'bg-blue-600' :
+                politician.party === '民進黨' ? 'bg-green-600' :
+                politician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
+              {{ politician.party[0] }}
             </span>
           </div>
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-2">
-              <h1 class="text-4xl font-bold text-white">{{ candidate.name }}</h1>
-              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">{{ candidate.position }}</span>
-              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ candidate.region }}</span>
+              <h1 class="text-4xl font-bold text-white">{{ politician.name }}</h1>
+              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">{{ politician.position }}</span>
+              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
             </div>
-            <h2 v-if="candidate.slogan" class="text-xl md:text-2xl font-bold text-amber-400 mb-4 italic">"{{ candidate.slogan }}"</h2>
-            <p class="text-violet-100 max-w-2xl leading-relaxed mb-6 text-lg">{{ candidate.bio || "暫無簡介。" }}</p>
+            <h2 v-if="politician.slogan" class="text-xl md:text-2xl font-bold text-amber-400 mb-4 italic">"{{ politician.slogan }}"</h2>
+            <p class="text-violet-100 max-w-2xl leading-relaxed mb-6 text-lg">{{ politician.bio || "暫無簡介。" }}</p>
           </div>
         </div>
       </template>
@@ -70,13 +71,13 @@ const historicalPolicies = computed(() => candidate.value ? POLICIES.filter(p =>
           <div class="space-y-6">
             <template v-if="activeTab === 'campaign'">
               <div v-if="campaignPledges.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <PolicyCard v-for="policy in campaignPledges" :key="policy.id" :policy="policy" :candidate="candidate" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                <PolicyCard v-for="policy in campaignPledges" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
               </div>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300"><p class="text-slate-500">該候選人尚未發布 2026 競選承諾。</p></div>
             </template>
             <template v-else>
               <div v-if="historicalPolicies.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <PolicyCard v-for="policy in historicalPolicies" :key="policy.id" :policy="policy" :candidate="candidate" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                <PolicyCard v-for="policy in historicalPolicies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
               </div>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300"><p class="text-slate-500">該候選人無過往追蹤紀錄。</p></div>
             </template>
@@ -90,23 +91,23 @@ const historicalPolicies = computed(() => candidate.value ? POLICIES.filter(p =>
               <div>
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
                 <span :class="`inline-block px-3 py-1 rounded text-sm font-bold
-                  ${candidate.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
-                    candidate.party === '民進黨' ? 'bg-green-50 text-green-700' :
-                    candidate.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
-                  {{ candidate.party }}
+                  ${politician.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
+                    politician.party === '民進黨' ? 'bg-green-50 text-green-700' :
+                    politician.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
+                  {{ politician.party }}
                 </span>
               </div>
 
               <div class="pt-4 border-t border-slate-100">
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">選區</h4>
-                <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ candidate.region }}</p>
+                <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ politician.region }}</p>
               </div>
 
               <div class="pt-4 border-t border-slate-100">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h3>
                 <ul class="space-y-3">
-                  <template v-if="candidate.experience?.length">
-                    <li v-for="(exp, i) in candidate.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
+                  <template v-if="politician.experience?.length">
+                    <li v-for="(exp, i) in politician.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
                   </template>
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>
@@ -115,8 +116,8 @@ const historicalPolicies = computed(() => candidate.value ? POLICIES.filter(p =>
               <div class="pt-4 border-t border-slate-100">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
                 <ul class="space-y-3">
-                  <template v-if="candidate.education?.length">
-                    <li v-for="(edu, i) in candidate.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
+                  <template v-if="politician.education?.length">
+                    <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
                   </template>
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>

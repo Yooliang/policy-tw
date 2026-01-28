@@ -3,10 +3,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import { MessageSquare, ThumbsUp, TrendingUp, Search, Filter, PenTool, Eye } from 'lucide-vue-next'
-import { DISCUSSIONS } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
+import type { Discussion } from '../types'
 
 const route = useRoute()
 const router = useRouter()
+const { discussions } = useSupabase()
 const initialFilter = computed(() => (route.query.filter as string) || '')
 const activeTab = ref<'hot' | 'latest'>('hot')
 const searchQuery = ref('')
@@ -40,12 +42,12 @@ function isLiked(id: string) {
   return likedIds.value.includes(id)
 }
 
-function getLikeCount(post: typeof DISCUSSIONS[number]) {
+function getLikeCount(post: Discussion) {
   return post.likes + (isLiked(post.id) ? 1 : 0)
 }
 
 const filteredDiscussions = computed(() => {
-  let list = [...DISCUSSIONS]
+  let list = [...discussions.value]
 
   // policyTitle filter from query
   if (initialFilter.value) {
@@ -78,7 +80,7 @@ const filteredDiscussions = computed(() => {
 })
 
 const hotDiscussions = computed(() =>
-  [...DISCUSSIONS].sort((a, b) => b.likes - a.likes).slice(0, 5)
+  [...discussions.value].sort((a, b) => b.likes - a.likes).slice(0, 5)
 )
 
 function setCategory(tag: string) {
@@ -89,7 +91,7 @@ const clearFilter = () => {
   router.push('/community')
 }
 
-function getCommentCount(post: typeof DISCUSSIONS[number]) {
+function getCommentCount(post: Discussion) {
   return post.comments.reduce((sum, c) => sum + 1 + c.replies.length, 0)
 }
 </script>

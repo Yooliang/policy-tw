@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CANDIDATES, LOCATIONS } from '../../constants'
-import type { Candidate } from '../../types'
+import { useSupabase } from '../../composables/useSupabase'
+import type { Politician } from '../../types'
 
 const props = defineProps<{
   modelValue: string
   label: string
   ringColor: string
   selectedRegion: string
-  comparisonPool: Candidate[]
+  comparisonPool: Politician[]
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const selectedCandidate = computed(() => CANDIDATES.find(c => c.id === props.modelValue))
+const { politicians, locations } = useSupabase()
+
+const selectedPolitician = computed(() => politicians.value.find(c => c.id === props.modelValue))
 </script>
 
 <template>
@@ -32,7 +34,7 @@ const selectedCandidate = computed(() => CANDIDATES.find(c => c.id === props.mod
       >
         <option v-if="comparisonPool.length === 0" value="">無符合條件候選人</option>
         <template v-if="selectedRegion === 'All'">
-          <template v-for="loc in LOCATIONS" :key="loc">
+          <template v-for="loc in locations" :key="loc">
             <optgroup v-if="comparisonPool.filter(c => c.region === loc).length > 0" :label="loc">
               <option v-for="c in comparisonPool.filter(c => c.region === loc)" :key="c.id" :value="c.id">
                 {{ c.name }} ({{ c.party }}) {{ c.subRegion ? `- ${c.subRegion}` : '' }}
@@ -47,18 +49,18 @@ const selectedCandidate = computed(() => CANDIDATES.find(c => c.id === props.mod
         </template>
       </select>
     </div>
-    <div v-if="selectedCandidate" class="mt-4 flex items-center gap-3 bg-white p-3 rounded-lg border border-slate-100 shadow-sm animate-fade-in">
-      <img :src="selectedCandidate.avatarUrl" class="w-12 h-12 rounded-full border-2 border-white shadow-sm" />
+    <div v-if="selectedPolitician" class="mt-4 flex items-center gap-3 bg-white p-3 rounded-lg border border-slate-100 shadow-sm animate-fade-in">
+      <img :src="selectedPolitician.avatarUrl" class="w-12 h-12 rounded-full border-2 border-white shadow-sm" />
       <div>
         <div class="font-bold text-navy-900 flex items-center gap-2">
-          {{ selectedCandidate.name }}
+          {{ selectedPolitician.name }}
           <span :class="`text-[10px] px-1.5 py-0.5 rounded text-white ${
-            selectedCandidate.party === '國民黨' ? 'bg-blue-600' :
-            selectedCandidate.party === '民進黨' ? 'bg-green-600' :
-            selectedCandidate.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'
-          }`">{{ selectedCandidate.party }}</span>
+            selectedPolitician.party === '國民黨' ? 'bg-blue-600' :
+            selectedPolitician.party === '民進黨' ? 'bg-green-600' :
+            selectedPolitician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'
+          }`">{{ selectedPolitician.party }}</span>
         </div>
-        <div class="text-xs text-slate-500">{{ selectedCandidate.slogan || '無口號' }}</div>
+        <div class="text-xs text-slate-500">{{ selectedPolitician.slogan || '無口號' }}</div>
       </div>
     </div>
   </div>

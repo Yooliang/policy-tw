@@ -1,4 +1,4 @@
-import { Candidate, Discussion, Election, Policy, PolicyStatus, PoliticalParty, ElectionType } from './types';
+import { Politician, PoliticianStatus, Discussion, Election, Policy, PolicyStatus, PoliticalParty, ElectionType } from './types';
 
 export const ELECTIONS: Election[] = [
   {
@@ -30,11 +30,12 @@ export const getActiveElection = (): Election => {
   return active[0] || ELECTIONS[0];
 };
 
-export const CANDIDATES: Candidate[] = [
+export const POLITICIANS: Politician[] = [
   {
     id: 'c0',
     name: '前任高雄市長',
     party: PoliticalParty.KMT,
+    status: PoliticianStatus.FORMER,
     electionType: ElectionType.MAYOR,
     position: '前高雄市長',
     region: '高雄市',
@@ -46,6 +47,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c1',
     name: '蔣萬安',
     party: PoliticalParty.KMT,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.MAYOR,
     position: '台北市長',
     region: '台北市',
@@ -60,6 +62,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c2',
     name: '侯友宜',
     party: PoliticalParty.KMT,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.MAYOR,
     position: '新北市長',
     region: '新北市',
@@ -74,6 +77,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c3',
     name: '陳其邁',
     party: PoliticalParty.DPP,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.MAYOR,
     position: '高雄市長',
     region: '高雄市',
@@ -88,6 +92,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c4',
     name: '高虹安',
     party: PoliticalParty.TPP,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.MAYOR,
     position: '新竹市長',
     region: '新竹市',
@@ -102,6 +107,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c5',
     name: '王小明',
     party: PoliticalParty.DPP,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.MAYOR,
     position: '台北市長參選人',
     region: '台北市',
@@ -116,6 +122,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c6',
     name: '林大華',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.MAYOR,
     position: '新竹市長參選人',
     region: '新竹市',
@@ -130,6 +137,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c7',
     name: '張熱血',
     party: PoliticalParty.TPP,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.COUNCILOR,
     position: '台北市議員參選人',
     region: '台北市',
@@ -145,6 +153,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c8',
     name: '陳在地',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.COUNCILOR,
     position: '新竹市議員參選人',
     region: '新竹市',
@@ -160,6 +169,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c9',
     name: '李里長',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.CHIEF,
     position: '新竹市東區龍山里長參選人',
     region: '新竹市',
@@ -173,6 +183,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c10',
     name: '楊文科',
     party: PoliticalParty.KMT,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.MAYOR,
     position: '新竹縣長',
     region: '新竹縣',
@@ -185,6 +196,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c11',
     name: '鄭朝方',
     party: PoliticalParty.DPP,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.TOWNSHIP_MAYOR,
     position: '竹北市長',
     region: '新竹縣',
@@ -198,6 +210,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c12',
     name: '林小市民',
     party: PoliticalParty.TPP,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.REPRESENTATIVE,
     position: '竹北市民代表參選人',
     region: '新竹縣',
@@ -210,6 +223,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c13',
     name: '張里長',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.CHIEF,
     position: '竹北市中興里長',
     region: '新竹縣',
@@ -222,6 +236,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c14',
     name: '林山水',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.INDIGENOUS_DISTRICT_CHIEF,
     position: '烏來區長參選人',
     region: '新北市',
@@ -235,6 +250,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c15',
     name: '高勇士',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.POLITICIAN,
     electionType: ElectionType.INDIGENOUS_DISTRICT_REP,
     position: '烏來區民代表參選人',
     region: '新北市',
@@ -247,6 +263,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c16',
     name: '林議員',
     party: PoliticalParty.DPP,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.COUNCILOR,
     position: '高雄市議員',
     region: '高雄市',
@@ -260,6 +277,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c17',
     name: '陳區長',
     party: PoliticalParty.DPP,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.TOWNSHIP_MAYOR,
     position: '楠梓區長',
     region: '高雄市',
@@ -273,6 +291,7 @@ export const CANDIDATES: Candidate[] = [
     id: 'c18',
     name: '王里長',
     party: PoliticalParty.IND,
+    status: PoliticianStatus.INCUMBENT,
     electionType: ElectionType.CHIEF,
     position: '楠梓區援中里長',
     region: '高雄市',
@@ -287,7 +306,7 @@ export const CANDIDATES: Candidate[] = [
 export const POLICIES: Policy[] = [
   {
     id: 'p0',
-    candidateId: 'c0',
+    politicianId: 'c0',
     title: '和發產業園區規劃',
     description: '規劃南部產業用地，為製造業回流做準備。',
     category: 'Economy',
@@ -304,7 +323,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p1',
-    candidateId: 'c1',
+    politicianId: 'c1',
     title: '台北大建設 - 都更加速',
     description: '推動公辦都更降門檻，加速台北市老舊公寓改建速度，落實居住正義。',
     category: 'Urban Planning',
@@ -322,7 +341,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p2',
-    candidateId: 'c1',
+    politicianId: 'c1',
     title: '長照補助加碼',
     description: '台北市長照補助提高至每年 5 萬元，減輕家庭照顧者負擔。',
     category: 'Welfare',
@@ -340,7 +359,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p3',
-    candidateId: 'c2',
+    politicianId: 'c2',
     title: '2030 新北願景',
     description: '以三軸心、三曲線為核心，串聯北北基桃生活圈，打造國際化大都會。',
     category: 'Urban Planning',
@@ -356,7 +375,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p4',
-    candidateId: 'c2',
+    politicianId: 'c2',
     title: '三環六線捷運路網',
     description: '持續推動捷運建設，包含萬大線、三鶯線等，完善新北交通路網。',
     category: 'Traffic',
@@ -373,7 +392,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p5',
-    candidateId: 'c3',
+    politicianId: 'c3',
     title: '半導體 S 廊帶',
     description: '串聯南科、路竹、橋頭至楠梓，打造全球最完整的半導體產業聚落。',
     category: 'Economy',
@@ -391,7 +410,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p8',
-    candidateId: 'c16',
+    politicianId: 'c16',
     title: '半導體 S 廊帶預算審查',
     description: '嚴格審查台積電設廠相關市府配套預算，確保公帑用在刀口上，杜絕浮編與虛報。',
     category: 'Economy',
@@ -410,7 +429,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p9',
-    candidateId: 'c17',
+    politicianId: 'c17',
     title: '楠梓園區周邊基礎建設',
     description: '執行台積電設廠周邊道路拓寬、排水系統升級、公共運輸接駁規劃等基礎建設。',
     category: 'Economy',
@@ -430,7 +449,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p10',
-    candidateId: 'c18',
+    politicianId: 'c18',
     title: '援中里居民安置與生活品質維護',
     description: '協助因台積電設廠受影響的援中里居民處理噪音、交通與環境問題，爭取合理補償。',
     category: 'Economy',
@@ -450,7 +469,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p6',
-    candidateId: 'c4',
+    politicianId: 'c4',
     title: '0 到 6 歲市府養',
     description: '加碼托育補助，凍卵補助，打造友善生育城市。',
     category: 'Welfare',
@@ -466,7 +485,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p7',
-    candidateId: 'c4',
+    politicianId: 'c4',
     title: '智慧交通改善園區塞車',
     description: '利用 AI 號誌控制與大數據分析，紓解新竹科學園區周邊交通壅塞。',
     category: 'Traffic',
@@ -483,7 +502,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp1',
-    candidateId: 'c1',
+    politicianId: 'c1',
     title: '2026 願景：台北元宇宙園區',
     description: '運用區塊鏈與 VR 技術，打造虛擬台北，促進數位經濟發展。',
     category: 'Economy',
@@ -498,7 +517,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp5',
-    candidateId: 'c1',
+    politicianId: 'c1',
     title: '台北科技走廊計畫',
     description: '串聯內科、南軟至北士科，打造首都科技金三角，吸引國際大廠研發中心進駐。',
     category: 'Economy',
@@ -513,7 +532,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp2',
-    candidateId: 'c5',
+    politicianId: 'c5',
     title: '社宅租金全面八折',
     description: '重新檢視社宅定價公式，承諾當選後全面調降市有社宅租金至市價八折以下。',
     category: 'Welfare',
@@ -528,7 +547,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp4',
-    candidateId: 'c5',
+    politicianId: 'c5',
     title: '國中小營養午餐免費',
     description: '全額補助公立國中小營養午餐費用，減輕家長負擔，確保學童營養均衡。',
     category: 'Education',
@@ -543,7 +562,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp3',
-    candidateId: 'c6',
+    politicianId: 'c6',
     title: '新竹輕軌立即動工',
     description: '解決多年延宕問題，承諾上任半年內完成土地徵收，一年內動工。',
     category: 'Traffic',
@@ -558,7 +577,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp_c7_1',
-    candidateId: 'c7',
+    politicianId: 'c7',
     title: '捷運大同線增設出口',
     description: '爭取捷運站體增設無障礙出口，方便長者與輪椅族進出。',
     category: 'Traffic',
@@ -572,7 +591,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'cp_c8_1',
-    candidateId: 'c8',
+    politicianId: 'c8',
     title: '東區公園全面遊具更新',
     description: '淘汰罐頭遊具，打造共融式遊戲場，讓孩子玩得開心又安全。',
     category: 'Welfare',
@@ -586,7 +605,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'stack_mayor_1',
-    candidateId: 'c4',
+    politicianId: 'c4',
     title: '大新竹智慧交通網 2.0',
     description: '升級全市交通號誌控制系統，導入 AI 預判車流，並建立大新竹交通行控中心。',
     category: 'Traffic',
@@ -600,7 +619,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'stack_counc_1',
-    candidateId: 'c8',
+    politicianId: 'c8',
     title: '嚴審智慧交通預算，杜絕無效號誌',
     description: '強力監督市府智慧交通標案，要求廠商提出具體車流改善數據，拒絕裝飾性工程。',
     category: 'Traffic',
@@ -614,7 +633,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'stack_chief_1',
-    candidateId: 'c9',
+    politicianId: 'c9',
     title: '爭取龍山路口增設智慧感應號誌',
     description: '本里龍山路口車禍頻傳，將依據市府智慧交通計畫，爭取優先安裝感應式紅綠燈。',
     category: 'Traffic',
@@ -628,7 +647,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_hc_mayor_1',
-    candidateId: 'c10',
+    politicianId: 'c10',
     title: '大新竹輕軌藍線延伸竹北',
     description: '爭取輕軌跨越頭前溪，串聯竹科與竹北生活圈。',
     category: 'Traffic',
@@ -642,7 +661,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_hc_tm_1',
-    candidateId: 'c11',
+    politicianId: 'c11',
     title: '配合輕軌規劃站點接駁車',
     description: '於市區規劃 YouBike 與免費接駁巴士，串聯輕軌預定站點。',
     category: 'Traffic',
@@ -656,7 +675,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_hc_rep_1',
-    candidateId: 'c12',
+    politicianId: 'c12',
     title: '要求接駁車路線繞經舊市區',
     description: '監督公所接駁計畫，確保舊市區長者也能享受大眾運輸便利。',
     category: 'Traffic',
@@ -670,7 +689,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_hc_chief_1',
-    candidateId: 'c13',
+    politicianId: 'c13',
     title: '爭取中興里設 YouBike 站',
     description: '本里人口密集，爭取於活動中心前設置 YouBike 2.0 站點。',
     category: 'Traffic',
@@ -684,7 +703,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_wulai_chief_1',
-    candidateId: 'c14',
+    politicianId: 'c14',
     title: '烏來溫泉觀光升級計畫',
     description: '結合泰雅文化與生態導覽，打造國際級溫泉觀光品牌。',
     category: 'Economy',
@@ -698,7 +717,7 @@ export const POLICIES: Policy[] = [
   },
   {
     id: 'p_wulai_rep_1',
-    candidateId: 'c15',
+    politicianId: 'c15',
     title: '爭取溫泉區收益回饋族人',
     description: '要求觀光收益應有固定比例回饋部落建設與長者照護。',
     category: 'Welfare',

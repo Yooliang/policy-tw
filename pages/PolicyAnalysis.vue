@@ -1,22 +1,23 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { POLICIES, CANDIDATES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const { policies, politicians } = useSupabase()
 const searchTerm = ref('')
 
 const relayCases = computed(() => {
   const cases: any[] = []
   const visitedPolicyIds = new Set<string>()
 
-  POLICIES.forEach(policy => {
+  policies.value.forEach(policy => {
     if (visitedPolicyIds.has(policy.id)) return
     if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
-      const chain = POLICIES.filter(p => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
+      const chain = policies.value.filter(p => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
         .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
       chain.forEach(p => visitedPolicyIds.add(p.id))
       cases.push({
@@ -24,7 +25,7 @@ const relayCases = computed(() => {
         mainTitle: policy.title.includes('園區') ? '高屏產業聚落接力案' : policy.title,
         category: policy.category,
         policies: chain,
-        involvedCandidateIds: [...new Set(chain.map(p => p.candidateId))],
+        involvedPoliticianIds: [...new Set(chain.map(p => p.politicianId))],
         startYear: chain[0].proposedDate.split('-')[0],
         lastYear: new Date().getFullYear().toString(),
         totalProgress: Math.round(chain.reduce((acc, p) => acc + p.progress, 0) / chain.length),
@@ -37,7 +38,7 @@ const relayCases = computed(() => {
         mainTitle: policy.title,
         category: policy.category,
         policies: [policy],
-        involvedCandidateIds: [policy.candidateId],
+        involvedPoliticianIds: [policy.politicianId],
         startYear: policy.proposedDate.split('-')[0],
         lastYear: new Date().getFullYear().toString(),
         totalProgress: policy.progress,
@@ -99,16 +100,16 @@ const relayCases = computed(() => {
             <div class="flex items-center justify-between pt-6 border-t border-slate-50">
               <div class="flex -space-x-3">
                 <img
-                  v-for="cid in relayCase.involvedCandidateIds"
+                  v-for="cid in relayCase.involvedPoliticianIds"
                   :key="cid"
-                  :src="CANDIDATES.find(can => can.id === cid)?.avatarUrl"
+                  :src="politicians.find(pol => pol.id === cid)?.avatarUrl"
                   class="w-12 h-12 rounded-full border-4 border-white shadow-md group-hover:scale-110 transition-all"
-                  :title="CANDIDATES.find(can => can.id === cid)?.name"
+                  :title="politicians.find(pol => pol.id === cid)?.name"
                 />
               </div>
               <div class="text-right">
                 <div class="text-[10px] font-black text-slate-400 uppercase tracking-tighter">參與首長</div>
-                <div class="text-sm font-black text-navy-900">{{ relayCase.involvedCandidateIds.length }} 位市政接棒者</div>
+                <div class="text-sm font-black text-navy-900">{{ relayCase.involvedPoliticianIds.length }} 位市政接棒者</div>
               </div>
             </div>
           </div>

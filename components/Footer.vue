@@ -2,8 +2,9 @@
 import { computed } from 'vue'
 import { Github, Twitter, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
-import { getActiveElection } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 
+const { getActiveElection } = useSupabase()
 const activeElection = computed(() => getActiveElection())
 </script>
 

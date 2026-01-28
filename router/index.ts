@@ -32,8 +32,8 @@ const router = createRouter({
       redirect: '/election/election-2026',
     },
     {
-      path: '/candidate/:candidateId',
-      component: () => import('../pages/CandidateProfile.vue'),
+      path: '/politician/:politicianId',
+      component: () => import('../pages/PoliticianProfile.vue'),
     },
     {
       path: '/community',

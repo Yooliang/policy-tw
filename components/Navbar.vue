@@ -2,11 +2,12 @@
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { TrendingUp, FileText, Activity, Heart, Menu, X, Vote, MessageSquare, LogIn } from 'lucide-vue-next'
-import { getActiveElection } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 
 const isOpen = ref(false)
 const isLoginModalOpen = ref(false)
 const route = useRoute()
+const { getActiveElection } = useSupabase()
 
 const activeElection = computed(() => getActiveElection())
 

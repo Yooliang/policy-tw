@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { Policy, Candidate, PolicyStatus } from '../types'
+import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star } from 'lucide-vue-next'
 
 const props = defineProps<{
   policy: Policy
-  candidate: Candidate
+  politician: Politician
   onClick?: () => void
 }>()
 
@@ -59,10 +59,10 @@ onUnmounted(() => {
     <div class="p-6 flex-1">
       <div class="flex justify-between items-start mb-4">
         <div class="flex items-center gap-3">
-          <img :src="candidate.avatarUrl" :alt="candidate.name" class="w-10 h-10 rounded-full border-2 border-slate-50 shadow-sm" />
+          <img :src="politician.avatarUrl" :alt="politician.name" class="w-10 h-10 rounded-full border-2 border-slate-50 shadow-sm" />
           <div class="text-left">
-            <span class="font-bold text-navy-900 block text-sm">{{ candidate.name }}</span>
-            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ candidate.party }}</span>
+            <span class="font-bold text-navy-900 block text-sm">{{ politician.name }}</span>
+            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ politician.party }}</span>
           </div>
         </div>
         <StatusBadge :status="policy.status" />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { POLICIES, CANDIDATES, LOCATIONS, CATEGORIES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
@@ -8,6 +8,7 @@ import { Filter, Search, TrendingUp, Star } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const { policies, politicians, locations, categories } = useSupabase()
 const selectedLocation = ref('All')
 const selectedCategory = ref('All')
 const searchTerm = ref('')
@@ -28,9 +29,9 @@ onUnmounted(() => {
 })
 
 const filteredPolicies = computed(() => {
-  return POLICIES.filter(policy => {
-    const candidate = CANDIDATES.find(c => c.id === policy.candidateId)
-    const matchesLocation = selectedLocation.value === 'All' || candidate?.region === selectedLocation.value
+  return policies.value.filter(policy => {
+    const politician = politicians.value.find(c => c.id === policy.politicianId)
+    const matchesLocation = selectedLocation.value === 'All' || politician?.region === selectedLocation.value
     const matchesCategory = selectedCategory.value === 'All' || policy.category === selectedCategory.value
     const matchesSearch = policy.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
                          policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
@@ -75,7 +76,7 @@ const filteredPolicies = computed(() => {
               <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">地區</span>
               <select v-model="selectedLocation" class="bg-transparent border-none text-sm font-bold text-navy-900 focus:ring-0 cursor-pointer w-full">
                 <option value="All">全部地區</option>
-                <option v-for="loc in LOCATIONS" :key="loc" :value="loc">{{ loc }}</option>
+                <option v-for="loc in locations" :key="loc" :value="loc">{{ loc }}</option>
               </select>
             </div>
 
@@ -84,7 +85,7 @@ const filteredPolicies = computed(() => {
               <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">類別</span>
               <select v-model="selectedCategory" class="bg-transparent border-none text-sm font-bold text-navy-900 focus:ring-0 cursor-pointer w-full">
                 <option value="All">全部類別</option>
-                <option v-for="cat in CATEGORIES" :key="cat" :value="cat">{{ cat }}</option>
+                <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
               </select>
             </div>
           </div>
@@ -101,9 +102,9 @@ const filteredPolicies = computed(() => {
         <template v-if="filteredPolicies.length > 0">
           <template v-for="policy in filteredPolicies" :key="policy.id">
             <PolicyCard
-              v-if="CANDIDATES.find(c => c.id === policy.candidateId)"
+              v-if="politicians.find(c => c.id === policy.politicianId)"
               :policy="policy"
-              :candidate="CANDIDATES.find(c => c.id === policy.candidateId)!"
+              :politician="politicians.find(c => c.id === policy.politicianId)!"
               :on-click="() => router.push(`/policy/${policy.id}`)"
             />
           </template>

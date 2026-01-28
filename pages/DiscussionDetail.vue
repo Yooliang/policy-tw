@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import StatusBadge from '../components/StatusBadge.vue'
-import { DISCUSSIONS, POLICIES } from '../constants'
+import { useSupabase } from '../composables/useSupabase'
 import {
   MessageSquare, ThumbsUp, Eye, ArrowLeft, Bookmark,
   Clock, TrendingUp, ChevronDown, ChevronUp,
@@ -11,12 +11,13 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { discussions, policies } = useSupabase()
 
 const discussionId = computed(() => route.params.discussionId as string)
-const discussion = computed(() => DISCUSSIONS.find(d => d.id === discussionId.value))
-const policy = computed(() => POLICIES.find(p => p.id === discussion.value?.policyId))
+const discussion = computed(() => discussions.value.find(d => d.id === discussionId.value))
+const policy = computed(() => policies.value.find(p => p.id === discussion.value?.policyId))
 const relatedDiscussions = computed(() =>
-  DISCUSSIONS.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussionId.value)
+  discussions.value.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussionId.value)
 )
 
 const commentSort = ref<'latest' | 'hot'>('latest')
