@@ -1,18 +1,26 @@
 import { ref } from 'vue'
 import { supabase } from '../lib/supabase'
-import type { Election, Politician, Policy, Discussion, TrackingLog } from '../types'
+import type { Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData } from '../types'
 import { ElectionType } from '../types'
+import { useIndexedDB } from './useIndexedDB'
 
-// Global shared state (loaded once, shared across components)
+const { getFromCache, setToCache, getCacheTimestamp, CACHE_DURATION } = useIndexedDB()
+
+// Cache keys
+const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'  // 按選舉快取
+
+// Global shared state
 const elections = ref<Election[]>([])
-const politicians = ref<Politician[]>([])
+const politicians = ref<Politician[]>([])  // 目前已載入的候選人（可能來自多個選舉）
 const policies = ref<Policy[]>([])
 const discussions = ref<Discussion[]>([])
 const categories = ref<string[]>([])
 const locations = ref<string[]>([])
-const regionStats = ref<any[]>([]) // New state for region stats
+const regionStats = ref<any[]>([])
+const electoralDistrictAreas = ref<any[]>([])
 const loading = ref(false)
 const loaded = ref(false)
+const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
 async function fetchAllRows(tableName: string, selectStr: string = '*') {
@@ -52,14 +60,28 @@ function mapElection(row: any): Election {
 }
 
 function mapPolitician(row: any): Politician {
+  // Map elections array from the view (election-specific data)
+  const elections: PoliticianElectionData[] = (row.elections || []).map((e: any) => ({
+    electionId: e.electionId,
+    position: e.position || '',
+    slogan: e.slogan || undefined,
+    electionType: e.electionType || undefined,
+    regionId: e.regionId || undefined,
+    region: e.region || '',
+    subRegion: e.subRegion || undefined,
+    village: e.village || undefined,
+  }));
+
   return {
     id: row.id,
     name: row.name,
     party: row.party,
     status: row.status,
     electionType: row.election_type,
-    position: row.position,
-    region: row.region,
+    position: row.position || '',
+    currentPosition: row.current_position || undefined,
+    // Region from view (already JOINed with regions table for backward compat)
+    region: row.region || '',
     subRegion: row.sub_region || undefined,
     village: row.village || undefined,
     avatarUrl: row.avatar_url,
@@ -70,7 +92,17 @@ function mapPolitician(row: any): Politician {
     electionIds: row.election_ids || [],
     birthYear: row.birth_year || undefined,
     educationLevel: row.education_level || undefined,
+    // New: election-specific data array
+    elections,
   }
+}
+
+// Helper function to get election-specific data for a politician
+function getPoliticianElectionData(
+  politician: Politician,
+  electionId: number
+): PoliticianElectionData | undefined {
+  return politician.elections?.find(e => e.electionId === electionId);
 }
 
 
@@ -78,6 +110,7 @@ function mapPolicy(row: any): Policy {
   return {
     id: row.id,
     politicianId: row.politician_id,
+    electionId: row.election_id || undefined,
     title: row.title,
     description: row.description,
     category: row.category,
@@ -138,22 +171,28 @@ async function fetchAll() {
   loading.value = true
 
   try {
-    // 1. First fetch lightweight metadata and elections
+    // 只載入基本 metadata（不載入候選人，由 ElectionPage 按需載入）
     const [
       electionsData,
       electionTypesData,
       categoriesRes,
       locationsRes,
       regionStatsData,
+      electoralDistrictAreasData,
+      policiesData,
+      discussionsData,
     ] = await Promise.all([
       fetchAllRows('elections'),
       fetchAllRows('election_types', 'election_id, type'),
       supabase.from('categories').select('name'),
       supabase.from('locations').select('name'),
-      supabase.from('politician_stats_by_region').select('*')
+      supabase.from('regions').select('*'),
+      supabase.from('electoral_district_areas').select('*'),
+      fetchAllRows('policies_with_logs'),
+      fetchAllRows('discussions_full'),
     ])
 
-    // Map elections immediately
+    // Map elections
     const typesByElection: Record<number, string[]> = {}
     for (const row of electionTypesData || []) {
       if (!typesByElection[row.election_id]) typesByElection[row.election_id] = []
@@ -165,67 +204,14 @@ async function fetchAll() {
     categories.value = (categoriesRes.data || []).map(r => r.name)
     locations.value = (locationsRes.data || []).map(r => r.name)
     regionStats.value = regionStatsData.data || []
-
-    // 2. Determine target election (latest active)
-    const today = new Date().toISOString().slice(0, 10)
-    const activeElection = elections.value
-      .filter(e => e.startDate <= today && today <= e.endDate)
-      .sort((a, b) => b.electionDate.localeCompare(a.electionDate))[0] 
-      || elections.value.sort((a, b) => b.electionDate.localeCompare(a.electionDate))[0]
-
-    // 3. Fetch Priority Politicians (President, Mayor, Legislator from target election)
-    // We join with politician_elections to filter by election_id
-    const priorityTypes = ['總統副總統', '立法委員', '縣市長']
-    
-    // Fetch priority IDs first
-    const { data: priorityIds } = await supabase
-      .from('politician_elections')
-      .select('politician_id')
-      .eq('election_id', activeElection?.id || 1) // Default to 1 (2026) if not found
-
-    const targetIds = (priorityIds || []).map((p: any) => p.politician_id)
-
-    // Fetch the actual politicians
-    let priorityPols: any[] = []
-    if (targetIds.length > 0) {
-      const { data } = await supabase
-        .from('politicians')
-        .select('*')
-        .in('id', targetIds)
-        .in('election_type', priorityTypes)
-      
-      priorityPols = data || []
-      politicians.value = priorityPols.map(mapPolitician)
-    }
-
-    // 4. Fetch related data for priority politicians (policies, discussions)
-    // Note: Ideally we should filter these too, but for simplicity we might fetch all or filter by pol ID
-    // For performance, let's fetch all policies/discussions for NOW as they are smaller tables compared to all politicians
-    // Or better: filter by priority politicians if possible. 
-    // Given the constraints, let's fetch ALL policies/discussions as they are critical for the UI.
-    const [policiesData, discussionsData] = await Promise.all([
-      fetchAllRows('policies_with_logs'),
-      fetchAllRows('discussions_full'),
-    ])
+    electoralDistrictAreas.value = electoralDistrictAreasData.data || []
     policies.value = (policiesData || []).map(mapPolicy)
     discussions.value = (discussionsData || []).map(mapDiscussion)
 
-    // Mark as loaded so UI renders the critical data
+    // 候選人不在這裡載入，改由 ElectionPage 呼叫 loadPoliticiansByElection()
     loaded.value = true
     loading.value = false
-
-    // 5. Lazy load the rest (Background Fetch)
-    // Fetch ALL politicians_with_elections to get the full list
-    // This might take time, but the UI is already responsive
-    console.log('Background loading remaining politicians...')
-    const allPolsData = await fetchAllRows('politicians_with_elections')
-    
-    // Merge logic: Create a map of existing IDs to avoid duplicates/overwrite
-    const existingIds = new Set(politicians.value.map(p => p.id))
-    const newPols = (allPolsData || []).map(mapPolitician).filter(p => !existingIds.has(p.id))
-    
-    politicians.value = [...politicians.value, ...newPols]
-    console.log(`Background load complete. Total politicians: ${politicians.value.length}`)
+    console.log('[fetchAll] 基本資料載入完成，候選人將按需載入')
 
   } catch (err) {
     console.error('Failed to fetch data from Supabase:', err)
@@ -247,6 +233,109 @@ function getActiveElection(): Election {
   return active[0] || elections.value[0]
 }
 
+// 按選舉載入候選人（按需載入，不一次載入全部）
+async function loadPoliticiansByElection(electionId: number): Promise<Politician[]> {
+  // 已經載入過就跳過
+  if (loadedElections.value.has(electionId)) {
+    console.log(`[loadByElection] 選舉 ${electionId} 已載入，跳過`)
+    return politicians.value.filter(p => p.electionIds?.includes(electionId))
+  }
+
+  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}`
+  console.log(`[loadByElection] 載入選舉 ${electionId} 的候選人...`)
+
+  try {
+    // 1. 先查快取
+    const cached = await getFromCache<Politician[]>(cacheKey)
+    if (cached && cached.length > 0) {
+      console.log(`[loadByElection] 從快取載入 ${cached.length} 位候選人`)
+      // 合併到全域 state（避免重複）
+      const existingIds = new Set(politicians.value.map(p => p.id))
+      const newPols = cached.filter(p => !existingIds.has(p.id))
+      politicians.value = [...politicians.value, ...newPols]
+      loadedElections.value.add(electionId)
+      return cached
+    }
+
+    // 2. 從資料庫載入（只取該選舉的候選人）
+    // 先從 politician_elections 取得該選舉的 politician_id 列表
+    const { data: peData, error: peError } = await supabase
+      .from('politician_elections')
+      .select('politician_id')
+      .eq('election_id', electionId)
+
+    if (peError) throw peError
+
+    const politicianIds = (peData || []).map(pe => pe.politician_id)
+    if (politicianIds.length === 0) {
+      console.log(`[loadByElection] 選舉 ${electionId} 無候選人`)
+      loadedElections.value.add(electionId)
+      return []
+    }
+
+    // 再從 view 取得完整資料
+    const { data, error } = await supabase
+      .from('politicians_with_elections')
+      .select('*')
+      .in('id', politicianIds)
+
+    if (error) throw error
+
+    const pols = (data || []).map(mapPolitician)
+    console.log(`[loadByElection] 從資料庫載入 ${pols.length} 位候選人`)
+
+    // 3. 存入快取
+    await setToCache(cacheKey, pols)
+
+    // 4. 合併到全域 state
+    const existingIds = new Set(politicians.value.map(p => p.id))
+    const newPols = pols.filter(p => !existingIds.has(p.id))
+    politicians.value = [...politicians.value, ...newPols]
+    loadedElections.value.add(electionId)
+
+    return pols
+  } catch (err) {
+    console.error(`[loadByElection] 載入選舉 ${electionId} 失敗:`, err)
+    throw err
+  }
+}
+
+// Force refresh politicians for a specific election
+async function refreshPoliticiansByElection(electionId: number) {
+  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}`
+  loadedElections.value.delete(electionId)
+
+  // 清除該選舉的快取
+  await setToCache(cacheKey, null)
+
+  // 重新載入
+  return loadPoliticiansByElection(electionId)
+}
+
+// Force refresh politicians from Supabase (legacy, refreshes current election)
+async function refreshPoliticians() {
+  const activeElection = getActiveElection()
+  if (activeElection) {
+    return refreshPoliticiansByElection(activeElection.id)
+  }
+  return []
+}
+
+// 根據鄉鎮區查找對應的議員選舉區
+function getElectoralDistrictByTownship(region: string, township: string, electionId: number): string | undefined {
+  const mapping = electoralDistrictAreas.value.find(
+    m => m.region === region && m.township === township && m.election_id === electionId
+  )
+  return mapping?.electoral_district
+}
+
+// 根據選舉區查找所有對應的鄉鎮區
+function getTownshipsByElectoralDistrict(region: string, electoralDistrict: string, electionId: number): string[] {
+  return electoralDistrictAreas.value
+    .filter(m => m.region === region && m.electoral_district === electoralDistrict && m.election_id === electionId)
+    .map(m => m.township)
+}
+
 export function useSupabase() {
   // Trigger fetch on first use
   if (!loaded.value && !loading.value) {
@@ -261,11 +350,19 @@ export function useSupabase() {
     categories,
     locations,
     regionStats,
+    electoralDistrictAreas,
     loading,
-
     loaded,
+    loadedElections,
+
     fetchAll,
     getElectionById,
     getActiveElection,
+    loadPoliticiansByElection,  // 新增：按選舉載入
+    refreshPoliticiansByElection,  // 新增：重新整理特定選舉
+    refreshPoliticians,
+    getPoliticianElectionData,
+    getElectoralDistrictByTownship,
+    getTownshipsByElectoralDistrict,
   }
 }
