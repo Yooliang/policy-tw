@@ -11,13 +11,25 @@ const { getActiveElection } = useSupabase()
 
 const activeElection = computed(() => getActiveElection())
 
-const navItems = computed(() => [
-  { name: '總覽', path: '/', icon: Activity },
-  { name: '政見追蹤', path: '/tracking', icon: TrendingUp },
-  { name: '智能分析', path: '/analysis', icon: FileText },
-  { name: '公民參與', path: '/community', icon: MessageSquare },
-  { name: activeElection.value.shortName, path: `/election/${activeElection.value.id}`, icon: Vote },
-])
+const navItems = computed(() => {
+  const items = [
+    { name: '總覽', path: '/', icon: Activity },
+    { name: '政見追蹤', path: '/tracking', icon: TrendingUp },
+    { name: '智能分析', path: '/analysis', icon: FileText },
+    { name: '公民參與', path: '/community', icon: MessageSquare },
+  ]
+  
+  if (activeElection.value) {
+    items.push({ 
+      name: activeElection.value.shortName, 
+      path: `/election/${activeElection.value.id}`, 
+      icon: Vote 
+    })
+  }
+  
+  return items
+})
+
 
 const isActive = (path: string) => route.path === path
 </script>

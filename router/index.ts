@@ -48,7 +48,16 @@ const router = createRouter({
       component: () => import('../pages/Donation.vue'),
     },
     {
+      path: '/admin/scraper',
+      component: () => import('../pages/AdminScraper.vue'),
+    },
+    {
+      path: '/admin/duplicates',
+      component: () => import('../pages/AdminDuplicates.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
+
       redirect: '/',
     },
   ],

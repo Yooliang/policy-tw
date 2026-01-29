@@ -11,29 +11,27 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale, Swords,
-  Building2, Mountain, Landmark, MessageCircle, Hash
+  Building2, Mountain, Landmark, MessageCircle, Hash, Loader2
 } from 'lucide-vue-next'
 
-const CATEGORY_MAP: { [key: string]: string } = {
-  'Urban Planning': '都市計畫',
-  'Welfare': '社會福利',
-  'Traffic': '交通建設',
-  'Economy': '經濟發展',
-  'Education': '教育文化',
-  'Environment': '環境保護',
-  'Justice': '公平正義',
-  'Administration': '行政革新',
-  'Political': '政治議題'
-}
+import { useGlobalState } from '../composables/useGlobalState'
+import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, loading } = useSupabase()
+const { globalRegion } = useGlobalState()
 
 const electionId = computed(() => Number(route.params.electionId))
 const election = computed(() => getElectionById(electionId.value))
 
-const selectedRegion = ref('All')
+const selectedRegion = ref(globalRegion.value)
+
+// Sync with global state
+watch(globalRegion, (newVal) => {
+  selectedRegion.value = newVal
+})
+
 const viewMode = ref<'politicians' | 'pledges' | 'issues' | 'comparison'>('politicians')
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
@@ -107,24 +105,25 @@ const comparisonPool = computed(() =>
   )
 )
 
-const politicianAId = ref(0)
-const politicianBId = ref(0)
+const politicianAId = ref<string | number>('')
+const politicianBId = ref<string | number>('')
 
 watch([() => selectedRegion.value, () => comparisonLevel.value], () => {
   if (comparisonPool.value.length > 0) {
     politicianAId.value = comparisonPool.value[0].id
     politicianBId.value = comparisonPool.value.length > 1 ? comparisonPool.value[1].id : comparisonPool.value[0].id
   } else {
-    politicianAId.value = 0
-    politicianBId.value = 0
+    politicianAId.value = ''
+    politicianBId.value = ''
   }
 }, { immediate: true })
 
-const politicianA = computed(() => politicians.value.find(c => c.id === politicianAId.value))
-const politicianB = computed(() => politicians.value.find(c => c.id === politicianBId.value))
+const politicianA = computed(() => politicians.value.find(c => String(c.id) === String(politicianAId.value)))
+const politicianB = computed(() => politicians.value.find(c => String(c.id) === String(politicianBId.value)))
 
-const getPledge = (cId: number, category: string) =>
-  policies.value.find(p => p.politicianId === cId && p.status === PolicyStatus.CAMPAIGN && (p.category === category || p.tags.includes(category)))
+const getPledge = (cId: string | number, category: string) =>
+  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && (p.category === category || p.tags.includes(category)))
+
 
 const electionLevels = [
   { type: ElectionType.MAYOR, label: '縣市長' },
@@ -164,31 +163,26 @@ const electionLevels = [
       <template #description>不僅是縣市長，我們深入記錄議員、鄉鎮代表等基層候選人的競選承諾。</template>
 
       <!-- View Mode Tabs in default slot (overlapping white bar) -->
-      <div class="flex items-center justify-between gap-4">
-        <h2 class="text-lg font-bold text-navy-900 whitespace-nowrap shrink-0">{{ election.name }}</h2>
-        <div class="flex bg-slate-100 p-1 rounded-lg shrink-0 overflow-x-auto">
-          <button @click="viewMode = 'politicians'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><LayoutGrid :size="16" /> 候選人</button>
-          <button @click="viewMode = 'pledges'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'pledges' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Megaphone :size="16" /> 競選承諾</button>
-          <button @click="viewMode = 'issues'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'issues' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Layers :size="16" /> 議題串聯</button>
-          <button @click="viewMode = 'comparison'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'comparison' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Scale :size="16" /> 政見 PK</button>
+      <div class="space-y-6">
+        <GlobalRegionSelector />
+
+        <div class="flex items-center justify-between gap-4 border-t border-slate-100 pt-6">
+          <h2 class="text-lg font-bold text-navy-900 whitespace-nowrap shrink-0">{{ election.name }}</h2>
+          <div class="flex bg-slate-100 p-1 rounded-lg shrink-0 overflow-x-auto">
+            <button @click="viewMode = 'politicians'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><LayoutGrid :size="16" /> 候選人</button>
+            <button @click="viewMode = 'pledges'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'pledges' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Megaphone :size="16" /> 競選承諾</button>
+            <button @click="viewMode = 'issues'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'issues' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Layers :size="16" /> 議題串聯</button>
+            <button @click="viewMode = 'comparison'" :class="`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'comparison' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Scale :size="16" /> 政見 PK</button>
+          </div>
         </div>
       </div>
     </Hero>
 
+
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
-      <!-- Region Selector -->
-      <div class="mb-8">
-        <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
-          <button @click="selectedRegion = 'All'" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 ${selectedRegion === 'All' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">顯示全台</button>
-          <div class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></div>
-          <button v-for="city in SIX_CAPITALS" :key="city" @click="selectedRegion = city" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 border ${selectedRegion === city ? 'bg-white text-blue-700 border-blue-200 shadow-sm' : 'text-slate-600 border-transparent hover:text-blue-600 hover:bg-white/50'}`">{{ city }}</button>
-          <div class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></div>
-          <button v-for="loc in OTHER_LOCATIONS" :key="loc" @click="selectedRegion = loc" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 ${selectedRegion === loc ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`">{{ loc }}</button>
-        </div>
-      </div>
-
       <!-- VIEW: Politicians -->
+
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <PoliticianGrid :politicians="mayorPoliticians" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
         <PoliticianGrid :politicians="councilorPoliticians" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
@@ -215,7 +209,8 @@ const electionLevels = [
         <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar">
           <button @click="selectedIssueCategory = 'All'" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 ${selectedIssueCategory === 'All' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">全部議題</button>
           <div class="w-px h-6 bg-slate-300 mx-1 flex-shrink-0"></div>
-          <button v-for="category in categories" :key="category" @click="selectedIssueCategory = category" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 ${selectedIssueCategory === category ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`">{{ CATEGORY_MAP[category] || category }}</button>
+          <button v-for="category in categories" :key="category" @click="selectedIssueCategory = category" :class="`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 ${selectedIssueCategory === category ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`">{{ category }}</button>
+
         </div>
 
         <div v-if="selectedRegion === 'All'" class="text-center py-20 bg-white border border-dashed border-slate-300 rounded-xl">
@@ -272,7 +267,8 @@ const electionLevels = [
             <div v-if="getPledge(politicianAId, category) || getPledge(politicianBId, category)" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div class="bg-slate-50 px-6 py-3 border-b border-slate-100 flex items-center gap-2">
                 <span class="w-2 h-6 bg-navy-800 rounded-sm"></span>
-                <h3 class="font-bold text-navy-900">{{ CATEGORY_MAP[category] || category }}</h3>
+                <h3 class="font-bold text-navy-900">{{ category }}</h3>
+
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100">
                 <div class="p-6 hover:bg-blue-50/20 transition-colors">
@@ -294,6 +290,14 @@ const electionLevels = [
           </template>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Loading state -->
+  <div v-else-if="loading" class="bg-slate-50 min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <Loader2 :size="48" class="mx-auto mb-4 text-blue-500 animate-spin" />
+      <p class="text-slate-500">載入中...</p>
     </div>
   </div>
 

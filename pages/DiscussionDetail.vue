@@ -6,12 +6,13 @@ import StatusBadge from '../components/StatusBadge.vue'
 import { useSupabase } from '../composables/useSupabase'
 import {
   MessageSquare, ThumbsUp, Eye, ArrowLeft, Bookmark,
-  Clock, TrendingUp, ChevronDown, ChevronUp,
+  Clock, TrendingUp, ChevronDown, ChevronUp, Loader2
 } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
-const { discussions, policies } = useSupabase()
+const { discussions, policies, loading } = useSupabase()
+
 
 const discussionId = computed(() => Number(route.params.discussionId))
 const discussion = computed(() => discussions.value.find(d => d.id === discussionId.value))
@@ -293,8 +294,17 @@ function toggleReplies(commentId: number) {
       </div>
     </template>
 
+    <!-- Loading -->
+    <template v-else-if="loading">
+      <div class="flex flex-col items-center justify-center min-h-screen text-slate-400">
+        <Loader2 :size="48" class="mb-4 text-blue-500 animate-spin" />
+        <p class="text-slate-500">載入中...</p>
+      </div>
+    </template>
+
     <!-- Not found -->
     <template v-else>
+
       <div class="flex flex-col items-center justify-center min-h-[60vh] text-slate-400">
         <MessageSquare :size="64" class="mb-4 opacity-30" />
         <p class="text-xl font-bold mb-2">找不到此討論</p>

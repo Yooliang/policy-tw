@@ -5,14 +5,17 @@ import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
-import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2 } from 'lucide-vue-next'
+
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies } = useSupabase()
+const { politicians, policies, loading } = useSupabase()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
-const politician = computed(() => politicians.value.find(c => c.id === Number(route.params.politicianId)))
+
+const politician = computed(() => politicians.value.find(c => c.id === String(route.params.politicianId)))
+
 const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
 const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
 </script>
@@ -37,7 +40,11 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
               <h1 class="text-4xl font-bold text-white">{{ politician.name }}</h1>
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">{{ politician.position }}</span>
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
+              <span v-if="politician.birthYear" class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">
+                {{ politician.birthYear }} 年生 ({{ new Date().getFullYear() - politician.birthYear }} 歲)
+              </span>
             </div>
+
             <h2 v-if="politician.slogan" class="text-xl md:text-2xl font-bold text-amber-400 mb-4 italic">"{{ politician.slogan }}"</h2>
             <p class="text-violet-100 max-w-2xl leading-relaxed mb-6 text-lg">{{ politician.bio || "暫無簡介。" }}</p>
           </div>
@@ -115,7 +122,12 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
 
               <div class="pt-4 border-t border-slate-100">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
+                <div v-if="politician.educationLevel" class="mb-4 bg-violet-50 p-3 rounded-lg border border-violet-100">
+                  <p class="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-1">最高學歷</p>
+                  <p class="text-violet-700 font-bold">{{ politician.educationLevel }}</p>
+                </div>
                 <ul class="space-y-3">
+
                   <template v-if="politician.education?.length">
                     <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
                   </template>
@@ -128,5 +140,25 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
       </div>
     </div>
   </div>
-  <div v-else class="p-10 text-center">找不到候選人</div>
+  
+  <!-- Loading state -->
+  <div v-else-if="loading" class="bg-slate-50 min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <Loader2 :size="48" class="mx-auto mb-4 text-violet-500 animate-spin" />
+      <p class="text-slate-500">載入中...</p>
+    </div>
+  </div>
+
+  <!-- Not found state -->
+  <div v-else class="bg-slate-50 min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <User :size="64" class="mx-auto mb-4 text-slate-300" />
+      <h2 class="text-2xl font-bold text-navy-900 mb-2">找不到候選人</h2>
+      <p class="text-slate-500">請確認網址是否正確，或候選人資料尚未建立。</p>
+      <button @click="router.push('/')" class="mt-6 text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 justify-center mx-auto">
+        <ChevronLeft :size="18" /> 返回首頁
+      </button>
+    </div>
+  </div>
 </template>
+

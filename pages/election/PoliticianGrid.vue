@@ -12,8 +12,9 @@ defineProps<{
 const router = useRouter()
 const { policies } = useSupabase()
 
-const getPledgeCount = (politicianId: number) =>
-  policies.value.filter(p => p.politicianId === politicianId && p.status === PolicyStatus.CAMPAIGN).length
+const getPledgeCount = (politicianId: string | number) =>
+  policies.value.filter(p => String(p.politicianId) === String(politicianId) && p.status === PolicyStatus.CAMPAIGN).length
+
 </script>
 
 <template>

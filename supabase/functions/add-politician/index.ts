@@ -8,178 +8,112 @@ const corsHeaders = {
 
 interface PoliticianInput {
   name: string;
-  party: "國民黨" | "民進黨" | "民眾黨" | "無黨籍";
+  party: string;
   status?: "incumbent" | "politician" | "potential" | "former";
   electionType?: string;
   position: string;
   region: string;
   subRegion?: string;
-  avatarUrl?: string;
-  slogan?: string;
-  bio?: string;
-  education?: string[];
-  experience?: string[];
-  electionIds?: number[];
-}
-
-interface PolicyInput {
-  title: string;
-  description: string;
-  category: string;
-  status?: string;
-  proposedDate: string;
-  tags?: string[];
-  supportCount?: number;
-}
-
-interface RequestBody {
-  politician: PoliticianInput;
-  policies?: PolicyInput[];
+  birthYear?: number;
+  educationLevel?: string;
+  electionId?: number; // 指定要關聯的選舉 ID
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const body: RequestBody = await req.json();
-    const { politician, policies } = body;
+    const body = await req.json();
+    const inputList = body.politicians || (body.politician ? [body.politician] : []);
+    const defaultElectionId = body.electionId || 2026; // 預設 2026
 
-    // Validate required fields
-    if (!politician?.name || !politician?.party || !politician?.position || !politician?.region) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields: name, party, position, region" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const results = { added: 0, updated: 0, exists: 0, failed: 0, errors: [] as string[] };
 
-    // Insert politician
-    const { data: politicianData, error: politicianError } = await supabase
-      .from("politicians")
-      .insert({
-        name: politician.name,
-        party: politician.party,
-        status: politician.status || "politician",
-        election_type: politician.electionType || "縣市長",
-        position: politician.position,
-        region: politician.region,
-        sub_region: politician.subRegion,
-        avatar_url: politician.avatarUrl,
-        slogan: politician.slogan,
-        bio: politician.bio,
-        education: politician.education,
-        experience: politician.experience,
-      })
-      .select()
-      .single();
+    for (const p of inputList) {
+      try {
+        const targetElectionId = p.electionId || defaultElectionId;
 
-    if (politicianError) {
-      return new Response(
-        JSON.stringify({ error: politicianError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+        // 1. 查找同名人員
+        const { data: candidates } = await supabase
+          .from("politicians")
+          .select("*")
+          .eq("name", p.name);
 
-    const politicianId = politicianData.id;
+        let existing = null;
+        if (candidates && candidates.length > 0) {
+          if (p.birthYear) {
+            existing = candidates.find(c => c.birth_year === p.birthYear) || 
+                       candidates.find(c => c.birth_year === null);
+          } else {
+            existing = candidates[0];
+          }
+        }
 
-    // Link to elections if provided
-    if (politician.electionIds?.length) {
-      const electionLinks = politician.electionIds.map((electionId) => ({
-        politician_id: politicianId,
-        election_id: electionId,
-      }));
-      await supabase.from("politician_elections").insert(electionLinks);
-    } else {
-      // Default: link to 2026 election (id=1)
-      await supabase.from("politician_elections").insert({
-        politician_id: politicianId,
-        election_id: 1,
-      });
-    }
+        if (existing) {
+          // 如果找到了，且原本出生年為空，則更新它
+          if (!existing.birth_year && p.birthYear) {
+            await supabase.from("politicians")
+              .update({ 
+                birth_year: p.birthYear, 
+                education_level: p.educationLevel || existing.education_level,
+                sub_region: p.subRegion || existing.sub_region
+              })
+              .eq("id", existing.id);
+            results.updated++;
+          } else {
+            results.exists++;
+          }
+          
+          // 確保有關聯到該選舉
+          await supabase.from("politician_elections").upsert({
+            politician_id: existing.id,
+            election_id: targetElectionId,
+          }, { onConflict: 'politician_id,election_id' });
 
-    // Insert policies if provided
-    let insertedPolicies: any[] = [];
-    if (policies?.length) {
-      const today = new Date().toISOString().slice(0, 10);
-      const policyRows = policies.map((p) => ({
-        politician_id: politicianId,
-        title: p.title,
-        description: p.description,
-        category: p.category,
-        status: p.status || "Campaign Pledge",
-        proposed_date: p.proposedDate || today,
-        last_updated: p.proposedDate || today,
-        progress: 0,
-        tags: p.tags || [],
-        support_count: p.supportCount || 0,
-      }));
+          continue;
+        }
 
-      const { data: policyData, error: policyError } = await supabase
-        .from("policies")
-        .insert(policyRows)
-        .select();
+        // 2. 真正的新增
+        const { data, error } = await supabase
+          .from("politicians")
+          .insert({
+            name: p.name,
+            party: p.party || "無黨籍",
+            status: p.status || "politician",
+            election_type: p.electionType || "其他",
+            position: p.position || "",
+            region: p.region || "未知",
+            sub_region: p.subRegion || null,
+            birth_year: p.birthYear || null,
+            education_level: p.educationLevel || null
+          })
+          .select()
+          .single();
 
-      if (policyError) {
-        return new Response(
-          JSON.stringify({
-            error: policyError.message,
-            politicianId,
-            message: "Politician created but policies failed"
-          }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        if (error) throw error;
+
+        // 3. 關聯選舉
+        await supabase.from("politician_elections").insert({
+          politician_id: data.id,
+          election_id: targetElectionId,
+        });
+        
+        results.added++;
+      } catch (e: any) {
+        results.failed++;
+        results.errors.push(`${p.name}: ${e.message}`);
       }
-      insertedPolicies = policyData || [];
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        politician: politicianData,
-        policies: insertedPolicies,
-        message: `Created politician "${politician.name}" with ${insertedPolicies.length} policies`,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ success: true, ...results }), { 
+      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
 
-  } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }
 });
-
-/* 使用範例:
-
-curl -i --location --request POST 'https://<project-ref>.supabase.co/functions/v1/add-politician' \
-  --header 'Authorization: Bearer <anon-key>' \
-  --header 'Content-Type: application/json' \
-  --data '{
-    "politician": {
-      "name": "王小明",
-      "party": "民進黨",
-      "status": "politician",
-      "position": "立法委員",
-      "region": "台北市",
-      "avatarUrl": "https://example.com/avatar.jpg"
-    },
-    "policies": [
-      {
-        "title": "推動綠能發展",
-        "description": "在台北市推動太陽能與風力發電",
-        "category": "Environment",
-        "proposedDate": "2026-01-28",
-        "tags": ["綠能", "環保", "永續"],
-        "supportCount": 5000
-      }
-    ]
-  }'
-
-*/

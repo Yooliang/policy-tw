@@ -13,7 +13,7 @@ defineProps<{
   <div :class="`relative ${className || ''}`">
     <!-- Dark Section -->
     <section
-      class="bg-navy-900 text-white relative overflow-hidden pt-20 pb-24 md:pb-32 max-h-[370px]"
+      class="bg-navy-900 text-white relative overflow-hidden pt-20 pb-24 md:pb-32 max-h-[280px]"
       :style="backgroundImage ? {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: 'cover',
@@ -33,11 +33,8 @@ defineProps<{
 
         <!-- Content Area -->
         <div :class="fullWidth ? '' : 'max-w-3xl'">
-          <div v-if="$slots.badge" class="inline-flex items-center gap-2 bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-[10px] font-black mb-4 border border-blue-500/30 uppercase tracking-widest">
-            <slot name="badge" />
-          </div>
-
           <h1 class="text-4xl md:text-5xl lg:text-6xl font-black mb-6 tracking-tight leading-tight">
+
             <slot name="title" />
           </h1>
 
@@ -71,5 +68,6 @@ defineProps<{
         </div>
       </div>
     </div>
+
   </div>
 </template>

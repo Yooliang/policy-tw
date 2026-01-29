@@ -3,8 +3,10 @@ import { ref, computed } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
+import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+
 
 const router = useRouter()
 const { policies, politicians } = useSupabase()
@@ -12,7 +14,7 @@ const searchTerm = ref('')
 
 const relayCases = computed(() => {
   const cases: any[] = []
-  const visitedPolicyIds = new Set<number>()
+  const visitedPolicyIds = new Set<string>()
 
   policies.value.forEach(policy => {
     if (visitedPolicyIds.has(policy.id)) return
@@ -22,6 +24,7 @@ const relayCases = computed(() => {
       chain.forEach(p => visitedPolicyIds.add(p.id))
       cases.push({
         id: `case-${policy.id}`,
+
         mainTitle: policy.title.includes('園區') ? '高屏產業聚落接力案' : policy.title,
         category: policy.category,
         policies: chain,
@@ -57,8 +60,11 @@ const relayCases = computed(() => {
       <template #description>這不是單一政見的陳列。我們將跨任期、跨黨派的重大建設案進行聚合，<br class="hidden lg:block" />分析每一根治理接力棒的傳承品質，提供具備行政歷史深度的稽核數據。</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
-        <div class="relative text-left">
-          <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
+      <div class="space-y-6">
+        <GlobalRegionSelector />
+
+        <div class="relative text-left border-t border-slate-100 pt-6">
+          <Search class="absolute left-4 top-[calc(50%+12px)] -translate-y-1/2 text-slate-400" :size="20" />
           <input
             v-model="searchTerm"
             type="text"
@@ -66,7 +72,9 @@ const relayCases = computed(() => {
             class="w-full pl-12 pr-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 text-navy-900 font-bold"
           />
         </div>
+      </div>
     </Hero>
+
 
     <div class="max-w-7xl mx-auto px-4 pt-20">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8">

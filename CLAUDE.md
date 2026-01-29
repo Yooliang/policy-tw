@@ -86,3 +86,24 @@ VITE_SUPABASE_ANON_KEY=<anon-key>
 - `constants.ts` retained as reference only (not imported)
 - RLS enabled on all tables with public read policies
 - Migrations in `supabase/migrations/`, seed in `supabase/seed.sql`
+
+## Edge Functions
+
+Located in `supabase/functions/`:
+
+- **`add-politician`** — Add new politician with optional policies
+- **`add-policy`** — Add new policy to existing politician
+- **`update-avatar`** — Batch update politician avatar URLs
+- **`update-politician`** — Update any field of a politician (bio, slogan, etc.)
+
+
+Deploy with: `npx supabase functions deploy <function-name>`
+
+## Claude Skills
+
+Located in `.claude/skills/`:
+
+- **`/find-avatar [name]`** — Find politician avatar URLs from Wikipedia
+  - Searches Wikipedia API for politician images
+  - Supports batch queries and `--all` flag for missing avatars
+  - Can update database via Edge Function

@@ -21,12 +21,13 @@ const loadCheckpoint = () => {
 const toggleCheckpoint = (e: Event) => {
   e.stopPropagation()
   const checkpoints = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
-  let newCheckpoints: number[]
+  let newCheckpoints: string[]
   if (isCheckpointed.value) {
-    newCheckpoints = checkpoints.filter((id: number) => id !== props.policy.id)
+    newCheckpoints = checkpoints.filter((id: string) => id !== props.policy.id)
   } else {
     newCheckpoints = [...checkpoints, props.policy.id]
   }
+
   localStorage.setItem('zhengjian_checkpoints', JSON.stringify(newCheckpoints))
   isCheckpointed.value = !isCheckpointed.value
   window.dispatchEvent(new Event('checkpoints_updated'))

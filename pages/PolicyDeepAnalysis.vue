@@ -17,18 +17,18 @@ const router = useRouter()
 const { policies, politicians } = useSupabase()
 const sourceUrl = ref('')
 
-const policyId = computed(() => Number(route.params.policyId))
-const selectedPolicy = computed(() => policies.value.find(p => p.id === policyId.value))
+const policyId = computed(() => route.params.policyId)
+const selectedPolicy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 
 const relayChain = computed(() => {
   if (!selectedPolicy.value) return []
-  const visited = new Set<number>()
+  const visited = new Set<string>()
   const queue = [selectedPolicy.value.id]
   while (queue.length > 0) {
     const id = queue.shift()!
     if (visited.has(id)) continue
     visited.add(id)
-    const p = policies.value.find(pol => pol.id === id)
+    const p = policies.value.find(pol => String(pol.id) === String(id))
     if (!p) continue
     // follow outgoing links
     p.relatedPolicyIds?.forEach(rid => { if (!visited.has(rid)) queue.push(rid) })
@@ -41,11 +41,11 @@ const relayChain = computed(() => {
     .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
 })
 
-const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => c.id === selectedPolicy.value!.politicianId) : null)
+const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => String(c.id) === String(selectedPolicy.value!.politicianId)) : null)
 
 const allPoliticians = computed(() => {
-  const ids = new Set(relayChain.value.map(p => p.politicianId))
-  return politicians.value.filter(c => ids.has(c.id))
+  const ids = new Set(relayChain.value.map(p => String(p.politicianId)))
+  return politicians.value.filter(c => ids.has(String(c.id)))
 })
 
 const isLevelActiveForChain = (levelType: ElectionType, idx: number) => {
@@ -67,7 +67,7 @@ const LEVEL_ORDER: Record<string, number> = {
 const allLogs = computed(() => {
   return relayChain.value
     .flatMap(p => {
-      const c = politicians.value.find(c => c.id === p.politicianId)
+      const c = politicians.value.find(c => String(c.id) === String(p.politicianId))
       const level = c?.electionType ? (LEVEL_ORDER[c.electionType] ?? 0) : 0
       return p.logs.map(log => ({
         ...log,
@@ -76,7 +76,7 @@ const allLogs = computed(() => {
         politicianId: p.politicianId,
         politicianName: c?.name || '',
         politicianAvatar: c?.avatarUrl || '',
-        isSelected: p.id === policyId.value,
+        isSelected: String(p.id) === String(policyId.value),
         level,
       }))
     })
@@ -104,9 +104,10 @@ const isLevelActive = (levelType: ElectionType, idx: number) => {
   return (politician.value.electionType === levelType) || (politician.value.electionType === ElectionType.MAYOR && idx === 0)
 }
 
-const isPoliticianSelected = (politicianId: number) => {
-  return relayChain.value.some(p => p.politicianId === politicianId && p.id === policyId.value)
+const isPoliticianSelected = (politicianId: string | number) => {
+  return relayChain.value.some(p => String(p.politicianId) === String(politicianId) && String(p.id) === String(policyId.value))
 }
+
 </script>
 
 <template>
@@ -114,12 +115,12 @@ const isPoliticianSelected = (politicianId: number) => {
 
     <Hero :back-action="() => router.push('/analysis')">
       <template #icon><Database :size="400" class="text-blue-500" /></template>
-      <template #badge><Sparkles :size="12" /> AI 政策歷史追蹤</template>
       <template #title>{{ selectedPolicy.title }}</template>
       <template #description>
         超越單一任期。AI 自動偵測該案件在行政體系中的「接力軌跡」，<br class="hidden lg:block" />
         確保治理透明度與政策延續性，讓每一份行政努力都能被溯源。
       </template>
+
 
       <div class="flex flex-col md:flex-row gap-2">
         <div class="flex-1 relative text-left">
@@ -138,8 +139,9 @@ const isPoliticianSelected = (politicianId: number) => {
       </div>
     </Hero>
 
-    <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-20">
       <div class="bg-white rounded-[40px] border border-slate-200 shadow-2xl overflow-hidden flex flex-col min-h-[950px]">
+
 
         <!-- TOP AXIS: Timeline -->
         <div class="border-b border-slate-100 bg-slate-50/90 sticky top-0 z-30 backdrop-blur-md">
@@ -256,10 +258,11 @@ const isPoliticianSelected = (politicianId: number) => {
           </div>
 
           <!-- RIGHT AXIS -->
-          <div class="w-[480px] bg-slate-50/50 p-12 flex flex-col border-l border-slate-100 text-left">
+          <div class="w-80 lg:w-96 bg-slate-50/50 p-8 flex flex-col border-l border-slate-100 text-left">
 
             <div class="space-y-6 relative flex-1">
-              <div class="absolute left-[38px] top-8 bottom-8 w-2 bg-slate-200/50 rounded-full"></div>
+              <div class="absolute left-[22px] top-8 bottom-8 w-2 bg-slate-200/50 rounded-full"></div>
+
 
               <div
                 v-for="(level, idx) in HIERARCHY_LEVELS"

@@ -42,11 +42,11 @@ export enum PoliticianStatus {
 }
 
 export interface Politician {
-  id: number;
+  id: string; // Changed from number to UUID string
   name: string;
-  party: PoliticalParty;
+  party: string; // Changed from PoliticalParty to string for flexibility
   status?: PoliticianStatus;
-  electionType?: ElectionType;
+  electionType?: string; // Changed from ElectionType to string for flexibility
   position: string;
   avatarUrl?: string;
   region: string;
@@ -54,9 +54,12 @@ export interface Politician {
   electionIds?: number[];
   slogan?: string;
   bio?: string;
+  birthYear?: number;
+  educationLevel?: string;
   education?: string[];
   experience?: string[];
 }
+
 
 export interface TrackingLog {
   id: number;
@@ -66,9 +69,11 @@ export interface TrackingLog {
 }
 
 export interface Policy {
-  id: number;
-  politicianId: number;
+  id: string; // Changed from number to UUID string
+  politicianId: string; // Changed from number to UUID string
+
   title: string;
+
   description: string;
   category: string; // e.g., "Traffic", "Welfare"
   status: PolicyStatus;
@@ -79,8 +84,9 @@ export interface Policy {
   logs: TrackingLog[];
   aiAnalysis?: string; // Daily summary
   supportCount?: number; // Only for Campaign Pledges
-  relatedPolicyIds?: number[]; // IDs of predecessor or successor policies (Cross-term tracking)
+  relatedPolicyIds?: string[]; // IDs of predecessor or successor policies (Cross-term tracking)
 }
+
 
 export interface DonationMethod {
   id: string;
@@ -115,8 +121,9 @@ export interface DiscussionComment {
 
 export interface Discussion {
   id: number;
-  policyId: number;
+  policyId: string; // Changed to UUID string
   policyTitle: string;
+
   author: DiscussionAuthor;
   title: string;
   content: string;

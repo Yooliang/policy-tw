@@ -5,22 +5,25 @@ import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2 } from 'lucide-vue-next'
+
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians } = useSupabase()
+const { policies, politicians, loading } = useSupabase()
+
 const hasVoted = ref(false)
 
-const policyId = computed(() => Number(route.params.policyId))
-const policy = computed(() => policies.value.find(p => p.id === policyId.value))
-const politician = computed(() => policy.value ? politicians.value.find(c => c.id === policy.value!.politicianId) : null)
+const policyId = computed(() => route.params.policyId)
+const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
+const politician = computed(() => policy.value ? politicians.value.find(c => String(c.id) === String(policy.value!.politicianId)) : null)
 
 const otherPolicies = computed(() =>
   politician.value
-    ? policies.value.filter(p => p.politicianId === politician.value!.id && p.id !== policy.value?.id).slice(0, 3)
+    ? policies.value.filter(p => String(p.politicianId) === String(politician.value!.id) && p.id !== policy.value?.id).slice(0, 3)
     : []
 )
+
 
 const policyChain = computed(() => {
   if (!policy.value?.relatedPolicyIds) return []
@@ -302,11 +305,29 @@ const handleVote = () => {
     </div>
   </div>
 
-  <div v-else class="min-h-screen flex items-center justify-center bg-slate-50">
+  <!-- Loading state -->
+  <div v-else-if="loading" class="bg-slate-50 min-h-screen flex items-center justify-center">
     <div class="text-center">
+      <Loader2 :size="48" class="mx-auto mb-4 text-blue-500 animate-spin" />
+      <p class="text-slate-500">載入中...</p>
+    </div>
+  </div>
+
+  <!-- Not found state -->
+  <div v-else class="min-h-screen flex items-center justify-center bg-slate-50">
+    <div class="text-center px-4">
+      <FileText :size="64" class="mx-auto mb-4 text-slate-300" />
       <h2 class="text-2xl font-bold text-navy-900 mb-2">找不到該政見</h2>
-      <p class="text-slate-500 mb-4">該政見可能已被移除或連結錯誤。</p>
-      <button @click="router.push('/tracking')" class="text-blue-600 hover:text-blue-800 font-medium">返回列表</button>
+      <p class="text-slate-500 mb-6">該政見可能已被移除或連結錯誤。</p>
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <button @click="router.push('/tracking')" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all">
+          返回追蹤列表
+        </button>
+        <button @click="router.push('/')" class="text-slate-500 hover:text-navy-900 font-medium flex items-center gap-1">
+          <ChevronLeft :size="18" /> 返回首頁
+        </button>
+      </div>
     </div>
   </div>
 </template>
+

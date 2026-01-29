@@ -4,7 +4,7 @@ import { useSupabase } from '../../composables/useSupabase'
 import type { Politician } from '../../types'
 
 const props = defineProps<{
-  modelValue: number
+  modelValue: string | number
   label: string
   ringColor: string
   selectedRegion: string
@@ -12,12 +12,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: number]
+  'update:modelValue': [value: string | number]
 }>()
 
 const { politicians, locations } = useSupabase()
 
-const selectedPolitician = computed(() => politicians.value.find(c => c.id === props.modelValue))
+const selectedPolitician = computed(() => politicians.value.find(c => String(c.id) === String(props.modelValue)))
 </script>
 
 <template>
@@ -29,7 +29,8 @@ const selectedPolitician = computed(() => politicians.value.find(c => c.id === p
     <div class="relative">
       <select
         :value="modelValue"
-        @change="emit('update:modelValue', Number(($event.target as HTMLSelectElement).value))"
+        @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
+
         :class="`w-full p-3 border border-slate-300 rounded-lg font-bold text-navy-900 shadow-sm focus:ring-2 focus:ring-${ringColor}`"
       >
         <option v-if="comparisonPool.length === 0" value="">無符合條件候選人</option>
