@@ -68,32 +68,31 @@ const filteredPolicies = computed(() => {
       <div class="space-y-6">
         <GlobalRegionSelector />
 
-        <div class="flex flex-col lg:flex-row gap-6 items-center border-t border-slate-100 pt-6">
-            <!-- search input -->
-          <div class="relative flex-1 w-full text-left flex items-center">
+        <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+          <!-- 搜尋框 -->
+          <div class="relative flex-1 w-full">
             <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
             <input
               v-model="searchTerm"
               type="text"
               placeholder="搜尋關鍵字（如：長照、捷運、產業園區）..."
-              class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-navy-900 font-bold placeholder:text-slate-400"
+              class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400"
             />
           </div>
-          <!-- search input end -->
 
+          <!-- 按鈕群組 -->
           <div class="flex flex-wrap lg:flex-nowrap gap-3 w-full lg:w-auto">
             <button
               @click="showCheckpointsOnly = !showCheckpointsOnly"
-              :class="`flex items-center gap-2 px-5 py-2.5 rounded-xl border transition-all font-bold text-sm shrink-0 ${showCheckpointsOnly ? 'bg-amber-500 text-white border-amber-400 shadow-lg shadow-amber-500/20' : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300 hover:text-amber-500'}`"
+              :class="`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all font-bold text-sm whitespace-nowrap ${showCheckpointsOnly ? 'bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-400 hover:text-amber-600'}`"
             >
-              <Star :size="18" :fill="showCheckpointsOnly ? 'currentColor' : 'none'" />
+              <Star :size="16" :fill="showCheckpointsOnly ? 'currentColor' : 'none'" />
               {{ showCheckpointsOnly ? '已顯示檢核點' : '我的檢核點' }}
             </button>
 
-            <div class="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100 flex-1 min-w-[140px]">
-              <Filter :size="16" class="text-slate-400" />
-              <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">類別</span>
-              <select v-model="selectedCategory" class="bg-transparent border-none text-sm font-bold text-navy-900 focus:ring-0 cursor-pointer w-full">
+            <div class="flex items-center gap-2 px-4 py-2.5 bg-white rounded-xl border border-slate-200 min-w-[160px]">
+              <Filter :size="16" class="text-slate-400 shrink-0" />
+              <select v-model="selectedCategory" class="bg-transparent border-none text-sm font-bold text-navy-900 focus:ring-0 cursor-pointer flex-1 min-w-0">
                 <option value="All">全部類別</option>
                 <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
               </select>

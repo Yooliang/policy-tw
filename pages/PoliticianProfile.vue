@@ -1,18 +1,29 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { useIndexedDB } from '../composables/useIndexedDB'
 import { PolicyStatus } from '../types'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2 } from 'lucide-vue-next'
 
-
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, loading } = useSupabase()
+const { politicians, policies, loading, refreshPoliticians } = useSupabase()
+const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
+
+// Check cache age on mount, refresh if older than 1 hour
+const ONE_HOUR = 60 * 60 * 1000
+onMounted(async () => {
+  const cacheTimestamp = await getCacheTimestamp('politicians_all')
+  if (cacheTimestamp && Date.now() - cacheTimestamp > ONE_HOUR) {
+    console.log('Cache older than 1 hour, refreshing politicians...')
+    refreshPoliticians()
+  }
+})
 
 
 const politician = computed(() => politicians.value.find(c => c.id === String(route.params.politicianId)))

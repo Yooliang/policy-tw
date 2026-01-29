@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useGlobalState } from '../composables/useGlobalState'
 import { Globe, ChevronUp, ChevronDown } from 'lucide-vue-next'
 
-const { globalRegion, setGlobalRegion } = useGlobalState()
-const expanded = ref(false)
+const { globalRegion, setGlobalRegion, regionSelectorExpanded, toggleRegionSelectorExpanded } = useGlobalState()
 
 const specialMunicipalities = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
 const group1 = ['基隆市', '新竹市', '新竹縣', '苗栗縣', '彰化縣', '南投縣', '雲林縣', '嘉義市']
@@ -45,23 +43,23 @@ const getBtnClass = (region: string) => {
         </button>
         <div class="hidden md:flex col-span-2 justify-end items-center gap-2">
           <span
-            v-if="!expanded && [...group1, ...group2].includes(globalRegion)"
+            v-if="!regionSelectorExpanded && [...group1, ...group2].includes(globalRegion)"
             class="text-xs font-black text-blue-600"
           >
             {{ globalRegion }}
           </span>
           <button
-            @click="expanded = !expanded"
+            @click="toggleRegionSelectorExpanded()"
             class="px-3 h-9 rounded-xl border border-transparent bg-slate-50 text-slate-400 hover:bg-white hover:border-blue-300 hover:text-blue-600 transition-all flex items-center justify-center"
           >
-            <ChevronUp v-if="expanded" :size="16" />
+            <ChevronUp v-if="regionSelectorExpanded" :size="16" />
             <ChevronDown v-else :size="16" />
           </button>
         </div>
       </div>
 
       <!-- Row 2: Group 1 (8) -->
-      <div v-show="expanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
+      <div v-show="regionSelectorExpanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
         <button
           v-for="city in group1"
           :key="city"
@@ -73,7 +71,7 @@ const getBtnClass = (region: string) => {
       </div>
 
       <!-- Row 3: Group 2 (8) -->
-      <div v-show="expanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
+      <div v-show="regionSelectorExpanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
         <button
           v-for="city in group2"
           :key="city"

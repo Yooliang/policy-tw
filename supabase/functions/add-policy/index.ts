@@ -9,6 +9,7 @@ const corsHeaders = {
 interface PolicyInput {
   politicianId?: number;
   politicianName?: string; // Alternative: lookup by name
+  electionId?: number; // Election this policy belongs to
   title: string;
   description: string;
   category: string;
@@ -92,6 +93,7 @@ Deno.serve(async (req) => {
         .from("policies")
         .insert({
           politician_id: politicianId,
+          election_id: input.electionId || null,
           title: input.title,
           description: input.description,
           category: input.category,

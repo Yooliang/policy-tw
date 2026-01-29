@@ -28,11 +28,14 @@ Deno.serve(async (req) => {
         p_status: p.status || "politician",
         p_election_type: p.electionType || "其他",
         p_position: p.position || "",
+        p_current_position: p.currentPosition || null,
         p_region: p.region || "未知",
         p_sub_region: p.subRegion || null,
         p_village: p.village || null,
         p_birth_year: p.birthYear || null,
         p_education_level: p.educationLevel || null,
+        p_avatar_url: p.avatarUrl || null,
+        p_slogan: p.slogan || null,
         p_election_id: p.electionId || defaultElectionId
       });
 

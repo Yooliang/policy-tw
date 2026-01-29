@@ -129,23 +129,24 @@ function getCommentCount(post: Discussion) {
         <div class="space-y-6">
           <GlobalRegionSelector />
 
-          <div class="flex flex-col lg:flex-row gap-6 items-center border-t border-slate-100 pt-6">
-            <div class="relative flex-1 w-full text-left">
+          <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+            <!-- 搜尋框 -->
+            <div class="relative flex-1 w-full">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
-              <input v-model="searchQuery" type="text" placeholder="搜尋討論..." class="w-full pl-12 pr-4 py-3.5 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 text-navy-900 font-bold placeholder:text-slate-400" />
+              <input v-model="searchQuery" type="text" placeholder="搜尋討論..." class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400" />
             </div>
 
+            <!-- 按鈕群組 -->
             <div class="flex flex-wrap lg:flex-nowrap gap-3 w-full lg:w-auto">
-              <button class="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-500 shadow-lg shadow-blue-500/20 transition-all font-bold text-sm shrink-0">
-                <PenTool :size="18" />
+              <button class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 shadow-lg shadow-blue-500/20 transition-all font-bold text-sm whitespace-nowrap">
+                <PenTool :size="16" />
                 發起新討論
               </button>
-              <button class="flex items-center gap-2 px-5 py-3 rounded-xl bg-white text-slate-500 border border-slate-200 hover:border-blue-300 hover:text-blue-500 transition-all font-bold text-sm shrink-0">
-                查看熱門提案
-              </button>
-              <div class="flex gap-2 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100">
-                <button @click="activeTab = 'hot'" :class="`px-3 py-1 rounded-lg font-bold text-sm transition-all ${activeTab === 'hot' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-blue-500'}`">熱門討論</button>
-                <button @click="activeTab = 'latest'" :class="`px-3 py-1 rounded-lg font-bold text-sm transition-all ${activeTab === 'latest' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-blue-500'}`">最新發表</button>
+
+              <!-- 頁籤 -->
+              <div class="flex bg-slate-100 p-1 rounded-xl">
+                <button @click="activeTab = 'hot'" :class="`px-4 py-2 rounded-lg font-bold text-sm transition-all whitespace-nowrap ${activeTab === 'hot' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">熱門討論</button>
+                <button @click="activeTab = 'latest'" :class="`px-4 py-2 rounded-lg font-bold text-sm transition-all whitespace-nowrap ${activeTab === 'latest' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">最新發表</button>
               </div>
             </div>
           </div>

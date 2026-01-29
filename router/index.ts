@@ -48,12 +48,20 @@ const router = createRouter({
       component: () => import('../pages/Donation.vue'),
     },
     {
+      path: '/regional-data',
+      component: () => import('../pages/RegionalData.vue'),
+    },
+    {
       path: '/admin/scraper',
       component: () => import('../pages/AdminScraper.vue'),
     },
     {
       path: '/admin/duplicates',
       component: () => import('../pages/AdminDuplicates.vue'),
+    },
+    {
+      path: '/auth/callback',
+      component: () => import('../pages/AuthCallback.vue'),
     },
     {
       path: '/:pathMatch(.*)*',

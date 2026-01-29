@@ -15,6 +15,8 @@ export enum PoliticalParty {
 }
 
 export enum ElectionType {
+  PRESIDENT = '總統副總統',
+  LEGISLATOR = '立法委員',
   MAYOR = '縣市長',
   COUNCILOR = '縣市議員',
   TOWNSHIP_MAYOR = '鄉鎮市長',
@@ -34,6 +36,26 @@ export interface Election {
   types: ElectionType[];
 }
 
+// Normalized region data
+export interface Region {
+  id: number;
+  region: string;        // County/City (縣市)
+  subRegion?: string;    // District/Township (鄉鎮市區)
+  village?: string;      // Village (村里)
+}
+
+// Election-specific data for a politician
+export interface PoliticianElectionData {
+  electionId: number;
+  position: string;      // Running position (參選職位)
+  slogan?: string;       // Campaign slogan (競選口號)
+  electionType?: string; // Election type (參選類型)
+  regionId?: number;     // Region ID (正規化地區 ID)
+  region: string;        // Region name (選區)
+  subRegion?: string;    // Sub-region (子選區)
+  village?: string;      // Village (村里)
+}
+
 export enum PoliticianStatus {
   INCUMBENT = 'incumbent',       // 現任
   POLITICIAN = 'politician',       // 已登記參選
@@ -47,7 +69,8 @@ export interface Politician {
   party: string; // Changed from PoliticalParty to string for flexibility
   status?: PoliticianStatus;
   electionType?: string; // Changed from ElectionType to string for flexibility
-  position: string;
+  position: string; // 參選職位 (e.g., 縣市長候選人)
+  currentPosition?: string; // 現職 (e.g., 立法委員, 現任市長)
   avatarUrl?: string;
   region: string;
   subRegion?: string;
@@ -59,6 +82,9 @@ export interface Politician {
   educationLevel?: string;
   education?: string[];
   experience?: string[];
+
+  // Election-specific data (new)
+  elections?: PoliticianElectionData[];
 }
 
 
@@ -72,6 +98,7 @@ export interface TrackingLog {
 export interface Policy {
   id: string; // Changed from number to UUID string
   politicianId: string; // Changed from number to UUID string
+  electionId?: number; // Election this policy belongs to
 
   title: string;
 

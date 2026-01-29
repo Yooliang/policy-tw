@@ -7,7 +7,11 @@ import Footer from './components/Footer.vue'
   <div class="flex flex-col min-h-screen font-sans">
     <Navbar />
     <main class="flex-grow">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <KeepAlive :include="['ElectionPage']">
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
     </main>
     <Footer />
   </div>

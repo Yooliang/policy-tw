@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
-import { Database, CheckCircle2, Pause, Users, Activity, Loader2, Sparkles, XCircle, Clock } from 'lucide-vue-next'
+import { Database, CheckCircle2, Pause, Users, Activity, Loader2, Sparkles, XCircle, Clock, MapPin } from 'lucide-vue-next'
 
 const { politicians, fetchAll } = useSupabase()
 
@@ -18,8 +18,8 @@ const availableYears = ['2024', '2022']
 
 // 選舉類型
 const electionTypes = [
-  { id: 'President', name: '總統', needCity: false, dataLevel: 'N' },
-  { id: 'Legislator', name: '立委', needCity: true, dataLevel: 'A' },
+  { id: 'President', name: '總統副總統', needCity: false, dataLevel: 'N' },
+  { id: 'Legislator', name: '立法委員', needCity: true, dataLevel: 'A' },
   { id: 'Mayor', name: '直轄市長', needCity: false, dataLevel: 'C' },
   { id: 'CountyMayor', name: '縣市長', needCity: false, dataLevel: 'C' },
   { id: 'CouncilMember', name: '直轄市議員', needCity: true, dataLevel: 'A' },
@@ -194,7 +194,6 @@ async function fetchCell(typeId: string, themeId: string, city: typeof cities[0]
     const typeName = electionTypes.find(t => t.id === typeId)?.name || typeId
 
     const candidates = candList
-      .filter((c: any) => c.is_vice !== 'Y')
       .map((c: any) => {
         const party = c.party_name || '無黨籍'
         let birthYear = c.cand_birthyear ? parseInt(c.cand_birthyear) : null
@@ -217,10 +216,16 @@ async function fetchCell(typeId: string, themeId: string, city: typeof cities[0]
           subRegion = c.area_name || null
         }
 
+        // 總統副總統特殊處理：根據 is_vice 決定職位
+        let position = `${typeName}候選人`
+        if (typeId === 'President') {
+          position = c.is_vice === 'Y' ? '副總統候選人' : '總統候選人'
+        }
+
         return {
           name: c.cand_name,
           party,
-          position: `${typeName}候選人`,
+          position,
           region,
           subRegion,
           village,
@@ -303,6 +308,116 @@ async function startFetch() {
 
 function stop() {
   isRunning.value = false
+}
+
+// 抓取選舉區對應資料
+const districtMappingStatus = ref<'idle' | 'running' | 'done' | 'error'>('idle')
+
+async function fetchElectoralDistrictMapping() {
+  if (districtMappingStatus.value === 'running') return
+  districtMappingStatus.value = 'running'
+  logs.value.unshift('開始抓取選舉區對應資料...')
+
+  const themes = themesByYear[selectedYear.value] || {}
+  logs.value.unshift(`年份: ${selectedYear.value}, themes: ${JSON.stringify(Object.keys(themes))}`)
+
+  const councilThemes = [
+    { typeId: 'CouncilMember', themeId: themes.CouncilMember, subjectId: 'T1', legisId: 'T1' },
+    { typeId: 'CountyCouncilMember', themeId: themes.CountyCouncilMember, subjectId: 'T2', legisId: 'T1' },
+  ].filter(t => t.themeId)
+
+  logs.value.unshift(`找到 ${councilThemes.length} 個議員主題`)
+
+  const allMappings: any[] = []
+
+  for (const theme of councilThemes) {
+    logs.value.unshift(`處理主題: ${theme.typeId}`)
+    for (const city of cities.slice(1)) { // 跳過「全國」
+      currentTask.value = `選舉區對應 - ${city.name}`
+      try {
+        const areasUrl = `https://db.cec.gov.tw/static/elections/data/areas/ELC/${theme.subjectId}/${theme.legisId}/${theme.themeId}/D/${city.prvCode}_${city.cityCode}_00_000_0000.json`
+        logs.value.unshift(`嘗試: ${city.name} - ${areasUrl.slice(-50)}`)
+        const response = await fetch(areasUrl)
+
+        if (response.status === 404) {
+          logs.value.unshift(`  → 404 (無資料)`)
+          continue
+        }
+        if (!response.ok) {
+          logs.value.unshift(`  → ${response.status} (失敗)`)
+          continue
+        }
+
+        const data = await response.json()
+        logs.value.unshift(`  → 成功，keys: ${Object.keys(data).length}`)
+
+        // 解析對應資料
+        // Key 格式: "64_000_01_000_0000" (prvCode_cityCode_areaCode_deptCode_liCode)
+        for (const key of Object.keys(data)) {
+          const areas = data[key]
+          if (!Array.isArray(areas)) continue
+
+          for (const area of areas) {
+            // area_code 是選舉區編號，area_name 是鄉鎮區名
+            const electoralDistrict = `第${area.area_code.padStart(2, '0')}選舉區`
+            allMappings.push({
+              region: city.name,
+              electoral_district: electoralDistrict,
+              township: area.area_name,
+              election_id: parseInt(selectedYear.value),
+              prv_code: area.prv_code,
+              area_code: area.area_code,
+              dept_code: area.dept_code,
+            })
+          }
+        }
+
+        logs.value.unshift(`✓ ${city.name} 選舉區對應已解析`)
+      } catch (err: any) {
+        logs.value.unshift(`✗ ${city.name} 選舉區對應失敗: ${err.message}`)
+      }
+      await new Promise(r => setTimeout(r, 100))
+    }
+  }
+
+  // 批次寫入 Supabase
+  if (allMappings.length > 0) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js')
+      const supabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY
+      )
+
+      // 先刪除該年份的舊資料
+      await supabase
+        .from('electoral_district_areas')
+        .delete()
+        .eq('election_id', parseInt(selectedYear.value))
+
+      // 分批插入（每批 100 筆）
+      const BATCH_SIZE = 100
+      for (let i = 0; i < allMappings.length; i += BATCH_SIZE) {
+        const batch = allMappings.slice(i, i + BATCH_SIZE)
+        const { error } = await supabase
+          .from('electoral_district_areas')
+          .upsert(batch, { onConflict: 'region,electoral_district,township,election_id' })
+
+        if (error) throw error
+      }
+
+      logs.value.unshift(`✓ 成功寫入 ${allMappings.length} 筆選舉區對應`)
+      districtMappingStatus.value = 'done'
+    } catch (err: any) {
+      logs.value.unshift(`✗ 寫入失敗: ${err.message}`)
+      districtMappingStatus.value = 'error'
+    }
+  } else {
+    logs.value.unshift('⚠ 沒有找到選舉區對應資料')
+    districtMappingStatus.value = 'done'
+  }
+
+  currentTask.value = ''
 }
 
 // 統計
@@ -404,6 +519,29 @@ onMounted(loadProgress)
                 重置
               </button>
             </div>
+          </div>
+
+          <!-- 選舉區對應 -->
+          <div class="bg-white rounded-xl border p-4 space-y-3">
+            <h4 class="text-xs font-bold text-slate-400 uppercase">議員選舉區對應</h4>
+            <p class="text-xs text-slate-500">抓取選舉區與鄉鎮區的對應關係，用於篩選功能</p>
+            <button
+              @click="fetchElectoralDistrictMapping"
+              :disabled="districtMappingStatus === 'running'"
+              :class="`w-full px-4 py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition-all
+                ${districtMappingStatus === 'running' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' :
+                  districtMappingStatus === 'done' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
+                  districtMappingStatus === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200' :
+                  'bg-violet-100 text-violet-700 hover:bg-violet-200'}`"
+            >
+              <Loader2 v-if="districtMappingStatus === 'running'" :size="16" class="animate-spin" />
+              <CheckCircle2 v-else-if="districtMappingStatus === 'done'" :size="16" />
+              <XCircle v-else-if="districtMappingStatus === 'error'" :size="16" />
+              <MapPin v-else :size="16" />
+              {{ districtMappingStatus === 'running' ? '抓取中...' :
+                 districtMappingStatus === 'done' ? '已完成' :
+                 districtMappingStatus === 'error' ? '重試' : '抓取選舉區對應' }}
+            </button>
           </div>
 
           <!-- 目前任務 -->

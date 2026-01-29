@@ -29,14 +29,23 @@ npx vue-tsc --noEmit
 ### Data Layer
 - **Supabase PostgreSQL** — All data stored remotely (project: `wiiqoaytpqvegtknlbue`)
 - **`composables/useSupabase.ts`** — Global state composable, fetches once and shares across components
+- **`composables/useIndexedDB.ts`** — IndexedDB caching for politicians data (reduces API calls)
+- **`composables/useGlobalState.ts`** — Shared state for region selection across pages
 - **`lib/supabase.ts`** — Supabase client initialization
 - **Views used**: `policies_with_logs`, `politicians_with_elections`, `discussions_full` (JSON aggregation)
 
-### Database Schema (12 tables)
+### Database Schema (14 tables)
 Core: `elections`, `election_types`, `politicians`, `politician_elections`, `policies`, `tracking_logs`, `related_policies`, `discussions`, `discussion_comments`, `comment_replies`
-Reference: `categories`, `locations`
+Reference: `categories`, `locations`, `regions`, `electoral_district_areas`
 
 ENUMs: `policy_status`, `political_party`, `election_type`, `politician_status`
+
+#### Electoral District Mapping
+The `electoral_district_areas` table maps townships (鄉鎮市區) to electoral districts (選舉區) for councilor filtering:
+- Structure: `region` (縣市) + `electoral_district` (第01選舉區) + `township` (茂林區) + `election_id` (year, e.g., 2022)
+- When user selects a township, the system looks up the corresponding electoral district and filters councilors
+- Data scraped from CEC API via AdminScraper page
+- **Important**: `election_id` stores the **year** (2022), not the database election ID
 
 ### Frontend Structure
 ```
@@ -46,24 +55,27 @@ pages/                    # Route components (lazy-loaded)
 ├── PolicyDetail.vue     # Single policy with timeline
 ├── PolicyAnalysis.vue   # AI analysis listing
 ├── PolicyDeepAnalysis.vue # Deep dive with timeline
-├── ElectionPage.vue     # Generic election page (/election/:electionId)
+├── ElectionPage.vue     # Generic election page (/election/:electionId) - uses KeepAlive
 ├── PoliticianProfile.vue # Politician detail
 ├── Community.vue        # Discussion listing
 ├── DiscussionDetail.vue # Single discussion
+├── RegionalData.vue     # Regional statistics view
+├── AdminScraper.vue     # CEC data scraper (electoral district mapping)
 └── election/            # Election sub-components
-    ├── PoliticianGrid.vue
+    ├── PoliticianGrid.vue  # Collapsible politician grid
     ├── PoliticianDropdown.vue
     └── VerticalStack.vue
 
 components/               # Shared components
 ├── Navbar.vue, Footer.vue
 ├── Hero.vue, PolicyCard.vue, StatusBadge.vue
+├── GlobalRegionSelector.vue  # Shared region selector
 ```
 
 ### Type Definitions (`types.ts`)
 - `PolicyStatus` enum: Proposed, In Progress, Achieved, Stalled, Failed, Campaign Pledge
 - `PoliticalParty` enum: 國民黨, 民進黨, 民眾黨, 無黨籍
-- `ElectionType` enum: 7 levels from 縣市長 to 村里長
+- `ElectionType` enum: 9 levels — 總統副總統, 立法委員, 縣市長, 縣市議員, 鄉鎮市長, 直轄市山地原住民區長, 鄉鎮市民代表, 直轄市山地原住民區民代表, 村里長
 - Interfaces: `Election`, `Politician`, `Policy`, `TrackingLog`, `Discussion`, etc.
 
 ### Data Flow Pattern
@@ -86,6 +98,16 @@ VITE_SUPABASE_ANON_KEY=<anon-key>
 - `constants.ts` retained as reference only (not imported)
 - RLS enabled on all tables with public read policies
 - Migrations in `supabase/migrations/`, seed in `supabase/seed.sql`
+- `ElectionPage.vue` uses `<KeepAlive>` to preserve filter state during navigation
+- Electoral district lookups use **election year** (2022), not database election ID
+
+## Admin Tools
+
+### AdminScraper (`/admin/scraper`)
+Scrapes election data from CEC (Central Election Commission) API:
+- **Politician scraping** — Fetches candidates by election type and region
+- **Electoral district mapping** — Maps townships to electoral districts for councilor filtering
+- Data source: `https://db.cec.gov.tw/ElecTable/Election/ElecTickets`
 
 ## Edge Functions
 

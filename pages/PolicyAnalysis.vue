@@ -64,14 +64,17 @@ const relayCases = computed(() => {
       <div class="space-y-6">
         <GlobalRegionSelector />
 
-        <div class="relative text-left border-t border-slate-100 pt-6">
-          <Search class="absolute left-4 top-[calc(50%+12px)] -translate-y-1/2 text-slate-400" :size="20" />
-          <input
-            v-model="searchTerm"
-            type="text"
-            placeholder="搜尋重大建設案（如：產業園區、捷運建設）..."
-            class="w-full pl-12 pr-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 text-navy-900 font-bold"
-          />
+        <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+          <!-- 搜尋框 -->
+          <div class="relative flex-1 w-full">
+            <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
+            <input
+              v-model="searchTerm"
+              type="text"
+              placeholder="搜尋重大建設案（如：產業園區、捷運建設）..."
+              class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400"
+            />
+          </div>
         </div>
       </div>
     </Hero>
