@@ -5,6 +5,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
+import Avatar from '../components/Avatar.vue'
 import {
   Bot, Link as LinkIcon, FileText,
   Layers, ShieldCheck, ArrowRight, Sparkles, Network, MapPin,
@@ -240,7 +241,7 @@ const isPoliticianSelected = (politicianId: string | number) => {
                       </div>
                       <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ log.description }}</p>
                       <div class="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
-                        <img :src="log.politicianAvatar" class="w-6 h-6 rounded-full border border-white shadow-sm shrink-0" />
+                        <Avatar :src="log.politicianAvatar" :name="log.politicianName" size="xs" class="border border-white shadow-sm shrink-0" />
                         <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.politicianName }}</span>
                         <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ politicians.find(c => c.id === log.politicianId)?.position }}</span>
                         <span class="text-[10px] text-slate-300">·</span>
@@ -280,9 +281,11 @@ const isPoliticianSelected = (politicianId: string | number) => {
                       ${isPoliticianSelected(c.id) ? 'bg-blue-50 ring-2 ring-blue-500' : 'opacity-40 grayscale hover:opacity-70 hover:grayscale-0 cursor-pointer'}`"
                     @click="!isPoliticianSelected(c.id) && router.push(`/analysis/${relayChain.find(p => p.politicianId === c.id)?.id}`)"
                   >
-                    <img
+                    <Avatar
                       :src="c.avatarUrl"
-                      :class="`w-10 h-10 rounded-full border-2 shadow-sm ${isPoliticianSelected(c.id) ? 'border-blue-500' : 'border-slate-200'}`"
+                      :name="c.name"
+                      size="sm"
+                      :class="`border-2 shadow-sm ${isPoliticianSelected(c.id) ? 'border-blue-500' : 'border-slate-200'}`"
                     />
                     <div class="flex-1">
                       <div :class="`text-sm font-black ${isPoliticianSelected(c.id) ? 'text-navy-900' : 'text-slate-400'}`">{{ c.name }}</div>

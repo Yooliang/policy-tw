@@ -13,7 +13,7 @@ defineProps<{
   <div :class="`relative ${className || ''}`">
     <!-- Dark Section -->
     <section
-      class="bg-navy-900 text-white relative overflow-hidden pt-20 pb-24 md:pb-32 max-h-[280px]"
+      class="bg-navy-900 text-white relative h-[330px] flex items-end overflow-hidden"
       :style="backgroundImage ? {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: 'cover',
@@ -24,12 +24,11 @@ defineProps<{
       <!-- Background Overlay -->
       <div v-if="backgroundImage" class="absolute inset-0 bg-navy-900/80"></div>
 
-      <!-- Decorative Background Icon -->
-      <div v-if="$slots.icon && !backgroundImage" class="absolute top-0 right-0 p-10 opacity-10 pointer-events-none z-10">
-        <slot name="icon" />
-      </div>
-
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 text-left">
+      <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 text-left pb-16">
+        <!-- Decorative Background Icon -->
+        <div v-if="$slots.icon && !backgroundImage" class="absolute bottom-0 right-0 p-10 -mb-[120px] opacity-10 pointer-events-none z-10">
+          <slot name="icon" />
+        </div>
 
         <!-- Content Area -->
         <div :class="fullWidth ? '' : 'max-w-3xl'">

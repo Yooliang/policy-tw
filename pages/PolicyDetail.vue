@@ -5,6 +5,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
+import Avatar from '../components/Avatar.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2 } from 'lucide-vue-next'
 
 
@@ -51,7 +52,7 @@ const handleVote = () => {
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
           <div class="relative cursor-pointer" @click="router.push(`/politician/${politician.id}`)">
-            <img :src="politician.avatarUrl" :alt="politician.name" class="w-28 h-28 md:w-36 md:h-36 rounded-full border-4 border-white shadow-xl" />
+            <Avatar :src="politician.avatarUrl" :name="politician.name" class="w-28 h-28 md:w-36 md:h-36 border-4 border-white shadow-xl" />
             <span :class="`absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white border-2 border-white shadow-md
               ${politician.party === '國民黨' ? 'bg-blue-600' :
                 politician.party === '民進黨' ? 'bg-green-600' :
@@ -112,7 +113,7 @@ const handleVote = () => {
                   >
                     <div :class="`w-16 h-16 rounded-full border-4 flex items-center justify-center bg-white transition-all z-10
                       ${p!.id === policy?.id ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
-                      <img :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :alt="politicians.find(pol => pol.id === p!.politicianId)?.name" class="w-full h-full rounded-full object-cover p-0.5" />
+                      <Avatar :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :name="politicians.find(pol => pol.id === p!.politicianId)?.name || ''" class="w-full h-full" />
                     </div>
                     <div class="mt-4 text-center">
                       <span class="text-xs font-bold text-slate-400 block mb-1">{{ p!.proposedDate.split('-')[0] }}</span>
@@ -212,7 +213,7 @@ const handleVote = () => {
         <div class="lg:col-span-1 space-y-6">
           <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24">
             <div class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors" @click="router.push(`/politician/${politician.id}`)">
-              <img :src="politician.avatarUrl" :alt="politician.name" class="w-16 h-16 rounded-full border-2 border-slate-100" />
+              <Avatar :src="politician.avatarUrl" :name="politician.name" size="lg" class="border-2 border-slate-100" />
               <div>
                 <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ politician.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
                 <p class="text-sm text-slate-500">{{ politician.position }}</p>

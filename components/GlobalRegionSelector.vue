@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useGlobalState } from '../composables/useGlobalState'
-import { Globe } from 'lucide-vue-next'
+import { Globe, ChevronUp, ChevronDown } from 'lucide-vue-next'
 
 const { globalRegion, setGlobalRegion } = useGlobalState()
+const expanded = ref(false)
 
 const specialMunicipalities = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
 const group1 = ['基隆市', '新竹市', '新竹縣', '苗栗縣', '彰化縣', '南投縣', '雲林縣', '嘉義市']
@@ -12,7 +14,7 @@ const getBtnClass = (region: string) => {
   const isSelected = globalRegion.value === region
   const base = "py-2 rounded-xl text-xs font-black transition-all border text-center whitespace-nowrap h-9 flex items-center justify-center gap-1.5"
   const active = "bg-blue-600 text-white border-blue-600 shadow-lg scale-[1.02] z-10"
-  const inactive = "bg-slate-50 text-slate-500 border-slate-200 hover:bg-white hover:border-blue-300 hover:text-blue-600"
+  const inactive = "bg-slate-50 text-slate-500 border-transparent hover:bg-white hover:border-blue-300 hover:text-blue-600"
   return `${base} ${isSelected ? active : inactive}`
 }
 </script>
@@ -20,7 +22,7 @@ const getBtnClass = (region: string) => {
 <template>
   <div class="flex gap-4 py-2 w-full">
     <!-- Left Column: All -->
-    <div class="flex flex-col shrink-0 pt-1">
+    <div class="flex flex-col shrink-0">
       <button 
         @click="setGlobalRegion('All')"
         :class="`px-4 ${getBtnClass('All')}`"
@@ -31,23 +33,37 @@ const getBtnClass = (region: string) => {
 
     <!-- Right Column: 3 Rows x 8 Columns -->
     <div class="flex-grow flex flex-col gap-2">
-      <!-- Row 1: Special Municipalities (6) + 2 Spacers -->
+      <!-- Row 1: Special Municipalities (6) + Toggle Button -->
       <div class="grid grid-cols-4 md:grid-cols-8 gap-2">
-        <button 
-          v-for="city in specialMunicipalities" 
+        <button
+          v-for="city in specialMunicipalities"
           :key="city"
           @click="setGlobalRegion(city)"
           :class="getBtnClass(city)"
         >
           {{ city }}
         </button>
-        <div class="hidden md:block col-span-2"></div>
+        <div class="hidden md:flex col-span-2 justify-end items-center gap-2">
+          <span
+            v-if="!expanded && [...group1, ...group2].includes(globalRegion)"
+            class="text-xs font-black text-blue-600"
+          >
+            {{ globalRegion }}
+          </span>
+          <button
+            @click="expanded = !expanded"
+            class="px-3 h-9 rounded-xl border border-transparent bg-slate-50 text-slate-400 hover:bg-white hover:border-blue-300 hover:text-blue-600 transition-all flex items-center justify-center"
+          >
+            <ChevronUp v-if="expanded" :size="16" />
+            <ChevronDown v-else :size="16" />
+          </button>
+        </div>
       </div>
 
       <!-- Row 2: Group 1 (8) -->
-      <div class="grid grid-cols-4 md:grid-cols-8 gap-2">
-        <button 
-          v-for="city in group1" 
+      <div v-show="expanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
+        <button
+          v-for="city in group1"
           :key="city"
           @click="setGlobalRegion(city)"
           :class="getBtnClass(city)"
@@ -57,9 +73,9 @@ const getBtnClass = (region: string) => {
       </div>
 
       <!-- Row 3: Group 2 (8) -->
-      <div class="grid grid-cols-4 md:grid-cols-8 gap-2">
-        <button 
-          v-for="city in group2" 
+      <div v-show="expanded" class="grid grid-cols-4 md:grid-cols-8 gap-2">
+        <button
+          v-for="city in group2"
           :key="city"
           @click="setGlobalRegion(city)"
           :class="getBtnClass(city)"

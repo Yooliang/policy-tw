@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
+import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -60,7 +61,7 @@ onUnmounted(() => {
     <div class="p-6 flex-1">
       <div class="flex justify-between items-start mb-4">
         <div class="flex items-center gap-3">
-          <img :src="politician.avatarUrl" :alt="politician.name" class="w-10 h-10 rounded-full border-2 border-slate-50 shadow-sm" />
+          <Avatar :src="politician.avatarUrl" :name="politician.name" size="sm" class="border-2 border-slate-50 shadow-sm" />
           <div class="text-left">
             <span class="font-bold text-navy-900 block text-sm">{{ politician.name }}</span>
             <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ politician.party }}</span>

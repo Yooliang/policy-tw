@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
+import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2 } from 'lucide-vue-next'
@@ -27,7 +28,7 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
           <div class="relative">
-            <img :src="politician.avatarUrl" :alt="politician.name" class="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-white shadow-xl" />
+            <Avatar :src="politician.avatarUrl" :name="politician.name" size="2xl" class="border-4 border-white shadow-xl" />
             <span :class="`absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white border-2 border-white shadow-md
               ${politician.party === '國民黨' ? 'bg-blue-600' :
                 politician.party === '民進黨' ? 'bg-green-600' :

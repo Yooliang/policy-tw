@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import Avatar from '../components/Avatar.vue'
 import { useSupabase } from '../composables/useSupabase'
 import {
   MessageSquare, ThumbsUp, Eye, ArrowLeft, Bookmark,
@@ -128,7 +129,7 @@ function toggleReplies(commentId: number) {
             <!-- Discussion body -->
             <div class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
               <div class="flex items-center gap-4 mb-6">
-                <img :src="discussion.author.avatarUrl" :alt="discussion.author.name" class="w-12 h-12 rounded-full border-2 border-slate-100" />
+                <Avatar :src="discussion.author.avatarUrl" :name="discussion.author.name" size="md" class="border-2 border-slate-100" />
                 <div>
                   <p class="font-bold text-slate-800">{{ discussion.author.name }}</p>
                   <p class="text-slate-400 text-xs flex items-center gap-1"><Clock :size="12" /> {{ discussion.createdAt }}</p>
@@ -174,7 +175,7 @@ function toggleReplies(commentId: number) {
                 <div v-for="comment in sortedComments" :key="comment.id">
                   <!-- Comment -->
                   <div class="flex gap-4">
-                    <img :src="comment.author.avatarUrl" :alt="comment.author.name" class="w-10 h-10 rounded-full border border-slate-100 shrink-0" />
+                    <Avatar :src="comment.author.avatarUrl" :name="comment.author.name" size="sm" class="border border-slate-100 shrink-0" />
                     <div class="flex-1">
                       <div class="flex items-center gap-2 mb-1">
                         <span class="font-bold text-sm text-slate-800">{{ comment.author.name }}</span>
@@ -203,7 +204,7 @@ function toggleReplies(commentId: number) {
                       <!-- Replies -->
                       <div v-if="comment.replies.length > 0 && !collapsedComments.has(comment.id)" class="ml-8 mt-4 space-y-4 border-l-2 border-slate-100 pl-4">
                         <div v-for="reply in comment.replies" :key="reply.id" class="flex gap-3">
-                          <img :src="reply.author.avatarUrl" :alt="reply.author.name" class="w-8 h-8 rounded-full border border-slate-100 shrink-0" />
+                          <Avatar :src="reply.author.avatarUrl" :name="reply.author.name" class="w-8 h-8 border border-slate-100 shrink-0" />
                           <div class="flex-1">
                             <div class="flex items-center gap-2 mb-1">
                               <span class="font-bold text-xs text-slate-800">{{ reply.author.name }}</span>

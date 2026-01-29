@@ -3,6 +3,7 @@ import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician } from '../../types'
 import { ArrowRight, Megaphone } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import Avatar from '../../components/Avatar.vue'
 
 defineProps<{
   politicians: Politician[]
@@ -30,7 +31,7 @@ const getPledgeCount = (politicianId: string | number) =>
         class="group relative bg-white p-6 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer flex items-center gap-6"
       >
         <div class="relative shrink-0">
-          <img :src="politician.avatarUrl" :alt="politician.name" class="w-20 h-20 rounded-full border-4 border-slate-50 group-hover:scale-105 transition-transform" />
+          <Avatar :src="politician.avatarUrl" :name="politician.name" size="xl" class="border-4 border-slate-50 group-hover:scale-105 transition-transform" />
           <span :class="`absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold text-white border-2 border-white
             ${politician.party === '國民黨' ? 'bg-blue-600' :
               politician.party === '民進黨' ? 'bg-green-600' :

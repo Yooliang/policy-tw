@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import Avatar from '../components/Avatar.vue'
 import { MessageSquare, ThumbsUp, TrendingUp, Search, Filter, PenTool, Eye } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
@@ -202,7 +203,7 @@ function getCommentCount(post: Discussion) {
               class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
             >
               <div class="flex items-start gap-4">
-                <img :src="post.author.avatarUrl" :alt="post.author.name" class="w-10 h-10 rounded-full border border-slate-100" />
+                <Avatar :src="post.author.avatarUrl" :name="post.author.name" size="sm" class="border border-slate-100" />
                 <div class="flex-1">
                   <div class="flex items-center justify-between mb-2">
                     <div><span class="font-bold text-slate-800 text-sm">{{ post.author.name }}</span><span class="text-slate-400 text-xs ml-2">· {{ post.createdAt }}</span></div>

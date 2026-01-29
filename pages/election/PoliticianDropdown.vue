@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import type { Politician } from '../../types'
+import Avatar from '../../components/Avatar.vue'
 
 const props = defineProps<{
   modelValue: string | number
@@ -51,7 +52,7 @@ const selectedPolitician = computed(() => politicians.value.find(c => String(c.i
       </select>
     </div>
     <div v-if="selectedPolitician" class="mt-4 flex items-center gap-3 bg-white p-3 rounded-lg border border-slate-100 shadow-sm animate-fade-in">
-      <img :src="selectedPolitician.avatarUrl" class="w-12 h-12 rounded-full border-2 border-white shadow-sm" />
+      <Avatar :src="selectedPolitician.avatarUrl" :name="selectedPolitician.name" size="md" class="border-2 border-white shadow-sm" />
       <div>
         <div class="font-bold text-navy-900 flex items-center gap-2">
           {{ selectedPolitician.name }}

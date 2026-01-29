@@ -4,6 +4,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import Avatar from '../components/Avatar.vue'
 import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -107,12 +108,13 @@ const relayCases = computed(() => {
             </div>
             <div class="flex items-center justify-between pt-6 border-t border-slate-50">
               <div class="flex -space-x-3">
-                <img
+                <Avatar
                   v-for="cid in relayCase.involvedPoliticianIds"
                   :key="cid"
                   :src="politicians.find(pol => pol.id === cid)?.avatarUrl"
-                  class="w-12 h-12 rounded-full border-4 border-white shadow-md group-hover:scale-110 transition-all"
-                  :title="politicians.find(pol => pol.id === cid)?.name"
+                  :name="politicians.find(pol => pol.id === cid)?.name || ''"
+                  size="md"
+                  class="border-4 border-white shadow-md group-hover:scale-110 transition-all"
                 />
               </div>
               <div class="text-right">

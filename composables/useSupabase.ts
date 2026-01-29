@@ -61,6 +61,7 @@ function mapPolitician(row: any): Politician {
     position: row.position,
     region: row.region,
     subRegion: row.sub_region || undefined,
+    village: row.village || undefined,
     avatarUrl: row.avatar_url,
     slogan: row.slogan || undefined,
     bio: row.bio || undefined,

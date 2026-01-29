@@ -51,6 +51,7 @@ export interface Politician {
   avatarUrl?: string;
   region: string;
   subRegion?: string;
+  village?: string; // 村里名稱（用於村里長選舉）
   electionIds?: number[];
   slogan?: string;
   bio?: string;
