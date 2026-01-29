@@ -170,6 +170,26 @@ async function fetchCell(typeId: string, themeId: string, city: typeof cities[0]
       return
     }
 
+    // 對於村里長，取得 dept_code → 區名的對照表
+    let deptMap: Record<string, string> = {}
+    if (typeId === 'Village') {
+      try {
+        const areasUrl = `https://db.cec.gov.tw/static/elections/data/areas/ELC/${subject.subjectId}/${subject.legisId}/${themeId}/D/${city.prvCode}_${city.cityCode}_00_000_0000.json`
+        const areasRes = await fetch(areasUrl)
+        if (areasRes.ok) {
+          const areasData = await areasRes.json()
+          const areasList = areasData[Object.keys(areasData)[0]] || []
+          for (const a of areasList) {
+            if (a.dept_code && a.area_name) {
+              deptMap[a.dept_code] = a.area_name
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略錯誤，subRegion 會是 null
+      }
+    }
+
     // 解析候選人
     const typeName = electionTypes.find(t => t.id === typeId)?.name || typeId
 
@@ -186,14 +206,15 @@ async function fetchCell(typeId: string, themeId: string, city: typeof cities[0]
         let village = null
 
         if (typeId === 'Village') {
-          // 村里長：area_name 是里名
+          // 村里長：area_name 是里名，用 dept_code 查區名
           village = c.area_name || null
+          subRegion = deptMap[c.dept_code] || null
         } else if (typeId === 'CityMayor') {
           // 鄉鎮市長：area_name 是鄉鎮市名
           subRegion = c.area_name || null
         } else {
-          // 其他：area_name 是選區名，存到 region
-          region = c.area_name || city.name
+          // 其他（議員、代表等）：region 是縣市，area_name 是選區存到 subRegion
+          subRegion = c.area_name || null
         }
 
         return {
