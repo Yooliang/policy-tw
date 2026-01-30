@@ -104,10 +104,11 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
     </Hero>
 
     <!-- 2026 Election Special Zone (Prominent) -->
-    <section class="py-12 bg-white">
+    <section class="py-12 bg-transparent election-2026-section">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="bg-gradient-to-br from-navy-900 to-blue-900 rounded-[48px] p-10 text-white relative overflow-hidden shadow-2xl">
-          <div class="absolute top-0 right-0 p-20 opacity-10 rotate-12"><Vote :size="300" /></div>
+        <div class="election-2026-border rounded-[52px] p-[5px]">
+          <div class="bg-gradient-to-br from-navy-900 to-blue-900 rounded-[48px] p-10 text-white relative overflow-hidden shadow-2xl">
+            <div class="absolute top-0 right-0 p-20 opacity-10 rotate-12"><Vote :size="300" /></div>
           <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
             <div class="text-left md:w-2/3">
               <span class="inline-block bg-amber-500 text-navy-900 px-4 py-1 rounded-full text-sm font-black mb-6 tracking-widest uppercase">Election 2026</span>
@@ -130,6 +131,7 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </section>
@@ -240,4 +242,16 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* 2026 Election Special Zone - 侵入 Hero */
+.election-2026-section {
+  margin-top: -110px;
+  position: relative;
+  z-index: 10;
+}
+
+.election-2026-border {
+  background: linear-gradient(to bottom, #ffffff 0%, #fbbf24 100%);
+}
+
 </style>
