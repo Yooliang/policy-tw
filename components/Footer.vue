@@ -11,7 +11,7 @@ const activeElection = computed(() => getActiveElection())
 <template>
   <footer class="bg-navy-900 text-slate-400 py-12 border-t border-navy-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-8">
         <div class="col-span-1 md:col-span-2">
           <h3 class="text-white text-lg font-bold mb-4">正見</h3>
           <p class="text-sm leading-relaxed mb-4 max-w-sm">
@@ -36,6 +36,14 @@ const activeElection = computed(() => getActiveElection())
                 {{ activeElection.shortName }}
               </RouterLink>
             </li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="text-white font-semibold mb-4">歷屆選舉</h4>
+          <ul class="space-y-2 text-sm">
+            <li><RouterLink to="/election/2024" class="hover:text-blue-400 transition-colors">2024 總統大選</RouterLink></li>
+            <li><RouterLink to="/election/2022" class="hover:text-blue-400 transition-colors">2022 九合一選舉</RouterLink></li>
           </ul>
         </div>
 

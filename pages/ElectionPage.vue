@@ -24,18 +24,28 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, loading, getElectoralDistrictByTownship, electoralDistrictAreas, loadPoliticiansByElection, loadedElections } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, loadPoliticiansByElection, loadedElections } = useSupabase()
+
+// Helper: 取得候選人在該選舉的類型
+function getElectionType(politician: any): string | undefined {
+  const data = getPoliticianElectionData(politician, electionId.value)
+  return data?.electionType
+}
 const { globalRegion } = useGlobalState()
 
 const electionId = computed(() => Number(route.params.electionId))
+const election = computed(() => getElectionById(electionId.value))
 const electionLoading = ref(false)
 
-// Load politicians for this election on mount and when electionId changes
-async function loadElectionData(id: number) {
-  if (!id || loadedElections.value.has(id)) return
+const selectedRegion = ref(globalRegion.value)
+const selectedSubRegion = ref<string>('All')  // 鄉鎮市區
+
+// Load politicians for this election + region
+async function loadElectionData(id: number, region: string) {
+  if (!id) return
   electionLoading.value = true
   try {
-    await loadPoliticiansByElection(id)
+    await loadPoliticiansByElection(id, region)
   } finally {
     electionLoading.value = false
   }
@@ -43,24 +53,29 @@ async function loadElectionData(id: number) {
 
 onMounted(() => {
   if (electionId.value) {
-    loadElectionData(electionId.value)
+    loadElectionData(electionId.value, selectedRegion.value)
   }
 })
 
+// 當選舉 ID 變化時重新載入
 watch(electionId, (newId) => {
   if (newId) {
-    loadElectionData(newId)
+    loadElectionData(newId, selectedRegion.value)
   }
 })
-const election = computed(() => getElectionById(electionId.value))
+
+// 當地區變化時載入該地區的候選人
+watch(selectedRegion, (newRegion) => {
+  if (electionId.value) {
+    loadElectionData(electionId.value, newRegion)
+  }
+})
+
 // 選舉年份（用於選舉區對應表查詢，因為該表存的是年份而非 election ID）
 const electionYear = computed(() => {
   if (!election.value?.electionDate) return 0
   return parseInt(election.value.electionDate.substring(0, 4))
 })
-
-const selectedRegion = ref(globalRegion.value)
-const selectedSubRegion = ref<string>('All')  // 鄉鎮市區
 
 // Sync with global state
 watch(globalRegion, (newVal) => {
@@ -96,12 +111,17 @@ const availableSubRegions = computed(() => {
   if (selectedRegion.value === 'All') return []
   const subRegions = new Set<string>()
 
-  // 1. 從 politicians 取得（鄉鎮市長、代表、村里長等），排除選舉區格式（包含「選區」或「選舉區」）
+  // 1. 從 politicians 取得（鄉鎮市長、代表、村里長等），排除選舉區格式
   electionPoliticians.value
-    .filter(c => c.region === selectedRegion.value && c.subRegion &&
-      c.electionType !== ElectionType.COUNCILOR &&
-      c.electionType !== ElectionType.LEGISLATOR &&
-      !c.subRegion.includes('選區'))
+    .filter(c => {
+      const type = getElectionType(c)
+      return c.region === selectedRegion.value && c.subRegion &&
+        type !== ElectionType.COUNCILOR &&
+        type !== ElectionType.LEGISLATOR &&
+        type !== ElectionType.INDIGENOUS_DISTRICT_CHIEF &&
+        type !== ElectionType.INDIGENOUS_DISTRICT_REP &&
+        !c.subRegion.includes('選區')
+    })
     .forEach(c => subRegions.add(c.subRegion!))
 
   // 2. 從選舉區對應表取得（議員對應的鄉鎮區）
@@ -120,16 +140,17 @@ const filteredPoliticians = computed(() => {
   // 鄉鎮市區篩選
   if (selectedSubRegion.value !== 'All') {
     result = result.filter(c => {
+      const type = getElectionType(c)
       // 總統、立委、縣市長、議員不受鄉鎮篩選影響
-      if (c.electionType === ElectionType.PRESIDENT ||
-          c.electionType === ElectionType.LEGISLATOR ||
-          c.electionType === ElectionType.MAYOR ||
-          c.electionType === ElectionType.COUNCILOR) {
+      if (type === ElectionType.PRESIDENT ||
+          type === ElectionType.LEGISLATOR ||
+          type === ElectionType.MAYOR ||
+          type === ElectionType.COUNCILOR) {
         return true
       }
       // 原民區長/代表：subRegion 格式是「XX區第YY選舉區」，用前綴匹配
-      if (c.electionType === ElectionType.INDIGENOUS_DISTRICT_CHIEF ||
-          c.electionType === ElectionType.INDIGENOUS_DISTRICT_REP) {
+      if (type === ElectionType.INDIGENOUS_DISTRICT_CHIEF ||
+          type === ElectionType.INDIGENOUS_DISTRICT_REP) {
         return c.subRegion?.startsWith(selectedSubRegion.value)
       }
       // 其他（鄉鎮市長、代表、村里長）：完全匹配
@@ -141,7 +162,7 @@ const filteredPoliticians = computed(() => {
 
 const presidentPoliticians = computed(() =>
   filteredPoliticians.value
-    .filter(c => c.electionType === ElectionType.PRESIDENT)
+    .filter(c => getElectionType(c) === ElectionType.PRESIDENT)
     .sort((a, b) => {
       // 總統候選人排在副總統候選人前面
       const aIsVice = a.position?.includes('副') ? 1 : 0
@@ -150,15 +171,15 @@ const presidentPoliticians = computed(() =>
     })
 )
 const legislatorPoliticians = computed(() => {
-  let result = electionPoliticians.value.filter(c => c.electionType === ElectionType.LEGISLATOR)
+  let result = electionPoliticians.value.filter(c => getElectionType(c) === ElectionType.LEGISLATOR)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
   return result
 })
-const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.MAYOR))
+const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.MAYOR))
 const councilorPoliticians = computed(() => {
-  let result = electionPoliticians.value.filter(c => c.electionType === ElectionType.COUNCILOR)
+  let result = electionPoliticians.value.filter(c => getElectionType(c) === ElectionType.COUNCILOR)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
@@ -175,11 +196,11 @@ const councilorPoliticians = computed(() => {
   }
   return result
 })
-const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.TOWNSHIP_MAYOR))
-const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
-const repPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.REPRESENTATIVE))
-const indigenousRepPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.INDIGENOUS_DISTRICT_REP))
-const chiefPoliticians = computed(() => filteredPoliticians.value.filter(c => c.electionType === ElectionType.CHIEF))
+const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.TOWNSHIP_MAYOR))
+const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
+const repPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.REPRESENTATIVE))
+const indigenousRepPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_REP))
+const chiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.CHIEF))
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
 const hasLocalCandidates = computed(() => {
@@ -191,7 +212,7 @@ const hasLocalCandidates = computed(() => {
     ElectionType.INDIGENOUS_DISTRICT_REP,
     ElectionType.CHIEF
   ]
-  return electionPoliticians.value.some(c => localTypes.includes(c.electionType as ElectionType))
+  return electionPoliticians.value.some(c => localTypes.includes(getElectionType(c) as ElectionType))
 })
 
 const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.map(c => c.id)))
@@ -204,7 +225,7 @@ const allCampaignPolicies = computed(() =>
     if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
-      if (politician.electionType === ElectionType.COUNCILOR) {
+      if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
@@ -224,7 +245,7 @@ const regionPolicies = computed(() =>
     if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
-      if (politician.electionType === ElectionType.COUNCILOR) {
+      if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
@@ -263,11 +284,12 @@ watch([() => selectedIssueCategory.value, () => selectedRegion.value, () => sele
 const comparisonPool = computed(() =>
   politicians.value.filter(c => {
     if (!c.electionIds?.includes(electionId.value)) return false
-    if (!(c.electionType === comparisonLevel.value || (!c.electionType && comparisonLevel.value === ElectionType.MAYOR))) return false
+    const type = getElectionType(c)
+    if (!(type === comparisonLevel.value || (!type && comparisonLevel.value === ElectionType.MAYOR))) return false
     if (selectedRegion.value !== 'All' && c.region !== selectedRegion.value) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
-      if (c.electionType === ElectionType.COUNCILOR) {
+      if (type === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && c.subRegion !== electoralDistrict) return false
       } else {
