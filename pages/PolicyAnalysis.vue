@@ -56,7 +56,7 @@ const relayCases = computed(() => {
 
 <template>
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
-    <Hero>
+    <Hero background-image="/images/heroes/ai.png">
       <template #title>AI 智能分析</template>
       <template #description>這不是單一政見的陳列。我們將跨任期、跨黨派的重大建設案進行聚合，<br class="hidden lg:block" />分析每一根治理接力棒的傳承品質，提供具備行政歷史深度的稽核數據。</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>

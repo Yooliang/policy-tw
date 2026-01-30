@@ -121,7 +121,7 @@ function getCommentCount(post: Discussion) {
 
 <template>
   <div class="bg-slate-50 min-h-screen">
-    <Hero>
+    <Hero background-image="/images/heroes/community.png">
       <template #title>公民發聲</template>
       <template #description>這裡不只是政見的展示架，更是公民意志的集散地。針對每一項政策提出您的見解、疑問或支持，讓改變從對話開始。</template>
       <template #icon><MessageSquare :size="400" class="text-blue-500" /></template>

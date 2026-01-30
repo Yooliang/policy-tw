@@ -77,6 +77,14 @@ const electionYear = computed(() => {
   return parseInt(election.value.electionDate.substring(0, 4))
 })
 
+// Hero 背景圖片（依選舉年份）
+const heroImages: Record<number, string> = {
+  2022: '/images/heroes/election-2022.png',
+  2024: '/images/heroes/election-2024.png',
+  2026: '/images/heroes/election-2026.png',
+}
+const heroBackgroundImage = computed(() => heroImages[electionYear.value] || '/images/heroes/election-default.png')
+
 // Sync with global state
 watch(globalRegion, (newVal) => {
   selectedRegion.value = newVal
@@ -336,7 +344,7 @@ const electionLevels = [
 <template>
   <div v-if="election" class="bg-slate-50 min-h-screen">
 
-    <Hero full-width>
+    <Hero full-width :background-image="heroBackgroundImage">
       <template #title>
         <div class="relative w-full">
           <div>
