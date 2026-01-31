@@ -1,0 +1,892 @@
+[
+  {
+    "region": "臺北市",
+    "name": "蔣萬安",
+    "gender": "男",
+    "birthDate": "1978-12-26",
+    "birthYear": 1978,
+    "party": "中國國民黨",
+    "votes": 575590,
+    "elected": true
+  },
+  {
+    "region": "臺北市",
+    "name": "陳時中",
+    "gender": "男",
+    "birthDate": "1952-12-27",
+    "birthYear": 1952,
+    "party": "民主進步黨",
+    "votes": 434558,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "黃珊珊",
+    "gender": "女",
+    "birthDate": "1969-10-18",
+    "birthYear": 1969,
+    "party": "無",
+    "votes": 342141,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "童文薰",
+    "gender": "女",
+    "birthDate": "1965-11-11",
+    "birthYear": 1965,
+    "party": "無",
+    "votes": 2425,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "張家豪",
+    "gender": "男",
+    "birthDate": "1985-01-11",
+    "birthYear": 1985,
+    "party": "台灣動物保護黨",
+    "votes": 2367,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "蘇煥智",
+    "gender": "男",
+    "birthDate": "1956-07-20",
+    "birthYear": 1956,
+    "party": "台灣維新",
+    "votes": 1851,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "王文娟",
+    "gender": "女",
+    "birthDate": "1963-10-28",
+    "birthYear": 1963,
+    "party": "無",
+    "votes": 451,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "鄭匡宇",
+    "gender": "男",
+    "birthDate": "1976-05-15",
+    "birthYear": 1976,
+    "party": "無",
+    "votes": 386,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "施奉先",
+    "gender": "男",
+    "birthDate": "1958-12-09",
+    "birthYear": 1958,
+    "party": "無",
+    "votes": 383,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "唐新民",
+    "gender": "男",
+    "birthDate": "1950-12-25",
+    "birthYear": 1950,
+    "party": "共和黨",
+    "votes": 316,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "黃聖峰",
+    "gender": "男",
+    "birthDate": "1979-06-30",
+    "birthYear": 1979,
+    "party": "台澎黨",
+    "votes": 256,
+    "elected": false
+  },
+  {
+    "region": "臺北市",
+    "name": "謝立康",
+    "gender": "男",
+    "birthDate": "1970-10-23",
+    "birthYear": 1970,
+    "party": "無",
+    "votes": 227,
+    "elected": false
+  },
+  {
+    "region": "新北市",
+    "name": "侯友宜",
+    "gender": "男",
+    "birthDate": "1957-06-07",
+    "birthYear": 1957,
+    "party": "中國國民黨",
+    "votes": 1152555,
+    "elected": true
+  },
+  {
+    "region": "新北市",
+    "name": "林佳龍",
+    "gender": "男",
+    "birthDate": "1964-02-13",
+    "birthYear": 1964,
+    "party": "民主進步黨",
+    "votes": 693976,
+    "elected": false
+  },
+  {
+    "region": "桃園市",
+    "name": "張善政",
+    "gender": "男",
+    "birthDate": "1954-06-24",
+    "birthYear": 1954,
+    "party": "中國國民黨",
+    "votes": 557572,
+    "elected": true
+  },
+  {
+    "region": "桃園市",
+    "name": "鄭運鵬",
+    "gender": "男",
+    "birthDate": "1973-06-02",
+    "birthYear": 1973,
+    "party": "民主進步黨",
+    "votes": 428983,
+    "elected": false
+  },
+  {
+    "region": "桃園市",
+    "name": "賴香伶",
+    "gender": "女",
+    "birthDate": "1968-01-05",
+    "birthYear": 1968,
+    "party": "台灣民眾黨",
+    "votes": 54926,
+    "elected": false
+  },
+  {
+    "region": "桃園市",
+    "name": "鄭寶清",
+    "gender": "男",
+    "birthDate": "1955-01-10",
+    "birthYear": 1955,
+    "party": "無",
+    "votes": 30282,
+    "elected": false
+  },
+  {
+    "region": "臺中市",
+    "name": "盧秀燕",
+    "gender": "女",
+    "birthDate": "1961-08-31",
+    "birthYear": 1961,
+    "party": "中國國民黨",
+    "votes": 799107,
+    "elected": true
+  },
+  {
+    "region": "臺中市",
+    "name": "蔡其昌",
+    "gender": "男",
+    "birthDate": "1969-04-16",
+    "birthYear": 1969,
+    "party": "民主進步黨",
+    "votes": 524224,
+    "elected": false
+  },
+  {
+    "region": "臺中市",
+    "name": "陳美妃",
+    "gender": "女",
+    "birthDate": "1971-04-17",
+    "birthYear": 1971,
+    "party": "無",
+    "votes": 23140,
+    "elected": false
+  },
+  {
+    "region": "臺南市",
+    "name": "黃偉哲",
+    "gender": "男",
+    "birthDate": "1963-09-26",
+    "birthYear": 1963,
+    "party": "民主進步黨",
+    "votes": 433684,
+    "elected": true
+  },
+  {
+    "region": "臺南市",
+    "name": "謝龍介",
+    "gender": "男",
+    "birthDate": "1961-10-03",
+    "birthYear": 1961,
+    "party": "中國國民黨",
+    "votes": 387731,
+    "elected": false
+  },
+  {
+    "region": "臺南市",
+    "name": "許忠信",
+    "gender": "男",
+    "birthDate": "1965-06-01",
+    "birthYear": 1965,
+    "party": "無",
+    "votes": 38697,
+    "elected": false
+  },
+  {
+    "region": "臺南市",
+    "name": "林義豐",
+    "gender": "男",
+    "birthDate": "1948-02-04",
+    "birthYear": 1948,
+    "party": "無",
+    "votes": 24606,
+    "elected": false
+  },
+  {
+    "region": "臺南市",
+    "name": "吳炳輝",
+    "gender": "男",
+    "birthDate": "1967-12-01",
+    "birthYear": 1967,
+    "party": "無",
+    "votes": 3956,
+    "elected": false
+  },
+  {
+    "region": "高雄市",
+    "name": "陳其邁",
+    "gender": "男",
+    "birthDate": "1964-12-23",
+    "birthYear": 1964,
+    "party": "民主進步黨",
+    "votes": 766147,
+    "elected": true
+  },
+  {
+    "region": "高雄市",
+    "name": "柯志恩",
+    "gender": "女",
+    "birthDate": "1962-04-29",
+    "birthYear": 1962,
+    "party": "中國國民黨",
+    "votes": 529607,
+    "elected": false
+  },
+  {
+    "region": "高雄市",
+    "name": "曾尹儷",
+    "gender": "女",
+    "birthDate": "1963-10-31",
+    "birthYear": 1963,
+    "party": "無",
+    "votes": 14585,
+    "elected": false
+  },
+  {
+    "region": "高雄市",
+    "name": "鄭宇翔",
+    "gender": "男",
+    "birthDate": "1981-10-30",
+    "birthYear": 1981,
+    "party": "無",
+    "votes": 8394,
+    "elected": false
+  },
+  {
+    "region": "新竹縣",
+    "name": "楊文科",
+    "gender": "男",
+    "birthDate": "1951-03-22",
+    "birthYear": 1951,
+    "party": "中國國民黨",
+    "votes": 163662,
+    "elected": true
+  },
+  {
+    "region": "新竹縣",
+    "name": "周江杰",
+    "gender": "男",
+    "birthDate": "1980-07-15",
+    "birthYear": 1980,
+    "party": "民主進步黨",
+    "votes": 83683,
+    "elected": false
+  },
+  {
+    "region": "新竹縣",
+    "name": "范振揆",
+    "gender": "男",
+    "birthDate": "1971-02-24",
+    "birthYear": 1971,
+    "party": "無",
+    "votes": 4874,
+    "elected": false
+  },
+  {
+    "region": "新竹縣",
+    "name": "黃秀龍",
+    "gender": "男",
+    "birthDate": "1960-06-02",
+    "birthYear": 1960,
+    "party": "無",
+    "votes": 3403,
+    "elected": false
+  },
+  {
+    "region": "新竹縣",
+    "name": "劉復嵐",
+    "gender": "男",
+    "birthDate": "1974-05-09",
+    "birthYear": 1974,
+    "party": "無",
+    "votes": 2683,
+    "elected": false
+  },
+  {
+    "region": "苗栗縣",
+    "name": "鍾東錦",
+    "gender": "男",
+    "birthDate": "1963-01-02",
+    "birthYear": 1963,
+    "party": "無",
+    "votes": 124603,
+    "elected": true
+  },
+  {
+    "region": "苗栗縣",
+    "name": "徐定禎",
+    "gender": "男",
+    "birthDate": "1961-01-03",
+    "birthYear": 1961,
+    "party": "民主進步黨",
+    "votes": 91260,
+    "elected": false
+  },
+  {
+    "region": "苗栗縣",
+    "name": "宋國鼎",
+    "gender": "男",
+    "birthDate": "1981-01-22",
+    "birthYear": 1981,
+    "party": "時代力量",
+    "votes": 39347,
+    "elected": false
+  },
+  {
+    "region": "苗栗縣",
+    "name": "謝福弘",
+    "gender": "男",
+    "birthDate": "1956-09-10",
+    "birthYear": 1956,
+    "party": "中國國民黨",
+    "votes": 32026,
+    "elected": false
+  },
+  {
+    "region": "苗栗縣",
+    "name": "吳盛聖",
+    "gender": "男",
+    "birthDate": "1979-08-02",
+    "birthYear": 1979,
+    "party": "無",
+    "votes": 4864,
+    "elected": false
+  },
+  {
+    "region": "彰化縣",
+    "name": "王惠美",
+    "gender": "女",
+    "birthDate": "1968-11-22",
+    "birthYear": 1968,
+    "party": "中國國民黨",
+    "votes": 369133,
+    "elected": true
+  },
+  {
+    "region": "彰化縣",
+    "name": "黃秀芳",
+    "gender": "女",
+    "birthDate": "1971-11-10",
+    "birthYear": 1971,
+    "party": "民主進步黨",
+    "votes": 272817,
+    "elected": false
+  },
+  {
+    "region": "彰化縣",
+    "name": "蕭仁正",
+    "gender": "男",
+    "birthDate": "1953-06-03",
+    "birthYear": 1953,
+    "party": "無",
+    "votes": 8474,
+    "elected": false
+  },
+  {
+    "region": "南投縣",
+    "name": "許淑華",
+    "gender": "女",
+    "birthDate": "1975-10-15",
+    "birthYear": 1975,
+    "party": "中國國民黨",
+    "votes": 154256,
+    "elected": true
+  },
+  {
+    "region": "南投縣",
+    "name": "蔡培慧",
+    "gender": "女",
+    "birthDate": "1971-09-02",
+    "birthYear": 1971,
+    "party": "民主進步黨",
+    "votes": 117993,
+    "elected": false
+  },
+  {
+    "region": "南投縣",
+    "name": "王永慶",
+    "gender": "男",
+    "birthDate": "1962-10-24",
+    "birthYear": 1962,
+    "party": "無",
+    "votes": 3250,
+    "elected": false
+  },
+  {
+    "region": "雲林縣",
+    "name": "張麗善",
+    "gender": "女",
+    "birthDate": "1964-01-01",
+    "birthYear": 1964,
+    "party": "中國國民黨",
+    "votes": 207519,
+    "elected": true
+  },
+  {
+    "region": "雲林縣",
+    "name": "劉建國",
+    "gender": "男",
+    "birthDate": "1969-03-09",
+    "birthYear": 1969,
+    "party": "民主進步黨",
+    "votes": 152620,
+    "elected": false
+  },
+  {
+    "region": "雲林縣",
+    "name": "林佳瑜",
+    "gender": "男",
+    "birthDate": "1959-04-06",
+    "birthYear": 1959,
+    "party": "無",
+    "votes": 6694,
+    "elected": false
+  },
+  {
+    "region": "嘉義縣",
+    "name": "翁章梁",
+    "gender": "男",
+    "birthDate": "1965-05-28",
+    "birthYear": 1965,
+    "party": "民主進步黨",
+    "votes": 171777,
+    "elected": true
+  },
+  {
+    "region": "嘉義縣",
+    "name": "王育敏",
+    "gender": "女",
+    "birthDate": "1971-04-11",
+    "birthYear": 1971,
+    "party": "中國國民黨",
+    "votes": 101517,
+    "elected": false
+  },
+  {
+    "region": "屏東縣",
+    "name": "周春米",
+    "gender": "女",
+    "birthDate": "1966-11-01",
+    "birthYear": 1966,
+    "party": "民主進步黨",
+    "votes": 217537,
+    "elected": true
+  },
+  {
+    "region": "屏東縣",
+    "name": "蘇清泉",
+    "gender": "男",
+    "birthDate": "1957-08-05",
+    "birthYear": 1957,
+    "party": "中國國民黨",
+    "votes": 206460,
+    "elected": false
+  },
+  {
+    "region": "屏東縣",
+    "name": "詹智鈞",
+    "gender": "男",
+    "birthDate": "1976-09-01",
+    "birthYear": 1976,
+    "party": "時代力量",
+    "votes": 19156,
+    "elected": false
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "林姿妙",
+    "gender": "女",
+    "birthDate": "1952-01-28",
+    "birthYear": 1952,
+    "party": "中國國民黨",
+    "votes": 119421,
+    "elected": true
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "江淵",
+    "gender": "男",
+    "birthDate": "1969-10-23",
+    "birthYear": 1969,
+    "party": "民主進步黨",
+    "votes": 96779,
+    "elected": false
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "陳琬惠",
+    "gender": "女",
+    "birthDate": "1974-09-11",
+    "birthYear": 1974,
+    "party": "台灣民眾黨",
+    "votes": 16412,
+    "elected": false
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "許鋐哲",
+    "gender": "男",
+    "birthDate": "1949-11-30",
+    "birthYear": 1949,
+    "party": "無",
+    "votes": 1036,
+    "elected": false
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "朱振東",
+    "gender": "男",
+    "birthDate": "1953-08-12",
+    "birthYear": 1953,
+    "party": "天一黨",
+    "votes": 919,
+    "elected": false
+  },
+  {
+    "region": "宜蘭縣",
+    "name": "陳秋境",
+    "gender": "男",
+    "birthDate": "1963-01-08",
+    "birthYear": 1963,
+    "party": "無",
+    "votes": 714,
+    "elected": false
+  },
+  {
+    "region": "花蓮縣",
+    "name": "徐榛蔚",
+    "gender": "女",
+    "birthDate": "1968-10-12",
+    "birthYear": 1968,
+    "party": "中國國民黨",
+    "votes": 96645,
+    "elected": true
+  },
+  {
+    "region": "花蓮縣",
+    "name": "谷辣斯．尤達卡 Kolas Yotaka",
+    "gender": "女",
+    "birthDate": "1974-03-17",
+    "birthYear": 1974,
+    "party": "民主進步黨",
+    "votes": 47845,
+    "elected": false
+  },
+  {
+    "region": "花蓮縣",
+    "name": "黄師鵬",
+    "gender": "男",
+    "birthDate": "1957-07-18",
+    "birthYear": 1957,
+    "party": "無",
+    "votes": 4817,
+    "elected": false
+  },
+  {
+    "region": "臺東縣",
+    "name": "饒慶鈴",
+    "gender": "女",
+    "birthDate": "1969-11-23",
+    "birthYear": 1969,
+    "party": "中國國民黨",
+    "votes": 68661,
+    "elected": true
+  },
+  {
+    "region": "臺東縣",
+    "name": "劉櫂豪",
+    "gender": "男",
+    "birthDate": "1967-02-02",
+    "birthYear": 1967,
+    "party": "民主進步黨",
+    "votes": 41104,
+    "elected": false
+  },
+  {
+    "region": "臺東縣",
+    "name": "陳長宏",
+    "gender": "男",
+    "birthDate": "1965-08-25",
+    "birthYear": 1965,
+    "party": "無",
+    "votes": 2383,
+    "elected": false
+  },
+  {
+    "region": "澎湖縣",
+    "name": "陳光復",
+    "gender": "男",
+    "birthDate": "1955-10-25",
+    "birthYear": 1955,
+    "party": "民主進步黨",
+    "votes": 18777,
+    "elected": true
+  },
+  {
+    "region": "澎湖縣",
+    "name": "賴峰偉",
+    "gender": "男",
+    "birthDate": "1953-09-20",
+    "birthYear": 1953,
+    "party": "中國國民黨",
+    "votes": 17081,
+    "elected": false
+  },
+  {
+    "region": "澎湖縣",
+    "name": "葉竹林",
+    "gender": "男",
+    "birthDate": "1962-01-06",
+    "birthYear": 1962,
+    "party": "無",
+    "votes": 15384,
+    "elected": false
+  },
+  {
+    "region": "基隆市",
+    "name": "謝國樑",
+    "gender": "男",
+    "birthDate": "1975-10-05",
+    "birthYear": 1975,
+    "party": "中國國民黨",
+    "votes": 96784,
+    "elected": true
+  },
+  {
+    "region": "基隆市",
+    "name": "蔡適應",
+    "gender": "男",
+    "birthDate": "1973-06-14",
+    "birthYear": 1973,
+    "party": "民主進步黨",
+    "votes": 71354,
+    "elected": false
+  },
+  {
+    "region": "基隆市",
+    "name": "陳薇仲",
+    "gender": "女",
+    "birthDate": "1990-10-07",
+    "birthYear": 1990,
+    "party": "時代力量",
+    "votes": 12000,
+    "elected": false
+  },
+  {
+    "region": "基隆市",
+    "name": "黃希賢",
+    "gender": "男",
+    "birthDate": "1965-10-07",
+    "birthYear": 1965,
+    "party": "無",
+    "votes": 2136,
+    "elected": false
+  },
+  {
+    "region": "基隆市",
+    "name": "曾國民",
+    "gender": "男",
+    "birthDate": "1962-01-27",
+    "birthYear": 1962,
+    "party": "無",
+    "votes": 619,
+    "elected": false
+  },
+  {
+    "region": "新竹市",
+    "name": "高虹安",
+    "gender": "女",
+    "birthDate": "1984-01-25",
+    "birthYear": 1984,
+    "party": "台灣民眾黨",
+    "votes": 98121,
+    "elected": true
+  },
+  {
+    "region": "新竹市",
+    "name": "沈慧虹",
+    "gender": "女",
+    "birthDate": "1967-03-03",
+    "birthYear": 1967,
+    "party": "民主進步黨",
+    "votes": 77764,
+    "elected": false
+  },
+  {
+    "region": "新竹市",
+    "name": "林耕仁",
+    "gender": "男",
+    "birthDate": "1960-11-30",
+    "birthYear": 1960,
+    "party": "中國國民黨",
+    "votes": 39391,
+    "elected": false
+  },
+  {
+    "region": "新竹市",
+    "name": "李驥羣",
+    "gender": "男",
+    "birthDate": "1956-02-15",
+    "birthYear": 1956,
+    "party": "無",
+    "votes": 1108,
+    "elected": false
+  },
+  {
+    "region": "新竹市",
+    "name": "黃源甫",
+    "gender": "男",
+    "birthDate": "1954-05-26",
+    "birthYear": 1954,
+    "party": "無",
+    "votes": 1049,
+    "elected": false
+  },
+  {
+    "region": "新竹市",
+    "name": "龔偉綸",
+    "gender": "男",
+    "birthDate": "1982-05-26",
+    "birthYear": 1982,
+    "party": "無",
+    "votes": 508,
+    "elected": false
+  },
+  {
+    "region": "金門縣",
+    "name": "陳福海",
+    "gender": "男",
+    "birthDate": "1963-06-03",
+    "birthYear": 1963,
+    "party": "無",
+    "votes": 23248,
+    "elected": true
+  },
+  {
+    "region": "金門縣",
+    "name": "楊鎮浯",
+    "gender": "男",
+    "birthDate": "1972-06-26",
+    "birthYear": 1972,
+    "party": "中國國民黨",
+    "votes": 19340,
+    "elected": false
+  },
+  {
+    "region": "金門縣",
+    "name": "李應文",
+    "gender": "男",
+    "birthDate": "1979-04-12",
+    "birthYear": 1979,
+    "party": "無",
+    "votes": 3459,
+    "elected": false
+  },
+  {
+    "region": "金門縣",
+    "name": "洪志恒",
+    "gender": "男",
+    "birthDate": "1968-10-07",
+    "birthYear": 1968,
+    "party": "無",
+    "votes": 752,
+    "elected": false
+  },
+  {
+    "region": "金門縣",
+    "name": "朱紀瑋",
+    "gender": "男",
+    "birthDate": "1961-02-18",
+    "birthYear": 1961,
+    "party": "龍黨",
+    "votes": 174,
+    "elected": false
+  },
+  {
+    "region": "金門縣",
+    "name": "林志錦",
+    "gender": "男",
+    "birthDate": "1972-05-07",
+    "birthYear": 1972,
+    "party": "無",
+    "votes": 141,
+    "elected": false
+  },
+  {
+    "region": "連江縣",
+    "name": "王忠銘",
+    "gender": "男",
+    "birthDate": "1958-02-27",
+    "birthYear": 1958,
+    "party": "中國國民黨",
+    "votes": 4337,
+    "elected": true
+  },
+  {
+    "region": "連江縣",
+    "name": "曹爾元",
+    "gender": "男",
+    "birthDate": "1958-06-26",
+    "birthYear": 1958,
+    "party": "中國國民黨",
+    "votes": 3582,
+    "elected": false
+  },
+  {
+    "region": "連江縣",
+    "name": "李問",
+    "gender": "男",
+    "birthDate": "1989-03-04",
+    "birthYear": 1989,
+    "party": "民主進步黨",
+    "votes": 586,
+    "elected": false
+  }
+]

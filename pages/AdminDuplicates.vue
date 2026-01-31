@@ -2,8 +2,9 @@
 import { ref, computed, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
-import { 
-  Users, Trash2, ShieldAlert, CheckCircle2, 
+import AdminNav from '../components/AdminNav.vue'
+import {
+  Users, Trash2, ShieldAlert, CheckCircle2,
   ExternalLink, Search, RefreshCw, Layers, Check, Loader2
 } from 'lucide-vue-next'
 
@@ -146,13 +147,14 @@ async function mergeDuplicate(name: string) {
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #badge>管理後台</template>
-      <template #title>資料核對與清理中心</template>
-      <template #description>對接中選會官方資料庫，精確比對出生年與身份，確保政治人物資料的唯一性與準確性。</template>
-      <template #icon><ShieldAlert :size="400" class="text-rose-500 opacity-20" /></template>
+      <template #title>重複資料清理</template>
+      <template #description>比對出生年與身份，確保政治人物資料的唯一性與準確性</template>
+      <template #icon><ShieldAlert :size="400" class="text-rose-500" /></template>
+
+      <AdminNav />
     </Hero>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-10 relative z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-200">
         <div class="flex flex-col md:flex-row justify-between items-center gap-4">
           <div class="flex items-center gap-4">

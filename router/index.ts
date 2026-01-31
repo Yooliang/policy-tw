@@ -60,6 +60,18 @@ const router = createRouter({
       component: () => import('../pages/AdminDuplicates.vue'),
     },
     {
+      path: '/admin/ai',
+      component: () => import('../pages/AdminAI.vue'),
+    },
+    {
+      path: '/admin/import',
+      component: () => import('../pages/AdminImport.vue'),
+    },
+    {
+      path: '/verify',
+      component: () => import('../pages/VerifyContent.vue'),
+    },
+    {
       path: '/auth/callback',
       component: () => import('../pages/AuthCallback.vue'),
     },

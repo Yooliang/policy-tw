@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
+import AdminNav from '../components/AdminNav.vue'
 import { Database, CheckCircle2, Pause, Users, Activity, Loader2, Sparkles, XCircle, Clock, MapPin } from 'lucide-vue-next'
 
 const { politicians, fetchAll } = useSupabase()
@@ -450,12 +451,14 @@ onMounted(loadProgress)
 <template>
   <div class="bg-slate-50 min-h-screen">
     <Hero>
-      <template #badge>管理後台</template>
       <template #title>中選會資料抓取</template>
+      <template #description>從中選會 API 抓取候選人資料並匯入資料庫</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
+
+      <AdminNav />
     </Hero>
 
-    <div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <!-- 左側欄 -->
         <div class="lg:col-span-1 space-y-4">
