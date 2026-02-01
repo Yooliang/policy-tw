@@ -41,9 +41,16 @@ COMMENT ON COLUMN ai_prompts.review_notes IS '審核備註';
 COMMENT ON COLUMN ai_prompts.user_input IS '原始使用者輸入文字';
 
 -- Update RLS to allow public read of own prompts
-CREATE POLICY IF NOT EXISTS "Users can view own prompts" ON ai_prompts
-    FOR SELECT
-    USING (created_by = auth.uid());
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE policyname = 'Users can view own prompts' AND tablename = 'ai_prompts'
+    ) THEN
+        CREATE POLICY "Users can view own prompts" ON ai_prompts
+            FOR SELECT
+            USING (created_by = auth.uid());
+    END IF;
+END $$;
 
 -- Allow authenticated users to insert
 DROP POLICY IF EXISTS "Authenticated users can insert" ON ai_prompts;
