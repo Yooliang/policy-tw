@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Github, Twitter, Mail } from 'lucide-vue-next'
+import { Github, Twitter, Mail, Sparkles } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -31,6 +31,12 @@ const activeElection = computed(() => getActiveElection())
             <li><RouterLink to="/tracking" class="hover:text-blue-400 transition-colors">政見追蹤</RouterLink></li>
             <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">AI 智能分析</RouterLink></li>
             <li><RouterLink to="/regional-data" class="hover:text-blue-400 transition-colors">縣市數據分佈</RouterLink></li>
+            <li>
+              <RouterLink to="/ai-chat" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1">
+                <Sparkles :size="14" />
+                AI 助手
+              </RouterLink>
+            </li>
             <li v-if="activeElection">
               <RouterLink :to="`/election/${activeElection.id}`" class="hover:text-blue-400 transition-colors">
                 {{ activeElection.shortName }}

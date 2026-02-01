@@ -72,6 +72,10 @@ const router = createRouter({
       component: () => import('../pages/VerifyContent.vue'),
     },
     {
+      path: '/ai-chat',
+      component: () => import('../pages/AIChat.vue'),
+    },
+    {
       path: '/auth/callback',
       component: () => import('../pages/AuthCallback.vue'),
     },
