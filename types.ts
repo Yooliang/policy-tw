@@ -44,6 +44,9 @@ export interface Region {
   village?: string;      // Village (村里)
 }
 
+// Candidate status for elections
+export type CandidateStatus = 'confirmed' | 'likely' | 'rumored';
+
 // Election-specific data for a politician
 export interface PoliticianElectionData {
   electionId: number;
@@ -54,6 +57,8 @@ export interface PoliticianElectionData {
   region: string;        // Region name (選區)
   subRegion?: string;    // Sub-region (子選區)
   village?: string;      // Village (村里)
+  candidateStatus?: CandidateStatus; // 參選狀態：confirmed(已宣布)、likely(可能參選)、rumored(傳聞)
+  sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
 }
 
 export enum PoliticianStatus {
@@ -82,6 +87,8 @@ export interface Politician {
   educationLevel?: string;
   education?: string[];
   experience?: string[];
+  candidateStatus?: CandidateStatus; // 參選狀態 (for current election context)
+  sourceNote?: string; // 來源備註 (for current election context)
 
   // Election-specific data (new)
   elections?: PoliticianElectionData[];

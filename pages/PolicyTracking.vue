@@ -65,10 +65,10 @@ const filteredPolicies = computed(() => {
       <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項治理承諾都在正確的軌道上。</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
 
-      <div class="space-y-6">
+      <div class="space-y-2">
         <GlobalRegionSelector />
 
-        <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+        <div class="flex flex-col lg:flex-row gap-4 items-center">
           <!-- 搜尋框 -->
           <div class="relative flex-1 w-full">
             <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />

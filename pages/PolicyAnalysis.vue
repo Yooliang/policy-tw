@@ -61,10 +61,10 @@ const relayCases = computed(() => {
       <template #description>這不是單一政見的陳列。我們將跨任期、跨黨派的重大建設案進行聚合，<br class="hidden lg:block" />分析每一根治理接力棒的傳承品質，提供具備行政歷史深度的稽核數據。</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
-      <div class="space-y-6">
+      <div class="space-y-2">
         <GlobalRegionSelector />
 
-        <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+        <div class="flex flex-col lg:flex-row gap-4 items-center">
           <!-- 搜尋框 -->
           <div class="relative flex-1 w-full">
             <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />

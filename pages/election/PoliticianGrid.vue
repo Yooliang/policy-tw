@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
-import { PolicyStatus, type Politician } from '../../types'
+import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
 import { ArrowRight, Megaphone, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
@@ -17,6 +17,31 @@ const collapsed = ref(false)
 
 const getPledgeCount = (politicianId: string | number) =>
   policies.value.filter(p => String(p.politicianId) === String(politicianId) && p.status === PolicyStatus.CAMPAIGN).length
+
+// 參選狀態顯示
+const candidateStatusLabel = (status?: CandidateStatus) => {
+  switch (status) {
+    case 'confirmed': return null  // 已確認參選不需特別標註
+    case 'likely': return '可能參選'
+    case 'rumored': return '傳聞'
+    default: return null
+  }
+}
+
+const candidateStatusColor = (status?: CandidateStatus) => {
+  switch (status) {
+    case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
+    case 'rumored': return 'bg-slate-100 text-slate-500 border-slate-200'
+    default: return ''
+  }
+}
+
+// 顯示備註（移除 AI搜尋匯入 前綴）
+const displayNote = (note?: string) => {
+  if (!note) return null
+  // 移除 "AI搜尋匯入: " 或 "AI搜尋匯入" 前綴
+  return note.replace(/^AI搜尋匯入[：:]?\s*/, '') || null
+}
 
 </script>
 
@@ -53,10 +78,19 @@ const getPledgeCount = (politicianId: string | number) =>
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-start">
             <div class="text-left">
-              <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">{{ politician.name }}</h3>
+              <div class="flex items-center gap-2">
+                <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">{{ politician.name }}</h3>
+                <span
+                  v-if="candidateStatusLabel(politician.candidateStatus)"
+                  :class="`text-[10px] px-1.5 py-0.5 rounded border font-bold ${candidateStatusColor(politician.candidateStatus)}`"
+                >
+                  {{ candidateStatusLabel(politician.candidateStatus) }}
+                </span>
+              </div>
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
                 <span v-if="politician.subRegion" class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mt-1 w-fit">{{ politician.subRegion }}</span>
+                <p v-if="displayNote(politician.sourceNote)" class="text-xs text-slate-400 mt-1 line-clamp-2">{{ displayNote(politician.sourceNote) }}</p>
               </div>
             </div>
             <ArrowRight class="text-slate-300 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" :size="20" />

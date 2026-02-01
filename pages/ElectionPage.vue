@@ -367,24 +367,21 @@ const electionLevels = [
       </template>
       <template #description>不僅是縣市長，我們深入記錄議員、鄉鎮代表等基層候選人的競選承諾。</template>
 
-      <!-- View Mode Tabs in default slot (overlapping white bar) -->
-      <div class="space-y-6">
+      <!-- Hero Actions: View Mode Tabs -->
+      <template #actions>
+        <button @click="viewMode = 'politicians'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><LayoutGrid :size="16" /> 候選人</button>
+        <button @click="viewMode = 'pledges'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'pledges' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Megaphone :size="16" /> 競選承諾</button>
+        <button @click="viewMode = 'issues'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'issues' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Layers :size="16" /> 議題串聯</button>
+        <button @click="viewMode = 'comparison'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'comparison' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Scale :size="16" /> 政見 PK</button>
+      </template>
+
+      <!-- White bar: Region selector and election name -->
+      <div class="space-y-4">
         <GlobalRegionSelector />
 
-        <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
-          <!-- 標題（樣式同搜尋框，但不可編輯） -->
-          <div class="flex-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-navy-900 font-medium flex items-center gap-2">
-            <Vote :size="18" class="text-slate-400 shrink-0" />
-            <span>{{ election.name }}</span>
-          </div>
-
-          <!-- 頁籤 -->
-          <div class="flex bg-slate-100 p-1 rounded-xl overflow-x-auto w-full lg:w-auto">
-            <button @click="viewMode = 'politicians'" :class="`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><LayoutGrid :size="16" /> 候選人</button>
-            <button @click="viewMode = 'pledges'" :class="`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'pledges' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Megaphone :size="16" /> 競選承諾</button>
-            <button @click="viewMode = 'issues'" :class="`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'issues' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Layers :size="16" /> 議題串聯</button>
-            <button @click="viewMode = 'comparison'" :class="`px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap ${viewMode === 'comparison' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"><Scale :size="16" /> 政見 PK</button>
-          </div>
+        <div class="flex items-center gap-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-navy-900 font-medium">
+          <Vote :size="18" class="text-slate-400 shrink-0" />
+          <span>{{ election.name }}</span>
         </div>
       </div>
     </Hero>

@@ -13,7 +13,7 @@ defineProps<{
   <div :class="`relative ${className || ''}`">
     <!-- Dark Section -->
     <section
-      class="bg-navy-900 text-white relative h-[330px] flex items-end overflow-hidden"
+      class="bg-navy-900 text-white relative min-h-[330px] pt-16 md:pt-0 md:h-[330px] flex items-end overflow-hidden"
       :style="backgroundImage ? {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: 'cover',

@@ -126,10 +126,10 @@ function getCommentCount(post: Discussion) {
       <template #description>這裡不只是政見的展示架，更是公民意志的集散地。針對每一項政策提出您的見解、疑問或支持，讓改變從對話開始。</template>
       <template #icon><MessageSquare :size="400" class="text-blue-500" /></template>
 
-        <div class="space-y-6">
+        <div class="space-y-2">
           <GlobalRegionSelector />
 
-          <div class="flex flex-col lg:flex-row gap-4 items-center border-t border-slate-100 pt-6">
+          <div class="flex flex-col lg:flex-row gap-4 items-center">
             <!-- 搜尋框 -->
             <div class="relative flex-1 w-full">
               <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />

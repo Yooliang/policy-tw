@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 
 import { useSupabase } from '../composables/useSupabase'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -10,17 +10,47 @@ import { ArrowRight, Users, FileCheck, Vote, Star, TrendingUp } from 'lucide-vue
 import { RouterLink, useRouter } from 'vue-router'
 
 const router = useRouter()
-const { policies, politicians, elections } = useSupabase()
+const { policies, politicians, elections, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory } = useSupabase()
 
 const checkpointIds = ref<string[]>([])
+const politicians2026CountDirect = ref<number | null>(null)
+const totalPoliticiansCount = ref<number | null>(null)
+const categoryDataFromDB = ref<{ name: string; count: number }[]>([])
 
 const loadCheckpoints = () => {
   checkpointIds.value = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
 }
 
+// 載入首頁統計資料
+async function loadHomeStats() {
+  // 2026 選舉人數
+  const election = elections.value.find(e => e.name.includes('2026'))
+  if (election && politicians2026CountDirect.value === null) {
+    politicians2026CountDirect.value = await getElectionPoliticianCount(election.id)
+  }
+
+  // 總政治人物數
+  if (totalPoliticiansCount.value === null) {
+    totalPoliticiansCount.value = await getTotalPoliticianCount()
+  }
+
+  // 各分類政見數
+  if (categoryDataFromDB.value.length === 0) {
+    categoryDataFromDB.value = await getPoliciesByCategory()
+  }
+}
+
 onMounted(() => {
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
+  loadHomeStats()
+})
+
+// 當 elections 載入後再試一次
+watch(() => elections.value.length, () => {
+  if (elections.value.length > 0) {
+    loadHomeStats()
+  }
 })
 
 onUnmounted(() => {
@@ -38,12 +68,17 @@ const statusData = computed(() => [
   { name: '提出', value: policies.value.filter(p => p.status === 'Proposed').length, color: '#94a3b8' },
 ])
 
-const totalPoliticians = computed(() => politicians.value.length)
+const totalPoliticians = computed(() => totalPoliticiansCount.value ?? politicians.value.length)
 
-// 2026 選舉專區統計 - 只計算 2026 九合一選舉的人數
+// 2026 選舉專區統計 - 使用直接從 DB 查詢的數量
 const election2026 = computed(() => elections.value.find(e => e.name.includes('2026')))
 const politicians2026Count = computed(() => {
-  if (!election2026.value) return politicians.value.length
+  // 優先使用直接查詢的結果
+  if (politicians2026CountDirect.value !== null) {
+    return politicians2026CountDirect.value
+  }
+  // 備用：從已載入的資料計算
+  if (!election2026.value) return 0
   const electionId = election2026.value.id
   return politicians.value.filter(p => p.electionIds?.includes(electionId)).length
 })
@@ -54,21 +89,13 @@ const averageProgress = computed(() => {
   return Math.round(sum / policies.value.length)
 })
 
-const categoryData = [
-  { name: '交通', count: 12 },
-  { name: '都更', count: 8 },
-  { name: '社福', count: 15 },
-  { name: '經濟', count: 10 },
-  { name: '教育', count: 7 },
-]
-
 const recentPolicies = computed(() => policies.value.slice(0, 3))
 
-const barOptions = {
+const barOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false } },
   plotOptions: { bar: { borderRadius: 8, columnWidth: '48px' } },
   xaxis: {
-    categories: categoryData.map(d => d.name),
+    categories: categoryDataFromDB.value.map(d => d.name),
     labels: { style: { colors: '#94a3b8', fontSize: '12px', fontWeight: 'bold' } },
     axisBorder: { show: false },
     axisTicks: { show: false },
@@ -80,8 +107,8 @@ const barOptions = {
   colors: ['#2563eb'],
   tooltip: { theme: 'light' },
   dataLabels: { enabled: false },
-}
-const barSeries = [{ name: 'count', data: categoryData.map(d => d.count) }]
+}))
+const barSeries = computed(() => [{ name: 'count', data: categoryDataFromDB.value.map(d => d.count) }])
 
 const donutOptions = computed(() => ({
   chart: { type: 'donut' as const },
@@ -156,15 +183,19 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
             <p class="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已建檔政治人物</p>
           </div>
 
-          <div class="md:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px]">
-            <h3 class="text-xl font-bold text-navy-900 mb-6">熱門議題稽核分佈</h3>
-            <apexchart type="bar" height="85%" :options="barOptions" :series="barSeries" />
+          <div class="md:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col overflow-hidden">
+            <h3 class="text-xl font-bold text-navy-900 mb-4 shrink-0">熱門議題稽核分佈</h3>
+            <div class="flex-1 min-h-0">
+              <apexchart type="bar" height="100%" :options="barOptions" :series="barSeries" />
+            </div>
           </div>
 
-          <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px]">
-            <h3 class="text-xl font-bold text-navy-900 mb-6">政見執行狀態</h3>
-            <apexchart type="donut" height="75%" :options="donutOptions" :series="donutSeries" />
-            <div class="flex flex-wrap justify-center gap-4 text-[10px] font-black text-slate-400 mt-4 uppercase tracking-widest">
+          <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col overflow-hidden">
+            <h3 class="text-xl font-bold text-navy-900 mb-4 shrink-0">政見執行狀態</h3>
+            <div class="flex-1 min-h-0">
+              <apexchart type="donut" height="100%" :options="donutOptions" :series="donutSeries" />
+            </div>
+            <div class="flex flex-wrap justify-center gap-4 text-[10px] font-black text-slate-400 mt-2 uppercase tracking-widest shrink-0">
               <div v-for="item in statusData" :key="item.name" class="flex items-center gap-1.5">
                 <div class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: item.color }"></div>
                 {{ item.name }}
@@ -245,7 +276,7 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
 
 /* 2026 Election Special Zone - 侵入 Hero */
 .election-2026-section {
-  margin-top: -110px;
+  margin-top: -90px;
   position: relative;
   z-index: 10;
 }

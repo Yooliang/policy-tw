@@ -70,7 +70,12 @@ function mapPolitician(row: any): Politician {
     region: e.region || '',
     subRegion: e.subRegion || undefined,
     village: e.village || undefined,
+    candidateStatus: e.candidateStatus || undefined,
+    sourceNote: e.sourceNote || undefined,
   }));
+
+  // Get candidateStatus from the first election (for display purposes)
+  const firstElection = elections[0];
 
   return {
     id: row.id,
@@ -92,6 +97,8 @@ function mapPolitician(row: any): Politician {
     electionIds: row.election_ids || [],
     birthYear: row.birth_year || undefined,
     educationLevel: row.education_level || undefined,
+    candidateStatus: firstElection?.candidateStatus || undefined,
+    sourceNote: firstElection?.sourceNote || undefined,
     // New: election-specific data array
     elections,
   }
@@ -186,7 +193,7 @@ async function fetchAll() {
       fetchAllRows('election_types', 'election_id, type'),
       supabase.from('categories').select('name'),
       supabase.from('locations').select('name'),
-      supabase.from('regions').select('*'),
+      supabase.from('regions').select('*').is('village', null),  // 只撈縣市和鄉鎮層級，不撈村里
       supabase.from('electoral_district_areas').select('*'),
       fetchAllRows('policies_with_logs'),
       fetchAllRows('discussions_full'),
@@ -312,7 +319,22 @@ async function loadPoliticiansByElection(
       throw error
     }
 
-    const pols = (data || []).map(mapPolitician)
+    const pols = (data || []).map(mapPolitician).map(p => {
+      // 覆蓋為當前選舉的資料（避免顯示舊選舉的 candidateStatus/sourceNote）
+      const currentElection = p.elections?.find(e => e.electionId === electionId)
+      if (currentElection) {
+        return {
+          ...p,
+          candidateStatus: currentElection.candidateStatus,
+          sourceNote: currentElection.sourceNote,
+          position: currentElection.position || p.position,
+          electionType: currentElection.electionType || p.electionType,
+          region: currentElection.region || p.region,
+          subRegion: currentElection.subRegion || p.subRegion,
+        }
+      }
+      return p
+    })
     console.log(`[loadByElection] DB 返回 ${pols.length} 位候選人`)
     if (pols.length > 0) {
       console.log(`[loadByElection] 範例:`, pols.slice(0, 3).map(p => ({ name: p.name, type: p.electionType, region: p.region })))
@@ -380,6 +402,59 @@ export function useSupabase() {
     fetchAll()
   }
 
+  // 取得特定選舉的候選人數量（不載入完整資料）
+  async function getElectionPoliticianCount(electionId: number): Promise<number> {
+    const { count, error } = await supabase
+      .from('politician_elections')
+      .select('*', { count: 'exact', head: true })
+      .eq('election_id', electionId)
+
+    if (error) {
+      console.error('Failed to get election politician count:', error)
+      return 0
+    }
+    return count || 0
+  }
+
+  // 取得政治人物總數（不載入完整資料）
+  async function getTotalPoliticianCount(): Promise<number> {
+    const { count, error } = await supabase
+      .from('politicians')
+      .select('*', { count: 'exact', head: true })
+
+    if (error) {
+      console.error('Failed to get total politician count:', error)
+      return 0
+    }
+    return count || 0
+  }
+
+  // 取得各分類的政見數量
+  async function getPoliciesByCategory(): Promise<{ name: string; count: number }[]> {
+    const { data, error } = await supabase
+      .from('policies')
+      .select('category')
+
+    if (error) {
+      console.error('Failed to get policies by category:', error)
+      return []
+    }
+
+    // 計算每個分類的數量
+    const counts: Record<string, number> = {}
+    for (const row of data || []) {
+      if (row.category) {
+        counts[row.category] = (counts[row.category] || 0) + 1
+      }
+    }
+
+    // 轉換為陣列並排序
+    return Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6)  // 只取前 6 個
+  }
+
   return {
     elections,
     politicians,
@@ -403,5 +478,8 @@ export function useSupabase() {
     getPoliticianElectionData,
     getElectoralDistrictByTownship,
     getTownshipsByElectoralDistrict,
+    getElectionPoliticianCount,
+    getTotalPoliticianCount,
+    getPoliciesByCategory,
   }
 }

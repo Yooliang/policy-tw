@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { TrendingUp, FileText, Activity, Heart, Menu, X, Vote, MessageSquare, LogIn, LogOut, Loader2 } from 'lucide-vue-next'
+import { TrendingUp, FileText, Activity, Heart, X, Vote, MessageSquare, LogIn, LogOut, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 
-const isOpen = ref(false)
 const isLoginModalOpen = ref(false)
 const isLoggingIn = ref(false)
 const route = useRoute()
@@ -36,20 +35,21 @@ const activeElection = computed(() => getActiveElection())
 
 const navItems = computed(() => {
   const items = [
-    { name: '總覽', path: '/', icon: Activity },
-    { name: '政見追蹤', path: '/tracking', icon: TrendingUp },
-    { name: '智能分析', path: '/analysis', icon: FileText },
-    { name: '公民參與', path: '/community', icon: MessageSquare },
+    { name: '總覽', shortName: '總覽', path: '/', icon: Activity },
+    { name: '政見追蹤', shortName: '追蹤', path: '/tracking', icon: TrendingUp },
+    { name: '智能分析', shortName: '分析', path: '/analysis', icon: FileText },
+    { name: '公民參與', shortName: '參與', path: '/community', icon: MessageSquare },
   ]
-  
+
   if (activeElection.value) {
-    items.push({ 
-      name: activeElection.value.shortName, 
-      path: `/election/${activeElection.value.id}`, 
-      icon: Vote 
+    items.push({
+      name: activeElection.value.shortName,
+      shortName: '選舉',
+      path: `/election/${activeElection.value.id}`,
+      icon: Vote
     })
   }
-  
+
   return items
 })
 
@@ -62,54 +62,58 @@ const isActive = (path: string) => route.path === path
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center">
-          <RouterLink to="/" class="flex-shrink-0 flex items-center gap-2 group">
-            <div class="w-8 h-8 bg-blue-600 rounded-sm flex items-center justify-center group-hover:bg-blue-500 transition-colors">
-              <Vote :size="18" class="text-white" />
+          <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
+            <div class="bg-blue-600 rounded-md flex items-center justify-center group-hover:bg-blue-500 transition-colors overflow-hidden shadow-lg" style="width: 37px; height: 45px; min-width: 32px; min-height: 32px; margin: -10px 0;">
+              <span class="text-white font-black text-[28px] leading-none">正</span>
             </div>
-            <span class="font-bold text-xl tracking-wide">正見</span>
+            <span class="font-bold text-xl tracking-wide hidden min-[500px]:inline">見</span>
           </RouterLink>
         </div>
 
-        <div class="hidden md:block">
-          <div class="ml-10 flex items-center space-x-1">
+        <!-- Nav Items: Always visible, shorter text on mobile -->
+        <div class="flex-1 flex justify-center">
+          <div class="flex items-center space-x-0.5 sm:space-x-1">
             <RouterLink
               v-for="item in navItems"
               :key="item.name"
               :to="item.path"
-              :class="`flex flex-col items-center justify-center px-4 py-1.5 rounded-xl text-xs font-bold transition-colors duration-200 min-w-[72px] ${
+              :class="`flex flex-col items-center justify-center px-2 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold transition-colors duration-200 min-w-[48px] sm:min-w-[72px] ${
                 isActive(item.path)
                   ? 'bg-navy-800 text-blue-400 border border-navy-700'
                   : 'text-gray-400 hover:bg-navy-800 hover:text-white'
               }`"
             >
-              <component :is="item.icon" :size="20" class="mb-1" />
-              <span>{{ item.name }}</span>
+              <component :is="item.icon" :size="18" class="mb-0.5 sm:mb-1" />
+              <span class="sm:hidden">{{ item.shortName }}</span>
+              <span class="hidden sm:inline">{{ item.name }}</span>
             </RouterLink>
           </div>
         </div>
 
-        <div class="hidden md:flex items-center gap-2 flex-shrink-0">
-          <RouterLink to="/donation" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all shadow-lg hover:shadow-blue-500/20 whitespace-nowrap">
+        <!-- Right Side Actions -->
+        <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          <!-- Donation: Circle on mobile, rectangle on desktop -->
+          <RouterLink to="/donation" class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 sm:w-auto sm:h-auto sm:px-3 sm:py-2 rounded-full sm:rounded-md text-sm font-bold flex items-center justify-center sm:gap-1.5 transition-all shadow-lg hover:shadow-red-500/20 whitespace-nowrap">
             <Heart :size="16" class="fill-current" />
-            <span>贊助平台</span>
+            <span class="hidden sm:inline">贊助平台</span>
           </RouterLink>
 
           <!-- User Avatar (Logged In) -->
           <template v-if="isAuthenticated">
             <button
               @click="isLoginModalOpen = true"
-              class="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-full text-sm font-bold transition-all border border-white/20"
+              class="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 text-white p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-white/20"
             >
               <img
                 v-if="userAvatarUrl"
                 :src="userAvatarUrl"
                 :alt="userDisplayName"
-                class="w-7 h-7 rounded-full object-cover"
+                class="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover"
               />
-              <div v-else class="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
+              <div v-else class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
                 {{ userDisplayName.charAt(0).toUpperCase() }}
               </div>
-              <span class="max-w-[100px] truncate">{{ userDisplayName }}</span>
+              <span class="hidden sm:inline max-w-[100px] truncate">{{ userDisplayName }}</span>
             </button>
           </template>
 
@@ -117,77 +121,16 @@ const isActive = (path: string) => route.path === path
           <template v-else>
             <button
               @click="isLoginModalOpen = true"
-              class="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all border border-white/20 whitespace-nowrap"
+              class="bg-white/10 hover:bg-white/20 text-white p-2 sm:px-3 sm:py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all border border-white/20 whitespace-nowrap"
             >
               <LogIn :size="16" />
-              <span>登入</span>
+              <span class="hidden sm:inline">登入</span>
             </button>
           </template>
         </div>
-
-        <div class="-mr-2 flex md:hidden">
-          <button
-            @click="isOpen = !isOpen"
-            class="bg-navy-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-navy-700 focus:outline-none"
-          >
-            <X v-if="isOpen" :size="24" />
-            <Menu v-else :size="24" />
-          </button>
-        </div>
       </div>
     </div>
 
-    <!-- Mobile menu -->
-    <div v-if="isOpen" class="md:hidden bg-navy-800">
-      <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.name"
-          :to="item.path"
-          @click="isOpen = false"
-          :class="`block px-3 py-2 rounded-md text-base font-medium flex items-center gap-3 ${
-            isActive(item.path) ? 'bg-navy-900 text-white' : 'text-gray-300 hover:bg-navy-700 hover:text-white'
-          }`"
-        >
-          <component :is="item.icon" :size="18" />
-          {{ item.name }}
-        </RouterLink>
-        <RouterLink
-          to="/donation"
-          @click="isOpen = false"
-          class="block px-3 py-2 rounded-md text-base font-medium text-blue-400 hover:text-blue-300 flex items-center gap-3"
-        >
-          <Heart :size="18" />
-          贊助平台
-        </RouterLink>
-        <template v-if="isAuthenticated">
-          <button
-            @click="isOpen = false; isLoginModalOpen = true"
-            class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-navy-700 hover:text-white flex items-center gap-3"
-          >
-            <img
-              v-if="userAvatarUrl"
-              :src="userAvatarUrl"
-              :alt="userDisplayName"
-              class="w-6 h-6 rounded-full object-cover"
-            />
-            <div v-else class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-              {{ userDisplayName.charAt(0).toUpperCase() }}
-            </div>
-            {{ userDisplayName }}
-          </button>
-        </template>
-        <template v-else>
-          <button
-            @click="isOpen = false; isLoginModalOpen = true"
-            class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-gray-300 hover:bg-navy-700 hover:text-white flex items-center gap-3"
-          >
-            <LogIn :size="18" />
-            登入
-          </button>
-        </template>
-      </div>
-    </div>
 
     <!-- Login/Profile Modal -->
     <div v-if="isLoginModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="isLoginModalOpen = false">

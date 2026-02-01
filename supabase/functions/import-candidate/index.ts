@@ -78,6 +78,28 @@ Deno.serve(async (req) => {
       );
     }
 
+    // 過濾無效的候選人名稱
+    const invalidNamePatterns = [
+      '未定', '待定', '待確認', '尚待確認', '未知', '未定人選',
+      '其他', '人選', '可能人選', '潛在人選', '待公布',
+    ];
+    const nameLower = candidate.name.toLowerCase();
+    const isInvalidName = invalidNamePatterns.some(p => candidate.name.includes(p)) ||
+      candidate.name.length < 2 ||
+      candidate.name.length > 10 ||
+      /^[a-zA-Z\s]+$/.test(candidate.name); // 純英文名
+
+    if (isInvalidName) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          skipped: true,
+          message: `跳過無效名稱: ${candidate.name}`,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Find or create election for the year
     let { data: election } = await supabaseService
       .from("elections")
@@ -135,7 +157,9 @@ Deno.serve(async (req) => {
         .insert({
           name: candidate.name,
           party: party,
+          position: candidate.position,
           region: candidate.region,
+          current_position: candidate.current_position || null,
           bio: candidate.current_position ? `現任${candidate.current_position}` : null,
         })
         .select("id")
@@ -150,17 +174,31 @@ Deno.serve(async (req) => {
     // Check if politician_election already exists
     const { data: existingPE } = await supabaseService
       .from("politician_elections")
-      .select("id")
+      .select("id, candidate_status")
       .eq("politician_id", politician.id)
       .eq("election_id", election.id)
       .single();
 
     if (existingPE) {
+      // Update existing record with new status
+      const { error: updateError } = await supabaseService
+        .from("politician_elections")
+        .update({
+          candidate_status: candidate.status || existingPE.candidate_status || "rumored",
+          source_note: `AI搜尋匯入${candidate.note ? `: ${candidate.note}` : ""}`,
+        })
+        .eq("id", existingPE.id);
+
+      if (updateError) {
+        throw new Error(`Failed to update politician_election: ${updateError.message}`);
+      }
+
       return new Response(
         JSON.stringify({
-          success: false,
-          message: `${candidate.name} 已存在於此選舉中`,
+          success: true,
+          message: `已更新 ${candidate.name} 的參選狀態`,
           politician_id: politician.id,
+          updated: true,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

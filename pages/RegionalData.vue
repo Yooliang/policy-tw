@@ -66,21 +66,77 @@ watch(selectedRegion, (newVal) => {
 // City-level stats (sub_region is null)
 const regionInfo = computed(() => {
   if (isNational.value) {
-    // 全國：加總所有縣市層級的統計
-    const cityLevelStats = regionStats.value.filter(s => s.sub_region === null && s.region !== '全國')
+    // 全國：加總所有縣市的統計（優先用縣市層級，否則加總鄉鎮區）
+    let total_politicians = 0
+    let mayor_count = 0
+    let councilor_count = 0
+    let township_mayor_count = 0
+    let representative_count = 0
+    let village_chief_count = 0
+    let policy_count = 0
+
+    for (const county of allCounties) {
+      const cityLevel = regionStats.value.find(s => s.region === county && s.sub_region === null)
+      if (cityLevel && cityLevel.total_politicians > 0) {
+        // 有縣市層級統計
+        total_politicians += cityLevel.total_politicians || 0
+        mayor_count += cityLevel.mayor_count || 0
+        councilor_count += cityLevel.councilor_count || 0
+        township_mayor_count += cityLevel.township_mayor_count || 0
+        representative_count += cityLevel.representative_count || 0
+        village_chief_count += cityLevel.village_chief_count || 0
+        policy_count += cityLevel.policy_count || 0
+      } else {
+        // 沒有縣市層級，加總鄉鎮區統計
+        const subRegionStats = regionStats.value.filter(s => s.region === county && s.sub_region !== null && s.village === null)
+        total_politicians += subRegionStats.reduce((sum, s) => sum + (s.total_politicians || 0), 0)
+        mayor_count += subRegionStats.reduce((sum, s) => sum + (s.mayor_count || 0), 0)
+        councilor_count += subRegionStats.reduce((sum, s) => sum + (s.councilor_count || 0), 0)
+        township_mayor_count += subRegionStats.reduce((sum, s) => sum + (s.township_mayor_count || 0), 0)
+        representative_count += subRegionStats.reduce((sum, s) => sum + (s.representative_count || 0), 0)
+        village_chief_count += subRegionStats.reduce((sum, s) => sum + (s.village_chief_count || 0), 0)
+        policy_count += subRegionStats.reduce((sum, s) => sum + (s.policy_count || 0), 0)
+      }
+    }
+
     return {
-      total_politicians: cityLevelStats.reduce((sum, s) => sum + (s.total_politicians || 0), 0),
-      mayor_count: cityLevelStats.reduce((sum, s) => sum + (s.mayor_count || 0), 0),
-      councilor_count: cityLevelStats.reduce((sum, s) => sum + (s.councilor_count || 0), 0),
-      township_mayor_count: cityLevelStats.reduce((sum, s) => sum + (s.township_mayor_count || 0), 0),
-      representative_count: cityLevelStats.reduce((sum, s) => sum + (s.representative_count || 0), 0),
-      village_chief_count: cityLevelStats.reduce((sum, s) => sum + (s.village_chief_count || 0), 0),
-      policy_count: cityLevelStats.reduce((sum, s) => sum + (s.policy_count || 0), 0),
+      total_politicians,
+      mayor_count,
+      councilor_count,
+      township_mayor_count,
+      representative_count,
+      village_chief_count,
+      policy_count,
     }
   }
-  return regionStats.value.find(s =>
+
+  // 特定縣市：先找縣市層級統計
+  const cityLevel = regionStats.value.find(s =>
     s.region === selectedRegion.value && s.sub_region === null
-  ) || {
+  )
+
+  if (cityLevel && cityLevel.total_politicians > 0) {
+    return cityLevel
+  }
+
+  // 沒有縣市層級統計，加總該縣市所有鄉鎮區的統計
+  const subRegionStats = regionStats.value.filter(s =>
+    s.region === selectedRegion.value && s.sub_region !== null && s.village === null
+  )
+
+  if (subRegionStats.length > 0) {
+    return {
+      total_politicians: subRegionStats.reduce((sum, s) => sum + (s.total_politicians || 0), 0),
+      mayor_count: subRegionStats.reduce((sum, s) => sum + (s.mayor_count || 0), 0),
+      councilor_count: subRegionStats.reduce((sum, s) => sum + (s.councilor_count || 0), 0),
+      township_mayor_count: subRegionStats.reduce((sum, s) => sum + (s.township_mayor_count || 0), 0),
+      representative_count: subRegionStats.reduce((sum, s) => sum + (s.representative_count || 0), 0),
+      village_chief_count: subRegionStats.reduce((sum, s) => sum + (s.village_chief_count || 0), 0),
+      policy_count: subRegionStats.reduce((sum, s) => sum + (s.policy_count || 0), 0),
+    }
+  }
+
+  return {
     total_politicians: 0,
     mayor_count: 0,
     councilor_count: 0,
