@@ -2,313 +2,364 @@
 
 ## 概述
 
-Policy-AI 是一個基於 Claude 驅動的 Python 服務，用於自動化搜尋、驗證台灣選舉候選人與政見資料。系統採用非同步任務佇列模式，將 AI 處理與前端解耦。
+Policy-AI 是一個基於 Claude 驅動的自動化系統，用於搜尋、驗證台灣選舉候選人與政見資料。系統採用非同步任務佇列模式，Claude 直接呼叫 API 更新資料庫。
 
 ---
 
 ## 系統架構圖
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Frontend (Vue)                               │
-│        AdminAI.vue / VerifyContent.vue / Donation.vue           │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ HTTP API
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Supabase Edge Functions (Trigger Layer)             │
-│  ai-search / ai-verify / ai-prompt-status                       │
-│  • 建立 ai_prompts 記錄                                          │
-│  • 回傳 prompt_id 供前端輪詢                                      │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ INSERT INTO ai_prompts
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Supabase Database                             │
-│  ai_prompts │ ai_usage_logs │ politicians │ policies            │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ SELECT WHERE status='pending'
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│            policy-ai (GCP Python Service)                        │
-├──────────────────────┬──────────────────────────────────────────┤
-│  poller.py           │  parser.py                                │
-│  • 每 60 秒查詢任務   │  • 監控 results/ 目錄                      │
-│  • 建立 task 檔案     │  • 解析 Claude 輸出                        │
-│  • 支援 cron 排程     │  • 寫入 Supabase                          │
-└──────────┬───────────┴─────────────────┬────────────────────────┘
-           │ tasks/*.md                   │ results/*_result.md
-           ▼                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                    Claude PM + Claude CLI                        │
-│  claude -p "..." --output results/                               │
-│  • 執行 AI 搜尋任務                                               │
-│  • 輸出結構化 JSON 結果                                           │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           使用者介面層                                    │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
+│  │   policy-tw     │  │  Claude PM Web  │  │     AdminAI.vue         │  │
+│  │   (前端網站)     │  │  (任務監控)      │  │   (AI 任務管理)          │  │
+│  └────────┬────────┘  └────────┬────────┘  └───────────┬─────────────┘  │
+└───────────┼─────────────────────┼──────────────────────┼────────────────┘
+            │                     │                      │
+            ▼                     ▼                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Supabase 層                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    Edge Functions                                │   │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │   │
+│  │  │  ai-search   │  │  ai-action   │  │  ai-prompt-status    │  │   │
+│  │  │  (建立任務)   │  │  (統一 API)   │  │  (查詢狀態)           │  │   │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘  │   │
+│  │         │                 │                                      │   │
+│  │         ▼                 ▼                                      │   │
+│  │  ┌────────────────────────────────────────────────────────────┐ │   │
+│  │  │                   ai_prompts 表                             │ │   │
+│  │  │  - id, task_type, parameters, status                       │ │   │
+│  │  │  - result_summary, result_data, error_message              │ │   │
+│  │  │  - created_at, started_at, completed_at                    │ │   │
+│  │  └────────────────────────────────────────────────────────────┘ │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    核心資料表                                     │   │
+│  │  politicians │ policies │ tracking_logs │ elections │ ...       │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+            │
+            │ 輪詢 (polling)
+            ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        GCP Compute Engine                               │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                     Claude PM                                    │   │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │   │
+│  │  │   Poller     │  │  Executor    │  │  policy-ai-skills    │  │   │
+│  │  │ (輪詢任務)    │  │ (執行 Claude) │  │    (技能庫)           │  │   │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘  │   │
+│  │         │                 │                                      │   │
+│  │         ▼                 ▼                                      │   │
+│  │  ┌────────────────────────────────────────────────────────────┐ │   │
+│  │  │               Claude CLI (claude -p)                        │ │   │
+│  │  │  - 接收任務檔案                                              │ │   │
+│  │  │  - 執行網路搜尋                                              │ │   │
+│  │  │  - 直接呼叫 ai-action API 更新資料庫                          │ │   │
+│  │  └────────────────────────────────────────────────────────────┘ │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 核心元件
 
-### 1. Supabase Edge Functions
+### 1. Edge Functions
 
-#### `ai-search`
-觸發 AI 搜尋任務，建立 `ai_prompts` 記錄。
+| 函數名稱 | 用途 | 狀態 |
+|---------|------|------|
+| `ai-action` | 統一的 AI 任務 API（主要使用） | ✅ 使用中 |
+| `ai-search` | 建立新的 AI 搜尋任務 | ✅ 使用中 |
+| `ai-prompt-status` | 查詢任務狀態 | ✅ 使用中 |
 
-**端點:** `POST /functions/v1/ai-search`
+### 2. ai-action 支援的操作
 
-**請求參數:**
-```typescript
-{
-  election_year: number;      // 選舉年份 (e.g., 2026)
-  region?: string;            // 地區 (e.g., "台北市")
-  position?: string;          // 職位 (e.g., "縣市長")
-  search_query?: string;      // 自訂搜尋內容
-}
-```
+| Action | 用途 | 必要欄位 |
+|--------|------|---------|
+| `query_candidates` | 查詢現有候選人（防止重複） | election_year, region?, position? |
+| `query_policies` | 查詢現有政見（防止重複） | politician_name |
+| `import_candidate` | 匯入候選人（需 confidence >= 0.7） | election_year, candidate |
+| `add_policy` | 新增政見 | politician_name, policy |
+| `update_policy` | 更新政見狀態 | politician_name, policy_title, new_status |
+| `add_tracking_log` | 新增追蹤紀錄 | politician_name, policy_title, log |
+| `update_prompt` | 更新任務狀態 | prompt_id, status |
 
-**回應:**
-```typescript
-{
-  success: boolean;
-  prompt_id: string;          // UUID，用於輪詢狀態
-  message: string;
-}
-```
+### 3. 技能庫 (policy-ai-skills/)
 
-#### `ai-prompt-status`
-查詢任務狀態與結果。
-
-**端點:** `POST /functions/v1/ai-prompt-status`
-
-**請求參數:**
-```typescript
-{
-  prompt_id: string;          // 任務 UUID
-}
-```
-
-**回應:**
-```typescript
-{
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  result_data?: {
-    candidates: Candidate[];
-    summary: string;
-    sources: string[];
-  };
-  error_message?: string;
-  completed_at?: string;
-}
-```
+| 檔案 | 用途 |
+|------|------|
+| `taiwan-election-expert.md` | 候選人搜尋技能 |
+| `policy-researcher.md` | 政見搜尋技能 |
+| `policy-verifier.md` | 政見驗證技能 |
+| `progress-tracker.md` | 進度追蹤技能 |
+| `task_manager.py` | 任務檔案管理 |
 
 ---
 
-### 2. ai_prompts 資料表
+## 資料驗證機制
 
-儲存所有 AI 任務的佇列與結果。
+### 1. 查詢先行
 
-```sql
-CREATE TABLE ai_prompts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+Claude 執行任務時必須先查詢現有資料：
 
-    -- 任務類型
-    task_type TEXT NOT NULL CHECK (task_type IN (
-        'candidate_search',
-        'policy_search',
-        'policy_verify',
-        'progress_tracking'
-    )),
+```bash
+# 步驟 1：查詢現有候選人
+curl -X POST "https://.../ai-action" \
+  -d '{"action":"query_candidates","election_year":2026,"region":"台北市"}'
 
-    -- Prompt 內容
-    prompt_template TEXT NOT NULL,
-    parameters JSONB DEFAULT '{}',
+# 回應：
+# {"success":true,"count":3,"candidates":[...]}
 
-    -- 狀態追蹤
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
-        'pending', 'scheduled', 'processing', 'completed', 'failed'
-    )),
-    priority INTEGER DEFAULT 5,
-
-    -- 執行追蹤
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-
-    -- 結果儲存
-    result_summary TEXT,
-    result_data JSONB,
-    confidence DECIMAL(3, 2),
-    error_message TEXT,
-
-    -- 範圍篩選
-    election_id INTEGER REFERENCES elections(id),
-    region TEXT,
-
-    -- 中繼資料
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+# 步驟 2：只新增不存在的候選人
 ```
+
+### 2. 信心度門檻
+
+| 信心度 | 來源可信度 | 是否匯入 |
+|--------|-----------|---------|
+| 0.9-1.0 | 官方登記、中選會公告 | ✅ |
+| 0.8-0.9 | 候選人正式宣布、黨提名確定 | ✅ |
+| 0.7-0.8 | 多家主流媒體報導確認 | ✅ |
+| 0.5-0.7 | 單一來源報導 | ❌ |
+| 0.0-0.5 | 傳聞、推測 | ❌ |
+
+### 3. 無效名稱過濾
+
+自動跳過包含以下模式的名稱：
+- 未定、待定、待確認、未知、人選、待公布
+- 長度 < 2 或 > 10 的名稱
 
 ---
 
-### 3. Python 服務 (policy-ai)
+## 潛在問題與解決方案
 
-位於 GCP 伺服器，由 PM2 管理。
+### 問題 1：搜尋到舊資料
 
-#### 專案結構
+**現象**：搜尋到過時的新聞或過去的選舉資料
+
+**解決方案**：在搜尋時加入日期限制
 
 ```
-/home/cwen0/projects/policy-ai/
-├── config/
-│   ├── __init__.py
-│   └── settings.py           # 環境變數與常數
-├── core/
-│   ├── __init__.py
-│   ├── poller.py             # 輪詢 ai_prompts 表
-│   └── parser.py             # 解析 Claude 結果
-├── db/
-│   ├── __init__.py
-│   └── supabase_client.py    # Supabase 客戶端
-├── models/
-│   ├── __init__.py
-│   └── models.py             # Pydantic 模型
-├── tasks/                    # Claude 輸入檔案
-├── results/                  # Claude 輸出檔案
-├── .env                      # 環境變數
-├── requirements.txt
-└── ecosystem.config.js       # PM2 設定
+搜尋時請加入時間限制：
+- 只搜尋最近 30 天的新聞
+- 使用搜尋語法：site:news.google.com after:2026-01-01
+- 排除超過 6 個月的舊聞
 ```
 
-#### poller.py
+### 問題 2：任務超時
 
-每 60 秒查詢 `ai_prompts` 表中 `status='pending'` 的任務：
+**現象**：任務執行超過 5 分鐘被終止
 
-```python
-class Poller:
-    async def _poll_cycle(self):
-        # 1. 查詢待處理任務
-        prompts = self.db.get_pending_prompts()
+**解決方案**：
+1. 將大任務拆分成小任務（每個縣市一個任務）
+2. 設定合理的搜尋範圍
+3. 增加任務續傳機制
 
-        # 2. 建立 task 檔案
-        for prompt in prompts:
-            task_file = self._create_task_file(prompt)
+### 問題 3：服務中斷
 
-            # 3. 更新狀態為 processing
-            self.db.update_prompt_status(prompt['id'], 'processing')
-```
+**現象**：PM2 服務停止，任務無法執行
 
-#### parser.py
-
-使用 Watchdog 監控 `results/` 目錄：
-
-```python
-class Parser:
-    async def process_result_file(self, file_path):
-        # 1. 讀取結果檔案
-        content = file_path.read_text()
-
-        # 2. 提取 prompt_id (從 ## Task ID 區塊)
-        prompt_id = self._extract_prompt_id(file_path.name, content)
-
-        # 3. 解析 JSON 結果
-        result = self._extract_json(content)
-
-        # 4. 處理候選人資料
-        if task_type == 'candidate_search':
-            await self._handle_candidate_search(prompt_id, result)
-
-        # 5. 更新 ai_prompts 狀態
-        self.db.save_prompt_result(prompt_id, result)
-```
+**解決方案**：
+1. 設定 PM2 自動重啟
+2. 增加健康檢查
+3. 設定告警機制
 
 ---
 
-### 4. Claude PM
+## 自動化排程設計
 
-Claude PM 監控 `tasks/` 目錄，當新檔案出現時自動執行 Claude CLI。
-
-**配置檔案:** `/home/cwen0/Claude-PM/config.yaml`
-
-```yaml
-projects:
-  - name: policy-ai
-    path: /home/cwen0/projects/policy-ai
-    task_dir: tasks
-    result_dir: results
-    done_dir: done
-    claude_args:
-      - "--dangerously-skip-permissions"
-```
-
----
-
-## 任務流程
-
-### 候選人搜尋流程
+### 方案 A：每日輪換排程
 
 ```
-1. 使用者在 AdminAI.vue 點擊「搜尋候選人」
-   ↓
-2. 呼叫 ai-search Edge Function
-   ↓
-3. 建立 ai_prompts 記錄 (status: pending)
-   ↓
-4. 回傳 prompt_id，前端開始輪詢
-   ↓
-5. poller.py 偵測到新任務
-   ↓
-6. 建立 tasks/task_YYYYMMDD_HHMMSS_XXXXXXXX.md
-   ↓
-7. 更新狀態為 processing
-   ↓
-8. Claude PM 偵測到新檔案，執行 Claude CLI
-   ↓
-9. Claude 輸出結果到 results/task_..._result.md
-   ↓
-10. parser.py 偵測到結果檔案
-    ↓
-11. 解析 JSON，匯入 politicians 表
-    ↓
-12. 更新 ai_prompts 狀態為 completed
-    ↓
-13. 前端輪詢取得結果，顯示候選人清單
+週一：六都（台北、新北、桃園、台中、台南、高雄）
+週二：北部縣市（基隆、新竹市、新竹縣、苗栗、宜蘭）
+週三：中部縣市（彰化、南投、雲林、嘉義市、嘉義縣）
+週四：南部縣市（屏東、澎湖）+ 東部（花蓮、台東）
+週五：離島（金門、連江）+ 全台政見進度追蹤
+週六：重點候選人政見驗證
+週日：休息 / 系統維護
 ```
 
----
+### 方案 B：定時排程（每 30 分鐘一個縣市）
 
-## 前端整合
+```
+00:00  台北市
+00:30  新北市
+01:00  桃園市
+...
+10:30  連江縣
+12:00  政見進度追蹤
+18:00  政見驗證
+```
 
-### AdminAI.vue
+### 實作方式
 
-提供四個 Tab：
+#### 選項 1：Supabase Cron + Edge Function
 
-1. **搜尋** - 觸發新的 AI 搜尋任務
-2. **更新** - 批次更新政見資料
-3. **日誌** - 查看 AI 使用紀錄
-4. **搜尋歷史** - 查看過往任務與結果
+建立 `ai-scheduler` Edge Function：
 
 ```typescript
-// 觸發搜尋
-const searchCandidates = async () => {
-  const { prompt_id } = await triggerSearch(params);
+// supabase/functions/ai-scheduler/index.ts
+Deno.serve(async () => {
+  const now = new Date();
+  const hour = now.getHours();
+  const dayOfWeek = now.getDay();
 
-  // 輪詢等待結果
-  const result = await pollForResult(prompt_id, {
-    interval: 5000,   // 每 5 秒
-    timeout: 300000,  // 最長 5 分鐘
-  });
+  // 根據時間決定要處理的縣市
+  const regions = getScheduledRegions(dayOfWeek, hour);
 
-  searchResults.value = result.candidates;
-};
-
-// 查看歷史結果
-const viewPromptResult = async (prompt: any) => {
-  if (prompt.status === 'completed') {
-    searchResults.value = prompt.result_data.candidates;
+  for (const region of regions) {
+    await createSearchTask(region);
   }
-};
+});
+```
+
+使用 Supabase 的 pg_cron 或外部 cron 服務觸發。
+
+#### 選項 2：GCP Cloud Scheduler
+
+```bash
+# 建立 Cloud Scheduler Job
+gcloud scheduler jobs create http policy-ai-daily \
+  --schedule="0 0 * * *" \
+  --uri="https://.../functions/v1/ai-scheduler" \
+  --http-method=POST
+```
+
+#### 選項 3：Python Cron 排程器
+
+在 policy-ai 服務中加入排程器：
+
+```python
+# scheduler.py
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+scheduler = AsyncIOScheduler()
+
+# 定義排程
+SCHEDULE = {
+    0: ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市"],  # 週一
+    1: ["基隆市", "新竹市", "新竹縣", "苗栗縣", "宜蘭縣"],  # 週二
+    # ...
+}
+
+@scheduler.scheduled_job('cron', hour=0, minute=0)
+async def daily_search():
+    today = datetime.now().weekday()
+    regions = SCHEDULE.get(today, [])
+
+    for i, region in enumerate(regions):
+        # 每 30 分鐘一個任務
+        await asyncio.sleep(i * 30 * 60)
+        await create_search_task(region)
+```
+
+---
+
+## 日期限制設計
+
+### 在提示詞中加入日期限制
+
+修改技能檔案，加入日期過濾指示：
+
+```markdown
+## 搜尋時間限制
+
+**重要**：只搜尋最近 30 天的新聞資料。
+
+搜尋技巧：
+1. Google 搜尋加入時間過濾：`2026年台北市長候選人 after:2026-01-01`
+2. 排除明顯過時的資訊（如：2022 年選舉結果）
+3. 優先使用最近一週的新聞來源
+4. 在結果中記錄新聞發布日期
+
+若搜尋結果都是舊資料，回報「無最新消息」而非使用過時資訊。
+```
+
+### 在 API 中驗證日期
+
+```typescript
+// ai-action Edge Function
+async function handleImportCandidate(supabase: any, body: any) {
+  const { candidate } = body;
+
+  // 驗證來源日期
+  if (candidate.source_date) {
+    const sourceDate = new Date(candidate.source_date);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 30);
+
+    if (sourceDate < cutoffDate) {
+      return successResponse({
+        skipped: true,
+        reason: "outdated_source",
+        message: `來源日期過舊: ${candidate.source_date}`
+      });
+    }
+  }
+
+  // ... 繼續處理
+}
+```
+
+---
+
+## 任務類型與參數
+
+### candidate_search（候選人搜尋）
+
+```json
+{
+  "task_type": "candidate_search",
+  "parameters": {
+    "election_year": 2026,
+    "region": "台北市",
+    "position": "縣市長",
+    "search_date_limit": 30
+  }
+}
+```
+
+### policy_search（政見搜尋）
+
+```json
+{
+  "task_type": "policy_search",
+  "parameters": {
+    "politician_name": "蔣萬安",
+    "keywords": ["交通", "捷運"],
+    "search_date_limit": 30
+  }
+}
+```
+
+### progress_tracking（進度追蹤）
+
+```json
+{
+  "task_type": "progress_tracking",
+  "parameters": {
+    "politician_name": "蔣萬安",
+    "policy_title": "捷運綠線",
+    "search_date_limit": 30
+  }
+}
+```
+
+### policy_verify（政見驗證）
+
+```json
+{
+  "task_type": "policy_verify",
+  "parameters": {
+    "politician_name": "蔣萬安",
+    "policy_title": "捷運綠線"
+  }
+}
 ```
 
 ---
@@ -319,58 +370,94 @@ const viewPromptResult = async (prompt: any) => {
 
 ```bash
 # SSH 連線
-gcloud compute ssh claude-pm-server --zone=asia-east1-b
+gcloud compute ssh claude-pm-server --zone=us-central1-a --tunnel-through-iap
 
-# 啟動服務
-cd /home/cwen0/projects/policy-ai
-pm2 start ecosystem.config.js
+# 查看服務狀態
+sudo -u cwen0 pm2 list
+
+# 重啟服務
+sudo -u cwen0 pm2 restart all
 
 # 查看日誌
-pm2 logs policy-ai-poller
-pm2 logs policy-ai-parser
+sudo -u cwen0 pm2 logs
 ```
 
 ### Edge Functions
 
 ```bash
-# 部署 ai-search
-npx supabase functions deploy ai-search
+# 部署 ai-action
+npx supabase functions deploy ai-action --no-verify-jwt
 
-# 部署 ai-prompt-status
-npx supabase functions deploy ai-prompt-status
+# 部署 ai-search
+npx supabase functions deploy ai-search --no-verify-jwt
 ```
 
-### 前端
+### 同步技能檔案到 GCP
 
 ```bash
-pnpm build
-npx firebase deploy --only hosting
+# 從本地上傳
+gcloud compute scp policy-ai-skills/*.md \
+  claude-pm-server:/home/cwen0/projects/policy-ai/skills/ \
+  --zone=us-central1-a
+
+gcloud compute scp policy-ai-skills/task_manager.py \
+  claude-pm-server:/home/cwen0/projects/policy-ai/ \
+  --zone=us-central1-a
 ```
 
 ---
 
-## 環境變數
+## 監控與告警
 
-### policy-ai/.env
+### PM2 監控
 
+```bash
+# 設定自動重啟
+pm2 startup
+pm2 save
+
+# 健康檢查
+pm2 monit
 ```
-SUPABASE_URL=https://wiiqoaytpqvegtknlbue.supabase.co
-SUPABASE_SERVICE_KEY=<service_role_key>
-RESULTS_DIR=./results
-TASKS_DIR=./tasks
-LOG_LEVEL=INFO
+
+### 任務監控 SQL
+
+```sql
+-- 查看今日任務統計
+SELECT
+  status,
+  COUNT(*) as count,
+  AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) as avg_seconds
+FROM ai_prompts
+WHERE created_at > NOW() - INTERVAL '24 hours'
+GROUP BY status;
+
+-- 查看失敗任務
+SELECT id, task_type, parameters, error_message, created_at
+FROM ai_prompts
+WHERE status = 'failed'
+  AND created_at > NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC;
 ```
 
 ---
 
-## 錯誤處理
+## 下一步行動
 
-| 錯誤情境 | 處理方式 |
-|---------|---------|
-| Claude 執行超時 | 前端顯示超時訊息，可從歷史 Tab 查看後續結果 |
-| JSON 解析失敗 | 記錄錯誤到 ai_prompts.error_message |
-| 候選人名稱無效 | 跳過無效資料，只匯入有效候選人 |
-| 資料庫寫入失敗 | 重試 3 次後標記為 failed |
+### 優先順序 1：日期限制
+- [ ] 修改技能檔案，加入搜尋日期限制
+- [ ] 在 AI 呼叫時要求記錄新聞日期
+- [ ] 在 API 中驗證來源日期
+
+### 優先順序 2：排程系統
+- [ ] 建立 `ai-scheduler` Edge Function
+- [ ] 設定 Cron 排程
+- [ ] 實作輪換排程配置
+
+### 優先順序 3：監控告警
+- [ ] 設定 PM2 自動重啟
+- [ ] 建立每日報告 SQL
+- [ ] 設定失敗告警
 
 ---
 
@@ -379,9 +466,12 @@ LOG_LEVEL=INFO
 | 用途 | 路徑 |
 |------|------|
 | 前端 AI 管理頁 | `pages/AdminAI.vue` |
+| 統一 AI API | `supabase/functions/ai-action/index.ts` |
 | 觸發 Edge Function | `supabase/functions/ai-search/index.ts` |
 | 狀態查詢 Function | `supabase/functions/ai-prompt-status/index.ts` |
-| 資料表 Migration | `supabase/migrations/20260202100001_ai_prompts.sql` |
-| Python Poller | `policy-ai/core/poller.py` |
-| Python Parser | `policy-ai/core/parser.py` |
-| PM2 配置 | `policy-ai/ecosystem.config.js` |
+| 候選人搜尋技能 | `policy-ai-skills/taiwan-election-expert.md` |
+| 政見搜尋技能 | `policy-ai-skills/policy-researcher.md` |
+| 政見驗證技能 | `policy-ai-skills/policy-verifier.md` |
+| 進度追蹤技能 | `policy-ai-skills/progress-tracker.md` |
+| 任務管理器 | `policy-ai-skills/task_manager.py` |
+| Claude PM 配置 | `Claude-PM/config.gcp.yaml` |
