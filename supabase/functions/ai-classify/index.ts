@@ -201,13 +201,19 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    // Create service client for database operations
+    const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
 
     // Check authentication
     const authHeader = req.headers.get("Authorization");
+    console.log("Auth header present:", !!authHeader);
+
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(
         JSON.stringify({
+          success: false,
           error: "Authentication required",
           message: "請先登入後再使用 AI 助手",
         }),
@@ -219,16 +225,28 @@ Deno.serve(async (req) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
+    console.log("Token length:", token.length);
+
+    // Create auth client to verify user
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    });
+
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser(token);
+    } = await supabaseAuth.auth.getUser();
+
+    console.log("Auth result:", { user: user?.id, error: authError?.message });
 
     if (authError || !user) {
       return new Response(
         JSON.stringify({
-          error: "Authentication required",
-          message: authError?.message || "請先登入",
+          success: false,
+          error: "Invalid token",
+          message: authError?.message || "登入已過期，請重新登入",
         }),
         {
           status: 401,
@@ -236,6 +254,9 @@ Deno.serve(async (req) => {
         }
       );
     }
+
+    // Use service client for all subsequent operations
+    const supabase = supabaseService;
 
     // Parse request
     const body: ClassifyRequest = await req.json();

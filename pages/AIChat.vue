@@ -11,7 +11,6 @@ import {
   XCircle,
   AlertCircle,
   Clock,
-  Link,
   History,
   ChevronRight,
   ExternalLink,
@@ -22,14 +21,20 @@ import {
   RefreshCw,
 } from 'lucide-vue-next'
 
-const { isAuthenticated, signInWithGoogle, userEmail, user } = useAuth()
+const { isAuthenticated, signInWithGoogle, userEmail, user, session } = useAuth()
 
 // Input state
 const userInput = ref('')
-const sourceUrl = ref('')
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const submitSuccess = ref<string | null>(null)
+
+// URL extraction from text
+function extractUrl(text: string): string | null {
+  const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi
+  const matches = text.match(urlPattern)
+  return matches ? matches[0] : null
+}
 
 // Current task state
 const currentTask = ref<any>(null)
@@ -144,15 +149,24 @@ async function handleSubmit() {
   currentTask.value = null
 
   try {
+    const inputText = userInput.value.trim()
+    const extractedUrl = extractUrl(inputText)
+
+    // Debug: check session
+    console.log('Session:', session.value)
+    console.log('Access token:', session.value?.access_token?.substring(0, 20) + '...')
+
     const response = await supabase.functions.invoke('ai-classify', {
       body: {
-        input: userInput.value.trim(),
-        url: sourceUrl.value.trim() || undefined,
+        input: inputText,
+        url: extractedUrl || undefined,
       },
     })
 
+    console.log('Response:', response)
+
     if (response.error) {
-      throw new Error(response.error.message)
+      throw new Error(response.error.message || JSON.stringify(response.error))
     }
 
     const data = response.data
@@ -171,7 +185,6 @@ async function handleSubmit() {
 
     // Clear input
     userInput.value = ''
-    sourceUrl.value = ''
 
     // Start polling if not requiring review
     if (!data.requires_review) {
@@ -181,6 +194,7 @@ async function handleSubmit() {
     // Refresh task list
     fetchTasks(true)
   } catch (err: any) {
+    console.error('Submit error:', err)
     submitError.value = err.message || '提交失敗，請稍後再試'
   } finally {
     submitting.value = false
@@ -339,27 +353,15 @@ watch(user, (newUser) => {
             <div>
               <textarea
                 v-model="userInput"
-                placeholder="輸入您的請求，例如：請幫我找 2026 年台北市長候選人..."
-                rows="3"
+                placeholder="輸入您的請求或貼上網址，例如：&#10;• 請幫我找 2026 年台北市長候選人&#10;• 這是政見新聞：https://news.example.com/..."
+                rows="4"
                 class="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
                 :disabled="submitting"
               />
+              <p class="mt-1 text-xs text-slate-500">可直接在文字中貼上網址，系統會自動偵測</p>
             </div>
 
-            <div class="flex gap-4">
-              <div class="flex-1">
-                <div class="relative">
-                  <Link class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    v-model="sourceUrl"
-                    type="url"
-                    placeholder="相關網址（選填）"
-                    class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    :disabled="submitting"
-                  />
-                </div>
-              </div>
-
+            <div class="flex justify-end">
               <button
                 type="submit"
                 :disabled="submitting || !userInput.trim()"
