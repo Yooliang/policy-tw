@@ -18,6 +18,7 @@ const corsHeaders = {
  *
  * 寫入類（需要信心度檢查）：
  * - import_candidate: 匯入候選人（需 confidence >= 0.7）
+ * - update_politician: 更新候選人資料（簡介、經歷、學歷、頭像）
  * - add_policy: 新增政見
  * - update_policy: 更新政見進度
  * - add_tracking_log: 新增追蹤紀錄
@@ -58,6 +59,9 @@ Deno.serve(async (req) => {
       // 寫入類 API
       case "import_candidate":
         return await handleImportCandidate(supabase, body);
+
+      case "update_politician":
+        return await handleUpdatePolitician(supabase, body);
 
       case "add_policy":
         return await handleAddPolicy(supabase, body);
@@ -419,6 +423,110 @@ async function handleImportCandidate(supabase: any, body: any): Promise<Response
   if (peError) throw new Error(peError.message);
 
   return successResponse({ action: "created", name: candidate.name, politician_id: politician.id });
+}
+
+/**
+ * 更新候選人資料（簡介、經歷、學歷、頭像）
+ *
+ * 支援更新欄位：
+ * - bio: 個人簡介
+ * - experience: 經歷陣列 (string[])
+ * - education: 學歷陣列 (string[])
+ * - education_level: 最高學歷
+ * - birth_year: 出生年份
+ * - avatar_url: 頭像網址
+ * - slogan: 競選口號
+ * - current_position: 現任職位
+ */
+async function handleUpdatePolitician(supabase: any, body: any): Promise<Response> {
+  const { prompt_id, politician_id, politician_name, updates } = body;
+
+  if (!politician_id && !politician_name) {
+    return errorResponse("Missing politician_id or politician_name");
+  }
+
+  if (!updates || Object.keys(updates).length === 0) {
+    return errorResponse("Missing updates object");
+  }
+
+  // 找到政治人物
+  let politicianId = politician_id;
+
+  if (!politicianId && politician_name) {
+    const { data: politician } = await supabase
+      .from("politicians")
+      .select("id")
+      .eq("name", politician_name)
+      .single();
+
+    if (!politician) {
+      return errorResponse(`找不到政治人物: ${politician_name}`, 404);
+    }
+    politicianId = politician.id;
+  }
+
+  // 構建更新資料（只允許特定欄位）
+  const allowedFields = [
+    "bio",
+    "experience",
+    "education",
+    "education_level",
+    "birth_year",
+    "avatar_url",
+    "slogan",
+    "current_position",
+  ];
+
+  const updateData: Record<string, any> = {};
+
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      // 特殊處理陣列欄位
+      if (field === "experience" || field === "education") {
+        // 確保是陣列
+        if (Array.isArray(updates[field])) {
+          updateData[field] = updates[field];
+        } else if (typeof updates[field] === "string") {
+          // 如果是字串，嘗試分割成陣列
+          updateData[field] = updates[field].split(/[,、\n]/).map((s: string) => s.trim()).filter(Boolean);
+        }
+      } else if (field === "birth_year") {
+        // 確保是數字
+        const year = parseInt(updates[field], 10);
+        if (!isNaN(year) && year >= 1900 && year <= 2010) {
+          updateData[field] = year;
+        }
+      } else {
+        // 其他欄位直接設定
+        updateData[field] = updates[field];
+      }
+    }
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return errorResponse("No valid fields to update");
+  }
+
+  // 執行更新
+  const { error } = await supabase
+    .from("politicians")
+    .update(updateData)
+    .eq("id", politicianId);
+
+  if (error) {
+    return errorResponse(error.message, 500);
+  }
+
+  // 記錄更新來源
+  const updatedFields = Object.keys(updateData);
+  console.log(`[update_politician] Updated ${politician_name || politicianId}: ${updatedFields.join(", ")} (prompt: ${prompt_id?.substring(0, 8) || '-'})`);
+
+  return successResponse({
+    action: "updated",
+    politician_id: politicianId,
+    updated_fields: updatedFields,
+    message: `已更新 ${updatedFields.length} 個欄位`,
+  });
 }
 
 /**

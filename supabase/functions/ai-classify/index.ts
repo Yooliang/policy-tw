@@ -10,6 +10,7 @@ const corsHeaders = {
 // Task type definitions
 type TaskType =
   | "candidate_search"
+  | "politician_update"  // New: Update existing politician profile
   | "policy_import"
   | "policy_verify"
   | "progress_tracking"
@@ -18,6 +19,9 @@ type TaskType =
 interface ClassifyRequest {
   input: string;
   url?: string;
+  politician_id?: string;
+  politician_name?: string;
+  policy_id?: string;
 }
 
 interface ClassifyResponse {
@@ -40,6 +44,17 @@ const SEARCH_KEYWORDS = [
   "誰",
   "候選人",
   "參選",
+];
+const PROFILE_UPDATE_KEYWORDS = [
+  "簡介",
+  "經歷",
+  "學歷",
+  "頭像",
+  "照片",
+  "背景",
+  "個人資料",
+  "維基",
+  "wikipedia",
 ];
 const VERIFY_KEYWORDS = [
   "驗證",
@@ -109,7 +124,9 @@ function extractParams(input: string): {
 
 function classifyInput(
   input: string,
-  url?: string
+  url?: string,
+  politicianId?: string,
+  politicianName?: string
 ): {
   task_type: TaskType;
   confidence: number;
@@ -119,6 +136,20 @@ function classifyInput(
   const isNews = hasUrl && isNewsUrl(url!);
   const params = extractParams(input);
   const hasLocation = params.regions.length > 0 || params.positions.length > 0;
+  const hasProfileKeywords = hasKeywords(input, PROFILE_UPDATE_KEYWORDS);
+
+  // 0. Politician profile update (when we have politician_id or asking for profile info)
+  // Check if input contains a quoted name like「蔡易餘」
+  const nameMatch = input.match(/[「『]([^」』]+)[」』]/);
+  const hasSpecificName = !!nameMatch || !!politicianName;
+
+  if ((politicianId || hasSpecificName) && hasProfileKeywords) {
+    return {
+      task_type: "politician_update",
+      confidence: 0.9,
+      requires_review: false,
+    };
+  }
 
   // 1. Search for candidates
   if (hasKeywords(input, SEARCH_KEYWORDS) && hasLocation) {
@@ -174,6 +205,8 @@ function getStatusMessage(
   switch (task_type) {
     case "candidate_search":
       return "正在搜尋候選人資訊，請稍候...";
+    case "politician_update":
+      return "正在搜尋並更新個人資料，請稍候...";
     case "policy_verify":
       return "正在驗證政見內容...";
     case "progress_tracking":
@@ -191,6 +224,31 @@ async function isAdmin(supabase: any, userId: string): Promise<boolean> {
     .eq("id", userId)
     .single();
   return data?.is_admin === true;
+}
+
+// Rate limiting: 20 tasks per user per day
+const DAILY_TASK_LIMIT = 20;
+
+async function getTodayTaskCount(
+  supabase: any,
+  userId: string
+): Promise<number> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = today.toISOString();
+
+  const { count, error } = await supabase
+    .from("ai_prompts")
+    .select("*", { count: "exact", head: true })
+    .eq("created_by", userId)
+    .gte("created_at", todayIso);
+
+  if (error) {
+    console.error("Error checking rate limit:", error);
+    return 0;
+  }
+
+  return count || 0;
 }
 
 Deno.serve(async (req) => {
@@ -241,6 +299,25 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Check rate limit (admins are exempt)
+    const userIsAdmin = await isAdmin(supabase, user.id);
+    if (!userIsAdmin) {
+      const todayCount = await getTodayTaskCount(supabase, user.id);
+      if (todayCount >= DAILY_TASK_LIMIT) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Rate limit exceeded",
+            message: `已達今日上限（${DAILY_TASK_LIMIT} 個任務），請明天再試`,
+          }),
+          {
+            status: 429,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
     // Parse request
     const body: ClassifyRequest = await req.json();
 
@@ -259,15 +336,19 @@ Deno.serve(async (req) => {
 
     const input = body.input.trim();
     const url = body.url?.trim() || null;
+    const politicianId = body.politician_id || null;
+    const politicianName = body.politician_name || null;
+    const policyId = body.policy_id || null;
 
-    // Classify the input
-    const classification = classifyInput(input, url || undefined);
+    // Classify the input (pass politician info for better classification)
+    const classification = classifyInput(input, url || undefined, politicianId || undefined, politicianName || undefined);
     const params = extractParams(input);
 
-    // Check if user is admin (affects priority and review requirement)
-    const userIsAdmin = await isAdmin(supabase, user.id);
+    // Extract politician name from quoted text if not provided
+    const nameMatch = input.match(/[「『]([^」』]+)[」』]/);
+    const extractedPoliticianName = politicianName || (nameMatch ? nameMatch[1] : null);
 
-    // Admin submissions don't require review
+    // Admin submissions don't require review (userIsAdmin already checked above)
     const requires_review = userIsAdmin
       ? false
       : classification.requires_review;
@@ -310,6 +391,9 @@ Deno.serve(async (req) => {
           positions: params.positions,
           url: url,
           original_input: input,
+          politician_id: politicianId,
+          politician_name: extractedPoliticianName,  // Use extracted name if not provided
+          policy_id: policyId,
         },
         status: "pending",
         priority: priority,

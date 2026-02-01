@@ -10,8 +10,9 @@ import { useRouter } from 'vue-router'
 
 
 const router = useRouter()
-const { policies, politicians } = useSupabase()
+const { policies, politicians, categories } = useSupabase()
 const searchTerm = ref('')
+const selectedCategory = ref('All')
 
 const relayCases = computed(() => {
   const cases: any[] = []
@@ -50,7 +51,17 @@ const relayCases = computed(() => {
       })
     }
   })
-  return cases.filter(c => c.mainTitle.toLowerCase().includes(searchTerm.value.toLowerCase()))
+
+  let result = cases
+  // Category filter
+  if (selectedCategory.value !== 'All') {
+    result = result.filter(c => c.category === selectedCategory.value)
+  }
+  // Search filter
+  if (searchTerm.value.trim()) {
+    result = result.filter(c => c.mainTitle.toLowerCase().includes(searchTerm.value.toLowerCase()))
+  }
+  return result
 })
 </script>
 
@@ -61,26 +72,67 @@ const relayCases = computed(() => {
       <template #description>這不是單一政見的陳列。我們將跨任期、跨黨派的重大建設案進行聚合，<br class="hidden lg:block" />分析每一根治理接力棒的傳承品質，提供具備行政歷史深度的稽核數據。</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
-      <div class="space-y-2">
-        <GlobalRegionSelector />
+      <template #actions>
+        <button :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white text-navy-900 shadow-lg`">
+          <Database :size="16" /> 分析列表
+        </button>
+        <button @click="router.push('/ai-assistant')" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white/10 text-white hover:bg-white/20 border border-white/20`">
+          <Sparkles :size="16" /> 提交查核
+        </button>
+      </template>
 
-        <div class="flex flex-col lg:flex-row gap-4 items-center">
-          <!-- 搜尋框 -->
-          <div class="relative flex-1 w-full">
-            <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
-            <input
-              v-model="searchTerm"
-              type="text"
-              placeholder="搜尋重大建設案（如：產業園區、捷運建設）..."
-              class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400"
-            />
-          </div>
-        </div>
-      </div>
+      <GlobalRegionSelector />
     </Hero>
 
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <!-- 搜尋框 -->
+      <div class="mb-6">
+        <div class="relative max-w-xl">
+          <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
+          <input
+            v-model="searchTerm"
+            type="text"
+            placeholder="搜尋重大建設案（如：產業園區、捷運建設）..."
+            class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400 shadow-sm"
+          />
+        </div>
+      </div>
 
-    <div class="max-w-7xl mx-auto px-4 pt-20">
+      <!-- 分類篩選 -->
+      <div class="flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+        <!-- Left: 全部 -->
+        <div class="shrink-0 flex items-center gap-3">
+          <button
+            @click="selectedCategory = 'All'"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
+              selectedCategory === 'All'
+                ? 'bg-white text-navy-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
+            ]"
+          >
+            全部
+          </button>
+          <div class="w-px h-6 bg-slate-300"></div>
+        </div>
+        <!-- Right: Wrap -->
+        <div class="flex-grow flex flex-wrap items-center gap-2">
+          <button
+            v-for="cat in categories"
+            :key="cat"
+            @click="selectedCategory = cat"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
+              selectedCategory === cat
+                ? 'bg-white text-navy-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
+            ]"
+          >
+            {{ cat }}
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div
           v-for="relayCase in relayCases"

@@ -32,7 +32,7 @@ const activeElection = computed(() => getActiveElection())
             <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">AI 智能分析</RouterLink></li>
             <li><RouterLink to="/regional-data" class="hover:text-blue-400 transition-colors">縣市數據分佈</RouterLink></li>
             <li>
-              <RouterLink to="/ai-chat" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1">
+              <RouterLink to="/ai-assistant" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1">
                 <Sparkles :size="14" />
                 AI 助手
               </RouterLink>
