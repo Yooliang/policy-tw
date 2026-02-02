@@ -477,7 +477,23 @@ async function handleUpdatePolitician(supabase: any, body: any): Promise<Respons
     "current_position",
   ];
 
+  // 欄位別名映射（AI 可能使用不同的名稱）
+  const fieldAliases: Record<string, string> = {
+    "biography": "bio",
+    "photo_url": "avatar_url",
+    "photo": "avatar_url",
+    "image_url": "avatar_url",
+    "avatar": "avatar_url",
+  };
+
   const updateData: Record<string, any> = {};
+
+  // 先處理別名
+  for (const [alias, canonical] of Object.entries(fieldAliases)) {
+    if (updates[alias] !== undefined && updates[canonical] === undefined) {
+      updates[canonical] = updates[alias];
+    }
+  }
 
   for (const field of allowedFields) {
     if (updates[field] !== undefined) {

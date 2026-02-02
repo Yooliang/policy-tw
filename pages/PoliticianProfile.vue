@@ -14,8 +14,8 @@ import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, Us
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, refreshPoliticians } = useSupabase()
-const { isAuthenticated, signInWithGoogle } = useAuth()
+const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById } = useSupabase()
+const { isAuthenticated, signInWithGoogle, session } = useAuth()
 const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
@@ -121,6 +121,9 @@ async function handleSearchCampaign() {
         politician_id: pol.id,
         politician_name: pol.name,
       },
+      headers: {
+        Authorization: `Bearer ${session.value?.access_token}`,
+      },
     })
 
     if (response.error) {
@@ -163,6 +166,9 @@ async function handleSearchHistory() {
         input,
         politician_id: pol.id,
         politician_name: pol.name,
+      },
+      headers: {
+        Authorization: `Bearer ${session.value?.access_token}`,
       },
     })
 
@@ -207,6 +213,9 @@ async function handleSearchBio() {
         politician_id: pol.id,
         politician_name: pol.name,
       },
+      headers: {
+        Authorization: `Bearer ${session.value?.access_token}`,
+      },
     })
 
     if (response.error) {
@@ -250,6 +259,9 @@ async function handleSearchAvatar() {
         politician_id: pol.id,
         politician_name: pol.name,
       },
+      headers: {
+        Authorization: `Bearer ${session.value?.access_token}`,
+      },
     })
 
     if (response.error) {
@@ -272,7 +284,17 @@ async function handleSearchAvatar() {
 
 // Check cache age on mount, refresh if older than 1 hour
 const ONE_HOUR = 60 * 60 * 1000
+const politicianLoading = ref(false)
+
 onMounted(async () => {
+  // 如果 politicians 中找不到該候選人，直接從 DB 載入
+  const politicianId = String(route.params.politicianId)
+  if (!politicians.value.find(p => p.id === politicianId)) {
+    politicianLoading.value = true
+    await loadPoliticianById(politicianId)
+    politicianLoading.value = false
+  }
+
   const cacheTimestamp = await getCacheTimestamp('politicians_all')
   if (cacheTimestamp && Date.now() - cacheTimestamp > ONE_HOUR) {
     console.log('Cache older than 1 hour, refreshing politicians...')
@@ -551,7 +573,7 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
   </div>
   
   <!-- Loading state -->
-  <div v-else-if="loading" class="bg-slate-50 min-h-screen flex items-center justify-center">
+  <div v-else-if="loading || politicianLoading" class="bg-slate-50 min-h-screen flex items-center justify-center">
     <div class="text-center">
       <Loader2 :size="48" class="mx-auto mb-4 text-violet-500 animate-spin" />
       <p class="text-slate-500">載入中...</p>

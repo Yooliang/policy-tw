@@ -463,6 +463,41 @@ export function useSupabase() {
       .slice(0, 6)  // 只取前 6 個
   }
 
+  // 根據 ID 載入單一 politician（用於直接訪問 profile 頁面）
+  async function loadPoliticianById(politicianId: string): Promise<Politician | null> {
+    // 先檢查是否已在 state 中
+    const existing = politicians.value.find(p => p.id === politicianId)
+    if (existing) return existing
+
+    console.log(`[loadPoliticianById] 載入 ${politicianId}...`)
+
+    try {
+      const { data, error } = await supabase
+        .from('politicians_with_elections')
+        .select('*')
+        .eq('id', politicianId)
+        .single()
+
+      if (error || !data) {
+        console.error(`[loadPoliticianById] 找不到 ${politicianId}:`, error)
+        return null
+      }
+
+      const pol = mapPolitician(data)
+
+      // 加入到 state（避免重複）
+      const existingIds = new Set(politicians.value.map(p => p.id))
+      if (!existingIds.has(pol.id)) {
+        politicians.value = [...politicians.value, pol]
+      }
+
+      return pol
+    } catch (err) {
+      console.error(`[loadPoliticianById] 錯誤:`, err)
+      return null
+    }
+  }
+
   return {
     elections,
     politicians,
@@ -489,5 +524,6 @@ export function useSupabase() {
     getElectionPoliticianCount,
     getTotalPoliticianCount,
     getPoliciesByCategory,
+    loadPoliticianById,
   }
 }

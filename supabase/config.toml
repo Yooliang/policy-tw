@@ -404,3 +404,49 @@ entrypoint = "./functions/add-policy/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/add-policy/*.html" ]
+
+# AI Edge Functions - verify_jwt = false allows internal JWT handling
+[functions.ai-classify]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-classify/index.ts"
+
+[functions.ai-verify]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-verify/index.ts"
+
+[functions.ai-search]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-search/index.ts"
+
+[functions.ai-prompt-status]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-prompt-status/index.ts"
+
+[functions.ai-contribute]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-contribute/index.ts"
+
+[functions.ai-update-progress]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-update-progress/index.ts"
+
+[functions.ai-action]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-action/index.ts"
+
+[functions.ai-scheduler]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-scheduler/index.ts"
+
+[functions.ai-import-candidate]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ai-import-candidate/index.ts"
