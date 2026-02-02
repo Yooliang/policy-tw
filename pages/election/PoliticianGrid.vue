@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
 import { ArrowRight, Megaphone, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
 
-defineProps<{
+const props = defineProps<{
   politicians: Politician[]
   title: string
+  columns?: 2 | 3
 }>()
+
+// Grid classes based on columns prop
+const gridClasses = computed(() => {
+  if (props.columns === 2) {
+    return 'grid grid-cols-1 md:grid-cols-2 gap-6'
+  }
+  return 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+})
 
 const router = useRouter()
 const { policies } = useSupabase()
@@ -18,12 +27,14 @@ const collapsed = ref(false)
 const getPledgeCount = (politicianId: string | number) =>
   policies.value.filter(p => String(p.politicianId) === String(politicianId) && p.status === PolicyStatus.CAMPAIGN).length
 
-// 參選狀態顯示
+// 參選狀態顯示（選舉前中後三階段）
 const candidateStatusLabel = (status?: CandidateStatus) => {
   switch (status) {
     case 'confirmed': return null  // 已確認參選不需特別標註
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞'
+    case 'elected': return '當選'
+    case 'defeated': return '落選'
     default: return null
   }
 }
@@ -32,8 +43,26 @@ const candidateStatusColor = (status?: CandidateStatus) => {
   switch (status) {
     case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
     case 'rumored': return 'bg-slate-100 text-slate-500 border-slate-200'
+    case 'elected': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'defeated': return 'bg-red-100 text-red-600 border-red-200'
     default: return ''
   }
+}
+
+// 只有 confirmed/elected 狀態才顯示選區（中選會正式資料）
+const shouldShowSubRegion = (status?: CandidateStatus) => {
+  return status === 'confirmed' || status === 'elected' || status === 'defeated'
+}
+
+// 格式化選區顯示（村里長顯示 "XX區 XX里"）
+const formatSubRegion = (politician: Politician) => {
+  if (politician.village && politician.subRegion) {
+    return `${politician.subRegion} ${politician.village}`
+  }
+  if (politician.village) {
+    return politician.village
+  }
+  return politician.subRegion
 }
 
 // 顯示備註（移除 AI搜尋匯入 前綴）
@@ -58,7 +87,7 @@ const displayNote = (note?: string) => {
         <ChevronDown v-else :size="20" />
       </button>
     </h3>
-    <div v-if="!collapsed && politicians.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div v-if="!collapsed && politicians.length > 0" :class="gridClasses">
       <div
         v-for="politician in politicians"
         :key="politician.id"
@@ -89,7 +118,7 @@ const displayNote = (note?: string) => {
               </div>
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
-                <span v-if="politician.subRegion" class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mt-1 w-fit">{{ politician.subRegion }}</span>
+                <span v-if="(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)" class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatSubRegion(politician) }}</span>
                 <p v-if="displayNote(politician.sourceNote)" class="text-xs text-slate-400 mt-1 line-clamp-2">{{ displayNote(politician.sourceNote) }}</p>
               </div>
             </div>

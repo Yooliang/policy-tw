@@ -44,8 +44,11 @@ export interface Region {
   village?: string;      // Village (村里)
 }
 
-// Candidate status for elections
-export type CandidateStatus = 'confirmed' | 'likely' | 'rumored';
+// Candidate status for elections (選舉前中後三階段)
+// 選前: rumored(傳聞), likely(可能參選)
+// 選中: confirmed(確認參選)
+// 選後: elected(當選), defeated(落選)
+export type CandidateStatus = 'rumored' | 'likely' | 'confirmed' | 'elected' | 'defeated';
 
 // Election-specific data for a politician
 export interface PoliticianElectionData {

@@ -40,6 +40,19 @@ Reference: `categories`, `locations`, `regions`, `electoral_district_areas`
 
 ENUMs: `policy_status`, `political_party`, `election_type`, `politician_status`
 
+#### ⚠️ Election ID = 選舉年份（重要！）
+
+| 表格 | 欄位 | 存的是 | 範例 |
+|------|------|--------|------|
+| `elections` | `id` | **選舉年份** | 2022, 2024, 2026 |
+| `politician_elections` | `election_id` | FK → `elections.id`（年份） | 2022, 2024, 2026 |
+| `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
+
+**注意**：
+- `elections.id` 就是選舉年份，**不是自增 ID**
+- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）
+- 所有 `election_id` 外鍵都是年份
+
 #### Electoral District Mapping
 The `electoral_district_areas` table maps townships (鄉鎮市區) to electoral districts (選舉區) for councilor filtering:
 - Structure: `region` (縣市) + `electoral_district` (第01選舉區) + `township` (茂林區) + `election_id` (year, e.g., 2022)

@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { TrendingUp, FileText, Activity, Heart, X, Vote, MessageSquare, LogIn, LogOut, Loader2 } from 'lucide-vue-next'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { TrendingUp, FileText, Heart, X, Vote, MessageSquare, LogIn, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 
 const isLoginModalOpen = ref(false)
 const isLoggingIn = ref(false)
 const route = useRoute()
+const router = useRouter()
 const { getActiveElection } = useSupabase()
-const { isAuthenticated, userDisplayName, userAvatarUrl, signInWithGoogle, signOut, loading: authLoading } = useAuth()
+const { isAuthenticated, userDisplayName, userAvatarUrl, signInWithGoogle, loading: authLoading } = useAuth()
 
 const handleGoogleLogin = async () => {
   isLoggingIn.value = true
@@ -22,20 +23,11 @@ const handleGoogleLogin = async () => {
   }
 }
 
-const handleSignOut = async () => {
-  try {
-    await signOut()
-    isLoginModalOpen.value = false
-  } catch (error) {
-    console.error('Sign out failed:', error)
-  }
-}
 
 const activeElection = computed(() => getActiveElection())
 
 const navItems = computed(() => {
   const items = [
-    { name: '總覽', shortName: '總覽', path: '/', icon: Activity },
     { name: '政見追蹤', shortName: '追蹤', path: '/tracking', icon: TrendingUp },
     { name: '智能分析', shortName: '分析', path: '/analysis', icon: FileText },
     { name: '公民參與', shortName: '參與', path: '/community', icon: MessageSquare },
@@ -101,7 +93,7 @@ const isActive = (path: string) => route.path === path
           <!-- User Avatar (Logged In) -->
           <template v-if="isAuthenticated">
             <button
-              @click="isLoginModalOpen = true"
+              @click="router.push('/profile')"
               class="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 text-white p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-white/20"
             >
               <img
@@ -132,46 +124,9 @@ const isActive = (path: string) => route.path === path
     </div>
 
 
-    <!-- Login/Profile Modal -->
-    <div v-if="isLoginModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="isLoginModalOpen = false">
+    <!-- Login Modal (only for non-logged-in users) -->
+    <div v-if="isLoginModalOpen && !isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="isLoginModalOpen = false">
       <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-8" @click.stop>
-        <!-- Logged In: User Profile -->
-        <template v-if="isAuthenticated">
-          <div class="flex items-center justify-between mb-6">
-            <h2 class="text-2xl font-bold text-navy-900">我的帳戶</h2>
-            <button
-              @click="isLoginModalOpen = false"
-              class="text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <X :size="24" />
-            </button>
-          </div>
-
-          <div class="text-center mb-8">
-            <img
-              v-if="userAvatarUrl"
-              :src="userAvatarUrl"
-              :alt="userDisplayName"
-              class="w-20 h-20 rounded-full object-cover mx-auto mb-4 border-4 border-blue-100"
-            />
-            <div v-else class="w-20 h-20 rounded-full bg-blue-500 flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">
-              {{ userDisplayName.charAt(0).toUpperCase() }}
-            </div>
-            <h3 class="text-xl font-bold text-navy-900">{{ userDisplayName }}</h3>
-            <p class="text-slate-500 text-sm mt-1">已登入</p>
-          </div>
-
-          <button
-            @click="handleSignOut"
-            class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
-          >
-            <LogOut :size="18" />
-            登出
-          </button>
-        </template>
-
-        <!-- Not Logged In: Login Options -->
-        <template v-else>
           <div class="flex items-center justify-between mb-6">
             <h2 class="text-2xl font-bold text-navy-900">登入</h2>
             <button
@@ -211,7 +166,6 @@ const isActive = (path: string) => route.path === path
               登入即表示您同意我們的服務條款與隱私政策
             </p>
           </div>
-        </template>
       </div>
     </div>
   </nav>

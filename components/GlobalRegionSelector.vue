@@ -41,16 +41,17 @@ const getBtnClass = (region: string) => {
         >
           {{ city }}
         </button>
-        <div class="hidden md:flex col-span-2 justify-end items-center gap-2">
+        <!-- 展開/收合按鈕 -->
+        <div class="flex col-span-2 justify-end items-center gap-2">
           <span
             v-if="!regionSelectorExpanded && [...group1, ...group2].includes(globalRegion)"
-            class="text-xs font-black text-blue-600"
+            class="text-xs font-black text-blue-600 truncate"
           >
             {{ globalRegion }}
           </span>
           <button
             @click="toggleRegionSelectorExpanded()"
-            class="px-3 h-9 rounded-xl border border-transparent bg-slate-50 text-slate-400 hover:bg-white hover:border-blue-300 hover:text-blue-600 transition-all flex items-center justify-center"
+            class="px-3 h-9 rounded-xl border border-transparent bg-slate-50 text-slate-400 hover:bg-white hover:border-blue-300 hover:text-blue-600 transition-all flex items-center justify-center shrink-0"
           >
             <ChevronUp v-if="regionSelectorExpanded" :size="16" />
             <ChevronDown v-else :size="16" />

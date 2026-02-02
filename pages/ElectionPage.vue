@@ -31,6 +31,22 @@ function getElectionType(politician: any): string | undefined {
   const data = getPoliticianElectionData(politician, electionId.value)
   return data?.electionType
 }
+
+// Helper: 套用當前選舉的特定資料（解決跨選舉資料混亂問題）
+function withCurrentElectionData(politician: any): any {
+  const electionData = getPoliticianElectionData(politician, electionId.value)
+  if (!electionData) return politician
+  return {
+    ...politician,
+    candidateStatus: electionData.candidateStatus,
+    sourceNote: electionData.sourceNote,
+    position: electionData.position || politician.position,
+    electionType: electionData.electionType || politician.electionType,
+    region: electionData.region || politician.region,
+    subRegion: electionData.subRegion || politician.subRegion,
+    village: electionData.village || politician.village,
+  }
+}
 const { globalRegion } = useGlobalState()
 
 const electionId = computed(() => Number(route.params.electionId))
@@ -39,6 +55,7 @@ const electionLoading = ref(false)
 
 const selectedRegion = ref(globalRegion.value)
 const selectedSubRegion = ref<string>('All')  // 鄉鎮市區
+const selectedVillage = ref<string>('All')    // 村里
 
 // Load politicians for this election + region
 async function loadElectionData(id: number, region: string) {
@@ -89,11 +106,18 @@ const heroBackgroundImage = computed(() => heroImages[electionYear.value] || '/i
 watch(globalRegion, (newVal) => {
   selectedRegion.value = newVal
   selectedSubRegion.value = 'All'
+  selectedVillage.value = 'All'
 })
 
 // Reset filters when region changes locally
 watch(selectedRegion, () => {
   selectedSubRegion.value = 'All'
+  selectedVillage.value = 'All'
+})
+
+// Reset village filter when subRegion changes
+watch(selectedSubRegion, () => {
+  selectedVillage.value = 'All'
 })
 
 const viewMode = ref<'politicians' | 'pledges' | 'issues' | 'comparison'>('politicians')
@@ -103,6 +127,11 @@ const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
 
 const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
 const OTHER_LOCATIONS = computed(() => locations.value.filter(loc => !SIX_CAPITALS.includes(loc)))
+
+// 判斷是否為直轄市（用於顯示「區」或「鄉鎮市區」）
+const isSpecialMunicipality = computed(() => SIX_CAPITALS.includes(selectedRegion.value))
+const subRegionLabel = computed(() => isSpecialMunicipality.value ? '區' : '鄉鎮市區')
+const villageLabel = computed(() => isSpecialMunicipality.value ? '里' : '村里')
 
 const timeLeft = computed(() => {
   if (!election.value) return { days: 0 }
@@ -114,13 +143,26 @@ const electionPoliticians = computed(() =>
   politicians.value.filter(c => c.electionIds?.includes(electionId.value))
 )
 
+// 是否顯示右側篩選區（用於決定左側欄位數）
+const showSidebar = computed(() => selectedRegion.value !== 'All')
+
+// Grid 欄位數（有右側篩選時用 2 欄）
+const gridColumns = computed(() => showSidebar.value ? 2 : 3)
+
+// 排序：先照字數，再照筆畫
+const sortByLengthThenStroke = (a: string, b: string) => {
+  if (a.length !== b.length) return a.length - b.length
+  return a.localeCompare(b, 'zh-Hant-TW', { numeric: true })
+}
+
 // 取得選定縣市的鄉鎮市區（合併所有來源）
 const availableSubRegions = computed(() => {
   if (selectedRegion.value === 'All') return []
   const subRegions = new Set<string>()
 
   // 1. 從 politicians 取得（鄉鎮市長、代表、村里長等），排除選舉區格式
-  electionPoliticians.value
+  // 套用當前選舉資料以取得正確的 subRegion
+  electionPoliticians.value.map(withCurrentElectionData)
     .filter(c => {
       const type = getElectionType(c)
       return c.region === selectedRegion.value && c.subRegion &&
@@ -133,15 +175,43 @@ const availableSubRegions = computed(() => {
     .forEach(c => subRegions.add(c.subRegion!))
 
   // 2. 從選舉區對應表取得（議員對應的鄉鎮區）
-  electoralDistrictAreas.value
-    .filter(m => m.region === selectedRegion.value && m.election_id === electionYear.value)
-    .forEach(m => subRegions.add(m.township))
+  // 優先使用當前選舉年份，若無則使用任何可用年份（鄉鎮區跨選舉相對穩定）
+  const areasForYear = electoralDistrictAreas.value.filter(
+    m => m.region === selectedRegion.value && m.election_id === electionYear.value
+  )
+  const areasToUse = areasForYear.length > 0
+    ? areasForYear
+    : electoralDistrictAreas.value.filter(m => m.region === selectedRegion.value)
+  areasToUse.forEach(m => subRegions.add(m.township))
 
-  return Array.from(subRegions).sort()
+  // 過濾掉選舉區格式（如「第01選舉區」），並排序
+  return Array.from(subRegions)
+    .filter(s => !s.includes('選區') && !s.includes('選舉區'))
+    .sort(sortByLengthThenStroke)
+})
+
+// 取得選定鄉鎮市區的村里（從村里長候選人）
+const availableVillages = computed(() => {
+  if (selectedSubRegion.value === 'All') return []
+  const villages = new Set<string>()
+
+  // 從村里長候選人取得村里名稱
+  electionPoliticians.value.map(withCurrentElectionData)
+    .filter(c => {
+      const type = getElectionType(c)
+      return type === ElectionType.CHIEF &&
+        c.region === selectedRegion.value &&
+        c.subRegion === selectedSubRegion.value &&
+        c.village
+    })
+    .forEach(c => villages.add(c.village!))
+
+  return Array.from(villages).sort(sortByLengthThenStroke)
 })
 
 const filteredPoliticians = computed(() => {
-  let result = electionPoliticians.value
+  // 關鍵：套用當前選舉的特定資料，確保 candidateStatus/subRegion 等欄位正確
+  let result = electionPoliticians.value.map(withCurrentElectionData)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
@@ -179,7 +249,7 @@ const presidentPoliticians = computed(() =>
     })
 )
 const legislatorPoliticians = computed(() => {
-  let result = electionPoliticians.value.filter(c => getElectionType(c) === ElectionType.LEGISLATOR)
+  let result = electionPoliticians.value.map(withCurrentElectionData).filter(c => getElectionType(c) === ElectionType.LEGISLATOR)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
@@ -187,7 +257,7 @@ const legislatorPoliticians = computed(() => {
 })
 const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.MAYOR))
 const councilorPoliticians = computed(() => {
-  let result = electionPoliticians.value.filter(c => getElectionType(c) === ElectionType.COUNCILOR)
+  let result = electionPoliticians.value.map(withCurrentElectionData).filter(c => getElectionType(c) === ElectionType.COUNCILOR)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
@@ -208,7 +278,14 @@ const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter
 const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
 const repPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.REPRESENTATIVE))
 const indigenousRepPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_REP))
-const chiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.CHIEF))
+const chiefPoliticians = computed(() => {
+  let result = filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.CHIEF)
+  // 村里篩選
+  if (selectedVillage.value !== 'All') {
+    result = result.filter(c => c.village === selectedVillage.value)
+  }
+  return result
+})
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
 const hasLocalCandidates = computed(() => {
@@ -375,77 +452,67 @@ const electionLevels = [
         <button @click="viewMode = 'comparison'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'comparison' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Scale :size="16" /> 政見 PK</button>
       </template>
 
-      <!-- White bar: Region selector and election name -->
-      <div class="space-y-4">
-        <GlobalRegionSelector />
-
-        <div class="flex items-center gap-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-navy-900 font-medium">
-          <Vote :size="18" class="text-slate-400 shrink-0" />
-          <span>{{ election.name }}</span>
-        </div>
-      </div>
+      <GlobalRegionSelector />
     </Hero>
 
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div class="flex flex-col md:flex-row gap-8">
 
-      <!-- 篩選區：只在選擇特定縣市時顯示 -->
-      <div v-if="selectedRegion !== 'All'" class="mb-4 space-y-4">
-        <!-- 鄉鎮市區篩選（也用於議員，透過對應表自動查詢選舉區） -->
-        <div v-if="availableSubRegions.length > 0">
-          <div class="flex items-center gap-2 mb-2">
-            <MapPin :size="16" class="text-slate-400" />
-            <span class="text-sm font-medium text-slate-500">鄉鎮市區篩選</span>
-            <span class="text-xs text-slate-400">（議員、鄉鎮市長、代表、村里長）</span>
-          </div>
-          <div class="flex gap-4 w-full bg-slate-100 p-2 rounded-xl">
-            <!-- Left: 全部 -->
-            <div class="shrink-0 flex items-center gap-3">
-              <button
-                @click="selectedSubRegion = 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${selectedSubRegion === 'All' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
-              >全部</button>
-              <div class="w-px h-6 bg-slate-300"></div>
-            </div>
-            <!-- Right: Wrap -->
-            <div class="flex-grow flex flex-wrap items-center gap-2">
-              <button
-                v-for="subRegion in availableSubRegions"
-                :key="subRegion"
-                @click="selectedSubRegion = subRegion"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${selectedSubRegion === subRegion ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`"
-              >{{ subRegion }}</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- 左側：主要內容 -->
+      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 md:w-2/3' : 'w-full'">
 
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
-        <!-- 總統：全台模式下顯示 -->
-        <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
-
-        <!-- 立委：全台或特定縣市都顯示 -->
-        <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
-
-        <!-- 縣市長：全台模式下也顯示 -->
-        <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-
-        <!-- 縣市議員及以下：需選擇特定縣市 -->
-        <template v-if="selectedRegion !== 'All'">
-          <PoliticianGrid :politicians="councilorPoliticians" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" title="村里長參選人"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
+        <!-- ===== 第1級：全台 ===== -->
+        <template v-if="selectedRegion === 'All'">
+          <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" :columns="gridColumns" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
         </template>
-        <div v-else-if="hasLocalCandidates" class="mt-8 text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
-          <Users :size="48" class="mx-auto mb-4 text-slate-300" />
-          <h3 class="text-lg font-bold text-navy-900 mb-2">請選擇特定縣市</h3>
-          <p class="text-slate-500 max-w-md mx-auto">縣市議員、鄉鎮市長、代表、村里長等選舉數量較多，請先選擇特定縣市查看。</p>
-        </div>
+
+        <!-- ===== 第2級：縣市 ===== -->
+        <template v-else-if="selectedSubRegion === 'All'">
+          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="councilorPoliticians.length > 0" :politicians="councilorPoliticians" :columns="gridColumns" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
+        </template>
+
+        <!-- ===== 第3級：鄉鎮市區 ===== -->
+        <template v-else-if="selectedVillage === 'All'">
+          <!-- 直轄市的「區」是指派的，無選舉 -->
+          <template v-if="isSpecialMunicipality">
+            <div class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+              <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
+              <h3 class="text-lg font-bold text-navy-900 mb-2">直轄市的區長為官派</h3>
+              <p class="text-slate-500">請選擇<span class="font-bold text-slate-700">里</span>查看里長參選人。</p>
+            </div>
+          </template>
+          <!-- 一般縣市的鄉鎮市有選舉 -->
+          <template v-else>
+            <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" :columns="gridColumns" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
+            <!-- 無候選人時的提示 -->
+            <div v-if="!townshipMayorPoliticians.length && !indigenousChiefPoliticians.length && !repPoliticians.length && !indigenousRepPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+              <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
+              <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無參選人資料</h3>
+              <p class="text-slate-500">請選擇其他{{ subRegionLabel }}，或選擇{{ villageLabel }}查看{{ villageLabel }}長。</p>
+            </div>
+          </template>
+        </template>
+
+        <!-- ===== 第4級：村里 ===== -->
+        <template v-else>
+          <PoliticianGrid v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" :columns="gridColumns" :title="`${villageLabel}長參選人`"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
+          <!-- 無候選人時的提示 -->
+          <div v-if="!chiefPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+            <MapPin :size="48" class="mx-auto mb-4 text-slate-300" />
+            <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ villageLabel }}無參選人資料</h3>
+            <p class="text-slate-500">請選擇其他{{ villageLabel }}查看。</p>
+          </div>
+        </template>
       </div>
 
       <!-- VIEW: Pledges -->
@@ -556,6 +623,64 @@ const electionLevels = [
           </template>
         </div>
       </div>
+
+      </div><!-- 左側內容結束 -->
+
+      <!-- 右側：篩選區（手機版顯示在上方） -->
+      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
+        <div class="sticky top-4 space-y-4">
+          <!-- 鄉鎮市區篩選 -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div class="flex items-center gap-2 mb-3">
+              <MapPin :size="16" class="text-slate-400" />
+              <span class="text-sm font-bold text-slate-700">鄉鎮市區</span>
+            </div>
+            <div class="flex flex-wrap gap-0.5">
+              <button
+                @click="selectedSubRegion = 'All'"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
+              >全部</button>
+              <button
+                v-for="subRegion in availableSubRegions"
+                :key="subRegion"
+                @click="selectedSubRegion = subRegion"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === subRegion ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
+              >{{ subRegion }}</button>
+            </div>
+          </div>
+
+          <!-- 村里篩選 -->
+          <div v-if="availableVillages.length > 0" class="bg-white rounded-xl border border-amber-200 p-4 shadow-sm">
+            <div class="flex items-center gap-2 mb-3">
+              <MapPin :size="16" class="text-amber-500" />
+              <span class="text-sm font-bold text-slate-700">村里</span>
+            </div>
+            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+              <button
+                @click="selectedVillage = 'All'"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === 'All' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+              >全部</button>
+              <button
+                v-for="village in availableVillages"
+                :key="village"
+                @click="selectedVillage = village"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === village ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+              >{{ village }}</button>
+            </div>
+          </div>
+
+          <!-- 篩選狀態摘要 -->
+          <div v-if="selectedSubRegion !== 'All'" class="bg-slate-50 rounded-xl p-4 text-sm text-slate-600">
+            <div class="flex items-center gap-2">
+              <span class="font-medium">目前篩選：</span>
+              <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{{ selectedSubRegion }}</span>
+              <span v-if="selectedVillage !== 'All'" class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded">{{ selectedVillage }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      </div><!-- flex 結束 -->
     </div>
   </div>
 

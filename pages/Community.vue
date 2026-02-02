@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
-import { MessageSquare, ThumbsUp, TrendingUp, Search, Filter, PenTool, Eye } from 'lucide-vue-next'
+import { MessageSquare, ThumbsUp, TrendingUp, Search, PenTool, Eye } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import type { Discussion } from '../types'
@@ -106,10 +106,6 @@ const hotDiscussions = computed(() =>
   [...discussions.value].sort((a, b) => b.likes - a.likes).slice(0, 5)
 )
 
-function setCategory(tag: string) {
-  activeCategory.value = tag === '全部' ? '' : tag
-}
-
 const clearFilter = () => {
   router.push('/community')
 }
@@ -126,39 +122,70 @@ function getCommentCount(post: Discussion) {
       <template #description>這裡不只是政見的展示架，更是公民意志的集散地。針對每一項政策提出您的見解、疑問或支持，讓改變從對話開始。</template>
       <template #icon><MessageSquare :size="400" class="text-blue-500" /></template>
 
-        <div class="space-y-2">
-          <GlobalRegionSelector />
+      <!-- Hero Actions: 頁籤 -->
+      <template #actions>
+        <button @click="activeTab = 'hot'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'hot' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
+          <TrendingUp :size="16" /> 熱門討論
+        </button>
+        <button @click="activeTab = 'latest'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'latest' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
+          <MessageSquare :size="16" /> 最新發表
+        </button>
+        <button class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-500/20">
+          <PenTool :size="16" /> 發起新討論
+        </button>
+      </template>
 
-          <div class="flex flex-col lg:flex-row gap-4 items-center">
-            <!-- 搜尋框 -->
-            <div class="relative flex-1 w-full">
-              <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
-              <input v-model="searchQuery" type="text" placeholder="搜尋討論..." class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400" />
-            </div>
+      <GlobalRegionSelector />
+    </Hero>
 
-            <!-- 按鈕群組 -->
-            <div class="flex flex-wrap lg:flex-nowrap gap-3 w-full lg:w-auto">
-              <button class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 shadow-lg shadow-blue-500/20 transition-all font-bold text-sm whitespace-nowrap">
-                <PenTool :size="16" />
-                發起新討論
-              </button>
-
-              <!-- 頁籤 -->
-              <div class="flex bg-slate-100 p-1 rounded-xl">
-                <button @click="activeTab = 'hot'" :class="`px-4 py-2 rounded-lg font-bold text-sm transition-all whitespace-nowrap ${activeTab === 'hot' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">熱門討論</button>
-                <button @click="activeTab = 'latest'" :class="`px-4 py-2 rounded-lg font-bold text-sm transition-all whitespace-nowrap ${activeTab === 'latest' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`">最新發表</button>
-              </div>
-            </div>
-          </div>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <!-- 搜尋 -->
+      <div class="mb-6">
+        <div class="relative max-w-xl">
+          <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
+          <input v-model="searchQuery" type="text" placeholder="搜尋討論..." class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400 shadow-sm" />
         </div>
-        <div v-if="initialFilter" class="mt-4 bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between">
+        <div v-if="initialFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mt-4">
           <span>篩選政見：<strong>{{ initialFilter }}</strong></span>
           <button @click="clearFilter" class="text-sm underline hover:text-blue-900">清除</button>
         </div>
-    </Hero>
+      </div>
 
+      <!-- 分類篩選 -->
+      <div class="flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+        <!-- Left: 全部 -->
+        <div class="shrink-0 flex items-center gap-3">
+          <button
+            @click="activeCategory = ''"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
+              !activeCategory
+                ? 'bg-white text-navy-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
+            ]"
+          >
+            全部
+          </button>
+          <div class="w-px h-6 bg-slate-300"></div>
+        </div>
+        <!-- Right: Wrap -->
+        <div class="flex-grow flex flex-wrap items-center gap-2">
+          <button
+            v-for="tag in COMMUNITY_TAGS"
+            :key="tag"
+            @click="activeCategory = tag"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
+              activeCategory === tag
+                ? 'bg-white text-navy-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
+            ]"
+          >
+            {{ tag }}
+          </button>
+        </div>
+      </div>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-8 text-left">
         <div class="lg:col-span-1 space-y-6">
           <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
@@ -171,22 +198,6 @@ function getCommentCount(post: Discussion) {
                 </a>
               </li>
             </ul>
-          </div>
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Filter class="text-blue-500" :size="20" /> 篩選類別</h3>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="tag in ['全部', ...COMMUNITY_TAGS]"
-                :key="tag"
-                @click="setCategory(tag)"
-                :class="[
-                  'cursor-pointer px-3 py-1 text-xs rounded-full transition-colors',
-                  (tag === '全部' && !activeCategory) || activeCategory === tag
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                ]"
-              >{{ tag }}</span>
-            </div>
           </div>
         </div>
 

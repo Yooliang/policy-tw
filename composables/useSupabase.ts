@@ -2,12 +2,9 @@ import { ref } from 'vue'
 import { supabase } from '../lib/supabase'
 import type { Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData } from '../types'
 import { ElectionType } from '../types'
-import { useIndexedDB } from './useIndexedDB'
 
-const { getFromCache, setToCache, getCacheTimestamp, CACHE_DURATION } = useIndexedDB()
-
-// Cache keys
-const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'  // 按選舉快取
+// Cache key prefix (used for in-memory tracking only, no IndexedDB)
+const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
 
 // Global shared state
 const elections = ref<Election[]>([])
@@ -247,7 +244,7 @@ function getActiveElection(): Election {
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
 
-// 按選舉 + 地區載入候選人（按需載入）
+// 按選舉 + 地區載入候選人（按需載入，不使用 IndexedDB 快取）
 async function loadPoliticiansByElection(
   electionId: number,
   region: string = 'All'
@@ -255,7 +252,7 @@ async function loadPoliticiansByElection(
   // 全國選 All 時載入總統/立委，選縣市時載入該縣市候選人
   const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}`
 
-  // 已經載入過就跳過
+  // 已經載入過就跳過（僅內存快取，不用 IndexedDB）
   if (loadedRegions.value.has(cacheKey)) {
     console.log(`[loadByElection] ${electionId}/${region} 已載入，跳過`)
     return politicians.value.filter(p => p.electionIds?.includes(electionId))
@@ -266,18 +263,7 @@ async function loadPoliticiansByElection(
   console.log(`[loadByElection] 已載入的 regions:`, Array.from(loadedRegions.value))
 
   try {
-    // 1. 先查快取
-    const cached = await getFromCache<Politician[]>(cacheKey)
-    if (cached && cached.length > 0) {
-      console.log(`[loadByElection] 快取命中! ${cached.length} 位候選人`)
-      const existingIds = new Set(politicians.value.map(p => p.id))
-      const newPols = cached.filter(p => !existingIds.has(p.id))
-      console.log(`[loadByElection] 新增 ${newPols.length} 位到 state (原有 ${existingIds.size})`)
-      politicians.value = [...politicians.value, ...newPols]
-      loadedRegions.value.add(cacheKey)
-      return cached
-    }
-    console.log(`[loadByElection] 快取未命中，從 DB 載入`)
+    // 直接從 DB 載入（不使用 IndexedDB 快取）
 
     // 2. 先查詢該選舉有哪些類型
     const { data: typeData } = await supabase
@@ -340,14 +326,32 @@ async function loadPoliticiansByElection(
       console.log(`[loadByElection] 範例:`, pols.slice(0, 3).map(p => ({ name: p.name, type: p.electionType, region: p.region })))
     }
 
-    // 4. 存入快取
-    console.log(`[loadByElection] 存入快取: ${cacheKey}`)
-    await setToCache(cacheKey, pols)
+    // 合併到全域 state（不存入 IndexedDB 快取）
+    // 重要：更新已存在候選人的 elections 陣列，確保跨選舉資料正確
+    const polsMap = new Map<string, Politician>(pols.map(p => [p.id, p]))
 
-    // 5. 合併到全域 state
-    const existingIds = new Set(politicians.value.map(p => p.id))
-    const newPols = pols.filter(p => !existingIds.has(p.id))
-    console.log(`[loadByElection] 合併到 state: 新增 ${newPols.length} 位 (原有 ${existingIds.size})`)
+    politicians.value = politicians.value.map(existing => {
+      const updated = polsMap.get(existing.id)
+      if (updated) {
+        // 合併 elections 陣列，保持完整歷史
+        const mergedElections = [...(existing.elections || [])]
+        for (const newElection of updated.elections || []) {
+          const idx = mergedElections.findIndex(e => e.electionId === newElection.electionId)
+          if (idx >= 0) {
+            mergedElections[idx] = newElection  // 更新已存在的選舉資料
+          } else {
+            mergedElections.push(newElection)   // 新增新的選舉資料
+          }
+        }
+        polsMap.delete(existing.id)  // 標記為已處理
+        return { ...existing, elections: mergedElections }
+      }
+      return existing
+    })
+
+    // 新增不存在的候選人
+    const newPols = Array.from(polsMap.values())
+    console.log(`[loadByElection] 合併到 state: 新增 ${newPols.length} 位, 更新 ${pols.length - newPols.length} 位`)
     politicians.value = [...politicians.value, ...newPols]
     loadedRegions.value.add(cacheKey)
     loadedElections.value.add(electionId)
@@ -362,11 +366,15 @@ async function loadPoliticiansByElection(
 
 // Force refresh politicians for a specific election
 async function refreshPoliticiansByElection(electionId: number) {
-  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}`
+  // 清除內存中的快取記錄
   loadedElections.value.delete(electionId)
 
-  // 清除該選舉的快取
-  await setToCache(cacheKey, null)
+  // 清除相關的 loadedRegions
+  for (const key of loadedRegions.value) {
+    if (key.startsWith(`${CACHE_KEY_PREFIX_ELECTION}${electionId}`)) {
+      loadedRegions.value.delete(key)
+    }
+  }
 
   // 重新載入
   return loadPoliticiansByElection(electionId)
