@@ -75,6 +75,9 @@ Deno.serve(async (req) => {
       case "update_prompt":
         return await handleUpdatePrompt(supabase, body);
 
+      case "deduplicate_candidates":
+        return await handleDeduplicateCandidates(supabase, body);
+
       default:
         return new Response(
           JSON.stringify({ error: `Unknown action: ${action}` }),
@@ -737,6 +740,108 @@ async function handleAddTrackingLog(supabase: any, body: any): Promise<Response>
   if (error) throw new Error(error.message);
 
   return successResponse({ action: "created", log_id: newLog.id });
+}
+
+/**
+ * 去重候選人資料
+ *
+ * 找出同名同選舉的重複 politician_elections 記錄並合併
+ */
+async function handleDeduplicateCandidates(supabase: any, body: any): Promise<Response> {
+  const { election_year, dry_run = true } = body;
+
+  if (!election_year) {
+    return errorResponse("Missing election_year");
+  }
+
+  // 找出該選舉年份的所有參選記錄
+  const { data: elections } = await supabase
+    .from("elections")
+    .select("id")
+    .gte("election_date", `${election_year}-01-01`)
+    .lte("election_date", `${election_year}-12-31`);
+
+  if (!elections || elections.length === 0) {
+    return successResponse({ message: "找不到該年份的選舉", duplicates: [] });
+  }
+
+  const electionIds = elections.map((e: any) => e.id);
+
+  // 找出重複的 politician_elections (同一 politician 在同一 election 有多筆記錄)
+  const { data: allPE } = await supabase
+    .from("politician_elections")
+    .select(`
+      id,
+      politician_id,
+      election_id,
+      position,
+      candidate_status,
+      created_at,
+      politicians (
+        id,
+        name,
+        region
+      )
+    `)
+    .in("election_id", electionIds)
+    .order("created_at", { ascending: true });
+
+  if (!allPE || allPE.length === 0) {
+    return successResponse({ message: "沒有參選記錄", duplicates: [] });
+  }
+
+  // 按 politician_id + election_id 分組
+  const groups: Record<string, any[]> = {};
+  for (const pe of allPE) {
+    const key = `${pe.politician_id}-${pe.election_id}`;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(pe);
+  }
+
+  // 找出有重複的群組
+  const duplicates: any[] = [];
+  const toDelete: string[] = [];
+
+  for (const [key, records] of Object.entries(groups)) {
+    if (records.length > 1) {
+      // 保留最早的記錄，刪除其他
+      const [keep, ...remove] = records;
+      duplicates.push({
+        name: keep.politicians?.name,
+        region: keep.politicians?.region,
+        kept: keep.id,
+        removed: remove.map((r: any) => r.id),
+        count: records.length,
+      });
+      toDelete.push(...remove.map((r: any) => r.id));
+    }
+  }
+
+  // 如果不是 dry_run，執行刪除
+  let deleted = 0;
+  if (!dry_run && toDelete.length > 0) {
+    const { error } = await supabase
+      .from("politician_elections")
+      .delete()
+      .in("id", toDelete);
+
+    if (error) {
+      return errorResponse(`刪除失敗: ${error.message}`, 500);
+    }
+    deleted = toDelete.length;
+  }
+
+  return successResponse({
+    message: dry_run
+      ? `找到 ${duplicates.length} 組重複資料（預覽模式，未刪除）`
+      : `已刪除 ${deleted} 筆重複資料`,
+    dry_run,
+    duplicate_groups: duplicates.length,
+    total_duplicates: toDelete.length,
+    duplicates: duplicates.slice(0, 20), // 只回傳前 20 筆
+  });
 }
 
 // ============================================================

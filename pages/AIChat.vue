@@ -24,6 +24,7 @@ import {
   Database,
   BarChart3,
   Activity,
+  Trash2,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -291,6 +292,42 @@ function useExample(text: string) {
   userInput.value = text
 }
 
+// Deduplication
+const deduplicating = ref(false)
+const dedupeResult = ref<any>(null)
+
+async function handleDeduplicate(dryRun = true) {
+  deduplicating.value = true
+  dedupeResult.value = null
+
+  try {
+    const response = await supabase.functions.invoke('ai-action', {
+      body: {
+        api_key: 'policy-ai-2026',
+        action: 'deduplicate_candidates',
+        election_year: 2026,
+        dry_run: dryRun,
+      },
+    })
+
+    if (response.error) {
+      throw new Error(response.error.message)
+    }
+
+    dedupeResult.value = response.data
+
+    // If not dry run, refresh tasks
+    if (!dryRun) {
+      fetchTasks(true)
+    }
+  } catch (err: any) {
+    console.error('Deduplicate error:', err)
+    dedupeResult.value = { success: false, error: err.message }
+  } finally {
+    deduplicating.value = false
+  }
+}
+
 // Lifecycle
 onMounted(() => {
   // Always fetch tasks (public view)
@@ -490,6 +527,54 @@ watch(user, (newUser) => {
               <div class="bg-red-50 rounded-lg p-3 text-center">
                 <div class="text-2xl font-bold text-red-600">{{ stats.failed }}</div>
                 <div class="text-xs text-red-600">失敗</div>
+              </div>
+            </div>
+
+            <!-- Data Quality Tools -->
+            <div class="mb-6 p-4 bg-slate-50 rounded-lg">
+              <h4 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                <Database class="w-4 h-4" />
+                資料品質工具
+              </h4>
+
+              <div class="flex flex-wrap gap-2">
+                <button
+                  @click="handleDeduplicate(true)"
+                  :disabled="deduplicating"
+                  class="px-3 py-1.5 text-sm bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors flex items-center gap-1.5"
+                >
+                  <Search v-if="!deduplicating" class="w-4 h-4" />
+                  <Loader2 v-else class="w-4 h-4 animate-spin" />
+                  檢查重複資料
+                </button>
+
+                <button
+                  v-if="dedupeResult?.duplicate_groups > 0"
+                  @click="handleDeduplicate(false)"
+                  :disabled="deduplicating"
+                  class="px-3 py-1.5 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 class="w-4 h-4" />
+                  清除 {{ dedupeResult.total_duplicates }} 筆重複
+                </button>
+              </div>
+
+              <!-- Dedupe result -->
+              <div v-if="dedupeResult" class="mt-3 text-sm">
+                <div v-if="dedupeResult.success !== false" :class="['p-3 rounded-lg', dedupeResult.duplicate_groups > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700']">
+                  <p class="font-medium">{{ dedupeResult.message }}</p>
+                  <div v-if="dedupeResult.duplicates?.length > 0" class="mt-2 space-y-1">
+                    <p v-for="dup in dedupeResult.duplicates.slice(0, 5)" :key="dup.name" class="text-xs">
+                      • {{ dup.name }} ({{ dup.region }}) - {{ dup.count }} 筆重複
+                    </p>
+                    <p v-if="dedupeResult.duplicates.length > 5" class="text-xs opacity-75">
+                      ...還有 {{ dedupeResult.duplicates.length - 5 }} 組
+                    </p>
+                  </div>
+                </div>
+                <div v-else class="p-3 rounded-lg bg-red-50 text-red-700">
+                  錯誤：{{ dedupeResult.error }}
+                </div>
               </div>
             </div>
 
