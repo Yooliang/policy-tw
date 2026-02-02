@@ -323,19 +323,19 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
                 politician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
               {{ politician.party[0] }}
             </span>
-            <!-- Avatar search button when no avatar -->
+            <!-- Avatar search button - always visible -->
             <button
-              v-if="!politician.avatarUrl && !searchAvatarSuccess"
+              v-if="!searchAvatarSuccess"
               @click="handleSearchAvatar"
               :disabled="searchingAvatar"
               class="absolute -bottom-2 left-1/2 -translate-x-1/2 text-xs px-2 py-1 bg-white/90 hover:bg-white text-slate-700 rounded-full transition-all flex items-center gap-1 shadow-lg"
             >
               <Loader2 v-if="searchingAvatar" :size="10" class="animate-spin" />
               <Camera v-else :size="10" />
-              {{ searchingAvatar ? '...' : '查找照片' }}
+              {{ searchingAvatar ? '...' : '更新照片' }}
             </button>
             <span
-              v-if="!politician.avatarUrl && searchAvatarSuccess"
+              v-if="searchAvatarSuccess"
               class="absolute -bottom-2 left-1/2 -translate-x-1/2 text-xs px-2 py-1 bg-emerald-500 text-white rounded-full flex items-center gap-1 shadow-lg"
             >
               <CheckCircle :size="10" />
@@ -354,27 +354,10 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
 
             <h2 v-if="politician.slogan" class="text-xl md:text-2xl font-bold text-amber-400 mb-4 italic">"{{ politician.slogan }}"</h2>
 
-            <!-- Bio with AI search -->
+            <!-- Bio display -->
             <div class="max-w-2xl">
               <p v-if="politician.bio" class="text-violet-100 leading-relaxed mb-6 text-lg">{{ politician.bio }}</p>
-              <div v-else class="text-violet-200 mb-4 flex items-center gap-3 flex-wrap">
-                <span class="text-sm opacity-75">暫無簡介</span>
-                <button
-                  v-if="!searchBioSuccess"
-                  @click="handleSearchBio"
-                  :disabled="searchingBio"
-                  class="text-xs px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg transition-all flex items-center gap-1.5 border border-white/20"
-                >
-                  <Loader2 v-if="searchingBio" :size="12" class="animate-spin" />
-                  <Sparkles v-else :size="12" />
-                  {{ searchingBio ? '搜尋中...' : 'AI 查找' }}
-                </button>
-                <span v-if="searchBioSuccess" class="text-emerald-300 text-xs flex items-center gap-1">
-                  <CheckCircle :size="12" />
-                  已提交
-                </span>
-                <span v-if="searchBioError" class="text-red-300 text-xs">{{ searchBioError }}</span>
-              </div>
+              <p v-else class="text-violet-200 mb-4 text-sm opacity-75">暫無簡介</p>
             </div>
           </div>
         </div>
@@ -564,6 +547,67 @@ const historicalPolicies = computed(() => politician.value ? policies.value.filt
                   </template>
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>
+              </div>
+
+              <!-- AI Lookup Section - Always visible -->
+              <div class="pt-4 border-t border-slate-100">
+                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> AI 資料查找</h3>
+                <div class="space-y-3">
+                  <!-- Search Bio Button -->
+                  <button
+                    @click="handleSearchBio"
+                    :disabled="searchingBio"
+                    :class="[
+                      'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
+                      searchBioSuccess
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : searchBioError
+                          ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                          : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
+                    ]"
+                  >
+                    <Loader2 v-if="searchingBio" :size="16" class="animate-spin" />
+                    <CheckCircle v-else-if="searchBioSuccess" :size="16" />
+                    <XCircle v-else-if="searchBioError" :size="16" />
+                    <User v-else :size="16" />
+                    {{ searchingBio ? '搜尋中...' : searchBioSuccess ? '已提交查找' : searchBioError ? '重試查找' : '查找簡介/學經歷' }}
+                  </button>
+
+                  <!-- Search Avatar Button -->
+                  <button
+                    @click="handleSearchAvatar"
+                    :disabled="searchingAvatar"
+                    :class="[
+                      'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
+                      searchAvatarSuccess
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : searchAvatarError
+                          ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                          : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    ]"
+                  >
+                    <Loader2 v-if="searchingAvatar" :size="16" class="animate-spin" />
+                    <CheckCircle v-else-if="searchAvatarSuccess" :size="16" />
+                    <XCircle v-else-if="searchAvatarError" :size="16" />
+                    <Camera v-else :size="16" />
+                    {{ searchingAvatar ? '搜尋中...' : searchAvatarSuccess ? '已提交查找' : searchAvatarError ? '重試查找' : '查找照片' }}
+                  </button>
+
+                  <!-- Error messages -->
+                  <p v-if="searchBioError" class="text-red-500 text-xs">{{ searchBioError }}</p>
+                  <p v-if="searchAvatarError" class="text-red-500 text-xs">{{ searchAvatarError }}</p>
+
+                  <!-- Success hint -->
+                  <div v-if="searchBioSuccess || searchAvatarSuccess" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <p class="text-xs text-emerald-600 mb-2">任務已送出，將在背景執行。</p>
+                    <button
+                      @click="router.push('/ai-assistant')"
+                      class="text-xs font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
+                    >
+                      查看進度 <ChevronRight :size="14" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
