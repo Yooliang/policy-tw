@@ -512,6 +512,28 @@ async function handleUpdatePolitician(supabase: any, body: any): Promise<Respons
         if (!isNaN(year) && year >= 1900 && year <= 2010) {
           updateData[field] = year;
         }
+      } else if (field === "avatar_url") {
+        // 驗證 avatar_url 必須是有效的圖片 URL
+        const url = updates[field];
+        if (typeof url === "string" && url.length > 0) {
+          // 必須是實際圖片 URL，不能是 Wikipedia 分類頁面
+          const isValidImageUrl = (
+            url.includes("upload.wikimedia.org") ||
+            url.includes(".jpg") ||
+            url.includes(".jpeg") ||
+            url.includes(".png") ||
+            url.includes(".webp") ||
+            url.includes("taichung.gov.tw/media") ||
+            url.includes("taipei.gov.tw") ||
+            url.includes("kcg.gov.tw")
+          ) && !url.includes("commons.wikimedia.org/wiki/Category:");
+
+          if (isValidImageUrl) {
+            updateData[field] = url;
+          } else {
+            console.log(`[update_politician] Rejected invalid avatar_url: ${url}`);
+          }
+        }
       } else {
         // 其他欄位直接設定
         updateData[field] = updates[field];
