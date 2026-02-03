@@ -364,25 +364,24 @@ Deno.serve(async (req) => {
       .limit(1)
       .single();
 
-    // Build prompt template based on task type
-    let promptTemplate = input;
+    // Build processed prompt for candidate_search (stored in parameters)
+    let processedPrompt: string | null = null;
     if (classification.task_type === "candidate_search") {
-      promptTemplate = `搜尋 ${electionYear} 年台灣`;
+      processedPrompt = `搜尋 ${electionYear} 年台灣`;
       if (params.regions.length > 0) {
-        promptTemplate += params.regions.join("、");
+        processedPrompt += params.regions.join("、");
       }
       if (params.positions.length > 0) {
-        promptTemplate += params.positions.join("、");
+        processedPrompt += params.positions.join("、");
       }
-      promptTemplate += "選舉候選人名單";
+      processedPrompt += "選舉候選人名單";
     }
 
-    // Create ai_prompts record
+    // Create ai_prompts record (user_input is the main prompt field)
     const { data: prompt, error: insertError } = await supabase
       .from("ai_prompts")
       .insert({
         task_type: classification.task_type,
-        prompt_template: promptTemplate,
         user_input: input,
         source_url: url,
         parameters: {
@@ -391,8 +390,9 @@ Deno.serve(async (req) => {
           positions: params.positions,
           url: url,
           original_input: input,
+          processed_prompt: processedPrompt,  // Store processed prompt if different
           politician_id: politicianId,
-          politician_name: extractedPoliticianName,  // Use extracted name if not provided
+          politician_name: extractedPoliticianName,
           policy_id: policyId,
         },
         status: "pending",

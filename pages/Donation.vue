@@ -2,14 +2,20 @@
 import { ref, onMounted } from 'vue'
 import Hero from '../components/Hero.vue'
 import { supabase } from '../lib/supabase'
-import { CreditCard, Copy, Check, Heart, Sparkles, Loader2 } from 'lucide-vue-next'
+import { CreditCard, Copy, Check, Heart, Sparkles, Loader2, ChevronDown } from 'lucide-vue-next'
 
 const copied = ref<string | null>(null)
+const showAllCrypto = ref(false)
 const cryptoWallets = [
-  { name: 'Bitcoin', symbol: 'BTC', address: '3FZbgi29cpjq2GjdwV8eyHuJJnkLtktZc5' },
-  { name: 'Ethereum', symbol: 'ETH', address: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F' },
-  { name: 'USDT (TRC20)', symbol: 'USDT', address: 'T9yD14Nj9j7xAB4dbGeiX9h8zzC52CCD5' },
+  { name: 'Bitcoin', symbol: 'BTC', address: 'bc1q9umjtz04dfslddw4eryw5mn8hk4ld7csml40pk' },
+  { name: 'Ethereum (ERC20)', symbol: 'ETH', address: '0xcd28639ce0395E9f8048AAf2F52da0624880a772' },
+  { name: 'USDT (TRC20)', symbol: 'TRC20', address: 'TUfyufkfRiUFxWnZ5BURKqUWWZHRThvNHt' },
+  { name: 'USDT (BEP20)', symbol: 'BEP20', address: '0xcd28639ce0395E9f8048AAf2F52da0624880a772' },
+  { name: 'USDT (Solana)', symbol: 'SOL', address: 'Fm5gcJ4V79VjSo3EmFqeyeeTkgUKgT6HWUS9J1cGyLEq' },
 ]
+
+// USD to TWD exchange rate (approximate)
+const USD_TO_TWD = 32.5
 
 const handleCopy = (address: string, symbol: string) => {
   navigator.clipboard.writeText(address)
@@ -34,15 +40,15 @@ const aiStatsError = ref<string | null>(null)
 const currentMonthStats = ref<{
   verify: number
   search: number
-  update: number
-  contribute: number
+  policyUpdate: number
+  politicianUpdate: number
   totalTokens: number
   totalCost: number
 }>({
   verify: 0,
   search: 0,
-  update: 0,
-  contribute: 0,
+  policyUpdate: 0,
+  politicianUpdate: 0,
   totalTokens: 0,
   totalCost: 0,
 })
@@ -72,8 +78,8 @@ async function fetchAIStats() {
 
     let verifyCount = 0
     let searchCount = 0
-    let updateCount = 0
-    let contributeCount = 0
+    let policyUpdateCount = 0
+    let politicianUpdateCount = 0
     let monthTokens = 0
     let monthCost = 0
     let allTokens = 0
@@ -91,16 +97,16 @@ async function fetchAIStats() {
 
         if (stat.function_type === 'verify') verifyCount += stat.request_count
         if (stat.function_type === 'search') searchCount += stat.request_count
-        if (stat.function_type === 'update') updateCount += stat.request_count
-        if (stat.function_type === 'contribute') contributeCount += stat.request_count
+        if (stat.function_type === 'policy_update') policyUpdateCount += stat.request_count
+        if (stat.function_type === 'politician_update') politicianUpdateCount += stat.request_count
       }
     }
 
     currentMonthStats.value = {
       verify: verifyCount,
       search: searchCount,
-      update: updateCount,
-      contribute: contributeCount,
+      policyUpdate: policyUpdateCount,
+      politicianUpdate: politicianUpdateCount,
       totalTokens: monthTokens,
       totalCost: monthCost,
     }
@@ -117,9 +123,21 @@ async function fetchAIStats() {
   }
 }
 
-function formatCost(cost: number): string {
+function formatCostUSD(cost: number): string {
   if (cost < 0.01) return '< $0.01'
   return `$${cost.toFixed(2)}`
+}
+
+function formatCostTWD(cost: number): string {
+  const twd = cost * USD_TO_TWD
+  if (twd < 1) return '< NT$1'
+  return `NT$${Math.round(twd).toLocaleString()}`
+}
+
+function formatCostNumber(cost: number): string {
+  const twd = cost * USD_TO_TWD
+  if (twd < 1) return '< 1'
+  return Math.round(twd).toLocaleString()
 }
 
 function formatTokens(tokens: number): string {
@@ -147,6 +165,14 @@ onMounted(() => {
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <!-- Left: AI Usage Statistics (8 cols) -->
         <div class="lg:col-span-8 space-y-6">
+          <!-- CTA - Independent card above stats -->
+          <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 flex items-center gap-4 shadow-lg">
+            <Heart :size="32" class="text-red-500 shrink-0" />
+            <p class="text-lg text-slate-700">
+              您的捐款將幫助我們維持 AI 服務運作，讓更多公民能夠查核政見、追蹤政治承諾。
+            </p>
+          </div>
+
           <div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-lg text-left">
             <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2">
               <Sparkles class="text-amber-500" />
@@ -163,56 +189,49 @@ onMounted(() => {
             </div>
 
             <div v-else class="space-y-6">
-              <!-- Current Month -->
-              <div>
-                <h4 class="text-sm font-medium text-slate-500 mb-3">本月使用量</h4>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div class="bg-slate-50 p-4 rounded-xl">
-                    <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.verify }}</div>
-                    <div class="text-sm text-slate-500">內容查核</div>
-                  </div>
-                  <div class="bg-slate-50 p-4 rounded-xl">
-                    <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.search }}</div>
-                    <div class="text-sm text-slate-500">候選人搜尋</div>
-                  </div>
-                  <div class="bg-slate-50 p-4 rounded-xl">
-                    <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.update }}</div>
-                    <div class="text-sm text-slate-500">政見更新</div>
-                  </div>
-                  <div class="bg-slate-50 p-4 rounded-xl">
-                    <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.contribute }}</div>
-                    <div class="text-sm text-slate-500">公民貢獻</div>
-                  </div>
+              <!-- Stats Grid: 4 columns x 2 rows -->
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Row 1: Task types -->
+                <div class="bg-slate-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.verify }}</div>
+                  <div class="text-sm text-slate-500">內容查核</div>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.search }}</div>
+                  <div class="text-sm text-slate-500">候選人搜尋</div>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.politicianUpdate }}</div>
+                  <div class="text-sm text-slate-500">候選人更新</div>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-navy-900">{{ currentMonthStats.policyUpdate }}</div>
+                  <div class="text-sm text-slate-500">政見更新</div>
+                </div>
+                <!-- Row 2: Tokens and Costs -->
+                <div class="bg-blue-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-blue-600">{{ formatTokens(currentMonthStats.totalTokens) }}</div>
+                  <div class="text-sm text-slate-500">本月 tokens</div>
+                </div>
+                <div class="bg-amber-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-amber-600">{{ formatCostNumber(currentMonthStats.totalCost) }}</div>
+                  <div class="text-sm text-slate-500">本月成本 (NT$)</div>
+                </div>
+                <div class="bg-slate-100 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-navy-900">{{ formatTokens(allTimeStats.totalTokens) }}</div>
+                  <div class="text-sm text-slate-500">累計 tokens</div>
+                </div>
+                <div class="bg-orange-50 p-4 rounded-xl text-center">
+                  <div class="text-2xl font-bold text-orange-600">{{ formatCostNumber(allTimeStats.totalCost) }}</div>
+                  <div class="text-sm text-slate-500">累計成本 (NT$)</div>
                 </div>
               </div>
 
-              <!-- Totals -->
-              <div class="border-t border-slate-200 pt-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 class="text-sm font-medium text-slate-500 mb-2">本月消耗</h4>
-                    <div class="flex items-baseline gap-2">
-                      <span class="text-3xl font-bold text-navy-900">{{ formatTokens(currentMonthStats.totalTokens) }}</span>
-                      <span class="text-slate-500">tokens</span>
-                    </div>
-                    <div class="text-lg text-slate-600">{{ formatCost(currentMonthStats.totalCost) }} USD</div>
-                  </div>
-                  <div>
-                    <h4 class="text-sm font-medium text-slate-500 mb-2">累計消耗</h4>
-                    <div class="flex items-baseline gap-2">
-                      <span class="text-3xl font-bold text-navy-900">{{ formatTokens(allTimeStats.totalTokens) }}</span>
-                      <span class="text-slate-500">tokens</span>
-                    </div>
-                    <div class="text-lg text-slate-600">{{ formatCost(allTimeStats.totalCost) }} USD</div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- CTA -->
-              <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
-                <Heart :size="20" class="text-red-500 shrink-0" />
-                <p class="text-sm text-slate-700">
-                  您的捐款將幫助我們維持 AI 服務運作，讓更多公民能夠查核政見、追蹤政治承諾。
+              <!-- Pricing Reference -->
+              <div class="border-t border-slate-200 pt-4 mt-4">
+                <p class="text-xs text-slate-400">
+                  價格參考：Claude Opus 4.5 輸入 $5/MTok、輸出 $25/MTok｜Haiku 4.5 輸入 $1/MTok、輸出 $5/MTok
+                  <a href="https://platform.claude.com/docs/zh-TW/about-claude/pricing" target="_blank" class="text-blue-500 hover:underline ml-1">官方定價</a>
                 </p>
               </div>
             </div>
@@ -242,20 +261,33 @@ onMounted(() => {
             <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
               <span class="text-amber-400">₿</span>加密貨幣捐款
             </h3>
-            <div class="space-y-4">
-              <div v-for="wallet in cryptoWallets" :key="wallet.symbol" class="bg-navy-800 p-3 rounded-lg border border-navy-700">
-                <div class="flex justify-between items-center mb-2">
-                  <span class="font-bold text-slate-200 text-sm">{{ wallet.name }}</span>
-                  <span class="text-xs bg-navy-950 px-2 py-0.5 rounded text-slate-400">{{ wallet.symbol }}</span>
+            <div class="space-y-2">
+              <template v-for="(wallet, index) in cryptoWallets" :key="wallet.symbol">
+                <div
+                  v-if="index < 2 || showAllCrypto"
+                  class="bg-navy-800 p-2.5 rounded-lg border border-navy-700"
+                >
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-medium text-slate-300 w-24 shrink-0">{{ wallet.name }}</span>
+                    <div class="flex-1 flex items-center gap-1.5 bg-navy-950 px-2 py-1 rounded border border-navy-800 min-w-0">
+                      <code class="text-[10px] text-slate-400 truncate font-mono flex-1">{{ wallet.address }}</code>
+                      <button @click="handleCopy(wallet.address, wallet.symbol)" class="p-0.5 hover:text-white text-slate-500 transition-colors shrink-0">
+                        <Check v-if="copied === wallet.symbol" :size="12" class="text-emerald-500" />
+                        <Copy v-else :size="12" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div class="flex items-center gap-2 bg-navy-950 p-2 rounded border border-navy-800">
-                  <code class="text-[10px] text-slate-400 flex-1 truncate font-mono">{{ wallet.address }}</code>
-                  <button @click="handleCopy(wallet.address, wallet.symbol)" class="p-1 hover:text-white text-slate-500 transition-colors shrink-0">
-                    <Check v-if="copied === wallet.symbol" :size="14" class="text-emerald-500" />
-                    <Copy v-else :size="14" />
-                  </button>
-                </div>
-              </div>
+              </template>
+              <!-- Expand/Collapse button -->
+              <button
+                v-if="cryptoWallets.length > 2"
+                @click="showAllCrypto = !showAllCrypto"
+                class="w-full py-2 text-xs text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition-colors"
+              >
+                <span>{{ showAllCrypto ? '收合' : `顯示更多 (${cryptoWallets.length - 2})` }}</span>
+                <ChevronDown :size="14" :class="{ 'rotate-180': showAllCrypto }" class="transition-transform" />
+              </button>
             </div>
           </div>
         </div>

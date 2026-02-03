@@ -679,6 +679,32 @@ watch(user, (newUser) => {
                   <p class="text-slate-600 bg-slate-50 p-4 rounded-lg">{{ selectedTask.result_summary }}</p>
                 </div>
 
+                <!-- Token Usage -->
+                <div v-if="selectedTask.result_data?.usage" class="mb-6">
+                  <h4 class="font-medium text-slate-800 mb-2">AI 使用量</h4>
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="bg-slate-50 p-3 rounded-lg text-center">
+                      <div class="text-lg font-bold text-navy-900">{{ (selectedTask.result_data.usage.input_tokens || 0).toLocaleString() }}</div>
+                      <div class="text-xs text-slate-500">輸入 tokens</div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-lg text-center">
+                      <div class="text-lg font-bold text-navy-900">{{ (selectedTask.result_data.usage.output_tokens || 0).toLocaleString() }}</div>
+                      <div class="text-xs text-slate-500">輸出 tokens</div>
+                    </div>
+                    <div class="bg-blue-50 p-3 rounded-lg text-center">
+                      <div class="text-lg font-bold text-blue-600">{{ (selectedTask.result_data.usage.cache_read_input_tokens || 0).toLocaleString() }}</div>
+                      <div class="text-xs text-slate-500">快取讀取</div>
+                    </div>
+                    <div class="bg-amber-50 p-3 rounded-lg text-center">
+                      <div class="text-lg font-bold text-amber-600">NT${{ Math.round((selectedTask.result_data.usage.total_cost_usd || 0) * 32.5).toLocaleString() }}</div>
+                      <div class="text-xs text-slate-500">≈ ${{ (selectedTask.result_data.usage.total_cost_usd || 0).toFixed(2) }}</div>
+                    </div>
+                  </div>
+                  <div v-if="selectedTask.result_data.usage.model" class="mt-2 text-xs text-slate-400">
+                    模型：{{ selectedTask.result_data.usage.model }}
+                  </div>
+                </div>
+
                 <!-- Result data -->
                 <div v-if="selectedTask.result_data">
                   <!-- Candidates -->

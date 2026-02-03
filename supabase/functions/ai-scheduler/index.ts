@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
         .from("ai_prompts")
         .insert({
           task_type: taskTypeToCreate,
-          prompt_template: getPromptTemplate(taskTypeToCreate, region),
+          user_input: getPromptTemplate(taskTypeToCreate, region),
           parameters: {
             election_year: 2026,
             region,

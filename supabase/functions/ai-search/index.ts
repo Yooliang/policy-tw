@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
       .from("ai_prompts")
       .insert({
         task_type: "candidate_search",
-        prompt_template: promptTemplate,
+        user_input: promptTemplate,
         parameters: {
           election_year: body.election_year,
           region: body.region || null,
