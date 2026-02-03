@@ -516,11 +516,11 @@ async function handleUpdatePolitician(supabase: any, body: any): Promise<Respons
           updateData[field] = year;
         }
       } else if (field === "avatar_url") {
-        // 驗證 avatar_url 必須是有效的圖片 URL
+        // avatar_url 需要異步驗證，先暫存
         const url = updates[field];
         if (typeof url === "string" && url.length > 0) {
-          // 必須是實際圖片 URL，不能是 Wikipedia 分類頁面
-          const isValidImageUrl = (
+          // 基本格式檢查：必須是實際圖片 URL，不能是 Wikipedia 分類頁面
+          const isValidFormat = (
             url.includes("upload.wikimedia.org") ||
             url.includes(".jpg") ||
             url.includes(".jpeg") ||
@@ -531,10 +531,32 @@ async function handleUpdatePolitician(supabase: any, body: any): Promise<Respons
             url.includes("kcg.gov.tw")
           ) && !url.includes("commons.wikimedia.org/wiki/Category:");
 
-          if (isValidImageUrl) {
-            updateData[field] = url;
+          if (isValidFormat) {
+            // 嘗試下載驗證圖片是否可用
+            try {
+              const response = await fetch(url, {
+                method: "HEAD",
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (compatible; PolicyTracker/1.0)",
+                },
+              });
+
+              if (response.ok) {
+                const contentType = response.headers.get("content-type") || "";
+                if (contentType.startsWith("image/")) {
+                  updateData[field] = url;
+                  console.log(`[update_politician] Verified avatar_url: ${url}`);
+                } else {
+                  console.log(`[update_politician] Rejected avatar_url (not image): ${url}, content-type: ${contentType}`);
+                }
+              } else {
+                console.log(`[update_politician] Rejected avatar_url (fetch failed): ${url}, status: ${response.status}`);
+              }
+            } catch (fetchError) {
+              console.log(`[update_politician] Rejected avatar_url (fetch error): ${url}, error: ${fetchError}`);
+            }
           } else {
-            console.log(`[update_politician] Rejected invalid avatar_url: ${url}`);
+            console.log(`[update_politician] Rejected invalid avatar_url format: ${url}`);
           }
         }
       } else {
