@@ -214,18 +214,12 @@ async function handleSubmit() {
     const inputText = userInput.value.trim()
     const extractedUrl = extractUrl(inputText)
 
-    // Debug: check session
-    console.log('Session:', session.value)
-    console.log('Access token:', session.value?.access_token?.substring(0, 20) + '...')
-
     const response = await supabase.functions.invoke('ai-classify', {
       body: {
         input: inputText,
         url: extractedUrl || undefined,
       },
     })
-
-    console.log('Response:', response)
 
     if (response.error) {
       throw new Error(response.error.message || JSON.stringify(response.error))

@@ -297,7 +297,6 @@ onMounted(async () => {
 
   const cacheTimestamp = await getCacheTimestamp('politicians_all')
   if (cacheTimestamp && Date.now() - cacheTimestamp > ONE_HOUR) {
-    console.log('Cache older than 1 hour, refreshing politicians...')
     refreshPoliticians()
   }
 })

@@ -24,6 +24,7 @@ const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
+const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
 async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string = '*'): Promise<T[]> {
@@ -41,7 +42,7 @@ async function fetchAllRows<T = Record<string, unknown>>(tableName: string, sele
     if (error) throw error
     if (!data || data.length < 1000) finished = true
 
-    allData = [...allData, ...(data as T[])]
+    if (data) allData.push(...(data as T[]))
     from += 1000
     to += 1000
   }
@@ -254,6 +255,14 @@ async function loadPoliticiansByElection(
   electionId: number,
   region: string = 'All'
 ): Promise<Politician[]> {
+  // 切換不同選舉時，清空舊資料避免無限膨脹
+  if (currentElectionId.value !== null && currentElectionId.value !== electionId) {
+    politicians.value = []
+    loadedRegions.value.clear()
+    loadedElections.value.clear()
+  }
+  currentElectionId.value = electionId
+
   // 全國選 All 時載入總統/立委，選縣市時載入該縣市候選人
   const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}`
 
@@ -343,7 +352,7 @@ async function loadPoliticiansByElection(
 
     // 新增不存在的候選人
     const newPols = Array.from(polsMap.values())
-    politicians.value = [...politicians.value, ...newPols]
+    politicians.value.push(...newPols)
     loadedRegions.value.add(cacheKey)
     loadedElections.value.add(electionId)
 
@@ -476,7 +485,7 @@ export function useSupabase() {
       // 加入到 state（避免重複）
       const existingIds = new Set(politicians.value.map(p => p.id))
       if (!existingIds.has(pol.id)) {
-        politicians.value = [...politicians.value, pol]
+        politicians.value.push(pol)
       }
 
       return pol
