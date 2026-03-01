@@ -25,6 +25,7 @@ const corsHeaders = {
  * - update_prompt: 更新任務狀態
  * - add_policy_source: 新增政見資料來源
  * - query_policy_sources: 查詢政見資料來源
+ * - query_data_quality: 查詢資料品質問題（daily_review 用）
  */
 
 Deno.serve(async (req) => {
@@ -82,6 +83,9 @@ Deno.serve(async (req) => {
 
       case "query_policy_sources":
         return await handleQueryPolicySources(supabase, body);
+
+      case "query_data_quality":
+        return await handleQueryDataQuality(supabase, body);
 
       case "deduplicate_candidates":
         return await handleDeduplicateCandidates(supabase, body);
@@ -770,6 +774,135 @@ async function handleAddTrackingLog(supabase: any, body: any): Promise<Response>
   if (error) throw new Error(error.message);
 
   return successResponse({ action: "created", log_id: newLog.id });
+}
+
+/**
+ * 查詢資料品質問題（daily_review 用）
+ *
+ * 檢查項目：
+ * - incomplete_candidates: 缺少 bio/education/avatar 的候選人
+ * - short_policies: 描述過短或缺失的政見
+ * - duplicate_candidates: 同名重複候選人
+ * - urls_to_check: 今日新增的資料來源 URL
+ * - cross_region: 同一人出現在不同地區
+ */
+async function handleQueryDataQuality(supabase: any, body: any): Promise<Response> {
+  const { target_date } = body;
+
+  if (!target_date) {
+    return errorResponse("Missing target_date");
+  }
+
+  // 1. 缺少重要欄位的候選人
+  const { data: incompleteCandidates } = await supabase
+    .from("politicians")
+    .select("id, name, bio, education, avatar_url, created_at, updated_at")
+    .or(`bio.is.null,education.is.null,avatar_url.is.null`)
+    .or(`created_at.gte.${target_date},updated_at.gte.${target_date}`)
+    .limit(50);
+
+  const incomplete = (incompleteCandidates || []).map((p: any) => {
+    const missing: string[] = [];
+    if (!p.bio) missing.push("bio");
+    if (!p.education) missing.push("education");
+    if (!p.avatar_url) missing.push("avatar_url");
+    return { id: p.id, name: p.name, missing };
+  }).filter((p: any) => p.missing.length > 0);
+
+  // 2. 描述過短或缺失的政見
+  const { data: shortPoliciesRaw } = await supabase
+    .from("policies")
+    .select("id, title, description")
+    .or(`description.is.null`)
+    .gte("created_at", target_date)
+    .limit(50);
+
+  // 也查詢描述過短的（需要在應用層過濾）
+  const { data: recentPolicies } = await supabase
+    .from("policies")
+    .select("id, title, description")
+    .not("description", "is", null)
+    .gte("created_at", target_date)
+    .limit(100);
+
+  const shortPolicies = [
+    ...(shortPoliciesRaw || []).map((p: any) => ({
+      id: p.id,
+      title: p.title,
+      description_length: 0,
+    })),
+    ...(recentPolicies || [])
+      .filter((p: any) => p.description && p.description.length < 10)
+      .map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        description_length: p.description.length,
+      })),
+  ];
+
+  // 3. 同名重複候選人（全域掃描）
+  const { data: allPoliticians } = await supabase
+    .from("politicians")
+    .select("id, name, region")
+    .order("name");
+
+  const nameGroups: Record<string, any[]> = {};
+  for (const p of (allPoliticians || [])) {
+    if (!nameGroups[p.name]) nameGroups[p.name] = [];
+    nameGroups[p.name].push(p);
+  }
+
+  const duplicateCandidates = Object.entries(nameGroups)
+    .filter(([, records]) => records.length > 1)
+    .map(([name, records]) => ({
+      name,
+      count: records.length,
+      ids: records.map((r: any) => r.id),
+    }))
+    .slice(0, 20);
+
+  // 4. 今日新增的資料來源 URL
+  const { data: recentSources } = await supabase
+    .from("policy_sources")
+    .select("id, policy_id, url")
+    .gte("created_at", target_date)
+    .limit(50);
+
+  const urlsToCheck = (recentSources || []).map((s: any) => ({
+    policy_id: s.policy_id,
+    url: s.url,
+  }));
+
+  // 5. 同一人出現在不同地區
+  const crossRegion = Object.entries(nameGroups)
+    .filter(([, records]) => {
+      const regions = new Set(records.map((r: any) => r.region).filter(Boolean));
+      return regions.size > 1;
+    })
+    .map(([name, records]) => ({
+      name,
+      regions: [...new Set(records.map((r: any) => r.region).filter(Boolean))],
+    }))
+    .slice(0, 20);
+
+  const totalIssues =
+    incomplete.length +
+    shortPolicies.length +
+    duplicateCandidates.length +
+    urlsToCheck.length +
+    crossRegion.length;
+
+  return successResponse({
+    target_date,
+    issues: {
+      incomplete_candidates: incomplete,
+      short_policies: shortPolicies,
+      duplicate_candidates: duplicateCandidates,
+      urls_to_check: urlsToCheck,
+      cross_region: crossRegion,
+    },
+    total_issues: totalIssues,
+  });
 }
 
 /**

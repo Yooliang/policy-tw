@@ -84,6 +84,7 @@ class TaskManager:
             TaskType.POLICY_SEARCH: "policy-researcher.md",
             TaskType.POLICY_VERIFY: "policy-verifier.md",
             TaskType.PROGRESS_TRACKING: "progress-tracker.md",
+            "daily_review": "data-reviewer.md",
         }
         return skill_map.get(task_type, "taiwan-election-expert.md")
 
