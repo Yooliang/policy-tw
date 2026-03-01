@@ -52,6 +52,10 @@ const router = createRouter({
       component: () => import('../pages/RegionalData.vue'),
     },
     {
+      path: '/admin/dashboard',
+      component: () => import('../pages/AdminDashboard.vue'),
+    },
+    {
       path: '/admin/scraper',
       component: () => import('../pages/AdminScraper.vue'),
     },

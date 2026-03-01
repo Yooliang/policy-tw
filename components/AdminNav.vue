@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Database, Sparkles, Users, Upload } from 'lucide-vue-next'
+import { BarChart3, Database, Sparkles, Users, Upload } from 'lucide-vue-next'
 
 const route = useRoute()
 
 const navItems = [
+  { path: '/admin/dashboard', label: '統計總覽', icon: BarChart3 },
   { path: '/admin/scraper', label: '資料抓取', icon: Database },
   { path: '/admin/import', label: '資料匯入', icon: Upload },
   { path: '/admin/ai', label: 'AI 管理', icon: Sparkles },
