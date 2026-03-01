@@ -173,7 +173,27 @@ export interface Discussion {
   comments: DiscussionComment[];
 }
 
+export interface PolicySource {
+  id: number;
+  policyId: string;
+  url: string;
+  title?: string;
+  sourceName?: string;
+  publishedDate?: string;
+  createdAt: string;
+}
+
 // === DB raw row types (snake_case, matching Supabase response) ===
+
+export interface RawPolicySource {
+  id: number;
+  policy_id: string;
+  url: string;
+  title?: string;
+  source_name?: string;
+  published_date?: string;
+  created_at: string;
+}
 
 export interface RegionStats {
   id: number;

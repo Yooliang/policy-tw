@@ -235,6 +235,15 @@ curl -X POST "{API_ENDPOINT}" \\
 - 描述內容相同
 - 若為同一政見的不同表述，視為重複
 
+新增政見後，**同步記錄新聞來源**：
+
+```bash
+curl -X POST "{API_ENDPOINT}" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer {AUTH_TOKEN}" \\
+  -d '{{"api_key":"{API_KEY}","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{{"url":"https://...","title":"新聞標題","source_name":"媒體名稱","published_date":"2026-03-01"}}]}}'
+```
+
 ## 步驟 4：完成任務
 
 ```bash

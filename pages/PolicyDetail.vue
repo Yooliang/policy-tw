@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
@@ -8,7 +8,8 @@ import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
+import type { RawPolicySource } from '../types'
 
 
 const route = useRoute()
@@ -97,6 +98,24 @@ const policyChain = computed(() => {
 })
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
+
+// Policy sources state
+const sources = ref<RawPolicySource[]>([])
+const showAllSources = ref(false)
+const displayedSources = computed(() =>
+  showAllSources.value ? sources.value : sources.value.slice(0, 5)
+)
+
+// Fetch policy sources
+watch(policyId, async (id) => {
+  if (!id) return
+  const { data } = await supabase
+    .from('policy_sources')
+    .select('*')
+    .eq('policy_id', id)
+    .order('published_date', { ascending: false })
+  sources.value = data || []
+}, { immediate: true })
 
 const handleVote = () => {
   if (!hasVoted.value) hasVoted.value = true
@@ -285,6 +304,43 @@ const handleVote = () => {
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- Sources -->
+          <div v-if="sources.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2">
+              <Newspaper class="text-blue-600" :size="20" />
+              資料來源
+              <span class="text-sm font-normal text-slate-400">({{ sources.length }})</span>
+            </h3>
+            <ul class="space-y-3">
+              <li v-for="src in displayedSources" :key="src.id" class="flex items-start gap-3 group">
+                <ExternalLink :size="16" class="text-slate-400 mt-1 shrink-0" />
+                <div class="min-w-0">
+                  <a
+                    :href="src.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-blue-600 hover:text-blue-800 font-medium text-sm line-clamp-1 break-all"
+                  >
+                    {{ src.title || src.url }}
+                  </a>
+                  <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                    <span v-if="src.source_name">{{ src.source_name }}</span>
+                    <span v-if="src.source_name && src.published_date">·</span>
+                    <span v-if="src.published_date">{{ src.published_date }}</span>
+                  </div>
+                </div>
+              </li>
+            </ul>
+            <button
+              v-if="sources.length > 5 && !showAllSources"
+              @click="showAllSources = true"
+              class="mt-4 text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+            >
+              查看更多（共 {{ sources.length }} 筆）
+              <ChevronRight :size="14" />
+            </button>
           </div>
 
           <!-- Community Discussion -->

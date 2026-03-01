@@ -23,6 +23,8 @@ const corsHeaders = {
  * - update_policy: 更新政見進度
  * - add_tracking_log: 新增追蹤紀錄
  * - update_prompt: 更新任務狀態
+ * - add_policy_source: 新增政見資料來源
+ * - query_policy_sources: 查詢政見資料來源
  */
 
 Deno.serve(async (req) => {
@@ -74,6 +76,12 @@ Deno.serve(async (req) => {
 
       case "update_prompt":
         return await handleUpdatePrompt(supabase, body);
+
+      case "add_policy_source":
+        return await handleAddPolicySource(supabase, body);
+
+      case "query_policy_sources":
+        return await handleQueryPolicySources(supabase, body);
 
       case "deduplicate_candidates":
         return await handleDeduplicateCandidates(supabase, body);
@@ -863,6 +871,118 @@ async function handleDeduplicateCandidates(supabase: any, body: any): Promise<Re
     duplicate_groups: duplicates.length,
     total_duplicates: toDelete.length,
     duplicates: duplicates.slice(0, 20), // 只回傳前 20 筆
+  });
+}
+
+// ============================================================
+// 資料來源 Action Handlers
+// ============================================================
+
+/**
+ * 新增政見資料來源
+ *
+ * 支援兩種查找方式：
+ * - 直接提供 policy_id
+ * - 提供 politician_name + policy_title 反查
+ */
+async function handleAddPolicySource(supabase: any, body: any): Promise<Response> {
+  const { policy_id, politician_name, policy_title, sources } = body;
+
+  if (!sources || !Array.isArray(sources) || sources.length === 0) {
+    return errorResponse("Missing or empty sources array");
+  }
+
+  let policyId = policy_id;
+
+  // 如果沒有 policy_id，用政治人物名稱+政見標題查找
+  if (!policyId && politician_name && policy_title) {
+    const { data: politician } = await supabase
+      .from("politicians")
+      .select("id")
+      .eq("name", politician_name)
+      .single();
+
+    if (!politician) {
+      return errorResponse(`找不到政治人物: ${politician_name}`, 404);
+    }
+
+    const { data: policy } = await supabase
+      .from("policies")
+      .select("id")
+      .eq("politician_id", politician.id)
+      .ilike("title", `%${policy_title}%`)
+      .single();
+
+    if (!policy) {
+      return errorResponse(`找不到政見: ${policy_title}`, 404);
+    }
+    policyId = policy.id;
+  }
+
+  if (!policyId) {
+    return errorResponse("Missing policy_id or politician_name+policy_title");
+  }
+
+  // 準備 upsert 資料
+  const rows = sources.map((s: any) => ({
+    policy_id: policyId,
+    url: s.url,
+    title: s.title || null,
+    source_name: s.source_name || null,
+    published_date: s.published_date || null,
+  }));
+
+  // upsert：衝突時不做任何事（避免重複 URL）
+  const { data, error } = await supabase
+    .from("policy_sources")
+    .upsert(rows, { onConflict: "policy_id,url", ignoreDuplicates: true })
+    .select("id");
+
+  if (error) {
+    return errorResponse(error.message, 500);
+  }
+
+  return successResponse({
+    action: "added",
+    policy_id: policyId,
+    inserted_count: data?.length || 0,
+    message: `新增 ${data?.length || 0} 筆資料來源`,
+  });
+}
+
+/**
+ * 查詢政見資料來源
+ */
+async function handleQueryPolicySources(supabase: any, body: any): Promise<Response> {
+  const { policy_id, limit: queryLimit, offset: queryOffset } = body;
+
+  if (!policy_id) {
+    return errorResponse("Missing policy_id");
+  }
+
+  let query = supabase
+    .from("policy_sources")
+    .select("*")
+    .eq("policy_id", policy_id)
+    .order("published_date", { ascending: false, nullsFirst: false });
+
+  if (queryLimit) {
+    query = query.limit(queryLimit);
+  }
+  if (queryOffset) {
+    query = query.range(queryOffset, queryOffset + (queryLimit || 50) - 1);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return errorResponse(error.message, 500);
+  }
+
+  return successResponse({
+    policy_id,
+    count: data?.length || 0,
+    sources: data || [],
   });
 }
 

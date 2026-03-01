@@ -2,7 +2,7 @@
 
 ## 概述
 
-正見 (Zheng Jian) 平台使用 Supabase PostgreSQL 資料庫，共有 17 個資料表、4 個 ENUM 類型、6 個視圖。
+正見 (Zheng Jian) 平台使用 Supabase PostgreSQL 資料庫，共有 18 個資料表、4 個 ENUM 類型、6 個視圖。
 
 ---
 
@@ -169,7 +169,23 @@
 | ai_extracted | BOOLEAN | AI 提取標記 |
 | created_at | TIMESTAMPTZ | 建立時間 |
 
-### 7. related_policies - 相關政見
+### 7. policy_sources - 政見資料來源
+儲存政見的新聞來源連結。
+
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| id | SERIAL PK | |
+| policy_id | UUID FK | → policies.id (CASCADE) |
+| url | TEXT | 來源網址 |
+| title | TEXT | 新聞標題 |
+| source_name | TEXT | 媒體名稱（中央通訊社、聯合報等） |
+| published_date | DATE | 發布日期 |
+| created_at | TIMESTAMPTZ | 建立時間 |
+
+**索引:** `idx_policy_sources_policy_id`
+**約束:** `UNIQUE(policy_id, url)` — 防止同一政見的重複 URL
+
+### 8. related_policies - 相關政見
 政見之間的關聯（如：前後任延續）。
 
 | 欄位 | 類型 | 說明 |
@@ -180,7 +196,7 @@
 
 **約束:** `UNIQUE(policy_id, related_policy_id)`, `CHECK(policy_id <> related_policy_id)`
 
-### 8. discussions - 討論
+### 9. discussions - 討論
 政見相關的討論串。
 
 | 欄位 | 類型 | 說明 |
@@ -199,7 +215,7 @@
 | created_at | TEXT | 建立時間 |
 | created_at_ts | BIGINT | 時間戳 |
 
-### 9. discussion_comments - 討論留言
+### 10. discussion_comments - 討論留言
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
@@ -212,7 +228,7 @@
 | likes | INTEGER | 按讚數 |
 | created_at | TEXT | 建立時間 |
 
-### 10. comment_replies - 留言回覆
+### 11. comment_replies - 留言回覆
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
@@ -229,7 +245,7 @@
 
 ## 地區與選區資料表
 
-### 11. regions - 地區統計
+### 12. regions - 地區統計
 正規化的地區資料與統計。
 
 | 欄位 | 類型 | 說明 |
@@ -249,7 +265,7 @@
 
 **約束:** `UNIQUE NULLS NOT DISTINCT (region, sub_region, village)`
 
-### 12. electoral_district_areas - 選舉區對應
+### 13. electoral_district_areas - 選舉區對應
 議員選區與鄉鎮市區的對應關係。
 
 | 欄位 | 類型 | 說明 |
@@ -270,7 +286,7 @@
 
 ## AI 相關資料表
 
-### 13. ai_prompts - AI 任務佇列
+### 14. ai_prompts - AI 任務佇列
 儲存非同步 AI 任務。
 
 | 欄位 | 類型 | 說明 |
@@ -303,7 +319,7 @@
 - `policy_verify` - 政見驗證
 - `progress_tracking` - 進度追蹤
 
-### 14. ai_usage_logs - AI 使用紀錄
+### 15. ai_usage_logs - AI 使用紀錄
 追蹤所有 AI API 調用。
 
 | 欄位 | 類型 | 說明 |
@@ -331,7 +347,7 @@
 
 ## 使用者資料表
 
-### 15. user_profiles - 使用者資料
+### 16. user_profiles - 使用者資料
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
@@ -347,14 +363,14 @@
 
 ## 參考資料表
 
-### 16. categories - 分類
+### 17. categories - 分類
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
 | id | SERIAL PK | |
 | name | TEXT UNIQUE | 分類名稱 |
 
-### 17. locations - 位置
+### 18. locations - 位置
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
@@ -415,6 +431,8 @@ elections ───────────────────────�
               │                              │      │
               │                              ├── tracking_logs
               │                              │
+              │                              ├── policy_sources
+              │                              │
               │                              └── related_policies
               │
               │                              └── discussions
@@ -449,7 +467,7 @@ user_profiles ──► auth.users
 
 | 表 | 讀取 | 寫入 |
 |---|------|------|
-| elections, politicians, policies | 公開 | 管理員/Service Role |
+| elections, politicians, policies, policy_sources | 公開 | 管理員/Service Role |
 | ai_prompts | 本人/管理員 | 認證使用者 |
 | ai_usage_logs | 本人/管理員 | Service Role |
 | user_profiles | 本人 | 本人 |
