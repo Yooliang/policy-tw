@@ -38,7 +38,7 @@ Content-Type: application/json
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_policies","politician_name":"<政治人物姓名>","keywords":["<政見關鍵字>"]}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_policies","politician_name":"<政治人物姓名>","keywords":["<政見關鍵字>"]}'
 ```
 
 確認找到要追蹤的政見後，記下 policy_id 和目前狀態。
@@ -57,7 +57,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_policy","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy_title":"政見標題關鍵字","new_status":"In Progress","progress_note":"最新進度說明"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_policy","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy_title":"政見標題關鍵字","new_status":"In Progress","progress_note":"最新進度說明"}'
 ```
 
 ### 步驟 4：新增追蹤紀錄
@@ -66,7 +66,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_tracking_log","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy_title":"政見標題關鍵字","log":{"status":"In Progress","content":"進度內容說明","source_url":"新聞來源","date":"2026-02-01"}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_tracking_log","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy_title":"政見標題關鍵字","log":{"status":"In Progress","content":"進度內容說明","source_url":"新聞來源","date":"2026-02-01"}}'
 ```
 
 ### 步驟 5：完成任務
@@ -75,7 +75,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"更新 X 條政見進度","result_data":{"updated_count":X}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"更新 X 條政見進度","result_data":{"updated_count":X}}'
 ```
 
 ## 注意事項

@@ -41,7 +41,7 @@ Content-Type: application/json
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_policies","politician_name":"<政治人物姓名>"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_policies","politician_name":"<政治人物姓名>"}'
 ```
 
 回應範例：
@@ -74,7 +74,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_policy","prompt_id":"<TASK_ID>","politician_name":"<政治人物姓名>","policy":{"title":"政見標題","description":"詳細說明","category":"交通/經濟/社會/環境/教育/其他","source_url":"新聞來源網址"}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_policy","prompt_id":"<TASK_ID>","politician_name":"<政治人物姓名>","policy":{"title":"政見標題","description":"詳細說明","category":"交通/經濟/社會/環境/教育/其他","source_url":"新聞來源網址"}}'
 ```
 
 **判斷是否重複的標準：**
@@ -87,7 +87,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"媒體名稱","published_date":"2026-03-01"}]}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"媒體名稱","published_date":"2026-03-01"}]}'
 ```
 
 ### 步驟 4：完成任務
@@ -96,7 +96,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"新增 X 條政見，跳過 Y 條重複","result_data":{"new_added":X,"skipped_duplicate":Y,"sources":["來源1"]}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"新增 X 條政見，跳過 Y 條重複","result_data":{"new_added":X,"skipped_duplicate":Y,"sources":["來源1"]}}'
 ```
 
 ## 注意事項

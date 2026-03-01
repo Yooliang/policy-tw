@@ -295,9 +295,14 @@ async function handleDeduplicate(dryRun = true) {
   dedupeResult.value = null
 
   try {
+    const aiApiKey = import.meta.env.VITE_AI_IMPORT_API_KEY
+    if (!aiApiKey) {
+      throw new Error('AI API Key 未設定，請聯繫管理員')
+    }
+
     const response = await supabase.functions.invoke('ai-action', {
       body: {
-        api_key: 'policy-ai-2026',
+        api_key: aiApiKey,
         action: 'deduplicate_candidates',
         election_year: 2026,
         dry_run: dryRun,

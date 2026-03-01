@@ -51,7 +51,7 @@ Content-Type: application/json
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_candidates","election_year":2026}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_candidates","election_year":2026}'
 ```
 
 查詢政見（對主要政治人物）：
@@ -59,7 +59,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_policies","politician_name":"<政治人物姓名>"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_policies","politician_name":"<政治人物姓名>"}'
 ```
 
 記下已存在的候選人名單和政見標題，後續比對用。
@@ -97,7 +97,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"import_candidate","prompt_id":"<TASK_ID>","election_year":2026,"candidate":{"name":"姓名","party":"政黨","position":"縣市長","region":"台北市","status":"confirmed","confidence":0.85,"source_date":"2026-02-28"}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"import_candidate","prompt_id":"<TASK_ID>","election_year":2026,"candidate":{"name":"姓名","party":"政黨","position":"縣市長","region":"台北市","status":"confirmed","confidence":0.85,"source_date":"2026-02-28"}}'
 ```
 
 **B. 新政見發表**
@@ -106,7 +106,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_policy","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy":{"title":"政見標題（20字以內）","description":"詳細說明","category":"交通","source_url":"https://..."}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_policy","prompt_id":"<TASK_ID>","politician_name":"政治人物姓名","policy":{"title":"政見標題（20字以內）","description":"詳細說明","category":"交通","source_url":"https://..."}}'
 ```
 
 新增政見後，**同步記錄新聞來源**：
@@ -114,7 +114,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"中央通訊社","published_date":"2026-03-01"}]}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"中央通訊社","published_date":"2026-03-01"}]}'
 ```
 
 **C. 政見進度更新**
@@ -124,7 +124,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_policy","politician_name":"政治人物姓名","policy_title":"政見標題","new_status":"in_progress","progress_note":"最新進展說明"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_policy","politician_name":"政治人物姓名","policy_title":"政見標題","new_status":"in_progress","progress_note":"最新進展說明"}'
 ```
 
 再新增追蹤紀錄：
@@ -132,7 +132,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_tracking_log","politician_name":"政治人物姓名","policy_title":"政見標題","log":{"status":"in_progress","content":"進度說明","source_url":"https://...","date":"2026-02-28"}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_tracking_log","politician_name":"政治人物姓名","policy_title":"政見標題","log":{"status":"in_progress","content":"進度說明","source_url":"https://...","date":"2026-02-28"}}'
 ```
 
 更新進度後，**同步記錄新聞來源**：
@@ -140,7 +140,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"媒體名稱","published_date":"2026-03-01"}]}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_policy_source","policy_id":"<POLICY_ID>","sources":[{"url":"https://...","title":"新聞標題","source_name":"媒體名稱","published_date":"2026-03-01"}]}'
 ```
 
 **D. 候選人資料更新**（退選、轉換選區等）
@@ -149,7 +149,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_politician","politician_name":"政治人物姓名","bio":"更新的簡介"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_politician","politician_name":"政治人物姓名","bio":"更新的簡介"}'
 ```
 
 ### 步驟 4：完成任務
@@ -158,7 +158,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"檢查 30 則新聞，X 則相關，新增 Y 位候選人、Z 條政見","result_data":{"total_news_found":30,"relevant_count":X,"actions_taken":{"import_candidate":Y,"add_policy":Z,"update_policy":W,"add_tracking_log":V},"news_summary":[{"title":"新聞標題","source":"媒體名","action":"import_candidate/add_policy/skip","url":"https://..."}],"sources":["https://..."]}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"檢查 30 則新聞，X 則相關，新增 Y 位候選人、Z 條政見","result_data":{"total_news_found":30,"relevant_count":X,"actions_taken":{"import_candidate":Y,"add_policy":Z,"update_policy":W,"add_tracking_log":V},"news_summary":[{"title":"新聞標題","source":"媒體名","action":"import_candidate/add_policy/skip","url":"https://..."}],"sources":["https://..."]}}'
 ```
 
 ---

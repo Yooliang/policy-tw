@@ -64,7 +64,7 @@ Content-Type: application/json
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_candidates","election_year":<年份>,"region":"<地區>","position":"<職位>"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_candidates","election_year":<年份>,"region":"<地區>","position":"<職位>"}'
 ```
 
 回應範例：
@@ -96,7 +96,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"import_candidate","prompt_id":"<TASK_ID>","election_year":<年份>,"candidate":{"name":"姓名","party":"政黨","position":"縣市長","region":"台北市","status":"confirmed","current_position":"現任職位","confidence":0.85,"source_date":"2026-01-15"}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"import_candidate","prompt_id":"<TASK_ID>","election_year":<年份>,"candidate":{"name":"姓名","party":"政黨","position":"縣市長","region":"台北市","status":"confirmed","current_position":"現任職位","confidence":0.85,"source_date":"2026-01-15"}}'
 ```
 
 **重要：**
@@ -109,7 +109,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"找到 X 位候選人，新增 Y 位","result_data":{"total_found":X,"new_added":Y,"existing":Z,"skipped_low_confidence":W,"sources":["來源1"]}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"找到 X 位候選人，新增 Y 位","result_data":{"total_found":X,"new_added":Y,"existing":Z,"skipped_low_confidence":W,"sources":["來源1"]}}'
 ```
 
 ## 注意事項

@@ -17,8 +17,12 @@ settings = get_settings()
 
 # API 設定
 API_ENDPOINT = "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action"
-API_KEY = "policy-ai-2026"
-AUTH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc"
+API_KEY = os.environ.get("AI_IMPORT_API_KEY")
+if not API_KEY:
+    raise RuntimeError("AI_IMPORT_API_KEY environment variable is not set")
+AUTH_TOKEN = os.environ.get("SUPABASE_ANON_KEY")
+if not AUTH_TOKEN:
+    raise RuntimeError("SUPABASE_ANON_KEY environment variable is not set")
 
 
 class TaskManager:

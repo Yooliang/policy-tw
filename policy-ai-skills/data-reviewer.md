@@ -40,7 +40,7 @@ Content-Type: application/json
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"query_data_quality","target_date":"<TARGET_DATE>"}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_data_quality","target_date":"<TARGET_DATE>"}'
 ```
 
 記下回應中的各類問題清單。
@@ -64,7 +64,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_politician","prompt_id":"<TASK_ID>","politician_id":"<ID>","politician_name":"<NAME>","updates":{"bio":"個人簡介","education":["學歷1","學歷2"]}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_politician","prompt_id":"<TASK_ID>","politician_id":"<ID>","politician_name":"<NAME>","updates":{"bio":"個人簡介","education":["學歷1","學歷2"]}}'
 ```
 
 **重要**：
@@ -79,7 +79,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"deduplicate_candidates","election_year":2026,"dry_run":true}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"deduplicate_candidates","election_year":2026,"dry_run":true}'
 ```
 
 **重要**：`dry_run` 必須為 `true`，只預覽不刪除！
@@ -100,7 +100,7 @@ curl -sI "<URL>" -o /dev/null -w "%{http_code}"
 curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
-  -d '{"api_key":"policy-ai-2026","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"資料總整檢查完成：檢查 X 項，發現 Y 個問題，修正 Z 個","result_data":{"total_checked":X,"issues_found":Y,"issues_fixed":Z,"details":{"incomplete_candidates":{"found":A,"fixed":B},"short_policies":{"found":C},"duplicate_candidates":{"found":D},"broken_urls":{"found":E},"cross_region":{"found":F}},"unfixed_issues":[{"type":"問題類型","description":"問題說明","severity":"critical/warning/info"}]}}'
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"資料總整檢查完成：檢查 X 項，發現 Y 個問題，修正 Z 個","result_data":{"total_checked":X,"issues_found":Y,"issues_fixed":Z,"details":{"incomplete_candidates":{"found":A,"fixed":B},"short_policies":{"found":C},"duplicate_candidates":{"found":D},"broken_urls":{"found":E},"cross_region":{"found":F}},"unfixed_issues":[{"type":"問題類型","description":"問題說明","severity":"critical/warning/info"}]}}'
 ```
 
 ---

@@ -60,7 +60,13 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const expectedApiKey = Deno.env.get("AI_IMPORT_API_KEY") || "policy-ai-2026";
+    const expectedApiKey = Deno.env.get("AI_IMPORT_API_KEY");
+    if (!expectedApiKey) {
+      return new Response(
+        JSON.stringify({ error: "Server configuration error", message: "AI_IMPORT_API_KEY is not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const body = await req.json();
