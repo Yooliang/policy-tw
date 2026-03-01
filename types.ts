@@ -172,3 +172,145 @@ export interface Discussion {
   viewCount: number;
   comments: DiscussionComment[];
 }
+
+// === DB raw row types (snake_case, matching Supabase response) ===
+
+export interface RegionStats {
+  id: number;
+  region: string;
+  sub_region: string | null;
+  village: string | null;
+  total_politicians: number;
+  mayor_count: number;
+  councilor_count: number;
+  township_mayor_count: number;
+  representative_count: number;
+  village_chief_count: number;
+  policy_count: number;
+  updated_at: string;
+}
+
+export interface ElectoralDistrictArea {
+  id: number;
+  region: string;
+  electoral_district: string;
+  township: string;
+  election_id: number;
+  prv_code: string | null;
+  area_code: string | null;
+  dept_code: string | null;
+  created_at: string;
+}
+
+export interface ElectionTypeTableRow {
+  election_id: number;
+  type: string;
+}
+
+export interface RawElection {
+  id: number;
+  name: string;
+  short_name: string;
+  start_date: string;
+  end_date: string;
+  election_date: string;
+  types?: ElectionType[];
+}
+
+export interface RawPoliticianElectionData {
+  electionId: number;
+  position?: string;
+  slogan?: string;
+  electionType?: string;
+  regionId?: number;
+  region?: string;
+  subRegion?: string;
+  village?: string;
+  candidateStatus?: CandidateStatus;
+  sourceNote?: string;
+}
+
+export interface RawPolitician {
+  id: string;
+  name: string;
+  party: string;
+  status?: PoliticianStatus;
+  election_type?: string;
+  position?: string;
+  current_position?: string;
+  region?: string;
+  sub_region?: string;
+  village?: string;
+  avatar_url?: string;
+  slogan?: string;
+  bio?: string;
+  education?: string[];
+  experience?: string[];
+  election_ids?: number[];
+  birth_year?: number;
+  education_level?: string;
+  elections?: RawPoliticianElectionData[];
+}
+
+export interface RawTrackingLog {
+  id: number;
+  date: string;
+  event: string;
+  description?: string;
+}
+
+export interface RawPolicy {
+  id: string;
+  politician_id: string;
+  election_id?: number;
+  title: string;
+  description: string;
+  category: string;
+  status: PolicyStatus;
+  proposed_date: string;
+  last_updated: string;
+  progress: number;
+  tags?: string[];
+  ai_analysis?: string;
+  support_count?: number;
+  logs?: RawTrackingLog[];
+  related_policy_ids?: string[];
+}
+
+export interface RawDiscussionComment {
+  id: number;
+  author: DiscussionAuthor;
+  content: string;
+  likes: number;
+  createdAt: string;
+  replies?: RawCommentReply[];
+}
+
+export interface RawCommentReply {
+  id: number;
+  author: DiscussionAuthor;
+  content: string;
+  likes: number;
+  createdAt: string;
+}
+
+export interface RawDiscussion {
+  id: number;
+  policy_id: string;
+  policy_title: string;
+  author_id: string;
+  author_name: string;
+  author_avatar_url: string;
+  title: string;
+  content: string;
+  likes: number;
+  tags?: string[];
+  created_at: string;
+  created_at_ts: number;
+  view_count: number;
+  comments?: RawDiscussionComment[];
+}
+
+export interface RawElectionTypeRow {
+  election_type: string;
+}

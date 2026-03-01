@@ -1,6 +1,12 @@
 import { ref } from 'vue'
 import { supabase } from '../lib/supabase'
-import type { Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData } from '../types'
+import type {
+  Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
+  RegionStats, ElectoralDistrictArea, ElectionTypeTableRow,
+  RawElection, RawPolitician, RawPoliticianElectionData,
+  RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
+  RawElectionTypeRow,
+} from '../types'
 import { ElectionType } from '../types'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
@@ -13,15 +19,15 @@ const policies = ref<Policy[]>([])
 const discussions = ref<Discussion[]>([])
 const categories = ref<string[]>([])
 const locations = ref<string[]>([])
-const regionStats = ref<any[]>([])
-const electoralDistrictAreas = ref<any[]>([])
+const regionStats = ref<RegionStats[]>([])
+const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
-async function fetchAllRows(tableName: string, selectStr: string = '*') {
-  let allData: any[] = []
+async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string = '*'): Promise<T[]> {
+  let allData: T[] = []
   let from = 0
   let to = 999
   let finished = false
@@ -31,11 +37,11 @@ async function fetchAllRows(tableName: string, selectStr: string = '*') {
       .from(tableName)
       .select(selectStr)
       .range(from, to)
-    
+
     if (error) throw error
     if (!data || data.length < 1000) finished = true
-    
-    allData = [...allData, ...data]
+
+    allData = [...allData, ...(data as T[])]
     from += 1000
     to += 1000
   }
@@ -44,7 +50,7 @@ async function fetchAllRows(tableName: string, selectStr: string = '*') {
 
 // snake_case → camelCase mapping helpers
 
-function mapElection(row: any): Election {
+function mapElection(row: RawElection): Election {
   return {
     id: row.id,
     name: row.name,
@@ -56,9 +62,9 @@ function mapElection(row: any): Election {
   }
 }
 
-function mapPolitician(row: any): Politician {
+function mapPolitician(row: RawPolitician): Politician {
   // Map elections array from the view (election-specific data)
-  const elections: PoliticianElectionData[] = (row.elections || []).map((e: any) => ({
+  const elections: PoliticianElectionData[] = (row.elections || []).map((e: RawPoliticianElectionData) => ({
     electionId: e.electionId,
     position: e.position || '',
     slogan: e.slogan || undefined,
@@ -110,7 +116,7 @@ function getPoliticianElectionData(
 }
 
 
-function mapPolicy(row: any): Policy {
+function mapPolicy(row: RawPolicy): Policy {
   return {
     id: row.id,
     politicianId: row.politician_id,
@@ -125,17 +131,17 @@ function mapPolicy(row: any): Policy {
     tags: row.tags || [],
     aiAnalysis: row.ai_analysis || undefined,
     supportCount: row.support_count || undefined,
-    logs: ((row.logs || []) as any[]).map((l: any) => ({
+    logs: (row.logs || []).map((l: RawTrackingLog) => ({
       id: l.id,
       date: l.date,
       event: l.event,
       description: l.description || undefined,
     })),
-    relatedPolicyIds: (row.related_policy_ids || []).filter((id: any) => typeof id === 'string'),
+    relatedPolicyIds: (row.related_policy_ids || []).filter((id): id is string => typeof id === 'string'),
   }
 }
 
-function mapDiscussion(row: any): Discussion {
+function mapDiscussion(row: RawDiscussion): Discussion {
   return {
     id: row.id,
     policyId: row.policy_id,
@@ -153,13 +159,13 @@ function mapDiscussion(row: any): Discussion {
     createdAt: row.created_at,
     createdAtTs: row.created_at_ts,
     viewCount: row.view_count,
-    comments: ((row.comments || []) as any[]).map((c: any) => ({
+    comments: (row.comments || []).map((c: RawDiscussionComment) => ({
       id: c.id,
       author: c.author,
       content: c.content,
       likes: c.likes,
       createdAt: c.createdAt,
-      replies: (c.replies || []).map((r: any) => ({
+      replies: (c.replies || []).map((r: RawCommentReply) => ({
         id: r.id,
         author: r.author,
         content: r.content,
@@ -186,36 +192,35 @@ async function fetchAll() {
       policiesData,
       discussionsData,
     ] = await Promise.all([
-      fetchAllRows('elections'),
-      fetchAllRows('election_types', 'election_id, type'),
+      fetchAllRows<RawElection>('elections'),
+      fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type'),
       supabase.from('categories').select('name'),
       supabase.from('locations').select('name'),
       supabase.from('regions').select('*').is('village', null),  // 只撈縣市和鄉鎮層級，不撈村里
       supabase.from('electoral_district_areas').select('*'),
-      fetchAllRows('policies_with_logs'),
-      fetchAllRows('discussions_full'),
+      fetchAllRows<RawPolicy>('policies_with_logs'),
+      fetchAllRows<RawDiscussion>('discussions_full'),
     ])
 
     // Map elections
-    const typesByElection: Record<number, string[]> = {}
+    const typesByElection: Record<number, ElectionType[]> = {}
     for (const row of electionTypesData || []) {
       if (!typesByElection[row.election_id]) typesByElection[row.election_id] = []
-      typesByElection[row.election_id].push(row.type)
+      typesByElection[row.election_id].push(row.type as ElectionType)
     }
     elections.value = (electionsData || []).map(row =>
       mapElection({ ...row, types: typesByElection[row.id] || [] })
     )
     categories.value = (categoriesRes.data || []).map(r => r.name)
     locations.value = (locationsRes.data || []).map(r => r.name)
-    regionStats.value = regionStatsData.data || []
-    electoralDistrictAreas.value = electoralDistrictAreasData.data || []
+    regionStats.value = (regionStatsData.data || []) as RegionStats[]
+    electoralDistrictAreas.value = (electoralDistrictAreasData.data || []) as ElectoralDistrictArea[]
     policies.value = (policiesData || []).map(mapPolicy)
     discussions.value = (discussionsData || []).map(mapDiscussion)
 
     // 候選人不在這裡載入，改由 ElectionPage 呼叫 loadPoliticiansByElection()
     loaded.value = true
     loading.value = false
-    console.log('[fetchAll] 基本資料載入完成，候選人將按需載入')
 
   } catch (err) {
     console.error('Failed to fetch data from Supabase:', err)
@@ -254,13 +259,8 @@ async function loadPoliticiansByElection(
 
   // 已經載入過就跳過（僅內存快取，不用 IndexedDB）
   if (loadedRegions.value.has(cacheKey)) {
-    console.log(`[loadByElection] ${electionId}/${region} 已載入，跳過`)
     return politicians.value.filter(p => p.electionIds?.includes(electionId))
   }
-
-  console.log(`[loadByElection] 開始載入 選舉=${electionId} 地區=${region}`)
-  console.log(`[loadByElection] cacheKey=${cacheKey}`)
-  console.log(`[loadByElection] 已載入的 regions:`, Array.from(loadedRegions.value))
 
   try {
     // 直接從 DB 載入（不使用 IndexedDB 快取）
@@ -269,8 +269,7 @@ async function loadPoliticiansByElection(
     const { data: typeData } = await supabase
       .rpc('get_election_types', { p_election_id: electionId })
 
-    const availableTypes = (typeData || []).map((t: any) => t.election_type)
-    console.log(`[loadByElection] 該選舉有的類型:`, availableTypes)
+    const availableTypes = (typeData || []).map((t: RawElectionTypeRow) => t.election_type)
 
     // 3. 根據地區決定載入哪些類型
     let electionTypes: string[] | null = null
@@ -281,7 +280,6 @@ async function loadPoliticiansByElection(
       const nationalTypes = ['總統副總統', '立法委員', '縣市長']
       electionTypes = nationalTypes.filter(t => availableTypes.includes(t))
       if (electionTypes.length === 0) {
-        console.log(`[loadByElection] 該選舉無全國性類型，不載入`)
         loadedRegions.value.add(cacheKey)
         return []
       }
@@ -289,8 +287,6 @@ async function loadPoliticiansByElection(
       // 特定縣市：載入該縣市的所有類型
       regionParam = region
     }
-
-    console.log(`[loadByElection] RPC 參數: election_id=${electionId}, region=${regionParam}, types=${JSON.stringify(electionTypes)}`)
 
     // 3. 使用 RPC 函數載入
     const { data, error } = await supabase
@@ -321,10 +317,6 @@ async function loadPoliticiansByElection(
       }
       return p
     })
-    console.log(`[loadByElection] DB 返回 ${pols.length} 位候選人`)
-    if (pols.length > 0) {
-      console.log(`[loadByElection] 範例:`, pols.slice(0, 3).map(p => ({ name: p.name, type: p.electionType, region: p.region })))
-    }
 
     // 合併到全域 state（不存入 IndexedDB 快取）
     // 重要：更新已存在候選人的 elections 陣列，確保跨選舉資料正確
@@ -351,11 +343,9 @@ async function loadPoliticiansByElection(
 
     // 新增不存在的候選人
     const newPols = Array.from(polsMap.values())
-    console.log(`[loadByElection] 合併到 state: 新增 ${newPols.length} 位, 更新 ${pols.length - newPols.length} 位`)
     politicians.value = [...politicians.value, ...newPols]
     loadedRegions.value.add(cacheKey)
     loadedElections.value.add(electionId)
-    console.log(`[loadByElection] 完成! 總計 ${politicians.value.length} 位候選人`)
 
     return pols
   } catch (err) {
@@ -468,8 +458,6 @@ export function useSupabase() {
     // 先檢查是否已在 state 中
     const existing = politicians.value.find(p => p.id === politicianId)
     if (existing) return existing
-
-    console.log(`[loadPoliticianById] 載入 ${politicianId}...`)
 
     try {
       const { data, error } = await supabase
