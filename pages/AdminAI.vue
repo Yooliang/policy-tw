@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Hero from '../components/Hero.vue'
 import AdminNav from '../components/AdminNav.vue'
 import { useAuth } from '../composables/useAuth'
@@ -23,17 +23,11 @@ import {
   ChevronRight,
 } from 'lucide-vue-next'
 
-const { isAuthenticated, signInWithGoogle, userEmail } = useAuth()
+const { isAuthenticated, isAdmin, signInWithGoogle, userEmail } = useAuth()
 const { elections } = useSupabase()
 
 // Tab state
 const activeTab = ref<'search' | 'update' | 'logs' | 'history'>('search')
-
-// Admin check (simple client-side check - real auth is in Edge Functions)
-const isAdmin = computed(() => {
-  const email = userEmail.value
-  return email?.endsWith('@admin.com') || email?.includes('admin')
-})
 
 // =====================
 // Search Tab State

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuth } from '../composables/useAuth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -54,22 +55,27 @@ const router = createRouter({
     {
       path: '/admin/dashboard',
       component: () => import('../pages/AdminDashboard.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/scraper',
       component: () => import('../pages/AdminScraper.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/duplicates',
       component: () => import('../pages/AdminDuplicates.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/ai',
       component: () => import('../pages/AdminAI.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/import',
       component: () => import('../pages/AdminImport.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/verify',
@@ -96,6 +102,21 @@ const router = createRouter({
   scrollBehavior() {
     return false
   },
+})
+
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAdmin) {
+    const { isAuthenticated, isAdmin, authReady, initAuth } = useAuth()
+
+    // Wait for auth to initialize
+    if (!authReady.value) {
+      await initAuth()
+    }
+
+    if (!isAuthenticated.value || !isAdmin.value) {
+      return '/'
+    }
+  }
 })
 
 export default router

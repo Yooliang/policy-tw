@@ -1,11 +1,33 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = [
+  "https://policy-tw.web.app",
+  "https://policy-tw.firebaseapp.com",
+  "http://localhost:3000",
+];
+
+const WRITE_ACTIONS = new Set([
+  "import_candidate", "update_politician", "add_policy",
+  "update_policy", "add_tracking_log", "update_prompt",
+  "add_policy_source", "deduplicate_candidates",
+]);
+
+const DAILY_LIMIT_WRITE = 100;
+const DAILY_LIMIT_QUERY = 200;
+
+// Per-request CORS headers (set at the start of each request)
+let corsHeaders: Record<string, string> = {};
+
+function setCorsHeaders(req: Request) {
+  const origin = req.headers.get("origin") || "";
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  corsHeaders = {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+  };
+}
 
 /**
  * AI Action - 統一的 AI 任務處理 Edge Function
@@ -29,6 +51,8 @@ const corsHeaders = {
  */
 
 Deno.serve(async (req) => {
+  setCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -51,44 +75,96 @@ Deno.serve(async (req) => {
 
     const { action, prompt_id } = body;
 
+    if (!action) {
+      return new Response(
+        JSON.stringify({ error: "Missing action" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Rate limiting (per-IP, daily)
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const isWrite = WRITE_ACTIONS.has(action);
+    const dailyLimit = isWrite ? DAILY_LIMIT_WRITE : DAILY_LIMIT_QUERY;
+
+    const { count: ipCount } = await supabase
+      .from("ai_usage_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("ip_address", clientIp)
+      .eq("function_type", "ai-action")
+      .gte("created_at", todayStart.toISOString());
+
+    const ipUsed = ipCount || 0;
+    if (ipUsed >= dailyLimit) {
+      return new Response(
+        JSON.stringify({
+          error: "Rate limit exceeded",
+          message: `每日限額 ${dailyLimit} 次（${isWrite ? "寫入" : "查詢"}），已使用 ${ipUsed} 次`,
+          retry_after: "tomorrow",
+        }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    let result: Response;
+
     switch (action) {
       // 查詢類 API（讓 Claude 先查再新增）
       case "query_candidates":
-        return await handleQueryCandidates(supabase, body);
+        result = await handleQueryCandidates(supabase, body);
+        break;
 
       case "query_policies":
-        return await handleQueryPolicies(supabase, body);
+        result = await handleQueryPolicies(supabase, body);
+        break;
 
       // 寫入類 API
       case "import_candidate":
-        return await handleImportCandidate(supabase, body);
+        result = await handleImportCandidate(supabase, body);
+        break;
 
       case "update_politician":
-        return await handleUpdatePolitician(supabase, body);
+        result = await handleUpdatePolitician(supabase, body);
+        break;
 
       case "add_policy":
-        return await handleAddPolicy(supabase, body);
+        result = await handleAddPolicy(supabase, body);
+        break;
 
       case "update_policy":
-        return await handleUpdatePolicy(supabase, body);
+        result = await handleUpdatePolicy(supabase, body);
+        break;
 
       case "add_tracking_log":
-        return await handleAddTrackingLog(supabase, body);
+        result = await handleAddTrackingLog(supabase, body);
+        break;
 
       case "update_prompt":
-        return await handleUpdatePrompt(supabase, body);
+        result = await handleUpdatePrompt(supabase, body);
+        break;
 
       case "add_policy_source":
-        return await handleAddPolicySource(supabase, body);
+        result = await handleAddPolicySource(supabase, body);
+        break;
 
       case "query_policy_sources":
-        return await handleQueryPolicySources(supabase, body);
+        result = await handleQueryPolicySources(supabase, body);
+        break;
 
       case "query_data_quality":
-        return await handleQueryDataQuality(supabase, body);
+        result = await handleQueryDataQuality(supabase, body);
+        break;
 
       case "deduplicate_candidates":
-        return await handleDeduplicateCandidates(supabase, body);
+        result = await handleDeduplicateCandidates(supabase, body);
+        break;
 
       default:
         return new Response(
@@ -96,6 +172,18 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
     }
+
+    // Log usage to ai_usage_logs
+    await supabase.from("ai_usage_logs").insert({
+      function_type: "ai-action",
+      ip_address: clientIp,
+      request_data: { action, prompt_id },
+      status_code: result.status,
+    }).then(() => {}, (err: any) => {
+      console.error("Failed to log ai-action usage:", err);
+    });
+
+    return result;
   } catch (error: any) {
     console.error("ai-action error:", error);
     return new Response(
