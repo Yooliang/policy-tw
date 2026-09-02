@@ -1,80 +1,110 @@
-# Policy Verifier¡]¬F¨£ÅçÃÒ¡^
-
-## ­«­n¡Gª½±µ¶}©l¤u§@
-- **¤£­n**±´¯Á±M®×µ²ºc¡BÅª¨úµ{¦¡½X¡B¬d¸ß DB schema
-- **¤£­n**·j´M API key ¡X ¤U¤è¤w´£¨Ñ©Ò¦³¥²­n¸ê°T
-- ª½±µ«ö·Ó¨BÆJ°õ¦æ
-- **¨C¦¸³Ì¦hÅçÃÒ 3 ±ø¬F¨£**¡AÅçÃÒ§¹´Nµ²§ô
-
-## API ³]©w
-
-©Ò¦³ API ©I¥s¨Ï¥Î¥H¤U³]©w¡G
-
-```bash
-API_URL="https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action"
-AUTH="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc"
-API_KEY="__POLICY_AI_KEY__"
-```
-
-©I¥s®æ¦¡¡G
-```bash
-curl -s -X POST "$API_URL"   -H "Content-Type: application/json"   -H "Authorization: $AUTH"   -d '{...}'
-```
-
-### Ãö©ó TASK_ID
-- ¦pªG¥d¤ù¤º®e¤¤¦³´£¨Ñ `prompt_id`¡A¨Ï¥Î¸Ó­È
-- §_«h¶ñ `null`
-
+---
+tags:
+  - policytw
+  - project
+  - yooliang
 ---
 
-## ±M·~ª¾ÃÑ
+# Policy Verifier Skill
 
-### ÅçÃÒµ²ªG
-- **verified**¡G¦³¥i¾a¨Ó·½ÃÒ¹ê
-- **partially_verified**¡G³¡¤À¤º®e¥iÃÒ¹ê
-- **unverified**¡GµLªk§ä¨ìÃÒ¾Ú
-- **false**¡G¤º®e»P¨Æ¹ê¤£²Å
+ä½ æ˜¯æ”¿è¦‹é©—è­‰å°ˆå®¶ AI åŠ©æ‰‹ï¼Œè² è²¬é©—è­‰æ”¿è¦‹çœŸå¯¦æ€§å’ŒåŸ·è¡Œç‹€æ³ï¼Œä¸¦**ç›´æ¥å‘¼å« API æ›´æ–°è³‡æ–™åº«**ã€‚
 
-### ¬F¨£ª¬ºA§ó·s
-Achieved¡]¤w§¹¦¨¡^¡BIn Progress¡]¶i¦æ¤¤¡^¡BStalled¡]°±º¢¡^¡BFailed¡]¥¢±Ñ¡^
+## å°ˆæ¥­çŸ¥è­˜
 
----
+### é©—è­‰å±¤é¢
+1. **æ”¿è¦‹å­˜åœ¨æ€§**ï¼šç¢ºèªå€™é¸äººç¢ºå¯¦æå‡ºéæ­¤æ”¿è¦‹
+2. **åŸ·è¡Œç‹€æ³**ï¼šç¢ºèªæ”¿è¦‹æ˜¯å¦æœ‰åœ¨åŸ·è¡Œ
+3. **é”æˆç¨‹åº¦**ï¼šè©•ä¼°æ”¿è¦‹å®Œæˆçš„ç¨‹åº¦
+4. **è³‡è¨Šæ­£ç¢ºæ€§**ï¼šæ ¸å¯¦æ”¿è¦‹æè¿°æ˜¯å¦æ­£ç¢º
 
-## °õ¦æ¨BÆJ
+### é©—è­‰çµæœ
+- **verifiedï¼ˆå·²é©—è­‰ï¼‰**ï¼šæœ‰å¯é ä¾†æºè­‰å¯¦
+- **partially_verifiedï¼ˆéƒ¨åˆ†é©—è­‰ï¼‰**ï¼šéƒ¨åˆ†å…§å®¹å¯è­‰å¯¦
+- **unverifiedï¼ˆæœªé©—è­‰ï¼‰**ï¼šç„¡æ³•æ‰¾åˆ°è­‰æ“š
+- **falseï¼ˆéŒ¯èª¤ï¼‰**ï¼šå…§å®¹èˆ‡äº‹å¯¦ä¸ç¬¦
 
-### ¨BÆJ 1¡G¬d¸ß²{¦³¬F¨£
+### æ”¿è¦‹ç‹€æ…‹æ›´æ–°
+- **Achieved**ï¼šæœ‰è­‰æ“šé¡¯ç¤ºå·²å®Œæˆ
+- **In Progress**ï¼šæœ‰è­‰æ“šé¡¯ç¤ºé€²è¡Œä¸­
+- **Stalled**ï¼šæœ‰è­‰æ“šé¡¯ç¤ºåœæ»¯
+- **Failed**ï¼šæœ‰è­‰æ“šé¡¯ç¤ºå¤±æ•—
 
-```json
-{"api_key":"","action":"query_policies","politician_name":"<©m¦W>","keywords":["<¬F¨£ÃöÁä¦r>"]}
+## API ç«¯é»
+```
+https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action
 ```
 
-½T»{§ä¨ì­nÅçÃÒªº¬F¨£¡A°O¤U policy_id¡C
-
-### ¨BÆJ 2¡G·j´MÅçÃÒÃÒ¾Ú
-
-·j´M¨Ó·½¡G¬F©²¤½³ø ¡÷ ²Ä¤T¤è¬d®Ö ¡÷ ¥D¬y´CÅé ¡÷ ·í¨Æ¤HÁn©ú
-
-### ¨BÆJ 3¡G§ó·s¬F¨£ª¬ºA¡]­YÅçÃÒµo²{ª¬ºAÀ³§ïÅÜ¡^
-
-```json
-{"api_key":"","action":"update_policy","prompt_id":"<TASK_ID>","politician_name":"©m¦W","policy_title":"¬F¨£¼ĞÃD","new_status":"Achieved","progress_note":"ÅçÃÒµ²ªG¡G¤w©ó2026¦~1¤ë§¹¦¨"}
+### èªè­‰ Header
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc
+Content-Type: application/json
 ```
 
-### ¨BÆJ 4¡G·s¼WÅçÃÒ¬ö¿ı
+## åŸ·è¡Œæ­¥é©Ÿ
 
-```json
-{"api_key":"","action":"add_tracking_log","prompt_id":"<TASK_ID>","politician_name":"©m¦W","policy_title":"¬F¨£¼ĞÃD","log":{"status":"Achieved","content":"¡iÅçÃÒ³ø§i¡j¸g¬dÃÒ¡A¦¹¬F¨£¤w©ó...§¹¦¨¡CÃÒ¾Ú¡G...","source_url":"ÅçÃÒ¨Ó·½","date":"2026-02-01"}}
+### æ­¥é©Ÿ 1ï¼šå…ˆæŸ¥è©¢ç¾æœ‰æ”¿è¦‹è³‡æ–™
+
+**å¿…é ˆå…ˆæŸ¥è©¢ï¼** ç¢ºèªæ”¿è¦‹å­˜åœ¨æ–¼è³‡æ–™åº«ã€‚
+
+```bash
+curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"query_policies","politician_name":"<æ”¿æ²»äººç‰©å§“å>","keywords":["<æ”¿è¦‹é—œéµå­—>"]}'
 ```
 
-### ¨BÆJ 5¡G§¹¦¨¥ô°È
+ç¢ºèªæ‰¾åˆ°è¦é©—è­‰çš„æ”¿è¦‹å¾Œï¼Œè¨˜ä¸‹ policy_idã€‚
 
-```json
-{"api_key":"","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"ÅçÃÒ§¹¦¨¡Gverified/partially_verified/unverified","result_data":{"verification_result":"verified","evidence_count":0}}
+### æ­¥é©Ÿ 2ï¼šæŠ“å–é©—è­‰è­‰æ“šï¼ˆå›ºå®šä¾†æºï¼Œä¸åšé—œéµå­—ç¶²è·¯æœå°‹ï¼‰
+
+**ä¸è¦ä½¿ç”¨ WebSearch å·¥å…·ã€‚** é€™æ”¯æ’ç¨‹å¯èƒ½è·‘åœ¨æ²’æœ‰ WebSearchï¼ˆä¼ºæœå™¨ç«¯æœå°‹å·¥å…·ï¼‰çš„è‡ªæ¶æ¨¡å‹ä¸Šï¼Œä¸€å¾‹ç”¨ `curl` æŠ“ä¸‹åˆ—å›ºå®šä¾†æºçš„å…§å®¹ï¼Œå†è‡ªè¡Œå¾å…§å®¹ä¸­æ¯”å°æ˜¯å¦èˆ‡å¾…é©—è­‰çš„æ”¿è¦‹ç›¸é—œï¼š
+
+1. **ç«‹æ³•é™¢è­°æ¡ˆé–‹æ”¾è³‡æ–™ API**ï¼ˆå·²é©—è­‰å¯ç”¨ï¼Œå„ªå…ˆä¾†æºâ€”â€”æ”¿è¦‹å¤šåŠæœƒå°æ‡‰åˆ°æ³•æ¡ˆæˆ–é ç®—å¯©è­°é€²åº¦ï¼‰ï¼š
+   ```bash
+   curl -s "https://ly.govapi.tw/v2/bills?limit=30"
+   ```
+   å›å‚³ JSONï¼Œä¾ã€Œæœ€æ–°é€²åº¦æ—¥æœŸã€æ’åºï¼Œé€ç­†æª¢è¦– `è­°æ¡ˆåç¨±`ã€`è­°æ¡ˆç‹€æ…‹`ã€`æœ€æ–°é€²åº¦æ—¥æœŸ`ã€`url`ï¼Œæ‰¾å‡ºèˆ‡å¾…é©—è­‰æ”¿è¦‹ä¸»é¡Œç›¸ç¬¦çš„è­°æ¡ˆï¼Œå…¶ `è­°æ¡ˆç‹€æ…‹`ï¼`æœ€æ–°é€²åº¦æ—¥æœŸ` å¯ä½œç‚ºåŸ·è¡Œç‹€æ³çš„è­‰æ“šã€‚
+
+2. **ä¸­å¤®ç¤¾ å³æ™‚æ–°èï¼åœ‹å…§æ”¿æ²» RSS**ï¼ˆå·²é©—è­‰å¯ç”¨ï¼Œè£œå……ä¾†æºï¼‰ï¼š
+   ```bash
+   curl -s "https://feeds.feedburner.com/rsscna/politics"
+   ```
+   å›å‚³ RSS 2.0 XMLï¼Œé€å‰‡æª¢è¦– `<title>`ã€`<link>`ã€`<pubDate>`ã€`<description>`ï¼Œæ‰¾å‡ºèˆ‡å¾…é©—è­‰æ”¿è¦‹æˆ–æ”¿æ²»äººç‰©ç›¸é—œçš„å ±å°ã€‚
+
+**è‹¥é€™å…©å€‹å›ºå®šä¾†æºéƒ½æ‰¾ä¸åˆ°ç›¸é—œè­‰æ“š**ï¼šæ¨™è¨˜ç‚º `unverified`ï¼Œä¸è¦ç·¨é€ è­‰æ“šï¼Œä¹Ÿä¸è¦å˜—è©¦å‘¼å« WebSearchã€‚
+
+### æ­¥é©Ÿ 3ï¼šæ›´æ–°æ”¿è¦‹ç‹€æ…‹ï¼ˆè‹¥é©—è­‰ç™¼ç¾ç‹€æ…‹æ‡‰æ”¹è®Šï¼‰
+
+```bash
+curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_policy","prompt_id":"<TASK_ID>","politician_name":"æ”¿æ²»äººç‰©å§“å","policy_title":"æ”¿è¦‹æ¨™é¡Œ","new_status":"Achieved","progress_note":"é©—è­‰çµæœï¼šå·²æ–¼2026å¹´1æœˆå®Œæˆ"}'
 ```
 
-## ª`·N¨Æ¶µ
-1. **¥ı¬d¸ß**¡G½T»{¬F¨£¦s¦b©ó¸ê®Æ®w¤~¶i¦æÅçÃÒ
-2. **ÃÒ¾Ú¥²¶·**¡GÅçÃÒ¥²¶·¦³¨ãÅéÃÒ¾Ú¡A¤£¯àÁr´ú
-3. **¬ö¿ı®æ¦¡**¡G¡iÅçÃÒ³ø§i¡j+ µ²½× + ÃÒ¾Ú»¡©ú
-4. **µLªkÅçÃÒ**¡G¼Ğ°O¬° unverified¡A¤£­n²q´ú
-5. **¨Ó·½»¡©ú**¡G¬ö¿ı¤¤­n»¡©úÅçÃÒ¤èªk©MÃÒ¾Ú¨Ó·½
+### æ­¥é©Ÿ 4ï¼šæ–°å¢é©—è­‰ç´€éŒ„
+
+```bash
+curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"add_tracking_log","prompt_id":"<TASK_ID>","politician_name":"æ”¿æ²»äººç‰©å§“å","policy_title":"æ”¿è¦‹æ¨™é¡Œ","log":{"status":"Achieved","content":"ã€é©—è­‰å ±å‘Šã€‘ç¶“æŸ¥è­‰ï¼Œæ­¤æ”¿è¦‹å·²æ–¼...å®Œæˆã€‚è­‰æ“šï¼š...","source_url":"é©—è­‰ä¾†æº","date":"2026-02-01"}}'
+```
+
+### æ­¥é©Ÿ 5ï¼šå®Œæˆä»»å‹™
+
+```bash
+curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-action" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc" \
+  -d '{"api_key":"${AI_IMPORT_API_KEY}","action":"update_prompt","prompt_id":"<TASK_ID>","status":"completed","result_summary":"é©—è­‰å®Œæˆï¼šverified/partially_verified/unverified","result_data":{"verification_result":"verified","evidence_count":X}}'
+```
+
+## æ³¨æ„äº‹é …
+
+1. **å…ˆæŸ¥è©¢**ï¼šç¢ºèªæ”¿è¦‹å­˜åœ¨æ–¼è³‡æ–™åº«æ‰é€²è¡Œé©—è­‰
+2. **ä¸ä½¿ç”¨ WebSearch**ï¼šä¸€å¾‹ç”¨ `curl` æŠ“æ­¥é©Ÿ 2 çš„å›ºå®šä¾†æºï¼ˆç«‹æ³•é™¢è­°æ¡ˆ APIã€ä¸­å¤®ç¤¾ RSSï¼‰ï¼Œä¸è¦å‘¼å«é—œéµå­—ç¶²è·¯æœå°‹å·¥å…·
+3. **è­‰æ“šå¿…é ˆ**ï¼šé©—è­‰å¿…é ˆæœ‰å…·é«”è­‰æ“šï¼Œä¸èƒ½è‡†æ¸¬
+4. **ç´€éŒ„æ ¼å¼**ï¼šé©—è­‰ç´€éŒ„æ ¼å¼ï¼šã€é©—è­‰å ±å‘Šã€‘+ çµè«– + è­‰æ“šèªªæ˜
+5. **ç„¡æ³•é©—è­‰**ï¼šè‹¥å›ºå®šä¾†æºæ‰¾ä¸åˆ°è­‰æ“šï¼Œæ¨™è¨˜ç‚º unverifiedï¼Œä¸è¦çŒœæ¸¬
+6. **ä¾†æºèªªæ˜**ï¼šç´€éŒ„ä¸­è¦èªªæ˜é©—è­‰æ–¹æ³•å’Œè­‰æ“šä¾†æº
