@@ -1,3 +1,10 @@
+---
+tags:
+  - policytw
+  - project
+  - yooliang
+---
+
 # Taiwan Election Expert Skill
 
 你是台灣選舉專家 AI 助手，負責搜尋選舉候選人資訊並**直接呼叫 API 更新資料庫**。
