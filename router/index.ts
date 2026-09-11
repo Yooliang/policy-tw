@@ -1,6 +1,7 @@
 import type { Router, RouteRecordRaw } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import type { PageSnapshot } from '../lib/ssg/page-data'
+import { handleChunkLoadError, isChunkLoadError, setPendingPath } from '../lib/chunk-reload'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -130,6 +131,7 @@ export const routes: RouteRecordRaw[] = [
 /** 後台頁需登入且為管理員；只在瀏覽器端有意義（建置時不預渲染 /admin）。 */
 export function installRouterGuards(router: Router): void {
   router.beforeEach(async (to) => {
+    setPendingPath(to.fullPath)
     if (to.meta.requiresAdmin) {
       const { isAuthenticated, isAdmin, authReady, initAuth } = useAuth()
 
@@ -143,4 +145,12 @@ export function installRouterGuards(router: Router): void {
       }
     }
   })
+  router.afterEach(() => setPendingPath(null))
+
+  // 部署新版後舊分頁載入舊 chunk 404：硬重載到目標路徑（60 秒內同路徑只一次，再失敗顯示提示）
+  if (!import.meta.env.SSR) {
+    router.onError((error, to) => {
+      if (isChunkLoadError(error)) handleChunkLoadError(to.fullPath)
+    })
+  }
 }

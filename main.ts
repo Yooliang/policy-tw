@@ -3,6 +3,7 @@ import App from './App.vue'
 import { routes, installRouterGuards } from './router'
 import { applyDataSnapshot } from './composables/useSupabase'
 import { buildPageSnapshot, type PageSnapshot } from './lib/ssg/page-data'
+import { installChunkReloadListeners } from './lib/chunk-reload'
 import './styles/main.css'
 
 /**
@@ -22,6 +23,7 @@ export const createApp = ViteSSG(
     installRouterGuards(router)
 
     if (!import.meta.env.SSR) {
+      installChunkReloadListeners()
       const page = initialState.page as PageSnapshot | undefined
       if (page) applyDataSnapshot(page)
       // vue3-apexcharts 在 import 時就碰 window，只能在瀏覽器載入
