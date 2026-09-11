@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import HeroAction from '../components/HeroAction.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
+import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
+import { fetchHistory, type HistoryEntry } from '../lib/history'
 import { usePageHead } from '../composables/usePageHead'
 import {
   Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
@@ -163,10 +165,28 @@ async function loadMore() {
   }
 }
 
+// 展開一筆時再去拿驗證者清單、改動與裁決（history?target=contribution），列表本身維持輕量
+type DetailState = HistoryEntry | null | 'loading' | 'error'
+const details = ref<Record<string, DetailState>>({})
+async function loadDetail(id: string) {
+  if (details.value[id] !== undefined) return
+  details.value = { ...details.value, [id]: 'loading' }
+  try {
+    const body = await fetchHistory('contribution', id, { limit: 1 })
+    details.value = { ...details.value, [id]: body.entries[0] ?? null }
+  } catch {
+    details.value = { ...details.value, [id]: 'error' }
+  }
+}
+function detailOf(id: string): HistoryEntry | null {
+  const d = details.value[id]
+  return d && typeof d === 'object' ? d : null
+}
+
 function toggle(id: string) {
   const next = new Set(expanded.value)
   if (next.has(id)) next.delete(id)
-  else next.add(id)
+  else { next.add(id); loadDetail(id) }
   expanded.value = next
 }
 
@@ -358,6 +378,11 @@ usePageHead({
                 <div v-if="it.review_notes">
                   <p class="text-xs font-bold text-slate-400 mb-1">審核備註</p>
                   <p class="text-slate-700 whitespace-pre-wrap break-words">{{ it.review_notes }}</p>
+                </div>
+                <div data-testid="feed-history">
+                  <p v-if="details[it.id] === 'loading'" class="text-xs text-slate-400 inline-flex items-center gap-1"><Loader2 :size="12" class="animate-spin" /> 載入驗證者與改動…</p>
+                  <p v-else-if="details[it.id] === 'error'" class="text-xs text-red-600">驗證者清單暫時讀不到</p>
+                  <HistoryEntryDetail v-else-if="detailOf(it.id)" :entry="detailOf(it.id)!" hide-sources hide-notes />
                 </div>
                 <div>
                   <p class="text-xs font-bold text-slate-400 mb-1">提交內容</p>

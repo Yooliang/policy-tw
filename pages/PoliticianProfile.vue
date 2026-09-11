@@ -9,6 +9,7 @@ import type { CandidateStatus } from '../types'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
+import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
@@ -302,6 +303,9 @@ usePageHead({
               </div>
             </template>
           </div>
+
+          <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過 -->
+          <div class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" /></div>
         </div>
 
         <!-- Sidebar (Right) -->

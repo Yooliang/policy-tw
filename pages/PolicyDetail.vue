@@ -8,6 +8,7 @@ import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
+import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
@@ -343,6 +344,9 @@ usePageHead({
               </div>
             </div>
           </div>
+
+          <!-- 查核履歷：誰交的、誰驗的、改了什麼 -->
+          <HistoryPanel target="policy" :id="policy.id" />
         </div>
 
         <!-- Sidebar -->
