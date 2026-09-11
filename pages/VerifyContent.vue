@@ -25,7 +25,7 @@ import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, userDisplayName, session } = useAuth()
-const { politicians } = useSupabase()
+const { politicians, categories } = useSupabase()
 
 // Form state
 const message = ref('')
@@ -106,18 +106,7 @@ const matchedPolitician = computed(() => {
   return politicians.value.find(p => p.id === matchId)
 })
 
-// Category options
-const categories = [
-  '交通建設',
-  '社會福利',
-  '經濟發展',
-  '環境保護',
-  '教育文化',
-  '居住正義',
-  '醫療衛生',
-  '治安司法',
-  '其他',
-]
+// Category options：與後端一致，直接讀 categories 表（19 類，migration 20260912000003），見上方 useSupabase()
 
 async function handleSubmit() {
   if (!message.value.trim()) {

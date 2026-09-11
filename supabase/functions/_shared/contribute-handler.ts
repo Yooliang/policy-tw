@@ -29,12 +29,14 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   const validation = validateContributionRequest(body);
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
-    return {
-      status: 400,
-      body: encoding
-        ? { success: false, error: "encoding_invalid", message: ENCODING_INVALID_MESSAGE, errors: validation.errors }
-        : { success: false, error: "validation_failed", message: "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）", errors: validation.errors },
-    };
+    const category = validation.errors.some((e) => e.code === "category_invalid");
+    const error = encoding ? "encoding_invalid" : category ? "category_invalid" : "validation_failed";
+    const message = encoding
+      ? ENCODING_INVALID_MESSAGE
+      : category
+      ? validation.errors.find((e) => e.code === "category_invalid")!.message
+      : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
+    return { status: 400, body: { success: false, error, message, errors: validation.errors } };
   }
 
   const todayStart = new Date();
