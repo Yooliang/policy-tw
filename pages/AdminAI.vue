@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const { isAuthenticated, isAdmin, signInWithGoogle, userEmail } = useAuth()
 const { elections } = useSupabase()
@@ -581,6 +582,8 @@ function handleTabChange(tab: 'search' | 'update' | 'logs' | 'history') {
     fetchPrompts()
   }
 }
+
+usePageHead({ title: '後台 AI 任務', noindex: true })
 </script>
 
 <template>

@@ -4,6 +4,7 @@ import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import AdminNav from '../components/AdminNav.vue'
 import { Database, CheckCircle2, Pause, Users, Activity, Loader2, Sparkles, XCircle, Clock, MapPin } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const { politicians, fetchAll } = useSupabase()
 
@@ -446,6 +447,8 @@ const totalCount = computed(() => {
 // 年份切換時載入進度
 watch(selectedYear, loadProgress)
 onMounted(loadProgress)
+
+usePageHead({ title: '後台資料擷取', noindex: true })
 </script>
 
 <template>

@@ -20,6 +20,10 @@ function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
 
   dbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'))
+      return
+    }
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
     request.onerror = () => reject(request.error)

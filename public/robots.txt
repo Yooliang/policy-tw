@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /auth/
+Allow: /
+
+Sitemap: https://policy-tw.web.app/sitemap.xml

@@ -8,6 +8,7 @@ import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { policies, politicians, locations, categories } = useSupabase()
@@ -55,6 +56,11 @@ const filteredPolicies = computed(() => {
     const isNotCampaign = policy.status !== PolicyStatus.CAMPAIGN
     return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isNotCampaign
   })
+})
+
+usePageHead({
+  title: '政見追蹤',
+  description: '持續追蹤全台各縣市首長與民意代表的政見執行進度，依縣市、分類、關鍵字篩選，透過時間軸確認每一項治理承諾都在正確的軌道上。',
 })
 </script>
 

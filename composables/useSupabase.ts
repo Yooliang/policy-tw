@@ -26,18 +26,24 @@ const loaded = ref(false)
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
+/** 全站統計（建置預渲染時由完整資料算出；瀏覽器端首頁再用 DB count 覆蓋）。 */
+export interface DataStats {
+  totalPoliticians: number | null
+  politiciansByElection: Record<string, number>
+}
+const stats = ref<DataStats>({ totalPoliticians: null, politiciansByElection: {} })
+
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
-async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string = '*'): Promise<T[]> {
+// orderBy：超過 1000 筆的 view 若沒有排序，PostgREST 每頁順序不穩，會同一筆重複、另一筆漏掉。
+export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string = '*', orderBy?: string): Promise<T[]> {
   let allData: T[] = []
   let from = 0
   let to = 999
   let finished = false
 
   while (!finished) {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select(selectStr)
-      .range(from, to)
+    const baseQuery = supabase.from(tableName).select(selectStr)
+    const { data, error } = await (orderBy ? baseQuery.order(orderBy) : baseQuery).range(from, to)
 
     if (error) throw error
     if (!data || data.length < 1000) finished = true
@@ -63,7 +69,7 @@ function mapElection(row: RawElection): Election {
   }
 }
 
-function mapPolitician(row: RawPolitician): Politician {
+export function mapPolitician(row: RawPolitician): Politician {
   // Map elections array from the view (election-specific data)
   const elections: PoliticianElectionData[] = (row.elections || []).map((e: RawPoliticianElectionData) => ({
     electionId: e.electionId,
@@ -105,6 +111,21 @@ function mapPolitician(row: RawPolitician): Politician {
     sourceNote: firstElection?.sourceNote || undefined,
     // New: election-specific data array
     elections,
+  }
+}
+
+// 覆蓋為特定選舉的資料（避免顯示舊選舉的 candidateStatus/sourceNote）
+export function withElectionData(p: Politician, electionId: number): Politician {
+  const currentElection = p.elections?.find(e => e.electionId === electionId)
+  if (!currentElection) return p
+  return {
+    ...p,
+    candidateStatus: currentElection.candidateStatus,
+    sourceNote: currentElection.sourceNote,
+    position: currentElection.position || p.position,
+    electionType: currentElection.electionType || p.electionType,
+    region: currentElection.region || p.region,
+    subRegion: currentElection.subRegion || p.subRegion,
   }
 }
 
@@ -177,8 +198,16 @@ function mapDiscussion(row: RawDiscussion): Discussion {
   }
 }
 
-async function fetchAll() {
-  if (loaded.value || loading.value) return
+let fetchAllPromise: Promise<void> | null = null
+
+function fetchAll(): Promise<void> {
+  if (loaded.value) return Promise.resolve()
+  if (fetchAllPromise) return fetchAllPromise
+  fetchAllPromise = fetchAllInner().finally(() => { fetchAllPromise = null })
+  return fetchAllPromise
+}
+
+async function fetchAllInner() {
   loading.value = true
 
   try {
@@ -310,22 +339,7 @@ async function loadPoliticiansByElection(
       throw error
     }
 
-    const pols = (data || []).map(mapPolitician).map(p => {
-      // 覆蓋為當前選舉的資料（避免顯示舊選舉的 candidateStatus/sourceNote）
-      const currentElection = p.elections?.find(e => e.electionId === electionId)
-      if (currentElection) {
-        return {
-          ...p,
-          candidateStatus: currentElection.candidateStatus,
-          sourceNote: currentElection.sourceNote,
-          position: currentElection.position || p.position,
-          electionType: currentElection.electionType || p.electionType,
-          region: currentElection.region || p.region,
-          subRegion: currentElection.subRegion || p.subRegion,
-        }
-      }
-      return p
-    })
+    const pols = (data || []).map(mapPolitician).map(p => withElectionData(p, electionId))
 
     // 合併到全域 state（不存入 IndexedDB 快取）
     // 重要：更新已存在候選人的 elections 陣列，確保跨選舉資料正確
@@ -401,6 +415,50 @@ function getTownshipsByElectoralDistrict(region: string, electoralDistrict: stri
   return electoralDistrictAreas.value
     .filter(m => m.region === region && m.electoral_district === electoralDistrict && m.election_id === electionId)
     .map(m => m.township)
+}
+
+/** 全域資料狀態的純資料快照（可 JSON 序列化）。 */
+export interface DataSnapshot {
+  elections: Election[]
+  categories: string[]
+  locations: string[]
+  regionStats: RegionStats[]
+  electoralDistrictAreas: ElectoralDistrictArea[]
+  policies: Policy[]
+  politicians: Politician[]
+  discussions: Discussion[]
+  stats: DataStats
+}
+
+/** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
+export function getDataSnapshot(): DataSnapshot {
+  return {
+    elections: elections.value,
+    categories: categories.value,
+    locations: locations.value,
+    regionStats: regionStats.value,
+    electoralDistrictAreas: electoralDistrictAreas.value,
+    policies: policies.value,
+    politicians: politicians.value,
+    discussions: discussions.value,
+    stats: stats.value,
+  }
+}
+
+/**
+ * 以快照覆蓋全域狀態。不動 loaded／loading：客戶端 hydrate 後仍會照常 fetchAll 換成最新資料，
+ * 建置時 fetchAll 早已完成，loaded 保持 true。
+ */
+export function applyDataSnapshot(snapshot: DataSnapshot): void {
+  elections.value = snapshot.elections
+  categories.value = snapshot.categories
+  locations.value = snapshot.locations
+  regionStats.value = snapshot.regionStats
+  electoralDistrictAreas.value = snapshot.electoralDistrictAreas
+  policies.value = snapshot.policies
+  politicians.value = snapshot.politicians
+  discussions.value = snapshot.discussions
+  stats.value = snapshot.stats
 }
 
 export function useSupabase() {
@@ -507,6 +565,7 @@ export function useSupabase() {
     loading,
     loaded,
     loadedElections,
+    stats,
 
     fetchAll,
     getElectionById,

@@ -10,6 +10,8 @@ import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
+import { usePageHead } from '../composables/usePageHead'
+import { policyStatusLabel } from '../composables/usePageHead'
 
 
 const route = useRoute()
@@ -120,6 +122,14 @@ watch(policyId, async (id) => {
 const handleVote = () => {
   if (!hasVoted.value) hasVoted.value = true
 }
+
+usePageHead({
+  type: 'article',
+  title: () => policy.value?.title,
+  description: () => policy.value
+    ? `${politician.value?.name ?? ''}政見「${policy.value.title}」，狀態：${policyStatusLabel(policy.value.status)}，進度 ${policy.value.progress}%。${policy.value.description}`
+    : undefined,
+})
 </script>
 
 <template>

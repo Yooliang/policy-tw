@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Download,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const { isAuthenticated, signInWithGoogle } = useAuth()
 
@@ -234,6 +235,8 @@ const electedCount = computed(() => parsedData.value.filter(item => item.elected
 
 // Expose CHUNK_SIZE for template
 const chunkSizeDisplay = CHUNK_SIZE
+
+usePageHead({ title: '後台匯入', noindex: true })
 </script>
 
 <template>

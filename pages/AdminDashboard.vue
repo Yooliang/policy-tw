@@ -16,6 +16,7 @@ import {
   TrendingUp,
   MapPin,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const { regionStats } = useSupabase()
 const {
@@ -169,6 +170,8 @@ const sortedRegionCoverage = computed(() => {
     b[regionSortKey.value] - a[regionSortKey.value]
   )
 })
+
+usePageHead({ title: '後台總覽', noindex: true })
 </script>
 
 <template>

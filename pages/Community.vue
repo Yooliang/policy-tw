@@ -8,6 +8,7 @@ import { MessageSquare, ThumbsUp, TrendingUp, Search, PenTool, Eye } from 'lucid
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import type { Discussion } from '../types'
+import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
@@ -113,6 +114,11 @@ const clearFilter = () => {
 function getCommentCount(post: Discussion) {
   return post.comments.reduce((sum, c) => sum + 1 + c.replies.length, 0)
 }
+
+usePageHead({
+  title: '公民發聲',
+  description: '針對每一項政見提出見解、疑問或支持的公民討論區，依縣市與議題分類瀏覽熱門與最新討論。',
+})
 </script>
 
 <template>

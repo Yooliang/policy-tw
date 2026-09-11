@@ -8,9 +8,10 @@ import Hero from '../components/Hero.vue'
 import { ArrowRight, Users, FileCheck, Vote, Star, TrendingUp } from 'lucide-vue-next'
 
 import { RouterLink, useRouter } from 'vue-router'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
-const { policies, politicians, elections, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory } = useSupabase()
+const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory } = useSupabase()
 
 const checkpointIds = ref<string[]>([])
 const politicians2026CountDirect = ref<number | null>(null)
@@ -68,7 +69,8 @@ const statusData = computed(() => [
   { name: '提出', value: policies.value.filter(p => p.status === 'Proposed').length, color: '#94a3b8' },
 ])
 
-const totalPoliticians = computed(() => totalPoliticiansCount.value ?? politicians.value.length)
+// 優先 DB count → 建置時算好的統計 → 已載入清單長度
+const totalPoliticians = computed(() => totalPoliticiansCount.value ?? stats.value.totalPoliticians ?? politicians.value.length)
 
 // 2026 選舉專區統計 - 使用直接從 DB 查詢的數量
 const election2026 = computed(() => elections.value.find(e => e.name.includes('2026')))
@@ -77,9 +79,11 @@ const politicians2026Count = computed(() => {
   if (politicians2026CountDirect.value !== null) {
     return politicians2026CountDirect.value
   }
-  // 備用：從已載入的資料計算
+  // 備用：建置時算好的統計，再退到已載入的資料
   if (!election2026.value) return 0
   const electionId = election2026.value.id
+  const fromStats = stats.value.politiciansByElection[String(electionId)]
+  if (fromStats !== undefined) return fromStats
   return politicians.value.filter(p => p.electionIds?.includes(electionId)).length
 })
 const totalPolicies = computed(() => policies.value.length)
@@ -121,6 +125,11 @@ const donutOptions = computed(() => ({
   tooltip: { theme: 'light' },
 }))
 const donutSeries = computed(() => statusData.value.map(d => d.value))
+
+usePageHead({
+  title: undefined,
+  description: '正見是超越黨派色彩的政策歷史追蹤平台：記錄全台政治人物政見的提出與執行進度、2026 九合一選舉候選人與競選承諾，並以 AI 進行客觀分析。',
+})
 </script>
 
 <template>
@@ -186,14 +195,14 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
           <div class="md:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col overflow-hidden">
             <h3 class="text-xl font-bold text-navy-900 mb-4 shrink-0">熱門議題稽核分佈</h3>
             <div class="flex-1 min-h-0">
-              <apexchart type="bar" height="100%" :options="barOptions" :series="barSeries" />
+              <ClientOnly><apexchart type="bar" height="100%" :options="barOptions" :series="barSeries" /></ClientOnly>
             </div>
           </div>
 
           <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col overflow-hidden">
             <h3 class="text-xl font-bold text-navy-900 mb-4 shrink-0">政見執行狀態</h3>
             <div class="flex-1 min-h-0">
-              <apexchart type="donut" height="100%" :options="donutOptions" :series="donutSeries" />
+              <ClientOnly><apexchart type="donut" height="100%" :options="donutOptions" :series="donutSeries" /></ClientOnly>
             </div>
             <div class="flex flex-wrap justify-center gap-4 text-[10px] font-black text-slate-400 mt-2 uppercase tracking-widest shrink-0">
               <div v-for="item in statusData" :key="item.name" class="flex items-center gap-1.5">

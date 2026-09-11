@@ -106,8 +106,8 @@ const userEmail = computed(() => user.value?.email || '')
 const isAdmin = computed(() => isAdminRef.value)
 
 export function useAuth() {
-  // Initialize on first use
-  if (!initialized.value) {
+  // Initialize on first use（建置預渲染時沒有瀏覽器 session，跳過；客戶端 hydrate 後才初始化）
+  if (!initialized.value && !import.meta.env.SSR) {
     initAuth()
   }
 

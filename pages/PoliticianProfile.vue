@@ -11,6 +11,7 @@ import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
@@ -306,6 +307,16 @@ const politician = computed(() => politicians.value.find(c => c.id === String(ro
 
 const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
 const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
+
+usePageHead({
+  type: 'article',
+  title: () => politician.value ? `${politician.value.name}｜${politician.value.position}` : undefined,
+  description: () => politician.value
+    ? (politician.value.slogan || politician.value.bio
+        ? `${politician.value.name}（${politician.value.party}，${politician.value.region}${politician.value.position}）：${politician.value.slogan || politician.value.bio}`
+        : `${politician.value.name}，${politician.value.party}，${politician.value.region}${politician.value.position}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
+    : undefined,
+})
 </script>
 
 <template>

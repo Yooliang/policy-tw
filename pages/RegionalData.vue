@@ -6,6 +6,7 @@ import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { regionStats } = useSupabase()
@@ -170,6 +171,11 @@ const getSubRegionStats = (subRegion: string) => {
     policies: stats?.policy_count || 0
   }
 }
+
+usePageHead({
+  title: '全台各縣市數據分佈',
+  description: '統計全台 22 縣市與各鄉鎮市區的政治人物人數與政見規模，了解各縣市的政治生態與治理脈絡。',
+})
 </script>
 
 <template>

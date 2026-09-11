@@ -12,6 +12,7 @@ import {
   Database, Milestone, GitBranch, UserCheck, ArrowRightCircle, GitCommit, History,
   Activity
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,6 +110,14 @@ const isPoliticianSelected = (politicianId: string | number) => {
   return relayChain.value.some(p => String(p.politicianId) === String(politicianId) && String(p.id) === String(policyId.value))
 }
 
+
+usePageHead({
+  type: 'article',
+  title: () => selectedPolicy.value ? `${selectedPolicy.value.title} 深度分析` : undefined,
+  description: () => selectedPolicy.value
+    ? `${politician.value?.name ?? ''}「${selectedPolicy.value.title}」的接力軌跡與完整時間軸，進度 ${selectedPolicy.value.progress}%。${selectedPolicy.value.description}`
+    : undefined,
+})
 </script>
 
 <template>

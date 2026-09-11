@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, userDisplayName, session } = useAuth()
@@ -225,6 +226,8 @@ function formatCost(cost: number): string {
   if (cost < 0.001) return '< $0.001'
   return `$${cost.toFixed(4)}`
 }
+
+usePageHead({ title: '內容查核', noindex: true })
 </script>
 
 <template>

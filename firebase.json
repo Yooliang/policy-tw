@@ -1,16 +1,19 @@
 {
   "hosting": {
     "public": "dist",
+    "cleanUrls": true,
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
+      { "source": "/ai-assistant", "destination": "/app.html" },
+      { "source": "/verify", "destination": "/app.html" },
+      { "source": "/profile", "destination": "/app.html" },
+      { "source": "/auth/callback", "destination": "/app.html" },
+      { "source": "/election-2026", "destination": "/app.html" },
+      { "source": "/admin/**", "destination": "/app.html" }
     ]
   }
 }

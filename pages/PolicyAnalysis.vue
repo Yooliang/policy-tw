@@ -7,6 +7,7 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
 import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import { usePageHead } from '../composables/usePageHead'
 
 
 const router = useRouter()
@@ -62,6 +63,11 @@ const relayCases = computed(() => {
     result = result.filter(c => c.mainTitle.toLowerCase().includes(searchTerm.value.toLowerCase()))
   }
   return result
+})
+
+usePageHead({
+  title: 'AI 智能分析',
+  description: '將跨任期、跨黨派的重大建設案聚合分析，追蹤市政接力的傳承品質，提供具備行政歷史深度的稽核數據。',
 })
 </script>
 

@@ -25,6 +25,7 @@ import {
   Sparkles,
   ExternalLink,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, user, userDisplayName, userAvatarUrl, userEmail, signOut } = useAuth()
@@ -225,6 +226,8 @@ async function handleSignOut() {
     console.error('Sign out failed:', error)
   }
 }
+
+usePageHead({ title: '個人頁面', noindex: true })
 </script>
 
 <template>

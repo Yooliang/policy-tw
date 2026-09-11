@@ -21,6 +21,7 @@ import {
 
 import { useGlobalState } from '../composables/useGlobalState'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const route = useRoute()
@@ -416,6 +417,13 @@ const electionLevels = [
   { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原民區代表' },
   { type: ElectionType.CHIEF, label: '村里長' }
 ]
+
+usePageHead({
+  title: () => election.value ? (election.value.shortName || election.value.name) : undefined,
+  description: () => election.value
+    ? `${election.value.name}（投票日 ${election.value.electionDate}）候選人名單與競選承諾：總統、立委、縣市長到議員、鄉鎮市長、村里長，依縣市與鄉鎮篩選，比較政見。`
+    : undefined,
+})
 </script>
 
 <template>
@@ -433,7 +441,11 @@ const electionLevels = [
                 <Clock :size="18" class="text-amber-400" /> 距離投票日
               </div>
               <div class="text-7xl font-black text-white mb-1 font-mono tracking-tighter leading-none animate-pulse">
-                {{ timeLeft.days }}
+                <!-- 倒數天數依當下日期計算，建置時算的會過期，只在瀏覽器渲染 -->
+                <ClientOnly>
+                  {{ timeLeft.days }}
+                  <template #placeholder>&nbsp;</template>
+                </ClientOnly>
               </div>
               <div class="text-sm font-bold text-amber-400 uppercase tracking-[0.3em] pl-[0.3em]">
                 Days Left

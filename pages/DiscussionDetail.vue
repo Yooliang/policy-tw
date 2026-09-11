@@ -9,6 +9,7 @@ import {
   MessageSquare, ThumbsUp, Eye, ArrowLeft, Bookmark,
   Clock, TrendingUp, ChevronDown, ChevronUp, Loader2
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +99,12 @@ function toggleReplies(commentId: number) {
     collapsedComments.value.add(commentId)
   }
 }
+
+usePageHead({
+  type: 'article',
+  title: () => discussion.value?.title,
+  description: () => discussion.value ? `針對「${discussion.value.policyTitle}」的公民討論：${discussion.value.content}` : undefined,
+})
 </script>
 
 <template>

@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import Hero from '../components/Hero.vue'
 import { supabase } from '../lib/supabase'
 import { CreditCard, Copy, Check, Heart, Sparkles, Loader2, ChevronDown } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const copied = ref<string | null>(null)
 const showAllCrypto = ref(false)
@@ -148,6 +149,11 @@ function formatTokens(tokens: number): string {
 
 onMounted(() => {
   fetchAIStats()
+})
+
+usePageHead({
+  title: '贊助平台',
+  description: '正見由公民贊助維運，支持我們持續追蹤政見、更新資料與 AI 分析。',
 })
 </script>
 

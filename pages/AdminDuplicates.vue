@@ -7,6 +7,7 @@ import {
   Users, Trash2, ShieldAlert, CheckCircle2,
   ExternalLink, Search, RefreshCw, Layers, Check, Loader2
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const { politicians, fetchAll } = useSupabase()
 
@@ -142,6 +143,8 @@ async function mergeDuplicate(name: string) {
     isProcessing.value = false
   }
 }
+
+usePageHead({ title: '後台重複資料', noindex: true })
 </script>
 
 <template>

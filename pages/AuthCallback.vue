@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import { Loader2 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 
@@ -22,6 +23,8 @@ onMounted(async () => {
     router.replace('/')
   }
 })
+
+usePageHead({ title: '登入中', noindex: true })
 </script>
 
 <template>

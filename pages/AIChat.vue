@@ -26,6 +26,7 @@ import {
   Activity,
   Trash2,
 } from 'lucide-vue-next'
+import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const route = useRoute()
@@ -339,6 +340,8 @@ watch(user, (newUser) => {
     fetchTasks(true)
   }
 })
+
+usePageHead({ title: 'AI 查核助理', noindex: true })
 </script>
 
 <template>
