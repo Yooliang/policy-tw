@@ -6,7 +6,7 @@ import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
   Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
-  Clock, CheckCircle2, ShieldCheck, AlertTriangle, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText,
+  Clock, CheckCircle2, AlertTriangle, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
 } from 'lucide-vue-next'
 
 /**
@@ -14,7 +14,8 @@ import {
  * 資料來源：GET /functions/v1/contributions-feed（公開、唯讀、不含任何雜湊）。
  */
 
-type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'disputed' | 'needs_review' | 'rejected' | 'reverted'
+// attention = disputed＋needs_review＋approved（身份待人工）＋apply_failed，feed 端點也認這個 key
+type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'attention' | 'rejected' | 'reverted'
 
 interface FeedItem {
   id: string
@@ -42,8 +43,10 @@ interface FeedItem {
 interface FeedSummary {
   total: number
   by_status: Record<string, number>
+  needs_attention: { total: number; disputed: number; needs_review: number; identity_review: number; apply_failed: number }
+  contributors_30d: number
   daily_last_7: Array<{ date: string; count: number }>
-  leaderboard: Array<{ agent_name: string; submitted: number; applied: number }>
+  leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>
 }
 
 const FEED_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/contributions-feed`
@@ -55,8 +58,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   { key: 'pending', label: '待驗證' },
   { key: 'verified', label: '已驗證' },
   { key: 'applied', label: '已上線' },
-  { key: 'disputed', label: '有爭議' },
-  { key: 'needs_review', label: '待人工' },
+  { key: 'attention', label: '待人工審核' },
   { key: 'rejected', label: '退件' },
   { key: 'reverted', label: '已還原' },
 ]
@@ -166,15 +168,27 @@ function toggle(id: string) {
   expanded.value = next
 }
 
-const stats = computed(() => {
+// 四張卡：待驗證／已上線／待人工審核（有事才亮警示色）／貢獻者（近 30 天）。卡片帶數字，下方狀態 tab 只當篩選不重複顯示數字。
+interface StatCard { key: string; label: string; value: number; icon: unknown; cls: string; filter?: StatusKey; hint?: string }
+const stats = computed<StatCard[]>(() => {
   const s = summary.value?.by_status ?? {}
+  const attention = summary.value?.needs_attention?.total ?? 0
   return [
-    { key: 'pending', label: '待驗證', value: s.pending ?? 0, icon: Clock, cls: 'text-amber-600 bg-amber-50' },
-    { key: 'verified', label: '已驗證待落庫', value: s.verified ?? 0, icon: ShieldCheck, cls: 'text-sky-600 bg-sky-50' },
-    { key: 'applied', label: '已上線', value: s.applied ?? 0, icon: CheckCircle2, cls: 'text-emerald-600 bg-emerald-50' },
-    { key: 'attention', label: '有爭議／待人工', value: (s.disputed ?? 0) + (s.needs_review ?? 0) + (s.approved ?? 0) + (s.apply_failed ?? 0), icon: AlertTriangle, cls: 'text-red-600 bg-red-50' },
+    { key: 'pending', label: '待驗證', value: s.pending ?? 0, icon: Clock, cls: 'text-amber-600 bg-amber-50', filter: 'pending' },
+    { key: 'applied', label: '已上線', value: s.applied ?? 0, icon: CheckCircle2, cls: 'text-emerald-600 bg-emerald-50', filter: 'applied' },
+    {
+      key: 'attention', label: '待人工審核', value: attention, icon: AlertTriangle, filter: 'attention',
+      cls: attention > 0 ? 'text-red-600 bg-red-50' : 'text-slate-400 bg-slate-100',
+      hint: '有爭議、疑似重複、身份待確認或落庫失敗，由維護者處理',
+    },
+    { key: 'contributors', label: '貢獻者（近 30 天）', value: summary.value?.contributors_30d ?? 0, icon: Users, cls: 'text-sky-600 bg-sky-50' },
   ]
 })
+function applyCardFilter(card: StatCard) {
+  if (!card.filter) return
+  tab.value = 'feed'
+  status.value = card.filter
+}
 
 const chartSeries = computed(() => [{ name: '提交數', data: (summary.value?.daily_last_7 ?? []).map(d => d.count) }])
 const chartOptions = computed(() => ({
@@ -244,13 +258,15 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">
       <!-- 統計卡 -->
       <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" data-testid="stats">
-        <div v-for="s in stats" :key="s.key" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5 flex items-center gap-3">
+        <component :is="s.filter ? 'button' : 'div'" v-for="s in stats" :key="s.key" :type="s.filter ? 'button' : undefined" :title="s.hint"
+          :class="['bg-white rounded-2xl shadow-lg border p-4 sm:p-5 flex items-center gap-3 text-left', s.key === 'attention' && s.value > 0 ? 'border-red-200' : 'border-slate-200', s.filter ? 'hover:border-slate-400 transition-colors' : '']"
+          :data-testid="`stat-${s.key}`" :data-alert="s.key === 'attention' ? String(s.value > 0) : undefined" @click="applyCardFilter(s)">
           <div :class="['p-2.5 rounded-xl flex-shrink-0', s.cls]"><component :is="s.icon" :size="22" /></div>
           <div class="min-w-0">
             <p class="text-xs font-bold text-slate-400 uppercase tracking-wider truncate">{{ s.label }}</p>
-            <p class="text-2xl font-black text-navy-900 leading-tight">{{ summary ? s.value : '–' }}</p>
+            <p :class="['text-2xl font-black leading-tight', s.key === 'attention' && s.value > 0 ? 'text-red-600' : 'text-navy-900']">{{ summary ? s.value : '–' }}</p>
           </div>
-        </div>
+        </component>
       </section>
 
       <!-- 分頁：貢獻／任務 -->
@@ -277,7 +293,7 @@ usePageHead({
               <button v-for="t in STATUS_TABS" :key="t.key" type="button"
                 :class="['px-3 py-1.5 rounded-full text-xs font-bold border transition-colors', status === t.key ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
                 @click="status = t.key">
-                {{ t.label }}<span v-if="t.key !== 'all' && summary?.by_status?.[t.key]" class="ml-1 opacity-70">{{ summary.by_status[t.key] }}</span>
+                {{ t.label }}
               </button>
             </div>
             <div class="flex items-center gap-2">
@@ -373,7 +389,7 @@ usePageHead({
               <li v-for="(row, i) in summary.leaderboard" :key="row.agent_name" class="flex items-center gap-3 text-sm">
                 <span class="w-5 text-right font-black text-slate-400">{{ i + 1 }}</span>
                 <span class="font-bold text-navy-900 truncate flex-1">{{ row.agent_name }}</span>
-                <span class="text-xs text-slate-500 whitespace-nowrap">提交 {{ row.submitted }}・上線 {{ row.applied }}</span>
+                <span class="text-xs text-slate-500 whitespace-nowrap">提交 {{ row.submitted }}・上線 {{ row.applied }}・驗證 {{ row.verified_votes ?? 0 }}</span>
               </li>
             </ol>
           </section>

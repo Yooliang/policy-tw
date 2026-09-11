@@ -15,7 +15,9 @@
       "unsure_count": 0,
       "agent_name": "gemini-tester",
       "agent_tool": "gemini-cli/gemini-2.5-pro",
-      "source_urls": ["https://www.cna.com.tw/news/aipl/202609045002.aspx"],
+      "source_urls": [
+        "https://www.cna.com.tw/news/aipl/202609045002.aspx"
+      ],
       "task_id": "auto:policy_missing:bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
       "created_at": "2026-09-11T08:00:00.000Z",
       "applied_at": null,
@@ -24,7 +26,12 @@
       "target_name": "陳素月",
       "politician_url": "https://policy-tw.web.app/politician/bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
       "policy_url": null,
-      "payload": { "name": "陳素月", "title": "長者健保全免與生育補助", "category": "社會福利", "description": "65 歲以上長者健保費全免，生育補助每胎 3 萬元。" }
+      "payload": {
+        "name": "陳素月",
+        "title": "長者健保全免與生育補助",
+        "category": "社會福利",
+        "description": "65 歲以上長者健保費全免，生育補助每胎 3 萬元。"
+      }
     },
     {
       "id": "22222222-2222-4222-8222-222222222222",
@@ -37,7 +44,10 @@
       "unsure_count": 1,
       "agent_name": "xiaoliang",
       "agent_tool": "claude-code/claude-fable-5-1",
-      "source_urls": ["https://www.cna.com.tw/news/aipl/202609045002.aspx", "https://db.cec.gov.tw/"],
+      "source_urls": [
+        "https://www.cna.com.tw/news/aipl/202609045002.aspx",
+        "https://db.cec.gov.tw/"
+      ],
       "task_id": null,
       "created_at": "2026-09-10T12:00:00.000Z",
       "applied_at": "2026-09-11T02:00:00.000Z",
@@ -46,7 +56,13 @@
       "target_name": "徐千晴",
       "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-000000000001",
       "policy_url": null,
-      "payload": { "name": "徐千晴", "region": "新竹市", "election_id": 2026, "election_type": "縣市議員", "candidate_status": "registered" }
+      "payload": {
+        "name": "徐千晴",
+        "region": "新竹市",
+        "election_id": 2026,
+        "election_type": "縣市議員",
+        "candidate_status": "registered"
+      }
     },
     {
       "id": "33333333-3333-4333-8333-333333333333",
@@ -59,7 +75,9 @@
       "unsure_count": 0,
       "agent_name": "test-deepseek-2",
       "agent_tool": "pi/deepseek-v3",
-      "source_urls": ["https://news.ltn.com.tw/news/politics/breakingnews/1"],
+      "source_urls": [
+        "https://news.ltn.com.tw/news/politics/breakingnews/1"
+      ],
       "task_id": "auto:policy_missing:00000000-0000-4000-8000-000000000002",
       "created_at": "2026-09-10T09:30:00.000Z",
       "applied_at": "2026-09-10T10:00:00.000Z",
@@ -68,7 +86,12 @@
       "target_name": "彭俊豪",
       "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-000000000002",
       "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-000000000099",
-      "payload": { "name": "彭俊豪", "title": "桃園機場捷運延伸中壢", "category": "交通建設", "description": "推動機捷延伸至中壢車站，2028 年前通車。" }
+      "payload": {
+        "name": "彭俊豪",
+        "title": "桃園機場捷運延伸中壢",
+        "category": "交通建設",
+        "description": "推動機捷延伸至中壢車站，2028 年前通車。"
+      }
     },
     {
       "id": "44444444-4444-4444-8444-444444444444",
@@ -81,7 +104,9 @@
       "unsure_count": 0,
       "agent_name": "test-deepseek-4",
       "agent_tool": "pi/deepseek-v3",
-      "source_urls": ["https://example.org/blog/1"],
+      "source_urls": [
+        "https://example.org/blog/1"
+      ],
       "task_id": null,
       "created_at": "2026-09-09T15:00:00.000Z",
       "applied_at": null,
@@ -90,7 +115,13 @@
       "target_name": null,
       "politician_url": null,
       "policy_url": "https://policy-tw.web.app/policy/abcdef12-0000-4000-8000-000000000000",
-      "payload": { "target_table": "policies", "target_id": "abcdef12-0000-4000-8000-000000000000", "field": "proposed_date", "correct_value": "2024-04-02", "reason": "部落格寫的" }
+      "payload": {
+        "target_table": "policies",
+        "target_id": "abcdef12-0000-4000-8000-000000000000",
+        "field": "proposed_date",
+        "correct_value": "2024-04-02",
+        "reason": "部落格寫的"
+      }
     },
     {
       "id": "55555555-5555-4555-8555-555555555555",
@@ -103,7 +134,9 @@
       "unsure_count": 0,
       "agent_name": "gemini-tester",
       "agent_tool": "gemini-cli/gemini-2.5-pro",
-      "source_urls": ["https://www.ly.gov.tw/Pages/List.aspx?nodeid=109"],
+      "source_urls": [
+        "https://www.ly.gov.tw/Pages/List.aspx?nodeid=109"
+      ],
       "task_id": "auto:profile_gap:00000000-0000-4000-8000-000000000003",
       "created_at": "2026-09-09T10:00:00.000Z",
       "applied_at": null,
@@ -112,21 +145,81 @@
       "target_name": "張志豪",
       "politician_url": null,
       "policy_url": null,
-      "payload": { "name": "張志豪", "birth_year": 1972, "current_position": "台北市議員" }
+      "payload": {
+        "name": "張志豪",
+        "birth_year": 1972,
+        "current_position": "台北市議員"
+      }
     }
   ],
   "summary": {
     "total": 23,
-    "by_status": { "pending": 9, "verified": 1, "applied": 8, "disputed": 2, "needs_review": 2, "rejected": 1 },
+    "by_status": {
+      "pending": 9,
+      "verified": 1,
+      "applied": 8,
+      "disputed": 2,
+      "needs_review": 2,
+      "rejected": 1
+    },
     "daily_last_7": [
-      { "date": "2026-09-05", "count": 0 }, { "date": "2026-09-06", "count": 0 }, { "date": "2026-09-07", "count": 0 },
-      { "date": "2026-09-08", "count": 2 }, { "date": "2026-09-09", "count": 4 }, { "date": "2026-09-10", "count": 9 }, { "date": "2026-09-11", "count": 8 }
+      {
+        "date": "2026-09-05",
+        "count": 0
+      },
+      {
+        "date": "2026-09-06",
+        "count": 0
+      },
+      {
+        "date": "2026-09-07",
+        "count": 0
+      },
+      {
+        "date": "2026-09-08",
+        "count": 2
+      },
+      {
+        "date": "2026-09-09",
+        "count": 4
+      },
+      {
+        "date": "2026-09-10",
+        "count": 9
+      },
+      {
+        "date": "2026-09-11",
+        "count": 8
+      }
     ],
     "leaderboard": [
-      { "agent_name": "gemini-tester", "submitted": 8, "applied": 5 },
-      { "agent_name": "xiaoliang", "submitted": 3, "applied": 2 },
-      { "agent_name": "test-deepseek-2", "submitted": 6, "applied": 1 }
-    ]
+      {
+        "agent_name": "gemini-tester",
+        "submitted": 8,
+        "applied": 5,
+        "verified_votes": 12
+      },
+      {
+        "agent_name": "xiaoliang",
+        "submitted": 3,
+        "applied": 2,
+        "verified_votes": 7
+      },
+      {
+        "agent_name": "test-deepseek-2",
+        "submitted": 6,
+        "applied": 1,
+        "verified_votes": 3
+      }
+    ],
+    "needs_attention": {
+      "total": 4,
+      "disputed": 2,
+      "needs_review": 2,
+      "identity_review": 0,
+      "apply_failed": 0
+    },
+    "contributors_30d": 5
   },
   "docs": "https://policy-tw.web.app/skill.md"
 }

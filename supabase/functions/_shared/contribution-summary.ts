@@ -109,3 +109,67 @@ export function safePayload(payload: unknown): Obj {
   const p = (payload && typeof payload === "object" ? payload : {}) as Obj;
   return Object.fromEntries(Object.entries(p).map(([k, v]) => [k, typeof v === "string" ? clip(v) : Array.isArray(v) ? v.slice(0, 20).map((x) => (typeof x === "string" ? clip(x, 100) : x)) : v]));
 }
+
+// ---- 看板 summary（純函式，feed 端點呼叫）----
+
+/** 需要維護者處理的狀態：有爭議／疑似重複／身份待人工（approved）／落庫失敗 */
+export const ATTENTION_STATUSES = ["disputed", "needs_review", "approved", "apply_failed"] as const;
+export const CONTRIBUTORS_WINDOW_DAYS = 30;
+
+export interface SummaryRow { status: string; agent_name: string | null; created_at: string }
+export interface VoteRow { agent_name: string | null }
+
+export interface FeedSummary {
+  total: number;
+  by_status: Record<string, number>;
+  needs_attention: { total: number; disputed: number; needs_review: number; identity_review: number; apply_failed: number };
+  contributors_30d: number;
+  daily_last_7: Array<{ date: string; count: number }>;
+  leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>;
+}
+
+export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now()): FeedSummary {
+  const byStatus: Record<string, number> = {};
+  const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
+  const recentAgents = new Set<string>();
+  const since30 = now - CONTRIBUTORS_WINDOW_DAYS * 86400 * 1000;
+  const daily: Record<string, number> = {};
+  for (let i = 6; i >= 0; i--) daily[new Date(now - i * 86400 * 1000).toISOString().slice(0, 10)] = 0;
+
+  const agentOf = (r: { agent_name: string | null }) => (r.agent_name && r.agent_name.trim()) || "(unknown)";
+  const bump = (name: string) => {
+    const a = byAgent.get(name) ?? { submitted: 0, applied: 0, verified_votes: 0 };
+    byAgent.set(name, a);
+    return a;
+  };
+  for (const r of rows) {
+    byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+    const a = bump(agentOf(r));
+    a.submitted++;
+    if (r.status === "applied") a.applied++;
+    const t = Date.parse(r.created_at);
+    if (!Number.isNaN(t) && t >= since30) recentAgents.add(agentOf(r));
+    const d = String(r.created_at).slice(0, 10);
+    if (d in daily) daily[d]++;
+  }
+  for (const v of votes) bump(agentOf(v)).verified_votes++;
+
+  const leaderboard = [...byAgent.entries()]
+    .map(([agent_name, v]) => ({ agent_name, ...v }))
+    .sort((a, b) => b.applied - a.applied || b.submitted - a.submitted || b.verified_votes - a.verified_votes)
+    .slice(0, 10);
+  const needs = {
+    disputed: byStatus.disputed ?? 0,
+    needs_review: byStatus.needs_review ?? 0,
+    identity_review: byStatus.approved ?? 0,
+    apply_failed: byStatus.apply_failed ?? 0,
+  };
+  return {
+    total: rows.length,
+    by_status: byStatus,
+    needs_attention: { total: needs.disputed + needs.needs_review + needs.identity_review + needs.apply_failed, ...needs },
+    contributors_30d: recentAgents.size,
+    daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })),
+    leaderboard,
+  };
+}
