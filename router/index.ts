@@ -75,6 +75,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/RegionalData.vue'),
   },
   {
+    path: '/skill',
+    name: 'skill',
+    component: () => import('../pages/Skill.vue'),
+  },
+  {
     path: '/admin/dashboard',
     component: () => import('../pages/AdminDashboard.vue'),
     meta: { requiresAdmin: true },

@@ -450,3 +450,43 @@ entrypoint = "./functions/ai-scheduler/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/ai-import-candidate/index.ts"
+
+[functions.contribute]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/contribute/index.ts"
+
+[functions.contribution-status]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/contribution-status/index.ts"
+
+[functions.apply]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/apply/index.ts"
+
+[functions.tasks]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/tasks/index.ts"
+
+[functions.verifications]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/verifications/index.ts"
+
+[functions.verify]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/verify/index.ts"
+
+[functions.next]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/next/index.ts"
+
+[functions.report]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/report/index.ts"
