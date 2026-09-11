@@ -2,11 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import HeroAction from '../components/HeroAction.vue'
+import MechanismNav from '../components/MechanismNav.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
-  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
+  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
   Clock, CheckCircle2, AlertTriangle, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
 } from 'lucide-vue-next'
 
@@ -245,9 +245,7 @@ usePageHead({
       </template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
-        <HeroAction active><Milestone :size="16" /> 貢獻紀錄</HeroAction>
-        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
-        <HeroAction to="/analysis"><Database :size="16" /> 智能分析</HeroAction>
+        <MechanismNav current="contributions" />
       </template>
     </Hero>
 
