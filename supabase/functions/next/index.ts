@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, filterVerifyCandidates, pickBySeed, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, filterLeasedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
@@ -122,31 +122,57 @@ Deno.serve(async (req) => {
       });
     }
 
-    // task：手動任務優先（priority 高者），否則自動缺口隨機一筆
-    if (manual.length > 0) {
-      const t = pickBySeed(manual, seed)!;
+    // task：先清過期認領、讀未過期的（別人領走的目標 30 分鐘內不派）
+    await supabase.rpc("contribution_task_leases_purge");
+    const { data: leaseRows, error: leaseError } = await supabase.from("contribution_task_leases").select("task_id, target_key, agent_name, leased_until").gt("leased_until", new Date().toISOString());
+    if (leaseError) throw new Error(`leases read: ${leaseError.message}`);
+    const leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; agent_name: string; leased_until: string }>;
+    const leasedUntil = new Date(Date.now() + LEASE_MINUTES * 60 * 1000).toISOString();
+    const lease = async (taskId: string, target: unknown) => {
+      const { error } = await supabase.from("contribution_task_leases").upsert(
+        { task_id: taskId, target_key: taskTargetKey({ task_id: taskId, target }), agent_name: agentName, ip_hash: ipHash, leased_until: leasedUntil },
+        { onConflict: "task_id" },
+      );
+      if (error) throw new Error(`lease upsert: ${error.message}`);
+    };
+    const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
+
+    // 手動任務優先（priority 高者），否則自動缺口隨機一筆
+    const freeManual = filterLeasedTasks(manual.map((m) => ({ ...m, task_id: m.id })), leases, agentName);
+    if (freeManual.length > 0) {
+      const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+      await lease(t.id, t.target);
       return json({
         ...base,
         kind: "task",
+        lease_minutes: LEASE_MINUTES,
         item: {
           task_id: t.id, task_type: t.task_type, source: "manual", target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget)),
           lookup: buildLookup(manualTarget),
         },
-        how_to: "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交。",
+        how_to: howTo,
       });
     }
-    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 1, p_seed: seed });
+    // 多抓幾筆再排掉別人認領中的
+    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
-    const t = (autoRes.data ?? [])[0];
+    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
+    const freeAuto = filterLeasedTasks((autoRes.data ?? []) as AutoTask[], leases, agentName);
+    const t = freeAuto[0];
     if (!t) {
-      return json({ ...base, kind: "none", reason: totalPending > 0 ? "目前沒有可派的任務；待驗證的也都輪到任務了" : "目前沒有待驗證、也沒有缺口任務", retry_after_min: RETRY_AFTER_MIN });
+      const reason = (autoRes.data ?? []).length > 0
+        ? `目前可派的任務都在其他代理的 ${LEASE_MINUTES} 分鐘認領期內，請稍後再來`
+        : (totalPending > 0 ? "目前沒有可派的任務；待驗證的也都輪到任務了" : "目前沒有待驗證、也沒有缺口任務");
+      return json({ ...base, kind: "none", reason, retry_after_min: RETRY_AFTER_MIN });
     }
     const autoTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+    await lease(t.task_id, t.target);
     return json({
       ...base,
       kind: "task",
+      lease_minutes: LEASE_MINUTES,
       item: {
         ...t,
         source: "auto",
@@ -154,7 +180,7 @@ Deno.serve(async (req) => {
         current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget)),
         lookup: buildLookup(autoTarget),
       },
-      how_to: "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。",
+      how_to: howTo,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

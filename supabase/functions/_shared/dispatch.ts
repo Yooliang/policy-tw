@@ -51,6 +51,38 @@ export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly
   );
 }
 
+/** 軟認領：派出後幾分鐘內不派給其他代理 */
+export const LEASE_MINUTES = 30;
+
+export interface TaskLike {
+  task_id: string;
+  target?: unknown;
+}
+
+export interface LeaseLike {
+  task_id: string;
+  target_key: string;
+  agent_name: string;
+  leased_until: string;
+}
+
+/** 認領以目標為單位：politician_id 或 policy_id；沒有就用 task_id 本身 */
+export function taskTargetKey(task: TaskLike): string {
+  const t = (task.target && typeof task.target === "object" ? task.target : {}) as Record<string, unknown>;
+  if (typeof t.policy_id === "string") return `policy:${t.policy_id}`;
+  if (typeof t.politician_id === "string") return `politician:${t.politician_id}`;
+  return `task:${task.task_id}`;
+}
+
+/** 排掉「別人」未過期的認領；自己認領中的可以再拿到（會延長） */
+export function filterLeasedTasks<T extends TaskLike>(tasks: readonly T[], leases: readonly LeaseLike[], agentName: string, now: Date = new Date()): T[] {
+  const mine = agentName.toLowerCase();
+  const heldByOthers = new Set(
+    leases.filter((l) => new Date(l.leased_until) > now && l.agent_name.toLowerCase() !== mine).map((l) => l.target_key),
+  );
+  return tasks.filter((t) => !heldByOthers.has(taskTargetKey(t)));
+}
+
 /** 確定性的偽隨機挑選：同 seed 同結果，不同代理（不同 seed）拿到不同筆。 */
 export function pickBySeed<T>(list: readonly T[], seed: string): T | null {
   if (list.length === 0) return null;

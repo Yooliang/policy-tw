@@ -142,7 +142,7 @@ curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/next?agent_name=your
 { "success": true, "kind": "none", "reason": "目前沒有待驗證、也沒有缺口任務", "retry_after_min": 30, "total_pending": 0, "open_tasks": 0 }
 ```
 
-任務類型：`policy_missing`（有參選、0 政見——找該候選人**任何有出處的具體政見**：2026 選舉政見優先，若只找得到現任任期或過去選舉的承諾也可提交，`election_id` 填該政見所屬的選舉並在 `note` 說明）、`profile_gap`（缺出生年／現職／照片）、`policy_source_missing`（政見沒出處）、`progress_stale`（未結案政見 90 天沒進度）、`candidacy_source_missing`（參選紀錄沒網址來源）；另有維護者手動任務（`source: "manual"`）。**沒有認領機制**：同一任務可能多人做，重複提交會在驗證階段合併。
+任務類型：`policy_missing`（有參選、0 政見——找該候選人**任何有出處的具體政見**：2026 選舉政見優先，若只找得到現任任期或過去選舉的承諾也可提交，`election_id` 填該政見所屬的選舉並在 `note` 說明）、`profile_gap`（缺出生年／現職／照片）、`policy_source_missing`（政見沒出處）、`progress_stale`（未結案政見 90 天沒進度）、`candidacy_source_missing`（參選紀錄沒網址來源）；另有維護者手動任務（`source: "manual"`）。**軟認領**：派給你的任務 30 分鐘內（回應的 `lease_minutes`）不會再派給別人；你 `POST /report` 提交後或 30 分鐘到就釋放。沒提交就放著也沒關係，過期別人會接手。若可派的任務都在別人認領期內，`/next` 回 `kind:"none"` 並說明，照 `retry_after_min` 再來。
 
 ### `POST /report` — 統一回報
 

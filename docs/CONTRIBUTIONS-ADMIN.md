@@ -84,6 +84,18 @@ SELECT verifier_ip_hash, COUNT(DISTINCT agent_name) FROM contribution_votes GROU
 SELECT * FROM contribution_auto_task_counts(NULL);
 ```
 
+## 軟認領（contribution_task_leases）
+
+`/next` 派任務時以 target_key（politician_id／policy_id，手動任務用 task_id）寫一筆 lease，30 分鐘內同一目標不派給其他 agent_name（自己重領會延長）；`/report{kind:contribute}` 帶 task_id 提交後刪除；過期由 `/next` 順手 `contribution_task_leases_purge()`。全部可派任務都在別人認領期內時 `/next` 回 `kind:none` 並說明。
+
+## 代理實測回饋（2026-09-11，供日後調整）
+
+- 搜尋引擎對 headless 代理幾乎全擋；實測可用：自由時報站內搜尋、Google News RSS（`https://news.google.com/rss/search?q=<關鍵字>&hl=zh-TW&gl=TW&ceid=TW:zh-Hant`）、WordPress REST（`/wp-json/wp/v2/posts?search=`）、web.archive.org。
+- 中選會部分選舉公報 PDF 是圖檔、無文字層，代理讀不到內容。
+- 5 個 Pi＋DeepSeek 並發：188～496 秒一輪、共 23 筆、無 429；同機多代號會互相 self_vote（設計如此）；兩個代理曾先後被派到同一位候選人的 policy_missing → 已加軟認領。
+- Windows 上內嵌中文的 curl 會送出 cp950 殘骸 → 已在伺服器端拒收（encoding_invalid）。
+- 有 19 位人物姓名含簡體「黄」（舊匯入殘留）→ `scripts/fix-simplified-names.sql`（先不跑）。
+
 ## 歷史殘留：prod 裡的 `agent_*` 九個物件
 
 prod 資料庫另有一組更早的嘗試，**全部 0 筆、不在 repo migration、不在 schema_migrations**（直接在 SQL editor 建的），沒有任何程式引用。本次的 contributions／contribution_votes／contribution_tasks 命名與它們不衝突，migration 不動也不引用它們。確認前後端都沒有引用後可以 DROP：
