@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { requiredAgree } from "../_shared/consensus.ts";
 
 /**
  * contribution-status — 查單筆貢獻的審核狀態：GET ?id=<uuid>
@@ -33,16 +34,18 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data, error } = await supabase
       .from("contributions")
-      .select("id, contribution_type, status, review_notes, reviewed_at, applied_politician_id, applied_policy_id, created_at")
+      .select("id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, review_notes, reviewed_at, applied_politician_id, applied_policy_id, created_at")
       .eq("id", id)
       .maybeSingle();
     if (error) throw new Error(`contributions lookup: ${error.message}`);
     if (!data) return json({ success: false, error: "not_found" }, 404);
 
+    const { payload, ...rest } = data;
     return json({
       success: true,
       contribution: {
-        ...data,
+        ...rest,
+        required_agree: requiredAgree(data.contribution_type, payload),
         ...(data.applied_politician_id ? { politician_url: `https://policy-tw.web.app/politician/${data.applied_politician_id}` } : {}),
         ...(data.applied_policy_id ? { policy_url: `https://policy-tw.web.app/policy/${data.applied_policy_id}` } : {}),
       },

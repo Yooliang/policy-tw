@@ -19,16 +19,20 @@ Deno.test("/next：total_pending=0 只派 task，即使驗證數為 0", () => {
 });
 
 Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agree 已達門檻的", () => {
+  const base = { contribution_type: "policy", payload: {} };
   const rows = [
-    { id: "a", agent_name: "xiaoliang", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
-    { id: "b", agent_name: "someone", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
-    { id: "c", agent_name: "someone", contributor_ip_hash: "ip-2", agree_count: 0, status: "pending" },
-    { id: "d", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
-    { id: "e", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "pending" },
-    { id: "f", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "verified" },
+    { ...base, id: "a", agent_name: "xiaoliang", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
+    { ...base, id: "b", agent_name: "someone", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
+    { ...base, id: "c", agent_name: "someone", contributor_ip_hash: "ip-2", agree_count: 0, status: "pending" },
+    { ...base, id: "d", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
+    { ...base, id: "e", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "pending" },
+    { ...base, id: "f", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "verified" },
+    // candidacy 門檻 6：2 票還要繼續派
+    { id: "g", contribution_type: "candidacy", payload: { candidate_status: "registered" }, agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
+    { id: "h", contribution_type: "candidacy", payload: { candidate_status: "registered" }, agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 6, status: "pending" },
   ];
   const me = { agent_name: "XiaoLiang", ip_hash: "ip-1", voted_ids: new Set(["e"]) };
-  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c"]);
+  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "g"]);
 });
 
 Deno.test("pickBySeed：同 seed 同結果、不同 seed 會分散", () => {

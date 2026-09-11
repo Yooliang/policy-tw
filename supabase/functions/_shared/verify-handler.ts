@@ -5,7 +5,7 @@
  */
 
 import { validateVerifyRequest } from "./contribution-schema.ts";
-import { isDuplicateVote, isSelfVote } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -30,7 +30,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count")
+    .select("id, status, contribution_type, payload, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -82,7 +82,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,
       status: after?.status ?? contribution.status,
-      ...(after?.status === "verified" ? { note: "verified ＝ 同儕驗證通過，仍要維護者 apply 才會上線" } : {}),
+      required_agree: requiredAgree(contribution.contribution_type, contribution.payload),
+      ...(after?.status === "verified" ? { note: "verified ＝ 同儕驗證通過，仍要維護者審核才會上線" } : {}),
     },
   };
 }

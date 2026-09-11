@@ -79,11 +79,23 @@ ALTER TABLE contribution_votes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role all" ON contribution_votes;
 CREATE POLICY "Service role all" ON contribution_votes FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
--- 共識：投票後重算計數並轉狀態（門檻鏡射 _shared/consensus.ts：VERIFIED_MIN_AGREE=2, VERIFIED_MAX_DISAGREE=0, DISPUTED_MIN_DISAGREE=2）
+-- 分級門檻（鏡射 _shared/consensus.ts requiredAgree）：
+--   高風險＝加減參選人：candidacy（任何 candidate_status）與 correction 改 candidate_status → agree ≥ 6
+--   其餘 → agree ≥ 2
+CREATE OR REPLACE FUNCTION contribution_required_agree(p_type TEXT, p_payload JSONB) RETURNS INTEGER
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_type = 'candidacy' THEN 6
+    WHEN p_type = 'correction' AND p_payload->>'field' = 'candidate_status' THEN 6
+    ELSE 2
+  END;
+$$;
+
+-- 共識：投票後重算計數並轉狀態（門檻鏡射 _shared/consensus.ts：requiredAgree()、VERIFIED_MAX_DISAGREE=0、DISPUTED_MIN_DISAGREE=2）
 CREATE OR REPLACE FUNCTION contribution_apply_consensus(p_contribution_id UUID) RETURNS TEXT
 LANGUAGE plpgsql AS $$
 DECLARE
-  v_agree INTEGER; v_disagree INTEGER; v_unsure INTEGER; v_status TEXT; v_new TEXT;
+  v_agree INTEGER; v_disagree INTEGER; v_unsure INTEGER; v_status TEXT; v_new TEXT; v_need INTEGER;
 BEGIN
   SELECT
     COUNT(*) FILTER (WHERE verdict = 'agree'),
@@ -92,12 +104,13 @@ BEGIN
   INTO v_agree, v_disagree, v_unsure
   FROM contribution_votes WHERE contribution_id = p_contribution_id;
 
-  SELECT status INTO v_status FROM contributions WHERE id = p_contribution_id;
+  SELECT status, contribution_required_agree(contribution_type, payload) INTO v_status, v_need
+  FROM contributions WHERE id = p_contribution_id;
   v_new := v_status;
   -- 只在還沒進維護者流程的狀態間轉換（approved/rejected/applied 不動）
   IF v_status IN ('pending', 'verified', 'disputed') THEN
     IF v_disagree >= 2 THEN v_new := 'disputed';
-    ELSIF v_agree >= 2 AND v_disagree = 0 THEN v_new := 'verified';
+    ELSIF v_agree >= v_need AND v_disagree = 0 THEN v_new := 'verified';
     ELSE v_new := 'pending';
     END IF;
   END IF;

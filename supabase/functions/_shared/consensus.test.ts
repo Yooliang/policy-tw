@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, tally } from "./consensus.ts";
+import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, requiredAgree, tally } from "./consensus.ts";
 import { validateVerifyRequest } from "./contribution-schema.ts";
 
 Deno.test("共識：2 agree、0 disagree → verified", () => {
@@ -13,6 +13,25 @@ Deno.test("共識：2 disagree → disputed；1 agree 1 disagree 維持 pending�
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "disagree" }]), "pending"), "pending");
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "disagree" }, { verdict: "disagree" }]), "verified"), "disputed");
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "applied"), "applied", "維護者已處理的不受投票影響");
+});
+
+Deno.test("分級門檻：candidacy 2 票仍 pending、6 票才 verified", () => {
+  const need = requiredAgree("candidacy", { candidate_status: "registered" });
+  assertEquals(need, 6);
+  const two = tally([{ verdict: "agree" }, { verdict: "agree" }]);
+  assertEquals(consensusStatus(two, "pending", need), "pending", "加減參選人 2 票不夠");
+  const six = tally(Array.from({ length: 6 }, () => ({ verdict: "agree" as const })));
+  assertEquals(consensusStatus(six, "pending", need), "verified");
+  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "pending", "有 disagree 就不算");
+});
+
+Deno.test("分級門檻：correction 改 candidate_status 要 6 票，其他欄位與型別 2 票", () => {
+  assertEquals(requiredAgree("correction", { field: "candidate_status" }), 6);
+  assertEquals(requiredAgree("correction", { field: "birth_year" }), 2);
+  assertEquals(requiredAgree("politician", {}), 2);
+  assertEquals(requiredAgree("policy", {}), 2);
+  assertEquals(requiredAgree("policy_progress", {}), 2);
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "pending", requiredAgree("policy", {})), "verified");
 });
 
 Deno.test("不能驗自己提交的：agent_name 或 ip_hash 任一相同就擋", () => {
