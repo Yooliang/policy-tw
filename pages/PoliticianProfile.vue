@@ -5,7 +5,8 @@ import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import { useIndexedDB } from '../composables/useIndexedDB'
 import { PolicyStatus } from '../types'
-import type { CandidateStatus } from '../types'
+import type { CandidateStatus, Policy } from '../types'
+import { policySortDate } from '../lib/policy-date'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
@@ -19,7 +20,7 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById } = useSupabase()
+const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById } = useSupabase()
 const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
@@ -153,6 +154,50 @@ const politician = computed(() => politicians.value.find(c => c.id === String(ro
 const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
 const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
 
+interface PolicyGroup {
+  key: string
+  label: string | null // null＝不顯示分組標題
+  policies: Policy[]
+}
+
+// 目前這屆＝elections 裡選舉日最新的一屆（不寫死年份，2026 過後自然換下一屆）。
+const latestElectionId = computed<number | null>(() => {
+  if (elections.value.length === 0) return null
+  return elections.value.reduce((latest, e) => (e.electionDate > latest.electionDate ? e : latest)).id
+})
+
+// 依所屬選舉屆別分組，新屆別在前、沒有屆別的（舊資料）排最後；組內依提出日期新到舊。
+// 標題的用途是「避免讀者誤以為這是本屆的」，所以只在可能誤會時才出現：
+// 分成多組一定要標；只有一組時，本屆與沒有屆別的舊資料都不必標
+// （年份在政見卡片上本來就看得到），只有往屆單獨一組時要標出來，
+// 不然只有 2024 屆政見的人物頁會讓人誤以為在看本屆。
+function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] {
+  const byElection = new Map<number | null, Policy[]>()
+  for (const p of list) {
+    const key = p.electionId ?? null
+    byElection.set(key, [...(byElection.get(key) ?? []), p])
+  }
+
+  const knownYears = [...byElection.keys()].filter((id): id is number => id !== null).sort((a, b) => b - a)
+  const orderedKeys: (number | null)[] = byElection.has(null) ? [...knownYears, null] : knownYears
+
+  const groups = orderedKeys.map((id): PolicyGroup => {
+    const groupPolicies = [...(byElection.get(id) ?? [])].sort((a, b) => policySortDate(b) - policySortDate(a))
+    const label = id === null ? '未標註屆別' : `${getElectionById(id)?.shortName ?? `${id} 年`}${suffix}`
+    return { key: id === null ? 'unlabeled' : String(id), label, policies: groupPolicies }
+  })
+
+  const onlyGroupNeedsNoLabel = groups.length === 1
+    && (groups[0].key === 'unlabeled' || groups[0].key === String(latestElectionId.value))
+  if (onlyGroupNeedsNoLabel) {
+    return [{ ...groups[0], label: null }]
+  }
+  return groups
+}
+
+const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾'))
+const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見'))
+
 usePageHead({
   type: 'article',
   title: () => politician.value ? `${politician.value.name}｜${politician.value.position}` : undefined,
@@ -246,7 +291,7 @@ usePageHead({
         <div class="lg:col-span-2">
           <div class="flex border-b border-slate-200 mb-6">
             <button @click="activeTab = 'campaign'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <Megaphone :size="20" />2026 競選承諾<span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
+              <Megaphone :size="20" />競選承諾<span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>
             </button>
             <button @click="activeTab = 'history'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
@@ -257,15 +302,20 @@ usePageHead({
           <div class="space-y-6">
             <template v-if="activeTab === 'campaign'">
               <template v-if="campaignPledges.length > 0">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <PolicyCard v-for="policy in campaignPledges" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                <div class="space-y-8">
+                  <div v-for="group in campaignGroups" :key="group.key">
+                    <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                    </div>
+                  </div>
                 </div>
                 <!-- 已有資料也能再查：次要位置、小按鈕 -->
                 <AiLookupInline :state="lookup.campaign" label="請 AI 補充最新的政見" @click="requestLookup('campaign')" />
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <Search :size="48" class="mx-auto mb-4 text-slate-300" />
-                <p class="text-slate-500 mb-6">該候選人尚未發布 2026 競選承諾。</p>
+                <p class="text-slate-500 mb-6">該候選人尚未發布競選承諾。</p>
 
                 <!-- AI Search Button -->
                 <button
@@ -300,8 +350,13 @@ usePageHead({
             </template>
             <template v-else>
               <template v-if="historicalPolicies.length > 0">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <PolicyCard v-for="policy in historicalPolicies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                <div class="space-y-8">
+                  <div v-for="group in historyGroups" :key="group.key">
+                    <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                    </div>
+                  </div>
                 </div>
                 <AiLookupInline :state="lookup.history" label="請 AI 補充最新的政績" @click="requestLookup('history')" />
               </template>
