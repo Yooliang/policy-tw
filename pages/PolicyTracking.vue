@@ -10,6 +10,7 @@ import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
+import { policyMatchesRegion } from '../lib/policy-region'
 
 const router = useRouter()
 const { policies, politicians, locations, categories } = useSupabase()
@@ -51,8 +52,7 @@ onUnmounted(() => {
 
 const filteredPolicies = computed(() => {
   return policies.value.filter(policy => {
-    const politician = politicians.value.find(c => c.id === policy.politicianId)
-    const matchesLocation = selectedLocation.value === 'All' || politician?.region === selectedLocation.value
+    const matchesLocation = policyMatchesRegion(policy, politicians.value, selectedLocation.value)
     const matchesCategory = selectedCategory.value === 'All' || policy.category === selectedCategory.value
     const matchesSearch = policy.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
                          policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
