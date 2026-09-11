@@ -8,6 +8,7 @@ import {
 } from '../../composables/useSupabase'
 import type { Politician, RawPolitician } from '../../types'
 import { analysisListedPolicyIds } from './page-data'
+import { isRunningCandidate } from '../candidate-status'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -63,7 +64,9 @@ function dedupeById(politicians: Politician[]): Politician[] {
 function computeStats(politicians: Politician[], base: DataSnapshot): DataStats {
   const politiciansByElection: Record<string, number> = {}
   for (const election of base.elections) {
-    politiciansByElection[String(election.id)] = politicians.filter((pl) => pl.elections?.some((e) => e.electionId === election.id)).length
+    politiciansByElection[String(election.id)] = politicians
+      .filter((pl) => pl.elections?.some((e) => e.electionId === election.id && isRunningCandidate(e.candidateStatus)))
+      .length
   }
   return { totalPoliticians: politicians.length, politiciansByElection }
 }

@@ -473,6 +473,7 @@ export function useSupabase() {
       .from('politician_elections')
       .select('*', { count: 'exact', head: true })
       .eq('election_id', electionId)
+      .neq('candidate_status', 'not_running')  // AI 推測但未登記的人不算「已收錄人員」
 
     if (error) {
       console.error('Failed to get election politician count:', error)

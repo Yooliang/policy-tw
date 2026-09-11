@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 
 import { useGlobalState } from '../composables/useGlobalState'
+import { isRunningCandidate } from '../lib/candidate-status'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -140,8 +141,12 @@ const timeLeft = computed(() => {
   return { days: difference > 0 ? Math.floor(difference / (1000 * 60 * 60 * 24)) : 0 }
 })
 
+// 本選舉的候選人；AI 推測但未登記（not_running）的人不進選舉頁，各級 grid 與統計數字都由這裡衍生
 const electionPoliticians = computed(() =>
-  politicians.value.filter(c => c.electionIds?.includes(electionId.value))
+  politicians.value.filter(c =>
+    c.electionIds?.includes(electionId.value) &&
+    isRunningCandidate(getPoliticianElectionData(c, electionId.value)?.candidateStatus)
+  )
 )
 
 // 是否顯示右側篩選區（用於決定左側欄位數）
@@ -368,8 +373,7 @@ watch([() => selectedIssueCategory.value, () => selectedRegion.value, () => sele
 
 // Comparison mode
 const comparisonPool = computed(() =>
-  politicians.value.filter(c => {
-    if (!c.electionIds?.includes(electionId.value)) return false
+  electionPoliticians.value.filter(c => {
     const type = getElectionType(c)
     if (!(type === comparisonLevel.value || (!type && comparisonLevel.value === ElectionType.MAYOR))) return false
     if (selectedRegion.value !== 'All' && c.region !== selectedRegion.value) return false

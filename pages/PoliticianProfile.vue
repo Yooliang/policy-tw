@@ -61,11 +61,12 @@ function isElectionPast(electionId: number): boolean {
 function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number): string | null {
   const isPast = electionId ? isElectionPast(electionId) : false
 
-  // For past elections, only show elected/defeated
+  // For past elections, only show elected/defeated（未登記參選是歷史事實，一併保留）
   if (isPast) {
     switch (status) {
       case 'elected': return '當選'
       case 'defeated': return '落選'
+      case 'not_running': return '未登記參選'
       default: return null // Don't show "確認參選" for past elections
     }
   }
@@ -73,6 +74,9 @@ function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number):
   // For future elections, show pre-election status
   switch (status) {
     case 'confirmed': return '確認參選'
+    case 'registered': return '已登記'
+    case 'qualified': return '已審定'
+    case 'not_running': return '未登記參選'
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞參選'
     case 'elected': return '當選'
@@ -91,6 +95,9 @@ function getCandidateStatusColor(status?: CandidateStatus, electionId?: number):
 
   switch (status) {
     case 'confirmed': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'registered': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'qualified': return 'bg-emerald-200 text-emerald-800 border-emerald-300'
+    case 'not_running': return 'bg-slate-100 text-slate-500 border-slate-200'
     case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
     case 'rumored': return 'bg-slate-100 text-slate-600 border-slate-200'
     case 'elected': return 'bg-emerald-100 text-emerald-700 border-emerald-200'

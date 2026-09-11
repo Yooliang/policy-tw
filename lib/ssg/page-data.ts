@@ -1,6 +1,7 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { withElectionData, type DataSnapshot } from '../../composables/useSupabase'
 import { PolicyStatus, type Policy, type Politician } from '../../types'
+import { isRunningCandidate } from '../candidate-status'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -112,7 +113,11 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
     case 'election': {
       const electionId = Number(paramString(to.params.electionId))
       const politicians = full.politicians
-        .filter((pl) => pl.elections?.some((e) => e.electionId === electionId && NATIONAL_ELECTION_TYPES.includes(e.electionType || '')))
+        .filter((pl) => pl.elections?.some((e) =>
+          e.electionId === electionId
+          && NATIONAL_ELECTION_TYPES.includes(e.electionType || '')
+          && isRunningCandidate(e.candidateStatus),
+        ))
         .map((pl) => withElectionData(pl, electionId))
       return { ...base, politicians }
     }

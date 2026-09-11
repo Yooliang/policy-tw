@@ -31,6 +31,9 @@ const getPledgeCount = (politicianId: string | number) =>
 const candidateStatusLabel = (status?: CandidateStatus) => {
   switch (status) {
     case 'confirmed': return null  // 已確認參選不需特別標註
+    case 'registered': return '已登記'
+    case 'qualified': return '已審定'
+    case 'not_running': return '未登記'  // 正常不會進到 grid（ElectionPage 已過濾），保底顯示
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞'
     case 'elected': return '當選'
@@ -41,6 +44,9 @@ const candidateStatusLabel = (status?: CandidateStatus) => {
 
 const candidateStatusColor = (status?: CandidateStatus) => {
   switch (status) {
+    case 'registered': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'qualified': return 'bg-emerald-200 text-emerald-800 border-emerald-300'
+    case 'not_running': return 'bg-slate-100 text-slate-500 border-slate-200'
     case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
     case 'rumored': return 'bg-slate-100 text-slate-500 border-slate-200'
     case 'elected': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
@@ -51,7 +57,7 @@ const candidateStatusColor = (status?: CandidateStatus) => {
 
 // 只有 confirmed/elected 狀態才顯示選區（中選會正式資料）
 const shouldShowSubRegion = (status?: CandidateStatus) => {
-  return status === 'confirmed' || status === 'elected' || status === 'defeated'
+  return status === 'confirmed' || status === 'registered' || status === 'qualified' || status === 'elected' || status === 'defeated'
 }
 
 // 格式化選區顯示（村里長顯示 "XX區 XX里"）
