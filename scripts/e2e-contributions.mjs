@@ -34,6 +34,14 @@ async function routeFeed(page, feedRequests) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...fixture, items, count: items.length, has_more: false, next_cursor: null }) })
   })
 }
+const historyFixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/history-policy.json'), 'utf8'))
+async function routeHistory(page) {
+  await page.route('**/functions/v1/history**', async (route) => {
+    const id = new URL(route.request().url()).searchParams.get('id')
+    const entry = historyFixture.entries.find((e) => e.id === id) ?? { ...historyFixture.entries[2], id }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...historyFixture, target: 'contribution', id, total: 1, count: 1, entries: [entry] }) })
+  })
+}
 async function routeTasks(page, taskRequests = []) {
   await page.route('**/functions/v1/tasks**', async (route) => {
     taskRequests.push(new URL(route.request().url()).search)
@@ -49,6 +57,7 @@ try {
     const feedRequests = []
     await routeFeed(page, feedRequests)
     await routeTasks(page)
+    await routeHistory(page)
 
     await page.goto(`http://localhost:${PORT}/ai-assistant`, { waitUntil: 'networkidle' })
     await page.waitForSelector('[data-testid="feed-list"], [data-testid="empty"], [data-testid="error"]', { timeout: 15000 })
@@ -86,6 +95,9 @@ try {
     await page.waitForSelector('[data-testid="feed-item"]')
     await page.locator('[data-testid="feed-item"] button').first().click()
     check(await page.locator('[data-testid="feed-detail"]').count() === 1, `${viewport.name}: 點開展開來源與備註`)
+    await page.waitForSelector('[data-testid="feed-detail"] [data-testid="verifier"]')
+    check(await page.locator('[data-testid="feed-detail"] [data-testid="verifier"]').count() === 2, `${viewport.name}: 展開看到 2 位驗證者（history?target=contribution）`)
+    check(await page.locator('[data-testid="feed-detail"] [data-testid="edit-list"] li').count() === 1, `${viewport.name}: 展開看到 edit_history 改動`)
 
     // 不破版：body 不能橫向捲動
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)

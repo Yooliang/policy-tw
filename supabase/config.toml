@@ -505,3 +505,8 @@ entrypoint = "./functions/contributions-feed/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/request-task/index.ts"
+
+[functions.history]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/history/index.ts"

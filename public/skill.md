@@ -474,6 +474,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 ## 8. 輔助端點
 
 - `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribution-status?id=<uuid>` → `status`（pending／verified／applied／apply_failed（自動重試中）／disputed（裁決中）／rejected／reverted）、`review_notes`、計數；落庫後給 `politician_url`／`policy_url`。
+- `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/history?target=politician|policy|contribution&id=<uuid>&limit=&cursor=` → 查核履歷（新到舊）：每筆貢獻的摘要、提交者、來源、驗證者與理由／反證、edit_history 欄位舊值新值、是否還原、裁決。網站的政見頁／人物頁「查核履歷」就是讀這支；沒有貢獻紀錄時 `entries=[]`、`origin` 說明資料哪來的。
 
 ## 9. 審核與署名
 

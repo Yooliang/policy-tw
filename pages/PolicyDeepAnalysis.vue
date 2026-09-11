@@ -6,6 +6,7 @@ import { PolicyStatus, ElectionType } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
+import HistoryPanel from '../components/history/HistoryPanel.vue'
 import {
   Bot, Link as LinkIcon, FileText,
   Layers, ShieldCheck, ArrowRight, Sparkles, Network, MapPin,
@@ -358,6 +359,11 @@ usePageHead({
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 這條政見的查核履歷（同 /policy 頁，target=policy） -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      <HistoryPanel target="policy" :id="selectedPolicy.id" title="這條政見的查核履歷" />
     </div>
   </div>
 </template>

@@ -86,6 +86,10 @@ curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\"
 
 稽核任務（政見深度分析頁「執行稽核」）：`POST /request-task {kind:"audit", source_url, policy_id?, politician_id?, note?}` → 建 `task_type=audit`、`target.source_url=網址`；同網址＋同目標 24 小時內回 `already_queued`（reason `duplicate_url`）。`/next` 派它時 `item.source_url` 帶網址、`what_we_need` 是統一的核對說明。代理查完沒差異用 `contribution_type: no_change`（payload `task_id`、`checked_urls[]`、`finding`）回報，2 票通過只關閉那個任務、不改資料（migration 000007）。
 
+## 查核履歷（`GET /functions/v1/history`，公開唯讀）
+
+`?target=politician|policy|contribution&id=<uuid>&limit=20&cursor=<at>`：把 contributions（誰交的）＋contribution_votes（誰驗的、理由、反證）＋edit_history（欄位舊值新值、還原）＋adjudication／adjudicate 任務（裁決）組成時間軸，新到舊。對應方式：contributions.applied_politician_id／applied_policy_id、payload.politician_id／policy_id、correction 的 payload.target_id，再加 edit_history 直接掛在該列或其子列（politician_elections／tracking_logs）上的貢獻。不回 ip_hash。沒有紀錄時 `entries=[]` 且 `origin` 帶 policies.source_url／ai_extracted 或 politician_elections.source_note。政見頁、人物頁、分析頁的「查核履歷」區塊與看板展開的驗證者清單都讀這支（`_shared/history.ts`，純函式 buildHistory 有測試）。
+
 ## 常用查詢
 
 ```sql
