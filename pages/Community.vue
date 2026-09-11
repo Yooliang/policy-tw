@@ -9,16 +9,29 @@ import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import type { Discussion } from '../types'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 const route = useRoute()
 const router = useRouter()
 const { discussions, politicians, policies } = useSupabase()
 const { globalRegion } = useGlobalState()
-const initialFilter = computed(() => (route.query.filter as string) || '')
+// 政見標題篩選（PolicyDetail 的「公民討論」帶 ?filter= 過來）。改由下方 useRegionQuerySync 在 mounted 後從網址套進來，
+// 不在 setup 直接讀 route.query：預渲染的 HTML 沒有這段，setup 就讀會 hydration mismatch
+const initialFilter = ref('')
 
 const activeTab = ref<'hot' | 'latest'>('hot')
 const searchQuery = ref('')
 const activeCategory = ref('')
+
+// 縣市（全站共用）、頁籤、議題標籤 ↔ 網址 ?region=&tab=&tag=；既有的 ?filter=政見標題 原樣保留
+useRegionQuerySync({
+  routeName: 'community',
+  extra: {
+    tab: queryField(activeTab, 'hot', { allowed: ['hot', 'latest'] as const }),
+    tag: queryField(activeCategory, ''),
+    filter: queryField(initialFilter, ''),
+  },
+})
 
 const COMMUNITY_TAGS = ['居住正義', '交通', '教育', '經濟', '環保']
 
@@ -108,7 +121,7 @@ const hotDiscussions = computed(() =>
 )
 
 const clearFilter = () => {
-  router.push('/community')
+  initialFilter.value = ''  // 網址的 ?filter= 由同步機制拿掉，縣市等其他參數保留
 }
 
 function getCommentCount(post: Discussion) {

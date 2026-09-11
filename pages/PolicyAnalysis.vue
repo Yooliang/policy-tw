@@ -8,12 +8,16 @@ import Avatar from '../components/Avatar.vue'
 import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 
 const router = useRouter()
 const { policies, politicians, categories } = useSupabase()
 const searchTerm = ref('')
 const selectedCategory = ref('All')
+
+// 縣市（全站共用，本頁只影響選擇器顯示）與分類 ↔ 網址 ?region=&category=
+useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(selectedCategory, 'All') } })
 
 const relayCases = computed(() => {
   const cases: any[] = []

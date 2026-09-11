@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import { useRegionQuerySync } from '../composables/useRegionQuerySync'
 import { useAuth } from '../composables/useAuth'
 import { supabase } from '../lib/supabase'
 import {
@@ -34,6 +35,9 @@ const route = useRoute()
 const { isAuthenticated, signInWithGoogle, userEmail, user, session } = useAuth()
 
 // Input state
+// 縣市選擇器（全站共用）↔ 網址 ?region=
+useRegionQuerySync({ routeName: 'ai-assistant' })
+
 const userInput = ref('')
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
