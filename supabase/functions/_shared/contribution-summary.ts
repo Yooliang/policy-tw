@@ -5,6 +5,8 @@
 
 export const SITE_URL = "https://policy-tw.web.app";
 export const SUMMARY_TEXT_LIMIT = 200;
+import { normalizeCorrection } from "./correction.ts";
+
 type Obj = Record<string, unknown>;
 
 const CANDIDATE_STATUS_LABEL: Record<string, string> = {
@@ -79,9 +81,11 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     }
     case "correction": {
       const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
-      const field = FIELD_LABEL[str(p.field)] ?? str(p.field);
       const id = str(p.target_id);
-      summary = `把${table} ${id.slice(0, 8)} 的${field}改為「${clip(p.correct_value, 80)}」`;
+      const { changes } = normalizeCorrection(p);
+      summary = changes.length <= 1
+        ? `把${table} ${id.slice(0, 8)} 的${FIELD_LABEL[changes[0]?.field ?? ""] ?? changes[0]?.field ?? "?"}改為「${clip(changes[0]?.correct_value, 80)}」`
+        : `更正${table} ${id.slice(0, 8)} 的 ${changes.length} 個欄位：${changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}→「${clip(c.correct_value, 40)}」`).join("、")}`;
       targetName = null;
       if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null);
       if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);

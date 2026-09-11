@@ -5,6 +5,7 @@
 
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
+import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication"] as const;
 export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "other"] as const;
@@ -207,14 +208,25 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       break;
     }
     case "correction": {
+      // 舊格式 {field, correct_value} 與新格式 {changes:[{field, current_value, correct_value}]} 都收（normalizeCorrection）
       if (!oneOf(CORRECTION_TABLES, p.target_table)) push("payload.target_table", `要是 ${CORRECTION_TABLES.join("／")} 之一`);
       if (!isStr(p.target_id, 1, 64)) push("payload.target_id", "target_id 必填（該筆資料的 id）");
       const table = oneOf(CORRECTION_TABLES, p.target_table) ? p.target_table : null;
-      if (!isStr(p.field, 1, 50)) push("payload.field", "field 必填");
-      else if (table && !CORRECTION_FIELDS[table].includes(p.field as string)) push("payload.field", `${table} 只接受修正：${CORRECTION_FIELDS[table].join("／")}`);
-      if (p.correct_value === undefined || p.correct_value === null || p.correct_value === "") push("payload.correct_value", "correct_value 必填");
-      else if (table === "policies" && p.field === "category" && !isCanonicalCategory(p.correct_value)) push("payload.correct_value", categoryErrorMessage(p.correct_value), "category_invalid");
-      if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，說明依據）");
+      const { changes } = normalizeCorrection(p);
+      const usesChanges = Array.isArray(p.changes);
+      if (changes.length === 0) push(usesChanges ? "payload.changes" : "payload.field", "至少要一個要更正的欄位：changes:[{field, current_value, correct_value}]（或舊格式 field＋correct_value）");
+      else if (changes.length > MAX_CORRECTION_CHANGES) push("payload.changes", `一筆最多更正 ${MAX_CORRECTION_CHANGES} 個欄位`);
+      const seen = new Set<string>();
+      changes.forEach((c, i) => {
+        const at = usesChanges ? `payload.changes[${i}]` : "payload";
+        if (!isStr(c.field, 1, 50)) push(`${at}.field`, "field 必填");
+        else if (table && !CORRECTION_FIELDS[table].includes(c.field)) push(`${at}.field`, `${table} 只接受修正：${CORRECTION_FIELDS[table].join("／")}`);
+        else if (seen.has(c.field)) push(`${at}.field`, `欄位 ${c.field} 重複`);
+        seen.add(c.field);
+        if (c.correct_value === undefined || c.correct_value === null || c.correct_value === "") push(`${at}.correct_value`, "correct_value 必填");
+        else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
+      });
+      if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");
       break;
     }
   }

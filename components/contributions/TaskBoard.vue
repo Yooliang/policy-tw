@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, AlertCircle, Inbox, KeyRound, Plus, X, CheckCircle2, ExternalLink } from 'lucide-vue-next'
+import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
 
 /**
- * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求）的 open 與 closed，加上自動缺口的數量。
+ * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求／系統裁決）的 open 與 closed，加上自動缺口的數量。
  * 資料：GET /functions/v1/tasks?include_closed=1&with_current=0（公開）。
- * 維護者面板：金鑰只放 sessionStorage，打 POST /functions/v1/apply 的 create_task／close_task。
+ * 純顯示：建任務走各頁面的免金鑰入口（人物頁請 AI 補齊、政見頁請 AI 查進度、深度分析頁執行稽核），
+ * 維護者的 create_task／close_task 用 apply 端點指令（docs/CONTRIBUTIONS-ADMIN.md），公開頁不放金鑰欄位。
  */
 
 interface BoardTask {
@@ -27,7 +28,6 @@ interface BoardTask {
 }
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
-const KEY_STORAGE = 'policytw.maintainer_key'
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   policy_missing: '缺政見', profile_gap: '缺人物資料', policy_source_missing: '政見缺出處',
@@ -52,7 +52,7 @@ watch(typeSel, (v) => emit('update:typeFilter', v))
 
 function headers(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-  return { 'Content-Type': 'application/json', ...(key ? { apikey: key, Authorization: `Bearer ${key}` } : {}) }
+  return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
 }
 
 async function load() {
@@ -76,12 +76,12 @@ async function load() {
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
 const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'))
 const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
+const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
+
 function contributionIdOf(t: BoardTask): string | null {
   const v = t.target?.contribution_id
   return typeof v === 'string' ? v : null
 }
-const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
-
 function targetLink(t: BoardTask): { href: string; label: string } | null {
   const target = t.target ?? {}
   if (typeof target.policy_id === 'string') return { href: `/policy/${target.policy_id}`, label: '看政見頁' }
@@ -94,90 +94,7 @@ function fmtTime(iso: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-// === 維護者面板 ===
-const adminOpen = ref(false)
-const apiKey = ref('')
-const submitting = ref(false)
-const adminError = ref<string | null>(null)
-const adminNotice = ref<string | null>(null)
-const closingId = ref<string | null>(null)
-
-interface TaskForm { title: string; description: string; task_type: string; target_politician_id: string; target_policy_id: string; region: string; priority: number; hint_sources: string }
-const EMPTY_FORM: TaskForm = { title: '', description: '', task_type: 'other', target_politician_id: '', target_policy_id: '', region: '', priority: 1, hint_sources: '' }
-const form = ref<TaskForm>({ ...EMPTY_FORM })
-
-function readStoredKey(): string {
-  try { return sessionStorage.getItem(KEY_STORAGE) || '' } catch { return '' }
-}
-function rememberKey() {
-  try { sessionStorage.setItem(KEY_STORAGE, apiKey.value) } catch { /* 無法寫入時只在記憶體用 */ }
-}
-function forgetKey() {
-  apiKey.value = ''
-  try { sessionStorage.removeItem(KEY_STORAGE) } catch { /* ignore */ }
-}
-
-async function callApply(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(`${FN_BASE}/apply`, { method: 'POST', headers: headers(), body: JSON.stringify({ api_key: apiKey.value, ...payload }) })
-  const body = await res.json().catch(() => null)
-  if (res.status === 401) throw new Error('金鑰不對')
-  if (!res.ok || !body?.success) {
-    const detail = Array.isArray(body?.errors) ? body.errors.map((e: { path: string; message: string }) => `${e.path}：${e.message}`).join('；') : ''
-    throw new Error(detail || body?.message || body?.error || `HTTP ${res.status}`)
-  }
-  return body
-}
-
-async function createTask() {
-  if (!apiKey.value.trim()) { adminError.value = '先填維護者金鑰'; return }
-  submitting.value = true
-  adminError.value = null
-  adminNotice.value = null
-  try {
-    const f = form.value
-    const task = {
-      title: f.title.trim(),
-      description: f.description.trim() || null,
-      task_type: f.task_type,
-      target_politician_id: f.target_politician_id.trim() || null,
-      target_policy_id: f.target_policy_id.trim() || null,
-      region: f.region.trim() || null,
-      priority: Number(f.priority) || 0,
-      hint_sources: f.hint_sources.split(/\s+/).map(s => s.trim()).filter(Boolean),
-    }
-    await callApply({ action: 'create_task', task })
-    rememberKey()
-    adminNotice.value = `已新增「${task.title}」`
-    form.value = { ...EMPTY_FORM }
-    await load()
-  } catch (e) {
-    adminError.value = e instanceof Error ? e.message : '新增失敗'
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function closeTask(t: BoardTask) {
-  if (!apiKey.value.trim()) { adminError.value = '先填維護者金鑰'; adminOpen.value = true; return }
-  closingId.value = t.task_id
-  adminError.value = null
-  try {
-    await callApply({ action: 'close_task', task_id: t.task_id })
-    rememberKey()
-    adminNotice.value = `已關閉「${t.title}」`
-    await load()
-  } catch (e) {
-    adminError.value = e instanceof Error ? e.message : '關閉失敗'
-  } finally {
-    closingId.value = null
-  }
-}
-
-onMounted(() => {
-  apiKey.value = readStoredKey()
-  load()
-})
-
+onMounted(load)
 defineExpose({ load })
 </script>
 
@@ -198,47 +115,17 @@ defineExpose({ load })
       </div>
     </div>
 
-    <!-- 手動任務 -->
+    <!-- 任務清單 -->
     <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
-        <h3 class="font-black text-navy-900">手動任務 <span class="text-sm font-bold text-slate-400">open {{ openTasks.length }}・closed {{ closedTasks.length }}</span></h3>
+        <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">open {{ openTasks.length }}・closed {{ closedTasks.length }}</span></h3>
         <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">
           <option value="">全部類型</option>
           <option v-for="(label, k) in TASK_TYPE_LABEL" :key="k" :value="k">{{ label }}</option>
         </select>
         <label class="text-xs text-slate-500 inline-flex items-center gap-1.5"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
-        <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1 bg-navy-900 text-white" data-testid="task-admin-toggle" @click="adminOpen = !adminOpen">
-          <component :is="adminOpen ? X : Plus" :size="14" /> {{ adminOpen ? '收起' : '新增任務' }}
-        </button>
       </div>
-
-      <!-- 維護者面板 -->
-      <div v-if="adminOpen" class="p-4 sm:p-5 border-b border-slate-100 bg-slate-50 space-y-3" data-testid="task-admin">
-        <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
-          <label class="text-xs font-bold text-slate-500 inline-flex items-center gap-1"><KeyRound :size="14" /> 維護者金鑰</label>
-          <input v-model="apiKey" type="password" autocomplete="off" placeholder="只存在這個分頁的 sessionStorage，關掉就消失" class="flex-1 text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white" data-testid="task-admin-key" />
-          <button v-if="apiKey" type="button" class="text-xs text-slate-500 underline" @click="forgetKey">清除</button>
-        </div>
-        <form class="grid sm:grid-cols-2 gap-3" data-testid="task-form" @submit.prevent="createTask">
-          <input v-model="form.title" required minlength="2" maxlength="200" placeholder="標題（必填）" class="sm:col-span-2 text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white" />
-          <textarea v-model="form.description" rows="3" placeholder="說明：缺什麼、到哪裡找、要附什麼出處" class="sm:col-span-2 text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white"></textarea>
-          <select v-model="form.task_type" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white">
-            <option v-for="(label, k) in TASK_TYPE_LABEL" :key="k" :value="k">{{ label }}（{{ k }}）</option>
-          </select>
-          <input v-model.number="form.priority" type="number" min="0" max="100" placeholder="優先序（越大越先派）" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white" />
-          <input v-model="form.target_politician_id" placeholder="目標人物 id（uuid，選填）" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white font-mono" />
-          <input v-model="form.target_policy_id" placeholder="目標政見 id（uuid，選填）" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white font-mono" />
-          <input v-model="form.region" placeholder="縣市（選填）" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white" />
-          <input v-model="form.hint_sources" placeholder="建議來源網址，用空白分隔（選填）" class="text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white" />
-          <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
-            <button type="submit" :disabled="submitting" class="px-4 py-2 rounded-lg bg-navy-900 text-white text-sm font-bold inline-flex items-center gap-2">
-              <Loader2 v-if="submitting" :size="14" class="animate-spin" /> 建立任務
-            </button>
-            <span v-if="adminNotice" class="text-sm text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 :size="14" /> {{ adminNotice }}</span>
-            <span v-if="adminError" class="text-sm text-red-700" data-testid="task-admin-error">{{ adminError }}</span>
-          </div>
-        </form>
-      </div>
+      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">想請 AI 補某個人物或政見的資料，到那個頁面按「請 AI 幫忙查」就會出現在這裡；有爭議的貢獻會自動變成裁決任務。</p>
 
       <div v-if="loading" class="p-10 text-center text-slate-500" data-testid="task-loading">
         <Loader2 :size="28" class="animate-spin mx-auto mb-2 text-blue-500" />載入中…
@@ -252,7 +139,7 @@ defineExpose({ load })
       <div v-else-if="visibleTasks.length === 0" class="p-10 text-center text-slate-500" data-testid="task-empty">
         <Inbox :size="32" class="mx-auto mb-2 text-slate-300" />
         <p class="font-bold">{{ typeSel ? `目前沒有「${TASK_TYPE_LABEL[typeSel] ?? typeSel}」任務` : '目前沒有手動任務' }}</p>
-        <p class="text-sm mt-1">自動缺口仍會派給 AI 代理；有特別想補的，維護者可在上方新增。</p>
+        <p class="text-sm mt-1">自動缺口仍會派給 AI 代理。</p>
       </div>
       <ul v-else class="divide-y divide-slate-100" data-testid="task-list">
         <li v-for="t in visibleTasks" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source" :data-type="t.task_type">
@@ -272,9 +159,6 @@ defineExpose({ load })
             <span v-if="contributionIdOf(t)" class="font-mono text-slate-400">貢獻 {{ contributionIdOf(t)!.slice(0, 8) }}</span>
             <a v-if="targetLink(t)" :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 font-bold">{{ targetLink(t)!.label }}</a>
             <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ u }}</a>
-            <button v-if="t.status === 'open'" type="button" class="ml-auto text-xs font-bold text-red-700 underline underline-offset-2" :disabled="closingId === t.task_id" data-testid="task-close" @click="closeTask(t)">
-              {{ closingId === t.task_id ? '關閉中…' : '關閉' }}
-            </button>
           </div>
         </li>
       </ul>

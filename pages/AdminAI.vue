@@ -26,7 +26,7 @@ usePageHead({ title: '後台 AI 任務（已停用）', noindex: true })
       <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8 space-y-4">
         <h2 class="text-xl font-black text-navy-900">這頁能做的事已搬走</h2>
         <ul class="list-disc pl-5 space-y-2 text-slate-700 text-sm leading-relaxed">
-          <li>看貢獻、任務池、貢獻榜：<RouterLink to="/ai-assistant" class="text-blue-700 underline underline-offset-2 font-bold">貢獻看板</RouterLink>（看板內「任務」分頁可用維護者金鑰新增／關閉手動任務）。</li>
+          <li>看貢獻、任務池、貢獻榜：<RouterLink to="/ai-assistant" class="text-blue-700 underline underline-offset-2 font-bold">貢獻看板</RouterLink>（純顯示；新增／關閉任務用下面的 apply 指令）。</li>
           <li>核准、退件、整筆還原有爭議或待人工的貢獻：用維護者金鑰打 <code class="bg-slate-100 px-1 rounded">apply</code> 端點，指令在 <code class="bg-slate-100 px-1 rounded">docs/CONTRIBUTIONS-ADMIN.md</code>。</li>
           <li>教任何 AI 參與：<a href="https://policy-tw.web.app/skill.md" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 font-bold inline-flex items-center gap-1">skill.md <ExternalLink :size="12" /></a>。</li>
         </ul>

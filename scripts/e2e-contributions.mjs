@@ -125,38 +125,21 @@ try {
     await context.close()
   }
 
-  // 維護者面板：沒金鑰擋下、有金鑰打 apply create_task；?tab=tasks 直接開任務分頁；?type= 預設篩選
+  // 任務分頁純顯示（公開頁沒有金鑰欄位、沒有 apply 呼叫）；?tab=tasks 直接開任務分頁；?type= 預設篩選
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
     const page = await context.newPage()
     const feedRequests = []
     await routeFeed(page, feedRequests)
     await routeTasks(page)
-    const applyBodies = []
-    await page.route('**/functions/v1/apply', async (route) => {
-      const body = route.request().postDataJSON()
-      applyBodies.push(body)
-      if (body.api_key !== 'test-key') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'Invalid api_key' }) })
-      return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ success: true, task: { id: 'new-task', ...body.task } }) })
-    })
+    const applyCalls = []
+    await page.route('**/functions/v1/apply', (route) => { applyCalls.push(route.request().url()); return route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }) })
     await page.goto(`http://localhost:${PORT}/ai-assistant?tab=tasks&type=policy`, { waitUntil: 'networkidle' })
     await page.waitForSelector('[data-testid="task-list"]')
     check(await page.locator('[data-testid="task-board"]').count() === 1, '?tab=tasks 直接開任務分頁')
-    await page.locator('[data-testid="task-admin-toggle"]').click()
-    await page.locator('[data-testid="task-form"] input[placeholder^="標題"]').fill('e2e 測試任務')
-    await page.locator('[data-testid="task-form"] button[type="submit"]').click()
-    await page.waitForSelector('[data-testid="task-admin-error"]')
-    check((await page.locator('[data-testid="task-admin-error"]').textContent()).includes('金鑰'), '沒填金鑰 → 前端擋下不打 apply')
-    check(applyBodies.length === 0, '沒填金鑰時 apply 未被呼叫')
-    await page.locator('[data-testid="task-admin-key"]').fill('test-key')
-    await page.locator('[data-testid="task-form"] button[type="submit"]').click()
-    await page.waitForFunction(() => document.body.textContent.includes('已新增'))
-    check(applyBodies.length === 1 && applyBodies[0].action === 'create_task' && applyBodies[0].task.title === 'e2e 測試任務', 'apply 收到 create_task 且 title 正確')
-    check(await page.evaluate(() => sessionStorage.getItem('policytw.maintainer_key')) === 'test-key', '金鑰只存 sessionStorage')
-    check(await page.evaluate(() => localStorage.getItem('policytw.maintainer_key')) === null, '金鑰沒進 localStorage')
-    await page.locator('[data-testid="task-close"]').first().click()
-    await page.waitForFunction(() => document.body.textContent.includes('已關閉'))
-    check(applyBodies.some((b) => b.action === 'close_task' && b.task_id === tasksFixture.tasks[0].task_id), 'apply 收到 close_task')
+    check(await page.locator('[data-testid="task-board"] input[type="password"]').count() === 0 && !(await page.locator('[data-testid="task-board"]').textContent()).includes('金鑰'), '任務分頁沒有金鑰欄位')
+    check(await page.locator('[data-testid="task-board"] button', { hasText: '新增任務' }).count() === 0 && await page.locator('[data-testid="task-close"]').count() === 0, '沒有新增／關閉任務按鈕')
+    check(applyCalls.length === 0, '公開頁不呼叫 apply')
     await page.locator('[data-testid="tab-feed"]').click()
     await page.waitForSelector('[data-testid="feed-list"]')
     check(feedRequests.some((q) => q.includes('type=policy')), '?type=policy 帶進貢獻分頁的第一次請求')
