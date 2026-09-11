@@ -34,3 +34,6 @@ dist-ssr
 # SSG
 .vite-ssg-temp
 .ssg-check
+
+# 身份比對 dry-run 產物
+.dedupe-check

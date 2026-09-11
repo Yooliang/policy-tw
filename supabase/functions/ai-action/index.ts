@@ -1,5 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  ambiguousPayload,
+  ensurePolitician,
+  findOrCreateElection,
+  positionToElectionType,
+  upsertParticipation,
+} from "../_shared/candidate-import.ts";
+import { findPoliticianByNameStrict } from "../_shared/politician-identity.ts";
 
 const ALLOWED_ORIGINS = [
   "https://policy-tw.web.app",
@@ -442,96 +450,58 @@ async function handleImportCandidate(supabase: any, body: any): Promise<Response
     return successResponse({ skipped: true, reason: "invalid_name", message: `跳過無效名稱: ${candidate.name}` });
   }
 
-  // 找或建立選舉
-  let { data: election } = await supabase
-    .from("elections")
-    .select("id")
-    .gte("election_date", `${election_year}-01-01`)
-    .lte("election_date", `${election_year}-12-31`)
-    .single();
+  const electionId = await findOrCreateElection(supabase, election_year);
+  const sourceNote = `AI(${prompt_id?.substring(0, 8) || '-'})`;
 
-  if (!election) {
-    const { data: newElection, error } = await supabase
-      .from("elections")
-      .insert({
-        name: `${election_year}年地方公職人員選舉`,
-        short_name: `${election_year}地方選舉`,
-        election_date: `${election_year}-11-26`,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    election = newElection;
+  // 找或建立政治人物：多面向身份比對（不再用 name.eq().single()）
+  const ensured = await ensurePolitician(supabase, candidate, { source: "ai-action" });
+  if (ensured.politician_id === null) {
+    return successResponse(ambiguousPayload(candidate.name, ensured.resolution));
   }
 
-  // 政黨對應
-  const partyMap: Record<string, string> = {
-    "國民黨": "中國國民黨", "中國國民黨": "中國國民黨",
-    "民進黨": "民主進步黨", "民主進步黨": "民主進步黨",
-    "民眾黨": "台灣民眾黨", "台灣民眾黨": "台灣民眾黨",
-    "時代力量": "時代力量", "台灣基進": "台灣基進",
-    "無黨籍": "無黨籍", "無": "無黨籍",
-  };
-  const party = partyMap[candidate.party || ""] || "無黨籍";
+  const participation = await upsertParticipation(supabase, {
+    politician_id: ensured.politician_id,
+    election_id: electionId,
+    position: candidate.position,
+    election_type: positionToElectionType(candidate.position),
+    candidate_status: candidate.status || "rumored",
+    source_note: sourceNote,
+  });
 
-  // 找或建立政治人物
-  let { data: politician } = await supabase
-    .from("politicians")
-    .select("id")
-    .eq("name", candidate.name)
-    .single();
+  return successResponse({
+    action: participation.outcome,
+    name: candidate.name,
+    politician_id: ensured.politician_id,
+    politician_created: ensured.created,
+    identity: {
+      decision: ensured.resolution.decision,
+      matched_keys: ensured.resolution.matched_keys.map((k) => k.key_value),
+      ...(ensured.resolution.flag ? { flag: ensured.resolution.flag } : {}),
+    },
+  });
+}
 
-  if (!politician) {
-    const { data: newPol, error } = await supabase
-      .from("politicians")
-      .insert({
-        name: candidate.name,
-        party,
-        position: candidate.position,
-        region: candidate.region,
-        current_position: candidate.current_position || null,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    politician = newPol;
+/**
+ * 只用姓名找人：同名多位就回 409 要求帶 politician_id，不再靜默當查無。
+ */
+async function findPoliticianOr409(supabase: any, name: string): Promise<{ id: string } | Response> {
+  try {
+    const found = await findPoliticianByNameStrict(supabase, name);
+    return found ?? errorResponse(`找不到政治人物: ${name}`, 404);
+  } catch (e: any) {
+    return errorResponse(e.message, 409);
   }
+}
 
-  // 檢查是否已有參選紀錄
-  const { data: existingPE } = await supabase
-    .from("politician_elections")
-    .select("id")
-    .eq("politician_id", politician.id)
-    .eq("election_id", election.id)
-    .single();
-
-  if (existingPE) {
-    await supabase
-      .from("politician_elections")
-      .update({
-        candidate_status: candidate.status || "rumored",
-        source_note: `AI(${prompt_id?.substring(0, 8) || '-'})`,
-      })
-      .eq("id", existingPE.id);
-    return successResponse({ action: "updated", name: candidate.name, politician_id: politician.id });
-  }
-
-  // 建立參選紀錄
-  const { error: peError } = await supabase
-    .from("politician_elections")
-    .insert({
-      politician_id: politician.id,
-      election_id: election.id,
-      position: candidate.position,
-      election_type: mapPositionToType(candidate.position),
-      candidate_status: candidate.status || "rumored",
-      verified: false,
-      source_note: `AI(${prompt_id?.substring(0, 8) || '-'})`,
-    });
-
-  if (peError) throw new Error(peError.message);
-
-  return successResponse({ action: "created", name: candidate.name, politician_id: politician.id });
+/** 用標題找該人的政見：0 筆 → null；≥2 筆 → 丟錯（避免隨機挑一筆）。 */
+async function findPolicyByTitle(supabase: any, politicianId: string, title: string, exact: boolean): Promise<{ id: string } | null> {
+  const query = supabase.from("policies").select("id, title").eq("politician_id", politicianId);
+  const { data, error } = await (exact ? query.ilike("title", title) : query.ilike("title", `%${title}%`)).limit(2);
+  if (error) throw new Error(`policies lookup: ${error.message}`);
+  const rows = data || [];
+  if (rows.length === 0) return null;
+  if (rows.length > 1) throw new Error(`「${title}」對到 ${rows.length} 筆政見，請改用 policy_id 指定`);
+  return { id: rows[0].id };
 }
 
 /**
@@ -562,16 +532,9 @@ async function handleUpdatePolitician(supabase: any, body: any): Promise<Respons
   let politicianId = politician_id;
 
   if (!politicianId && politician_name) {
-    const { data: politician } = await supabase
-      .from("politicians")
-      .select("id")
-      .eq("name", politician_name)
-      .single();
-
-    if (!politician) {
-      return errorResponse(`找不到政治人物: ${politician_name}`, 404);
-    }
-    politicianId = politician.id;
+    const found = await findPoliticianOr409(supabase, politician_name);
+    if (found instanceof Response) return found;
+    politicianId = found.id;
   }
 
   // 構建更新資料（只允許特定欄位）
@@ -709,23 +672,11 @@ async function handleAddPolicy(supabase: any, body: any): Promise<Response> {
   }
 
   // 找政治人物
-  const { data: politician } = await supabase
-    .from("politicians")
-    .select("id")
-    .eq("name", politician_name)
-    .single();
-
-  if (!politician) {
-    return errorResponse(`找不到政治人物: ${politician_name}`, 404);
-  }
+  const politician = await findPoliticianOr409(supabase, politician_name);
+  if (politician instanceof Response) return politician;
 
   // 檢查是否已有相同政見
-  const { data: existing } = await supabase
-    .from("policies")
-    .select("id")
-    .eq("politician_id", politician.id)
-    .ilike("title", policy.title)
-    .single();
+  const existing = await findPolicyByTitle(supabase, politician.id, policy.title, true);
 
   if (existing) {
     return successResponse({ action: "exists", policy_id: existing.id, message: "政見已存在" });
@@ -764,23 +715,10 @@ async function handleUpdatePolicy(supabase: any, body: any): Promise<Response> {
 
   // 如果沒有 policy_id，用政治人物名稱+政見標題查找
   if (!policyId && politician_name && policy_title) {
-    const { data: politician } = await supabase
-      .from("politicians")
-      .select("id")
-      .eq("name", politician_name)
-      .single();
+    const politician = await findPoliticianOr409(supabase, politician_name);
+    if (politician instanceof Response) return politician;
 
-    if (!politician) {
-      return errorResponse(`找不到政治人物: ${politician_name}`, 404);
-    }
-
-    const { data: policy } = await supabase
-      .from("policies")
-      .select("id")
-      .eq("politician_id", politician.id)
-      .ilike("title", `%${policy_title}%`)
-      .single();
-
+    const policy = await findPolicyByTitle(supabase, politician.id, policy_title, false);
     if (!policy) {
       return errorResponse(`找不到政見: ${policy_title}`, 404);
     }
@@ -831,21 +769,10 @@ async function handleAddTrackingLog(supabase: any, body: any): Promise<Response>
 
   // 如果沒有 policy_id，用政治人物名稱+政見標題查找
   if (!policyId && politician_name && policy_title) {
-    const { data: politician } = await supabase
-      .from("politicians")
-      .select("id")
-      .eq("name", politician_name)
-      .single();
-
-    if (politician) {
-      const { data: policy } = await supabase
-        .from("policies")
-        .select("id")
-        .eq("politician_id", politician.id)
-        .ilike("title", `%${policy_title}%`)
-        .single();
-      if (policy) policyId = policy.id;
-    }
+    const politician = await findPoliticianOr409(supabase, politician_name);
+    if (politician instanceof Response) return politician;
+    const policy = await findPolicyByTitle(supabase, politician.id, policy_title, false);
+    if (policy) policyId = policy.id;
   }
 
   if (!policyId) {
@@ -1123,23 +1050,10 @@ async function handleAddPolicySource(supabase: any, body: any): Promise<Response
 
   // 如果沒有 policy_id，用政治人物名稱+政見標題查找
   if (!policyId && politician_name && policy_title) {
-    const { data: politician } = await supabase
-      .from("politicians")
-      .select("id")
-      .eq("name", politician_name)
-      .single();
+    const politician = await findPoliticianOr409(supabase, politician_name);
+    if (politician instanceof Response) return politician;
 
-    if (!politician) {
-      return errorResponse(`找不到政治人物: ${politician_name}`, 404);
-    }
-
-    const { data: policy } = await supabase
-      .from("policies")
-      .select("id")
-      .eq("politician_id", politician.id)
-      .ilike("title", `%${policy_title}%`)
-      .single();
-
+    const policy = await findPolicyByTitle(supabase, politician.id, policy_title, false);
     if (!policy) {
       return errorResponse(`找不到政見: ${policy_title}`, 404);
     }
@@ -1229,15 +1143,4 @@ function errorResponse(message: string, status = 400): Response {
     JSON.stringify({ success: false, error: message }),
     { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
-}
-
-function mapPositionToType(position: string): string {
-  if (position.includes("總統")) return "總統副總統";
-  if (position.includes("立法委員") || position.includes("立委")) return "立法委員";
-  if (position.includes("市長") || position.includes("縣長")) return "縣市長";
-  if (position.includes("議員")) return "縣市議員";
-  if (position.includes("鄉長") || position.includes("鎮長")) return "鄉鎮市長";
-  if (position.includes("代表")) return "鄉鎮市民代表";
-  if (position.includes("村長") || position.includes("里長")) return "村里長";
-  return "縣市長";
 }

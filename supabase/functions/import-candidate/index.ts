@@ -1,5 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  ambiguousPayload,
+  ensurePolitician,
+  findOrCreateElection,
+  positionToElectionType,
+  upsertParticipation,
+} from "../_shared/candidate-import.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,13 +14,21 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 // Admin check helper function
 async function isAdmin(supabase: any, userId: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_profiles")
     .select("is_admin")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
+  if (error) throw new Error(`user_profiles lookup: ${error.message}`);
   return data?.is_admin === true;
 }
 
@@ -43,39 +58,27 @@ Deno.serve(async (req) => {
     // Check authentication
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response(
-        JSON.stringify({ error: "Authentication required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "Authentication required" }, 401);
     }
 
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabaseService.auth.getUser(token);
 
     if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Authentication required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "Authentication required" }, 401);
     }
 
     // Check admin
     const userIsAdmin = await isAdmin(supabaseService, user.id);
     if (!userIsAdmin) {
-      return new Response(
-        JSON.stringify({ error: "Forbidden", message: "此功能僅限管理員使用" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "Forbidden", message: "此功能僅限管理員使用" }, 403);
     }
 
     const body: ImportRequest = await req.json();
     const { election_year, candidate } = body;
 
     if (!election_year || !candidate?.name) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "Missing required fields" }, 400);
     }
 
     // 過濾無效的候選人名稱
@@ -83,170 +86,55 @@ Deno.serve(async (req) => {
       '未定', '待定', '待確認', '尚待確認', '未知', '未定人選',
       '其他', '人選', '可能人選', '潛在人選', '待公布',
     ];
-    const nameLower = candidate.name.toLowerCase();
     const isInvalidName = invalidNamePatterns.some(p => candidate.name.includes(p)) ||
       candidate.name.length < 2 ||
       candidate.name.length > 10 ||
       /^[a-zA-Z\s]+$/.test(candidate.name); // 純英文名
 
     if (isInvalidName) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          skipped: true,
-          message: `跳過無效名稱: ${candidate.name}`,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ success: false, skipped: true, message: `跳過無效名稱: ${candidate.name}` });
     }
 
-    // Find or create election for the year
-    let { data: election } = await supabaseService
-      .from("elections")
-      .select("id")
-      .gte("election_date", `${election_year}-01-01`)
-      .lte("election_date", `${election_year}-12-31`)
-      .single();
+    const electionId = await findOrCreateElection(supabaseService, election_year);
+    const sourceNote = `AI搜尋匯入${candidate.note ? `: ${candidate.note}` : ""}`;
 
-    if (!election) {
-      // Create a placeholder election for this year
-      const { data: newElection, error: electionError } = await supabaseService
-        .from("elections")
-        .insert({
-          name: `${election_year}年地方公職人員選舉`,
-          short_name: `${election_year}地方選舉`,
-          start_date: `${election_year}-01-01`,
-          end_date: `${election_year}-12-31`,
-          election_date: `${election_year}-11-26`, // Placeholder date
-        })
-        .select("id")
-        .single();
-
-      if (electionError) {
-        throw new Error(`Failed to create election: ${electionError.message}`);
-      }
-      election = newElection;
+    // 多面向身份比對找人；模稜兩可不新增、進待審
+    const ensured = await ensurePolitician(supabaseService, candidate, {
+      source: `import-candidate:${user.id}`,
+      extraInsert: { bio: candidate.current_position ? `現任${candidate.current_position}` : null },
+    });
+    if (ensured.politician_id === null) {
+      return json({ success: true, ...ambiguousPayload(candidate.name, ensured.resolution) });
     }
 
-    // Map party name to enum value
-    const partyMap: Record<string, string> = {
-      "中國國民黨": "中國國民黨",
-      "國民黨": "中國國民黨",
-      "民主進步黨": "民主進步黨",
-      "民進黨": "民主進步黨",
-      "台灣民眾黨": "台灣民眾黨",
-      "民眾黨": "台灣民眾黨",
-      "時代力量": "時代力量",
-      "台灣基進": "台灣基進",
-      "無黨籍": "無黨籍",
-      "無": "無黨籍",
-    };
-    const party = partyMap[candidate.party || ""] || "無黨籍";
+    const participation = await upsertParticipation(supabaseService, {
+      politician_id: ensured.politician_id,
+      election_id: electionId,
+      position: candidate.position,
+      election_type: positionToElectionType(candidate.position),
+      candidate_status: candidate.status || undefined,
+      source_note: sourceNote,
+    });
 
-    // Find existing politician by name
-    let { data: politician } = await supabaseService
-      .from("politicians")
-      .select("id")
-      .eq("name", candidate.name)
-      .single();
-
-    if (!politician) {
-      // Create new politician
-      const { data: newPolitician, error: politicianError } = await supabaseService
-        .from("politicians")
-        .insert({
-          name: candidate.name,
-          party: party,
-          position: candidate.position,
-          region: candidate.region,
-          current_position: candidate.current_position || null,
-          bio: candidate.current_position ? `現任${candidate.current_position}` : null,
-        })
-        .select("id")
-        .single();
-
-      if (politicianError) {
-        throw new Error(`Failed to create politician: ${politicianError.message}`);
-      }
-      politician = newPolitician;
-    }
-
-    // Check if politician_election already exists
-    const { data: existingPE } = await supabaseService
-      .from("politician_elections")
-      .select("id, candidate_status")
-      .eq("politician_id", politician.id)
-      .eq("election_id", election.id)
-      .single();
-
-    if (existingPE) {
-      // Update existing record with new status
-      const { error: updateError } = await supabaseService
-        .from("politician_elections")
-        .update({
-          candidate_status: candidate.status || existingPE.candidate_status || "rumored",
-          source_note: `AI搜尋匯入${candidate.note ? `: ${candidate.note}` : ""}`,
-        })
-        .eq("id", existingPE.id);
-
-      if (updateError) {
-        throw new Error(`Failed to update politician_election: ${updateError.message}`);
-      }
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: `已更新 ${candidate.name} 的參選狀態`,
-          politician_id: politician.id,
-          updated: true,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Create politician_election record
-    const { error: peError } = await supabaseService
-      .from("politician_elections")
-      .insert({
-        politician_id: politician.id,
-        election_id: election.id,
-        position: candidate.position,
-        election_type: mapPositionToType(candidate.position),
-        candidate_status: candidate.status || "rumored",
-        verified: false,
-        source_note: `AI搜尋匯入${candidate.note ? `: ${candidate.note}` : ""}`,
-      });
-
-    if (peError) {
-      throw new Error(`Failed to create politician_election: ${peError.message}`);
-    }
-
-    return new Response(
-      JSON.stringify({
+    if (participation.outcome === "updated") {
+      return json({
         success: true,
-        message: `成功匯入 ${candidate.name}`,
-        politician_id: politician.id,
-        election_id: election.id,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+        message: `已更新 ${candidate.name} 的參選狀態`,
+        politician_id: ensured.politician_id,
+        updated: true,
+      });
+    }
+
+    return json({
+      success: true,
+      message: `成功匯入 ${candidate.name}`,
+      politician_id: ensured.politician_id,
+      politician_created: ensured.created,
+      election_id: electionId,
+    });
 
   } catch (error: any) {
     console.error("import-candidate error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error", message: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({ error: "Internal server error", message: error.message }, 500);
   }
 });
-
-function mapPositionToType(position: string): string {
-  if (position.includes("總統") || position.includes("副總統")) return "總統副總統";
-  if (position.includes("立法委員") || position.includes("立委")) return "立法委員";
-  if (position.includes("市長") || position.includes("縣長")) return "縣市長";
-  if (position.includes("議員")) return "縣市議員";
-  if (position.includes("鄉長") || position.includes("鎮長") || position.includes("區長")) return "鄉鎮市長";
-  if (position.includes("代表")) return "鄉鎮市民代表";
-  if (position.includes("村長") || position.includes("里長")) return "村里長";
-  return "縣市長"; // Default
-}
