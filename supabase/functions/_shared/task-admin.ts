@@ -20,6 +20,8 @@ export interface TaskInput {
   region?: string | null;
   priority?: number;
   hint_sources?: string[];
+  /** task_type=audit：要核對的文件網址（存進 target.source_url） */
+  source_url?: string | null;
 }
 
 export interface TaskValidation {
@@ -43,6 +45,7 @@ export function validateTaskInput(raw: unknown): TaskValidation {
   if (t.region !== undefined && t.region !== null && !isStr(t.region, 2, 20)) errors.push({ path: "task.region", message: "縣市名要是字串" });
   if (t.priority !== undefined && !(Number.isInteger(t.priority) && (t.priority as number) >= -10 && (t.priority as number) <= 100)) errors.push({ path: "task.priority", message: "要是 -10～100 的整數" });
   if (t.hint_sources !== undefined && !(Array.isArray(t.hint_sources) && (t.hint_sources as unknown[]).every((s) => isStr(s, 1, 300)))) errors.push({ path: "task.hint_sources", message: "要是字串陣列" });
+  if (t.source_url !== undefined && t.source_url !== null && !(isStr(t.source_url, 8, 500) && /^https?:\/\/\S+$/.test(t.source_url))) errors.push({ path: "task.source_url", message: "要是 http(s) 網址" });
   if (errors.length > 0) return { ok: false, errors, input: null };
   return {
     ok: true,
@@ -56,6 +59,7 @@ export function validateTaskInput(raw: unknown): TaskValidation {
       region: typeof t.region === "string" ? t.region.replace(/臺/g, "台").trim() : null,
       priority: typeof t.priority === "number" ? t.priority : undefined,
       hint_sources: Array.isArray(t.hint_sources) ? (t.hint_sources as string[]) : [],
+      source_url: typeof t.source_url === "string" ? t.source_url.trim() : null,
     },
   };
 }
@@ -65,7 +69,41 @@ export function taskTarget(input: TaskInput): Obj {
     ...(input.target_politician_id ? { politician_id: input.target_politician_id } : {}),
     ...(input.target_policy_id ? { policy_id: input.target_policy_id } : {}),
     ...(input.region ? { region: input.region } : {}),
+    ...(input.source_url ? { source_url: input.source_url } : {}),
   };
+}
+
+/** audit 任務給代理的統一說明（/next、/tasks 都用） */
+export const AUDIT_WHAT_WE_NEED = "打開這份文件，核對其內容與我們資料庫既有的相關政見／進度是否一致；不一致就提 correction 或 policy_progress，一致就回報無異動（contribution_type: no_change，payload 帶 task_id、checked_urls、finding）";
+
+export interface ManualTaskRowLike { title: string; description: string | null; task_type: string; target: unknown }
+
+/** 手動任務的 what_we_need 與 source_url（audit 型別用統一說明並把 target.source_url 提到 item 上） */
+export function describeManualTask(t: ManualTaskRowLike): { what_we_need: string; source_url: string | null } {
+  const target = (t.target && typeof t.target === "object" ? t.target : {}) as Obj;
+  const sourceUrl = typeof target.source_url === "string" ? target.source_url : null;
+  if (t.task_type === "audit" && sourceUrl) {
+    return { what_we_need: `${AUDIT_WHAT_WE_NEED}。文件：${sourceUrl}${t.description ? `。${t.description}` : ""}`, source_url: sourceUrl };
+  }
+  return { what_we_need: t.description ? `${t.title}：${t.description}` : t.title, source_url: sourceUrl };
+}
+
+/** audit 去重：同網址＋同目標（policy_id／politician_id 都要相同，含都沒有） */
+export function sameAuditTarget(target: unknown, want: { politician_id?: string | null; policy_id?: string | null }): boolean {
+  const t = (target && typeof target === "object" ? target : {}) as Obj;
+  return (t.policy_id ?? null) === (want.policy_id ?? null) && (t.politician_id ?? null) === (want.politician_id ?? null);
+}
+
+export const AUDIT_DUPLICATE_WINDOW_HOURS = 24;
+
+/** 24 小時內同網址＋同目標建過的 audit 任務（open 或 closed 都算，避免同一份文件被重複丟） */
+export async function findRecentAuditTask(supabase: SupabaseLike, want: { source_url: string; politician_id?: string | null; policy_id?: string | null }): Promise<Obj | null> {
+  const since = new Date(Date.now() - AUDIT_DUPLICATE_WINDOW_HOURS * 3600 * 1000).toISOString();
+  const { data, error } = await supabase.from("contribution_tasks").select("id, target, status, created_at")
+    .eq("task_type", "audit").eq("target->>source_url", want.source_url).gte("created_at", since)
+    .order("created_at", { ascending: false }).limit(50);
+  if (error) throw new Error(`contribution_tasks audit lookup: ${error.message}`);
+  return ((data ?? []) as Obj[]).find((r) => sameAuditTarget(r.target, want)) ?? null;
 }
 
 export interface CreateTaskOptions {

@@ -17,7 +17,7 @@
 1. 第一次向使用者提問「你要用來貢獻的名稱怎麼稱呼？」取得 `agent_name`（**人的代號**：GitHub 帳號或暱稱），由執行環境自行持久化（設定檔或環境變數），沒有持久化能力的環境每次由使用者提供；之後每次呼叫都帶同一個。另外自報 `agent_tool`，格式 `<工具>/<模型>`，照實填、不要抄範例。
 2. `GET /next?agent_name=<代號>&agent_tool=<工具/模型>` → 看 `kind`：
    - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload` → `POST /report {kind:"verify", …}`
-   - `task`：到優先來源（官方優先）查證 `item.what_we_need` → 查到就 `POST /report {kind:"contribute", task_id, …}`；查不到就不回報、計入「查不到」
+   - `task`：到優先來源（官方優先）查證 `item.what_we_need` → 查到就 `POST /report {kind:"contribute", task_id, …}`；查不到就不回報、計入「查不到」；查了、確認資料庫已經正確（例如 `audit` 任務的文件與既有資料一致）→ `POST /report {kind:"contribute", contribution_type:"no_change", …}`
    - `none`：這輪結束，`retry_after_min` 後再來
 3. 重複第 2 步，直到 `kind = none`、本輪上限、或第 5b 節的額度規則要求停止。
 4. 回報一行（5b.5）。**不要在同一輪驗自己剛提交的**（伺服器也不會派給你）。
@@ -142,7 +142,7 @@ curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/next?agent_name=your
 { "success": true, "kind": "none", "reason": "目前沒有待驗證、也沒有缺口任務", "retry_after_min": 30, "total_pending": 0, "open_tasks": 0 }
 ```
 
-任務類型：`policy_missing`（有參選、0 政見——找該候選人**任何有出處的具體政見**：2026 選舉政見優先，若只找得到現任任期或過去選舉的承諾也可提交，`election_id` 填該政見所屬的選舉並在 `note` 說明）、`profile_gap`（缺出生年／現職／照片）、`policy_source_missing`（政見沒出處）、`progress_stale`（未結案政見 90 天沒進度）、`candidacy_source_missing`（參選紀錄沒網址來源）；另有手動任務（`source` 為 `manual`＝維護者建、`suggested`＝代理提議通過、`web_request`＝網站訪客請求；見下方「提議任務」）。**軟認領**：派給你的任務 30 分鐘內（回應的 `lease_minutes`）不會再派給別人；你 `POST /report` 提交後或 30 分鐘到就釋放。沒提交就放著也沒關係，過期別人會接手。若可派的任務都在別人認領期內，`/next` 回 `kind:"none"` 並說明，照 `retry_after_min` 再來。
+任務類型：`policy_missing`（有參選、0 政見——找該候選人**任何有出處的具體政見**：2026 選舉政見優先，若只找得到現任任期或過去選舉的承諾也可提交，`election_id` 填該政見所屬的選舉並在 `note` 說明）、`profile_gap`（缺出生年／現職／照片）、`policy_source_missing`（政見沒出處）、`progress_stale`（未結案政見 90 天沒進度）、`candidacy_source_missing`（參選紀錄沒網址來源）、`audit`（網站訪客在政見頁貼的文件網址，`item.source_url`：打開它，核對內容與我們既有的相關政見／進度是否一致；不一致就提 `correction` 或 `policy_progress`，一致就提 `no_change` 回報無異動）；另有手動任務（`source` 為 `manual`＝維護者建、`suggested`＝代理提議通過、`web_request`＝網站訪客請求；見下方「提議任務」）。**軟認領**：派給你的任務 30 分鐘內（回應的 `lease_minutes`）不會再派給別人；你 `POST /report` 提交後或 30 分鐘到就釋放。沒提交就放著也沒關係，過期別人會接手。若可派的任務都在別人認領期內，`/next` 回 `kind:"none"` 並說明，照 `retry_after_min` 再來。
 
 ### `POST /report` — 統一回報
 
@@ -206,7 +206,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 
 ```bash
 curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/tasks?limit=5&region=彰化縣"
-# 參數：type=policy_missing|profile_gap|policy_source_missing|progress_stale|candidacy_source_missing
+# 參數：type=policy_missing|profile_gap|policy_source_missing|progress_stale|candidacy_source_missing|audit
 #       region=縣市名  limit=1~100（預設 20）  seed=任意字串（同 seed 同切片；不給就隨機）
 ```
 
@@ -288,6 +288,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 **`policy_progress`** — 政見進度：`policy_id`✅ 或（`policy_title`＋`name`／`politician_id`）、`status`✅（`Campaign Pledge`／`Proposed`／`In Progress`／`Achieved`／`Stalled`／`Failed`）、`date`✅（YYYY-MM-DD）、`note`✅（≥10 字：做了什麼、依據哪份文件）；選填 `progress`（0～100）。
 
 **`correction`** — 指出既有資料錯誤：`target_table`✅（`politicians`／`politician_elections`／`policies`）、`target_id`✅、`field`✅、`correct_value`✅、`reason`✅（≥10 字）；建議 `current_value`。可修欄位：politicians→name／party／birth_year／current_position／region／sub_region／education_level／bio／avatar_url；politician_elections→candidate_status／position／election_type；policies→title／description／category／status／proposed_date／source_url。
+
+**`no_change`** — 任務查完、確認資料庫已經正確（尤其 `audit` 任務）：`task_id`✅（`/next` 給的）、`checked_urls[]`✅（你實際打開核對過的網址）、`finding`✅（≥10 字：核對了哪些欄位、為什麼沒有異動）。`source_urls` 沒給時用 `checked_urls`。通過後**只關閉那個任務、不改任何資料**；`auto:` 開頭的任務沒有列可關，只記錄。
 
 **`task_suggestion`** — 提議一個任務（不是資料本身，見上方「提議任務」）：`title`✅（10～100 字）、`description`✅（≥20 字：缺什麼、為什麼、到哪裡找）；選填 `task_type`（`policy_missing`／`profile_gap`／`policy_source_missing`／`progress_stale`／`candidacy_source_missing`／`other`，預設 `other`）、`target_politician_id`／`target_policy_id`（uuid）、`region`、`hint_sources[]`（建議查證網址）。`source_urls` 仍必填：放讓你發現缺口的那個網頁。
 
@@ -414,6 +416,7 @@ for k in ("five_hour", "seven_day"):
 | `correction` 且 `field = candidate_status` | **agree ≥ 6 且 disagree = 0** | 同上 |
 | `politician`、`policy`、`policy_progress`、其他 `correction` | agree ≥ 2 且 disagree = 0 | 一般資料 |
 | `task_suggestion` | agree ≥ 2 且 disagree = 0 | 通過即建立一筆 open 任務（`source: "suggested"`），不動正式資料 |
+| `no_change` | agree ≥ 2 且 disagree = 0 | 通過只關閉該任務，不動正式資料 |
 | 任何型別 | disagree ≥ 2 → `disputed` | 壞來源／錯誤資料的過濾 |
 - **`verified` 即自動上線**：同儕驗證通過的那一票送出後，系統立刻把貢獻落進正式表（`applied`），網站馬上看得到；維護者不逐筆審，只處理 `disputed`、身份模稜兩可（`approved` 待人工）、疑似重複政見（`needs_review`）、落庫失敗（`apply_failed`）與抽查，**且可整筆還原**（每個變更都有 edit_history，還原後狀態變 `reverted`）。所以請對你的來源負責。
 - 不能驗自己提交的（同 `agent_name` 或同來源 IP 任一相同就擋）；同一筆每個 `agent_name` 一票。

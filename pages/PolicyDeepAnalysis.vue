@@ -13,11 +13,42 @@ import {
   Activity
 } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 
 const route = useRoute()
 const router = useRouter()
 const { policies, politicians } = useSupabase()
+
+// 「執行稽核」：把訪客貼的文件網址丟進貢獻任務池（request-task kind=audit），AI 代理來核對與既有政見／進度的落差
 const sourceUrl = ref('')
+const auditing = ref(false)
+const auditResult = ref<RequestTaskResult | null>(null)
+const auditError = ref<string | null>(null)
+const canAudit = computed(() => sourceUrl.value.trim().length > 0 && !auditing.value)
+
+async function submitAudit() {
+  const url = sourceUrl.value.trim()
+  if (!url || auditing.value) return
+  auditError.value = null
+  auditResult.value = null
+  if (!isAuditUrl(url)) {
+    auditError.value = '請貼完整的網址（要以 http:// 或 https:// 開頭）'
+    return
+  }
+  auditing.value = true
+  try {
+    auditResult.value = await requestTask({
+      kind: 'audit',
+      source_url: url,
+      policy_id: selectedPolicy.value?.id,
+      politician_id: politician.value?.id,
+    })
+  } catch (err: unknown) {
+    auditError.value = err instanceof Error ? err.message : '送出失敗，請稍後再試'
+  } finally {
+    auditing.value = false
+  }
+}
 
 const policyId = computed(() => route.params.policyId)
 const selectedPolicy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
@@ -132,21 +163,30 @@ usePageHead({
       </template>
 
 
-      <div class="flex flex-col md:flex-row gap-2">
+      <!-- novalidate：用自己的檢查與文案，不讓瀏覽器原生的 type=url 泡泡擋掉 submit -->
+      <form class="flex flex-col md:flex-row gap-2" novalidate @submit.prevent="submitAudit">
         <div class="flex-1 relative text-left">
           <LinkIcon class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
           <input
             v-model="sourceUrl"
-            type="text"
-            placeholder="貼上相關文件網址，由 AI 執行數據稽核..."
-            class="w-full border-none rounded-xl py-3 pl-12 pr-4 text-navy-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+            type="url"
+            inputmode="url"
+            placeholder="貼上相關文件網址，請 AI 核對與這條政見的落差..."
+            :class="['w-full border-none rounded-xl py-3 pl-12 pr-4 text-navy-900 placeholder:text-slate-400 focus:ring-2 transition-all text-sm', auditError ? 'ring-2 ring-red-400 focus:ring-red-400' : 'focus:ring-blue-500']"
+            data-testid="audit-url"
+            @input="auditError = null"
           />
         </div>
-        <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 group whitespace-nowrap">
-          <Bot :size="20" class="group-hover:rotate-12 transition-transform" />
-          執行稽核
+        <button type="submit" :disabled="!canAudit" class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-500 disabled:cursor-not-allowed text-white font-bold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 group whitespace-nowrap" data-testid="audit-submit">
+          <Bot :size="20" :class="auditing ? 'animate-pulse' : 'group-hover:rotate-12 transition-transform'" />
+          {{ auditing ? '送出中…' : '執行稽核' }}
         </button>
-      </div>
+      </form>
+      <p v-if="auditError" class="mt-2 text-sm text-red-200 text-left" data-testid="audit-error">{{ auditError }}</p>
+      <p v-else-if="auditResult" class="mt-2 text-sm text-emerald-200 text-left" data-testid="audit-done">
+        {{ requestTaskMessage(auditResult) }}
+        <RouterLink :to="BOARD_PATH" class="ml-1 font-bold underline underline-offset-2 text-white">到貢獻看板看進度</RouterLink>
+      </p>
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-20">

@@ -1,20 +1,35 @@
 /**
  * 網站「請 AI 幫忙查」（request-task）的規則：純函式部分可測。
  * kind → task_type／標題／說明；同目標已有 open 任務或對應自動缺口 → already_queued；每 IP 每日 10 次。
+ * kind=audit（政見深度分析頁貼文件網址）：同一網址＋同一目標 24 小時內只建一筆。
  */
 
 export const REQUEST_DAILY_LIMIT_PER_IP = 10;
-export const REQUEST_KINDS = ["policy", "profile", "progress"] as const;
+export const REQUEST_KINDS = ["policy", "profile", "progress", "audit"] as const;
 export type RequestKind = (typeof REQUEST_KINDS)[number];
+export const AUDIT_URL_MAX = 500;
+export const AUDIT_NOTE_MAX = 500;
 
 export const KIND_TO_TASK_TYPE: Record<RequestKind, string> = {
   policy: "policy_missing",
   profile: "profile_gap",
   progress: "progress_stale",
+  audit: "audit",
 };
 
 export function isRequestKind(v: unknown): v is RequestKind {
   return typeof v === "string" && (REQUEST_KINDS as readonly string[]).includes(v);
+}
+
+/** 訪客貼的文件網址：只收 http(s)、可被 URL 解析、長度上限 */
+export function isAuditUrl(v: unknown): v is string {
+  if (typeof v !== "string" || v.length > AUDIT_URL_MAX) return false;
+  try {
+    const u = new URL(v.trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export interface RequestTarget {
@@ -24,6 +39,8 @@ export interface RequestTarget {
   politician_name?: string | null;
   region?: string | null;
   policy_title?: string | null;
+  source_url?: string | null;
+  note?: string | null;
 }
 
 /** 組給代理看的標題與說明（人話） */
@@ -48,6 +65,18 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
         description: `有人在網站上按了「請 AI 追進度」。請查${who}政見「${t.policy_title ?? ""}」的最新執行狀況（施政報告、議會／立法院紀錄、新聞），用 policy_progress 型別回報，附日期與出處。`,
         hint_sources: ["縣市政府施政報告（*.gov.tw）", "ly.gov.tw 議事錄", "議會官網", "cna.com.tw"],
       };
+    case "audit": {
+      const url = t.source_url ?? "";
+      const context = t.policy_title
+        ? `，頁面情境是${who}的政見「${t.policy_title}」`
+        : t.politician_name ? `，頁面情境是${who}` : "";
+      const note = t.note ? `訪客備註：${t.note}。` : "";
+      return {
+        title: `核對這份文件與相關政見的落差（網站訪客請求）`,
+        description: `有人在政見深度分析頁貼了文件網址 ${url}${context}。${note}請打開這份文件，核對其內容與我們資料庫既有的相關政見／進度是否一致；不一致就提 correction 或 policy_progress，一致就用 no_change 回報無異動。`,
+        hint_sources: url ? [url] : [],
+      };
+    }
   }
 }
 
@@ -55,17 +84,20 @@ export interface RequestDecisionInput {
   usedToday: number;
   existingOpenTask: { id: string } | null;
   autoGapTaskId: string | null;
+  /** kind=audit：24 小時內同網址＋同目標已建過的任務 */
+  duplicateAuditTask?: { id: string } | null;
 }
 
 export type RequestDecision =
   | { action: "rate_limited" }
-  | { action: "already_queued"; task_id: string; reason: "open_task" | "auto_gap" }
+  | { action: "already_queued"; task_id: string; reason: "open_task" | "auto_gap" | "duplicate_url" }
   | { action: "create" };
 
-/** 純函式：限額 → 已有 open 手動任務 → 已有對應自動缺口 → 建立 */
+/** 純函式：限額 → 已有 open 手動任務 → 已有對應自動缺口 → 同網址重複 → 建立 */
 export function decideRequest(input: RequestDecisionInput): RequestDecision {
   if (input.usedToday >= REQUEST_DAILY_LIMIT_PER_IP) return { action: "rate_limited" };
   if (input.existingOpenTask) return { action: "already_queued", task_id: input.existingOpenTask.id, reason: "open_task" };
   if (input.autoGapTaskId) return { action: "already_queued", task_id: input.autoGapTaskId, reason: "auto_gap" };
+  if (input.duplicateAuditTask) return { action: "already_queued", task_id: input.duplicateAuditTask.id, reason: "duplicate_url" };
   return { action: "create" };
 }

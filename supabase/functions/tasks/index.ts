@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
+import { describeManualTask } from "../_shared/task-admin.ts";
 
 /**
  * tasks — 領任務（四主端點之一）。無金鑰。
@@ -63,7 +64,7 @@ Deno.serve(async (req) => {
       target: t.target,
       title: t.title,
       description: t.description,
-      what_we_need: t.description ? `${t.title}：${t.description}` : t.title,
+      ...describeManualTask(t),
       hint_sources: t.hint_sources ?? [],
       reward: t.reward,
       priority: t.priority,
