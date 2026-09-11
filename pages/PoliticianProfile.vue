@@ -14,11 +14,8 @@ import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, Us
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
 import AiLookupInline from '../components/AiLookupInline.vue'
-// 動作列的「請 AI 補齊這個人的資料」：捲到側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡）
+// 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
-function scrollToAiLookup(): void {
-  document.getElementById(AI_LOOKUP_SECTION_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -42,6 +39,23 @@ async function requestLookup(key: LookupKey) {
     lookup[key] = { loading: false, result, error: null }
   } catch (err: unknown) {
     lookup[key] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
+  }
+}
+
+// 動作列的「查政見」「查簡介」：按下就地顯示狀態，不換頁、不捲動
+type HeroLookupKey = 'policy' | 'profile'
+const HERO_LOOKUP_KIND: Record<HeroLookupKey, RequestKind> = { policy: 'policy', profile: 'profile' }
+const heroLookup = reactive<Record<HeroLookupKey, LookupState>>({ policy: idle(), profile: idle() })
+
+async function requestHeroLookup(key: HeroLookupKey) {
+  const pol = politician.value
+  if (!pol || heroLookup[key].loading) return
+  heroLookup[key] = { loading: true, result: null, error: null }
+  try {
+    const result = await requestTask({ kind: HERO_LOOKUP_KIND[key], politician_id: pol.id })
+    heroLookup[key] = { loading: false, result, error: null }
+  } catch (err: unknown) {
+    heroLookup[key] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
   }
 }
 
@@ -208,7 +222,20 @@ usePageHead({
           <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <HeroAction @click="scrollToAiLookup"><Sparkles :size="16" /> 請 AI 補齊這個人的資料</HeroAction>
+          <HeroAction data-testid="hero-query-policy" @click="requestHeroLookup('policy')">
+            <Loader2 v-if="heroLookup.policy.loading" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="heroLookup.policy.result" :size="16" />
+            <XCircle v-else-if="heroLookup.policy.error" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ heroLookup.policy.loading ? '處理中…' : heroLookup.policy.result ? (heroLookup.policy.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : heroLookup.policy.error ? '查政見（重試）' : '查政見' }}
+          </HeroAction>
+          <HeroAction data-testid="hero-query-profile" @click="requestHeroLookup('profile')">
+            <Loader2 v-if="heroLookup.profile.loading" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="heroLookup.profile.result" :size="16" />
+            <XCircle v-else-if="heroLookup.profile.error" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ heroLookup.profile.loading ? '處理中…' : heroLookup.profile.result ? (heroLookup.profile.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : heroLookup.profile.error ? '查簡介（重試）' : '查簡介' }}
+          </HeroAction>
         </div>
       </template>
     </Hero>
