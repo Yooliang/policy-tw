@@ -39,6 +39,10 @@ export interface TaskContextData {
   policy?: Obj | null;
   tracking_logs?: Obj[];
   politician_election?: Obj | null;
+  /** adjudicate：被裁決的貢獻、它的所有票、未定案的裁決數 */
+  contribution?: Obj | null;
+  votes?: Obj[];
+  pending_adjudications?: number;
 }
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
@@ -79,6 +83,17 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
     }
     case "candidacy_source_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    case "adjudicate": {
+      const c = data.contribution ?? null;
+      return {
+        contribution: c
+          ? { ...pick(c, ["id", "contribution_type", "status", "agent_name", "agent_tool", "source_urls", "note", "agree_count", "disagree_count", "unsure_count", "review_notes", "last_error", "created_at"]), payload: c.payload ?? null }
+          : null,
+        votes: (data.votes ?? []).map((v) => pick(v, ["verdict", "evidence_url", "note", "agent_name", "resolved_politician_id", "created_at"])),
+        pending_adjudications: data.pending_adjudications ?? 0,
+        hint: "正方＝contribution.source_urls，反方＝votes 裡 disagree 的 evidence_url／note；都打開、獨立判斷。uphold＝原貢獻正確、reject＝原貢獻有誤；payload 帶 contribution_id、verdict、reason（≥20 字）、checked_urls；身份爭議多帶 resolved_politician_id。你的裁決會再被 4 票驗證才定案。",
+      };
+    }
     default:
       return { politician: pick(p, POLITICIAN_BRIEF) };
   }
@@ -132,6 +147,17 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
     data.politician_election = pe ?? null;
+  }
+  if (taskType === "adjudicate" && typeof target.contribution_id === "string") {
+    const cid = target.contribution_id;
+    const [c, votes, adj] = await Promise.all([
+      supabase.from("contributions").select("*").eq("id", cid).maybeSingle(),
+      supabase.from("contribution_votes").select("verdict, evidence_url, note, agent_name, resolved_politician_id, created_at").eq("contribution_id", cid).order("created_at", { ascending: true }),
+      supabase.from("contributions").select("id", { count: "exact", head: true }).eq("contribution_type", "adjudication").eq("payload->>contribution_id", cid).in("status", ["pending", "verified"]),
+    ]);
+    data.contribution = c.data ?? null;
+    data.votes = votes.data ?? [];
+    data.pending_adjudications = adj.count ?? 0;
   }
   return data;
 }

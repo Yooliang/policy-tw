@@ -8,6 +8,7 @@ import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-
 import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
+import { ensureAdjudicationTask } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -34,16 +35,24 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, contribution_type, payload, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count")
+    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
   if (!contribution) return { status: 404, body: { success: false, error: "not_found", message: "沒有這筆貢獻" } };
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
-    return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，維護者已處理，不再收驗證` } };
+    return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
   }
   if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash })) {
     return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同 agent_name 或同一來源 IP）提交的貢獻，請跳過這筆" } };
+  }
+  // 裁決的驗證：原貢獻的提交者也不能投（利益相關）
+  if (contribution.contribution_type === "adjudication") {
+    const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
+    const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash").eq("id", originalId).maybeSingle() : { data: null };
+    if (original && isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash })) {
+      return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
+    }
   }
 
   const { data: existing, error: eError } = await supabase
@@ -76,9 +85,14 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     .from("contributions").select("status, agree_count, disagree_count, unsure_count").eq("id", contribution.id).maybeSingle();
   if (aError) throw new Error(`contributions reread: ${aError.message}`);
 
-  // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機／維護者處理）
+  // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機重試）
   const autoApply = shouldAutoApply(after?.status) ? await autoApplyContribution(supabase, contribution.id, applyFn) : { triggered: false };
   const finalStatus = autoApply.triggered && autoApply.status ? autoApply.status : (after?.status ?? contribution.status);
+  // 這一票把它變成 disputed → 自動建裁決任務（零人工點）；建不成只記 log
+  let adjudicationTaskId: string | null = null;
+  if (after?.status === "disputed" && contribution.status !== "disputed") {
+    try { adjudicationTaskId = (await ensureAdjudicationTask(supabase, contribution.id, "兩票反對")).task_id; } catch (e) { console.error("ensureAdjudicationTask:", e instanceof Error ? e.message : String(e)); }
+  }
 
   return {
     status: 201,
@@ -91,8 +105,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,
       status: finalStatus,
-      required_agree: requiredAgree(contribution.contribution_type, contribution.payload),
+      required_agree: requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []),
       ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
+      ...(adjudicationTaskId ? { adjudication_task_id: adjudicationTaskId, note: "兩票反對 → 已建裁決任務，會派給其他代理用更多票決定" } : {}),
       ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),
     },
   };

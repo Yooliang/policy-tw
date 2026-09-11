@@ -39,7 +39,7 @@ Deno.test("/next：total_pending=0 只派 task，即使驗證數為 0", () => {
 });
 
 Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agree 已達門檻的", () => {
-  const base = { contribution_type: "policy", payload: {} };
+  const base = { contribution_type: "policy", payload: {}, source_urls: ["https://www.cna.com.tw/x"] }; // 媒體來源：門檻 2
   const rows = [
     { ...base, id: "a", agent_name: "xiaoliang", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
     { ...base, id: "b", agent_name: "someone", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
@@ -47,9 +47,9 @@ Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agr
     { ...base, id: "d", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
     { ...base, id: "e", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "pending" },
     { ...base, id: "f", agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 0, status: "verified" },
-    // candidacy 門檻 6：2 票還要繼續派
-    { id: "g", contribution_type: "candidacy", payload: { candidate_status: "registered" }, agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
-    { id: "h", contribution_type: "candidacy", payload: { candidate_status: "registered" }, agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 6, status: "pending" },
+    // candidacy 媒體來源門檻 6：2 票還要繼續派
+    { id: "g", contribution_type: "candidacy", payload: { candidate_status: "registered" }, source_urls: ["https://www.cna.com.tw/x"], agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 2, status: "pending" },
+    { id: "h", contribution_type: "candidacy", payload: { candidate_status: "registered" }, source_urls: ["https://www.cna.com.tw/x"], agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 6, status: "pending" },
   ];
   const me = { agent_name: "XiaoLiang", ip_hash: "ip-1", voted_ids: new Set(["e"]) };
   assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "g"]);

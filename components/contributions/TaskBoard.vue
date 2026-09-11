@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle, Inbox, KeyRound, Plus, X, CheckCircle2, ExternalLink } from 'lucide-vue-next'
 
 /**
@@ -31,18 +31,24 @@ const KEY_STORAGE = 'policytw.maintainer_key'
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   policy_missing: '缺政見', profile_gap: '缺人物資料', policy_source_missing: '政見缺出處',
-  progress_stale: '進度停滯', candidacy_source_missing: '參選缺出處', other: '其他',
+  progress_stale: '進度停滯', candidacy_source_missing: '參選缺出處', audit: '文件核對', adjudicate: '裁決', other: '其他',
 }
-const SOURCE_LABEL: Record<string, string> = { manual: '維護者', suggested: 'AI 提議', web_request: '網站請求' }
+const SOURCE_LABEL: Record<string, string> = { manual: '維護者', suggested: 'AI 提議', web_request: '網站請求', auto_dispute: '系統（爭議）' }
 const SOURCE_CLASS: Record<string, string> = {
-  manual: 'bg-navy-900 text-white', suggested: 'bg-violet-100 text-violet-800', web_request: 'bg-sky-100 text-sky-800',
+  manual: 'bg-navy-900 text-white', suggested: 'bg-violet-100 text-violet-800', web_request: 'bg-sky-100 text-sky-800', auto_dispute: 'bg-orange-100 text-orange-800',
 }
+
+const props = defineProps<{ typeFilter?: string }>()
+const emit = defineEmits<{ (e: 'update:typeFilter', value: string): void }>()
 
 const tasks = ref<BoardTask[]>([])
 const totals = ref<Record<string, number>>({})
 const loading = ref(false)
 const error = ref<string | null>(null)
 const showClosed = ref(false)
+const typeSel = ref(props.typeFilter ?? '')
+watch(() => props.typeFilter, (v) => { typeSel.value = v ?? '' })
+watch(typeSel, (v) => emit('update:typeFilter', v))
 
 function headers(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -69,6 +75,11 @@ async function load() {
 
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
 const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'))
+const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
+function contributionIdOf(t: BoardTask): string | null {
+  const v = t.target?.contribution_id
+  return typeof v === 'string' ? v : null
+}
 const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
 
 function targetLink(t: BoardTask): { href: string; label: string } | null {
@@ -191,7 +202,11 @@ defineExpose({ load })
     <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
         <h3 class="font-black text-navy-900">手動任務 <span class="text-sm font-bold text-slate-400">open {{ openTasks.length }}・closed {{ closedTasks.length }}</span></h3>
-        <label class="text-xs text-slate-500 inline-flex items-center gap-1.5 ml-auto"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
+        <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">
+          <option value="">全部類型</option>
+          <option v-for="(label, k) in TASK_TYPE_LABEL" :key="k" :value="k">{{ label }}</option>
+        </select>
+        <label class="text-xs text-slate-500 inline-flex items-center gap-1.5"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
         <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1 bg-navy-900 text-white" data-testid="task-admin-toggle" @click="adminOpen = !adminOpen">
           <component :is="adminOpen ? X : Plus" :size="14" /> {{ adminOpen ? '收起' : '新增任務' }}
         </button>
@@ -234,13 +249,13 @@ defineExpose({ load })
         <p class="text-sm text-slate-500 mt-1">{{ error }}</p>
         <button type="button" class="mt-4 px-4 py-2 rounded-lg bg-navy-900 text-white text-sm font-bold" @click="load">再試一次</button>
       </div>
-      <div v-else-if="openTasks.length === 0 && (!showClosed || closedTasks.length === 0)" class="p-10 text-center text-slate-500" data-testid="task-empty">
+      <div v-else-if="visibleTasks.length === 0" class="p-10 text-center text-slate-500" data-testid="task-empty">
         <Inbox :size="32" class="mx-auto mb-2 text-slate-300" />
-        <p class="font-bold">目前沒有手動任務</p>
+        <p class="font-bold">{{ typeSel ? `目前沒有「${TASK_TYPE_LABEL[typeSel] ?? typeSel}」任務` : '目前沒有手動任務' }}</p>
         <p class="text-sm mt-1">自動缺口仍會派給 AI 代理；有特別想補的，維護者可在上方新增。</p>
       </div>
       <ul v-else class="divide-y divide-slate-100" data-testid="task-list">
-        <li v-for="t in (showClosed ? tasks : openTasks)" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source">
+        <li v-for="t in visibleTasks" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source" :data-type="t.task_type">
           <div class="flex flex-wrap items-center gap-2 mb-1.5">
             <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', SOURCE_CLASS[t.source] ?? 'bg-slate-100 text-slate-600']">{{ SOURCE_LABEL[t.source] ?? t.source }}</span>
             <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TASK_TYPE_LABEL[t.task_type] ?? t.task_type }}</span>
@@ -254,6 +269,7 @@ defineExpose({ load })
             <span v-if="t.suggested_by">提議者 {{ t.suggested_by }}</span>
             <span v-else-if="t.created_by && t.source === 'manual'">建立者 {{ t.created_by }}</span>
             <span>優先序 {{ t.priority }}</span>
+            <span v-if="contributionIdOf(t)" class="font-mono text-slate-400">貢獻 {{ contributionIdOf(t)!.slice(0, 8) }}</span>
             <a v-if="targetLink(t)" :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 font-bold">{{ targetLink(t)!.label }}</a>
             <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ u }}</a>
             <button v-if="t.status === 'open'" type="button" class="ml-auto text-xs font-bold text-red-700 underline underline-offset-2" :disabled="closingId === t.task_id" data-testid="task-close" @click="closeTask(t)">

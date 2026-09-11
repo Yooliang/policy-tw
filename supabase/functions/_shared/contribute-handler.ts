@@ -97,7 +97,7 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     const hash = hashes[i];
     const dup = existingByHash.get(hash);
     const id = dup ? dup.id : insertedByHash.get(hash)!;
-    const need = requiredAgree(item.contribution_type, item.payload);
+    const need = requiredAgree(item.contribution_type, item.payload, item.source_urls);
     return {
       index: i,
       contribution_type: item.contribution_type,

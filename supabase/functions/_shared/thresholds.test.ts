@@ -1,0 +1,70 @@
+// 門檻 = 型別風險 × 來源等級；SQL（migration 000009）與 TS（consensus.ts／source-priority.ts）必須一致
+import { assert, assertEquals } from "jsr:@std/assert@1";
+import { AGREE_THRESHOLDS, consensusStatus, requiredAgree, riskLevel, tally } from "./consensus.ts";
+import { SOURCE_PRIORITY } from "./source-priority.ts";
+
+const OFFICIAL = "https://db.cec.gov.tw/ElecTable/Election/ElecTickets";
+const MEDIA = "https://www.cna.com.tw/news/aipl/202609045002.aspx";
+const SOCIAL = "https://www.facebook.com/candidate/posts/123";
+const OTHER = "https://candidate-2026.tw/policy";
+
+Deno.test("來源等級門檻：一般資料 官方 1／媒體 2／社群 3／其他 3", () => {
+  assertEquals(requiredAgree("policy", {}, [OFFICIAL]), 1);
+  assertEquals(requiredAgree("policy", {}, [MEDIA]), 2);
+  assertEquals(requiredAgree("policy", {}, [SOCIAL]), 3);
+  assertEquals(requiredAgree("policy", {}, [OTHER]), 3);
+  assertEquals(requiredAgree("policy", {}), 3, "沒給來源視為 other");
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }]), "pending", requiredAgree("policy", {}, [OFFICIAL])), "verified", "官方來源 1 票即上線");
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "pending", requiredAgree("policy", {}, [SOCIAL])), "pending", "社群來源 2 票不夠");
+});
+
+Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與其他 8；correction 改 candidate_status 同級", () => {
+  assertEquals(requiredAgree("candidacy", { candidate_status: "registered" }, [OFFICIAL]), 4);
+  assertEquals(requiredAgree("candidacy", { candidate_status: "registered" }, [MEDIA]), 6);
+  assertEquals(requiredAgree("candidacy", { candidate_status: "withdrawn" }, [SOCIAL]), 8);
+  assertEquals(requiredAgree("candidacy", {}, [OTHER]), 8);
+  assertEquals(requiredAgree("correction", { field: "candidate_status" }, [MEDIA]), 6);
+  assertEquals(requiredAgree("correction", { field: "birth_year" }, [MEDIA]), 2, "一般欄位是一般資料");
+  const need = requiredAgree("candidacy", {}, [MEDIA]);
+  assertEquals(consensusStatus(tally(Array.from({ length: 6 }, () => ({ verdict: "agree" as const }))), "pending", need), "verified");
+  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "pending", "有 disagree 就不算");
+});
+
+Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 4；多來源取最高等級", () => {
+  assertEquals(requiredAgree("task_suggestion", {}, [OFFICIAL]), 1);
+  assertEquals(requiredAgree("task_suggestion", {}, [SOCIAL]), 2);
+  assertEquals(requiredAgree("no_change", {}, [OTHER]), 2);
+  assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 4);
+  assertEquals(requiredAgree("adjudication", {}, [OTHER]), 4);
+  assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
+  assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 1, "有一個官方就算官方");
+  assertEquals(riskLevel("policy_progress", {}), "normal");
+  assertEquals(riskLevel("candidacy", {}), "high");
+});
+
+Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣等於 source-priority.ts 與 AGREE_THRESHOLDS", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20260912000009_zero_manual_points.sql", import.meta.url));
+  const fn = sql.slice(sql.indexOf("FUNCTION contribution_source_kind"), sql.indexOf("FUNCTION contribution_required_agree"));
+  const arrays = [...fn.matchAll(/ARRAY\[([^\]]+)\]/g)].map((m) => m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, "")));
+  assertEquals(arrays.length, 3, "official／media／social 三組清單");
+  const byKind = (kind: string) => SOURCE_PRIORITY.filter((s) => s.kind === kind).map((s) => s.host);
+  assertEquals(arrays[0], byKind("official"));
+  assertEquals(arrays[1], byKind("media"));
+  assertEquals(arrays[2], byKind("social"));
+
+  const matrix = sql.slice(sql.indexOf("FUNCTION contribution_required_agree"), sql.indexOf("FUNCTION contribution_apply_consensus"));
+  const rowRe = /WHEN v_risk = '(\w+)' THEN CASE v_kind WHEN 'official' THEN (\d+) WHEN 'media' THEN (\d+) WHEN 'social' THEN (\d+) ELSE (\d+) END/g;
+  const rows = Object.fromEntries([...matrix.matchAll(rowRe)].map((m) => [m[1], { official: +m[2], media: +m[3], social: +m[4], other: +m[5] }]));
+  assertEquals(rows.normal, AGREE_THRESHOLDS.normal);
+  assertEquals(rows.high, AGREE_THRESHOLDS.high);
+  assertEquals(rows.light, AGREE_THRESHOLDS.light);
+  const adj = matrix.match(/\n\s+ELSE (\d+)\n\s+END;/);
+  assert(adj, "adjudication 走最後的 ELSE");
+  assertEquals(+adj![1], AGREE_THRESHOLDS.adjudication.other);
+  assert(new Set(Object.values(AGREE_THRESHOLDS.adjudication)).size === 1, "裁決不看來源");
+  // 風險分級的判斷式也要對得上
+  assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
+  assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND p_payload->>'field' = 'candidate_status') THEN 'high'"));
+  assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change') THEN 'light'"));
+  assert(sql.includes("contribution_required_agree(contribution_type, payload, source_urls)"), "共識函式改用三參數");
+});

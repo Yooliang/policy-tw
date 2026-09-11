@@ -4,21 +4,41 @@
  * skill.md 也寫出同樣的數字（skill.md 是唯一協議文件，沒有 skill.json）。
  */
 
+import { bestSourceKind, type SourceKind } from "./source-priority.ts";
+
 export const VOTE_WEIGHT = 1;
-/** 一般型別：agree ≥ 2 且 disagree = 0 → verified */
+/** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
 export const VERIFIED_MIN_AGREE = 2;
-/** 高風險（加減參選人）：candidacy 任何狀態、correction 改 candidate_status → agree ≥ 6 */
-export const HIGH_RISK_MIN_AGREE = 6;
 export const VERIFIED_MAX_DISAGREE = 0;
 
-/** 依型別／欄位決定需要幾票同意（鏡射 SQL contribution_required_agree） */
-export function requiredAgree(contributionType: string, payload: unknown): number {
-  if (contributionType === "candidacy") return HIGH_RISK_MIN_AGREE;
+/** 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；adjudication＝裁決 */
+export type RiskLevel = "normal" | "high" | "light" | "adjudication";
+
+/**
+ * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
+ * 官方來源通過得更快，非官方要更多人看過；多個來源取最高等級。
+ */
+export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
+  normal: { official: 1, media: 2, social: 3, other: 3 },
+  high: { official: 4, media: 6, social: 8, other: 8 },
+  light: { official: 1, media: 2, social: 2, other: 2 },
+  adjudication: { official: 4, media: 4, social: 4, other: 4 },
+};
+
+export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
+  if (contributionType === "adjudication") return "adjudication";
+  if (contributionType === "candidacy") return "high";
   if (contributionType === "correction") {
     const field = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>).field : undefined;
-    if (field === "candidate_status") return HIGH_RISK_MIN_AGREE;
+    if (field === "candidate_status") return "high";
   }
-  return VERIFIED_MIN_AGREE;
+  if (contributionType === "task_suggestion" || contributionType === "no_change") return "light";
+  return "normal";
+}
+
+/** 依型別／欄位／來源等級決定需要幾票同意；source_urls 沒給視為 other */
+export function requiredAgree(contributionType: string, payload: unknown, sourceUrls: readonly string[] = []): number {
+  return AGREE_THRESHOLDS[riskLevel(contributionType, payload)][bestSourceKind(sourceUrls)];
 }
 /** disagree ≥ 2 → disputed */
 export const DISPUTED_MIN_DISAGREE = 2;
