@@ -209,12 +209,13 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         politician: pick(data.politicians?.[0] ?? null, POLITICIAN_BRIEF),
         existing_policy_titles: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"])),
         similar_policies: (data.similar_policies ?? []).map((s) => ({ id: s.id, title: s.title, similarity: Math.round(s.similarity * 100) / 100 })),
-        hint: "similar_policies 是系統算出的相似既有政見（相似度 0～1）；若 payload 與其中一條實質重複（同一承諾換句話說），投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、內容不同就照來源核對",
+        hint: "similar_policies 是系統算出的相似既有政見（相似度 0～1）；若 payload 與其中一條實質重複（同一承諾換句話說），投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、內容不同就照來源核對。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
       };
     case "policy_progress":
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "status", "progress", "last_updated", "source_url", "description"])!, ["description"]) : null,
         recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
+        hint: "先確認來源證明的是這個人、年份與職權都對得上：施政成果要能歸屬到該政見主體本人任內、其職權範圍內，別人或前任做的同主題事情不算，對不上就投 disagree",
       };
     case "correction": {
       // 多欄位：每個 change 都附資料庫現值；第一個欄位另放在 field／current_value 維持相容

@@ -5,12 +5,13 @@ import { fetchHistory, formatTime, type HistoryEntry, type HistoryOrigin, type H
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 
 /**
- * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設收合、標題帶筆數；展開列時間軸，每筆再展開看驗證者與改動。
+ * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設展開、標題帶筆數；時間軸每筆可個別收合看驗證者與改動。
  * 沒有貢獻紀錄時顯示資料來源說明（匯入的 source_url／source_note），不留空白。
  */
 const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean }>(), { title: '查核履歷', compact: false })
+const emit = defineEmits<{ loaded: [payload: { total: number; appliedCount: number }] }>()
 
-const open = ref(false)
+const open = ref(true)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const entries = ref<HistoryEntry[]>([])
@@ -19,6 +20,7 @@ const total = ref<number | null>(null)
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
 const expanded = ref<Set<string>>(new Set())
+const appliedCount = computed(() => entries.value.filter(e => e.status === 'applied').length)
 
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800', verified: 'bg-sky-100 text-sky-800', applied: 'bg-emerald-100 text-emerald-800',
@@ -35,6 +37,7 @@ async function load(cursor: string | null = null) {
     total.value = body.total
     hasMore.value = body.has_more
     nextCursor.value = body.next_cursor
+    emit('loaded', { total: total.value ?? 0, appliedCount: appliedCount.value })
   } catch (e) {
     error.value = e instanceof Error ? e.message : '暫時讀不到履歷'
   } finally {

@@ -69,6 +69,16 @@ const policyChain = computed(() => {
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
 
+// 查核履歷徽章：有 status=applied 的紀錄才顯示，點擊平滑捲到履歷區塊
+const appliedHistoryCount = ref(0)
+const historySectionEl = ref<HTMLElement | null>(null)
+function onHistoryLoaded(payload: { total: number; appliedCount: number }) {
+  appliedHistoryCount.value = payload.appliedCount
+}
+function scrollToHistory() {
+  historySectionEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 // Policy sources state
 const sources = ref<RawPolicySource[]>([])
 const showAllSources = ref(false)
@@ -79,6 +89,7 @@ const displayedSources = computed(() =>
 // Fetch policy sources
 watch(policyId, async (id) => {
   if (!id) return
+  appliedHistoryCount.value = 0
   const { data } = await supabase
     .from('policy_sources')
     .select('*')
@@ -120,6 +131,15 @@ usePageHead({
               <StatusBadge :status="policy.status" />
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><Tag :size="14" /> {{ policy.category }}</span>
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
+              <button
+                v-if="appliedHistoryCount > 0"
+                type="button"
+                class="bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/30 px-3 py-1 rounded-full text-sm font-bold backdrop-blur-sm flex items-center gap-1 transition-colors"
+                data-testid="history-badge"
+                @click="scrollToHistory"
+              >
+                <CheckCircle2 :size="14" /> 已查核 · {{ appliedHistoryCount }} 筆
+              </button>
             </div>
             <h1 class="text-3xl md:text-4xl font-black text-white leading-tight mb-3">{{ policy.title }}</h1>
             <div class="flex flex-wrap items-center gap-4 text-sm text-slate-300">
@@ -344,7 +364,9 @@ usePageHead({
           </div>
 
           <!-- 查核履歷：誰交的、誰驗的、改了什麼 -->
-          <HistoryPanel target="policy" :id="policy.id" />
+          <div ref="historySectionEl">
+            <HistoryPanel target="policy" :id="policy.id" @loaded="onHistoryLoaded" />
+          </div>
         </div>
 
         <!-- Sidebar -->
