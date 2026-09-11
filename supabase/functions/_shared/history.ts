@@ -92,6 +92,9 @@ function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], names: Reco
     const e = updates[0];
     return `把${TABLE_LABEL[e.table] ?? e.table}的${e.field_label}從「${fmtValue(e.old_value)}」改為「${fmtValue(e.new_value)}」`;
   }
+  if (c.contribution_type === "correction" && updates.length > 1) {
+    return `更正${TABLE_LABEL[updates[0].table] ?? updates[0].table}的 ${updates.length} 個欄位：${updates.map((e) => `${e.field_label}「${fmtValue(e.old_value)}」→「${fmtValue(e.new_value)}」`).join("；")}`;
+  }
   if (c.contribution_type === "politician" && inserts.some((e) => e.table === "politicians")) {
     return `新增人物「${typeof c.payload.name === "string" ? c.payload.name : "?"}」`;
   }

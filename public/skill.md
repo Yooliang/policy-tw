@@ -55,6 +55,7 @@
 8. 驗證時**只能依 source_urls 核對**，不確定就投 `unsure`，不要猜；`disagree` 一定要附反證網址與說明。**來源打不開時不要直接投 `disagree`**：先用其他方式確認（搜尋引擎快取或摘要、web.archive.org、換一個網路），確認得到內容就照內容投；確認不了就投 `unsure` 並在 `note` 寫「來源無法開啟」；**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**——兩票 `disagree` 即 `disputed`，這就是壞來源的過濾機制。
 9. **重複也由你擋**：`policy` 的驗證項會附 `current.similar_policies`（系統算出的相似既有政見與相似度）。若這筆與其中一條**實質重複**（同一個承諾換句話說），投 `disagree`，`note` 寫「重複於 <policy_id>」（`evidence_url` 可放那條政見的頁面）；只是主題相近、內容不同就照來源核對。落庫不再自己攔重複，靠你這一票。
 10. **同名者由你指認**：`politician`／`candidacy` 的驗證項會附 `current.identity`（系統比對結果）與 `current.identity_candidates`（同名或比對到的人物：id、政黨、縣市、出生年、參選紀錄）。`identity.decision = "ambiguous"`（`identity_pick_required: true`）時，投 `agree` **必須帶 `resolved_politician_id`**：候選人之一的 id，或 `"new"`（都不是，建新人物）；兩票同一個值才落庫，指不同（一票 `new`、一票某人也算不同）、或都沒指認，會轉 `disputed` 進裁決任務。`matched`／`new` 時不用帶，但你若認為系統對錯人，可帶 id 或 `"new"` 更正。
+11. **事實要放進資料欄位，不要只寫在 reason 裡**：查證時若發現除了目標欄位以外，內容本身也不完整或有誤（例如來源網址錯，但同一份文件還有各期座數、驗收日期），一併在 `correction` 的 `changes` 提出（可同時改 `description`、`source_url`…），或另外提一筆 `policy_progress`／`policy`。`reason` 只放判斷依據，讀者看不到它。
 
 ---
 
@@ -312,7 +313,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`policy_progress`** — 政見進度：`policy_id`✅ 或（`policy_title`＋`name`／`politician_id`）、`status`✅（`Campaign Pledge`／`Proposed`／`In Progress`／`Achieved`／`Stalled`／`Failed`）、`date`✅（YYYY-MM-DD）、`note`✅（≥10 字：做了什麼、依據哪份文件）；選填 `progress`（0～100）。
 
-**`correction`** — 指出既有資料錯誤：`target_table`✅（`politicians`／`politician_elections`／`policies`）、`target_id`✅、`field`✅、`correct_value`✅、`reason`✅（≥10 字）；建議 `current_value`。可修欄位：politicians→name／party／birth_year／current_position／region／sub_region／education_level／bio／avatar_url；politician_elections→candidate_status／position／election_type；policies→title／description／category／status／proposed_date／source_url。
+**`correction`** — 指出既有資料錯誤，**一筆可改多個欄位**：`target_table`✅（`politicians`／`politician_elections`／`policies`）、`target_id`✅、`changes`✅（陣列，每項 `{field, current_value, correct_value}`，1～10 個、欄位不重複）、`reason`✅（≥10 字，**只放判斷依據**；事實內容要放進 `changes` 的欄位，讀者看不到 reason）。舊格式 `field`＋`correct_value`（單欄位）仍可用。可修欄位：politicians→name／party／birth_year／current_position／region／sub_region／education_level／bio／avatar_url；politician_elections→candidate_status／position／election_type；policies→title／description／category／status／proposed_date／source_url。門檻取所有欄位中最高風險：含 `candidate_status` 就走加減參選人級距。例：發現政見來源網址錯、且描述漏了各期座數與驗收日期 → `changes: [{field:"source_url", current_value:"…", correct_value:"…"}, {field:"description", correct_value:"第一期候車亭 12 座已於 2026-03-15 驗收，第二期 8 座預計 2026-12 完工。"}]`。
 
 **`no_change`** — 任務查完、確認資料庫已經正確（尤其 `audit` 任務）：`task_id`✅（`/next` 給的）、`checked_urls[]`✅（你實際打開核對過的網址）、`finding`✅（≥10 字：核對了哪些欄位、為什麼沒有異動）。`source_urls` 沒給時用 `checked_urls`。通過後**只關閉那個任務、不改任何資料**；`auto:` 開頭的任務沒有列可關，只記錄。
 

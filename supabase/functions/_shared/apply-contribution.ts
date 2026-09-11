@@ -17,6 +17,7 @@ import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { closeAdjudicationTasks } from "./adjudication.ts";
+import { normalizeCorrection } from "./correction.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -287,24 +288,36 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
   return { status: "applied", policy_id: policyId as string, message: "政見進度已更新並留下追蹤紀錄" };
 }
 
+/** correction：一筆可改多個欄位（changes[]），逐欄套用、各寫一筆 edit_history；舊的單欄位格式由 normalizeCorrection 相容 */
 async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
-  const p = row.payload;
   const ctx = ctxOf(row);
-  const table = String(p.target_table) as keyof typeof CORRECTION_FIELDS;
-  const field = String(p.field);
-  if (!CORRECTION_FIELDS[table]?.includes(field)) return { status: "failed", message: `${table}.${field} 不在可修正欄位白名單` };
-  const { data: current, error: readError } = await supabase.from(table).select(`id, ${field}`).eq("id", p.target_id).maybeSingle();
+  const { target_table, target_id, changes } = normalizeCorrection(row.payload);
+  const table = String(target_table) as keyof typeof CORRECTION_FIELDS;
+  if (!target_id || changes.length === 0) return { status: "failed", message: "correction 缺 target_id 或要更正的欄位" };
+  const bad = changes.find((c) => !CORRECTION_FIELDS[table]?.includes(c.field));
+  if (bad) return { status: "failed", message: `${table}.${bad.field} 不在可修正欄位白名單` };
+
+  const fields = changes.map((c) => c.field);
+  const { data: current, error: readError } = await supabase.from(table).select(`id, ${fields.join(", ")}`).eq("id", target_id).maybeSingle();
   throwIf(readError, `${table} read`);
-  if (!current) return { status: "failed", message: `${table} 找不到 id=${p.target_id}` };
-  const newValue = table === "policies" && field === "category" ? (normalizeCategory(String(p.correct_value)) ?? p.correct_value) : p.correct_value;
-  const { error } = await supabase.from(table).update({ [field]: newValue }).eq("id", p.target_id);
+  if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
+
+  const patch: Obj = Object.fromEntries(changes.map((c) => [
+    c.field,
+    table === "policies" && c.field === "category" ? (normalizeCategory(String(c.correct_value)) ?? c.correct_value) : c.correct_value,
+  ]));
+  const { error } = await supabase.from(table).update(patch).eq("id", target_id);
   throwIf(error, `${table} correction update`);
-  await recordUpdate(supabase, ctx, table, String(p.target_id), field, current[field] ?? null, newValue);
+  const applied: string[] = [];
+  for (const [field, newValue] of Object.entries(patch)) {
+    await recordUpdate(supabase, ctx, table, String(target_id), field, current[field] ?? null, newValue);
+    applied.push(`${field}：「${current[field] ?? ""}」→「${String(newValue)}」`);
+  }
   return {
     status: "applied",
-    message: `${table}.${field}：「${current[field] ?? ""}」→「${String(newValue)}」`,
-    ...(table === "politicians" ? { politician_id: String(p.target_id) } : {}),
-    ...(table === "policies" ? { policy_id: String(p.target_id) } : {}),
+    message: `${table} 更正 ${applied.length} 個欄位：${applied.join("；")}`,
+    ...(table === "politicians" ? { politician_id: String(target_id) } : {}),
+    ...(table === "policies" ? { policy_id: String(target_id) } : {}),
   };
 }
 

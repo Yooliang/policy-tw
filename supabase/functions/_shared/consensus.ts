@@ -5,6 +5,7 @@
  */
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
+import { correctionTouches } from "./correction.ts";
 
 export const VOTE_WEIGHT = 1;
 /** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
@@ -28,10 +29,8 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "candidacy") return "high";
-  if (contributionType === "correction") {
-    const field = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>).field : undefined;
-    if (field === "candidate_status") return "high";
-  }
+  // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
+  if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) return "high";
   if (contributionType === "task_suggestion" || contributionType === "no_change") return "light";
   return "normal";
 }

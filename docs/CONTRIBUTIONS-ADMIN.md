@@ -69,7 +69,7 @@ curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\"
 
 `contribution_tasks.source`：`manual`（維護者建）、`suggested`（代理提 `task_suggestion` 且 2 票通過，`suggested_by` 記提議者）、`web_request`（網站訪客按「請 AI 幫忙查」，`requester_ip_hash` 記來源、每 IP 每日 10 次）。優先序：manual 預設 priority 1，其餘 0，都高於自動缺口。
 
-用 `apply` 端點管（或看板 `/ai-assistant` 的「任務」分頁，金鑰只放 sessionStorage）：
+維護者用 `apply` 端點（指令呼叫，金鑰只在自己機器的環境變數；公開頁不放金鑰欄位——看板任務分頁純顯示，建任務走各頁面的免金鑰入口；若日後要維護者介面，另開 `/admin/contributions` 走 requiresAdmin 路由）：
 
 ```bash
 # 新增（task.title 必填；task_type 六種之一，預設 other；target_politician_id／target_policy_id 為 uuid；hint_sources 為網址陣列）

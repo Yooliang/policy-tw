@@ -4,6 +4,7 @@
  */
 
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
+import { normalizeCorrection } from "./correction.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -216,13 +217,17 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
       };
     case "correction": {
-      const field = typeof payload.field === "string" ? payload.field : "";
+      // 多欄位：每個 change 都附資料庫現值；第一個欄位另放在 field／current_value 維持相容
+      const { changes } = normalizeCorrection(payload);
+      const withCurrent = changes.map((c) => ({ field: c.field, claimed_current: c.current_value ?? null, db_current: data.target ? (data.target[c.field] ?? null) : null, correct_value: c.correct_value }));
       return {
         target_table: payload.target_table ?? null,
         target_id: payload.target_id ?? null,
-        field,
-        current_value: data.target ? (data.target[field] ?? null) : null,
+        field: withCurrent[0]?.field ?? "",
+        current_value: withCurrent[0]?.db_current ?? null,
+        changes: withCurrent,
         target: data.target ? truncateFields(data.target, ["description", "bio"]) : null,
+        hint: "逐欄核對：db_current 是資料庫現值、correct_value 是提交者主張的正確值；每個欄位都要在來源找得到才 agree，任一欄對不上就 disagree 並指出是哪一欄",
       };
     }
     default:

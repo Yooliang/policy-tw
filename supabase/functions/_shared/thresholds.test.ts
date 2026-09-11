@@ -52,7 +52,10 @@ Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣�
   assertEquals(arrays[1], byKind("media"));
   assertEquals(arrays[2], byKind("social"));
 
-  const matrix = sql.slice(sql.indexOf("FUNCTION contribution_required_agree"), sql.indexOf("FUNCTION contribution_apply_consensus"));
+  // 門檻函式最新定義在 000011（多欄位 correction）；矩陣與風險判斷從那裡讀
+  const latest = await Deno.readTextFile(new URL("../../migrations/20260912000011_correction_multi_field.sql", import.meta.url));
+  const matrix = latest.slice(latest.indexOf("FUNCTION contribution_required_agree"));
+  assert(matrix.includes(`p_payload->'changes' @> '[{"field":"candidate_status"}]'::jsonb`), "多欄位 correction 含 candidate_status 也算高風險");
   const rowRe = /WHEN v_risk = '(\w+)' THEN CASE v_kind WHEN 'official' THEN (\d+) WHEN 'media' THEN (\d+) WHEN 'social' THEN (\d+) ELSE (\d+) END/g;
   const rows = Object.fromEntries([...matrix.matchAll(rowRe)].map((m) => [m[1], { official: +m[2], media: +m[3], social: +m[4], other: +m[5] }]));
   assertEquals(rows.normal, AGREE_THRESHOLDS.normal);
@@ -64,7 +67,7 @@ Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣�
   assert(new Set(Object.values(AGREE_THRESHOLDS.adjudication)).size === 1, "裁決不看來源");
   // 風險分級的判斷式也要對得上
   assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
-  assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND p_payload->>'field' = 'candidate_status') THEN 'high'"));
+  assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
   assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change') THEN 'light'"));
   assert(sql.includes("contribution_required_agree(contribution_type, payload, source_urls)"), "共識函式改用三參數");
 });
