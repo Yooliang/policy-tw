@@ -12,7 +12,11 @@ import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
-import { Link as LinkIcon, Milestone } from 'lucide-vue-next'
+// 動作列的「請 AI 補齊這個人的資料」：捲到側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡）
+const AI_LOOKUP_SECTION_ID = 'ai-lookup'
+function scrollToAiLookup(): void {
+  document.getElementById(AI_LOOKUP_SECTION_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -202,8 +206,7 @@ usePageHead({
           <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <HeroAction :to="{ path: '/ai-assistant', query: { type: 'politician' } }"><Milestone :size="16" /> 看人物貢獻</HeroAction>
-          <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
+          <HeroAction @click="scrollToAiLookup"><Sparkles :size="16" /> 請 AI 補齊這個人的資料</HeroAction>
         </div>
       </template>
     </Hero>
@@ -374,8 +377,8 @@ usePageHead({
                 </ul>
               </div>
 
-              <!-- AI Lookup Section - Always visible -->
-              <div class="pt-4 border-t border-slate-100">
+              <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
+              <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
                 <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；不需登入。</p>
                 <div class="space-y-3">
