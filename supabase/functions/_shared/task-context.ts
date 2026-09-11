@@ -3,9 +3,12 @@
  * 純函式 shape*（可測）＋ fetch*（碰 DB）分開。長文字截 500 字並標 truncated:true。
  */
 
+import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
+
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
+export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
 export const REST_BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1";
 export const TEXT_LIMIT = 500;
@@ -137,26 +140,49 @@ export interface VerifyContextData {
   politicians?: Obj[];
   elections?: Obj[];
   policies?: Obj[];
+  /** policy：find_similar_policies（pg_trgm）命中的既有政見，給驗證者判斷是否重複 */
+  similar_policies?: Array<{ id: string; title: string; similarity: number }>;
+  /** politician／candidacy：多面向比對的 dry-run 結果（不寫回） */
+  identity?: { decision: string; politician_id?: string | null; reason: string; candidate_ids: string[] } | null;
   policy?: Obj | null;
   tracking_logs?: Obj[];
   target?: Obj | null;
 }
 
+const IDENTITY_HINT = {
+  matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
+  new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id",
+  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一）；兩票同一位才會落庫，指不同位或都沒指認會轉 disputed 交維護者",
+} as const;
+
 /** 純函式：依 contribution_type 組驗證用的 current */
 export function shapeVerifyCurrent(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
   switch (contributionType) {
     case "politician":
-    case "candidacy":
+    case "candidacy": {
+      const elections = (data.elections ?? []).map((e) => pick(e, ["politician_id", "election_id", "election_type", "candidate_status", "source_note"]));
+      const candidates = (data.politicians ?? []).map((p) => ({
+        ...pick(p, POLITICIAN_BRIEF),
+        has_avatar: !!p.avatar_url,
+        elections: elections.filter((e) => e?.politician_id === p.id).map((e) => `${e?.election_id} ${e?.election_type}（${e?.candidate_status}）`),
+      }));
+      const decision = data.identity?.decision ?? null;
       return {
-        matching_politicians: (data.politicians ?? []).map((p) => ({ ...pick(p, POLITICIAN_BRIEF), has_avatar: !!p.avatar_url })),
-        elections: (data.elections ?? []).map((e) => pick(e, ["politician_id", "election_id", "election_type", "candidate_status", "source_note"])),
-        hint: "同名多位時，用 payload 的政黨／縣市／現職／出生年判斷是不是同一人；candidacy 要看該人是否已有這場選舉的紀錄",
+        identity: data.identity ? { decision: data.identity.decision, politician_id: data.identity.politician_id ?? null, reason: data.identity.reason } : null,
+        identity_pick_required: decision === "ambiguous",
+        identity_candidates: candidates,
+        matching_politicians: candidates.map(({ elections: _e, ...rest }) => rest),
+        elections,
+        hint: (decision && decision in IDENTITY_HINT ? IDENTITY_HINT[decision as keyof typeof IDENTITY_HINT] : "同名多位時，用 payload 的政黨／縣市／現職／出生年判斷是不是同一人") +
+          "；candidacy 要看該人是否已有這場選舉的紀錄",
       };
+    }
     case "policy":
       return {
         politician: pick(data.politicians?.[0] ?? null, POLITICIAN_BRIEF),
         existing_policy_titles: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"])),
-        hint: "看 payload.title 是否與既有政見重複或只是改寫；重複請投 disagree 並在 note 指出既有政見 id",
+        similar_policies: (data.similar_policies ?? []).map((s) => ({ id: s.id, title: s.title, similarity: Math.round(s.similarity * 100) / 100 })),
+        hint: "similar_policies 是系統算出的相似既有政見（相似度 0～1）；若 payload 與其中一條實質重複（同一承諾換句話說），投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、內容不同就照來源核對",
       };
     case "policy_progress":
       return {
@@ -178,6 +204,28 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
   }
 }
 
+/** 多面向身份比對 dry-run（persist:false，不寫 keys、不寫 reviews）；失敗不影響派工 */
+async function dryRunIdentity(supabase: SupabaseLike, payload: Obj, name: string): Promise<VerifyContextData["identity"]> {
+  try {
+    const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    const resolution = await resolvePolitician(createSupabaseIdentityStore(supabase), {
+      name,
+      party: s(payload.party),
+      region: s(payload.region),
+      election_type: s(payload.election_type),
+      position: s(payload.position),
+      current_position: s(payload.current_position),
+      birth_year: typeof payload.birth_year === "number" ? payload.birth_year : s(payload.birth_year),
+      cec_cand_id: typeof payload.cec_cand_id === "number" ? payload.cec_cand_id : s(payload.cec_cand_id),
+      cec_theme_id: s(payload.cec_theme_id),
+    }, { persist: false });
+    return { decision: resolution.decision, politician_id: resolution.politician_id ?? null, reason: resolution.reason, candidate_ids: resolution.candidates.map((c) => c.politician_id) };
+  } catch (e) {
+    console.error("dryRunIdentity:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
 /** 碰 DB：依 contribution_type／payload 撈驗證用資料 */
 export async function fetchVerifyContext(supabase: SupabaseLike, contributionType: string, payload: Obj): Promise<VerifyContextData> {
   const data: VerifyContextData = {};
@@ -195,8 +243,27 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       data.elections = el ?? [];
     }
     if (ids.length === 1 && contributionType === "policy") {
-      const { data: pol } = await supabase.from("policies").select("id, title, category, status").eq("politician_id", ids[0]).limit(MAX_EXISTING_POLICIES);
+      const [{ data: pol }, similar] = await Promise.all([
+        supabase.from("policies").select("id, title, category, status").eq("politician_id", ids[0]).limit(MAX_EXISTING_POLICIES),
+        typeof payload.title === "string"
+          ? supabase.rpc("find_similar_policies", { p_politician_id: ids[0], p_title: payload.title, p_threshold: POLICY_SIMILARITY_THRESHOLD })
+          : Promise.resolve({ data: [] }),
+      ]);
       data.policies = pol ?? [];
+      data.similar_policies = (similar.data ?? []) as VerifyContextData["similar_policies"];
+    }
+    if (contributionType !== "policy" && name) {
+      data.identity = await dryRunIdentity(supabase, payload, name);
+      // 比對出來的候選人若不在同名清單裡（別名／改名），一併附上，讓驗證者能指認
+      const missing = (data.identity?.candidate_ids ?? []).filter((id) => !ids.includes(id));
+      if (missing.length > 0) {
+        const [{ data: more }, { data: moreEl }] = await Promise.all([
+          supabase.from("politicians").select("*").in("id", missing),
+          supabase.from("politician_elections").select("politician_id, election_id, election_type, candidate_status, source_note").in("politician_id", missing).order("election_id", { ascending: false }),
+        ]);
+        data.politicians = [...(data.politicians ?? []), ...(more ?? [])];
+        data.elections = [...(data.elections ?? []), ...(moreEl ?? [])];
+      }
     }
   }
   if (contributionType === "policy_progress") {

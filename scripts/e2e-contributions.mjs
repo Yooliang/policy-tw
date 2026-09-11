@@ -28,7 +28,7 @@ async function routeFeed(page, feedRequests) {
     const status = url.searchParams.get('status') || 'all'
     const type = url.searchParams.get('type') || ''
     const agent = url.searchParams.get('agent_name') || ''
-    const ATTENTION = ['disputed', 'needs_review', 'approved', 'apply_failed']
+    const ATTENTION = ['disputed']
     const matchStatus = (it) => status === 'all' || (status === 'attention' ? ATTENTION.includes(it.status) : it.status === status)
     const items = fixture.items.filter((it) => matchStatus(it) && (!type || it.contribution_type === type) && (!agent || it.agent_name === agent))
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...fixture, items, count: items.length, has_more: false, next_cursor: null }) })
@@ -57,12 +57,12 @@ try {
     check(count === fixture.items.length, `${viewport.name}: 列表有 ${count} 筆（fixture ${fixture.items.length}）`)
     check((await page.locator('[data-testid="stats"] p.text-2xl').allTextContents()).join(',').includes(String(fixture.summary.by_status.applied)), `${viewport.name}: 統計卡顯示 applied=${fixture.summary.by_status.applied}`)
     check(await page.locator('text=還差').count() >= 1, `${viewport.name}: pending 項顯示「還差 N 票」`)
-    check((await page.locator('[data-testid="stat-attention"]').getAttribute('data-alert')) === 'true' && (await page.locator('[data-testid="stat-attention"] p.text-2xl').textContent()).trim() === String(fixture.summary.needs_attention.total), `${viewport.name}: 「待人工審核」=${fixture.summary.needs_attention.total} 且亮警示色`)
+    check((await page.locator('[data-testid="stat-disputed"]').getAttribute('data-alert')) === 'true' && (await page.locator('[data-testid="stat-disputed"] p.text-2xl').textContent()).trim() === String(fixture.summary.needs_attention.disputed), `${viewport.name}: 「有爭議」=${fixture.summary.needs_attention.disputed} 且亮警示色`)
     check((await page.locator('[data-testid="stat-contributors"] p.text-2xl').textContent()).trim() === String(fixture.summary.contributors_30d), `${viewport.name}: 貢獻者（近 30 天）=${fixture.summary.contributors_30d}`)
     check(!(await page.locator('[data-testid="stats"]').textContent()).includes('你'), `${viewport.name}: 統計卡文案沒有「你」`)
-    await page.locator('[data-testid="stat-attention"]').click()
-    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="feed-item"]').length === n, fixture.items.filter((i) => ['disputed', 'needs_review', 'approved', 'apply_failed'].includes(i.status)).length)
-    check(feedRequests.some((q) => q.includes('status=attention')), `${viewport.name}: 點「待人工審核」卡 → status=attention`)
+    await page.locator('[data-testid="stat-disputed"]').click()
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="feed-item"]').length === n, fixture.items.filter((i) => i.status === 'disputed').length)
+    check(feedRequests.some((q) => q.includes('status=disputed')), `${viewport.name}: 點「有爭議」卡 → status=disputed`)
     check(await page.locator('[data-testid="leaderboard"] li').first().textContent().then((t) => t.includes('驗證 12')), `${viewport.name}: 貢獻榜顯示驗證數`)
 
     // 狀態篩選
@@ -152,10 +152,10 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await context.newPage()
   await routeTasks(page)
-  await page.route('**/functions/v1/contributions-feed**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...fixture, items: [], count: 0, has_more: false, summary: { ...fixture.summary, needs_attention: { total: 0, disputed: 0, needs_review: 0, identity_review: 0, apply_failed: 0 } } }) }))
+  await page.route('**/functions/v1/contributions-feed**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...fixture, items: [], count: 0, has_more: false, summary: { ...fixture.summary, by_status: { ...fixture.summary.by_status, disputed: 0 }, needs_attention: { total: 0, disputed: 0, retrying: 0 } } }) }))
   await page.goto(`http://localhost:${PORT}/ai-assistant`, { waitUntil: 'networkidle' })
   check(await page.locator('[data-testid="empty"]').count() === 1, '空狀態顯示')
-  check((await page.locator('[data-testid="stat-attention"]').getAttribute('data-alert')) === 'false', '待人工審核=0 時不亮警示色')
+  check((await page.locator('[data-testid="stat-disputed"]').getAttribute('data-alert')) === 'false', '有爭議=0 時不亮警示色')
   await page.unroute('**/functions/v1/contributions-feed**')
   await page.route('**/functions/v1/contributions-feed**', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'internal_error', message: 'boom' }) }))
   await page.locator('button', { hasText: '重新整理' }).click()

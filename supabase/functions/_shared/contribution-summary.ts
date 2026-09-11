@@ -112,8 +112,8 @@ export function safePayload(payload: unknown): Obj {
 
 // ---- 看板 summary（純函式，feed 端點呼叫）----
 
-/** 需要維護者處理的狀態：有爭議／疑似重複／身份待人工（approved）／落庫失敗 */
-export const ATTENTION_STATUSES = ["disputed", "needs_review", "approved", "apply_failed"] as const;
+/** 需要維護者處理的狀態只有一種：disputed（2 票反對、身份指認衝突、或連續 3 次落庫失敗） */
+export const ATTENTION_STATUSES = ["disputed"] as const;
 export const CONTRIBUTORS_WINDOW_DAYS = 30;
 
 export interface SummaryRow { status: string; agent_name: string | null; created_at: string }
@@ -122,7 +122,7 @@ export interface VoteRow { agent_name: string | null }
 export interface FeedSummary {
   total: number;
   by_status: Record<string, number>;
-  needs_attention: { total: number; disputed: number; needs_review: number; identity_review: number; apply_failed: number };
+  needs_attention: { total: number; disputed: number; retrying: number };
   contributors_30d: number;
   daily_last_7: Array<{ date: string; count: number }>;
   leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>;
@@ -158,16 +158,11 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     .map(([agent_name, v]) => ({ agent_name, ...v }))
     .sort((a, b) => b.applied - a.applied || b.submitted - a.submitted || b.verified_votes - a.verified_votes)
     .slice(0, 10);
-  const needs = {
-    disputed: byStatus.disputed ?? 0,
-    needs_review: byStatus.needs_review ?? 0,
-    identity_review: byStatus.approved ?? 0,
-    apply_failed: byStatus.apply_failed ?? 0,
-  };
+  const needs = { disputed: byStatus.disputed ?? 0, retrying: byStatus.apply_failed ?? 0 }; // retrying 只是資訊，不算人工
   return {
     total: rows.length,
     by_status: byStatus,
-    needs_attention: { total: needs.disputed + needs.needs_review + needs.identity_review + needs.apply_failed, ...needs },
+    needs_attention: { total: needs.disputed, ...needs },
     contributors_30d: recentAgents.size,
     daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })),
     leaderboard,

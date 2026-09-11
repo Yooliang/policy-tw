@@ -5,7 +5,7 @@ import { ATTENTION_STATUSES, buildFeedSummary, safePayload, type SummaryRow, sum
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
- * GET ?status=all|pending|verified|applied|disputed|needs_review|rejected|reverted&agent_name=&type=&limit=20&cursor=<created_at>
+ * GET ?status=all|attention|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<created_at>
  * 每筆：安全摘要＋計數＋來源＋審核備註（不回 ip_hash；長文截 200 字）。另回 summary（各狀態筆數、近 7 日每日提交、貢獻榜前 10）。
  */
 
@@ -14,7 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
-const STATUSES = ["pending", "verified", "applied", "disputed", "needs_review", "rejected", "reverted", "approved", "apply_failed"];
+const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed"];
 const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id";
 
 function json(body: unknown, status = 200): Response {

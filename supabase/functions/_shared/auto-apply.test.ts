@@ -46,8 +46,7 @@ Deno.test("verified 才自動落庫；轉 verified 時呼叫 applyFn 並把狀�
 
 Deno.test("apply 結果 → contributions.status 對應", () => {
   assertEquals(contributionStatusFor("applied"), "applied");
-  assertEquals(contributionStatusFor("needs_review"), "needs_review");
-  assertEquals(contributionStatusFor("needs_identity_review"), "approved");
+  assertEquals(contributionStatusFor("disputed"), "disputed");
   assertEquals(contributionStatusFor("failed"), "apply_failed");
 });
 
