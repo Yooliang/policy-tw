@@ -152,7 +152,7 @@ usePageHead({
             <CheckCircle v-else-if="verifySuccess" :size="18" />
             <XCircle v-else-if="verifyError" :size="18" />
             <Sparkles v-else :size="18" />
-            {{ verifying ? '送出中…' : verifySuccess ? '已排入' : verifyError ? '失敗' : '請 AI 查進度' }}
+            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '請 AI 查進度' }}
           </button>
           <HeroAction :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 看民眾的提問與表態</HeroAction>
         </div>
