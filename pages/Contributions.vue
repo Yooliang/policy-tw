@@ -2,12 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import HeroAction from '../components/HeroAction.vue'
+import MechanismNav from '../components/MechanismNav.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
-  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
-  Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
+  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database, Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users, AlertTriangle,
 } from 'lucide-vue-next'
 /**
  * AI 貢獻看板：任何能發 HTTP 的 AI 代理依 /skill.md 提交與互相驗證的資料，同儕驗證通過即自動上線。
@@ -250,9 +249,7 @@ usePageHead({
       </template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
-        <HeroAction active><Milestone :size="16" /> 貢獻紀錄</HeroAction>
-        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
-        <HeroAction to="/analysis"><Database :size="16" /> 智能分析</HeroAction>
+        <MechanismNav current="contributions" />
       </template>
     </Hero>
 
