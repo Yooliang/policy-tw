@@ -12,6 +12,7 @@ import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
+import AiLookupInline from '../components/AiLookupInline.vue'
 // 動作列的「請 AI 補齊這個人的資料」：捲到側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡）
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 function scrollToAiLookup(): void {
@@ -227,9 +228,13 @@ usePageHead({
           </div>
           <div class="space-y-6">
             <template v-if="activeTab === 'campaign'">
-              <div v-if="campaignPledges.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <PolicyCard v-for="policy in campaignPledges" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
-              </div>
+              <template v-if="campaignPledges.length > 0">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <PolicyCard v-for="policy in campaignPledges" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                </div>
+                <!-- 已有資料也能再查：次要位置、小按鈕 -->
+                <AiLookupInline :state="lookup.campaign" label="請 AI 補充最新的政見" @click="requestLookup('campaign')" />
+              </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <Search :size="48" class="mx-auto mb-4 text-slate-300" />
                 <p class="text-slate-500 mb-6">該候選人尚未發布 2026 競選承諾。</p>
@@ -266,9 +271,12 @@ usePageHead({
               </div>
             </template>
             <template v-else>
-              <div v-if="historicalPolicies.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <PolicyCard v-for="policy in historicalPolicies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
-              </div>
+              <template v-if="historicalPolicies.length > 0">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <PolicyCard v-for="policy in historicalPolicies" :key="policy.id" :policy="policy" :politician="politician" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                </div>
+                <AiLookupInline :state="lookup.history" label="請 AI 補充最新的政績" @click="requestLookup('history')" />
+              </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <FileText :size="48" class="mx-auto mb-4 text-slate-300" />
                 <p class="text-slate-500 mb-6">該候選人無過往追蹤紀錄。</p>
@@ -381,7 +389,7 @@ usePageHead({
               <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
               <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
                 <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
-                <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；不需登入。</p>
+                <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；已有資料也可以再查，補新的或更新；不需登入。</p>
                 <div class="space-y-3">
                   <!-- Search Bio Button -->
                   <button
@@ -400,7 +408,7 @@ usePageHead({
                     <CheckCircle v-else-if="lookup.bio.result" :size="16" />
                     <XCircle v-else-if="lookup.bio.error" :size="16" />
                     <User v-else :size="16" />
-                    {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? '已排入任務池' : lookup.bio.error ? '重試' : '請 AI 查簡介／學經歷' }}
+                    {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? (lookup.bio.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
                   </button>
 
                   <!-- Search Avatar Button -->
@@ -420,7 +428,7 @@ usePageHead({
                     <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
                     <XCircle v-else-if="lookup.avatar.error" :size="16" />
                     <Camera v-else :size="16" />
-                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? '已排入任務池' : lookup.avatar.error ? '重試' : '請 AI 找照片' }}
+                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '請 AI 補充最新的照片' : '請 AI 找照片') }}
                   </button>
 
                   <!-- Error messages -->
