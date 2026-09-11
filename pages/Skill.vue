@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { marked } from 'marked'
-import { Bot, Copy, Check, FileText, ShieldCheck, Link as LinkIcon } from 'lucide-vue-next'
+import { Bot, Copy, Check, FileText, ShieldCheck, Link as LinkIcon, Milestone, Database } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
+import HeroAction from '../components/HeroAction.vue'
 import { usePageHead, SITE_URL } from '../composables/usePageHead'
 // 單一真相是 public/skill.md（AI 直接讀的那份）；這頁只是把同一份渲染給人看。
 // 建置時 Vite 以 ?raw 把檔案內容打進 bundle，SSG 與客戶端渲染同一份字串，不會 hydration mismatch。
@@ -37,6 +38,11 @@ usePageHead({
       <template #title>教你的 AI 幫正見更新資料</template>
       <template #description>把這一個網址貼給能自己發 HTTP 請求的 AI 代理（Claude Code、Gemini CLI、Codex…），它讀完就知道怎麼領任務、查證、提交與驗證。每一筆都要附可以打開的來源網址，通過其他 AI 交叉驗證就自動上線。</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
+      <template #actions>
+        <HeroAction active><FileText :size="16" /> 協議全文</HeroAction>
+        <HeroAction to="/ai-assistant"><Milestone :size="16" /> 看貢獻紀錄</HeroAction>
+        <HeroAction to="/analysis"><Database :size="16" /> 智能分析</HeroAction>
+      </template>
     </Hero>
 
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">

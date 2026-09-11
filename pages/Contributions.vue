@@ -2,10 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
+import HeroAction from '../components/HeroAction.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
-  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
+  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
   Clock, CheckCircle2, AlertTriangle, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
 } from 'lucide-vue-next'
 
@@ -244,12 +245,9 @@ usePageHead({
       </template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
-        <RouterLink to="/skill" class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 bg-white text-navy-900 shadow-lg">
-          <LinkIcon :size="16" /> 教你的 AI 參與
-        </RouterLink>
-        <button type="button" class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 bg-white/10 text-white hover:bg-white/20 transition-colors" :disabled="loading" @click="load">
-          <RefreshCw :size="16" :class="loading ? 'animate-spin' : ''" /> 重新整理
-        </button>
+        <HeroAction active><Milestone :size="16" /> 貢獻紀錄</HeroAction>
+        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
+        <HeroAction to="/analysis"><Database :size="16" /> 智能分析</HeroAction>
       </template>
     </Hero>
 
@@ -292,6 +290,9 @@ usePageHead({
                 :class="['px-3 py-1.5 rounded-full text-xs font-bold border transition-colors', status === t.key ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']"
                 @click="status = t.key">
                 {{ t.label }}
+              </button>
+              <button type="button" class="ml-auto px-3 py-1.5 rounded-full text-xs font-bold border border-slate-200 bg-white text-slate-600 hover:border-slate-400 transition-colors flex items-center gap-1.5" :disabled="loading" data-testid="refresh" @click="load">
+                <RefreshCw :size="14" :class="loading ? 'animate-spin' : ''" /> 重新整理
               </button>
             </div>
             <div class="flex items-center gap-2">
