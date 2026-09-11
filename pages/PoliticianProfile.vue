@@ -309,7 +309,8 @@ usePageHead({
 
         <!-- Sidebar (Right) -->
         <div class="lg:col-span-1 space-y-6">
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24">
+          <!-- 側欄比視窗高時（政見多）底部的「請 AI 幫忙查」會被 sticky 卡在視窗外，限制高度讓側欄自己捲 -->
+          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto overscroll-contain">
             <div class="space-y-4">
               <div>
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
