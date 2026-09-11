@@ -18,8 +18,9 @@ export interface CandidateInput {
   election_type?: string | null;
   current_position?: string | null;
   birth_year?: number | string | null;
-  /** 中選會 cand_id（官方匯入才有） */
+  /** 中選會 cand_id 與其選舉場次 theme_id（官方匯入才有；兩者都要才會產 cec_cand_id key） */
   cec_cand_id?: number | string | null;
+  cec_theme_id?: string | null;
   status?: string | null;
   note?: string | null;
 }
@@ -112,16 +113,28 @@ export async function ensurePolitician(
     current_position: candidate.current_position,
     birth_year: candidate.birth_year,
     cec_cand_id: candidate.cec_cand_id,
+    cec_theme_id: candidate.cec_theme_id,
   }, { source: options.source });
 
+  const birthYear = typeof candidate.birth_year === "string" ? parseInt(candidate.birth_year, 10) : candidate.birth_year;
+  const validBirthYear = Number.isInteger(birthYear) ? (birthYear as number) : null;
+
   if (resolution.decision === "matched" && resolution.politician_id) {
+    // 官方資料帶出生年就補進沒有出生年的人（觸發器會順手產 birth key，之後跨屆靠它對人）
+    if (validBirthYear !== null) {
+      const { error: birthError } = await supabase
+        .from("politicians")
+        .update({ birth_year: validBirthYear })
+        .eq("id", resolution.politician_id)
+        .is("birth_year", null);
+      throwIf(birthError, "politicians birth_year backfill");
+    }
     return { resolution, politician_id: resolution.politician_id, created: false };
   }
   if (resolution.decision === "ambiguous") {
     return { resolution, politician_id: null, created: false };
   }
 
-  const birthYear = typeof candidate.birth_year === "string" ? parseInt(candidate.birth_year, 10) : candidate.birth_year;
   const { data: inserted, error } = await supabase
     .from("politicians")
     .insert({
@@ -130,7 +143,7 @@ export async function ensurePolitician(
       position: candidate.position ?? null,
       region: candidate.region ?? null,
       current_position: candidate.current_position ?? null,
-      birth_year: Number.isInteger(birthYear) ? birthYear : null,
+      birth_year: validBirthYear,
       ...(options.extraInsert ?? {}),
     })
     .select("id")

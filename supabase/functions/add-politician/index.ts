@@ -33,8 +33,9 @@ interface IncomingPolitician {
   avatarUrl?: string;
   slogan?: string;
   electionId?: number;
-  /** 中選會 cand_id（AdminScraper 官方匯入帶入，寫成強面向 key） */
+  /** 中選會 cand_id 與選舉場次 theme_id（AdminScraper 官方匯入帶入；cand_id 每場重編，兩個要一起給才會寫 key） */
   cecCandId?: number | string;
+  cecThemeId?: string;
 }
 
 function compact(obj: Record<string, unknown>): Record<string, unknown> {
@@ -75,6 +76,7 @@ Deno.serve(async (req) => {
           current_position: p.currentPosition,
           birth_year: p.birthYear,
           cec_cand_id: p.cecCandId,
+          cec_theme_id: p.cecThemeId,
         }, {
           source: "add-politician",
           extraInsert: compact({

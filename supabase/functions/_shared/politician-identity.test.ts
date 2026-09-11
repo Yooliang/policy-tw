@@ -219,18 +219,49 @@ Deno.test("prod 快照：8 筆 AI 空殼逐一都會被判回真陳素月", asyn
   }
 });
 
-Deno.test("cec_cand_id：單獨命中就是強面向 matched，且不冠姓名", async () => {
+const THEME_2022 = "63615098f5afa8ec53159c4a86fc01d3"; // 111年縣市長選舉
+const THEME_2018 = "f75e94cad2958f8764f9d090e72b5567"; // 107年縣市長選舉
+
+Deno.test("cec_cand_id：value 帶選舉場次 {theme}#{cand_id}，同場重複匯入單靠它就 matched", async () => {
   const store = createMemoryIdentityStore();
-  store.addPolitician({ id: "P", name: "王惠美", party: "中國國民黨", region: "彰化縣", election_type: "縣市長", birth_year: 1968, cec_cand_id: 144837 });
+  store.addPolitician({ id: "P", name: "王惠美", party: "中國國民黨", region: "彰化縣", election_type: "縣市長", birth_year: 1968, cec_cand_id: 144837, cec_theme_id: THEME_2022 });
   const stored = store.keys.find((k) => k.key_type === "cec_cand_id");
-  assertEquals(stored?.key_value, "144837");
+  assertEquals(stored?.key_value, `${THEME_2022}#144837`);
   assertEquals(stored?.strength, 3);
 
-  // 同場再匯入一次：黨名寫法不同、沒帶出生年，只靠 cand_id 對上
-  const r = await resolvePolitician(store, { name: "王惠美", party: "國民黨", region: "彰化縣", election_type: "縣市長", cec_cand_id: "144837" }, { persist: false });
+  // 同場再匯入一次：黨名寫法不同、沒帶出生年，只靠 theme+cand_id 對上
+  const r = await resolvePolitician(store, { name: "王惠美", party: "國民黨", region: "彰化縣", election_type: "縣市長", cec_cand_id: "144837", cec_theme_id: THEME_2022 }, { persist: false });
   assertEquals(r.decision, "matched");
   assertEquals(r.politician_id, "P");
   assert(r.matched_keys.some((k) => k.key_type === "cec_cand_id"));
+
+  // 只有 cand_id 沒有 theme → 不產 key（避免跨屆撞號）
+  const noTheme = buildCandidateKeys({ name: "王惠美", cec_cand_id: 144837 });
+  assertEquals(noTheme.filter((k) => k.key_type === "cec_cand_id"), []);
+});
+
+Deno.test("同一人兩屆 cand_id 不同：cec_cand_id 不會命中，靠 birth 對上", async () => {
+  const store = createMemoryIdentityStore();
+  // 2018 匯入：林姿妙 cand_id=242
+  store.addPolitician({ id: "LIN", name: "林姿妙", party: "中國國民黨", region: "宜蘭縣", election_type: "縣市長", birth_year: 1952, cec_cand_id: 242, cec_theme_id: THEME_2018 });
+  // 2022 匯入：同一人 cand_id=144821
+  const r = await resolvePolitician(store, { name: "林姿妙", party: "中國國民黨", region: "宜蘭縣", election_type: "縣市長", birth_year: 1952, cec_cand_id: 144821, cec_theme_id: THEME_2022 }, { source: "cec-2022" });
+  assertEquals(r.decision, "matched");
+  assertEquals(r.politician_id, "LIN");
+  assert(r.matched_keys.some((k) => k.key_type === "birth" && k.key_value === "林姿妙|1952"));
+  assertEquals(r.matched_keys.filter((k) => k.key_type === "cec_cand_id"), []);
+  // 2022 的 cand_id 累積寫回，之後同場重匯入可直接命中
+  assert(store.keys.some((k) => k.politician_id === "LIN" && k.key_value === `${THEME_2022}#144821`));
+});
+
+Deno.test("不同人同名同屆不同 cand_id：出生年不同硬否決，判開成新人物", async () => {
+  const store = createMemoryIdentityStore();
+  store.addPolitician({ id: "A", name: "陳素月", party: "無黨籍及未經政黨推薦", region: "宜蘭縣", election_type: "村里長", birth_year: 1968, cec_cand_id: 165000, cec_theme_id: THEME_2022 });
+  const r = await resolvePolitician(store, { name: "陳素月", party: "無黨籍", region: "宜蘭縣", election_type: "村里長", birth_year: 1966, cec_cand_id: 165001, cec_theme_id: THEME_2022 }, { persist: false });
+  const a = r.candidates.find((c) => c.politician_id === "A");
+  assertEquals(a?.vetoed, "birth_conflict");
+  assertEquals(r.decision, "new");
+  assertEquals(r.flag, "same_name_exists");
 });
 
 Deno.test("候選 key 產生：election_type 沒給時由 position 推", () => {

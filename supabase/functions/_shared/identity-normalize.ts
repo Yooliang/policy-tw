@@ -124,8 +124,12 @@ export interface FacetSource {
   election_type?: string | null;
   position?: string | null;
   current_position?: string | null;
-  /** 中選會 cand_id：全站最可靠的識別碼（強 3），value 不冠姓名 */
+  /**
+   * 中選會 cand_id（強 3）。cand_id 每一場選舉重新編號，不是跨屆人物識別碼，
+   * 所以 key value 是 `{theme_id}#{cand_id}`，兩者都要有才產 key；只用來讓同一場選舉重複匯入冪等。
+   */
   cec_cand_id?: number | string | null;
+  cec_theme_id?: string | null;
 }
 
 /** 參選紀錄：region 是已解析成縣市名的字串（DB 端由 regions.region 取得）。 */
@@ -171,8 +175,9 @@ export function buildKeys(
     .filter((p): p is string => p !== null);
 
   const cecId = normText(base.cec_cand_id === null || base.cec_cand_id === undefined ? null : String(base.cec_cand_id));
-  if (cecId !== null && normalizedNames.length > 0) {
-    keys.push({ key_type: "cec_cand_id", key_value: cecId, strength: STRENGTH.STRONG });
+  const cecTheme = normText(base.cec_theme_id);
+  if (cecId !== null && cecTheme !== null && normalizedNames.length > 0) {
+    keys.push({ key_type: "cec_cand_id", key_value: `${cecTheme}#${cecId}`, strength: STRENGTH.STRONG });
   }
 
   for (const name of normalizedNames) {

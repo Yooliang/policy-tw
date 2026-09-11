@@ -85,6 +85,8 @@ interface CandidateResult {
   electionId?: number;
   // 2026-09 新增（相容：舊呼叫端忽略即可）
   cecCandId?: number;
+  /** cand_id 每場選舉重編，要和 themeId 一起才是識別碼 */
+  cecThemeId?: string;
   candNo?: number;
   gender?: string;
   birthday?: string;
@@ -303,6 +305,7 @@ Deno.serve(async (req) => {
           electionType: electionTypeName,
           electionId: electionId || 1,
           cecCandId: merged.cand_id,
+          cecThemeId: themeId,
           candNo: merged.cand_no,
           gender: merged.cand_sex === "1" ? "男" : merged.cand_sex === "2" ? "女" : undefined,
           birthday: merged.cand_birthday || undefined,

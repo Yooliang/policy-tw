@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS politician_keys (
 );
 
 COMMENT ON TABLE politician_keys IS '政治人物已知面向 key：新資料只要姓名相同且面向對得上就是同一人。故意不對 (key_type, key_value) 加 unique——同名兩人可合法共用一個 key。';
-COMMENT ON COLUMN politician_keys.key_type IS 'birth(強3)={name}|{birth_year}；region_type(中2)={name}|{region}|{election_type}；position(中2／常見職位弱1)={name}|{職位類別}；party(弱1)={name}|{party}；alias_name(強3)={舊名}；cec_cand_id(強3)={中選會 cand_id}，只在新匯入時寫入、不回溯';
+COMMENT ON COLUMN politician_keys.key_type IS 'birth(強3)={name}|{birth_year}；region_type(中2)={name}|{region}|{election_type}；position(中2／常見職位弱1)={name}|{職位類別}；party(弱1)={name}|{party}；alias_name(強3)={舊名}；cec_cand_id(強3)={theme_id}#{cand_id}（cand_id 每場選舉重編，只用來讓同場重複匯入冪等，不能跨屆對人），只在新匯入時寫入、不回溯';
 COMMENT ON COLUMN politician_keys.source IS '來源：backfill／derived（觸發器）／ai-action／import-candidate／manual…';
 
 -- 同一人同一 key 只留一筆（讓回填與寫回可重跑）

@@ -35,14 +35,17 @@ interface CandidateData {
   gender?: string;
   votes?: number;
   elected?: boolean;
-  /** 中選會 cand_id（fetch-cec-data 回傳的 cecCandId） */
+  /** 中選會 cand_id 與選舉場次（fetch-cec-data 回傳的 cecCandId／cecThemeId；cand_id 每場重編，兩個要一起給） */
   cec_cand_id?: number | string;
+  cec_theme_id?: string;
 }
 
 interface ImportRequest {
   election_year: number;
   election_type: string;
   data_source: string;
+  /** 中選會選舉場次 theme_id（整批同一場時給這裡即可） */
+  theme_id?: string;
   candidates: CandidateData[];
 }
 
@@ -118,6 +121,7 @@ Deno.serve(async (req) => {
           position: election_type,
           birth_year: candidate.birth_year,
           cec_cand_id: candidate.cec_cand_id,
+          cec_theme_id: candidate.cec_theme_id ?? body.theme_id,
         }, {
           source: `batch-import:${data_source}`,
           extraInsert: { gender: candidate.gender ?? null },
@@ -128,16 +132,7 @@ Deno.serve(async (req) => {
           ambiguousNames.push(candidate.name);
           continue;
         }
-
-        // 既有人物補空的出生年（欄位是 birth_year，不是 birthYear）
-        if (!ensured.created && candidate.birth_year) {
-          const { error: birthError } = await supabaseService
-            .from("politicians")
-            .update({ birth_year: candidate.birth_year })
-            .eq("id", ensured.politician_id)
-            .is("birth_year", null);
-          if (birthError) throw new Error(`politicians birth_year update: ${birthError.message}`);
-        }
+        // 既有人物缺出生年時由 ensurePolitician 統一補（欄位是 birth_year，舊碼寫成 birthYear 一直沒生效）
 
         const verifiedFields = {
           votes_received: candidate.votes,
