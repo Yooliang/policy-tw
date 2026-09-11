@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { MAX_VERIFICATIONS_PER_RUN } from "../_shared/consensus.ts";
+import { ipHashOf } from "../_shared/contribute-handler.ts";
 
 /**
  * verifications — 領檢驗事項（四主端點之三）。無金鑰。
@@ -24,7 +25,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
     const url = new URL(req.url);
     const type = url.searchParams.get("type");
     const region = url.searchParams.get("region")?.replace(/臺/g, "台") ?? null;
@@ -35,6 +38,7 @@ Deno.serve(async (req) => {
       .from("contributions")
       .select("id, contribution_type, payload, source_urls, note, task_id, agent_name, agent_tool, agree_count, disagree_count, unsure_count, status, created_at", { count: "exact" })
       .eq("status", "pending")
+      .neq("contributor_ip_hash", ipHash) // 與 /verify 的 self_vote 規則一致：同機提交的不列
       .order("created_at", { ascending: true });
     if (type) query = query.eq("contribution_type", type);
     if (agentName) query = query.neq("agent_name", agentName);

@@ -4,6 +4,7 @@
  */
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { requiredAgree } from "./consensus.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -85,26 +86,36 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
   const insertedByHash = new Map(inserted.map((r) => [r.payload_hash, r.id]));
 
+  // 提交後釋放該任務的軟認領（別人可以接手同一目標）
+  const taskIds = [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"))];
+  if (taskIds.length > 0) {
+    const { error: leaseError } = await supabase.from("contribution_task_leases").delete().in("task_id", taskIds);
+    if (leaseError) console.error("lease release failed:", leaseError.message);
+  }
+
   const results = validation.items.map((item, i) => {
     const hash = hashes[i];
     const dup = existingByHash.get(hash);
     const id = dup ? dup.id : insertedByHash.get(hash)!;
+    const need = requiredAgree(item.contribution_type, item.payload);
     return {
       index: i,
       contribution_type: item.contribution_type,
       contribution_id: id,
       status: dup ? "duplicate" : "pending",
+      required_agree: need,
       ...(dup ? { existing_status: dup.status, message: `${DEDUPE_WINDOW_HOURS} 小時內已有相同內容的貢獻，沿用原 id` } : {}),
       review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${id}`,
     };
   });
 
+  const needs = [...new Set(results.map((r) => r.required_agree))].sort((a, b) => a - b);
   const single = !Array.isArray((body as Record<string, unknown>).contributions);
   return {
     status: 201,
     body: {
       success: true,
-      message: `已收到 ${inserted.length} 筆新貢獻${results.length - inserted.length > 0 ? `（${results.length - inserted.length} 筆重複）` : ""}，會先由其他代理驗證，維護者最後審核通過才會出現在正見網站`,
+      message: `已收到 ${inserted.length} 筆新貢獻${results.length - inserted.length > 0 ? `（${results.length - inserted.length} 筆重複）` : ""}；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, used: used + inserted.length },
