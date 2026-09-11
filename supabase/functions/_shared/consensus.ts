@@ -5,9 +5,21 @@
  */
 
 export const VOTE_WEIGHT = 1;
-/** agree ≥ 2 且 disagree = 0 → verified */
+/** 一般型別：agree ≥ 2 且 disagree = 0 → verified */
 export const VERIFIED_MIN_AGREE = 2;
+/** 高風險（加減參選人）：candidacy 任何狀態、correction 改 candidate_status → agree ≥ 6 */
+export const HIGH_RISK_MIN_AGREE = 6;
 export const VERIFIED_MAX_DISAGREE = 0;
+
+/** 依型別／欄位決定需要幾票同意（鏡射 SQL contribution_required_agree） */
+export function requiredAgree(contributionType: string, payload: unknown): number {
+  if (contributionType === "candidacy") return HIGH_RISK_MIN_AGREE;
+  if (contributionType === "correction") {
+    const field = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>).field : undefined;
+    if (field === "candidate_status") return HIGH_RISK_MIN_AGREE;
+  }
+  return VERIFIED_MIN_AGREE;
+}
 /** disagree ≥ 2 → disputed */
 export const DISPUTED_MIN_DISAGREE = 2;
 /** /verifications 的預設 limit（skill.md 的工作順序是驗證：任務約 3：1，不寫死上限） */
@@ -25,10 +37,10 @@ export interface VoteCounts {
 }
 
 /** 只在 pending／verified／disputed 之間轉；approved／rejected／applied 由維護者決定、不受投票影響。 */
-export function consensusStatus(counts: VoteCounts, current: string): string {
+export function consensusStatus(counts: VoteCounts, current: string, minAgree: number = VERIFIED_MIN_AGREE): string {
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
   if (counts.disagree >= DISPUTED_MIN_DISAGREE) return "disputed";
-  if (counts.agree >= VERIFIED_MIN_AGREE && counts.disagree <= VERIFIED_MAX_DISAGREE) return "verified";
+  if (counts.agree >= minAgree && counts.disagree <= VERIFIED_MAX_DISAGREE) return "verified";
   return "pending";
 }
 

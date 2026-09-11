@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { chooseKind, filterVerifyCandidates, pickBySeed, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
-import { isValidAgentName } from "../_shared/consensus.ts";
+import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 
 /**
@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
           agree_count: pick.agree_count,
           disagree_count: pick.disagree_count,
           unsure_count: pick.unsure_count,
+          required_agree: requiredAgree(pick.contribution_type, pick.payload),
           created_at: pick.created_at,
         },
         how_to: "逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",

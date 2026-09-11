@@ -8,7 +8,7 @@
  * 隨機化：候選清單取最早的一批，再用 seed 隨機挑一筆，避免所有代理拿到同一筆。
  */
 
-import { VERIFIED_MIN_AGREE } from "./consensus.ts";
+import { requiredAgree } from "./consensus.ts";
 
 export const VERIFY_TASK_RATIO = 3;
 
@@ -26,6 +26,8 @@ export function chooseKind(totalPending: number, progress: AgentProgress): NextK
 
 export interface VerifyCandidate {
   id: string;
+  contribution_type: string;
+  payload: unknown;
   agent_name: string;
   contributor_ip_hash: string;
   agree_count: number;
@@ -45,7 +47,7 @@ export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly
     r.agent_name.toLowerCase() !== mine &&
     r.contributor_ip_hash !== me.ip_hash &&
     !me.voted_ids.has(r.id) &&
-    r.agree_count < VERIFIED_MIN_AGREE
+    r.agree_count < requiredAgree(r.contribution_type, r.payload)
   );
 }
 

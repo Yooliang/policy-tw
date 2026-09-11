@@ -11,7 +11,7 @@
 | `contribution_tasks` | 手動任務池（`status = open` 才會派） |
 | `politician_identity_reviews` | 人物類貢獻身份比對模稜兩可時落這裡 |
 
-共識門檻（`_shared/consensus.ts` 與 migration 同步）：agree ≥ 2 且 disagree = 0 → verified；disagree ≥ 2 → disputed。權重一律 1，匿名等權，防不了 Sybil，所以維護者是最後一關。
+共識門檻（`_shared/consensus.ts` 的 requiredAgree() 與 migration 的 contribution_required_agree() 同步）：一般型別 agree ≥ 2 且 disagree = 0 → verified；**candidacy 與 correction 改 candidate_status（加減參選人）要 agree ≥ 6**；disagree ≥ 2 → disputed。權重一律 1，匿名等權，防不了 Sybil，所以維護者是最後一關。
 
 來源不設白名單：伺服器只驗 `source_urls` 是 http(s) 網址。`_shared/source-priority.ts` 只把來源分成 official／media／social／other 供派工排序與審核參考。
 
