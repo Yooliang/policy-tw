@@ -43,13 +43,12 @@ const TYPE_LABEL: Record<string, string> = {
   politician: '人物資料', candidacy: '參選狀態', policy: '新政見', policy_progress: '政見進度', correction: '資料更正', task_suggestion: '任務提議',
 }
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議', needs_review: '待人工',
-  approved: '身份待人工', apply_failed: '落庫失敗', rejected: '退件', reverted: '已還原',
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議',
+  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原',
 }
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800', verified: 'bg-sky-100 text-sky-800', applied: 'bg-emerald-100 text-emerald-800',
-  disputed: 'bg-red-100 text-red-700', needs_review: 'bg-violet-100 text-violet-800', approved: 'bg-violet-100 text-violet-800',
-  apply_failed: 'bg-red-100 text-red-700', rejected: 'bg-slate-100 text-slate-600', reverted: 'bg-slate-200 text-slate-700',
+  disputed: 'bg-red-100 text-red-700', apply_failed: 'bg-amber-100 text-amber-800', rejected: 'bg-slate-100 text-slate-600', reverted: 'bg-slate-200 text-slate-700',
 }
 
 const agentName = ref('')

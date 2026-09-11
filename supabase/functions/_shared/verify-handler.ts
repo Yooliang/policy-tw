@@ -63,6 +63,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       agent_name: input.agent_name,
       agent_tool: input.agent_tool ?? null,
       verifier_ip_hash: ipHash,
+      resolved_politician_id: input.resolved_politician_id ?? null,
     })
     .select("id")
     .maybeSingle();

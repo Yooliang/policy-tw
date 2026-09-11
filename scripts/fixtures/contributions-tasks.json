@@ -5,7 +5,7 @@
   "totals": { "policy_missing": 118, "profile_gap": 71, "progress_stale": 40, "manual_open": 2 },
   "tasks": [
     {
-      "task_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
       "target": { "election_id": 2026, "election_type": "縣市長", "region": "台北市" },
       "title": "補 2026 台北市長候選人政見",
@@ -23,12 +23,12 @@
       "suggested_contribution_type": "policy"
     },
     {
-      "task_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
-      "target": { "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9", "region": "台北市" },
-      "title": "補齊蔣萬安 2026 政見白皮書內容",
+      "target": { "politician_id": "00000000-0000-4000-8000-0000000000ff", "region": "台北市" },
+      "title": "補齊李大華 2026 政見白皮書內容",
       "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",
-      "what_we_need": "補齊蔣萬安 2026 政見白皮書內容：…",
+      "what_we_need": "補齊李大華 2026 政見白皮書內容：…",
       "hint_sources": [],
       "reward": 1,
       "priority": 0,
@@ -41,9 +41,9 @@
       "suggested_contribution_type": "policy"
     },
     {
-      "task_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "progress_stale",
-      "target": { "policy_id": "0c9c1a5e-1111-4222-8333-444444444444", "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9" },
+      "target": { "policy_id": "00000000-0000-4000-8000-0000000000ff", "politician_id": "00000000-0000-4000-8000-0000000000ff" },
       "title": "查「長者健保全免」最新進度",
       "description": "網站訪客請求。請找這條政見最近的進度（議會質詢、預算、新聞），提交 policy_progress。",
       "what_we_need": "查「長者健保全免」最新進度：…",
@@ -59,10 +59,10 @@
       "suggested_contribution_type": "policy_progress"
     },
     {
-      "task_id": "auto:policy_missing:bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
+      "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
-      "target": { "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9", "name": "陳素月", "region": "彰化縣" },
-      "what_we_need": "陳素月（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
+      "target": { "politician_id": "00000000-0000-4000-8000-0000000000ff", "name": "王小明", "region": "彰化縣" },
+      "what_we_need": "王小明（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
       "hint_sources": [],
       "reward": 1,
       "source": "auto",

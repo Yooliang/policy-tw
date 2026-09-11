@@ -6,8 +6,9 @@ import { closeTask, createTask, validateTaskInput } from "../_shared/task-admin.
 
 /**
  * apply — 維護者用（需 AI_IMPORT_API_KEY）。verified 的貢獻已由 /report／apply-verified 自動落庫，這支處理：
- *   POST { api_key, action: "list", status?, limit? }                     → 列（預設 disputed + needs_review + apply_failed + pending）
- *   POST { api_key, action: "approve", contribution_id, reviewed_by?, review_notes? } → 手動落庫（disputed／needs_review／apply_failed／pending 都可）
+ *   POST { api_key, action: "list", status?, limit? }                     → 列（預設 disputed + apply_failed + pending）
+ *   POST { api_key, action: "approve", contribution_id, reviewed_by?, review_notes?, resolved_politician_id? } → 手動落庫（disputed／apply_failed／pending 都可；
+ *        身份爭議時帶 resolved_politician_id 指定是哪一位）
  *   POST { api_key, action: "reject",  contribution_id, reviewed_by?, review_notes }  → 退件
  *   POST { api_key, action: "revert",  contribution_id, reviewed_by?, review_notes? } → 依 edit_history 把該貢獻造成的變更全部倒回，標 reverted
  */
@@ -17,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, contributor_url, status, review_notes, created_at, applied_at";
-const APPROVABLE = new Set(["pending", "verified", "disputed", "approved", "needs_review", "apply_failed"]);
+const APPROVABLE = new Set(["pending", "verified", "disputed", "apply_failed"]);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
     const now = new Date().toISOString();
 
     if (action === "list") {
-      const statuses = body.status ? [body.status] : ["disputed", "needs_review", "apply_failed", "pending"];
+      const statuses = body.status ? [body.status] : ["disputed", "apply_failed", "pending"];
       const { data, error } = await supabase.from("contributions").select(ROW_COLUMNS).in("status", statuses)
         .order("created_at", { ascending: true }).limit(Math.min(Number(body.limit) || 50, 200));
       if (error) throw new Error(`contributions list: ${error.message}`);
@@ -90,7 +91,8 @@ Deno.serve(async (req) => {
 
     // approve
     if (!APPROVABLE.has(row.status)) return json({ success: false, error: `已是 ${row.status}，不能再審` }, 409);
-    const outcome = await applyContribution(supabase, row as ContributionRow);
+    const resolvedPoliticianId = typeof body.resolved_politician_id === "string" ? body.resolved_politician_id : null;
+    const outcome = await applyContribution(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
     const finalStatus = contributionStatusFor(outcome.status);
     const notes = [review_notes, outcome.message].filter((s) => typeof s === "string" && s.trim()).join("；");
     const { error: updateError } = await supabase.from("contributions").update({

@@ -35,15 +35,15 @@ Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d �
     { status: "applied", agent_name: "alice", created_at: day(1) },
     { status: "pending", agent_name: "bob", created_at: day(1) },
     { status: "disputed", agent_name: "bob", created_at: day(3) },
-    { status: "needs_review", agent_name: "carol", created_at: day(40) },
-    { status: "approved", agent_name: "carol", created_at: day(40) },
+    { status: "disputed", agent_name: "carol", created_at: day(40) },
+    { status: "rejected", agent_name: "carol", created_at: day(40) },
     { status: "apply_failed", agent_name: null, created_at: day(2) },
     { status: "verified", agent_name: "dave", created_at: day(10) },
   ];
   const votes = [{ agent_name: "bob" }, { agent_name: "bob" }, { agent_name: "erin" }];
   const s = buildFeedSummary(rows, votes, now);
   assertEquals(s.total, 8);
-  assertEquals(s.needs_attention, { total: 4, disputed: 1, needs_review: 1, identity_review: 1, apply_failed: 1 });
+  assertEquals(s.needs_attention, { total: 2, disputed: 2, retrying: 1 });
   assertEquals(s.contributors_30d, 4, "alice、bob、dave、(unknown)；carol 是 40 天前");
   assertEquals(s.daily_last_7.length, 7);
   assertEquals(s.daily_last_7[6], { date: "2026-09-12", count: 1 });

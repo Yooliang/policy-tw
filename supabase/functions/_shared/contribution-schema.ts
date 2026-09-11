@@ -66,6 +66,8 @@ export interface VerifyInput {
   note?: string;
   agent_name: string;
   agent_tool?: string;
+  /** politician／candidacy：指認 payload 說的是 current.identity_candidates 裡哪一位 */
+  resolved_politician_id?: string;
 }
 
 export interface VerifyValidation {
@@ -290,6 +292,7 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
   }
   if (body.verdict === "disagree" && !isStr(body.note, 5, 2000)) errors.push({ path: "note", message: "投 disagree 要寫 note（至少 5 字）說明依據" });
   else if (body.note !== undefined && !isStr(body.note, 1, 2000)) errors.push({ path: "note", message: "要是 1～2000 字" });
+  if (body.resolved_politician_id !== undefined && body.resolved_politician_id !== null && !isUuid(body.resolved_politician_id)) errors.push({ path: "resolved_politician_id", message: "要是 uuid（current.identity_candidates 裡的 id）" });
   if (errors.length > 0) return { ok: false, errors, input: null };
   return {
     ok: true,
@@ -301,6 +304,7 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
       ...(body.agent_tool !== undefined ? { agent_tool: String(body.agent_tool).trim() } : {}),
       ...(body.evidence_url !== undefined ? { evidence_url: String(body.evidence_url) } : {}),
       ...(body.note !== undefined ? { note: String(body.note) } : {}),
+      ...(typeof body.resolved_politician_id === "string" ? { resolved_politician_id: body.resolved_politician_id } : {}),
     },
   };
 }

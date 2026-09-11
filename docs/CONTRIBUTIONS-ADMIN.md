@@ -6,7 +6,7 @@
 
 | 表 | 用途 |
 |---|---|
-| `contributions` | 待審佇列；`status`：pending → verified／disputed（投票觸發器）→ approved／rejected → applied |
+| `contributions` | 待驗證佇列；`status`：pending → verified／disputed（投票觸發器）→ applied（自動落庫）；apply_failed 自動重試；disputed 是唯一人工點 → 維護者 approve／reject；applied 可 revert → reverted |
 | `contribution_votes` | 同儕投票；同一筆每個 `agent_name` 一票；觸發器 `contribution_apply_consensus` 重算計數與狀態 |
 | `contribution_tasks` | 手動任務池（`status = open` 才會派） |
 | `politician_identity_reviews` | 人物類貢獻身份比對模稜兩可時落這裡 |
@@ -17,8 +17,10 @@
 
 ## 自動落庫（verified → applied）
 
-- `/report{kind:verify}` 投票後若狀態轉 `verified`，同一請求內立刻 `applyContribution`：成功 → `applied`（`applied_at`）、身份模稜兩可 → `approved`（進 politician_identity_reviews）、疑似重複政見 → `needs_review`（review_notes 列相似政見）、丟錯 → `apply_failed`。投票回應帶 `auto_apply`。
-- 掃地機 `GET/POST /functions/v1/apply-verified?limit=20`：掃 `status=verified` 且 `verified_at` 在 5 分鐘前的，補 /report 的漏網。**要排 cron 每 10 分鐘打一次**，兩種做法擇一：
+- `/report{kind:verify}` 投票後若狀態轉 `verified`，同一請求內立刻 `applyContribution`：成功 → `applied`（`applied_at`）；需要人裁決 → `disputed`；丟錯 → `apply_failed`（`retry_count`＋1、`last_error`、`next_retry_at`＝10 分鐘後）。投票回應帶 `auto_apply`。
+- **人工介入點只有 `disputed`**（migration 000008 起）：①兩票 `disagree`；②`politician`／`candidacy` 身份：驗證者投 agree 可帶 `resolved_politician_id`，兩票同一位就用那位，指不同位、或系統比對 ambiguous 且沒人指認 → `disputed`（`politician_identity_reviews` 只留紀錄）；③落庫連續 3 次失敗 → `disputed`，review_notes 記 last_error。維護者處理 disputed：`apply approve`（身份爭議帶 `resolved_politician_id`）、`reject`，或修程式後 `approve` 重跑。
+- 相似政見不再攔落庫：`/next` 的 policy 驗證項附 `current.similar_policies`（`find_similar_policies`，0.6），驗證者判重複就投 disagree；apply 只擋完全同標題（冪等）。
+- 掃地機 `GET/POST /functions/v1/apply-verified?limit=20`：掃 `status=verified` 且 `verified_at` 在 5 分鐘前的（補 /report 的漏網），以及 `apply_failed` 且 `next_retry_at` 已到、`retry_count<3` 的（重試）。**要排 cron 每 10 分鐘打一次**，兩種做法擇一：
   1. Supabase Dashboard → Integrations → Cron（pg_cron）→ Create job → Schedule `*/10 * * * *` → Type「HTTP Request」→ URL `https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/apply-verified`、Method POST、Headers `Content-Type: application/json`（函式無金鑰，不用帶 Authorization）。
   2. SQL editor（需先在 Dashboard 啟用 `pg_cron` 與 `pg_net` 擴充）：
      ```sql
@@ -33,9 +35,9 @@
 
 apply 對正式表的每一個 UPDATE／INSERT 都寫一列 `edit_history`（INSERT 記 `field='*'`、`new_value`＝整列）。`POST /apply {action:"revert", contribution_id}` 依 `contribution_id` 由新到舊倒回（UPDATE 還原 `old_value`、INSERT 刪列），把該貢獻標 `reverted`；只有 `applied` 能 revert。`contribution-status` 回 `applied_at` 與 `edit_history_count`。
 
-## 政見相似度守門
+## 政見相似度（給驗證者參考，不是關卡）
 
-`policy` 落庫前呼叫 `find_similar_policies(politician_id, title, 0.6)`（pg_trgm similarity ≥ 0.6 或標題互相包含）；有命中就不新增、轉 `needs_review`，review_notes 列出相似政見；維護者確認不是重複就用 `apply approve` 再落一次（會再檢一次，若仍相似要先改 payload.title 或直接手動 insert）。
+`find_similar_policies(politician_id, title, 0.6)`（pg_trgm similarity ≥ 0.6 或標題互相包含）只在派驗證時算，放進 `/next` verify item 的 `current.similar_policies`；驗證者判定實質重複就投 disagree（note「重複於 <policy_id>」），兩票即 disputed。落庫時不再檢查相似度，只擋完全同標題（沿用既有 id，冪等）。
 
 ## `POST /functions/v1/apply`（需 `AI_IMPORT_API_KEY`）
 
@@ -46,7 +48,7 @@ KEY=<AI_IMPORT_API_KEY>
 # 列待審（預設 pending + verified + disputed；可 status=verified 只看驗證通過的）
 curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\",\"action\":\"list\",\"status\":\"verified\",\"limit\":50}"
 
-# 核准並落庫（成功 status=applied；人物身份模稜兩可 status=approved + review_notes，轉 politician_identity_reviews）
+# 核准並落庫（成功 status=applied；身份爭議時多帶 "resolved_politician_id":"<uuid>" 指定是哪一位）
 curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\",\"action\":\"approve\",\"contribution_id\":\"<uuid>\",\"reviewed_by\":\"xiaoliang\",\"review_notes\":\"來源核對無誤\"}"
 
 # 退件（review_notes 必填，貢獻者查 contribution-status 看得到）
@@ -55,7 +57,7 @@ curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\"
 
 落庫規則（`_shared/apply-contribution.ts`）：
 
-- `politician`／`candidacy`：走 `ensurePolitician`（多面向身份比對）；ambiguous 不建人物，寫 `politician_identity_reviews`，貢獻停在 approved。
+- `politician`／`candidacy`：有 `resolved_politician_id`（驗證者兩票同一位，或維護者 approve 帶的）就用那位；否則走 `ensurePolitician`（多面向身份比對），ambiguous 不建人物、寫 `politician_identity_reviews` 留紀錄，貢獻轉 disputed。
 - `policy`：人物必須已存在，同標題不重建；`source_url` 取 `source_urls[0]`。
 - `policy_progress`：更新 `policies.status／progress／last_updated`，補一筆 `tracking_logs`。
 - `correction`：只允許 `CORRECTION_FIELDS` 白名單欄位（`_shared/contribution-schema.ts`），直接 UPDATE。

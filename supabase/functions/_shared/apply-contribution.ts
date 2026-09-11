@@ -1,8 +1,9 @@
 /**
  * 把一筆貢獻落進正式表。同儕驗證通過（verified）後由 /report 或 apply-verified 自動呼叫；維護者 apply 也走這裡。
  *
- * - politician／candidacy：走 ensurePolitician（多面向身份比對）；ambiguous → needs_identity_review（進 politician_identity_reviews，不動正式表）
- * - policy：人物必須已存在；同一人既有政見標題 similarity ≥ 0.6 或互相包含 → needs_review（不新增，列出相似政見）
+ * - politician／candidacy：驗證者有指認（row.resolved_politician_id，兩票同一位）就用那位；否則走 ensurePolitician（多面向身份比對），
+ *   ambiguous → disputed（唯一的人工點；politician_identity_reviews 只留紀錄）
+ * - policy：人物必須已存在；相似政見不再攔截（派驗證時已把 similar_policies 給驗證者判斷），只擋完全同標題（冪等）
  * - policy_progress：更新 policies.status／progress／last_updated，補一筆 tracking_logs
  * - correction：只允許 CORRECTION_FIELDS 白名單欄位，直接 UPDATE（category 走正規化）
  * 每個 UPDATE／INSERT 都寫 edit_history（revert 用）；每一步檢查 error。
@@ -20,8 +21,6 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 
-export const POLICY_SIMILARITY_THRESHOLD = 0.6;
-
 export interface ContributionRow {
   id: string;
   contribution_type: ContributionType;
@@ -30,9 +29,12 @@ export interface ContributionRow {
   note: string | null;
   agent_name: string | null;
   contributor_url: string | null;
+  /** politician／candidacy：驗證者兩票指認的同一位（auto-apply 從 votes 算出）或維護者 approve 時指定 */
+  resolved_politician_id?: string | null;
 }
 
-export type ApplyStatus = "applied" | "needs_identity_review" | "needs_review" | "failed";
+/** applied＝落庫完成；disputed＝需要人裁決（身份判不出／指認衝突）；failed＝技術性失敗（會自動重試） */
+export type ApplyStatus = "applied" | "disputed" | "failed";
 
 export interface ApplyOutcome {
   status: ApplyStatus;
@@ -96,10 +98,29 @@ async function recordCreatedPolitician(supabase: SupabaseLike, ctx: EditContext,
   await recordInsert(supabase, ctx, "politicians", politicianId, data ?? { id: politicianId });
 }
 
+type Ensured = { politician_id: string; created: boolean } | { disputed: string };
+
+/** 驗證者／維護者有指認就用那位（要存在）；否則多面向比對：matched／new 照常，ambiguous → disputed */
+async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, candidate: Parameters<typeof ensurePolitician>[1], options: Parameters<typeof ensurePolitician>[2]): Promise<Ensured> {
+  const resolved = str(row.resolved_politician_id);
+  if (resolved) {
+    const { data, error } = await supabase.from("politicians").select("id").eq("id", resolved).maybeSingle();
+    throwIf(error, "politicians lookup resolved");
+    if (!data) return { disputed: `指認的人物 ${resolved} 不存在，交維護者裁決` };
+    return { politician_id: String(data.id), created: false };
+  }
+  const ensured = await ensurePolitician(supabase, candidate, options);
+  if (ensured.politician_id === null) {
+    const names = ensured.resolution.candidates.map((c) => `${c.name ?? "?"}（${c.politician_id.slice(0, 8)}）`).join("、");
+    return { disputed: `身份判不出（同名多位：${names || "見 politician_identity_reviews"}）且驗證者未指認 resolved_politician_id，交維護者裁決：${ensured.resolution.reason}` };
+  }
+  return { politician_id: ensured.politician_id, created: ensured.created };
+}
+
 async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
-  const ensured = await ensurePolitician(supabase, {
+  const ensured = await ensureOrResolve(supabase, row, {
     name: String(p.name),
     party: str(p.party),
     region: str(p.region),
@@ -119,9 +140,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
       experience: Array.isArray(p.experience) ? p.experience : null,
     },
   });
-  if (ensured.politician_id === null) {
-    return { status: "needs_identity_review", message: `身份比對模稜兩可，已進 politician_identity_reviews：${ensured.resolution.reason}` };
-  }
+  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) {
     await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
     return { status: "applied", politician_id: ensured.politician_id, created_politician: true, message: "已建立新政治人物" };
@@ -149,7 +168,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const p = row.payload;
   const ctx = ctxOf(row);
   const electionType = normElectionType(str(p.election_type)) ?? "縣市長";
-  const ensured = await ensurePolitician(supabase, {
+  const ensured = await ensureOrResolve(supabase, row, {
     name: String(p.name ?? ""),
     party: str(p.party),
     region: str(p.region),
@@ -160,9 +179,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     cec_cand_id: str(p.cec_cand_id) ?? int(p.cec_cand_id),
     cec_theme_id: str(p.cec_theme_id),
   }, { source: `contribution:${row.id}` });
-  if (ensured.politician_id === null) {
-    return { status: "needs_identity_review", message: `身份比對模稜兩可，已進 politician_identity_reviews：${ensured.resolution.reason}` };
-  }
+  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
   // withdrawn 在 DB 沒有對應值，落成 not_running 並在 source_note 註明
@@ -200,20 +217,11 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
   const politicianId = await locatePolitician(supabase, p);
   if (!politicianId) return { status: "failed", message: "找不到該政治人物（不會為了一條政見建新人物）；請先提交 politician 貢獻或帶 politician_id" };
 
-  // 相似度守門：同一人既有政見標題 similarity ≥ 0.6 或互相包含 → 不新增，轉 needs_review
-  const { data: similar, error: simError } = await supabase.rpc("find_similar_policies", {
-    p_politician_id: politicianId, p_title: String(p.title), p_threshold: POLICY_SIMILARITY_THRESHOLD,
-  });
-  throwIf(simError, "find_similar_policies");
-  const hits = ((similar ?? []) as Array<{ id: string; title: string; similarity: number }>);
-  if (hits.length > 0) {
-    return {
-      status: "needs_review",
-      politician_id: politicianId,
-      similar_policies: hits,
-      message: `疑似與既有政見重複，未新增：${hits.map((h) => `「${h.title}」(${(h.similarity * 100).toFixed(0)}%)`).join("、")}`,
-    };
-  }
+  // 相似政見不再攔截（驗證者在 /next 的 current.similar_policies 已判斷過）；只擋完全同標題，讓重試／重複落庫冪等
+  const { data: sameTitle, error: sameError } = await supabase.from("policies").select("id").eq("politician_id", politicianId).eq("title", String(p.title).trim()).limit(1);
+  throwIf(sameError, "policies same-title lookup");
+  const existingId = (sameTitle ?? [])[0]?.id as string | undefined;
+  if (existingId) return { status: "applied", policy_id: existingId, politician_id: politicianId, message: `同標題政見已存在（${existingId}），沿用、未重複新增` };
 
   const today = new Date().toISOString().slice(0, 10);
   const rowToInsert = {
@@ -332,11 +340,10 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
 }
 
 /** apply 結果 → contributions.status */
-export function contributionStatusFor(outcome: ApplyStatus): "applied" | "approved" | "needs_review" | "apply_failed" {
+export function contributionStatusFor(outcome: ApplyStatus): "applied" | "disputed" | "apply_failed" {
   switch (outcome) {
     case "applied": return "applied";
-    case "needs_identity_review": return "approved"; // 身份待人工，維護者從 politician_identity_reviews 處理
-    case "needs_review": return "needs_review";
-    default: return "apply_failed";
+    case "disputed": return "disputed"; // 唯一的人工點
+    default: return "apply_failed"; // 掃地機會重試
   }
 }

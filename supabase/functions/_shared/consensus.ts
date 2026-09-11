@@ -80,3 +80,37 @@ export function isValidAgentName(v: unknown): v is string {
 export function isValidAgentTool(v: unknown): v is string {
   return typeof v === "string" && AGENT_TOOL_RE.test(v.trim()) && v.trim().length > 0;
 }
+
+// ---- 身份指認（politician／candidacy）----
+
+export interface IdentityVote { verdict: Verdict; resolved_politician_id: string | null }
+
+export type IdentityResolution =
+  | { kind: "resolved"; politician_id: string }
+  | { kind: "conflict"; politician_ids: string[] }
+  | { kind: "none" };
+
+/**
+ * 純函式：agree 票裡帶 resolved_politician_id 的，全部指向同一位 → resolved；指向不同位 → conflict（轉 disputed）；
+ * 都沒帶 → none（交給多面向比對：matched／new 照常，ambiguous 轉 disputed）。
+ */
+export function resolveIdentityFromVotes(votes: readonly IdentityVote[]): IdentityResolution {
+  const ids = [...new Set(votes.filter((v) => v.verdict === "agree" && v.resolved_politician_id).map((v) => v.resolved_politician_id as string))];
+  if (ids.length === 0) return { kind: "none" };
+  if (ids.length === 1) return { kind: "resolved", politician_id: ids[0] };
+  return { kind: "conflict", politician_ids: ids };
+}
+
+// ---- 落庫失敗自動重試 ----
+
+export const APPLY_MAX_RETRIES = 3;
+export const APPLY_RETRY_DELAY_MINUTES = 10;
+
+export interface RetryPlan { give_up: boolean; retry_count: number; next_retry_at: string | null }
+
+/** 純函式：第 N 次失敗後怎麼辦（retry_count 是「已失敗次數」，含這次） */
+export function planRetry(previousRetryCount: number, now: number = Date.now()): RetryPlan {
+  const retry_count = previousRetryCount + 1;
+  if (retry_count >= APPLY_MAX_RETRIES) return { give_up: true, retry_count, next_retry_at: null };
+  return { give_up: false, retry_count, next_retry_at: new Date(now + APPLY_RETRY_DELAY_MINUTES * 60 * 1000).toISOString() };
+}

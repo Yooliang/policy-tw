@@ -14,8 +14,8 @@ import {
  * 資料來源：GET /functions/v1/contributions-feed（公開、唯讀、不含任何雜湊）。
  */
 
-// attention = disputed＋needs_review＋approved（身份待人工）＋apply_failed，feed 端點也認這個 key
-type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'attention' | 'rejected' | 'reverted'
+// 人工介入點只有 disputed（兩票反對、身份指認衝突、連續落庫失敗）；apply_failed 會自動重試，不列為人工
+type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'disputed' | 'rejected' | 'reverted'
 
 interface FeedItem {
   id: string
@@ -43,7 +43,7 @@ interface FeedItem {
 interface FeedSummary {
   total: number
   by_status: Record<string, number>
-  needs_attention: { total: number; disputed: number; needs_review: number; identity_review: number; apply_failed: number }
+  needs_attention: { total: number; disputed: number; retrying: number }
   contributors_30d: number
   daily_last_7: Array<{ date: string; count: number }>
   leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>
@@ -58,7 +58,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   { key: 'pending', label: '待驗證' },
   { key: 'verified', label: '已驗證' },
   { key: 'applied', label: '已上線' },
-  { key: 'attention', label: '待人工審核' },
+  { key: 'disputed', label: '有爭議' },
   { key: 'rejected', label: '退件' },
   { key: 'reverted', label: '已還原' },
 ]
@@ -75,17 +75,15 @@ const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.filter(t => t.key).map(t => [t.key, t.label]))
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議', needs_review: '待人工',
-  approved: '身份待人工', apply_failed: '落庫失敗', rejected: '退件', reverted: '已還原',
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議',
+  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原',
 }
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800 border-amber-200',
   verified: 'bg-sky-100 text-sky-800 border-sky-200',
   applied: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   disputed: 'bg-red-100 text-red-700 border-red-200',
-  needs_review: 'bg-violet-100 text-violet-800 border-violet-200',
-  approved: 'bg-violet-100 text-violet-800 border-violet-200',
-  apply_failed: 'bg-red-100 text-red-700 border-red-200',
+  apply_failed: 'bg-amber-100 text-amber-800 border-amber-200',
   rejected: 'bg-slate-100 text-slate-600 border-slate-200',
   reverted: 'bg-slate-200 text-slate-700 border-slate-300',
 }
@@ -168,18 +166,18 @@ function toggle(id: string) {
   expanded.value = next
 }
 
-// 四張卡：待驗證／已上線／待人工審核（有事才亮警示色）／貢獻者（近 30 天）。卡片帶數字，下方狀態 tab 只當篩選不重複顯示數字。
+// 四張卡：待驗證／已上線／有爭議（唯一的人工點，有事才亮警示色）／貢獻者（近 30 天）。卡片帶數字，下方狀態 tab 只當篩選不重複顯示數字。
 interface StatCard { key: string; label: string; value: number; icon: unknown; cls: string; filter?: StatusKey; hint?: string }
 const stats = computed<StatCard[]>(() => {
   const s = summary.value?.by_status ?? {}
-  const attention = summary.value?.needs_attention?.total ?? 0
+  const disputed = summary.value?.needs_attention?.disputed ?? s.disputed ?? 0
   return [
     { key: 'pending', label: '待驗證', value: s.pending ?? 0, icon: Clock, cls: 'text-amber-600 bg-amber-50', filter: 'pending' },
     { key: 'applied', label: '已上線', value: s.applied ?? 0, icon: CheckCircle2, cls: 'text-emerald-600 bg-emerald-50', filter: 'applied' },
     {
-      key: 'attention', label: '待人工審核', value: attention, icon: AlertTriangle, filter: 'attention',
-      cls: attention > 0 ? 'text-red-600 bg-red-50' : 'text-slate-400 bg-slate-100',
-      hint: '有爭議、疑似重複、身份待確認或落庫失敗，由維護者處理',
+      key: 'disputed', label: '有爭議', value: disputed, icon: AlertTriangle, filter: 'disputed',
+      cls: disputed > 0 ? 'text-red-600 bg-red-50' : 'text-slate-400 bg-slate-100',
+      hint: '兩票反對、身份指認衝突或連續落庫失敗，由維護者裁決',
     },
     { key: 'contributors', label: '貢獻者（近 30 天）', value: summary.value?.contributors_30d ?? 0, icon: Users, cls: 'text-sky-600 bg-sky-50' },
   ]
@@ -259,12 +257,12 @@ usePageHead({
       <!-- 統計卡 -->
       <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" data-testid="stats">
         <component :is="s.filter ? 'button' : 'div'" v-for="s in stats" :key="s.key" :type="s.filter ? 'button' : undefined" :title="s.hint"
-          :class="['bg-white rounded-2xl shadow-lg border p-4 sm:p-5 flex items-center gap-3 text-left', s.key === 'attention' && s.value > 0 ? 'border-red-200' : 'border-slate-200', s.filter ? 'hover:border-slate-400 transition-colors' : '']"
-          :data-testid="`stat-${s.key}`" :data-alert="s.key === 'attention' ? String(s.value > 0) : undefined" @click="applyCardFilter(s)">
+          :class="['bg-white rounded-2xl shadow-lg border p-4 sm:p-5 flex items-center gap-3 text-left', s.key === 'disputed' && s.value > 0 ? 'border-red-200' : 'border-slate-200', s.filter ? 'hover:border-slate-400 transition-colors' : '']"
+          :data-testid="`stat-${s.key}`" :data-alert="s.key === 'disputed' ? String(s.value > 0) : undefined" @click="applyCardFilter(s)">
           <div :class="['p-2.5 rounded-xl flex-shrink-0', s.cls]"><component :is="s.icon" :size="22" /></div>
           <div class="min-w-0">
             <p class="text-xs font-bold text-slate-400 uppercase tracking-wider truncate">{{ s.label }}</p>
-            <p :class="['text-2xl font-black leading-tight', s.key === 'attention' && s.value > 0 ? 'text-red-600' : 'text-navy-900']">{{ summary ? s.value : '–' }}</p>
+            <p :class="['text-2xl font-black leading-tight', s.key === 'disputed' && s.value > 0 ? 'text-red-600' : 'text-navy-900']">{{ summary ? s.value : '–' }}</p>
           </div>
         </component>
       </section>
