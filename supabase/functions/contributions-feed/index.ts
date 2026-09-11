@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { requiredAgree } from "../_shared/consensus.ts";
-import { safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
+import { ATTENTION_STATUSES, buildFeedSummary, safePayload, type SummaryRow, summarizeContribution, type VoteRow } from "../_shared/contribution-summary.ts";
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
@@ -31,21 +31,21 @@ Deno.serve(async (req) => {
     const type = url.searchParams.get("type");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 50);
     const cursor = url.searchParams.get("cursor");
-    if (status !== "all" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all 或 ${STATUSES.join("/")}` }, 400);
+    if (status !== "all" && status !== "attention" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all／attention 或 ${STATUSES.join("/")}` }, 400);
 
     let q = supabase.from("contributions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(limit + 1);
-    if (status !== "all") q = q.eq("status", status);
+    if (status === "attention") q = q.in("status", ATTENTION_STATUSES);
+    else if (status !== "all") q = q.eq("status", status);
     if (agentName) q = q.eq("agent_name", agentName);
     if (type) q = q.eq("contribution_type", type);
     if (cursor) q = q.lt("created_at", cursor);
 
-    const since7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
-    const [feedRes, allRes, recentRes] = await Promise.all([
+    const [feedRes, allRes, votesRes] = await Promise.all([
       q,
-      supabase.from("contributions").select("status, agent_name").limit(10000),
-      supabase.from("contributions").select("created_at").gte("created_at", since7).limit(10000),
+      supabase.from("contributions").select("status, agent_name, created_at").limit(10000),
+      supabase.from("contribution_votes").select("agent_name").limit(20000),
     ]);
-    for (const r of [feedRes, allRes, recentRes]) if (r.error) throw new Error(r.error.message);
+    for (const r of [feedRes, allRes, votesRes]) if (r.error) throw new Error(r.error.message);
 
     // deno-lint-ignore no-explicit-any
     const rows = (feedRes.data ?? []) as any[];
@@ -78,26 +78,8 @@ Deno.serve(async (req) => {
       };
     });
 
-    // summary
-    // deno-lint-ignore no-explicit-any
-    const all = (allRes.data ?? []) as any[];
-    const byStatus: Record<string, number> = {};
-    const byAgent = new Map<string, { submitted: number; applied: number }>();
-    for (const r of all) {
-      byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
-      const a = byAgent.get(r.agent_name) ?? { submitted: 0, applied: 0 };
-      a.submitted++;
-      if (r.status === "applied") a.applied++;
-      byAgent.set(r.agent_name, a);
-    }
-    const daily: Record<string, number> = {};
-    for (let i = 6; i >= 0; i--) daily[new Date(Date.now() - i * 86400 * 1000).toISOString().slice(0, 10)] = 0;
-    // deno-lint-ignore no-explicit-any
-    for (const r of (recentRes.data ?? []) as any[]) {
-      const d = String(r.created_at).slice(0, 10);
-      if (d in daily) daily[d]++;
-    }
-    const leaderboard = [...byAgent.entries()].map(([agent_name, v]) => ({ agent_name, ...v })).sort((a, b) => b.applied - a.applied || b.submitted - a.submitted).slice(0, 10);
+    // summary（純函式，見 contribution-summary.ts）
+    const summary = buildFeedSummary((allRes.data ?? []) as SummaryRow[], (votesRes.data ?? []) as VoteRow[]);
 
     return json({
       success: true,
@@ -105,7 +87,7 @@ Deno.serve(async (req) => {
       has_more: hasMore,
       next_cursor: hasMore ? page[page.length - 1].created_at : null,
       items,
-      summary: { total: all.length, by_status: byStatus, daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })), leaderboard },
+      summary,
       docs: "https://policy-tw.web.app/skill.md",
     });
   } catch (error: unknown) {
