@@ -6,7 +6,8 @@ import { PolicyStatus } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import { Search, TrendingUp, Star } from 'lucide-vue-next'
+import { Search, TrendingUp, Star, Link as LinkIcon } from 'lucide-vue-next'
+import HeroAction from '../components/HeroAction.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -77,12 +78,9 @@ usePageHead({
 
       <!-- Hero Actions: 頁籤 -->
       <template #actions>
-        <button @click="showCheckpointsOnly = false" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${!showCheckpointsOnly ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
-          <TrendingUp :size="16" /> 政見列表
-        </button>
-        <button @click="showCheckpointsOnly = true" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${showCheckpointsOnly ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
-          <Star :size="16" /> 我的追蹤
-        </button>
+        <HeroAction :active="!showCheckpointsOnly" @click="showCheckpointsOnly = false"><TrendingUp :size="16" /> 政見列表</HeroAction>
+        <HeroAction :active="showCheckpointsOnly" @click="showCheckpointsOnly = true"><Star :size="16" /> 我的追蹤</HeroAction>
+        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
       </template>
 
       <GlobalRegionSelector />

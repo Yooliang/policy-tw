@@ -10,6 +10,8 @@ import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
+import HeroAction from '../components/HeroAction.vue'
+import { Link as LinkIcon } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 
@@ -131,7 +133,7 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex items-center gap-3 ml-0 md:ml-44">
+        <div class="flex flex-wrap items-center gap-3 ml-0 md:ml-44">
           <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
@@ -139,7 +141,7 @@ usePageHead({
             @click="handleVerify"
             :disabled="verifying"
             :class="[
-              'px-5 py-2 rounded-lg font-bold transition-all flex items-center gap-2',
+              'px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap border border-transparent',
               verifySuccess
                 ? 'bg-emerald-500 text-white'
                 : verifyError
@@ -153,8 +155,8 @@ usePageHead({
             <Sparkles v-else :size="18" />
             {{ verifying ? '送出中…' : verifySuccess ? '已排入' : verifyError ? '失敗' : '請 AI 查進度' }}
           </button>
-          <button class="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-lg font-bold border border-white/20 transition-all flex items-center gap-2"><Share2 :size="18" /> 分享</button>
-          <button @click="router.push({ path: '/community', query: { filter: policy.title } })" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-lg font-bold border border-white/20 transition-all flex items-center gap-2"><MessageSquare :size="18" /> 公民討論</button>
+          <HeroAction :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 公民討論</HeroAction>
+          <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
         </div>
       </template>
     </Hero>

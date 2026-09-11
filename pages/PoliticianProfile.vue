@@ -11,6 +11,8 @@ import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+import HeroAction from '../components/HeroAction.vue'
+import { Link as LinkIcon, Milestone } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -196,12 +198,12 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex items-center gap-4 ml-0 md:ml-48">
+        <div class="flex flex-wrap items-center gap-3 ml-0 md:ml-48">
           <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <button class="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg shadow-amber-500/30 transition-all flex items-center gap-2"><ThumbsUp :size="18" /> 支持候選人</button>
-          <button class="bg-white/10 hover:bg-white/20 text-white px-6 py-2 rounded-lg font-bold border border-white/30 transition-all">分享頁面</button>
+          <HeroAction :to="{ path: '/ai-assistant', query: { type: 'politician' } }"><Milestone :size="16" /> 看人物貢獻</HeroAction>
+          <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
         </div>
       </template>
     </Hero>
