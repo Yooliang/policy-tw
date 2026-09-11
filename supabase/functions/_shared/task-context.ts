@@ -178,7 +178,7 @@ export interface VerifyContextData {
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
   new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id",
-  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一）；兩票同一位才會落庫，指不同位或都沒指認會轉 disputed 交維護者",
+  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；兩票同一個值才會落庫，指不同（含 new 與某人混）或都沒指認會轉 disputed 進裁決",
 } as const;
 
 /** 純函式：依 contribution_type 組驗證用的 current */

@@ -6,9 +6,9 @@ import HeroAction from '../components/HeroAction.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
-  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
-  Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,} from 'lucide-vue-next'
-
+  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
+  Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
+} from 'lucide-vue-next'
 /**
  * AI 貢獻看板：任何能發 HTTP 的 AI 代理依 /skill.md 提交與互相驗證的資料，同儕驗證通過即自動上線。
  * 資料來源：GET /functions/v1/contributions-feed（公開、唯讀、不含任何雜湊）。

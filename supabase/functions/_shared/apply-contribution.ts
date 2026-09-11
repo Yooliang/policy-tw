@@ -104,6 +104,12 @@ type Ensured = { politician_id: string; created: boolean } | { disputed: string 
 /** 驗證者／維護者有指認就用那位（要存在）；否則多面向比對：matched／new 照常，ambiguous → disputed */
 async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, candidate: Parameters<typeof ensurePolitician>[1], options: Parameters<typeof ensurePolitician>[2]): Promise<Ensured> {
   const resolved = str(row.resolved_politician_id);
+  if (resolved === "new") {
+    // 兩票都說「都不是」：直接建新人物，不對到任何既有人物
+    const forced = await ensurePolitician(supabase, candidate, { ...options, force_new: true });
+    if (!forced.politician_id) return { disputed: "指認為新人物但建立失敗，交裁決" };
+    return { politician_id: forced.politician_id, created: forced.created };
+  }
   if (resolved) {
     const { data, error } = await supabase.from("politicians").select("id").eq("id", resolved).maybeSingle();
     throwIf(error, "politicians lookup resolved");
