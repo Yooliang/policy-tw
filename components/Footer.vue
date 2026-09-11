@@ -58,7 +58,7 @@ const activeElection = computed(() => getActiveElection())
           <h4 class="text-white font-semibold mb-4">關於我們</h4>
           <ul class="space-y-2 text-sm">
             <li><a href="#" class="hover:text-blue-400 transition-colors">專案願景</a></li>
-            <li><a href="#" class="hover:text-blue-400 transition-colors">開源貢獻</a></li>
+            <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">教你的 AI 幫正見更新資料</RouterLink></li>
             <li><a href="#" class="hover:text-blue-400 transition-colors">隱私權政策</a></li>
             <li><RouterLink to="/donation" class="hover:text-blue-400 transition-colors">贊助支持</RouterLink></li>
           </ul>

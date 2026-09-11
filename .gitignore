@@ -37,3 +37,6 @@ dist-ssr
 
 # 身份比對 dry-run 產物
 .dedupe-check
+
+# deno test 在 repo 根目錄跑會留下的鎖檔
+deno.lock
