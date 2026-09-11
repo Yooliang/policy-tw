@@ -490,3 +490,8 @@ entrypoint = "./functions/next/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/report/index.ts"
+
+[functions.apply-verified]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/apply-verified/index.ts"

@@ -7,13 +7,14 @@
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
+import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
 export const VERIFY_DAILY_LIMIT_PER_IP = 200;
 
-export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string): Promise<HandlerResult> {
+export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn): Promise<HandlerResult> {
   const v = validateVerifyRequest(body);
   if (!v.ok || !v.input) {
     const encoding = v.errors.some((e) => e.code === "encoding_invalid");
@@ -74,6 +75,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     .from("contributions").select("status, agree_count, disagree_count, unsure_count").eq("id", contribution.id).maybeSingle();
   if (aError) throw new Error(`contributions reread: ${aError.message}`);
 
+  // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機／維護者處理）
+  const autoApply = shouldAutoApply(after?.status) ? await autoApplyContribution(supabase, contribution.id, applyFn) : { triggered: false };
+  const finalStatus = autoApply.triggered && autoApply.status ? autoApply.status : (after?.status ?? contribution.status);
+
   return {
     status: 201,
     body: {
@@ -84,9 +89,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       agree_count: after?.agree_count ?? 0,
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,
-      status: after?.status ?? contribution.status,
+      status: finalStatus,
       required_agree: requiredAgree(contribution.contribution_type, contribution.payload),
-      ...(after?.status === "verified" ? { note: "verified ＝ 同儕驗證通過，仍要維護者審核才會上線" } : {}),
+      ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
+      ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),
     },
   };
 }

@@ -15,6 +15,28 @@
 
 來源不設白名單：伺服器只驗 `source_urls` 是 http(s) 網址。`_shared/source-priority.ts` 只把來源分成 official／media／social／other 供派工排序與審核參考。
 
+## 自動落庫（verified → applied）
+
+- `/report{kind:verify}` 投票後若狀態轉 `verified`，同一請求內立刻 `applyContribution`：成功 → `applied`（`applied_at`）、身份模稜兩可 → `approved`（進 politician_identity_reviews）、疑似重複政見 → `needs_review`（review_notes 列相似政見）、丟錯 → `apply_failed`。投票回應帶 `auto_apply`。
+- 掃地機 `GET/POST /functions/v1/apply-verified?limit=20`：掃 `status=verified` 且 `verified_at` 在 5 分鐘前的，補 /report 的漏網。**要排 cron 每 10 分鐘打一次**，兩種做法擇一：
+  1. Supabase Dashboard → Integrations → Cron（pg_cron）→ Create job → Schedule `*/10 * * * *` → Type「HTTP Request」→ URL `https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/apply-verified`、Method POST、Headers `Content-Type: application/json`（函式無金鑰，不用帶 Authorization）。
+  2. SQL editor（需先在 Dashboard 啟用 `pg_cron` 與 `pg_net` 擴充）：
+     ```sql
+     SELECT cron.schedule('apply-verified-10min', '*/10 * * * *', $$
+       SELECT net.http_post(url := 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/apply-verified',
+                            headers := '{"Content-Type":"application/json"}'::jsonb, body := '{}'::jsonb);
+     $$);
+     -- 查：SELECT * FROM cron.job;  停：SELECT cron.unschedule('apply-verified-10min');
+     ```
+
+## edit_history 與整筆還原
+
+apply 對正式表的每一個 UPDATE／INSERT 都寫一列 `edit_history`（INSERT 記 `field='*'`、`new_value`＝整列）。`POST /apply {action:"revert", contribution_id}` 依 `contribution_id` 由新到舊倒回（UPDATE 還原 `old_value`、INSERT 刪列），把該貢獻標 `reverted`；只有 `applied` 能 revert。`contribution-status` 回 `applied_at` 與 `edit_history_count`。
+
+## 政見相似度守門
+
+`policy` 落庫前呼叫 `find_similar_policies(politician_id, title, 0.6)`（pg_trgm similarity ≥ 0.6 或標題互相包含）；有命中就不新增、轉 `needs_review`，review_notes 列出相似政見；維護者確認不是重複就用 `apply approve` 再落一次（會再檢一次，若仍相似要先改 payload.title 或直接手動 insert）。
+
 ## `POST /functions/v1/apply`（需 `AI_IMPORT_API_KEY`）
 
 ```bash
