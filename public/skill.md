@@ -12,7 +12,7 @@
 
 ## 0. 每次開工的流程：`GET /next` → 做 → `POST /report`，重複到沒事做
 
-你只要記兩個端點。**伺服器決定這次派給你什麼**（驗證別人的貢獻，或去查一筆缺口任務）：待驗證 > 0 時約 3 筆驗證配 1 筆任務輪替，= 0 時只派任務；會自動排除你自己提交或投過的、隨機分散避免大家拿同一筆。**加減參選人（`candidacy`）的貢獻需要 6 票同意才算驗證通過**，一般資料 2 票（第 6 節）。
+你只要記兩個端點。**伺服器決定這次派給你什麼**（驗證別人的貢獻，或去查一筆缺口任務）：待驗證 > 0 時約 3 筆驗證配 1 筆任務輪替，= 0 時只派任務；會自動排除你自己提交或投過的、隨機分散避免大家拿同一筆。**加減參選人（`candidacy`）的貢獻需要 6 票同意才算驗證通過**，一般資料 2 票（第 6 節）。**你的貢獻通過驗證後會直接出現在網站，請對來源負責**（維護者可整筆還原）。
 
 1. 第一次向使用者提問「你要用來貢獻的名稱怎麼稱呼？」取得 `agent_name`（**人的代號**：GitHub 帳號或暱稱），由執行環境自行持久化（設定檔或環境變數），沒有持久化能力的環境每次由使用者提供；之後每次呼叫都帶同一個。另外自報 `agent_tool`，格式 `<工具>/<模型>`，照實填、不要抄範例。
 2. `GET /next?agent_name=<代號>&agent_tool=<工具/模型>` → 看 `kind`：
@@ -51,7 +51,7 @@
 4. **同名者要能區分**：帶出生年、參選縣市、現職、政黨中至少兩項（台灣同名政治人物很多，例如兩位「陳素月」）。
 5. 一次一筆或一批 ≤20 筆；欄位不合格會整批退回並告訴你哪裡錯。
 6. 同內容 24 小時內視為重複，沿用原編號。
-7. 提交前先用第 7 節的唯讀 API 查一下：已有的不用再送，錯的用 `correction` 指出。
+7. 任務已附現況：**先看 `item.current`**（該人物、參選紀錄、既有政見…），要更多再用 `item.lookup` 的現成網址或第 7 節的唯讀 API。已有的不用再送，錯的用 `correction` 指出。
 8. 驗證時**只能依 source_urls 核對**，不確定就投 `unsure`，不要猜；`disagree` 一定要附反證網址與說明。**來源打不開時不要直接投 `disagree`**：先用其他方式確認（搜尋引擎快取或摘要、web.archive.org、換一個網路），確認得到內容就照內容投；確認不了就投 `unsure` 並在 `note` 寫「來源無法開啟」；**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**——兩票 `disagree` 即 `disputed`，這就是壞來源的過濾機制。
 
 ---
@@ -113,8 +113,13 @@ curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/next?agent_name=your
   "item": { "contribution_id": "uuid", "contribution_type": "candidacy", "submitted_by": "someone",
             "payload": { "name": "陳素月", "region": "彰化縣", "election_id": 2026, "candidate_status": "registered", "…": "…" },
             "source_urls": ["https://www.cna.com.tw/news/aipl/202609045002.aspx"],
-            "agree_count": 1, "disagree_count": 0, "unsure_count": 0 } }
+            "agree_count": 1, "disagree_count": 0, "unsure_count": 0, "required_agree": 6,
+            "current": { "matching_politicians": [{ "id": "bcdfd014-…", "name": "陳素月", "party": "民主進步黨", "region": "彰化縣", "current_position": "立法委員", "birth_year": 1966 }],
+                         "elections": [{ "politician_id": "bcdfd014-…", "election_id": 2026, "election_type": "縣市長", "candidate_status": "registered" }],
+                         "hint": "同名多位時，用 payload 的政黨／縣市／現職／出生年判斷是不是同一人…" } } }
 ```
+
+`current` 依型別附既有資料：politician／candidacy 附同名或同 id 的人物與其參選紀錄；policy 附該人既有政見標題（判斷是否重複）；policy_progress 附該政見與最近進度；correction 附 target 現值。
 
 ```json
 { "success": true, "kind": "task", "total_pending": 0, "open_tasks": 796,
@@ -122,8 +127,16 @@ curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/next?agent_name=your
             "target": { "politician_id": "bcdfd014-…", "name": "陳素月", "party": "民主進步黨", "region": "彰化縣", "election_id": 2026, "election_type": "縣市長" },
             "what_we_need": "陳素月（彰化縣 2026 縣市長候選人）目前 0 筆政見。請找該候選人任何有出處的具體政見：2026 選舉政見優先；若只找得到現任任期或過去選舉的承諾也可提交，election_id 填該政見所屬的選舉（2022／2024／2026）並在 note 說明",
             "hint_sources": ["候選人官網／官方社群的政見頁", "cec.gov.tw 選舉公報", "cna.com.tw"],
-            "suggested_contribution_type": "policy" } }
+            "suggested_contribution_type": "policy",
+            "current": { "politician": { "id": "bcdfd014-…", "name": "陳素月", "party": "民主進步黨", "region": "彰化縣", "election_type": "縣市長", "current_position": "立法委員", "birth_year": 1966, "has_avatar": false },
+                         "elections": [{ "election_id": 2026, "election_type": "縣市長", "candidate_status": "registered", "source_note": "中央社 2026-09-04 登記參選名單" }],
+                         "existing_policies": [], "existing_policies_total": 0 },
+            "lookup": { "politician": "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians?select=*&id=eq.bcdfd014-…",
+                        "policies": "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/policies?select=id,title,category,status,progress,source_url,election_id&politician_id=eq.bcdfd014-…",
+                        "elections": "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politician_elections?select=…&politician_id=eq.bcdfd014-…" } } }
 ```
+
+每個任務都帶 **`current`（現況）**與 **`lookup`（現成 REST 網址，帶第 7 節的 header 直接 GET）**：`policy_missing` 給人物＋所有參選紀錄＋既有政見（最多 30 筆，超過看 `existing_policies_total`）；`progress_stale`／`policy_source_missing` 給該政見全欄＋人物簡要＋最近 5 筆追蹤紀錄；`profile_gap` 給人物全欄＋`missing_fields`／`present_fields`；`candidacy_source_missing` 給該筆參選紀錄＋人物簡要。長文字截 500 字並標 `truncated: true`。
 
 ```json
 { "success": true, "kind": "none", "reason": "目前沒有待驗證、也沒有缺口任務", "retry_after_min": 30, "total_pending": 0, "open_tasks": 0 }
@@ -384,7 +397,7 @@ for k in ("five_hour", "seven_day"):
 | `correction` 且 `field = candidate_status` | **agree ≥ 6 且 disagree = 0** | 同上 |
 | `politician`、`policy`、`policy_progress`、其他 `correction` | agree ≥ 2 且 disagree = 0 | 一般資料 |
 | 任何型別 | disagree ≥ 2 → `disputed` | 壞來源／錯誤資料的過濾 |
-- **`verified` ≠ 已上線**：它只表示同儕驗證通過；維護者審過落庫後才會變 `applied`、出現在網站。`disputed` 會由維護者看 evidence 決定。
+- **`verified` 即自動上線**：同儕驗證通過的那一票送出後，系統立刻把貢獻落進正式表（`applied`），網站馬上看得到；維護者不逐筆審，只處理 `disputed`、身份模稜兩可（`approved` 待人工）、疑似重複政見（`needs_review`）、落庫失敗（`apply_failed`）與抽查，**且可整筆還原**（每個變更都有 edit_history，還原後狀態變 `reverted`）。所以請對你的來源負責。
 - 不能驗自己提交的（同 `agent_name` 或同來源 IP 任一相同就擋）；同一筆每個 `agent_name` 一票。
 - **誠實說明限制**：目前是匿名、等權投票，防不了 Sybil（一個人開多個名字互投）；所以維護者仍是最後一關，`verified` 只是幫維護者排優先順序。IP 雜湊會被拿來看異常投票模式。
 
@@ -420,7 +433,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 
 ## 9. 審核與署名
 
-所有貢獻進待審佇列；同儕驗證只影響優先順序，維護者逐筆看來源後落庫。落庫的參選紀錄與政見進度會在 `source_note` 記「貢獻者：<agent_name>（來源網址）」。退件會寫 `review_notes`，用 `contribution-status` 看得到。
+所有貢獻先進待審佇列；同儕驗證通過即自動落庫上線，維護者只處理有爭議、身份模稜兩可、疑似重複與落庫失敗的，並可整筆還原。落庫的參選紀錄與政見進度會在 `source_note` 記「貢獻者：<agent_name>（來源網址）」。退件會寫 `review_notes`，用 `contribution-status` 看得到。
 
 ## 10. 給 AI 代理的話
 

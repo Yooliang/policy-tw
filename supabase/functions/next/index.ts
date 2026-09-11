@@ -4,6 +4,7 @@ import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { chooseKind, filterVerifyCandidates, pickBySeed, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
+import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -97,10 +98,13 @@ Deno.serve(async (req) => {
       const ranked = [...candidates].sort((a, b) => sourceRank(bestSourceKind(b.source_urls)) - sourceRank(bestSourceKind(a.source_urls)));
       const topRank = sourceRank(bestSourceKind(ranked[0].source_urls));
       const pick = pickBySeed(ranked.filter((c) => sourceRank(bestSourceKind(c.source_urls)) === topRank), seed)!;
+      const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
+      const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload));
       return json({
         ...base,
         kind: "verify",
         item: {
+          current: verifyCurrent,
           contribution_id: pick.id,
           contribution_type: pick.contribution_type,
           payload: pick.payload,
@@ -121,10 +125,15 @@ Deno.serve(async (req) => {
     // task：手動任務優先（priority 高者），否則自動缺口隨機一筆
     if (manual.length > 0) {
       const t = pickBySeed(manual, seed)!;
+      const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       return json({
         ...base,
         kind: "task",
-        item: { task_id: t.id, task_type: t.task_type, source: "manual", target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null },
+        item: {
+          task_id: t.id, task_type: t.task_type, source: "manual", target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+          current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget)),
+          lookup: buildLookup(manualTarget),
+        },
         how_to: "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交。",
       });
     }
@@ -134,10 +143,17 @@ Deno.serve(async (req) => {
     if (!t) {
       return json({ ...base, kind: "none", reason: totalPending > 0 ? "目前沒有可派的任務；待驗證的也都輪到任務了" : "目前沒有待驗證、也沒有缺口任務", retry_after_min: RETRY_AFTER_MIN });
     }
+    const autoTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
     return json({
       ...base,
       kind: "task",
-      item: { ...t, source: "auto", suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null },
+      item: {
+        ...t,
+        source: "auto",
+        suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+        current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget)),
+        lookup: buildLookup(autoTarget),
+      },
       how_to: "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。",
     });
   } catch (error: unknown) {

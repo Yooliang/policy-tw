@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
 
 /**
  * tasks — 領任務（四主端點之一）。無金鑰。
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const type = url.searchParams.get("type") || null;
     const region = url.searchParams.get("region")?.replace(/臺/g, "台") || null;
-    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 10, 1), 50);
     const seed = url.searchParams.get("seed") || crypto.randomUUID();
 
     const [autoRes, manualRes, countRes] = await Promise.all([
@@ -68,7 +69,15 @@ Deno.serve(async (req) => {
     }));
     // deno-lint-ignore no-explicit-any
     const auto = (autoRes.data ?? []).map((t: any) => ({ ...t, source: "auto", suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null }));
-    const tasks = [...manual, ...auto].slice(0, limit);
+    // 每筆附現況與 lookup（?with_current=0 可關掉，省查詢）
+    const withCurrent = url.searchParams.get("with_current") !== "0";
+    const picked = [...manual, ...auto].slice(0, limit);
+    const tasks = withCurrent
+      ? await Promise.all(picked.map(async (t) => {
+        const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+        return { ...t, current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, target)), lookup: buildLookup(target) };
+      }))
+      : picked;
 
     // deno-lint-ignore no-explicit-any
     const totals = Object.fromEntries((countRes.data ?? []).map((r: any) => [r.task_type, Number(r.total)]));
