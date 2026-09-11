@@ -5,7 +5,8 @@ import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
-import { Search, GitBranch, Database, Milestone, ArrowRight } from 'lucide-vue-next'
+import { Search, GitBranch, Database, Milestone, ArrowRight, Link as LinkIcon } from 'lucide-vue-next'
+import HeroAction from '../components/HeroAction.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -91,12 +92,9 @@ usePageHead({
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
       <template #actions>
-        <button :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white text-navy-900 shadow-lg`">
-          <Database :size="16" /> 分析列表
-        </button>
-        <button @click="router.push({ path: '/ai-assistant', query: { type: 'policy' } })" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white/10 text-white hover:bg-white/20 border border-white/20`">
-          <Milestone :size="16" /> 看政見貢獻
-        </button>
+        <HeroAction active><Database :size="16" /> 分析列表</HeroAction>
+        <HeroAction :to="{ path: '/ai-assistant', query: { type: 'policy' } }"><Milestone :size="16" /> 看政見貢獻</HeroAction>
+        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
       </template>
 
       <GlobalRegionSelector />
