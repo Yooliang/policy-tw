@@ -72,11 +72,16 @@ const formatSubRegion = (politician: Politician) => {
 }
 
 // 顯示備註（移除 AI搜尋匯入 前綴）
-const displayNote = (note?: string) => {
-  if (!note) return null
-  // 移除 "AI搜尋匯入: " 或 "AI搜尋匯入" 前綴
-  return note.replace(/^AI搜尋匯入[：:]?\s*/, '') || null
+const URL_RE = /https?:\/\/\S+/g
+/** 來源備註拆成「文字」與「網址」：卡片只顯示文字，網址做成小連結，避免長網址撐破版面 */
+const splitNote = (note?: string): { text: string | null; url: string | null } => {
+  if (!note) return { text: null, url: null }
+  const url = note.match(URL_RE)?.[0] ?? null
+  const text = note.replace(URL_RE, '').replace(/^AI搜尋匯入[：:]?\s*/, '').replace(/[\s，,;；]+$/, '').trim()
+  return { text: text || null, url }
 }
+const displayNote = (note?: string) => splitNote(note).text
+const noteUrl = (note?: string) => splitNote(note).url
 
 </script>
 
@@ -125,7 +130,10 @@ const displayNote = (note?: string) => {
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
                 <span v-if="(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)" class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatSubRegion(politician) }}</span>
-                <p v-if="displayNote(politician.sourceNote)" class="text-xs text-slate-400 mt-1 line-clamp-2">{{ displayNote(politician.sourceNote) }}</p>
+                <p v-if="displayNote(politician.sourceNote) || noteUrl(politician.sourceNote)" class="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
+                  <span v-if="displayNote(politician.sourceNote)">{{ displayNote(politician.sourceNote) }}</span>
+                  <a v-if="noteUrl(politician.sourceNote)" :href="noteUrl(politician.sourceNote)!" target="_blank" rel="noopener" class="ml-1 text-violet-500 hover:underline" @click.stop>來源</a>
+                </p>
               </div>
             </div>
             <ArrowRight class="text-slate-300 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" :size="20" />
