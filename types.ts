@@ -48,7 +48,8 @@ export interface Region {
 // 選前: rumored(傳聞), likely(可能參選)
 // 選中: confirmed(確認參選)
 // 選後: elected(當選), defeated(落選)
-export type CandidateStatus = 'rumored' | 'likely' | 'confirmed' | 'elected' | 'defeated';
+// registered＝中選會已登記、qualified＝已審定、not_running＝AI 推測但未登記（選舉頁不顯示）
+export type CandidateStatus = 'rumored' | 'likely' | 'confirmed' | 'registered' | 'qualified' | 'not_running' | 'elected' | 'defeated';
 
 // Election-specific data for a politician
 export interface PoliticianElectionData {
