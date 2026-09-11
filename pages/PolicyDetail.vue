@@ -9,7 +9,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -91,6 +91,11 @@ const handleVote = () => {
   if (!hasVoted.value) hasVoted.value = true
 }
 
+// 「查核履歷」：捲到本頁底部的履歷區塊（HistoryPanel 本身的 id prop 是政見 id，所以外面包一層當錨點）
+function scrollToHistory(): void {
+  document.getElementById('history')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 usePageHead({
   type: 'article',
   title: () => policy.value?.title,
@@ -138,6 +143,7 @@ usePageHead({
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
           <button
+            data-testid="hero-progress"
             @click="handleVerify"
             :disabled="verifying"
             :class="[
@@ -153,9 +159,10 @@ usePageHead({
             <CheckCircle v-else-if="verifySuccess" :size="18" />
             <XCircle v-else-if="verifyError" :size="18" />
             <Sparkles v-else :size="18" />
-            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '請 AI 查進度' }}
+            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '查進度' }}
           </button>
-          <HeroAction :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 看民眾的提問與表態</HeroAction>
+          <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 民眾提問</HeroAction>
+          <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
     </Hero>
@@ -344,7 +351,7 @@ usePageHead({
           </div>
 
           <!-- 查核履歷：誰交的、誰驗的、改了什麼 -->
-          <HistoryPanel target="policy" :id="policy.id" />
+          <div id="history" class="scroll-mt-24"><HistoryPanel target="policy" :id="policy.id" /></div>
         </div>
 
         <!-- Sidebar -->

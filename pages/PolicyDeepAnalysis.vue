@@ -11,10 +11,11 @@ import {
   Bot, Link as LinkIcon, FileText,
   Layers, ShieldCheck, ArrowRight, Sparkles, Network, MapPin,
   Database, Milestone, GitBranch, UserCheck, ArrowRightCircle, GitCommit, History,
-  Activity
+  Activity, ChevronLeft, CheckCircle, XCircle, Loader2
 } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
+import HeroAction from '../components/HeroAction.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +27,36 @@ const auditing = ref(false)
 const auditResult = ref<RequestTaskResult | null>(null)
 const auditError = ref<string | null>(null)
 const canAudit = computed(() => sourceUrl.value.trim().length > 0 && !auditing.value)
+const auditInputRef = ref<HTMLInputElement | null>(null)
+
+// 動作列「執行稽核」：不是另開頁，只是把畫面捲到下面那個網址輸入框並聚焦
+function focusAuditInput(): void {
+  const el = auditInputRef.value
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.focus()
+}
+
+// 動作列「查進度」：與政見頁同一顆功能（kind=progress），就地顯示狀態
+const progressRequesting = ref(false)
+const progressResult = ref<RequestTaskResult | null>(null)
+const progressError = ref<string | null>(null)
+const progressSuccess = computed(() => progressResult.value !== null)
+
+async function requestProgress() {
+  const p = selectedPolicy.value
+  if (!p || progressRequesting.value) return
+  progressRequesting.value = true
+  progressResult.value = null
+  progressError.value = null
+  try {
+    progressResult.value = await requestTask({ kind: 'progress', policy_id: p.id })
+  } catch (err: unknown) {
+    progressError.value = err instanceof Error ? err.message : '送出失敗，請稍後再試'
+  } finally {
+    progressRequesting.value = false
+  }
+}
 
 async function submitAudit() {
   const url = sourceUrl.value.trim()
@@ -163,12 +194,41 @@ usePageHead({
         確保治理透明度與政策延續性，讓每一份行政努力都能被溯源。
       </template>
 
+      <template #actions>
+        <div class="flex flex-wrap items-center gap-3">
+          <button @click="router.push('/analysis')" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
+            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+          </button>
+          <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> 政見原文</HeroAction>
+          <button
+            data-testid="hero-progress"
+            @click="requestProgress"
+            :disabled="progressRequesting"
+            :class="[
+              'px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap border border-transparent',
+              progressSuccess
+                ? 'bg-emerald-500 text-white'
+                : progressError
+                  ? 'bg-red-500/80 text-white'
+                  : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+            ]"
+          >
+            <Loader2 v-if="progressRequesting" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="progressSuccess" :size="16" />
+            <XCircle v-else-if="progressError" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ progressRequesting ? '送出中…' : progressSuccess ? (progressResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : progressError ? '失敗' : '查進度' }}
+          </button>
+          <HeroAction data-testid="hero-audit-focus" @click="focusAuditInput"><LinkIcon :size="16" /> 執行稽核</HeroAction>
+        </div>
+      </template>
 
       <!-- novalidate：用自己的檢查與文案，不讓瀏覽器原生的 type=url 泡泡擋掉 submit -->
       <form class="flex flex-col md:flex-row gap-2" novalidate @submit.prevent="submitAudit">
         <div class="flex-1 relative text-left">
           <LinkIcon class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
           <input
+            ref="auditInputRef"
             v-model="sourceUrl"
             type="url"
             inputmode="url"
