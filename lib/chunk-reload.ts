@@ -75,7 +75,7 @@ export function showSiteUpdatedNotice(targetPath: string): void {
   box.id = NOTICE_ID
   box.setAttribute('role', 'alert')
   box.style.cssText = [
-    'position:fixed', 'left:50%', 'top:16px', 'transform:translateX(-50%)', 'z-index:9999',
+    'position:fixed', 'left:50%', 'top:80px' /* 避開 sticky 導覽列（h-16） */, 'transform:translateX(-50%)', 'z-index:9999',
     'max-width:calc(100vw - 32px)', 'display:flex', 'flex-wrap:wrap', 'align-items:center', 'gap:12px',
     'padding:12px 16px', 'border-radius:14px', 'background:#0f172a', 'color:#fff',
     'font:600 14px/1.5 "Noto Sans TC",sans-serif', 'box-shadow:0 10px 30px rgba(15,23,42,.35)',
