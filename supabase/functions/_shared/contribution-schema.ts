@@ -9,6 +9,11 @@ import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication"] as const;
 export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "other"] as const;
 export const ADJUDICATION_VERDICTS = ["uphold", "reject"] as const;
+/** 身份指認：候選人物的 uuid，或 "new"（都不是，建新人物） */
+export const IDENTITY_PICK_NEW = "new";
+export function isIdentityPick(v: unknown): v is string {
+  return v === IDENTITY_PICK_NEW || (typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+}
 export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
 
 export const ELECTION_TYPES = [
@@ -181,7 +186,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!oneOf(ADJUDICATION_VERDICTS, p.verdict)) push("payload.verdict", "verdict 要是 uphold（原貢獻正確）或 reject（原貢獻有誤）");
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：看了哪些來源、為什麼站這一邊）");
       if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
-      if (p.resolved_politician_id !== undefined && !isUuid(p.resolved_politician_id)) push("payload.resolved_politician_id", "要是 uuid");
+      if (p.resolved_politician_id !== undefined && !isIdentityPick(p.resolved_politician_id)) push("payload.resolved_politician_id", "要是 uuid 或 \"new\"");
       break;
     }
     case "no_change": {
@@ -303,7 +308,7 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
   }
   if (body.verdict === "disagree" && !isStr(body.note, 5, 2000)) errors.push({ path: "note", message: "投 disagree 要寫 note（至少 5 字）說明依據" });
   else if (body.note !== undefined && !isStr(body.note, 1, 2000)) errors.push({ path: "note", message: "要是 1～2000 字" });
-  if (body.resolved_politician_id !== undefined && body.resolved_politician_id !== null && !isUuid(body.resolved_politician_id)) errors.push({ path: "resolved_politician_id", message: "要是 uuid（current.identity_candidates 裡的 id）" });
+  if (body.resolved_politician_id !== undefined && body.resolved_politician_id !== null && !isIdentityPick(body.resolved_politician_id)) errors.push({ path: "resolved_politician_id", message: "要是 uuid（current.identity_candidates 裡的 id）或 \"new\"（都不是，建新人物）" });
   if (errors.length > 0) return { ok: false, errors, input: null };
   return {
     ok: true,

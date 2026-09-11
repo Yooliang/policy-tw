@@ -107,18 +107,19 @@ export interface IdentityVote { verdict: Verdict; resolved_politician_id: string
 
 export type IdentityResolution =
   | { kind: "resolved"; politician_id: string }
+  | { kind: "new" }
   | { kind: "conflict"; politician_ids: string[] }
   | { kind: "none" };
 
 /**
- * 純函式：agree 票裡帶 resolved_politician_id 的，全部指向同一位 → resolved；指向不同位 → conflict（轉 disputed）；
- * 都沒帶 → none（交給多面向比對：matched／new 照常，ambiguous 轉 disputed）。
+ * 純函式：agree 票裡帶 resolved_politician_id 的，全部指向同一位 → resolved；全部說 "new" → new（建新人物）；
+ * 指向不同位（含 new 與某人混）→ conflict（轉 disputed）；都沒帶 → none（交給多面向比對：matched／new 照常，ambiguous 轉 disputed）。
  */
 export function resolveIdentityFromVotes(votes: readonly IdentityVote[]): IdentityResolution {
   const ids = [...new Set(votes.filter((v) => v.verdict === "agree" && v.resolved_politician_id).map((v) => v.resolved_politician_id as string))];
   if (ids.length === 0) return { kind: "none" };
-  if (ids.length === 1) return { kind: "resolved", politician_id: ids[0] };
-  return { kind: "conflict", politician_ids: ids };
+  if (ids.length > 1) return { kind: "conflict", politician_ids: ids };
+  return ids[0] === "new" ? { kind: "new" } : { kind: "resolved", politician_id: ids[0] };
 }
 
 // ---- 落庫失敗自動重試 ----

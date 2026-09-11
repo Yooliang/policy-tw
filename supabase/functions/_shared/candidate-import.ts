@@ -80,6 +80,8 @@ export interface EnsurePoliticianOptions {
   source: string;
   /** new 時額外塞進 politicians 的欄位（例如 bio、gender） */
   extraInsert?: Record<string, unknown>;
+  /** 驗證者兩票都指認 "new"：不管比對結果，直接建新人物（比對只用來產 key，不寫回別人） */
+  force_new?: boolean;
 }
 
 export interface EnsurePoliticianResult {
@@ -114,12 +116,12 @@ export async function ensurePolitician(
     birth_year: candidate.birth_year,
     cec_cand_id: candidate.cec_cand_id,
     cec_theme_id: candidate.cec_theme_id,
-  }, { source: options.source });
+  }, { source: options.source, persist: !options.force_new });
 
   const birthYear = typeof candidate.birth_year === "string" ? parseInt(candidate.birth_year, 10) : candidate.birth_year;
   const validBirthYear = Number.isInteger(birthYear) ? (birthYear as number) : null;
 
-  if (resolution.decision === "matched" && resolution.politician_id) {
+  if (!options.force_new && resolution.decision === "matched" && resolution.politician_id) {
     // 官方資料帶出生年就補進沒有出生年的人（觸發器會順手產 birth key，之後跨屆靠它對人）
     if (validBirthYear !== null) {
       const { error: birthError } = await supabase
@@ -131,7 +133,7 @@ export async function ensurePolitician(
     }
     return { resolution, politician_id: resolution.politician_id, created: false };
   }
-  if (resolution.decision === "ambiguous") {
+  if (!options.force_new && resolution.decision === "ambiguous") {
     return { resolution, politician_id: null, created: false };
   }
 

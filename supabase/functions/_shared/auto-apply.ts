@@ -83,6 +83,7 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
         return { triggered: true, status: "disputed", outcome: { status: "disputed", message }, ...(err ? { error: err } : {}) };
       }
       if (identity.kind === "resolved") resolvedPoliticianId = identity.politician_id;
+      else if (identity.kind === "new") resolvedPoliticianId = "new";
     }
 
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
