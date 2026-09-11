@@ -231,7 +231,31 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`candidacy`** — 某人參選某選舉：`name` 或 `politician_id`✅、`election_id`✅（2022／2024／2026＝年份）、`election_type`✅（九種之一）、`region`✅（總統填「全國」）、`candidate_status`✅（`confirmed`／`registered`／`qualified`／`withdrawn`／`not_running`）；建議 `party`、`current_position`、`birth_year`、`position`、`cand_no`；選填 `cec_cand_id`＋`cec_theme_id`（中選會資料庫的候選人 id 與場次 id，要一起給）。
 
-**`policy`** — 新政見：`name` 或 `politician_id`✅（人物必須已存在）、`title`✅（4～200 字）、`description`✅（≥20 字）、`category`✅（交通建設／社會福利／經濟發展／教育文化／環境保護／公平正義／行政革新／政治議題，共 8 個；既有資料仍有舊寫法如交通／社會／經濟／環境／教育／社福，**驗證時不要因為分類寫法不同投 disagree**，維護者會統一）；選填 `status`（預設 `Campaign Pledge`）、`election_id`、`proposed_date`、`tags[]`。
+**`policy`** — 新政見：`name` 或 `politician_id`✅（人物必須已存在）、`title`✅（4～200 字）、`description`✅（≥20 字）、`category`✅（**只能用下表 19 個之一**，送別的會回 `400 category_invalid` 並提示；舊資料已統一）；選填 `status`（預設 `Campaign Pledge`）、`election_id`、`proposed_date`、`tags[]`。
+
+政見分類（19 個，與網站 `categories` 表同步；舊資料已統一，提交只能用這 19 個）：
+
+| category | 涵蓋 |
+|---|---|
+| 交通建設 | 道路、橋梁、大眾運輸、捷運輕軌、鐵路、停車、交通安全與運輸政策 |
+| 都市發展與住宅 | 都市計畫、都更、社會住宅、居住正義、房價與租屋、區域開發、公共空間 |
+| 社會福利 | 長照、托育、身心障礙、弱勢扶助、津貼補助、社福設施 |
+| 醫療衛生 | 醫療資源、公衛、防疫、健保、心理健康、食安 |
+| 教育文化 | 各級教育、幼教、技職、文化藝術、圖書館、語言與文資 |
+| 經濟發展與產業 | 產業政策、招商投資、中小企業、觀光、商圈、就業機會、地方經濟 |
+| 農漁業 | 農業、漁業、畜牧、農地、農產運銷、農漁民福利 |
+| 環境保護 | 空污、水污、廢棄物、生態保育、氣候調適、淨零 |
+| 能源 | 電力、再生能源、核能、節能、能源轉型 |
+| 治安消防與防災 | 警政治安、消防、災害防救、防洪治水、公共安全 |
+| 青年與勞工 | 青年政策、創業、勞動條件、薪資、職訓、工會 |
+| 性別與人權 | 性別平等、婚姻家庭、人權、多元族群平權（非原住民） |
+| 原住民與族群 | 原住民族政策、族群文化、新住民、客家 |
+| 體育休閒 | 運動場館、體育推廣、休閒設施、公園綠地 |
+| 行政革新與數位治理 | 政府效能、開放資料、數位服務、廉政、組織改造 |
+| 財政與稅務 | 預算、財政紀律、稅制、規費、公共債務 |
+| 公平正義 | 司法改革、轉型正義、分配正義、弱勢權益保障 |
+| 政治議題 | 選制、地方自治、兩岸、國防外交、政黨政治 |
+| 其他 | 上列都不適合時才用 |
 
 **`policy_progress`** — 政見進度：`policy_id`✅ 或（`policy_title`＋`name`／`politician_id`）、`status`✅（`Campaign Pledge`／`Proposed`／`In Progress`／`Achieved`／`Stalled`／`Failed`）、`date`✅（YYYY-MM-DD）、`note`✅（≥10 字：做了什麼、依據哪份文件）；選填 `progress`（0～100）。
 
@@ -383,7 +407,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians?select=id,name,party,region,election_type,current_position,birth_year&name=eq.陳素月`
 - **`politician_elections`**：`politician_id`、`election_id`（＝年份 2022／2024／2026）、`election_type`、`position`、`candidate_status`（rumored／likely／confirmed／registered／qualified／not_running／elected／defeated）、`source_note`、`verified`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politician_elections?select=id,politician_id,election_type,candidate_status,source_note&election_id=eq.2026&election_type=eq.縣市長`
-- **`policies`**：`id`、`politician_id`、`election_id`、`title`、`description`、`category`（8 個正規值，舊資料仍有簡寫）、`status`、`progress`、`source_url`、`proposed_date`、`last_updated`
+- **`policies`**：`id`、`politician_id`、`election_id`、`title`、`description`、`category`（19 個正規值，見上方分類表）、`status`、`progress`、`source_url`、`proposed_date`、`last_updated`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/policies?select=id,title,status,progress,source_url&politician_id=eq.<uuid>`
 - **`politicians_with_elections`**（view）：人物＋`elections` JSON 陣列（electionId／electionType／candidateStatus／region／sourceNote）
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians_with_elections?select=id,name,party,region,birth_year,elections&name=eq.童子瑋`

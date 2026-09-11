@@ -15,7 +15,7 @@ export const ELECTION_TYPES = [
 ] as const;
 
 export { POLICY_CATEGORIES } from "./category-map.ts";
-import { POLICY_CATEGORIES } from "./category-map.ts";
+import { categoryErrorMessage, isCanonicalCategory, POLICY_CATEGORIES } from "./category-map.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
 export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies"] as const;
@@ -69,19 +69,21 @@ export interface VerifyInput {
 
 export interface VerifyValidation {
   ok: boolean;
-  errors: Array<{ path: string; message: string; code?: "encoding_invalid" }>;
+  errors: Array<{ path: string; message: string; code?: ValidationCode }>;
   input: VerifyInput | null;
 }
 
 const AGENT_NAME_MSG = "agent_name 必填：使用者代號（GitHub 帳號或暱稱），2～64 字，只能字母數字與 ._-，不要放模型名（模型名放 agent_tool）";
 const AGENT_TOOL_MSG = "agent_tool 要是 1～64 字的字串（例：<工具>/<模型>）";
 
+export type ValidationCode = "encoding_invalid" | "category_invalid";
+
 export interface ValidationError {
   index: number;
   path: string;
   message: string;
-  /** encoding_invalid：字串含 U+FFFD（無法以 UTF-8 解碼的殘骸）或 C0 控制字元 */
-  code?: "encoding_invalid";
+  /** encoding_invalid：字串含 U+FFFD 或 C0 控制字元；category_invalid：分類不在 19 值內 */
+  code?: ValidationCode;
 }
 
 export const ENCODING_INVALID_MESSAGE =
@@ -124,7 +126,7 @@ function validateHints(p: Obj, push: (path: string, message: string) => void): v
   if (p.election_type !== undefined && !oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `要是 ${ELECTION_TYPES.join("／")} 之一`);
 }
 
-function validatePayload(type: ContributionType, p: Obj, push: (path: string, message: string) => void): void {
+function validatePayload(type: ContributionType, p: Obj, push: (path: string, message: string, code?: ValidationCode) => void): void {
   switch (type) {
     case "politician": {
       if (!isStr(p.name, 2, 30)) push("payload.name", "姓名必填（2～30 字）");
@@ -152,7 +154,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isUuid(p.politician_id) && !isStr(p.name, 2, 30)) push("payload.name", "要給 politician_id 或政治人物姓名");
       if (!isStr(p.title, 4, 200)) push("payload.title", "政見標題必填（4～200 字）");
       if (!isStr(p.description, MIN_POLICY_DESCRIPTION, 5000)) push("payload.description", `政見內容必填（至少 ${MIN_POLICY_DESCRIPTION} 字，寫清楚承諾了什麼）`);
-      if (!oneOf(POLICY_CATEGORIES, p.category)) push("payload.category", `category 必填，要是 ${POLICY_CATEGORIES.join("／")} 之一`);
+      if (!isCanonicalCategory(p.category)) push("payload.category", categoryErrorMessage(p.category), "category_invalid");
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
       if (p.election_id !== undefined && !(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `要是 ${KNOWN_ELECTION_IDS.join("／")}`);
       if (p.proposed_date !== undefined && !isDate(p.proposed_date)) push("payload.proposed_date", "要是 YYYY-MM-DD");
@@ -176,6 +178,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isStr(p.field, 1, 50)) push("payload.field", "field 必填");
       else if (table && !CORRECTION_FIELDS[table].includes(p.field as string)) push("payload.field", `${table} 只接受修正：${CORRECTION_FIELDS[table].join("／")}`);
       if (p.correct_value === undefined || p.correct_value === null || p.correct_value === "") push("payload.correct_value", "correct_value 必填");
+      else if (table === "policies" && p.field === "category" && !isCanonicalCategory(p.correct_value)) push("payload.correct_value", categoryErrorMessage(p.correct_value), "category_invalid");
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，說明依據）");
       break;
     }
@@ -220,7 +223,7 @@ export function validateContributionRequest(body: unknown): ValidationResult {
   if (rawList.length > MAX_BATCH) errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆` });
 
   rawList.slice(0, MAX_BATCH).forEach((raw, index) => {
-    const push = (path: string, message: string) => errors.push({ index, path, message });
+    const push = (path: string, message: string, code?: ValidationCode) => errors.push({ index, path, message, ...(code ? { code } : {}) });
     if (!isObj(raw)) { push("", "每筆要是物件"); return; }
     if (!oneOf(CONTRIBUTION_TYPES, raw.contribution_type)) { push("contribution_type", `要是 ${CONTRIBUTION_TYPES.join("／")} 之一`); return; }
     if (!isObj(raw.payload)) { push("payload", "payload 要是物件"); return; }
