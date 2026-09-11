@@ -6,8 +6,9 @@
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change"] as const;
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "other"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "other"] as const;
+export const ADJUDICATION_VERDICTS = ["uphold", "reject"] as const;
 export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
 
 export const ELECTION_TYPES = [
@@ -174,6 +175,15 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
       break;
     }
+    case "adjudication": {
+      // 裁決一筆 disputed 的貢獻：uphold＝原貢獻正確、reject＝原貢獻有誤；4 票同向定案
+      if (!isUuid(p.contribution_id)) push("payload.contribution_id", "contribution_id 必填（被裁決的貢獻 uuid，在任務的 target.contribution_id）");
+      if (!oneOf(ADJUDICATION_VERDICTS, p.verdict)) push("payload.verdict", "verdict 要是 uphold（原貢獻正確）或 reject（原貢獻有誤）");
+      if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：看了哪些來源、為什麼站這一邊）");
+      if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
+      if (p.resolved_politician_id !== undefined && !isUuid(p.resolved_politician_id)) push("payload.resolved_politician_id", "要是 uuid");
+      break;
+    }
     case "no_change": {
       // 查完發現與資料庫一致：只關任務、不改資料；checked_urls 就是驗證者要核對的來源
       if (!isStr(p.task_id, 1, 160)) push("payload.task_id", "task_id 必填（/next 給的 task_id）");
@@ -247,8 +257,9 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     if (!isObj(raw)) { push("", "每筆要是物件"); return; }
     if (!oneOf(CONTRIBUTION_TYPES, raw.contribution_type)) { push("contribution_type", `要是 ${CONTRIBUTION_TYPES.join("／")} 之一`); return; }
     if (!isObj(raw.payload)) { push("payload", "payload 要是物件"); return; }
-    // no_change 沒給 source_urls 時，用 payload.checked_urls 當來源（驗證者照那些網址核對）
-    const sourceUrls: unknown = Array.isArray(raw.source_urls) || raw.contribution_type !== "no_change" ? raw.source_urls : raw.payload.checked_urls;
+    // no_change／adjudication 沒給 source_urls 時，用 payload.checked_urls 當來源（驗證者照那些網址核對）
+    const usesChecked = raw.contribution_type === "no_change" || raw.contribution_type === "adjudication";
+    const sourceUrls: unknown = Array.isArray(raw.source_urls) || !usesChecked ? raw.source_urls : raw.payload.checked_urls;
     if (!Array.isArray(sourceUrls) || sourceUrls.length === 0) push("source_urls", "source_urls 必填，至少一個可打開的來源網址");
     else if (sourceUrls.length > MAX_SOURCE_URLS) push("source_urls", `最多 ${MAX_SOURCE_URLS} 個`);
     else if (!sourceUrls.every((u) => typeof u === "string")) push("source_urls", "每個都要是字串");

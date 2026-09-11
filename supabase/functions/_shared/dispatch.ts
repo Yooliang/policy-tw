@@ -32,6 +32,7 @@ export interface VerifyCandidate {
   contributor_ip_hash: string;
   agree_count: number;
   status: string;
+  source_urls?: string[] | null;
 }
 
 export interface Requester {
@@ -47,7 +48,7 @@ export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly
     r.agent_name.toLowerCase() !== mine &&
     r.contributor_ip_hash !== me.ip_hash &&
     !me.voted_ids.has(r.id) &&
-    r.agree_count < requiredAgree(r.contribution_type, r.payload)
+    r.agree_count < requiredAgree(r.contribution_type, r.payload, r.source_urls ?? [])
   );
 }
 
@@ -81,6 +82,31 @@ export function filterLeasedTasks<T extends TaskLike>(tasks: readonly T[], lease
     leases.filter((l) => new Date(l.leased_until) > now && l.agent_name.toLowerCase() !== mine).map((l) => l.target_key),
   );
   return tasks.filter((t) => !heldByOthers.has(taskTargetKey(t)));
+}
+
+/** 裁決任務不派給：原貢獻的提交者；已有未定案裁決（pending／verified 的 adjudication）的那筆（等它的票就好） */
+export function filterAdjudicateTasks<T extends TaskLike & { task_type?: string }>(tasks: readonly T[], agentName: string, pendingAdjudicatedIds: ReadonlySet<string>): T[] {
+  const mine = agentName.toLowerCase();
+  return tasks.filter((t) => {
+    if (t.task_type !== "adjudicate") return true;
+    const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+    if (typeof target.contributor === "string" && target.contributor.toLowerCase() === mine) return false;
+    if (typeof target.contribution_id === "string" && pendingAdjudicatedIds.has(target.contribution_id)) return false;
+    return true;
+  });
+}
+
+export interface OriginalIdentity { id: string; agent_name: string; contributor_ip_hash: string }
+
+/** 裁決（adjudication）的驗證不派給原貢獻的提交者（同名或同 IP） */
+export function excludeOwnAdjudications<T extends VerifyCandidate>(candidates: readonly T[], originals: readonly OriginalIdentity[], me: Requester): T[] {
+  const mine = me.agent_name.toLowerCase();
+  const own = new Set(originals.filter((o) => o.agent_name.toLowerCase() === mine || o.contributor_ip_hash === me.ip_hash).map((o) => o.id));
+  return candidates.filter((c) => {
+    if (c.contribution_type !== "adjudication") return true;
+    const target = (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null);
+    return !(typeof target === "string" && own.has(target));
+  });
 }
 
 /** 確定性的偽隨機挑選：同 seed 同結果，不同代理（不同 seed）拿到不同筆。 */

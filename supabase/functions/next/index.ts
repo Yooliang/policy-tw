@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, filterLeasedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterLeasedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
@@ -29,6 +29,7 @@ const SUGGESTED_TYPE: Record<string, string> = {
   policy_source_missing: "correction",
   progress_stale: "policy_progress",
   candidacy_source_missing: "candidacy",
+  adjudicate: "adjudication",
 };
 const CANDIDATE_POOL = 30;
 const RETRY_AFTER_MIN = 30;
@@ -64,17 +65,21 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources").eq("status", "open").order("priority", { ascending: false }).limit(20),
+      // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
+      supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes]) {
       if (r.error) throw new Error(r.error.message);
     }
+    // deno-lint-ignore no-explicit-any
+    const pendingAdjudicated = new Set<string>(((adjRes.data ?? []) as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
 
     type PendingRow = {
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
@@ -83,7 +88,18 @@ Deno.serve(async (req) => {
     };
     // deno-lint-ignore no-explicit-any
     const votedIds = new Set<string>(((votedRes.data ?? []) as any[]).map((v) => v.contribution_id));
-    const candidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], { agent_name: agentName, ip_hash: ipHash, voted_ids: votedIds });
+    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: votedIds };
+    const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
+    // 裁決的驗證不派給原貢獻的提交者
+    const adjOriginalIds = rawCandidates.filter((c) => c.contribution_type === "adjudication")
+      .map((c) => (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null))
+      .filter((v): v is string => typeof v === "string");
+    let candidates = rawCandidates;
+    if (adjOriginalIds.length > 0) {
+      const { data: originals, error: oErr } = await supabase.from("contributions").select("id, agent_name, contributor_ip_hash").in("id", adjOriginalIds);
+      if (oErr) throw new Error(`originals lookup: ${oErr.message}`);
+      candidates = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me);
+    }
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
@@ -116,7 +132,7 @@ Deno.serve(async (req) => {
           agree_count: pick.agree_count,
           disagree_count: pick.disagree_count,
           unsure_count: pick.unsure_count,
-          required_agree: requiredAgree(pick.contribution_type, pick.payload),
+          required_agree: requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
         },
         how_to: "逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
@@ -139,7 +155,7 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterLeasedTasks(manual.map((m) => ({ ...m, task_id: m.id })), leases, agentName);
+    const freeManual = filterLeasedTasks(filterAdjudicateTasks(manual.map((m) => ({ ...m, task_id: m.id })), agentName, pendingAdjudicated), leases, agentName);
     if (freeManual.length > 0) {
       const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;

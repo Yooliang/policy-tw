@@ -123,12 +123,14 @@ export interface FeedSummary {
   total: number;
   by_status: Record<string, number>;
   needs_attention: { total: number; disputed: number; retrying: number };
+  /** open 的裁決任務數（disputed 的貢獻正由更多代理用 4 票決定；不是人工待辦） */
+  adjudicating: number;
   contributors_30d: number;
   daily_last_7: Array<{ date: string; count: number }>;
   leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>;
 }
 
-export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now()): FeedSummary {
+export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now(), adjudicating = 0): FeedSummary {
   const byStatus: Record<string, number> = {};
   const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
   const recentAgents = new Set<string>();
@@ -163,6 +165,7 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     total: rows.length,
     by_status: byStatus,
     needs_attention: { total: needs.disputed, ...needs },
+    adjudicating,
     contributors_30d: recentAgents.size,
     daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })),
     leaderboard,

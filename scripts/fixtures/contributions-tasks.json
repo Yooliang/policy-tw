@@ -1,17 +1,28 @@
 {
   "success": true,
-  "count": 4,
+  "count": 5,
   "seed": "fixture",
-  "totals": { "policy_missing": 118, "profile_gap": 71, "progress_stale": 40, "manual_open": 2 },
+  "totals": {
+    "policy_missing": 118,
+    "profile_gap": 71,
+    "progress_stale": 40,
+    "manual_open": 3
+  },
   "tasks": [
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
-      "target": { "election_id": 2026, "election_type": "縣市長", "region": "台北市" },
+      "target": {
+        "election_id": 2026,
+        "election_type": "縣市長",
+        "region": "台北市"
+      },
       "title": "補 2026 台北市長候選人政見",
       "description": "六位登記者各至少 3 條政見，附政見發表會或官網出處",
       "what_we_need": "補 2026 台北市長候選人政見：六位登記者各至少 3 條政見，附政見發表會或官網出處",
-      "hint_sources": ["https://www.cec.gov.tw/"],
+      "hint_sources": [
+        "https://www.cec.gov.tw/"
+      ],
       "reward": 1,
       "priority": 5,
       "source": "manual",
@@ -25,9 +36,11 @@
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
-      "target": { "politician_id": "00000000-0000-4000-8000-0000000000ff", "region": "台北市" },
-      "title": "補齊李大華 2026 政見白皮書內容",
-      "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",
+      "target": {
+        "politician_id": "00000000-0000-4000-8000-0000000000ff",
+        "region": "台北市"
+      },
+      "title": "補齊李大華 2026 政見白皮書內容",      "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",
       "what_we_need": "補齊李大華 2026 政見白皮書內容：…",
       "hint_sources": [],
       "reward": 1,
@@ -42,9 +55,37 @@
     },
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
+      "task_type": "adjudicate",
+      "target": {
+        "contribution_id": "00000000-0000-4000-8000-0000000000ff",
+        "contribution_type": "policy",
+        "contributor": "gemini-tester",
+        "reason": "兩票反對"
+      },
+      "title": "裁決：為「王小明」新增政見：長者健保全免與生育補助",
+      "description": "兩票反對。原貢獻（policy，提交者 gemini-tester）。反對意見：bob：選舉公報沒有這條（https://db.cec.gov.tw/x）。請打開正反雙方來源獨立判斷，用 contribution_type=adjudication 回報 uphold／reject。4 票同向即定案。",
+      "what_we_need": "裁決…",
+      "hint_sources": [
+        "https://www.cna.com.tw/news/aipl/202609045002.aspx",
+        "https://db.cec.gov.tw/x"
+      ],
+      "reward": 1,
+      "priority": 2,
+      "source": "auto_dispute",
+      "suggested_by": null,
+      "created_by": "auto-dispute",
+      "status": "open",
+      "created_at": "2026-09-12T04:00:00.000Z",
+      "closed_at": null,
+      "suggested_contribution_type": "adjudication"
+    },
+    {
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "progress_stale",
-      "target": { "policy_id": "00000000-0000-4000-8000-0000000000ff", "politician_id": "00000000-0000-4000-8000-0000000000ff" },
-      "title": "查「長者健保全免」最新進度",
+      "target": {
+        "policy_id": "00000000-0000-4000-8000-0000000000ff",
+        "politician_id": "00000000-0000-4000-8000-0000000000ff"
+      },      "title": "查「長者健保全免」最新進度",
       "description": "網站訪客請求。請找這條政見最近的進度（議會質詢、預算、新聞），提交 policy_progress。",
       "what_we_need": "查「長者健保全免」最新進度：…",
       "hint_sources": [],
@@ -61,9 +102,12 @@
     {
       "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
-      "target": { "politician_id": "00000000-0000-4000-8000-0000000000ff", "name": "王小明", "region": "彰化縣" },
-      "what_we_need": "王小明（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
-      "hint_sources": [],
+      "target": {
+        "politician_id": "00000000-0000-4000-8000-0000000000ff",
+        "name": "王小明",
+        "region": "彰化縣"
+      },
+      "what_we_need": "王小明（彰化縣 2026 縣市長候選人）目前 0 筆政見。",      "hint_sources": [],
       "reward": 1,
       "source": "auto",
       "suggested_contribution_type": "policy"

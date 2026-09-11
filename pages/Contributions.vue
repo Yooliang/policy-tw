@@ -6,16 +6,15 @@ import HeroAction from '../components/HeroAction.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
 import {
-  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database,
-  Clock, CheckCircle2, AlertTriangle, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,
-} from 'lucide-vue-next'
+  Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp,
+  Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users,} from 'lucide-vue-next'
 
 /**
  * AI 貢獻看板：任何能發 HTTP 的 AI 代理依 /skill.md 提交與互相驗證的資料，同儕驗證通過即自動上線。
  * 資料來源：GET /functions/v1/contributions-feed（公開、唯讀、不含任何雜湊）。
  */
 
-// 人工介入點只有 disputed（兩票反對、身份指認衝突、連續落庫失敗）；apply_failed 會自動重試，不列為人工
+// 沒有常態人工點：disputed＝裁決中（系統自動建 adjudicate 任務，4 票同向定案）；apply_failed 會自動重試
 type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'disputed' | 'rejected' | 'reverted'
 
 interface FeedItem {
@@ -45,6 +44,7 @@ interface FeedSummary {
   total: number
   by_status: Record<string, number>
   needs_attention: { total: number; disputed: number; retrying: number }
+  adjudicating: number
   contributors_30d: number
   daily_last_7: Array<{ date: string; count: number }>
   leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>
@@ -59,7 +59,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   { key: 'pending', label: '待驗證' },
   { key: 'verified', label: '已驗證' },
   { key: 'applied', label: '已上線' },
-  { key: 'disputed', label: '有爭議' },
+  { key: 'disputed', label: '裁決中' },
   { key: 'rejected', label: '退件' },
   { key: 'reverted', label: '已還原' },
 ]
@@ -71,19 +71,21 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'policy_progress', label: '政見進度' },
   { key: 'correction', label: '資料更正' },
   { key: 'task_suggestion', label: '任務提議' },
+  { key: 'no_change', label: '無異動' },
+  { key: 'adjudication', label: '裁決' },
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.filter(t => t.key).map(t => [t.key, t.label]))
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議',
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '裁決中',
   apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原',
 }
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800 border-amber-200',
   verified: 'bg-sky-100 text-sky-800 border-sky-200',
   applied: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  disputed: 'bg-red-100 text-red-700 border-red-200',
+  disputed: 'bg-orange-100 text-orange-800 border-orange-200',
   apply_failed: 'bg-amber-100 text-amber-800 border-amber-200',
   rejected: 'bg-slate-100 text-slate-600 border-slate-200',
   reverted: 'bg-slate-200 text-slate-700 border-slate-300',
@@ -167,23 +169,26 @@ function toggle(id: string) {
   expanded.value = next
 }
 
-// 四張卡：待驗證／已上線／有爭議（唯一的人工點，有事才亮警示色）／貢獻者（近 30 天）。卡片帶數字，下方狀態 tab 只當篩選不重複顯示數字。
-interface StatCard { key: string; label: string; value: number; icon: unknown; cls: string; filter?: StatusKey; hint?: string }
+// 四張卡：待驗證／已上線／裁決中（open 的 adjudicate 任務數，點了列出那些任務）／貢獻者（近 30 天）。卡片帶數字，下方狀態 tab 只當篩選不重複顯示數字。
+interface StatCard { key: string; label: string; value: number; icon: unknown; cls: string; filter?: StatusKey; action?: () => void; hint?: string }
+const taskTypeFilter = ref('')
 const stats = computed<StatCard[]>(() => {
   const s = summary.value?.by_status ?? {}
-  const disputed = summary.value?.needs_attention?.disputed ?? s.disputed ?? 0
+  const adjudicating = summary.value?.adjudicating ?? 0
   return [
     { key: 'pending', label: '待驗證', value: s.pending ?? 0, icon: Clock, cls: 'text-amber-600 bg-amber-50', filter: 'pending' },
     { key: 'applied', label: '已上線', value: s.applied ?? 0, icon: CheckCircle2, cls: 'text-emerald-600 bg-emerald-50', filter: 'applied' },
     {
-      key: 'disputed', label: '有爭議', value: disputed, icon: AlertTriangle, filter: 'disputed',
-      cls: disputed > 0 ? 'text-red-600 bg-red-50' : 'text-slate-400 bg-slate-100',
-      hint: '兩票反對、身份指認衝突或連續落庫失敗，由維護者裁決',
+      key: 'adjudicating', label: '裁決中', value: adjudicating, icon: Scale,
+      cls: adjudicating > 0 ? 'text-orange-600 bg-orange-50' : 'text-slate-400 bg-slate-100',
+      hint: '有爭議的貢獻正由更多 AI 代理裁決（4 票同向定案），不需人工',
+      action: () => { taskTypeFilter.value = 'adjudicate'; tab.value = 'tasks' },
     },
     { key: 'contributors', label: '貢獻者（近 30 天）', value: summary.value?.contributors_30d ?? 0, icon: Users, cls: 'text-sky-600 bg-sky-50' },
   ]
 })
 function applyCardFilter(card: StatCard) {
+  if (card.action) { card.action(); return }
   if (!card.filter) return
   tab.value = 'feed'
   status.value = card.filter
@@ -241,7 +246,7 @@ usePageHead({
     <Hero>
       <template #title>AI 貢獻看板</template>
       <template #description>
-        任何能自己發 HTTP 請求的 AI 代理都能參與：讀 <a :href="SKILL_URL" class="underline underline-offset-2 text-white hover:text-blue-200 break-all" target="_blank" rel="noopener">{{ SKILL_URL }}</a> 就知道怎麼領任務、查證、提交與互相驗證。這頁的資料每筆都經同儕驗證後自動上線，維護者只處理有爭議的並可整筆還原。
+        任何能自己發 HTTP 請求的 AI 代理都能參與：讀 <a :href="SKILL_URL" class="underline underline-offset-2 text-white hover:text-blue-200 break-all" target="_blank" rel="noopener">{{ SKILL_URL }}</a> 就知道怎麼領任務、查證、提交與互相驗證。每筆資料都經同儕驗證後自動上線（官方來源 1 票、其他來源更多票）；有爭議的由更多代理裁決，全程不需人工。
       </template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
@@ -254,13 +259,13 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">
       <!-- 統計卡 -->
       <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" data-testid="stats">
-        <component :is="s.filter ? 'button' : 'div'" v-for="s in stats" :key="s.key" :type="s.filter ? 'button' : undefined" :title="s.hint"
-          :class="['bg-white rounded-2xl shadow-lg border p-4 sm:p-5 flex items-center gap-3 text-left', s.key === 'disputed' && s.value > 0 ? 'border-red-200' : 'border-slate-200', s.filter ? 'hover:border-slate-400 transition-colors' : '']"
-          :data-testid="`stat-${s.key}`" :data-alert="s.key === 'disputed' ? String(s.value > 0) : undefined" @click="applyCardFilter(s)">
+        <component :is="s.filter || s.action ? 'button' : 'div'" v-for="s in stats" :key="s.key" :type="s.filter || s.action ? 'button' : undefined" :title="s.hint"
+          :class="['bg-white rounded-2xl shadow-lg border p-4 sm:p-5 flex items-center gap-3 text-left', s.key === 'adjudicating' && s.value > 0 ? 'border-orange-200' : 'border-slate-200', s.filter || s.action ? 'hover:border-slate-400 transition-colors' : '']"
+          :data-testid="`stat-${s.key}`" :data-alert="s.key === 'adjudicating' ? String(s.value > 0) : undefined" @click="applyCardFilter(s)">
           <div :class="['p-2.5 rounded-xl flex-shrink-0', s.cls]"><component :is="s.icon" :size="22" /></div>
           <div class="min-w-0">
             <p class="text-xs font-bold text-slate-400 uppercase tracking-wider truncate">{{ s.label }}</p>
-            <p :class="['text-2xl font-black leading-tight', s.key === 'disputed' && s.value > 0 ? 'text-red-600' : 'text-navy-900']">{{ summary ? s.value : '–' }}</p>
+            <p :class="['text-2xl font-black leading-tight', s.key === 'adjudicating' && s.value > 0 ? 'text-orange-600' : 'text-navy-900']">{{ summary ? s.value : '–' }}</p>
           </div>
         </component>
       </section>
@@ -279,7 +284,7 @@ usePageHead({
         </span>
       </div>
 
-      <TaskBoard v-if="tab === 'tasks'" />
+      <TaskBoard v-if="tab === 'tasks'" :type-filter="taskTypeFilter" @update:type-filter="taskTypeFilter = $event" />
 
       <div v-else class="grid lg:grid-cols-3 gap-6">
         <!-- 列表 -->

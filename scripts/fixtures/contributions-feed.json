@@ -216,7 +216,8 @@
       "disputed": 4,
       "retrying": 0
     },
-    "contributors_30d": 5
+    "contributors_30d": 5,
+    "adjudicating": 2
   },
   "docs": "https://policy-tw.web.app/skill.md"
 }

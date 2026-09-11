@@ -23,6 +23,7 @@ const SUGGESTED_TYPE: Record<string, string> = {
   policy_source_missing: "correction",
   progress_stale: "policy_progress",
   candidacy_source_missing: "candidacy",
+  adjudicate: "adjudication",
 };
 
 function json(body: unknown, status = 200): Response {

@@ -16,6 +16,7 @@ import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
+import { closeAdjudicationTasks } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -326,8 +327,67 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   return { status: "applied", message: `已記錄無異動並關閉任務 ${taskId}`, task_id: taskId };
 }
 
+const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, contributor_url, status, review_notes";
+
+/**
+ * adjudication（4 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
+ * 兩種都關閉該貢獻的裁決任務、把同一筆的其他未定案裁決退掉。原貢獻已非 disputed 就只收尾。
+ */
+async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const targetId = str(p.contribution_id);
+  const verdict = str(p.verdict);
+  if (!targetId || !verdict) return { status: "failed", message: "adjudication 要帶 contribution_id 與 verdict" };
+  const { data: original, error } = await supabase.from("contributions").select(ORIGINAL_COLUMNS).eq("id", targetId).maybeSingle();
+  throwIf(error, "original contribution lookup");
+  if (!original) return { status: "failed", message: `找不到原貢獻 ${targetId}` };
+
+  const now = new Date().toISOString();
+  const stamp = `[adjudication ${verdict}] ${str(p.reason) ?? ""}（裁決者 ${row.agent_name ?? "?"}，${row.id}）`;
+  const finish = async () => {
+    const closed = await closeAdjudicationTasks(supabase, targetId);
+    const { error: e } = await supabase.from("contributions")
+      .update({ status: "rejected", review_notes: `[auto] 同一筆爭議已由裁決 ${row.id} 定案`, reviewed_by: "adjudication", reviewed_at: now })
+      .eq("contribution_type", "adjudication").eq("payload->>contribution_id", targetId).neq("id", row.id).in("status", ["pending", "verified", "disputed", "apply_failed"]);
+    throwIf(e, "retire other adjudications");
+    return closed;
+  };
+
+  if (original.status !== "disputed") {
+    const closed = await finish();
+    return { status: "applied", message: `原貢獻已是 ${original.status}，裁決不再需要（關閉 ${closed} 個任務）` };
+  }
+
+  if (verdict === "reject") {
+    const { error: e } = await supabase.from("contributions").update({
+      status: "rejected", review_notes: [original.review_notes, stamp].filter(Boolean).join("；"), reviewed_by: "adjudication", reviewed_at: now,
+    }).eq("id", targetId).eq("status", "disputed");
+    throwIf(e, "original reject");
+    await finish();
+    return { status: "applied", message: `裁決 reject 定案：原貢獻 ${targetId} 已退件` };
+  }
+
+  // uphold：把原貢獻落庫（身份爭議由裁決者指認）
+  const outcome = await applyContribution(supabase, { ...(original as ContributionRow), resolved_politician_id: str(p.resolved_politician_id) });
+  if (outcome.status === "failed") throw new Error(`原貢獻落庫失敗：${outcome.message}`);
+  if (outcome.status === "disputed") {
+    const { error: e } = await supabase.from("contributions").update({ review_notes: [original.review_notes, `${stamp}；但仍無法落庫：${outcome.message}`].filter(Boolean).join("；") }).eq("id", targetId);
+    throwIf(e, "original note");
+    return { status: "applied", message: `裁決 uphold 通過，但原貢獻仍無法落庫（${outcome.message}）；任務保持 open，下一位裁決者請帶 resolved_politician_id` };
+  }
+  const { error: e } = await supabase.from("contributions").update({
+    status: "applied", applied_at: now, applied_politician_id: outcome.politician_id ?? null, applied_policy_id: outcome.policy_id ?? null,
+    review_notes: [original.review_notes, `${stamp}；${outcome.message}`].filter(Boolean).join("；"), reviewed_by: "adjudication", reviewed_at: now,
+    last_error: null, next_retry_at: null,
+  }).eq("id", targetId).eq("status", "disputed");
+  throwIf(e, "original mark applied");
+  await finish();
+  return { status: "applied", politician_id: outcome.politician_id, policy_id: outcome.policy_id, message: `裁決 uphold 定案：原貢獻已落庫（${outcome.message}）` };
+}
+
 export async function applyContribution(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   switch (row.contribution_type) {
+    case "adjudication": return await applyAdjudication(supabase, row);
     case "no_change": return await applyNoChange(supabase, row);
     case "politician": return await applyPolitician(supabase, row);
     case "candidacy": return await applyCandidacy(supabase, row);

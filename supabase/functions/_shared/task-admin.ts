@@ -9,7 +9,7 @@ import { TASK_TYPES } from "./contribution-schema.ts";
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 
-export type TaskSource = "manual" | "suggested" | "web_request";
+export type TaskSource = "manual" | "suggested" | "web_request" | "auto_dispute";
 
 export interface TaskInput {
   title: string;
@@ -22,6 +22,10 @@ export interface TaskInput {
   hint_sources?: string[];
   /** task_type=audit：要核對的文件網址（存進 target.source_url） */
   source_url?: string | null;
+  /** task_type=adjudicate：被裁決的貢獻（存進 target.contribution_id） */
+  target_contribution_id?: string | null;
+  /** 其他要放進 target 的欄位（例如 contributor、reason） */
+  target_extra?: Record<string, unknown>;
 }
 
 export interface TaskValidation {
@@ -60,16 +64,20 @@ export function validateTaskInput(raw: unknown): TaskValidation {
       priority: typeof t.priority === "number" ? t.priority : undefined,
       hint_sources: Array.isArray(t.hint_sources) ? (t.hint_sources as string[]) : [],
       source_url: typeof t.source_url === "string" ? t.source_url.trim() : null,
+      target_contribution_id: isUuid(t.target_contribution_id) ? t.target_contribution_id : null,
+      target_extra: t.target_extra && typeof t.target_extra === "object" ? (t.target_extra as Record<string, unknown>) : undefined,
     },
   };
 }
 
 export function taskTarget(input: TaskInput): Obj {
   return {
+    ...(input.target_extra ?? {}),
     ...(input.target_politician_id ? { politician_id: input.target_politician_id } : {}),
     ...(input.target_policy_id ? { policy_id: input.target_policy_id } : {}),
     ...(input.region ? { region: input.region } : {}),
     ...(input.source_url ? { source_url: input.source_url } : {}),
+    ...(input.target_contribution_id ? { contribution_id: input.target_contribution_id } : {}),
   };
 }
 

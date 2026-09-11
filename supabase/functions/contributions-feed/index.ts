@@ -40,12 +40,13 @@ Deno.serve(async (req) => {
     if (type) q = q.eq("contribution_type", type);
     if (cursor) q = q.lt("created_at", cursor);
 
-    const [feedRes, allRes, votesRes] = await Promise.all([
+    const [feedRes, allRes, votesRes, adjRes] = await Promise.all([
       q,
       supabase.from("contributions").select("status, agent_name, created_at").limit(10000),
       supabase.from("contribution_votes").select("agent_name").limit(20000),
+      supabase.from("contribution_tasks").select("id", { count: "exact", head: true }).eq("task_type", "adjudicate").eq("status", "open"),
     ]);
-    for (const r of [feedRes, allRes, votesRes]) if (r.error) throw new Error(r.error.message);
+    for (const r of [feedRes, allRes, votesRes, adjRes]) if (r.error) throw new Error(r.error.message);
 
     // deno-lint-ignore no-explicit-any
     const rows = (feedRes.data ?? []) as any[];
@@ -53,7 +54,7 @@ Deno.serve(async (req) => {
     const page = rows.slice(0, limit);
     const items = page.map((r) => {
       const s = summarizeContribution({ contribution_type: r.contribution_type, payload: r.payload, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
-      const need = requiredAgree(r.contribution_type, r.payload);
+      const need = requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []);
       return {
         id: r.id,
         contribution_type: r.contribution_type,
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
     });
 
     // summary（純函式，見 contribution-summary.ts）
-    const summary = buildFeedSummary((allRes.data ?? []) as SummaryRow[], (votesRes.data ?? []) as VoteRow[]);
+    const summary = buildFeedSummary((allRes.data ?? []) as SummaryRow[], (votesRes.data ?? []) as VoteRow[], Date.now(), adjRes.count ?? 0);
 
     return json({
       success: true,

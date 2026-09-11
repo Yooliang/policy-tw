@@ -9,6 +9,7 @@
 
 import { applyContribution, type ApplyOutcome, type ContributionRow, contributionStatusFor } from "./apply-contribution.ts";
 import { APPLY_MAX_RETRIES, type IdentityVote, planRetry, resolveIdentityFromVotes } from "./consensus.ts";
+import { ensureAdjudicationTask } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -66,14 +67,19 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const { error: e } = await supabase.from("contributions").update(patch).eq("id", lock.id).eq("status", lock.status);
     return e ? `contributions update: ${e.message}` : null;
   };
+  // 轉 disputed 就自動建裁決任務（零人工點）；建不成只記 log，不影響主流程
+  const escalate = async (reason: string) => {
+    try { await ensureAdjudicationTask(supabase, contributionId, reason); } catch (e) { console.error("ensureAdjudicationTask:", e instanceof Error ? e.message : String(e)); }
+  };
 
   try {
     let resolvedPoliticianId: string | null = null;
     if (IDENTITY_TYPES.has(row.contribution_type)) {
       const identity = await identityFromVotes(supabase, contributionId);
       if (identity.kind === "conflict") {
-        const message = `驗證者指認的人物不一致（${identity.politician_ids.join("、")}），交維護者裁決`;
+        const message = `驗證者指認的人物不一致（${identity.politician_ids.join("、")}），交裁決`;
         const err = await update({ status: "disputed", review_notes: `[auto] ${message}`, reviewed_by: "auto-apply", reviewed_at: now });
+        await escalate(message);
         return { triggered: true, status: "disputed", outcome: { status: "disputed", message }, ...(err ? { error: err } : {}) };
       }
       if (identity.kind === "resolved") resolvedPoliticianId = identity.politician_id;
@@ -82,6 +88,11 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
     if (outcome.status === "failed") throw new Error(outcome.message);
     const status = contributionStatusFor(outcome.status);
+    if (status === "disputed") {
+      const err = await update({ status, review_notes: `[auto] ${outcome.message}`, reviewed_by: "auto-apply", reviewed_at: now });
+      await escalate(outcome.message);
+      return { triggered: true, status, outcome, ...(err ? { error: err } : {}) };
+    }
     const err = await update({
       status,
       review_notes: `[auto] ${outcome.message}`,
@@ -100,8 +111,9 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     if (plan.give_up) {
       await update({
         status: "disputed", retry_count: plan.retry_count, last_error: message, next_retry_at: null,
-        review_notes: `[auto] 落庫連續 ${plan.retry_count} 次失敗，需要人看程式：${message}`, reviewed_by: "auto-apply", reviewed_at: now,
+        review_notes: `[auto] 落庫連續 ${plan.retry_count} 次失敗，交裁決：${message}`, reviewed_by: "auto-apply", reviewed_at: now,
       });
+      await escalate(`落庫連續 ${plan.retry_count} 次失敗`);
       return { triggered: true, status: "disputed", error: message };
     }
     await update({
