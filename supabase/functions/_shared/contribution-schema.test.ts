@@ -24,7 +24,7 @@ Deno.test("亂碼拒收：任何字串含 U+FFFD 或控制字元 → encoding_in
   assertEquals(r.errors[0].code, "encoding_invalid");
   assert(r.errors[0].message.includes("--data-binary"));
 
-  const control = { ...validCandidacy, note: "有控制字元" };
+  const control = { ...validCandidacy, note: "有控制字元\x07" };
   assert(validateContributionRequest(control).errors.some((e) => e.code === "encoding_invalid" && e.path === "note"));
 
   const verify = validateVerifyRequest({ contribution_id: "5f0f2a2e-1c1e-4b3a-9d2c-0a1b2c3d4e5f", verdict: "unsure", agent_name: AGENT, note: "�" });
