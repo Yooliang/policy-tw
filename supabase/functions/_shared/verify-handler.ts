@@ -4,7 +4,7 @@
  *       disagree 必附 evidence_url；共識由 DB 觸發器算。
  */
 
-import { validateVerifyRequest } from "./contribution-schema.ts";
+import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 
@@ -15,7 +15,10 @@ export const VERIFY_DAILY_LIMIT_PER_IP = 200;
 
 export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string): Promise<HandlerResult> {
   const v = validateVerifyRequest(body);
-  if (!v.ok || !v.input) return { status: 400, body: { success: false, error: "validation_failed", errors: v.errors } };
+  if (!v.ok || !v.input) {
+    const encoding = v.errors.some((e) => e.code === "encoding_invalid");
+    return { status: 400, body: { success: false, error: encoding ? "encoding_invalid" : "validation_failed", ...(encoding ? { message: ENCODING_INVALID_MESSAGE } : {}), errors: v.errors } };
+  }
   const input = v.input;
 
   const todayStart = new Date();

@@ -68,7 +68,7 @@ export interface VerifyInput {
 
 export interface VerifyValidation {
   ok: boolean;
-  errors: Array<{ path: string; message: string }>;
+  errors: Array<{ path: string; message: string; code?: "encoding_invalid" }>;
   input: VerifyInput | null;
 }
 
@@ -79,6 +79,24 @@ export interface ValidationError {
   index: number;
   path: string;
   message: string;
+  /** encoding_invalid：字串含 U+FFFD（無法以 UTF-8 解碼的殘骸）或 C0 控制字元 */
+  code?: "encoding_invalid";
+}
+
+export const ENCODING_INVALID_MESSAGE =
+  "字串含亂碼（U+FFFD／無法以 UTF-8 解碼）或控制字元。請以 UTF-8 送出；Windows 請把 JSON 寫到檔案再用 curl --data-binary @file，不要在指令列內嵌中文。";
+
+// U+FFFD 或 C0 控制字元（保留 \t \n \r）
+const BAD_CHARS_RE = /[�\x00-\x08\x0B\x0C\x0E-\x1F]/;
+
+/** 遞迴找出所有含亂碼／控制字元的字串欄位路徑 */
+export function findEncodingProblems(value: unknown, path = ""): string[] {
+  if (typeof value === "string") return BAD_CHARS_RE.test(value) ? [path || "(root)"] : [];
+  if (Array.isArray(value)) return value.flatMap((v, i) => findEncodingProblems(v, `${path}[${i}]`));
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value as Record<string, unknown>).flatMap(([k, v]) => findEncodingProblems(v, path ? `${path}.${k}` : k));
+  }
+  return [];
 }
 
 export interface ValidationResult {
@@ -171,6 +189,17 @@ export function validateContributionRequest(body: unknown): ValidationResult {
 
   if (!isObj(body)) return { ok: false, errors: [{ index: -1, path: "body", message: "body 要是 JSON 物件" }], items, contributor };
 
+  // 先擋亂碼：任何字串欄位含 U+FFFD 或控制字元就整批退，不再往下驗
+  const encodingProblems = findEncodingProblems(body);
+  if (encodingProblems.length > 0) {
+    return {
+      ok: false,
+      errors: encodingProblems.map((p) => ({ index: -1, path: p, message: ENCODING_INVALID_MESSAGE, code: "encoding_invalid" as const })),
+      items,
+      contributor,
+    };
+  }
+
   if (!isValidAgentName(body.agent_name)) {
     errors.push({ index: -1, path: "agent_name", message: AGENT_NAME_MSG });
   } else {
@@ -220,8 +249,12 @@ export const VERDICTS = ["agree", "disagree", "unsure"] as const;
 
 /** POST /verify／/report{kind:verify} 的請求驗證：disagree 一定要有 evidence_url（http(s)）與 note。 */
 export function validateVerifyRequest(body: unknown): VerifyValidation {
-  const errors: Array<{ path: string; message: string }> = [];
+  const errors: Array<{ path: string; message: string; code?: "encoding_invalid" }> = [];
   if (!isObj(body)) return { ok: false, errors: [{ path: "body", message: "body 要是 JSON 物件" }], input: null };
+  const encodingProblems = findEncodingProblems(body);
+  if (encodingProblems.length > 0) {
+    return { ok: false, errors: encodingProblems.map((p) => ({ path: p, message: ENCODING_INVALID_MESSAGE, code: "encoding_invalid" as const })), input: null };
+  }
   if (!isUuid(body.contribution_id)) errors.push({ path: "contribution_id", message: "contribution_id 必填（uuid，/next 給的）" });
   if (!oneOf(VERDICTS, body.verdict)) errors.push({ path: "verdict", message: "verdict 要是 agree／disagree／unsure" });
   if (!isValidAgentName(body.agent_name)) errors.push({ path: "agent_name", message: AGENT_NAME_MSG });

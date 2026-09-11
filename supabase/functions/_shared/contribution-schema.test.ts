@@ -2,7 +2,7 @@
  * 執行：cd supabase/functions && deno test --allow-read _shared/
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { canonicalPayload, MAX_BATCH, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { canonicalPayload, MAX_BATCH, sha256Hex, validateContributionRequest, validateVerifyRequest } from "./contribution-schema.ts";
 import { bestSourceKind, checkSourceSet, sourceKind } from "./source-priority.ts";
 
 const CEC = "https://db.cec.gov.tw/ElecTable/Election/ElecTickets";
@@ -15,6 +15,24 @@ const validCandidacy = {
   payload: { name: "陳素月", party: "民主進步黨", region: "彰化縣", election_id: 2026, election_type: "縣市長", candidate_status: "registered", current_position: "立法委員" },
   source_urls: [CNA],
 };
+
+Deno.test("亂碼拒收：任何字串含 U+FFFD 或控制字元 → encoding_invalid，指出路徑並教 UTF-8 送法", () => {
+  const garbled = { ...validCandidacy, payload: { ...validCandidacy.payload, name: "���", region: "彰化縣" } };
+  const r = validateContributionRequest(garbled);
+  assertEquals(r.ok, false);
+  assertEquals(r.errors.map((e) => e.path), ["payload.name"]);
+  assertEquals(r.errors[0].code, "encoding_invalid");
+  assert(r.errors[0].message.includes("--data-binary"));
+
+  const control = { ...validCandidacy, note: "有控制字元\x07" };
+  assert(validateContributionRequest(control).errors.some((e) => e.code === "encoding_invalid" && e.path === "note"));
+
+  const verify = validateVerifyRequest({ contribution_id: "5f0f2a2e-1c1e-4b3a-9d2c-0a1b2c3d4e5f", verdict: "unsure", agent_name: AGENT, note: "�" });
+  assert(verify.errors.some((e) => e.code === "encoding_invalid"));
+
+  // 正常中文（含換行）不會被誤擋
+  assertEquals(validateContributionRequest({ ...validCandidacy, note: "第一行\n第二行\t縮排" }).ok, true);
+});
 
 Deno.test("agent_name 必填；task_id 可帶", () => {
   const { agent_name: _drop, ...noAgent } = validCandidacy;
