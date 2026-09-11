@@ -4,21 +4,35 @@ import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
-import { MessageSquare, ThumbsUp, TrendingUp, Search, PenTool, Eye } from 'lucide-vue-next'
+import { MessageSquare, ThumbsUp, TrendingUp, Search, Eye } from 'lucide-vue-next'
+import HeroAction from '../components/HeroAction.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import type { Discussion } from '../types'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 const route = useRoute()
 const router = useRouter()
 const { discussions, politicians, policies } = useSupabase()
 const { globalRegion } = useGlobalState()
-const initialFilter = computed(() => (route.query.filter as string) || '')
+// 政見標題篩選（PolicyDetail 的「公民討論」帶 ?filter= 過來）。改由下方 useRegionQuerySync 在 mounted 後從網址套進來，
+// 不在 setup 直接讀 route.query：預渲染的 HTML 沒有這段，setup 就讀會 hydration mismatch
+const initialFilter = ref('')
 
 const activeTab = ref<'hot' | 'latest'>('hot')
 const searchQuery = ref('')
 const activeCategory = ref('')
+
+// 縣市（全站共用）、頁籤、議題標籤 ↔ 網址 ?region=&tab=&tag=；既有的 ?filter=政見標題 原樣保留
+useRegionQuerySync({
+  routeName: 'community',
+  extra: {
+    tab: queryField(activeTab, 'hot', { allowed: ['hot', 'latest'] as const }),
+    tag: queryField(activeCategory, ''),
+    filter: queryField(initialFilter, ''),
+  },
+})
 
 const COMMUNITY_TAGS = ['居住正義', '交通', '教育', '經濟', '環保']
 
@@ -108,7 +122,7 @@ const hotDiscussions = computed(() =>
 )
 
 const clearFilter = () => {
-  router.push('/community')
+  initialFilter.value = ''  // 網址的 ?filter= 由同步機制拿掉，縣市等其他參數保留
 }
 
 function getCommentCount(post: Discussion) {
@@ -130,15 +144,8 @@ usePageHead({
 
       <!-- Hero Actions: 頁籤 -->
       <template #actions>
-        <button @click="activeTab = 'hot'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'hot' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
-          <TrendingUp :size="16" /> 熱門討論
-        </button>
-        <button @click="activeTab = 'latest'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'latest' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`">
-          <MessageSquare :size="16" /> 最新發表
-        </button>
-        <button class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-500/20">
-          <PenTool :size="16" /> 發起新討論
-        </button>
+        <HeroAction :active="activeTab === 'hot'" @click="activeTab = 'hot'"><TrendingUp :size="16" /> 熱門討論</HeroAction>
+        <HeroAction :active="activeTab === 'latest'" @click="activeTab = 'latest'"><MessageSquare :size="16" /> 最新發表</HeroAction>
       </template>
 
       <GlobalRegionSelector />

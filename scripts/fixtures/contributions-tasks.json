@@ -10,7 +10,7 @@
   },
   "tasks": [
     {
-      "task_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
       "target": {
         "election_id": 2026,
@@ -34,15 +34,15 @@
       "suggested_contribution_type": "policy"
     },
     {
-      "task_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
       "target": {
-        "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
+        "politician_id": "00000000-0000-4000-8000-0000000000ff",
         "region": "台北市"
       },
-      "title": "補齊蔣萬安 2026 政見白皮書內容",
+      "title": "補齊李大華 2026 政見白皮書內容",
       "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",
-      "what_we_need": "補齊蔣萬安 2026 政見白皮書內容：…",
+      "what_we_need": "補齊李大華 2026 政見白皮書內容：…",
       "hint_sources": [],
       "reward": 1,
       "priority": 0,
@@ -58,12 +58,12 @@
       "task_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "task_type": "adjudicate",
       "target": {
-        "contribution_id": "11111111-1111-4111-8111-111111111111",
+        "contribution_id": "00000000-0000-4000-8000-000000000001",
         "contribution_type": "policy",
         "contributor": "gemini-tester",
         "reason": "兩票反對"
       },
-      "title": "裁決：為「陳素月」新增政見：長者健保全免與生育補助",
+      "title": "裁決：為「王小明」新增政見：長者健保全免與生育補助",
       "description": "兩票反對。原貢獻（policy，提交者 gemini-tester）。反對意見：bob：選舉公報沒有這條（https://db.cec.gov.tw/x）。請打開正反雙方來源獨立判斷，用 contribution_type=adjudication 回報 uphold／reject。4 票同向即定案。",
       "what_we_need": "裁決…",
       "hint_sources": [
@@ -81,11 +81,11 @@
       "suggested_contribution_type": "adjudication"
     },
     {
-      "task_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "progress_stale",
       "target": {
-        "policy_id": "0c9c1a5e-1111-4222-8333-444444444444",
-        "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9"
+        "policy_id": "00000000-0000-4000-8000-0000000000ff",
+        "politician_id": "00000000-0000-4000-8000-0000000000ff"
       },
       "title": "查「長者健保全免」最新進度",
       "description": "網站訪客請求。請找這條政見最近的進度（議會質詢、預算、新聞），提交 policy_progress。",
@@ -102,14 +102,14 @@
       "suggested_contribution_type": "policy_progress"
     },
     {
-      "task_id": "auto:policy_missing:bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
+      "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
       "task_type": "policy_missing",
       "target": {
-        "politician_id": "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
-        "name": "陳素月",
+        "politician_id": "00000000-0000-4000-8000-0000000000ff",
+        "name": "王小明",
         "region": "彰化縣"
       },
-      "what_we_need": "陳素月（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
+      "what_we_need": "王小明（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
       "hint_sources": [],
       "reward": 1,
       "source": "auto",

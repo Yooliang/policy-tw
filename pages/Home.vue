@@ -5,7 +5,8 @@ import { useSupabase } from '../composables/useSupabase'
 import PolicyCard from '../components/PolicyCard.vue'
 
 import Hero from '../components/Hero.vue'
-import { ArrowRight, Users, FileCheck, Vote, Star, TrendingUp } from 'lucide-vue-next'
+import AiContributeBanner from '../components/AiContributeBanner.vue'
+import { ArrowRight, Users, FileCheck, Vote, Star, CheckCircle2, Activity } from 'lucide-vue-next'
 
 import { RouterLink, useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
@@ -87,10 +88,15 @@ const politicians2026Count = computed(() => {
   return politicians.value.filter(p => p.electionIds?.includes(electionId)).length
 })
 const totalPolicies = computed(() => policies.value.length)
-const averageProgress = computed(() => {
-  if (policies.value.length === 0) return 0
-  const sum = policies.value.reduce((acc, p) => acc + (p.progress || 0), 0)
-  return Math.round(sum / policies.value.length)
+// 狀態數字用 status 算，不用 progress：293 筆裡 252 筆是還沒開始的競選承諾，progress 平均永遠趨近 0
+const countByStatus = (status: string) => policies.value.filter(p => p.status === status).length
+const achievedCount = computed(() => countByStatus('Achieved'))
+const inProgressCount = computed(() => countByStatus('In Progress'))
+const proposedCount = computed(() => countByStatus('Proposed'))
+// 已執行政見的達成率＝已達成 ÷（已達成＋進行中＋已提出），還沒開始的競選承諾不算進分母
+const executedAchievementRate = computed(() => {
+  const denominator = achievedCount.value + inProgressCount.value + proposedCount.value
+  return denominator === 0 ? 0 : Math.round((achievedCount.value / denominator) * 100)
 })
 
 const recentPolicies = computed(() => policies.value.slice(0, 3))
@@ -175,23 +181,31 @@ usePageHead({
     <!-- Overall Stats -->
     <section class="py-20 bg-white">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
-          <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-            <div class="p-4 bg-blue-100 rounded-2xl mb-4 text-blue-600"><FileCheck :size="32" /></div>
-            <h3 class="text-4xl font-black text-navy-900">{{ totalPolicies.toLocaleString() }}</h3>
-            <p class="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">追蹤中政見總數</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 text-left mb-8" data-testid="home-stats">
+          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+            <div class="p-3 md:p-4 bg-blue-100 rounded-2xl mb-3 md:mb-4 text-blue-600"><FileCheck :size="28" /></div>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="total-policies">{{ totalPolicies.toLocaleString() }}</h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">追蹤中政見</p>
           </div>
-          <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-            <div class="p-4 bg-emerald-100 rounded-2xl mb-4 text-emerald-600"><TrendingUp :size="32" /></div>
-            <h3 class="text-4xl font-black text-navy-900">{{ averageProgress }}%</h3>
-            <p class="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">平均行政達成率</p>
+          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+            <div class="p-3 md:p-4 bg-emerald-100 rounded-2xl mb-3 md:mb-4 text-emerald-600"><CheckCircle2 :size="28" /></div>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="achieved">{{ achievedCount.toLocaleString() }}</h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已達成</p>
+            <p class="text-[11px] text-slate-400 mt-1">已執行政見達成率 <span data-stat="executed-rate">{{ executedAchievementRate }}</span>%</p>
           </div>
-          <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-            <div class="p-4 bg-amber-100 rounded-2xl mb-4 text-amber-600"><Users :size="32" /></div>
-            <h3 class="text-4xl font-black text-navy-900">{{ totalPoliticians.toLocaleString() }}</h3>
-            <p class="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已建檔政治人物</p>
+          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+            <div class="p-3 md:p-4 bg-sky-100 rounded-2xl mb-3 md:mb-4 text-sky-600"><Activity :size="28" /></div>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="in-progress">{{ inProgressCount.toLocaleString() }}</h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">進行中</p>
           </div>
+          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+            <div class="p-3 md:p-4 bg-amber-100 rounded-2xl mb-3 md:mb-4 text-amber-600"><Users :size="28" /></div>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="total-politicians">{{ totalPoliticians.toLocaleString() }}</h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已建檔政治人物</p>
+          </div>
+        </div>
 
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
           <div class="md:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col overflow-hidden">
             <h3 class="text-xl font-bold text-navy-900 mb-4 shrink-0">熱門議題稽核分佈</h3>
             <div class="flex-1 min-h-0">
@@ -214,6 +228,9 @@ usePageHead({
         </div>
       </div>
     </section>
+
+    <!-- 讓你的 AI 一起貢獻（主打區塊，放在統計之後、最新政見動態之前） -->
+    <AiContributeBanner />
 
     <!-- Checkpoints Quick View -->
     <section v-if="checkpointPolicies.length > 0" class="py-12 bg-amber-50/50 border-b border-amber-100">

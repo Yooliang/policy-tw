@@ -5,21 +5,34 @@ import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
-import { Search, GitBranch, Database, Milestone, ArrowRight } from 'lucide-vue-next'
+import { Search, GitBranch, Database, Milestone, ArrowRight, Link as LinkIcon } from 'lucide-vue-next'
+import HeroAction from '../components/HeroAction.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
+import { useGlobalState } from '../composables/useGlobalState'
+import { policyMatchesRegion } from '../lib/policy-region'
 
 
 const router = useRouter()
 const { policies, politicians, categories } = useSupabase()
+const { globalRegion } = useGlobalState()
 const searchTerm = ref('')
 const selectedCategory = ref('All')
+
+// 縣市（全站共用，本頁只影響選擇器顯示）與分類 ↔ 網址 ?region=&category=
+useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(selectedCategory, 'All') } })
+
+// 縣市過濾：與政見追蹤頁同一套判斷（政見所屬政治人物的 region）；選了縣市而 0 筆就顯示空狀態
+const regionPolicies = computed(() =>
+  policies.value.filter(policy => policyMatchesRegion(policy, politicians.value, globalRegion.value))
+)
 
 const relayCases = computed(() => {
   const cases: any[] = []
   const visitedPolicyIds = new Set<string>()
 
-  policies.value.forEach(policy => {
+  regionPolicies.value.forEach(policy => {
     if (visitedPolicyIds.has(policy.id)) return
     if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
       const chain = policies.value.filter(p => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
@@ -79,12 +92,9 @@ usePageHead({
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
       <template #actions>
-        <button :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white text-navy-900 shadow-lg`">
-          <Database :size="16" /> 分析列表
-        </button>
-        <button @click="router.push({ path: '/ai-assistant', query: { type: 'policy' } })" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white/10 text-white hover:bg-white/20 border border-white/20`">
-          <Milestone :size="16" /> 看政見貢獻
-        </button>
+        <HeroAction active><Database :size="16" /> 分析列表</HeroAction>
+        <HeroAction :to="{ path: '/ai-assistant', query: { type: 'policy' } }"><Milestone :size="16" /> 看政見貢獻</HeroAction>
+        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
       </template>
 
       <GlobalRegionSelector />
@@ -140,6 +150,11 @@ usePageHead({
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div v-if="relayCases.length === 0" class="col-span-full text-center py-32 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-300">
+          <Search :size="48" class="mx-auto mb-4 opacity-20" />
+          <p class="font-bold">沒有找到符合條件的分析項目。</p>
+          <p class="text-sm mt-1">試試其他縣市或分類。</p>
+        </div>
         <div
           v-for="relayCase in relayCases"
           :key="relayCase.id"

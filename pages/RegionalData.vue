@@ -7,6 +7,7 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync } from '../composables/useRegionQuerySync'
 
 const router = useRouter()
 const { regionStats } = useSupabase()
@@ -48,6 +49,9 @@ const twArea: Record<string, string[]> = {
 
 // 當全域選擇 "All" 時，顯示 "全國"
 const selectedRegion = ref(globalRegion.value === 'All' ? '全國' : globalRegion.value)
+
+// 縣市（全站共用）↔ 網址 ?region=；selectedRegion 與 globalRegion 的雙向 watch 在下面
+useRegionQuerySync({ routeName: 'regional-data' })
 
 // 是否為全國模式
 const isNational = computed(() => selectedRegion.value === '全國')
@@ -253,7 +257,7 @@ usePageHead({
               <button
                  v-for="dist in twArea[selectedRegion]"
                  :key="dist"
-                 @click="isNational ? (selectedRegion = dist) : router.push({ path: '/tracking', query: { region: selectedRegion, subRegion: dist } })"
+                 @click="isNational ? (selectedRegion = dist) : router.push({ path: '/tracking', query: { region: selectedRegion } })"
                  class="p-4 bg-slate-50 hover:bg-blue-50 border border-slate-100 hover:border-blue-200 rounded-2xl text-left transition-all group"
               >
                  <p class="text-sm font-bold text-navy-900 group-hover:text-blue-700">{{ dist }}</p>

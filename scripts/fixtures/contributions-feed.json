@@ -5,7 +5,7 @@
   "next_cursor": null,
   "items": [
     {
-      "id": "11111111-1111-4111-8111-111111111111",
+      "id": "00000000-0000-4000-8000-000000000001",
       "contribution_type": "policy",
       "status": "pending",
       "required_agree": 2,
@@ -18,23 +18,23 @@
       "source_urls": [
         "https://www.cna.com.tw/news/aipl/202609045002.aspx"
       ],
-      "task_id": "auto:policy_missing:bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
+      "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
       "created_at": "2026-09-11T08:00:00.000Z",
       "applied_at": null,
       "review_notes": null,
-      "summary": "為「陳素月」新增政見：長者健保全免與生育補助",
-      "target_name": "陳素月",
-      "politician_url": "https://policy-tw.web.app/politician/bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9",
+      "summary": "為「王小明」新增政見：長者健保全免與生育補助",
+      "target_name": "王小明",
+      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
       "policy_url": null,
       "payload": {
-        "name": "陳素月",
+        "name": "王小明",
         "title": "長者健保全免與生育補助",
         "category": "社會福利",
         "description": "65 歲以上長者健保費全免，生育補助每胎 3 萬元。"
       }
     },
     {
-      "id": "22222222-2222-4222-8222-222222222222",
+      "id": "00000000-0000-4000-8000-000000000002",
       "contribution_type": "candidacy",
       "status": "applied",
       "required_agree": 6,
@@ -54,7 +54,7 @@
       "review_notes": "[auto] 參選紀錄已更新為 registered",
       "summary": "將 徐千晴 2026 新竹市縣市議員參選狀態改為「已登記」",
       "target_name": "徐千晴",
-      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-000000000001",
+      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
       "policy_url": null,
       "payload": {
         "name": "徐千晴",
@@ -65,7 +65,7 @@
       }
     },
     {
-      "id": "33333333-3333-4333-8333-333333333333",
+      "id": "00000000-0000-4000-8000-000000000003",
       "contribution_type": "policy",
       "status": "applied",
       "required_agree": 2,
@@ -78,23 +78,23 @@
       "source_urls": [
         "https://news.ltn.com.tw/news/politics/breakingnews/1"
       ],
-      "task_id": "auto:policy_missing:00000000-0000-4000-8000-000000000002",
+      "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
       "created_at": "2026-09-10T09:30:00.000Z",
       "applied_at": "2026-09-10T10:00:00.000Z",
       "review_notes": "[auto] 政見已建立",
-      "summary": "為「彭俊豪」新增政見：桃園機場捷運延伸中壢",
-      "target_name": "彭俊豪",
-      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-000000000002",
-      "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-000000000099",
+      "summary": "為「陳志明」新增政見：桃園機場捷運延伸中壢",
+      "target_name": "陳志明",
+      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
+      "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-0000000000ff",
       "payload": {
-        "name": "彭俊豪",
+        "name": "陳志明",
         "title": "桃園機場捷運延伸中壢",
         "category": "交通建設",
         "description": "推動機捷延伸至中壢車站，2028 年前通車。"
       }
     },
     {
-      "id": "44444444-4444-4444-8444-444444444444",
+      "id": "00000000-0000-4000-8000-000000000004",
       "contribution_type": "correction",
       "status": "disputed",
       "required_agree": 2,
@@ -114,17 +114,17 @@
       "summary": "把政見 abcdef12 的提出日改為「2024-04-02」",
       "target_name": null,
       "politician_url": null,
-      "policy_url": "https://policy-tw.web.app/policy/abcdef12-0000-4000-8000-000000000000",
+      "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-0000000000ff",
       "payload": {
         "target_table": "policies",
-        "target_id": "abcdef12-0000-4000-8000-000000000000",
+        "target_id": "00000000-0000-4000-8000-0000000000ff",
         "field": "proposed_date",
         "correct_value": "2024-04-02",
         "reason": "部落格寫的"
       }
     },
     {
-      "id": "55555555-5555-4555-8555-555555555555",
+      "id": "00000000-0000-4000-8000-000000000005",
       "contribution_type": "politician",
       "status": "disputed",
       "required_agree": 2,
@@ -137,7 +137,7 @@
       "source_urls": [
         "https://www.ly.gov.tw/Pages/List.aspx?nodeid=109"
       ],
-      "task_id": "auto:profile_gap:00000000-0000-4000-8000-000000000003",
+      "task_id": "auto:profile_gap:00000000-0000-4000-8000-0000000000ff",
       "created_at": "2026-09-09T10:00:00.000Z",
       "applied_at": null,
       "review_notes": "[auto] 驗證者指認的人物不一致（bcdfd014、9a1c2f33），交維護者裁決",
