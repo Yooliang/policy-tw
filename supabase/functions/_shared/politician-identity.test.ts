@@ -219,6 +219,20 @@ Deno.test("prod 快照：8 筆 AI 空殼逐一都會被判回真陳素月", asyn
   }
 });
 
+Deno.test("cec_cand_id：單獨命中就是強面向 matched，且不冠姓名", async () => {
+  const store = createMemoryIdentityStore();
+  store.addPolitician({ id: "P", name: "王惠美", party: "中國國民黨", region: "彰化縣", election_type: "縣市長", birth_year: 1968, cec_cand_id: 144837 });
+  const stored = store.keys.find((k) => k.key_type === "cec_cand_id");
+  assertEquals(stored?.key_value, "144837");
+  assertEquals(stored?.strength, 3);
+
+  // 同場再匯入一次：黨名寫法不同、沒帶出生年，只靠 cand_id 對上
+  const r = await resolvePolitician(store, { name: "王惠美", party: "國民黨", region: "彰化縣", election_type: "縣市長", cec_cand_id: "144837" }, { persist: false });
+  assertEquals(r.decision, "matched");
+  assertEquals(r.politician_id, "P");
+  assert(r.matched_keys.some((k) => k.key_type === "cec_cand_id"));
+});
+
 Deno.test("候選 key 產生：election_type 沒給時由 position 推", () => {
   const keys = buildCandidateKeys({ name: "陳素月", party: "民進黨", position: "彰化縣長候選人", region: "彰化縣" });
   assertEquals(keys.map((k) => `${k.key_type}:${k.key_value}`).sort(), [

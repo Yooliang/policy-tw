@@ -9,7 +9,7 @@
  * 改任何一邊的規則，另一邊與案例檔要同步。
  */
 
-export type KeyType = "birth" | "region_type" | "position" | "party" | "alias_name";
+export type KeyType = "birth" | "region_type" | "position" | "party" | "alias_name" | "cec_cand_id";
 
 export interface IdentityKey {
   key_type: KeyType;
@@ -124,6 +124,8 @@ export interface FacetSource {
   election_type?: string | null;
   position?: string | null;
   current_position?: string | null;
+  /** 中選會 cand_id：全站最可靠的識別碼（強 3），value 不冠姓名 */
+  cec_cand_id?: number | string | null;
 }
 
 /** 參選紀錄：region 是已解析成縣市名的字串（DB 端由 regions.region 取得）。 */
@@ -167,6 +169,11 @@ export function buildKeys(
   const baseType = normElectionType(base.election_type);
   const positions = [normPosition(base.current_position), normPosition(base.position)]
     .filter((p): p is string => p !== null);
+
+  const cecId = normText(base.cec_cand_id === null || base.cec_cand_id === undefined ? null : String(base.cec_cand_id));
+  if (cecId !== null && normalizedNames.length > 0) {
+    keys.push({ key_type: "cec_cand_id", key_value: cecId, strength: STRENGTH.STRONG });
+  }
 
   for (const name of normalizedNames) {
     if (birth !== null) keys.push({ key_type: "birth", key_value: `${name}|${birth}`, strength: STRENGTH.STRONG });

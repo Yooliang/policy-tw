@@ -35,6 +35,8 @@ interface CandidateData {
   gender?: string;
   votes?: number;
   elected?: boolean;
+  /** 中選會 cand_id（fetch-cec-data 回傳的 cecCandId） */
+  cec_cand_id?: number | string;
 }
 
 interface ImportRequest {
@@ -115,6 +117,7 @@ Deno.serve(async (req) => {
           election_type: normalizedType,
           position: election_type,
           birth_year: candidate.birth_year,
+          cec_cand_id: candidate.cec_cand_id,
         }, {
           source: `batch-import:${data_source}`,
           extraInsert: { gender: candidate.gender ?? null },

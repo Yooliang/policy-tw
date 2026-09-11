@@ -18,6 +18,8 @@ export interface CandidateInput {
   election_type?: string | null;
   current_position?: string | null;
   birth_year?: number | string | null;
+  /** 中選會 cand_id（官方匯入才有） */
+  cec_cand_id?: number | string | null;
   status?: string | null;
   note?: string | null;
 }
@@ -109,6 +111,7 @@ export async function ensurePolitician(
     position: candidate.position,
     current_position: candidate.current_position,
     birth_year: candidate.birth_year,
+    cec_cand_id: candidate.cec_cand_id,
   }, { source: options.source });
 
   if (resolution.decision === "matched" && resolution.politician_id) {

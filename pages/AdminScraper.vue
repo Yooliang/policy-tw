@@ -235,6 +235,7 @@ async function fetchCell(typeId: string, themeId: string, city: typeof cities[0]
           educationLevel: c.cand_edu || null,
           electionType: typeName,
           electionId: parseInt(selectedYear.value),
+          cecCandId: c.cand_id ?? null,
         }
       })
 
