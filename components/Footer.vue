@@ -34,7 +34,7 @@ const activeElection = computed(() => getActiveElection())
             <li>
               <RouterLink to="/ai-assistant" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1">
                 <Sparkles :size="14" />
-                AI 助手
+                貢獻看板
               </RouterLink>
             </li>
             <li v-if="activeElection">

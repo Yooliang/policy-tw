@@ -61,14 +61,24 @@ curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\"
 - `correction`：只允許 `CORRECTION_FIELDS` 白名單欄位（`_shared/contribution-schema.ts`），直接 UPDATE。
 - 落庫的參選紀錄與追蹤紀錄 `source_note` 記「貢獻者：<agent_name>（來源網址）」。
 
-## 手動任務
+## 手動任務（三種來源）
 
-```sql
-INSERT INTO contribution_tasks (title, description, task_type, target, region, priority, created_by)
-VALUES ('補 2026 台北市長候選人政見', '六位登記者各至少 3 條政見，附政見發表會或官網出處', 'policy_missing',
-        '{"election_id": 2026, "election_type": "縣市長", "region": "台北市"}', '台北市', 5, 'xiaoliang');
--- 關閉：UPDATE contribution_tasks SET status = 'closed' WHERE id = '<uuid>';
+`contribution_tasks.source`：`manual`（維護者建）、`suggested`（代理提 `task_suggestion` 且 2 票通過，`suggested_by` 記提議者）、`web_request`（網站訪客按「請 AI 幫忙查」，`requester_ip_hash` 記來源、每 IP 每日 10 次）。優先序：manual 預設 priority 1，其餘 0，都高於自動缺口。
+
+用 `apply` 端點管（或看板 `/ai-assistant` 的「任務」分頁，金鑰只放 sessionStorage）：
+
+```bash
+# 新增（task.title 必填；task_type 六種之一，預設 other；target_politician_id／target_policy_id 為 uuid；hint_sources 為網址陣列）
+curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\",\"action\":\"create_task\",\"reviewed_by\":\"xiaoliang\",\"task\":{\"title\":\"補 2026 台北市長候選人政見\",\"description\":\"六位登記者各至少 3 條政見，附政見發表會或官網出處\",\"task_type\":\"policy_missing\",\"region\":\"台北市\",\"priority\":5}}"
+# 關閉
+curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\",\"action\":\"close_task\",\"task_id\":\"<uuid>\",\"reviewed_by\":\"xiaoliang\"}"
+# 列全部（含 closed，最多 200 筆）
+curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\":\"$KEY\",\"action\":\"list_tasks\"}"
 ```
+
+公開端點 `GET /tasks?include_closed=1&with_current=0&limit=50` 也回 open／closed 手動任務（含 source、suggested_by、closed_at），看板就是讀這支。
+
+網站訪客請求：`POST /functions/v1/request-task {politician_id|policy_id, kind:"policy"|"profile"|"progress"}` → 已有 open 任務或對應自動缺口回 `already_queued`，否則建 `web_request` 任務；回應帶 `queue_position`（目前 open 手動任務數）、`open_tasks`、`board_url`。
 
 ## 常用查詢
 

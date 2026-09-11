@@ -5,7 +5,7 @@ import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
-import { Search, GitBranch, Sparkles, Database, Milestone, ArrowRight } from 'lucide-vue-next'
+import { Search, GitBranch, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -86,8 +86,8 @@ usePageHead({
         <button :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white text-navy-900 shadow-lg`">
           <Database :size="16" /> 分析列表
         </button>
-        <button @click="router.push('/ai-assistant')" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white/10 text-white hover:bg-white/20 border border-white/20`">
-          <Sparkles :size="16" /> 提交查核
+        <button @click="router.push({ path: '/ai-assistant', query: { type: 'policy' } })" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all bg-white/10 text-white hover:bg-white/20 border border-white/20`">
+          <Milestone :size="16" /> 看政見貢獻
         </button>
       </template>
 

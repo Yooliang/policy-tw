@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
-import { useAuth } from '../composables/useAuth'
+import { BOARD_PATH, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import { supabase } from '../lib/supabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -17,60 +17,26 @@ import { policyStatusLabel } from '../composables/usePageHead'
 const route = useRoute()
 const router = useRouter()
 const { policies, politicians, loading } = useSupabase()
-const { isAuthenticated, signInWithGoogle, user } = useAuth()
 
 const hasVoted = ref(false)
 
-// AI verification state
+// 「請 AI 查進度」：把這條政見丟進貢獻任務池（公開端點 request-task，不需登入）
 const verifying = ref(false)
-const verifySuccess = ref(false)
+const verifyResult = ref<RequestTaskResult | null>(null)
 const verifyError = ref<string | null>(null)
-const verifyPromptId = ref<string | null>(null)
+const verifySuccess = computed(() => verifyResult.value !== null)
 
-// Trigger AI verification for this policy
 async function handleVerify() {
-  if (!isAuthenticated.value) {
-    signInWithGoogle()
-    return
-  }
+  const current = policy.value
+  if (!current || verifying.value) return
 
   verifying.value = true
-  verifySuccess.value = false
+  verifyResult.value = null
   verifyError.value = null
-
   try {
-    const policy = policies.value.find(p => String(p.id) === String(policyId.value))
-    const politician = policy ? politicians.value.find(c => String(c.id) === String(policy.politicianId)) : null
-
-    if (!policy || !politician) {
-      throw new Error('找不到政見資料')
-    }
-
-    const input = `請查核並更新「${politician.name}」的政見「${policy.title}」的最新進度與執行狀況。`
-
-    const response = await supabase.functions.invoke('ai-classify', {
-      body: {
-        input,
-        politician_id: politician.id,
-        politician_name: politician.name,
-        policy_id: policy.id,
-      },
-    })
-
-    if (response.error) {
-      throw new Error(response.error.message || JSON.stringify(response.error))
-    }
-
-    const data = response.data
-    if (!data.success) {
-      throw new Error(data.message || '提交失敗')
-    }
-
-    verifyPromptId.value = data.prompt_id
-    verifySuccess.value = true
-  } catch (err: any) {
-    console.error('Verify error:', err)
-    verifyError.value = err.message || '查核請求失敗，請稍後再試'
+    verifyResult.value = await requestTask({ kind: 'progress', policy_id: current.id })
+  } catch (err: unknown) {
+    verifyError.value = err instanceof Error ? err.message : '送出失敗，請稍後再試'
   } finally {
     verifying.value = false
   }
@@ -185,7 +151,7 @@ usePageHead({
             <CheckCircle v-else-if="verifySuccess" :size="18" />
             <XCircle v-else-if="verifyError" :size="18" />
             <Sparkles v-else :size="18" />
-            {{ verifying ? '查核中...' : verifySuccess ? '已送出' : verifyError ? '失敗' : 'AI 查核' }}
+            {{ verifying ? '送出中…' : verifySuccess ? '已排入' : verifyError ? '失敗' : '請 AI 查進度' }}
           </button>
           <button class="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-lg font-bold border border-white/20 transition-all flex items-center gap-2"><Share2 :size="18" /> 分享</button>
           <button @click="router.push({ path: '/community', query: { filter: policy.title } })" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-lg font-bold border border-white/20 transition-all flex items-center gap-2"><MessageSquare :size="18" /> 公民討論</button>
@@ -205,18 +171,12 @@ usePageHead({
           <CheckCircle v-if="verifySuccess" class="text-emerald-600" :size="20" />
           <XCircle v-else class="text-red-600" :size="20" />
           <span :class="verifySuccess ? 'text-emerald-700' : 'text-red-700'">
-            {{ verifySuccess ? '任務已開始，將在背景運行。請稍後回來查看結果。' : verifyError }}
+            {{ verifyResult ? requestTaskMessage(verifyResult) : verifyError }}
+            <RouterLink v-if="verifyResult" :to="BOARD_PATH" class="ml-2 font-bold underline underline-offset-2">到貢獻看板看進度</RouterLink>
           </span>
         </div>
         <button
-          v-if="verifySuccess && verifyPromptId"
-          @click="router.push('/ai-assistant')"
-          class="text-sm font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
-        >
-          查看進度 <ChevronRight :size="16" />
-        </button>
-        <button
-          v-else-if="verifyError"
+          v-if="verifyError"
           @click="verifyError = null"
           class="text-sm font-bold text-red-700 hover:text-red-900"
         >

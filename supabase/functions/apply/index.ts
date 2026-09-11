@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { applyContribution, type ContributionRow, contributionStatusFor } from "../_shared/apply-contribution.ts";
 import { executeRevert } from "../_shared/edit-history.ts";
+import { closeTask, createTask, validateTaskInput } from "../_shared/task-admin.ts";
 
 /**
  * apply — 維護者用（需 AI_IMPORT_API_KEY）。verified 的貢獻已由 /report／apply-verified 自動落庫，這支處理：
@@ -45,7 +46,25 @@ Deno.serve(async (req) => {
       return json({ success: true, count: data?.length ?? 0, contributions: data ?? [] });
     }
 
-    if (!["approve", "reject", "revert"].includes(action)) return json({ success: false, error: "action 要是 list／approve／reject／revert" }, 400);
+    if (action === "create_task") {
+      const v = validateTaskInput(body.task);
+      if (!v.ok || !v.input) return json({ success: false, error: "validation_failed", errors: v.errors }, 400);
+      const task = await createTask(supabase, v.input, { source: "manual", created_by: reviewer });
+      return json({ success: true, task }, 201);
+    }
+    if (action === "close_task") {
+      if (typeof body.task_id !== "string") return json({ success: false, error: "缺 task_id" }, 400);
+      const task = await closeTask(supabase, body.task_id, reviewer);
+      if (!task) return json({ success: false, error: "not_found" }, 404);
+      return json({ success: true, task });
+    }
+    if (action === "list_tasks") {
+      const { data, error } = await supabase.from("contribution_tasks").select("*").order("status").order("priority", { ascending: false }).order("created_at", { ascending: false }).limit(200);
+      if (error) throw new Error(`contribution_tasks list: ${error.message}`);
+      return json({ success: true, count: data?.length ?? 0, tasks: data ?? [] });
+    }
+
+    if (!["approve", "reject", "revert"].includes(action)) return json({ success: false, error: "action 要是 list／approve／reject／revert／create_task／close_task／list_tasks" }, 400);
     if (typeof contribution_id !== "string") return json({ success: false, error: "缺 contribution_id" }, 400);
 
     const { data: row, error } = await supabase.from("contributions").select(ROW_COLUMNS).eq("id", contribution_id).maybeSingle();

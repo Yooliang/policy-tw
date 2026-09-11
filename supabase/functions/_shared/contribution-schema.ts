@@ -6,7 +6,8 @@
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "other"] as const;
 export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
 
 export const ELECTION_TYPES = [
@@ -169,6 +170,16 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.progress !== undefined && !(isInt(p.progress) && p.progress >= 0 && p.progress <= 100)) push("payload.progress", "要是 0～100 的整數");
       if (!isStr(p.note, 10, 3000)) push("payload.note", "進度說明必填（至少 10 字：做了什麼、依據哪份文件）");
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
+      break;
+    }
+    case "task_suggestion": {
+      if (!isStr(p.title, 10, 100)) push("payload.title", "title 必填（10～100 字：一句話說要查什麼）");
+      if (!isStr(p.description, 20, 2000)) push("payload.description", "description 必填（≥20 字：為什麼該查、預期能查到什麼）");
+      if (p.task_type !== undefined && !oneOf(TASK_TYPES, p.task_type)) push("payload.task_type", `task_type 要是 ${TASK_TYPES.join("／")} 之一`);
+      if (p.target_politician_id !== undefined && !isUuid(p.target_politician_id)) push("payload.target_politician_id", "要是 uuid");
+      if (p.target_policy_id !== undefined && !isUuid(p.target_policy_id)) push("payload.target_policy_id", "要是 uuid");
+      if (p.region !== undefined && !isStr(p.region, 2, 20)) push("payload.region", "縣市名要是字串");
+      if (p.hint_sources !== undefined && !(Array.isArray(p.hint_sources) && (p.hint_sources as unknown[]).every((s) => isStr(s, 1, 300)))) push("payload.hint_sources", "要是字串陣列");
       break;
     }
     case "correction": {

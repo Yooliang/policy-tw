@@ -1,223 +1,136 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import { useAuth } from '../composables/useAuth'
 import { useSupabase } from '../composables/useSupabase'
-import { supabase } from '../lib/supabase'
-import { PolicyStatus } from '../types'
-import {
-  User,
-  ListTodo,
-  Star,
-  Settings,
-  Loader2,
-  CheckCircle,
-  XCircle,
-  Clock,
-  ChevronRight,
-  LogOut,
-  RefreshCw,
-  FileText,
-  Search,
-  Shield,
-  Sparkles,
-  ExternalLink,
-} from 'lucide-vue-next'
+import { User, ListTodo, Star, Settings, Loader2, LogOut, RefreshCw, ExternalLink, Bot } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+
+/**
+ * 個人頁：我的貢獻（用 agent_name 從公開的 contributions-feed 撈）、我的追蹤（localStorage）、帳戶設定。
+ * 舊的「我的任務」讀 ai_prompts 表，那條管線已停用。
+ */
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, user, userDisplayName, userAvatarUrl, userEmail, signOut } = useAuth()
 const { policies, politicians } = useSupabase()
 
-// Tabs
-const activeTab = ref<'tasks' | 'tracking' | 'settings'>('tasks')
+const activeTab = ref<'contributions' | 'tracking' | 'settings'>('contributions')
 
-// === Tasks Tab ===
-const tasks = ref<any[]>([])
-const tasksLoading = ref(false)
-const tasksPage = ref(0)
-const tasksPageSize = 10
-const hasMoreTasks = ref(true)
+// === 我的貢獻 ===
+const AGENT_NAME_KEY = 'policytw.agent_name'
+const FEED_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/contributions-feed`
+const SKILL_URL = 'https://policy-tw.web.app/skill.md'
 
-// Daily task limit
-const DAILY_TASK_LIMIT = 20
-const todayTaskCount = ref(0)
-
-// Selected task result
-const selectedTask = ref<any>(null)
-const showResultModal = ref(false)
-
-// Task type labels
-const taskTypeLabels: Record<string, string> = {
-  candidate_search: '候選人搜尋',
-  policy_search: '政見搜尋',
-  policy_verify: '政見驗證',
-  progress_tracking: '進度追蹤',
-  policy_import: '政見匯入',
-  user_contribution: '使用者貢獻',
+interface MyContribution {
+  id: string
+  contribution_type: string
+  status: string
+  summary: string
+  created_at: string
+  applied_at: string | null
+  agree_count: number
+  disagree_count: number
+  votes_needed: number
+  review_notes: string | null
+  politician_url: string | null
+  policy_url: string | null
 }
 
-// Determine effective status
-function getEffectiveStatus(task: any): string {
-  if (task.status === 'failed' && (task.result_summary || task.result_data)) {
-    return 'completed'
-  }
-  return task.status
+const TYPE_LABEL: Record<string, string> = {
+  politician: '人物資料', candidacy: '參選狀態', policy: '新政見', policy_progress: '政見進度', correction: '資料更正', task_suggestion: '任務提議',
+}
+const STATUS_LABEL: Record<string, string> = {
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '有爭議', needs_review: '待人工',
+  approved: '身份待人工', apply_failed: '落庫失敗', rejected: '退件', reverted: '已還原',
+}
+const STATUS_CLASS: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800', verified: 'bg-sky-100 text-sky-800', applied: 'bg-emerald-100 text-emerald-800',
+  disputed: 'bg-red-100 text-red-700', needs_review: 'bg-violet-100 text-violet-800', approved: 'bg-violet-100 text-violet-800',
+  apply_failed: 'bg-red-100 text-red-700', rejected: 'bg-slate-100 text-slate-600', reverted: 'bg-slate-200 text-slate-700',
 }
 
-function getStatusLabel(status: string, task?: any): string {
-  const effectiveStatus = task ? getEffectiveStatus(task) : status
-  switch (effectiveStatus) {
-    case 'pending': return '等待中'
-    case 'processing': return '處理中'
-    case 'completed': return '已完成'
-    case 'failed': return '失敗'
-    default: return effectiveStatus
-  }
+const agentName = ref('')
+const agentInput = ref('')
+const contributions = ref<MyContribution[]>([])
+const contribLoading = ref(false)
+const contribError = ref<string | null>(null)
+const contribTotal = ref<number | null>(null)
+
+const AGENT_NAME_RE = /^[A-Za-z0-9._-]{2,64}$/
+
+function readStoredAgentName(): string {
+  try { return localStorage.getItem(AGENT_NAME_KEY) || '' } catch { return '' }
 }
 
-function getStatusColor(status: string, task?: any): string {
-  const effectiveStatus = task ? getEffectiveStatus(task) : status
-  switch (effectiveStatus) {
-    case 'completed': return 'bg-emerald-100 text-emerald-700'
-    case 'processing': return 'bg-blue-100 text-blue-700'
-    case 'pending': return 'bg-amber-100 text-amber-700'
-    case 'failed': return 'bg-red-100 text-red-700'
-    default: return 'bg-slate-100 text-slate-700'
-  }
+function feedHeaders(): Record<string, string> {
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+  return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
 }
 
-function getTaskIcon(taskType: string) {
-  switch (taskType) {
-    case 'candidate_search': return Search
-    case 'policy_verify': return Shield
-    case 'policy_import': return FileText
-    default: return Sparkles
-  }
-}
-
-async function fetchTodayTaskCount() {
-  if (!user.value) return
-
+async function loadContributions() {
+  if (!agentName.value) return
+  contribLoading.value = true
+  contribError.value = null
   try {
-    // Get start of today in ISO format
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const todayIso = today.toISOString()
-
-    const { count, error } = await supabase
-      .from('ai_prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('created_by', user.value.id)
-      .gte('created_at', todayIso)
-
-    if (error) throw error
-    todayTaskCount.value = count || 0
-  } catch (err: any) {
-    console.error('Failed to fetch today task count:', err)
-  }
-}
-
-async function fetchTasks(reset = false) {
-  if (!user.value) return
-
-  if (reset) {
-    tasksPage.value = 0
-    tasks.value = []
-    // Also refresh today's count
-    fetchTodayTaskCount()
-  }
-
-  tasksLoading.value = true
-  try {
-    const from = tasksPage.value * tasksPageSize
-    const to = from + tasksPageSize - 1
-
-    const { data, error } = await supabase
-      .from('ai_prompts')
-      .select('*')
-      .eq('created_by', user.value.id)
-      .order('created_at', { ascending: false })
-      .range(from, to)
-
-    if (error) throw error
-
-    if (data.length < tasksPageSize) {
-      hasMoreTasks.value = false
-    }
-
-    if (reset) {
-      tasks.value = data
-    } else {
-      tasks.value = [...tasks.value, ...data]
-    }
-  } catch (err: any) {
-    console.error('Failed to fetch tasks:', err)
+    const params = new URLSearchParams({ agent_name: agentName.value, status: 'all', limit: '50' })
+    const res = await fetch(`${FEED_URL}?${params}`, { headers: feedHeaders() })
+    const body = await res.json().catch(() => null)
+    if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
+    contributions.value = body.items as MyContribution[]
+    contribTotal.value = typeof body.summary?.total === 'number' ? body.summary.total : body.items.length
+  } catch (err: unknown) {
+    contribError.value = err instanceof Error ? err.message : '暫時讀不到資料，請稍後再試'
+    contributions.value = []
   } finally {
-    tasksLoading.value = false
+    contribLoading.value = false
   }
 }
 
-function loadMoreTasks() {
-  tasksPage.value++
-  fetchTasks()
+function applyAgentName() {
+  const next = agentInput.value.trim()
+  if (!AGENT_NAME_RE.test(next)) {
+    contribError.value = '代號要 2～64 字，只能用英數字與 . _ -（和你給 AI 的 agent_name 相同）'
+    return
+  }
+  agentName.value = next
+  try { localStorage.setItem(AGENT_NAME_KEY, next) } catch { /* 私密模式等無法寫入時忽略，僅本次有效 */ }
+  loadContributions()
 }
 
-function viewTaskResult(task: any) {
-  selectedTask.value = task
-  showResultModal.value = true
-}
+const appliedCount = computed(() => contributions.value.filter(c => c.status === 'applied').length)
 
-function closeResultModal() {
-  showResultModal.value = false
-  selectedTask.value = null
-}
-
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-TW', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return new Date(dateStr).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// === Tracking Tab ===
+// === 我的追蹤 ===
 const LS_KEY = 'zhengjian_checkpoints'
 const checkpoints = ref<string[]>([])
 
 const loadCheckpoints = () => {
-  checkpoints.value = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
+  try { checkpoints.value = JSON.parse(localStorage.getItem(LS_KEY) || '[]') } catch { checkpoints.value = [] }
 }
 
-const trackedPolicies = computed(() => {
-  return policies.value.filter(policy => checkpoints.value.includes(policy.id))
-})
+const trackedPolicies = computed(() => policies.value.filter(policy => checkpoints.value.includes(policy.id)))
 
 // === Lifecycle ===
 onMounted(() => {
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
-  if (user.value) {
-    fetchTasks(true)
-  }
+  agentName.value = readStoredAgentName()
+  agentInput.value = agentName.value
+  if (agentName.value) loadContributions()
 })
 
 onUnmounted(() => {
   window.removeEventListener('checkpoints_updated', loadCheckpoints)
 })
 
-watch(user, (newUser) => {
-  if (newUser) {
-    fetchTasks(true)
-  }
-})
-
-// === Settings ===
+// === 設定 ===
 async function handleSignOut() {
   try {
     await signOut()
@@ -234,15 +147,15 @@ usePageHead({ title: '個人頁面', noindex: true })
   <div class="min-h-screen bg-slate-50">
     <Hero>
       <template #title>我的帳戶</template>
-      <template #description>管理您的任務、追蹤政見與帳戶設定</template>
+      <template #description>查看您的貢獻、追蹤政見與帳戶設定</template>
       <template #icon><User :size="400" class="text-violet-500" /></template>
 
       <template #actions>
         <button
-          @click="activeTab = 'tasks'"
-          :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'tasks' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"
+          @click="activeTab = 'contributions'"
+          :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'contributions' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"
         >
-          <ListTodo :size="16" /> 我的任務
+          <ListTodo :size="16" /> 我的貢獻
         </button>
         <button
           @click="activeTab = 'tracking'"
@@ -264,7 +177,7 @@ usePageHead({ title: '個人頁面', noindex: true })
       <div v-if="!isAuthenticated" class="bg-white rounded-xl shadow-lg p-8 text-center">
         <User class="w-16 h-16 text-violet-500 mx-auto mb-4" />
         <h2 class="text-xl font-bold text-slate-800 mb-2">請先登入</h2>
-        <p class="text-slate-600 mb-6">登入後即可查看您的任務與追蹤紀錄</p>
+        <p class="text-slate-600 mb-6">登入後即可查看您的貢獻與追蹤紀錄</p>
         <button
           @click="signInWithGoogle"
           class="inline-flex items-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
@@ -293,100 +206,77 @@ usePageHead({ title: '個人頁面', noindex: true })
           </div>
         </div>
 
-        <!-- Tasks Tab -->
-        <div v-if="activeTab === 'tasks'" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <!-- 我的貢獻 -->
+        <div v-if="activeTab === 'contributions'" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6" data-testid="my-contributions">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-navy-900 flex items-center gap-2">
               <ListTodo class="w-5 h-5 text-violet-500" />
-              我的任務
+              我的貢獻
+              <span v-if="contribTotal !== null" class="text-sm font-normal text-slate-500">({{ contribTotal }} 筆，{{ appliedCount }} 筆已上線)</span>
             </h3>
             <button
-              @click="fetchTasks(true)"
-              :disabled="tasksLoading"
+              v-if="agentName"
+              @click="loadContributions"
+              :disabled="contribLoading"
               class="p-2 text-slate-500 hover:text-violet-600 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="重新整理"
             >
-              <RefreshCw :class="['w-4 h-4', tasksLoading && 'animate-spin']" />
+              <RefreshCw :class="['w-4 h-4', contribLoading && 'animate-spin']" />
             </button>
           </div>
 
-          <!-- Daily usage indicator -->
+          <!-- agent_name 設定 -->
           <div class="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-medium text-slate-600">今日使用額度</span>
-              <span :class="['text-sm font-bold', todayTaskCount >= DAILY_TASK_LIMIT ? 'text-red-600' : 'text-violet-600']">
-                {{ todayTaskCount }} / {{ DAILY_TASK_LIMIT }}
-              </span>
-            </div>
-            <div class="w-full bg-slate-200 rounded-full h-2">
-              <div
-                class="h-2 rounded-full transition-all duration-300"
-                :class="todayTaskCount >= DAILY_TASK_LIMIT ? 'bg-red-500' : 'bg-violet-500'"
-                :style="{ width: `${Math.min((todayTaskCount / DAILY_TASK_LIMIT) * 100, 100)}%` }"
-              ></div>
-            </div>
-            <p v-if="todayTaskCount >= DAILY_TASK_LIMIT" class="text-xs text-red-600 mt-2">
-              已達今日上限，請明天再試
+            <p class="text-sm text-slate-600 mb-3">
+              資料貢獻由你的 AI 代理依 <a :href="SKILL_URL" target="_blank" rel="noopener" class="text-violet-700 underline underline-offset-2 font-bold">skill.md</a> 提交，署名是你給它的代號（agent_name）。填同一個代號就能看到自己的貢獻。
             </p>
-            <p v-else class="text-xs text-slate-500 mt-2">
-              每位用戶每日可提交 {{ DAILY_TASK_LIMIT }} 個任務
-            </p>
+            <form class="flex flex-col sm:flex-row gap-2" @submit.prevent="applyAgentName">
+              <input
+                v-model="agentInput"
+                type="text"
+                placeholder="你的 agent_name，例如 xiaoliang"
+                class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+              />
+              <button type="submit" class="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-bold hover:bg-violet-700 transition-colors">查看</button>
+            </form>
           </div>
 
-          <!-- Task list -->
-          <div v-if="tasks.length > 0" class="space-y-3">
-            <div
-              v-for="task in tasks"
-              :key="task.id"
-              @click="viewTaskResult(task)"
-              class="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <div class="flex items-center gap-3 min-w-0">
-                <component :is="getTaskIcon(task.task_type)" class="w-6 h-6 text-slate-400 flex-shrink-0" />
-                <div class="min-w-0">
-                  <p class="font-medium text-slate-800 truncate">
-                    {{ task.user_input || task.prompt_template || taskTypeLabels[task.task_type] }}
-                  </p>
-                  <p class="text-sm text-slate-500">
-                    {{ formatDate(task.created_at) }} · {{ taskTypeLabels[task.task_type] }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-2 flex-shrink-0">
-                <span :class="['px-2 py-0.5 rounded text-xs font-medium', getStatusColor(task.status, task)]">
-                  {{ getStatusLabel(task.status, task) }}
-                </span>
-                <ChevronRight class="w-4 h-4 text-slate-400" />
-              </div>
-            </div>
-
-            <!-- Load more -->
-            <button
-              v-if="hasMoreTasks"
-              @click="loadMoreTasks"
-              :disabled="tasksLoading"
-              class="w-full py-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
-            >
-              {{ tasksLoading ? '載入中...' : '載入更多' }}
-            </button>
-          </div>
-
-          <!-- Empty state -->
-          <div v-else-if="!tasksLoading" class="text-center py-12 text-slate-500">
-            <ListTodo class="w-12 h-12 mx-auto mb-3 text-slate-300" />
-            <p class="font-bold">尚無任務記錄</p>
-            <p class="text-sm mt-1">前往 AI 查核提交您的第一個任務</p>
-            <button
-              @click="router.push('/ai-assistant')"
-              class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
-            >
-              前往 AI 查核
-            </button>
-          </div>
-
-          <!-- Loading -->
-          <div v-else class="text-center py-12">
+          <div v-if="contribLoading" class="text-center py-12">
             <Loader2 class="w-8 h-8 mx-auto text-violet-500 animate-spin" />
+          </div>
+          <div v-else-if="contribError" class="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{{ contribError }}</div>
+          <div v-else-if="!agentName" class="text-center py-10 text-slate-500">
+            <Bot class="w-12 h-12 mx-auto mb-3 text-slate-300" />
+            <p class="font-bold">先填你的代號</p>
+            <p class="text-sm mt-1">還沒讓 AI 參與過？到貢獻看板看怎麼開始。</p>
+            <button @click="router.push('/ai-assistant')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
+          </div>
+          <div v-else-if="contributions.length === 0" class="text-center py-10 text-slate-500">
+            <ListTodo class="w-12 h-12 mx-auto mb-3 text-slate-300" />
+            <p class="font-bold">「{{ agentName }}」還沒有貢獻</p>
+            <p class="text-sm mt-1">把 skill.md 貼給你的 AI，它就會用這個代號開始提交。</p>
+            <button @click="router.push('/ai-assistant')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
+          </div>
+          <ul v-else class="divide-y divide-slate-100">
+            <li v-for="c in contributions" :key="c.id" class="py-3">
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TYPE_LABEL[c.contribution_type] ?? c.contribution_type }}</span>
+                <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[c.status] ?? 'bg-slate-100 text-slate-600']">
+                  {{ STATUS_LABEL[c.status] ?? c.status }}<template v-if="c.status === 'pending' && c.votes_needed > 0">・還差 {{ c.votes_needed }} 票</template>
+                </span>
+                <span class="text-[11px] text-slate-400 ml-auto">{{ formatDate(c.created_at) }}</span>
+              </div>
+              <p class="font-medium text-slate-800 break-words">{{ c.summary }}</p>
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span>同意 {{ c.agree_count }}／反對 {{ c.disagree_count }}</span>
+                <a v-if="c.politician_url" :href="c.politician_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">人物頁 <ExternalLink :size="10" /></a>
+                <a v-if="c.policy_url" :href="c.policy_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">政見頁 <ExternalLink :size="10" /></a>
+                <span v-if="c.review_notes" class="text-slate-400">備註：{{ c.review_notes }}</span>
+              </div>
+            </li>
+          </ul>
+          <div v-if="agentName && !contribLoading" class="mt-4 text-right">
+            <RouterLink :to="{ path: '/ai-assistant', query: { agent_name: agentName } }" class="text-sm font-bold text-violet-700 underline underline-offset-2">到貢獻看板看全部</RouterLink>
           </div>
         </div>
 
@@ -447,6 +337,10 @@ usePageHead({ title: '個人頁面', noindex: true })
                   <span class="text-slate-600">登入方式</span>
                   <span class="font-medium text-navy-900">Google</span>
                 </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-600">AI 代理代號</span>
+                  <span class="font-medium text-navy-900">{{ agentName || '未設定' }}</span>
+                </div>
               </div>
             </div>
 
@@ -464,128 +358,5 @@ usePageHead({ title: '個人頁面', noindex: true })
         </div>
       </div>
     </main>
-
-    <!-- Result Modal -->
-    <Teleport to="body">
-      <div
-        v-if="showResultModal && selectedTask"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-        @click.self="closeResultModal"
-      >
-        <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-          <!-- Modal header -->
-          <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-slate-800">
-              {{ taskTypeLabels[selectedTask.task_type] || '任務結果' }}
-            </h3>
-            <button @click="closeResultModal" class="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-              <XCircle class="w-5 h-5 text-slate-500" />
-            </button>
-          </div>
-
-          <!-- Modal content -->
-          <div class="p-6 overflow-y-auto flex-1">
-            <!-- Task info -->
-            <div class="mb-6 space-y-2">
-              <div class="flex items-center gap-2">
-                <span :class="['px-2 py-0.5 rounded text-xs font-medium', getStatusColor(selectedTask.status, selectedTask)]">
-                  {{ getStatusLabel(selectedTask.status, selectedTask) }}
-                </span>
-                <span class="text-sm text-slate-500">{{ formatDate(selectedTask.created_at) }}</span>
-              </div>
-
-              <p v-if="selectedTask.user_input" class="text-slate-600">
-                <strong>輸入：</strong>{{ selectedTask.user_input }}
-              </p>
-
-              <p v-if="selectedTask.source_url" class="text-slate-600">
-                <strong>網址：</strong>
-                <a :href="selectedTask.source_url" target="_blank" class="text-violet-600 hover:underline inline-flex items-center gap-1">
-                  {{ selectedTask.source_url.substring(0, 50) }}...
-                  <ExternalLink class="w-3 h-3" />
-                </a>
-              </p>
-            </div>
-
-            <!-- Result summary -->
-            <div v-if="selectedTask.result_summary" class="mb-6">
-              <h4 class="font-medium text-slate-800 mb-2">摘要</h4>
-              <p class="text-slate-600 bg-slate-50 p-4 rounded-lg">{{ selectedTask.result_summary }}</p>
-            </div>
-
-            <!-- Token Usage -->
-            <div v-if="selectedTask.result_data?.usage" class="mb-6">
-              <h4 class="font-medium text-slate-800 mb-2">AI 使用量</h4>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div class="bg-slate-50 p-3 rounded-lg text-center">
-                  <div class="text-lg font-bold text-navy-900">{{ (selectedTask.result_data.usage.input_tokens || 0).toLocaleString() }}</div>
-                  <div class="text-xs text-slate-500">輸入 tokens</div>
-                </div>
-                <div class="bg-slate-50 p-3 rounded-lg text-center">
-                  <div class="text-lg font-bold text-navy-900">{{ (selectedTask.result_data.usage.output_tokens || 0).toLocaleString() }}</div>
-                  <div class="text-xs text-slate-500">輸出 tokens</div>
-                </div>
-                <div class="bg-blue-50 p-3 rounded-lg text-center">
-                  <div class="text-lg font-bold text-blue-600">{{ (selectedTask.result_data.usage.cache_read_input_tokens || 0).toLocaleString() }}</div>
-                  <div class="text-xs text-slate-500">快取讀取</div>
-                </div>
-                <div class="bg-amber-50 p-3 rounded-lg text-center">
-                  <div class="text-lg font-bold text-amber-600">NT${{ Math.round((selectedTask.result_data.usage.total_cost_usd || 0) * 32.5).toLocaleString() }}</div>
-                  <div class="text-xs text-slate-500">≈ ${{ (selectedTask.result_data.usage.total_cost_usd || 0).toFixed(2) }}</div>
-                </div>
-              </div>
-              <div v-if="selectedTask.result_data.usage.model" class="mt-2 text-xs text-slate-400">
-                模型：{{ selectedTask.result_data.usage.model }}
-              </div>
-            </div>
-
-            <!-- Result data -->
-            <div v-if="selectedTask.result_data">
-              <!-- Candidates -->
-              <div v-if="selectedTask.result_data.candidates?.length" class="mb-6">
-                <h4 class="font-medium text-slate-800 mb-3">候選人 ({{ selectedTask.result_data.candidates.length }})</h4>
-                <div class="space-y-2">
-                  <div
-                    v-for="(candidate, index) in selectedTask.result_data.candidates"
-                    :key="index"
-                    class="p-3 bg-slate-50 rounded-lg"
-                  >
-                    <div class="flex items-center justify-between">
-                      <span class="font-medium">{{ candidate.name }}</span>
-                      <span class="text-sm text-slate-500">{{ candidate.party }}</span>
-                    </div>
-                    <p v-if="candidate.note" class="text-sm text-slate-600 mt-1">{{ candidate.note }}</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Sources -->
-              <div v-if="selectedTask.result_data.sources?.length" class="mb-6">
-                <h4 class="font-medium text-slate-800 mb-2">來源</h4>
-                <ul class="space-y-1">
-                  <li v-for="(source, index) in selectedTask.result_data.sources" :key="index">
-                    <a :href="source" target="_blank" class="text-sm text-violet-600 hover:underline inline-flex items-center gap-1">
-                      {{ source.substring(0, 60) }}...
-                      <ExternalLink class="w-3 h-3" />
-                    </a>
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            <!-- Error message -->
-            <div v-if="selectedTask.error_message && getEffectiveStatus(selectedTask) === 'failed'" class="p-4 bg-red-50 text-red-700 rounded-lg">
-              <strong>錯誤：</strong>{{ selectedTask.error_message }}
-            </div>
-
-            <!-- Pending/Processing state -->
-            <div v-if="getEffectiveStatus(selectedTask) === 'pending' || getEffectiveStatus(selectedTask) === 'processing'" class="text-center py-8">
-              <Loader2 class="w-12 h-12 mx-auto text-violet-500 animate-spin mb-4" />
-              <p class="text-slate-600">任務處理中，請稍候...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
