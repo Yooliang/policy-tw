@@ -14,7 +14,8 @@ export const ELECTION_TYPES = [
   "直轄市山地原住民區長", "鄉鎮市民代表", "直轄市山地原住民區民代表", "村里長",
 ] as const;
 
-export const POLICY_CATEGORIES = ["交通建設", "社會福利", "經濟發展", "教育文化", "環境保護", "公平正義", "行政革新", "政治議題", "其他"] as const;
+export { POLICY_CATEGORIES } from "./category-map.ts";
+import { POLICY_CATEGORIES } from "./category-map.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
 export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies"] as const;

@@ -13,6 +13,7 @@ import { CORRECTION_FIELDS, type ContributionType } from "./contribution-schema.
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
+import { normalizeCategory } from "./category-map.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -169,7 +170,7 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
     election_id: int(p.election_id),
     title: String(p.title),
     description: String(p.description),
-    category: String(p.category),
+    category: normalizeCategory(String(p.category)) ?? String(p.category),
     status: str(p.status) ?? "Campaign Pledge",
     source_url: row.source_urls[0],
     ai_extracted: false,
@@ -217,7 +218,8 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   const { data: current, error: readError } = await supabase.from(table).select(`id, ${field}`).eq("id", p.target_id).maybeSingle();
   throwIf(readError, `${table} read`);
   if (!current) return { status: "failed", message: `${table} 找不到 id=${p.target_id}` };
-  const { error } = await supabase.from(table).update({ [field]: p.correct_value }).eq("id", p.target_id);
+  const newValue = table === "policies" && field === "category" ? (normalizeCategory(String(p.correct_value)) ?? p.correct_value) : p.correct_value;
+  const { error } = await supabase.from(table).update({ [field]: newValue }).eq("id", p.target_id);
   throwIf(error, `${table} correction update`);
   return {
     status: "applied",

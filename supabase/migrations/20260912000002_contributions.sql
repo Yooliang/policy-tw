@@ -190,7 +190,7 @@ LANGUAGE sql STABLE AS $$
     -- (a) 有參選、無政見
     SELECT 'auto:policy_missing:' || c.id AS task_id, 'policy_missing' AS task_type,
            jsonb_build_object('politician_id', c.id, 'name', c.name, 'party', c.party, 'region', c.region, 'election_id', 2026, 'election_type', c.election_type) AS target,
-           c.name || '（' || COALESCE(c.region, '') || ' 2026 ' || COALESCE(c.election_type, '') || '候選人）目前 0 筆政見，請從官方政見網頁、選舉公報或政見發表會報導找出具體承諾' AS what_we_need,
+           c.name || '（' || COALESCE(c.region, '') || ' 2026 ' || COALESCE(c.election_type, '') || '候選人）目前 0 筆政見。請找該候選人任何有出處的具體政見：2026 選舉政見優先；若只找得到現任任期或過去選舉的承諾也可提交，election_id 填該政見所屬的選舉（2022／2024／2026）並在 note 說明' AS what_we_need,
            ARRAY['候選人官網／官方社群的政見頁', 'cec.gov.tw 選舉公報', 'cna.com.tw', 'pts.org.tw'] AS hint_sources, 1 AS reward, c.region
     FROM c2026 c
     WHERE NOT EXISTS (SELECT 1 FROM policies pl WHERE pl.politician_id = c.id)
