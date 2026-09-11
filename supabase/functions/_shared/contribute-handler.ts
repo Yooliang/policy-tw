@@ -3,7 +3,7 @@
  * 只寫 contributions（待審佇列）；schema 驗證、來源網址格式、每 IP 每日限額、24 小時去重。
  */
 
-import { canonicalPayload, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -28,9 +28,12 @@ export async function ipHashOf(req: Request, ipSalt: string): Promise<string> {
 export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string): Promise<HandlerResult> {
   const validation = validateContributionRequest(body);
   if (!validation.ok) {
+    const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
     return {
       status: 400,
-      body: { success: false, error: "validation_failed", message: "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）", errors: validation.errors },
+      body: encoding
+        ? { success: false, error: "encoding_invalid", message: ENCODING_INVALID_MESSAGE, errors: validation.errors }
+        : { success: false, error: "validation_failed", message: "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）", errors: validation.errors },
     };
   }
 
