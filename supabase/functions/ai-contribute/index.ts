@@ -209,7 +209,8 @@ Deno.serve(async (req) => {
         description: body.policy.description,
         category: body.policy.category,
         status: body.policy.status || "Campaign Pledge",
-        proposed_date: body.policy.proposed_date || today,
+        // 沒給提出日期就留空，別拿當天充數
+        proposed_date: body.policy.proposed_date || null,
         last_updated: today,
         progress: 0,
         tags: body.policy.tags || [],

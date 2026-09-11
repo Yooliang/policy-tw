@@ -40,3 +40,4 @@ dist-ssr
 
 # deno test 在 repo 根目錄跑會留下的鎖檔
 deno.lock
+*.tsbuildinfo

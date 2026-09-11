@@ -241,7 +241,8 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
     status: str(p.status) ?? "Campaign Pledge",
     source_url: row.source_urls[0],
     ai_extracted: false,
-    proposed_date: str(p.proposed_date) ?? today,
+    // 查不到提出日期就留空；填當天會把「資料送進來的日子」偽裝成「政見提出的日子」
+    proposed_date: str(p.proposed_date) ?? null,
     last_updated: today,
     tags: Array.isArray(p.tags) ? p.tags : null,
   };
@@ -289,6 +290,14 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
 }
 
 /** correction：一筆可改多個欄位（changes[]），逐欄套用、各寫一筆 edit_history；舊的單欄位格式由 normalizeCorrection 相容 */
+// 空字串在 DATE 欄位會讓 PostgreSQL 直接報錯，而「查不到提出日期」是合法狀態，
+// 所以清空一律轉成 null。分類則順手正規化成 19 個正式名稱之一。
+function correctionValue(table: string, field: string, value: unknown): unknown {
+  if (table === "policies" && field === "category") return normalizeCategory(String(value)) ?? value;
+  if (table === "policies" && field === "proposed_date" && (value === undefined || value === null || value === "")) return null;
+  return value;
+}
+
 async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const ctx = ctxOf(row);
   const { target_table, target_id, changes } = normalizeCorrection(row.payload);
@@ -302,16 +311,13 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   throwIf(readError, `${table} read`);
   if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
 
-  const patch: Obj = Object.fromEntries(changes.map((c) => [
-    c.field,
-    table === "policies" && c.field === "category" ? (normalizeCategory(String(c.correct_value)) ?? c.correct_value) : c.correct_value,
-  ]));
+  const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(table, c.field, c.correct_value)]));
   const { error } = await supabase.from(table).update(patch).eq("id", target_id);
   throwIf(error, `${table} correction update`);
   const applied: string[] = [];
   for (const [field, newValue] of Object.entries(patch)) {
     await recordUpdate(supabase, ctx, table, String(target_id), field, current[field] ?? null, newValue);
-    applied.push(`${field}：「${current[field] ?? ""}」→「${String(newValue)}」`);
+    applied.push(`${field}：「${current[field] ?? ""}」→「${newValue === null ? "（清空）" : String(newValue)}」`);
   }
   return {
     status: "applied",

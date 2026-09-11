@@ -125,6 +125,25 @@ const isStr = (v: unknown, min = 1, max = 2000): v is string => typeof v === "st
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
 const isUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+
+// 提出日期是選填的：查不到就別填。填錯比留空傷害更大——留空前端會改顯示屆別，
+// 填錯會讓舊屆的政見看起來像這次剛提出的。
+function validateProposedDate(value: unknown, electionId: unknown, push: (path: string, message: string) => void): void {
+  if (value === undefined || value === null) return;
+  if (!isDate(value)) {
+    push("payload.proposed_date", "要是 YYYY-MM-DD；查不到政見實際提出的日期就整個別填，不要填今天");
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (value > today) {
+    push("payload.proposed_date", "不能是未來日期");
+    return;
+  }
+  // election_id 就是選舉年份，政見不會在那屆選完之後才提出。
+  if (isInt(electionId) && Number(value.slice(0, 4)) > electionId) {
+    push("payload.proposed_date", `這筆掛在 ${electionId} 年那屆選舉，提出日期不會晚於 ${electionId} 年；查不到就別填`);
+  }
+}
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
 
 function validateHints(p: Obj, push: (path: string, message: string) => void): void {
@@ -167,7 +186,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isCanonicalCategory(p.category)) push("payload.category", categoryErrorMessage(p.category), "category_invalid");
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
       if (p.election_id !== undefined && !(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `要是 ${KNOWN_ELECTION_IDS.join("／")}`);
-      if (p.proposed_date !== undefined && !isDate(p.proposed_date)) push("payload.proposed_date", "要是 YYYY-MM-DD");
+      validateProposedDate(p.proposed_date, p.election_id, push);
       validateHints(p, push);
       break;
     }
@@ -223,8 +242,12 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         else if (table && !CORRECTION_FIELDS[table].includes(c.field)) push(`${at}.field`, `${table} 只接受修正：${CORRECTION_FIELDS[table].join("／")}`);
         else if (seen.has(c.field)) push(`${at}.field`, `欄位 ${c.field} 重複`);
         seen.add(c.field);
-        if (c.correct_value === undefined || c.correct_value === null || c.correct_value === "") push(`${at}.correct_value`, "correct_value 必填");
+        const clearable = table === "policies" && c.field === "proposed_date"; // 提出日期查不到時可以清空
+        const empty = c.correct_value === undefined || c.correct_value === null || c.correct_value === "";
+        if (empty && !clearable) push(`${at}.correct_value`, "correct_value 必填");
+        else if (empty) { /* 清空提出日期：合法 */ }
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
+        else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
       });
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");
       break;

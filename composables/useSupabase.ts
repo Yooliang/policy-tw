@@ -147,7 +147,7 @@ function mapPolicy(row: RawPolicy): Policy {
     description: row.description,
     category: row.category,
     status: row.status,
-    proposedDate: row.proposed_date,
+    proposedDate: row.proposed_date ?? null,
     lastUpdated: row.last_updated,
     progress: row.progress,
     tags: row.tags || [],

@@ -12,10 +12,11 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
 import { policyMatchesRegion } from '../lib/policy-region'
+import { policySortDate, policyYear } from '../lib/policy-date'
 
 
 const router = useRouter()
-const { policies, politicians, categories } = useSupabase()
+const { policies, politicians, categories, elections } = useSupabase()
 const { globalRegion } = useGlobalState()
 const searchTerm = ref('')
 const selectedCategory = ref('All')
@@ -36,7 +37,7 @@ const relayCases = computed(() => {
     if (visitedPolicyIds.has(policy.id)) return
     if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
       const chain = policies.value.filter(p => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
-        .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
+        .sort((a, b) => policySortDate(a) - policySortDate(b))
       chain.forEach(p => visitedPolicyIds.add(p.id))
       cases.push({
         id: `case-${policy.id}`,
@@ -45,7 +46,7 @@ const relayCases = computed(() => {
         category: policy.category,
         policies: chain,
         involvedPoliticianIds: [...new Set(chain.map(p => p.politicianId))],
-        startYear: chain[0].proposedDate.split('-')[0],
+        startYear: policyYear(chain[0], elections.value),
         lastYear: new Date().getFullYear().toString(),
         totalProgress: Math.round(chain.reduce((acc, p) => acc + p.progress, 0) / chain.length),
         isRelay: true
@@ -58,7 +59,7 @@ const relayCases = computed(() => {
         category: policy.category,
         policies: [policy],
         involvedPoliticianIds: [policy.politicianId],
-        startYear: policy.proposedDate.split('-')[0],
+        startYear: policyYear(policy, elections.value),
         lastYear: new Date().getFullYear().toString(),
         totalProgress: policy.progress,
         isRelay: false
@@ -173,7 +174,7 @@ usePageHead({
             <p class="text-slate-500 text-sm leading-relaxed mb-8 line-clamp-2 font-medium">{{ relayCase.policies[0].description }}</p>
             <div class="mb-8">
               <div class="flex justify-between text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest">
-                <span>{{ relayCase.startYear }} 啟動</span>
+                <span>{{ relayCase.startYear ?? '—' }} 啟動</span>
                 <span>{{ new Date().getFullYear() }} 預計願景</span>
               </div>
               <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">

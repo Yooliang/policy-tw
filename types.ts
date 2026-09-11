@@ -116,7 +116,7 @@ export interface Policy {
   description: string;
   category: string; // e.g., "Traffic", "Welfare"
   status: PolicyStatus;
-  proposedDate: string;
+  proposedDate: string | null;
   lastUpdated: string;
   progress: number; // 0-100
   tags: string[];
@@ -288,7 +288,7 @@ export interface RawPolicy {
   description: string;
   category: string;
   status: PolicyStatus;
-  proposed_date: string;
+  proposed_date: string | null;
   last_updated: string;
   progress: number;
   tags?: string[];

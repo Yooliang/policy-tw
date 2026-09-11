@@ -694,7 +694,8 @@ async function handleAddPolicy(supabase: any, body: any): Promise<Response> {
       status: policy.status || "Campaign Pledge",
       source_url: policy.source_url || null,
       ai_extracted: true,
-      proposed_date: today,
+      // 提出日期不知道就留空；填當天會把「抓到資料的日子」寫成「政見提出的日子」
+      proposed_date: policy.proposed_date || null,
       last_updated: today,
     })
     .select("id")

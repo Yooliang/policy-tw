@@ -2,6 +2,7 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { withElectionData, type DataSnapshot } from '../../composables/useSupabase'
 import { PolicyStatus, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
+import { policySortDate } from '../policy-date'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -53,7 +54,7 @@ export function analysisListedPolicyIds(policies: Policy[]): string[] {
     if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
       const chain = policies
         .filter((p) => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
-        .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
+        .sort((a, b) => policySortDate(a) - policySortDate(b))
       chain.forEach((p) => visited.add(p.id))
       targets.push(chain[chain.length - 1].id)
     } else if (policy.status !== PolicyStatus.CAMPAIGN && policy.progress > 50) {

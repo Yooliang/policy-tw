@@ -4,6 +4,7 @@ import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
 import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star } from 'lucide-vue-next'
+import { policyYear } from '../lib/policy-date'
 
 const props = defineProps<{
   policy: Policy
@@ -81,7 +82,7 @@ onUnmounted(() => {
       <div class="flex items-center gap-4 text-[10px] font-black text-slate-400 mb-6 uppercase tracking-widest">
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
-          <span>{{ isCampaign ? `${policy.proposedDate.split('-')[0]} 承諾` : `${policy.lastUpdated.split('-')[0]} 更新` }}</span>
+          <span>{{ isCampaign ? `${policyYear(policy) ?? '—'} 承諾` : `${policy.lastUpdated.split('-')[0]} 更新` }}</span>
         </div>
         <div class="flex items-center gap-1.5">
           <Tag :size="12" class="text-slate-300" />

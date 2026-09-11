@@ -98,7 +98,8 @@ Deno.serve(async (req) => {
           description: input.description,
           category: input.category,
           status: input.status || "Campaign Pledge",
-          proposed_date: input.proposedDate || today,
+          // 沒給提出日期就留空，別拿當天充數
+          proposed_date: input.proposedDate || null,
           last_updated: input.proposedDate || today,
           progress: 0,
           tags: input.tags || [],

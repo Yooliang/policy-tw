@@ -137,3 +137,55 @@ Deno.test("去重雜湊：鍵順序不同視為同一筆，內容不同就不同
   assertEquals(await sha256Hex(a), await sha256Hex(b));
   assert((await sha256Hex(a)) !== (await sha256Hex(c)));
 });
+
+const validPolicy = {
+  agent_name: AGENT,
+  contribution_type: "policy",
+  payload: {
+    name: "王小明",
+    title: "萬大捷運站區沿線街景商機再造",
+    description: "依選舉公報所載政見，整頓站區沿線街景並導入商圈再造計畫。",
+    category: "經濟發展與產業",
+    election_id: 2024,
+  },
+  source_urls: [CEC],
+};
+
+const proposedDate = (v: unknown) => validateContributionRequest({ ...validPolicy, payload: { ...validPolicy.payload, proposed_date: v } });
+
+Deno.test("提出日期：不填合法；未來日期與晚於該屆選舉年份都擋下", () => {
+  // 查不到就別填——這是協議教 AI 的做法
+  assertEquals(validateContributionRequest(validPolicy).errors.length, 0);
+
+  // 2024 那屆的政見不可能在 2026 年提出。落庫端以前缺值就自動填當天，正是這樣把舊政見標成新承諾的
+  assert(proposedDate("2026-09-11").errors.some((e) => e.path === "payload.proposed_date"));
+
+  // 屆別對得上就放行
+  assertEquals(proposedDate("2023-12-01").errors.length, 0);
+
+  // 未來日期一律不收
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const future = validateContributionRequest({ ...validPolicy, payload: { ...validPolicy.payload, election_id: 2026, proposed_date: tomorrow } });
+  assert(future.errors.some((e) => e.path === "payload.proposed_date"));
+
+  // 格式錯的照舊擋
+  assert(proposedDate("2024/01/13").errors.some((e) => e.path === "payload.proposed_date"));
+});
+
+Deno.test("提出日期：correction 允許清空，其他欄位不允許", () => {
+  const correction = (changes: unknown) => validateContributionRequest({
+    agent_name: AGENT,
+    contribution_type: "correction",
+    payload: {
+      target_table: "policies",
+      target_id: "00000000-0000-4000-8000-000000000001",
+      changes,
+      reason: "選舉公報查不到提出日期，原值是資料送進來的日子",
+    },
+    source_urls: [CEC],
+  });
+
+  assertEquals(correction([{ field: "proposed_date", current_value: "2026-09-11", correct_value: null }]).errors.length, 0);
+  assert(correction([{ field: "title", correct_value: null }]).errors.some((e) => e.path.endsWith("correct_value")));
+  assert(correction([{ field: "proposed_date", correct_value: "2099-01-01" }]).errors.some((e) => e.path.endsWith("correct_value")));
+});

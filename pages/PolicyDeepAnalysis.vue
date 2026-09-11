@@ -16,10 +16,11 @@ import {
 import { usePageHead } from '../composables/usePageHead'
 import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import HeroAction from '../components/HeroAction.vue'
+import { policySortDate, policyYear } from '../lib/policy-date'
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians } = useSupabase()
+const { policies, politicians, elections } = useSupabase()
 
 // 「執行稽核」：把訪客貼的文件網址丟進貢獻任務池（request-task kind=audit），AI 代理來核對與既有政見／進度的落差
 const sourceUrl = ref('')
@@ -103,7 +104,7 @@ const relayChain = computed(() => {
     })
   }
   return policies.value.filter(p => visited.has(p.id))
-    .sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
+    .sort((a, b) => policySortDate(a) - policySortDate(b))
 })
 
 const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => String(c.id) === String(selectedPolicy.value!.politicianId)) : null)
@@ -156,6 +157,14 @@ const getPoliticiansForLevel = (levelType: ElectionType, idx: number) => {
 
 const currentYear = new Date().getFullYear()
 const YEARS = Array.from({ length: 12 }, (_, i) => String(currentYear - 11 + i))
+
+// 頂軸時間刻度：接力鏈裡有沒有政見落在這一年（沒有提出日期的政見改看所屬選舉屆別／最後更新時間）
+const chainHasYear = (year: string) => relayChain.value.some(p => policyYear(p, elections.value) === year)
+const selectedPolicyIsInYear = (year: string) => {
+  const p = selectedPolicy.value
+  if (!p) return false
+  return policyYear(p, elections.value) === year || p.lastUpdated.includes(year)
+}
 
 const HIERARCHY_LEVELS = [
   { label: '戰略層', role: '縣市首長', desc: '資源整合與願景規劃', iconComponent: ShieldCheck, iconClass: 'text-red-500', type: ElectionType.MAYOR },
@@ -260,15 +269,15 @@ usePageHead({
             <div
               v-for="year in YEARS"
               :key="year"
-              :class="`py-8 flex flex-col items-center border-r border-slate-100 last:border-r-0 relative transition-all ${relayChain.some(p => p.proposedDate.includes(year)) ? 'bg-blue-50/20' : ''}`"
+              :class="`py-8 flex flex-col items-center border-r border-slate-100 last:border-r-0 relative transition-all ${chainHasYear(year) ? 'bg-blue-50/20' : ''}`"
             >
-              <span :class="`text-[12px] font-black mb-3 ${year === '2024' ? 'text-emerald-600' : relayChain.some(p => p.proposedDate.includes(year)) ? 'text-blue-600' : 'text-slate-300'}`">
+              <span :class="`text-[12px] font-black mb-3 ${year === '2024' ? 'text-emerald-600' : chainHasYear(year) ? 'text-blue-600' : 'text-slate-300'}`">
                 {{ year }}
               </span>
-              <div :class="`w-3 h-3 rounded-full border-2 border-white shadow-sm transition-all duration-500 ${year === '2024' ? 'bg-emerald-500 animate-pulse' : relayChain.some(p => p.proposedDate.includes(year)) ? 'bg-blue-600 scale-125 ring-4 ring-blue-50' : 'bg-slate-200'}`"></div>
+              <div :class="`w-3 h-3 rounded-full border-2 border-white shadow-sm transition-all duration-500 ${year === '2024' ? 'bg-emerald-500 animate-pulse' : chainHasYear(year) ? 'bg-blue-600 scale-125 ring-4 ring-blue-50' : 'bg-slate-200'}`"></div>
 
               <div
-                v-if="selectedPolicy.proposedDate.includes(year) || selectedPolicy.lastUpdated.includes(year)"
+                v-if="selectedPolicyIsInYear(year)"
                 class="absolute top-[85px] left-1/2 -translate-x-1/2 z-30 bg-white p-3 rounded-xl border border-blue-100 shadow-xl w-44 text-left animate-fade-in pointer-events-none"
               >
                 <div class="text-[10px] text-blue-600 font-black mb-1 flex items-center gap-1"><History :size="10" /> 歷史座標</div>

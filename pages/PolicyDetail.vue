@@ -14,11 +14,12 @@ import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
+import { policySortDate, policyYear } from '../lib/policy-date'
 
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading } = useSupabase()
+const { policies, politicians, loading, elections, getElectionById } = useSupabase()
 
 const hasVoted = ref(false)
 
@@ -48,6 +49,9 @@ const policyId = computed(() => route.params.policyId)
 const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 const politician = computed(() => policy.value ? politicians.value.find(c => String(c.id) === String(policy.value!.politicianId)) : null)
 
+// 政見所屬選舉屆別的簡稱，例如「2024 大選」「2026 九合一」。沒有屆別（舊資料）就不顯示。
+const policyElection = computed(() => policy.value?.electionId != null ? getElectionById(policy.value.electionId) : undefined)
+
 const otherPolicies = computed(() =>
   politician.value
     ? policies.value.filter(p => String(p.politicianId) === String(politician.value!.id) && p.id !== policy.value?.id).slice(0, 3)
@@ -59,11 +63,11 @@ const policyChain = computed(() => {
   if (!policy.value?.relatedPolicyIds) return []
   const relatedPolicies = policies.value.filter(p =>
     policy.value!.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.value!.id)
-  ).sort((a, b) => new Date(a.proposedDate).getTime() - new Date(b.proposedDate).getTime())
+  ).sort((a, b) => policySortDate(a) - policySortDate(b))
 
   return [...relatedPolicies, policy.value]
     .filter((p): p is typeof policy.value => !!p)
-    .sort((a, b) => new Date(a!.proposedDate).getTime() - new Date(b!.proposedDate).getTime())
+    .sort((a, b) => policySortDate(a!) - policySortDate(b!))
     .filter((v, i, a) => a.findIndex(t => t!.id === v!.id) === i)
 })
 
@@ -144,7 +148,10 @@ usePageHead({
             </div>
             <h1 class="text-3xl md:text-4xl font-black text-white leading-tight mb-3">{{ policy.title }}</h1>
             <div class="flex flex-wrap items-center gap-4 text-sm text-slate-300">
-              <span class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
+              <span v-if="policyElection" class="flex items-center gap-1 bg-white/10 px-2.5 py-0.5 rounded-full text-xs font-bold text-white">
+                {{ policyElection.shortName }}政見
+              </span>
+              <span v-if="policy.proposedDate" class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
               <span class="flex items-center gap-1"><Activity :size="16" /> 更新：{{ policy.lastUpdated }}</span>
               <span class="flex items-center gap-1 cursor-pointer hover:text-white" @click="router.push(`/politician/${politician.id}`)">
                 {{ politician.name }} · {{ politician.position }}
@@ -237,7 +244,7 @@ usePageHead({
                       <Avatar :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :name="politicians.find(pol => pol.id === p!.politicianId)?.name || ''" class="w-full h-full" />
                     </div>
                     <div class="mt-4 text-center">
-                      <span class="text-xs font-bold text-slate-400 block mb-1">{{ p!.proposedDate.split('-')[0] }}</span>
+                      <span class="text-xs font-bold text-slate-400 block mb-1">{{ policyYear(p!, elections) ?? '—' }}</span>
                       <h4 :class="`font-bold text-sm mb-1 ${p!.id === policy?.id ? 'text-blue-700' : 'text-slate-700'}`">
                         {{ politicians.find(pol => pol.id === p!.politicianId)?.name }}
                       </h4>

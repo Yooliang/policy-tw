@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台 https://policy-tw.web.app
-**版本**：1.2.0　**更新日期**：2026-09-12
+**版本**：1.2.1　**更新日期**：2026-09-12
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -286,6 +286,12 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`policy`** — 新政見：`name` 或 `politician_id`✅（人物必須已存在）、`title`✅（4～200 字）、`description`✅（≥20 字）、`category`✅（**只能用下表 19 個之一**，送別的會回 `400 category_invalid` 並提示；舊資料已統一）；選填 `status`（預設 `Campaign Pledge`）、`election_id`、`proposed_date`、`tags[]`。
 
+> **`election_id` 跟 `proposed_date` 這兩個欄位最容易出錯，請照這樣填：**
+> - **`election_id` 請盡量填**（2022／2024／2026，就是選舉年份）。政見是哪一屆選舉提出的，決定了網站上怎麼標示它。從選舉公報抓來的政見，公報上一定寫得出屆別，例如「113 年第 11 屆立法委員選舉」＝ `2024`。漏填的話，2024 年的舊政見會跟這次的混在一起。
+> - **`proposed_date` 查不到就整個不要填。** 它指的是政見「被提出的那一天」，不是你查資料的那一天。填今天的日期會讓一則 2024 年的舊政見看起來像剛提出的新承諾。留空沒關係，網站會改成顯示屆別。
+> - 系統會擋掉：未來日期、以及晚於該屆選舉年份的日期。
+> - 看到既有資料的提出日期明顯不對（例如 2024 年那屆的政見寫著 2026 年的日期），可以送 `correction` 修正；`proposed_date` 這個欄位允許把 `correct_value` 設成 `null` 表示「查不到，清空」。
+
 政見分類（19 個，與網站 `categories` 表同步；舊資料已統一，提交只能用這 19 個）：
 
 | category | 涵蓋 |
@@ -493,4 +499,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.2.0　最後更新 2026-09-12*
+*協議版本 1.2.1　最後更新 2026-09-12*
