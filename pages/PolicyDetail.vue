@@ -11,7 +11,6 @@ import Avatar from '../components/Avatar.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
-import { Link as LinkIcon } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 
@@ -155,8 +154,7 @@ usePageHead({
             <Sparkles v-else :size="18" />
             {{ verifying ? '送出中…' : verifySuccess ? '已排入' : verifyError ? '失敗' : '請 AI 查進度' }}
           </button>
-          <HeroAction :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 公民討論</HeroAction>
-          <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
+          <HeroAction :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 看民眾的提問與表態</HeroAction>
         </div>
       </template>
     </Hero>

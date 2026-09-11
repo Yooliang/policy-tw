@@ -6,7 +6,7 @@ import { PolicyStatus } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import { Search, TrendingUp, Star, Link as LinkIcon } from 'lucide-vue-next'
+import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
@@ -80,7 +80,6 @@ usePageHead({
       <template #actions>
         <HeroAction :active="!showCheckpointsOnly" @click="showCheckpointsOnly = false"><TrendingUp :size="16" /> 政見列表</HeroAction>
         <HeroAction :active="showCheckpointsOnly" @click="showCheckpointsOnly = true"><Star :size="16" /> 我的追蹤</HeroAction>
-        <HeroAction to="/skill"><LinkIcon :size="16" /> 教你的 AI 參與</HeroAction>
       </template>
 
       <GlobalRegionSelector />
