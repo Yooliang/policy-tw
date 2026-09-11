@@ -4,7 +4,7 @@
  * `settings.appendTo` 指定的容器；容器若不存在就會退回「插在 script 後面」，
  * 也就是掉到 footer 下方。容器由 <AdSlot /> 提供，整站只有一個。
  */
-export const AD_SLOT_SELECTOR = '#monetag-slot'
+export const AD_SLOT_SELECTOR = '#pt-tail-box'
 
 const MONETAG_SRC =
   '//quarrelsomebitter.com/btXzV.s-dCGPlp0pYVWVcG/EeVmc9uubZtUwltkWPqT/cY0gMLT/UM2CNkT/Myt/NnzLQ-xLNlTUYG1uN/ws'
