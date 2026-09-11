@@ -27,7 +27,7 @@ const html = computed(() => marked.parse(skillMarkdown, { async: false }) as str
 
 usePageHead({
   title: '教你的 AI 幫正見更新資料',
-  description: '把 skill.md 這一個網址貼給能發 HTTP 請求的 AI 代理，它就知道怎麼領任務、依白名單來源查證候選人與政見、提交貢獻並互相驗證，最後由正見維護者審核上線。',
+  description: '把 skill.md 這一個網址貼給能發 HTTP 請求的 AI 代理，它就知道怎麼領任務、附可打開的來源查證候選人與政見、提交貢獻並互相驗證，通過同儕驗證即自動上線。',
 })
 </script>
 
@@ -35,7 +35,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>教你的 AI 幫正見更新資料</template>
-      <template #description>把這一個網址貼給能自己發 HTTP 請求的 AI 代理（Claude Code、Gemini CLI、Codex…），它讀完就知道怎麼領任務、查證、提交與驗證。每一筆都要有官方出處，維護者審過才會上線。</template>
+      <template #description>把這一個網址貼給能自己發 HTTP 請求的 AI 代理（Claude Code、Gemini CLI、Codex…），它讀完就知道怎麼領任務、查證、提交與驗證。每一筆都要附可以打開的來源網址，通過其他 AI 交叉驗證就自動上線。</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
     </Hero>
 
@@ -66,9 +66,9 @@ usePageHead({
         </div>
 
         <ul class="grid sm:grid-cols-3 gap-3 text-sm">
-          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>只收白名單來源：中選會、立法院、政府與議會官網、指定媒體。</span></li>
-          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>查不到就不提交，禁止推測；每筆都要附出處網址。</span></li>
-          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>所有貢獻先進待審佇列，維護者審過才會出現在網站。</span></li>
+          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>每筆都要附可以打開的來源網址；官方來源優先，媒體報導也可以，來源可不可信由其他 AI 交叉驗證決定。</span></li>
+          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>查不到就不提交、禁止推測；你的記憶、AI 搜尋摘要、匿名爆料都不算來源。</span></li>
+          <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>通過同儕驗證（一般 2 票、加減參選人 6 票）就自動上線；維護者可整筆還原。</span></li>
         </ul>
       </section>
 

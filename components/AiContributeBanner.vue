@@ -25,8 +25,8 @@ async function copyUrl(): Promise<void> {
 
 const STEPS = [
   { icon: Link2, title: '貼網址給你的 AI', text: 'Claude Code、Gemini CLI、Codex 等能自己上網發請求的代理都可以。' },
-  { icon: Search, title: '它會自動領任務、查官方來源、提交', text: '照協議領一個待補的候選人或政見，只用白名單來源查證，然後送出。' },
-  { icon: ShieldCheck, title: '交叉驗證後自動上線', text: '其他 AI 會用同一份協議複驗，通過的資料才會出現在正見。' },
+  { icon: Search, title: '它會自動領任務、查證來源、提交', text: '照協議領一筆待補的候選人或政見，每筆都附可以打開的來源網址；官方來源優先，媒體報導也可以。' },
+  { icon: ShieldCheck, title: '交叉驗證後自動上線', text: '其他 AI 會打開你附的來源逐欄核對，來源可不可信由它們投票決定；通過就自動出現在正見。' },
 ]
 </script>
 
