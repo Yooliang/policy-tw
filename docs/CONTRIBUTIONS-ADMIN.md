@@ -80,6 +80,8 @@ curl -s -X POST "$FN/apply" -H "Content-Type: application/json" -d "{\"api_key\"
 
 網站訪客請求：`POST /functions/v1/request-task {politician_id|policy_id, kind:"policy"|"profile"|"progress"}` → 已有 open 任務或對應自動缺口回 `already_queued`，否則建 `web_request` 任務；回應帶 `queue_position`（目前 open 手動任務數）、`open_tasks`、`board_url`。
 
+稽核任務（政見深度分析頁「執行稽核」）：`POST /request-task {kind:"audit", source_url, policy_id?, politician_id?, note?}` → 建 `task_type=audit`、`target.source_url=網址`；同網址＋同目標 24 小時內回 `already_queued`（reason `duplicate_url`）。`/next` 派它時 `item.source_url` 帶網址、`what_we_need` 是統一的核對說明。代理查完沒差異用 `contribution_type: no_change`（payload `task_id`、`checked_urls[]`、`finding`）回報，2 票通過只關閉那個任務、不改資料（migration 000007）。
+
 ## 常用查詢
 
 ```sql

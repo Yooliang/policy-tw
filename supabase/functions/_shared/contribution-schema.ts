@@ -6,8 +6,8 @@
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion"] as const;
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "other"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "other"] as const;
 export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
 
 export const ELECTION_TYPES = [
@@ -172,6 +172,13 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
       break;
     }
+    case "no_change": {
+      // 查完發現與資料庫一致：只關任務、不改資料；checked_urls 就是驗證者要核對的來源
+      if (!isStr(p.task_id, 1, 160)) push("payload.task_id", "task_id 必填（/next 給的 task_id）");
+      if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
+      if (!isStr(p.finding, 10, 2000)) push("payload.finding", "finding 必填（≥10 字：核對了什麼、為什麼判定沒有異動）");
+      break;
+    }
     case "task_suggestion": {
       if (!isStr(p.title, 10, 100)) push("payload.title", "title 必填（10～100 字：一句話說要查什麼）");
       if (!isStr(p.description, 20, 2000)) push("payload.description", "description 必填（≥20 字：為什麼該查、預期能查到什麼）");
@@ -238,11 +245,13 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     if (!isObj(raw)) { push("", "每筆要是物件"); return; }
     if (!oneOf(CONTRIBUTION_TYPES, raw.contribution_type)) { push("contribution_type", `要是 ${CONTRIBUTION_TYPES.join("／")} 之一`); return; }
     if (!isObj(raw.payload)) { push("payload", "payload 要是物件"); return; }
-    if (!Array.isArray(raw.source_urls) || raw.source_urls.length === 0) push("source_urls", "source_urls 必填，至少一個可打開的來源網址");
-    else if (raw.source_urls.length > MAX_SOURCE_URLS) push("source_urls", `最多 ${MAX_SOURCE_URLS} 個`);
-    else if (!raw.source_urls.every((u) => typeof u === "string")) push("source_urls", "每個都要是字串");
+    // no_change 沒給 source_urls 時，用 payload.checked_urls 當來源（驗證者照那些網址核對）
+    const sourceUrls: unknown = Array.isArray(raw.source_urls) || raw.contribution_type !== "no_change" ? raw.source_urls : raw.payload.checked_urls;
+    if (!Array.isArray(sourceUrls) || sourceUrls.length === 0) push("source_urls", "source_urls 必填，至少一個可打開的來源網址");
+    else if (sourceUrls.length > MAX_SOURCE_URLS) push("source_urls", `最多 ${MAX_SOURCE_URLS} 個`);
+    else if (!sourceUrls.every((u) => typeof u === "string")) push("source_urls", "每個都要是字串");
     else {
-      const check = checkSourceSet(raw.source_urls as string[]);
+      const check = checkSourceSet(sourceUrls as string[]);
       if (!check.ok) push("source_urls", `${check.reason}：${check.details.filter((d) => d.kind === "invalid").map((d) => d.url).join("、")}`);
     }
     if (raw.note !== undefined && !isStr(raw.note, 1, 2000)) push("note", "要是 1～2000 字");
@@ -251,7 +260,7 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     items.push({
       contribution_type: raw.contribution_type,
       payload: raw.payload,
-      source_urls: Array.isArray(raw.source_urls) ? (raw.source_urls as string[]) : [],
+      source_urls: Array.isArray(sourceUrls) ? (sourceUrls as string[]) : [],
       ...(raw.note !== undefined ? { note: String(raw.note) } : {}),
       ...(raw.task_id !== undefined ? { task_id: String(raw.task_id) } : {}),
     });

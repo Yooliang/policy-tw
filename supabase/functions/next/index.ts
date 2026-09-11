@@ -5,6 +5,7 @@ import { chooseKind, filterLeasedTasks, filterVerifyCandidates, LEASE_MINUTES, p
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
+import { describeManualTask } from "../_shared/task-admin.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -148,7 +149,7 @@ Deno.serve(async (req) => {
         kind: "task",
         lease_minutes: LEASE_MINUTES,
         item: {
-          task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+          task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target, ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget)),
           lookup: buildLookup(manualTarget),
         },

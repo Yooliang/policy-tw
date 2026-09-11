@@ -14,7 +14,7 @@ import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
-import { createTask, validateTaskInput } from "./task-admin.ts";
+import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -307,8 +307,20 @@ async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow)
   return { status: "applied", message: `提議已成為公開任務（task_id=${task.id}），/next 會派出`, task_id: String(task.id) };
 }
 
+/** no_change：代理核對後確認與資料庫一致 → 只關閉該任務、不動任何正式資料（自動缺口任務沒有列可關，只記錄） */
+async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const taskId = str(row.payload.task_id);
+  if (!taskId) return { status: "failed", message: "no_change 要帶 task_id" };
+  if (taskId.startsWith("auto:")) return { status: "applied", message: `已記錄無異動（自動缺口任務 ${taskId} 會在資料補齊後自行消失）`, task_id: taskId };
+  const task = await closeTask(supabase, taskId, row.agent_name);
+  if (!task) return { status: "failed", message: `找不到任務 ${taskId}` };
+  await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");
+  return { status: "applied", message: `已記錄無異動並關閉任務 ${taskId}`, task_id: taskId };
+}
+
 export async function applyContribution(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   switch (row.contribution_type) {
+    case "no_change": return await applyNoChange(supabase, row);
     case "politician": return await applyPolitician(supabase, row);
     case "candidacy": return await applyCandidacy(supabase, row);
     case "policy": return await applyPolicy(supabase, row);

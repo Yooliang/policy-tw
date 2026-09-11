@@ -3,7 +3,7 @@
  * 舊的 ai-classify 管線已停擺，這是唯一入口。
  */
 
-export type RequestKind = 'policy' | 'profile' | 'progress'
+export type RequestKind = 'policy' | 'profile' | 'progress' | 'audit'
 
 export interface RequestTaskResult {
   status: 'queued' | 'already_queued'
@@ -21,7 +21,27 @@ function headers(): Record<string, string> {
   return { 'Content-Type': 'application/json', ...(key ? { apikey: key, Authorization: `Bearer ${key}` } : {}) }
 }
 
-export async function requestTask(input: { kind: RequestKind; politician_id?: string; policy_id?: string }): Promise<RequestTaskResult> {
+export interface RequestTaskInput {
+  kind: RequestKind
+  politician_id?: string
+  policy_id?: string
+  /** kind=audit：要核對的文件網址 */
+  source_url?: string
+  note?: string
+}
+
+/** 訪客貼的網址是否合格（http/https、可解析）；與後端 isAuditUrl 同規則 */
+export function isAuditUrl(v: string): boolean {
+  if (v.length > 500) return false
+  try {
+    const u = new URL(v.trim())
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export async function requestTask(input: RequestTaskInput): Promise<RequestTaskResult> {
   const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-task`, {
     method: 'POST',
     headers: headers(),
