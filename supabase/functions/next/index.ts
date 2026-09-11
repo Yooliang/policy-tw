@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward").eq("status", "open").order("priority", { ascending: false }).limit(20),
+      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources").eq("status", "open").order("priority", { ascending: false }).limit(20),
     ]);
     for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes]) {
       if (r.error) throw new Error(r.error.message);
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
-    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number };
+    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null };
     const manual = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region);
     const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manual.length;
 
@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
         kind: "task",
         lease_minutes: LEASE_MINUTES,
         item: {
-          task_id: t.id, task_type: t.task_type, source: "manual", target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+          task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target, what_we_need: t.description ? `${t.title}：${t.description}` : t.title, hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget)),
           lookup: buildLookup(manualTarget),
         },

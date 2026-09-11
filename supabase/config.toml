@@ -495,3 +495,13 @@ entrypoint = "./functions/report/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/apply-verified/index.ts"
+
+[functions.contributions-feed]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/contributions-feed/index.ts"
+
+[functions.request-task]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/request-task/index.ts"

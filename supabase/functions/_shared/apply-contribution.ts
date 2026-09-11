@@ -14,6 +14,7 @@ import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
+import { createTask, validateTaskInput } from "./task-admin.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -40,6 +41,7 @@ export interface ApplyOutcome {
   policy_id?: string;
   created_politician?: boolean;
   similar_policies?: Array<{ id: string; title: string; similarity: number }>;
+  task_id?: string;
 }
 
 function throwIf(error: { message: string } | null, where: string): void {
@@ -291,6 +293,20 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   };
 }
 
+/** 外部提議任務通過驗證 → 自動 insert 成 open 任務（source=suggested），/next 就會派 */
+async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const validated = validateTaskInput({
+    title: p.title, description: p.description, task_type: str(p.task_type) ?? "other",
+    target_politician_id: str(p.target_politician_id), target_policy_id: str(p.target_policy_id), region: str(p.region),
+    hint_sources: Array.isArray(p.hint_sources) ? p.hint_sources : [],
+  });
+  if (!validated.ok || !validated.input) return { status: "failed", message: `提議內容不合格：${validated.errors.map((e) => e.message).join("；")}` };
+  const task = await createTask(supabase, validated.input, { source: "suggested", suggested_by: row.agent_name, created_by: row.agent_name });
+  await recordInsert(supabase, ctxOf(row), "contribution_tasks", String(task.id), task);
+  return { status: "applied", message: `提議已成為公開任務（task_id=${task.id}），/next 會派出`, task_id: String(task.id) };
+}
+
 export async function applyContribution(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   switch (row.contribution_type) {
     case "politician": return await applyPolitician(supabase, row);
@@ -298,6 +314,7 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     case "policy": return await applyPolicy(supabase, row);
     case "policy_progress": return await applyPolicyProgress(supabase, row);
     case "correction": return await applyCorrection(supabase, row);
+    case "task_suggestion": return await applyTaskSuggestion(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
-import { useAuth } from '../composables/useAuth'
-import { supabase } from '../lib/supabase'
+import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import { useIndexedDB } from '../composables/useIndexedDB'
 import { PolicyStatus } from '../types'
 import type { CandidateStatus } from '../types'
@@ -16,26 +15,27 @@ import { usePageHead } from '../composables/usePageHead'
 const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById } = useSupabase()
-const { isAuthenticated, signInWithGoogle, session } = useAuth()
 const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
-// AI search states
-const searchingCampaign = ref(false)
-const searchCampaignSuccess = ref(false)
-const searchCampaignError = ref<string | null>(null)
+// 「請 AI 幫忙查」：四顆按鈕都把這位人物丟進貢獻任務池（公開端點 request-task，不需登入）
+type LookupKey = 'campaign' | 'history' | 'bio' | 'avatar'
+const LOOKUP_KIND: Record<LookupKey, RequestKind> = { campaign: 'policy', history: 'policy', bio: 'profile', avatar: 'profile' }
+interface LookupState { loading: boolean; result: RequestTaskResult | null; error: string | null }
+const idle = (): LookupState => ({ loading: false, result: null, error: null })
+const lookup = reactive<Record<LookupKey, LookupState>>({ campaign: idle(), history: idle(), bio: idle(), avatar: idle() })
 
-const searchingHistory = ref(false)
-const searchHistorySuccess = ref(false)
-const searchHistoryError = ref<string | null>(null)
-
-const searchingBio = ref(false)
-const searchBioSuccess = ref(false)
-const searchBioError = ref<string | null>(null)
-
-const searchingAvatar = ref(false)
-const searchAvatarSuccess = ref(false)
-const searchAvatarError = ref<string | null>(null)
+async function requestLookup(key: LookupKey) {
+  const pol = politician.value
+  if (!pol || lookup[key].loading) return
+  lookup[key] = { loading: true, result: null, error: null }
+  try {
+    const result = await requestTask({ kind: LOOKUP_KIND[key], politician_id: pol.id })
+    lookup[key] = { loading: false, result, error: null }
+  } catch (err: unknown) {
+    lookup[key] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
+  }
+}
 
 // Get election name by ID
 function getElectionName(electionId: number): string {
@@ -106,190 +106,6 @@ function getCandidateStatusColor(status?: CandidateStatus, electionId?: number):
   }
 }
 
-// Trigger AI search for campaign pledges
-async function handleSearchCampaign() {
-  if (!isAuthenticated.value) {
-    signInWithGoogle()
-    return
-  }
-
-  const pol = politician.value
-  if (!pol) return
-
-  searchingCampaign.value = true
-  searchCampaignSuccess.value = false
-  searchCampaignError.value = null
-
-  try {
-    const input = `請搜尋「${pol.name}」的 2026 年選舉政見與競選承諾。地區：${pol.region}，職位：${pol.position}`
-
-    const response = await supabase.functions.invoke('ai-classify', {
-      body: {
-        input,
-        politician_id: pol.id,
-        politician_name: pol.name,
-      },
-      headers: {
-        Authorization: `Bearer ${session.value?.access_token}`,
-      },
-    })
-
-    if (response.error) {
-      throw new Error(response.error.message || JSON.stringify(response.error))
-    }
-
-    const data = response.data
-    if (!data.success) {
-      throw new Error(data.message || '提交失敗')
-    }
-
-    searchCampaignSuccess.value = true
-  } catch (err: any) {
-    console.error('Search error:', err)
-    searchCampaignError.value = err.message || '搜尋請求失敗，請稍後再試'
-  } finally {
-    searchingCampaign.value = false
-  }
-}
-
-// Trigger AI search for historical records
-async function handleSearchHistory() {
-  if (!isAuthenticated.value) {
-    signInWithGoogle()
-    return
-  }
-
-  const pol = politician.value
-  if (!pol) return
-
-  searchingHistory.value = true
-  searchHistorySuccess.value = false
-  searchHistoryError.value = null
-
-  try {
-    const input = `請搜尋「${pol.name}」的過往政績與施政成果。地區：${pol.region}，現任或曾任：${pol.currentPosition || pol.position}`
-
-    const response = await supabase.functions.invoke('ai-classify', {
-      body: {
-        input,
-        politician_id: pol.id,
-        politician_name: pol.name,
-      },
-      headers: {
-        Authorization: `Bearer ${session.value?.access_token}`,
-      },
-    })
-
-    if (response.error) {
-      throw new Error(response.error.message || JSON.stringify(response.error))
-    }
-
-    const data = response.data
-    if (!data.success) {
-      throw new Error(data.message || '提交失敗')
-    }
-
-    searchHistorySuccess.value = true
-  } catch (err: any) {
-    console.error('Search error:', err)
-    searchHistoryError.value = err.message || '搜尋請求失敗，請稍後再試'
-  } finally {
-    searchingHistory.value = false
-  }
-}
-
-// Trigger AI search for bio
-async function handleSearchBio() {
-  if (!isAuthenticated.value) {
-    signInWithGoogle()
-    return
-  }
-
-  const pol = politician.value
-  if (!pol) return
-
-  searchingBio.value = true
-  searchBioSuccess.value = false
-  searchBioError.value = null
-
-  try {
-    const input = `請搜尋「${pol.name}」的個人簡介、經歷、學歷背景，以及維基百科頭像照片。${pol.party ? `政黨：${pol.party}，` : ''}地區：${pol.region}`
-
-    const response = await supabase.functions.invoke('ai-classify', {
-      body: {
-        input,
-        politician_id: pol.id,
-        politician_name: pol.name,
-      },
-      headers: {
-        Authorization: `Bearer ${session.value?.access_token}`,
-      },
-    })
-
-    if (response.error) {
-      throw new Error(response.error.message || JSON.stringify(response.error))
-    }
-
-    const data = response.data
-    if (!data.success) {
-      throw new Error(data.message || '提交失敗')
-    }
-
-    searchBioSuccess.value = true
-  } catch (err: any) {
-    console.error('Search error:', err)
-    searchBioError.value = err.message || '搜尋請求失敗，請稍後再試'
-  } finally {
-    searchingBio.value = false
-  }
-}
-
-// Trigger AI search for avatar only
-async function handleSearchAvatar() {
-  if (!isAuthenticated.value) {
-    signInWithGoogle()
-    return
-  }
-
-  const pol = politician.value
-  if (!pol) return
-
-  searchingAvatar.value = true
-  searchAvatarSuccess.value = false
-  searchAvatarError.value = null
-
-  try {
-    const input = `請搜尋「${pol.name}」的維基百科頭像照片。${pol.party ? `政黨：${pol.party}，` : ''}地區：${pol.region}，職位：${pol.position}`
-
-    const response = await supabase.functions.invoke('ai-classify', {
-      body: {
-        input,
-        politician_id: pol.id,
-        politician_name: pol.name,
-      },
-      headers: {
-        Authorization: `Bearer ${session.value?.access_token}`,
-      },
-    })
-
-    if (response.error) {
-      throw new Error(response.error.message || JSON.stringify(response.error))
-    }
-
-    const data = response.data
-    if (!data.success) {
-      throw new Error(data.message || '提交失敗')
-    }
-
-    searchAvatarSuccess.value = true
-  } catch (err: any) {
-    console.error('Search error:', err)
-    searchAvatarError.value = err.message || '搜尋請求失敗，請稍後再試'
-  } finally {
-    searchingAvatar.value = false
-  }
-}
-
 // Check cache age on mount, refresh if older than 1 hour
 const ONE_HOUR = 60 * 60 * 1000
 const politicianLoading = ref(false)
@@ -342,21 +158,21 @@ usePageHead({
             </span>
             <!-- Avatar search button - always visible -->
             <button
-              v-if="!searchAvatarSuccess"
-              @click="handleSearchAvatar"
-              :disabled="searchingAvatar"
+              v-if="!lookup.avatar.result"
+              @click="requestLookup('avatar')"
+              :disabled="lookup.avatar.loading"
               class="absolute -bottom-2 left-1/2 -translate-x-1/2 text-xs px-2 py-1 bg-white/90 hover:bg-white text-slate-700 rounded-full transition-all flex items-center gap-1 shadow-lg"
             >
-              <Loader2 v-if="searchingAvatar" :size="10" class="animate-spin" />
+              <Loader2 v-if="lookup.avatar.loading" :size="10" class="animate-spin" />
               <Camera v-else :size="10" />
-              {{ searchingAvatar ? '...' : '更新照片' }}
+              {{ lookup.avatar.loading ? '...' : '請 AI 找照片' }}
             </button>
             <span
-              v-if="searchAvatarSuccess"
+              v-if="lookup.avatar.result"
               class="absolute -bottom-2 left-1/2 -translate-x-1/2 text-xs px-2 py-1 bg-emerald-500 text-white rounded-full flex items-center gap-1 shadow-lg"
             >
               <CheckCircle :size="10" />
-              已提交
+              已排入
             </span>
           </div>
           <div class="flex-1">
@@ -415,38 +231,33 @@ usePageHead({
 
                 <!-- AI Search Button -->
                 <button
-                  v-if="!searchCampaignSuccess"
-                  @click="handleSearchCampaign"
-                  :disabled="searchingCampaign"
+                  v-if="!lookup.campaign.result"
+                  @click="requestLookup('campaign')"
+                  :disabled="lookup.campaign.loading"
                   :class="[
                     'px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 mx-auto',
-                    searchCampaignError
+                    lookup.campaign.error
                       ? 'bg-red-100 text-red-700 hover:bg-red-200'
                       : 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-500/20'
                   ]"
                 >
-                  <Loader2 v-if="searchingCampaign" :size="20" class="animate-spin" />
+                  <Loader2 v-if="lookup.campaign.loading" :size="20" class="animate-spin" />
                   <Sparkles v-else :size="20" />
-                  {{ searchingCampaign ? '搜尋中...' : searchCampaignError ? '重試' : 'AI 一鍵查找政見' }}
+                  {{ lookup.campaign.loading ? '送出中…' : lookup.campaign.error ? '重試' : '請 AI 幫忙查政見' }}
                 </button>
 
                 <!-- Success State -->
-                <div v-if="searchCampaignSuccess" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto">
+                <div v-if="lookup.campaign.result" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto" data-testid="request-task-done">
                   <div class="flex items-center gap-2 text-emerald-700 font-bold mb-2">
                     <CheckCircle :size="20" />
-                    任務已開始
+                    已交給 AI 代理
                   </div>
-                  <p class="text-sm text-emerald-600 mb-3">將在背景運行，請稍後回來查看結果。</p>
-                  <button
-                    @click="router.push('/ai-assistant')"
-                    class="text-sm font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 mx-auto"
-                  >
-                    前往 AI 查核 <ChevronRight :size="16" />
-                  </button>
+                  <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.campaign.result) }}</p>
+                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
                 </div>
 
                 <!-- Error Message -->
-                <p v-if="searchCampaignError && !searchCampaignSuccess" class="text-red-500 text-sm mt-3">{{ searchCampaignError }}</p>
+                <p v-if="lookup.campaign.error && !lookup.campaign.result" class="text-red-500 text-sm mt-3">{{ lookup.campaign.error }}</p>
               </div>
             </template>
             <template v-else>
@@ -459,38 +270,33 @@ usePageHead({
 
                 <!-- AI Search Button for History -->
                 <button
-                  v-if="!searchHistorySuccess"
-                  @click="handleSearchHistory"
-                  :disabled="searchingHistory"
+                  v-if="!lookup.history.result"
+                  @click="requestLookup('history')"
+                  :disabled="lookup.history.loading"
                   :class="[
                     'px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 mx-auto',
-                    searchHistoryError
+                    lookup.history.error
                       ? 'bg-red-100 text-red-700 hover:bg-red-200'
                       : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20'
                   ]"
                 >
-                  <Loader2 v-if="searchingHistory" :size="20" class="animate-spin" />
+                  <Loader2 v-if="lookup.history.loading" :size="20" class="animate-spin" />
                   <Sparkles v-else :size="20" />
-                  {{ searchingHistory ? '搜尋中...' : searchHistoryError ? '重試' : 'AI 一鍵查找政績' }}
+                  {{ lookup.history.loading ? '送出中…' : lookup.history.error ? '重試' : '請 AI 幫忙查政績' }}
                 </button>
 
                 <!-- Success State -->
-                <div v-if="searchHistorySuccess" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto">
+                <div v-if="lookup.history.result" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto" data-testid="request-task-done">
                   <div class="flex items-center gap-2 text-emerald-700 font-bold mb-2">
                     <CheckCircle :size="20" />
-                    任務已開始
+                    已交給 AI 代理
                   </div>
-                  <p class="text-sm text-emerald-600 mb-3">將在背景運行，請稍後回來查看結果。</p>
-                  <button
-                    @click="router.push('/ai-assistant')"
-                    class="text-sm font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 mx-auto"
-                  >
-                    前往 AI 查核 <ChevronRight :size="16" />
-                  </button>
+                  <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.history.result) }}</p>
+                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
                 </div>
 
                 <!-- Error Message -->
-                <p v-if="searchHistoryError && !searchHistorySuccess" class="text-red-500 text-sm mt-3">{{ searchHistoryError }}</p>
+                <p v-if="lookup.history.error && !lookup.history.result" class="text-red-500 text-sm mt-3">{{ lookup.history.error }}</p>
               </div>
             </template>
           </div>
@@ -568,61 +374,57 @@ usePageHead({
 
               <!-- AI Lookup Section - Always visible -->
               <div class="pt-4 border-t border-slate-100">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> AI 資料查找</h3>
+                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
+                <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；不需登入。</p>
                 <div class="space-y-3">
                   <!-- Search Bio Button -->
                   <button
-                    @click="handleSearchBio"
-                    :disabled="searchingBio"
+                    @click="requestLookup('bio')"
+                    :disabled="lookup.bio.loading"
                     :class="[
                       'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                      searchBioSuccess
+                      lookup.bio.result
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : searchBioError
+                        : lookup.bio.error
                           ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
                           : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
                     ]"
                   >
-                    <Loader2 v-if="searchingBio" :size="16" class="animate-spin" />
-                    <CheckCircle v-else-if="searchBioSuccess" :size="16" />
-                    <XCircle v-else-if="searchBioError" :size="16" />
+                    <Loader2 v-if="lookup.bio.loading" :size="16" class="animate-spin" />
+                    <CheckCircle v-else-if="lookup.bio.result" :size="16" />
+                    <XCircle v-else-if="lookup.bio.error" :size="16" />
                     <User v-else :size="16" />
-                    {{ searchingBio ? '搜尋中...' : searchBioSuccess ? '已提交查找' : searchBioError ? '重試查找' : '查找簡介/學經歷' }}
+                    {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? '已排入任務池' : lookup.bio.error ? '重試' : '請 AI 查簡介／學經歷' }}
                   </button>
 
                   <!-- Search Avatar Button -->
                   <button
-                    @click="handleSearchAvatar"
-                    :disabled="searchingAvatar"
+                    @click="requestLookup('avatar')"
+                    :disabled="lookup.avatar.loading"
                     :class="[
                       'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                      searchAvatarSuccess
+                      lookup.avatar.result
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : searchAvatarError
+                        : lookup.avatar.error
                           ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
                           : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
                     ]"
                   >
-                    <Loader2 v-if="searchingAvatar" :size="16" class="animate-spin" />
-                    <CheckCircle v-else-if="searchAvatarSuccess" :size="16" />
-                    <XCircle v-else-if="searchAvatarError" :size="16" />
+                    <Loader2 v-if="lookup.avatar.loading" :size="16" class="animate-spin" />
+                    <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
+                    <XCircle v-else-if="lookup.avatar.error" :size="16" />
                     <Camera v-else :size="16" />
-                    {{ searchingAvatar ? '搜尋中...' : searchAvatarSuccess ? '已提交查找' : searchAvatarError ? '重試查找' : '查找照片' }}
+                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? '已排入任務池' : lookup.avatar.error ? '重試' : '請 AI 找照片' }}
                   </button>
 
                   <!-- Error messages -->
-                  <p v-if="searchBioError" class="text-red-500 text-xs">{{ searchBioError }}</p>
-                  <p v-if="searchAvatarError" class="text-red-500 text-xs">{{ searchAvatarError }}</p>
+                  <p v-if="lookup.bio.error" class="text-red-500 text-xs">{{ lookup.bio.error }}</p>
+                  <p v-if="lookup.avatar.error" class="text-red-500 text-xs">{{ lookup.avatar.error }}</p>
 
                   <!-- Success hint -->
-                  <div v-if="searchBioSuccess || searchAvatarSuccess" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                    <p class="text-xs text-emerald-600 mb-2">任務已送出，將在背景執行。</p>
-                    <button
-                      @click="router.push('/ai-assistant')"
-                      class="text-xs font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
-                    >
-                      查看進度 <ChevronRight :size="14" />
-                    </button>
+                  <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
+                    <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
+                    <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
                   </div>
                 </div>
               </div>

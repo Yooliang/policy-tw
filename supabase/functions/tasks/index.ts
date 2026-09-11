@@ -43,8 +43,9 @@ Deno.serve(async (req) => {
       supabase.rpc("contribution_auto_tasks", { p_type: type, p_region: region, p_limit: limit, p_seed: seed }),
       (() => {
         let q = supabase.from("contribution_tasks")
-          .select("id, title, description, task_type, target, region, priority, reward, created_at")
-          .eq("status", "open").order("priority", { ascending: false }).limit(limit);
+          .select("id, title, description, task_type, target, region, priority, reward, created_at, source, suggested_by, hint_sources, status, closed_at, created_by")
+          .order("status", { ascending: false }).order("priority", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
+        if (url.searchParams.get("include_closed") !== "1") q = q.eq("status", "open");
         if (type) q = q.eq("task_type", type);
         if (region) q = q.eq("region", region);
         return q;
@@ -60,11 +61,18 @@ Deno.serve(async (req) => {
       task_id: t.id,
       task_type: t.task_type,
       target: t.target,
+      title: t.title,
+      description: t.description,
       what_we_need: t.description ? `${t.title}：${t.description}` : t.title,
-      hint_sources: [],
+      hint_sources: t.hint_sources ?? [],
       reward: t.reward,
       priority: t.priority,
-      source: "manual",
+      source: t.source ?? "manual",
+      suggested_by: t.suggested_by ?? null,
+      created_by: t.created_by ?? null,
+      status: t.status,
+      created_at: t.created_at,
+      closed_at: t.closed_at ?? null,
       suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
     }));
     // deno-lint-ignore no-explicit-any

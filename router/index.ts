@@ -110,7 +110,8 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: '/ai-assistant',
-    component: () => import('../pages/AIChat.vue'),
+    name: 'contributions',
+    component: () => import('../pages/Contributions.vue'),
   },
   {
     path: '/profile',
