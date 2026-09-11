@@ -9,6 +9,7 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 const router = useRouter()
 const { policies, politicians, locations, categories } = useSupabase()
@@ -29,6 +30,9 @@ watch(selectedLocation, (newVal) => {
 
 const searchTerm = ref('')
 const showCheckpointsOnly = ref(false)
+
+// 縣市（全站共用）與分類 ↔ 網址 ?region=&category=，區域資料頁的「進入 XX 追蹤頁」就是靠這個
+useRegionQuerySync({ routeName: 'tracking', extra: { category: queryField(selectedCategory, 'All') } })
 const checkpoints = ref<string[]>([])
 
 

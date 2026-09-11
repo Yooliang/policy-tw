@@ -23,7 +23,7 @@ import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { usePageHead } from '../composables/usePageHead'
-import { useElectionQuerySync, type ElectionViewMode } from '../composables/useElectionQuerySync'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 const router = useRouter()
 const route = useRoute()
@@ -50,7 +50,7 @@ function withCurrentElectionData(politician: any): any {
     village: electionData.village || politician.village,
   }
 }
-const { globalRegion, setGlobalRegion } = useGlobalState()
+const { globalRegion } = useGlobalState()
 
 const electionId = computed(() => Number(route.params.electionId))
 const election = computed(() => getElectionById(electionId.value))
@@ -123,19 +123,22 @@ watch(selectedSubRegion, () => {
   selectedVillage.value = 'All'
 })
 
+const VIEW_MODES = ['politicians', 'pledges', 'issues', 'comparison'] as const
+type ElectionViewMode = typeof VIEW_MODES[number]
 const viewMode = ref<ElectionViewMode>('politicians')
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
 
 // 縣市／鄉鎮／村里／頁籤／PK 層級 ↔ 網址 ?region=&sub=&village=&view=&type=，可貼連結直達
-useElectionQuerySync({
-  region: selectedRegion,
+useRegionQuerySync({
+  routeName: 'election',
   sub: selectedSubRegion,
   village: selectedVillage,
-  view: viewMode,
-  type: comparisonLevel,
-  setGlobalRegion,
+  extra: {
+    view: queryField(viewMode, 'politicians', { allowed: VIEW_MODES }),
+    type: queryField(comparisonLevel, ElectionType.MAYOR, { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
+  },
 })
 
 const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
