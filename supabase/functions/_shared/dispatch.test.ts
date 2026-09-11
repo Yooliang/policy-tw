@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterLeasedTasks, filterVerifyCandidates, pickBySeed, taskTargetKey } from "./dispatch.ts";
+import { chooseKind, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, taskTargetKey } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -61,4 +61,27 @@ Deno.test("pickBySeed：同 seed 同結果、不同 seed 會分散", () => {
   const picks = new Set(["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"].map((s) => pickBySeed(list, s)));
   assert(picks.size > 1);
   assertEquals(pickBySeed([], "x"), null);
+});
+
+Deno.test("不重複派自己交過的任務：認領期只擋別人，但已提交的任務要由伺服器擋掉", () => {
+  const tasks = [
+    { task_id: "auto:profile_gap:aaa", target: { politician_id: "p1" } },
+    { task_id: "auto:policy_source_missing:bbb", target: { policy_id: "y1" } },
+  ];
+
+  // 沒交過任何東西時照派
+  assertEquals(filterOwnSubmittedTasks(tasks, new Set<string>()).length, 2);
+
+  // 交過第一筆、還在等票 → 只剩第二筆
+  const left = filterOwnSubmittedTasks(tasks, new Set(["auto:profile_gap:aaa"]));
+  assertEquals(left.map((t) => t.task_id), ["auto:policy_source_missing:bbb"]);
+
+  // 兩筆都交過 → 一筆都不派，代理該去驗別人的
+  assertEquals(filterOwnSubmittedTasks(tasks, new Set(["auto:profile_gap:aaa", "auto:policy_source_missing:bbb"])).length, 0);
+
+  // 認領期的行為不變：自己認領中的仍然派回給自己（中斷可續做），別人認領中的排掉
+  const future = new Date(Date.now() + 10 * 60_000).toISOString();
+  const leases = [{ task_id: "auto:profile_gap:aaa", target_key: "politician:p1", agent_name: "alice", leased_until: future }];
+  assertEquals(filterLeasedTasks(tasks, leases, "alice").length, 2);
+  assertEquals(filterLeasedTasks(tasks, leases, "bob").map((t) => t.task_id), ["auto:policy_source_missing:bbb"]);
 });

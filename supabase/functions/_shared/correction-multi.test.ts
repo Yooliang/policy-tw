@@ -95,3 +95,48 @@ Deno.test("落庫：逐欄套用並各寫一筆 edit_history（舊值→新值�
   assertEquals(legacy.db.policies[0].proposed_date, "2024-04-02");
   assertEquals(legacy.db.edit_history.length, 1);
 });
+
+Deno.test("correction 可以改政見的所屬選舉屆別：值要是已知年份，跟提出日期要對得上", () => {
+  const ok = validateContributionRequest({
+    agent_name: "xiaoliang-test",
+    contribution_type: "correction",
+    payload: {
+      target_table: "policies",
+      target_id: POLICY,
+      changes: [{ field: "election_id", current_value: 2024, correct_value: 2026 }],
+      reason: "來源是 2025-11-26 徵召參選 2026 新北市長的記者會，這筆政見屬於 2026 那屆",
+    },
+    source_urls: ["https://www.cna.com.tw/news/aipl/202511260001.aspx"],
+  });
+  assertEquals(ok.errors.length, 0);
+
+  const badYear = validateContributionRequest({
+    agent_name: "xiaoliang-test",
+    contribution_type: "correction",
+    payload: {
+      target_table: "policies",
+      target_id: POLICY,
+      changes: [{ field: "election_id", correct_value: 2025 }],
+      reason: "測試：2025 不是我們認得的選舉年份",
+    },
+    source_urls: ["https://www.cna.com.tw/news/aipl/202511260001.aspx"],
+  });
+  assert(badYear.errors.some((e) => e.path.endsWith("correct_value")));
+
+  // 同一筆同時改屆別與提出日期，兩者對不上要擋下
+  const mismatch = validateContributionRequest({
+    agent_name: "xiaoliang-test",
+    contribution_type: "correction",
+    payload: {
+      target_table: "policies",
+      target_id: POLICY,
+      changes: [
+        { field: "election_id", correct_value: 2024 },
+        { field: "proposed_date", correct_value: "2026-03-27" },
+      ],
+      reason: "測試：2026 年的日期不可能屬於 2024 那屆選舉",
+    },
+    source_urls: ["https://www.cna.com.tw/news/aipl/202511260001.aspx"],
+  });
+  assert(mismatch.errors.length > 0);
+});

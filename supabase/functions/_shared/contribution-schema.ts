@@ -32,7 +32,7 @@ export const CORRECTION_TABLES = ["politicians", "politician_elections", "polici
 export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], readonly string[]> = {
   politicians: ["name", "party", "birth_year", "current_position", "region", "sub_region", "education_level", "bio", "avatar_url"],
   politician_elections: ["candidate_status", "position", "election_type"],
-  policies: ["title", "description", "category", "status", "proposed_date", "source_url"],
+  policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id"],
 };
 
 export const MAX_BATCH = 20;
@@ -248,7 +248,16 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         else if (empty) { /* 清空提出日期：合法 */ }
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
+        else if (table === "policies" && c.field === "election_id" && !(isInt(c.correct_value) && KNOWN_ELECTION_IDS.includes(c.correct_value))) push(`${at}.correct_value`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);
       });
+      if (table === "policies") {
+        // 同一筆裡同時改屆別與提出日期時，兩者要對得上
+        const newElection = changes.find((c) => c.field === "election_id")?.correct_value;
+        const newDate = changes.find((c) => c.field === "proposed_date")?.correct_value;
+        if (isInt(newElection) && typeof newDate === "string" && isDate(newDate) && Number(newDate.slice(0, 4)) > newElection) {
+          push(usesChanges ? "payload.changes" : "payload", `提出日期 ${newDate} 晚於你要改成的 ${newElection} 年那屆選舉，兩者對不上`);
+        }
+      }
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");
       break;
     }

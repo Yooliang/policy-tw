@@ -68,6 +68,18 @@ export interface LeaseLike {
 }
 
 /** 認領以目標為單位：politician_id 或 policy_id；沒有就用 task_id 本身 */
+/**
+ * 排掉這個代理自己已經提交、還在等票的任務。
+ *
+ * 認領期只擋別人，好讓中途斷掉的代理能接回自己的任務；但代理提交之後，
+ * 資料庫還沒變（貢獻要等票才落庫），缺口任務就會被重新算出來再派一次，
+ * 代理只能白跑一輪。伺服器知道誰交過什麼，該由伺服器擋掉。
+ */
+export function filterOwnSubmittedTasks<T extends TaskLike>(tasks: readonly T[], submittedTaskIds: ReadonlySet<string>): T[] {
+  if (submittedTaskIds.size === 0) return [...tasks];
+  return tasks.filter((t) => !submittedTaskIds.has(t.task_id));
+}
+
 export function taskTargetKey(task: TaskLike): string {
   const t = (task.target && typeof task.target === "object" ? task.target : {}) as Record<string, unknown>;
   if (typeof t.policy_id === "string") return `policy:${t.policy_id}`;

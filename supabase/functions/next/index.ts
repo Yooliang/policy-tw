@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterLeasedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -74,12 +74,16 @@ Deno.serve(async (req) => {
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources").eq("status", "open").order("priority", { ascending: false }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
+      // 這個代理自己交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派給他）
+      supabase.from("contributions").select("task_id").eq("agent_name", agentName).in("status", ["pending", "verified"]).not("task_id", "is", null).limit(500),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
     const pendingAdjudicated = new Set<string>(((adjRes.data ?? []) as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
+    // deno-lint-ignore no-explicit-any
+    const mySubmittedTaskIds = new Set<string>(((mySubmittedRes.data ?? []) as any[]).map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
 
     type PendingRow = {
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
@@ -155,7 +159,7 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterLeasedTasks(filterAdjudicateTasks(manual.map((m) => ({ ...m, task_id: m.id })), agentName, pendingAdjudicated), leases, agentName);
+    const freeManual = filterOwnSubmittedTasks(filterLeasedTasks(filterAdjudicateTasks(manual.map((m) => ({ ...m, task_id: m.id })), agentName, pendingAdjudicated), leases, agentName), mySubmittedTaskIds);
     if (freeManual.length > 0) {
       const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
@@ -176,10 +180,14 @@ Deno.serve(async (req) => {
     const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
-    const freeAuto = filterLeasedTasks((autoRes.data ?? []) as AutoTask[], leases, agentName);
+    const freeAuto = filterOwnSubmittedTasks(filterLeasedTasks((autoRes.data ?? []) as AutoTask[], leases, agentName), mySubmittedTaskIds);
     const t = freeAuto[0];
     if (!t) {
-      const reason = (autoRes.data ?? []).length > 0
+      const all = (autoRes.data ?? []) as AutoTask[];
+      const waitingOnMyVotes = all.length > 0 && all.every((x) => mySubmittedTaskIds.has(x.task_id));
+      const reason = waitingOnMyVotes
+        ? "剩下的任務你都交過了，正在等其他代理投票；先去驗證別人的，或稍後再來"
+        : all.length > 0
         ? `目前可派的任務都在其他代理的 ${LEASE_MINUTES} 分鐘認領期內，請稍後再來`
         : (totalPending > 0 ? "目前沒有可派的任務；待驗證的也都輪到任務了" : "目前沒有待驗證、也沒有缺口任務");
       return json({ ...base, kind: "none", reason, retry_after_min: RETRY_AFTER_MIN });

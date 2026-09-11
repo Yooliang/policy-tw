@@ -72,7 +72,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const FIELD_LABEL: Record<string, string> = {
   name: "姓名", party: "政黨", birth_year: "出生年", current_position: "現職", region: "縣市", sub_region: "選區", education_level: "學歷", bio: "簡介", avatar_url: "照片網址",
-  candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題", description: "說明", category: "分類", status: "狀態", proposed_date: "提出日期",
+  candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題", description: "說明", category: "分類", status: "狀態", proposed_date: "提出日期", election_id: "所屬選舉",
   source_url: "來源網址", progress: "進度", last_updated: "最後更新", source_note: "來源備註", "*": "整列",
 };
 const TABLE_LABEL: Record<string, string> = { politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務" };
