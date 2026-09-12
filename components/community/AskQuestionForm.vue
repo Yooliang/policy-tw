@@ -62,7 +62,7 @@ async function submit() {
       v-model="questionText"
       rows="3"
       :maxlength="QUESTION_MAX_LENGTH"
-      placeholder="想問什麼？例如：這項政見預計什麼時候完工？"
+      placeholder="想問什麼？例如：這項政見預計什麼時候完工？&#10;看到有人宣布參選、或報導提到新政見，把網址貼進來也可以，AI 會去讀。"
       class="w-full p-3 border border-slate-200 rounded-lg text-navy-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
     />
     <div class="flex items-center justify-end mt-1 mb-4">

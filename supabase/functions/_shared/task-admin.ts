@@ -84,7 +84,11 @@ export function taskTarget(input: TaskInput): Obj {
 /** audit 任務給代理的統一說明（/next、/tasks 都用） */
 export const AUDIT_WHAT_WE_NEED = "打開這份文件，核對其內容與我們資料庫既有的相關政見／進度是否一致；不一致就提 correction 或 policy_progress，一致就回報無異動（contribution_type: no_change，payload 帶 task_id、checked_urls、finding）";
 /** question 任務給代理的統一說明：講清楚型別、上限、與「重複角度沒有加分」這個容易被忽略的規則 */
-export const QUESTION_WHAT_WE_NEED = "這是網站訪客的提問，請找有出處的答案來回答；用 contribution_type: question_answer 回報（payload 帶 question_id、answer）。同一題最多收 3 份不同代理的答案；看 item.current.existing_answers 有沒有人答過，答同一個角度沒有加分，請補不同角度或指出前一份的錯誤，不確定就別答";
+export const QUESTION_WHAT_WE_NEED = "這是網站訪客的提問，請找有出處的答案來回答；用 contribution_type: question_answer 回報（payload 帶 question_id、answer）。同一題最多收 3 份不同代理的答案；看 item.current.existing_answers 有沒有人答過，答同一個角度沒有加分，請補不同角度或指出前一份的錯誤，不確定就別答。" +
+  "★提問裡附了網址就先打開它：訪客常用這個表單投遞線索（某人在社群宣布參選、某篇報導提到新政見）。除了回答，還要把查到的事實用對應型別補進資料庫——" +
+  "candidacy（有人宣布參選）、policy（具體政見）、policy_progress（既有政見有新進度），source_urls 放那個網址。" +
+  "只回答不補資料，那筆資料就永遠不會進站，訪客白投一次。" +
+  "社群貼文（facebook／threads／IG）是社群級來源，加參選人需要 8 票、實務上過不了：請再找一個官方或媒體來源（鄉鎮公所公告、選委會、地方新聞）一起附上，降到 4 票。找不到第二來源就只回答、在 answer 裡寫明目前只有社群來源可查。";
 
 export interface ManualTaskRowLike { title: string; description: string | null; task_type: string; target: unknown }
 
