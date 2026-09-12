@@ -87,3 +87,19 @@ Deno.test("skill.md 檔頭與檔尾的版本號要一致", async () => {
   assert(foot, "找不到檔尾的版本號");
   assertEquals(head![1], foot![1], "檔頭改了、檔尾忘了改");
 });
+
+Deno.test("管線快照：採樣函式與排程都在最新的 migration 裡，欄位與前端讀的對得上", async () => {
+  const { sql } = await latestMigrationDefining("pipeline_take_snapshot");
+  // 每 4 小時整點採樣一次。改頻率要連同前端「多久一筆」的文案一起改。
+  assert(sql.includes("'0 */4 * * *'"), "排程要是每 4 小時");
+  assert(sql.includes("cron.schedule('pipeline-snapshot-4h'"), "排程名稱固定，重跑 migration 才不會排兩份");
+
+  // 圖表讀這幾個欄位，少一個就畫不出來
+  for (const col of ["tasks_open", "tasks_by_type", "pending", "applied", "votes_total", "voters", "taken_at"]) {
+    assert(sql.includes(col), `快照表少了 ${col}`);
+  }
+  // 政見數要排除軟移除的，否則移除一筆之後圖表上的數字不會動
+  assert(sql.includes("FROM policies WHERE removed_at IS NULL"), "政見數要排除已移除的");
+  // 對外要能讀，不然網站上的圖表拿不到資料
+  assert(sql.includes('CREATE POLICY "Public read" ON pipeline_snapshots'), "快照要公開可讀");
+});
