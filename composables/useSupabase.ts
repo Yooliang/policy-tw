@@ -248,7 +248,12 @@ async function fetchAllInner() {
     policies.value = (policiesData || []).map(mapPolicy)
     discussions.value = (discussionsData || []).map(mapDiscussion)
 
-    // 候選人不在這裡載入，改由 ElectionPage 呼叫 loadPoliticiansByElection()
+    // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
+    // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
+    // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
+    // 目前有政見的只有 72 位，跟著政見一起載的成本可以忽略。
+    await loadPoliticiansWithPolicies()
+
     loaded.value = true
     loading.value = false
 
@@ -276,6 +281,40 @@ function getActiveElection(): Election {
   return active[0] || elections.value[0]
 }
 
+/** 政見卡片與縣市篩選需要的人物＝有政見的那些人。切選舉時這批不能被清掉。 */
+function politicianIdsWithPolicies(): Set<string> {
+  return new Set(policies.value.map(p => p.politicianId).filter((id): id is string => !!id))
+}
+
+/**
+ * 把「有政見的人物」載進全域 state。fetchAllInner 在政見載完後呼叫。
+ * 失敗只記 log 不丟出：少了這批頁面會退化成卡片出不來，但其他資料還是該顯示。
+ */
+async function loadPoliticiansWithPolicies(): Promise<void> {
+  const ids = [...politicianIdsWithPolicies()]
+  if (ids.length === 0) return
+  try {
+    const existing = new Set(politicians.value.map(p => p.id))
+    const missing = ids.filter(id => !existing.has(id))
+    if (missing.length === 0) return
+    // 分批：PostgREST 的 in.() 走查詢字串，一次塞太多 uuid 會超過網址長度上限
+    const CHUNK = 100
+    const loaded: Politician[] = []
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const { data, error } = await supabase
+        .from('politicians_with_elections')
+        .select('*')
+        .in('id', missing.slice(i, i + CHUNK))
+      if (error) throw error
+      loaded.push(...(data || []).map(mapPolitician))
+    }
+    const seen = new Set(politicians.value.map(p => p.id))
+    politicians.value = [...politicians.value, ...loaded.filter(p => !seen.has(p.id))]
+  } catch (err) {
+    console.error('[loadPoliticiansWithPolicies] 載入有政見的人物失敗，政見卡片會出不來:', err)
+  }
+}
+
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
 
@@ -284,9 +323,12 @@ async function loadPoliticiansByElection(
   electionId: number,
   region: string = 'All'
 ): Promise<Politician[]> {
-  // 切換不同選舉時，清空舊資料避免無限膨脹
+  // 切換不同選舉時，清掉上一個選舉載進來的候選人避免無限膨脹——
+  // 但「有政見的人物」要留著：全清會把 fetchAll 載進來的那批一起清掉，
+  // 使用者逛完兩個選舉頁再回政見追蹤頁，卡片就又全部消失了。
   if (currentElectionId.value !== null && currentElectionId.value !== electionId) {
-    politicians.value = []
+    const keep = politicianIdsWithPolicies()
+    politicians.value = politicians.value.filter(p => keep.has(p.id))
     loadedRegions.value.clear()
     loadedElections.value.clear()
   }
