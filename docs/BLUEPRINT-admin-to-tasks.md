@@ -129,6 +129,20 @@
 
 ---
 
+## 盤點時順手關掉的漏洞（已修）
+
+不是藍圖題材，是當場就該修的。記在這裡是為了留下經過。
+
+**`add-policy` 可以不帶任何授權就寫進 `policies`。** 它的 `verify_jwt` 是關的、程式碼裡也沒有金鑰檢查，而它內部用 `service_role` 建 client。也就是說網路上任何人都能 POST 一筆政見進正式表，**完全繞過同儕驗證管線**——那套機制存在的理由就是防止這件事。已補上 `AI_IMPORT_API_KEY` 守衛（沿用 `apply`／`ai-action` 同一把），實測無金鑰回 401。
+
+**`ai-scheduler` 同樣沒有守衛，而且它會寫入。** 盤點時用空 body 探測它是否需要授權，它直接執行了排程並建立 22 筆任務列。已補守衛，並用 `supabase/migrations/20260912000017_cleanup_probe_rows.sql` 清掉那 22 筆（`ai_prompts` 從 368 筆回到 346 筆）。
+
+**`apply-verified` 也沒有守衛，但刻意保留。** `docs/CONTRIBUTIONS-ADMIN.md:25-33` 的 pg_cron 每 10 分鐘不帶金鑰打它一次，加守衛會弄壞排程。風險可接受：它只落庫「已經通過同儕共識」的貢獻，提早觸發不會改變任何結果，最壞情況是浪費運算。要收的話得連 cron 一起改，那是另一件事。
+
+**`add-politician` 沒有程式碼層的授權檢查**，只靠平台的 `verify_jwt`。也就是任何登入者（任何 Google 帳號）都能寫 `politicians` 與 `politician_elections`。對照 `batch-import-candidates` 有完整的 `getUser` ＋ `is_admin` 檢查（`:19-26,76-91`）。這支還沒修，因為 `pages/AdminScraper.vue` 正在用它，補檢查要連那頁一起處理——列進上面的順序第 3 步。
+
+---
+
 ## 順手該做的
 
 盤點時發現的，跟拆解方向一致但可以獨立做：

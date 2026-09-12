@@ -24,6 +24,7 @@ interface PolicyInput {
 }
 
 interface RequestBody {
+  api_key?: string;
   policy?: PolicyInput;
   policies?: PolicyInput[];
 }
@@ -35,11 +36,25 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // 這支端點用 service_role 直接寫正式資料，繞過整個同儕驗證管線，
+    // 所以必須要金鑰。原本沒有任何守衛：verify_jwt 是關的、程式碼也沒有檢查，
+    // 等於網路上任何人都能寫。守衛沿用 apply／ai-action 的同一把 AI_IMPORT_API_KEY。
+    const expectedApiKey = Deno.env.get("AI_IMPORT_API_KEY");
+    if (!expectedApiKey) {
+      return new Response(JSON.stringify({ error: "AI_IMPORT_API_KEY is not configured" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const body: RequestBody = await req.json();
+    if (body?.api_key !== expectedApiKey) {
+      return new Response(JSON.stringify({ error: "Invalid api_key" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Support both single policy and batch
     const policyInputs = body.policies || (body.policy ? [body.policy] : []);
