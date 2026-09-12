@@ -30,6 +30,8 @@ const SUGGESTED_TYPE: Record<string, string> = {
   progress_stale: "policy_progress",
   candidacy_source_missing: "candidacy",
   adjudicate: "adjudication",
+  // 掃 RSS 找到的多半是新政見；既有政見的新進度就改用 policy_progress，任務敘述有寫
+  news_sweep: "policy",
 };
 const CANDIDATE_POOL = 30;
 const RETRY_AFTER_MIN = 30;

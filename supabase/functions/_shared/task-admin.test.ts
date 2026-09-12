@@ -79,3 +79,29 @@ Deno.test("request-task 規則：已有 open 任務 → already_queued；對應�
   assert(text.title.includes("長者健保全免"));
   assert(text.description.includes("policy_progress"));
 });
+
+Deno.test("news_sweep 任務：RSS 網址要提到 item.source_url，敘述要講死來源網址規則", () => {
+  const described = describeManualTask({
+    title: "掃 中央社 政治 找新政見",
+    description: "打開 https://feeds.feedburner.com/rsscna/politics（RSS，最新 20～40 筆），"
+      + "挑出提到 2026 候選人「具體政見」或既有政見「新進度」的報導。"
+      + "source_urls 一律放新聞原文網址（RSS 裡 <link> 的值，不是這個 RSS 網址、不是搜尋結果、不是轉貼）。"
+      + "看完沒有可提交的就用 no_change 回報。",
+    task_type: "news_sweep",
+    target: { feed_url: "https://feeds.feedburner.com/rsscna/politics", label: "中央社 政治" },
+  });
+  // 代理要能從 item.source_url 直接拿到 RSS，不必從中文敘述裡用正則撈網址
+  assertEquals(described.source_url, "https://feeds.feedburner.com/rsscna/politics");
+  assert(described.what_we_need.includes("新聞原文網址"), "要講明附的是原文網址不是 RSS 自己");
+  assert(described.what_we_need.includes("no_change"), "要給查完沒東西的出口，否則任務不會關、來源從此不再被掃");
+});
+
+Deno.test("news_sweep 是合法的 task_type（task_suggestion 才提議得動）", () => {
+  const v = validateContributionRequest({
+    agent_name: "someone",
+    contribution_type: "task_suggestion",
+    payload: { title: "加掃公視新聞 RSS", description: "公視的政治新聞沒有被掃到，建議加一個來源。", task_type: "news_sweep" },
+    source_urls: ["https://about.pts.org.tw/"],
+  });
+  assert(v.ok, `news_sweep 應該是合法 task_type，卻被擋：${JSON.stringify(v.ok ? [] : v.errors)}`);
+});

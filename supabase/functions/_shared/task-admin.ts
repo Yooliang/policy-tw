@@ -99,6 +99,11 @@ export function describeManualTask(t: ManualTaskRowLike): { what_we_need: string
   if (t.task_type === "audit" && sourceUrl) {
     return { what_we_need: `${AUDIT_WHAT_WE_NEED}。文件：${sourceUrl}${t.description ? `。${t.description}` : ""}`, source_url: sourceUrl };
   }
+  // 掃 RSS：把來源網址提到 item.source_url，代理不用從敘述裡撈網址
+  if (t.task_type === "news_sweep") {
+    const feed = typeof target.feed_url === "string" ? target.feed_url : null;
+    return { what_we_need: t.description ?? t.title, source_url: feed };
+  }
   if (t.task_type === "question") {
     return { what_we_need: `${QUESTION_WHAT_WE_NEED}。提問：「${t.description ?? t.title}」`, source_url: sourceUrl };
   }
