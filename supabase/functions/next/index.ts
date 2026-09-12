@@ -48,6 +48,9 @@ Deno.serve(async (req) => {
     const agentName = url.searchParams.get("agent_name") ?? "";
     const agentTool = url.searchParams.get("agent_tool") ?? null;
     const region = url.searchParams.get("region")?.replace(/臺/g, "台") || null;
+    // 拿到不該由你處理的任務時，帶 skip=<task_id> 再打一次：釋放認領期並改派別的。
+    // 沒有這個出口的話，30 分鐘的軟認領會讓主流程一直卡在同一筆（外部代理實測踩到）。
+    const skipTaskId = url.searchParams.get("skip")?.trim() || null;
     if (!isValidAgentName(agentName)) {
       return json({ success: false, error: "agent_name 必填：使用者代號，2～64 字，字母數字與 ._-（模型名放 agent_tool）" }, 400);
     }
@@ -65,7 +68,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, myVotedOnRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -76,14 +79,20 @@ Deno.serve(async (req) => {
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
       // 這個代理自己交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派給他）
       supabase.from("contributions").select("task_id").eq("agent_name", agentName).in("status", ["pending", "verified"]).not("task_id", "is", null).limit(500),
+      // 這個代理投過票的貢獻（同代號或同來源 IP）。裁決要排掉這些：
+      // 對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
+      supabase.from("contribution_votes").select("contribution_id")
+        .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`).limit(2000),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, myVotedOnRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
     const pendingAdjudicated = new Set<string>(((adjRes.data ?? []) as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     const mySubmittedTaskIds = new Set<string>(((mySubmittedRes.data ?? []) as any[]).map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
+    // deno-lint-ignore no-explicit-any
+    const myVotedOriginalIds = new Set<string>(((myVotedOnRes.data ?? []) as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
 
     type PendingRow = {
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
@@ -102,7 +111,7 @@ Deno.serve(async (req) => {
     if (adjOriginalIds.length > 0) {
       const { data: originals, error: oErr } = await supabase.from("contributions").select("id, agent_name, contributor_ip_hash").in("id", adjOriginalIds);
       if (oErr) throw new Error(`originals lookup: ${oErr.message}`);
-      candidates = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me);
+      candidates = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me, myVotedOriginalIds);
     }
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
@@ -175,7 +184,14 @@ Deno.serve(async (req) => {
     await supabase.rpc("contribution_task_leases_purge");
     const { data: leaseRows, error: leaseError } = await supabase.from("contribution_task_leases").select("task_id, target_key, agent_name, leased_until").gt("leased_until", new Date().toISOString());
     if (leaseError) throw new Error(`leases read: ${leaseError.message}`);
-    const leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; agent_name: string; leased_until: string }>;
+    let leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; agent_name: string; leased_until: string }>;
+    if (skipTaskId) {
+      // 只能釋放自己認領的，不能幫別人放掉
+      const { error: relErr } = await supabase.from("contribution_task_leases")
+        .delete().eq("task_id", skipTaskId).eq("agent_name", agentName);
+      if (relErr) throw new Error(`lease release: ${relErr.message}`);
+      leases = leases.filter((l) => l.task_id !== skipTaskId);
+    }
     const leasedUntil = new Date(Date.now() + LEASE_MINUTES * 60 * 1000).toISOString();
     const lease = async (taskId: string, target: unknown) => {
       const { error } = await supabase.from("contribution_task_leases").upsert(
@@ -187,7 +203,10 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterOwnSubmittedTasks(filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated), leases, agentName), mySubmittedTaskIds);
+    const freeManual = filterOwnSubmittedTasks(
+      filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
+      mySubmittedTaskIds,
+    ).filter((t) => t.task_id !== skipTaskId);
     if (freeManual.length > 0) {
       const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
@@ -208,7 +227,10 @@ Deno.serve(async (req) => {
     const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
-    const freeAuto = filterOwnSubmittedTasks(filterLeasedTasks((autoRes.data ?? []) as AutoTask[], leases, agentName), mySubmittedTaskIds);
+    const freeAuto = filterOwnSubmittedTasks(
+      filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
+      mySubmittedTaskIds,
+    ).filter((t) => t.task_id !== skipTaskId);
     const t = freeAuto[0];
     if (!t) {
       const all = (autoRes.data ?? []) as AutoTask[];

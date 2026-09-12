@@ -97,13 +97,31 @@ export function filterLeasedTasks<T extends TaskLike>(tasks: readonly T[], lease
 }
 
 /** 裁決任務不派給：原貢獻的提交者；已有未定案裁決（pending／verified 的 adjudication）的那筆（等它的票就好） */
-export function filterAdjudicateTasks<T extends TaskLike & { task_type?: string }>(tasks: readonly T[], agentName: string, pendingAdjudicatedIds: ReadonlySet<string>): T[] {
+/**
+ * 排掉不該給這個代理的裁決任務。
+ *
+ * 三種都要排：
+ *   1. 原貢獻是他自己交的
+ *   2. 他已經對原貢獻投過票——裁決是要重新判斷這件爭議，投過票的人再來裁決，
+ *      等於自己先投反對票再裁決自己的判斷，那不是第三方裁決
+ *   3. 這筆爭議已經有人提交裁決在等票了
+ *
+ * 第 2 點原本漏了，外部代理實測踩到：投完 disagree 讓貢獻轉成爭議之後，
+ * /next 就一直把那筆裁決派回給他，而且沒有 skip 可以跳過，主流程整個卡住。
+ */
+export function filterAdjudicateTasks<T extends TaskLike & { task_type?: string }>(
+  tasks: readonly T[],
+  agentName: string,
+  pendingAdjudicatedIds: ReadonlySet<string>,
+  votedOriginalIds: ReadonlySet<string> = new Set(),
+): T[] {
   const mine = agentName.toLowerCase();
   return tasks.filter((t) => {
     if (t.task_type !== "adjudicate") return true;
     const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
     if (typeof target.contributor === "string" && target.contributor.toLowerCase() === mine) return false;
     if (typeof target.contribution_id === "string" && pendingAdjudicatedIds.has(target.contribution_id)) return false;
+    if (typeof target.contribution_id === "string" && votedOriginalIds.has(target.contribution_id)) return false;
     return true;
   });
 }
@@ -148,13 +166,24 @@ export function sortQuestionTasksBySupport<T extends TaskLike & { task_type?: st
 export interface OriginalIdentity { id: string; agent_name: string; contributor_ip_hash: string }
 
 /** 裁決（adjudication）的驗證不派給原貢獻的提交者（同名或同 IP） */
-export function excludeOwnAdjudications<T extends VerifyCandidate>(candidates: readonly T[], originals: readonly OriginalIdentity[], me: Requester): T[] {
+/**
+ * 別把「對某筆爭議的裁決」派給跟那筆原貢獻有關係的人去驗證。
+ * 有關係＝原貢獻是他交的，或他對原貢獻投過票（後者原本漏了，理由同
+ * filterAdjudicateTasks 的第 2 點）。
+ */
+export function excludeOwnAdjudications<T extends VerifyCandidate>(
+  candidates: readonly T[],
+  originals: readonly OriginalIdentity[],
+  me: Requester,
+  votedOriginalIds: ReadonlySet<string> = new Set(),
+): T[] {
   const mine = me.agent_name.toLowerCase();
   const own = new Set(originals.filter((o) => o.agent_name.toLowerCase() === mine || o.contributor_ip_hash === me.ip_hash).map((o) => o.id));
   return candidates.filter((c) => {
     if (c.contribution_type !== "adjudication") return true;
     const target = (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null);
-    return !(typeof target === "string" && own.has(target));
+    if (typeof target !== "string") return true;
+    return !own.has(target) && !votedOriginalIds.has(target);
   });
 }
 

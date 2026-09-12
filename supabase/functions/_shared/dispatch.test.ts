@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -115,4 +115,43 @@ Deno.test("不重複派自己交過的任務：認領期只擋別人，但已提
   const leases = [{ task_id: "auto:profile_gap:aaa", target_key: "politician:p1", agent_name: "alice", leased_until: future }];
   assertEquals(filterLeasedTasks(tasks, leases, "alice").length, 2);
   assertEquals(filterLeasedTasks(tasks, leases, "bob").map((t) => t.task_id), ["auto:policy_source_missing:bbb"]);
+});
+
+Deno.test("裁決不派給對原貢獻投過票的人：投完反對票讓它轉成爭議的人，不該再去裁決同一件", () => {
+  const tasks = [
+    { task_id: "adj-1", task_type: "adjudicate", target: { contribution_id: "c-1", contributor: "alice" } },
+    { task_id: "adj-2", task_type: "adjudicate", target: { contribution_id: "c-2", contributor: "alice" } },
+    { task_id: "gap-1", task_type: "profile_gap", target: { politician_id: "p-1" } },
+  ];
+  const none = new Set<string>();
+
+  // bob 對 c-1 投過票 → adj-1 不該派給他；adj-2 可以
+  const forBob = filterAdjudicateTasks(tasks, "bob", none, new Set(["c-1"]));
+  assertEquals(forBob.map((t) => t.task_id), ["adj-2", "gap-1"]);
+
+  // alice 是原提交者 → 兩筆裁決都不該派給她
+  assertEquals(filterAdjudicateTasks(tasks, "alice", none, none).map((t) => t.task_id), ["gap-1"]);
+
+  // 沒投過票也不是提交者 → 兩筆都派得
+  assertEquals(filterAdjudicateTasks(tasks, "carol", none, none).length, 3);
+
+  // 已經有人提交裁決在等票 → 不再派同一筆
+  assertEquals(filterAdjudicateTasks(tasks, "carol", new Set(["c-2"]), none).map((t) => t.task_id), ["adj-1", "gap-1"]);
+
+  // 非裁決任務不受投票紀錄影響
+  assertEquals(filterAdjudicateTasks(tasks, "bob", none, new Set(["c-1", "c-2"])).map((t) => t.task_id), ["gap-1"]);
+});
+
+Deno.test("裁決的驗證也要排掉對原貢獻投過票的人", () => {
+  const candidates = [
+    { id: "v-1", contribution_type: "adjudication", payload: { contribution_id: "c-1" }, agent_name: "dave", contributor_ip_hash: "ip-d", source_urls: [] },
+    { id: "v-2", contribution_type: "policy", payload: {}, agent_name: "dave", contributor_ip_hash: "ip-d", source_urls: [] },
+  ];
+  const originals = [{ id: "c-1", agent_name: "alice", contributor_ip_hash: "ip-a" }];
+  const me = { agent_name: "bob", ip_hash: "ip-b", voted_ids: new Set<string>() };
+
+  // bob 沒碰過 c-1 → 兩筆都可驗
+  assertEquals(excludeOwnAdjudications(candidates as never, originals, me).length, 2);
+  // bob 對 c-1 投過票 → 那筆裁決不給他驗
+  assertEquals(excludeOwnAdjudications(candidates as never, originals, me, new Set(["c-1"])).map((c) => c.id), ["v-2"]);
 });
