@@ -387,3 +387,34 @@ export interface RawDiscussion {
 export interface RawElectionTypeRow {
   election_type: string;
 }
+
+// 資料採集管線的健康度快照（每 4 小時一筆），用來畫「機制有沒有在動」的走勢圖
+export interface RawPipelineSnapshot {
+  taken_at: string;
+  tasks_open: number;
+  tasks_by_type: Record<string, number> | null; // 鍵會增減，不假設固定欄位
+  pending: number;
+  applied: number;
+  disputed: number;
+  rejected: number;
+  votes_total: number;
+  voters: number;
+  policies: number;
+  politicians: number;
+  questions: number;
+}
+
+export interface PipelineSnapshot {
+  takenAt: string;
+  tasksOpen: number;
+  tasksByType: Record<string, number>;
+  pending: number;
+  applied: number;
+  disputed: number;
+  rejected: number;
+  votesTotal: number;
+  voters: number;
+  policies: number;
+  politicians: number;
+  questions: number;
+}

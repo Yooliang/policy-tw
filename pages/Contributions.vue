@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import MechanismNav from '../components/MechanismNav.vue'
+import PipelineChart from '../components/PipelineChart.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
 import { fetchHistory, type HistoryEntry } from '../lib/history'
@@ -286,6 +287,8 @@ usePageHead({
           </div>
         </component>
       </section>
+
+      <PipelineChart />
 
       <!-- 分頁：貢獻／任務 -->
       <div class="flex flex-wrap gap-2" data-testid="board-tabs">
