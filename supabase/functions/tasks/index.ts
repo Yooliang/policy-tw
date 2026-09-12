@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 10, 1), 50);
     const seed = url.searchParams.get("seed") || crypto.randomUUID();
 
-    const [autoRes, manualRes, countRes] = await Promise.all([
+    const [autoRes, manualRes, countRes, manualCountRes] = await Promise.all([
       supabase.rpc("contribution_auto_tasks", { p_type: type, p_region: region, p_limit: limit, p_seed: seed }),
       (() => {
         let q = supabase.from("contribution_tasks")
@@ -53,9 +53,19 @@ Deno.serve(async (req) => {
         return q;
       })(),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
+      // manual_open 要是真正的總數。原本用回傳陣列的長度，會被 limit 截斷：
+      // /tasks?limit=1 回 manual_open:1，讀到的代理會以為只剩一筆手動任務。
+      // 同一個 totals 物件裡其他數字都是 RPC 算出來的真實總數，混一個當頁筆數進去會騙人。
+      (() => {
+        let q = supabase.from("contribution_tasks").select("id", { count: "exact", head: true }).eq("status", "open");
+        if (type) q = q.eq("task_type", type);
+        if (region) q = q.eq("region", region);
+        return q;
+      })(),
     ]);
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     if (manualRes.error) throw new Error(`manual tasks: ${manualRes.error.message}`);
+    if (manualCountRes.error) throw new Error(`manual task count: ${manualCountRes.error.message}`);
     if (countRes.error) throw new Error(`task counts: ${countRes.error.message}`);
 
     // deno-lint-ignore no-explicit-any
@@ -96,7 +106,7 @@ Deno.serve(async (req) => {
       success: true,
       count: tasks.length,
       seed,
-      totals: { ...totals, manual_open: manual.length },
+      totals: { ...totals, manual_open: manualCountRes.count ?? manual.length },
       tasks,
       how_to: "挑一筆 → 到優先來源（官方優先）查證 → POST /contribute，payload 帶 task_id；查不到就放著，不要猜。同一任務可能多人做，重複會在驗證階段合併。",
       docs: "https://policy-tw.web.app/skill.md",
