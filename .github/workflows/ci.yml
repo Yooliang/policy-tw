@@ -1,0 +1,59 @@
+# 這個專案在 2026-09-12 之前沒有任何 CI，所有檢查都靠人在本機跑。
+# 當天實際出過的事：一個開發代理回報「型別檢查全綠」，主線接手重跑是紅的。
+# 所以這裡守的是「有人說他跑過了」以外的證據。
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: 型別檢查與建置
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # vue-tsc 單獨跑一次：建置也會跑它，但分開跑才看得出紅燈是型別還是打包
+      - name: vue-tsc
+        run: pnpm exec vue-tsc --noEmit
+      # 預渲染一萬六千頁很慢，只在 main 上跑；分支上先擋住型別錯誤就夠了
+      - name: 建置（含預渲染）
+        if: github.ref == 'refs/heads/main'
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: pnpm build
+
+  edge-tests:
+    name: Edge Function 與協議守門測試
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # 這批測試包含 SQL 與 TypeScript 門檻矩陣的一致性、以及對外協議 skill.md
+      # 的表格與版本號是否跟著改。門檻只改一邊就會在這裡紅。
+      - name: deno test（supabase/functions/_shared）
+        working-directory: supabase/functions
+        run: deno test --allow-read _shared/
+      - name: deno test（前端純函式）
+        run: deno test --allow-read lib/policy-date.test.ts
+
+      # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
+      # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
+      - name: 掃不該進版控的金鑰
+        run: deno run --allow-read scripts/scan-secrets.ts

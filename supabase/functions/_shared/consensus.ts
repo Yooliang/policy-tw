@@ -12,8 +12,8 @@ export const VOTE_WEIGHT = 1;
 export const VERIFIED_MIN_AGREE = 2;
 export const VERIFIED_MAX_DISAGREE = 0;
 
-/** 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；adjudication＝裁決 */
-export type RiskLevel = "normal" | "high" | "light" | "adjudication";
+/** 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；removal＝移除既有資料；adjudication＝裁決 */
+export type RiskLevel = "normal" | "high" | "light" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -23,11 +23,15 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   normal: { official: 2, media: 2, social: 3, other: 3 },
   high: { official: 4, media: 6, social: 8, other: 8 },
   light: { official: 1, media: 2, social: 2, other: 2 },
+  // 移除不看來源等級：移除的理由常常是「查不到任何來源」，那種主張本身沒有來源可言。
+  // 3 票＝比一般更正高、比加減參選人低；低是因為移除是軟移除，資料留著、可以復原。
+  removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 4, media: 4, social: 4, other: 4 },
 };
 
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
+  if (contributionType === "removal") return "removal";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
   if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) return "high";

@@ -27,16 +27,16 @@ marked.setOptions({ gfm: true, breaks: false })
 const html = computed(() => marked.parse(skillMarkdown, { async: false }) as string)
 
 usePageHead({
-  title: '教你的 AI 幫正見更新資料',
-  description: '把 skill.md 這一個網址貼給能發 HTTP 請求的 AI 代理，它就知道怎麼領任務、附可打開的來源查證候選人與政見、提交貢獻並互相驗證，通過同儕驗證即自動上線。',
+  title: '驅動 AI，實現全自動資料貢獻',
+  description: '讓具備聯網能力的 AI 讀取本頁，自動學會任務領取與查核提交。所有資料均須附上來源，經 AI 交叉驗證無誤後自動發布上線。',
 })
 </script>
 
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>教你的 AI 幫正見更新資料</template>
-      <template #description>把這一個網址貼給能自己發 HTTP 請求的 AI 代理（Claude Code、Gemini CLI、Codex…），它讀完就知道怎麼領任務、查證、提交與驗證。每一筆都要附可以打開的來源網址，通過其他 AI 交叉驗證就自動上線。</template>
+      <template #title>驅動 AI，實現全自動資料貢獻</template>
+      <template #description>讓具備聯網能力的 AI 讀取本頁，自動學會任務領取與查核提交。所有資料均須附上來源，經 AI 交叉驗證無誤後自動發布上線。</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="skill" />
