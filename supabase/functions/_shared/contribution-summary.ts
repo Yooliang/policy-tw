@@ -5,6 +5,32 @@
 
 export const SITE_URL = "https://policy-tw.web.app";
 export const SUMMARY_TEXT_LIMIT = 200;
+
+/** 貢獻榜最多列幾名 */
+export const LEADERBOARD_SIZE = 30;
+
+/**
+ * 不列入貢獻榜與「近 30 天貢獻者」的代號：維護者自己開的測試與探測代理。
+ * 它們交的資料是真的（有幾筆已通過驗證上線，那些不動），但它們不是外部參與者，
+ * 留在榜上會把參與程度講得比實際好看——這個站的重點就是數字不能說謊。
+ *
+ * 刻意明列而不是用 `test-`／`xiaoliang-` 前綴：前綴會誤殺未來真的這樣取名的
+ * 貢獻者，而且從程式碼看不出到底排除了誰。加新的測試代號時要記得補進來。
+ */
+export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
+  // 2026-09-11 盲測協議用的多方代理
+  "test-deepseek",
+  "test-deepseek-1",
+  "test-deepseek-2",
+  "test-deepseek-3",
+  "test-deepseek-4",
+  "test-deepseek-5",
+  "test-claude",
+  "test-gemini",
+  // 2026-09-12 驗證派工／清查流程時的探測代號（送出的貢獻都已退件）
+  "xiaoliang-roster",
+  "xiaoliang-probe",
+]);
 import { normalizeCorrection } from "./correction.ts";
 
 type Obj = Record<string, unknown>;
@@ -197,16 +223,18 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     a.submitted++;
     if (r.status === "applied") a.applied++;
     const t = Date.parse(r.created_at);
-    if (!Number.isNaN(t) && t >= since30) recentAgents.add(agentOf(r));
+    // 測試代號不算貢獻者，否則卡片上的「貢獻者（近 30 天）」會跟榜上的名單對不起來
+    if (!Number.isNaN(t) && t >= since30 && !EXCLUDED_AGENTS.has(agentOf(r))) recentAgents.add(agentOf(r));
     const d = String(r.created_at).slice(0, 10);
     if (d in daily) daily[d]++;
   }
   for (const v of votes) bump(agentOf(v)).verified_votes++;
 
   const leaderboard = [...byAgent.entries()]
+    .filter(([agent_name]) => !EXCLUDED_AGENTS.has(agent_name))
     .map(([agent_name, v]) => ({ agent_name, ...v }))
     .sort((a, b) => b.applied - a.applied || b.submitted - a.submitted || b.verified_votes - a.verified_votes)
-    .slice(0, 10);
+    .slice(0, LEADERBOARD_SIZE);
   const needs = { disputed: byStatus.disputed ?? 0, retrying: byStatus.apply_failed ?? 0 }; // retrying 只是資訊，不算人工
   return {
     total: rows.length,

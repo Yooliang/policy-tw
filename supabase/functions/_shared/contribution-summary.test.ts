@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildFeedSummary, safePayload, summarizeContribution } from "./contribution-summary.ts";
+import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, safePayload, summarizeContribution } from "./contribution-summary.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
@@ -55,6 +55,41 @@ Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d �
   assertEquals([bob.submitted, bob.applied, bob.verified_votes], [2, 0, 2]);
   assertEquals(s.leaderboard[0].agent_name, "alice", "上線數優先");
   assert(s.leaderboard.some((r) => r.agent_name === "erin" && r.submitted === 0 && r.verified_votes === 1), "只驗證沒提交的人也上榜");
+});
+
+Deno.test("貢獻榜：最多 30 名，測試代號不上榜也不算貢獻者", () => {
+  // 這支測試的第一版是假綠，兩個斷言都沒有鑑別力，記在這裡免得再犯：
+  //   1. 名額寫成 assertEquals(leaderboard.length, LEADERBOARD_SIZE)——拿產生結果的
+  //      那個常數當期望值，改常數兩邊一起動，等於恆真。期望值要寫死 30。
+  //   2. 測試代號只給一筆上線，跟真人同分；排序穩定所以它們本來就排在 30 名之後，
+  //      把過濾整行刪掉測試照樣綠。要讓它們分數高到「沒過濾就一定在榜上」。
+  const now = Date.parse("2026-09-12T08:00:00Z");
+  const at = new Date(now - 3600_000).toISOString();
+  const rows: Array<{ status: string; agent_name: string; created_at: string }> = [];
+  // 40 個真人，各一筆已上線 → 榜上只能列 30 個
+  for (let i = 0; i < 40; i++) {
+    rows.push({ status: "applied", agent_name: `human-${String(i).padStart(2, "0")}`, created_at: at });
+  }
+  // 每個測試代號五筆已上線：分數高於所有真人，沒有過濾就會霸佔榜首
+  const excluded = [...EXCLUDED_AGENTS];
+  for (const name of excluded) {
+    for (let i = 0; i < 5; i++) rows.push({ status: "applied", agent_name: name, created_at: at });
+  }
+
+  const s = buildFeedSummary(rows, [], now);
+  assertEquals(LEADERBOARD_SIZE, 30, "貢獻榜名額是 30；要改請連同這個期望值一起改");
+  assertEquals(s.leaderboard.length, 30, "貢獻榜要列滿 30 名");
+  assertEquals(
+    s.leaderboard.filter((r) => EXCLUDED_AGENTS.has(r.agent_name)).length,
+    0,
+    "測試代號分數最高卻不該出現在貢獻榜",
+  );
+  assertEquals(s.leaderboard[0].applied, 1, "榜首應該是真人（1 筆上線），不是五筆上線的測試代號");
+  assertEquals(s.contributors_30d, 40, "貢獻者只算真人，不算那些測試代號");
+  // 資料本身不動：測試代號交的東西還是算在總數與狀態統計裡
+  const totalRows = 40 + excluded.length * 5;
+  assertEquals(s.total, totalRows, "排除只影響榜與貢獻者數，不影響貢獻總數");
+  assertEquals(s.by_status.applied, totalRows);
 });
 
 Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別名）」的預設值", () => {
