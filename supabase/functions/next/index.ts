@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
@@ -30,6 +30,8 @@ const SUGGESTED_TYPE: Record<string, string> = {
   progress_stale: "policy_progress",
   candidacy_source_missing: "candidacy",
   adjudicate: "adjudication",
+  // 掃 RSS 找到的多半是新政見；既有政見的新進度就改用 policy_progress，任務敘述有寫
+  news_sweep: "policy",
 };
 const CANDIDATE_POOL = 30;
 const RETRY_AFTER_MIN = 30;
@@ -68,7 +70,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, myVotedOnRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -79,18 +81,25 @@ Deno.serve(async (req) => {
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
       // 這個代理自己交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派給他）
       supabase.from("contributions").select("task_id").eq("agent_name", agentName).in("status", ["pending", "verified"]).not("task_id", "is", null).limit(500),
+      // 任何人回報過「查了沒東西」且還在等票的任務：期間不要再派給別人重查
+      supabase.from("contributions").select("payload")
+        .eq("contribution_type", "no_change").in("status", ["pending", "verified"]).limit(500),
       // 這個代理投過票的貢獻（同代號或同來源 IP）。裁決要排掉這些：
       // 對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       supabase.from("contribution_votes").select("contribution_id")
         .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`).limit(2000),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, myVotedOnRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
     const pendingAdjudicated = new Set<string>(((adjRes.data ?? []) as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     const mySubmittedTaskIds = new Set<string>(((mySubmittedRes.data ?? []) as any[]).map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
+    // deno-lint-ignore no-explicit-any
+    const deadEndTaskIds = new Set<string>(((deadEndRes.data ?? []) as any[])
+      .map((r) => (r.payload && typeof r.payload === "object" ? r.payload.task_id : null))
+      .filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     const myVotedOriginalIds = new Set<string>(((myVotedOnRes.data ?? []) as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
 
@@ -203,10 +212,10 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterOwnSubmittedTasks(
+    const freeManual = filterReportedDeadEnds(filterOwnSubmittedTasks(
       filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
-    ).filter((t) => t.task_id !== skipTaskId);
+    ), deadEndTaskIds).filter((t) => t.task_id !== skipTaskId);
     if (freeManual.length > 0) {
       const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
@@ -227,10 +236,10 @@ Deno.serve(async (req) => {
     const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
-    const freeAuto = filterOwnSubmittedTasks(
+    const freeAuto = filterReportedDeadEnds(filterOwnSubmittedTasks(
       filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
-    ).filter((t) => t.task_id !== skipTaskId);
+    ), deadEndTaskIds).filter((t) => t.task_id !== skipTaskId);
     const t = freeAuto[0];
     if (!t) {
       const all = (autoRes.data ?? []) as AutoTask[];

@@ -2,6 +2,9 @@
 <html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
+    <!-- AdSense 網站所有權驗證。只是宣告發布商 ID，不會載入任何廣告腳本。
+         這個檔的 <head> 會被預渲染的每一頁繼承，app.html／404.html 也是從它複製出去的。 -->
+    <meta name="google-adsense-account" content="ca-pub-6687848895101003" />
     <meta name="referrer" content="no-referrer-when-downgrade" />
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-ED8EZ1503S"></script>
@@ -16,6 +19,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>正見 | 智能政見追蹤平台</title>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- AdSense 載入器。放這裡而不是元件裡：Vue 的 template 不會執行 inline <script>，
+         而且預渲染的每一頁都繼承這個 <head>，一處就全站到位。版位本身在 AdSlot.vue。 -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6687848895101003" crossorigin="anonymous"></script>
   </head>
   <body class="bg-slate-50 text-slate-800 antialiased">
     <div id="app"></div>

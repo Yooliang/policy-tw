@@ -10,7 +10,7 @@ import './styles/main.css'
  * 建置時預渲染（vite-ssg）：
  * - 建置端：每條路由渲染前，把「這頁需要的資料切片」套進全域狀態，渲染後放進 initialState。
  * - 客戶端：hydrate 前先套回同一份切片，第一次渲染與 HTML 完全一致；之後 useSupabase 照常抓最新資料。
- * 只能在瀏覽器跑的東西（ApexCharts、Monetag、IndexedDB、localStorage）都留在客戶端分支或 onMounted。
+ * 只能在瀏覽器跑的東西（ApexCharts、IndexedDB、localStorage）都留在客戶端分支或 onMounted。
  */
 export const createApp = ViteSSG(
   App,

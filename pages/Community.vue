@@ -147,7 +147,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero background-image="/images/heroes/community.png">
       <template #title>公民提問</template>
-      <template #description>提出你關心的問題，AI 代理會去查有出處的資料來回答——同一題可能有好幾個代理各自作答，答案並排列出，讓你自己比對判斷，而不是由誰說了算。</template>
+      <template #description>提出你關心的問題，AI 代理會去查有出處的資料來回答——同一題可能有好幾個代理各自作答，答案並排列出，讓你自己比對判斷，而不是由誰說了算。看到有人宣布參選、或報導提到新政見，也可以直接把網址貼進來：AI 會去讀那個網址，把查得到的寫進資料庫。</template>
       <template #icon><MessageCircleQuestion :size="400" class="text-blue-500" /></template>
 
       <template #actions>

@@ -14,11 +14,12 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { policyMatchesRegion } from '../lib/policy-region'
 
 const router = useRouter()
-const { policies, politicians, locations, categories } = useSupabase()
+const { policies, politicians, locations, categories, loading } = useSupabase()
 const { globalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
 const selectedCategory = ref('All')
+
 
 // Sync with global state
 watch(globalRegion, (newVal) => {
@@ -61,6 +62,26 @@ const filteredPolicies = computed(() => {
     const isNotCampaign = policy.status !== PolicyStatus.CAMPAIGN
     return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isNotCampaign
   })
+})
+
+// 以下兩個要放在 filteredPolicies 之後：watch 會立即求值一次來源，
+// 擺在前面會讀到還沒初始化的 const（暫時死區），整個 setup 拋 ReferenceError、
+// 畫面全白。vue-tsc 與 SSG 建置都不會紅，只有在瀏覽器裡才看得到。
+// 資料還在路上：沒有這個判斷，使用者會先看到「沒有找到符合條件的政見」再突然跳出資料，
+// 看起來像壞掉。政見是跟著首屏一起載的，所以只在真的還沒有政見時才顯示骨架。
+const stillLoading = computed(() => loading.value && policies.value.length === 0)
+
+// 篩得出來、卻因為找不到所屬政治人物而渲染不了的筆數。
+// 正常應該是 0（fetchAll 會把有政見的人物一起載進來）；不是 0 就要讓使用者知道，
+// 不要安靜地少幾張卡片。
+const unrenderablePolicies = computed(() =>
+  filteredPolicies.value.filter(policy => !politicians.value.find(c => c.id === policy.politicianId))
+)
+// 畫面上只說「有幾筆顯示不出來」；要 debug 的人才需要 id，那進 devtools
+watch(unrenderablePolicies, (list) => {
+  if (list.length > 0) {
+    console.info('[政見追蹤] 找不到所屬政治人物的政見：', list.map(p => ({ policyId: p.id, politicianId: p.politicianId })))
+  }
 })
 
 usePageHead({
@@ -138,7 +159,21 @@ usePageHead({
         <span>您正在查看個人追蹤的檢核點（共 {{ filteredPolicies.length }} 項）</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
+      <div v-if="unrenderablePolicies.length > 0" class="mb-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
+        有 {{ unrenderablePolicies.length }} 筆政見暫時顯示不出來，重新整理通常就會出現。
+      </div>
+
+      <div v-if="stillLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div v-for="n in 6" :key="n" class="bg-white rounded-3xl border border-slate-200 p-6 animate-pulse">
+          <div class="h-4 w-24 bg-slate-200 rounded mb-4"></div>
+          <div class="h-5 w-full bg-slate-200 rounded mb-2"></div>
+          <div class="h-5 w-2/3 bg-slate-200 rounded mb-6"></div>
+          <div class="h-3 w-full bg-slate-100 rounded mb-2"></div>
+          <div class="h-3 w-5/6 bg-slate-100 rounded"></div>
+        </div>
+      </div>
+
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
         <template v-if="filteredPolicies.length > 0">
           <template v-for="policy in filteredPolicies" :key="policy.id">
             <PolicyCard

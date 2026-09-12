@@ -75,6 +75,21 @@ export interface LeaseLike {
  * 資料庫還沒變（貢獻要等票才落庫），缺口任務就會被重新算出來再派一次，
  * 代理只能白跑一輪。伺服器知道誰交過什麼，該由伺服器擋掉。
  */
+/**
+ * 排掉「已經有人回報是死路、正在等票」的任務。
+ *
+ * no_change 的冷卻紀錄只在落庫時才寫，而落庫要等票。在參與人數還少的時候，
+ * 那筆回報可能等很久，期間同一條死路會繼續派給每一個代理，大家輪流白查。
+ *
+ * 所以待審中的 no_change 也要擋——它是一個還沒被確認、但已經有人花時間查過的
+ * 訊號。擋錯的代價很小：那筆 no_change 若被投反對，任務就回到池子裡。
+ * 這跟落庫後的 14 天冷卻是兩層，不是取代關係。
+ */
+export function filterReportedDeadEnds<T extends TaskLike>(tasks: readonly T[], deadEndTaskIds: ReadonlySet<string>): T[] {
+  if (deadEndTaskIds.size === 0) return [...tasks];
+  return tasks.filter((t) => !deadEndTaskIds.has(t.task_id));
+}
+
 export function filterOwnSubmittedTasks<T extends TaskLike>(tasks: readonly T[], submittedTaskIds: ReadonlySet<string>): T[] {
   if (submittedTaskIds.size === 0) return [...tasks];
   return tasks.filter((t) => !submittedTaskIds.has(t.task_id));

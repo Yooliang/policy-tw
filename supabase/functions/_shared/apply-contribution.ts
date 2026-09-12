@@ -385,11 +385,15 @@ async function applyRosterCheck(supabase: SupabaseLike, row: ContributionRow): P
   if (!inserted) throw new Error("roster_checks insert 沒有回傳 id");
 
   await recordInsert(supabase, ctx, "roster_checks", String(inserted.id), inserted);
+  // cec_count 留空代表「試過但找不到官方名單」，那不是清查完成。訊息要講清楚，
+  // 否則回報的人會以為這個縣市結案了；缺口也只會壓一天就重新派（見 migration
+  // 20260912000028 的兩個時鐘）。
   const cec = int(p.cec_count);
-  const detail = cec === null || cec === undefined
-    ? "（查不到官方名單，已記錄這次嘗試）"
-    : `中選會 ${cec} 人、我們 ${int(p.ours_count) ?? "?"} 人、另外補交 ${int(p.submitted) ?? 0} 筆`;
-  return { status: "applied", message: `${region} ${electionId} ${electionType} 名單已清查${detail}` };
+  const done = cec !== null && cec !== undefined;
+  const message = done
+    ? `${region} ${electionId} ${electionType} 名單已清查：中選會 ${cec} 人、我們 ${int(p.ours_count) ?? "?"} 人、另外補交 ${int(p.submitted) ?? 0} 筆`
+    : `已記錄你這次的嘗試：${region} ${electionId} ${electionType} 查不到官方名單，所以還沒算清查完成，這個縣市明天會再派給別人試`;
+  return { status: "applied", message };
 }
 
 /**

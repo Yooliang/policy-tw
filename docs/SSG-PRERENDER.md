@@ -37,7 +37,6 @@
 ## 只能在瀏覽器跑的東西
 
 - `vue3-apexcharts`：`main.ts` 客戶端分支動態 import；模板中的 `<apexchart>` 包 `<ClientOnly>`
-- Monetag（`lib/ads.ts`）：`App.vue` 的 `onMounted` 才呼叫
 - 選舉頁倒數天數：包 `<ClientOnly>`（建置時算的會過期）
 - `useAuth` 在 SSR 不初始化；`useIndexedDB` 沒有 `indexedDB` 時直接走既有 catch
 - 新增頁面若在 `setup` 期碰 `window`／`document`／`localStorage`，建置會直接炸；放進 `onMounted` 或 `<ClientOnly>`

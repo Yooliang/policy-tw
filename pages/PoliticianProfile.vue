@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
@@ -133,19 +133,31 @@ function getCandidateStatusColor(status?: CandidateStatus, electionId?: number):
 const ONE_HOUR = 60 * 60 * 1000
 const politicianLoading = ref(false)
 
-onMounted(async () => {
-  // 如果 politicians 中找不到該候選人，直接從 DB 載入
-  const politicianId = String(route.params.politicianId)
-  if (!politicians.value.find(p => p.id === politicianId)) {
-    politicianLoading.value = true
+/** 這個人不在全域 state 裡就從 DB 補載。/politician/A → /politician/B 也要走這裡。 */
+async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
+  if (!politicianId || politicians.value.find(p => p.id === politicianId)) return
+  politicianLoading.value = true
+  try {
     await loadPoliticianById(politicianId)
+  } finally {
     politicianLoading.value = false
   }
+}
+
+onMounted(async () => {
+  await ensurePoliticianLoaded(String(route.params.politicianId))
 
   const cacheTimestamp = await getCacheTimestamp('politicians_all')
   if (cacheTimestamp && Date.now() - cacheTimestamp > ONE_HOUR) {
     refreshPoliticians()
   }
+})
+
+// 站內從一位政治人物點到另一位，走的是同一個元件實例，onMounted 不會再跑。
+// 沒有這個 watch，只要對方還沒在全域 state 裡，頁面就直接顯示「找不到該政治人物」。
+// （直接開網址不受影響，那是預渲染的頁面。）
+watch(() => route.params.politicianId, (id) => {
+  if (id) ensurePoliticianLoaded(String(id))
 })
 
 

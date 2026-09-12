@@ -3,7 +3,7 @@ export default { name: 'ElectionPage' }
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -73,6 +73,18 @@ async function loadElectionData(id: number, region: string) {
 
 onMounted(() => {
   if (electionId.value) {
+    loadElectionData(electionId.value, selectedRegion.value)
+  }
+})
+
+// 這一頁被 App.vue 的 <KeepAlive> 快取著，切回來時 onMounted 不會再跑；
+// 路由參數沒變 watch 也不會觸發。而 loadPoliticiansByElection 在切到另一個選舉時
+// 會清掉上一個選舉的候選人——於是切去別的選舉再切回來，名單是空的、畫面留白。
+// 醒來時檢查一次：這個選舉的候選人還在就什麼都不做，不在就補載。
+onActivated(() => {
+  if (!electionId.value) return
+  const hasAny = politicians.value.some(p => p.electionIds?.includes(electionId.value))
+  if (!hasAny) {
     loadElectionData(electionId.value, selectedRegion.value)
   }
 })
