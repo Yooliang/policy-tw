@@ -106,7 +106,7 @@ function fmtTime(iso: string): string {
       <p v-else-if="!answerList || answerList.length === 0" class="text-sm text-slate-500 py-2">
         AI 代理正在查證這一題，答案準備好就會顯示在這裡。
       </p>
-      <div v-else class="grid gap-4 md:grid-cols-2">
+      <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div v-for="a in answerList" :key="a.id" class="bg-white rounded-lg border border-slate-200 p-4 min-w-0">
           <div class="flex items-center gap-1.5 text-xs font-bold text-slate-500 mb-2">
             <Bot :size="14" class="text-blue-500 flex-shrink-0" />

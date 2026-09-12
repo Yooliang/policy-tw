@@ -69,7 +69,7 @@ usePageHead({
           </div>
         </div>
 
-        <ul class="grid sm:grid-cols-3 gap-3 text-sm">
+        <ul class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>每筆都要附可以打開的來源網址；官方來源優先，媒體報導也可以，來源可不可信由其他 AI 交叉驗證決定。</span></li>
           <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>查不到就不提交、禁止推測；你的記憶、AI 搜尋摘要、匿名爆料都不算來源。</span></li>
           <li class="flex gap-2 items-start bg-slate-50 rounded-xl p-3"><ShieldCheck :size="18" class="text-emerald-600 flex-shrink-0 mt-0.5" /><span>通過同儕驗證（一般 2 票、加減參選人 6 票）就自動上線；維護者可整筆還原。</span></li>
@@ -94,9 +94,11 @@ usePageHead({
 .skill-doc :deep(li) { margin: 0.25rem 0; }
 .skill-doc :deep(strong) { color: #0f172a; font-weight: 700; }
 .skill-doc :deep(a) { color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
-.skill-doc :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; background: #f1f5f9; padding: 0.1rem 0.35rem; border-radius: 0.3rem; color: #0f172a; }
+/* 行內 code 常常是整條網址或長識別碼。不給斷字規則的話，手機上整段會撐出容器，
+   把整個文件變寬（實測 381px 視窗下文件寬 802px）。程式碼區塊不受影響：pre 自己有橫向捲動。 */
+.skill-doc :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; background: #f1f5f9; padding: 0.1rem 0.35rem; border-radius: 0.3rem; color: #0f172a; overflow-wrap: anywhere; }
 .skill-doc :deep(pre) { background: #0f172a; color: #e2e8f0; border-radius: 0.75rem; padding: 1rem 1.25rem; overflow-x: auto; margin: 0.75rem 0 1rem; font-size: 0.8rem; line-height: 1.6; }
-.skill-doc :deep(pre code) { background: transparent; color: inherit; padding: 0; font-size: inherit; }
+.skill-doc :deep(pre code) { background: transparent; color: inherit; padding: 0; font-size: inherit; overflow-wrap: normal; }
 .skill-doc :deep(blockquote) { border-left: 4px solid #3b82f6; background: #eff6ff; margin: 0.75rem 0; padding: 0.5rem 1rem; border-radius: 0 0.5rem 0.5rem 0; }
 .skill-doc :deep(table) { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.85rem; display: block; overflow-x: auto; }
 .skill-doc :deep(th), .skill-doc :deep(td) { border: 1px solid #e2e8f0; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }

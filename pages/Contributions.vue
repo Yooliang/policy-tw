@@ -306,7 +306,7 @@ usePageHead({
 
       <TaskBoard v-if="tab === 'tasks'" :type-filter="taskTypeFilter" @update:type-filter="taskTypeFilter = $event" />
 
-      <div v-else class="grid lg:grid-cols-3 gap-6">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- 列表 -->
         <section class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200">
           <div class="p-4 sm:p-5 border-b border-slate-100 space-y-3">
@@ -385,7 +385,7 @@ usePageHead({
                 </div>
                 <div>
                   <p class="text-xs font-bold text-slate-400 mb-1">提交內容</p>
-                  <dl class="grid sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                  <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1">
                     <template v-for="[k, v] in payloadEntries(it.payload)" :key="k">
                       <dt class="text-slate-400 font-mono text-xs">{{ k }}</dt>
                       <dd class="text-slate-700 break-words">{{ v }}</dd>
