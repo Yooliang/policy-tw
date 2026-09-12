@@ -2,8 +2,13 @@
 import { ref, onMounted } from 'vue'
 import Hero from '../components/Hero.vue'
 import { supabase } from '../lib/supabase'
-import { CreditCard, Copy, Check, Heart, Sparkles, Loader2, ChevronDown } from 'lucide-vue-next'
+import { Copy, Check, Heart, Sparkles, Loader2, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+
+// 贊助走 Ko-fi。刻意用連結而不是嵌入 Ko-fi 的 Widget：這站是預渲染的靜態頁，
+// 多一支第三方腳本會拖慢載入，而且先前 AdSense 的外部資源已經害過一次。
+// 換 Ko-fi 帳號只要改這一行。
+const KOFI_URL = 'https://ko-fi.com/cwen0708'
 
 const copied = ref<string | null>(null)
 const showAllCrypto = ref(false)
@@ -249,17 +254,19 @@ usePageHead({
           <!-- General Donation -->
           <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg hover:shadow-xl transition-shadow text-left">
             <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2">
-              <CreditCard class="text-blue-600" />一般捐款
+              <img src="/kofi-cup.png" alt="" class="w-6 h-6" />請我們喝杯咖啡
             </h3>
-            <div class="space-y-3">
-              <button class="w-full bg-[#00c300] hover:bg-[#00b300] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
-                <span class="font-bold">LINE Pay</span>
-                <span class="text-xs opacity-90">單次 / 定期</span>
-              </button>
-              <button class="w-full bg-navy-800 hover:bg-navy-700 text-white font-bold py-3 rounded-xl transition-colors">
-                信用卡
-              </button>
-            </div>
+            <a
+              :href="KOFI_URL"
+              target="_blank"
+              rel="noopener"
+              class="w-full bg-[#FF5E5B] hover:bg-[#e85450] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+            >
+              <img src="/kofi-cup.png" alt="" class="w-6 h-6" />到 Ko-fi 贊助
+            </a>
+            <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+              支援信用卡與 PayPal，可以只贊助一次，也可以每月固定支持。金額由你決定。
+            </p>
           </div>
 
           <!-- Crypto Donation -->
