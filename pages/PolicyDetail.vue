@@ -19,7 +19,7 @@ import { policySortDate, policyYear } from '../lib/policy-date'
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading, elections, getElectionById } = useSupabase()
+const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById } = useSupabase()
 
 const hasVoted = ref(false)
 
@@ -48,6 +48,43 @@ async function handleVerify() {
 const policyId = computed(() => route.params.policyId)
 const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 const politician = computed(() => policy.value ? politicians.value.find(c => String(c.id) === String(policy.value!.politicianId)) : null)
+
+const policyLoading = ref(false)
+const politicianLoading = ref(false)
+
+// 當直接訪問或重新整理時，若找不到 policy 則單獨抓取
+watch(
+  policyId,
+  async (id) => {
+    if (!id) return
+    if (!policies.value.some(p => String(p.id) === String(id))) {
+      policyLoading.value = true
+      try {
+        await loadPolicyById(String(id))
+      } finally {
+        policyLoading.value = false
+      }
+    }
+  },
+  { immediate: true }
+)
+
+// 取得 policy 後，若找不到對應的 politician 則即時載入（因全站候選人不預載）
+watch(
+  () => policy.value?.politicianId,
+  async (politicianId) => {
+    if (!politicianId) return
+    if (!politicians.value.some(p => String(p.id) === String(politicianId))) {
+      politicianLoading.value = true
+      try {
+        await loadPoliticianById(String(politicianId))
+      } finally {
+        politicianLoading.value = false
+      }
+    }
+  },
+  { immediate: true }
+)
 
 // 政見所屬選舉屆別的簡稱，例如「2024 大選」「2026 九合一」。沒有屆別（舊資料）就不顯示。
 const policyElection = computed(() => policy.value?.electionId != null ? getElectionById(policy.value.electionId) : undefined)
@@ -477,7 +514,7 @@ usePageHead({
   </div>
 
   <!-- Loading state -->
-  <div v-else-if="loading" class="bg-slate-50 min-h-screen flex items-center justify-center">
+  <div v-else-if="loading || policyLoading || politicianLoading" class="bg-slate-50 min-h-screen flex items-center justify-center">
     <div class="text-center">
       <Loader2 :size="48" class="mx-auto mb-4 text-blue-500 animate-spin" />
       <p class="text-slate-500">載入中...</p>

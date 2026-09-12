@@ -554,6 +554,37 @@ export function useSupabase() {
     }
   }
 
+  // 根據 ID 載入單一 policy（用於直接訪問政見詳情頁面）
+  async function loadPolicyById(policyId: string): Promise<Policy | null> {
+    const existing = policies.value.find(p => p.id === policyId)
+    if (existing) return existing
+
+    try {
+      const { data, error } = await supabase
+        .from('policies_with_logs')
+        .select('*')
+        .eq('id', policyId)
+        .single()
+
+      if (error || !data) {
+        console.error(`[loadPolicyById] 找不到 ${policyId}:`, error)
+        return null
+      }
+
+      const mapped = mapPolicy(data as RawPolicy)
+
+      const existingIds = new Set(policies.value.map(p => p.id))
+      if (!existingIds.has(mapped.id)) {
+        policies.value.push(mapped)
+      }
+
+      return mapped
+    } catch (err) {
+      console.error(`[loadPolicyById] 錯誤:`, err)
+      return null
+    }
+  }
+
   return {
     elections,
     politicians,
@@ -582,5 +613,6 @@ export function useSupabase() {
     getTotalPoliticianCount,
     getPoliciesByCategory,
     loadPoliticianById,
+    loadPolicyById,
   }
 }

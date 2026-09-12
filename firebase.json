@@ -13,7 +13,11 @@
       { "source": "/profile", "destination": "/app.html" },
       { "source": "/auth/callback", "destination": "/app.html" },
       { "source": "/election-2026", "destination": "/app.html" },
-      { "source": "/admin/**", "destination": "/app.html" }
+      { "source": "/admin/**", "destination": "/app.html" },
+      { "source": "/policy/**", "destination": "/app.html" },
+      { "source": "/politician/**", "destination": "/app.html" },
+      { "source": "/analysis/**", "destination": "/app.html" },
+      { "source": "/community/**", "destination": "/app.html" }
     ]
   }
 }

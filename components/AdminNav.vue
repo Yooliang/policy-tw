@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { BarChart3, Database, Sparkles, Users, Upload } from 'lucide-vue-next'
+import { BarChart3, Database, Sparkles, Users, Upload, Bot, ClipboardList, UserPlus } from 'lucide-vue-next'
 
 const route = useRoute()
 
@@ -11,6 +11,9 @@ const navItems = [
   { path: '/admin/import', label: '資料匯入', icon: Upload },
   { path: '/admin/ai', label: 'AI 管理', icon: Sparkles },
   { path: '/admin/duplicates', label: '重複資料', icon: Users },
+  { path: '/admin/agent-register', label: 'Agent 註冊', icon: UserPlus },
+  { path: '/admin/agent-dashboard', label: 'Agent 監控', icon: Bot },
+  { path: '/admin/agent-tasks', label: 'Agent 任務', icon: ClipboardList },
 ]
 
 const currentPath = computed(() => route.path)
