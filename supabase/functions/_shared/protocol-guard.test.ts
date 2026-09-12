@@ -201,3 +201,32 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
   const attemptDays = Number(m![1]);
   assert(attemptDays >= 1 && attemptDays < TASK_CHECK_COOLDOWN_DAYS, "嘗試冷卻要比無異動冷卻短：那是換人再試，不是結案");
 });
+
+Deno.test("協議只有一份：根目錄 SKILL.md 不可以是 public/skill.md 的複本", async () => {
+  // 2026-09-13 踩到：根目錄放了 public/skill.md 的複本，停在 1.4.1、還寫著
+  // 「這份文件就是唯一的協議」，而網址那份已經 1.4.4，兩份差 29 行。
+  // 外部代理讀網址、看 repo 的人讀根目錄，說法不同時沒有任何東西會變紅。
+  // 這支測試讓「複本回來」這件事直接紅燈。
+  const root = new URL("../../../SKILL.md", import.meta.url);
+  let rootText = "";
+  try {
+    rootText = await Deno.readTextFile(root);
+  } catch {
+    return; // 根目錄沒有這個檔也可以，指路檔是選配
+  }
+  assert(
+    /policy-tw\.web\.app\/skill\.md/.test(rootText),
+    "根目錄 SKILL.md 要指向 https://policy-tw.web.app/skill.md",
+  );
+  // 協議本文的特徵：檔頭的版本行、以及鐵律那一節。有這些就是複本不是指路。
+  assert(
+    !/\*\*版本\*\*：\d+\.\d+\.\d+/.test(rootText),
+    "根目錄 SKILL.md 出現版本號＝又變成協議複本了；協議只留 public/skill.md 一份",
+  );
+  assert(
+    !rootText.includes("## 2. 鐵律"),
+    "根目錄 SKILL.md 出現協議本文章節＝又變成複本了",
+  );
+  const real = await Deno.readTextFile(SKILL_MD);
+  assert(real.length > rootText.length * 3, "根目錄那份長度接近本文，八成又是複本");
+});

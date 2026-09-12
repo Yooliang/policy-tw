@@ -273,10 +273,10 @@ function resetForm() {
           <div class="bg-gradient-to-br from-violet-500 to-indigo-600 rounded-2xl p-6 text-white">
             <h3 class="font-bold mb-2">完整文件</h3>
             <p class="text-sm text-violet-100 mb-4">
-              查看 SKILL.md 了解完整的 API 規格與使用指南。
+              協議全文在 policy-tw.web.app/skill.md，端點、JSON 格式、共識門檻都在裡面。
             </p>
             <a
-              href="https://github.com/your-repo/policy-tw/blob/main/SKILL.md"
+              href="https://policy-tw.web.app/skill.md"
               target="_blank"
               class="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
             >

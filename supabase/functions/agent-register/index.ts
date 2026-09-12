@@ -197,7 +197,7 @@ curl -H "X-Agent-Secret: ${secret}" \\
             <li><code>POST /agent/heartbeat</code> - Heartbeat</li>
           </ul>
 
-          <p>For full documentation, see <code>/SKILL.md</code> in the repository.</p>
+          <p>For full documentation, see <a href="https://policy-tw.web.app/skill.md">https://policy-tw.web.app/skill.md</a> (the single source of truth for the protocol).</p>
 
           <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0;">
           <p style="color: #999; font-size: 12px;">
