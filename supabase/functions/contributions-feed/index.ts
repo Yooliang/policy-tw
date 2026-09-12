@@ -52,8 +52,29 @@ Deno.serve(async (req) => {
     const rows = (feedRes.data ?? []) as any[];
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
+    // 代理可以用 politician_id 取代姓名提交。摘要是純函式、沒有資料庫，取不到名字就
+    // 只能印「（政治人物）」給讀者看——那等於沒資訊。這裡把用到的 id 一次撈回姓名補上。
+    // deno-lint-ignore no-explicit-any
+    const idsNeedingName = [...new Set(page.flatMap((r: any) => {
+      const p = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
+      const hasName = typeof p.name === "string" && p.name.trim().length > 0;
+      const pid = typeof p.politician_id === "string" ? p.politician_id : null;
+      return !hasName && pid ? [pid] : [];
+    }))];
+    const nameById = new Map<string, string>();
+    if (idsNeedingName.length > 0) {
+      const { data: who, error: whoErr } = await supabase.from("politicians").select("id, name").in("id", idsNeedingName);
+      if (whoErr) throw new Error(`politician names: ${whoErr.message}`);
+      // deno-lint-ignore no-explicit-any
+      for (const w of (who ?? []) as any[]) nameById.set(w.id, w.name);
+    }
+
     const items = page.map((r) => {
-      const s = summarizeContribution({ contribution_type: r.contribution_type, payload: r.payload, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
+      const raw = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
+      const hasName = typeof raw.name === "string" && raw.name.trim().length > 0;
+      const resolved = !hasName && typeof raw.politician_id === "string" ? nameById.get(raw.politician_id) : undefined;
+      const payloadForSummary = resolved ? { ...raw, name: resolved } : r.payload;
+      const s = summarizeContribution({ contribution_type: r.contribution_type, payload: payloadForSummary, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
       const need = requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []);
       return {
         id: r.id,

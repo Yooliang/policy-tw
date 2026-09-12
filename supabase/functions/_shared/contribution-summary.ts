@@ -68,7 +68,10 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       break;
     }
     case "policy": {
-      summary = `為「${name || "（政治人物）"}」新增政見：${clip(p.title, 80)}`;
+      // 代理可以只帶 politician_id。呼叫端（contributions-feed）會先把 id 換成姓名；
+      // 真的換不到時退成 id 前八碼，至少讀者點得到那個人，不要只印一個空括號。
+      const who = name || (politicianId ? `政治人物 ${politicianId.slice(0, 8)}` : "未指名的政治人物");
+      summary = `為「${who}」新增政見：${clip(p.title, 80)}`;
       break;
     }
     case "policy_progress": {
