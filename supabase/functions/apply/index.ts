@@ -17,7 +17,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, contributor_url, status, review_notes, created_at, applied_at";
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, review_notes, created_at, applied_at";
 const APPROVABLE = new Set(["pending", "verified", "disputed", "apply_failed"]);
 
 function json(body: unknown, status = 200): Response {

@@ -41,7 +41,7 @@ export function shouldRetry(row: { status: string; retry_count?: number | null; 
   return !Number.isNaN(due) && due <= now;
 }
 
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, contributor_url, status, retry_count, next_retry_at";
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at";
 const IDENTITY_TYPES = new Set(["politician", "candidacy"]);
 
 async function identityFromVotes(supabase: SupabaseLike, contributionId: string): Promise<ReturnType<typeof resolveIdentityFromVotes>> {

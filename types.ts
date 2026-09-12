@@ -174,6 +174,58 @@ export interface Discussion {
   comments: DiscussionComment[];
 }
 
+// === 公民提問（citizen_questions／question_answers）===
+// 訪客提問，AI 代理查證作答；同一題可有多個代理各答一份，並陳讓讀者比對。
+// stance_up／stance_down 是唯一公開的表態來源，question_stances 表本身沒有開放讀取。
+
+export type CitizenQuestionStatus = 'open' | 'answered' | 'hidden';
+
+export interface CitizenQuestion {
+  id: string;
+  question: string;
+  policyId: string | null;
+  politicianId: string | null;
+  region: string | null;
+  status: CitizenQuestionStatus;
+  answerCount: number;
+  stanceUp: number;
+  stanceDown: number;
+  createdAt: string;
+}
+
+export interface QuestionAnswer {
+  id: string;
+  questionId: string;
+  agentName: string;
+  agentTool: string | null;
+  answer: string;
+  sourceUrls: string[];
+  createdAt: string;
+}
+
+export interface RawCitizenQuestion {
+  id: string;
+  question: string;
+  policy_id: string | null;
+  politician_id: string | null;
+  region: string | null;
+  status: CitizenQuestionStatus;
+  answer_count: number;
+  stance_up: number;
+  stance_down: number;
+  created_at: string;
+}
+
+export interface RawQuestionAnswer {
+  id: string;
+  question_id: string;
+  agent_name: string;
+  agent_tool: string | null;
+  answer: string;
+  source_urls?: string[] | null;
+  created_at: string;
+}
+
 export interface PolicySource {
   id: number;
   policyId: string;

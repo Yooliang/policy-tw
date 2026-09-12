@@ -7,8 +7,11 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication"] as const;
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "other"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "other"] as const;
+/** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
+export const QUESTION_ANSWER_MIN = 30;
+export const QUESTION_ANSWER_MAX = 4000;
 export const ADJUDICATION_VERDICTS = ["uphold", "reject"] as const;
 /** 身份指認：候選人物的 uuid，或 "new"（都不是，建新人物） */
 export const IDENTITY_PICK_NEW = "new";
@@ -207,6 +210,12 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：看了哪些來源、為什麼站這一邊）");
       if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
       if (p.resolved_politician_id !== undefined && !isIdentityPick(p.resolved_politician_id)) push("payload.resolved_politician_id", "要是 uuid 或 \"new\"");
+      break;
+    }
+    case "question_answer": {
+      // 公民提問的答案：question_id 指哪一題，answer 是內容本身；來源網址走通用規則（見下方 rawList 驗證）
+      if (!isUuid(p.question_id)) push("payload.question_id", "question_id 必填（uuid，任務 target.question_id）");
+      if (!isStr(p.answer, QUESTION_ANSWER_MIN, QUESTION_ANSWER_MAX)) push("payload.answer", `answer 必填（${QUESTION_ANSWER_MIN}～${QUESTION_ANSWER_MAX} 字，附出處，不要只寫結論）`);
       break;
     }
     case "no_change": {

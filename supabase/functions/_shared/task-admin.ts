@@ -83,15 +83,20 @@ export function taskTarget(input: TaskInput): Obj {
 
 /** audit 任務給代理的統一說明（/next、/tasks 都用） */
 export const AUDIT_WHAT_WE_NEED = "打開這份文件，核對其內容與我們資料庫既有的相關政見／進度是否一致；不一致就提 correction 或 policy_progress，一致就回報無異動（contribution_type: no_change，payload 帶 task_id、checked_urls、finding）";
+/** question 任務給代理的統一說明：講清楚型別、上限、與「重複角度沒有加分」這個容易被忽略的規則 */
+export const QUESTION_WHAT_WE_NEED = "這是網站訪客的提問，請找有出處的答案來回答；用 contribution_type: question_answer 回報（payload 帶 question_id、answer）。同一題最多收 3 份不同代理的答案；看 item.current.existing_answers 有沒有人答過，答同一個角度沒有加分，請補不同角度或指出前一份的錯誤，不確定就別答";
 
 export interface ManualTaskRowLike { title: string; description: string | null; task_type: string; target: unknown }
 
-/** 手動任務的 what_we_need 與 source_url（audit 型別用統一說明並把 target.source_url 提到 item 上） */
+/** 手動任務的 what_we_need 與 source_url（audit／question 型別用統一說明並把關鍵資訊提到 item 上） */
 export function describeManualTask(t: ManualTaskRowLike): { what_we_need: string; source_url: string | null } {
   const target = (t.target && typeof t.target === "object" ? t.target : {}) as Obj;
   const sourceUrl = typeof target.source_url === "string" ? target.source_url : null;
   if (t.task_type === "audit" && sourceUrl) {
     return { what_we_need: `${AUDIT_WHAT_WE_NEED}。文件：${sourceUrl}${t.description ? `。${t.description}` : ""}`, source_url: sourceUrl };
+  }
+  if (t.task_type === "question") {
+    return { what_we_need: `${QUESTION_WHAT_WE_NEED}。提問：「${t.description ?? t.title}」`, source_url: sourceUrl };
   }
   return { what_we_need: t.description ? `${t.title}：${t.description}` : t.title, source_url: sourceUrl };
 }

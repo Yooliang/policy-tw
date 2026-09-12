@@ -43,6 +43,14 @@ Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；
   assertEquals(riskLevel("candidacy", {}), "high");
 });
 
+Deno.test("question_answer 走一般資料門檻（沒有特例）：官方 2／媒體 2／社群 3／其他 3", () => {
+  assertEquals(riskLevel("question_answer", {}), "normal");
+  assertEquals(requiredAgree("question_answer", {}, [OFFICIAL]), 2);
+  assertEquals(requiredAgree("question_answer", {}, [MEDIA]), 2);
+  assertEquals(requiredAgree("question_answer", {}, [SOCIAL]), 3);
+  assertEquals(requiredAgree("question_answer", {}, [OTHER]), 3);
+});
+
 Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority.ts 與 AGREE_THRESHOLDS；計票依來源 IP 去重", async () => {
   const sql = await Deno.readTextFile(new URL("../../migrations/20260912000009_zero_manual_points.sql", import.meta.url));
   const fn = sql.slice(sql.indexOf("FUNCTION contribution_source_kind"), sql.indexOf("FUNCTION contribution_required_agree"));

@@ -9,7 +9,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageSquare, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -184,7 +184,7 @@ usePageHead({
             <Sparkles v-else :size="18" />
             {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '查進度' }}
           </button>
-          <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { filter: policy.title } }"><MessageSquare :size="16" /> 民眾提問</HeroAction>
+          <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
@@ -344,14 +344,14 @@ usePageHead({
             </button>
           </div>
 
-          <!-- Community Discussion -->
+          <!-- Citizen Questions -->
           <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <h3 class="text-lg font-bold text-navy-900 flex items-center gap-2"><MessageSquare class="text-blue-600" />公民討論區</h3>
-              <p class="text-sm text-slate-500 mt-1">針對此政見有不同的看法？歡迎加入討論。</p>
+              <h3 class="text-lg font-bold text-navy-900 flex items-center gap-2"><MessageCircleQuestion class="text-blue-600" />公民提問</h3>
+              <p class="text-sm text-slate-500 mt-1">想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。</p>
             </div>
-            <button @click="router.push({ path: '/community', query: { filter: policy.title } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors">
-              前往討論
+            <button @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors">
+              前往提問
             </button>
           </div>
 

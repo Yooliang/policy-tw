@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { taskTarget, validateTaskInput } from "./task-admin.ts";
+import { describeManualTask, taskTarget, validateTaskInput } from "./task-admin.ts";
 import { buildRequestTaskText, decideRequest, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
@@ -54,6 +54,20 @@ Deno.test("task_suggestion 2 票通過 → apply 落庫成 open 任務（source=
   assertEquals(task.suggested_by, "gemini-tester");
   assertEquals(task.priority, 0);
   assert(inserted.some((i) => i.table === "edit_history"), "有寫 edit_history");
+});
+
+Deno.test("describeManualTask：question 任務講清楚型別、上限、重複角度沒有加分", () => {
+  const described = describeManualTask({
+    title: "回答民眾提問：市長有承諾要蓋長照據點嗎？",
+    description: "市長有承諾要蓋長照據點嗎？大概什麼時候會完工？",
+    task_type: "question",
+    target: { question_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+  });
+  assert(described.what_we_need.includes("question_answer"));
+  assert(described.what_we_need.includes("最多收 3 份"));
+  assert(described.what_we_need.includes("沒有加分"), "講清楚重複角度沒有加分");
+  assert(described.what_we_need.includes("市長有承諾要蓋長照據點嗎？大概什麼時候會完工？"), "帶出完整提問內容，不是只有截短的 title");
+  assertEquals(described.source_url, null);
 });
 
 Deno.test("request-task 規則：已有 open 任務 → already_queued；對應自動缺口 → already_queued；限額 10", () => {

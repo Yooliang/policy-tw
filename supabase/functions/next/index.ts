@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources").eq("status", "open").order("priority", { ascending: false }).limit(20),
+      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open").order("priority", { ascending: false }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
       // 這個代理自己交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派給他）
@@ -107,9 +107,37 @@ Deno.serve(async (req) => {
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
-    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null };
-    const manual = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region);
-    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manual.length;
+    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string };
+    // task_id 併進來的早一點加，dispatch.ts 的 TaskLike 系列函式都要它
+    const manualRaw = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
+    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manualRaw.length;
+
+    // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他、
+    // 彼此之間依 stance_up 排序（其他任務位置不動，見 sortQuestionTasksBySupport 的說明）
+    const questionIds = [...new Set(manualRaw
+      .filter((t) => t.task_type === "question")
+      .map((t) => (t.target && typeof t.target === "object" ? (t.target as Record<string, unknown>).question_id : null))
+      .filter((v): v is string => typeof v === "string"))];
+    let manual = manualRaw;
+    if (questionIds.length > 0) {
+      const [{ data: qRows, error: qErr }, { data: qaRows, error: qaErr }] = await Promise.all([
+        supabase.from("citizen_questions").select("id, stance_up, answer_count").in("id", questionIds),
+        supabase.from("question_answers").select("question_id, agent_name").in("question_id", questionIds),
+      ]);
+      if (qErr) throw new Error(`citizen_questions lookup: ${qErr.message}`);
+      if (qaErr) throw new Error(`question_answers lookup: ${qaErr.message}`);
+      const stanceById = new Map(((qRows ?? []) as Array<{ id: string; stance_up: number }>).map((r) => [r.id, r.stance_up]));
+      const fullQuestionIds = new Set(((qRows ?? []) as Array<{ id: string; answer_count: number }>).filter((r) => r.answer_count >= 3).map((r) => r.id));
+      const mine = agentName.toLowerCase();
+      const answeredQuestionIds = new Set(((qaRows ?? []) as Array<{ question_id: string; agent_name: string }>).filter((r) => r.agent_name.toLowerCase() === mine).map((r) => r.question_id));
+      const withStance = manualRaw.map((t) => {
+        if (t.task_type !== "question") return t;
+        const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+        const qid = typeof target.question_id === "string" ? target.question_id : null;
+        return { ...t, target: { ...target, stance_up: qid ? stanceById.get(qid) ?? 0 : 0 } };
+      });
+      manual = filterAnsweredQuestionTasks(sortQuestionTasksBySupport(withStance), answeredQuestionIds, fullQuestionIds);
+    }
 
     const kind = chooseKind(totalPending, { verifies_done: myVotesRes.count ?? 0, tasks_done: myContribRes.count ?? 0 });
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, docs: "https://policy-tw.web.app/skill.md" };
@@ -159,7 +187,7 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterOwnSubmittedTasks(filterLeasedTasks(filterAdjudicateTasks(manual.map((m) => ({ ...m, task_id: m.id })), agentName, pendingAdjudicated), leases, agentName), mySubmittedTaskIds);
+    const freeManual = filterOwnSubmittedTasks(filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated), leases, agentName), mySubmittedTaskIds);
     if (freeManual.length > 0) {
       const t = pickBySeed(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;

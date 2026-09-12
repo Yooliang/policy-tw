@@ -44,6 +44,10 @@ export interface TaskContextData {
   contribution?: Obj | null;
   votes?: Obj[];
   pending_adjudications?: number;
+  /** question：這一題本身（citizen_questions 一列） */
+  question?: Obj | null;
+  /** question：已經有哪些代理答過、答了什麼（citizen_questions.id = target.question_id） */
+  question_answers?: Obj[];
 }
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
@@ -84,6 +88,20 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
     }
     case "candidacy_source_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    case "question": {
+      const q = data.question ?? null;
+      return {
+        question: q ? truncateFields(pick(q, ["id", "question", "region", "stance_up", "stance_down", "answer_count"])!, ["question"]) : null,
+        // 這題掛在哪個政見／人物：帶標題與姓名，不要只有 uuid，讓代理不用另外查
+        policy: data.policy ? pick(data.policy, ["id", "title"]) : null,
+        politician: p ? pick(p, ["id", "name"]) : null,
+        // 已經有哪些代理答過、答了什麼：新代理不要重複同一個角度，該補不同角度或指出前一份的錯誤
+        existing_answers: (data.question_answers ?? []).map((a) => truncateFields(pick(a, ["agent_name", "answer", "source_urls", "created_at"])!, ["answer"])),
+        hint: q && (q.answer_count as number) > 0
+          ? "已經有代理答過：看 existing_answers 的角度，答一樣的沒有加分，請補不同面向或指出前一份哪裡查證不足／有誤"
+          : "還沒有人答過，找有出處的答案（政府網頁、新聞、候選人官方發言優先）",
+      };
+    }
     case "adjudicate": {
       const c = data.contribution ?? null;
       return {
@@ -148,6 +166,25 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
     data.politician_election = pe ?? null;
+  }
+  if (taskType === "question" && typeof target.question_id === "string") {
+    const questionId = target.question_id;
+    const { data: q } = await supabase.from("citizen_questions").select("*").eq("id", questionId).maybeSingle();
+    data.question = q ?? null;
+    // question 的 target 不一定帶 politician_id／policy_id（ask 端點是照提問當下的欄位存的），
+    // 這題本身掛的 policy_id 才是最新真相，query 一次現成的 policy 標題附上
+    const linkedPolicyId = policyId ?? (typeof q?.policy_id === "string" ? q.policy_id : null);
+    if (linkedPolicyId) {
+      const { data: pl } = await supabase.from("policies").select("id, title").eq("id", linkedPolicyId).maybeSingle();
+      data.policy = pl ?? null;
+    }
+    const questionPid = pid ?? (typeof q?.politician_id === "string" ? q.politician_id : null);
+    if (questionPid && !data.politician) {
+      const { data: pol } = await supabase.from("politicians").select("*").eq("id", questionPid).maybeSingle();
+      data.politician = pol ?? null;
+    }
+    const { data: answers } = await supabase.from("question_answers").select("agent_name, answer, source_urls, created_at").eq("question_id", questionId).order("created_at", { ascending: true });
+    data.question_answers = answers ?? [];
   }
   if (taskType === "adjudicate" && typeof target.contribution_id === "string") {
     const cid = target.contribution_id;

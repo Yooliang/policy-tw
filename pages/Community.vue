@@ -1,259 +1,211 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import Avatar from '../components/Avatar.vue'
-import { MessageSquare, ThumbsUp, TrendingUp, Search, Eye } from 'lucide-vue-next'
-import HeroAction from '../components/HeroAction.vue'
+import MechanismNav from '../components/MechanismNav.vue'
+import AskQuestionForm from '../components/community/AskQuestionForm.vue'
+import CitizenQuestionCard from '../components/community/CitizenQuestionCard.vue'
+import { Loader2, MessageCircleQuestion } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
-import type { Discussion } from '../types'
+import { useCitizenQuestions } from '../composables/useCitizenQuestions'
+import { voteStance, type AskQuestionResult, type Stance } from '../lib/citizen-questions'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
-const route = useRoute()
-const router = useRouter()
-const { discussions, politicians, policies } = useSupabase()
+const { policies, politicians, loadPoliticianById } = useSupabase()
 const { globalRegion } = useGlobalState()
-// 政見標題篩選（PolicyDetail 的「公民討論」帶 ?filter= 過來）。改由下方 useRegionQuerySync 在 mounted 後從網址套進來，
-// 不在 setup 直接讀 route.query：預渲染的 HTML 沒有這段，setup 就讀會 hydration mismatch
-const initialFilter = ref('')
+const { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, applyStanceResult } = useCitizenQuestions()
 
-const activeTab = ref<'hot' | 'latest'>('hot')
-const searchQuery = ref('')
-const activeCategory = ref('')
+type StatusFilter = 'all' | 'open' | 'answered'
+type SortMode = 'stance' | 'latest'
 
-// 縣市（全站共用）、頁籤、議題標籤 ↔ 網址 ?region=&tab=&tag=；既有的 ?filter=政見標題 原樣保留
+const statusFilter = ref<StatusFilter>('all')
+const sortMode = ref<SortMode>('latest')
+// 從 PolicyDetail 的「民眾提問」帶 ?policy= 過來：只看這項政見的提問，且提問表單預設掛在它底下
+const policyFilter = ref('')
+
+// 縣市（全站共用）、狀態、排序 ↔ 網址 ?region=&status=&sort=&policy=
 useRegionQuerySync({
   routeName: 'community',
   extra: {
-    tab: queryField(activeTab, 'hot', { allowed: ['hot', 'latest'] as const }),
-    tag: queryField(activeCategory, ''),
-    filter: queryField(initialFilter, ''),
+    status: queryField(statusFilter, 'all', { allowed: ['all', 'open', 'answered'] as const }),
+    sort: queryField(sortMode, 'latest', { allowed: ['stance', 'latest'] as const }),
+    policy: queryField(policyFilter, ''),
   },
 })
 
-const COMMUNITY_TAGS = ['居住正義', '交通', '教育', '經濟', '環保']
+onMounted(loadQuestions)
 
-const LS_KEY = 'zhengjian_discussion_likes'
+const STATUS_OPTIONS: Array<{ key: StatusFilter; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'open', label: '待回答' },
+  { key: 'answered', label: '已有答案' },
+]
+const SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
+  { key: 'stance', label: '表態多的' },
+  { key: 'latest', label: '最新的' },
+]
+function chipClass(active: boolean): string {
+  return active
+    ? 'px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-navy-900 shadow-sm transition-all'
+    : 'px-3 py-1.5 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-700 hover:bg-white/50 transition-all'
+}
 
-const likedIds = ref<number[]>([])
+// 政見標題（政見清單已全載）；人物姓名優先用已載入的清單，缺的再按需查（多數人物不會在 Community 頁預先載入）
+const policyFilterTitle = computed(() => policyFilter.value ? policies.value.find(p => p.id === policyFilter.value)?.title : undefined)
+function policyTitleOf(id: string | null): string | undefined {
+  return id ? policies.value.find(p => p.id === id)?.title : undefined
+}
 
-onMounted(() => {
-  try {
-    const stored = localStorage.getItem(LS_KEY)
-    if (stored) likedIds.value = JSON.parse(stored)
-  } catch { /* ignore */ }
+const politicianNameCache = ref<Record<string, string>>({})
+function politicianNameOf(id: string | null): string | undefined {
+  if (!id) return undefined
+  return politicians.value.find(p => p.id === id)?.name ?? politicianNameCache.value[id]
+}
+async function ensurePoliticianName(id: string) {
+  if (politicianNameCache.value[id] || politicians.value.some(p => p.id === id)) return
+  const loaded = await loadPoliticianById(id)
+  if (loaded) politicianNameCache.value = { ...politicianNameCache.value, [id]: loaded.name }
+}
+watch(questions, (list) => {
+  const missing = new Set(list.map(q => q.politicianId).filter((id): id is string => !!id && !politicianNameOf(id)))
+  missing.forEach(ensurePoliticianName)
 })
 
-function toggleLike(id: number, e: Event) {
-  e.stopPropagation()
-  const idx = likedIds.value.indexOf(id)
-  if (idx >= 0) {
-    likedIds.value.splice(idx, 1)
+const filteredQuestions = computed(() => {
+  let list = questions.value
+  if (globalRegion.value !== 'All') list = list.filter(q => q.region === globalRegion.value)
+  if (policyFilter.value) list = list.filter(q => q.policyId === policyFilter.value)
+  if (statusFilter.value !== 'all') list = list.filter(q => q.status === statusFilter.value)
+
+  list = [...list]
+  if (sortMode.value === 'stance') {
+    list.sort((a, b) => (b.stanceUp + b.stanceDown) - (a.stanceUp + a.stanceDown) || b.createdAt.localeCompare(a.createdAt))
   } else {
-    likedIds.value.push(id)
+    list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
-  localStorage.setItem(LS_KEY, JSON.stringify(likedIds.value))
-}
-
-function isLiked(id: number) {
-  return likedIds.value.includes(id)
-}
-
-function getLikeCount(post: Discussion) {
-  return post.likes + (isLiked(post.id) ? 1 : 0)
-}
-
-const filteredDiscussions = computed(() => {
-  let list = [...discussions.value]
-
-  // Region filter (from global state)
-  if (globalRegion.value !== 'All') {
-    // Find policies linked to discussions, then politicians linked to policies
-    // This requires us to look up discussion -> policy -> politician -> region
-    list = list.filter(d => {
-      // Find the policy for this discussion
-      const policy = policies.value.find(p => String(p.id) === String(d.policyId))
-      if (!policy) return false
-      
-      // Find the politician for this policy
-      const politician = politicians.value.find(p => String(p.id) === String(policy.politicianId))
-      if (!politician) return false
-      
-      return politician.region === globalRegion.value
-    })
-  }
-
-  // policyTitle filter from query
-  if (initialFilter.value) {
-
-    list = list.filter(d => d.policyTitle.includes(initialFilter.value))
-  }
-
-  // search
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.trim().toLowerCase()
-    list = list.filter(d =>
-      d.title.toLowerCase().includes(q) ||
-      d.content.toLowerCase().includes(q) ||
-      d.tags.some(t => t.toLowerCase().includes(q))
-    )
-  }
-
-  // category filter
-  if (activeCategory.value) {
-    list = list.filter(d => d.tags.includes(activeCategory.value))
-  }
-
-  // sort
-  if (activeTab.value === 'hot') {
-    list.sort((a, b) => b.likes - a.likes)
-  } else {
-    list.sort((a, b) => b.createdAtTs - a.createdAtTs)
-  }
-
   return list
 })
 
-const hotDiscussions = computed(() =>
-  [...discussions.value].sort((a, b) => b.likes - a.likes).slice(0, 5)
-)
-
-const clearFilter = () => {
-  initialFilter.value = ''  // 網址的 ?filter= 由同步機制拿掉，縣市等其他參數保留
+// 展開／表態：以題目 id 為 key，各自獨立
+const expandedIds = ref<Set<string>>(new Set())
+function toggleQuestion(id: string) {
+  const next = new Set(expandedIds.value)
+  if (next.has(id)) next.delete(id)
+  else {
+    next.add(id)
+    loadAnswers(id)
+  }
+  expandedIds.value = next
 }
 
-function getCommentCount(post: Discussion) {
-  return post.comments.reduce((sum, c) => sum + 1 + c.replies.length, 0)
+const LS_STANCE_KEY = 'zhengjian_question_stances'
+const votedStances = ref<Record<string, Stance>>({})
+onMounted(() => {
+  try {
+    const stored = localStorage.getItem(LS_STANCE_KEY)
+    if (stored) votedStances.value = JSON.parse(stored)
+  } catch { /* ignore */ }
+})
+
+const voteBusyIds = ref<Set<string>>(new Set())
+const voteErrors = ref<Record<string, string>>({})
+
+async function castVote(id: string, stance: Stance) {
+  // 伺服器端同一題同一個 IP 是覆蓋（upsert）而不是報錯，所以按錯了要能改回來；
+  // 只擋「重複送出同一個表態」與送出中的狀態。
+  if (voteBusyIds.value.has(id) || votedStances.value[id] === stance) return
+  voteBusyIds.value = new Set(voteBusyIds.value).add(id)
+  voteErrors.value = { ...voteErrors.value, [id]: '' }
+  try {
+    const result = await voteStance(id, stance)
+    applyStanceResult(id, result.stanceUp, result.stanceDown)
+    votedStances.value = { ...votedStances.value, [id]: stance }
+    localStorage.setItem(LS_STANCE_KEY, JSON.stringify(votedStances.value))
+  } catch (err) {
+    voteErrors.value = { ...voteErrors.value, [id]: err instanceof Error ? err.message : '表態失敗，請稍後再試' }
+  } finally {
+    const next = new Set(voteBusyIds.value)
+    next.delete(id)
+    voteBusyIds.value = next
+  }
+}
+
+// 提問成功：重新整理列表，讓新題目馬上出現
+function onAsked(_result: AskQuestionResult) {
+  loadQuestions()
 }
 
 usePageHead({
-  title: '公民發聲',
-  description: '針對每一項政見提出見解、疑問或支持的公民討論區，依縣市與議題分類瀏覽熱門與最新討論。',
+  title: '公民提問',
+  description: '對政見或政治人物有疑問？提出你的問題，AI 代理會去查有出處的資料來回答，多個代理的答案並陳，讓你自己比對判斷。',
 })
 </script>
 
 <template>
-  <div class="bg-slate-50 min-h-screen">
+  <div class="bg-slate-50 min-h-screen pb-20">
     <Hero background-image="/images/heroes/community.png">
-      <template #title>公民發聲</template>
-      <template #description>這裡不只是政見的展示架，更是公民意志的集散地。針對每一項政策提出您的見解、疑問或支持，讓改變從對話開始。</template>
-      <template #icon><MessageSquare :size="400" class="text-blue-500" /></template>
+      <template #title>公民提問</template>
+      <template #description>提出你關心的問題，AI 代理會去查有出處的資料來回答——同一題可能有好幾個代理各自作答，答案並排列出，讓你自己比對判斷，而不是由誰說了算。</template>
+      <template #icon><MessageCircleQuestion :size="400" class="text-blue-500" /></template>
 
-      <!-- Hero Actions: 頁籤 -->
       <template #actions>
-        <HeroAction :active="activeTab === 'hot'" @click="activeTab = 'hot'"><TrendingUp :size="16" /> 熱門討論</HeroAction>
-        <HeroAction :active="activeTab === 'latest'" @click="activeTab = 'latest'"><MessageSquare :size="16" /> 最新發表</HeroAction>
+        <MechanismNav current="community" />
       </template>
 
       <GlobalRegionSelector />
     </Hero>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <!-- 搜尋 -->
-      <div class="mb-6">
-        <div class="relative max-w-xl">
-          <Search class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" :size="20" />
-          <input v-model="searchQuery" type="text" placeholder="搜尋討論..." class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400 shadow-sm" />
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
+      <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" class="mb-8" @asked="onAsked" />
+
+      <div v-if="policyFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mb-6">
+        <span>只看這項政見的提問：<strong>{{ policyFilterTitle || '（政見）' }}</strong></span>
+        <button @click="policyFilter = ''" class="text-sm underline hover:text-blue-900 flex-shrink-0 ml-3">清除</button>
+      </div>
+
+      <div v-if="questionsError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6 flex items-center justify-between gap-4">
+        <span>{{ questionsError }}</span>
+        <button @click="loadQuestions" class="text-sm underline font-bold flex-shrink-0">重新整理</button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-4 bg-slate-100 p-2 rounded-xl mb-8">
+        <div class="flex flex-wrap items-center gap-2">
+          <button v-for="opt in STATUS_OPTIONS" :key="opt.key" @click="statusFilter = opt.key" :class="chipClass(statusFilter === opt.key)">{{ opt.label }}</button>
         </div>
-        <div v-if="initialFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mt-4">
-          <span>篩選政見：<strong>{{ initialFilter }}</strong></span>
-          <button @click="clearFilter" class="text-sm underline hover:text-blue-900">清除</button>
+        <div class="w-px h-6 bg-slate-300 hidden sm:block"></div>
+        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <button v-for="opt in SORT_OPTIONS" :key="opt.key" @click="sortMode = opt.key" :class="chipClass(sortMode === opt.key)">{{ opt.label }}</button>
         </div>
       </div>
 
-      <!-- 分類篩選 -->
-      <div class="flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
-        <!-- Left: 全部 -->
-        <div class="shrink-0 flex items-center gap-3">
-          <button
-            @click="activeCategory = ''"
-            :class="[
-              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
-              !activeCategory
-                ? 'bg-white text-navy-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-            ]"
-          >
-            全部
-          </button>
-          <div class="w-px h-6 bg-slate-300"></div>
-        </div>
-        <!-- Right: Wrap -->
-        <div class="flex-grow flex flex-wrap items-center gap-2">
-          <button
-            v-for="tag in COMMUNITY_TAGS"
-            :key="tag"
-            @click="activeCategory = tag"
-            :class="[
-              'px-3 py-1.5 rounded-lg text-sm font-bold transition-all',
-              activeCategory === tag
-                ? 'bg-white text-navy-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-            ]"
-          >
-            {{ tag }}
-          </button>
-        </div>
+      <div v-if="loadingQuestions && questions.length === 0" class="text-center py-20 text-slate-400">
+        <Loader2 :size="32" class="mx-auto mb-3 animate-spin" />
+        <p>讀取提問中…</p>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-4 gap-8 text-left">
-        <div class="lg:col-span-1 space-y-6">
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><TrendingUp class="text-red-500" :size="20" /> 熱門議題</h3>
-            <ul class="space-y-3">
-              <li v-for="(d, i) in hotDiscussions" :key="d.id" class="text-sm">
-                <a @click.prevent="router.push('/community/' + d.id)" href="#" class="flex gap-2 group cursor-pointer">
-                  <span class="font-mono text-slate-400 font-bold">0{{ i + 1 }}</span>
-                  <span class="text-slate-600 group-hover:text-blue-600 line-clamp-1">{{ d.title }}</span>
-                </a>
-              </li>
-            </ul>
-          </div>
-        </div>
+      <div v-else-if="filteredQuestions.length === 0" class="text-center py-20 text-slate-400 bg-white rounded-xl border border-dashed border-slate-300">
+        <MessageCircleQuestion :size="48" class="mx-auto mb-4 opacity-40" />
+        <p class="text-lg font-bold text-slate-500">{{ questions.length === 0 ? '目前還沒有人提問' : '這個篩選條件下還沒有提問' }}</p>
+        <p class="text-sm mt-1">在上面留下你的問題，AI 代理很快就會來查證回答。</p>
+      </div>
 
-        <div class="lg:col-span-3">
-          <div v-if="filteredDiscussions.length === 0" class="text-center py-20 text-slate-400">
-            <MessageSquare :size="48" class="mx-auto mb-4 opacity-50" />
-            <p class="text-lg font-bold">找不到相關討論</p>
-            <p class="text-sm mt-1">試試其他關鍵字或清除篩選條件</p>
-          </div>
-          <div class="space-y-6">
-            <div
-              v-for="post in filteredDiscussions"
-              :key="post.id"
-              @click="router.push('/community/' + post.id)"
-              class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
-            >
-              <div class="flex items-start gap-4">
-                <Avatar :src="post.author.avatarUrl" :name="post.author.name" size="sm" class="border border-slate-100" />
-                <div class="flex-1">
-                  <div class="flex items-center justify-between mb-2">
-                    <div><span class="font-bold text-slate-800 text-sm">{{ post.author.name }}</span><span class="text-slate-400 text-xs ml-2">· {{ post.createdAt }}</span></div>
-                    <span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">針對：{{ post.policyTitle }}</span>
-                  </div>
-                  <h3 class="font-bold text-lg text-navy-900 mb-2 group-hover:text-blue-600 transition-colors">{{ post.title }}</h3>
-                  <p class="text-slate-600 text-sm leading-relaxed mb-3 line-clamp-2">{{ post.content }}</p>
-                  <div class="flex flex-wrap gap-2 mb-3">
-                    <span v-for="tag in post.tags" :key="tag" class="px-2 py-0.5 bg-slate-50 text-slate-500 text-[11px] rounded-full border border-slate-100">{{ tag }}</span>
-                  </div>
-                  <div class="flex items-center gap-6 text-slate-400 text-xs font-medium">
-                    <button
-                      @click="toggleLike(post.id, $event)"
-                      :class="['flex items-center gap-1.5 transition-colors', isLiked(post.id) ? 'text-blue-500' : 'hover:text-blue-500']"
-                    >
-                      <ThumbsUp :size="14" :fill="isLiked(post.id) ? 'currentColor' : 'none'" /> {{ getLikeCount(post) }}
-                    </button>
-                    <div class="flex items-center gap-1.5 hover:text-blue-500 transition-colors"><MessageSquare :size="14" /> {{ getCommentCount(post) }} 留言</div>
-                    <div class="flex items-center gap-1.5"><Eye :size="14" /> {{ post.viewCount }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div v-else class="space-y-4">
+        <CitizenQuestionCard
+          v-for="q in filteredQuestions"
+          :key="q.id"
+          :question="q"
+          :policy-title="policyTitleOf(q.policyId)"
+          :politician-name="politicianNameOf(q.politicianId)"
+          :expanded="expandedIds.has(q.id)"
+          :answers="answersByQuestion[q.id]"
+          :voted-stance="votedStances[q.id]"
+          :vote-busy="voteBusyIds.has(q.id)"
+          :vote-error="voteErrors[q.id]"
+          @toggle="toggleQuestion"
+          @vote="castVote"
+        />
       </div>
     </div>
   </div>

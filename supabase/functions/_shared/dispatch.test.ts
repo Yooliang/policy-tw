@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, taskTargetKey } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -61,6 +61,37 @@ Deno.test("pickBySeed：同 seed 同結果、不同 seed 會分散", () => {
   const picks = new Set(["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"].map((s) => pickBySeed(list, s)));
   assert(picks.size > 1);
   assertEquals(pickBySeed([], "x"), null);
+});
+
+Deno.test("提問任務：已答過的代理與已滿 3 份的題目不再派；非提問任務不受影響", () => {
+  const tasks = [
+    { task_id: "q1", task_type: "question", target: { question_id: "Q1" } },
+    { task_id: "q2", task_type: "question", target: { question_id: "Q2" } },
+    { task_id: "q3", task_type: "question", target: { question_id: "Q3" } },
+    { task_id: "audit1", task_type: "audit", target: { source_url: "https://x" } },
+  ];
+  // Q1 這個代理答過、Q2 已滿 3 份 → 都不派；Q3 與非提問任務照派
+  const left = filterAnsweredQuestionTasks(tasks, new Set(["Q1"]), new Set(["Q2"]));
+  assertEquals(left.map((t) => t.task_id), ["q3", "audit1"]);
+  // 沒有任何要排除的 → 全部照派（含空 Set 的快速路徑）
+  assertEquals(filterAnsweredQuestionTasks(tasks, new Set(), new Set()).length, 4);
+});
+
+Deno.test("提問任務排序：彼此依 stance_up 高、建立時間早排序；其他任務位置完全不動", () => {
+  const tasks = [
+    { task_id: "audit1", task_type: "audit", created_at: "2026-09-01T00:00:00Z", target: {} },
+    { task_id: "q-low", task_type: "question", created_at: "2026-09-05T00:00:00Z", target: { question_id: "Q1", stance_up: 1 } },
+    { task_id: "manual1", task_type: "other", created_at: "2026-09-02T00:00:00Z", target: {} },
+    { task_id: "q-high", task_type: "question", created_at: "2026-09-06T00:00:00Z", target: { question_id: "Q2", stance_up: 9 } },
+    { task_id: "q-tie-early", task_type: "question", created_at: "2026-09-03T00:00:00Z", target: { question_id: "Q3", stance_up: 1 } },
+  ];
+  const sorted = sortQuestionTasksBySupport(tasks);
+  // 非提問任務原地不動（第 0、2 個位置還是 audit1、manual1）
+  assertEquals(sorted[0].task_id, "audit1");
+  assertEquals(sorted[2].task_id, "manual1");
+  // 提問任務只在彼此原本佔的位置（1、3、4）內重排：stance_up 高的優先，同分依建立時間早的優先
+  assertEquals([sorted[1].task_id, sorted[3].task_id, sorted[4].task_id], ["q-high", "q-tie-early", "q-low"]);
+  assertEquals(sortQuestionTasksBySupport([tasks[0]]).map((t) => t.task_id), ["audit1"], "只有一筆或沒有提問任務時原樣返回");
 });
 
 Deno.test("不重複派自己交過的任務：認領期只擋別人，但已提交的任務要由伺服器擋掉", () => {

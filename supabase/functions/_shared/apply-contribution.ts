@@ -31,6 +31,8 @@ export interface ContributionRow {
   note: string | null;
   agent_name: string | null;
   contributor_url: string | null;
+  /** question_answer 落庫要記進 question_answers；其他型別的 apply 用不到，選填以免動到既有呼叫端 */
+  agent_tool?: string | null;
   /** politician／candidacy：驗證者兩票指認的同一位（auto-apply 從 votes 算出）或維護者 approve 時指定 */
   resolved_politician_id?: string | null;
 }
@@ -46,6 +48,7 @@ export interface ApplyOutcome {
   created_politician?: boolean;
   similar_policies?: Array<{ id: string; title: string; similarity: number }>;
   task_id?: string;
+  question_id?: string;
 }
 
 function throwIf(error: { message: string } | null, where: string): void {
@@ -341,6 +344,61 @@ async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow)
   return { status: "applied", message: `提議已成為公開任務（task_id=${task.id}），/next 會派出`, task_id: String(task.id) };
 }
 
+/**
+ * question_answer：把答案寫進 question_answers。
+ * 資料庫有兩道結構性防線（migration 20260912000014）：一個代號一題只能一份（UNIQUE），同一題最多三份（trigger）。
+ * 這裡先用 SELECT 預檢做一樣的判斷，好給出講給 AI 看的清楚訊息；防線本身留給 DB，
+ * 預檢與實際 insert 之間仍有極小的競態窗口，insert 若真的撞上唯一鍵／trigger 也轉成 failed，不當成技術性錯誤丟出去變 500。
+ */
+async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const questionId = str(p.question_id);
+  const answer = str(p.answer);
+  if (!questionId || !answer) return { status: "failed", message: "question_answer 要帶 question_id 與 answer" };
+  const agentName = row.agent_name?.trim();
+  if (!agentName) return { status: "failed", message: "question_answer 一定要有 agent_name（回答要掛在哪個代號底下）" };
+
+  const { data: question, error: qError } = await supabase.from("citizen_questions").select("id, status").eq("id", questionId).maybeSingle();
+  throwIf(qError, "citizen_questions lookup");
+  if (!question) return { status: "failed", message: `找不到提問 ${questionId}，可能已被下架，不用再回答` };
+  if (question.status === "hidden") return { status: "failed", message: "這題已被下架，不再收答案" };
+
+  const { data: existing, error: existingError } = await supabase.from("question_answers").select("agent_name").eq("question_id", questionId);
+  throwIf(existingError, "question_answers read");
+  const answers = (existing ?? []) as Array<{ agent_name: string }>;
+  if (answers.some((a) => a.agent_name.toLowerCase() === agentName.toLowerCase())) {
+    return { status: "failed", message: `代號「${agentName}」已經回答過這一題，一個代號一題只能答一份；想補充請用不同角度指出前一份的不足，或去回答其他題目` };
+  }
+  if (answers.length >= 3) {
+    return { status: "failed", message: "這題已經有 3 份答案了，不再收新的；請去回答其他題目" };
+  }
+
+  const insertRow = {
+    question_id: questionId,
+    agent_name: agentName,
+    agent_tool: row.agent_tool ?? null,
+    answer,
+    source_urls: row.source_urls,
+    contribution_id: row.id,
+  };
+  const { data: inserted, error } = await supabase.from("question_answers").insert(insertRow).select("*").maybeSingle();
+  if (error) {
+    // 競態窗口撞上 DB 的兩道防線：唯一鍵（重複代號）或 trigger（滿三份）；轉成講清楚的 failed，不當技術性錯誤重試
+    const message = error.message ?? String(error);
+    if (/question_answers_one_per_agent|duplicate key/i.test(message)) {
+      return { status: "failed", message: `代號「${agentName}」已經回答過這一題，一個代號一題只能答一份` };
+    }
+    if (/已經有 3 份答案/.test(message)) {
+      return { status: "failed", message: "這題已經有 3 份答案了，不再收新的；請去回答其他題目" };
+    }
+    throw new Error(`question_answers insert: ${message}`);
+  }
+  if (!inserted) throw new Error("question_answers insert 沒有回傳 id");
+  await recordInsert(supabase, ctx, "question_answers", inserted.id, inserted);
+  return { status: "applied", message: `已將「${agentName}」的答案登記到提問 ${questionId}`, question_id: questionId };
+}
+
 /** no_change：代理核對後確認與資料庫一致 → 只關閉該任務、不動任何正式資料（自動缺口任務沒有列可關，只記錄） */
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
@@ -352,7 +410,7 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   return { status: "applied", message: `已記錄無異動並關閉任務 ${taskId}`, task_id: taskId };
 }
 
-const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, contributor_url, status, review_notes";
+const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, review_notes";
 
 /**
  * adjudication（4 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
@@ -420,6 +478,7 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     case "policy_progress": return await applyPolicyProgress(supabase, row);
     case "correction": return await applyCorrection(supabase, row);
     case "task_suggestion": return await applyTaskSuggestion(supabase, row);
+    case "question_answer": return await applyQuestionAnswer(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

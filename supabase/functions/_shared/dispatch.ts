@@ -108,6 +108,43 @@ export function filterAdjudicateTasks<T extends TaskLike & { task_type?: string 
   });
 }
 
+/**
+ * 提問任務（task_type="question"）不重派給已經答過那一題的代理、也不再派已滿 3 份答案的題目——
+ * DB 的 UNIQUE 與 trigger 是最後防線，這裡先擋掉，別讓代理白跑一趟才在 /report 撞牆。
+ */
+export function filterAnsweredQuestionTasks<T extends TaskLike & { task_type?: string }>(
+  tasks: readonly T[],
+  answeredQuestionIds: ReadonlySet<string>,
+  fullQuestionIds: ReadonlySet<string>,
+): T[] {
+  if (answeredQuestionIds.size === 0 && fullQuestionIds.size === 0) return [...tasks];
+  return tasks.filter((t) => {
+    if (t.task_type !== "question") return true;
+    const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+    const qid = typeof target.question_id === "string" ? target.question_id : null;
+    if (!qid) return true;
+    return !answeredQuestionIds.has(qid) && !fullQuestionIds.has(qid);
+  });
+}
+
+/**
+ * 提問任務彼此之間依 stance_up 高、建立時間早排序（讓比較多人想知道答案的題目優先派出）；
+ * 只調整提問任務彼此佔的位置，其他任務的順序與位置完全不動——不讓提問任務整體插到前面，
+ * 維持既有的派工比例與隨機分散（pickBySeed 仍在整個候選清單上挑）。
+ */
+export function sortQuestionTasksBySupport<T extends TaskLike & { task_type?: string; created_at?: string; target?: unknown }>(tasks: readonly T[]): T[] {
+  const stanceUpOf = (t: T): number => {
+    const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+    return typeof target.stance_up === "number" ? target.stance_up : 0;
+  };
+  const slots = tasks.map((t, index) => ({ t, index })).filter(({ t }) => t.task_type === "question");
+  if (slots.length <= 1) return [...tasks];
+  const sorted = [...slots].sort((a, b) => stanceUpOf(b.t) - stanceUpOf(a.t) || Date.parse(a.t.created_at ?? "") - Date.parse(b.t.created_at ?? ""));
+  const out = [...tasks];
+  slots.forEach(({ index }, i) => { out[index] = sorted[i].t; });
+  return out;
+}
+
 export interface OriginalIdentity { id: string; agent_name: string; contributor_ip_hash: string }
 
 /** 裁決（adjudication）的驗證不派給原貢獻的提交者（同名或同 IP） */
