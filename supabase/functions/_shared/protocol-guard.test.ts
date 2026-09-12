@@ -9,8 +9,9 @@
  * 寫死檔名的測試在新增 migration 之後會繼續守著舊數字——這個專案踩過。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { AGREE_THRESHOLDS, type RiskLevel } from "./consensus.ts";
+import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
+import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const SKILL_MD = new URL("../../../public/skill.md", import.meta.url);
@@ -133,9 +134,67 @@ Deno.test("無異動的冷卻天數：SQL 與 TypeScript 要是同一個數字",
 
   // 冷卻過濾必須在 LIMIT 之前，否則要 12 筆濾掉 3 筆就只回 9 筆，
   // 甚至在還有幾百筆可派時回空。
-  const { sql: tasksSql } = await latestMigrationDefining("contribution_auto_tasks");
+  // 要找的是薄薄那一層 wrapper，不是 _raw。不帶括號會配到 contribution_auto_tasks_raw
+  // 的定義檔（它沒有冷卻過濾也沒有 LIMIT），這支測試就會在完全正確的改動上變紅。
+  const { sql: tasksSql } = await latestMigrationDefining("contribution_auto_tasks(");
   const body = tasksSql.slice(tasksSql.lastIndexOf("FUNCTION contribution_auto_tasks("));
   const filterAt = body.indexOf("task_checks");
   const limitAt = body.lastIndexOf("LIMIT");
   assert(filterAt > 0 && limitAt > filterAt, "冷卻過濾要寫在 LIMIT 之前");
+});
+
+Deno.test("每一種貢獻型別的風險等級：SQL 與 TypeScript 要一致", async () => {
+  // 只比對門檻矩陣（風險 × 來源等級）抓不到「型別被分錯級」。2026-09-12 就是這樣漏掉
+  // roster_check：TS 分 light（官方 1 票），SQL 那行沒寫它、掉進 ELSE 'normal'（2 票）。
+  // 代理看到的 required_agree 走 TS，真正決定狀態的是 SQL，於是畫面顯示 1/1 卻永遠
+  // 停在 pending，沒有任何錯誤。新增型別時這支測試會先紅。
+  const { sql } = await latestMigrationDefining("contribution_required_agree");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_required_agree"));
+  const from = body.indexOf("v_risk := CASE");
+  assert(from > 0, "找不到 SQL 的風險分級 CASE");
+  const caseBlock = body.slice(from, body.indexOf("END;", from));
+  const branches = new Map<string, string>();
+  for (const m of caseBlock.matchAll(/WHEN ([\s\S]*?) THEN '(\w+)'/g)) {
+    branches.set(m[2], `${branches.get(m[2]) ?? ""} ${m[1]}`);
+  }
+  assert(branches.size > 0, "SQL 的風險分級 CASE 解析不出任何分支");
+
+  // correction 的風險看 payload（改 candidate_status 才是 high），不能用型別名直接比
+  const PAYLOAD_DEPENDENT = new Set<string>(["correction"]);
+  for (const type of CONTRIBUTION_TYPES) {
+    if (PAYLOAD_DEPENDENT.has(type)) continue;
+    const risk = riskLevel(type, {});
+    const quoted = new RegExp(`'${type}'`);
+    if (risk === "normal") {
+      // normal 是 ELSE 的結果，所以型別名不該出現在任何分支裡
+      for (const [r, text] of branches) {
+        assert(!quoted.test(text), `SQL 把 ${type} 分到 ${r}，TS 說是 normal`);
+      }
+    } else {
+      assert(
+        quoted.test(branches.get(risk) ?? ""),
+        `SQL 沒有把 ${type} 分到 ${risk}（TS 是 ${risk}）——代理看到一個門檻、資料庫用另一個，貢獻會卡在 pending 沒有錯誤訊息`,
+      );
+    }
+  }
+  assert(/candidate_status/.test(branches.get("high") ?? ""), "correction 改 candidate_status 要算 high");
+});
+
+Deno.test("名單清查：查不到官方名單不能算清查完成", async () => {
+  // 缺口判斷「清查過了沒」必須只看 cec_count 有值的那些紀錄。
+  // 少了這個 FILTER，一筆「我找不到名單」的回報就會把那個縣市壓住七天，
+  // 跟真的把名單全部比對完一樣——2026-09-12 實際發生過。
+  const { sql } = await latestMigrationContaining("auto:roster_check:");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
+  assert(
+    /MAX\(checked_at\)\s+FILTER\s+\(WHERE\s+cec_count\s+IS\s+NOT\s+NULL\)\s+AS\s+last_checked/.test(body),
+    "last_checked 要只算 cec_count 有值的紀錄，否則查不到名單也會被當成清查完成",
+  );
+  // 找不到名單的嘗試要另外壓一小段時間，不然同一個縣市會被無限重派
+  assert(body.includes("roster_attempt_cooldown_days()"), "查不到名單的嘗試要有自己的冷卻");
+  const { sql: fnSql } = await latestMigrationDefining("roster_attempt_cooldown_days");
+  const m = fnSql.match(/FUNCTION roster_attempt_cooldown_days\(\)[\s\S]*?SELECT\s+(\d+)/);
+  assert(m, "找不到嘗試冷卻天數");
+  const attemptDays = Number(m![1]);
+  assert(attemptDays >= 1 && attemptDays < TASK_CHECK_COOLDOWN_DAYS, "嘗試冷卻要比無異動冷卻短：那是換人再試，不是結案");
 });
