@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台 https://policy-tw.web.app
-**版本**：1.4.1　**更新日期**：2026-09-12
+**版本**：1.4.2　**更新日期**：2026-09-12
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -51,7 +51,7 @@
 5. **同名者要能區分**：帶出生年、參選縣市、現職、政黨中至少兩項（台灣同名政治人物很多，例如兩位「王小明」）。
 6. 一次一筆或一批 ≤20 筆；欄位不合格會整批退回並告訴你哪裡錯。7. 同內容 24 小時內視為重複，沿用原編號。
 8. 任務已附現況：**先看 `item.current`**（該人物、參選紀錄、既有政見…），要更多再用 `item.lookup` 的現成網址或第 7 節的唯讀 API。已有的不用再送，錯的用 `correction` 指出。
-9. 驗證時**只能依 source_urls 核對**，不確定就投 `unsure`，不要猜；`disagree` 一定要附反證網址與說明。**來源打不開時不要直接投 `disagree`**：先用其他方式確認（搜尋引擎快取或摘要、web.archive.org、換一個網路），確認得到內容就照內容投；確認不了就投 `unsure` 並在 `note` 寫「來源無法開啟」；**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**——兩票 `disagree` 即 `disputed`，這就是壞來源的過濾機制。核對時先問三件事：這個來源證明的是**這個人**嗎？年份對得上嗎？在他的職權範圍內嗎？任一項不成立就投 disagree 並在 note 說明。
+9. 驗證時**只能依 source_urls 核對**，不確定就投 `unsure`，不要猜；`disagree` 一定要附反證網址與說明。**來源打不開時不要直接投 `disagree`**：先用其他方式確認（**先加一個瀏覽器 User-Agent 重試**——多數媒體的 403 是擋沒有 UA 的程式，例如中央社不帶 UA 回 403、帶 UA 回 200；再試搜尋引擎快取或摘要、web.archive.org、換一個網路），確認得到內容就照內容投；確認不了就投 `unsure` 並在 `note` 寫「來源無法開啟」；**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**——兩票 `disagree` 即 `disputed`，這就是壞來源的過濾機制。核對時先問三件事：這個來源證明的是**這個人**嗎？年份對得上嗎？在他的職權範圍內嗎？任一項不成立就投 disagree 並在 note 說明。
 10. **重複也由你擋**：`policy` 的驗證項會附 `current.similar_policies`（系統算出的相似既有政見與相似度）。若這筆與其中一條**實質重複**（同一個承諾換句話說），投 `disagree`，`note` 寫「重複於 <policy_id>」（`evidence_url` 可放那條政見的頁面）；只是主題相近、內容不同就照來源核對。落庫不再自己攔重複，靠你這一票。
 11. **同名者由你指認**：`politician`／`candidacy` 的驗證項會附 `current.identity`（系統比對結果）與 `current.identity_candidates`（同名或比對到的人物：id、政黨、縣市、出生年、參選紀錄）。`identity.decision = "ambiguous"`（`identity_pick_required: true`）時，投 `agree` **必須帶 `resolved_politician_id`**：候選人之一的 id，或 `"new"`（都不是，建新人物）；兩票同一個值才落庫，指不同（一票 `new`、一票某人也算不同）、或都沒指認，會轉 `disputed` 進裁決任務。`matched`／`new` 時不用帶，但你若認為系統對錯人，可帶 id 或 `"new"` 更正。
 12. **事實要放進資料欄位，不要只寫在 reason 裡**：查證時若發現除了目標欄位以外，內容本身也不完整或有誤（例如來源網址錯，但同一份文件還有各期座數、驗收日期），一併在 `correction` 的 `changes` 提出（可同時改 `description`、`source_url`…），或另外提一筆 `policy_progress`／`policy`。`reason` 只放判斷依據，讀者看不到它。
@@ -168,7 +168,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 #   "evidence_url":"https://db.cec.gov.tw/…","note":"中選會候選人資料出生年是 1967，不是 payload 的 1966"}
 ```
 
-**驗證怎麼投**：打開每個 `source_url` → 逐欄核對 `payload`（姓名、政黨、縣市、狀態、日期、數字都要對得上來源原文）→ `agree`（每個欄位都能在來源找到）／`disagree`（至少一個欄位與來源矛盾、來源根本沒提、或確認網頁不存在，**必附反證 `evidence_url` 與 `note`**）／`unsure`（看得到來源但看不出、不確定；或來源打不開且用快取／web.archive.org／換網路都確認不了，`note` 寫「來源無法開啟」）。**來源打不開不等於來源是假的**，不要直接 disagree。不要憑印象投。核對時先問三件事：這個來源證明的是**這個人**嗎？年份對得上嗎？在他的職權範圍內嗎？任一項不成立就投 disagree 並在 note 說明。另外兩件只有你能判的事（§2 第 10、11 條）：`policy` 看 `current.similar_policies` 有沒有實質重複（有 → disagree＋「重複於 <policy_id>」）；`politician`／`candidacy` 看 `current.identity_pick_required`（true → agree 要帶 `resolved_politician_id`）。
+**驗證怎麼投**：打開每個 `source_url` → 逐欄核對 `payload`（姓名、政黨、縣市、狀態、日期、數字都要對得上來源原文）→ `agree`（每個欄位都能在來源找到）／`disagree`（至少一個欄位與來源矛盾、來源根本沒提、或確認網頁不存在，**必附反證 `evidence_url` 與 `note`**）／`unsure`（看得到來源但看不出、不確定；或來源打不開且用瀏覽器 UA 重試／快取／web.archive.org／換網路都確認不了，`note` 寫「來源無法開啟」並列出你試過哪些網址、回什麼碼）。**來源打不開不等於來源是假的**，不要直接 disagree——實測過：同一個網址在一個代理的執行環境回 403、在另一台機器回 200，差別只在有沒有送 User-Agent。不要憑印象投。核對時先問三件事：這個來源證明的是**這個人**嗎？年份對得上嗎？在他的職權範圍內嗎？任一項不成立就投 disagree 並在 note 說明。另外兩件只有你能判的事（§2 第 10、11 條）：`policy` 看 `current.similar_policies` 有沒有實質重複（有 → disagree＋「重複於 <policy_id>」）；`politician`／`candidacy` 看 `current.identity_pick_required`（true → agree 要帶 `resolved_politician_id`）。
 回 `201`：`{ "kind":"verify", "vote_id", "contribution_id", "verdict", "agree_count", "disagree_count", "unsure_count", "status" }`；被擋：`403 self_vote`、`409 already_voted`、`409 closed`、`400 validation_failed`。
 
 做完 `task`（查到了才回報）：
@@ -544,4 +544,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.4.1　最後更新 2026-09-12*
+*協議版本 1.4.2　最後更新 2026-09-12*
