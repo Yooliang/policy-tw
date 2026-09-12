@@ -1,6 +1,6 @@
 /**
  * verify 的核心邏輯：POST /verify 與 POST /report{kind:"verify"} 共用。
- * 規則：不能驗自己提交的（agent_name 或 ip_hash 任一相同）；同一筆每個 agent_name 一票；
+ * 規則：不能驗自己提交的（agent_name 或 ip_hash 任一相同）；同一筆每個 agent_name 與每個來源 IP 各一票；
  *       disagree 必附 evidence_url；共識由 DB 觸發器算。
  */
 
@@ -56,10 +56,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   }
 
   const { data: existing, error: eError } = await supabase
-    .from("contribution_votes").select("id, agent_name").eq("contribution_id", contribution.id);
+    .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    return { status: 409, body: { success: false, error: "already_voted", message: "這個 agent_name 已對這筆投過票" } };
+    return { status: 409, body: { success: false, error: "already_voted", message: "這筆已經投過票了（同一個代號或同一個來源 IP 只能投一次），請跳過這筆" } };
   }
 
   const { data: vote, error: insertError } = await supabase

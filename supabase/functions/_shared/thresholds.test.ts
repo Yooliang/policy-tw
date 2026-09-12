@@ -1,6 +1,6 @@
-// 門檻 = 型別風險 × 來源等級；SQL（migration 000009）與 TS（consensus.ts／source-priority.ts）必須一致
+// 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { AGREE_THRESHOLDS, consensusStatus, requiredAgree, riskLevel, tally } from "./consensus.ts";
+import { AGREE_THRESHOLDS, consensusStatus, isDuplicateVote, requiredAgree, riskLevel, tally, tallyByIp } from "./consensus.ts";
 import { SOURCE_PRIORITY } from "./source-priority.ts";
 
 const OFFICIAL = "https://db.cec.gov.tw/ElecTable/Election/ElecTickets";
@@ -8,13 +8,14 @@ const MEDIA = "https://www.cna.com.tw/news/aipl/202609045002.aspx";
 const SOCIAL = "https://www.facebook.com/candidate/posts/123";
 const OTHER = "https://candidate-2026.tw/policy";
 
-Deno.test("來源等級門檻：一般資料 官方 1／媒體 2／社群 3／其他 3", () => {
-  assertEquals(requiredAgree("policy", {}, [OFFICIAL]), 1);
+Deno.test("來源等級門檻：一般資料 官方 2／媒體 2／社群 3／其他 3", () => {
+  assertEquals(requiredAgree("policy", {}, [OFFICIAL]), 2, "官方原本 1 票，但 1 票配上換機器就能規避的自我投票檢查等於單人可寫入");
   assertEquals(requiredAgree("policy", {}, [MEDIA]), 2);
   assertEquals(requiredAgree("policy", {}, [SOCIAL]), 3);
   assertEquals(requiredAgree("policy", {}, [OTHER]), 3);
   assertEquals(requiredAgree("policy", {}), 3, "沒給來源視為 other");
-  assertEquals(consensusStatus(tally([{ verdict: "agree" }]), "pending", requiredAgree("policy", {}, [OFFICIAL])), "verified", "官方來源 1 票即上線");
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }]), "pending", requiredAgree("policy", {}, [OFFICIAL])), "pending", "官方來源 1 票不再直接上線");
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "pending", requiredAgree("policy", {}, [OFFICIAL])), "verified", "官方來源 2 票上線");
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "pending", requiredAgree("policy", {}, [SOCIAL])), "pending", "社群來源 2 票不夠");
 });
 
@@ -37,12 +38,12 @@ Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；
   assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 4);
   assertEquals(requiredAgree("adjudication", {}, [OTHER]), 4);
   assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
-  assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 1, "有一個官方就算官方");
+  assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 2, "有一個官方就算官方");
   assertEquals(riskLevel("policy_progress", {}), "normal");
   assertEquals(riskLevel("candidacy", {}), "high");
 });
 
-Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣等於 source-priority.ts 與 AGREE_THRESHOLDS", async () => {
+Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority.ts 與 AGREE_THRESHOLDS；計票依來源 IP 去重", async () => {
   const sql = await Deno.readTextFile(new URL("../../migrations/20260912000009_zero_manual_points.sql", import.meta.url));
   const fn = sql.slice(sql.indexOf("FUNCTION contribution_source_kind"), sql.indexOf("FUNCTION contribution_required_agree"));
   const arrays = [...fn.matchAll(/ARRAY\[([^\]]+)\]/g)].map((m) => m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, "")));
@@ -52,8 +53,9 @@ Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣�
   assertEquals(arrays[1], byKind("media"));
   assertEquals(arrays[2], byKind("social"));
 
-  // 門檻函式最新定義在 000011（多欄位 correction）；矩陣與風險判斷從那裡讀
-  const latest = await Deno.readTextFile(new URL("../../migrations/20260912000011_correction_multi_field.sql", import.meta.url));
+  // 門檻函式最新定義在 000013（同來源 IP 去重＋官方兩票）；矩陣與風險判斷從那裡讀。
+  // 換新 migration 重新定義這支函式時，這行要跟著指到最新那支，否則測試會守著舊數字。
+  const latest = await Deno.readTextFile(new URL("../../migrations/20260912000013_distinct_ip_votes_and_official_two.sql", import.meta.url));
   const matrix = latest.slice(latest.indexOf("FUNCTION contribution_required_agree"));
   assert(matrix.includes(`p_payload->'changes' @> '[{"field":"candidate_status"}]'::jsonb`), "多欄位 correction 含 candidate_status 也算高風險");
   const rowRe = /WHEN v_risk = '(\w+)' THEN CASE v_kind WHEN 'official' THEN (\d+) WHEN 'media' THEN (\d+) WHEN 'social' THEN (\d+) ELSE (\d+) END/g;
@@ -70,4 +72,47 @@ Deno.test("SQL 與 TS 一致：migration 000009 的網域清單與門檻矩陣�
   assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
   assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change') THEN 'light'"));
   assert(sql.includes("contribution_required_agree(contribution_type, payload, source_urls)"), "共識函式改用三參數");
+});
+
+Deno.test("同一個來源 IP 一筆貢獻只算一票：SQL 用 COUNT(DISTINCT verifier_ip_hash)，TS 的 tallyByIp 要一致", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20260912000013_distinct_ip_votes_and_official_two.sql", import.meta.url));
+  const fn = sql.slice(sql.indexOf("FUNCTION contribution_apply_consensus"));
+  assert(fn.includes("COUNT(DISTINCT verifier_ip_hash) FILTER (WHERE verdict = 'agree')"), "agree 依來源 IP 去重");
+  assert(fn.includes("COUNT(DISTINCT verifier_ip_hash) FILTER (WHERE verdict = 'disagree')"), "disagree 也要去重，否則一個人就能把資料打成爭議");
+
+  // 同一台機器換三個代號投同意 → 只算一票，過不了官方兩票的門檻
+  const sameMachine = [
+    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
+    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
+    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
+  ];
+  assertEquals(tallyByIp(sameMachine).agree, 1);
+  assertEquals(consensusStatus(tallyByIp(sameMachine), "pending", AGREE_THRESHOLDS.normal.official), "pending");
+
+  // 兩台不同機器 → 兩票，達官方門檻
+  const twoMachines = [
+    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
+    { verdict: "agree" as const, verifier_ip_hash: "bbb" },
+  ];
+  assertEquals(tallyByIp(twoMachines).agree, 2);
+  assertEquals(consensusStatus(tallyByIp(twoMachines), "pending", AGREE_THRESHOLDS.normal.official), "verified");
+
+  // 同一台機器投反對也只算一票，湊不到爭議所需的兩票
+  const sameMachineDisagree = [
+    { verdict: "disagree" as const, verifier_ip_hash: "ccc" },
+    { verdict: "disagree" as const, verifier_ip_hash: "ccc" },
+  ];
+  assertEquals(tallyByIp(sameMachineDisagree).disagree, 1);
+  assertEquals(consensusStatus(tallyByIp(sameMachineDisagree), "pending", AGREE_THRESHOLDS.normal.official), "pending");
+
+  // unsure 不影響狀態，維持總筆數
+  assertEquals(tallyByIp([{ verdict: "unsure", verifier_ip_hash: "ddd" }, { verdict: "unsure", verifier_ip_hash: "ddd" }]).unsure, 2);
+});
+
+Deno.test("投票去重：同一筆貢獻，同代號或同來源 IP 都只能投一次", () => {
+  const existing = [{ agent_name: "alice", verifier_ip_hash: "aaa" }];
+  assert(isDuplicateVote(existing, { agent_name: "alice", ip_hash: "zzz" }), "同代號換機器不行");
+  assert(isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號也不行");
+  assert(!isDuplicateVote(existing, { agent_name: "bob", ip_hash: "bbb" }), "不同人不同機器可以");
+  assertEquals(isDuplicateVote([], { agent_name: "alice", ip_hash: "aaa" }), false);
 });

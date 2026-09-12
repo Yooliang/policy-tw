@@ -1,6 +1,6 @@
 /**
  * 同儕驗證共識規則（第一版：匿名、權重一律 1、沒有信譽分級）。
- * 門檻同時寫在 migration 20260912000002 的 contribution_apply_consensus()，改一邊要改另一邊；
+ * 門檻與計票同時寫在 migration 20260912000013 的 contribution_required_agree()／contribution_apply_consensus()，改一邊要改另一邊；
  * skill.md 也寫出同樣的數字（skill.md 是唯一協議文件，沒有 skill.json）。
  */
 
@@ -20,7 +20,7 @@ export type RiskLevel = "normal" | "high" | "light" | "adjudication";
  * 官方來源通過得更快，非官方要更多人看過；多個來源取最高等級。
  */
 export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
-  normal: { official: 1, media: 2, social: 3, other: 3 },
+  normal: { official: 2, media: 2, social: 3, other: 3 },
   high: { official: 4, media: 6, social: 8, other: 8 },
   light: { official: 1, media: 2, social: 2, other: 2 },
   adjudication: { official: 4, media: 4, social: 4, other: 4 },
@@ -82,9 +82,34 @@ export function isSelfVote(contribution: ContributionIdentity, voter: VoterIdent
   return contribution.agent_name.toLowerCase() === voter.agent_name.toLowerCase() || contribution.contributor_ip_hash === voter.ip_hash;
 }
 
-/** 同一 contribution 同一 agent_name 只能投一次（DB 也有 unique）；同機不同名可以，但會被記下。 */
-export function isDuplicateVote(existing: readonly { agent_name: string }[], voter: VoterIdentity): boolean {
-  return existing.some((v) => v.agent_name.toLowerCase() === voter.agent_name.toLowerCase());
+/**
+ * 同一筆貢獻，同一個 agent_name 或同一個來源 IP 只能投一次。
+ *
+ * 原本只比 agent_name，同一台機器換個代號就能再投一票，於是一個人自己
+ * 就能把票數投到門檻。計票端（contribution_apply_consensus）也改成依來源 IP
+ * 去重，這裡先把重複的票擋在門外並講清楚原因，不要靜靜收下卻不計入。
+ */
+export function isDuplicateVote(existing: readonly VoteRecord[], voter: VoterIdentity): boolean {
+  return existing.some((v) =>
+    v.agent_name.toLowerCase() === voter.agent_name.toLowerCase() ||
+    (!!v.verifier_ip_hash && v.verifier_ip_hash === voter.ip_hash)
+  );
+}
+
+export interface VoteRecord {
+  agent_name: string;
+  verifier_ip_hash?: string | null;
+}
+
+/** 依來源 IP 去重的票數，鏡射 SQL 的 COUNT(DISTINCT verifier_ip_hash)；unsure 不影響狀態，算總筆數。 */
+export function tallyByIp(votes: readonly { verdict: Verdict; verifier_ip_hash?: string | null }[]): VoteCounts {
+  const seen: Record<Verdict, Set<string>> = { agree: new Set(), disagree: new Set(), unsure: new Set() };
+  let unsure = 0;
+  for (const v of votes) {
+    if (v.verdict === "unsure") { unsure += VOTE_WEIGHT; continue; }
+    seen[v.verdict].add(v.verifier_ip_hash ?? "");
+  }
+  return { agree: seen.agree.size, disagree: seen.disagree.size, unsure };
 }
 
 /** agent_name＝人的代號（GitHub 帳號、暱稱），2～64 字，字母數字與 ._-；不含模型名 */
