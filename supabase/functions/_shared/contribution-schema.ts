@@ -7,7 +7,7 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal"] as const;
 export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
@@ -37,6 +37,9 @@ export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], reado
   politician_elections: ["candidate_status", "position", "election_type"],
   policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id"],
 };
+
+/** 目前只開放移除政見。人物與參選紀錄牽動太多關聯資料，要先有可逆的合併設計。 */
+export const REMOVAL_TABLES = ["policies"] as const;
 
 export const MAX_BATCH = 20;
 export const MAX_SOURCE_URLS = 10;
@@ -201,6 +204,14 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.progress !== undefined && !(isInt(p.progress) && p.progress >= 0 && p.progress <= 100)) push("payload.progress", "要是 0～100 的整數");
       if (!isStr(p.note, 10, 3000)) push("payload.note", "進度說明必填（至少 10 字：做了什麼、依據哪份文件）");
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
+      break;
+    }
+    case "removal": {
+      // 移除是軟移除：資料從網站消失但留著、可以復原。所以要求的是「講清楚為什麼不該存在」，
+      // 不是要求你附一個證明它不存在的來源——最常見的移除理由就是查遍了找不到任何來源。
+      if (!oneOf(REMOVAL_TABLES, p.target_table)) push("payload.target_table", `目前只能移除 ${REMOVAL_TABLES.join("／")}`);
+      if (!isUuid(p.target_id)) push("payload.target_id", "target_id 要是該筆資料的 uuid");
+      if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（至少 20 字）：說清楚這筆為什麼不該存在，例如「這是參選表態不是政見」「查遍官方與媒體都沒有這個人」");
       break;
     }
     case "adjudication": {

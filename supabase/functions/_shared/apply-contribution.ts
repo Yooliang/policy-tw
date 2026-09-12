@@ -350,6 +350,40 @@ async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow)
  * 這裡先用 SELECT 預檢做一樣的判斷，好給出講給 AI 看的清楚訊息；防線本身留給 DB，
  * 預檢與實際 insert 之間仍有極小的競態窗口，insert 若真的撞上唯一鍵／trigger 也轉成 failed，不當成技術性錯誤丟出去變 500。
  */
+/**
+ * 移除一筆明顯不該存在的資料。
+ *
+ * 刻意做成軟移除：打上 removed_at 讓它從網站消失，資料與整條查核履歷都留著。
+ * 因為救得回來，門檻才敢訂 3 票而不是比照加減參選人的 4～8 票。
+ * 每一次移除都寫 edit_history，所以 apply 的 revert 可以整筆倒回。
+ */
+async function applyRemoval(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const table = str(p.target_table);
+  const targetId = str(p.target_id);
+  if (table !== "policies") return { status: "failed", message: `目前只能移除政見，收到 ${table}` };
+  if (!targetId) return { status: "failed", message: "缺 target_id" };
+
+  const { data: current, error: readError } = await supabase
+    .from("policies").select("id, title, removed_at").eq("id", targetId).maybeSingle();
+  throwIf(readError, "policies read");
+  if (!current) return { status: "failed", message: `找不到政見 ${targetId}` };
+  if (current.removed_at) {
+    return { status: "applied", policy_id: targetId, message: "這筆政見先前已經移除過了，沿用、未重複處理" };
+  }
+
+  const reason = str(p.reason) ?? "";
+  const { error } = await supabase.from("policies")
+    .update({ removed_at: new Date().toISOString(), removed_reason: reason, removed_by: row.id })
+    .eq("id", targetId);
+  throwIf(error, "policies removal update");
+
+  // 只記 removed_at 這一欄就夠 revert 用：把它倒回 null，資料就回到網站上
+  await recordUpdate(supabase, ctx, "policies", targetId, "removed_at", null, "removed");
+  return { status: "applied", policy_id: targetId, message: `政見「${current.title}」已從網站移除（資料留著，可還原）：${reason}` };
+}
+
 async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -479,6 +513,7 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     case "correction": return await applyCorrection(supabase, row);
     case "task_suggestion": return await applyTaskSuggestion(supabase, row);
     case "question_answer": return await applyQuestionAnswer(supabase, row);
+    case "removal": return await applyRemoval(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

@@ -140,3 +140,30 @@ Deno.test("correction 可以改政見的所屬選舉屆別：值要是已知年�
   });
   assert(mismatch.errors.length > 0);
 });
+
+Deno.test("removal：目前只開放移除政見，理由至少 20 字；門檻固定 3 票不看來源", () => {
+  const base = {
+    agent_name: "xiaoliang-test",
+    contribution_type: "removal",
+    payload: {
+      target_table: "policies",
+      target_id: "00000000-0000-4000-8000-000000000001",
+      reason: "這是參選表態不是政見，內容只說願不願意被徵召，而且查不到任何來源網址",
+    },
+    source_urls: ["https://db.cec.gov.tw/ElecTable/Election/ElecTickets"],
+  };
+  assertEquals(validateContributionRequest(base).errors.length, 0);
+
+  // 理由太短擋下：移除不要求證明「它不存在」，但要求講清楚為什麼不該存在
+  const shortReason = validateContributionRequest({ ...base, payload: { ...base.payload, reason: "不對" } });
+  assert(shortReason.errors.some((e) => e.path === "payload.reason"));
+
+  // 人物與參選紀錄還不開放移除：牽動太多關聯資料，要先有可逆的合併設計
+  const politicians = validateContributionRequest({ ...base, payload: { ...base.payload, target_table: "politicians" } });
+  assert(politicians.errors.some((e) => e.path === "payload.target_table"));
+
+  // 門檻固定 3 票，官方與社群來源一樣
+  assertEquals(requiredAgree("removal", base.payload, ["https://db.cec.gov.tw/x"]), 3);
+  assertEquals(requiredAgree("removal", base.payload, ["https://www.facebook.com/x"]), 3);
+  assertEquals(riskLevel("removal", base.payload), "removal");
+});
