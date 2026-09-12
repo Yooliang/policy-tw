@@ -114,6 +114,12 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "roster_check": {
+      const cec = typeof p.cec_count === "number" ? `${p.cec_count} 人` : "查不到";
+      summary = `清查 ${str(p.region)} ${str(p.election_id)} ${str(p.election_type)} 名單：中選會 ${cec}、我們 ${typeof p.ours_count === "number" ? `${p.ours_count} 人` : "?"}、另補 ${typeof p.submitted === "number" ? p.submitted : 0} 筆`;
+      targetName = null;
+      break;
+    }
     case "removal": {
       // 移除是「這筆不該存在」，讀者最需要看到的是理由，不是 id
       const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);

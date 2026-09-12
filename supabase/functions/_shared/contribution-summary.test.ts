@@ -71,6 +71,7 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     adjudication: { contribution_id: "00000000-0000-4000-8000-000000000002", verdict: "uphold", reason: "原貢獻的來源打得開且內容相符。" },
     question_answer: { question_id: "00000000-0000-4000-8000-000000000003", answer: "依市府預算書，這條路線的第一期經費已編列。" },
     removal: { target_table: "policies", target_id: "00000000-0000-4000-8000-000000000001", reason: "這是參選表態不是政見，也沒有任何來源。" },
+    roster_check: { election_id: 2026, region: "彰化縣", election_type: "縣市議員", cec_count: 41, ours_count: 6, submitted: 35, note: "打開中選會候選人查詢，彰化縣縣市議員共 41 人，我們只有 6 人，另外 35 位已逐筆用 candidacy 補交。" },
   };
 
   for (const type of CONTRIBUTION_TYPES) {

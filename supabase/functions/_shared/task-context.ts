@@ -33,6 +33,7 @@ export function truncateFields<T extends Obj>(row: T, fields: readonly string[])
 }
 
 export interface TaskContextData {
+  roster?: unknown;
   politician?: Obj | null;
   elections?: Obj[];
   policies?: Obj[];
@@ -88,6 +89,21 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
     }
     case "candidacy_source_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    case "roster_check": {
+      const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string } | null;
+      // politician_elections 的 join 會把人物包在 politicians 裡，攤平成代理好比對的樣子
+      const ours = (r?.rows ?? []).map((row) => {
+        const who = (row.politicians ?? {}) as Obj;
+        return { name: who.name, party: who.party, region: who.region, candidate_status: row.candidate_status, position: row.position };
+      }).filter((x) => !r?.region || x.region === r.region);
+      return {
+        region: r?.region ?? null,
+        ours_count: ours.length,
+        ours,
+        previous_checks: r?.history ?? [],
+        hint: "把中選會該縣市該選舉的名單全部列出來，跟 ours 逐一比對。中選會有、ours 沒有的，每一位用 candidacy 補一筆（附中選會網址）；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
+      };
+    }
     case "question": {
       const q = data.question ?? null;
       return {
@@ -144,6 +160,26 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
     data.politician = p ?? null;
+  }
+  if (taskType === "roster_check") {
+    // 把「我們現有的名單」直接給代理。它的工作是跟中選會比對，
+    // 沒必要為了知道我們有誰而多打幾次 API，也避免它查錯範圍。
+    const electionId = typeof target.election_id === "number" ? target.election_id : null;
+    const region = typeof target.region === "string" ? target.region : null;
+    const electionType = typeof target.election_type === "string" ? target.election_type : null;
+    if (electionId && region && electionType) {
+      const [mine, history] = await Promise.all([
+        supabase.from("politician_elections")
+          .select("candidate_status, position, politicians!inner(id, name, party, region)")
+          .eq("election_id", electionId).eq("election_type", electionType)
+          .neq("candidate_status", "not_running").limit(300),
+        supabase.from("roster_checks")
+          .select("checked_at, cec_count, ours_count, submitted, agent_name, source_url")
+          .eq("election_id", electionId).eq("region", region).eq("election_type", electionType)
+          .order("checked_at", { ascending: false }).limit(3),
+      ]);
+      data.roster = { rows: mine.data ?? [], history: history.data ?? [], region };
+    }
   }
   if (taskType === "policy_missing" && pid) {
     const [el, pol] = await Promise.all([

@@ -167,3 +167,40 @@ Deno.test("removal：目前只開放移除政見，理由至少 20 字；門檻�
   assertEquals(requiredAgree("removal", base.payload, ["https://www.facebook.com/x"]), 3);
   assertEquals(riskLevel("removal", base.payload), "removal");
 });
+
+Deno.test("roster_check：三個定位欄位必填、cec_count 可留空、門檻走 light（官方 1 票）", () => {
+  const base = {
+    agent_name: "xiaoliang-test",
+    contribution_type: "roster_check",
+    payload: {
+      election_id: 2026,
+      region: "彰化縣",
+      election_type: "縣市議員",
+      cec_count: 41,
+      ours_count: 6,
+      submitted: 35,
+      note: "打開中選會候選人查詢，彰化縣縣市議員共 41 人，我們只有 6 人，另外 35 位已逐筆補交。",
+    },
+    source_urls: ["https://db.cec.gov.tw/ElecTable/Election/ElecTickets"],
+  };
+  assertEquals(validateContributionRequest(base).errors.length, 0);
+
+  // 查不到官方名單時 cec_count 可以整個不填，但 note 要說清楚查了哪裡
+  const { cec_count: _drop, ...noCount } = base.payload;
+  assertEquals(validateContributionRequest({ ...base, payload: noCount }).errors.length, 0);
+
+  // 三個定位欄位是任務 target 帶回來的，少一個就不知道要標記哪個縣市
+  for (const field of ["region", "election_type", "election_id"]) {
+    const p = { ...base.payload } as Record<string, unknown>;
+    delete p[field];
+    assert(validateContributionRequest({ ...base, payload: p }).errors.some((e) => e.path === `payload.${field}`), `${field} 應該必填`);
+  }
+
+  // note 太短擋下：清查的價值就在說清楚比對了什麼
+  assert(validateContributionRequest({ ...base, payload: { ...base.payload, note: "查過" } }).errors.some((e) => e.path === "payload.note"));
+
+  // 不改核心資料，走 light：官方來源 1 票、其他 2 票
+  assertEquals(riskLevel("roster_check", base.payload), "light");
+  assertEquals(requiredAgree("roster_check", base.payload, ["https://db.cec.gov.tw/x"]), 1);
+  assertEquals(requiredAgree("roster_check", base.payload, ["https://example.com/x"]), 2);
+});

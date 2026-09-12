@@ -7,8 +7,8 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal"] as const;
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "other"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -204,6 +204,18 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.progress !== undefined && !(isInt(p.progress) && p.progress >= 0 && p.progress <= 100)) push("payload.progress", "要是 0～100 的整數");
       if (!isStr(p.note, 10, 3000)) push("payload.note", "進度說明必填（至少 10 字：做了什麼、依據哪份文件）");
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
+      break;
+    }
+    case "roster_check": {
+      // 回報「我清查過某縣市某選舉的名單」。它不改核心資料，但會讓那個縣市的清查任務
+      // 七天內不再派，所以要求附得出官方名單網址；查不到就讓 cec_count 留空並說明。
+      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}`);
+      if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
+      if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${ELECTION_TYPES.join("／")} 之一`);
+      if (p.cec_count !== undefined && p.cec_count !== null && !(isInt(p.cec_count) && p.cec_count >= 0)) push("payload.cec_count", "中選會名單人數要是 0 或正整數；查不到就整個不要填");
+      if (p.ours_count !== undefined && !(isInt(p.ours_count) && p.ours_count >= 0)) push("payload.ours_count", "要是 0 或正整數");
+      if (p.submitted !== undefined && !(isInt(p.submitted) && p.submitted >= 0)) push("payload.submitted", "要是 0 或正整數");
+      if (!isStr(p.note, 10, 2000)) push("payload.note", "note 必填（至少 10 字）：說明你打開了哪個名單、比對結果如何、補了誰");
       break;
     }
     case "removal": {

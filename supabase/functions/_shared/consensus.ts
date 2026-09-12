@@ -35,7 +35,11 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
   if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) return "high";
-  if (contributionType === "task_suggestion" || contributionType === "no_change") return "light";
+  // roster_check 跟提議任務、無異動同級：它不改核心資料。
+  // 代價是官方來源只要一票就能把某縣市標記為已清查、壓住那個缺口七天——
+  // 但最壞情況只是七天的延遲，而且 roster_checks 表裡看得到是誰報的；
+  // 要求兩票反而會讓清查永遠確認不了，任務一直重派、代理重複做同一個縣市。
+  if (contributionType === "task_suggestion" || contributionType === "no_change" || contributionType === "roster_check") return "light";
   return "normal";
 }
 

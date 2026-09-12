@@ -351,6 +351,48 @@ async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow)
  * 預檢與實際 insert 之間仍有極小的競態窗口，insert 若真的撞上唯一鍵／trigger 也轉成 failed，不當成技術性錯誤丟出去變 500。
  */
 /**
+ * 記下一次名單清查。
+ *
+ * 這筆落庫就是「這個縣市這種選舉已經清查過」的唯一憑據——自動缺口靠
+ * roster_checks 的最後清查時間決定要不要再派，所以寫進去之後那個任務就消失，
+ * 過了重查週期又自己出現。不需要任何人去關掉它。
+ *
+ * 它刻意不建立任何參選紀錄：缺的人由代理另外用 candidacy 逐筆提交，
+ * 各自走自己的票數。一筆清查回報不該夾帶一整份名單的寫入權。
+ */
+async function applyRosterCheck(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const electionId = int(p.election_id);
+  const region = str(p.region);
+  const electionType = str(p.election_type);
+  if (!electionId || !region || !electionType) {
+    return { status: "failed", message: "缺 election_id／region／election_type，這三個要原樣帶回任務 target 裡的值" };
+  }
+
+  const { data: inserted, error } = await supabase.from("roster_checks").insert({
+    election_id: electionId,
+    region,
+    election_type: electionType,
+    cec_count: int(p.cec_count),
+    ours_count: int(p.ours_count),
+    submitted: int(p.submitted) ?? 0,
+    agent_name: row.agent_name,
+    source_url: row.source_urls[0] ?? null,
+    contribution_id: row.id,
+  }).select("id, checked_at").maybeSingle();
+  throwIf(error, "roster_checks insert");
+  if (!inserted) throw new Error("roster_checks insert 沒有回傳 id");
+
+  await recordInsert(supabase, ctx, "roster_checks", String(inserted.id), inserted);
+  const cec = int(p.cec_count);
+  const detail = cec === null || cec === undefined
+    ? "（查不到官方名單，已記錄這次嘗試）"
+    : `中選會 ${cec} 人、我們 ${int(p.ours_count) ?? "?"} 人、另外補交 ${int(p.submitted) ?? 0} 筆`;
+  return { status: "applied", message: `${region} ${electionId} ${electionType} 名單已清查${detail}` };
+}
+
+/**
  * 移除一筆明顯不該存在的資料。
  *
  * 刻意做成軟移除：打上 removed_at 讓它從網站消失，資料與整條查核履歷都留著。
@@ -514,6 +556,7 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     case "task_suggestion": return await applyTaskSuggestion(supabase, row);
     case "question_answer": return await applyQuestionAnswer(supabase, row);
     case "removal": return await applyRemoval(supabase, row);
+    case "roster_check": return await applyRosterCheck(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }
