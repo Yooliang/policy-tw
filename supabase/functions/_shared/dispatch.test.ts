@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -154,4 +154,26 @@ Deno.test("裁決的驗證也要排掉對原貢獻投過票的人", () => {
   assertEquals(excludeOwnAdjudications(candidates as never, originals, me).length, 2);
   // bob 對 c-1 投過票 → 那筆裁決不給他驗
   assertEquals(excludeOwnAdjudications(candidates as never, originals, me, new Set(["c-1"])).map((c) => c.id), ["v-2"]);
+});
+
+Deno.test("已被回報是死路、正在等票的任務不再派給別人", () => {
+  const tasks = [
+    { task_id: "auto:progress_stale:a", target: { policy_id: "a" } },
+    { task_id: "auto:progress_stale:b", target: { policy_id: "b" } },
+    { task_id: "auto:profile_gap:c", target: { politician_id: "c" } },
+  ];
+
+  assertEquals(filterReportedDeadEnds(tasks, new Set<string>()).length, 3);
+
+  // 有人回報 a 查了沒東西、還在等票 → 期間不要再派給別人重查
+  assertEquals(
+    filterReportedDeadEnds(tasks, new Set(["auto:progress_stale:a"])).map((t) => t.task_id),
+    ["auto:progress_stale:b", "auto:profile_gap:c"],
+  );
+
+  // 全部都被回報過 → 一筆都不派，代理該去做別的事
+  assertEquals(filterReportedDeadEnds(tasks, new Set(tasks.map((t) => t.task_id))).length, 0);
+
+  // 這一層跟落庫後的 14 天冷卻是兩層：這裡擋的是「還在等票」的回報
+  assertEquals(filterReportedDeadEnds([], new Set(["x"])).length, 0);
 });
