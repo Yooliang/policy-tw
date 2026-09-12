@@ -10,6 +10,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, type RiskLevel } from "./consensus.ts";
+import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const SKILL_MD = new URL("../../../public/skill.md", import.meta.url);
@@ -102,4 +103,19 @@ Deno.test("管線快照：採樣函式與排程都在最新的 migration 裡，�
   assert(sql.includes("FROM policies WHERE removed_at IS NULL"), "政見數要排除已移除的");
   // 對外要能讀，不然網站上的圖表拿不到資料
   assert(sql.includes('CREATE POLICY "Public read" ON pipeline_snapshots'), "快照要公開可讀");
+});
+
+Deno.test("無異動的冷卻天數：SQL 與 TypeScript 要是同一個數字", async () => {
+  const { sql } = await latestMigrationDefining("task_check_cooldown_days");
+  const m = sql.match(/FUNCTION task_check_cooldown_days\(\)[\s\S]*?SELECT\s+(\d+)/);
+  assert(m, "找不到 SQL 的冷卻天數");
+  assertEquals(Number(m![1]), TASK_CHECK_COOLDOWN_DAYS, "SQL 與 TS 的冷卻天數不一致；改一邊一定要改另一邊");
+
+  // 冷卻過濾必須在 LIMIT 之前，否則要 12 筆濾掉 3 筆就只回 9 筆，
+  // 甚至在還有幾百筆可派時回空。
+  const { sql: tasksSql } = await latestMigrationDefining("contribution_auto_tasks");
+  const body = tasksSql.slice(tasksSql.lastIndexOf("FUNCTION contribution_auto_tasks("));
+  const filterAt = body.indexOf("task_checks");
+  const limitAt = body.lastIndexOf("LIMIT");
+  assert(filterAt > 0 && limitAt > filterAt, "冷卻過濾要寫在 LIMIT 之前");
 });

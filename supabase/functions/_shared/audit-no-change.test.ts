@@ -2,7 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildRequestTaskText, decideRequest, isAuditUrl } from "./request-task.ts";
 import { describeManualTask, sameAuditTarget, validateTaskInput } from "./task-admin.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
-import { applyContribution } from "./apply-contribution.ts";
+import { applyContribution, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 
 const DOC = "https://www.gov.taipei/News_Content.aspx?n=1&s=2";
 const POLICY = "0c9c1a5e-1111-4222-8333-444444444444";
@@ -69,10 +69,17 @@ Deno.test("no_change：schema 要 task_id／checked_urls／finding，source_urls
   assertEquals(updates[0].patch.status, "closed");
   assert(inserted.every((i) => i.table === "edit_history"), "除了 edit_history 不寫任何表");
 
+  // 自動缺口不是靠關閉任務消失的（它是即時算出來的），所以不打 update；
+  // 但一定要記一筆 task_checks，否則「查過、沒東西可補」不留痕跡，
+  // 同一筆死路會被無限重派給每一個代理。
+  const before = inserted.length;
   const auto = await applyContribution(fake, {
     id: "c-10", contribution_type: "no_change", source_urls: [DOC], note: null, agent_name: "tester", contributor_url: null,
     payload: { task_id: "auto:policy_missing:" + POL, checked_urls: [DOC], finding: "已查過三個來源，該候選人尚未公布政見。" },
   });
   assertEquals(auto.status, "applied");
   assertEquals(updates.length, 1, "auto: 任務不打 update");
+  const added = inserted.slice(before);
+  assert(added.some((i) => i.table === "task_checks"), "auto: 任務要記一筆 task_checks，冷卻期內才不會重派");
+  assert(auto.message.includes(String(TASK_CHECK_COOLDOWN_DAYS)), "訊息要告訴代理冷卻幾天，它才知道這筆不是白做");
 });

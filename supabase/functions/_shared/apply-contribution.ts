@@ -476,10 +476,29 @@ async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow)
 }
 
 /** no_change：代理核對後確認與資料庫一致 → 只關閉該任務、不動任何正式資料（自動缺口任務沒有列可關，只記錄） */
+/** 跟 SQL 的 task_check_cooldown_days() 同一個數字；改一邊要改另一邊，thresholds 測試會比對 */
+export const TASK_CHECK_COOLDOWN_DAYS = 14;
+
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
   if (!taskId) return { status: "failed", message: "no_change 要帶 task_id" };
-  if (taskId.startsWith("auto:")) return { status: "applied", message: `已記錄無異動（自動缺口任務 ${taskId} 會在資料補齊後自行消失）`, task_id: taskId };
+  if (taskId.startsWith("auto:")) {
+    // 自動缺口不是靠關閉任務消失的，它是即時算出來的。所以「查過了、沒東西可補」
+    // 原本完全不留痕跡，同一筆死路會被無限重派給每一個代理，每個人都白跑一次。
+    // 記一筆 task_checks，冷卻期內不再派；過期再出現，因為世界會變。
+    const check = {
+      task_id: taskId,
+      agent_name: row.agent_name,
+      note: str(row.payload.finding) ?? str(row.payload.note) ?? row.note ?? null,
+      contribution_id: row.id,
+    };
+    const { error } = await supabase.from("task_checks").insert(check);
+    throwIf(error, "task_checks insert");
+    // 用 task_id 當紀錄鍵：這張表的 id 是流水號，回不回來都不影響還原，
+    // 而 task_id 才是人看得懂、也是冷卻判斷用的那把鑰匙。
+    await recordInsert(supabase, ctxOf(row), "task_checks", taskId, check);
+    return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
+  }
   const task = await closeTask(supabase, taskId, row.agent_name);
   if (!task) return { status: "failed", message: `找不到任務 ${taskId}` };
   await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");
