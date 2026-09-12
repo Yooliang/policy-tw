@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-vue-next'
 import { usePipelineSnapshots } from '../composables/usePipelineSnapshots'
 
 /**
- * 機制健康度圖表：資料庫每 4 小時寫入一筆採樣，用來讓讀者確認「AI 查證機制真的在跑」。
+ * 機制健康度圖表：資料庫每小時寫入一筆採樣，用來讓讀者確認「AI 查證機制真的在跑」。
  * 採樣還太少畫不出走勢時（<3 筆）改顯示目前數值，避免一張看起來像壞掉的空折線圖。
  */
 const METRICS = [
@@ -15,7 +15,7 @@ const METRICS = [
 ] as const
 type MetricKey = (typeof METRICS)[number]['key']
 
-const SAMPLE_INTERVAL_HOURS = 4
+const SAMPLE_INTERVAL_HOURS = 1
 // 兩個點就是一條線，畫得出來。一個點只能是數字，畫成圖跟壞掉沒兩樣。
 const MIN_POINTS_FOR_CHART = 2
 
@@ -48,7 +48,7 @@ const chartSeries = computed(() =>
 )
 
 /**
- * 用分類軸而不是時間軸：採樣固定 4 小時一次，一格就該是一次採樣。
+ * 用分類軸而不是時間軸：採樣固定一小時一次，一格就該是一次採樣。
  * 時間軸在樣本還少的時候會自己在兩點之間插出 5 分鐘一格的刻度，
  * 畫面看起來像每 5 分鐘採樣一次，跟這張圖要傳達的事實相反。
  * 標籤帶真正的採樣時刻，所以萬一某一次沒跑成，從時間跳號看得出來。
@@ -80,7 +80,7 @@ const chartOptions = computed(() => ({
   yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9' },
   legend: { show: false },
-  // 樣本還少的時候把採樣點畫出來，讀者才看得出這是每 4 小時一筆而不是連續曲線
+  // 樣本還少的時候把採樣點畫出來，讀者才看得出這是一次次的採樣而不是連續曲線
   markers: { size: snapshots.value.length <= 8 ? 4 : 0 },
   tooltip: { shared: true, intersect: false },
 }))
@@ -91,7 +91,7 @@ onMounted(fetchSnapshots)
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6" data-testid="pipeline-chart">
     <h3 class="font-black text-navy-900 mb-1">機制運作狀態</h3>
-    <p class="text-xs text-slate-400 mb-4">每 4 小時採樣一次，追蹤 AI 查證機制的運作情形</p>
+    <p class="text-xs text-slate-400 mb-4">每小時採樣一次，追蹤 AI 查證機制的運作情形</p>
 
     <p v-if="error" class="text-sm text-red-600">運作狀態暫時讀不到</p>
 
@@ -111,7 +111,7 @@ onMounted(fetchSnapshots)
         </div>
       </div>
       <p class="text-xs text-slate-400">
-        目前累積 {{ snapshots.length }} 筆採樣，每 4 小時新增一筆；再過約 {{ pointsNeeded * SAMPLE_INTERVAL_HOURS }} 小時就能看到走勢圖。
+        目前累積 {{ snapshots.length }} 筆採樣，每小時新增一筆；再過約 {{ pointsNeeded * SAMPLE_INTERVAL_HOURS }} 小時就能看到走勢圖。
       </p>
     </template>
 
@@ -128,7 +128,7 @@ onMounted(fetchSnapshots)
         <ClientOnly><apexchart type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
       </div>
       <p v-if="snapshots.length < 6" class="text-xs text-slate-400 mt-2">
-        目前累積 {{ snapshots.length }} 個採樣點（每 4 小時一個），走勢還很短；累積滿一天之後會更看得出變化。
+        目前累積 {{ snapshots.length }} 個採樣點（每小時一個），走勢還很短；累積滿一天之後會更看得出變化。
       </p>
     </template>
   </section>

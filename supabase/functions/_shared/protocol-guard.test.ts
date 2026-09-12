@@ -29,6 +29,20 @@ async function latestMigrationDefining(fn: string): Promise<{ name: string; sql:
   throw new Error(`沒有任何 migration 定義 ${fn}`);
 }
 
+/** 掃 migrations，回傳最後一支包含 needle 的檔案（檔名字典序＝時間序） */
+async function latestMigrationContaining(needle: string): Promise<{ name: string; sql: string }> {
+  const names: string[] = [];
+  for await (const e of Deno.readDir(MIGRATIONS)) {
+    if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  }
+  names.sort();
+  for (const name of names.reverse()) {
+    const sql = await Deno.readTextFile(new URL(name, MIGRATIONS));
+    if (sql.includes(needle)) return { name, sql };
+  }
+  throw new Error(`沒有任何 migration 含有 ${needle}`);
+}
+
 function parseSqlMatrix(sql: string): Record<string, Record<string, number>> {
   const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_required_agree"));
   const rowRe = /WHEN v_risk = '(\w+)' THEN CASE v_kind WHEN 'official' THEN (\d+) WHEN 'media' THEN (\d+) WHEN 'social' THEN (\d+) ELSE (\d+) END/g;
@@ -91,9 +105,15 @@ Deno.test("skill.md 檔頭與檔尾的版本號要一致", async () => {
 
 Deno.test("管線快照：採樣函式與排程都在最新的 migration 裡，欄位與前端讀的對得上", async () => {
   const { sql } = await latestMigrationDefining("pipeline_take_snapshot");
-  // 每 4 小時整點採樣一次。改頻率要連同前端「多久一筆」的文案一起改。
-  assert(sql.includes("'0 */4 * * *'"), "排程要是每 4 小時");
-  assert(sql.includes("cron.schedule('pipeline-snapshot-4h'"), "排程名稱固定，重跑 migration 才不會排兩份");
+  // 採樣頻率改了，前端「多久一筆」的文案與 SAMPLE_INTERVAL_HOURS 也要一起改，
+  // 否則畫面會告訴讀者錯的等待時間。這支測試就是為了逼出那個連動。
+  // 排程可能不在定義函式的那一支 migration 裡（改頻率只會新增一支 cron.schedule），
+  // 所以找的是「最後一支設定這個排程的檔案」。
+  const cron = await latestMigrationContaining("cron.schedule('pipeline-snapshot");
+  const sched = cron.sql.match(/cron\.schedule\('(pipeline-snapshot[^']*)',\s*'([^']+)'/);
+  assert(sched, "找不到 cron.schedule");
+  assertEquals(sched![2], "0 * * * *", "排程要是每小時整點");
+  assert(sched![1].length > 0, "排程要有固定名稱，重跑 migration 才不會排兩份");
 
   // 圖表讀這幾個欄位，少一個就畫不出來
   for (const col of ["tasks_open", "tasks_by_type", "pending", "applied", "votes_total", "voters", "taken_at"]) {
