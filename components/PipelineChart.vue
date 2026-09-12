@@ -16,7 +16,8 @@ const METRICS = [
 type MetricKey = (typeof METRICS)[number]['key']
 
 const SAMPLE_INTERVAL_HOURS = 4
-const MIN_POINTS_FOR_CHART = 3
+// 兩個點就是一條線，畫得出來。一個點只能是數字，畫成圖跟壞掉沒兩樣。
+const MIN_POINTS_FOR_CHART = 2
 
 const { snapshots, loading, error, fetchSnapshots } = usePipelineSnapshots()
 
@@ -42,8 +43,22 @@ const visibleMetrics = computed(() => METRICS.filter(m => visible.value.has(m.ke
 const chartSeries = computed(() =>
   visibleMetrics.value.map(m => ({
     name: m.label,
-    data: snapshots.value.map(s => [new Date(s.takenAt).getTime(), s[m.key]]),
+    data: snapshots.value.map(s => s[m.key]),
   }))
+)
+
+/**
+ * 用分類軸而不是時間軸：採樣固定 4 小時一次，一格就該是一次採樣。
+ * 時間軸在樣本還少的時候會自己在兩點之間插出 5 分鐘一格的刻度，
+ * 畫面看起來像每 5 分鐘採樣一次，跟這張圖要傳達的事實相反。
+ * 標籤帶真正的採樣時刻，所以萬一某一次沒跑成，從時間跳號看得出來。
+ */
+const axisLabels = computed(() =>
+  snapshots.value.map(s => {
+    const d = new Date(s.takenAt)
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  })
 )
 
 const chartOptions = computed(() => ({
@@ -51,16 +66,23 @@ const chartOptions = computed(() => ({
   colors: visibleMetrics.value.map(m => m.color),
   stroke: { width: 2, curve: 'smooth' as const },
   xaxis: {
-    type: 'datetime' as const,
-    labels: { style: { colors: '#94a3b8', fontSize: '11px' }, datetimeUTC: false },
+    categories: axisLabels.value,
+    labels: {
+      style: { colors: '#94a3b8', fontSize: '11px' },
+      rotate: -35,
+      rotateAlways: false,
+      hideOverlappingLabels: true,
+    },
     axisBorder: { show: false },
     axisTicks: { show: false },
+    tooltip: { enabled: false },
   },
   yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9' },
   legend: { show: false },
-  markers: { size: 0 },
-  tooltip: { x: { format: 'MM/dd HH:mm' } },
+  // 樣本還少的時候把採樣點畫出來，讀者才看得出這是每 4 小時一筆而不是連續曲線
+  markers: { size: snapshots.value.length <= 8 ? 4 : 0 },
+  tooltip: { shared: true, intersect: false },
 }))
 
 onMounted(fetchSnapshots)
@@ -105,6 +127,9 @@ onMounted(fetchSnapshots)
       <div class="h-64">
         <ClientOnly><apexchart type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
       </div>
+      <p v-if="snapshots.length < 6" class="text-xs text-slate-400 mt-2">
+        目前累積 {{ snapshots.length }} 個採樣點（每 4 小時一個），走勢還很短；累積滿一天之後會更看得出變化。
+      </p>
     </template>
   </section>
 </template>
