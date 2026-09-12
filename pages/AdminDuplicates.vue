@@ -14,8 +14,6 @@ const { politicians, fetchAll } = useSupabase()
 // --- State ---
 const searchTerm = ref('')
 const isProcessing = ref(false)
-const cecResults = ref<Record<string, any[]>>({}) // { name: [cand_data] }
-const loadingCec = ref<Record<string, boolean>>({})
 
 // --- Logic: Find Duplicates ---
 const duplicateGroups = computed(() => {
@@ -55,93 +53,6 @@ async function refresh() {
   isProcessing.value = true
   await fetchAll()
   isProcessing.value = false
-}
-
-async function verifyWithCec(name: string) {
-  loadingCec.value[name] = true
-  try {
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-cec-data`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ queryName: name })
-    })
-    const data = await res.json()
-    if (data.success && data.cand_data_list) {
-      // Deduplicate results by birth year and party since one person might have many election records
-      const uniqueCands: any[] = []
-      const seen = new Set()
-      data.cand_data_list.forEach((c: any) => {
-        const key = `${c.cand_birthyear}_${c.party_name}`
-        if (!seen.has(key)) {
-          uniqueCands.push(c)
-          seen.add(key)
-        }
-      })
-      cecResults.value[name] = uniqueCands
-    }
-  } catch (e) {
-    console.error(e)
-  } finally {
-    loadingCec.value[name] = false
-  }
-}
-
-async function applyCecIdentity(p: any, cec: any) {
-  if (!confirm(`將 ${p.name} 的出生年設定為 ${cec.cand_birthyear}？`)) return
-  
-  try {
-    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-politician`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        update: {
-          id: p.id,
-          birthYear: parseInt(cec.cand_birthyear),
-          party: cec.party_name
-        }
-      })
-    })
-    const result = await response.json()
-    if (result.success) {
-      alert('已更新身份資訊')
-      await fetchAll()
-    }
-  } catch (e) {
-    alert('更新失敗')
-  }
-}
-
-async function mergeDuplicate(name: string) {
-  if (!confirm(`確定要自動合併「${name}」的所有重複項嗎？這將優先保留有出生年的紀錄。`)) return
-  
-  isProcessing.value = true
-  try {
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/merge-politicians`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ name })
-    })
-    const result = await res.json()
-    if (result.success) {
-      alert(result.message)
-      await fetchAll()
-    } else {
-      alert('合併失敗: ' + result.error)
-    }
-  } catch (e) {
-    alert('合併請求失敗')
-  } finally {
-    isProcessing.value = false
-  }
 }
 
 usePageHead({ title: '後台重複資料', noindex: true })
@@ -199,37 +110,16 @@ usePageHead({ title: '後台重複資料', noindex: true })
               </div>
             </div>
             
-            <div class="flex gap-3">
-              <button 
-                @click="verifyWithCec(group.name)" 
-                :disabled="loadingCec[group.name]"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
-              >
-                <Search :size="14" v-if="!loadingCec[group.name]" />
-                <Loader2 :size="14" class="animate-spin" v-else />
-                中選會官方核對
-              </button>
-              <button @click="mergeDuplicate(group.name)" :disabled="isProcessing" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-xs font-bold flex items-center gap-2 transition-all">
-                <Layers :size="14" /> 自動合併
-              </button>
-            </div>
+            <!-- 原本這裡有「中選會官方核對」與「自動合併」兩顆按鈕，2026-09-12 移除。
+                 核對那顆送的參數對應的函式不認，按下去無聲失敗；合併那顆只比對姓名，
+                 會把同名的不同人併成一筆，而且是不可逆的刪除。設計見
+                 docs/BLUEPRINT-admin-to-tasks.md，重做成可逆並排成任務之後再開放。 -->
+            <p class="text-xs text-slate-400 max-w-sm text-right leading-relaxed">
+              合併功能正在重做。舊版只看姓名相同就合併，會把同名的不同人併成一個，而且刪掉救不回來。
+            </p>
           </div>
 
-          <!-- CEC Reference Area -->
-          <div v-if="cecResults[group.name]" class="px-8 py-4 bg-blue-50 border-b border-blue-100 flex flex-wrap gap-4">
-            <div class="w-full text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 flex items-center gap-2">
-              <CheckCircle2 :size="12" /> 中選會搜尋結果 (供對照使用)
-            </div>
-            <div v-for="c in cecResults[group.name]" :key="c.cand_id" class="bg-white p-3 rounded-xl border border-blue-200 shadow-sm flex items-center gap-4">
-              <div class="flex flex-col">
-                <span class="text-xs font-black text-navy-900">{{ c.cand_birthyear }} 年生</span>
-                <span class="text-[10px] text-blue-600 font-bold">{{ c.party_name }}</span>
-              </div>
-              <div class="text-[10px] text-slate-400 max-w-[150px] leading-tight">
-                {{ c.theme_name }} <br/> {{ c.area_data.file_location.area_name }}
-              </div>
-            </div>
-          </div>
+          <!-- 中選會核對結果區塊隨核對按鈕一併移除（2026-09-12） -->
           
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
@@ -276,17 +166,6 @@ usePageHead({ title: '後台重複資料', noindex: true })
                   </td>
                   <td class="px-8 py-4 text-right">
                     <div class="flex justify-end gap-2">
-                      <template v-if="cecResults[group.name]">
-                        <button 
-                          v-for="cec in cecResults[group.name]" 
-                          :key="cec.cand_id"
-                          @click="applyCecIdentity(p, cec)"
-                          class="p-1.5 hover:bg-blue-600 hover:text-white border border-blue-200 text-blue-600 rounded-lg text-[10px] font-bold transition-all"
-                          :title="`標記為 ${cec.cand_birthyear} 生`"
-                        >
-                          {{ cec.cand_birthyear }}
-                        </button>
-                      </template>
                       <a :href="`/politician/${p.id}`" target="_blank" class="p-1.5 bg-slate-100 text-slate-400 hover:text-blue-600 rounded-lg transition-colors">
                         <ExternalLink :size="14" />
                       </a>
