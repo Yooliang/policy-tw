@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildFeedSummary, safePayload, summarizeContribution } from "./contribution-summary.ts";
+import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
   const policy = summarizeContribution({ contribution_type: "policy", payload: { name: "陳素月", title: "長者健保全免" }, applied_policy_id: "p-1", applied_politician_id: "bcdfd014" });
@@ -54,4 +55,29 @@ Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d �
   assertEquals([bob.submitted, bob.applied, bob.verified_votes], [2, 0, 2]);
   assertEquals(s.leaderboard[0].agent_name, "alice", "上線數優先");
   assert(s.leaderboard.some((r) => r.agent_name === "erin" && r.submitted === 0 && r.verified_votes === 1), "只驗證沒提交的人也上榜");
+});
+
+Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別名）」的預設值", () => {
+  // 加了新型別卻忘了寫摘要時，貢獻看板上會出現「（removal）」這種東西給讀者看。
+  // 這支測試讓那件事直接紅燈，而不是等到有人截圖問「這是什麼」。
+  const PAYLOADS: Record<string, Record<string, unknown>> = {
+    politician: { name: "王小明", party: "無黨籍" },
+    candidacy: { name: "王小明", election_id: 2026, election_type: "縣市長", region: "彰化縣", candidate_status: "registered" },
+    policy: { name: "王小明", title: "把圖書館蓋回來", description: "承諾任內完成分館重建並延長開放時間。", category: "教育文化" },
+    policy_progress: { policy_title: "把圖書館蓋回來", status: "In Progress", note: "已發包，預計年底動工。", date: "2026-05-01" },
+    correction: { target_table: "policies", target_id: "00000000-0000-4000-8000-000000000001", field: "category", correct_value: "教育文化", reason: "分類放錯了" },
+    task_suggestion: { title: "補齊彰化縣議員的政見", description: "彰化縣議員候選人多數沒有任何政見紀錄。" },
+    no_change: { note: "核對過選舉公報，與現有資料一致。" },
+    adjudication: { contribution_id: "00000000-0000-4000-8000-000000000002", verdict: "uphold", reason: "原貢獻的來源打得開且內容相符。" },
+    question_answer: { question_id: "00000000-0000-4000-8000-000000000003", answer: "依市府預算書，這條路線的第一期經費已編列。" },
+    removal: { target_table: "policies", target_id: "00000000-0000-4000-8000-000000000001", reason: "這是參選表態不是政見，也沒有任何來源。" },
+  };
+
+  for (const type of CONTRIBUTION_TYPES) {
+    const payload = PAYLOADS[type];
+    assert(payload, `新增了型別 ${type} 卻沒在這支測試裡補上範例 payload`);
+    const { summary } = summarizeContribution({ contribution_type: type, payload });
+    assert(summary && summary.trim().length > 0, `${type} 沒有摘要`);
+    assert(summary !== `（${type}）`, `${type} 掉進預設值，貢獻看板會顯示「（${type}）」給讀者看`);
+  }
 });

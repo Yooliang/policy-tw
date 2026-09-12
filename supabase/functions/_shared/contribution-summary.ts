@@ -91,6 +91,40 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);
       break;
     }
+    case "adjudication": {
+      // 裁決是對別人那筆貢獻的定奪，讀者要看得出是支持還是推翻，以及依據
+      const verdict = str(p.verdict) === "uphold" ? "認為原貢獻正確" : str(p.verdict) === "reject" ? "認為原貢獻有誤" : "裁決";
+      const cid = str(p.contribution_id).slice(0, 8);
+      summary = `裁決貢獻 ${cid}：${verdict}${str(p.reason) ? `——${clip(p.reason, 100)}` : ""}`;
+      targetName = null;
+      break;
+    }
+    case "task_suggestion": {
+      summary = `提議一項任務：${clip(p.title, 80)}`;
+      targetName = null;
+      break;
+    }
+    case "no_change": {
+      // 「核對過、沒有要改」本身就是有價值的回報，讀者要看得出核對了什麼
+      const note = clip(p.note, 120);
+      summary = note ? `核對後回報沒有異動：${note}` : "核對後回報沒有異動";
+      targetName = null;
+      break;
+    }
+    case "removal": {
+      // 移除是「這筆不該存在」，讀者最需要看到的是理由，不是 id
+      const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
+      const id = str(p.target_id);
+      summary = `建議移除${table} ${id.slice(0, 8)}：${clip(p.reason, 120)}`;
+      targetName = null;
+      if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);
+      break;
+    }
+    case "question_answer": {
+      summary = `回答公民提問：${clip(p.answer, 120)}`;
+      targetName = null;
+      break;
+    }
     default:
       summary = `（${input.contribution_type}）`;
   }
