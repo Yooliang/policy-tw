@@ -50,7 +50,10 @@ function parseSqlMatrix(sql: string): Record<string, Record<string, number>> {
   const rows = Object.fromEntries(
     [...body.matchAll(rowRe)].map((m) => [m[1], { official: +m[2], media: +m[3], social: +m[4], other: +m[5] }]),
   );
-  const fallback = body.match(/\n\s+ELSE (\d+)\n\s+END;/);
+  // 行尾要吃 CRLF：這個 repo 在 Windows 上 checkout 會把 .sql 轉成 CRLF
+  // （rebase 後整包重新 checkout 就會發生），寫死 \n 的話這支測試會在
+  //  Windows 上紅、在 CI 的 Linux runner 上綠——比單純紅掉更糟。
+  const fallback = body.match(/\r?\n\s*ELSE (\d+)\s*\r?\n\s*END;/);
   assert(fallback, "裁決走最後的 ELSE");
   rows.adjudication = { official: +fallback![1], media: +fallback![1], social: +fallback![1], other: +fallback![1] };
   return rows;
