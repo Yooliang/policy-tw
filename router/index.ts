@@ -106,21 +106,6 @@ export const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
-    path: '/admin/agent-register',
-    component: () => import('../pages/AdminAgentRegister.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
-    path: '/admin/agent-dashboard',
-    component: () => import('../pages/AdminAgentDashboard.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
-    path: '/admin/agent-tasks',
-    component: () => import('../pages/AdminAgentTasks.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
     path: '/verify',
     component: () => import('../pages/VerifyContent.vue'),
   },
