@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, safePayload, summarizeContribution } from "./contribution-summary.ts";
+import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, leaderboardScore, safePayload, summarizeContribution } from "./contribution-summary.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
@@ -116,4 +116,98 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     assert(summary && summary.trim().length > 0, `${type} 沒有摘要`);
     assert(summary !== `（${type}）`, `${type} 掉進預設值，貢獻看板會顯示「（${type}）」給讀者看`);
   }
+});
+
+Deno.test("貢獻榜排名：三項合計，不是只看上線", () => {
+  // 實際發生過：交 44 筆、投 22 票的人因為那 44 筆全卡在待驗證（沒人能驗），
+  // applied=0，被只看 applied 的排法壓在一個「交 2 筆上線 1 筆」的代號後面。
+  const now = Date.parse("2026-09-13T00:00:00Z");
+  const at = new Date(now - 3600_000).toISOString();
+  const rows: Array<{ status: string; agent_name: string; created_at: string }> = [];
+  const submit = (name: string, n: number, applied: number) => {
+    for (let i = 0; i < n; i++) {
+      rows.push({ status: i < applied ? "applied" : "pending", agent_name: name, created_at: at });
+    }
+  };
+  submit("prolific", 44, 0); // 交很多、一筆都還沒過
+  submit("lucky", 2, 1); // 交很少、過了一筆
+  const votes = [...Array(22)].map(() => ({ agent_name: "prolific" }));
+
+  const s = buildFeedSummary(rows, votes, now);
+  const prolific = s.leaderboard.find((r) => r.agent_name === "prolific")!;
+  const lucky = s.leaderboard.find((r) => r.agent_name === "lucky")!;
+
+  assertEquals(prolific.score, 44 + 0 + 22, "分數＝提交＋上線＋驗證票");
+  assertEquals(leaderboardScore(prolific), prolific.score, "匯出的計分函式要跟榜上的分數是同一套");
+  assertEquals(lucky.score, 2 + 1 + 0);
+  assertEquals(s.leaderboard[0].agent_name, "prolific", "做最多的要排第一，不能被只看 applied 的排法壓下去");
+
+  // 上線的那幾筆算兩次（applied 是 submitted 的子集），品質要比純數量值錢
+  const quality = buildFeedSummary(
+    [...Array(10)].map(() => ({ status: "applied", agent_name: "q", created_at: at })),
+    [],
+    now,
+  ).leaderboard[0];
+  assertEquals(quality.score, 20, "10 筆全通過 = 10 提交 + 10 上線");
+});
+
+Deno.test("貢獻榜排名：同分時的名次要穩定，不能靠插入順序", () => {
+  const now = Date.parse("2026-09-13T00:00:00Z");
+  const at = new Date(now - 3600_000).toISOString();
+  // 兩人同分（都是 4）：a 靠上線、b 靠提交。上線優先 → a 在前。
+  const rows = [
+    { status: "applied", agent_name: "a", created_at: at },
+    { status: "applied", agent_name: "a", created_at: at },
+    { status: "pending", agent_name: "b", created_at: at },
+    { status: "pending", agent_name: "b", created_at: at },
+    { status: "pending", agent_name: "b", created_at: at },
+    { status: "pending", agent_name: "b", created_at: at },
+  ];
+  const s = buildFeedSummary(rows, [], now);
+  const a = s.leaderboard.find((r) => r.agent_name === "a")!;
+  const b = s.leaderboard.find((r) => r.agent_name === "b")!;
+  assertEquals([a.score, b.score], [4, 4], "先確認真的同分，否則這支測試沒有在測同分");
+  assertEquals(s.leaderboard[0].agent_name, "a", "同分時上線多的在前");
+});
+
+Deno.test("貢獻榜時間窗：總榜／30 天／7 天各自只算窗內的貢獻與票", () => {
+  const now = Date.parse("2026-09-13T12:00:00Z");
+  const ago = (days: number) => new Date(now - days * 86400 * 1000).toISOString();
+  const rows = [
+    // old：只有 40 天前的活動，應該只出現在總榜
+    { status: "applied", agent_name: "old", created_at: ago(40) },
+    { status: "applied", agent_name: "old", created_at: ago(41) },
+    // mid：20 天前，總榜與 30 天榜看得到，7 天榜看不到
+    { status: "pending", agent_name: "mid", created_at: ago(20) },
+    // fresh：2 天前，三張榜都看得到
+    { status: "pending", agent_name: "fresh", created_at: ago(2) },
+  ];
+  const votes = [
+    { agent_name: "old", created_at: ago(40) },
+    { agent_name: "fresh", created_at: ago(1) },
+    { agent_name: "fresh", created_at: ago(1) },
+  ];
+  const s = buildFeedSummary(rows, votes, now);
+  const names = (list: Array<{ agent_name: string }>) => list.map((r) => r.agent_name).sort();
+
+  assertEquals(names(s.leaderboard), ["fresh", "mid", "old"], "總榜要有全部三個");
+  assertEquals(names(s.leaderboard_30d), ["fresh", "mid"], "30 天榜不該有 40 天前的 old");
+  assertEquals(names(s.leaderboard_7d), ["fresh"], "7 天榜只該有 2 天前的 fresh");
+
+  // old 在總榜的分數＝2 提交 + 2 上線 + 1 票
+  assertEquals(s.leaderboard.find((r) => r.agent_name === "old")!.score, 5);
+  // fresh 在 7 天榜＝1 提交 + 0 上線 + 2 票
+  assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "fresh")!.score, 3);
+});
+
+Deno.test("貢獻榜時間窗：票沒有時間就不算進任何時間窗，但總榜要算", () => {
+  const now = Date.parse("2026-09-13T12:00:00Z");
+  const at = new Date(now - 86400 * 1000).toISOString();
+  const rows = [{ status: "pending", agent_name: "someone", created_at: at }];
+  // 舊資料或呼叫端沒撈 created_at 的票：寧可少算，不要塞進本週
+  const votes = [{ agent_name: "voter" }, { agent_name: "voter" }];
+  const s = buildFeedSummary(rows, votes, now);
+  assertEquals(s.leaderboard.find((r) => r.agent_name === "voter")?.score, 2, "總榜要算無時間的票");
+  assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "voter"), undefined, "7 天榜不該憑空多出時間不明的票");
+  assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "someone")?.score, 1);
 });

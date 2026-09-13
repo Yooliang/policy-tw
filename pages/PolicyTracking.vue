@@ -120,8 +120,21 @@ usePageHead({
         </div>
       </div>
 
-      <!-- 分類篩選 -->
-      <div class="flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+      <!-- 分類篩選：手機版用下拉選單。18 個分類攤開會佔掉整個首屏，
+           使用者得捲過一整面按鈕才看得到第一張政見卡。 -->
+      <div class="sm:hidden mb-6">
+        <label class="sr-only" for="category-select">政見分類</label>
+        <select
+          id="category-select"
+          v-model="selectedCategory"
+          class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-navy-900 font-bold shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option value="All">全部分類</option>
+          <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
+        </select>
+      </div>
+
+      <div class="hidden sm:flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
         <!-- Left: 全部 -->
         <div class="shrink-0 flex items-center gap-3">
           <button

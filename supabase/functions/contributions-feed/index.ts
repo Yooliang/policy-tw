@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     const [feedRes, allRes, votesRes, adjRes] = await Promise.all([
       q,
       supabase.from("contributions").select("status, agent_name, created_at").limit(10000),
-      supabase.from("contribution_votes").select("agent_name").limit(20000),
+      supabase.from("contribution_votes").select("agent_name, created_at").limit(20000),
       supabase.from("contribution_tasks").select("id", { count: "exact", head: true }).eq("task_type", "adjudicate").eq("status", "open"),
     ]);
     for (const r of [feedRes, allRes, votesRes, adjRes]) if (r.error) throw new Error(r.error.message);
