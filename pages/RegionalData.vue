@@ -10,7 +10,9 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync } from '../composables/useRegionQuerySync'
 
 const router = useRouter()
-const { regionStats } = useSupabase()
+const { regionStats, ensureRegionStats } = useSupabase()
+// 這一頁才需要的重資料，改成按需載入（見 useSupabase 的 ensure*）
+ensureRegionStats()
 const { globalRegion, setGlobalRegion } = useGlobalState()
 
 // 所有縣市列表

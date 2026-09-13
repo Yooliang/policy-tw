@@ -13,7 +13,7 @@ import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
-const { discussions, policies, loading } = useSupabase()
+const { discussions, policies, loading, ensureDiscussions } = useSupabase()
 
 
 const discussionId = computed(() => Number(route.params.discussionId))
@@ -47,6 +47,7 @@ const likedDiscussions = ref<number[]>([])
 const likedComments = ref<number[]>([])
 
 onMounted(() => {
+  ensureDiscussions()
   try {
     const sd = localStorage.getItem(LS_DISC)
     if (sd) likedDiscussions.value = JSON.parse(sd)
