@@ -293,33 +293,23 @@ function politicianIdsWithPolicies(): Set<string> {
 
 /**
  * 把「有政見的人物」載進全域 state。fetchAllInner 在政見載完後呼叫。
+ *
+ * 走 politicians_with_policies 這個 view，不要自己撈 id 再 `id=in.(…)` 回頭查：
+ * 那樣產生的網址是 2,941 字元，超過 2048／2083 的網址在行動網路代理與 WAF 上會被回 403
+ * （2026-09-13 手機上實際踩到），而且人物越多網址越長，是會隨資料惡化的實作。
+ *
  * 失敗只記 log 不丟出：少了這批頁面會退化成卡片出不來，但其他資料還是該顯示。
  */
 async function loadPoliticiansWithPolicies(): Promise<void> {
-  const ids = [...politicianIdsWithPolicies()]
-  if (ids.length === 0) return
   try {
-    const existing = new Set(politicians.value.map(p => p.id))
-    const missing = ids.filter(id => !existing.has(id))
-    if (missing.length === 0) return
-    // 分批：PostgREST 的 in.() 走查詢字串，一次塞太多 uuid 會超過網址長度上限
-    const CHUNK = 100
-    const loaded: Politician[] = []
-    for (let i = 0; i < missing.length; i += CHUNK) {
-      const { data, error } = await supabase
-        .from('politicians_with_elections')
-        .select('*')
-        .in('id', missing.slice(i, i + CHUNK))
-      if (error) throw error
-      loaded.push(...(data || []).map(mapPolitician))
-    }
+    const rows = await fetchAllRows<RawPolitician>('politicians_with_policies')
     const seen = new Set(politicians.value.map(p => p.id))
-    politicians.value = [...politicians.value, ...loaded.filter(p => !seen.has(p.id))]
+    const loaded = rows.map(mapPolitician).filter(p => !seen.has(p.id))
+    if (loaded.length > 0) politicians.value = [...politicians.value, ...loaded]
   } catch (err) {
     console.error('[loadPoliticiansWithPolicies] 載入有政見的人物失敗，政見卡片會出不來:', err)
   }
 }
-
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
 
