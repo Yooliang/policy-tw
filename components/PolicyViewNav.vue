@@ -26,7 +26,8 @@ const ITEMS: Array<{ key: PolicyView; to: string; label: string; icon: typeof St
 </script>
 
 <template>
-  <HeroAction v-for="item in ITEMS" :key="item.key" :to="item.key === current ? undefined : item.to" :active="item.key === current">
+  <!-- compact：三顆在 400px 寬的手機上要擠在同一排，不要換行 -->
+  <HeroAction v-for="item in ITEMS" :key="item.key" compact :to="item.key === current ? undefined : item.to" :active="item.key === current">
     <component :is="item.icon" :size="16" /> {{ item.label }}
   </HeroAction>
 </template>
