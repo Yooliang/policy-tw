@@ -153,6 +153,9 @@ function mapPolicy(row: RawPolicy): Policy {
     tags: row.tags || [],
     aiAnalysis: row.ai_analysis || undefined,
     supportCount: row.support_count || undefined,
+    stanceSupport: row.stance_support ?? 0,
+    stanceOppose: row.stance_oppose ?? 0,
+    stancePriority: row.stance_priority ?? 0,
     logs: (row.logs || []).map((l: RawTrackingLog) => ({
       id: l.id,
       date: l.date,
@@ -245,7 +248,9 @@ async function fetchAllInner() {
     locations.value = (locationsRes.data || []).map(r => r.name)
     regionStats.value = (regionStatsData.data || []) as RegionStats[]
     electoralDistrictAreas.value = (electoralDistrictAreasData.data || []) as ElectoralDistrictArea[]
-    policies.value = (policiesData || []).map(mapPolicy)
+    // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
+    // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
+    policies.value = (policiesData || []).filter(r => !r.removed_at).map(mapPolicy)
     discussions.value = (discussionsData || []).map(mapDiscussion)
 
     // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，

@@ -15,13 +15,20 @@ import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
+import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 
 
 const route = useRoute()
 const router = useRouter()
 const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById } = useSupabase()
 
-const hasVoted = ref(false)
+// 讀者表態。以前這裡只有一個 hasVoted 的 local ref——按下去把畫面數字 +1，
+// 什麼都沒存，重新整理就沒了，而旁邊寫著「讓候選人看見選民的聲音」。
+// 現在真的打 /policy-stance，計數以伺服器回的為準。
+const myPolicyStance = ref<PolicyStance | null>(null)
+const stanceBusy = ref<PolicyStance | null>(null)
+const stanceError = ref<string | null>(null)
+const stanceCounts = ref<StanceCounts | null>(null)
 
 // 「請 AI 查進度」：把這條政見丟進貢獻任務池（公開端點 request-task，不需登入）
 const verifying = ref(false)
@@ -139,9 +146,41 @@ watch(policyId, async (id) => {
   sources.value = data || []
 }, { immediate: true })
 
-const handleVote = () => {
-  if (!hasVoted.value) hasVoted.value = true
+const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string }> = [
+  { key: 'support', label: '我支持', hint: '希望這項政見被實現' },
+  { key: 'oppose', label: '我反對', hint: '不希望這項政見被實現' },
+  { key: 'priority', label: '我更在意', hint: '不一定有立場，但覺得這件事該優先處理' },
+]
+
+/** 畫面上的計數：表態過就用伺服器回的最新值，否則用政見本身帶的 */
+const shownStances = computed<StanceCounts>(() => stanceCounts.value ?? {
+  stance_support: policy.value?.stanceSupport ?? 0,
+  stance_oppose: policy.value?.stanceOppose ?? 0,
+  stance_priority: policy.value?.stancePriority ?? 0,
+})
+
+async function castStance(stance: PolicyStance) {
+  const id = policy.value?.id
+  if (!id || stanceBusy.value) return
+  stanceBusy.value = stance
+  stanceError.value = null
+  try {
+    const r = await castPolicyStance(id, stance)
+    stanceCounts.value = { stance_support: r.stance_support, stance_oppose: r.stance_oppose, stance_priority: r.stance_priority }
+    myPolicyStance.value = stance
+  } catch (e) {
+    stanceError.value = e instanceof Error ? e.message : '表態沒有成功，請稍後再試'
+  } finally {
+    stanceBusy.value = null
+  }
 }
+
+// 換一條政見就重讀「我投過什麼」，不要把上一條的狀態留在畫面上
+watch(() => policy.value?.id, (id) => {
+  stanceCounts.value = null
+  stanceError.value = null
+  myPolicyStance.value = id ? myStance(id) : null
+}, { immediate: true })
 
 
 usePageHead({
@@ -299,29 +338,48 @@ usePageHead({
             </div>
           </div>
 
-          <!-- Campaign Action -->
-          <div v-if="isCampaign" class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
-              <h3 class="text-lg font-bold text-violet-900 mb-1">您期待這項政見被實現嗎？</h3>
-              <p class="text-slate-600 text-sm">點擊支持，讓候選人看見選民的聲音。</p>
-            </div>
-            <div class="flex items-center gap-4">
-              <div class="text-center">
-                <span class="block text-2xl font-bold text-violet-700">
-                  {{ hasVoted ? ((policy.supportCount || 0) + 1).toLocaleString() : policy.supportCount?.toLocaleString() }}
-                </span>
-                <span class="text-xs text-violet-400 uppercase tracking-wider font-bold">選民期待</span>
+          <!-- 讀者表態：支持／反對／更在意。計數以伺服器回的為準，不在本機加一。 -->
+          <div v-if="isCampaign" class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
+            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+              <div>
+                <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
+                <p class="text-slate-600 text-sm">表態會公開顯示在這裡，候選人與其他讀者都看得到。這不會影響政見內容的真假判定——那由附出處的查證決定。</p>
               </div>
-              <button
-                @click="handleVote"
-                :disabled="hasVoted"
-                :class="`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all shadow-md
-                  ${hasVoted ? 'bg-violet-200 text-violet-800 cursor-default' : 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg hover:-translate-y-0.5'}`"
-              >
-                <ThumbsUp :size="20" :class="hasVoted ? '' : 'animate-pulse'" />
-                {{ hasVoted ? '已表達支持' : '我支持' }}
-              </button>
+              <div class="flex items-center gap-5 shrink-0">
+                <div class="text-center">
+                  <span class="block text-2xl font-black text-violet-700 tabular-nums">{{ shownStances.stance_support.toLocaleString() }}</span>
+                  <span class="text-[11px] text-violet-400 font-bold">支持</span>
+                </div>
+                <div class="text-center">
+                  <span class="block text-2xl font-black text-rose-600 tabular-nums">{{ shownStances.stance_oppose.toLocaleString() }}</span>
+                  <span class="text-[11px] text-rose-400 font-bold">反對</span>
+                </div>
+                <div class="text-center">
+                  <span class="block text-2xl font-black text-amber-600 tabular-nums">{{ shownStances.stance_priority.toLocaleString() }}</span>
+                  <span class="text-[11px] text-amber-500 font-bold">更在意</span>
+                </div>
+              </div>
             </div>
+            <div class="mt-5 flex flex-wrap gap-2">
+              <button
+                v-for="opt in STANCE_OPTIONS"
+                :key="opt.key"
+                @click="castStance(opt.key)"
+                :disabled="stanceBusy !== null"
+                :title="opt.hint"
+                :class="[
+                  'px-4 py-2 rounded-lg font-bold text-sm transition-all border disabled:opacity-60',
+                  myPolicyStance === opt.key
+                    ? 'bg-violet-600 border-violet-600 text-white shadow'
+                    : 'bg-white border-violet-200 text-violet-700 hover:bg-violet-50',
+                ]"
+              >
+                <Loader2 v-if="stanceBusy === opt.key" :size="16" class="inline animate-spin mr-1" />
+                {{ opt.label }}
+              </button>
+              <span v-if="myPolicyStance" class="self-center text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉</span>
+            </div>
+            <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
           </div>
 
           <!-- Description & AI Analysis -->

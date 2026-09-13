@@ -1,7 +1,7 @@
 // 零常態人工點：爭議自動變裁決任務，4 票同向定案；來源等級門檻
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
-import { buildAdjudicationTask, ensureAdjudicationTask, findOpenAdjudicationTask } from "./adjudication.ts";
+import { buildAdjudicationTask, ensureAdjudicationTask, findOpenAdjudicationTask, buildFixTask } from "./adjudication.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { autoApplyContribution } from "./auto-apply.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
@@ -146,4 +146,50 @@ Deno.test("落庫連續 3 次失敗 → disputed 並自動建裁決任務，描�
   assertEquals(task.task_type, "adjudicate");
   assert(String(task.description).includes("null value in column category"), "錯誤訊息進任務描述，代理可提 correction");
   assert(String(task.description).includes("落庫連續 3 次失敗"));
+});
+
+Deno.test("修正任務：反對意見原樣進任務敘述，並要求連帶問題一起修", () => {
+  const c = {
+    id: "00000000-0000-4000-8000-000000000001",
+    contribution_type: "correction",
+    payload: { target_table: "policies", target_id: "d38e9529-b541-4a10-903c-368809f72d45", field: "source_url", correct_value: "https://www.ettoday.net/news/20260503/3158529.htm" },
+    source_urls: ["https://www.ettoday.net/news/20260503/3158529.htm"],
+    agent_name: "test-gemini",
+    status: "disputed",
+  };
+  const votes = [
+    { verdict: "agree", evidence_url: null, note: "核對原文屬實", agent_name: "QiLiang" },
+    { verdict: "disagree", evidence_url: "https://www.ettoday.net/news/20260503/3158529.htm", note: "來源是 2026 台中市長選舉的專訪，但這筆政見標 election_id=2024，只補 source_url 會留下屆別錯置", agent_name: "Yooliang" },
+    { verdict: "disagree", evidence_url: null, note: "同上，應一併把 election_id 改成 2026", agent_name: "a-zhen" },
+  ];
+  const task = buildFixTask(c, votes);
+
+  assertEquals(task.task_type, "fix_disputed");
+  // 反對理由要原樣帶進去，不然接任務的人得自己去翻投票紀錄
+  assert(task.description!.includes("election_id=2024"), "第一位反對者的理由要在敘述裡");
+  assert(task.description!.includes("一併把 election_id 改成 2026"), "第二位反對者的理由也要在");
+  assert(task.description!.includes("Yooliang") && task.description!.includes("a-zhen"), "要看得出是誰反對的");
+  // 同意票不該出現在「反對意見」裡
+  assert(!task.description!.includes("核對原文屬實"), "同意票不是反對意見，不要混進去");
+  // 這是整件事的重點：不要只重送原本那一欄
+  assert(task.description!.includes("不要只重送原本那一欄"), "要講明連帶問題也得修");
+  assert(task.description!.includes("no_change"), "要給查完無從修起的出口，否則任務永遠關不掉");
+  // 正反雙方的網址都要進 hint_sources，接手的人才不用相信任何一邊
+  assertEquals(task.hint_sources, ["https://www.ettoday.net/news/20260503/3158529.htm"]);
+  assertEquals(task.target_contribution_id, c.id);
+});
+
+Deno.test("修正任務：沒有反對說明時不建（那是落庫失敗轉 disputed，沒有內容可寫）", () => {
+  const c = {
+    id: "00000000-0000-4000-8000-000000000002",
+    contribution_type: "policy",
+    payload: { title: "某政見" },
+    source_urls: [],
+    agent_name: "someone",
+    status: "disputed",
+  };
+  // 只有同意票與不確定票：buildFixTask 仍然能組出東西，但 ensureFixTask 會擋掉。
+  // 這裡驗的是「敘述不會憑空捏造反對意見」。
+  const task = buildFixTask(c, [{ verdict: "unsure", evidence_url: null, note: "看不出來", agent_name: "x" }]);
+  assert(task.description!.includes("（沒有留下反對說明）"), "沒有反對票就要照實說，不要假裝有意見");
 });
