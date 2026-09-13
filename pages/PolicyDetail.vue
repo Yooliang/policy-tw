@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import { supabase } from '../lib/supabase'
@@ -116,6 +116,11 @@ const policyChain = computed(() => {
 })
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
+
+// 競選承諾還沒開始執行，頁面上也刻意不顯示進度時間軸（下面 v-if="!isCampaign"），
+// 所以按鈕寫「查進度」跟頁面自己講的話矛盾。派出去的任務是一樣的
+// （policy_progress：這個承諾後來有沒有動靜），只是標籤要對得上狀態。
+const verifyLabel = computed(() => (isCampaign.value ? '查後續進展' : '查進度'))
 
 // 查核履歷徽章：有 status=applied 的紀錄才顯示，點擊平滑捲到履歷區塊
 const appliedHistoryCount = ref(0)
@@ -270,14 +275,9 @@ usePageHead({
             <CheckCircle v-else-if="verifySuccess" :size="18" />
             <XCircle v-else-if="verifyError" :size="18" />
             <Sparkles v-else :size="18" />
-            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '查進度' }}
+            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : verifyLabel }}
           </button>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
-          <HeroAction
-            data-testid="hero-not-a-policy"
-            :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
-            title="走公民提問流程，問題已經先幫你寫好"
-          ><AlertTriangle :size="16" /> 這不是政見？</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
@@ -355,8 +355,10 @@ usePageHead({
             </div>
           </div>
 
-          <!-- 讀者表態：支持／反對／更在意。計數以伺服器回的為準，不在本機加一。 -->
-          <div v-if="isCampaign" class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
+          <!-- 讀者表態：支持／反對／更在意，計數以伺服器回的為準，不在本機加一。
+               對所有狀態的政見都顯示，不只競選承諾：「這不是政見？」的回報入口在這一區，
+               非承諾類的政見（那些才更可能被誤建）一樣要有得按。 -->
+          <div class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div>
                 <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
@@ -397,6 +399,14 @@ usePageHead({
               <span v-if="myPolicyStance" class="self-center text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉</span>
             </div>
             <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
+            <div class="mt-5 pt-4 border-t border-violet-100">
+              <RouterLink
+                data-testid="hero-not-a-policy"
+                :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
+                class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 transition-colors"
+                title="走公民提問流程，問題已經先幫你寫好"
+              ><AlertTriangle :size="15" /> 這不是政見？回報給 AI 查證</RouterLink>
+            </div>
           </div>
 
           <!-- Description & AI Analysis -->
