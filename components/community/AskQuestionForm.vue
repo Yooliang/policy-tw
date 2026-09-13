@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-vue-next'
 import { useSupabase } from '../../composables/useSupabase'
 import { askQuestion, isValidQuestion, QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH, type AskQuestionResult } from '../../lib/citizen-questions'
@@ -12,6 +12,8 @@ import { askQuestion, isValidQuestion, QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH,
 const props = defineProps<{
   presetPolicyId?: string
   presetPolicyTitle?: string
+  /** 預先填好的問題。從政見頁按「這不是政見？」過來時用，讓人不必自己想怎麼問。 */
+  presetQuestion?: string
 }>()
 
 const emit = defineEmits<{
@@ -20,7 +22,11 @@ const emit = defineEmits<{
 
 const { locations } = useSupabase()
 
-const questionText = ref('')
+const questionText = ref(props.presetQuestion ?? '')
+// 從別的政見頁再按一次過來時要換成新的預填內容；但使用者已經改過就不要蓋掉他打的字
+watch(() => props.presetQuestion, (q, prev) => {
+  if (q && (questionText.value === '' || questionText.value === (prev ?? ''))) questionText.value = q
+})
 const region = ref('')
 const submitting = ref(false)
 const error = ref<string | null>(null)
