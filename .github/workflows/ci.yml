@@ -57,3 +57,39 @@ jobs:
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
       - name: 掃不該進版控的金鑰
         run: deno run --allow-read scripts/scan-secrets.ts
+
+  # 部署只在 main、而且要等上面兩個 job 都綠。
+  # 2026-09-13 之前沒有這一段：每次上線都是有人在自己機器上跑 firebase deploy，
+  # 當天就出過事——我從落後的分支建置後直接推上去，把另一個人剛加的 GA 和政見
+  # 詳情頁修法從線上洗掉了。CI 部署的重點不是省事，是「上線的東西一定跟 main 一樣」。
+  #
+  # 服務帳戶是 `firebase init hosting:github` 建的 github-action-1143883858，
+  # 只有 Hosting admin 權限，不是整個專案的 Editor。
+  deploy:
+    name: 部署到 Firebase Hosting
+    needs: [typecheck, edge-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 這裡要自己再建一次：typecheck job 的 dist 不會跨 job 傳過來，
+      # 而且預渲染需要 Supabase 的環境變數。
+      - name: 建置（含預渲染）
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: pnpm build
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_POLICY_TW }}
+          channelId: live
+          projectId: policy-tw
