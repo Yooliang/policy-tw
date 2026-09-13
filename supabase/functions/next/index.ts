@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open").order("priority", { ascending: false }).limit(20),
+      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open").order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
       // 這個代理自己交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派給他）
@@ -231,7 +231,8 @@ Deno.serve(async (req) => {
       mySubmittedTaskIds,
     ), deadEndTaskIds).filter((t) => t.task_id !== skipTaskId);
     if (freeManual.length > 0) {
-      const t = pickBySeed(freeManual, seed)!;
+      // 依 priority 分層挑，不要整池隨機——否則 priority 與提問的表態數都是白寫的
+      const t = pickManualTask(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
       return json({

@@ -16,6 +16,7 @@ import {
 import { usePageHead } from '../composables/usePageHead'
 import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import HeroAction from '../components/HeroAction.vue'
+import { askPolicyProgress } from '../lib/ask-links'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { policySortDate, policyYear } from '../lib/policy-date'
 
@@ -39,26 +40,7 @@ function focusAuditInput(): void {
   el.focus()
 }
 
-// 動作列「查進度」：與政見頁同一顆功能（kind=progress），就地顯示狀態
-const progressRequesting = ref(false)
-const progressResult = ref<RequestTaskResult | null>(null)
-const progressError = ref<string | null>(null)
-const progressSuccess = computed(() => progressResult.value !== null)
-
-async function requestProgress() {
-  const p = selectedPolicy.value
-  if (!p || progressRequesting.value) return
-  progressRequesting.value = true
-  progressResult.value = null
-  progressError.value = null
-  try {
-    progressResult.value = await requestTask({ kind: 'progress', policy_id: p.id })
-  } catch (err: unknown) {
-    progressError.value = err instanceof Error ? err.message : '送出失敗，請稍後再試'
-  } finally {
-    progressRequesting.value = false
-  }
-}
+// 動作列「查進度」改成跳到公民提問（見 lib/ask-links.ts）；這一頁的「執行稽核」仍走 requestTask。
 
 async function submitAudit() {
   const url = sourceUrl.value.trim()
@@ -213,25 +195,10 @@ onMounted(() => { ensurePolicies() })
             <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
           <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> 政見原文</HeroAction>
-          <button
-            data-testid="hero-progress"
-            @click="requestProgress"
-            :disabled="progressRequesting"
-            :class="[
-              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent',
-              progressSuccess
-                ? 'bg-emerald-500 text-white'
-                : progressError
-                  ? 'bg-red-500/80 text-white'
-                  : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
-            ]"
-          >
-            <Loader2 v-if="progressRequesting" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="progressSuccess" :size="16" />
-            <XCircle v-else-if="progressError" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ progressRequesting ? '送出中…' : progressSuccess ? (progressResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : progressError ? '失敗' : '查進度' }}
-          </button>
+          <!-- 跟政見頁那顆同一套：跳到公民提問、問題先填好（見 lib/ask-links.ts） -->
+          <HeroAction data-testid="hero-progress" :to="askPolicyProgress(selectedPolicy.id, selectedPolicy.title, selectedPolicy.status === PolicyStatus.CAMPAIGN)">
+            <Sparkles :size="16" /> {{ selectedPolicy.status === PolicyStatus.CAMPAIGN ? '查兌現情形' : '查進度' }}
+          </HeroAction>
           <HeroAction data-testid="hero-audit-focus" @click="focusAuditInput"><LinkIcon :size="16" /> 執行稽核</HeroAction>
         </div>
       </template>

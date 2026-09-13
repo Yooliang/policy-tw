@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-vue-next'
 import { useSupabase } from '../../composables/useSupabase'
 import { askQuestion, isValidQuestion, QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH, type AskQuestionResult } from '../../lib/citizen-questions'
+import type { AskLinkKind } from '../../lib/ask-links'
 
 /**
  * 公民提問表單：訪客免登入發問，AI 代理會去查有出處的資料來回答。
@@ -12,8 +13,15 @@ import { askQuestion, isValidQuestion, QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH,
 const props = defineProps<{
   presetPolicyId?: string
   presetPolicyTitle?: string
-  /** 預先填好的問題。從政見頁按「這不是政見？」過來時用，讓人不必自己想怎麼問。 */
+  /** 預先填好的問題。從政見頁／人物頁的按鈕過來時用，讓人不必自己想怎麼問。 */
   presetQuestion?: string
+  /** 這一題掛在哪一位人物（人物頁的「查政見」「查簡介」用） */
+  presetPoliticianId?: string
+  /**
+   * 這一題要建哪一種任務。從按鈕過來時帶著，代理才會產出資料變更而不是只有一段文字。
+   * 一般提問不帶（見 lib/ask-links.ts 的說明）。
+   */
+  presetKind?: AskLinkKind
 }>()
 
 const emit = defineEmits<{
@@ -44,7 +52,9 @@ async function submit() {
     const result = await askQuestion({
       question: questionText.value,
       policyId: props.presetPolicyId,
+      politicianId: props.presetPoliticianId,
       region: region.value || undefined,
+      kind: props.presetKind,
     })
     questionText.value = ''
     successMessage.value = '已經交給 AI 代理去查，答案會出現在這一題下面。'

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
+import { askPoliticianPolicies, askPoliticianProfile } from '../lib/ask-links'
 import { useIndexedDB } from '../composables/useIndexedDB'
 import { PolicyStatus } from '../types'
 import type { CandidateStatus, Policy } from '../types'
@@ -44,22 +45,8 @@ async function requestLookup(key: LookupKey) {
   }
 }
 
-// 動作列的「查政見」「查簡介」：按下就地顯示狀態，不換頁、不捲動
-type HeroLookupKey = 'policy' | 'profile'
-const HERO_LOOKUP_KIND: Record<HeroLookupKey, RequestKind> = { policy: 'policy', profile: 'profile' }
-const heroLookup = reactive<Record<HeroLookupKey, LookupState>>({ policy: idle(), profile: idle() })
-
-async function requestHeroLookup(key: HeroLookupKey) {
-  const pol = politician.value
-  if (!pol || heroLookup[key].loading) return
-  heroLookup[key] = { loading: true, result: null, error: null }
-  try {
-    const result = await requestTask({ kind: HERO_LOOKUP_KIND[key], politician_id: pol.id })
-    heroLookup[key] = { loading: false, result, error: null }
-  } catch (err: unknown) {
-    heroLookup[key] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
-  }
-}
+// 動作列的「查政見」「查簡介」不在這裡送出了：改成跳到公民提問、問題先填好
+// （見 lib/ask-links.ts）。頁面內文那幾顆空狀態的「查一下」仍走 requestTask。
 
 // Get election name by ID
 function getElectionName(electionId: number): string {
@@ -282,19 +269,12 @@ usePageHead({
           <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
             <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <HeroAction data-testid="hero-query-policy" @click="requestHeroLookup('policy')">
-            <Loader2 v-if="heroLookup.policy.loading" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="heroLookup.policy.result" :size="16" />
-            <XCircle v-else-if="heroLookup.policy.error" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ heroLookup.policy.loading ? '處理中…' : heroLookup.policy.result ? (heroLookup.policy.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : heroLookup.policy.error ? '查政見（重試）' : '查政見' }}
+          <!-- 兩顆都走公民提問流程（跳轉＋預填），跟政見頁的按鈕同一套，見 lib/ask-links.ts -->
+          <HeroAction data-testid="hero-query-policy" :to="askPoliticianPolicies(politician.id, politician.name)">
+            <Sparkles :size="16" /> 查政見
           </HeroAction>
-          <HeroAction data-testid="hero-query-profile" @click="requestHeroLookup('profile')">
-            <Loader2 v-if="heroLookup.profile.loading" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="heroLookup.profile.result" :size="16" />
-            <XCircle v-else-if="heroLookup.profile.error" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ heroLookup.profile.loading ? '處理中…' : heroLookup.profile.result ? (heroLookup.profile.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : heroLookup.profile.error ? '查簡介（重試）' : '查簡介' }}
+          <HeroAction data-testid="hero-query-profile" :to="askPoliticianProfile(politician.id, politician.name)">
+            <Sparkles :size="16" /> 查簡介
           </HeroAction>
         </div>
       </template>
