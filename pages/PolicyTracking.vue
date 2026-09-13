@@ -8,6 +8,7 @@ import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
+import PolicyViewNav from '../components/PolicyViewNav.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -32,10 +33,19 @@ watch(selectedLocation, (newVal) => {
 })
 
 const searchTerm = ref('')
-const showCheckpointsOnly = ref(false)
+// 「我的追蹤」從網址進來（PolicyViewNav 指 /tracking?view=mine），不能只是本頁的 local 狀態，
+// 不然從別頁點那顆按鈕會落到全部政見。
+const view = ref<'all' | 'mine'>('all')
+const showCheckpointsOnly = computed({
+  get: () => view.value === 'mine',
+  set: (v: boolean) => { view.value = v ? 'mine' : 'all' },
+})
 
 // 縣市（全站共用）與分類 ↔ 網址 ?region=&category=，區域資料頁的「進入 XX 追蹤頁」就是靠這個
-useRegionQuerySync({ routeName: 'tracking', extra: { category: queryField(selectedCategory, 'All') } })
+useRegionQuerySync({ routeName: 'tracking', extra: {
+  category: queryField(selectedCategory, 'All'),
+  view: queryField(view, 'all', { allowed: ['all', 'mine'] as const }),
+} })
 const checkpoints = ref<string[]>([])
 
 
@@ -93,14 +103,13 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen">
     <Hero background-image="/images/heroes/policy-tracking.png">
-      <template #title>政見追蹤</template>
+      <template #title>政見</template>
       <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項治理承諾都在正確的軌道上。</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
 
       <!-- Hero Actions: 頁籤 -->
       <template #actions>
-        <HeroAction :active="!showCheckpointsOnly" @click="showCheckpointsOnly = false"><TrendingUp :size="16" /> 政見列表</HeroAction>
-        <HeroAction :active="showCheckpointsOnly" @click="showCheckpointsOnly = true"><Star :size="16" /> 我的追蹤</HeroAction>
+        <PolicyViewNav :current="showCheckpointsOnly ? 'mine' : 'list'" />
       </template>
 
       <GlobalRegionSelector />
