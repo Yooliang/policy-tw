@@ -10,6 +10,21 @@ export const SUMMARY_TEXT_LIMIT = 200;
 export const LEADERBOARD_SIZE = 30;
 
 /**
+ * 貢獻榜的分數：提交 ＋ 上線 ＋ 驗證票三項相加。
+ *
+ * 原本只按 applied 排，結果是「做最多的人排在後面」——交了 44 筆、投了 22 票的人
+ * 因為那 44 筆全卡在待驗證（沒人能驗），分數是 0，排在一個「交 2 筆上線 1 筆」的
+ * 測試代號後面。那個排法量的不是貢獻多寡，是運氣好不好被核對到。
+ *
+ * applied 是 submitted 的子集，所以通過驗證的那幾筆實際上算兩次——這是刻意的：
+ * 查證品質好、被同儕認可的貢獻本來就該比單純的量更值錢。驗證別人的資料也算分，
+ * 因為這個平台目前最缺的就是願意花額度去核對別人的人。
+ */
+export function leaderboardScore(v: { submitted: number; applied: number; verified_votes: number }): number {
+  return v.submitted + v.applied + v.verified_votes;
+}
+
+/**
  * 不列入貢獻榜與「近 30 天貢獻者」的代號：維護者自己開的測試與探測代理。
  * 它們交的資料是真的（有幾筆已通過驗證上線，那些不動），但它們不是外部參與者，
  * 留在榜上會把參與程度講得比實際好看——這個站的重點就是數字不能說謊。
@@ -190,7 +205,11 @@ export const ATTENTION_STATUSES = ["disputed"] as const;
 export const CONTRIBUTORS_WINDOW_DAYS = 30;
 
 export interface SummaryRow { status: string; agent_name: string | null; created_at: string }
-export interface VoteRow { agent_name: string | null }
+export interface VoteRow { agent_name: string | null; created_at?: string | null }
+
+/** 貢獻榜的時間窗：總榜（null）／近 30 天／近 7 天 */
+export const LEADERBOARD_WINDOWS = { all: null, d30: 30, d7: 7 } as const;
+export type LeaderboardEntry = { agent_name: string; submitted: number; applied: number; verified_votes: number; score: number };
 
 export interface FeedSummary {
   total: number;
@@ -200,7 +219,61 @@ export interface FeedSummary {
   adjudicating: number;
   contributors_30d: number;
   daily_last_7: Array<{ date: string; count: number }>;
-  leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>;
+  /** 總榜（全部時間）。欄位名保留不動：外部有東西在讀它。 */
+  leaderboard: LeaderboardEntry[];
+  /** 近 30 天 */
+  leaderboard_30d: LeaderboardEntry[];
+  /** 近 7 天 */
+  leaderboard_7d: LeaderboardEntry[];
+}
+
+/**
+ * 算一張貢獻榜。windowDays 給 null＝總榜；給數字＝只算那幾天內的貢獻與票。
+ *
+ * 時間窗看的是「這筆貢獻／這張票是什麼時候發生的」，不是它現在什麼狀態。
+ * 所以一筆三週前提交、昨天才通過驗證的貢獻，不會出現在 7 天榜裡——
+ * 榜量的是這段期間做了多少事，不是這段期間有多少東西剛好落庫。
+ *
+ * 票沒有 created_at 時（舊資料或呼叫端沒撈）一律算進總榜、不算進任何時間窗，
+ * 寧可少算也不要把時間不明的票塞進本週。
+ */
+export function buildLeaderboard(
+  rows: readonly SummaryRow[],
+  votes: readonly VoteRow[],
+  windowDays: number | null,
+  now: number = Date.now(),
+): LeaderboardEntry[] {
+  const since = windowDays === null ? null : now - windowDays * 86400 * 1000;
+  const inWindow = (iso: string | null | undefined): boolean => {
+    if (since === null) return true;
+    if (!iso) return false;
+    const t = Date.parse(iso);
+    return !Number.isNaN(t) && t >= since;
+  };
+  const agentOf = (r: { agent_name: string | null }) => (r.agent_name && r.agent_name.trim()) || "(unknown)";
+  const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
+  const bump = (name: string) => {
+    const a = byAgent.get(name) ?? { submitted: 0, applied: 0, verified_votes: 0 };
+    byAgent.set(name, a);
+    return a;
+  };
+  for (const r of rows) {
+    if (!inWindow(r.created_at)) continue;
+    const a = bump(agentOf(r));
+    a.submitted++;
+    if (r.status === "applied") a.applied++;
+  }
+  for (const v of votes) {
+    if (!inWindow(v.created_at)) continue;
+    bump(agentOf(v)).verified_votes++;
+  }
+  return [...byAgent.entries()]
+    .filter(([agent_name]) => !EXCLUDED_AGENTS.has(agent_name))
+    .map(([agent_name, v]) => ({ agent_name, ...v, score: leaderboardScore(v) }))
+    // 同分時先看上線、再看提交，讓名次穩定可預測（不要靠 Map 的插入順序）
+    .sort((a, b) => b.score - a.score || b.applied - a.applied || b.submitted - a.submitted)
+    .filter((r) => r.score > 0)
+    .slice(0, LEADERBOARD_SIZE);
 }
 
 export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now(), adjudicating = 0): FeedSummary {
@@ -229,12 +302,6 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     if (d in daily) daily[d]++;
   }
   for (const v of votes) bump(agentOf(v)).verified_votes++;
-
-  const leaderboard = [...byAgent.entries()]
-    .filter(([agent_name]) => !EXCLUDED_AGENTS.has(agent_name))
-    .map(([agent_name, v]) => ({ agent_name, ...v }))
-    .sort((a, b) => b.applied - a.applied || b.submitted - a.submitted || b.verified_votes - a.verified_votes)
-    .slice(0, LEADERBOARD_SIZE);
   const needs = { disputed: byStatus.disputed ?? 0, retrying: byStatus.apply_failed ?? 0 }; // retrying 只是資訊，不算人工
   return {
     total: rows.length,
@@ -243,6 +310,8 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     adjudicating,
     contributors_30d: recentAgents.size,
     daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })),
-    leaderboard,
+    leaderboard: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.all, now),
+    leaderboard_30d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d30, now),
+    leaderboard_7d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d7, now),
   };
 }

@@ -42,6 +42,14 @@ interface FeedItem {
   payload: Record<string, unknown>
 }
 
+interface LeaderboardEntry {
+  agent_name: string
+  submitted: number
+  applied: number
+  verified_votes: number
+  score: number
+}
+
 interface FeedSummary {
   total: number
   by_status: Record<string, number>
@@ -49,7 +57,9 @@ interface FeedSummary {
   adjudicating: number
   contributors_30d: number
   daily_last_7: Array<{ date: string; count: number }>
-  leaderboard: Array<{ agent_name: string; submitted: number; applied: number; verified_votes: number }>
+  leaderboard: LeaderboardEntry[]
+  leaderboard_30d?: LeaderboardEntry[]
+  leaderboard_7d?: LeaderboardEntry[]
 }
 
 const FEED_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/contributions-feed`
@@ -95,6 +105,14 @@ const STATUS_CLASS: Record<string, string> = {
 
 const route = useRoute()
 const router = useRouter()
+
+// 貢獻榜的時間窗。後端三張榜一次回傳，切換不用重打 API。
+const LEADERBOARD_RANGES = [
+  { key: 'all' as const, label: '總榜' },
+  { key: 'd30' as const, label: '30 天' },
+  { key: 'd7' as const, label: '7 天' },
+]
+const leaderboardRange = ref<'all' | 'd30' | 'd7'>('all')
 // 網址參數：?tab=tasks 直接開任務分頁；?type=policy&status=applied 預設篩選；?agent_name=xxx 只看某人的
 function queryString(key: string): string {
   const v = route.query[key]
@@ -115,6 +133,21 @@ const agentName = ref(queryString('agent_name'))
 const nextCursor = ref<string | null>(null)
 const hasMore = ref(false)
 const expanded = ref<Set<string>>(new Set())
+
+// 後端一次回三張榜；舊版回應沒有時間窗那兩個欄位時退回總榜，不要讓畫面空白
+const activeLeaderboard = computed<LeaderboardEntry[]>(() => {
+  const s = summary.value
+  if (!s) return []
+  if (leaderboardRange.value === 'd30') return s.leaderboard_30d ?? s.leaderboard
+  if (leaderboardRange.value === 'd7') return s.leaderboard_7d ?? s.leaderboard
+  return s.leaderboard
+})
+const leaderboardEmptyText = computed(() => {
+  if (!summary.value) return "讀取中"
+  if (leaderboardRange.value === 'd7') return '最近 7 天還沒有人有動作'
+  if (leaderboardRange.value === 'd30') return '最近 30 天還沒有人有動作'
+  return '還沒有人上榜'
+})
 
 function headers(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -412,12 +445,25 @@ usePageHead({
             </div>
           </section>
           <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
-            <h3 class="font-black text-navy-900 mb-3 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
-            <p v-if="!summary || summary.leaderboard.length === 0" class="text-sm text-slate-400">還沒有人上榜</p>
+            <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
+            <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
+            <div class="flex flex-wrap items-center gap-1.5 mb-3">
+              <button
+                v-for="opt in LEADERBOARD_RANGES"
+                :key="opt.key"
+                @click="leaderboardRange = opt.key"
+                :class="[
+                  'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors',
+                  leaderboardRange === opt.key ? 'bg-navy-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                ]"
+              >{{ opt.label }}</button>
+            </div>
+            <p v-if="activeLeaderboard.length === 0" class="text-sm text-slate-400">{{ leaderboardEmptyText }}</p>
             <ol v-else class="space-y-2">
-              <li v-for="(row, i) in summary.leaderboard" :key="row.agent_name" class="flex items-center gap-3 text-sm">
+              <li v-for="(row, i) in activeLeaderboard" :key="row.agent_name" class="flex items-center gap-3 text-sm">
                 <span class="w-5 text-right font-black text-slate-400">{{ i + 1 }}</span>
                 <span class="font-bold text-navy-900 truncate flex-1">{{ row.agent_name }}</span>
+                <span class="font-black text-navy-900 tabular-nums">{{ row.score ?? 0 }}</span>
                 <span class="text-xs text-slate-500 whitespace-nowrap">提交 {{ row.submitted }}・上線 {{ row.applied }}・驗證 {{ row.verified_votes ?? 0 }}</span>
               </li>
             </ol>
