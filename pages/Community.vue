@@ -12,6 +12,7 @@ import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 import { voteStance, type AskQuestionResult, type Stance } from '../lib/citizen-questions'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
+import { useRoute } from 'vue-router'
 
 const { policies, politicians, loadPoliticianById } = useSupabase()
 const { globalRegion } = useGlobalState()
@@ -20,10 +21,16 @@ const { questions, loadingQuestions, questionsError, loadQuestions, answersByQue
 type StatusFilter = 'all' | 'open' | 'answered'
 type SortMode = 'stance' | 'latest'
 
+const route = useRoute()
 const statusFilter = ref<StatusFilter>('all')
 const sortMode = ref<SortMode>('latest')
 // 從 PolicyDetail 的「民眾提問」帶 ?policy= 過來：只看這項政見的提問，且提問表單預設掛在它底下
 const policyFilter = ref('')
+// ?q= 由政見頁的「這不是政見？」帶過來，預先填好問題，使用者可以改或直接送出
+const presetQuestion = computed(() => {
+  const v = route.query.q
+  return typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : undefined
+})
 
 // 縣市（全站共用）、狀態、排序 ↔ 網址 ?region=&status=&sort=&policy=
 useRegionQuerySync({
@@ -158,7 +165,7 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
-      <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" class="mb-8" @asked="onAsked" />
+      <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" :preset-question="presetQuestion" class="mb-8" @asked="onAsked" />
 
       <div v-if="policyFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mb-6">
         <span>只看這項政見的提問：<strong>{{ policyFilterTitle || '（政見）' }}</strong></span>

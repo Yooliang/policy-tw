@@ -97,7 +97,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-3 text-sm font-black tabular-nums">
           <span class="flex items-center gap-1 text-violet-700" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
           <span class="flex items-center gap-1 text-rose-600" title="反對"><ThumbsDown :size="13" class="fill-current" />{{ policy.stanceOppose }}</span>
-          <span class="flex items-center gap-1 text-amber-600" title="更在意"><Flame :size="13" />{{ policy.stancePriority }}</span>
+          <span class="flex items-center gap-1 text-amber-600" title="關注"><Flame :size="13" />{{ policy.stancePriority }}</span>
         </div>
       </div>
       <div v-else class="space-y-2">

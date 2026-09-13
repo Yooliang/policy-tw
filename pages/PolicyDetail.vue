@@ -9,7 +9,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -146,10 +146,22 @@ watch(policyId, async (id) => {
   sources.value = data || []
 }, { immediate: true })
 
+/**
+ * 「這不是政見？」用的預填提問。
+ *
+ * 不另外做一套回報機制：公民提問本來就會建任務、派給代理、要求附出處，
+ * 代理判定該移除時用 removal 型別（需 3 票）。缺的只是「一般人想不到要怎麼問」，
+ * 所以這裡把話先寫好，使用者可以改也可以直接送。
+ */
+const notAPolicyQuestion = computed(() => {
+  const t = policy.value?.title ?? ""
+  return `「${t}」這筆看起來不像政見（比較像個人表態、行程或活動紀錄）。請查證原始出處後判斷：它應該被移除、改分類，還是其實是有效的承諾？`.slice(0, 300)
+})
+
 const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string }> = [
   { key: 'support', label: '我支持', hint: '希望這項政見被實現' },
   { key: 'oppose', label: '我反對', hint: '不希望這項政見被實現' },
-  { key: 'priority', label: '我更在意', hint: '不一定有立場，但覺得這件事該優先處理' },
+  { key: 'priority', label: '我關注', hint: '不一定有立場，但會持續注意這件事' },
 ]
 
 /** 畫面上的計數：表態過就用伺服器回的最新值，否則用政見本身帶的 */
@@ -261,6 +273,11 @@ usePageHead({
             {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '查進度' }}
           </button>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
+          <HeroAction
+            data-testid="hero-not-a-policy"
+            :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
+            title="走公民提問流程，問題已經先幫你寫好"
+          ><AlertTriangle :size="16" /> 這不是政見？</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
@@ -356,7 +373,7 @@ usePageHead({
                 </div>
                 <div class="text-center">
                   <span class="block text-2xl font-black text-amber-600 tabular-nums">{{ shownStances.stance_priority.toLocaleString() }}</span>
-                  <span class="text-[11px] text-amber-500 font-bold">更在意</span>
+                  <span class="text-[11px] text-amber-500 font-bold">關注</span>
                 </div>
               </div>
             </div>
