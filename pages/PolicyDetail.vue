@@ -12,6 +12,7 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
+import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
@@ -280,11 +281,11 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex flex-wrap items-center gap-3 ml-0 md:ml-44">
-          <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
-            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-44">
+          <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
+            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <span v-if="!canVerify" data-testid="hero-progress-blocked" class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 bg-white/10 text-white/70 border border-white/20">
+          <span v-if="!canVerify" data-testid="hero-progress-blocked" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'bg-white/10 text-white/70 border border-white/20']">
             <Clock :size="16" /> {{ verifyBlockedReason }}
           </span>
           <button
@@ -293,7 +294,7 @@ usePageHead({
             @click="handleVerify"
             :disabled="verifying"
             :class="[
-              'px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap border border-transparent',
+              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent',
               verifySuccess
                 ? 'bg-emerald-500 text-white'
                 : verifyError
@@ -301,10 +302,10 @@ usePageHead({
                   : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20'
             ]"
           >
-            <Loader2 v-if="verifying" :size="18" class="animate-spin" />
-            <CheckCircle v-else-if="verifySuccess" :size="18" />
-            <XCircle v-else-if="verifyError" :size="18" />
-            <Sparkles v-else :size="18" />
+            <Loader2 v-if="verifying" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="verifySuccess" :size="16" />
+            <XCircle v-else-if="verifyError" :size="16" />
+            <Sparkles v-else :size="16" />
             {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : verifyLabel }}
           </button>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>

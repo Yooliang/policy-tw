@@ -16,6 +16,7 @@ import {
 import { usePageHead } from '../composables/usePageHead'
 import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import HeroAction from '../components/HeroAction.vue'
+import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { policySortDate, policyYear } from '../lib/policy-date'
 
 const route = useRoute()
@@ -207,9 +208,9 @@ onMounted(() => { ensurePolicies() })
       </template>
 
       <template #actions>
-        <div class="flex flex-wrap items-center gap-3">
-          <button @click="router.push('/analysis')" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
-            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+          <button @click="router.push('/analysis')" :class="HERO_ICON_BUTTON" aria-label="返回">
+            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
           <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> 政見原文</HeroAction>
           <button
@@ -217,7 +218,7 @@ onMounted(() => { ensurePolicies() })
             @click="requestProgress"
             :disabled="progressRequesting"
             :class="[
-              'px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap border border-transparent',
+              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent',
               progressSuccess
                 ? 'bg-emerald-500 text-white'
                 : progressError

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
+import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 
 defineProps<{
   backAction?: () => void
@@ -45,14 +46,14 @@ defineProps<{
           <button
             v-if="backAction && !$slots.actions"
             @click="backAction"
-            class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0"
+            :class="HERO_ICON_BUTTON"
             aria-label="返回"
           >
-            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
 
-          <!-- Actions Area -->
-          <div v-if="$slots.actions" class="flex flex-wrap gap-3">
+          <!-- Actions Area：間距跟按鈕一樣手機縮一級。按鈕尺寸見 lib/hero-action-styles.ts -->
+          <div v-if="$slots.actions" class="flex flex-wrap items-center gap-2 sm:gap-3">
             <slot name="actions" />
           </div>
         </div>
