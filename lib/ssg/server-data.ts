@@ -22,19 +22,57 @@ export function ensureFullDataset(): Promise<DataSnapshot> {
   return datasetPromise
 }
 
+const FETCH_ATTEMPTS = 3
+const RETRY_DELAY_MS = [0, 3000, 9000]
+
+/**
+ * 建置期間的暫時性失敗要重試，不要整條 CI 紅掉。
+ *
+ * 2026-09-13 實際發生：`Failed to fetch data from Supabase: { message: 'Gateway Timeout' }`
+ * → 建置中止 → 那次合併的改動整批沒有部署，而且畫面上看起來只是「CI 紅了」。
+ * 中止本身是對的（產出空殼頁更糟），錯的是只試一次。
+ *
+ * 刻意只重試「拿不到資料」，不重試「資料是空的」：後者代表 Supabase 回了但內容不對，
+ * 那是真的該停下來的狀況，重試只會拖長時間然後得到同一個答案。
+ */
+async function withRetry<T>(label: string, run: () => Promise<T>, ok: (v: T) => boolean): Promise<T> {
+  let last: unknown = null
+  for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt++) {
+    if (RETRY_DELAY_MS[attempt] > 0) {
+      console.warn(`[ssg] ${label} 第 ${attempt} 次沒成功，${RETRY_DELAY_MS[attempt] / 1000} 秒後重試`)
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS[attempt]))
+    }
+    try {
+      const v = await run()
+      if (ok(v)) return v
+      last = new Error(`${label} 回傳的內容不完整`)
+    } catch (err) {
+      last = err
+    }
+  }
+  throw last instanceof Error ? last : new Error(`[ssg] ${label} 連續 ${FETCH_ATTEMPTS} 次失敗`)
+}
+
 async function loadFullDataset(): Promise<DataSnapshot> {
   const { fetchAll, loaded } = useSupabase()
-  await fetchAll()
-  if (!loaded.value) {
-    throw new Error('[ssg] 基礎資料（政見／選舉／分類）載入失敗，中止建置以免產出空殼頁')
-  }
+  await withRetry(
+    '基礎資料（政見／選舉／分類）',
+    async () => { await fetchAll(); return loaded.value },
+    (ok) => ok,
+  ).catch(() => {
+    throw new Error('[ssg] 基礎資料（政見／選舉／分類）連續三次載入失敗，中止建置以免產出空殼頁')
+  })
   const base = getDataSnapshot()
   if (base.policies.length === 0 || base.elections.length === 0) {
     throw new Error(`[ssg] 基礎資料為空（policies=${base.policies.length}, elections=${base.elections.length}），中止建置`)
   }
 
   // 一定要排序：這個 view 沒有 ORDER BY，分頁撈會重複／漏筆
-  const rows = await fetchAllRows<RawPolitician>('politicians_with_elections', '*', 'id')
+  const rows = await withRetry(
+    'politicians_with_elections',
+    () => fetchAllRows<RawPolitician>('politicians_with_elections', '*', 'id'),
+    (r) => r.length > 0,
+  )
   const politicians = dedupeById(rows.map(mapPolitician))
   if (politicians.length === 0) {
     throw new Error('[ssg] politicians_with_elections 回傳 0 筆，中止建置')
