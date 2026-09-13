@@ -117,10 +117,30 @@ const policyChain = computed(() => {
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
 
-// 競選承諾還沒開始執行，頁面上也刻意不顯示進度時間軸（下面 v-if="!isCampaign"），
-// 所以按鈕寫「查進度」跟頁面自己講的話矛盾。派出去的任務是一樣的
-// （policy_progress：這個承諾後來有沒有動靜），只是標籤要對得上狀態。
-const verifyLabel = computed(() => (isCampaign.value ? '查後續進展' : '查進度'))
+/**
+ * 查證按鈕三態，跟後端派任務的條件一致（migration 20260913000004）。
+ *
+ * 一筆 2026 的競選承諾不可能有執行進度——投票日還沒到。後端已經不對這種政見
+ * 派 progress_stale 了，前端就不該留一顆按鈕請人去派。屆別空著的同理：
+ * 連是哪一場選舉都不知道，查不出「兌現了沒有」。
+ *
+ * 施政中的政見              → 查進度
+ * 已投票屆別的競選承諾      → 查兌現情形
+ * 未投票或屆別不明的承諾    → 不給按鈕，改說一句為什麼
+ */
+const TODAY = new Date().toISOString().slice(0, 10)
+const pledgeElectionDone = computed(() => {
+  const d = policyElection.value?.electionDate
+  return !!d && d < TODAY
+})
+const canVerify = computed(() => !isCampaign.value || pledgeElectionDone.value)
+const verifyLabel = computed(() => (isCampaign.value ? '查兌現情形' : '查進度'))
+/** 不能查證時，畫面上要講得出原因（而且是使用者能據以行動的那句） */
+const verifyBlockedReason = computed(() => {
+  if (canVerify.value) return null
+  const d = policyElection.value?.electionDate
+  return d ? `${d} 投票，選後才會有執行進度` : '還沒確認這是哪一場選舉的承諾'
+})
 
 // 查核履歷徽章：有 status=applied 的紀錄才顯示，點擊平滑捲到履歷區塊
 const appliedHistoryCount = ref(0)
@@ -258,7 +278,11 @@ usePageHead({
           <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
             <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
           </button>
+          <span v-if="!canVerify" data-testid="hero-progress-blocked" class="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 bg-white/10 text-white/70 border border-white/20">
+            <Clock :size="16" /> {{ verifyBlockedReason }}
+          </span>
           <button
+            v-else
             data-testid="hero-progress"
             @click="handleVerify"
             :disabled="verifying"
