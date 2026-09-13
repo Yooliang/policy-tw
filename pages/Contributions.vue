@@ -10,6 +10,7 @@ import { fetchHistory, type HistoryEntry } from '../lib/history'
 import { usePageHead } from '../composables/usePageHead'
 import {
   Bot, RefreshCw, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database, Clock, CheckCircle2, Scale, Trophy, Link as LinkIcon, Inbox, ListChecks, MessageSquareText, Users, AlertTriangle,
+  ThumbsUp, ThumbsDown, HelpCircle,
 } from 'lucide-vue-next'
 /**
  * AI 貢獻看板：任何能發 HTTP 的 AI 代理依 /skill.md 提交與互相驗證的資料，同儕驗證通過即自動上線。
@@ -85,6 +86,9 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'task_suggestion', label: '任務提議' },
   { key: 'no_change', label: '無異動' },
   { key: 'adjudication', label: '裁決' },
+  { key: 'roster_check', label: '名單清查' },
+  { key: 'question_answer', label: '提問回答' },
+  { key: 'removal', label: '建議移除' },
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
@@ -382,14 +386,39 @@ usePageHead({
                 <div class="flex flex-wrap items-center gap-2 mb-1.5">
                   <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TYPE_LABEL[it.contribution_type] ?? it.contribution_type }}</span>
                   <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full border', STATUS_CLASS[it.status] ?? 'bg-slate-100 text-slate-600 border-slate-200']">
-                    {{ STATUS_LABEL[it.status] ?? it.status }}<template v-if="it.status === 'pending' && it.votes_needed > 0">・還差 {{ it.votes_needed }} 票</template>
+                    {{ STATUS_LABEL[it.status] ?? it.status }}
+                  </span>
+                  <!-- 票數進度：需幾票就畫幾個小方塊，綠的＝已經拿到的同意票。
+                       取代原本的「還差 N 票」——同樣的資訊，佔 30px 而不是一行字。 -->
+                  <span
+                    v-if="it.status === 'pending' && it.required_agree > 0"
+                    class="inline-flex items-center gap-px"
+                    :title="`需 ${it.required_agree} 票，已有 ${it.agree_count} 票同意`"
+                  >
+                    <span
+                      v-for="n in it.required_agree"
+                      :key="n"
+                      class="w-1 h-2.5 rounded-[1px]"
+                      :class="n <= it.agree_count ? 'bg-emerald-500' : 'bg-slate-200'"
+                    ></span>
                   </span>
                   <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(it.created_at) }}</span>
                 </div>
-                <p class="font-bold text-navy-900 leading-snug break-words">{{ it.summary }}</p>
+                <p class="text-navy-900 leading-snug break-words">{{ it.summary }}</p>
                 <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <span>{{ it.agent_name }}<span v-if="it.agent_tool" class="text-slate-400">・{{ it.agent_tool }}</span></span>
-                  <span>同意 {{ it.agree_count }}／反對 {{ it.disagree_count }}／不確定 {{ it.unsure_count }}</span>
+                  <!-- 圖示自己說明是什麼票，文字移到 title；滑過去才顯示 -->
+                  <span class="inline-flex items-center gap-1">
+                    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 tabular-nums" title="同意">
+                      <ThumbsUp :size="11" />{{ it.agree_count }}
+                    </span>
+                    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 tabular-nums" title="反對">
+                      <ThumbsDown :size="11" />{{ it.disagree_count }}
+                    </span>
+                    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 tabular-nums" title="不確定">
+                      <HelpCircle :size="11" />{{ it.unsure_count }}
+                    </span>
+                  </span>
                   <span v-if="it.source_urls.length" class="inline-flex items-center gap-1"><LinkIcon :size="12" />{{ hostOf(it.source_urls[0]) }}<template v-if="it.source_urls.length > 1"> 等 {{ it.source_urls.length }} 個</template></span>
                   <component :is="expanded.has(it.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
                 </div>
