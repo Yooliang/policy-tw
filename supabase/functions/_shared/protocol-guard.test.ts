@@ -254,6 +254,32 @@ Deno.test("競選承諾：還沒投票的屆別不可以被問「進度如何」
     "施政類（非競選承諾）要維持原本的「90 天沒進度」問法",
   );
 });
+Deno.test("名單清查：不可以叫代理去查投票後才更新的來源", async () => {
+  // 2026-09-13 查到的：43 個 roster_check 缺口，last_checked 全是空的——一次都沒成功過。
+  // 原因是 hint_sources 把 db.cec.gov.tw（選舉「結果」資料庫，頁面自己標明「投票後 7 日內
+  // 更新」）跟選舉公報（接近投票日才出版）列在最前面，兩個都回答不了進行中的選舉。
+  // 這跟 progress_stale 問還沒投票的承諾「進度如何」是同一類 bug：問題答不出來。
+  const { sql } = await latestMigrationDefining("contribution_auto_tasks_raw(");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
+  const branch = body.slice(body.indexOf("'auto:roster_check:'"));
+  const roster = branch.slice(0, branch.indexOf("UNION ALL"));
+
+  // 公告日之前那一支的來源清單裡不可以有這兩個
+  const beforeArm = roster.slice(roster.indexOf("ELSE ARRAY["), roster.indexOf("2, l.name"));
+  assert(!beforeArm.includes("db.cec.gov.tw"), "登記階段的 hint_sources 不可以指向 db.cec.gov.tw——那是投票後才更新的結果資料庫");
+  assert(!beforeArm.includes("bulletin.cec.gov.tw"), "登記階段的 hint_sources 不可以指向選舉公報——要接近投票日才出版");
+
+  // 兩個階段要分開：任務必須依公告日決定該補 registered 還是 confirmed
+  assert(roster.includes("s.list_announced_on"), "任務要依 roster_check_scope.list_announced_on 判斷現在是登記階段還是審定階段");
+  assert(/registered/.test(roster) && /confirmed/.test(roster), "任務要明講這個階段該填哪一種 candidate_status");
+
+  // 公告日存在 scope 表上而且不可為空：新增一屆就必須填，否則任務會講錯階段
+  const { sql: colSql } = await latestMigrationContaining("list_announced_on");
+  assert(
+    /ALTER COLUMN list_announced_on SET NOT NULL/.test(colSql),
+    "list_announced_on 要是 NOT NULL，不然新增一屆選舉時忘了填，任務會一直用登記階段的說法",
+  );
+});
 Deno.test("協議只有一份：根目錄 SKILL.md 不可以是 public/skill.md 的複本", async () => {
   // 2026-09-13 踩到：根目錄放了 public/skill.md 的複本，停在 1.4.1、還寫著
   // 「這份文件就是唯一的協議」，而網址那份已經 1.4.4，兩份差 29 行。
