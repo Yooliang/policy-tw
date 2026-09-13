@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import { supabase } from '../lib/supabase'
@@ -12,6 +12,7 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
+import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
@@ -20,7 +21,13 @@ import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById } = useSupabase()
+const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
+
+// 這一頁除了主角那筆，還要「同一人的其他政見」與整條市政接力鏈（otherPolicies／policyChain），
+// 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
+// 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
+// 兩個區塊會憑空變空。所以這一頁明確要整份。
+onMounted(() => { ensurePolicies() })
 
 // 讀者表態。以前這裡只有一個 hasVoted 的 local ref——按下去把畫面數字 +1，
 // 什麼都沒存，重新整理就沒了，而旁邊寫著「讓候選人看見選民的聲音」。
@@ -116,6 +123,31 @@ const policyChain = computed(() => {
 })
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
+
+/**
+ * 查證按鈕三態，跟後端派任務的條件一致（migration 20260913000004）。
+ *
+ * 一筆 2026 的競選承諾不可能有執行進度——投票日還沒到。後端已經不對這種政見
+ * 派 progress_stale 了，前端就不該留一顆按鈕請人去派。屆別空著的同理：
+ * 連是哪一場選舉都不知道，查不出「兌現了沒有」。
+ *
+ * 施政中的政見              → 查進度
+ * 已投票屆別的競選承諾      → 查兌現情形
+ * 未投票或屆別不明的承諾    → 不給按鈕，改說一句為什麼
+ */
+const TODAY = new Date().toISOString().slice(0, 10)
+const pledgeElectionDone = computed(() => {
+  const d = policyElection.value?.electionDate
+  return !!d && d < TODAY
+})
+const canVerify = computed(() => !isCampaign.value || pledgeElectionDone.value)
+const verifyLabel = computed(() => (isCampaign.value ? '查兌現情形' : '查進度'))
+/** 不能查證時，畫面上要講得出原因（而且是使用者能據以行動的那句） */
+const verifyBlockedReason = computed(() => {
+  if (canVerify.value) return null
+  const d = policyElection.value?.electionDate
+  return d ? `${d} 投票，選後才會有執行進度` : '還沒確認這是哪一場選舉的承諾'
+})
 
 // 查核履歷徽章：有 status=applied 的紀錄才顯示，點擊平滑捲到履歷區塊
 const appliedHistoryCount = ref(0)
@@ -249,16 +281,20 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex flex-wrap items-center gap-3 ml-0 md:ml-44">
-          <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
-            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-44">
+          <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
+            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
+          <span v-if="!canVerify" data-testid="hero-progress-blocked" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'bg-white/10 text-white/70 border border-white/20']">
+            <Clock :size="16" /> {{ verifyBlockedReason }}
+          </span>
           <button
+            v-else
             data-testid="hero-progress"
             @click="handleVerify"
             :disabled="verifying"
             :class="[
-              'px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap border border-transparent',
+              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent',
               verifySuccess
                 ? 'bg-emerald-500 text-white'
                 : verifyError
@@ -266,18 +302,13 @@ usePageHead({
                   : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20'
             ]"
           >
-            <Loader2 v-if="verifying" :size="18" class="animate-spin" />
-            <CheckCircle v-else-if="verifySuccess" :size="18" />
-            <XCircle v-else-if="verifyError" :size="18" />
-            <Sparkles v-else :size="18" />
-            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : '查進度' }}
+            <Loader2 v-if="verifying" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="verifySuccess" :size="16" />
+            <XCircle v-else-if="verifyError" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : verifyLabel }}
           </button>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
-          <HeroAction
-            data-testid="hero-not-a-policy"
-            :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
-            title="走公民提問流程，問題已經先幫你寫好"
-          ><AlertTriangle :size="16" /> 這不是政見？</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
@@ -355,8 +386,10 @@ usePageHead({
             </div>
           </div>
 
-          <!-- 讀者表態：支持／反對／更在意。計數以伺服器回的為準，不在本機加一。 -->
-          <div v-if="isCampaign" class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
+          <!-- 讀者表態：支持／反對／更在意，計數以伺服器回的為準，不在本機加一。
+               對所有狀態的政見都顯示，不只競選承諾：「這不是政見？」的回報入口在這一區，
+               非承諾類的政見（那些才更可能被誤建）一樣要有得按。 -->
+          <div class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div>
                 <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
@@ -397,6 +430,14 @@ usePageHead({
               <span v-if="myPolicyStance" class="self-center text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉</span>
             </div>
             <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
+            <div class="mt-5 pt-4 border-t border-violet-100">
+              <RouterLink
+                data-testid="hero-not-a-policy"
+                :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
+                class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 transition-colors"
+                title="走公民提問流程，問題已經先幫你寫好"
+              ><AlertTriangle :size="15" /> 這不是政見？回報給 AI 查證</RouterLink>
+            </div>
           </div>
 
           <!-- Description & AI Analysis -->

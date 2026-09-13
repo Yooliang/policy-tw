@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -13,12 +13,15 @@ import { usePageHead } from '../composables/usePageHead'
 
 const route = useRoute()
 const router = useRouter()
-const { discussions, policies, loading, ensureDiscussions } = useSupabase()
+const { discussions, policies, loading, ensureDiscussions, loadPolicyById } = useSupabase()
 
 
 const discussionId = computed(() => Number(route.params.discussionId))
 const discussion = computed(() => discussions.value.find(d => d.id === discussionId.value))
 const policy = computed(() => policies.value.find(p => p.id === discussion.value?.policyId))
+// 這一頁只需要「這串討論掛的那一筆政見」，不需要整份清單（257 KB）。
+// 預渲染的切片已經帶了那一筆；客戶端換頁進來的才要補。
+watch(() => discussion.value?.policyId, (id) => { if (id && !policies.value.some(p => p.id === id)) loadPolicyById(id) }, { immediate: true })
 const relatedDiscussions = computed(() =>
   discussions.value.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussion.value?.id)
 )

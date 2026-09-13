@@ -23,6 +23,16 @@ const regionStats = ref<RegionStats[]>([])
 const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 const loading = ref(false)
 const loaded = ref(false)
+/**
+ * 政見清單是不是「完整的一份」。
+ *
+ * 刻意不用 policies.value.length > 0 判斷，那會是個假的已載入：
+ *   1. 預渲染的政見詳情頁只嵌那一條政見（與同一人、同一條接力鏈）的切片；
+ *   2. loadPolicyById 查不到就把單筆 push 進 policies。
+ * 兩種情況都讓 length > 0 而清單其實不完整——列表頁會只出現一張卡片，
+ * 而且因為「已經有資料了」再也不會去載，畫面看起來就是資料不見了。
+ */
+const policiesComplete = ref(false)
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
@@ -218,18 +228,19 @@ async function fetchAllInner() {
     // regions（178 KB）、electoral_district_areas（77 KB）、discussions 改成按需載入——
     // 那 255 KB 只有區域資料頁、後台統計頁、選舉頁、討論頁會用到，
     // 卻讓每一個訪客的第一次連線都付這個成本（改之前首屏是 605 KB／9 個請求）。
+    //
+    // 2026-09-13 政見清單（257 KB）＋有政見的人物（91 KB）也移出去了，見 ensurePolicies。
+    // 公民提問頁對這 348 KB 的全部用途是「用 id 找一個政見標題」，小良哥回報載入很慢。
     const [
       electionsData,
       electionTypesData,
       categoriesRes,
       locationsRes,
-      policiesData,
     ] = await Promise.all([
       fetchAllRows<RawElection>('elections'),
       fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type'),
       supabase.from('categories').select('name'),
       supabase.from('locations').select('name'),
-      fetchAllRows<RawPolicy>('policies_with_logs'),
     ])
 
     // Map elections
@@ -245,14 +256,6 @@ async function fetchAllInner() {
     locations.value = (locationsRes.data || []).map(r => r.name)
     // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
     // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
-    policies.value = (policiesData || []).filter(r => !r.removed_at).map(mapPolicy)
-
-    // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
-    // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
-    // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
-    // 目前有政見的只有 72 位，跟著政見一起載的成本可以忽略。
-    await loadPoliticiansWithPolicies()
-
     loaded.value = true
     loading.value = false
 
@@ -329,6 +332,35 @@ export function ensureDiscussions(): Promise<void> {
     })().catch((err) => { discussionsPromise = null; console.error('[ensureDiscussions] 失敗：', err) })
   }
   return discussionsPromise
+}
+
+let policiesPromise: Promise<void> | null = null
+
+/**
+ * 政見清單（257 KB）＋有政見的人物（91 KB）。列表頁與詳情頁要，公民提問頁不要。
+ *
+ * 跟另外三塊 ensure* 不同的是：這一塊的判斷不能看 length。預渲染的詳情頁會先嵌
+ * 一份不完整的切片，loadPolicyById 也會把單筆塞進清單——所以用 policiesComplete
+ * 這個明確的旗標，只有「真的整份載完」或「切片本身就是整份」才算。
+ */
+export function ensurePolicies(): Promise<void> {
+  if (policiesComplete.value) return Promise.resolve()
+  if (!policiesPromise) {
+    policiesPromise = (async () => {
+      const rows = await fetchAllRows<RawPolicy>('policies_with_logs')
+      // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
+      // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
+      const loadedPolicies = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
+      // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
+      policies.value = loadedPolicies
+      // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
+      // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
+      // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
+      await loadPoliticiansWithPolicies()
+      policiesComplete.value = true
+    })().catch((err) => { policiesPromise = null; console.error('[ensurePolicies] 政見清單載入失敗，卡片會出不來：', err) })
+  }
+  return policiesPromise
 }
 
 /** 政見卡片與縣市篩選需要的人物＝有政見的那些人。切選舉時這批不能被清掉。 */
@@ -501,6 +533,13 @@ function getTownshipsByElectoralDistrict(region: string, electoralDistrict: stri
 
 /** 全域資料狀態的純資料快照（可 JSON 序列化）。 */
 export interface DataSnapshot {
+  /**
+   * 這份切片裡的 policies 是不是完整的一份。
+   * 只有首頁、政見列表、市政接力列表拿得到全部政見；詳情頁只拿那一條鏈。
+   * 少了這個布林，hydrate 後 policiesComplete 就得靠猜，詳情頁的部分切片會被
+   * 當成「已經載完了」，之後導到列表頁就只剩那一張卡片。
+   */
+  policiesComplete: boolean
   elections: Election[]
   categories: string[]
   locations: string[]
@@ -515,6 +554,7 @@ export interface DataSnapshot {
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
 export function getDataSnapshot(): DataSnapshot {
   return {
+    policiesComplete: policiesComplete.value,
     elections: elections.value,
     categories: categories.value,
     locations: locations.value,
@@ -532,6 +572,7 @@ export function getDataSnapshot(): DataSnapshot {
  * 建置時 fetchAll 早已完成，loaded 保持 true。
  */
 export function applyDataSnapshot(snapshot: DataSnapshot): void {
+  policiesComplete.value = snapshot.policiesComplete === true
   elections.value = snapshot.elections
   categories.value = snapshot.categories
   locations.value = snapshot.locations
@@ -697,6 +738,8 @@ export function useSupabase() {
     ensureRegionStats,
     ensureDistricts,
     ensureDiscussions,
+    ensurePolicies,
+    policiesComplete,
     getPoliciesByCategory,
     loadPoliticianById,
     loadPolicyById,

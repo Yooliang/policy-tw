@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { PolicyStatus } from '../types'
+import { policyStatusLabel } from '../composables/usePageHead'
 
 const props = defineProps<{
   status: PolicyStatus
@@ -25,9 +26,10 @@ const styles = computed(() => {
   }
 })
 
-const label = computed(() => {
-  return props.status === PolicyStatus.CAMPAIGN ? '競選承諾' : props.status
-})
+// 標籤走 policyStatusLabel 這一份。原本只有 CAMPAIGN 翻成「競選承諾」，
+// 其餘直接印 enum 的英文值——畫面上會並排出現「競選承諾」與「In Progress」。
+// 政見與競選承諾是兩種狀態，要分得出來，前提是每一種都講得出中文。
+const label = computed(() => policyStatusLabel(props.status))
 </script>
 
 <template>

@@ -5,6 +5,7 @@ export default { name: 'ElectionPage' }
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
+import HeroAction from '../components/HeroAction.vue'
 import { PolicyStatus, ElectionType } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
@@ -27,7 +28,7 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -72,6 +73,8 @@ async function loadElectionData(id: number, region: string) {
 }
 
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   // 選舉區對應表 77 KB，只有這一頁篩議員選區要用，改成按需載入
   ensureDistricts()
   if (electionId.value) {
@@ -140,6 +143,14 @@ watch(selectedSubRegion, () => {
 const VIEW_MODES = ['politicians', 'pledges', 'issues', 'comparison'] as const
 type ElectionViewMode = typeof VIEW_MODES[number]
 const viewMode = ref<ElectionViewMode>('politicians')
+
+/** Hero 的四個檢視頁籤（文字與圖示）。VIEW_MODES 是給網址參數驗證用的字串清單，兩者分開。 */
+const VIEW_TABS: Array<{ key: ElectionViewMode; label: string; icon: typeof LayoutGrid }> = [
+  { key: 'politicians', label: '候選人', icon: LayoutGrid },
+  { key: 'pledges', label: '競選承諾', icon: Megaphone },
+  { key: 'issues', label: '議題串聯', icon: Layers },
+  { key: 'comparison', label: '政見 PK', icon: Scale },
+]
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
@@ -490,10 +501,10 @@ usePageHead({
 
       <!-- Hero Actions: View Mode Tabs -->
       <template #actions>
-        <button @click="viewMode = 'politicians'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'politicians' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><LayoutGrid :size="16" /> 候選人</button>
-        <button @click="viewMode = 'pledges'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'pledges' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Megaphone :size="16" /> 競選承諾</button>
-        <button @click="viewMode = 'issues'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'issues' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Layers :size="16" /> 議題串聯</button>
-        <button @click="viewMode = 'comparison'" :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${viewMode === 'comparison' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"><Scale :size="16" /> 政見 PK</button>
+        <!-- 檢視切換一律走 HeroAction：尺寸與間距跟全站動作區一致，四顆在手機上換行沒關係 -->
+        <HeroAction v-for="v in VIEW_TABS" :key="v.key" :active="viewMode === v.key" @click="viewMode = v.key">
+          <component :is="v.icon" :size="16" /> {{ v.label }}
+        </HeroAction>
       </template>
 
       <GlobalRegionSelector />

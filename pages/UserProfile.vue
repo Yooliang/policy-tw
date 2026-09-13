@@ -6,6 +6,7 @@ import PolicyCard from '../components/PolicyCard.vue'
 import { useAuth } from '../composables/useAuth'
 import { useSupabase } from '../composables/useSupabase'
 import { User, ListTodo, Star, Settings, Loader2, LogOut, RefreshCw, ExternalLink, Bot } from 'lucide-vue-next'
+import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
@@ -15,7 +16,14 @@ import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, user, userDisplayName, userAvatarUrl, userEmail, signOut } = useAuth()
-const { policies, politicians } = useSupabase()
+const { policies, politicians, ensurePolicies } = useSupabase()
+
+/** Hero 的三個頁籤。改文字或順序只動這裡。 */
+const TABS: Array<{ key: 'contributions' | 'tracking' | 'settings'; label: string; icon: typeof Star }> = [
+  { key: 'contributions', label: '我的貢獻', icon: ListTodo },
+  { key: 'tracking', label: '我的追蹤', icon: Star },
+  { key: 'settings', label: '我的設定', icon: Settings },
+]
 
 const activeTab = ref<'contributions' | 'tracking' | 'settings'>('contributions')
 
@@ -118,6 +126,8 @@ const trackedPolicies = computed(() => policies.value.filter(policy => checkpoin
 
 // === Lifecycle ===
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
   agentName.value = readStoredAgentName()
@@ -150,24 +160,10 @@ usePageHead({ title: '個人頁面', noindex: true })
       <template #icon><User :size="400" class="text-violet-500" /></template>
 
       <template #actions>
-        <button
-          @click="activeTab = 'contributions'"
-          :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'contributions' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"
-        >
-          <ListTodo :size="16" /> 我的貢獻
-        </button>
-        <button
-          @click="activeTab = 'tracking'"
-          :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'tracking' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"
-        >
-          <Star :size="16" /> 我的追蹤
-        </button>
-        <button
-          @click="activeTab = 'settings'"
-          :class="`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'settings' ? 'bg-white text-navy-900 shadow-lg' : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'}`"
-        >
-          <Settings :size="16" /> 我的設定
-        </button>
+        <!-- 頁籤一律走 HeroAction，尺寸與間距跟全站動作區一致 -->
+        <HeroAction v-for="tab in TABS" :key="tab.key" :active="activeTab === tab.key" @click="activeTab = tab.key">
+          <component :is="tab.icon" :size="16" /> {{ tab.label }}
+        </HeroAction>
       </template>
     </Hero>
 

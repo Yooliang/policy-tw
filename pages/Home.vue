@@ -12,7 +12,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
-const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory } = useSupabase()
+const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
 
 const checkpointIds = ref<string[]>([])
 const politicians2026CountDirect = ref<number | null>(null)
@@ -43,6 +43,8 @@ async function loadHomeStats() {
 }
 
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
   loadHomeStats()

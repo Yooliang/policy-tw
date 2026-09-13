@@ -8,6 +8,7 @@ import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
+import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -24,19 +25,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
-const SUGGESTED_TYPE: Record<string, string> = {
-  policy_missing: "policy",
-  profile_gap: "politician",
-  policy_source_missing: "correction",
-  progress_stale: "policy_progress",
-  candidacy_source_missing: "candidacy",
-  adjudicate: "adjudication",
-  // 掃 RSS 找到的多半是新政見；既有政見的新進度就改用 policy_progress，任務敘述有寫
-  news_sweep: "policy",
-  // 修正任務多半是改既有資料；整筆不該存在的話改用 removal，任務敘述有寫
-  fix_disputed: "correction",
-  policy_election_missing: "correction",
 };
 const CANDIDATE_POOL = 30;
 const RETRY_AFTER_MIN = 30;

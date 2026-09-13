@@ -15,7 +15,7 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { policyMatchesRegion } from '../lib/policy-region'
 
 const router = useRouter()
-const { policies, politicians, locations, categories, loading } = useSupabase()
+const { policies, politicians, locations, categories, loading, ensurePolicies } = useSupabase()
 const { globalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
@@ -54,6 +54,8 @@ const loadCheckpoints = () => {
 }
 
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
 })

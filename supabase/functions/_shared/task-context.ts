@@ -78,6 +78,9 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
       return {
         policy,
         politician: pick(p, POLITICIAN_BRIEF),
+        // 競選承諾的 progress_stale 問的是「當選了嗎？兌現了嗎？」，
+        // 所以參選紀錄（含 election_result）要一起給，代理不必為此多打一次 API。
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
         recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
       };
     }
@@ -88,6 +91,7 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
       return { politician: full, missing_fields: missing, present_fields: present };
     }
     case "candidacy_source_missing":
+    case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
     case "roster_check": {
       const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string } | null;
@@ -198,7 +202,14 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policy = pl.data ?? null;
     data.tracking_logs = logs.data ?? [];
   }
-  if (taskType === "candidacy_source_missing" && pid) {
+  // 承諾類的 progress_stale 要先判斷當選與否，把這個人的參選紀錄一起帶上
+  if (taskType === "progress_stale" && pid) {
+    const { data: el } = await supabase.from("politician_elections")
+      .select("election_id, election_type, candidate_status, election_result")
+      .eq("politician_id", pid).order("election_id", { ascending: false });
+    data.elections = el ?? [];
+  }
+  if ((taskType === "candidacy_source_missing" || taskType === "election_result_missing") && pid) {
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
     data.politician_election = pe ?? null;

@@ -14,13 +14,14 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
+import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById } = useSupabase()
+const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
 const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
@@ -145,6 +146,8 @@ async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
 }
 
 onMounted(async () => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   await ensurePoliticianLoaded(String(route.params.politicianId))
 
   const cacheTimestamp = await getCacheTimestamp('politicians_all')
@@ -275,9 +278,9 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex flex-wrap items-center gap-3 ml-0 md:ml-48">
-          <button @click="router.go(-1)" class="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full transition-all border border-white/10 group shrink-0" aria-label="返回">
-            <ChevronLeft :size="24" class="group-hover:-translate-x-1 transition-transform" />
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-48">
+          <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
+            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
           <HeroAction data-testid="hero-query-policy" @click="requestHeroLookup('policy')">
             <Loader2 v-if="heroLookup.policy.loading" :size="16" class="animate-spin" />
