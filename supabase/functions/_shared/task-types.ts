@@ -1,0 +1,30 @@
+/**
+ * 任務型別 → 建議用哪一種貢獻型別回報。
+ *
+ * 這張表原本在 next/index.ts 與 tasks/index.ts 各抄一份，而且早就抄岔了：
+ * tasks 那份停在六種，news_sweep／fix_disputed／policy_election_missing／roster_check
+ * 四種任務從 /tasks 拿到的 suggested_contribution_type 一直是 null，沒有任何東西會紅。
+ * 2026-09-13 加 election_result_missing 時踩到，收成一份。
+ *
+ * 新增自動缺口時只改這裡。protocol-guard.test.ts 會從 migration 的 SQL 把所有 task_type
+ * 撈出來逐一比對，漏登記就紅。
+ */
+export const SUGGESTED_TYPE: Record<string, string> = {
+  policy_missing: "policy",
+  profile_gap: "politician",
+  policy_source_missing: "correction",
+  progress_stale: "policy_progress",
+  candidacy_source_missing: "candidacy",
+  adjudicate: "adjudication",
+  // 掃 RSS 找到的多半是新政見；既有政見的新進度就改用 policy_progress，任務敘述有寫
+  news_sweep: "policy",
+  // 修正任務多半是改既有資料；整筆不該存在的話改用 removal，任務敘述有寫
+  fix_disputed: "correction",
+  policy_election_missing: "correction",
+  // 選舉結果要補在參選紀錄上（politician_elections.election_result），所以走 candidacy
+  election_result_missing: "candidacy",
+  // 名單清查用同名的型別回報
+  roster_check: "roster_check",
+  // 公民提問用 question_answer 回報（非自動缺口，所以守門測試不會要求它，但它一樣該有）
+  question: "question_answer",
+};

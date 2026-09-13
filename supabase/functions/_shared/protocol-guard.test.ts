@@ -12,6 +12,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
+import { SUGGESTED_TYPE } from "./task-types.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const SKILL_MD = new URL("../../../public/skill.md", import.meta.url);
@@ -202,6 +203,57 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
   assert(attemptDays >= 1 && attemptDays < TASK_CHECK_COOLDOWN_DAYS, "嘗試冷卻要比無異動冷卻短：那是換人再試，不是結案");
 });
 
+Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建議", async () => {
+  // 新增缺口時最容易忘的一步：SQL 長出新的 task_type，next 端點的 SUGGESTED_TYPE 沒跟上，
+  // 代理拿到的 suggested_contribution_type 就是 null——它得自己猜要用哪一種型別回報。
+  // 這個專案已經三次因為「新型別、兩邊沒對上」靜默出錯，所以這裡不比對單一字面，
+  // 而是從 SQL 把所有 task_type 撈出來逐一檢查。
+  const { sql } = await latestMigrationDefining("contribution_auto_tasks_raw(");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
+  const sqlTypes = [...body.matchAll(/'auto:[a-z_]+:'[^,]*,\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  assert(sqlTypes.length >= 7, `只從 SQL 撈到 ${sqlTypes.length} 種 task_type，正則可能失效了`);
+
+  for (const t of new Set(sqlTypes)) {
+    assert(SUGGESTED_TYPE[t], `缺口 ${t} 沒有登記在 _shared/task-types.ts 的 SUGGESTED_TYPE，代理會收到 suggested_contribution_type: null`);
+  }
+  // 兩個端點都要用同一份，不可以再各抄一份（/tasks 那份曾經停在六種，漏四種沒人發現）
+  for (const f of ["../next/index.ts", "../tasks/index.ts"]) {
+    const src = await Deno.readTextFile(new URL(f, import.meta.url));
+    assert(src.includes('from "../_shared/task-types.ts"'), `${f} 要 import 共用的 SUGGESTED_TYPE`);
+    assert(!src.includes("const SUGGESTED_TYPE"), `${f} 不可以自己再宣告一份 SUGGESTED_TYPE`);
+  }
+
+  // skill.md 也要講得出這種任務是什麼，否則外部代理只拿到一個沒解釋的字串
+  const skill = await Deno.readTextFile(SKILL_MD);
+  for (const t of new Set(sqlTypes)) {
+    assert(skill.includes("`" + t + "`"), `skill.md 沒有說明 ${t} 這種任務要做什麼`);
+  }
+});
+
+Deno.test("競選承諾：還沒投票的屆別不可以被問「進度如何」", async () => {
+  // 2026-09-13 量到：progress_stale 的 219 個缺口裡只有 27 個問對了問題。
+  // 其餘是競選承諾——2026 的投票日是 11-28，還沒選，不可能有執行進度；
+  // 屆別空著的連是哪一場選舉都不知道。代理只能回 no_change，14 天後再被派一次。
+  // 這支測試守著兩個條件：承諾要等投票日過了才問，落選／退選的不再問。
+  const { sql } = await latestMigrationDefining("contribution_auto_tasks_raw(");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
+  const branch = body.slice(body.indexOf("'auto:progress_stale:'"));
+  const stale = branch.slice(0, branch.indexOf("UNION ALL"));
+
+  assert(
+    /e\.election_date\s+IS\s+NOT\s+NULL[\s\S]*?AND\s+e\.election_date\s*<\s*CURRENT_DATE/.test(stale),
+    "投票日條件不見了：競選承諾必須等所屬選舉的投票日過了才派 progress_stale（屆別空的也會被這個條件排掉）",
+  );
+  assert(
+    /election_result\s+IN\s*\(\s*'not_elected'\s*,\s*'withdrawn'\s*\)/.test(stale),
+    "落選／退選者的承諾永遠不會有進度，要排掉，否則每 14 天重派一次",
+  );
+  // 施政類不受影響：那一支問法本來就是對的，不要被一起排掉
+  assert(
+    /pl\.status::TEXT\s*<>\s*'Campaign Pledge'/.test(stale),
+    "施政類（非競選承諾）要維持原本的「90 天沒進度」問法",
+  );
+});
 Deno.test("協議只有一份：根目錄 SKILL.md 不可以是 public/skill.md 的複本", async () => {
   // 2026-09-13 踩到：根目錄放了 public/skill.md 的複本，停在 1.4.1、還寫著
   // 「這份文件就是唯一的協議」，而網址那份已經 1.4.4，兩份差 29 行。

@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
+import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 
 /**
  * tasks — 領任務（四主端點之一）。無金鑰。
@@ -15,15 +16,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
-
-const SUGGESTED_TYPE: Record<string, string> = {
-  policy_missing: "policy",
-  profile_gap: "politician",
-  policy_source_missing: "correction",
-  progress_stale: "policy_progress",
-  candidacy_source_missing: "candidacy",
-  adjudicate: "adjudication",
 };
 
 function json(body: unknown, status = 200): Response {
