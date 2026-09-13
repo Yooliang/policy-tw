@@ -6,7 +6,7 @@ import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
 import { Search, GitBranch, Database, Milestone, ArrowRight } from 'lucide-vue-next'
-import MechanismNav from '../components/MechanismNav.vue'
+import PolicyViewNav from '../components/PolicyViewNav.vue'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -80,7 +80,7 @@ const relayCases = computed(() => {
 })
 
 usePageHead({
-  title: 'AI 智能分析',
+  title: '市政接力',
   description: '將跨任期、跨黨派的重大建設案聚合分析，追蹤市政接力的傳承品質，提供具備行政歷史深度的稽核數據。',
 })
 </script>
@@ -88,12 +88,12 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
     <Hero background-image="/images/heroes/ai.png">
-      <template #title>AI 智能分析</template>
+      <template #title>市政接力</template>
       <template #description>這不是單一政見的陳列。我們將跨任期、跨黨派的重大建設案進行聚合，<br class="hidden lg:block" />分析每一根治理接力棒的傳承品質，提供具備行政歷史深度的稽核數據。</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
       <template #actions>
-        <MechanismNav current="analysis" />
+        <PolicyViewNav current="relay" />
       </template>
 
       <GlobalRegionSelector />

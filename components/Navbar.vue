@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, FileText, Heart, X, Vote, MessageSquare, LogIn, Loader2 } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, MessageSquare, LogIn, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 
@@ -28,8 +28,9 @@ const activeElection = computed(() => getActiveElection())
 
 const navItems = computed(() => {
   const items = [
-    { name: '政見追蹤', shortName: '追蹤', path: '/tracking', icon: TrendingUp },
-    { name: '智能分析', shortName: '分析', path: '/analysis', icon: FileText },
+    // 「跨任期接力」（/analysis）不在主選單：它是「政見」底下的一種看法，
+    // 入口在 PolicyViewNav。放兩個地方會讓人以為是兩件不同的事。
+    { name: '政見', shortName: '政見', path: '/tracking', icon: TrendingUp },
     { name: '公民參與', shortName: '參與', path: '/community', icon: MessageSquare },
   ]
 
