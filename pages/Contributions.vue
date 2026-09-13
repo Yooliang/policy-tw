@@ -18,7 +18,7 @@ import {
  */
 
 // 沒有常態人工點：disputed＝裁決中（系統自動建 adjudicate 任務，4 票同向定案）；apply_failed 會自動重試
-type StatusKey = 'all' | 'pending' | 'verified' | 'applied' | 'disputed' | 'rejected' | 'reverted'
+type StatusKey = 'all' | 'pending' | 'voting' | 'applied' | 'disputed' | 'rejected' | 'reverted'
 
 interface FeedItem {
   id: string
@@ -70,7 +70,9 @@ const PAGE_SIZE = 20
 const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'pending', label: '待驗證' },
-  { key: 'verified', label: '已驗證' },
+  // 不放 verified：通過驗證會立刻自動落庫變 applied，那一頁實測回 0 筆，
+  // 跟「已上線」講同一件事。讀者真正想看的是「正在被核對的那些」。
+  { key: 'voting', label: '驗證中' },
   { key: 'applied', label: '已上線' },
   { key: 'disputed', label: '裁決中' },
   { key: 'rejected', label: '退件' },

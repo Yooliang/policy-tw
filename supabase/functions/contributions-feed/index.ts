@@ -5,7 +5,10 @@ import { ATTENTION_STATUSES, buildFeedSummary, safePayload, type SummaryRow, sum
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
- * GET ?status=all|attention|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<created_at>
+ * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<created_at>
+ *   voting＝還在等票但已經有人投過（status=pending 且三種票數任一 > 0）。
+ *   verified 這個狀態是過渡的——通過驗證會立刻自動落庫變 applied，所以那一頁幾乎永遠是空的，
+ *   讀者要看的其實是「正在被核對的那些」。
  * 每筆：安全摘要＋計數＋來源＋審核備註（不回 ip_hash；長文截 200 字）。另回 summary（各狀態筆數、近 7 日每日提交、貢獻榜前 10）。
  */
 
@@ -31,10 +34,12 @@ Deno.serve(async (req) => {
     const type = url.searchParams.get("type");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 50);
     const cursor = url.searchParams.get("cursor");
-    if (status !== "all" && status !== "attention" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all／attention 或 ${STATUSES.join("/")}` }, 400);
+    if (status !== "all" && status !== "attention" && status !== "voting" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all／attention／voting 或 ${STATUSES.join("/")}` }, 400);
 
     let q = supabase.from("contributions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(limit + 1);
     if (status === "attention") q = q.in("status", ATTENTION_STATUSES);
+    // 「驗證中」＝還在等票、但已經有人動過的。單看 status 分不出「沒人理」與「正在被核對」。
+    else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0");
     else if (status !== "all") q = q.eq("status", status);
     if (agentName) q = q.eq("agent_name", agentName);
     if (type) q = q.eq("contribution_type", type);

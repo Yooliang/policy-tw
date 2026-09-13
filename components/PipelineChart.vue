@@ -21,9 +21,10 @@ const MIN_POINTS_FOR_CHART = 2
 
 const { snapshots, loading, error, fetchSnapshots } = usePipelineSnapshots()
 
-// 預設只勾「待查任務／待驗證貢獻」：兩者數值量級相近，一起看才看得出「池子有沒有在消化」；
-// 「已上線累計」「驗證票累計」是只增不減的總數，混在一起畫會把前兩條線壓成一直線，讓使用者自己選要不要疊加。
-const visible = ref<Set<MetricKey>>(new Set(['tasksOpen', 'pending']))
+// 預設勾「待驗證貢獻／已上線累計／驗證票累計」——這三條講的是同一件事的三個階段：
+// 交進來、被核對、真的上線。「待查任務」預設不勾：它現在是 842，量級比其他三條大一個
+// 數量級，一起畫會把它們壓成貼著 X 軸的直線，看不出有沒有在動。要看的人自己勾。
+const visible = ref<Set<MetricKey>>(new Set(['pending', 'applied', 'votesTotal']))
 
 function toggleMetric(key: MetricKey) {
   const next = new Set(visible.value)
@@ -90,8 +91,7 @@ onMounted(fetchSnapshots)
 
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6" data-testid="pipeline-chart">
-    <h3 class="font-black text-navy-900 mb-1">機制運作狀態</h3>
-    <p class="text-xs text-slate-400 mb-4">每小時採樣一次，追蹤 AI 查證機制的運作情形</p>
+    <h3 class="font-black text-navy-900 mb-4">機制運作狀態</h3>
 
     <p v-if="error" class="text-sm text-red-600">運作狀態暫時讀不到</p>
 
