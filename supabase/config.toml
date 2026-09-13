@@ -510,3 +510,9 @@ entrypoint = "./functions/request-task/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/history/index.ts"
+
+[functions.policy-stance]
+enabled = true
+# 公開端點：讀者不需要登入就能對政見表態（同一來源 IP 每日 30 次，端點自己擋）
+verify_jwt = false
+entrypoint = "./functions/policy-stance/index.ts"

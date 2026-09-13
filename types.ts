@@ -123,6 +123,10 @@ export interface Policy {
   logs: TrackingLog[];
   aiAnalysis?: string; // Daily summary
   supportCount?: number; // Only for Campaign Pledges
+  /** 讀者表態：支持／反對／更在意（policy_stances） */
+  stanceSupport: number;
+  stanceOppose: number;
+  stancePriority: number;
   relatedPolicyIds?: string[]; // IDs of predecessor or successor policies (Cross-term tracking)
 }
 
@@ -346,6 +350,12 @@ export interface RawPolicy {
   tags?: string[];
   ai_analysis?: string;
   support_count?: number;
+  /** 讀者表態計數（policy_stances 的 trigger 同步）。view 重建前這三欄不存在，所以是選填。 */
+  stance_support?: number;
+  stance_oppose?: number;
+  stance_priority?: number;
+  /** 軟移除：有值代表這筆已被移除，前端一律過濾掉 */
+  removed_at?: string | null;
   logs?: RawTrackingLog[];
   related_policy_ids?: string[];
 }

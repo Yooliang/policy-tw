@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
 import Avatar from './Avatar.vue'
-import { Calendar, Tag, ChevronRight, ThumbsUp, Star } from 'lucide-vue-next'
+import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyYear } from '../lib/policy-date'
 
 const props = defineProps<{
@@ -91,11 +91,13 @@ onUnmounted(() => {
       </div>
 
       <!-- Progress Logic -->
-      <div v-if="isCampaign" class="flex items-center justify-between bg-violet-50 rounded-xl p-3 text-violet-700">
-        <span class="text-[10px] font-black uppercase tracking-wider">選民期待度</span>
-        <div class="flex items-center gap-1.5 text-sm font-black">
-          <ThumbsUp :size="14" class="fill-current" />
-          {{ policy.supportCount?.toLocaleString() }}
+      <!-- 讀者表態：三個數字一起顯示。只秀支持數會讓反對的聲音看不見。 -->
+      <div v-if="isCampaign" class="flex items-center justify-between bg-violet-50 rounded-xl p-3">
+        <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
+        <div class="flex items-center gap-3 text-sm font-black tabular-nums">
+          <span class="flex items-center gap-1 text-violet-700" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
+          <span class="flex items-center gap-1 text-rose-600" title="反對"><ThumbsDown :size="13" class="fill-current" />{{ policy.stanceOppose }}</span>
+          <span class="flex items-center gap-1 text-amber-600" title="更在意"><Flame :size="13" />{{ policy.stancePriority }}</span>
         </div>
       </div>
       <div v-else class="space-y-2">

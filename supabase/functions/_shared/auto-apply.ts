@@ -9,7 +9,7 @@
 
 import { applyContribution, type ApplyOutcome, type ContributionRow, contributionStatusFor } from "./apply-contribution.ts";
 import { APPLY_MAX_RETRIES, type IdentityVote, planRetry, resolveIdentityFromVotes } from "./consensus.ts";
-import { ensureAdjudicationTask } from "./adjudication.ts";
+import { ensureAdjudicationTask, ensureFixTask } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -70,6 +70,9 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
   // 轉 disputed 就自動建裁決任務（零人工點）；建不成只記 log，不影響主流程
   const escalate = async (reason: string) => {
     try { await ensureAdjudicationTask(supabase, contributionId, reason); } catch (e) { console.error("ensureAdjudicationTask:", e instanceof Error ? e.message : String(e)); }
+    // 裁決只能 uphold／reject，沒有「照反對意見修好」這個出口。反對者常常知道
+    // 正確答案，那份說明直接變成一筆修正任務，不必等人想起來重提。
+    try { await ensureFixTask(supabase, contributionId); } catch (e) { console.error("ensureFixTask:", e instanceof Error ? e.message : String(e)); }
   };
 
   try {

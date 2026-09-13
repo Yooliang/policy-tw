@@ -78,6 +78,78 @@ export async function ensureAdjudicationTask(supabase: SupabaseLike, contributio
   return { created: true, task_id: String(task.id) };
 }
 
+
+// ------------------------------------------------------------
+// 修正任務：反對達門檻時，除了裁決任務再長一筆「照反對意見修好它」。
+//
+// 為什麼需要：裁決只能二選一（uphold 落庫／reject 退件），沒有第三個出口。
+// 但實務上反對者常常**知道正確答案**——2026-09-13 那筆就是：兩位代理都指出
+// 「來源是 2026 台中市長選舉的專訪，但這筆政見標 election_id=2024」。
+// 舊流程下這筆會被 reject，然後要有人想到去重提一筆同時修 source_url 與
+// election_id 的 correction，同一件事跑兩輪，而且第二輪沒人保證會做。
+// 現在反對意見會原樣變成一筆任務，不必等人想起來。
+//
+// 裁決 uphold（原貢獻其實是對的）時這筆任務會被關掉；reject 時刻意留著，
+// 因為那正是還沒做完的事。查過覺得不用改就用 no_change 回報關掉它。
+// ------------------------------------------------------------
+export const FIX_TASK_TYPE = "fix_disputed";
+export const FIX_PRIORITY = 2;
+
+/** 純函式：把反對意見組成一筆「請修好它」的任務 */
+export function buildFixTask(c: DisputedContribution, votes: readonly DisputeVote[]): TaskInput {
+  const disagree = votes.filter((v) => v.verdict === "disagree");
+  const evidence = disagree.map((v) => v.evidence_url).filter((u): u is string => typeof u === "string" && u.length > 0);
+  const hint_sources = [...new Set([...(c.source_urls ?? []), ...evidence])];
+  const summary = summarizeContribution({ contribution_type: c.contribution_type, payload: c.payload, applied_politician_id: null, applied_policy_id: null }).summary;
+  const objections = disagree.length > 0
+    ? disagree.map((v, i) => `（${i + 1}）${v.agent_name ?? "?"}：${v.note ?? "（無說明）"}${v.evidence_url ? `［反證 ${v.evidence_url}］` : ""}`).join(" ")
+    : "（沒有留下反對說明）";
+  const description = `有人提了「${summary}」，被反對擋下來了。反對的理由如下，請逐條看過，然後提一筆**改好的新貢獻**——` +
+    `不要只重送原本那一欄，反對意見指出的問題要一起修掉（例如來源對了但屆別錯，就連 election_id 一起改）。` +
+    `反對意見：${objections}。原本的內容：${JSON.stringify(c.payload).slice(0, 300)}。` +
+    `先打開 hint_sources 裡正反雙方的網址自己確認一次，不要直接相信反對者說的。` +
+    `確認之後照一般規則提交（多半是 correction；若整筆本來就不該存在，用 removal）。` +
+    `查完覺得原本沒問題、或真的無從修起，用 no_change 帶 task_id 回報，這筆任務就會關掉。`;
+  return {
+    title: `照反對意見修正：${summary}`.slice(0, 120),
+    description,
+    task_type: FIX_TASK_TYPE,
+    priority: FIX_PRIORITY,
+    hint_sources,
+    target_contribution_id: c.id,
+    target_extra: { contribution_type: c.contribution_type, contributor: c.agent_name ?? null, objections: disagree.length },
+  };
+}
+
+/** 冪等：同一筆爭議只會有一個 open 的修正任務 */
+export async function ensureFixTask(supabase: SupabaseLike, contributionId: string): Promise<EnsureResult> {
+  const { data: c, error } = await supabase.from("contributions")
+    .select("id, contribution_type, payload, source_urls, agent_name, status, review_notes, last_error").eq("id", contributionId).maybeSingle();
+  if (error) throw new Error(`contributions read: ${error.message}`);
+  if (!c) return { created: false, task_id: null, skipped: "not_found" };
+  if (c.contribution_type === "adjudication") return { created: false, task_id: null, skipped: "adjudication_itself" };
+  if (c.status !== "disputed") return { created: false, task_id: null, skipped: "not_disputed" };
+  const { data: existing, error: exErr } = await supabase.from("contribution_tasks").select("id")
+    .eq("task_type", FIX_TASK_TYPE).eq("status", "open").eq("target->>contribution_id", contributionId).limit(1);
+  if (exErr) throw new Error(`fix task lookup: ${exErr.message}`);
+  if (((existing ?? []) as Obj[])[0]) return { created: false, task_id: String(((existing ?? []) as Obj[])[0].id) };
+  const { data: votes, error: vError } = await supabase.from("contribution_votes").select("verdict, evidence_url, note, agent_name").eq("contribution_id", contributionId);
+  if (vError) throw new Error(`votes read: ${vError.message}`);
+  // 沒有任何反對說明就不建：那多半是落庫失敗轉 disputed，修正任務沒有內容可寫
+  const disagree = ((votes ?? []) as DisputeVote[]).filter((v) => v.verdict === "disagree");
+  if (disagree.length === 0) return { created: false, task_id: null, skipped: "not_disputed" };
+  const task = await createTask(supabase, buildFixTask(c as DisputedContribution, (votes ?? []) as DisputeVote[]), { source: "auto_dispute", created_by: "auto-dispute" });
+  return { created: true, task_id: String(task.id) };
+}
+
+/** 原貢獻最後是 applied 時才關修正任務；reject 時刻意留著，那是還沒做完的事 */
+export async function closeFixTasks(supabase: SupabaseLike, contributionId: string): Promise<number> {
+  const { data, error } = await supabase.from("contribution_tasks")
+    .update({ status: "closed", closed_at: new Date().toISOString() })
+    .eq("task_type", FIX_TASK_TYPE).eq("status", "open").eq("target->>contribution_id", contributionId).select("id");
+  if (error) throw new Error(`fix task close: ${error.message}`);
+  return ((data ?? []) as Obj[]).length;
+}
 /** 定案後關閉該貢獻所有 open 的裁決任務；回關了幾筆 */
 export async function closeAdjudicationTasks(supabase: SupabaseLike, contributionId: string): Promise<number> {
   const { data, error } = await supabase.from("contribution_tasks")

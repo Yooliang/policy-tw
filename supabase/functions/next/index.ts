@@ -3,6 +3,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, LEASE_MINUTES, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
+import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
+import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
@@ -32,6 +34,9 @@ const SUGGESTED_TYPE: Record<string, string> = {
   adjudicate: "adjudication",
   // 掃 RSS 找到的多半是新政見；既有政見的新進度就改用 policy_progress，任務敘述有寫
   news_sweep: "policy",
+  // 修正任務多半是改既有資料；整筆不該存在的話改用 removal，任務敘述有寫
+  fix_disputed: "correction",
+  policy_election_missing: "correction",
 };
 const CANDIDATE_POOL = 30;
 const RETRY_AFTER_MIN = 30;
@@ -70,7 +75,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -88,8 +93,14 @@ Deno.serve(async (req) => {
       // 對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       supabase.from("contribution_votes").select("contribution_id")
         .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`).limit(2000),
+      // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
+      // 所以這裡要按 ip_hash 數，按 agent_name 數會給出偏低的用量、讓代理以為還有很多。
+      supabase.from("contributions").select("id", { count: "exact", head: true })
+        .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
+      supabase.from("contribution_votes").select("id", { count: "exact", head: true })
+        .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
@@ -158,7 +169,22 @@ Deno.serve(async (req) => {
     }
 
     const kind = chooseKind(totalPending, { verifies_done: myVotesRes.count ?? 0, tasks_done: myContribRes.count ?? 0 });
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, docs: "https://policy-tw.web.app/skill.md" };
+    // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
+    // 而 429 是在 POST /report 才發生——那時候查證的工都已經做完，白費。
+    const quota = {
+      scope: "每個來源 IP，UTC 零時重置；同一台機器的多個代號共用",
+      submit: {
+        limit: CONTRIBUTE_DAILY_LIMIT_PER_IP,
+        used: ipContribRes.count ?? 0,
+        remaining: Math.max(0, CONTRIBUTE_DAILY_LIMIT_PER_IP - (ipContribRes.count ?? 0)),
+      },
+      verify: {
+        limit: VERIFY_DAILY_LIMIT_PER_IP,
+        used: ipVoteRes.count ?? 0,
+        remaining: Math.max(0, VERIFY_DAILY_LIMIT_PER_IP - (ipVoteRes.count ?? 0)),
+      },
+    };
+    const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, docs: "https://policy-tw.web.app/skill.md" };
 
     if (kind === "verify") {
       // 優先派來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機

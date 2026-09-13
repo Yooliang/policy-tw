@@ -16,7 +16,7 @@ import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
-import { closeAdjudicationTasks } from "./adjudication.ts";
+import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection } from "./correction.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -546,7 +546,9 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
     }).eq("id", targetId).eq("status", "disputed");
     throwIf(e, "original reject");
     await finish();
-    return { status: "applied", message: `裁決 reject 定案：原貢獻 ${targetId} 已退件` };
+    // 修正任務刻意不關：reject 代表「原貢獻有誤」，那筆「照反對意見修好它」的任務
+    // 正是還沒做完的事。查過覺得無從修起的人用 no_change 帶 task_id 回報就會關掉。
+    return { status: "applied", message: `裁決 reject 定案：原貢獻 ${targetId} 已退件；修正任務保持 open，等人依反對意見重提` };
   }
 
   // uphold：把原貢獻落庫（身份爭議由裁決者指認）
@@ -564,7 +566,14 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
   }).eq("id", targetId).eq("status", "disputed");
   throwIf(e, "original mark applied");
   await finish();
-  return { status: "applied", politician_id: outcome.politician_id, policy_id: outcome.policy_id, message: `裁決 uphold 定案：原貢獻已落庫（${outcome.message}）` };
+  // uphold 代表原貢獻其實是對的，那筆修正任務就沒有東西要修了
+  const fixClosed = await closeFixTasks(supabase, targetId);
+  return {
+    status: "applied",
+    politician_id: outcome.politician_id,
+    policy_id: outcome.policy_id,
+    message: `裁決 uphold 定案：原貢獻已落庫（${outcome.message}）${fixClosed > 0 ? `；一併關閉 ${fixClosed} 筆修正任務` : ""}`,
+  };
 }
 
 export async function applyContribution(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
