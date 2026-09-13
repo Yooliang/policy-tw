@@ -14,7 +14,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useRoute } from 'vue-router'
 
-const { policies, politicians, loadPoliticianById } = useSupabase()
+const { policies, politicians, loadPoliticianById, loadPolicyById } = useSupabase()
 const { globalRegion } = useGlobalState()
 const { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, applyStanceResult } = useCitizenQuestions()
 
@@ -59,11 +59,20 @@ function chipClass(active: boolean): string {
     : 'px-3 py-1.5 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-700 hover:bg-white/50 transition-all'
 }
 
-// 政見標題（政見清單已全載）；人物姓名優先用已載入的清單，缺的再按需查（多數人物不會在 Community 頁預先載入）
-const policyFilterTitle = computed(() => policyFilter.value ? policies.value.find(p => p.id === policyFilter.value)?.title : undefined)
+// 這一頁對政見與人物的全部需求，就是「用 id 換一個名字」。
+// 所以兩邊都不叫 ensurePolicies／不預載整份清單，缺哪一筆就查哪一筆：
+// 整份政見清單是 257 KB＋有政見的人物 91 KB，這一頁顯示的是幾行標題。
+const policyTitleCache = ref<Record<string, string>>({})
 function policyTitleOf(id: string | null): string | undefined {
-  return id ? policies.value.find(p => p.id === id)?.title : undefined
+  if (!id) return undefined
+  return policies.value.find(p => p.id === id)?.title ?? policyTitleCache.value[id]
 }
+async function ensurePolicyTitle(id: string) {
+  if (policyTitleCache.value[id] || policies.value.some(p => p.id === id)) return
+  const loaded = await loadPolicyById(id)
+  if (loaded) policyTitleCache.value = { ...policyTitleCache.value, [id]: loaded.title }
+}
+const policyFilterTitle = computed(() => policyTitleOf(policyFilter.value))
 
 const politicianNameCache = ref<Record<string, string>>({})
 function politicianNameOf(id: string | null): string | undefined {
@@ -78,7 +87,11 @@ async function ensurePoliticianName(id: string) {
 watch(questions, (list) => {
   const missing = new Set(list.map(q => q.politicianId).filter((id): id is string => !!id && !politicianNameOf(id)))
   missing.forEach(ensurePoliticianName)
+  const missingPolicies = new Set(list.map(q => q.policyId).filter((id): id is string => !!id && !policyTitleOf(id)))
+  missingPolicies.forEach(ensurePolicyTitle)
 })
+// 網址帶 ?policy=<id> 進來時，那一筆不一定在問題清單裡（例如還沒有人問過），單獨補
+watch(policyFilter, (id) => { if (id) ensurePolicyTitle(id) }, { immediate: true })
 
 const filteredQuestions = computed(() => {
   let list = questions.value

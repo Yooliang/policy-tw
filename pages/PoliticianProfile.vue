@@ -20,7 +20,7 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById } = useSupabase()
+const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
 const { getCacheTimestamp } = useIndexedDB()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
@@ -145,6 +145,8 @@ async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
 }
 
 onMounted(async () => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   await ensurePoliticianLoaded(String(route.params.politicianId))
 
   const cacheTimestamp = await getCacheTimestamp('politicians_all')

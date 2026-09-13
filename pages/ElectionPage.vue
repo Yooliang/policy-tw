@@ -27,7 +27,7 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -72,6 +72,8 @@ async function loadElectionData(id: number, region: string) {
 }
 
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   // 選舉區對應表 77 KB，只有這一頁篩議員選區要用，改成按需載入
   ensureDistricts()
   if (electionId.value) {

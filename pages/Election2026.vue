@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -16,7 +16,7 @@ import {
 
 const router = useRouter()
 
-const { politicians, policies, locations, categories } = useSupabase()
+const { politicians, policies, locations, categories, ensurePolicies } = useSupabase()
 const selectedRegion = ref('All')
 const viewMode = ref<'politicians' | 'pledges' | 'issues' | 'comparison'>('politicians')
 const selectedIssueCategory = ref('All')
@@ -122,6 +122,9 @@ const electionLevels = [
   { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原民區代表' },
   { type: ElectionType.CHIEF, label: '村里長' }
 ]
+// 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+onMounted(() => { ensurePolicies() })
+
 </script>
 
 <template>

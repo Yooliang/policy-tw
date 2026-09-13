@@ -15,7 +15,7 @@ import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, user, userDisplayName, userAvatarUrl, userEmail, signOut } = useAuth()
-const { policies, politicians } = useSupabase()
+const { policies, politicians, ensurePolicies } = useSupabase()
 
 const activeTab = ref<'contributions' | 'tracking' | 'settings'>('contributions')
 
@@ -118,6 +118,8 @@ const trackedPolicies = computed(() => policies.value.filter(policy => checkpoin
 
 // === Lifecycle ===
 onMounted(() => {
+  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+  ensurePolicies()
   loadCheckpoints()
   window.addEventListener('checkpoints_updated', loadCheckpoints)
   agentName.value = readStoredAgentName()

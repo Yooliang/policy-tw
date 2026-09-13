@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
@@ -16,7 +16,7 @@ import { policySortDate, policyYear } from '../lib/policy-date'
 
 
 const router = useRouter()
-const { policies, politicians, categories, elections } = useSupabase()
+const { policies, politicians, categories, elections, ensurePolicies } = useSupabase()
 const { globalRegion } = useGlobalState()
 const searchTerm = ref('')
 const selectedCategory = ref('All')
@@ -83,6 +83,9 @@ usePageHead({
   title: '市政接力',
   description: '將跨任期、跨黨派的重大建設案聚合分析，追蹤市政接力的傳承品質，提供具備行政歷史深度的稽核數據。',
 })
+// 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+onMounted(() => { ensurePolicies() })
+
 </script>
 
 <template>

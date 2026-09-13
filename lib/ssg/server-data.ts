@@ -8,6 +8,7 @@ import {
   ensureRegionStats,
   ensureDistricts,
   ensureDiscussions,
+  ensurePolicies,
 } from '../../composables/useSupabase'
 import type { Politician, RawPolitician } from '../../types'
 import { analysisListedPolicyIds } from './page-data'
@@ -65,10 +66,11 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   ).catch(() => {
     throw new Error('[ssg] 基礎資料（政見／選舉／分類）連續三次載入失敗，中止建置以免產出空殼頁')
   })
-  // 首屏已經把 regions／選舉區對應／討論改成按需載入，但預渲染要靠完整資料切片，
-  // 所以建置端明確把三塊都補上。漏掉的話區域資料頁與選舉頁會預渲染成空的。
-  await withRetry('按需載入的三塊（regions／選舉區／討論）', async () => {
-    await Promise.all([ensureRegionStats(), ensureDistricts(), ensureDiscussions()])
+  // 首屏已經把政見清單／regions／選舉區對應／討論改成按需載入，但預渲染要靠完整
+  // 資料切片，所以建置端明確把四塊都補上。漏掉的話對應的頁面會預渲染成空的
+  // （政見那塊漏掉更嚴重：下面的「基礎資料為空」會直接中止建置）。
+  await withRetry('按需載入的四塊（政見／regions／選舉區／討論）', async () => {
+    await Promise.all([ensurePolicies(), ensureRegionStats(), ensureDistricts(), ensureDiscussions()])
     return true
   }, (ok) => ok)
 

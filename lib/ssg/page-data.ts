@@ -67,6 +67,9 @@ export function analysisListedPolicyIds(policies: Policy[]): string[] {
 
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
   return {
+    // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
+    // 只有下面明確塞 full.policies 的那三個路由會把它翻成 true。
+    policiesComplete: false,
     elections: full.elections,
     categories: full.categories,
     locations: full.locations,
@@ -86,11 +89,11 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
   switch (to.name) {
     case 'home':
       // 統計數字要全部政見；卡片只列最新 3 筆，其政治人物要在場
-      return { ...base, policies: full.policies, politicians: politiciansReferencedBy(full.policies.slice(0, 3), full.politicians) }
+      return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies.slice(0, 3), full.politicians) }
 
     case 'tracking':
     case 'analysis':
-      return { ...base, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians) }
+      return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians) }
 
     case 'policy': {
       const id = paramString(to.params.policyId)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
@@ -20,7 +20,13 @@ import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById } = useSupabase()
+const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
+
+// 這一頁除了主角那筆，還要「同一人的其他政見」與整條市政接力鏈（otherPolicies／policyChain），
+// 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
+// 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
+// 兩個區塊會憑空變空。所以這一頁明確要整份。
+onMounted(() => { ensurePolicies() })
 
 // 讀者表態。以前這裡只有一個 hasVoted 的 local ref——按下去把畫面數字 +1，
 // 什麼都沒存，重新整理就沒了，而旁邊寫著「讓候選人看見選民的聲音」。
