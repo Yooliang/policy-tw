@@ -18,7 +18,7 @@ import {
 } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 
-const { regionStats } = useSupabase()
+const { regionStats, ensureRegionStats } = useSupabase()
 const {
   dailyStats,
   monthlyTrend,
@@ -30,6 +30,7 @@ const {
 const selectedDate = ref(new Date().toISOString().slice(0, 10))
 
 onMounted(() => {
+  ensureRegionStats()
   fetchAll(selectedDate.value)
 })
 

@@ -214,25 +214,22 @@ async function fetchAllInner() {
   loading.value = true
 
   try {
-    // 只載入基本 metadata（不載入候選人，由 ElectionPage 按需載入）
+    // 首屏只載「每一頁都要用」的東西。
+    // regions（178 KB）、electoral_district_areas（77 KB）、discussions 改成按需載入——
+    // 那 255 KB 只有區域資料頁、後台統計頁、選舉頁、討論頁會用到，
+    // 卻讓每一個訪客的第一次連線都付這個成本（改之前首屏是 605 KB／9 個請求）。
     const [
       electionsData,
       electionTypesData,
       categoriesRes,
       locationsRes,
-      regionStatsData,
-      electoralDistrictAreasData,
       policiesData,
-      discussionsData,
     ] = await Promise.all([
       fetchAllRows<RawElection>('elections'),
       fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type'),
       supabase.from('categories').select('name'),
       supabase.from('locations').select('name'),
-      supabase.from('regions').select('*').is('village', null),  // 只撈縣市和鄉鎮層級，不撈村里
-      supabase.from('electoral_district_areas').select('*'),
       fetchAllRows<RawPolicy>('policies_with_logs'),
-      fetchAllRows<RawDiscussion>('discussions_full'),
     ])
 
     // Map elections
@@ -246,12 +243,9 @@ async function fetchAllInner() {
     )
     categories.value = (categoriesRes.data || []).map(r => r.name)
     locations.value = (locationsRes.data || []).map(r => r.name)
-    regionStats.value = (regionStatsData.data || []) as RegionStats[]
-    electoralDistrictAreas.value = (electoralDistrictAreasData.data || []) as ElectoralDistrictArea[]
     // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
     // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
     policies.value = (policiesData || []).filter(r => !r.removed_at).map(mapPolicy)
-    discussions.value = (discussionsData || []).map(mapDiscussion)
 
     // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
     // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
@@ -284,6 +278,57 @@ function getActiveElection(): Election {
     .filter(e => e.startDate <= today && today <= e.endDate)
     .sort((a, b) => a.electionDate.localeCompare(b.electionDate))
   return active[0] || elections.value[0]
+}
+
+// ------------------------------------------------------------
+// 按需載入的三塊重資料。
+//
+// 改之前首屏是 605 KB／9 個請求，其中 255 KB（regions 178、選舉區對應 77）只有
+// 區域資料頁、後台統計、選舉頁會用到。每個只看政見或提問的訪客都在白付這個成本。
+//
+// 三個共通的形狀：冪等（promise 快取）、已經有資料就直接回（預渲染頁的切片會先塞好，
+// 不要重打一次）、失敗清掉快取讓下一次能重試。
+// ------------------------------------------------------------
+let regionStatsPromise: Promise<void> | null = null
+let districtsPromise: Promise<void> | null = null
+let discussionsPromise: Promise<void> | null = null
+
+/** 縣市統計：區域資料頁與後台統計頁用（178 KB） */
+export function ensureRegionStats(): Promise<void> {
+  if (regionStats.value.length > 0) return Promise.resolve()
+  if (!regionStatsPromise) {
+    regionStatsPromise = (async () => {
+      const { data, error } = await supabase.from('regions').select('*').is('village', null)  // 只撈縣市和鄉鎮層級，不撈村里
+      if (error) throw error
+      regionStats.value = (data || []) as RegionStats[]
+    })().catch((err) => { regionStatsPromise = null; console.error('[ensureRegionStats] 失敗：', err) })
+  }
+  return regionStatsPromise
+}
+
+/** 選舉區對應表：選舉頁篩議員選區用（77 KB） */
+export function ensureDistricts(): Promise<void> {
+  if (electoralDistrictAreas.value.length > 0) return Promise.resolve()
+  if (!districtsPromise) {
+    districtsPromise = (async () => {
+      const { data, error } = await supabase.from('electoral_district_areas').select('*')
+      if (error) throw error
+      electoralDistrictAreas.value = (data || []) as ElectoralDistrictArea[]
+    })().catch((err) => { districtsPromise = null; console.error('[ensureDistricts] 失敗：', err) })
+  }
+  return districtsPromise
+}
+
+/** 討論：只有討論頁用 */
+export function ensureDiscussions(): Promise<void> {
+  if (discussions.value.length > 0) return Promise.resolve()
+  if (!discussionsPromise) {
+    discussionsPromise = (async () => {
+      const rows = await fetchAllRows<RawDiscussion>('discussions_full')
+      discussions.value = (rows || []).map(mapDiscussion)
+    })().catch((err) => { discussionsPromise = null; console.error('[ensureDiscussions] 失敗：', err) })
+  }
+  return discussionsPromise
 }
 
 /** 政見卡片與縣市篩選需要的人物＝有政見的那些人。切選舉時這批不能被清掉。 */
@@ -648,6 +693,10 @@ export function useSupabase() {
     getTownshipsByElectoralDistrict,
     getElectionPoliticianCount,
     getTotalPoliticianCount,
+    // 按需載入的三塊重資料：需要的頁面自己在 onMounted 呼叫
+    ensureRegionStats,
+    ensureDistricts,
+    ensureDiscussions,
     getPoliciesByCategory,
     loadPoliticianById,
     loadPolicyById,
