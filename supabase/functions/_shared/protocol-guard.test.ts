@@ -14,6 +14,8 @@ import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { ASK_KINDS } from "./ask.ts";
+import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "./contribute-handler.ts";
+import { VERIFY_DAILY_LIMIT_PER_IP } from "./verify-handler.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const SKILL_MD = new URL("../../../public/skill.md", import.meta.url);
@@ -294,6 +296,30 @@ Deno.test("名單清查：不可以叫代理去查投票後才更新的來源", 
     /ALTER COLUMN list_announced_on SET NOT NULL/.test(colSql),
     "list_announced_on 要是 NOT NULL，不然新增一屆選舉時忘了填，任務會一直用登記階段的說法",
   );
+});
+Deno.test("每日額度：skill.md 不可以寫死數字，也不可以跟程式碼對不上", async () => {
+  // 2026-09-14 小良哥把額度從 50／200 調到 200／800，同一個數字散在 5 個地方：
+  // 兩個 TS 常數，加 skill.md 的說明、quota 範例、daily_quota 範例。手動同步五處
+  // 就是下一次漏掉一處的原因——而且文件是對外協議，寫錯等於教錯外部代理。
+  //
+  // 作法是文件不寫數字，只說「看 /next 回應的 quota」。這支測試守住那個決定。
+  const skill = await Deno.readTextFile(SKILL_MD);
+
+  // 1. JSON 範例裡不可以出現寫死的 limit
+  const hardCoded = [...skill.matchAll(/"(?:limit|daily_limit)"\s*:\s*(\d+)/g)].map((m) => m[1]);
+  assertEquals(hardCoded, [], `skill.md 的範例寫死了額度數字；請改成 <今日提交上限> 這類佔位，真值看 /next 的 quota`);
+
+  // 2. 說明文字裡也不可以寫死（「提交 200 筆、驗證 800 筆」那種）
+  const prose = [...skill.matchAll(/(?:提交|驗證|每日最多)\s*(\d+)\s*(?:筆|題|次)/g)].map((m) => m[0]);
+  assertEquals(prose, [], `skill.md 的說明寫死了額度；上限會調整，文件要指向 /next 的 quota`);
+
+  // 3. 但文件還是得講得出去哪裡看，否則代理只會撞 429
+  assert(skill.includes("quota"), "skill.md 要說明 quota 這個欄位在哪裡看");
+
+  // 4. 額度本身仍然只有一個定義處：兩個常數都要是正整數，且驗證的上限不低於提交
+  assert(Number.isInteger(CONTRIBUTE_DAILY_LIMIT_PER_IP) && CONTRIBUTE_DAILY_LIMIT_PER_IP > 0, "提交額度要是正整數");
+  assert(Number.isInteger(VERIFY_DAILY_LIMIT_PER_IP) && VERIFY_DAILY_LIMIT_PER_IP > 0, "驗證額度要是正整數");
+  assert(VERIFY_DAILY_LIMIT_PER_IP >= CONTRIBUTE_DAILY_LIMIT_PER_IP, "驗證額度不該比提交低");
 });
 Deno.test("協議只有一份：根目錄 SKILL.md 不可以是 public/skill.md 的複本", async () => {
   // 2026-09-13 踩到：根目錄放了 public/skill.md 的複本，停在 1.4.1、還寫著
