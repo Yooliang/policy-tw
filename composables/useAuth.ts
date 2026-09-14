@@ -55,7 +55,17 @@ async function initAuth() {
 
       initialized.value = true
     } catch (error) {
+      // 常見的是瀏覽器裡留著過期的 refresh token：換發回 400，然後每次進站都再試一次。
+      // 把壞掉的 session 清乾淨，下一次載入就沒有東西可以重試了。
+      // （2026-09-14 線上事故：這個狀態會讓整站資料載不出來，見 lib/supabase.ts 的說明。
+      //   資料層已經改用不碰 auth 的 client，所以現在最壞情況只是「沒有登入」。）
       console.error('Failed to initialize auth:', error)
+      try {
+        await supabase.auth.signOut({ scope: 'local' })
+      } catch {
+        // 清不掉就算了：資料層不靠它，畫面照樣是完整的
+      }
+      initialized.value = true
     } finally {
       loading.value = false
       authReady.value = true

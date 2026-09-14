@@ -6,7 +6,15 @@
 import { isDuplicateQuestion, isLowEffortQuestion } from "./question-guard.ts";
 
 /** 同一個來源 IP 每日最多幾題；比 request-task 的 10 次低，因為每題會直接開一筆派工任務 */
-export const ASK_DAILY_LIMIT_PER_IP = 5;
+/**
+ * 每個來源 IP 每日最多提幾題。
+ *
+ * 2026-09-14 從 5 調到 20：政見頁與人物頁的四顆按鈕（查進度／查兌現情形／
+ * 查政見／查簡介／這不是政見？）現在全部走這個端點，5 題等於逛到第六筆政見
+ * 按下去就被擋。原本 request-task 那條路是每日 10 次，不該因為統一入口反而更緊。
+ * 重複問題另有 24 小時的相似度檢查擋著，這裡放寬不等於開放灌水。
+ */
+export const ASK_DAILY_LIMIT_PER_IP = 20;
 /** 跟 migration 20260912000014 的 citizen_questions.question CHECK (BETWEEN 8 AND 300) 一致 */
 export const QUESTION_MIN_LEN = 8;
 export const QUESTION_MAX_LEN = 300;

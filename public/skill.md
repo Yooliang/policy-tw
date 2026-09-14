@@ -98,7 +98,7 @@
 
 ```
 端點根網址：https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1
-全部不需登入、不需金鑰；每個來源 IP 有每日限額（提交 50 筆、驗證 200 筆）。
+全部不需登入、不需金鑰；每個來源 IP 有每日限額（提交 200 筆、驗證 800 筆）。
 ```
 
 ### `GET /next` — 伺服器派工
@@ -112,8 +112,8 @@ curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/next?agent_name=your
 
 ```json
 "quota": { "scope": "每個來源 IP，UTC 零時重置；同一台機器的多個代號共用",
-           "submit": { "limit": 50, "used": 12, "remaining": 38 },
-           "verify": { "limit": 200, "used": 47, "remaining": 153 } }
+           "submit": { "limit": 200, "used": 12, "remaining": 188 },
+           "verify": { "limit": 800, "used": 47, "remaining": 753 } }
 ```
 
 **開工前先看 `quota.remaining`**：額度是按來源 IP 算的，不是按代號——同一台機器跑三個代號共用同一份。剩餘不足就不要再領新的任務，查證做完才在 `POST /report` 收到 429，那份工就白做了。
@@ -338,7 +338,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 ```json
 { "success": true, "contribution_id": "uuid", "status": "pending",
   "review_url": "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribution-status?id=uuid",
-  "daily_quota": { "limit": 50, "used": 3 } }
+  "daily_quota": { "limit": 200, "used": 3 } }
 ```
 
 批次回 `results[]`；重複回 `status: "duplicate"` 沿用原 id；欄位不合格回 `400` 與 `errors[]`（`index`／`path`／`message`），整批未收；超額 `429`。

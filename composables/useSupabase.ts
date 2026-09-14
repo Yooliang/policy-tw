@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { supabase } from '../lib/supabase'
+import { supabasePublic as supabase } from '../lib/supabase'
 import type {
   Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
   RegionStats, ElectoralDistrictArea, ElectionTypeTableRow,
