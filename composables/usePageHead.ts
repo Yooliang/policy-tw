@@ -11,8 +11,8 @@ interface PageHeadOptions {
   /** 頁面標題（不含站名，會自動補「| 正見」）。給 undefined 時退回站名。 */
   title: MaybeRefOrGetter<string | undefined>
   description?: MaybeRefOrGetter<string | undefined>
-  /** 工具頁／後台：不讓搜尋引擎索引。 */
-  noindex?: boolean
+  /** 工具頁／後台：不讓搜尋引擎索引。內容頁可給 getter，資料確定不存在時翻成 true（避免 soft 404 被收錄）。 */
+  noindex?: MaybeRefOrGetter<boolean | undefined>
   /** og:type，內容頁用 article，其餘 website。 */
   type?: 'website' | 'article'
 }
@@ -40,7 +40,7 @@ export function usePageHead(options: PageHeadOptions): void {
       { property: 'og:type', content: options.type ?? 'website' },
       { property: 'og:title', content: title.value },
       { property: 'og:description', content: description.value },
-      ...(options.noindex ? [{ name: 'robots', content: 'noindex' }] : []),
+      ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
     ]),
   })
 }

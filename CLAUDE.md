@@ -20,7 +20,7 @@ node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（clea
 
 # Edge Functions 測試（CI 也跑）
 cd supabase/functions && deno test --allow-read _shared/
-deno test --allow-read lib/policy-date.test.ts
+deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts
 deno run --allow-read scripts/scan-secrets.ts
 
 # Database / Edge Functions
@@ -37,8 +37,8 @@ npx supabase functions deploy <function-name>
 ### Data Layer
 - **Supabase PostgreSQL**（project `wiiqoaytpqvegtknlbue`），所有表開 RLS、公開讀
 - **`lib/supabase.ts`** — 兩個 client：`supabase`（帶登入 session）、`supabasePublic`（純 anon，給預渲染與匿名讀取）
-- **`composables/useSupabase.ts`** — 模組級全域狀態；`fetchAll()` 首次呼叫時撈基礎資料，重資料（政見清單、討論、區域統計、選區）改成 `ensurePolicies()` / `ensureDiscussions()` / `ensureRegionStats()` / `ensureDistricts()` 按需載入。`fetchAllRows()` 會分頁繞過 PostgREST 1,000 筆上限，**呼叫時要給 `orderBy`**（無序分頁會重複／漏筆）
-- **`composables/useIndexedDB.ts`** — 目前沒有任何地方寫入快取（`setToCache` 無呼叫者）；實際快取只有記憶體
+- **`composables/useSupabase.ts`** — 模組級全域狀態；`fetchAll()` 首次呼叫時撈基礎資料，重資料（政見清單、討論、區域統計、選區）改成 `ensurePolicies()` / `ensureDiscussions()` / `ensureRegionStats()` / `ensureDistricts()` 按需載入。`fetchAllRows()` 會分頁繞過 PostgREST 1,000 筆上限，`orderBy` 必填（無序分頁會重複／漏筆）。所有瀏覽器端請求走 `lib/retry.ts` 的 `withTimeoutAndRetry`（15 秒 timeout、最多再試兩次）；失敗會寫進 `error` ref，頁面用 `<LoadError>` 顯示重試，別再把「拿不到」顯示成「找不到」
+- 快取只有記憶體（模組級 ref），沒有 IndexedDB／localStorage 資料快取
 - **`composables/useGlobalState.ts`** — 跨頁共用的地區選擇
 - **`lib/ssg/server-data.ts`、`lib/ssg/page-data.ts`** — 建置時撈全站資料、切出每頁快照塞進 `window.__INITIAL_STATE__`；細節見 `docs/SSG-PRERENDER.md`
 - **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`discussions_full`、`elected_politicians`、`ai_usage_stats`

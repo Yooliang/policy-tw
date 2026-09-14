@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, defineAsyncComponent } from 'vue'
 import { Loader2 } from 'lucide-vue-next'
+
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { usePipelineSnapshots } from '../composables/usePipelineSnapshots'
 
 /**

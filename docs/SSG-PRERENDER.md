@@ -17,7 +17,7 @@
 
 1. `main.ts` 匯出 `includedRoutes`：vite-ssg 從 server bundle 呼叫它，`lib/ssg/server-data.ts` 一次撈齊全站資料（`fetchAll` ＋ `politicians_with_elections` 全表，**必須 `order('id')`**，否則 PostgREST 分頁會重複／漏筆），回傳所有要預渲染的路徑。
 2. 每條路由渲染前，`router.beforeEach` 用 `lib/ssg/page-data.ts` 算出「這頁需要的資料切片」，套進 `useSupabase` 的全域狀態（`applyDataSnapshot`），渲染後同一份切片序列化進 `window.__INITIAL_STATE__`。
-3. 客戶端啟動時先 `applyDataSnapshot(initialState.page)` 再 hydrate，所以第一次渲染與 HTML 完全一致；之後 `useSupabase()` 照常 `fetchAll()` 換成最新資料（`loaded` 不會被快照設成 true）。
+3. 客戶端啟動時先 `applyDataSnapshot(initialState.page)` 再 hydrate，所以第一次渲染與 HTML 完全一致。快照帶 `generatedAt`（建置時間）：7 天內且有基礎資料就直接視為 `loaded`，不再重撈 elections／categories／locations 那四個小請求；重資料（政見清單等）照舊由 `policiesComplete` 等旗標決定要不要撈。
 4. `ssgOptions.concurrency` 必須是 1：資料層是模組級全域狀態，並行渲染會讓各頁切片互相覆蓋。
 5. `onBeforePageRender` 第一次被叫到時，把 vite 產出的模板（空 `#app`）寫成 `dist/404.html` 與 `dist/app.html`，並加 `noindex`。
 
@@ -36,9 +36,9 @@
 
 ## 只能在瀏覽器跑的東西
 
-- `vue3-apexcharts`：`main.ts` 客戶端分支動態 import；模板中的 `<apexchart>` 包 `<ClientOnly>`
+- `vue3-apexcharts`（578 KB）：不全域註冊，用到的元件自己 `defineAsyncComponent(() => import('vue3-apexcharts'))`，模板中的 `<apexchart>` 包 `<ClientOnly>`。以前在 `main.ts` 全域 `await import`，vite-ssg 會等它才 mount，害每一頁都得先載完圖表函式庫才能互動
 - 選舉頁倒數天數：包 `<ClientOnly>`（建置時算的會過期）
-- `useAuth` 在 SSR 不初始化；`useIndexedDB` 沒有 `indexedDB` 時直接走既有 catch
+- `useAuth` 在 SSR 不初始化
 - 新增頁面若在 `setup` 期碰 `window`／`document`／`localStorage`，建置會直接炸；放進 `onMounted` 或 `<ClientOnly>`
 
 ## 每頁 head

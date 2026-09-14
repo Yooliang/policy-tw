@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue'
 import Hero from '../components/Hero.vue'
 import AdminNav from '../components/AdminNav.vue'
+
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { useSupabase } from '../composables/useSupabase'
 import { useDailyStats } from '../composables/useDailyStats'
 import {

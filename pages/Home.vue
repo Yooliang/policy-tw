@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 
 import { useSupabase } from '../composables/useSupabase'
+
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import PolicyCard from '../components/PolicyCard.vue'
 
 import Hero from '../components/Hero.vue'
