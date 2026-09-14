@@ -71,6 +71,16 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Donation.vue'),
   },
   {
+    path: '/vision',
+    name: 'vision',
+    component: () => import('../pages/Vision.vue'),
+  },
+  {
+    path: '/privacy',
+    name: 'privacy',
+    component: () => import('../pages/Privacy.vue'),
+  },
+  {
     path: '/regional-data',
     name: 'regional-data',
     component: () => import('../pages/RegionalData.vue'),
