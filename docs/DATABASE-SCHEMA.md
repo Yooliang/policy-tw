@@ -2,7 +2,14 @@
 
 ## 概述
 
-正見 (Zheng Jian) 平台使用 Supabase PostgreSQL 資料庫，共有 18 個資料表、4 個 ENUM 類型、6 個視圖。
+正見 (Zheng Jian) 平台使用 Supabase PostgreSQL 資料庫。
+
+> **本文件只涵蓋 2026-03 以前的核心表**（18 表／4 ENUM／6 視圖）。實際結構以 `supabase/migrations/` 為準，2026-09 為止約 36 張表。這裡沒寫到的：
+> - 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`（見 `CONTRIBUTIONS-ADMIN.md`）
+> - 政見立場與來源：`policy_stances`、`policy_sources`；視圖 `politicians_with_policies`
+> - 公民提問：`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
+> - AI 用量：`ai_usage_logs`、`model_pricing`、`pipeline_snapshots`
+> - `politician_stats_by_region` 曾是表，已在後續 migration 中 drop；`politician_duplicates` 亦已 drop
 
 ---
 

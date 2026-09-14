@@ -4,41 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-正見 (Zheng Jian) — A Taiwan policy tracking platform built with Vue 3 + TypeScript + Vite + Supabase. Tracks election promises and policy progress across different levels of government.
+正見 (Zheng Jian) — 台灣政見追蹤平台。Vue 3 + TypeScript + Vite + vite-ssg（建置時預渲染）+ Supabase。線上：<https://policy-tw.web.app>。
+
+資料維護主要靠外部 AI 代理依 `public/skill.md` 的協議領任務、查證、提交、互相投票（見 `docs/CONTRIBUTIONS-ADMIN.md`）；維護者只在系統壞掉時介入。
 
 ## Commands
 
 ```bash
-# Development
-pnpm dev              # Start dev server at http://localhost:3000
+pnpm dev                 # 開發伺服器
+pnpm build               # vue-tsc → vite-ssg build（預渲染約 16k 頁）→ scripts/postbuild-ssg.mjs（sitemap＋空殼檢查）
+pnpm build:spa           # 純 SPA build（緊急 fallback，沒有預渲染）
+pnpm exec vue-tsc --noEmit
+SSG_POLITICIANS=with-content pnpm build   # 只預渲染有內容的政治人物（約 2,500 頁，開發用）
+node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（cleanUrls、rewrites、404）
 
-# Build & Deploy
-pnpm build            # Type-check (vue-tsc) then build
-npx firebase deploy --only hosting  # Deploy to Firebase Hosting
+# Edge Functions 測試（CI 也跑）
+cd supabase/functions && deno test --allow-read _shared/
+deno test --allow-read lib/policy-date.test.ts
+deno run --allow-read scripts/scan-secrets.ts
 
-# Database
-npx supabase db push  # Push migrations to remote Supabase
-npx supabase link --project-ref <id>  # Link to Supabase project
-
-# Type checking only
-npx vue-tsc --noEmit
+# Database / Edge Functions
+npx supabase db push
+npx supabase functions deploy <function-name>
 ```
+
+### 部署：不要在本機跑 firebase deploy
+
+自 2026-09-13 起，push 到 `main` 就由 GitHub Actions（`.github/workflows/ci.yml`）建置並部署到 Firebase Hosting，且要等型別檢查與 Edge Function 測試都綠。曾經有人從落後的分支本機 build 後手動 deploy，把別人剛上線的改動洗掉——所以**手動 `firebase deploy` 是被明文禁止的動作**。要上線就開 PR 合進 `main`。
 
 ## Architecture
 
 ### Data Layer
-- **Supabase PostgreSQL** — All data stored remotely (project: `wiiqoaytpqvegtknlbue`)
-- **`composables/useSupabase.ts`** — Global state composable, fetches once and shares across components
-- **`composables/useIndexedDB.ts`** — IndexedDB caching for politicians data (reduces API calls)
-- **`composables/useGlobalState.ts`** — Shared state for region selection across pages
-- **`lib/supabase.ts`** — Supabase client initialization
-- **Views used**: `policies_with_logs`, `politicians_with_elections`, `discussions_full` (JSON aggregation)
+- **Supabase PostgreSQL**（project `wiiqoaytpqvegtknlbue`），所有表開 RLS、公開讀
+- **`lib/supabase.ts`** — 兩個 client：`supabase`（帶登入 session）、`supabasePublic`（純 anon，給預渲染與匿名讀取）
+- **`composables/useSupabase.ts`** — 模組級全域狀態；`fetchAll()` 首次呼叫時撈基礎資料，重資料（政見清單、討論、區域統計、選區）改成 `ensurePolicies()` / `ensureDiscussions()` / `ensureRegionStats()` / `ensureDistricts()` 按需載入。`fetchAllRows()` 會分頁繞過 PostgREST 1,000 筆上限，**呼叫時要給 `orderBy`**（無序分頁會重複／漏筆）
+- **`composables/useIndexedDB.ts`** — 目前沒有任何地方寫入快取（`setToCache` 無呼叫者）；實際快取只有記憶體
+- **`composables/useGlobalState.ts`** — 跨頁共用的地區選擇
+- **`lib/ssg/server-data.ts`、`lib/ssg/page-data.ts`** — 建置時撈全站資料、切出每頁快照塞進 `window.__INITIAL_STATE__`；細節見 `docs/SSG-PRERENDER.md`
+- **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`discussions_full`、`elected_politicians`、`ai_usage_stats`
 
-### Database Schema (14 tables)
-Core: `elections`, `election_types`, `politicians`, `politician_elections`, `policies`, `tracking_logs`, `related_policies`, `discussions`, `discussion_comments`, `comment_replies`
-Reference: `categories`, `locations`, `regions`, `electoral_district_areas`
+### Database
+表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
 
-ENUMs: `policy_status`, `political_party`, `election_type`, `politician_status`
+主要群組：
+- 核心：`elections`、`election_types`、`politicians`、`politician_elections`、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`
+- 社群：`discussions`、`discussion_comments`、`comment_replies`、`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
+- 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`
+- 參考：`categories`、`locations`、`regions`、`electoral_district_areas`
+- AI 用量：`ai_prompts`、`ai_usage_logs`、`model_pricing`、`pipeline_snapshots`
+
+ENUMs：`policy_status`、`political_party`、`election_type`、`politician_status`
 
 #### ⚠️ Election ID = 選舉年份（重要！）
 
@@ -48,97 +63,54 @@ ENUMs: `policy_status`, `political_party`, `election_type`, `politician_status`
 | `politician_elections` | `election_id` | FK → `elections.id`（年份） | 2022, 2024, 2026 |
 | `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
 
-**注意**：
 - `elections.id` 就是選舉年份，**不是自增 ID**
 - 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）
-- 所有 `election_id` 外鍵都是年份
 
 #### Electoral District Mapping
-The `electoral_district_areas` table maps townships (鄉鎮市區) to electoral districts (選舉區) for councilor filtering:
-- Structure: `region` (縣市) + `electoral_district` (第01選舉區) + `township` (茂林區) + `election_id` (year, e.g., 2022)
-- When user selects a township, the system looks up the corresponding electoral district and filters councilors
-- Data scraped from CEC API via AdminScraper page
-- **Important**: `election_id` stores the **year** (2022), not the database election ID
+`electoral_district_areas` 把鄉鎮市區對到選舉區，供議員篩選：`region`（縣市）+ `electoral_district`（第01選舉區）+ `township` + `election_id`（年份）。
 
-### Frontend Structure
-```
-pages/                    # Route components (lazy-loaded)
-├── Home.vue             # Dashboard with status overview
-├── PolicyTracking.vue   # Filter/search policies
-├── PolicyDetail.vue     # Single policy with timeline
-├── PolicyAnalysis.vue   # AI analysis listing
-├── PolicyDeepAnalysis.vue # Deep dive with timeline
-├── ElectionPage.vue     # Generic election page (/election/:electionId) - uses KeepAlive
-├── PoliticianProfile.vue # Politician detail
-├── Community.vue        # Discussion listing
-├── DiscussionDetail.vue # Single discussion
-├── RegionalData.vue     # Regional statistics view
-├── AdminScraper.vue     # CEC data scraper (electoral district mapping)
-└── election/            # Election sub-components
-    ├── PoliticianGrid.vue  # Collapsible politician grid
-    ├── PoliticianDropdown.vue
-    └── VerticalStack.vue
+### Frontend Structure（`router/index.ts` 為準）
 
-components/               # Shared components
-├── Navbar.vue, Footer.vue
-├── Hero.vue, PolicyCard.vue, StatusBadge.vue
-├── GlobalRegionSelector.vue  # Shared region selector
-```
+預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`
+
+客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/ai-assistant`（Contributions）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（redirect）、`/admin/*`（dashboard、scraper、duplicates、ai、import）
+
+共用元件在 `components/`；選舉頁子元件在 `pages/election/`。
 
 ### Type Definitions (`types.ts`)
-- `PolicyStatus` enum: Proposed, In Progress, Achieved, Stalled, Failed, Campaign Pledge
-- `PoliticalParty` enum: 國民黨, 民進黨, 民眾黨, 無黨籍
-- `ElectionType` enum: 9 levels — 總統副總統, 立法委員, 縣市長, 縣市議員, 鄉鎮市長, 直轄市山地原住民區長, 鄉鎮市民代表, 直轄市山地原住民區民代表, 村里長
-- Interfaces: `Election`, `Politician`, `Policy`, `TrackingLog`, `Discussion`, etc.
-
-### Data Flow Pattern
-1. `useSupabase()` called → triggers `fetchAll()` on first use
-2. Global `ref` state populated from Supabase views
-3. Components use `computed()` for derived data (data is async)
-4. snake_case (DB) → camelCase (frontend) mapping in composable
+- `PolicyStatus`、`PoliticalParty`、`ElectionType`（9 級：總統副總統 → 村里長）、`PoliticianStatus`
+- Interfaces：`Election`、`Politician`、`Policy`、`TrackingLog`、`Discussion` 等；DB snake_case → 前端 camelCase 的轉換在 `useSupabase.ts`
 
 ## Environment Variables
 
-Required in `.env.local`:
+`.env.local`：
 ```
 VITE_SUPABASE_URL=https://<project>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon-key>
 ```
+anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等非 anon 的金鑰。
 
 ## Key Conventions
 
-- All pages import data via `useSupabase()`, not from `constants.ts`
-- `constants.ts` retained as reference only (not imported)
-- RLS enabled on all tables with public read policies
-- Migrations in `supabase/migrations/`, seed in `supabase/seed.sql`
-- `ElectionPage.vue` uses `<KeepAlive>` to preserve filter state during navigation
-- Electoral district lookups use **election year** (2022), not database election ID
+- 所有頁面透過 `useSupabase()` 取資料；重資料一律 `ensure*()` 按需載入，不要在 `fetchAll` 裡加東西
+- `ElectionPage.vue` 用 `<KeepAlive>` 保住篩選狀態
+- 只能在瀏覽器跑的東西（`vue3-apexcharts`、倒數天數、`window`/`localStorage`）放 `<ClientOnly>` 或 `onMounted`，否則預渲染會炸
+- Tailwind 走建置時編譯；動態組出來的 class 要加 `safelist`
+- 給人看的文字純中文
 
-## Admin Tools
+## Edge Functions（`supabase/functions/`，共 33 支）
 
-### AdminScraper (`/admin/scraper`)
-Scrapes election data from CEC (Central Election Commission) API:
-- **Politician scraping** — Fetches candidates by election type and region
-- **Electoral district mapping** — Maps townships to electoral districts for councilor filtering
-- Data source: `https://db.cec.gov.tw/ElecTable/Election/ElecTickets`
+- 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`
+- 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`merge-politicians`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
+- AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
+- 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 
-## Edge Functions
+## Claude Skills（`.claude/skills/`）
 
-Located in `supabase/functions/`:
+- **`/find-avatar [name]`** — 從 Wikipedia 找政治人物頭像，可 `--all` 補缺圖、透過 Edge Function 寫回
 
-- **`add-politician`** — Add new politician with optional policies
-- **`add-policy`** — Add new policy to existing politician
-- **`update-avatar`** — Batch update politician avatar URLs
-- **`update-politician`** — Update any field of a politician (bio, slogan, etc.)
+## Docs（`docs/`）
 
-
-Deploy with: `npx supabase functions deploy <function-name>`
-
-## Claude Skills
-
-Located in `.claude/skills/`:
-
-- **`/find-avatar [name]`** — Find politician avatar URLs from Wikipedia
-  - Searches Wikipedia API for politician images
-  - Supports batch queries and `--all` flag for missing avatars
-  - Can update database via Edge Function
+- 現行：`SSG-PRERENDER.md`、`CONTRIBUTIONS-ADMIN.md`、`BLUEPRINT-admin-to-tasks.md`
+- 部分過時：`DATABASE-SCHEMA.md`（缺 2026-09 新表）
+- 歷史文件（2026-02 的 Claude-PM／管理頁架構，已被貢獻協議取代）：`AI-ARCHITECTURE.md`、`AI-CHAT-PROPOSAL.md`、`AI-SYSTEM-STATUS.md`、`ADMIN-PAGES-ANALYSIS.md`、`CHANGELOG-2026-02-01.md`
