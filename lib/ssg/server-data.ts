@@ -122,7 +122,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
 }
 
 /** 靜態內容頁。工具頁（/verify /ai-assistant /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
-const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/community', '/regional-data', '/donation', '/skill']
+const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy']
 
 const VILLAGE_CHIEF = '村里長'
 
