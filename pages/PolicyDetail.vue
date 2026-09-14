@@ -12,6 +12,7 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
+import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
@@ -21,7 +22,7 @@ import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
+const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
 
 // 這一頁除了主角那筆，還要「同一人的其他政見」與整條市政接力鏈（otherPolicies／policyChain），
 // 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
@@ -195,6 +196,8 @@ watch(() => policy.value?.id, (id) => {
 
 usePageHead({
   type: 'article',
+  // firebase.json 把 /policy/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
+  noindex: () => !loading.value && !policyLoading.value && !politicianLoading.value && !policy.value,
   title: () => policy.value?.title,
   description: () => policy.value
     ? `${politician.value?.name ?? ''}政見「${policy.value.title}」，狀態：${policyStatusLabel(policy.value.status)}，進度 ${policy.value.progress}%。${policy.value.description}`
@@ -566,6 +569,9 @@ usePageHead({
       <p class="text-slate-500">載入中...</p>
     </div>
   </div>
+
+  <!-- 資料拿不到（不是不存在）：給重試，別冒充「找不到」 -->
+  <LoadError v-else-if="error" />
 
   <!-- Not found state -->
   <div v-else class="min-h-screen flex items-center justify-center bg-slate-50">

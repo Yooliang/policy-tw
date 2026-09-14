@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
+
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import MechanismNav from '../components/MechanismNav.vue'
 import PipelineChart from '../components/PipelineChart.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'

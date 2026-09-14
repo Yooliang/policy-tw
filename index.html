@@ -18,7 +18,11 @@
     <link rel="icon" type="image/svg+xml" href="https://lucide.dev/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>正見 | 智能政見追蹤平台</title>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- 字型 CSS 不阻塞首次繪製：先以 print 載入（不阻塞），載完再切成 all。系統字型會先頂著。 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet"></noscript>
     <!-- AdSense 載入器。放這裡而不是元件裡：Vue 的 template 不會執行 inline <script>，
          而且預渲染的每一頁都繼承這個 <head>，一處就全站到位。版位本身在 AdSlot.vue。 -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6687848895101003" crossorigin="anonymous"></script>

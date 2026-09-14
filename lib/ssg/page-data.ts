@@ -70,6 +70,7 @@ function emptySnapshot(full: DataSnapshot): PageSnapshot {
     // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
     // 只有下面明確塞 full.policies 的那三個路由會把它翻成 true。
     policiesComplete: false,
+    generatedAt: full.generatedAt,
     elections: full.elections,
     categories: full.categories,
     locations: full.locations,

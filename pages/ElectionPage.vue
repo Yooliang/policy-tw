@@ -23,12 +23,13 @@ import {
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -746,6 +747,9 @@ usePageHead({
       <p class="text-slate-500">載入中...</p>
     </div>
   </div>
+
+  <!-- 資料拿不到（不是不存在）：給重試，別冒充「找不到」 -->
+  <LoadError v-else-if="error" />
 
   <!-- Election not found -->
   <div v-else class="bg-slate-50 min-h-screen flex items-center justify-center">

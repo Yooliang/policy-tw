@@ -8,6 +8,7 @@ import type {
   RawElectionTypeRow,
 } from '../types'
 import { ElectionType } from '../types'
+import { isClientError, withTimeoutAndRetry } from '../lib/retry'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -23,6 +24,27 @@ const regionStats = ref<RegionStats[]>([])
 const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 const loading = ref(false)
 const loaded = ref(false)
+/**
+ * 最近一次載入失敗的描述；null 表示沒有失敗。
+ * 頁面用它區分「資料不存在」與「資料拿不到」——以前兩者都顯示「找不到」，
+ * Supabase 暫時性 Gateway Timeout 或手機網路 403 時使用者沒有任何重試的路。
+ */
+const error = ref<string | null>(null)
+const failedLoaders = new Set<() => Promise<void>>()
+
+function recordFailure(label: string, err: unknown, loader: () => Promise<void>): void {
+  console.error(`[${label}] 載入失敗：`, err)
+  error.value = `${label}載入失敗`
+  failedLoaders.add(loader)
+}
+
+/** 重跑所有失敗過的載入；成功的會自己把 error 清掉。 */
+async function retry(): Promise<void> {
+  const loaders = [...failedLoaders]
+  failedLoaders.clear()
+  error.value = null
+  await Promise.all(loaders.map((run) => run()))
+}
 /**
  * 政見清單是不是「完整的一份」。
  *
@@ -44,18 +66,20 @@ export interface DataStats {
 const stats = ref<DataStats>({ totalPoliticians: null, politiciansByElection: {} })
 
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
-// orderBy：超過 1000 筆的 view 若沒有排序，PostgREST 每頁順序不穩，會同一筆重複、另一筆漏掉。
-export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string = '*', orderBy?: string): Promise<T[]> {
+// orderBy 是必填：超過 1000 筆的 view 若沒有排序，PostgREST 每頁順序不穩，會同一筆重複、另一筆漏掉，
+// 而且不會有任何錯誤——只是卡片靜靜地少幾張。
+export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string, orderBy: string): Promise<T[]> {
   let allData: T[] = []
   let from = 0
   let to = 999
   let finished = false
 
   while (!finished) {
-    const baseQuery = supabase.from(tableName).select(selectStr)
-    const { data, error } = await (orderBy ? baseQuery.order(orderBy) : baseQuery).range(from, to)
+    // supabase-js 不會 reject，網路錯誤與中止都包在 error 裡回來；要 throwOnError 重試才看得到
+    const { data } = await withTimeoutAndRetry(`${tableName} ${from}-${to}`, (signal) =>
+      supabase.from(tableName).select(selectStr).order(orderBy).range(from, to).abortSignal(signal).throwOnError(),
+    )
 
-    if (error) throw error
     if (!data || data.length < 1000) finished = true
 
     if (data) allData.push(...(data as T[]))
@@ -237,10 +261,10 @@ async function fetchAllInner() {
       categoriesRes,
       locationsRes,
     ] = await Promise.all([
-      fetchAllRows<RawElection>('elections'),
-      fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type'),
-      supabase.from('categories').select('name'),
-      supabase.from('locations').select('name'),
+      fetchAllRows<RawElection>('elections', '*', 'id'),
+      fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type', 'election_id'),
+      withTimeoutAndRetry('categories', (signal) => supabase.from('categories').select('name').abortSignal(signal).throwOnError()),
+      withTimeoutAndRetry('locations', (signal) => supabase.from('locations').select('name').abortSignal(signal).throwOnError()),
     ])
 
     // Map elections
@@ -260,8 +284,8 @@ async function fetchAllInner() {
     loading.value = false
 
   } catch (err) {
-    console.error('Failed to fetch data from Supabase:', err)
     loading.value = false
+    recordFailure('基礎資料', err, fetchAll)
   }
 }
 
@@ -301,10 +325,11 @@ export function ensureRegionStats(): Promise<void> {
   if (regionStats.value.length > 0) return Promise.resolve()
   if (!regionStatsPromise) {
     regionStatsPromise = (async () => {
-      const { data, error } = await supabase.from('regions').select('*').is('village', null)  // 只撈縣市和鄉鎮層級，不撈村里
-      if (error) throw error
+      // 只撈縣市和鄉鎮層級，不撈村里
+      const { data } = await withTimeoutAndRetry('regions', (signal) =>
+        supabase.from('regions').select('*').is('village', null).abortSignal(signal).throwOnError())
       regionStats.value = (data || []) as RegionStats[]
-    })().catch((err) => { regionStatsPromise = null; console.error('[ensureRegionStats] 失敗：', err) })
+    })().catch((err) => { regionStatsPromise = null; recordFailure('縣市統計', err, ensureRegionStats) })
   }
   return regionStatsPromise
 }
@@ -314,10 +339,10 @@ export function ensureDistricts(): Promise<void> {
   if (electoralDistrictAreas.value.length > 0) return Promise.resolve()
   if (!districtsPromise) {
     districtsPromise = (async () => {
-      const { data, error } = await supabase.from('electoral_district_areas').select('*')
-      if (error) throw error
+      const { data } = await withTimeoutAndRetry('electoral_district_areas', (signal) =>
+        supabase.from('electoral_district_areas').select('*').abortSignal(signal).throwOnError())
       electoralDistrictAreas.value = (data || []) as ElectoralDistrictArea[]
-    })().catch((err) => { districtsPromise = null; console.error('[ensureDistricts] 失敗：', err) })
+    })().catch((err) => { districtsPromise = null; recordFailure('選舉區對應', err, ensureDistricts) })
   }
   return districtsPromise
 }
@@ -327,9 +352,9 @@ export function ensureDiscussions(): Promise<void> {
   if (discussions.value.length > 0) return Promise.resolve()
   if (!discussionsPromise) {
     discussionsPromise = (async () => {
-      const rows = await fetchAllRows<RawDiscussion>('discussions_full')
+      const rows = await fetchAllRows<RawDiscussion>('discussions_full', '*', 'id')
       discussions.value = (rows || []).map(mapDiscussion)
-    })().catch((err) => { discussionsPromise = null; console.error('[ensureDiscussions] 失敗：', err) })
+    })().catch((err) => { discussionsPromise = null; recordFailure('討論', err, ensureDiscussions) })
   }
   return discussionsPromise
 }
@@ -347,18 +372,20 @@ export function ensurePolicies(): Promise<void> {
   if (policiesComplete.value) return Promise.resolve()
   if (!policiesPromise) {
     policiesPromise = (async () => {
-      const rows = await fetchAllRows<RawPolicy>('policies_with_logs')
-      // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
-      // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
-      const loadedPolicies = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
-      // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
-      policies.value = loadedPolicies
       // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
       // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
       // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
-      await loadPoliticiansWithPolicies()
+      // 兩份互不依賴，同時發；以前串行等於白付一次往返。
+      const [rows] = await Promise.all([
+        fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id'),
+        loadPoliticiansWithPolicies(),
+      ])
+      // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
+      // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
+      // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
+      policies.value = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
       policiesComplete.value = true
-    })().catch((err) => { policiesPromise = null; console.error('[ensurePolicies] 政見清單載入失敗，卡片會出不來：', err) })
+    })().catch((err) => { policiesPromise = null; recordFailure('政見清單', err, ensurePolicies) })
   }
   return policiesPromise
 }
@@ -379,12 +406,12 @@ function politicianIdsWithPolicies(): Set<string> {
  */
 async function loadPoliticiansWithPolicies(): Promise<void> {
   try {
-    const rows = await fetchAllRows<RawPolitician>('politicians_with_policies')
+    const rows = await fetchAllRows<RawPolitician>('politicians_with_policies', '*', 'id')
     const seen = new Set(politicians.value.map(p => p.id))
     const loaded = rows.map(mapPolitician).filter(p => !seen.has(p.id))
     if (loaded.length > 0) politicians.value = [...politicians.value, ...loaded]
   } catch (err) {
-    console.error('[loadPoliticiansWithPolicies] 載入有政見的人物失敗，政見卡片會出不來:', err)
+    recordFailure('有政見的人物', err, loadPoliticiansWithPolicies)
   }
 }
 // 已載入的 region 組合追蹤
@@ -533,6 +560,8 @@ function getTownshipsByElectoralDistrict(region: string, electoralDistrict: stri
 
 /** 全域資料狀態的純資料快照（可 JSON 序列化）。 */
 export interface DataSnapshot {
+  /** 建置時間（epoch ms）。客戶端用它判斷快照夠不夠新，夠新就不再重撈基礎資料。 */
+  generatedAt?: number
   /**
    * 這份切片裡的 policies 是不是完整的一份。
    * 只有首頁、政見列表、市政接力列表拿得到全部政見；詳情頁只拿那一條鏈。
@@ -554,6 +583,7 @@ export interface DataSnapshot {
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
 export function getDataSnapshot(): DataSnapshot {
   return {
+    generatedAt: Date.now(),
     policiesComplete: policiesComplete.value,
     elections: elections.value,
     categories: categories.value,
@@ -567,12 +597,19 @@ export function getDataSnapshot(): DataSnapshot {
   }
 }
 
+/** 快照超過這個年紀就不信它的基礎資料（選舉、分類、地區），照常重撈。CI 每次 push 都重建，實際上很少超過一天。 */
+const SNAPSHOT_FRESH_MS = 7 * 24 * 60 * 60 * 1000
+
 /**
- * 以快照覆蓋全域狀態。不動 loaded／loading：客戶端 hydrate 後仍會照常 fetchAll 換成最新資料，
- * 建置時 fetchAll 早已完成，loaded 保持 true。
+ * 以快照覆蓋全域狀態。
+ * 快照夠新且帶了基礎資料時直接視為 loaded，省掉每頁首次連線那四個小請求
+ * （elections／election_types／categories／locations，HTML 裡本來就有同一份）。
+ * 重資料（政見清單等）另有 policiesComplete 等旗標決定要不要撈。
  */
 export function applyDataSnapshot(snapshot: DataSnapshot): void {
   policiesComplete.value = snapshot.policiesComplete === true
+  const fresh = typeof snapshot.generatedAt === 'number' && Date.now() - snapshot.generatedAt < SNAPSHOT_FRESH_MS
+  if (fresh && snapshot.elections.length > 0) loaded.value = true
   elections.value = snapshot.elections
   categories.value = snapshot.categories
   locations.value = snapshot.locations
@@ -651,16 +688,9 @@ export function useSupabase() {
     if (existing) return existing
 
     try {
-      const { data, error } = await supabase
-        .from('politicians_with_elections')
-        .select('*')
-        .eq('id', politicianId)
-        .single()
-
-      if (error || !data) {
-        console.error(`[loadPoliticianById] 找不到 ${politicianId}:`, error)
-        return null
-      }
+      const { data } = await withTimeoutAndRetry(`politician ${politicianId}`, (signal) =>
+        supabase.from('politicians_with_elections').select('*').eq('id', politicianId).abortSignal(signal).maybeSingle().throwOnError())
+      if (!data) return null
 
       const pol = mapPolitician(data)
 
@@ -672,7 +702,9 @@ export function useSupabase() {
 
       return pol
     } catch (err) {
-      console.error(`[loadPoliticianById] 錯誤:`, err)
+      // id 格式錯之類的請求錯誤等於「找不到」；網路／伺服器問題才讓頁面顯示重試
+      if (isClientError(err)) { console.warn(`[loadPoliticianById] ${politicianId}：`, err); return null }
+      recordFailure('政治人物', err, async () => { await loadPoliticianById(politicianId) })
       return null
     }
   }
@@ -683,16 +715,9 @@ export function useSupabase() {
     if (existing) return existing
 
     try {
-      const { data, error } = await supabase
-        .from('policies_with_logs')
-        .select('*')
-        .eq('id', policyId)
-        .single()
-
-      if (error || !data) {
-        console.error(`[loadPolicyById] 找不到 ${policyId}:`, error)
-        return null
-      }
+      const { data } = await withTimeoutAndRetry(`policy ${policyId}`, (signal) =>
+        supabase.from('policies_with_logs').select('*').eq('id', policyId).abortSignal(signal).maybeSingle().throwOnError())
+      if (!data) return null
 
       const mapped = mapPolicy(data as RawPolicy)
 
@@ -703,7 +728,8 @@ export function useSupabase() {
 
       return mapped
     } catch (err) {
-      console.error(`[loadPolicyById] 錯誤:`, err)
+      if (isClientError(err)) { console.warn(`[loadPolicyById] ${policyId}：`, err); return null }
+      recordFailure('政見', err, async () => { await loadPolicyById(policyId) })
       return null
     }
   }
@@ -719,6 +745,8 @@ export function useSupabase() {
     electoralDistrictAreas,
     loading,
     loaded,
+    error,
+    retry,
     loadedElections,
     stats,
 

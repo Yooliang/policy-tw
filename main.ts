@@ -10,7 +10,7 @@ import './styles/main.css'
  * 建置時預渲染（vite-ssg）：
  * - 建置端：每條路由渲染前，把「這頁需要的資料切片」套進全域狀態，渲染後放進 initialState。
  * - 客戶端：hydrate 前先套回同一份切片，第一次渲染與 HTML 完全一致；之後 useSupabase 照常抓最新資料。
- * 只能在瀏覽器跑的東西（ApexCharts、IndexedDB、localStorage）都留在客戶端分支或 onMounted。
+ * 只能在瀏覽器跑的東西（ApexCharts、localStorage）都留在客戶端分支、onMounted 或 defineAsyncComponent。
  */
 export const createApp = ViteSSG(
   App,
@@ -26,9 +26,8 @@ export const createApp = ViteSSG(
       installChunkReloadListeners()
       const page = initialState.page as PageSnapshot | undefined
       if (page) applyDataSnapshot(page)
-      // vue3-apexcharts 在 import 時就碰 window，只能在瀏覽器載入
-      const { default: VueApexCharts } = await import('vue3-apexcharts')
-      app.use(VueApexCharts)
+      // 圖表函式庫（578 KB）不在這裡全域註冊：vite-ssg 會等這個 callback 才 mount，
+      // 以前每一頁（含隱私頁）都得先載完它才能互動。改由用到的元件自己 defineAsyncComponent。
       return
     }
 

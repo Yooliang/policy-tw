@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import { askPoliticianPolicies, askPoliticianProfile } from '../lib/ask-links'
-import { useIndexedDB } from '../composables/useIndexedDB'
+import LoadError from '../components/LoadError.vue'
 import { PolicyStatus } from '../types'
 import type { CandidateStatus, Policy } from '../types'
 import { policySortDate } from '../lib/policy-date'
@@ -22,8 +22,7 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, refreshPoliticians, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
-const { getCacheTimestamp } = useIndexedDB()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
 const activeTab = ref<'campaign' | 'history'>('campaign')
 
 // 「請 AI 幫忙查」：四顆按鈕都把這位人物丟進貢獻任務池（公開端點 request-task，不需登入）
@@ -117,8 +116,6 @@ function getCandidateStatusColor(status?: CandidateStatus, electionId?: number):
   }
 }
 
-// Check cache age on mount, refresh if older than 1 hour
-const ONE_HOUR = 60 * 60 * 1000
 const politicianLoading = ref(false)
 
 /** 這個人不在全域 state 裡就從 DB 補載。/politician/A → /politician/B 也要走這裡。 */
@@ -136,11 +133,6 @@ onMounted(async () => {
   // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
   ensurePolicies()
   await ensurePoliticianLoaded(String(route.params.politicianId))
-
-  const cacheTimestamp = await getCacheTimestamp('politicians_all')
-  if (cacheTimestamp && Date.now() - cacheTimestamp > ONE_HOUR) {
-    refreshPoliticians()
-  }
 })
 
 // 站內從一位政治人物點到另一位，走的是同一個元件實例，onMounted 不會再跑。
@@ -202,6 +194,8 @@ const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.
 
 usePageHead({
   type: 'article',
+  // firebase.json 把 /politician/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
+  noindex: () => !loading.value && !politicianLoading.value && !politician.value,
   title: () => politician.value ? `${politician.value.name}｜${politician.value.position}` : undefined,
   description: () => politician.value
     ? (politician.value.slogan || politician.value.bio
@@ -537,6 +531,9 @@ usePageHead({
       <p class="text-slate-500">載入中...</p>
     </div>
   </div>
+
+  <!-- 資料拿不到（不是不存在）：給重試，別冒充「找不到」 -->
+  <LoadError v-else-if="error" />
 
   <!-- Not found state -->
   <div v-else class="bg-slate-50 min-h-screen flex items-center justify-center">
