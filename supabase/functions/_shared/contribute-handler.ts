@@ -9,7 +9,12 @@ import { requiredAgree } from "./consensus.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
-export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 50;
+/**
+ * 每個來源 IP 每日最多提交幾筆。
+ * 2026-09-14 小良哥：「初期改 200 筆」——現在瓶頸是沒人來貢獻，不是有人灌水，
+ * 額度卡住的是自己人。等真的有外部代理進來、也真的出現濫用再往下收。
+ */
+export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 200;
 export const DEDUPE_WINDOW_HOURS = 24;
 const SITE_URL = "https://policy-tw.web.app";
 

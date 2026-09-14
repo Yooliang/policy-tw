@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { supabase } from '../lib/supabase'
+import { supabasePublic as supabase } from '../lib/supabase'
 import { fetchAllRows } from './useSupabase'
 import type { CitizenQuestion, QuestionAnswer, RawCitizenQuestion, RawQuestionAnswer } from '../types'
 

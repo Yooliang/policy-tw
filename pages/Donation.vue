@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import Hero from '../components/Hero.vue'
-import { supabase } from '../lib/supabase'
+import { supabasePublic as supabase } from '../lib/supabase'
 import { Copy, Check, Heart, Sparkles, Loader2, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 

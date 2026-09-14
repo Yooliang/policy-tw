@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { ASK_DAILY_LIMIT_PER_IP, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
+import { ASK_DAILY_LIMIT_PER_IP, askTaskType, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
 import { createTask } from "../_shared/task-admin.ts";
 
 /**
@@ -87,7 +87,11 @@ Deno.serve(async (req) => {
     const task = await createTask(supabase, {
       title: buildAskTaskTitle(question),
       description: question,
-      task_type: "question",
+      // 提問本身長得一樣（都有表態、都公開列出答案），但「要做什麼」不一樣：
+      // 一般提問是回答一段有出處的文字（question_answer）；從政見頁的按鈕過來的
+      // 幾種提問，答案其實是一筆資料變更（policy_progress／removal／policy／politician）。
+      // 型別由 kind 決定，讓代理產出的東西對得上使用者真正要的結果。
+      task_type: askTaskType(body.kind, policyId, politicianId),
       target_politician_id: politicianId,
       target_policy_id: policyId,
       region,

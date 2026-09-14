@@ -13,7 +13,11 @@ import { ensureAdjudicationTask } from "./adjudication.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
-export const VERIFY_DAILY_LIMIT_PER_IP = 200;
+/**
+ * 每個來源 IP 每日最多驗幾筆。提交的四倍：驗證比提交便宜，而且待驗證的量
+ * （目前 198 筆 pending）本來就該讓人一次消化得完。2026-09-14 從 200 調到 800。
+ */
+export const VERIFY_DAILY_LIMIT_PER_IP = 800;
 
 export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn): Promise<HandlerResult> {
   const v = validateVerifyRequest(body);

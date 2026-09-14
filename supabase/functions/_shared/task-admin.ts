@@ -137,8 +137,22 @@ export interface CreateTaskOptions {
   default_priority?: number;
 }
 
+/**
+ * 任務的預設 priority，由來源決定。數字大的先派（見 dispatch.ts 的 pickManualTask）。
+ *
+ * web_request 最高，因為那後面有一個真人按了按鈕或問了問題在等答案。
+ * 2026-09-13 之前它是 0、裁決是 2，而且挑選是整池隨機的，所以民眾提問要抽籤。
+ * 小良哥：「這種提問 不會優先被領走嗎，有人問，提早解決啊」。
+ */
+const DEFAULT_PRIORITY: Record<string, number> = {
+  web_request: 3,  // 網站訪客按按鈕／提問：有真人在等答案
+  manual: 1,       // 維護者自己建的
+};
+// 其餘（auto_dispute 的裁決／修正任務自己帶 priority、suggested 是代理提議通過的）落到 0，
+// 跟改之前一樣。這次只調「有人在等」那一類，不順手改別的。
+
 export async function createTask(supabase: SupabaseLike, input: TaskInput, options: CreateTaskOptions): Promise<Obj> {
-  const defaultPriority = options.default_priority ?? (options.source === "manual" ? 1 : 0);
+  const defaultPriority = options.default_priority ?? DEFAULT_PRIORITY[options.source] ?? 0;
   const { data, error } = await supabase.from("contribution_tasks").insert({
     title: input.title,
     description: input.description ?? null,

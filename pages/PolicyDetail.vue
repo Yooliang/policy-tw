@@ -2,8 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
-import { BOARD_PATH, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
-import { supabase } from '../lib/supabase'
+import { askNotAPolicy, askPolicyProgress } from '../lib/ask-links'
+import { supabasePublic as supabase } from '../lib/supabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
@@ -36,28 +36,6 @@ const myPolicyStance = ref<PolicyStance | null>(null)
 const stanceBusy = ref<PolicyStance | null>(null)
 const stanceError = ref<string | null>(null)
 const stanceCounts = ref<StanceCounts | null>(null)
-
-// 「請 AI 查進度」：把這條政見丟進貢獻任務池（公開端點 request-task，不需登入）
-const verifying = ref(false)
-const verifyResult = ref<RequestTaskResult | null>(null)
-const verifyError = ref<string | null>(null)
-const verifySuccess = computed(() => verifyResult.value !== null)
-
-async function handleVerify() {
-  const current = policy.value
-  if (!current || verifying.value) return
-
-  verifying.value = true
-  verifyResult.value = null
-  verifyError.value = null
-  try {
-    verifyResult.value = await requestTask({ kind: 'progress', policy_id: current.id })
-  } catch (err: unknown) {
-    verifyError.value = err instanceof Error ? err.message : '送出失敗，請稍後再試'
-  } finally {
-    verifying.value = false
-  }
-}
 
 const policyId = computed(() => route.params.policyId)
 const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
@@ -178,18 +156,6 @@ watch(policyId, async (id) => {
   sources.value = data || []
 }, { immediate: true })
 
-/**
- * 「這不是政見？」用的預填提問。
- *
- * 不另外做一套回報機制：公民提問本來就會建任務、派給代理、要求附出處，
- * 代理判定該移除時用 removal 型別（需 3 票）。缺的只是「一般人想不到要怎麼問」，
- * 所以這裡把話先寫好，使用者可以改也可以直接送。
- */
-const notAPolicyQuestion = computed(() => {
-  const t = policy.value?.title ?? ""
-  return `「${t}」這筆看起來不像政見（比較像個人表態、行程或活動紀錄）。請查證原始出處後判斷：它應該被移除、改分類，還是其實是有效的承諾？`.slice(0, 300)
-})
-
 const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string }> = [
   { key: 'support', label: '我支持', hint: '希望這項政見被實現' },
   { key: 'oppose', label: '我反對', hint: '不希望這項政見被實現' },
@@ -288,57 +254,21 @@ usePageHead({
           <span v-if="!canVerify" data-testid="hero-progress-blocked" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'bg-white/10 text-white/70 border border-white/20']">
             <Clock :size="16" /> {{ verifyBlockedReason }}
           </span>
-          <button
+          <!-- 主要動作，保留藍底；尺寸走共用 token，跟旁邊那幾顆一致 -->
+          <RouterLink
             v-else
             data-testid="hero-progress"
-            @click="handleVerify"
-            :disabled="verifying"
-            :class="[
-              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent',
-              verifySuccess
-                ? 'bg-emerald-500 text-white'
-                : verifyError
-                  ? 'bg-red-500/80 text-white'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20'
-            ]"
+            :to="askPolicyProgress(policy.id, policy.title, isCampaign)"
+            :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20']"
+            title="走公民提問流程，問題已經先幫你寫好"
           >
-            <Loader2 v-if="verifying" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="verifySuccess" :size="16" />
-            <XCircle v-else-if="verifyError" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ verifying ? '送出中…' : verifySuccess ? (verifyResult?.status === 'already_queued' ? '已在任務池中' : '已排入') : verifyError ? '失敗' : verifyLabel }}
-          </button>
+            <Sparkles :size="16" /> {{ verifyLabel }}
+          </RouterLink>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
       </template>
     </Hero>
-
-    <!-- AI Verification Notification -->
-    <div v-if="verifySuccess || verifyError" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
-      <div
-        :class="[
-          'p-4 rounded-xl flex items-center justify-between',
-          verifySuccess ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'
-        ]"
-      >
-        <div class="flex items-center gap-3">
-          <CheckCircle v-if="verifySuccess" class="text-emerald-600" :size="20" />
-          <XCircle v-else class="text-red-600" :size="20" />
-          <span :class="verifySuccess ? 'text-emerald-700' : 'text-red-700'">
-            {{ verifyResult ? requestTaskMessage(verifyResult) : verifyError }}
-            <RouterLink v-if="verifyResult" :to="BOARD_PATH" class="ml-2 font-bold underline underline-offset-2">到貢獻看板看進度</RouterLink>
-          </span>
-        </div>
-        <button
-          v-if="verifyError"
-          @click="verifyError = null"
-          class="text-sm font-bold text-red-700 hover:text-red-900"
-        >
-          關閉
-        </button>
-      </div>
-    </div>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
@@ -433,7 +363,7 @@ usePageHead({
             <div class="mt-5 pt-4 border-t border-violet-100">
               <RouterLink
                 data-testid="hero-not-a-policy"
-                :to="{ path: '/community', query: { policy: policy.id, q: notAPolicyQuestion } }"
+                :to="askNotAPolicy(policy.id, policy.title)"
                 class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 transition-colors"
                 title="走公民提問流程，問題已經先幫你寫好"
               ><AlertTriangle :size="15" /> 這不是政見？回報給 AI 查證</RouterLink>

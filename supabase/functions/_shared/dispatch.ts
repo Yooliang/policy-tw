@@ -178,6 +178,35 @@ export function sortQuestionTasksBySupport<T extends TaskLike & { task_type?: st
   return out;
 }
 
+/**
+ * 手動池最多從排序後的前幾筆裡挑。
+ *
+ * 為什麼不是固定挑第一筆：兩個代理同時打 /next，在任何一方寫下軟認領之前
+ * 兩邊讀到的是同一份清單，固定挑第一筆會讓他們撞在同一個任務上。
+ * 為什麼不是整池隨機（改之前的做法）：那會讓 priority 與提問的表態數完全失效。
+ * 所以取「排序後的前 N 筆」再用代理自己的 seed 挑一筆——順序有效，又散得開。
+ */
+export const MANUAL_PICK_WINDOW = 3;
+
+/**
+ * 手動任務的挑選：先取 priority 最高的那一層，再從那一層排序後的前幾筆裡用 seed 挑。
+ *
+ * 改之前是 `pickBySeed(freeManual, seed)`——整池隨機。那讓兩個機制默默失效：
+ *   1. 撈任務時的 `.order("priority")`（註解寫著「手動任務優先（priority 高者）」，程式卻沒照做）
+ *   2. sortQuestionTasksBySupport（把提問依表態數排序，排完就被隨機洗掉，只有單元測試看得到效果）
+ * 實測 2026-09-13：手動池 17 筆，裁決 8 筆佔 priority 2，網站訪客請求全是 0，
+ * 所以民眾提了問題之後，那筆是 1/17 的機率被抽中。
+ *
+ * 傳進來的清單必須已經排好（撈的時候 priority DESC、created_at ASC，再套
+ * sortQuestionTasksBySupport），這個函式只負責分層與挑選。
+ */
+export function pickManualTask<T extends { priority?: number | null }>(tasks: readonly T[], seed: string): T | null {
+  if (tasks.length === 0) return null;
+  const top = Math.max(...tasks.map((t) => t.priority ?? 0));
+  const band = tasks.filter((t) => (t.priority ?? 0) === top);
+  return pickBySeed(band.slice(0, MANUAL_PICK_WINDOW), seed);
+}
+
 export interface OriginalIdentity { id: string; agent_name: string; contributor_ip_hash: string }
 
 /** 裁決（adjudication）的驗證不派給原貢獻的提交者（同名或同 IP） */

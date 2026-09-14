@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, pickBySeed, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -176,4 +176,41 @@ Deno.test("已被回報是死路、正在等票的任務不再派給別人", () 
 
   // 這一層跟落庫後的 14 天冷卻是兩層：這裡擋的是「還在等票」的回報
   assertEquals(filterReportedDeadEnds([], new Set(["x"])).length, 0);
+});
+
+Deno.test("手動任務：priority 高的那一層才會被派，不是整池隨機", () => {
+  // 2026-09-13 實測的形狀：手動池 17 筆，裁決 8 筆在 priority 2，網站訪客請求全是 0。
+  // 改之前是 pickBySeed(整池)，所以民眾提問是 1/17 的機率被抽中——小良哥：
+  // 「這種提問 不會優先被領走嗎，有人問，提早解決啊」。
+  const pool = [
+    { task_id: "q1", priority: 3 },
+    { task_id: "q2", priority: 3 },
+    { task_id: "adj1", priority: 2 },
+    { task_id: "adj2", priority: 2 },
+    { task_id: "news", priority: 1 },
+    { task_id: "sugg", priority: 0 },
+  ];
+  // 不管哪個代理的 seed，挑出來的一定是 priority 3 那一層
+  for (const seed of ["a", "b", "c", "d", "e", "f", "g", "h"]) {
+    const picked = pickManualTask(pool, seed)!;
+    assert(["q1", "q2"].includes(picked.task_id), `seed=${seed} 挑到 ${picked.task_id}，應該只從 priority 3 那層挑`);
+  }
+});
+
+Deno.test("手動任務：同一層裡順序有效，但不是固定挑第一筆", () => {
+  // 順序要有效（否則 sortQuestionTasksBySupport 的表態排序又白做了），
+  // 但不能固定挑第一筆——兩個代理同時打 /next、任一方還沒寫下軟認領時會撞在一起。
+  const band = Array.from({ length: 8 }, (_, i) => ({ task_id: `t${i}`, priority: 3 }));
+  const picked = new Set(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((s) => pickManualTask(band, s)!.task_id));
+  for (const id of picked) {
+    const rank = Number(id.slice(1));
+    assert(rank < MANUAL_PICK_WINDOW, `挑到排在第 ${rank + 1} 的 ${id}，超出前 ${MANUAL_PICK_WINDOW} 筆的範圍`);
+  }
+  assert(picked.size > 1, "不同代理應該散得開，不是所有人都拿到同一筆");
+});
+
+Deno.test("手動任務：priority 沒填當 0，空池回 null", () => {
+  assertEquals(pickManualTask([], "seed"), null);
+  const mixed = [{ task_id: "none" }, { task_id: "low", priority: -1 }];
+  assertEquals(pickManualTask(mixed, "seed")!.task_id, "none", "沒填 priority 要當 0，比 -1 高");
 });
