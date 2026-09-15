@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Github, Twitter, Mail, Sparkles } from 'lucide-vue-next'
+import { Github, Mail, Sparkles } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -19,9 +19,9 @@ const activeElection = computed(() => getActiveElection())
             我們致力於打造一個透明、客觀的政見追蹤平台，利用數據與 AI 消除資訊不對稱。
           </p>
           <div class="flex space-x-4">
-            <a href="#" class="hover:text-white transition-colors"><Github :size="20" /></a>
-            <a href="#" class="hover:text-white transition-colors"><Twitter :size="20" /></a>
-            <a href="#" class="hover:text-white transition-colors"><Mail :size="20" /></a>
+            <a href="https://github.com/Yooliang/policy-tw" target="_blank" rel="noopener" class="hover:text-white transition-colors" aria-label="GitHub 原始碼" title="GitHub 原始碼"><Github :size="20" /></a>
+            <!-- 沒有 X 帳號，也沒有公開信箱：聯絡一律走 GitHub Issues（跟隱私權頁一致） -->
+            <a href="https://github.com/Yooliang/policy-tw/issues" target="_blank" rel="noopener" class="hover:text-white transition-colors" aria-label="回報問題" title="回報問題"><Mail :size="20" /></a>
           </div>
         </div>
 
