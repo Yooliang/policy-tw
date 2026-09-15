@@ -114,7 +114,12 @@ try {
     const openCount = tasksFixture.tasks.filter((t) => t.source !== 'auto' && t.status === 'open').length
     const manualCount = tasksFixture.tasks.filter((t) => t.source !== 'auto').length
     check(await page.locator('[data-testid="task-item"]').count() === openCount, `${viewport.name}: 任務分頁預設列 open ${openCount} 筆（自動缺口不列）`)
-    check((await page.locator('[data-testid="gap-counts"]').textContent()).includes(String(tasksFixture.totals.policy_missing)), `${viewport.name}: 自動缺口數量顯示 policy_missing=${tasksFixture.totals.policy_missing}`)
+    // 自動缺口改成直條圖：總數在標題列，各類型在圖上（x 軸是中文名稱，不是代號）
+    const gapTotal = Object.values(tasksFixture.totals).filter((_, i) => Object.keys(tasksFixture.totals)[i] !== 'manual_open').reduce((a, n) => a + n, 0)
+    await page.waitForSelector('[data-testid="gap-counts"] .apexcharts-xaxis-label')
+    const gapText = await page.locator('[data-testid="gap-counts"]').textContent()
+    check(gapText.includes(`共 ${gapTotal} 件`), `${viewport.name}: 自動缺口總數 ${gapTotal}`)
+    check(gapText.includes('缺政見') && !gapText.includes('policy_missing'), `${viewport.name}: 自動缺口直條圖用中文類型名稱`)
     check(await page.locator('[data-testid="task-item"][data-source="suggested"]').count() === 1, `${viewport.name}: AI 提議的任務有標示來源`)
     await page.locator('[data-testid="toggle-closed"]').check()
     check(await page.locator('[data-testid="task-item"]').count() === manualCount, `${viewport.name}: 勾「顯示已關閉」後 ${manualCount} 筆`)

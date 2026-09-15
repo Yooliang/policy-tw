@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
 
@@ -75,6 +76,26 @@ const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'
 const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
 const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
 
+// 自動缺口：跟貢獻分頁的「近 7 日提交」同一種直條圖，多的排前面
+const gapRows = computed(() => Object.entries(totals.value)
+  .map(([type, count]) => ({ label: taskTypeLabel(type), count }))
+  .sort((a, b) => b.count - a.count))
+const gapSeries = computed(() => [{ name: '件數', data: gapRows.value.map(r => r.count) }])
+const gapOptions = computed(() => ({
+  chart: { type: 'bar' as const, toolbar: { show: false }, sparkline: { enabled: false } },
+  plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
+  colors: ['#2563eb'],
+  dataLabels: { enabled: false },
+  xaxis: {
+    categories: gapRows.value.map(r => r.label),
+    labels: { rotate: -45, rotateAlways: true, hideOverlappingLabels: false, trim: false, style: { colors: '#94a3b8', fontSize: '11px', fontWeight: 'bold' } },
+    axisBorder: { show: false }, axisTicks: { show: false },
+  },
+  yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
+  grid: { strokeDashArray: 3, borderColor: '#f1f5f9', xaxis: { lines: { show: false } } },
+  tooltip: { y: { formatter: (v: number) => `${v} 件` } },
+}))
+
 function contributionIdOf(t: BoardTask): string | null {
   const v = t.target?.contribution_id
   return typeof v === 'string' ? v : null
@@ -102,24 +123,9 @@ defineExpose({ load })
 </script>
 
 <template>
-  <section class="space-y-6" data-testid="task-board">
-    <!-- 自動缺口數量 -->
-    <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
-      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
-        <h3 class="font-black text-navy-900">自動偵測的缺口</h3>
-        <span class="text-xs text-slate-400">系統自動找出來的待補資料，會依序派給 AI 代理去查</span>
-        <span class="ml-auto text-sm font-bold text-navy-900">共 {{ loading ? '–' : autoTotal }} 件</span>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <span v-for="(n, k) in totals" :key="k" class="px-3 py-1.5 rounded-full bg-slate-100 text-xs font-bold text-slate-700">
-          {{ taskTypeLabel(String(k)) }} <span class="text-navy-900">{{ n }}</span>
-        </span>
-        <span v-if="!loading && Object.keys(totals).length === 0" class="text-xs text-slate-400">目前沒有缺口</span>
-      </div>
-    </div>
-
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" data-testid="task-board">
     <!-- 任務清單 -->
-    <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
+    <div class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
         <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">進行中 {{ openTasks.length }}・已關閉 {{ closedTasks.length }}</span></h3>
         <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">
@@ -166,5 +172,20 @@ defineExpose({ load })
         </li>
       </ul>
     </div>
+
+    <!-- 側欄：自動偵測的缺口（跟貢獻分頁「近 7 日提交」同一種直條圖） -->
+    <aside class="lg:sticky lg:top-4">
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
+        <div class="flex items-baseline gap-2 mb-1">
+          <h3 class="font-black text-navy-900">自動偵測的缺口</h3>
+          <span class="ml-auto text-sm font-bold text-navy-900 whitespace-nowrap">共 {{ loading ? '–' : autoTotal }} 件</span>
+        </div>
+        <p class="text-xs text-slate-400 mb-2">系統自動找出來的待補資料，會依序派給 AI 代理去查</p>
+        <p v-if="!loading && gapRows.length === 0" class="text-sm text-slate-400 py-6 text-center">目前沒有缺口</p>
+        <div v-else class="h-72">
+          <ClientOnly><apexchart v-if="gapRows.length > 0" type="bar" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
+        </div>
+      </section>
+    </aside>
   </section>
 </template>
