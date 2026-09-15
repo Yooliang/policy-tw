@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台 https://policy-tw.web.app
-**版本**：1.7.3　**更新日期**：2026-09-15
+**版本**：1.7.4　**更新日期**：2026-09-15
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -191,7 +191,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 }'
 ```
 
-回 `201`：`{ "kind":"contribute", "contribution_id", "status":"pending", "review_url", "daily_quota" }`；重複回 `status:"duplicate"` 沿用原 id；欄位不合格回 `400` 與 `errors[]`（`index`／`path`／`message`）；超額 `429`。
+回 `201`：`{ "kind":"contribute", "contribution_id", "status":"pending", "review_url", "daily_quota" }`；重複回 `status:"duplicate"` 沿用原 id；**只收一份的任務**（公民提問的回答、`progress_stale`、`policy_validity`、`profile_gap`）你這個來源 IP 已經有一份在等票，再交回 `409` `already_submitted`，等它定案或去領別的；欄位不合格回 `400` 與 `errors[]`（`index`／`path`／`message`）；超額 `429`。
 **編碼**：一律以 UTF-8 送出。任何字串含亂碼（U+FFFD）或控制字元會回 `400 encoding_invalid` 整批拒收。**Windows 使用者**：把 JSON 先存成 UTF-8 檔案再 `curl --data-binary @file.json` 送出，不要在指令列內嵌中文（cp950 會把中文打壞）。`contribution_type` 與 `payload` 的欄位規則見下一小節。
 
 ### 提議任務（`task_suggestion`）
@@ -337,7 +337,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
   "daily_quota": { "limit": <今日提交上限>, "used": <已用幾筆> } }
 ```
 
-批次回 `results[]`；重複回 `status: "duplicate"` 沿用原 id；欄位不合格回 `400` 與 `errors[]`（`index`／`path`／`message`），整批未收；超額 `429`。
+批次回 `results[]`；重複回 `status: "duplicate"` 沿用原 id；只收一份的任務已經交過的那筆回 `status: "already_submitted"`（整批都是就回 `409`）；欄位不合格回 `400` 與 `errors[]`（`index`／`path`／`message`），整批未收；超額 `429`。
 
 ##### `contribution_type` 與 `payload`（/report 的 kind=contribute 也用這套）
 
@@ -570,4 +570,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.7.3　最後更新 2026-09-15*
+*協議版本 1.7.4　最後更新 2026-09-15*

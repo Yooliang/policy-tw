@@ -5,6 +5,7 @@
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { requiredAgree } from "./consensus.ts";
+import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -30,6 +31,27 @@ export function clientIp(req: Request): string {
 export async function ipHashOf(req: Request, ipSalt: string): Promise<string> {
   return await sha256Hex(`${ipSalt}|${clientIp(req)}`);
 }
+
+/** 撈這批任務的型別與同 IP 排隊中的貢獻，交給純函式判斷要擋哪幾筆 */
+async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyArray<{ task_id?: string | null }>, ipHash: string): Promise<Set<number>> {
+  const taskIds = [...new Set(items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))];
+  if (taskIds.length === 0) return new Set();
+  const manualIds = taskIds.filter((t) => !t.startsWith("auto:") && UUID_RE.test(t));
+  const [manualRes, inFlightRes] = await Promise.all([
+    manualIds.length > 0
+      ? supabase.from("contribution_tasks").select("id, task_type").in("id", manualIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase.from("contributions").select("task_id").eq("contributor_ip_hash", ipHash)
+      .in("task_id", taskIds).in("status", [...IN_FLIGHT_STATUSES]).limit(1000),
+  ]);
+  if (manualRes.error) throw new Error(`task types lookup: ${manualRes.error.message}`);
+  if (inFlightRes.error) throw new Error(`in-flight lookup: ${inFlightRes.error.message}`);
+  const manualTypes = new Map<string, string>(((manualRes.data ?? []) as Array<{ id: string; task_type: string }>).map((r) => [r.id, r.task_type]));
+  const inFlight = new Set<string>(((inFlightRes.data ?? []) as Array<{ task_id: string }>).map((r) => r.task_id));
+  return blockedSingleAnswerIndexes(items, manualTypes, inFlight);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string): Promise<HandlerResult> {
   const validation = validateContributionRequest(body);
@@ -59,6 +81,9 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     };
   }
 
+  // 單一答案型任務：同 IP 已有一份在排隊就不收第二份（見 single-answer-guard.ts）
+  const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
+
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
   const { data: existing, error: dupError } = await supabase
@@ -68,8 +93,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   const existingByHash = new Map<string, ExistingRow>(((existing ?? []) as ExistingRow[]).map((r) => [r.payload_hash, r]));
 
   const toInsert = validation.items
-    .map((item, i) => ({ item, hash: hashes[i] }))
-    .filter(({ hash }) => !existingByHash.has(hash))
+    .map((item, i) => ({ item, hash: hashes[i], i }))
+    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i))
     .map(({ item, hash }) => ({
       contribution_type: item.contribution_type,
       payload: item.payload,
@@ -99,6 +124,15 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
 
   const results = validation.items.map((item, i) => {
+    if (blocked.has(i) && !existingByHash.has(hashes[i])) {
+      return {
+        index: i,
+        contribution_type: item.contribution_type,
+        contribution_id: null,
+        status: "already_submitted",
+        message: "這個任務只收一份，你（同一個來源 IP）已經有一份在等票；等它定案，或去 GET /next 領別的",
+      };
+    }
     const hash = hashes[i];
     const dup = existingByHash.get(hash);
     const id = dup ? dup.id : insertedByHash.get(hash)!;
@@ -114,8 +148,15 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     };
   });
 
-  const needs = [...new Set(results.map((r) => r.required_agree))].sort((a, b) => a - b);
+  const needs = [...new Set(results.map((r) => ("required_agree" in r ? r.required_agree : null)).filter((n): n is number => typeof n === "number"))].sort((a, b) => a - b);
   const single = !Array.isArray((body as Record<string, unknown>).contributions);
+  // 整批都是「已經交過一份」：不是成功，回 409 讓代理知道去領別的
+  if (results.every((r) => r.status === "already_submitted")) {
+    return {
+      status: 409,
+      body: { success: false, error: "already_submitted", message: results[0].message, ...(single ? results[0] : { results }), docs: `${SITE_URL}/skill.md` },
+    };
+  }
   return {
     status: 201,
     body: {
