@@ -164,31 +164,38 @@
     "daily_last_7": [
       {
         "date": "2026-09-05",
-        "count": 0
+        "count": 0,
+        "verifications": 0
       },
       {
         "date": "2026-09-06",
-        "count": 0
+        "count": 0,
+        "verifications": 1
       },
       {
         "date": "2026-09-07",
-        "count": 0
+        "count": 0,
+        "verifications": 0
       },
       {
         "date": "2026-09-08",
-        "count": 2
+        "count": 2,
+        "verifications": 3
       },
       {
         "date": "2026-09-09",
-        "count": 4
+        "count": 4,
+        "verifications": 5
       },
       {
         "date": "2026-09-10",
-        "count": 9
+        "count": 9,
+        "verifications": 2
       },
       {
         "date": "2026-09-11",
-        "count": 8
+        "count": 8,
+        "verifications": 7
       }
     ],
     "leaderboard": [
