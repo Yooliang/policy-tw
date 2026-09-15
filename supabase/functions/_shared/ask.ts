@@ -5,14 +5,12 @@
 
 import { isDuplicateQuestion, isLowEffortQuestion } from "./question-guard.ts";
 
-/** 同一個來源 IP 每日最多幾題；比 request-task 的 10 次低，因為每題會直接開一筆派工任務 */
 /**
  * 每個來源 IP 每日最多提幾題。
  *
- * 2026-09-14 從 5 調到 20：政見頁與人物頁的四顆按鈕（查進度／查兌現情形／
- * 查政見／查簡介／這不是政見？）現在全部走這個端點，5 題等於逛到第六筆政見
- * 按下去就被擋。原本 request-task 那條路是每日 10 次，不該因為統一入口反而更緊。
- * 重複問題另有 24 小時的相似度檢查擋著，這裡放寬不等於開放灌水。
+ * 2026-09-14 從 5 調到 20，當時政見頁與人物頁的按鈕也走這個端點。
+ * 2026-09-15 按鈕已搬回 request-task，這裡只剩民眾自己打字的提問；數字先不動，
+ * 重複問題另有 24 小時的相似度檢查擋著。
  */
 export const ASK_DAILY_LIMIT_PER_IP = 20;
 /** 跟 migration 20260912000014 的 citizen_questions.question CHECK (BETWEEN 8 AND 300) 一致 */
@@ -50,41 +48,4 @@ export function decideAsk(input: AskDecisionInput): AskDecision {
   if (isLowEffortQuestion(input.question)) return { action: "rejected", reason: "low_effort" };
   if (isDuplicateQuestion(input.question, input.recentQuestions)) return { action: "rejected", reason: "duplicate" };
   return { action: "create" };
-}
-
-/**
- * 從政見頁／人物頁的按鈕過來的提問，答案其實是一筆資料變更，不是一段文字。
- *
- * 2026-09-13 小良哥指出：「這不是政見？」那個按鈕問的是「該被移除、改分類，還是
- * 其實有效」——三個答案都是資料變更，但它建的是 question 任務，代理只會回一段文字
- * 貼在提問下面，那筆假政見不會被移除。他要的是「型別保留」：走同一個提問流程
- * （所以保有表態與公開的答案），但任務型別要能讓代理產出資料變更。
- *
- * kind 由前端按鈕帶上來；沒帶或帶了不認識的值就是一般提問。
- * 每一種都要求對應的目標存在，否則退回一般提問（不要產生一個查無對象的任務）。
- */
-export const ASK_KINDS = {
-  /** 政見頁「這不是政見？」：查證後移除／改分類／確認有效 */
-  policy_validity: { task_type: "policy_validity", needs: "policy" },
-  /** 政見頁「查進度」「查兌現情形」 */
-  policy_progress: { task_type: "progress_stale", needs: "policy" },
-  /** 人物頁「查政見」 */
-  policy_missing: { task_type: "policy_missing", needs: "politician" },
-  /** 人物頁「查簡介」 */
-  profile_gap: { task_type: "profile_gap", needs: "politician" },
-} as const;
-
-export type AskKind = keyof typeof ASK_KINDS;
-
-export function isAskKind(v: unknown): v is AskKind {
-  return typeof v === "string" && Object.hasOwn(ASK_KINDS, v);
-}
-
-/** 決定這筆提問要建哪一種任務。條件不符就退回一般提問。 */
-export function askTaskType(kind: unknown, policyId: string | null, politicianId: string | null): string {
-  if (!isAskKind(kind)) return "question";
-  const spec = ASK_KINDS[kind];
-  if (spec.needs === "policy" && !policyId) return "question";
-  if (spec.needs === "politician" && !politicianId && !policyId) return "question";
-  return spec.task_type;
 }

@@ -3,7 +3,7 @@
  * 舊的 ai-classify 管線已停擺，這是唯一入口。
  */
 
-export type RequestKind = 'policy' | 'profile' | 'progress' | 'audit'
+export type RequestKind = 'policy' | 'profile' | 'progress' | 'validity' | 'audit'
 
 export interface RequestTaskResult {
   status: 'queued' | 'already_queued'
@@ -14,7 +14,8 @@ export interface RequestTaskResult {
   message: string
 }
 
-export const BOARD_PATH = '/ai-assistant'
+/** 任務看板：按鈕建的任務都列在這一頁的「任務」分頁 */
+export const BOARD_PATH = '/ai-assistant?tab=tasks'
 
 function headers(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined

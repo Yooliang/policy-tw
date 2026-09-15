@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
-import { askNotAPolicy, askPolicyProgress } from '../lib/ask-links'
+import { useRequestTask } from '../composables/useRequestTask'
+import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import { PolicyStatus } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -38,7 +39,12 @@ const stanceBusy = ref<PolicyStance | null>(null)
 const stanceError = ref<string | null>(null)
 const stanceCounts = ref<StanceCounts | null>(null)
 
+// 「查進度／查兌現情形」「這不是政見？」：按一下就建任務，出現在任務看板（/ai-assistant?tab=tasks）
+const progressRequest = useRequestTask()
+const validityRequest = useRequestTask()
+
 const policyId = computed(() => route.params.policyId)
+watch(policyId, () => { progressRequest.reset(); validityRequest.reset() })
 const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 const politician = computed(() => policy.value ? politicians.value.find(c => String(c.id) === String(policy.value!.politicianId)) : null)
 
@@ -258,18 +264,27 @@ usePageHead({
             <Clock :size="16" /> {{ verifyBlockedReason }}
           </span>
           <!-- 主要動作，保留藍底；尺寸走共用 token，跟旁邊那幾顆一致 -->
-          <RouterLink
+          <button
             v-else
+            type="button"
             data-testid="hero-progress"
-            :to="askPolicyProgress(policy.id, policy.title, isCampaign)"
-            :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20']"
-            title="走公民提問流程，問題已經先幫你寫好"
+            :disabled="progressRequest.loading.value"
+            :class="[
+              HERO_ACTION_BASE, HERO_ACTION_SIZE, 'border border-transparent text-white',
+              progressRequest.done.value ? 'bg-emerald-500' : progressRequest.error.value ? 'bg-red-500/80' : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/20',
+            ]"
+            @click="progressRequest.send({ kind: 'progress', policy_id: policy.id })"
           >
-            <Sparkles :size="16" /> {{ verifyLabel }}
-          </RouterLink>
+            <Loader2 v-if="progressRequest.loading.value" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="progressRequest.done.value" :size="16" />
+            <XCircle v-else-if="progressRequest.error.value" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ progressRequest.label(verifyLabel) }}
+          </button>
           <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
+        <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
       </template>
     </Hero>
 
@@ -364,12 +379,18 @@ usePageHead({
             </div>
             <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
             <div class="mt-5 pt-4 border-t border-violet-100">
-              <RouterLink
+              <button
+                type="button"
                 data-testid="hero-not-a-policy"
-                :to="askNotAPolicy(policy.id, policy.title)"
-                class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 transition-colors"
-                title="走公民提問流程，問題已經先幫你寫好"
-              ><AlertTriangle :size="15" /> 這不是政見？回報給 AI 查證</RouterLink>
+                :disabled="validityRequest.loading.value || validityRequest.done.value"
+                class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 disabled:hover:text-slate-500 transition-colors"
+                @click="validityRequest.send({ kind: 'validity', policy_id: policy.id })"
+              >
+                <Loader2 v-if="validityRequest.loading.value" :size="15" class="animate-spin" />
+                <AlertTriangle v-else :size="15" />
+                {{ validityRequest.label('這不是政見？回報給 AI 查證') }}
+              </button>
+              <RequestTaskNotice class="mt-2" :result="validityRequest.result.value" :error="validityRequest.error.value" />
             </div>
           </div>
 

@@ -1,11 +1,20 @@
 /**
  * 網站「請 AI 幫忙查」（request-task）的規則：純函式部分可測。
- * kind → task_type／標題／說明；同目標已有 open 任務或對應自動缺口 → already_queued；每 IP 每日 10 次。
+ * kind → task_type／標題／說明；同目標已有同型別 open 任務或對應自動缺口 → already_queued；每 IP 每日 20 次。
  * kind=audit（政見深度分析頁貼文件網址）：同一網址＋同一目標 24 小時內只建一筆。
+ *
+ * 政見頁與人物頁的按鈕（查進度／查兌現情形／查政見／查簡介／這不是政見？）都走這裡：
+ * 按下去就建任務、出現在 /ai-assistant?tab=tasks，不再跳去公民提問填文字。
+ * 2026-09-15 小良哥：「這些因該出現在 ai-assistant?tab=tasks，我之前提出的講錯了」「不用人填文字」。
+ * 公民提問（/community）只留民眾自己打字問的題目。
  */
 
-export const REQUEST_DAILY_LIMIT_PER_IP = 10;
-export const REQUEST_KINDS = ["policy", "profile", "progress", "audit"] as const;
+/**
+ * 每個來源 IP 每日幾次。沿用公民提問放寬後的 20：按鈕原本在 ask 端點上就是 20 次，
+ * 搬回這條路不該反而變緊；同目標同型別已有任務會回 already_queued、不佔新的一筆。
+ */
+export const REQUEST_DAILY_LIMIT_PER_IP = 20;
+export const REQUEST_KINDS = ["policy", "profile", "progress", "validity", "audit"] as const;
 export type RequestKind = (typeof REQUEST_KINDS)[number];
 export const AUDIT_URL_MAX = 500;
 export const AUDIT_NOTE_MAX = 500;
@@ -14,8 +23,12 @@ export const KIND_TO_TASK_TYPE: Record<RequestKind, string> = {
   policy: "policy_missing",
   profile: "profile_gap",
   progress: "progress_stale",
+  validity: "policy_validity",
   audit: "audit",
 };
+
+/** 這些 kind 一定要帶 policy_id（其餘的 policy／profile 要帶 politician_id） */
+export const POLICY_KINDS: readonly RequestKind[] = ["progress", "validity"];
 
 export function isRequestKind(v: unknown): v is RequestKind {
   return typeof v === "string" && (REQUEST_KINDS as readonly string[]).includes(v);
@@ -64,6 +77,12 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
         title: `追蹤政見「${t.policy_title ?? "（見 target）"}」的進度（網站訪客請求）`,
         description: `有人在網站上按了「請 AI 追進度」。請查${who}政見「${t.policy_title ?? ""}」的最新執行狀況（施政報告、議會／立法院紀錄、新聞），用 policy_progress 型別回報，附日期與出處。`,
         hint_sources: ["縣市政府施政報告（*.gov.tw）", "ly.gov.tw 議事錄", "議會官網", "cna.com.tw"],
+      };
+    case "validity":
+      return {
+        title: `查證「${t.policy_title ?? "（見 target）"}」是不是政見（網站訪客請求）`,
+        description: `有人在網站上按了「這不是政見？」，覺得${who}的「${t.policy_title ?? ""}」不像政見（比較像個人表態、行程或活動紀錄）。請查證原始出處後三選一：整筆不該存在用 removal／分類或狀態標錯用 correction／其實是有效的承諾用 no_change 並在 note 說明查到什麼。`,
+        hint_sources: ["這筆政見自己的 source_url", "候選人官網／官方社群", "cna.com.tw"],
       };
     case "audit": {
       const url = t.source_url ?? "";

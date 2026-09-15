@@ -1,11 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { ASK_DAILY_LIMIT_PER_IP, askTaskType, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
-import { createTask } from "../_shared/task-admin.ts";
+import { ASK_DAILY_LIMIT_PER_IP, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
+import { createTask, QUESTION_PRIORITY } from "../_shared/task-admin.ts";
 
 /**
- * ask — 網站訪客「問一句話」（公開、無金鑰、每 IP 每日 5 次）。
+ * ask — 網站訪客「問一句話」（公開、無金鑰、每 IP 每日 20 次）。
+ * 只收民眾自己打字的提問；政見頁／人物頁的按鈕走 request-task，不經過這裡。
  * POST { question✅, policy_id?, politician_id?, region? }
  *   → 建一筆 citizen_questions ＋一筆 contribution_tasks（task_type="question"、source="web_request"），
  *     `/next` 會派給代理去找有出處的答案；同一題最多收 3 份不同代理的答案。
@@ -87,11 +88,9 @@ Deno.serve(async (req) => {
     const task = await createTask(supabase, {
       title: buildAskTaskTitle(question),
       description: question,
-      // 提問本身長得一樣（都有表態、都公開列出答案），但「要做什麼」不一樣：
-      // 一般提問是回答一段有出處的文字（question_answer）；從政見頁的按鈕過來的
-      // 幾種提問，答案其實是一筆資料變更（policy_progress／removal／policy／politician）。
-      // 型別由 kind 決定，讓代理產出的東西對得上使用者真正要的結果。
-      task_type: askTaskType(body.kind, policyId, politicianId),
+      task_type: "question",
+      // 派工順序：公民提問 > 任務清單 > 自動缺口（見 task-admin.ts 的 DEFAULT_PRIORITY）
+      priority: QUESTION_PRIORITY,
       target_politician_id: politicianId,
       target_policy_id: policyId,
       region,

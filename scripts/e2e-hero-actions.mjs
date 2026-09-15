@@ -14,7 +14,13 @@ fs.mkdirSync(OUT, { recursive: true })
 
 const pick = (dir) => fs.readdirSync(path.join(ROOT, 'dist', dir)).map((f) => f.replace(/\.html$/, '')).find((f) => /^[0-9a-f-]{36}$/.test(f))
 const politicianId = pick('politician')
-const policyId = pick('policy')
+// 政見頁要挑「查進度」可以按的那種：還沒投票的競選承諾會顯示 hero-progress-blocked，沒有按鈕可測
+const policyId = fs.readdirSync(path.join(ROOT, 'dist', 'policy'))
+  .filter((f) => /^[0-9a-f-]{36}$/.test(f))
+  .find((f) => {
+    const file = path.join(ROOT, 'dist', 'policy', f, 'index.html')
+    return fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('data-testid="hero-progress"')
+  })
 const analysisId = pick('analysis')
 if (!politicianId || !policyId || !analysisId) { console.error('dist 缺頁，先 pnpm build'); process.exit(1) }
 
@@ -112,14 +118,15 @@ try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
     const page = await context.newPage()
     const guard = attachConsoleGuard(page, '政見頁-desktop')
-    await routeRequestTask(page, 'queued')
+    const policyBodies = await routeRequestTask(page, 'queued')
     await page.goto(`http://localhost:${PORT}/policy/${policyId}`, { waitUntil: 'networkidle' })
 
     const progressBtn = page.locator('[data-testid="hero-progress"]')
     const communityBtn = page.locator('[data-testid="hero-community"]')
     const historyBtn = page.locator('[data-testid="hero-history"]')
     check(await progressBtn.count() === 1 && await communityBtn.count() === 1 && await historyBtn.count() === 1, '政見頁動作列（返回鈕不計）恰好 3 顆：查進度／民眾提問／查核履歷')
-    check((await progressBtn.textContent()).trim() === '查進度', `「查進度」文案逐字：「${(await progressBtn.textContent()).trim()}」`)
+    // 施政中的政見叫「查進度」，已投票的競選承諾叫「查兌現情形」
+    check(['查進度', '查兌現情形'].includes((await progressBtn.textContent()).trim()), `「查進度／查兌現情形」文案逐字：「${(await progressBtn.textContent()).trim()}」`)
     check((await communityBtn.textContent()).trim() === '民眾提問', `「民眾提問」文案逐字：「${(await communityBtn.textContent()).trim()}」`)
     check((await historyBtn.textContent()).trim() === '查核履歷', `「查核履歷」文案逐字：「${(await historyBtn.textContent()).trim()}」`)
     check((await communityBtn.getAttribute('href')).startsWith('/community?'), '「民眾提問」目的地維持 /community?filter=...')
@@ -127,6 +134,16 @@ try {
     await progressBtn.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="hero-progress"]')?.textContent.includes('已排入'))
     check((await progressBtn.textContent()).includes('已排入'), `「查進度」按下後狀態變化：「${(await progressBtn.textContent()).trim()}」`)
+    check(policyBodies.length === 1 && policyBodies[0].kind === 'progress' && policyBodies[0].policy_id === policyId, `request-task 收到 kind=progress 與正確 policy_id（${JSON.stringify(policyBodies[0])}）`)
+    check(page.url().includes(`/policy/${policyId}`), '「查進度」按下後留在政見頁，不跳去公民提問')
+
+    // 「這不是政見？」：按一下就建 policy_validity 任務，不跳頁、不用填文字
+    const validityBtn = page.locator('[data-testid="hero-not-a-policy"]')
+    await validityBtn.click()
+    await page.waitForFunction(() => document.querySelector('[data-testid="hero-not-a-policy"]')?.textContent.includes('已排入'))
+    check(policyBodies.length === 2 && policyBodies[1].kind === 'validity' && policyBodies[1].policy_id === policyId, `request-task 收到 kind=validity 與正確 policy_id（${JSON.stringify(policyBodies[1])}）`)
+    check(page.url().includes(`/policy/${policyId}`), '「這不是政見？」按下後留在政見頁')
+    check((await page.locator('a[href="/ai-assistant?tab=tasks"]').count()) >= 1, '送出後有連到任務看板（/ai-assistant?tab=tasks）的連結')
 
     await page.waitForSelector('#history [data-testid="history-panel"]')
     await historyBtn.click()

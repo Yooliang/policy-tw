@@ -1,14 +1,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
+import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
 import { createTask, findOpenTaskForTarget, findRecentAuditTask } from "../_shared/task-admin.ts";
 
 /**
- * request-task — 網站「請 AI 幫忙查」按鈕（公開、無金鑰、每 IP 每日 10 次）。
- * POST { politician_id?, policy_id?, kind: "policy"|"profile"|"progress", requester?: "web" }
- *   → 已有 open 任務或對應自動缺口：{ status:"already_queued", task_id, queue_position, open_tasks, board_url }
- *   → 否則建一筆 contribution_tasks（source=web_request、priority 0）：{ status:"queued", task_id, … }
+ * request-task — 網站「請 AI 幫忙查」按鈕（公開、無金鑰、每 IP 每日 20 次）。
+ * POST { politician_id?, policy_id?, kind: "policy"|"profile"|"progress"|"validity", requester?: "web" }
+ *   → 同目標已有同型別 open 任務或對應自動缺口：{ status:"already_queued", task_id, queue_position, open_tasks, board_url }
+ *   → 否則建一筆 contribution_tasks（source=web_request、priority 2，排在公民提問之後）：{ status:"queued", task_id, … }
  * POST { kind: "audit", source_url, policy_id?, politician_id?, note? }（政見深度分析頁「執行稽核」）
  *   → 同網址＋同目標 24 小時內已建過：already_queued（reason=duplicate_url）；否則建 task_type=audit、target.source_url=網址
  */
@@ -18,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const BOARD_URL = "https://policy-tw.web.app/ai-assistant";
+const BOARD_URL = "https://policy-tw.web.app/ai-assistant?tab=tasks";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status = 200): Response {
@@ -38,11 +38,12 @@ Deno.serve(async (req) => {
     const kind = body.kind;
     const politicianId = typeof body.politician_id === "string" && UUID_RE.test(body.politician_id) ? body.politician_id : null;
     const policyId = typeof body.policy_id === "string" && UUID_RE.test(body.policy_id) ? body.policy_id : null;
-    if (!isRequestKind(kind)) return json({ success: false, error: "kind 要是 policy／profile／progress／audit" }, 400);
+    if (!isRequestKind(kind)) return json({ success: false, error: "kind 要是 policy／profile／progress／validity／audit" }, 400);
     const sourceUrl = kind === "audit" && isAuditUrl(body.source_url) ? String(body.source_url).trim() : null;
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, AUDIT_NOTE_MAX) : null;
     if (kind === "audit" && !sourceUrl) return json({ success: false, error: "invalid_url", message: "請貼可以打開的 http(s) 網址" }, 400);
-    if (kind === "progress" && !policyId) return json({ success: false, error: "kind=progress 要帶 policy_id" }, 400);
+    const isPolicyKind = POLICY_KINDS.includes(kind);
+    if (isPolicyKind && !policyId) return json({ success: false, error: `kind=${kind} 要帶 policy_id` }, 400);
     if ((kind === "policy" || kind === "profile") && !politicianId) return json({ success: false, error: "要帶 politician_id" }, 400);
 
     // 目標存在？順便拿名字
@@ -71,8 +72,8 @@ Deno.serve(async (req) => {
 
     // 已有 open 任務？已有對應自動缺口？（audit 不看這兩項，改看同網址 24 小時去重）
     const taskType = KIND_TO_TASK_TYPE[kind];
-    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: kind === "progress" ? null : pid, policy_id: policyId });
-    const targetId = kind === "progress" ? policyId : pid;
+    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType });
+    const targetId = isPolicyKind ? policyId : pid;
     let autoGap: { task_id: string } | null = null;
     if (kind !== "audit" && targetId) {
       const { data: gaps, error: gapError } = await supabase.rpc("contribution_auto_tasks", { p_type: taskType, p_region: null, p_limit: 100000, p_seed: "" });

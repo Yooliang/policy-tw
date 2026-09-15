@@ -26,7 +26,7 @@ defineEmits<{ click: [] }>()
     <p v-if="state.error" class="text-red-500">{{ state.error }}</p>
     <p v-else-if="state.result" class="text-emerald-700">
       {{ requestTaskMessage(state.result) }}
-      <RouterLink :to="BOARD_PATH" class="font-bold underline underline-offset-2 ml-1">到貢獻看板看進度</RouterLink>
+      <RouterLink :to="BOARD_PATH" class="font-bold underline underline-offset-2 ml-1">到任務看板看進度</RouterLink>
     </p>
     <button
       type="button"
