@@ -15,15 +15,11 @@ export function isValidQuestion(v: string): boolean {
 
 export type Stance = 'up' | 'down'
 
-import type { AskLinkKind } from './ask-links'
-
 export interface AskQuestionInput {
   question: string
   policyId?: string
   politicianId?: string
   region?: string
-  /** 由政見頁／人物頁的按鈕帶過來，決定建哪一種任務（見 lib/ask-links.ts） */
-  kind?: AskLinkKind
 }
 
 export interface AskQuestionResult {
@@ -51,9 +47,6 @@ export async function askQuestion(input: AskQuestionInput): Promise<AskQuestionR
       policy_id: input.policyId,
       politician_id: input.politicianId,
       region: input.region,
-      // 從政見頁／人物頁的按鈕過來時帶著，後端據此決定任務型別（見 _shared/ask.ts）。
-      // 一般提問不帶，就是 question 型別。
-      kind: input.kind,
     }),
   })
   const body = await res.json().catch(() => null)

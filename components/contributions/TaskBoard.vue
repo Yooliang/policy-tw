@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
+import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
 
 /**
  * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求／系統裁決）的 open 與 closed，加上自動缺口的數量。
@@ -29,10 +31,6 @@ interface BoardTask {
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
-const TASK_TYPE_LABEL: Record<string, string> = {
-  policy_missing: '缺政見', profile_gap: '缺人物資料', policy_source_missing: '政見缺出處',
-  progress_stale: '進度停滯', candidacy_source_missing: '參選缺出處', audit: '文件核對', adjudicate: '裁決', other: '其他',
-}
 const SOURCE_LABEL: Record<string, string> = { manual: '維護者', suggested: 'AI 提議', web_request: '網站請求', auto_dispute: '系統（爭議）' }
 const SOURCE_CLASS: Record<string, string> = {
   manual: 'bg-navy-900 text-white', suggested: 'bg-violet-100 text-violet-800', web_request: 'bg-sky-100 text-sky-800', auto_dispute: 'bg-orange-100 text-orange-800',
@@ -78,6 +76,26 @@ const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'
 const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
 const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
 
+// 自動缺口：跟貢獻分頁的「近 7 日提交」同一種直條圖，多的排前面
+const gapRows = computed(() => Object.entries(totals.value)
+  .map(([type, count]) => ({ label: taskTypeLabel(type), count }))
+  .sort((a, b) => b.count - a.count))
+const gapSeries = computed(() => [{ name: '件數', data: gapRows.value.map(r => r.count) }])
+const gapOptions = computed(() => ({
+  chart: { type: 'bar' as const, toolbar: { show: false }, sparkline: { enabled: false } },
+  plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
+  colors: ['#2563eb'],
+  dataLabels: { enabled: false },
+  xaxis: {
+    categories: gapRows.value.map(r => r.label),
+    labels: { rotate: -45, rotateAlways: true, hideOverlappingLabels: false, trim: false, style: { colors: '#94a3b8', fontSize: '11px', fontWeight: 'bold' } },
+    axisBorder: { show: false }, axisTicks: { show: false },
+  },
+  yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
+  grid: { strokeDashArray: 3, borderColor: '#f1f5f9', xaxis: { lines: { show: false } } },
+  tooltip: { y: { formatter: (v: number) => `${v} 件` } },
+}))
+
 function contributionIdOf(t: BoardTask): string | null {
   const v = t.target?.contribution_id
   return typeof v === 'string' ? v : null
@@ -87,6 +105,12 @@ function targetLink(t: BoardTask): { href: string; label: string } | null {
   if (typeof target.policy_id === 'string') return { href: `/policy/${target.policy_id}`, label: '看政見頁' }
   if (typeof target.politician_id === 'string') return { href: `/politician/${target.politician_id}`, label: '看人物頁' }
   return null
+}
+/** priority 數字對人沒有意義：3 以上是公民提問那一層，2 是網站請求與裁決，其餘一般（見 _shared/task-admin.ts） */
+function priorityLabel(p: number): string {
+  if (p >= 3) return '高'
+  if (p === 2) return '中'
+  return '一般'
 }
 function fmtTime(iso: string | null): string {
   if (!iso) return ''
@@ -99,33 +123,18 @@ defineExpose({ load })
 </script>
 
 <template>
-  <section class="space-y-6" data-testid="task-board">
-    <!-- 自動缺口數量 -->
-    <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
-      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
-        <h3 class="font-black text-navy-900">自動偵測的缺口</h3>
-        <span class="text-xs text-slate-400">系統即時掃出來、不需人建的任務；AI 代理跑 /next 就會被派到</span>
-        <span class="ml-auto text-sm font-bold text-navy-900">共 {{ loading ? '–' : autoTotal }} 件</span>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <span v-for="(n, k) in totals" :key="k" class="px-3 py-1.5 rounded-full bg-slate-100 text-xs font-bold text-slate-700">
-          {{ TASK_TYPE_LABEL[String(k)] ?? k }} <span class="text-navy-900">{{ n }}</span>
-        </span>
-        <span v-if="!loading && Object.keys(totals).length === 0" class="text-xs text-slate-400">目前沒有缺口</span>
-      </div>
-    </div>
-
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" data-testid="task-board">
     <!-- 任務清單 -->
-    <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
+    <div class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
-        <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">open {{ openTasks.length }}・closed {{ closedTasks.length }}</span></h3>
+        <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">進行中 {{ openTasks.length }}・已關閉 {{ closedTasks.length }}</span></h3>
         <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">
           <option value="">全部類型</option>
           <option v-for="(label, k) in TASK_TYPE_LABEL" :key="k" :value="k">{{ label }}</option>
         </select>
         <label class="text-xs text-slate-500 inline-flex items-center gap-1.5"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
       </div>
-      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">想請 AI 補某個人物或政見的資料，到那個頁面按「請 AI 幫忙查」就會出現在這裡；有爭議的貢獻會自動變成裁決任務。</p>
+      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會出現在這裡；有爭議的貢獻會自動變成裁決任務。派工順序是公民提問優先，再來是這份清單，最後才是自動找出來的待補資料。</p>
 
       <div v-if="loading" class="p-10 text-center text-slate-500" data-testid="task-loading">
         <Loader2 :size="28" class="animate-spin mx-auto mb-2 text-blue-500" />載入中…
@@ -138,14 +147,14 @@ defineExpose({ load })
       </div>
       <div v-else-if="visibleTasks.length === 0" class="p-10 text-center text-slate-500" data-testid="task-empty">
         <Inbox :size="32" class="mx-auto mb-2 text-slate-300" />
-        <p class="font-bold">{{ typeSel ? `目前沒有「${TASK_TYPE_LABEL[typeSel] ?? typeSel}」任務` : '目前沒有手動任務' }}</p>
+        <p class="font-bold">{{ typeSel ? `目前沒有「${taskTypeLabel(typeSel)}」任務` : '目前沒有手動任務' }}</p>
         <p class="text-sm mt-1">自動缺口仍會派給 AI 代理。</p>
       </div>
       <ul v-else class="divide-y divide-slate-100" data-testid="task-list">
         <li v-for="t in visibleTasks" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source" :data-type="t.task_type">
           <div class="flex flex-wrap items-center gap-2 mb-1.5">
             <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', SOURCE_CLASS[t.source] ?? 'bg-slate-100 text-slate-600']">{{ SOURCE_LABEL[t.source] ?? t.source }}</span>
-            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TASK_TYPE_LABEL[t.task_type] ?? t.task_type }}</span>
+            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ taskTypeLabel(t.task_type) }}</span>
             <span v-if="t.status === 'closed'" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">已關閉{{ t.closed_at ? `・${fmtTime(t.closed_at)}` : '' }}</span>
             <span v-if="t.region" class="text-[11px] text-slate-500">{{ t.region }}</span>
             <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(t.created_at) }}</span>
@@ -155,7 +164,7 @@ defineExpose({ load })
           <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span v-if="t.suggested_by">提議者 {{ t.suggested_by }}</span>
             <span v-else-if="t.created_by && t.source === 'manual'">建立者 {{ t.created_by }}</span>
-            <span>優先序 {{ t.priority }}</span>
+            <span>優先度 {{ priorityLabel(t.priority) }}</span>
             <span v-if="contributionIdOf(t)" class="font-mono text-slate-400">貢獻 {{ contributionIdOf(t)!.slice(0, 8) }}</span>
             <a v-if="targetLink(t)" :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 font-bold">{{ targetLink(t)!.label }}</a>
             <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ u }}</a>
@@ -163,5 +172,20 @@ defineExpose({ load })
         </li>
       </ul>
     </div>
+
+    <!-- 側欄：自動偵測的缺口（跟貢獻分頁「近 7 日提交」同一種直條圖） -->
+    <aside class="lg:sticky lg:top-4">
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
+        <div class="flex items-baseline gap-2 mb-1">
+          <h3 class="font-black text-navy-900">自動偵測的缺口</h3>
+          <span class="ml-auto text-sm font-bold text-navy-900 whitespace-nowrap">共 {{ loading ? '–' : autoTotal }} 件</span>
+        </div>
+        <p class="text-xs text-slate-400 mb-2">系統自動找出來的待補資料，會依序派給 AI 代理去查</p>
+        <p v-if="!loading && gapRows.length === 0" class="text-sm text-slate-400 py-6 text-center">目前沒有缺口</p>
+        <div v-else class="h-72">
+          <ClientOnly><apexchart v-if="gapRows.length > 0" type="bar" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
+        </div>
+      </section>
+    </aside>
   </section>
 </template>

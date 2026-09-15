@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { describeManualTask, taskTarget, validateTaskInput } from "./task-admin.ts";
-import { buildRequestTaskText, decideRequest, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
+import { DEFAULT_PRIORITY, describeManualTask, QUESTION_PRIORITY, taskTarget, validateTaskInput } from "./task-admin.ts";
+import { buildRequestTaskText, decideRequest, KIND_TO_TASK_TYPE, POLICY_KINDS, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
 
@@ -70,7 +70,21 @@ Deno.test("describeManualTask：question 任務講清楚型別、上限、重複
   assertEquals(described.source_url, null);
 });
 
-Deno.test("request-task 規則：已有 open 任務 → already_queued；對應自動缺口 → already_queued；限額 10", () => {
+Deno.test("request-task：「這不是政見？」建 policy_validity，敘述講清楚三條路，且要帶 policy_id", () => {
+  assertEquals(KIND_TO_TASK_TYPE.validity, "policy_validity");
+  assert(POLICY_KINDS.includes("validity") && POLICY_KINDS.includes("progress"));
+  const text = buildRequestTaskText({ kind: "validity", politician_id: "p", policy_id: "x", politician_name: "某人", policy_title: "台南 400 首位女市長" });
+  assert(text.title.includes("台南 400 首位女市長"));
+  for (const t of ["removal", "correction", "no_change"]) assert(text.description.includes(t), `敘述要講到 ${t}`);
+});
+
+Deno.test("派工順序：公民提問 > 按鈕建的任務（任務清單）> 自動缺口", () => {
+  // 自動缺口不在手動池裡、手動池挑空了才輪到它（next/index.ts），所以這裡只需要比手動池內的兩層
+  assert(QUESTION_PRIORITY > DEFAULT_PRIORITY.web_request, "公民提問要排在按鈕任務前面");
+  assert(DEFAULT_PRIORITY.web_request > 0, "按鈕任務要排在沒指定優先序的任務前面");
+});
+
+Deno.test("request-task 規則：已有 open 任務 → already_queued；對應自動缺口 → already_queued；限額 20", () => {
   assertEquals(decideRequest({ usedToday: 0, existingOpenTask: { id: "t1" }, autoGapTaskId: null }), { action: "already_queued", task_id: "t1", reason: "open_task" });
   assertEquals(decideRequest({ usedToday: 0, existingOpenTask: null, autoGapTaskId: "auto:policy_missing:p1" }), { action: "already_queued", task_id: "auto:policy_missing:p1", reason: "auto_gap" });
   assertEquals(decideRequest({ usedToday: 0, existingOpenTask: null, autoGapTaskId: null }), { action: "create" });

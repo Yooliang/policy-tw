@@ -11,9 +11,9 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
-import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
+import { CONTRIBUTION_TYPES, TASK_TYPES } from "./contribution-schema.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
-import { ASK_KINDS } from "./ask.ts";
+import { KIND_TO_TASK_TYPE, REQUEST_KINDS } from "./request-task.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "./contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "./verify-handler.ts";
 
@@ -232,19 +232,27 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
     assert(skill.includes("`" + t + "`"), `skill.md 沒有說明 ${t} 這種任務要做什麼`);
   }
 
-  // 網站按鈕建出來的任務型別（ASK_KINDS）同樣要登記與說明。
+  // 網站按鈕建出來的任務型別（request-task 的 KIND_TO_TASK_TYPE）同樣要登記與說明。
   // 這些不在 SQL 裡（不是自動缺口），所以上面那圈掃不到——2026-09-13 加 policy_validity
   // 時補的：新增一顆按鈕就是新增一種任務型別，同一個坑。
-  for (const [kind, spec] of Object.entries(ASK_KINDS)) {
-    const t = spec.task_type;
-    assert(SUGGESTED_TYPE[t], `按鈕 kind=${kind} 建的任務型別 ${t} 沒有登記在 _shared/task-types.ts`);
+  for (const [kind, t] of Object.entries(KIND_TO_TASK_TYPE)) {
+    if (t !== "audit") assert(SUGGESTED_TYPE[t], `按鈕 kind=${kind} 建的任務型別 ${t} 沒有登記在 _shared/task-types.ts`);
     assert(skill.includes("`" + t + "`"), `skill.md 沒有說明 ${t} 這種任務要做什麼`);
   }
-  // 前端的 kind 清單與後端的 ASK_KINDS 要是同一組，否則按鈕帶的 kind 會被後端當成一般提問
-  const askLinks = await Deno.readTextFile(new URL("../../../lib/ask-links.ts", import.meta.url));
-  const frontKinds = (askLinks.match(/ASK_LINK_KINDS = \[([^\]]*)\]/)?.[1] ?? "")
-    .split(",").map((x) => x.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
-  assertEquals(frontKinds.sort(), Object.keys(ASK_KINDS).sort(), "lib/ask-links.ts 的 ASK_LINK_KINDS 要跟 _shared/ask.ts 的 ASK_KINDS 一致");
+  // 前端的 kind 清單與後端要是同一組，否則按鈕送出的 kind 會被後端以 400 擋掉
+  const front = await Deno.readTextFile(new URL("../../../lib/request-task.ts", import.meta.url));
+  const frontKinds = (front.match(/export type RequestKind = ([^\n]*)/)?.[1] ?? "")
+    .split("|").map((x) => x.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+  assertEquals(frontKinds.sort(), [...REQUEST_KINDS].sort(), "lib/request-task.ts 的 RequestKind 要跟 _shared/request-task.ts 的 REQUEST_KINDS 一致");
+
+  // 任務看板要能用中文顯示每一種任務型別。2026-09-15 小良哥看到看板直接印出
+  // election_result_missing／policy_election_missing／roster_check／policy_validity——
+  // 新增型別時沒人記得補 lib/task-labels.ts，畫面不會壞，只是把代號丟給使用者。
+  const labels = await Deno.readTextFile(new URL("../../../lib/task-labels.ts", import.meta.url));
+  const allTypes = new Set([...sqlTypes, ...Object.keys(SUGGESTED_TYPE), ...Object.values(KIND_TO_TASK_TYPE), ...TASK_TYPES]);
+  for (const t of allTypes) {
+    assert(new RegExp(`\\b${t}:\\s*'`).test(labels), `lib/task-labels.ts 沒有 ${t} 的中文名稱，任務看板會顯示成「其他」`);
+  }
 });
 
 Deno.test("競選承諾：還沒投票的屆別不可以被問「進度如何」", async () => {

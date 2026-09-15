@@ -10,7 +10,6 @@ import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 import { voteStance, type AskQuestionResult, type Stance } from '../lib/citizen-questions'
-import { ASK_LINK_KINDS, type AskLinkKind } from '../lib/ask-links'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useRoute } from 'vue-router'
@@ -27,16 +26,11 @@ const statusFilter = ref<StatusFilter>('all')
 const sortMode = ref<SortMode>('latest')
 // 從 PolicyDetail 的「民眾提問」帶 ?policy= 過來：只看這項政見的提問，且提問表單預設掛在它底下
 const policyFilter = ref('')
-// ?q=／?kind=／?politician= 由政見頁與人物頁的四個按鈕帶過來（見 lib/ask-links.ts）：
-// 問題先填好，使用者可以改或直接送出；kind 決定後端要建哪一種任務，
-// 所以代理產出的是資料變更，不是只有一段貼在提問下面的文字。
+// ?q=／?politician=：預填問題與掛載人物。這一頁只收民眾自己打字的提問——
+// 政見頁／人物頁的「查進度／查政見／查簡介／這不是政見？」按鈕直接建任務，不經過這裡。
 const presetQuestion = computed(() => {
   const v = route.query.q
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : undefined
-})
-const presetKind = computed(() => {
-  const v = route.query.kind
-  return typeof v === 'string' && (ASK_LINK_KINDS as readonly string[]).includes(v) ? (v as AskLinkKind) : undefined
 })
 const presetPoliticianId = computed(() => {
   const v = route.query.politician
@@ -189,7 +183,7 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
-      <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" :preset-question="presetQuestion" :preset-politician-id="presetPoliticianId" :preset-kind="presetKind" class="mb-8" @asked="onAsked" />
+      <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" :preset-question="presetQuestion" :preset-politician-id="presetPoliticianId" class="mb-8" @asked="onAsked" />
 
       <div v-if="policyFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mb-6">
         <span>只看這項政見的提問：<strong>{{ policyFilterTitle || '（政見）' }}</strong></span>

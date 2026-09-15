@@ -3,7 +3,8 @@ import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
-import { askPoliticianPolicies, askPoliticianProfile } from '../lib/ask-links'
+import { useRequestTask } from '../composables/useRequestTask'
+import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
 import { PolicyStatus } from '../types'
 import type { CandidateStatus, Policy } from '../types'
@@ -44,8 +45,10 @@ async function requestLookup(key: LookupKey) {
   }
 }
 
-// 動作列的「查政見」「查簡介」不在這裡送出了：改成跳到公民提問、問題先填好
-// （見 lib/ask-links.ts）。頁面內文那幾顆空狀態的「查一下」仍走 requestTask。
+// 動作列的「查政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
+const policyRequest = useRequestTask()
+const profileRequest = useRequestTask()
+watch(() => route.params.politicianId, () => { policyRequest.reset(); profileRequest.reset() })
 
 // Get election name by ID
 function getElectionName(electionId: number): string {
@@ -263,14 +266,24 @@ usePageHead({
           <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
             <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <!-- 兩顆都走公民提問流程（跳轉＋預填），跟政見頁的按鈕同一套，見 lib/ask-links.ts -->
-          <HeroAction data-testid="hero-query-policy" :to="askPoliticianPolicies(politician.id, politician.name)">
-            <Sparkles :size="16" /> 查政見
+          <!-- 按一下就建任務，出現在任務看板；跟政見頁的按鈕同一套（composables/useRequestTask.ts） -->
+          <HeroAction data-testid="hero-query-policy" @click="policyRequest.send({ kind: 'policy', politician_id: politician.id })">
+            <Loader2 v-if="policyRequest.loading.value" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="policyRequest.done.value" :size="16" />
+            <XCircle v-else-if="policyRequest.error.value" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ policyRequest.label('查政見') }}
           </HeroAction>
-          <HeroAction data-testid="hero-query-profile" :to="askPoliticianProfile(politician.id, politician.name)">
-            <Sparkles :size="16" /> 查簡介
+          <HeroAction data-testid="hero-query-profile" @click="profileRequest.send({ kind: 'profile', politician_id: politician.id })">
+            <Loader2 v-if="profileRequest.loading.value" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="profileRequest.done.value" :size="16" />
+            <XCircle v-else-if="profileRequest.error.value" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ profileRequest.label('查簡介') }}
           </HeroAction>
         </div>
+        <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
+        <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
 
@@ -330,7 +343,7 @@ usePageHead({
                     已交給 AI 代理
                   </div>
                   <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.campaign.result) }}</p>
-                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
+                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
                 </div>
 
                 <!-- Error Message -->
@@ -377,7 +390,7 @@ usePageHead({
                     已交給 AI 代理
                   </div>
                   <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.history.result) }}</p>
-                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
+                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
                 </div>
 
                 <!-- Error Message -->
@@ -513,7 +526,7 @@ usePageHead({
                   <!-- Success hint -->
                   <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
                     <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
-                    <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到貢獻看板看進度</RouterLink>
+                    <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
                   </div>
                 </div>
               </div>

@@ -16,7 +16,8 @@ import {
 import { usePageHead } from '../composables/usePageHead'
 import { BOARD_PATH, isAuditUrl, requestTask, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 import HeroAction from '../components/HeroAction.vue'
-import { askPolicyProgress } from '../lib/ask-links'
+import { useRequestTask } from '../composables/useRequestTask'
+import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { policySortDate, policyYear } from '../lib/policy-date'
 
@@ -40,7 +41,8 @@ function focusAuditInput(): void {
   el.focus()
 }
 
-// 動作列「查進度」改成跳到公民提問（見 lib/ask-links.ts）；這一頁的「執行稽核」仍走 requestTask。
+// 動作列「查進度／查兌現情形」：跟政見頁同一顆，按一下就建任務（kind=progress）
+const progressRequest = useRequestTask()
 
 async function submitAudit() {
   const url = sourceUrl.value.trim()
@@ -195,12 +197,16 @@ onMounted(() => { ensurePolicies() })
             <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
           <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> 政見原文</HeroAction>
-          <!-- 跟政見頁那顆同一套：跳到公民提問、問題先填好（見 lib/ask-links.ts） -->
-          <HeroAction data-testid="hero-progress" :to="askPolicyProgress(selectedPolicy.id, selectedPolicy.title, selectedPolicy.status === PolicyStatus.CAMPAIGN)">
-            <Sparkles :size="16" /> {{ selectedPolicy.status === PolicyStatus.CAMPAIGN ? '查兌現情形' : '查進度' }}
+          <HeroAction data-testid="hero-progress" @click="progressRequest.send({ kind: 'progress', policy_id: selectedPolicy.id })">
+            <Loader2 v-if="progressRequest.loading.value" :size="16" class="animate-spin" />
+            <CheckCircle v-else-if="progressRequest.done.value" :size="16" />
+            <XCircle v-else-if="progressRequest.error.value" :size="16" />
+            <Sparkles v-else :size="16" />
+            {{ progressRequest.label(selectedPolicy.status === PolicyStatus.CAMPAIGN ? '查兌現情形' : '查進度') }}
           </HeroAction>
           <HeroAction data-testid="hero-audit-focus" @click="focusAuditInput"><LinkIcon :size="16" /> 執行稽核</HeroAction>
         </div>
+        <RequestTaskNotice class="mt-3" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
       </template>
 
       <!-- novalidate：用自己的檢查與文案，不讓瀏覽器原生的 type=url 泡泡擋掉 submit -->
@@ -226,7 +232,7 @@ onMounted(() => { ensurePolicies() })
       <p v-if="auditError" class="mt-2 text-sm text-red-200 text-left" data-testid="audit-error">{{ auditError }}</p>
       <p v-else-if="auditResult" class="mt-2 text-sm text-emerald-200 text-left" data-testid="audit-done">
         {{ requestTaskMessage(auditResult) }}
-        <RouterLink :to="BOARD_PATH" class="ml-1 font-bold underline underline-offset-2 text-white">到貢獻看板看進度</RouterLink>
+        <RouterLink :to="BOARD_PATH" class="ml-1 font-bold underline underline-offset-2 text-white">到任務看板看進度</RouterLink>
       </p>
     </Hero>
 

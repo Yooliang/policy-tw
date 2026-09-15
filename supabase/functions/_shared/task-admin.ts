@@ -133,23 +133,26 @@ export interface CreateTaskOptions {
   created_by?: string | null;
   suggested_by?: string | null;
   requester_ip_hash?: string | null;
-  /** 沒給時：manual=1、web_request=0、suggested=0 */
+  /** 沒給時：manual=1、web_request=2、suggested=0（見 DEFAULT_PRIORITY） */
   default_priority?: number;
 }
 
 /**
  * 任務的預設 priority，由來源決定。數字大的先派（見 dispatch.ts 的 pickManualTask）。
  *
- * web_request 最高，因為那後面有一個真人按了按鈕或問了問題在等答案。
- * 2026-09-13 之前它是 0、裁決是 2，而且挑選是整池隨機的，所以民眾提問要抽籤。
+ * 派工順序（2026-09-15 小良哥拍板）：公民提問 > 任務清單 > 自動缺口。
+ *   - 公民提問：ask 端點明確帶 QUESTION_PRIORITY，手動池最高那一層
+ *   - 任務清單：網站按鈕建的任務（web_request）與裁決同一層；自動缺口本來就排在整個手動池之後
+ *
+ * 2026-09-13 之前 web_request 是 0、裁決是 2，而且挑選是整池隨機的，所以民眾提問要抽籤。
  * 小良哥：「這種提問 不會優先被領走嗎，有人問，提早解決啊」。
  */
-const DEFAULT_PRIORITY: Record<string, number> = {
-  web_request: 3,  // 網站訪客按按鈕／提問：有真人在等答案
+export const QUESTION_PRIORITY = 3;
+export const DEFAULT_PRIORITY: Readonly<Record<string, number>> = {
+  web_request: 2,  // 網站訪客按按鈕：有真人在等，但排在公民提問後面
   manual: 1,       // 維護者自己建的
 };
-// 其餘（auto_dispute 的裁決／修正任務自己帶 priority、suggested 是代理提議通過的）落到 0，
-// 跟改之前一樣。這次只調「有人在等」那一類，不順手改別的。
+// 其餘（auto_dispute 的裁決／修正任務自己帶 priority、suggested 是代理提議通過的）落到 0。
 
 export async function createTask(supabase: SupabaseLike, input: TaskInput, options: CreateTaskOptions): Promise<Obj> {
   const defaultPriority = options.default_priority ?? DEFAULT_PRIORITY[options.source] ?? 0;
@@ -181,9 +184,14 @@ export async function closeTask(supabase: SupabaseLike, taskId: string, closedBy
   return (data as Obj) ?? null;
 }
 
-/** 同一目標是否已有 open 的手動／提議／網站任務 */
-export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null }): Promise<Obj | null> {
+/**
+ * 同一目標是否已有 open 的手動／提議／網站任務。
+ * 有給 task_type 就只比同型別：同一筆政見「查進度」與「這不是政見？」是兩件不同的事，
+ * 也不該因為有人對它發了一題公民提問，按鈕就回「已在任務池中」。
+ */
+export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null }): Promise<Obj | null> {
   let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at").eq("status", "open").limit(1);
+  if (target.task_type) q = q.eq("task_type", target.task_type);
   if (target.policy_id) q = q.eq("target->>policy_id", target.policy_id);
   else if (target.politician_id) q = q.eq("target->>politician_id", target.politician_id);
   else return null;
