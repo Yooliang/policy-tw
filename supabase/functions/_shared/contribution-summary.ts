@@ -203,6 +203,11 @@ export function safePayload(payload: unknown): Obj {
 /** 需要維護者處理的狀態只有一種：disputed（2 票反對、身份指認衝突、或連續 3 次落庫失敗） */
 export const ATTENTION_STATUSES = ["disputed"] as const;
 export const CONTRIBUTORS_WINDOW_DAYS = 30;
+/** 看板每日統計用台灣時間分日（UTC+8，沒有夏令時間）；原本切 UTC 日期，早上 8 點前的會算到前一天 */
+const TAIWAN_OFFSET_MS = 8 * 3600 * 1000;
+export function taiwanDate(ms: number): string {
+  return new Date(ms + TAIWAN_OFFSET_MS).toISOString().slice(0, 10);
+}
 
 export interface SummaryRow { status: string; agent_name: string | null; created_at: string }
 export interface VoteRow { agent_name: string | null; created_at?: string | null }
@@ -218,7 +223,8 @@ export interface FeedSummary {
   /** open 的裁決任務數（disputed 的貢獻正由更多代理用 4 票決定；不是人工待辦） */
   adjudicating: number;
   contributors_30d: number;
-  daily_last_7: Array<{ date: string; count: number }>;
+  /** 近 7 日（台灣日期）：count＝新提交筆數（欄位名保留，外部有東西在讀）、verifications＝驗證票數 */
+  daily_last_7: Array<{ date: string; count: number; verifications: number }>;
   /** 總榜（全部時間）。欄位名保留不動：外部有東西在讀它。 */
   leaderboard: LeaderboardEntry[];
   /** 近 30 天 */
@@ -281,8 +287,8 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
   const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
   const recentAgents = new Set<string>();
   const since30 = now - CONTRIBUTORS_WINDOW_DAYS * 86400 * 1000;
-  const daily: Record<string, number> = {};
-  for (let i = 6; i >= 0; i--) daily[new Date(now - i * 86400 * 1000).toISOString().slice(0, 10)] = 0;
+  const daily: Record<string, { count: number; verifications: number }> = {};
+  for (let i = 6; i >= 0; i--) daily[taiwanDate(now - i * 86400 * 1000)] = { count: 0, verifications: 0 };
 
   const agentOf = (r: { agent_name: string | null }) => (r.agent_name && r.agent_name.trim()) || "(unknown)";
   const bump = (name: string) => {
@@ -298,10 +304,19 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     const t = Date.parse(r.created_at);
     // 測試代號不算貢獻者，否則卡片上的「貢獻者（近 30 天）」會跟榜上的名單對不起來
     if (!Number.isNaN(t) && t >= since30 && !EXCLUDED_AGENTS.has(agentOf(r))) recentAgents.add(agentOf(r));
-    const d = String(r.created_at).slice(0, 10);
-    if (d in daily) daily[d]++;
+    if (!Number.isNaN(t)) {
+      const d = taiwanDate(t);
+      if (d in daily) daily[d].count++;
+    }
   }
-  for (const v of votes) bump(agentOf(v)).verified_votes++;
+  for (const v of votes) {
+    bump(agentOf(v)).verified_votes++;
+    const t = Date.parse(String(v.created_at ?? ""));
+    if (!Number.isNaN(t)) {
+      const d = taiwanDate(t);
+      if (d in daily) daily[d].verifications++;
+    }
+  }
   const needs = { disputed: byStatus.disputed ?? 0, retrying: byStatus.apply_failed ?? 0 }; // retrying 只是資訊，不算人工
   return {
     total: rows.length,
@@ -309,7 +324,7 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     needs_attention: { total: needs.disputed, ...needs },
     adjudicating,
     contributors_30d: recentAgents.size,
-    daily_last_7: Object.entries(daily).map(([date, count]) => ({ date, count })),
+    daily_last_7: Object.entries(daily).map(([date, v]) => ({ date, ...v })),
     leaderboard: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.all, now),
     leaderboard_30d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d30, now),
     leaderboard_7d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d7, now),

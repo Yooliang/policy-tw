@@ -59,7 +59,8 @@ interface FeedSummary {
   needs_attention: { total: number; disputed: number; retrying: number }
   adjudicating: number
   contributors_30d: number
-  daily_last_7: Array<{ date: string; count: number }>
+  /** count＝提交筆數、verifications＝驗證票數（台灣日期） */
+  daily_last_7: Array<{ date: string; count: number; verifications?: number }>
   leaderboard: LeaderboardEntry[]
   leaderboard_30d?: LeaderboardEntry[]
   leaderboard_7d?: LeaderboardEntry[]
@@ -255,11 +256,21 @@ function applyCardFilter(card: StatCard) {
   status.value = card.filter
 }
 
-const chartSeries = computed(() => [{ name: '提交數', data: (summary.value?.daily_last_7 ?? []).map(d => d.count) }])
+// 近 7 日：提交＋驗證兩根柱子，取消勾選只看提交（2026-09-15 小良哥：驗證也要算進來，預設打勾）
+const includeVerifications = ref(true)
+const chartSeries = computed(() => {
+  const days = summary.value?.daily_last_7 ?? []
+  const submitted = { name: '提交', data: days.map(d => d.count) }
+  return includeVerifications.value
+    ? [submitted, { name: '驗證', data: days.map(d => d.verifications ?? 0) }]
+    : [submitted]
+})
 const chartOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false }, sparkline: { enabled: false } },
-  plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
-  colors: ['#2563eb'],
+  plotOptions: { bar: { borderRadius: 4, columnWidth: includeVerifications.value ? '70%' : '55%' } },
+  // 驗證用紫色，跟上方管線圖的「驗證票累計」同色
+  colors: ['#2563eb', '#7c3aed'],
+  legend: { show: includeVerifications.value, position: 'top' as const, horizontalAlign: 'right' as const, fontSize: '11px', fontWeight: 700, markers: { size: 5 } },
   dataLabels: { enabled: false },
   xaxis: {
     categories: (summary.value?.daily_last_7 ?? []).map(d => d.date.slice(5)),
@@ -268,7 +279,7 @@ const chartOptions = computed(() => ({
   },
   yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9', xaxis: { lines: { show: false } } },
-  tooltip: { y: { formatter: (v: number) => `${v} 筆` } },
+  tooltip: { shared: true, intersect: false, y: { formatter: (v: number) => `${v} 筆` } },
 }))
 
 function fmtTime(iso: string | null): string {
@@ -472,7 +483,12 @@ usePageHead({
         <!-- 側欄：近 7 日、貢獻榜 -->
         <aside class="space-y-6">
           <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-            <h3 class="font-black text-navy-900 mb-2">近 7 日提交</h3>
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="font-black text-navy-900">近 7 日{{ includeVerifications ? '提交與驗證' : '提交' }}</h3>
+              <label class="ml-auto text-xs text-slate-500 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                <input v-model="includeVerifications" type="checkbox" class="rounded" data-testid="daily-include-verifications" /> 含驗證
+              </label>
+            </div>
             <div class="h-44">
               <ClientOnly><apexchart v-if="summary" type="bar" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
             </div>

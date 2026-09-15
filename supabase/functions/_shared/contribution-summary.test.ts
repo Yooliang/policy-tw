@@ -28,6 +28,28 @@ Deno.test("安全 payload：長文截 200 字", () => {
   assertEquals(sp.n, 1);
 });
 
+Deno.test("近 7 日：驗證票也按天統計，且用台灣日期分日", () => {
+  // 台灣 09-12 早上 07:30 ＝ UTC 09-11 23:30：切 UTC 會被算到 09-11
+  const now = Date.parse("2026-09-12T10:00:00Z"); // 台灣 09-12 18:00
+  const rows = [
+    { status: "pending", agent_name: "alice", created_at: "2026-09-11T23:30:00Z" }, // 台灣 09-12 07:30
+    { status: "pending", agent_name: "alice", created_at: "2026-09-11T15:59:00Z" }, // 台灣 09-11 23:59
+  ];
+  const votes = [
+    { agent_name: "bob", created_at: "2026-09-12T01:00:00Z" },  // 台灣 09-12
+    { agent_name: "bob", created_at: "2026-09-11T16:00:00Z" },  // 台灣 09-12 00:00
+    { agent_name: "erin", created_at: "2026-09-10T12:00:00Z" }, // 台灣 09-10 20:00
+    { agent_name: "erin", created_at: "2026-08-01T00:00:00Z" }, // 超出 7 日
+  ];
+  const s = buildFeedSummary(rows, votes, now);
+  assertEquals(s.daily_last_7.map((d) => d.date), ["2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-12"]);
+  assertEquals(s.daily_last_7[6], { date: "2026-09-12", count: 1, verifications: 2 });
+  assertEquals(s.daily_last_7[5], { date: "2026-09-11", count: 1, verifications: 0 });
+  assertEquals(s.daily_last_7[4].verifications, 1);
+  assertEquals(s.daily_last_7.reduce((a, d) => a + d.verifications, 0), 3, "超出 7 日的票不算進圖，但照樣算進貢獻榜");
+  assertEquals(s.leaderboard.find((r) => r.agent_name === "erin")?.verified_votes, 2);
+});
+
 Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d 不重複、leaderboard 三個數字、近 7 日", () => {
   const now = Date.parse("2026-09-12T08:00:00Z");
   const day = (d: number) => new Date(now - d * 86400 * 1000).toISOString();
@@ -47,7 +69,7 @@ Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d �
   assertEquals(s.needs_attention, { total: 2, disputed: 2, retrying: 1 });
   assertEquals(s.contributors_30d, 4, "alice、bob、dave、(unknown)；carol 是 40 天前");
   assertEquals(s.daily_last_7.length, 7);
-  assertEquals(s.daily_last_7[6], { date: "2026-09-12", count: 1 });
+  assertEquals(s.daily_last_7[6], { date: "2026-09-12", count: 1, verifications: 0 }, "votes 沒帶時間就不進每日圖");
   assertEquals(s.daily_last_7[5].count, 2);
   const alice = s.leaderboard.find((r) => r.agent_name === "alice")!;
   assertEquals([alice.submitted, alice.applied, alice.verified_votes], [2, 2, 0]);

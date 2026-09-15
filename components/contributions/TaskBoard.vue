@@ -134,7 +134,7 @@ defineExpose({ load })
         </select>
         <label class="text-xs text-slate-500 inline-flex items-center gap-1.5"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
       </div>
-      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會出現在這裡；有爭議的貢獻會自動變成裁決任務。派工順序是公民提問優先，再來是這份清單，最後才是自動找出來的待補資料。</p>
+      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會出現在這裡；有爭議的貢獻會自動變成裁決任務。派工順序是公民提問優先，再來是這份清單，最後才是右邊的資料缺口。</p>
 
       <div v-if="loading" class="p-10 text-center text-slate-500" data-testid="task-loading">
         <Loader2 :size="28" class="animate-spin mx-auto mb-2 text-blue-500" />載入中…
@@ -148,7 +148,7 @@ defineExpose({ load })
       <div v-else-if="visibleTasks.length === 0" class="p-10 text-center text-slate-500" data-testid="task-empty">
         <Inbox :size="32" class="mx-auto mb-2 text-slate-300" />
         <p class="font-bold">{{ typeSel ? `目前沒有「${taskTypeLabel(typeSel)}」任務` : '目前沒有手動任務' }}</p>
-        <p class="text-sm mt-1">自動缺口仍會派給 AI 代理。</p>
+        <p class="text-sm mt-1">資料缺口仍會派給 AI 代理。</p>
       </div>
       <ul v-else class="divide-y divide-slate-100" data-testid="task-list">
         <li v-for="t in visibleTasks" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source" :data-type="t.task_type">
@@ -173,11 +173,11 @@ defineExpose({ load })
       </ul>
     </div>
 
-    <!-- 側欄：自動偵測的缺口（跟貢獻分頁「近 7 日提交」同一種直條圖） -->
+    <!-- 側欄：資料缺口（跟貢獻分頁「近 7 日提交」同一種直條圖） -->
     <aside class="lg:sticky lg:top-4">
       <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
         <div class="flex items-baseline gap-2 mb-1">
-          <h3 class="font-black text-navy-900">自動偵測的缺口</h3>
+          <h3 class="font-black text-navy-900">資料缺口</h3>
           <span class="ml-auto text-sm font-bold text-navy-900 whitespace-nowrap">共 {{ loading ? '–' : autoTotal }} 件</span>
         </div>
         <p class="text-xs text-slate-400 mb-2">系統自動找出來的待補資料，會依序派給 AI 代理去查</p>

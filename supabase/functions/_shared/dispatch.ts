@@ -90,9 +90,52 @@ export function filterReportedDeadEnds<T extends TaskLike>(tasks: readonly T[], 
   return tasks.filter((t) => !deadEndTaskIds.has(t.task_id));
 }
 
+/**
+ * submittedTaskIds 由呼叫端依「同代號或同來源 IP」撈：同一台機器換個代號，
+ * 仍然是同一個人在做，不該再派一次（跟每日額度、計票都按 IP 算是同一個道理）。
+ */
 export function filterOwnSubmittedTasks<T extends TaskLike>(tasks: readonly T[], submittedTaskIds: ReadonlySet<string>): T[] {
   if (submittedTaskIds.size === 0) return [...tasks];
   return tasks.filter((t) => !submittedTaskIds.has(t.task_id));
+}
+
+/** 同一個來源 IP 按過 skip 的任務，這麼久之內不再派給這個 IP（任何代號） */
+export const SKIP_MEMORY_HOURS = 24;
+/** 一題公民提問最多收幾份答案（已上線＋還在等票的都算） */
+export const QUESTION_ANSWER_CAP = 3;
+
+/**
+ * 排掉這個來源 IP 最近按過 skip 的任務。
+ *
+ * 2026-09-15 萬大捷運那題：代理按 skip 只釋放了當下的認領，那題又在最高優先層、
+ * 只從前 3 筆裡挑，下一次 /next 馬上又抽回同一題，代理回報「反覆出現、一直 skip」。
+ */
+export function filterSkippedTasks<T extends TaskLike>(tasks: readonly T[], skippedTaskIds: ReadonlySet<string>): T[] {
+  if (skippedTaskIds.size === 0) return [...tasks];
+  return tasks.filter((t) => !skippedTaskIds.has(t.task_id));
+}
+
+/**
+ * 已滿額的提問：已上線的答案（citizen_questions.answer_count）＋還在等票的 question_answer 貢獻 ≥ 上限。
+ *
+ * 只看已上線的話，萬大捷運那題 1 份上線、5 份在排隊，系統仍以為「還差 2 份」一直派——
+ * 大家重複寫同一題，排隊的答案又互相搶票，沒有一份通過得了。
+ */
+export function fullQuestionIdsOf(
+  questions: ReadonlyArray<{ id: string; answer_count: number }>,
+  tasks: ReadonlyArray<TaskLike & { task_type?: string }>,
+  inFlightByTaskId: ReadonlyMap<string, number>,
+): Set<string> {
+  const inFlightByQuestion = new Map<string, number>();
+  for (const t of tasks) {
+    if (t.task_type !== "question") continue;
+    const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
+    if (typeof target.question_id !== "string") continue;
+    inFlightByQuestion.set(target.question_id, (inFlightByQuestion.get(target.question_id) ?? 0) + (inFlightByTaskId.get(t.task_id) ?? 0));
+  }
+  return new Set(questions
+    .filter((q) => q.answer_count + (inFlightByQuestion.get(q.id) ?? 0) >= QUESTION_ANSWER_CAP)
+    .map((q) => q.id));
 }
 
 export function taskTargetKey(task: TaskLike): string {

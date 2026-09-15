@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -213,4 +213,29 @@ Deno.test("手動任務：priority 沒填當 0，空池回 null", () => {
   assertEquals(pickManualTask([], "seed"), null);
   const mixed = [{ task_id: "none" }, { task_id: "low", priority: -1 }];
   assertEquals(pickManualTask(mixed, "seed")!.task_id, "none", "沒填 priority 要當 0，比 -1 高");
+});
+
+// 2026-09-15 萬大捷運站那題：1 份已上線、5 份在排隊，還被派給第 7 個代理；
+// 代理 skip 之後下一次 /next 又抽回同一題。
+const Q_TASK = { task_id: "t-wanda", task_type: "question", target: { question_id: "q-wanda" } };
+const OTHER = { task_id: "t-other", task_type: "policy_missing", target: { politician_id: "p1" } };
+
+Deno.test("提問滿額：已上線＋還在等票的答案合計達上限就不再派", () => {
+  const questions = [{ id: "q-wanda", answer_count: 1 }];
+  assertEquals(QUESTION_ANSWER_CAP, 3);
+  // 萬大實況：1 份上線、5 份在排隊
+  const full = fullQuestionIdsOf(questions, [Q_TASK, OTHER], new Map([["t-wanda", 5]]));
+  assert(full.has("q-wanda"), "排隊中的答案也要佔名額，否則只看上線數會一直以為還差 2 份");
+  assertEquals(filterAnsweredQuestionTasks([Q_TASK, OTHER], new Set(), full).map((t) => t.task_id), ["t-other"]);
+  // 1 上線＋1 排隊＝2，還沒滿
+  assert(!fullQuestionIdsOf(questions, [Q_TASK], new Map([["t-wanda", 1]])).has("q-wanda"));
+  // 剛好 1＋2＝3 就滿
+  assert(fullQuestionIdsOf(questions, [Q_TASK], new Map([["t-wanda", 2]])).has("q-wanda"));
+  // 排隊數掛在別的任務上不能算到這題
+  assert(!fullQuestionIdsOf(questions, [Q_TASK, OTHER], new Map([["t-other", 9]])).has("q-wanda"));
+});
+
+Deno.test("skip 有記憶：同 IP 跳過的任務不再派回來，其他任務照派", () => {
+  assertEquals(filterSkippedTasks([Q_TASK, OTHER], new Set(["t-wanda"])).map((t) => t.task_id), ["t-other"]);
+  assertEquals(filterSkippedTasks([Q_TASK, OTHER], new Set()).length, 2);
 });
