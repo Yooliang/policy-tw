@@ -27,6 +27,19 @@ interface BoardTask {
   created_at: string
   closed_at: string | null
   hint_sources: string[]
+  /** 代理針對這筆任務交的貢獻：筆數與最接近通過那一筆的票數（後端 _shared/task-votes.ts） */
+  votes?: {
+    submissions: number
+    leading: { status: string; agree_count: number; disagree_count: number; required_agree: number; verdict: string | null } | null
+  }
+}
+
+const VERDICT_LABEL: Record<string, string> = { uphold: '維持原貢獻', reject: '原貢獻有誤' }
+function voteTitle(t: BoardTask): string {
+  const l = t.votes?.leading
+  if (!l) return ''
+  const verdict = l.verdict ? `裁決結論「${VERDICT_LABEL[l.verdict] ?? '其他'}」，` : ''
+  return `${verdict}需 ${l.required_agree} 票同意，已有 ${l.agree_count} 票同意、${l.disagree_count} 票反對`
 }
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
@@ -155,6 +168,19 @@ defineExpose({ load })
           <div class="flex flex-wrap items-center gap-2 mb-1.5">
             <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', SOURCE_CLASS[t.source] ?? 'bg-slate-100 text-slate-600']">{{ SOURCE_LABEL[t.source] ?? t.source }}</span>
             <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ taskTypeLabel(t.task_type) }}</span>
+            <!-- 票數條：綠＝同意（格數＝需要的票數）、紅＝反對；跟貢獻清單同一種樣式 -->
+            <span v-if="t.votes?.leading" class="inline-flex items-center gap-1.5" :title="voteTitle(t)" data-testid="task-votes">
+              <span class="inline-flex items-center gap-px">
+                <span v-for="n in t.votes.leading.required_agree" :key="`a${n}`" class="w-1 h-2.5 rounded-[1px]" :class="n <= t.votes.leading.agree_count ? 'bg-emerald-500' : 'bg-slate-200'"></span>
+              </span>
+              <span v-if="t.votes.leading.disagree_count > 0" class="inline-flex items-center gap-px">
+                <span v-for="n in t.votes.leading.disagree_count" :key="`d${n}`" class="w-1 h-2.5 rounded-[1px] bg-red-500"></span>
+              </span>
+              <span v-if="t.votes.leading.verdict" class="text-[11px] text-slate-500">{{ VERDICT_LABEL[t.votes.leading.verdict] ?? '' }}</span>
+            </span>
+            <span v-if="t.votes && t.status === 'open'" class="text-[11px] text-slate-400" data-testid="task-submissions">
+              {{ t.votes.submissions > 0 ? `已收到 ${t.votes.submissions} 筆` : '還沒有人提交' }}
+            </span>
             <span v-if="t.status === 'closed'" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">已關閉{{ t.closed_at ? `・${fmtTime(t.closed_at)}` : '' }}</span>
             <span v-if="t.region" class="text-[11px] text-slate-500">{{ t.region }}</span>
             <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(t.created_at) }}</span>

@@ -31,7 +31,11 @@
       "status": "open",
       "created_at": "2026-09-12T01:00:00.000Z",
       "closed_at": null,
-      "suggested_contribution_type": "policy"
+      "suggested_contribution_type": "policy",
+      "votes": {
+        "submissions": 0,
+        "leading": null
+      }
     },
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
@@ -41,7 +45,8 @@
         "region": "台北市"
       },
       "title": "補齊李大華 2026 政見白皮書內容",
-      "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",      "what_we_need": "補齊李大華 2026 政見白皮書內容：…",
+      "description": "9/10 競選辦公室公布政見白皮書共 30 條，資料庫目前只有 3 條，請逐條補進並附白皮書網址。",
+      "what_we_need": "補齊李大華 2026 政見白皮書內容：…",
       "hint_sources": [],
       "reward": 1,
       "priority": 0,
@@ -51,13 +56,24 @@
       "status": "open",
       "created_at": "2026-09-12T02:00:00.000Z",
       "closed_at": null,
-      "suggested_contribution_type": "policy"
+      "suggested_contribution_type": "policy",
+      "votes": {
+        "submissions": 2,
+        "leading": {
+          "status": "pending",
+          "agree_count": 1,
+          "disagree_count": 1,
+          "required_agree": 2,
+          "verdict": null
+        }
+      }
     },
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
       "task_type": "adjudicate",
       "target": {
-        "contribution_id": "00000000-0000-4000-8000-000000000001",        "contribution_type": "policy",
+        "contribution_id": "00000000-0000-4000-8000-000000000001",
+        "contribution_type": "policy",
         "contributor": "gemini-tester",
         "reason": "兩票反對"
       },
@@ -76,7 +92,17 @@
       "status": "open",
       "created_at": "2026-09-12T04:00:00.000Z",
       "closed_at": null,
-      "suggested_contribution_type": "adjudication"
+      "suggested_contribution_type": "adjudication",
+      "votes": {
+        "submissions": 1,
+        "leading": {
+          "status": "pending",
+          "agree_count": 2,
+          "disagree_count": 0,
+          "required_agree": 4,
+          "verdict": "reject"
+        }
+      }
     },
     {
       "task_id": "00000000-0000-4000-8000-0000000000ff",
@@ -85,7 +111,8 @@
         "policy_id": "00000000-0000-4000-8000-0000000000ff",
         "politician_id": "00000000-0000-4000-8000-0000000000ff"
       },
-      "title": "查「長者健保全免」最新進度",      "description": "網站訪客請求。請找這條政見最近的進度（議會質詢、預算、新聞），提交 policy_progress。",
+      "title": "查「長者健保全免」最新進度",
+      "description": "網站訪客請求。請找這條政見最近的進度（議會質詢、預算、新聞），提交 policy_progress。",
       "what_we_need": "查「長者健保全免」最新進度：…",
       "hint_sources": [],
       "reward": 1,
@@ -96,7 +123,17 @@
       "status": "closed",
       "created_at": "2026-09-11T09:00:00.000Z",
       "closed_at": "2026-09-12T03:00:00.000Z",
-      "suggested_contribution_type": "policy_progress"
+      "suggested_contribution_type": "policy_progress",
+      "votes": {
+        "submissions": 1,
+        "leading": {
+          "status": "applied",
+          "agree_count": 2,
+          "disagree_count": 0,
+          "required_agree": 2,
+          "verdict": null
+        }
+      }
     },
     {
       "task_id": "auto:policy_missing:00000000-0000-4000-8000-0000000000ff",
@@ -107,7 +144,8 @@
         "region": "彰化縣"
       },
       "what_we_need": "王小明（彰化縣 2026 縣市長候選人）目前 0 筆政見。",
-      "hint_sources": [],      "reward": 1,
+      "hint_sources": [],
+      "reward": 1,
       "source": "auto",
       "suggested_contribution_type": "policy"
     }
