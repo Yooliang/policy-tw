@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
+import { summarizeTaskVotes, type VoteContribution } from "../_shared/task-votes.ts";
 
 /**
  * tasks — 領任務（四主端點之一）。無金鑰。
@@ -17,6 +18,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
+
+const VOTE_COLUMNS = "id, contribution_type, payload, source_urls, status, agree_count, disagree_count, task_id";
+
+// deno-lint-ignore no-explicit-any
+async function fetchTaskVotes(supabase: any, tasks: ReadonlyArray<{ task_id: string; task_type: string; target: unknown }>) {
+  if (tasks.length === 0) return new Map();
+  const ids = tasks.map((t) => t.task_id);
+  const originals = tasks
+    .filter((t) => t.task_type === "adjudicate")
+    .map((t) => (t.target && typeof t.target === "object" ? (t.target as Record<string, unknown>).contribution_id : null))
+    .filter((v): v is string => typeof v === "string");
+  const [byTask, byAdjudication] = await Promise.all([
+    supabase.from("contributions").select(VOTE_COLUMNS).in("task_id", ids).limit(2000),
+    originals.length > 0
+      ? supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", originals).limit(2000)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (byTask.error) throw new Error(`task votes: ${byTask.error.message}`);
+  if (byAdjudication.error) throw new Error(`adjudication votes: ${byAdjudication.error.message}`);
+  return summarizeTaskVotes(tasks, [...(byTask.data ?? []), ...(byAdjudication.data ?? [])] as VoteContribution[]);
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -79,11 +101,14 @@ Deno.serve(async (req) => {
       closed_at: t.closed_at ?? null,
       suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
     }));
+    // 任務清單的票數條：代理針對每筆手動任務交的貢獻，挑最接近通過的那筆（見 _shared/task-votes.ts）
+    const votesByTask = await fetchTaskVotes(supabase, manual);
+    const manualWithVotes = manual.map((t) => ({ ...t, votes: votesByTask.get(t.task_id) ?? { submissions: 0, leading: null } }));
     // deno-lint-ignore no-explicit-any
     const auto = (autoRes.data ?? []).map((t: any) => ({ ...t, source: "auto", suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null }));
     // 每筆附現況與 lookup（?with_current=0 可關掉，省查詢）
     const withCurrent = url.searchParams.get("with_current") !== "0";
-    const picked = [...manual, ...auto].slice(0, limit);
+    const picked = [...manualWithVotes, ...auto].slice(0, limit);
     const tasks = withCurrent
       ? await Promise.all(picked.map(async (t) => {
         const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;

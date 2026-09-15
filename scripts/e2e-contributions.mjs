@@ -129,6 +129,13 @@ try {
     const gapText = await page.locator('[data-testid="gap-counts"]').textContent()
     check(gapText.includes(`共 ${gapTotal} 件`), `${viewport.name}: 自動缺口總數 ${gapTotal}`)
     check(gapText.includes('缺政見') && !gapText.includes('policy_missing'), `${viewport.name}: 自動缺口直條圖用中文類型名稱`)
+    // 票數條：有進行中貢獻的任務顯示、沒人交的寫「還沒有人提交」、裁決帶結論
+    const sugg = page.locator('[data-testid="task-item"][data-source="suggested"]')
+    check(await sugg.locator('[data-testid="task-votes"] .bg-emerald-500').count() === 1 && await sugg.locator('[data-testid="task-votes"] .bg-red-500').count() === 1, `${viewport.name}: 任務票數條 1 綠（同意）1 紅（反對）`)
+    check((await sugg.locator('[data-testid="task-submissions"]').textContent()).includes('已收到 2 筆'), `${viewport.name}: 任務顯示已收到筆數`)
+    check((await page.locator('[data-testid="task-item"][data-source="manual"] [data-testid="task-submissions"]').textContent()).includes('還沒有人提交'), `${viewport.name}: 沒人交的任務寫還沒有人提交`)
+    const adj = page.locator('[data-testid="task-item"][data-type="adjudicate"] [data-testid="task-votes"]')
+    check(await adj.locator('span.w-1').count() === 4 && (await adj.textContent()).includes('原貢獻有誤'), `${viewport.name}: 裁決任務 4 格並帶結論`)
     check(await page.locator('[data-testid="task-item"][data-source="suggested"]').count() === 1, `${viewport.name}: AI 提議的任務有標示來源`)
     await page.locator('[data-testid="toggle-closed"]').check()
     check(await page.locator('[data-testid="task-item"]').count() === manualCount, `${viewport.name}: 勾「顯示已關閉」後 ${manualCount} 筆`)
