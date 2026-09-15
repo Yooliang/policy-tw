@@ -11,7 +11,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
-import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
+import { CONTRIBUTION_TYPES, TASK_TYPES } from "./contribution-schema.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { KIND_TO_TASK_TYPE, REQUEST_KINDS } from "./request-task.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "./contribute-handler.ts";
@@ -244,6 +244,15 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
   const frontKinds = (front.match(/export type RequestKind = ([^\n]*)/)?.[1] ?? "")
     .split("|").map((x) => x.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
   assertEquals(frontKinds.sort(), [...REQUEST_KINDS].sort(), "lib/request-task.ts 的 RequestKind 要跟 _shared/request-task.ts 的 REQUEST_KINDS 一致");
+
+  // 任務看板要能用中文顯示每一種任務型別。2026-09-15 小良哥看到看板直接印出
+  // election_result_missing／policy_election_missing／roster_check／policy_validity——
+  // 新增型別時沒人記得補 lib/task-labels.ts，畫面不會壞，只是把代號丟給使用者。
+  const labels = await Deno.readTextFile(new URL("../../../lib/task-labels.ts", import.meta.url));
+  const allTypes = new Set([...sqlTypes, ...Object.keys(SUGGESTED_TYPE), ...Object.values(KIND_TO_TASK_TYPE), ...TASK_TYPES]);
+  for (const t of allTypes) {
+    assert(new RegExp(`\\b${t}:\\s*'`).test(labels), `lib/task-labels.ts 沒有 ${t} 的中文名稱，任務看板會顯示成「其他」`);
+  }
 });
 
 Deno.test("競選承諾：還沒投票的屆別不可以被問「進度如何」", async () => {
