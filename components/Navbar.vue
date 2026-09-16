@@ -85,10 +85,15 @@ const isActive = (path: string) => route.path === path
 
         <!-- Right Side Actions -->
         <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-          <!-- Donation: Circle on mobile, rectangle on desktop -->
-          <RouterLink to="/donation" class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 sm:w-auto sm:h-auto sm:px-3 sm:py-2 rounded-full sm:rounded-md text-sm font-bold flex items-center justify-center sm:gap-1.5 transition-all shadow-lg hover:shadow-red-500/20 whitespace-nowrap">
+          <!-- 贊助：只用一顆愛心（2026-09-16 小良哥：「主選單那邊用個愛心即可」）；
+               文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
+          <RouterLink
+            to="/donation"
+            class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
+            aria-label="贊助平台"
+            title="贊助平台"
+          >
             <Heart :size="16" class="fill-current" />
-            <span class="hidden sm:inline">贊助平台</span>
           </RouterLink>
 
           <!-- User Avatar (Logged In) -->
