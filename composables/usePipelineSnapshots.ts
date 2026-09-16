@@ -2,11 +2,18 @@ import { ref } from 'vue'
 import { fetchAllRows } from './useSupabase'
 import type { PipelineSnapshot, RawPipelineSnapshot } from '../types'
 
+/** tasks_by_type 把手動任務也放在裡面（鍵 manual_open），算資料缺口時要扣掉 */
+export const MANUAL_TASKS_KEY = 'manual_open'
+
 function mapSnapshot(row: RawPipelineSnapshot): PipelineSnapshot {
+  const byType = row.tasks_by_type || {}
+  const manualOpen = Number(byType[MANUAL_TASKS_KEY] ?? 0)
   return {
     takenAt: row.taken_at,
     tasksOpen: row.tasks_open,
-    tasksByType: row.tasks_by_type || {},
+    tasksByType: byType,
+    gapsOpen: Object.entries(byType).filter(([k]) => k !== MANUAL_TASKS_KEY).reduce((a, [, v]) => a + Number(v ?? 0), 0),
+    manualOpen,
     pending: row.pending,
     applied: row.applied,
     disputed: row.disputed,
@@ -19,7 +26,7 @@ function mapSnapshot(row: RawPipelineSnapshot): PipelineSnapshot {
   }
 }
 
-/** 讀取管線健康度採樣（`pipeline_snapshots`，每 4 小時一筆），依時間升冪排列供圖表使用。 */
+/** 讀取管線健康度採樣（`pipeline_snapshots`，每小時一筆），依時間升冪排列供圖表使用。 */
 export function usePipelineSnapshots() {
   const snapshots = ref<PipelineSnapshot[]>([])
   const loading = ref(false)

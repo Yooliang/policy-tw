@@ -12,6 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PORT = Number(process.argv[2] || 4191)
 const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/contributions-feed.json'), 'utf8'))
 const tasksFixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/contributions-tasks.json'), 'utf8'))
+const snapshotsFixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/pipeline-snapshots.json'), 'utf8'))
 const OUT = path.join(ROOT, '.dedupe-check')
 fs.mkdirSync(OUT, { recursive: true })
 
@@ -42,6 +43,13 @@ async function routeHistory(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...historyFixture, target: 'contribution', id, total: 1, count: 1, entries: [entry] }) })
   })
 }
+// pipeline_snapshots 走 Supabase REST：不攔就會打到線上真資料，走勢圖的檢查會隨當下資料飄
+async function routeSnapshots(page) {
+  await page.route('**/rest/v1/pipeline_snapshots**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshotsFixture) })
+  })
+}
+
 async function routeTasks(page, taskRequests = []) {
   await page.route('**/functions/v1/tasks**', async (route) => {
     taskRequests.push(new URL(route.request().url()).search)
@@ -56,7 +64,7 @@ try {
     const page = await context.newPage()
     const feedRequests = []
     await routeFeed(page, feedRequests)
-    await routeTasks(page)
+    await routeSnapshots(page); await routeTasks(page)
     await routeHistory(page)
 
     await page.goto(`http://localhost:${PORT}/ai-assistant`, { waitUntil: 'networkidle' })
@@ -134,6 +142,15 @@ try {
     check(await sugg.locator('[data-testid="task-votes"] .bg-emerald-500').count() === 1 && await sugg.locator('[data-testid="task-votes"] .bg-red-500').count() === 1, `${viewport.name}: 任務票數條 1 綠（同意）1 紅（反對）`)
     check((await sugg.locator('[data-testid="task-submissions"]').textContent()).includes('已收到 2 筆'), `${viewport.name}: 任務顯示已收到筆數`)
     check((await page.locator('[data-testid="task-item"][data-source="manual"] [data-testid="task-submissions"]').textContent()).includes('還沒有人提交'), `${viewport.name}: 沒人交的任務寫還沒有人提交`)
+    // 資料缺口近 24 小時走勢：每小時一筆，線用中文缺口名稱
+    const trend = page.locator('[data-testid="gap-trend"]')
+    await page.waitForSelector('[data-testid="gap-trend"] .apexcharts-line-series', { timeout: 15000 })
+    const trendText = await trend.textContent()
+    check(trendText.includes('近 24 小時走勢'), `${viewport.name}: 缺口走勢圖標題`)
+    check(trendText.includes('政見缺屆別') && !trendText.includes('policy_election_missing'), `${viewport.name}: 走勢圖圖例用中文缺口名稱`)
+    check(await trend.locator('.apexcharts-line-series .apexcharts-series').count() >= 5, `${viewport.name}: 走勢圖至少畫出 5 種缺口`)
+    check(!trendText.includes('manual_open') && !trendText.includes('任務清單'), `${viewport.name}: 走勢圖不含手動任務（那在左邊清單）`)
+
     const adj = page.locator('[data-testid="task-item"][data-type="adjudicate"] [data-testid="task-votes"]')
     check(await adj.locator('span.w-1').count() === 4 && (await adj.textContent()).includes('原貢獻有誤'), `${viewport.name}: 裁決任務 4 格並帶結論`)
     check(await page.locator('[data-testid="task-item"][data-source="suggested"]').count() === 1, `${viewport.name}: AI 提議的任務有標示來源`)
@@ -152,7 +169,7 @@ try {
     const page = await context.newPage()
     const feedRequests = []
     await routeFeed(page, feedRequests)
-    await routeTasks(page)
+    await routeSnapshots(page); await routeTasks(page)
     const applyCalls = []
     await page.route('**/functions/v1/apply', (route) => { applyCalls.push(route.request().url()); return route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }) })
     await page.goto(`http://localhost:${PORT}/ai-assistant?tab=tasks&type=policy`, { waitUntil: 'networkidle' })
@@ -171,7 +188,7 @@ try {
   // 空狀態與錯誤狀態
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await context.newPage()
-  await routeTasks(page)
+  await routeSnapshots(page); await routeTasks(page)
   await page.route('**/functions/v1/contributions-feed**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...fixture, items: [], count: 0, has_more: false, summary: { ...fixture.summary, by_status: { ...fixture.summary.by_status, disputed: 0 }, needs_attention: { total: 0, disputed: 0, retrying: 0 }, adjudicating: 0 } }) }))
   await page.goto(`http://localhost:${PORT}/ai-assistant`, { waitUntil: 'networkidle' })
   check(await page.locator('[data-testid="empty"]').count() === 1, '空狀態顯示')
