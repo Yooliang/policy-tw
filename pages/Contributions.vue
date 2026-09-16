@@ -258,6 +258,25 @@ function applyCardFilter(card: StatCard) {
 
 // 近 7 日：提交＋驗證兩根柱子，取消勾選只看提交（2026-09-15 小良哥：驗證也要算進來，預設打勾）
 const includeVerifications = ref(true)
+// 貢獻榜的三段：顏色沿用管線圖（提交藍、上線綠、驗證票紫），同一件事在站上只有一種顏色
+const LEADERBOARD_PARTS = [
+  { key: 'submitted' as const, label: '提交', color: 'bg-blue-600' },
+  { key: 'applied' as const, label: '上線', color: 'bg-emerald-600' },
+  { key: 'verified_votes' as const, label: '驗證票', color: 'bg-violet-600' },
+]
+
+/** 長條按「榜上最高分」等比例，所以列與列之間比得出長短；分數為 0 的人不會有色塊 */
+const leaderboardMax = computed(() => Math.max(1, ...activeLeaderboard.value.map(r => r.score ?? 0)))
+
+function barWidth(row: LeaderboardEntry, key: 'submitted' | 'applied' | 'verified_votes'): string {
+  const value = Number(row[key] ?? 0)
+  return value <= 0 ? '0' : `${(value / leaderboardMax.value) * 100}%`
+}
+
+function leaderboardTitle(row: LeaderboardEntry): string {
+  return `提交 ${row.submitted}・上線 ${row.applied}・驗證票 ${row.verified_votes ?? 0}`
+}
+
 const chartSeries = computed(() => {
   const days = summary.value?.daily_last_7 ?? []
   const submitted = { name: '提交', data: days.map(d => d.count) }
@@ -359,8 +378,24 @@ usePageHead({
       <TaskBoard v-if="tab === 'tasks'" :type-filter="taskTypeFilter" @update:type-filter="taskTypeFilter = $event" />
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- 近 7 日：手機上要在清單前面（2026-09-17 小良哥：不該捲一長串才看到），
+             桌機再用 col-start／row-start 指定回右欄，所以 DOM 順序是 圖 → 清單 → 貢獻榜 -->
+        <div class="lg:col-start-3 lg:row-start-1">
+        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+          <div class="flex items-center gap-2 mb-2">
+            <h3 class="font-black text-navy-900">近 7 日{{ includeVerifications ? '提交與驗證' : '提交' }}</h3>
+            <label class="ml-auto text-xs text-slate-500 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+              <input v-model="includeVerifications" type="checkbox" class="rounded" data-testid="daily-include-verifications" /> 含驗證
+            </label>
+          </div>
+          <div class="h-44">
+            <ClientOnly><apexchart v-if="summary" type="bar" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
+          </div>
+        </section>
+        </div>
+
         <!-- 列表 -->
-        <section class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200">
+        <section class="lg:col-span-2 lg:col-start-1 lg:row-start-1 lg:row-span-2 bg-white rounded-2xl shadow-lg border border-slate-200">
           <div class="p-4 sm:p-5 border-b border-slate-100 space-y-3">
             <div class="flex flex-wrap gap-1.5" data-testid="status-tabs">
               <button v-for="t in STATUS_TABS" :key="t.key" type="button"
@@ -480,43 +515,49 @@ usePageHead({
           </div>
         </section>
 
-        <!-- 側欄：近 7 日、貢獻榜 -->
-        <aside class="space-y-6">
-          <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-            <div class="flex items-center gap-2 mb-2">
-              <h3 class="font-black text-navy-900">近 7 日{{ includeVerifications ? '提交與驗證' : '提交' }}</h3>
-              <label class="ml-auto text-xs text-slate-500 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
-                <input v-model="includeVerifications" type="checkbox" class="rounded" data-testid="daily-include-verifications" /> 含驗證
-              </label>
+        <aside class="lg:col-start-3 lg:row-start-2">
+        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
+          <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
+          <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
+          <div class="flex flex-wrap items-center gap-1.5 mb-3">
+            <button
+              v-for="opt in LEADERBOARD_RANGES"
+              :key="opt.key"
+              @click="leaderboardRange = opt.key"
+              :class="[
+                'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors',
+                leaderboardRange === opt.key ? 'bg-navy-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+              ]"
+            >{{ opt.label }}</button>
+          </div>
+          <p v-if="activeLeaderboard.length === 0" class="text-sm text-slate-400">{{ leaderboardEmptyText }}</p>
+          <template v-else>
+            <!-- 三段堆疊長條：分數就是這三個數字相加，疊起來的長度剛好等於分數，
+                 一眼看得出誰是交得多、誰是幫忙驗得多（2026-09-17 小良哥要的） -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-[11px] font-bold text-slate-500">
+              <span v-for="part in LEADERBOARD_PARTS" :key="part.key" class="inline-flex items-center gap-1">
+                <span :class="['w-2.5 h-2.5 rounded-sm', part.color]"></span>{{ part.label }}
+              </span>
             </div>
-            <div class="h-44">
-              <ClientOnly><apexchart v-if="summary" type="bar" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
-            </div>
-          </section>
-          <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
-            <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
-            <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
-            <div class="flex flex-wrap items-center gap-1.5 mb-3">
-              <button
-                v-for="opt in LEADERBOARD_RANGES"
-                :key="opt.key"
-                @click="leaderboardRange = opt.key"
-                :class="[
-                  'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors',
-                  leaderboardRange === opt.key ? 'bg-navy-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
-                ]"
-              >{{ opt.label }}</button>
-            </div>
-            <p v-if="activeLeaderboard.length === 0" class="text-sm text-slate-400">{{ leaderboardEmptyText }}</p>
-            <ol v-else class="space-y-2">
-              <li v-for="(row, i) in activeLeaderboard" :key="row.agent_name" class="flex items-center gap-3 text-sm">
-                <span class="w-5 text-right font-black text-slate-400">{{ i + 1 }}</span>
-                <span class="font-bold text-navy-900 truncate flex-1">{{ row.agent_name }}</span>
-                <span class="font-black text-navy-900 tabular-nums">{{ row.score ?? 0 }}</span>
-                <span class="text-xs text-slate-500 whitespace-nowrap">提交 {{ row.submitted }}・上線 {{ row.applied }}・驗證 {{ row.verified_votes ?? 0 }}</span>
+            <ol class="space-y-2" data-testid="leaderboard-bars">
+              <li v-for="(row, i) in activeLeaderboard" :key="row.agent_name" class="text-sm">
+                <div class="flex items-baseline gap-2">
+                  <span class="w-4 text-right font-black text-slate-400 text-xs">{{ i + 1 }}</span>
+                  <span class="font-bold text-navy-900 truncate flex-1">{{ row.agent_name }}</span>
+                  <span class="font-black text-navy-900 tabular-nums">{{ row.score ?? 0 }}</span>
+                </div>
+                <div class="ml-6 mt-1 flex h-2.5 rounded-full overflow-hidden bg-slate-100" :title="leaderboardTitle(row)">
+                  <span
+                    v-for="part in LEADERBOARD_PARTS"
+                    :key="part.key"
+                    :class="part.color"
+                    :style="{ width: barWidth(row, part.key) }"
+                  ></span>
+                </div>
               </li>
             </ol>
-          </section>
+          </template>
+        </section>
         </aside>
       </div>
     </div>
