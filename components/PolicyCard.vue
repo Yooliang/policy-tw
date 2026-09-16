@@ -16,7 +16,13 @@ const props = withDefaults(defineProps<{
    * 已經在那個人的頁面上，每張卡再報一次名字是雜訊。清單混著多人時才需要。
    */
   showPolitician?: boolean
-}>(), { showPolitician: true })
+  /**
+   * 要不要顯示狀態標籤。人物頁的「競選承諾」區塊是用 status 篩出來的，
+   * 每張卡的標籤都是同一個「競選承諾」——2026-09-17 小良哥：「我看起來都一樣…這個標籤就不要顯示了」。
+   * 施政紀錄那一區有執行中／已完成／規劃中，標籤在那裡才有資訊。
+   */
+  showStatus?: boolean
+}>(), { showPolitician: true, showStatus: true })
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 const isCheckpointed = ref(false)
@@ -57,16 +63,8 @@ onUnmounted(() => {
     @click="onClick?.()"
   >
     <!-- Checkpoint Star -->
-    <button
-      @click.stop="toggleCheckpoint"
-      :class="`absolute top-4 right-4 z-20 p-2 rounded-full transition-all border ${isCheckpointed ? 'bg-amber-50 border-amber-200 text-amber-500 shadow-sm' : 'bg-white/80 backdrop-blur-sm border-slate-100 text-slate-300 hover:text-amber-400 opacity-0 group-hover:opacity-100'}`"
-      :title="isCheckpointed ? '移除檢核點' : '加入我的檢核點'"
-    >
-      <Star :size="18" :fill="isCheckpointed ? 'currentColor' : 'none'" :class="isCheckpointed ? 'animate-pulse' : ''" />
-    </button>
-
     <div class="p-6 flex-1">
-      <div :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
+      <div v-if="props.showPolitician || props.showStatus" :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
         <div v-if="props.showPolitician" class="flex items-center gap-3">
           <Avatar :src="politician.avatarUrl" :name="politician.name" size="sm" class="border-2 border-slate-50 shadow-sm" />
           <div class="text-left">
@@ -74,12 +72,23 @@ onUnmounted(() => {
             <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ politician.party }}</span>
           </div>
         </div>
-        <StatusBadge :status="policy.status" />
+        <StatusBadge v-if="props.showStatus" :status="policy.status" />
       </div>
 
-      <h3 :class="`text-lg font-black mb-3 leading-tight transition-colors ${isCampaign ? 'text-violet-900 group-hover:text-violet-700' : 'text-navy-900 group-hover:text-blue-600'}`">
-        {{ policy.title }}
-      </h3>
+      <!-- 收藏星星跟標題同一行：原本浮在右上角、還要 hover 才出現，跟狀態標籤也會疊到 -->
+      <div class="flex items-start gap-2 mb-3">
+        <h3 :class="`flex-1 text-lg font-black leading-tight transition-colors ${isCampaign ? 'text-violet-900 group-hover:text-violet-700' : 'text-navy-900 group-hover:text-blue-600'}`">
+          {{ policy.title }}
+        </h3>
+        <button
+          @click.stop="toggleCheckpoint"
+          :class="`shrink-0 -mt-1 p-1.5 rounded-full transition-colors ${isCheckpointed ? 'text-amber-500 hover:text-amber-600' : 'text-slate-300 hover:text-amber-400'}`"
+          :title="isCheckpointed ? '移除檢核點' : '加入我的檢核點'"
+          :aria-pressed="isCheckpointed"
+        >
+          <Star :size="18" :fill="isCheckpointed ? 'currentColor' : 'none'" />
+        </button>
+      </div>
 
       <p class="text-sm text-slate-500 line-clamp-2 mb-6 h-10 leading-relaxed font-medium">
         {{ policy.description }}
