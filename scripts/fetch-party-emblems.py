@@ -39,7 +39,9 @@ SVG_SOURCES = {
     "台灣基進": "https://commons.wikimedia.org/wiki/Special:FilePath/Taiwan%20Statebuilding%20Party%20Logo.png",
     "台灣團結聯盟": "https://commons.wikimedia.org/wiki/Special:FilePath/Logo%20of%20former%20Taiwan%20Solidarity%20Union.svg",
     "中國國民黨": "https://upload.wikimedia.org/wikipedia/commons/a/a1/Emblem_of_the_Kuomintang.svg",
-    "民主進步黨": "https://upload.wikimedia.org/wikipedia/commons/9/9e/The_Democratic_Progressive_Party_Logo.svg",
+    # 民進黨不列在這裡：維基那張 SVG 是 3000×1000 的橫式標準字（「民主進步黨」五個字），
+    # 縮到 24 像素的圓圈只剩一團看不懂的東西（2026-09-17 小良哥一眼看出來）。
+    # 內政部登記的那張是綠十字加台灣島，才是黨徽。
     "台灣民眾黨": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Emblem_of_Taiwan_People%27s_Party_2019.svg",
     "新黨": "https://upload.wikimedia.org/wikipedia/commons/0/01/Np_logo.svg",
     "親民黨": "https://upload.wikimedia.org/wikipedia/commons/4/4a/LogoPFP.svg",
@@ -72,9 +74,9 @@ def moi_emblem(party_id: str) -> bytes | None:
     拼起來看才發現——所以這裡認的是 alt 帶「黨徽」的那個 img。
     """
     html = fetch(f"https://party.moi.gov.tw/PartyMainContent.aspx?n=16100&sms=13073&s={party_id}").decode("utf-8", "replace")
-    m = re.search(r"<img[^>]*alt=['\"][^'\"]*黨徽['\"][^>]*src=['\"]([^'\"]+)['\"]", html)
-    if not m:
-        m = re.search(r"<img[^>]*src=['\"](https://ws\.moi\.gov\.tw/[^'\"]+)['\"][^>]*alt=['\"][^'\"]*黨徽", html)
+    # 不要只認 alt 帶「黨徽」的：每個政黨的 alt 寫法不一樣（民進黨是「16_民主進步黨_logo01」），
+    # 只認「黨徽」會漏掉。頁面上唯一放在 ws.moi.gov.tw 的圖就是黨徽，認網址最穩。
+    m = re.search(r"<img[^>]*src=['\"](https://ws\.moi\.gov\.tw/[^'\"]+)['\"]", html)
     if not m:
         return None
     return fetch(urllib.parse.urljoin("https://party.moi.gov.tw/", m.group(1)))
