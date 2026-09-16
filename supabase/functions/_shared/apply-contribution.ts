@@ -229,10 +229,20 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
   if (!politicianId) return { status: "failed", message: "找不到該政治人物（不會為了一條政見建新人物）；請先提交 politician 貢獻或帶 politician_id" };
 
   // 相似政見不再攔截（驗證者在 /next 的 current.similar_policies 已判斷過）；只擋完全同標題，讓重試／重複落庫冪等
-  const { data: sameTitle, error: sameError } = await supabase.from("policies").select("id").eq("politician_id", politicianId).eq("title", String(p.title).trim()).limit(1);
+  const { data: sameTitle, error: sameError } = await supabase.from("policies").select("id, removed_at, removed_reason").eq("politician_id", politicianId).eq("title", String(p.title).trim()).limit(1);
   throwIf(sameError, "policies same-title lookup");
-  const existingId = (sameTitle ?? [])[0]?.id as string | undefined;
-  if (existingId) return { status: "applied", policy_id: existingId, politician_id: politicianId, message: `同標題政見已存在（${existingId}），沿用、未重複新增` };
+  const existing = (sameTitle ?? [])[0] as { id: string; removed_at: string | null; removed_reason: string | null } | undefined;
+  // 已被移除的同名政見不會因為有人再交一次就復活；照實說，不要讓代理以為新增成功
+  if (existing?.removed_at) {
+    return {
+      status: "failed",
+      policy_id: existing.id,
+      politician_id: politicianId,
+      message: `這筆政見先前已被移除（${existing.removed_reason ?? "未寫理由"}），不會因為重新提交而回到網站上。` +
+        `確定它其實是有效政見，請用 correction 或在 note 說明理由請維護者還原，不要換個標題再交一次。`,
+    };
+  }
+  if (existing) return { status: "applied", policy_id: existing.id, politician_id: politicianId, message: `同標題政見已存在（${existing.id}），沿用、未重複新增` };
 
   const today = new Date().toISOString().slice(0, 10);
   const rowToInsert = {
@@ -263,15 +273,24 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
   if (!policyId) {
     const politicianId = await locatePolitician(supabase, p);
     if (!politicianId) return { status: "failed", message: "找不到政治人物" };
-    const { data, error } = await supabase.from("policies").select("id").eq("politician_id", politicianId).ilike("title", `%${String(p.policy_title)}%`).limit(2);
+    // 已移除的政見不接受進度更新：寫進去讀者也看不到，等於把代理的工丟進黑洞
+    const { data, error } = await supabase.from("policies").select("id").eq("politician_id", politicianId).is("removed_at", null).ilike("title", `%${String(p.policy_title)}%`).limit(2);
     throwIf(error, "policies lookup");
-    if (!data || data.length === 0) return { status: "failed", message: `找不到政見「${p.policy_title}」` };
+    if (!data || data.length === 0) return { status: "failed", message: `找不到政見「${p.policy_title}」（已被移除的政見不接受進度更新）` };
     if (data.length > 1) return { status: "failed", message: `「${p.policy_title}」對到多筆政見，請帶 policy_id` };
     policyId = data[0].id;
   }
-  const { data: before, error: beforeError } = await supabase.from("policies").select("status, progress, last_updated").eq("id", policyId).maybeSingle();
+  const { data: before, error: beforeError } = await supabase.from("policies").select("status, progress, last_updated, removed_at, removed_reason").eq("id", policyId).maybeSingle();
   throwIf(beforeError, "policies read");
   if (!before) return { status: "failed", message: `找不到政見 ${policyId}` };
+  // 帶 policy_id 指名的也要擋：進度寫進已移除的政見，讀者看不到，等於白做
+  if (before.removed_at) {
+    return {
+      status: "failed",
+      message: `政見 ${policyId} 已被移除（${before.removed_reason ?? "未寫理由"}），不接受進度更新。` +
+        `如果你認為它其實是有效政見，請在 note 說明理由請維護者還原。`,
+    };
+  }
 
   const patch: Obj = { status: String(p.status), last_updated: String(p.date) };
   if (int(p.progress) !== null) patch.progress = p.progress;
