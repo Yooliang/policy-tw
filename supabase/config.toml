@@ -496,6 +496,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/apply-verified/index.ts"
 
+[functions.cec-verify]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/cec-verify/index.ts"
+
 [functions.contributions-feed]
 enabled = true
 verify_jwt = false

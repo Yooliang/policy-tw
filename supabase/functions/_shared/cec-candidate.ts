@@ -45,6 +45,9 @@ export interface CecCandidacy {
   /** elected／not_elected；中選會沒標就是 null */
   election_result: "elected" | "not_elected" | null;
   area: string | null;
+  /** 得票數與得票率要另外查 data 端點，用 attachTickets 併進來；沒查就是 null */
+  votes_received: number | null;
+  vote_percentage: number | null;
 }
 
 function year(voteDate: unknown): number | null {
@@ -67,6 +70,8 @@ export function normalizeCandidacy(raw: CecCandidacyRaw): CecCandidacy {
     // is_victor 只有當選才給 "*"；沒有這個記號就是沒當選，但只有投票日已過才算數
     election_result: raw.is_victor === "*" ? "elected" : "not_elected",
     area: raw.area_data?.current_area?.area_name ?? null,
+    votes_received: null,
+    vote_percentage: null,
   };
 }
 
@@ -86,4 +91,27 @@ export function withoutFutureResults(list: readonly CecCandidacy[], today = new 
 /** 挑出某一屆（投票年份）的那一筆；同年多筆（例如立委區域與不分區）回第一筆 */
 export function pickByElectionId(list: readonly CecCandidacy[], electionId: number): CecCandidacy | null {
   return list.find((c) => c.election_id === electionId) ?? null;
+}
+
+/** data 端點回的逐位得票；只取用得到的欄位 */
+interface TicketRow { cand_name?: string; ticket_num?: number; ticket_percent?: number }
+
+/**
+ * 純函式：把 data 端點的得票併進某一筆參選紀錄。
+ * 該場次所有候選人都在 ticket_data 裡，用姓名挑出本人那一列。
+ */
+export function attachTickets(candidacy: CecCandidacy, ticketsJson: unknown): CecCandidacy {
+  const themes = (ticketsJson && typeof ticketsJson === "object" ? (ticketsJson as Record<string, unknown>).theme_data : null);
+  const rows: TicketRow[] = Array.isArray(themes)
+    ? themes.flatMap((t) => (t && typeof t === "object" && Array.isArray((t as Record<string, unknown>).ticket_data) ? (t as Record<string, unknown>).ticket_data as TicketRow[] : []))
+    : [];
+  const norm = (s: string) => s.replace(/臺/g, "台").replace(/\s/g, "");
+  const mine = rows.filter((r) => typeof r.cand_name === "string" && norm(r.cand_name) === norm(candidacy.name));
+  // 同一場次同名多列（極少見）：分不出是哪一位就不要猜
+  if (mine.length !== 1) return candidacy;
+  return {
+    ...candidacy,
+    votes_received: typeof mine[0].ticket_num === "number" ? mine[0].ticket_num : null,
+    vote_percentage: typeof mine[0].ticket_percent === "number" ? mine[0].ticket_percent : null,
+  };
 }
