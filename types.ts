@@ -418,6 +418,10 @@ export interface PipelineSnapshot {
   takenAt: string;
   tasksOpen: number;
   tasksByType: Record<string, number>;
+  /** 自動找出來的資料缺口總數（tasksByType 扣掉 manual_open） */
+  gapsOpen: number;
+  /** 任務清單裡 open 的手動任務數（tasksByType.manual_open） */
+  manualOpen: number;
   pending: number;
   applied: number;
   disputed: number;

@@ -10,7 +10,10 @@ import { usePipelineSnapshots } from '../composables/usePipelineSnapshots'
  * 採樣還太少畫不出走勢時（<3 筆）改顯示目前數值，避免一張看起來像壞掉的空折線圖。
  */
 const METRICS = [
-  { key: 'tasksOpen', label: '待查任務', color: '#ea580c' },
+  // 2026-09-16 小良哥：「我是想放 資料缺口／任務清單 的總數」——原本只有一條「待查任務」，
+  // 兩者加起來就是它，但混在一起看不出是缺口在長還是人在建任務。
+  { key: 'gapsOpen', label: '資料缺口', color: '#ea580c' },
+  { key: 'manualOpen', label: '任務清單', color: '#0891b2' },
   { key: 'pending', label: '待驗證貢獻', color: '#2563eb' },
   { key: 'applied', label: '已上線累計', color: '#059669' },
   { key: 'votesTotal', label: '驗證票累計', color: '#7c3aed' },

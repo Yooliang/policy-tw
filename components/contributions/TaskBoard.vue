@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
+import GapTrendChart from './GapTrendChart.vue'
 
 /**
  * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求／系統裁決）的 open 與 closed，加上自動缺口的數量。
@@ -211,6 +212,8 @@ defineExpose({ load })
         <div v-else class="h-72">
           <ClientOnly><apexchart v-if="gapRows.length > 0" type="bar" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
         </div>
+        <!-- 現在各有幾件（上面的直條）之外，也要看得出它們在變多還是變少 -->
+        <GapTrendChart />
       </section>
     </aside>
   </section>
