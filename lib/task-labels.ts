@@ -14,6 +14,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   election_result_missing: '缺選舉結果',
   policy_election_missing: '政見缺屆別',
   roster_check: '名單清查',
+  candidate_status_stale: '參選狀態待確認',
   news_sweep: '掃新聞',
   policy_validity: '疑似不是政見',
   question: '公民提問',
