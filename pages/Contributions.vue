@@ -377,10 +377,19 @@ usePageHead({
 
       <TaskBoard v-if="tab === 'tasks'" :type-filter="taskTypeFilter" @update:type-filter="taskTypeFilter = $event" />
 
-      <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-3 lg:grid-rows-[auto_1fr] gap-6">
         <!-- 近 7 日：手機上要在清單前面（2026-09-17 小良哥：不該捲一長串才看到），
              桌機再用 col-start／row-start 指定回右欄，所以 DOM 順序是 圖 → 清單 → 貢獻榜 -->
-        <div class="lg:col-start-3 lg:row-start-1">
+        <!-- 桌機：整個右欄是一個 aside（圖在上、貢獻榜緊接其下）。
+             手機：aside 變成 display:contents，兩個區塊各自成為格線項目，
+             再用 order 排成 圖 → 清單 → 貢獻榜（2026-09-17 小良哥：桌機時貢獻榜掉到頁面中段，
+             那是因為上一版把清單設成跨兩列、貢獻榜放第二列，清單一長第二列就被推下去）。 -->
+        <!-- 桌機：右欄兩列（上＝圖、下＝貢獻榜），列高用 lg:grid-rows-[auto_1fr] 定死，
+             貢獻榜 self-start 緊接在圖下方；清單跨兩列。
+             手機：單欄，用 order 排成 圖 → 清單 → 貢獻榜。
+             2026-09-17 小良哥回報桌機時貢獻榜掉到頁面中段——上一版沒有定義列高，
+             清單一長，第二列就被撐開、貢獻榜被推到清單中段。 -->
+        <div class="order-first lg:order-none lg:col-start-3 lg:row-start-1">
         <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <div class="flex items-center gap-2 mb-2">
             <h3 class="font-black text-navy-900">近 7 日{{ includeVerifications ? '提交與驗證' : '提交' }}</h3>
@@ -515,7 +524,7 @@ usePageHead({
           </div>
         </section>
 
-        <aside class="lg:col-start-3 lg:row-start-2">
+        <aside class="order-last lg:order-none lg:col-start-3 lg:row-start-2 lg:self-start">
         <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
           <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
           <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
