@@ -6,11 +6,17 @@ import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyYear } from '../lib/policy-date'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   policy: Policy
   politician: Politician
   onClick?: () => void
-}>()
+  /**
+   * 卡片上要不要印政治人物（頭像、姓名、政黨）。
+   * 2026-09-16 小良哥看人物頁：「裡面的卡片再一直重覆…就沒意義了吧」——
+   * 已經在那個人的頁面上，每張卡再報一次名字是雜訊。清單混著多人時才需要。
+   */
+  showPolitician?: boolean
+}>(), { showPolitician: true })
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 const isCheckpointed = ref(false)
@@ -60,8 +66,8 @@ onUnmounted(() => {
     </button>
 
     <div class="p-6 flex-1">
-      <div class="flex justify-between items-start mb-4">
-        <div class="flex items-center gap-3">
+      <div :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
+        <div v-if="props.showPolitician" class="flex items-center gap-3">
           <Avatar :src="politician.avatarUrl" :name="politician.name" size="sm" class="border-2 border-slate-50 shadow-sm" />
           <div class="text-left">
             <span class="font-bold text-navy-900 block text-sm">{{ politician.name }}</span>
