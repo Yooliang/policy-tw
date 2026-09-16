@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
@@ -107,12 +108,7 @@ const noteUrl = (note?: string) => splitNote(note).url
       >
         <div class="relative shrink-0">
           <Avatar :src="politician.avatarUrl" :name="politician.name" size="xl" class="border-4 border-slate-50 group-hover:scale-105 transition-transform" />
-          <span :class="`absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold text-white border-2 border-white
-            ${politician.party === '國民黨' ? 'bg-blue-600' :
-              politician.party === '民進黨' ? 'bg-green-600' :
-              politician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
-            {{ politician.party[0] }}
-          </span>
+          <PartyBadge :party="politician.party" class="absolute -bottom-1 -right-1" />
         </div>
 
         <div class="flex-1 min-w-0">

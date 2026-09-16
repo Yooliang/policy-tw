@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
@@ -216,12 +217,7 @@ usePageHead({
         <div class="flex flex-col md:flex-row gap-8 items-start">
           <div class="relative">
             <Avatar :src="politician.avatarUrl" :name="politician.name" size="2xl" class="border-4 border-white shadow-xl" />
-            <span :class="`absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white border-2 border-white shadow-md
-              ${politician.party === '國民黨' ? 'bg-blue-600' :
-                politician.party === '民進黨' ? 'bg-green-600' :
-                politician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'}`">
-              {{ politician.party[0] }}
-            </span>
+            <PartyBadge :party="politician.party" :size="8" class="absolute bottom-2 right-2 shadow-md" />
             <!-- Avatar search button - always visible -->
             <button
               v-if="!lookup.avatar.result"

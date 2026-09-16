@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { partyColor } from '../../lib/party'
 import { computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import type { Politician } from '../../types'
@@ -56,11 +57,7 @@ const selectedPolitician = computed(() => politicians.value.find(c => String(c.i
       <div>
         <div class="font-bold text-navy-900 flex items-center gap-2">
           {{ selectedPolitician.name }}
-          <span :class="`text-[10px] px-1.5 py-0.5 rounded text-white ${
-            selectedPolitician.party === '國民黨' ? 'bg-blue-600' :
-            selectedPolitician.party === '民進黨' ? 'bg-green-600' :
-            selectedPolitician.party === '民眾黨' ? 'bg-cyan-600' : 'bg-gray-500'
-          }`">{{ selectedPolitician.party }}</span>
+          <span :class="`text-[10px] px-1.5 py-0.5 rounded text-white ${partyColor(selectedPolitician.party)}`">{{ selectedPolitician.party }}</span>
         </div>
         <div class="text-xs text-slate-500">{{ selectedPolitician.slogan || '無口號' }}</div>
       </div>
