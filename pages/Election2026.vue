@@ -179,13 +179,13 @@ onMounted(() => { ensurePolicies() })
 
       <!-- VIEW: Politicians -->
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
-        <PoliticianGrid :politicians="mayorPoliticians" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-        <PoliticianGrid :politicians="councilorPoliticians" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
-        <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
-        <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-        <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
-        <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
-        <PoliticianGrid v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" title="村里長參選人"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
+        <PoliticianGrid :politicians="mayorPoliticians" :election-id="2026" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
+        <PoliticianGrid :politicians="councilorPoliticians" :election-id="2026" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
+        <PoliticianGrid :election-id="2026" v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
+        <PoliticianGrid :election-id="2026" v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
+        <PoliticianGrid :election-id="2026" v-if="repPoliticians.length > 0" :politicians="repPoliticians" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
+        <PoliticianGrid :election-id="2026" v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
+        <PoliticianGrid :election-id="2026" v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" title="村里長參選人"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
       </div>
 
       <!-- VIEW: Pledges -->

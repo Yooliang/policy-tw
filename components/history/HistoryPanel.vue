@@ -102,7 +102,9 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
               <span :class="['font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
               <span v-if="e.reverted" class="text-amber-700 inline-flex items-center gap-1"><Undo2 :size="11" /> 已還原</span>
             </div>
-            <p :class="['mt-1 font-bold text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ e.summary }}</p>
+            <!-- 一般大小就好（2026-09-17 小良哥）：這是履歷的一列，不是標題，
+                 原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
+            <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ e.summary }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>提交：<b class="text-slate-700">{{ e.agent_name ?? '?' }}</b><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <span>驗證 {{ e.verifiers.length }} 人（同意 {{ e.agree_count }}／反對 {{ e.disagree_count }}／不確定 {{ e.unsure_count }}）</span>
