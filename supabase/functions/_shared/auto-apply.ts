@@ -26,6 +26,11 @@ export interface AutoApplyResult {
 export interface AutoApplyOptions {
   /** 掃地機重試 apply_failed 時為 true；投票路徑不帶（只處理 verified） */
   retry?: boolean;
+  /**
+   * 沒有投票指認時要用哪一位人物（cec-verify 用：它不投票，身份是拿我們資料庫的唯一同名者比中選會選區確認的）。
+   * 投票有指認時以投票為準——那是多個代理看過的結果，比單一來源可靠。
+   */
+  resolvedPoliticianId?: string | null;
 }
 
 /** 純判斷：只有 verified 才自動落庫 */
@@ -87,6 +92,9 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
       }
       if (identity.kind === "resolved") resolvedPoliticianId = identity.politician_id;
       else if (identity.kind === "new") resolvedPoliticianId = "new";
+      // 沒有投票指認時，呼叫端若已經確認是誰就用它（cec-verify：我們資料庫唯一同名者＋中選會選區對得上）。
+      // 有投票指認就不理會這個值——那是多個代理看過的結果。
+      else if (identity.kind === "none" && options.resolvedPoliticianId) resolvedPoliticianId = options.resolvedPoliticianId;
     }
 
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });

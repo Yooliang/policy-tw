@@ -22,6 +22,7 @@
 - **門檻 = 型別風險 × 來源等級**（`requiredAgree(type, payload, source_urls)`，SQL `contribution_required_agree` 三參數同步，`thresholds.test.ts` 比對 migration 內的清單與矩陣）：一般 1／2／3／3、加減參選人 4／6／8／8、task_suggestion／no_change 1／2／2／2、adjudication 一律 4（official／media／social／other）。既有 pending 的貢獻下一票進來就用新門檻重算。
 - 維護者能力保留但不是流程的一環：`apply approve`（身份爭議可帶 `resolved_politician_id`）、`reject`、`revert`、`create_task`／`close_task`，用於系統異常時自救；看板沒有人工待辦清單，第三張卡「裁決中」是 open 的 adjudicate 任務數。
 - 相似政見不再攔落庫：`/next` 的 policy 驗證項附 `current.similar_policies`（`find_similar_policies`，0.6），驗證者判重複就投 disagree；apply 只擋完全同標題（冪等）。
+- 中選會自動查證 `POST /functions/v1/cec-verify?limit=20`（2026-09-17 起）：掃 pending 的 `candidacy`／`politician`，用姓名查中選會，**對得上直接落庫（不需要任何票）、對不上退件並附中選會的數字、查不到或身份不明就不碰**。身份要兩邊都確定才敢判：我們資料庫唯一同名者（或 payload 帶 `politician_id`）＋中選會那筆的選區含我們記的縣市——第一次實跑就踩到「中選會的李四川是彰化縣花壇鄉村長、我們的是台北市副市長」。**要排 cron 每 10 分鐘打一次**（同 apply-verified 的做法）。帶 `?dry_run=1` 只回會怎麼判、不寫入。
 - 掃地機 `GET/POST /functions/v1/apply-verified?limit=20`：掃 `status=verified` 且 `verified_at` 在 5 分鐘前的（補 /report 的漏網），以及 `apply_failed` 且 `next_retry_at` 已到、`retry_count<3` 的（重試）。**要排 cron 每 10 分鐘打一次**，兩種做法擇一：
   1. Supabase Dashboard → Integrations → Cron（pg_cron）→ Create job → Schedule `*/10 * * * *` → Type「HTTP Request」→ URL `https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/apply-verified`、Method POST、Headers `Content-Type: application/json`（函式無金鑰，不用帶 Authorization）。
   2. SQL editor（需先在 Dashboard 啟用 `pg_cron` 與 `pg_net` 擴充）：
