@@ -523,15 +523,15 @@ usePageHead({
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <!-- ===== 第1級：全台 ===== -->
         <template v-if="selectedRegion === 'All'">
-          <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" :columns="gridColumns" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" :election-id="electionId" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" :columns="gridColumns" :election-id="electionId" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
         </template>
 
         <!-- ===== 第2級：縣市 ===== -->
         <template v-else-if="selectedSubRegion === 'All'">
-          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="councilorPoliticians.length > 0" :politicians="councilorPoliticians" :columns="gridColumns" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="councilorPoliticians.length > 0" :politicians="councilorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
         </template>
 
         <!-- ===== 第3級：鄉鎮市區 ===== -->
@@ -546,10 +546,10 @@ usePageHead({
           </template>
           <!-- 一般縣市的鄉鎮市有選舉 -->
           <template v-else>
-            <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
-            <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-            <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
-            <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" :columns="gridColumns" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
+            <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
             <!-- 無候選人時的提示 -->
             <div v-if="!townshipMayorPoliticians.length && !indigenousChiefPoliticians.length && !repPoliticians.length && !indigenousRepPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
               <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
@@ -561,7 +561,7 @@ usePageHead({
 
         <!-- ===== 第4級：村里 ===== -->
         <template v-else>
-          <PoliticianGrid v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" :columns="gridColumns" :title="`${villageLabel}長參選人`"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
+          <PoliticianGrid :election-id="electionId" v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" :columns="gridColumns" :title="`${villageLabel}長參選人`"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
           <!-- 無候選人時的提示 -->
           <div v-if="!chiefPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
             <MapPin :size="48" class="mx-auto mb-4 text-slate-300" />

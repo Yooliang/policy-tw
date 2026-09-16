@@ -11,6 +11,13 @@ const props = defineProps<{
   politicians: Politician[]
   title: string
   columns?: 2 | 3
+  /**
+   * 這一頁是哪一屆選舉。有給就只算那一屆的政見。
+   * 2026-09-17 小良哥：「這個頁面的政見應該顯示當屆的就好」，並拍板「純嚴格」——
+   * 蔡易餘卡片上原本寫 18 項，實際上 2026 只有 2 項、2024 有 2 項、其餘 14 項沒標屆別。
+   * 未標屆別的不算進來：那是「政見缺屆別」的資料缺口，不是當屆政見。
+   */
+  electionId?: number
 }>()
 
 // Grid classes based on columns prop
@@ -26,7 +33,11 @@ const { policies } = useSupabase()
 const collapsed = ref(false)
 
 const getPledgeCount = (politicianId: string | number) =>
-  policies.value.filter(p => String(p.politicianId) === String(politicianId) && p.status === PolicyStatus.CAMPAIGN).length
+  policies.value.filter(p =>
+    String(p.politicianId) === String(politicianId) &&
+    p.status === PolicyStatus.CAMPAIGN &&
+    (props.electionId === undefined || p.electionId === props.electionId)
+  ).length
 
 // 參選狀態顯示（選舉前中後三階段）
 const candidateStatusLabel = (status?: CandidateStatus) => {
@@ -135,7 +146,10 @@ const noteUrl = (note?: string) => splitNote(note).url
             <ArrowRight class="text-slate-300 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" :size="20" />
           </div>
           <div class="mt-3 flex items-center gap-2">
-            <span class="inline-flex items-center gap-1 bg-violet-50 text-violet-700 text-xs px-2 py-1 rounded-md font-bold">
+            <!-- 0 用灰色：純嚴格只算當屆之後，多數參選人是 0，全部紫色徽章會變成一片噪音；
+                 但不能直接藏起來——「這個人還沒有當屆政見」正是要讓人看見、有人去補的事 -->
+            <span :class="['inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md font-bold',
+                           getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
               <Megaphone :size="12" /> {{ getPledgeCount(politician.id) }} 項政見
             </span>
           </div>
