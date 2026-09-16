@@ -189,7 +189,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (taskType === "policy_missing" && pid) {
     const [el, pol] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
-      supabase.from("policies").select("id, title, category, status", { count: "exact" }).eq("politician_id", pid).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
+      supabase.from("policies").select("id, title, category, status", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
     ]);
     data.elections = el.data ?? [];
     data.policies = pol.data ?? [];
@@ -361,7 +361,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     }
     if (ids.length === 1 && contributionType === "policy") {
       const [{ data: pol }, similar] = await Promise.all([
-        supabase.from("policies").select("id, title, category, status").eq("politician_id", ids[0]).limit(MAX_EXISTING_POLICIES),
+        supabase.from("policies").select("id, title, category, status").eq("politician_id", ids[0]).is("removed_at", null).limit(MAX_EXISTING_POLICIES),
         typeof payload.title === "string"
           ? supabase.rpc("find_similar_policies", { p_politician_id: ids[0], p_title: payload.title, p_threshold: POLICY_SIMILARITY_THRESHOLD })
           : Promise.resolve({ data: [] }),
