@@ -298,8 +298,11 @@ Deno.test("名單清查：不可以叫代理去查投票後才更新的來源", 
   assert(roster.includes("s.list_announced_on"), "任務要依 roster_check_scope.list_announced_on 判斷現在是登記階段還是審定階段");
   assert(/registered/.test(roster) && /confirmed/.test(roster), "任務要明講這個階段該填哪一種 candidate_status");
 
-  // 公告日存在 scope 表上而且不可為空：新增一屆就必須填，否則任務會講錯階段
-  const { sql: colSql } = await latestMigrationContaining("list_announced_on");
+  // 公告日存在 scope 表上而且不可為空：新增一屆就必須填，否則任務會講錯階段。
+  // 找的是「最後一支動到這個欄位定義的 migration」，不是「最後一支提到它的」——
+  // 後者會被任何在函式裡引用這個欄位的 migration 搶走（2026-09-16 改任務敘述時踩到）。
+  // 日後若有人把 NOT NULL 拿掉，那支 migration 會是最後一支 ALTER COLUMN，這裡照樣會紅。
+  const { sql: colSql } = await latestMigrationContaining("ALTER COLUMN list_announced_on");
   assert(
     /ALTER COLUMN list_announced_on SET NOT NULL/.test(colSql),
     "list_announced_on 要是 NOT NULL，不然新增一屆選舉時忘了填，任務會一直用登記階段的說法",
