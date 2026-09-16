@@ -3,6 +3,19 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, consensusStatus, isDuplicateVote, requiredAgree, riskLevel, tally, tallyByIp } from "./consensus.ts";
 import { SOURCE_PRIORITY } from "./source-priority.ts";
 
+/** 找最後一支（檔名排序最大）重新定義某個 SQL 物件的 migration，回傳從定義處起的內容 */
+async function latestMigrationDefining(marker: string): Promise<string> {
+  const dir = new URL("../../migrations/", import.meta.url);
+  const names: string[] = [];
+  for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  for (const name of names.sort().reverse()) {
+    const sql = await Deno.readTextFile(new URL(name, dir));
+    const at = sql.indexOf(marker);
+    if (at >= 0) return sql.slice(at);
+  }
+  throw new Error(`找不到定義 ${marker} 的 migration`);
+}
+
 const OFFICIAL = "https://db.cec.gov.tw/ElecTable/Election/ElecTickets";
 const MEDIA = "https://www.cna.com.tw/news/aipl/202609045002.aspx";
 const SOCIAL = "https://www.facebook.com/candidate/posts/123";
@@ -61,24 +74,28 @@ Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority
   assertEquals(arrays[1], byKind("media"));
   assertEquals(arrays[2], byKind("social"));
 
-  // 門檻函式最新定義在 000013（同來源 IP 去重＋官方兩票）；矩陣與風險判斷從那裡讀。
-  // 換新 migration 重新定義這支函式時，這行要跟著指到最新那支，否則測試會守著舊數字。
-  const latest = await Deno.readTextFile(new URL("../../migrations/20260912000013_distinct_ip_votes_and_official_two.sql", import.meta.url));
-  const matrix = latest.slice(latest.indexOf("FUNCTION contribution_required_agree"));
+  // 自己找「最後一支重新定義這個函式的 migration」。原本這裡寫死 000013，但函式後來在
+  // 000015、000029 又各被改過一次，測試等於守著舊數字（2026-09-16 加 past_result 時發現）。
+  const matrix = await latestMigrationDefining("FUNCTION contribution_required_agree");
   assert(matrix.includes(`p_payload->'changes' @> '[{"field":"candidate_status"}]'::jsonb`), "多欄位 correction 含 candidate_status 也算高風險");
   const rowRe = /WHEN v_risk = '(\w+)' THEN CASE v_kind WHEN 'official' THEN (\d+) WHEN 'media' THEN (\d+) WHEN 'social' THEN (\d+) ELSE (\d+) END/g;
   const rows = Object.fromEntries([...matrix.matchAll(rowRe)].map((m) => [m[1], { official: +m[2], media: +m[3], social: +m[4], other: +m[5] }]));
   assertEquals(rows.normal, AGREE_THRESHOLDS.normal);
   assertEquals(rows.high, AGREE_THRESHOLDS.high);
   assertEquals(rows.light, AGREE_THRESHOLDS.light);
-  const adj = matrix.match(/\n\s+ELSE (\d+)\n\s+END;/);
+  assertEquals(rows.past_result, AGREE_THRESHOLDS.past_result, "補已投票選舉結果的門檻 SQL 與 TS 要一致");
+  assertEquals(rows.removal, AGREE_THRESHOLDS.removal);
+  assert(matrix.includes("p_payload->>'election_result' IN ('elected', 'not_elected')"), "SQL 也要認得「補選舉結果」這一類");
+  // \s 而不是 \n：Windows 上 checkout 成 CRLF 時，寫死 \n 會抓不到，這支測試在本機一直紅
+  const adj = matrix.match(/\s+ELSE (\d+)\s+END;/);
   assert(adj, "adjudication 走最後的 ELSE");
   assertEquals(+adj![1], AGREE_THRESHOLDS.adjudication.other);
   assert(new Set(Object.values(AGREE_THRESHOLDS.adjudication)).size === 1, "裁決不看來源");
   // 風險分級的判斷式也要對得上
   assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
   assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
-  assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change') THEN 'light'"));
+  // roster_check 是 000029 加進 light 的；原本這裡寫死舊字串，指到最新 migration 後才露出來
+  assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change', 'roster_check') THEN 'light'"));
   assert(sql.includes("contribution_required_agree(contribution_type, payload, source_urls)"), "共識函式改用三參數");
 });
 
@@ -123,4 +140,17 @@ Deno.test("投票去重：同一筆貢獻，同代號或同來源 IP 都只能�
   assert(isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號也不行");
   assert(!isDuplicateVote(existing, { agent_name: "bob", ip_hash: "bbb" }), "不同人不同機器可以");
   assertEquals(isDuplicateVote([], { agent_name: "alice", ip_hash: "aaa" }), false);
+});
+
+Deno.test("補已投票選舉的結果只要 2 票，不看來源等級；沒帶 politician_id 仍是加減參選人", () => {
+  // 小良哥 2026-09-16 指的那一筆：陳若翠 2024 高雄市立委，來源是維基＋中央社，原本要 6 票
+  const pastResult = { politician_id: "a4ad066b-c02b-4046-84c9-889da17df8d5", election_id: 2024, election_result: "not_elected", votes_received: 64261, candidate_status: "confirmed" };
+  assertEquals(riskLevel("candidacy", pastResult), "past_result");
+  for (const src of [OFFICIAL, MEDIA, SOCIAL, OTHER]) assertEquals(requiredAgree("candidacy", pastResult, [src]), 2, `來源 ${src} 也該是 2 票`);
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }]), "pending", requiredAgree("candidacy", pastResult, [SOCIAL])), "verified");
+
+  // 靠姓名新建的那條路會順手生出人物，維持高風險
+  assertEquals(riskLevel("candidacy", { name: "某某", election_id: 2024, election_result: "elected" }), "high");
+  // 還沒有結果的參選紀錄（登記、確認參選）也維持高風險
+  assertEquals(riskLevel("candidacy", { politician_id: "a4ad066b-c02b-4046-84c9-889da17df8d5", candidate_status: "registered" }), "high");
 });

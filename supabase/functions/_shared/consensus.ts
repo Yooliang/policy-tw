@@ -12,8 +12,11 @@ export const VOTE_WEIGHT = 1;
 export const VERIFIED_MIN_AGREE = 2;
 export const VERIFIED_MAX_DISAGREE = 0;
 
-/** 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；removal＝移除既有資料；adjudication＝裁決 */
-export type RiskLevel = "normal" | "high" | "light" | "removal" | "adjudication";
+/**
+ * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
+ * past_result＝補一場已投票選舉的結果；removal＝移除既有資料；adjudication＝裁決
+ */
+export type RiskLevel = "normal" | "high" | "light" | "past_result" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -23,15 +26,36 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   normal: { official: 2, media: 2, social: 3, other: 3 },
   high: { official: 4, media: 6, social: 8, other: 8 },
   light: { official: 1, media: 2, social: 2, other: 2 },
+  // 2026-09-16 小良哥看一筆「陳若翠 2024 高雄市立委 not_elected、得票 64,261」要 6 票：
+  // 「這種舊期的參選，我覺得 2 票就夠了」。
+  // 加減參選人之所以要 4／6／8，是因為那會憑空生出或抹掉一筆參選紀錄；
+  // 但「已投票選舉的結果」是查得到的既成事實，而且掛在既有人物既有屆別上，
+  // 搞錯了改回來也容易。不看來源等級：選舉結果連維基都抄得到，分級沒有意義。
+  past_result: { official: 2, media: 2, social: 2, other: 2 },
   // 移除不看來源等級：移除的理由常常是「查不到任何來源」，那種主張本身沒有來源可言。
   // 3 票＝比一般更正高、比加減參選人低；低是因為移除是軟移除，資料留著、可以復原。
   removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 4, media: 4, social: 4, other: 4 },
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 「補一場已投票選舉的結果」：掛在既有人物（帶 politician_id，不是靠姓名新建）、
+ * 而且帶 election_result。沒有 politician_id 就不算——那條路會順手建出新人物，
+ * 風險跟新增參選人一樣。
+ */
+export function isPastElectionResult(contributionType: string, payload: unknown): boolean {
+  if (contributionType !== "candidacy") return false;
+  const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const result = typeof p.election_result === "string" ? p.election_result : null;
+  return (result === "elected" || result === "not_elected") && typeof p.politician_id === "string" && UUID_RE.test(p.politician_id);
+}
+
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "removal") return "removal";
+  if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
   if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) return "high";
