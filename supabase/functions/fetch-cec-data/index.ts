@@ -26,6 +26,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+import { CEC_DATA_URL, CEC_QUERY_URL, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+
 const CEC_BASE = "https://db.cec.gov.tw/static/elections";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 PolicyTracker/1.0";
 
@@ -218,6 +220,43 @@ async function handleList(electionType: string): Promise<Response> {
   return json({ success: true, electionType, themes, apiUrl: url });
 }
 
+
+/**
+ * 按姓名查中選會：回這個人歷屆的參選紀錄（含當選與否、出生年、政黨、選區）。
+ * 帶 electionId 就只回那一屆，並附上該選區逐位候選人的得票（用來核對得票數與得票率）。
+ */
+async function handleByName(name: string, electionId?: number): Promise<Response> {
+  const queryUrl = `${CEC_QUERY_URL}?${new URLSearchParams({ cand_name: name })}`;
+  const res = await fetch(queryUrl, { headers: { "User-Agent": USER_AGENT, Referer: "https://db.cec.gov.tw/" } });
+  if (!res.ok) return json({ error: `中選會查詢失敗（HTTP ${res.status}）`, apiUrl: queryUrl }, 502);
+  const raw = await res.json();
+  const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? []));
+  const picked = electionId ? all.filter((c) => c.election_id === electionId) : all;
+
+  // 指定屆別時順便把該場的得票抓回來：代理要填 votes_received／vote_percentage
+  let tickets: unknown = null;
+  let ticketsUrl: string | null = null;
+  const one = picked[0];
+  if (electionId && one?.theme_id && one?.cand_id) {
+    ticketsUrl = `${CEC_DATA_URL}?theme_id=${one.theme_id}&cand_id=${one.cand_id}`;
+    const tRes = await fetch(ticketsUrl, { headers: { "User-Agent": USER_AGENT, Referer: "https://db.cec.gov.tw/" } });
+    if (tRes.ok) tickets = await tRes.json();
+  }
+
+  return json({
+    success: true,
+    name,
+    total: picked.length,
+    candidacies: picked,
+    tickets,
+    apiUrl: queryUrl,
+    ticketsUrl,
+    note: picked.length === 0
+      ? "中選會查無此姓名；可能是尚未登記、姓名用字不同（例如「臺」與「台」），或那一屆還沒公告"
+      : "同名同姓會一起回；請用選區、政黨、出生年確認是不是同一個人",
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -225,7 +264,17 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { action, electionType, themeId, prvCode, cityCode, areaCode, deptCode, liCode, dataLevel, electionId, region } = body;
+    const { action, electionType, themeId, prvCode, cityCode, areaCode, deptCode, liCode, dataLevel, electionId, region, queryName } = body;
+
+    // 按姓名查歷屆參選（2026-09-17 新增）。上面那條路是「某場選舉某地區的整份名單」，
+    // 這條是「這個人哪幾屆選過、選上了沒有、拿幾票」——election_result_missing 與
+    // candidacy_source_missing 要的就是後者，而代理原本被指去 db.cec.gov.tw 那個 SPA，
+    // curl 抓不到任何東西。管理介面之後要做「中選會官方核對」也接這一支。
+    if (queryName || action === "candidate") {
+      const name = String(queryName ?? body.name ?? "").trim();
+      if (!name) return json({ error: "缺少必要參數 queryName（候選人姓名）" }, 400);
+      return await handleByName(name, electionId ? Number(electionId) : undefined);
+    }
 
     if (action === "list") {
       if (!electionType) return json({ error: "缺少必要參數 electionType" }, 400);
