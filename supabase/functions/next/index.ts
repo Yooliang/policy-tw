@@ -8,6 +8,7 @@ import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
+import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 
 /**
@@ -227,8 +228,16 @@ Deno.serve(async (req) => {
           unsure_count: pick.unsure_count,
           required_agree: requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
+          // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
+          ...(pick.contribution_type === "policy"
+            ? (() => {
+              const notice = policyLikenessNotice(verifyPayload.title, verifyPayload.description);
+              return notice ? { warning: notice } : {};
+            })()
+            : {}),
         },
-        how_to: "逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
+        how_to: "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。" +
+          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
       });
     }
 

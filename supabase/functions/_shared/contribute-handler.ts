@@ -6,6 +6,7 @@
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
+import { policyLikenessNotice } from "./policy-likeness.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -143,6 +144,14 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       contribution_id: id,
       status: dup ? "duplicate" : "pending",
       required_agree: need,
+      // 疑似口號／行程／個人表態：收下但當場告訴提交者，驗證者也會看到同一句（見 policy-likeness.ts）
+      ...(item.contribution_type === "policy"
+        ? (() => {
+          const p = (item.payload && typeof item.payload === "object" ? item.payload : {}) as Record<string, unknown>;
+          const notice = policyLikenessNotice(p.title, p.description);
+          return notice ? { warning: notice } : {};
+        })()
+        : {}),
       ...(dup ? { existing_status: dup.status, message: `${DEDUPE_WINDOW_HOURS} 小時內已有相同內容的貢獻，沿用原 id` } : {}),
       review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${id}`,
     };
