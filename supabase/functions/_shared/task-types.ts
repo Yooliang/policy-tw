@@ -27,6 +27,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   roster_check: "roster_check",
   // 公民提問用 question_answer 回報（非自動缺口，所以守門測試不會要求它，但它一樣該有）
   question: "question_answer",
+  // 登記截止後還掛著「傳聞參選」的：查登記名單後用 correction 改成 registered 或 not_running
+  candidate_status_stale: "correction",
   // 「這不是政見？」：查證後多半是整筆移除，也可能是改分類（correction）或確認有效（no_change），
   // 任務敘述會把三條路都講清楚。這裡給最常見的那一種。
   policy_validity: "removal",
