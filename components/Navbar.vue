@@ -68,18 +68,20 @@ const isActive = (path: string) => route.path === path
 
         <!-- Nav Items: Always visible, shorter text on mobile -->
         <div class="flex-1 flex justify-center">
-          <div class="flex items-center space-x-0.5 sm:space-x-1">
+          <!-- 桌面版（lg 以上）圖示與文字左右排，兩者都放大；窄螢幕維持上下疊，
+               不然三個項目加起來會擠掉右邊的登入鈕（2026-09-17 小良哥）。 -->
+          <div class="flex items-center space-x-0.5 sm:space-x-1 lg:space-x-2">
             <RouterLink
               v-for="item in navItems"
               :key="item.name"
               :to="item.path"
-              :class="`flex flex-col items-center justify-center px-2 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold transition-colors duration-200 min-w-[48px] sm:min-w-[72px] ${
+              :class="`flex flex-col lg:flex-row items-center justify-center lg:gap-2 px-2 sm:px-4 lg:px-5 py-1.5 lg:py-2.5 rounded-xl text-[10px] sm:text-xs lg:text-base font-bold transition-colors duration-200 min-w-[48px] sm:min-w-[72px] ${
                 isActive(item.path)
                   ? 'bg-blue-50 text-blue-700 border border-blue-200'
                   : 'text-slate-500 hover:bg-slate-100 hover:text-navy-900'
               }`"
             >
-              <component :is="item.icon" :size="18" class="mb-0.5 sm:mb-1" />
+              <component :is="item.icon" :size="18" class="mb-0.5 sm:mb-1 lg:mb-0 lg:w-[22px] lg:h-[22px]" />
               <span class="sm:hidden">{{ item.shortName }}</span>
               <span class="hidden sm:inline">{{ item.name }}</span>
             </RouterLink>
