@@ -51,3 +51,16 @@ Deno.test("verify 請求：disagree 必附 evidence_url（http(s)）；verdict �
   const noAgent = validateVerifyRequest({ contribution_id: "5f0f2a2e-1c1e-4b3a-9d2c-0a1b2c3d4e5f", verdict: "agree" });
   assert(noAgent.errors.some((e) => e.path === "agent_name"));
 });
+
+// 2026-09-17：那題 Facebook 提問的 no_change 是「2 同意 1 反對」——通過要反對 0、
+// 爭議要反對 ≥ 2，兩邊都不成立，從 09-12 懸空到今天沒人會再處理它。
+Deno.test("同意達標但有人反對 → 進裁決，不留在懸空狀態", () => {
+  assertEquals(consensusStatus({ agree: 2, disagree: 1, unsure: 0 }, "pending", 2), "disputed");
+  assertEquals(consensusStatus({ agree: 1, disagree: 1, unsure: 0 }, "pending", 1), "disputed");
+});
+
+Deno.test("同意還沒達標時的一張反對維持 pending（等更多票，不急著裁決）", () => {
+  assertEquals(consensusStatus({ agree: 1, disagree: 1, unsure: 0 }, "pending", 2), "pending");
+  assertEquals(consensusStatus({ agree: 2, disagree: 0, unsure: 0 }, "pending", 2), "verified");
+  assertEquals(consensusStatus({ agree: 0, disagree: 2, unsure: 0 }, "pending", 2), "disputed");
+});

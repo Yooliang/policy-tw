@@ -90,7 +90,11 @@ export interface VoteCounts {
 /** 只在 pending／verified／disputed 之間轉；approved／rejected／applied 由維護者決定、不受投票影響。 */
 export function consensusStatus(counts: VoteCounts, current: string, minAgree: number = VERIFIED_MIN_AGREE): string {
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
+  // 兩張反對＝爭議；一張反對但同意已達標也是爭議——不能既不通過又不裁決。
+  // 2026-09-17：那題 Facebook 提問的 no_change 就是「2 同意 1 反對」，兩邊都不成立，
+  // 從 09-12 懸空到今天，沒有任何人會再處理它（全站當時有 3 筆卡在這個縫裡）。
   if (counts.disagree >= DISPUTED_MIN_DISAGREE) return "disputed";
+  if (counts.disagree > VERIFIED_MAX_DISAGREE && counts.agree >= minAgree) return "disputed";
   if (counts.agree >= minAgree && counts.disagree <= VERIFIED_MAX_DISAGREE) return "verified";
   return "pending";
 }

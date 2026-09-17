@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP, filterSaturatedTasks } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -238,4 +238,17 @@ Deno.test("提問滿額：已上線＋還在等票的答案合計達上限就不
 Deno.test("skip 有記憶：同 IP 跳過的任務不再派回來，其他任務照派", () => {
   assertEquals(filterSkippedTasks([Q_TASK, OTHER], new Set(["t-wanda"])).map((t) => t.task_id), ["t-other"]);
   assertEquals(filterSkippedTasks([Q_TASK, OTHER], new Set()).length, 2);
+});
+
+// 2026-09-17 李四川：任務底下 21 筆等票、任務不關、又在最高優先層的前 3 筆裡 → 每個代理都抽到它
+Deno.test("底下在途筆數達上限的任務不再派", () => {
+  const tasks = [{ task_id: "t1" }, { task_id: "t2" }, { task_id: "t3" }];
+  const counts = new Map([["t1", 3], ["t2", 21], ["t3", 2]]);
+  assertEquals(filterSaturatedTasks(tasks, counts).map((t) => t.task_id), ["t3"]);
+});
+
+Deno.test("沒有在途資料時不擋任何任務；上限可調", () => {
+  const tasks = [{ task_id: "t1" }, { task_id: "t2" }];
+  assertEquals(filterSaturatedTasks(tasks, new Map()).length, 2);
+  assertEquals(filterSaturatedTasks(tasks, new Map([["t1", 1]]), 1).map((t) => t.task_id), ["t2"]);
 });

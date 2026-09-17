@@ -101,6 +101,33 @@ export function filterOwnSubmittedTasks<T extends TaskLike>(tasks: readonly T[],
 
 /** 同一個來源 IP 按過 skip 的任務，這麼久之內不再派給這個 IP（任何代號） */
 export const SKIP_MEMORY_HOURS = 24;
+/**
+ * 一個任務底下最多同時有幾筆還在等票的貢獻；超過就先不要再派這個任務。
+ *
+ * 2026-09-17 小良哥：「李四川這個任務怎麼好像跑 n 多次了」。實查：
+ * `policy_missing`／李四川（網站訪客按「請 AI 幫忙查政見」）底下堆了 21 筆待驗證，
+ * 14 筆是 0～1 票。任務要等「有貢獻上線」才會關，那 21 筆卡在票數不夠 → 任務不關
+ * → 它又是最高優先層裡最舊的幾筆之一（pickManualTask 只從前 3 筆挑）→ 每個代理都抽到它。
+ * 結果是同一件事被查了十幾次：「居住新五箭」三份、醫療那包兩份、運動幣兩份。
+ *
+ * 力氣該花在還沒人碰的 777 個缺口上，不是同一題的第 22 份答案。
+ */
+export const TASK_INFLIGHT_CAP = 3;
+
+/**
+ * 排掉「底下已經有夠多筆在等票」的任務。
+ *
+ * 只看還沒定案的（pending／verified 等在途狀態），已退件或已上線的不算——
+ * 前者代表那個方向行不通、後者代表任務本來就該關了。
+ */
+export function filterSaturatedTasks<T extends TaskLike>(
+  tasks: readonly T[],
+  inFlightByTask: ReadonlyMap<string, number>,
+  cap: number = TASK_INFLIGHT_CAP,
+): T[] {
+  if (inFlightByTask.size === 0) return [...tasks];
+  return tasks.filter((t) => (inFlightByTask.get(t.task_id) ?? 0) < cap);
+}
 /** 一題公民提問最多收幾份答案（已上線＋還在等票的都算） */
 export const QUESTION_ANSWER_CAP = 3;
 

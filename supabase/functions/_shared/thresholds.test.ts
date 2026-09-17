@@ -41,7 +41,9 @@ Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與�
   assertEquals(requiredAgree("correction", { field: "birth_year" }, [MEDIA]), 2, "一般欄位是一般資料");
   const need = requiredAgree("candidacy", {}, [MEDIA]);
   assertEquals(consensusStatus(tally(Array.from({ length: 6 }, () => ({ verdict: "agree" as const }))), "pending", need), "verified");
-  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "pending", "有 disagree 就不算");
+  // 2026-09-17 改：同意達標卻有人反對 → 進裁決，不再留在 pending。
+  // 舊規則（通過要反對 0、爭議要反對 ≥ 2）會讓「達標 + 1 反對」兩邊都不成立、永久懸空。
+  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "disputed", "達標卻有人反對＝爭議，交裁決");
 });
 
 Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 4；多來源取最高等級", () => {
