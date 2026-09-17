@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, MessageSquare, LogIn, Loader2 } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, MessageSquare, CircleUserRound, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 
@@ -122,12 +122,15 @@ const isActive = (path: string) => route.path === path
 
           <!-- Login Button (Not Logged In) -->
           <template v-else>
+            <!-- 登入改成一個人的形象（2026-09-17 小良哥），跟旁邊的愛心一樣是圓鈕。
+                 文字拿掉了，所以 aria-label 與 title 一定要留，不然讀螢幕的人不知道這是什麼。 -->
             <button
               @click="isLoginModalOpen = true"
-              class="bg-slate-100 hover:bg-slate-200 text-navy-900 p-2 sm:px-3 sm:py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap"
+              class="bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full flex items-center justify-center transition-colors border border-slate-200"
+              aria-label="登入"
+              title="登入"
             >
-              <LogIn :size="16" />
-              <span class="hidden sm:inline">登入</span>
+              <CircleUserRound :size="22" />
             </button>
           </template>
         </div>
