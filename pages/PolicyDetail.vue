@@ -341,7 +341,8 @@ usePageHead({
                 <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
                 <p class="text-slate-600 text-sm">表態會公開顯示在這裡，候選人與其他讀者都看得到。這不會影響政見內容的真假判定——那由附出處的查證決定。</p>
               </div>
-              <div class="flex items-stretch gap-2 shrink-0">
+              <div class="shrink-0">
+              <div class="flex items-stretch gap-2">
                 <button
                   v-for="opt in STANCE_OPTIONS"
                   :key="opt.key"
@@ -362,23 +363,26 @@ usePageHead({
                   <span class="text-sm font-black tabular-nums leading-none">{{ shownStances[opt.count].toLocaleString() }}</span>
                 </button>
               </div>
+              <!-- 回報入口就放在這三顆鈕下面（2026-09-17 小良哥）：它講的是同一件事——
+                   你對這筆政見的看法，包含「它根本不是政見」 -->
+              <div class="mt-2 text-center">
+                <button
+                  type="button"
+                  data-testid="hero-not-a-policy"
+                  :disabled="validityRequest.loading.value || validityRequest.done.value"
+                  class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 disabled:hover:text-slate-500 transition-colors"
+                  @click="validityRequest.send({ kind: 'validity', policy_id: policy.id })"
+                >
+                  <Loader2 v-if="validityRequest.loading.value" :size="14" class="animate-spin" />
+                  <AlertTriangle v-else :size="14" />
+                  {{ validityRequest.label('這不是政見？回報給 AI 查證') }}
+                </button>
+                <RequestTaskNotice class="mt-2 text-left" :result="validityRequest.result.value" :error="validityRequest.error.value" />
+              </div>
+              </div>
             </div>
             <p v-if="myPolicyStance" class="mt-3 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
             <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
-            <div class="mt-5 pt-4 border-t border-violet-100">
-              <button
-                type="button"
-                data-testid="hero-not-a-policy"
-                :disabled="validityRequest.loading.value || validityRequest.done.value"
-                class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-rose-600 disabled:hover:text-slate-500 transition-colors"
-                @click="validityRequest.send({ kind: 'validity', policy_id: policy.id })"
-              >
-                <Loader2 v-if="validityRequest.loading.value" :size="15" class="animate-spin" />
-                <AlertTriangle v-else :size="15" />
-                {{ validityRequest.label('這不是政見？回報給 AI 查證') }}
-              </button>
-              <RequestTaskNotice class="mt-2" :result="validityRequest.result.value" :error="validityRequest.error.value" />
-            </div>
           </div>
 
           <!-- Description & AI Analysis -->
