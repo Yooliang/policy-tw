@@ -332,15 +332,12 @@ usePageHead({
             </div>
           </div>
 
-          <!-- 讀者表態：支持／反對／更在意，計數以伺服器回的為準，不在本機加一。
-               對所有狀態的政見都顯示，不只競選承諾：「這不是政見？」的回報入口在這一區，
-               非承諾類的政見（那些才更可能被誤建）一樣要有得按。 -->
-          <div class="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-6">
-            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-              <div>
-                <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
-                <p class="text-slate-600 text-sm">表態會公開顯示在這裡，候選人與其他讀者都看得到。這不會影響政見內容的真假判定——那由附出處的查證決定。</p>
-              </div>
+          <!-- 政見詳情與讀者表態同一張卡（2026-09-17 小良哥：「跟下方的政見詳情整合」）。
+               原本表態獨立一塊紫底、還寫了一段說明它是什麼——看的人要的是內容與一個按鈕，
+               不是一段解釋。計數以伺服器回的為準，不在本機加一。 -->
+          <div class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 mb-4">
+              <h2 class="text-xl font-bold text-navy-900">重大建設/政見詳情</h2>
               <div class="shrink-0">
               <div class="flex items-stretch gap-2">
                 <button
@@ -381,14 +378,10 @@ usePageHead({
               </div>
               </div>
             </div>
-            <p v-if="myPolicyStance" class="mt-3 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
-            <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
-          </div>
-
-          <!-- Description & AI Analysis -->
-          <div class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-            <h2 class="text-xl font-bold text-navy-900 mb-4">重大建設/政見詳情</h2>
-            <p class="text-slate-700 leading-relaxed mb-8 text-lg">{{ policy.description }}</p>
+            <p class="text-slate-700 leading-relaxed mb-2 text-lg">{{ policy.description }}</p>
+            <p v-if="myPolicyStance" class="text-xs text-violet-500 mb-6">已記錄你的立場，改按別顆就會換掉。</p>
+            <p v-if="stanceError" class="text-sm text-rose-600 mb-6">{{ stanceError }}</p>
+            <div class="mb-8"></div>
 
             <div v-if="policy.aiAnalysis" class="bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-lg border border-blue-100 p-6 relative overflow-hidden">
               <div class="absolute top-0 right-0 p-4 opacity-5"><Bot :size="100" /></div>
