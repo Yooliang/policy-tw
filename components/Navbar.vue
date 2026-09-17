@@ -56,9 +56,11 @@ const isActive = (path: string) => route.path === path
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center">
           <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
-            <div class="bg-blue-600 rounded-md flex items-center justify-center group-hover:bg-blue-500 transition-colors overflow-hidden shadow-lg" style="width: 37px; height: 45px; min-width: 32px; min-height: 32px; margin: -10px 0;">
-              <span class="text-white font-black text-[28px] leading-none">正</span>
-            </div>
+            <!-- 站徽（2026-09-17）：原本是藍底方塊配一個白色「正」字。
+                 換成水墨字本身，深藍底直接襯得住，不需要底色方塊。 -->
+            <span class="bg-white/95 rounded-lg p-0.5 shadow-md group-hover:bg-white transition-colors">
+              <img src="/brand/icon-512.png" alt="正見" width="36" height="36" class="h-9 w-9 object-contain" />
+            </span>
             <span class="font-bold text-xl tracking-wide hidden min-[500px]:inline">見</span>
           </RouterLink>
         </div>
