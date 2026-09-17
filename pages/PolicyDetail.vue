@@ -336,8 +336,13 @@ usePageHead({
                原本表態獨立一塊紫底、還寫了一段說明它是什麼——看的人要的是內容與一個按鈕，
                不是一段解釋。計數以伺服器回的為準，不在本機加一。 -->
           <div class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm">
-            <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 mb-4">
-              <h2 class="text-xl font-bold text-navy-900">重大建設/政見詳情</h2>
+            <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 sm:gap-6">
+              <div class="flex-1 min-w-0">
+                <h2 class="text-xl font-bold text-navy-900 mb-3">重大建設/政見詳情</h2>
+                <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
+                <p v-if="myPolicyStance" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
+                <p v-if="stanceError" class="mt-2 text-sm text-rose-600">{{ stanceError }}</p>
+              </div>
               <div class="shrink-0">
               <div class="flex items-stretch gap-2">
                 <button
@@ -378,10 +383,6 @@ usePageHead({
               </div>
               </div>
             </div>
-            <p class="text-slate-700 leading-relaxed mb-2 text-lg">{{ policy.description }}</p>
-            <p v-if="myPolicyStance" class="text-xs text-violet-500 mb-6">已記錄你的立場，改按別顆就會換掉。</p>
-            <p v-if="stanceError" class="text-sm text-rose-600 mb-6">{{ stanceError }}</p>
-            <div class="mb-8"></div>
 
             <div v-if="policy.aiAnalysis" class="bg-gradient-to-br from-slate-50 to-blue-50/30 rounded-lg border border-blue-100 p-6 relative overflow-hidden">
               <div class="absolute top-0 right-0 p-4 opacity-5"><Bot :size="100" /></div>
