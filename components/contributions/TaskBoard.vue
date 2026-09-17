@@ -110,17 +110,13 @@ const gapPieRows = computed(() => {
 })
 const gapSeries = computed(() => gapPieRows.value.map(r => r.count))
 const gapOptions = computed(() => ({
-  chart: { type: 'donut' as const, toolbar: { show: false } },
+  chart: { type: 'pie' as const, toolbar: { show: false } },
   labels: gapPieRows.value.map(r => r.label),
   colors: GAP_COLORS,
   stroke: { width: 2, colors: ['#ffffff'] },
   // 扇形上只標百分比，件數留給圖例與提示框：小扇形塞兩個數字會疊在一起
   dataLabels: { enabled: true, formatter: (v: number) => (v >= 6 ? `${Math.round(v)}%` : ''), style: { fontSize: '11px', fontWeight: 700 }, dropShadow: { enabled: false } },
   legend: { position: 'bottom' as const, fontSize: '11px', fontWeight: 600, itemMargin: { horizontal: 6, vertical: 2 }, markers: { size: 6 } },
-  plotOptions: { pie: { donut: { size: '58%', labels: { show: true,
-    total: { show: true, showAlways: true, label: '總計', fontSize: '12px', color: '#94a3b8', formatter: () => `${autoTotal.value} 件` },
-    value: { fontSize: '20px', fontWeight: 800, color: '#0f172a', formatter: (v: string) => `${v} 件` },
-  } } } },
   tooltip: { y: { formatter: (v: number) => `${v} 件` } },
 }))
 
@@ -163,7 +159,7 @@ defineExpose({ load })
         <p class="text-xs text-slate-400 mb-2">自動偵測，依序派給 AI 代理</p>
         <p v-if="!loading && gapRows.length === 0" class="text-sm text-slate-400 py-6 text-center">目前沒有缺口</p>
         <div v-else class="h-72">
-          <ClientOnly><apexchart v-if="gapRows.length > 0" type="donut" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
+          <ClientOnly><apexchart v-if="gapRows.length > 0" type="pie" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
         </div>
         <!-- 現在各有幾件（上面的直條）之外，也要看得出它們在變多還是變少 -->
         <GapTrendChart />
