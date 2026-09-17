@@ -51,17 +51,16 @@ const isActive = (path: string) => route.path === path
 </script>
 
 <template>
-  <nav class="bg-navy-900 text-white sticky top-0 z-50 shadow-lg border-b border-navy-700">
+  <nav class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center">
           <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
-            <!-- 站徽（2026-09-17）：原本是藍底方塊配一個白色「正」字。
-                 換成水墨字本身，深藍底直接襯得住，不需要底色方塊。 -->
-            <span class="bg-white/95 rounded-lg p-0.5 shadow-md group-hover:bg-white transition-colors">
-              <img src="/brand/icon-512.png" alt="正見" width="36" height="36" class="h-9 w-9 object-contain" />
-            </span>
-            <span class="font-bold text-xl tracking-wide hidden min-[500px]:inline">見</span>
+            <!-- 站徽（2026-09-17）：原本是藍底方塊配一個白色「正」字，改成水墨字本身。
+                 選單改白底之後不必再襯白底板——紙本來就是白的，墨直接落在上面。 -->
+            <img src="/brand/icon-512.png" alt="正見" width="40" height="40"
+              class="h-10 w-10 object-contain group-hover:scale-105 transition-transform" />
+            <span class="font-bold text-xl tracking-wide text-navy-900 hidden min-[500px]:inline">見</span>
           </RouterLink>
         </div>
 
@@ -74,8 +73,8 @@ const isActive = (path: string) => route.path === path
               :to="item.path"
               :class="`flex flex-col items-center justify-center px-2 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold transition-colors duration-200 min-w-[48px] sm:min-w-[72px] ${
                 isActive(item.path)
-                  ? 'bg-navy-800 text-blue-400 border border-navy-700'
-                  : 'text-gray-400 hover:bg-navy-800 hover:text-white'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-navy-900'
               }`"
             >
               <component :is="item.icon" :size="18" class="mb-0.5 sm:mb-1" />
@@ -102,7 +101,7 @@ const isActive = (path: string) => route.path === path
           <template v-if="isAuthenticated">
             <button
               @click="router.push('/profile')"
-              class="flex items-center gap-1 sm:gap-2 bg-white/10 hover:bg-white/20 text-white p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-white/20"
+              class="flex items-center gap-1 sm:gap-2 bg-slate-100 hover:bg-slate-200 text-navy-900 p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-slate-200"
             >
               <img
                 v-if="userAvatarUrl"
@@ -121,7 +120,7 @@ const isActive = (path: string) => route.path === path
           <template v-else>
             <button
               @click="isLoginModalOpen = true"
-              class="bg-white/10 hover:bg-white/20 text-white p-2 sm:px-3 sm:py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all border border-white/20 whitespace-nowrap"
+              class="bg-slate-100 hover:bg-slate-200 text-navy-900 p-2 sm:px-3 sm:py-2 rounded-md text-sm font-bold flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap"
             >
               <LogIn :size="16" />
               <span class="hidden sm:inline">登入</span>
