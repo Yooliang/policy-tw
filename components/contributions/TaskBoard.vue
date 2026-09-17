@@ -94,19 +94,33 @@ const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a 
 const gapRows = computed(() => Object.entries(totals.value)
   .map(([type, count]) => ({ label: taskTypeLabel(type), count }))
   .sort((a, b) => b.count - a.count))
-const gapSeries = computed(() => [{ name: '件數', data: gapRows.value.map(r => r.count) }])
+/**
+ * 圓餅圖（2026-09-17 小良哥）：這裡要回答的是「缺口集中在哪一類」，比例比絕對值重要。
+ * 缺口型別有十幾種，全部切成扇形會變成一圈看不懂的碎片，所以只畫前 6 大，
+ * 其餘合併成「其他缺口」——跟下方的 24 小時趨勢圖用同一套取法。
+ */
+const GAP_TOP_N = 6
+const GAP_COLORS = ['#2563eb', '#ea580c', '#059669', '#7c3aed', '#0891b2', '#eab308', '#94a3b8']
+const gapPieRows = computed(() => {
+  const rows = gapRows.value
+  if (rows.length <= GAP_TOP_N + 1) return rows
+  const head = rows.slice(0, GAP_TOP_N)
+  const rest = rows.slice(GAP_TOP_N).reduce((sum, r) => sum + r.count, 0)
+  return rest > 0 ? [...head, { label: '其他缺口', count: rest }] : head
+})
+const gapSeries = computed(() => gapPieRows.value.map(r => r.count))
 const gapOptions = computed(() => ({
-  chart: { type: 'bar' as const, toolbar: { show: false }, sparkline: { enabled: false } },
-  plotOptions: { bar: { borderRadius: 6, columnWidth: '55%' } },
-  colors: ['#2563eb'],
-  dataLabels: { enabled: false },
-  xaxis: {
-    categories: gapRows.value.map(r => r.label),
-    labels: { rotate: -45, rotateAlways: true, hideOverlappingLabels: false, trim: false, style: { colors: '#94a3b8', fontSize: '11px', fontWeight: 'bold' } },
-    axisBorder: { show: false }, axisTicks: { show: false },
-  },
-  yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
-  grid: { strokeDashArray: 3, borderColor: '#f1f5f9', xaxis: { lines: { show: false } } },
+  chart: { type: 'donut' as const, toolbar: { show: false } },
+  labels: gapPieRows.value.map(r => r.label),
+  colors: GAP_COLORS,
+  stroke: { width: 2, colors: ['#ffffff'] },
+  // 扇形上只標百分比，件數留給圖例與提示框：小扇形塞兩個數字會疊在一起
+  dataLabels: { enabled: true, formatter: (v: number) => (v >= 6 ? `${Math.round(v)}%` : ''), style: { fontSize: '11px', fontWeight: 700 }, dropShadow: { enabled: false } },
+  legend: { position: 'bottom' as const, fontSize: '11px', fontWeight: 600, itemMargin: { horizontal: 6, vertical: 2 }, markers: { size: 6 } },
+  plotOptions: { pie: { donut: { size: '58%', labels: { show: true,
+    total: { show: true, showAlways: true, label: '總計', fontSize: '12px', color: '#94a3b8', formatter: () => `${autoTotal.value} 件` },
+    value: { fontSize: '20px', fontWeight: 800, color: '#0f172a', formatter: (v: string) => `${v} 件` },
+  } } } },
   tooltip: { y: { formatter: (v: number) => `${v} 件` } },
 }))
 
@@ -146,10 +160,10 @@ defineExpose({ load })
           <h3 class="font-black text-navy-900">資料缺口</h3>
           <span class="ml-auto text-sm font-bold text-navy-900 whitespace-nowrap">共 {{ loading ? '–' : autoTotal }} 件</span>
         </div>
-        <p class="text-xs text-slate-400 mb-2">系統自動找出來的待補資料，會依序派給 AI 代理去查</p>
+        <p class="text-xs text-slate-400 mb-2">自動偵測，依序派給 AI 代理</p>
         <p v-if="!loading && gapRows.length === 0" class="text-sm text-slate-400 py-6 text-center">目前沒有缺口</p>
         <div v-else class="h-72">
-          <ClientOnly><apexchart v-if="gapRows.length > 0" type="bar" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
+          <ClientOnly><apexchart v-if="gapRows.length > 0" type="donut" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
         </div>
         <!-- 現在各有幾件（上面的直條）之外，也要看得出它們在變多還是變少 -->
         <GapTrendChart />

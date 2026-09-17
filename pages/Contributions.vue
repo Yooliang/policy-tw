@@ -256,8 +256,8 @@ function applyCardFilter(card: StatCard) {
   status.value = card.filter
 }
 
-// 近 7 日：提交＋驗證兩根柱子，取消勾選只看提交（2026-09-15 小良哥：驗證也要算進來，預設打勾）
-const includeVerifications = ref(true)
+// 近 7 日：提交＋驗證兩根柱子。原本有個「含驗證」勾選框，2026-09-17 拿掉了——
+// ApexCharts 的圖例本來就能點掉任一數列，兩套開關做同一件事。
 // 貢獻榜的三段：顏色沿用管線圖（提交藍、上線綠、驗證票紫），同一件事在站上只有一種顏色
 const LEADERBOARD_PARTS = [
   { key: 'submitted' as const, label: '提交', color: 'bg-blue-600' },
@@ -279,17 +279,17 @@ function leaderboardTitle(row: LeaderboardEntry): string {
 
 const chartSeries = computed(() => {
   const days = summary.value?.daily_last_7 ?? []
-  const submitted = { name: '提交', data: days.map(d => d.count) }
-  return includeVerifications.value
-    ? [submitted, { name: '驗證', data: days.map(d => d.verifications ?? 0) }]
-    : [submitted]
+  return [
+    { name: '提交', data: days.map(d => d.count) },
+    { name: '驗證', data: days.map(d => d.verifications ?? 0) },
+  ]
 })
 const chartOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false }, sparkline: { enabled: false } },
-  plotOptions: { bar: { borderRadius: 4, columnWidth: includeVerifications.value ? '70%' : '55%' } },
+  plotOptions: { bar: { borderRadius: 4, columnWidth: '70%' } },
   // 驗證用紫色，跟上方管線圖的「驗證票累計」同色
   colors: ['#2563eb', '#7c3aed'],
-  legend: { show: includeVerifications.value, position: 'top' as const, horizontalAlign: 'right' as const, fontSize: '11px', fontWeight: 700, markers: { size: 5 } },
+  legend: { show: true, position: 'top' as const, horizontalAlign: 'right' as const, fontSize: '11px', fontWeight: 700, markers: { size: 5 } },
   dataLabels: { enabled: false },
   xaxis: {
     categories: (summary.value?.daily_last_7 ?? []).map(d => d.date.slice(5)),
@@ -391,12 +391,7 @@ usePageHead({
              清單一長，第二列就被撐開、貢獻榜被推到清單中段。 -->
         <div class="order-first lg:order-none lg:col-start-3 lg:row-start-1">
         <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-          <div class="flex items-center gap-2 mb-2">
-            <h3 class="font-black text-navy-900">近 7 日{{ includeVerifications ? '提交與驗證' : '提交' }}</h3>
-            <label class="ml-auto text-xs text-slate-500 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
-              <input v-model="includeVerifications" type="checkbox" class="rounded" data-testid="daily-include-verifications" /> 含驗證
-            </label>
-          </div>
+          <h3 class="font-black text-navy-900 mb-2">近 7 日提交與驗證</h3>
           <div class="h-44">
             <ClientOnly><apexchart v-if="summary" type="bar" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
           </div>
@@ -543,7 +538,6 @@ usePageHead({
               >{{ opt.label }}</button>
             </div>
           </div>
-          <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
           <p v-if="activeLeaderboard.length === 0" class="text-sm text-slate-400">{{ leaderboardEmptyText }}</p>
           <template v-else>
             <!-- 三段堆疊長條：分數就是這三個數字相加，疊起來的長度剛好等於分數，
