@@ -1,0 +1,13 @@
+[Unit]
+Description=正見 最小驗證代理（跑一輪就結束）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/policy-verifier
+EnvironmentFile=/home/pi/policy-verifier/.env
+ExecStart=/usr/bin/python3 /home/pi/policy-verifier/verify_once.py
+# 讀不到網路時不要無限重試把額度燒掉
+TimeoutStartSec=600
