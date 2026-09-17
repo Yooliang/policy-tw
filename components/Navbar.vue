@@ -30,7 +30,9 @@ const navItems = computed(() => {
   const items = [
     // 「跨任期接力」（/analysis）不在主選單：它是「政見」底下的一種看法，
     // 入口在 PolicyViewNav。放兩個地方會讓人以為是兩件不同的事。
-    { name: '政見', shortName: '政見', path: '/tracking', icon: TrendingUp },
+    // 「政見追蹤」而不是「政見」（2026-09-17 小良哥）：這一頁是追進度的，
+    // 只寫「政見」會讓人以為是政見列表。手機仍用兩個字，不然會擠掉旁邊兩項。
+    { name: '政見追蹤', shortName: '政見', path: '/tracking', icon: TrendingUp },
     { name: '公民參與', shortName: '參與', path: '/community', icon: MessageSquare },
   ]
 
