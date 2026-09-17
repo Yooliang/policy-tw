@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PartyBadge from '../components/PartyBadge.vue'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, type Component } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { useRequestTask } from '../composables/useRequestTask'
@@ -11,7 +11,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
@@ -164,10 +164,12 @@ watch(policyId, async (id) => {
   sources.value = data || []
 }, { immediate: true })
 
-const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string }> = [
-  { key: 'support', label: '我支持', hint: '希望這項政見被實現' },
-  { key: 'oppose', label: '我反對', hint: '不希望這項政見被實現' },
-  { key: 'priority', label: '我關注', hint: '不一定有立場，但會持續注意這件事' },
+// 按鈕與計數合併成一顆（2026-09-17 小良哥）：原本上面一排數字、下面一排按鈕，
+// 同一件事被拆成兩處，按了還要抬頭去對數字有沒有變。
+const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string; icon: Component; count: keyof StanceCounts; active: string }> = [
+  { key: 'support', label: '支持', hint: '希望這項政見被實現', icon: ThumbsUp, count: 'stance_support', active: 'bg-violet-600 text-white border-violet-600' },
+  { key: 'oppose', label: '反對', hint: '不希望這項政見被實現', icon: ThumbsDown, count: 'stance_oppose', active: 'bg-rose-600 text-white border-rose-600' },
+  { key: 'priority', label: '關注', hint: '不一定有立場，但會持續注意這件事', icon: Star, count: 'stance_priority', active: 'bg-amber-500 text-white border-amber-500' },
 ]
 
 /** 畫面上的計數：表態過就用伺服器回的最新值，否則用政見本身帶的 */
@@ -339,40 +341,29 @@ usePageHead({
                 <h3 class="text-lg font-bold text-violet-900 mb-1">你怎麼看這項政見？</h3>
                 <p class="text-slate-600 text-sm">表態會公開顯示在這裡，候選人與其他讀者都看得到。這不會影響政見內容的真假判定——那由附出處的查證決定。</p>
               </div>
-              <div class="flex items-center gap-5 shrink-0">
-                <div class="text-center">
-                  <span class="block text-2xl font-black text-violet-700 tabular-nums">{{ shownStances.stance_support.toLocaleString() }}</span>
-                  <span class="text-[11px] text-violet-400 font-bold">支持</span>
-                </div>
-                <div class="text-center">
-                  <span class="block text-2xl font-black text-rose-600 tabular-nums">{{ shownStances.stance_oppose.toLocaleString() }}</span>
-                  <span class="text-[11px] text-rose-400 font-bold">反對</span>
-                </div>
-                <div class="text-center">
-                  <span class="block text-2xl font-black text-amber-600 tabular-nums">{{ shownStances.stance_priority.toLocaleString() }}</span>
-                  <span class="text-[11px] text-amber-500 font-bold">關注</span>
-                </div>
+              <div class="flex items-stretch gap-2 shrink-0">
+                <button
+                  v-for="opt in STANCE_OPTIONS"
+                  :key="opt.key"
+                  type="button"
+                  @click="castStance(opt.key)"
+                  :disabled="stanceBusy !== null"
+                  :title="opt.hint"
+                  :aria-pressed="myPolicyStance === opt.key"
+                  :class="[
+                    'w-[72px] shrink-0 flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-xl border transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
+                    myPolicyStance === opt.key ? opt.active + ' shadow' : 'bg-white border-violet-200 text-violet-700 hover:bg-violet-50',
+                  ]"
+                >
+                  <Loader2 v-if="stanceBusy === opt.key" :size="18" class="animate-spin" />
+                  <component v-else :is="opt.icon" :size="18" />
+                  <span class="text-[11px] font-bold leading-none">{{ opt.label }}</span>
+                  <div class="w-8 h-px bg-current opacity-25"></div>
+                  <span class="text-sm font-black tabular-nums leading-none">{{ shownStances[opt.count].toLocaleString() }}</span>
+                </button>
               </div>
             </div>
-            <div class="mt-5 flex flex-wrap gap-2">
-              <button
-                v-for="opt in STANCE_OPTIONS"
-                :key="opt.key"
-                @click="castStance(opt.key)"
-                :disabled="stanceBusy !== null"
-                :title="opt.hint"
-                :class="[
-                  'px-4 py-2 rounded-lg font-bold text-sm transition-all border disabled:opacity-60',
-                  myPolicyStance === opt.key
-                    ? 'bg-violet-600 border-violet-600 text-white shadow'
-                    : 'bg-white border-violet-200 text-violet-700 hover:bg-violet-50',
-                ]"
-              >
-                <Loader2 v-if="stanceBusy === opt.key" :size="16" class="inline animate-spin mr-1" />
-                {{ opt.label }}
-              </button>
-              <span v-if="myPolicyStance" class="self-center text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉</span>
-            </div>
+            <p v-if="myPolicyStance" class="mt-3 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
             <p v-if="stanceError" class="mt-3 text-sm text-rose-600">{{ stanceError }}</p>
             <div class="mt-5 pt-4 border-t border-violet-100">
               <button
