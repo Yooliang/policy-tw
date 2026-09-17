@@ -35,6 +35,8 @@ export interface HistoryData {
   tasks: HistoryTask[];
   /** politician_id → 姓名（摘要用；payload 只帶 id 時才寫得出「為「王小明」新增政見」） */
   politician_names?: Record<string, string>;
+  policy_titles?: Record<string, string>;
+  election_labels?: Record<string, string>;
 }
 
 export interface HistoryVerifier { agent_name: string | null; agent_tool: string | null; verdict: string; note: string | null; evidence_url: string | null; resolved_politician_id: string | null; created_at: string }
@@ -85,7 +87,7 @@ function fmtValue(v: unknown): string {
 }
 
 /** 有單一欄位更新時用「把 X 從 A 改為 B」，否則沿用 feed 的一句話摘要 */
-function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], names: Record<string, string>): string {
+function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], names: Record<string, string>, titles: Record<string, string> = {}, elections: Record<string, string> = {}): string {
   const updates = edits.filter((e) => e.field !== "*");
   const inserts = edits.filter((e) => e.field === "*");
   if (c.contribution_type === "correction" && updates.length === 1) {
@@ -102,7 +104,17 @@ function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], names: Reco
     return `補上${updates.map((e) => e.field_label).join("、")}`;
   }
   const pid = c.applied_politician_id ?? (typeof c.payload.politician_id === "string" ? c.payload.politician_id : null);
-  const payload = typeof c.payload.name === "string" || !pid || !names[pid] ? c.payload : { ...c.payload, name: names[pid] };
+  const withName = typeof c.payload.name === "string" || !pid || !names[pid] ? c.payload : { ...c.payload, name: names[pid] };
+  const polId = c.applied_policy_id
+    ?? (typeof c.payload.policy_id === "string" ? c.payload.policy_id : null)
+    ?? (c.payload.target_table === "policies" && typeof c.payload.target_id === "string" ? c.payload.target_id : null);
+  const withTitle = typeof c.payload.policy_title === "string" || !polId || !titles[polId]
+    ? withName
+    : { ...withName, policy_title: titles[polId] };
+  const elecKey = c.payload.target_table === "politician_elections" && (typeof c.payload.target_id === "string" || typeof c.payload.target_id === "number")
+    ? String(c.payload.target_id)
+    : null;
+  const payload = elecKey && elections[elecKey] ? { ...withTitle, target_label: elections[elecKey] } : withTitle;
   return summarizeContribution({ contribution_type: c.contribution_type, payload, applied_politician_id: c.applied_politician_id, applied_policy_id: c.applied_policy_id }).summary;
 }
 
@@ -154,7 +166,7 @@ export function buildHistory(data: HistoryData): HistoryEntry[] {
         id: c.id,
         contribution_type: c.contribution_type,
         type_label: typeLabelFor(c, edits),
-        summary: summaryFor(c, edits, data.politician_names ?? {}),
+        summary: summaryFor(c, edits, data.politician_names ?? {}, data.policy_titles ?? {}, data.election_labels ?? {}),
         status,
         status_label: STATUS_LABEL[status] ?? status,
         agent_name: c.agent_name,
@@ -258,13 +270,29 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     return { contributions: [], votes: [], edits: [], adjudications: [], tasks: [], origin_row: originRow.row, election_notes: originRow.notes };
   }
   const politicianIds = [...new Set(contributions.flatMap((c) => [c.applied_politician_id, typeof c.payload.politician_id === "string" ? c.payload.politician_id : null]).filter((v): v is string => typeof v === "string"))];
-  const [votes, edits, adjudications, tasks, originRow, names] = await Promise.all([
+  // 政見標題同樣要換掉 id（2026-09-17）：correction 帶 target_id、policy_progress 帶 policy_id，
+  // 摘要拿不到標題就只能印 id 前八碼，讀者看到「政見 1b808b02」等於沒資訊。
+  const policyIds = [...new Set(contributions.flatMap((c) => [
+    c.applied_policy_id,
+    typeof c.payload.policy_id === "string" ? c.payload.policy_id : null,
+    c.payload.target_table === "policies" && typeof c.payload.target_id === "string" ? c.payload.target_id : null,
+  ]).filter((v): v is string => typeof v === "string"))];
+  const electionRowIds = [...new Set(contributions.flatMap((c) =>
+    c.payload.target_table === "politician_elections" && (typeof c.payload.target_id === "string" || typeof c.payload.target_id === "number")
+      ? [String(c.payload.target_id)]
+      : []
+  ))];
+  const [votes, edits, adjudications, tasks, originRow, names, titles, elecRows] = await Promise.all([
     supabase.from("contribution_votes").select(VOTE_COLUMNS).in("contribution_id", ids).limit(2000),
     supabase.from("edit_history").select(EDIT_COLUMNS).in("contribution_id", ids).limit(2000),
     supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", ids).limit(500),
     supabase.from("contribution_tasks").select("id, task_type, status, target, created_at, closed_at").eq("task_type", "adjudicate").in("target->>contribution_id", ids).limit(500),
     originRowFor(supabase, target, id),
     politicianIds.length > 0 ? supabase.from("politicians").select("id, name").in("id", politicianIds) : Promise.resolve({ data: [], error: null }),
+    policyIds.length > 0 ? supabase.from("policies").select("id, title").in("id", policyIds) : Promise.resolve({ data: [], error: null }),
+    electionRowIds.length > 0
+      ? supabase.from("politician_elections").select("id, election_id, election_type, politicians(name)").in("id", electionRowIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   return {
     contributions,
@@ -273,6 +301,12 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     adjudications: ok<HistoryContribution[]>(adjudications, "adjudications"),
     tasks: ok<HistoryTask[]>(tasks, "adjudicate tasks"),
     politician_names: Object.fromEntries(ok<Array<{ id: string; name: string }>>(names, "politician names").map((p) => [p.id, p.name])),
+    policy_titles: Object.fromEntries(ok<Array<{ id: string; title: string }>>(titles, "policy titles").map((p) => [p.id, p.title])),
+    // deno-lint-ignore no-explicit-any
+    election_labels: Object.fromEntries((ok<any[]>(elecRows, "politician_elections").map((x) => [
+      String(x.id),
+      `${x.politicians?.name ?? "未指名"} ${x.election_id ?? ""} ${x.election_type ?? ""}`.trim(),
+    ]))),
     origin_row: originRow.row,
     election_notes: originRow.notes,
   };

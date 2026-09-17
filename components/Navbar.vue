@@ -4,6 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { TrendingUp, Heart, X, Vote, MessageSquare, CircleUserRound, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
+import GlobalSearch from './GlobalSearch.vue'
 
 const isLoginModalOpen = ref(false)
 const isLoggingIn = ref(false)
@@ -91,16 +92,7 @@ const isActive = (path: string) => route.path === path
 
         <!-- Right Side Actions -->
         <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-          <!-- 贊助：只用一顆愛心（2026-09-16 小良哥：「主選單那邊用個愛心即可」）；
-               文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
-          <RouterLink
-            to="/donation"
-            class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
-            aria-label="贊助平台"
-            title="贊助平台"
-          >
-            <Heart :size="16" class="fill-current" />
-          </RouterLink>
+          <GlobalSearch />
 
           <!-- User Avatar (Logged In) -->
           <template v-if="isAuthenticated">
@@ -134,6 +126,17 @@ const isActive = (path: string) => route.path === path
               <CircleUserRound :size="22" />
             </button>
           </template>
+
+          <!-- 贊助：只用一顆愛心（2026-09-16 小良哥：「主選單那邊用個愛心即可」）；
+               文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
+          <RouterLink
+            to="/donation"
+            class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
+            aria-label="贊助平台"
+            title="贊助平台"
+          >
+            <Heart :size="16" class="fill-current" />
+          </RouterLink>
         </div>
       </div>
     </div>

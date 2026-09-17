@@ -166,6 +166,28 @@ watch(policyId, async (id) => {
 
 // 按鈕與計數合併成一顆（2026-09-17 小良哥）：原本上面一排數字、下面一排按鈕，
 // 同一件事被拆成兩處，按了還要抬頭去對數字有沒有變。
+/**
+ * 執行歷程的一列拆成「型別／狀態／內容／提交者」四塊，格式對齊查核履歷（2026-09-17 小良哥）。
+ * 落庫時 event 寫成「進度更新：In Progress」、description 尾巴接「貢獻者：X（網址）」，
+ * 直接印出來就會在畫面上混出英文狀態與一句夾在內文裡的署名。
+ */
+function parseLog(log: { event: string; description?: string | null; sourceUrl?: string | null }) {
+  const m = /^(.+?)：(.+)$/.exec(log.event ?? '')
+  const kind = m ? m[1] : (log.event || '進度更新')
+  const rawStatus = m ? m[2].replace(/（.*?）$/, '').trim() : null
+  const percent = m ? (/（(\d+)%）/.exec(m[2])?.[1] ?? null) : null
+  const body = (log.description ?? '').replace(/\s*貢獻者：([^（]+)（([^）]+)）\s*$/, '')
+  const who = /貢獻者：([^（]+)（([^）]+)）/.exec(log.description ?? '')
+  return {
+    kind,
+    status: rawStatus ? policyStatusLabel(rawStatus) : null,
+    percent,
+    body: body.trim(),
+    agent: who ? who[1].trim() : null,
+    source: who ? who[2].trim() : (log.sourceUrl ?? null),
+  }
+}
+
 const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string; icon: Component; count: keyof StanceCounts; active: string }> = [
   { key: 'support', label: '支持', hint: '希望這項政見被實現', icon: ThumbsUp, count: 'stance_support', active: 'bg-violet-600 text-white border-violet-600' },
   { key: 'oppose', label: '反對', hint: '不希望這項政見被實現', icon: ThumbsDown, count: 'stance_oppose', active: 'bg-rose-600 text-white border-rose-600' },
@@ -338,7 +360,8 @@ usePageHead({
           <div class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm">
             <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 sm:gap-6">
               <div class="flex-1 min-w-0">
-                <h2 class="text-xl font-bold text-navy-900 mb-3">重大建設/政見詳情</h2>
+                <!-- 跟「查核履歷」一樣帶圖示（2026-09-17 小良哥），同一頁的區塊標題長得一致 -->
+                <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
                 <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
                 <p v-if="myPolicyStance" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
                 <p v-if="stanceError" class="mt-2 text-sm text-rose-600">{{ stanceError }}</p>
@@ -450,17 +473,28 @@ usePageHead({
           <!-- Timeline -->
           <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <h2 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2"><Calendar class="text-slate-400" />執行歷程追蹤</h2>
-            <div class="relative border-l-2 border-slate-200 ml-3 space-y-8 pb-2">
-              <div v-for="(log, index) in policy.logs" :key="log.id" class="relative pl-8 group">
-                <div :class="`absolute -left-[9px] top-1.5 w-4 h-4 rounded-full border-2 border-white ring-2 ${
-                  index === 0 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-300 ring-slate-50'
+            <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17 小良哥：「時間軸大小不一」）：
+                 同一頁兩條時間軸，一條 16px 點、一條 12px 點，看起來像兩套東西 -->
+            <div class="relative border-l-2 border-slate-200 ml-2 space-y-4 pb-2">
+              <div v-for="(log, index) in policy.logs" :key="log.id" class="relative pl-6 group">
+                <div :class="`absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 ${
+                  index === 0 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-300 ring-slate-100'
                 }`"></div>
-                <span class="text-sm font-mono text-slate-400 block mb-1">{{ log.date }}</span>
-                <h4 :class="`text-lg font-bold ${index === 0 ? 'text-navy-900' : 'text-slate-600'}`">{{ log.event }}</h4>
-                <p v-if="log.description" class="text-slate-500 mt-1">{{ log.description }}</p>
-                <span v-if="index === 0" class="inline-flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded mt-2">
-                  <CheckCircle2 :size="12" /> 最新進度
-                </span>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span class="font-mono text-slate-400">{{ log.date }}</span>
+                  <span class="font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ parseLog(log).kind }}</span>
+                  <span v-if="parseLog(log).status" class="font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                    {{ parseLog(log).status }}<template v-if="parseLog(log).percent"> {{ parseLog(log).percent }}%</template>
+                  </span>
+                  <span v-if="index === 0" class="inline-flex items-center gap-1 font-bold text-blue-600"><CheckCircle2 :size="12" />最新</span>
+                </div>
+                <p v-if="parseLog(log).body" :class="['mt-1 text-sm font-medium leading-snug break-words', index === 0 ? 'text-navy-900' : 'text-slate-600']">{{ parseLog(log).body }}</p>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                  <span v-if="parseLog(log).agent">提交：<b class="text-slate-700">{{ parseLog(log).agent }}</b></span>
+                  <a v-if="parseLog(log).source" :href="parseLog(log).source!" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 underline underline-offset-2 break-all">
+                    <ExternalLink :size="11" />來源
+                  </a>
+                </div>
               </div>
             </div>
           </div>
