@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, SKIP_MEMORY_HOURS, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, SKIP_MEMORY_HOURS, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
@@ -74,18 +74,24 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, inFlightByTaskRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open").order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20),
+      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open")
+        // 派過的排到後面（2026-09-17 小良哥：「任務自己要有個時間戳，派過就向後排」）：
+        // 原本只按 priority／created_at 排，最舊的那幾筆永遠佔著 pickManualTask 的前 3 名視窗。
+        .order("priority", { ascending: false }).order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
       // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
       supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
         .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).limit(1000),
+      // 每個任務底下還在等票的貢獻數：滿了就先不要再派這個任務（見 filterSaturatedTasks）
+      supabase.from("contributions").select("task_id").in("status", ["pending", "verified", "disputed"])
+        .not("task_id", "is", null).limit(5000),
       // 任何人回報過「查了沒東西」且還在等票的任務：期間不要再派給別人重查
       supabase.from("contributions").select("payload")
         .eq("contribution_type", "no_change").in("status", ["pending", "verified"]).limit(500),
@@ -119,6 +125,12 @@ Deno.serve(async (req) => {
     const mySubmittedTaskIds = new Set<string>([...((mySubmittedRes.data ?? []) as any[]), ...((myAnswersRes.data ?? []) as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
+    // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派
+    const inFlightByTask = new Map<string, number>();
+    for (const r of ((inFlightByTaskRes.data ?? []) as any[])) {
+      const id = r.task_id;
+      if (typeof id === "string") inFlightByTask.set(id, (inFlightByTask.get(id) ?? 0) + 1);
+    }
     const deadEndTaskIds = new Set<string>(((deadEndRes.data ?? []) as any[])
       .map((r) => (r.payload && typeof r.payload === "object" ? r.payload.task_id : null))
       .filter((v): v is string => typeof v === "string"));
@@ -264,15 +276,17 @@ Deno.serve(async (req) => {
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
     // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
+    const freeManual = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
       filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
-    ), deadEndTaskIds), skippedTaskIds);
+    ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
     if (freeManual.length > 0) {
       // 依 priority 分層挑，不要整池隨機——否則 priority 與提問的表態數都是白寫的
       const t = pickManualTask(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
+      // 派出就蓋章，下一次排到後面（自動缺口是即時算出來的，沒有列可蓋）
+      await supabase.from("contribution_tasks").update({ last_dispatched_at: new Date().toISOString() }).eq("id", t.id);
       return json({
         ...base,
         kind: "task",
@@ -289,10 +303,10 @@ Deno.serve(async (req) => {
     const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
-    const freeAuto = filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
+    const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
       filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
-    ), deadEndTaskIds), skippedTaskIds);
+    ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
     const t = freeAuto[0];
     if (!t) {
       const all = (autoRes.data ?? []) as AutoTask[];

@@ -38,6 +38,8 @@ export interface TaskContextData {
   elections?: Obj[];
   policies?: Obj[];
   policies_total?: number;
+  /** policy_missing：這個人還在等票的政見提交（避免重複查同一件事） */
+  queued_policies?: Obj[];
   policy?: Obj | null;
   tracking_logs?: Obj[];
   politician_election?: Obj | null;
@@ -65,11 +67,21 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
   switch (taskType) {
     case "policy_missing": {
       const list = (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"]));
+      // 已經有人交、還在等票的：交一樣的東西不會加分，看到同一件事請去投它的票
+      const queued = (data.queued_policies ?? []).map((c) => ({
+        contribution_id: c.id,
+        title: (c.payload && typeof c.payload === "object" ? (c.payload as Obj).title : null) ?? null,
+        agent_name: c.agent_name ?? null,
+      })).filter((x) => typeof x.title === "string" && x.title.length > 0);
       return {
         politician: p ? { ...pick(p, POLITICIAN_BRIEF), has_avatar: !!p.avatar_url } : null,
         elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "source_note"])),
         existing_policies: list,
         existing_policies_total: data.policies_total ?? (data.policies ?? []).length,
+        queued_policies: queued,
+        queued_policies_note: queued.length > 0
+          ? `已經有 ${queued.length} 筆在等票，內容重複的不要再交；找到同一件事請改去投那一筆的票。`
+          : null,
       };
     }
     case "policy_validity":
@@ -187,13 +199,20 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     }
   }
   if (taskType === "policy_missing" && pid) {
-    const [el, pol] = await Promise.all([
+    const [el, pol, queued] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
       supabase.from("policies").select("id, title, category, status", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
+      // 還在等票的提交也要給代理看見（2026-09-17 小良哥：「輪到這種任務時，要先問是不是
+      // 已經有類似的政見了」）。只列已上線的害慘了李四川：21 筆等票的沒被列出來，
+      // 代理看不到「居住新五箭」已經交過三次，於是交了第四次。
+      supabase.from("contributions").select("id, payload, agent_name")
+        .eq("contribution_type", "policy").in("status", ["pending", "verified"])
+        .eq("payload->>politician_id", pid).order("created_at", { ascending: false }).limit(MAX_EXISTING_POLICIES),
     ]);
     data.elections = el.data ?? [];
     data.policies = pol.data ?? [];
     data.policies_total = pol.count ?? (data.policies ?? []).length;
+    data.queued_policies = queued.data ?? [];
   }
   if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity") && policyId) {
     const [pl, logs] = await Promise.all([
