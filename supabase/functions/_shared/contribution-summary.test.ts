@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, leaderboardScore, safePayload, summarizeContribution } from "./contribution-summary.ts";
+import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, leaderboardScore, safePayload, summarizeContribution, CONTRIBUTORS_WINDOW_DAYS } from "./contribution-summary.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
@@ -249,4 +249,32 @@ Deno.test("correction 有標題就用標題，沒有才退回 id 前八碼", () 
     applied_politician_id: null, applied_policy_id: null,
   }).summary;
   assertEquals(withoutTitle, "把政見 1b808b02 的所屬選舉改為「2024」");
+});
+
+// 統計從 2026-09-17 起改在資料庫算（contribution_feed_summary），TS 這份變成規格。
+// 兩份規則一漂開，畫面上的數字就會跟協議講的不一樣，而且不會有人發現——所以守住。
+async function summarySql(): Promise<string> {
+  const dir = new URL("../../migrations/", import.meta.url);
+  const names: string[] = [];
+  for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  for (const name of names.sort().reverse()) {
+    const sql = await Deno.readTextFile(new URL(name, dir));
+    if (sql.includes("CREATE OR REPLACE FUNCTION contribution_leaderboard")) return sql;
+  }
+  throw new Error("找不到定義 contribution_leaderboard 的 migration");
+}
+
+Deno.test("SQL 的貢獻榜規則要跟 TS 這份一致：排除名單、榜長、分數、同分排序", async () => {
+  const sql = await summarySql();
+  for (const name of EXCLUDED_AGENTS) {
+    assert(sql.includes(`'${name}'`), `SQL 的排除名單少了 ${name}`);
+  }
+  assert(sql.includes(`LIMIT ${LEADERBOARD_SIZE}`), `SQL 的榜長要是 ${LEADERBOARD_SIZE}`);
+  assert(sql.includes("submitted + applied + verified_votes"), "SQL 的分數要是三項相加");
+  assert(
+    sql.includes("ORDER BY submitted + applied + verified_votes DESC, applied DESC, submitted DESC"),
+    "SQL 同分時要先看上線、再看提交",
+  );
+  assert(sql.includes("Asia/Taipei"), "每日統計要用台灣時間分日");
+  assert(sql.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);
 });

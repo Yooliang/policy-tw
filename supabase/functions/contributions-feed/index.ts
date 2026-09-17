@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { requiredAgree } from "../_shared/consensus.ts";
-import { ATTENTION_STATUSES, buildFeedSummary, safePayload, type SummaryRow, summarizeContribution, type VoteRow } from "../_shared/contribution-summary.ts";
+import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
@@ -45,13 +45,21 @@ Deno.serve(async (req) => {
     if (type) q = q.eq("contribution_type", type);
     if (cursor) q = q.lt("created_at", cursor);
 
-    const [feedRes, allRes, votesRes, adjRes] = await Promise.all([
+    // 統計只在第一頁算（2026-09-17 小良哥：「會不會造成伺服器的負擔？」）。
+    // 翻頁時前端根本不會用 summary——它只在第一次載入時覆寫——但伺服器原本每一頁都
+    // 重新掃一次全表。資料每天 +400 筆，那個浪費會越長越大。
+    // 要整份撈是另一回事：PostgREST 一次最多回 1000 列，.limit(20000) 是騙自己的，
+    // 實際後果是貢獻榜的驗證票合計卡在 1000，之後的票一張都不算分。
+    // 統計在資料庫算（contribution_feed_summary，見 migration 20260917000012）：
+    // 一次 GROUP BY，不把上千列搬進函式。實測 808ms → 225ms，而且資料再長也是一次查詢。
+    // 仍只在第一頁算——翻頁用不到它。
+    const wantSummary = !cursor && url.searchParams.get("summary") !== "0";
+    const [feedRes, summaryRes] = await Promise.all([
       q,
-      supabase.from("contributions").select("status, agent_name, created_at").limit(10000),
-      supabase.from("contribution_votes").select("agent_name, created_at").limit(20000),
-      supabase.from("contribution_tasks").select("id", { count: "exact", head: true }).eq("task_type", "adjudicate").eq("status", "open"),
+      wantSummary ? supabase.rpc("contribution_feed_summary") : Promise.resolve({ data: null, error: null }),
     ]);
-    for (const r of [feedRes, allRes, votesRes, adjRes]) if (r.error) throw new Error(r.error.message);
+    if (feedRes.error) throw new Error(feedRes.error.message);
+    if (summaryRes.error) throw new Error(`summary: ${summaryRes.error.message}`);
 
     // deno-lint-ignore no-explicit-any
     const rows = (feedRes.data ?? []) as any[];
@@ -159,8 +167,8 @@ Deno.serve(async (req) => {
       };
     });
 
-    // summary（純函式，見 contribution-summary.ts）
-    const summary = buildFeedSummary((allRes.data ?? []) as SummaryRow[], (votesRes.data ?? []) as VoteRow[], Date.now(), adjRes.count ?? 0);
+    // 翻頁時回 null，前端沿用第一頁那份
+    const summary = (summaryRes.data ?? null) as FeedSummary | null;
 
     return json({
       success: true,
