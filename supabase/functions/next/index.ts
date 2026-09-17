@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -86,17 +86,25 @@ Deno.serve(async (req) => {
         // 原本只按 priority／created_at 排，最舊的那幾筆永遠佔著 pickManualTask 的前 3 名視窗。
         .order("priority", { ascending: false }).order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
-      supabase.from("contributions").select("payload").eq("contribution_type", "adjudication").in("status", ["pending", "verified"]).limit(500),
+      fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
+        supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
+          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)),
       // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
-      supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
-        .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).limit(1000),
+      fetchAllRows<{ task_id: string }>("my submitted tasks", (from, to) =>
+        supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
+          .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to)),
       // 任何人回報過「查了沒東西」且還在等票的任務：期間不要再派給別人重查
-      supabase.from("contributions").select("payload")
-        .eq("contribution_type", "no_change").in("status", ["pending", "verified"]).limit(500),
+      fetchAllRows<{ payload: Record<string, unknown> }>("no_change reports", (from, to) =>
+        supabase.from("contributions").select("payload").eq("contribution_type", "no_change")
+          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)),
       // 這個代理投過票的貢獻（同代號或同來源 IP）。裁決要排掉這些：
       // 對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
-      supabase.from("contribution_votes").select("contribution_id")
-        .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`).limit(2000),
+      // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
+      // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
+      fetchAllRows<{ contribution_id: string }>("my votes", (from, to) =>
+        supabase.from("contribution_votes").select("contribution_id")
+          .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`)
+          .order("created_at", { ascending: true }).range(from, to)),
       // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
       // 所以這裡要按 ip_hash 數，按 agent_name 數會給出偏低的用量、讓代理以為還有很多。
       supabase.from("contributions").select("id", { count: "exact", head: true })
@@ -111,16 +119,16 @@ Deno.serve(async (req) => {
       supabase.from("contribution_task_skips").select("task_id").eq("ip_hash", ipHash)
         .gte("skipped_at", new Date(Date.now() - SKIP_MEMORY_HOURS * 3600 * 1000).toISOString()).limit(1000),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes]) {
+    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
     const skippedTaskIds = new Set<string>(((skipsRes.data ?? []) as any[]).map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     if (skipTaskId) skippedTaskIds.add(skipTaskId);
     // deno-lint-ignore no-explicit-any
-    const pendingAdjudicated = new Set<string>(((adjRes.data ?? []) as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
+    const pendingAdjudicated = new Set<string>((adjRows as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
-    const mySubmittedTaskIds = new Set<string>([...((mySubmittedRes.data ?? []) as any[]), ...((myAnswersRes.data ?? []) as any[])]
+    const mySubmittedTaskIds = new Set<string>([...(mySubmittedRows as any[]), ...((myAnswersRes.data ?? []) as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派。
@@ -137,11 +145,11 @@ Deno.serve(async (req) => {
       const id = r.task_id;
       if (typeof id === "string") inFlightByTask.set(id, (inFlightByTask.get(id) ?? 0) + 1);
     }
-    const deadEndTaskIds = new Set<string>(((deadEndRes.data ?? []) as any[])
+    const deadEndTaskIds = new Set<string>((deadEndRows as any[])
       .map((r) => (r.payload && typeof r.payload === "object" ? r.payload.task_id : null))
       .filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
-    const myVotedOriginalIds = new Set<string>(((myVotedOnRes.data ?? []) as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
+    const myVotedOriginalIds = new Set<string>((myVotedOnRows as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
 
     type PendingRow = {
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
