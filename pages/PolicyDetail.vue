@@ -396,6 +396,17 @@ usePageHead({
                 </div>
               </div>
             </div>
+            <!-- 公民提問併進同一張卡，用分隔線隔開（2026-09-17 小良哥）：
+                 它問的就是這一筆政見，不該自己占一張卡 -->
+            <div class="mt-6 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 class="font-bold text-navy-900 flex items-center gap-2"><MessageCircleQuestion :size="18" class="text-blue-600" />公民提問</h3>
+                <p class="text-sm text-slate-500 mt-1">想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。</p>
+              </div>
+              <button @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0">
+                前往提問
+              </button>
+            </div>
           </div>
 
           <!-- Sources -->
@@ -432,17 +443,6 @@ usePageHead({
             >
               查看更多（共 {{ sources.length }} 筆）
               <ChevronRight :size="14" />
-            </button>
-          </div>
-
-          <!-- Citizen Questions -->
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-              <h3 class="text-lg font-bold text-navy-900 flex items-center gap-2"><MessageCircleQuestion class="text-blue-600" />公民提問</h3>
-              <p class="text-sm text-slate-500 mt-1">想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。</p>
-            </div>
-            <button @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors">
-              前往提問
             </button>
           </div>
 
