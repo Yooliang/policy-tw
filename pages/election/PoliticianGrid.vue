@@ -67,9 +67,27 @@ const candidateStatusColor = (status?: CandidateStatus) => {
   }
 }
 
-// 只有 confirmed/elected 狀態才顯示選區（中選會正式資料）
+// 只有 confirmed/elected 狀態才顯示「細到鄉鎮／村里」的選區（中選會正式資料）
 const shouldShowSubRegion = (status?: CandidateStatus) => {
   return status === 'confirmed' || status === 'registered' || status === 'qualified' || status === 'elected' || status === 'defeated'
+}
+
+/**
+ * 卡片上的選區（2026-09-18 小良哥：「將選區也顯示出來吧」）。
+ * 原本只顯示 subRegion，而縣市長的選區就是那個縣市本身——於是整頁 87 位縣市長參選人
+ * 一個都看不出要選哪裡。縣市先顯示，鄉鎮／村里只在中選會正式資料時才加上去。
+ */
+const formatArea = (politician: Politician): string | null => {
+  const parts = [politician.region]
+  // 縣市長的選區就是那個縣市。politicians.sub_region 存的是這個人自己的身份
+  // （例如鄭運鵬是桃園市第01選區的立委），印在縣市長卡片上會變成
+  // 「縣市長候選人 ＋ 立委選區」這種讀不通的東西——177 位裡有 64 位會這樣。
+  const isCityWide = politician.electionType === '縣市長'
+  if (!isCityWide && (politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)) {
+    parts.push(formatSubRegion(politician) ?? '')
+  }
+  const out = parts.filter(Boolean).join(' ')
+  return out || null
 }
 
 // 格式化選區顯示（村里長顯示 "XX區 XX里"）
@@ -136,10 +154,12 @@ const noteUrl = (note?: string) => splitNote(note).url
               </div>
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
-                <span v-if="(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)" class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatSubRegion(politician) }}</span>
-                <p v-if="displayNote(politician.sourceNote) || noteUrl(politician.sourceNote)" class="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
-                  <span v-if="displayNote(politician.sourceNote)">{{ displayNote(politician.sourceNote) }}</span>
-                  <a v-if="noteUrl(politician.sourceNote)" :href="noteUrl(politician.sourceNote)!" target="_blank" rel="noopener" class="ml-1 text-violet-500 hover:underline" @click.stop>來源</a>
+                <span v-if="formatArea(politician)" class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatArea(politician) }}</span>
+                <!-- 同一句登記名單來源在 42 張卡上一字不差地重複（2026-09-18 小良哥：「反而不用一直重複」），
+                     那是整批匯入時寫進每一列的 source_note。卡片只留一個「來源」連結，滑過去才看得到那句話。 -->
+                <p v-if="displayNote(politician.sourceNote) || noteUrl(politician.sourceNote)" class="text-xs text-slate-400 mt-1">
+                  <a v-if="noteUrl(politician.sourceNote)" :href="noteUrl(politician.sourceNote)!" :title="displayNote(politician.sourceNote) ?? '來源'" target="_blank" rel="noopener" class="text-violet-500 hover:underline" @click.stop>來源</a>
+                  <span v-else class="line-clamp-2 break-words">{{ displayNote(politician.sourceNote) }}</span>
                 </p>
               </div>
             </div>

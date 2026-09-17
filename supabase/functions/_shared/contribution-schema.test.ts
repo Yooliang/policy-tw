@@ -47,8 +47,12 @@ Deno.test("agent_name 必填；task_id 可帶", () => {
 
 Deno.test("來源優先等級只做分類，不擋提交：任意 host 可通過，缺來源／非 URL 退件", () => {
   assertEquals(sourceKind("https://db.cec.gov.tw/x"), "official");
-  assertEquals(sourceKind("https://www.chcg.gov.tw/"), "official");           // 縣政府 *.gov.tw
-  assertEquals(sourceKind("https://www.gov.taipei/"), "official");
+  // 2026-09-17 起首頁一律降到最低等級：官方網域的首頁看不到那筆事實，
+  // 卻跟公報的實際那一頁一樣只要 2 票——實查有 46 筆這樣的來源，6 筆吵成爭議。
+  assertEquals(sourceKind("https://www.chcg.gov.tw/news/123"), "official");   // 縣政府 *.gov.tw 的內頁
+  assertEquals(sourceKind("https://www.gov.taipei/News_Content.aspx?n=1"), "official");
+  assertEquals(sourceKind("https://www.chcg.gov.tw/"), "other", "首頁撐不起具體宣稱");
+  assertEquals(sourceKind("https://www.gov.taipei/"), "other", "首頁撐不起具體宣稱");
   assertEquals(sourceKind(CNA), "media");
   assertEquals(sourceKind("https://www.facebook.com/someone/posts/1"), "social");
   assertEquals(sourceKind("https://zh.wikipedia.org/wiki/x"), "other");
