@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import { PolicyStatus } from '../types'
@@ -46,22 +47,17 @@ useRegionQuerySync({ routeName: 'tracking', extra: {
   category: queryField(selectedCategory, 'All'),
   view: queryField(view, 'all', { allowed: ['all', 'mine'] as const }),
 } })
-const checkpoints = ref<string[]>([])
+// 我的追蹤改走 useCheckpoints（2026-09-17）
+const { checkpoints } = useCheckpoints()
 
 
-const loadCheckpoints = () => {
-  checkpoints.value = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
-}
 
 onMounted(() => {
   // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
   ensurePolicies()
-  loadCheckpoints()
-  window.addEventListener('checkpoints_updated', loadCheckpoints)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('checkpoints_updated', loadCheckpoints)
 })
 
 const filteredPolicies = computed(() => {

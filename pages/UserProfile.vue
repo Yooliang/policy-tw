@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useCheckpoints } from '../composables/useCheckpoints'
 import { useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -115,12 +116,8 @@ function formatDate(dateStr: string | null): string {
 }
 
 // === 我的追蹤 ===
-const LS_KEY = 'zhengjian_checkpoints'
-const checkpoints = ref<string[]>([])
-
-const loadCheckpoints = () => {
-  try { checkpoints.value = JSON.parse(localStorage.getItem(LS_KEY) || '[]') } catch { checkpoints.value = [] }
-}
+// 改走 useCheckpoints（2026-09-17）：登入後與帳號同步，換裝置也帶得走
+const { checkpoints, syncing: checkpointSyncing, synced: checkpointSynced } = useCheckpoints()
 
 const trackedPolicies = computed(() => policies.value.filter(policy => checkpoints.value.includes(policy.id)))
 
@@ -128,15 +125,12 @@ const trackedPolicies = computed(() => policies.value.filter(policy => checkpoin
 onMounted(() => {
   // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
   ensurePolicies()
-  loadCheckpoints()
-  window.addEventListener('checkpoints_updated', loadCheckpoints)
   agentName.value = readStoredAgentName()
   agentInput.value = agentName.value
   if (agentName.value) loadContributions()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('checkpoints_updated', loadCheckpoints)
 })
 
 // === 設定 ===
@@ -282,7 +276,12 @@ usePageHead({ title: '個人頁面', noindex: true })
               <Star class="w-5 h-5 text-amber-500" />
               我的追蹤
               <span class="text-sm font-normal text-slate-500">({{ trackedPolicies.length }} 項)</span>
+              <Loader2 v-if="checkpointSyncing" :size="14" class="animate-spin text-slate-400" />
             </h3>
+            <!-- 講清楚這份清單存在哪：登入前後行為不同，使用者有權知道換裝置會不會跟著走 -->
+            <p class="-mt-4 mb-6 text-xs text-slate-400">
+              {{ checkpointSynced ? '已與你的帳號同步，換裝置登入後也看得到。' : '目前只存在這個瀏覽器；登入後會同步到你的帳號。' }}
+            </p>
 
             <div v-if="trackedPolicies.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <template v-for="policy in trackedPolicies" :key="policy.id">

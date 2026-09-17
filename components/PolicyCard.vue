@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
 import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
 import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyYear } from '../lib/policy-date'
+import { useCheckpoints } from '../composables/useCheckpoints'
 
 const props = withDefaults(defineProps<{
   policy: Policy
@@ -25,36 +26,16 @@ const props = withDefaults(defineProps<{
 }>(), { showPolitician: true, showStatus: true })
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
-const isCheckpointed = ref(false)
 
-const loadCheckpoint = () => {
-  const checkpoints = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
-  isCheckpointed.value = checkpoints.includes(props.policy.id)
-}
+// 我的追蹤改走 useCheckpoints（2026-09-17）：原本這裡直接讀寫 localStorage，
+// 四個地方各寫一份，而且登入與否毫無差別——換台機器就全沒了。
+const { isCheckpointed: has, toggle } = useCheckpoints()
+const isCheckpointed = computed(() => has(props.policy.id))
 
 const toggleCheckpoint = (e: Event) => {
   e.stopPropagation()
-  const checkpoints = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
-  let newCheckpoints: string[]
-  if (isCheckpointed.value) {
-    newCheckpoints = checkpoints.filter((id: string) => id !== props.policy.id)
-  } else {
-    newCheckpoints = [...checkpoints, props.policy.id]
-  }
-
-  localStorage.setItem('zhengjian_checkpoints', JSON.stringify(newCheckpoints))
-  isCheckpointed.value = !isCheckpointed.value
-  window.dispatchEvent(new Event('checkpoints_updated'))
+  toggle(props.policy.id)
 }
-
-onMounted(() => {
-  loadCheckpoint()
-  window.addEventListener('checkpoints_updated', loadCheckpoint)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('checkpoints_updated', loadCheckpoint)
-})
 </script>
 
 <template>

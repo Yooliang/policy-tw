@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
+import { useCheckpoints } from '../composables/useCheckpoints'
 
 import { useSupabase } from '../composables/useSupabase'
 
@@ -16,14 +17,12 @@ import { usePageHead } from '../composables/usePageHead'
 const router = useRouter()
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
 
-const checkpointIds = ref<string[]>([])
+// 我的追蹤改走 useCheckpoints（2026-09-17）：登入後會與帳號同步，未登入照舊只存瀏覽器
+const { checkpoints: checkpointIds } = useCheckpoints()
 const politicians2026CountDirect = ref<number | null>(null)
 const totalPoliticiansCount = ref<number | null>(null)
 const categoryDataFromDB = ref<{ name: string; count: number }[]>([])
 
-const loadCheckpoints = () => {
-  checkpointIds.value = JSON.parse(localStorage.getItem('zhengjian_checkpoints') || '[]')
-}
 
 // 載入首頁統計資料
 async function loadHomeStats() {
@@ -47,8 +46,6 @@ async function loadHomeStats() {
 onMounted(() => {
   // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
   ensurePolicies()
-  loadCheckpoints()
-  window.addEventListener('checkpoints_updated', loadCheckpoints)
   loadHomeStats()
 })
 
@@ -60,7 +57,6 @@ watch(() => elections.value.length, () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('checkpoints_updated', loadCheckpoints)
 })
 
 const checkpointPolicies = computed(() =>
