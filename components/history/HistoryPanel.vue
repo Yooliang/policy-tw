@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2 } from 'lucide-vue-next'
-import { fetchHistory, formatTime, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
+import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2, ThumbsUp, ThumbsDown, CircleHelp } from 'lucide-vue-next'
+import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 
 /**
@@ -68,9 +68,10 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         <History class="text-slate-400" :size="compact ? 18 : 22" /> {{ headline }}
         <Loader2 v-if="loading && total === null" :size="14" class="animate-spin text-slate-400" />
       </span>
-      <span class="text-xs text-slate-500 inline-flex items-center gap-1 whitespace-nowrap">
-        {{ open ? '收合' : (total === 0 ? '看來源' : '展開') }}
-        <component :is="open ? ChevronUp : ChevronDown" :size="16" />
+      <!-- 只留箭頭（2026-09-17 小良哥）：箭頭本身就在講開合，旁邊再寫「收合」是同一件事說兩次。
+           title 留著，滑過去與讀螢幕的人仍讀得到。 -->
+      <span class="text-slate-400" :title="open ? '收合' : (total === 0 ? '看來源' : '展開')">
+        <component :is="open ? ChevronUp : ChevronDown" :size="18" />
       </span>
     </button>
     <p v-if="!open && total !== null" class="mt-1 text-xs text-slate-500">
@@ -94,12 +95,18 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
       </div>
       <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
         <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
-          <span :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : 'bg-amber-400 ring-amber-100']"></span>
+          <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : 'bg-amber-400 ring-amber-100']"></span>
           <button type="button" class="w-full text-left" @click="toggleEntry(e.id)">
             <div class="flex flex-wrap items-center gap-2 text-xs">
-              <span class="font-mono text-slate-400">{{ formatTime(e.at) }}</span>
+              <span class="font-mono text-slate-400">{{ formatDate(e.at) }}</span>
               <span class="font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
-              <span :class="['font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
+              <!-- 已上線不再標籤（2026-09-17 小良哥）：左邊那顆綠點講的就是這件事。
+                   其他狀態留著——點只分得出綠（已上線）／橘（爭議）／琥珀（其餘），
+                   「待驗證」與「驗證中」靠這個標籤才分得出來。 -->
+              <span v-if="e.status !== 'applied'" :class="['font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
+              <!-- 改了幾處放在上面這一列（2026-09-17 小良哥）：它跟型別、狀態一樣是這筆的屬性，
+                   擺在下面那排跟「誰提交、幾票」混在一起，看的人要掃兩遍 -->
+              <span v-if="e.edits.length" class="text-slate-500">改動 {{ e.edits.length }} 處</span>
               <span v-if="e.reverted" class="text-amber-700 inline-flex items-center gap-1"><Undo2 :size="11" /> 已還原</span>
             </div>
             <!-- 一般大小就好（2026-09-17 小良哥）：這是履歷的一列，不是標題，
@@ -107,8 +114,13 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
             <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ e.summary }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>提交：<b class="text-slate-700">{{ e.agent_name ?? '?' }}</b><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
-              <span>驗證 {{ e.verifiers.length }} 人（同意 {{ e.agree_count }}／反對 {{ e.disagree_count }}／不確定 {{ e.unsure_count }}）</span>
-              <span v-if="e.edits.length">改動 {{ e.edits.length }} 處</span>
+              <!-- 票數改成三顆小膠囊（2026-09-17 小良哥）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」
+                   在一排中繼資料裡最長，但講的只是三個數字 -->
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 tabular-nums" title="同意"><ThumbsUp :size="11" />{{ e.agree_count }}</span>
+                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 tabular-nums" title="反對"><ThumbsDown :size="11" />{{ e.disagree_count }}</span>
+                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 tabular-nums" title="不確定"><CircleHelp :size="11" />{{ e.unsure_count }}</span>
+              </span>
               <span v-if="e.adjudications.length">有裁決</span>
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
             </div>

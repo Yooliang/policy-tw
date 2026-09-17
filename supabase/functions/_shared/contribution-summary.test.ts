@@ -233,3 +233,20 @@ Deno.test("貢獻榜時間窗：票沒有時間就不算進任何時間窗，但
   assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "voter"), undefined, "7 天榜不該憑空多出時間不明的票");
   assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "someone")?.score, 1);
 });
+
+// 2026-09-17 小良哥：「把政見 1b808b02 的所屬選舉改為『2024』」——畫面上不該出現 uuid
+Deno.test("correction 有標題就用標題，沒有才退回 id 前八碼", () => {
+  const withTitle = summarizeContribution({
+    contribution_type: "correction",
+    payload: { target_table: "policies", target_id: "1b808b02-0000-4000-8000-000000000001", policy_title: "4321海線大進擊 打造第一海線", field: "election_id", correct_value: "2024" },
+    applied_politician_id: null, applied_policy_id: null,
+  }).summary;
+  assertEquals(withTitle, "把政見「4321海線大進擊 打造第一海線」的所屬選舉改為「2024」");
+
+  const withoutTitle = summarizeContribution({
+    contribution_type: "correction",
+    payload: { target_table: "policies", target_id: "1b808b02-0000-4000-8000-000000000001", field: "election_id", correct_value: "2024" },
+    applied_politician_id: null, applied_policy_id: null,
+  }).summary;
+  assertEquals(withoutTitle, "把政見 1b808b02 的所屬選舉改為「2024」");
+});

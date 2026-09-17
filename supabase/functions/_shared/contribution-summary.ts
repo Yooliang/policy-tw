@@ -126,10 +126,27 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     case "correction": {
       const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
       const id = str(p.target_id);
+      // 標題／姓名優先，沒有才退回 id 前八碼（2026-09-17 小良哥：「把政見 1b808b02 的…」
+      // 這種畫面對讀者毫無意義）。呼叫端會先把 target_id 換成標題塞進 payload。
+      const targetLabel = str(p.target_table) === "policies"
+        ? str(p.policy_title)
+        : str(p.target_table) === "politicians"
+        ? str(p.name)
+        // 參選紀錄的列 id（9827）對讀者沒有意義，呼叫端會查成「某某某 2026 縣市議員」
+        : str(p.target_label);
+      // 沒有標題時維持舊格式「政見 abcdef12 的…」，那個空白是格式的一部分
+      const what = targetLabel ? `${table}「${clip(targetLabel, 40)}」` : `${table} ${id.slice(0, 8)} `;
+      // 值也要看得懂：candidate_status／status 是固定 enum，翻成中文；其餘照原樣印
+      const valueLabel = (field: string, v: unknown): string => {
+        const raw = clip(v, 80);
+        if (field === "candidate_status") return CANDIDATE_STATUS_LABEL[raw] ?? raw;
+        if (field === "status") return POLICY_STATUS_LABEL[raw] ?? raw;
+        return raw;
+      };
       const { changes } = normalizeCorrection(p);
       summary = changes.length <= 1
-        ? `把${table} ${id.slice(0, 8)} 的${FIELD_LABEL[changes[0]?.field ?? ""] ?? changes[0]?.field ?? "?"}改為「${clip(changes[0]?.correct_value, 80)}」`
-        : `更正${table} ${id.slice(0, 8)} 的 ${changes.length} 個欄位：${changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}→「${clip(c.correct_value, 40)}」`).join("、")}`;
+        ? `把${what}的${FIELD_LABEL[changes[0]?.field ?? ""] ?? changes[0]?.field ?? "?"}改為「${valueLabel(changes[0]?.field ?? "", changes[0]?.correct_value)}」`
+        : `更正${what}的 ${changes.length} 個欄位：${changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}→「${valueLabel(c.field, c.correct_value)}」`).join("、")}`;
       targetName = null;
       if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null);
       if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);

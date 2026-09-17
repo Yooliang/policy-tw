@@ -66,6 +66,45 @@ Deno.serve(async (req) => {
       const pid = typeof p.politician_id === "string" ? p.politician_id : null;
       return !hasName && pid ? [pid] : [];
     }))];
+    // 政見標題同理（2026-09-17 小良哥：「政見 aa6d7871」不該出現在畫面上）：
+    // policy_progress／policy_source 這些只帶 policy_id，摘要取不到標題就印 id 前八碼。
+    // deno-lint-ignore no-explicit-any
+    const idsNeedingTitle = [...new Set(page.flatMap((r: any) => {
+      const p = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
+      const hasTitle = typeof p.policy_title === "string" && p.policy_title.trim().length > 0;
+      const pid = typeof p.policy_id === "string"
+        ? p.policy_id
+        : (p.target_table === "policies" && typeof p.target_id === "string" ? p.target_id : null);
+      return !hasTitle && pid ? [pid] : [];
+    }))];
+    const titleById = new Map<string, string>();
+    if (idsNeedingTitle.length > 0) {
+      const { data: pol, error: polErr } = await supabase.from("policies").select("id, title").in("id", idsNeedingTitle);
+      if (polErr) throw new Error(`policy titles: ${polErr.message}`);
+      // deno-lint-ignore no-explicit-any
+      for (const x of (pol ?? []) as any[]) titleById.set(x.id, x.title);
+    }
+
+    // 參選紀錄（politician_elections）的列 id 同樣要換成人看得懂的字：
+    // 「把參選紀錄 9827 的參選狀態改為…」→「把參選紀錄「王小明 2026 縣市議員」的…」
+    // deno-lint-ignore no-explicit-any
+    const electionRowIds = [...new Set(page.flatMap((r: any) => {
+      const p = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
+      return p.target_table === "politician_elections" && (typeof p.target_id === "string" || typeof p.target_id === "number")
+        ? [String(p.target_id)]
+        : [];
+    }))];
+    const electionLabelById = new Map<string, string>();
+    if (electionRowIds.length > 0) {
+      const { data: pe } = await supabase.from("politician_elections")
+        .select("id, election_id, election_type, politicians(name)").in("id", electionRowIds);
+      // deno-lint-ignore no-explicit-any
+      for (const x of (pe ?? []) as any[]) {
+        const who = x.politicians?.name ?? "未指名";
+        electionLabelById.set(String(x.id), `${who} ${x.election_id ?? ""} ${x.election_type ?? ""}`.trim());
+      }
+    }
+
     const nameById = new Map<string, string>();
     if (idsNeedingName.length > 0) {
       const { data: who, error: whoErr } = await supabase.from("politicians").select("id, name").in("id", idsNeedingName);
@@ -78,7 +117,22 @@ Deno.serve(async (req) => {
       const raw = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
       const hasName = typeof raw.name === "string" && raw.name.trim().length > 0;
       const resolved = !hasName && typeof raw.politician_id === "string" ? nameById.get(raw.politician_id) : undefined;
-      const payloadForSummary = resolved ? { ...raw, name: resolved } : r.payload;
+      const hasTitle = typeof raw.policy_title === "string" && raw.policy_title.trim().length > 0;
+      const titleKey = typeof raw.policy_id === "string"
+        ? raw.policy_id
+        : (raw.target_table === "policies" && typeof raw.target_id === "string" ? raw.target_id : null);
+      const resolvedTitle = !hasTitle && titleKey ? titleById.get(titleKey) : undefined;
+      const resolvedElection = raw.target_table === "politician_elections" && (typeof raw.target_id === "string" || typeof raw.target_id === "number")
+        ? electionLabelById.get(String(raw.target_id))
+        : undefined;
+      const payloadForSummary = (resolved || resolvedTitle || resolvedElection)
+        ? {
+          ...raw,
+          ...(resolved ? { name: resolved } : {}),
+          ...(resolvedTitle ? { policy_title: resolvedTitle } : {}),
+          ...(resolvedElection ? { target_label: resolvedElection } : {}),
+        }
+        : r.payload;
       const s = summarizeContribution({ contribution_type: r.contribution_type, payload: payloadForSummary, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
       const need = requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []);
       return {
