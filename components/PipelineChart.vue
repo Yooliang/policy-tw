@@ -41,6 +41,20 @@ function toggleMetric(key: MetricKey) {
   visible.value = next
 }
 
+/**
+ * 兩種看法（2026-09-17 小良哥交代做成兩個按鈕）：
+ *   數量＝所有線共用一條 Y 軸，可以直接比誰多、差多少；小的那幾條會貼著底。
+ *   走勢＝每條線各自一條 Y 軸，看的是各自在漲多少；線之間的高低沒有意義。
+ * 預設走勢：這張圖要回答的是「機制有沒有在跑」，而已上線累計 167 擺在待驗證 980
+ * 旁邊時，它整整一天的成長不到一個像素。
+ */
+const SCALE_MODES = [
+  { key: 'trend', label: '走勢', hint: '每條線各自縮放，看各自漲多少' },
+  { key: 'absolute', label: '數量', hint: '共用一條刻度，直接比大小' },
+] as const
+type ScaleMode = (typeof SCALE_MODES)[number]['key']
+const scaleMode = ref<ScaleMode>('trend')
+
 const latest = computed(() => snapshots.value[snapshots.value.length - 1] ?? null)
 const pointsNeeded = computed(() => Math.max(0, MIN_POINTS_FOR_CHART - snapshots.value.length))
 
@@ -85,18 +99,16 @@ const chartOptions = computed(() => ({
     axisTicks: { show: false },
     tooltip: { enabled: false },
   },
-  /**
-   * 每條線各自一條 Y 軸（2026-09-17 小良哥：「綠色線還是躺在地上」）。
-   * 共用一條軸時，已上線累計 165 跟待驗證貢獻 910 畫在同一張 0～1000 的圖上，
-   * 它五天成長的十幾筆只有一個像素，看起來像沒在動——但它其實一直在漲。
-   * 軸刻度只在單選一條時顯示：多條線共用一組刻度反而是假的，數值看提示框與上面的數字。
-   */
-  yaxis: visibleMetrics.value.map((m, i) => ({
-    seriesName: m.label,
-    show: visibleMetrics.value.length === 1 && i === 0,
-    labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
-    forceNiceScale: true,
-  })),
+  // 數量＝一條共用的軸（從 0 起跳才比得出倍數）；走勢＝每條線一條軸、刻度只在單選時顯示，
+  // 多條線共用一組刻度反而是假的，數值看標籤上的數字與提示框。
+  yaxis: scaleMode.value === 'absolute'
+    ? { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 }
+    : visibleMetrics.value.map((m, i) => ({
+      seriesName: m.label,
+      show: visibleMetrics.value.length === 1 && i === 0,
+      labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
+      forceNiceScale: true,
+    })),
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9' },
   legend: { show: false },
   // 樣本還少的時候把採樣點畫出來，讀者才看得出這是一次次的採樣而不是連續曲線
@@ -109,7 +121,16 @@ onMounted(fetchSnapshots)
 
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6" data-testid="pipeline-chart">
-    <h3 class="font-black text-navy-900 mb-4">運作狀態</h3>
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <h3 class="font-black text-navy-900">運作狀態</h3>
+      <div v-if="snapshots.length >= MIN_POINTS_FOR_CHART" class="flex rounded-lg border border-slate-200 overflow-hidden" data-testid="scale-mode">
+        <button v-for="m in SCALE_MODES" :key="m.key" type="button" :title="m.hint"
+          :class="['px-3 py-1 text-xs font-bold transition-colors', scaleMode === m.key ? 'bg-navy-900 text-white' : 'bg-white text-slate-500 hover:bg-slate-50']"
+          :aria-pressed="scaleMode === m.key" @click="scaleMode = m.key">
+          {{ m.label }}
+        </button>
+      </div>
+    </div>
 
     <p v-if="error" class="text-sm text-red-600">運作狀態暫時讀不到</p>
 
@@ -146,8 +167,8 @@ onMounted(fetchSnapshots)
       <div class="h-64">
         <ClientOnly><apexchart type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
       </div>
-      <p v-if="visibleMetrics.length > 1" class="text-xs text-slate-400 mt-2">
-        每條線各自縮放，看的是各自的成長幅度；實際數值在標籤上與滑過去的提示框裡。
+      <p v-if="scaleMode === 'trend' && visibleMetrics.length > 1" class="text-xs text-slate-400 mt-2">
+        每條線各自縮放，看的是各自的成長幅度；要比大小請切到「數量」。
       </p>
       <p v-if="snapshots.length < 6" class="text-xs text-slate-400 mt-2">
         目前累積 {{ snapshots.length }} 個採樣點（每小時一個），走勢還很短；累積滿一天之後會更看得出變化。
