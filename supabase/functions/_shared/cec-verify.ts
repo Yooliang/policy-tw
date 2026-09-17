@@ -17,6 +17,23 @@ import type { CecCandidacy } from "./cec-candidate.ts";
 /** 可自動查證的貢獻型別 */
 export const CEC_VERIFIABLE_TYPES = ["candidacy", "politician"] as const;
 
+/**
+ * 掃描要從第幾筆開始。
+ *
+ * 2026-09-17 掛上 10 分鐘排程時發現的死循環：被判 skip 的貢獻仍然是 pending，
+ * 所以「取最舊的 20 筆」每一輪都取到同樣那 20 筆——排程跑一整天也碰不到後面的 440 筆。
+ * 手動觸發時看不出來，因為只跑一兩輪。
+ *
+ * 用時間切片輪流掃過整個佇列，不必額外存游標：每一輪往後挪一批，繞完一圈回到開頭。
+ * 尾巴不足一批時退回「最後一批」，避免最後幾筆永遠只被掃到半批。
+ */
+export function scanOffset(total: number, limit: number, slot: number): number {
+  if (total <= limit || limit <= 0) return 0;
+  const batches = Math.ceil(total / limit);
+  const offset = (((slot % batches) + batches) % batches) * limit;
+  return Math.min(offset, total - limit);
+}
+
 export interface VerifiableClaim {
   contribution_type: string;
   payload: Record<string, unknown>;

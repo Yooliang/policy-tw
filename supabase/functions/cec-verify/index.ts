@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { attachTickets, CEC_DATA_URL, CEC_QUERY_URL, type CecCandidacy, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
-import { CEC_VERIFIABLE_TYPES, decideByCec } from "../_shared/cec-verify.ts";
+import { CEC_VERIFIABLE_TYPES, decideByCec, scanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
 
 /**
@@ -54,10 +54,24 @@ Deno.serve(async (req) => {
     // ?dry_run=1：只回會怎麼判，不寫任何東西（上線前先看一輪）
     const dryRun = url.searchParams.get("dry_run") === "1";
 
+    // 掃描視窗每一輪往後挪一批（見 _shared/cec-verify.ts 的 scanOffset）：
+    // 判成 skip 的仍然是 pending，固定取最舊的一批會讓排程永遠掃同樣那幾筆。
+    // ?offset= 可以指定，手動複查某一段時用。
+    const { count, error: countError } = await supabase.from("contributions")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending").in("contribution_type", [...CEC_VERIFIABLE_TYPES]);
+    if (countError) throw new Error(`contributions count: ${countError.message}`);
+    const total = count ?? 0;
+    const asked = Number(url.searchParams.get("offset"));
+    // 一格＝一次排程間隔（10 分鐘）；用時間切片輪流，不必另外存游標
+    const offset = Number.isFinite(asked) && asked >= 0
+      ? Math.min(Math.trunc(asked), Math.max(0, total - limit))
+      : scanOffset(total, limit, Math.floor(Date.now() / (10 * 60 * 1000)));
+
     const { data: rows, error } = await supabase.from("contributions")
       .select("id, contribution_type, payload, agent_name, created_at")
       .eq("status", "pending").in("contribution_type", [...CEC_VERIFIABLE_TYPES])
-      .order("created_at", { ascending: true }).limit(limit);
+      .order("created_at", { ascending: true }).range(offset, offset + limit - 1);
     if (error) throw new Error(`contributions scan: ${error.message}`);
 
     const cache = new Map<string, CecCandidacy[]>();
@@ -145,7 +159,7 @@ Deno.serve(async (req) => {
       results.push({ ...base, matched: decision.matched });
     }
 
-    return json({ success: true, dry_run: dryRun, scanned: rows?.length ?? 0, applied, rejected, skipped, results });
+    return json({ success: true, dry_run: dryRun, queue_total: total, offset, scanned: rows?.length ?? 0, applied, rejected, skipped, results });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("cec-verify error:", message);

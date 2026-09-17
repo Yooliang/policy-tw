@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { attachTickets, normalizeCandidacies, withoutFutureResults } from "./cec-candidate.ts";
-import { decideByCec } from "./cec-verify.ts";
+import { decideByCec, scanOffset } from "./cec-verify.ts";
 
 // 2026-09-17 對中選會實抓的蔡易餘（2024 當選、2012 落選）
 const RAW = [
@@ -103,4 +103,22 @@ Deno.test("同名同姓但縣市對不上：不碰（2026-09-17 乾跑實例）"
 Deno.test("我們沒記縣市就不敢判", () => {
   const d = decideByCec({ contribution_type: "politician", payload: { name: "蔡易餘", birth_year: 1981 }, politician: { region: null } }, LIST());
   assertEquals(d.action, "skip");
+});
+
+// 掛上排程才會現形的死循環：被判 skip 的還是 pending，固定取最舊的一批＝永遠掃同一批
+Deno.test("掃描視窗會輪流走過整個佇列，不會卡在最舊的那一批", () => {
+  const total = 462, limit = 20;
+  const seen = new Set<number>();
+  for (let slot = 0; slot < 24; slot++) seen.add(scanOffset(total, limit, slot));
+  // 24 輪（4 小時）之內每一筆都被掃過：最大的起點加上一批要蓋到尾巴
+  assertEquals(Math.max(...seen) + limit >= total, true);
+  assert(seen.size > 1);
+  // 繞完一圈回到開頭，佇列前面新進來的不會被冷落
+  assertEquals(scanOffset(total, limit, 0), scanOffset(total, limit, Math.ceil(total / limit)));
+});
+
+Deno.test("佇列比一批還短時從頭掃，尾巴不足一批時退回最後一批", () => {
+  assertEquals(scanOffset(12, 20, 7), 0);
+  assertEquals(scanOffset(462, 20, 23), 442); // 第 24 批只剩 2 筆 → 退回 442 起算
+  assertEquals(scanOffset(0, 20, 3), 0);
 });

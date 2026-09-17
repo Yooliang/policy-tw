@@ -526,19 +526,24 @@ usePageHead({
 
         <aside class="order-last lg:order-none lg:col-start-3 lg:row-start-2 lg:self-start">
         <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
-          <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
-          <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
-          <div class="flex flex-wrap items-center gap-1.5 mb-3">
-            <button
-              v-for="opt in LEADERBOARD_RANGES"
-              :key="opt.key"
-              @click="leaderboardRange = opt.key"
-              :class="[
-                'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors',
-                leaderboardRange === opt.key ? 'bg-navy-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
-              ]"
-            >{{ opt.label }}</button>
+          <!-- 時間窗按鈕跟標題同一行（2026-09-17 小良哥）：原本擺在標題下面，
+               佔掉一整列高度，而且視覺上像是在講底下那張榜的內容而不是在切換它 -->
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <h3 class="font-black text-navy-900 flex items-center gap-2"><Trophy :size="18" class="text-amber-500" />貢獻榜</h3>
+            <div class="flex rounded-lg border border-slate-200 overflow-hidden shrink-0">
+              <button
+                v-for="opt in LEADERBOARD_RANGES"
+                :key="opt.key"
+                @click="leaderboardRange = opt.key"
+                :aria-pressed="leaderboardRange === opt.key"
+                :class="[
+                  'px-2.5 py-1 text-xs font-bold transition-colors whitespace-nowrap',
+                  leaderboardRange === opt.key ? 'bg-navy-900 text-white' : 'bg-white text-slate-500 hover:bg-slate-50',
+                ]"
+              >{{ opt.label }}</button>
+            </div>
           </div>
+          <p class="text-xs text-slate-400 mb-3">分數＝提交＋上線＋驗證票</p>
           <p v-if="activeLeaderboard.length === 0" class="text-sm text-slate-400">{{ leaderboardEmptyText }}</p>
           <template v-else>
             <!-- 三段堆疊長條：分數就是這三個數字相加，疊起來的長度剛好等於分數，
