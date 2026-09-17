@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, SKIP_MEMORY_HOURS, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
@@ -74,7 +75,7 @@ Deno.serve(async (req) => {
       .limit(CANDIDATE_POOL);
     if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, inFlightByTaskRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
+    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRes, mySubmittedRes, deadEndRes, myVotedOnRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
       pendingQuery,
       supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
@@ -89,9 +90,6 @@ Deno.serve(async (req) => {
       // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
       supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
         .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).limit(1000),
-      // 每個任務底下還在等票的貢獻數：滿了就先不要再派這個任務（見 filterSaturatedTasks）
-      supabase.from("contributions").select("task_id").in("status", ["pending", "verified", "disputed"])
-        .not("task_id", "is", null).limit(5000),
       // 任何人回報過「查了沒東西」且還在等票的任務：期間不要再派給別人重查
       supabase.from("contributions").select("payload")
         .eq("contribution_type", "no_change").in("status", ["pending", "verified"]).limit(500),
@@ -125,9 +123,17 @@ Deno.serve(async (req) => {
     const mySubmittedTaskIds = new Set<string>([...((mySubmittedRes.data ?? []) as any[]), ...((myAnswersRes.data ?? []) as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
-    // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派
+    // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派。
+    // 要翻頁撈——PostgREST 一次只回 1000 列，寫 .limit(5000) 只會拿到前 1000 筆，
+    // 排在後面的任務就會被當成「底下沒人做」一直派（2026-09-17 抓到同一個坑害貢獻榜失準）。
+    const inFlightRows = await fetchAllRows<{ task_id: string }>(
+      "in-flight by task",
+      (from, to) => supabase.from("contributions").select("task_id")
+        .in("status", ["pending", "verified", "disputed"]).not("task_id", "is", null)
+        .order("created_at", { ascending: true }).range(from, to),
+    );
     const inFlightByTask = new Map<string, number>();
-    for (const r of ((inFlightByTaskRes.data ?? []) as any[])) {
+    for (const r of inFlightRows) {
       const id = r.task_id;
       if (typeof id === "string") inFlightByTask.set(id, (inFlightByTask.get(id) ?? 0) + 1);
     }

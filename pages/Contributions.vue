@@ -163,7 +163,8 @@ function headers(): Record<string, string> {
   return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
 }
 
-async function fetchFeed(cursor: string | null): Promise<{ items: FeedItem[]; summary: FeedSummary; has_more: boolean; next_cursor: string | null }> {
+// 翻頁時伺服器不回 summary（它每算一次就掃一遍全表，而翻頁根本用不到）——所以型別是可為 null
+async function fetchFeed(cursor: string | null): Promise<{ items: FeedItem[]; summary: FeedSummary | null; has_more: boolean; next_cursor: string | null }> {
   const params = new URLSearchParams({ status: status.value, limit: String(PAGE_SIZE) })
   if (type.value) params.set('type', type.value)
   if (agentName.value) params.set('agent_name', agentName.value)
@@ -180,7 +181,7 @@ async function load() {
   try {
     const body = await fetchFeed(null)
     items.value = body.items
-    summary.value = body.summary
+    if (body.summary) summary.value = body.summary
     hasMore.value = body.has_more
     nextCursor.value = body.next_cursor
   } catch (e) {
