@@ -58,11 +58,12 @@ const isActive = (path: string) => route.path === path
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center">
           <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
-            <!-- 站徽（2026-09-17）：原本是藍底方塊配一個白色「正」字，改成水墨字本身。
-                 選單改白底之後不必再襯白底板——紙本來就是白的，墨直接落在上面。 -->
-            <img src="/brand/icon-512.png" alt="正見" width="40" height="40"
-              class="h-10 w-10 object-contain group-hover:scale-105 transition-transform" />
-            <span class="font-bold text-xl tracking-wide text-navy-900 hidden min-[500px]:inline">見</span>
+            <!-- 站徽（2026-09-17）：水墨「正見」，兩字都由五個政黨色暈染而成。
+                 兩字間距是字高的 10%——原圖間隔超過半個字寬，縮到 4% 又會讓
+                 「正」的收筆撞上「見」的起筆。srcset 給 2x 螢幕用。 -->
+            <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x"
+              alt="正見" width="72" height="40"
+              class="h-8 sm:h-10 w-auto object-contain group-hover:scale-105 transition-transform" />
           </RouterLink>
         </div>
 
