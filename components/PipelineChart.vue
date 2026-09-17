@@ -27,8 +27,8 @@ const MIN_POINTS_FOR_CHART = 2
 const { snapshots, loading, error, fetchSnapshots } = usePipelineSnapshots()
 
 // 預設勾「待驗證貢獻／已上線累計／驗證票累計」——這三條講的是同一件事的三個階段：
-// 交進來、被核對、真的上線。「待查任務」預設不勾：它現在是 842，量級比其他三條大一個
-// 數量級，一起畫會把它們壓成貼著 X 軸的直線，看不出有沒有在動。要看的人自己勾。
+// 交進來、被核對、真的上線。缺口與任務清單是另一件事（還沒進來的），要看的人自己勾。
+// （量級差距已經由「每條線各自一條 Y 軸」解決，見下面 chartOptions 的 yaxis。）
 const visible = ref<Set<MetricKey>>(new Set(['pending', 'applied', 'votesTotal']))
 
 function toggleMetric(key: MetricKey) {
@@ -73,6 +73,8 @@ const chartOptions = computed(() => ({
   stroke: { width: 2, curve: 'smooth' as const },
   xaxis: {
     categories: axisLabels.value,
+    // 採樣累積到幾十筆之後，每一格都標時間會疊成一片灰糊；只留幾個看得懂的刻度
+    tickAmount: Math.min(8, axisLabels.value.length),
     labels: {
       style: { colors: '#94a3b8', fontSize: '11px' },
       rotate: -35,
@@ -83,7 +85,18 @@ const chartOptions = computed(() => ({
     axisTicks: { show: false },
     tooltip: { enabled: false },
   },
-  yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' } }, forceNiceScale: true, min: 0 },
+  /**
+   * 每條線各自一條 Y 軸（2026-09-17 小良哥：「綠色線還是躺在地上」）。
+   * 共用一條軸時，已上線累計 165 跟待驗證貢獻 910 畫在同一張 0～1000 的圖上，
+   * 它五天成長的十幾筆只有一個像素，看起來像沒在動——但它其實一直在漲。
+   * 軸刻度只在單選一條時顯示：多條線共用一組刻度反而是假的，數值看提示框與上面的數字。
+   */
+  yaxis: visibleMetrics.value.map((m, i) => ({
+    seriesName: m.label,
+    show: visibleMetrics.value.length === 1 && i === 0,
+    labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
+    forceNiceScale: true,
+  })),
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9' },
   legend: { show: false },
   // 樣本還少的時候把採樣點畫出來，讀者才看得出這是一次次的採樣而不是連續曲線
@@ -96,7 +109,7 @@ onMounted(fetchSnapshots)
 
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6" data-testid="pipeline-chart">
-    <h3 class="font-black text-navy-900 mb-4">機制運作狀態</h3>
+    <h3 class="font-black text-navy-900 mb-4">運作狀態</h3>
 
     <p v-if="error" class="text-sm text-red-600">運作狀態暫時讀不到</p>
 
@@ -127,11 +140,15 @@ onMounted(fetchSnapshots)
           :style="visible.has(m.key) ? { backgroundColor: m.color } : undefined"
           @click="toggleMetric(m.key)">
           {{ m.label }}
+          <span :class="['ml-1 font-mono', visible.has(m.key) ? 'text-white/80' : 'text-slate-400']">{{ latest?.[m.key].toLocaleString() ?? '–' }}</span>
         </button>
       </div>
       <div class="h-64">
         <ClientOnly><apexchart type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
       </div>
+      <p v-if="visibleMetrics.length > 1" class="text-xs text-slate-400 mt-2">
+        每條線各自縮放，看的是各自的成長幅度；實際數值在標籤上與滑過去的提示框裡。
+      </p>
       <p v-if="snapshots.length < 6" class="text-xs text-slate-400 mt-2">
         目前累積 {{ snapshots.length }} 個採樣點（每小時一個），走勢還很短；累積滿一天之後會更看得出變化。
       </p>

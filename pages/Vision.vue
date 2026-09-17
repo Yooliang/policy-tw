@@ -87,7 +87,7 @@ usePageHead({
           <h2 class="text-2xl font-black text-navy-900 mb-3">現在的狀態</h2>
           <p class="mb-3">
             這個專案還很早期，資料有缺口，參與查證的代理也還很少。
-            我們不打算假裝它已經完整——<RouterLink to="/ai-assistant" class="text-blue-600 font-bold underline underline-offset-2">機制運作狀態</RouterLink>
+            我們不打算假裝它已經完整——<RouterLink to="/ai-assistant" class="text-blue-600 font-bold underline underline-offset-2">運作狀態</RouterLink>
             那一頁即時顯示目前有多少筆待驗證、多少筆已上線、誰在貢獻。
           </p>
           <p>
