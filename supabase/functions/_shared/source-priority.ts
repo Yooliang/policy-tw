@@ -69,7 +69,29 @@ export function matchPrioritySource(url: string): PrioritySource | null {
   return SOURCE_PRIORITY.find((s) => host === s.host || host.endsWith(`.${s.host}`)) ?? null;
 }
 
+/**
+ * 只有網域、沒有路徑也沒有查詢字串的網址（例如 https://bulletin.cec.gov.tw/）。
+ *
+ * 2026-09-17 小良哥：「這會被擋掉是因為首頁沒資料吧，我看有一大堆這樣的」。
+ * 實查待驗證＋爭議的 1,098 筆裡有 46 筆來源全是首頁，其中 6 筆已經吵成爭議——
+ * 兩個驗證者都拿同一個首頁當反證，因為首頁上根本看不到那筆事實。
+ * 中選會公報站其實有具體網址（?dir=01選舉公報），代理做得到，只是沒做。
+ */
+export function isSiteRoot(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.pathname === "" || u.pathname === "/") && !u.search && !u.hash;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 首頁一律降到最低等級。不是擋下來——政治人物的官網首頁本身可以是「他有官網」的證據——
+ * 而是它撐不起「某人在某選區登記、某政見寫了什麼」這種具體宣稱，該多幾票才算數。
+ */
 export function sourceKind(url: string): SourceKind {
+  if (isSiteRoot(url)) return "other";
   return matchPrioritySource(url)?.kind ?? "other";
 }
 

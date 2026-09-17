@@ -1,7 +1,7 @@
 // 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, consensusStatus, isDuplicateVote, requiredAgree, riskLevel, tally, tallyByIp } from "./consensus.ts";
-import { SOURCE_PRIORITY } from "./source-priority.ts";
+import { SOURCE_PRIORITY, sourceKind } from "./source-priority.ts";
 
 /** 找最後一支（檔名排序最大）重新定義某個 SQL 物件的 migration，回傳從定義處起的內容 */
 async function latestMigrationDefining(marker: string): Promise<string> {
@@ -155,4 +155,17 @@ Deno.test("補已投票選舉的結果只要 2 票，不看來源等級；沒帶
   assertEquals(riskLevel("candidacy", { name: "某某", election_id: 2024, election_result: "elected" }), "high");
   // 還沒有結果的參選紀錄（登記、確認參選）也維持高風險
   assertEquals(riskLevel("candidacy", { politician_id: "a4ad066b-c02b-4046-84c9-889da17df8d5", candidate_status: "registered" }), "high");
+});
+
+// 2026-09-17：來源只給首頁的有 46 筆，6 筆已吵成爭議——首頁上看不到那筆事實，
+// 卻跟公報的實際那一頁拿到一樣的官方等級、一樣只要 2 票。
+Deno.test("只有網域的首頁降到最低等級，具體那一頁才算官方", () => {
+  assertEquals(sourceKind("https://bulletin.cec.gov.tw/"), "other");
+  assertEquals(sourceKind("https://db.cec.gov.tw"), "other");
+  assertEquals(sourceKind("https://bulletin.cec.gov.tw/?dir=01%E9%81%B8%E8%88%89%E5%85%AC%E5%A0%B1"), "official");
+  assertEquals(sourceKind("https://www.cna.com.tw/"), "other");
+  assertEquals(sourceKind("https://www.cna.com.tw/news/aipl/202609045002.aspx"), "media");
+  // 門檻跟著變：一般資料官方 2 票，降成 other 要 3 票
+  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/"]), 3);
+  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/?dir=x"]), 2);
 });
