@@ -2,7 +2,7 @@
 --
 -- 2026-09-17 代理回報：election_result_missing 的 hint_sources 叫它去 db.cec.gov.tw，
 -- 但那是前端渲染的 SPA，curl 抓不到任何東西，「整夜的 log 都卡在這」。
--- 小良哥轉述後，實測找到兩支可用的（無金鑰、CORS 開放）：
+-- 轉述後，實測找到兩支可用的（無金鑰、CORS 開放）：
 --   按姓名查歷屆參選：/query/api/v1/elections/candidates/query?cand_name=蔡易餘
 --   查該場逐位得票：  /query/api/v1/elections/candidates/data?theme_id=…&cand_id=…
 -- 站上的 fetch-cec-data 端點同一天加了 queryName 模式，把這兩支包起來：

@@ -8,7 +8,7 @@
  *   if (r.decision === "ambiguous") → 不要 insert；已寫進 politician_identity_reviews
  *   if (r.decision === "new")       → insert politicians 後呼叫 store.addKeys(newId, r.keys, source)
  *
- * 判定規則（小良哥 2026-09-11 拍板 + 兩點加嚴，見 README 段落「偏離規格」）：
+ * 判定規則（2026-09-11 拍板 + 兩點加嚴，見 README 段落「偏離規格」）：
  *   - 每個候選人物分數 = 命中 key 的 strength 總和
  *   - 只有一個候選：分數 ≥2 且至少一個中／強面向 → matched；否則 ambiguous
  *   - ≥2 個候選：最高分唯一且領先第二名 ≥2 → matched 最高分者；否則 ambiguous

@@ -7,7 +7,7 @@ import { HERO_ACTION_ACTIVE, HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZ
  * 樣式只有兩種：active（本頁／目前頁籤，白底）與一般（半透明），各頁不要再自己刻。
  *
  * 尺寸只有一種，在 lib/hero-action-styles.ts。原本多一個 compact prop 只給
- * PolicyViewNav 用，結果全站動作區出現兩種大小——小良哥指出其他頁沒跟著縮很奇怪，
+ * PolicyViewNav 用，結果全站動作區出現兩種大小——其他頁沒跟著縮顯得奇怪，
  * 所以那一級縮放現在是所有動作區的預設。
  */
 defineProps<{

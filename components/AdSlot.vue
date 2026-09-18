@@ -17,7 +17,7 @@ import { useRoute } from 'vue-router'
  */
 const AD_CLIENT = 'ca-pub-6687848895101003'
 const AD_SLOT = '9455802665'
-const HIDDEN_PREFIXES = ['/admin', '/auth', '/ai-assistant', '/profile']
+const HIDDEN_PREFIXES = ['/admin', '/auth', '/contributions', '/tasks', '/stats', '/profile']
 
 const route = useRoute()
 const visible = computed(() => !HIDDEN_PREFIXES.some((p) => route.path.startsWith(p)))

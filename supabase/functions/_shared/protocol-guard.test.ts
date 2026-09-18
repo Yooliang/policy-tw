@@ -245,7 +245,7 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
     .split("|").map((x) => x.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
   assertEquals(frontKinds.sort(), [...REQUEST_KINDS].sort(), "lib/request-task.ts 的 RequestKind 要跟 _shared/request-task.ts 的 REQUEST_KINDS 一致");
 
-  // 任務看板要能用中文顯示每一種任務型別。2026-09-15 小良哥看到看板直接印出
+  // 任務看板要能用中文顯示每一種任務型別。2026-09-15 看到看板直接印出
   // election_result_missing／policy_election_missing／roster_check／policy_validity——
   // 新增型別時沒人記得補 lib/task-labels.ts，畫面不會壞，只是把代號丟給使用者。
   const labels = await Deno.readTextFile(new URL("../../../lib/task-labels.ts", import.meta.url));
@@ -309,7 +309,7 @@ Deno.test("名單清查：不可以叫代理去查投票後才更新的來源", 
   );
 });
 Deno.test("每日額度：skill.md 不可以寫死數字，也不可以跟程式碼對不上", async () => {
-  // 2026-09-14 小良哥把額度從 50／200 調到 200／800，同一個數字散在 5 個地方：
+  // 2026-09-14 把額度從 50／200 調到 200／800，同一個數字散在 5 個地方：
   // 兩個 TS 常數，加 skill.md 的說明、quota 範例、daily_quota 範例。手動同步五處
   // 就是下一次漏掉一處的原因——而且文件是對外協議，寫錯等於教錯外部代理。
   //

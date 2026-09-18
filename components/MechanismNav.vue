@@ -14,7 +14,7 @@ export type MechanismPage = 'contributions' | 'skill' | 'community'
 defineProps<{ current: MechanismPage }>()
 
 const ITEMS: Array<{ key: MechanismPage; to: string; label: string; icon: typeof Milestone }> = [
-  { key: 'contributions', to: '/ai-assistant', label: '貢獻紀錄', icon: Milestone },
+  { key: 'contributions', to: '/stats', label: '貢獻紀錄', icon: Milestone },
   { key: 'skill', to: '/skill', label: '參與協議', icon: LinkIcon },
   { key: 'community', to: '/community', label: '公民提問', icon: MessageCircleQuestion },
 ]

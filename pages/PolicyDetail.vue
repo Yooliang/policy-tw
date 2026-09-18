@@ -40,7 +40,7 @@ const stanceBusy = ref<PolicyStance | null>(null)
 const stanceError = ref<string | null>(null)
 const stanceCounts = ref<StanceCounts | null>(null)
 
-// 「查進度／查兌現情形」「這不是政見？」：按一下就建任務，出現在任務看板（/ai-assistant?tab=tasks）
+// 「查進度／查兌現情形」「這不是政見？」：按一下就建任務，出現在任務頁（/tasks）
 const progressRequest = useRequestTask()
 const validityRequest = useRequestTask()
 
@@ -164,10 +164,10 @@ watch(policyId, async (id) => {
   sources.value = data || []
 }, { immediate: true })
 
-// 按鈕與計數合併成一顆（2026-09-17 小良哥）：原本上面一排數字、下面一排按鈕，
+// 按鈕與計數合併成一顆（2026-09-17）：原本上面一排數字、下面一排按鈕，
 // 同一件事被拆成兩處，按了還要抬頭去對數字有沒有變。
 /**
- * 執行歷程的一列拆成「型別／狀態／內容／提交者」四塊，格式對齊查核履歷（2026-09-17 小良哥）。
+ * 執行歷程的一列拆成「型別／狀態／內容／提交者」四塊，格式對齊查核履歷（2026-09-17）。
  * 落庫時 event 寫成「進度更新：In Progress」、description 尾巴接「貢獻者：X（網址）」，
  * 直接印出來就會在畫面上混出英文狀態與一句夾在內文裡的署名。
  */
@@ -354,13 +354,13 @@ usePageHead({
             </div>
           </div>
 
-          <!-- 政見詳情與讀者表態同一張卡（2026-09-17 小良哥：「跟下方的政見詳情整合」）。
+          <!-- 政見詳情與讀者表態同一張卡（2026-09-17：「跟下方的政見詳情整合」）。
                原本表態獨立一塊紫底、還寫了一段說明它是什麼——看的人要的是內容與一個按鈕，
                不是一段解釋。計數以伺服器回的為準，不在本機加一。 -->
           <div class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm">
             <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 sm:gap-6">
               <div class="flex-1 min-w-0">
-                <!-- 跟「查核履歷」一樣帶圖示（2026-09-17 小良哥），同一頁的區塊標題長得一致 -->
+                <!-- 跟「查核履歷」一樣帶圖示（2026-09-17），同一頁的區塊標題長得一致 -->
                 <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
                 <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
                 <p v-if="myPolicyStance" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
@@ -388,7 +388,7 @@ usePageHead({
                   <span class="text-sm font-black tabular-nums leading-none">{{ shownStances[opt.count].toLocaleString() }}</span>
                 </button>
               </div>
-              <!-- 回報入口就放在這三顆鈕下面（2026-09-17 小良哥）：它講的是同一件事——
+              <!-- 回報入口就放在這三顆鈕下面（2026-09-17）：它講的是同一件事——
                    你對這筆政見的看法，包含「它根本不是政見」 -->
               <div class="mt-2 text-center">
                 <button
@@ -420,7 +420,7 @@ usePageHead({
                 </div>
               </div>
             </div>
-            <!-- 公民提問併進同一張卡，用分隔線隔開（2026-09-17 小良哥）：
+            <!-- 公民提問併進同一張卡，用分隔線隔開（2026-09-17）：
                  它問的就是這一筆政見，不該自己占一張卡 -->
             <div class="mt-6 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -473,7 +473,7 @@ usePageHead({
           <!-- Timeline -->
           <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <h2 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2"><Calendar class="text-slate-400" />執行歷程追蹤</h2>
-            <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17 小良哥：「時間軸大小不一」）：
+            <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17：「時間軸大小不一」）：
                  同一頁兩條時間軸，一條 16px 點、一條 12px 點，看起來像兩套東西 -->
             <div class="relative border-l-2 border-slate-200 ml-2 space-y-4 pb-2">
               <div v-for="(log, index) in policy.logs" :key="log.id" class="relative pl-6 group">

@@ -36,7 +36,15 @@ Deno.serve(async (req) => {
     const cursor = url.searchParams.get("cursor");
     if (status !== "all" && status !== "attention" && status !== "voting" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all／attention／voting 或 ${STATUSES.join("/")}` }, 400);
 
-    let q = supabase.from("contributions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(limit + 1);
+    // 第一頁要回「目前這組篩選共幾筆」給畫面顯示。count 走 PostgREST 同一個請求的
+    // Content-Range，不是第二次查詢；翻頁時不算（那時查詢帶了 cursor，數出來的是
+    // 「游標之後還有幾筆」，不是總數，印在畫面上會是錯的）。
+    // 跟 summary 分開判斷：貢獻頁只要這個數字、不要那份全表聚合（它帶 summary=0）。
+    const wantCount = !cursor;
+    const wantSummary = wantCount && url.searchParams.get("summary") !== "0";
+    let q = supabase.from("contributions")
+      .select(FEED_COLUMNS, wantCount ? { count: "exact" } : undefined)
+      .order("created_at", { ascending: false }).limit(limit + 1);
     if (status === "attention") q = q.in("status", ATTENTION_STATUSES);
     // 「驗證中」＝還在等票、但已經有人動過的。單看 status 分不出「沒人理」與「正在被核對」。
     else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0");
@@ -45,7 +53,7 @@ Deno.serve(async (req) => {
     if (type) q = q.eq("contribution_type", type);
     if (cursor) q = q.lt("created_at", cursor);
 
-    // 統計只在第一頁算（2026-09-17 小良哥：「會不會造成伺服器的負擔？」）。
+    // 統計只在第一頁算（2026-09-17：「會不會造成伺服器的負擔？」）。
     // 翻頁時前端根本不會用 summary——它只在第一次載入時覆寫——但伺服器原本每一頁都
     // 重新掃一次全表。資料每天 +400 筆，那個浪費會越長越大。
     // 要整份撈是另一回事：PostgREST 一次最多回 1000 列，.limit(20000) 是騙自己的，
@@ -53,7 +61,6 @@ Deno.serve(async (req) => {
     // 統計在資料庫算（contribution_feed_summary，見 migration 20260917000012）：
     // 一次 GROUP BY，不把上千列搬進函式。實測 808ms → 225ms，而且資料再長也是一次查詢。
     // 仍只在第一頁算——翻頁用不到它。
-    const wantSummary = !cursor && url.searchParams.get("summary") !== "0";
     const [feedRes, summaryRes] = await Promise.all([
       q,
       wantSummary ? supabase.rpc("contribution_feed_summary") : Promise.resolve({ data: null, error: null }),
@@ -74,7 +81,7 @@ Deno.serve(async (req) => {
       const pid = typeof p.politician_id === "string" ? p.politician_id : null;
       return !hasName && pid ? [pid] : [];
     }))];
-    // 政見標題同理（2026-09-17 小良哥：「政見 aa6d7871」不該出現在畫面上）：
+    // 政見標題同理（2026-09-17：「政見 aa6d7871」不該出現在畫面上）：
     // policy_progress／policy_source 這些只帶 policy_id，摘要取不到標題就印 id 前八碼。
     // deno-lint-ignore no-explicit-any
     const idsNeedingTitle = [...new Set(page.flatMap((r: any) => {
@@ -173,6 +180,8 @@ Deno.serve(async (req) => {
     return json({
       success: true,
       count: items.length,
+      /** 目前這組篩選共幾筆（只有第一頁算得準；翻頁時回 null） */
+      filtered_total: wantCount ? (feedRes.count ?? null) : null,
       has_more: hasMore,
       next_cursor: hasMore ? page[page.length - 1].created_at : null,
       items,

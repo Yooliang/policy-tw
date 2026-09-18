@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
-const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
+import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
-import GapTrendChart from './GapTrendChart.vue'
 
 /**
  * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求／系統裁決）的 open 與 closed，加上自動缺口的數量。
@@ -54,7 +52,6 @@ const props = defineProps<{ typeFilter?: string }>()
 const emit = defineEmits<{ (e: 'update:typeFilter', value: string): void }>()
 
 const tasks = ref<BoardTask[]>([])
-const totals = ref<Record<string, number>>({})
 const loading = ref(false)
 const error = ref<string | null>(null)
 const showClosed = ref(false)
@@ -75,8 +72,6 @@ async function load() {
     const body = await res.json().catch(() => null)
     if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
     tasks.value = (body.tasks as BoardTask[]).filter(t => t.source !== 'auto')
-    const { manual_open: _ignored, ...auto } = body.totals ?? {}
-    totals.value = auto
   } catch (e) {
     error.value = e instanceof Error ? e.message : '讀取失敗'
     tasks.value = []
@@ -88,37 +83,6 @@ async function load() {
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
 const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'))
 const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
-const autoTotal = computed(() => Object.values(totals.value).reduce((a, n) => a + n, 0))
-
-// 自動缺口：跟貢獻分頁的「近 7 日提交」同一種直條圖，多的排前面
-const gapRows = computed(() => Object.entries(totals.value)
-  .map(([type, count]) => ({ label: taskTypeLabel(type), count }))
-  .sort((a, b) => b.count - a.count))
-/**
- * 圓餅圖（2026-09-17 小良哥）：這裡要回答的是「缺口集中在哪一類」，比例比絕對值重要。
- * 缺口型別有十幾種，全部切成扇形會變成一圈看不懂的碎片，所以只畫前 6 大，
- * 其餘合併成「其他缺口」——跟下方的 24 小時趨勢圖用同一套取法。
- */
-const GAP_TOP_N = 6
-const GAP_COLORS = ['#2563eb', '#ea580c', '#059669', '#7c3aed', '#0891b2', '#eab308', '#94a3b8']
-const gapPieRows = computed(() => {
-  const rows = gapRows.value
-  if (rows.length <= GAP_TOP_N + 1) return rows
-  const head = rows.slice(0, GAP_TOP_N)
-  const rest = rows.slice(GAP_TOP_N).reduce((sum, r) => sum + r.count, 0)
-  return rest > 0 ? [...head, { label: '其他缺口', count: rest }] : head
-})
-const gapSeries = computed(() => gapPieRows.value.map(r => r.count))
-const gapOptions = computed(() => ({
-  chart: { type: 'pie' as const, toolbar: { show: false } },
-  labels: gapPieRows.value.map(r => r.label),
-  colors: GAP_COLORS,
-  stroke: { width: 2, colors: ['#ffffff'] },
-  // 扇形上只標百分比，件數留給圖例與提示框：小扇形塞兩個數字會疊在一起
-  dataLabels: { enabled: true, formatter: (v: number) => (v >= 6 ? `${Math.round(v)}%` : ''), style: { fontSize: '11px', fontWeight: 700 }, dropShadow: { enabled: false } },
-  legend: { position: 'bottom' as const, fontSize: '11px', fontWeight: 600, itemMargin: { horizontal: 6, vertical: 2 }, markers: { size: 6 } },
-  tooltip: { y: { formatter: (v: number) => `${v} 件` } },
-}))
 
 function contributionIdOf(t: BoardTask): string | null {
   const v = t.target?.contribution_id
@@ -147,27 +111,9 @@ defineExpose({ load })
 </script>
 
 <template>
-  <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" data-testid="task-board">
-    <!-- 資料缺口：手機上要在任務清單前面（2026-09-17 小良哥：不該捲一長串才看到），
-         桌機用 col-start／row-start 指定回右欄 -->
-    <aside class="lg:col-start-3 lg:row-start-1 lg:sticky lg:top-4">
-      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-counts">
-        <div class="flex items-baseline gap-2 mb-1">
-          <h3 class="font-black text-navy-900">資料缺口</h3>
-          <span class="ml-auto text-sm font-bold text-navy-900 whitespace-nowrap">共 {{ loading ? '–' : autoTotal }} 件</span>
-        </div>
-        <p class="text-xs text-slate-400 mb-2">自動偵測，依序派給 AI 代理</p>
-        <p v-if="!loading && gapRows.length === 0" class="text-sm text-slate-400 py-6 text-center">目前沒有缺口</p>
-        <div v-else class="h-72">
-          <ClientOnly><apexchart v-if="gapRows.length > 0" type="pie" height="100%" :options="gapOptions" :series="gapSeries" /></ClientOnly>
-        </div>
-        <!-- 現在各有幾件（上面的直條）之外，也要看得出它們在變多還是變少 -->
-        <GapTrendChart />
-      </section>
-    </aside>
-
+  <section data-testid="task-board">
     <!-- 任務清單 -->
-    <div class="lg:col-span-2 lg:col-start-1 lg:row-start-1 bg-white rounded-2xl shadow-lg border border-slate-200">
+    <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
         <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">進行中 {{ openTasks.length }}・已關閉 {{ closedTasks.length }}</span></h3>
         <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">

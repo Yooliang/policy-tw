@@ -31,10 +31,10 @@ const navItems = computed(() => {
   const items = [
     // 「跨任期接力」（/analysis）不在主選單：它是「政見」底下的一種看法，
     // 入口在 PolicyViewNav。放兩個地方會讓人以為是兩件不同的事。
-    // 「政見追蹤」而不是「政見」（2026-09-17 小良哥）：這一頁是追進度的，
+    // 「政見追蹤」而不是「政見」（2026-09-17）：這一頁是追進度的，
     // 只寫「政見」會讓人以為是政見列表。手機仍用兩個字，不然會擠掉旁邊兩項。
     { name: '政見追蹤', shortName: '政見', path: '/tracking', icon: TrendingUp },
-    { name: '公民參與', shortName: '參與', path: '/community', icon: MessageSquare },
+    { name: '參與貢獻', shortName: '參與', path: '/community', icon: MessageSquare },
   ]
 
   if (activeElection.value) {
@@ -71,7 +71,7 @@ const isActive = (path: string) => route.path === path
         <!-- Nav Items: Always visible, shorter text on mobile -->
         <div class="flex-1 flex justify-center">
           <!-- 桌面版（lg 以上）圖示與文字左右排，兩者都放大；窄螢幕維持上下疊，
-               不然三個項目加起來會擠掉右邊的登入鈕（2026-09-17 小良哥）。 -->
+               不然三個項目加起來會擠掉右邊的登入鈕（2026-09-17）。 -->
           <div class="flex items-center space-x-0.5 sm:space-x-1 lg:space-x-2">
             <RouterLink
               v-for="item in navItems"
@@ -115,7 +115,7 @@ const isActive = (path: string) => route.path === path
 
           <!-- Login Button (Not Logged In) -->
           <template v-else>
-            <!-- 登入改成一個人的形象（2026-09-17 小良哥），跟旁邊的愛心一樣是圓鈕。
+            <!-- 登入改成一個人的形象（2026-09-17），跟旁邊的愛心一樣是圓鈕。
                  文字拿掉了，所以 aria-label 與 title 一定要留，不然讀螢幕的人不知道這是什麼。 -->
             <button
               @click="isLoginModalOpen = true"
@@ -127,7 +127,7 @@ const isActive = (path: string) => route.path === path
             </button>
           </template>
 
-          <!-- 贊助：只用一顆愛心（2026-09-16 小良哥：「主選單那邊用個愛心即可」）；
+          <!-- 贊助：只用一顆愛心（2026-09-16：「主選單那邊用個愛心即可」）；
                文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
           <RouterLink
             to="/donation"

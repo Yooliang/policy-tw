@@ -126,7 +126,7 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     case "correction": {
       const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
       const id = str(p.target_id);
-      // 標題／姓名優先，沒有才退回 id 前八碼（2026-09-17 小良哥：「把政見 1b808b02 的…」
+      // 標題／姓名優先，沒有才退回 id 前八碼（2026-09-17：「把政見 1b808b02 的…」
       // 這種畫面對讀者毫無意義）。呼叫端會先把 target_id 換成標題塞進 payload。
       const targetLabel = str(p.target_table) === "policies"
         ? str(p.policy_title)
@@ -240,6 +240,8 @@ export interface FeedSummary {
   /** open 的裁決任務數（disputed 的貢獻正由更多代理用 4 票決定；不是人工待辦） */
   adjudicating: number;
   contributors_30d: number;
+  /** 有提交過的不重複代號（全部時間、不含測試代號）。規則跟 contributors_30d 相同，只是不限時間 */
+  contributors_total: number;
   /** 近 7 日（台灣日期）：count＝新提交筆數（欄位名保留，外部有東西在讀）、verifications＝驗證票數 */
   daily_last_7: Array<{ date: string; count: number; verifications: number }>;
   /** 總榜（全部時間）。欄位名保留不動：外部有東西在讀它。 */
@@ -303,6 +305,7 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
   const byStatus: Record<string, number> = {};
   const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
   const recentAgents = new Set<string>();
+  const allAgents = new Set<string>();
   const since30 = now - CONTRIBUTORS_WINDOW_DAYS * 86400 * 1000;
   const daily: Record<string, { count: number; verifications: number }> = {};
   for (let i = 6; i >= 0; i--) daily[taiwanDate(now - i * 86400 * 1000)] = { count: 0, verifications: 0 };
@@ -321,6 +324,7 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     const t = Date.parse(r.created_at);
     // 測試代號不算貢獻者，否則卡片上的「貢獻者（近 30 天）」會跟榜上的名單對不起來
     if (!Number.isNaN(t) && t >= since30 && !EXCLUDED_AGENTS.has(agentOf(r))) recentAgents.add(agentOf(r));
+    if (!EXCLUDED_AGENTS.has(agentOf(r))) allAgents.add(agentOf(r));
     if (!Number.isNaN(t)) {
       const d = taiwanDate(t);
       if (d in daily) daily[d].count++;
@@ -341,6 +345,7 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     needs_attention: { total: needs.disputed, ...needs },
     adjudicating,
     contributors_30d: recentAgents.size,
+    contributors_total: allAgents.size,
     daily_last_7: Object.entries(daily).map(([date, v]) => ({ date, ...v })),
     leaderboard: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.all, now),
     leaderboard_30d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d30, now),

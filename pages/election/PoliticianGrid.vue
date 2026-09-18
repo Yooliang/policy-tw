@@ -13,7 +13,7 @@ const props = defineProps<{
   columns?: 2 | 3
   /**
    * 這一頁是哪一屆選舉。有給就只算那一屆的政見。
-   * 2026-09-17 小良哥：「這個頁面的政見應該顯示當屆的就好」，並拍板「純嚴格」——
+   * 2026-09-17：「這個頁面的政見應該顯示當屆的就好」，並拍板「純嚴格」——
    * 蔡易餘卡片上原本寫 18 項，實際上 2026 只有 2 項、2024 有 2 項、其餘 14 項沒標屆別。
    * 未標屆別的不算進來：那是「政見缺屆別」的資料缺口，不是當屆政見。
    */
@@ -73,7 +73,7 @@ const shouldShowSubRegion = (status?: CandidateStatus) => {
 }
 
 /**
- * 卡片上的選區（2026-09-18 小良哥：「將選區也顯示出來吧」）。
+ * 卡片上的選區（2026-09-18：「將選區也顯示出來吧」）。
  * 原本只顯示 subRegion，而縣市長的選區就是那個縣市本身——於是整頁 87 位縣市長參選人
  * 一個都看不出要選哪裡。縣市先顯示，鄉鎮／村里只在中選會正式資料時才加上去。
  */
@@ -155,7 +155,7 @@ const noteUrl = (note?: string) => splitNote(note).url
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
                 <span v-if="formatArea(politician)" class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatArea(politician) }}</span>
-                <!-- 同一句登記名單來源在 42 張卡上一字不差地重複（2026-09-18 小良哥：「反而不用一直重複」），
+                <!-- 同一句登記名單來源在 42 張卡上一字不差地重複（2026-09-18：「反而不用一直重複」），
                      那是整批匯入時寫進每一列的 source_note。卡片只留一個「來源」連結，滑過去才看得到那句話。 -->
                 <p v-if="displayNote(politician.sourceNote) || noteUrl(politician.sourceNote)" class="text-xs text-slate-400 mt-1">
                   <a v-if="noteUrl(politician.sourceNote)" :href="noteUrl(politician.sourceNote)!" :title="displayNote(politician.sourceNote) ?? '來源'" target="_blank" rel="noopener" class="text-violet-500 hover:underline" @click.stop>來源</a>

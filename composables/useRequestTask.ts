@@ -4,7 +4,7 @@ import { requestTask, type RequestTaskInput, type RequestTaskResult } from '../l
 /**
  * 政見頁／人物頁「請 AI 幫忙查」按鈕的送出狀態：按一下就建任務、就地顯示結果，不換頁。
  *
- * 2026-09-15 小良哥：這些按鈕建的任務要出現在 /ai-assistant?tab=tasks、不用人填文字。
+ * 2026-09-15：這些按鈕建的任務要出現在任務頁（2026-09-18 起是 /tasks）、不用人填文字。
  * 之前（#14）是跳去 /community 預填一題公民提問，已撤回。
  */
 export interface RequestTaskState {

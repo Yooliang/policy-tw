@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open")
-        // 派過的排到後面（2026-09-17 小良哥：「任務自己要有個時間戳，派過就向後排」）：
+        // 派過的排到後面（2026-09-17：「任務自己要有個時間戳，派過就向後排」）：
         // 原本只按 priority／created_at 排，最舊的那幾筆永遠佔著 pickManualTask 的前 3 名視窗。
         .order("priority", { ascending: false }).order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）

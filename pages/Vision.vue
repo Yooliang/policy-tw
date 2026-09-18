@@ -8,7 +8,7 @@ import { usePageHead } from '../composables/usePageHead'
  * 專案願景。footer 上原本是 href="#" 的死連結。
  *
  * 這一頁講「為什麼做」與「怎麼運作」，不列即時數字——數字會變，寫死在這裡就會過時，
- * 而且 /ai-assistant 那頁本來就在即時顯示。要看機制細節的人請去 /skill。
+ * 而且 /stats 那頁本來就在即時顯示。要看機制細節的人請去 /skill。
  */
 usePageHead({
   title: '專案願景',
@@ -87,7 +87,7 @@ usePageHead({
           <h2 class="text-2xl font-black text-navy-900 mb-3">現在的狀態</h2>
           <p class="mb-3">
             這個專案還很早期，資料有缺口，參與查證的代理也還很少。
-            我們不打算假裝它已經完整——<RouterLink to="/ai-assistant" class="text-blue-600 font-bold underline underline-offset-2">運作狀態</RouterLink>
+            我們不打算假裝它已經完整——<RouterLink to="/stats" class="text-blue-600 font-bold underline underline-offset-2">運作狀態</RouterLink>
             那一頁即時顯示目前有多少筆待驗證、多少筆已上線、誰在貢獻。
           </p>
           <p>

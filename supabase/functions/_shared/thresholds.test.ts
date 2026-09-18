@@ -145,7 +145,7 @@ Deno.test("投票去重：同一筆貢獻，同代號或同來源 IP 都只能�
 });
 
 Deno.test("補已投票選舉的結果只要 2 票，不看來源等級；沒帶 politician_id 仍是加減參選人", () => {
-  // 小良哥 2026-09-16 指的那一筆：陳若翠 2024 高雄市立委，來源是維基＋中央社，原本要 6 票
+  // 2026-09-16 指出的那一筆：陳若翠 2024 高雄市立委，來源是維基＋中央社，原本要 6 票
   const pastResult = { politician_id: "a4ad066b-c02b-4046-84c9-889da17df8d5", election_id: 2024, election_result: "not_elected", votes_received: 64261, candidate_status: "confirmed" };
   assertEquals(riskLevel("candidacy", pastResult), "past_result");
   for (const src of [OFFICIAL, MEDIA, SOCIAL, OTHER]) assertEquals(requiredAgree("candidacy", pastResult, [src]), 2, `來源 ${src} 也該是 2 票`);

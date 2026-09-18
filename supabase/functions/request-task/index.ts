@@ -18,7 +18,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const BOARD_URL = "https://policy-tw.web.app/ai-assistant?tab=tasks";
+// 這是前端頁面的網址：部署這支之前，正式站的 /tasks 要先是 200（前端先上、這支後上）。
+const BOARD_URL = "https://policy-tw.web.app/tasks";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status = 200): Response {

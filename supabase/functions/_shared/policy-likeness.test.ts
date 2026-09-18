@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { checkPolicyLikeness, policyLikenessNotice } from "./policy-likeness.ts";
 
-Deno.test("疑似不是政見：小良哥指認的那兩筆會被標記", () => {
+Deno.test("疑似不是政見：指認的那兩筆會被標記", () => {
   const a = checkPolicyLikeness("母雞帶小雞 - 最強新北隊", "組建最強團隊，帶領新北市議員候選人一起打贏 2026 選戰，實現議會過半目標。");
   assert(a.suspect);
   assert(a.reasons.some((r) => r.includes("選戰")), a.reasons.join("|"));
