@@ -1,12 +1,18 @@
 import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
+import { voteStance, type Stance } from '../lib/citizen-questions'
 import { fetchAllRows } from './useSupabase'
 import type { CitizenQuestion, QuestionAnswer, RawCitizenQuestion, RawQuestionAnswer } from '../types'
 
 /**
  * 公民提問頁的資料讀取：citizen_questions 列表（一次全載，anon 讀不到 hidden 的已由 RLS 擋掉）、
  * question_answers 按需載入（展開一題才查）。寫入（發問／表態）走 lib/citizen-questions.ts。
+ *
+ * 表態的狀態與流程也放這裡（2026-09-18）：政見頁也要顯示提問與表態，
+ * 兩頁各寫一份會漂開。「我投過什麼」存 localStorage，每台瀏覽器自己記。
  */
+
+const LS_STANCE_KEY = 'zhengjian_question_stances'
 
 function mapQuestion(row: RawCitizenQuestion): CitizenQuestion {
   return {
@@ -42,6 +48,9 @@ export function useCitizenQuestions() {
   const loadingQuestions = ref(false)
   const questionsError = ref<string | null>(null)
   const answersByQuestion = ref<Record<string, AnswersState>>({})
+  const votedStances = ref<Record<string, Stance>>({})
+  const voteBusyIds = ref<Set<string>>(new Set())
+  const voteErrors = ref<Record<string, string>>({})
 
   /** 讀全部提問（最新在前）。 */
   async function loadQuestions(): Promise<void> {
@@ -84,5 +93,47 @@ export function useCitizenQuestions() {
     )
   }
 
-  return { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, applyStanceResult }
+  // ---- 表態（up／down）----
+  function readStoredStances(): Record<string, Stance> {
+    try {
+      const raw = localStorage.getItem(LS_STANCE_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /** 我在這台瀏覽器投過什麼；伺服器端是按 IP 算，這裡只是讓按鈕記得亮哪一顆 */
+  function loadMyStances(): void {
+    votedStances.value = readStoredStances()
+  }
+
+  async function castVote(questionId: string, stance: Stance): Promise<void> {
+    // 伺服器端同一題同一個 IP 是覆蓋（upsert）而不是報錯，所以按錯了要能改回來；
+    // 只擋「重複送出同一個表態」與送出中的狀態。
+    if (voteBusyIds.value.has(questionId) || votedStances.value[questionId] === stance) return
+    voteBusyIds.value = new Set(voteBusyIds.value).add(questionId)
+    voteErrors.value = { ...voteErrors.value, [questionId]: '' }
+    try {
+      const result = await voteStance(questionId, stance)
+      applyStanceResult(questionId, result.stanceUp, result.stanceDown)
+      votedStances.value = { ...votedStances.value, [questionId]: stance }
+      try {
+        localStorage.setItem(LS_STANCE_KEY, JSON.stringify(votedStances.value))
+      } catch (e) {
+        console.info('[公民提問] 表態沒能記進這台瀏覽器（伺服器已收下）：', e)
+      }
+    } catch (err) {
+      voteErrors.value = { ...voteErrors.value, [questionId]: err instanceof Error ? err.message : '表態失敗，請稍後再試' }
+    } finally {
+      const next = new Set(voteBusyIds.value)
+      next.delete(questionId)
+      voteBusyIds.value = next
+    }
+  }
+
+  return {
+    questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, applyStanceResult,
+    votedStances, voteBusyIds, voteErrors, loadMyStances, castVote,
+  }
 }

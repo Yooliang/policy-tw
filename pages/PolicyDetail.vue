@@ -21,6 +21,9 @@ import { policyStatusLabel } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
+import { useCitizenQuestions } from '../composables/useCitizenQuestions'
+// 日期格式跟同一頁的查核履歷共用同一支，兩條時間軸不要一個斜線一個橫線
+import { formatDate } from '../lib/history'
 
 
 const route = useRoute()
@@ -127,11 +130,21 @@ const pledgeElectionDone = computed(() => {
   const d = policyElection.value?.electionDate
   return !!d && d < TODAY
 })
-const canVerify = computed(() => !isCampaign.value || pledgeElectionDone.value)
+/**
+ * 落選也不給（2026-09-18）：選輸的人不會去執行這條承諾，「查兌現情形」派出去
+ * 只會讓代理跑一趟回報「沒有進度」。campaignResult 在下面才宣告，但 computed 是
+ * 讀的時候才算，不受宣告順序影響。
+ */
+const canVerify = computed(() => {
+  if (campaignResult.value === 'not_elected') return false
+  return !isCampaign.value || pledgeElectionDone.value
+})
 const verifyLabel = computed(() => (isCampaign.value ? '查兌現情形' : '查進度'))
 /** 不能查證時，畫面上要講得出原因（而且是使用者能據以行動的那句） */
 const verifyBlockedReason = computed(() => {
   if (canVerify.value) return null
+  // 這一格排在按鈕列裡，長句會把整列撐開；為什麼沒有進度，下面卡片已經講完整了
+  if (campaignResult.value === 'not_elected') return '未當選'
   const d = policyElection.value?.electionDate
   return d ? `${d} 投票，選後才會有執行進度` : '還沒確認這是哪一場選舉的承諾'
 })
@@ -242,6 +255,70 @@ watch(() => policy.value?.id, (id) => {
 }, { immediate: true })
 
 
+// 公民提問：問這筆政見的題目與回答，排成一條時間軸——跟同一頁的查核履歷同一種讀法
+// （2026-09-18）。原本這一區只有一顆「前往提問」按鈕，已經有人問過、AI 也答了，看的人不知道。
+const { questions, loadQuestions, answersByQuestion, loadAnswers } = useCitizenQuestions()
+
+/**
+ * 這筆承諾所屬那場選舉的結果。落選就不會有執行進度——畫面要說出來，
+ * 不然看的人只看到一片空白，不知道是還沒人追，還是根本不可能有（2026-09-18）。
+ * 查不到結果（過去選舉九成還是空的）就什麼都不說，不猜。
+ */
+const campaignResult = computed(() => {
+  if (!isCampaign.value || !policy.value?.electionId) return null
+  return politician.value?.elections?.find((e) => e.electionId === policy.value!.electionId)?.electionResult ?? null
+})
+
+/** 來源只顯示網域，完整網址太長會把時間軸擠壞 */
+function hostOf(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
+}
+const policyQuestions = computed(() => (policy.value ? questions.value.filter((q) => q.policyId === policy.value!.id) : []))
+
+interface QuestionEvent {
+  id: string
+  at: string
+  kind: 'ask' | 'answer' | 'waiting' | 'invite'
+  text: string
+  by?: string
+  sources?: string[]
+}
+
+/** 提問與每一份回答攤平成一條時間軸，新的在上面 */
+const questionTimeline = computed<QuestionEvent[]>(() => {
+  const out: QuestionEvent[] = []
+  for (const q of policyQuestions.value) {
+    out.push({ id: `q-${q.id}`, at: q.createdAt, kind: 'ask', text: q.question })
+    const answers = answersByQuestion.value[q.id]
+    if (Array.isArray(answers)) {
+      for (const a of answers) {
+        out.push({
+          id: `a-${a.id}`,
+          at: a.createdAt,
+          kind: 'answer',
+          text: a.answer,
+          by: a.agentTool ? `${a.agentName}・${a.agentTool}` : a.agentName,
+          sources: a.sourceUrls,
+        })
+      }
+    } else if (q.answerCount === 0) {
+      out.push({ id: `w-${q.id}`, at: q.createdAt, kind: 'waiting', text: '還沒有人回答，AI 代理領到這題就會去查' })
+    }
+  }
+  if (out.length === 0) {
+    // 沒人問過也用同一種樣式，不要一個是子標題、一個是時間軸（2026-09-18）
+    if (campaignResult.value === 'not_elected') return []
+    return [{ id: 'invite', at: '', kind: 'invite', text: '想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。' }]
+  }
+  return out.sort((x, y) => y.at.localeCompare(x.at))
+})
+
+onMounted(loadQuestions)
+// 答案一律先載好：這一頁的人要看的就是答案，不該再點一下才出現
+watch(policyQuestions, (list) => {
+  for (const q of list) if (q.answerCount > 0) loadAnswers(q.id)
+}, { immediate: true })
+
 usePageHead({
   type: 'article',
   // firebase.json 把 /policy/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
@@ -318,7 +395,8 @@ usePageHead({
             <Sparkles v-else :size="16" />
             {{ progressRequest.label(verifyLabel) }}
           </button>
-          <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
+          <!-- 落選就不給提問入口，跟下面那張公民提問卡的「前往提問」同一條規則（2026-09-18） -->
+          <HeroAction v-if="campaignResult !== 'not_elected'" data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 公民提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
@@ -329,7 +407,10 @@ usePageHead({
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
 
         <!-- Main Content -->
-        <div class="lg:col-span-2 space-y-6">
+        <!-- 落選：整個內容區去色、變淡（2026-09-18）。這條承諾不會被執行了，
+             它仍是歷史紀錄該留著，但不該跟進行中的政見看起來一樣重要。
+             包在最外層一次處理，之後新增的卡片不必各自記得補。 -->
+        <div :class="['lg:col-span-2 space-y-6', campaignResult === 'not_elected' ? 'grayscale opacity-75' : '']">
 
           <!-- Policy Relay -->
           <div v-if="policyChain.length > 1" class="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm">
@@ -380,6 +461,8 @@ usePageHead({
                 <!-- 跟「查核履歷」一樣帶圖示（2026-09-17），同一頁的區塊標題長得一致 -->
                 <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
                 <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
+                <!-- 落選就不會有執行進度：說出來，不要讓人以為是還沒人追（2026-09-18） -->
+                <p v-if="campaignResult === 'not_elected'" class="mt-2 text-xs text-slate-500">這場選舉未當選，所以這項承諾不會有執行進度。</p>
                 <p v-if="myPolicyStance === 'support' || myPolicyStance === 'oppose'" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按另一顆就會換掉。</p>
                 <p v-if="isFollowing && !countsTowardFollows" class="mt-2 text-xs text-amber-600">已加進你這台瀏覽器的關注；登入後才會計入關注數。</p>
                 <p v-if="stanceError" class="mt-2 text-sm text-rose-600">{{ stanceError }}</p>
@@ -391,8 +474,8 @@ usePageHead({
                   :key="opt.key"
                   type="button"
                   @click="castStance(opt.key)"
-                  :disabled="stanceBusy !== null"
-                  :title="opt.hint"
+                  :disabled="stanceBusy !== null || campaignResult === 'not_elected'"
+                  :title="campaignResult === 'not_elected' ? '這場選舉未當選，不再收集對這條承諾的表態' : opt.hint"
                   :aria-pressed="stanceActive(opt.key)"
                   :class="[
                     'w-[72px] shrink-0 flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-xl border transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
@@ -438,17 +521,42 @@ usePageHead({
                 </div>
               </div>
             </div>
-            <!-- 公民提問併進同一張卡，用分隔線隔開（2026-09-17）：
-                 它問的就是這一筆政見，不該自己占一張卡 -->
-            <div class="mt-6 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          </div>
+
+          <!-- 公民提問獨立一張卡（2026-09-18）：它是讀者跟 AI 的問答，
+               跟政見內容是兩件事，混在同一張卡裡分不出哪句是政見、哪句是回答。
+               落選又沒人問過就整張不出現：沒有人會去執行這條承諾，邀請提問沒有意義；
+               已經有人問過仍照常顯示，那些問答是既有紀錄。 -->
+          <div v-if="campaignResult !== 'not_elected' || policyQuestions.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 class="font-bold text-navy-900 flex items-center gap-2"><MessageCircleQuestion :size="18" class="text-blue-600" />公民提問</h3>
-                <p class="text-sm text-slate-500 mt-1">想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。</p>
+                <!-- 字級與圖示跟同一頁的查核履歷一致（2026-09-18） -->
+                <h3 class="font-bold text-navy-900 flex items-center gap-2 text-xl">
+                  <MessageCircleQuestion class="text-slate-400" :size="22" />公民提問
+                  <span v-if="policyQuestions.length > 0" class="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{{ policyQuestions.length }}</span>
+                </h3>
               </div>
-              <button @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0">
+              <button v-if="campaignResult !== 'not_elected'" @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0">
                 前往提問
               </button>
             </div>
+            <!-- 跟查核履歷同一種時間軸：等寬字的日期＋圓點＋這一則是什麼 -->
+            <ol v-if="questionTimeline.length > 0" class="mt-4 relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="policy-questions">
+              <li v-for="ev in questionTimeline" :key="ev.id" class="relative pl-6" :data-kind="ev.kind">
+                <span :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', ev.kind === 'answer' ? 'bg-emerald-500 ring-emerald-100' : ev.kind === 'ask' ? 'bg-blue-500 ring-blue-100' : 'bg-slate-300 ring-slate-100']"></span>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span v-if="ev.at" class="font-mono text-slate-400">{{ formatDate(ev.at) }}</span>
+                  <span :class="['font-bold px-2 py-0.5 rounded-full', ev.kind === 'answer' ? 'bg-emerald-50 text-emerald-700' : ev.kind === 'ask' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500']">
+                    {{ ev.kind === 'answer' ? '回答' : ev.kind === 'ask' ? '提問' : ev.kind === 'waiting' ? '等待回答' : '還沒有人問' }}
+                  </span>
+                  <span v-if="ev.by" class="text-slate-500">{{ ev.by }}</span>
+                </div>
+                <p :class="['mt-1 text-sm leading-relaxed break-words', ev.kind === 'answer' || ev.kind === 'ask' ? 'text-navy-900' : 'text-slate-500']">{{ ev.text }}</p>
+                <div v-if="ev.sources?.length" class="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  <a v-for="u in ev.sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-xs text-blue-700 underline underline-offset-2 break-all" @click.stop>{{ hostOf(u) }}</a>
+                </div>
+              </li>
+            </ol>
           </div>
 
           <!-- Sources -->
@@ -490,7 +598,26 @@ usePageHead({
 
           <!-- Timeline -->
           <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-            <h2 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2"><Calendar class="text-slate-400" />執行歷程追蹤</h2>
+            <!-- 標題右邊擺一顆動作鈕，跟同一頁的公民提問一致（2026-09-18）：
+                 兩張卡都是「這裡有紀錄，也可以請 AI 再去查一次」，只有公民提問給得出下一步
+                 看起來像只有它能動。文字沿用 hero 那顆（查進度／查兌現情形），同一件事只有一種叫法。
+                 這一區只在非競選政見出現，所以 canVerify 必為真，不必再處理擋下來的情況。 -->
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+              <h2 class="text-xl font-bold text-navy-900 flex items-center gap-2"><Calendar class="text-slate-400" :size="22" />執行歷程追蹤</h2>
+              <button
+                type="button"
+                data-testid="timeline-progress"
+                :disabled="progressRequest.loading.value"
+                class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-2 disabled:opacity-60"
+                @click="progressRequest.send({ kind: 'progress', policy_id: policy.id })"
+              >
+                <Loader2 v-if="progressRequest.loading.value" :size="16" class="animate-spin" />
+                <CheckCircle v-else-if="progressRequest.done.value" :size="16" />
+                <XCircle v-else-if="progressRequest.error.value" :size="16" />
+                <Sparkles v-else :size="16" />
+                {{ progressRequest.label(verifyLabel) }}
+              </button>
+            </div>
             <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17：「時間軸大小不一」）：
                  同一頁兩條時間軸，一條 16px 點、一條 12px 點，看起來像兩套東西 -->
             <div class="relative border-l-2 border-slate-200 ml-2 space-y-4 pb-2">

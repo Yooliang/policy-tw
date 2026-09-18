@@ -9,14 +9,14 @@ import { Loader2, MessageCircleQuestion } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
-import { voteStance, type AskQuestionResult, type Stance } from '../lib/citizen-questions'
+import type { AskQuestionResult } from '../lib/citizen-questions'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useRoute } from 'vue-router'
 
 const { policies, politicians, loadPoliticianById, loadPolicyById } = useSupabase()
 const { globalRegion } = useGlobalState()
-const { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, applyStanceResult } = useCitizenQuestions()
+const { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, votedStances, voteBusyIds, voteErrors, loadMyStances, castVote } = useCitizenQuestions()
 
 type StatusFilter = 'all' | 'open' | 'answered'
 type SortMode = 'stance' | 'latest'
@@ -125,37 +125,8 @@ function toggleQuestion(id: string) {
   expandedIds.value = next
 }
 
-const LS_STANCE_KEY = 'zhengjian_question_stances'
-const votedStances = ref<Record<string, Stance>>({})
-onMounted(() => {
-  try {
-    const stored = localStorage.getItem(LS_STANCE_KEY)
-    if (stored) votedStances.value = JSON.parse(stored)
-  } catch { /* ignore */ }
-})
-
-const voteBusyIds = ref<Set<string>>(new Set())
-const voteErrors = ref<Record<string, string>>({})
-
-async function castVote(id: string, stance: Stance) {
-  // 伺服器端同一題同一個 IP 是覆蓋（upsert）而不是報錯，所以按錯了要能改回來；
-  // 只擋「重複送出同一個表態」與送出中的狀態。
-  if (voteBusyIds.value.has(id) || votedStances.value[id] === stance) return
-  voteBusyIds.value = new Set(voteBusyIds.value).add(id)
-  voteErrors.value = { ...voteErrors.value, [id]: '' }
-  try {
-    const result = await voteStance(id, stance)
-    applyStanceResult(id, result.stanceUp, result.stanceDown)
-    votedStances.value = { ...votedStances.value, [id]: stance }
-    localStorage.setItem(LS_STANCE_KEY, JSON.stringify(votedStances.value))
-  } catch (err) {
-    voteErrors.value = { ...voteErrors.value, [id]: err instanceof Error ? err.message : '表態失敗，請稍後再試' }
-  } finally {
-    const next = new Set(voteBusyIds.value)
-    next.delete(id)
-    voteBusyIds.value = next
-  }
-}
+// 表態的狀態與流程在 useCitizenQuestions（政見頁也用同一份）
+onMounted(loadMyStances)
 
 // 提問成功：重新整理列表，讓新題目馬上出現
 function onAsked(_result: AskQuestionResult) {
