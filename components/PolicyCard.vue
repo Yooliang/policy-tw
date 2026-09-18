@@ -6,6 +6,7 @@ import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyYear } from '../lib/policy-date'
 import { useCheckpoints } from '../composables/useCheckpoints'
+import { useSupabase } from '../composables/useSupabase'
 
 const props = withDefaults(defineProps<{
   policy: Policy
@@ -26,6 +27,16 @@ const props = withDefaults(defineProps<{
 }>(), { showPolitician: true, showStatus: true })
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
+
+// 已經投完票那場選舉的承諾，用小卡（2026-09-18）：期待度與⭐對它沒有意義——
+// 支持或反對一個 2024 年的承諾改變不了任何事，追蹤它也不會再有選前的作用。
+// 那場選舉「投完了沒」是可以判斷的；「當選了沒」目前九成的資料是空的，所以不拿來當依據。
+const { elections } = useSupabase()
+const isPastCampaign = computed(() => {
+  if (!isCampaign || props.policy.electionId == null) return false
+  const date = elections.value.find((e) => e.id === props.policy.electionId)?.electionDate
+  return !!date && date < new Date().toISOString().slice(0, 10)
+})
 
 // 我的關注改走 useCheckpoints（2026-09-17）：原本這裡直接讀寫 localStorage，
 // 四個地方各寫一份，而且登入與否毫無差別——換台機器就全沒了。
@@ -77,6 +88,7 @@ const toggleCheckpoint = (e: Event) => {
           {{ policy.title }}
         </h3>
         <button
+          v-if="!isPastCampaign"
           @click.stop="toggleCheckpoint"
           :class="`shrink-0 -mt-1 p-1.5 rounded-full transition-colors ${isCheckpointed ? 'text-amber-500 hover:text-amber-600' : 'text-slate-300 hover:text-amber-400'}`"
           :title="starTitle"
@@ -105,7 +117,7 @@ const toggleCheckpoint = (e: Event) => {
       <!-- 讀者表態：支持從左、反對從右，互搶一條長條（2026-09-18）。
            兩邊數字都留在兩端：只秀比例會看不出是 1:1 還是 100:100。
            關注（🔥）不是支持或反對，不進長條：它是按了標題旁⭐的登入帳號數。 -->
-      <div v-if="isCampaign" class="bg-violet-50 rounded-xl p-3 space-y-2" data-testid="stance-bar">
+      <div v-if="isCampaign && !isPastCampaign" class="bg-violet-50 rounded-xl p-3 space-y-2" data-testid="stance-bar">
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
           <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600" title="關注：按了⭐的登入帳號數"><Flame :size="13" />{{ shownFollows }}</span>
@@ -119,7 +131,9 @@ const toggleCheckpoint = (e: Event) => {
           <span class="flex items-center gap-1 text-rose-600 shrink-0" title="反對">{{ policy.stanceOppose }}<ThumbsDown :size="13" class="fill-current" /></span>
         </div>
       </div>
-      <div v-else class="space-y-2">
+      <!-- 已投票那場的承諾：什麼都不放。進度條對它沒意義（沒當選就不會有執行進度，
+           當選且有進度的話狀態早就不是「競選承諾」了，會落在人物頁的施政那一區） -->
+      <div v-else-if="!isCampaign" class="space-y-2">
         <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
           <span>當前執行進度</span>
           <span>{{ policy.progress }}%</span>

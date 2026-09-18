@@ -5,7 +5,7 @@ import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContributio
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
- * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<created_at>
+ * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<last_activity_at>
  *   voting＝還在等票但已經有人投過（status=pending 且三種票數任一 > 0）。
  *   verified 這個狀態是過渡的——通過驗證會立刻自動落庫變 applied，所以那一頁幾乎永遠是空的，
  *   讀者要看的其實是「正在被核對的那些」。
@@ -18,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed"];
-const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id";
+const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=30" } });
@@ -44,14 +44,17 @@ Deno.serve(async (req) => {
     const wantSummary = wantCount && url.searchParams.get("summary") !== "0";
     let q = supabase.from("contributions")
       .select(FEED_COLUMNS, wantCount ? { count: "exact" } : undefined)
-      .order("created_at", { ascending: false }).limit(limit + 1);
+      // 排序看「最後一次變動」而不是提交時間（2026-09-18）：一筆兩天前交的貢獻，
+      // 剛剛有人投票或剛上線，就該回到最上面。翻頁游標也要跟著換成同一個欄位，
+      // 不然第二頁會用另一個欄位去切，中間的資料會漏掉。
+      .order("last_activity_at", { ascending: false }).limit(limit + 1);
     if (status === "attention") q = q.in("status", ATTENTION_STATUSES);
     // 「驗證中」＝還在等票、但已經有人動過的。單看 status 分不出「沒人理」與「正在被核對」。
     else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0");
     else if (status !== "all") q = q.eq("status", status);
     if (agentName) q = q.eq("agent_name", agentName);
     if (type) q = q.eq("contribution_type", type);
-    if (cursor) q = q.lt("created_at", cursor);
+    if (cursor) q = q.lt("last_activity_at", cursor);
 
     // 統計只在第一頁算（2026-09-17：「會不會造成伺服器的負擔？」）。
     // 翻頁時前端根本不會用 summary——它只在第一次載入時覆寫——但伺服器原本每一頁都
@@ -164,6 +167,8 @@ Deno.serve(async (req) => {
         source_urls: r.source_urls ?? [],
         task_id: r.task_id,
         created_at: r.created_at,
+        last_activity_at: r.last_activity_at ?? r.created_at,
+        last_activity: r.last_activity ?? "created",
         applied_at: r.applied_at,
         review_notes: r.review_notes,
         summary: s.summary,
@@ -183,7 +188,7 @@ Deno.serve(async (req) => {
       /** 目前這組篩選共幾筆（只有第一頁算得準；翻頁時回 null） */
       filtered_total: wantCount ? (feedRes.count ?? null) : null,
       has_more: hasMore,
-      next_cursor: hasMore ? page[page.length - 1].created_at : null,
+      next_cursor: hasMore ? page[page.length - 1].last_activity_at : null,
       items,
       summary,
       docs: "https://policy-tw.web.app/skill.md",
