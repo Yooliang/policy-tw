@@ -396,7 +396,10 @@ usePageHead({
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
 
         <!-- Main Content -->
-        <div class="lg:col-span-2 space-y-6">
+        <!-- 落選：整個內容區去色、變淡（2026-09-18）。這條承諾不會被執行了，
+             它仍是歷史紀錄該留著，但不該跟進行中的政見看起來一樣重要。
+             包在最外層一次處理，之後新增的卡片不必各自記得補。 -->
+        <div :class="['lg:col-span-2 space-y-6', campaignResult === 'not_elected' ? 'grayscale opacity-75' : '']">
 
           <!-- Policy Relay -->
           <div v-if="policyChain.length > 1" class="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm">
@@ -460,8 +463,8 @@ usePageHead({
                   :key="opt.key"
                   type="button"
                   @click="castStance(opt.key)"
-                  :disabled="stanceBusy !== null"
-                  :title="opt.hint"
+                  :disabled="stanceBusy !== null || campaignResult === 'not_elected'"
+                  :title="campaignResult === 'not_elected' ? '這場選舉未當選，不再收集對這條承諾的表態' : opt.hint"
                   :aria-pressed="stanceActive(opt.key)"
                   :class="[
                     'w-[72px] shrink-0 flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-xl border transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
