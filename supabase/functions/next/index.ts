@@ -1,3 +1,4 @@
+import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
@@ -228,7 +229,9 @@ Deno.serve(async (req) => {
         remaining: Math.max(0, VERIFY_DAILY_LIMIT_PER_IP - (ipVoteRes.count ?? 0)),
       },
     };
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, docs: "https://policy-tw.web.app/skill.md" };
+    // protocol_version：代理拿它跟自己手上那份 skill.md 的版本比，不一樣就要重讀再繼續。
+    // 不然協議改了，還在跑的代理會照舊規則做到下一次重啟。
+    const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
     if (kind === "verify") {
       // 優先派來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
