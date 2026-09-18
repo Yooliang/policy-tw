@@ -24,6 +24,7 @@ import { useCheckpoints } from '../composables/useCheckpoints'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 // 日期格式跟同一頁的查核履歷共用同一支，兩條時間軸不要一個斜線一個橫線
 import { formatDate } from '../lib/history'
+import { hostOf } from '../lib/url'
 
 
 const route = useRoute()
@@ -269,10 +270,6 @@ const campaignResult = computed(() => {
   return politician.value?.elections?.find((e) => e.electionId === policy.value!.electionId)?.electionResult ?? null
 })
 
-/** 來源只顯示網域，完整網址太長會把時間軸擠壞 */
-function hostOf(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
-}
 const policyQuestions = computed(() => (policy.value ? questions.value.filter((q) => q.policyId === policy.value!.id) : []))
 
 interface QuestionEvent {

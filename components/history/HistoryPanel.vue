@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2, ThumbsUp, ThumbsDown, CircleHelp } from 'lucide-vue-next'
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
+import TimelineNote from '../TimelineNote.vue'
+import { hostOf } from '../../lib/url'
 
 /**
  * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設展開、標題帶筆數；時間軸每筆可個別收合看驗證者與改動。
@@ -73,9 +75,13 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         <component :is="open ? ChevronUp : ChevronDown" :size="18" />
       </span>
     </button>
-    <p v-if="!open && total !== null" class="mt-1 text-xs text-slate-500">
-      {{ total > 0 ? '這筆資料由 AI 代理提交、其他代理驗證後上線；展開看是誰查的、誰審的、改過什麼。' : (origin?.note ?? '這筆資料尚未經過 AI 貢獻流程') }}
-    </p>
+    <!-- 收合時那句說明也走時間軸格式（2026-09-18），跟展開後的紀錄、跟政見頁公民提問一致 -->
+    <TimelineNote
+      v-if="!open && total !== null"
+      class="mt-3"
+      :label="total > 0 ? '已查核' : '尚未查核'"
+      :text="total > 0 ? '這筆資料由 AI 代理提交、其他代理驗證後上線；展開看是誰查的、誰審的、改過什麼。' : (origin?.note ?? '這筆資料尚未經過 AI 貢獻流程')"
+    />
 
     <div v-if="open" class="mt-4" data-testid="history-body">
       <div v-if="loading && entries.length === 0" class="py-6 text-center text-slate-500"><Loader2 :size="22" class="animate-spin mx-auto mb-1 text-blue-500" />載入中…</div>
@@ -84,13 +90,18 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         <p class="text-slate-700 font-bold">暫時讀不到履歷</p>
         <button type="button" class="mt-2 px-3 py-1.5 rounded-lg bg-navy-900 text-white text-xs font-bold" @click="load()">再試一次</button>
       </div>
-      <div v-else-if="entries.length === 0" class="text-sm text-slate-600 space-y-2" data-testid="history-empty">
-        <p class="font-bold text-slate-800">這筆資料尚未經過 AI 貢獻流程</p>
-        <p v-if="origin?.note">{{ origin.note }}</p>
-        <a v-if="origin?.source_url" :href="origin.source_url" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ origin.source_url }}</a>
-        <ul v-if="origin?.source_notes?.length" class="list-disc pl-5 text-slate-700">
-          <li v-for="n in origin.source_notes" :key="n">{{ n }}</li>
-        </ul>
+      <!-- 還沒有貢獻紀錄：排在同一條時間軸上講一句（2026-09-18），
+           格式跟下面的紀錄、跟政見頁「還沒有人問」一致，不再是框外的一段小字。
+           來源網址是讀者唯一能往下追的東西，接在這句後面。 -->
+      <div v-else-if="entries.length === 0" data-testid="history-empty">
+        <TimelineNote label="尚未查核" :text="origin?.note ?? '這筆資料尚未經過 AI 貢獻流程'">
+          <div class="mt-1 space-y-1">
+            <a v-if="origin?.source_url" :href="origin.source_url" target="_blank" rel="noopener" class="text-xs text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-0.5 flex-shrink-0" />{{ hostOf(origin.source_url) }}</a>
+            <ul v-if="origin?.source_notes?.length" class="list-disc pl-5 text-xs text-slate-500">
+              <li v-for="n in origin.source_notes" :key="n">{{ n }}</li>
+            </ul>
+          </div>
+        </TimelineNote>
       </div>
       <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
         <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
