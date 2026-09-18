@@ -1,39 +1,35 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted } from 'vue'
-import { Loader2 } from 'lucide-vue-next'
+import { Loader2, TrendingUp } from 'lucide-vue-next'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import { MANUAL_TASKS_KEY, usePipelineSnapshots } from '../../composables/usePipelineSnapshots'
 import { taskTypeLabel } from '../../lib/task-labels'
+import { withinHours } from '../../lib/stats-range'
+import { BRAND, CATEGORY_SERIES } from '../../lib/brand-colors'
+import { CHART_LEGEND } from '../../lib/chart-style'
+import { topGapTypes } from '../../lib/gap-ranking'
 
 /**
- * 近 24 小時各類資料缺口的走勢。
+ * 各類資料缺口的走勢。時間窗由統計頁整頁共用的那一組決定（24h／7D／30D／90D）。
  *
- * 2026-09-16 小良哥：「資料缺口可以也加入每小時的計算嗎…也想有個地方可以看各種資料缺口的狀況」。
+ * 2026-09-16：「資料缺口可以也加入每小時的計算嗎…也想有個地方可以看各種資料缺口的狀況」。
  * 資料本來就有：pipeline_snapshots 每小時一筆，tasks_by_type 存著當下每一種缺口的數量，
  * 這裡只是把它畫出來，不需要另外採樣。
  */
-const HOURS = 24
-/** 手動任務不是「資料缺口」，它在左邊的任務清單裡 */
+const props = withDefaults(defineProps<{ hours?: number; rangeLabel?: string }>(), { hours: 24, rangeLabel: '24h' })
+/** 手動任務不是「資料缺口」，它在任務頁的清單裡 */
 
 /** 側欄很窄，線太多會糊成一團：只畫目前最多的幾種，其餘合成一條 */
-const MAX_LINES = 6
-const COLORS = ['#2563eb', '#ea580c', '#059669', '#7c3aed', '#db2777', '#0891b2', '#94a3b8']
+// 取前 5 大：剛好用完站徽的五個顏色，其餘併成灰色的「其他缺口」
+const MAX_LINES = CATEGORY_SERIES.length
+const COLORS = [...CATEGORY_SERIES, BRAND.other]
 
 const { snapshots, loading, error, fetchSnapshots } = usePipelineSnapshots()
 
-const recent = computed(() => {
-  const since = Date.now() - HOURS * 3600 * 1000
-  return snapshots.value.filter(s => new Date(s.takenAt).getTime() >= since)
-})
+const recent = computed(() => withinHours(snapshots.value, props.hours))
 
-const topTypes = computed(() => {
-  const last = recent.value[recent.value.length - 1]?.tasksByType ?? {}
-  return Object.entries(last)
-    .filter(([k]) => k !== MANUAL_TASKS_KEY)
-    .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .slice(0, MAX_LINES)
-    .map(([k]) => k)
-})
+// 名次依「全體最新一筆」排，不是時間窗內的最後一筆：跟資料缺口圓餅同一筆、同一支排序，同一類才同色
+const topTypes = computed(() => topGapTypes(snapshots.value[snapshots.value.length - 1]?.tasksByType ?? {}, MAX_LINES))
 
 const chartSeries = computed(() => {
   const series = topTypes.value.map(type => ({
@@ -49,10 +45,13 @@ const chartSeries = computed(() => {
   return series
 })
 
+// 超過一天的時間窗要帶日期，不然 X 軸上一堆「14:00」分不出是哪一天
 const axisLabels = computed(() =>
   recent.value.map(s => {
     const d = new Date(s.takenAt)
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const p = (n: number) => String(n).padStart(2, '0')
+    const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+    return props.hours > 24 ? `${p(d.getMonth() + 1)}/${p(d.getDate())} ${hm}` : hm
   })
 )
 
@@ -68,8 +67,8 @@ const chartOptions = computed(() => ({
   },
   yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '10px' } }, forceNiceScale: true, min: 0 },
   grid: { strokeDashArray: 3, borderColor: '#f1f5f9' },
-  legend: { show: true, position: 'bottom' as const, fontSize: '11px', markers: { size: 5 }, itemMargin: { horizontal: 6, vertical: 2 } },
-  markers: { size: recent.value.length <= 8 ? 3 : 0 },
+  legend: CHART_LEGEND,
+  markers: { size: 0 },
   tooltip: { shared: true, intersect: false },
 }))
 
@@ -77,9 +76,9 @@ onMounted(fetchSnapshots)
 </script>
 
 <template>
-  <div class="mt-4 pt-4 border-t border-slate-100" data-testid="gap-trend">
+  <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="gap-trend">
     <div class="flex items-baseline gap-2 mb-1">
-      <h4 class="text-sm font-black text-navy-900">近 {{ HOURS }} 小時走勢</h4>
+      <h3 class="font-black text-navy-900 flex items-center gap-2"><TrendingUp :size="18" class="text-violet-600" />缺口走勢({{ rangeLabel }})</h3>
       <span class="text-xs text-slate-400">每小時採樣一次</span>
     </div>
 
@@ -88,10 +87,10 @@ onMounted(fetchSnapshots)
       <Loader2 :size="16" class="animate-spin" />載入中
     </div>
     <p v-else-if="recent.length < 2" class="text-sm text-slate-400 py-4">
-      近 {{ HOURS }} 小時只有 {{ recent.length }} 筆採樣，還畫不出走勢；每小時會新增一筆。
+      這段期間只有 {{ recent.length }} 筆採樣，還畫不出走勢；每小時會新增一筆。
     </p>
     <div v-else class="h-64">
       <ClientOnly><apexchart type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
     </div>
-  </div>
+  </section>
 </template>

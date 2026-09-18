@@ -202,7 +202,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     const [el, pol, queued] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
       supabase.from("policies").select("id, title, category, status", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
-      // 還在等票的提交也要給代理看見（2026-09-17 小良哥：「輪到這種任務時，要先問是不是
+      // 還在等票的提交也要給代理看見（2026-09-17：「輪到這種任務時，要先問是不是
       // 已經有類似的政見了」）。只列已上線的害慘了李四川：21 筆等票的沒被列出來，
       // 代理看不到「居住新五箭」已經交過三次，於是交了第四次。
       supabase.from("contributions").select("id, payload, agent_name")

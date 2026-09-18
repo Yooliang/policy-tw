@@ -48,7 +48,7 @@ export const VERDICT_CLASS: Record<string, string> = {
   agree: 'bg-emerald-100 text-emerald-800', disagree: 'bg-red-100 text-red-700', unsure: 'bg-slate-100 text-slate-600',
 }
 /**
- * 資料表名改成中文（2026-09-17 小良哥）：畫面上原本直接印 policies／tracking_logs，
+ * 資料表名改成中文（2026-09-17）：畫面上原本直接印 policies／tracking_logs，
  * 那是給工程師看的識別碼，看報表的人不會因為它做任何事。
  * 對照只收線上實際出現過的那幾張（edit_history 實查）；沒收到的就照原樣印，不要假裝翻譯過。
  */
@@ -92,7 +92,7 @@ export function formatValue(v: unknown): string {
 }
 
 /**
- * 履歷列只到日期（2026-09-17 小良哥：「不用 10:13 這樣，到日期即可」），
+ * 履歷列只到日期（2026-09-17：「不用 10:13 這樣，到日期即可」），
  * 並且跟執行歷程的 YYYY-MM-DD 對齊——同一頁兩條時間軸別一個斜線一個橫線。
  * 展開後的驗證票仍保留時分：同一天的幾張票要看得出先後。
  */

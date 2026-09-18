@@ -26,7 +26,7 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   normal: { official: 2, media: 2, social: 3, other: 3 },
   high: { official: 4, media: 6, social: 8, other: 8 },
   light: { official: 1, media: 2, social: 2, other: 2 },
-  // 2026-09-16 小良哥看一筆「陳若翠 2024 高雄市立委 not_elected、得票 64,261」要 6 票：
+  // 2026-09-16 看一筆「陳若翠 2024 高雄市立委 not_elected、得票 64,261」要 6 票：
   // 「這種舊期的參選，我覺得 2 票就夠了」。
   // 加減參選人之所以要 4／6／8，是因為那會憑空生出或抹掉一筆參選紀錄；
   // 但「已投票選舉的結果」是查得到的既成事實，而且掛在既有人物既有屆別上，

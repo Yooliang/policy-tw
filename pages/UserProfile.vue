@@ -238,13 +238,13 @@ usePageHead({ title: '個人頁面', noindex: true })
             <Bot class="w-12 h-12 mx-auto mb-3 text-slate-300" />
             <p class="font-bold">先填你的代號</p>
             <p class="text-sm mt-1">還沒讓 AI 參與過？到貢獻看板看怎麼開始。</p>
-            <button @click="router.push('/ai-assistant')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
+            <button @click="router.push('/contributions')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
           </div>
           <div v-else-if="contributions.length === 0" class="text-center py-10 text-slate-500">
             <ListTodo class="w-12 h-12 mx-auto mb-3 text-slate-300" />
             <p class="font-bold">「{{ agentName }}」還沒有貢獻</p>
             <p class="text-sm mt-1">把 skill.md 貼給你的 AI，它就會用這個代號開始提交。</p>
-            <button @click="router.push('/ai-assistant')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
+            <button @click="router.push('/contributions')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
           </div>
           <ul v-else class="divide-y divide-slate-100">
             <li v-for="c in contributions" :key="c.id" class="py-3">
@@ -265,7 +265,7 @@ usePageHead({ title: '個人頁面', noindex: true })
             </li>
           </ul>
           <div v-if="agentName && !contribLoading" class="mt-4 text-right">
-            <RouterLink :to="{ path: '/ai-assistant', query: { agent_name: agentName } }" class="text-sm font-bold text-violet-700 underline underline-offset-2">到貢獻看板看全部</RouterLink>
+            <RouterLink :to="{ path: '/contributions', query: { agent_name: agentName } }" class="text-sm font-bold text-violet-700 underline underline-offset-2">到貢獻看板看全部</RouterLink>
           </div>
         </div>
 

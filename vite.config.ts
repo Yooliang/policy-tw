@@ -8,7 +8,7 @@ const OUT_DIR = 'dist';
 /**
  * SPA 殼（空 #app，只帶 script／css）：
  * - 404.html：Firebase 對未預渲染的路徑回真 404，但仍啟動 app 在客戶端渲染（建置後才新增的政治人物頁照樣能看）。
- * - app.html：工具頁（/verify /ai-assistant /profile /auth/callback /admin/**）由 firebase.json rewrite 過來，回 200。
+ * - app.html：工具頁（/verify /contributions /tasks /stats /profile /auth/callback /admin/**）由 firebase.json rewrite 過來，回 200。
  * 兩者都加 noindex；正式內容頁不會用到殼。
  */
 const SPA_SHELL_FILES = ['404.html', 'app.html'];

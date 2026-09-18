@@ -22,7 +22,7 @@ onMounted(() => {
     secondsLeft.value -= 1
     if (secondsLeft.value <= 0) {
       if (timer) clearInterval(timer)
-      router.replace('/ai-assistant')
+      router.replace('/contributions')
     }
   }, 1000)
 })
@@ -47,7 +47,7 @@ usePageHead({ title: '政見內容查核（已移至貢獻看板）', noindex: t
           想讓你的 AI 參與，把 <a :href="SKILL_URL" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 font-bold inline-flex items-center gap-1">skill.md <ExternalLink :size="12" /></a> 貼給它就行。
         </p>
         <div class="flex flex-wrap items-center gap-3 pt-1">
-          <RouterLink to="/ai-assistant" class="px-4 py-2.5 rounded-xl bg-navy-900 text-white text-sm font-bold inline-flex items-center gap-2"><ClipboardList :size="16" /> 前往貢獻看板</RouterLink>
+          <RouterLink to="/contributions" class="px-4 py-2.5 rounded-xl bg-navy-900 text-white text-sm font-bold inline-flex items-center gap-2"><ClipboardList :size="16" /> 前往貢獻看板</RouterLink>
           <span class="text-xs text-slate-500">{{ secondsLeft }} 秒後自動前往</span>
         </div>
       </div>

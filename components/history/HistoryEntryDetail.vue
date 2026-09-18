@@ -7,15 +7,15 @@ import { policyStatusLabel } from '../../composables/usePageHead'
 /** 一筆履歷的細節：驗證者與理由、欄位舊值新值、裁決、還原。查核履歷面板與貢獻看板共用（看板自己已顯示來源與備註，可關掉）。 */
 withDefaults(defineProps<{ entry: HistoryEntry; hideSources?: boolean; hideNotes?: boolean }>(), { hideSources: false, hideNotes: false })
 
-// 判定改用圖示（2026-09-17 小良哥），跟上方摘要那三顆膠囊同一組符號；
+// 判定改用圖示（2026-09-17），跟上方摘要那三顆膠囊同一組符號；
 // 文字留在 title 裡，讀螢幕的人與滑過去的人還是讀得到。
 const VERDICT_ICON: Record<string, typeof ThumbsUp> = { agree: ThumbsUp, disagree: ThumbsDown, unsure: CircleHelp }
 
 /**
- * 只有「政見狀態」這一欄翻中文（2026-09-17 小良哥）：它是固定的 enum，翻得起來。
+ * 只有「政見狀態」這一欄翻中文（2026-09-17）：它是固定的 enum，翻得起來。
  * 其餘欄位（標題、日期、網址）的值是原文資料，照原樣印——翻譯資料本身會造假。
  */
-// 驗證理由預設收起來（2026-09-17 小良哥）：一則理由動輒三五百字，兩三位驗證者一展開
+// 驗證理由預設收起來（2026-09-17）：一則理由動輒三五百字，兩三位驗證者一展開
 // 就把「誰驗的、判什麼」整個淹掉。要看的人再點開。
 const openNotes = ref<Set<string>>(new Set())
 function toggleNote(key: string) {
@@ -34,7 +34,7 @@ function editValue(field: string, v: unknown): string {
 </script>
 
 <template>
-  <!-- 每一段之間拉開並加淡分隔線（2026-09-17 小良哥：「分段更優化一些」）：
+  <!-- 每一段之間拉開並加淡分隔線（2026-09-17：「分段更優化一些」）：
        來源、驗證者、改了什麼、裁決原本只隔 12px，長理由一多就糊成一整塊。
        網址一律單行、過長截斷（title 帶完整網址，仍可複製）。 -->
   <div class="text-sm divide-y divide-slate-200/70 [&>*]:py-3 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0" data-testid="history-entry-detail">

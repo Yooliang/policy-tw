@@ -126,7 +126,7 @@ prod 資料庫另有一組更早的嘗試，**全部 0 筆、不在 repo migrati
 > migration `20260203100001_agent_system.sql`、三個 `pages/AdminAgent*.vue`。
 > 那套是另一套獨立的代理協議（註冊換 API 金鑰、`/claim` 認領、挑戰題防機器人），
 > 跟 `public/skill.md` 的無金鑰同儕共識協議並行。**它從未部署**（線上函式清單裡
-> 沒有那兩支、該 migration 的 remote 欄位是空的），小良哥裁示「用 1.4.4」後整套刪除。
+> 沒有那兩支、該 migration 的 remote 欄位是空的），裁示「用 1.4.4」後整套刪除。
 > 要看那套設計請查 git 歷史（`026a4e4` 加入）。下面這些 prod 物件仍然存在、仍然 0 筆。本次的 contributions／contribution_votes／contribution_tasks 命名與它們不衝突，migration 不動也不引用它們。確認前後端都沒有引用後可以 DROP：
 
 | 類型 | 名稱 |

@@ -91,15 +91,15 @@ try {
     await page.waitForFunction((n) => document.querySelectorAll('[data-testid="feed-item"]').length === n, fixture.items.filter((i) => i.status === 'applied').length)
     check(feedRequests.some((q) => q.includes('status=applied')), `${viewport.name}: 切換「已上線」有帶 status=applied`)
     // 型別篩選
-    await page.locator('[data-testid="type-filter"]').selectOption('policy')
+    await page.locator('[data-testid="type-filter"] button[data-type="policy"]').click()
     await page.waitForTimeout(400)
     check(feedRequests.some((q) => q.includes('type=policy')), `${viewport.name}: 型別篩選有帶 type=policy`)
     const shown = await page.locator('[data-testid="feed-item"]').count()
     check(shown === fixture.items.filter((i) => i.status === 'applied' && i.contribution_type === 'policy').length, `${viewport.name}: 篩選後筆數 ${shown} 正確`)
 
     // 展開一筆
-    await page.locator('[data-testid="status-tabs"] button', { hasText: '全部' }).click()
-    await page.locator('[data-testid="type-filter"]').selectOption('')
+    await page.locator('[data-testid="status-tabs"] button', { hasText: '全部狀態' }).click()
+    await page.locator('[data-testid="type-filter"] button[data-type=""]').click()
     await page.waitForSelector('[data-testid="feed-item"]')
     await page.locator('[data-testid="feed-item"] button').first().click()
     check(await page.locator('[data-testid="feed-detail"]').count() === 1, `${viewport.name}: 點開展開來源與備註`)
@@ -181,7 +181,7 @@ try {
     await page.locator('[data-testid="tab-feed"]').click()
     await page.waitForSelector('[data-testid="feed-list"]')
     check(feedRequests.some((q) => q.includes('type=policy')), '?type=policy 帶進貢獻分頁的第一次請求')
-    check(await page.locator('[data-testid="type-filter"]').inputValue() === 'policy', '型別下拉預選 policy')
+    check(await page.locator('[data-testid="type-filter"] button[data-type="policy"]').getAttribute('aria-pressed') === 'true', '型別按鈕預選 policy')
     await context.close()
   }
 

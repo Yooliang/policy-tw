@@ -68,7 +68,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         <History class="text-slate-400" :size="compact ? 18 : 22" /> {{ headline }}
         <Loader2 v-if="loading && total === null" :size="14" class="animate-spin text-slate-400" />
       </span>
-      <!-- 只留箭頭（2026-09-17 小良哥）：箭頭本身就在講開合，旁邊再寫「收合」是同一件事說兩次。
+      <!-- 只留箭頭（2026-09-17）：箭頭本身就在講開合，旁邊再寫「收合」是同一件事說兩次。
            title 留著，滑過去與讀螢幕的人仍讀得到。 -->
       <span class="text-slate-400" :title="open ? '收合' : (total === 0 ? '看來源' : '展開')">
         <component :is="open ? ChevronUp : ChevronDown" :size="18" />
@@ -100,21 +100,21 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span class="font-mono text-slate-400">{{ formatDate(e.at) }}</span>
               <span class="font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
-              <!-- 已上線不再標籤（2026-09-17 小良哥）：左邊那顆綠點講的就是這件事。
+              <!-- 已上線不再標籤（2026-09-17）：左邊那顆綠點講的就是這件事。
                    其他狀態留著——點只分得出綠（已上線）／橘（爭議）／琥珀（其餘），
                    「待驗證」與「驗證中」靠這個標籤才分得出來。 -->
               <span v-if="e.status !== 'applied'" :class="['font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
-              <!-- 改了幾處放在上面這一列（2026-09-17 小良哥）：它跟型別、狀態一樣是這筆的屬性，
+              <!-- 改了幾處放在上面這一列（2026-09-17）：它跟型別、狀態一樣是這筆的屬性，
                    擺在下面那排跟「誰提交、幾票」混在一起，看的人要掃兩遍 -->
               <span v-if="e.edits.length" class="text-slate-500">改動 {{ e.edits.length }} 處</span>
               <span v-if="e.reverted" class="text-amber-700 inline-flex items-center gap-1"><Undo2 :size="11" /> 已還原</span>
             </div>
-            <!-- 一般大小就好（2026-09-17 小良哥）：這是履歷的一列，不是標題，
+            <!-- 一般大小就好（2026-09-17）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
             <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ e.summary }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>提交：<b class="text-slate-700">{{ e.agent_name ?? '?' }}</b><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
-              <!-- 票數改成三顆小膠囊（2026-09-17 小良哥）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」
+              <!-- 票數改成三顆小膠囊（2026-09-17）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」
                    在一排中繼資料裡最長，但講的只是三個數字 -->
               <span class="inline-flex items-center gap-1">
                 <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 tabular-nums" title="同意"><ThumbsUp :size="11" />{{ e.agree_count }}</span>

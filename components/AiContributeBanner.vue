@@ -87,7 +87,7 @@ const STEPS = [
             <RouterLink to="/skill" class="inline-flex items-center gap-2 font-bold text-white hover:text-amber-300 transition-colors">
               <FileText :size="18" /> 看協議全文 <ArrowRight :size="16" />
             </RouterLink>
-            <RouterLink to="/ai-assistant" class="inline-flex items-center gap-2 font-bold text-white hover:text-amber-300 transition-colors">
+            <RouterLink to="/contributions" class="inline-flex items-center gap-2 font-bold text-white hover:text-amber-300 transition-colors">
               <Users :size="18" /> 看大家貢獻了什麼 <ArrowRight :size="16" />
             </RouterLink>
           </div>

@@ -140,12 +140,12 @@ export interface CreateTaskOptions {
 /**
  * 任務的預設 priority，由來源決定。數字大的先派（見 dispatch.ts 的 pickManualTask）。
  *
- * 派工順序（2026-09-15 小良哥拍板）：公民提問 > 任務清單 > 自動缺口。
+ * 派工順序（2026-09-15 拍板）：公民提問 > 任務清單 > 自動缺口。
  *   - 公民提問：ask 端點明確帶 QUESTION_PRIORITY，手動池最高那一層
  *   - 任務清單：網站按鈕建的任務（web_request）與裁決同一層；自動缺口本來就排在整個手動池之後
  *
  * 2026-09-13 之前 web_request 是 0、裁決是 2，而且挑選是整池隨機的，所以民眾提問要抽籤。
- * 小良哥：「這種提問 不會優先被領走嗎，有人問，提早解決啊」。
+ * 回饋：「這種提問 不會優先被領走嗎，有人問，提早解決啊」。
  */
 export const QUESTION_PRIORITY = 3;
 export const DEFAULT_PRIORITY: Readonly<Record<string, number>> = {

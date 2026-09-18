@@ -68,6 +68,7 @@ Deno.test("看板 summary：needs_attention 四子項合計、contributors_30d �
   assertEquals(s.total, 8);
   assertEquals(s.needs_attention, { total: 2, disputed: 2, retrying: 1 });
   assertEquals(s.contributors_30d, 4, "alice、bob、dave、(unknown)；carol 是 40 天前");
+  assertEquals(s.contributors_total, 5, "總數不限時間，carol 也算；erin 只投票沒提交，不算");
   assertEquals(s.daily_last_7.length, 7);
   assertEquals(s.daily_last_7[6], { date: "2026-09-12", count: 1, verifications: 0 }, "votes 沒帶時間就不進每日圖");
   assertEquals(s.daily_last_7[5].count, 2);
@@ -108,6 +109,7 @@ Deno.test("貢獻榜：最多 30 名，測試代號不上榜也不算貢獻者",
   );
   assertEquals(s.leaderboard[0].applied, 1, "榜首應該是真人（1 筆上線），不是五筆上線的測試代號");
   assertEquals(s.contributors_30d, 40, "貢獻者只算真人，不算那些測試代號");
+  assertEquals(s.contributors_total, 40, "總數也不算測試代號");
   // 資料本身不動：測試代號交的東西還是算在總數與狀態統計裡
   const totalRows = 40 + excluded.length * 5;
   assertEquals(s.total, totalRows, "排除只影響榜與貢獻者數，不影響貢獻總數");
@@ -234,7 +236,7 @@ Deno.test("貢獻榜時間窗：票沒有時間就不算進任何時間窗，但
   assertEquals(s.leaderboard_7d.find((r) => r.agent_name === "someone")?.score, 1);
 });
 
-// 2026-09-17 小良哥：「把政見 1b808b02 的所屬選舉改為『2024』」——畫面上不該出現 uuid
+// 2026-09-17：「把政見 1b808b02 的所屬選舉改為『2024』」——畫面上不該出現 uuid
 Deno.test("correction 有標題就用標題，沒有才退回 id 前八碼", () => {
   const withTitle = summarizeContribution({
     contribution_type: "correction",
@@ -277,4 +279,30 @@ Deno.test("SQL 的貢獻榜規則要跟 TS 這份一致：排除名單、榜長�
   );
   assert(sql.includes("Asia/Taipei"), "每日統計要用台灣時間分日");
   assert(sql.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);
+});
+
+// 統計函式會被新 migration 整支重寫（CREATE OR REPLACE），每重寫一次就有兩件事可能悄悄掉：
+// 排除名單跟 TS 漂開，以及 SECURITY DEFINER——少了它匿名呼叫只拿到 0（migration 000013 修過一次）。
+async function latestFeedSummarySql(): Promise<string> {
+  const dir = new URL("../../migrations/", import.meta.url);
+  const names: string[] = [];
+  for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  for (const name of names.sort().reverse()) {
+    const sql = await Deno.readTextFile(new URL(name, dir));
+    const i = sql.indexOf("CREATE OR REPLACE FUNCTION contribution_feed_summary");
+    if (i >= 0) return sql.slice(i);
+  }
+  throw new Error("找不到定義 contribution_feed_summary 的 migration");
+}
+
+Deno.test("最新的統計函式：排除名單跟 TS 一致、有貢獻者總數、以定義者身分執行", async () => {
+  const sql = await latestFeedSummarySql();
+  for (const name of EXCLUDED_AGENTS) {
+    assert(sql.includes(`'${name}'`), `統計函式的排除名單少了 ${name}`);
+  }
+  assert(sql.includes("'contributors_total'"), "統計函式要回 contributors_total");
+  assert(sql.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);
+  // 函式本體後面緊接的屬性，或同檔之後的 ALTER，都算數
+  assert(/SECURITY DEFINER/.test(sql), "統計函式要 SECURITY DEFINER，不然匿名呼叫拿到的都是 0");
+  assert(/search_path\s*=\s*public/.test(sql), "SECURITY DEFINER 要固定 search_path");
 });

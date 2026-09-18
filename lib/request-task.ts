@@ -15,7 +15,7 @@ export interface RequestTaskResult {
 }
 
 /** 任務看板：按鈕建的任務都列在這一頁的「任務」分頁 */
-export const BOARD_PATH = '/ai-assistant?tab=tasks'
+export const BOARD_PATH = '/tasks'
 
 function headers(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined

@@ -1,5 +1,5 @@
 -- ============================================================
--- 政見分類標準化並擴充為 19 類（2026-09-11 小良哥拍板）
+-- 政見分類標準化並擴充為 19 類（2026-09-11 拍板）
 --   1. categories 表加 description；改名 2 個（保留 id）、新增 11 個（往後編號）
 --   2. policies.category 既有髒值依對照表統一（併入原 scripts/normalize-policy-categories.sql）
 --   3. policies.category 加 FK → categories(name) ON UPDATE CASCADE

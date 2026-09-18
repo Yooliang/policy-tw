@@ -26,7 +26,7 @@
 - 靜態：`/`、`/tracking`、`/analysis`、`/community`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`（`lib/ssg/server-data.ts` 的 `STATIC_CONTENT_ROUTES`）
 - `/election/:id`（每個選舉）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
 - `/analysis/:id` 只出「分析列表實際會連到」的那幾條（與 `PolicyAnalysis.relayCases` 同邏輯），不是全部政見
-- **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/ai-assistant`、`/profile`、`/election-2026`（redirect）、catch-all
+- **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
 
 ## Firebase Hosting 行為（firebase.json）
 

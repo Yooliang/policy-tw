@@ -120,9 +120,19 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/VerifyContent.vue'),
   },
   {
-    path: '/ai-assistant',
+    path: '/contributions',
     name: 'contributions',
     component: () => import('../pages/Contributions.vue'),
+  },
+  {
+    path: '/tasks',
+    name: 'tasks',
+    component: () => import('../pages/Tasks.vue'),
+  },
+  {
+    path: '/stats',
+    name: 'stats',
+    component: () => import('../pages/Stats.vue'),
   },
   {
     path: '/profile',

@@ -7,7 +7,7 @@ import { withTimeoutAndRetry } from '../lib/retry'
 import { useSupabase } from '../composables/useSupabase'
 
 /**
- * 全站搜尋（2026-09-17 小良哥）：找人與找政見。
+ * 全站搜尋（2026-09-17）：找人與找政見。
  *
  * 兩個刻意的區分：
  *   人物——「正在參選」用顏色標出來。站上 15,864 位政治人物裡，多數是歷屆的紀錄，
@@ -35,7 +35,7 @@ interface PersonHit {
 }
 
 /**
- * 排序用的職位位階（2026-09-17 小良哥：「人無高低，但職位位階較高的會較常被搜尋」）。
+ * 排序用的職位位階（2026-09-17：「人無高低，但職位位階較高的會較常被搜尋」）。
  * 順序照 types.ts 的 ElectionType，不是我自己排的。
  */
 const TYPE_RANK: Record<string, number> = {
@@ -59,7 +59,7 @@ let seq = 0
 const refElection = computed(() => getActiveElection() ?? null)
 const activeYear = computed(() => refElection.value?.id ?? null)
 /**
- * 投票日過了沒？（2026-09-17 小良哥問「2027 年沒有選舉時呢」）
+ * 投票日過了沒？（2026-09-17 問「2027 年沒有選舉時呢」）
  * getActiveElection() 在沒有進行中的選舉時會退回最近一屆，所以 2027 年搜尋拿到的是 2026。
  * 那時候該標的不是「參選中」——選完了，落選的人標成參選中是假的——而是「當選」。
  */
@@ -71,7 +71,7 @@ const voted = computed(() => {
 const highlightStatuses = computed(() => (voted.value ? ['elected'] : RUNNING_STATUSES))
 
 /**
- * 排序的第一順位是「現在是不是這個人」，不是位階（2026-09-17 小良哥問「當選 現職 高低？」）。
+ * 排序的第一順位是「現在是不是這個人」，不是位階（2026-09-17 問「當選 現職 高低？」）。
  * 只看位階的話，2022 落選的縣市長會排在現任議員前面——那不是搜尋的人要找的。
  *   第一層：本屆候選人
  *   第二層：現任（最近幾屆當選、任期內）
@@ -193,7 +193,7 @@ function go(path: string) {
       <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-200">
         <Search :size="18" class="text-slate-400 shrink-0" />
         <!-- 用 text 不用 search：type="search" 瀏覽器會自己加一個清除的 ✕，
-             跟右邊的關閉鈕並排就變成兩個叉（2026-09-17 小良哥抓到） -->
+             跟右邊的關閉鈕並排就變成兩個叉（2026-09-17 抓到） -->
         <input
           ref="inputEl"
           v-model="term"

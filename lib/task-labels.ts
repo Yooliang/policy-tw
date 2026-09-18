@@ -1,7 +1,7 @@
 /**
  * 任務型別的中文名稱，任務看板與其他頁面共用這一份。
  *
- * 2026-09-15 小良哥看 /ai-assistant?tab=tasks：election_result_missing、policy_election_missing、
+ * 2026-09-15 看任務頁（現 /tasks）：election_result_missing、policy_election_missing、
  * roster_check、policy_validity 直接把英文代號印在畫面上——新增任務型別時沒人記得補這張表。
  * supabase/functions/_shared/protocol-guard.test.ts 會檢查後端每一種任務型別這裡都有名稱，漏了就紅。
  */

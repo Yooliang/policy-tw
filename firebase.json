@@ -8,7 +8,9 @@
       "**/node_modules/**"
     ],
     "rewrites": [
-      { "source": "/ai-assistant", "destination": "/app.html" },
+      { "source": "/contributions", "destination": "/app.html" },
+      { "source": "/tasks", "destination": "/app.html" },
+      { "source": "/stats", "destination": "/app.html" },
       { "source": "/verify", "destination": "/app.html" },
       { "source": "/profile", "destination": "/app.html" },
       { "source": "/auth/callback", "destination": "/app.html" },

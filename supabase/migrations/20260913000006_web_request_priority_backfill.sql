@@ -1,6 +1,6 @@
 -- 回填：已經排在隊伍裡的網站訪客請求，priority 還是舊的 0。
 --
--- 2026-09-13 小良哥指出民眾提問沒有被優先領走。修法有兩段：
+-- 2026-09-13 指出民眾提問沒有被優先領走。修法有兩段：
 --   1. dispatch.ts 的 pickManualTask 改成「先取 priority 最高那一層」（改之前是整池隨機，
 --      所以撈任務時的 .order("priority") 與提問的表態排序都是白寫的）
 --   2. task-admin.ts 的 DEFAULT_PRIORITY 把 source='web_request' 設成 3（有真人在等）
@@ -18,7 +18,7 @@ UPDATE contribution_tasks
 
 -- 另一件事：「這不是政見？」那顆按鈕在 2026-09-13 之前建的是 task_type='question'，
 -- 代理只會回一段文字貼在提問下面，那筆不像政見的資料不會被移除。
--- 小良哥：「這個也有型別的吧，也是會更新資料的吧」。按鈕已經改成建 policy_validity，
+-- 回饋：「這個也有型別的吧，也是會更新資料的吧」。按鈕已經改成建 policy_validity，
 -- 這裡把已經排隊的那幾筆一起換過去，否則它們還是只會收到一段文字。
 --
 -- 認得出來是因為那句話是按鈕預先填好的固定句型（見 lib/ask-links.ts 的 askNotAPolicy），

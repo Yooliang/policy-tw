@@ -254,7 +254,7 @@ async function fetchAllInner() {
     // 卻讓每一個訪客的第一次連線都付這個成本（改之前首屏是 605 KB／9 個請求）。
     //
     // 2026-09-13 政見清單（257 KB）＋有政見的人物（91 KB）也移出去了，見 ensurePolicies。
-    // 公民提問頁對這 348 KB 的全部用途是「用 id 找一個政見標題」，小良哥回報載入很慢。
+    // 公民提問頁對這 348 KB 的全部用途是「用 id 找一個政見標題」，使用者回報載入很慢。
     const [
       electionsData,
       electionTypesData,
