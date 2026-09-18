@@ -130,11 +130,21 @@ const pledgeElectionDone = computed(() => {
   const d = policyElection.value?.electionDate
   return !!d && d < TODAY
 })
-const canVerify = computed(() => !isCampaign.value || pledgeElectionDone.value)
+/**
+ * 落選也不給（2026-09-18）：選輸的人不會去執行這條承諾，「查兌現情形」派出去
+ * 只會讓代理跑一趟回報「沒有進度」。campaignResult 在下面才宣告，但 computed 是
+ * 讀的時候才算，不受宣告順序影響。
+ */
+const canVerify = computed(() => {
+  if (campaignResult.value === 'not_elected') return false
+  return !isCampaign.value || pledgeElectionDone.value
+})
 const verifyLabel = computed(() => (isCampaign.value ? '查兌現情形' : '查進度'))
 /** 不能查證時，畫面上要講得出原因（而且是使用者能據以行動的那句） */
 const verifyBlockedReason = computed(() => {
   if (canVerify.value) return null
+  // 這一格排在按鈕列裡，長句會把整列撐開；為什麼沒有進度，下面卡片已經講完整了
+  if (campaignResult.value === 'not_elected') return '未當選'
   const d = policyElection.value?.electionDate
   return d ? `${d} 投票，選後才會有執行進度` : '還沒確認這是哪一場選舉的承諾'
 })
@@ -385,7 +395,8 @@ usePageHead({
             <Sparkles v-else :size="16" />
             {{ progressRequest.label(verifyLabel) }}
           </button>
-          <HeroAction data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 民眾提問</HeroAction>
+          <!-- 落選就不給提問入口，跟下面那張公民提問卡的「前往提問」同一條規則（2026-09-18） -->
+          <HeroAction v-if="campaignResult !== 'not_elected'" data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 公民提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
@@ -587,7 +598,26 @@ usePageHead({
 
           <!-- Timeline -->
           <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-            <h2 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2"><Calendar class="text-slate-400" />執行歷程追蹤</h2>
+            <!-- 標題右邊擺一顆動作鈕，跟同一頁的公民提問一致（2026-09-18）：
+                 兩張卡都是「這裡有紀錄，也可以請 AI 再去查一次」，只有公民提問給得出下一步
+                 看起來像只有它能動。文字沿用 hero 那顆（查進度／查兌現情形），同一件事只有一種叫法。
+                 這一區只在非競選政見出現，所以 canVerify 必為真，不必再處理擋下來的情況。 -->
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+              <h2 class="text-xl font-bold text-navy-900 flex items-center gap-2"><Calendar class="text-slate-400" :size="22" />執行歷程追蹤</h2>
+              <button
+                type="button"
+                data-testid="timeline-progress"
+                :disabled="progressRequest.loading.value"
+                class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-2 disabled:opacity-60"
+                @click="progressRequest.send({ kind: 'progress', policy_id: policy.id })"
+              >
+                <Loader2 v-if="progressRequest.loading.value" :size="16" class="animate-spin" />
+                <CheckCircle v-else-if="progressRequest.done.value" :size="16" />
+                <XCircle v-else-if="progressRequest.error.value" :size="16" />
+                <Sparkles v-else :size="16" />
+                {{ progressRequest.label(verifyLabel) }}
+              </button>
+            </div>
             <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17：「時間軸大小不一」）：
                  同一頁兩條時間軸，一條 16px 點、一條 12px 點，看起來像兩套東西 -->
             <div class="relative border-l-2 border-slate-200 ml-2 space-y-4 pb-2">
