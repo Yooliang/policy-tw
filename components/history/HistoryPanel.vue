@@ -52,10 +52,8 @@ function toggleEntry(id: string) {
   expanded.value = next
 }
 
-const headline = computed(() => {
-  if (total.value === null) return props.title
-  return total.value > 0 ? `${props.title}（${total.value} 筆）` : props.title
-})
+// 筆數改用藥丸標籤呈現（2026-09-18），跟同一頁的公民提問一致；標題本身只留字
+const countBadge = computed(() => (total.value !== null && total.value > 0 ? total.value : null))
 
 onMounted(() => { load() })
 watch(() => props.id, () => { entries.value = []; total.value = null; expanded.value = new Set(); load() })
@@ -65,7 +63,8 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
   <section :class="['bg-white rounded-xl border border-slate-200 shadow-sm', compact ? 'p-4' : 'p-6']" data-testid="history-panel">
     <button type="button" class="w-full flex items-center justify-between gap-3 text-left" data-testid="history-toggle" :aria-expanded="open" @click="open = !open">
       <span :class="['font-bold text-navy-900 flex items-center gap-2', compact ? 'text-base' : 'text-xl']">
-        <History class="text-slate-400" :size="compact ? 18 : 22" /> {{ headline }}
+        <History class="text-slate-400" :size="compact ? 18 : 22" /> {{ title }}
+        <span v-if="countBadge" class="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{{ countBadge }}</span>
         <Loader2 v-if="loading && total === null" :size="14" class="animate-spin text-slate-400" />
       </span>
       <!-- 只留箭頭（2026-09-17）：箭頭本身就在講開合，旁邊再寫「收合」是同一件事說兩次。
