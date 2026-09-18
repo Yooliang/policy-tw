@@ -396,7 +396,7 @@ usePageHead({
             {{ progressRequest.label(verifyLabel) }}
           </button>
           <!-- 落選就不給提問入口，跟下面那張公民提問卡的「前往提問」同一條規則（2026-09-18） -->
-          <HeroAction v-if="campaignResult !== 'not_elected'" data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 公民提問</HeroAction>
+          <HeroAction v-if="campaignResult !== 'not_elected'" data-testid="hero-community" :to="{ path: '/community', query: { policy: policy.id } }"><MessageCircleQuestion :size="16" /> 去提問</HeroAction>
           <HeroAction data-testid="hero-history" @click="scrollToHistory"><History :size="16" /> 查核履歷</HeroAction>
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
@@ -537,7 +537,7 @@ usePageHead({
                 </h3>
               </div>
               <button v-if="campaignResult !== 'not_elected'" @click="router.push({ path: '/community', query: { policy: policy.id } })" class="px-4 py-2 bg-white border border-slate-300 hover:border-blue-400 text-slate-700 hover:text-blue-600 rounded-lg font-medium transition-colors shrink-0">
-                前往提問
+                去提問
               </button>
             </div>
             <!-- 跟查核履歷同一種時間軸：等寬字的日期＋圓點＋這一則是什麼 -->
