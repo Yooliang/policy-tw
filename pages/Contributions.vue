@@ -8,6 +8,7 @@ import BoardNav from '../components/contributions/BoardNav.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
 import { fetchHistory, type HistoryEntry } from '../lib/history'
 import { usePageHead } from '../composables/usePageHead'
+import { activityText, relativeTime } from '../lib/activity'
 import {
   Bot, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database, Link as LinkIcon, Inbox, AlertTriangle,
   ThumbsUp, ThumbsDown, HelpCircle,
@@ -34,6 +35,9 @@ interface FeedItem {
   source_urls: string[]
   task_id: string | null
   created_at: string
+  /** 最後一次變動（投票或狀態改變）的時間與內容；排序吃前者，畫面講後者 */
+  last_activity_at?: string
+  last_activity?: string
   applied_at: string | null
   review_notes: string | null
   summary: string
@@ -184,6 +188,11 @@ function detailOf(id: string): HistoryEntry | null {
   return d && typeof d === 'object' ? d : null
 }
 
+/** 這一列剛剛發生什麼事：投票要帶票數，看不懂的變動就不顯示 */
+function activityOf(it: FeedItem): string | null {
+  return activityText(it.last_activity, { agree: it.agree_count, required: it.required_agree })
+}
+
 function toggle(id: string) {
   const next = new Set(expanded.value)
   if (next.has(id)) next.delete(id)
@@ -302,9 +311,11 @@ usePageHead({
                     :class="n <= it.agree_count ? 'bg-emerald-500' : 'bg-slate-200'"
                   ></span>
                 </span>
-                <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(it.created_at) }}</span>
+                <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
               <p class="text-navy-900 leading-snug break-words">{{ it.summary }}</p>
+              <!-- 列表照「最近有變動」排，所以要講出它剛剛變成什麼樣，不是只顯示這筆在做什麼 -->
+              <p v-if="activityOf(it)" class="mt-1 text-xs font-bold text-violet-700">{{ activityOf(it) }}</p>
               <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>{{ it.agent_name }}<span v-if="it.agent_tool" class="text-slate-400">・{{ it.agent_tool }}</span></span>
                 <!-- 圖示自己說明是什麼票，文字移到 title；滑過去才顯示 -->
