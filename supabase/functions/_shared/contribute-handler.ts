@@ -7,6 +7,8 @@ import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContribu
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
+import { claimKey, claimTarget, type ExistingClaim, findMergeTarget } from "./duplicate-claim.ts";
+import { handleVerify } from "./verify-handler.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -54,7 +56,48 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string): Promise<HandlerResult> {
+/** 投票端（預設 handleVerify；測試可換掉） */
+export type VerifyFn = typeof handleVerify;
+
+/**
+ * 撈「可能是同一個宣稱」的待驗證貢獻。
+ * 依 (型別, 對象欄位) 分組，每組一次查詢——不是每筆一次，也不是整張表拉回來。
+ */
+async function fetchClaimCandidates(
+  supabase: SupabaseLike,
+  items: ReadonlyArray<{ contribution_type: string; payload: unknown }>,
+): Promise<ExistingClaim[]> {
+  const groups = new Map<string, { type: string; field: string; values: Set<string> }>();
+  for (const item of items) {
+    const target = claimTarget(item.contribution_type, item.payload);
+    if (!target || claimKey(item.contribution_type, item.payload) === null) continue;
+    const gk = `${item.contribution_type}|${target.field}`;
+    const g = groups.get(gk) ?? { type: item.contribution_type, field: target.field, values: new Set<string>() };
+    g.values.add(target.value);
+    groups.set(gk, g);
+  }
+  if (groups.size === 0) return [];
+  const rows = await Promise.all([...groups.values()].map(async (g) => {
+    const { data, error } = await supabase.from("contributions")
+      .select("id, contribution_type, payload, agent_name, contributor_ip_hash, status")
+      .eq("contribution_type", g.type).eq("status", "pending")
+      .in(`payload->>${g.field}`, [...g.values])
+      .order("created_at", { ascending: true }).limit(200);
+    if (error) throw new Error(`claim candidates (${g.type}): ${error.message}`);
+    return (data ?? []) as ExistingClaim[];
+  }));
+  return rows.flat();
+}
+
+/** 合併時寫進票裡的理由——事後在查核履歷上看得出這票是怎麼來的 */
+function mergeNote(agentName: string, sourceUrls: readonly string[], note: string | null | undefined): string {
+  const head = `這票來自重複提交：${agentName} 獨立查證後提交了同一個宣稱，系統改記為對這一筆的同意票。`;
+  const src = sourceUrls.length > 0 ? `對方的來源：${sourceUrls.join("、")}` : "";
+  const own = note ? `對方備註：${note}` : "";
+  return [head, src, own].filter(Boolean).join(" ").slice(0, 2000);
+}
+
+export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string, verifyFn: VerifyFn = handleVerify): Promise<HandlerResult> {
   const validation = validateContributionRequest(body);
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
@@ -93,9 +136,51 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   type ExistingRow = { id: string; payload_hash: string; status: string };
   const existingByHash = new Map<string, ExistingRow>(((existing ?? []) as ExistingRow[]).map((r) => [r.payload_hash, r]));
 
+  /**
+   * 重複提交＝同意票（2026-09-18）。
+   *
+   * 兩個代理各自查證後得到同一個宣稱，比「看別人交的東西投一票」更強的證據，
+   * 但原本是各躺各的、兩筆都 0 票——李四川那 21 筆堆積就是這麼來的。
+   * 實測線上 1,207 筆 pending 有 110 對這種配對（涉及 152 筆）。
+   *
+   * 只對結構化型別生效（見 duplicate-claim.ts），而且走 handleVerify 投票——
+   * 自驗、重複票、每日額度、自動落庫、爭議建案全部沿用既有那一套，這裡不另開一條路。
+   * 投不成（自己那台交的／已投過／對方剛定案／額度用完）就照原路收下這筆，不能默默丟掉。
+   */
+  const mergedByIndex = new Map<number, { existing_id: string; agree_count: number; status: string; required_agree: number; from_agent: string | null }>();
+  const mergeCandidateIdx = validation.items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item, i }) => !existingByHash.has(hashes[i]) && !blocked.has(i) && claimKey(item.contribution_type, item.payload) !== null);
+  if (mergeCandidateIdx.length > 0) {
+    const candidates = await fetchClaimCandidates(supabase, mergeCandidateIdx.map(({ item }) => item));
+    const claimed = new Set<string>(); // 同一批裡兩筆指向同一個既有貢獻時，只投一票
+    for (const { item, i } of mergeCandidateIdx) {
+      const target = findMergeTarget(item, { agent_name: validation.contributor.agent_name, ip_hash: ipHash }, candidates);
+      if (!target || claimed.has(target.id)) continue;
+      const voted = await verifyFn(supabase, {
+        contribution_id: target.id,
+        verdict: "agree",
+        agent_name: validation.contributor.agent_name,
+        ...(validation.contributor.agent_tool ? { agent_tool: validation.contributor.agent_tool } : {}),
+        note: mergeNote(validation.contributor.agent_name, item.source_urls, item.note),
+        ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
+      }, ipHash);
+      if (voted.status !== 201) continue; // 投不成就照原路收下
+      claimed.add(target.id);
+      const b = voted.body as Record<string, unknown>;
+      mergedByIndex.set(i, {
+        existing_id: target.id,
+        agree_count: typeof b.agree_count === "number" ? b.agree_count : 0,
+        status: typeof b.status === "string" ? b.status : "pending",
+        required_agree: typeof b.required_agree === "number" ? b.required_agree : 0,
+        from_agent: target.agent_name,
+      });
+    }
+  }
+
   const toInsert = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
-    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i))
+    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i))
     .map(({ item, hash }) => ({
       contribution_type: item.contribution_type,
       payload: item.payload,
@@ -125,6 +210,19 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
 
   const results = validation.items.map((item, i) => {
+    const merged = mergedByIndex.get(i);
+    if (merged) {
+      return {
+        index: i,
+        contribution_type: item.contribution_type,
+        contribution_id: merged.existing_id,
+        status: "counted_as_vote",
+        agree_count: merged.agree_count,
+        required_agree: merged.required_agree,
+        message: `${merged.from_agent ?? "另一個代理"} 已經交過同一個宣稱，你這筆改記為對那一筆的同意票（目前同意 ${merged.agree_count}／${merged.required_agree}${merged.status === "applied" ? "，已上線" : ""}）。下次可以先看 /verifications 有沒有人交過，直接投票比重交一份快。`,
+        review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${merged.existing_id}`,
+      };
+    }
     if (blocked.has(i) && !existingByHash.has(hashes[i])) {
       return {
         index: i,
@@ -170,7 +268,11 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     status: 201,
     body: {
       success: true,
-      message: `已收到 ${inserted.length} 筆新貢獻${results.length - inserted.length > 0 ? `（${results.length - inserted.length} 筆重複）` : ""}；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`,
+      message: [
+        `已收到 ${inserted.length} 筆新貢獻`,
+        mergedByIndex.size > 0 ? `${mergedByIndex.size} 筆與別人交過的是同一件事，改記為對那幾筆的同意票` : "",
+        results.length - inserted.length - mergedByIndex.size > 0 ? `${results.length - inserted.length - mergedByIndex.size} 筆重複` : "",
+      ].filter(Boolean).join("；") + `；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, used: used + inserted.length },
