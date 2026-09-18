@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 
 /**
- * 我的追蹤（檢核點）：未登入存瀏覽器，登入後帶著走。
+ * 我的關注（政見旁的⭐；程式裡歷史上叫 checkpoints）：未登入存瀏覽器，登入後帶著走、並計入關注數。
  *
  * 2026-09-17：「沒登入也能用嗎？登入沒記錄這個嗎？」——兩個都成立。
  * 原本四個地方各自 JSON.parse(localStorage)，登入與否毫無差別，換台機器就全沒了。
@@ -44,7 +44,7 @@ function writeLocal(next: string[]): void {
     window.dispatchEvent(new Event(UPDATED_EVENT))
   } catch (e) {
     // 無痕視窗或關閉儲存空間時會丟例外；畫面仍然照 ids 顯示，只是重整後會不見
-    console.info('[我的追蹤] 寫不進 localStorage：', e)
+    console.info('[我的關注] 寫不進 localStorage：', e)
   }
 }
 
@@ -69,11 +69,16 @@ async function syncWithAccount(userId: string): Promise<void> {
   } catch (e) {
     // 同步失敗不該讓追蹤功能整個壞掉：本機那份仍然可用
     syncedFor = null
-    console.info('[我的追蹤] 與帳號同步失敗，這台機器的清單仍可使用：', e)
+    console.info('[我的關注] 與帳號同步失敗，這台機器的清單仍可使用：', e)
   } finally {
     syncing.value = false
   }
 }
+
+// 關注數（policies.stance_priority）＝把這條加進⭐的登入帳號數，伺服器由 trigger 同步（2026-09-18）。
+// 畫面拿到的是載入當下的數字；自己按了⭐之後不必等重新整理，用「第一次看到這條時有沒有⭐」
+// 當基準，加上自己的變化。沒登入的⭐不計數，所以沒登入時不調整。
+const followBaseline = new Map<string, boolean>()
 
 export function useCheckpoints() {
   const { user, isAuthenticated } = useAuth()
@@ -95,6 +100,15 @@ export function useCheckpoints() {
     return ids.value.includes(policyId)
   }
 
+  /** 畫面上顯示的關注數：伺服器數字＋自己這次的變化（只有登入的⭐會被計入） */
+  function followCount(policyId: string, serverCount: number): number {
+    if (!followBaseline.has(policyId)) followBaseline.set(policyId, isCheckpointed(policyId))
+    if (!isAuthenticated.value) return serverCount
+    const now = isCheckpointed(policyId) ? 1 : 0
+    const before = followBaseline.get(policyId) ? 1 : 0
+    return Math.max(0, serverCount + now - before)
+  }
+
   async function toggle(policyId: string): Promise<boolean> {
     const has = isCheckpointed(policyId)
     const next = has ? ids.value.filter((id) => id !== policyId) : [...ids.value, policyId]
@@ -112,7 +126,7 @@ export function useCheckpoints() {
         if (error) throw error
       }
     } catch (e) {
-      console.info('[我的追蹤] 這一筆沒存進帳號（本機已記下）：', e)
+      console.info('[我的關注] 這一筆沒存進帳號（本機已記下）：', e)
     }
     return !has
   }
@@ -123,6 +137,9 @@ export function useCheckpoints() {
     syncing: computed(() => syncing.value),
     /** 登入了才有「帶著走」這件事；沒登入時畫面不必提 */
     synced: computed(() => isAuthenticated.value && syncedFor !== null),
+    followCount,
+    /** 沒登入時按⭐只存在這台瀏覽器、不計入關注數；畫面要講清楚 */
+    countsTowardFollows: computed(() => isAuthenticated.value),
     isCheckpointed,
     toggle,
     reload: () => { ids.value = readLocal() },

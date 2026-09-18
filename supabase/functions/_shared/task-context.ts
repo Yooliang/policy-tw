@@ -5,6 +5,7 @@
 
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
 import { normalizeCorrection } from "./correction.ts";
+import { fetchAllRows } from "./fetch-all.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -111,14 +112,14 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
       // politician_elections 的 join 會把人物包在 politicians 裡，攤平成代理好比對的樣子
       const ours = (r?.rows ?? []).map((row) => {
         const who = (row.politicians ?? {}) as Obj;
-        return { name: who.name, party: who.party, region: who.region, candidate_status: row.candidate_status, position: row.position };
-      }).filter((x) => !r?.region || x.region === r.region);
+        return { name: who.name, party: who.party, region: r?.region ?? who.region, candidate_status: row.candidate_status, position: row.position };
+      });
       return {
         region: r?.region ?? null,
         ours_count: ours.length,
         ours,
         previous_checks: r?.history ?? [],
-        hint: "把中選會該縣市該選舉的名單全部列出來，跟 ours 逐一比對。中選會有、ours 沒有的，每一位用 candidacy 補一筆（附中選會網址）；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
+        hint: "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
       };
     }
     case "question": {
@@ -185,17 +186,28 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     const region = typeof target.region === "string" ? target.region : null;
     const electionType = typeof target.election_type === "string" ? target.election_type : null;
     if (electionId && region && electionType) {
-      const [mine, history] = await Promise.all([
-        supabase.from("politician_elections")
-          .select("candidate_status, position, politicians!inner(id, name, party, region)")
+      // 縣市怎麼算跟 SQL 的 ours 一模一樣：COALESCE(參選紀錄選區所屬縣市, 人物的縣市)。
+      // 原本撈全國同類選舉前 300 筆再在這裡篩縣市——縣市議員全國上千人，目標縣市的人
+      // 可能根本不在那 300 筆裡，代理會以為我們缺人而重複補（2026-09-18）。
+      // 拆兩段在資料庫篩：有選區的看選區、沒選區的看人物；各自翻頁撈完。
+      const base = "candidate_status, position, region_id";
+      const [byDistrict, byPerson, history] = await Promise.all([
+        fetchAllRows<Obj>("roster ours by district", (from, to) => supabase.from("politician_elections")
+          .select(`${base}, regions!inner(region), politicians!inner(id, name, party, region)`)
           .eq("election_id", electionId).eq("election_type", electionType)
-          .neq("candidate_status", "not_running").limit(300),
+          .neq("candidate_status", "not_running").eq("regions.region", region)
+          .order("politician_id", { ascending: true }).range(from, to)),
+        fetchAllRows<Obj>("roster ours by person", (from, to) => supabase.from("politician_elections")
+          .select(`${base}, politicians!inner(id, name, party, region)`)
+          .eq("election_id", electionId).eq("election_type", electionType)
+          .neq("candidate_status", "not_running").is("region_id", null).eq("politicians.region", region)
+          .order("politician_id", { ascending: true }).range(from, to)),
         supabase.from("roster_checks")
           .select("checked_at, cec_count, ours_count, submitted, agent_name, source_url")
           .eq("election_id", electionId).eq("region", region).eq("election_type", electionType)
           .order("checked_at", { ascending: false }).limit(3),
       ]);
-      data.roster = { rows: mine.data ?? [], history: history.data ?? [], region };
+      data.roster = { rows: [...byDistrict, ...byPerson], history: history.data ?? [], region };
     }
   }
   if (taskType === "policy_missing" && pid) {

@@ -16,6 +16,7 @@ import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
+import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection } from "./correction.ts";
 
@@ -35,6 +36,8 @@ export interface ContributionRow {
   agent_tool?: string | null;
   /** politician／candidacy：驗證者兩票指認的同一位（auto-apply 從 votes 算出）或維護者 approve 時指定 */
   resolved_politician_id?: string | null;
+  /** 這筆貢獻是做哪個任務交的（contributions.task_id）。上線後拿它判斷任務該不該關，見 task-fulfilment.ts */
+  task_id?: string | null;
 }
 
 /** applied＝落庫完成；disputed＝需要人裁決（身份判不出／指認衝突）；failed＝技術性失敗（會自動重試） */
@@ -528,7 +531,8 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   return { status: "applied", message: `已記錄無異動並關閉任務 ${taskId}`, task_id: taskId };
 }
 
-const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, review_notes";
+// task_id 要撈：裁決 uphold 後原貢獻上線，它所屬的任務要能被關（task-fulfilment.ts）
+const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, review_notes, task_id";
 
 /**
  * adjudication（4 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
@@ -595,7 +599,38 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
   };
 }
 
+/**
+ * 貢獻上線後，它所屬的手動任務若算做完了就關掉（規則見 task-fulfilment.ts）。回傳有沒有關。
+ * 關任務也記進 edit_history，整筆還原時任務會跟著重新打開。
+ */
+export async function closeTaskIfFulfilled(supabase: SupabaseLike, row: ContributionRow): Promise<boolean> {
+  const taskId = manualTaskIdOf(row);
+  if (!taskId) return false;
+  const { data: task, error } = await supabase.from("contribution_tasks").select("id, status, task_type").eq("id", taskId).maybeSingle();
+  throwIf(error, "contribution_tasks lookup");
+  if (!task || task.status !== "open") return false;
+  if (!shouldCloseOnApplied(str(task.task_type), row.contribution_type)) return false;
+  const closed = await closeTask(supabase, taskId, row.agent_name);
+  if (!closed) return false;
+  await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");
+  return true;
+}
+
 export async function applyContribution(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const outcome = await applyByType(supabase, row);
+  if (outcome.status === "applied") {
+    // 資料已經寫進去了，關任務只是附帶動作：關不成只記錄，不能讓這筆被當成上線失敗
+    // （上線失敗會被自動重試，資料會再寫一次）
+    try {
+      await closeTaskIfFulfilled(supabase, row);
+    } catch (e) {
+      console.error("closeTaskIfFulfilled:", e instanceof Error ? e.message : String(e));
+    }
+  }
+  return outcome;
+}
+
+async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   switch (row.contribution_type) {
     case "adjudication": return await applyAdjudication(supabase, row);
     case "no_change": return await applyNoChange(supabase, row);

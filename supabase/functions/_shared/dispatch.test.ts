@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP, filterSaturatedTasks } from "./dispatch.ts";
+import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP, filterSaturatedTasks , TASK_INFLIGHT_CAP } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -241,9 +241,11 @@ Deno.test("skip 有記憶：同 IP 跳過的任務不再派回來，其他任務
 });
 
 // 2026-09-17 李四川：任務底下 21 筆等票、任務不關、又在最高優先層的前 3 筆裡 → 每個代理都抽到它
+// 上限原本寫死 3；2026-09-18 改成跟「一題最多交 5 筆政見」同一個常數，這裡改用常數，
+// 守的是「達上限就不派、差一筆還會派」這條規則本身，不是某個數字。
 Deno.test("底下在途筆數達上限的任務不再派", () => {
   const tasks = [{ task_id: "t1" }, { task_id: "t2" }, { task_id: "t3" }];
-  const counts = new Map([["t1", 3], ["t2", 21], ["t3", 2]]);
+  const counts = new Map([["t1", TASK_INFLIGHT_CAP], ["t2", 21], ["t3", TASK_INFLIGHT_CAP - 1]]);
   assertEquals(filterSaturatedTasks(tasks, counts).map((t) => t.task_id), ["t3"]);
 });
 

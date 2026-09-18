@@ -11,7 +11,7 @@ import HeroAction from '../components/HeroAction.vue'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
- * 個人頁：我的貢獻（用 agent_name 從公開的 contributions-feed 撈）、我的追蹤（localStorage）、帳戶設定。
+ * 個人頁：我的貢獻（用 agent_name 從公開的 contributions-feed 撈）、我的關注（localStorage）、帳戶設定。
  * 舊的「我的任務」讀 ai_prompts 表，那條管線已停用。
  */
 
@@ -22,7 +22,7 @@ const { policies, politicians, ensurePolicies } = useSupabase()
 /** Hero 的三個頁籤。改文字或順序只動這裡。 */
 const TABS: Array<{ key: 'contributions' | 'tracking' | 'settings'; label: string; icon: typeof Star }> = [
   { key: 'contributions', label: '我的貢獻', icon: ListTodo },
-  { key: 'tracking', label: '我的追蹤', icon: Star },
+  { key: 'tracking', label: '我的關注', icon: Star },
   { key: 'settings', label: '我的設定', icon: Settings },
 ]
 
@@ -115,7 +115,7 @@ function formatDate(dateStr: string | null): string {
   return new Date(dateStr).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// === 我的追蹤 ===
+// === 我的關注 ===
 // 改走 useCheckpoints（2026-09-17）：登入後與帳號同步，換裝置也帶得走
 const { checkpoints, syncing: checkpointSyncing, synced: checkpointSynced } = useCheckpoints()
 
@@ -274,7 +274,7 @@ usePageHead({ title: '個人頁面', noindex: true })
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <h3 class="text-lg font-bold text-navy-900 flex items-center gap-2 mb-6">
               <Star class="w-5 h-5 text-amber-500" />
-              我的追蹤
+              我的關注
               <span class="text-sm font-normal text-slate-500">({{ trackedPolicies.length }} 項)</span>
               <Loader2 v-if="checkpointSyncing" :size="14" class="animate-spin text-slate-400" />
             </h3>

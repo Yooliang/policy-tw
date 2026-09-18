@@ -5,7 +5,7 @@ import { isPolicyStance, POLICY_STANCE_DAILY_LIMIT_PER_IP, policyStanceValue } f
 
 /**
  * policy-stance — 讀者對一條既有政見表態（公開、無金鑰、每 IP 每日 30 次）。
- * POST { policy_id✅, stance✅（support／oppose／priority） }
+ * POST { policy_id✅, stance✅（support／oppose；priority 已改成⭐，見 migration 20260918000003） }
  *   → upsert 到 policy_stances（同一 IP 同一條政見重複表態＝改成新值，不是報錯）；
  *     DB trigger 會同步 policies 上的三個計數，回應直接帶更新後的數字。
  *
@@ -38,6 +38,12 @@ Deno.serve(async (req) => {
     if (!policyId) return json({ success: false, error: "invalid_policy_id", message: "policy_id 必填（uuid）" }, 400);
     if (!isPolicyStance(body.stance)) {
       return json({ success: false, error: "invalid_stance", message: "stance 要是 support、oppose 或 priority" }, 400);
+    }
+
+    // 「關注」從 2026-09-18 起不是表態了：改成按⭐、只算登入的人（user_checkpoints）。
+    // 還開著的舊頁面可能照舊送 priority——不能再以 IP 計數，也不要假裝成功，告訴他怎麼做。
+    if (body.stance === "priority") {
+      return json({ success: false, error: "moved", message: "「關注」改成按政見旁的⭐，登入後會計入關注數。請重新整理頁面" }, 400);
     }
 
     // 已軟移除的政見不收表態：頁面上看不到它，也不該再累積民意

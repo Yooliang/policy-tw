@@ -11,7 +11,7 @@ import { usePageHead } from '../composables/usePageHead'
  *   IP 雜湊      supabase/functions/_shared/contribute-handler.ts 的 ipHashOf（SHA-256(salt|ip)）
  *   登入         composables/useAuth.ts 只有 signInWithOAuth({ provider: 'google' })
  *   帳號欄位     migration 20260131100004_user_profiles.sql（email／display_name／avatar_url）
- *   本機儲存     zhengjian_checkpoints（我的追蹤）
+ *   本機儲存     zhengjian_checkpoints（我的關注）
  *   GA／AdSense  index.html
  * 改了那些地方，這一頁要跟著改。
  */
@@ -88,8 +88,10 @@ usePageHead({
         <section>
           <h2 class="text-2xl font-black text-navy-900 mb-3">留在你自己瀏覽器裡的東西</h2>
           <p>
-            「我的追蹤」存在你瀏覽器的 localStorage（<code class="text-sm bg-slate-100 px-1.5 py-0.5 rounded">zhengjian_checkpoints</code>），
-            不會傳到我們的伺服器。清掉瀏覽器資料就會消失。
+            「我的關注」（政見旁的⭐）：沒登入時存在你瀏覽器的 localStorage（<code class="text-sm bg-slate-100 px-1.5 py-0.5 rounded">zhengjian_checkpoints</code>），
+            不會傳到我們的伺服器，清掉瀏覽器資料就會消失。
+            登入的話會同步到你的帳號（換裝置也看得到），並計入那條政見的「關注數」——
+            公開的只有每條政見有幾個人關注，你關注了哪些不會公開。
           </p>
         </section>
 

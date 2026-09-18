@@ -46,7 +46,8 @@ export function shouldRetry(row: { status: string; retry_count?: number | null; 
   return !Number.isNaN(due) && due <= now;
 }
 
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at";
+// task_id 要撈：上線後拿它判斷所屬任務該不該關（task-fulfilment.ts）；少了它，關任務會默默不做
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id";
 const IDENTITY_TYPES = new Set(["politician", "candidacy"]);
 
 async function identityFromVotes(supabase: SupabaseLike, contributionId: string): Promise<ReturnType<typeof resolveIdentityFromVotes>> {
