@@ -348,9 +348,18 @@ const hasLocalCandidates = computed(() => {
 
 const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.map(c => c.id)))
 
+/**
+ * 這筆政見屬不屬於這場選舉。2026-09-18 之前三個檢視都只看「這個人有參加這場選舉」，
+ * 於是同一個人 2024／2022 的舊承諾會混進 2026 的頁面（候選人卡片上的政見數有篩屆別，
+ * 點進去的清單沒有，兩邊對不上）。
+ * 只認標了屆別的：沒標的（目前 150 筆）先不顯示，等 policy_election_missing 任務補上。
+ * 三個檢視共用這一個判斷，不要各寫各的。
+ */
+const belongsToThisElection = (p: { electionId?: number }) => p.electionId === electionYear.value
+
 const allCampaignPolicies = computed(() =>
   policies.value.filter(p => {
-    if (p.status !== PolicyStatus.CAMPAIGN || !electionPoliticianIds.value.has(p.politicianId)) return false
+    if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
     const politician = politicians.value.find(c => c.id === p.politicianId)
     if (!politician) return false
     if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
@@ -370,7 +379,7 @@ const allCampaignPolicies = computed(() =>
 // Issues mode
 const regionPolicies = computed(() =>
   policies.value.filter(p => {
-    if (p.status !== PolicyStatus.CAMPAIGN || !electionPoliticianIds.value.has(p.politicianId)) return false
+    if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
     const politician = politicians.value.find(c => c.id === p.politicianId)
     if (!politician) return false
     if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
@@ -447,7 +456,7 @@ const politicianA = computed(() => politicians.value.find(c => String(c.id) === 
 const politicianB = computed(() => politicians.value.find(c => String(c.id) === String(politicianBId.value)))
 
 const getPledge = (cId: string | number, category: string) =>
-  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && (p.category === category || p.tags.includes(category)))
+  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && belongsToThisElection(p) && (p.category === category || p.tags.includes(category)))
 
 
 const electionLevels = [

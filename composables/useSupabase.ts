@@ -115,6 +115,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     subRegion: e.subRegion || undefined,
     village: e.village || undefined,
     candidateStatus: e.candidateStatus || undefined,
+    electionResult: e.electionResult || undefined,
     sourceNote: e.sourceNote || undefined,
   }));
 

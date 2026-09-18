@@ -28,12 +28,14 @@ const props = withDefaults(defineProps<{
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 
-// 已經投完票那場選舉的承諾，用小卡（2026-09-18）：期待度與⭐對它沒有意義——
-// 支持或反對一個 2024 年的承諾改變不了任何事，追蹤它也不會再有選前的作用。
-// 那場選舉「投完了沒」是可以判斷的；「當選了沒」目前九成的資料是空的，所以不拿來當依據。
+// 用小卡（無期待度、無⭐）的兩種承諾（2026-09-18）：
+//   1. 那場選舉已經投完票——支持或反對一個 2024 年的承諾改變不了任何事
+//   2. 沒標屆別——不知道是哪一場，就不能當成進行中的來收集民意
+// 「當選了沒」不拿來當依據：election_result 目前九成是空的。
 const { elections } = useSupabase()
 const isPastCampaign = computed(() => {
-  if (!isCampaign || props.policy.electionId == null) return false
+  if (!isCampaign) return false
+  if (props.policy.electionId == null) return true
   const date = elections.value.find((e) => e.id === props.policy.electionId)?.electionDate
   return !!date && date < new Date().toISOString().slice(0, 10)
 })
@@ -44,6 +46,13 @@ const { isCheckpointed: has, toggle, followCount, countsTowardFollows } = useChe
 const isCheckpointed = computed(() => has(props.policy.id))
 // 🔥 關注數＝按了⭐的登入帳號數；自己剛按的立刻反映，不必等重新整理
 const shownFollows = computed(() => followCount(props.policy.id, props.policy.stancePriority ?? 0))
+// 那場選舉的結果：落選就標出來，順便解釋為什麼這張卡沒有進度可看。
+// 查不到（過去選舉九成還是空的）就不標，不猜。
+const campaignResult = computed(() => {
+  if (!isCampaign || props.policy.electionId == null) return null
+  return props.politician.elections?.find((e) => e.electionId === props.policy.electionId)?.electionResult ?? null
+})
+
 const starTitle = computed(() => {
   if (isCheckpointed.value) return '取消關注'
   return countsTowardFollows.value ? '加入我的關注' : '加入我的關注（登入後才會計入關注數）'
@@ -70,7 +79,8 @@ const toggleCheckpoint = (e: Event) => {
     @click="onClick?.()"
   >
     <!-- Checkpoint Star -->
-    <div class="p-6 flex-1">
+    <!-- 小卡下面沒有期待度長條，容器的底部內距與下面那行的 mb 會疊成一片空白 -->
+    <div :class="['px-6 pt-6 flex-1 flex flex-col', isPastCampaign ? 'pb-2' : 'pb-6']">
       <div v-if="props.showPolitician || props.showStatus" :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
         <div v-if="props.showPolitician" class="flex items-center gap-3">
           <Avatar :src="politician.avatarUrl" :name="politician.name" size="sm" class="border-2 border-slate-50 shadow-sm" />
@@ -102,10 +112,16 @@ const toggleCheckpoint = (e: Event) => {
         {{ policy.description }}
       </p>
 
-      <div class="flex items-center gap-4 text-[10px] font-black text-slate-400 mb-6 uppercase tracking-widest">
+      <div :class="['flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest', isPastCampaign ? 'mb-0' : 'mb-6']">
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
           <span>{{ isCampaign ? `${policyYear(policy) ?? '—'} 承諾` : `${policy.lastUpdated.split('-')[0]} 更新` }}</span>
+        </div>
+        <div v-if="campaignResult" class="flex items-center gap-1.5">
+          <span :class="['px-1.5 py-0.5 rounded-full', campaignResult === 'elected' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']"
+            :title="campaignResult === 'elected' ? '這場選舉當選' : '這場選舉未當選，所以不會有執行進度'">
+            {{ campaignResult === 'elected' ? '當選' : '未當選' }}
+          </span>
         </div>
         <div class="flex items-center gap-1.5">
           <Tag :size="12" class="text-slate-300" />
@@ -117,23 +133,18 @@ const toggleCheckpoint = (e: Event) => {
       <!-- 讀者表態：支持從左、反對從右，互搶一條長條（2026-09-18）。
            兩邊數字都留在兩端：只秀比例會看不出是 1:1 還是 100:100。
            關注（🔥）不是支持或反對，不進長條：它是按了標題旁⭐的登入帳號數。 -->
-      <div v-if="isCampaign && !isPastCampaign" class="bg-violet-50 rounded-xl p-3 space-y-2" data-testid="stance-bar">
-        <div class="flex items-center justify-between">
-          <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
-          <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600" title="關注：按了⭐的登入帳號數"><Flame :size="13" />{{ shownFollows }}</span>
+      <!-- 支持從左、反對從右，互搶一條長條；標籤與關注數在底部那一排（2026-09-18） -->
+      <div v-if="isCampaign && !isPastCampaign" class="mt-auto flex items-center gap-2 text-sm font-black tabular-nums" data-testid="stance-bar">
+        <span class="flex items-center gap-1 text-violet-700 shrink-0" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
+        <div class="flex-1 h-2 rounded-full overflow-hidden flex bg-slate-200" role="img" :aria-label="stanceLabel" :title="stanceLabel">
+          <div class="h-full bg-violet-600 transition-all duration-700" :style="{ width: `${supportPct}%` }"></div>
+          <div class="h-full bg-rose-500 transition-all duration-700" :style="{ width: `${opposePct}%` }"></div>
         </div>
-        <div class="flex items-center gap-2 text-sm font-black tabular-nums">
-          <span class="flex items-center gap-1 text-violet-700 shrink-0" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
-          <div class="flex-1 h-2 rounded-full overflow-hidden flex bg-slate-200" role="img" :aria-label="stanceLabel" :title="stanceLabel">
-            <div class="h-full bg-violet-600 transition-all duration-700" :style="{ width: `${supportPct}%` }"></div>
-            <div class="h-full bg-rose-500 transition-all duration-700" :style="{ width: `${opposePct}%` }"></div>
-          </div>
-          <span class="flex items-center gap-1 text-rose-600 shrink-0" title="反對">{{ policy.stanceOppose }}<ThumbsDown :size="13" class="fill-current" /></span>
-        </div>
+        <span class="flex items-center gap-1 text-rose-600 shrink-0" title="反對">{{ policy.stanceOppose }}<ThumbsDown :size="13" class="fill-current" /></span>
       </div>
       <!-- 已投票那場的承諾：什麼都不放。進度條對它沒意義（沒當選就不會有執行進度，
            當選且有進度的話狀態早就不是「競選承諾」了，會落在人物頁的施政那一區） -->
-      <div v-else-if="!isCampaign" class="space-y-2">
+      <div v-else-if="!isCampaign" class="mt-auto space-y-2">
         <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
           <span>當前執行進度</span>
           <span>{{ policy.progress }}%</span>
@@ -150,11 +161,18 @@ const toggleCheckpoint = (e: Event) => {
       </div>
     </div>
 
-    <div :class="`${isCampaign ? 'bg-violet-50/30' : 'bg-slate-50/50'} px-6 py-4 border-t border-slate-100 flex justify-between items-center group-hover:bg-white transition-colors`">
-      <span :class="`text-[10px] font-black uppercase tracking-widest ${isCampaign ? 'text-violet-500' : 'text-slate-400'}`">
+    <!-- 期待度併進這一排（2026-09-18）：原本它自己一塊，卡片高度一變它就跟著上下跑。
+         關注數與支持／反對都在同一行，右邊接詳情入口 -->
+    <div :class="`${isCampaign ? 'bg-violet-50/30' : 'bg-slate-50/50'} px-6 py-3 border-t border-slate-100 flex items-center gap-3 group-hover:bg-white transition-colors`" data-testid="card-footer">
+      <template v-if="isCampaign && !isPastCampaign">
+        <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600 shrink-0" title="關注：按了⭐的登入帳號數"><Flame :size="13" />{{ shownFollows }}</span>
+        <span class="text-[10px] font-black uppercase tracking-wider text-violet-700 shrink-0">選民期待度</span>
+        <span class="text-slate-200 shrink-0">|</span>
+      </template>
+      <span :class="`text-[10px] font-black uppercase tracking-widest shrink-0 ${isCampaign ? 'text-violet-500' : 'text-slate-400'} ${isCampaign && !isPastCampaign ? '' : 'flex-1'}`">
         {{ isCampaign ? '查看承諾詳情' : '查看詳細歷程' }}
       </span>
-      <ChevronRight :size="14" :class="`${isCampaign ? 'text-violet-300' : 'text-slate-300'} group-hover:translate-x-1 transition-transform`" />
+      <ChevronRight :size="14" :class="`shrink-0 ml-auto ${isCampaign ? 'text-violet-300' : 'text-slate-300'} group-hover:translate-x-1 transition-transform`" />
     </div>
   </div>
 </template>
