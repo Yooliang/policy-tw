@@ -111,8 +111,13 @@ export const SKIP_MEMORY_HOURS = 24;
  * 結果是同一件事被查了十幾次：「居住新五箭」三份、醫療那包兩份、運動幣兩份。
  *
  * 力氣該花在還沒人碰的 777 個缺口上，不是同一題的第 22 份答案。
+ *
+ * 2026-09-18 從 3 改成跟「一題最多交幾筆政見」同一個數字：任務文字叫代理最多交 5 筆，
+ * 上限卻是 3 的話，一個代理交完 3 筆這題就不再派、剩下的機會也沒了。
+ * 而且任務現在有一筆上線就會關（task-fulfilment.ts），不會再像李四川那樣越堆越多。
  */
-export const TASK_INFLIGHT_CAP = 3;
+export const MAX_POLICIES_PER_TASK = 5;
+export const TASK_INFLIGHT_CAP = MAX_POLICIES_PER_TASK;
 
 /**
  * 排掉「底下已經有夠多筆在等票」的任務。

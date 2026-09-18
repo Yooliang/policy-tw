@@ -32,6 +32,15 @@ const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 const { isCheckpointed: has, toggle } = useCheckpoints()
 const isCheckpointed = computed(() => has(props.policy.id))
 
+// 支持 vs 反對：左右互搶的比例長條。兩邊都 0 就不給寬度，長條整條灰——
+// 不能畫成一半一半，那會讓人以為有人表態而且剛好平手。
+const stanceTotal = computed(() => (props.policy.stanceSupport ?? 0) + (props.policy.stanceOppose ?? 0))
+const supportPct = computed(() => (stanceTotal.value > 0 ? ((props.policy.stanceSupport ?? 0) / stanceTotal.value) * 100 : 0))
+const opposePct = computed(() => (stanceTotal.value > 0 ? 100 - supportPct.value : 0))
+const stanceLabel = computed(() => (stanceTotal.value > 0
+  ? `支持 ${props.policy.stanceSupport ?? 0}、反對 ${props.policy.stanceOppose ?? 0}（支持 ${Math.round(supportPct.value)}%）`
+  : '還沒有人表態'))
+
 const toggleCheckpoint = (e: Event) => {
   e.stopPropagation()
   toggle(props.policy.id)
@@ -87,13 +96,20 @@ const toggleCheckpoint = (e: Event) => {
       </div>
 
       <!-- Progress Logic -->
-      <!-- 讀者表態：三個數字一起顯示。只秀支持數會讓反對的聲音看不見。 -->
-      <div v-if="isCampaign" class="flex items-center justify-between bg-violet-50 rounded-xl p-3">
-        <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
-        <div class="flex items-center gap-3 text-sm font-black tabular-nums">
-          <span class="flex items-center gap-1 text-violet-700" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
-          <span class="flex items-center gap-1 text-rose-600" title="反對"><ThumbsDown :size="13" class="fill-current" />{{ policy.stanceOppose }}</span>
-          <span class="flex items-center gap-1 text-amber-600" title="關注"><Flame :size="13" />{{ policy.stancePriority }}</span>
+      <!-- 讀者表態：支持從左、反對從右，互搶一條長條（2026-09-18）。
+           兩邊數字都留在兩端：只秀比例會看不出是 1:1 還是 100:100。關注不是支持或反對，不進長條。 -->
+      <div v-if="isCampaign" class="bg-violet-50 rounded-xl p-3 space-y-2" data-testid="stance-bar">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
+          <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600" title="關注"><Flame :size="13" />{{ policy.stancePriority }}</span>
+        </div>
+        <div class="flex items-center gap-2 text-sm font-black tabular-nums">
+          <span class="flex items-center gap-1 text-violet-700 shrink-0" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>
+          <div class="flex-1 h-2 rounded-full overflow-hidden flex bg-slate-200" role="img" :aria-label="stanceLabel" :title="stanceLabel">
+            <div class="h-full bg-violet-600 transition-all duration-700" :style="{ width: `${supportPct}%` }"></div>
+            <div class="h-full bg-rose-500 transition-all duration-700" :style="{ width: `${opposePct}%` }"></div>
+          </div>
+          <span class="flex items-center gap-1 text-rose-600 shrink-0" title="反對">{{ policy.stanceOppose }}<ThumbsDown :size="13" class="fill-current" /></span>
         </div>
       </div>
       <div v-else class="space-y-2">

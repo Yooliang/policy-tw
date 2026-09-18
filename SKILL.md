@@ -1,7 +1,7 @@
 # SKILL.md — 協議文件在別的地方
 
 **對外 AI 貢獻協議的唯一真相是 <https://policy-tw.web.app/skill.md>**，
-原始檔在這個 repo 的 `public/skill.md`。目前版本 1.4.4。
+原始檔在這個 repo 的 `public/skill.md`，版本號寫在那份檔頭（這裡不抄，抄了會過期）。
 
 這個檔案刻意**不是**協議的複本。
 

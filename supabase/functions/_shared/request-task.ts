@@ -9,6 +9,8 @@
  * 公民提問（/community）只留民眾自己打字問的題目。
  */
 
+import { MAX_POLICIES_PER_TASK } from "./dispatch.ts";
+
 /**
  * 每個來源 IP 每日幾次。沿用公民提問放寬後的 20：按鈕原本在 ask 端點上就是 20 次，
  * 搬回這條路不該反而變緊；同目標同型別已有任務會回 already_queued、不佔新的一筆。
@@ -63,25 +65,25 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
     case "policy":
       return {
         title: `補${who}的政見（網站訪客請求）`,
-        description: `有人在網站上按了「請 AI 幫忙查政見」。請找${who}任何有出處的具體政見：2026 選舉政見優先，找得到現任任期或過去選舉的承諾也可提交，election_id 填該政見所屬選舉並在 note 說明。`,
+        description: `有人在網站上按了「請 AI 幫忙查政見」。請找${who}有出處的具體政見，最多 ${MAX_POLICIES_PER_TASK} 筆、每筆一個 policy 型別、各附自己的出處；找到幾筆交幾筆，只找到 1 筆就交 1 筆，不要為了湊數交口號、願景或個人表態。先看 current.existing_policies（已上線）與 current.queued_policies（別人交了還在等票），講同一件事的不要再交。2026 選舉政見優先，找得到現任任期或過去選舉的承諾也可提交，election_id 填該政見所屬選舉並在 note 說明。`,
         hint_sources: ["候選人官網／官方社群的政見頁", "cec.gov.tw 選舉公報", "cna.com.tw", "pts.org.tw"],
       };
     case "profile":
       return {
         title: `補${who}的基本資料（網站訪客請求）`,
-        description: `有人在網站上按了「請 AI 幫忙查資料」。請補${who}的出生年、現職、學歷、官方照片網址（只補查得到的），用 politician 型別提交。`,
-        hint_sources: ["db.cec.gov.tw 候選人資料", "所屬機關官網", "ly.gov.tw 立委個人頁"],
+        description: `有人在網站上按了「請 AI 幫忙查資料」。請補${who}的基本資料，用 politician 型別一次提交：必補出生年、現職、官方照片網址；查得到順便補學歷、簡介。只補查得到的，查不到的欄位不要填。`,
+        hint_sources: ["所屬機關官網", "ly.gov.tw 立委個人頁", "cec.gov.tw 選舉公報"],
       };
     case "progress":
       return {
         title: `追蹤政見「${t.policy_title ?? "（見 target）"}」的進度（網站訪客請求）`,
-        description: `有人在網站上按了「請 AI 追進度」。請查${who}政見「${t.policy_title ?? ""}」的最新執行狀況（施政報告、議會／立法院紀錄、新聞），用 policy_progress 型別回報，附日期與出處。`,
+        description: `有人在網站上按了「請 AI 追進度」。先判斷兩件事：這一筆是不是政見（不是的話改走 removal）；如果是還沒投票那場選舉的競選承諾，不會有執行進度，用 no_change 說明即可。確定要追的話，請查${who}政見「${t.policy_title ?? ""}」的最新執行狀況（施政報告、議會／立法院紀錄、新聞），用 policy_progress 型別回報，附日期與出處。`,
         hint_sources: ["縣市政府施政報告（*.gov.tw）", "ly.gov.tw 議事錄", "議會官網", "cna.com.tw"],
       };
     case "validity":
       return {
         title: `查證「${t.policy_title ?? "（見 target）"}」是不是政見（網站訪客請求）`,
-        description: `有人在網站上按了「這不是政見？」，覺得${who}的「${t.policy_title ?? ""}」不像政見（比較像個人表態、行程或活動紀錄）。請查證原始出處後三選一：整筆不該存在用 removal／分類或狀態標錯用 correction／其實是有效的承諾用 no_change 並在 note 說明查到什麼。`,
+        description: `有人在網站上按了「這不是政見？」，覺得${who}的「${t.policy_title ?? ""}」不像政見（比較像個人表態、行程或活動紀錄）。請查證原始出處後三選一：整筆不該存在用 removal／分類或狀態標錯用 correction／其實是有效的承諾用 no_change 並在 note 說明查到什麼。如果這筆政見本身沒有出處網址，而你查到它確實是政見，請用 correction 補上 policies.source_url，不要回 no_change——不然出處永遠是空的。`,
         hint_sources: ["這筆政見自己的 source_url", "候選人官網／官方社群", "cna.com.tw"],
       };
     case "audit": {
