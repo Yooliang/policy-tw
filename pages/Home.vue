@@ -17,7 +17,7 @@ import { usePageHead } from '../composables/usePageHead'
 const router = useRouter()
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
 
-// 我的追蹤改走 useCheckpoints（2026-09-17）：登入後會與帳號同步，未登入照舊只存瀏覽器
+// 我的關注改走 useCheckpoints（2026-09-17）：登入後會與帳號同步，未登入照舊只存瀏覽器
 const { checkpoints: checkpointIds } = useCheckpoints()
 const politicians2026CountDirect = ref<number | null>(null)
 const totalPoliticiansCount = ref<number | null>(null)
@@ -238,7 +238,7 @@ usePageHead({
           <div class="flex justify-between items-center mb-8">
           <h2 class="text-xl font-black text-navy-900 flex items-center gap-2 uppercase tracking-tight">
               <Star class="text-amber-500" fill="currentColor" :size="24" />
-              我的公民檢核點 Checkpoints
+              我的關注
           </h2>
           <RouterLink to="/tracking" class="text-amber-600 font-bold text-sm flex items-center gap-1 hover:underline">
               查看全部 <ArrowRight :size="16" />

@@ -27,10 +27,16 @@ const props = withDefaults(defineProps<{
 
 const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 
-// 我的追蹤改走 useCheckpoints（2026-09-17）：原本這裡直接讀寫 localStorage，
+// 我的關注改走 useCheckpoints（2026-09-17）：原本這裡直接讀寫 localStorage，
 // 四個地方各寫一份，而且登入與否毫無差別——換台機器就全沒了。
-const { isCheckpointed: has, toggle } = useCheckpoints()
+const { isCheckpointed: has, toggle, followCount, countsTowardFollows } = useCheckpoints()
 const isCheckpointed = computed(() => has(props.policy.id))
+// 🔥 關注數＝按了⭐的登入帳號數；自己剛按的立刻反映，不必等重新整理
+const shownFollows = computed(() => followCount(props.policy.id, props.policy.stancePriority ?? 0))
+const starTitle = computed(() => {
+  if (isCheckpointed.value) return '取消關注'
+  return countsTowardFollows.value ? '加入我的關注' : '加入我的關注（登入後才會計入關注數）'
+})
 
 // 支持 vs 反對：左右互搶的比例長條。兩邊都 0 就不給寬度，長條整條灰——
 // 不能畫成一半一半，那會讓人以為有人表態而且剛好平手。
@@ -73,7 +79,7 @@ const toggleCheckpoint = (e: Event) => {
         <button
           @click.stop="toggleCheckpoint"
           :class="`shrink-0 -mt-1 p-1.5 rounded-full transition-colors ${isCheckpointed ? 'text-amber-500 hover:text-amber-600' : 'text-slate-300 hover:text-amber-400'}`"
-          :title="isCheckpointed ? '移除檢核點' : '加入我的檢核點'"
+          :title="starTitle"
           :aria-pressed="isCheckpointed"
         >
           <Star :size="18" :fill="isCheckpointed ? 'currentColor' : 'none'" />
@@ -97,11 +103,12 @@ const toggleCheckpoint = (e: Event) => {
 
       <!-- Progress Logic -->
       <!-- 讀者表態：支持從左、反對從右，互搶一條長條（2026-09-18）。
-           兩邊數字都留在兩端：只秀比例會看不出是 1:1 還是 100:100。關注不是支持或反對，不進長條。 -->
+           兩邊數字都留在兩端：只秀比例會看不出是 1:1 還是 100:100。
+           關注（🔥）不是支持或反對，不進長條：它是按了標題旁⭐的登入帳號數。 -->
       <div v-if="isCampaign" class="bg-violet-50 rounded-xl p-3 space-y-2" data-testid="stance-bar">
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-black uppercase tracking-wider text-violet-700">選民期待度</span>
-          <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600" title="關注"><Flame :size="13" />{{ policy.stancePriority }}</span>
+          <span class="flex items-center gap-1 text-xs font-black tabular-nums text-amber-600" title="關注：按了⭐的登入帳號數"><Flame :size="13" />{{ shownFollows }}</span>
         </div>
         <div class="flex items-center gap-2 text-sm font-black tabular-nums">
           <span class="flex items-center gap-1 text-violet-700 shrink-0" title="支持"><ThumbsUp :size="13" class="fill-current" />{{ policy.stanceSupport }}</span>

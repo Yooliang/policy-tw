@@ -34,7 +34,7 @@ watch(selectedLocation, (newVal) => {
 })
 
 const searchTerm = ref('')
-// 「我的追蹤」從網址進來（PolicyViewNav 指 /tracking?view=mine），不能只是本頁的 local 狀態，
+// 「我的關注」從網址進來（PolicyViewNav 指 /tracking?view=mine），不能只是本頁的 local 狀態，
 // 不然從別頁點那顆按鈕會落到全部政見。
 const view = ref<'all' | 'mine'>('all')
 const showCheckpointsOnly = computed({
@@ -47,7 +47,7 @@ useRegionQuerySync({ routeName: 'tracking', extra: {
   category: queryField(selectedCategory, 'All'),
   view: queryField(view, 'all', { allowed: ['all', 'mine'] as const }),
 } })
-// 我的追蹤改走 useCheckpoints（2026-09-17）
+// 我的關注改走 useCheckpoints（2026-09-17）
 const { checkpoints } = useCheckpoints()
 
 
@@ -176,7 +176,7 @@ usePageHead({
       </div>
       <div v-if="showCheckpointsOnly && filteredPolicies.length > 0" class="mb-12 flex items-center gap-3 text-amber-600 font-bold bg-amber-50 p-4 rounded-2xl border border-amber-100 animate-fade-in">
         <Star :size="20" fill="currentColor" />
-        <span>您正在查看個人追蹤的檢核點（共 {{ filteredPolicies.length }} 項）</span>
+        <span>您正在查看我的關注（共 {{ filteredPolicies.length }} 項）</span>
       </div>
 
       <div v-if="unrenderablePolicies.length > 0" class="mb-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
@@ -207,7 +207,7 @@ usePageHead({
         <div v-else class="col-span-full text-center py-32 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-300">
           <template v-if="showCheckpointsOnly">
             <Star :size="48" class="mx-auto mb-4 opacity-20" />
-            <p class="font-bold">目前沒有標記任何政見檢核點。</p>
+            <p class="font-bold">你還沒有關注任何政見。按政見旁的⭐就會加進來。</p>
             <button @click="showCheckpointsOnly = false" class="mt-4 text-blue-600 font-bold hover:underline">瀏覽全部政見</button>
           </template>
           <template v-else>

@@ -20,6 +20,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
+import { useCheckpoints } from '../composables/useCheckpoints'
 
 
 const route = useRoute()
@@ -191,8 +192,20 @@ function parseLog(log: { event: string; description?: string | null; sourceUrl?:
 const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string; icon: Component; count: keyof StanceCounts; active: string }> = [
   { key: 'support', label: '支持', hint: '希望這項政見被實現', icon: ThumbsUp, count: 'stance_support', active: 'bg-violet-600 text-white border-violet-600' },
   { key: 'oppose', label: '反對', hint: '不希望這項政見被實現', icon: ThumbsDown, count: 'stance_oppose', active: 'bg-rose-600 text-white border-rose-600' },
-  { key: 'priority', label: '關注', hint: '不一定有立場，但會持續注意這件事', icon: Star, count: 'stance_priority', active: 'bg-amber-500 text-white border-amber-500' },
+  { key: 'priority', label: '關注', hint: '加進我的關注；登入後會計入關注數。可以同時支持或反對', icon: Star, count: 'stance_priority', active: 'bg-amber-500 text-white border-amber-500' },
 ]
+
+// 「關注」就是卡片上的⭐（2026-09-18）：存進我的關注，登入的話計入關注數（按⭐的登入帳號數）。
+// 跟支持／反對不再三選一——可以支持又關注。
+const { isCheckpointed, toggle: toggleFollow, followCount, countsTowardFollows } = useCheckpoints()
+const isFollowing = computed(() => (policy.value ? isCheckpointed(policy.value.id) : false))
+function stanceActive(key: PolicyStance): boolean {
+  return key === 'priority' ? isFollowing.value : myPolicyStance.value === key
+}
+function stanceCount(opt: { key: PolicyStance; count: keyof StanceCounts }): number {
+  const server = shownStances.value[opt.count]
+  return opt.key === 'priority' && policy.value ? followCount(policy.value.id, server) : server
+}
 
 /** 畫面上的計數：表態過就用伺服器回的最新值，否則用政見本身帶的 */
 const shownStances = computed<StanceCounts>(() => stanceCounts.value ?? {
@@ -204,6 +217,10 @@ const shownStances = computed<StanceCounts>(() => stanceCounts.value ?? {
 async function castStance(stance: PolicyStance) {
   const id = policy.value?.id
   if (!id || stanceBusy.value) return
+  if (stance === 'priority') {
+    await toggleFollow(id)
+    return
+  }
   stanceBusy.value = stance
   stanceError.value = null
   try {
@@ -363,7 +380,8 @@ usePageHead({
                 <!-- 跟「查核履歷」一樣帶圖示（2026-09-17），同一頁的區塊標題長得一致 -->
                 <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
                 <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
-                <p v-if="myPolicyStance" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按別顆就會換掉。</p>
+                <p v-if="myPolicyStance === 'support' || myPolicyStance === 'oppose'" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按另一顆就會換掉。</p>
+                <p v-if="isFollowing && !countsTowardFollows" class="mt-2 text-xs text-amber-600">已加進你這台瀏覽器的關注；登入後才會計入關注數。</p>
                 <p v-if="stanceError" class="mt-2 text-sm text-rose-600">{{ stanceError }}</p>
               </div>
               <div class="shrink-0">
@@ -375,17 +393,17 @@ usePageHead({
                   @click="castStance(opt.key)"
                   :disabled="stanceBusy !== null"
                   :title="opt.hint"
-                  :aria-pressed="myPolicyStance === opt.key"
+                  :aria-pressed="stanceActive(opt.key)"
                   :class="[
                     'w-[72px] shrink-0 flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-xl border transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
-                    myPolicyStance === opt.key ? opt.active + ' shadow' : 'bg-white border-violet-200 text-violet-700 hover:bg-violet-50',
+                    stanceActive(opt.key) ? opt.active + ' shadow' : 'bg-white border-violet-200 text-violet-700 hover:bg-violet-50',
                   ]"
                 >
                   <Loader2 v-if="stanceBusy === opt.key" :size="18" class="animate-spin" />
                   <component v-else :is="opt.icon" :size="18" />
                   <span class="text-[11px] font-bold leading-none">{{ opt.label }}</span>
                   <div class="w-8 h-px bg-current opacity-25"></div>
-                  <span class="text-sm font-black tabular-nums leading-none">{{ shownStances[opt.count].toLocaleString() }}</span>
+                  <span class="text-sm font-black tabular-nums leading-none">{{ stanceCount(opt).toLocaleString() }}</span>
                 </button>
               </div>
               <!-- 回報入口就放在這三顆鈕下面（2026-09-17）：它講的是同一件事——
