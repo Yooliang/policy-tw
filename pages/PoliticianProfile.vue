@@ -72,7 +72,23 @@ function isElectionPast(electionId: number): boolean {
 }
 
 // Candidate status helpers - considers whether election is past or future
-function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number): string | null {
+/**
+ * 選舉結果優先於參選狀態（2026-09-18）。
+ *
+ * candidate_status 記的是「選前的登記狀態」，2024 那 318 筆全都停在 confirmed；
+ * 選完的結果在另一個欄位 election_result（已用中選會資料回填：當選 75、落選 239）。
+ * 這裡原本只讀 candidate_status，過去選舉又只認 elected/defeated，
+ * 結果是「2024 總統候選人 賴清德」右邊一片空白——資料有，只是沒人去讀。
+ */
+function resultLabel(result?: 'elected' | 'not_elected'): string | null {
+  if (result === 'elected') return '當選'
+  if (result === 'not_elected') return '落選'
+  return null
+}
+
+function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected'): string | null {
+  const byResult = resultLabel(result)
+  if (byResult) return byResult
   const isPast = electionId ? isElectionPast(electionId) : false
 
   // For past elections, only show elected/defeated（未登記參選是歷史事實，一併保留）
@@ -99,7 +115,9 @@ function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number):
   }
 }
 
-function getCandidateStatusColor(status?: CandidateStatus, electionId?: number): string {
+function getCandidateStatusColor(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected'): string {
+  if (result === 'elected') return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+  if (result === 'not_elected') return 'bg-red-100 text-red-600 border-red-200'
   const isPast = electionId ? isElectionPast(electionId) : false
 
   // For past elections without elected/defeated status, use neutral color
@@ -426,14 +444,14 @@ usePageHead({
                   <div
                     v-for="elec in politician.elections"
                     :key="elec.electionId"
-                    :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec.candidateStatus, elec.electionId)]"
+                    :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec.candidateStatus, elec.electionId, elec.electionResult)]"
                   >
                     <div class="flex items-center gap-2">
                       <Vote :size="14" />
                       <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}</span>
                     </div>
-                    <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId)" class="text-xs">
-                      {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId) }}
+                    <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult)" class="text-xs">
+                      {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult) }}
                     </span>
                   </div>
                 </div>
