@@ -20,7 +20,7 @@ node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（clea
 
 # Edge Functions 測試（CI 也跑）
 cd supabase/functions && deno test --allow-read _shared/
-deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts
+deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts
 deno run --allow-read scripts/scan-secrets.ts
 
 # Database / Edge Functions

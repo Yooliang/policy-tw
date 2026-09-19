@@ -6,6 +6,7 @@ import { useSupabase } from '../composables/useSupabase'
 
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import PolicyCard from '../components/PolicyCard.vue'
+import { isLostCampaignPromise } from '../lib/policy-visibility'
 
 import Hero from '../components/Hero.vue'
 import AiContributeBanner from '../components/AiContributeBanner.vue'
@@ -59,8 +60,12 @@ watch(() => elections.value.length, () => {
 onUnmounted(() => {
 })
 
+// 落選者的競選承諾只留在個人頁（第 4 種狀態，2026-09-19），首頁兩個清單都不列
+const politicianOf = (p: { politicianId: string }) => politicians.value.find(pol => pol.id === p.politicianId)
+const notLost = (p: (typeof policies.value)[number]) => !isLostCampaignPromise(p, politicianOf(p))
+
 const checkpointPolicies = computed(() =>
-  policies.value.filter(p => checkpointIds.value.includes(p.id)).slice(0, 3)
+  policies.value.filter(p => checkpointIds.value.includes(p.id) && notLost(p)).slice(0, 3)
 )
 
 const statusData = computed(() => [
@@ -99,7 +104,7 @@ const executedAchievementRate = computed(() => {
   return denominator === 0 ? 0 : Math.round((achievedCount.value / denominator) * 100)
 })
 
-const recentPolicies = computed(() => policies.value.slice(0, 3))
+const recentPolicies = computed(() => policies.value.filter(notLost).slice(0, 3))
 
 const barOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false } },
