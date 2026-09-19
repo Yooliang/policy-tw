@@ -202,7 +202,8 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   politician: ["name", "party", "region", "birth_year", "current_position", "education_level"],
   policy: ["name", "politician_name", "title", "description", "election_id", "category"],
   policy_progress: ["policy_title", "status", "progress", "description"],
-  correction: ["target_table", "field", "current_value", "correct_value", "changes", "reason"],
+  // correction 走 flattenCorrection：攤成「<欄位>＝新值」＋ subject_name，不問 target_table／reason 這種頁面證明不了的東西
+  correction: ["subject_name"],
 };
 const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
 const PAGE_TEXT_MAX = 6000;
@@ -211,7 +212,23 @@ const FOCUS_WINDOW = 1400;
 
 export function claimOf(contributionType: string, payload: Record<string, unknown>): Record<string, unknown> {
   const fields = CLAIM_FIELDS_BY_TYPE[contributionType] ?? CLAIM_FIELDS_DEFAULT;
-  return Object.fromEntries(Object.entries(payload).filter(([k, v]) => fields.includes(k) && v != null && v !== ""));
+  const base = Object.fromEntries(Object.entries(payload).filter(([k, v]) => fields.includes(k) && v != null && v !== ""));
+  return contributionType === "correction" ? { ...base, ...flattenCorrection(payload) } : base;
+}
+
+/**
+ * 更正的 claim：每個要改的欄位一題「<欄位>＝新值」。2026-09-19 第一批把 target_table／reason 當欄位問，
+ * Jev 回 target_table contradicted 0.63——頁面本來就證明不了資料表名稱，那是題目出錯。
+ * 舊格式 {field, correct_value} 與新格式 {changes:[…]} 都收（correction.ts 同一套）。
+ */
+export function flattenCorrection(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const changes = Array.isArray(payload.changes) ? payload.changes : (payload.field ? [payload] : []);
+  for (const ch of changes as Array<Record<string, unknown>>) {
+    const f = typeof ch?.field === "string" ? ch.field : null;
+    if (f && ch.correct_value != null && ch.correct_value !== "") out[f] = ch.correct_value;
+  }
+  return out;
 }
 
 /**
@@ -290,7 +307,7 @@ const CORE_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   politician: ["name"],
   policy: ["title"],
   policy_progress: ["policy_title", "status"],
-  correction: ["correct_value"],
+  correction: ["*changes"], // 特殊記號：所有攤平出來的「<欄位>＝新值」都是核心
 };
 
 const FIELD_INSTRUCTIONS =
@@ -341,11 +358,22 @@ export function aggregateFieldVerdicts(
   if (contradicted.length > 0) {
     return { choice: "not_supported", probability: Math.max(...contradicted.map((f) => f.p)), fields };
   }
-  const core = (CORE_FIELDS_BY_TYPE[contributionType] ?? ["name"]).filter((k) => k in fields);
+  const coreSpec = CORE_FIELDS_BY_TYPE[contributionType] ?? ["name"];
+  const core = coreSpec.includes("*changes")
+    ? Object.keys(fields).filter((k) => k !== "subject_name")
+    : coreSpec.filter((k) => k in fields);
   if (core.length > 0 && core.every((k) => fields[k].verdict === "confirmed")) {
     return { choice: "supported", probability: Math.min(...core.map((k) => fields[k].p)), fields };
   }
   return { choice: "cannot_tell", probability: 0, fields };
+}
+
+/** PDF 抽字：unpdf 是給 serverless／edge 用的 pdf.js 包裝，不需要 canvas。動態載入，HTML 路徑不付這個成本 */
+async function pdfText(buf: Uint8Array): Promise<string> {
+  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1");
+  const pdf = await getDocumentProxy(buf);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return typeof text === "string" ? text : (text as string[]).join("\n");
 }
 
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36";
@@ -360,7 +388,17 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
     const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "zh-TW,zh;q=0.9" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
     if (!res.ok) return { kind: "error", text: "", note: `http ${res.status}` };
-    if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) return { kind: "pdf", text: "", note: "pdf 未抽字" };
+    if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) {
+      // 中選會的公告多半是 PDF（回測 90 筆有 15 筆），不抽字等於參選紀錄的來源票一半棄權
+      try {
+        const buf = new Uint8Array(await res.arrayBuffer());
+        const text = await pdfText(buf);
+        if (text.trim().length < 50) return { kind: "pdf", text: "", note: "pdf 抽不到文字（掃描檔？）" };
+        return { kind: "html", text: text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim(), note: "pdf" };
+      } catch (e) {
+        return { kind: "pdf", text: "", note: `pdf 抽字失敗：${e instanceof Error ? e.message : String(e)}`.slice(0, 120) };
+      }
+    }
     const raw = await res.text();
     return { kind: "html", text: htmlToText(raw.slice(0, 1_500_000)), note: ct };
   } catch (e) {

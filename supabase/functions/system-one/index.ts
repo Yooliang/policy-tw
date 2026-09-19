@@ -163,10 +163,24 @@ Deno.serve(async (req) => {
       const startedAt = Date.now();
       const BUDGET_MS = 50_000;
       const CONCURRENCY = 5;
+      /** 更正沒帶對象名稱，頁面無從對起：用 target_table／target_id 把人物名或政見標題查出來 */
+      const subjectNameOf = async (payload: Record<string, unknown>): Promise<string | null> => {
+        const table = payload.target_table, id = payload.target_id;
+        if (typeof table !== "string" || typeof id !== "string") return null;
+        const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
+        if (!col) return null;
+        const { data } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
+        return data && typeof data[col] === "string" ? data[col] : null;
+      };
       const one = async (c: Cand): Promise<void> => {
         const srcUrl = c.source_urls[0];
         const page = await fetchSource(srcUrl);
-        const claim = claimOf(c.contribution_type, c.payload ?? {});
+        const payload = { ...(c.payload ?? {}) };
+        if (c.contribution_type === "correction") {
+          const subject = await subjectNameOf(payload);
+          if (subject) payload.subject_name = subject;
+        }
+        const claim = claimOf(c.contribution_type, payload);
         let rows: DecisionRecord[];
         let key: string;
         if (page.kind !== "html" || page.text.length < 200) {
@@ -179,7 +193,7 @@ Deno.serve(async (req) => {
           }];
           key = `fetch:${page.kind}`;
         } else {
-          const names = [c.payload?.name, c.payload?.politician_name, c.payload?.title].map((v) => typeof v === "string" ? v : null);
+          const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
           const { state, questions } = buildSourceSupportAsk(claim, srcUrl, focusText(page.text, names));
           const res = await askJev(apiKey, state, questions);
           cost += res.usage.cost;

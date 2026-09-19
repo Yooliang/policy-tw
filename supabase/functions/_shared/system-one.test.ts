@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateFieldVerdicts, articleBodyFromJsonLd, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateFieldVerdicts, articleBodyFromJsonLd, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -157,4 +157,21 @@ Deno.test("aggregateFieldVerdicts：核心欄位全 confirmed → supported、�
   assertEquals(missing.choice, "cannot_tell", "核心欄位 absent → 棄權");
   assertEquals(missing.probability, 0);
   assertEquals(Object.keys(missing.fields).length, 5, "細節全部留下來給代理看");
+});
+
+// 2026-09-19 第一批：更正的 claim 把 target_table 當欄位問，頁面證明不了那種東西
+Deno.test("更正的 claim：攤成「欄位＝新值」＋ subject_name；核心欄位就是那些新值", () => {
+  const payload = { target_table: "policies", target_id: "x", reason: "公報寫的是 2026", subject_name: "某政見",
+    changes: [{ field: "election_id", current_value: null, correct_value: 2026 }, { field: "proposed_date", current_value: "2024-01-01", correct_value: "2026-02-04" }] };
+  const claim = claimOf("correction", payload);
+  assertEquals(claim, { subject_name: "某政見", election_id: 2026, proposed_date: "2026-02-04" });
+  assertEquals(flattenCorrection({ field: "birth_year", correct_value: 1962 }), { birth_year: 1962 }, "舊格式也收");
+  const ans: Record<string, { type: string; choice: string; probabilities: Record<string, number> }> = {
+    "field:subject_name": { type: "choice", choice: "confirmed", probabilities: { confirmed: 0.99 } },
+    "field:election_id": { type: "choice", choice: "confirmed", probabilities: { confirmed: 0.97 } },
+    "field:proposed_date": { type: "choice", choice: "absent", probabilities: { absent: 0.8 } } };
+  assertEquals(aggregateFieldVerdicts("correction", claim, ans).choice, "cannot_tell", "有一個新值沒被證明就不算支持");
+  ans["field:proposed_date"] = { type: "choice", choice: "confirmed", probabilities: { confirmed: 0.96 } };
+  const ok = aggregateFieldVerdicts("correction", claim, ans);
+  assertEquals(ok.choice, "supported"); assertEquals(ok.probability, 0.96);
 });
