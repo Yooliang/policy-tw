@@ -145,12 +145,15 @@ const VIEW_MODES = ['politicians', 'pledges', 'issues', 'comparison'] as const
 type ElectionViewMode = typeof VIEW_MODES[number]
 const viewMode = ref<ElectionViewMode>('politicians')
 
-/** Hero 的四個檢視頁籤（文字與圖示）。VIEW_MODES 是給網址參數驗證用的字串清單，兩者分開。 */
-const VIEW_TABS: Array<{ key: ElectionViewMode; label: string; icon: typeof LayoutGrid }> = [
-  { key: 'politicians', label: '候選人', icon: LayoutGrid },
-  { key: 'pledges', label: '競選承諾', icon: Megaphone },
-  { key: 'issues', label: '議題串聯', icon: Layers },
-  { key: 'comparison', label: '政見 PK', icon: Scale },
+/**
+ * Hero 的四個檢視頁籤（文字與圖示）。VIEW_MODES 是給網址參數驗證用的字串清單，兩者分開。
+ * short 是手機版用的兩字短標（使用者 2026-09-19：四顆要放進一排；圖示照舊）。
+ */
+const VIEW_TABS: Array<{ key: ElectionViewMode; label: string; short: string; icon: typeof LayoutGrid }> = [
+  { key: 'politicians', label: '候選人', short: '候選人', icon: LayoutGrid },
+  { key: 'pledges', label: '競選承諾', short: '承諾', icon: Megaphone },
+  { key: 'issues', label: '議題串聯', short: '串聯', icon: Layers },
+  { key: 'comparison', label: '政見 PK', short: 'PK', icon: Scale },
 ]
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
@@ -511,9 +514,11 @@ usePageHead({
 
       <!-- Hero Actions: View Mode Tabs -->
       <template #actions>
-        <!-- 檢視切換一律走 HeroAction：尺寸與間距跟全站動作區一致，四顆在手機上換行沒關係 -->
+        <!-- 檢視切換一律走 HeroAction：尺寸與間距跟全站動作區一致；手機用兩字短標讓四顆擠進一排 -->
         <HeroAction v-for="v in VIEW_TABS" :key="v.key" :active="viewMode === v.key" @click="viewMode = v.key">
-          <component :is="v.icon" :size="16" /> {{ v.label }}
+          <component :is="v.icon" :size="16" />
+          <span class="sm:hidden">{{ v.short }}</span>
+          <span class="hidden sm:inline">{{ v.label }}</span>
         </HeroAction>
       </template>
 
