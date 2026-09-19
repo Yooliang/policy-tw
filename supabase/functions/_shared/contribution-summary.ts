@@ -47,6 +47,7 @@ export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
   "xiaoliang-probe",
 ]);
 import { normalizeCorrection } from "./correction.ts";
+import { electionResultLabel } from "./candidacy-result.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -105,7 +106,11 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     }
     case "candidacy": {
       const status = CANDIDATE_STATUS_LABEL[str(p.candidate_status)] ?? str(p.candidate_status);
-      summary = `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」`;
+      const result = electionResultLabel(p);
+      // 帶選舉結果的（election_result_missing 的答案）重點是結果，不是「狀態改成確認參選」——那多半沒變
+      summary = result
+        ? `補 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}選舉結果：${result}`
+        : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」`;
       break;
     }
     case "policy": {

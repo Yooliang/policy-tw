@@ -11,6 +11,7 @@
 
 import { CORRECTION_FIELDS, type ContributionType } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
+import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
@@ -213,26 +214,34 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const electionId = Number(p.election_id);
   const { data: before } = await supabase.from("politician_elections").select("*").eq("politician_id", ensured.politician_id).eq("election_id", electionId).maybeSingle();
 
+  // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
+  const resultPatch = electionResultPatch(p);
+  const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,
     election_id: electionId,
     position: str(p.position) ?? `${electionType}候選人`,
     election_type: electionType,
     candidate_status: candidateStatus,
-    source_note: `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`,
+    source_note: newSourceNote,
+    always: resultPatch,
   });
   if (participation.outcome === "created") {
     const { data: after } = await supabase.from("politician_elections").select("*").eq("id", participation.id).maybeSingle();
     await recordInsert(supabase, ctx, "politician_elections", String(participation.id), after ?? { id: participation.id });
   } else {
-    await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), "candidate_status", before?.candidate_status ?? null, candidateStatus);
-    await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), "source_note", before?.source_note ?? null, sourceNote(row));
+    // 只記真的變的欄位：confirmed→confirmed 不進 edit_history
+    const after = { candidate_status: candidateStatus, source_note: newSourceNote, ...resultPatch };
+    for (const [field, oldValue, newValue] of changedFields(before ?? null, after)) {
+      await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), field, oldValue, newValue);
+    }
   }
+  const resultLabel = electionResultLabel(p);
   return {
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
-    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}`,
+    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}`,
   };
 }
 

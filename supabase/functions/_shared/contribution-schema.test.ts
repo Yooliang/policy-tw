@@ -193,3 +193,11 @@ Deno.test("提出日期：correction 允許清空，其他欄位不允許", () =
   assert(correction([{ field: "title", correct_value: null }]).errors.some((e) => e.path.endsWith("correct_value")));
   assert(correction([{ field: "proposed_date", correct_value: "2099-01-01" }]).errors.some((e) => e.path.endsWith("correct_value")));
 });
+
+// 2026-09-19：election_result_missing 任務的答案帶三個結果欄位，之前 schema 直接無視
+Deno.test("candidacy：election_result／votes_received／vote_percentage 選填但要對", () => {
+  const ok = validateContributionRequest({ ...validCandidacy, payload: { ...validCandidacy.payload, election_result: "elected", votes_received: 29150, vote_percentage: 53.7 } });
+  assertEquals(ok.errors, []);
+  const bad = validateContributionRequest({ ...validCandidacy, payload: { ...validCandidacy.payload, election_result: "won", votes_received: -3, vote_percentage: 101 } });
+  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.election_result", "payload.vote_percentage", "payload.votes_received"]);
+});
