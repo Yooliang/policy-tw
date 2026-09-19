@@ -313,10 +313,39 @@ const CORE_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
 const FIELD_INSTRUCTIONS =
   "claim 是一筆要寫進台灣政治資料庫的宣稱，page 是提交者附的來源網頁文字。這一題只問 claim 裡的一個欄位：這段文字有沒有證明它？" +
   "判準：來源必須證明「這個人說過或做過這件事」，不是只證明「這件事存在」。同義寫法算一致：政黨簡稱（國民黨＝中國國民黨、民進黨＝民主進步黨、民眾黨＝台灣民眾黨、無黨籍＝無黨籍及未經政黨推薦）、" +
-  "「完成登記／登記參選」＝candidate_status registered、「2026 九合一／年底選舉」＝election_id 2026、縣市議員＝市議員／縣議員、「現任某市議員」可推得 region 與職位。" +
+  "「完成登記／登記參選」＝candidate_status registered、「2026 九合一／年底選舉／民國 115 年／115 年地方公職人員選舉」＝election_id 2026、" +
+  "election_type 縣市議員＝直轄市議員／縣（市）議員／市議員／縣議員，縣市長＝直轄市長／縣（市）長，鄉鎮市長＝鄉（鎮、市）長；「臺」＝「台」（臺南市＝台南市）；" +
+  "中選會「候選人登記情形一覽表／登記名冊」裡列出「某選舉區 某人」，就證明那個人在該縣市那場選舉 candidate_status registered，選舉區前綴的縣市就是 region。" +
   "文字寫的跟這個欄位對得上選 confirmed；文字明確寫了不一樣的值、或講的是別人／前任選 contradicted；文字沒提到這個欄位選 absent。";
 
 /** 一份 state、每個 claim 欄位一題。題名 field:<欄位> */
+/**
+ * 多個來源各取一段（名字附近優先），拼成一份 page.text，每段前面標來源網域。
+ * 2026-09-19：很多參選紀錄的第一個來源是中選會的「附件索引頁」（只有 PDF 連結清單，681 字），
+ * 名單在 PDF 或第二、三個來源裡；只看第一個來源等於什麼都沒看到。含有人名的來源排前面。
+ */
+export function combineSources(
+  pages: Array<{ url: string; text: string }>,
+  names: Array<string | null | undefined>,
+  perSource = 2200,
+  total = PAGE_TEXT_MAX,
+): string {
+  const scored = pages
+    .filter((p) => p.text && p.text.trim())
+    .map((p) => ({ ...p, hit: names.some((n) => !!n && n.length >= 2 && p.text.includes(n)) }))
+    .sort((a, b) => Number(b.hit) - Number(a.hit));
+  const parts: string[] = [];
+  let used = 0;
+  for (const p of scored) {
+    let host = p.url;
+    try { host = new URL(p.url).hostname; } catch { /* 原樣 */ }
+    const piece = `【來源 ${host}】\n${focusText(p.text, names, perSource)}`;
+    if (used + piece.length > total && parts.length > 0) break;
+    parts.push(piece); used += piece.length;
+  }
+  return parts.join("\n\n").slice(0, total);
+}
+
 export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string): {
   state: Record<string, unknown>;
   questions: Record<string, JevQuestion>;
@@ -391,7 +420,10 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
     if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) {
       // 中選會的公告多半是 PDF（回測 90 筆有 15 筆），不抽字等於參選紀錄的來源票一半棄權
       try {
+        const len = Number(res.headers.get("content-length") ?? 0);
+        if (len > 3_000_000) return { kind: "pdf", text: "", note: `pdf 太大（${Math.round(len / 1e6)} MB）不抽字` };
         const buf = new Uint8Array(await res.arrayBuffer());
+        if (buf.byteLength > 3_000_000) return { kind: "pdf", text: "", note: "pdf 太大不抽字" };
         const text = await pdfText(buf);
         if (text.trim().length < 50) return { kind: "pdf", text: "", note: "pdf 抽不到文字（掃描檔？）" };
         return { kind: "html", text: text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim(), note: "pdf" };

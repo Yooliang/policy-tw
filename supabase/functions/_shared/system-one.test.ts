@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateFieldVerdicts, articleBodyFromJsonLd, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateFieldVerdicts, articleBodyFromJsonLd, combineSources, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -174,4 +174,17 @@ Deno.test("更正的 claim：攤成「欄位＝新值」＋ subject_name；核�
   ans["field:proposed_date"] = { type: "choice", choice: "confirmed", probabilities: { confirmed: 0.96 } };
   const ok = aggregateFieldVerdicts("correction", claim, ans);
   assertEquals(ok.choice, "supported"); assertEquals(ok.probability, 0.96);
+});
+
+// 2026-09-19：第一個來源常是中選會附件索引頁，名單在 PDF 或後面的來源裡
+Deno.test("combineSources：含人名的來源排前面、每段標來源網域、空的略過、總長受限", () => {
+  const idx = { url: "https://web.cec.gov.tw/central/cms/1", text: "115年地方公職人員選舉候選人登記名冊 附件下載 " + "x".repeat(600) };
+  const pdf = { url: "https://web.cec.gov.tw/api/file/a.pdf", text: "115年直轄市議員選舉候選人登記情形一覽表 臺南市第9選舉區 周麗津 臺南市第9選舉區 王大明" };
+  const empty = { url: "https://x/y", text: "" };
+  const out = combineSources([idx, pdf, empty], ["周麗津"]);
+  assertEquals(out.startsWith("【來源 web.cec.gov.tw】\n115年直轄市議員"), true, "有名字的那份在最前面");
+  assertEquals(out.includes("附件下載"), true, "沒名字的也附在後面");
+  assertEquals(out.includes("https://x/y"), false);
+  assertEquals(combineSources([], ["a"]), "");
+  assertEquals(combineSources([{ url: "u", text: "y".repeat(10000) }], ["a"], 2200, 3000).length <= 3000, true);
 });
