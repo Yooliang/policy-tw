@@ -103,7 +103,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`
 - 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`merge-politicians`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
-- Jev 影子模式（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill 三個動作）；判決只進 `jev_decisions`，不投票不否決；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
+- Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 - `_shared/query-bounds.test.ts` 掃所有查詢鏈：沒 limit、`limit>1000`、翻頁沒 `.order` 都會紅（PostgREST max-rows=1000 靜默截斷）；真的有界就在那行上面寫 `// query-bounds: ok — 理由`
 
