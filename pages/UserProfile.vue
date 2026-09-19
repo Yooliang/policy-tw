@@ -68,14 +68,16 @@ const agentInput = ref('')
 // 登入後由伺服器用 session 裡的信箱向 DiTrust 開戶或連結，拿回 agent_id；序號只在開戶那次與
 // 「顯示序號」時經過，正見不存（護欄二）。「我的貢獻」改用 actor_id=ditrust:<agent_id> 撈，是關聯不是字串比對。
 const DITRUST_AGENT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ditrust-agent`
-const agent = ref<{ agent_id: string; actor_id: string; created: boolean } | null>(null)
+const agent = ref<{ agent_id: string; actor_id: string; created: boolean; display_name: string | null } | null>(null)
+const renameInput = ref('')
+const renameNote = ref<string | null>(null)
 const agentSecret = ref<string | null>(null)
 const agentBusy = ref(false)
 const agentError = ref<string | null>(null)
 const secretCopied = ref(false)
 const { session } = useAuth()
 
-async function callDitrustAgent(action: 'link' | 'reveal' | 'rotate') {
+async function callDitrustAgent(action: 'link' | 'reveal' | 'rotate' | 'rename', extra: Record<string, unknown> = {}) {
   const token = session.value?.access_token
   if (!token) { agentError.value = '請先登入'; return null }
   agentBusy.value = true
@@ -84,11 +86,11 @@ async function callDitrustAgent(action: 'link' | 'reveal' | 'rotate') {
     const res = await fetch(DITRUST_AGENT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '' },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...extra }),
     })
     const body = await res.json().catch(() => null)
     if (!res.ok || !body?.success) throw new Error(body?.error || `HTTP ${res.status}`)
-    return body as { agent_id: string; actor_id: string; created: boolean; secret?: string }
+    return body as { agent_id: string; actor_id: string; created: boolean; secret?: string; display_name?: string | null; display_name_status?: string }
   } catch (err: unknown) {
     agentError.value = err instanceof Error ? err.message : '暫時連不上身份服務'
     return null
@@ -100,9 +102,20 @@ async function callDitrustAgent(action: 'link' | 'reveal' | 'rotate') {
 async function linkAgent() {
   const out = await callDitrustAgent('link')
   if (!out) return
-  agent.value = { agent_id: out.agent_id, actor_id: out.actor_id, created: out.created }
+  agent.value = { agent_id: out.agent_id, actor_id: out.actor_id, created: out.created, display_name: out.display_name ?? null }
+  renameInput.value = out.display_name ?? ''
+  if (out.display_name_status === 'taken') renameNote.value = '你的 Google 名字已經有人當代號用了，請自己取一個'
   if (out.secret) agentSecret.value = out.secret
   loadContributions()
+}
+async function renameAgent() {
+  const name = renameInput.value.trim()
+  if (!name || name === agent.value?.display_name) return
+  renameNote.value = null
+  const out = await callDitrustAgent('rename', { display_name: name })
+  if (!out) return
+  if (agent.value) agent.value = { ...agent.value, display_name: out.display_name ?? name }
+  renameNote.value = '代號已更新；代理端最多 5 分鐘後生效（伺服器有身份快取）'
 }
 async function revealSecret() {
   const out = await callDitrustAgent('reveal')
@@ -293,6 +306,14 @@ usePageHead({ title: '個人頁面', noindex: true })
             <div v-if="agentError" class="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">{{ agentError }}</div>
             <div v-if="agent" class="mt-3 space-y-2">
               <p class="text-xs text-slate-500">代理編號 <span class="font-mono">{{ agent.agent_id.slice(0, 8) }}</span>{{ agent.created ? '（剛建立）' : '' }}</p>
+              <!-- 代號：DiTrust 發的、全站唯一；貢獻榜與查核履歷顯示的就是這個 -->
+              <form class="flex flex-col sm:flex-row gap-2 items-start sm:items-center" @submit.prevent="renameAgent">
+                <label class="text-xs text-slate-600 shrink-0">代號</label>
+                <input v-model="renameInput" type="text" maxlength="64" :placeholder="agent.display_name || '例如 小梁'" class="flex-1 min-w-0 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500" />
+                <button type="submit" :disabled="agentBusy || !renameInput.trim() || renameInput.trim() === agent.display_name" class="px-3 py-1.5 text-sm border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50">{{ agent.display_name ? '改代號' : '設定代號' }}</button>
+              </form>
+              <p v-if="renameNote" class="text-xs text-slate-600">{{ renameNote }}</p>
+              <p v-else-if="!agent.display_name" class="text-xs text-amber-700">還沒有代號：貢獻會顯示成「ditrust-{{ agent.agent_id.slice(0, 8) }}」，取一個吧。代號全站唯一、七天只能改一次。</p>
               <div v-if="agentSecret" class="p-3 bg-white rounded-lg border border-violet-200">
                 <p class="text-xs text-slate-600 mb-1">給代理的 agent_name（序號等於密碼，只給你自己的 AI 代理，不要貼到別的網站）：</p>
                 <div class="flex items-center gap-2">
