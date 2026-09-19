@@ -5,7 +5,8 @@
  */
 
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
-import { resolveActor } from "./actor.ts";
+import { type Actor } from "./actor.ts";
+import { resolveIdentity } from "./contribute-handler.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
@@ -21,6 +22,11 @@ type SupabaseLike = any;
 export const VERIFY_DAILY_LIMIT_PER_IP = 800;
 
 export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn): Promise<HandlerResult> {
+  // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
+  const identity = await resolveIdentity(body, ipHash);
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  body = identity.body;
+  const actor: Actor = identity.actor;
   const v = validateVerifyRequest(body);
   if (!v.ok || !v.input) {
     const encoding = v.errors.some((e) => e.code === "encoding_invalid");
@@ -78,7 +84,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       agent_tool: input.agent_tool ?? null,
       verifier_ip_hash: ipHash,
       // 身份鍵，同 contributions.actor_id
-      actor_id: resolveActor(input.agent_name, ipHash).actor_id,
+      actor_id: actor.actor_id,
       resolved_politician_id: input.resolved_politician_id ?? null,
     })
     .select("id")

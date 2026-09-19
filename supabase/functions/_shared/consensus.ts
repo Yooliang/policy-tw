@@ -73,6 +73,25 @@ export function requiredAgree(contributionType: string, payload: unknown, source
 }
 /** disagree ≥ 2 → disputed */
 export const DISPUTED_MIN_DISAGREE = 2;
+
+// ---- 系統來源票（Jev）：4 票變 3+1 ----
+// 2026-09-19 使用者裁決：代理的價值是找第二、第三個可信來源；Jev 核「提交者附的那個來源」支不支持宣稱，
+// 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
+// not_supported 算一張反對；棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress"] as const;
+export type SystemVote = "supported" | "not_supported" | null;
+
+export function systemVoteEligible(contributionType: string): boolean {
+  return (SYSTEM_VOTE_ELIGIBLE_TYPES as readonly string[]).includes(contributionType);
+}
+/** supported → 門檻 −1，但最少 1 */
+export function effectiveRequiredAgree(required: number, systemVote: SystemVote): number {
+  return systemVote === "supported" ? Math.max(1, required - 1) : required;
+}
+/** not_supported → 多一張反對 */
+export function effectiveDisagree(disagree: number, systemVote: SystemVote): number {
+  return disagree + (systemVote === "not_supported" ? 1 : 0);
+}
 /** /verifications 的預設 limit（skill.md 的工作順序是驗證：任務約 3：1，不寫死上限） */
 export const MAX_VERIFICATIONS_PER_RUN = 5;
 /** 24 小時內同名／同機提交過的筆不能驗 */

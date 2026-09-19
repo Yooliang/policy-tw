@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { askJev, buildPolicyAsk, type DecisionRecord, type ElectionLite, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -12,8 +12,11 @@ import { askJev, buildPolicyAsk, type DecisionRecord, type ElectionLite, MIN_PRO
  *   ?action=backfill POST                                撿還沒問過的、或答不出來但參考資料變多的，問掉。不帶金鑰，
  *                                                        因為 pg_cron 的呼叫寫在 migration 裡而這是開源倉庫；
  *                                                        改用成本上限守：10 分鐘內已問滿 limit 就不再問。
+ *   ?action=precheck POST                                系統來源票：撿 pending 且還沒判過的貢獻，抓提交的來源、問 Jev
+ *                                                        支不支持宣稱，寫 jev_decisions 後重算共識。守法同 backfill。
  *
- * 這張表只記錄，不參與任何計票。Jev 不能投票也不能否決（藍圖 §3）。
+ * 系統來源票（2026-09-19 使用者裁決，4 票變 3+1）：Jev 核「提交者附的那個來源」，supported ≥門檻讓代理門檻 −1
+ * （最少仍要 1 張代理票）、not_supported 算一張反對、其餘棄權。計票在 SQL 的 contribution_apply_consensus。
  *
  * 三件這支端點自己守住的事：
  *   1. 只新增不更新。撞到 unique(subject_type, subject_id, question, model, state_hash) 就算 skipped——
@@ -28,8 +31,12 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const MAX_RECORDS = 500;
-/** backfill 每次最多問幾筆；以及成本上限的時間窗 */
-const BACKFILL_MAX = 50;
+/**
+ * 每次最多問幾筆，以及成本上限的時間窗。上限是防外人狂打不帶金鑰的端點，不是預算：
+ * 最壞情況 = MAX × (1440 / WINDOW) 筆／天 × 每筆約 $0.0002。2026-09-19 使用者：「n 也太小了吧」——
+ * 原本 50／10 分鐘，precheck 一輪 20 筆，積壓 1,400 多筆要清一整天；改成 300／10 分鐘，最壞每天約 $9，可接受。
+ */
+const BACKFILL_MAX = 300;
 const BACKFILL_WINDOW_MINUTES = 10;
 const CONFLICT = "subject_type,subject_id,question,model,state_hash";
 
@@ -130,6 +137,97 @@ Deno.serve(async (req) => {
         }
       }
       return json({ success: true, asked, inserted, cost_usd: Number(cost.toFixed(6)), candidates: (cands ?? []).length, failures, min_probability: MIN_PROBABILITY });
+    }
+
+    // ---- precheck：系統來源票。排程叫這個。不帶金鑰，靠成本上限 ----
+    if (action === "precheck") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), BACKFILL_MAX);
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const { count, error: cErr } = await supabase.from("jev_decisions")
+        .select("id", { count: "exact", head: true }).eq("subject_type", "contribution").eq("question", "source_support").gte("asked_at", since);
+      if (cErr) throw new Error(`jev_decisions recent count: ${cErr.message}`);
+      const budget = Math.max(0, limit - (count ?? 0));
+      if (budget === 0) return json({ success: true, asked: 0, reason: `${BACKFILL_WINDOW_MINUTES} 分鐘內已判過 ${count} 筆，這輪不判` });
+
+      const { data: cands, error: qErr } = await supabase.rpc("system_one_precheck_candidates", { p_limit: budget });
+      if (qErr) throw new Error(`precheck candidates: ${qErr.message}`);
+      let asked = 0, cost = 0;
+      const tally: Record<string, number> = {};
+      const failures: Array<{ contribution_id: string; error: string }> = [];
+      type Cand = { contribution_id: string; contribution_type: string; payload: Record<string, unknown>; source_urls: string[] };
+      const list = (cands ?? []) as Cand[];
+      // 一輪可能有 200 筆，序列抓網頁會撞到 edge function 的執行上限：改成一次 5 筆並行，
+      // 並給 50 秒時間預算，到了就收工回報——沒做完的下一輪 cron 會再撿（候選查詢是冪等的）
+      const startedAt = Date.now();
+      const BUDGET_MS = 50_000;
+      const CONCURRENCY = 5;
+      /** 更正沒帶對象名稱，頁面無從對起：用 target_table／target_id 把人物名或政見標題查出來 */
+      const subjectNameOf = async (payload: Record<string, unknown>): Promise<string | null> => {
+        const table = payload.target_table, id = payload.target_id;
+        if (typeof table !== "string" || typeof id !== "string") return null;
+        const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
+        if (!col) return null;
+        const { data } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
+        return data && typeof data[col] === "string" ? data[col] : null;
+      };
+      const one = async (c: Cand): Promise<void> => {
+        const srcUrl = c.source_urls[0];
+        const page = await fetchSource(srcUrl);
+        const payload = { ...(c.payload ?? {}) };
+        if (c.contribution_type === "correction") {
+          const subject = await subjectNameOf(payload);
+          if (subject) payload.subject_name = subject;
+        }
+        const claim = claimOf(c.contribution_type, payload);
+        let rows: DecisionRecord[];
+        let key: string;
+        if (page.kind !== "html" || page.text.length < 200) {
+          // 抓不到正文就棄權（cannot_tell、機率 0），但一樣留紀錄：候選查詢靠這列知道「判過了」，
+          // 而且對帳時分得出「來源抓不到」跟「Jev 看不出來」是兩回事
+          rows = [{
+            subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
+            choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
+            model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: srcUrl, text: "", fetch: page.kind, note: page.note } }, cost_usd: 0,
+          }];
+          key = `fetch:${page.kind}`;
+        } else {
+          const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
+          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, focusText(page.text, names));
+          const res = await askJev(apiKey, state, questions);
+          cost += res.usage.cost;
+          // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
+          const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+          rows = [{
+            subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
+            choice: agg.choice, probability: agg.probability, confidence: null,
+            probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)),
+          }];
+          key = `${agg.choice}${agg.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
+        }
+        await insertRecords(supabase, rows);
+        // 有票就重算共識：supported 可能讓門檻剛好達標、not_supported 可能直接進裁決
+        const { error: aErr } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.contribution_id });
+        if (aErr) throw new Error(`apply_consensus: ${aErr.message}`);
+        tally[key] = (tally[key] ?? 0) + 1;
+        asked++;
+      };
+      let cursor = 0;
+      let outOfTime = false;
+      while (cursor < list.length && !outOfTime) {
+        if (Date.now() - startedAt > BUDGET_MS) { outOfTime = true; break; }
+        const chunk = list.slice(cursor, cursor + CONCURRENCY);
+        cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map(one));
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          if (r.status === "rejected") failures.push({ contribution_id: chunk[i].contribution_id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+        }
+        // OpenRouter 掛了就整輪停，不要 200 筆各撞一次
+        if (failures.length >= 5) break;
+      }
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY });
     }
 
     // ---- record：外部批次腳本寫入 ----

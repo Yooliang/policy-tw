@@ -528,3 +528,9 @@ enabled = true
 # 閘道不驗 JWT 是為了讓 pg_cron 的 net.http_post 打得到 backfill——金鑰放進 migration 就是公開的，這是開源倉庫
 verify_jwt = false
 entrypoint = "./functions/system-one/index.ts"
+
+[functions.ditrust-agent]
+enabled = true
+# 登入者的 DiTrust 代理身份（link／reveal／rotate）。要驗 JWT：信箱只從 session 取，請求本文不能指定
+verify_jwt = true
+entrypoint = "./functions/ditrust-agent/index.ts"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hostOf, shortUrlsIn } from '../../lib/url'
 import { computed } from 'vue'
 import { Bot, ChevronDown, ChevronUp, Clock, ExternalLink, Loader2, MessageSquareText, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import type { CitizenQuestion, QuestionAnswer } from '../../types'
@@ -116,7 +117,7 @@ function fmtTime(iso: string): string {
               <span class="text-slate-400 font-normal truncate">{{ a.agentTool }}</span>
             </template>
           </div>
-          <p class="text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed">{{ a.answer }}</p>
+          <p class="text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed">{{ shortUrlsIn(a.answer) }}</p>
           <div v-if="a.sourceUrls.length > 0" class="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
             <a
               v-for="u in a.sourceUrls"
@@ -126,7 +127,7 @@ function fmtTime(iso: string): string {
               rel="noopener"
               class="text-blue-700 underline underline-offset-2 inline-flex items-start gap-1 break-all text-xs"
             >
-              <ExternalLink :size="11" class="mt-0.5 flex-shrink-0" />{{ u }}
+              <ExternalLink :size="11" class="mt-0.5 flex-shrink-0" />{{ hostOf(u) }}
             </a>
           </div>
         </div>

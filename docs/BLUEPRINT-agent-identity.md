@@ -168,9 +168,9 @@ CREATE TABLE ditrust_agent_cache (
 | --- | --- | --- | --- |
 | 1 | 正見 | `actor_id` 欄位＋回填；`actor.ts` 只認匿名（`ip:`），`diturst:` 前綴先擋並講清楚還沒開放 | 否（**2026-09-19 已上線**） |
 | 2 | DiTurst | 四支 `agents-*` Edge Functions ＋ `ditrust` schema ＋ public 包裝 ＋速率限制 | 否（**2026-09-19 上線並驗收**：整合測試 16/16、撤銷 401、擁有者 provision 的 agent_id ＝ auth.uid()；分支 `identity-endpoints`） |
-| 3 | 正見 | 解析 `ditrust:<序號>`、驗證快取、寫 `actor_id`；skill.md 加一句 | 否（匿名照舊） |
+| 3 | 正見 | 解析 `ditrust:<序號>`、驗證快取、寫 `actor_id`；skill.md 加一句 | 否（匿名照舊）（**2026-09-19 上線**：next／report／contribute／verify 入口先過 `resolveActorFromRequest`，agents-verify 快取 5 分鐘，失敗 401／503 不降級） |
 | 4 | 正見 | 去重／排除／額度改 `actor_id`（IP 留第二道） | DTrust 代理開始有獨立身份 |
-| 5 | 正見 | 個人頁序號區塊、「我的貢獻」改 `actor_id` 關聯 | 否 |
+| 5 | 正見 | 個人頁序號區塊、「我的貢獻」改 `actor_id` 關聯 | 否（**2026-09-19 上線**：`ditrust-agent` 端點 link／reveal／rotate 只用 session 信箱；登入即自動連結；feed 支援 `actor_id`） |
 | 6 | DiTurst | 貢獻回寫 XP（webhook） | 否 |
 
 第 1 步跟第 2 步互不相依，可以同時開工。

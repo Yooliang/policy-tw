@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
@@ -327,7 +328,7 @@ onMounted(() => { ensurePolicies() })
                       <h4 :class="`font-black ${log.isSelected ? 'text-navy-900 text-lg' : log.level === 0 ? 'text-slate-600 text-lg' : 'text-slate-500 text-base'}`">{{ log.event }}</h4>
                       <span class="text-xs font-mono font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 shrink-0 ml-4">{{ log.date }}</span>
                     </div>
-                    <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ log.description }}</p>
+                    <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ shortUrlsIn(log.description) }}</p>
 
                     <!-- Hover: absolute card overlay wrapping content + politician info -->
                     <div class="hidden group-hover/log:block absolute inset-x-[-12px] top-[-8px] z-40 bg-white rounded-xl shadow-lg ring-1 ring-slate-200 px-3 py-2 pointer-events-none">
@@ -335,7 +336,7 @@ onMounted(() => { ensurePolicies() })
                         <h4 :class="`font-black ${log.isSelected ? 'text-navy-900 text-lg' : log.level === 0 ? 'text-slate-600 text-lg' : 'text-slate-500 text-base'}`">{{ log.event }}</h4>
                         <span class="text-xs font-mono font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 shrink-0 ml-4">{{ log.date }}</span>
                       </div>
-                      <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ log.description }}</p>
+                      <p v-if="log.description" class="text-slate-500 text-sm leading-relaxed">{{ shortUrlsIn(log.description) }}</p>
                       <div class="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
                         <Avatar :src="log.politicianAvatar" :name="log.politicianName" size="xs" class="border border-white shadow-sm shrink-0" />
                         <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.politicianName }}</span>

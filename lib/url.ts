@@ -12,3 +12,13 @@ export function hostOf(url: string): string {
     return url
   }
 }
+
+/**
+ * 內文裡的網址也只留網域（2026-09-19：「有時內文也會出現網址，弄個統一的過濾器吧」）。
+ * 只動 http(s):// 開頭的那一串，其餘文字原樣；解析不出來的照 hostOf 的規矩原樣留著。
+ * 給 {{ }} 純文字用，所以不會變成連結——要連結的地方用 hostOf 當顯示字、href 保留完整網址。
+ */
+export function shortUrlsIn(text: string | null | undefined): string {
+  if (!text) return ''
+  return text.replace(/https?:\/\/[^\s<>"'）)】」》\]。，、；：！？]+/g, (m) => hostOf(m))
+}

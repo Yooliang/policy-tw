@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useRouter } from 'vue-router'
@@ -62,6 +63,61 @@ const STATUS_CLASS: Record<string, string> = {
 
 const agentName = ref('')
 const agentInput = ref('')
+
+// === DiTrust 代理身份（docs/BLUEPRINT-agent-identity.md）===
+// 登入後由伺服器用 session 裡的信箱向 DiTrust 開戶或連結，拿回 agent_id；序號只在開戶那次與
+// 「顯示序號」時經過，正見不存（護欄二）。「我的貢獻」改用 actor_id=ditrust:<agent_id> 撈，是關聯不是字串比對。
+const DITRUST_AGENT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ditrust-agent`
+const agent = ref<{ agent_id: string; actor_id: string; created: boolean } | null>(null)
+const agentSecret = ref<string | null>(null)
+const agentBusy = ref(false)
+const agentError = ref<string | null>(null)
+const secretCopied = ref(false)
+const { session } = useAuth()
+
+async function callDitrustAgent(action: 'link' | 'reveal' | 'rotate') {
+  const token = session.value?.access_token
+  if (!token) { agentError.value = '請先登入'; return null }
+  agentBusy.value = true
+  agentError.value = null
+  try {
+    const res = await fetch(DITRUST_AGENT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '' },
+      body: JSON.stringify({ action }),
+    })
+    const body = await res.json().catch(() => null)
+    if (!res.ok || !body?.success) throw new Error(body?.error || `HTTP ${res.status}`)
+    return body as { agent_id: string; actor_id: string; created: boolean; secret?: string }
+  } catch (err: unknown) {
+    agentError.value = err instanceof Error ? err.message : '暫時連不上身份服務'
+    return null
+  } finally {
+    agentBusy.value = false
+  }
+}
+
+async function linkAgent() {
+  const out = await callDitrustAgent('link')
+  if (!out) return
+  agent.value = { agent_id: out.agent_id, actor_id: out.actor_id, created: out.created }
+  if (out.secret) agentSecret.value = out.secret
+  loadContributions()
+}
+async function revealSecret() {
+  const out = await callDitrustAgent('reveal')
+  if (out?.secret) agentSecret.value = out.secret
+}
+async function rotateSecret() {
+  if (!confirm('重新產生後，舊序號立刻失效，正在跑的代理要換成新的。確定？')) return
+  const out = await callDitrustAgent('rotate')
+  if (out?.secret) agentSecret.value = out.secret
+}
+async function copySecret() {
+  if (!agentSecret.value) return
+  try { await navigator.clipboard.writeText(`ditrust:${agentSecret.value}`); secretCopied.value = true; setTimeout(() => { secretCopied.value = false }, 1500) } catch { /* 沒有剪貼簿權限就讓使用者手動選取 */ }
+}
+const agentNameForSkill = computed(() => agentSecret.value ? `ditrust:${agentSecret.value}` : '')
 const contributions = ref<MyContribution[]>([])
 const contribLoading = ref(false)
 const contribError = ref<string | null>(null)
@@ -79,11 +135,15 @@ function feedHeaders(): Record<string, string> {
 }
 
 async function loadContributions() {
-  if (!agentName.value) return
+  const byActor = agent.value?.actor_id
+  if (!byActor && !agentName.value) return
   contribLoading.value = true
   contribError.value = null
   try {
-    const params = new URLSearchParams({ agent_name: agentName.value, status: 'all', limit: '50' })
+    const params = new URLSearchParams({ status: 'all', limit: '50' })
+    // 登入且已連結 DiTrust：用身份鍵撈，這才是「我的」；沒連結的匿名代號仍可查
+    if (byActor) params.set('actor_id', byActor)
+    else params.set('agent_name', agentName.value)
     const res = await fetch(`${FEED_URL}?${params}`, { headers: feedHeaders() })
     const body = await res.json().catch(() => null)
     if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
@@ -127,6 +187,8 @@ onMounted(() => {
   ensurePolicies()
   agentName.value = readStoredAgentName()
   agentInput.value = agentName.value
+  // 登入了就自動連結 DiTrust（第一次會開戶並顯示序號一次）
+  if (isAuthenticated.value) linkAgent()
   if (agentName.value) loadContributions()
 })
 
@@ -214,12 +276,41 @@ usePageHead({ title: '個人頁面', noindex: true })
             </button>
           </div>
 
-          <!-- agent_name 設定 -->
-          <div class="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-            <p class="text-sm text-slate-600 mb-3">
-              資料貢獻由你的 AI 代理依 <a :href="SKILL_URL" target="_blank" rel="noopener" class="text-violet-700 underline underline-offset-2 font-bold">skill.md</a> 提交，署名是你給它的代號（agent_name）。填同一個代號就能看到自己的貢獻。
-            </p>
-            <form class="flex flex-col sm:flex-row gap-2" @submit.prevent="applyAgentName">
+          <!-- DiTrust 代理身份：序號給你的 AI 代理當 agent_name -->
+          <div class="mb-6 p-4 bg-violet-50 rounded-lg border border-violet-200" data-testid="ditrust-agent">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-bold text-navy-900 flex items-center gap-2"><Bot class="w-4 h-4 text-violet-600" />你的代理身份</p>
+                <p class="text-xs text-slate-600 mt-1">
+                  資料貢獻由你的 AI 代理依 <a :href="SKILL_URL" target="_blank" rel="noopener" class="text-violet-700 underline underline-offset-2 font-bold">skill.md</a> 進行。
+                  把下面的序號當 <code class="px-1 bg-white rounded">agent_name</code> 給它，貢獻就會記在你的帳號下，不用再手填代號。
+                </p>
+              </div>
+              <button v-if="!agent" @click="linkAgent" :disabled="agentBusy || !isAuthenticated" class="shrink-0 px-3 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-bold hover:bg-violet-700 disabled:opacity-50">
+                {{ agentBusy ? '連結中…' : '連結 DiTrust' }}
+              </button>
+            </div>
+            <div v-if="agentError" class="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">{{ agentError }}</div>
+            <div v-if="agent" class="mt-3 space-y-2">
+              <p class="text-xs text-slate-500">代理編號 <span class="font-mono">{{ agent.agent_id.slice(0, 8) }}</span>{{ agent.created ? '（剛建立）' : '' }}</p>
+              <div v-if="agentSecret" class="p-3 bg-white rounded-lg border border-violet-200">
+                <p class="text-xs text-slate-600 mb-1">給代理的 agent_name（序號等於密碼，只給你自己的 AI 代理，不要貼到別的網站）：</p>
+                <div class="flex items-center gap-2">
+                  <code class="flex-1 text-xs font-mono break-all select-all">{{ agentNameForSkill }}</code>
+                  <button @click="copySecret" class="shrink-0 px-2 py-1 text-xs border border-slate-300 rounded hover:bg-slate-50">{{ secretCopied ? '已複製' : '複製' }}</button>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button v-if="!agentSecret" @click="revealSecret" :disabled="agentBusy" class="px-3 py-1.5 text-sm border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50">顯示序號</button>
+                <button @click="rotateSecret" :disabled="agentBusy" class="px-3 py-1.5 text-sm border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 disabled:opacity-50">重新產生序號</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 匿名代號（沒連結 DiTrust 時的備用查法；只是字串比對，不是「我的」） -->
+          <details v-if="!agent" class="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <summary class="text-sm text-slate-600 cursor-pointer">用匿名代號查（沒連結 DiTrust 時）</summary>
+            <form class="flex flex-col sm:flex-row gap-2 mt-3" @submit.prevent="applyAgentName">
               <input
                 v-model="agentInput"
                 type="text"
@@ -228,15 +319,15 @@ usePageHead({ title: '個人頁面', noindex: true })
               />
               <button type="submit" class="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-bold hover:bg-violet-700 transition-colors">查看</button>
             </form>
-          </div>
+          </details>
 
           <div v-if="contribLoading" class="text-center py-12">
             <Loader2 class="w-8 h-8 mx-auto text-violet-500 animate-spin" />
           </div>
           <div v-else-if="contribError" class="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{{ contribError }}</div>
-          <div v-else-if="!agentName" class="text-center py-10 text-slate-500">
+          <div v-else-if="!agentName && !agent" class="text-center py-10 text-slate-500">
             <Bot class="w-12 h-12 mx-auto mb-3 text-slate-300" />
-            <p class="font-bold">先填你的代號</p>
+            <p class="font-bold">連結 DiTrust 後，你的代理交的貢獻會出現在這裡</p>
             <p class="text-sm mt-1">還沒讓 AI 參與過？到貢獻看板看怎麼開始。</p>
             <button @click="router.push('/contributions')" class="mt-4 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">前往貢獻看板</button>
           </div>
@@ -255,12 +346,12 @@ usePageHead({ title: '個人頁面', noindex: true })
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto">{{ formatDate(c.created_at) }}</span>
               </div>
-              <p class="font-medium text-slate-800 break-words">{{ c.summary }}</p>
+              <p class="font-medium text-slate-800 break-words">{{ shortUrlsIn(c.summary) }}</p>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>同意 {{ c.agree_count }}／反對 {{ c.disagree_count }}</span>
                 <a v-if="c.politician_url" :href="c.politician_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">人物頁 <ExternalLink :size="10" /></a>
                 <a v-if="c.policy_url" :href="c.policy_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">政見頁 <ExternalLink :size="10" /></a>
-                <span v-if="c.review_notes" class="text-slate-400">備註：{{ c.review_notes }}</span>
+                <span v-if="c.review_notes" class="text-slate-400">備註：{{ shortUrlsIn(c.review_notes) }}</span>
               </div>
             </li>
           </ul>

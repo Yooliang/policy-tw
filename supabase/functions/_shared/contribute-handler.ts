@@ -4,7 +4,7 @@
  */
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
-import { resolveActor } from "./actor.ts";
+import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
@@ -99,6 +99,11 @@ function mergeNote(agentName: string, sourceUrls: readonly string[], note: strin
 }
 
 export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string, verifyFn: VerifyFn = handleVerify): Promise<HandlerResult> {
+  // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
+  const identity = await resolveIdentity(body, ipHash);
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  body = identity.body;
+  const actor: Actor = identity.actor;
   const validation = validateContributionRequest(body);
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
@@ -193,7 +198,7 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       contributor_url: validation.contributor.url ?? null,
       contributor_ip_hash: ipHash,
       // 身份鍵：去重與歸戶看這個，agent_name 只給人看（docs/BLUEPRINT-agent-identity.md §3）
-      actor_id: resolveActor(validation.contributor.agent_name, ipHash).actor_id,
+      actor_id: actor.actor_id,
       payload_hash: hash,
     }));
 
@@ -282,4 +287,16 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       docs: `${SITE_URL}/skill.md`,
     },
   };
+}
+
+/** 把 body.agent_name 從 ditrust:<序號> 換成代號；回新的 body 與身份。一般代號原樣通過 */
+export async function resolveIdentity(body: unknown, ipHash: string): Promise<
+  { ok: true; body: unknown; actor: Actor } | { ok: false; status: number; error: string }
+> {
+  const raw = (body && typeof body === "object") ? body as Record<string, unknown> : null;
+  const name = raw && typeof raw.agent_name === "string" ? raw.agent_name : "";
+  const outcome = await resolveActorFromRequest(name, ipHash);
+  if (!outcome.ok) return outcome;
+  const next = raw && outcome.actor.level !== "ip" ? { ...raw, agent_name: outcome.actor.handle } : body;
+  return { ok: true, body: next, actor: outcome.actor };
 }

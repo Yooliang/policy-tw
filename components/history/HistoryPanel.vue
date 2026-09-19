@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Un
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
-import { hostOf } from '../../lib/url'
+import { hostOf, shortUrlsIn } from '../../lib/url'
 
 /**
  * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設展開、標題帶筆數；時間軸每筆可個別收合看驗證者與改動。
@@ -121,7 +121,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
             </div>
             <!-- 一般大小就好（2026-09-17）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
-            <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ e.summary }}</p>
+            <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>提交：<b class="text-slate-700">{{ e.agent_name ?? '?' }}</b><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <!-- 票數改成三顆小膠囊（2026-09-17）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」

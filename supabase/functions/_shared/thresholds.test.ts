@@ -1,6 +1,6 @@
 // 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { AGREE_THRESHOLDS, consensusStatus, isDuplicateVote, requiredAgree, riskLevel, tally, tallyByIp } from "./consensus.ts";
+import { AGREE_THRESHOLDS, consensusStatus, effectiveDisagree, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByIp } from "./consensus.ts";
 import { SOURCE_PRIORITY, sourceKind } from "./source-priority.ts";
 
 /** 找最後一支（檔名排序最大）重新定義某個 SQL 物件的 migration，回傳從定義處起的內容 */
@@ -170,4 +170,32 @@ Deno.test("只有網域的首頁降到最低等級，具體那一頁才算官方
   // 門檻跟著變：一般資料官方 2 票，降成 other 要 3 票
   assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/"]), 3);
   assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/?dir=x"]), 2);
+});
+
+// ---- 系統來源票（Jev）：4 票變 3+1，2026-09-19 使用者裁決 ----
+
+Deno.test("系統票：supported 讓門檻 −1 但最少 1；not_supported 多一張反對；棄權不動", () => {
+  assertEquals(effectiveRequiredAgree(4, "supported"), 3, "4 → 3+1");
+  assertEquals(effectiveRequiredAgree(2, "supported"), 1, "2 → 1+1");
+  assertEquals(effectiveRequiredAgree(1, "supported"), 1, "Jev 永遠不能單獨通過");
+  assertEquals(effectiveRequiredAgree(4, null), 4);
+  assertEquals(effectiveRequiredAgree(4, "not_supported"), 4, "反對不改門檻，改反對數");
+  assertEquals(effectiveDisagree(1, "not_supported"), 2, "1 張代理反對 + Jev 就進裁決");
+  assertEquals(effectiveDisagree(1, "supported"), 1);
+  assertEquals(effectiveDisagree(0, null), 0);
+  // 走一次完整判定：4 票門檻、Jev supported、3 張代理 agree → verified
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }]), "pending", effectiveRequiredAgree(4, "supported")), "verified");
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }]), "pending", effectiveRequiredAgree(4, null)), "pending");
+});
+
+Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最少 1 的規則都在計票函式裡", async () => {
+  const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
+  assert(fn.includes("contribution_system_vote(p_contribution_id)"), "計票要讀系統票");
+  assert(fn.includes("GREATEST(1, v_need - 1)"), "supported → 門檻 −1 且最少 1");
+  assert(fn.includes("CASE WHEN v_sys = 'not_supported' THEN 1 ELSE 0 END"), "not_supported → 一張反對");
+  assert(fn.includes("v_disagree_eff >= 2"), "爭議判定要用含系統票的反對數");
+  assert(fn.includes("agree_count = v_agree"), "agree_count 仍是純代理票，系統票不混進去");
+  const elig = await latestMigrationDefining("FUNCTION system_vote_eligible");
+  for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assert(elig.includes(`'${t}'`), `SQL 合格型別缺 ${t}`);
+  assert(!elig.includes("'adjudication'") && !elig.includes("'removal'") && !elig.includes("'no_change'"), "沒有來源可核的型別不能有系統票");
 });

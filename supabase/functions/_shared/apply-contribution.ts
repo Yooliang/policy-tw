@@ -123,6 +123,17 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
     if (!data) return { disputed: `指認的人物 ${resolved} 不存在，交維護者裁決` };
     return { politician_id: String(data.id), created: false };
   }
+  // 提交者自己帶了 politician_id 就是那位（要存在），不再用姓名去猜身份。
+  // 2026-09-19 抓到 7 筆落庫連續失敗＋蘇清泉 2 票齊了卻轉裁決：payload 都有 politician_id，
+  // 這裡卻跳過它去比對姓名——比出「唯一候選但只有弱面向命中」就退件；candidacy 沒帶 name 更直接炸
+  // 「candidate.name 為空」、politician 沒帶 position 撞 NOT NULL。帶了 id 還去猜，猜不準就退件，是這裡的錯。
+  const given = str(row.payload.politician_id);
+  if (given) {
+    const { data, error } = await supabase.from("politicians").select("id").eq("id", given).maybeSingle();
+    throwIf(error, "politicians lookup by payload id");
+    if (data) return { politician_id: String(data.id), created: false };
+    return { disputed: `payload.politician_id ${given} 不存在，交維護者裁決` };
+  }
   const ensured = await ensurePolitician(supabase, candidate, options);
   if (ensured.politician_id === null) {
     const names = ensured.resolution.candidates.map((c) => `${c.name ?? "?"}（${c.politician_id.slice(0, 8)}）`).join("、");

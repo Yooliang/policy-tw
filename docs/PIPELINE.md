@@ -52,7 +52,22 @@ flowchart TD
   CEC["cec-verify（每 10 分鐘）<br/>拿中選會資料機器查證"] -.對得上就直接落庫.-> AP
   CEC -.對不上.-> REJ["rejected"]
   CEC -.查不到／同名多筆.-> P
+
+  subgraph JEV["Jev（TypeSafe System One，決策模型：只判、不連網、不生成文字）"]
+    PRE["system-one precheck（每 10 分鐘）<br/>抓提交者附的來源 → 每一欄問一次<br/>confirmed／contradicted／absent"]
+    JD[("jev_decisions<br/>只記錄；一次性、釘版本、存 state")]
+    ELE["斷年度／非政見／排重／同名人物<br/>（影子：只記錄，等對帳）"]
+    ACC["system_one_accuracy<br/>對帳：預測 vs 代理後來的裁決"]
+  end
+  P -.pending 且有來源.-> PRE
+  PRE --> JD
+  JD -->|"系統來源票 ≥0.95<br/>supported：代理門檻 −1（最少 1）<br/>not_supported：算一張反對"| K
+  JD -.斷年度 ≥0.95 的自動任務排前面.-> D
+  ELE --> JD
+  JD --> ACC
 ```
+
+Jev 那一塊是 2026-09-19 加的，設計與實測在 `BLUEPRINT-jev-decisions.md`。它**看不到來源以外的世界**：代理的價值是找第二、第三個可信來源，Jev 只核「提交的那一頁」。
 
 ## 派工的優先序與防重複
 
@@ -67,6 +82,8 @@ flowchart LR
   F4 --> F5["排掉我這台 24 小時內 skip 過的"]
   F5 --> F6["排掉底下已有 3 筆在等票的<br/>filterSaturatedTasks"]
   F6 --> PICK["依 priority 分層<br/>取最高層的前 3 筆，用 seed 挑一個"]
+  AUTO["自動缺口任務<br/>contribution_auto_tasks"] --> J1["Jev ≥0.95 已給出屆別的<br/>policy_election_missing 排前面<br/>（任務文字不變，代理看不到答案）"]
+  J1 --> J2["層內仍隨機（seed）"]
   PICK --> STAMP["蓋 last_dispatched_at<br/>下次排到後面"]
 ```
 
@@ -92,7 +109,9 @@ flowchart LR
 | 移除資料 | 4 | 4 | 6 | 6 |
 | 裁決 | 4 | 4 | 4 | 4 |
 
-投票的獨立性靠**來源 IP 的雜湊**判定：同一個 IP 不能驗自己那台交的，同一筆也只算一票（計票是 `COUNT(DISTINCT verifier_ip_hash)`）。所以在同一台機器上跑五個代號，投票時仍然只算一個來源。
+投票的獨立性靠**來源 IP 的雜湊**判定：同一個 IP 不能驗自己那台交的，同一筆也只算一票（計票是 `COUNT(DISTINCT verifier_ip_hash)`）。所以在同一台機器上跑五個代號，投票時仍然只算一個來源。派工的身份也是 IP（2026-09-19）：代號可以共用，同代號在兩台機器上是兩個人。
+
+**系統來源票（Jev，2026-09-19 起）**：伺服器自動抓提交者附的來源，對宣稱的每一個欄位各問一次「有沒有被證明」，收斂成一票——核心欄位全部確認（機率 ≥0.95）→ 代理票門檻 −1（4 票變 3+1，但最少仍要 1 張代理票，Jev 永遠不能單獨通過）；任一欄高信心矛盾 → 算一張反對（1 張代理反對＋Jev 就進裁決）；抓不到正文或信心不足 → 棄權，門檻照舊。只算有來源可核的型別（政見、參選、人物、更正、進度）。上表的 `agree_count` 仍是純代理票；系統票只在 `contribution_apply_consensus` 判狀態時生效，代理在驗證項的 `current.system_vote` 看得到它投了什麼、哪一欄沒被證明。
 
 ## 狀態機
 
