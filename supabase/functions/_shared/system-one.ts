@@ -141,6 +141,8 @@ export interface DecisionRecord {
   model: string;
   state: Record<string, unknown>;
   cost_usd: number | null;
+  /** judge 動作的呼叫端來源 IP 雜湊（配額用）；系統自己的判定不帶 */
+  requester_ip_hash?: string | null;
 }
 
 /** 把一次回應攤成每題一列。cost 平均分到每題——OpenRouter 只給整次的成本 */

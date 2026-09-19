@@ -114,7 +114,14 @@ Authorization: Bearer $OPENROUTER_API_KEY
 
 第一筆落地：鍾小平的參選紀錄 supported 0.99 → 5 張代理票＋系統票達 6 票門檻，pending → verified（2026-09-19）。
 
-管線：cron 每 15 分 → `system-one?action=precheck` → 撿 pending 且沒判過的 → 抓第一個 source_url（帶瀏覽器 UA）→ Jev → 寫
+**代理用的第二來源判定端點**（使用者 2026-09-19：「jev 提供端點，別給 key」）：`POST system-one?action=judge { contribution_id, url }`。
+伺服器自己抓那一頁（代理只能給網址、不能餵假文本）、同一套每欄一題、記 `jev_decisions(question=second_source, requester_ip_hash)`，
+回 verdict／counts／fields；拒收提交者附的同網域（那是系統票核過的）；每 IP 每 10 分鐘 60 次、全域 300 次。
+**這不是系統票**——票還是代理投的，`evidence_url` 放那個網址；判定紀錄讓對帳看得到票背後的第二來源。
+參考實作 `scripts/agent/relay_jev_verify.py`：不帶任何金鑰，/next → 搜尋（DuckDuckGo lite）→ judge → 投票；
+真的小模型只需要決定搜尋關鍵字。紅線：不能拿 Jev 對「提交的那一頁」的判定當代理票。
+
+管線：cron 每 10 分 → `system-one?action=precheck` → 撿 pending 且沒判過的 → 抓第一個 source_url（帶瀏覽器 UA）→ Jev → 寫
 `jev_decisions(contribution, source_support)` → 重算共識。抓不到正文的一樣留一列（cannot_tell、機率 0、model `policy-tw/fetch-only-*`），
 對帳時才分得出「來源抓不到」與「Jev 看不出來」。
 

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
+import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -14,6 +15,10 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
  *                                                        改用成本上限守：10 分鐘內已問滿 limit 就不再問。
  *   ?action=precheck POST                                系統來源票：撿 pending 且還沒判過的貢獻，抓提交的來源、問 Jev
  *                                                        支不支持宣稱，寫 jev_decisions 後重算共識。守法同 backfill。
+ *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
+ *                                                        伺服器自己抓那一頁（代理只能給網址、不能餵假文本），每欄一題判定，
+ *                                                        記 jev_decisions(question=second_source) 並回每欄結果。不是系統票。
+ *                                                        公開、按來源 IP 配額：每 IP 每 10 分鐘 60 次、全域 300 次。
  *
  * 系統來源票（2026-09-19 使用者裁決，4 票變 3+1）：Jev 核「提交者附的那個來源」，supported ≥門檻讓代理門檻 −1
  * （最少仍要 1 張代理票）、not_supported 算一張反對、其餘棄權。計票在 SQL 的 contribution_apply_consensus。
@@ -237,6 +242,76 @@ Deno.serve(async (req) => {
         if (failures.length >= 5) break;
       }
       return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY });
+    }
+
+    // ---- judge：代理的第二來源判定。公開，按來源 IP 配額 ----
+    if (action === "judge") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const contributionId = typeof body.contribution_id === "string" ? body.contribution_id.trim() : "";
+      const targetUrl = typeof body.url === "string" ? body.url.trim() : "";
+      if (!/^[0-9a-f-]{36}$/i.test(contributionId)) return json({ success: false, error: "contribution_id 必填（uuid）" }, 400);
+      if (!/^https?:\/\/\S+$/.test(targetUrl)) return json({ success: false, error: "url 必填（http(s) 網址）" }, 400);
+      const requester = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+
+      // 配額：每 IP 每 10 分鐘 JUDGE_PER_IP 次、全域 BACKFILL_MAX 次。不帶金鑰的端點只能這樣守
+      const JUDGE_PER_IP = 60;
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const [{ count: mine }, { count: all }] = await Promise.all([
+        supabase.from("jev_decisions").select("id", { count: "exact", head: true }).eq("question", "second_source").eq("requester_ip_hash", requester).gte("asked_at", since),
+        supabase.from("jev_decisions").select("id", { count: "exact", head: true }).eq("question", "second_source").gte("asked_at", since),
+      ]);
+      if ((mine ?? 0) >= JUDGE_PER_IP || (all ?? 0) >= BACKFILL_MAX) {
+        return json({ success: false, error: "rate_limited", message: `${BACKFILL_WINDOW_MINUTES} 分鐘內判定次數已滿，稍後再試` }, 429);
+      }
+
+      const { data: c, error: cErr } = await supabase.from("contributions")
+        .select("id, contribution_type, payload, source_urls, status").eq("id", contributionId).maybeSingle();
+      if (cErr) throw new Error(`contributions read: ${cErr.message}`);
+      if (!c) return json({ success: false, error: "not_found", message: "找不到這筆貢獻" }, 404);
+      if (!["policy", "candidacy", "politician", "correction", "policy_progress"].includes(c.contribution_type)) {
+        return json({ success: false, error: "not_eligible", message: "這種型別沒有來源可核" }, 400);
+      }
+      // 第二來源必須是另一個網域：拿提交的那一頁來問，等於系統票再投一次
+      const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
+      const submitted = new Set((c.source_urls ?? []).map(hostOf));
+      if (submitted.has(hostOf(targetUrl))) {
+        return json({ success: false, error: "same_source", message: "這是提交者附的來源網域，系統票已經核過；請找另一個獨立來源" }, 400);
+      }
+
+      const payload = { ...(c.payload ?? {}) } as Record<string, unknown>;
+      if (c.contribution_type === "correction") {
+        const table = payload.target_table, id = payload.target_id;
+        const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
+        if (col && typeof table === "string" && typeof id === "string") {
+          const { data: subj } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
+          if (subj && typeof subj[col] === "string") payload.subject_name = subj[col];
+        }
+      }
+      const claim = claimOf(c.contribution_type, payload);
+      const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((x) => typeof x === "string" ? x : null);
+      const page = await fetchSource(targetUrl);
+      if (page.kind !== "html" || page.text.length < 200) {
+        return json({ success: false, error: "fetch_failed", message: `抓不到正文（${page.note}）；試試 archive.org 的存檔網址或另一個來源` }, 422);
+      }
+      const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
+      const res = await askJev(apiKey, state, questions);
+      const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+      await insertRecords(supabase, [{
+        subject_type: "contribution", subject_id: c.id, question: "second_source",
+        choice: agg.choice, probability: agg.probability, confidence: null,
+        probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state,
+        cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
+      }]);
+      return json({
+        success: true, contribution_id: c.id, url: targetUrl,
+        verdict: agg.choice, probability: agg.probability, counts: agg.probability >= MIN_PROBABILITY, fields: agg.fields,
+        min_probability: MIN_PROBABILITY,
+        hint: agg.choice === "supported" && agg.probability >= MIN_PROBABILITY
+          ? "這一頁足以證實：投 agree 時把這個網址放 evidence_url"
+          : agg.choice === "not_supported" ? "這一頁與宣稱矛盾：投 disagree 並把這個網址放 evidence_url、note 寫哪一欄不對"
+          : "這一頁證明不了關鍵欄位：換一個來源，或投 unsure 並說明找過哪裡",
+      });
     }
 
     // ---- record：外部批次腳本寫入 ----
