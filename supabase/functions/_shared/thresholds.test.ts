@@ -38,6 +38,11 @@ Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與�
   assertEquals(requiredAgree("candidacy", { candidate_status: "withdrawn" }, [SOCIAL]), 8);
   assertEquals(requiredAgree("candidacy", {}, [OTHER]), 8);
   assertEquals(requiredAgree("correction", { field: "candidate_status" }, [MEDIA]), 6);
+  // 2026-09-20：傳聞參選改成登記／不參選是一般級（2 票），登記→不參選才是加減參選人
+  assertEquals(requiredAgree("correction", { changes: [{ field: "candidate_status", current_value: "rumored", correct_value: "registered" }] }, [OFFICIAL]), 2);
+  assertEquals(requiredAgree("correction", { changes: [{ field: "candidate_status", current_value: "likely", correct_value: "not_running" }] }, [MEDIA]), 2);
+  assertEquals(requiredAgree("correction", { changes: [{ field: "candidate_status", current_value: "registered", correct_value: "not_running" }] }, [OFFICIAL]), 4);
+  assertEquals(requiredAgree("correction", { changes: [{ field: "candidate_status", current_value: "rumored", correct_value: "registered" }, { field: "candidate_status", current_value: "confirmed", correct_value: "not_running" }] }, [OFFICIAL]), 4, "混著一筆真的加減就走高風險");
   assertEquals(requiredAgree("correction", { field: "birth_year" }, [MEDIA]), 2, "一般欄位是一般資料");
   const need = requiredAgree("candidacy", {}, [MEDIA]);
   assertEquals(consensusStatus(tally(Array.from({ length: 6 }, () => ({ verdict: "agree" as const }))), "pending", need), "verified");
@@ -97,6 +102,7 @@ Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority
   // 風險分級的判斷式也要對得上
   assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
   assert(matrix.includes("WHEN p_type = 'merge_politician' THEN 'high'"), "SQL 也要把同名合併算成 high 級");
+  assert(matrix.includes("correction_only_from_rumor(p_payload)"), "SQL 也要把「傳聞→登記／不參選」算成一般級");
   assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
   // roster_check 是 000029 加進 light 的；原本這裡寫死舊字串，指到最新 migration 後才露出來
   assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change', 'roster_check') THEN 'light'"));
