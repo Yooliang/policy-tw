@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     // 拿到不該由你處理的任務時，帶 skip=<task_id> 再打一次：釋放認領期並改派別的。
     // 沒有這個出口的話，30 分鐘的軟認領會讓主流程一直卡在同一筆（外部代理實測踩到）。
     const skipTaskId = url.searchParams.get("skip")?.trim() || null;
-    // diturst:<序號> 在開放前要被擋並講清楚，不能當一般代號收進去（docs/BLUEPRINT-agent-identity.md §3）
+    // ditrust:<序號> 在開放前要被擋並講清楚，不能當一般代號收進去（docs/BLUEPRINT-agent-identity.md §3）
     const nameProblem = agentNameProblem(agentName);
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
     const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);

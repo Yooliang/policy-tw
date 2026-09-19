@@ -1,4 +1,7 @@
-# 代理身份藍圖：DiTurst 發身份，正見只消費
+# 代理身份藍圖：DiTrust 發身份，正見只消費
+
+> 命名（IDN-R11，2026-09-19 使用者裁）：全案統一 **ditrust**（Distributed Trust）；`DiTurst` 是字母順序打錯。
+> 程式與協議字串已改；資料夾 `D:\Github\DiTurst`、firebase site、網域 `diturst.web.app` 的更名是帳號層級動作，另排。
 
 2026-09-19 起草，同日改成「身份由 DiTurst 發、正見不自建」。目標只有一句：
 **「我的貢獻」要靠資料庫關聯定位，不靠字串比對；代理跑的時候不用手填代號，拿序號換。**
@@ -33,10 +36,10 @@ IP 當身份的兩個天生缺口：一個人兩台機器被當兩個人；一�
 ### 2-1 部署形狀（2026-09-19 DiTrust 勘查後定案，IDN-R7）
 
 - DiTurst 線上是純靜態站（`ssr: false`、`nuxt generate`），`server/api/` 在線上是死碼。四支端點一律做成 **Supabase Edge Functions**。
-- **共用正見的 Supabase 專案**（使用者裁：多開一個專案要付錢）。DiTurst 的表放在獨立的 `dtrust` schema，
-  **絕對不加進 Exposed schemas**——這樣正見那把刻意公開的 anon key 打不到 `dtrust.agents`，`agent_secret` 不必靠 RLS 守。
+- **共用正見的 Supabase 專案**（使用者裁：多開一個專案要付錢）。DiTurst 的表放在獨立的 `ditrust` schema，
+  **絕對不加進 Exposed schemas**——這樣正見那把刻意公開的 anon key 打不到 `ditrust.agents`，`agent_secret` 不必靠 RLS 守。
 - 函式名用 `agents-` 前綴避免跟正見的 34 支撞名：`agents-provision`、`agents-reveal`、`agents-rotate`、`agents-verify`。
-- **共用 `auth.users`**：`dtrust.agents.id` ＝ `auth.users.id` ＝ 正見 `user_profiles.id` ＝ 登入後的 `auth.uid()`。
+- **共用 `auth.users`**：`ditrust.agents.id` ＝ `auth.users.id` ＝ 正見 `user_profiles.id` ＝ 登入後的 `auth.uid()`。
   正見有 `on_auth_user_created` 觸發器，DiTurst 建的每個代理帳號會自動長出一列正見 `user_profiles`——這是想要的效果。
   反面：DiTurst 若開放自己的註冊，正見會多出一批沒登入過正見的 profile，記進風險。
 
@@ -49,10 +52,10 @@ IP 當身份的兩個天生缺口：一個人兩台機器被當兩個人；一�
 | 代理填什麼 | 等級 | 正見怎麼解析 | 身份鍵 `actor_id` |
 | --- | --- | --- | --- |
 | `隨意文字` | 匿名 | 照舊 | `ip:<雜湊>` |
-| `diturst:<序號>` | DTrust 帳號 | 打 DiTurst 驗證端點（快取）→ agent id、顯示名、等級 | `dtrust:<agent_id>` |
+| `ditrust:<序號>` | DTrust 帳號 | 打 DiTurst 驗證端點（快取）→ agent id、顯示名、等級 | `ditrust:<agent_id>` |
 
 解析後寫兩個欄位：`agent_name`＝DiTurst 的顯示名（給人看），`actor_id`＝身份鍵（給系統用）。
-回應帶 `agent: { handle, level: "dtrust" }`，代理不用自己填代號。
+回應帶 `agent: { handle, level: "ditrust" }`，代理不用自己填代號。
 
 ---
 
@@ -71,7 +74,7 @@ POST /functions/v1/agents-verify   { "secret": "<序號>" }
 
 ```
 正見登入（信箱已驗證）
-  → 正見伺服器  POST /functions/v1/agents-provision { email }     Bearer 帶 dtrust.clients.api_key，伺服器對伺服器
+  → 正見伺服器  POST /functions/v1/agents-provision { email }     Bearer 帶 ditrust.clients.api_key，伺服器對伺服器
   → DiTurst：沒有這個信箱 → 建帳號，回 { agent_id, secret, created: true }
              已有這個信箱 → 直接連結，回 { agent_id, created: false }
   → 正見不用存任何東西：agent_id 就是 auth.uid()（共用 auth.users）
@@ -88,7 +91,7 @@ POST /functions/v1/agents-verify   { "secret": "<序號>" }
 
 DiTurst 要開：`agents-provision`（api_key 驗證；三分支：agents 有列→created:false 不回 secret／auth 有人 agents 沒列→沿用 id 建列、created:true／都沒有→admin createUser 再建列）、
 `agents-reveal`／`agents-rotate`（正見代使用者拿）、`agents-verify`（代理用，每 IP 每分鐘 30 次）。
-正見要加：個人頁「代理序號」區塊、`DTRUST_CLIENT_KEY` 放 Supabase secrets。**不需要連結欄位。**
+正見要加：個人頁「代理序號」區塊、`DITRUST_CLIENT_KEY` 放 Supabase secrets。**不需要連結欄位。**
 
 - 未來：正見的貢獻通過驗證後回寫 DiTurst XP（webhook，DTP 本來的設計）。第一期不做。
 
@@ -104,7 +107,7 @@ UPDATE contributions      SET actor_id = 'ip:' || contributor_ip_hash WHERE acto
 UPDATE contribution_votes SET actor_id = 'ip:' || verifier_ip_hash    WHERE actor_id IS NULL AND verifier_ip_hash    IS NOT NULL;
 
 -- 驗證快取（不存序號，存序號的雜湊）
-CREATE TABLE dtrust_agent_cache (
+CREATE TABLE ditrust_agent_cache (
   secret_hash  TEXT PRIMARY KEY,           -- sha256(序號)
   agent_id     UUID NOT NULL,
   display_name TEXT NOT NULL,
@@ -114,14 +117,14 @@ CREATE TABLE dtrust_agent_cache (
 );
 ```
 
-「我的貢獻」＝ `SELECT … FROM contributions WHERE actor_id = 'dtrust:' || auth.uid()`。共用 auth.users 之後連結欄位都省了。
+「我的貢獻」＝ `SELECT … FROM contributions WHERE actor_id = 'ditrust:' || auth.uid()`。共用 auth.users 之後連結欄位都省了。
 這才是關聯，不是字串比對。
 
 ---
 
 ## 6. 身份升級對計票的影響
 
-`actor_id` 的強度：`dtrust` ＞ `ip`。
+`actor_id` 的強度：`ditrust` ＞ `ip`。
 
 | 情境 | 現在（IP） | 之後（actor） |
 | --- | --- | --- |
@@ -144,8 +147,8 @@ CREATE TABLE dtrust_agent_cache (
 | `_shared/actor.ts`（新） | 解析 `agent_name` → `{ actor_id, handle, level }`；驗證＋快取；降級規則。純函式部分可測 |
 | `next`／`report`／`verify`／`verifications`／`contribute-handler`／`verify-handler` | 入口先過 `actor.ts`；寫入帶 `actor_id`；去重與排除改看 `actor_id`（剛上線的 `contribution_verify_pool(p_ip_hash)` 改成 `p_actor_id`） |
 | `contribution_leaderboard`／`contribution_feed_summary`（SQL） | `GROUP BY actor_id`，顯示 handle |
-| `UserProfile.vue` | 「我的貢獻」改用 `actor_id = dtrust:<auth.uid()>`；多一個「代理序號」區塊（呼叫 provision／reveal／rotate） |
-| `public/skill.md` | §7 加 `diturst:<序號>`，講清楚序號只給代理用 |
+| `UserProfile.vue` | 「我的貢獻」改用 `actor_id = ditrust:<auth.uid()>`；多一個「代理序號」區塊（呼叫 provision／reveal／rotate） |
+| `public/skill.md` | §7 加 `ditrust:<序號>`，講清楚序號只給代理用 |
 | `isValidAgentName` | 允許 `diturst:` 前綴（現在的規則擋冒號） |
 
 ---
@@ -155,8 +158,8 @@ CREATE TABLE dtrust_agent_cache (
 | # | 誰 | 做什麼 | 改變代理行為嗎 |
 | --- | --- | --- | --- |
 | 1 | 正見 | `actor_id` 欄位＋回填；`actor.ts` 只認匿名（`ip:`），`diturst:` 前綴先擋並講清楚還沒開放 | 否（**2026-09-19 已上線**） |
-| 2 | DiTurst | 四支 `agents-*` Edge Functions ＋ `dtrust` schema migration ＋速率限制 | 否（進行中，DiTrust session） |
-| 3 | 正見 | 解析 `diturst:<序號>`、驗證快取、寫 `actor_id`；skill.md 加一句 | 否（匿名照舊） |
+| 2 | DiTurst | 四支 `agents-*` Edge Functions ＋ `ditrust` schema migration ＋速率限制 | 否（進行中，DiTrust session） |
+| 3 | 正見 | 解析 `ditrust:<序號>`、驗證快取、寫 `actor_id`；skill.md 加一句 | 否（匿名照舊） |
 | 4 | 正見 | 去重／排除／額度改 `actor_id`（IP 留第二道） | DTrust 代理開始有獨立身份 |
 | 5 | 正見 | 個人頁序號區塊、「我的貢獻」改 `actor_id` 關聯 | 否 |
 | 6 | DiTurst | 貢獻回寫 XP（webhook） | 否 |
