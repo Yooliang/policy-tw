@@ -485,6 +485,29 @@ async function applyRosterCheck(supabase: SupabaseLike, row: ContributionRow): P
  * 因為救得回來，門檻才敢訂 3 票而不是比照加減參選人的 4～8 票。
  * 每一次移除都寫 edit_history，所以 apply 的 revert 可以整筆倒回。
  */
+/**
+ * 同名人物（2026-09-19）：same_person=true → SQL merge_politician 軟合併；false → 記 politician_pair_resolutions 為 different，
+ * duplicate_politician 任務就不再派這一對。合併本身在 SQL 一個交易裡做完。
+ */
+async function applyMergePolitician(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const keep = str(p.keep_id), remove = str(p.remove_id);
+  if (!keep || !remove) return { status: "failed", message: "缺 keep_id／remove_id" };
+  if (p.same_person === false) {
+    const [a, b] = [keep, remove].sort();
+    const { error } = await supabase.from("politician_pair_resolutions").upsert({ pair_key: `${a}|${b}`, a, b, resolution: "different", contribution_id: row.id }, { onConflict: "pair_key" });
+    if (error) return { status: "failed", message: `pair_resolutions upsert: ${error.message}` };
+    return { status: "applied", message: `已記為不同人：${keep.slice(0, 8)} 與 ${remove.slice(0, 8)}，這一對不再派任務` };
+  }
+  const { data, error } = await supabase.rpc("merge_politician", { p_keep: keep, p_remove: remove, p_contribution: row.id, p_agent: row.agent_name });
+  if (error) return { status: "failed", message: `merge_politician: ${error.message}` };
+  const r = (data ?? {}) as { moved_policies?: number; moved_elections?: number; filled?: string[] };
+  return {
+    status: "applied", politician_id: keep, created_politician: false,
+    message: `已合併：${remove.slice(0, 8)} 併入 ${keep.slice(0, 8)}（搬 ${r.moved_policies ?? 0} 筆政見、${r.moved_elections ?? 0} 筆參選${(r.filled ?? []).length ? `，補上 ${(r.filled ?? []).join("、")}` : ""}）`,
+  };
+}
+
 async function applyRemoval(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -702,6 +725,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "task_suggestion": return await applyTaskSuggestion(supabase, row);
     case "question_answer": return await applyQuestionAnswer(supabase, row);
     case "removal": return await applyRemoval(supabase, row);
+    case "merge_politician": return await applyMergePolitician(supabase, row);
     case "roster_check": return await applyRosterCheck(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }

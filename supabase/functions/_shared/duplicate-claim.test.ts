@@ -104,3 +104,13 @@ Deno.test("candidacy：帶選舉結果的跟沒帶的不是同一個宣稱；結
   assertEquals(won, won2, "得票數差一票仍是同一個宣稱（結果相同）");
   assertEquals(won === lost, false);
 });
+
+Deno.test("merge_politician：同一對（順序無關）＋同結論才是同一個宣稱", () => {
+  const A = "00000000-0000-4000-8000-000000000001", B = "00000000-0000-4000-8000-000000000002";
+  const k1 = claimKey("merge_politician", { keep_id: A, remove_id: B, same_person: true });
+  const k2 = claimKey("merge_politician", { keep_id: B, remove_id: A, same_person: true });
+  const k3 = claimKey("merge_politician", { keep_id: A, remove_id: B, same_person: false });
+  assertEquals(k1 === k2, false, "keep 不同就不是同一個宣稱（誰被留下來是結論的一部分）");
+  assertEquals(k1 === k3, false);
+  assertEquals(claimKey("merge_politician", { keep_id: A, remove_id: B, same_person: true }), k1);
+});

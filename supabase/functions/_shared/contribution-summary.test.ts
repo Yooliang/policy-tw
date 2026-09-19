@@ -131,6 +131,7 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     question_answer: { question_id: "00000000-0000-4000-8000-000000000003", answer: "依市府預算書，這條路線的第一期經費已編列。" },
     removal: { target_table: "policies", target_id: "00000000-0000-4000-8000-000000000001", reason: "這是參選表態不是政見，也沒有任何來源。" },
     roster_check: { election_id: 2026, region: "彰化縣", election_type: "縣市議員", cec_count: 41, ours_count: 6, submitted: 35, note: "打開中選會候選人查詢，彰化縣縣市議員共 41 人，我們只有 6 人，另外 35 位已逐筆用 candidacy 補交。" },
+    merge_politician: { keep_id: "00000000-0000-4000-8000-000000000001", remove_id: "00000000-0000-4000-8000-000000000002", same_person: true, reason: "中選會歷屆參選同一筆：2022 朴子市長與 2026 縣長登記是同一位，出生年相同。" },
   };
 
   for (const type of CONTRIBUTION_TYPES) {
@@ -311,4 +312,10 @@ Deno.test("最新的統計函式：排除名單跟 TS 一致、有貢獻者總�
 Deno.test("candidacy 帶選舉結果：摘要講結果不講狀態", () => {
   const r = summarizeContribution({ contribution_type: "candidacy", payload: { name: "張嘉哲", election_id: 2022, region: "南投縣", election_type: "鄉鎮市長", candidate_status: "confirmed", election_result: "elected", votes_received: 29150, vote_percentage: 53.7 } });
   assertEquals(r.summary, "補 張嘉哲 2022 南投縣鄉鎮市長選舉結果：當選（29,150 票，53.7%）");
+});
+
+Deno.test("merge_politician 摘要：合併或不同人", () => {
+  const A = "00000000-0000-4000-8000-000000000001", B = "00000000-0000-4000-8000-000000000002";
+  assertEquals(summarizeContribution({ contribution_type: "merge_politician", payload: { keep_id: A, remove_id: B, same_person: true, reason: "中選會歷屆參選同一筆，出生年相同" } }).summary, "合併同名人物：00000000 併入 00000000：中選會歷屆參選同一筆，出生年相同");
+  assertEquals(summarizeContribution({ contribution_type: "merge_politician", payload: { keep_id: A, remove_id: B, same_person: false, reason: "一位是金門縣議員一位是連江縣議員，出生年不同" } }).summary.startsWith("判定人物"), true);
 });

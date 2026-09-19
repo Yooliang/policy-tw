@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -183,7 +183,45 @@ Deno.serve(async (req) => {
         const row = data as Record<string, unknown> | null;
         return row && typeof row[col] === "string" ? row[col] as string : null;
       };
+      /** merge_politician：來源是那兩筆資料本身。問 Jev 同一人（配對已判過就直接用），映成這筆貢獻的 source_support */
+      const onePair = async (c: Cand): Promise<void> => {
+        const keep = String(c.payload.keep_id ?? ""), remove = String(c.payload.remove_id ?? "");
+        const pairKey = [keep, remove].sort().join("|");
+        const { data: prior } = await supabase.from("jev_decisions").select("choice, probability, model, state")
+          .eq("subject_type", "politician_pair").eq("subject_id", pairKey).eq("question", "same_person").gte("asked_at", new Date(Date.now() - 30 * 86400_000).toISOString())
+          .order("asked_at", { ascending: false }).limit(1).maybeSingle();
+        let choice: string, probability: number, model: string, state: Record<string, unknown>;
+        if (prior) {
+          choice = String(prior.choice); probability = Number(prior.probability); model = String(prior.model); state = (prior.state ?? {}) as Record<string, unknown>;
+        } else {
+          const [pa, pb, ea, eb] = await Promise.all([
+            supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", keep).maybeSingle(),
+            supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", remove).maybeSingle(),
+            supabase.from("politician_elections").select("election_id, election_type, candidate_status").eq("politician_id", keep).limit(20),
+            supabase.from("politician_elections").select("election_id, election_type, candidate_status").eq("politician_id", remove).limit(20),
+          ]);
+          if (!pa.data || !pb.data) { tally["fetch:noperson"] = (tally["fetch:noperson"] ?? 0) + 1; return; }
+          const el = (rows: unknown[] | null) => (rows ?? []).map((e) => { const r = e as Record<string, unknown>; return `${r.election_id} ${r.election_type ?? ""} ${r.candidate_status ?? ""}`; });
+          const { state: st, questions } = buildPairAsk({ ...(pa.data as Record<string, unknown>), elections: el(ea.data) } as never, { ...(pb.data as Record<string, unknown>), elections: el(eb.data) } as never);
+          const res = await askJev(apiKey, st, questions);
+          cost += res.usage.cost; asked++;
+          const ans = res.answers.same_person;
+          choice = ans.choice; probability = Number((ans.probabilities?.[ans.choice] ?? 0).toFixed(4)); model = res.model; state = st;
+          await insertRecords(supabase, [{ subject_type: "politician_pair", subject_id: pairKey, question: "same_person", choice, probability, confidence: null, probabilities: ans.probabilities ?? null, model, state, cost_usd: Number(res.usage.cost.toFixed(8)) }]);
+        }
+        // 配對判定 → 這筆貢獻的系統票：代理說同一人而 Jev 說 same → supported；相反 → not_supported；unclear → cannot_tell
+        const agentSays = c.payload.same_person === false ? "diff" : "same";
+        const mapped = choice === "unclear" ? "cannot_tell" : choice === agentSays ? "supported" : "not_supported";
+        await insertRecords(supabase, [{
+          subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
+          choice: mapped, probability, confidence: null, probabilities: { same_person: { verdict: choice, p: probability } } as unknown as Record<string, number>,
+          model, state: { claim: { keep_id: keep, remove_id: remove, same_person: agentSays === "same" }, pair: state }, cost_usd: 0,
+        }]);
+        const key = `${mapped}${probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
+        tally[key] = (tally[key] ?? 0) + 1;
+      };
       const one = async (c: Cand): Promise<void> => {
+        if (c.contribution_type === "merge_politician") return await onePair(c);
         const payload = { ...(c.payload ?? {}) };
         if (c.contribution_type === "correction") {
           const subject = await subjectNameOf(payload);

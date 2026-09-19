@@ -201,3 +201,12 @@ Deno.test("candidacy：election_result／votes_received／vote_percentage 選填
   const bad = validateContributionRequest({ ...validCandidacy, payload: { ...validCandidacy.payload, election_result: "won", votes_received: -3, vote_percentage: 101 } });
   assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.election_result", "payload.vote_percentage", "payload.votes_received"]);
 });
+
+// 2026-09-19 同名人物流程：吳品叡（嘉義縣，1986）有兩筆
+Deno.test("merge_politician：keep／remove 都要 uuid 且不同、same_person 是布林、reason ≥20 字", () => {
+  const base = { agent_name: "tester", contribution_type: "merge_politician", task_id: "auto:duplicate_politician:00000000-0000-4000-8000-000000000001|00000000-0000-4000-8000-000000000002", source_urls: ["https://db.cec.gov.tw/x"] };
+  const ok = validateContributionRequest({ ...base, payload: { keep_id: "00000000-0000-4000-8000-000000000001", remove_id: "00000000-0000-4000-8000-000000000002", same_person: true, reason: "中選會歷屆參選同一筆：2022 朴子市長與 2026 縣長登記都是同一位，出生年相同" } });
+  assertEquals(ok.errors, []);
+  const bad = validateContributionRequest({ ...base, payload: { keep_id: "00000000-0000-4000-8000-000000000001", remove_id: "00000000-0000-4000-8000-000000000001", same_person: "yes", reason: "短" } });
+  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.reason", "payload.remove_id", "payload.same_person"]);
+});

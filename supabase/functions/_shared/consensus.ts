@@ -60,6 +60,8 @@ export function isPastElectionResult(contributionType: string, payload: unknown)
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "removal") return "removal";
+  // 同名人物合併跟移除同級：3 票、不看來源（2026-09-19）
+  if (contributionType === "merge_politician") return "removal";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
@@ -99,7 +101,7 @@ export const BLIND_DISAGREE_NOTE = "（系統改記 unsure：反對票要有反�
 // 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
 // not_supported 讓門檻 +1（只擋自動上線，**不觸發裁決**——同日晚上改：它判錯過一次就把 4 張人票推進裁決）；
 // 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress"] as const;
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "merge_politician"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {

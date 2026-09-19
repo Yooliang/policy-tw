@@ -26,7 +26,7 @@
 type Obj = Record<string, unknown>;
 
 /** 只有這些型別會被判為「同一個宣稱」；其餘一律各自成案 */
-export const DUPLICATE_ELIGIBLE_TYPES = ["candidacy", "correction", "removal", "policy_progress", "no_change"] as const;
+export const DUPLICATE_ELIGIBLE_TYPES = ["candidacy", "correction", "removal", "policy_progress", "no_change", "merge_politician"] as const;
 
 /** 宣稱指向的對象：查資料庫時用這個欄位過濾（payload->>field） */
 const TARGET_FIELD: Record<string, string> = {
@@ -35,6 +35,7 @@ const TARGET_FIELD: Record<string, string> = {
   removal: "target_id",
   policy_progress: "policy_id",
   no_change: "task_id",
+  merge_politician: "keep_id",
 };
 
 /** 臺／台、全形空白、大小寫不算不同；值用同一套正規化再比 */
@@ -82,6 +83,11 @@ export function claimKey(contributionType: string, payload: unknown): string | n
       // 同一個人、同一屆、同一種選舉、同一個參選狀態、同一個選舉結果＝同一個宣稱
       // （帶結果的答案不能併進沒帶結果的那筆，否則結果會跟著被丟掉；2026-09-19）
       return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status)}|${norm(p.election_result)}`;
+    case "merge_politician": {
+      // 同一對人、同一個結論＝同一個宣稱（keep／remove 對調也算同一對）
+      const pair = [norm(p.keep_id), norm(p.remove_id)].sort().join("~");
+      return `${head}|${pair}|${norm(p.same_person)}`;
+    }
     case "correction":
       // 同一列、同一組「欄位→新值」＝同一個宣稱（理由寫得不一樣不影響）
       return `${head}|${norm(p.target_table)}|${correctionChanges(p)}`;

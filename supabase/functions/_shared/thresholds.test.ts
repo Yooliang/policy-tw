@@ -55,6 +55,7 @@ Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；
   assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
   assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 2, "有一個官方就算官方");
   assertEquals(riskLevel("policy_progress", {}), "normal");
+  assertEquals(riskLevel("merge_politician", { same_person: true }), "removal", "同名合併 3 票，不看來源");
   assertEquals(riskLevel("candidacy", {}), "high");
 });
 
@@ -95,6 +96,7 @@ Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority
   assert(new Set(Object.values(AGREE_THRESHOLDS.adjudication)).size === 1, "裁決不看來源");
   // 風險分級的判斷式也要對得上
   assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
+  assert(matrix.includes("WHEN p_type = 'merge_politician' THEN 'removal'"), "SQL 也要把同名合併算成 removal 級");
   assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
   // roster_check 是 000029 加進 light 的；原本這裡寫死舊字串，指到最新 migration 後才露出來
   assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change', 'roster_check') THEN 'light'"));

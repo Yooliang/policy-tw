@@ -85,7 +85,8 @@ async function loadFullDataset(): Promise<DataSnapshot> {
     () => fetchAllRows<RawPolitician>('politicians_with_elections', '*', 'id'),
     (r) => r.length > 0,
   )
-  const politicians = dedupeById(rows.map(mapPolitician))
+  // 已軟合併的人物不預渲染也不進清單：直接開舊網址會在客戶端載到 merged_into 再轉向
+  const politicians = dedupeById(rows.filter((r) => !r.merged_into).map(mapPolitician))
   if (politicians.length === 0) {
     throw new Error('[ssg] politicians_with_elections 回傳 0 筆，中止建置')
   }

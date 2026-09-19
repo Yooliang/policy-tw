@@ -7,10 +7,10 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -232,6 +232,16 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!oneOf(REMOVAL_TABLES, p.target_table)) push("payload.target_table", `目前只能移除 ${REMOVAL_TABLES.join("／")}`);
       if (!isUuid(p.target_id)) push("payload.target_id", "target_id 要是該筆資料的 uuid");
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（至少 20 字）：說清楚這筆為什麼不該存在，例如「這是參選表態不是政見」「查遍官方與媒體都沒有這個人」");
+      break;
+    }
+    case "merge_politician": {
+      // 同名人物：same_person=true → keep_id 保留、remove_id 併入（軟合併）；false → 記「不同人」，任務不再派。
+      // 兩種都要理由與來源（中選會候選人資料庫、官方簡介）；3 票＋系統票（Jev same_person）
+      if (!isUuid(p.keep_id)) push("payload.keep_id", "keep_id 必填（保留的那筆 uuid）");
+      if (!isUuid(p.remove_id)) push("payload.remove_id", "remove_id 必填（併入的那筆 uuid）");
+      if (isUuid(p.keep_id) && isUuid(p.remove_id) && p.keep_id === p.remove_id) push("payload.remove_id", "keep_id 與 remove_id 不能是同一筆");
+      if (typeof p.same_person !== "boolean") push("payload.same_person", "same_person 必填：true＝同一人（合併）、false＝不同人");
+      if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：查了哪裡、為什麼是／不是同一人）");
       break;
     }
     case "adjudication": {

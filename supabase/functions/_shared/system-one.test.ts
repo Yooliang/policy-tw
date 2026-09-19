@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -259,4 +259,11 @@ Deno.test("nameHit／normalizeName：間隔號、臺台、空白不算不同；�
   assertEquals(nameHit("新竹市第7選舉區 115/09/03 卡伊‧馬賴 民主進步黨", ["卡伊．馬賴"]), true);
   assertEquals(nameHit("115年縣市議員選舉候選人登記彙總表（索引頁，名單見附件）", ["卡伊．馬賴"]), false);
   assertEquals(nameHit("一段文字", [null, undefined, "王"]), false, "單字名不比");
+});
+
+Deno.test("buildPairAsk：一題 same／diff／unclear，state 帶兩筆", () => {
+  const { state, questions } = buildPairAsk({ id: "a", name: "吳品叡", region: "嘉義縣", birth_year: 1986, party: "無黨籍" }, { id: "b", name: "吳品叡", region: "嘉義縣", birth_year: 1986, party: "無黨籍及未經政黨推薦" });
+  assertEquals(Object.keys(questions), ["same_person"]);
+  assertEquals(Object.keys(questions.same_person.criteria), ["same", "diff", "unclear"]);
+  assertEquals((state.a as { name: string }).name, "吳品叡");
 });

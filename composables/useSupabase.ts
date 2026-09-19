@@ -124,6 +124,7 @@ export function mapPolitician(row: RawPolitician): Politician {
 
   return {
     id: row.id,
+    mergedInto: row.merged_into || undefined,
     name: row.name,
     party: row.party,
     status: row.status,
