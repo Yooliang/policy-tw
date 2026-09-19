@@ -92,3 +92,15 @@ Deno.test("findMergeTarget：同代號或同 IP 一律不算，最早那筆優�
   assertEquals(findMergeTarget(incoming, me, [mk({ payload: { target_id: "different" } })]), null);
   assertEquals(findMergeTarget({ contribution_type: "policy", payload: { title: "x" } }, me, [mk({ contribution_type: "policy" })]), null, "自由文字型別不合併");
 });
+
+// 2026-09-19：election_result_missing 的答案若併進只有狀態的舊提交，結果欄位就丟了
+Deno.test("candidacy：帶選舉結果的跟沒帶的不是同一個宣稱；結果相同才是", () => {
+  const p = { politician_id: P1, election_id: 2022, election_type: "鄉鎮市長", candidate_status: "confirmed", region: "南投縣" };
+  const plain = claimKey("candidacy", p);
+  const won = claimKey("candidacy", { ...p, election_result: "elected", votes_received: 29150 });
+  const won2 = claimKey("candidacy", { ...p, election_result: "elected", votes_received: 29151 });
+  const lost = claimKey("candidacy", { ...p, election_result: "not_elected" });
+  assertEquals(plain === won, false);
+  assertEquals(won, won2, "得票數差一票仍是同一個宣稱（結果相同）");
+  assertEquals(won === lost, false);
+});

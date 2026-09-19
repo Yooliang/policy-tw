@@ -31,6 +31,8 @@ export { POLICY_CATEGORIES } from "./category-map.ts";
 import { categoryErrorMessage, isCanonicalCategory, POLICY_CATEGORIES } from "./category-map.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
+export { ELECTION_RESULTS } from "./candidacy-result.ts";
+import { ELECTION_RESULTS as ELECTION_RESULTS_LIST } from "./candidacy-result.ts";
 export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies"] as const;
 
 /** correction 可改的欄位（其他欄位一律拒收，避免任意 UPDATE） */
@@ -185,6 +187,10 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       validateHints({ ...p, election_type: undefined }, push);
       if (p.position !== undefined && !isStr(p.position, 1, 100)) push("payload.position", "要是非空字串");
       if (p.cand_no !== undefined && !(isInt(p.cand_no) && p.cand_no > 0)) push("payload.cand_no", "號次要是正整數");
+      // election_result_missing 任務要補的三欄：選填，但給了就要對（2026-09-19 前這三欄沒驗也沒寫進去）
+      if (p.election_result !== undefined && !oneOf(ELECTION_RESULTS_LIST, p.election_result)) push("payload.election_result", "election_result 要是 elected／not_elected 之一");
+      if (p.votes_received !== undefined && !(isInt(p.votes_received) && p.votes_received >= 0)) push("payload.votes_received", "得票數要是非負整數");
+      if (p.vote_percentage !== undefined && !(typeof p.vote_percentage === "number" && p.vote_percentage >= 0 && p.vote_percentage <= 100)) push("payload.vote_percentage", "得票率要是 0～100 的數字");
       break;
     }
     case "policy": {

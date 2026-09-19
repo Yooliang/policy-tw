@@ -79,8 +79,9 @@ export function claimKey(contributionType: string, payload: unknown): string | n
 
   switch (contributionType) {
     case "candidacy":
-      // 同一個人、同一屆、同一種選舉、同一個參選狀態＝同一個宣稱
-      return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status)}`;
+      // 同一個人、同一屆、同一種選舉、同一個參選狀態、同一個選舉結果＝同一個宣稱
+      // （帶結果的答案不能併進沒帶結果的那筆，否則結果會跟著被丟掉；2026-09-19）
+      return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status)}|${norm(p.election_result)}`;
     case "correction":
       // 同一列、同一組「欄位→新值」＝同一個宣稱（理由寫得不一樣不影響）
       return `${head}|${norm(p.target_table)}|${correctionChanges(p)}`;
