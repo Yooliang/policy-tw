@@ -12,6 +12,7 @@
 import { CORRECTION_FIELDS, type ContributionType } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
+import { checkAvatarUrl } from "./avatar-check.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
@@ -144,8 +145,14 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
 }
 
 async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
-  const p = row.payload;
+  const p = { ...row.payload };
   const ctx = ctxOf(row);
+  // 照片形狀守門（2026-09-19）：橫幅、太小、不是圖的不套用，其他欄位照常；理由寫進回覆讓代理重找
+  let avatarNote = "";
+  if (typeof p.avatar_url === "string" && p.avatar_url) {
+    const problem = await checkAvatarUrl(p.avatar_url);
+    if (problem) { avatarNote = `；照片沒套用：${problem}`; p.avatar_url = null; }
+  }
   const ensured = await ensureOrResolve(supabase, row, {
     name: String(p.name),
     party: str(p.party),
@@ -169,7 +176,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) {
     await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
-    return { status: "applied", politician_id: ensured.politician_id, created_politician: true, message: "已建立新政治人物" };
+    return { status: "applied", politician_id: ensured.politician_id, created_politician: true, message: `已建立新政治人物${avatarNote}` };
   }
   const filled = await fillBlanks(supabase, ctx, ensured.politician_id, {
     birth_year: int(p.birth_year),
@@ -186,7 +193,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: false,
-    message: `已對到既有人物${filled.length ? `，補上 ${filled.join("、")}` : "（無空欄位可補）"}`,
+    message: `已對到既有人物${filled.length ? `，補上 ${filled.join("、")}` : "（無空欄位可補）"}${avatarNote}`,
   };
 }
 
@@ -381,6 +388,15 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
 
   const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(table, c.field, c.correct_value)]));
+  // 照片形狀守門（2026-09-19）：只改照片而照片不合格就退成爭議，理由帶回 fix_disputed 任務；連同別的欄位一起改就只跳過照片
+  let avatarNote = "";
+  if (table === "politicians" && typeof patch.avatar_url === "string" && patch.avatar_url) {
+    const problem = await checkAvatarUrl(patch.avatar_url);
+    if (problem) {
+      if (Object.keys(patch).length === 1) return { status: "disputed", message: `照片不能用：${problem}` };
+      delete patch.avatar_url; avatarNote = `；照片沒套用：${problem}`;
+    }
+  }
   const { error } = await supabase.from(table).update(patch).eq("id", target_id);
   throwIf(error, `${table} correction update`);
   const applied: string[] = [];
