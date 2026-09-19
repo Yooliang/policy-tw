@@ -5,6 +5,7 @@
  */
 
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
+import { resolveActor } from "./actor.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
@@ -76,6 +77,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       agent_name: input.agent_name,
       agent_tool: input.agent_tool ?? null,
       verifier_ip_hash: ipHash,
+      // 身份鍵，同 contributions.actor_id
+      actor_id: resolveActor(input.agent_name, ipHash).actor_id,
       resolved_politician_id: input.resolved_politician_id ?? null,
     })
     .select("id")
