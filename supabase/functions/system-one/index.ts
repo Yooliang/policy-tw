@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -161,8 +161,11 @@ Deno.serve(async (req) => {
       // 一輪可能有 200 筆，序列抓網頁會撞到 edge function 的執行上限：改成一次 5 筆並行，
       // 並給 50 秒時間預算，到了就收工回報——沒做完的下一輪 cron 會再撿（候選查詢是冪等的）
       const startedAt = Date.now();
-      const BUDGET_MS = 50_000;
-      const CONCURRENCY = 5;
+      // 2026-09-19 手動打 limit=100 撞到 WORKER_RESOURCE_LIMIT（546）：每筆最多抓三個來源＋PDF 抽字，
+      // 5 筆並行等於同時 15 個抓取加 pdf.js，edge runtime 的記憶體撐不住。降到 2 筆並行、40 秒預算，
+      // 一輪做不完由下一輪 cron 接（候選查詢冪等）；cron 的 limit 也從 200 降到 60。
+      const BUDGET_MS = 40_000;
+      const CONCURRENCY = 2;
       /** 更正沒帶對象名稱，頁面無從對起：用 target_table／target_id 把人物名或政見標題查出來 */
       const subjectNameOf = async (payload: Record<string, unknown>): Promise<string | null> => {
         const table = payload.target_table, id = payload.target_id;
@@ -173,28 +176,34 @@ Deno.serve(async (req) => {
         return data && typeof data[col] === "string" ? data[col] : null;
       };
       const one = async (c: Cand): Promise<void> => {
-        const srcUrl = c.source_urls[0];
-        const page = await fetchSource(srcUrl);
         const payload = { ...(c.payload ?? {}) };
         if (c.contribution_type === "correction") {
           const subject = await subjectNameOf(payload);
           if (subject) payload.subject_name = subject;
         }
         const claim = claimOf(c.contribution_type, payload);
+        const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
+        // 最多看三個來源：第一個常常只是中選會的附件索引頁，名單在 PDF 或後面的來源裡
+        const urls = c.source_urls.slice(0, 3);
+        const fetched = await Promise.all(urls.map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
+        const usable = fetched.filter((p) => p.kind === "html" && p.text.length >= 200);
+        const combined = combineSources(usable, names);
+        const srcUrl = urls[0];
         let rows: DecisionRecord[];
         let key: string;
-        if (page.kind !== "html" || page.text.length < 200) {
-          // 抓不到正文就棄權（cannot_tell、機率 0），但一樣留紀錄：候選查詢靠這列知道「判過了」，
+        if (!combined || combined.length < 200) {
+          // 全部抓不到正文就棄權（cannot_tell、機率 0），但一樣留紀錄：候選查詢靠這列知道「判過了」，
           // 而且對帳時分得出「來源抓不到」跟「Jev 看不出來」是兩回事
+          const notes = fetched.map((p) => `${p.kind}:${p.note}`).join(" | ");
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
             choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
-            model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: srcUrl, text: "", fetch: page.kind, note: page.note } }, cost_usd: 0,
+            model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: srcUrl, urls, text: "", fetch: fetched[0]?.kind ?? "error", note: notes } }, cost_usd: 0,
           }];
-          key = `fetch:${page.kind}`;
+          key = `fetch:${fetched[0]?.kind ?? "error"}`;
         } else {
-          const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
-          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, focusText(page.text, names));
+          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
+          (state.page as Record<string, unknown>).urls = urls;
           const res = await askJev(apiKey, state, questions);
           cost += res.usage.cost;
           // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
