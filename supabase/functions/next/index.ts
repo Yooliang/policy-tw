@@ -67,18 +67,13 @@ Deno.serve(async (req) => {
       if (skipErr) throw new Error(`skip record: ${skipErr.message}`);
     }
 
-    // 待驗證池（最早的一批）＋我今天做了多少
-    let pendingQuery = supabase
-      .from("contributions")
-      .select("id, contribution_type, payload, source_urls, note, task_id, agent_name, agent_tool, contributor_ip_hash, agree_count, disagree_count, unsure_count, status, created_at")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(CANDIDATE_POOL);
-    if (region) pendingQuery = pendingQuery.eq("payload->>region", region);
+    // 待驗證池：在 SQL 裡就排掉這台機器提交的、投過的、已達門檻的，撈出來的就是真的能投的最早 N 筆。
+    // 原本先取最早 30 筆再在這裡排，機器投完那 30 筆就整池是死的，第 31 筆之後永遠看不到（2026-09-19）。
+    // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL });
 
-    const [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRes, skipsRes] = await Promise.all([
+    const [pendingRes, myVotesRes, myContribRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       pendingQuery,
-      supabase.from("contribution_votes").select("contribution_id").eq("agent_name", agentName),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
@@ -98,13 +93,14 @@ Deno.serve(async (req) => {
       fetchAllRows<{ payload: Record<string, unknown> }>("no_change reports", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "no_change")
           .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)),
-      // 這個代理投過票的貢獻（同代號或同來源 IP）。裁決要排掉這些：
-      // 對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
+      // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
+      // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
+      // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
       // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
       // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
       fetchAllRows<{ contribution_id: string }>("my votes", (from, to) =>
         supabase.from("contribution_votes").select("contribution_id")
-          .or(`agent_name.eq.${agentName},verifier_ip_hash.eq.${ipHash}`)
+          .eq("verifier_ip_hash", ipHash)
           .order("created_at", { ascending: true }).range(from, to)),
       // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
       // 所以這裡要按 ip_hash 數，按 agent_name 數會給出偏低的用量、讓代理以為還有很多。
@@ -112,15 +108,18 @@ Deno.serve(async (req) => {
         .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true })
         .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
-      // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住
-      supabase.from("contributions").select("task_id").eq("contribution_type", "question_answer")
-        .or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
-        .in("status", ["pending", "verified", "applied"]).not("task_id", "is", null).limit(500),
+      // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住。
+      // 含 applied 表示這份只會成長、不會退場，跟「my votes」同一類，要翻頁撈（2026-09-19）
+      fetchAllRows<{ task_id: string }>("my answered questions", (from, to) =>
+        supabase.from("contributions").select("task_id").eq("contribution_type", "question_answer")
+          .or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
+          .in("status", ["pending", "verified", "applied"]).not("task_id", "is", null)
+          .order("created_at", { ascending: true }).range(from, to)),
       // 這個來源 IP 最近按過 skip 的任務
       supabase.from("contribution_task_skips").select("task_id").eq("ip_hash", ipHash)
         .gte("skipped_at", new Date(Date.now() - SKIP_MEMORY_HOURS * 3600 * 1000).toISOString()).limit(1000),
     ]);
-    for (const r of [pendingRes, votedRes, myVotesRes, myContribRes, countsRes, manualRes, ipContribRes, ipVoteRes, myAnswersRes, skipsRes]) {
+    for (const r of [pendingRes, myVotesRes, myContribRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
@@ -129,7 +128,7 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     const pendingAdjudicated = new Set<string>((adjRows as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
-    const mySubmittedTaskIds = new Set<string>([...(mySubmittedRows as any[]), ...((myAnswersRes.data ?? []) as any[])]
+    const mySubmittedTaskIds = new Set<string>([...(mySubmittedRows as any[]), ...(myAnswersRows as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派。
@@ -158,8 +157,7 @@ Deno.serve(async (req) => {
       status: string; created_at: string;
     };
     // deno-lint-ignore no-explicit-any
-    const votedIds = new Set<string>(((votedRes.data ?? []) as any[]).map((v) => v.contribution_id));
-    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: votedIds };
+    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
     const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
     // 裁決的驗證不派給原貢獻的提交者
     const adjOriginalIds = rawCandidates.filter((c) => c.contribution_type === "adjudication")
@@ -272,6 +270,7 @@ Deno.serve(async (req) => {
 
     // task：先清過期認領、讀未過期的（別人領走的目標 30 分鐘內不派）
     await supabase.rpc("contribution_task_leases_purge");
+    // query-bounds: ok — 只有未過期的認領（LEASE_MINUTES=30 分鐘），上面剛 purge 過，同時在跑的代理是個位數
     const { data: leaseRows, error: leaseError } = await supabase.from("contribution_task_leases").select("task_id, target_key, agent_name, leased_until").gt("leased_until", new Date().toISOString());
     if (leaseError) throw new Error(`leases read: ${leaseError.message}`);
     let leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; agent_name: string; leased_until: string }>;

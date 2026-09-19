@@ -23,10 +23,17 @@ Deno.test("不能驗自己提交的：agent_name 或 ip_hash 任一相同就擋"
   assert(!isSelfVote(c, { agent_name: "someone", ip_hash: "ip-B" }), "不同名不同機才可以");
 });
 
-Deno.test("同一筆同一 agent_name 重投被擋；同機不同名不算重投", () => {
+Deno.test("舊票（沒記 IP 雜湊）退回比代號：同名重投被擋、不同名不算", () => {
   const existing = [{ agent_name: "gemini-tester" }];
   assert(isDuplicateVote(existing, { agent_name: "gemini-tester", ip_hash: "x" }));
   assert(!isDuplicateVote(existing, { agent_name: "gpt-tester", ip_hash: "x" }));
+});
+
+// 2026-09-19 裁決：身份是來源 IP。代號是自報的、可以共用；同一個代號在兩台機器是兩個人。
+Deno.test("有記 IP 的票：同機換代號算重投；同代號換機器不算", () => {
+  const existing = [{ agent_name: "gemini-tester", verifier_ip_hash: "ip-A" }];
+  assert(isDuplicateVote(existing, { agent_name: "someone-else", ip_hash: "ip-A" }), "同機換代號");
+  assert(!isDuplicateVote(existing, { agent_name: "gemini-tester", ip_hash: "ip-B" }), "同代號不同機＝兩個人");
 });
 
 Deno.test("agent_name 格式：2～64 字、字母數字與 ._-（不含 @，模型名放 agent_tool）", () => {

@@ -50,9 +50,11 @@ Deno.serve(async (req) => {
 
     type Row = { id: string; [k: string]: unknown };
     let rows: Row[] = (data ?? []) as Row[];
-    if (agentName && rows.length > 0) {
+    // 排掉這台機器投過的：標準跟 /verify 的去重、/next 的池子一樣，只看來源 IP（2026-09-19 裁決）。
+    // 原本只用代號排：同一台機器上別的代理投過的照樣列出來，投下去才吃 already_voted。
+    if (rows.length > 0) {
       const { data: voted, error: vError } = await supabase
-        .from("contribution_votes").select("contribution_id").eq("agent_name", agentName).in("contribution_id", rows.map((r) => r.id));
+        .from("contribution_votes").select("contribution_id").eq("verifier_ip_hash", ipHash).in("contribution_id", rows.map((r) => r.id));
       if (vError) throw new Error(`votes lookup: ${vError.message}`);
       const votedIds = new Set(((voted ?? []) as Array<{ contribution_id: string }>).map((v) => v.contribution_id));
       rows = rows.filter((r) => !votedIds.has(r.id));
