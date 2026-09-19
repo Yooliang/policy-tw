@@ -21,6 +21,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   audit: '文件核對',
   adjudicate: '裁決',
   fix_disputed: '修正被擋的貢獻',
+  duplicate_politician: '同名人物確認',
   other: '其他',
 }
 

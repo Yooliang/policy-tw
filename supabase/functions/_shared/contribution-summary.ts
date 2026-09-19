@@ -183,6 +183,14 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "merge_politician": {
+      const keep = str(p.keep_id).slice(0, 8), remove = str(p.remove_id).slice(0, 8);
+      summary = p.same_person === false
+        ? `判定人物 ${keep} 與 ${remove} 不是同一人：${clip(p.reason, 100)}`
+        : `合併同名人物：${remove} 併入 ${keep}：${clip(p.reason, 100)}`;
+      targetName = null;
+      break;
+    }
     case "removal": {
       // 移除是「這筆不該存在」，讀者最需要看到的是理由，不是 id
       const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);

@@ -48,6 +48,8 @@ export interface TaskContextData {
   contribution?: Obj | null;
   votes?: Obj[];
   pending_adjudications?: number;
+  /** duplicate_politician：兩筆人物各自的全欄、參選紀錄、政見標題；pair_verdict 是 Jev 的 same_person 判定 */
+  pair?: { a: Obj | null; b: Obj | null; a_elections: Obj[]; b_elections: Obj[]; a_policies: Obj[]; b_policies: Obj[]; verdict: Obj | null };
   /** question：這一題本身（citizen_questions 一列） */
   question?: Obj | null;
   /** question：已經有哪些代理答過、答了什麼（citizen_questions.id = target.question_id） */
@@ -136,6 +138,21 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
           : "還沒有人答過，找有出處的答案（政府網頁、新聞、候選人官方發言優先）",
       };
     }
+    case "duplicate_politician": {
+      const pr = data.pair;
+      const side = (who: Obj | null, elections: Obj[], policies: Obj[]) => ({
+        politician: who ? truncateFields(who, ["bio"]) : null,
+        elections: elections.map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result", "position", "source_note"])),
+        policies: policies.slice(0, 10).map((x) => pick(x, ["id", "title", "election_id", "status"])),
+        policies_total: policies.length,
+      });
+      return {
+        a: side(pr?.a ?? null, pr?.a_elections ?? [], pr?.a_policies ?? []),
+        b: side(pr?.b ?? null, pr?.b_elections ?? [], pr?.b_policies ?? []),
+        system_vote: pr?.verdict ?? null,
+        hint: "同名不代表同一人：連政黨、縣市／選區、出生年、歷屆參選一起看。中選會歷屆參選查詢會把同一人列在同一筆。是同一人就 merge_politician same_person=true，keep_id 選資料較完整、參選紀錄較多的那筆；不是就 same_person=false。兩種都附 reason（≥20 字）與你查的網址。",
+      };
+    }
     case "adjudicate": {
       const c = data.contribution ?? null;
       return {
@@ -178,6 +195,29 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
     data.politician = p ?? null;
+  }
+  if (taskType === "duplicate_politician") {
+    const a = (target.a && typeof target.a === "object" ? (target.a as Obj).id : null) as string | null;
+    const b = (target.b && typeof target.b === "object" ? (target.b as Obj).id : null) as string | null;
+    if (a && b) {
+      const pairKey = [a, b].sort().join("|");
+      const [pa, pb, ea, eb, la, lb, jv] = await Promise.all([
+        supabase.from("politicians").select("*").eq("id", a).maybeSingle(),
+        supabase.from("politicians").select("*").eq("id", b).maybeSingle(),
+        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, position, source_note").eq("politician_id", a).order("election_id", { ascending: false }).limit(20),
+        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, position, source_note").eq("politician_id", b).order("election_id", { ascending: false }).limit(20),
+        supabase.from("policies").select("id, title, election_id, status").eq("politician_id", a).is("removed_at", null).order("proposed_date", { ascending: false }).limit(50),
+        supabase.from("policies").select("id, title, election_id, status").eq("politician_id", b).is("removed_at", null).order("proposed_date", { ascending: false }).limit(50),
+        supabase.from("jev_decisions").select("choice, probability, asked_at").eq("subject_type", "politician_pair").eq("subject_id", pairKey).eq("question", "same_person").order("asked_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      const v = jv.data as { choice?: string; probability?: number } | null;
+      data.pair = {
+        a: (pa.data as Obj | null) ?? null, b: (pb.data as Obj | null) ?? null,
+        a_elections: (ea.data ?? []) as Obj[], b_elections: (eb.data ?? []) as Obj[],
+        a_policies: (la.data ?? []) as Obj[], b_policies: (lb.data ?? []) as Obj[],
+        verdict: v ? { verdict: v.choice === "same" ? "same_person" : v.choice === "diff" ? "different_person" : v.choice, probability: Number(v.probability) } : null,
+      };
+    }
   }
   if (taskType === "roster_check") {
     // 把「我們現有的名單」直接給代理。它的工作是跟中選會比對，

@@ -10,6 +10,7 @@
  * 撈出來逐一比對，漏登記就紅。
  */
 export const SUGGESTED_TYPE: Record<string, string> = {
+  duplicate_politician: "merge_politician",
   policy_missing: "policy",
   profile_gap: "politician",
   policy_source_missing: "correction",

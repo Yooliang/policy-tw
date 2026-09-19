@@ -167,6 +167,8 @@ watch(() => route.params.politicianId, (id) => {
 
 
 const politician = computed(() => politicians.value.find(c => c.id === String(route.params.politicianId)))
+// 軟合併過的人物：舊網址轉向到保留的那一筆（2026-09-19 同名人物流程）
+watch(politician, (p) => { if (p?.mergedInto) router.replace(`/politician/${p.mergedInto}`) }, { immediate: true })
 
 const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
 const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])

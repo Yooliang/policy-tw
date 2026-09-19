@@ -75,6 +75,8 @@ export enum PoliticianStatus {
 
 export interface Politician {
   id: string; // Changed from number to UUID string
+  /** 軟合併：已併進哪一筆；有值的不進清單，人物頁自動轉向過去 */
+  mergedInto?: string;
   name: string;
   party: string; // Changed from PoliticalParty to string for flexibility
   status?: PoliticianStatus;
@@ -313,6 +315,8 @@ export interface RawPolitician {
   id: string;
   name: string;
   party: string;
+  /** 軟合併：這筆已併進哪一筆（2026-09-19）；清單過濾、人物頁轉向 */
+  merged_into?: string | null;
   status?: PoliticianStatus;
   election_type?: string;
   position?: string;

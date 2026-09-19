@@ -372,6 +372,21 @@ export function combineSources(
   return parts.join("\n\n").slice(0, total);
 }
 
+// ---- 同名配對：兩筆人物資料是不是同一個人（影子期已判 164 對；現在接回流程當 merge_politician 的系統票）----
+export interface PairSide { id: string; name: string; party?: string | null; region?: string | null; birth_year?: number | null; current_position?: string | null; elections?: string[] }
+
+export function buildPairAsk(a: PairSide, b: PairSide): { state: Record<string, unknown>; questions: Record<string, JevQuestion> } {
+  const state = { a: { ...a }, b: { ...b } };
+  const questions: Record<string, JevQuestion> = {
+    same_person: {
+      type: "choice",
+      instructions: "a 與 b 是資料庫裡兩筆同名的政治人物。判斷是不是同一個人：政黨同義寫法算相同（國民黨＝中國國民黨、無黨籍＝無黨籍及未經政黨推薦、無＝無黨籍）；同縣市不同屆別（例如 2022 選鄉鎮市長、2026 登記縣市長）常是同一人往上選；出生年不同、或同一屆同一種選舉在不同縣市，就是不同人。資料不夠就選 unclear，不要猜。",
+      criteria: { same: "同一個人（縣市或選區對得上、出生年不衝突、經歷連得起來）", diff: "不同的人（出生年不同、同一屆分別在兩個縣市參選、或政黨與經歷明顯是兩個人）", unclear: "資料太少看不出來" },
+    },
+  };
+  return { state, questions };
+}
+
 // ---- extract：代理找到「第一來源」後，讓 Jev 從頁面裡選值 ----
 //
 // 使用者 2026-09-19：「它應該是收到任務之後，分析關鍵字自己找來源，不一定要去看既有的那個」。
