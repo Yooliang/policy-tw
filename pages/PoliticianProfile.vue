@@ -246,7 +246,7 @@ usePageHead({
             >
               <Loader2 v-if="lookup.avatar.loading" :size="10" class="animate-spin" />
               <Camera v-else :size="10" />
-              {{ lookup.avatar.loading ? '...' : '請 AI 找照片' }}
+              {{ lookup.avatar.loading ? '...' : '照片更新' }}
             </button>
             <span
               v-if="lookup.avatar.result"
@@ -531,7 +531,7 @@ usePageHead({
                     <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
                     <XCircle v-else-if="lookup.avatar.error" :size="16" />
                     <Camera v-else :size="16" />
-                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '請 AI 補充最新的照片' : '請 AI 找照片') }}
+                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
                   </button>
 
                   <!-- Error messages -->
