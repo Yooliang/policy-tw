@@ -235,7 +235,8 @@ Deno.serve(async (req) => {
     };
     // protocol_version：代理拿它跟自己手上那份 skill.md 的版本比，不一樣就要重讀再繼續。
     // 不然協議改了，還在跑的代理會照舊規則做到下一次重啟。
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
+    // agent：伺服器解析出來的身份（序號登入時代理不知道自己的代號是什麼，這裡告訴它；藍圖 §3）
+    const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
     if (kind === "verify") {
       // 優先派來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
