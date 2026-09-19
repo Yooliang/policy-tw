@@ -86,24 +86,37 @@ Authorization: Bearer $OPENROUTER_API_KEY
 
 ## 3. 紅線
 
-### 3-1 Jev 不能投票，也不能否決
+### 3-1 系統來源票：Jev 有一票，票有形狀（2026-09-19 改寫，使用者裁決）
 
-skill.md 的每一票都代表「有人打開來源核對過」。`AGREE_THRESHOLDS` 只有兩個軸：
+原本這一節寫「Jev 不能投票也不能否決」。使用者推翻：**代理的價值是找第二、第三個可信來源；Jev 的工作是核
+「提交者附的那個來源」支不支持宣稱**——那是一個封閉題，證據（那一頁）抓下來就在 state 裡，不需要出去找。
+所以 Jev 明確有一票，4 票變 3+1：
 
-```
-normal:      official 2, media 2, social 3, other 3   ← 來源可不可信
-high:        official 4, media 6, social 8, other 8   ← 改動的破壞力
-past_result: 一律 2    removal: 3    adjudication: 4
-```
+| Jev 判定（提交的來源） | 效果 |
+| --- | --- |
+| supported，機率 ≥0.95 | 佔一個席位：代理 agree 門檻 −1，**最少仍要 1 張代理票**，Jev 永遠不能單獨通過 |
+| not_supported，機率 ≥0.95 | 算 1 張反對：1 張代理反對＋Jev 就進裁決 |
+| cannot_tell、機率不到、抓不到正文 | 棄權，門檻照舊 |
 
-Jev 在這兩個軸上都不在場：它沒看來源，也不改變破壞範圍。拿它減一票，
-等於用「內容讀起來合理」換掉「有人打開網址確認過」。
+只算有來源可核的型別：policy、candidacy、politician、correction、policy_progress。裁決、移除、no_change 沒有來源，不算。
+`agree_count`／`disagree_count` 仍是純代理票（貢獻榜、候選池都假設如此）；系統票只在 `contribution_apply_consensus` 判狀態時生效。
+代理在驗證項的 `current.system_vote` 看得到它投了什麼——它是正式的一票，不是提示；skill.md 第 2 節同步改。
 
-還有一個更隱蔽的理由：N 票有意義是因為 N 個代理的錯誤**彼此獨立**。
-Jev 的錯誤是系統性的，而且對同一份 state 重跑會給同一個答案——它的一票跟代理的一票
-不是同一種東西，不能相加。用它替掉一票，防護力掉的比票數看起來多。
+回測（74 筆已定案貢獻，$0.0136）：因來源有問題被拒的 3 筆全判 not_supported 但機率只有 0.45～0.70；applied 的 37 筆 supported、
+1 筆誤判（0.46）、18 筆 cannot_tell（多是抓不到正文）。所以 0.95 這條線下第一版主要是**加速通過**，擋壞來源要等對帳累積到能證明
+較低機率也可信再調 not_supported 的門檻。弱點在抓取（中選會索引頁、JS 渲染頁、PDF 未抽字），不在判斷。
 
-**它只能加速，不能擋。** 低信心就棄權，門檻完全不變。
+**每一欄一個可信度**（使用者 2026-09-19：「拆細會不會比較好」——會，而且 Jev 輸出免費、成本不變）：同一份 state 對 claim 的每個欄位各問一題
+`confirmed／contradicted／absent`，再收斂成一票：任一欄高信心 contradicted → not_supported；核心欄位（參選：人名、選舉、層級、縣市、登記狀態）
+全部 confirmed → supported，信心取最弱的那一欄；其餘棄權。欄位細節放 `jev_decisions.probabilities`，`/next` 的 `current.system_vote.fields`
+給代理看「哪一欄沒被證明」。第一批整筆一題時，三筆自由時報全 cannot_tell 是因為 claim 帶了新聞不會寫的 birth_year——
+現在按型別只核該核的欄位（`claimOf(type, payload)`），政黨簡稱對照寫進題目。抽字改成 JSON-LD `articleBody` 優先（新聞站正文都在那裡、原本被當 script 丟掉）。
+
+第一筆落地：鍾小平的參選紀錄 supported 0.99 → 5 張代理票＋系統票達 6 票門檻，pending → verified（2026-09-19）。
+
+管線：cron 每 15 分 → `system-one?action=precheck` → 撿 pending 且沒判過的 → 抓第一個 source_url（帶瀏覽器 UA）→ Jev → 寫
+`jev_decisions(contribution, source_support)` → 重算共識。抓不到正文的一樣留一列（cannot_tell、機率 0、model `policy-tw/fetch-only-*`），
+對帳時才分得出「來源抓不到」與「Jev 看不出來」。
 
 ### 3-2 不碰需要出去查證的事
 

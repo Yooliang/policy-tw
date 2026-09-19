@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { askJev, buildPolicyAsk, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateFieldVerdicts, articleBodyFromJsonLd, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -80,4 +80,81 @@ Deno.test("askJev：釘住 typesafe/jev-1.13、打 decisions 端點；非 2xx �
     threw = String(e).includes("500");
   }
   assertEquals(threw, true);
+});
+
+// ---- 系統來源票 ----
+
+Deno.test("htmlToText：去 script／style／nav、去標籤、還原實體、壓空白", () => {
+  const html = `<html><head><style>.a{}</style><script>var x=1;</script></head><body><nav>選單</nav><h1>李四川&nbsp;政見</h1><p>承諾&quot;當選後&quot;推動 &#25429;</p></body></html>`;
+  const t = htmlToText(html);
+  assertEquals(t.includes("var x"), false);
+  assertEquals(t.includes("選單"), false);
+  assertEquals(t.includes('李四川 政見'), true);
+  assertEquals(t.includes('承諾"當選後"推動 捕'), true);
+});
+
+Deno.test("focusText：名字附近優先、不重複、超過上限截斷；沒命中取開頭", () => {
+  const filler = "無關文字。".repeat(300);
+  const text = filler + "李四川表示將推動捷運三鶯線延伸。" + filler + "李四川另提六大福利。" + filler;
+  const f = focusText(text, ["李四川"], 3000);
+  assertEquals(f.includes("捷運三鶯線"), true);
+  assertEquals(f.length <= 3000, true);
+  assertEquals(focusText("abc", [null, "x"], 10), "abc", "沒命中就取開頭");
+  assertEquals(focusText("", ["李"]), "");
+});
+
+Deno.test("claimOf 只留判斷用欄位；buildSourceSupportAsk 的 criteria 有三個選項且事實在 state", () => {
+  const claim = claimOf("candidacy", { name: "王小明", party: "民主進步黨", contributor_ip_hash: "x", agent_tool: "y", election_id: 2026, birth_year: 1962, source_note: null });
+  assertEquals(Object.keys(claim).sort(), ["election_id", "name", "party"], "參選紀錄不核出生年，空值不帶");
+  assertEquals(Object.keys(claimOf("politician", { name: "王小明", birth_year: 1962, election_id: 2026 })).sort(), ["birth_year", "name"], "人物資料才核出生年");
+  const { state, questions } = buildSourceSupportAsk(claim, "https://a.b/c", "頁面文字");
+  assertEquals(Object.keys(questions).sort(), ["field:election_id", "field:name", "field:party"], "每個 claim 欄位一題");
+  assertEquals(Object.keys(questions["field:name"].criteria).sort(), ["absent", "confirmed", "contradicted"]);
+  assertEquals((state.page as { url: string }).url, "https://a.b/c");
+  assertEquals((state.claim as { name: string }).name, "王小明");
+});
+
+Deno.test("fetchSource：帶瀏覽器 UA；PDF 回 pdf 不假裝看過；非 2xx 回 error", async () => {
+  let ua = "";
+  const okHtml = (async (_u: string | URL | Request, init?: RequestInit) => {
+    ua = String((init?.headers as Record<string, string>)["User-Agent"]);
+    return new Response("<p>hi</p>", { status: 200, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  const r1 = await fetchSource("https://x/y", okHtml);
+  assertEquals(r1.kind, "html"); assertEquals(r1.text, "hi"); assertEquals(ua.includes("Mozilla"), true);
+  const pdf = (async () => new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } })) as typeof fetch;
+  assertEquals((await fetchSource("https://x/f", pdf)).kind, "pdf");
+  const bad = (async () => new Response("nope", { status: 403 })) as typeof fetch;
+  const r3 = await fetchSource("https://x/z", bad);
+  assertEquals(r3.kind, "error"); assertEquals(r3.note, "http 403");
+});
+
+// 2026-09-19 第一批 precheck：三筆自由時報全 cannot_tell，正文其實在 JSON-LD 的 articleBody 裡、被當 script 丟掉
+Deno.test("htmlToText：JSON-LD 的 articleBody 要被撈出來放在最前面，script 照樣不進正文", () => {
+  const html = `<html><head><script type="application/ld+json">{"@type":"NewsArticle","headline":"台北市58名議員候選人登記","articleBody":"九合一大選年底登場，台北市至今已有58名議員候選人登記。"}</script><script>var tracker=1;</script></head><body><p>相關新聞</p></body></html>`;
+  assertEquals(articleBodyFromJsonLd(html).startsWith("台北市58名議員候選人登記"), true);
+  const t = htmlToText(html);
+  assertEquals(t.startsWith("台北市58名議員候選人登記\n九合一大選"), true);
+  assertEquals(t.includes("var tracker"), false);
+  assertEquals(t.includes("相關新聞"), true);
+  // 壞掉的 JSON 不能讓整頁抽字失敗
+  assertEquals(htmlToText(`<script type="application/ld+json">{bad</script><p>ok</p>`), "ok");
+});
+
+// 2026-09-19 使用者：「每一欄一個可信度，拆細會不會比較好」
+Deno.test("aggregateFieldVerdicts：核心欄位全 confirmed → supported、信心取最弱；任一欄高信心 contradicted → not_supported；其餘棄權", () => {
+  const claim = { name: "鍾小平", party: "中國國民黨", region: "台北市", election_id: 2026, election_type: "縣市議員", candidate_status: "registered" };
+  const ans = (m: Record<string, [string, number]>) => Object.fromEntries(Object.entries(m).map(([k, [c, p]]) => [`field:${k}`, { type: "choice", choice: c, probabilities: { [c]: p } }]));
+  const good = aggregateFieldVerdicts("candidacy", claim, ans({ name: ["confirmed", 1], party: ["absent", 0.9], region: ["confirmed", 0.99], election_id: ["confirmed", 0.97], election_type: ["confirmed", 0.98], candidate_status: ["confirmed", 0.96] }));
+  assertEquals(good.choice, "supported");
+  assertEquals(good.probability, 0.96, "最弱的核心欄位決定信心；政黨 absent 不影響（非核心）");
+  const bad = aggregateFieldVerdicts("candidacy", claim, ans({ name: ["confirmed", 1], party: ["contradicted", 0.97], region: ["confirmed", 0.99], election_id: ["confirmed", 0.97], election_type: ["confirmed", 0.98], candidate_status: ["confirmed", 0.96] }));
+  assertEquals(bad.choice, "not_supported", "非核心欄位寫了不同的值一樣算反對");
+  assertEquals(bad.probability, 0.97);
+  const weakContra = aggregateFieldVerdicts("candidacy", claim, ans({ name: ["confirmed", 1], party: ["contradicted", 0.6], region: ["confirmed", 0.99], election_id: ["confirmed", 0.97], election_type: ["confirmed", 0.98], candidate_status: ["confirmed", 0.96] }));
+  assertEquals(weakContra.choice, "supported", "低信心的 contradicted 不擋，核心全 confirmed 仍算支持");
+  const missing = aggregateFieldVerdicts("candidacy", claim, ans({ name: ["confirmed", 1], region: ["absent", 0.9], election_id: ["confirmed", 0.97], election_type: ["confirmed", 0.98], candidate_status: ["confirmed", 0.96] }));
+  assertEquals(missing.choice, "cannot_tell", "核心欄位 absent → 棄權");
+  assertEquals(missing.probability, 0);
+  assertEquals(Object.keys(missing.fields).length, 5, "細節全部留下來給代理看");
 });

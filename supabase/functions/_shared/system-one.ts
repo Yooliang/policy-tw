@@ -186,3 +186,184 @@ export function validateRecord(r: Partial<DecisionRecord> | null | undefined): s
   if (r.state == null || typeof r.state !== "object" || Object.keys(r.state).length === 0) return "state 必填且不能是空物件——少了它事後無法重現";
   return null;
 }
+
+// ---- 系統來源票：抓提交的來源，問 Jev 支不支持這筆宣稱 ----
+// 2026-09-19 回測 74 筆已定案貢獻：因來源有問題被拒的 3 筆全判 not_supported（機率 0.45～0.70）、
+// applied 的 37 筆 supported、1 筆誤判、18 筆 cannot_tell（多是抓不到正文：中選會索引頁、JS 渲染頁）。
+// 弱點在抓取不在判斷；Jev 在文字不夠時會選 cannot_tell 而不是硬猜，那正是要的行為。
+
+/**
+ * 按型別只留「來源該證明的欄位」。2026-09-19 第一批 precheck 三筆自由時報全 cannot_tell，原因是 claim 帶了
+ * birth_year 這種新聞不會寫的欄位、而題目又要求每個欄位都對得上——那是題目出錯，不是來源不支持。
+ * 參選紀錄要證的是「這個人在這場選舉登記／參選」；出生年、學歷是 politician 型別的事。
+ */
+const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
+  candidacy: ["name", "party", "region", "election_id", "election_type", "candidate_status", "electoral_district"],
+  politician: ["name", "party", "region", "birth_year", "current_position", "education_level"],
+  policy: ["name", "politician_name", "title", "description", "election_id", "category"],
+  policy_progress: ["policy_title", "status", "progress", "description"],
+  correction: ["target_table", "field", "current_value", "correct_value", "changes", "reason"],
+};
+const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
+const PAGE_TEXT_MAX = 6000;
+const FOCUS_BEFORE = 700;
+const FOCUS_WINDOW = 1400;
+
+export function claimOf(contributionType: string, payload: Record<string, unknown>): Record<string, unknown> {
+  const fields = CLAIM_FIELDS_BY_TYPE[contributionType] ?? CLAIM_FIELDS_DEFAULT;
+  return Object.fromEntries(Object.entries(payload).filter(([k, v]) => fields.includes(k) && v != null && v !== ""));
+}
+
+/**
+ * 新聞站多半把整篇正文放在 JSON-LD 的 articleBody（自由時報、中央社、聯合都是），而那個在 <script> 裡，
+ * 一般去標籤會把它連 script 一起丟掉——2026-09-19 第一批 precheck 三筆自由時報全 cannot_tell 就是這樣。
+ * 有 articleBody 就用它當正文開頭，再接一般抽字的結果當補充。
+ */
+export function articleBodyFromJsonLd(html: string): string {
+  const out: string[] = [];
+  const re = /<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    let data: unknown;
+    try { data = JSON.parse(m[1]); } catch { continue; }
+    const items = Array.isArray(data) ? data : [data];
+    for (const it of items) {
+      if (it && typeof it === "object") {
+        const o = it as Record<string, unknown>;
+        for (const k of ["headline", "articleBody", "description"]) {
+          if (typeof o[k] === "string" && (o[k] as string).trim()) out.push((o[k] as string).trim());
+        }
+      }
+    }
+  }
+  return out.join("\n");
+}
+
+/** 粗抽正文：JSON-LD 的 articleBody 優先，再接去標籤的頁面文字。不求完美，求可重現 */
+export function htmlToText(html: string): string {
+  const body = articleBodyFromJsonLd(html);
+  const stripped = stripHtml(html);
+  return body ? `${body}\n\n${stripped}` : stripped;
+}
+
+function stripHtml(html: string): string {
+  let s = html.replace(/<(script|style|noscript|svg|header|footer|nav)[\s\S]*?<\/\1>/gi, " ");
+  s = s.replace(/<[^>]+>/g, " ");
+  s = s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
+  s = s.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n");
+  return s.trim();
+}
+
+/** 名字附近的段落優先；沒命中就取開頭。上限 PAGE_TEXT_MAX（Jev context 32k，留餘裕） */
+export function focusText(text: string, names: Array<string | null | undefined>, limit = PAGE_TEXT_MAX): string {
+  if (!text) return "";
+  const starts = new Set<number>();
+  for (const n of names) {
+    if (!n || n.length < 2) continue;
+    let i = text.indexOf(n);
+    while (i >= 0 && starts.size < 6) { starts.add(Math.max(0, i - FOCUS_BEFORE)); i = text.indexOf(n, i + n.length); }
+  }
+  if (starts.size === 0) return text.slice(0, limit);
+  const chunks: string[] = [];
+  let used = 0;
+  for (const st of [...starts].sort((a, b) => a - b)) {
+    const c = text.slice(st, st + FOCUS_WINDOW);
+    chunks.push(c); used += c.length;
+    if (used >= limit) break;
+  }
+  return chunks.join("\n…\n").slice(0, limit);
+}
+
+export const SOURCE_SUPPORT_CHOICES = ["supported", "not_supported", "cannot_tell"] as const;
+export type SourceSupport = (typeof SOURCE_SUPPORT_CHOICES)[number];
+export const FIELD_VERDICTS = ["confirmed", "contradicted", "absent"] as const;
+export type FieldVerdict = (typeof FIELD_VERDICTS)[number];
+
+/**
+ * 每個型別「來源一定要證明」的核心欄位；其他欄位（政黨簡稱、分類…）可以不在來源裡，但不能矛盾。
+ * 2026-09-19 使用者：「每一欄一個可信度，拆細會不會比較好」——會。整筆一個分數會被一個不確定的欄位拖低，
+ * 而且代理看不出是哪一欄沒被證明。拆開之後 Jev 輸出免費、成本不變。
+ */
+const CORE_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
+  candidacy: ["name", "election_id", "election_type", "region", "candidate_status"],
+  politician: ["name"],
+  policy: ["title"],
+  policy_progress: ["policy_title", "status"],
+  correction: ["correct_value"],
+};
+
+const FIELD_INSTRUCTIONS =
+  "claim 是一筆要寫進台灣政治資料庫的宣稱，page 是提交者附的來源網頁文字。這一題只問 claim 裡的一個欄位：這段文字有沒有證明它？" +
+  "判準：來源必須證明「這個人說過或做過這件事」，不是只證明「這件事存在」。同義寫法算一致：政黨簡稱（國民黨＝中國國民黨、民進黨＝民主進步黨、民眾黨＝台灣民眾黨、無黨籍＝無黨籍及未經政黨推薦）、" +
+  "「完成登記／登記參選」＝candidate_status registered、「2026 九合一／年底選舉」＝election_id 2026、縣市議員＝市議員／縣議員、「現任某市議員」可推得 region 與職位。" +
+  "文字寫的跟這個欄位對得上選 confirmed；文字明確寫了不一樣的值、或講的是別人／前任選 contradicted；文字沒提到這個欄位選 absent。";
+
+/** 一份 state、每個 claim 欄位一題。題名 field:<欄位> */
+export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string): {
+  state: Record<string, unknown>;
+  questions: Record<string, JevQuestion>;
+} {
+  const questions: Record<string, JevQuestion> = {};
+  for (const [k, v] of Object.entries(claim)) {
+    const shown = typeof v === "string" ? v : JSON.stringify(v);
+    questions[`field:${k}`] = {
+      type: "choice",
+      instructions: `${FIELD_INSTRUCTIONS} 這一題的欄位：${k}＝${shown}`,
+      criteria: { confirmed: `文字證明 ${k} 就是 ${shown}（含同義寫法）`, contradicted: `文字寫了不同的值、或這件事是別人的`, absent: `文字沒提到這個欄位` },
+    };
+  }
+  return { state: { claim, page: { url, text: pageText } }, questions };
+}
+
+export interface FieldResult { verdict: FieldVerdict; p: number }
+
+/**
+ * 把每欄的答案收斂成一票。規則（跟 SQL 的門檻一起看）：
+ *   任一欄 contradicted 且機率 ≥ 門檻 → not_supported，probability = 那欄的機率
+ *   核心欄位全部 confirmed → supported，probability = 核心欄位裡最低的 confirmed 機率（最弱的一欄決定信心）
+ *   其他 → cannot_tell，probability = 0（棄權；細節留在 fields 給人看）
+ * 非核心欄位 absent 不影響；非核心欄位 contradicted 一樣算反對——來源寫了不同的政黨就是有問題。
+ */
+export function aggregateFieldVerdicts(
+  contributionType: string,
+  claim: Record<string, unknown>,
+  answers: Record<string, JevAnswer>,
+  minProbability = MIN_PROBABILITY,
+): { choice: SourceSupport; probability: number; fields: Record<string, FieldResult> } {
+  const fields: Record<string, FieldResult> = {};
+  for (const k of Object.keys(claim)) {
+    const a = answers[`field:${k}`];
+    if (!a) continue;
+    fields[k] = { verdict: a.choice as FieldVerdict, p: Math.round((a.probabilities?.[a.choice] ?? 0) * 10000) / 10000 };
+  }
+  const contradicted = Object.values(fields).filter((f) => f.verdict === "contradicted" && f.p >= minProbability);
+  if (contradicted.length > 0) {
+    return { choice: "not_supported", probability: Math.max(...contradicted.map((f) => f.p)), fields };
+  }
+  const core = (CORE_FIELDS_BY_TYPE[contributionType] ?? ["name"]).filter((k) => k in fields);
+  if (core.length > 0 && core.every((k) => fields[k].verdict === "confirmed")) {
+    return { choice: "supported", probability: Math.min(...core.map((k) => fields[k].p)), fields };
+  }
+  return { choice: "cannot_tell", probability: 0, fields };
+}
+
+const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36";
+
+/**
+ * 抓來源。回 { kind: "html", text } 或 { kind: "pdf" | "error", text: "" }。
+ * PDF 這一版不抽字（沒有輕量的 Deno 方案）；回 pdf 讓呼叫端記成 cannot_tell 棄權，不要假裝看過。
+ * 帶瀏覽器 UA：skill.md 實測多數媒體的 403 是擋沒有 UA 的程式。
+ */
+export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch): Promise<{ kind: "html" | "pdf" | "error"; text: string; note: string }> {
+  try {
+    const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "zh-TW,zh;q=0.9" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (!res.ok) return { kind: "error", text: "", note: `http ${res.status}` };
+    if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) return { kind: "pdf", text: "", note: "pdf 未抽字" };
+    const raw = await res.text();
+    return { kind: "html", text: htmlToText(raw.slice(0, 1_500_000)), note: ct };
+  } catch (e) {
+    return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
+  }
+}

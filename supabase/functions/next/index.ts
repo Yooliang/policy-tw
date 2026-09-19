@@ -239,6 +239,22 @@ Deno.serve(async (req) => {
       const pick = pickBySeed(ranked.filter((c) => sourceRank(bestSourceKind(c.source_urls)) === topRank), seed)!;
       const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
       const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload));
+      // 系統來源票（2026-09-19，4 票變 3+1）：Jev 核過提交的來源就給代理看。它是正式的一票，不是提示——
+      // supported 讓門檻 −1、not_supported 算一張反對；機率不到門檻或抓不到正文＝棄權，這裡照實給 abstain。
+      {
+        const { data: sv } = await supabase.from("jev_decisions").select("choice, probability, asked_at, probabilities")
+          .eq("subject_type", "contribution").eq("subject_id", pick.id).eq("question", "source_support")
+          .order("asked_at", { ascending: false }).limit(1).maybeSingle();
+        if (sv) {
+          const counts = Number(sv.probability) >= 0.95 && (sv.choice === "supported" || sv.choice === "not_supported");
+          (verifyCurrent as Record<string, unknown>).system_vote = {
+            verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,
+            // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源
+            fields: sv.probabilities ?? null,
+            note: counts ? "系統已核對提交的來源；這一票已計入門檻（supported＝門檻 −1、not_supported＝一張反對）。請你另找第二個可信來源核對，不要只重看同一頁。" : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。",
+          };
+        }
+      }
       return json({
         ...base,
         kind: "verify",
