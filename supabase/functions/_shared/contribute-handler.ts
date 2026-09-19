@@ -4,6 +4,7 @@
  */
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { resolveActor } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
@@ -191,6 +192,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       agent_tool: validation.contributor.agent_tool ?? null,
       contributor_url: validation.contributor.url ?? null,
       contributor_ip_hash: ipHash,
+      // 身份鍵：去重與歸戶看這個，agent_name 只給人看（docs/BLUEPRINT-agent-identity.md §3）
+      actor_id: resolveActor(validation.contributor.agent_name, ipHash).actor_id,
       payload_hash: hash,
     }));
 

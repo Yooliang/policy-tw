@@ -4,7 +4,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, SKIP_MEMORY_HOURS, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
-import { isValidAgentName, requiredAgree } from "../_shared/consensus.ts";
+import { requiredAgree } from "../_shared/consensus.ts";
+import { agentNameProblem } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
@@ -49,9 +50,9 @@ Deno.serve(async (req) => {
     // 拿到不該由你處理的任務時，帶 skip=<task_id> 再打一次：釋放認領期並改派別的。
     // 沒有這個出口的話，30 分鐘的軟認領會讓主流程一直卡在同一筆（外部代理實測踩到）。
     const skipTaskId = url.searchParams.get("skip")?.trim() || null;
-    if (!isValidAgentName(agentName)) {
-      return json({ success: false, error: "agent_name 必填：使用者代號，2～64 字，字母數字與 ._-（模型名放 agent_tool）" }, 400);
-    }
+    // ditrust:<序號> 在開放前要被擋並講清楚，不能當一般代號收進去（docs/BLUEPRINT-agent-identity.md §3）
+    const nameProblem = agentNameProblem(agentName);
+    if (nameProblem) return json({ success: false, error: nameProblem }, 400);
     const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
