@@ -5,11 +5,12 @@
 流程（對應 skill.md §2-9，2026-09-19 版）：
   GET /next → 拿到 verify 項與 current.system_vote
   system_vote 是 supported → 不重看提交的那一頁，去找第二個獨立來源（DuckDuckGo lite，免金鑰）
-  抓第二來源 → Jev 每欄一題判定 → 收斂成 agree／disagree／unsure
+  把第二來源的網址交給正見的 judge 端點（伺服器自己抓頁、Jev 每欄一題）→ agree／disagree／unsure
   DRY_RUN=1 時只印出會投什麼，不 POST；否則 POST /report kind=verify，帶 evidence_url（第二來源）
 
 用法：
-  SUPABASE_URL=… SUPABASE_ANON_KEY=… OPENROUTER_API_KEY=… AGENT_NAME=<你的代號或 ditrust:<序號>> ROUNDS=10 DRY_RUN=1 python relay_jev_verify.py
+  SUPABASE_URL=… SUPABASE_ANON_KEY=… AGENT_NAME=<你的代號或 ditrust:<序號>> ROUNDS=10 DRY_RUN=1 python relay_jev_verify.py
+  不需要任何 Jev／OpenRouter 金鑰：判定走正見的 system-one?action=judge（使用者 2026-09-19：「jev 提供端點，別給 key」）
 
 紅線（docs/BLUEPRINT-jev-decisions.md §3-1）：不能拿 Jev 對「提交的那一頁」的判定當代理票——那等於系統票再投一次。
 這支只用 Jev 核「另一個來源」，票的獨立性來自新的網址（evidence_url），不是來自判斷者。
@@ -19,7 +20,6 @@ import json, os, re, sys, html, urllib.request, urllib.parse, time
 
 URL = os.environ["SUPABASE_URL"].rstrip("/")
 ANON = os.environ["SUPABASE_ANON_KEY"]
-JEV_KEY = os.environ["OPENROUTER_API_KEY"]
 AGENT = os.environ.get("AGENT_NAME", "jev-relay-test")
 DRY = os.environ.get("DRY_RUN", "1") == "1"
 ROUNDS = int(os.environ.get("ROUNDS", "5"))
@@ -108,39 +108,10 @@ def keywords(ctype, payload):
         return f'{name} {payload.get("region","")} {payload.get("current_position","")}'
     return f'{name} {payload.get("title","")}'
 
-# ---- Jev：每欄一題（跟 system-one 同一套題目）----
-CLAIM_FIELDS = {
-    "candidacy": ["name", "party", "region", "election_id", "election_type", "candidate_status"],
-    "politician": ["name", "party", "region", "birth_year", "current_position", "education_level"],
-    "policy": ["name", "politician_name", "title", "description", "election_id", "category"],
-    "policy_progress": ["policy_title", "status", "progress", "description"],
-}
-CORE = {"candidacy": ["name", "election_id", "election_type", "region", "candidate_status"], "politician": ["name"], "policy": ["title"], "policy_progress": ["policy_title", "status"]}
-INSTR = ("claim 是一筆要寫進台灣政治資料庫的宣稱，page 是「另一個獨立來源」的網頁文字。這一題只問 claim 裡的一個欄位：這段文字有沒有證明它？"
-         "來源必須證明「這個人說過或做過這件事」。同義寫法算一致：政黨簡稱（國民黨＝中國國民黨、民進黨＝民主進步黨、民眾黨＝台灣民眾黨、無黨籍＝無黨籍及未經政黨推薦）、"
-         "「完成登記／登記參選」＝candidate_status registered、「2026 九合一／民國 115 年」＝election_id 2026、直轄市議員／縣（市）議員＝縣市議員、「臺」＝「台」。"
-         "對得上選 confirmed；寫了不同的值或講的是別人選 contradicted；沒提到選 absent。")
-
-def jev(claim, url, text):
-    qs = {}
-    for k, v in claim.items():
-        shown = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-        qs[f"field:{k}"] = {"type": "choice", "instructions": f"{INSTR} 這一題的欄位：{k}＝{shown}",
-                            "criteria": {"confirmed": f"文字證明 {k} 就是 {shown}", "contradicted": "文字寫了不同的值、或這件事是別人的", "absent": "文字沒提到這個欄位"}}
-    st, raw = http("POST", "https://openrouter.ai/api/alpha/decisions", {"model": "typesafe/jev-1.13", "state": {"claim": claim, "page": {"url": url, "text": text}}, "questions": qs},
-                   {"Authorization": f"Bearer {JEV_KEY}"}, timeout=60)
-    return json.loads(raw)
-
-def aggregate(ctype, claim, answers, thr=0.95):
-    fields = {}
-    for k in claim:
-        a = answers.get(f"field:{k}")
-        if a: fields[k] = (a["choice"], round(a["probabilities"].get(a["choice"], 0), 3))
-    contra = [p for v, p in fields.values() if v == "contradicted" and p >= thr]
-    if contra: return "disagree", max(contra), fields
-    core = [k for k in CORE.get(ctype, ["name"]) if k in fields]
-    if core and all(fields[k][0] == "confirmed" for k in core): return "agree", min(fields[k][1] for k in core), fields
-    return "unsure", 0.0, fields
+# ---- 第二來源判定：交給正見的端點，網頁由伺服器抓（代理只給網址）----
+def judge(cid, url):
+    st, out = api("POST", "system-one?action=judge", {"contribution_id": cid, "url": url})
+    return out
 
 # ---- 主迴圈 ----
 def main():
@@ -158,7 +129,6 @@ def main():
         ctype, payload = it["contribution_type"], it["payload"]
         sv = (it.get("current") or {}).get("system_vote") or {}
         print(f"\n[{i+1}] {ctype} {cid[:8]} {payload.get('name') or payload.get('title','')[:20]} | 需 {it.get('votes_needed') or nxt.get('votes_needed') or '?'} 票 | 系統票={sv.get('verdict','（無）')} {sv.get('probability','')}")
-        claim = {k: v for k, v in payload.items() if k in CLAIM_FIELDS.get(ctype, ["name", "title"]) and v not in (None, "")}
         exclude = [urllib.parse.urlparse(u).hostname or "" for u in it.get("source_urls", [])]
         exclude = [h[4:] if h.startswith("www.") else h for h in exclude]
         q = keywords(ctype, payload)
@@ -167,22 +137,27 @@ def main():
         except Exception as e:
             cands = []; print(f"   搜尋失敗 {type(e).__name__}")
         print(f"   搜尋「{q.strip()}」→ {len(cands)} 個候選（排除提交來源 {exclude}）")
-        names = [payload.get("name"), payload.get("politician_name"), payload.get("title")]
         vote, evidence, note = "unsure", None, ""
         for u in cands[:3]:
-            text, kind = fetch_text(u)
-            if not text or len(text) < 200:
-                print(f"   - {u[:70]} → {kind}"); continue
-            res = jev(claim, u, focus(text, names))
-            v, p, fields = aggregate(ctype, claim, res["answers"])
+            try:
+                out = judge(cid, u)
+            except Exception as e:
+                print(f"   - {u[:70]} → judge 失敗 {type(e).__name__}"); continue
+            if not out.get("success"):
+                print(f"   - {u[:70]} → {out.get('error')}：{str(out.get('message',''))[:60]}"); continue
+            fields = {k: (f["verdict"], f["p"]) for k, f in (out.get("fields") or {}).items()}
             fs = " ".join(f"{k}={vv[:4]}({pp:.2f})" for k, (vv, pp) in fields.items())
-            print(f"   - {u[:70]}\n     Jev → {v} {p:.2f} | {fs} | ${res['usage']['cost']:.5f}")
-            # 跟系統票同一條線：核心欄位全 confirmed 但最弱的一欄不到 0.95，仍算 unsure（不要用 0.89 的證據投 agree）
-            if v == "agree" and p < 0.95:
-                print(f"     最弱欄位 {p:.2f} < 0.95，這頁不夠力，換下一個候選"); continue
-            if v in ("agree", "disagree"):
-                vote, evidence = v, u
-                note = f"第二來源（{urllib.parse.urlparse(u).hostname}）{'證實' if v=='agree' else '反證'}：" + "、".join(k for k, (vv, _) in fields.items() if vv == ("confirmed" if v == "agree" else "contradicted"))
+            v, p = out["verdict"], out["probability"]
+            print(f"   - {u[:70]}\n     judge → {v} {p:.2f} counts={out.get('counts')} | {fs}")
+            if not out.get("counts"):
+                print("     不到門檻，換下一個候選"); continue
+            if v == "supported":
+                vote, evidence = "agree", u
+                note = f"第二來源（{urllib.parse.urlparse(u).hostname}）證實：" + "、".join(k for k, (vv, _) in fields.items() if vv == "confirmed")
+                break
+            if v == "not_supported":
+                vote, evidence = "disagree", u
+                note = f"第二來源（{urllib.parse.urlparse(u).hostname}）反證：" + "、".join(k for k, (vv, _) in fields.items() if vv == "contradicted")
                 break
         if vote == "unsure":
             note = "找不到能證實關鍵欄位的第二來源；搜尋了 " + ", ".join(urllib.parse.urlparse(u).hostname or u for u in cands[:3])
