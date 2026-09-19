@@ -158,6 +158,8 @@ Deno.serve(async (req) => {
     const myVotedOriginalIds = new Set<string>((myVotedOnRows as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
 
     type PendingRow = {
+  /** contribution_verify_pool 回的有效門檻（2026-09-20） */
+  effective_required?: number | null;
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
       agent_name: string; agent_tool: string | null; contributor_ip_hash: string; agree_count: number; disagree_count: number; unsure_count: number;
       status: string; created_at: string;
@@ -257,7 +259,10 @@ Deno.serve(async (req) => {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,
             // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源
             fields: sv.probabilities ?? null,
-            note: counts ? "系統已核對提交的來源；這一票已計入門檻（supported＝門檻 −1、not_supported＝一張反對）。請你另找第二個可信來源核對，不要只重看同一頁。" : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。",
+            min_probability: 0.95,
+            note: counts
+              ? "系統已核對提交的來源；這一票已折進門檻（supported＝門檻 −1、not_supported＝門檻 +1——它不是反對票、不會觸發裁決）。要不要反對，請你自己看第二個可信來源決定，不要只重看同一頁。"
+              : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。fields 裡的逐欄判定沒有達到門檻，不能當反證。",
           };
         }
       }
@@ -276,7 +281,8 @@ Deno.serve(async (req) => {
           agree_count: pick.agree_count,
           disagree_count: pick.disagree_count,
           unsure_count: pick.unsure_count,
-          required_agree: requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
+          // 有效門檻（系統票已折進去）；池子沒回時退回原門檻
+          required_agree: typeof pick.effective_required === "number" ? pick.effective_required : requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
           ...(pick.contribution_type === "policy"

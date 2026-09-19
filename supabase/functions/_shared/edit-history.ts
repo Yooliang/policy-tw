@@ -42,7 +42,9 @@ export async function recordInsert(supabase: SupabaseLike, ctx: EditContext, tab
 
 export type RevertStep =
   | { op: "delete"; table: string; record_id: string; edit_id: number }
-  | { op: "restore"; table: string; record_id: string; field: string; value: unknown; edit_id: number };
+  | { op: "restore"; table: string; record_id: string; field: string; value: unknown; edit_id: number }
+  /** field='*'、old=整列、new=NULL：合併時被刪掉的列，還原＝整列 INSERT 回去（2026-09-20） */
+  | { op: "reinsert"; table: string; record_id: string; row: Record<string, unknown>; edit_id: number };
 
 /**
  * 純函式：把一筆貢獻的變更倒成還原步驟（由新到舊；已還原的跳過）。
@@ -54,7 +56,11 @@ export function planRevert(edits: readonly (EditRecord & { id: number })[]): Rev
   const seen = new Set<string>();
   for (const e of live) {
     if (e.field === "*") {
-      steps.push({ op: "delete", table: e.table_name, record_id: e.record_id, edit_id: e.id });
+      if (e.new_value === null && e.old_value && typeof e.old_value === "object") {
+        steps.push({ op: "reinsert", table: e.table_name, record_id: e.record_id, row: e.old_value as Record<string, unknown>, edit_id: e.id });
+      } else {
+        steps.push({ op: "delete", table: e.table_name, record_id: e.record_id, edit_id: e.id });
+      }
       continue;
     }
     const key = `${e.table_name}#${e.record_id}#${e.field}`;
@@ -65,8 +71,8 @@ export function planRevert(edits: readonly (EditRecord & { id: number })[]): Rev
     else steps.push(step);
     seen.add(key);
   }
-  // 先還原欄位、再刪整列（刪列後欄位還原沒意義，順序無害但清楚）
-  return [...steps.filter((s) => s.op === "restore"), ...steps.filter((s) => s.op === "delete")];
+  // 先把被刪的列放回去、再還原欄位、最後刪掉當時新增的列（刪列後欄位還原沒意義，順序無害但清楚）
+  return [...steps.filter((s) => s.op === "reinsert"), ...steps.filter((s) => s.op === "restore"), ...steps.filter((s) => s.op === "delete")];
 }
 
 export async function executeRevert(supabase: SupabaseLike, contributionId: string, revertedBy: string): Promise<{ steps: RevertStep[]; reverted: number }> {
@@ -77,6 +83,9 @@ export async function executeRevert(supabase: SupabaseLike, contributionId: stri
     if (s.op === "restore") {
       const { error: e } = await supabase.from(s.table).update({ [s.field]: s.value }).eq("id", s.record_id);
       if (e) throw new Error(`revert ${s.table}.${s.field}: ${e.message}`);
+    } else if (s.op === "reinsert") {
+      const { error: e } = await supabase.from(s.table).insert(s.row);
+      if (e) throw new Error(`revert reinsert ${s.table}#${s.record_id}: ${e.message}`);
     } else {
       const { error: e } = await supabase.from(s.table).delete().eq("id", s.record_id);
       if (e) throw new Error(`revert delete ${s.table}#${s.record_id}: ${e.message}`);

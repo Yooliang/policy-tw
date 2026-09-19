@@ -368,6 +368,11 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     }
     if (raw.note !== undefined && !isStr(raw.note, 1, 2000)) push("note", "要是 1～2000 字");
     if (raw.task_id !== undefined && !isStr(raw.task_id, 1, 160)) push("task_id", "要是字串（/next 給的 task_id）");
+    // no_change 的 task_id：/next 的 how_to 教代理放頂層，schema 卻只認 payload.task_id（外部審查 2026-09-19 建議 4）。
+    // 只對 no_change 做這個補正：頂層有、payload 沒有 → 灌進去再驗。其他型別的 payload 一律原樣。
+    if (raw.contribution_type === "no_change" && isObj(raw.payload) && !raw.payload.task_id && typeof raw.task_id === "string" && raw.task_id) {
+      raw.payload.task_id = raw.task_id;
+    }
     validatePayload(raw.contribution_type, raw.payload, push);
     items.push({
       contribution_type: raw.contribution_type,

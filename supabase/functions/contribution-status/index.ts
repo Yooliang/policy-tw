@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { requiredAgree } from "../_shared/consensus.ts";
+import { requiredAgree, effectiveOrRequired } from "../_shared/consensus.ts";
 
 /**
  * contribution-status — 查單筆貢獻的審核狀態：GET ?id=<uuid>
@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data, error } = await supabase
       .from("contributions")
-      .select("id, contribution_type, payload, source_urls, status, agree_count, disagree_count, unsure_count, review_notes, reviewed_at, applied_at, applied_politician_id, applied_policy_id, created_at")
+      .select("id, contribution_type, payload, source_urls, status, agree_count, disagree_count, unsure_count, review_notes, reviewed_at, applied_at, applied_politician_id, applied_policy_id, created_at, effective_agree")
       .eq("id", id)
       .maybeSingle();
     if (error) throw new Error(`contributions lookup: ${error.message}`);
@@ -42,12 +42,13 @@ Deno.serve(async (req) => {
     const { count: editCount, error: editError } = await supabase.from("edit_history").select("id", { count: "exact", head: true }).eq("contribution_id", id);
     if (editError) throw new Error(`edit_history count: ${editError.message}`);
 
-    const { payload, source_urls: _sourceUrls, ...rest } = data;
+    const { payload, source_urls: _sourceUrls, effective_agree: _eff, ...rest } = data;
     return json({
       success: true,
       contribution: {
         ...rest,
-        required_agree: requiredAgree(data.contribution_type, payload, data.source_urls ?? []),
+        // 有效門檻（系統票折進去；2026-09-20）
+        required_agree: effectiveOrRequired(data),
         edit_history_count: editCount ?? 0,
         ...(data.applied_politician_id ? { politician_url: `https://policy-tw.web.app/politician/${data.applied_politician_id}` } : {}),
         ...(data.applied_policy_id ? { policy_url: `https://policy-tw.web.app/policy/${data.applied_policy_id}` } : {}),
