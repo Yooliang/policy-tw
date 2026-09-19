@@ -5,7 +5,7 @@
  */
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
-import { correctionTouches } from "./correction.ts";
+import { correctionTouches, correctionOnlyFromRumor } from "./correction.ts";
 
 export const VOTE_WEIGHT = 1;
 /** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
@@ -65,7 +65,10 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
-  if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) return "high";
+  if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) {
+    // 傳聞參選→登記／不參選：一般級（2026-09-20 審查建議 12）；SQL contribution_required_agree 同步
+    return correctionOnlyFromRumor(payload) ? "normal" : "high";
+  }
   // roster_check 跟提議任務、無異動同級：它不改核心資料。
   // 代價是官方來源只要一票就能把某縣市標記為已清查、壓住那個缺口七天——
   // 但最壞情況只是七天的延遲，而且 roster_checks 表裡看得到是誰報的；

@@ -330,12 +330,18 @@ export interface VerifyContextData {
   policy?: Obj | null;
   tracking_logs?: Obj[];
   target?: Obj | null;
+  /** merge_politician：跟 duplicate_politician 任務同一份 current（兩筆全欄、參選、政見、Jev 判定） */
+  pair_current?: Obj | null;
+  /** adjudication：跟 adjudicate 任務同一份 current（原貢獻＋正反票） */
+  adjudicate_current?: Obj | null;
+  /** no_change：這筆回報的是哪個任務（手動任務的標題與敘述；auto 任務拆出型別與目標） */
+  task?: Obj | null;
 }
 
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
   new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id",
-  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；兩票同一個值才會落庫，指不同（含 new 與某人混）或都沒指認會轉 disputed 進裁決",
+  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；兩票指不同（含 new 與某人混）會轉 disputed 進裁決；都沒指認也會轉 disputed",
 } as const;
 
 /** 純函式：依 contribution_type 組驗證用的 current */
@@ -387,6 +393,21 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         hint: "逐欄核對：db_current 是資料庫現值、correct_value 是提交者主張的正確值；每個欄位都要在來源找得到才 agree，任一欄對不上就 disagree 並指出是哪一欄",
       };
     }
+    // 2026-09-20 審查建議 5：這幾種型別的驗證項原本只有 payload，驗證者只能照 reason 投
+    case "merge_politician":
+      return data.pair_current ?? { hint: "找不到那兩筆人物（可能已合併或不存在）：投 unsure" };
+    case "adjudication":
+      return data.adjudicate_current ?? {};
+    case "removal":
+      return {
+        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null,
+        politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
+        hint: "看這筆政見的標題與內容：它是不是「當選後要做的具體事情」？口號、行程、表態、團隊組成不是政見 → agree 移除；是政見但只是缺出處 → disagree 並在 note 說應該用 correction 補 source_url",
+      };
+    case "no_change":
+      return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
+    case "question_answer":
+      return data.task ?? {};
     default:
       return {};
   }
@@ -463,6 +484,42 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       ]);
       data.policy = pl.data ?? null;
       data.tracking_logs = logs.data ?? [];
+    }
+  }
+  if (contributionType === "merge_politician") {
+    const keep = typeof payload.keep_id === "string" ? payload.keep_id : null, remove = typeof payload.remove_id === "string" ? payload.remove_id : null;
+    if (keep && remove) {
+      const ctx = await fetchTaskContext(supabase, "duplicate_politician", { a: { id: keep }, b: { id: remove } });
+      data.pair_current = ctx.pair?.a && ctx.pair?.b ? shapeTaskCurrent("duplicate_politician", ctx) : null;
+    }
+  }
+  if (contributionType === "adjudication") {
+    const cid = typeof payload.contribution_id === "string" ? payload.contribution_id : null;
+    if (cid) data.adjudicate_current = shapeTaskCurrent("adjudicate", await fetchTaskContext(supabase, "adjudicate", { contribution_id: cid }));
+  }
+  if (contributionType === "removal") {
+    const id = typeof payload.target_id === "string" ? payload.target_id : null;
+    if (id && payload.target_table === "policies") {
+      const { data: pl } = await supabase.from("policies").select("*").eq("id", id).maybeSingle();
+      data.policy = pl ?? null;
+      const pid = (pl as Obj | null)?.politician_id;
+      if (typeof pid === "string") {
+        const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
+        data.politicians = p ? [p] : [];
+      }
+    }
+  }
+  if (contributionType === "no_change" || contributionType === "question_answer") {
+    const taskId = typeof payload.task_id === "string" ? payload.task_id : null;
+    const questionId = typeof payload.question_id === "string" ? payload.question_id : null;
+    if (questionId) {
+      data.task = shapeTaskCurrent("question", await fetchTaskContext(supabase, "question", { question_id: questionId }));
+    } else if (taskId?.startsWith("auto:")) {
+      const [, taskType, ...rest] = taskId.split(":");
+      data.task = { task_id: taskId, task_type: taskType, target_id: rest.join(":"), source: "auto" };
+    } else if (taskId) {
+      const { data: t } = await supabase.from("contribution_tasks").select("id, task_type, title, description, target, source").eq("id", taskId).maybeSingle();
+      data.task = t ? { task_id: taskId, ...pick(t, ["task_type", "title", "description", "target", "source"]) } : { task_id: taskId };
     }
   }
   if (contributionType === "correction") {

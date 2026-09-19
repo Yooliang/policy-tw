@@ -29,3 +29,15 @@ export function normalizeCorrection(payload: unknown): NormalizedCorrection {
 export function correctionTouches(payload: unknown, field: string): boolean {
   return normalizeCorrection(payload).changes.some((c) => c.field === field);
 }
+
+/**
+ * 這筆 correction 動 candidate_status，而且動的**全部**是「傳聞參選／可能參選」（rumored／likely）？
+ * 2026-09-20 審查建議 12：把傳聞改成 registered 是補強、改成 not_running 抹掉的是一則傳聞，不是一筆已登記的參選——
+ * 不該走加減參選人的 4／6／8 票（63 筆 candidate_status_stale 清不完）。真正要 4／6／8 的是 registered／confirmed → not_running。
+ * current_value 是代理自報的，但驗證項把 db_current 並排顯示，謊報會被看見。
+ */
+export function correctionOnlyFromRumor(payload: unknown): boolean {
+  const changes = normalizeCorrection(payload).changes.filter((c) => c.field === "candidate_status");
+  if (changes.length === 0) return false;
+  return changes.every((c) => c.current_value === "rumored" || c.current_value === "likely");
+}
