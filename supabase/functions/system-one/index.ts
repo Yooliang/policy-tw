@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, isTabularNote, textSimilarity, SAME_CONTENT_THRESHOLD, focusLines } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -232,7 +232,8 @@ Deno.serve(async (req) => {
         // 最多看三個來源：第一個常常只是中選會的附件索引頁，名單在 PDF 或後面的來源裡
         const urls = c.source_urls.slice(0, 3);
         const fetched = await Promise.all(urls.map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
-        const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names));
+        const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names)).map((p) => ({ ...p, tabular: isTabularNote(p.note) }));
+        const tabular = usable.some((p) => p.tabular);
         const combined = combineSources(usable, names);
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
@@ -250,12 +251,12 @@ Deno.serve(async (req) => {
           }];
           key = noName ? "fetch:noname" : `fetch:${fetched[0]?.kind ?? "error"}`;
         } else {
-          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
+          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined, { tabular });
           (state.page as Record<string, unknown>).urls = urls;
           const res = await askJev(apiKey, state, questions);
           cost += res.usage.cost;
           // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
-          const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+          const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers, MIN_PROBABILITY, { tabular });
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
             choice: agg.choice, probability: agg.probability, confidence: null,
@@ -346,9 +347,19 @@ Deno.serve(async (req) => {
         }]);
         return json({ success: true, contribution_id: c.id, url: targetUrl, verdict: "cannot_tell", probability: 0, counts: false, fields: {}, min_probability: MIN_PROBABILITY, hint: "這一頁沒提到主角（名字不在正文裡）：換一個真的講到這個人的來源；不要拿這頁投 disagree" });
       }
-      const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
+      // 轉載不是第二來源（審查建議 7）：跟系統票當時存下來的正文比，太像就退件
+      {
+        const { data: prior } = await supabase.from("jev_decisions").select("state").eq("subject_type", "contribution").eq("subject_id", c.id)
+          .eq("question", "source_support").order("asked_at", { ascending: false }).limit(1).maybeSingle();
+        const priorText = (prior?.state as { page?: { text?: string } } | null)?.page?.text ?? "";
+        if (priorText && textSimilarity(priorText, page.text) >= SAME_CONTENT_THRESHOLD) {
+          return json({ success: false, error: "same_content", message: "這一頁是提交來源的轉載（正文幾乎相同），不算獨立的第二個來源；請找另一家自己採訪或另一份官方文件" }, 400);
+        }
+      }
+      const tabular = isTabularNote(page.note);
+      const { state, questions } = buildSourceSupportAsk(claim, targetUrl, tabular ? focusLines(page.text, names) : focusText(page.text, names), { tabular });
       const res = await askJev(apiKey, state, questions);
-      const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+      const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers, MIN_PROBABILITY, { tabular });
       await insertRecords(supabase, [{
         subject_type: "contribution", subject_id: c.id, question: "second_source",
         choice: agg.choice, probability: agg.probability, confidence: null,
@@ -358,10 +369,12 @@ Deno.serve(async (req) => {
       return json({
         success: true, contribution_id: c.id, url: targetUrl,
         verdict: agg.choice, probability: agg.probability, counts: agg.probability >= MIN_PROBABILITY, fields: agg.fields,
+        core_fields: agg.core_fields, contradicted_core: agg.contradicted_core, tabular,
         min_probability: MIN_PROBABILITY,
         hint: agg.choice === "supported" && agg.probability >= MIN_PROBABILITY
           ? "這一頁足以證實：投 agree 時把這個網址放 evidence_url"
-          : agg.choice === "not_supported" ? "這一頁與宣稱矛盾：投 disagree 並把這個網址放 evidence_url、note 寫哪一欄不對"
+          : agg.choice === "not_supported" && agg.contradicted_core ? "這一頁與宣稱的核心欄位矛盾：投 disagree 並把這個網址放 evidence_url、note 寫哪一欄不對"
+          : agg.choice === "not_supported" ? "只有非核心欄位（政黨寫法、上一屆選區之類）對不上：不構成反對，投 unsure 並在 note 說明哪一欄不同"
           : "這一頁證明不了關鍵欄位：換一個來源，或投 unsure 並說明找過哪裡",
       });
     }

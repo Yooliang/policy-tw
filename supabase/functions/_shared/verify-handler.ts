@@ -78,12 +78,24 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   const finalVerdict = blind ? "unsure" : input.verdict;
   const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
 
+  // 票的來歷（審查建議 7）：evidence_url 曾由這台機器拿去 judge 判過 → 這張票的判斷者是 Jev，不是代理
+  let judgeBacked = false;
+  if (input.evidence_url) {
+    try {
+      const { data: judged } = await supabase.from("jev_decisions").select("state").eq("subject_type", "contribution").eq("subject_id", contribution.id)
+        .eq("question", "second_source").eq("requester_ip_hash", ipHash).order("asked_at", { ascending: false }).limit(20);
+      type Judged = { state?: { page?: { url?: string } } };
+      judgeBacked = ((judged ?? []) as Judged[]).some((j: Judged) => (j.state?.page?.url ?? "") === input.evidence_url);
+    } catch { /* 查不到就當不是 */ }
+  }
+
   const { data: vote, error: insertError } = await supabase
     .from("contribution_votes")
     .insert({
       contribution_id: contribution.id,
       verdict: finalVerdict,
       evidence_url: input.evidence_url ?? null,
+      judge_backed: judgeBacked,
       note: finalNote,
       agent_name: input.agent_name,
       agent_tool: input.agent_tool ?? null,

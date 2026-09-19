@@ -275,6 +275,32 @@ function stripHtml(html: string): string {
 }
 
 /** 名字附近的段落優先；沒命中就取開頭。上限 PAGE_TEXT_MAX（Jev context 32k，留餘裕） */
+/**
+ * 表格來源（PDF／xls／附件）用「行」取：只留含主角名字的那幾行，前後各帶一行（表頭或相鄰列給對照用）。
+ * 2026-09-19 卡伊．馬賴：登記名單攤平後「新竹市第7選舉區 115/09/03 卡伊．馬賴 民主進步黨 嘉義市第1選舉區 …」，
+ * 下一列的縣市貼在她名字後面，Jev 把 region 讀成嘉義市、高信心判矛盾。名字前後 700 字的窗口塞著十幾個別人的欄位。
+ */
+export function focusLines(text: string, names: Array<string | null | undefined>, limit = PAGE_TEXT_MAX): string {
+  if (!text) return "";
+  const lines = text.split(/\n/);
+  const hits = new Set<number>();
+  lines.forEach((line, i) => { if (nameHit(line, names)) { hits.add(i); if (i > 0) hits.add(i - 1); if (i + 1 < lines.length) hits.add(i + 1); } });
+  if (hits.size === 0) return focusText(text, names, limit);
+  const out: string[] = [];
+  let used = 0;
+  for (const i of [...hits].sort((a, b) => a - b)) {
+    const l = lines[i].trim(); if (!l) continue;
+    out.push(l); used += l.length + 1;
+    if (used >= limit) break;
+  }
+  return out.join("\n").slice(0, limit);
+}
+
+/** 來源是不是表格類（PDF／xls／附件）：fetchSource 的 note 會標 */
+export function isTabularNote(note: string | null | undefined): boolean {
+  return /pdf|xls|附件/i.test(note ?? "");
+}
+
 export function focusText(text: string, names: Array<string | null | undefined>, limit = PAGE_TEXT_MAX): string {
   if (!text) return "";
   const starts = new Set<number>();
@@ -351,7 +377,7 @@ export function nameHit(text: string, names: Array<string | null | undefined>): 
 }
 
 export function combineSources(
-  pages: Array<{ url: string; text: string }>,
+  pages: Array<{ url: string; text: string; tabular?: boolean }>,
   names: Array<string | null | undefined>,
   perSource = 2200,
   total = PAGE_TEXT_MAX,
@@ -365,7 +391,7 @@ export function combineSources(
   for (const p of scored) {
     let host = p.url;
     try { host = new URL(p.url).hostname; } catch { /* 原樣 */ }
-    const piece = `【來源 ${host}】\n${focusText(p.text, names, perSource)}`;
+    const piece = `【來源 ${host}】\n${p.tabular ? focusLines(p.text, names, perSource) : focusText(p.text, names, perSource)}`;
     if (used + piece.length > total && parts.length > 0) break;
     parts.push(piece); used += piece.length;
   }
@@ -485,20 +511,23 @@ export function aggregateExtract(
   return { field, person, value, probability, counts };
 }
 
-export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string): {
+export const TABULAR_INSTRUCTIONS = "page 是表格逐行攤平的結果（登記名單、彙總表），每一行是一個人：只看含有主角名字的那一行，相鄰行是別人的資料，不能拿來判斷。";
+
+export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string, opts: { tabular?: boolean } = {}): {
   state: Record<string, unknown>;
   questions: Record<string, JevQuestion>;
 } {
   const questions: Record<string, JevQuestion> = {};
+  const extra = opts.tabular ? ` ${TABULAR_INSTRUCTIONS}` : "";
   for (const [k, v] of Object.entries(claim)) {
     const shown = typeof v === "string" ? v : JSON.stringify(v);
     questions[`field:${k}`] = {
       type: "choice",
-      instructions: `${FIELD_INSTRUCTIONS} 這一題的欄位：${k}＝${shown}`,
+      instructions: `${FIELD_INSTRUCTIONS}${extra} 這一題的欄位：${k}＝${shown}`,
       criteria: { confirmed: `文字證明 ${k} 就是 ${shown}（含同義寫法）`, contradicted: `文字寫了不同的值、或這件事是別人的`, absent: `文字沒提到這個欄位` },
     };
   }
-  return { state: { claim, page: { url, text: pageText } }, questions };
+  return { state: { claim, page: { url, text: pageText, ...(opts.tabular ? { tabular: true } : {}) } }, questions };
 }
 
 export interface FieldResult { verdict: FieldVerdict; p: number }
@@ -515,26 +544,46 @@ export function aggregateFieldVerdicts(
   claim: Record<string, unknown>,
   answers: Record<string, JevAnswer>,
   minProbability = MIN_PROBABILITY,
-): { choice: SourceSupport; probability: number; fields: Record<string, FieldResult> } {
+  opts: { tabular?: boolean } = {},
+): { choice: SourceSupport; probability: number; fields: Record<string, FieldResult>; core_fields: string[]; contradicted_core: boolean } {
   const fields: Record<string, FieldResult> = {};
   for (const k of Object.keys(claim)) {
     const a = answers[`field:${k}`];
     if (!a) continue;
-    fields[k] = { verdict: a.choice as FieldVerdict, p: Math.round((a.probabilities?.[a.choice] ?? 0) * 10000) / 10000 };
-  }
-  const contradicted = Object.values(fields).filter((f) => f.verdict === "contradicted" && f.p >= minProbability);
-  if (contradicted.length > 0) {
-    return { choice: "not_supported", probability: Math.max(...contradicted.map((f) => f.p)), fields };
+    let verdict = a.choice as FieldVerdict;
+    // 表格來源（PDF／xls）的「矛盾」證據力不足：攤平後的值可能來自相鄰列。降成 absent → 棄權不加速，不會卡住一筆真的資料（2026-09-20 審查建議 10）
+    if (opts.tabular && verdict === "contradicted") verdict = "absent";
+    fields[k] = { verdict, p: Math.round((a.probabilities?.[a.choice] ?? 0) * 10000) / 10000 };
   }
   const coreSpec = CORE_FIELDS_BY_TYPE[contributionType] ?? ["name"];
   const core = coreSpec.includes("*changes")
     ? Object.keys(fields).filter((k) => k !== "subject_name")
     : coreSpec.filter((k) => k in fields);
-  if (core.length > 0 && core.every((k) => fields[k].verdict === "confirmed")) {
-    return { choice: "supported", probability: Math.min(...core.map((k) => fields[k].p)), fields };
+  const contradicted = Object.values(fields).filter((f) => f.verdict === "contradicted" && f.p >= minProbability);
+  // 哪一欄矛盾要讓代理知道：政黨簡稱、上一屆選區這種非核心欄對不上，不該變成帶反證的反對票（審查建議 8）
+  const contradictedCore = core.some((k) => fields[k]?.verdict === "contradicted" && fields[k].p >= minProbability);
+  if (contradicted.length > 0) {
+    return { choice: "not_supported", probability: Math.max(...contradicted.map((f) => f.p)), fields, core_fields: core, contradicted_core: contradictedCore };
   }
-  return { choice: "cannot_tell", probability: 0, fields };
+  if (core.length > 0 && core.every((k) => fields[k].verdict === "confirmed")) {
+    return { choice: "supported", probability: Math.min(...core.map((k) => fields[k].p)), fields, core_fields: core, contradicted_core: false };
+  }
+  return { choice: "cannot_tell", probability: 0, fields, core_fields: core, contradicted_core: false };
 }
+
+/**
+ * 兩段正文像不像（審查建議 7）：中央社的稿會原文出現在 Yahoo、LINE TODAY、地方新聞網，網域不同、文字幾乎一樣。
+ * 正規化後取 3-gram 算 Jaccard；只看開頭 2000 字（轉載通常整段照抄）。
+ */
+export function textSimilarity(a: string, b: string): number {
+  const norm = (t: string) => t.replace(/\s+/g, "").replace(/[，。、：；！？「」『』（）()\[\]【】《》〈〉"'“”‘’—\-–·．]/g, "").slice(0, 2000);
+  const grams = (t: string) => { const g = new Set<string>(); for (let i = 0; i + 3 <= t.length; i++) g.add(t.slice(i, i + 3)); return g; };
+  const ga = grams(norm(a)), gb = grams(norm(b));
+  if (ga.size === 0 || gb.size === 0) return 0;
+  let inter = 0; for (const g of ga) if (gb.has(g)) inter++;
+  return inter / (ga.size + gb.size - inter);
+}
+export const SAME_CONTENT_THRESHOLD = 0.5;
 
 /** PDF 抽字：unpdf 是給 serverless／edge 用的 pdf.js 包裝，不需要 canvas。動態載入，HTML 路徑不付這個成本 */
 async function pdfText(buf: Uint8Array): Promise<string> {
