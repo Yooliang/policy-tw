@@ -212,6 +212,9 @@ def main():
                 vote, evidence = "agree", u
                 note = f"第二來源（{urllib.parse.urlparse(u).hostname}）證實：" + "、".join(k for k, (vv, _) in fields.items() if vv == "confirmed")
                 break
+            if v == "not_supported" and not out.get("contradicted_core", True):
+                # 只有政黨寫法、上一屆選區這種非核心欄對不上：不是反對，留線索給下一個人（2026-09-20）
+                print("     只有非核心欄位矛盾，不構成反對，換下一個候選"); continue
             if v == "not_supported":
                 vote, evidence = "disagree", u
                 note = f"第二來源（{urllib.parse.urlparse(u).hostname}）反證：" + "、".join(k for k, (vv, _) in fields.items() if vv == "contradicted")

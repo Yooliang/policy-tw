@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { focusLines, isTabularNote, textSimilarity, SAME_CONTENT_THRESHOLD, buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -266,4 +266,43 @@ Deno.test("buildPairAsk：一題 same／diff／unclear，state 帶兩筆", () =>
   assertEquals(Object.keys(questions), ["same_person"]);
   assertEquals(Object.keys(questions.same_person.criteria), ["same", "diff", "unclear"]);
   assertEquals((state.a as { name: string }).name, "吳品叡");
+});
+
+// 2026-09-20 審查建議 10：表格攤平後矛盾來自相鄰列
+Deno.test("focusLines：表格來源只取主角所在行±1；沒命中就退回 focusText", () => {
+  const t = "選舉區 登記日 姓名 政黨\n新竹市第7選舉區 115/09/03 卡伊‧馬賴 民主進步黨\n嘉義市第1選舉區 115/08/31 凌子楚 民主進步黨\n嘉義市第1選舉區 115/08/31 郭文居 無";
+  const f = focusLines(t, ["卡伊．馬賴"]);
+  assertEquals(f.split("\n").length, 3);
+  assertEquals(f.includes("郭文居"), false);
+  assertEquals(f.includes("卡伊‧馬賴 民主進步黨"), true);
+  assertEquals(focusLines("沒有她的一段文字", ["卡伊．馬賴"]), "沒有她的一段文字");
+  assertEquals(isTabularNote("text/html; charset=utf-8; 附件 5"), true);
+  assertEquals(isTabularNote("pdf"), true);
+  assertEquals(isTabularNote("text/html; charset=utf-8"), false);
+});
+
+Deno.test("aggregateFieldVerdicts：表格來源的矛盾降成 absent（棄權）；非表格照舊；回 core_fields 與 contradicted_core", () => {
+  const claim = { name: "卡伊．馬賴", region: "新竹市", party: "民主進步黨", election_id: 2026, election_type: "縣市議員", candidate_status: "registered" };
+  type A = Record<string, { choice: string; probabilities: Record<string, number> }>;
+  const ans: A = {
+    "field:name": { choice: "confirmed", probabilities: { confirmed: 1 } }, "field:region": { choice: "contradicted", probabilities: { contradicted: 1 } },
+    "field:party": { choice: "confirmed", probabilities: { confirmed: 1 } }, "field:election_id": { choice: "confirmed", probabilities: { confirmed: 0.99 } },
+    "field:election_type": { choice: "confirmed", probabilities: { confirmed: 0.98 } }, "field:candidate_status": { choice: "confirmed", probabilities: { confirmed: 0.96 } },
+  };
+  const plain = aggregateFieldVerdicts("candidacy", claim, ans as never);
+  assertEquals(plain.choice, "not_supported"); assertEquals(plain.contradicted_core, true, "region 是核心欄");
+  const tab = aggregateFieldVerdicts("candidacy", claim, ans as never, 0.95, { tabular: true });
+  assertEquals(tab.choice, "cannot_tell", "表格來源：矛盾降成 absent，核心欄不全 confirmed → 棄權");
+  assertEquals(tab.contradicted_core, false);
+  const partyOnly = aggregateFieldVerdicts("candidacy", claim, { ...ans, "field:region": { choice: "confirmed", probabilities: { confirmed: 1 } }, "field:party": { choice: "contradicted", probabilities: { contradicted: 0.99 } } } as never);
+  assertEquals(partyOnly.choice, "not_supported"); assertEquals(partyOnly.contradicted_core, false, "政黨不是核心欄：not_supported 但不構成反對");
+});
+
+Deno.test("textSimilarity：轉載幾乎一樣 → 高；不同稿 → 低", () => {
+  const a = "國民黨立法院黨團總召傅崐萁今天提案修正國籍法，增訂大陸地區人民取得台灣戶籍者參選公職依兩岸人民關係條例規定，不適用國籍法放棄國籍的規定。";
+  const b = "【轉載】" + a + "（中央社）";
+  const c = "屏東縣長周春米今天出席社區共餐活動，宣布長輩加菜計畫將擴大到全縣三十三鄉鎮，並補助每人每餐二十元。";
+  assertEquals(textSimilarity(a, b) >= SAME_CONTENT_THRESHOLD, true);
+  assertEquals(textSimilarity(a, c) < SAME_CONTENT_THRESHOLD, true);
+  assertEquals(textSimilarity("", a), 0);
 });
