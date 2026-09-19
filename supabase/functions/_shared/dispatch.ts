@@ -102,7 +102,7 @@ export function filterOwnSubmittedTasks<T extends TaskLike>(tasks: readonly T[],
   return tasks.filter((t) => !submittedTaskIds.has(t.task_id));
 }
 
-/** 同一個來源 IP 按過 skip 的任務，這麼久之內不再派給這個 IP（任何代號） */
+/** @deprecated 2026-09-20：skip 不再按 IP 記 24 小時排除，改成「跟派過一樣排到後面」；常數留給舊測試 */
 export const SKIP_MEMORY_HOURS = 24;
 /**
  * 一個任務底下最多同時有幾筆還在等票的貢獻；超過就先不要再派這個任務。
