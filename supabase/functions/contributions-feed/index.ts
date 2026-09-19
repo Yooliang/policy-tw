@@ -5,7 +5,7 @@ import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContributio
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
- * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&type=&limit=20&cursor=<last_activity_at>
+ * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&actor_id=&type=&limit=20&cursor=<last_activity_at>
  *   voting＝還在等票但已經有人投過（status=pending 且三種票數任一 > 0）。
  *   verified 這個狀態是過渡的——通過驗證會立刻自動落庫變 applied，所以那一頁幾乎永遠是空的，
  *   讀者要看的其實是「正在被核對的那些」。
@@ -31,6 +31,9 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const status = url.searchParams.get("status") || "all";
     const agentName = url.searchParams.get("agent_name");
+    // 身份鍵（docs/BLUEPRINT-agent-identity.md）：登入者的「我的貢獻」用 actor_id=ditrust:<auth.uid()> 撈，
+    // 不再靠字串比對代號——任何人填別人的代號就看到別人的，那不叫「我的」
+    const actorId = url.searchParams.get("actor_id");
     const type = url.searchParams.get("type");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 50);
     const cursor = url.searchParams.get("cursor");
@@ -53,6 +56,7 @@ Deno.serve(async (req) => {
     else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0");
     else if (status !== "all") q = q.eq("status", status);
     if (agentName) q = q.eq("agent_name", agentName);
+    if (actorId) q = q.eq("actor_id", actorId);
     if (type) q = q.eq("contribution_type", type);
     if (cursor) q = q.lt("last_activity_at", cursor);
 
