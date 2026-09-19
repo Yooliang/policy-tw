@@ -418,6 +418,45 @@ async function pdfText(buf: Uint8Array): Promise<string> {
   return typeof text === "string" ? text : (text as string[]).join("\n");
 }
 
+/** xls／xlsx 抽字：SheetJS（esm.sh）。連江縣選委會的登記名單是 .xls 附件，PDF 補了 xls 沒補就等於那一縣全棄權（2026-09-19） */
+async function xlsText(buf: Uint8Array): Promise<string> {
+  type Xlsx = { read(d: Uint8Array, o: { type: "array" }): { SheetNames: string[]; Sheets: Record<string, unknown> }; utils: { sheet_to_csv(s: unknown): string } };
+  const spec = "https://esm.sh/xlsx@0.18.5?no-dts";
+  const XLSX = await import(spec) as unknown as Xlsx;
+  const wb = XLSX.read(buf, { type: "array" });
+  return wb.SheetNames.map((n) => `【工作表 ${n}】\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join("\n");
+}
+
+const ATTACHMENT_RE = /href="([^"]+\.(?:pdf|xlsx?|ods))(?:\?[^"]*)?"/gi;
+const ATTACHMENT_MAX = 3;
+const ATTACHMENT_MAX_BYTES = 3_000_000;
+
+/** 頁面上的附件連結（pdf／xls／xlsx／ods），相對路徑照 base 補全，去重 */
+export function attachmentLinks(html: string, baseUrl: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(ATTACHMENT_RE)) {
+    try {
+      const u = new URL(m[1], baseUrl).href;
+      if (!out.includes(u)) out.push(u);
+    } catch { /* 壞連結略過 */ }
+    if (out.length >= ATTACHMENT_MAX) break;
+  }
+  return out;
+}
+
+async function attachmentText(url: string, fetchImpl: typeof fetch): Promise<string> {
+  const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) return "";
+  const len = Number(res.headers.get("content-length") ?? 0);
+  if (len > ATTACHMENT_MAX_BYTES) return "";
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.byteLength > ATTACHMENT_MAX_BYTES) return "";
+  const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+  const isPdf = ct.includes("pdf") || /\.pdf(\?|$)/i.test(url) || (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46);
+  const text = isPdf ? await pdfText(buf) : await xlsText(buf);
+  return text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+}
+
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36";
 
 /**
@@ -444,8 +483,32 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
         return { kind: "pdf", text: "", note: `pdf 抽字失敗：${e instanceof Error ? e.message : String(e)}`.slice(0, 120) };
       }
     }
+    if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.xlsx?(\?|$)/i.test(url)) {
+      try {
+        const buf = new Uint8Array(await res.arrayBuffer());
+        if (buf.byteLength > ATTACHMENT_MAX_BYTES) return { kind: "pdf", text: "", note: "xls 太大不抽字" };
+        const text = await xlsText(buf);
+        return { kind: "html", text: text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim(), note: "xls" };
+      } catch (e) {
+        return { kind: "error", text: "", note: `xls 抽字失敗：${e instanceof Error ? e.message : String(e)}`.slice(0, 120) };
+      }
+    }
     const raw = await res.text();
-    return { kind: "html", text: htmlToText(raw.slice(0, 1_500_000)), note: ct };
+    const html = raw.slice(0, 1_500_000);
+    let text = htmlToText(html);
+    // 頁面本身只有幾行、名單在附件裡（選委會的公告頁幾乎都這樣）：跟著抓最多三個 pdf／xls 附件接在後面。
+    // 抓失敗只是少一段，不影響頁面本身的文字。
+    const attachments = attachmentLinks(html, url);
+    if (attachments.length > 0) {
+      const parts = await Promise.all(attachments.map(async (a) => {
+        try {
+          const t = await attachmentText(a, fetchImpl);
+          return t ? `\n\n【附件 ${a.split("/").pop()}】\n${t}` : "";
+        } catch { return ""; }
+      }));
+      text += parts.join("");
+    }
+    return { kind: "html", text, note: attachments.length ? `${ct}; 附件 ${attachments.length}` : ct };
   } catch (e) {
     return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
   }

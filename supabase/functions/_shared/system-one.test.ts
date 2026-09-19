@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateFieldVerdicts, articleBodyFromJsonLd, combineSources, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -187,4 +187,12 @@ Deno.test("combineSources：含人名的來源排前面、每段標來源網域�
   assertEquals(out.includes("https://x/y"), false);
   assertEquals(combineSources([], ["a"]), "");
   assertEquals(combineSources([{ url: "u", text: "y".repeat(10000) }], ["a"], 2200, 3000).length <= 3000, true);
+});
+
+// 2026-09-19：連江縣選委會的公告頁只有幾行字，登記名單在 .xls 附件裡，三筆參選紀錄的系統票全棄權
+Deno.test("attachmentLinks：抓 pdf／xls／xlsx 連結、補全相對路徑、去重、最多三個", () => {
+  const html = `<a href="/api/file/a.xls">議員</a> <a href="https://web.cec.gov.tw/api/file/b.pdf?x=1">長</a> <a href="/api/file/a.xls">重複</a> <a href="/img/c.png">圖</a> <a href="/api/file/d.xlsx">代表</a> <a href="/api/file/e.ods">村里</a>`;
+  const links = attachmentLinks(html, "https://web.cec.gov.tw/lcec/article/64620");
+  assertEquals(links, ["https://web.cec.gov.tw/api/file/a.xls", "https://web.cec.gov.tw/api/file/b.pdf", "https://web.cec.gov.tw/api/file/d.xlsx"]);
+  assertEquals(attachmentLinks("<p>沒有附件</p>", "https://x/y"), []);
 });
