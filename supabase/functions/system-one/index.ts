@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -199,16 +199,18 @@ Deno.serve(async (req) => {
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
         let key: string;
-        if (!combined || !hasUsableText(combined, names)) {
+        // 主角名字不在文本裡（索引頁、附件沒接進來）→ 棄權，不問 Jev：它只會在別人的資料上判「矛盾」（2026-09-19 卡伊．馬賴）
+        const noName = !!combined && !nameHit(combined, names);
+        if (!combined || !hasUsableText(combined, names) || noName) {
           // 全部抓不到正文就棄權（cannot_tell、機率 0），但一樣留紀錄：候選查詢靠這列知道「判過了」，
           // 而且對帳時分得出「來源抓不到」跟「Jev 看不出來」是兩回事
-          const notes = fetched.map((p) => `${p.kind}:${p.note}`).join(" | ");
+          const notes = (noName ? "主角名字不在文本裡 | " : "") + fetched.map((p) => `${p.kind}:${p.note}`).join(" | ");
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
             choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
             model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: srcUrl, urls, text: "", fetch: fetched[0]?.kind ?? "error", note: notes } }, cost_usd: 0,
           }];
-          key = `fetch:${fetched[0]?.kind ?? "error"}`;
+          key = noName ? "fetch:noname" : `fetch:${fetched[0]?.kind ?? "error"}`;
         } else {
           const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
           (state.page as Record<string, unknown>).urls = urls;
@@ -297,6 +299,14 @@ Deno.serve(async (req) => {
       const page = await fetchSource(targetUrl);
       if (page.kind !== "html" || !hasUsableText(page.text, names)) {
         return json({ success: false, error: "fetch_failed", message: `抓不到正文（${page.note}）；試試 archive.org 的存檔網址或另一個來源` }, 422);
+      }
+      if (!nameHit(page.text, names)) {
+        await insertRecords(supabase, [{
+          subject_type: "contribution", subject_id: c.id, question: "second_source",
+          choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
+          model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: targetUrl, text: "", note: "主角名字不在文本裡" } }, cost_usd: 0, requester_ip_hash: requester,
+        }]);
+        return json({ success: true, contribution_id: c.id, url: targetUrl, verdict: "cannot_tell", probability: 0, counts: false, fields: {}, min_probability: MIN_PROBABILITY, hint: "這一頁沒提到主角（名字不在正文裡）：換一個真的講到這個人的來源；不要拿這頁投 disagree" });
       }
       const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
       const res = await askJev(apiKey, state, questions);

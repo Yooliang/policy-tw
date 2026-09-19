@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, tally } from "./consensus.ts";
+import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, tally, isBlindDisagree } from "./consensus.ts";
 import { validateVerifyRequest } from "./contribution-schema.ts";
 
 Deno.test("共識：2 agree、0 disagree → verified", () => {
@@ -59,11 +59,26 @@ Deno.test("verify 請求：disagree 必附 evidence_url（http(s)）；verdict �
   assert(noAgent.errors.some((e) => e.path === "agent_name"));
 });
 
-// 2026-09-17：那題 Facebook 提問的 no_change 是「2 同意 1 反對」——通過要反對 0、
-// 爭議要反對 ≥ 2，兩邊都不成立，從 09-12 懸空到今天沒人會再處理它。
-Deno.test("同意達標但有人反對 → 進裁決，不留在懸空狀態", () => {
-  assertEquals(consensusStatus({ agree: 2, disagree: 1, unsure: 0 }, "pending", 2), "disputed");
-  assertEquals(consensusStatus({ agree: 1, disagree: 1, unsure: 0 }, "pending", 1), "disputed");
+// 2026-09-17 那版：達標但有 1 反對 → 爭議（避免懸空）。2026-09-19 改：一張反對不推翻達標的同意，直接通過；
+// 「打不開來源」那種反對在 verify 端點就改記 unsure。沒有懸空：反對 ≥2 爭議、達標通過、其餘 pending。
+Deno.test("同意達標而只有一張反對 → 通過，不進裁決", () => {
+  assertEquals(consensusStatus({ agree: 2, disagree: 1, unsure: 0 }, "pending", 2), "verified");
+  assertEquals(consensusStatus({ agree: 1, disagree: 1, unsure: 0 }, "pending", 1), "verified");
+  assertEquals(consensusStatus({ agree: 4, disagree: 1, unsure: 1 }, "pending", 2), "verified", "卡伊．馬賴：4 agree 被一張「無法開啟 PDF」擋住的那種");
+});
+
+Deno.test("isBlindDisagree：打不開／確認不了是盲反對；寫了具體矛盾就不是", () => {
+  assertEquals(isBlindDisagree("無法開啟來源PDF檔案以核對內容"), true);
+  assertEquals(isBlindDisagree("來源無法確定，無法確認 election_id 的設定。"), true);
+  assertEquals(isBlindDisagree("來源 www.pthg.gov.tw 在本執行環境無法連線：curl exit 7"), true);
+  assertEquals(isBlindDisagree("HTTP 403，web.archive.org 也沒有存檔"), true);
+  assertEquals(isBlindDisagree("中選會候選人資料出生年是 1967，不是 payload 的 1966"), false);
+  assertEquals(isBlindDisagree("來源打不開，但改查中選會資料庫：登記的是第 6 選區，與 payload 第 7 選區不符"), false, "有具體矛盾就算反證");
+  assertEquals(isBlindDisagree("出生年與學歷經金門日報《藝文沙龍》黃世團小檔案（2023/06/17：1951年生，師大美術系）核對，來源無法確認學歷"), false, "引了別的來源與數字＝有反證");
+  assertEquals(isBlindDisagree("source_url 只是風傳媒首頁，非特定報導，頁面沒有任何東螺溪內容，無法核對 payload 的 7.66 億元"), false, "來源沒提到＝實質反對");
+  assertEquals(isBlindDisagree("提交的 source_url 打不開：實際 GET https://bulletin.cec.gov.tw/… 回 404"), true);
+  assertEquals(isBlindDisagree(""), false);
+  assertEquals(isBlindDisagree(null), false);
 });
 
 Deno.test("同意還沒達標時的一張反對維持 pending（等更多票，不急著裁決）", () => {

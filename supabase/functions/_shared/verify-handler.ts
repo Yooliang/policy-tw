@@ -7,7 +7,7 @@
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { ensureAdjudicationTask } from "./adjudication.ts";
@@ -73,13 +73,18 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     return { status: 409, body: { success: false, error: "already_voted", message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票），請跳過這筆" } };
   }
 
+  // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
+  const blind = input.verdict === "disagree" && isBlindDisagree(input.note);
+  const finalVerdict = blind ? "unsure" : input.verdict;
+  const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
+
   const { data: vote, error: insertError } = await supabase
     .from("contribution_votes")
     .insert({
       contribution_id: contribution.id,
-      verdict: input.verdict,
+      verdict: finalVerdict,
       evidence_url: input.evidence_url ?? null,
-      note: input.note ?? null,
+      note: finalNote,
       agent_name: input.agent_name,
       agent_tool: input.agent_tool ?? null,
       verifier_ip_hash: ipHash,
@@ -113,7 +118,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       success: true,
       vote_id: vote?.id,
       contribution_id: contribution.id,
-      verdict: input.verdict,
+      verdict: finalVerdict,
+      ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       agree_count: after?.agree_count ?? 0,
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,

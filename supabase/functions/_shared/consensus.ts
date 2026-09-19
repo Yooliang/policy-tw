@@ -10,7 +10,12 @@ import { correctionTouches } from "./correction.ts";
 export const VOTE_WEIGHT = 1;
 /** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
 export const VERIFIED_MIN_AGREE = 2;
-export const VERIFIED_MAX_DISAGREE = 0;
+/**
+ * 通過時最多容忍幾張反對：1。
+ * 2026-09-19 使用者裁決：「我看不到」不是「我反對」。一張反對（常常是「打不開來源」）不該推翻 2～4 個真的讀過來源的人；
+ * 轉爭議要 2 張帶反證的反對。單獨一張反對而同意已達標 → 通過（那張反對留著給對帳看）。
+ */
+export const VERIFIED_MAX_DISAGREE = 1;
 
 /**
  * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
@@ -71,26 +76,40 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
 export function requiredAgree(contributionType: string, payload: unknown, sourceUrls: readonly string[] = []): number {
   return AGREE_THRESHOLDS[riskLevel(contributionType, payload)][bestSourceKind(sourceUrls)];
 }
-/** disagree ≥ 2 → disputed */
+/** disagree ≥ 2 → disputed（兩張帶反證的反對才是爭議） */
 export const DISPUTED_MIN_DISAGREE = 2;
+
+/**
+ * 「盲反對」：備註寫的是打不開、連不上、確認不了——那是 unsure 不是 disagree（skill.md §2-9 一直這樣寫，現在改成守門）。
+ * 有具體矛盾字眼（不符、矛盾、應為…）就不算盲的，就算同一句也提到某個網址打不開。
+ * 2026-09-19：卡伊．馬賴 4 張 agree 被一張「無法開啟來源 PDF」＋一張系統票推進裁決；傅崐萁那筆是 2 agree 被「來源無法確定」卡住。
+ */
+const BLIND_DISAGREE_RE = /無法(開啟|連線|確定|下載|讀取|存取|核對|取得|驗證|確認|載入|打開)|打不開|開不了|抓不到|連不上|逾時|timeout|timed out|HTTP ?(403|404|5\d\d)|連線失敗|讀不到/i;
+// 有實質內容的反對：矛盾字眼、來源「沒提到」、引了別的來源或數字——就算同一句也說某個網址打不開
+const CONTRADICTION_RE = /不符|矛盾|不一致|應為|應該是|實為|寫的是|錯誤|有誤|不是|並非|查無|沒有這個人|不存在|沒有任何|沒有提|沒提|未提|無此|只是|而非|才是|年生|經.{1,12}(報|網|資料|公報|名單)/;
+export function isBlindDisagree(note: string | null | undefined): boolean {
+  const n = (note ?? "").trim();
+  if (!n) return false;
+  return BLIND_DISAGREE_RE.test(n) && !CONTRADICTION_RE.test(n);
+}
+export const BLIND_DISAGREE_NOTE = "（系統改記 unsure：反對票要有反證，「來源打不開／確認不了」不是反證）";
 
 // ---- 系統來源票（Jev）：4 票變 3+1 ----
 // 2026-09-19 使用者裁決：代理的價值是找第二、第三個可信來源；Jev 核「提交者附的那個來源」支不支持宣稱，
 // 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
-// not_supported 算一張反對；棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
+// not_supported 讓門檻 +1（只擋自動上線，**不觸發裁決**——同日晚上改：它判錯過一次就把 4 張人票推進裁決）；
+// 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
 export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {
   return (SYSTEM_VOTE_ELIGIBLE_TYPES as readonly string[]).includes(contributionType);
 }
-/** supported → 門檻 −1，但最少 1 */
+/** supported → 門檻 −1，但最少 1；not_supported → 門檻 +1（多要一張人票，不算反對） */
 export function effectiveRequiredAgree(required: number, systemVote: SystemVote): number {
-  return systemVote === "supported" ? Math.max(1, required - 1) : required;
-}
-/** not_supported → 多一張反對 */
-export function effectiveDisagree(disagree: number, systemVote: SystemVote): number {
-  return disagree + (systemVote === "not_supported" ? 1 : 0);
+  if (systemVote === "supported") return Math.max(1, required - 1);
+  if (systemVote === "not_supported") return required + 1;
+  return required;
 }
 /** /verifications 的預設 limit（skill.md 的工作順序是驗證：任務約 3：1，不寫死上限） */
 export const MAX_VERIFICATIONS_PER_RUN = 5;
@@ -109,11 +128,10 @@ export interface VoteCounts {
 /** 只在 pending／verified／disputed 之間轉；approved／rejected／applied 由維護者決定、不受投票影響。 */
 export function consensusStatus(counts: VoteCounts, current: string, minAgree: number = VERIFIED_MIN_AGREE): string {
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
-  // 兩張反對＝爭議；一張反對但同意已達標也是爭議——不能既不通過又不裁決。
-  // 2026-09-17：那題 Facebook 提問的 no_change 就是「2 同意 1 反對」，兩邊都不成立，
-  // 從 09-12 懸空到今天，沒有任何人會再處理它（全站當時有 3 筆卡在這個縫裡）。
+  // 兩張反對＝爭議。一張反對而同意已達標 → 通過（2026-09-19：09-17 那版把它算成爭議，結果一張「打不開來源」
+  // 就能把 4 張讀過來源的 agree 推進 4 票的裁決；盲反對現在在 verify 端點就改記 unsure，剩下的一張反對不擋路，留著對帳）。
+  // 沒有懸空：反對 ≥2 爭議、達標通過、其餘 pending。
   if (counts.disagree >= DISPUTED_MIN_DISAGREE) return "disputed";
-  if (counts.disagree > VERIFIED_MAX_DISAGREE && counts.agree >= minAgree) return "disputed";
   if (counts.agree >= minAgree && counts.disagree <= VERIFIED_MAX_DISAGREE) return "verified";
   return "pending";
 }

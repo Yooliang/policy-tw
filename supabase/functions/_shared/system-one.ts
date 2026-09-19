@@ -337,6 +337,19 @@ export function hasUsableText(text: string, names: (string | null | undefined)[]
   return names.some((n) => !!n && n.length >= 2 && text.includes(n));
 }
 
+/** 名字比對前的正規化：全形／半形間隔號一律拿掉（卡伊．馬賴＝卡伊‧馬賴＝卡伊·馬賴）、臺→台、去空白 */
+export function normalizeName(s: string): string {
+  return s.replace(/[．·‧・•\.]/g, "").replace(/臺/g, "台").replace(/\s+/g, "");
+}
+/**
+ * 文本裡有沒有主角。2026-09-19：卡伊．馬賴的系統票在一段沒有她那一列的文字上判「region 矛盾」（PDF 沒接進來），
+ * 一張錯的 not_supported 把 4 張人票推進裁決——主角不在文本裡，Jev 只能說看不到，不能說矛盾。
+ */
+export function nameHit(text: string, names: Array<string | null | undefined>): boolean {
+  const t = normalizeName(text);
+  return names.some((n) => !!n && normalizeName(n).length >= 2 && t.includes(normalizeName(n)));
+}
+
 export function combineSources(
   pages: Array<{ url: string; text: string }>,
   names: Array<string | null | undefined>,
@@ -345,7 +358,7 @@ export function combineSources(
 ): string {
   const scored = pages
     .filter((p) => p.text && p.text.trim())
-    .map((p) => ({ ...p, hit: names.some((n) => !!n && n.length >= 2 && p.text.includes(n)) }))
+    .map((p) => ({ ...p, hit: nameHit(p.text, names) }))
     .sort((a, b) => Number(b.hit) - Number(a.hit));
   const parts: string[] = [];
   let used = 0;
