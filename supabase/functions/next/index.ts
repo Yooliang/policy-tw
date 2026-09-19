@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, SKIP_MEMORY_HOURS, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
@@ -64,14 +64,18 @@ Deno.serve(async (req) => {
     todayStart.setUTCHours(0, 0, 0, 0);
     const seed = `${agentName}|${ipHash}|${Date.now()}`;
 
-    // 記住這個 IP 跳過了哪個任務：SKIP_MEMORY_HOURS 內不再派回來（別人照樣可以領）。
-    // 要在分流之前寫：這一輪若輪到 verify，後面派任務的那段根本不會跑到。
+    // 跳過＝「這題我不答」（使用者 2026-09-20）：跟派過一樣排到後面，不再按 IP 記 24 小時不派（會連坐同機的其他代理）。
+    // 要在分流之前寫：這一輪若輪到 verify，後面派任務的那段根本不會跑到。skips 表只留紀錄。
     if (skipTaskId) {
       const { error: skipErr } = await supabase.from("contribution_task_skips").upsert(
         { task_id: skipTaskId, ip_hash: ipHash, agent_name: agentName, skipped_at: new Date().toISOString() },
         { onConflict: "task_id,ip_hash" },
       );
       if (skipErr) throw new Error(`skip record: ${skipErr.message}`);
+      try {
+        if (skipTaskId.startsWith("auto:")) await supabase.rpc("task_dispatched", { p_task_id: skipTaskId });
+        else await supabase.from("contribution_tasks").update({ last_dispatched_at: new Date().toISOString() }).eq("id", skipTaskId);
+      } catch (e) { console.error("skip push-back:", e instanceof Error ? e.message : String(e)); }
     }
 
     // 待驗證池：在 SQL 裡就排掉這台機器提交的、投過的、已達門檻的，撈出來的就是真的能投的最早 N 筆。
@@ -122,16 +126,16 @@ Deno.serve(async (req) => {
           .or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
           .in("status", ["pending", "verified", "applied"]).not("task_id", "is", null)
           .order("created_at", { ascending: true }).range(from, to)),
-      // 這個來源 IP 最近按過 skip 的任務
-      supabase.from("contribution_task_skips").select("task_id").eq("ip_hash", ipHash)
-        .gte("skipped_at", new Date(Date.now() - SKIP_MEMORY_HOURS * 3600 * 1000).toISOString()).limit(1000),
+      // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
+      Promise.resolve({ data: [], error: null }),
     ]);
     for (const r of [pendingRes, myVotesRes, myContribRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
-    const skippedTaskIds = new Set<string>(((skipsRes.data ?? []) as any[]).map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
-    if (skipTaskId) skippedTaskIds.add(skipTaskId);
+    // 只排除這一次呼叫剛跳過的那一筆（別立刻派回同一題）；之前的 skip 靠「派過就排後面」處理
+    const skippedTaskIds = new Set<string>(skipTaskId ? [skipTaskId] : []);
+    void skipsRes;
     // deno-lint-ignore no-explicit-any
     const pendingAdjudicated = new Set<string>((adjRows as any[]).map((r) => r.payload?.contribution_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
