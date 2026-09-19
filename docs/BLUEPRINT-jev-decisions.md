@@ -417,3 +417,17 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 - `run1.py` / `dupscan.py` / `three.py` / `yr.py` / `sens.py` / `hard.py` — 各輪測試腳本
 
 前期測試約 $0.012，全量掃描約 $0.051。
+
+## 代理自己找第一來源：`extract`（2026-09-19）
+
+使用者：「它應該是收到任務之後，分析關鍵字自己找來源，不一定要去看既有的那個」。Jev 是選擇題模型，不生成文字，所以分兩類：
+
+| 任務 | 代理要交出什麼 | Jev 能不能代勞 |
+|---|---|---|
+| verify | 一票 | 能（`judge`：頁面 vs 宣稱逐欄判） |
+| `election_result_missing`、`candidate_status_stale` | 有限域的值＋來源 | 能（`extract`：先問同一個人，再從 criteria 選值；兩題都 ≥0.95 才算數） |
+| `policy_missing`、`profile_gap`、`progress_stale` | 自由文字 | 不能；要會抽字的模型，Jev 只能當上傳前自檢 |
+
+`POST system-one?action=extract { task_id, url }` → `{ same_person, value, probability, counts, suggested_contribution }`；記 `jev_decisions`（`politician_election`／`extract`）。
+
+首跑（`scripts/agent/relay_jev_verify.py`，DuckDuckGo 找來源，代號啟良）：3 個 `election_result_missing` 任務，1 個成功（鄭朝方：維基百科 → elected 1.00，已交 candidacy），2 個失敗都在來源端——govtw.org 的選區總表被判 different_person（整頁多人）、db.cec.gov.tw 是 JS 渲染抓不到、votetw 403。關鍵字與選頁是弱點，那正是小模型該補的那一步；官方結果另一條路是任務提示裡的 `fetch-cec-data`，不需要搜尋。
