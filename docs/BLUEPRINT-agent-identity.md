@@ -97,6 +97,15 @@ DiTurst 要開：`agents-provision`（api_key 驗證；三分支：agents 有列
 
 ---
 
+### 4-1 存取路徑（IDN-R17、R18，2026-09-19 部署後定案）
+
+- `ditrust` schema 不暴露給 PostgREST，而 **service role 只繞 RLS、不繞 exposed schemas**——所以 Edge Function 不能用
+  supabase-js 指定 `schema: 'ditrust'`（部署後實測 verify 500、provision 401 就是這個）。
+  所有存取走 `public.ditrust_*` SECURITY DEFINER 包裝函式（sql/07，鏡像 `20260919000007`），只 GRANT 給 service_role。
+- 四支函式的 verify_jwt 保持開啟，Supabase 閘道會把 `Authorization` 當 JWT 驗；所以 client api_key 走 **`x-client-key`** 標頭，
+  跟 DiTurst 既有的 `create-task` 一致。呼叫端兩個標頭都要帶。
+- policy-tw 的 api_key 在正見 secrets `DITRUST_CLIENT_KEY`；`ditrust.clients` 有 policy-tw 那列。
+
 ## 5. 正見這邊的表
 
 ```sql
