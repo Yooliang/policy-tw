@@ -14,8 +14,8 @@ export const JEV_MODEL = "typesafe/jev-1.13";
 /** 門檻 0.95：同題重問只有機率 ≤0.55 會換答案，兩次都 ≥0.95 的 155 題全數一致（藍圖 §8-1） */
 export const MIN_PROBABILITY = 0.95;
 
-export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution"] as const;
-export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source"] as const;
+export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election"] as const;
+export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract"] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number];
 export type Question = (typeof QUESTIONS)[number];
 
@@ -357,6 +357,104 @@ export function combineSources(
     parts.push(piece); used += piece.length;
   }
   return parts.join("\n\n").slice(0, total);
+}
+
+// ---- extract：代理找到「第一來源」後，讓 Jev 從頁面裡選值 ----
+//
+// 使用者 2026-09-19：「它應該是收到任務之後，分析關鍵字自己找來源，不一定要去看既有的那個」。
+// Jev 是選擇題模型，不會生成文字，所以只有「值在有限集合裡」的任務能這樣填：
+//   election_result_missing → election_result ∈ elected／not_elected
+//   candidate_status_stale  → candidate_status ∈ registered／not_running
+// 政見標題、簡介這種自由文字還是得靠會抽字的模型；Jev 只能當上傳前的自檢（judge）。
+
+export const EXTRACT_TASK_TYPES = ["election_result_missing", "candidate_status_stale"] as const;
+export type ExtractTaskType = (typeof EXTRACT_TASK_TYPES)[number];
+
+export interface ExtractSubject {
+  name: string;
+  party?: string | null;
+  region?: string | null;
+  election_id: number;
+  election_type?: string | null;
+}
+
+/** auto:<task_type>:<politician_elections.id> → 型別與紀錄 id；不是這兩種任務就 null */
+export function parseExtractTask(taskId: string): { task_type: ExtractTaskType; pe_id: number } | null {
+  const m = /^auto:(election_result_missing|candidate_status_stale):(\d+)$/.exec(taskId.trim());
+  if (!m) return null;
+  return { task_type: m[1] as ExtractTaskType, pe_id: Number(m[2]) };
+}
+
+const EXTRACT_QUESTIONS: Record<ExtractTaskType, { field: string; instructions: string; criteria: Record<string, string> }> = {
+  election_result_missing: {
+    field: "election_result",
+    instructions: "subject 是一個人的一場選舉，page 是代理找到的網頁文字。這一題問：這段文字有沒有講他「這一場」選舉的結果？只看 subject 那一屆、那一種選舉；別的屆別、別的職位、初選都不算。",
+    criteria: {
+      elected: "文字說他當選、勝選、連任成功、或當選人名單裡有他",
+      not_elected: "文字說他落選、未當選、敗選、或得票未達當選",
+      absent: "文字沒講這一場選舉的結果、或講的是別場選舉",
+    },
+  },
+  candidate_status_stale: {
+    field: "candidate_status",
+    instructions: "subject 是一個人的一場選舉，page 是代理找到的網頁文字（多半是登記名單或選委會公告）。這一題問：登記截止後，他到底有沒有登記參選這一場？",
+    criteria: {
+      registered: "文字證明他完成登記、或在該選區的登記名單／候選人名單上",
+      not_running: "文字明確說他沒登記、退出、改選別的職位；或名單是完整的而裡面沒有他",
+      absent: "文字看不出來：沒有名單、名單不完整、或講的是別場選舉",
+    },
+  },
+};
+
+export function buildExtractAsk(taskType: ExtractTaskType, subject: ExtractSubject, url: string, pageText: string): {
+  state: Record<string, unknown>;
+  questions: Record<string, JevQuestion>;
+  field: string;
+} {
+  const q = EXTRACT_QUESTIONS[taskType];
+  const who = `${subject.name}（${subject.region ?? ""} ${subject.election_id} ${subject.election_type ?? ""}${subject.party ? "，" + subject.party : ""}）`;
+  const state = { subject: { ...subject }, page: { url, text: pageText } };
+  const questions: Record<string, JevQuestion> = {
+    // 先問是不是同一個人：同名不同縣市的人很多（金門也有一個曹爾章），值對了人錯了更糟
+    same_person: {
+      type: "choice",
+      instructions: `page 裡講的是不是 subject 這個人？同名而且縣市或選區對得上才算。subject＝${who}。`,
+      criteria: {
+        same_person: "文字講的就是這個人（同名，縣市或選區對得上）",
+        different_person: "同名但縣市／選舉對不上，或根本沒提到這個人",
+        unclear: "有這個名字但看不出是不是同一個人",
+      },
+    },
+    [q.field]: { type: "choice", instructions: `${q.instructions} subject＝${who}。`, criteria: q.criteria },
+  };
+  return { state, questions, field: q.field };
+}
+
+export interface ExtractVerdict {
+  field: string;
+  person: { choice: string; probability: number };
+  /** Jev 選出來的值；absent 時為 null */
+  value: string | null;
+  /** 兩題取較弱的一題 */
+  probability: number;
+  /** 同一個人且值不是 absent，兩題都過門檻才算數 */
+  counts: boolean;
+}
+
+export function aggregateExtract(
+  taskType: ExtractTaskType,
+  answers: Record<string, { choice: string; probabilities: Record<string, number> }>,
+  minProbability = MIN_PROBABILITY,
+): ExtractVerdict {
+  const field = EXTRACT_QUESTIONS[taskType].field;
+  const pick = (a?: { choice: string; probabilities: Record<string, number> }) =>
+    a ? { choice: a.choice, probability: Number((a.probabilities?.[a.choice] ?? 0).toFixed(4)) } : { choice: "unclear", probability: 0 };
+  const person = pick(answers.same_person);
+  const picked = pick(answers[field]);
+  const value = picked.choice === "absent" ? null : picked.choice;
+  const probability = Math.min(person.probability, picked.probability);
+  const counts = person.choice === "same_person" && value !== null && person.probability >= minProbability && picked.probability >= minProbability;
+  return { field, person, value, probability, counts };
 }
 
 export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string): {

@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -15,6 +15,8 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
  *                                                        改用成本上限守：10 分鐘內已問滿 limit 就不再問。
  *   ?action=precheck POST                                系統來源票：撿 pending 且還沒判過的貢獻，抓提交的來源、問 Jev
  *                                                        支不支持宣稱，寫 jev_decisions 後重算共識。守法同 backfill。
+ *   ?action=extract  POST { task_id, url }          代理替 election_result_missing／candidate_status_stale 任務找到「第一來源」後，
+ *                                                  讓 Jev 從那一頁選值（有限域欄位）。不帶金鑰，同 judge 的配額。回建議的 contribution。
  *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
  *                                                        伺服器自己抓那一頁（代理只能給網址、不能餵假文本），每欄一題判定，
  *                                                        記 jev_decisions(question=second_source) 並回每欄結果。不是系統票。
@@ -313,6 +315,65 @@ Deno.serve(async (req) => {
           ? "這一頁足以證實：投 agree 時把這個網址放 evidence_url"
           : agg.choice === "not_supported" ? "這一頁與宣稱矛盾：投 disagree 並把這個網址放 evidence_url、note 寫哪一欄不對"
           : "這一頁證明不了關鍵欄位：換一個來源，或投 unsure 並說明找過哪裡",
+      });
+    }
+
+    // ---- extract：代理找到第一來源，Jev 選值（使用者 2026-09-19：任務應該讓代理自己找來源，不一定要看既有的那個）----
+    if (action === "extract") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const taskId = typeof body.task_id === "string" ? body.task_id.trim() : "";
+      const targetUrl = typeof body.url === "string" ? body.url.trim() : "";
+      const parsed = parseExtractTask(taskId);
+      if (!parsed) return json({ success: false, error: "task_not_eligible", message: "task_id 要是 auto:election_result_missing:<id> 或 auto:candidate_status_stale:<id>；其他任務的值不是有限域，Jev 選不出來" }, 400);
+      if (!/^https?:\/\/\S+$/.test(targetUrl)) return json({ success: false, error: "url 必填（http(s) 網址）" }, 400);
+      const requester = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+
+      const EXTRACT_PER_IP = 60;
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const [{ count: mine }, { count: all }] = await Promise.all([
+        supabase.from("jev_decisions").select("id", { count: "exact", head: true }).eq("question", "extract").eq("requester_ip_hash", requester).gte("asked_at", since),
+        supabase.from("jev_decisions").select("id", { count: "exact", head: true }).eq("question", "extract").gte("asked_at", since),
+      ]);
+      if ((mine ?? 0) >= EXTRACT_PER_IP || (all ?? 0) >= BACKFILL_MAX) {
+        return json({ success: false, error: "rate_limited", message: `${BACKFILL_WINDOW_MINUTES} 分鐘內判定次數已滿，稍後再試` }, 429);
+      }
+
+      const { data: pe, error: peErr } = await supabase.from("politician_elections")
+        .select("id, politician_id, election_id, election_type, candidate_status, election_result, politicians(name, party, region)")
+        .eq("id", parsed.pe_id).maybeSingle();
+      if (peErr) throw new Error(`politician_elections read: ${peErr.message}`);
+      const pol = (pe?.politicians ?? null) as { name?: string; party?: string | null; region?: string | null } | null;
+      if (!pe || !pol?.name) return json({ success: false, error: "not_found", message: "找不到這筆參選紀錄" }, 404);
+      const subject = { name: pol.name, party: pol.party ?? null, region: pol.region ?? null, election_id: Number(pe.election_id), election_type: (pe.election_type as string | null) ?? null };
+
+      const page = await fetchSource(targetUrl);
+      if (page.kind !== "html" || !hasUsableText(page.text, [subject.name])) {
+        return json({ success: false, error: "fetch_failed", message: `抓不到正文（${page.note}）；試試 archive.org 的存檔網址或另一個來源` }, 422);
+      }
+      const { state, questions, field } = buildExtractAsk(parsed.task_type, subject, targetUrl, focusText(page.text, [subject.name]));
+      const res = await askJev(apiKey, state, questions);
+      const agg = aggregateExtract(parsed.task_type, res.answers as Record<string, { choice: string; probabilities: Record<string, number> }>);
+      await insertRecords(supabase, [{
+        subject_type: "politician_election", subject_id: String(pe.id), question: "extract",
+        choice: agg.value ?? "absent", probability: agg.probability, confidence: null,
+        probabilities: { same_person: agg.person.probability, [field]: agg.value ? agg.probability : 0 },
+        model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
+      }]);
+
+      // 建議的貢獻：照 skill.md 的規矩——結果用 candidacy 補、登記狀態用 correction 改
+      const suggested = !agg.counts ? null
+        : parsed.task_type === "election_result_missing"
+          ? { contribution_type: "candidacy", task_id: taskId, source_urls: [targetUrl], payload: { politician_id: pe.politician_id, name: subject.name, election_id: subject.election_id, election_type: subject.election_type, region: subject.region, candidate_status: pe.candidate_status ?? "confirmed", election_result: agg.value } }
+          : { contribution_type: "correction", task_id: taskId, source_urls: [targetUrl], payload: { target_table: "politician_elections", target_id: String(pe.id), changes: [{ field: "candidate_status", current_value: pe.candidate_status ?? null, correct_value: agg.value }], reason: `Jev 依 ${targetUrl} 判定 ${agg.value}（${agg.probability}）` } };
+      return json({
+        success: true, task_id: taskId, url: targetUrl, field,
+        same_person: agg.person, value: agg.value, probability: agg.probability, counts: agg.counts, min_probability: MIN_PROBABILITY,
+        current: { candidate_status: pe.candidate_status ?? null, election_result: pe.election_result ?? null },
+        suggested_contribution: suggested,
+        hint: agg.counts ? "這一頁足以定值：把 suggested_contribution 原樣 POST /contribute（可補 votes_received／vote_percentage、note）"
+          : agg.person.choice !== "same_person" ? "這一頁講的可能不是這個人（同名？）：換一個來源"
+          : agg.value === null ? "這一頁沒講這一欄：換一個來源" : "值有了但不到門檻：換一個更明確的來源，或交 no_change 說明找過哪裡",
       });
     }
 

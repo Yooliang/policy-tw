@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -207,4 +207,47 @@ Deno.test("hasUsableText：短文本只要點到主角名字就算有正文；�
   assertEquals(hasUsableText("王忠銘", ["王忠銘"]), false);
   assertEquals(hasUsableText("x".repeat(200), ["陳亭妃"]), true);
   assertEquals(hasUsableText("", [null, undefined]), false);
+});
+
+// 2026-09-19 使用者：「它應該是收到任務之後，分析關鍵字自己找來源」——有限域的欄位讓 Jev 從代理找到的頁面裡選值
+Deno.test("parseExtractTask：只認兩種 auto 任務", () => {
+  assertEquals(parseExtractTask("auto:election_result_missing:13167"), { task_type: "election_result_missing", pe_id: 13167 });
+  assertEquals(parseExtractTask("auto:candidate_status_stale:42"), { task_type: "candidate_status_stale", pe_id: 42 });
+  assertEquals(parseExtractTask("auto:policy_missing:abc"), null);
+  assertEquals(parseExtractTask("auto:election_result_missing:not-a-number"), null);
+});
+
+Deno.test("buildExtractAsk：先問同一個人，再問那一欄；criteria 是有限域", () => {
+  const { questions, field, state } = buildExtractAsk("election_result_missing", { name: "張嘉哲", region: "南投縣", election_id: 2022, election_type: "鄉鎮市長", party: "中國國民黨" }, "https://x/y", "…張嘉哲當選南投市長…");
+  assertEquals(field, "election_result");
+  assertEquals(Object.keys(questions), ["same_person", "election_result"]);
+  assertEquals(Object.keys(questions.election_result.criteria), ["elected", "not_elected", "absent"]);
+  assertEquals(questions.same_person.instructions.includes("張嘉哲（南投縣 2022 鄉鎮市長，中國國民黨）"), true);
+  assertEquals((state.page as { url: string }).url, "https://x/y");
+  const st = buildExtractAsk("candidate_status_stale", { name: "王小明", election_id: 2026 }, "https://x", "…");
+  assertEquals(Object.keys(st.questions.candidate_status.criteria), ["registered", "not_running", "absent"]);
+});
+
+Deno.test("aggregateExtract：同一個人且值過門檻才算數；absent 回 null；人不對就不算", () => {
+  const ok = aggregateExtract("election_result_missing", {
+    same_person: { choice: "same_person", probabilities: { same_person: 0.99, different_person: 0.01, unclear: 0 } },
+    election_result: { choice: "elected", probabilities: { elected: 0.97, not_elected: 0.02, absent: 0.01 } },
+  });
+  assertEquals(ok, { field: "election_result", person: { choice: "same_person", probability: 0.99 }, value: "elected", probability: 0.97, counts: true });
+  const weak = aggregateExtract("election_result_missing", {
+    same_person: { choice: "same_person", probabilities: { same_person: 0.99 } },
+    election_result: { choice: "elected", probabilities: { elected: 0.90 } },
+  });
+  assertEquals(weak.value, "elected"); assertEquals(weak.counts, false); assertEquals(weak.probability, 0.9);
+  const wrongPerson = aggregateExtract("election_result_missing", {
+    same_person: { choice: "different_person", probabilities: { different_person: 0.98 } },
+    election_result: { choice: "elected", probabilities: { elected: 0.99 } },
+  });
+  assertEquals(wrongPerson.counts, false);
+  const absent = aggregateExtract("candidate_status_stale", {
+    same_person: { choice: "same_person", probabilities: { same_person: 0.99 } },
+    candidate_status: { choice: "absent", probabilities: { absent: 0.99 } },
+  });
+  assertEquals(absent.value, null); assertEquals(absent.counts, false);
+  assertEquals(aggregateExtract("candidate_status_stale", {}).counts, false);
 });

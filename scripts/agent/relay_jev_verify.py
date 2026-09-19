@@ -7,6 +7,8 @@
   system_vote 是 supported → 不重看提交的那一頁，去找第二個獨立來源（DuckDuckGo lite，免金鑰）
   把第二來源的網址交給正見的 judge 端點（伺服器自己抓頁、Jev 每欄一題）→ agree／disagree／unsure
   DRY_RUN=1 時只印出會投什麼，不 POST；否則 POST /report kind=verify，帶 evidence_url（第二來源）
+  kind=task 且是 election_result_missing／candidate_status_stale → 自己搜第一來源，POST system-one?action=extract 讓 Jev 選值，
+  counts 為 true 就把回應裡的 suggested_contribution 原樣 POST /contribute（值是有限域的任務才行）
 
 用法：
   SUPABASE_URL=… SUPABASE_ANON_KEY=… AGENT_NAME=<你的代號或 ditrust:<序號>> ROUNDS=10 DRY_RUN=1 python relay_jev_verify.py
@@ -114,10 +116,65 @@ def judge(cid, url):
     return out
 
 # ---- 主迴圈 ----
+# ---- 任務：自己找第一來源，讓 Jev 選值（extract）----
+# 使用者 2026-09-19：「它應該是收到任務之後，分析關鍵字自己找來源，不一定要去看既有的那個」。
+# 只有值在有限域裡的任務能這樣做（選舉結果、登記狀態）；政見這種自由文字還是要會抽字的模型。
+EXTRACT_TYPES = ("election_result_missing", "candidate_status_stale")
+
+def api_soft(method, path, body=None):
+    """4xx 也回 (status, json)，不丟例外"""
+    try:
+        return api(method, path, body)
+    except urllib.error.HTTPError as e:
+        try: return e.code, json.loads(e.read())
+        except Exception: return e.code, {"error": f"http {e.code}"}
+
+def task_keywords(task_type, t):
+    name, region, et, yr = t.get("name", ""), t.get("region", ""), t.get("election_type", ""), t.get("election_id", "")
+    if task_type == "election_result_missing":
+        return f"{name} {region} {yr} {et} 選舉 當選"
+    return f"{name} {region} {et} 候選人 登記 名單"
+
+def handle_task(i, item):
+    tt, tid, t = item["task_type"], item["task_id"], item.get("target") or {}
+    print(f"\n[{i}] task {tt} {tid} | {t.get('name')} {t.get('region')} {t.get('election_id')} {t.get('election_type')}")
+    q = task_keywords(tt, t)
+    try:
+        cands = search(q, [])
+    except Exception as e:
+        cands = []; print(f"   搜尋失敗 {type(e).__name__}")
+    print(f"   搜尋「{q}」→ {len(cands)} 個候選")
+    for u in cands[:4]:
+        st, out = api_soft("POST", "system-one?action=extract", {"task_id": tid, "url": u})
+        if not out.get("success"):
+            print(f"   - {u[:70]} → {out.get('error')}：{str(out.get('message', ''))[:60]}"); continue
+        sp = out["same_person"]
+        print(f"   - {u[:70]}\n     extract → {out['field']}={out['value']} {out['probability']:.2f} 同一人={sp['choice']}({sp['probability']:.2f}) counts={out['counts']}")
+        if not out["counts"]:
+            print("     " + str(out.get("hint", ""))); continue
+        c = out["suggested_contribution"]
+        c.update({"agent_name": AGENT, "agent_tool": "relay/jev-1.13",
+                  "note": f"第一來源（{urllib.parse.urlparse(u).hostname}）由 Jev 判定 {out['field']}={out['value']}（{out['probability']}）；同一人 {sp['probability']}"})
+        print(f"   ⇒ 會交 {c['contribution_type']} {json.dumps(c['payload'], ensure_ascii=False)[:110]}")
+        if not DRY:
+            st, res = api_soft("POST", "contribute", c)
+            print(f"   POST /contribute → {st} {json.dumps(res, ensure_ascii=False)[:160]}")
+        return True
+    print("   ⇒ 沒找到能定值的來源，釋放任務")
+    if not DRY: api_soft("GET", f"next?agent_name={AGENT}&skip={tid}")
+    return False
+
 def main():
+    # 測試用：TASK_ID＋TARGET_JSON 直接跑一個任務，不經 /next
+    if os.environ.get("TASK_ID"):
+        tid = os.environ["TASK_ID"]
+        handle_task(1, {"task_type": tid.split(":")[1], "task_id": tid, "target": json.loads(os.environ.get("TARGET_JSON", "{}"))})
+        return
     seen = set()
     for i in range(ROUNDS):
         st, nxt = api("GET", f"next?agent_name={AGENT}&agent_tool=relay/jev-1.13")
+        if nxt.get("kind") == "task" and (nxt.get("item") or {}).get("task_type") in EXTRACT_TYPES:
+            handle_task(i + 1, nxt["item"]); time.sleep(1); continue
         if nxt.get("kind") != "verify":
             tid = (nxt.get("item") or {}).get("task_id")
             print(f"[{i+1}] kind={nxt.get('kind')}，不是驗證，{'跳過並釋放' if tid else '略過'}")

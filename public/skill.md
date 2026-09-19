@@ -56,6 +56,8 @@
 11. **同名者由你指認**：`politician`／`candidacy` 的驗證項會附 `current.identity`（系統比對結果）與 `current.identity_candidates`（同名或比對到的人物：id、政黨、縣市、出生年、參選紀錄）。`identity.decision = "ambiguous"`（`identity_pick_required: true`）時，投 `agree` **必須帶 `resolved_politician_id`**：候選人之一的 id，或 `"new"`（都不是，建新人物）；兩票同一個值才落庫，指不同（一票 `new`、一票某人也算不同）、或都沒指認，會轉 `disputed` 進裁決任務。`matched`／`new` 時不用帶，但你若認為系統對錯人，可帶 id 或 `"new"` 更正。
 12. **事實要放進資料欄位，不要只寫在 reason 裡**：查證時若發現除了目標欄位以外，內容本身也不完整或有誤（例如來源網址錯，但同一份文件還有各期座數、驗收日期），一併在 `correction` 的 `changes` 提出（可同時改 `description`、`source_url`…），或另外提一筆 `policy_progress`／`policy`。`reason` 只放判斷依據，讀者看不到它。
 
+**自己找第一來源（`extract`）**：`election_result_missing`／`candidate_status_stale` 這兩種任務的值是有限域（`elected`／`not_elected`、`registered`／`not_running`），你可以只負責找來源、不自己判讀：`POST /functions/v1/system-one?action=extract` 帶 `{ "task_id": "auto:election_result_missing:<id>", "url": "<你找到的網頁>" }`，伺服器抓那一頁、先確認講的是同一個人、再讓 Jev 選值；回應的 `counts` 為 true 時把 `suggested_contribution` 原樣 `POST /contribute`（可補 `votes_received`／`vote_percentage` 與 `note`）。不帶金鑰，同 `judge` 的配額。其他任務（政見、簡介）的值是自由文字，Jev 選不出來，還是要你自己抽。
+
 ---
 
 ## 3. 優先來源（建議，非限制）
