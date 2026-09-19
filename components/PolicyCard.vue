@@ -14,9 +14,14 @@ const props = withDefaults(defineProps<{
   politician: Politician
   onClick?: () => void
   /**
-   * 卡片上要不要印政治人物（頭像、姓名、政黨）。
+   * 卡片上要不要印政治人物。
    * 2026-09-16 看人物頁：「裡面的卡片再一直重覆…就沒意義了吧」——
    * 已經在那個人的頁面上，每張卡再報一次名字是雜訊。清單混著多人時才需要。
+   *
+   * 印的方式分兩種（使用者 2026-09-19 對齊的三種狀態，第 1 種＝人物頁＝這個旗標 false）：
+   *   第 3 種「參選前的承諾」（競選承諾、那場還沒投票）：人為主——頂排先頭像＋姓名＋政黨，再標題。選前大家是看人下菜。
+   *   第 2 種「當選後的進度」（其餘：執行中的政見、以及已投完票的舊承諾）：標題為主軸——頂排整個拿掉（狀態標籤也不要），
+   *     人退成標籤列裡的一顆小頭像＋姓名，跟年份、分類同一列；不印政黨（當選了也不再是候選人）。
    */
   showPolitician?: boolean
   /**
@@ -54,6 +59,9 @@ const campaignResult = computed(() => {
   return props.politician.elections?.find((e) => e.electionId === props.policy.electionId)?.electionResult ?? null
 })
 
+// 第 3 種狀態（人為主）：競選承諾而且那場還沒投票。其餘走「標題為主軸」
+const personFirst = computed(() => isCampaign && !isPastCampaign.value)
+
 const starTitle = computed(() => {
   if (isCheckpointed.value) return '取消關注'
   return countsTowardFollows.value ? '加入我的關注' : '加入我的關注（登入後才會計入關注數）'
@@ -82,7 +90,8 @@ const toggleCheckpoint = (e: Event) => {
     <!-- Checkpoint Star -->
     <!-- 小卡下面沒有期待度長條，容器的底部內距與下面那行的 mb 會疊成一片空白 -->
     <div :class="['px-6 pt-6 flex-1 flex flex-col', isPastCampaign ? 'pb-2' : 'pb-6']">
-      <div v-if="props.showPolitician || props.showStatus" :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
+      <!-- 頂排：人為主（第 3 種）才有頭像＋姓名＋政黨；人物頁（第 1 種）只有狀態標籤；標題為主軸（第 2 種）整排不印 -->
+      <div v-if="(props.showPolitician && personFirst) || (!props.showPolitician && props.showStatus)" :class="['flex items-start mb-4', props.showPolitician ? 'justify-between' : 'justify-start']">
         <div v-if="props.showPolitician" class="flex items-center gap-3">
           <Avatar :src="politician.avatarUrl" :name="politician.name" size="sm" class="border-2 border-slate-50 shadow-sm" />
           <div class="text-left">
@@ -127,6 +136,11 @@ const toggleCheckpoint = (e: Event) => {
         <div class="flex items-center gap-1.5">
           <Tag :size="12" class="text-slate-300" />
           <span>{{ policy.category }}</span>
+        </div>
+        <!-- 第 2 種狀態：提出的人退成小頭像＋姓名的標籤，跟年份、分類同一列；不印政黨 -->
+        <div v-if="props.showPolitician && !personFirst" class="flex items-center gap-1.5 normal-case tracking-normal min-w-0" :title="politician.name">
+          <Avatar :src="politician.avatarUrl" :name="politician.name" size="xs" class="shrink-0 border border-slate-100" />
+          <span class="text-slate-500 font-bold truncate">{{ politician.name }}</span>
         </div>
       </div>
 
