@@ -31,7 +31,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const CANDIDATE_POOL = 30;
-const RETRY_AFTER_MIN = 30;
+// 2026-09-20：從 30 降到 5——回 none 幾乎都是暫時的（別人認領中、這一輪抽到的都不合格），等 30 分鐘是白等
+const RETRY_AFTER_MIN = 5;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -240,7 +241,7 @@ Deno.serve(async (req) => {
     // agent：伺服器解析出來的身份（序號登入時代理不知道自己的代號是什麼，這裡告訴它；藍圖 §3）
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
-    if (kind === "verify") {
+    const serveVerify = async (): Promise<Response> => {
       // 優先派來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
       const ranked = [...candidates].sort((a, b) => sourceRank(bestSourceKind(b.source_urls)) - sourceRank(bestSourceKind(a.source_urls)));
       const topRank = sourceRank(bestSourceKind(ranked[0].source_urls));
@@ -295,7 +296,8 @@ Deno.serve(async (req) => {
         how_to: "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。" +
           "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
       });
-    }
+    };
+    if (kind === "verify" && candidates.length > 0) return await serveVerify();
 
     // task：先清過期認領、讀未過期的（別人領走的目標 30 分鐘內不派）
     await supabase.rpc("contribution_task_leases_purge");
@@ -344,8 +346,9 @@ Deno.serve(async (req) => {
         how_to: howTo,
       });
     }
-    // 多抓幾筆再排掉別人認領中的
-    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 12, p_seed: seed });
+    // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
+    // 程式裡的過濾器留著當保險。2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
+    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
     const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
@@ -354,17 +357,19 @@ Deno.serve(async (req) => {
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
     const t = freeAuto[0];
     if (!t) {
+      // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
+      // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）
+      if (candidates.length > 0) return await serveVerify();
       const all = (autoRes.data ?? []) as AutoTask[];
-      const waitingOnMyVotes = all.length > 0 && all.every((x) => mySubmittedTaskIds.has(x.task_id));
-      const reason = waitingOnMyVotes
-        ? "剩下的任務你都交過了，正在等其他代理投票；先去驗證別人的，或稍後再來"
-        : all.length > 0
-        ? `目前可派的任務都在其他代理的 ${LEASE_MINUTES} 分鐘認領期內，請稍後再來`
-        : (totalPending > 0 ? "目前沒有可派的任務；待驗證的也都輪到任務了" : "目前沒有待驗證、也沒有缺口任務");
+      const reason = all.length > 0
+        ? "這一輪抽到的任務對你都不合格（你交過在等票、剛跳過、或裁決跟你有關），驗證池也空了；幾分鐘後再來會抽到別的"
+        : (openTasks > 0 ? "目前所有缺口任務都在別人手上或已飽和，驗證池也空了；幾分鐘後再來" : "目前沒有待驗證、也沒有缺口任務");
       return json({ ...base, kind: "none", reason, retry_after_min: RETRY_AFTER_MIN });
     }
     const autoTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
     await lease(t.task_id, t.target);
+    // 派過就排後面（task_dispatches）；記不成不影響派工
+    try { await supabase.rpc("task_dispatched", { p_task_id: t.task_id }); } catch (e) { console.error("task_dispatched:", e instanceof Error ? e.message : String(e)); }
     return json({
       ...base,
       kind: "task",
