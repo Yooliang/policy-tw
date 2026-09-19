@@ -136,10 +136,12 @@ Deno.test("同一個來源 IP 一筆貢獻只算一票：SQL 用 COUNT(DISTINCT 
   assertEquals(tallyByIp([{ verdict: "unsure", verifier_ip_hash: "ddd" }, { verdict: "unsure", verifier_ip_hash: "ddd" }]).unsure, 2);
 });
 
-Deno.test("投票去重：同一筆貢獻，同代號或同來源 IP 都只能投一次", () => {
+// 2026-09-19 裁決：投票身份是來源 IP，不是代號。代號自報、可共用；同代號在兩台機器是兩個人。
+// 原本是「同代號或同 IP 都擋」，同代號換機器會被當重投——那會擋掉共用代號的另一個人。
+Deno.test("投票去重：同一筆貢獻，同一個來源 IP 只能投一次；代號不是身份", () => {
   const existing = [{ agent_name: "alice", verifier_ip_hash: "aaa" }];
-  assert(isDuplicateVote(existing, { agent_name: "alice", ip_hash: "zzz" }), "同代號換機器不行");
-  assert(isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號也不行");
+  assert(!isDuplicateVote(existing, { agent_name: "alice", ip_hash: "zzz" }), "同代號換機器＝另一個人，可以");
+  assert(isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號不行");
   assert(!isDuplicateVote(existing, { agent_name: "bob", ip_hash: "bbb" }), "不同人不同機器可以");
   assertEquals(isDuplicateVote([], { agent_name: "alice", ip_hash: "aaa" }), false);
 });

@@ -283,8 +283,10 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
       : []
   ))];
   const [votes, edits, adjudications, tasks, originRow, names, titles, elecRows] = await Promise.all([
-    supabase.from("contribution_votes").select(VOTE_COLUMNS).in("contribution_id", ids).limit(2000),
-    supabase.from("edit_history").select(EDIT_COLUMNS).in("contribution_id", ids).limit(2000),
+    // 1000 是伺服器上限（PostgREST max-rows），寫 2000 拿不到更多、只會讓人以為有保護。
+    // 實測一筆查核履歷的票與 edit 最多 61 筆（2026-09-18 算過最壞情況）。
+    supabase.from("contribution_votes").select(VOTE_COLUMNS).in("contribution_id", ids).limit(1000),
+    supabase.from("edit_history").select(EDIT_COLUMNS).in("contribution_id", ids).limit(1000),
     supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", ids).limit(500),
     supabase.from("contribution_tasks").select("id, task_type, status, target, created_at, closed_at").eq("task_type", "adjudicate").in("target->>contribution_id", ids).limit(500),
     originRowFor(supabase, target, id),

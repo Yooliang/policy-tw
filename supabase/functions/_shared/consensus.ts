@@ -126,9 +126,10 @@ export function isSelfVote(contribution: ContributionIdentity, voter: VoterIdent
  * 去重，這裡先把重複的票擋在門外並講清楚原因，不要靜靜收下卻不計入。
  */
 export function isDuplicateVote(existing: readonly VoteRecord[], voter: VoterIdentity): boolean {
+  // 2026-09-19 裁決：身份是來源 IP，不是代號。代號是自報的、兩個人可以共用同一個；
+  // 同一個代號在兩台機器各投一票，那是兩個人。只有舊票（還沒記 IP 雜湊的年代）才退回比代號。
   return existing.some((v) =>
-    v.agent_name.toLowerCase() === voter.agent_name.toLowerCase() ||
-    (!!v.verifier_ip_hash && v.verifier_ip_hash === voter.ip_hash)
+    v.verifier_ip_hash ? v.verifier_ip_hash === voter.ip_hash : v.agent_name.toLowerCase() === voter.agent_name.toLowerCase()
   );
 }
 

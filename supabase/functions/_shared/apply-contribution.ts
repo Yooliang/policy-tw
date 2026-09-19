@@ -266,7 +266,31 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
   throwIf(error, "policies insert");
   if (!inserted) throw new Error("policies insert 沒有回傳 id");
   await recordInsert(supabase, ctx, "policies", inserted.id, inserted);
+  // 新政見落庫就問 Jev（影子模式：只寫 jev_decisions，不影響任何流程與計票）。
+  // 不 await：落庫這條路不能依賴 OpenRouter 的可用性。漏掉的由 system-one 的 backfill 每 15 分鐘補——
+  // 事件是加速，補漏才是保證（docs/BLUEPRINT-jev-decisions.md §6）。
+  notifySystemOne("policy", inserted.id);
   return { status: "applied", policy_id: inserted.id, politician_id: politicianId, message: "政見已建立" };
+}
+
+/** 叫 system-one 的 ask 動作。只有 service role 叫得動，所以帶 service key；失敗只記 log */
+function notifySystemOne(subjectType: string, subjectId: string): void {
+  let url: string | undefined, key: string | undefined;
+  try {
+    url = Deno.env.get("SUPABASE_URL");
+    key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  } catch {
+    // 測試沒開 --allow-env 會丟 PermissionDenied。觸發失敗不能拖倒落庫，這裡就是第一道
+    return;
+  }
+  if (!url || !key) return;
+  fetch(`${url}/functions/v1/system-one?action=ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+    body: JSON.stringify({ subject_type: subjectType, subject_id: subjectId }),
+  }).then((r) => {
+    if (!r.ok) console.warn(`[system-one] ask 回 ${r.status}`);
+  }).catch((e) => console.warn(`[system-one] ask 送不出去：${e instanceof Error ? e.message : String(e)}`));
 }
 
 async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {

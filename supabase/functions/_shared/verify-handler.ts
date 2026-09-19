@@ -63,7 +63,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    return { status: 409, body: { success: false, error: "already_voted", message: "這筆已經投過票了（同一個代號或同一個來源 IP 只能投一次），請跳過這筆" } };
+    return { status: 409, body: { success: false, error: "already_voted", message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票），請跳過這筆" } };
   }
 
   const { data: vote, error: insertError } = await supabase
