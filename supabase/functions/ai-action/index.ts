@@ -8,6 +8,7 @@ import {
   upsertParticipation,
 } from "../_shared/candidate-import.ts";
 import { findPoliticianByNameStrict } from "../_shared/politician-identity.ts";
+import { fetchAllRows } from "../_shared/fetch-all.ts";
 
 const ALLOWED_ORIGINS = [
   "https://policy-tw.web.app",
@@ -299,6 +300,7 @@ async function handleQueryPolicies(supabase: any, body: any): Promise<Response> 
     politicianIds = [politician_id];
   } else if (politician_name) {
     // 先找政治人物
+    // query-bounds: ok — 名字模糊比對，命中的是同名或名字相近的幾個人
     const { data: politicians } = await supabase
       .from("politicians")
       .select("id")
@@ -863,10 +865,12 @@ async function handleQueryDataQuality(supabase: any, body: any): Promise<Respons
   ];
 
   // 3. 同名重複候選人（全域掃描）
-  const { data: allPoliticians } = await supabase
-    .from("politicians")
-    .select("id, name, region")
-    .order("name");
+  // 全表掃同名：politicians 早就破千，原本這支沒有翻頁，等於只掃了名字最前面的 1000 人，
+  // 後面的重複一個都找不到，而且不會有任何徵兆（2026-09-19）
+  const allPoliticians = await fetchAllRows<{ id: string; name: string; region: string | null }>(
+    "duplicate scan politicians",
+    (from, to) => supabase.from("politicians").select("id, name, region").order("name").range(from, to),
+  );
 
   const nameGroups: Record<string, any[]> = {};
   for (const p of (allPoliticians || [])) {
@@ -940,6 +944,7 @@ async function handleDeduplicateCandidates(supabase: any, body: any): Promise<Re
   }
 
   // 找出該選舉年份的所有參選記錄
+  // query-bounds: ok — 一個年份的選舉，elections.id 就是年份，最多幾筆
   const { data: elections } = await supabase
     .from("elections")
     .select("id")

@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
     const since24h = new Date(Date.now() - DUPLICATE_WINDOW_HOURS * 3600 * 1000).toISOString();
     const [{ count: usedToday, error: countError }, { data: recentRows, error: recentError }] = await Promise.all([
       supabase.from("citizen_questions").select("id", { count: "exact", head: true }).eq("asker_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
+      // query-bounds: ok — 同一個 IP 24 小時內問過的題目，本來就被每日額度壓在兩位數
       supabase.from("citizen_questions").select("question").eq("asker_ip_hash", ipHash).gte("created_at", since24h),
     ]);
     if (countError) throw new Error(`rate limit lookup: ${countError.message}`);

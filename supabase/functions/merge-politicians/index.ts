@@ -66,6 +66,7 @@ Deno.serve(async (req) => {
     console.log(`正在合併人員: ${name}`);
 
     // 1. 取得所有同名的人
+    // query-bounds: ok — 同名的人，台灣政壇最多個位數
     const { data: list, error: fetchError } = await supabase
       .from("politicians")
       .select("*")

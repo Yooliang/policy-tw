@@ -29,10 +29,12 @@ async function fetchTaskVotes(supabase: any, tasks: ReadonlyArray<{ task_id: str
     .filter((t) => t.task_type === "adjudicate")
     .map((t) => (t.target && typeof t.target === "object" ? (t.target as Record<string, unknown>).contribution_id : null))
     .filter((v): v is string => typeof v === "string");
+  // 上限寫 1000 是因為伺服器就只給 1000（PostgREST max-rows）。原本寫 2000，
+  // 數字比實際保護大，會讓下一個人以為這裡撐得住——實測一批任務最多 10 筆票，所以夠。
   const [byTask, byAdjudication] = await Promise.all([
-    supabase.from("contributions").select(VOTE_COLUMNS).in("task_id", ids).limit(2000),
+    supabase.from("contributions").select(VOTE_COLUMNS).in("task_id", ids).limit(1000),
     originals.length > 0
-      ? supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", originals).limit(2000)
+      ? supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", originals).limit(1000)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (byTask.error) throw new Error(`task votes: ${byTask.error.message}`);
