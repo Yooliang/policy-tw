@@ -14,8 +14,8 @@ export const JEV_MODEL = "typesafe/jev-1.13";
 /** 門檻 0.95：同題重問只有機率 ≤0.55 會換答案，兩次都 ≥0.95 的 155 題全數一致（藍圖 §8-1） */
 export const MIN_PROBABILITY = 0.95;
 
-export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair"] as const;
-export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person"] as const;
+export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution"] as const;
+export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source"] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number];
 export type Question = (typeof QUESTIONS)[number];
 
@@ -326,6 +326,17 @@ const FIELD_INSTRUCTIONS =
  * 2026-09-19：很多參選紀錄的第一個來源是中選會的「附件索引頁」（只有 PDF 連結清單，681 字），
  * 名單在 PDF 或第二、三個來源裡；只看第一個來源等於什麼都沒看到。含有人名的來源排前面。
  */
+/**
+ * 這一頁的文字算不算「有正文」：200 字以上，或雖短但點到了主角的名字。
+ * 200 字門檻是擋空殼頁（JS 渲染、cookie 牆）；連江縣選委會的縣市長登記彙總表抽出來只有 171 字、
+ * 兩個人名都在裡面，被門檻擋掉就等於那一縣永遠棄權（2026-09-19 線上實測）。
+ */
+export function hasUsableText(text: string, names: (string | null | undefined)[]): boolean {
+  if (text.length >= 200) return true;
+  if (text.trim().length < 20) return false;
+  return names.some((n) => !!n && n.length >= 2 && text.includes(n));
+}
+
 export function combineSources(
   pages: Array<{ url: string; text: string }>,
   names: Array<string | null | undefined>,
@@ -408,11 +419,9 @@ async function pdfText(buf: Uint8Array): Promise<string> {
     getDocumentProxy(data: Uint8Array): Promise<unknown>;
     extractText(pdf: unknown, opts: { mergePages: true }): Promise<{ text: string | string[]; totalPages?: number }>;
   };
-  // 匯入字串放變數：Deno 只會把「字串字面值」的動態匯入放進型別檢查的模組圖。
-  // pdf.js 本體有 node: 匯入，CI 的 Deno 2.9.7 在有 package.json 的 repo 會去 node_modules 找 @types/node（#84 修了型別標頭還是紅）。
-  // 執行期照常載入；Supabase 部署時一樣打包。
-  const spec = "https://esm.sh/unpdf@0.12.1?no-dts";
-  const { extractText, getDocumentProxy } = await import(spec) as unknown as Unpdf;
+  // 一定要字串字面值：Supabase edge runtime 不允許執行期載入遠端模組（#85 改成變數後線上回 Module not found，
+  // PDF 抽字從那時起全壞）。CI 那邊的 @types/node 問題改由 supabase/functions/deno.json 的 nodeModulesDir: none 解。
+  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1?no-dts") as unknown as Unpdf;
   const pdf = await getDocumentProxy(buf);
   const { text } = await extractText(pdf, { mergePages: true });
   return typeof text === "string" ? text : (text as string[]).join("\n");
@@ -421,17 +430,17 @@ async function pdfText(buf: Uint8Array): Promise<string> {
 /** xls／xlsx 抽字：SheetJS（esm.sh）。連江縣選委會的登記名單是 .xls 附件，PDF 補了 xls 沒補就等於那一縣全棄權（2026-09-19） */
 async function xlsText(buf: Uint8Array): Promise<string> {
   type Xlsx = { read(d: Uint8Array, o: { type: "array" }): { SheetNames: string[]; Sheets: Record<string, unknown> }; utils: { sheet_to_csv(s: unknown): string } };
-  const spec = "https://esm.sh/xlsx@0.18.5?no-dts";
-  const XLSX = await import(spec) as unknown as Xlsx;
+  const XLSX = await import("https://esm.sh/xlsx@0.18.5?no-dts") as unknown as Xlsx;
   const wb = XLSX.read(buf, { type: "array" });
   return wb.SheetNames.map((n) => `【工作表 ${n}】\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join("\n");
 }
 
 const ATTACHMENT_RE = /href="([^"]+\.(?:pdf|xlsx?|ods))(?:\?[^"]*)?"/gi;
-const ATTACHMENT_MAX = 3;
+// 連江縣選委會的登記公告一頁掛五個 xls（縣長／議員／鄉鎮市長／代表／村里長），只跟三個就漏掉後兩級的人（2026-09-19）
+const ATTACHMENT_MAX = 6;
 const ATTACHMENT_MAX_BYTES = 3_000_000;
 
-/** 頁面上的附件連結（pdf／xls／xlsx／ods），相對路徑照 base 補全，去重 */
+/** 頁面上的附件連結（pdf／xls／xlsx／ods），相對路徑照 base 補全，去重，最多 ATTACHMENT_MAX 個 */
 export function attachmentLinks(html: string, baseUrl: string): string[] {
   const out: string[] = [];
   for (const m of html.matchAll(ATTACHMENT_RE)) {
