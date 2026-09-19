@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useRouter } from 'vue-router'
@@ -255,12 +256,12 @@ usePageHead({ title: '個人頁面', noindex: true })
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto">{{ formatDate(c.created_at) }}</span>
               </div>
-              <p class="font-medium text-slate-800 break-words">{{ c.summary }}</p>
+              <p class="font-medium text-slate-800 break-words">{{ shortUrlsIn(c.summary) }}</p>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>同意 {{ c.agree_count }}／反對 {{ c.disagree_count }}</span>
                 <a v-if="c.politician_url" :href="c.politician_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">人物頁 <ExternalLink :size="10" /></a>
                 <a v-if="c.policy_url" :href="c.policy_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">政見頁 <ExternalLink :size="10" /></a>
-                <span v-if="c.review_notes" class="text-slate-400">備註：{{ c.review_notes }}</span>
+                <span v-if="c.review_notes" class="text-slate-400">備註：{{ shortUrlsIn(c.review_notes) }}</span>
               </div>
             </li>
           </ul>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url'
 import { computed } from 'vue'
 import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
@@ -109,7 +110,7 @@ const toggleCheckpoint = (e: Event) => {
       </div>
 
       <p class="text-sm text-slate-500 line-clamp-2 mb-6 h-10 leading-relaxed font-medium">
-        {{ policy.description }}
+        {{ shortUrlsIn(policy.description) }}
       </p>
 
       <div :class="['flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest', isPastCampaign ? 'mb-0' : 'mb-6']">

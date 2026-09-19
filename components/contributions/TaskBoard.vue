@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hostOf, shortUrlsIn } from '../../lib/url'
 import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
@@ -161,14 +162,14 @@ defineExpose({ load })
             <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(t.created_at) }}</span>
           </div>
           <p class="font-bold text-navy-900 leading-snug break-words">{{ t.title }}</p>
-          <p v-if="t.description" class="mt-1 text-sm text-slate-600 whitespace-pre-wrap break-words">{{ t.description }}</p>
+          <p v-if="t.description" class="mt-1 text-sm text-slate-600 whitespace-pre-wrap break-words">{{ shortUrlsIn(t.description) }}</p>
           <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span v-if="t.suggested_by">提議者 {{ t.suggested_by }}</span>
             <span v-else-if="t.created_by && t.source === 'manual'">建立者 {{ t.created_by }}</span>
             <span>優先度 {{ priorityLabel(t.priority) }}</span>
             <span v-if="contributionIdOf(t)" class="font-mono text-slate-400">貢獻 {{ contributionIdOf(t)!.slice(0, 8) }}</span>
             <a v-if="targetLink(t)" :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 font-bold">{{ targetLink(t)!.label }}</a>
-            <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ u }}</a>
+            <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ hostOf(u) }}</a>
           </div>
         </li>
       </ul>

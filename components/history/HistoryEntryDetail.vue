@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hostOf, shortUrlsIn } from '../../lib/url'
 import { ref } from 'vue'
 import { ExternalLink, Scale, Undo2, ThumbsUp, ThumbsDown, CircleHelp, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { ADJ_VERDICT_LABEL, formatTime, formatValue, tableLabel, VERDICT_CLASS, VERDICT_LABEL, type HistoryEntry } from '../../lib/history'
@@ -59,7 +60,7 @@ function editValue(field: string, v: unknown): string {
       <p class="text-xs font-bold text-slate-400 mb-1">來源</p>
       <ul class="space-y-1">
         <li v-for="u in entry.source_urls" :key="u">
-          <a :href="u" :title="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 flex items-center gap-1 min-w-0"><ExternalLink :size="12" class="flex-shrink-0" /><span class="truncate">{{ u }}</span></a>
+          <a :href="u" :title="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 flex items-center gap-1 min-w-0"><ExternalLink :size="12" class="flex-shrink-0" /><span class="truncate">{{ hostOf(u) }}</span></a>
         </li>
       </ul>
     </div>
@@ -85,8 +86,8 @@ function editValue(field: string, v: unknown): string {
             {{ openNotes.has(`${v.agent_name}-${v.created_at}`) ? '收合理由' : '看理由' }}
             <component :is="openNotes.has(`${v.agent_name}-${v.created_at}`) ? ChevronUp : ChevronDown" :size="12" />
           </button>
-          <span v-if="v.note && openNotes.has(`${v.agent_name}-${v.created_at}`)" class="basis-full text-slate-600 leading-relaxed break-words border-l-2 border-slate-200 pl-2.5">{{ v.note }}</span>
-          <a v-if="v.evidence_url" :href="v.evidence_url" :title="v.evidence_url" target="_blank" rel="noopener" class="basis-full text-blue-700 underline underline-offset-2 flex items-center gap-1 text-xs min-w-0"><ExternalLink :size="11" class="flex-shrink-0" /><span class="shrink-0">反證：</span><span class="truncate">{{ v.evidence_url }}</span></a>
+          <span v-if="v.note && openNotes.has(`${v.agent_name}-${v.created_at}`)" class="basis-full text-slate-600 leading-relaxed break-words border-l-2 border-slate-200 pl-2.5">{{ shortUrlsIn(v.note) }}</span>
+          <a v-if="v.evidence_url" :href="v.evidence_url" :title="v.evidence_url" target="_blank" rel="noopener" class="basis-full text-blue-700 underline underline-offset-2 flex items-center gap-1 text-xs min-w-0"><ExternalLink :size="11" class="flex-shrink-0" /><span class="shrink-0">反證：</span><span class="truncate">{{ hostOf(v.evidence_url) }}</span></a>
         </li>
       </ul>
     </div>
@@ -99,7 +100,7 @@ function editValue(field: string, v: unknown): string {
             <span class="font-bold text-navy-900">{{ a.agent_name ?? '?' }}</span>
             <span :class="['ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full', a.verdict === 'uphold' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700']">{{ ADJ_VERDICT_LABEL[a.verdict] ?? a.verdict }}</span>
             <span class="ml-2 text-xs text-slate-400">{{ a.status === 'applied' ? '已定案' : '驗證中' }}・{{ formatTime(a.created_at) }}</span>
-            <p v-if="a.reason" class="mt-0.5 break-words">{{ a.reason }}</p>
+            <p v-if="a.reason" class="mt-0.5 break-words">{{ shortUrlsIn(a.reason) }}</p>
           </template>
           <template v-else>
             <span class="text-slate-500">裁決任務已建立（{{ a.task_status === 'open' ? '等待代理裁決' : '已關閉' }}），{{ formatTime(a.created_at) }}</span>
@@ -108,6 +109,6 @@ function editValue(field: string, v: unknown): string {
       </ul>
     </div>
 
-    <p v-if="!hideNotes && entry.review_notes" class="text-xs text-slate-500 whitespace-pre-wrap break-words"><span class="font-bold text-slate-400">系統備註：</span>{{ entry.review_notes }}</p>
+    <p v-if="!hideNotes && entry.review_notes" class="text-xs text-slate-500 whitespace-pre-wrap break-words"><span class="font-bold text-slate-400">系統備註：</span>{{ shortUrlsIn(entry.review_notes) }}</p>
   </div>
 </template>

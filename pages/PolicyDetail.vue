@@ -24,7 +24,7 @@ import { useCheckpoints } from '../composables/useCheckpoints'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 // 日期格式跟同一頁的查核履歷共用同一支，兩條時間軸不要一個斜線一個橫線
 import { formatDate } from '../lib/history'
-import { hostOf } from '../lib/url'
+import { hostOf, shortUrlsIn } from '../lib/url'
 
 
 const route = useRoute()
@@ -457,7 +457,7 @@ usePageHead({
               <div class="flex-1 min-w-0">
                 <!-- 跟「查核履歷」一樣帶圖示（2026-09-17），同一頁的區塊標題長得一致 -->
                 <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
-                <p class="text-slate-700 leading-relaxed text-lg">{{ policy.description }}</p>
+                <p class="text-slate-700 leading-relaxed text-lg">{{ shortUrlsIn(policy.description) }}</p>
                 <!-- 落選就不會有執行進度：說出來，不要讓人以為是還沒人追（2026-09-18） -->
                 <p v-if="campaignResult === 'not_elected'" class="mt-2 text-xs text-slate-500">這場選舉未當選，所以這項承諾不會有執行進度。</p>
                 <p v-if="myPolicyStance === 'support' || myPolicyStance === 'oppose'" class="mt-2 text-xs text-violet-500">已記錄你的立場，改按另一顆就會換掉。</p>
@@ -573,7 +573,7 @@ usePageHead({
                     rel="noopener noreferrer"
                     class="text-blue-600 hover:text-blue-800 font-medium text-sm line-clamp-1 break-all"
                   >
-                    {{ src.title || src.url }}
+                    {{ src.title || hostOf(src.url) }}
                   </a>
                   <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                     <span v-if="src.source_name">{{ src.source_name }}</span>

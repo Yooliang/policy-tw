@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url'
 import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -269,7 +270,7 @@ usePageHead({
 
             <!-- Bio display -->
             <div class="max-w-2xl">
-              <p v-if="politician.bio" class="text-violet-100 leading-relaxed mb-6 text-lg">{{ politician.bio }}</p>
+              <p v-if="politician.bio" class="text-violet-100 leading-relaxed mb-6 text-lg">{{ shortUrlsIn(politician.bio) }}</p>
               <p v-else class="text-violet-200 mb-4 text-sm opacity-75">暫無簡介</p>
             </div>
           </div>

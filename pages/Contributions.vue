@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortUrlsIn } from '../lib/url' // hostOf 這頁自己有一份
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
@@ -313,7 +314,7 @@ usePageHead({
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
-              <p class="text-navy-900 leading-snug break-words">{{ it.summary }}</p>
+              <p class="text-navy-900 leading-snug break-words">{{ shortUrlsIn(it.summary) }}</p>
               <!-- 列表照「最近有變動」排，所以要講出它剛剛變成什麼樣，不是只顯示這筆在做什麼 -->
               <p v-if="activityOf(it)" class="mt-1 text-xs font-bold text-violet-700">{{ activityOf(it) }}</p>
               <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -339,7 +340,7 @@ usePageHead({
                 <p class="text-xs font-bold text-slate-400 mb-1">來源</p>
                 <ul class="space-y-1">
                   <li v-for="u in it.source_urls" :key="u">
-                    <a :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ u }}</a>
+                    <a :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ hostOf(u) }}</a>
                   </li>
                 </ul>
               </div>
@@ -349,7 +350,7 @@ usePageHead({
               </div>
               <div v-if="it.review_notes">
                 <p class="text-xs font-bold text-slate-400 mb-1">審核備註</p>
-                <p class="text-slate-700 whitespace-pre-wrap break-words">{{ it.review_notes }}</p>
+                <p class="text-slate-700 whitespace-pre-wrap break-words">{{ shortUrlsIn(it.review_notes) }}</p>
               </div>
               <div data-testid="feed-history">
                 <p v-if="details[it.id] === 'loading'" class="text-xs text-slate-400 inline-flex items-center gap-1"><Loader2 :size="12" class="animate-spin" /> 載入驗證者與改動…</p>
