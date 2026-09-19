@@ -521,3 +521,10 @@ enabled = true
 # 公開端點：讀者不需要登入就能對政見表態（同一來源 IP 每日 30 次，端點自己擋）
 verify_jwt = false
 entrypoint = "./functions/policy-stance/index.ts"
+
+[functions.system-one]
+enabled = true
+# record 動作靠 SYSTEM_ONE_API_KEY、ask 動作靠 service role bearer、backfill 不帶金鑰但有成本上限（端點自己擋）
+# 閘道不驗 JWT 是為了讓 pg_cron 的 net.http_post 打得到 backfill——金鑰放進 migration 就是公開的，這是開源倉庫
+verify_jwt = false
+entrypoint = "./functions/system-one/index.ts"
