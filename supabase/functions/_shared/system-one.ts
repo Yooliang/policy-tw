@@ -399,7 +399,14 @@ export function aggregateFieldVerdicts(
 
 /** PDF 抽字：unpdf 是給 serverless／edge 用的 pdf.js 包裝，不需要 canvas。動態載入，HTML 路徑不付這個成本 */
 async function pdfText(buf: Uint8Array): Promise<string> {
-  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1");
+  // ?no-dts：esm.sh 預設會附型別檔，而 unpdf 的型別引用 @types/node，CI 的乾淨環境沒有 node_modules
+  // 就在型別檢查炸掉（2026-09-19 main 的 CI 紅在這裡；本機因為有 pnpm 的 node_modules 才沒發現）。
+  // 型別在這裡手寫最小介面，不靠遠端 .d.ts。
+  type Unpdf = {
+    getDocumentProxy(data: Uint8Array): Promise<unknown>;
+    extractText(pdf: unknown, opts: { mergePages: true }): Promise<{ text: string | string[]; totalPages?: number }>;
+  };
+  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1?no-dts") as unknown as Unpdf;
   const pdf = await getDocumentProxy(buf);
   const { text } = await extractText(pdf, { mergePages: true });
   return typeof text === "string" ? text : (text as string[]).join("\n");
