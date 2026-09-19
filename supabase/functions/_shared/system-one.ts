@@ -406,7 +406,11 @@ async function pdfText(buf: Uint8Array): Promise<string> {
     getDocumentProxy(data: Uint8Array): Promise<unknown>;
     extractText(pdf: unknown, opts: { mergePages: true }): Promise<{ text: string | string[]; totalPages?: number }>;
   };
-  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1?no-dts") as unknown as Unpdf;
+  // 匯入字串放變數：Deno 只會把「字串字面值」的動態匯入放進型別檢查的模組圖。
+  // pdf.js 本體有 node: 匯入，CI 的 Deno 2.9.7 在有 package.json 的 repo 會去 node_modules 找 @types/node（#84 修了型別標頭還是紅）。
+  // 執行期照常載入；Supabase 部署時一樣打包。
+  const spec = "https://esm.sh/unpdf@0.12.1?no-dts";
+  const { extractText, getDocumentProxy } = await import(spec) as unknown as Unpdf;
   const pdf = await getDocumentProxy(buf);
   const { text } = await extractText(pdf, { mergePages: true });
   return typeof text === "string" ? text : (text as string[]).join("\n");
