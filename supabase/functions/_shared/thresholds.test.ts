@@ -1,6 +1,6 @@
 // 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { AGREE_THRESHOLDS, consensusStatus, effectiveDisagree, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByIp } from "./consensus.ts";
+import { AGREE_THRESHOLDS, consensusStatus, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByIp } from "./consensus.ts";
 import { SOURCE_PRIORITY, sourceKind } from "./source-priority.ts";
 
 /** 找最後一支（檔名排序最大）重新定義某個 SQL 物件的 migration，回傳從定義處起的內容 */
@@ -41,9 +41,9 @@ Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與�
   assertEquals(requiredAgree("correction", { field: "birth_year" }, [MEDIA]), 2, "一般欄位是一般資料");
   const need = requiredAgree("candidacy", {}, [MEDIA]);
   assertEquals(consensusStatus(tally(Array.from({ length: 6 }, () => ({ verdict: "agree" as const }))), "pending", need), "verified");
-  // 2026-09-17 改：同意達標卻有人反對 → 進裁決，不再留在 pending。
-  // 舊規則（通過要反對 0、爭議要反對 ≥ 2）會讓「達標 + 1 反對」兩邊都不成立、永久懸空。
-  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "disputed", "達標卻有人反對＝爭議，交裁決");
+  // 2026-09-19 改：達標而只有一張反對 → 通過（盲反對在 verify 端點改記 unsure；兩張反對才是爭議）
+  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }]), "pending", need), "verified", "達標＋一張反對＝通過");
+  assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }, { verdict: "disagree" }]), "pending", need), "disputed", "兩張反對才是爭議");
 });
 
 Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 4；多來源取最高等級", () => {
@@ -174,15 +174,14 @@ Deno.test("只有網域的首頁降到最低等級，具體那一頁才算官方
 
 // ---- 系統來源票（Jev）：4 票變 3+1，2026-09-19 使用者裁決 ----
 
-Deno.test("系統票：supported 讓門檻 −1 但最少 1；not_supported 多一張反對；棄權不動", () => {
+Deno.test("系統票：supported 讓門檻 −1 但最少 1；not_supported 讓門檻 +1 不算反對；棄權不動", () => {
   assertEquals(effectiveRequiredAgree(4, "supported"), 3, "4 → 3+1");
   assertEquals(effectiveRequiredAgree(2, "supported"), 1, "2 → 1+1");
   assertEquals(effectiveRequiredAgree(1, "supported"), 1, "Jev 永遠不能單獨通過");
   assertEquals(effectiveRequiredAgree(4, null), 4);
-  assertEquals(effectiveRequiredAgree(4, "not_supported"), 4, "反對不改門檻，改反對數");
-  assertEquals(effectiveDisagree(1, "not_supported"), 2, "1 張代理反對 + Jev 就進裁決");
-  assertEquals(effectiveDisagree(1, "supported"), 1);
-  assertEquals(effectiveDisagree(0, null), 0);
+  assertEquals(effectiveRequiredAgree(4, "not_supported"), 5, "2026-09-19：not_supported 只多要一張人票，不觸發裁決");
+  // 卡伊．馬賴：4 agree、1 盲反對（已改記 unsure）、系統票 not_supported → 門檻 2+1=3 → 通過，不進裁決
+  assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }, { verdict: "unsure" }]), "pending", effectiveRequiredAgree(2, "not_supported")), "verified");
   // 走一次完整判定：4 票門檻、Jev supported、3 張代理 agree → verified
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }]), "pending", effectiveRequiredAgree(4, "supported")), "verified");
   assertEquals(consensusStatus(tally([{ verdict: "agree" }, { verdict: "agree" }, { verdict: "agree" }]), "pending", effectiveRequiredAgree(4, null)), "pending");
@@ -192,8 +191,10 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
   assert(fn.includes("contribution_system_vote(p_contribution_id)"), "計票要讀系統票");
   assert(fn.includes("GREATEST(1, v_need - 1)"), "supported → 門檻 −1 且最少 1");
-  assert(fn.includes("CASE WHEN v_sys = 'not_supported' THEN 1 ELSE 0 END"), "not_supported → 一張反對");
-  assert(fn.includes("v_disagree_eff >= 2"), "爭議判定要用含系統票的反對數");
+  assert(fn.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
+  assert(!fn.includes("v_disagree_eff"), "系統票不再混進反對數");
+  assert(fn.includes("IF v_disagree >= 2 THEN v_new := 'disputed'"), "兩張代理反對才是爭議");
+  assert(fn.includes("v_agree >= v_need_eff AND v_disagree <= 1 THEN v_new := 'verified'"), "達標且反對 ≤1 就通過");
   assert(fn.includes("agree_count = v_agree"), "agree_count 仍是純代理票，系統票不混進去");
   const elig = await latestMigrationDefining("FUNCTION system_vote_eligible");
   for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assert(elig.includes(`'${t}'`), `SQL 合格型別缺 ${t}`);

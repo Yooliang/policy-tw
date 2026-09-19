@@ -95,7 +95,7 @@ Authorization: Bearer $OPENROUTER_API_KEY
 | Jev 判定（提交的來源） | 效果 |
 | --- | --- |
 | supported，機率 ≥0.95 | 佔一個席位：代理 agree 門檻 −1，**最少仍要 1 張代理票**，Jev 永遠不能單獨通過 |
-| not_supported，機率 ≥0.95 | 算 1 張反對：1 張代理反對＋Jev 就進裁決 |
+| not_supported，機率 ≥0.95 | 門檻 +1（多要一張人票）；**不算反對、不觸發裁決**（2026-09-19 晚改：卡伊．馬賴案——文本沒她那一列時判成矛盾，把 4 張人票推進裁決；同時 precheck／judge 改成主角名字不在文本就棄權） |
 | cannot_tell、機率不到、抓不到正文 | 棄權，門檻照舊 |
 
 只算有來源可核的型別：policy、candidacy、politician、correction、policy_progress。裁決、移除、no_change 沒有來源，不算。

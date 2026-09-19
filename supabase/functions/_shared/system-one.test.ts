@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -250,4 +250,13 @@ Deno.test("aggregateExtract：同一個人且值過門檻才算數；absent 回 
   });
   assertEquals(absent.value, null); assertEquals(absent.counts, false);
   assertEquals(aggregateExtract("candidate_status_stale", {}).counts, false);
+});
+
+// 2026-09-19：卡伊．馬賴——中選會 PDF 寫「卡伊‧馬賴」、payload 寫「卡伊．馬賴」，而且那次文本根本沒有她那一列
+Deno.test("nameHit／normalizeName：間隔號、臺台、空白不算不同；主角不在文本就 false", () => {
+  assertEquals(normalizeName("卡伊．馬賴"), normalizeName("卡伊‧馬賴"));
+  assertEquals(normalizeName("臺北市 王小明"), "台北市王小明");
+  assertEquals(nameHit("新竹市第7選舉區 115/09/03 卡伊‧馬賴 民主進步黨", ["卡伊．馬賴"]), true);
+  assertEquals(nameHit("115年縣市議員選舉候選人登記彙總表（索引頁，名單見附件）", ["卡伊．馬賴"]), false);
+  assertEquals(nameHit("一段文字", [null, undefined, "王"]), false, "單字名不比");
 });
