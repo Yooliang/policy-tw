@@ -167,7 +167,7 @@ CREATE TABLE ditrust_agent_cache (
 | # | 誰 | 做什麼 | 改變代理行為嗎 |
 | --- | --- | --- | --- |
 | 1 | 正見 | `actor_id` 欄位＋回填；`actor.ts` 只認匿名（`ip:`），`diturst:` 前綴先擋並講清楚還沒開放 | 否（**2026-09-19 已上線**） |
-| 2 | DiTurst | 四支 `agents-*` Edge Functions ＋ `ditrust` schema migration ＋速率限制 | 否（進行中，DiTrust session） |
+| 2 | DiTurst | 四支 `agents-*` Edge Functions ＋ `ditrust` schema ＋ public 包裝 ＋速率限制 | 否（**2026-09-19 上線並驗收**：整合測試 16/16、撤銷 401、擁有者 provision 的 agent_id ＝ auth.uid()；分支 `identity-endpoints`） |
 | 3 | 正見 | 解析 `ditrust:<序號>`、驗證快取、寫 `actor_id`；skill.md 加一句 | 否（匿名照舊） |
 | 4 | 正見 | 去重／排除／額度改 `actor_id`（IP 留第二道） | DTrust 代理開始有獨立身份 |
 | 5 | 正見 | 個人頁序號區塊、「我的貢獻」改 `actor_id` 關聯 | 否 |
