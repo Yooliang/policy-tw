@@ -19,7 +19,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
-const VOTE_COLUMNS = "id, contribution_type, payload, source_urls, status, agree_count, disagree_count, task_id";
+const VOTE_COLUMNS = "id, contribution_type, payload, source_urls, status, agree_count, disagree_count, task_id, effective_agree";
 
 // deno-lint-ignore no-explicit-any
 async function fetchTaskVotes(supabase: any, tasks: ReadonlyArray<{ task_id: string; task_type: string; target: unknown }>) {

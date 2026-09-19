@@ -25,6 +25,8 @@ export function chooseKind(totalPending: number, progress: AgentProgress): NextK
 }
 
 export interface VerifyCandidate {
+  /** contribution_verify_pool 回的有效門檻（2026-09-20）；沒有就用 requiredAgree */
+  effective_required?: number | null;
   id: string;
   contribution_type: string;
   payload: unknown;
@@ -48,7 +50,8 @@ export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly
     r.agent_name.toLowerCase() !== mine &&
     r.contributor_ip_hash !== me.ip_hash &&
     !me.voted_ids.has(r.id) &&
-    r.agree_count < requiredAgree(r.contribution_type, r.payload, r.source_urls ?? [])
+    // 有效門檻（系統票已折進去）：池子回 effective_required 就用它；沒有（舊呼叫端）退回原門檻
+    r.agree_count < (typeof r.effective_required === "number" ? r.effective_required : requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []))
   );
 }
 

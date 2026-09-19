@@ -60,8 +60,8 @@ export function isPastElectionResult(contributionType: string, payload: unknown)
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "removal") return "removal";
-  // 同名人物合併跟移除同級：3 票、不看來源（2026-09-19）
-  if (contributionType === "merge_politician") return "removal";
+  // 同名人物合併走 high（官方 4／媒體 6／社群 8）：誤併沒有便宜的回頭路（2026-09-20 審查建議 6；前一天訂 3 票）
+  if (contributionType === "merge_politician") return "high";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
@@ -101,12 +101,22 @@ export const BLIND_DISAGREE_NOTE = "（系統改記 unsure：反對票要有反�
 // 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
 // not_supported 讓門檻 +1（只擋自動上線，**不觸發裁決**——同日晚上改：它判錯過一次就把 4 張人票推進裁決）；
 // 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "merge_politician"] as const;
+// merge_politician 不拿系統票：Jev 的 same_person 看的是我們自己的欄位，跟代理看的是同一批資料，不構成獨立證據（2026-09-20）
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {
   return (SYSTEM_VOTE_ELIGIBLE_TYPES as readonly string[]).includes(contributionType);
 }
+/**
+ * 這筆現在要幾張同意票：資料列帶著 PostgREST 計算欄位 effective_agree（SQL contribution_effective_agree，系統票已折進去）
+ * 就用它；沒帶（舊查詢、剛提交還沒有系統票）就退回原門檻。五個回 required_agree 的地方都走這裡（2026-09-20 審查建議 1）。
+ */
+export function effectiveOrRequired(row: { contribution_type: string; payload: unknown; source_urls?: readonly string[] | null; effective_agree?: number | null; effective_required?: number | null }): number {
+  const eff = row.effective_agree ?? row.effective_required;
+  return typeof eff === "number" ? eff : requiredAgree(row.contribution_type, row.payload, row.source_urls ?? []);
+}
+
 /** supported → 門檻 −1，但最少 1；not_supported → 門檻 +1（多要一張人票，不算反對） */
 export function effectiveRequiredAgree(required: number, systemVote: SystemVote): number {
   if (systemVote === "supported") return Math.max(1, required - 1);

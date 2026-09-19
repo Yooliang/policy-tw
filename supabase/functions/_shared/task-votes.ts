@@ -9,7 +9,7 @@
  *     （一份裁決本身也要 4 票同意才定案，見 consensus.ts 的 AGREE_THRESHOLDS.adjudication）
  */
 
-import { requiredAgree } from "./consensus.ts";
+import { requiredAgree, effectiveOrRequired } from "./consensus.ts";
 
 export interface VoteContribution {
   id: string;
@@ -20,6 +20,8 @@ export interface VoteContribution {
   agree_count: number;
   disagree_count: number;
   task_id: string | null;
+  /** PostgREST 計算欄位：有效門檻（2026-09-20） */
+  effective_agree?: number | null;
 }
 
 export interface TaskVoteSummary {
@@ -64,7 +66,7 @@ export function summarizeTaskVotes(tasks: readonly TaskRef[], contributions: rea
         ? c.contribution_type === "adjudication" && payloadField(c.payload, "contribution_id") === originalId
         : c.task_id === t.task_id)
     );
-    const withNeed = mine.map((c) => ({ c, need: requiredAgree(c.contribution_type, c.payload, c.source_urls ?? []) }));
+    const withNeed = mine.map((c) => ({ c, need: effectiveOrRequired(c) }));
     const applied = withNeed.find(({ c }) => c.status === "applied");
     const inProgress = withNeed
       .filter(({ c }) => IN_PROGRESS.has(c.status))

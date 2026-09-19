@@ -210,3 +210,10 @@ Deno.test("merge_politician：keep／remove 都要 uuid 且不同、same_person 
   const bad = validateContributionRequest({ ...base, payload: { keep_id: "00000000-0000-4000-8000-000000000001", remove_id: "00000000-0000-4000-8000-000000000001", same_person: "yes", reason: "短" } });
   assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.reason", "payload.remove_id", "payload.same_person"]);
 });
+
+// 2026-09-20 審查建議 4：/next 的 how_to 教代理把 task_id 放頂層，no_change 卻只認 payload.task_id
+Deno.test("no_change：task_id 放頂層也要過（灌進 payload 再驗）", () => {
+  const r = validateContributionRequest({ agent_name: "tester", contribution_type: "no_change", task_id: "auto:policy_election_missing:00000000-0000-4000-8000-000000000001", source_urls: ["https://news.ltn.com.tw/x"], payload: { note: "查了自由時報與中選會，來源沒寫是哪一屆的承諾，不猜。" } });
+  assertEquals(r.errors.filter((e) => e.path === "payload.task_id"), []);
+  assertEquals((r.items[0]?.payload as { task_id?: string })?.task_id, "auto:policy_election_missing:00000000-0000-4000-8000-000000000001");
+});

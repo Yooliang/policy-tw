@@ -102,6 +102,12 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   const { data: after, error: aError } = await supabase
     .from("contributions").select("status, agree_count, disagree_count, unsure_count").eq("id", contribution.id).maybeSingle();
   if (aError) throw new Error(`contributions reread: ${aError.message}`);
+  // 回給代理的「還要幾票」用有效門檻（系統票折進去；2026-09-20），拿不到就退回原門檻
+  let effectiveRequired: number | null = null;
+  try {
+    const { data: eff } = await supabase.rpc("contribution_effective_agree", { p_contribution_id: contribution.id });
+    if (typeof eff === "number") effectiveRequired = eff;
+  } catch { /* 舊 DB 沒這支函式：退回原門檻 */ }
 
   // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機重試）
   const autoApply = shouldAutoApply(after?.status) ? await autoApplyContribution(supabase, contribution.id, applyFn) : { triggered: false };
@@ -124,7 +130,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,
       status: finalStatus,
-      required_agree: requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []),
+      required_agree: effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []),
       ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
       ...(adjudicationTaskId ? { adjudication_task_id: adjudicationTaskId, note: "兩票反對 → 已建裁決任務，會派給其他代理用更多票決定" } : {}),
       ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),

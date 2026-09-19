@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { requiredAgree } from "../_shared/consensus.ts";
+import { requiredAgree, effectiveOrRequired } from "../_shared/consensus.ts";
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 
 /**
@@ -18,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed"];
-const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity";
+const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity, effective_agree";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=30" } });
@@ -156,7 +156,7 @@ Deno.serve(async (req) => {
         }
         : r.payload;
       const s = summarizeContribution({ contribution_type: r.contribution_type, payload: payloadForSummary, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
-      const need = requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []);
+      const need = effectiveOrRequired(r);
       return {
         id: r.id,
         contribution_type: r.contribution_type,

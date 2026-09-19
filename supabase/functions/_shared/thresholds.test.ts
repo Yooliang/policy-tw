@@ -55,7 +55,7 @@ Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；
   assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
   assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 2, "有一個官方就算官方");
   assertEquals(riskLevel("policy_progress", {}), "normal");
-  assertEquals(riskLevel("merge_politician", { same_person: true }), "removal", "同名合併 3 票，不看來源");
+  assertEquals(riskLevel("merge_politician", { same_person: true }), "high", "同名合併走 high：誤併沒有便宜的回頭路（2026-09-20）");
   assertEquals(riskLevel("candidacy", {}), "high");
 });
 
@@ -96,7 +96,7 @@ Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority
   assert(new Set(Object.values(AGREE_THRESHOLDS.adjudication)).size === 1, "裁決不看來源");
   // 風險分級的判斷式也要對得上
   assert(matrix.includes("WHEN p_type = 'adjudication' THEN 'adjudication'"));
-  assert(matrix.includes("WHEN p_type = 'merge_politician' THEN 'removal'"), "SQL 也要把同名合併算成 removal 級");
+  assert(matrix.includes("WHEN p_type = 'merge_politician' THEN 'high'"), "SQL 也要把同名合併算成 high 級");
   assert(matrix.includes("WHEN p_type = 'candidacy' OR (p_type = 'correction' AND (p_payload->>'field' = 'candidate_status' OR"));
   // roster_check 是 000029 加進 light 的；原本這裡寫死舊字串，指到最新 migration 後才露出來
   assert(matrix.includes("WHEN p_type IN ('task_suggestion', 'no_change', 'roster_check') THEN 'light'"));
@@ -191,10 +191,16 @@ Deno.test("系統票：supported 讓門檻 −1 但最少 1；not_supported 讓�
 
 Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最少 1 的規則都在計票函式裡", async () => {
   const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
-  assert(fn.includes("contribution_system_vote(p_contribution_id)"), "計票要讀系統票");
-  assert(fn.includes("GREATEST(1, v_need - 1)"), "supported → 門檻 −1 且最少 1");
-  assert(fn.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
+  assert(fn.includes("contribution_effective_agree(p_contribution_id)"), "計票要用有效門檻那一支函式");
   assert(!fn.includes("v_disagree_eff"), "系統票不再混進反對數");
+  // 有效門檻只有一份：supported −1（最少 1）、not_supported +1；派工池也要用它（2026-09-20 審查建議 1）
+  const eff = await latestMigrationDefining("FUNCTION contribution_effective_agree");
+  assert(eff.includes("contribution_system_vote(p_contribution_id)"), "有效門檻要讀系統票");
+  assert(eff.includes("GREATEST(1, v_need - 1)"), "supported → 門檻 −1 且最少 1");
+  assert(eff.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
+  const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
+  assert(pool.includes("c.agree_count < contribution_effective_agree(c.id)"), "派工池要用有效門檻，否則 not_supported 的那筆永久卡住");
+  assert(pool.includes("effective_required"), "池子要把有效門檻回給 /next");
   assert(fn.includes("IF v_disagree >= 2 THEN v_new := 'disputed'"), "兩張代理反對才是爭議");
   assert(fn.includes("v_agree >= v_need_eff AND v_disagree <= 1 THEN v_new := 'verified'"), "達標且反對 ≤1 就通過");
   assert(fn.includes("agree_count = v_agree"), "agree_count 仍是純代理票，系統票不混進去");
