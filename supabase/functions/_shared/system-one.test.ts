@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -190,9 +190,21 @@ Deno.test("combineSources：含人名的來源排前面、每段標來源網域�
 });
 
 // 2026-09-19：連江縣選委會的公告頁只有幾行字，登記名單在 .xls 附件裡，三筆參選紀錄的系統票全棄權
-Deno.test("attachmentLinks：抓 pdf／xls／xlsx 連結、補全相對路徑、去重、最多三個", () => {
+Deno.test("attachmentLinks：抓 pdf／xls／xlsx／ods 連結、補全相對路徑、去重、最多六個", () => {
   const html = `<a href="/api/file/a.xls">議員</a> <a href="https://web.cec.gov.tw/api/file/b.pdf?x=1">長</a> <a href="/api/file/a.xls">重複</a> <a href="/img/c.png">圖</a> <a href="/api/file/d.xlsx">代表</a> <a href="/api/file/e.ods">村里</a>`;
   const links = attachmentLinks(html, "https://web.cec.gov.tw/lcec/article/64620");
-  assertEquals(links, ["https://web.cec.gov.tw/api/file/a.xls", "https://web.cec.gov.tw/api/file/b.pdf", "https://web.cec.gov.tw/api/file/d.xlsx"]);
+  assertEquals(links, ["https://web.cec.gov.tw/api/file/a.xls", "https://web.cec.gov.tw/api/file/b.pdf", "https://web.cec.gov.tw/api/file/d.xlsx", "https://web.cec.gov.tw/api/file/e.ods"]);
+  const seven = Array.from({ length: 7 }, (_, i) => `<a href="/f/${i}.xls">x</a>`).join("");
+  assertEquals(attachmentLinks(seven, "https://web.cec.gov.tw/").length, 6);
   assertEquals(attachmentLinks("<p>沒有附件</p>", "https://x/y"), []);
+});
+
+// 2026-09-19：連江縣選委會縣市長登記彙總表（xls）抽出來只有 171 字，被 200 字門檻擋成「抓不到正文」
+Deno.test("hasUsableText：短文本只要點到主角名字就算有正文；空殼頁不算", () => {
+  const csv = "登記日期,登記之選舉區,姓名,性別,推薦之政黨\n115/08/31,連江縣,王忠銘,男,中國國民黨\n115/09/02,連江縣,曹爾元,男,無";
+  assertEquals(hasUsableText(csv, ["王忠銘"]), true);
+  assertEquals(hasUsableText(csv, ["陳亭妃"]), false);
+  assertEquals(hasUsableText("王忠銘", ["王忠銘"]), false);
+  assertEquals(hasUsableText("x".repeat(200), ["陳亭妃"]), true);
+  assertEquals(hasUsableText("", [null, undefined]), false);
 });

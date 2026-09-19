@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -178,7 +178,8 @@ Deno.serve(async (req) => {
         const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
         if (!col) return null;
         const { data } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
-        return data && typeof data[col] === "string" ? data[col] : null;
+        const row = data as Record<string, unknown> | null;
+        return row && typeof row[col] === "string" ? row[col] as string : null;
       };
       const one = async (c: Cand): Promise<void> => {
         const payload = { ...(c.payload ?? {}) };
@@ -191,12 +192,12 @@ Deno.serve(async (req) => {
         // 最多看三個來源：第一個常常只是中選會的附件索引頁，名單在 PDF 或後面的來源裡
         const urls = c.source_urls.slice(0, 3);
         const fetched = await Promise.all(urls.map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
-        const usable = fetched.filter((p) => p.kind === "html" && p.text.length >= 200);
+        const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names));
         const combined = combineSources(usable, names);
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
         let key: string;
-        if (!combined || combined.length < 200) {
+        if (!combined || !hasUsableText(combined, names)) {
           // 全部抓不到正文就棄權（cannot_tell、機率 0），但一樣留紀錄：候選查詢靠這列知道「判過了」，
           // 而且對帳時分得出「來源抓不到」跟「Jev 看不出來」是兩回事
           const notes = fetched.map((p) => `${p.kind}:${p.note}`).join(" | ");
@@ -285,13 +286,14 @@ Deno.serve(async (req) => {
         const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
         if (col && typeof table === "string" && typeof id === "string") {
           const { data: subj } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
-          if (subj && typeof subj[col] === "string") payload.subject_name = subj[col];
+          const row = subj as Record<string, unknown> | null;
+          if (row && typeof row[col] === "string") payload.subject_name = row[col];
         }
       }
       const claim = claimOf(c.contribution_type, payload);
       const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((x) => typeof x === "string" ? x : null);
       const page = await fetchSource(targetUrl);
-      if (page.kind !== "html" || page.text.length < 200) {
+      if (page.kind !== "html" || !hasUsableText(page.text, names)) {
         return json({ success: false, error: "fetch_failed", message: `抓不到正文（${page.note}）；試試 archive.org 的存檔網址或另一個來源` }, 422);
       }
       const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
