@@ -621,6 +621,17 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
+  // 提問任務不因 no_change 關閉（2026-09-20）：關了就沒人再答，訪客永遠看到「正在查證」。新的 no_change 在 contribute 就會被擋，這裡守舊資料。
+  // 測試的假 supabase 只有 update／insert：查不到型別就當非提問（真 DB 一定查得到）
+  let taskType: string | null = null;
+  try {
+    // query-bounds: ok — 按 id 查一列（maybeSingle），鏈被拆開只是為了容忍測試的假 supabase
+    const q = supabase.from("contribution_tasks") as { select?: (cols: string) => { eq: (k: string, v: unknown) => { maybeSingle: () => Promise<{ data: { task_type?: string } | null }> } } };
+    if (typeof q.select === "function") taskType = (await q.select("id, task_type").eq("id", taskId).maybeSingle()).data?.task_type ?? null;
+  } catch { /* 查不到就當非提問 */ }
+  if (taskType === "question") {
+    return { status: "applied", message: "已記錄；提問任務不因 no_change 關閉，仍等有人用 question_answer 回一份說明", task_id: taskId };
+  }
   const task = await closeTask(supabase, taskId, row.agent_name);
   if (!task) return { status: "failed", message: `找不到任務 ${taskId}` };
   await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");

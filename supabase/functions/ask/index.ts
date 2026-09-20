@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { loginWalledOnly, LOGIN_WALLED_MESSAGE } from "../_shared/question-intake.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { ASK_DAILY_LIMIT_PER_IP, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
@@ -39,6 +40,8 @@ Deno.serve(async (req) => {
     if (!isValidQuestionLength(question)) {
       return json({ success: false, error: "invalid_question", message: `question 必填，${QUESTION_MIN_LEN}～${QUESTION_MAX_LEN} 字` }, 400);
     }
+    // 只有需登入的社群連結：代理讀不到，入口就退（2026-09-20）
+    if (loginWalledOnly(question)) return json({ success: false, error: "login_walled_link", message: LOGIN_WALLED_MESSAGE }, 400);
     const policyId = typeof body.policy_id === "string" && UUID_RE.test(body.policy_id) ? body.policy_id : null;
     if (body.policy_id !== undefined && body.policy_id !== null && !policyId) return json({ success: false, error: "invalid_policy_id", message: "policy_id 要是 uuid" }, 400);
     const politicianId = typeof body.politician_id === "string" && UUID_RE.test(body.politician_id) ? body.politician_id : null;

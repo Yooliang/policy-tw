@@ -11,8 +11,8 @@ import { summarizeContribution } from "./contribution-summary.ts";
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 
-export type HistoryTarget = "politician" | "policy" | "contribution";
-export const HISTORY_TARGETS: readonly HistoryTarget[] = ["politician", "policy", "contribution"];
+export type HistoryTarget = "politician" | "policy" | "contribution" | "question";
+export const HISTORY_TARGETS: readonly HistoryTarget[] = ["politician", "policy", "contribution", "question"];
 export const HISTORY_MAX_LIMIT = 50;
 
 export interface HistoryContribution {
@@ -203,6 +203,10 @@ export function describeOrigin(target: HistoryTarget, row: Obj | null, electionN
     const ai = row?.ai_extracted === true;
     return { kind: sourceUrl || ai ? "imported" : "unknown", note: ai ? "早期由 AI 搜尋匯入，尚未經過貢獻流程；來源見下方網址" : sourceUrl ? "由匯入資料建立，尚未經過 AI 貢獻流程；來源見下方網址" : "這筆資料尚未經過 AI 貢獻流程，也沒有記錄來源", source_url: sourceUrl };
   }
+  if (target === "question") {
+    // 訪客的提問：沒有任何處理紀錄時要講清楚，不要留白（2026-09-20：一題 Facebook 提問卡了八天，頁面只寫「正在查證」）
+    return { kind: "unknown", note: "還沒有 AI 代理處理過這一題；派出後每一次處理（回答、查不到的回報、驗證投票）都會列在這裡" };
+  }
   if (target === "politician") {
     const notes = electionNotes.filter((n) => typeof n === "string" && n.trim().length > 0);
     return { kind: notes.length > 0 ? "imported" : "unknown", note: notes.length > 0 ? "由匯入資料建立，尚未經過 AI 貢獻流程；參選紀錄的來源備註如下" : "這筆資料尚未經過 AI 貢獻流程，也沒有記錄來源", source_notes: [...new Set(notes)] };
@@ -224,6 +228,16 @@ async function contributionsForTarget(supabase: SupabaseLike, target: HistoryTar
     const res = await supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("id", id).limit(1);
     return ok<HistoryContribution[]>(res, "contribution read");
   }
+  if (target === "question") {
+    // 這一題的所有處理：回答（payload.question_id）、掛在提問任務上的任何貢獻（no_change「查不到」也算一次處理）
+    const tasks = ok<Array<{ id: string }>>(await supabase.from("contribution_tasks").select("id").eq("task_type", "question").eq("target->>question_id", id).limit(20), "question tasks");
+    const taskIds = tasks.map((t) => String(t.id));
+    const [answers, byTask] = await Promise.all([
+      supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("payload->>question_id", id).limit(200),
+      taskIds.length > 0 ? supabase.from("contributions").select(CONTRIBUTION_COLUMNS).in("task_id", taskIds).limit(200) : Promise.resolve({ data: [], error: null }),
+    ]);
+    return [...ok<HistoryContribution[]>(answers, "question answers"), ...ok<HistoryContribution[]>(byTask, "question task contributions")];
+  }
   const appliedCol = target === "policy" ? "applied_policy_id" : "applied_politician_id";
   const payloadCol = target === "policy" ? "payload->>policy_id" : "payload->>politician_id";
   const targetTable = target === "policy" ? "policies" : "politicians";
@@ -242,7 +256,7 @@ async function contributionsForTarget(supabase: SupabaseLike, target: HistoryTar
 
 /** edit_history 直接掛在這個對象（或它的子列：參選紀錄／追蹤紀錄）上的貢獻 id */
 async function contributionIdsFromEdits(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<{ ids: string[]; edits: HistoryEdit[] }> {
-  if (target === "contribution") return { ids: [], edits: [] };
+  if (target === "contribution" || target === "question") return { ids: [], edits: [] };
   const mainTable = target === "policy" ? "policies" : "politicians";
   const childTable = target === "policy" ? "tracking_logs" : "politician_elections";
   const childFk = target === "policy" ? "policy_id" : "politician_id";
@@ -317,6 +331,10 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
 async function originRowFor(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<{ row: Obj | null; notes: string[] }> {
   if (target === "policy") {
     const res = await supabase.from("policies").select("id, title, source_url, ai_extracted, proposed_date").eq("id", id).maybeSingle();
+    return { row: (res.data as Obj | null) ?? null, notes: [] };
+  }
+  if (target === "question") {
+    const res = await supabase.from("citizen_questions").select("id, question, status, answer_count, created_at").eq("id", id).maybeSingle();
     return { row: (res.data as Obj | null) ?? null, notes: [] };
   }
   if (target === "politician") {

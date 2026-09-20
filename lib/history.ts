@@ -2,7 +2,7 @@
  * 查核履歷（GET /functions/v1/history）：某人物／政見／單筆貢獻被誰交、誰驗、改了什麼、有沒有裁決或還原。
  */
 
-export type HistoryTarget = 'politician' | 'policy' | 'contribution'
+export type HistoryTarget = 'politician' | 'policy' | 'contribution' | 'question'
 
 export interface HistoryVerifier { agent_name: string | null; agent_tool: string | null; verdict: string; note: string | null; evidence_url: string | null; resolved_politician_id: string | null; created_at: string }
 export interface HistoryEdit { table: string; record_id: string; field: string; field_label: string; old_value: unknown; new_value: unknown; applied_at: string; reverted_at: string | null; reverted_by: string | null }
