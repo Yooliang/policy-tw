@@ -285,6 +285,10 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 | 3 | 斷年度 31 筆：用優先序讓代理先做，不透露答案 | **已上線**。代理回報後 `system_one_accuracy` 會出現第一批真正的準確率 |
 | 4 | 身份衝突免升級（4-1） | 等 3 累積夠 |
 | 5 | 同名重複人物 → `duplicate_politician` 任務 → 多 AI 查證 → 軟合併 | **2026-09-19 晚上線**（migration `…000016`）：`merge_politician` SQL 軟合併（`politicians.merged_into`）、`politician_pair_resolutions`、`contribution_auto_tasks_dup()`（Jev diff ≥0.95 的不派、same 的排前面）、`merge_politician` 貢獻型別（2026-09-20 改：high 級 4／6／8，不拿系統票；合併逐列記 edit_history 可整筆還原）。舊的 `merge-politicians`（硬刪）保留給管理員但不再是流程的一部分 |
+| 6 | 早期匯入政見核對（`legacy_audit`＋`system-one?action=legacy`） | **2026-09-20 上線**（#106） |
+| 7 | 屆別矛盾（`policy_election_mismatch`） | **2026-09-20 上線**（#114） |
+| 8 | judge 擋轉載、`judge_backed`、非核心矛盾不算反對；表格類來源一律棄權（系統不解析 PDF／Excel） | **2026-09-20 上線**（#100、#116） |
+| 9 | 全 judge 票不得單獨通過 | 擱置，等 `judge_backed` 數據 |
 
 **不做**：把 Jev 的答案當 hint 塞進 `/next` 給代理看——錨定效應會讓對帳失去意義。
 

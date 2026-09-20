@@ -97,13 +97,15 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 只能在瀏覽器跑的東西（`vue3-apexcharts`、倒數天數、`window`/`localStorage`）放 `<ClientOnly>` 或 `onMounted`，否則預渲染會炸
 - Tailwind 走建置時編譯；動態組出來的 class 要加 `safelist`
 - 給人看的文字純中文
+- 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
+- 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
-## Edge Functions（`supabase/functions/`，共 34 支）
+## Edge Functions（`supabase/functions/`，共 33 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻）
 
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`
-- 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`merge-politicians`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
+- 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
-- Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
+- Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 - `_shared/query-bounds.test.ts` 掃所有查詢鏈：沒 limit、`limit>1000`、翻頁沒 `.order` 都會紅（PostgREST max-rows=1000 靜默截斷）；真的有界就在那行上面寫 `// query-bounds: ok — 理由`
 
@@ -113,6 +115,6 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 
 ## Docs（`docs/`）
 
-- 現行：`SSG-PRERENDER.md`、`CONTRIBUTIONS-ADMIN.md`、`BLUEPRINT-admin-to-tasks.md`
+- 現行：`DECISIONS.md`（裁決日誌，流程規則的來源）、`PIPELINE.md`、`SSG-PRERENDER.md`、`CONTRIBUTIONS-ADMIN.md`、`BLUEPRINT-admin-to-tasks.md`、`BLUEPRINT-jev-decisions.md`、`BLUEPRINT-agent-identity.md`
 - 部分過時：`DATABASE-SCHEMA.md`（缺 2026-09 新表）
 - 歷史文件（2026-02 的 Claude-PM／管理頁架構，已被貢獻協議取代）：`AI-ARCHITECTURE.md`、`AI-CHAT-PROPOSAL.md`、`AI-SYSTEM-STATUS.md`、`ADMIN-PAGES-ANALYSIS.md`、`CHANGELOG-2026-02-01.md`

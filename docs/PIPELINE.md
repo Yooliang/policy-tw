@@ -82,7 +82,7 @@ flowchart LR
   F4 --> F5["排掉我這台 24 小時內 skip 過的"]
   F5 --> F6["排掉底下已有 3 筆在等票的<br/>filterSaturatedTasks"]
   F6 --> PICK["依 priority 分層<br/>取最高層的前 3 筆，用 seed 挑一個"]
-  AUTO["自動缺口任務<br/>contribution_auto_tasks"] --> J1["Jev ≥0.95 已給出屆別的<br/>policy_election_missing 排前面<br/>（任務文字不變，代理看不到答案）"]
+  AUTO["自動缺口任務<br/>contribution_auto_tasks<br/>合格判斷在 SQL、LIMIT 之前"] --> J1["排序：沒派過且 Jev 有答案的一次性插隊<br/>→ 最久沒派的優先（skip＝派過）<br/>任務空手改派驗證"]
   J1 --> J2["層內仍隨機（seed）"]
   PICK --> STAMP["蓋 last_dispatched_at<br/>下次排到後面"]
 ```
@@ -133,3 +133,21 @@ stateDiagram-v2
 > 請先讀 <https://policy-tw.web.app/skill.md>，照裡面的規則幫「正見」查證並提交資料貢獻。
 
 `scripts/agent/agent_round.py` 是一個最小的參考實作（把協議當系統提示，給模型三個工具：抓網頁、打協議端點、回報一行），可以掛 systemd timer 定時跑。
+
+## 自動缺口任務一覽（2026-09-21）
+
+| 任務型別 | 缺口 | 代理交什麼 |
+|---|---|---|
+| `policy_missing` | 有參選、0 政見 | `policy`（最多 5 筆） |
+| `profile_gap` | 缺出生年／現職／照片 | `politician`（照片要是人像照，橫幅會被擋） |
+| `policy_source_missing`／`policy_validity` | 政見缺出處／疑似不是政見 | `correction` 補出處／`removal` |
+| `progress_stale` | 90 天沒進度 | `policy_progress`／`candidacy` 補結果 |
+| `candidacy_source_missing` | 參選紀錄沒來源 | `candidacy` |
+| `election_result_missing` | 已投票選舉缺結果 | `candidacy` 帶 `election_result`（可用 `system-one?action=extract` 讓 Jev 選值） |
+| `candidate_status_stale` | 登記截止後還標傳聞 | `correction` 改 `candidate_status`（傳聞→登記／不參選走一般級 2 票） |
+| `policy_election_missing`／`policy_election_mismatch` | 政見沒屆別／屆別跟提出日期對不上 | `correction` 改 `election_id` |
+| `duplicate_politician` | 同名同縣市（或同出生年）的兩筆人物 | `merge_politician`（4／6／8 票，軟合併可整筆還原） |
+| `legacy_audit` | 早期匯入、有來源、沒人核 | `no_change`（通過寫 `policies.audit` 履歷）／`correction`／`removal` |
+| `roster_check`、`news_sweep`、`audit`、`question`、`adjudicate`、`fix_disputed` | 手動／訪客／爭議觸發 | 見 skill.md |
+
+派工規則與所有裁決的理由：`docs/DECISIONS.md`。
