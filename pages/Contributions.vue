@@ -84,7 +84,7 @@ const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.filter(t => t.key).map(t => [t.key, t.label]))
 const STATUS_LABEL: Record<string, string> = {
   pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '裁決中',
-  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原',
+  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原', superseded: '已由他筆上線',
 }
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800 border-amber-200',

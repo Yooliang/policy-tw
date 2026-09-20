@@ -148,3 +148,15 @@ export function findMergeTarget(
   );
   return hits[0] ?? null;
 }
+
+/**
+ * 一筆貢獻上線後，同一宣稱還在等票的其他提交要收編（2026-09-21）：內容沒錯（不是退件）、也沒有各自落庫（不是通過），
+ * 標成 superseded，驗證池不再派它、頁面只剩上線的那筆。回要收編的 id 清單。
+ */
+export function findSuperseded(applied: { id: string; contribution_type: string; payload: unknown }, pending: ReadonlyArray<{ id: string; contribution_type: string; payload: unknown; status: string }>): string[] {
+  const key = claimKey(applied.contribution_type, applied.payload);
+  if (!key) return [];
+  return pending
+    .filter((c) => c.id !== applied.id && (c.status === "pending" || c.status === "verified") && claimKey(c.contribution_type, c.payload) === key)
+    .map((c) => c.id);
+}

@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { claimKey, claimTarget, DUPLICATE_ELIGIBLE_TYPES, type ExistingClaim, findMergeTarget, sameClaim } from "./duplicate-claim.ts";
+import { findSuperseded, claimKey, claimTarget, DUPLICATE_ELIGIBLE_TYPES, type ExistingClaim, findMergeTarget, sameClaim } from "./duplicate-claim.ts";
 
 // 案例取自 2026-09-18 線上 1,207 筆 pending 的實測配對
 const P1 = "98b8b1ff-d085-4597-8384-a02461f773f6";
@@ -113,4 +113,19 @@ Deno.test("merge_politician：同一對（順序無關）＋同結論才是同�
   assertEquals(k1 === k2, false, "keep 不同就不是同一個宣稱（誰被留下來是結論的一部分）");
   assertEquals(k1 === k3, false);
   assertEquals(claimKey("merge_politician", { keep_id: A, remove_id: B, same_person: true }), k1);
+});
+
+// 2026-09-21：蔡培慧 2024 落選那筆三個代理各交一份，一筆上線後另兩筆還在等票
+Deno.test("findSuperseded：同宣稱、還在等票的才收編；自己、不同宣稱、已定案的不動", () => {
+  const p = { politician_id: P1, election_id: 2024, election_type: "立法委員", candidate_status: "confirmed", election_result: "not_elected", region: "南投縣" };
+  const applied = { id: "a", contribution_type: "candidacy", payload: p };
+  const pending = [
+    { id: "a", contribution_type: "candidacy", payload: p, status: "pending" },
+    { id: "b", contribution_type: "candidacy", payload: { ...p, votes_received: 66551 }, status: "pending" },
+    { id: "c", contribution_type: "candidacy", payload: { ...p, election_result: "elected" }, status: "pending" },
+    { id: "d", contribution_type: "candidacy", payload: p, status: "rejected" },
+    { id: "e", contribution_type: "candidacy", payload: p, status: "verified" },
+  ];
+  assertEquals(findSuperseded(applied, pending), ["b", "e"]);
+  assertEquals(findSuperseded({ id: "x", contribution_type: "policy", payload: { title: "t" } }, pending), [], "自由文字型別不併");
 });
