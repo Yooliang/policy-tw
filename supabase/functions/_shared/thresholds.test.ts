@@ -1,5 +1,6 @@
 // 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 import { AGREE_THRESHOLDS, consensusStatus, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByIp } from "./consensus.ts";
 import { SOURCE_PRIORITY, sourceKind } from "./source-priority.ts";
 
@@ -213,4 +214,10 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   const elig = await latestMigrationDefining("FUNCTION system_vote_eligible");
   for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assert(elig.includes(`'${t}'`), `SQL 合格型別缺 ${t}`);
   assert(!elig.includes("'adjudication'") && !elig.includes("'removal'") && !elig.includes("'no_change'"), "沒有來源可核的型別不能有系統票");
+});
+
+// 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改
+Deno.test("contributions.contribution_type 的 CHECK 要包含 TS 的每一種型別", async () => {
+  const sql = await latestMigrationDefining("CONSTRAINT contributions_contribution_type_check");
+  for (const t of CONTRIBUTION_TYPES) assert(sql.includes(`'${t}'`), `DB 的 CHECK 少了型別 ${t}：加 migration 重建約束`);
 });
