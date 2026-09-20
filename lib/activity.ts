@@ -15,6 +15,7 @@ const STATUS_TEXT: Record<string, string> = {
   rejected: '已退件',
   reverted: '已還原',
   apply_failed: '上線失敗，系統會自動重試',
+  superseded: '同一宣稱已由別筆上線，這筆收編',
   pending: '重新回到等待驗證',
 }
 

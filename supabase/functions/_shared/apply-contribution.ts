@@ -21,6 +21,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection } from "./correction.ts";
+import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -733,8 +734,27 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     } catch (e) {
       console.error("closeTaskIfFulfilled:", e instanceof Error ? e.message : String(e));
     }
+    // 同一宣稱還在等票的其他提交收編成 superseded（2026-09-21）：驗證者不用再投票在已成事實的東西上
+    try {
+      await supersedeDuplicates(supabase, row);
+    } catch (e) {
+      console.error("supersedeDuplicates:", e instanceof Error ? e.message : String(e));
+    }
   }
   return outcome;
+}
+
+async function supersedeDuplicates(supabase: SupabaseLike, row: ContributionRow): Promise<void> {
+  if (!(DUPLICATE_ELIGIBLE_TYPES as readonly string[]).includes(row.contribution_type)) return;
+  const target = claimTarget(row.contribution_type, row.payload);
+  if (!target) return;
+  const { data } = await supabase.from("contributions").select("id, contribution_type, payload, status")
+    .eq("contribution_type", row.contribution_type).eq(`payload->>${target.field}`, target.value).in("status", ["pending", "verified"]).neq("id", row.id).limit(200);
+  const ids = findSuperseded({ id: row.id, contribution_type: row.contribution_type, payload: row.payload }, (data ?? []) as Array<{ id: string; contribution_type: string; payload: unknown; status: string }>);
+  if (ids.length === 0) return;
+  const { error } = await supabase.from("contributions")
+    .update({ status: "superseded", review_notes: `同一宣稱已由 ${row.agent_name ?? "?"} 的提交（${row.id}）上線` }).in("id", ids);
+  throwIf(error, "supersede duplicates");
 }
 
 async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
