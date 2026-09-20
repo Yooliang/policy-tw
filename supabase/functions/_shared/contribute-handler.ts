@@ -132,6 +132,15 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
 
   // 單一答案型任務：同 IP 已有一份在排隊就不收第二份（見 single-answer-guard.ts）
+  // 提問任務只收 question_answer（2026-09-20）：no_change 通過會把提問任務關掉，訪客卻永遠看到「AI 正在查證」。
+  // 查不到、連結打不開也要回一份說明——那才是訪客看得到的東西。
+  const manualNoChange = validation.items.filter((it) => it.contribution_type === "no_change" && typeof it.task_id === "string" && !it.task_id.startsWith("auto:")).map((it) => it.task_id as string);
+  if (manualNoChange.length > 0) {
+    const { data: qTasks } = await supabase.from("contribution_tasks").select("id").in("id", manualNoChange).eq("task_type", "question").limit(50);
+    if ((qTasks ?? []).length > 0) {
+      return { status: 400, body: { success: false, error: "question_needs_answer", message: "提問任務只收 question_answer：查不到、連結需登入打不開，也請用 question_answer 回一份說明（訪客看得到的是回答，不是 no_change）", task_ids: ((qTasks ?? []) as Array<{ id: string }>).map((t) => t.id) } };
+    }
+  }
   const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
 
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { hostOf, shortUrlsIn } from '../../lib/url'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import HistoryPanel from '../history/HistoryPanel.vue'
 import { Bot, ChevronDown, ChevronUp, Clock, ExternalLink, Loader2, MessageSquareText, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import type { CitizenQuestion, QuestionAnswer } from '../../types'
 import type { AnswersState } from '../../composables/useCitizenQuestions'
@@ -26,6 +27,10 @@ const emit = defineEmits<{
   toggle: [id: string]
   vote: [id: string, stance: Stance]
 }>()
+
+// AI 處理紀錄（使用者 2026-09-20：「至少要呈現出來它處理過 3 次、有一個回答正在被檢驗投票，不是呆呆的空在那裡」）
+// 由 HistoryPanel（target=question）載入：每一次回答、查不到的回報、驗證票都列出來；這裡只接它回報的次數
+const attempts = ref<number | null>(null)
 
 const STATUS_LABEL: Record<CitizenQuestion['status'], string> = {
   open: '待回答',
@@ -104,9 +109,14 @@ function fmtTime(iso: string): string {
         <Loader2 :size="16" class="animate-spin" /> 讀取答案中…
       </div>
       <p v-else-if="answers === 'error'" class="text-sm text-red-600 py-2">暫時讀不到答案，請稍後再試。</p>
-      <p v-else-if="!answerList || answerList.length === 0" class="text-sm text-slate-500 py-2">
-        AI 代理正在查證這一題，答案準備好就會顯示在這裡。
-      </p>
+      <div v-else-if="!answerList || answerList.length === 0" class="py-2 space-y-3">
+        <p class="text-sm text-slate-500">
+          <template v-if="attempts === null">還沒有通過驗證的回答。</template>
+          <template v-else-if="attempts === 0">還沒有 AI 代理處理過這一題；派出後每一次處理都會列在下面。</template>
+          <template v-else>還沒有通過驗證的回答；AI 已處理 {{ attempts }} 次，每一次的結果與投票進度在下面（回答要 2 票同意才會顯示）。</template>
+        </p>
+        <HistoryPanel target="question" :id="question.id" title="AI 處理紀錄" compact @loaded="attempts = $event.total" />
+      </div>
       <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div v-for="a in answerList" :key="a.id" class="bg-white rounded-lg border border-slate-200 p-4 min-w-0">
           <div class="flex items-center gap-1.5 text-xs font-bold text-slate-500 mb-2">
