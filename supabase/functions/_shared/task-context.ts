@@ -48,6 +48,8 @@ export interface TaskContextData {
   contribution?: Obj | null;
   votes?: Obj[];
   pending_adjudications?: number;
+  /** legacy_audit：系統對這筆政見來源的逐欄核對（jev_decisions policy／source_support），沒有就 null */
+  system_check?: Obj | null;
   /** duplicate_politician：兩筆人物各自的全欄、參選紀錄、政見標題；pair_verdict 是 Jev 的 same_person 判定 */
   pair?: { a: Obj | null; b: Obj | null; a_elections: Obj[]; b_elections: Obj[]; a_policies: Obj[]; b_policies: Obj[]; verdict: Obj | null };
   /** question：這一題本身（citizen_questions 一列） */
@@ -138,6 +140,16 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
           : "還沒有人答過，找有出處的答案（政府網頁、新聞、候選人官方發言優先）",
       };
     }
+    case "legacy_audit": {
+      const policy = data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null;
+      return {
+        policy,
+        politician: pick(p, POLITICIAN_BRIEF),
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
+        system_check: data.system_check ?? null,
+        hint: "打開 policy.source_url：這是不是這個人說過的承諾、標題與內容對不對、是哪一場選舉的。都對 → no_change（note 寫你核對到什麼）；欄位錯 → correction；不是政見 → removal。system_check 是系統逐欄核對的結果，contradicted 的欄位優先看。",
+      };
+    }
     case "duplicate_politician": {
       const pr = data.pair;
       const side = (who: Obj | null, elections: Obj[], policies: Obj[]) => ({
@@ -195,6 +207,17 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
     data.politician = p ?? null;
+  }
+  if (taskType === "legacy_audit" && policyId) {
+    const [pl, el, jv] = await Promise.all([
+      supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
+      pid ? supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result").eq("politician_id", pid).order("election_id", { ascending: false }).limit(10) : Promise.resolve({ data: [] }),
+      supabase.from("jev_decisions").select("choice, probability, probabilities, asked_at").eq("subject_type", "policy").eq("subject_id", policyId).eq("question", "source_support").order("asked_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    data.policy = (pl.data as Obj | null) ?? null;
+    data.elections = (el.data ?? []) as Obj[];
+    const v = jv.data as { choice?: string; probability?: number; probabilities?: unknown; asked_at?: string } | null;
+    data.system_check = v ? { verdict: v.choice, probability: Number(v.probability), fields: v.probabilities ?? null, checked_at: v.asked_at } : null;
   }
   if (taskType === "duplicate_politician") {
     const a = (target.a && typeof target.a === "object" ? (target.a as Obj).id : null) as string | null;

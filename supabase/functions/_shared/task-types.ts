@@ -11,6 +11,7 @@
  */
 export const SUGGESTED_TYPE: Record<string, string> = {
   duplicate_politician: "merge_politician",
+  legacy_audit: "no_change",
   policy_missing: "policy",
   profile_gap: "politician",
   policy_source_missing: "correction",
