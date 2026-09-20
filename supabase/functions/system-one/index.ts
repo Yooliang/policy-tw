@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, isTabularNote, textSimilarity, SAME_CONTENT_THRESHOLD, focusLines } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -32,6 +32,7 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
  *   3. state 不能是空的。
  */
 
+import { cecCandidacyPage } from "../_shared/cec-check.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -229,11 +230,15 @@ Deno.serve(async (req) => {
         }
         const claim = claimOf(c.contribution_type, payload);
         const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
-        // 最多看三個來源：第一個常常只是中選會的附件索引頁，名單在 PDF 或後面的來源裡
-        const urls = c.source_urls.slice(0, 3);
-        const fetched = await Promise.all(urls.map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
-        const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names)).map((p) => ({ ...p, tabular: isTabularNote(p.note) }));
-        const tabular = usable.some((p) => p.tabular);
+        // 參選紀錄先問中選會的結構化資料（2026-09-20：系統不解析 PDF／Excel）；查不到（2026 登記期）才看提交者附的網頁
+        const cec = c.contribution_type === "candidacy" && typeof payload.name === "string" && typeof payload.election_id === "number"
+          ? await cecCandidacyPage(payload.name, payload.election_id)
+          : null;
+        const urls = cec ? [cec.url] : c.source_urls.slice(0, 3);
+        const fetched = cec
+          ? [{ url: cec.url, kind: "html" as const, text: cec.text, note: `cec-api（${cec.count} 筆）` }]
+          : await Promise.all(c.source_urls.slice(0, 3).map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
+        const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names));
         const combined = combineSources(usable, names);
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
@@ -251,12 +256,12 @@ Deno.serve(async (req) => {
           }];
           key = noName ? "fetch:noname" : `fetch:${fetched[0]?.kind ?? "error"}`;
         } else {
-          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined, { tabular });
+          const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
           (state.page as Record<string, unknown>).urls = urls;
           const res = await askJev(apiKey, state, questions);
           cost += res.usage.cost;
           // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
-          const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers, MIN_PROBABILITY, { tabular });
+          const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
             choice: agg.choice, probability: agg.probability, confidence: null,
@@ -314,18 +319,16 @@ Deno.serve(async (req) => {
         const claim = claimOf("policy", { name: t.target.name, politician_name: t.target.name, title: pl.title, description: String(pl.description ?? "").slice(0, 300), ...(pl.election_id ? { election_id: pl.election_id } : {}), ...(pl.category ? { category: pl.category } : {}) });
         const names = [t.target.name, String(pl.title)];
         const page = await fetchSource(t.target.source_url);
-        const tabular = isTabularNote(page.note);
         let row: DecisionRecord; let key: string;
         if (page.kind !== "html" || !hasUsableText(page.text, names) || !nameHit(page.text, names)) {
           row = { subject_type: "policy", subject_id: pl.id, question: "source_support", choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
             model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: t.target.source_url, text: "", fetch: page.kind, note: page.note } }, cost_usd: 0 };
           key = `fetch:${page.kind}`;
         } else {
-          const text = tabular ? focusLines(page.text, names) : focusText(page.text, names);
-          const { state, questions } = buildSourceSupportAsk(claim, t.target.source_url, text, { tabular });
+          const { state, questions } = buildSourceSupportAsk(claim, t.target.source_url, focusText(page.text, names));
           const res = await askJev(apiKey, state, questions);
           cost += res.usage.cost;
-          const agg = aggregateFieldVerdicts("policy", claim, res.answers, MIN_PROBABILITY, { tabular });
+          const agg = aggregateFieldVerdicts("policy", claim, res.answers);
           row = { subject_type: "policy", subject_id: pl.id, question: "source_support", choice: agg.choice, probability: agg.probability, confidence: null,
             probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)) };
           key = `${agg.choice}${agg.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
@@ -391,6 +394,9 @@ Deno.serve(async (req) => {
       const claim = claimOf(c.contribution_type, payload);
       const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((x) => typeof x === "string" ? x : null);
       const page = await fetchSource(targetUrl);
+      if (page.kind === "pdf") {
+        return json({ success: false, error: "unsupported_source", message: "系統不解析 PDF／試算表（只讀網頁）。請找網頁版的來源；參選紀錄可用中選會資料庫的查詢網址（db.cec.gov.tw/query/api/v1/elections/candidates/query?cand_name=姓名）" }, 422);
+      }
       if (page.kind !== "html" || !hasUsableText(page.text, names)) {
         return json({ success: false, error: "fetch_failed", message: `抓不到正文（${page.note}）；試試 archive.org 的存檔網址或另一個來源` }, 422);
       }
@@ -411,10 +417,9 @@ Deno.serve(async (req) => {
           return json({ success: false, error: "same_content", message: "這一頁是提交來源的轉載（正文幾乎相同），不算獨立的第二個來源；請找另一家自己採訪或另一份官方文件" }, 400);
         }
       }
-      const tabular = isTabularNote(page.note);
-      const { state, questions } = buildSourceSupportAsk(claim, targetUrl, tabular ? focusLines(page.text, names) : focusText(page.text, names), { tabular });
+      const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
       const res = await askJev(apiKey, state, questions);
-      const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers, MIN_PROBABILITY, { tabular });
+      const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
       await insertRecords(supabase, [{
         subject_type: "contribution", subject_id: c.id, question: "second_source",
         choice: agg.choice, probability: agg.probability, confidence: null,
@@ -424,7 +429,7 @@ Deno.serve(async (req) => {
       return json({
         success: true, contribution_id: c.id, url: targetUrl,
         verdict: agg.choice, probability: agg.probability, counts: agg.probability >= MIN_PROBABILITY, fields: agg.fields,
-        core_fields: agg.core_fields, contradicted_core: agg.contradicted_core, tabular,
+        core_fields: agg.core_fields, contradicted_core: agg.contradicted_core,
         min_probability: MIN_PROBABILITY,
         hint: agg.choice === "supported" && agg.probability >= MIN_PROBABILITY
           ? "這一頁足以證實：投 agree 時把這個網址放 evidence_url"

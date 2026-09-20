@@ -431,3 +431,10 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 `POST system-one?action=extract { task_id, url }` → `{ same_person, value, probability, counts, suggested_contribution }`；記 `jev_decisions`（`politician_election`／`extract`）。
 
 首跑（`scripts/agent/relay_jev_verify.py`，DuckDuckGo 找來源，代號啟良）：3 個 `election_result_missing` 任務，1 個成功（鄭朝方：維基百科 → elected 1.00，已交 candidacy），2 個失敗都在來源端——govtw.org 的選區總表被判 different_person（整頁多人）、db.cec.gov.tw 是 JS 渲染抓不到、votetw 403。關鍵字與選頁是弱點，那正是小模型該補的那一步；官方結果另一條路是任務提示裡的 `fetch-cec-data`，不需要搜尋。
+
+## 系統不解析 PDF／Excel（2026-09-20 裁決）
+
+使用者：「我們不該提供 PDF／Excel 這些解析的能力」。拿掉 unpdf／SheetJS／附件跟連／表格逐行那一整族（前一天為了中選會公告加的），
+`fetchSource` 對 PDF／試算表一律回 `pdf` 棄權；judge 對這類網址回 422 `unsupported_source`。
+參選紀錄的系統票改問中選會候選人資料庫（`_shared/cec-check.ts`：姓名查詢、只留該屆），Jev 讀的是欄位不是攤平的表格；
+2026 登記期中選會還沒資料，那段時間參選紀錄的系統票會棄權，靠代理票。

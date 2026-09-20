@@ -275,32 +275,6 @@ function stripHtml(html: string): string {
 }
 
 /** 名字附近的段落優先；沒命中就取開頭。上限 PAGE_TEXT_MAX（Jev context 32k，留餘裕） */
-/**
- * 表格來源（PDF／xls／附件）用「行」取：只留含主角名字的那幾行，前後各帶一行（表頭或相鄰列給對照用）。
- * 2026-09-19 卡伊．馬賴：登記名單攤平後「新竹市第7選舉區 115/09/03 卡伊．馬賴 民主進步黨 嘉義市第1選舉區 …」，
- * 下一列的縣市貼在她名字後面，Jev 把 region 讀成嘉義市、高信心判矛盾。名字前後 700 字的窗口塞著十幾個別人的欄位。
- */
-export function focusLines(text: string, names: Array<string | null | undefined>, limit = PAGE_TEXT_MAX): string {
-  if (!text) return "";
-  const lines = text.split(/\n/);
-  const hits = new Set<number>();
-  lines.forEach((line, i) => { if (nameHit(line, names)) { hits.add(i); if (i > 0) hits.add(i - 1); if (i + 1 < lines.length) hits.add(i + 1); } });
-  if (hits.size === 0) return focusText(text, names, limit);
-  const out: string[] = [];
-  let used = 0;
-  for (const i of [...hits].sort((a, b) => a - b)) {
-    const l = lines[i].trim(); if (!l) continue;
-    out.push(l); used += l.length + 1;
-    if (used >= limit) break;
-  }
-  return out.join("\n").slice(0, limit);
-}
-
-/** 來源是不是表格類（PDF／xls／附件）：fetchSource 的 note 會標 */
-export function isTabularNote(note: string | null | undefined): boolean {
-  return /pdf|xls|附件/i.test(note ?? "");
-}
-
 export function focusText(text: string, names: Array<string | null | undefined>, limit = PAGE_TEXT_MAX): string {
   if (!text) return "";
   const starts = new Set<number>();
@@ -377,7 +351,7 @@ export function nameHit(text: string, names: Array<string | null | undefined>): 
 }
 
 export function combineSources(
-  pages: Array<{ url: string; text: string; tabular?: boolean }>,
+  pages: Array<{ url: string; text: string }>,
   names: Array<string | null | undefined>,
   perSource = 2200,
   total = PAGE_TEXT_MAX,
@@ -391,7 +365,7 @@ export function combineSources(
   for (const p of scored) {
     let host = p.url;
     try { host = new URL(p.url).hostname; } catch { /* 原樣 */ }
-    const piece = `【來源 ${host}】\n${p.tabular ? focusLines(p.text, names, perSource) : focusText(p.text, names, perSource)}`;
+    const piece = `【來源 ${host}】\n${focusText(p.text, names, perSource)}`;
     if (used + piece.length > total && parts.length > 0) break;
     parts.push(piece); used += piece.length;
   }
@@ -511,23 +485,20 @@ export function aggregateExtract(
   return { field, person, value, probability, counts };
 }
 
-export const TABULAR_INSTRUCTIONS = "page 是表格逐行攤平的結果（登記名單、彙總表），每一行是一個人：只看含有主角名字的那一行，相鄰行是別人的資料，不能拿來判斷。";
-
-export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string, opts: { tabular?: boolean } = {}): {
+export function buildSourceSupportAsk(claim: Record<string, unknown>, url: string, pageText: string): {
   state: Record<string, unknown>;
   questions: Record<string, JevQuestion>;
 } {
   const questions: Record<string, JevQuestion> = {};
-  const extra = opts.tabular ? ` ${TABULAR_INSTRUCTIONS}` : "";
   for (const [k, v] of Object.entries(claim)) {
     const shown = typeof v === "string" ? v : JSON.stringify(v);
     questions[`field:${k}`] = {
       type: "choice",
-      instructions: `${FIELD_INSTRUCTIONS}${extra} 這一題的欄位：${k}＝${shown}`,
+      instructions: `${FIELD_INSTRUCTIONS} 這一題的欄位：${k}＝${shown}`,
       criteria: { confirmed: `文字證明 ${k} 就是 ${shown}（含同義寫法）`, contradicted: `文字寫了不同的值、或這件事是別人的`, absent: `文字沒提到這個欄位` },
     };
   }
-  return { state: { claim, page: { url, text: pageText, ...(opts.tabular ? { tabular: true } : {}) } }, questions };
+  return { state: { claim, page: { url, text: pageText } }, questions };
 }
 
 export interface FieldResult { verdict: FieldVerdict; p: number }
@@ -544,16 +515,12 @@ export function aggregateFieldVerdicts(
   claim: Record<string, unknown>,
   answers: Record<string, JevAnswer>,
   minProbability = MIN_PROBABILITY,
-  opts: { tabular?: boolean } = {},
 ): { choice: SourceSupport; probability: number; fields: Record<string, FieldResult>; core_fields: string[]; contradicted_core: boolean } {
   const fields: Record<string, FieldResult> = {};
   for (const k of Object.keys(claim)) {
     const a = answers[`field:${k}`];
     if (!a) continue;
-    let verdict = a.choice as FieldVerdict;
-    // 表格來源（PDF／xls）的「矛盾」證據力不足：攤平後的值可能來自相鄰列。降成 absent → 棄權不加速，不會卡住一筆真的資料（2026-09-20 審查建議 10）
-    if (opts.tabular && verdict === "contradicted") verdict = "absent";
-    fields[k] = { verdict, p: Math.round((a.probabilities?.[a.choice] ?? 0) * 10000) / 10000 };
+    fields[k] = { verdict: a.choice as FieldVerdict, p: Math.round((a.probabilities?.[a.choice] ?? 0) * 10000) / 10000 };
   }
   const coreSpec = CORE_FIELDS_BY_TYPE[contributionType] ?? ["name"];
   const core = coreSpec.includes("*changes")
@@ -585,67 +552,12 @@ export function textSimilarity(a: string, b: string): number {
 }
 export const SAME_CONTENT_THRESHOLD = 0.5;
 
-/** PDF 抽字：unpdf 是給 serverless／edge 用的 pdf.js 包裝，不需要 canvas。動態載入，HTML 路徑不付這個成本 */
-async function pdfText(buf: Uint8Array): Promise<string> {
-  // ?no-dts：esm.sh 預設會附型別檔，而 unpdf 的型別引用 @types/node，CI 的乾淨環境沒有 node_modules
-  // 就在型別檢查炸掉（2026-09-19 main 的 CI 紅在這裡；本機因為有 pnpm 的 node_modules 才沒發現）。
-  // 型別在這裡手寫最小介面，不靠遠端 .d.ts。
-  type Unpdf = {
-    getDocumentProxy(data: Uint8Array): Promise<unknown>;
-    extractText(pdf: unknown, opts: { mergePages: true }): Promise<{ text: string | string[]; totalPages?: number }>;
-  };
-  // 一定要字串字面值：Supabase edge runtime 不允許執行期載入遠端模組（#85 改成變數後線上回 Module not found，
-  // PDF 抽字從那時起全壞）。CI 那邊的 @types/node 問題改由 supabase/functions/deno.json 的 nodeModulesDir: none 解。
-  const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1?no-dts") as unknown as Unpdf;
-  const pdf = await getDocumentProxy(buf);
-  const { text } = await extractText(pdf, { mergePages: true });
-  return typeof text === "string" ? text : (text as string[]).join("\n");
-}
-
-/** xls／xlsx 抽字：SheetJS（esm.sh）。連江縣選委會的登記名單是 .xls 附件，PDF 補了 xls 沒補就等於那一縣全棄權（2026-09-19） */
-async function xlsText(buf: Uint8Array): Promise<string> {
-  type Xlsx = { read(d: Uint8Array, o: { type: "array" }): { SheetNames: string[]; Sheets: Record<string, unknown> }; utils: { sheet_to_csv(s: unknown): string } };
-  const XLSX = await import("https://esm.sh/xlsx@0.18.5?no-dts") as unknown as Xlsx;
-  const wb = XLSX.read(buf, { type: "array" });
-  return wb.SheetNames.map((n) => `【工作表 ${n}】\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`).join("\n");
-}
-
-const ATTACHMENT_RE = /href="([^"]+\.(?:pdf|xlsx?|ods))(?:\?[^"]*)?"/gi;
-// 連江縣選委會的登記公告一頁掛五個 xls（縣長／議員／鄉鎮市長／代表／村里長），只跟三個就漏掉後兩級的人（2026-09-19）
-const ATTACHMENT_MAX = 6;
-const ATTACHMENT_MAX_BYTES = 3_000_000;
-
-/** 頁面上的附件連結（pdf／xls／xlsx／ods），相對路徑照 base 補全，去重，最多 ATTACHMENT_MAX 個 */
-export function attachmentLinks(html: string, baseUrl: string): string[] {
-  const out: string[] = [];
-  for (const m of html.matchAll(ATTACHMENT_RE)) {
-    try {
-      const u = new URL(m[1], baseUrl).href;
-      if (!out.includes(u)) out.push(u);
-    } catch { /* 壞連結略過 */ }
-    if (out.length >= ATTACHMENT_MAX) break;
-  }
-  return out;
-}
-
-async function attachmentText(url: string, fetchImpl: typeof fetch): Promise<string> {
-  const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) return "";
-  const len = Number(res.headers.get("content-length") ?? 0);
-  if (len > ATTACHMENT_MAX_BYTES) return "";
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength > ATTACHMENT_MAX_BYTES) return "";
-  const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-  const isPdf = ct.includes("pdf") || /\.pdf(\?|$)/i.test(url) || (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46);
-  const text = isPdf ? await pdfText(buf) : await xlsText(buf);
-  return text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
-}
-
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36";
 
 /**
  * 抓來源。回 { kind: "html", text } 或 { kind: "pdf" | "error", text: "" }。
- * PDF 這一版不抽字（沒有輕量的 Deno 方案）；回 pdf 讓呼叫端記成 cannot_tell 棄權，不要假裝看過。
+ * PDF／試算表不解析（使用者 2026-09-20 裁決：系統不該提供 PDF／Excel 解析能力）：回 pdf 讓呼叫端記成 cannot_tell 棄權，
+ * 不假裝看過。參選紀錄的系統票改問中選會的結構化資料（cec-check.ts），不靠附件。
  * 帶瀏覽器 UA：skill.md 實測多數媒體的 403 是擋沒有 UA 的程式。
  */
 export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch): Promise<{ kind: "html" | "pdf" | "error"; text: string; note: string }> {
@@ -653,46 +565,10 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
     const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "zh-TW,zh;q=0.9" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
     if (!res.ok) return { kind: "error", text: "", note: `http ${res.status}` };
-    if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) {
-      // 中選會的公告多半是 PDF（回測 90 筆有 15 筆），不抽字等於參選紀錄的來源票一半棄權
-      try {
-        const len = Number(res.headers.get("content-length") ?? 0);
-        if (len > 3_000_000) return { kind: "pdf", text: "", note: `pdf 太大（${Math.round(len / 1e6)} MB）不抽字` };
-        const buf = new Uint8Array(await res.arrayBuffer());
-        if (buf.byteLength > 3_000_000) return { kind: "pdf", text: "", note: "pdf 太大不抽字" };
-        const text = await pdfText(buf);
-        if (text.trim().length < 50) return { kind: "pdf", text: "", note: "pdf 抽不到文字（掃描檔？）" };
-        return { kind: "html", text: text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim(), note: "pdf" };
-      } catch (e) {
-        return { kind: "pdf", text: "", note: `pdf 抽字失敗：${e instanceof Error ? e.message : String(e)}`.slice(0, 120) };
-      }
-    }
-    if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.xlsx?(\?|$)/i.test(url)) {
-      try {
-        const buf = new Uint8Array(await res.arrayBuffer());
-        if (buf.byteLength > ATTACHMENT_MAX_BYTES) return { kind: "pdf", text: "", note: "xls 太大不抽字" };
-        const text = await xlsText(buf);
-        return { kind: "html", text: text.replace(/[ \t\r\f\v]+/g, " ").replace(/\n\s*\n+/g, "\n").trim(), note: "xls" };
-      } catch (e) {
-        return { kind: "error", text: "", note: `xls 抽字失敗：${e instanceof Error ? e.message : String(e)}`.slice(0, 120) };
-      }
-    }
+    if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) return { kind: "pdf", text: "", note: "pdf 不解析（系統只讀網頁；參選紀錄走中選會資料庫）" };
+    if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.(xlsx?|ods)(\?|$)/i.test(url)) return { kind: "pdf", text: "", note: "試算表不解析（系統只讀網頁）" };
     const raw = await res.text();
-    const html = raw.slice(0, 1_500_000);
-    let text = htmlToText(html);
-    // 頁面本身只有幾行、名單在附件裡（選委會的公告頁幾乎都這樣）：跟著抓最多三個 pdf／xls 附件接在後面。
-    // 抓失敗只是少一段，不影響頁面本身的文字。
-    const attachments = attachmentLinks(html, url);
-    if (attachments.length > 0) {
-      const parts = await Promise.all(attachments.map(async (a) => {
-        try {
-          const t = await attachmentText(a, fetchImpl);
-          return t ? `\n\n【附件 ${a.split("/").pop()}】\n${t}` : "";
-        } catch { return ""; }
-      }));
-      text += parts.join("");
-    }
-    return { kind: "html", text, note: attachments.length ? `${ct}; 附件 ${attachments.length}` : ct };
+    return { kind: "html", text: htmlToText(raw.slice(0, 1_500_000)), note: ct };
   } catch (e) {
     return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
   }
