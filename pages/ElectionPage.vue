@@ -6,7 +6,7 @@ export default { name: 'ElectionPage' }
 import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import HeroAction from '../components/HeroAction.vue'
-import { PolicyStatus, ElectionType } from '../types'
+import { PolicyStatus, ElectionType, type Politician } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import PoliticianDropdown from './election/PoliticianDropdown.vue'
@@ -204,6 +204,41 @@ const sortByLengthThenStroke = (a: string, b: string) => {
   return a.localeCompare(b, 'zh-Hant-TW', { numeric: true })
 }
 
+// 候選人排序（使用者 2026-09-20：多種排序讓人選，預設「最近更新」）。
+// 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
+type SortMode = 'updated' | 'stroke' | 'policies' | 'attention'
+const sortMode = ref<SortMode>('updated')
+const SORT_OPTIONS: Array<{ key: SortMode; label: string; hint: string }> = [
+  { key: 'updated', label: '最近更新', hint: '名下政見或進度最近有變動的在前' },
+  { key: 'stroke', label: '姓名筆畫', hint: '中選會抽籤前的慣例' },
+  { key: 'policies', label: '政見數', hint: '登錄的政見多的在前' },
+  { key: 'attention', label: '關注度', hint: '支持、反對、關注的總數' },
+]
+/** 每位候選人名下政見的統計：最後更新日、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
+const policyStatsByPolitician = computed(() => {
+  const m = new Map<string, { updated: string; count: number; attention: number }>()
+  for (const p of policies.value) {
+    const st = m.get(p.politicianId) ?? { updated: '', count: 0, attention: 0 }
+    if ((p.lastUpdated ?? '') > st.updated) st.updated = p.lastUpdated ?? ''
+    st.count += 1
+    st.attention += (p.stanceSupport ?? 0) + (p.stanceOppose ?? 0) + (p.stancePriority ?? 0)
+    m.set(p.politicianId, st)
+  }
+  return m
+})
+function sortPoliticians<T extends Politician>(list: T[]): T[] {
+  const stats = policyStatsByPolitician.value
+  const st = (c: Politician) => stats.get(c.id) ?? { updated: '', count: 0, attention: 0 }
+  const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
+  const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
+    updated: (a, b) => st(b).updated.localeCompare(st(a).updated) || byStroke(a, b),
+    stroke: byStroke,
+    policies: (a, b) => (st(b).count - st(a).count) || byStroke(a, b),
+    attention: (a, b) => (st(b).attention - st(a).attention) || byStroke(a, b),
+  }
+  return [...list].sort(cmp[sortMode.value])
+}
+
 // 取得選定縣市的鄉鎮市區（合併所有來源）
 const availableSubRegions = computed(() => {
   if (selectedRegion.value === 'All') return []
@@ -284,7 +319,7 @@ const filteredPoliticians = computed(() => {
       return c.subRegion === selectedSubRegion.value
     })
   }
-  return result
+  return sortPoliticians(result)
 })
 
 const presidentPoliticians = computed(() =>
@@ -302,7 +337,7 @@ const legislatorPoliticians = computed(() => {
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => c.region === selectedRegion.value)
   }
-  return result
+  return sortPoliticians(result)
 })
 const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.MAYOR))
 const councilorPoliticians = computed(() => {
@@ -535,6 +570,14 @@ usePageHead({
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
+        <!-- 排序選單：預設最近更新；不讓任何人固定排第一 -->
+        <div class="flex items-center justify-end gap-2 mb-4 text-sm">
+          <label for="candidate-sort" class="text-slate-500">排序</label>
+          <select id="candidate-sort" v-model="sortMode" class="border border-slate-300 rounded-lg px-2 py-1 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
+            <option v-for="o in SORT_OPTIONS" :key="o.key" :value="o.key" :title="o.hint">{{ o.label }}</option>
+          </select>
+          <span class="hidden sm:inline text-xs text-slate-400">{{ SORT_OPTIONS.find(o => o.key === sortMode)?.hint }}</span>
+        </div>
         <!-- ===== 第1級：全台 ===== -->
         <template v-if="selectedRegion === 'All'">
           <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" :election-id="electionId" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
