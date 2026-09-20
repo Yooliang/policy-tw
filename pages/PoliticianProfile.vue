@@ -419,8 +419,10 @@ usePageHead({
                 <p v-if="lookup.history.error && !lookup.history.result" class="text-red-500 text-sm mt-3">{{ lookup.history.error }}</p>
               </div>
             </template>
-            <!-- 基本資料：原本的右側欄（政黨、選區、參選紀錄、現職、經歷、學歷、請 AI 幫忙查），2026-09-20 改成分頁 -->
-            <template v-if="activeTab === 'profile'">
+            <!-- 基本資料：原本的右側欄（政黨、選區、參選紀錄、現職、經歷、學歷、請 AI 幫忙查），2026-09-20 改成分頁。
+                 用 v-show 不用 v-if：預渲染的 HTML 要有這一段，否則沒政見的人物頁 <main> 不到 120 字，
+                 postbuild 的空殼檢查會把 14,137 頁擋下（#107 上線時建置紅在這裡） -->
+            <div v-show="activeTab === 'profile'">
               <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <div class="space-y-4">
                 <div>
@@ -547,7 +549,7 @@ usePageHead({
                 </div>
               </div>
             </div>
-            </template>
+            </div>
           </div>
 
           <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過 -->
