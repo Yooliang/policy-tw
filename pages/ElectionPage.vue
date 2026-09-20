@@ -17,8 +17,7 @@ import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale, Swords,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText
-} from 'lucide-vue-next'
+  Crown, ScrollText, ArrowUpDown } from 'lucide-vue-next'
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
@@ -208,11 +207,11 @@ const sortByLengthThenStroke = (a: string, b: string) => {
 // 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
 type SortMode = 'updated' | 'stroke' | 'policies' | 'attention'
 const sortMode = ref<SortMode>('updated')
-const SORT_OPTIONS: Array<{ key: SortMode; label: string; hint: string }> = [
-  { key: 'updated', label: '最近更新', hint: '名下政見或進度最近有變動的在前' },
-  { key: 'stroke', label: '姓名筆畫', hint: '中選會抽籤前的慣例' },
-  { key: 'policies', label: '政見數', hint: '登錄的政見多的在前' },
-  { key: 'attention', label: '關注度', hint: '支持、反對、關注的總數' },
+const SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
+  { key: 'updated', label: '最近更新' },   // 名下政見或進度最近有變動的在前
+  { key: 'stroke', label: '姓名筆畫' },    // 中選會抽籤前的慣例
+  { key: 'policies', label: '政見數' },    // 登錄的政見多的在前
+  { key: 'attention', label: '關注度' },   // 支持、反對、關注的總數
 ]
 /** 每位候選人名下政見的統計：最後更新日、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
 const policyStatsByPolitician = computed(() => {
@@ -572,11 +571,10 @@ usePageHead({
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <!-- 排序選單：預設最近更新；不讓任何人固定排第一 -->
         <div class="flex items-center justify-end gap-2 mb-4 text-sm">
-          <label for="candidate-sort" class="text-slate-500">排序</label>
+          <label for="candidate-sort" class="text-slate-400" title="排序"><ArrowUpDown :size="16" /><span class="sr-only">排序</span></label>
           <select id="candidate-sort" v-model="sortMode" class="border border-slate-300 rounded-lg px-2 py-1 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
-            <option v-for="o in SORT_OPTIONS" :key="o.key" :value="o.key" :title="o.hint">{{ o.label }}</option>
+            <option v-for="o in SORT_OPTIONS" :key="o.key" :value="o.key">{{ o.label }}</option>
           </select>
-          <span class="hidden sm:inline text-xs text-slate-400">{{ SORT_OPTIONS.find(o => o.key === sortMode)?.hint }}</span>
         </div>
         <!-- ===== 第1級：全台 ===== -->
         <template v-if="selectedRegion === 'All'">
