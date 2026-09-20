@@ -52,12 +52,12 @@ Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與�
   assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }, { verdict: "disagree" }]), "pending", need), "disputed", "兩張反對才是爭議");
 });
 
-Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 4；多來源取最高等級", () => {
+Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 3（2026-09-21 從 4 降）；多來源取最高等級", () => {
   assertEquals(requiredAgree("task_suggestion", {}, [OFFICIAL]), 1);
   assertEquals(requiredAgree("task_suggestion", {}, [SOCIAL]), 2);
   assertEquals(requiredAgree("no_change", {}, [OTHER]), 2);
-  assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 4);
-  assertEquals(requiredAgree("adjudication", {}, [OTHER]), 4);
+  assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 3, "2026-09-21：裁決線太久沒人投，4 票降 3 票");
+  assertEquals(requiredAgree("adjudication", {}, [OTHER]), 3);
   assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
   assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 2, "有一個官方就算官方");
   assertEquals(riskLevel("policy_progress", {}), "normal");
@@ -214,6 +214,32 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   const elig = await latestMigrationDefining("FUNCTION system_vote_eligible");
   for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assert(elig.includes(`'${t}'`), `SQL 合格型別缺 ${t}`);
   assert(!elig.includes("'adjudication'") && !elig.includes("'removal'") && !elig.includes("'no_change'"), "沒有來源可核的型別不能有系統票");
+});
+
+// 2026-09-21：裁決線是死的（87 份等票平均 0.1 票）。驗證池的順序是「訪客觸發 > 裁決 > 其餘最早」，
+// SQL 的 ORDER BY 跟 next/index.ts 的 serveVerify 是同一套規則的兩份寫法，改一邊沒改另一邊就會各派各的。
+Deno.test("SQL 與 TS 一致：驗證池順序是訪客觸發 > 裁決 > 其餘最早", async () => {
+  const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
+  const orderAt = pool.indexOf("ORDER BY");
+  assert(orderAt > 0, "驗證池要有 ORDER BY");
+  const order = pool.slice(orderAt, pool.indexOf("LIMIT", orderAt));
+  const visitorAt = order.indexOf("web_request");
+  const adjAt = order.indexOf("'adjudication'");
+  const createdAt = order.indexOf("c.created_at ASC");
+  assert(visitorAt >= 0, "訪客觸發（web_request）要在 ORDER BY 裡");
+  assert(adjAt >= 0, "裁決要在 ORDER BY 裡");
+  assert(visitorAt < adjAt && adjAt < createdAt, "順序是訪客觸發 > 裁決 > 提交時間");
+  assert(pool.includes("adjudication_facing"), "池子要把裁決旗標回給 /next");
+
+  const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
+  const at = serve.indexOf("const serveVerify");
+  assert(at > 0, "找不到 serveVerify");
+  const body = serve.slice(at, at + 1500);
+  assert(body.includes(`c.contribution_type === "adjudication"`), "serveVerify 也要把裁決排第二順位");
+  assert(
+    body.indexOf("visitorFirst.length > 0") < body.indexOf("adjudicationsNext.length > 0"),
+    "訪客觸發仍排在裁決前面",
+  );
 });
 
 // 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改

@@ -6,7 +6,7 @@
  * 任務本身不被投票，被投票的是代理針對它交的貢獻：
  *   - 一般任務：contributions.task_id = 任務 id
  *   - 裁決任務：contribution_type=adjudication 且 payload.contribution_id = 任務 target.contribution_id
- *     （一份裁決本身也要 4 票同意才定案，見 consensus.ts 的 AGREE_THRESHOLDS.adjudication）
+ *     （一份裁決本身也要 3 票同意才定案，見 consensus.ts 的 AGREE_THRESHOLDS.adjudication）
  */
 
 import { requiredAgree, effectiveOrRequired } from "./consensus.ts";

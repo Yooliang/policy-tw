@@ -40,7 +40,10 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   // 移除不看來源等級：移除的理由常常是「查不到任何來源」，那種主張本身沒有來源可言。
   // 3 票＝比一般更正高、比加減參選人低；低是因為移除是軟移除，資料留著、可以復原。
   removal: { official: 3, media: 3, social: 3, other: 3 },
-  adjudication: { official: 4, media: 4, social: 4, other: 4 },
+  // 2026-09-21：4 票降 3 票。裁決線是死的（87 份等票平均 0.1 票、歷來只定案 4 份），
+  // 4 票不看來源等級是全站最高的一般門檻之一，跟「裁決排第二順位」一起放寬。
+  // 3 票仍高於一般資料，也還是三個彼此獨立的來源 IP。
+  adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

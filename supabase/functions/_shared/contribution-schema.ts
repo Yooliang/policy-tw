@@ -245,7 +245,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       break;
     }
     case "adjudication": {
-      // 裁決一筆 disputed 的貢獻：uphold＝原貢獻正確、reject＝原貢獻有誤；4 票同向定案
+      // 裁決一筆 disputed 的貢獻：uphold＝原貢獻正確、reject＝原貢獻有誤；3 票同向定案
       if (!isUuid(p.contribution_id)) push("payload.contribution_id", "contribution_id 必填（被裁決的貢獻 uuid，在任務的 target.contribution_id）");
       if (!oneOf(ADJUDICATION_VERDICTS, p.verdict)) push("payload.verdict", "verdict 要是 uphold（原貢獻正確）或 reject（原貢獻有誤）");
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：看了哪些來源、為什麼站這一邊）");
