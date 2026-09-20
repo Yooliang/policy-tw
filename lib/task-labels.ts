@@ -13,6 +13,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   candidacy_source_missing: '參選缺出處',
   election_result_missing: '缺選舉結果',
   policy_election_missing: '政見缺屆別',
+  policy_election_mismatch: '政見屆別對不上',
   roster_check: '名單清查',
   candidate_status_stale: '參選狀態待確認',
   news_sweep: '掃新聞',

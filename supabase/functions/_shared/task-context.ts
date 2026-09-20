@@ -90,6 +90,8 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
       };
     }
     case "policy_validity":
+    case "policy_election_missing":
+    case "policy_election_mismatch":
     case "progress_stale":
     case "policy_source_missing": {
       const policy = data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "progress", "source_url", "proposed_date", "last_updated"])!, ["description"]) : null;
@@ -289,7 +291,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies_total = pol.count ?? (data.policies ?? []).length;
     data.queued_policies = queued.data ?? [];
   }
-  if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity") && policyId) {
+  if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity" || taskType === "policy_election_missing" || taskType === "policy_election_mismatch") && policyId) {
     const [pl, logs] = await Promise.all([
       supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
       supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),

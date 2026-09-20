@@ -125,7 +125,8 @@ const toggleCheckpoint = (e: Event) => {
       <div :class="['flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest', isPastCampaign ? 'mb-0' : 'mb-6']">
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
-          <span>{{ isCampaign ? `${policyYear(policy) ?? '—'} 承諾` : `${policy.lastUpdated.split('-')[0]} 更新` }}</span>
+          <!-- 承諾的年份跟屆別走（分組、當選與否都看 election_id；2026-09-20 蔡培慧那筆提出日期 2026 卻標 2024，卡片自己打架），沒屆別才退回提出日期 -->
+          <span>{{ isCampaign ? `${policy.electionId ?? policyYear(policy) ?? '—'} 承諾` : `${policy.lastUpdated.split('-')[0]} 更新` }}</span>
         </div>
         <div v-if="campaignResult" class="flex items-center gap-1.5">
           <span :class="['px-1.5 py-0.5 rounded-full', campaignResult === 'elected' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']"

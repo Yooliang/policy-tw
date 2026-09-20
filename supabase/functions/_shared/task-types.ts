@@ -23,6 +23,7 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   // 修正任務多半是改既有資料；整筆不該存在的話改用 removal，任務敘述有寫
   fix_disputed: "correction",
   policy_election_missing: "correction",
+  policy_election_mismatch: "correction",
   // 選舉結果要補在參選紀錄上（politician_elections.election_result），所以走 candidacy
   election_result_missing: "candidacy",
   // 名單清查用同名的型別回報
