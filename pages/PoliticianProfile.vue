@@ -309,17 +309,18 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
         <div>
-          <div class="flex border-b border-slate-200 mb-6">
-            <button @click="activeTab = 'campaign'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <Megaphone :size="20" />競選承諾<span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
+          <!-- 三個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機用短標、縮字級與內距、不換行 -->
+          <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
+            <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <Megaphone :size="18" /><span class="sm:hidden">承諾</span><span class="hidden sm:inline">競選承諾</span><span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>
             </button>
-            <button @click="activeTab = 'history'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <CheckCircle2 :size="20" />過往政績與追蹤<span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
+            <button @click="activeTab = 'history'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <CheckCircle2 :size="18" /><span class="sm:hidden">政績</span><span class="hidden sm:inline">過往政績與追蹤</span><span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
               <div v-if="activeTab === 'history'" class="absolute bottom-0 left-0 w-full h-1 bg-blue-600 rounded-t-full"></div>
             </button>
-            <button @click="activeTab = 'profile'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <User :size="20" />基本資料
+            <button @click="activeTab = 'profile'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <User :size="18" /><span class="sm:hidden">資料</span><span class="hidden sm:inline">基本資料</span>
               <div v-if="activeTab === 'profile'" class="absolute bottom-0 left-0 w-full h-1 bg-emerald-600 rounded-t-full"></div>
             </button>
           </div>
