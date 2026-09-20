@@ -288,6 +288,61 @@ Deno.serve(async (req) => {
       return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY });
     }
 
+    // ---- legacy：早期匯入、有來源、沒查核履歷的政見，系統先核（排程）----
+    if (action === "legacy") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
+      // 候選：legacy_audit 任務會派的那些，扣掉已經判過的
+      const { data: tasks, error: tErr } = await supabase.rpc("contribution_auto_tasks_legacy");
+      if (tErr) throw new Error(`legacy tasks: ${tErr.message}`);
+      type LT = { task_id: string; target: { policy_id: string; policy_title: string; name: string; source_url: string } };
+      const all = (tasks ?? []) as LT[];
+      const ids = all.map((t) => t.target.policy_id);
+      const { data: done } = ids.length > 0
+        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "policy").eq("question", "source_support").in("subject_id", ids.slice(0, 1000))
+        : { data: [] };
+      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+      const list = all.filter((t) => !doneSet.has(t.target.policy_id)).slice(0, limit);
+      let asked = 0, cost = 0;
+      const tally: Record<string, number> = {};
+      const failures: Array<{ policy_id: string; error: string }> = [];
+      const startedAt = Date.now();
+      const one = async (t: LT): Promise<void> => {
+        const { data: pl } = await supabase.from("policies").select("id, title, description, election_id, category, politician_id").eq("id", t.target.policy_id).maybeSingle();
+        if (!pl) return;
+        const claim = claimOf("policy", { name: t.target.name, politician_name: t.target.name, title: pl.title, description: String(pl.description ?? "").slice(0, 300), ...(pl.election_id ? { election_id: pl.election_id } : {}), ...(pl.category ? { category: pl.category } : {}) });
+        const names = [t.target.name, String(pl.title)];
+        const page = await fetchSource(t.target.source_url);
+        const tabular = isTabularNote(page.note);
+        let row: DecisionRecord; let key: string;
+        if (page.kind !== "html" || !hasUsableText(page.text, names) || !nameHit(page.text, names)) {
+          row = { subject_type: "policy", subject_id: pl.id, question: "source_support", choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
+            model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: t.target.source_url, text: "", fetch: page.kind, note: page.note } }, cost_usd: 0 };
+          key = `fetch:${page.kind}`;
+        } else {
+          const text = tabular ? focusLines(page.text, names) : focusText(page.text, names);
+          const { state, questions } = buildSourceSupportAsk(claim, t.target.source_url, text, { tabular });
+          const res = await askJev(apiKey, state, questions);
+          cost += res.usage.cost;
+          const agg = aggregateFieldVerdicts("policy", claim, res.answers, MIN_PROBABILITY, { tabular });
+          row = { subject_type: "policy", subject_id: pl.id, question: "source_support", choice: agg.choice, probability: agg.probability, confidence: null,
+            probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)) };
+          key = `${agg.choice}${agg.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
+        }
+        await insertRecords(supabase, [row]);
+        tally[key] = (tally[key] ?? 0) + 1; asked++;
+      };
+      let cursor = 0;
+      while (cursor < list.length && Date.now() - startedAt < 40_000) {
+        const chunk = list.slice(cursor, cursor + 2); cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map(one));
+        results.forEach((r, i) => { if (r.status === "rejected") failures.push({ policy_id: chunk[i].target.policy_id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) }); });
+        if (failures.length >= 5) break;
+      }
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, backlog: all.length - doneSet.size, remaining: list.length - cursor, tally, failures });
+    }
+
     // ---- judge：代理的第二來源判定。公開，按來源 IP 配額 ----
     if (action === "judge") {
       const apiKey = Deno.env.get("OPENROUTER_API_KEY");

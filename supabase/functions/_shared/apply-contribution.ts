@@ -606,6 +606,19 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 用 task_id 當紀錄鍵：這張表的 id 是流水號，回不回來都不影響還原，
     // 而 task_id 才是人看得懂、也是冷卻判斷用的那把鑰匙。
     await recordInsert(supabase, ctxOf(row), "task_checks", taskId, check);
+    // 早期匯入核對（2026-09-20）：no_change 通過＝這筆政見查核過了。寫一列 policies.audit，
+    // 頁面的「尚未查核」變「已查核」、legacy_audit 任務隨之消失（它的條件是「沒有任何查核履歷」）
+    const legacy = /^auto:legacy_audit:([0-9a-f-]{36})$/i.exec(taskId);
+    if (legacy) {
+      const { data: pl } = await supabase.from("policies").select("id, source_url").eq("id", legacy[1]).maybeSingle();
+      if (pl) {
+        let host = String((pl as { source_url?: string }).source_url ?? "");
+        try { host = new URL(host).hostname.replace(/^www\./, ""); } catch { /* 原樣 */ }
+        const note = check.note ? `：${String(check.note).slice(0, 200)}` : "";
+        await recordUpdate(supabase, ctxOf(row), "policies", legacy[1], "audit", null, `已核對來源 ${host}${note}`);
+      }
+      return { status: "applied", message: "已核對：這筆早期匯入的政見從「尚未查核」變成「已查核」", task_id: taskId, policy_id: legacy[1] };
+    }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
   const task = await closeTask(supabase, taskId, row.agent_name);
