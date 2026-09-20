@@ -26,7 +26,9 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
-const activeTab = ref<'campaign' | 'history'>('campaign')
+const activeTab = ref<'campaign' | 'history' | 'profile'>('campaign')
+// 側欄改成第三個分頁（使用者 2026-09-20）；帶 #ai-lookup 進來的深連結要先切到它
+if (typeof window !== 'undefined' && window.location.hash === `#${AI_LOOKUP_SECTION_ID}`) activeTab.value = 'profile'
 
 // 「請 AI 幫忙查」：四顆按鈕都把這位人物丟進貢獻任務池（公開端點 request-task，不需登入）
 type LookupKey = 'campaign' | 'history' | 'bio' | 'avatar'
@@ -305,9 +307,8 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
-        <!-- Main Content (Left) -->
-        <div class="lg:col-span-2">
+      <div class="text-left">
+        <div>
           <div class="flex border-b border-slate-200 mb-6">
             <button @click="activeTab = 'campaign'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
               <Megaphone :size="20" />競選承諾<span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
@@ -316,6 +317,10 @@ usePageHead({
             <button @click="activeTab = 'history'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
               <CheckCircle2 :size="20" />過往政績與追蹤<span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
               <div v-if="activeTab === 'history'" class="absolute bottom-0 left-0 w-full h-1 bg-blue-600 rounded-t-full"></div>
+            </button>
+            <button @click="activeTab = 'profile'" :class="`pb-4 px-6 font-bold text-lg flex items-center gap-2 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <User :size="20" />基本資料
+              <div v-if="activeTab === 'profile'" class="absolute bottom-0 left-0 w-full h-1 bg-emerald-600 rounded-t-full"></div>
             </button>
           </div>
           <div class="space-y-6">
@@ -414,142 +419,141 @@ usePageHead({
                 <p v-if="lookup.history.error && !lookup.history.result" class="text-red-500 text-sm mt-3">{{ lookup.history.error }}</p>
               </div>
             </template>
+            <!-- 基本資料：原本的右側欄（政黨、選區、參選紀錄、現職、經歷、學歷、請 AI 幫忙查），2026-09-20 改成分頁 -->
+            <template v-if="activeTab === 'profile'">
+              <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
+                  <span :class="`inline-block px-3 py-1 rounded text-sm font-bold
+                    ${politician.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
+                      politician.party === '民進黨' ? 'bg-green-50 text-green-700' :
+                      politician.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
+                    {{ politician.party }}
+                  </span>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">選區</h4>
+                  <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ politician.region }}</p>
+                </div>
+
+                <!-- Election participation -->
+                <div v-if="politician.elections?.length" class="pt-4 border-t border-slate-100">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">參選紀錄</h4>
+                  <div class="space-y-2">
+                    <div
+                      v-for="elec in politician.elections"
+                      :key="elec.electionId"
+                      :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec.candidateStatus, elec.electionId, elec.electionResult)]"
+                    >
+                      <div class="flex items-center gap-2">
+                        <Vote :size="14" />
+                        <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}</span>
+                      </div>
+                      <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult)" class="text-xs">
+                        {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Current position -->
+                <div v-if="politician.currentPosition" class="pt-4 border-t border-slate-100">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">現任職位</h4>
+                  <p class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ politician.currentPosition }}</p>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100">
+                  <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h3>
+                  <ul class="space-y-3">
+                    <template v-if="politician.experience?.length">
+                      <li v-for="(exp, i) in politician.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
+                    </template>
+                    <li v-else class="text-slate-400 text-sm">暫無資料</li>
+                  </ul>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100">
+                  <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
+                  <div v-if="politician.educationLevel" class="mb-4 bg-violet-50 p-3 rounded-lg border border-violet-100">
+                    <p class="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-1">最高學歷</p>
+                    <p class="text-violet-700 font-bold">{{ politician.educationLevel }}</p>
+                  </div>
+                  <ul class="space-y-3">
+
+                    <template v-if="politician.education?.length">
+                      <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
+                    </template>
+                    <li v-else class="text-slate-400 text-sm">暫無資料</li>
+                  </ul>
+                </div>
+
+                <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
+                <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
+                  <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
+                  <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；已有資料也可以再查，補新的或更新；不需登入。</p>
+                  <div class="space-y-3">
+                    <!-- Search Bio Button -->
+                    <button
+                      @click="requestLookup('bio')"
+                      :disabled="lookup.bio.loading"
+                      :class="[
+                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
+                        lookup.bio.result
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : lookup.bio.error
+                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                            : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
+                      ]"
+                    >
+                      <Loader2 v-if="lookup.bio.loading" :size="16" class="animate-spin" />
+                      <CheckCircle v-else-if="lookup.bio.result" :size="16" />
+                      <XCircle v-else-if="lookup.bio.error" :size="16" />
+                      <User v-else :size="16" />
+                      {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? (lookup.bio.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
+                    </button>
+
+                    <!-- Search Avatar Button -->
+                    <button
+                      @click="requestLookup('avatar')"
+                      :disabled="lookup.avatar.loading"
+                      :class="[
+                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
+                        lookup.avatar.result
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : lookup.avatar.error
+                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                            : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      ]"
+                    >
+                      <Loader2 v-if="lookup.avatar.loading" :size="16" class="animate-spin" />
+                      <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
+                      <XCircle v-else-if="lookup.avatar.error" :size="16" />
+                      <Camera v-else :size="16" />
+                      {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
+                    </button>
+
+                    <!-- Error messages -->
+                    <p v-if="lookup.bio.error" class="text-red-500 text-xs">{{ lookup.bio.error }}</p>
+                    <p v-if="lookup.avatar.error" class="text-red-500 text-xs">{{ lookup.avatar.error }}</p>
+
+                    <!-- Success hint -->
+                    <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
+                      <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
+                      <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </template>
           </div>
 
           <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過 -->
           <div class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" /></div>
         </div>
 
-        <!-- Sidebar (Right) -->
-        <div class="lg:col-span-1 space-y-6">
-          <!-- 側欄比視窗高時（政見多）底部的「請 AI 幫忙查」會被 sticky 卡在視窗外，限制高度讓側欄自己捲 -->
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto overscroll-contain">
-            <div class="space-y-4">
-              <div>
-                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
-                <span :class="`inline-block px-3 py-1 rounded text-sm font-bold
-                  ${politician.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
-                    politician.party === '民進黨' ? 'bg-green-50 text-green-700' :
-                    politician.party === '民眾黨' ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-50 text-gray-700'}`">
-                  {{ politician.party }}
-                </span>
-              </div>
-
-              <div class="pt-4 border-t border-slate-100">
-                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">選區</h4>
-                <p class="text-navy-900 font-medium flex items-center gap-2"><MapPin :size="16" class="text-slate-400" />{{ politician.region }}</p>
-              </div>
-
-              <!-- Election participation -->
-              <div v-if="politician.elections?.length" class="pt-4 border-t border-slate-100">
-                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">參選紀錄</h4>
-                <div class="space-y-2">
-                  <div
-                    v-for="elec in politician.elections"
-                    :key="elec.electionId"
-                    :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec.candidateStatus, elec.electionId, elec.electionResult)]"
-                  >
-                    <div class="flex items-center gap-2">
-                      <Vote :size="14" />
-                      <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}</span>
-                    </div>
-                    <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult)" class="text-xs">
-                      {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult) }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Current position -->
-              <div v-if="politician.currentPosition" class="pt-4 border-t border-slate-100">
-                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">現任職位</h4>
-                <p class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ politician.currentPosition }}</p>
-              </div>
-
-              <div class="pt-4 border-t border-slate-100">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h3>
-                <ul class="space-y-3">
-                  <template v-if="politician.experience?.length">
-                    <li v-for="(exp, i) in politician.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
-                  </template>
-                  <li v-else class="text-slate-400 text-sm">暫無資料</li>
-                </ul>
-              </div>
-
-              <div class="pt-4 border-t border-slate-100">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
-                <div v-if="politician.educationLevel" class="mb-4 bg-violet-50 p-3 rounded-lg border border-violet-100">
-                  <p class="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-1">最高學歷</p>
-                  <p class="text-violet-700 font-bold">{{ politician.educationLevel }}</p>
-                </div>
-                <ul class="space-y-3">
-
-                  <template v-if="politician.education?.length">
-                    <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
-                  </template>
-                  <li v-else class="text-slate-400 text-sm">暫無資料</li>
-                </ul>
-              </div>
-
-              <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
-              <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
-                <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；已有資料也可以再查，補新的或更新；不需登入。</p>
-                <div class="space-y-3">
-                  <!-- Search Bio Button -->
-                  <button
-                    @click="requestLookup('bio')"
-                    :disabled="lookup.bio.loading"
-                    :class="[
-                      'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                      lookup.bio.result
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : lookup.bio.error
-                          ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                          : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
-                    ]"
-                  >
-                    <Loader2 v-if="lookup.bio.loading" :size="16" class="animate-spin" />
-                    <CheckCircle v-else-if="lookup.bio.result" :size="16" />
-                    <XCircle v-else-if="lookup.bio.error" :size="16" />
-                    <User v-else :size="16" />
-                    {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? (lookup.bio.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
-                  </button>
-
-                  <!-- Search Avatar Button -->
-                  <button
-                    @click="requestLookup('avatar')"
-                    :disabled="lookup.avatar.loading"
-                    :class="[
-                      'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                      lookup.avatar.result
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : lookup.avatar.error
-                          ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                          : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    ]"
-                  >
-                    <Loader2 v-if="lookup.avatar.loading" :size="16" class="animate-spin" />
-                    <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
-                    <XCircle v-else-if="lookup.avatar.error" :size="16" />
-                    <Camera v-else :size="16" />
-                    {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
-                  </button>
-
-                  <!-- Error messages -->
-                  <p v-if="lookup.bio.error" class="text-red-500 text-xs">{{ lookup.bio.error }}</p>
-                  <p v-if="lookup.avatar.error" class="text-red-500 text-xs">{{ lookup.avatar.error }}</p>
-
-                  <!-- Success hint -->
-                  <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
-                    <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
-                    <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
