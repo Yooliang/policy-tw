@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { focusLines, isTabularNote, textSimilarity, SAME_CONTENT_THRESHOLD, buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, attachmentLinks, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
+import { textSimilarity, SAME_CONTENT_THRESHOLD, buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
@@ -114,7 +114,7 @@ Deno.test("claimOf 只留判斷用欄位；buildSourceSupportAsk 的 criteria �
   assertEquals((state.claim as { name: string }).name, "王小明");
 });
 
-Deno.test("fetchSource：帶瀏覽器 UA；PDF 回 pdf 不假裝看過；非 2xx 回 error", async () => {
+Deno.test("fetchSource：帶瀏覽器 UA；PDF／試算表回 pdf 不解析（2026-09-20 裁決）；非 2xx 回 error", async () => {
   let ua = "";
   const okHtml = (async (_u: string | URL | Request, init?: RequestInit) => {
     ua = String((init?.headers as Record<string, string>)["User-Agent"]);
@@ -189,15 +189,6 @@ Deno.test("combineSources：含人名的來源排前面、每段標來源網域�
   assertEquals(combineSources([{ url: "u", text: "y".repeat(10000) }], ["a"], 2200, 3000).length <= 3000, true);
 });
 
-// 2026-09-19：連江縣選委會的公告頁只有幾行字，登記名單在 .xls 附件裡，三筆參選紀錄的系統票全棄權
-Deno.test("attachmentLinks：抓 pdf／xls／xlsx／ods 連結、補全相對路徑、去重、最多六個", () => {
-  const html = `<a href="/api/file/a.xls">議員</a> <a href="https://web.cec.gov.tw/api/file/b.pdf?x=1">長</a> <a href="/api/file/a.xls">重複</a> <a href="/img/c.png">圖</a> <a href="/api/file/d.xlsx">代表</a> <a href="/api/file/e.ods">村里</a>`;
-  const links = attachmentLinks(html, "https://web.cec.gov.tw/lcec/article/64620");
-  assertEquals(links, ["https://web.cec.gov.tw/api/file/a.xls", "https://web.cec.gov.tw/api/file/b.pdf", "https://web.cec.gov.tw/api/file/d.xlsx", "https://web.cec.gov.tw/api/file/e.ods"]);
-  const seven = Array.from({ length: 7 }, (_, i) => `<a href="/f/${i}.xls">x</a>`).join("");
-  assertEquals(attachmentLinks(seven, "https://web.cec.gov.tw/").length, 6);
-  assertEquals(attachmentLinks("<p>沒有附件</p>", "https://x/y"), []);
-});
 
 // 2026-09-19：連江縣選委會縣市長登記彙總表（xls）抽出來只有 171 字，被 200 字門檻擋成「抓不到正文」
 Deno.test("hasUsableText：短文本只要點到主角名字就算有正文；空殼頁不算", () => {
@@ -268,20 +259,8 @@ Deno.test("buildPairAsk：一題 same／diff／unclear，state 帶兩筆", () =>
   assertEquals((state.a as { name: string }).name, "吳品叡");
 });
 
-// 2026-09-20 審查建議 10：表格攤平後矛盾來自相鄰列
-Deno.test("focusLines：表格來源只取主角所在行±1；沒命中就退回 focusText", () => {
-  const t = "選舉區 登記日 姓名 政黨\n新竹市第7選舉區 115/09/03 卡伊‧馬賴 民主進步黨\n嘉義市第1選舉區 115/08/31 凌子楚 民主進步黨\n嘉義市第1選舉區 115/08/31 郭文居 無";
-  const f = focusLines(t, ["卡伊．馬賴"]);
-  assertEquals(f.split("\n").length, 3);
-  assertEquals(f.includes("郭文居"), false);
-  assertEquals(f.includes("卡伊‧馬賴 民主進步黨"), true);
-  assertEquals(focusLines("沒有她的一段文字", ["卡伊．馬賴"]), "沒有她的一段文字");
-  assertEquals(isTabularNote("text/html; charset=utf-8; 附件 5"), true);
-  assertEquals(isTabularNote("pdf"), true);
-  assertEquals(isTabularNote("text/html; charset=utf-8"), false);
-});
 
-Deno.test("aggregateFieldVerdicts：表格來源的矛盾降成 absent（棄權）；非表格照舊；回 core_fields 與 contradicted_core", () => {
+Deno.test("aggregateFieldVerdicts：回 core_fields 與 contradicted_core（非核心欄矛盾不構成反對）", () => {
   const claim = { name: "卡伊．馬賴", region: "新竹市", party: "民主進步黨", election_id: 2026, election_type: "縣市議員", candidate_status: "registered" };
   type A = Record<string, { choice: string; probabilities: Record<string, number> }>;
   const ans: A = {
@@ -291,9 +270,6 @@ Deno.test("aggregateFieldVerdicts：表格來源的矛盾降成 absent（棄權�
   };
   const plain = aggregateFieldVerdicts("candidacy", claim, ans as never);
   assertEquals(plain.choice, "not_supported"); assertEquals(plain.contradicted_core, true, "region 是核心欄");
-  const tab = aggregateFieldVerdicts("candidacy", claim, ans as never, 0.95, { tabular: true });
-  assertEquals(tab.choice, "cannot_tell", "表格來源：矛盾降成 absent，核心欄不全 confirmed → 棄權");
-  assertEquals(tab.contradicted_core, false);
   const partyOnly = aggregateFieldVerdicts("candidacy", claim, { ...ans, "field:region": { choice: "confirmed", probabilities: { confirmed: 1 } }, "field:party": { choice: "contradicted", probabilities: { contradicted: 0.99 } } } as never);
   assertEquals(partyOnly.choice, "not_supported"); assertEquals(partyOnly.contradicted_core, false, "政黨不是核心欄：not_supported 但不構成反對");
 });
