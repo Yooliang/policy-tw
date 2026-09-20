@@ -167,6 +167,8 @@ Deno.serve(async (req) => {
   effective_required?: number | null;
   /** 訪客看得到的（提問回答、web_request 任務）：先驗 */
   visitor_facing?: boolean | null;
+  /** 裁決：排訪客之後的第二順位（2026-09-21） */
+  adjudication_facing?: boolean | null;
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
       agent_name: string; agent_tool: string | null; contributor_ip_hash: string; agree_count: number; disagree_count: number; unsure_count: number;
       status: string; created_at: string;
@@ -248,9 +250,11 @@ Deno.serve(async (req) => {
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
     const serveVerify = async (): Promise<Response> => {
-      // 訪客看得到的先（提問回答、網站按鈕觸發的任務），再依來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
+      // 訪客看得到的先（提問回答、網站按鈕觸發的任務），裁決次之（2026-09-21：不先驗裁決，原貢獻永遠卡在 disputed），
+      // 再依來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
       const visitorFirst = candidates.filter((c) => c.visitor_facing === true);
-      const pool = visitorFirst.length > 0 ? visitorFirst : candidates;
+      const adjudicationsNext = candidates.filter((c) => c.visitor_facing !== true && c.contribution_type === "adjudication");
+      const pool = visitorFirst.length > 0 ? visitorFirst : adjudicationsNext.length > 0 ? adjudicationsNext : candidates;
       const ranked = [...pool].sort((a, b) => sourceRank(bestSourceKind(b.source_urls)) - sourceRank(bestSourceKind(a.source_urls)));
       const topRank = sourceRank(bestSourceKind(ranked[0].source_urls));
       const pick = pickBySeed(ranked.filter((c) => sourceRank(bestSourceKind(c.source_urls)) === topRank), seed)!;

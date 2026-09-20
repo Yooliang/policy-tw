@@ -216,6 +216,32 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   assert(!elig.includes("'adjudication'") && !elig.includes("'removal'") && !elig.includes("'no_change'"), "沒有來源可核的型別不能有系統票");
 });
 
+// 2026-09-21：裁決線是死的（87 份等票平均 0.1 票）。驗證池的順序是「訪客觸發 > 裁決 > 其餘最早」，
+// SQL 的 ORDER BY 跟 next/index.ts 的 serveVerify 是同一套規則的兩份寫法，改一邊沒改另一邊就會各派各的。
+Deno.test("SQL 與 TS 一致：驗證池順序是訪客觸發 > 裁決 > 其餘最早", async () => {
+  const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
+  const orderAt = pool.indexOf("ORDER BY");
+  assert(orderAt > 0, "驗證池要有 ORDER BY");
+  const order = pool.slice(orderAt, pool.indexOf("LIMIT", orderAt));
+  const visitorAt = order.indexOf("web_request");
+  const adjAt = order.indexOf("'adjudication'");
+  const createdAt = order.indexOf("c.created_at ASC");
+  assert(visitorAt >= 0, "訪客觸發（web_request）要在 ORDER BY 裡");
+  assert(adjAt >= 0, "裁決要在 ORDER BY 裡");
+  assert(visitorAt < adjAt && adjAt < createdAt, "順序是訪客觸發 > 裁決 > 提交時間");
+  assert(pool.includes("adjudication_facing"), "池子要把裁決旗標回給 /next");
+
+  const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
+  const at = serve.indexOf("const serveVerify");
+  assert(at > 0, "找不到 serveVerify");
+  const body = serve.slice(at, at + 1500);
+  assert(body.includes(`c.contribution_type === "adjudication"`), "serveVerify 也要把裁決排第二順位");
+  assert(
+    body.indexOf("visitorFirst.length > 0") < body.indexOf("adjudicationsNext.length > 0"),
+    "訪客觸發仍排在裁決前面",
+  );
+});
+
 // 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改
 Deno.test("contributions.contribution_type 的 CHECK 要包含 TS 的每一種型別", async () => {
   const sql = await latestMigrationDefining("CONSTRAINT contributions_contribution_type_check");
