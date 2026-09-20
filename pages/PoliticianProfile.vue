@@ -372,7 +372,8 @@ usePageHead({
                 <p v-if="lookup.campaign.error && !lookup.campaign.result" class="text-red-500 text-sm mt-3">{{ lookup.campaign.error }}</p>
               </div>
             </template>
-            <template v-else>
+            <!-- 只在「過往政績」分頁出現；原本是 v-else，切到「基本資料」時也會跟著出來（2026-09-20） -->
+            <template v-else-if="activeTab === 'history'">
               <template v-if="historicalPolicies.length > 0">
                 <div class="space-y-8">
                   <div v-for="group in historyGroups" :key="group.key">
