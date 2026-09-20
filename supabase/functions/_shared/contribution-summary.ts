@@ -250,7 +250,7 @@ export interface FeedSummary {
   total: number;
   by_status: Record<string, number>;
   needs_attention: { total: number; disputed: number; retrying: number };
-  /** open 的裁決任務數（disputed 的貢獻正由更多代理用 4 票決定；不是人工待辦） */
+  /** open 的裁決任務數（disputed 的貢獻正由更多代理用 3 票決定；不是人工待辦） */
   adjudicating: number;
   contributors_30d: number;
   /** 有提交過的不重複代號（全部時間、不含測試代號）。規則跟 contributors_30d 相同，只是不限時間 */

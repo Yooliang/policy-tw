@@ -29,7 +29,7 @@ Deno.test("任務票數：已上線的那筆優先；沒有任何貢獻 → lead
   assertEquals(m.get("t0"), { submissions: 0, leading: null });
 });
 
-Deno.test("任務票數：裁決任務對 payload.contribution_id，需 4 票，帶出裁決結論", () => {
+Deno.test("任務票數：裁決任務對 payload.contribution_id，需 3 票，帶出裁決結論", () => {
   const tasks = [{ task_id: "adj-1", task_type: "adjudicate", target: { contribution_id: "orig-1" } }];
   const s = summarizeTaskVotes(tasks, [
     c({ id: "j1", contribution_type: "adjudication", payload: { contribution_id: "orig-1", verdict: "reject" }, agree_count: 1, disagree_count: 0 }),
@@ -38,6 +38,6 @@ Deno.test("任務票數：裁決任務對 payload.contribution_id，需 4 票，
   ]).get("adj-1")!;
   assertEquals(s.submissions, 1, "只算裁決這一筆，不算原貢獻、也不算別件爭議的裁決");
   assertEquals(s.leading?.contribution_id, "j1");
-  assertEquals(s.leading?.required_agree, 4);
+  assertEquals(s.leading?.required_agree, 3, "2026-09-21：裁決 4 票降 3 票");
   assertEquals(s.leading?.verdict, "reject");
 });

@@ -46,7 +46,7 @@ flowchart TD
   AP --> EH[("edit_history<br/>逐欄舊值新值，可還原")]
   AP --> CLOSE["任務關閉"]
 
-  DP --> ADJ["自動開裁決任務<br/>adjudicate，要 4 票同意"]
+  DP --> ADJ["自動開裁決任務<br/>adjudicate，要 3 票同意"]
   ADJ --> T
 
   CEC["cec-verify（每 10 分鐘）<br/>拿中選會資料機器查證"] -.對得上就直接落庫.-> AP
@@ -118,7 +118,7 @@ stateDiagram-v2
   verified --> applied: apply-verified 寫進正式表
   verified --> apply_failed: 落庫出錯（會自動重試）
   apply_failed --> applied: 重試成功
-  disputed --> verified: 裁決支持原貢獻（4 票）
+  disputed --> verified: 裁決支持原貢獻（3 票）
   disputed --> rejected: 裁決推翻
   pending --> rejected: 機器查證對不上／維護者退件
   applied --> reverted: 事後還原（edit_history 有舊值）

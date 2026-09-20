@@ -643,7 +643,7 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
 const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, review_notes, task_id";
 
 /**
- * adjudication（4 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
+ * adjudication（3 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
  * 兩種都關閉該貢獻的裁決任務、把同一筆的其他未定案裁決退掉。原貢獻已非 disputed 就只收尾。
  */
 async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {

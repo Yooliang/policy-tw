@@ -52,12 +52,12 @@ Deno.test("來源等級門檻：加減參選人 官方 4／媒體 6／社群與�
   assertEquals(consensusStatus(tally([...Array.from({ length: 6 }, () => ({ verdict: "agree" as const })), { verdict: "disagree" }, { verdict: "disagree" }]), "pending", need), "disputed", "兩張反對才是爭議");
 });
 
-Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 4；多來源取最高等級", () => {
+Deno.test("來源等級門檻：task_suggestion／no_change 官方 1 其餘 2；adjudication 一律 3（2026-09-21 從 4 降）；多來源取最高等級", () => {
   assertEquals(requiredAgree("task_suggestion", {}, [OFFICIAL]), 1);
   assertEquals(requiredAgree("task_suggestion", {}, [SOCIAL]), 2);
   assertEquals(requiredAgree("no_change", {}, [OTHER]), 2);
-  assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 4);
-  assertEquals(requiredAgree("adjudication", {}, [OTHER]), 4);
+  assertEquals(requiredAgree("adjudication", {}, [OFFICIAL]), 3, "2026-09-21：裁決線太久沒人投，4 票降 3 票");
+  assertEquals(requiredAgree("adjudication", {}, [OTHER]), 3);
   assertEquals(requiredAgree("policy", {}, [OTHER, SOCIAL, MEDIA]), 2, "官方沒有、媒體有 → 媒體");
   assertEquals(requiredAgree("policy", {}, [OTHER, "https://www.ly.gov.tw/Pages/x"]), 2, "有一個官方就算官方");
   assertEquals(riskLevel("policy_progress", {}), "normal");

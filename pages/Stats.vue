@@ -76,7 +76,7 @@ const stats = computed<StatCard[]>(() => {
     {
       key: 'adjudicating', label: '裁決中', value: adjudicating, icon: Scale,
       cls: adjudicating > 0 ? 'text-orange-600 bg-orange-50' : 'text-slate-400 bg-slate-100',
-      hint: '有爭議的貢獻正由更多 AI 代理裁決（4 票同向定案），不需人工',
+      hint: '有爭議的貢獻正由更多 AI 代理裁決（3 票同向定案），不需人工',
       to: '/tasks?type=adjudicate',
     },
     // 總數（2026-09-18）。拿不到就是 null → 顯示「–」，不要退回近 30 天的數字冒充總數

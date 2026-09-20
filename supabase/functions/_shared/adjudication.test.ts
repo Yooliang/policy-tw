@@ -1,4 +1,4 @@
-// 零常態人工點：爭議自動變裁決任務，4 票同向定案；來源等級門檻
+// 零常態人工點：爭議自動變裁決任務，3 票同向定案（2026-09-21 從 4 降）；來源等級門檻
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
 import { buildAdjudicationTask, ensureAdjudicationTask, findOpenAdjudicationTask, buildFixTask } from "./adjudication.ts";
@@ -52,7 +52,7 @@ Deno.test("disputed 自動建裁決任務：hint_sources 併正反來源、targe
   assertEquals(fake.db.contribution_tasks.length, 1, "裁決被爭議不會再建任務（原任務保持 open）");
 });
 
-Deno.test("adjudication schema：contribution_id／verdict／reason≥20／checked_urls 必填，source_urls 可省略；門檻不看來源一律 4", () => {
+Deno.test("adjudication schema：contribution_id／verdict／reason≥20／checked_urls 必填，source_urls 可省略；門檻不看來源一律 3", () => {
   const ok = validateContributionRequest({
     agent_name: "dave", contribution_type: "adjudication",
     payload: { contribution_id: C1, verdict: "uphold", reason: "打開中央社與選舉公報，公報第 3 頁確實列了長者健保全免，原貢獻正確。", checked_urls: [CNA, CEC] },
@@ -61,8 +61,8 @@ Deno.test("adjudication schema：contribution_id／verdict／reason≥20／check
   assertEquals(ok.items[0].source_urls, [CNA, CEC]);
   const bad = validateContributionRequest({ agent_name: "dave", contribution_type: "adjudication", payload: { verdict: "maybe", reason: "太短" }, source_urls: [CNA] });
   assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.checked_urls", "payload.contribution_id", "payload.reason", "payload.verdict"]);
-  assertEquals(requiredAgree("adjudication", {}, [CEC]), 4);
-  assertEquals(requiredAgree("adjudication", {}, ["https://example.org/x"]), 4);
+  assertEquals(requiredAgree("adjudication", {}, [CEC]), 3, "2026-09-21：裁決 4 票降 3 票");
+  assertEquals(requiredAgree("adjudication", {}, ["https://example.org/x"]), 3);
 });
 
 function adjudicationRow(id: string, verdict: string, agent: string, status = "verified") {
@@ -73,7 +73,7 @@ function adjudicationRow(id: string, verdict: string, agent: string, status = "v
   };
 }
 
-Deno.test("4 票 uphold → 原貢獻落庫成 applied、裁決任務關閉、同一筆其他未定案裁決退掉", async () => {
+Deno.test("3 票 uphold → 原貢獻落庫成 applied、裁決任務關閉、同一筆其他未定案裁決退掉", async () => {
   const fake = createFakeSupabase({
     contributions: [disputedPolicy, adjudicationRow(A1, "uphold", "dave"), adjudicationRow(A2, "reject", "erin", "pending")],
     contribution_votes: votes,
@@ -95,7 +95,7 @@ Deno.test("4 票 uphold → 原貢獻落庫成 applied、裁決任務關閉、�
   assert(fake.db.edit_history.some((e) => e.table_name === "policies" && e.contribution_id === C1), "edit_history 掛在原貢獻上（可 revert）");
 });
 
-Deno.test("4 票 reject → 原貢獻 rejected、review_notes 記裁決理由、任務關閉、不動正式表", async () => {
+Deno.test("3 票 reject → 原貢獻 rejected、review_notes 記裁決理由、任務關閉、不動正式表", async () => {
   const fake = createFakeSupabase({
     contributions: [disputedPolicy, adjudicationRow(A1, "reject", "dave")],
     contribution_votes: votes,

@@ -19,7 +19,7 @@ import {
  * 資料來源：GET /functions/v1/contributions-feed（公開、唯讀、不含任何雜湊）。
  */
 
-// 沒有常態人工點：disputed＝裁決中（系統自動建 adjudicate 任務，4 票同向定案）；apply_failed 會自動重試
+// 沒有常態人工點：disputed＝裁決中（系統自動建 adjudicate 任務，3 票同向定案）；apply_failed 會自動重試
 type StatusKey = 'all' | 'pending' | 'voting' | 'applied' | 'disputed' | 'rejected' | 'reverted'
 
 interface FeedItem {

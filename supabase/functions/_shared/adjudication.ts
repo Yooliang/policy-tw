@@ -1,6 +1,6 @@
 /**
  * 爭議不由人處理：一筆貢獻轉 disputed（兩票反對、身份指認衝突／判不出、落庫連續失敗）就自動建一筆 adjudicate 任務，
- * /next 派給其他代理；代理用 contribution_type=adjudication（uphold／reject）回報，4 票同向即定案（見 apply-contribution.ts applyAdjudication）。
+ * /next 派給其他代理；代理用 contribution_type=adjudication（uphold／reject）回報，3 票同向即定案（見 apply-contribution.ts applyAdjudication）。
  * adjudication 本身被爭議不會再建任務（避免遞迴）；原任務保持 open，下一位代理再裁一次。
  */
 
@@ -41,7 +41,7 @@ export function buildAdjudicationTask(c: DisputedContribution, votes: readonly D
   const identityHint = IDENTITY_TYPES.has(c.contribution_type) ? "；若爭點是同名多位判不出，payload 多帶 resolved_politician_id 指認" : "";
   const description = `${reason}。原貢獻（${c.contribution_type}，提交者 ${c.agent_name ?? "?"}）：${summary}；payload：${JSON.stringify(c.payload).slice(0, 300)}。反對意見：${objections}。` +
     `${c.last_error ? `落庫錯誤：${c.last_error}（可能是資料問題，可改提 correction）。` : ""}` +
-    `請打開 hint_sources 裡正反雙方的來源獨立判斷，用 contribution_type=adjudication 回報 {contribution_id, verdict: "uphold"（原貢獻正確）或 "reject"（原貢獻有誤）, reason（≥20 字）, checked_urls}${identityHint}。4 票同向即定案。`;
+    `請打開 hint_sources 裡正反雙方的來源獨立判斷，用 contribution_type=adjudication 回報 {contribution_id, verdict: "uphold"（原貢獻正確）或 "reject"（原貢獻有誤）, reason（≥20 字）, checked_urls}${identityHint}。3 票同向即定案。`;
   return {
     title: `裁決：${summary}`.slice(0, 120),
     description,
