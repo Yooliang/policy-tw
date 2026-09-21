@@ -396,7 +396,9 @@ Deno.serve(async (req) => {
       const state: Record<string, unknown> = {
         target: claim,
         contribution_type: c.contribution_type,
-        page: page ? { url: page.url, text: page.text } : { url: null, text: "", note: "抓不到正文" },
+        // note 要留著（2026-09-21）：裡面是 raw|archive|text 三個長度——candlefish 驗 archive 回退時發現 judge 存的是縮減版、
+        // 看不出回退有沒有出手；每一層都只回報自己看到的，這三個數字就是在補「沒看到什麼」。
+        page: page ? { url: page.url, text: page.text, note: page.note } : { url: null, text: "", note: "抓不到正文" },
       };
       const res = await askJev(apiKey, state, dimensionQuestions(c.contribution_type));
       const budget = computeVoteBudget(c.contribution_type, res.answers, cecConfirmed);
