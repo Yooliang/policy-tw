@@ -450,7 +450,7 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         matching_politicians: candidates.map(({ elections: _e, ...rest }) => rest),
         elections,
         hint: (decision && decision in IDENTITY_HINT ? IDENTITY_HINT[decision as keyof typeof IDENTITY_HINT] : "同名多位時，用 payload 的政黨／縣市／現職／出生年判斷是不是同一人") +
-          "；candidacy 要看該人是否已有這場選舉的紀錄",
+          "；candidacy 要看該人是否已有這場選舉的紀錄。逐欄核對來源後投 agree／disagree（附 evidence_url 與 note）／unsure",
       };
     }
     case "policy":
@@ -481,8 +481,20 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
       };
     }
     // 2026-09-20 審查建議 5：這幾種型別的驗證項原本只有 payload，驗證者只能照 reason 投
-    case "merge_politician":
-      return data.pair_current ?? { hint: "找不到那兩筆人物（可能已合併或不存在）：投 unsure" };
+    case "merge_politician": {
+      // 跟 adjudication 同一個形狀：pair_current 是任務端的 current，它的 hint 寫給
+      // 「要提交一份合併」的人看（「是同一人就 same_person=true」），驗證回合照抄的話，
+      // 等於教投票的人去交一筆新貢獻。2026-09-21 把驗證守門測試的取樣擴大後掃出來的第二處。
+      if (!data.pair_current) return { hint: "找不到那兩筆人物（可能已合併或不存在）：投 unsure" };
+      const { hint: _submitHint, ...rest } = data.pair_current as Obj;
+      return {
+        ...rest,
+        hint: "你要判的是**提交者的結論站不站得住**，不是自己重判一次：payload 的 same_person 是 true（同一人、通過後會軟合併）還是 false（不同人、這一對之後不再派）。" +
+          "打開它附的 source_urls，看那份中選會或官方名單能不能支持這個結論；a／b 兩邊的政黨、縣市、出生年、歷屆參選也一起對。" +
+          "**合併沒有便宜的回頭路**，判 same_person=true 的要特別嚴：同名同縣市不等於同一人。" +
+          "支持就 agree、來源推不出這個結論或與它矛盾就 disagree（附 evidence_url 與 note）、看不出來就 unsure。**你這一票是 agree／disagree／unsure**。",
+      };
+    }
     case "adjudication": {
       // 任務端的 current（含 hint）是寫給「要提交一份裁決」的人看的——uphold／reject 是那一側的詞彙。
       // 驗證回合要做的事完全不同：對別人交的那份裁決投 agree／disagree／unsure。
