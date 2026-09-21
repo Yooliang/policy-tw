@@ -52,6 +52,38 @@ Deno.test("current 要給整份清單，不是系統挑出來的配對", () => {
   assert(hint.includes("no_change") && hint.includes("比對過哪幾組"), "no_change 要求列出比對過的組別，否則掃過去就回報等於沒查");
 });
 
+Deno.test("同一個 source_url 的先分好組：那多半是同場發表的 N 大政見，不是重複", () => {
+  // selkie（pi/deepseek）2026-09-21 跑完一輪的回報：它判掉的三組假重複全是
+  // 「同一篇報導、不同標的」。我們沒有 source_title／發布日欄位，但「同一篇」
+  // 光靠網址相同就判得出來——與其叫代理自己比對 60 條網址，不如先分好組給它。
+  const SRC = "https://news.ltn.com.tw/news/politics/breakingnews/5515712";
+  const out = shapeTaskCurrent("duplicate_policy", {
+    politician: { id: "p1", name: "李四川" },
+    policies: [
+      { id: "a", title: "興建淡海新市鎮醫院", source_url: SRC, ai_extracted: false },
+      { id: "b", title: "協助恩主公醫院擴建", source_url: SRC, ai_extracted: false },
+      { id: "c", title: "加速都市更新", source_url: "https://example.test/other", ai_extracted: true },
+    ],
+  });
+  const groups = out.same_source_groups as Array<{ source_url: string; policy_ids: string[] }>;
+  assertEquals(groups.length, 1, "只有真的同網址的才成組");
+  assertEquals(groups[0].source_url, SRC);
+  assertEquals(groups[0].policy_ids.sort(), ["a", "b"]);
+  assert(String(out.same_source_note).includes("N 大政見"));
+  // 早期 AI 匯入的要標出來：這批的來源掛錯率偏高，判重複之前要先確認那一頁真的講了這筆
+  assertEquals((out.policies as Array<Record<string, unknown>>)[2].ai_extracted, true);
+  assert(String(out.hint).includes("source_url"), "提示要先叫它看出處");
+});
+
+Deno.test("沒有同網址的群組時不要硬塞提醒", () => {
+  const out = shapeTaskCurrent("duplicate_policy", {
+    politician: { id: "p1" },
+    policies: [{ id: "a", title: "甲", source_url: "https://a.test" }, { id: "b", title: "乙", source_url: null }],
+  });
+  assertEquals((out.same_source_groups as unknown[]).length, 0);
+  assertEquals(out.same_source_note, null);
+});
+
 Deno.test("清單長到上限也不會漏掉總數", () => {
   const many = Array.from({ length: MAX_POLICY_DUPE_LIST + 10 }, (_, i) => ({ id: `p${i}`, title: `政見 ${i}`, description: null }));
   const out = shapeTaskCurrent("duplicate_policy", { politician: { id: "p1" }, policies: many, policies_total: many.length });

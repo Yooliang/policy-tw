@@ -161,15 +161,31 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
       // 系統配不出「哪兩筆重複」（實測：真重複那對的字面相似度比不重複的那對還低），
       // 所以這裡不挑配對，整份清單交給代理判。它要回報比對過哪幾組，不能只給結論。
       const list = (data.policies ?? []).slice(0, MAX_POLICY_DUPE_LIST).map((x) => {
-        const row = pick(x, ["id", "title", "description", "category", "status", "election_id", "proposed_date", "source_url"])!;
+        const row = pick(x, ["id", "title", "description", "category", "status", "election_id", "proposed_date", "source_url", "ai_extracted"])!;
         const d = truncateText(row.description, POLICY_DUPE_DESC_LIMIT);
         return d.truncated ? { ...row, description: d.text, truncated: true } : row;
       });
+      // 同一個 source_url 的先分好組給它看（selkie 2026-09-21：判掉的假重複全是「同一篇報導、
+      // 不同標的」＝同場發表的 N 大政見）。我們沒有 source_title／發布日欄位，但「同一篇」
+      // 光靠網址相同就判得出來，不必加欄位、也不必叫代理自己比對 60 條網址。
+      const bySource = new Map<string, string[]>();
+      for (const row of list) {
+        const url = typeof row.source_url === "string" ? row.source_url.trim() : "";
+        if (!url) continue;
+        bySource.set(url, [...(bySource.get(url) ?? []), String(row.id)]);
+      }
+      const sameSource = [...bySource.entries()]
+        .filter(([, ids]) => ids.length > 1)
+        .map(([source_url, policy_ids]) => ({ source_url, policy_ids }));
       return {
         politician: pick(p, POLITICIAN_BRIEF),
         policies: list,
         policies_total: data.policies_total ?? list.length,
-        hint: "逐組比對這份清單：換句話說講同一件事＝重複；同一個主題但標的不同（不同醫院、不同路線、不同補助對象）不是重複，一篇報導的「N 大政見」本來就該拆成 N 筆。空泛的一筆碰上具體的一筆而且講同一件事，保留具體那筆、對空泛那筆提 removal，reason 寫「與 <保留的 policy_id> 是同一個承諾」；具體資訊只在要移除的那筆才有就先用 correction 補過去。沒有重複就用 no_change 帶 task_id，note 列出你比對過哪幾組。",
+        same_source_groups: sameSource,
+        same_source_note: sameSource.length > 0
+          ? "這幾組出自同一個網址，多半是同一場發表的「N 大政見」被正確拆成 N 筆——標的不同就不是重複，別急著退。"
+          : null,
+        hint: "逐組比對這份清單。**先看 source_url**：同一篇報導拆出來的多筆，標的不同（不同醫院、不同路線、不同補助對象）就不是重複（見 same_source_groups）。換句話說講同一件事才是重複——空泛的一筆碰上具體的一筆而且講同一件事，保留具體那筆、對空泛那筆提 removal，reason 寫「與 <保留的 policy_id> 是同一個承諾」；具體資訊只在要移除的那筆才有就先用 correction 補過去。ai_extracted=true 表示這筆是早期 AI 匯入的，來源掛錯的比率偏高，判之前先打開它的 source_url 確認那一頁真的講了這筆政見。沒有重複就用 no_change（outcome=confirmed）帶 task_id，note 列出你比對過哪幾組。",
       };
     }
     case "duplicate_politician": {
@@ -297,7 +313,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   }
   if (taskType === "duplicate_policy" && pid) {
     const { data: pol, count } = await supabase.from("policies")
-      .select("id, title, description, category, status, election_id, proposed_date, source_url", { count: "exact" })
+      .select("id, title, description, category, status, election_id, proposed_date, source_url, ai_extracted", { count: "exact" })
       .eq("politician_id", pid).is("removed_at", null)
       .order("proposed_date", { ascending: false, nullsFirst: false }).order("id", { ascending: true })
       .limit(MAX_POLICY_DUPE_LIST);
