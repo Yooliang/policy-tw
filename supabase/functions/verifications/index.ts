@@ -34,6 +34,59 @@ Deno.serve(async (req) => {
     const agentName = url.searchParams.get("agent_name");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || MAX_VERIFICATIONS_PER_RUN, 1), 50);
 
+    // #15（2026-09-22）：列出這個來源 IP 投過的票。#10 讓投票者可以修訂自己的票，但「可以改，前提是記得 id」對
+    // 「事後發現錯了」這個場景等於沒有——代理跑了幾十輪、重啟過、或中途掛掉，記憶隨行程一起沒了（leatherback）。
+    // 身份是來源 IP，不是代號：同一台機器換代號投的票也列，因為修訂看的也是 IP。
+    if (url.searchParams.get("mine") === "1") {
+      const mineLimit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+      // query-bounds: ok — 一個 IP 的票有上限（每日 800），而且帶 limit 與 order
+      const { data: myVotes, error: mvErr } = await supabase.from("contribution_votes")
+        .select("id, contribution_id, verdict, weight, note, evidence_url, resolved_politician_id, via, created_at")
+        .eq("verifier_ip_hash", ipHash).order("created_at", { ascending: false }).limit(mineLimit);
+      if (mvErr) throw new Error(`my votes: ${mvErr.message}`);
+      type MyVote = { id: string; contribution_id: string; verdict: string; weight: number | null; note: string | null; evidence_url: string | null; resolved_politician_id: string | null; via: string | null; created_at: string };
+      const votes = (myVotes ?? []) as MyVote[];
+      const ids = [...new Set(votes.map((v) => v.contribution_id))];
+      type Contrib = { id: string; contribution_type: string; status: string; score: number | null; effective_agree: number | null; payload: Record<string, unknown> | null };
+      let byId = new Map<string, Contrib>();
+      if (ids.length > 0) {
+        // query-bounds: ok — ids 來自上面那批票（≤200）
+        const { data: cs, error: cErr } = await supabase.from("contributions")
+          .select("id, contribution_type, status, score, effective_agree, payload").in("id", ids.slice(0, 200)).limit(200);
+        if (cErr) throw new Error(`my votes contributions: ${cErr.message}`);
+        byId = new Map(((cs ?? []) as Contrib[]).map((c) => [c.id, c]));
+      }
+      const rows = votes.map((v) => {
+        const c = byId.get(v.contribution_id);
+        const p = (c?.payload ?? {}) as Record<string, unknown>;
+        const subject = [p.name, p.title, p.target_table && p.target_id ? `${p.target_table}:${String(p.target_id).slice(0, 8)}` : null].filter(Boolean).join("｜");
+        return {
+          vote_id: v.id,
+          contribution_id: v.contribution_id,
+          contribution_type: c?.contribution_type ?? null,
+          subject: subject || null,
+          verdict: v.verdict,
+          weight: v.weight,
+          resolved_politician_id: v.resolved_politician_id,
+          note: v.note ? String(v.note).slice(0, 200) : null,
+          evidence_url: v.evidence_url,
+          voted_at: v.created_at,
+          revised: typeof v.via === "string" && v.via.endsWith(":revise"),
+          contribution_status: c?.status ?? null,
+          score: c?.score ?? null,
+          target_score: c?.effective_agree ?? null,
+        };
+      });
+      return json({
+        success: true,
+        mine: true,
+        count: rows.length,
+        votes: rows,
+        how_to_revise: "投錯了要改：POST /report {kind:'verify', contribution_id, verdict, note, evidence_url?, resolved_politician_id?, agent_name, revise: true}——覆寫你那張票，分數依新的重算，仍只算一票。只有 pending／verified 的還能改；已 applied／rejected 的改不動。",
+        docs: "https://policy-tw.web.app/skill.md",
+      });
+    }
+
     // 候選一律走 contribution_verify_pool（跟 /next 同一支）：同 IP 提交的、投過的、
     // 已達有效門檻的、跟原貢獻有關係的裁決，全部在 SQL 裡、LIMIT 之前就排掉。
     //
