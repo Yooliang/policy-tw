@@ -42,7 +42,7 @@ Deno.test("via 真的被寫進資料列，不是收了就丟", async () => {
   const v = await src("./verify-handler.ts");
   // 插入的物件字面值裡要有 via
   assert(/payload_hash: hash,\s*\n\s*\/\/[^\n]*\n\s*via,/.test(c), "contributions 的插入要帶 via");
-  assert(/resolved_politician_id: input\.resolved_politician_id \?\? null,\s*\n\s*\/\/[^\n]*\n\s*via,/.test(v), "contribution_votes 的插入要帶 via");
+  assert(/resolved_politician_id: input\.resolved_politician_id \?\? null,\s*\n\s*\/\/[^\n]*\n\s*via(,|:)/.test(v), "contribution_votes 的插入要帶 via（修訂時是 <via>:revise）");
 });
 
 Deno.test("DB 有 via 欄位與 endpoint_usage 檢視表——收掉舊端點之前要看得出誰在用", async () => {
