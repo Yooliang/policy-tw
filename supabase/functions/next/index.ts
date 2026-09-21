@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { autoTaskTier, chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, manualTaskTier, pickBySeed, pickQueuedManual, queueKeyBefore, sortQuestionTasksBySupport, taskTargetKey, TIER_REST, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
@@ -91,10 +91,13 @@ Deno.serve(async (req) => {
     const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       pendingQuery,
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open")
+      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
         // 派過的排到後面（2026-09-17：「任務自己要有個時間戳，派過就向後排」）：
         // 原本只按 priority／created_at 排，最舊的那幾筆永遠佔著 pickManualTask 的前 3 名視窗。
-        .order("priority", { ascending: false }).order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(20),
+        // 2026-09-21：last_dispatched_at 提到最前面排，而且真的 select 出來（原本只拿它排序、
+        // 沒放進 select，所以 TS 那側拿不到值，沒辦法跟自動缺口比）。先按「最久沒派」取這 20 筆，
+        // 新建的任務 last_dispatched_at 是 NULL 一定在窗內——那是「任務一建立就排最前」的前提。
+        .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
@@ -195,7 +198,7 @@ Deno.serve(async (req) => {
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
-    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string };
+    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string; last_dispatched_at: string | null };
     // task_id 併進來的早一點加，dispatch.ts 的 TaskLike 系列函式都要它
     const manualRaw = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
     const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manualRaw.length;
@@ -361,22 +364,37 @@ Deno.serve(async (req) => {
       filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
-    // 2026 縣市長的基本資料與政見要真的排最前（使用者 2026-09-21）：手動任務本來無條件
-    // 優先於自動缺口，而裁決任務就是手動的、有 86 筆——縣市長那一層會被整個蓋掉。
-    // 先問一句「現在有沒有縣市長的缺口輪得到」，有就讓它插到手動任務前面。
-    let mayorFirst: AutoTask | null = null;
-    {
-      const { data: top } = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 1, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
-      const first = ((top ?? []) as AutoTask[])[0];
-      if (first && ["profile_gap", "policy_missing"].includes(first.task_type)) {
-        const { data: tier } = await supabase.rpc("task_priority_tier", { p_task_type: first.task_type, p_target: first.target });
-        if (tier === 0 || tier === 1) mayorFirst = first;
-      }
-    }
+    // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
+    // 自動缺口也先撈出來，兩邊用同一把尺比，不再是「手動清單有東西就手動贏」。
+    // 原本的 mayorFirst 特例（讓縣市長插到手動前面）一併拿掉——那是用特例壓特例。
+    // last_dispatched_at 是 20260921000019 讓 contribution_auto_tasks 一起回傳的，
+    // 沒有它就沒辦法跟手動任務用同一把尺比。
+    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; last_dispatched_at: string | null };
+    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
+    if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
+    // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
+    // 程式裡的過濾器留著當保險。2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
+    const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
+      filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
+      mySubmittedTaskIds,
+    ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
 
-    if (freeManual.length > 0 && !mayorFirst) {
-      // 依 priority 分層挑，不要整池隨機——否則 priority 與提問的表態數都是白寫的
-      const t = pickManualTask(freeManual, seed)!;
+    // 自動那側 SQL 已經排好序（task_priority_tier → Jev 一次性插隊 → 最久沒派），
+    // 所以第一筆就是它的最佳候選，這裡只需要問它落在哪一層。
+    const autoHead = freeAuto[0] ?? null;
+    let autoTier = TIER_REST;
+    if (autoHead) {
+      const { data: tierRow } = await supabase.rpc("task_priority_tier", { p_task_type: autoHead.task_type, p_target: autoHead.target });
+      autoTier = autoTaskTier(tierRow);
+    }
+    const manualHead = pickQueuedManual(freeManual);
+    const manualFirst = manualHead !== null && (autoHead === null || queueKeyBefore(
+      { tier: manualTaskTier(manualHead.source), lastDispatchedAt: manualHead.last_dispatched_at ?? null },
+      { tier: autoTier, lastDispatchedAt: autoHead.last_dispatched_at ?? null },
+    ));
+
+    if (manualFirst) {
+      const t = manualHead!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
       // 派出就蓋章，下一次排到後面（自動缺口是即時算出來的，沒有列可蓋）
@@ -393,16 +411,7 @@ Deno.serve(async (req) => {
         how_to: howTo,
       });
     }
-    // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
-    // 程式裡的過濾器留著當保險。2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
-    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
-    if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
-    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number };
-    const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
-      filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
-      mySubmittedTaskIds,
-    ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
-    const t = freeAuto[0];
+    const t = autoHead;
     if (!t) {
       // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
       // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）

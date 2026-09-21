@@ -319,3 +319,88 @@ export function pickBySeed<T>(list: readonly T[], seed: string): T | null {
   }
   return list[h % list.length];
 }
+
+// ============================================================
+// 單一派工佇列（2026-09-21）
+//
+// 原本 /next 有兩套任務來源、兩套排序，而且程式無條件讓手動任務贏：
+//   if (freeManual.length > 0) { 派手動 } else { 叫 contribution_auto_tasks }
+// 裁決任務就是手動的、有 86 筆，所以自動缺口的優先序永遠輪不到。為了讓 2026 縣市長
+// 排最前，前一版又加了 mayorFirst 特例去壓手動——用一個特例壓另一個特例。
+//
+// 使用者 2026-09-21 的裁示：
+//   「手動任務那個一開始就做錯了。當一個手動任務被建立的時候，它應該被排在最前面，
+//     而不是整個手動任務的列表都卡在最前面。任務一建立它就是最快會被進行的，
+//     之後就照著流程走。」
+//
+// 所以兩邊排進同一個比較器：先比層級，同層比「最久沒派」（沒派過的算最久）。
+//
+// 為什麼不是全部混在一起只按 last_dispatched_at 排——這是實測數字擋下來的：
+// 自動缺口 1,168 筆可派、其中 926 筆從沒派過；86 筆裁決全都派過了。混排會讓裁決
+// 排在那 926 筆後面，以現在的速度是好幾週，等於把 2026-09-21 早上才救活的裁決線
+// 再餓死一次。所以裁決與訪客觸發各留一層，其餘手動與自動全部平等。
+// ============================================================
+
+/** 2026 縣市長的基本資料（task_priority_tier 回 0） */
+export const TIER_MAYOR_PROFILE = 0;
+/** 2026 縣市長的政見（task_priority_tier 回 1） */
+export const TIER_MAYOR_POLICY = 1;
+/** 爭議裁決：卡著別人的貢獻不能收斂，時效性最強 */
+export const TIER_ADJUDICATION = 2;
+/** 網站「請 AI 幫忙查」按鈕：有訪客在等 */
+export const TIER_WEB_REQUEST = 3;
+/** 其餘全部同一池：手動的 manual／suggested ＋ 所有其他自動缺口 */
+export const TIER_REST = 4;
+
+export interface QueueKey {
+  tier: number;
+  /** 沒派過是 null，排在所有派過的前面 */
+  lastDispatchedAt: string | null;
+}
+
+/** a 是否該排在 b 前面。先比層，同層比最久沒派（null＝沒派過＝最久）。 */
+export function queueKeyBefore(a: QueueKey, b: QueueKey): boolean {
+  if (a.tier !== b.tier) return a.tier < b.tier;
+  if (a.lastDispatchedAt === b.lastDispatchedAt) return false;
+  if (a.lastDispatchedAt === null) return true;
+  if (b.lastDispatchedAt === null) return false;
+  return a.lastDispatchedAt < b.lastDispatchedAt;
+}
+
+/**
+ * 手動任務的層級由 source 決定。
+ * 只有裁決與訪客觸發各自有層；維護者建的（manual）與外部提議通過的（suggested）
+ * 都落到 TIER_REST，跟自動缺口平等——新建的那筆 last_dispatched_at 是 null，
+ * 自然排最前；派過一次就跟大家一起輪。這就是使用者要的行為。
+ */
+export function manualTaskTier(source: string | null | undefined): number {
+  if (source === "auto_dispute") return TIER_ADJUDICATION;
+  if (source === "web_request") return TIER_WEB_REQUEST;
+  return TIER_REST;
+}
+
+/** 自動缺口的層級：task_priority_tier 只有 0／1 有意義（縣市長），其餘一律進共同池。 */
+export function autoTaskTier(priorityTier: unknown): number {
+  return priorityTier === TIER_MAYOR_PROFILE || priorityTier === TIER_MAYOR_POLICY
+    ? (priorityTier as number)
+    : TIER_REST;
+}
+
+export interface ManualQueueTask {
+  source?: string | null;
+  last_dispatched_at?: string | null;
+}
+
+/** 手動任務裡最該派的一筆，用的是跟自動缺口同一把尺。 */
+export function pickQueuedManual<T extends ManualQueueTask>(tasks: readonly T[]): T | null {
+  let best: T | null = null;
+  let bestKey: QueueKey | null = null;
+  for (const t of tasks) {
+    const key: QueueKey = { tier: manualTaskTier(t.source), lastDispatchedAt: t.last_dispatched_at ?? null };
+    if (bestKey === null || queueKeyBefore(key, bestKey)) {
+      best = t;
+      bestKey = key;
+    }
+  }
+  return best;
+}
