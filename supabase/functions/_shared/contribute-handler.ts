@@ -10,7 +10,7 @@ import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-
 import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
 import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
-import { claimKey, claimTarget, type ExistingClaim, findMergeTarget } from "./duplicate-claim.ts";
+import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -165,6 +165,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
    * 投不成（自己那台交的／已投過／對方剛定案／額度用完）就照原路收下這筆，不能默默丟掉。
    */
   const mergedByIndex = new Map<number, { existing_id: string; agree_count: number; status: string; required_agree: number; from_agent: string | null }>();
+  /** 同對象的既有提交是同一台機器（同 IP）交的：不能併成票，但要告訴它，不然它會一直重交（2026-09-22） */
+  const sameMachineDup = new Map<number, string>();
   const mergeCandidateIdx = validation.items
     .map((item, i) => ({ item, i }))
     .filter(({ item, i }) => !existingByHash.has(hashes[i]) && !blocked.has(i) && claimKey(item.contribution_type, item.payload) !== null);
@@ -173,7 +175,12 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     const claimed = new Set<string>(); // 同一批裡兩筆指向同一個既有貢獻時，只投一票
     for (const { item, i } of mergeCandidateIdx) {
       const target = findMergeTarget(item, { agent_name: validation.contributor.agent_name, ip_hash: ipHash }, candidates);
-      if (!target || claimed.has(target.id)) continue;
+      if (!target) {
+        const sameMachine = findSameMachineClaim(item, { agent_name: validation.contributor.agent_name, ip_hash: ipHash }, candidates);
+        if (sameMachine) sameMachineDup.set(i, sameMachine.id);
+        continue;
+      }
+      if (claimed.has(target.id)) continue;
       const voted = await verifyFn(supabase, {
         contribution_id: target.id,
         verdict: "agree",
@@ -202,6 +209,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   // edit_history。而驗證票是最稀缺的資源（全站 1,400+ 筆待驗證）。
   // 成因多半是資料新鮮度——提交者看到的是舊的，別人已經修好了。
   const noOpIndexes = new Map<number, NoOpCheck>();
+  // #6（2026-09-22）：一筆多個 change 只有部分是 no-op → 收下，但當場告訴提交者哪幾欄白做（不擋）
+  const partialNoOp = new Map<number, string[]>();
   {
     const corrections = validation.items
       .map((item, i) => ({ item, i }))
@@ -216,6 +225,7 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
         const { data: row } = await supabase.from(target_table).select(["id", ...cols].join(", ")).eq("id", target_id).maybeSingle();
         const check = checkNoOp(item.payload, row as Record<string, unknown> | null);
         if (check.allNoOp) noOpIndexes.set(i, check);
+        else if (check.fields.some((f) => f.same)) partialNoOp.set(i, check.fields.filter((f) => f.same).map((f) => f.field));
       } catch { /* 查不到就不擋，讓它照常走驗證 */ }
     }
   }
@@ -309,6 +319,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
         })()
         : {}),
       ...(dup ? { existing_status: dup.status, message: `${DEDUPE_WINDOW_HOURS} 小時內已有相同內容的貢獻，沿用原 id` } : {}),
+      ...(sameMachineDup.has(i) ? { note: `同一台機器（同來源 IP）已經交過同對象的同一件事（${sameMachineDup.get(i)}），你這筆**不會**算成對它的同意票——一台機器只有一票。之後同對象的別再交，去驗別人的。` } : {}),
+      ...(partialNoOp.has(i) ? { warning: `這幾欄改完跟現值一樣（別人先修好了）：${partialNoOp.get(i)!.join("、")}；只有其餘欄位會被驗證與套用` } : {}),
       review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${id}`,
     };
   });

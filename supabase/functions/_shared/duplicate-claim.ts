@@ -159,6 +159,22 @@ export function findMergeTarget(
   return hits[0] ?? null;
 }
 
+/** 同一宣稱、但既有那筆是同一台機器交的（同 IP 或同代號）——併不成票，只能提示（2026-09-22） */
+export function findSameMachineClaim(
+  incoming: { contribution_type: string; payload: unknown },
+  submitter: { agent_name: string; ip_hash: string },
+  candidates: readonly ExistingClaim[],
+): ExistingClaim | null {
+  const key = claimKey(incoming.contribution_type, incoming.payload);
+  if (!key) return null;
+  return candidates.find((c) =>
+    c.status === "pending" &&
+    c.contribution_type === incoming.contribution_type &&
+    claimKey(c.contribution_type, c.payload) === key &&
+    ((c.agent_name ?? "").toLowerCase() === submitter.agent_name.toLowerCase() || c.contributor_ip_hash === submitter.ip_hash)
+  ) ?? null;
+}
+
 /**
  * 一筆貢獻上線後，同一宣稱還在等票的其他提交要收編（2026-09-21）：內容沒錯（不是退件）、也沒有各自落庫（不是通過），
  * 標成 superseded，驗證池不再派它、頁面只剩上線的那筆。回要收編的 id 清單。
