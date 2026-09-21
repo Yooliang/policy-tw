@@ -45,3 +45,22 @@ Deno.test("archive 也沒有 → 回原本那份（可能是空的），note 記
   assert(r.text.length < ARCHIVE_FALLBACK_MIN_CHARS);
   assert(r.note.includes("archive:0"), r.note);
 });
+
+// 2026-09-22 candlefish 第三次探測：活頁已 404、archive 有 2022 快照的 udn 6316823 只回 fetch_failed，沒回退。
+Deno.test("活頁 404 → 找快照；快照有正文就當 html 用，note 記原因與 archive 長度", async () => {
+  const f = fakeFetch({
+    "https://news.example/gone": { status: 404, body: "" },
+    "https://web.archive.org/web/2026/https://news.example/gone": { status: 200, body: ARTICLE },
+  });
+  const r = await fetchSource("https://news.example/gone", f);
+  assertEquals(r.kind, "html");
+  assert(r.text.includes("敬老津貼"));
+  assert(/^http 404 \| archive:\d+ \| text:\d+$/.test(r.note), r.note);
+});
+
+Deno.test("活頁 404 且快照也沒有 → error，note 記 http 404 | archive:0", async () => {
+  const f = fakeFetch({ "https://news.example/gone2": { status: 404, body: "" } });
+  const r = await fetchSource("https://news.example/gone2", f);
+  assertEquals(r.kind, "error");
+  assertEquals(r.note, "http 404 | archive:0");
+});

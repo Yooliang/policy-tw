@@ -484,14 +484,16 @@ Deno.serve(async (req) => {
       const { state, questions } = buildSourceSupportAsk(claim, targetUrl, focusText(page.text, names));
       const res = await askJev(apiKey, state, questions);
       const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+      // 成功路徑也留抓取麵包屑（raw｜archive｜text）：只有失敗那條有的話，archive 回退有沒有出手事後查不到（candlefish 第三次探測）
+      const stateOut = { ...state, page: { ...((state.page ?? { url: targetUrl }) as Record<string, unknown>), note: page.note } };
       await insertRecords(supabase, [{
         subject_type: "contribution", subject_id: c.id, question: "second_source",
         choice: agg.choice, probability: agg.probability, confidence: null,
-        probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state,
+        probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state: stateOut,
         cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
       }]);
       return json({
-        success: true, contribution_id: c.id, url: targetUrl,
+        success: true, contribution_id: c.id, url: targetUrl, subjects: names.filter(Boolean),
         verdict: agg.choice, probability: agg.probability, counts: agg.probability >= MIN_PROBABILITY, fields: agg.fields,
         core_fields: agg.core_fields, contradicted_core: agg.contradicted_core,
         min_probability: MIN_PROBABILITY,

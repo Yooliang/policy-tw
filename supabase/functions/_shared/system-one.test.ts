@@ -126,7 +126,7 @@ Deno.test("fetchSource：帶瀏覽器 UA；PDF／試算表回 pdf 不解析（20
   assertEquals((await fetchSource("https://x/f", pdf)).kind, "pdf");
   const bad = (async () => new Response("nope", { status: 403 })) as typeof fetch;
   const r3 = await fetchSource("https://x/z", bad);
-  assertEquals(r3.kind, "error"); assertEquals(r3.note, "http 403");
+  assertEquals(r3.kind, "error"); assertEquals(r3.note, "http 403 | archive:0"); // 2026-09-22：抓不到也找快照，note 留 archive 長度
 });
 
 // 2026-09-19 第一批 precheck：三筆自由時報全 cannot_tell，正文其實在 JSON-LD 的 articleBody 裡、被當 script 丟掉
