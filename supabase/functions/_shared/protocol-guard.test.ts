@@ -11,7 +11,8 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
-import { CONTRIBUTION_TYPES, TASK_TYPES } from "./contribution-schema.ts";
+import { CONTRIBUTION_TYPES, NO_CHANGE_OUTCOMES, TASK_TYPES } from "./contribution-schema.ts";
+import { NO_CHANGE_OUTCOMES_HINT, shapeTaskCurrent, type TaskContextData } from "./task-context.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { KIND_TO_TASK_TYPE, REQUEST_KINDS } from "./request-task.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "./contribute-handler.ts";
@@ -278,6 +279,45 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
   const allTypes = new Set([...sqlTypes, ...Object.keys(SUGGESTED_TYPE), ...Object.values(KIND_TO_TASK_TYPE), ...TASK_TYPES]);
   for (const t of allTypes) {
     assert(new RegExp(`\\b${t}:\\s*'`).test(labels), `lib/task-labels.ts 沒有 ${t} 的中文名稱，任務看板會顯示成「其他」`);
+  }
+});
+
+Deno.test("任務的 current：hint 指名的欄位，協議裡要查得到；每種任務都要帶 outcome 說明", async () => {
+  // 2026-09-21 由 selkie（跑任務的伙伴）發現：duplicate_policy 的 hint 叫代理「見
+  // same_source_groups」，但 public/skill.md 整份 grep 不到那個欄位名——代理照協議查不到
+  // 那是什麼。同一天還有一條反向的：#121 讓 outcome 變必填，legacy_audit 的 hint 卻還停在
+  // 「都對 → no_change」，照它送會被 schema 擋下 400。這支測試把兩件事一起守住。
+  const skill = await Deno.readTextFile(SKILL_MD);
+  const samples: Array<[string, TaskContextData]> = [
+    ["duplicate_policy", { politician: { id: "p" }, policies: [{ id: "a", title: "甲", source_url: "https://x.test" }] }],
+    ["legacy_audit", { politician: { id: "p" }, policy: { id: "pl", title: "乙" } }],
+    ["policy_missing", { politician: { id: "p" }, policies: [] }],
+    ["duplicate_politician", { politician: { id: "p" } }],
+    ["adjudicate", { contribution: null }],
+  ];
+  for (const [taskType, data] of samples) {
+    const current = shapeTaskCurrent(taskType, data);
+    assert(current.no_change_outcomes, `${taskType} 的 current 沒有 no_change_outcomes——任何任務都可能以 no_change 收尾，而 outcome 是必填的`);
+
+    // hint 裡提到的、而且真的是我們送出去的欄位名，協議必須查得到
+    const hint = typeof current.hint === "string" ? current.hint : "";
+    const emitted = new Set(Object.keys(current));
+    for (const token of new Set(hint.match(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g) ?? [])) {
+      if (!emitted.has(token)) continue;
+      assert(
+        skill.includes(token),
+        `${taskType} 的 hint 叫代理看 ${token}，但 public/skill.md 沒有提到這個欄位——代理照協議查不到那是什麼`,
+      );
+    }
+  }
+});
+
+Deno.test("no_change 的 outcome：TS 的值、協議的表格、任務帶的說明要是同一組", async () => {
+  const skill = await Deno.readTextFile(SKILL_MD);
+  const hintKeys = Object.keys(NO_CHANGE_OUTCOMES_HINT).filter((k) => !k.startsWith("_"));
+  assertEquals(hintKeys.sort(), [...NO_CHANGE_OUTCOMES].sort(), "任務帶的說明少了某個 outcome，或多了一個 schema 不收的值");
+  for (const v of NO_CHANGE_OUTCOMES) {
+    assert(skill.includes("`" + v + "`"), `skill.md 沒有說明 outcome=${v} 是什麼意思`);
   }
 });
 
