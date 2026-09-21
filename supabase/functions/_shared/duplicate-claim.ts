@@ -26,7 +26,9 @@
 type Obj = Record<string, unknown>;
 
 /** 只有這些型別會被判為「同一個宣稱」；其餘一律各自成案 */
-export const DUPLICATE_ELIGIBLE_TYPES = ["candidacy", "correction", "removal", "policy_progress", "no_change", "merge_politician"] as const;
+// 2026-09-21 加 task_suggestion：同一筆政見的同一種缺陷，三個代理各提一次（陳素月 9b990687：efc818ad／cca5a5de／c6140cc3），
+// 三筆額度、三份 0 分的提議、互相稀釋投票池。接進這裡之後，第二個人提的自動變成第一筆的同意票。
+export const DUPLICATE_ELIGIBLE_TYPES = ["candidacy", "correction", "removal", "policy_progress", "no_change", "merge_politician", "task_suggestion"] as const;
 
 /** 宣稱指向的對象：查資料庫時用這個欄位過濾（payload->>field） */
 const TARGET_FIELD: Record<string, string> = {
@@ -36,6 +38,8 @@ const TARGET_FIELD: Record<string, string> = {
   policy_progress: "policy_id",
   no_change: "task_id",
   merge_politician: "keep_id",
+  // task_suggestion 的對象可能是政見或人物，兩個欄位擇一（claimTarget 裡處理）
+  task_suggestion: "target_policy_id",
 };
 
 /** 臺／台、全形空白、大小寫不算不同；值用同一套正規化再比 */
@@ -47,9 +51,11 @@ function norm(v: unknown): string {
 
 /** 這筆宣稱指向誰（查詢用）；拿不到對象就不做重複判定 */
 export function claimTarget(contributionType: string, payload: unknown): { field: string; value: string } | null {
-  const field = TARGET_FIELD[contributionType];
+  let field = TARGET_FIELD[contributionType];
   if (!field) return null;
   const p = (payload && typeof payload === "object" ? payload : {}) as Obj;
+  // 提議任務：指政見就用 target_policy_id，沒有就用 target_politician_id；兩個都沒有＝沒有對象，不併
+  if (contributionType === "task_suggestion" && !(typeof p.target_policy_id === "string" && p.target_policy_id.trim())) field = "target_politician_id";
   const raw = p[field];
   if (typeof raw === "string" && raw.trim()) return { field, value: raw.trim() };
   if (typeof raw === "number") return { field, value: String(raw) };
@@ -100,6 +106,10 @@ export function claimKey(contributionType: string, payload: unknown): string | n
     case "no_change":
       // 「查了，這個任務沒東西要改」——同一個任務就是同一個宣稱
       return head;
+    case "task_suggestion":
+      // 同一個對象、同一種缺陷＝同一個提議；標題與描述各寫各的不影響。
+      // 型別沒寫視為 other——同一個對象用 other 提兩次也是同一件事。
+      return `${head}|${norm(p.task_type ?? "other")}`;
     default:
       return null;
   }
