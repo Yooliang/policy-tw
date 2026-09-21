@@ -21,7 +21,7 @@ type SupabaseLike = any;
  */
 export const VERIFY_DAILY_LIMIT_PER_IP = 800;
 
-export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn): Promise<HandlerResult> {
+export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify"): Promise<HandlerResult> {
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -146,6 +146,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       // 身份鍵，同 contributions.actor_id
       actor_id: actor.actor_id,
       resolved_politician_id: input.resolved_politician_id ?? null,
+      // 從哪個端點進來的（2026-09-21）
+      via,
     })
     .select("id")
     .maybeSingle();

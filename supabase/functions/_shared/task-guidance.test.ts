@@ -1,7 +1,7 @@
 // 「這一種任務怎麼做」隨任務送出（2026-09-21 使用者：「它應該是領任務、回報，而不是自己去管理任務」）。
 // 這支守的是刪掉 skill.md 那份 5,049 字元的型別目錄之後，沒有任何一種任務變成沒人交代。
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildReportTemplate, DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, rowIdFromTaskId, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildNoChangeTemplate, buildReportTemplate, DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, rowIdFromTaskId, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { shapeTaskCurrent } from "./task-context.ts";
 
@@ -233,4 +233,20 @@ Deno.test("參選狀態的合法值要在骨架裡，不能只留在散文", () 
   for (const v of ["registered", "not_running", "qualified"]) {
     assert(status.includes(v), `合法值 ${v} 沒有出現在骨架裡`);
   }
+});
+
+// 2026-09-21 實測阻塞：代理真的查不到東西時，任務教它走 no_change、outcome 三個值
+// 也講清楚了，但骨架只示範 contribute 那一條，它猜成 {"kind":"no_change"} → 400。
+// 「查不到」正是我們最希望它敢回報的結果，不能卡在回報這一步。
+Deno.test("查不到東西也要有骨架，而且 no_change 是 contribution_type 不是 kind", () => {
+  const empty = {} as Parameters<typeof shapeTaskCurrent>[1];
+  const cur = shapeTaskCurrent("policy_missing", empty, { task_id: "auto:policy_missing:abc", target: {} });
+  const t = cur.report_template_no_change as Record<string, unknown>;
+  assert(t, "每一筆任務都要附「查不到」的骨架");
+  assertEquals(t.kind, "contribute", "kind 是 contribute——猜成 no_change 會被 400 擋");
+  assertEquals(t.contribution_type, "no_change");
+  const payload = t.payload as Record<string, unknown>;
+  assertEquals(payload.task_id, "auto:policy_missing:abc");
+  assert(String(payload.outcome).includes("unreachable"), "三個 outcome 都要列出來");
+  assert(Array.isArray(t.source_urls), "頂層 source_urls 一樣不能漏");
 });

@@ -10,7 +10,7 @@ import { fetchAllRows } from "./fetch-all.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildNoChangeTemplate, buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -110,6 +110,9 @@ export function shapeTaskCurrent(
     ...(hint ? { hint } : {}),
     ...(shape ? { payload_shape: shape } : {}),
     ...(template ? { report_template: template } : {}),
+    // 查不到東西那一條路也要有骨架：教了 outcome 三選一卻沒示範怎麼送，
+    // 代理會猜成 {"kind":"no_change"} 然後被 400 擋下（2026-09-21 實測）
+    ...(task ? { report_template_no_change: buildNoChangeTemplate(task.task_id) } : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
   };
 }

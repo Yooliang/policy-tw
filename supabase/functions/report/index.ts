@@ -36,11 +36,11 @@ Deno.serve(async (req) => {
     const kind = (body as Record<string, unknown>).kind;
 
     if (kind === "verify") {
-      const result = await handleVerify(supabase, body, ipHash);
+      const result = await handleVerify(supabase, body, ipHash, undefined, "report");
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "contribute") {
-      const result = await handleContribute(supabase, supabaseUrl, body, ipHash);
+      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report");
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {

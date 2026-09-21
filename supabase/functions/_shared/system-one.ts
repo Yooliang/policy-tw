@@ -15,7 +15,7 @@ export const JEV_MODEL = "typesafe/jev-1.13";
 export const MIN_PROBABILITY = 0.95;
 
 export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election"] as const;
-export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract"] as const;
+export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget"] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number];
 export type Question = (typeof QUESTIONS)[number];
 

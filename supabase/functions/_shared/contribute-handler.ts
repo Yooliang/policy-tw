@@ -98,7 +98,7 @@ function mergeNote(agentName: string, sourceUrls: readonly string[], note: strin
   return [head, src, own].filter(Boolean).join(" ").slice(0, 2000);
 }
 
-export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string, verifyFn: VerifyFn = handleVerify): Promise<HandlerResult> {
+export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string, verifyFn: VerifyFn = handleVerify, via = "contribute"): Promise<HandlerResult> {
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -209,6 +209,8 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       // 身份鍵：去重與歸戶看這個，agent_name 只給人看（docs/BLUEPRINT-agent-identity.md §3）
       actor_id: actor.actor_id,
       payload_hash: hash,
+      // 從哪個端點進來的：要收掉舊端點之前，得先看得到還有誰在用（2026-09-21）
+      via,
     }));
 
   let inserted: Array<{ id: string; payload_hash: string }> = [];
