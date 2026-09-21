@@ -10,7 +10,7 @@ import { fetchAllRows } from "./fetch-all.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildPayloadTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -88,18 +88,28 @@ export const NO_CHANGE_OUTCOMES_HINT = {
 } as const;
 
 /** 純函式：依 task_type 組 current（尾端統一補上 no_change 的 outcome 說明） */
-export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
+export function shapeTaskCurrent(
+  taskType: string,
+  data: TaskContextData,
+  task?: { task_id?: string | null; target?: unknown },
+): Obj {
   const inner = shapeTaskCurrentInner(taskType, data);
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   const hint = inner.hint ?? TASK_GUIDANCE[taskType];
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
-  const shape = PAYLOAD_SHAPE[SUGGESTED_TYPE[taskType] ?? ""];
+  const suggested = SUGGESTED_TYPE[taskType] ?? "";
+  const shape = PAYLOAD_SHAPE[suggested];
+  // 骨架把已知的 id 先填好。candidate_status_stale 要改 politician_elections 的某一列卻沒給
+  // 那一列的 id，代理只能猜複合鍵——那個 id 其實一直在 task_id 裡（2026-09-21 實測回報）。
+  const target = (task?.target && typeof task.target === "object" ? task.target : null) as Obj | null;
+  const template = task ? buildPayloadTemplate(taskType, suggested, target, task.task_id) : null;
   return {
     ...inner,
     ...(hint ? { hint } : {}),
     ...(shape ? { payload_shape: shape } : {}),
+    ...(template ? { payload_template: template } : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
   };
 }

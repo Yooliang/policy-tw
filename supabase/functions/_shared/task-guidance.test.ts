@@ -1,7 +1,7 @@
 // 「這一種任務怎麼做」隨任務送出（2026-09-21 使用者：「它應該是領任務、回報，而不是自己去管理任務」）。
 // 這支守的是刪掉 skill.md 那份 5,049 字元的型別目錄之後，沒有任何一種任務變成沒人交代。
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildPayloadTemplate, DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, rowIdFromTaskId, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { shapeTaskCurrent } from "./task-context.ts";
 
@@ -145,4 +145,47 @@ Deno.test("schema 的必填欄位，payload 形狀不可以漏講", async () => 
       assert(shape.includes(f), `${type} 的必填欄位 ${f} 沒有寫進 payload 形狀——代理照形狀送會被 400 擋下`);
     }
   }
+});
+
+// payload 骨架（2026-09-21）：兩隻代理獨立實測都說「講得清做什麼、講不清怎麼交」。
+Deno.test("candidate_status_stale 的骨架要填好 politician_elections 的 row id——代理不該猜複合鍵", () => {
+  const taskId = "auto:candidate_status_stale:38d16e30-26e3-4c50-9a71-4168116b5f1c";
+  const tpl = buildPayloadTemplate("candidate_status_stale", "correction", {
+    politician_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    election_id: 2026,
+    election_type: "縣市長",
+  }, taskId);
+  assert(tpl, "要有骨架");
+  assertEquals(tpl!.target_table, "politician_elections");
+  assertEquals(tpl!.target_id, "38d16e30-26e3-4c50-9a71-4168116b5f1c", "id 一直都在 task_id 裡，只是沒送出去");
+  assert(Array.isArray(tpl!.changes), "correction 要有 changes 陣列");
+});
+
+Deno.test("政見類的 correction 指到 policies，而且用 target 裡的 policy_id", () => {
+  const tpl = buildPayloadTemplate("policy_election_mismatch", "correction", { policy_id: "pol-1" }, "auto:policy_election_mismatch:pol-1");
+  assertEquals(tpl!.target_table, "policies");
+  assertEquals(tpl!.target_id, "pol-1");
+});
+
+Deno.test("no_change 的骨架帶著 task_id 與三選一的 outcome", () => {
+  const tpl = buildPayloadTemplate("legacy_audit", "no_change", {}, "auto:legacy_audit:abc");
+  assertEquals(tpl!.task_id, "auto:legacy_audit:abc");
+  assert(String(tpl!.outcome).includes("unreachable"), "三個值都要列出來，代理才知道有哪些路");
+});
+
+Deno.test("shapeTaskCurrent 帶了 task 才給骨架，沒帶就不給（不要送半成品）", () => {
+  const empty = {} as Parameters<typeof shapeTaskCurrent>[1];
+  assert(!("payload_template" in shapeTaskCurrent("candidate_status_stale", empty)));
+  const withTask = shapeTaskCurrent("candidate_status_stale", empty, {
+    task_id: "auto:candidate_status_stale:38d16e30-26e3-4c50-9a71-4168116b5f1c",
+    target: { politician_id: "p" },
+  });
+  assert("payload_template" in withTask, "帶了 task 就要給骨架");
+});
+
+Deno.test("rowIdFromTaskId 只認 auto:<型別>:<uuid>，手動任務不亂解", () => {
+  assertEquals(rowIdFromTaskId("auto:legacy_audit:38d16e30-26e3-4c50-9a71-4168116b5f1c"), "38d16e30-26e3-4c50-9a71-4168116b5f1c");
+  assertEquals(rowIdFromTaskId("auto:legacy_audit:not-a-uuid"), null);
+  assertEquals(rowIdFromTaskId("38d16e30-26e3-4c50-9a71-4168116b5f1c"), null, "手動任務的 id 不是這個格式");
+  assertEquals(rowIdFromTaskId(null), null);
 });

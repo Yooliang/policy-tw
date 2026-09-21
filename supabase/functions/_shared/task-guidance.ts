@@ -126,3 +126,100 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
 };
+
+/** correction／removal 這類要指定「改哪一列」的任務，target_table 是哪一張表。 */
+const TARGET_TABLE: Record<string, string> = {
+  candidate_status_stale: "politician_elections",
+  not_running_recheck: "politician_elections",
+  candidacy_source_missing: "politician_elections",
+  policy_source_missing: "policies",
+  policy_election_missing: "policies",
+  policy_election_mismatch: "policies",
+  policy_validity: "policies",
+  legacy_audit: "policies",
+  duplicate_policy: "policies",
+};
+
+/** 自動缺口的 task_id 是 `auto:<型別>:<那一列的 id>`，id 沒有另外放進 target 時從這裡取。 */
+export function rowIdFromTaskId(taskId: string | null | undefined): string | null {
+  const m = /^auto:[a-z_]+:([0-9a-f-]{36})$/i.exec(String(taskId ?? ""));
+  return m ? m[1] : null;
+}
+
+/**
+ * 回報用的 payload 骨架，已知的 id 先填好，隨任務送出（2026-09-21）。
+ *
+ * 兩隻跑任務的代理各自獨立實測後指向同一件事：任務講得清「做什麼」、講不清「怎麼交」，
+ * 而且有明講欄位名的型別信心 4/5、沒明講的全掉到 3/5。其中 candidate_status_stale
+ * 最具體——它要代理改 politician_elections 的某一列，卻沒給那一列的 id，
+ * 代理只能用 politician_id + election_id + election_type 猜複合鍵。
+ * 那個 id 其實一直在 task_id 裡（auto:candidate_status_stale:<pe.id>），只是沒送出去。
+ */
+export function buildPayloadTemplate(
+  taskType: string,
+  contributionType: string,
+  target: Record<string, unknown> | null | undefined,
+  taskId: string | null | undefined,
+): Record<string, unknown> | null {
+  const t = target ?? {};
+  const rowId = rowIdFromTaskId(taskId);
+  const table = TARGET_TABLE[taskType];
+  switch (contributionType) {
+    case "correction":
+      if (!table) return null;
+      return {
+        target_table: table,
+        target_id: (table === "policies" ? t.policy_id : t.politician_election_id) ?? rowId ?? "（這一列的 id）",
+        changes: [{ field: "（要改的欄位）", current_value: "（資料庫現值）", correct_value: "（正確值）" }],
+        reason: "（為什麼是這個值，附你查到的來源）",
+      };
+    case "removal":
+      if (!table) return null;
+      return {
+        target_table: table,
+        target_id: (table === "policies" ? t.policy_id : t.politician_election_id) ?? rowId ?? "（這一列的 id）",
+        reason: "（為什麼整筆不該存在）",
+      };
+    case "no_change":
+      return {
+        task_id: taskId ?? "（這筆任務的 task_id）",
+        outcome: "confirmed｜unreachable｜not_found",
+        finding: "（你查了什麼、查到什麼）",
+        checked_urls: ["（你實際打開過的網址）"],
+      };
+    case "candidacy":
+      return {
+        politician_id: t.politician_id ?? "（人物 id）",
+        election_id: t.election_id ?? "（選舉年份）",
+        election_type: t.election_type ?? "（選舉類型）",
+        region: t.region ?? "（縣市）",
+        candidate_status: "（registered／not_running／…）",
+      };
+    case "policy":
+      return {
+        politician_id: t.politician_id ?? "（人物 id）",
+        election_id: t.election_id ?? "（政見所屬的選舉年份）",
+        title: "（4–200 字）",
+        description: "（≥20 字）",
+        category: "（19 種之一，見 payload_shape）",
+        status: "（Campaign Pledge／Proposed／…）",
+      };
+    case "politician":
+      return {
+        politician_id: t.politician_id ?? "（人物 id）",
+        name: t.name ?? "（姓名）",
+        birth_year: "（西元四位數）",
+        current_position: "（現職）",
+        avatar_url: "（https 人像照網址）",
+      };
+    case "policy_progress":
+      return {
+        policy_id: t.policy_id ?? rowId ?? "（政見 id）",
+        status: "（In Progress／Achieved／Stalled／Failed）",
+        progress: "（進度說明）",
+        date: "（YYYY-MM-DD）",
+      };
+    default:
+      return null;
+  }
+}
