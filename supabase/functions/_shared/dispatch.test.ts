@@ -254,3 +254,20 @@ Deno.test("沒有在途資料時不擋任何任務；上限可調", () => {
   assertEquals(filterSaturatedTasks(tasks, new Map()).length, 2);
   assertEquals(filterSaturatedTasks(tasks, new Map([["t1", 1]]), 1).map((t) => t.task_id), ["t2"]);
 });
+
+Deno.test("比例的身份是來源 IP，不是代號：換代號不可以洗掉欠的驗證", async () => {
+  // 2026-09-21：這是全站唯一還在用 agent_name 當身份的地方。代號是自報的，
+  // 換一個新的就 tasks_done=0、做 3 筆驗證又能領任務；沿用舊代號的老實代理反而動不了。
+  // 額度、投票去重、驗證池都按來源 IP 算，比例要用同一把尺。
+  const src = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
+  const call = src.match(/chooseKind\([^)]*\)/);
+  assert(call, "找不到 chooseKind 的呼叫");
+  assert(
+    /ipVoteRes/.test(call![0]) && /ipContribRes/.test(call![0]),
+    `比例要吃按來源 IP 算的計數，現在是：${call![0]}`,
+  );
+  assert(
+    !/agent_name/.test(call![0]),
+    "比例不可以按代號算——換代號就能洗掉欠的驗證",
+  );
+});
