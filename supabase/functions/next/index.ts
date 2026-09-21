@@ -83,10 +83,13 @@ Deno.serve(async (req) => {
     // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
     const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL });
 
-    const [pendingRes, myVotesRes, myContribRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
+    // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
+    // 而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了
+    // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
+    // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
+    // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
+    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       pendingQuery,
-      supabase.from("contribution_votes").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
-      supabase.from("contributions").select("id", { count: "exact", head: true }).eq("agent_name", agentName).gte("created_at", todayStart.toISOString()),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at").eq("status", "open")
         // 派過的排到後面（2026-09-17：「任務自己要有個時間戳，派過就向後排」）：
@@ -129,7 +132,7 @@ Deno.serve(async (req) => {
       // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
       Promise.resolve({ data: [], error: null }),
     ]);
-    for (const r of [pendingRes, myVotesRes, myContribRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
+    for (const r of [pendingRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     // deno-lint-ignore no-explicit-any
@@ -231,7 +234,7 @@ Deno.serve(async (req) => {
       manual = filterAnsweredQuestionTasks(sortQuestionTasksBySupport(withStance), answeredQuestionIds, fullQuestionIds);
     }
 
-    const kind = chooseKind(totalPending, { verifies_done: myVotesRes.count ?? 0, tasks_done: myContribRes.count ?? 0 });
+    const kind = chooseKind(totalPending, { verifies_done: ipVoteRes.count ?? 0, tasks_done: ipContribRes.count ?? 0 });
     // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
     // 而 429 是在 POST /report 才發生——那時候查證的工都已經做完，白費。
     const quota = {
