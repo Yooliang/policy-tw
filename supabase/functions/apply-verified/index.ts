@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
 import { APPLY_MAX_RETRIES } from "../_shared/consensus.ts";
-import { backfillAdjudicationTasks } from "../_shared/adjudication.ts";
+import { } from "../_shared/adjudication.ts";
 
 /**
  * apply-verified — 掃地機（cron 每 10 分鐘）：
@@ -47,8 +47,11 @@ Deno.serve(async (req) => {
       const res = await autoApplyContribution(supabase, r.id, undefined, { retry: true });
       results.push({ contribution_id: r.id, kind: "retry", status: res.status, error: res.error, message: res.outcome?.message });
     }
-    // 補漏：disputed 但沒有 open 裁決任務的（例如投票路徑建任務失敗）
-    const backfill = await backfillAdjudicationTasks(supabase, limit);
+    // 裁決退場（2026-09-21 分數制，docs/PLAN-weighted-consensus.md §8.1）：不再補建裁決任務。
+    // 原本這裡會把「disputed 但沒有 open 裁決任務」的補回去——分數制上線那一刻 132 筆裁決任務
+    // 全部關閉，這段保險若還在，下一次掃就會把它們重新開回來。
+    // disputed 還有兩個非投票的來源（身份指認衝突、落庫連續失敗）沒搬家，那 6 筆先留著等安置。
+    const backfill = { scanned: 0, created: 0, retired: true };
     return json({ success: true, scanned: (verifiedRes.data?.length ?? 0) + (retryRes.data?.length ?? 0), retried: retryRes.data?.length ?? 0, adjudication_backfill: backfill, results });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
