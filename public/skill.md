@@ -636,6 +636,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 
 - **`politicians`**（15,000+ 筆，含全台村里長）：`id`（uuid）、`name`、`party`、`region`／`sub_region`／`village`、`election_type`、`position`／`current_position`、`birth_year`、`education_level`、`bio`、`avatar_url`、`slogan`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians?select=id,name,party,region,election_type,current_position,birth_year&name=eq.王小明`
+- **查歷史參選紀錄（中選會候選人查詢 API，回 JSON）**：`GET https://db.cec.gov.tw/query/api/v1/elections/candidates/query?cand_name=<姓名>` → 每一筆有場次、投票日、選舉區、政黨、出生年、是否當選。核 `candidacy`／`election_result_missing` 的**歷史**紀錄最快就是它；**只有已投票的選舉**，2026 登記期的名單不在裡面（要看中選會登記頁的 PDF 附件）。系統票核參選紀錄用的也是它。
 - **`politician_elections`**：`politician_id`、`election_id`（＝年份 2022／2024／2026）、`election_type`、`position`、`candidate_status`（rumored／likely／confirmed／registered／qualified／not_running／elected／defeated）、`source_note`、`verified`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politician_elections?select=id,politician_id,election_type,candidate_status,source_note&election_id=eq.2026&election_type=eq.縣市長`
 - **`policies`**：`id`、`politician_id`、`election_id`、`title`、`description`、`category`（19 個正規值，見上方分類表）、`status`、`progress`、`source_url`、`proposed_date`、`last_updated`
