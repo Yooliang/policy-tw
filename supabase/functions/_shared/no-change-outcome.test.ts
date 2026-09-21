@@ -91,7 +91,18 @@ Deno.test("legacy_audit：沒確認的回報不可以回 policy_id（那是第�
 });
 
 Deno.test("SQL：applied_policy_id 的排除只認新增政見那一種貢獻", async () => {
-  const sql = await Deno.readTextFile(new URL("../../migrations/20260921000005_no_change_outcome.sql", import.meta.url));
+  // 掃目錄挑最新一支定義這個函式的 migration，不寫死檔名——寫死的話，之後有人再改一次
+  // 這支函式，這裡會繼續守著舊檔（而且 2026-09-21 這支才剛因為跟別人撞號而改過編號）。
+  const dir = new URL("../../migrations/", import.meta.url);
+  const names: string[] = [];
+  for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  names.sort();
+  let sql = "";
+  for (const name of names.reverse()) {
+    const text = await Deno.readTextFile(new URL(name, dir));
+    if (text.includes("FUNCTION contribution_auto_tasks_legacy(")) { sql = text; break; }
+  }
+  assert(sql, "沒有任何 migration 定義 contribution_auto_tasks_legacy");
   const fn = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_legacy("));
   assert(
     /applied_policy_id = pl\.id AND c\.contribution_type = 'policy'/.test(fn),
