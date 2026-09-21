@@ -455,7 +455,16 @@ export interface VerifyContextData {
   adjudicate_current?: Obj | null;
   /** no_change：這筆回報的是哪個任務（手動任務的標題與敘述；auto 任務拆出型別與目標） */
   task?: Obj | null;
+  /** 派工池（contribution_verify_pool）回的目前分數／目標分數（2026-09-21 票數→分數）；兩者都是數字才附 scoring，缺一就不附（呼叫端沒傳，或池子還沒上這個欄位） */
+  score?: number | null;
+  target_score?: number | null;
 }
+
+/** 一票最多能加幾分、怎麼拿到滿分：給 shapeVerifyCurrent 的 scoring 區塊用 */
+const VOTE_SCORE_GUIDE = {
+  max: 2,
+  how: "找到另一個獨立來源並放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1",
+} as const;
 
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
@@ -463,8 +472,18 @@ const IDENTITY_HINT = {
   ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；兩票指不同（含 new 與某人混）會轉 disputed 進裁決；都沒指認也會轉 disputed",
 } as const;
 
-/** 純函式：依 contribution_type 組驗證用的 current */
+/**
+ * 純函式：依 contribution_type 組驗證用的 current。
+ * scoring 區塊只在呼叫端傳了 score／target_score 兩個數字才附上（見 VerifyContextData 的說明）：
+ * 派工池還沒上這兩欄、或這條路徑沒有分數概念（如 no_change）時，缺一律不附，不要印出 undefined／null 的分數騙代理。
+ */
 export function shapeVerifyCurrent(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
+  const inner = shapeVerifyCurrentInner(contributionType, payload, data);
+  if (typeof data.score !== "number" || typeof data.target_score !== "number") return inner;
+  return { ...inner, scoring: { target_score: data.target_score, current_score: data.score, your_vote_could_be: VOTE_SCORE_GUIDE } };
+}
+
+function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
   switch (contributionType) {
     case "politician":
     case "candidacy": {

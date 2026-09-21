@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data, error } = await supabase
       .from("contributions")
-      .select("id, contribution_type, payload, source_urls, status, agree_count, disagree_count, unsure_count, review_notes, reviewed_at, applied_at, applied_politician_id, applied_policy_id, created_at, effective_agree")
+      .select("id, contribution_type, payload, source_urls, status, score, agree_count, disagree_count, unsure_count, review_notes, reviewed_at, applied_at, applied_politician_id, applied_policy_id, created_at, effective_agree")
       .eq("id", id)
       .maybeSingle();
     if (error) throw new Error(`contributions lookup: ${error.message}`);
@@ -43,12 +43,16 @@ Deno.serve(async (req) => {
     if (editError) throw new Error(`edit_history count: ${editError.message}`);
 
     const { payload, source_urls: _sourceUrls, effective_agree: _eff, ...rest } = data;
+    // 有效門檻（系統票折進去；2026-09-20）；分數（2026-09-21 票數→分數）沿用同一個目標值
+    const need = effectiveOrRequired(data);
     return json({
       success: true,
       contribution: {
         ...rest,
-        // 有效門檻（系統票折進去；2026-09-20）
-        required_agree: effectiveOrRequired(data),
+        required_agree: need,
+        // rest 已經帶著 score（select 有撈）；這裡只補 target_score／score_needed 兩個衍生值
+        target_score: need,
+        score_needed: data.status === "pending" ? Math.max(need - (data.score ?? 0), 0) : 0,
         edit_history_count: editCount ?? 0,
         ...(data.applied_politician_id ? { politician_url: `https://policy-tw.web.app/politician/${data.applied_politician_id}` } : {}),
         ...(data.applied_policy_id ? { policy_url: `https://policy-tw.web.app/policy/${data.applied_policy_id}` } : {}),
