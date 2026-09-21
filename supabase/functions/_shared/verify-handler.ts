@@ -5,6 +5,7 @@
  */
 
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, voteWeight, weightReason } from "./consensus.ts";
@@ -32,6 +33,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     return { status: 400, body: { success: false, error: encoding ? "encoding_invalid" : "validation_failed", ...(encoding ? { message: ENCODING_INVALID_MESSAGE } : {}), errors: v.errors } };
   }
   const input = v.input;
+  // 投錯了要改（2026-09-21 #10）：提交者有 withdraw、投票者原本沒有出口——而 candidacy 的 agree 票挾帶會被套用的
+  // 指認，投錯代價高。同一筆再送一次帶 revise:true，就覆寫自己那張票（同 IP 那張），計分不變一票。
+  const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
@@ -86,17 +90,23 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   const { data: existing, error: eError } = await supabase
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
+  let revising: { id: string } | null = null;
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    return {
-      status: 409,
-      body: {
-        success: false,
-        error: "already_voted",
-        // 2026-09-21：代理做完整套查證才吃到這個錯，而它不知道自己沒做錯——
-        // 同一台機器上有別的代理在跑，在它回報前投掉了同一筆。講清楚，不然它會以為是自己的問題。
-        message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票）。如果你剛做完查證才看到這個，那是同一台機器上另一個代理在你查證期間投掉了它——**你的工不算白做，也不是你做錯**，請直接領下一筆。",
-      },
-    };
+    const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
+      .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
+    if (!revise || !mine) {
+      return {
+        status: 409,
+        body: {
+          success: false,
+          error: "already_voted",
+          // 2026-09-21：代理做完整套查證才吃到這個錯，而它不知道自己沒做錯——
+          // 同一台機器上有別的代理在跑，在它回報前投掉了同一筆。講清楚，不然它會以為是自己的問題。
+          message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票）。如果你剛做完查證才看到這個，那是同一台機器上另一個代理在你查證期間投掉了它——**你的工不算白做，也不是你做錯**，請直接領下一筆。**如果是你自己投錯了要改**：同一筆再送一次並帶 `revise: true`，會覆寫你那張票。",
+        },
+      };
+    }
+    revising = { id: mine.id };
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
@@ -116,7 +126,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   // 第二層：跟自己上一票一字不差（2026-09-21）。事故裡代理自承 vote 5–33 完全沒開網頁，
   // 那 29 票的 note 全是同一句；而它真的查過的前 6 票，每一票的 note 都不一樣。
   // 訊號乾淨，而且不要求代理多做任何事——兩次查證本來就不會產生一模一樣的描述。
-  if (input.verdict === "agree" && input.note) {
+  if (input.verdict === "agree" && input.note && !revising) {
     const { data: prev } = await supabase.from("contribution_votes")
       .select("note").eq("verifier_ip_hash", ipHash)
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -158,23 +168,27 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     } catch { /* 查不到就當不是 */ }
   }
 
-  const { data: vote, error: insertError } = await supabase
+  const voteRow = {
+    contribution_id: contribution.id,
+    verdict: finalVerdict,
+    evidence_url: input.evidence_url ?? null,
+    judge_backed: judgeBacked,
+    note: finalNote,
+    agent_name: input.agent_name,
+    agent_tool: input.agent_tool ?? null,
+    verifier_ip_hash: ipHash,
+    // 身份鍵，同 contributions.actor_id
+    actor_id: actor.actor_id,
+    resolved_politician_id: input.resolved_politician_id ?? null,
+    // 從哪個端點進來的（2026-09-21）；修訂的標成 <via>:revise，稽核分得出
+    via: revising ? `${via}:revise` : via,
+  };
+  // 修訂＝UPDATE 自己那張；BEFORE 觸發器重算 weight、AFTER 觸發器重算分數，跟新投一張走同一條路
+  const { data: vote, error: insertError } = revising
+    ? await supabase.from("contribution_votes").update(voteRow).eq("id", revising.id).select("id").maybeSingle()
+    : await supabase
     .from("contribution_votes")
-    .insert({
-      contribution_id: contribution.id,
-      verdict: finalVerdict,
-      evidence_url: input.evidence_url ?? null,
-      judge_backed: judgeBacked,
-      note: finalNote,
-      agent_name: input.agent_name,
-      agent_tool: input.agent_tool ?? null,
-      verifier_ip_hash: ipHash,
-      // 身份鍵，同 contributions.actor_id
-      actor_id: actor.actor_id,
-      resolved_politician_id: input.resolved_politician_id ?? null,
-      // 從哪個端點進來的（2026-09-21）
-      via,
-    })
+    .insert(voteRow)
     .select("id")
     .maybeSingle();
   if (insertError) {
@@ -207,9 +221,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     status: 201,
     body: {
       success: true,
-      vote_id: vote?.id,
+      vote_id: vote?.id ?? revising?.id,
       contribution_id: contribution.id,
       verdict: finalVerdict,
+      ...(revising ? { revised: true, note_revise: "已覆寫你原本那張票；分數依新的 verdict 重算，仍只算一票" } : {}),
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       weight,
       weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),

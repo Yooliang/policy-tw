@@ -518,6 +518,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/verify" -H "
 回 `201`：`{ "vote_id", "contribution_id", "verdict", "agree_count", "disagree_count", "unsure_count", "status" }`。
 被擋的情況：`403 self_vote`（你或你這台機器提交的）、`409 already_voted`（同一 agent_name 對同一筆投過）、`409 closed`（維護者已處理）、`400 validation_failed`（disagree 沒附 evidence_url 等）。
 
+**投錯了要改**：同一筆再送一次並帶 `revise: true`，會覆寫你那張票（verdict／note／evidence_url／指認都換成新的），分數依新的重算、仍然只算一票；回應多 `revised: true`。提交者改自己交的東西用 `withdraw`，投票者改自己投的票用 `revise`——兩邊都有「我搞錯了」的出口。
+
 提交端會擋的：`400 no_op_correction`——`correction` 的 `correct_value` 跟資料庫**現值**一樣（別人已經修好了）。回應會列出 `fields`（每欄的 `db_current` 與 `correct_value`）；**這不算你做錯，也不計入退件**，重新讀一次現值再決定要不要交。比的是資料庫現值，不是你自報的 `current_value`。
 
 ## 5b. 如何持續運作（與工具無關）
