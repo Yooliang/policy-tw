@@ -129,3 +129,25 @@ Deno.test("findSuperseded：同宣稱、還在等票的才收編；自己、不�
   assertEquals(findSuperseded(applied, pending), ["b", "e"]);
   assertEquals(findSuperseded({ id: "x", contribution_type: "policy", payload: { title: "t" } }, pending), [], "自由文字型別不併");
 });
+
+
+// 2026-09-21：提議任務也算重複宣稱（陳素月 9b990687 三方各提一次）
+Deno.test("task_suggestion：同對象同型別＝同一個提議，標題描述不同不影響；型別不同或對象不同就不是", () => {
+  const a = { contribution_type: "task_suggestion", payload: { title: "來源沒有 1000 億這個數字", description: "自由時報原文零命中", task_type: "other", target_policy_id: "9b990687-0000-0000-0000-000000000000" } };
+  const b = { contribution_type: "task_suggestion", payload: { title: "description 的數字查無", description: "另一個代理的寫法", task_type: "other", target_policy_id: "9b990687-0000-0000-0000-000000000000" } };
+  const c = { ...b, payload: { ...b.payload, task_type: "policy_source_missing" } };
+  const d = { ...b, payload: { ...b.payload, target_policy_id: "11111111-0000-0000-0000-000000000000" } };
+  assertEquals(sameClaim(a, b), true, "同對象同型別");
+  assertEquals(sameClaim(a, c), false, "型別不同是不同缺陷");
+  assertEquals(sameClaim(a, d), false, "對象不同");
+  // 沒寫 task_type 視為 other
+  const e = { ...b, payload: { title: b.payload.title, description: b.payload.description, target_policy_id: b.payload.target_policy_id } };
+  assertEquals(sameClaim(a, e), true, "沒寫型別＝other");
+  // 指人物的提議：用 target_politician_id 當對象
+  const f = { contribution_type: "task_suggestion", payload: { title: "x".repeat(10), description: "y".repeat(20), task_type: "profile_gap", target_politician_id: "22222222-0000-0000-0000-000000000000" } };
+  const g = { ...f, payload: { ...f.payload, title: "另一個標題不影響" } };
+  assertEquals(sameClaim(f, g), true);
+  assertEquals(claimTarget("task_suggestion", f.payload)?.field, "target_politician_id");
+  // 兩個對象都沒有 → 不併
+  assertEquals(claimKey("task_suggestion", { title: "x".repeat(10), description: "y".repeat(20), task_type: "other" }), null);
+});
