@@ -330,3 +330,45 @@ export function planRetry(previousRetryCount: number, now: number = Date.now()):
   if (retry_count >= APPLY_MAX_RETRIES) return { give_up: true, retry_count, next_retry_at: null };
   return { give_up: false, retry_count, next_retry_at: new Date(now + APPLY_RETRY_DELAY_MINUTES * 60 * 1000).toISOString() };
 }
+
+// ============================================================
+// 分數制（2026-09-21）：這裡是 SQL contribution_vote_weight()／contribution_apply_consensus() 的鏡像，
+// 給回應文字與測試用。真正計分的是 DB 觸發器；兩邊要一致，守門測試盯著。
+// ============================================================
+
+export type VoteWeight = -2 | -1 | 0 | 1 | 2;
+
+/** 一票值幾分：agree +1（Jev 核過來源 +2）、disagree −1（Jev 核過反證 −2）、unsure 0 */
+export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
+  if (verdict === "agree") return judgeBacked ? 2 : 1;
+  if (verdict === "disagree") return judgeBacked ? -2 : -1;
+  return 0;
+}
+
+/** 告訴代理它這一票為什麼值這個分數——看得見才學得會，學不會就沒有人會去找第二來源 */
+export function weightReason(verdict: string, judgeBacked: boolean): string {
+  if (verdict === "agree") {
+    return judgeBacked
+      ? "你附的 evidence_url 是獨立的第二來源，而且系統核過它直接支持這筆宣稱"
+      : "你打開了提交者的來源並寫出核對內容；想拿 +2，附一個不同網域的獨立來源到 evidence_url，並先用 judge 讓系統核過";
+  }
+  if (verdict === "disagree") {
+    return judgeBacked
+      ? "你附的反證系統核過，直接與這筆宣稱矛盾"
+      : "反對且理由具體；附上系統核過的反證（evidence_url）才是 −2";
+  }
+  return "存疑不加減分；它記錄你看過，但不推動這筆往任何方向走";
+}
+
+/** 高風險型別：分數不得由單一來源 IP 湊足 */
+export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
+
+/** 總分 → 狀態。只在 pending／verified／disputed 之間轉；其餘狀態由維護者或系統決定。 */
+export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string }): string {
+  const { score, target, distinctIps, contributionType, current } = input;
+  if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
+  if (score <= -target) return "rejected";
+  const needTwoIps = (SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType);
+  if (score >= target && (!needTwoIps || distinctIps >= 2)) return "verified";
+  return "pending";
+}
