@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -175,16 +175,6 @@ Deno.serve(async (req) => {
       // 一輪做不完由下一輪 cron 接（候選查詢冪等）；cron 的 limit 也從 200 降到 60。
       const BUDGET_MS = 40_000;
       const CONCURRENCY = 2;
-      /** 更正沒帶對象名稱，頁面無從對起：用 target_table／target_id 把人物名或政見標題查出來 */
-      const subjectNameOf = async (payload: Record<string, unknown>): Promise<string | null> => {
-        const table = payload.target_table, id = payload.target_id;
-        if (typeof table !== "string" || typeof id !== "string") return null;
-        const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
-        if (!col) return null;
-        const { data } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
-        const row = data as Record<string, unknown> | null;
-        return row && typeof row[col] === "string" ? row[col] as string : null;
-      };
       /** merge_politician：來源是那兩筆資料本身。問 Jev 同一人（配對已判過就直接用），映成這筆貢獻的 source_support */
       const onePair = async (c: Cand): Promise<void> => {
         const keep = String(c.payload.keep_id ?? ""), remove = String(c.payload.remove_id ?? "");
@@ -225,12 +215,11 @@ Deno.serve(async (req) => {
       const one = async (c: Cand): Promise<void> => {
         if (c.contribution_type === "merge_politician") return await onePair(c);
         const payload = { ...(c.payload ?? {}) };
-        if (c.contribution_type === "correction") {
-          const subject = await subjectNameOf(payload);
-          if (subject) payload.subject_name = subject;
-        }
+        // payload 沒帶名字（correction／candidacy／policy_progress）就回查，不分型別（2026-09-22，見 subjectRef）
+        const subjects = await subjectNamesOf(supabase, payload);
+        if (subjects[0]) payload.subject_name = subjects[0];
         const claim = claimOf(c.contribution_type, payload);
-        const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((v) => typeof v === "string" ? v : null);
+        const names = [payload.name, payload.politician_name, payload.title, ...subjects].map((v) => typeof v === "string" ? v : null);
         // 參選紀錄先問中選會的結構化資料（2026-09-20：系統不解析 PDF／Excel）；查不到（2026 登記期）才看提交者附的網頁
         const cec = c.contribution_type === "candidacy" && typeof payload.name === "string" && typeof payload.election_id === "number"
           ? await cecCandidacyPage(payload.name, payload.election_id)
@@ -458,17 +447,12 @@ Deno.serve(async (req) => {
       }
 
       const payload = { ...(c.payload ?? {}) } as Record<string, unknown>;
-      if (c.contribution_type === "correction") {
-        const table = payload.target_table, id = payload.target_id;
-        const col = table === "politicians" ? "name" : table === "policies" ? "title" : null;
-        if (col && typeof table === "string" && typeof id === "string") {
-          const { data: subj } = await supabase.from(table).select(col).eq("id", id).maybeSingle();
-          const row = subj as Record<string, unknown> | null;
-          if (row && typeof row[col] === "string") payload.subject_name = row[col];
-        }
-      }
+      // 2026-09-22 candlefish 第二次探測：原本只有 correction 回查主角，candidacy／policy_progress 的 payload 沒有 name
+      // → 主角名單空 → 每一頁都棄權。改成不分型別回查（見 subjectRef）。
+      const subjects = await subjectNamesOf(supabase, payload);
+      if (subjects[0]) payload.subject_name = subjects[0];
       const claim = claimOf(c.contribution_type, payload);
-      const names = [payload.name, payload.politician_name, payload.title, payload.subject_name].map((x) => typeof x === "string" ? x : null);
+      const names = [payload.name, payload.politician_name, payload.title, ...subjects].map((x) => typeof x === "string" ? x : null);
       const page = await fetchSource(targetUrl);
       if (page.kind === "pdf") {
         return json({ success: false, error: "unsupported_source", message: "系統不解析 PDF／試算表（只讀網頁）。請找網頁版的來源；參選紀錄可用中選會資料庫的查詢網址（db.cec.gov.tw/query/api/v1/elections/candidates/query?cand_name=姓名）" }, 422);
@@ -480,9 +464,13 @@ Deno.serve(async (req) => {
         await insertRecords(supabase, [{
           subject_type: "contribution", subject_id: c.id, question: "second_source",
           choice: "cannot_tell", probability: 0, confidence: null, probabilities: null,
-          model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: targetUrl, text: "", note: "主角名字不在文本裡" } }, cost_usd: 0, requester_ip_hash: requester,
+          // 棄權也要留抓取麵包屑（raw｜archive｜text）跟找過哪些名字，不然事後分不出「頁抓不到」與「名字對不上」
+          model: "policy-tw/fetch-only-00000000", state: { claim, page: { url: targetUrl, text: "", note: `主角名字不在文本裡（找：${names.filter(Boolean).join("／") || "沒有名字可找"}）| ${page.note}` } }, cost_usd: 0, requester_ip_hash: requester,
         }]);
-        return json({ success: true, contribution_id: c.id, url: targetUrl, verdict: "cannot_tell", probability: 0, counts: false, fields: {}, min_probability: MIN_PROBABILITY, hint: "這一頁沒提到主角（名字不在正文裡）：換一個真的講到這個人的來源；不要拿這頁投 disagree" });
+        const hint = names.some(Boolean)
+          ? "這一頁沒提到主角（名字不在正文裡）：換一個真的講到這個人的來源；不要拿這頁投 disagree"
+          : "這筆貢獻查不出主角名字（payload 沒有 name、也回查不到對象），系統無法核；請人工核";
+        return json({ success: true, contribution_id: c.id, url: targetUrl, verdict: "cannot_tell", probability: 0, counts: false, fields: {}, min_probability: MIN_PROBABILITY, subjects: names.filter(Boolean), hint });
       }
       // 轉載不是第二來源（審查建議 7）：跟系統票當時存下來的正文比，太像就退件
       {
