@@ -71,7 +71,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   // 派發即綁定：只收「/next 派給你的那一筆」。2026-09-21 使用者裁示——
   // 代理自己挑題目是派發的問題，不是投票的問題，所以執行點在這裡而不是在權重上補丁。
-  {
+  // 例外：via "merge"（重複提交被系統配對成同意票）——那不是代理挑的題目，是它獨立查證得到同一宣稱。
+  // 這個例外有測試看著（verify-dispatch.test）：下次誰再加一道閘，不能再安靜地把併票關掉。
+  if (via !== "merge") {
     const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
       .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).maybeSingle();
     if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);

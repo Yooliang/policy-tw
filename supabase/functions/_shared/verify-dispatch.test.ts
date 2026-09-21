@@ -65,3 +65,13 @@ Deno.test("被派到了就照常收，而且票要真的寫進去", async () => 
   assert(res.status < 400, `被派到的票不該被擋（實際 ${res.status}：${JSON.stringify(res.body).slice(0, 200)}）`);
   assert(inserted.some((r) => r.table === "contribution_votes"), "票要寫進 contribution_votes");
 });
+
+
+// 2026-09-21：派發閘上線後把「重複提交＝同意票」安靜關了 10 小時——併票那一票不是代理挑的題目，閘要放行。
+Deno.test("via merge（重複提交配對成的票）沒被派發也要收——派發閘不得擋下併票", async () => {
+  const { client, inserted } = fake({ dispatched: false });
+  const res = await handleVerify(client, body, MINE, undefined, "merge");
+  assert(res.status < 400, `併票不該被派發閘擋（實際 ${res.status}：${JSON.stringify(res.body).slice(0, 200)}）`);
+  assert(inserted.some((r) => r.table === "contribution_votes"), "票要寫進 contribution_votes");
+  assertEquals(inserted.find((r) => r.table === "contribution_votes")?.via, "merge");
+});

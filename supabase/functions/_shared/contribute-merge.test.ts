@@ -49,10 +49,13 @@ const ITEM = {
 Deno.test("同一宣稱、不同代理 → 不建新的一筆，改投同意票", async () => {
   const { api, inserted } = fakeSupabase();
   const votes: Array<Record<string, unknown>> = [];
-  const res = await handleContribute(api, "https://x", ITEM, "ip-me", (_s, body) => {
+  const vias: Array<string | undefined> = [];
+  const res = await handleContribute(api, "https://x", ITEM, "ip-me", (_s, body, _ip, _apply, via) => {
     votes.push(body as Record<string, unknown>);
+    vias.push(via);
     return Promise.resolve({ status: 201, body: { agree_count: 2, required_agree: 2, status: "applied" } });
   });
+  assertEquals(vias, ["merge"], "併票要標 via merge，派發閘才會放行（2026-09-21 被閘關了 10 小時的教訓）");
 
   assertEquals(res.status, 201);
   assertEquals(inserted.length, 0, "不該再插一筆新的貢獻");
