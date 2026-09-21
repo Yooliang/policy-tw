@@ -321,112 +321,76 @@ export function pickBySeed<T>(list: readonly T[], seed: string): T | null {
 }
 
 // ============================================================
-// 單一派工佇列（2026-09-21）
+// 單一派工佇列：一個時間軸，沒有第二個維度（使用者 2026-09-21）
 //
-// 原本 /next 有兩套任務來源、兩套排序，而且程式無條件讓手動任務贏：
-//   if (freeManual.length > 0) { 派手動 } else { 叫 contribution_auto_tasks }
-// 裁決任務就是手動的、有 86 筆，所以自動缺口的優先序永遠輪不到。為了讓 2026 縣市長
-// 排最前，前一版又加了 mayorFirst 特例去壓手動——用一個特例壓另一個特例。
+// 使用者：
+//   「像裁決在被建立的時候，就應該使用最舊的時間排入任務裡，這樣它就會被優先派發
+//     出去。新的任務出來（比如說明確定義新缺口出來的那些任務），用的都是現在的
+//     時間，所以會被排在比較後面…加進任務佇列裡面，就有一個參數決定它要放在最
+//     前面還是最後面。最前面就是最舊的，最舊的那一些會被最先領走。」
 //
-// 使用者 2026-09-21 的裁示：
-//   「手動任務那個一開始就做錯了。當一個手動任務被建立的時候，它應該被排在最前面，
-//     而不是整個手動任務的列表都卡在最前面。任務一建立它就是最快會被進行的，
-//     之後就照著流程走。」
-//
-// 所以兩邊排進同一個比較器：先比層級，同層比「最久沒派」（沒派過的算最久）。
-//
-// ------------------------------------------------------------
-// 覆蓋率優先（使用者 2026-09-21，這一段推翻了本檔的第一版）
-//
-// 第一版給裁決與訪客觸發各留了一層，理由是「86 筆裁決會排在 926 筆沒派過的缺口
-// 後面、要好幾週，等於餓死裁決線」。那個數字是真的，結論是錯的。使用者：
-//
+// 而且要這樣排，理由是覆蓋率：
 //   「我們要的是盡可能覆蓋任務數量，而不是把一個任務做到完成，所以『領完就走』
 //     這件事情是優先的。輪了 900 次之後，我們就有可能出現 300 筆上線的資料；
 //     可是你如果把一筆複雜的任務卡在前面，900 筆過後可能只有 50 筆上線資料。」
 //
-// 裁決正是最貴、最可能做不完的那種工作。讓它插在 926 筆便宜的補資料前面，就是
-// 「一筆複雜任務卡在前面」的實例——我原本以為在保護它，其實是在壓低整體產出。
+// 所以：派出去就蓋成 now() 回到隊尾。簡單的當場結案離開池子，複雜的自然被推到
+// 下一輪、下下輪，不會卡住前面。
 //
-// 所以只剩兩層：使用者明確指定要最先做的（2026 縣市長），以及其餘全部。
-// 其餘那層裡不分手動自動、不分裁決與缺口，一律照「最久沒派」輪，派出去就蓋章
-// 回到隊尾——簡單的當場結案離開池子，複雜的自然被推到下一輪。
+// 這一版之前試過兩種都錯：
+//   1. 用 `last_dispatched_at ASC NULLS FIRST`——NULL 等於無限舊，1,168 筆缺口
+//      全部並列最前，實際順序由 task_id 字典序決定，是隨機不是設計。
+//   2. 再加一個「層級」維度去壓它們（縣市長 0／1、裁決 2、訪客 3、其餘 4）——
+//      裁決拿到永久特權，而裁決正是最貴、最可能做不完的工作，直接違反覆蓋率。
+// 現在只有一個鍵：queue_at。想排最前就給它 1980，想排最後就給它現在。
 // ============================================================
 
-/** 2026 縣市長的基本資料（task_priority_tier 回 0） */
-export const TIER_MAYOR_PROFILE = 0;
-/** 2026 縣市長的政見（task_priority_tier 回 1） */
-export const TIER_MAYOR_POLICY = 1;
-/**
- * 其餘全部同一池——手動的、裁決、訪客觸發、所有自動缺口，一律平等。
- *
- * 2026-09-21 第二版：原本裁決（2）與訪客觸發（3）各有一層，那是錯的，理由見上面
- * 「覆蓋率優先」那段。這個常數留成 2 而不是 4，是因為它現在真的只是第三層。
- */
-export const TIER_REST = 2;
-
-export interface QueueKey {
-  tier: number;
-  /** 沒派過是 null，排在所有派過的前面 */
-  lastDispatchedAt: string | null;
-}
-
-/** a 是否該排在 b 前面。先比層，同層比最久沒派（null＝沒派過＝最久）。 */
-export function queueKeyBefore(a: QueueKey, b: QueueKey): boolean {
-  if (a.tier !== b.tier) return a.tier < b.tier;
-  if (a.lastDispatchedAt === b.lastDispatchedAt) return false;
-  if (a.lastDispatchedAt === null) return true;
-  if (b.lastDispatchedAt === null) return false;
-  return a.lastDispatchedAt < b.lastDispatchedAt;
-}
+/** 想排在最前面就用這個時間（使用者指定：「調到 1980 年這樣子好不好」） */
+export const QUEUE_FRONT = "1980-01-01T00:00:00.000Z";
 
 /**
- * 手動任務一律落在共同池。
+ * 這些手動任務是「有人明確要求要做的」，進佇列就排最前：
+ * 維護者手建的、爭議裁決、訪客按按鈕要求的。
+ * 派出去一次之後就蓋成 now()、回到隊尾——它們拿到的是一次立刻被領走的機會，
+ * 不是永久特權。這就是使用者說的「裁決一出來就會被領走做完，然後繼續跑我們
+ * 原本缺口的任務」。
  *
- * 參數留著（呼叫端還是傳 source 進來）是為了讓「曾經想用 source 分層、後來否決了」
- * 這件事在型別上留下痕跡——下一個想加層的人會先看到這段註解。
+ * 不在這裡面的（suggested）屬於累積下來的待辦，照進佇列的時間排。
  */
-export function manualTaskTier(_source: string | null | undefined): number {
-  return TIER_REST;
-}
+const FRONT_SOURCES = new Set(["manual", "auto_dispute", "web_request"]);
 
-/** 自動缺口的層級：task_priority_tier 只有 0／1 有意義（縣市長），其餘一律進共同池。 */
-export function autoTaskTier(priorityTier: unknown): number {
-  return priorityTier === TIER_MAYOR_PROFILE || priorityTier === TIER_MAYOR_POLICY
-    ? (priorityTier as number)
-    : TIER_REST;
-}
-
-export interface ManualQueueTask {
+export interface QueuedTask {
   source?: string | null;
   last_dispatched_at?: string | null;
+  created_at?: string | null;
 }
 
 /**
- * 手動任務裡最該派的一筆，用的是跟自動缺口同一把尺。
- *
- * 不是嚴格取第一名，而是排序後在前 MANUAL_PICK_WINDOW 筆裡用 seed 挑——沿用
- * pickManualTask 原本的防撞設計（merge-queue 2026-09-21 指出的）：兩個代理同時打
- * /next 時，雙方都在對方寫入認領之前就撈完候選了，嚴格取第一名會讓它們固定撞同一筆。
- * 認領排除擋得住大部分情況，但擋不住這個競賽窗口。
+ * 手動任務在佇列裡的時間。
+ * 派過就用派出的時間（隊尾）；沒派過的看它是不是「有人明確要求」——是就 1980，
+ * 不是就用它進佇列的時間（created_at）。
  */
-export function pickQueuedManual<T extends ManualQueueTask>(tasks: readonly T[], seed: string): T | null {
+export function manualQueueAt(task: QueuedTask): string {
+  if (task.last_dispatched_at) return task.last_dispatched_at;
+  if (FRONT_SOURCES.has(task.source ?? "")) return QUEUE_FRONT;
+  return task.created_at ?? QUEUE_FRONT;
+}
+
+/**
+ * 手動任務裡最該派的一筆。
+ *
+ * 不是嚴格取第一名，而是在「並列第一」之間用 seed 挑——兩個代理同時打 /next 時，
+ * 雙方都在對方寫入認領之前就撈完候選了，嚴格取第一名會讓它們固定撞同一筆
+ * （merge-queue 2026-09-21 指出；認領排除擋不住這個競賽窗口）。
+ * 只在並列時散開，是因為唯一一筆剛建立的任務必須每次都被派出去，不能變成機率。
+ */
+export function pickQueuedManual<T extends QueuedTask>(tasks: readonly T[], seed: string): T | null {
   if (tasks.length === 0) return null;
   const sorted = [...tasks].sort((a, b) => {
-    const ka: QueueKey = { tier: manualTaskTier(a.source), lastDispatchedAt: a.last_dispatched_at ?? null };
-    const kb: QueueKey = { tier: manualTaskTier(b.source), lastDispatchedAt: b.last_dispatched_at ?? null };
-    if (queueKeyBefore(ka, kb)) return -1;
-    if (queueKeyBefore(kb, ka)) return 1;
-    return 0;
+    const ka = manualQueueAt(a), kb = manualQueueAt(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
-  // 防撞只在「並列第一」之間做，不是固定取前 3 筆。
-  // 固定窗口會弄丟裁示要的那個保證：唯一一筆剛建立的任務必須立刻被派出去，
-  // 而不是三分之一的機率（單元測試抓到這件事）。並列時才有選擇餘地，也才需要防撞——
-  // 而剛建立的任務全都是 last_dispatched_at = null，彼此並列，照樣散得開。
-  const first: QueueKey = { tier: manualTaskTier(sorted[0].source), lastDispatchedAt: sorted[0].last_dispatched_at ?? null };
-  const tied = sorted.filter((t) => {
-    const k: QueueKey = { tier: manualTaskTier(t.source), lastDispatchedAt: t.last_dispatched_at ?? null };
-    return !queueKeyBefore(first, k) && !queueKeyBefore(k, first);
-  });
+  const first = manualQueueAt(sorted[0]);
+  const tied = sorted.filter((t) => manualQueueAt(t) === first);
   return tied.length > 1 ? pickBySeed(tied.slice(0, MANUAL_PICK_WINDOW), seed) : sorted[0];
 }
