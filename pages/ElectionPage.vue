@@ -500,7 +500,7 @@ const getPledge = (cId: string | number, category: string) =>
   policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && belongsToThisElection(p) && (p.category === category || p.tags.includes(category)))
 
 
-const electionLevels = [
+const ALL_LEVELS = [
   { type: ElectionType.PRESIDENT, label: '總統' },
   { type: ElectionType.LEGISLATOR, label: '立法委員' },
   { type: ElectionType.MAYOR, label: '縣市長' },
@@ -511,6 +511,15 @@ const electionLevels = [
   { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原民區代表' },
   { type: ElectionType.CHIEF, label: '村里長' }
 ]
+// 只列本屆真的有的層級（election_types 表）：2026 九合一沒有總統／立委，2024 沒有地方層級。表沒資料才退回全部。
+const electionLevels = computed(() => {
+  const types = election.value?.types ?? []
+  return types.length > 0 ? ALL_LEVELS.filter(l => types.includes(l.type)) : ALL_LEVELS
+})
+// ?type= 帶了本屆沒有的層級（例：2026 帶 立法委員）→ 退回第一個有的；網址會跟著 useRegionQuerySync 改正
+watch(electionLevels, (levels) => {
+  if (levels.length > 0 && !levels.some(l => l.type === comparisonLevel.value)) comparisonLevel.value = levels[0].type
+}, { immediate: true })
 
 usePageHead({
   title: () => election.value ? (election.value.shortName || election.value.name) : undefined,

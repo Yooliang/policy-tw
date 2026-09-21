@@ -124,7 +124,10 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
           && isRunningCandidate(e.candidateStatus),
         ))
         .map((pl) => withElectionData(pl, electionId))
-      return { ...base, politicians }
+      // 2026-09-22：快照不帶政見的話，預渲染 HTML 每張候選人卡都是「0 項政見」（爬蟲與分享預覽看到的就是這份）。
+      // 只塞該屆的（2026 屆 223 筆），policiesComplete 照舊 false，瀏覽器端 ensurePolicies() 仍會抓整份。
+      const policies = full.policies.filter((p) => p.electionId === electionId)
+      return { ...base, politicians, policies }
     }
 
     case 'politician': {
