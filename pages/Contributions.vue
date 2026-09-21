@@ -366,7 +366,9 @@ usePageHead({
                   </template>
                 </dl>
               </div>
-              <p class="text-[11px] text-slate-400">需要 {{ it.required_agree }} 票同意<span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} 上線</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
+              <!-- 票數門檻只在還在等票時講。撤回／退件／還原的已經退出驗證池，不會有人被派到，
+                   照印「需要 2 票同意」會讓人以為撤回還要等人投票（2026-09-21 使用者看動態牆發現）。 -->
+              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">需要 {{ it.required_agree }} 票同意</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">{{ it.required_agree }} 票同意通過</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} 上線</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
             </div>
           </li>
         </ul>

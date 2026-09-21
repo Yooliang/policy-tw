@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
     const tasks = withCurrent
       ? await Promise.all(picked.map(async (t) => {
         const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
-        return { ...t, current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, target)), lookup: buildLookup(target) };
+        return { ...t, current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, target), { task_id: t.task_id ?? null, target }), lookup: buildLookup(target) };
       }))
       : picked;
 

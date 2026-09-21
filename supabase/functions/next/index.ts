@@ -366,7 +366,7 @@ Deno.serve(async (req) => {
         lease_minutes: LEASE_MINUTES,
         item: {
           task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target, ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
-          current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget)),
+          current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget), { task_id: t.id ?? null, target: manualTarget }),
           lookup: buildLookup(manualTarget),
         },
         how_to: howTo,
@@ -404,7 +404,7 @@ Deno.serve(async (req) => {
         ...t,
         source: "auto",
         suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
-        current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget)),
+        current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget), { task_id: t.task_id ?? null, target: autoTarget }),
         lookup: buildLookup(autoTarget),
       },
       how_to: howTo,

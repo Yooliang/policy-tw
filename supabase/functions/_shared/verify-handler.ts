@@ -74,7 +74,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
-  const blind = input.verdict === "disagree" && isBlindDisagree(input.note);
+  const blind = input.verdict === "disagree" && isBlindDisagree(input.note, {
+    evidenceUrl: input.evidence_url,
+    sourceUrls: contribution.source_urls ?? [],
+  });
   // 罐頭同意票退回重寫（2026-09-21）：agree 但備註只有套語、也沒附 evidence_url。
   //
   // 原本想比照盲反對改記 unsure，但實地查過之後理由變了：那 30 票寫著「查證通過」的，
