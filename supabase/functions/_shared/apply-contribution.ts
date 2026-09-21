@@ -496,9 +496,19 @@ async function applyMergePolitician(supabase: SupabaseLike, row: ContributionRow
   if (!keep || !remove) return { status: "failed", message: "缺 keep_id／remove_id" };
   if (p.same_person === false) {
     const [a, b] = [keep, remove].sort();
-    const { error } = await supabase.from("politician_pair_resolutions").upsert({ pair_key: `${a}|${b}`, a, b, resolution: "different", contribution_id: row.id }, { onConflict: "pair_key" });
+    // 「不同人」跟合併一樣是永久決定：寫下去之後 duplicate_politician 就不再派這一對，
+    // 沒有冷卻、沒有重查。所以它必須跟 same 分支一樣留查核履歷，否則 planRevert 救不回來——
+    // 那會是全站唯一一個「判錯了、連還原都沒有」的動作（2026-09-21 子代理掃出來的）。
+    const { data: resolution, error } = await supabase.from("politician_pair_resolutions")
+      .upsert({ pair_key: `${a}|${b}`, a, b, resolution: "different", contribution_id: row.id }, { onConflict: "pair_key" })
+      .select("*").maybeSingle();
     if (error) return { status: "failed", message: `pair_resolutions upsert: ${error.message}` };
-    return { status: "applied", message: `已記為不同人：${keep.slice(0, 8)} 與 ${remove.slice(0, 8)}，這一對不再派任務` };
+    // record_id 要傳這一列的 id（UUID）而不是 pair_key：executeRevert 的 delete 寫死 .eq("id", record_id)，
+    // SQL 版 merge 的 same 分支也是照這個約定記的。
+    if (resolution && typeof (resolution as Obj).id === "string") {
+      await recordInsert(supabase, ctxOf(row), "politician_pair_resolutions", String((resolution as Obj).id), resolution as Obj);
+    }
+    return { status: "applied", message: `已記為不同人：${keep.slice(0, 8)} 與 ${remove.slice(0, 8)}，這一對不再派任務（判錯的話這筆可以整筆還原）` };
   }
   const { data, error } = await supabase.rpc("merge_politician", { p_keep: keep, p_remove: remove, p_contribution: row.id, p_agent: row.agent_name });
   if (error) return { status: "failed", message: `merge_politician: ${error.message}` };
