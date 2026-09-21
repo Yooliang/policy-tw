@@ -148,16 +148,18 @@ Deno.test("schema 的必填欄位，payload 形狀不可以漏講", async () => 
 });
 
 // payload 骨架（2026-09-21）：兩隻代理獨立實測都說「講得清做什麼、講不清怎麼交」。
+// 用線上真的長相當樣本。第一版這裡寫的是自己編的 uuid，測試全綠，
+// 但實際上 politician_elections.id 是整數（auto:candidate_status_stale:10009），
+// 正則只認 uuid 所以解不出來——最該被填好的那一種反而填不出來。
 Deno.test("candidate_status_stale 的骨架要填好 politician_elections 的 row id——代理不該猜複合鍵", () => {
-  const taskId = "auto:candidate_status_stale:38d16e30-26e3-4c50-9a71-4168116b5f1c";
   const tpl = buildPayloadTemplate("candidate_status_stale", "correction", {
     politician_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     election_id: 2026,
     election_type: "縣市長",
-  }, taskId);
+  }, "auto:candidate_status_stale:10009");
   assert(tpl, "要有骨架");
   assertEquals(tpl!.target_table, "politician_elections");
-  assertEquals(tpl!.target_id, "38d16e30-26e3-4c50-9a71-4168116b5f1c", "id 一直都在 task_id 裡，只是沒送出去");
+  assertEquals(tpl!.target_id, "10009", "參選紀錄的 id 是整數，不是 uuid");
   assert(Array.isArray(tpl!.changes), "correction 要有 changes 陣列");
 });
 
@@ -183,9 +185,14 @@ Deno.test("shapeTaskCurrent 帶了 task 才給骨架，沒帶就不給（不要�
   assert("payload_template" in withTask, "帶了 task 就要給骨架");
 });
 
-Deno.test("rowIdFromTaskId 只認 auto:<型別>:<uuid>，手動任務不亂解", () => {
+Deno.test("rowIdFromTaskId 認 uuid 也認整數，但不亂解不是單一列的", () => {
+  // policies 是 uuid
   assertEquals(rowIdFromTaskId("auto:legacy_audit:38d16e30-26e3-4c50-9a71-4168116b5f1c"), "38d16e30-26e3-4c50-9a71-4168116b5f1c");
-  assertEquals(rowIdFromTaskId("auto:legacy_audit:not-a-uuid"), null);
+  // politician_elections 是整數（線上實測）
+  assertEquals(rowIdFromTaskId("auto:candidate_status_stale:10009"), "10009");
+  // 多段的指的是一對，不是單一列——填進 target_id 會是錯的
+  assertEquals(rowIdFromTaskId("auto:duplicate_policy:46b9a63f-e5ec-4a7b-b9dc-3624235780e0:6df0e0f3"), null);
+  assertEquals(rowIdFromTaskId("auto:legacy_audit:not-an-id"), null);
   assertEquals(rowIdFromTaskId("38d16e30-26e3-4c50-9a71-4168116b5f1c"), null, "手動任務的 id 不是這個格式");
   assertEquals(rowIdFromTaskId(null), null);
 });

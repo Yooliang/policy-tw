@@ -140,9 +140,19 @@ const TARGET_TABLE: Record<string, string> = {
   duplicate_policy: "policies",
 };
 
-/** 自動缺口的 task_id 是 `auto:<型別>:<那一列的 id>`，id 沒有另外放進 target 時從這裡取。 */
+/**
+ * 自動缺口的 task_id 是 `auto:<型別>:<那一列的 id>`，id 沒有另外放進 target 時從這裡取。
+ *
+ * id 有兩種長相：policies 是 uuid、politician_elections 是整數（線上實測
+ * `auto:candidate_status_stale:10009`）。2026-09-21 第一版只認 uuid，
+ * 結果最該被填好的那一種反而填不出來——而單元測試用的是自己編的 uuid，
+ * 測到的是我的假設不是真實資料，所以測試全綠也沒擋住。
+ *
+ * 多段的（例如 duplicate_policy 的 `auto:duplicate_policy:<a>:<b>` 指的是一對）
+ * 不解：那不是單一列，填進 target_id 會是錯的。
+ */
 export function rowIdFromTaskId(taskId: string | null | undefined): string | null {
-  const m = /^auto:[a-z_]+:([0-9a-f-]{36})$/i.exec(String(taskId ?? ""));
+  const m = /^auto:[a-z_]+:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+)$/i.exec(String(taskId ?? ""));
   return m ? m[1] : null;
 }
 
