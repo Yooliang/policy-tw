@@ -206,14 +206,40 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
   assert(attemptDays >= 1 && attemptDays < TASK_CHECK_COOLDOWN_DAYS, "嘗試冷卻要比無異動冷卻短：那是換人再試，不是結案");
 });
 
+/**
+ * 派工函式 contribution_auto_tasks() 是幾支 contribution_auto_tasks_*() 的 UNION。
+ * 從它的 body 把每一支臂的名字讀出來，再各自找最新的定義——新增一支臂就自動被守到，
+ * 不必回來改這支測試。2026-09-21 加 duplicate_policy 時發現舊版只掃 _raw，
+ * dup／legacy／mismatch 三支臂的 task_type 其實從來沒被守過。
+ */
+async function allAutoTaskTypes(): Promise<string[]> {
+  const { sql } = await latestMigrationDefining("contribution_auto_tasks(");
+  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks("));
+  const arms = [...new Set([...body.matchAll(/FROM (contribution_auto_tasks_[a-z_]+)\(\)/g)].map((m) => m[1]))];
+  assert(arms.length >= 2, `只解析到 ${arms.length} 支任務函式，UNION 的寫法可能變了`);
+  const types: string[] = [];
+  for (const arm of arms) {
+    const { sql: armSql } = await latestMigrationDefining(`${arm}(`);
+    const from = armSql.lastIndexOf(`FUNCTION ${arm}(`);
+    // 只切到這支函式為止：同一支 migration 常常在它後面接著重定義 contribution_auto_tasks()，
+    // 切到檔尾會把 wrapper 的 ORDER BY 一起讀進來，撈出 'not_supported' 這種不是 task_type 的字串。
+    const ends = [armSql.indexOf("COMMENT ON FUNCTION", from), armSql.indexOf("CREATE OR REPLACE FUNCTION", from + 10)]
+      .filter((i) => i > from);
+    const armBody = armSql.slice(from, ends.length > 0 ? Math.min(...ends) : undefined);
+    // task_id 的前綴就是 task_type（auto:<task_type>:<目標>），applyNoChange 也是這樣解析的
+    const found = [...armBody.matchAll(/'auto:([a-z_]+):'/g)].map((m) => m[1]);
+    assert(found.length > 0, `${arm} 裡解析不出任何 task_type`);
+    types.push(...found);
+  }
+  return types;
+}
+
 Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建議", async () => {
   // 新增缺口時最容易忘的一步：SQL 長出新的 task_type，next 端點的 SUGGESTED_TYPE 沒跟上，
   // 代理拿到的 suggested_contribution_type 就是 null——它得自己猜要用哪一種型別回報。
   // 這個專案已經三次因為「新型別、兩邊沒對上」靜默出錯，所以這裡不比對單一字面，
   // 而是從 SQL 把所有 task_type 撈出來逐一檢查。
-  const { sql } = await latestMigrationDefining("contribution_auto_tasks_raw(");
-  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
-  const sqlTypes = [...body.matchAll(/'auto:[a-z_]+:'[^,]*,\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  const sqlTypes = await allAutoTaskTypes();
   assert(sqlTypes.length >= 7, `只從 SQL 撈到 ${sqlTypes.length} 種 task_type，正則可能失效了`);
 
   for (const t of new Set(sqlTypes)) {

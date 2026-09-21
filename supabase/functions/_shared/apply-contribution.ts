@@ -620,6 +620,17 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
       }
       return { status: "applied", message: "已核對：這筆早期匯入的政見從「尚未查核」變成「已查核」", task_id: taskId, policy_id: legacy[1] };
     }
+    // 政見重複清查（2026-09-21）：no_change 通過＝這個人目前這份清單已經逐組比對過、沒有重複。
+    // 記進 policy_dupe_reviews（鍵是清單指紋）就永遠不再派——同一份清單 14 天後再問一次還是同一個答案。
+    // 新增、編輯或移除任何一筆政見，指紋就變，任務自己重新出現。
+    const dupe = /^auto:duplicate_policy:([0-9a-f-]{36}):([0-9a-f]{8})$/i.exec(taskId);
+    if (dupe) {
+      const review = { politician_id: dupe[1], fingerprint: dupe[2], agent_name: row.agent_name, contribution_id: row.id, note: check.note };
+      const { error: dupeError } = await supabase.from("policy_dupe_reviews").upsert(review, { onConflict: "politician_id" });
+      throwIf(dupeError, "policy_dupe_reviews upsert");
+      await recordInsert(supabase, ctxOf(row), "policy_dupe_reviews", dupe[1], review);
+      return { status: "applied", message: "已記錄：這個人目前這份政見清單已逐組比對過、沒有重複；清單有變動才會再派一次", task_id: taskId, politician_id: dupe[1] };
+    }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
   // 提問任務不因 no_change 關閉（2026-09-20）：關了就沒人再答，訪客永遠看到「正在查證」。新的 no_change 在 contribute 就會被擋，這裡守舊資料。

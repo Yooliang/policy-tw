@@ -23,6 +23,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   adjudicate: '裁決',
   fix_disputed: '修正被擋的貢獻',
   duplicate_politician: '同名人物確認',
+  duplicate_policy: '政見重複清查',
   legacy_audit: '早期匯入核對',
   other: '其他',
 }

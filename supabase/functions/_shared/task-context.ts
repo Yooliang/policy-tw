@@ -15,6 +15,10 @@ export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 export const REST_BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1";
 export const TEXT_LIMIT = 500;
 export const MAX_EXISTING_POLICIES = 30;
+/** duplicate_policy：整份清單要給代理看完才判得出重複；全站最長的一份是 25 筆，留一倍餘裕 */
+export const MAX_POLICY_DUPE_LIST = 60;
+/** 清單裡每筆描述只取開頭：判「是不是同一個承諾」看得到主旨就夠，不必整段 */
+export const POLICY_DUPE_DESC_LIMIT = 200;
 export const MAX_TRACKING_LOGS = 5;
 
 export function truncateText(value: unknown, limit = TEXT_LIMIT): { text: string | null; truncated: boolean } {
@@ -39,6 +43,7 @@ export interface TaskContextData {
   elections?: Obj[];
   policies?: Obj[];
   policies_total?: number;
+  /** duplicate_policy：這個人整份政見清單（含描述開頭），由代理逐組比對有沒有同一個承諾被記成兩筆 */
   /** policy_missing：這個人還在等票的政見提交（避免重複查同一件事） */
   queued_policies?: Obj[];
   policy?: Obj | null;
@@ -150,6 +155,21 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
         elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
         system_check: data.system_check ?? null,
         hint: "打開 policy.source_url：這是不是這個人說過的承諾、標題與內容對不對、是哪一場選舉的。都對 → no_change（note 寫你核對到什麼）；欄位錯 → correction；不是政見 → removal。system_check 是系統逐欄核對的結果，contradicted 的欄位優先看。",
+      };
+    }
+    case "duplicate_policy": {
+      // 系統配不出「哪兩筆重複」（實測：真重複那對的字面相似度比不重複的那對還低），
+      // 所以這裡不挑配對，整份清單交給代理判。它要回報比對過哪幾組，不能只給結論。
+      const list = (data.policies ?? []).slice(0, MAX_POLICY_DUPE_LIST).map((x) => {
+        const row = pick(x, ["id", "title", "description", "category", "status", "election_id", "proposed_date", "source_url"])!;
+        const d = truncateText(row.description, POLICY_DUPE_DESC_LIMIT);
+        return d.truncated ? { ...row, description: d.text, truncated: true } : row;
+      });
+      return {
+        politician: pick(p, POLITICIAN_BRIEF),
+        policies: list,
+        policies_total: data.policies_total ?? list.length,
+        hint: "逐組比對這份清單：換句話說講同一件事＝重複；同一個主題但標的不同（不同醫院、不同路線、不同補助對象）不是重複，一篇報導的「N 大政見」本來就該拆成 N 筆。空泛的一筆碰上具體的一筆而且講同一件事，保留具體那筆、對空泛那筆提 removal，reason 寫「與 <保留的 policy_id> 是同一個承諾」；具體資訊只在要移除的那筆才有就先用 correction 補過去。沒有重複就用 no_change 帶 task_id，note 列出你比對過哪幾組。",
       };
     }
     case "duplicate_politician": {
@@ -275,6 +295,15 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       data.roster = { rows: [...byDistrict, ...byPerson], history: history.data ?? [], region };
     }
   }
+  if (taskType === "duplicate_policy" && pid) {
+    const { data: pol, count } = await supabase.from("policies")
+      .select("id, title, description, category, status, election_id, proposed_date, source_url", { count: "exact" })
+      .eq("politician_id", pid).is("removed_at", null)
+      .order("proposed_date", { ascending: false, nullsFirst: false }).order("id", { ascending: true })
+      .limit(MAX_POLICY_DUPE_LIST);
+    data.policies = pol ?? [];
+    data.policies_total = count ?? (data.policies ?? []).length;
+  }
   if (taskType === "policy_missing" && pid) {
     const [el, pol, queued] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
@@ -396,7 +425,7 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         politician: pick(data.politicians?.[0] ?? null, POLITICIAN_BRIEF),
         existing_policy_titles: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"])),
         similar_policies: (data.similar_policies ?? []).map((s) => ({ id: s.id, title: s.title, similarity: Math.round(s.similarity * 100) / 100 })),
-        hint: "similar_policies 是系統算出的相似既有政見（相似度 0～1）；若 payload 與其中一條實質重複（同一承諾換句話說），投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、內容不同就照來源核對。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
+        hint: "先看重複：similar_policies 是系統用**字面**相似度撈的，中文換句話說的重複它抓不到（實測「加速都市更新」與「都更5夠力」的字面相似度低於兩筆不重複的政見），所以請把 existing_policy_titles 整份看過再判斷。與其中一條實質重複（同一承諾換句話說）就投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、標的不同（不同醫院、不同路線）就照來源核對。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
       };
     case "policy_progress":
       return {
