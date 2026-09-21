@@ -147,6 +147,7 @@ stateDiagram-v2
 | `candidate_status_stale` | 登記截止後還標傳聞 | `correction` 改 `candidate_status`（傳聞→登記／不參選走一般級 2 票） |
 | `policy_election_missing`／`policy_election_mismatch` | 政見沒屆別／屆別跟提出日期對不上 | `correction` 改 `election_id` |
 | `duplicate_politician` | 同名同縣市（或同出生年）的兩筆人物 | `merge_politician`（4／6／8 票，軟合併可整筆還原） |
+| `duplicate_policy` | 同一人 ≥2 筆政見、目前這份清單沒人逐組比對過 | `removal` 退空泛那筆（3 票）／`no_change`（寫進 `policy_dupe_reviews`，清單沒變不再派） |
 | `legacy_audit` | 早期匯入、有來源、沒人核 | `no_change`（通過寫 `policies.audit` 履歷）／`correction`／`removal` |
 | `roster_check`、`news_sweep`、`audit`、`question`、`adjudicate`、`fix_disputed` | 手動／訪客／爭議觸發 | 見 skill.md |
 
