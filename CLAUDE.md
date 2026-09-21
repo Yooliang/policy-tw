@@ -42,6 +42,14 @@ Hosting 由 CI 跑、要十幾分鐘（預渲染約 16k 頁）；Edge Function �
 
 還有一件連帶的：**連續合併多個 PR 會讓前一個 Hosting 部署被取消**（CI 的 concurrency group）。同一批要上線的東西，合完一個等它綠再合下一個。
 
+**別靠記得——用 `pnpm deploy:functions` 部署。** 這條規則 2026-09-21 當天被違反兩次，兩次都是寫下它的人自己。所以改成機械檢查：`scripts/deploy-functions.mjs` 會先抓線上 `skill.md` 的版本，落後程式的 `PROTOCOL_VERSION` 就拒絕部署並印出正確順序。
+
+```bash
+pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
+```
+
+真的知道自己在做什麼才加 `--force`。
+
 ## Architecture
 
 ### Data Layer
