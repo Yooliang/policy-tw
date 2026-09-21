@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main 不取消：取消會讓 Hosting 一直部署不出去（2026-09-22 連續 11 次），排隊只會多等一輪；PR 分支照舊取消
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   typecheck:
