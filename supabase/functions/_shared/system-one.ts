@@ -598,3 +598,41 @@ export async function fetchArchive(url: string, fetchImpl: typeof fetch = fetch)
     return { raw: 0, text: "" };
   }
 }
+
+/**
+ * 貢獻的主角要去哪張表查名字（2026-09-22，candlefish 第二次探測）。
+ * judge／precheck 原本只在 correction 回查 target_table／target_id；candidacy／policy_progress 的 payload 只有
+ * politician_id／policy_id、沒有 name，主角名單就是空的 → 每一頁都判「主角名字不在文本裡」棄權（bd1a0cd5 對
+ * cw、archive、維基三頁全棄權，同一頁對有 name 的貢獻正常）。payload 已有名字就不查。
+ */
+export function subjectRef(payload: Record<string, unknown>): { table: "politicians" | "policies"; id: string } | null {
+  const str = (k: string) => typeof payload[k] === "string" && (payload[k] as string).length > 0 ? payload[k] as string : null;
+  if (str("name") || str("politician_name")) return null;
+  const table = str("target_table"), tid = str("target_id");
+  if (table && tid) return table === "politicians" || table === "policies" ? { table, id: tid } : null;
+  const pol = str("politician_id");
+  if (pol) return { table: "politicians", id: pol };
+  const pid = str("policy_id");
+  if (pid) return { table: "policies", id: pid };
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+type SubjectDb = any;
+/** 回查主角名字：人物 → 姓名；政見 → 標題＋提出者姓名（正文通常寫人名不寫政見標題） */
+export async function subjectNamesOf(supabase: SubjectDb, payload: Record<string, unknown>): Promise<string[]> {
+  const ref = subjectRef(payload);
+  if (!ref) return [];
+  const { data } = await supabase.from(ref.table).select(ref.table === "policies" ? "title, politician_id" : "name").eq("id", ref.id).maybeSingle();
+  const row = (data ?? null) as Record<string, unknown> | null;
+  if (!row) return [];
+  const out: string[] = [];
+  const own = row[ref.table === "policies" ? "title" : "name"];
+  if (typeof own === "string" && own) out.push(own);
+  if (ref.table === "policies" && typeof row.politician_id === "string") {
+    const { data: p } = await supabase.from("politicians").select("name").eq("id", row.politician_id).maybeSingle();
+    const name = (p as { name?: unknown } | null)?.name;
+    if (typeof name === "string" && name) out.push(name);
+  }
+  return out;
+}
