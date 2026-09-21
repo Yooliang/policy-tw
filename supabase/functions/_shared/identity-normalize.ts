@@ -63,8 +63,14 @@ const PARTY_ALIASES: Readonly<Record<string, string>> = {
 const EMPTY_MARKERS: ReadonlySet<string> = new Set(["", "無", "未知", "未定", "待定", "null", "undefined", "-"]);
 
 /** trim → 全形轉半形（NFKC）→ 去所有空白 → 臺→台。空值回 null。 */
+/** 中選會對罕用字的逸出寫法：@ 十六進位碼位 @。匯入端該擋、正規化端該警告，不該當字面值存。 */
+export const CEC_ESCAPE_RE = /@[0-9A-Fa-f]{4,5}@/;
+
 export function normText(input: string | null | undefined): string | null {
   if (input === null || input === undefined) return null;
+  // 中選會逸出碼（@2F97F@ 這種）沒解碼就進來，正規化後永遠比對不上本人（2026-09-21：32 人因此對去重隱形）。
+  // 這裡不安靜地放行：記 log 讓下游分得出「比對不到」和「這個名字有問題」。
+  if (CEC_ESCAPE_RE.test(String(input))) console.warn(`identity-normalize：姓名含中選會逸出碼，應先解碼：${String(input)}`);
   const s = String(input).normalize("NFKC").replace(/\s+/g, "").replace(/臺/g, "台");
   return EMPTY_MARKERS.has(s) ? null : s;
 }
