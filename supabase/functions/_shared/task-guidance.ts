@@ -41,6 +41,12 @@ export const TASK_GUIDANCE: Record<string, string> = {
   policy_source_missing:
     "這筆政見沒有出處。去找原始報導或官方公告，用 correction 補 policies.source_url。找不到就 no_change 並寫你找過哪裡——不要拿主題相近的頁面充數。",
 
+  source_mismatch:
+    "來源是真的、也對題，但 description 裡最具體的那段（數字、期程、名稱）在原文找不到——這比沒來源危險，因為它看起來查證過了。" +
+    "先把原文逐字讀一遍（數字要正規化：1000億／千億／1,000 億算同一個；8.39 公里不要切成 39 公里），確認那段真的沒根據。" +
+    "有根據 → no_change 並貼出原文那一句；沒根據 → 用 correction 改 policies.description，把沒根據的部分刪掉或改成原文有的寫法（原文寫 48 億政見寫 49 億這種，改成 48 億）；" +
+    "整筆都對不上來源 → 那是 policy_source_missing 的形狀，用 correction 換來源或 removal。",
+
   progress_stale:
     "**第一步先判斷它是不是政見**：標語、團隊組成、行程、個人表態不是政見，追不出進度也不該追，那種用 removal 回報，不要為它補欄位。" +
     "是政見才往下做，而且依狀態問兩種不同的事：施政中的問「近期進度如何」；已投票屆別的競選承諾問「這個人當選了嗎、承諾後來兌現了嗎」——elections 裡有他的參選紀錄與 election_result。當選就用 policy_progress 把 status 改成 In Progress／Achieved／Stalled／Failed；落選、或我們根本沒有他那場選舉的參選紀錄，就用 candidacy 補 election_result。真的查不到後續就 no_change 並說明你查了哪些來源。",
@@ -151,6 +157,7 @@ const TARGET_TABLE: Record<string, string> = {
   not_running_recheck: "politician_elections",
   candidacy_source_missing: "politician_elections",
   policy_source_missing: "policies",
+  source_mismatch: "policies",
   policy_election_missing: "policies",
   policy_election_mismatch: "policies",
   policy_validity: "policies",

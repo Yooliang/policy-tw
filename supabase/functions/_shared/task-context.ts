@@ -471,7 +471,7 @@ export interface VerifyContextData {
 export const SOURCE_HINTS: ReadonlyArray<{ host: RegExp; hint: string }> = [
   { host: /(^|\.)web\.cec\.gov\.tw$/, hint: "中選會登記公告：名單在頁面的 PDF 附件裡（候選人登記情形一覽表），系統不解析 PDF，你要自己下載讀。逐欄印的名冊不要用 pdftotext -layout（會錯配），各欄各抓成清單再 zip，三欄長度要相等。" },
   { host: /(^|\.)bulletin\.cec\.gov\.tw$/, hint: "中選會選舉公報：PDF，政見常做成圖，pdftotext 抽到空字串不代表沒有——裁切渲染成圖目視核對。" },
-  { host: /(^|\.)db\.cec\.gov\.tw$/, hint: "中選會候選人資料庫：頁面是 SPA、抓不到正文；直接用 API `/query/api/v1/elections/candidates/query?cand_name=<姓名>`（只有已投票的選舉，2026 登記期不在裡面）。" },
+  { host: /(^|\.)db\.cec\.gov\.tw$/, hint: "中選會候選人資料庫：頁面是 SPA、抓不到正文；直接用 API `/query/api/v1/elections/candidates/query?cand_name=<姓名>`——它證明「這個人是誰」（出生年、歷屆），證明不了「本屆有沒有登記」（只有已投票的選舉，2026 登記期不在裡面）；系統核到 election_id／candidate_status absent 回 cannot_tell 是對的。" },
   { host: /(^|\.)cna\.com\.tw$/, hint: "中央社：不帶瀏覽器 User-Agent 會 403，帶了就 200。" },
   { host: /(^|\.)chinatimes\.com$/, hint: "中時：Cloudflare 擋程式，帶 UA 仍常 403；改抓 web.archive.org/web/2026/<網址> 的快照。" },
   { host: /(^|\.)upmedia\.mg$/, hint: "上報：常 403；改抓 archive.org 快照。" },

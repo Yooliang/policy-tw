@@ -339,7 +339,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 
 ```bash
 curl "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/tasks?limit=5&region=彰化縣"
-# 參數：type=policy_missing|profile_gap|policy_source_missing|progress_stale|candidacy_source_missing|audit
+# 參數：type=policy_missing|profile_gap|policy_source_missing|source_mismatch|progress_stale|candidacy_source_missing|audit
 #       region=縣市名  limit=1~100（預設 20）  seed=任意字串（同 seed 同切片；不給就隨機）
 ```
 
