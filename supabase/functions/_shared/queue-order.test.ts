@@ -73,7 +73,7 @@ Deno.test("pickQueuedManual：新建的維護者任務贏過派過的裁決嗎�
   const picked = pickQueuedManual([
     { source: "manual", last_dispatched_at: null },
     { source: "auto_dispute", last_dispatched_at: "2026-09-21T00:00:00Z" },
-  ]);
+  ], "seed");
   assertEquals(picked?.source, "auto_dispute");
 });
 
@@ -82,10 +82,33 @@ Deno.test("pickQueuedManual：同層時新建的排最前", () => {
     { source: "suggested", last_dispatched_at: "2026-09-20T00:00:00Z" },
     { source: "manual", last_dispatched_at: null },
     { source: "suggested", last_dispatched_at: "2026-09-19T00:00:00Z" },
-  ]);
+  ], "seed");
   assertEquals(picked?.last_dispatched_at, null);
 });
 
 Deno.test("pickQueuedManual：空清單回 null", () => {
-  assertEquals(pickQueuedManual([]), null);
+  assertEquals(pickQueuedManual([], "seed"), null);
+});
+
+Deno.test("pickQueuedManual：並列第一的才用 seed 散開（防兩個代理撞同一筆）", () => {
+  // 三筆都沒派過、同層＝並列第一，不同 seed 應該挑得到不只一筆
+  const tasks = [
+    { source: "manual", last_dispatched_at: null, id: "a" },
+    { source: "manual", last_dispatched_at: null, id: "b" },
+    { source: "manual", last_dispatched_at: null, id: "c" },
+  ];
+  const picked = new Set(["s1", "s2", "s3", "s4", "s5", "s6"].map((s) => pickQueuedManual(tasks, s)?.id));
+  assertEquals(picked.size > 1, true);
+});
+
+Deno.test("pickQueuedManual：唯一的第一名不受 seed 影響", () => {
+  // 這條是上一條的反面，也是裁示的本體：只有一筆剛建立時，它必須每次都被派出去
+  const tasks = [
+    { source: "manual", last_dispatched_at: null, id: "new" },
+    { source: "manual", last_dispatched_at: "2026-09-20T00:00:00Z", id: "old1" },
+    { source: "manual", last_dispatched_at: "2026-09-19T00:00:00Z", id: "old2" },
+  ];
+  for (const s of ["s1", "s2", "s3", "s4", "s5", "s6"]) {
+    assertEquals(pickQueuedManual(tasks, s)?.id, "new");
+  }
 });

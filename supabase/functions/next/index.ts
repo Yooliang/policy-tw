@@ -387,7 +387,7 @@ Deno.serve(async (req) => {
       const { data: tierRow } = await supabase.rpc("task_priority_tier", { p_task_type: autoHead.task_type, p_target: autoHead.target });
       autoTier = autoTaskTier(tierRow);
     }
-    const manualHead = pickQueuedManual(freeManual);
+    const manualHead = pickQueuedManual(freeManual, seed);
     const manualFirst = manualHead !== null && (autoHead === null || queueKeyBefore(
       { tier: manualTaskTier(manualHead.source), lastDispatchedAt: manualHead.last_dispatched_at ?? null },
       { tier: autoTier, lastDispatchedAt: autoHead.last_dispatched_at ?? null },

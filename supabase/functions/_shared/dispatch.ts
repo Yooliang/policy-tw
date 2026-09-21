@@ -391,16 +391,31 @@ export interface ManualQueueTask {
   last_dispatched_at?: string | null;
 }
 
-/** 手動任務裡最該派的一筆，用的是跟自動缺口同一把尺。 */
-export function pickQueuedManual<T extends ManualQueueTask>(tasks: readonly T[]): T | null {
-  let best: T | null = null;
-  let bestKey: QueueKey | null = null;
-  for (const t of tasks) {
-    const key: QueueKey = { tier: manualTaskTier(t.source), lastDispatchedAt: t.last_dispatched_at ?? null };
-    if (bestKey === null || queueKeyBefore(key, bestKey)) {
-      best = t;
-      bestKey = key;
-    }
-  }
-  return best;
+/**
+ * 手動任務裡最該派的一筆，用的是跟自動缺口同一把尺。
+ *
+ * 不是嚴格取第一名，而是排序後在前 MANUAL_PICK_WINDOW 筆裡用 seed 挑——沿用
+ * pickManualTask 原本的防撞設計（merge-queue 2026-09-21 指出的）：兩個代理同時打
+ * /next 時，雙方都在對方寫入認領之前就撈完候選了，嚴格取第一名會讓它們固定撞同一筆。
+ * 認領排除擋得住大部分情況，但擋不住這個競賽窗口。
+ */
+export function pickQueuedManual<T extends ManualQueueTask>(tasks: readonly T[], seed: string): T | null {
+  if (tasks.length === 0) return null;
+  const sorted = [...tasks].sort((a, b) => {
+    const ka: QueueKey = { tier: manualTaskTier(a.source), lastDispatchedAt: a.last_dispatched_at ?? null };
+    const kb: QueueKey = { tier: manualTaskTier(b.source), lastDispatchedAt: b.last_dispatched_at ?? null };
+    if (queueKeyBefore(ka, kb)) return -1;
+    if (queueKeyBefore(kb, ka)) return 1;
+    return 0;
+  });
+  // 防撞只在「並列第一」之間做，不是固定取前 3 筆。
+  // 固定窗口會弄丟裁示要的那個保證：唯一一筆剛建立的任務必須立刻被派出去，
+  // 而不是三分之一的機率（單元測試抓到這件事）。並列時才有選擇餘地，也才需要防撞——
+  // 而剛建立的任務全都是 last_dispatched_at = null，彼此並列，照樣散得開。
+  const first: QueueKey = { tier: manualTaskTier(sorted[0].source), lastDispatchedAt: sorted[0].last_dispatched_at ?? null };
+  const tied = sorted.filter((t) => {
+    const k: QueueKey = { tier: manualTaskTier(t.source), lastDispatchedAt: t.last_dispatched_at ?? null };
+    return !queueKeyBefore(first, k) && !queueKeyBefore(k, first);
+  });
+  return tied.length > 1 ? pickBySeed(tied.slice(0, MANUAL_PICK_WINDOW), seed) : sorted[0];
 }
