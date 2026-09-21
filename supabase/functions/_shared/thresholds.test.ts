@@ -218,18 +218,27 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
 
 // 2026-09-21：裁決線是死的（87 份等票平均 0.1 票）。驗證池的順序是「訪客觸發 > 裁決 > 其餘最早」，
 // SQL 的 ORDER BY 跟 next/index.ts 的 serveVerify 是同一套規則的兩份寫法，改一邊沒改另一邊就會各派各的。
-Deno.test("SQL 與 TS 一致：驗證池順序是訪客觸發 > 裁決 > 其餘最早", async () => {
+Deno.test("SQL 與 TS 一致：驗證池順序是訪客觸發 > 裁決（限三分之一）> 其餘最早，且合格判斷在 LIMIT 之前", async () => {
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
-  const orderAt = pool.indexOf("ORDER BY");
-  assert(orderAt > 0, "驗證池要有 ORDER BY");
-  const order = pool.slice(orderAt, pool.indexOf("LIMIT", orderAt));
-  const visitorAt = order.indexOf("web_request");
-  const adjAt = order.indexOf("'adjudication'");
-  const createdAt = order.indexOf("c.created_at ASC");
-  assert(visitorAt >= 0, "訪客觸發（web_request）要在 ORDER BY 裡");
-  assert(adjAt >= 0, "裁決要在 ORDER BY 裡");
-  assert(visitorAt < adjAt && adjAt < createdAt, "順序是訪客觸發 > 裁決 > 提交時間");
+  // 2026-09-21 起優先序在 bucket（0 訪客觸發／1 裁決／2 其餘），ORDER BY 只排 bucket 與時間。
+  const bucket = pool.match(/CASE WHEN [\w.]*visitor_facing THEN 0 WHEN [\w.]*adjudication_facing THEN 1 ELSE 2 END AS bucket/);
+  assert(bucket, "優先序要是 bucket：訪客觸發 0、裁決 1、其餘 2");
+  assert(/ORDER BY [\w.]*bucket ASC, [\w.]*created_at ASC/.test(pool), "先照 bucket 再照提交時間");
   assert(pool.includes("adjudication_facing"), "池子要把裁決旗標回給 /next");
+  // 2026-09-21：#119 讓 86 筆裁決塞滿 p_limit=30 的窗口，TS 在 LIMIT 之後才篩掉不合格的，
+  // candidates 趨近 0、/next 只派任務。合格判斷要在 SQL、LIMIT 之前（#102–#105 已裁過的反模式）。
+  assert(
+    pool.includes("v2.verifier_ip_hash = p_ip_hash"),
+    "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決",
+  );
+  assert(
+    pool.includes("o.contributor_ip_hash = p_ip_hash"),
+    "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決",
+  );
+  assert(
+    /r\.bucket <> 1 OR r\.rn <= GREATEST\(1, COALESCE\(p_limit, 30\) \/ 3\)/.test(pool),
+    "裁決最多佔窗口三分之一，否則它會排擠掉其他型別的驗證",
+  );
 
   const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
   const at = serve.indexOf("const serveVerify");
