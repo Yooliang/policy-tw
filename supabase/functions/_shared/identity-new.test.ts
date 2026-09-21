@@ -48,7 +48,7 @@ Deno.test("兩票 new → 就算有同名人物也建新的（不對到既有）
   const r2 = await autoApplyContribution(mixed.client, C1);
   assertEquals(r2.status, "rejected");
   assertEquals(mixed.db.politicians.length, 1, "沒有硬建人物");
-  assertEquals(mixed.db.contribution_tasks.length, 0, "不開裁決任務（2026-09-21 裁示：缺口回佇列重做）");
+  assertEquals((mixed.db.contribution_tasks ?? []).length, 0, "不開裁決任務（2026-09-21 裁示：缺口回佇列重做）");
 
   // 裁決者也能指認 new：applyContribution 直接帶 "new"
   const direct = createFakeSupabase(seed);

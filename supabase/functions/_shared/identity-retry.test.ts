@@ -76,7 +76,7 @@ Deno.test("落庫失敗自動重試：10 分鐘後重試、最多 3 次，第 3 
 
   const third = fakeWithVotes({ ...base, status: "apply_failed", retry_count: 2, next_retry_at: "2020-01-01T00:00:00Z" }, []);
   const r3 = await autoApplyContribution(third.client, "c3", boom, { retry: true });
-  assertEquals(r3.status, "disputed");
+  assertEquals(r3.status, "rejected", "2026-09-21：第 3 次仍失敗直接退件，不留 disputed");
   assertEquals(third.updates[0].patch.retry_count, 3);
   assert(String(third.updates[0].patch.review_notes).includes("db down"));
 
