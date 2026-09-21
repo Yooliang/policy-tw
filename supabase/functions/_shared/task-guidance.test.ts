@@ -1,13 +1,24 @@
 // 「這一種任務怎麼做」隨任務送出（2026-09-21 使用者：「它應該是領任務、回報，而不是自己去管理任務」）。
 // 這支守的是刪掉 skill.md 那份 5,049 字元的型別目錄之後，沒有任何一種任務變成沒人交代。
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildPayloadTemplate, DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, rowIdFromTaskId, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildReportTemplate, DYNAMIC_GUIDANCE_TYPES, hasGuidance, PAYLOAD_SHAPE, rowIdFromTaskId, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { shapeTaskCurrent } from "./task-context.ts";
 
-Deno.test("每一種任務型別都交代得出怎麼做——刪掉協議目錄的前提", () => {
+// 這支原本查的是「有沒有登記在表裡」（hasGuidance），結果 not_running_recheck 登記在
+// DYNAMIC_GUIDANCE_TYPES、卻沒有人真的組它的 hint——測試全綠，線上那一種任務沒有 hint。
+// 跑任務的代理實測才發現（2026-09-21）。改成查實際輸出：註冊表不是事實，送出去的才是。
+Deno.test("每一種任務型別都真的送得出做法——刪掉協議目錄的前提", () => {
+  const empty = {} as Parameters<typeof shapeTaskCurrent>[1];
   for (const t of Object.keys(SUGGESTED_TYPE)) {
-    assert(hasGuidance(t), `任務型別 ${t} 沒有做法可以送給代理：在 task-guidance.ts 補一條，或（依當筆資料而變的）在 task-context.ts 組 hint 並登記到 DYNAMIC_GUIDANCE_TYPES`);
+    assert(hasGuidance(t), `任務型別 ${t} 沒有登記做法：在 task-guidance.ts 補一條`);
+    // 只問「送不送得出來」。長度門檻由上面那支管靜態表——依資料組的 hint 本來就可能短
+    // （question 沒人答過時只有一句），短不是問題，空的才是。
+    const hint = shapeTaskCurrent(t, empty).hint;
+    assert(
+      typeof hint === "string" && hint.trim().length > 0,
+      `任務型別 ${t} 登記了卻送不出 hint（實際送出：${JSON.stringify(hint)}）——登記在 DYNAMIC_GUIDANCE_TYPES 卻沒有人組它，就是這種形狀`,
+    );
   }
 });
 
@@ -152,37 +163,37 @@ Deno.test("schema 的必填欄位，payload 形狀不可以漏講", async () => 
 // 但實際上 politician_elections.id 是整數（auto:candidate_status_stale:10009），
 // 正則只認 uuid 所以解不出來——最該被填好的那一種反而填不出來。
 Deno.test("candidate_status_stale 的骨架要填好 politician_elections 的 row id——代理不該猜複合鍵", () => {
-  const tpl = buildPayloadTemplate("candidate_status_stale", "correction", {
+  const tpl = buildReportTemplate("candidate_status_stale", "correction", {
     politician_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     election_id: 2026,
     election_type: "縣市長",
   }, "auto:candidate_status_stale:10009");
   assert(tpl, "要有骨架");
-  assertEquals(tpl!.target_table, "politician_elections");
-  assertEquals(tpl!.target_id, "10009", "參選紀錄的 id 是整數，不是 uuid");
-  assert(Array.isArray(tpl!.changes), "correction 要有 changes 陣列");
+  assertEquals((tpl!.payload as Record<string, unknown>).target_table, "politician_elections");
+  assertEquals((tpl!.payload as Record<string, unknown>).target_id, "10009", "參選紀錄的 id 是整數，但一律以字串送（schema 收字串）");
+  assert(Array.isArray((tpl!.payload as Record<string, unknown>).changes), "correction 要有 changes 陣列");
 });
 
 Deno.test("政見類的 correction 指到 policies，而且用 target 裡的 policy_id", () => {
-  const tpl = buildPayloadTemplate("policy_election_mismatch", "correction", { policy_id: "pol-1" }, "auto:policy_election_mismatch:pol-1");
-  assertEquals(tpl!.target_table, "policies");
-  assertEquals(tpl!.target_id, "pol-1");
+  const tpl = buildReportTemplate("policy_election_mismatch", "correction", { policy_id: "pol-1" }, "auto:policy_election_mismatch:pol-1");
+  assertEquals((tpl!.payload as Record<string, unknown>).target_table, "policies");
+  assertEquals((tpl!.payload as Record<string, unknown>).target_id, "pol-1");
 });
 
 Deno.test("no_change 的骨架帶著 task_id 與三選一的 outcome", () => {
-  const tpl = buildPayloadTemplate("legacy_audit", "no_change", {}, "auto:legacy_audit:abc");
-  assertEquals(tpl!.task_id, "auto:legacy_audit:abc");
-  assert(String(tpl!.outcome).includes("unreachable"), "三個值都要列出來，代理才知道有哪些路");
+  const tpl = buildReportTemplate("legacy_audit", "no_change", {}, "auto:legacy_audit:abc");
+  assertEquals((tpl!.payload as Record<string, unknown>).task_id, "auto:legacy_audit:abc");
+  assert(String((tpl!.payload as Record<string, unknown>).outcome).includes("unreachable"), "三個值都要列出來，代理才知道有哪些路");
 });
 
 Deno.test("shapeTaskCurrent 帶了 task 才給骨架，沒帶就不給（不要送半成品）", () => {
   const empty = {} as Parameters<typeof shapeTaskCurrent>[1];
-  assert(!("payload_template" in shapeTaskCurrent("candidate_status_stale", empty)));
+  assert(!("report_template" in shapeTaskCurrent("candidate_status_stale", empty)));
   const withTask = shapeTaskCurrent("candidate_status_stale", empty, {
     task_id: "auto:candidate_status_stale:38d16e30-26e3-4c50-9a71-4168116b5f1c",
     target: { politician_id: "p" },
   });
-  assert("payload_template" in withTask, "帶了 task 就要給骨架");
+  assert("report_template" in withTask, "帶了 task 就要給骨架");
 });
 
 Deno.test("rowIdFromTaskId 認 uuid 也認整數，但不亂解不是單一列的", () => {
@@ -195,4 +206,31 @@ Deno.test("rowIdFromTaskId 認 uuid 也認整數，但不亂解不是單一列�
   assertEquals(rowIdFromTaskId("auto:legacy_audit:not-an-id"), null);
   assertEquals(rowIdFromTaskId("38d16e30-26e3-4c50-9a71-4168116b5f1c"), null, "手動任務的 id 不是這個格式");
   assertEquals(rowIdFromTaskId(null), null);
+});
+
+// 2026-09-21 對照實驗：三筆照第一版骨架填完，全部被同一個 400 擋下
+// （source_urls 必填，至少一個可打開的來源網址）；同樣的內容只把 source_urls
+// 移到頂層就全部 201。骨架給了信裡的內容卻沒給信封。
+Deno.test("骨架是整個 request，而且 source_urls 在頂層不在 payload 裡", () => {
+  for (const [taskType, ctype] of [
+    ["candidate_status_stale", "correction"],
+    ["policy_missing", "policy"],
+    ["legacy_audit", "no_change"],
+  ] as const) {
+    const tpl = buildReportTemplate(taskType, ctype, { politician_id: "p", policy_id: "pl" }, `auto:${taskType}:10009`);
+    assert(tpl, `${taskType} 要有骨架`);
+    assert(Array.isArray(tpl!.source_urls), `${taskType} 的骨架要有頂層 source_urls——這是實測最常被擋下的一欄`);
+    assert(!("source_urls" in (tpl!.payload as Record<string, unknown>)), `${taskType} 的 source_urls 不可以放進 payload 裡，位置錯了一樣被擋`);
+    assertEquals(tpl!.contribution_type, ctype);
+    assertEquals(tpl!.kind, "contribute", "代理要知道這是往 /report 送的哪一種");
+    assert("agent_name" in tpl!, "信封要提醒帶代號");
+  }
+});
+
+Deno.test("參選狀態的合法值要在骨架裡，不能只留在散文", () => {
+  const tpl = buildReportTemplate("candidacy_source_missing", "candidacy", { region: "台北市" }, "abc");
+  const status = String((tpl!.payload as Record<string, unknown>).candidate_status);
+  for (const v of ["registered", "not_running", "qualified"]) {
+    assert(status.includes(v), `合法值 ${v} 沒有出現在骨架裡`);
+  }
 });

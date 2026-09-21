@@ -17,7 +17,7 @@
  *   - 直接對著代理講話，它看得到 current 裡的欄位，不必寫 `item.current.` 前綴
  */
 import { POLICY_CATEGORIES } from "./category-map.ts";
-import { POLICY_STATUSES } from "./contribution-schema.ts";
+import { CANDIDATE_STATUSES, POLICY_STATUSES } from "./contribution-schema.ts";
 
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
@@ -65,6 +65,15 @@ export const TASK_GUIDANCE: Record<string, string> = {
   fix_disputed:
     "有人的貢獻被兩票反對擋下來了，任務敘述帶著每一條反對理由。請提一筆**改好的新貢獻**，不要只重送原本那一欄——反對意見指出的連帶問題要一起修掉。",
 
+  not_running_recheck:
+    "這一列被標成「不參選」，但沒有人對過官方登記名單——多半是早期匯入時就這樣寫的。"
+    + "**這個標記的代價很大**：標成不參選之後，這個人的政見、基本資料、參選來源、選舉結果四種缺口都不會再被派給任何人。"
+    + "請打開該縣市選舉委員會的登記公告（或媒體整理的完整登記名單）核對："
+    + "**他在名單上** → correction 把 candidate_status 改成 registered，附那份名單；"
+    + "**確實不在名單上** → no_change 且 outcome=confirmed，checked_urls 放你核對的那份名單；"
+    + "**找不到該縣市的名單** → no_change 且 outcome 填 unreachable 或 not_found，不會蓋章。"
+    + "`source_note` 是匯入來歷，**不要拿它當證據**——實測很多寫著「可能再次挑戰」卻被標成不參選。",
+
   audit:
     "訪客在政見頁貼了一個文件網址。打開它，核對內容與我們既有的相關政見／進度是否一致：不一致就提 correction 或 policy_progress，一致就提 no_change 回報無異動。",
 };
@@ -74,7 +83,6 @@ export const DYNAMIC_GUIDANCE_TYPES = [
   "legacy_audit",
   "duplicate_policy",
   "duplicate_politician",
-  "not_running_recheck",
   "roster_check",
   "question",
   "adjudicate",
@@ -165,7 +173,7 @@ export function rowIdFromTaskId(taskId: string | null | undefined): string | nul
  * 代理只能用 politician_id + election_id + election_type 猜複合鍵。
  * 那個 id 其實一直在 task_id 裡（auto:candidate_status_stale:<pe.id>），只是沒送出去。
  */
-export function buildPayloadTemplate(
+function buildPayload(
   taskType: string,
   contributionType: string,
   target: Record<string, unknown> | null | undefined,
@@ -174,12 +182,16 @@ export function buildPayloadTemplate(
   const t = target ?? {};
   const rowId = rowIdFromTaskId(taskId);
   const table = TARGET_TABLE[taskType];
+  // 一律轉字串：同樣是 politician_elections，從 target 拿到的是整數、從 task_id 解出來的是字串，
+  // 兩種任務給的型別不一樣（2026-09-21 跑任務的代理回報）。送出去都收，但不一致本身就會讓人猶豫。
+  const asText = (v: unknown): string | null => (v === null || v === undefined || v === "" ? null : String(v));
+  const rowTarget = asText(table === "policies" ? t.policy_id : t.politician_election_id) ?? asText(rowId);
   switch (contributionType) {
     case "correction":
       if (!table) return null;
       return {
         target_table: table,
-        target_id: (table === "policies" ? t.policy_id : t.politician_election_id) ?? rowId ?? "（這一列的 id）",
+        target_id: rowTarget ?? "（這一列的 id）",
         changes: [{ field: "（要改的欄位）", current_value: "（資料庫現值）", correct_value: "（正確值）" }],
         reason: "（為什麼是這個值，附你查到的來源）",
       };
@@ -187,7 +199,8 @@ export function buildPayloadTemplate(
       if (!table) return null;
       return {
         target_table: table,
-        target_id: (table === "policies" ? t.policy_id : t.politician_election_id) ?? rowId ?? "（這一列的 id）",
+        // duplicate_policy 沒有單一列：哪一筆該移除是代理要判斷的，所以這裡刻意不填
+        target_id: rowTarget ?? (taskType === "duplicate_policy" ? "（你判定該移除的那一筆 policy_id）" : "（這一列的 id）"),
         reason: "（為什麼整筆不該存在）",
       };
     case "no_change":
@@ -203,7 +216,7 @@ export function buildPayloadTemplate(
         election_id: t.election_id ?? "（選舉年份）",
         election_type: t.election_type ?? "（選舉類型）",
         region: t.region ?? "（縣市）",
-        candidate_status: "（registered／not_running／…）",
+        candidate_status: "（confirmed／registered／qualified／withdrawn／not_running 之一）",
       };
     case "policy":
       return {
@@ -222,6 +235,26 @@ export function buildPayloadTemplate(
         current_position: "（現職）",
         avatar_url: "（https 人像照網址）",
       };
+    case "merge_politician": {
+      const a = (t.a && typeof t.a === "object" ? t.a : {}) as Record<string, unknown>;
+      const b = (t.b && typeof t.b === "object" ? t.b : {}) as Record<string, unknown>;
+      return {
+        same_person: "true 或 false",
+        keep_id: asText(a.id) ?? "（保留哪一筆的 id）",
+        remove_id: asText(b.id) ?? "（併掉哪一筆的 id）",
+        reason: "（≥20 字，說明你憑什麼判定是／不是同一人）",
+      };
+    }
+    case "roster_check":
+      return {
+        region: t.region ?? "（縣市）",
+        election_id: t.election_id ?? "（選舉年份）",
+        election_type: t.election_type ?? "（選舉類型）",
+        ours_count: t.ours_count ?? "（我們現有幾筆）",
+        cec_count: "（官方名單上幾人）",
+        submitted: "（這次補了幾筆）",
+        note: "（你查的是哪一份名單）",
+      };
     case "policy_progress":
       return {
         policy_id: t.policy_id ?? rowId ?? "（政見 id）",
@@ -232,4 +265,34 @@ export function buildPayloadTemplate(
     default:
       return null;
   }
+}
+
+/**
+ * 整個 POST /report 的骨架——包含信封，不只是信裡的內容（2026-09-21 實測）。
+ *
+ * 第一版只給 payload 那一層，結果三筆照骨架填完全部被同一個 400 擋下：
+ * `source_urls 必填，至少一個可打開的來源網址`。它是**頂層**欄位，而骨架沒提過它；
+ * 有一種的 payload_shape 散文裡提了一句，代理就猜成 payload.source_urls，位置還是錯的。
+ * 跑任務的伙伴做了對照實驗：同樣的內容、只把 source_urls 移到頂層，三筆全部 201。
+ *
+ * 教訓是「給了內容卻沒給信封」。所以這裡回整個 request body，代理填空就能送。
+ */
+export function buildReportTemplate(
+  taskType: string,
+  contributionType: string,
+  target: Record<string, unknown> | null | undefined,
+  taskId: string | null | undefined,
+): Record<string, unknown> | null {
+  const payload = buildPayload(taskType, contributionType, target, taskId);
+  if (!payload) return null;
+  return {
+    kind: "contribute",
+    agent_name: "（你的代號）",
+    agent_tool: "（你是什麼 AI，例如 claude-code/claude-sonnet-5）",
+    contribution_type: contributionType,
+    ...(taskId ? { task_id: taskId } : {}),
+    payload,
+    // 頂層，不是 payload 裡面。這一欄就是第一版最常被擋下的原因。
+    source_urls: ["（你實際打開過、而且證明得了這筆的網址）"],
+  };
 }

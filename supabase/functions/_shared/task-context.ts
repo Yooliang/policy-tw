@@ -10,7 +10,7 @@ import { fetchAllRows } from "./fetch-all.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { buildPayloadTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -104,12 +104,12 @@ export function shapeTaskCurrent(
   // 骨架把已知的 id 先填好。candidate_status_stale 要改 politician_elections 的某一列卻沒給
   // 那一列的 id，代理只能猜複合鍵——那個 id 其實一直在 task_id 裡（2026-09-21 實測回報）。
   const target = (task?.target && typeof task.target === "object" ? task.target : null) as Obj | null;
-  const template = task ? buildPayloadTemplate(taskType, suggested, target, task.task_id) : null;
+  const template = task ? buildReportTemplate(taskType, suggested, target, task.task_id) : null;
   return {
     ...inner,
     ...(hint ? { hint } : {}),
     ...(shape ? { payload_shape: shape } : {}),
-    ...(template ? { payload_template: template } : {}),
+    ...(template ? { report_template: template } : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
   };
 }
