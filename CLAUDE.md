@@ -32,6 +32,16 @@ npx supabase functions deploy <function-name>
 
 自 2026-09-13 起，push 到 `main` 就由 GitHub Actions（`.github/workflows/ci.yml`）建置並部署到 Firebase Hosting，且要等型別檢查與 Edge Function 測試都綠。曾經有人從落後的分支本機 build 後手動 deploy，把別人剛上線的改動洗掉——所以**手動 `firebase deploy` 是被明文禁止的動作**。要上線就開 PR 合進 `main`。
 
+### 部署順序：Hosting 先綠，才部署 Edge Function
+
+改動碰到 `public/skill.md`（協議）時，順序是 **合併 → 等 Hosting 綠 → `npx supabase db push` → `npx supabase functions deploy`**。
+
+Hosting 由 CI 跑、要十幾分鐘（預渲染約 16k 頁）；Edge Function 是手動、立刻生效。先部署函式的話，端點會回新版號、線上 `skill.md` 還是舊的——而協議規定「版本不一樣就重讀 <https://policy-tw.web.app/skill.md>」，代理重讀拿到的還是舊版，於是**無限重讀**。2026-09-21 連續發生兩次，外部代理只有那個網址、沒有任何線索知道這是部署時間差。
+
+反過來（文件先新、函式還報舊版號）只會讓代理照舊規則多跑幾分鐘，不會卡住。**文件領先端點是安全方向，端點領先文件不是。**
+
+還有一件連帶的：**連續合併多個 PR 會讓前一個 Hosting 部署被取消**（CI 的 concurrency group）。同一批要上線的東西，合完一個等它綠再合下一個。
+
 ## Architecture
 
 ### Data Layer
