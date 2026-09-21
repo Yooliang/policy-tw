@@ -53,8 +53,9 @@ const cities = [
   { prvCode: '10', cityCode: '017', name: '基隆市' },
   { prvCode: '10', cityCode: '018', name: '新竹市' },
   { prvCode: '10', cityCode: '020', name: '嘉義市' },
-  { prvCode: '09', cityCode: '007', name: '金門縣' },
-  { prvCode: '09', cityCode: '020', name: '連江縣' },
+  // 2026-09-21：原本配反（見 supabase/functions/fetch-cec-data/index.ts 的說明），正確是 007＝連江、020＝金門
+  { prvCode: '09', cityCode: '007', name: '連江縣' },
+  { prvCode: '09', cityCode: '020', name: '金門縣' },
 ]
 
 // themeId

@@ -56,7 +56,10 @@ const CITY_CODES: Record<string, { prv: string; city: string }> = {
   "嘉義縣": { prv: "10", city: "010" }, "屏東縣": { prv: "10", city: "013" }, "台東縣": { prv: "10", city: "014" },
   "花蓮縣": { prv: "10", city: "015" }, "澎湖縣": { prv: "10", city: "016" }, "基隆市": { prv: "10", city: "017" },
   "新竹市": { prv: "10", city: "018" }, "嘉義市": { prv: "10", city: "020" },
-  "金門縣": { prv: "09", city: "007" }, "連江縣": { prv: "09", city: "020" },
+  // 2026-09-21：這兩個代碼原本配反（金門 007／連江 020），整批 2022 金門議員被存成連江、連江存成金門，
+  // electoral_district_areas 也對調。證據是這支自己抓回來的鄉鎮：007 回南竿北竿莒光東引（馬祖）、020 回金城金寧金沙金湖烈嶼烏坵（金門）。
+  // 正確對應：09_007＝連江縣、09_020＝金門縣。_shared/cec-city-codes.test.ts 盯著這兩行與 AdminScraper.vue 那份一致。
+  "連江縣": { prv: "09", city: "007" }, "金門縣": { prv: "09", city: "020" },
 };
 const CITY_NAME_BY_CODE = new Map(Object.entries(CITY_CODES).map(([name, c]) => [`${c.prv}_${c.city}`, name]));
 
