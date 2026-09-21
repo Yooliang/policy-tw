@@ -458,6 +458,66 @@ export interface VerifyContextData {
   /** 派工池（contribution_verify_pool）回的目前分數／目標分數（2026-09-21 票數→分數）；兩者都是數字才附 scoring，缺一就不附（呼叫端沒傳，或池子還沒上這個欄位） */
   score?: number | null;
   target_score?: number | null;
+  /** 這筆既有的票（去識別）：後到的驗證者要看得到前一張反對票的理由與反證，不然只能從頭重查（#7，實例 bd3fedaf 林鑫一） */
+  votes?: Array<{ verdict: string; weight?: number | null; note?: string | null; evidence_url?: string | null; created_at?: string | null }>;
+  /** 提交者附的來源網址；shapeVerifyCurrent 用它算按網域的 source_hints（#4） */
+  source_urls?: string[] | null;
+}
+
+/**
+ * 按網域的查證提示（#4，2026-09-21）。任務側的 hint_sources 傳不到驗證側，沒被特別交代過的代理
+ * 碰到中選會登記頁只看到「這頁只有連結」就卡住。資訊系統早就知道，只是沒送到代理手上。
+ */
+export const SOURCE_HINTS: ReadonlyArray<{ host: RegExp; hint: string }> = [
+  { host: /(^|\.)web\.cec\.gov\.tw$/, hint: "中選會登記公告：名單在頁面的 PDF 附件裡（候選人登記情形一覽表），系統不解析 PDF，你要自己下載讀。逐欄印的名冊不要用 pdftotext -layout（會錯配），各欄各抓成清單再 zip，三欄長度要相等。" },
+  { host: /(^|\.)bulletin\.cec\.gov\.tw$/, hint: "中選會選舉公報：PDF，政見常做成圖，pdftotext 抽到空字串不代表沒有——裁切渲染成圖目視核對。" },
+  { host: /(^|\.)db\.cec\.gov\.tw$/, hint: "中選會候選人資料庫：頁面是 SPA、抓不到正文；直接用 API `/query/api/v1/elections/candidates/query?cand_name=<姓名>`（只有已投票的選舉，2026 登記期不在裡面）。" },
+  { host: /(^|\.)cna\.com\.tw$/, hint: "中央社：不帶瀏覽器 User-Agent 會 403，帶了就 200。" },
+  { host: /(^|\.)chinatimes\.com$/, hint: "中時：Cloudflare 擋程式，帶 UA 仍常 403；改抓 web.archive.org/web/2026/<網址> 的快照。" },
+  { host: /(^|\.)upmedia\.mg$/, hint: "上報：常 403；改抓 archive.org 快照。" },
+  { host: /(^|\.)udn\.com$/, hint: "聯合：舊文常 404（真的下架了，不是擋你）；archive.org 通常有。" },
+];
+
+export function sourceHintsFor(urls: ReadonlyArray<string> | null | undefined): Array<{ url: string; hint: string }> {
+  const out: Array<{ url: string; hint: string }> = [];
+  for (const u of urls ?? []) {
+    let host = "";
+    try { host = new URL(u).hostname.toLowerCase(); } catch { continue; }
+    const m = SOURCE_HINTS.find((h) => h.host.test(host));
+    if (m) out.push({ url: u, hint: m.hint });
+  }
+  return out;
+}
+
+/** 既有票去識別：只留判斷需要的（verdict／分數／理由／反證／時間），不留代號與 IP */
+export function shapeVotes(votes: VerifyContextData["votes"]): Array<Record<string, unknown>> {
+  return (votes ?? []).map((v) => ({
+    verdict: v.verdict,
+    ...(typeof v.weight === "number" ? { weight: v.weight } : {}),
+    ...(v.note ? { note: String(v.note).slice(0, 500) } : {}),
+    ...(v.evidence_url ? { evidence_url: v.evidence_url } : {}),
+    ...(v.created_at ? { at: v.created_at } : {}),
+  }));
+}
+
+/**
+ * 候選人「為什麼被列進來」（#8，2026-09-21）。金門那批 11 筆同名衝突：清單只給了縣市欄位，代理用地理常識
+ * 否決了本人；如果當時帶著「同出生年、2022 第01選舉區當選」，就不會。這裡只講事實，不下結論。
+ */
+export function candidateReasons(candidate: Obj, payload: Obj, elections: ReadonlyArray<Obj>): string[] {
+  const why: string[] = [];
+  const same = (a: unknown, b: unknown) => a !== undefined && a !== null && b !== undefined && b !== null && String(a).trim() !== "" && String(a).trim() === String(b).trim();
+  if (same(candidate.name, payload.name)) why.push("同名");
+  if (same(candidate.birth_year, payload.birth_year)) why.push(`同出生年 ${candidate.birth_year}`);
+  else if (candidate.birth_year && payload.birth_year) why.push(`出生年不同（清單 ${candidate.birth_year}／提交 ${payload.birth_year}）`);
+  if (same(candidate.party, payload.party)) why.push(`同政黨 ${candidate.party}`);
+  if (same(candidate.region, payload.region)) why.push(`同縣市 ${candidate.region}`);
+  else if (candidate.region && payload.region) why.push(`縣市不同（清單 ${candidate.region}／提交 ${payload.region}）——清單的縣市可能標錯，以中選會 API 為準`);
+  const mine = elections.filter((e) => e.politician_id === candidate.id);
+  const sameType = mine.filter((e) => same(e.election_type, payload.election_type));
+  if (sameType.length > 0) why.push(`有 ${sameType.map((e) => `${e.election_id} ${e.election_type}（${e.candidate_status}）`).join("、")} 的紀錄`);
+  if (candidate.current_position) why.push(`現職 ${candidate.current_position}`);
+  return why;
 }
 
 /** 一票最多能加幾分、怎麼拿到滿分：給 shapeVerifyCurrent 的 scoring 區塊用 */
@@ -469,7 +529,7 @@ const VOTE_SCORE_GUIDE = {
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
   new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id",
-  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；兩票指不同（含 new 與某人混）會轉 disputed 進裁決；都沒指認也會轉 disputed",
+  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；指認不一致（含 new 與某人混）或都沒指認 → 這筆退件、缺口回到任務佇列重做（2026-09-21 起沒有裁決）。判斷方法見協議 §2 第 11 條：先用中選會 API 以出生年收斂同名者，再看這次提交跟哪一位相容；查無不是新人的證據",
 } as const;
 
 /**
@@ -478,9 +538,16 @@ const IDENTITY_HINT = {
  * 派工池還沒上這兩欄、或這條路徑沒有分數概念（如 no_change）時，缺一律不附，不要印出 undefined／null 的分數騙代理。
  */
 export function shapeVerifyCurrent(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
-  const inner = shapeVerifyCurrentInner(contributionType, payload, data);
-  if (typeof data.score !== "number" || typeof data.target_score !== "number") return inner;
-  return { ...inner, scoring: { target_score: data.target_score, current_score: data.score, your_vote_could_be: VOTE_SCORE_GUIDE } };
+  let out = shapeVerifyCurrentInner(contributionType, payload, data);
+  if (typeof data.score === "number" && typeof data.target_score === "number") {
+    out = { ...out, scoring: { target_score: data.target_score, current_score: data.score, your_vote_could_be: VOTE_SCORE_GUIDE } };
+  }
+  // #7：既有票公開（去識別）。看得到前一張反對票的理由，後到的人才能針對爭點查、也才看得出盲反對。
+  if (data.votes && data.votes.length > 0) out = { ...out, votes: shapeVotes(data.votes) };
+  // #4：按網域的查證提示
+  const hints = sourceHintsFor(data.source_urls);
+  if (hints.length > 0) out = { ...out, source_hints: hints };
+  return out;
 }
 
 function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
@@ -492,6 +559,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         ...pick(p, POLITICIAN_BRIEF),
         has_avatar: !!p.avatar_url,
         elections: elections.filter((e) => e?.politician_id === p.id).map((e) => `${e?.election_id} ${e?.election_type}（${e?.candidate_status}）`),
+        // #8：為什麼被列進來——只講事實（同名／同出生年／同縣市／有哪一屆的紀錄），結論由你下
+        why: candidateReasons(p, payload, (data.elections ?? []) as Obj[]),
       }));
       const decision = data.identity?.decision ?? null;
       return {

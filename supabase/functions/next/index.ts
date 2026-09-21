@@ -9,7 +9,7 @@ import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
-import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent } from "../_shared/task-context.ts";
+import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
@@ -280,10 +280,15 @@ Deno.serve(async (req) => {
       }
       const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
       const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload);
+      // #7（2026-09-21）：既有票一併送去（去識別在 shapeVotes 做）。query-bounds: ok — 一筆貢獻的票是個位數
+      const { data: priorVotes } = await supabase.from("contribution_votes")
+        .select("verdict, weight, note, evidence_url, created_at").eq("contribution_id", pick.id).order("created_at", { ascending: true }).limit(50);
       // 分數（2026-09-21 票數→分數）：池子回 target_score 就用它，舊池子只有 effective_required 時退回它；
       // 兩者都沒有就不傳，shapeVerifyCurrent 會照舊不附 scoring 區塊
       const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, {
         ...verifyContext,
+        votes: (priorVotes ?? []) as VerifyContextData["votes"],
+        source_urls: Array.isArray(pick.source_urls) ? (pick.source_urls as string[]) : null,
         score: pick.score,
         target_score: typeof pick.target_score === "number" ? pick.target_score : pick.effective_required,
       });
