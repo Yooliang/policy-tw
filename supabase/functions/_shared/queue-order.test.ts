@@ -4,16 +4,16 @@ import {
   manualTaskTier,
   pickQueuedManual,
   queueKeyBefore,
-  TIER_ADJUDICATION,
   TIER_MAYOR_POLICY,
   TIER_MAYOR_PROFILE,
   TIER_REST,
-  TIER_WEB_REQUEST,
 } from "./dispatch.ts";
 
-// 這組測試盯的是 2026-09-21 那個裁示：
+// 這組測試盯的是 2026-09-21 的兩個裁示：
 //   「任務一建立它就是最快會被進行的，之後就照著流程走。」
-// 以及它的邊界：不能為了做到這件事，讓 86 筆裁決排到 926 筆沒派過的自動缺口後面。
+//   「我們要的是盡可能覆蓋任務數量，而不是把一個任務做到完成，
+//     所以『領完就走』這件事情是優先的。」
+// 第二條推翻了第一版給裁決與訪客觸發留層的做法——貴的工作不該卡在便宜的前面。
 
 Deno.test("沒派過的排在派過的前面", () => {
   assertEquals(queueKeyBefore(
@@ -33,13 +33,21 @@ Deno.test("同層比最久沒派", () => {
   ), true);
 });
 
-Deno.test("層級勝過時間：沒派過的低層仍排在派過的高層後面", () => {
-  // 這條是重點。裁決（層 2）雖然全都派過了，仍然排在從沒派過的一般缺口（層 4）前面——
-  // 不這樣的話，實測 926 筆沒派過的自動缺口會把 86 筆裁決壓好幾週。
+Deno.test("層級勝過時間：縣市長就算剛派過，仍排在沒派過的一般缺口前面", () => {
+  // 只剩使用者明確指定的那一層有這個特權。裁決沒有——它跟所有缺口一起輪。
   assertEquals(queueKeyBefore(
-    { tier: TIER_ADJUDICATION, lastDispatchedAt: "2026-09-21T00:00:00Z" },
+    { tier: TIER_MAYOR_PROFILE, lastDispatchedAt: "2026-09-21T00:00:00Z" },
     { tier: TIER_REST, lastDispatchedAt: null },
   ), true);
+});
+
+Deno.test("裁決不插隊：派過的裁決排在沒派過的缺口後面", () => {
+  // 覆蓋率優先。裁決是最貴、最可能做不完的工作，讓它卡在 926 筆便宜的補資料前面，
+  // 就是「900 輪只換到 50 筆上線資料」的成因。
+  assertEquals(queueKeyBefore(
+    { tier: manualTaskTier("auto_dispute"), lastDispatchedAt: "2026-09-21T00:00:00Z" },
+    { tier: TIER_REST, lastDispatchedAt: null },
+  ), false);
 });
 
 Deno.test("完全相同不算在前面（避免比較器不穩定）", () => {
@@ -49,14 +57,10 @@ Deno.test("完全相同不算在前面（避免比較器不穩定）", () => {
   ), false);
 });
 
-Deno.test("手動任務的層級只認裁決與訪客觸發", () => {
-  assertEquals(manualTaskTier("auto_dispute"), TIER_ADJUDICATION);
-  assertEquals(manualTaskTier("web_request"), TIER_WEB_REQUEST);
-  // 維護者建的與外部提議通過的，跟自動缺口平等——這就是「整個手動清單不再卡在最前面」
-  assertEquals(manualTaskTier("manual"), TIER_REST);
-  assertEquals(manualTaskTier("suggested"), TIER_REST);
-  assertEquals(manualTaskTier(null), TIER_REST);
-  assertEquals(manualTaskTier(undefined), TIER_REST);
+Deno.test("手動任務一律落在共同池，沒有任何 source 可以插隊", () => {
+  for (const source of ["auto_dispute", "web_request", "manual", "suggested", null, undefined]) {
+    assertEquals(manualTaskTier(source), TIER_REST, `${source} 不該有自己的層`);
+  }
 });
 
 Deno.test("自動缺口只有縣市長那兩層有意義", () => {
@@ -69,12 +73,13 @@ Deno.test("自動缺口只有縣市長那兩層有意義", () => {
   assertEquals(autoTaskTier("0"), TIER_REST);
 });
 
-Deno.test("pickQueuedManual：新建的維護者任務贏過派過的裁決嗎——不該贏", () => {
+Deno.test("pickQueuedManual：新建的維護者任務贏過派過的裁決", () => {
+  // 第一版這條的期望是相反的（裁決贏）。覆蓋率優先之後改過來：沒派過的先派。
   const picked = pickQueuedManual([
     { source: "manual", last_dispatched_at: null },
     { source: "auto_dispute", last_dispatched_at: "2026-09-21T00:00:00Z" },
   ], "seed");
-  assertEquals(picked?.source, "auto_dispute");
+  assertEquals(picked?.source, "manual");
 });
 
 Deno.test("pickQueuedManual：同層時新建的排最前", () => {

@@ -335,22 +335,35 @@ export function pickBySeed<T>(list: readonly T[], seed: string): T | null {
 //
 // 所以兩邊排進同一個比較器：先比層級，同層比「最久沒派」（沒派過的算最久）。
 //
-// 為什麼不是全部混在一起只按 last_dispatched_at 排——這是實測數字擋下來的：
-// 自動缺口 1,168 筆可派、其中 926 筆從沒派過；86 筆裁決全都派過了。混排會讓裁決
-// 排在那 926 筆後面，以現在的速度是好幾週，等於把 2026-09-21 早上才救活的裁決線
-// 再餓死一次。所以裁決與訪客觸發各留一層，其餘手動與自動全部平等。
+// ------------------------------------------------------------
+// 覆蓋率優先（使用者 2026-09-21，這一段推翻了本檔的第一版）
+//
+// 第一版給裁決與訪客觸發各留了一層，理由是「86 筆裁決會排在 926 筆沒派過的缺口
+// 後面、要好幾週，等於餓死裁決線」。那個數字是真的，結論是錯的。使用者：
+//
+//   「我們要的是盡可能覆蓋任務數量，而不是把一個任務做到完成，所以『領完就走』
+//     這件事情是優先的。輪了 900 次之後，我們就有可能出現 300 筆上線的資料；
+//     可是你如果把一筆複雜的任務卡在前面，900 筆過後可能只有 50 筆上線資料。」
+//
+// 裁決正是最貴、最可能做不完的那種工作。讓它插在 926 筆便宜的補資料前面，就是
+// 「一筆複雜任務卡在前面」的實例——我原本以為在保護它，其實是在壓低整體產出。
+//
+// 所以只剩兩層：使用者明確指定要最先做的（2026 縣市長），以及其餘全部。
+// 其餘那層裡不分手動自動、不分裁決與缺口，一律照「最久沒派」輪，派出去就蓋章
+// 回到隊尾——簡單的當場結案離開池子，複雜的自然被推到下一輪。
 // ============================================================
 
 /** 2026 縣市長的基本資料（task_priority_tier 回 0） */
 export const TIER_MAYOR_PROFILE = 0;
 /** 2026 縣市長的政見（task_priority_tier 回 1） */
 export const TIER_MAYOR_POLICY = 1;
-/** 爭議裁決：卡著別人的貢獻不能收斂，時效性最強 */
-export const TIER_ADJUDICATION = 2;
-/** 網站「請 AI 幫忙查」按鈕：有訪客在等 */
-export const TIER_WEB_REQUEST = 3;
-/** 其餘全部同一池：手動的 manual／suggested ＋ 所有其他自動缺口 */
-export const TIER_REST = 4;
+/**
+ * 其餘全部同一池——手動的、裁決、訪客觸發、所有自動缺口，一律平等。
+ *
+ * 2026-09-21 第二版：原本裁決（2）與訪客觸發（3）各有一層，那是錯的，理由見上面
+ * 「覆蓋率優先」那段。這個常數留成 2 而不是 4，是因為它現在真的只是第三層。
+ */
+export const TIER_REST = 2;
 
 export interface QueueKey {
   tier: number;
@@ -368,14 +381,12 @@ export function queueKeyBefore(a: QueueKey, b: QueueKey): boolean {
 }
 
 /**
- * 手動任務的層級由 source 決定。
- * 只有裁決與訪客觸發各自有層；維護者建的（manual）與外部提議通過的（suggested）
- * 都落到 TIER_REST，跟自動缺口平等——新建的那筆 last_dispatched_at 是 null，
- * 自然排最前；派過一次就跟大家一起輪。這就是使用者要的行為。
+ * 手動任務一律落在共同池。
+ *
+ * 參數留著（呼叫端還是傳 source 進來）是為了讓「曾經想用 source 分層、後來否決了」
+ * 這件事在型別上留下痕跡——下一個想加層的人會先看到這段註解。
  */
-export function manualTaskTier(source: string | null | undefined): number {
-  if (source === "auto_dispute") return TIER_ADJUDICATION;
-  if (source === "web_request") return TIER_WEB_REQUEST;
+export function manualTaskTier(_source: string | null | undefined): number {
   return TIER_REST;
 }
 
