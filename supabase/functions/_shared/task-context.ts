@@ -71,8 +71,25 @@ function pick(row: Obj | null | undefined, keys: readonly string[]): Obj | null 
   return Object.fromEntries(keys.map((k) => [k, row[k] ?? null]));
 }
 
-/** 純函式：依 task_type 組 current */
+/**
+ * 任何一種任務最後都可能以 no_change 收尾，而 outcome 從 2026-09-21 起是必填的
+ * （沒填會被 schema 擋下 400）。十幾條任務敘述散在 SQL 與這支檔案裡，逐條補字遲早漏一條，
+ * 所以改成每個任務的 current 都帶著這份說明——代理讀 item 就看得到，不必回頭翻協議。
+ * 現場實例：legacy_audit 的提示還停在「都對 → no_change」，照它送會被 400 擋。
+ */
+export const NO_CHANGE_OUTCOMES_HINT = {
+  confirmed: "你打開了來源，來源支持這筆資料、內容無誤（只有這個值會把資料標成已核對）",
+  unreachable: "拿不到來源內容：打不開、逾時、付費牆、或被導去不相干的頁面。填之前至少試過瀏覽器 UA、站內搜尋／另一家媒體、web.archive.org（遇 429 要退避重試）",
+  not_found: "查了，公開資料找不到：找不到這項東西，或找不到任何能證明這筆宣稱的來源",
+  _note: "來源打得開、主題也相關、但那一頁沒寫到這筆宣稱 → 先找真出處，找到用 correction 換 source_url，確實找不到才 no_change + not_found。來源與資料矛盾 → correction 或 removal，不要回 no_change",
+} as const;
+
+/** 純函式：依 task_type 組 current（尾端統一補上 no_change 的 outcome 說明） */
 export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
+  return { ...shapeTaskCurrentInner(taskType, data), no_change_outcomes: NO_CHANGE_OUTCOMES_HINT };
+}
+
+function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
   const p = data.politician ?? null;
   switch (taskType) {
     case "policy_missing": {
@@ -154,7 +171,7 @@ export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
         politician: pick(p, POLITICIAN_BRIEF),
         elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
         system_check: data.system_check ?? null,
-        hint: "打開 policy.source_url：這是不是這個人說過的承諾、標題與內容對不對、是哪一場選舉的。都對 → no_change（note 寫你核對到什麼）；欄位錯 → correction；不是政見 → removal。system_check 是系統逐欄核對的結果，contradicted 的欄位優先看。",
+        hint: "打開 policy.source_url：這是不是這個人說過的承諾、標題與內容對不對、是哪一場選舉的。都對 → no_change 且 outcome=confirmed（note 寫你核對到什麼，只有 confirmed 會把這筆標成已核對）；來源拿不到 → no_change 且 outcome=unreachable（不會標成已核對，過幾天換人再試）；來源打得開卻沒寫到這筆政見 → 先找真出處，找到用 correction 換 source_url、找不到才 no_change + not_found；欄位錯 → correction；不是政見 → removal。**每一個網址都要打開**，同批匯入的政見會互相借錯連結。system_check 是系統逐欄核對的結果，contradicted 的欄位優先看；它判 cannot_tell 是「系統看不出來」，不是背書。",
       };
     }
     case "duplicate_policy": {
@@ -466,8 +483,17 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
     // 2026-09-20 審查建議 5：這幾種型別的驗證項原本只有 payload，驗證者只能照 reason 投
     case "merge_politician":
       return data.pair_current ?? { hint: "找不到那兩筆人物（可能已合併或不存在）：投 unsure" };
-    case "adjudication":
-      return data.adjudicate_current ?? {};
+    case "adjudication": {
+      // 任務端的 current（含 hint）是寫給「要提交一份裁決」的人看的——uphold／reject 是那一側的詞彙。
+      // 驗證回合要做的事完全不同：對別人交的那份裁決投 agree／disagree／unsure。
+      // 2026-09-21 之前這裡直接把任務端的 current 原樣回傳，於是教投票的人送 verdict:"reject"，
+      // 被 schema 擋下 400（ballyhoo-4d 的子代理實際撞到）。hint 要換成驗證端的。
+      const { hint: _submitHint, ...rest } = (data.adjudicate_current ?? {}) as Obj;
+      return {
+        ...rest,
+        hint: "你要判的是**這份裁決站不站得住**，不是自己重判一次爭議：contribution 是被裁決的原貢獻、votes 是它的正反票，payload.verdict／reason／checked_urls 是裁決者的結論與理由。打開它列的 checked_urls，看理由是否從那些來源推得出來、有沒有漏掉反方的反證。站得住投 agree、推不出來或與來源矛盾投 disagree（附 evidence_url 與 note）、看不出來投 unsure。**你這一票是 agree／disagree／unsure**，uphold／reject 是裁決者提交時用的詞，不要填進 verdict。",
+      };
+    }
     case "removal":
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null,
