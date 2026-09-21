@@ -27,10 +27,14 @@ When this skill is invoked, follow these steps:
 For each politician name, use the Wikipedia API to find their image:
 
 ```bash
-curl -s "https://zh.wikipedia.org/w/api.php?action=query&titles={URL_ENCODED_NAME}&prop=pageimages&format=json&pithumbsize=220" -H "User-Agent: Mozilla/5.0"
+curl -s "https://zh.wikipedia.org/w/api.php?action=query&titles={URL_ENCODED_NAME}&prop=pageimages&format=json&pithumbsize=250&redirects=1" -H "User-Agent: Mozilla/5.0"
 ```
 
 The response will contain a `thumbnail.source` field with the image URL if available.
+
+**寬度一定用 250／330／500 其中之一**（2026-09-22）：Wikimedia 對外只供這幾種縮圖，220px 整批回 400、頭像空白（那天 24 人中招）。
+`update-avatar` 現在會自動把其他寬度換成允許值（`_shared/avatar-url.ts`），但這裡就直接要 250。
+存進資料庫前把 `?utm_source=…` 這串查詢參數去掉。原檔在 Commons 被刪或改名時（柯文哲、盧秀燕 2026-09-22 那批）要重查，不是改寬度。
 
 ### Step 3: Handle Special Cases
 
