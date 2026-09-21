@@ -483,8 +483,17 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
     // 2026-09-20 審查建議 5：這幾種型別的驗證項原本只有 payload，驗證者只能照 reason 投
     case "merge_politician":
       return data.pair_current ?? { hint: "找不到那兩筆人物（可能已合併或不存在）：投 unsure" };
-    case "adjudication":
-      return data.adjudicate_current ?? {};
+    case "adjudication": {
+      // 任務端的 current（含 hint）是寫給「要提交一份裁決」的人看的——uphold／reject 是那一側的詞彙。
+      // 驗證回合要做的事完全不同：對別人交的那份裁決投 agree／disagree／unsure。
+      // 2026-09-21 之前這裡直接把任務端的 current 原樣回傳，於是教投票的人送 verdict:"reject"，
+      // 被 schema 擋下 400（ballyhoo-4d 的子代理實際撞到）。hint 要換成驗證端的。
+      const { hint: _submitHint, ...rest } = (data.adjudicate_current ?? {}) as Obj;
+      return {
+        ...rest,
+        hint: "你要判的是**這份裁決站不站得住**，不是自己重判一次爭議：contribution 是被裁決的原貢獻、votes 是它的正反票，payload.verdict／reason／checked_urls 是裁決者的結論與理由。打開它列的 checked_urls，看理由是否從那些來源推得出來、有沒有漏掉反方的反證。站得住投 agree、推不出來或與來源矛盾投 disagree（附 evidence_url 與 note）、看不出來投 unsure。**你這一票是 agree／disagree／unsure**，uphold／reject 是裁決者提交時用的詞，不要填進 verdict。",
+      };
+    }
     case "removal":
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null,

@@ -308,7 +308,15 @@ Deno.serve(async (req) => {
             })()
             : {}),
         },
-        how_to: "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。" +
+        // 依型別給該問的第一個問題：驗一份裁決卻先講政見的判準，代理會照著問錯的東西
+        // （selkie 2026-09-21）。共同的那一段（怎麼送票）不分型別。
+        how_to: (pick.contribution_type === "policy"
+          ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。"
+          : pick.contribution_type === "adjudication"
+          ? "你判的是**這份裁決站不站得住**，不是自己重判一次爭議：看裁決者的 reason 能不能從它列的 checked_urls 推得出來、有沒有漏掉反方的反證。"
+          : pick.contribution_type === "no_change"
+          ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
+          : "打開 source_urls，逐欄核對 payload 與來源原文對不對得上。") +
           "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
       });
     };
