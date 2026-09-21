@@ -206,10 +206,15 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   assert(eff.includes("GREATEST(1, v_need - 1)"), "supported → 門檻 −1 且最少 1");
   assert(eff.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
-  assert(pool.includes("c.agree_count < contribution_effective_agree(c.id)"), "派工池要用有效門檻，否則 not_supported 的那筆永久卡住");
+  // 2026-09-21 分數制：達標判斷看 score，不看 agree_count；目標仍是有效門檻那一支函式
+  assert(pool.includes("c.score < contribution_effective_agree(c.id)"), "派工池要用分數對有效門檻，否則 not_supported 的那筆永久卡住");
   assert(pool.includes("effective_required"), "池子要把有效門檻回給 /next");
-  assert(fn.includes("IF v_disagree >= 2 THEN v_new := 'disputed'"), "兩張代理反對才是爭議");
-  assert(fn.includes("v_agree >= v_need_eff AND v_disagree <= 1 THEN v_new := 'verified'"), "達標且反對 ≤1 就通過");
+  assert(pool.includes("target_score"), "池子要把目標分數回給 /next（代理要知道自己這票能推多遠）");
+  // 裁決退場：兩張反對不再變 disputed，跌到 −目標直接退件
+  assert(!fn.includes("v_new := 'disputed'"), "分數制不再產生 disputed");
+  assert(fn.includes("IF v_score <= -v_target THEN"), "跌到 −目標 → rejected");
+  assert(fn.includes("v_score >= v_target"), "達到目標 → verified");
+  assert(fn.includes("score = v_score"), "累計分數要寫回 contributions.score");
   assert(fn.includes("agree_count = v_agree"), "agree_count 仍是純代理票，系統票不混進去");
   const elig = await latestMigrationDefining("FUNCTION system_vote_eligible");
   for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assert(elig.includes(`'${t}'`), `SQL 合格型別缺 ${t}`);

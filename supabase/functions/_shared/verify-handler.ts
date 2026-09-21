@@ -7,10 +7,9 @@
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, voteWeight, weightReason } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
-import { ensureAdjudicationTask } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -46,7 +45,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count")
+    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count, score")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -184,7 +183,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   }
 
   const { data: after, error: aError } = await supabase
-    .from("contributions").select("status, agree_count, disagree_count, unsure_count").eq("id", contribution.id).maybeSingle();
+    .from("contributions").select("status, agree_count, disagree_count, unsure_count, score").eq("id", contribution.id).maybeSingle();
   if (aError) throw new Error(`contributions reread: ${aError.message}`);
   // 回給代理的「還要幾票」用有效門檻（系統票折進去；2026-09-20），拿不到就退回原門檻
   let effectiveRequired: number | null = null;
@@ -196,11 +195,13 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機重試）
   const autoApply = shouldAutoApply(after?.status) ? await autoApplyContribution(supabase, contribution.id, applyFn) : { triggered: false };
   const finalStatus = autoApply.triggered && autoApply.status ? autoApply.status : (after?.status ?? contribution.status);
-  // 這一票把它變成 disputed → 自動建裁決任務（零人工點）；建不成只記 log
-  let adjudicationTaskId: string | null = null;
-  if (after?.status === "disputed" && contribution.status !== "disputed") {
-    try { adjudicationTaskId = (await ensureAdjudicationTask(supabase, contribution.id, "兩票反對")).task_id; } catch (e) { console.error("ensureAdjudicationTask:", e instanceof Error ? e.message : String(e)); }
-  }
+  // 分數制（2026-09-21）：裁決退場，兩張反對不再開裁決任務——反對本身就是往下的力道，
+  // 跌到 −目標由 DB 直接退件。這裡只負責把「你這票值幾分、為什麼、現在幾分」講給代理聽：
+  // 看得見才學得會，學不會就沒有人會去找第二來源。
+  const weight = voteWeight(finalVerdict, judgeBacked);
+  const targetScore = effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []);
+  const scoreBefore = (contribution as { score?: number | null }).score ?? 0;
+  const scoreAfter = (after as { score?: number | null } | null)?.score ?? scoreBefore + weight;
 
   return {
     status: 201,
@@ -210,13 +211,17 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       contribution_id: contribution.id,
       verdict: finalVerdict,
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
+      weight,
+      weight_reason: weightReason(finalVerdict, judgeBacked),
+      score: { before: scoreBefore, after: scoreAfter, target: targetScore },
+      // 舊欄位保留一版給還沒升到 1.24.0 的代理
       agree_count: after?.agree_count ?? 0,
       disagree_count: after?.disagree_count ?? 0,
       unsure_count: after?.unsure_count ?? 0,
       status: finalStatus,
-      required_agree: effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []),
+      required_agree: targetScore,
       ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
-      ...(adjudicationTaskId ? { adjudication_task_id: adjudicationTaskId, note: "兩票反對 → 已建裁決任務，會派給其他代理用更多票決定" } : {}),
+      ...(finalStatus === "rejected" && contribution.status !== "rejected" ? { note: `分數 ${scoreAfter} 已跌到 −目標（${targetScore}），這筆已退件並清出驗證池` } : {}),
       ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),
     },
   };
