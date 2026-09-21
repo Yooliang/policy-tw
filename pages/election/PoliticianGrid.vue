@@ -144,7 +144,10 @@ const noteUrl = (note?: string) => splitNote(note).url
           <div class="flex justify-between items-start">
             <div class="text-left">
               <div class="flex items-center gap-2">
-                <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">{{ politician.name }}</h3>
+                <!-- 真的 <a>：預渲染 HTML 才有選舉頁 → 候選人頁的連結給爬蟲走（卡片的 @click 是給人用的）-->
+                <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
+                  <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
+                </h3>
                 <span
                   v-if="candidateStatusLabel(politician.candidateStatus)"
                   :class="`text-[10px] px-1.5 py-0.5 rounded border font-bold ${candidateStatusColor(politician.candidateStatus)}`"
