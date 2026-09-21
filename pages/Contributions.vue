@@ -193,6 +193,19 @@ function detailOf(id: string): HistoryEntry | null {
   return d && typeof d === 'object' ? d : null
 }
 
+/** 通過之後這筆「做了什麼」——移除不是上線（使用者 2026-09-21：「建議移除上面寫的『已上線』，到底是移除了還是沒移除？」） */
+const APPLIED_LABEL: Record<string, string> = { removal: '已移除', correction: '已更正', policy_progress: '已更新進度', merge_politician: '已合併', no_change: '已確認無異動' }
+function statusLabel(it: FeedItem): string {
+  if (it.status === 'applied') return APPLIED_LABEL[it.contribution_type] ?? '已上線'
+  return STATUS_LABEL[it.status] ?? it.status
+}
+/** 拉鋸條：左端 −目標＝退件、右端 ＋目標＝通過，標記在現在的分數。回 0～100 的百分比。 */
+function scorePercent(it: FeedItem): number {
+  const t = Math.max(1, it.target_score ?? it.required_agree ?? 1)
+  const s = Math.max(-t, Math.min(t, it.score ?? 0))
+  return Math.round(((s + t) / (2 * t)) * 100)
+}
+
 /** 這一列剛剛發生什麼事：投票要帶分數，看不懂的變動就不顯示 */
 function activityOf(it: FeedItem): string | null {
   return activityText(it.last_activity, { score: it.score ?? 0, target: it.target_score ?? it.required_agree })
@@ -300,21 +313,26 @@ usePageHead({
               <div class="flex flex-wrap items-center gap-2 mb-1.5">
                 <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TYPE_LABEL[it.contribution_type] ?? it.contribution_type }}</span>
                 <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full border', STATUS_CLASS[it.status] ?? 'bg-slate-100 text-slate-600 border-slate-200']">
-                  {{ STATUS_LABEL[it.status] ?? it.status }}
+                  {{ statusLabel(it) }}
                 </span>
-                <!-- 分數進度：目標幾分就畫幾個小方塊，綠的＝已經累積到的分數（負分時全灰）。
-                     同樣的資訊，佔 30px 而不是一行字。 -->
+                <!-- 拉鋸條（使用者 2026-09-21）：不是按讚數，是兩邊角力——左端 −目標＝退件、右端 ＋目標＝通過，
+                     標記在現在的分數。從中線往右填綠、往左填紅。 -->
                 <span
-                  v-if="it.status === 'pending' && it.target_score > 0"
-                  class="inline-flex items-center gap-px"
-                  :title="`分數 ${it.score}／目標 ${it.target_score}`"
+                  v-if="(it.target_score ?? 0) > 0"
+                  class="inline-flex items-center gap-1 text-[10px] tabular-nums text-slate-400"
+                  :title="`分數 ${it.score}／通過 ${it.target_score}、退件 −${it.target_score}（同意 ${it.agree_count}・反對 ${it.disagree_count}・存疑 ${it.unsure_count}）`"
                 >
-                  <span
-                    v-for="n in it.target_score"
-                    :key="n"
-                    class="w-1 h-2.5 rounded-[1px]"
-                    :class="n <= it.score ? 'bg-emerald-500' : 'bg-slate-200'"
-                  ></span>
+                  <span class="text-red-500">−{{ it.target_score }}</span>
+                  <span class="relative inline-block w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <span class="absolute top-0 bottom-0 left-1/2 w-px bg-slate-400"></span>
+                    <span
+                      class="absolute top-0 bottom-0"
+                      :class="(it.score ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500'"
+                      :style="(it.score ?? 0) >= 0 ? { left: '50%', width: `${scorePercent(it) - 50}%` } : { left: `${scorePercent(it)}%`, width: `${50 - scorePercent(it)}%` }"
+                    ></span>
+                    <span class="absolute -top-0.5 w-1 h-3 rounded-sm bg-navy-900" :style="{ left: `calc(${scorePercent(it)}% - 2px)` }"></span>
+                  </span>
+                  <span class="text-emerald-600">+{{ it.target_score }}</span>
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
@@ -323,18 +341,8 @@ usePageHead({
               <p v-if="activityOf(it)" class="mt-1 text-xs font-bold text-violet-700">{{ activityOf(it) }}</p>
               <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>{{ it.agent_name }}<span v-if="it.agent_tool" class="text-slate-400">・{{ it.agent_tool }}</span></span>
-                <!-- 圖示自己說明是什麼票，文字移到 title；滑過去才顯示 -->
-                <span class="inline-flex items-center gap-1">
-                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 tabular-nums" title="同意">
-                    <ThumbsUp :size="11" />{{ it.agree_count }}
-                  </span>
-                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 tabular-nums" title="反對">
-                    <ThumbsDown :size="11" />{{ it.disagree_count }}
-                  </span>
-                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 tabular-nums" title="不確定">
-                    <HelpCircle :size="11" />{{ it.unsure_count }}
-                  </span>
-                </span>
+                <!-- 票數膠囊拿掉了（2026-09-21）：分數制下「幾個讚」不是有意義的量，拉鋸條才是；票數留在它的 title -->
+                <span class="tabular-nums" :class="(it.score ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700'">{{ (it.score ?? 0) > 0 ? '+' : '' }}{{ it.score ?? 0 }} 分</span>
                 <span v-if="it.source_urls.length" class="inline-flex items-center gap-1"><LinkIcon :size="12" />{{ hostOf(it.source_urls[0]) }}<template v-if="it.source_urls.length > 1"> 等 {{ it.source_urls.length }} 個</template></span>
                 <component :is="expanded.has(it.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
               </div>
@@ -372,7 +380,7 @@ usePageHead({
               </div>
               <!-- 票數門檻只在還在等票時講。撤回／退件／還原的已經退出驗證池，不會有人被派到，
                    照印「需要 2 票同意」會讓人以為撤回還要等人投票（2026-09-21 使用者看動態牆發現）。 -->
-              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} 上線</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
+              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-else-if="it.status === 'rejected'">跌到 −{{ it.target_score }} 分退件</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} {{ it.contribution_type === 'removal' ? '移除' : '上線' }}</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
             </div>
           </li>
         </ul>
