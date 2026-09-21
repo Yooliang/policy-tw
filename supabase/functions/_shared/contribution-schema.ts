@@ -10,11 +10,18 @@ import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "legacy_audit", "policy_election_mismatch", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "legacy_audit", "policy_election_mismatch", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
 export const ADJUDICATION_VERDICTS = ["uphold", "reject"] as const;
+/**
+ * no_change 在主張哪一件事（2026-09-21）。原本一種型別承載四種主張，其中兩種是
+ * 「我沒能確認」被記成「我確認了」——legacy_audit 還會照著蓋「已核對來源」的章，
+ * 而蓋完章那筆政見就永遠不再被派。分成三個值之後，「我拿不到來源」有了一個
+ * 合法、填得下去的答案，代理不必為了交差去編一個打得開的網址。
+ */
+export const NO_CHANGE_OUTCOMES = ["confirmed", "unreachable", "not_found"] as const;
 /** 身份指認：候選人物的 uuid，或 "new"（都不是，建新人物） */
 export const IDENTITY_PICK_NEW = "new";
 export function isIdentityPick(v: unknown): v is string {
@@ -262,6 +269,9 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "no_change": {
       // 查完發現與資料庫一致：只關任務、不改資料；checked_urls 就是驗證者要核對的來源
       if (!isStr(p.task_id, 1, 160)) push("payload.task_id", "task_id 必填（/next 給的 task_id）");
+      if (!oneOf(NO_CHANGE_OUTCOMES, p.outcome)) {
+        push("payload.outcome", "outcome 必填：confirmed（來源支持、資料無誤）／unreachable（拿不到來源內容，未能確認）／not_found（公開資料就是沒有）。拿不到來源就填 unreachable，不要填 confirmed——只有 confirmed 會把資料標成已核對");
+      }
       if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
       if (!isStr(p.finding, 10, 2000)) push("payload.finding", "finding 必填（≥10 字：核對了什麼、為什麼判定沒有異動）");
       break;

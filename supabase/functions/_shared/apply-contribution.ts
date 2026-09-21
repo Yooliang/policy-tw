@@ -588,6 +588,8 @@ async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow)
 /** no_change：代理核對後確認與資料庫一致 → 只關閉該任務、不動任何正式資料（自動缺口任務沒有列可關，只記錄） */
 /** 跟 SQL 的 task_check_cooldown_days() 同一個數字；改一邊要改另一邊，thresholds 測試會比對 */
 export const TASK_CHECK_COOLDOWN_DAYS = 14;
+/** 跟 SQL 的 task_unreachable_cooldown_days() 同一個數字；「我拿不到來源」是換人再試，不是結案 */
+export const TASK_UNREACHABLE_COOLDOWN_DAYS = 2;
 
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
@@ -596,11 +598,15 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 自動缺口不是靠關閉任務消失的，它是即時算出來的。所以「查過了、沒東西可補」
     // 原本完全不留痕跡，同一筆死路會被無限重派給每一個代理，每個人都白跑一次。
     // 記一筆 task_checks，冷卻期內不再派；過期再出現，因為世界會變。
+    // outcome 決定這筆「查過」到底是哪一種主張；2026-09-21 之前的舊資料沒有這個欄位，
+    // 一律當成「不是 confirmed」——不蓋章比誤蓋安全，章一蓋那筆政見就永遠不再被派。
+    const outcome = str(row.payload.outcome) ?? null;
     const check = {
       task_id: taskId,
       agent_name: row.agent_name,
       note: str(row.payload.finding) ?? str(row.payload.note) ?? row.note ?? null,
       contribution_id: row.id,
+      outcome,
     };
     const { error } = await supabase.from("task_checks").insert(check);
     throwIf(error, "task_checks insert");
@@ -610,6 +616,18 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 早期匯入核對（2026-09-20）：no_change 通過＝這筆政見查核過了。寫一列 policies.audit，
     // 頁面的「尚未查核」變「已查核」、legacy_audit 任務隨之消失（它的條件是「沒有任何查核履歷」）
     const legacy = /^auto:legacy_audit:([0-9a-f-]{36})$/i.exec(taskId);
+    if (legacy && outcome !== "confirmed") {
+      // 拿不到來源、或公開資料就是沒有：記下來進冷卻，但不可以宣稱核對過。
+      // 蓋章的條件是「來源支持、資料無誤」，不是「有人回報過」。
+      return {
+        status: "applied",
+        message: outcome === "unreachable"
+          ? `已記錄「拿不到來源、未能確認」：這筆政見**不會**被標成已核對，${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試`
+          : "已記錄「公開資料查不到」：這筆政見不會被標成已核對",
+        task_id: taskId,
+        policy_id: legacy[1],
+      };
+    }
     if (legacy) {
       const { data: pl } = await supabase.from("policies").select("id, source_url").eq("id", legacy[1]).maybeSingle();
       if (pl) {
@@ -624,12 +642,25 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 記進 policy_dupe_reviews（鍵是清單指紋）就永遠不再派——同一份清單 14 天後再問一次還是同一個答案。
     // 新增、編輯或移除任何一筆政見，指紋就變，任務自己重新出現。
     const dupe = /^auto:duplicate_policy:([0-9a-f-]{36}):([0-9a-f]{8})$/i.exec(taskId);
+    if (dupe && outcome !== "confirmed") {
+      // 跟 legacy_audit 的章是同一個病（selkie 2026-09-21 指出）：policy_dupe_reviews 一寫下去，
+      // 那份清單就永遠不再派。沒有真的逐組比對完（拿不到來源、只掃過去）就不該鎖住它。
+      return {
+        status: "applied",
+        message: "已記錄，但**沒有**把這份政見清單標成已比對——只有 outcome=confirmed（逐組比對完、確認沒有重複）才會鎖住它",
+        task_id: taskId,
+        politician_id: dupe[1],
+      };
+    }
     if (dupe) {
       const review = { politician_id: dupe[1], fingerprint: dupe[2], agent_name: row.agent_name, contribution_id: row.id, note: check.note };
       const { error: dupeError } = await supabase.from("policy_dupe_reviews").upsert(review, { onConflict: "politician_id" });
       throwIf(dupeError, "policy_dupe_reviews upsert");
       await recordInsert(supabase, ctxOf(row), "policy_dupe_reviews", dupe[1], review);
       return { status: "applied", message: "已記錄：這個人目前這份政見清單已逐組比對過、沒有重複；清單有變動才會再派一次", task_id: taskId, politician_id: dupe[1] };
+    }
+    if (outcome === "unreachable") {
+      return { status: "applied", message: `已記錄「拿不到來源、未能確認」，這筆缺口 ${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試（不是結案）`, task_id: taskId };
     }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
