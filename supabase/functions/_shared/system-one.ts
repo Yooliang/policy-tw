@@ -564,7 +564,8 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
   try {
     const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "zh-TW,zh;q=0.9" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (!res.ok) return { kind: "error", text: "", note: `http ${res.status}` };
+    // 2026-09-22 candlefish 第三次探測：活頁 404（udn 6316823 有 2022 快照）沒有回退、只回 fetch_failed。抓不到（4xx／5xx／逾時）也去找快照。
+    if (!res.ok) return await archiveOrError(url, `http ${res.status}`, fetchImpl);
     if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) return { kind: "pdf", text: "", note: "pdf 不解析（系統只讀網頁；參選紀錄走中選會資料庫）" };
     if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.(xlsx?|ods)(\?|$)/i.test(url)) return { kind: "pdf", text: "", note: "試算表不解析（系統只讀網頁）" };
     const raw = await res.text();
@@ -580,8 +581,17 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
     }
     return { kind: "html", text, note: `raw:${raw.length} | archive:${archived.raw} | text:${text.length} | ${ct}` };
   } catch (e) {
-    return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
+    return await archiveOrError(url, e instanceof Error ? e.name : String(e), fetchImpl);
   }
+}
+
+/** 活頁抓不到（4xx／5xx／逾時）→ 找 archive.org 快照；快照有正文就當 html 用，沒有就照原因回 error（note 一樣留 archive 長度） */
+async function archiveOrError(url: string, reason: string, fetchImpl: typeof fetch): Promise<{ kind: "html" | "error"; text: string; note: string }> {
+  const archived = await fetchArchive(url, fetchImpl);
+  if (archived.text.length >= ARCHIVE_FALLBACK_MIN_CHARS) {
+    return { kind: "html", text: archived.text, note: `${reason} | archive:${archived.raw} | text:${archived.text.length}` };
+  }
+  return { kind: "error", text: "", note: `${reason} | archive:${archived.raw}` };
 }
 
 /** 正文短於這個就當「沒抓到」去找快照：一篇新聞正文再短也有幾百字，200 以下多半是空殼或挑戰頁 */
@@ -605,11 +615,12 @@ export async function fetchArchive(url: string, fetchImpl: typeof fetch = fetch)
  * politician_id／policy_id、沒有 name，主角名單就是空的 → 每一頁都判「主角名字不在文本裡」棄權（bd1a0cd5 對
  * cw、archive、維基三頁全棄權，同一頁對有 name 的貢獻正常）。payload 已有名字就不查。
  */
-export function subjectRef(payload: Record<string, unknown>): { table: "politicians" | "policies"; id: string } | null {
+export function subjectRef(payload: Record<string, unknown>): { table: "politicians" | "policies" | "politician_elections"; id: string } | null {
   const str = (k: string) => typeof payload[k] === "string" && (payload[k] as string).length > 0 ? payload[k] as string : null;
   if (str("name") || str("politician_name")) return null;
   const table = str("target_table"), tid = str("target_id");
-  if (table && tid) return table === "politicians" || table === "policies" ? { table, id: tid } : null;
+  // politician_elections 的更正（屆別、參選狀態）主角是那筆參選紀錄的人（candlefish 第三次探測：游智彬 7fd8787f 回查不到）
+  if (table && tid) return table === "politicians" || table === "policies" || table === "politician_elections" ? { table, id: tid } : null;
   const pol = str("politician_id");
   if (pol) return { table: "politicians", id: pol };
   const pid = str("policy_id");
@@ -623,13 +634,14 @@ type SubjectDb = any;
 export async function subjectNamesOf(supabase: SubjectDb, payload: Record<string, unknown>): Promise<string[]> {
   const ref = subjectRef(payload);
   if (!ref) return [];
-  const { data } = await supabase.from(ref.table).select(ref.table === "policies" ? "title, politician_id" : "name").eq("id", ref.id).maybeSingle();
+  const cols = ref.table === "policies" ? "title, politician_id" : ref.table === "politician_elections" ? "politician_id" : "name";
+  const { data } = await supabase.from(ref.table).select(cols).eq("id", ref.id).maybeSingle();
   const row = (data ?? null) as Record<string, unknown> | null;
   if (!row) return [];
   const out: string[] = [];
-  const own = row[ref.table === "policies" ? "title" : "name"];
+  const own = ref.table === "politician_elections" ? null : row[ref.table === "policies" ? "title" : "name"];
   if (typeof own === "string" && own) out.push(own);
-  if (ref.table === "policies" && typeof row.politician_id === "string") {
+  if ((ref.table === "policies" || ref.table === "politician_elections") && typeof row.politician_id === "string") {
     const { data: p } = await supabase.from("politicians").select("name").eq("id", row.politician_id).maybeSingle();
     const name = (p as { name?: unknown } | null)?.name;
     if (typeof name === "string" && name) out.push(name);

@@ -19,3 +19,10 @@ Deno.test("policy_progress 只有 policy_id → 標題＋提出者姓名都算�
   assertEquals(await subjectNamesOf(fake, { politician_id: "p9" }), ["謝衣鳯"]);
   assertEquals(await subjectNamesOf(fake, { politician_id: "nope" }), []);
 });
+
+Deno.test("correction 對 politician_elections → 主角是那筆參選紀錄的人", async () => {
+  const rows: Record<string, Record<string, unknown>> = { "politician_elections:pe1": { politician_id: "p9" }, "politicians:p9": { name: "游智彬" } };
+  const fake = { from: (t: string) => ({ select: () => ({ eq: (_c: string, id: string) => ({ maybeSingle: () => Promise.resolve({ data: rows[`${t}:${id}`] ?? null }) }) }) }) };
+  assertEquals(subjectRef({ target_table: "politician_elections", target_id: "pe1", changes: {} }), { table: "politician_elections", id: "pe1" });
+  assertEquals(await subjectNamesOf(fake, { target_table: "politician_elections", target_id: "pe1" }), ["游智彬"]);
+});
