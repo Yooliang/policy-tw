@@ -250,3 +250,32 @@ Deno.test("查不到東西也要有骨架，而且 no_change 是 contribution_ty
   assert(String(payload.outcome).includes("unreachable"), "三個 outcome 都要列出來");
   assert(Array.isArray(t.source_urls), "頂層 source_urls 一樣不能漏");
 });
+
+// 2026-09-21 實測：每一筆任務只帶「預設分支」的骨架，但實跑三筆有兩筆的正確分支
+// 不是預設那個（legacy_audit 預設 no_change、正確是 correction），代理只好回頭翻
+// payload_shape——而整個改動的目的就是讓它不必回頭翻。
+Deno.test("多分支任務要把每一條路的骨架都送出去", () => {
+  const empty = {} as Parameters<typeof shapeTaskCurrent>[1];
+  for (const [taskType, mustHave] of [
+    ["legacy_audit", ["no_change", "correction", "removal"]],
+    ["not_running_recheck", ["correction", "no_change"]],
+    ["policy_validity", ["removal", "correction", "no_change"]],
+  ] as const) {
+    const cur = shapeTaskCurrent(taskType, empty, { task_id: `auto:${taskType}:10009`, target: { policy_id: "pl-1" } });
+    const byType = cur.report_templates_by_type as Record<string, unknown> | undefined;
+    assert(byType, `${taskType} 是多分支任務，要帶 report_templates_by_type`);
+    for (const t of mustHave) {
+      assert(byType![t], `${taskType} 少了 ${t} 這條路的骨架——代理走到那一條就得回頭翻文件`);
+    }
+  }
+  // 單分支的不要多送
+  const gap = shapeTaskCurrent("profile_gap", empty, { task_id: "auto:profile_gap:x", target: {} });
+  assert(!("report_templates_by_type" in gap), "單分支任務不必多送一份");
+});
+
+Deno.test("有固定值域的欄位要把值列出來，不要讓代理猜", () => {
+  // education_level 在生產資料裡是 7 個固定值，但 shape 原本完全沒寫（2026-09-21 回報）
+  for (const v of ["高中(職)", "專科", "碩士", "博士"]) {
+    assert(PAYLOAD_SHAPE.politician.includes(v), `politician 的 shape 少了 education_level 的值 ${v}`);
+  }
+});

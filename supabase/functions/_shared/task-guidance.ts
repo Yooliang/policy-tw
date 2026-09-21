@@ -116,8 +116,13 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   policy:
     `payload：title（4–200 字）、description（≥20 字）、category（要是這 19 個之一：${POLICY_CATEGORIES.join("／")}）、` +
     `status（${POLICY_STATUSES.join("／")}）、election_id（選舉年份）、politician_id 或 name。source_urls 放證明這筆政見的網址。`,
+  // education_level 是固定值域（生產資料的實際分布），不是自由文字——
+  // 實測回報代理只能猜（2026-09-21）
   politician:
-    "payload：name，加上你查到的 birth_year／current_position／avatar_url（人像照，正方或直式、短邊 ≥120px）／education_level／bio。查不到的欄位不要填。",
+    "payload：name，加上你查到的 birth_year（西元四位數）／current_position／" +
+    "avatar_url（人像照，正方或直式、短邊 ≥120px）／" +
+    `education_level（要是這幾個之一：${["高中(職)以下","高中(職)","專科","大學","碩士","博士","其他"].join("／")}）／bio。` +
+    "查不到的欄位不要填。",
   candidacy:
     "payload：politician_id 或 name、election_id（選舉年份）、election_type、region、candidate_status。已投票的屆別可加 election_result、votes_received、vote_percentage、cand_no、position。",
   policy_progress:
@@ -238,7 +243,8 @@ function buildPayload(
         name: t.name ?? "（姓名）",
         birth_year: "（西元四位數）",
         current_position: "（現職）",
-        avatar_url: "（https 人像照網址）",
+        avatar_url: "（https 人像照網址，正方或直式、短邊 ≥120px）",
+        education_level: "（高中(職)以下／高中(職)／專科／大學／碩士／博士／其他 之一）",
       };
     case "merge_politician": {
       const a = (t.a && typeof t.a === "object" ? t.a : {}) as Record<string, unknown>;
@@ -328,4 +334,44 @@ export function buildReportTemplate(
     // 頂層，不是 payload 裡面。這一欄就是第一版最常被擋下的原因。
     source_urls: ["（你實際打開過、而且證明得了這筆的網址）"],
   };
+}
+
+/**
+ * 多分支任務：這一種任務可能以哪幾種貢獻型別收尾。
+ *
+ * 2026-09-21 實測回報：每一筆任務只帶「預設分支」那一份骨架，但實跑三筆裡有兩筆的
+ * 正確分支剛好不是預設的——legacy_audit 給了 no_change 的骨架、正確是 correction；
+ * not_running_recheck 給了 correction 的骨架、正確是 no_change。代理得回頭翻
+ * payload_shape 才知道怎麼送，而整個改動的目的就是讓它不必回頭翻。
+ *
+ * 所以這幾種任務要把每一條路的骨架都送出去，而不是只送最常見的那一條。
+ */
+export const TASK_BRANCHES: Record<string, string[]> = {
+  legacy_audit: ["no_change", "correction", "removal"],
+  not_running_recheck: ["correction", "no_change"],
+  candidate_status_stale: ["correction", "no_change"],
+  policy_validity: ["removal", "correction", "no_change"],
+  duplicate_policy: ["removal", "correction", "no_change"],
+  roster_check: ["roster_check", "candidacy"],
+  progress_stale: ["policy_progress", "candidacy", "removal", "no_change"],
+  policy_election_missing: ["correction", "no_change"],
+  policy_election_mismatch: ["correction", "no_change"],
+  news_sweep: ["policy", "policy_progress", "no_change"],
+  audit: ["correction", "policy_progress", "no_change"],
+};
+
+/** 這一種任務所有可能的回報骨架，key 是貢獻型別。單分支的回 null（用 report_template 就好）。 */
+export function buildBranchTemplates(
+  taskType: string,
+  target: Record<string, unknown> | null | undefined,
+  taskId: string | null | undefined,
+): Record<string, Record<string, unknown>> | null {
+  const branches = TASK_BRANCHES[taskType];
+  if (!branches || branches.length < 2) return null;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const ctype of branches) {
+    const tpl = ctype === "no_change" ? buildNoChangeTemplate(taskId) : buildReportTemplate(taskType, ctype, target, taskId);
+    if (tpl) out[ctype] = tpl;
+  }
+  return Object.keys(out).length > 1 ? out : null;
 }

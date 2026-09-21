@@ -10,7 +10,7 @@ import { fetchAllRows } from "./fetch-all.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { buildNoChangeTemplate, buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -113,6 +113,10 @@ export function shapeTaskCurrent(
     // 查不到東西那一條路也要有骨架：教了 outcome 三選一卻沒示範怎麼送，
     // 代理會猜成 {"kind":"no_change"} 然後被 400 擋下（2026-09-21 實測）
     ...(task ? { report_template_no_change: buildNoChangeTemplate(task.task_id) } : {}),
+    // 多分支任務把每一條路的骨架都送出去：實測發現正確分支常常不是預設那個
+    // （legacy_audit 預設 no_change、正確是 correction），代理只好回頭翻 payload_shape——
+    // 而整個改動的目的就是讓它不必回頭翻（2026-09-21）
+    ...(task ? (() => { const b = buildBranchTemplates(taskType, target, task.task_id); return b ? { report_templates_by_type: b } : {}; })() : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
   };
 }
