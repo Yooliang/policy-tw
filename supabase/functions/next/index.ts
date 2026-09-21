@@ -264,6 +264,14 @@ Deno.serve(async (req) => {
       const ranked = [...pool].sort((a, b) => sourceRank(bestSourceKind(b.source_urls)) - sourceRank(bestSourceKind(a.source_urls)));
       const topRank = sourceRank(bestSourceKind(ranked[0].source_urls));
       const pick = pickBySeed(ranked.filter((c) => sourceRank(bestSourceKind(c.source_urls)) === topRank), seed)!;
+      // 派發即綁定（2026-09-21）：記下「這一筆派給了這個來源 IP」，投票時要求對得上。
+      // 代理不能自己挑題目——contributions-feed 是公開的、id 拿得到，所以光關掉
+      // 可以列清單的端點擋不住，執行點在這裡。
+      {
+        const { error: dErr } = await supabase.from("verify_dispatches")
+          .upsert({ contribution_id: pick.id, ip_hash: ipHash, agent_name: agentName, dispatched_at: new Date().toISOString() }, { onConflict: "contribution_id,ip_hash" });
+        if (dErr) console.error("verify dispatch record failed:", dErr.message);
+      }
       const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
       const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload));
       // 系統來源票（2026-09-19，4 票變 3+1）：Jev 核過提交的來源就給代理看。它是正式的一票，不是提示——
