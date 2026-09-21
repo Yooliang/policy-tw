@@ -212,7 +212,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       verdict: finalVerdict,
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       weight,
-      weight_reason: weightReason(finalVerdict, judgeBacked),
+      weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
       score: { before: scoreBefore, after: scoreAfter, target: targetScore },
       // 舊欄位保留一版給還沒升到 1.24.0 的代理
       agree_count: after?.agree_count ?? 0,
