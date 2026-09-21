@@ -34,32 +34,30 @@ Deno.serve(async (req) => {
     const agentName = url.searchParams.get("agent_name");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || MAX_VERIFICATIONS_PER_RUN, 1), 50);
 
-    let query = supabase
-      .from("contributions")
-      .select("id, contribution_type, payload, source_urls, note, task_id, agent_name, agent_tool, agree_count, disagree_count, unsure_count, status, created_at", { count: "exact" })
-      .eq("status", "pending")
-      .neq("contributor_ip_hash", ipHash) // 與 /verify 的 self_vote 規則一致：同機提交的不列
-      .order("created_at", { ascending: true });
-    if (type) query = query.eq("contribution_type", type);
-    if (agentName) query = query.neq("agent_name", agentName);
-    if (region) query = query.eq("payload->>region", region);
-
-    // 多抓一些再切，讓已投過票的可以排除
-    const { data, error, count } = await query.limit(limit * 4);
-    if (error) throw new Error(`contributions list: ${error.message}`);
-
+    // 候選一律走 contribution_verify_pool（跟 /next 同一支）：同 IP 提交的、投過的、
+    // 已達有效門檻的、跟原貢獻有關係的裁決，全部在 SQL 裡、LIMIT 之前就排掉。
+    //
+    // 2026-09-21 之前這裡是自己寫的查詢：先抓最舊的 limit*4 筆，再用 TS 濾掉投過的。
+    // 結果這台機器把最舊的幾百筆投完之後，端點就開始回空——limit=3 回 0 筆、
+    // limit=100 也只回 50 筆，而 total_pending 顯示 1,076。代理會以為沒東西可驗。
+    // 跟 #102–#105、#122 同一個反模式：合格判斷要在 SQL、LIMIT 之前。
+    const { data: poolRows, error } = await supabase.rpc("contribution_verify_pool", {
+      p_ip_hash: ipHash,
+      p_region: region,
+      p_limit: limit,
+      p_type: type,
+    });
+    if (error) throw new Error(`verify pool: ${error.message}`);
     type Row = { id: string; [k: string]: unknown };
-    let rows: Row[] = (data ?? []) as Row[];
-    // 排掉這台機器投過的：標準跟 /verify 的去重、/next 的池子一樣，只看來源 IP（2026-09-19 裁決）。
-    // 原本只用代號排：同一台機器上別的代理投過的照樣列出來，投下去才吃 already_voted。
-    if (rows.length > 0) {
-      const { data: voted, error: vError } = await supabase
-        .from("contribution_votes").select("contribution_id").eq("verifier_ip_hash", ipHash).in("contribution_id", rows.map((r) => r.id));
-      if (vError) throw new Error(`votes lookup: ${vError.message}`);
-      const votedIds = new Set(((voted ?? []) as Array<{ contribution_id: string }>).map((v) => v.contribution_id));
-      rows = rows.filter((r) => !votedIds.has(r.id));
-    }
-    const totalPending = agentName ? Math.max((count ?? 0) - ((data?.length ?? 0) - rows.length), 0) : (count ?? 0);
+    const rows: Row[] = ((poolRows ?? []) as Row[]).map(({ contributor_ip_hash: _ip, visitor_facing: _v, adjudication_facing: _a, ...rest }) => rest as Row);
+
+    // 待驗證總數還是照原本的口徑數（這個代理還能驗幾筆），跟候選頁分開算
+    const { count: pendingCount, error: countError } = await supabase
+      .from("contributions").select("id", { count: "exact", head: true })
+      .eq("status", "pending").neq("contributor_ip_hash", ipHash);
+    if (countError) throw new Error(`pending count: ${countError.message}`);
+
+    const totalPending = pendingCount ?? 0;
 
     return json({
       success: true,
