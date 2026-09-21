@@ -121,6 +121,8 @@ export interface Policy {
   status: PolicyStatus;
   proposedDate: string | null;
   lastUpdated: string;
+  /** 內容最後一次變動的時間（timestamptz，DB 觸發器維護）；lastUpdated 只有「日」，排序用這個（2026-09-22） */
+  updatedAt?: string;
   progress: number; // 0-100
   tags: string[];
   logs: TrackingLog[];
@@ -352,6 +354,7 @@ export interface RawPolicy {
   status: PolicyStatus;
   proposed_date: string | null;
   last_updated: string;
+  updated_at?: string;
   progress: number;
   tags?: string[];
   ai_analysis?: string;
