@@ -625,7 +625,8 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
           ? `已記錄「拿不到來源、未能確認」：這筆政見**不會**被標成已核對，${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試`
           : "已記錄「公開資料查不到」：這筆政見不會被標成已核對",
         task_id: taskId,
-        policy_id: legacy[1],
+        // 這裡**不可以**回 policy_id：呼叫端會把它寫進 contributions.applied_policy_id，
+        // 而那個欄位是 legacy_audit 的另一條永久排除條件。回了就等於「我沒確認」也能讓它消失。
       };
     }
     if (legacy) {

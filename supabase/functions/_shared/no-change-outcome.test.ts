@@ -75,6 +75,30 @@ Deno.test("legacy_audit：舊資料沒有 outcome 一律不蓋章", async () => 
   assertEquals(inserted.find((i) => i.table === "task_checks")?.row.outcome, null);
 });
 
+Deno.test("legacy_audit：沒確認的回報不可以回 policy_id（那是第二條永久排除）", async () => {
+  // 子代理 2026-09-21 掃出來的：呼叫端會把 outcome.policy_id 寫進 contributions.applied_policy_id
+  // （apply/index.ts、auto-apply.ts），而 legacy_audit 的第二條排除就是看那個欄位。
+  // 所以「不蓋章」還不夠——只要回了 policy_id，那筆政見照樣從任務池永久消失。
+  for (const outcome of ["unreachable", "not_found", undefined]) {
+    const { db } = fakeDb();
+    const out = await applyContribution(db, row(`auto:legacy_audit:${POLICY}`, outcome));
+    assertEquals(out.policy_id, undefined, `outcome=${outcome} 回了 policy_id，會被寫進 applied_policy_id 而永久排除這筆政見`);
+  }
+  // confirmed 本來就要讓它消失（已經蓋章了），帶不帶 policy_id 都不影響結論
+  const ok = fakeDb();
+  const done = await applyContribution(ok.db, row(`auto:legacy_audit:${POLICY}`, "confirmed"));
+  assertEquals(done.policy_id, POLICY);
+});
+
+Deno.test("SQL：applied_policy_id 的排除只認新增政見那一種貢獻", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20260921000005_no_change_outcome.sql", import.meta.url));
+  const fn = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_legacy("));
+  assert(
+    /applied_policy_id = pl\.id AND c\.contribution_type = 'policy'/.test(fn),
+    "那條排除的本意是「這筆政見是貢獻建出來的」；不看型別的話，任何 correction／policy_progress 都會讓它永久沉底（線上已有 133 筆落庫的 correction）",
+  );
+});
+
 Deno.test("duplicate_policy：confirmed 才鎖住那份清單的指紋", async () => {
   const taskId = `auto:duplicate_policy:${PID}:0a1b2c3d`;
   const { db, upserted } = fakeDb();

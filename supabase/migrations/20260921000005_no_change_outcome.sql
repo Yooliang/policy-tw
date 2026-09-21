@@ -148,7 +148,14 @@ LANGUAGE sql STABLE AS $fn$
       SELECT 1 FROM edit_history e
       WHERE e.table_name = 'policies' AND e.record_id = pl.id::TEXT AND e.field IN ('audit', '*')
     )
-    AND NOT EXISTS (SELECT 1 FROM contributions c WHERE c.applied_policy_id = pl.id)
+    -- 「是貢獻建出來的」只有新增政見那一種（contribution_type='policy'）。
+    -- 原本不看型別，於是任何一筆改到這筆政見的 correction／policy_progress，甚至一筆
+    -- 回報「來源打不開」的 no_change，都會把 applied_policy_id 設成它而永久排除——
+    -- 線上已有 133 筆落庫的 correction，收窄 edit_history 那條卻不收這條，等於沒改。
+    AND NOT EXISTS (
+      SELECT 1 FROM contributions c
+      WHERE c.applied_policy_id = pl.id AND c.contribution_type = 'policy'
+    )
 $fn$;
 COMMENT ON FUNCTION contribution_auto_tasks_legacy IS
   '早期匯入、有來源、沒查核履歷的政見 → legacy_audit 任務；只有 no_change 且 outcome=confirmed 會蓋 audit 章讓它消失';
