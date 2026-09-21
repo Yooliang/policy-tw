@@ -53,7 +53,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   policy_election_missing:
     "這筆政見沒標所屬屆別，網站上顯示「未標註屆別」。打開 source_url 確認是哪一場選舉的承諾，用 correction 把 policies.election_id 改成該年份。" +
-    "**同一個人可能多屆都選過，來源沒寫清楚就不要猜**，用 no_change 回報。",
+    "**同一個人可能多屆都選過，來源沒寫清楚就不要猜**，用 no_change 回報。" +
+    "特別是**不要用「他是現任第 N 屆」回推屆別**：那是推論不是出處，而且政見可能是更早那一屆提的。" +
+    "來源那一頁要自己寫出是哪一場選舉（或寫得出投票年份），才算證明得了。",
 
   policy_election_mismatch:
     "這筆政見標的屆別跟提出日期對不上——提出日期晚於那場選舉的投票日。打開來源確認是哪一屆，用 correction 改 election_id；是日期填錯就改 proposed_date；分不出來用 no_change。",
