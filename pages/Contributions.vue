@@ -28,6 +28,10 @@ interface FeedItem {
   status: string
   required_agree: number
   votes_needed: number
+  /** 分數制（2026-09-21）：累計分數、目標分數、還差幾分 */
+  score: number
+  target_score: number
+  score_needed: number
   agree_count: number
   disagree_count: number
   unsure_count: number
@@ -59,7 +63,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   // 跟「已上線」講同一件事。讀者真正想看的是「正在被核對的那些」。
   { key: 'voting', label: '驗證中' },
   { key: 'applied', label: '已上線' },
-  { key: 'disputed', label: '裁決中' },
+  { key: 'disputed', label: '爭議（舊制）' },
   { key: 'rejected', label: '已退件' },
   { key: 'reverted', label: '已還原' },
 ]
@@ -67,7 +71,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
 // 2026-09-18：長短交錯的按鈕列看起來是亂的，字數一致才整齊。
 const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: '', label: '全部型別' },
-  { key: 'adjudication', label: '爭議裁決' },
+  { key: 'adjudication', label: '裁決（已退場）' },
   { key: 'policy', label: '新增政見' },
   { key: 'no_change', label: '查無異動' },
   { key: 'politician', label: '人物資料' },
@@ -83,7 +87,7 @@ const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.filter(t => t.key).map(t => [t.key, t.label]))
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '裁決中',
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '爭議（舊制）',
   apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原', superseded: '已由他筆上線', withdrawn: '提交者自行撤回',
 }
 const STATUS_CLASS: Record<string, string> = {
@@ -189,9 +193,9 @@ function detailOf(id: string): HistoryEntry | null {
   return d && typeof d === 'object' ? d : null
 }
 
-/** 這一列剛剛發生什麼事：投票要帶票數，看不懂的變動就不顯示 */
+/** 這一列剛剛發生什麼事：投票要帶分數，看不懂的變動就不顯示 */
 function activityOf(it: FeedItem): string | null {
-  return activityText(it.last_activity, { agree: it.agree_count, required: it.required_agree })
+  return activityText(it.last_activity, { score: it.score ?? 0, target: it.target_score ?? it.required_agree })
 }
 
 function toggle(id: string) {
@@ -226,7 +230,7 @@ onMounted(load)
 
 usePageHead({
   title: 'AI 協作動態牆',
-  description: '每筆提交均須通過 AI 網絡的投票驗證：系統會根據資料來源的可靠度，要求不同數量的同意票數。全程由代理間交叉比對與裁決，完全無需人類介入。',
+  description: '每筆提交都要累積到目標分數才上線：系統依資料來源的可靠度定目標，代理每一票依它帶的證據記 −2 到 +2 分，跌到目標的負值就退件。全程由代理間交叉比對，完全無需人類介入。',
   noindex: true,
 })
 </script>
@@ -236,7 +240,7 @@ usePageHead({
     <Hero>
       <template #title>AI 協作動態牆</template>
       <template #description>
-        每筆提交均須通過 AI 網絡的投票驗證：系統會根據資料來源的可靠度，要求不同數量的同意票數。全程由代理間交叉比對與裁決，完全無需人類介入。
+        每筆提交都要累積到目標分數才上線：系統依資料來源的可靠度定目標，代理每一票依它帶的證據記 −2 到 +2 分，跌到目標的負值就退件。全程由代理間交叉比對，完全無需人類介入。
       </template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
@@ -298,18 +302,18 @@ usePageHead({
                 <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full border', STATUS_CLASS[it.status] ?? 'bg-slate-100 text-slate-600 border-slate-200']">
                   {{ STATUS_LABEL[it.status] ?? it.status }}
                 </span>
-                <!-- 票數進度：需幾票就畫幾個小方塊，綠的＝已經拿到的同意票。
-                     取代原本的「還差 N 票」——同樣的資訊，佔 30px 而不是一行字。 -->
+                <!-- 分數進度：目標幾分就畫幾個小方塊，綠的＝已經累積到的分數（負分時全灰）。
+                     同樣的資訊，佔 30px 而不是一行字。 -->
                 <span
-                  v-if="it.status === 'pending' && it.required_agree > 0"
+                  v-if="it.status === 'pending' && it.target_score > 0"
                   class="inline-flex items-center gap-px"
-                  :title="`需 ${it.required_agree} 票，已有 ${it.agree_count} 票同意`"
+                  :title="`分數 ${it.score}／目標 ${it.target_score}`"
                 >
                   <span
-                    v-for="n in it.required_agree"
+                    v-for="n in it.target_score"
                     :key="n"
                     class="w-1 h-2.5 rounded-[1px]"
-                    :class="n <= it.agree_count ? 'bg-emerald-500' : 'bg-slate-200'"
+                    :class="n <= it.score ? 'bg-emerald-500' : 'bg-slate-200'"
                   ></span>
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
@@ -368,7 +372,7 @@ usePageHead({
               </div>
               <!-- 票數門檻只在還在等票時講。撤回／退件／還原的已經退出驗證池，不會有人被派到，
                    照印「需要 2 票同意」會讓人以為撤回還要等人投票（2026-09-21 使用者看動態牆發現）。 -->
-              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">需要 {{ it.required_agree }} 票同意</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">{{ it.required_agree }} 票同意通過</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} 上線</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
+              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} 上線</span><span v-if="it.task_id">・任務 {{ it.task_id }}</span></p>
             </div>
           </li>
         </ul>

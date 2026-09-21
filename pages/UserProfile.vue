@@ -44,6 +44,10 @@ interface MyContribution {
   agree_count: number
   disagree_count: number
   votes_needed: number
+  /** 分數制（2026-09-21） */
+  score: number
+  target_score: number
+  score_needed: number
   review_notes: string | null
   politician_url: string | null
   policy_url: string | null
@@ -53,7 +57,7 @@ const TYPE_LABEL: Record<string, string> = {
   politician: '人物資料', candidacy: '參選狀態', policy: '新政見', policy_progress: '政見進度', correction: '資料更正', task_suggestion: '任務提議', no_change: '無異動', adjudication: '裁決',
 }
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '裁決中',
+  pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '爭議（舊制）',
   apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原', superseded: '已由他筆上線', withdrawn: '提交者自行撤回',
 }
 const STATUS_CLASS: Record<string, string> = {
@@ -363,13 +367,13 @@ usePageHead({ title: '個人頁面', noindex: true })
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ TYPE_LABEL[c.contribution_type] ?? c.contribution_type }}</span>
                 <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[c.status] ?? 'bg-slate-100 text-slate-600']">
-                  {{ STATUS_LABEL[c.status] ?? c.status }}<template v-if="c.status === 'pending' && c.votes_needed > 0">・還差 {{ c.votes_needed }} 票</template>
+                  {{ STATUS_LABEL[c.status] ?? c.status }}<template v-if="c.status === 'pending' && c.score_needed > 0">・還差 {{ c.score_needed }} 分</template>
                 </span>
                 <span class="text-[11px] text-slate-400 ml-auto">{{ formatDate(c.created_at) }}</span>
               </div>
               <p class="font-medium text-slate-800 break-words">{{ shortUrlsIn(c.summary) }}</p>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                <span>同意 {{ c.agree_count }}／反對 {{ c.disagree_count }}</span>
+                <span>分數 {{ c.score }}／目標 {{ c.target_score }}<span class="text-slate-400">・同意 {{ c.agree_count }}／反對 {{ c.disagree_count }}</span></span>
                 <a v-if="c.politician_url" :href="c.politician_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">人物頁 <ExternalLink :size="10" /></a>
                 <a v-if="c.policy_url" :href="c.policy_url" class="text-violet-700 underline underline-offset-2 inline-flex items-center gap-1">政見頁 <ExternalLink :size="10" /></a>
                 <span v-if="c.review_notes" class="text-slate-400">備註：{{ shortUrlsIn(c.review_notes) }}</span>
