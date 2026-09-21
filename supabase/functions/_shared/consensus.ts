@@ -165,6 +165,18 @@ export function isRepeatedNote(note: string | null | undefined, previousNote: st
   return a === norm(previousNote);
 }
 
+/**
+ * 跟這筆既有的某張票一字不差、而且自己沒帶引文（數字或引號裡的字）＝抄的（#7 配套，2026-09-21）。
+ * 只比「正規化後完全相同」，不比相似度：同一份官方名冊的不同列，句型必然相同，相似度會誤傷正確行為。
+ */
+export function isCopiedNote(note: string | null | undefined, existingNotes: ReadonlyArray<string | null | undefined>): boolean {
+  const norm = (s: string | null | undefined) => (s ?? "").replace(/[\s，。、．,.!！?？；;：:「」『』()（）]/g, "").trim();
+  const n = norm(note);
+  if (!n) return false;
+  if (/\d/.test(note ?? "") || /[「『"]/.test(note ?? "")) return false; // 有自己的引文（行號、日期、數字、引句）
+  return existingNotes.some((e) => norm(e) === n);
+}
+
 export function isRubberStampAgree(note: string | null | undefined, evidenceUrl: string | null | undefined): boolean {
   if (evidenceUrl && /https?:\/\/\S+/.test(evidenceUrl)) return false;
   const n = (note ?? "").replace(/[\s，。、．,.!！?？；;：:「」『』()（）]/g, "").trim();

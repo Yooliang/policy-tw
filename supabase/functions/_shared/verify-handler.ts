@@ -8,7 +8,7 @@ import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, voteWeight, weightReason } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 
@@ -88,7 +88,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   }
 
   const { data: existing, error: eError } = await supabase
-    .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
+    .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
@@ -141,6 +141,20 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
         },
       };
     }
+  }
+  // 防從眾（#7 的配套，2026-09-21）：既有票的理由現在公開了，「跟別人說一樣的話」不是問題，
+  // 「跟別人說一樣的話而且拿不出自己的東西」才是。note 帶逐字引文（數字／引號）或帶 evidence_url → 放行不管多像；
+  // 沒引文、沒來源、又跟既有票一字不差 → 退回補寫。金門 7 筆同一份名冊不同列句型必然相同，所以只擋一字不差。
+  if (!revising && input.verdict === "agree" && !input.evidence_url && input.note && isCopiedNote(input.note, ((existing ?? []) as Array<{ note?: string | null }>).map((x) => x.note))) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: "note_copied",
+        message: "這句備註跟這筆既有的一張票一字不差，而且沒有你自己的引文或 evidence_url。看得到別人的理由是為了讓你針對爭點查，不是抄——" +
+          "請寫你這次實際核對到什麼（哪一頁、哪一列、哪個欄位），或附你自己找到的來源。改好再送一次，這次不算你被拒。",
+      },
+    };
   }
   if (input.verdict === "agree" && isRubberStampAgree(input.note, input.evidence_url)) {
     return {
