@@ -46,7 +46,7 @@ Deno.test("verified 才自動落庫；轉 verified 時呼叫 applyFn 並把狀�
 
 Deno.test("apply 結果 → contributions.status 對應", () => {
   assertEquals(contributionStatusFor("applied"), "applied");
-  assertEquals(contributionStatusFor("disputed"), "disputed");
+  assertEquals(contributionStatusFor("disputed"), "rejected", "2026-09-21：判不出／衝突退件，不留 disputed");
   assertEquals(contributionStatusFor("failed"), "apply_failed");
 });
 
