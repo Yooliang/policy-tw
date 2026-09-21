@@ -333,6 +333,30 @@ Deno.test("任務的 current：hint 指名的欄位，協議裡要查得到；�
   }
 });
 
+Deno.test("驗證候選的過濾一律在 SQL、LIMIT 之前：/next 與 /verifications 都走同一支池子", async () => {
+  // 這一族的第三次（#102–#105 派工、#122 /next、2026-09-21 /verifications）。
+  // /verifications 原本自己寫查詢：先抓最舊的 limit*4 筆，再用 TS 濾掉投過的。
+  // 這台機器把最舊的幾百筆投完之後，端點開始回空——limit=3 回 0 筆、limit=100 只回 50 筆，
+  // 而 total_pending 顯示 1,076。代理會以為沒東西可驗。
+  const src = await Deno.readTextFile(new URL("../verifications/index.ts", import.meta.url));
+  assert(/rpc\("contribution_verify_pool"/.test(src), "/verifications 要走 contribution_verify_pool，不要自己寫一份候選查詢");
+  assert(
+    !/\.limit\(limit \* 4\)/.test(src),
+    "limit*4 再事後過濾＝合格判斷在 LIMIT 之後，這個專案已經為此壞過三次",
+  );
+  // 型別過濾也要進 SQL，不然 type=xxx 會重蹈覆轍
+  assert(/p_type: type/.test(src), "type 過濾要傳進池子，不可以撈回來再篩");
+
+  const { sql } = await latestMigrationDefining("contribution_verify_pool");
+  // 從 CREATE 那一行切，不要用 lastIndexOf("FUNCTION …")——檔尾的 COMMENT ON FUNCTION
+  // 會把切點吃掉，切出來只剩一句註解，於是測試在完全正確的程式上變紅（剛踩到）
+  const fn = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION contribution_verify_pool"));
+  assert(/p_type TEXT DEFAULT NULL/.test(fn), "池子要收 p_type");
+  const filterAt = fn.indexOf("p_type IS NULL OR");
+  const limitAt = fn.lastIndexOf("LIMIT");
+  assert(filterAt > 0 && limitAt > filterAt, "型別過濾要寫在 LIMIT 之前");
+});
+
 Deno.test("驗證回合的 hint 只能講投票的詞彙，不可以出現提交端的動詞", () => {
   // 2026-09-21：adjudication 的驗證項直接沿用任務端的 current（含 hint），於是教投票的人
   // 送 verdict:"reject"——那是裁決者提交時用的值，投票只收 agree／disagree／unsure，送了被 400 擋。
