@@ -568,8 +568,33 @@ export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch):
     if (ct.includes("pdf") || url.toLowerCase().endsWith(".pdf")) return { kind: "pdf", text: "", note: "pdf 不解析（系統只讀網頁；參選紀錄走中選會資料庫）" };
     if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.(xlsx?|ods)(\?|$)/i.test(url)) return { kind: "pdf", text: "", note: "試算表不解析（系統只讀網頁）" };
     const raw = await res.text();
-    return { kind: "html", text: htmlToText(raw.slice(0, 1_500_000)), note: ct };
+    const text = htmlToText(raw.slice(0, 1_500_000));
+    // 2026-09-21：媒體頁面從雲端 IP 抓回 200 但正文是空的（軟封鎖：body 空或只剩腳本），24 小時內 144 筆
+    // 系統票因此棄權；同一支程式從住宅 IP 抓同一頁有 1,600～5,100 字。正文太短就改抓 archive.org 的快照
+    // （直接打 /web/2026/<url>，不用 availability API——那支會 429；302 由 redirect: follow 跟過去）。
+    // note 記三個長度：每一層都只回報自己看到的、沒有人回報自己沒看到什麼，這三個整數就是在補這件事。
+    if (text.length >= ARCHIVE_FALLBACK_MIN_CHARS) return { kind: "html", text, note: `raw:${raw.length} | text:${text.length} | ${ct}` };
+    const archived = await fetchArchive(url, fetchImpl);
+    if (archived.text.length > text.length) {
+      return { kind: "html", text: archived.text, note: `raw:${raw.length} | archive:${archived.raw} | text:${archived.text.length} | ${ct}` };
+    }
+    return { kind: "html", text, note: `raw:${raw.length} | archive:${archived.raw} | text:${text.length} | ${ct}` };
   } catch (e) {
     return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
+  }
+}
+
+/** 正文短於這個就當「沒抓到」去找快照：一篇新聞正文再短也有幾百字，200 以下多半是空殼或挑戰頁 */
+export const ARCHIVE_FALLBACK_MIN_CHARS = 200;
+
+/** archive.org 最近的快照。抓不到就回空，不丟錯——呼叫端拿原本那份（可能也是空的）繼續走。 */
+export async function fetchArchive(url: string, fetchImpl: typeof fetch = fetch): Promise<{ raw: number; text: string }> {
+  try {
+    const res = await fetchImpl(`https://web.archive.org/web/2026/${url}`, { headers: { "User-Agent": FETCH_UA }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return { raw: 0, text: "" };
+    const raw = await res.text();
+    return { raw: raw.length, text: htmlToText(raw.slice(0, 1_500_000)) };
+  } catch {
+    return { raw: 0, text: "" };
   }
 }
