@@ -76,6 +76,31 @@ Deno.test("isBlindDisagree：打不開／確認不了是盲反對；寫了具體
   assertEquals(isBlindDisagree("來源打不開，但改查中選會資料庫：登記的是第 6 選區，與 payload 第 7 選區不符"), false, "有具體矛盾就算反證");
   assertEquals(isBlindDisagree("出生年與學歷經金門日報《藝文沙龍》黃世團小檔案（2023/06/17：1951年生，師大美術系）核對，來源無法確認學歷"), false, "引了別的來源與數字＝有反證");
   assertEquals(isBlindDisagree("source_url 只是風傳媒首頁，非特定報導，頁面沒有任何東螺溪內容，無法核對 payload 的 7.66 億元"), false, "來源沒提到＝實質反對");
+
+  // 2026-09-21 現場：澎湖那批 19 筆 candidacy 共用一個已 404 的 udn 網址，四票寫「來源不存在…HTTP 404…
+  // 查無快照」卻被記成真反對——CONTRADICTION_RE 的「不存在」「查無」本來要抓「這個人不存在」，撞在一起了。
+  // 判準改成結構的：「讀不到」與「讀到了但內容不符」不可能同時成立。
+  const DEAD = "https://udn.com/news/story/7326/8197777";
+  const unreachable = "來源不存在：以瀏覽器 User-Agent 開啟 " + DEAD + " 一律回 HTTP 404，web.archive.org 查無快照。來源無法支持此筆宣稱，故反對。";
+  assertEquals(isBlindDisagree(unreachable), false, "只看文字會漏：「不存在」「查無」讓它看起來像有反證");
+  assertEquals(
+    isBlindDisagree(unreachable, { evidenceUrl: DEAD, sourceUrls: [DEAD] }),
+    true,
+    "反證網址就是那個拿不到的來源＝沒有第二來源，只能是 unsure",
+  );
+  assertEquals(
+    isBlindDisagree("提交來源 " + DEAD + " 已 404，改核官方名單：選委會彙總表載明政黨為中國國民黨，與 payload 的無黨籍不符", {
+      evidenceUrl: "https://web.cec.gov.tw/phec/article/64633",
+      sourceUrls: [DEAD],
+    }),
+    false,
+    "真的找了第二來源（官方名單）並指出矛盾＝正當的反對，不可以改記 unsure",
+  );
+  assertEquals(
+    isBlindDisagree("打不開", { evidenceUrl: "HTTPS://WWW.UDN.COM/news/story/7326/8197777/", sourceUrls: [DEAD] }),
+    true,
+    "同一頁的大小寫、www、尾斜線差異要算同一個",
+  );
   assertEquals(isBlindDisagree("提交的 source_url 打不開：實際 GET https://bulletin.cec.gov.tw/… 回 404"), true);
   assertEquals(isBlindDisagree(""), false);
   assertEquals(isBlindDisagree(null), false);

@@ -10,6 +10,9 @@ import { fetchAllRows } from "./fetch-all.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
+import { PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { SUGGESTED_TYPE } from "./task-types.ts";
+
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
 export const REST_BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1";
@@ -86,7 +89,19 @@ export const NO_CHANGE_OUTCOMES_HINT = {
 
 /** 純函式：依 task_type 組 current（尾端統一補上 no_change 的 outcome 說明） */
 export function shapeTaskCurrent(taskType: string, data: TaskContextData): Obj {
-  return { ...shapeTaskCurrentInner(taskType, data), no_change_outcomes: NO_CHANGE_OUTCOMES_HINT };
+  const inner = shapeTaskCurrentInner(taskType, data);
+  // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
+  // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
+  const hint = inner.hint ?? TASK_GUIDANCE[taskType];
+  // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
+  // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
+  const shape = PAYLOAD_SHAPE[SUGGESTED_TYPE[taskType] ?? ""];
+  return {
+    ...inner,
+    ...(hint ? { hint } : {}),
+    ...(shape ? { payload_shape: shape } : {}),
+    no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
+  };
 }
 
 function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {

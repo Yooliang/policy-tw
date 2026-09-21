@@ -19,6 +19,7 @@ import { SUGGESTED_TYPE } from "./task-types.ts";
 import { KIND_TO_TASK_TYPE, REQUEST_KINDS } from "./request-task.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "./contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "./verify-handler.ts";
+import { hasGuidance } from "./task-guidance.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const SKILL_MD = new URL("../../../public/skill.md", import.meta.url);
@@ -274,10 +275,11 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
     assert(!src.includes("const SUGGESTED_TYPE"), `${f} 不可以自己再宣告一份 SUGGESTED_TYPE`);
   }
 
-  // skill.md 也要講得出這種任務是什麼，否則外部代理只拿到一個沒解釋的字串
-  const skill = await Deno.readTextFile(SKILL_MD);
+  // 每一種任務都要交代得出怎麼做。2026-09-21 起說明隨任務送（current.hint），不再放在
+  // skill.md 的型別目錄裡——使用者：「它應該是領任務、回報，而不是自己去管理任務」。
+  // 所以這裡查的是 task-guidance.ts（靜態表或依資料組的 hint），不是協議文件。
   for (const t of new Set(sqlTypes)) {
-    assert(skill.includes("`" + t + "`"), `skill.md 沒有說明 ${t} 這種任務要做什麼`);
+    assert(hasGuidance(t), `${t} 沒有做法可以送給代理：在 _shared/task-guidance.ts 補一條`);
   }
 
   // 網站按鈕建出來的任務型別（request-task 的 KIND_TO_TASK_TYPE）同樣要登記與說明。
@@ -285,7 +287,7 @@ Deno.test("每一種自動缺口的 task_type 都要有對應的貢獻型別建�
   // 時補的：新增一顆按鈕就是新增一種任務型別，同一個坑。
   for (const [kind, t] of Object.entries(KIND_TO_TASK_TYPE)) {
     if (t !== "audit") assert(SUGGESTED_TYPE[t], `按鈕 kind=${kind} 建的任務型別 ${t} 沒有登記在 _shared/task-types.ts`);
-    assert(skill.includes("`" + t + "`"), `skill.md 沒有說明 ${t} 這種任務要做什麼`);
+    assert(hasGuidance(t), `按鈕建的任務型別 ${t} 沒有做法可以送給代理：在 _shared/task-guidance.ts 補一條`);
   }
   // 前端的 kind 清單與後端要是同一組，否則按鈕送出的 kind 會被後端以 400 擋掉
   const front = await Deno.readTextFile(new URL("../../../lib/request-task.ts", import.meta.url));
@@ -316,18 +318,28 @@ Deno.test("任務的 current：hint 指名的欄位，協議裡要查得到；�
     ["duplicate_politician", { politician: { id: "p" } }],
     ["adjudicate", { contribution: null }],
   ];
+  // 白名單：所有樣本型別送出過的欄位名聯集
+  const knownCurrentFields = new Set<string>(samples.flatMap(([t, d]) => Object.keys(shapeTaskCurrent(t, d))));
+
   for (const [taskType, data] of samples) {
     const current = shapeTaskCurrent(taskType, data);
     assert(current.no_change_outcomes, `${taskType} 的 current 沒有 no_change_outcomes——任何任務都可能以 no_change 收尾，而 outcome 是必填的`);
 
-    // hint 裡提到的、而且真的是我們送出去的欄位名，協議必須查得到
+    // hint 叫代理看的欄位，要真的隨這一筆送出去。
+    // 原本這裡查的是「skill.md 有沒有提到那個欄位名」，因為當時說明住在協議的型別目錄裡。
+    // 2026-09-21 說明改成隨任務送（見 task-guidance.ts），欄位就在代理手上的 current 裡，
+    // 不必回頭查文件；真正會害到代理的是 hint 指了一個我們根本沒送的欄位，改守這件事。
+    //
+    // 判斷「這個詞是不是欄位名」用白名單而不是黑名單：只有「某個任務型別真的會送的欄位」
+    // 才算。用黑名單會一直漏——貢獻型別（no_change）、outcome 的值（not_found）、
+    // Jev 的判定（cannot_tell）長得都跟欄位名一樣。
     const hint = typeof current.hint === "string" ? current.hint : "";
     const emitted = new Set(Object.keys(current));
     for (const token of new Set(hint.match(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g) ?? [])) {
-      if (!emitted.has(token)) continue;
+      if (!knownCurrentFields.has(token)) continue;
       assert(
-        skill.includes(token),
-        `${taskType} 的 hint 叫代理看 ${token}，但 public/skill.md 沒有提到這個欄位——代理照協議查不到那是什麼`,
+        emitted.has(token),
+        `${taskType} 的 hint 叫代理看 ${token}，但這一筆的 current 沒有送——代理找不到`,
       );
     }
   }

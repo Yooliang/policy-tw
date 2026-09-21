@@ -2,6 +2,7 @@ import { assert } from "jsr:@std/assert@1";
 import { MAX_POLICIES_PER_TASK } from "./dispatch.ts";
 import { buildRequestTaskText } from "./request-task.ts";
 import { TASK_TYPES } from "./contribution-schema.ts";
+import { TASK_GUIDANCE } from "./task-guidance.ts";
 
 // 任務文字散在 SQL（自動缺口）與 TS（網站按鈕）兩處。數字與規則一漂開，
 // 代理拿到的指示就跟派工的實際行為對不上，而且不會有人發現。（2026-09-18）
@@ -24,9 +25,11 @@ Deno.test("政見缺漏：自動缺口與網站按鈕都寫「最多 N 筆」，
   const button = buildRequestTaskText({ kind: "policy", politician_id: null, policy_id: null, politician_name: "某人" });
   assert(button.description.includes(`最多 ${MAX_POLICIES_PER_TASK} 筆`), "網站按鈕「查政見」也要寫同一個上限");
   assert(button.description.includes("不要為了湊數"), "要寫明不要湊數——給數字容易引來口號與願景");
-  // 協議文件是代理實際讀的那份，也要同一個數字
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
-  assert(skill.includes(`最多 ${MAX_POLICIES_PER_TASK} 筆`), `public/skill.md 的 policy_missing 也要寫「最多 ${MAX_POLICIES_PER_TASK} 筆」`);
+  // 代理實際讀到的那份說明（2026-09-21 起隨任務送，不在協議的型別目錄裡）也要同一個數字
+  assert(
+    TASK_GUIDANCE.policy_missing.includes(`最多 ${MAX_POLICIES_PER_TASK} 筆`),
+    `task-guidance.ts 的 policy_missing 也要寫「最多 ${MAX_POLICIES_PER_TASK} 筆」`,
+  );
 });
 
 Deno.test("名單清查：登記截止後 rumored 與 likely 都要處理（跟 candidate_status_stale 的條件一致）", async () => {

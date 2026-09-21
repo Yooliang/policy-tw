@@ -177,9 +177,15 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "politician": {
       if (!isStr(p.name, 2, 30)) push("payload.name", "姓名必填（2～30 字）");
       validateHints(p, push);
-      const optional = ["position", "sub_region", "education_level", "bio", "avatar_url", "slogan"];
+      // current_position 與 birth_year 是 profile_gap 任務明文要補的兩欄，落庫也真的會寫
+      // （apply-contribution.ts applyPolitician），卻一直沒有任何驗證——送「民國50年」或 19666 都會過。
+      // 2026-09-21：payload 形狀與 schema 對帳時發現。
+      const optional = ["position", "current_position", "sub_region", "education_level", "bio", "avatar_url", "slogan"];
       for (const k of optional) if (p[k] !== undefined && !isStr(p[k], 1, 5000)) push(`payload.${k}`, "要是非空字串");
       if (p.avatar_url !== undefined && !/^https:\/\//.test(String(p.avatar_url))) push("payload.avatar_url", "要是 https 網址");
+      if (p.birth_year !== undefined && !(isInt(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
+        push("payload.birth_year", "出生年要是西元四位數整數（例：1975），不是民國年也不是文字");
+      }
       for (const k of ["education", "experience"]) {
         if (p[k] !== undefined && !(Array.isArray(p[k]) && (p[k] as unknown[]).every((s) => isStr(s, 1, 200)))) push(`payload.${k}`, "要是字串陣列");
       }

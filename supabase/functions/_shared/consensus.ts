@@ -95,10 +95,39 @@ export const DISPUTED_MIN_DISAGREE = 2;
 const BLIND_DISAGREE_RE = /無法(開啟|連線|確定|下載|讀取|存取|核對|取得|驗證|確認|載入|打開)|打不開|開不了|抓不到|連不上|逾時|timeout|timed out|HTTP ?(403|404|5\d\d)|連線失敗|讀不到/i;
 // 有實質內容的反對：矛盾字眼、來源「沒提到」、引了別的來源或數字——就算同一句也說某個網址打不開
 const CONTRADICTION_RE = /不符|矛盾|不一致|應為|應該是|實為|寫的是|錯誤|有誤|不是|並非|查無|沒有這個人|不存在|沒有任何|沒有提|沒提|未提|無此|只是|而非|才是|年生|經.{1,12}(報|網|資料|公報|名單)/;
-export function isBlindDisagree(note: string | null | undefined): boolean {
+/** 兩個網址是不是同一頁：忽略協定、www、尾斜線與大小寫。 */
+function sameUrl(a: string, b: string): boolean {
+  const norm = (u: string) => u.trim().toLowerCase()
+    .replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  const x = norm(a), y = norm(b);
+  return x.length > 0 && x === y;
+}
+
+/**
+ * 盲反對：說的是「我拿不到來源」，不是「來源說的跟宣稱不一樣」。這種票改記 unsure。
+ *
+ * 2026-09-21 現場：澎湖那批 19 筆 candidacy 共用一個已經 404 的 udn 網址，
+ * 有四票寫「來源不存在：…回 HTTP 404…web.archive.org 查無快照」卻被記成真的反對。
+ * 原因是判斷「有沒有實質反證」的 CONTRADICTION_RE 裡有「不存在」「查無」——
+ * 那本來是要抓「這個人不存在」「查無此人」，卻跟「來源不存在」「查無快照」撞在一起。
+ *
+ * 再用正則去分「來源不存在」與「人不存在」會一直漏（同一批裡還有「故非類別錯誤」
+ * 命中「錯誤」）。改用一個結構上的判準：**「讀不到」與「讀到了但內容不符」不可能同時成立**。
+ * 所以備註說拿不到、而 evidence_url 指的又正是那個拿不到的來源時，它手上就沒有第二來源。
+ *
+ * 沒附 evidence_url 的維持原本的文字判斷——歷來有不少票把反證寫在備註裡
+ * （「來源打不開，但改查中選會資料庫：登記的是第 6 選區，與 payload 不符」），那是真的反證。
+ */
+export function isBlindDisagree(
+  note: string | null | undefined,
+  opts?: { evidenceUrl?: string | null; sourceUrls?: readonly string[] | null },
+): boolean {
   const n = (note ?? "").trim();
   if (!n) return false;
-  return BLIND_DISAGREE_RE.test(n) && !CONTRADICTION_RE.test(n);
+  if (!BLIND_DISAGREE_RE.test(n)) return false;
+  const ev = opts?.evidenceUrl?.trim();
+  if (ev && (opts?.sourceUrls ?? []).some((s) => sameUrl(s, ev))) return true;
+  return !CONTRADICTION_RE.test(n);
 }
 export const BLIND_DISAGREE_NOTE = "（系統改記 unsure：反對票要有反證，「來源打不開／確認不了」不是反證）";
 
