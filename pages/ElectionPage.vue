@@ -213,12 +213,14 @@ const SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
   { key: 'policies', label: '政見數' },    // 登錄的政見多的在前
   { key: 'attention', label: '關注度' },   // 支持、反對、關注的總數
 ]
-/** 每位候選人名下政見的統計：最後更新日、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
+/** 每位候選人名下政見的統計：最後變動時間、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
 const policyStatsByPolitician = computed(() => {
   const m = new Map<string, { updated: string; count: number; attention: number }>()
   for (const p of policies.value) {
     const st = m.get(p.politicianId) ?? { updated: '', count: 0, attention: 0 }
-    if ((p.lastUpdated ?? '') > st.updated) st.updated = p.lastUpdated ?? ''
+    // updatedAt 是 timestamptz（內容任何變動都會蓋，含代理套用的更正）；快照還沒帶這欄時退回只有「日」的 lastUpdated
+    const touched = p.updatedAt ?? p.lastUpdated ?? ''
+    if (touched > st.updated) st.updated = touched
     st.count += 1
     st.attention += (p.stanceSupport ?? 0) + (p.stanceOppose ?? 0) + (p.stancePriority ?? 0)
     m.set(p.politicianId, st)
@@ -230,10 +232,8 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
   const st = (c: Politician) => stats.get(c.id) ?? { updated: '', count: 0, attention: 0 }
   const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
   const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
-    // last_updated 只到「日」，同一天更新的人全部並列，並列時原本照筆畫排——所以只要當天有六個人動過，
-    // 排最前的永遠是筆畫最少那位，看起來像「卡在」某個人（2026-09-21 使用者：選舉頁最後更新卡在李四川；
-    // 那天 2026 縣市長有六位的政見同日更新，李四川只是筆畫排第一）。並列改用政見筆數多的在前（活動量），最後才筆畫。
-    // 根本解要 last_updated 帶時間，那是資料層的事，另案。
+    // 2026-09-21 卡在李四川：last_updated 只到「日」，六個人同日並列，筆畫或筆數任一種並列規則都會讓同一個人永遠第一。
+    // 2026-09-22 改用 updated_at（timestamptz，內容任何變動都會蓋，migration 000028），並列只剩極少數；退路仍是筆數→筆畫。
     updated: (a, b) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b),
     stroke: byStroke,
     policies: (a, b) => (st(b).count - st(a).count) || byStroke(a, b),
