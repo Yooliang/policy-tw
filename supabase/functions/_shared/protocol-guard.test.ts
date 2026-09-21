@@ -343,6 +343,14 @@ Deno.test("驗證回合的 hint 只能講投票的詞彙，不可以出現提交
     ["policy", { politicians: [{ id: "p" }], policies: [] }],
     ["removal", { policy: null }],
     ["no_change", { task: null }],
+    // merge_politician 的驗證項也是沿用任務端的 current（fetchVerifyContext 直接呼叫
+    // shapeTaskCurrent("duplicate_politician")），跟裁決那支是同一個形狀——
+    // 2026-09-21 把取樣擴大之後掃出來的第二處。
+    ["merge_politician", { pair_current: shapeTaskCurrent("duplicate_politician", { politician: { id: "p" } }) }],
+    ["politician", { politicians: [{ id: "p" }], elections: [] }],
+    ["candidacy", { politicians: [{ id: "p" }], elections: [] }],
+    ["policy_progress", { policy: null }],
+    ["correction", { target: null }],
   ];
   for (const [type, data] of samples) {
     const hint = String((shapeVerifyCurrent(type, {}, data as never) as Obj).hint ?? "");
