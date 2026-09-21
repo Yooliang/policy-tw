@@ -361,7 +361,20 @@ Deno.serve(async (req) => {
       filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
-    if (freeManual.length > 0) {
+    // 2026 縣市長的基本資料與政見要真的排最前（使用者 2026-09-21）：手動任務本來無條件
+    // 優先於自動缺口，而裁決任務就是手動的、有 86 筆——縣市長那一層會被整個蓋掉。
+    // 先問一句「現在有沒有縣市長的缺口輪得到」，有就讓它插到手動任務前面。
+    let mayorFirst: AutoTask | null = null;
+    {
+      const { data: top } = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 1, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
+      const first = ((top ?? []) as AutoTask[])[0];
+      if (first && ["profile_gap", "policy_missing"].includes(first.task_type)) {
+        const { data: tier } = await supabase.rpc("task_priority_tier", { p_task_type: first.task_type, p_target: first.target });
+        if (tier === 0 || tier === 1) mayorFirst = first;
+      }
+    }
+
+    if (freeManual.length > 0 && !mayorFirst) {
       // 依 priority 分層挑，不要整池隨機——否則 priority 與提問的表態數都是白寫的
       const t = pickManualTask(freeManual, seed)!;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
