@@ -48,11 +48,11 @@ Deno.test("多欄位 schema：changes 陣列可過、欄位要在白名單且不
 Deno.test("門檻取最高風險：含 candidate_status 就走加減參選人級距（媒體 6／官方 4）；一般欄位照一般級距", () => {
   const mixed = { target_table: "politician_elections", target_id: PE, changes: [{ field: "position", correct_value: "縣市長候選人" }, { field: "candidate_status", correct_value: "withdrawn" }], reason: "中選會公告退選，職位也一併更正" };
   assertEquals(riskLevel("correction", mixed), "high");
-  assertEquals(requiredAgree("correction", mixed, [MEDIA]), 6);
-  assertEquals(requiredAgree("correction", mixed, [CEC]), 4);
+  assertEquals(requiredAgree("correction", mixed, [MEDIA]), 3);
+  assertEquals(requiredAgree("correction", mixed, [CEC]), 3);
   const plain = { target_table: "policies", target_id: POLICY, changes: [{ field: "source_url", correct_value: "https://x" }, { field: "description", correct_value: "y" }], reason: "兩個一般欄位" };
   assertEquals(riskLevel("correction", plain), "normal");
-  assertEquals(requiredAgree("correction", plain, [MEDIA]), 2);
+  assertEquals(requiredAgree("correction", plain, [MEDIA]), 3);
   assertEquals(riskLevel("correction", { target_table: "politician_elections", target_id: PE, field: "candidate_status", correct_value: "withdrawn" }), "high", "舊格式");
 });
 
@@ -201,6 +201,6 @@ Deno.test("roster_check：三個定位欄位必填、cec_count 可留空、門�
 
   // 不改核心資料，走 light：官方來源 1 票、其他 2 票
   assertEquals(riskLevel("roster_check", base.payload), "light");
-  assertEquals(requiredAgree("roster_check", base.payload, ["https://db.cec.gov.tw/x"]), 1);
+  assertEquals(requiredAgree("roster_check", base.payload, ["https://db.cec.gov.tw/x"]), 2);
   assertEquals(requiredAgree("roster_check", base.payload, ["https://example.com/x"]), 2);
 });

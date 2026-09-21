@@ -28,21 +28,14 @@ export type RiskLevel = "normal" | "high" | "light" | "past_result" | "removal" 
  * 官方來源通過得更快，非官方要更多人看過；多個來源取最高等級。
  */
 export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
-  normal: { official: 2, media: 2, social: 3, other: 3 },
-  high: { official: 4, media: 6, social: 8, other: 8 },
-  light: { official: 1, media: 2, social: 2, other: 2 },
-  // 2026-09-16 看一筆「陳若翠 2024 高雄市立委 not_elected、得票 64,261」要 6 票：
-  // 「這種舊期的參選，我覺得 2 票就夠了」。
-  // 加減參選人之所以要 4／6／8，是因為那會憑空生出或抹掉一筆參選紀錄；
-  // 但「已投票選舉的結果」是查得到的既成事實，而且掛在既有人物既有屆別上，
-  // 搞錯了改回來也容易。不看來源等級：選舉結果連維基都抄得到，分級沒有意義。
-  past_result: { official: 2, media: 2, social: 2, other: 2 },
-  // 移除不看來源等級：移除的理由常常是「查不到任何來源」，那種主張本身沒有來源可言。
-  // 3 票＝比一般更正高、比加減參選人低；低是因為移除是軟移除，資料留著、可以復原。
+  // 2026-09-21 使用者裁示：目標分數一律 3，不動正式資料的型別 2。
+  // 舊矩陣（2/3/4/6/8）是票數制的遺物：媒體級參選紀錄目標 5～8，等於要六張 +1，官方名冊一秒可確認的登記
+  // 實務上到不了。風險差異之後由 Jev 的風險加成動態調，不靠靜態矩陣。形狀留著是給三處一致性測試比對用。
+  normal: { official: 3, media: 3, social: 3, other: 3 },
+  high: { official: 3, media: 3, social: 3, other: 3 },
+  light: { official: 2, media: 2, social: 2, other: 2 },
+  past_result: { official: 3, media: 3, social: 3, other: 3 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
-  // 2026-09-21：4 票降 3 票。裁決線是死的（87 份等票平均 0.1 票、歷來只定案 4 份），
-  // 4 票不看來源等級是全站最高的一般門檻之一，跟「裁決排第二順位」一起放寬。
-  // 3 票仍高於一般資料，也還是三個彼此獨立的來源 IP。
   adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
 
