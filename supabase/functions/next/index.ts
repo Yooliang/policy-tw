@@ -176,7 +176,10 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
     const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
-    // 裁決的驗證不派給原貢獻的提交者
+    // 裁決的驗證不派給原貢獻的提交者。
+    // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，
+    // 會讓窗口先被不合格的裁決塞滿再全部丟掉，/next 就看不到任何候選（#119 的回歸）。
+    // 這裡留著當第二道，它多比對一個 agent_name。
     const adjOriginalIds = rawCandidates.filter((c) => c.contribution_type === "adjudication")
       .map((c) => (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null))
       .filter((v): v is string => typeof v === "string");
