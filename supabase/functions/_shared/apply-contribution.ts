@@ -20,7 +20,7 @@ import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts"
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
-import { normalizeCorrection } from "./correction.ts";
+import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -44,7 +44,8 @@ export interface ContributionRow {
 }
 
 /** applied＝落庫完成；disputed＝需要人裁決（身份判不出／指認衝突）；failed＝技術性失敗（會自動重試） */
-export type ApplyStatus = "applied" | "disputed" | "failed";
+/** superseded＝落庫時現值已經跟更正一樣（別人先修好了），不寫 edit_history（#3，2026-09-22） */
+export type ApplyStatus = "applied" | "disputed" | "failed" | "superseded";
 
 export interface ApplyOutcome {
   status: ApplyStatus;
@@ -398,10 +399,17 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
       delete patch.avatar_url; avatarNote = `；照片沒套用：${problem}`;
     }
   }
-  const { error } = await supabase.from(table).update(patch).eq("id", target_id);
+  // #3／#6（2026-09-22）：等票期間別人可能先修好了。全部一樣 → superseded，不寫假的 edit_history；
+  // 部分一樣 → 只改真的會改的欄位，一樣的那幾欄寫進訊息讓提交者知道。
+  const { changed, noop } = splitNoOpChanges(patch, current as Record<string, unknown>);
+  if (Object.keys(changed).length === 0) {
+    return { status: "superseded", message: `${table} 的 ${noop.join("、")} 現值已經跟這筆更正一樣（別人先修好了），不重複寫入` };
+  }
+  const { error } = await supabase.from(table).update(changed).eq("id", target_id);
   throwIf(error, `${table} correction update`);
   const applied: string[] = [];
-  for (const [field, newValue] of Object.entries(patch)) {
+  if (noop.length > 0) avatarNote += `；${noop.join("、")} 現值已相同，略過`;
+  for (const [field, newValue] of Object.entries(changed)) {
     await recordUpdate(supabase, ctx, table, String(target_id), field, current[field] ?? null, newValue);
     applied.push(`${field}：「${current[field] ?? ""}」→「${newValue === null ? "（清空）" : String(newValue)}」`);
   }
@@ -850,9 +858,10 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
 }
 
 /** apply 結果 → contributions.status */
-export function contributionStatusFor(outcome: ApplyStatus): "applied" | "rejected" | "apply_failed" {
+export function contributionStatusFor(outcome: ApplyStatus): "applied" | "rejected" | "apply_failed" | "superseded" {
   // 2026-09-21：disputed 退場。身份判不出／指認衝突一律退件，缺口回到任務佇列由之後的任務重做，不硬建。
   if (outcome === "applied") return "applied";
   if (outcome === "disputed") return "rejected";
+  if (outcome === "superseded") return "superseded";
   return "apply_failed";
 }

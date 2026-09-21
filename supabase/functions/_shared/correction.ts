@@ -63,6 +63,21 @@ export interface NoOpCheck {
 }
 
 /** 值相不相同：數字與字串的 2024／"2024" 算同一個，空字串與 null 也算同一個。 */
+/**
+ * 落庫前把更正拆成「真的會改的欄位」與「改完跟現值一樣的欄位」（#3／#6，2026-09-22）。
+ * 提交當下的 no_op_correction 只擋得住提交那一刻；等票期間別人先修好了，落庫時再比一次，
+ * 全部一樣就標 superseded（同一宣稱已由別筆上線），不寫假的 edit_history（實例 6d3fafc8：not_running → not_running 落成 applied）。
+ */
+export function splitNoOpChanges(patch: Record<string, unknown>, current: Record<string, unknown>): { changed: Record<string, unknown>; noop: string[] } {
+  const changed: Record<string, unknown> = {};
+  const noop: string[] = [];
+  for (const [field, value] of Object.entries(patch)) {
+    if (sameValue(current[field], value)) noop.push(field);
+    else changed[field] = value;
+  }
+  return { changed, noop };
+}
+
 export function sameValue(a: unknown, b: unknown): boolean {
   const norm = (v: unknown) => (v === null || v === undefined || v === "" ? null : String(v).trim());
   return norm(a) === norm(b);
