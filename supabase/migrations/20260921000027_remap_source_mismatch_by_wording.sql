@@ -24,7 +24,7 @@ BEGIN
   UPDATE contribution_tasks
      SET task_type = 'source_mismatch'
    WHERE status = 'open' AND task_type = 'other'
-     AND target_policy_id IS NOT NULL
+     AND target->>'policy_id' IS NOT NULL
      AND (COALESCE(title, '') || ' ' || COALESCE(description, ''))
          ~ '(查無|對不上|不符|沒根據|來源未提|來源.*(沒提|沒有|不相關|無關|寫的是)|出處)';
   GET DIAGNOSTICS n_task = ROW_COUNT;
