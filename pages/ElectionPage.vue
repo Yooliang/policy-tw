@@ -230,7 +230,11 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
   const st = (c: Politician) => stats.get(c.id) ?? { updated: '', count: 0, attention: 0 }
   const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
   const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
-    updated: (a, b) => st(b).updated.localeCompare(st(a).updated) || byStroke(a, b),
+    // last_updated 只到「日」，同一天更新的人全部並列，並列時原本照筆畫排——所以只要當天有六個人動過，
+    // 排最前的永遠是筆畫最少那位，看起來像「卡在」某個人（2026-09-21 使用者：選舉頁最後更新卡在李四川；
+    // 那天 2026 縣市長有六位的政見同日更新，李四川只是筆畫排第一）。並列改用政見筆數多的在前（活動量），最後才筆畫。
+    // 根本解要 last_updated 帶時間，那是資料層的事，另案。
+    updated: (a, b) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b),
     stroke: byStroke,
     policies: (a, b) => (st(b).count - st(a).count) || byStroke(a, b),
     attention: (a, b) => (st(b).attention - st(a).attention) || byStroke(a, b),
