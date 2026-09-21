@@ -41,3 +41,41 @@ export function correctionOnlyFromRumor(payload: unknown): boolean {
   if (changes.length === 0) return false;
   return changes.every((c) => c.current_value === "rumored" || c.current_value === "likely");
 }
+
+/**
+ * 空操作的更正：改完之後值跟現在一樣。
+ *
+ * 兩隻跑任務的代理各自獨立回報同一件事（2026-09-21）：
+ * - 「`db_current` 已經是 2024、`correct_value` 也是 2024——這筆改完等於沒改」
+ * - 「我用 REST 重讀發現 election_id 本來就已經是 2024，提交者卻寫 claimed_current=null」
+ *
+ * 這種提交照樣佔一個驗證名額、要好幾票、通過還會寫一筆 edit_history。
+ * 而驗證票是這個系統最稀缺的資源——實查全站 1,400+ 筆待驗證。
+ *
+ * 成因多半是資料新鮮度：提交者看到的是舊的，別人已經修好了。
+ * 所以擋在提交端、而且訊息要講清楚「資料已經是對的」，不是罵它。
+ */
+export interface NoOpCheck {
+  /** 每一欄都跟現值相同＝整筆是空操作 */
+  allNoOp: boolean;
+  /** 逐欄：現值、提交者主張的正確值、是不是一樣 */
+  fields: Array<{ field: string; db_current: unknown; correct_value: unknown; same: boolean }>;
+}
+
+/** 值相不相同：數字與字串的 2024／"2024" 算同一個，空字串與 null 也算同一個。 */
+export function sameValue(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v === null || v === undefined || v === "" ? null : String(v).trim());
+  return norm(a) === norm(b);
+}
+
+export function checkNoOp(payload: unknown, dbRow: Record<string, unknown> | null): NoOpCheck {
+  const { changes } = normalizeCorrection(payload);
+  if (!dbRow || changes.length === 0) return { allNoOp: false, fields: [] };
+  const fields = changes.map((c) => ({
+    field: c.field,
+    db_current: dbRow[c.field],
+    correct_value: c.correct_value,
+    same: sameValue(dbRow[c.field], c.correct_value),
+  }));
+  return { allNoOp: fields.length > 0 && fields.every((f) => f.same), fields };
+}

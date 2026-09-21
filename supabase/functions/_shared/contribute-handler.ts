@@ -7,6 +7,8 @@ import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContribu
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
+import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
+import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
@@ -191,6 +193,41 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
         from_agent: target.agent_name,
       });
     }
+  }
+
+  // 空操作的更正在這裡擋掉（2026-09-21，兩隻跑任務的代理各自獨立回報）：
+  // 改完之後值跟現在一樣的 correction，照樣佔一個驗證名額、要好幾票、通過還寫一筆
+  // edit_history。而驗證票是最稀缺的資源（全站 1,400+ 筆待驗證）。
+  // 成因多半是資料新鮮度——提交者看到的是舊的，別人已經修好了。
+  const noOpIndexes = new Map<number, NoOpCheck>();
+  {
+    const corrections = validation.items
+      .map((item, i) => ({ item, i }))
+      .filter(({ item, i }) => item.contribution_type === "correction" && !blocked.has(i) && !mergedByIndex.has(i));
+    for (const { item, i } of corrections) {
+      const { target_table, target_id } = normalizeCorrection(item.payload);
+      if (!target_table || !target_id) continue;
+      const cols = CORRECTION_FIELDS[target_table as keyof typeof CORRECTION_FIELDS];
+      if (!cols) continue;
+      try {
+        // query-bounds: ok — 按 id 取一列
+        const { data: row } = await supabase.from(target_table).select(["id", ...cols].join(", ")).eq("id", target_id).maybeSingle();
+        const check = checkNoOp(item.payload, row as Record<string, unknown> | null);
+        if (check.allNoOp) noOpIndexes.set(i, check);
+      } catch { /* 查不到就不擋，讓它照常走驗證 */ }
+    }
+  }
+  if (noOpIndexes.size > 0 && noOpIndexes.size === validation.items.filter((_, i) => !blocked.has(i) && !mergedByIndex.has(i)).length) {
+    const first = [...noOpIndexes.values()][0];
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: "no_op_correction",
+        message: "這筆更正改完之後值跟現在一樣——資料已經是對的了，可能是別人先修好了。請重新讀一次現值再決定要不要提交；**這不算你做錯**，也不計入你的退件。",
+        fields: first.fields.map((f) => ({ field: f.field, db_current: f.db_current,correct_value: f.correct_value })),
+      },
+    };
   }
 
   const toInsert = validation.items
