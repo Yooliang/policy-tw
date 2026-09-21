@@ -7,7 +7,7 @@
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, RUBBER_STAMP_NOTE } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { ensureAdjudicationTask } from "./adjudication.ts";
@@ -75,15 +75,48 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
   const blind = input.verdict === "disagree" && isBlindDisagree(input.note);
-  // 橡皮圖章同意票改記 unsure（2026-09-21）：agree 但沒說核對了什麼、也沒附第二來源。
-  // agree 是真正推資料上線的那一票，disagree 早就要求附反證，這一側卻什麼都不要求。
-  const rubber = input.verdict === "agree" && isRubberStampAgree(input.note, input.evidence_url);
-  const finalVerdict = blind || rubber ? "unsure" : input.verdict;
-  const finalNote = blind
-    ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}`
-    : rubber
-    ? `${RUBBER_STAMP_NOTE}${input.note ?? ""}`
-    : (input.note ?? null);
+  // 罐頭同意票退回重寫（2026-09-21）：agree 但備註只有套語、也沒附 evidence_url。
+  //
+  // 原本想比照盲反對改記 unsure，但實地查過之後理由變了：那 30 票寫著「查證通過」的，
+  // 逐筆去核來源**內容其實是對的**（新北市議員登記名單那頁逐名比對得上）。
+  // 所以問題不是「無據放行」，是「查了卻沒留下痕跡」——下游沒有任何辦法分辨
+  // 真查過的票和沒查過的票（連提交者自己回頭看都分辨不出來，因此誤判過一次）。
+  //
+  // 既然多數是查過的，降級成 unsure 會永久吃掉一張有效的票（同一個 IP 不能重投），
+  // 對誠實的代理是懲罰。退回 400 讓它把核對內容寫上再送一次才對：工不白做、痕跡留得下。
+  // 第二層：跟自己上一票一字不差（2026-09-21）。事故裡代理自承 vote 5–33 完全沒開網頁，
+  // 那 29 票的 note 全是同一句；而它真的查過的前 6 票，每一票的 note 都不一樣。
+  // 訊號乾淨，而且不要求代理多做任何事——兩次查證本來就不會產生一模一樣的描述。
+  if (input.verdict === "agree" && input.note) {
+    const { data: prev } = await supabase.from("contribution_votes")
+      .select("note").eq("verifier_ip_hash", ipHash)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (prev && isRepeatedNote(input.note, (prev as { note?: string }).note)) {
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: "note_repeated",
+          message: "這句備註跟你上一票一字不差。每一筆驗證核對的是不同的來源與欄位，描述不該一模一樣——" +
+            "請寫這一筆你實際看到什麼（哪一頁、哪一段、哪幾個欄位對得上）。改好再送一次，這次不算你被拒。",
+        },
+      };
+    }
+  }
+  if (input.verdict === "agree" && isRubberStampAgree(input.note, input.evidence_url)) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: "note_too_thin",
+        message: "同意票要說出你核對了什麼（哪一頁、哪一段、哪幾個欄位對得上），或附上你找到的第二來源 evidence_url。" +
+          "只寫「驗證通過」這類套語的話，之後沒有人分得出這張票是查過還是沒查過——包括你自己。" +
+          "把核對內容補上再送一次，這次不算你被拒。",
+      },
+    };
+  }
+  const finalVerdict = blind ? "unsure" : input.verdict;
+  const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
 
   // 票的來歷（審查建議 7）：evidence_url 曾由這台機器拿去 judge 判過 → 這張票的判斷者是 Jev，不是代理
   let judgeBacked = false;
