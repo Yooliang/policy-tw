@@ -130,6 +130,49 @@ Deno.test("duplicate_policy：confirmed 才鎖住那份清單的指紋", async (
   }
 });
 
+Deno.test("not_running_recheck：confirmed 才把那筆參選紀錄標成已核對", async () => {
+  // 這個章的代價是三者最大的：標成不參選之後，這個人的政見、基本資料、參選來源、
+  // 選舉結果四種缺口同時不再被派。實查 2026 有 102 筆 not_running，而 candidate_status
+  // 的修改紀錄只有 4 筆——絕大多數是匯入就那樣、從來沒人對過名單。
+  const PE = "44444444-4444-4444-8444-444444444444";
+  const taskId = `auto:not_running_recheck:${PE}`;
+
+  const updates: Array<{ table: string; patch: Record<string, unknown> }> = [];
+  const mk = () => {
+    const inserted: Array<{ table: string; row: Record<string, unknown> }> = [];
+    return {
+      inserted,
+      db: {
+        from: (table: string) => ({
+          insert: (row: Record<string, unknown>) => { inserted.push({ table, row }); return { error: null }; },
+          update: (patch: Record<string, unknown>) => ({ eq: () => { updates.push({ table, patch }); return { error: null }; } }),
+          select: () => ({ eq: (_k: string, id: string) => ({ maybeSingle: async () => ({ data: { id }, error: null }) }) }),
+        }),
+      },
+    };
+  };
+
+  const ok = mk();
+  const done = await applyContribution(ok.db, row(taskId, "confirmed"));
+  assertEquals(done.status, "applied");
+  assertEquals(updates.filter((u) => u.table === "politician_elections" && u.patch.verified === true).length, 1);
+  // 要留履歷才還原得回來
+  const stamps = ok.inserted.filter((i) => i.table === "edit_history" && i.row.field === "verified");
+  assertEquals(stamps.length, 1, "沒有履歷就不可還原——這個章關掉的是四種缺口");
+
+  for (const outcome of ["unreachable", "not_found", undefined]) {
+    updates.length = 0;
+    const f = mk();
+    const out = await applyContribution(f.db, row(taskId, outcome));
+    assertEquals(out.status, "applied");
+    assertEquals(
+      updates.filter((u) => u.table === "politician_elections").length,
+      0,
+      `outcome=${outcome} 不可以把這筆標成已核對——找不到名單不等於他真的沒登記`,
+    );
+  }
+});
+
 Deno.test("unreachable 的回覆要講清楚它會換人再試，不是結案", async () => {
   const { db } = fakeDb();
   const out = await applyContribution(db, row("auto:profile_gap:" + PID, "unreachable"));

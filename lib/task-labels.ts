@@ -24,6 +24,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   fix_disputed: '修正被擋的貢獻',
   duplicate_politician: '同名人物確認',
   duplicate_policy: '政見重複清查',
+  not_running_recheck: '不參選待核對',
   legacy_audit: '早期匯入核對',
   other: '其他',
 }

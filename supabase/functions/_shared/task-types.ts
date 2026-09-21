@@ -13,6 +13,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   duplicate_politician: "merge_politician",
   // 政見重複清查：找到重複就對空泛的那筆提 removal；沒有重複用 no_change 回報（任務敘述有寫）
   duplicate_policy: "removal",
+  // 不參選重查：在名單上就 correction 改回 registered；確實不在名單上用 no_change（outcome=confirmed）
+  not_running_recheck: "correction",
   legacy_audit: "no_change",
   policy_missing: "policy",
   profile_gap: "politician",

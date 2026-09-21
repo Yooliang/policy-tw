@@ -10,7 +10,7 @@ import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "legacy_audit", "policy_election_mismatch", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
