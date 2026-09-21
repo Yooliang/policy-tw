@@ -18,7 +18,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed", "superseded", "withdrawn"];
-const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity, effective_agree";
+const FEED_COLUMNS = "id, contribution_type, payload, status, score, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity, effective_agree";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=30" } });
@@ -53,7 +53,9 @@ Deno.serve(async (req) => {
       .order("last_activity_at", { ascending: false }).limit(limit + 1);
     if (status === "attention") q = q.in("status", ATTENTION_STATUSES);
     // 「驗證中」＝還在等票、但已經有人動過的。單看 status 分不出「沒人理」與「正在被核對」。
-    else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0");
+    // score.neq.0（2026-09-21 票數→分數）：分數可正可負，只要不是 0 就代表有人投過（0 也可能是 +1 −1 互相抵銷，
+    // 但那種情況原本靠 agree/disagree/unsure_count 三個計數就抓得到，OR 條件不會漏）。
+    else if (status === "voting") q = q.eq("status", "pending").or("agree_count.gt.0,disagree_count.gt.0,unsure_count.gt.0,score.neq.0");
     else if (status !== "all") q = q.eq("status", status);
     if (agentName) q = q.eq("agent_name", agentName);
     if (actorId) q = q.eq("actor_id", actorId);
@@ -161,6 +163,11 @@ Deno.serve(async (req) => {
         id: r.id,
         contribution_type: r.contribution_type,
         status: r.status,
+        // 分數（2026-09-21 票數→分數）：score 可為負；target_score 拿不到 effective_agree 就退回 requiredAgree，跟 required_agree 算法一樣
+        score: r.score ?? 0,
+        target_score: need,
+        score_needed: r.status === "pending" ? Math.max(need - (r.score ?? 0), 0) : 0,
+        // 舊欄位保留一版相容：agree_count／required_agree／votes_needed 語意不變，仍是票數
         required_agree: need,
         votes_needed: r.status === "pending" ? Math.max(need - (r.agree_count ?? 0), 0) : 0,
         agree_count: r.agree_count ?? 0,

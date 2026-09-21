@@ -27,6 +27,9 @@ export function chooseKind(totalPending: number, progress: AgentProgress): NextK
 export interface VerifyCandidate {
   /** contribution_verify_pool 回的有效門檻（2026-09-20）；沒有就用 requiredAgree */
   effective_required?: number | null;
+  /** contribution_verify_pool 回的目前分數／目標分數（2026-09-21 票數→分數）；沒有就退回 agree_count／effective_required */
+  score?: number | null;
+  target_score?: number | null;
   id: string;
   contribution_type: string;
   payload: unknown;
@@ -45,14 +48,19 @@ export interface Requester {
 
 export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly T[], me: Requester): T[] {
   const mine = me.agent_name.toLowerCase();
-  return rows.filter((r) =>
-    r.status === "pending" &&
-    r.agent_name.toLowerCase() !== mine &&
-    r.contributor_ip_hash !== me.ip_hash &&
-    !me.voted_ids.has(r.id) &&
-    // 有效門檻（系統票已折進去）：池子回 effective_required 就用它；沒有（舊呼叫端）退回原門檻
-    r.agree_count < (typeof r.effective_required === "number" ? r.effective_required : requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []))
-  );
+  return rows.filter((r) => {
+    // 分數（2026-09-21 票數→分數）：池子回 score／target_score 就用它們；
+    // 沒有（舊池子還沒上這兩欄）退回舊的 agree_count／effective_required（票＝分，語意不變）
+    const current = typeof r.score === "number" ? r.score : r.agree_count;
+    const target = typeof r.target_score === "number"
+      ? r.target_score
+      : (typeof r.effective_required === "number" ? r.effective_required : requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []));
+    return r.status === "pending" &&
+      r.agent_name.toLowerCase() !== mine &&
+      r.contributor_ip_hash !== me.ip_hash &&
+      !me.voted_ids.has(r.id) &&
+      current < target;
+  });
 }
 
 /** 軟認領：派出後幾分鐘內不派給其他代理 */

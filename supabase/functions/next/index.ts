@@ -171,6 +171,9 @@ Deno.serve(async (req) => {
     type PendingRow = {
   /** contribution_verify_pool 回的有效門檻（2026-09-20） */
   effective_required?: number | null;
+  /** contribution_verify_pool 回的目前分數／目標分數（2026-09-21 票數→分數） */
+  score?: number | null;
+  target_score?: number | null;
   /** 訪客看得到的（提問回答、web_request 任務）：先驗 */
   visitor_facing?: boolean | null;
   /** 裁決：排訪客之後的第二順位（2026-09-21） */
@@ -276,7 +279,14 @@ Deno.serve(async (req) => {
         if (dErr) console.error("verify dispatch record failed:", dErr.message);
       }
       const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
-      const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload));
+      const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload);
+      // 分數（2026-09-21 票數→分數）：池子回 target_score 就用它，舊池子只有 effective_required 時退回它；
+      // 兩者都沒有就不傳，shapeVerifyCurrent 會照舊不附 scoring 區塊
+      const verifyCurrent = shapeVerifyCurrent(pick.contribution_type, verifyPayload, {
+        ...verifyContext,
+        score: pick.score,
+        target_score: typeof pick.target_score === "number" ? pick.target_score : pick.effective_required,
+      });
       // 系統來源票（2026-09-19，4 票變 3+1）：Jev 核過提交的來源就給代理看。它是正式的一票，不是提示——
       // supported 讓門檻 −1、not_supported 算一張反對；機率不到門檻或抓不到正文＝棄權，這裡照實給 abstain。
       {

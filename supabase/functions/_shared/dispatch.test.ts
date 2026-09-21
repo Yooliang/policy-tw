@@ -55,6 +55,21 @@ Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agr
   assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "g"]);
 });
 
+// 2026-09-21 票數→分數：池子回 score／target_score 就照它們排除已達標的，不再看 agree_count／effective_required。
+Deno.test("/next 排除已達標的：score／target_score 存在時取代 agree_count／effective_required", () => {
+  const base = { contribution_type: "policy", payload: {}, source_urls: ["https://www.cna.com.tw/x"], status: "pending" };
+  const rows = [
+    // agree_count 還沒到舊門檻（2），但 score 已達 target_score → 排除
+    { ...base, id: "a", agent_name: "other", contributor_ip_hash: "ip-2", agree_count: 0, effective_required: 2, score: 3, target_score: 3 },
+    // agree_count 已達舊門檻（2），但 score 還沒到 target_score → 繼續派
+    { ...base, id: "b", agent_name: "other", contributor_ip_hash: "ip-2", agree_count: 2, effective_required: 2, score: 1, target_score: 3 },
+    // 沒有 score／target_score（舊池子）→ 退回 agree_count／effective_required，跟原本行為一樣
+    { ...base, id: "c", agent_name: "other", contributor_ip_hash: "ip-2", agree_count: 2, effective_required: 2 },
+  ];
+  const me = { agent_name: "XiaoLiang", ip_hash: "ip-1", voted_ids: new Set<string>() };
+  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["b"]);
+});
+
 Deno.test("pickBySeed：同 seed 同結果、不同 seed 會分散", () => {
   const list = ["a", "b", "c", "d", "e", "f", "g", "h"];
   assertEquals(pickBySeed(list, "agent-1"), pickBySeed(list, "agent-1"));
