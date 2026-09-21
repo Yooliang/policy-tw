@@ -32,13 +32,21 @@ export const MAX_EXTRA_VOTES = 5;
 export const BASE_VOTES = 2;
 
 /**
- * 不可逆的操作有地板，Jev 只能往上加不能往下穿：誤判沒有便宜的回頭路。
- * removal 是軟移除、可還原，所以比 merge_politician 低一階。
+ * 不可逆的操作要求「幾個不同的人看過」，而不是「幾分」。
+ *
+ * 2026-09-21 審查指出：把地板設在分數上，會讓中選會折扣完全失效
+ * （candidacy 地板 3，扣不扣那一票都是 3），跟「中選會查得到就該快」自相矛盾。
+ *
+ * 分數與人數是兩件事：分數衡量證據夠不夠，人數衡量有沒有人獨立看過。
+ * 所以拆開——分數可以低到 1，但這幾種型別仍要求至少 2 個不同來源 IP。
+ *
+ * 附帶一提，「至少兩個人」在現行制度裡**並不存在**：實查已有 135 筆是 1 票上線的
+ * （系統票 supported 把門檻壓到 1）。所以這是新增的保護，不是恢復舊有的。
  */
-export const TYPE_FLOOR: Record<string, number> = {
-  merge_politician: 3,
-  candidacy: 3,
-  removal: 3,
+export const MIN_DISTINCT_VOTERS: Record<string, number> = {
+  merge_politician: 2,
+  candidacy: 2,
+  removal: 2,
 };
 
 export interface Dimension {
@@ -327,14 +335,22 @@ export interface VoteBudget {
   base: number;
   cec_discount: 0 | 1;
   extra: number;
-  floor: number;
+  /** 這一型別至少要幾個不同來源 IP 投過（與分數是兩件事） */
+  min_distinct_voters: number;
   threshold: number;
   dimensions: DimensionOutcome[];
 }
 
 /**
- * 算票數預算。判不出來的維度算命中——Jev 的 source_support 有 56% 回 cannot_tell，
- * 如果那算「沒事」，等於看不懂就放行。
+ * 算票數預算。
+ *
+ * **判不出來不算命中**（2026-09-21 修正）。第一版寫成「判不出來算命中」，理由是
+ * 「看不懂就放行」不可接受。但審查算了期望值：Jev 的 source_support 有 56% 回
+ * cannot_tell，5 個維度下期望加成 +2.8，policy 的目標會落在 5——**比現行矩陣的
+ * 2～3 還高**，跟整份規劃「解開積壓」的目的正好相反。
+ *
+ * 正確的做法是分開兩件事：**基本票數 2 才是保底**，維度只在 Jev 有信心說
+ * 「這一筆真的有這個風險」時才加。看不懂不會放行——看不懂就是 2 票，跟現行一般資料同級。
  */
 export function computeVoteBudget(
   contributionType: string,
@@ -346,26 +362,26 @@ export function computeVoteBudget(
     const a = answers[d.key];
     const p = a ? (a.probabilities?.[a.choice] ?? 0) : 0;
     // 沒答、答的不是我們給的兩個選項、或信心不足 → 當成判不出來 → 算命中
-    const decided = !!a && (a.choice === d.hit.key || a.choice === d.miss.key) && p >= DIMENSION_THRESHOLD;
-    const hit = decided ? a.choice === d.hit.key : true;
+    // 只有「Jev 有信心說命中的那一邊」才加票。沒答、答別的、信心不足都算判不出來。
+    const hit = !!a && a.choice === d.hit.key && p >= DIMENSION_THRESHOLD;
+    const undecided = !a || (a.choice !== d.hit.key && a.choice !== d.miss.key) || p < DIMENSION_THRESHOLD;
     return {
       key: d.key,
       choice: a?.choice ?? "unanswered",
       probability: Number(p.toFixed(4)),
       hit,
-      reason: hit ? (decided ? d.hit.means : `判不出來（${a?.choice ?? "沒有回答"}，機率 ${p.toFixed(2)}）——往嚴格的方向算`) : d.miss.means,
+      reason: hit ? d.hit.means : undecided ? `判不出來（${a?.choice ?? "沒有回答"}，機率 ${p.toFixed(2)}）——不加票，保底的 2 票仍在` : d.miss.means,
     };
   });
   const extra = Math.min(outcomes.filter((o) => o.hit).length, MAX_EXTRA_VOTES);
-  const floor = TYPE_FLOOR[contributionType] ?? 1;
   const cec_discount = cecConfirmed ? 1 : 0;
   return {
     contribution_type: contributionType,
     base: BASE_VOTES,
     cec_discount,
     extra,
-    floor,
-    threshold: Math.max(floor, BASE_VOTES - cec_discount + extra),
+    min_distinct_voters: MIN_DISTINCT_VOTERS[contributionType] ?? 1,
+    threshold: Math.max(1, BASE_VOTES - cec_discount + extra),
     dimensions: outcomes,
   };
 }

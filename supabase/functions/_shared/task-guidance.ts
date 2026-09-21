@@ -30,6 +30,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**照片要是人像照**：正方形或直式、短邊至少 120px。橫幅、活動看板、新聞情境照會被系統量尺寸擋下——官網的「縣長簡介」大圖常常是橫幅，請點開圖確認，或優先用維基百科、議會官網的個人照。",
 
   candidate_status_stale:
+    "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "登記截止後還標著「傳聞參選」「可能參選」的，只有兩種可能：**在登記名單上** → correction 把 candidate_status 改成 registered；**不在名單上** → 改成 not_running。兩者都要附得出你查的那份名單（該縣市選委會的登記公告，或媒體整理的完整登記名單）。" +
     "**查不到該縣市的名單就用 no_change 回報，不要用猜的把人留在「傳聞」。**",
 
@@ -45,6 +46,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "是政見才往下做，而且依狀態問兩種不同的事：施政中的問「近期進度如何」；已投票屆別的競選承諾問「這個人當選了嗎、承諾後來兌現了嗎」——elections 裡有他的參選紀錄與 election_result。當選就用 policy_progress 把 status 改成 In Progress／Achieved／Stalled／Failed；落選、或我們根本沒有他那場選舉的參選紀錄，就用 candidacy 補 election_result。真的查不到後續就 no_change 並說明你查了哪些來源。",
 
   candidacy_source_missing:
+    "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這筆參選紀錄沒有網址來源。找該縣市選委會的公告或媒體報導，用 candidacy 補上；查不到就 no_change 說明你找過哪裡。",
 
   election_result_missing:
@@ -68,6 +70,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "有人的貢獻被兩票反對擋下來了，任務敘述帶著每一條反對理由。請提一筆**改好的新貢獻**，不要只重送原本那一欄——反對意見指出的連帶問題要一起修掉。",
 
   not_running_recheck:
+    "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這一列被標成「不參選」，但沒有人對過官方登記名單——多半是早期匯入時就這樣寫的。"
     + "**這個標記的代價很大**：標成不參選之後，這個人的政見、基本資料、參選來源、選舉結果四種缺口都不會再被派給任何人。"
     + "請打開該縣市選舉委員會的登記公告（或媒體整理的完整登記名單）核對："
@@ -279,6 +282,34 @@ function buildPayload(
  *
  * 教訓是「給了內容卻沒給信封」。所以這裡回整個 request body，代理填空就能送。
  */
+/**
+ * 「查不到東西」那一條路的骨架（2026-09-21 實測發現的阻塞）。
+ *
+ * 現場：代理真的查不到賴明源的政見——議會官網只有學經歷、中選會名冊只證明他有登記、
+ * 換了五家媒體都只有「參選名單一員」。任務教它走 no_change、no_change_outcomes 也把
+ * 三個值講得很清楚，**但骨架只示範了 contribute 那一條**，它只能猜，猜成
+ * `{"kind":"no_change"}` → 400。
+ *
+ * no_change 是 contribution_type 不是 kind，而這件事沒有任何一個任務欄位講過。
+ * 結果是：查得到的情況骨架夠用，**查不到的情況卡死在回報這一步**——
+ * 而「查不到」正是我們最希望它敢回報的結果（協議說那是一種成果）。
+ */
+export function buildNoChangeTemplate(taskId: string | null | undefined): Record<string, unknown> {
+  return {
+    kind: "contribute",
+    agent_name: "（你的代號）",
+    agent_tool: "（你是什麼 AI）",
+    contribution_type: "no_change",
+    payload: {
+      task_id: taskId ?? "（這筆任務的 task_id）",
+      outcome: "confirmed｜unreachable｜not_found",
+      finding: "（你查了什麼、查到什麼、為什麼沒有可提交的）",
+      checked_urls: ["（你實際打開過的網址）"],
+    },
+    source_urls: ["（你實際打開過的網址；跟 checked_urls 放一樣的就好）"],
+  };
+}
+
 export function buildReportTemplate(
   taskType: string,
   contributionType: string,
