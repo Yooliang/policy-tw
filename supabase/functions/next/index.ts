@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { autoTaskTier, chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, manualTaskTier, pickBySeed, pickQueuedManual, queueKeyBefore, sortQuestionTasksBySupport, taskTargetKey, TIER_REST, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickBySeed, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
@@ -92,11 +92,11 @@ Deno.serve(async (req) => {
       pendingQuery,
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
-        // 派過的排到後面（2026-09-17：「任務自己要有個時間戳，派過就向後排」）：
-        // 原本只按 priority／created_at 排，最舊的那幾筆永遠佔著 pickManualTask 的前 3 名視窗。
-        // 2026-09-21：last_dispatched_at 提到最前面排，而且真的 select 出來（原本只拿它排序、
-        // 沒放進 select，所以 TS 那側拿不到值，沒辦法跟自動缺口比）。先按「最久沒派」取這 20 筆，
-        // 新建的任務 last_dispatched_at 是 NULL 一定在窗內——那是「任務一建立就排最前」的前提。
+        // 這裡只負責「把可能是前幾名的撈進來」，真正的排序由 TS 的 manualQueueAt 決定
+        // （SQL 排不出 1980 那條規則）。沒派過的排前面保證了 FRONT_SOURCES 的任務一定在窗內，
+        // 而手動任務總共只有 91 筆、窗口 20 筆，不會漏掉該派的。
+        // last_dispatched_at 也真的 select 出來——原本只拿它排序、沒放進 select，
+        // 所以 TS 那側拿不到值，根本沒辦法跟自動缺口比。
         .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20),
       // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
@@ -367,9 +367,8 @@ Deno.serve(async (req) => {
     // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
     // 自動缺口也先撈出來，兩邊用同一把尺比，不再是「手動清單有東西就手動贏」。
     // 原本的 mayorFirst 特例（讓縣市長插到手動前面）一併拿掉——那是用特例壓特例。
-    // last_dispatched_at 是 20260921000019 讓 contribution_auto_tasks 一起回傳的，
-    // 沒有它就沒辦法跟手動任務用同一把尺比。
-    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; last_dispatched_at: string | null };
+    // queue_at 是 20260921000020 加的單一排序鍵，兩邊靠它比。
+    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string };
     const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
@@ -379,19 +378,12 @@ Deno.serve(async (req) => {
       mySubmittedTaskIds,
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
 
-    // 自動那側 SQL 已經排好序（task_priority_tier → Jev 一次性插隊 → 最久沒派），
-    // 所以第一筆就是它的最佳候選，這裡只需要問它落在哪一層。
+    // 自動那側 SQL 已經排好序（Jev 對沒派過那一次的插隊 → queue_at），第一筆就是最佳候選。
+    // 兩邊現在用同一個鍵比：queue_at。1980＝有人明確要求要先做，排程加進佇列的當下＝排隊尾。
     const autoHead = freeAuto[0] ?? null;
-    let autoTier = TIER_REST;
-    if (autoHead) {
-      const { data: tierRow } = await supabase.rpc("task_priority_tier", { p_task_type: autoHead.task_type, p_target: autoHead.target });
-      autoTier = autoTaskTier(tierRow);
-    }
     const manualHead = pickQueuedManual(freeManual, seed);
-    const manualFirst = manualHead !== null && (autoHead === null || queueKeyBefore(
-      { tier: manualTaskTier(manualHead.source), lastDispatchedAt: manualHead.last_dispatched_at ?? null },
-      { tier: autoTier, lastDispatchedAt: autoHead.last_dispatched_at ?? null },
-    ));
+    const manualFirst = manualHead !== null
+      && (autoHead === null || manualQueueAt(manualHead) <= (autoHead.queue_at ?? ""));
 
     if (manualFirst) {
       const t = manualHead!;
