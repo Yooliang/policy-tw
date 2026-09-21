@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
 import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD } from "../_shared/system-one.ts";
 
 /**
@@ -347,6 +348,79 @@ Deno.serve(async (req) => {
     }
 
     // ---- judge：代理的第二來源判定。公開，按來源 IP 配額 ----
+    // 票數預算（影子模式，2026-09-21）：Jev 對每一個風險維度各給一個機率，
+    // 超過閾值的維度各加一票。**只記錄、不套用門檻**——0～5 的加成沒有校準資料，
+    // 先看真實分布再決定要不要接上去。設計與理由見 docs/PROPOSAL-jev-vote-budget.md。
+    if (action === "vote_budget") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const contributionId = typeof body.contribution_id === "string" ? body.contribution_id.trim() : "";
+      if (!/^[0-9a-f-]{36}$/i.test(contributionId)) return json({ success: false, error: "contribution_id 必填（uuid）" }, 400);
+      const requester = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+
+      const { data: c, error: cErr } = await supabase.from("contributions")
+        .select("id, contribution_type, payload, source_urls, status, agent_name").eq("id", contributionId).maybeSingle();
+      if (cErr) throw new Error(`contributions read: ${cErr.message}`);
+      if (!c) return json({ success: false, error: "not_found", message: "找不到這筆貢獻" }, 404);
+
+      const dims = VOTE_DIMENSIONS[c.contribution_type] ?? [];
+      if (dims.length === 0) {
+        return json({ success: false, error: "no_dimensions", message: `${c.contribution_type} 還沒有定義風險維度（_shared/vote-budget.ts）` }, 400);
+      }
+
+      const payload = (c.payload ?? {}) as Record<string, unknown>;
+      const claim = claimOf(c.contribution_type, payload);
+
+      // 來源正文：抓第一個抓得到的。抓不到就讓每一維自己判不出來（＝往嚴格的方向算）
+      let page: { url: string; text: string; note: string } | null = null;
+      for (const u of (c.source_urls ?? []).slice(0, 2)) {
+        const got = await fetchSource(u);
+        if (got.kind === "html" && got.text) { page = { url: u, text: got.text.slice(0, 12000), note: got.note ?? "" }; break; }
+      }
+
+      // 中選會折扣：參選類才問得到（cec-check 拿的是結構化資料，不是網頁）
+      let cecConfirmed = false;
+      let cecNote = "非參選類，不查中選會";
+      if (c.contribution_type === "candidacy" || c.contribution_type === "correction") {
+        const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
+        const eid = Number(payload.election_id ?? claim.election_id);
+        if (name && Number.isInteger(eid)) {
+          const hit = await cecCandidacyPage(name, eid);
+          cecConfirmed = !!hit && hit.count > 0;
+          cecNote = cecConfirmed ? `中選會查到 ${hit!.count} 筆` : "中選會查不到";
+        } else {
+          cecNote = "缺姓名或屆別，查不了";
+        }
+      }
+
+      const state: Record<string, unknown> = {
+        target: claim,
+        contribution_type: c.contribution_type,
+        page: page ? { url: page.url, text: page.text } : { url: null, text: "", note: "抓不到正文" },
+      };
+      const res = await askJev(apiKey, state, dimensionQuestions(c.contribution_type));
+      const budget = computeVoteBudget(c.contribution_type, res.answers, cecConfirmed);
+
+      await insertRecords(supabase, [{
+        subject_type: "contribution", subject_id: c.id, question: "vote_budget",
+        choice: String(budget.threshold), probability: 0, confidence: null,
+        probabilities: Object.fromEntries(budget.dimensions.map((d) => [d.key, d.probability])),
+        model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
+      }]);
+
+      return json({
+        success: true,
+        shadow_mode: true,
+        note: "只記錄不套用：現行門檻仍由 contribution_effective_agree 決定",
+        contribution_id: c.id,
+        current_threshold_note: "要跟現行門檻對照請看 contribution-status 的 required_agree",
+        cec: { confirmed: cecConfirmed, note: cecNote },
+        source: page ? { url: page.url, chars: page.text.length } : { url: null, chars: 0, note: "抓不到正文，每一維都會落到「判不出來」" },
+        budget,
+        cost_usd: Number(res.usage.cost.toFixed(8)),
+      });
+    }
+
     if (action === "judge") {
       const apiKey = Deno.env.get("OPENROUTER_API_KEY");
       if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
