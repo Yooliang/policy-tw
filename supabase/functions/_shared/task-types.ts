@@ -19,6 +19,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   policy_missing: "policy",
   profile_gap: "politician",
   policy_source_missing: "correction",
+  // 來源存在但不支持內容（數字／承諾原文查無）：改寫或刪掉那段沒根據的文字，走 correction 改 policies.description；整筆都沒根據才 removal
+  source_mismatch: "correction",
   progress_stale: "policy_progress",
   candidacy_source_missing: "candidacy",
   adjudicate: "adjudication",
