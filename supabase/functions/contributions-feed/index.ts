@@ -17,7 +17,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
-const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed"];
+const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed", "superseded", "withdrawn"];
 const FEED_COLUMNS = "id, contribution_type, payload, status, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity, effective_agree";
 
 function json(body: unknown, status = 200): Response {
