@@ -38,12 +38,18 @@ Deno.test("audit 任務：網址驗證、任務文字帶 source_url 與頁面情
 Deno.test("no_change：schema 要 task_id／checked_urls／finding，source_urls 可省略；落庫只關任務不改資料，auto: 任務只記錄", async () => {
   const ok = validateContributionRequest({
     agent_name: "tester", contribution_type: "no_change",
-    payload: { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", checked_urls: [DOC], finding: "文件第 3 頁預算與資料庫進度 60% 一致，無需更新。" },
+    payload: { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", outcome: "confirmed", checked_urls: [DOC], finding: "文件第 3 頁預算與資料庫進度 60% 一致，無需更新。" },
   });
   assertEquals(ok.errors, []);
   assertEquals(ok.items[0].source_urls, [DOC]);
   const bad = validateContributionRequest({ agent_name: "tester", contribution_type: "no_change", payload: { finding: "太短" }, source_urls: [DOC] });
-  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.checked_urls", "payload.finding", "payload.task_id"]);
+  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.checked_urls", "payload.finding", "payload.outcome", "payload.task_id"]);
+  // outcome 是三選一，不能自己發明一個（"partial"、"cannot_tell" 這類會變成新的模糊地帶）
+  const invented = validateContributionRequest({
+    agent_name: "tester", contribution_type: "no_change",
+    payload: { task_id: "t", outcome: "cannot_tell", checked_urls: [DOC], finding: "看不出來，先交了再說。" },
+  });
+  assertEquals(invented.errors.map((e) => e.path), ["payload.outcome"]);
 
   const updates: Array<{ table: string; patch: Record<string, unknown>; id: string }> = [];
   const inserted: Array<{ table: string; row: Record<string, unknown> }> = [];
@@ -60,7 +66,7 @@ Deno.test("no_change：schema 要 task_id／checked_urls／finding，source_urls
   };
   const outcome = await applyContribution(fake, {
     id: "c-9", contribution_type: "no_change", source_urls: [DOC], note: null, agent_name: "tester", contributor_url: null,
-    payload: { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", checked_urls: [DOC], finding: "文件與資料庫一致，無需更新。" },
+    payload: { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", outcome: "confirmed", checked_urls: [DOC], finding: "文件與資料庫一致，無需更新。" },
   });
   assertEquals(outcome.status, "applied");
   assertEquals(outcome.task_id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
