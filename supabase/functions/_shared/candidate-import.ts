@@ -173,11 +173,43 @@ export interface ParticipationInput {
 
 export type ParticipationOutcome = "created" | "updated";
 
+/**
+ * 「他沒有登記」是**否定的斷言**，而且是全站代價最大的一個狀態：
+ * 標成 not_running 之後，這個人不進選舉頁、不算已收錄人員、全站搜尋不算正在參選
+ * （lib/candidate-status.ts），而且 policy_missing／profile_gap／candidacy_source_missing／
+ * election_result_missing 四種缺口同時不再派——等於單方面消音，沒有回頭路。
+ *
+ * 2026-09-21 實測線上：registered 有 281 筆帶網址、3 筆沒有；**not_running 102 筆全部沒有網址**，
+ * 而且 76 筆的 source_note 寫著「可能再次挑戰」「可能被徵召」這種推測語氣——
+ * 推測被寫成了結論。這 102 筆沒有一筆被驗證過（verified 全 false），影響 26 人、94 筆政見。
+ *
+ * 所以：沒有出處網址就不准寫 not_running，降成 rumored（那才是「可能會選」的正確欄位），
+ * 並在註記寫明為什麼降。rumored 會進選舉頁、也會被 candidate_status_stale 任務追著問
+ * 「登記截止了，在名單上就改 registered、不在就改 not_running」——那正是該問的問題。
+ *
+ * 只擋 not_running：寫錯 registered 的代價小得多（多列一個人，名單清查會抓到），
+ * 而且那條路實測 99% 都帶網址，沒有證據顯示需要擋。
+ */
+export function guardNotRunning(
+  candidateStatus: string | null | undefined,
+  sourceNote: string | null | undefined,
+): { candidate_status: string | null | undefined; source_note: string | null | undefined; downgraded: boolean } {
+  if (candidateStatus !== "not_running") return { candidate_status: candidateStatus, source_note: sourceNote, downgraded: false };
+  if (/https?:\/\/\S+/.test(sourceNote ?? "")) return { candidate_status: candidateStatus, source_note: sourceNote, downgraded: false };
+  return {
+    candidate_status: "rumored",
+    source_note: `${(sourceNote ?? "").trim()}${sourceNote ? "；" : ""}未附出處網址，不足以斷定沒有登記，先記為傳聞待查`.trim(),
+    downgraded: true,
+  };
+}
+
 /** politician_elections 找或建（同一人同一場只一筆）。 */
 export async function upsertParticipation(
   supabase: SupabaseLike,
   input: ParticipationInput,
 ): Promise<{ outcome: ParticipationOutcome; id: number; previous_status: string | null }> {
+  const guarded = guardNotRunning(input.candidate_status, input.source_note);
+  input = { ...input, candidate_status: guarded.candidate_status, source_note: guarded.source_note };
   const { data: existing, error } = await supabase
     .from("politician_elections")
     .select("id, candidate_status")

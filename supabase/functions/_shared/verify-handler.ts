@@ -7,7 +7,7 @@
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, RUBBER_STAMP_NOTE } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { ensureAdjudicationTask } from "./adjudication.ts";
@@ -75,8 +75,15 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
   const blind = input.verdict === "disagree" && isBlindDisagree(input.note);
-  const finalVerdict = blind ? "unsure" : input.verdict;
-  const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
+  // 橡皮圖章同意票改記 unsure（2026-09-21）：agree 但沒說核對了什麼、也沒附第二來源。
+  // agree 是真正推資料上線的那一票，disagree 早就要求附反證，這一側卻什麼都不要求。
+  const rubber = input.verdict === "agree" && isRubberStampAgree(input.note, input.evidence_url);
+  const finalVerdict = blind || rubber ? "unsure" : input.verdict;
+  const finalNote = blind
+    ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}`
+    : rubber
+    ? `${RUBBER_STAMP_NOTE}${input.note ?? ""}`
+    : (input.note ?? null);
 
   // 票的來歷（審查建議 7）：evidence_url 曾由這台機器拿去 judge 判過 → 這張票的判斷者是 Jev，不是代理
   let judgeBacked = false;

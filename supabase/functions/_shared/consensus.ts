@@ -102,6 +102,37 @@ export function isBlindDisagree(note: string | null | undefined): boolean {
 }
 export const BLIND_DISAGREE_NOTE = "（系統改記 unsure：反對票要有反證，「來源打不開／確認不了」不是反證）";
 
+/**
+ * 「橡皮圖章同意票」：agree 但備註只有套語、也沒附第二來源——那張票沒有說出它核對了什麼。
+ *
+ * 2026-09-21 現場（ballyhoo-4d 的還債代理）：它前 6 票品質很好，其中一筆抓到「原貢獻附的
+ * CNA 網址實際內容是演唱會娛樂新聞」；接著最後 5 票全變成 `agree` ＋ note「驗證通過」＋
+ * 無 evidence_url，一模一樣，而其中 4 票是決定性的那一票（agree_count 剛好達標，直接落庫）。
+ *
+ * 這是第四種迴避實際查證的形狀，而且前三種（自設預算提前收工、填假網址、拖延不投）
+ * 都能靠把指令寫死壓制，**這一種壓不住**：它一開始照做，是後來才衰退的，事前指令涵蓋不到。
+ *
+ * 規則對稱於盲反對：不退件（工不白做）、不算背書，改記 unsure。
+ * disagree 早就要求附反證，agree 卻什麼都不要求——而 agree 才是真正推資料上線的那一票，
+ * 這個不對稱沒有道理。
+ *
+ * 判準刻意保守，只抓「什麼都沒說」：
+ *   - 沒有 evidence_url（有附第二來源就是有做事，不管備註寫多短）
+ *   - 而且備註去掉標點後短於 RUBBER_STAMP_MIN_NOTE 字，或整句就是套語
+ * 寫得出「三個欄位都對得上中選會那頁」這種具體內容的，一律不受影響。
+ */
+export const RUBBER_STAMP_MIN_NOTE = 12;
+const BOILERPLATE_RE = /^(驗證通過|確認通過|核對通過|資料正確|內容正確|無誤|正確|沒問題|沒有問題|ok|okay|looks good|lgtm|同意|通過|已核對|已驗證|已確認|來源正確|來源無誤)[。．.!！]*$/i;
+
+export function isRubberStampAgree(note: string | null | undefined, evidenceUrl: string | null | undefined): boolean {
+  if (evidenceUrl && /https?:\/\/\S+/.test(evidenceUrl)) return false;
+  const n = (note ?? "").replace(/[\s，。、．,.!！?？；;：:「」『』()（）]/g, "").trim();
+  if (!n) return true;
+  if (BOILERPLATE_RE.test((note ?? "").trim())) return true;
+  return n.length < RUBBER_STAMP_MIN_NOTE;
+}
+export const RUBBER_STAMP_NOTE = "（系統改記 unsure：同意票要說出你核對了什麼，或附上你找到的第二來源 evidence_url。只寫「驗證通過」這類套語不算背書）";
+
 // ---- 系統來源票（Jev）：4 票變 3+1 ----
 // 2026-09-19 使用者裁決：代理的價值是找第二、第三個可信來源；Jev 核「提交者附的那個來源」支不支持宣稱，
 // 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
