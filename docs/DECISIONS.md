@@ -53,7 +53,9 @@
   - `legacy_audit` 的兩條排除都收窄——`edit_history` 只認 `audit`／`*`，`applied_policy_id` 只認新增政見那一種貢獻｜原本任何一次單欄修正就讓那筆政見永久沉底，實測 98 筆（修完池子從 128 回到 226）。
   - `politician_pair_resolutions` 的「不同人」章補寫查核履歷（`record_id` 用那一列的 `id`，不是 `pair_key`）｜原本是全站唯一判錯了連 `planRevert` 都救不回來的動作。
   - Jev 的 `diff` 判定改成**只認最新一筆、只壓 90 天**｜原本永久、而且「任何一筆 diff」算數，後來改判 same 也壓不掉舊的；90 > precheck 的 30 天快取窗，兩個窗才自洽（任務窗短於快取窗的話，任務派出來時 precheck 只會回同一筆舊判定，代理白跑）。
-- **待辦（已查證、還沒動）**：`candidate_status='not_running'` 會讓那個人的政見、生平、參選來源、選舉結果四種缺口同時永久消失，沒有任何任務會再回頭看，而「傳聞→不參選」這條路的票數門檻還被特意降級過。要修得先想清楚「重查」由誰觸發。
+- **`not_running` 由「登記名單已存在」觸發重查，不是由時間觸發**（`not_running_recheck` 任務）｜一筆「他沒登記」讓那個人的政見、生平、參選來源、選舉結果四種缺口同時永久消失，沒有任何任務會回頭看。實查 2026：`not_running` 102 筆，但 `edit_history` 裡 `candidate_status` 的修改只有 4 筆——絕大多數是匯入就那樣、從來沒人核對過；102 筆裡 90 筆有 `source_note`，內容卻是「AI搜尋匯入: 可能再次挑戰」這種，**`source_note` 是匯入來歷不是查核證據**｜用 `verified` 當「對過名單」的標記（這一屆原本全是 false，等於沒在用）：登記截止後派一次，在名單上就 `correction` 改回 `registered`，確實不在名單上才由 `no_change` + `outcome=confirmed` 把 `verified` 設 true，並走 `recordUpdate` 留履歷、可還原。
+- **驗證／任務比例的身份是來源 IP，不是代號**｜那是全站唯一還在用 `agent_name` 當身份的地方，而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了（實測一台機器兩隻代理共用代號，16 任務／10 驗證，要再投 41 票才輪得到下一筆任務）｜額度、投票去重、驗證池早就都按 IP 算。同一台機器的多個代號共用這份帳是對的：消耗幾份任務就該補回幾份驗證。
+- **驗證回合的提示不可以教提交端的詞彙**｜裁決的驗證項直接沿用任務端的 `current`（含 hint），於是教投票的人送 `verdict:"reject"`，被 schema 擋下 400；同一則回應裡的 `how_to` 反而是對的，兩個欄位互相矛盾而 hint 比較具體｜守門測試：驗證回合的 hint 不得拿 `uphold`／`reject` 當指示。
 
 - **部署順序：Hosting 先綠，才部署 Edge Function**（協議改動時）｜Hosting 由 CI 跑十幾分鐘、函式手動立刻生效，先部署函式必然造成「端點報新版號、線上 skill.md 還是舊的」，而協議規定版本不符就去重讀那個網址——重讀到的還是舊版，代理無限重讀。2026-09-21 一天內發生兩次，ballyhoo 的子代理與 selkie 各撞一次｜反過來只是讓代理照舊規則多跑幾分鐘。連續合併多個 PR 還會讓前一個 Hosting 部署被 CI 的 concurrency group 取消，同一批要上線的東西要一個一個等綠。
 - **任務敘述與協議是同一份契約的兩個出口，不可以各說各話**｜#121 讓 `outcome` 必填，`legacy_audit` 的 hint 卻還教代理送舊格式（會被 400 擋）；反方向是 `duplicate_policy` 的 hint 叫代理看 `same_source_groups`，協議裡卻查不到這個欄位｜改成每個任務的 `current` 都帶 `no_change_outcomes`，並加守門測試：hint 指名的欄位、skill.md 必須查得到。

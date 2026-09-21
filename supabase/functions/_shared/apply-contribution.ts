@@ -652,6 +652,27 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 政見重複清查（2026-09-21）：no_change 通過＝這個人目前這份清單已經逐組比對過、沒有重複。
     // 記進 policy_dupe_reviews（鍵是清單指紋）就永遠不再派——同一份清單 14 天後再問一次還是同一個答案。
     // 新增、編輯或移除任何一筆政見，指紋就變，任務自己重新出現。
+    // 不參選重查（2026-09-21）：確認他確實不在登記名單上，才把這一列標成已核對。
+    // 這個章的代價特別大——標成不參選之後，這個人的政見／基本資料／參選來源／選舉結果
+    // 四種缺口都不會再被派，所以只有 confirmed 能蓋，而且走 recordUpdate 留履歷、可還原。
+    const notRunning = /^auto:not_running_recheck:([0-9a-f-]{36})$/i.exec(taskId);
+    if (notRunning) {
+      if (outcome !== "confirmed") {
+        return {
+          status: "applied",
+          message: "已記錄，但**沒有**把這筆參選紀錄標成已核對——只有 outcome=confirmed（對過官方登記名單、確認他不在上面）才會鎖住它",
+          task_id: taskId,
+        };
+      }
+      const { error: verifyError } = await supabase.from("politician_elections").update({ verified: true }).eq("id", notRunning[1]);
+      throwIf(verifyError, "politician_elections verified");
+      await recordUpdate(supabase, ctxOf(row), "politician_elections", notRunning[1], "verified", false, true);
+      return {
+        status: "applied",
+        message: "已核對：這筆「不參選」對過官方登記名單了，不會再重派（判錯的話這筆可以還原）",
+        task_id: taskId,
+      };
+    }
     const dupe = /^auto:duplicate_policy:([0-9a-f-]{36}):([0-9a-f]{8})$/i.exec(taskId);
     if (dupe && outcome !== "confirmed") {
       // 跟 legacy_audit 的章是同一個病（selkie 2026-09-21 指出）：policy_dupe_reviews 一寫下去，
