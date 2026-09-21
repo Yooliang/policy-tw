@@ -603,17 +603,17 @@ for k in ("five_hour", "seven_day"):
 | **−2** | 反對，而且附了系統核過的**直接矛盾**反證（`evidence_url`） |
 
   累計 `score ≥ target_score` → 上線；`score ≤ −target_score` → **直接退件**；其餘繼續等票。每個來源 IP 只算最新一票。投完票的回應會告訴你 `weight`（你這票記幾分）、`weight_reason`（為什麼）與 `score: {before, after, target}`——**分數不是評價你，是評價你這一票帶了多少證據。**
-- **目標分數 = 型別風險 × 來源等級**（系統票 `supported` 讓目標 −1、`not_supported` 讓目標 +1；它調的是目標，不是分數）。來源等級取 `source_urls` 裡**最高**的一個：`official`（`*.gov.tw`、`cec.gov.tw`、`ly.gov.tw`、`gov.taipei`、`judicial.gov.tw`）＞ `media`（第 3 節的主流媒體）＞ `social`（第 3 節的社群平台）＞ `other`（其他任何網址）。**用官方來源提交，目標更低、通過得更快。** 程式版在 `_shared/consensus.ts`（SQL 同步），`/next`、`/report`、`contribution-status` 的回應都帶算好的 `target_score`（舊欄位 `required_agree` 同值，留一版）：
+- **目標分數一律 3**；不動正式資料的型別（`task_suggestion`／`no_change`／`roster_check`）2。系統票 `supported`（伺服器自己核過你附的來源）讓目標 −1、`not_supported` 讓目標 +1——它調的是目標，不是分數。**所以官方、機器讀得到的來源仍然通過得更快**：系統票核得過，目標就剩 2。 程式版在 `_shared/consensus.ts`（SQL 同步），`/next`、`/report`、`contribution-status` 的回應都帶算好的 `target_score`（舊欄位 `required_agree` 同值，留一版）：
 
 | 型別 | official | media | social | other |
 |---|---|---|---|---|
-| `policy`／`policy_progress`／`politician`／`correction`（一般欄位）／`question_answer` | 2 | 2 | 3 | 3 |
-| `candidacy`／`correction` 改 `candidate_status`（加減參選人） | 4 | 6 | 8 | 8 |
-| `correction` 把「傳聞參選／可能參選」改成登記或不參選（`current_value` 是 `rumored`／`likely`） | 2 | 2 | 3 | 3 |
-| `candidacy` 補**已投票選舉的結果**（帶 `politician_id` 與 `election_result`，不看來源） | 2 | 2 | 2 | 2 |
-| `task_suggestion`／`no_change`（不動正式資料） | 1 | 2 | 2 | 2 |
+| `policy`／`policy_progress`／`politician`／`correction`（一般欄位）／`question_answer` | 3 | 3 | 3 | 3 |
+| `candidacy`／`correction` 改 `candidate_status`（加減參選人；另要求 ≥2 個不同來源 IP） | 3 | 3 | 3 | 3 |
+| `correction` 把「傳聞參選／可能參選」改成登記或不參選（`current_value` 是 `rumored`／`likely`） | 3 | 3 | 3 | 3 |
+| `candidacy` 補**已投票選舉的結果**（帶 `politician_id` 與 `election_result`，不看來源） | 3 | 3 | 3 | 3 |
+| `task_suggestion`／`no_change`（不動正式資料） | 2 | 2 | 2 | 2 |
 | `removal`（移除明顯不該存在的資料，不看來源） | 3 | 3 | 3 | 3 |
-| `merge_politician`（同名人物合併／判定不同人） | 4 | 6 | 8 | 8 |
+| `merge_politician`（同名人物合併／判定不同人） | 3 | 3 | 3 | 3 |
 - **達到目標分數即自動上線，沒有常態人工點**：把分數推到目標的那一票送出後，系統立刻把貢獻落進正式表（`applied`），網站馬上看得到。`merge_politician`／`candidacy`／`removal` 另外要求分數來自**至少 2 個不同來源 IP**——分數高不等於看過的人多。落庫出錯（`apply_failed`）會自動每 10 分鐘重試最多 3 次。維護者保留整筆還原與退件的能力（`reverted`／`rejected`），但只在系統異常時介入。所以請對你的來源負責，也對你的那一票負責。
 - **補「已投票選舉的結果」目標只要 2 分**：`candidacy` 帶著既有人物的 `politician_id` 與 `election_result`（`elected`／`not_elected`）時走這一列。加減參選人之所以要 4／6／8，是因為那會憑空生出或抹掉一筆參選紀錄；補一場已經投完票的選舉結果是查得到的既成事實，弄錯也容易改回來。**沒帶 `politician_id`（靠姓名新建人物）或還沒有結果的登記／確認參選，仍然是 4／6／8。**
 - **移除是軟移除，不是刪除**：`removal` 通過後那筆資料從網站上消失，但資料本身與整條查核履歷都留著，可以被復原。所以目標訂 3 分——比一般更正高（移除會讓讀者看不到東西），比加減參選人低（做錯了救得回來）。移除不看來源等級，因為最常見的移除理由就是「查遍了找不到任何來源」，這種主張本身沒有來源可言；你要寫清楚的是判斷依據。

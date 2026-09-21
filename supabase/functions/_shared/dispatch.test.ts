@@ -52,7 +52,7 @@ Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agr
     { id: "h", contribution_type: "candidacy", payload: { candidate_status: "registered" }, source_urls: ["https://www.cna.com.tw/x"], agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 6, status: "pending" },
   ];
   const me = { agent_name: "XiaoLiang", ip_hash: "ip-1", voted_ids: new Set(["e"]) };
-  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "g"]);
+  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "d", "g"], "目標一律 3：agree 2 的 d／g 還沒達標，h（6）已達標");
 });
 
 // 2026-09-21 票數→分數：池子回 score／target_score 就照它們排除已達標的，不再看 agree_count／effective_required。
