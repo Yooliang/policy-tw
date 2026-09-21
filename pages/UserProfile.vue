@@ -54,7 +54,7 @@ const TYPE_LABEL: Record<string, string> = {
 }
 const STATUS_LABEL: Record<string, string> = {
   pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '裁決中',
-  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原', superseded: '已由他筆上線',
+  apply_failed: '上線中（自動重試）', rejected: '退件', reverted: '已還原', superseded: '已由他筆上線', withdrawn: '提交者自行撤回',
 }
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800', verified: 'bg-sky-100 text-sky-800', applied: 'bg-emerald-100 text-emerald-800',
