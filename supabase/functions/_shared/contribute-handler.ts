@@ -181,7 +181,9 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
         ...(validation.contributor.agent_tool ? { agent_tool: validation.contributor.agent_tool } : {}),
         note: mergeNote(validation.contributor.agent_name, item.source_urls, item.note),
         ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
-      }, ipHash);
+      // via "merge"：這一票是系統把重複提交配對成的，不是代理自己挑的題目——派發閘對它放行。
+      // 2026-09-21 派發閘上線後，這條路安靜地被關了 10 小時（每筆重複都變新件），leatherback 打端點才發現。
+      }, ipHash, undefined, "merge");
       if (voted.status !== 201) continue; // 投不成就照原路收下
       claimed.add(target.id);
       const b = voted.body as Record<string, unknown>;
