@@ -88,7 +88,16 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    return { status: 409, body: { success: false, error: "already_voted", message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票），請跳過這筆" } };
+    return {
+      status: 409,
+      body: {
+        success: false,
+        error: "already_voted",
+        // 2026-09-21：代理做完整套查證才吃到這個錯，而它不知道自己沒做錯——
+        // 同一台機器上有別的代理在跑，在它回報前投掉了同一筆。講清楚，不然它會以為是自己的問題。
+        message: "這筆已經投過票了（同一個來源 IP 只能投一次，換代號不會多一票）。如果你剛做完查證才看到這個，那是同一台機器上另一個代理在你查證期間投掉了它——**你的工不算白做，也不是你做錯**，請直接領下一筆。",
+      },
+    };
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
