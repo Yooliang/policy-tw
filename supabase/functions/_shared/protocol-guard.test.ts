@@ -216,10 +216,29 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
  * dup／legacy／mismatch 三支臂的 task_type 其實從來沒被守過。
  */
 async function allAutoTaskTypes(): Promise<string[]> {
-  const { sql } = await latestMigrationDefining("contribution_auto_tasks(");
-  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks("));
-  const arms = [...new Set([...body.matchAll(/FROM (contribution_auto_tasks_[a-z_]+)\(\)/g)].map((m) => m[1]))];
-  assert(arms.length >= 2, `只解析到 ${arms.length} 支任務函式，UNION 的寫法可能變了`);
+  // 從派工函式出發，沿著 FROM contribution_auto_tasks_*() 一路展開。
+  // 2026-09-21 把 UNION 抽成 contribution_auto_tasks_arms() 之後就多了一層，
+  // 寫死一層的話這支測試會在重構後掃不到任何 task_type——所以這裡用待展開佇列。
+  const { sql: rootSql } = await latestMigrationDefining("contribution_auto_tasks(");
+  const queue = [rootSql.slice(rootSql.lastIndexOf("FUNCTION contribution_auto_tasks("))];
+  const arms = new Set<string>();
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const body = queue.shift()!;
+    for (const m of body.matchAll(/FROM (contribution_auto_tasks_[a-z_]+)\(\)/g)) {
+      const name = m[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const { sql: armSql } = await latestMigrationDefining(`${name}(`);
+      const from = armSql.lastIndexOf(`FUNCTION ${name}(`);
+      const ends = [armSql.indexOf("COMMENT ON FUNCTION", from), armSql.indexOf("CREATE OR REPLACE FUNCTION", from + 10)].filter((i) => i > from);
+      const armBody = armSql.slice(from, ends.length > 0 ? Math.min(...ends) : undefined);
+      // 只有 UNION 的中繼層（arms）要再展開一層；真正產任務的才收進來
+      if (/'auto:[a-z_]+:'/.test(armBody)) arms.add(name);
+      else queue.push(armBody);
+    }
+  }
+  assert(arms.size >= 2, `只解析到 ${arms.size} 支任務函式，UNION 的寫法可能變了`);
   const types: string[] = [];
   for (const arm of arms) {
     const { sql: armSql } = await latestMigrationDefining(`${arm}(`);
