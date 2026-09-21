@@ -1,10 +1,10 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { activityText, relativeTime } from "./activity.ts";
 
-Deno.test("變動文字：投票要帶票數，不然看不出離通過還有多遠", () => {
-  assertEquals(activityText("agree", { agree: 2, required: 3 }), "有人投了同意（2/3 票，還差 1 票）");
-  assertEquals(activityText("agree", { agree: 3, required: 3 }), "有人投了同意（3/3 票）");
-  assertEquals(activityText("disagree", { agree: 0, required: 3 }), "有人投了反對（0/3 票，還差 3 票）");
+Deno.test("變動文字：投票要帶分數，不然看不出離通過還有多遠", () => {
+  assertEquals(activityText("agree", { score: 2, target: 3 }), "有人投了同意（分數 2／目標 3，還差 1 分）");
+  assertEquals(activityText("agree", { score: 3, target: 3 }), "有人投了同意（分數 3／目標 3）");
+  assertEquals(activityText("disagree", { score: -1, target: 3 }), "有人投了反對（分數 -1／目標 3，還差 4 分）");
   assertEquals(activityText("unsure"), "有人投了存疑", "沒給票數就只講事件");
 });
 

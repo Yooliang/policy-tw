@@ -11,7 +11,7 @@ export type ActivityCode = string
 const STATUS_TEXT: Record<string, string> = {
   applied: '已上線',
   verified: '通過驗證，正在上線',
-  disputed: '有爭議，轉交裁決',
+  disputed: '有爭議（舊制，裁決已退場）',
   rejected: '已退件',
   reverted: '已還原',
   apply_failed: '上線失敗，系統會自動重試',
@@ -27,18 +27,19 @@ const VOTE_TEXT: Record<string, string> = {
 }
 
 /**
- * 變動內容講成一句話。投票要帶上目前票數，不然「有人投了同意」看不出離通過還有多遠。
+ * 變動內容講成一句話。投票要帶上目前分數，不然「有人投了同意」看不出離通過還有多遠。
+ * 2026-09-21 起是分數制：每票依證據記 −2～+2，累計達目標上線、跌到 −目標退件。
  * 看不懂的代碼回 null——寧可不顯示，也不要編一句話出來。
  */
-export function activityText(code: ActivityCode | null | undefined, votes?: { agree: number; required: number }): string | null {
+export function activityText(code: ActivityCode | null | undefined, score?: { score: number; target: number }): string | null {
   if (!code) return null
   if (code === 'created') return '剛提交，等待驗證'
   if (code.startsWith('status:')) return STATUS_TEXT[code.slice(7)] ?? null
   const vote = VOTE_TEXT[code]
   if (!vote) return null
-  if (!votes || votes.required <= 0) return vote
-  const left = Math.max(0, votes.required - votes.agree)
-  return left > 0 ? `${vote}（${votes.agree}/${votes.required} 票，還差 ${left} 票）` : `${vote}（${votes.agree}/${votes.required} 票）`
+  if (!score || score.target <= 0) return vote
+  const left = Math.max(0, score.target - score.score)
+  return left > 0 ? `${vote}（分數 ${score.score}／目標 ${score.target}，還差 ${left} 分）` : `${vote}（分數 ${score.score}／目標 ${score.target}）`
 }
 
 /**
