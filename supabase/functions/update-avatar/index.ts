@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { normalizeAvatarUrl } from "../_shared/avatar-url.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
 
       const { error } = await supabase
         .from("politicians")
-        .update({ avatar_url: update.avatarUrl })
+        .update({ avatar_url: normalizeAvatarUrl(update.avatarUrl) })
         .eq("name", update.name);
 
       if (error) {
@@ -85,11 +86,11 @@ curl -i --location --request POST 'https://wiiqoaytpqvegtknlbue.supabase.co/func
     "updates": [
       {
         "name": "李四川",
-        "avatarUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Lee_Shu-chuan_2023.jpg/220px-Lee_Shu-chuan_2023.jpg"
+        "avatarUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Lee_Shu-chuan_2023.jpg/250px-Lee_Shu-chuan_2023.jpg"
       },
       {
         "name": "童子瑋",
-        "avatarUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f4/童子瑋議長.jpg/220px-童子瑋議長.jpg"
+        "avatarUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f4/童子瑋議長.jpg/250px-童子瑋議長.jpg"
       }
     ]
   }'
