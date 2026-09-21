@@ -137,11 +137,38 @@ jobs:
   # 2026-09-21 之前這一步全靠人記得手動跑 `pnpm deploy:functions`。同一天出過兩次事：
   # CI 綠、Hosting 也部署了，但沒人手動跑這步——線上前端已經是新的、端點卻還是舊的，
   # 兩個各自在跑任務的代理各自獨立測到「線上沒擋」。這裡改成機械化，不再靠人記得。
+  # 守門如果需要人記得去啟動，它就不是守門，是文件——這條就是這次要堵的洞。
+  #
+  # 退版（rollback）順序跟部署順序相反：**函式先退，db 後退（如果真的要退 db）**。
+  # 舊函式碰到新 schema 通常沒事（多出來的欄位／函式不影響舊程式碼路徑）；新函式碰到
+  # 被退回的舊 schema 才會炸——像 20260921000018 那種用 CREATE OR REPLACE 換掉一個
+  # SQL 函式的行為、新版 index.ts 依賴新行為的情況。而且 `supabase db push` 沒有自動
+  # 反向操作，退 migration 要手動寫一個新的「反向」migration 再 push，不是單純
+  # revert 這個 commit 就會自動處理。真的要退版：先讓 Hosting／函式退回舊 commit，
+  # 確認函式不再依賴新 schema 之後，才動 db。
+  #
+  # environment: production —— 這是小良哥的裁示（2026-09-21，見 docs/DECISIONS.md）：
+  # 自動部署可以做，但「誰能讀到 Supabase 的 access token／DB 密碼」要收斂到
+  # 「誰能把東西合進 main」，不能是「誰能對這個 repo 開一個 PR 分支」。單靠上面的
+  # `if: github.ref == 'refs/heads/main'` 不夠——那只決定這個 job 跑不跑，repo 層級
+  # 的 secret 在 pull_request workflow 裡一樣讀得到,改一行 workflow 就能在 PR 分支
+  # 把它印出來或拿去部署。宣告 environment 之後，只有宣告了同一個 environment 的 job
+  # 才能讀到「加在那個 environment 底下」的 secret，而且 GitHub 會先檢查目前這個 ref
+  # 符不符合該 environment 的 deployment branch policy——不符合的話 job 連跑都不會跑,
+  # 不用等到讀 secret 那一步才擋。
+  #
+  # 前提：SUPABASE_ACCESS_TOKEN／SUPABASE_DB_PASSWORD 要加在 GitHub 的
+  # Settings → Environments → production → Environment secrets 底下,不是加在
+  # repo 層級的 Settings → Secrets and variables → Actions（加在那裡的話任何 job
+  # 不管有沒有宣告 environment 都讀得到,等於沒設）。這個 environment 本身也要先建：
+  # Deployment branches and tags 選 Selected branches and tags、只加 `main`；
+  # 不要加 required reviewers（小良哥要的是全程機器裁定，不是人工核准關卡）。
   deploy-functions:
     name: 部署 Supabase（migrations ＋ Edge Functions）
     needs: [deploy]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: production
     # 要在最後移動 edge-functions-deployed 這個 tag，需要 contents: write。
     permissions:
       contents: write
