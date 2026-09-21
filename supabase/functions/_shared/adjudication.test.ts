@@ -45,11 +45,11 @@ Deno.test("disputed 自動建裁決任務：hint_sources 併正反來源、targe
 
   const second = await ensureAdjudicationTask(fake.client, C1, "兩票反對");
   assertEquals(second.created, false, "已有 open 任務就不再建");
-  assertEquals(fake.db.contribution_tasks.length, 1);
+  assertEquals((fake.db.contribution_tasks ?? []).length, 1);
 
   fake.db.contributions.push({ id: A1, contribution_type: "adjudication", status: "disputed", payload: { contribution_id: C1 }, source_urls: [CEC], agent_name: "dave" });
   assertEquals((await ensureAdjudicationTask(fake.client, A1, "兩票反對")).skipped, "adjudication_itself");
-  assertEquals(fake.db.contribution_tasks.length, 1, "裁決被爭議不會再建任務（原任務保持 open）");
+  assertEquals((fake.db.contribution_tasks ?? []).length, 1, "裁決被爭議不會再建任務（原任務保持 open）");
 });
 
 Deno.test("adjudication schema：contribution_id／verdict／reason≥20／checked_urls 必填，source_urls 可省略；門檻不看來源一律 3", () => {
@@ -119,7 +119,7 @@ Deno.test("分歧：裁決本身被兩票反對 → 不建新任務、原裁決�
     contribution_tasks: [{ id: "t1", task_type: "adjudicate", status: "open", target: { contribution_id: C1, contributor: "alice" }, source: "auto_dispute" }],
   });
   assertEquals((await ensureAdjudicationTask(fake.client, A1, "兩票反對")).skipped, "adjudication_itself");
-  assertEquals(fake.db.contribution_tasks.length, 1);
+  assertEquals((fake.db.contribution_tasks ?? []).length, 1);
   assertEquals(fake.db.contribution_tasks[0].status, "open", "任務保持 open，下一位代理再裁一次");
 
   const tasks = [{ task_id: "t1", task_type: "adjudicate", target: { contribution_id: C1, contributor: "alice" } }, { task_id: "t2", task_type: "policy_missing", target: { politician_id: PID } }];
@@ -133,19 +133,19 @@ Deno.test("分歧：裁決本身被兩票反對 → 不建新任務、原裁決�
   assertEquals(excludeOwnAdjudications(cands, originals, { agent_name: "frank", ip_hash: "ip-z", voted_ids: new Set() }).length, 1);
 });
 
-Deno.test("落庫連續 3 次失敗 → disputed 並自動建裁決任務，描述帶錯誤訊息（不留給人）", async () => {
+Deno.test("落庫連續 3 次失敗 → 直接退件、不開任何任務；理由帶錯誤訊息與「缺口會回到佇列」（2026-09-21 裁示：不硬建）", async () => {
   const fake = createFakeSupabase({
     contributions: [{ ...disputedPolicy, status: "apply_failed", retry_count: 2, next_retry_at: "2020-01-01T00:00:00Z", last_error: "db down" }],
     contribution_votes: [],
   });
   const res = await autoApplyContribution(fake.client, C1, async () => { throw new Error("policies insert: null value in column category"); }, { retry: true });
-  assertEquals(res.status, "disputed");
-  assertEquals(fake.db.contributions[0].status, "disputed");
-  assertEquals(fake.db.contribution_tasks.length, 1);
-  const task = fake.db.contribution_tasks[0];
-  assertEquals(task.task_type, "adjudicate");
-  assert(String(task.description).includes("null value in column category"), "錯誤訊息進任務描述，代理可提 correction");
-  assert(String(task.description).includes("落庫連續 3 次失敗"));
+  assertEquals(res.status, "rejected");
+  assertEquals(fake.db.contributions[0].status, "rejected");
+  assertEquals((fake.db.contribution_tasks ?? []).length, 0, "不開裁決任務、也不開修正任務——缺口會由佇列重派");
+  const notes = String(fake.db.contributions[0].review_notes);
+  assert(notes.includes("null value in column category"), "錯誤訊息留在 review_notes，提交者看得到");
+  assert(notes.includes("落庫連續 3 次失敗"));
+  assert(notes.includes("缺口會回到任務佇列"));
 });
 
 Deno.test("修正任務：反對意見原樣進任務敘述，並要求連帶問題一起修", () => {

@@ -9,7 +9,6 @@
 
 import { applyContribution, type ApplyOutcome, type ContributionRow, contributionStatusFor } from "./apply-contribution.ts";
 import { APPLY_MAX_RETRIES, type IdentityVote, planRetry, resolveIdentityFromVotes } from "./consensus.ts";
-import { ensureAdjudicationTask, ensureFixTask } from "./adjudication.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -73,23 +72,19 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const { error: e } = await supabase.from("contributions").update(patch).eq("id", lock.id).eq("status", lock.status);
     return e ? `contributions update: ${e.message}` : null;
   };
-  // 轉 disputed 就自動建裁決任務（零人工點）；建不成只記 log，不影響主流程
-  const escalate = async (reason: string) => {
-    try { await ensureAdjudicationTask(supabase, contributionId, reason); } catch (e) { console.error("ensureAdjudicationTask:", e instanceof Error ? e.message : String(e)); }
-    // 裁決只能 uphold／reject，沒有「照反對意見修好」這個出口。反對者常常知道
-    // 正確答案，那份說明直接變成一筆修正任務，不必等人想起來重提。
-    try { await ensureFixTask(supabase, contributionId); } catch (e) { console.error("ensureFixTask:", e instanceof Error ? e.message : String(e)); }
-  };
+  // 2026-09-21 使用者裁示：衝突或落庫失敗就**不要硬建**，直接退件。缺口還在，派工佇列之後會再把它派出來，
+  // 用乾淨的一輪重做，衝突自然消失——不開裁決任務、不開修正任務、不留 disputed 這個狀態。
+  //   「資料不如不建，還會比較好。下面幾個任務盤查可能就會讓這些資料重新出現，現在的衝突可能就會被解決。」
+  const GAP_RETURNS = "這筆不落庫；缺口會回到任務佇列，由之後的任務重新查一次";
 
   try {
     let resolvedPoliticianId: string | null = null;
     if (IDENTITY_TYPES.has(row.contribution_type)) {
       const identity = await identityFromVotes(supabase, contributionId);
       if (identity.kind === "conflict") {
-        const message = `驗證者指認的人物不一致（${identity.politician_ids.join("、")}），交裁決`;
-        const err = await update({ status: "disputed", review_notes: `[auto] ${message}`, reviewed_by: "auto-apply", reviewed_at: now });
-        await escalate(message);
-        return { triggered: true, status: "disputed", outcome: { status: "disputed", message }, ...(err ? { error: err } : {}) };
+        const message = `驗證者指認的人物不一致（${identity.politician_ids.join("、")}），退件。${GAP_RETURNS}`;
+        const err = await update({ status: "rejected", review_notes: `[auto] ${message}`, reviewed_by: "auto-apply", reviewed_at: now });
+        return { triggered: true, status: "rejected", outcome: { status: "disputed", message }, ...(err ? { error: err } : {}) };
       }
       if (identity.kind === "resolved") resolvedPoliticianId = identity.politician_id;
       else if (identity.kind === "new") resolvedPoliticianId = "new";
@@ -101,9 +96,9 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
     if (outcome.status === "failed") throw new Error(outcome.message);
     const status = contributionStatusFor(outcome.status);
-    if (status === "disputed") {
-      const err = await update({ status, review_notes: `[auto] ${outcome.message}`, reviewed_by: "auto-apply", reviewed_at: now });
-      await escalate(outcome.message);
+    if (status === "rejected") {
+      // applyFn 判身份判不出（ambiguous）等情況：一樣退件，不硬建
+      const err = await update({ status, review_notes: `[auto] ${outcome.message}。${GAP_RETURNS}`, reviewed_by: "auto-apply", reviewed_at: now });
       return { triggered: true, status, outcome, ...(err ? { error: err } : {}) };
     }
     const err = await update({
@@ -123,11 +118,10 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const plan = planRetry(row.retry_count ?? 0);
     if (plan.give_up) {
       await update({
-        status: "disputed", retry_count: plan.retry_count, last_error: message, next_retry_at: null,
-        review_notes: `[auto] 落庫連續 ${plan.retry_count} 次失敗，交裁決：${message}`, reviewed_by: "auto-apply", reviewed_at: now,
+        status: "rejected", retry_count: plan.retry_count, last_error: message, next_retry_at: null,
+        review_notes: `[auto] 落庫連續 ${plan.retry_count} 次失敗，退件：${message}。${GAP_RETURNS}`, reviewed_by: "auto-apply", reviewed_at: now,
       });
-      await escalate(`落庫連續 ${plan.retry_count} 次失敗`);
-      return { triggered: true, status: "disputed", error: message };
+      return { triggered: true, status: "rejected", error: message };
     }
     await update({
       status: "apply_failed", retry_count: plan.retry_count, last_error: message, next_retry_at: plan.next_retry_at,

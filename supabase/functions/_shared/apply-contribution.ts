@@ -850,10 +850,9 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
 }
 
 /** apply 結果 → contributions.status */
-export function contributionStatusFor(outcome: ApplyStatus): "applied" | "disputed" | "apply_failed" {
-  switch (outcome) {
-    case "applied": return "applied";
-    case "disputed": return "disputed"; // 唯一的人工點
-    default: return "apply_failed"; // 掃地機會重試
-  }
+export function contributionStatusFor(outcome: ApplyStatus): "applied" | "rejected" | "apply_failed" {
+  // 2026-09-21：disputed 退場。身份判不出／指認衝突一律退件，缺口回到任務佇列由之後的任務重做，不硬建。
+  if (outcome === "applied") return "applied";
+  if (outcome === "disputed") return "rejected";
+  return "apply_failed";
 }

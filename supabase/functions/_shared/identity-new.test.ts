@@ -20,7 +20,7 @@ Deno.test("指認 new：純函式與 verify schema", () => {
   assertEquals(bad.errors.map((e) => e.path), ["resolved_politician_id"]);
 });
 
-Deno.test("兩票 new → 就算有同名人物也建新的（不對到既有）；new 與某人混 → disputed 進裁決", async () => {
+Deno.test("兩票 new → 就算有同名人物也建新的（不對到既有）；new 與某人混 → 退件不硬建、不開裁決", async () => {
   const seed = {
     contributions: [{
       id: C1, contribution_type: "politician", status: "verified", agent_name: "alice", contributor_ip_hash: "ip-a", contributor_url: null, note: null, retry_count: 0,
@@ -46,10 +46,9 @@ Deno.test("兩票 new → 就算有同名人物也建新的（不對到既有）
     { contribution_id: C1, verdict: "agree", resolved_politician_id: "new" }, { contribution_id: C1, verdict: "agree", resolved_politician_id: P1 },
   ] });
   const r2 = await autoApplyContribution(mixed.client, C1);
-  assertEquals(r2.status, "disputed");
-  assertEquals(mixed.db.politicians.length, 1);
-  assertEquals(mixed.db.contribution_tasks.length, 1, "自動建裁決任務");
-  assertEquals(mixed.db.contribution_tasks[0].task_type, "adjudicate");
+  assertEquals(r2.status, "rejected");
+  assertEquals(mixed.db.politicians.length, 1, "沒有硬建人物");
+  assertEquals((mixed.db.contribution_tasks ?? []).length, 0, "不開裁決任務（2026-09-21 裁示：缺口回佇列重做）");
 
   // 裁決者也能指認 new：applyContribution 直接帶 "new"
   const direct = createFakeSupabase(seed);

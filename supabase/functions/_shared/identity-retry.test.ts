@@ -26,16 +26,16 @@ Deno.test("身份指認純函式：兩票同一位 resolved；指不同位 confl
   assertEquals(resolveIdentityFromVotes([{ verdict: "agree", resolved_politician_id: "a" }, { verdict: "agree", resolved_politician_id: null }]), { kind: "resolved", politician_id: "a" });
 });
 
-Deno.test("candidacy 自動落庫：指認衝突 → disputed 不呼叫 applyFn；兩票同一位 → applyFn 收到 resolved_politician_id；比對 ambiguous → disputed", async () => {
+Deno.test("candidacy 自動落庫：指認衝突 → 退件不呼叫 applyFn；兩票同一位 → applyFn 收到 resolved_politician_id；比對 ambiguous → 退件", async () => {
   const row = { id: "c2", contribution_type: "candidacy", payload: { name: "陳素月" }, source_urls: ["https://a"], note: null, agent_name: "u", contributor_url: null, status: "verified", retry_count: 0 };
   let called: ContributionRow | null = null;
   const applyFn = async (_s: unknown, r: ContributionRow) => { called = r; return { status: "applied" as const, message: "ok", politician_id: String(r.resolved_politician_id) }; };
 
   const conflict = fakeWithVotes(row, [{ verdict: "agree", resolved_politician_id: "p-a" }, { verdict: "agree", resolved_politician_id: "p-b" }]);
   const r1 = await autoApplyContribution(conflict.client, "c2", applyFn);
-  assertEquals(r1.status, "disputed");
+  assertEquals(r1.status, "rejected");
   assertEquals(called, null);
-  assertEquals(conflict.updates[0].patch.status, "disputed");
+  assertEquals(conflict.updates[0].patch.status, "rejected");
   assert(String(conflict.updates[0].patch.review_notes).includes("不一致"));
 
   const agreed = fakeWithVotes(row, [{ verdict: "agree", resolved_politician_id: "p-a" }, { verdict: "agree", resolved_politician_id: "p-a" }]);
@@ -46,11 +46,11 @@ Deno.test("candidacy 自動落庫：指認衝突 → disputed 不呼叫 applyFn�
 
   const none = fakeWithVotes(row, [{ verdict: "agree", resolved_politician_id: null }, { verdict: "agree", resolved_politician_id: null }]);
   const r3 = await autoApplyContribution(none.client, "c2", async () => ({ status: "disputed" as const, message: "身份判不出" }));
-  assertEquals(r3.status, "disputed");
-  assertEquals(none.updates[0].patch.status, "disputed");
+  assertEquals(r3.status, "rejected");
+  assertEquals(none.updates[0].patch.status, "rejected");
 });
 
-Deno.test("落庫失敗自動重試：10 分鐘後重試、最多 3 次，第 3 次仍失敗才 disputed；掃地機只撿到期的", async () => {
+Deno.test("落庫失敗自動重試：10 分鐘後重試、最多 3 次，第 3 次仍失敗才退件；掃地機只撿到期的", async () => {
   assertEquals(planRetry(0, 0).give_up, false);
   assertEquals(planRetry(0, 0).next_retry_at, new Date(10 * 60 * 1000).toISOString());
   assertEquals(planRetry(2).give_up, true);
@@ -76,7 +76,7 @@ Deno.test("落庫失敗自動重試：10 分鐘後重試、最多 3 次，第 3 
 
   const third = fakeWithVotes({ ...base, status: "apply_failed", retry_count: 2, next_retry_at: "2020-01-01T00:00:00Z" }, []);
   const r3 = await autoApplyContribution(third.client, "c3", boom, { retry: true });
-  assertEquals(r3.status, "disputed");
+  assertEquals(r3.status, "rejected", "2026-09-21：第 3 次仍失敗直接退件，不留 disputed");
   assertEquals(third.updates[0].patch.retry_count, 3);
   assert(String(third.updates[0].patch.review_notes).includes("db down"));
 
