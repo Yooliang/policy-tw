@@ -126,3 +126,105 @@ jobs:
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "沒有 CLOUDFLARE_API_TOKEN，略過 Worker 部署"; exit 0; fi
           npx wrangler deploy
 
+  # Hosting 綠了才部署 Supabase（migrations 先、Edge Functions 後）——順序理由見
+  # scripts/deploy-functions.mjs 檔頭：函式先上線、公開的 skill.md 還沒更新的話，
+  # 照協議讀 skill.md 版號校對的代理會卡在「重讀→還是不一樣→再重讀」的無限迴圈。
+  # needs: [deploy] 已經保證這一點，不用再靠 scripts/deploy-functions.mjs 去現場
+  # 抓線上 skill.md 版本比對（那支腳本原本是為了「人手動跑、可能忘記順序」寫的
+  # 保險絲，這裡 CI 用 job 相依性機械保證順序，但仍然呼叫同一支腳本部署，等於多一層
+  # 版本斷言，不衝突)。
+  #
+  # 2026-09-21 之前這一步全靠人記得手動跑 `pnpm deploy:functions`。同一天出過兩次事：
+  # CI 綠、Hosting 也部署了，但沒人手動跑這步——線上前端已經是新的、端點卻還是舊的，
+  # 兩個各自在跑任務的代理各自獨立測到「線上沒擋」。這裡改成機械化，不再靠人記得。
+  deploy-functions:
+    name: 部署 Supabase（migrations ＋ Edge Functions）
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # 要在最後移動 edge-functions-deployed 這個 tag，需要 contents: write。
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要跟「上次成功部署」的 tag 做 diff，必須有完整歷史跟所有 tag，
+          # 不能用預設的 shallow clone。
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # SUPABASE_ACCESS_TOKEN／SUPABASE_DB_PASSWORD 跟 anon/service_role key 是不同東西：
+      # 前者是 supabase.com/dashboard/account/tokens 生成的 CLI 管理權杖，後者是遠端
+      # Postgres 的密碼。寫這份 workflow 的時候 repo 裡沒有這兩個 secret（`gh secret list`
+      # 查得到名字，查不到值，所以下面用「是不是空字串」判斷，不會把值印出來）。這一步
+      # 先擋下來、把缺什麼講清楚，不要讓後面的 supabase CLI 自己吐一段看不懂的認證錯誤。
+      - name: 檢查部署憑證存在
+        env:
+          HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+          HAS_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD != '' }}
+          HAS_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID != '' }}
+        run: |
+          missing=""
+          [ "$HAS_TOKEN" = "true" ] || missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ "$HAS_DB_PASSWORD" = "true" ] || missing="$missing SUPABASE_DB_PASSWORD"
+          [ "$HAS_PROJECT_REF" = "true" ] || missing="$missing SUPABASE_PROJECT_ID"
+          if [ -n "$missing" ]; then
+            {
+              echo "## Edge Functions 沒有部署"
+              echo
+              echo "Hosting 已經是新版，但缺少 repo secret：$missing"
+              echo
+              echo "現在線上是「新前端配舊（或半新）端點」的狀態，跟這次自動化要擋的事故一樣。"
+              echo "補上 secret 之後，下一次 push 到 main 會自動接著部署，不用重跑這次。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::缺少 repo secret：$missing（見上面的 job summary）"
+            exit 1
+          fi
+
+      # 上次成功部署到哪個 commit，記在 edge-functions-deployed 這個 tag 上（見檔尾
+      # 「標記部署成功」那一步）。找不到 tag 就是還沒跑過這套自動化，全部函式都當作
+      # 受影響——之後每次 push 只重部真的被動到的那幾支，見 scripts/affected-functions.mjs。
+      - name: 算出這次要部署哪些函式
+        id: affected
+        run: |
+          BASE=$(git rev-parse -q --verify refs/tags/edge-functions-deployed || true)
+          if [ -z "$BASE" ]; then
+            echo "找不到 edge-functions-deployed tag，第一次跑，全部函式都重部一次。"
+          else
+            echo "上次成功部署：$BASE"
+          fi
+          FNS=$(node scripts/affected-functions.mjs "$BASE" "${{ github.sha }}" | tr '\n' ' ' | sed 's/ *$//')
+          echo "受影響的函式：${FNS:-（沒有）}"
+          echo "list=$FNS" >> "$GITHUB_OUTPUT"
+
+      - name: 連結 Supabase 專案並套用 migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          npx supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
+          npx supabase db push --linked --password "$DB_PASSWORD"
+
+      # 重用 scripts/deploy-functions.mjs，不要在這裡另外寫一份部署邏輯：
+      # 它原本就會在部署前比對線上 skill.md 版號跟 PROTOCOL_VERSION，這裡當多一層
+      # 斷言（見這個 job 開頭的說明），失敗就代表 Hosting 部署的東西跟這次 commit
+      # 對不上，不應該硬部署，交給人來看。
+      - name: 部署受影響的 Edge Functions
+        if: steps.affected.outputs.list != ''
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          AFFECTED_FUNCTIONS: ${{ steps.affected.outputs.list }}
+        run: node scripts/deploy-functions.mjs $AFFECTED_FUNCTIONS
+
+      # 只有前面全部成功才移動這個 tag。失敗的話 tag 留在原地不動，下一次成功的
+      # 部署會自動把這次漏掉的也一起算進去重部——不需要人手動介入去修「基準點」。
+      - name: 標記這個 commit 部署成功
+        if: success()
+        run: |
+          git tag -f edge-functions-deployed "${{ github.sha }}"
+          git push origin -f edge-functions-deployed

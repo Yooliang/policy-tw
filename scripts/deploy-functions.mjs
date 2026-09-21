@@ -13,6 +13,13 @@
  * 所以改成機械檢查：線上 skill.md 的版本落後程式的 PROTOCOL_VERSION 時，
  * 這支直接拒絕部署。靠人記得的規則今天證明了記不住。
  *
+ * 2026-09-21：CI 的 deploy-functions job（.github/workflows/ci.yml）在 Hosting
+ * 部署成功之後會自動呼叫這支，帶入 scripts/affected-functions.mjs 算出的受影響函式
+ * 清單。CI 那邊已經用 `needs: [deploy]` 機械保證了順序，理論上這裡的版本檢查永遠會過；
+ * 留著不拿掉是因為它同時也是「Hosting 部署的到底是不是這次 commit」的斷言，失敗
+ * 代表兩邊對不上，這種時候本來就不該硬部署。CI 呼叫前會先 `supabase link`，所以
+ * 下面 spawnSync 沿用不帶 --project-ref 的寫法一樣能動。
+ *
  * 用法：node scripts/deploy-functions.mjs next tasks report
  *       node scripts/deploy-functions.mjs --force next   （知道自己在做什麼時才用）
  */
@@ -72,7 +79,8 @@ if (!hostedVersion) {
 let failed = 0;
 for (const fn of fns) {
   console.log(`\n→ 部署 ${fn}`);
-  const r = spawnSync("npx", ["supabase", "functions", "deploy", fn], { stdio: "inherit", shell: true });
+  // --use-api：伺服器端打包，不需要本機（或 CI runner 上）有 Docker 在跑。
+  const r = spawnSync("npx", ["supabase", "functions", "deploy", fn, "--use-api"], { stdio: "inherit", shell: true });
   if (r.status !== 0) { console.error(`✖ ${fn} 部署失敗`); failed++; }
 }
 process.exit(failed > 0 ? 1 : 0);
