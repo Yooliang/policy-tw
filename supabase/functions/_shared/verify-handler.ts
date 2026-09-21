@@ -66,6 +66,24 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
     }
   }
 
+  // 派發即綁定：只收「/next 派給你的那一筆」。2026-09-21 使用者裁示——
+  // 代理自己挑題目是派發的問題，不是投票的問題，所以執行點在這裡而不是在權重上補丁。
+  {
+    const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
+      .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).maybeSingle();
+    if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
+    if (!dispatched) {
+      return {
+        status: 409,
+        body: {
+          success: false,
+          error: "not_dispatched",
+          message: "這一筆不是派給你的。工作只從 GET /next 來：呼叫一次，伺服器會給你一筆要驗的，做完再用 POST /report 回報那一筆。不要自己挑題目。",
+        },
+      };
+    }
+  }
+
   const { data: existing, error: eError } = await supabase
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
