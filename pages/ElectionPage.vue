@@ -444,7 +444,15 @@ const categoryFilteredPolicies = computed(() =>
 
 // 議題頁的標籤要是「講什麼事」：候選人名、年份、「2026新北市長」、來源、口號都濾掉（lib/issue-tags.ts，2026-09-22）；
 // 完全沒可用標籤的政見退回它的類別，不然 177／223 筆 2026 政見在議題頁根本不出現
-const electionPoliticianNames = computed(() => new Set(electionPoliticians.value.map(c => c.name)))
+// 「不是議題的名字」：候選人名＋該縣市的鄉鎮市區名（楊梅、中壢、蘆竹這種標籤是地名不是議題），去掉「區／鄉／鎮／市」後綴也算
+const electionPoliticianNames = computed(() => {
+  const names = new Set(electionPoliticians.value.map(c => c.name))
+  for (const sub of availableSubRegions.value) {
+    names.add(sub)
+    names.add(sub.replace(/[區鄉鎮市]$/, ''))
+  }
+  return names
+})
 const tagCounts = computed(() => {
   const counts: { [key: string]: number } = {}
   categoryFilteredPolicies.value.forEach(p => {
@@ -706,7 +714,7 @@ usePageHead({
                 <Hash :size="12" /> {{ tag }}
               </button>
             </div>
-            <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="categoryFilteredPolicies" :election-politicians="electionPoliticians.map(withCurrentElectionData)" />
+            <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="categoryFilteredPolicies" :election-politicians="electionPoliticians.map(withCurrentElectionData)" :junk-names="electionPoliticianNames" />
           </div>
           <div v-else class="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
             <AlertCircle :size="48" class="mx-auto mb-4 opacity-50" />

@@ -13,6 +13,8 @@ const props = defineProps<{
   policies: Policy[]
   /** 已套上本屆資料的候選人（ElectionPage 的 withCurrentElectionData）：分層要看「本屆」的層級，不是人物最近一屆的。沒傳就退回全域人物（舊的 Election2026 頁） */
   electionPoliticians?: LevelPolitician[]
+  /** 不是議題的名字（候選人名＋鄉鎮名），跟 ElectionPage 的標籤列同一份；沒傳就只用候選人名 */
+  junkNames?: Set<string>
 }>()
 
 const router = useRouter()
@@ -20,7 +22,7 @@ const { politicians } = useSupabase()
 
 const levelPoliticians = computed<LevelPolitician[]>(() => props.electionPoliticians ?? politicians.value)
 const byId = computed(() => new Map(levelPoliticians.value.map(c => [String(c.id), c])))
-const names = computed(() => new Set(levelPoliticians.value.map(c => c.name)))
+const names = computed(() => props.junkNames ?? new Set(levelPoliticians.value.map(c => c.name)))
 const politicianOf = (p: Policy): LevelPolitician | undefined =>
   byId.value.get(String(p.politicianId)) ?? politicians.value.find(c => String(c.id) === String(p.politicianId))
 
