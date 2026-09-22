@@ -21,6 +21,7 @@ import {
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
+import { issueTagsOf } from '../lib/issue-tags'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -441,10 +442,13 @@ const categoryFilteredPolicies = computed(() =>
   selectedIssueCategory.value === 'All' ? regionPolicies.value : regionPolicies.value.filter(p => p.category === selectedIssueCategory.value)
 )
 
+// 議題頁的標籤要是「講什麼事」：候選人名、年份、「2026新北市長」、來源、口號都濾掉（lib/issue-tags.ts，2026-09-22）；
+// 完全沒可用標籤的政見退回它的類別，不然 177／223 筆 2026 政見在議題頁根本不出現
+const electionPoliticianNames = computed(() => new Set(electionPoliticians.value.map(c => c.name)))
 const tagCounts = computed(() => {
   const counts: { [key: string]: number } = {}
   categoryFilteredPolicies.value.forEach(p => {
-    p.tags.forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
+    issueTagsOf(p, electionPoliticianNames.value).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
   })
   return counts
 })
@@ -512,7 +516,7 @@ const politicianA = computed(() => politicians.value.find(c => String(c.id) === 
 const politicianB = computed(() => politicians.value.find(c => String(c.id) === String(politicianBId.value)))
 
 const getPledge = (cId: string | number, category: string) =>
-  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && belongsToThisElection(p) && (p.category === category || p.tags.includes(category)))
+  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && belongsToThisElection(p) && (p.category === category || issueTagsOf(p, electionPoliticianNames.value).includes(category)))
 
 
 const ALL_LEVELS = [
@@ -702,7 +706,7 @@ usePageHead({
                 <Hash :size="12" /> {{ tag }}
               </button>
             </div>
-            <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="categoryFilteredPolicies" />
+            <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="categoryFilteredPolicies" :election-politicians="electionPoliticians.map(withCurrentElectionData)" />
           </div>
           <div v-else class="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
             <AlertCircle :size="48" class="mx-auto mb-4 opacity-50" />

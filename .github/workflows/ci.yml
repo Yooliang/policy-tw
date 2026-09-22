@@ -52,7 +52,7 @@ jobs:
         working-directory: supabase/functions
         run: deno test --allow-read _shared/
       - name: deno test（前端純函式）
-        run: deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts
+        run: deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts lib/issue-tags.test.ts
 
       # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
