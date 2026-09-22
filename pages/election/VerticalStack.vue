@@ -5,19 +5,29 @@ import { ElectionType, type Policy } from '../../types'
 import { ArrowDown } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
+import { issueTagsOf } from '../../lib/issue-tags'
 
+type LevelPolitician = { id: string | number; name: string; avatarUrl?: string | null; electionType?: string | null }
 const props = defineProps<{
   tag: string
   policies: Policy[]
+  /** 已套上本屆資料的候選人（ElectionPage 的 withCurrentElectionData）：分層要看「本屆」的層級，不是人物最近一屆的。沒傳就退回全域人物（舊的 Election2026 頁） */
+  electionPoliticians?: LevelPolitician[]
 }>()
 
 const router = useRouter()
 const { politicians } = useSupabase()
 
+const levelPoliticians = computed<LevelPolitician[]>(() => props.electionPoliticians ?? politicians.value)
+const byId = computed(() => new Map(levelPoliticians.value.map(c => [String(c.id), c])))
+const names = computed(() => new Set(levelPoliticians.value.map(c => c.name)))
+const politicianOf = (p: Policy): LevelPolitician | undefined =>
+  byId.value.get(String(p.politicianId)) ?? politicians.value.find(c => String(c.id) === String(p.politicianId))
+
 const getPoliciesByLevel = (type: ElectionType) =>
   props.policies.filter(p =>
-    p.tags.includes(props.tag) &&
-    politicians.value.find(c => c.id === p.politicianId)?.electionType === type
+    issueTagsOf(p, names.value).includes(props.tag) &&
+    byId.value.get(String(p.politicianId))?.electionType === type
   )
 
 const mayors = computed(() => getPoliciesByLevel(ElectionType.MAYOR))
@@ -68,8 +78,8 @@ const levels = computed(() => [
                 :class="`bg-white border-l-4 ${level.colorBorder} shadow-sm border-y border-r border-slate-100 p-4 rounded-r-lg hover:shadow-md cursor-pointer transition-all`"
               >
                 <div class="flex items-center gap-2 mb-2">
-                  <Avatar :src="politicians.find(can => can.id === p.politicianId)?.avatarUrl" :name="politicians.find(can => can.id === p.politicianId)?.name || ''" size="xs" />
-                  <span class="text-sm font-bold text-navy-900">{{ politicians.find(can => can.id === p.politicianId)?.name }}</span>
+                  <Avatar :src="politicianOf(p)?.avatarUrl" :name="politicianOf(p)?.name || ''" size="xs" />
+                  <span class="text-sm font-bold text-navy-900">{{ politicianOf(p)?.name }}</span>
                 </div>
                 <h4 class="font-bold text-sm text-navy-900 line-clamp-2">{{ p.title }}</h4>
               </div>
