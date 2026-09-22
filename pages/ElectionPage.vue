@@ -462,13 +462,15 @@ watch([() => selectedIssueCategory.value, () => selectedRegion.value, () => sele
 })
 
 // Comparison mode
-const comparisonPool = computed(() =>
-  electionPoliticians.value.filter(c => {
+/** 選區是整個縣市（或全國）的層級：鄉鎮篩選對它沒有意義，不套用（2026-09-22：台東縣＋大武鄉把縣市長 PK 篩成空池） */
+const COUNTY_WIDE_LEVELS: readonly string[] = [ElectionType.PRESIDENT, ElectionType.MAYOR]
+function poolForLevel(level: ElectionType) {
+  return electionPoliticians.value.filter(c => {
     const type = getElectionType(c)
-    if (!(type === comparisonLevel.value || (!type && comparisonLevel.value === ElectionType.MAYOR))) return false
+    if (!(type === level || (!type && level === ElectionType.MAYOR))) return false
     if (selectedRegion.value !== 'All' && c.region !== selectedRegion.value) return false
-    // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
-    if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
+    // 鄉鎮市區篩選：議員透過對應表查選舉區；鄉鎮層級直接比；全縣層級不套用
+    if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && !COUNTY_WIDE_LEVELS.includes(level)) {
       if (type === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && c.subRegion !== electoralDistrict) return false
@@ -478,6 +480,19 @@ const comparisonPool = computed(() =>
     }
     return true
   })
+}
+const comparisonPool = computed(() => poolForLevel(comparisonLevel.value))
+/** 目前地區各層級有幾個人可以 PK；只列有人的層級，頁籤上帶人數（全部 0 才退回全部，讓使用者看得出是資料還沒有） */
+const levelCounts = computed(() => new Map(electionLevels.value.map(l => [l.type, poolForLevel(l.type).length])))
+const visibleLevels = computed(() => {
+  const withPeople = electionLevels.value.filter(l => (levelCounts.value.get(l.type) ?? 0) > 0)
+  return withPeople.length > 0 ? withPeople : electionLevels.value
+})
+/** 鄉鎮篩選對全縣層級沒作用時說一句，不然使用者會以為大武鄉的縣長候選人就是這幾位 */
+const subRegionIgnoredNote = computed(() =>
+  selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && COUNTY_WIDE_LEVELS.includes(comparisonLevel.value)
+    ? `${comparisonLevel.value}是全${selectedRegion.value.endsWith('市') ? '市' : '縣'}選舉，「${selectedSubRegion.value}」的篩選在這一層不套用；要看該鄉鎮的選區請切到議員或鄉鎮層級`
+    : ''
 )
 
 const politicianAId = ref<string | number>('')
@@ -517,7 +532,7 @@ const electionLevels = computed(() => {
   return types.length > 0 ? ALL_LEVELS.filter(l => types.includes(l.type)) : ALL_LEVELS
 })
 // ?type= 帶了本屆沒有的層級（例：2026 帶 立法委員）→ 退回第一個有的；網址會跟著 useRegionQuerySync 改正
-watch(electionLevels, (levels) => {
+watch(visibleLevels, (levels) => {
   if (levels.length > 0 && !levels.some(l => l.type === comparisonLevel.value)) comparisonLevel.value = levels[0].type
 }, { immediate: true })
 
@@ -701,13 +716,14 @@ usePageHead({
         <div class="flex justify-start overflow-x-auto pb-2">
           <div class="inline-flex bg-slate-100 p-1 rounded-lg shrink-0">
             <button
-              v-for="level in electionLevels"
+              v-for="level in visibleLevels"
               :key="level.type"
               @click="comparisonLevel = level.type"
               :class="`px-4 py-2 rounded-md text-sm font-bold transition-all whitespace-nowrap ${comparisonLevel === level.type ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
-            >{{ level.label }}</button>
+            >{{ level.label }}<span class="ml-1 text-[11px] font-medium opacity-70">{{ levelCounts.get(level.type) ?? 0 }}</span></button>
           </div>
         </div>
+        <p v-if="subRegionIgnoredNote" class="text-xs text-slate-500 -mt-4">{{ subRegionIgnoredNote }}</p>
 
         <div class="bg-amber-50 rounded-xl border border-amber-200 p-6 flex flex-col md:flex-row items-center justify-between gap-8">
           <PoliticianDropdown v-model="politicianAId" label="候選人 A" ring-color="blue-500" :selected-region="selectedRegion" :comparison-pool="comparisonPool" />
