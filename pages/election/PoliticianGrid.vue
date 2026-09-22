@@ -3,7 +3,7 @@ import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
-import { ArrowRight, Megaphone, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
 
@@ -110,8 +110,6 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
   const text = note.replace(URL_RE, '').replace(/^AI搜尋匯入[：:]?\s*/, '').replace(/[\s，,;；]+$/, '').trim()
   return { text: text || null, url }
 }
-const displayNote = (note?: string) => splitNote(note).text
-const noteUrl = (note?: string) => splitNote(note).url
 
 </script>
 
@@ -148,8 +146,14 @@ const noteUrl = (note?: string) => splitNote(note).url
                 <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
                   <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
                 </h3>
+                <!-- 已登記＝綠色小勾（2026-09-22：登記名單上的人是常態，文字標太吵）；其他狀態照舊文字標 -->
                 <span
-                  v-if="candidateStatusLabel(politician.candidateStatus)"
+                  v-if="politician.candidateStatus === 'registered'"
+                  class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 shrink-0"
+                  title="已登記"
+                ><Check :size="11" :stroke-width="3" /></span>
+                <span
+                  v-else-if="candidateStatusLabel(politician.candidateStatus)"
                   :class="`text-[10px] px-1.5 py-0.5 rounded border font-bold ${candidateStatusColor(politician.candidateStatus)}`"
                 >
                   {{ candidateStatusLabel(politician.candidateStatus) }}
@@ -158,12 +162,6 @@ const noteUrl = (note?: string) => splitNote(note).url
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
                 <span v-if="formatArea(politician)" class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatArea(politician) }}</span>
-                <!-- 同一句登記名單來源在 42 張卡上一字不差地重複（2026-09-18：「反而不用一直重複」），
-                     那是整批匯入時寫進每一列的 source_note。卡片只留一個「來源」連結，滑過去才看得到那句話。 -->
-                <p v-if="displayNote(politician.sourceNote) || noteUrl(politician.sourceNote)" class="text-xs text-slate-400 mt-1">
-                  <a v-if="noteUrl(politician.sourceNote)" :href="noteUrl(politician.sourceNote)!" :title="displayNote(politician.sourceNote) ?? '來源'" target="_blank" rel="noopener" class="text-violet-500 hover:underline" @click.stop>來源</a>
-                  <span v-else class="line-clamp-2 break-words">{{ displayNote(politician.sourceNote) }}</span>
-                </p>
               </div>
             </div>
             <ArrowRight class="text-slate-300 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" :size="20" />
