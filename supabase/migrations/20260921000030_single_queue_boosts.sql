@@ -176,7 +176,7 @@ LANGUAGE sql STABLE AS $$
     CASE p_payload->>'target_table'
       WHEN 'politicians' THEN uuid_or_null(p_payload->>'target_id')
       WHEN 'policies' THEN (SELECT p.politician_id FROM policies p WHERE p.id = uuid_or_null(p_payload->>'target_id'))
-      WHEN 'politician_elections' THEN (SELECT pe.politician_id FROM politician_elections pe WHERE pe.id = uuid_or_null(p_payload->>'target_id'))
+      WHEN 'politician_elections' THEN (SELECT pe.politician_id FROM politician_elections pe WHERE pe.id::TEXT = p_payload->>'target_id')
       ELSE NULL
     END,
     uuid_or_null(p_payload->>'keep_id')
