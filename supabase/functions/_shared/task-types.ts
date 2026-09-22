@@ -40,5 +40,7 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   candidate_status_stale: "correction",
   // 「這不是政見？」：查證後多半是整筆移除，也可能是改分類（correction）或確認有效（no_change），
   // 任務敘述會把三條路都講清楚。這裡給最常見的那一種。
-  policy_validity: "removal",
+  // 2026-09-22 shuwei-huang 實跑 8 題：6 題是真政見只缺出處、只有 2 題是口號——預設建議 removal 會把人往刪的方向帶；
+  // 常態是補 source_url（correction），真的不是政見再走 removal（做法裡三條路照舊）
+  policy_validity: "correction",
 };
