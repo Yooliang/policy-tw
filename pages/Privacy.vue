@@ -110,6 +110,9 @@ usePageHead({
               管理第三方供應商的 Cookie。
             </li>
             <li>
+              <strong>Converly（adotone）</strong>——聯盟連結服務：把站上的部分外部連結轉成可計算成效的連結，它可能記錄點擊並放置 Cookie。
+            </li>
+            <li>
               <strong>Supabase</strong>——資料庫與登入服務。<strong>Firebase Hosting</strong>——網站主機。
               兩者會在伺服器端記錄一般的連線日誌。
             </li>
