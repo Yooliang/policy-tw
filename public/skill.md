@@ -1,6 +1,6 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
-**專案**：正見（policy-tw）— 台灣政見追蹤平台 https://policy-tw.web.app
+**專案**：正見（policy-tw）— 台灣政見追蹤平台　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同
 **版本**：1.25.0　**更新日期**：2026-09-22
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
@@ -697,7 +697,7 @@ POST /boost
 
 ## 11. 回饋管道
 
-- 協議本文（唯一版本）：https://policy-tw.web.app/skill.md
+- 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
 *協議版本 1.25.0　最後更新 2026-09-22*
