@@ -3,7 +3,8 @@ import { useHead } from '@unhead/vue'
 
 export const SITE_NAME = '正見'
 export const SITE_TAGLINE = '智能政見追蹤平台'
-export const SITE_URL = 'https://policy-tw.web.app'
+// 2026-09-22 換自有網域 正見.tw（punycode）；policy-tw.web.app 照常可用，但 canonical／og:url／sitemap 都指這裡
+export const SITE_URL = 'https://xn--2lw665d.tw'
 export const DEFAULT_DESCRIPTION =
   '正見是超越黨派色彩的政策歷史追蹤平台，記錄全台政治人物政見的提出與執行進度，並以 AI 進行客觀分析。'
 
