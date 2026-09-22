@@ -11,15 +11,16 @@ type LevelPolitician = { id: string | number; name: string; avatarUrl?: string |
 const props = defineProps<{
   tag: string
   policies: Policy[]
-  /** 已套上本屆資料的候選人（ElectionPage 的 withCurrentElectionData）：分層要看「本屆」的層級，不是人物最近一屆的 */
-  electionPoliticians: LevelPolitician[]
+  /** 已套上本屆資料的候選人（ElectionPage 的 withCurrentElectionData）：分層要看「本屆」的層級，不是人物最近一屆的。沒傳就退回全域人物（舊的 Election2026 頁） */
+  electionPoliticians?: LevelPolitician[]
 }>()
 
 const router = useRouter()
 const { politicians } = useSupabase()
 
-const byId = computed(() => new Map(props.electionPoliticians.map(c => [String(c.id), c])))
-const names = computed(() => new Set(props.electionPoliticians.map(c => c.name)))
+const levelPoliticians = computed<LevelPolitician[]>(() => props.electionPoliticians ?? politicians.value)
+const byId = computed(() => new Map(levelPoliticians.value.map(c => [String(c.id), c])))
+const names = computed(() => new Set(levelPoliticians.value.map(c => c.name)))
 const politicianOf = (p: Policy): LevelPolitician | undefined =>
   byId.value.get(String(p.politicianId)) ?? politicians.value.find(c => String(c.id) === String(p.politicianId))
 
