@@ -1,27 +1,30 @@
 /**
  * GET /next 的派工決策（純函式，可測）。
  *
- * 比例：待驗證 > 0 時約 3 verify：1 task 輪替，用「該 agent_name 今天已做的驗證數／任務數」決定下一步
- *   → verify 當 verifies_done < (tasks_done + 1) * 3，否則 task。（3 驗、1 任、3 驗、1 任…）
- * 待驗證 = 0 時只派 task。
- * 派 verify 時排除：自己提交（agent_name 或 ip_hash 相同）、已投過、agree_count 已達門檻（不用再派）。
- * 隨機化：候選清單取最早的一批，再用 seed 隨機挑一筆，避免所有代理拿到同一筆。
+ * 單一佇列（2026-09-22，使用者裁示）：驗證也是任務，不再另外排程、不再 3:1 交錯。
+ * 三個來源（待驗證貢獻、手動任務、自動缺口）各出一個最前的候選，誰的 queue_at 最早誰先（pickQueueHead）。
+ * queue_at 是 task_dispatches 的單一排序鍵：新項目＝進佇列的當下；派過＝派出的當下（回到隊尾）；
+ * 1980 年段＝有人插隊（task_boost，一次性）。
+ * 派 verify 時排除：自己提交（agent_name 或 ip_hash 相同）、已投過、分數已達目標（在 SQL 池子裡做）。
  */
 
 import { requiredAgree } from "./consensus.ts";
 
-export const VERIFY_TASK_RATIO = 3;
-
 export type NextKind = "verify" | "task" | "none";
 
-export interface AgentProgress {
-  verifies_done: number;
-  tasks_done: number;
-}
-
-export function chooseKind(totalPending: number, progress: AgentProgress): NextKind {
-  if (totalPending <= 0) return "task";
-  return progress.verifies_done < (progress.tasks_done + 1) * VERIFY_TASK_RATIO ? "verify" : "task";
+export type QueueHeadKind = "verify" | "manual" | "auto";
+/** 同一時刻的先後：驗證最便宜、池子最大，先派；手動任務是人提的，比自動缺口先 */
+const HEAD_ORDER: Record<QueueHeadKind, number> = { verify: 0, manual: 1, auto: 2 };
+/** 三個來源各出一個最前的候選，回誰先。時間用 Date.parse 比，不能用字串比（池子回 +00:00、TS 這邊是 Z） */
+export function pickQueueHead(heads: ReadonlyArray<{ kind: QueueHeadKind; queue_at: string | null | undefined } | null>): QueueHeadKind | null {
+  const at = (v: string | null | undefined) => { const t = v ? Date.parse(v) : NaN; return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t; };
+  let best: { kind: QueueHeadKind; t: number } | null = null;
+  for (const h of heads) {
+    if (!h) continue;
+    const t = at(h.queue_at);
+    if (!best || t < best.t || (t === best.t && HEAD_ORDER[h.kind] < HEAD_ORDER[best.kind])) best = { kind: h.kind, t };
+  }
+  return best?.kind ?? null;
 }
 
 export interface VerifyCandidate {

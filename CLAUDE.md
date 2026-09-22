@@ -120,7 +120,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 
 ## Edge Functions（`supabase/functions/`，共 33 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻）
 
-- 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`
+- 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）
 - 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
