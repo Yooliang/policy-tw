@@ -3,12 +3,11 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { chooseKind, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickBySeed, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey, VERIFY_TASK_RATIO } from "../_shared/dispatch.ts";
+import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
-import { bestSourceKind, sourceRank } from "../_shared/source-priority.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
@@ -181,6 +180,8 @@ Deno.serve(async (req) => {
       id: string; contribution_type: string; payload: unknown; source_urls: string[]; note: string | null; task_id: string | null;
       agent_name: string; agent_tool: string | null; contributor_ip_hash: string; agree_count: number; disagree_count: number; unsure_count: number;
       status: string; created_at: string;
+      /** 單一佇列的排序鍵（contribution_verify_pool 回；沒有列時＝created_at） */
+      queue_at?: string | null;
     };
     // deno-lint-ignore no-explicit-any
     const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
@@ -240,7 +241,6 @@ Deno.serve(async (req) => {
       manual = filterAnsweredQuestionTasks(sortQuestionTasksBySupport(withStance), answeredQuestionIds, fullQuestionIds);
     }
 
-    const kind = chooseKind(totalPending, { verifies_done: ipVoteRes.count ?? 0, tasks_done: ipContribRes.count ?? 0 });
     // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
     // 而 429 是在 POST /report 才發生——那時候查證的工都已經做完，白費。
     const quota = {
@@ -259,17 +259,14 @@ Deno.serve(async (req) => {
     // protocol_version：代理拿它跟自己手上那份 skill.md 的版本比，不一樣就要重讀再繼續。
     // 不然協議改了，還在跑的代理會照舊規則做到下一次重啟。
     // agent：伺服器解析出來的身份（序號登入時代理不知道自己的代號是什麼，這裡告訴它；藍圖 §3）
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, ratio: `${VERIFY_TASK_RATIO}:1`, quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
+    const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
     const serveVerify = async (): Promise<Response> => {
-      // 訪客看得到的先（提問回答、網站按鈕觸發的任務），裁決次之（2026-09-21：不先驗裁決，原貢獻永遠卡在 disputed），
-      // 再依來源等級高的（官方 > 媒體 > 社群 > 其他），同等級內隨機
-      const visitorFirst = candidates.filter((c) => c.visitor_facing === true);
-      const adjudicationsNext = candidates.filter((c) => c.visitor_facing !== true && c.contribution_type === "adjudication");
-      const pool = visitorFirst.length > 0 ? visitorFirst : adjudicationsNext.length > 0 ? adjudicationsNext : candidates;
-      const ranked = [...pool].sort((a, b) => sourceRank(bestSourceKind(b.source_urls)) - sourceRank(bestSourceKind(a.source_urls)));
-      const topRank = sourceRank(bestSourceKind(ranked[0].source_urls));
-      const pick = pickBySeed(ranked.filter((c) => sourceRank(bestSourceKind(c.source_urls)) === topRank), seed)!;
+      // 單一佇列（2026-09-22）：池子已照 queue_at 排，第一筆就是等最久的（訪客看得到的、被插隊的在 1980 年段）。
+      // 桶子（訪客／裁決／來源等級／隨機）全部退場：等最久的先，每一筆都輪得到。
+      const pick = candidates[0]!;
+      // 派過就排到隊尾（task_dispatched 蓋 now()）；記不成不影響派工
+      try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
       // 派發即綁定（2026-09-21）：記下「這一筆派給了這個來源 IP」，投票時要求對得上。
       // 代理不能自己挑題目——contributions-feed 是公開的、id 拿得到，所以光關掉
       // 可以列清單的端點擋不住，執行點在這裡。
@@ -349,7 +346,6 @@ Deno.serve(async (req) => {
           "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
       });
     };
-    if (kind === "verify" && candidates.length > 0) return await serveVerify();
 
     // task：先清過期認領、讀未過期的（別人領走的目標 30 分鐘內不派）
     await supabase.rpc("contribution_task_leases_purge");
@@ -397,8 +393,16 @@ Deno.serve(async (req) => {
     // 兩邊現在用同一個鍵比：queue_at。1980＝有人明確要求要先做，排程加進佇列的當下＝排隊尾。
     const autoHead = freeAuto[0] ?? null;
     const manualHead = pickQueuedManual(freeManual, seed);
-    const manualFirst = manualHead !== null
-      && (autoHead === null || manualQueueAt(manualHead) <= (autoHead.queue_at ?? ""));
+    // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
+    // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
+    const verifyHead = candidates[0] ?? null;
+    const head = pickQueueHead([
+      verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
+      manualHead ? { kind: "manual", queue_at: manualQueueAt(manualHead) } : null,
+      autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
+    ]);
+    if (head === "verify") return await serveVerify();
+    const manualFirst = head === "manual";
 
     if (manualFirst) {
       const t = manualHead!;

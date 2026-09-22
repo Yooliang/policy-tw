@@ -223,39 +223,24 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   assert(!elig.includes("'adjudication'") && !elig.includes("'removal'") && !elig.includes("'no_change'"), "沒有來源可核的型別不能有系統票");
 });
 
-// 2026-09-21：裁決線是死的（87 份等票平均 0.1 票）。驗證池的順序是「訪客觸發 > 裁決 > 其餘最早」，
+// 2026-09-22 單一佇列：驗證池照 queue_at 排（訪客看得到的在 1980 年段），桶子退場；
 // SQL 的 ORDER BY 跟 next/index.ts 的 serveVerify 是同一套規則的兩份寫法，改一邊沒改另一邊就會各派各的。
-Deno.test("SQL 與 TS 一致：驗證池順序是訪客觸發 > 裁決（限三分之一）> 其餘最早，且合格判斷在 LIMIT 之前", async () => {
+Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveVerify 拿第一筆；合格判斷在 LIMIT 之前", async () => {
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
-  // 2026-09-21 起優先序在 bucket（0 訪客觸發／1 裁決／2 其餘），ORDER BY 只排 bucket 與時間。
-  const bucket = pool.match(/CASE WHEN [\w.]*visitor_facing THEN 0 WHEN [\w.]*adjudication_facing THEN 1 ELSE 2 END AS bucket/);
-  assert(bucket, "優先序要是 bucket：訪客觸發 0、裁決 1、其餘 2");
-  assert(/ORDER BY [\w.]*bucket ASC, [\w.]*created_at ASC/.test(pool), "先照 bucket 再照提交時間");
-  assert(pool.includes("adjudication_facing"), "池子要把裁決旗標回給 /next");
-  // 2026-09-21：#119 讓 86 筆裁決塞滿 p_limit=30 的窗口，TS 在 LIMIT 之後才篩掉不合格的，
-  // candidates 趨近 0、/next 只派任務。合格判斷要在 SQL、LIMIT 之前（#102–#105 已裁過的反模式）。
-  assert(
-    pool.includes("v2.verifier_ip_hash = p_ip_hash"),
-    "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決",
-  );
-  assert(
-    pool.includes("o.contributor_ip_hash = p_ip_hash"),
-    "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決",
-  );
-  assert(
-    /r\.bucket <> 1 OR r\.rn <= GREATEST\(1, COALESCE\(p_limit, 30\) \/ 3\)/.test(pool),
-    "裁決最多佔窗口三分之一，否則它會排擠掉其他型別的驗證",
-  );
-
+  assert(/ORDER BY COALESCE\(d\.queue_at, c\.created_at\) ASC/.test(pool), "驗證池要照 queue_at 排（沒有列時用 created_at）");
+  assert(pool.includes("queue_at TIMESTAMPTZ"), "池子要把 queue_at 回給 /next，三個來源才比得起來");
+  assert(!/AS bucket/.test(pool), "桶子（訪客／裁決）退場：訪客看得到的用 1980 表達");
+  assert(pool.includes("LEFT JOIN task_dispatches d ON d.task_id = 'verify:' || c.id"), "驗證列的鍵是 verify:<id>");
+  assert(pool.includes("v2.verifier_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決");
+  assert(pool.includes("o.contributor_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決");
   const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
   const at = serve.indexOf("const serveVerify");
   assert(at > 0, "找不到 serveVerify");
-  const body = serve.slice(at, at + 1500);
-  assert(body.includes(`c.contribution_type === "adjudication"`), "serveVerify 也要把裁決排第二順位");
-  assert(
-    body.indexOf("visitorFirst.length > 0") < body.indexOf("adjudicationsNext.length > 0"),
-    "訪客觸發仍排在裁決前面",
-  );
+  const body = serve.slice(at, at + 800);
+  assert(body.includes("const pick = candidates[0]!"), "serveVerify 拿池子第一筆（等最久的），不再依來源等級／隨機挑");
+  const seed = await latestMigrationDefining("FUNCTION seed_auto_task_queue");
+  assert(seed.includes("'verify:' || c.id"), "排程要把漏掉的待驗證貢獻補進佇列");
+  assert(!seed.includes("task_priority_tier"), "誰先誰後由 task_boost 決定，排程不再硬編碼 2026 縣市長");
 });
 
 // 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改

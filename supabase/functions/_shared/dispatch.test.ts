@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { chooseKind, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP, filterSaturatedTasks , TASK_INFLIGHT_CAP } from "./dispatch.ts";
+import { pickQueueHead, filterAnsweredQuestionTasks, filterLeasedTasks, filterAdjudicateTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterVerifyCandidates, MANUAL_PICK_WINDOW, pickBySeed, pickManualTask, sortQuestionTasksBySupport, taskTargetKey, excludeOwnAdjudications, filterSkippedTasks, fullQuestionIdsOf, QUESTION_ANSWER_CAP, filterSaturatedTasks , TASK_INFLIGHT_CAP } from "./dispatch.ts";
 
 Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、過期的照派；同目標不同任務類型也算同一認領", () => {
   const now = new Date("2026-09-11T10:00:00Z");
@@ -21,21 +21,21 @@ Deno.test("軟認領：別人 30 分鐘內領走的目標不派；自己的、�
   assertEquals(free, ["auto:policy_missing:P2", "auto:progress_stale:X9", "manual-uuid"]);
 });
 
-Deno.test("/next 比例輪替：3 驗 1 任、3 驗 1 任…", () => {
-  const seq: string[] = [];
-  const progress = { verifies_done: 0, tasks_done: 0 };
-  for (let i = 0; i < 8; i++) {
-    const k = chooseKind(10, progress);
-    seq.push(k);
-    if (k === "verify") progress.verifies_done++;
-    else progress.tasks_done++;
-  }
-  assertEquals(seq, ["verify", "verify", "verify", "task", "verify", "verify", "verify", "task"]);
+// 2026-09-22 單一佇列：驗證也是任務，3:1 退場。三個來源各出一個最前的，誰的 queue_at 最早誰先。
+Deno.test("/next 單一佇列：誰的 queue_at 最早誰先，跨格式（+00:00 與 Z）也比得對", () => {
+  assertEquals(pickQueueHead([
+    { kind: "verify", queue_at: "2026-09-21T10:00:00+00:00" },
+    { kind: "manual", queue_at: "2026-09-21T09:59:59.000Z" },
+    { kind: "auto", queue_at: "2026-09-21T10:00:01+00:00" },
+  ]), "manual");
+  assertEquals(pickQueueHead([{ kind: "verify", queue_at: "1980-01-01T00:02:00+00:00" }, { kind: "auto", queue_at: "1980-01-01T00:01:00.000Z" }]), "auto", "插隊有先後：先插的分鐘數小");
 });
-
-Deno.test("/next：total_pending=0 只派 task，即使驗證數為 0", () => {
-  assertEquals(chooseKind(0, { verifies_done: 0, tasks_done: 0 }), "task");
-  assertEquals(chooseKind(0, { verifies_done: 0, tasks_done: 5 }), "task");
+Deno.test("/next 單一佇列：同一時刻驗證先、手動次之、自動最後；沒有候選回 null；壞時間排最後", () => {
+  const t = "2026-09-21T10:00:00.000Z";
+  assertEquals(pickQueueHead([{ kind: "auto", queue_at: t }, { kind: "verify", queue_at: t }, { kind: "manual", queue_at: t }]), "verify");
+  assertEquals(pickQueueHead([{ kind: "auto", queue_at: t }, { kind: "manual", queue_at: t }]), "manual");
+  assertEquals(pickQueueHead([null, null]), null);
+  assertEquals(pickQueueHead([{ kind: "verify", queue_at: null }, { kind: "auto", queue_at: t }]), "auto");
 });
 
 Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agree 已達門檻的", () => {
@@ -270,19 +270,10 @@ Deno.test("沒有在途資料時不擋任何任務；上限可調", () => {
   assertEquals(filterSaturatedTasks(tasks, new Map([["t1", 1]]), 1).map((t) => t.task_id), ["t2"]);
 });
 
-Deno.test("比例的身份是來源 IP，不是代號：換代號不可以洗掉欠的驗證", async () => {
-  // 2026-09-21：這是全站唯一還在用 agent_name 當身份的地方。代號是自報的，
-  // 換一個新的就 tasks_done=0、做 3 筆驗證又能領任務；沿用舊代號的老實代理反而動不了。
-  // 額度、投票去重、驗證池都按來源 IP 算，比例要用同一把尺。
+Deno.test("/next 不再有 3:1：沒有 chooseKind；驗證派出去也要蓋章回隊尾", async () => {
+  // 2026-09-22 單一佇列。驗證派出去若不蓋 task_dispatched('verify:…')，同一筆會一直是「等最久的」，全站都拿到它。
   const src = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  const call = src.match(/chooseKind\([^)]*\)/);
-  assert(call, "找不到 chooseKind 的呼叫");
-  assert(
-    /ipVoteRes/.test(call![0]) && /ipContribRes/.test(call![0]),
-    `比例要吃按來源 IP 算的計數，現在是：${call![0]}`,
-  );
-  assert(
-    !/agent_name/.test(call![0]),
-    "比例不可以按代號算——換代號就能洗掉欠的驗證",
-  );
+  assert(!/chooseKind\(/.test(src), "3:1 已退場，/next 不該再呼叫 chooseKind");
+  assert(/task_dispatched", \{ p_task_id: `verify:\$\{pick\.id\}` \}/.test(src), "驗證派出去要蓋 task_dispatched('verify:<id>')");
+  assert(/pickQueueHead\(\[/.test(src), "三個來源要用 pickQueueHead 合成");
 });
