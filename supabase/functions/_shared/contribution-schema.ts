@@ -92,6 +92,10 @@ export interface VerifyInput {
   agent_tool?: string;
   /** politician／candidacy：指認 payload 說的是 current.identity_candidates 裡哪一位 */
   resolved_politician_id?: string;
+  /** 帶指認的同意票：中選會候選人查詢 API 查這個姓名回幾筆（1.29.0） */
+  cec_hits?: number;
+  /** 帶指認的同意票：那些紀錄依出生年收斂成幾個人（1.29.0） */
+  cec_people?: number;
 }
 
 export interface VerifyValidation {
@@ -433,6 +437,9 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
   if (body.verdict === "disagree" && !isStr(body.note, 5, 2000)) errors.push({ path: "note", message: "投 disagree 要寫 note（至少 5 字）說明依據" });
   else if (body.note !== undefined && !isStr(body.note, 1, 2000)) errors.push({ path: "note", message: "要是 1～2000 字" });
   if (body.resolved_politician_id !== undefined && body.resolved_politician_id !== null && !isIdentityPick(body.resolved_politician_id)) errors.push({ path: "resolved_politician_id", message: "要是 uuid（current.identity_candidates 裡的 id）或 \"new\"（都不是，建新人物）" });
+  for (const k of ["cec_hits", "cec_people"] as const) {
+    if (body[k] !== undefined && !(Number.isInteger(body[k]) && (body[k] as number) >= 0 && (body[k] as number) <= 10000)) errors.push({ path: k, message: "要是 0 以上的整數" });
+  }
   if (errors.length > 0) return { ok: false, errors, input: null };
   return {
     ok: true,
@@ -445,6 +452,8 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
       ...(body.evidence_url !== undefined ? { evidence_url: String(body.evidence_url) } : {}),
       ...(body.note !== undefined ? { note: String(body.note) } : {}),
       ...(typeof body.resolved_politician_id === "string" ? { resolved_politician_id: body.resolved_politician_id } : {}),
+      ...(typeof body.cec_hits === "number" ? { cec_hits: body.cec_hits } : {}),
+      ...(typeof body.cec_people === "number" ? { cec_people: body.cec_people } : {}),
     },
   };
 }
