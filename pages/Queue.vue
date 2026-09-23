@@ -48,7 +48,22 @@ const BORDER: Record<string, string> = {
   duplicate_politician: '#64748b',
   question: '#db2777',               // 提問：粉
 }
-const borderOf = (r: Row) => BORDER[r.kind === 'verify' ? 'verify' : r.task_type] ?? '#cbd5e1'
+// 驗證項目也依「在驗什麼」分色（2026-09-23 小良哥：只分任務／驗證兩色不夠）：鍵是 contribution_type
+const VERIFY_BORDER: Record<string, string> = {
+  policy: '#7c3aed',           // 新增政見：紫
+  policy_progress: '#047857',  // 政見進度：深綠
+  correction: '#c026d3',       // 資料更正：紫紅
+  candidacy: '#be123c',        // 參選狀態：深紅
+  politician: '#b45309',       // 人物資料：褐
+  no_change: '#94a3b8',        // 查無異動回報：淺灰
+  removal: '#dc2626',          // 建議移除：紅
+  task_suggestion: '#0e7490',  // 任務提議：藍綠
+  roster_check: '#0891b2',     // 名單清查：青
+  question_answer: '#db2777',  // 提問回答：粉
+  merge_politician: '#4f46e5', // 人物合併：靛
+  adjudication: '#475569',
+}
+const borderOf = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
 
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
 // 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
