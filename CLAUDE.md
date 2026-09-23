@@ -34,15 +34,17 @@ npx supabase functions deploy <function-name>
 
 ### 部署順序：Hosting 先綠，才部署 Edge Function
 
-改動碰到 `public/skill.md`（協議）時，順序是 **合併 → 等 Hosting 綠 → `npx supabase db push` → `npx supabase functions deploy`**。
+**2026-09-21 起這一步是自動的**：push 到 `main`、Hosting 部署成功之後，CI 的 `deploy-functions` job（`.github/workflows/ci.yml`）會接著自動跑 `npx supabase db push`，再用 `scripts/affected-functions.mjs` 算出這次 commit 真的動到哪幾支函式（自己的 `index.ts` 改了，或它 transitively import 的 `_shared/*.ts` 改了），只重部那幾支。`needs: [deploy]` 機械保證 Hosting 先綠。之前這一步全靠人記得手動跑 `pnpm deploy:functions`，2026-09-21 同一天出過兩次「Hosting 綠、CI 也綠，但沒人手動跑這步」的事故——**別靠記得**這條規則，這次直接改成 CI 自動接手，不再是人要記住的事。
 
-Hosting 由 CI 跑、要十幾分鐘（預渲染約 16k 頁）；Edge Function 是手動、立刻生效。先部署函式的話，端點會回新版號、線上 `skill.md` 還是舊的——而協議規定「版本不一樣就重讀 <https://policy-tw.web.app/skill.md>」，代理重讀拿到的還是舊版，於是**無限重讀**。2026-09-21 連續發生兩次，外部代理只有那個網址、沒有任何線索知道這是部署時間差。
+順序理由沒變：函式先上去、`public/skill.md` 還沒更新的話，端點會回新版號，而協議規定「版本不一樣就重讀 <https://policy-tw.web.app/skill.md>」，代理重讀拿到的還是舊版，於是無限重讀。**文件領先端點是安全方向，端點領先文件不是。**
 
-反過來（文件先新、函式還報舊版號）只會讓代理照舊規則多跑幾分鐘，不會卡住。**文件領先端點是安全方向，端點領先文件不是。**
+**連續合併多個 PR 已經不會再取消前一個部署**：`deploy`／`deploy-functions` 改用獨立的 `concurrency` group、`cancel-in-progress: false`，跟下一次 push 排隊而不是互相砍。只有 `typecheck`／`edge-tests` 還是砍掉重跑（快篩用不到排隊）。
 
 還有一件連帶的：main 的 CI 是**排隊**（2026-09-22 起不取消），但佇列只留最新一個等待中的——連續合併三個以上，中間那次會被略過（最新那次已包含它的內容，所以不會漏部署，只是時間拉長）。**小改動併成一個 PR**，別每一小步都合。
 
-**別靠記得——用 `pnpm deploy:functions` 部署。** 這條規則 2026-09-21 當天被違反兩次，兩次都是寫下它的人自己。所以改成機械檢查：`scripts/deploy-functions.mjs` 會先抓線上 `skill.md` 的版本，落後程式的 `PROTOCOL_VERSION` 就拒絕部署並印出正確順序。
+`deploy-functions` job（#142）要能跑，GitHub 的 `production` 環境（只限 main）要有 `SUPABASE_ACCESS_TOKEN`（Supabase CLI 的管理權杖，跟 anon／service_role key 是不同東西）；專案代號沿用既有的 `SUPABASE_PROJECT_ID`。**不需要資料庫密碼**：CLI 用管理權杖就能 link 與 `db push`（2026-09-23 實測）。
+
+`scripts/deploy-functions.mjs`（`pnpm deploy:functions`）仍然留著當手動保險絲——CI 掛掉、或要單獨補部署某支函式時用。它會先抓線上 `skill.md` 的版本，落後程式的 `PROTOCOL_VERSION` 就拒絕部署並印出正確順序：
 
 ```bash
 pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
