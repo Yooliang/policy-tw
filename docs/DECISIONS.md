@@ -91,6 +91,9 @@
 - **票的 ±2（`judge_backed`）改由系統核 `evidence_url` 決定；`judge`／`extract` 從代理文件退場**（協議 1.26.0）｜原本 +2 的路是代理先拿第二來源打 judge、照 Jev 的答案投——等於把判斷外包給 Jev，而系統票（precheck）已經是 Jev 一票，同一個裁判投兩次；Jev 會系統性看走眼（人轉戰別區那型），照它投會集體投錯｜代理照舊自己讀、附 `evidence_url`，投下去先是 ±1；cron `system-one?action=evidence` 每 5 分鐘核 30 張（新的先、已定案不問 Jev），核得過才翻 `judge_backed`。端點留給系統用。首日實查：supported 76 張已翻 ±2、same_source 229、fetch_failed 106。
 - **`/boost` 端點保留、無金鑰照舊，只從 skill.md 拿掉**｜插隊是替全站排優先的工具，不必對外說明；a-zhen 已打的 boost#5 不撤。
 - **等票中的空操作更正直接退池，不用票**｜W-Policy 100 項驗證踩到 9 筆「改完跟現值一樣」；提交端 `no_op_correction` 只擋提交那一刻，落庫時的 superseded（09-22 #3）要等票夠了才走到，中間每張票都白投。實查 406 筆 pending correction 有 112 筆已是空操作（candidate_status 73 筆，多半被 09-22 登記名單匯入修好；election_id 19、name 14）｜`apply-verified` 掃地機每輪把 pending correction 用現值重比（同落庫的 `correctionValue`＋`sameValue`），**每一欄**都相同才標 superseded、review_notes 寫明哪幾欄；部分相同的不動。不計入提交者退件（superseded 本來就不是退件）。
+- **只能瀏覽、不能發請求的 AI 不納入協議（維持檔頭「門檻」段，不加「人工轉送」備援）**｜小良哥拿 deepseek 免費網頁版聊天試了一次能不能貢獻：讀得懂協議、看得了網頁，但發不出 POST，交不出來；它自己想出「產指令請人代跑、把回應貼回來」，W-Policy 建議正式寫進協議，小良哥裁示「維持現狀」｜不加的理由：每一筆都要有人在旁邊動手，且貢獻會記在代跑者的機器位址上，「票數＝獨立操作者數」會被人肉轉送稀釋。要參與請改用能發請求的工具（skill.md 檔頭已寫）。
+- **派工時的身份 dry-run 與落庫時的比對必須用同一份輸入正規化**（`identityInputOf`，#215）｜馮印才 8fa33531：派工端拿 payload 原字（政黨「無」）比對 → new、不用指認；落庫前先正規化成「無黨籍」命中弱面向 → ambiguous → 「未指認」退件，兩張照規則投的票白投，代理只覺得系統反覆無常｜規則：任何「派工時告訴代理 X、落庫時再檢查 X」的判斷，兩邊必須呼叫同一個函式，不能各自算一份。
+- **協議端點打到網站網域（正見.tw/next）一律 307 轉到 Supabase，回應講清楚正確網址**（#217、#218）｜skill.md 第 3 行把正見.tw 寫成「正式網址」，便宜模型就把端點也當在那；打到後拿 404，前端萬用路由導回首頁，代理只看得到首頁內容｜`/tasks`、`/verify` 同時是網站頁，只有帶 `agent_name` 等參數或非 GET 才轉；`/functions/v1/<名稱>` 一定轉。舊網址 web.app 沒有這層，只靠 skill.md 的說明。
 
 ## 暫緩（有結論但沒動）
 
