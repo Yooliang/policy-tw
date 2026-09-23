@@ -92,6 +92,57 @@ async function askPolicy(supabase: Sb, apiKey: string, policyId: string) {
   return { model: res.model, answers: res.answers, cost_usd: res.usage.cost, ...wrote };
 }
 
+type VoteBudgetRow = { id: string; contribution_type: string; payload: Record<string, unknown> | null; source_urls: string[] | null };
+
+/**
+ * 票數預算（影子模式）：對一筆貢獻逐維問 Jev、算出它「應該」要幾票，寫進 jev_decisions（question=vote_budget）。
+ * 只記錄、不套用門檻。單筆端點（vote_budget）與排程掃描（vote_budget_sweep）共用。
+ */
+async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, requester: string | null) {
+  const payload = (c.payload ?? {}) as Record<string, unknown>;
+  const claim = claimOf(c.contribution_type, payload);
+
+  // 來源正文：抓第一個抓得到的。抓不到就讓每一維自己判不出來（＝往嚴格的方向算）
+  let page: { url: string; text: string; note: string } | null = null;
+  for (const u of (c.source_urls ?? []).slice(0, 2)) {
+    const got = await fetchSource(u);
+    if (got.kind === "html" && got.text) { page = { url: u, text: got.text.slice(0, 12000), note: got.note ?? "" }; break; }
+  }
+
+  // 中選會折扣：參選類才問得到（cec-check 拿的是結構化資料，不是網頁）
+  let cecConfirmed = false;
+  let cecNote = "非參選類，不查中選會";
+  if (c.contribution_type === "candidacy" || c.contribution_type === "correction") {
+    const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
+    const eid = Number(payload.election_id ?? claim.election_id);
+    if (name && Number.isInteger(eid)) {
+      const hit = await cecCandidacyPage(name, eid);
+      cecConfirmed = !!hit && hit.count > 0;
+      cecNote = cecConfirmed ? `中選會查到 ${hit!.count} 筆` : "中選會查不到";
+    } else {
+      cecNote = "缺姓名或屆別，查不了";
+    }
+  }
+
+  const state: Record<string, unknown> = {
+    target: claim,
+    contribution_type: c.contribution_type,
+    // note 要留著（2026-09-21）：裡面是 raw|archive|text 三個長度——candlefish 驗 archive 回退時發現 judge 存的是縮減版、
+    // 看不出回退有沒有出手；每一層都只回報自己看到的，這三個數字就是在補「沒看到什麼」。
+    page: page ? { url: page.url, text: page.text, note: page.note } : { url: null, text: "", note: "抓不到正文" },
+  };
+  const res = await askJev(apiKey, state, dimensionQuestions(c.contribution_type));
+  const budget = computeVoteBudget(c.contribution_type, res.answers, cecConfirmed);
+
+  await insertRecords(supabase, [{
+    subject_type: "contribution", subject_id: c.id, question: "vote_budget",
+    choice: String(budget.threshold), probability: 0, confidence: null,
+    probabilities: Object.fromEntries(budget.dimensions.map((d) => [d.key, d.probability])),
+    model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
+  }]);
+  return { budget, cecConfirmed, cecNote, page, cost: Number(res.usage.cost.toFixed(8)) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ success: false, error: "只收 POST" }, 405);
@@ -352,52 +403,10 @@ Deno.serve(async (req) => {
       if (cErr) throw new Error(`contributions read: ${cErr.message}`);
       if (!c) return json({ success: false, error: "not_found", message: "找不到這筆貢獻" }, 404);
 
-      const dims = VOTE_DIMENSIONS[c.contribution_type] ?? [];
-      if (dims.length === 0) {
+      if ((VOTE_DIMENSIONS[c.contribution_type] ?? []).length === 0) {
         return json({ success: false, error: "no_dimensions", message: `${c.contribution_type} 還沒有定義風險維度（_shared/vote-budget.ts）` }, 400);
       }
-
-      const payload = (c.payload ?? {}) as Record<string, unknown>;
-      const claim = claimOf(c.contribution_type, payload);
-
-      // 來源正文：抓第一個抓得到的。抓不到就讓每一維自己判不出來（＝往嚴格的方向算）
-      let page: { url: string; text: string; note: string } | null = null;
-      for (const u of (c.source_urls ?? []).slice(0, 2)) {
-        const got = await fetchSource(u);
-        if (got.kind === "html" && got.text) { page = { url: u, text: got.text.slice(0, 12000), note: got.note ?? "" }; break; }
-      }
-
-      // 中選會折扣：參選類才問得到（cec-check 拿的是結構化資料，不是網頁）
-      let cecConfirmed = false;
-      let cecNote = "非參選類，不查中選會";
-      if (c.contribution_type === "candidacy" || c.contribution_type === "correction") {
-        const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
-        const eid = Number(payload.election_id ?? claim.election_id);
-        if (name && Number.isInteger(eid)) {
-          const hit = await cecCandidacyPage(name, eid);
-          cecConfirmed = !!hit && hit.count > 0;
-          cecNote = cecConfirmed ? `中選會查到 ${hit!.count} 筆` : "中選會查不到";
-        } else {
-          cecNote = "缺姓名或屆別，查不了";
-        }
-      }
-
-      const state: Record<string, unknown> = {
-        target: claim,
-        contribution_type: c.contribution_type,
-        // note 要留著（2026-09-21）：裡面是 raw|archive|text 三個長度——candlefish 驗 archive 回退時發現 judge 存的是縮減版、
-        // 看不出回退有沒有出手；每一層都只回報自己看到的，這三個數字就是在補「沒看到什麼」。
-        page: page ? { url: page.url, text: page.text, note: page.note } : { url: null, text: "", note: "抓不到正文" },
-      };
-      const res = await askJev(apiKey, state, dimensionQuestions(c.contribution_type));
-      const budget = computeVoteBudget(c.contribution_type, res.answers, cecConfirmed);
-
-      await insertRecords(supabase, [{
-        subject_type: "contribution", subject_id: c.id, question: "vote_budget",
-        choice: String(budget.threshold), probability: 0, confidence: null,
-        probabilities: Object.fromEntries(budget.dimensions.map((d) => [d.key, d.probability])),
-        model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
-      }]);
+      const r = await voteBudgetFor(supabase, apiKey, c as VoteBudgetRow, requester);
 
       return json({
         success: true,
@@ -405,11 +414,49 @@ Deno.serve(async (req) => {
         note: "只記錄不套用：現行門檻仍由 contribution_effective_agree 決定",
         contribution_id: c.id,
         current_threshold_note: "要跟現行門檻對照請看 contribution-status 的 required_agree",
-        cec: { confirmed: cecConfirmed, note: cecNote },
-        source: page ? { url: page.url, chars: page.text.length } : { url: null, chars: 0, note: "抓不到正文，每一維都會落到「判不出來」" },
-        budget,
-        cost_usd: Number(res.usage.cost.toFixed(8)),
+        cec: { confirmed: r.cecConfirmed, note: r.cecNote },
+        source: r.page ? { url: r.page.url, chars: r.page.text.length } : { url: null, chars: 0, note: "抓不到正文，每一維都會落到「判不出來」" },
+        budget: r.budget,
+        cost_usd: r.cost,
       });
+    }
+
+    // ---- vote_budget_sweep：影子模式排進排程（小良哥 2026-09-23）----
+    // 09-21 上線後只有 2 筆手動測試，「先看真實分布再決定」一直沒有分布可看。這裡每 10 分鐘撿 pending 且還沒算過
+    // 票數預算的貢獻各問一次，只記錄不套用；累積到幾百筆再對照它們後來的結果（applied／rejected）決定閾值與要不要接上。
+    if (action === "vote_budget_sweep") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const { count, error: cErr } = await supabase.from("jev_decisions")
+        .select("id", { count: "exact", head: true }).eq("subject_type", "contribution").eq("question", "vote_budget").gte("asked_at", since);
+      if (cErr) throw new Error(`jev_decisions recent count: ${cErr.message}`);
+      const budgetN = Math.max(0, limit - (count ?? 0));
+      if (budgetN === 0) return json({ success: true, asked: 0, reason: `${BACKFILL_WINDOW_MINUTES} 分鐘內已算過 ${count} 筆，這輪不算` });
+
+      const { data: cands, error: qErr } = await supabase.rpc("system_one_vote_budget_candidates", { p_limit: budgetN });
+      if (qErr) throw new Error(`vote_budget candidates: ${qErr.message}`);
+      const list = (cands ?? []) as VoteBudgetRow[];
+      const startedAt = Date.now();
+      const BUDGET_MS = 40_000;
+      const CONCURRENCY = 2;
+      let asked = 0, cost = 0;
+      const tally: Record<string, number> = {};
+      const failures: Array<{ contribution_id: string; error: string }> = [];
+      let cursor = 0;
+      while (cursor < list.length && Date.now() - startedAt < BUDGET_MS) {
+        const chunk = list.slice(cursor, cursor + CONCURRENCY); cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map((c) => voteBudgetFor(supabase, apiKey, c, null)));
+        results.forEach((r, i) => {
+          if (r.status === "rejected") { failures.push({ contribution_id: chunk[i].id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) }); return; }
+          asked++; cost += r.value.cost;
+          const k = `${chunk[i].contribution_type}:${r.value.budget.threshold}`;
+          tally[k] = (tally[k] ?? 0) + 1;
+        });
+        if (failures.length >= 5) break;
+      }
+      return json({ success: true, shadow_mode: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, tally, failures });
     }
 
     // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 小良哥：代理不該把判斷外包給 Jev）----
