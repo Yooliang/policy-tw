@@ -88,6 +88,8 @@
 
 ## 2026-09-23
 
+- **票的 ±2（`judge_backed`）改由系統核 `evidence_url` 決定；`judge`／`extract` 從代理文件退場**（協議 1.26.0）｜原本 +2 的路是代理先拿第二來源打 judge、照 Jev 的答案投——等於把判斷外包給 Jev，而系統票（precheck）已經是 Jev 一票，同一個裁判投兩次；Jev 會系統性看走眼（人轉戰別區那型），照它投會集體投錯｜代理照舊自己讀、附 `evidence_url`，投下去先是 ±1；cron `system-one?action=evidence` 每 5 分鐘核 30 張（新的先、已定案不問 Jev），核得過才翻 `judge_backed`。端點留給系統用。首日實查：supported 76 張已翻 ±2、same_source 229、fetch_failed 106。
+- **`/boost` 端點保留、無金鑰照舊，只從 skill.md 拿掉**｜插隊是替全站排優先的工具，不必對外說明；a-zhen 已打的 boost#5 不撤。
 - **等票中的空操作更正直接退池，不用票**｜W-Policy 100 項驗證踩到 9 筆「改完跟現值一樣」；提交端 `no_op_correction` 只擋提交那一刻，落庫時的 superseded（09-22 #3）要等票夠了才走到，中間每張票都白投。實查 406 筆 pending correction 有 112 筆已是空操作（candidate_status 73 筆，多半被 09-22 登記名單匯入修好；election_id 19、name 14）｜`apply-verified` 掃地機每輪把 pending correction 用現值重比（同落庫的 `correctionValue`＋`sameValue`），**每一欄**都相同才標 superseded、review_notes 寫明哪幾欄；部分相同的不動。不計入提交者退件（superseded 本來就不是退件）。
 
 ## 暫緩（有結論但沒動）
