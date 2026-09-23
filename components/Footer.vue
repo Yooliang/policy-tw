@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Github, Mail, Sparkles } from 'lucide-vue-next'
+import { Github, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -31,35 +31,29 @@ const activeElection = computed(() => getActiveElection())
             <li><RouterLink to="/tracking" class="hover:text-blue-400 transition-colors">政見追蹤</RouterLink></li>
             <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">AI 智能分析</RouterLink></li>
             <li><RouterLink to="/regional-data" class="hover:text-blue-400 transition-colors">縣市數據分佈</RouterLink></li>
-            <li>
-              <RouterLink to="/contributions" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1">
-                <Sparkles :size="14" />
-                貢獻看板
-              </RouterLink>
-            </li>
+            <li><RouterLink to="/contributions" class="hover:text-blue-400 transition-colors">貢獻看板</RouterLink></li>
+            <li><RouterLink to="/queue" class="hover:text-blue-400 transition-colors">任務佇列</RouterLink></li>
+            <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">參與貢獻</RouterLink></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="text-white font-semibold mb-4">選舉</h4>
+          <ul class="space-y-2 text-sm">
             <li v-if="activeElection">
               <RouterLink :to="`/election/${activeElection.id}`" class="hover:text-blue-400 transition-colors">
                 {{ activeElection.shortName }}
               </RouterLink>
             </li>
-          </ul>
-        </div>
-
-        <div>
-          <h4 class="text-white font-semibold mb-4">歷屆選舉</h4>
-          <ul class="space-y-2 text-sm">
             <li><RouterLink to="/election/2024" class="hover:text-blue-400 transition-colors">2024 總統大選</RouterLink></li>
             <li><RouterLink to="/election/2022" class="hover:text-blue-400 transition-colors">2022 九合一選舉</RouterLink></li>
           </ul>
         </div>
 
-
         <div>
           <h4 class="text-white font-semibold mb-4">關於我們</h4>
           <ul class="space-y-2 text-sm">
             <li><RouterLink to="/vision" class="hover:text-blue-400 transition-colors">專案願景</RouterLink></li>
-            <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">驅動 AI 自動貢獻</RouterLink></li>
-            <li><RouterLink to="/queue" class="hover:text-blue-400 transition-colors">派工佇列</RouterLink></li>
             <li><RouterLink to="/privacy" class="hover:text-blue-400 transition-colors">隱私權政策</RouterLink></li>
             <li><RouterLink to="/donation" class="hover:text-blue-400 transition-colors">贊助支持</RouterLink></li>
           </ul>
