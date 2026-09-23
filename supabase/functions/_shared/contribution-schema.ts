@@ -145,7 +145,15 @@ const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{
 
 // 提出日期是選填的：查不到就別填。填錯比留空傷害更大——留空前端會改顯示屆別，
 // 填錯會讓舊屆的政見看起來像這次剛提出的。
-function validateProposedDate(value: unknown, electionId: unknown, push: (path: string, message: string) => void): void {
+/**
+ * status 不是競選承諾（Proposed 等）的，是「任內施政承諾」：這一任當選之後才宣布（例：2024 當選的總統 2026 年宣布普發一萬），
+ * 提出日期本來就晚於屆別年份，不能擋（2026-09-23 小良哥：任內新提出的也要追蹤；原本這條把它們全擋掉，代理只好硬塞成競選承諾）。
+ */
+function isCampaignStatus(status: unknown): boolean {
+  return status === undefined || status === null || status === "Campaign Pledge";
+}
+
+function validateProposedDate(value: unknown, electionId: unknown, push: (path: string, message: string) => void, status?: unknown): void {
   if (value === undefined || value === null) return;
   if (!isDate(value)) {
     push("payload.proposed_date", "要是 YYYY-MM-DD；查不到政見實際提出的日期就整個別填，不要填今天");
@@ -156,9 +164,9 @@ function validateProposedDate(value: unknown, electionId: unknown, push: (path: 
     push("payload.proposed_date", "不能是未來日期");
     return;
   }
-  // election_id 就是選舉年份，政見不會在那屆選完之後才提出。
-  if (isInt(electionId) && Number(value.slice(0, 4)) > electionId) {
-    push("payload.proposed_date", `這筆掛在 ${electionId} 年那屆選舉，提出日期不會晚於 ${electionId} 年；查不到就別填`);
+  // election_id 就是選舉年份，競選承諾不會在那屆選完之後才提出；任內施政承諾（status 非 Campaign Pledge）不受這條限制
+  if (isInt(electionId) && Number(value.slice(0, 4)) > electionId && isCampaignStatus(status)) {
+    push("payload.proposed_date", `這筆掛在 ${electionId} 年那屆選舉，競選承諾的提出日期不會晚於 ${electionId} 年；查不到就別填。若這是他這一任當選後才宣布的施政承諾，status 請填 Proposed`);
   }
 }
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
@@ -213,7 +221,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isCanonicalCategory(p.category)) push("payload.category", categoryErrorMessage(p.category), "category_invalid");
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
       if (p.election_id !== undefined && !(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `要是 ${KNOWN_ELECTION_IDS.join("／")}`);
-      validateProposedDate(p.proposed_date, p.election_id, push);
+      validateProposedDate(p.proposed_date, p.election_id, push, p.status);
       validateHints(p, push);
       break;
     }
@@ -320,8 +328,9 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         // 同一筆裡同時改屆別與提出日期時，兩者要對得上
         const newElection = changes.find((c) => c.field === "election_id")?.correct_value;
         const newDate = changes.find((c) => c.field === "proposed_date")?.correct_value;
-        if (isInt(newElection) && typeof newDate === "string" && isDate(newDate) && Number(newDate.slice(0, 4)) > newElection) {
-          push(usesChanges ? "payload.changes" : "payload", `提出日期 ${newDate} 晚於你要改成的 ${newElection} 年那屆選舉，兩者對不上`);
+        const newStatus = changes.find((c) => c.field === "status")?.correct_value;
+        if (isInt(newElection) && typeof newDate === "string" && isDate(newDate) && Number(newDate.slice(0, 4)) > newElection && isCampaignStatus(newStatus)) {
+          push(usesChanges ? "payload.changes" : "payload", `提出日期 ${newDate} 晚於你要改成的 ${newElection} 年那屆選舉，兩者對不上。若這是他 ${newElection} 年當選後、任內才宣布的施政承諾，同一筆把 status 改成 Proposed`);
         }
       }
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");

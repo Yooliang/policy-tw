@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.27.0　**更新日期**：2026-09-23
+**版本**：1.28.0　**更新日期**：2026-09-23
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -393,7 +393,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`candidacy`** — 某人參選某選舉：`name` 或 `politician_id`✅、`election_id`✅（2022／2024／2026＝年份）、`election_type`✅（九種之一）、`region`✅（總統填「全國」）、`candidate_status`✅（`confirmed`／`registered`／`qualified`／`withdrawn`／`not_running`）；建議 `party`、`current_position`、`birth_year`、`position`、`cand_no`；選填 `cec_cand_id`＋`cec_theme_id`（中選會資料庫的候選人 id 與場次 id，要一起給）。
 
-**`policy`** — 新政見。**先確認它真的是政見再提交**：政見是「當選後要做的具體事情」，看得出做什麼、給誰、做到什麼程度。競選標語、團隊組成、行程、造勢、個人經歷與表態都不是政見（「母雞帶小雞 - 最強新北隊」「溫暖創新的新北」「豐富行政經驗帶領新北」）——那些即使新聞真的這樣報導，也不要建成政見。伺服器收到疑似這一類的會照收但回一句 `warning`，並把同一句話標給驗證者看，驗證者判定不是政見就會投 disagree。欄位：`name` 或 `politician_id`✅（人物必須已存在）、`title`✅（4～200 字）、`description`✅（≥20 字）、`category`✅（**只能用下表 19 個之一**，送別的會回 `400 category_invalid` 並提示；舊資料已統一）；選填 `status`（預設 `Campaign Pledge`）、`election_id`、`proposed_date`、`tags[]`。**一筆＝一個能獨立查核的承諾**：一則報導的「N 大政見」每項有自己的標的就拆成 N 筆，無法單獨查核的子項併進 `description`（見 `policy_missing`）。與既有政見講同一件事的不要再交一筆——驗證者會照 `current.existing_policy_titles` 判重複並投 disagree。
+**`policy`** — 新政見。**先確認它真的是政見再提交**：政見是「要做的具體事情」，看得出做什麼、給誰、做到什麼程度。分兩種：**競選承諾**（選前提出、當選後要做；`status` 用預設的 `Campaign Pledge`、`election_id` 填那場選舉）與**任內施政承諾**（1.28.0：現任者在這一任當中**新宣布、還沒做完**的具體事項，例如 2024 年當選的總統在 2026 年宣布普發現金一萬元；`status` 填 `Proposed`、`election_id` 填他這一任當選的那屆、`proposed_date` 填宣布日——提出日期晚於屆別年份是正常的，伺服器不擋）。**已經做完的政績不是新政見**（有對應政見就用 `policy_progress` 回報進度）；把任內施政承諾硬填成 `Campaign Pledge`，網站會把它標成競選承諾，是錯的。競選標語、團隊組成、行程、造勢、個人經歷與表態都不是政見（「母雞帶小雞 - 最強新北隊」「溫暖創新的新北」「豐富行政經驗帶領新北」）——那些即使新聞真的這樣報導，也不要建成政見。伺服器收到疑似這一類的會照收但回一句 `warning`，並把同一句話標給驗證者看，驗證者判定不是政見就會投 disagree。欄位：`name` 或 `politician_id`✅（人物必須已存在）、`title`✅（4～200 字）、`description`✅（≥20 字）、`category`✅（**只能用下表 19 個之一**，送別的會回 `400 category_invalid` 並提示；舊資料已統一）；選填 `status`（預設 `Campaign Pledge`）、`election_id`、`proposed_date`、`tags[]`。**一筆＝一個能獨立查核的承諾**：一則報導的「N 大政見」每項有自己的標的就拆成 N 筆，無法單獨查核的子項併進 `description`（見 `policy_missing`）。與既有政見講同一件事的不要再交一筆——驗證者會照 `current.existing_policy_titles` 判重複並投 disagree。
 
 > **`election_id` 跟 `proposed_date` 這兩個欄位最容易出錯，請照這樣填：**
 > - **`election_id` 請盡量填**（2022／2024／2026，就是選舉年份）。政見是哪一屆選舉提出的，決定了網站上怎麼標示它。從選舉公報抓來的政見，公報上一定寫得出屆別，例如「113 年第 11 屆立法委員選舉」＝ `2024`。漏填的話，2024 年的舊政見會跟這次的混在一起。
@@ -680,4 +680,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.27.0　最後更新 2026-09-23*
+*協議版本 1.28.0　最後更新 2026-09-23*
