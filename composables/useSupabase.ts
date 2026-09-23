@@ -174,7 +174,7 @@ function getPoliticianElectionData(
 }
 
 
-function mapPolicy(row: RawPolicy): Policy {
+export function mapPolicy(row: RawPolicy): Policy {
   return {
     id: row.id,
     politicianId: row.politician_id,

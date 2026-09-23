@@ -8,7 +8,9 @@
     "build": "vue-tsc --noEmit && vite-ssg build && node scripts/postbuild-ssg.mjs",
     "preview": "vite preview",
     "build:spa": "vue-tsc --noEmit && vite build",
-    "deploy:functions": "node scripts/deploy-functions.mjs"
+    "deploy:functions": "node scripts/deploy-functions.mjs",
+    "build:ssr": "vite build --config vite.ssr.config.ts",
+    "deploy:ssr": "pnpm build:ssr && wrangler deploy"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.2",
@@ -31,6 +33,7 @@
     "vite": "^6.2.0",
     "vite-ssg": "28.3.0",
     "vue-tsc": "^2.2.0",
+    "wrangler": "^4.136.3",
     "xlsx": "^0.18.5"
   }
 }
