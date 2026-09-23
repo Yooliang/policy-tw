@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
+import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -198,6 +199,14 @@ Deno.serve(async (req) => {
       const { data: originals, error: oErr } = await supabase.from("contributions").select("id, agent_name, contributor_ip_hash").in("id", adjOriginalIds);
       if (oErr) throw new Error(`originals lookup: ${oErr.message}`);
       candidates = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me, myVotedOriginalIds);
+    }
+    // 派工當下再比一次空操作（2026-09-23 W-Policy：前一筆更正剛套用、10 分鐘一次的掃地機還沒跑到，這筆就派出去了）。
+    // 只看排頭、最多退 3 筆：退池是寫入，不在這裡掃整個窗口；重比失敗就照常派，不擋派工。
+    for (let i = 0; i < 3 && candidates.length > 0 && candidates[0]!.contribution_type === "correction"; i++) {
+      let retired = false;
+      try { retired = await retireIfNoOp(supabase, candidates[0]!.id); } catch (e) { console.error("retireIfNoOp:", e instanceof Error ? e.message : String(e)); }
+      if (!retired) break;
+      candidates = candidates.slice(1);
     }
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
