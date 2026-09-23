@@ -3,4 +3,4 @@ Disallow: /admin/
 Disallow: /auth/
 Allow: /
 
-Sitemap: https://policy-tw.web.app/sitemap.xml
+Sitemap: https://xn--2lw665d.tw/sitemap.xml

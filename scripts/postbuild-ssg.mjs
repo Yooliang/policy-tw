@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
-const SITE_URL = 'https://policy-tw.web.app'
+const SITE_URL = 'https://xn--2lw665d.tw' // 2026-09-22 自有網域 正見.tw；跟 composables/usePageHead.ts 同步
 const SHELL_FILES = ['404.html', 'app.html']
 /** <main> 內純文字少於這個長度視為空殼（村里長頁只有姓名／政黨／選區，本來就短） */
 const MIN_MAIN_TEXT = 120
