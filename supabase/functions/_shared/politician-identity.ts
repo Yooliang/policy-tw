@@ -12,7 +12,8 @@
  *   - 每個候選人物分數 = 命中 key 的 strength 總和
  *   - 只有一個候選：分數 ≥2 且至少一個中／強面向 → matched；否則 ambiguous
  *   - ≥2 個候選：最高分唯一且領先第二名 ≥2 → matched 最高分者；否則 ambiguous
- *   - 0 命中且無同名 → new；0 命中但有同名 → new + flag same_name_exists
+ *   - 0 命中且無同名 → new；0 命中但有同名 → ambiguous（要指認；2026-09-23 起）
+ *     只有同名者全都被出生年排除時才 new + flag same_name_exists
  *   - 加嚴①：雙方都有出生年且不同 → 該候選直接剔除（vetoed）
  *   - 加嚴②：只靠弱面向（政黨、常見職位）湊到 2 分不算 matched
  */
@@ -126,12 +127,29 @@ export function decide(
     if (sameName.length === 0) {
       return { ...base, decision: "new", matched_keys: [], reason: "無任何面向命中、無同名人物" };
     }
+    // 2026-09-23（agy 審查）：原本「0 命中但有同名」一律判 new——換了選區、換了黨、或新資料沒帶出生年的同一個人，
+    // 不會觸發指認、也不會觸發 1.29.0 的中選會筆數核對，落庫就多一個同名人物。
+    // 改成：同名者裡只要有一位沒被出生年排除，就交給驗證者指認（ambiguous）。全被出生年排除才是 new。
+    const excluded = new Set(scored.filter((c) => c.vetoed).map((c) => c.politician_id));
+    for (const p of sameName) {
+      const own = birthKeysOfHits.filter((b) => b.politician_id === p.id).map((b) => b.key_value);
+      if (candidateBirth.size > 0 && own.length > 0 && !own.some((b) => candidateBirth.has(b))) excluded.add(p.id);
+    }
+    const remaining = sameName.filter((p) => !excluded.has(p.id));
+    if (remaining.length > 0) {
+      return {
+        ...base,
+        decision: "ambiguous",
+        matched_keys: [],
+        reason: `無面向命中，但已有 ${remaining.length} 位同名人物、沒有出生年可排除——可能是同一人換了選區／黨籍，請指認`,
+      };
+    }
     return {
       ...base,
       decision: "new",
       matched_keys: [],
       flag: "same_name_exists",
-      reason: `無面向命中，但已有 ${sameName.length} 位同名人物（可能三面向同時換了，請人工確認）`,
+      reason: `無面向命中；${sameName.length} 位同名人物都因出生年不同而排除`,
     };
   }
 
@@ -182,7 +200,9 @@ export async function resolvePolitician(
     store.findByNames(names),
   ]);
   const hitIds = [...new Set(hits.map((h) => h.politician_id))];
-  const birthKeys = hitIds.length > 0 ? await store.findBirthKeys(hitIds) : [];
+  // 同名者也要拿出生年：0 命中時靠它排除「不是同一人」的同名者（2026-09-23）
+  const birthIds = [...new Set([...hitIds, ...sameName.map((p) => p.id)])];
+  const birthKeys = birthIds.length > 0 ? await store.findBirthKeys(birthIds) : [];
   const candidateBirth = keys.filter((k) => k.key_type === "birth").map((k) => k.key_value);
 
   const resolution = decide(keys, hits, sameName, names, candidateBirth, birthKeys);
