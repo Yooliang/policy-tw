@@ -370,7 +370,7 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
 /** correction：一筆可改多個欄位（changes[]），逐欄套用、各寫一筆 edit_history；舊的單欄位格式由 normalizeCorrection 相容 */
 // 空字串在 DATE 欄位會讓 PostgreSQL 直接報錯，而「查不到提出日期」是合法狀態，
 // 所以清空一律轉成 null。分類則順手正規化成 19 個正式名稱之一。
-function correctionValue(table: string, field: string, value: unknown): unknown {
+export function correctionValue(table: string, field: string, value: unknown): unknown {
   if (table === "policies" && field === "category") return normalizeCategory(String(value)) ?? value;
   if (table === "policies" && field === "proposed_date" && (value === undefined || value === null || value === "")) return null;
   return value;
