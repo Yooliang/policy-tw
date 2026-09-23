@@ -8,6 +8,7 @@ import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
+import { withTaskPolitician } from "./task-politician.ts";
 import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
@@ -117,6 +118,10 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       ? validation.errors.find((e) => e.code === "category_invalid")!.message
       : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
     return { status: 400, body: { success: false, error, message, errors: validation.errors } };
+  }
+  // profile_gap 交的 politician 沒帶 id → 用任務編號裡的那位補上（存進 payload，驗證時的身份比對與落庫都看得到）
+  for (const item of validation.items) {
+    (item as { payload: unknown }).payload = withTaskPolitician(item.contribution_type, item.payload, item.task_id);
   }
 
   const todayStart = new Date();

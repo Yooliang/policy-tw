@@ -4,6 +4,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
+import { withTaskPolitician } from "../_shared/task-politician.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -284,7 +285,8 @@ Deno.serve(async (req) => {
           .upsert({ contribution_id: pick.id, ip_hash: ipHash, agent_name: agentName, dispatched_at: new Date().toISOString() }, { onConflict: "contribution_id,ip_hash" });
         if (dErr) console.error("verify dispatch record failed:", dErr.message);
       }
-      const verifyPayload = (pick.payload && typeof pick.payload === "object" ? pick.payload : {}) as Record<string, unknown>;
+      // profile_gap 交的沒帶 politician_id：跟落庫一樣用任務編號指的那位，驗證者看到的身份比對才跟落庫一致（#215 的原則）
+      const verifyPayload = (withTaskPolitician(pick.contribution_type, pick.payload && typeof pick.payload === "object" ? pick.payload : {}, pick.task_id)) as Record<string, unknown>;
       const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload);
       // #7（2026-09-21）：既有票一併送去（去識別在 shapeVotes 做）。query-bounds: ok — 一筆貢獻的票是個位數
       const { data: priorVotes } = await supabase.from("contribution_votes")
