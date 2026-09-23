@@ -14,6 +14,7 @@ import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
+import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
@@ -132,7 +133,8 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
   // 2026-09-19 抓到 7 筆落庫連續失敗＋蘇清泉 2 票齊了卻轉裁決：payload 都有 politician_id，
   // 這裡卻跳過它去比對姓名——比出「唯一候選但只有弱面向命中」就退件；candidacy 沒帶 name 更直接炸
   // 「candidate.name 為空」、politician 沒帶 position 撞 NOT NULL。帶了 id 還去猜，猜不準就退件，是這裡的錯。
-  const given = str(row.payload.politician_id);
+  // profile_gap 任務交的沒帶 id 時，任務編號本身就指了是誰（2026-09-23 d5059957：用姓名猜成 new、差點建出一筆空人物）
+  const given = str(row.payload.politician_id) ?? politicianIdFromTask(row.task_id);
   if (given) {
     const { data, error } = await supabase.from("politicians").select("id").eq("id", given).maybeSingle();
     throwIf(error, "politicians lookup by payload id");
