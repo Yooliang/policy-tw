@@ -19,18 +19,40 @@ import { classifyRead } from './ai-reads.js'
 /**
  * 記「誰在讀」（2026-09-23）：AI／搜尋引擎／從 AI 服務點過來的人，背景加一，不拖慢回應、失敗不影響頁面。
  * 只記每日計數（代理、類別、頁種），不記網址與 IP。
+ *
+ * 2026-09-24：原本每讀一次就寫一次資料庫（每小時 1,400～1,600 次），是當晚 Disk IO 額度耗盡的成因之一。
+ * 改成在這個 Worker 實例的記憶體裡累加，滿一分鐘（或累積 500 次）才批次寫一次 ai_read_hits。
+ * 實例被回收時沒寫出去的會遺失——這是統計數字，少幾筆可以接受。
  */
+const READ_FLUSH_MS = 60_000
+const READ_FLUSH_MAX = 500
+const pendingReads = new Map()
+let pendingTotal = 0
+let lastReadFlush = Date.now()
+
 function countRead(request, ctx) {
   try {
     if (request.method !== 'GET' && request.method !== 'HEAD') return
     const url = new URL(request.url)
     const hit = classifyRead(request.headers.get('User-Agent') || '', request.headers.get('Referer') || '', url.pathname)
     if (!hit || !SUPABASE_PUBLIC.url || !SUPABASE_PUBLIC.anonKey) return
+    const key = `${hit.agent}|${hit.kind}|${hit.path_type}`
+    pendingReads.set(key, (pendingReads.get(key) || 0) + 1)
+    pendingTotal++
+    const now = Date.now()
+    if (now - lastReadFlush < READ_FLUSH_MS && pendingTotal < READ_FLUSH_MAX) return
+    const rows = [...pendingReads.entries()].map(([k, n]) => {
+      const [agent, kind, path_type] = k.split('|')
+      return { agent, kind, path_type, n }
+    })
+    pendingReads.clear()
+    pendingTotal = 0
+    lastReadFlush = now
     ctx.waitUntil(
-      fetch(`${SUPABASE_PUBLIC.url}/rest/v1/rpc/ai_read_hit`, {
+      fetch(`${SUPABASE_PUBLIC.url}/rest/v1/rpc/ai_read_hits`, {
         method: 'POST',
         headers: { apikey: SUPABASE_PUBLIC.anonKey, Authorization: `Bearer ${SUPABASE_PUBLIC.anonKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_agent: hit.agent, p_kind: hit.kind, p_path_type: hit.path_type }),
+        body: JSON.stringify({ p_rows: rows }),
       }).catch(() => undefined),
     )
   } catch { /* 記不成就算了 */ }

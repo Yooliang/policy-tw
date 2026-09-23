@@ -209,7 +209,9 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   assert(eff.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
   // 2026-09-21 分數制：達標判斷看 score，不看 agree_count；目標仍是有效門檻那一支函式
-  assert(pool.includes("c.score < contribution_effective_agree(c.id)"), "派工池要用分數對有效門檻，否則 not_supported 的那筆永久卡住");
+  // 2026-09-24：目標分數讀計票時寫入的欄位（省 Disk IO），還沒計過票才現算；計票函式要寫那個欄位
+  assert(pool.includes("c.score < COALESCE(c.target_score, contribution_effective_agree(c.id))"), "派工池要用分數對有效門檻，否則 not_supported 的那筆永久卡住");
+  assert(fn.includes("target_score = v_target"), "計票時要把目標分數寫進 contributions.target_score，派工池才讀得到");
   assert(pool.includes("effective_required"), "池子要把有效門檻回給 /next");
   assert(pool.includes("target_score"), "池子要把目標分數回給 /next（代理要知道自己這票能推多遠）");
   // 裁決退場：兩張反對不再變 disputed，跌到 −目標直接退件
