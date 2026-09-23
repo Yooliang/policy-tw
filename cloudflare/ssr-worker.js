@@ -30,10 +30,11 @@ const AGENT_PARAMS = ['agent_name', 'agent_tool', 'contribution_id', 'api_key']
 
 function apiRedirect(request) {
   const url = new URL(request.url)
-  const m = url.pathname.match(/^\/([a-z-]+)\/?$/)
+  // 也收 /functions/v1/<名稱>（W-Policy 實測：代理把 Supabase 的路徑接在網站網域後面）；帶這個前綴一定是要打端點
+  const m = url.pathname.match(/^\/(functions\/v1\/)?([a-z-]+)\/?$/)
   if (!m) return null
-  const name = m[1]
-  const agentish = request.method !== 'GET' && request.method !== 'HEAD' || AGENT_PARAMS.some((p) => url.searchParams.has(p))
+  const name = m[2]
+  const agentish = !!m[1] || request.method !== 'GET' && request.method !== 'HEAD' || AGENT_PARAMS.some((p) => url.searchParams.has(p))
   if (!API_ONLY.has(name) && !(API_ALSO_PAGE.has(name) && agentish)) return null
   const target = `${API_BASE}/${name}${url.search}`
   const body = JSON.stringify({
