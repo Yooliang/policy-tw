@@ -45,6 +45,13 @@ const allHtml = walkHtml(DIST)
 const pageFiles = allHtml.filter((f) => path.basename(f) === 'index.html')
 const routes = pageFiles.map(routeOf).sort()
 
+// 邊緣渲染頁（2026-09-24）：政治人物頁、政見頁不預渲染，由正見.tw 的 Worker 現場產生；
+// 清單由 lib/ssg/server-data.ts 寫在 dist/.edge-routes.json，這裡讀來產網站地圖，讀完刪掉（不部署出去）
+const EDGE_FILE = path.join(DIST, '.edge-routes.json')
+const edgeRoutes = fs.existsSync(EDGE_FILE) ? JSON.parse(fs.readFileSync(EDGE_FILE, 'utf8')) : []
+if (fs.existsSync(EDGE_FILE)) fs.unlinkSync(EDGE_FILE)
+const edgeMode = edgeRoutes.length > 0
+
 // 1. 殼
 for (const shell of SHELL_FILES) {
   const p = path.join(DIST, shell)
@@ -94,10 +101,15 @@ function spotCheck(route, label) {
 }
 const samplePolitician = routes.find((r) => r.startsWith('/politician/'))
 const samplePolicy = routes.find((r) => r.startsWith('/policy/'))
+// 邊緣渲染模式下這兩類不在 dist 裡（線上由 Worker 產生、CI 部署 Worker 前後有另外的檢查），只要求清單不是空的
+if (edgeMode) {
+  if (!edgeRoutes.some((r) => r.startsWith('/politician/'))) fail('邊緣渲染清單裡沒有任何 /politician/ 頁')
+  if (!edgeRoutes.some((r) => r.startsWith('/policy/'))) fail('邊緣渲染清單裡沒有任何 /policy/ 頁')
+}
 const samples = [
   spotCheck('/', '首頁'),
-  samplePolitician ? spotCheck(samplePolitician, '政治人物頁') : (fail('沒有任何 /politician/ 頁'), null),
-  samplePolicy ? spotCheck(samplePolicy, '政見頁') : (fail('沒有任何 /policy/ 頁'), null),
+  samplePolitician ? spotCheck(samplePolitician, '政治人物頁') : (edgeMode ? null : (fail('沒有任何 /politician/ 頁'), null)),
+  samplePolicy ? spotCheck(samplePolicy, '政見頁') : (edgeMode ? null : (fail('沒有任何 /policy/ 頁'), null)),
 ].filter(Boolean)
 
 // 4. 政治人物頁的 initialState 不該把整包政見塞進去（控制頁重）
@@ -113,7 +125,7 @@ const SITEMAP_GROUPS = [
   { file: 'sitemap-pages.xml', match: () => true },
 ]
 const grouped = new Map(SITEMAP_GROUPS.map((g) => [g.file, []]))
-for (const r of routes) grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
+for (const r of [...new Set([...routes, ...edgeRoutes])].sort()) grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
 for (const [file, list] of grouped) {
   if (list.length === 0) fail(`${file} 是空的`)
   if (list.length > 50000) fail(`${file} 超過 50,000 個網址（${list.length}），要再拆`)
@@ -144,7 +156,8 @@ const byPrefix = routes.reduce((acc, r) => {
 const summary = {
   htmlFiles: allHtml.length,
   prerenderedPages: pageFiles.length,
-  sitemapUrls: routes.length,
+  sitemapUrls: new Set([...routes, ...edgeRoutes]).size,
+  edgeRendered: edgeRoutes.length,
   sitemaps: Object.fromEntries([...grouped].map(([f, l]) => [f, l.length])),
   byPrefix,
   pagesWithoutInitialState: noStatePages.length,

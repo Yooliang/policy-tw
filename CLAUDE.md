@@ -12,10 +12,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pnpm dev                 # 開發伺服器
-pnpm build               # vue-tsc → vite-ssg build（預渲染約 16k 頁）→ scripts/postbuild-ssg.mjs（sitemap＋空殼檢查）
+pnpm build               # vue-tsc → vite-ssg build（預渲染約 20 頁；政治人物頁／政見頁由 Worker 邊緣渲染，只進網站地圖）→ scripts/postbuild-ssg.mjs（sitemap＋空殼檢查）
+SSG_EDGE_PAGES=prerender pnpm build      # 退回連政治人物頁／政見頁一起預渲染（約 16k 頁、4 分鐘）
 pnpm build:spa           # 純 SPA build（緊急 fallback，沒有預渲染）
 pnpm exec vue-tsc --noEmit
-SSG_POLITICIANS=with-content pnpm build   # 只預渲染有內容的政治人物（約 2,500 頁，開發用）
+SSG_POLITICIANS=with-content pnpm build   # 網站地圖只收有內容的政治人物（開發用）
 node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（cleanUrls、rewrites、404）
 
 # Edge Functions 測試（CI 也跑）
@@ -34,7 +35,7 @@ npx supabase functions deploy <function-name>
 
 ### 部署順序：Hosting 先綠，才部署 Edge Function
 
-**2026-09-21 起這一步是自動的**：push 到 `main`、Hosting 部署成功之後，CI 的 `deploy-functions` job（`.github/workflows/ci.yml`）會接著自動跑 `npx supabase db push`，再用 `scripts/affected-functions.mjs` 算出這次 commit 真的動到哪幾支函式（自己的 `index.ts` 改了，或它 transitively import 的 `_shared/*.ts` 改了），只重部那幾支。`needs: [deploy]` 機械保證 Hosting 先綠。之前這一步全靠人記得手動跑 `pnpm deploy:functions`，2026-09-21 同一天出過兩次「Hosting 綠、CI 也綠，但沒人手動跑這步」的事故——**別靠記得**這條規則，這次直接改成 CI 自動接手，不再是人要記住的事。
+**2026-09-21 起這一步是自動的**：push 到 `main`、Hosting 部署成功之後，CI 的 `deploy-functions` job（`.github/workflows/ci.yml`）會接著自動跑 `npx supabase db push`，再用 `scripts/affected-functions.mjs` 算出這次 commit 真的動到哪幾支函式（自己的 `index.ts` 改了，或它 transitively import 的 `_shared/*.ts` 改了），只重部那幾支。2026-09-24 起只在這次改了 `public/skill.md` 時才等 Hosting（該 job 的「等協議文件上線」步驟輪詢線上版號），沒改協議就跟 Hosting 同時部署；建置也只在 typecheck job 做一次，部署 job 拿它的產物。之前這一步全靠人記得手動跑 `pnpm deploy:functions`，2026-09-21 同一天出過兩次「Hosting 綠、CI 也綠，但沒人手動跑這步」的事故——**別靠記得**這條規則，這次直接改成 CI 自動接手，不再是人要記住的事。
 
 順序理由沒變：函式先上去、`public/skill.md` 還沒更新的話，端點會回新版號，而協議規定「版本不一樣就重讀 <https://policy-tw.web.app/skill.md>」，代理重讀拿到的還是舊版，於是無限重讀。**文件領先端點是安全方向，端點領先文件不是。**
 
