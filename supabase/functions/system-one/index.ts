@@ -34,6 +34,8 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
  */
 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
+import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, worthAsking, type FollowupChoice, type FollowupContribution, type FollowupVote } from "../_shared/vote-followup.ts";
+import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -440,7 +442,8 @@ Deno.serve(async (req) => {
       const list = (cands ?? []) as VoteBudgetRow[];
       const startedAt = Date.now();
       const BUDGET_MS = 40_000;
-      const CONCURRENCY = 2;
+      // 2026-09-23 小良哥：「十分鐘內有提交的都稽查」。三天內最多一個十分鐘 36 筆，併發 2 在 40 秒內做不完
+      const CONCURRENCY = 6;
       let asked = 0, cost = 0;
       const tally: Record<string, number> = {};
       const failures: Array<{ contribution_id: string; error: string }> = [];
@@ -457,6 +460,79 @@ Deno.serve(async (req) => {
         if (failures.length >= 5) break;
       }
       return json({ success: true, shadow_mode: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, tally, failures });
+    }
+
+    // ---- followups：Jev 讀投票備註，範圍外的問題開成任務（2026-09-23 小良哥）----
+    // 協議叫驗證者把範圍外的缺陷另提 task_suggestion，實際上多半只寫在 note 裡、沒有下游。
+    // dry=1：只回判定結果，不寫紀錄、不開任務（拿來掃一遍現況）。
+    if (action === "followups") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const dry = url.searchParams.get("dry") === "1";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
+      const sinceHours = Math.min(Math.max(Number(url.searchParams.get("since_hours")) || 1, 1), 24 * 14);
+      const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
+      // query-bounds: ok — 有 order 有 limit（1000）
+      const { data: votes, error: vErr } = await supabase.from("contribution_votes")
+        .select("id, contribution_id, verdict, note, agent_name, created_at")
+        .gte("created_at", since).not("note", "is", null)
+        .order("created_at", { ascending: false }).limit(1000);
+      if (vErr) throw new Error(`followup votes: ${vErr.message}`);
+      const withNote = ((votes ?? []) as Array<FollowupVote & { contribution_id: string }>).filter(worthAsking);
+      const ids = withNote.map((v) => v.id);
+      // query-bounds: ok — in() 最多 1000 個 id，一個 id 最多幾筆判定
+      const { data: done } = ids.length > 0 && !dry
+        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "vote").eq("question", "followup").in("subject_id", ids).limit(1000)
+        : { data: [] };
+      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+      const list = withNote.filter((v) => !doneSet.has(v.id)).slice(0, limit);
+      const cids = [...new Set(list.map((v) => v.contribution_id))];
+      // query-bounds: ok — in() 最多 200 個 id，每個 id 一列
+      const { data: cs } = cids.length > 0
+        ? await supabase.from("contributions").select("id, contribution_type, payload, applied_politician_id, applied_policy_id").in("id", cids).limit(1000)
+        : { data: [] };
+      const byId = new Map(((cs ?? []) as FollowupContribution[]).map((c) => [c.id, c]));
+      const startedAt = Date.now();
+      let asked = 0, cost = 0, created = 0;
+      const found: Array<Record<string, unknown>> = [];
+      const failures: Array<{ vote_id: string; error: string }> = [];
+      const one = async (v: FollowupVote & { contribution_id: string }) => {
+        const c = byId.get(v.contribution_id);
+        if (!c) return;
+        const { state, questions } = buildFollowupAsk(v, c);
+        const res = await askJev(apiKey, state, questions);
+        asked++; cost += res.usage.cost;
+        const ans = res.answers.followup;
+        const choice = (ans?.choice ?? "none") as FollowupChoice;
+        const prob = ans?.probabilities?.[choice] ?? 0;
+        if (!dry) {
+          await insertRecords(supabase, [{ subject_type: "vote", subject_id: v.id, question: "followup", choice, probability: prob, confidence: ans?.confidence ?? null,
+            probabilities: ans?.probabilities ?? null, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)) }]);
+        }
+        if (choice === "none" || prob < FOLLOWUP_MIN_PROBABILITY) return;
+        const p = c.payload ?? {};
+        const pid = (c.applied_politician_id ?? (typeof p.politician_id === "string" ? p.politician_id : null)) as string | null;
+        const { data: who } = pid ? await supabase.from("politicians").select("name").eq("id", pid).maybeSingle() : { data: null };
+        const task = followupTask(v, c, choice, (who as { name?: string } | null)?.name ?? null);
+        const entry: Record<string, unknown> = { vote_id: v.id, contribution_id: c.id, choice, probability: Number(prob.toFixed(2)), title: task.title, note: String(v.note).slice(0, 300) };
+        if (!dry) {
+          const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
+          if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
+          else {
+            const t = await createTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
+            entry.task_id = t.id; created++;
+          }
+        }
+        found.push(entry);
+      };
+      let cursor = 0;
+      while (cursor < list.length && Date.now() - startedAt < 40_000) {
+        const chunk = list.slice(cursor, cursor + 6); cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map(one));
+        results.forEach((r, i) => { if (r.status === "rejected") failures.push({ vote_id: chunk[i].id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) }); });
+        if (failures.length >= 5) break;
+      }
+      return json({ success: true, dry, since, scanned: withNote.length, asked, remaining: list.length - cursor, created, cost_usd: Number(cost.toFixed(6)), found, failures });
     }
 
     // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 小良哥：代理不該把判斷外包給 Jev）----
