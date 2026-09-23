@@ -220,9 +220,9 @@ async function allAutoTaskTypes(): Promise<string[]> {
   // 從派工函式出發，沿著 FROM contribution_auto_tasks_*() 一路展開。
   // 2026-09-21 把 UNION 抽成 contribution_auto_tasks_arms() 之後就多了一層，
   // 寫死一層的話這支測試會在重構後掃不到任何 task_type——所以這裡用待展開佇列。
-  // 2026-09-24 起派工讀快照表，重算在 refresh_auto_task_snapshot()（排程每 10 分鐘），從那裡出發
-  const { sql: rootSql } = await latestMigrationDefining("refresh_auto_task_snapshot(");
-  const queue = [rootSql.slice(rootSql.lastIndexOf("FUNCTION refresh_auto_task_snapshot("))];
+  // 2026-09-24 起派工讀 task_dispatches，重算在 seed_auto_task_queue()（排程每 10 分鐘），從那裡出發
+  const { sql: rootSql } = await latestMigrationDefining("seed_auto_task_queue(");
+  const queue = [rootSql.slice(rootSql.lastIndexOf("FUNCTION seed_auto_task_queue("))];
   const arms = new Set<string>();
   const seen = new Set<string>();
   while (queue.length > 0) {

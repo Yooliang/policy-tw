@@ -4,73 +4,47 @@
 -- contribution_auto_task_counts（又重算一次）、contribution_verify_pool（逐筆算目標分數，約 1.9 秒）。
 -- 平常 60～90 次／15 分，15:45 衝到 140 次；額度 16:00 耗盡。另有 AI 讀取計數每讀一次寫一次（每小時 1,400～1,600 次）。
 --
--- 1. 缺口改成排程每 10 分鐘算一次存進 auto_task_snapshot，/next 只讀這張表（本來就要等排程收進佇列才派，時間軸不變）
+-- 1. 缺口內容由排程每 10 分鐘寫進派工佇列 task_dispatches（原本只寫號碼牌），/next 只讀這張表，不再重算
 -- 2. 目標分數與投過票的機器數存進 contributions（計票時順手寫），驗證池不再逐筆呼叫函式
 -- 3. AI 讀取計數改成批次寫入（Worker 累加一分鐘寫一次）
 -- 4. 撤回的三樣照原設計加回（Jev 屆別判定、高風險型別兩台機器、讀備註排程）——它們的成本原本就在每次派工裡，
 --    現在搬到十分鐘一次的排程，已經不在熱路徑上。
 
 -- ============================================================
--- 1. 缺口快照
+-- 1. 缺口內容存進派工佇列 task_dispatches（不另開表；小良哥 09-24：「不是一直都有派工的表嗎」）
 -- ============================================================
-CREATE TABLE IF NOT EXISTS auto_task_snapshot (
-  task_id      TEXT PRIMARY KEY,
-  task_type    TEXT NOT NULL,
-  target       JSONB,
-  what_we_need TEXT,
-  hint_sources TEXT[],
-  reward       INTEGER,
-  region       TEXT,
-  refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE auto_task_snapshot IS '自動缺口的快照：refresh_auto_task_snapshot() 每 10 分鐘（seed_auto_task_queue）重算一次；/next、/tasks 只讀這張表。';
-CREATE INDEX IF NOT EXISTS auto_task_snapshot_type_idx ON auto_task_snapshot (task_type);
-ALTER TABLE auto_task_snapshot ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS auto_task_snapshot_public_read ON auto_task_snapshot;
-CREATE POLICY auto_task_snapshot_public_read ON auto_task_snapshot FOR SELECT USING (true);
-
-CREATE OR REPLACE FUNCTION refresh_auto_task_snapshot() RETURNS INTEGER
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_n INTEGER;
-BEGIN
-  CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT * FROM contribution_auto_tasks_arms();
-  DELETE FROM auto_task_snapshot s WHERE NOT EXISTS (SELECT 1 FROM _gaps g WHERE g.task_id = s.task_id);
-  INSERT INTO auto_task_snapshot (task_id, task_type, target, what_we_need, hint_sources, reward, region, refreshed_at)
-  SELECT DISTINCT ON (g.task_id) g.task_id, g.task_type, g.target, g.what_we_need, g.hint_sources, g.reward, g.region, now() FROM _gaps g
-  ON CONFLICT (task_id) DO UPDATE SET task_type = EXCLUDED.task_type, target = EXCLUDED.target, what_we_need = EXCLUDED.what_we_need,
-    hint_sources = EXCLUDED.hint_sources, reward = EXCLUDED.reward, region = EXCLUDED.region, refreshed_at = now();
-  GET DIAGNOSTICS v_n = ROW_COUNT;
-  RETURN v_n;
-END;
-$$;
-COMMENT ON FUNCTION refresh_auto_task_snapshot IS '重算全站自動缺口存進 auto_task_snapshot（重，只給排程用）';
-
--- 缺口一被補上（貢獻落庫）就從快照拿掉，不必等下一輪排程
-CREATE OR REPLACE FUNCTION auto_task_snapshot_drop_applied() RETURNS TRIGGER
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF NEW.status = 'applied' AND NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%' THEN
-    DELETE FROM auto_task_snapshot WHERE task_id = NEW.task_id;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-DROP TRIGGER IF EXISTS contributions_drop_snapshot ON contributions;
-CREATE TRIGGER contributions_drop_snapshot AFTER UPDATE OF status ON contributions
-  FOR EACH ROW WHEN (NEW.status = 'applied' AND OLD.status IS DISTINCT FROM 'applied') EXECUTE FUNCTION auto_task_snapshot_drop_applied();
+-- 原本排程只發號碼牌（task_id、queue_at），內容算完就丟、補上的缺口也不收回，
+-- 所以 /next 每次都得重算全站缺口拿內容、順便濾掉已補上的。現在排程把內容一起寫進同一列、補上的刪掉。
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS task_type    TEXT;
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS target       JSONB;
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS what_we_need TEXT;
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS hint_sources TEXT[];
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS reward       INTEGER;
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS region       TEXT;
+ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS refreshed_at TIMESTAMPTZ;
+COMMENT ON COLUMN task_dispatches.task_type IS '自動缺口（auto:）的內容由 seed_auto_task_queue 每 10 分鐘寫入；verify: 列為 NULL';
 
 CREATE OR REPLACE FUNCTION seed_auto_task_queue()
 RETURNS INTEGER
 LANGUAGE plpgsql AS $$
 DECLARE v_new INTEGER; v_verify INTEGER;
 BEGIN
-  PERFORM refresh_auto_task_snapshot();
-  INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count)
-  SELECT g.task_id, now(), now(), 0
-    FROM auto_task_snapshot g
-   WHERE NOT EXISTS (SELECT 1 FROM task_dispatches d WHERE d.task_id = g.task_id)
-  ON CONFLICT (task_id) DO NOTHING;
-  GET DIAGNOSTICS v_new = ROW_COUNT;
+  -- 全站缺口只在這裡算（重，約 1.5 秒）；/next 只讀 task_dispatches
+  DROP TABLE IF EXISTS _gaps;
+  CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT DISTINCT ON (g.task_id) g.* FROM contribution_auto_tasks_arms() g ORDER BY g.task_id;
+
+  -- 已經不存在的缺口（補上了）：收回號碼牌
+  DELETE FROM task_dispatches d
+   WHERE d.task_id LIKE 'auto:%'
+     AND NOT EXISTS (SELECT 1 FROM _gaps g WHERE g.task_id = d.task_id);
+
+  -- 新缺口發號碼牌（排進來的時間＝現在）；既有的只更新內容，不動排隊時間
+  INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count, task_type, target, what_we_need, hint_sources, reward, region, refreshed_at)
+  SELECT g.task_id, now(), now(), 0, g.task_type, g.target, g.what_we_need, g.hint_sources, g.reward, g.region, now()
+    FROM _gaps g
+  ON CONFLICT (task_id) DO UPDATE SET task_type = EXCLUDED.task_type, target = EXCLUDED.target, what_we_need = EXCLUDED.what_we_need,
+    hint_sources = EXCLUDED.hint_sources, reward = EXCLUDED.reward, region = EXCLUDED.region, refreshed_at = now();
+  SELECT COUNT(*) INTO v_new FROM task_dispatches WHERE task_id LIKE 'auto:%' AND dispatch_count = 0 AND queue_at > now() - interval '1 minute';
 
   -- 觸發器漏掉的（例如觸發器上線前就 pending 的）補進來
   INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count)
@@ -89,6 +63,21 @@ BEGIN
   RETURN v_new + v_verify;
 END;
 $$;
+COMMENT ON FUNCTION seed_auto_task_queue IS '排程每 10 分鐘：重算全站缺口，新缺口發號碼牌、內容寫進 task_dispatches、補上的收回；補驗證列、清掉已定案的';
+
+-- 缺口一被補上（貢獻落庫）就收回號碼牌，不必等下一輪排程
+CREATE OR REPLACE FUNCTION task_dispatches_drop_applied() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%' THEN
+    DELETE FROM task_dispatches WHERE task_id = NEW.task_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS contributions_drop_dispatch ON contributions;
+CREATE TRIGGER contributions_drop_dispatch AFTER UPDATE OF status ON contributions
+  FOR EACH ROW WHEN (NEW.status = 'applied' AND OLD.status IS DISTINCT FROM 'applied') EXECUTE FUNCTION task_dispatches_drop_applied();
 
 CREATE OR REPLACE FUNCTION contribution_auto_tasks(
   p_type TEXT DEFAULT NULL,
@@ -99,7 +88,7 @@ CREATE OR REPLACE FUNCTION contribution_auto_tasks(
   p_agent TEXT DEFAULT NULL
 ) RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, queue_at TIMESTAMPTZ)
 LANGUAGE sql STABLE AS $$
-  WITH t AS (SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region FROM auto_task_snapshot),
+  WITH t AS (SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region FROM task_dispatches WHERE task_id LIKE 'auto:%' AND task_type IS NOT NULL),
   inflight AS (
     SELECT c.task_id, COUNT(*) AS n FROM contributions c
     WHERE c.task_id IS NOT NULL AND c.status IN ('pending', 'verified', 'disputed') GROUP BY c.task_id
@@ -390,5 +379,5 @@ SELECT cron.schedule(
     );$$
 );
 
--- 第一次快照（排程下一輪也會做）
-SELECT refresh_auto_task_snapshot();
+-- 第一次把缺口內容寫進佇列（排程下一輪也會做）
+SELECT seed_auto_task_queue();
