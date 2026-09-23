@@ -10,6 +10,7 @@
     "rewrites": [
       { "source": "/contributions", "destination": "/app.html" },
       { "source": "/tasks", "destination": "/app.html" },
+      { "source": "/queue", "destination": "/app.html" },
       { "source": "/stats", "destination": "/app.html" },
       { "source": "/verify", "destination": "/app.html" },
       { "source": "/profile", "destination": "/app.html" },
