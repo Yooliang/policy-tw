@@ -42,5 +42,8 @@ Deno.test("分類跟 DB 的 CHECK 一致（盯 migration 文字）", async () =>
   for (const p of ["politician", "policy", "election", "skill", "llms", "sitemap", "other"]) assert(sql.includes(`'${p}'`), `DB 的 path_type CHECK 少了 ${p}`);
   const worker = await Deno.readTextFile(new URL("../../../cloudflare/ssr-worker.js", import.meta.url));
   assert(worker.includes("countRead(request, ctx)"), "Worker 要在每個請求呼叫 countRead");
-  assert(worker.includes("rpc/ai_read_hit"), "Worker 要打 ai_read_hit");
+  assert(worker.includes("rpc/ai_read_hits"), "Worker 要批次打 ai_read_hits（2026-09-24：每讀一次寫一次吃光了 Disk IO 額度）");
+  assert(worker.includes("READ_FLUSH_MS"), "要累加後才寫，不能每讀一次寫一次");
+  const mig = await Deno.readTextFile(new URL("../../migrations/20260924000001_dispatch_io.sql", import.meta.url));
+  for (const k of AI_READ_KINDS) assert(mig.includes(`'${k}'`), `ai_read_hits 的 kind 白名單少了 ${k}`);
 });
