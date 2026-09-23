@@ -214,7 +214,10 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   assert(pool.includes("target_score"), "池子要把目標分數回給 /next（代理要知道自己這票能推多遠）");
   // 裁決退場：兩張反對不再變 disputed，跌到 −目標直接退件
   assert(!fn.includes("v_new := 'disputed'"), "分數制不再產生 disputed");
-  assert(fn.includes("IF v_score <= -v_target THEN"), "跌到 −目標 → rejected");
+  // 2026-09-23：退件門檻固定（contribution_reject_floor），不再是 −目標——目標被 Jev 調高時退件不能跟著變難
+  assert(fn.includes("v_reject := contribution_reject_floor(v_type)"), "退件門檻要用固定的 contribution_reject_floor");
+  assert(fn.includes("IF v_score <= -v_reject THEN"), "跌到 −退件門檻 → rejected");
+  assert(!fn.includes("IF v_score <= -v_target THEN"), "退件不能再用 −目標（09-23 更正）");
   assert(fn.includes("v_score >= v_target"), "達到目標 → verified");
   assert(fn.includes("score = v_score"), "累計分數要寫回 contributions.score");
   assert(fn.includes("agree_count = v_agree"), "agree_count 仍是純代理票，系統票不混進去");

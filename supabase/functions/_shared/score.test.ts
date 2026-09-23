@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
-import { scoreStatus, voteWeight, weightReason } from "./consensus.ts";
+import { rejectFloor, scoreStatus, voteWeight, weightReason } from "./consensus.ts";
 
 // 分數制（2026-09-21）。這些是 SQL 的鏡像；最後一條測試直接盯 migration 的文字，
 // 兩邊的權重表不一致就紅。
@@ -27,13 +27,36 @@ Deno.test("附了來源但沒核過：理由要講「系統會自己核」，不
   assertEquals(weightReason("disagree", false, true).includes("judge"), false);
 });
 
-Deno.test("達目標→verified；跌到 −目標→rejected；其餘 pending", () => {
+Deno.test("達目標→verified；跌到退件門檻→rejected；其餘 pending", () => {
+  // 目標 2（系統票 supported 把 3 壓成 2）：上線門檻跟著目標，退件門檻不跟——policy 仍是 −3 才退
   const base = { target: 2, distinctIps: 2, contributionType: "policy", current: "pending" };
   assertEquals(scoreStatus({ ...base, score: 2 }), "verified");
   assertEquals(scoreStatus({ ...base, score: 3 }), "verified");
   assertEquals(scoreStatus({ ...base, score: 1 }), "pending");
   assertEquals(scoreStatus({ ...base, score: -1 }), "pending");
-  assertEquals(scoreStatus({ ...base, score: -2 }), "rejected");
+  assertEquals(scoreStatus({ ...base, score: -2 }), "pending");
+  assertEquals(scoreStatus({ ...base, score: -3 }), "rejected");
+});
+
+Deno.test("退件門檻固定（2026-09-23）：目標被 Jev 調高到 4，−3 照樣退；不動正式資料的型別 −2 就退", () => {
+  assertEquals(rejectFloor("policy"), 3);
+  assertEquals(rejectFloor("candidacy"), 3);
+  assertEquals(rejectFloor("task_suggestion"), 2);
+  assertEquals(rejectFloor("no_change"), 2);
+  assertEquals(rejectFloor("roster_check"), 2);
+  // Jev 判不支持 → 目標 4；退件不能因此變成 −4
+  assertEquals(scoreStatus({ score: -3, target: 4, distinctIps: 2, contributionType: "policy", current: "pending" }), "rejected");
+  assertEquals(scoreStatus({ score: -2, target: 4, distinctIps: 2, contributionType: "policy", current: "pending" }), "pending");
+  // 票數預算接上後目標可到 7：退件仍是 −3
+  assertEquals(scoreStatus({ score: -3, target: 7, distinctIps: 2, contributionType: "candidacy", current: "pending" }), "rejected");
+  assertEquals(scoreStatus({ score: -2, target: 2, distinctIps: 1, contributionType: "task_suggestion", current: "pending" }), "rejected");
+});
+
+Deno.test("SQL 的退件門檻跟 TS 一致（盯 migration 文字）", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20260923000007_reject_floor.sql", import.meta.url));
+  assertStringIncludes(sql, "WHEN p_type IN ('task_suggestion', 'no_change', 'roster_check') THEN 2");
+  assertStringIncludes(sql, "ELSE 3");
+  assertStringIncludes(sql, "IF v_score <= -v_reject THEN", "SQL 的退件要用固定門檻 v_reject，不是 −v_target");
 });
 
 Deno.test("裁決退場：兩張反對不再變 disputed，而是依分數退件或繼續等", () => {
