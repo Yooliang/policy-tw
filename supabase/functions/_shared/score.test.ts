@@ -18,11 +18,13 @@ Deno.test("理由要告訴代理怎麼拿到 +2", () => {
   assertStringIncludes(weightReason("disagree", false), "−2");
 });
 
-Deno.test("附了來源但沒核過：理由要講「先用 judge 核」，不是「去附來源」", () => {
-  // 實測：附了不同網域的第二來源仍拿 +1，回應叫它去附來源——誤導
-  assertStringIncludes(weightReason("agree", false, true), "judge");
+Deno.test("附了來源但沒核過：理由要講「系統會自己核」，不是「去附來源」、更不是「去打 judge」", () => {
+  // 2026-09-23：代理不該把判斷外包給 Jev，+2 由系統核 evidence_url 決定
+  assertStringIncludes(weightReason("agree", false, true), "系統會");
   assertEquals(weightReason("agree", false, true).includes("附一個不同網域"), false);
-  assertStringIncludes(weightReason("disagree", false, true), "judge");
+  assertEquals(weightReason("agree", false, true).includes("judge"), false);
+  assertStringIncludes(weightReason("disagree", false, true), "系統會");
+  assertEquals(weightReason("disagree", false, true).includes("judge"), false);
 });
 
 Deno.test("達目標→verified；跌到 −目標→rejected；其餘 pending", () => {

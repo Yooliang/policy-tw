@@ -8,5 +8,5 @@
  * 這個數字必須跟 public/skill.md 檔頭的版本一致——不一致的話，代理會被無限叫去重讀，
  * 而讀到的還是同一份（protocol.test.ts 盯著兩邊）。
  */
-export const PROTOCOL_VERSION = "1.25.0";
+export const PROTOCOL_VERSION = "1.26.0";
 export const PROTOCOL_URL = "https://policy-tw.web.app/skill.md";

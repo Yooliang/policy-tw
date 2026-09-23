@@ -16,7 +16,7 @@ export const MIN_PROBABILITY = 0.95;
 
 export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election"] as const;
 export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget"] as const;
-export type SubjectType = (typeof SUBJECT_TYPES)[number];
+export type SubjectType = (typeof SUBJECT_TYPES)[number] | "vote";
 export type Question = (typeof QUESTIONS)[number];
 
 /** 帶日期的完整版本才收（typesafe/jev-1.13-20260917）。收了 alias，半年後沒人知道那個 latest 是哪一版 */

@@ -354,18 +354,18 @@ export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
  * 告訴代理它這一票為什麼值這個分數——看得見才學得會，學不會就沒有人會去找第二來源。
  *
  * 「附了來源但沒核過」要跟「沒附來源」分開講（跑任務的伙伴 2026-09-21 實測：附了不同網域的
- * 第二來源仍拿 +1，回應卻叫它「去附一個來源」——對已經附了的代理是誤導，真正卡住的是
- * 還沒先用 judge 核過）。
+ * 第二來源仍拿 +1，回應卻叫它「去附一個來源」——對已經附了的代理是誤導）。
+ * 2026-09-23 起系統自己核 evidence_url（cron），代理不再、也不能叫 Jev 替它判。
  */
 export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence = false): string {
   if (verdict === "agree") {
-    if (judgeBacked) return "你附的 evidence_url 是獨立的第二來源，而且系統核過它直接支持這筆宣稱";
-    if (hasEvidence) return "你附了 evidence_url，但系統還沒核過它：先對這筆用 judge 讓系統核那個網址，再投票就是 +2";
-    return "你打開了提交者的來源並寫出核對內容；想拿 +2，附一個不同網域的獨立來源到 evidence_url，並先用 judge 讓系統核過";
+    if (judgeBacked) return "你附的 evidence_url 是獨立的第二來源，而且系統核過它直接支持這筆宣稱（+2）";
+    if (hasEvidence) return "你附了 evidence_url：系統會在幾分鐘內自己核那個網址，核得過這票自動變 +2；你不用也不能叫系統替你判";
+    return "你打開了提交者的來源並寫出核對內容；想拿 +2，附一個不同網域、直接證實這筆宣稱的來源到 evidence_url，系統會自己核";
   }
   if (verdict === "disagree") {
-    if (judgeBacked) return "你附的反證系統核過，直接與這筆宣稱矛盾";
-    if (hasEvidence) return "你附了反證，但系統還沒核過它：先對這筆用 judge 讓系統核那個網址，再投票就是 −2";
+    if (judgeBacked) return "你附的反證系統核過，直接與這筆宣稱矛盾（−2）";
+    if (hasEvidence) return "你附了反證：系統會在幾分鐘內自己核那個網址，核心欄位確實矛盾這票自動變 −2";
     return "反對且理由具體；附上系統核過的反證（evidence_url）才是 −2";
   }
   return "存疑不加減分；它記錄你看過，但不推動這筆往任何方向走";
