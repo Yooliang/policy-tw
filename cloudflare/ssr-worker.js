@@ -13,7 +13,28 @@
  * 部署：wrangler deploy（wrangler.toml）。回滾：把 SSR_ROUTES 清空重部署，就回到純代理。
  */
 
-import { render } from '../dist-ssr/entry-server.js'
+import { render, SUPABASE_PUBLIC } from '../dist-ssr/entry-server.js'
+import { classifyRead } from './ai-reads.js'
+
+/**
+ * 記「誰在讀」（2026-09-23）：AI／搜尋引擎／從 AI 服務點過來的人，背景加一，不拖慢回應、失敗不影響頁面。
+ * 只記每日計數（代理、類別、頁種），不記網址與 IP。
+ */
+function countRead(request, ctx) {
+  try {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return
+    const url = new URL(request.url)
+    const hit = classifyRead(request.headers.get('User-Agent') || '', request.headers.get('Referer') || '', url.pathname)
+    if (!hit || !SUPABASE_PUBLIC.url || !SUPABASE_PUBLIC.anonKey) return
+    ctx.waitUntil(
+      fetch(`${SUPABASE_PUBLIC.url}/rest/v1/rpc/ai_read_hit`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_PUBLIC.anonKey, Authorization: `Bearer ${SUPABASE_PUBLIC.anonKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_agent: hit.agent, p_kind: hit.kind, p_path_type: hit.path_type }),
+      }).catch(() => undefined),
+    )
+  } catch { /* 記不成就算了 */ }
+}
 
 const ORIGIN = 'https://policy-tw.web.app'
 const ORIGIN_HOST = 'policy-tw.web.app'
@@ -150,6 +171,7 @@ async function renderAndStore(path, origin, cacheKey, cache) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
+    countRead(request, ctx)
     if (request.method === 'POST' && url.pathname === '/__purge') {
       if (!env.PURGE_SECRET || request.headers.get('X-Purge-Secret') !== env.PURGE_SECRET) return new Response('forbidden', { status: 403 })
       const body = await request.json().catch(() => ({}))

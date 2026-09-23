@@ -186,6 +186,7 @@ export function mapPolicy(row: RawPolicy): Policy {
     proposedDate: row.proposed_date ?? null,
     lastUpdated: row.last_updated,
     updatedAt: row.updated_at,
+    sourceUrl: row.source_url || undefined,
     progress: row.progress,
     tags: row.tags || [],
     aiAnalysis: row.ai_analysis || undefined,

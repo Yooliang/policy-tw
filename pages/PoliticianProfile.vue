@@ -16,7 +16,7 @@ import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2 } from 'lucide-vue-next'
-import { usePageHead } from '../composables/usePageHead'
+import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
 import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
@@ -239,6 +239,26 @@ usePageHead({
         ? `${politician.value.name}（${politician.value.party}，${politician.value.region}${politician.value.position}）：${politician.value.slogan || politician.value.bio}`
         : `${politician.value.name}，${politician.value.party}，${politician.value.region}${politician.value.position}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
     : undefined,
+  // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料；政見清單放 subjectOf，每筆帶固定網址，AI 轉述時才引得回來
+  jsonLd: () => politician.value ? {
+    '@context': 'https://schema.org',
+    '@type': 'Person',
+    name: politician.value.name,
+    url: `${SITE_URL}/politician/${politician.value.id}`,
+    ...(politician.value.avatarUrl ? { image: politician.value.avatarUrl } : {}),
+    ...(politician.value.currentPosition ? { jobTitle: politician.value.currentPosition } : {}),
+    ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
+    ...(politician.value.region ? { homeLocation: { '@type': 'Place', name: politician.value.region } } : {}),
+    subjectOf: campaignPledges.value.slice(0, 30).map((p) => ({
+      '@type': 'CreativeWork',
+      additionalType: '競選承諾',
+      name: p.title,
+      url: `${SITE_URL}/policy/${p.id}`,
+      ...(p.sourceUrl ? { citation: p.sourceUrl } : {}),
+    })),
+    publisher: PUBLISHER_LD,
+    license: DATA_LICENSE_URL,
+  } : undefined,
 })
 </script>
 

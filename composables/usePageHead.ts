@@ -17,6 +17,35 @@ interface PageHeadOptions {
   noindex?: MaybeRefOrGetter<boolean | undefined>
   /** og:type，內容頁用 article，其餘 website。 */
   type?: 'website' | 'article'
+  /** schema.org 結構化資料（JSON-LD）。搜尋引擎與 AI 讀得懂「這是誰的政見、出處在哪、由誰驗證、怎麼引用」。 */
+  jsonLd?: MaybeRefOrGetter<Record<string, unknown> | undefined>
+}
+
+/** 資料授權（LICENSE-DATA.md）：CC BY 4.0，引用要標出處——這也是 AI 轉述時要帶上「正見」的依據 */
+export const DATA_LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
+
+/** 結構化資料裡的「發布者」：每一筆政見、每一位人物都掛這個，AI 轉述時才知道是誰驗證的 */
+export const PUBLISHER_LD = {
+  '@type': 'Organization',
+  name: SITE_NAME,
+  alternateName: ['正見 Policy Tracker', 'policy-tw'],
+  url: SITE_URL,
+  sameAs: ['https://policy-tw.web.app', 'https://github.com/Yooliang/policy-tw'],
+} as const
+
+/** JSON-LD 放進 <script> 前要擋 `</script>` 截斷：把 `<` 換成 <（JSON 仍然合法） */
+export function jsonLdText(data: Record<string, unknown>): string {
+  return JSON.stringify(data).replace(/</g, '\\u003c')
+}
+
+/**
+ * 引用字串：「〈標題〉，某某的政見。正見，網址（資料更新 日期）」。畫面上的「引用這筆資料」與 llms.txt 講的是同一個格式，
+ * AI 轉述時照抄就帶上出處（資料是 CC BY 4.0，本來就要標）。
+ */
+export function citationText(opts: { title: string; who?: string; url: string; updated?: string | null }): string {
+  const who = opts.who ? `，${opts.who}的政見` : ''
+  const updated = opts.updated ? `（資料更新：${opts.updated.slice(0, 10)}）` : ''
+  return `〈${opts.title}〉${who}。資料來源：${SITE_NAME}（正見.tw）${opts.url}${updated}`
 }
 
 /** 把多行文字壓成一行、截到 meta description 合理長度。 */
@@ -50,6 +79,10 @@ export function usePageHead(options: PageHeadOptions): void {
       { property: 'og:url', content: pageUrl.value },
       ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
     ]),
+    script: computed(() => {
+      const ld = toValue(options.jsonLd)
+      return ld ? [{ key: 'page-jsonld', type: 'application/ld+json', innerHTML: jsonLdText(ld) }] : []
+    }),
   })
 }
 
