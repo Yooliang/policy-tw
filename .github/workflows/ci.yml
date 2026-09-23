@@ -157,7 +157,7 @@ jobs:
   # 符不符合該 environment 的 deployment branch policy——不符合的話 job 連跑都不會跑,
   # 不用等到讀 secret 那一步才擋。
   #
-  # 前提：SUPABASE_ACCESS_TOKEN／SUPABASE_DB_PASSWORD 要加在 GitHub 的
+  # 前提：SUPABASE_ACCESS_TOKEN 要加在 GitHub 的
   # Settings → Environments → production → Environment secrets 底下,不是加在
   # repo 層級的 Settings → Secrets and variables → Actions（加在那裡的話任何 job
   # 不管有沒有宣告 environment 都讀得到,等於沒設）。這個 environment 本身也要先建：
@@ -184,21 +184,17 @@ jobs:
         with:
           node-version: '22'
 
-      # SUPABASE_ACCESS_TOKEN／SUPABASE_DB_PASSWORD 跟 anon/service_role key 是不同東西：
-      # 前者是 supabase.com/dashboard/account/tokens 生成的 CLI 管理權杖，後者是遠端
-      # Postgres 的密碼。寫這份 workflow 的時候 repo 裡沒有這兩個 secret（`gh secret list`
-      # 查得到名字，查不到值，所以下面用「是不是空字串」判斷，不會把值印出來）。這一步
-      # 先擋下來、把缺什麼講清楚，不要讓後面的 supabase CLI 自己吐一段看不懂的認證錯誤。
+      # SUPABASE_ACCESS_TOKEN 是 supabase.com/dashboard/account/tokens 生成的 CLI 管理權杖，
+      # 跟 anon／service_role key 是不同東西。**不需要資料庫密碼**：CLI 用管理權杖就能 link 與
+      # db push（2026-09-23 在乾淨目錄模擬 CI 實測：link 成功、db push --dry-run 回 up to date）。
+      # 專案代號是公開的（每個端點網址裡都有），直接寫在下面，不必再放 secret。
+      # 下面用「是不是空字串」判斷，不會把值印出來；缺就先擋下來講清楚，不讓 CLI 吐看不懂的認證錯誤。
       - name: 檢查部署憑證存在
         env:
           HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
-          HAS_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD != '' }}
-          HAS_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID != '' }}
         run: |
           missing=""
           [ "$HAS_TOKEN" = "true" ] || missing="$missing SUPABASE_ACCESS_TOKEN"
-          [ "$HAS_DB_PASSWORD" = "true" ] || missing="$missing SUPABASE_DB_PASSWORD"
-          [ "$HAS_PROJECT_REF" = "true" ] || missing="$missing SUPABASE_PROJECT_ID"
           if [ -n "$missing" ]; then
             {
               echo "## Edge Functions 沒有部署"
@@ -231,11 +227,10 @@ jobs:
       - name: 連結 Supabase 專案並套用 migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_ID }}
-          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJECT_REF: wiiqoaytpqvegtknlbue
         run: |
-          npx supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
-          npx supabase db push --linked --password "$DB_PASSWORD"
+          npx supabase link --project-ref "$PROJECT_REF"
+          npx supabase db push --linked
 
       # 重用 scripts/deploy-functions.mjs，不要在這裡另外寫一份部署邏輯：
       # 它原本就會在部署前比對線上 skill.md 版號跟 PROTOCOL_VERSION，這裡當多一層
