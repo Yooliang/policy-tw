@@ -374,11 +374,20 @@ export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence 
 /** 高風險型別：分數不得由單一來源 IP 湊足 */
 export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
 
+/**
+ * 退件門檻：分數 ≤ −這個數就退件。固定 3（不動正式資料的型別 2），**不隨目標分數調整**（2026-09-23 小良哥）。
+ * 09-21 原本是 ≤ −目標，但目標會被 Jev 往上調（來源判不支持 → 4；票數預算接上後可到 5～7），
+ * 退件跟著變難——Jev 已經說這筆撐不住，反而要更多反對票才退得掉，方向相反。SQL 同步：contribution_reject_floor。
+ */
+export function rejectFloor(contributionType: string): number {
+  return riskLevel(contributionType, null) === "light" ? 2 : 3;
+}
+
 /** 總分 → 狀態。只在 pending／verified／disputed 之間轉；其餘狀態由維護者或系統決定。 */
 export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string }): string {
   const { score, target, distinctIps, contributionType, current } = input;
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
-  if (score <= -target) return "rejected";
+  if (score <= -rejectFloor(contributionType)) return "rejected";
   const needTwoIps = (SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType);
   if (score >= target && (!needTwoIps || distinctIps >= 2)) return "verified";
   return "pending";
