@@ -11,13 +11,13 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
 import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
-import { policyStatusLabel } from '../composables/usePageHead'
+import { citationText, DATA_LICENSE_URL, policyStatusLabel, PUBLISHER_LD, SITE_URL, summarize } from '../composables/usePageHead'
 import { policySortDate, policyYear } from '../lib/policy-date'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
@@ -324,7 +324,45 @@ usePageHead({
   description: () => policy.value
     ? `${politician.value?.name ?? ''}政見「${policy.value.title}」，狀態：${policyStatusLabel(policy.value.status)}，進度 ${policy.value.progress}%。${policy.value.description}`
     : undefined,
+  // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料——這是誰的政見、出處、狀態、由誰整理、CC BY 要標出處
+  jsonLd: () => policy.value && politician.value ? {
+    '@context': 'https://schema.org',
+    '@type': 'CreativeWork',
+    additionalType: isCampaign.value ? '競選承諾' : '政見',
+    name: policy.value.title,
+    headline: policy.value.title,
+    description: summarize(policy.value.description, 300),
+    url: `${SITE_URL}/policy/${policy.value.id}`,
+    inLanguage: 'zh-TW',
+    genre: policy.value.category,
+    creativeWorkStatus: policyStatusLabel(policy.value.status),
+    ...(policy.value.proposedDate ? { datePublished: policy.value.proposedDate } : {}),
+    dateModified: policy.value.updatedAt || policy.value.lastUpdated,
+    about: {
+      '@type': 'Person',
+      name: politician.value.name,
+      url: `${SITE_URL}/politician/${politician.value.id}`,
+      ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
+    },
+    ...(policy.value.sourceUrl ? { citation: policy.value.sourceUrl, isBasedOn: policy.value.sourceUrl } : {}),
+    ...(policyElection.value ? { temporalCoverage: String(policy.value.electionId) } : {}),
+    publisher: PUBLISHER_LD,
+    license: DATA_LICENSE_URL,
+    isAccessibleForFree: true,
+  } : undefined,
 })
+
+// 「引用這筆資料」：伺服器端就渲染出來，AI 讀網頁時看得到；複製鈕只在瀏覽器
+const citation = computed(() => policy.value ? citationText({
+  title: policy.value.title,
+  who: politician.value?.name,
+  url: `${SITE_URL}/policy/${policy.value.id}`,
+  updated: policy.value.updatedAt || policy.value.lastUpdated,
+}) : '')
+const citationCopied = ref(false)
+async function copyCitation() {
+  try { await navigator.clipboard.writeText(citation.value); citationCopied.value = true; setTimeout(() => { citationCopied.value = false }, 2000) } catch { /* 瀏覽器不給就算了 */ }
+}
 </script>
 
 <template>
@@ -591,6 +629,23 @@ usePageHead({
               查看更多（共 {{ sources.length }} 筆）
               <ChevronRight :size="14" />
             </button>
+          </div>
+
+          <!-- 引用這筆資料（2026-09-23）：伺服器端渲染，AI 讀網頁時看得到；資料是 CC BY 4.0，引用要標出處 -->
+          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="cite">
+            <h3 class="text-lg font-bold text-navy-900 mb-2 flex items-center gap-2">
+              <Quote class="text-blue-600" :size="20" />
+              引用這筆資料
+            </h3>
+            <p class="text-sm text-slate-700 leading-relaxed break-all select-all">{{ citation }}</p>
+            <div class="mt-3 flex items-center gap-3 text-xs text-slate-500">
+              <ClientOnly>
+                <button type="button" class="px-3 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700" @click="copyCitation">
+                  {{ citationCopied ? '已複製' : '複製引用' }}
+                </button>
+              </ClientOnly>
+              <span>資料依 <a :href="DATA_LICENSE_URL" target="_blank" rel="noopener noreferrer" class="underline">CC BY 4.0</a> 授權，轉載或 AI 轉述請附上這個網址。</span>
+            </div>
           </div>
 
           <!-- Timeline -->

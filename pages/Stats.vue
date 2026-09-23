@@ -8,6 +8,7 @@ import PipelineChart from '../components/PipelineChart.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
+import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
@@ -254,6 +255,7 @@ usePageHead({
               <ClientOnly><apexchart v-if="summary" type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
             </div>
           </section>
+          <AiReadsPanel />
         </div>
       </div>
     </div>

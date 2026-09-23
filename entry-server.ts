@@ -75,3 +75,12 @@ async function renderOnce(url: string): Promise<RenderResult> {
     state: { page: snapshot },
   }
 }
+
+/**
+ * Worker 要打 Supabase 的公開連線資訊（anon key 本來就是公開的）。建置時由 VITE_ 環境變數烤進 bundle，
+ * 跟客戶端用的是同一把；Worker 用它呼叫 ai_read_hit() 記 AI 讀取次數（2026-09-23）。
+ */
+export const SUPABASE_PUBLIC = {
+  url: import.meta.env.VITE_SUPABASE_URL as string,
+  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+}

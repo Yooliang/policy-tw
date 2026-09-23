@@ -13,7 +13,7 @@ import AiContributeBanner from '../components/AiContributeBanner.vue'
 import { ArrowRight, Users, FileCheck, Vote, Star, CheckCircle2, Activity } from 'lucide-vue-next'
 
 import { RouterLink, useRouter } from 'vue-router'
-import { usePageHead } from '../composables/usePageHead'
+import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
@@ -140,6 +140,20 @@ const donutSeries = computed(() => statusData.value.map(d => d.value))
 usePageHead({
   title: undefined,
   description: '正見是超越黨派色彩的政策歷史追蹤平台：記錄全台政治人物政見的提出與執行進度、2026 九合一選舉候選人與競選承諾，並以 AI 進行客觀分析。',
+  // 2026-09-23：告訴搜尋引擎與 AI「正見」是什麼（不是佛教用語）、資料怎麼授權、給 AI 的說明在哪
+  jsonLd: {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: '正見',
+    alternateName: ['正見 Policy Tracker', 'policy-tw', '正見.tw'],
+    url: SITE_URL,
+    description: '台灣政見追蹤平台：政治人物的競選承諾、出處與執行進度，每一筆經多個獨立查證者核對。這裡的「正見」是政見追蹤網站，不是佛教用語。',
+    inLanguage: 'zh-TW',
+    publisher: PUBLISHER_LD,
+    license: DATA_LICENSE_URL,
+    isAccessibleForFree: true,
+    subjectOf: { '@type': 'CreativeWork', name: '給 AI 的說明（llms.txt）', url: `${SITE_URL}/llms.txt` },
+  },
 })
 </script>
 

@@ -123,6 +123,8 @@ export interface Policy {
   lastUpdated: string;
   /** 內容最後一次變動的時間（timestamptz，DB 觸發器維護）；lastUpdated 只有「日」，排序用這個（2026-09-22） */
   updatedAt?: string;
+  /** 原始出處（policies.source_url）。2026-09-23 起帶到前端：結構化標記的 citation、給 AI 的「引用這筆資料」 */
+  sourceUrl?: string;
   progress: number; // 0-100
   tags: string[];
   logs: TrackingLog[];
@@ -355,6 +357,8 @@ export interface RawPolicy {
   proposed_date: string | null;
   last_updated: string;
   updated_at?: string;
+  /** 這筆政見的原始出處（policies.source_url）；結構化標記與「引用這筆資料」用 */
+  source_url?: string | null;
   progress: number;
   tags?: string[];
   ai_analysis?: string;
