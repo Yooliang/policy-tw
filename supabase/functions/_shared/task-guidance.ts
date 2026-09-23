@@ -63,13 +63,16 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "這筆政見沒標所屬屆別，網站上顯示「未標註屆別」。打開 source_url 確認是哪一場選舉的承諾，用 correction 把 policies.election_id 改成該年份。" +
     "**同一個人可能多屆都選過，來源沒寫清楚就不要猜**，用 no_change 回報。" +
     "特別是**不要用「他是現任第 N 屆」回推屆別**：那是推論不是出處，而且政見可能是更早那一屆提的。" +
+    "**若來源是現任者任內宣布的施政承諾**（不是選前提的），election_id 填他這一任當選那屆，同一筆 correction 把 status 改成 Proposed——那不是競選承諾。" +
     "來源那一頁要自己寫出是哪一場選舉（或寫得出投票年份），才算證明得了。",
 
   policy_election_mismatch:
-    "這筆政見標的屆別跟提出日期對不上——提出日期晚於那場選舉的投票日。打開來源確認是哪一屆，用 correction 改 election_id；是日期填錯就改 proposed_date；分不出來用 no_change。",
+    "這筆政見標的屆別跟提出日期對不上——提出日期晚於那場選舉的投票日。打開來源確認是哪一屆，用 correction 改 election_id；是日期填錯就改 proposed_date；" +
+    "**若它其實是這個人當選後、任內才宣布的施政承諾**（不是選前的競選承諾），屆別與日期都沒錯，用 correction 把 status 改成 Proposed。分不出來用 no_change。",
 
   news_sweep:
-    "打開 RSS 網址，挑出提到 2026 候選人具體政見、或既有政見有新進度的報導，每筆用 policy／policy_progress 提交。" +
+    "打開 RSS 網址，挑出提到 2026 候選人具體政見、**現任者在任內新宣布的具體施政承諾**（例：總統宣布普發現金、市長宣布新計畫）、或既有政見有新進度的報導，每筆用 policy／policy_progress 提交。" +
+    "任內施政承諾用 policy：status 填 Proposed、election_id 填他這一任當選的那屆、proposed_date 填宣布日——**不是競選承諾，不要填 Campaign Pledge**。" +
     "**source_urls 放新聞原文網址**——RSS 裡 <link> 的值，不是 RSS 本身。看完沒有可提交的就用 no_change 並寫你看了幾筆。",
 
   fix_disputed:
