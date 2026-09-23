@@ -49,3 +49,16 @@ Deno.test("公開金鑰寫入的兩支端點已下架，前端也沒有人再打
   const router = await Deno.readTextFile(new URL("../../../router/index.ts", import.meta.url));
   assert(!router.includes("AdminScraper"), "資料抓取頁隨 add-politician 下架");
 });
+
+// 2026-09-23 下午：VM 跑者 no_subject 31 張裡 28 張是參選紀錄拿中選會公告頁當第二來源（姓名在附檔 PDF）；
+// same_source 21 張是拿提交者同一網站。提示要依型別講、並把提交者網域列出來。
+Deno.test("參選紀錄的提示不叫代理硬找 +2；列出提交者網域", async () => {
+  const { scoringHint: hintOf, submittedDomains, shapeVerifyCurrent } = await import("./task-context.ts");
+  const c = hintOf(1, 3, "candidacy");
+  assertEquals(c.points_short, 2);
+  assertStringIncludes(c.hint, "+1 就是正常的一票");
+  assertEquals(hintOf(1, 3, "policy").hint.includes("這一票就能讓它上線"), true);
+  assertEquals(submittedDomains(["https://www.cna.com.tw/a", "https://cna.com.tw/b", "https://web.cec.gov.tw/x.pdf", "nope"]), ["cna.com.tw", "web.cec.gov.tw"]);
+  const cur = shapeVerifyCurrent("policy", { name: "某某", title: "x" }, { politicians: [], score: 1, target_score: 3, source_urls: ["https://udn.com/news/1"] });
+  assertEquals((cur.scoring as Record<string, unknown>).not_a_second_source, ["udn.com"]);
+});

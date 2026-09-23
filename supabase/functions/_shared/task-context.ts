@@ -532,9 +532,23 @@ const VOTE_SCORE_GUIDE = {
  * 48 小時內只有 4 台機器在投票、一台一筆最多 +2、目標 3——+1 的票要三台全到，+2 的票兩台就夠，
  * 系統票把目標降到 2 時一張 +2 就夠。把這個算術當場講給代理聽，它才知道多花幾分鐘找第二來源值得。
  */
-export function scoringHint(score: number, target: number): { points_short: number; hint: string } {
+/** 提交者附的來源網域（去 www.、去重）：放進 evidence_url 不算第二來源 */
+export function submittedDomains(sourceUrls: readonly string[] | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const u of sourceUrls ?? []) {
+    try { out.add(new URL(u).hostname.replace(/^www\./, "").toLowerCase()); } catch { /* 不是網址就略過 */ }
+  }
+  return [...out];
+}
+
+export function scoringHint(score: number, target: number, contributionType?: string): { points_short: number; hint: string } {
   const short = Math.max(0, target - score);
   if (short === 0) return { points_short: 0, hint: "已達目標分數，等系統落庫" };
+  // 參選紀錄（2026-09-23 實測）：「附第二來源」推下去，代理拿中選會公告頁當第二來源——名單在附檔 PDF、頁面本身沒有姓名，
+  // 系統核不了（no_subject 31 張裡 28 張是這種）。協議 §6 本來就寫登記期參選紀錄 +1 是正常的一票，不要讓提示跟它打架。
+  if (contributionType === "candidacy") {
+    return { points_short: short, hint: `這筆差 ${short} 分。參選紀錄的官方名冊多半是 PDF，系統核不了——你打開名冊逐欄核對無誤投 +1 就是正常的一票，不用為了 +2 硬找（中選會公告頁的姓名在附檔裡，當第二來源會被判「頁面沒有當事人」）；另一家媒體的登記報導寫到這個人，才值得附` };
+  }
   if (short === 1) return { points_short: 1, hint: "這筆只差 1 分：你核對無誤投 agree（+1）就能讓它上線；附第二來源更穩" };
   if (short === 2) return { points_short: 2, hint: "這筆差 2 分：你附一個不同網域、系統核得過的第二來源（+2），這一票就能讓它上線；只投 +1 還要再等一台機器" };
   return { points_short: short, hint: `這筆差 ${short} 分：附第二來源（+2）能讓它少等一台機器；只投 +1 要再多兩台` };
@@ -554,7 +568,17 @@ const IDENTITY_HINT = {
 export function shapeVerifyCurrent(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
   let out = shapeVerifyCurrentInner(contributionType, payload, data);
   if (typeof data.score === "number" && typeof data.target_score === "number") {
-    out = { ...out, scoring: { target_score: data.target_score, current_score: data.score, ...scoringHint(data.score, data.target_score), your_vote_could_be: VOTE_SCORE_GUIDE } };
+    out = {
+      ...out,
+      scoring: {
+        target_score: data.target_score,
+        current_score: data.score,
+        ...scoringHint(data.score, data.target_score, contributionType),
+        // 把系統知道、代理不知道的事先講出來（2026-09-23 leatherback-ec）：這些網域是提交者的，放進 evidence_url 會被判 same_source、不加分
+        ...(submittedDomains(data.source_urls).length > 0 ? { not_a_second_source: submittedDomains(data.source_urls) } : {}),
+        your_vote_could_be: VOTE_SCORE_GUIDE,
+      },
+    };
   }
   // #7：既有票公開（去識別）。看得到前一張反對票的理由，後到的人才能針對爭點查、也才看得出盲反對。
   if (data.votes && data.votes.length > 0) out = { ...out, votes: shapeVotes(data.votes) };
