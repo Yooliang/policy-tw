@@ -162,7 +162,9 @@ Deno.test("別名展開：用舊名送進來也能對上改名後的人", async 
   assert(r.matched_keys.some((k) => k.key_type === "birth" && k.key_value === "陳筱諭|1985"));
 });
 
-Deno.test("三面向全換 → new + same_name_exists", async () => {
+// 2026-09-23（agy 審查）：原本判 new + flag——同一個人換了黨、換了縣市就會被建成第二個同名人物，而且不觸發指認。
+// 現在交給驗證者指認；只有出生年能排除全部同名者時才是 new（下面「出生年衝突」那支）。
+Deno.test("三面向全換、沒有出生年可排除 → ambiguous（要指認）", async () => {
   const store = realPeopleStore();
   const r = await resolvePolitician(store, {
     name: "陳素月",
@@ -171,8 +173,8 @@ Deno.test("三面向全換 → new + same_name_exists", async () => {
     election_type: "縣市長",
     current_position: "台中市副市長",
   }, { persist: false });
-  assertEquals(r.decision, "new");
-  assertEquals(r.flag, "same_name_exists");
+  assertEquals(r.decision, "ambiguous");
+  assertEquals(r.flag, undefined);
   assertEquals(r.candidates, []);
 });
 

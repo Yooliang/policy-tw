@@ -112,19 +112,7 @@ async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, req
   }
 
   // 中選會折扣：參選類才問得到（cec-check 拿的是結構化資料，不是網頁）
-  let cecConfirmed = false;
-  let cecNote = "非參選類，不查中選會";
-  if (c.contribution_type === "candidacy" || c.contribution_type === "correction") {
-    const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
-    const eid = Number(payload.election_id ?? claim.election_id);
-    if (name && Number.isInteger(eid)) {
-      const hit = await cecCandidacyPage(name, eid);
-      cecConfirmed = !!hit && hit.count > 0;
-      cecNote = cecConfirmed ? `中選會查到 ${hit!.count} 筆` : "中選會查不到";
-    } else {
-      cecNote = "缺姓名或屆別，查不了";
-    }
-  }
+  const { confirmed: cecConfirmed, note: cecNote } = await cecConfirmedFor(c.contribution_type, payload, claim);
 
   const state: Record<string, unknown> = {
     target: claim,
@@ -143,6 +131,52 @@ async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, req
     model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
   }]);
   return { budget, cecConfirmed, cecNote, page, cost: Number(res.usage.cost.toFixed(8)) };
+}
+
+/**
+ * 參選類的中選會折扣（票數預算用）：candidacy／correction 帶姓名與屆別時查得到就算確認。
+ * precheck 已經為 candidacy 查過中選會的，直接帶進來不重查。
+ */
+async function cecConfirmedFor(contributionType: string, payload: Record<string, unknown>, claim: Record<string, unknown>, known?: { count: number } | null): Promise<{ confirmed: boolean; note: string }> {
+  if (contributionType !== "candidacy" && contributionType !== "correction") return { confirmed: false, note: "非參選類，不查中選會" };
+  if (known !== undefined) return known && known.count > 0 ? { confirmed: true, note: `中選會查到 ${known.count} 筆` } : { confirmed: false, note: "中選會查不到" };
+  const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
+  const eid = Number(payload.election_id ?? claim.election_id);
+  if (!name || !Number.isInteger(eid)) return { confirmed: false, note: "缺姓名或屆別，查不了" };
+  const hit = await cecCandidacyPage(name, eid);
+  return hit && hit.count > 0 ? { confirmed: true, note: `中選會查到 ${hit.count} 筆` } : { confirmed: false, note: "中選會查不到" };
+}
+
+/**
+ * 投票備註的範圍外問題（followup）：記錄 Jev 的判定，≥門檻就開任務。
+ * 新票稽核（evidence）與備註掃描（followups）共用——同一張票只問 Jev 一次。
+ */
+async function settleFollowup(
+  supabase: Sb, v: FollowupVote, c: FollowupContribution,
+  ans: { choice: string; probabilities?: Record<string, number>; confidence?: number } | undefined,
+  model: string, state: Record<string, unknown>, costUsd: number, dry: boolean,
+): Promise<Record<string, unknown> | null> {
+  const choice = (ans?.choice ?? "none") as FollowupChoice;
+  const prob = ans?.probabilities?.[choice] ?? 0;
+  if (!dry) {
+    await insertRecords(supabase, [{ subject_type: "vote", subject_id: v.id, question: "followup", choice, probability: prob, confidence: ans?.confidence ?? null,
+      probabilities: ans?.probabilities ?? null, model, state, cost_usd: costUsd }]);
+  }
+  if (choice === "none" || prob < FOLLOWUP_MIN_PROBABILITY) return null;
+  const p = c.payload ?? {};
+  const pid = (c.applied_politician_id ?? (typeof p.politician_id === "string" ? p.politician_id : null)) as string | null;
+  const { data: who } = pid ? await supabase.from("politicians").select("name").eq("id", pid).maybeSingle() : { data: null };
+  const task = followupTask(v, c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
+  const entry: Record<string, unknown> = { vote_id: v.id, contribution_id: c.id, choice, probability: Number(prob.toFixed(2)), title: task.title, note: String(v.note).slice(0, 300) };
+  if (!dry) {
+    const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
+    if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
+    else {
+      const t = await createTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
+      entry.task_id = t.id;
+    }
+  }
+  return entry;
 }
 
 Deno.serve(async (req) => {
@@ -301,15 +335,31 @@ Deno.serve(async (req) => {
         } else {
           const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
           (state.page as Record<string, unknown>).urls = urls;
-          const res = await askJev(apiKey, state, questions);
+          // 票數預算的風險題跟來源核對一起問（2026-09-23 小良哥：「可以集中一次問嗎」）：同一份正文、同一次呼叫。
+          // 題名不衝突（來源題是 field:*、預算題是維度名）；維度題的 instructions 讀的是 state.target。
+          const budgetQs = dimensionQuestions(c.contribution_type);
+          const withBudget = Object.keys(budgetQs).length > 0;
+          const askState = withBudget ? { ...state, target: claim, contribution_type: c.contribution_type } : state;
+          const res = await askJev(apiKey, askState, { ...questions, ...budgetQs });
           cost += res.usage.cost;
           // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
           const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
             choice: agg.choice, probability: agg.probability, confidence: null,
-            probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)),
+            probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state: askState, cost_usd: Number(res.usage.cost.toFixed(8)),
           }];
+          if (withBudget) {
+            const cecInfo = await cecConfirmedFor(c.contribution_type, payload, claim, c.contribution_type === "candidacy" ? cec : undefined);
+            const budget = computeVoteBudget(c.contribution_type, res.answers, cecInfo.confirmed);
+            // 影子模式照舊：只記錄。費用已記在 source_support 那列，這列記 0 免得重算
+            rows.push({
+              subject_type: "contribution", subject_id: c.contribution_id, question: "vote_budget",
+              choice: String(budget.threshold), probability: 0, confidence: null,
+              probabilities: Object.fromEntries(budget.dimensions.map((d) => [d.key, d.probability])),
+              model: res.model, state: { target: claim, contribution_type: c.contribution_type, page: state.page, budget, asked_with: "precheck" }, cost_usd: 0,
+            });
+          }
           key = `${agg.choice}${agg.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
         }
         await insertRecords(supabase, rows);
@@ -472,11 +522,13 @@ Deno.serve(async (req) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
       const sinceHours = Math.min(Math.max(Number(url.searchParams.get("since_hours")) || 1, 1), 24 * 14);
       const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
+      // ids=逗號分隔的票 id：指定幾張票來測（不看時間窗）
+      const onlyIds = (url.searchParams.get("ids") ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200);
+      // query-bounds: ok — 下面接 .order().limit(1000)
+      let vq = supabase.from("contribution_votes").select("id, contribution_id, verdict, note, agent_name, created_at").not("note", "is", null);
+      vq = onlyIds.length > 0 ? vq.in("id", onlyIds) : vq.gte("created_at", since);
       // query-bounds: ok — 有 order 有 limit（1000）
-      const { data: votes, error: vErr } = await supabase.from("contribution_votes")
-        .select("id, contribution_id, verdict, note, agent_name, created_at")
-        .gte("created_at", since).not("note", "is", null)
-        .order("created_at", { ascending: false }).limit(1000);
+      const { data: votes, error: vErr } = await vq.order("created_at", { ascending: false }).limit(1000);
       if (vErr) throw new Error(`followup votes: ${vErr.message}`);
       const withNote = ((votes ?? []) as Array<FollowupVote & { contribution_id: string }>).filter(worthAsking);
       const ids = withNote.map((v) => v.id);
@@ -495,6 +547,7 @@ Deno.serve(async (req) => {
       const startedAt = Date.now();
       let asked = 0, cost = 0, created = 0;
       const found: Array<Record<string, unknown>> = [];
+      const seen: Array<Record<string, unknown>> = [];
       const failures: Array<{ vote_id: string; error: string }> = [];
       const one = async (v: FollowupVote & { contribution_id: string }) => {
         const c = byId.get(v.contribution_id);
@@ -503,27 +556,9 @@ Deno.serve(async (req) => {
         const res = await askJev(apiKey, state, questions);
         asked++; cost += res.usage.cost;
         const ans = res.answers.followup;
-        const choice = (ans?.choice ?? "none") as FollowupChoice;
-        const prob = ans?.probabilities?.[choice] ?? 0;
-        if (!dry) {
-          await insertRecords(supabase, [{ subject_type: "vote", subject_id: v.id, question: "followup", choice, probability: prob, confidence: ans?.confidence ?? null,
-            probabilities: ans?.probabilities ?? null, model: res.model, state, cost_usd: Number(res.usage.cost.toFixed(8)) }]);
-        }
-        if (choice === "none" || prob < FOLLOWUP_MIN_PROBABILITY) return;
-        const p = c.payload ?? {};
-        const pid = (c.applied_politician_id ?? (typeof p.politician_id === "string" ? p.politician_id : null)) as string | null;
-        const { data: who } = pid ? await supabase.from("politicians").select("name").eq("id", pid).maybeSingle() : { data: null };
-        const task = followupTask(v, c, choice, (who as { name?: string } | null)?.name ?? null);
-        const entry: Record<string, unknown> = { vote_id: v.id, contribution_id: c.id, choice, probability: Number(prob.toFixed(2)), title: task.title, note: String(v.note).slice(0, 300) };
-        if (!dry) {
-          const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
-          if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
-          else {
-            const t = await createTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
-            entry.task_id = t.id; created++;
-          }
-        }
-        found.push(entry);
+        seen.push({ vote_id: v.id, choice: ans?.choice, p: Number((ans?.probabilities?.[ans?.choice ?? ""] ?? 0).toFixed(2)) });
+        const entry = await settleFollowup(supabase, v, c, ans, res.model, state, Number(res.usage.cost.toFixed(8)), dry);
+        if (entry) { found.push(entry); if (entry.task_id) created++; }
       };
       let cursor = 0;
       while (cursor < list.length && Date.now() - startedAt < 40_000) {
@@ -532,7 +567,7 @@ Deno.serve(async (req) => {
         results.forEach((r, i) => { if (r.status === "rejected") failures.push({ vote_id: chunk[i].id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) }); });
         if (failures.length >= 5) break;
       }
-      return json({ success: true, dry, since, scanned: withNote.length, asked, remaining: list.length - cursor, created, cost_usd: Number(cost.toFixed(6)), found, failures });
+      return json({ success: true, dry, since, scanned: withNote.length, asked, remaining: list.length - cursor, created, cost_usd: Number(cost.toFixed(6)), found, ...(url.searchParams.get("all") === "1" ? { seen } : {}), failures });
     }
 
     // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 小良哥：代理不該把判斷外包給 Jev）----
@@ -542,10 +577,10 @@ Deno.serve(async (req) => {
       const apiKey = Deno.env.get("OPENROUTER_API_KEY");
       if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
-      type Vote = { id: string; contribution_id: string; verdict: string; evidence_url: string };
+      type Vote = { id: string; contribution_id: string; verdict: string; evidence_url: string; note: string | null; agent_name: string | null; created_at: string };
       // query-bounds: ok — 有 order 有 limit（≤60）
       const { data: votes, error: vErr } = await supabase.from("contribution_votes")
-        .select("id, contribution_id, verdict, evidence_url")
+        .select("id, contribution_id, verdict, evidence_url, note, agent_name, created_at")
         .not("evidence_url", "is", null).is("evidence_checked_at", null).in("verdict", ["agree", "disagree"])
         // 新的先：正在等票的那些筆才需要 +2；上線時 1,118 張積壓多半在已定案的貢獻上，那些下面直接標 not_pending 不問 Jev
         .order("created_at", { ascending: false }).limit(limit);
@@ -565,7 +600,7 @@ Deno.serve(async (req) => {
         tally[verdictOut] = (tally[verdictOut] ?? 0) + 1;
       };
       const one = async (v: Vote): Promise<void> => {
-        const { data: c, error: cErr } = await supabase.from("contributions").select("id, contribution_type, payload, source_urls, status").eq("id", v.contribution_id).maybeSingle();
+        const { data: c, error: cErr } = await supabase.from("contributions").select("id, contribution_type, payload, source_urls, status, applied_politician_id, applied_policy_id").eq("id", v.contribution_id).maybeSingle();
         if (cErr) throw new Error(`contribution read: ${cErr.message}`);
         if (!c) return await finish(v, "no_contribution", false);
         // 已定案（applied／rejected／superseded／withdrawn）的貢獻，票再加分也改變不了什麼，不花 Jev
@@ -583,8 +618,11 @@ Deno.serve(async (req) => {
         if (page.kind !== "html" || !hasUsableText(page.text, names)) return await finish(v, "fetch_failed", false);
         if (!nameHit(page.text, names)) return await finish(v, "no_subject", false);
         const { state, questions } = buildSourceSupportAsk(claim, v.evidence_url, focusText(page.text, names));
-        const res = await askJev(apiKey, state, questions);
+        // 備註的範圍外問題跟第二來源一起問（2026-09-23 小良哥：「可以集中一次問嗎」）
+        const fu = worthAsking(v) ? buildFollowupAsk(v, c as FollowupContribution) : null;
+        const res = await askJev(apiKey, fu ? { ...state, ...fu.state } : state, fu ? { ...questions, ...fu.questions } : questions);
         cost += res.usage.cost; asked++;
+        if (fu) await settleFollowup(supabase, v, c as FollowupContribution, res.answers.followup, res.model, fu.state, 0, false);
         const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
         const strong = agg.probability >= MIN_PROBABILITY;
         // agree 要「支持」；disagree 要「核心欄位矛盾」（非核心欄對不上不算反證，跟 judge 的規則一樣）

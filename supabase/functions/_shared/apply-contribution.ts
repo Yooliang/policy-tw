@@ -16,7 +16,7 @@ import { checkAvatarUrl } from "./avatar-check.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
-import { normElectionType } from "./identity-normalize.ts";
+import { normElectionType, normText } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
@@ -136,10 +136,18 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
   // profile_gap 任務交的沒帶 id 時，任務編號本身就指了是誰（2026-09-23 d5059957：用姓名猜成 new、差點建出一筆空人物）
   const given = str(row.payload.politician_id) ?? politicianIdFromTask(row.task_id);
   if (given) {
-    const { data, error } = await supabase.from("politicians").select("id").eq("id", given).maybeSingle();
+    const { data, error } = await supabase.from("politicians").select("id, name").eq("id", given).maybeSingle();
     throwIf(error, "politicians lookup by payload id");
-    if (data) return { politician_id: String(data.id), created: false };
-    return { disputed: `payload.politician_id ${given} 不存在，交維護者裁決` };
+    if (!data) return { disputed: `payload.politician_id ${given} 不存在，交維護者裁決` };
+    // 帶了 id 也帶了姓名，兩者要是同一個人（2026-09-23 agy 審查）：id 填錯的話，參選紀錄會掛到別人名下。
+    // 本名對不上再看別名（politician_keys alias_name），都不是才擋。
+    const claimed = normText(candidate.name ?? null);
+    if (claimed && claimed !== normText(String(data.name ?? ""))) {
+      const { data: alias } = await supabase.from("politician_keys").select("politician_id")
+        .eq("politician_id", given).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
+      if (!alias) return { disputed: `payload.politician_id ${given} 是「${data.name}」，但 payload.name 是「${candidate.name}」——id 與姓名不是同一人，這筆不落庫` };
+    }
+    return { politician_id: String(data.id), created: false };
   }
   const ensured = await ensurePolitician(supabase, candidate, options);
   if (ensured.politician_id === null) {
