@@ -11,7 +11,7 @@ const activeElection = computed(() => getActiveElection())
 <template>
   <footer class="bg-navy-900 text-slate-400 py-12 border-t border-navy-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-5 gap-8">
+      <div class="grid grid-cols-1 md:grid-cols-6 gap-8">
         <div class="col-span-1 md:col-span-2">
           <h3 class="text-white text-lg font-bold mb-4">正見</h3>
           <p class="text-sm leading-relaxed mb-4 max-w-sm">
@@ -26,14 +26,11 @@ const activeElection = computed(() => getActiveElection())
         </div>
 
         <div>
-          <h4 class="text-white font-semibold mb-4">平台功能</h4>
+          <h4 class="text-white font-semibold mb-4">政見</h4>
           <ul class="space-y-2 text-sm">
             <li><RouterLink to="/tracking" class="hover:text-blue-400 transition-colors">政見追蹤</RouterLink></li>
-            <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">AI 智能分析</RouterLink></li>
+            <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">市政接力</RouterLink></li>
             <li><RouterLink to="/regional-data" class="hover:text-blue-400 transition-colors">縣市數據分佈</RouterLink></li>
-            <li><RouterLink to="/contributions" class="hover:text-blue-400 transition-colors">貢獻看板</RouterLink></li>
-            <li><RouterLink to="/queue" class="hover:text-blue-400 transition-colors">任務佇列</RouterLink></li>
-            <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">參與貢獻</RouterLink></li>
           </ul>
         </div>
 
@@ -51,7 +48,16 @@ const activeElection = computed(() => getActiveElection())
         </div>
 
         <div>
-          <h4 class="text-white font-semibold mb-4">關於我們</h4>
+          <h4 class="text-white font-semibold mb-4">貢獻</h4>
+          <ul class="space-y-2 text-sm">
+            <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">參與貢獻</RouterLink></li>
+            <li><RouterLink to="/contributions" class="hover:text-blue-400 transition-colors">貢獻看板</RouterLink></li>
+            <li><RouterLink to="/queue" class="hover:text-blue-400 transition-colors">任務佇列</RouterLink></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="text-white font-semibold mb-4">關於</h4>
           <ul class="space-y-2 text-sm">
             <li><RouterLink to="/vision" class="hover:text-blue-400 transition-colors">專案願景</RouterLink></li>
             <li><RouterLink to="/privacy" class="hover:text-blue-400 transition-colors">隱私權政策</RouterLink></li>
