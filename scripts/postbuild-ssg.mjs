@@ -1,4 +1,4 @@
-// 建置後：產 sitemap.xml、驗證預渲染結果不是空殼。任何一項不過就讓 build 紅。
+// 建置後：產 sitemap（索引＋按內容拆的三份）、驗證預渲染結果不是空殼。任何一項不過就讓 build 紅。
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -104,16 +104,36 @@ const samples = [
 const politicianSample = samples.find((s) => s.route.startsWith('/politician/'))
 if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 initialState 過大：${politicianSample.stateKb} KB`)
 
-// 5. sitemap
+// 5. sitemap：按內容拆三份，sitemap.xml 是索引（2026-09-23 小良哥：Search Console 才看得出哪一類沒被收錄）
+//    提交的網址不變，一樣是 /sitemap.xml
 const lastmod = taipeiDate()
-const xml = [
+const SITEMAP_GROUPS = [
+  { file: 'sitemap-politicians.xml', match: (r) => r.startsWith('/politician/') },
+  { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') },
+  { file: 'sitemap-pages.xml', match: () => true },
+]
+const grouped = new Map(SITEMAP_GROUPS.map((g) => [g.file, []]))
+for (const r of routes) grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
+for (const [file, list] of grouped) {
+  if (list.length === 0) fail(`${file} 是空的`)
+  if (list.length > 50000) fail(`${file} 超過 50,000 個網址（${list.length}），要再拆`)
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...list.map((r) => `  <url><loc>${SITE_URL}${r}</loc><lastmod>${lastmod}</lastmod></url>`),
+    '</urlset>',
+    '',
+  ].join('\n')
+  fs.writeFileSync(path.join(DIST, file), xml, 'utf8')
+}
+const indexXml = [
   '<?xml version="1.0" encoding="UTF-8"?>',
-  '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-  ...routes.map((r) => `  <url><loc>${SITE_URL}${r}</loc><lastmod>${lastmod}</lastmod></url>`),
-  '</urlset>',
+  '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+  ...[...grouped.keys()].map((file) => `  <sitemap><loc>${SITE_URL}/${file}</loc><lastmod>${lastmod}</lastmod></sitemap>`),
+  '</sitemapindex>',
   '',
 ].join('\n')
-fs.writeFileSync(path.join(DIST, 'sitemap.xml'), xml, 'utf8')
+fs.writeFileSync(path.join(DIST, 'sitemap.xml'), indexXml, 'utf8')
 
 const byPrefix = routes.reduce((acc, r) => {
   const key = r === '/' ? '/' : `/${r.split('/')[1]}`
@@ -125,6 +145,7 @@ const summary = {
   htmlFiles: allHtml.length,
   prerenderedPages: pageFiles.length,
   sitemapUrls: routes.length,
+  sitemaps: Object.fromEntries([...grouped].map(([f, l]) => [f, l.length])),
   byPrefix,
   pagesWithoutInitialState: noStatePages.length,
   samples,
