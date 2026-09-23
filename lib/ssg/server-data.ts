@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import {
   fetchAllRows,
   getDataSnapshot,
@@ -140,6 +142,13 @@ function hasContent(pl: Politician, politicianIdsWithPolicies: Set<string>): boo
 }
 
 /** 建置時要預渲染的完整路徑清單。 */
+/** 邊緣渲染頁的清單寫給 scripts/postbuild-ssg.mjs 產網站地圖（它讀完就刪，不會部署出去） */
+export const EDGE_ROUTES_FILE = 'dist/.edge-routes.json'
+function writeEdgeRoutes(paths: string[]): void {
+  fs.mkdirSync(path.dirname(EDGE_ROUTES_FILE), { recursive: true })
+  fs.writeFileSync(EDGE_ROUTES_FILE, JSON.stringify(paths), 'utf8')
+}
+
 export function collectRoutePaths(full: DataSnapshot): string[] {
   const scope = politicianScope()
   const idsWithPolicies = new Set(full.policies.map((p) => String(p.politicianId)))
@@ -147,14 +156,22 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ? full.politicians.filter((pl) => hasContent(pl, idsWithPolicies))
     : full.politicians
 
+  // 政治人物頁、政見頁由正見.tw 的 Worker 在邊緣現場渲染（cloudflare/ssr-worker.js 的 SSR_ROUTES），
+  // 預渲染不再產生（2026-09-24 小良哥：建置從約 4 分鐘降下來）。清單照樣交給 postbuild 產網站地圖。
+  // 要退回全部預渲染：SSG_EDGE_PAGES=prerender。
+  const edgePaths = [
+    ...politicians.map((pl) => `/politician/${pl.id}`),
+    ...full.policies.map((p) => `/policy/${p.id}`),
+  ]
+  const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
   const paths = [
     ...STATIC_CONTENT_ROUTES,
     ...full.elections.map((e) => `/election/${e.id}`),
-    ...full.policies.map((p) => `/policy/${p.id}`),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
-    ...politicians.map((pl) => `/politician/${pl.id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),
+    ...(prerenderEdge ? edgePaths : []),
   ]
-  console.log(`[ssg] routes: ${paths.length} (politicians scope=${scope}: ${politicians.length}/${full.politicians.length})`)
+  if (!prerenderEdge) writeEdgeRoutes(edgePaths)
+  console.log(`[ssg] routes: ${paths.length} 預渲染＋${prerenderEdge ? 0 : edgePaths.length} 邊緣渲染 (politicians scope=${scope}: ${politicians.length}/${full.politicians.length})`)
   return paths
 }
