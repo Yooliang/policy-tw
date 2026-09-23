@@ -66,7 +66,8 @@ const VERIFY_BORDER: Record<string, string> = {
 const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
 // 左側 30px 色條：第一層分類（任務／驗證）的顏色漸變到第二層（型別）的顏色——固定範式，兩層都看得出來（2026-09-23 小良哥）
 const KIND_COLOR: Record<string, string> = { task: '#1d4ed8', verify: '#7c3aed' }
-const stripStyle = (r: Row) => ({ background: `linear-gradient(90deg, ${KIND_COLOR[r.kind] ?? '#94a3b8'}, ${typeColor(r)})` })
+// 漸層看起來糊（2026-09-23）：改成兩塊實色並排，左 15px 第一層、右 15px 第二層
+const kindColor = (r: Row) => KIND_COLOR[r.kind] ?? '#94a3b8'
 
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
 // 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
@@ -98,7 +99,10 @@ const when = (iso: string) => {
     <p v-else-if="rows === null" class="text-slate-400">載入中…</p>
     <ul v-else class="space-y-0.5">
       <li v-for="r in rows" :key="r.task_id" class="flex items-stretch gap-3 text-slate-700" :title="r.task_id">
-        <span class="w-[30px] shrink-0 rounded-sm" :style="stripStyle(r)" aria-hidden="true"></span>
+        <span class="flex w-[30px] shrink-0 rounded-sm overflow-hidden" aria-hidden="true">
+          <span class="w-1/2" :style="{ background: kindColor(r) }"></span>
+          <span class="w-1/2" :style="{ background: typeColor(r) }"></span>
+        </span>
         <span class="py-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
           <span class="text-slate-400 tabular-nums">{{ r.pos }}.</span>
           <span class="ml-1">{{ KIND_LABEL[r.kind] }}</span>
