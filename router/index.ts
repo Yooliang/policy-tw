@@ -130,6 +130,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Tasks.vue'),
   },
   {
+    path: '/queue',
+    name: 'queue',
+    component: () => import('../pages/Queue.vue'),
+  },
+  {
     path: '/stats',
     name: 'stats',
     component: () => import('../pages/Stats.vue'),
