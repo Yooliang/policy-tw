@@ -424,7 +424,8 @@ Deno.serve(async (req) => {
       const { data: votes, error: vErr } = await supabase.from("contribution_votes")
         .select("id, contribution_id, verdict, evidence_url")
         .not("evidence_url", "is", null).is("evidence_checked_at", null).in("verdict", ["agree", "disagree"])
-        .order("created_at", { ascending: true }).limit(limit);
+        // 新的先：正在等票的那些筆才需要 +2；上線時 1,118 張積壓多半在已定案的貢獻上，那些下面直接標 not_pending 不問 Jev
+        .order("created_at", { ascending: false }).limit(limit);
       if (vErr) throw new Error(`evidence votes: ${vErr.message}`);
       const list = (votes ?? []) as Vote[];
       const startedAt = Date.now();
@@ -441,9 +442,11 @@ Deno.serve(async (req) => {
         tally[verdictOut] = (tally[verdictOut] ?? 0) + 1;
       };
       const one = async (v: Vote): Promise<void> => {
-        const { data: c, error: cErr } = await supabase.from("contributions").select("id, contribution_type, payload, source_urls").eq("id", v.contribution_id).maybeSingle();
+        const { data: c, error: cErr } = await supabase.from("contributions").select("id, contribution_type, payload, source_urls, status").eq("id", v.contribution_id).maybeSingle();
         if (cErr) throw new Error(`contribution read: ${cErr.message}`);
         if (!c) return await finish(v, "no_contribution", false);
+        // 已定案（applied／rejected／superseded／withdrawn）的貢獻，票再加分也改變不了什麼，不花 Jev
+        if (c.status !== "pending" && c.status !== "verified") return await finish(v, "not_pending", false);
         if (!["policy", "candidacy", "politician", "correction", "policy_progress"].includes(c.contribution_type)) return await finish(v, "not_eligible", false);
         // 第二來源必須是另一個網域：提交者附的那一頁系統票已經核過
         const submitted = new Set(((c.source_urls ?? []) as string[]).map(hostOf));
