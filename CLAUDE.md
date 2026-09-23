@@ -40,7 +40,7 @@ Hosting 由 CI 跑、要十幾分鐘（預渲染約 16k 頁）；Edge Function �
 
 反過來（文件先新、函式還報舊版號）只會讓代理照舊規則多跑幾分鐘，不會卡住。**文件領先端點是安全方向，端點領先文件不是。**
 
-還有一件連帶的：**連續合併多個 PR 會讓前一個 Hosting 部署被取消**（CI 的 concurrency group）。同一批要上線的東西，合完一個等它綠再合下一個。
+還有一件連帶的：main 的 CI 是**排隊**（2026-09-22 起不取消），但佇列只留最新一個等待中的——連續合併三個以上，中間那次會被略過（最新那次已包含它的內容，所以不會漏部署，只是時間拉長）。**小改動併成一個 PR**，別每一小步都合。
 
 **別靠記得——用 `pnpm deploy:functions` 部署。** 這條規則 2026-09-21 當天被違反兩次，兩次都是寫下它的人自己。所以改成機械檢查：`scripts/deploy-functions.mjs` 會先抓線上 `skill.md` 的版本，落後程式的 `PROTOCOL_VERSION` 就拒絕部署並印出正確順序。
 
@@ -91,7 +91,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`
 
-客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（redirect）、`/admin/*`（dashboard、scraper、duplicates、ai、import）
+客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（redirect）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
 
 共用元件在 `components/`；選舉頁子元件在 `pages/election/`。
 
@@ -118,10 +118,10 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
-## Edge Functions（`supabase/functions/`，共 33 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻）
+## Edge Functions（`supabase/functions/`，共 34 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
 
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）
-- 資料維護：`add-politician`、`add-policy`、`update-politician`、`update-avatar`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
+- 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
@@ -129,7 +129,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 
 ## Claude Skills（`.claude/skills/`）
 
-- **`/find-avatar [name]`** — 從 Wikipedia 找政治人物頭像，可 `--all` 補缺圖、透過 Edge Function 寫回
+- **`/find-avatar [name]`** — 從 Wikipedia 找政治人物頭像，可 `--all` 補缺圖；找到後交 `correction` 貢獻（同儕驗證通過才上線）
 
 ## Docs（`docs/`）
 

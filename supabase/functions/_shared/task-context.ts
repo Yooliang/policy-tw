@@ -524,8 +524,21 @@ export function candidateReasons(candidate: Obj, payload: Obj, elections: Readon
 /** 一票最多能加幾分、怎麼拿到滿分：給 shapeVerifyCurrent 的 scoring 區塊用 */
 const VOTE_SCORE_GUIDE = {
   max: 2,
-  how: "找到另一個獨立來源並放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1",
+  how: "同意票預設要找第二來源：另一個網域、直接寫到這件事的來源放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1。提交者附的同一個網域不算第二來源",
 } as const;
+
+/**
+ * 這筆還差幾分、你這票能不能讓它上線（2026-09-23 小良哥：驗票儘量要求第二來源）。
+ * 48 小時內只有 4 台機器在投票、一台一筆最多 +2、目標 3——+1 的票要三台全到，+2 的票兩台就夠，
+ * 系統票把目標降到 2 時一張 +2 就夠。把這個算術當場講給代理聽，它才知道多花幾分鐘找第二來源值得。
+ */
+export function scoringHint(score: number, target: number): { points_short: number; hint: string } {
+  const short = Math.max(0, target - score);
+  if (short === 0) return { points_short: 0, hint: "已達目標分數，等系統落庫" };
+  if (short === 1) return { points_short: 1, hint: "這筆只差 1 分：你核對無誤投 agree（+1）就能讓它上線；附第二來源更穩" };
+  if (short === 2) return { points_short: 2, hint: "這筆差 2 分：你附一個不同網域、系統核得過的第二來源（+2），這一票就能讓它上線；只投 +1 還要再等一台機器" };
+  return { points_short: short, hint: `這筆差 ${short} 分：附第二來源（+2）能讓它少等一台機器；只投 +1 要再多兩台` };
+}
 
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
@@ -541,7 +554,7 @@ const IDENTITY_HINT = {
 export function shapeVerifyCurrent(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
   let out = shapeVerifyCurrentInner(contributionType, payload, data);
   if (typeof data.score === "number" && typeof data.target_score === "number") {
-    out = { ...out, scoring: { target_score: data.target_score, current_score: data.score, your_vote_could_be: VOTE_SCORE_GUIDE } };
+    out = { ...out, scoring: { target_score: data.target_score, current_score: data.score, ...scoringHint(data.score, data.target_score), your_vote_could_be: VOTE_SCORE_GUIDE } };
   }
   // #7：既有票公開（去識別）。看得到前一張反對票的理由，後到的人才能針對爭點查、也才看得出盲反對。
   if (data.votes && data.votes.length > 0) out = { ...out, votes: shapeVotes(data.votes) };

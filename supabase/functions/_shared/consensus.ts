@@ -371,6 +371,18 @@ export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence 
   return "存疑不加減分；它記錄你看過，但不推動這筆往任何方向走";
 }
 
+/**
+ * evidence_url 跟提交者附的來源是不是同一個網站（去掉 www.）。同網站不算第二來源：系統票已經核過那一頁，
+ * 排程會把這種票標 same_source、維持 ±1（2026-09-23 當天 229 張）。投票當下就告訴代理，別等排程。
+ */
+export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sourceUrls: readonly string[]): boolean {
+  if (!evidenceUrl) return false;
+  const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; } };
+  const ev = host(evidenceUrl);
+  if (!ev) return false;
+  return sourceUrls.some((u) => host(u) === ev);
+}
+
 /** 高風險型別：分數不得由單一來源 IP 湊足 */
 export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
 

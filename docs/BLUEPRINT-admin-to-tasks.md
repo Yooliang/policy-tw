@@ -139,6 +139,8 @@
 
 **`apply-verified` 也沒有守衛，但刻意保留。** `docs/CONTRIBUTIONS-ADMIN.md:25-33` 的 pg_cron 每 10 分鐘不帶金鑰打它一次，加守衛會弄壞排程。風險可接受：它只落庫「已經通過同儕共識」的貢獻，提早觸發不會改變任何結果，最壞情況是浪費運算。要收的話得連 cron 一起改，那是另一件事。
 
+> **2026-09-23 更正與結案**：實測只要**公開的 anon key** 就能呼叫（不需要登入——anon key 本身就是合法 JWT，`verify_jwt` 擋不住），回 `success`；`update-avatar` 同樣。兩支與使用它的 `/admin/scraper` 頁一起下架，人物與照片一律走貢獻流程。
+
 **`add-politician` 沒有程式碼層的授權檢查**，只靠平台的 `verify_jwt`。也就是任何登入者（任何 Google 帳號）都能寫 `politicians` 與 `politician_elections`。對照 `batch-import-candidates` 有完整的 `getUser` ＋ `is_admin` 檢查（`:19-26,76-91`）。這支還沒修，因為 `pages/AdminScraper.vue` 正在用它，補檢查要連那頁一起處理——列進上面的順序第 3 步。
 
 ---
