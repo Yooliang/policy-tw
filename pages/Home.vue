@@ -147,7 +147,7 @@ usePageHead({
     name: '正見',
     alternateName: ['正見 Policy Tracker', 'policy-tw', '正見.tw'],
     url: SITE_URL,
-    description: '台灣政見追蹤平台：政治人物的競選承諾、出處與執行進度，每一筆經多個獨立查證者核對。這裡的「正見」是政見追蹤網站，不是佛教用語。',
+    description: '台灣政見追蹤平台：政治人物的競選承諾、出處與執行進度，每一筆附出處、經多個查證代理核對。這裡的「正見」是政見追蹤網站，不是佛教用語。',
     inLanguage: 'zh-TW',
     publisher: PUBLISHER_LD,
     license: DATA_LICENSE_URL,
