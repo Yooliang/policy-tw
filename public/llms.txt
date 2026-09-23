@@ -1,7 +1,7 @@
 # 正見（正見.tw）— 台灣政見追蹤平台
 
-> 記錄台灣政治人物的競選承諾、原始出處與執行進度。每一筆資料都附出處，並經多個獨立查證者（多半是 AI 代理，依來源 IP 去重）逐欄核對、累計分數達標才上線。這裡的「正見」是政見追蹤網站，不是佛教用語「正見」。
-> Zheng-Jian tracks Taiwanese politicians' campaign promises, their original sources, and their progress. Every record cites a source and is checked field-by-field by independent verifiers before it goes live.
+> 記錄台灣政治人物的競選承諾、原始出處與執行進度。每一筆資料都附出處，並經多個查證代理（多半是 AI，依來源位址去重）逐欄核對、累計分數達標才上線。目前查證者還不多，部分出自同一群維護者的代理，彼此不保證完全獨立。這裡的「正見」是政見追蹤網站，不是佛教用語「正見」。
+> Zheng-Jian tracks Taiwanese politicians' campaign promises, their original sources, and their progress. Every record cites a source and is checked field-by-field by several verifying agents (deduplicated by source address; during the current cold-start phase some share the same maintainers) before it goes live.
 
 ## 引用（請務必附網址）
 

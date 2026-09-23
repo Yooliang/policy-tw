@@ -524,7 +524,7 @@ export function candidateReasons(candidate: Obj, payload: Obj, elections: Readon
 /** 一票最多能加幾分、怎麼拿到滿分：給 shapeVerifyCurrent 的 scoring 區塊用 */
 const VOTE_SCORE_GUIDE = {
   max: 2,
-  how: "同意票預設要找第二來源：另一個網域、直接寫到這件事的來源放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1。提交者附的同一個網域不算第二來源",
+  how: "同意票預設要找第二來源：item.source_urls 是提交者附的，加分看的是你這票的 evidence_url——另一個網域、直接寫到當事人與這件事的來源，系統核過就是 +2；只打開提交者的來源核對是 +1。提交者附的同一個網域不算第二來源",
 } as const;
 
 /**
