@@ -412,6 +412,85 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 小良哥：代理不該把判斷外包給 Jev）----
+    // +2／−2 不再由代理先打 judge 取得：票先是 ±1，這裡（cron 每 5 分鐘）抓那個網址、問 Jev 是否支持這張票的判定，
+    // 核得過才把 judge_backed 翻 true → BEFORE 觸發器重算 weight → AFTER 觸發器重算共識。
+    if (action === "evidence") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
+      type Vote = { id: string; contribution_id: string; verdict: string; evidence_url: string };
+      // query-bounds: ok — 有 order 有 limit（≤60）
+      const { data: votes, error: vErr } = await supabase.from("contribution_votes")
+        .select("id, contribution_id, verdict, evidence_url")
+        .not("evidence_url", "is", null).is("evidence_checked_at", null).in("verdict", ["agree", "disagree"])
+        .order("created_at", { ascending: true }).limit(limit);
+      if (vErr) throw new Error(`evidence votes: ${vErr.message}`);
+      const list = (votes ?? []) as Vote[];
+      const startedAt = Date.now();
+      const BUDGET_MS = 40_000;
+      const CONCURRENCY = 2;
+      let asked = 0, cost = 0;
+      const tally: Record<string, number> = {};
+      const failures: Array<{ vote_id: string; error: string }> = [];
+      const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
+      const finish = async (v: Vote, verdictOut: string, backed: boolean) => {
+        const { error } = await supabase.from("contribution_votes")
+          .update({ judge_backed: backed, evidence_checked_at: new Date().toISOString(), evidence_verdict: verdictOut }).eq("id", v.id);
+        if (error) throw new Error(`vote update: ${error.message}`);
+        tally[verdictOut] = (tally[verdictOut] ?? 0) + 1;
+      };
+      const one = async (v: Vote): Promise<void> => {
+        const { data: c, error: cErr } = await supabase.from("contributions").select("id, contribution_type, payload, source_urls").eq("id", v.contribution_id).maybeSingle();
+        if (cErr) throw new Error(`contribution read: ${cErr.message}`);
+        if (!c) return await finish(v, "no_contribution", false);
+        if (!["policy", "candidacy", "politician", "correction", "policy_progress"].includes(c.contribution_type)) return await finish(v, "not_eligible", false);
+        // 第二來源必須是另一個網域：提交者附的那一頁系統票已經核過
+        const submitted = new Set(((c.source_urls ?? []) as string[]).map(hostOf));
+        if (submitted.has(hostOf(v.evidence_url))) return await finish(v, "same_source", false);
+        const payload = { ...(c.payload ?? {}) } as Record<string, unknown>;
+        const subjects = await subjectNamesOf(supabase, payload);
+        if (subjects[0]) payload.subject_name = subjects[0];
+        const claim = claimOf(c.contribution_type, payload);
+        const names = [payload.name, payload.politician_name, payload.title, ...subjects].map((x) => typeof x === "string" ? x : null);
+        const page = await fetchSource(v.evidence_url);
+        if (page.kind !== "html" || !hasUsableText(page.text, names)) return await finish(v, "fetch_failed", false);
+        if (!nameHit(page.text, names)) return await finish(v, "no_subject", false);
+        const { state, questions } = buildSourceSupportAsk(claim, v.evidence_url, focusText(page.text, names));
+        const res = await askJev(apiKey, state, questions);
+        cost += res.usage.cost; asked++;
+        const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+        const strong = agg.probability >= MIN_PROBABILITY;
+        // agree 要「支持」；disagree 要「核心欄位矛盾」（非核心欄對不上不算反證，跟 judge 的規則一樣）
+        const backed = strong && (
+          (v.verdict === "agree" && agg.choice === "supported") ||
+          (v.verdict === "disagree" && agg.choice === "not_supported" && agg.contradicted_core)
+        );
+        await insertRecords(supabase, [{
+          subject_type: "vote", subject_id: v.id, question: "second_source",
+          choice: agg.choice, probability: agg.probability, confidence: null,
+          probabilities: agg.fields as unknown as Record<string, number>, model: res.model,
+          state: { ...state, page: { ...((state.page ?? { url: v.evidence_url }) as Record<string, unknown>), note: page.note }, vote: { verdict: v.verdict, contribution_id: v.contribution_id, backed } },
+          cost_usd: Number(res.usage.cost.toFixed(8)),
+        }]);
+        await finish(v, `${agg.choice}${strong ? "" : "<門檻"}`, backed);
+      };
+      let cursor = 0;
+      let outOfTime = false;
+      while (cursor < list.length && !outOfTime) {
+        if (Date.now() - startedAt > BUDGET_MS) { outOfTime = true; break; }
+        const chunk = list.slice(cursor, cursor + CONCURRENCY);
+        cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map(one));
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          if (r.status === "rejected") failures.push({ vote_id: chunk[i].id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+        }
+        if (failures.length >= 5) break;
+      }
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures });
+    }
+
     if (action === "judge") {
       const apiKey = Deno.env.get("OPENROUTER_API_KEY");
       if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
