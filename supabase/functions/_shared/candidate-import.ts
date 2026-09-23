@@ -92,6 +92,27 @@ export interface EnsurePoliticianResult {
 }
 
 /**
+ * 身份比對的輸入：姓名、政黨、選舉類型先正規化。落庫（ensurePolitician）與派工的 dry-run（task-context）
+ * 必須用同一份，否則同一筆資料兩個時間點比出不同結論（2026-09-23 馮印才 8fa33531：派工時政黨用原字「無」
+ * 對不到任何 key → new、不用指認；落庫時正規化成「無黨籍」命中弱面向 → ambiguous、未指認退件，兩張照規則投的票白投）。
+ */
+export function identityInputOf(candidate: CandidateInput) {
+  const name = normText(candidate.name);
+  if (name === null) throw new Error("candidate.name 為空");
+  return {
+    name,
+    party: normalizeParty(candidate.party),
+    region: candidate.region,
+    election_type: normElectionType(candidate.election_type) ?? normElectionType(candidate.position),
+    position: candidate.position,
+    current_position: candidate.current_position,
+    birth_year: candidate.birth_year,
+    cec_cand_id: candidate.cec_cand_id,
+    cec_theme_id: candidate.cec_theme_id,
+  };
+}
+
+/**
  * 以多面向比對找人；找不到就建、模稜兩可就不動並進待審。
  */
 export async function ensurePolitician(
@@ -99,24 +120,11 @@ export async function ensurePolitician(
   candidate: CandidateInput,
   options: EnsurePoliticianOptions,
 ): Promise<EnsurePoliticianResult> {
-  const name = normText(candidate.name);
-  if (name === null) throw new Error("candidate.name 為空");
-
-  const party = normalizeParty(candidate.party);
-  const electionType = normElectionType(candidate.election_type) ?? normElectionType(candidate.position);
+  const input = identityInputOf(candidate);
+  const { name, party, election_type: electionType } = input;
   const store = createSupabaseIdentityStore(supabase);
 
-  const resolution = await resolvePolitician(store, {
-    name,
-    party,
-    region: candidate.region,
-    election_type: electionType,
-    position: candidate.position,
-    current_position: candidate.current_position,
-    birth_year: candidate.birth_year,
-    cec_cand_id: candidate.cec_cand_id,
-    cec_theme_id: candidate.cec_theme_id,
-  }, { source: options.source, persist: !options.force_new });
+  const resolution = await resolvePolitician(store, input, { source: options.source, persist: !options.force_new });
 
   const birthYear = typeof candidate.birth_year === "string" ? parseInt(candidate.birth_year, 10) : candidate.birth_year;
   const validBirthYear = Number.isInteger(birthYear) ? (birthYear as number) : null;
