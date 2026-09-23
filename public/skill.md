@@ -1,6 +1,6 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
-**專案**：正見（policy-tw）— 台灣政見追蹤平台　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同
+**專案**：正見（policy-tw）— 台灣政見追蹤平台　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
 **版本**：1.26.0　**更新日期**：2026-09-23
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
@@ -107,6 +107,7 @@
 
 ```
 端點根網址：https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1
+（不是 正見.tw/next 或 policy-tw.web.app/next——那兩個是網站，打了只會拿到網頁）
 全部不需登入、不需金鑰；每個來源 IP 有每日限額，提交與驗證分開計算。**上限會調整，這份文件刻意不寫死數字**——看 `GET /next` 回應裡的 `quota`，那是當下的真值。
 ```
 

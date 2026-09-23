@@ -5,6 +5,7 @@
  *   /politician/:id、/policy/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
  *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取
+ *   /next、/report… 等協議端點名 → 307 轉到 Supabase functions（見 apiRedirect）
  *
  * 樣板：向 web.app 拿 /app.html（客戶端 bundle 的殼，含 assets 的 script／link），去掉 noindex，把 SSR 的 HTML、
  * head 與 __INITIAL_STATE__ 塞進去。SSR bundle 與 web.app 的客戶端 bundle 都由同一次 CI 從同一個 commit 建置。
@@ -17,6 +18,33 @@ import { render } from '../dist-ssr/entry-server.js'
 const ORIGIN = 'https://policy-tw.web.app'
 const ORIGIN_HOST = 'policy-tw.web.app'
 const SSR_ROUTES = [/^\/politician\/[^/]+\/?$/, /^\/policy\/[^/]+\/?$/]
+/**
+ * 協議端點打到網站網域上（2026-09-23：代理 kin／deepseek-flash 打 正見.tw/next?agent_name=…，拿到 404 後被前端導回首頁，
+ * 它只看得到首頁內容、不知道錯在哪）。端點在 Supabase，不在網站上；這裡 307 轉過去（方法與 body 照留），回應本身也講清楚。
+ * tasks／verify 同時是網站頁面，只有看起來是代理的請求（帶 agent_name 等參數、或非 GET）才轉。
+ */
+const API_BASE = 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1'
+const API_ONLY = new Set(['next', 'report', 'contribute', 'ask', 'request-task', 'history', 'verifications', 'contribution-status', 'contributions-feed', 'policy-stance', 'question-stance', 'boost', 'apply', 'apply-verified', 'system-one'])
+const API_ALSO_PAGE = new Set(['tasks', 'verify'])
+const AGENT_PARAMS = ['agent_name', 'agent_tool', 'contribution_id', 'api_key']
+
+function apiRedirect(request) {
+  const url = new URL(request.url)
+  const m = url.pathname.match(/^\/([a-z-]+)\/?$/)
+  if (!m) return null
+  const name = m[1]
+  const agentish = request.method !== 'GET' && request.method !== 'HEAD' || AGENT_PARAMS.some((p) => url.searchParams.has(p))
+  if (!API_ONLY.has(name) && !(API_ALSO_PAGE.has(name) && agentish)) return null
+  const target = `${API_BASE}/${name}${url.search}`
+  const body = JSON.stringify({
+    success: false,
+    error: 'wrong_host',
+    message: `協議端點不在網站網域上。請改打 ${target}（端點根網址 ${API_BASE}，見 skill.md「端點根網址」）。這次已用 307 轉過去，但請把之後的請求都改成正確網址。`,
+    endpoint: target,
+  })
+  return new Response(body, { status: 307, headers: { Location: target, 'Content-Type': 'application/json; charset=utf-8', 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'no-store' } })
+}
+
 const CACHE_TTL_S = 600
 const STALE_TTL_S = 3600
 const DROP_REQUEST_HEADERS = ['host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'cf-worker', 'x-forwarded-proto', 'x-real-ip']
@@ -129,6 +157,8 @@ export default {
       for (const p of paths) { if (await caches.default.delete(new Request(`${url.origin}${String(p).replace(/\/$/, '')}`, { method: 'GET' }))) n++ }
       return new Response(JSON.stringify({ purged: n }), { headers: { 'Content-Type': 'application/json' } })
     }
+    const api = apiRedirect(request)
+    if (api) return api
     if ((request.method === 'GET' || request.method === 'HEAD') && SSR_ROUTES.some((re) => re.test(url.pathname)) && !url.searchParams.has('__proxy')) {
       try {
         const res = await renderPage(request, ctx)
