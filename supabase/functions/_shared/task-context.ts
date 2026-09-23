@@ -4,6 +4,7 @@
  */
 
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
+import { identityInputOf } from "./candidate-import.ts";
 import { normalizeCorrection } from "./correction.ts";
 import { fetchAllRows } from "./fetch-all.ts";
 
@@ -645,7 +646,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
 async function dryRunIdentity(supabase: SupabaseLike, payload: Obj, name: string): Promise<VerifyContextData["identity"]> {
   try {
     const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
-    const resolution = await resolvePolitician(createSupabaseIdentityStore(supabase), {
+    // 跟落庫同一份正規化（identityInputOf），派工說不用指認、落庫卻因未指認退件的落差由此而來
+    const resolution = await resolvePolitician(createSupabaseIdentityStore(supabase), identityInputOf({
       name,
       party: s(payload.party),
       region: s(payload.region),
@@ -655,7 +657,7 @@ async function dryRunIdentity(supabase: SupabaseLike, payload: Obj, name: string
       birth_year: typeof payload.birth_year === "number" ? payload.birth_year : s(payload.birth_year),
       cec_cand_id: typeof payload.cec_cand_id === "number" ? payload.cec_cand_id : s(payload.cec_cand_id),
       cec_theme_id: s(payload.cec_theme_id),
-    }, { persist: false });
+    }), { persist: false });
     return { decision: resolution.decision, politician_id: resolution.politician_id ?? null, reason: resolution.reason, candidate_ids: resolution.candidates.map((c) => c.politician_id) };
   } catch (e) {
     console.error("dryRunIdentity:", e instanceof Error ? e.message : String(e));
