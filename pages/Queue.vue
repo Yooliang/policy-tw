@@ -51,10 +51,25 @@ const BORDER: Record<string, string> = {
 const borderOf = (r: Row) => BORDER[r.kind === 'verify' ? 'verify' : r.task_type] ?? '#cbd5e1'
 
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
-const typeLabel = (r: Row) => r.kind === 'verify' ? `驗證 ${r.task_type}` : taskTypeLabel(r.task_type)
+// 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
+const VERIFY_LABEL: Record<string, string> = {
+  policy: '新增政見',
+  no_change: '查無異動回報',
+  politician: '人物資料',
+  candidacy: '參選狀態',
+  policy_progress: '政見進度',
+  correction: '資料更正',
+  task_suggestion: '任務提議',
+  roster_check: '名單清查',
+  question_answer: '提問回答',
+  removal: '建議移除',
+  merge_politician: '人物合併',
+  adjudication: '裁決',
+}
+const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
 const when = (iso: string) => {
   const d = new Date(iso)
-  if (d.getFullYear() < 1990) return '插隊'
+  if (d.getFullYear() < 1990) return '優先'
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 </script>
