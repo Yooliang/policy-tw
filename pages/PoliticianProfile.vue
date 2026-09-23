@@ -15,7 +15,7 @@ import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera } from 'lucide-vue-next'
+import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2 } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
 import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
@@ -27,6 +27,16 @@ const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile'>('campaign')
+// 競選承諾的呈現：卡片或表格（2026-09-23 小良哥）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
+type CampaignView = 'cards' | 'table'
+const campaignView = ref<CampaignView>('cards')
+onMounted(() => {
+  try { const v = localStorage.getItem('campaignView'); if (v === 'cards' || v === 'table') campaignView.value = v } catch { /* 隱私模式 */ }
+})
+function setCampaignView(v: CampaignView) {
+  campaignView.value = v
+  try { localStorage.setItem('campaignView', v) } catch { /* 無法存就算了 */ }
+}
 // 側欄改成第三個分頁（使用者 2026-09-20）；帶 #ai-lookup 進來的深連結要先切到它
 if (typeof window !== 'undefined' && window.location.hash === `#${AI_LOOKUP_SECTION_ID}`) activeTab.value = 'profile'
 
@@ -327,7 +337,43 @@ usePageHead({
           <div class="space-y-6">
             <template v-if="activeTab === 'campaign'">
               <template v-if="campaignPledges.length > 0">
-                <div class="space-y-8">
+                <div class="flex justify-end -mt-2">
+                  <div class="inline-flex bg-slate-100 p-1 rounded-lg">
+                    <button @click="setCampaignView('cards')" :class="`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition-all ${campaignView === 'cards' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`" title="卡片"><LayoutGrid :size="14" />卡片</button>
+                    <button @click="setCampaignView('table')" :class="`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition-all ${campaignView === 'table' ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`" title="表格"><Table2 :size="14" />表格</button>
+                  </div>
+                </div>
+                <div v-if="campaignView === 'table'" class="space-y-8">
+                  <div v-for="group in campaignGroups" :key="group.key">
+                    <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-3">{{ group.label }}</h3>
+                    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                      <table class="w-full text-sm">
+                        <thead class="bg-slate-50 text-slate-500 text-xs">
+                          <tr>
+                            <th class="text-left font-semibold px-3 py-2 w-10">#</th>
+                            <th class="text-left font-semibold px-3 py-2">政見</th>
+                            <th class="text-left font-semibold px-3 py-2 w-32">類別</th>
+                            <th class="text-left font-semibold px-3 py-2 w-28">提出日期</th>
+                            <th class="text-left font-semibold px-3 py-2">標籤</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(policy, i) in group.policies" :key="policy.id" class="border-t border-slate-100 hover:bg-violet-50/40 cursor-pointer" @click="router.push(`/policy/${policy.id}`)">
+                            <td class="px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
+                            <td class="px-3 py-2">
+                              <div class="font-bold text-navy-900">{{ policy.title }}</div>
+                              <div class="text-slate-500 text-xs line-clamp-2">{{ policy.description }}</div>
+                            </td>
+                            <td class="px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
+                            <td class="px-3 py-2 text-slate-500 whitespace-nowrap tabular-nums">{{ policy.proposedDate ?? '—' }}</td>
+                            <td class="px-3 py-2 text-slate-500 text-xs">{{ (policy.tags ?? []).join('、') }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="space-y-8">
                   <div v-for="group in campaignGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
