@@ -11,6 +11,7 @@ import { resolveIdentity } from "./contribute-handler.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
+import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -21,7 +22,7 @@ type SupabaseLike = any;
  */
 export const VERIFY_DAILY_LIMIT_PER_IP = 800;
 
-export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify"): Promise<HandlerResult> {
+export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch): Promise<HandlerResult> {
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -170,8 +171,17 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       },
     };
   }
+  // 同名指認要附中選會筆數（1.29.0）：指認一票就採用，要有只能靠實際查詢才拿得到的數字，伺服器當場核
+  let cecSuffix = "";
+  const cecName = via === "merge" ? null : cecCountName(contribution.contribution_type, input.verdict, input.resolved_politician_id, contribution.payload);
+  if (cecName) {
+    const check = checkCecCount(cecName, { hits: input.cec_hits, people: input.cec_people }, await fetchCecNameHits(cecName, cecFetch));
+    if (!check.ok) return { status: 400, body: { success: false, error: check.error, message: check.message } };
+    cecSuffix = check.noteSuffix;
+  }
   const finalVerdict = blind ? "unsure" : input.verdict;
-  const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
+  const baseNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
+  const finalNote = cecSuffix ? `${baseNote ?? ""}${cecSuffix}` : baseNote;
 
   // 2026-09-23：+2／−2 不再由代理先打 judge 取得。票先是 ±1，evidence_url 由系統（system-one?action=evidence 的 cron）
   // 自己去核，核得過才翻 judge_backed → 觸發器重算 weight 與共識。代理不該把判斷外包給 Jev。

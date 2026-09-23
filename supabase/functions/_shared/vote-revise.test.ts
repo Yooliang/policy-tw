@@ -43,11 +43,13 @@ function fake(opts: { existingVote: boolean }) {
   return { client, inserted, updated };
 }
 
-const base = { agent_name: "dave", contribution_id: CID, verdict: "agree", note: "打開來源逐欄核對，登記日期與選區都對得上", resolved_politician_id: "new" };
+// 1.29.0 起帶指認的同意票要附中選會筆數；這裡用假的中選會回 1 筆，不打網路
+const base = { agent_name: "dave", contribution_id: CID, verdict: "agree", note: "打開來源逐欄核對，登記日期與選區都對得上", resolved_politician_id: "new", cec_hits: 1, cec_people: 1 };
+const cec = (() => Promise.resolve(new Response(JSON.stringify({ cand_data_list: [{ cand_name: "某某", cand_birthyear: "1970" }] })))) as typeof fetch;
 
 Deno.test("投過了沒帶 revise → 409，訊息要告訴它怎麼改票", async () => {
   const { client, inserted, updated } = fake({ existingVote: true });
-  const res = await handleVerify(client, base, MINE);
+  const res = await handleVerify(client, base, MINE, undefined, "verify", cec);
   assertEquals(res.status, 409);
   assertEquals(res.body.error, "already_voted");
   assert(String(res.body.message).includes("revise"), "要講怎麼改票");
@@ -57,7 +59,7 @@ Deno.test("投過了沒帶 revise → 409，訊息要告訴它怎麼改票", asy
 
 Deno.test("帶 revise:true → 覆寫自己那張票（UPDATE 不 INSERT），指認換成新的，回應標 revised", async () => {
   const { client, inserted, updated } = fake({ existingVote: true });
-  const res = await handleVerify(client, { ...base, revise: true, resolved_politician_id: "22222222-2222-3333-4444-555555555555", note: "查了中選會 API，出生年一致，是既有的那位" }, MINE);
+  const res = await handleVerify(client, { ...base, revise: true, resolved_politician_id: "22222222-2222-3333-4444-555555555555", note: "查了中選會 API，出生年一致，是既有的那位" }, MINE, undefined, "verify", cec);
   assertEquals(res.status, 201, JSON.stringify(res.body));
   assertEquals(res.body.revised, true);
   assertEquals(inserted.filter((r) => r.table === "contribution_votes").length, 0, "不該新增第二張票");
@@ -70,7 +72,7 @@ Deno.test("帶 revise:true → 覆寫自己那張票（UPDATE 不 INSERT），�
 
 Deno.test("沒投過卻帶 revise → 照常當新票收", async () => {
   const { client, inserted, updated } = fake({ existingVote: false });
-  const res = await handleVerify(client, { ...base, revise: true }, MINE);
+  const res = await handleVerify(client, { ...base, revise: true }, MINE, undefined, "verify", cec);
   assertEquals(res.status, 201, JSON.stringify(res.body));
   assertEquals(res.body.revised, undefined);
   assertEquals(inserted.filter((r) => r.table === "contribution_votes").length, 1);

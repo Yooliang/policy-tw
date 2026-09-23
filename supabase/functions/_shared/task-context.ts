@@ -556,8 +556,8 @@ export function scoringHint(score: number, target: number, contributionType?: st
 
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
-  new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id",
-  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；指認不一致（含 new 與某人混）或都沒指認 → 這筆退件、缺口回到任務佇列重做（2026-09-21 起沒有裁決）。判斷方法見協議 §2 第 11 條：先用中選會 API 以出生年收斂同名者，再看這次提交跟哪一位相容；查無不是新人的證據",
+  new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id（連同 cec_hits／cec_people，見 §2 第 11 條第 5 步）",
+  ambiguous: "同名多位、系統判不出：核對來源後投 agree 時**必須帶 resolved_politician_id**（identity_candidates 之一的 id；都不是就填 \"new\" 建新人物）；通過時採用 agree 票裡帶的指認（目前一票指認即採用，所以請確定你指的是對的人）；指認不一致（含 new 與某人混）或都沒指認 → 這筆退件、缺口回到任務佇列重做（2026-09-21 起沒有裁決）。判斷方法見協議 §2 第 11 條：先用中選會 API 以出生年收斂同名者，再看這次提交跟哪一位相容；查無不是新人的證據。帶指認的 agree 要一併帶 cec_hits（中選會查這個姓名回幾筆）與 cec_people（依出生年收斂成幾人），伺服器會當場核 cec_hits（1.29.0）",
 } as const;
 
 /**
