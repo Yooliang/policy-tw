@@ -13,6 +13,7 @@ import { CORRECTION_FIELDS, type ContributionType } from "./contribution-schema.
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
+import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType } from "./identity-normalize.ts";
 import { normalizeCategory } from "./category-map.ts";
@@ -152,7 +153,10 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
   // 照片形狀守門（2026-09-19）：橫幅、太小、不是圖的不套用，其他欄位照常；理由寫進回覆讓代理重找
   let avatarNote = "";
   if (typeof p.avatar_url === "string" && p.avatar_url) {
-    const problem = await checkAvatarUrl(p.avatar_url);
+    // Wikimedia 縮圖寬度換成允許值（原本只有 update-avatar 做；那支 2026-09-23 下架，照片一律走貢獻）
+    const avatar = normalizeAvatarUrl(p.avatar_url);
+    p.avatar_url = avatar;
+    const problem = await checkAvatarUrl(avatar);
     if (problem) { avatarNote = `；照片沒套用：${problem}`; p.avatar_url = null; }
   }
   const ensured = await ensureOrResolve(supabase, row, {
@@ -373,6 +377,7 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
 export function correctionValue(table: string, field: string, value: unknown): unknown {
   if (table === "policies" && field === "category") return normalizeCategory(String(value)) ?? value;
   if (table === "policies" && field === "proposed_date" && (value === undefined || value === null || value === "")) return null;
+  if (table === "politicians" && field === "avatar_url" && typeof value === "string" && value) return normalizeAvatarUrl(value);
   return value;
 }
 

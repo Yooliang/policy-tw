@@ -35,10 +35,13 @@ Deno.test("shapeVerifyCurrent：score 與 target_score 都是數字才附 scorin
     score: 1,
     target_score: 3,
   });
+  // 2026-09-23（協議 1.27.0）：多帶 points_short／hint，告訴代理附第二來源這票能不能讓它上線
   assertEquals(withScore.scoring, {
     target_score: 3,
     current_score: 1,
-    your_vote_could_be: { max: 2, how: "找到另一個獨立來源並放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1" },
+    points_short: 2,
+    hint: "這筆差 2 分：你附一個不同網域、系統核得過的第二來源（+2），這一票就能讓它上線；只投 +1 還要再等一台機器",
+    your_vote_could_be: { max: 2, how: "同意票預設要找第二來源：另一個網域、直接寫到這件事的來源放進 evidence_url，系統核過就是 +2；只打開提交者的來源核對是 +1。提交者附的同一個網域不算第二來源" },
   });
 
   const missingTarget = shapeVerifyCurrent("policy", { name: "陳素月" }, { politicians: [], score: 1 });

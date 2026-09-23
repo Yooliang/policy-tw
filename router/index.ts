@@ -96,11 +96,6 @@ export const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
-    path: '/admin/scraper',
-    component: () => import('../pages/AdminScraper.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
     path: '/admin/duplicates',
     component: () => import('../pages/AdminDuplicates.vue'),
     meta: { requiresAdmin: true },

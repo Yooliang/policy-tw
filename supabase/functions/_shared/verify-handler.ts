@@ -8,7 +8,7 @@ import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason } from "./consensus.ts";
+import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 
@@ -240,6 +240,10 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       weight,
       weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
+      // 2026-09-23：evidence_url 跟提交者同網域的票當天有 229 張，全都只記 +1——當場講，不要等排程核完才發現
+      ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
+        ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票" }
+        : {}),
       score: { before: scoreBefore, after: scoreAfter, target: targetScore },
       // 舊欄位保留一版給還沒升到 1.24.0 的代理
       agree_count: after?.agree_count ?? 0,
@@ -248,7 +252,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
       status: finalStatus,
       required_agree: targetScore,
       ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
-      ...(finalStatus === "rejected" && contribution.status !== "rejected" ? { note: `分數 ${scoreAfter} 已跌到 −目標（${targetScore}），這筆已退件並清出驗證池` } : {}),
+      ...(finalStatus === "rejected" && contribution.status !== "rejected" ? { note: `分數 ${scoreAfter} 已跌到退件門檻（−${rejectFloor(contribution.contribution_type)}），這筆已退件並清出驗證池` } : {}),
       ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),
     },
   };
