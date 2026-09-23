@@ -63,7 +63,10 @@ const VERIFY_BORDER: Record<string, string> = {
   merge_politician: '#4f46e5', // 人物合併：靛
   adjudication: '#475569',
 }
-const borderOf = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
+const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
+// 左側 30px 色條：第一層分類（任務／驗證）的顏色漸變到第二層（型別）的顏色——固定範式，兩層都看得出來（2026-09-23 小良哥）
+const KIND_COLOR: Record<string, string> = { task: '#1d4ed8', verify: '#7c3aed' }
+const stripStyle = (r: Row) => ({ background: `linear-gradient(90deg, ${KIND_COLOR[r.kind] ?? '#94a3b8'}, ${typeColor(r)})` })
 
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
 // 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
@@ -94,19 +97,16 @@ const when = (iso: string) => {
     <p v-if="failed" class="text-red-600">佇列讀不到，<button class="underline" @click="load">重試</button>。</p>
     <p v-else-if="rows === null" class="text-slate-400">載入中…</p>
     <ul v-else class="space-y-0.5">
-      <li
-        v-for="r in rows"
-        :key="r.task_id"
-        class="border-l-4 pl-3 py-0.5 text-slate-700 whitespace-nowrap overflow-hidden text-ellipsis"
-        :style="{ borderLeftColor: borderOf(r) }"
-        :title="r.task_id"
-      >
-        <span class="text-slate-400 tabular-nums">{{ r.pos }}.</span>
-        <span class="ml-1">{{ KIND_LABEL[r.kind] }}</span>
-        <span class="ml-1 text-slate-500">{{ typeLabel(r) }}</span>
-        <span v-if="r.subject" class="ml-1 font-medium">{{ r.subject }}</span>
-        <span v-if="r.region" class="ml-1 text-slate-500">{{ r.region }}</span>
-        <span class="ml-1 text-slate-400">{{ when(r.queue_at) }}</span>
+      <li v-for="r in rows" :key="r.task_id" class="flex items-stretch gap-3 text-slate-700" :title="r.task_id">
+        <span class="w-[30px] shrink-0 rounded-sm" :style="stripStyle(r)" aria-hidden="true"></span>
+        <span class="py-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+          <span class="text-slate-400 tabular-nums">{{ r.pos }}.</span>
+          <span class="ml-1">{{ KIND_LABEL[r.kind] }}</span>
+          <span class="ml-1 text-slate-500">{{ typeLabel(r) }}</span>
+          <span v-if="r.subject" class="ml-1 font-medium">{{ r.subject }}</span>
+          <span v-if="r.region" class="ml-1 text-slate-500">{{ r.region }}</span>
+          <span class="ml-1 text-slate-400">{{ when(r.queue_at) }}</span>
+        </span>
       </li>
     </ul>
   </main>
