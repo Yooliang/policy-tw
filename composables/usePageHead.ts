@@ -1,5 +1,6 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useHead } from '@unhead/vue'
+import { useRoute } from 'vue-router'
 
 export const SITE_NAME = '正見'
 export const SITE_TAGLINE = '智能政見追蹤平台'
@@ -32,15 +33,21 @@ export function usePageHead(options: PageHeadOptions): void {
     return t ? `${t} | ${SITE_NAME}` : `${SITE_NAME} | ${SITE_TAGLINE}`
   })
   const description = computed(() => summarize(toValue(options.description)) || DEFAULT_DESCRIPTION)
+  // 每頁自己的 canonical／og:url（2026-09-23）：以前只有 index.html 寫死的首頁 og:url，每一頁分享出去都指首頁。
+  // 用路由的 path（不含 query）：選舉頁的 ?region= 那些篩選不該各自成一個 canonical。
+  const route = useRoute()
+  const pageUrl = computed(() => `${SITE_URL}${route.path === '/' ? '/' : route.path.replace(/\/$/, '')}`)
 
   useHead({
     title,
+    link: computed(() => [{ rel: 'canonical', href: pageUrl.value }]),
     meta: computed(() => [
       { name: 'description', content: description.value },
       { property: 'og:site_name', content: SITE_NAME },
       { property: 'og:type', content: options.type ?? 'website' },
       { property: 'og:title', content: title.value },
       { property: 'og:description', content: description.value },
+      { property: 'og:url', content: pageUrl.value },
       ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
     ]),
   })

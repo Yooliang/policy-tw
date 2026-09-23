@@ -94,3 +94,35 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_POLICY_TW }}
           channelId: live
           projectId: policy-tw
+
+  # 邊緣 SSR Worker（docs/PLAN-edge-ssr.md）：人物頁／政見頁在 Cloudflare 現場渲染，其餘代理到 web.app。
+  # 排在 Firebase 之後：SSR 用的殼（app.html）與 assets 從 web.app 拿，要同一個 commit 的。
+  # 沒有 CLOUDFLARE_API_TOKEN 就略過（本機可用 pnpm deploy:ssr）。
+  ssr-deploy:
+    name: 部署邊緣 SSR Worker（正見.tw）
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 建置 SSR bundle
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: pnpm build:ssr
+      - name: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "沒有 CLOUDFLARE_API_TOKEN，略過 Worker 部署"; exit 0; fi
+          npx wrangler deploy
+

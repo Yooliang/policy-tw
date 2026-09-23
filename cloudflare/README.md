@@ -19,3 +19,11 @@
 - Worker 免費額度每天 100,000 次請求；超過再升級。
 - Firebase 那邊的自訂網域可以留著或刪掉，都不影響（A 記錄已被代理，Firebase 看到的是 Cloudflare 的 IP，它永遠驗不過，這是預期的）。
 - 站內 canonical／og:url／sitemap 改成新域名的 PR：#186。
+
+## 2026-09-23 之後：ssr-worker.js 取代 worker.js
+
+`cloudflare/ssr-worker.js`（wrangler.toml 的 main）：`/politician/:id`、`/policy/:id` 在邊緣 SSR（`entry-server.ts` → `pnpm build:ssr` → `dist-ssr/`），
+Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app。`POST /__purge`（`X-Purge-Secret`）清指定頁。
+部署：CI 的 `ssr-deploy` job（需 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`）或本機 `pnpm deploy:ssr`。
+回滾：把 `SSR_ROUTES` 清空重部署＝純代理。計畫與後續步驟見 `docs/PLAN-edge-ssr.md`。
+

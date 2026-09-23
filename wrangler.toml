@@ -1,0 +1,13 @@
+# 正見.tw 的 Worker（docs/PLAN-edge-ssr.md）。
+# name 沿用主控台上已綁定自訂網域（xn--2lw665d.tw、www）的那支，wrangler deploy 會原地取代它的程式。
+name = "yellow-cell-04ee"
+main = "cloudflare/ssr-worker.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ORIGIN = "https://policy-tw.web.app"
+# PURGE_SECRET 用 `wrangler secret put PURGE_SECRET` 設，不寫在這裡
+
+[observability]
+enabled = true
