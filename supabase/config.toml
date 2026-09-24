@@ -528,3 +528,9 @@ entrypoint = "./functions/ditrust-agent/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/boost/index.ts"
+
+[functions.moi-sync]
+enabled = true
+# 內政部地方公職人員名單每天同步（pg_cron 呼叫，不驗 JWT；同一種職務 6 小時內抓過就空轉）
+verify_jwt = false
+entrypoint = "./functions/moi-sync/index.ts"

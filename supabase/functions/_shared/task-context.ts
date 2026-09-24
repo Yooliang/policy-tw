@@ -42,6 +42,8 @@ export function truncateFields<T extends Obj>(row: T, fields: readonly string[])
 }
 
 export interface TaskContextData {
+  /** profile_gap：內政部地方公職人員名單上同名同縣市的現職紀錄（照片、機關、職稱、黨籍），沒有就 undefined */
+  moi_official?: Obj | null;
   roster?: unknown;
   politician?: Obj | null;
   elections?: Obj[];
@@ -163,7 +165,14 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       const full = p ? truncateFields(p, ["bio"]) : null;
       const missing = PROFILE_FIELDS.filter((f) => !p || p[f] === null || p[f] === undefined || p[f] === "");
       const present = PROFILE_FIELDS.filter((f) => !missing.includes(f));
-      return { politician: full, missing_fields: missing, present_fields: present };
+      const moi = data.moi_official ? pick(data.moi_official, ["name", "region", "org", "title", "party", "photo_url", "detail_url"]) : null;
+      return {
+        politician: full, missing_fields: missing, present_fields: present,
+        ...(moi ? {
+          official_record: moi,
+          official_record_hint: "內政部地方公職人員名單上有同縣市、同名的現職紀錄。先打開 detail_url 確認是同一個人（機關、職稱對得上）；是的話，照片可用 photo_url、黨籍與現職照這份官方資料補，source_urls 放 detail_url。不是同一人就忽略這份。",
+        } : {}),
+      };
     }
     case "candidacy_source_missing":
     case "election_result_missing":
@@ -295,6 +304,11 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
     data.politician = p ?? null;
+  }
+  // 補基本資料：內政部現職名單有這個人的話一起給（2026-09-24，陳雅倫的照片內政部就有，代理卻回報查無）
+  if (taskType === "profile_gap" && pid) {
+    const { data: m } = await supabase.rpc("moi_official_for", { p_politician_id: pid });
+    data.moi_official = ((m ?? []) as Obj[])[0] ?? null;
   }
   if (taskType === "legacy_audit" && policyId) {
     const [pl, el, jv] = await Promise.all([
