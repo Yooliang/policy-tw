@@ -87,7 +87,11 @@ Deno.test("端點：帶指認沒附數字 → 400、不寫票", async () => {
   const res = await handleVerify(client, vote, "ip-mine", undefined, "report", cec);
   assertEquals(res.status, 400);
   assertEquals(res.body.error, "cec_count_required");
-  assertEquals(inserted.length, 0);
+  assertEquals(inserted.filter((r) => r.table === "contribution_votes").length, 0, "不寫票");
+  // 2026-09-24：退回要留紀錄，否則這道守門在資料上跟「從未生效」分不出來
+  const g = inserted.find((r) => r.table === "gate_rejections");
+  assertEquals(g?.gate, "cec_count_required");
+  assertEquals(g?.contribution_id, CID);
 });
 
 Deno.test("端點：數字對上 → 收票，備註附上系統核對結果", async () => {
@@ -102,5 +106,6 @@ Deno.test("端點：數字對不上 → 400 cec_count_mismatch", async () => {
   const { client, inserted } = fake();
   const res = await handleVerify(client, { ...vote, cec_hits: 9, cec_people: 2 }, "ip-mine", undefined, "report", cec);
   assertEquals(res.body.error, "cec_count_mismatch");
-  assertEquals(inserted.length, 0);
+  assertEquals(inserted.filter((r) => r.table === "contribution_votes").length, 0);
+  assertEquals(inserted.find((r) => r.table === "gate_rejections")?.gate, "cec_count_mismatch");
 });
