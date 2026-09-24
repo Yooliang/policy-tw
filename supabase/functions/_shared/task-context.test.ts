@@ -41,8 +41,17 @@ Deno.test("shapeVerifyCurrent：score 與 target_score 都是數字才附 scorin
     current_score: 1,
     points_short: 2,
     hint: "這筆差 2 分：你附一個不同網域、系統核得過的第二來源（+2），這一票就能讓它上線；只投 +1 還要再等一台機器",
+    second_source_counts: true,
     your_vote_could_be: { max: 2, how: "同意票預設要找第二來源：item.source_urls 是提交者附的，加分看的是你這票的 evidence_url——另一個網域、直接寫到當事人與這件事的來源，系統核過就是 +2；只打開提交者的來源核對是 +1。提交者附的同一個網域不算第二來源" },
   });
+
+  // 2026-09-24：系統不核第二來源的型別直接講，不叫代理白找
+  const noChange = shapeVerifyCurrent("no_change", {}, { politicians: [], score: 0, target_score: 2, source_urls: ["https://udn.com/news/1"] });
+  const sc = noChange.scoring as Record<string, unknown>;
+  assertEquals(sc.second_source_counts, false);
+  assertEquals(sc.not_a_second_source, undefined);
+  assertEquals((sc.your_vote_could_be as { max: number }).max, 1);
+  assertEquals(String(sc.hint).includes("不核第二來源"), true);
 
   const missingTarget = shapeVerifyCurrent("policy", { name: "陳素月" }, { politicians: [], score: 1 });
   assertEquals(missingTarget.scoring, undefined);

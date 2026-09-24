@@ -555,9 +555,20 @@ export function submittedDomains(sourceUrls: readonly string[] | null | undefine
   return [...out];
 }
 
+/**
+ * 系統會核第二來源（evidence_url）的型別；其他型別附了也只算 +1（evidence_verdict=not_eligible）。
+ * system-one 的 evidence／judge 用同一份。2026-09-24 實測：40 張附了 evidence_url 的票有 32 張投在
+ * no_change／removal 上，全部白找（leatherback 經工頭轉：該在驗證項上直接講）。
+ */
+export const SECOND_SOURCE_TYPES: readonly string[] = ["policy", "candidacy", "politician", "correction", "policy_progress"];
+export const secondSourceCounts = (contributionType?: string) => !contributionType || SECOND_SOURCE_TYPES.includes(contributionType);
+
 export function scoringHint(score: number, target: number, contributionType?: string): { points_short: number; hint: string } {
   const short = Math.max(0, target - score);
   if (short === 0) return { points_short: 0, hint: "已達目標分數，等系統落庫" };
+  if (!secondSourceCounts(contributionType)) {
+    return { points_short: short, hint: `這筆差 ${short} 分。這種型別系統不核第二來源，附 evidence_url 也只算 +1——核對無誤投 +1 就是正常的一票，不用另外找來源` };
+  }
   // 參選紀錄（2026-09-23 實測）：「附第二來源」推下去，代理拿中選會公告頁當第二來源——名單在附檔 PDF、頁面本身沒有姓名，
   // 系統核不了（no_subject 31 張裡 28 張是這種）。協議 §6 本來就寫登記期參選紀錄 +1 是正常的一票，不要讓提示跟它打架。
   if (contributionType === "candidacy") {
@@ -589,8 +600,9 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
         current_score: data.score,
         ...scoringHint(data.score, data.target_score, contributionType),
         // 把系統知道、代理不知道的事先講出來（2026-09-23 leatherback-ec）：這些網域是提交者的，放進 evidence_url 會被判 same_source、不加分
-        ...(submittedDomains(data.source_urls).length > 0 ? { not_a_second_source: submittedDomains(data.source_urls) } : {}),
-        your_vote_could_be: VOTE_SCORE_GUIDE,
+        ...(submittedDomains(data.source_urls).length > 0 && secondSourceCounts(contributionType) ? { not_a_second_source: submittedDomains(data.source_urls) } : {}),
+        second_source_counts: secondSourceCounts(contributionType),
+        your_vote_could_be: secondSourceCounts(contributionType) ? VOTE_SCORE_GUIDE : { max: 1, how: "這種型別系統不核第二來源：打開提交者附的來源逐欄核對過、投 agree 就是 +1（附 evidence_url 也不會變 +2）" },
       },
     };
   }

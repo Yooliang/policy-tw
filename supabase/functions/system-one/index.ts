@@ -36,6 +36,7 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, worthAsking, type FollowupChoice, type FollowupContribution, type FollowupVote } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
+import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -667,7 +668,7 @@ Deno.serve(async (req) => {
         if (!c) return await finish(v, "no_contribution", false);
         // 已定案（applied／rejected／superseded／withdrawn）的貢獻，票再加分也改變不了什麼，不花 Jev
         if (c.status !== "pending" && c.status !== "verified") return await finish(v, "not_pending", false);
-        if (!["policy", "candidacy", "politician", "correction", "policy_progress"].includes(c.contribution_type)) return await finish(v, "not_eligible", false);
+        if (!SECOND_SOURCE_TYPES.includes(c.contribution_type)) return await finish(v, "not_eligible", false);
         // 第二來源必須是另一個網域：提交者附的那一頁系統票已經核過
         const submitted = new Set(((c.source_urls ?? []) as string[]).map(hostOf));
         if (submitted.has(hostOf(v.evidence_url))) return await finish(v, "same_source", false);
@@ -741,7 +742,7 @@ Deno.serve(async (req) => {
         .select("id, contribution_type, payload, source_urls, status").eq("id", contributionId).maybeSingle();
       if (cErr) throw new Error(`contributions read: ${cErr.message}`);
       if (!c) return json({ success: false, error: "not_found", message: "找不到這筆貢獻" }, 404);
-      if (!["policy", "candidacy", "politician", "correction", "policy_progress"].includes(c.contribution_type)) {
+      if (!SECOND_SOURCE_TYPES.includes(c.contribution_type)) {
         return json({ success: false, error: "not_eligible", message: "這種型別沒有來源可核" }, 400);
       }
       // 第二來源必須是另一個網域：拿提交的那一頁來問，等於系統票再投一次
