@@ -27,6 +27,25 @@ export function pickQueueHead(heads: ReadonlyArray<{ kind: QueueHeadKind; queue_
   return best?.kind ?? null;
 }
 
+/**
+ * 每台機器自己的 驗證：任務＝2:1（2026-09-24 小良哥「試試吧」）。
+ *
+ * 佇列上的 2:1 是全站的順序；但自己交的不能自己驗，對單一台機器就不是 2:1——09-24 全站 1,597 筆待驗證有 854 筆是 a-zhen 的，
+ * 最前面 670 筆全是它自己的，它要先做完交錯在中間的 419 個任務才輪到能驗的，而做任務又交出更多自己的貢獻。
+ * 所以派工時看這台機器最近三次拿到什麼：驗證不到兩次、而且有它能驗的，這次就派驗證；否則照佇列。
+ * 插隊的（1970／1980 年段）照舊最先，不受這條影響。
+ */
+export const MACHINE_WINDOW = 3;
+export const MACHINE_MIN_VERIFIES = 2;
+export function machineOwesVerify(recentKindsNewestFirst: ReadonlyArray<"verify" | "task">): boolean {
+  return recentKindsNewestFirst.slice(0, MACHINE_WINDOW).filter((k) => k === "verify").length < MACHINE_MIN_VERIFIES;
+}
+/** 插隊段（人明確要求先做、網站訪客）：排隊時間在 2000 年以前 */
+export function isFrontQueueAt(v: string | null | undefined): boolean {
+  const t = v ? Date.parse(v) : NaN;
+  return !Number.isNaN(t) && t < Date.parse("2000-01-01T00:00:00Z");
+}
+
 export interface VerifyCandidate {
   /** contribution_verify_pool 回的有效門檻（2026-09-20）；沒有就用 requiredAgree */
   effective_required?: number | null;
