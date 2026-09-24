@@ -10,6 +10,7 @@ import { listUrl, MOI_KINDS, MOI_PAGE_SIZE, parseMoiList } from "../_shared/moi-
 const UA = "Mozilla/5.0 (compatible; policy-tw-moi-sync/1.0; +https://xn--2lw665d.tw)";
 const MIN_INTERVAL_HOURS = 6;
 const TIME_BUDGET_MS = 120_000;
+const PARALLEL = 4;
 
 Deno.serve(async (req) => {
   if (req.method !== "POST" && req.method !== "GET") return new Response("method not allowed", { status: 405 });
@@ -29,25 +30,32 @@ Deno.serve(async (req) => {
     // 整輪用同一個時間戳：抓完後拿掉「這輪沒出現的人」要靠它，不能每頁各用各的
     const runAt = new Date().toISOString();
     try {
-      for (let page = 1; page <= 40 && Date.now() - started < TIME_BUDGET_MS; page++) {
-        const res = await fetch(listUrl(kind, page), { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30_000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = parseMoiList(await res.text(), kind);
-        pages++;
-        if (list.length === 0) break;
-        for (let i = 0; i < list.length; i += 500) {
-          const { error } = await supabase.from("moi_officials").upsert(list.slice(i, i + 500).map((r) => ({ ...r, fetched_at: runAt })), { onConflict: "id" });
-          if (error) throw new Error(`upsert: ${error.message}`);
-        }
-        rows += list.length;
-        if (list.length < MOI_PAGE_SIZE) {
-          // 這種職務整份抓完了：這次沒出現的人已經不在職，拿掉
-          const { error } = await supabase.from("moi_officials").delete().eq("kind", kind).lt("fetched_at", runAt);
-          if (error) throw new Error(`cleanup: ${error.message}`);
-          break;
+      // 一次抓 4 頁（村里長約 7,700 人、每頁 500，一頁一頁抓會超過時間上限、也就永遠清不到離職的人）
+      let done = false;
+      for (let start = 1; start <= 40 && !done && Date.now() - started < TIME_BUDGET_MS; start += PARALLEL) {
+        const batch = await Promise.all(Array.from({ length: PARALLEL }, (_, i) => start + i).map(async (page) => {
+          const res = await fetch(listUrl(kind, page), { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(60_000) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}（第 ${page} 頁）`);
+          return parseMoiList(await res.text(), kind);
+        }));
+        for (const list of batch) {
+          pages++;
+          if (list.length > 0) {
+            for (let i = 0; i < list.length; i += 500) {
+              const { error } = await supabase.from("moi_officials").upsert(list.slice(i, i + 500).map((r) => ({ ...r, fetched_at: runAt })), { onConflict: "id" });
+              if (error) throw new Error(`upsert: ${error.message}`);
+            }
+            rows += list.length;
+          }
+          if (list.length < MOI_PAGE_SIZE) { done = true; break; }
         }
       }
-      report[kind] = { rows, pages };
+      if (done) {
+        // 這種職務整份抓完了：這次沒出現的人已經不在職，拿掉
+        const { error } = await supabase.from("moi_officials").delete().eq("kind", kind).lt("fetched_at", runAt);
+        if (error) throw new Error(`cleanup: ${error.message}`);
+      }
+      report[kind] = { rows, pages, ...(done ? {} : { skipped: "時間用完、沒抓完，這次不清離職的人" }) };
     } catch (e) {
       report[kind] = { rows, pages, error: e instanceof Error ? e.message : String(e) };
     }
