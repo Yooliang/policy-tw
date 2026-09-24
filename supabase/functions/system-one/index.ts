@@ -512,6 +512,21 @@ Deno.serve(async (req) => {
       return json({ success: true, shadow_mode: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, tally, failures });
     }
 
+    // ---- costs：AI 判定帳戶的儲值與已用，存給捐款頁（2026-09-24）。排程每 15 分鐘；不回任何金鑰相關內容 ----
+    if (action === "costs") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const res = await fetch("https://openrouter.ai/api/v1/credits", { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) return json({ success: false, error: `openrouter credits ${res.status}` }, 502);
+      const body = await res.json().catch(() => null) as { data?: { total_credits?: number; total_usage?: number } } | null;
+      const credits = Number(body?.data?.total_credits), usage = Number(body?.data?.total_usage);
+      if (!Number.isFinite(credits) || !Number.isFinite(usage)) return json({ success: false, error: "openrouter credits 回應格式不對" }, 502);
+      const { error } = await supabase.from("platform_costs")
+        .upsert({ id: 1, openrouter_credits: credits, openrouter_usage: usage, refreshed_at: new Date().toISOString() }, { onConflict: "id" });
+      if (error) throw new Error(`platform_costs upsert: ${error.message}`);
+      return json({ success: true, balance_usd: Number((credits - usage).toFixed(2)) });
+    }
+
     // ---- followups：Jev 讀投票備註，範圍外的問題開成任務（2026-09-23 小良哥）----
     // 協議叫驗證者把範圍外的缺陷另提 task_suggestion，實際上多半只寫在 note 裡、沒有下游。
     // dry=1：只回判定結果，不寫紀錄、不開任務（拿來掃一遍現況）。

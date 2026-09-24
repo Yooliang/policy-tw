@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import Hero from '../components/Hero.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+import { supabasePublic } from '../lib/supabase'
 
 // 贊助走 Ko-fi。刻意用連結而不是嵌入 Ko-fi 的 Widget：這站是預渲染的靜態頁，
 // 多一支第三方腳本會拖慢載入，而且先前 AdSense 的外部資源已經害過一次。
@@ -29,6 +30,21 @@ const handleCopy = (address: string, symbol: string) => {
 
 
 
+
+// 運轉成本（2026-09-24 小良哥：「不用太顯眼，一個基本的資料就好」）：後端每 15 分鐘更新，這裡只讀。
+// 在瀏覽器才讀（onMounted），不進預渲染——數字會變，預渲染進去就是舊的。讀不到就整塊不顯示。
+type Costs = { balance_usd: number | null; jev_month_calls: number; jev_month_usd: number; db_bytes: number; refreshed_at: string | null }
+const costs = ref<Costs | null>(null)
+/** 餘額低於這個數才加強顯示：歸零之後系統就無法自動核對來源 */
+const LOW_BALANCE_USD = 2
+onMounted(async () => {
+  try {
+    const { data } = await supabasePublic.rpc('platform_cost_summary')
+    costs.value = ((data ?? []) as Costs[])[0] ?? null
+  } catch { costs.value = null }
+})
+const usd = (n: number | null | undefined) => (n == null ? '—' : `US$${Number(n).toFixed(2)}`)
+const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
 usePageHead({
   title: '贊助平台',
@@ -110,6 +126,17 @@ usePageHead({
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- 運轉成本：平常一行小字，餘額低時才變明顯 -->
+        <div v-if="costs" class="text-xs text-slate-500 leading-relaxed" :class="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD ? 'bg-amber-50 border border-amber-300 rounded-xl p-4 text-amber-800' : ''">
+          <p>
+            運轉成本：本月 AI 自動判定 {{ costs.jev_month_calls.toLocaleString() }} 次、花費約 {{ usd(costs.jev_month_usd) }}；
+            AI 判定帳戶餘額 {{ usd(costs.balance_usd) }}；資料庫目前 {{ mb(costs.db_bytes) }}。
+          </p>
+          <p v-if="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD" class="mt-1 font-medium">
+            AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
+          </p>
         </div>
       </div>
     </div>
