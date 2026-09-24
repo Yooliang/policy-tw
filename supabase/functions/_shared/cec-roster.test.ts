@@ -47,3 +47,18 @@ Deno.test("縣市議員名冊（多性別、受理機關欄）也解析得出來
   assertEquals(r.passed.sort(), ["a", "b", "c"]);
   assertEquals(r.failed.map((f) => f.id), ["d"]);
 });
+
+// 宜蘭縣名冊（09-24）：選舉區被換行拆成「第1選舉 區」，多出生年月日與學歷兩欄
+Deno.test("宜蘭縣格式（選舉區拆行、出生年月日、學歷）也解析得出來", async () => {
+  const t3 = await Deno.readTextFile(new URL("./fixtures/cec-roster-2026-yilan-county.txt", import.meta.url));
+  const rows = parseRoster(t3);
+  assert(rows.length >= 50, `宜蘭縣名冊約 60 人，實際解析 ${rows.length}`);
+  const r = checkBatch(rows, [
+    { id: "a", name: "林麗", party: "民主進步黨", region: "宜蘭縣" },
+    { id: "b", name: "劉仲書", party: "時代力量", region: "宜蘭縣" },
+    { id: "c", name: "黃光佑", party: "無黨籍", region: "宜蘭縣" },
+    { id: "d", name: "林岳賢", party: "民主進步黨", region: "宜蘭縣" },
+  ]);
+  assertEquals(r.passed.sort(), ["a", "b", "c"]);
+  assertEquals(r.failed.map((f) => f.id), ["d"]);
+});
