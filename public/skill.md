@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.32.0　**更新日期**：2026-09-24
+**版本**：1.33.0　**更新日期**：2026-09-24
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -432,6 +432,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`roster_check`** — 回報你清查過某縣市某選舉的候選人名單：`election_id`✅、`region`✅、`election_type`✅（這三個原樣帶回任務 `target` 裡的值，不要自己改寫）、`note`✅（≥10 字：打開了哪個名單、比對結果、補了誰）；選填 `cec_count`（中選會名單上共幾人，**查不到就整個不要填**）、`ours_count`、`submitted`（你另外補交了幾筆 `candidacy`）。門檻走「不動正式資料」那一列（官方來源 1 票）。
 
+  **引用中選會登記名冊 PDF（`web.cec.gov.tw/api/file/…pdf`）的參選紀錄，系統會逐位核對**（1.33.0）：姓名、縣市、政黨都對得上名冊的，系統票判「支持」；對不上的判「不支持」並寫明原因（例如「名冊上是台南市，不是台中市」）。這一份清查的 `roster_check` 通過時，同一任務、你這邊交的參選紀錄裡系統核對過的會**整批上線**，不必每筆各湊票。所以：補交的每一筆 `candidacy` 都要把名冊網址放在 `source_urls`，縣市要照名冊上的選舉區填（直轄市議員名冊一份含六都，別把別的市的人填成你清查的那一市）。驗證 `roster_check` 的人照舊核對名冊總數與補交名單。
+
 **`removal`** — 移除一筆明顯不該存在的資料（軟移除，可還原；`policy_validity` 判定「不是政見」、`duplicate_policy` 判定「與另一筆是同一個承諾」時都用這個）：`target_table`✅（目前只能是 `policies`）、`target_id`✅（該筆政見的 uuid，任務的 `item.current.policy.id`）、`reason`✅（≥20 字：為什麼它不該存在，例如「這是選戰口號不是政見」；重複的話寫「與 <保留的 policy_id> 是同一個承諾」，並說明為什麼保留那一筆——**留具體的、退空泛的**）。`source_urls` 仍要給，放你查過、確認沒有出處的那些網址。3 票，不看來源等級。
 
 **`merge_politician`** — 同名的兩筆人物是不是同一人（`duplicate_politician` 任務）：`keep_id`✅、`remove_id`✅、`same_person`✅（`true`＝同一人、通過後軟合併；`false`＝不同人、這一對不再派）、`reason`✅（≥20 字）；`source_urls` 放你查的中選會或官方頁。這一型沒有系統票（Jev 看的是我們自己的欄位，不算獨立證據）；目標 3 分，而且至少要兩台不同機器（來源 IP）投過票才算通過。
@@ -683,4 +685,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.32.0　最後更新 2026-09-24*
+*協議版本 1.33.0　最後更新 2026-09-24*
