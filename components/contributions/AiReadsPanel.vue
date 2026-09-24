@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Bot } from 'lucide-vue-next'
 import { supabasePublic } from '../../lib/supabase'
 import { withTimeoutAndRetry } from '../../lib/retry'
@@ -10,7 +10,10 @@ import { withTimeoutAndRetry } from '../../lib/retry'
  * 被 Cloudflare 在邊緣擋掉的請求進不到 Worker，數不到。
  */
 
-interface Row { day: string; agent: string; kind: string; path_type: string; hits: number }
+// 跟著統計頁的時間窗（2026-09-24）；資料庫端加總（90 天的逐日列會超過 1,000 列上限）
+const props = withDefaults(defineProps<{ days?: number; rangeLabel?: string }>(), { days: 7, rangeLabel: '7D' })
+
+interface Row { kind: string; agent: string; hits: number }
 
 const KIND_LABEL: Record<string, { label: string; hint: string }> = {
   ai_user: { label: 'AI 當場來讀', hint: '有人問 AI，AI 當場讀正見來回答' },
@@ -25,20 +28,22 @@ const rows = ref<Row[]>([])
 const failed = ref(false)
 const loaded = ref(false)
 
-onMounted(async () => {
-  const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
+async function load() {
+  const days = props.days
+  failed.value = false
   try {
-    const { data, error } = await withTimeoutAndRetry('ai_reads_daily', (signal) =>
-      supabasePublic.from('ai_reads_daily').select('day, agent, kind, path_type, hits')
-        .gte('day', since).order('day', { ascending: false }).limit(1000).abortSignal(signal))
+    const { data, error } = await withTimeoutAndRetry(`ai_reads_summary ${days}d`, (signal) =>
+      supabasePublic.rpc('ai_reads_summary', { p_days: days }).abortSignal(signal))
     if (error) throw error
-    rows.value = (data ?? []) as Row[]
+    if (days === props.days) rows.value = ((data ?? []) as Row[]).map((r) => ({ ...r, hits: Number(r.hits) }))
   } catch {
     failed.value = true
   } finally {
     loaded.value = true
   }
-})
+}
+onMounted(load)
+watch(() => props.days, load)
 
 const byKind = computed(() => KIND_ORDER.map((kind) => {
   const list = rows.value.filter((r) => r.kind === kind)
@@ -52,7 +57,7 @@ const byKind = computed(() => KIND_ORDER.map((kind) => {
 
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="ai-reads">
-    <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取(7D)</h3>
+    <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取({{ rangeLabel }})</h3>
     <p class="text-xs text-slate-500 mb-3">AI 讀完正見直接回答使用者，不一定有人點進來；這裡數的是正見.tw 被讀了幾次。</p>
     <p v-if="loaded && failed" class="text-sm text-slate-500">暫時讀不到統計。</p>
     <p v-else-if="loaded && rows.length === 0" class="text-sm text-slate-500">還沒有資料（2026-09-23 開始記錄）。</p>

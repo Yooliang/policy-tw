@@ -139,11 +139,27 @@ function leaderboardTitle(row: LeaderboardEntry): string {
   return `提交 ${row.submitted}・上線 ${row.applied}・驗證 ${row.verified_votes ?? 0}`
 }
 
+// 提交與驗證跟著整頁時間窗（2026-09-24 小良哥：要支援 30D／90D）：48 小時內按小時、以上按天，資料庫端聚合
+type Activity = { bucket: string; submissions: number; verifications: number }
+const activity = ref<Activity[] | null>(null)
+async function loadActivity() {
+  const hours = activeRange.value.hours
+  try {
+    const { data } = await withTimeoutAndRetry(`activity ${hours}h`, (signal) =>
+      supabasePublic.rpc('contribution_activity', { p_hours: hours }).abortSignal(signal).throwOnError())
+    if (hours === activeRange.value.hours) activity.value = ((data ?? []) as Activity[]).map(a => ({ ...a, submissions: Number(a.submissions), verifications: Number(a.verifications) }))
+  } catch (e) {
+    console.info('[統計] 提交與驗證讀取失敗', e)
+  }
+}
+watch(range, loadActivity)
+onMounted(loadActivity)
+
 const chartSeries = computed(() => {
-  const days = summary.value?.daily_last_7 ?? []
+  const rows = activity.value ?? []
   return [
-    { name: '提交', data: days.map(d => d.count) },
-    { name: '驗證', data: days.map(d => d.verifications ?? 0) },
+    { name: '提交', data: rows.map(d => d.submissions) },
+    { name: '驗證', data: rows.map(d => d.verifications) },
   ]
 })
 const chartOptions = computed(() => ({
@@ -156,7 +172,8 @@ const chartOptions = computed(() => ({
   legend: CHART_LEGEND,
   dataLabels: { enabled: false },
   xaxis: {
-    categories: (summary.value?.daily_last_7 ?? []).map(d => d.date.slice(5)),
+    categories: (activity.value ?? []).map(d => d.bucket),
+    tickAmount: Math.min(12, Math.max(1, (activity.value ?? []).length - 1)),
     labels: { style: { colors: '#94a3b8', fontSize: '11px', fontWeight: 'bold' } },
     axisBorder: { show: false }, axisTicks: { show: false },
   },
@@ -167,7 +184,7 @@ const chartOptions = computed(() => ({
 
 usePageHead({
   title: '統計',
-  description: '正見 AI 協作的運作數據：貢獻管線、近 7 日提交與驗證、資料缺口與貢獻榜。',
+  description: '正見 AI 協作的運作數據：貢獻管線、提交與驗證、資料缺口與貢獻榜。',
   noindex: true,
 })
 </script>
@@ -211,10 +228,18 @@ usePageHead({
         </button>
       </div>
 
-      <PipelineChart :hours="activeRange.hours" :range-label="activeRange.short" />
+      <!-- 2026-09-24 小良哥：原本這一整條是運作狀態，改放資料缺口與提交與驗證並排；運作狀態移到右欄 -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <GapPanel />
+        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+          <h3 class="font-black text-navy-900 mb-2 flex items-center gap-2"><CalendarDays :size="18" class="text-blue-600" />提交與驗證({{ activeRange.short }})</h3>
+          <div class="h-44">
+            <ClientOnly><apexchart v-if="activity" type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
+          </div>
+        </section>
+      </div>
 
-      <!-- 貢獻榜佔左欄（它最長），資料缺口／近 24 小時走勢／近 7 日在右欄疊著；
-           手機是單欄，四張依序排下來 -->
+      <!-- 貢獻榜佔左欄（它最長），運作狀態／缺口走勢／AI 讀取在右欄疊著；手機是單欄，依序排下來 -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
             <!-- 時間窗跟著整頁那一組走（原本這張榜自己有 總榜／30 天／7 天 三顆鈕） -->
@@ -247,15 +272,9 @@ usePageHead({
           </section>
 
         <div class="space-y-6">
-          <GapPanel />
+          <PipelineChart :hours="activeRange.hours" :range-label="activeRange.short" />
           <GapTrendChart :hours="activeRange.hours" :range-label="activeRange.short" />
-          <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-            <h3 class="font-black text-navy-900 mb-2 flex items-center gap-2"><CalendarDays :size="18" class="text-blue-600" />提交與驗證(7D)</h3>
-            <div class="h-44">
-              <ClientOnly><apexchart v-if="summary" type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
-            </div>
-          </section>
-          <AiReadsPanel />
+          <AiReadsPanel :days="activeRange.days" :range-label="activeRange.short" />
         </div>
       </div>
     </div>
