@@ -5,6 +5,7 @@ import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
+import { isThrottled, NEXT_PER_MINUTE, NEXT_RETRY_AFTER_S } from "../_shared/throttle.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -82,6 +83,24 @@ Deno.serve(async (req) => {
     // 待驗證池：在 SQL 裡就排掉這台機器提交的、投過的、已達門檻的，撈出來的就是真的能投的最早 N 筆。
     // 原本先取最早 30 筆再在這裡排，機器投完那 30 筆就整池是死的，第 31 筆之後永遠看不到（2026-09-19）。
     // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
+    // 節流（協議 1.31.0 守則第 2 條，2026-09-24）：每個來源 IP 每分鐘最多 NEXT_PER_MINUTE 次派出。
+    // 不另外記每次呼叫（那本身就是讀寫），用派工本來就會寫的兩張表數：驗證派發紀錄、任務認領（leased_until＝派出時間＋認領時長）。
+    {
+      const since = new Date(Date.now() - 60_000).toISOString();
+      const leasedAfter = new Date(Date.now() + LEASE_MINUTES * 60_000 - 60_000).toISOString();
+      const [{ count: vCount }, { count: tCount }] = await Promise.all([
+        supabase.from("verify_dispatches").select("contribution_id", { count: "exact", head: true }).eq("ip_hash", ipHash).gte("dispatched_at", since),
+        supabase.from("contribution_task_leases").select("task_id", { count: "exact", head: true }).eq("ip_hash", ipHash).gte("leased_until", leasedAfter),
+      ]);
+      if (isThrottled((vCount ?? 0) + (tCount ?? 0))) {
+        return json({
+          success: false,
+          error: "too_many_requests",
+          retry_after: NEXT_RETRY_AFTER_S,
+          message: `這個來源 IP 一分鐘內已經領了 ${NEXT_PER_MINUTE} 次工作（同一台機器上的代理合計）。請等 ${NEXT_RETRY_AFTER_S} 秒再來，不要換代號重打——協議 1.31.0 守則第 2 條：每兩次 /next 至少隔 10 秒。`,
+        }, 429);
+      }
+    }
     const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL });
 
     // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
