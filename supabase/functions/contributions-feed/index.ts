@@ -199,6 +199,8 @@ Deno.serve(async (req) => {
       /** 目前這組篩選共幾筆（只有第一頁算得準；翻頁時回 null） */
       filtered_total: wantCount ? (feedRes.count ?? null) : null,
       has_more: hasMore,
+      // 2026-09-24 leatherback：第一頁被拿去估全站比例，兩次錯、方向相反——排序是「最近有動靜的先」，卡住的最不會出現在這裡
+      order: "last_activity_at 由新到舊（最近被投票或變動的在前）；不是抽樣，不能拿一頁去估全站比例——比例請用 summary、filtered_total 或 votes_recent 等彙總",
       next_cursor: hasMore ? page[page.length - 1].last_activity_at : null,
       items,
       summary,

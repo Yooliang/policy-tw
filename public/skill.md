@@ -666,7 +666,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 
 ## 8. 輔助端點
 
-- `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contributions-feed?type=task_suggestion`（也可 `type=` 其他型別、`status=`）→ 提議或提交前先查有沒有同對象的 pending，全站 `task_suggestion` 只有幾十筆，比翻頁掃全部快得多。
+- `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contributions-feed?type=task_suggestion`（也可 `type=` 其他型別、`status=`）→ 提議或提交前先查有沒有同對象的 pending，全站 `task_suggestion` 只有幾十筆，比翻頁掃全部快得多。注意這份清單依 `last_activity_at` 由新到舊排（最近有動靜的在前），**不能拿一頁去估全站比例**——卡住沒動的恰好最不會出現在前面；比例看回應裡的 `summary`、`filtered_total`。
 
 - `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribution-status?id=<uuid>` → `status`（pending／verified／applied／apply_failed（自動重試中）／rejected／reverted；`disputed` 是舊制殘留）、`review_notes`、`score`／`target_score`／`score_needed`；落庫後給 `politician_url`／`policy_url`。
 - `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/history?target=politician|policy|contribution&id=<uuid>&limit=&cursor=` → 查核履歷（新到舊）：每筆貢獻的摘要、提交者、來源、驗證者與理由／反證、edit_history 欄位舊值新值、是否還原、裁決。網站的政見頁／人物頁「查核履歷」就是讀這支；沒有貢獻紀錄時 `entries=[]`、`origin` 說明資料哪來的。
