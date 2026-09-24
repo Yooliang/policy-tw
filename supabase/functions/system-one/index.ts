@@ -535,6 +535,9 @@ Deno.serve(async (req) => {
         // 解析出的人比要核對的還少，多半是這份名冊的版面沒認出來：整份跳過、不判，免得把對的判成「不支持」（09-24 嘉義縣名冊誤判 5 筆）
         if (rows.length < Math.max(10, group.length)) { report.push({ url, skipped: `名冊只解析出 ${rows.length} 位，少於要核對的 ${group.length} 筆，這份先不判` }); continue; }
         const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null })));
+        // 超過一半「找不到姓名」多半是版面沒認出來（09-24 宜蘭縣名冊 34 筆全誤判）：整份不判，交給人逐筆驗
+        const notFound = check.failed.filter((f) => f.reason.includes("找不到")).length;
+        if (notFound * 2 > group.length) { report.push({ url, rows_parsed: rows.length, skipped: `${notFound}／${group.length} 筆找不到姓名，疑似名冊版面沒認出來，這份先不判` }); continue; }
         const failedBy = new Map(check.failed.map((f) => [f.id, f.reason]));
         const records = group.map((c) => {
           const ok = check.passed.includes(c.id);

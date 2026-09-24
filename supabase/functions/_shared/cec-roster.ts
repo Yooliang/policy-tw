@@ -21,16 +21,20 @@ const isDate = (x: string) => /^(\d{3}\/\d{2}\/\d{2})+$/.test(x);
 const isDistrict = (x: string) => x.endsWith("選舉區");
 const isParty = (x: string) => x === "無" || x.endsWith("黨") || ["時代力量", "台灣基進", "臺灣基進", "台灣團結聯盟", "綠黨"].includes(x);
 // 頁首頁尾、純數字、受理機關（某某選舉委員會）都不是姓名
-const isHeader = (x: string) => HEADER.has(x) || /年|製表|頁|選舉委員會|筆數/.test(x) || /^\d+$/.test(x);
+const isHeader = (x: string) => HEADER.has(x) || /年|製表|頁|選舉委員會|筆數/.test(x) || /^\d+$/.test(x) || isEducation(x) || ["出生年月日", "學歷"].includes(x);
 /** 縣市議員名冊多一欄性別：夾在姓名與政黨之間，跟日期一樣略過 */
 const isGender = (x: string) => x === "男" || x === "女";
+/** 宜蘭縣等名冊多出生年月日（059/**／**）與學歷兩欄：出生年月日略過、學歷當表頭 */
+const isBirth = (x: string) => /^\d{3}\/\*\*\/\*\*$/.test(x);
+const isEducation = (x: string) => /^(博士|碩士|學士|大學|專科|高中|高職|國中|國小|初中|自修|識字|不識字|其他)$/.test(x) || x.includes("(職)");
 /** 「臺中市第01選舉區」→「台中市」 */
 const regionOf = (district: string) => norm(district).split("第")[0] || null;
 
 export function parseRoster(text: string): RosterRow[] {
-  const toks = text.split(/\s+/).filter(Boolean);
+  // 「宜蘭縣第1選舉 區」：換行把選舉區拆成兩段，先接回去
+  const toks = text.replace(/選舉\s+區/g, "選舉區").split(/\s+/).filter(Boolean);
   type K = "D" | "T" | "P" | "H" | "N";
-  const kind = (x: string): K => isDistrict(x) ? "D" : (isDate(x) || isGender(x)) ? "T" : isParty(x) ? "P" : isHeader(x) ? "H" : "N";
+  const kind = (x: string): K => isDistrict(x) ? "D" : (isDate(x) || isGender(x) || isBirth(x)) ? "T" : isParty(x) ? "P" : isHeader(x) ? "H" : "N";
   const seq = toks.map((x) => ({ k: kind(x), x })).filter((s) => s.k !== "H");
   const out: RosterRow[] = [];
   // 選舉區也可能是一整欄：記下姓名前面那一串（上一組政黨之後出現的），長度對得上就逐位配，否則整串同縣市才用、不然不判縣市
