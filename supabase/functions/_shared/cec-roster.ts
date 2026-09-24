@@ -16,19 +16,22 @@ export interface BatchItem { id: string; name: string; party: string | null; reg
 export interface BatchCheck { passed: string[]; failed: Array<{ id: string; name: string; reason: string }> }
 
 const norm = (s: string | null | undefined) => String(s ?? "").replace(/\s/g, "").replace(/臺/g, "台");
-const HEADER = new Set(["選舉區", "登記日期", "姓名", "推薦之政黨", "備註"]);
+const HEADER = new Set(["選舉區", "登記日期", "姓名", "推薦之政黨", "備註", "登記之選舉區", "性別", "受理登記機關", "第", "頁", "列印筆數"]);
 const isDate = (x: string) => /^(\d{3}\/\d{2}\/\d{2})+$/.test(x);
 const isDistrict = (x: string) => x.endsWith("選舉區");
 const isParty = (x: string) => x === "無" || x.endsWith("黨") || ["時代力量", "台灣基進", "臺灣基進", "台灣團結聯盟", "綠黨"].includes(x);
-const isHeader = (x: string) => HEADER.has(x) || /年|製表/.test(x);
+// 頁首頁尾、純數字、受理機關（某某選舉委員會）都不是姓名
+const isHeader = (x: string) => HEADER.has(x) || /年|製表|頁|選舉委員會|筆數/.test(x) || /^\d+$/.test(x);
+/** 縣市議員名冊多一欄性別：夾在姓名與政黨之間，跟日期一樣略過 */
+const isGender = (x: string) => x === "男" || x === "女";
 /** 「臺中市第01選舉區」→「台中市」 */
 const regionOf = (district: string) => norm(district).split("第")[0] || null;
 
 export function parseRoster(text: string): RosterRow[] {
   const toks = text.split(/\s+/).filter(Boolean);
   type K = "D" | "T" | "P" | "H" | "N";
-  const kind = (x: string): K => isDistrict(x) ? "D" : isDate(x) ? "T" : isParty(x) ? "P" : isHeader(x) ? "H" : "N";
-  const seq = toks.map((x) => ({ k: kind(x), x }));
+  const kind = (x: string): K => isDistrict(x) ? "D" : (isDate(x) || isGender(x)) ? "T" : isParty(x) ? "P" : isHeader(x) ? "H" : "N";
+  const seq = toks.map((x) => ({ k: kind(x), x })).filter((s) => s.k !== "H");
   const out: RosterRow[] = [];
   // 選舉區也可能是一整欄：記下姓名前面那一串（上一組政黨之後出現的），長度對得上就逐位配，否則整串同縣市才用、不然不判縣市
   let before: string[] = [];
