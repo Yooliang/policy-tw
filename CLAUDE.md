@@ -53,6 +53,8 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 
 真的知道自己在做什麼才加 `--force`。
 
+**手動跑 `db push`／`functions deploy` 時，不要接 `| tail`／`| grep` 來判斷成功**——管線的結束碼是最後一個指令的，失敗會被吃掉、印出來像成功。先把輸出寫檔、看結束碼（`$?`，或 `set -o pipefail`），再打端點或查 `supabase_migrations.schema_migrations` 驗一個可觀察值才說上線。2026-09-21 晚因此把一支沒套上的 migration 對外說成已上線；這條教訓當時只記在一條 session 的暫存筆記裡，兩任之後的接班者又用了同一個寫法。CI 的步驟失敗會紅，不受影響。
+
 ## Architecture
 
 ### Data Layer
