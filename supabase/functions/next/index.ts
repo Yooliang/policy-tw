@@ -303,11 +303,23 @@ Deno.serve(async (req) => {
       // 系統來源票（2026-09-19，4 票變 3+1）：Jev 核過提交的來源就給代理看。它是正式的一票，不是提示——
       // supported 讓門檻 −1、not_supported 算一張反對；機率不到門檻或抓不到正文＝棄權，這裡照實給 abstain。
       {
-        const { data: sv } = await supabase.from("jev_decisions").select("choice, probability, asked_at, probabilities")
+        const { data: sv } = await supabase.from("jev_decisions").select("choice, probability, asked_at, probabilities, model, state")
           .eq("subject_type", "contribution").eq("subject_id", pick.id).eq("question", "source_support")
           .order("asked_at", { ascending: false }).limit(1).maybeSingle();
         if (sv) {
           const counts = Number(sv.probability) >= 0.95 && (sv.choice === "supported" || sv.choice === "not_supported");
+          // 中選會名冊逐位核對（2026-09-24）：系統知道哪一欄對不上，就把衝突攤給驗證者看、改問「哪一個才對」——
+          // 光把門檻 3 拉到 4，只是把「這個人在不在名冊上」這個問錯的問題多問幾次（leatherback）。不給系統任何新權力。
+          const rosterState = typeof sv.model === "string" && sv.model.startsWith("policy-tw/roster-batch") ? (sv.state ?? {}) as Record<string, unknown> : null;
+          if (rosterState) {
+            (verifyCurrent as Record<string, unknown>).roster_check = sv.choice === "supported"
+              ? { result: "系統已逐位核對中選會名冊：姓名、縣市、政黨都對得上。", pdf_url: rosterState.pdf_url }
+              : {
+                conflict: `系統已逐位核對中選會名冊：${String(rosterState.reason ?? "有欄位對不上")}。`,
+                question: "請打開名冊判斷哪一個才對。名冊為準、本筆寫錯 → 投 disagree，evidence_url 放名冊網址、note 寫名冊上那一列；確定本筆才對（名冊有誤或系統讀錯）→ 投 agree 並寫明理由。「這個人確實在名冊上」不是投同意的理由——問題是本筆寫的欄位對不對。",
+                pdf_url: rosterState.pdf_url,
+              };
+          }
           (verifyCurrent as Record<string, unknown>).system_vote = {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,
             // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源
