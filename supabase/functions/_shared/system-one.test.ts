@@ -282,3 +282,9 @@ Deno.test("textSimilarity：轉載幾乎一樣 → 高；不同稿 → 低", () 
   assertEquals(textSimilarity(a, c) < SAME_CONTENT_THRESHOLD, true);
   assertEquals(textSimilarity("", a), 0);
 });
+
+// 2026-09-25：no_change 沒有 name／title，原本落到預設欄位、target 是空的，Jev 答票數預算時什麼都沒看到
+Deno.test("claimOf：no_change 送出宣告、查了哪裡、看到什麼", () => {
+  const claim = claimOf("no_change", { task_id: "auto:policy_missing:x", outcome: "not_found", checked_urls: ["https://www.cna.com.tw/"], finding: "查了中央社首頁，沒有找到", agent_tool: "y" });
+  assertEquals(Object.keys(claim).sort(), ["checked_urls", "finding", "outcome", "task_id"]);
+});

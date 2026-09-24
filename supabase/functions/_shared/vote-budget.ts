@@ -171,6 +171,14 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       hit: { key: "unrelated", means: "來源內容與這筆資料無關，或打不開" },
       miss: { key: "related", means: "來源確實講到這筆資料" },
     },
+    // 2026-09-25 小良哥：「查無」只列首頁就交的，近 7 天 125 筆只有 1 筆通過。不另開交件守門，
+    // 當成同一次 Jev 多判一件事——網址本身看得出有沒有針對這個人找（首頁、通用公告、分類標籤頁都看不出）。
+    {
+      key: "search_not_targeted",
+      instructions: "這筆宣告 outcome=not_found（查無）嗎？如果是，checked_urls 看得出是針對 target 這個人／這筆資料找的嗎？針對的＝帶姓名或關鍵字的搜尋網址、講到這個人的具體頁面；看不出的＝網站首頁、通用公告、新聞分類或標籤頁。",
+      hit: { key: "not_targeted", means: "宣告查無，但列的網址都是首頁、通用公告或分類頁，看不出找過這個人" },
+      miss: { key: "targeted", means: "不是查無，或至少有一個網址是針對這個人找的" },
+    },
   ],
 
   politician: [
