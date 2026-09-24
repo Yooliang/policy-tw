@@ -32,3 +32,18 @@ Deno.test("只收中選會名冊網址", () => {
   assert(CEC_ROSTER_URL_RE.test("https://web.cec.gov.tw/api/file/ccd7e51a-5fd0-4ea0-a81b-a120cd550c9c.pdf"));
   assert(!CEC_ROSTER_URL_RE.test("https://example.com/a.pdf"));
 });
+
+// 縣市議員名冊格式不同（09-24 嘉義縣）：日期 選舉區 姓名 性別 政黨 受理機關——性別與「某某選舉委員會」不能當成姓名
+Deno.test("縣市議員名冊（多性別、受理機關欄）也解析得出來，姓名配對政黨正確", async () => {
+  const t2 = await Deno.readTextFile(new URL("./fixtures/cec-roster-2026-chiayi-county.txt", import.meta.url));
+  const rows = parseRoster(t2);
+  assert(rows.length >= 50, `嘉義縣名冊 53 人，實際解析 ${rows.length}`);
+  const r = checkBatch(rows, [
+    { id: "a", name: "江佩曄", party: "民主進步黨", region: "嘉義縣" },
+    { id: "b", name: "詹琬蓁", party: "中國國民黨", region: "嘉義縣" },
+    { id: "c", name: "賴瓊如", party: "無黨籍", region: "嘉義縣" },
+    { id: "d", name: "江佩曄", party: "中國國民黨", region: "嘉義縣" },
+  ]);
+  assertEquals(r.passed.sort(), ["a", "b", "c"]);
+  assertEquals(r.failed.map((f) => f.id), ["d"]);
+});

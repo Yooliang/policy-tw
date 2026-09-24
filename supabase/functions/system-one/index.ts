@@ -532,7 +532,8 @@ Deno.serve(async (req) => {
       for (const [url, group] of [...byUrl.entries()].slice(0, 3)) {
         let rows: RosterRow[];
         try { rows = parseRoster(await cecRosterText(url)); } catch (e) { report.push({ url, error: e instanceof Error ? e.message : String(e) }); continue; }
-        if (rows.length === 0) { report.push({ url, error: "名冊解析不出任何一位" }); continue; }
+        // 解析出的人比要核對的還少，多半是這份名冊的版面沒認出來：整份跳過、不判，免得把對的判成「不支持」（09-24 嘉義縣名冊誤判 5 筆）
+        if (rows.length < Math.max(10, group.length)) { report.push({ url, skipped: `名冊只解析出 ${rows.length} 位，少於要核對的 ${group.length} 筆，這份先不判` }); continue; }
         const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null })));
         const failedBy = new Map(check.failed.map((f) => [f.id, f.reason]));
         const records = group.map((c) => {
