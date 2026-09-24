@@ -36,6 +36,7 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, worthAsking, type FollowupChoice, type FollowupContribution, type FollowupVote } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
+import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -510,6 +511,48 @@ Deno.serve(async (req) => {
         if (failures.length >= 5) break;
       }
       return json({ success: true, shadow_mode: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, tally, failures });
+    }
+
+    // ---- roster_batch：引用中選會登記名冊的待驗參選紀錄，逐位比對姓名／縣市／政黨，寫系統票（2026-09-24 小良哥選 B）----
+    // 09-20「系統不解析 PDF」的例外，只限 web.cec.gov.tw 的名冊（_shared/cec-roster.ts）。不用 Jev：純比對。
+    if (action === "roster_batch") {
+      type Cand = { id: string; payload: Record<string, unknown>; source_urls: string[] | null };
+      // 還沒核過、引用中選會名冊的待驗參選紀錄（SQL 端篩，陣列欄位的網址比對不好走 REST 篩選）
+      const { data: cands, error: cErr } = await supabase.rpc("roster_batch_candidates", { p_limit: 500 });
+      if (cErr) throw new Error(`roster candidates: ${cErr.message}`);
+      const list = (cands ?? []) as Cand[];
+      const todo = list;
+      const byUrl = new Map<string, Cand[]>();
+      for (const c of todo) {
+        const url = (c.source_urls ?? []).find((u) => CEC_ROSTER_URL_RE.test(u));
+        if (url && typeof c.payload?.name === "string") byUrl.set(url, [...(byUrl.get(url) ?? []), c]);
+      }
+      const report: Array<Record<string, unknown>> = [];
+      // 一輪最多讀 3 份名冊（PDF 抽字吃記憶體；見 precheck 那次 WORKER_RESOURCE_LIMIT）
+      for (const [url, group] of [...byUrl.entries()].slice(0, 3)) {
+        let rows: RosterRow[];
+        try { rows = parseRoster(await cecRosterText(url)); } catch (e) { report.push({ url, error: e instanceof Error ? e.message : String(e) }); continue; }
+        if (rows.length === 0) { report.push({ url, error: "名冊解析不出任何一位" }); continue; }
+        const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null })));
+        const failedBy = new Map(check.failed.map((f) => [f.id, f.reason]));
+        const records = group.map((c) => {
+          const ok = check.passed.includes(c.id);
+          return {
+            subject_type: "contribution", subject_id: c.id, question: "source_support",
+            choice: ok ? "supported" : "not_supported", probability: 1, confidence: null, probabilities: null,
+            model: ROSTER_BATCH_MODEL,
+            state: { pdf_url: url, name: c.payload.name, region: c.payload.region, party: c.payload.party, rows_parsed: rows.length, ...(ok ? { result: "名冊上姓名、縣市、政黨都對得上" } : { reason: failedBy.get(c.id) }) },
+            cost_usd: 0,
+          };
+        });
+        await insertRecords(supabase, records as DecisionRecord[]);
+        for (const c of group) {
+          const { error } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.id });
+          if (error) throw new Error(`apply_consensus: ${error.message}`);
+        }
+        report.push({ url, rows_parsed: rows.length, checked: group.length, passed: check.passed.length, failed: check.failed.length });
+      }
+      return json({ success: true, candidates: list.length, report });
     }
 
     // ---- costs：AI 判定帳戶的儲值與已用，存給捐款頁（2026-09-24）。排程每 15 分鐘；不回任何金鑰相關內容 ----
