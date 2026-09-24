@@ -277,3 +277,19 @@ Deno.test("/next 不再有 3:1：沒有 chooseKind；驗證派出去也要蓋章
   assert(/task_dispatched", \{ p_task_id: `verify:\$\{pick\.id\}` \}/.test(src), "驗證派出去要蓋 task_dispatched('verify:<id>')");
   assert(/pickQueueHead\(\[/.test(src), "三個來源要用 pickQueueHead 合成");
 });
+
+// 2026-09-24 每台機器自己的 2:1：自己交的不能自己驗，全站的 2:1 對單一台機器不成立（a-zhen 前面卡了 419 個任務）
+import { isFrontQueueAt, machineOwesVerify } from "./dispatch.ts";
+Deno.test("每台機器最近三次拿到的驗證不到兩次 → 先派驗證", () => {
+  assertEquals(machineOwesVerify([]), true, "剛開始先驗");
+  assertEquals(machineOwesVerify(["verify"]), true);
+  assertEquals(machineOwesVerify(["verify", "verify"]), false, "驗了兩次就照佇列");
+  assertEquals(machineOwesVerify(["task", "verify", "verify"]), false);
+  assertEquals(machineOwesVerify(["task", "task", "verify"]), true);
+  assertEquals(machineOwesVerify(["verify", "task", "task", "verify", "verify"]), true, "只看最近三次");
+});
+Deno.test("插隊段（2000 年以前）照舊優先", () => {
+  assertEquals(isFrontQueueAt("1979-12-31T23:57:00+00:00"), true);
+  assertEquals(isFrontQueueAt("2026-09-24T01:00:00Z"), false);
+  assertEquals(isFrontQueueAt(null), false);
+});

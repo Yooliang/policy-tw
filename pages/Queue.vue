@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
@@ -11,6 +11,15 @@ type Row = { pos: number; kind: 'task' | 'verify'; task_id: string; task_type: s
 
 const rows = ref<Row[] | null>(null)
 const failed = ref(false)
+// 誰領走了什麼（2026-09-24 小良哥：「a-zhen 領走的應該看的到吧」）：最近 30 分鐘的任務認領與驗證派發，只有代號、沒有 IP
+type Dispatch = { kind: 'task' | 'verify'; task_id: string; agent_name: string; dispatched_at: string; active_until: string }
+const recent = ref<Dispatch[]>([])
+const holderOf = computed(() => {
+  const m = new Map<string, Dispatch>()
+  const now = Date.now()
+  for (const d of recent.value) if (Date.parse(d.active_until) > now && !m.has(d.task_id)) m.set(d.task_id, d)
+  return m
+})
 
 usePageHead({ title: '派工佇列', description: '接下來 1000 筆會被領走的順序', noindex: true })
 
@@ -20,6 +29,11 @@ async function load() {
     const { data } = await withTimeoutAndRetry('queue preview', (signal) =>
       supabasePublic.rpc('queue_preview', { p_limit: 1000 }).abortSignal(signal).throwOnError())
     rows.value = (data ?? []) as Row[]
+    // 派出紀錄讀不到不影響佇列本身
+    try {
+      const { data: rd } = await supabasePublic.rpc('dispatch_recent', { p_minutes: 30 })
+      recent.value = (rd ?? []) as Dispatch[]
+    } catch { recent.value = [] }
   } catch (e) {
     console.info('[佇列] 讀取失敗', e)
     failed.value = true
@@ -80,6 +94,8 @@ const VERIFY_LABEL: Record<string, string> = {
   adjudication: '裁決',
 }
 const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
+const minsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000))
+const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 const when = (iso: string) => {
   const d = new Date(iso)
   if (d.getFullYear() < 1990) return '優先'
@@ -91,7 +107,18 @@ const when = (iso: string) => {
   <main class="max-w-5xl mx-auto px-4 py-6 text-sm">
     <p v-if="failed" class="text-red-600">佇列讀不到，<button class="underline" @click="load">重試</button>。</p>
     <p v-else-if="rows === null" class="text-slate-400">載入中…</p>
-    <ul v-else class="space-y-0.5">
+    <details v-if="rows !== null && recent.length > 0" class="mb-4 text-slate-600">
+      <summary class="cursor-pointer">最近 30 分鐘派出 {{ recent.length }} 筆（驗證 {{ recent.filter((d) => d.kind === 'verify').length }}／任務 {{ recent.filter((d) => d.kind === 'task').length }}）</summary>
+      <ul class="mt-1 space-y-0.5">
+        <li v-for="d in recent" :key="d.kind + d.task_id + d.dispatched_at" class="whitespace-nowrap overflow-hidden text-ellipsis">
+          <span class="text-slate-400 tabular-nums">{{ hhmm(d.dispatched_at) }}</span>
+          <span class="ml-1">{{ d.agent_name }}</span>
+          <span class="ml-1">{{ KIND_LABEL[d.kind] }}</span>
+          <span class="ml-1 text-slate-400">{{ d.task_id }}</span>
+        </li>
+      </ul>
+    </details>
+    <ul v-if="rows !== null && !failed" class="space-y-0.5">
       <li v-for="r in rows" :key="r.task_id" class="flex items-stretch gap-3 text-slate-700" :title="r.task_id">
         <span class="w-[30px] shrink-0 rounded-sm" :style="{ background: typeColor(r) }" aria-hidden="true"></span>
         <span class="py-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
@@ -101,6 +128,7 @@ const when = (iso: string) => {
           <span v-if="r.subject" class="ml-1 font-medium">{{ r.subject }}</span>
           <span v-if="r.region" class="ml-1 text-slate-500">{{ r.region }}</span>
           <span class="ml-1 text-slate-400">{{ when(r.queue_at) }}</span>
+          <span v-if="holderOf.get(r.task_id)" class="ml-1 text-amber-700">{{ holderOf.get(r.task_id)!.agent_name }} 處理中（剩 {{ minsLeft(holderOf.get(r.task_id)!.active_until) }} 分）</span>
         </span>
       </li>
     </ul>
