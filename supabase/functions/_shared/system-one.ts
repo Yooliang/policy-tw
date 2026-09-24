@@ -206,6 +206,9 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   policy_progress: ["policy_title", "status", "progress", "description"],
   // correction 走 flattenCorrection：攤成「<欄位>＝新值」＋ subject_name，不問 target_table／reason 這種頁面證明不了的東西
   correction: ["subject_name"],
+  // no_change 的 payload 沒有 name／title（2026-09-25 發現）：原本落到預設欄位，Jev 答票數預算那三維時一個字都沒看到，
+  // stamps_without_source／finding_too_thin／source_unrelated 全是空答。要看的是它宣告了什麼、查了哪裡、看到什麼
+  no_change: ["task_id", "outcome", "checked_urls", "finding"],
 };
 const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
 const PAGE_TEXT_MAX = 6000;

@@ -24,8 +24,11 @@ export const FOLLOWUP_CHOICES = {
 } as const;
 export type FollowupChoice = keyof typeof FOLLOWUP_CHOICES;
 
-/** 開任務的機率門檻：跟 Jev 其他會產生動作的判定同一個水準 */
-export const FOLLOWUP_MIN_PROBABILITY = 0.9;
+/**
+ * 開任務的機率門檻。原本 0.9（跟 Jev 其他會產生動作的判定同一個水準）；2026-09-25 小良哥改 0.85：
+ * Jev 判「該開」時多半沒把握（86 張只有 11 張到 0.9），0.85–0.9 那 3 張都是具體可查的事（同名不同人兩張、缺屆一張）。
+ */
+export const FOLLOWUP_MIN_PROBABILITY = 0.85;
 /** 太短的備註不問：講不出範圍外的事 */
 export const FOLLOWUP_MIN_NOTE = 30;
 
