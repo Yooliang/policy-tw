@@ -602,6 +602,50 @@ Deno.serve(async (req) => {
       return json({ success: true, balance_usd: Number((credits - usage).toFixed(2)) });
     }
 
+    // ---- submission_followups：補跑——已交的提交補讀一輪說明（2026-09-26 小良哥「先補跑一輪」）----
+    // 新進的提交在票數預算那次呼叫就會問（#269）；這裡給之前就交了的。一筆一次 Jev、只問 followup 這一題。
+    // since_hours 預設 168（7 天）、limit 預設 60（上限 200）；dry=1 只回判定、不寫紀錄不開任務。
+    if (action === "submission_followups") {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const dry = url.searchParams.get("dry") === "1";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
+      const sinceHours = Math.min(Math.max(Number(url.searchParams.get("since_hours")) || 168, 1), 24 * 30);
+      const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
+      // query-bounds: ok — 有 order 有 limit（1000）
+      const { data: rows, error: cErr } = await supabase.from("contributions")
+        .select("id, contribution_type, payload, note, agent_name, created_at, applied_politician_id, applied_policy_id")
+        .gte("created_at", since).order("created_at", { ascending: false }).limit(1000);
+      if (cErr) throw new Error(`submission followups: ${cErr.message}`);
+      const withText = ((rows ?? []) as SubmissionForFollowup[]).filter(worthAskingSubmission);
+      const ids = withText.map((c) => c.id);
+      // query-bounds: ok — in() 最多 1000 個 id，一個 id 最多一兩筆判定
+      const { data: done } = ids.length > 0
+        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "contribution").eq("question", "followup").in("subject_id", ids).limit(1000)
+        : { data: [] };
+      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+      const todo = withText.filter((c) => !doneSet.has(c.id));
+      const list = todo.slice(0, limit);
+      const startedAt = Date.now();
+      let asked = 0;
+      const found: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < list.length && Date.now() - startedAt < 100_000; i += 5) {
+        const chunk = list.slice(i, i + 5);
+        const results = await Promise.allSettled(chunk.map(async (c) => {
+          const state = { target: claimOf(c.contribution_type, (c.payload ?? {}) as Record<string, unknown>), contribution_type: c.contribution_type, submission_text: submissionText(c) };
+          const res = await askJev(apiKey, state, { followup: SUBMISSION_FOLLOWUP_QUESTION });
+          const ans = res.answers.followup;
+          const choice = String(ans?.choice ?? "none");
+          const prob = ans?.probabilities?.[choice] ?? 0;
+          if (choice !== "none") found.push({ id: c.id, type: c.contribution_type, choice, probability: Number(prob.toFixed(2)), text: submissionText(c).slice(0, 200) });
+          if (!dry) await settleSubmissionFollowup(supabase, c, ans, res.model);
+        }));
+        asked += results.filter((r) => r.status === "fulfilled").length;
+        for (const r of results) if (r.status === "rejected") console.error("submission_followups:", r.reason);
+      }
+      return json({ success: true, dry, candidates: todo.length, asked, remaining: Math.max(0, todo.length - asked), flagged: found.length, opened_threshold: FOLLOWUP_MIN_PROBABILITY, found });
+    }
+
     // ---- followups：Jev 讀投票備註，範圍外的問題開成任務（2026-09-23 小良哥）----
     // 協議叫驗證者把範圍外的缺陷另提 task_suggestion，實際上多半只寫在 note 裡、沒有下游。
     // dry=1：只回判定結果，不寫紀錄、不開任務（拿來掃一遍現況）。
