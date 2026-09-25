@@ -13,6 +13,8 @@ import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
+import { fetchSource, hasUsableText } from "./system-one.ts";
+import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./apply-contribution.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -60,6 +62,64 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ---- no_change＋unreachable：交件時伺服器當場試抓一次（2026-09-26 裁決） ----
+//
+// 「打不開」沒有資訊量，卻常常其實抓得到（原文 404 但 archive.org 有存檔、403 加 UA 就開）。
+// 讓它跟其他宣稱一樣排隊等兩三票認可，等於叫另一個代理去驗證「我什麼都沒看到」——沒東西可驗。
+// 抓得到就直接告訴代理去哪裡看（回 400，不算退件）；全部抓不到，這一次嘗試本身就是成果，
+// 記下來就好，不必為了「沒有東西」再排隊等票（apply-contribution.ts 的 applyNoChange 早就這樣待 auto: 任務）。
+export const UNREACHABLE_PRECHECK_URL_LIMIT = 3;
+export const UNREACHABLE_PRECHECK_BUDGET_MS = 20_000;
+
+export interface PrecheckAttempt {
+  url: string;
+  note: string;
+}
+export interface PrecheckResult {
+  /** 抓到可用正文的第一個網址（含 archive.org 的存檔網址，因為那就是「系統實際看到內容」的地方）；全部抓不到就是 null */
+  fetchedUrl: string | null;
+  attempts: PrecheckAttempt[];
+}
+
+/**
+ * 對代理回報 unreachable 的網址，伺服器自己也試一次。fetchSource（system-one.ts）已經帶瀏覽器 UA、
+ * 4xx／5xx／逾時會自動回退到 web.archive.org，這裡不重新發明——「有沒有可用正文」一樣用它的既有門檻
+ * （hasUsableText）。总时限抓 UNREACHABLE_PRECHECK_BUDGET_MS：時間到還沒有結果的網址算「來不及確認」，
+ * 不能讓伺服器自己的試抓拖住代理的交件。
+ */
+export async function precheckUnreachable(urls: readonly string[], fetchImpl: typeof fetch = fetch): Promise<PrecheckResult> {
+  const targets = urls.slice(0, UNREACHABLE_PRECHECK_URL_LIMIT);
+  const attempts: PrecheckAttempt[] = [];
+  if (targets.length === 0) return { fetchedUrl: null, attempts };
+
+  const timedOut = Symbol("unreachable_precheck_timeout");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<typeof timedOut>((resolve) => {
+    timer = setTimeout(() => resolve(timedOut), UNREACHABLE_PRECHECK_BUDGET_MS);
+  });
+  const runs = Promise.allSettled(targets.map(async (url) => ({ url, result: await fetchSource(url, fetchImpl) })));
+
+  const settled = await Promise.race([runs, budget]);
+  if (timer) clearTimeout(timer);
+  if (settled === timedOut) {
+    for (const url of targets) attempts.push({ url, note: `逾時（伺服器 ${UNREACHABLE_PRECHECK_BUDGET_MS / 1000} 秒內沒試完）` });
+    return { fetchedUrl: null, attempts };
+  }
+
+  let fetchedUrl: string | null = null;
+  for (const s of settled) {
+    if (s.status === "fulfilled") {
+      const { url, result } = s.value;
+      attempts.push({ url, note: result.note });
+      // 名字比對交給代理自己判斷內容；伺服器這一關只問「有沒有可用正文」，門檻照抄 hasUsableText，不另外發明
+      if (!fetchedUrl && result.kind === "html" && hasUsableText(result.text, [])) fetchedUrl = url;
+    } else {
+      attempts.push({ url: "?", note: `試抓例外：${s.reason instanceof Error ? s.reason.message : String(s.reason)}` });
+    }
+  }
+  return { fetchedUrl, attempts };
+}
+
 /** 投票端（預設 handleVerify；測試可換掉） */
 export type VerifyFn = typeof handleVerify;
 
@@ -101,7 +161,17 @@ function mergeNote(agentName: string, sourceUrls: readonly string[], note: strin
   return [head, src, own].filter(Boolean).join(" ").slice(0, 2000);
 }
 
-export async function handleContribute(supabase: SupabaseLike, supabaseUrl: string, body: unknown, ipHash: string, verifyFn: VerifyFn = handleVerify, via = "contribute"): Promise<HandlerResult> {
+export async function handleContribute(
+  supabase: SupabaseLike,
+  supabaseUrl: string,
+  body: unknown,
+  ipHash: string,
+  verifyFn: VerifyFn = handleVerify,
+  via = "contribute",
+  fetchImpl: typeof fetch = fetch,
+  // 測試用：注入一個會丟例外的假試抓，驗證「試抓本身出錯」真的照舊收成 pending（不是沒東西可測的空話）
+  precheckFn: typeof precheckUnreachable = precheckUnreachable,
+): Promise<HandlerResult> {
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -247,9 +317,49 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
     };
   }
 
+  // no_change＋outcome:unreachable：伺服器當場試抓一次（2026-09-26 裁決，見上方 precheckUnreachable）。
+  // 抓得到就整批 400 退回（不算被拒，代理照系統抓到的內容改判 confirmed／not_found）；
+  // 全部抓不到，這筆改成落庫時就是 applied、不進投票——bypassNotes 記著要寫進 review_notes 的話。
+  const bypassNotes = new Map<number, string>();
+  {
+    const unreachableCandidates = validation.items
+      .map((item, i) => ({ item, i }))
+      .filter(({ item, i }) =>
+        item.contribution_type === "no_change" && !blocked.has(i) && !mergedByIndex.has(i) && !existingByHash.has(hashes[i]) &&
+        (item.payload as Record<string, unknown>).outcome === "unreachable"
+      );
+    for (const { item, i } of unreachableCandidates) {
+      const payload = item.payload as Record<string, unknown>;
+      const urls = Array.isArray(payload.checked_urls) ? (payload.checked_urls as unknown[]).filter((u): u is string => typeof u === "string") : [];
+      try {
+        const check = await precheckFn(urls, fetchImpl);
+        if (check.fetchedUrl) {
+          try {
+            await supabase.from("gate_rejections").insert({ gate: "unreachable_but_fetchable", endpoint: via, contribution_id: null, ip_hash: ipHash });
+          } catch { /* 記不成不影響回應 */ }
+          return {
+            status: 400,
+            body: {
+              success: false,
+              error: "unreachable_but_fetchable",
+              message: `系統剛剛也試了一次，${check.fetchedUrl} 打得開（或它的網路存檔有內容）。這不算退件——請照系統抓到的內容改判 confirmed 或 not_found，不要回 unreachable。`,
+              fetched_url: check.fetchedUrl,
+              attempts: check.attempts,
+            },
+          };
+        }
+        const tried = check.attempts.map((a) => `${a.url}（${a.note}）`).join("；") || "沒有可試的網址";
+        bypassNotes.set(i, `[系統] 打不開：伺服器也抓不到——${tried}。只記一次嘗試，不進投票。`);
+      } catch (e) {
+        // 試抓本身出錯（程式例外）：不能讓系統自己的錯擋掉代理，照舊收成 pending
+        console.error("unreachable precheck failed:", e instanceof Error ? e.message : String(e));
+      }
+    }
+  }
+
   const toInsert = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
-    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i))
+    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i))
     .map(({ item, hash }) => ({
       contribution_type: item.contribution_type,
       payload: item.payload,
@@ -275,6 +385,52 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
   const insertedByHash = new Map(inserted.map((r) => [r.payload_hash, r.id]));
 
+  // 打不開、系統也抓不到的 no_change：直接寫進 contributions 再立刻落庫為 applied，不進投票佇列
+  // （applyNoChange 自己知道 auto: 任務要記 task_checks、手動任務只記錄不關，見 apply-contribution.ts）
+  const bypassResults = new Map<number, { id: string; outcome: ApplyOutcome }>();
+  for (const [i, reviewNote] of bypassNotes) {
+    const item = validation.items[i];
+    const insertRow = {
+      contribution_type: item.contribution_type,
+      payload: item.payload,
+      source_urls: item.source_urls,
+      note: item.note ?? null,
+      task_id: item.task_id ?? null,
+      agent_name: validation.contributor.agent_name,
+      agent_tool: validation.contributor.agent_tool ?? null,
+      contributor_url: validation.contributor.url ?? null,
+      contributor_ip_hash: ipHash,
+      actor_id: actor.actor_id,
+      payload_hash: hashes[i],
+      via,
+    };
+    const { data: insertedRow, error: insertError } = await supabase.from("contributions").insert(insertRow).select("id").maybeSingle();
+    if (insertError) throw new Error(`contributions insert (unreachable bypass): ${insertError.message}`);
+    const id = (insertedRow as { id?: string } | null)?.id;
+    if (!id) throw new Error("contributions insert (unreachable bypass) 沒有回傳 id");
+    const outcome = await applyContribution(supabase, {
+      id,
+      contribution_type: item.contribution_type,
+      payload: item.payload,
+      source_urls: item.source_urls,
+      note: item.note ?? null,
+      agent_name: validation.contributor.agent_name,
+      contributor_url: validation.contributor.url ?? null,
+      task_id: item.task_id ?? null,
+    });
+    const status = contributionStatusFor(outcome.status);
+    const now = new Date().toISOString();
+    const { error: updateError } = await supabase.from("contributions").update({
+      status,
+      review_notes: reviewNote,
+      reviewed_by: "system:unreachable-precheck",
+      reviewed_at: now,
+      applied_at: status === "applied" ? now : null,
+    }).eq("id", id);
+    if (updateError) console.error("unreachable bypass status update failed:", updateError.message);
+    bypassResults.set(i, { id, outcome });
+  }
+
   // 提交後釋放該任務的軟認領（別人可以接手同一目標）
   const taskIds = [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"))];
   if (taskIds.length > 0) {
@@ -283,6 +439,18 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
   }
 
   const results = validation.items.map((item, i) => {
+    const bypass = bypassResults.get(i);
+    if (bypass) {
+      return {
+        index: i,
+        contribution_type: item.contribution_type,
+        contribution_id: bypass.id,
+        status: "applied",
+        message: `已記錄這次嘗試：${bypass.outcome.message}。不需要別人驗證。`,
+        task_id: bypass.outcome.task_id,
+        review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${bypass.id}`,
+      };
+    }
     const merged = mergedByIndex.get(i);
     if (merged) {
       return {
@@ -339,6 +507,9 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       body: { success: false, error: "already_submitted", message: results[0].message, ...(single ? results[0] : { results }), docs: `${SITE_URL}/skill.md` },
     };
   }
+  const trailingVoteNote = needs.length > 0
+    ? `；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`
+    : "";
   return {
     status: 201,
     body: {
@@ -346,11 +517,14 @@ export async function handleContribute(supabase: SupabaseLike, supabaseUrl: stri
       message: [
         `已收到 ${inserted.length} 筆新貢獻`,
         mergedByIndex.size > 0 ? `${mergedByIndex.size} 筆與別人交過的是同一件事，改記為對那幾筆的同意票` : "",
-        results.length - inserted.length - mergedByIndex.size > 0 ? `${results.length - inserted.length - mergedByIndex.size} 筆重複` : "",
-      ].filter(Boolean).join("；") + `；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`,
+        bypassResults.size > 0 ? `${bypassResults.size} 筆打不開、系統也抓不到，已直接記錄這次嘗試（不進投票）` : "",
+        results.length - inserted.length - mergedByIndex.size - bypassResults.size > 0
+          ? `${results.length - inserted.length - mergedByIndex.size - bypassResults.size} 筆重複`
+          : "",
+      ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
-      daily_quota: { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, used: used + inserted.length },
+      daily_quota: { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, used: used + inserted.length + bypassResults.size },
       docs: `${SITE_URL}/skill.md`,
     },
   };

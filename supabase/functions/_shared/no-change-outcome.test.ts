@@ -198,3 +198,58 @@ Deno.test("舊資料的 task_id 不是任務編號：記成 superseded，不去�
   const out = await applyContribution(db, row("李玫-新竹市-2026縣市議員", "not_found"));
   assertEquals(out.status, "superseded");
 });
+
+/** 假 supabase：一個確實存在的手動任務，可以觀察 closeTask 的 update 有沒有被呼叫 */
+function fakeManualTaskDb(taskId: string, taskType = "policy_source_missing") {
+  const inserted: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const updates: Array<{ table: string; patch: Record<string, unknown> }> = [];
+  const db = {
+    from: (table: string) => ({
+      insert: (row: Record<string, unknown>) => { inserted.push({ table, row }); return { error: null }; },
+      select: (_c: string) => ({
+        eq: (_k: string, id: string) => ({ maybeSingle: async () => ({ data: id === taskId ? { id, task_type: taskType } : null, error: null }) }),
+      }),
+      update: (patch: Record<string, unknown>) => ({
+        eq: (_c: string, id: string) => {
+          updates.push({ table, patch });
+          return { select: () => ({ maybeSingle: async () => ({ data: { id, ...patch }, error: null }) }) };
+        },
+      }),
+    }),
+  };
+  return { db, inserted, updates };
+}
+
+// 2026-09-26：打不開的 no_change 不進投票，伺服器（contribute-handler.ts）當場試抓一次；
+// 這裡守的是 apply 這一端——手動任務被回報 unreachable 時，任務要留著換人再試，不能跟 confirmed／not_found 一樣直接關掉。
+Deno.test("手動任務打不開：只記錄不關閉，任務留著換人再試", async () => {
+  const MANUAL = "55555555-5555-4555-8555-555555555555";
+  const { db, updates } = fakeManualTaskDb(MANUAL);
+  const out = await applyContribution(db, row(MANUAL, "unreachable"));
+  assertEquals(out.status, "applied", "打不開仍然是成功落庫（記錄本身就是成果）");
+  assert(out.message.includes("留著") || out.message.includes("不會關閉"), `訊息要講清楚任務沒有結案，實際是：${out.message}`);
+  assertEquals(updates.filter((u) => u.table === "contribution_tasks").length, 0, "unreachable 不能關手動任務——換人再試的前提是任務還開著");
+});
+
+Deno.test("手動任務打不開、但任務已經不存在：記成 superseded，不是硬掰一個「已記錄」", async () => {
+  const MANUAL = "77777777-7777-4777-8777-777777777777";
+  // fakeManualTaskDb 只認得自己那個 taskId；查一個不存在的 id 會回 null，模擬任務被刪掉的情況
+  const { db, updates } = fakeManualTaskDb("00000000-0000-4000-8000-000000000000");
+  const out = await applyContribution(db, row(MANUAL, "unreachable"));
+  assertEquals(out.status, "superseded", "任務不存在就沒有「留給別人接手」這回事");
+  assertEquals(updates.length, 0);
+});
+
+Deno.test("手動任務查完有結果（confirmed／not_found）：照常關閉任務，不受這次改動影響", async () => {
+  const MANUAL = "66666666-6666-4666-8666-666666666666";
+  for (const outcome of ["confirmed", "not_found"]) {
+    const { db, updates } = fakeManualTaskDb(MANUAL);
+    const out = await applyContribution(db, row(MANUAL, outcome));
+    assertEquals(out.status, "applied");
+    assertEquals(
+      updates.filter((u) => u.table === "contribution_tasks" && u.patch.status === "closed").length,
+      1,
+      `outcome=${outcome} 應該照常關閉任務——只有 unreachable 才不關`,
+    );
+  }
+});

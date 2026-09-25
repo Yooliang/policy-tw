@@ -731,15 +731,25 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
   // 提問任務不因 no_change 關閉（2026-09-20）：關了就沒人再答，訪客永遠看到「正在查證」。新的 no_change 在 contribute 就會被擋，這裡守舊資料。
-  // 測試的假 supabase 只有 update／insert：查不到型別就當非提問（真 DB 一定查得到）
-  let taskType: string | null = null;
+  // 這次查詢順便拿來判斷任務存不存在（unreachable 分支要用，不能只靠 closeTask 的回傳值判斷）。
+  // 測試的假 supabase 只有 update／insert：查不到就當非提問、當任務不存在（真 DB 一定查得到）
+  let manualTask: { task_type?: string } | null = null;
   try {
     // query-bounds: ok — 按 id 查一列（maybeSingle），鏈被拆開只是為了容忍測試的假 supabase
     const q = supabase.from("contribution_tasks") as { select?: (cols: string) => { eq: (k: string, v: unknown) => { maybeSingle: () => Promise<{ data: { task_type?: string } | null }> } } };
-    if (typeof q.select === "function") taskType = (await q.select("id, task_type").eq("id", taskId).maybeSingle()).data?.task_type ?? null;
-  } catch { /* 查不到就當非提問 */ }
-  if (taskType === "question") {
+    if (typeof q.select === "function") manualTask = (await q.select("id, task_type").eq("id", taskId).maybeSingle()).data ?? null;
+  } catch { /* 查不到就當非提問、當任務不存在 */ }
+  if (manualTask?.task_type === "question") {
     return { status: "applied", message: "已記錄；提問任務不因 no_change 關閉，仍等有人用 question_answer 回一份說明", task_id: taskId };
+  }
+  // 打不開不能關手動任務（2026-09-26）：「查不到來源」不是「這個任務做完了」，任務要留著換人再試，
+  // 不然這條死路就永遠沒人再碰（跟 auto: 任務的 task_unreachable_cooldown 是同一個道理，只是手動任務沒有冷卻機制、
+  // 靠「不關」讓它繼續留在佇列裡）。contribute 端已經先讓伺服器自己試抓過一次，這裡收到的 unreachable
+  // 都是系統也抓不到的，不是代理偷懶。
+  const outcome = str(row.payload.outcome) ?? null;
+  if (outcome === "unreachable") {
+    if (!manualTask) return { status: "superseded", message: `任務 ${taskId} 已不存在，這筆無異動沒有可關的任務，不重試` };
+    return { status: "applied", message: `已記錄「拿不到來源、未能確認」：任務 ${taskId} 留著給別人接手，不會關閉`, task_id: taskId };
   }
   const task = await closeTask(supabase, taskId, row.agent_name);
   // 任務已經不存在（被刪了）：沒有東西可關，重試也不會變（2026-09-25 第一次出現 apply_failed，重試三次後會被當落庫失敗退件）
