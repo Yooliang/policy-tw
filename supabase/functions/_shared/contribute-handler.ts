@@ -112,7 +112,8 @@ export async function precheckUnreachable(urls: readonly string[], fetchImpl: ty
       const { url, result } = s.value;
       attempts.push({ url, note: result.note });
       // 名字比對交給代理自己判斷內容；伺服器這一關只問「有沒有可用正文」，門檻照抄 hasUsableText，不另外發明
-      if (!fetchedUrl && result.kind === "html" && hasUsableText(result.text, [])) fetchedUrl = url;
+      // 內容是從存檔回退拿到的（note 帶 archive:）→ 直接給代理存檔網址，不然它照原網址再開一次還是 404
+      if (!fetchedUrl && result.kind === "html" && hasUsableText(result.text, [])) fetchedUrl = /archive:\d/.test(result.note ?? "") ? `https://web.archive.org/web/${url}` : url;
     } else {
       attempts.push({ url: "?", note: `試抓例外：${s.reason instanceof Error ? s.reason.message : String(s.reason)}` });
     }
