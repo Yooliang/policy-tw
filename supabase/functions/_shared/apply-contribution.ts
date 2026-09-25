@@ -254,7 +254,9 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     await recordInsert(supabase, ctx, "politician_elections", String(participation.id), after ?? { id: participation.id });
   } else {
     // 只記真的變的欄位：confirmed→confirmed 不進 edit_history
-    const after = { candidate_status: candidateStatus, source_note: newSourceNote, ...resultPatch };
+    // 選舉別換了（傳聞選縣市長、實際登記縣市議員）也要記進履歷，見 candidate-import.ts 的 electionTypeSwitch
+    const switched = before && before.election_type !== electionType ? { election_type: electionType, position: str(p.position) ?? `${electionType}候選人` } : {};
+    const after = { candidate_status: candidateStatus, source_note: newSourceNote, ...resultPatch, ...switched };
     for (const [field, oldValue, newValue] of changedFields(before ?? null, after)) {
       await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), field, oldValue, newValue);
     }

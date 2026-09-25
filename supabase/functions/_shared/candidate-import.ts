@@ -212,6 +212,30 @@ export function guardNotRunning(
 }
 
 /** politician_elections 找或建（同一人同一場只一筆）。 */
+/** 正式的參選狀態：選委會登記過、審定過、或已投票有結果 */
+export const OFFICIAL_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["registered", "qualified", "confirmed", "elected", "defeated"]);
+
+/**
+ * 同一年只有一列（主鍵 politician_id＋election_id），但同一年有好幾種選舉（縣市長、縣市議員…）。
+ * 2026-09-25：高嘉瑜被 AI 匯入成「可能選台北市長（rumored→not_running）」，之後中選會名冊證實她登記的是台北市議員；
+ * 落庫只改了狀態，選舉別與職稱沒改，網站就顯示她「登記參選台北市長」。詹琬蓁、呂黃春金同一型。
+ *
+ * 規則：選舉別不同時——
+ *   - 原本那列不是正式狀態（傳聞、可能、不參選）→ 整列改成新的選舉別與職稱（她實際選的是這個）
+ *   - 原本那列已是正式狀態 → 擋下：同一次選舉不能登記兩種，兩筆必有一筆錯，不能靜靜蓋掉
+ * 回傳要改的欄位；不需要改選舉別時回 {}。
+ */
+export function electionTypeSwitch(
+  existing: { election_type?: string | null; candidate_status?: string | null },
+  input: { election_type?: string | null; position?: string | null },
+): Record<string, unknown> {
+  if (!input.election_type || !existing.election_type || existing.election_type === input.election_type) return {};
+  if (OFFICIAL_CANDIDATE_STATUSES.has(String(existing.candidate_status))) {
+    throw new Error(`同一年已有「${existing.election_type}」的正式參選紀錄（${existing.candidate_status}），不能再寫成「${input.election_type}」——兩筆必有一筆錯，請先核對`);
+  }
+  return { election_type: input.election_type, ...(input.position ? { position: input.position } : {}) };
+}
+
 export async function upsertParticipation(
   supabase: SupabaseLike,
   input: ParticipationInput,
@@ -220,16 +244,18 @@ export async function upsertParticipation(
   input = { ...input, candidate_status: guarded.candidate_status, source_note: guarded.source_note };
   const { data: existing, error } = await supabase
     .from("politician_elections")
-    .select("id, candidate_status")
+    .select("id, candidate_status, election_type")
     .eq("politician_id", input.politician_id)
     .eq("election_id", input.election_id)
     .maybeSingle();
   throwIf(error, "politician_elections lookup");
 
   if (existing) {
+    const typeSwitch = electionTypeSwitch(existing, input);
     const { error: updateError } = await supabase
       .from("politician_elections")
       .update({
+        ...typeSwitch,
         ...(input.candidate_status ? { candidate_status: input.candidate_status } : {}),
         ...(input.source_note !== undefined ? { source_note: input.source_note } : {}),
         ...(input.always ?? {}),
