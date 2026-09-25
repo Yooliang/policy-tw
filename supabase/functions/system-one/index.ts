@@ -619,10 +619,19 @@ Deno.serve(async (req) => {
       if (cErr) throw new Error(`submission followups: ${cErr.message}`);
       const withText = ((rows ?? []) as SubmissionForFollowup[]).filter(worthAskingSubmission);
       const ids = withText.map((c) => c.id);
-      // query-bounds: ok — in() 最多 1000 個 id，一個 id 最多一兩筆判定
-      const { data: done } = ids.length > 0
-        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "contribution").eq("question", "followup").in("subject_id", ids).limit(1000)
-        : { data: [] };
+      // 已判過的：不用 in(ids)——851 個 uuid 塞進網址會超長、查詢失敗又被忽略，doneSet 變空，同一批 200 筆被重問 60 輪（09-26）。
+      // 改成撈這段時間內所有 contribution 的 followup 判定（判定一定晚於提交），分頁撈完
+      const doneIds: string[] = [];
+      for (let from = 0; ; from += 1000) {
+        // query-bounds: ok — 有 order、range 分頁
+        const { data: page, error: dErr } = await supabase.from("jev_decisions").select("subject_id")
+          .eq("subject_type", "contribution").eq("question", "followup").gte("asked_at", since)
+          .order("id", { ascending: true }).range(from, from + 999);
+        if (dErr) throw new Error(`followup done lookup: ${dErr.message}`);
+        doneIds.push(...((page ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+        if (!page || page.length < 1000) break;
+      }
+      const done = doneIds.map((subject_id) => ({ subject_id }));
       const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
       const todo = withText.filter((c) => !doneSet.has(c.id));
       const list = todo.slice(0, limit);
