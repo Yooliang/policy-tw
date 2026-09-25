@@ -179,3 +179,16 @@ Deno.test("unreachable 的回覆要講清楚它會換人再試，不是結案", 
   assert(out.message.includes(String(TASK_UNREACHABLE_COOLDOWN_DAYS)), "要告訴代理幾天後會再派");
   assert(!out.message.includes("無異動"), "「拿不到來源」不是「查過、沒有異動」");
 });
+
+// 2026-09-25：手動任務已經被刪掉，無異動沒有東西可關——不是落庫失敗，不該重試到退件
+Deno.test("手動任務已不存在：無異動記成 superseded，不是 failed", async () => {
+  const db = {
+    from: (_t: string) => ({
+      insert: () => ({ error: null }),
+      select: (_c: string) => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      update: () => ({ eq: () => ({ select: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
+    }),
+  };
+  const out = await applyContribution(db, row("a702f5e7-8b79-4719-85d3-f6543f3f5e13", "unreachable"));
+  assertEquals(out.status, "superseded");
+});
