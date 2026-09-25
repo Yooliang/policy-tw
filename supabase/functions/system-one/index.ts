@@ -34,7 +34,7 @@ import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, 
  */
 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
-import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, worthAsking, type FollowupChoice, type FollowupContribution, type FollowupVote } from "../_shared/vote-followup.ts";
+import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
@@ -96,6 +96,24 @@ async function askPolicy(supabase: Sb, apiKey: string, policyId: string) {
   return { model: res.model, answers: res.answers, cost_usd: res.usage.cost, ...wrote };
 }
 
+/** 提交說明的範圍外問題：記錄判定，≥門檻且同一目標沒有 open 任務就開（跟投票備註同一套） */
+async function settleSubmissionFollowup(
+  supabase: Sb, c: SubmissionForFollowup, ans: { choice?: string; probabilities?: Record<string, number>; confidence?: number | null } | undefined, model: string,
+) {
+  const choice = (ans?.choice ?? "none") as FollowupChoice;
+  const prob = ans?.probabilities?.[choice] ?? 0;
+  await insertRecords(supabase, [{ subject_type: "contribution", subject_id: c.id, question: "followup", choice, probability: prob, confidence: ans?.confidence ?? null,
+    probabilities: ans?.probabilities ?? null, model, state: { submission_text: submissionText(c) }, cost_usd: 0 }]);
+  if (choice === "none" || prob < FOLLOWUP_MIN_PROBABILITY) return;
+  const p = c.payload ?? {};
+  const pid = (c.applied_politician_id ?? (typeof p.politician_id === "string" ? p.politician_id : null)) as string | null;
+  const { data: who } = pid ? await supabase.from("politicians").select("name").eq("id", pid).maybeSingle() : { data: null };
+  const task = submissionFollowupTask(c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
+  const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
+  if (existing) return;
+  await createTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup" });
+}
+
 type VoteBudgetRow = { id: string; contribution_type: string; payload: Record<string, unknown> | null; source_urls: string[] | null };
 
 /**
@@ -123,7 +141,13 @@ async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, req
     // 看不出回退有沒有出手；每一層都只回報自己看到的，這三個數字就是在補「沒看到什麼」。
     page: page ? { url: page.url, text: page.text, note: page.note } : { url: null, text: "", note: "抓不到正文" },
   };
-  const res = await askJev(apiKey, state, dimensionQuestions(c.contribution_type));
+  // 提交說明裡的範圍外問題：同一次呼叫多問一題（2026-09-26），不另外花一次 Jev
+  // query-bounds: ok — 按 id 取一列
+  const { data: meta } = await supabase.from("contributions").select("note, agent_name, created_at, applied_politician_id, applied_policy_id").eq("id", c.id).maybeSingle();
+  const sub: SubmissionForFollowup = { id: c.id, contribution_type: c.contribution_type, payload: payload, ...((meta ?? {}) as Record<string, unknown>) };
+  const askFollowup = worthAskingSubmission(sub);
+  if (askFollowup) state.submission_text = submissionText(sub);
+  const res = await askJev(apiKey, state, { ...dimensionQuestions(c.contribution_type), ...(askFollowup ? { followup: SUBMISSION_FOLLOWUP_QUESTION } : {}) });
   const budget = computeVoteBudget(c.contribution_type, res.answers, cecConfirmed);
 
   await insertRecords(supabase, [{
@@ -132,6 +156,9 @@ async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, req
     probabilities: Object.fromEntries(budget.dimensions.map((d) => [d.key, d.probability])),
     model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
   }]);
+  if (askFollowup) {
+    try { await settleSubmissionFollowup(supabase, sub, res.answers.followup, res.model); } catch (e) { console.error("submission followup:", e instanceof Error ? e.message : String(e)); }
+  }
   return { budget, cecConfirmed, cecNote, page, cost: Number(res.usage.cost.toFixed(8)) };
 }
 

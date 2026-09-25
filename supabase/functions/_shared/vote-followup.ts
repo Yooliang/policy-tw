@@ -113,3 +113,49 @@ export function followupTask(v: FollowupVote, c: FollowupContribution, choice: E
     ...(policyId && politicianId ? { target_extra: { politician_id: politicianId, followup_of_vote: v.id, followup_kind: choice } } : { target_extra: { followup_of_vote: v.id, followup_kind: choice } }),
   };
 }
+
+/**
+ * 提交本身的說明（2026-09-26 小良哥：「這個當初不是有做嗎，補上吧」）。
+ * 上面那套只讀投票備註；交件的 note、無異動的 finding、更正的 reason 裡也常順手寫到範圍外的事——
+ * 7 天約 2,500 筆有文字的提交，粗篩就有 65 筆（例：游智彬那筆的來源其實說他已棄選桃園、轉戰台北）。
+ * 不另外問 Jev：併進票數預算那一次呼叫（每筆待驗的提交本來就問一次），同一套選項與門檻。
+ */
+export interface SubmissionForFollowup extends FollowupContribution {
+  note?: string | null;
+  agent_name?: string | null;
+  created_at?: string | null;
+}
+
+export function submissionText(c: SubmissionForFollowup): string {
+  const p = c.payload ?? {};
+  return [c.note, p.finding, p.reason, p.note].map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean)
+    .filter((x, i, a) => a.indexOf(x) === i).join("\n").slice(0, 1500);
+}
+
+export const worthAskingSubmission = (c: SubmissionForFollowup): boolean => submissionText(c).length >= FOLLOWUP_MIN_NOTE;
+
+/** 放進票數預算那次呼叫的第 N 題；state 另外帶 submission_text */
+export const SUBMISSION_FOLLOWUP_QUESTION: JevQuestion = {
+  type: "choice",
+  instructions:
+    "submission_text 是提交者交這筆資料（target）時自己寫的說明。" +
+    "判斷它有沒有**另外**指出一個不屬於這筆提交本身的問題（別的欄位、別的人物、別條政見、別屆的紀錄），而且值得有人去查。" +
+    "說明只是在解釋這筆提交本身（查了哪裡、為什麼這樣填）→ none。提到範圍外問題 → 選問題落在的那一類。",
+  criteria: { ...FOLLOWUP_CHOICES },
+};
+
+export function submissionFollowupTask(c: SubmissionForFollowup, choice: Exclude<FollowupChoice, "none">, subjectName: string | null): TaskInput {
+  const base = followupTask({ id: c.id, verdict: "", note: submissionText(c), agent_name: c.agent_name ?? null, created_at: c.created_at ?? new Date().toISOString() }, c, choice, subjectName);
+  const who = subjectName ?? s(c.payload?.name) ?? s(c.payload?.politician_name) ?? "這筆資料";
+  const { followup_of_vote: _drop, ...extra } = (base.target_extra ?? {}) as Record<string, unknown>;
+  return {
+    ...base,
+    title: `核對${who}的${LABEL[choice]}（提交說明提到）`.slice(0, 120),
+    description: [
+      `提交者 ${c.agent_name ?? "（未具名）"} 交這筆資料（${c.contribution_type}，${c.id}）時在說明裡順手寫下：`,
+      `「${submissionText(c).slice(0, 1400)}」`,
+      "這是系統從說明裡撿出來的線索，不是結論。請自己打開來源查證：真的有錯就用 correction 等對應型別提交；查過發現沒問題就用 no_change 回報你查了什麼。",
+    ].join("\n"),
+    target_extra: { ...extra, followup_of_contribution: c.id, followup_kind: choice },
+  };
+}
