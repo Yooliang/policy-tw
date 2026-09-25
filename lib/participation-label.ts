@@ -46,3 +46,12 @@ export function participationLabel(e: ParticipationLike): string {
       return e.position || ''
   }
 }
+
+/**
+ * 現職欄存的是選舉名稱（「111年直轄市議員選舉」）就不當職稱顯示：879 位是早期匯入填錯的，
+ * 補基本資料任務會把它當缺派出去，代理補上真的現職後自然就顯示了。
+ */
+export function displayCurrentPosition(v?: string | null): string | undefined {
+  if (!v || /選舉\s*$/.test(v)) return undefined
+  return v
+}

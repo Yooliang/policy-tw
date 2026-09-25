@@ -225,3 +225,11 @@ Deno.test("no_change：task_id 要是 /next 給的形狀（uuid 或 auto:<型別
   assertEquals(req("a702f5e7-8b79-4719-85d3-f6543f3f5e13").errors.filter((e) => e.path === "payload.task_id"), []);
   assertEquals(req("auto:profile_gap:bbdb3cc2-39c5-488c-837f-938b64bcfb30").errors.filter((e) => e.path === "payload.task_id"), []);
 });
+
+// 2026-09-25：879 位的現職存成「111年直轄市議員選舉」，新交的不能再這樣寫
+Deno.test("現職不能是選舉名稱（politician 交件與更正都擋）", () => {
+  const pol = validateContributionRequest({ agent_name: "tester", contribution_type: "politician", source_urls: ["https://www.tcc.gov.tw/x"], payload: { name: "苗博雅", party: "社會民主黨", region: "台北市", birth_year: 1987, current_position: "111年直轄市議員選舉" } });
+  assertEquals(pol.errors.filter((e) => e.path === "payload.current_position").length, 1);
+  const cor = validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://www.tcc.gov.tw/x"], payload: { target_table: "politicians", target_id: "7eae0842-608a-4dd1-af74-1d20e4ca477e", reason: "議會官網寫的現職是台北市議員", changes: [{ field: "current_position", current_value: "台北市議員", correct_value: "111年直轄市議員選舉" }] } });
+  assertEquals(cor.errors.some((e) => e.path.endsWith("correct_value")), true);
+});
