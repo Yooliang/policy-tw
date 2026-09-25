@@ -737,7 +737,8 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     return { status: "applied", message: "已記錄；提問任務不因 no_change 關閉，仍等有人用 question_answer 回一份說明", task_id: taskId };
   }
   const task = await closeTask(supabase, taskId, row.agent_name);
-  if (!task) return { status: "failed", message: `找不到任務 ${taskId}` };
+  // 任務已經不存在（被刪了）：沒有東西可關，重試也不會變（2026-09-25 第一次出現 apply_failed，重試三次後會被當落庫失敗退件）
+  if (!task) return { status: "superseded", message: `任務 ${taskId} 已不存在，這筆無異動沒有可關的任務，不重試` };
   await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");
   return { status: "applied", message: `已記錄無異動並關閉任務 ${taskId}`, task_id: taskId };
 }
