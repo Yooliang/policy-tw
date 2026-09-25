@@ -1,3 +1,4 @@
+import { participationLabel } from '../lib/participation-label'
 import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
@@ -105,9 +106,10 @@ function mapElection(row: RawElection): Election {
 
 export function mapPolitician(row: RawPolitician): Politician {
   // Map elections array from the view (election-specific data)
+  // 職稱由選舉別＋縣市組出來，不照抄存的 position（2026-09-25：「111年直轄市議員選舉」掛在 2026、議員被寫成市長）
   const elections: PoliticianElectionData[] = (row.elections || []).map((e: RawPoliticianElectionData) => ({
     electionId: e.electionId,
-    position: e.position || '',
+    position: participationLabel({ electionType: e.electionType, position: e.position, region: e.region, subRegion: e.subRegion, village: e.village }),
     slogan: e.slogan || undefined,
     electionType: e.electionType || undefined,
     regionId: e.regionId || undefined,
@@ -121,6 +123,8 @@ export function mapPolitician(row: RawPolitician): Politician {
 
   // Get candidateStatus from the first election (for display purposes)
   const firstElection = elections[0];
+  // 人物層的職稱：最近一屆有在選的那一列組出來的；沒有參選紀錄才用人物表存的文字
+  const latest = [...elections].filter(e => e.candidateStatus !== 'not_running').sort((a, b) => b.electionId - a.electionId)[0];
 
   return {
     id: row.id,
@@ -129,7 +133,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     party: row.party,
     status: row.status,
     electionType: row.election_type,
-    position: row.position || '',
+    position: latest?.position || row.position || '',
     currentPosition: row.current_position || undefined,
     // Region from view (already JOINed with regions table for backward compat)
     region: row.region || '',
