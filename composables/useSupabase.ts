@@ -1,4 +1,4 @@
-import { participationLabel } from '../lib/participation-label'
+import { displayCurrentPosition, participationLabel } from '../lib/participation-label'
 import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
@@ -134,7 +134,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     status: row.status,
     electionType: row.election_type,
     position: latest?.position || row.position || '',
-    currentPosition: row.current_position || undefined,
+    currentPosition: displayCurrentPosition(row.current_position),
     // Region from view (already JOINed with regions table for backward compat)
     region: row.region || '',
     subRegion: row.sub_region || undefined,

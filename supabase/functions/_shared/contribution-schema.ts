@@ -7,6 +7,13 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
+/**
+ * 現職存成選舉名稱（「111年直轄市議員選舉」）是早期匯入留下的錯，879 位（2026-09-25）。
+ * 這個字尾在職稱裡不會出現，所以直接擋；補基本資料任務也把它當成缺（current_position_missing）。
+ */
+export const isElectionName = (v: unknown): boolean => typeof v === "string" && /選舉\s*$/.test(v);
+const CURRENT_POSITION_NOT_ELECTION = "現職要寫職稱（例如「台北市議員」「立法委員」），不是選舉名稱（「111年直轄市議員選舉」）";
+
 /** /next 給的 task_id 只有兩種形狀：手動任務 uuid、自動缺口 auto:<型別>:<對象> */
 export const isTaskIdShape = (v: unknown): boolean =>
   typeof v === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^auto:[a-z0-9_]+:\S+$/.test(v));
@@ -185,6 +192,7 @@ function validateHints(p: Obj, push: (path: string, message: string) => void): v
   if (p.party !== undefined && !isStr(p.party, 1, 50)) push("payload.party", "政黨要是非空字串");
   if (p.region !== undefined && !isStr(p.region, 2, 20)) push("payload.region", "縣市名要是字串（例：彰化縣）");
   if (p.current_position !== undefined && !isStr(p.current_position, 1, 200)) push("payload.current_position", "現職要是非空字串");
+  else if (p.current_position !== undefined && isElectionName(p.current_position)) push("payload.current_position", CURRENT_POSITION_NOT_ELECTION);
   if (p.election_type !== undefined && !oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `要是 ${ELECTION_TYPES.join("／")} 之一`);
 }
 
@@ -330,6 +338,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         const empty = c.correct_value === undefined || c.correct_value === null || c.correct_value === "";
         if (empty && !clearable) push(`${at}.correct_value`, "correct_value 必填");
         else if (empty) { /* 清空提出日期：合法 */ }
+        else if (table === "politicians" && c.field === "current_position" && isElectionName(c.correct_value)) push(`${at}.correct_value`, CURRENT_POSITION_NOT_ELECTION);
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
         else if (table === "policies" && c.field === "election_id" && !(isInt(c.correct_value) && KNOWN_ELECTION_IDS.includes(c.correct_value))) push(`${at}.correct_value`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);
