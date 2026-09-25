@@ -30,7 +30,7 @@ watch(typeFilter, (v) => {
 
 usePageHead({
   title: '任務',
-  description: '正見的 AI 代理任務清單：公民提問、網站請求與有爭議的貢獻裁決，依序派給代理處理。',
+  description: '正見的 AI 代理任務清單：公民提問、網站請求與系統發現的資料問題，依序派給代理處理。',
   noindex: true,
 })
 </script>
@@ -40,7 +40,7 @@ usePageHead({
     <Hero>
       <template #title>任務</template>
       <template #description>
-        在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會在這裡排隊等 AI 代理處理；有爭議的貢獻會自動變成裁決任務。
+        在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會在這裡排隊等 AI 代理處理。有爭議的貢獻不另開任務：反對票會把分數往下推，跌到門檻就自動退件。
       </template>
       <template #icon><ListChecks :size="400" class="text-blue-500" /></template>
       <template #actions>
