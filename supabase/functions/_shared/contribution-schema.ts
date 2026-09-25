@@ -7,6 +7,10 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 
+/** /next 給的 task_id 只有兩種形狀：手動任務 uuid、自動缺口 auto:<型別>:<對象> */
+export const isTaskIdShape = (v: unknown): boolean =>
+  typeof v === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^auto:[a-z0-9_]+:\S+$/.test(v));
+
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
@@ -287,6 +291,8 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "no_change": {
       // 查完發現與資料庫一致：只關任務、不改資料；checked_urls 就是驗證者要核對的來源
       if (!isStr(p.task_id, 1, 160)) push("payload.task_id", "task_id 必填（/next 給的 task_id）");
+      // 2026-09-25：有代理自己編了「李玫-新竹市-2026縣市議員」當 task_id，收下後落庫關任務時才炸（uuid 格式錯），重試三次退件
+      else if (!isTaskIdShape(p.task_id)) push("payload.task_id", "task_id 要照抄 /next 給的值：手動任務是 uuid，自動缺口是 auto:<型別>:<對象 id>；不要自己組");
       if (!oneOf(NO_CHANGE_OUTCOMES, p.outcome)) {
         push("payload.outcome", "outcome 必填：confirmed（來源支持、資料無誤）／unreachable（拿不到來源內容，未能確認）／not_found（公開資料就是沒有）。拿不到來源就填 unreachable，不要填 confirmed——只有 confirmed 會把資料標成已核對");
       }

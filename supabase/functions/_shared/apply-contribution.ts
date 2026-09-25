@@ -9,7 +9,7 @@
  * 每個 UPDATE／INSERT 都寫 edit_history（revert 用）；每一步檢查 error。
  */
 
-import { CORRECTION_FIELDS, type ContributionType } from "./contribution-schema.ts";
+import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
@@ -633,6 +633,8 @@ export const TASK_UNREACHABLE_COOLDOWN_DAYS = 2;
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
   if (!taskId) return { status: "failed", message: "no_change 要帶 task_id" };
+  // 舊資料：交件端 09-25 前不核格式，自己組的 task_id 會在關任務時炸 uuid 錯、重試到退件。沒有對應的任務就沒東西可關
+  if (!taskId.startsWith("auto:") && !isTaskIdShape(taskId)) return { status: "superseded", message: `task_id「${taskId}」不是 /next 給的任務編號，沒有可關的任務，不重試` };
   if (taskId.startsWith("auto:")) {
     // 自動缺口不是靠關閉任務消失的，它是即時算出來的。所以「查過了、沒東西可補」
     // 原本完全不留痕跡，同一筆死路會被無限重派給每一個代理，每個人都白跑一次。

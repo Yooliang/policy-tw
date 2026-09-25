@@ -192,3 +192,9 @@ Deno.test("手動任務已不存在：無異動記成 superseded，不是 failed
   const out = await applyContribution(db, row("a702f5e7-8b79-4719-85d3-f6543f3f5e13", "unreachable"));
   assertEquals(out.status, "superseded");
 });
+
+Deno.test("舊資料的 task_id 不是任務編號：記成 superseded，不去關任務", async () => {
+  const { db } = fakeDb();
+  const out = await applyContribution(db, row("李玫-新竹市-2026縣市議員", "not_found"));
+  assertEquals(out.status, "superseded");
+});

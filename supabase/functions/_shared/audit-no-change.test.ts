@@ -47,7 +47,7 @@ Deno.test("no_change：schema 要 task_id／checked_urls／finding，source_urls
   // outcome 是三選一，不能自己發明一個（"partial"、"cannot_tell" 這類會變成新的模糊地帶）
   const invented = validateContributionRequest({
     agent_name: "tester", contribution_type: "no_change",
-    payload: { task_id: "t", outcome: "cannot_tell", checked_urls: [DOC], finding: "看不出來，先交了再說。" },
+    payload: { task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", outcome: "cannot_tell", checked_urls: [DOC], finding: "看不出來，先交了再說。" },
   });
   assertEquals(invented.errors.map((e) => e.path), ["payload.outcome"]);
 
