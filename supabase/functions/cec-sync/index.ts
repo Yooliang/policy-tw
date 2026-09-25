@@ -163,7 +163,8 @@ Deno.serve(async (req) => {
   let startIndex = 0;
   if (resumeFromKey) {
     const idx = allUnits.findIndex((u) => unitKey(u) === resumeFromKey);
-    if (idx >= 0) startIndex = idx + 1;
+    // next 給的就是「下一個要處理的單位」本身，從它開始（原本 idx+1 會把它跳過：09-26 金門縣村里長整個漏掉、回應還是 success）
+    if (idx >= 0) startIndex = idx;
   }
 
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
