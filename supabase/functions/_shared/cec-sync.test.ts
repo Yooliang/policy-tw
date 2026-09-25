@@ -45,10 +45,8 @@ Deno.test("name_norm ④：原住民名的間隔號與附註英文拼音都要�
   assertEquals(cecNameNorm("谷辣斯·尤達卡"), "谷辣斯尤達卡");
 });
 
-Deno.test("name_norm：全形句點「．」NFKC 後會變成半形句點，殘留的句點不會被清掉——跟 SQL 版一樣的已知行為", () => {
-  // translate/regexp_replace 的移除清單裡也是全形「．」，NFKC 一律先跑，全形句點在那之前就已經變成半形「.」，
-  // 兩邊（TS／SQL）都會留下這個殘留句點；只要兩邊行為一致，比對時就不會因為這個字元對不起來。
-  assertEquals(cecNameNorm("谷辣斯．尤達卡"), "谷辣斯.尤達卡");
+Deno.test("name_norm：全形句點「．」NFKC 後變半形「.」，也要去掉（20260926000003 的 SQL 版同步）", () => {
+  assertEquals(cecNameNorm("谷辣斯．尤達卡"), "谷辣斯尤達卡");
 });
 
 Deno.test("name_norm ⑤：臺→台", () => {
@@ -56,10 +54,10 @@ Deno.test("name_norm ⑤：臺→台", () => {
 });
 
 Deno.test("name_norm 跟 SQL 函式 cec_name_norm 對齊：沒有拉丁附註時逐字相同", () => {
-  // migrations/20260926000001_cec_candidates.sql 的 cec_name_norm：
-  //   regexp_replace(translate(normalize(p, NFKC), '臺黄', '台黃'), '[\s·．・‧•]', '', 'g')
+  // migrations/20260926000003_cec_name_norm_dot.sql 的 cec_name_norm：
+  //   regexp_replace(translate(normalize(p, NFKC), '臺黄', '台黃'), '[\s·．.・‧•]', '', 'g')
   const sqlEquivalent = (p: string) =>
-    p.normalize("NFKC").replace(/臺/g, "台").replace(/黄/g, "黃").replace(/[\s·．・‧•]/g, "");
+    p.normalize("NFKC").replace(/臺/g, "台").replace(/黄/g, "黃").replace(/[\s·．.・‧•]/g, "");
   for (const name of ["蔡英文", "林佳龍", "黄珊珊", "臺南市長候選人", "谷辣斯．尤達卡"]) {
     assertEquals(cecNameNorm(name), sqlEquivalent(name), name);
   }

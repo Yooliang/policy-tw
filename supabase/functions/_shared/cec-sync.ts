@@ -52,7 +52,7 @@ export function cecNameNorm(raw: string | null | undefined): string {
     .normalize("NFKC")
     .replace(/臺/g, "台")
     .replace(/黄/g, "黃")
-    .replace(/[\s·．・‧•]/g, "");
+    .replace(/[\s·．.・‧•]/g, ""); // NFKC 會把全形「．」變成半形「.」，兩個都去（SQL 版 cec_name_norm 同步）
   return stripTrailingLatin(collapsed);
 }
 
