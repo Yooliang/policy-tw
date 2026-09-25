@@ -63,7 +63,6 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
   // 跟「已上線」講同一件事。讀者真正想看的是「正在被核對的那些」。
   { key: 'voting', label: '驗證中' },
   { key: 'applied', label: '已上線' },
-  { key: 'disputed', label: '爭議（舊制）' },
   { key: 'rejected', label: '已退件' },
   { key: 'reverted', label: '已還原' },
 ]
@@ -71,7 +70,6 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
 // 2026-09-18：長短交錯的按鈕列看起來是亂的，字數一致才整齊。
 const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: '', label: '全部型別' },
-  { key: 'adjudication', label: '裁決（已退場）' },
   { key: 'policy', label: '新增政見' },
   { key: 'no_change', label: '查無異動' },
   { key: 'politician', label: '人物資料' },
