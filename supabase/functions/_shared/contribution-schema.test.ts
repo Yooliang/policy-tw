@@ -217,3 +217,11 @@ Deno.test("no_change：task_id 放頂層也要過（灌進 payload 再驗）", (
   assertEquals(r.errors.filter((e) => e.path === "payload.task_id"), []);
   assertEquals((r.items[0]?.payload as { task_id?: string })?.task_id, "auto:policy_election_missing:00000000-0000-4000-8000-000000000001");
 });
+
+// 2026-09-25：代理自己組了「李玫-新竹市-2026縣市議員」當 task_id，收下後落庫關任務時炸 uuid 錯、重試三次退件
+Deno.test("no_change：task_id 要是 /next 給的形狀（uuid 或 auto:<型別>:<對象>）", () => {
+  const req = (task_id: string) => validateContributionRequest({ agent_name: "tester", contribution_type: "no_change", source_urls: ["https://news.ltn.com.tw/x"], payload: { task_id, outcome: "not_found", checked_urls: ["https://news.ltn.com.tw/x"], finding: "查了自由時報站內搜尋這個姓名，沒有任何報導。" } });
+  assertEquals(req("李玫-新竹市-2026縣市議員").errors.filter((e) => e.path === "payload.task_id").length, 1);
+  assertEquals(req("a702f5e7-8b79-4719-85d3-f6543f3f5e13").errors.filter((e) => e.path === "payload.task_id"), []);
+  assertEquals(req("auto:profile_gap:bbdb3cc2-39c5-488c-837f-938b64bcfb30").errors.filter((e) => e.path === "payload.task_id"), []);
+});
