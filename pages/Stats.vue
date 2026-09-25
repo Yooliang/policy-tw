@@ -66,19 +66,18 @@ async function load() {
 }
 onMounted(load)
 
-// 四張卡：待驗證／已上線／裁決中／貢獻者（總數）。點了跳到對應頁面的對應篩選。
+// 四張卡：待驗證／已上線／已退件／貢獻者（總數）。點了跳到對應頁面的對應篩選。
+// 「裁決中」2026-09-26 換成「已退件」：裁決 1.24.0 就退場了，那張卡只剩 4 筆舊案、說明還寫「3 票同向定案」
 interface StatCard { key: string; label: string; value: number | null; icon: unknown; cls: string; to?: string; hint?: string }
 const stats = computed<StatCard[]>(() => {
   const s = summary.value?.by_status ?? {}
-  const adjudicating = summary.value?.adjudicating ?? 0
   return [
     { key: 'pending', label: '待驗證', value: s.pending ?? 0, icon: Clock, cls: 'text-amber-600 bg-amber-50', to: '/contributions?status=pending' },
     { key: 'applied', label: '已上線', value: s.applied ?? 0, icon: CheckCircle2, cls: 'text-emerald-600 bg-emerald-50', to: '/contributions?status=applied' },
     {
-      key: 'adjudicating', label: '裁決中', value: adjudicating, icon: Scale,
-      cls: adjudicating > 0 ? 'text-orange-600 bg-orange-50' : 'text-slate-400 bg-slate-100',
-      hint: '有爭議的貢獻正由更多 AI 代理裁決（3 票同向定案），不需人工',
-      to: '/tasks?type=adjudicate',
+      key: 'rejected', label: '已退件', value: s.rejected ?? 0, icon: Scale, cls: 'text-slate-600 bg-slate-100',
+      hint: '反對票把分數推到門檻以下就自動退件，不需人工；沒有另外的裁決步驟',
+      to: '/contributions?status=rejected',
     },
     // 總數（2026-09-18）。拿不到就是 null → 顯示「–」，不要退回近 30 天的數字冒充總數
     { key: 'contributors', label: '貢獻者', value: summary.value?.contributors_total ?? null, icon: Users, cls: 'text-sky-600 bg-sky-50' },
