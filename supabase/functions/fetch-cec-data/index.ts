@@ -27,41 +27,18 @@ const corsHeaders = {
 };
 
 import { CEC_DATA_URL, CEC_QUERY_URL, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { CITY_CODES, CITY_NAME_BY_CODE, normalizeCityName as normalizeCity } from "../_shared/cec-city-codes.ts";
+import {
+  CEC_BASE,
+  type CecRow,
+  fetchCecJson,
+  locateRow as locate,
+  normalizeParty,
+  parseBirthYear,
+  SUBJECT_MAP,
+  USER_AGENT,
+} from "../_shared/cec-static-fetch.ts";
 
-const CEC_BASE = "https://db.cec.gov.tw/static/elections";
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 PolicyTracker/1.0";
-
-// 選舉類型對應（代碼沿用舊版，與 AdminScraper 一致）
-const SUBJECT_MAP: Record<string, { subjectId: string; legisId: string; defaultLevel: string }> = {
-  President: { subjectId: "P0", legisId: "00", defaultLevel: "N" },
-  Legislator: { subjectId: "L0", legisId: "L1", defaultLevel: "A" },
-  Mayor: { subjectId: "C1", legisId: "00", defaultLevel: "C" },
-  CountyMayor: { subjectId: "C2", legisId: "00", defaultLevel: "C" },
-  CouncilMember: { subjectId: "T1", legisId: "T1", defaultLevel: "A" },
-  CountyCouncilMember: { subjectId: "T2", legisId: "T1", defaultLevel: "A" },
-  CityMayor: { subjectId: "D2", legisId: "00", defaultLevel: "D" },
-  DistrictExecutive: { subjectId: "D1", legisId: "00", defaultLevel: "D" },
-  CityRepresentatives: { subjectId: "R2", legisId: "R1", defaultLevel: "A" },
-  DistrictRepresentatives: { subjectId: "R1", legisId: "R3", defaultLevel: "A" },
-  Village: { subjectId: "V0", legisId: "00", defaultLevel: "L" },
-};
-
-// 縣市 → 新版靜態檔的 prv/city 代碼（舊版 CITY_CODE_MAP 的兩碼是舊 API 的，新路徑不能用）
-const CITY_CODES: Record<string, { prv: string; city: string }> = {
-  "全國": { prv: "00", city: "000" },
-  "台北市": { prv: "63", city: "000" }, "新北市": { prv: "65", city: "000" }, "桃園市": { prv: "68", city: "000" },
-  "台中市": { prv: "66", city: "000" }, "台南市": { prv: "67", city: "000" }, "高雄市": { prv: "64", city: "000" },
-  "宜蘭縣": { prv: "10", city: "002" }, "新竹縣": { prv: "10", city: "004" }, "苗栗縣": { prv: "10", city: "005" },
-  "彰化縣": { prv: "10", city: "007" }, "南投縣": { prv: "10", city: "008" }, "雲林縣": { prv: "10", city: "009" },
-  "嘉義縣": { prv: "10", city: "010" }, "屏東縣": { prv: "10", city: "013" }, "台東縣": { prv: "10", city: "014" },
-  "花蓮縣": { prv: "10", city: "015" }, "澎湖縣": { prv: "10", city: "016" }, "基隆市": { prv: "10", city: "017" },
-  "新竹市": { prv: "10", city: "018" }, "嘉義市": { prv: "10", city: "020" },
-  // 2026-09-21：這兩個代碼原本配反（金門 007／連江 020），整批 2022 金門議員被存成連江、連江存成金門，
-  // electoral_district_areas 也對調。證據是這支自己抓回來的鄉鎮：007 回南竿北竿莒光東引（馬祖）、020 回金城金寧金沙金湖烈嶼烏坵（金門）。
-  // 正確對應：09_007＝連江縣、09_020＝金門縣。_shared/cec-city-codes.test.ts 盯著這兩行與 AdminScraper.vue 那份一致。
-  "連江縣": { prv: "09", city: "007" }, "金門縣": { prv: "09", city: "020" },
-};
-const CITY_NAME_BY_CODE = new Map(Object.entries(CITY_CODES).map(([name, c]) => [`${c.prv}_${c.city}`, name]));
 
 const ELECTION_TYPE_MAP: Record<string, string> = {
   President: "總統副總統",
@@ -101,107 +78,8 @@ interface CandidateResult {
   elected?: boolean;
 }
 
-interface CecRow {
-  cand_id?: number;
-  cand_name?: string;
-  cand_no?: number;
-  party_name?: string;
-  party_code?: number;
-  cand_sex?: string;
-  cand_birthday?: string;
-  cand_birthyear?: string | number;
-  cand_edu?: string;
-  is_current?: string;
-  is_victor?: string;
-  is_vice?: string;
-  area_name?: string;
-  prv_code?: string;
-  city_code?: string;
-  area_code?: string;
-  dept_code?: string;
-  li_code?: string;
-  ticket_num?: number;
-  ticket_percent?: number;
-}
-
-type FetchOutcome =
-  | { kind: "ok"; rows: CecRow[]; url: string }
-  | { kind: "nodata"; url: string }
-  | { kind: "error"; url: string; message: string; preview?: string };
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
-
-function normalizeCity(name: string | undefined): string | undefined {
-  return name ? name.replace(/臺/g, "台").trim() : undefined;
-}
-
-/** 抓一個靜態 JSON 檔；回 HTML／非 JSON 一律當錯誤回報，不靜默。 */
-async function fetchCecJson(url: string): Promise<FetchOutcome> {
-  const response = await fetch(url, {
-    headers: {
-      "Accept": "application/json, */*",
-      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-      "User-Agent": USER_AGENT,
-      "Referer": "https://db.cec.gov.tw/ElecTable/Election",
-    },
-  });
-  if (response.status === 404) return { kind: "nodata", url };
-  const text = await response.text();
-  if (!response.ok) return { kind: "error", url, message: `CEC 回應 HTTP ${response.status}`, preview: text.slice(0, 200) };
-  const contentType = response.headers.get("content-type") || "";
-  if (text.trimStart().startsWith("<") || (!contentType.includes("json") && !text.trimStart().startsWith("{") && !text.trimStart().startsWith("["))) {
-    console.error("CEC 回傳 HTML 而非 JSON:", url, text.slice(0, 300));
-    return { kind: "error", url, message: "CEC 回傳非 JSON 格式（路徑改版、被阻擋或維護中）", preview: text.slice(0, 200) };
-  }
-  try {
-    const data = JSON.parse(text);
-    // 資料檔是 { "<scope>": [rows] }，可能多個 key；清單檔是陣列
-    const rows: CecRow[] = Array.isArray(data)
-      ? data
-      : Object.values(data).flatMap((v) => (Array.isArray(v) ? v : []));
-    return { kind: "ok", rows, url };
-  } catch (e) {
-    return { kind: "error", url, message: `無法解析 CEC JSON: ${(e as Error).message}`, preview: text.slice(0, 200) };
-  }
-}
-
-function parseBirthYear(raw: string | number | undefined): number | undefined {
-  if (raw === undefined || raw === null || raw === "") return undefined;
-  let year = typeof raw === "number" ? raw : parseInt(String(raw), 10);
-  if (Number.isNaN(year)) return undefined;
-  if (year < 1000) year += 1911; // 民國轉西元
-  return year;
-}
-
-function normalizeParty(raw: string | undefined): string {
-  const p = (raw || "").trim();
-  if (!p || p === "無" || p === "無黨籍及未經政黨推薦" || p === "無黨籍及未經政黨推薦者") return "無黨籍";
-  return p;
-}
-
-/** 依選舉層級決定 region / subRegion / village 怎麼從 area_name 與代碼取 */
-function locate(
-  row: CecRow,
-  electionType: string,
-  requestedCity: string | undefined,
-  deptNames: ReadonlyMap<string, string> = new Map(),
-): Pick<CandidateResult, "region" | "subRegion" | "village"> {
-  const codeCity = normalizeCity(CITY_NAME_BY_CODE.get(`${row.prv_code}_${row.city_code}`));
-  const areaName = normalizeCity(row.area_name);
-  const isNationalScope = row.prv_code === "00" && row.city_code === "000";
-
-  if (electionType === "President") return { region: "全國" };
-  if (electionType === "Mayor" || electionType === "CountyMayor") {
-    // 縣市長：area_name 就是縣市
-    return { region: areaName || codeCity || requestedCity || "未知" };
-  }
-  const region = (isNationalScope ? undefined : codeCity) || requestedCity || (electionType === "Legislator" && areaName ? areaName.replace(/第\d+選區.*$/, "") : undefined) || "未知";
-  if (electionType === "Village") {
-    return { region, village: areaName, subRegion: row.dept_code ? deptNames.get(row.dept_code) : undefined };
-  }
-  return { region, subRegion: areaName };
 }
 
 async function handleList(electionType: string): Promise<Response> {

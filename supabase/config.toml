@@ -534,3 +534,9 @@ enabled = true
 # 內政部地方公職人員名單每天同步（pg_cron 呼叫，不驗 JWT；同一種職務 6 小時內抓過就空轉）
 verify_jwt = false
 entrypoint = "./functions/moi-sync/index.ts"
+
+[functions.cec-sync]
+enabled = true
+# 中選會已投票選舉候選人名單同步進 cec_candidates（排程呼叫，不驗 JWT；同一單位 24 小時內同步過就空轉，除非 force）
+verify_jwt = false
+entrypoint = "./functions/cec-sync/index.ts"
