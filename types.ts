@@ -62,6 +62,7 @@ export interface PoliticianElectionData {
   subRegion?: string;    // Sub-region (子選區)
   village?: string;      // Village (村里)
   candidateStatus?: CandidateStatus; // 參選狀態：confirmed(已宣布)、likely(可能參選)、rumored(傳聞)
+  candNo?: number;       // 選票上的號次（名單公告、抽籤後才有）
   electionResult?: 'elected' | 'not_elected'; // 那場選舉的結果；過去選舉九成還是空的（代理補中）
   sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
 }
@@ -95,6 +96,7 @@ export interface Politician {
   education?: string[];
   experience?: string[];
   candidateStatus?: CandidateStatus; // 參選狀態 (for current election context)
+  candNo?: number; // 號次 (for current election context)
   sourceNote?: string; // 來源備註 (for current election context)
 
   // Election-specific data (new)
@@ -311,6 +313,7 @@ export interface RawPoliticianElectionData {
   subRegion?: string;
   village?: string;
   candidateStatus?: CandidateStatus;
+  candNo?: number;
   electionResult?: 'elected' | 'not_elected';
   sourceNote?: string;
 }

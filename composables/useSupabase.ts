@@ -117,6 +117,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     subRegion: e.subRegion || undefined,
     village: e.village || undefined,
     candidateStatus: e.candidateStatus || undefined,
+    candNo: e.candNo || undefined,
     electionResult: e.electionResult || undefined,
     sourceNote: e.sourceNote || undefined,
   }));
@@ -161,6 +162,7 @@ export function withElectionData(p: Politician, electionId: number): Politician 
   return {
     ...p,
     candidateStatus: currentElection.candidateStatus,
+    candNo: currentElection.candNo,
     sourceNote: currentElection.sourceNote,
     position: currentElection.position || p.position,
     electionType: currentElection.electionType || p.electionType,
