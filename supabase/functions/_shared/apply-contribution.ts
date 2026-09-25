@@ -238,7 +238,8 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const { data: before } = await supabase.from("politician_elections").select("*").eq("politician_id", ensured.politician_id).eq("election_id", electionId).maybeSingle();
 
   // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
-  const resultPatch = electionResultPatch(p);
+  // 號次有給才寫（2026-09-25 補欄位；之前協議收了但沒地方放）
+  const resultPatch = { ...electionResultPatch(p), ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}) };
   const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,

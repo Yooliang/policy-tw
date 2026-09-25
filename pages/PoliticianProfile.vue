@@ -519,7 +519,7 @@ usePageHead({
                     >
                       <div class="flex items-center gap-2">
                         <Vote :size="14" />
-                        <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}</span>
+                        <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}<span v-if="elec.candNo" class="ml-1 text-slate-500">（{{ elec.candNo }}號）</span></span>
                       </div>
                       <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult)" class="text-xs">
                         {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult) }}

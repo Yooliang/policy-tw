@@ -146,9 +146,15 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
                 <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
                   <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
                 </h3>
+                <!-- 有號次（名單公告、抽籤後）就顯示「N號」取代狀態標（2026-09-25 小良哥）-->
+                <span
+                  v-if="politician.candNo"
+                  class="inline-flex items-center justify-center min-w-[1.75rem] h-5 px-1.5 rounded-full bg-navy-900 text-white text-[11px] font-bold shrink-0"
+                  :title="`${politician.candNo} 號`"
+                >{{ politician.candNo }}號</span>
                 <!-- 已登記＝綠色小勾（2026-09-22：登記名單上的人是常態，文字標太吵）；其他狀態照舊文字標 -->
                 <span
-                  v-if="politician.candidateStatus === 'registered'"
+                  v-else-if="politician.candidateStatus === 'registered'"
                   class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 shrink-0"
                   title="已登記"
                 ><Check :size="11" :stroke-width="3" /></span>
