@@ -323,6 +323,9 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!oneOf(CORRECTION_TABLES, p.target_table)) push("payload.target_table", `要是 ${CORRECTION_TABLES.join("／")} 之一`);
       if (!isStr(p.target_id, 1, 64)) push("payload.target_id", "target_id 必填（該筆資料的 id）");
       const table = oneOf(CORRECTION_TABLES, p.target_table) ? p.target_table : null;
+      // 參選紀錄的 id 是整數、人物與政見是 uuid（09-26：a-zhen 把人物 uuid 當成參選紀錄 id 交，落庫時才炸、重試到退件）
+      if (!isStr(p.target_id, 1, 64)) { /* 上面已報 */ } else if (table === "politician_elections" && !/^[1-9]\d{0,9}$/.test(String(p.target_id))) push("payload.target_id", "參選紀錄（politician_elections）的 target_id 是整數 id（任務 current 裡的參選紀錄 id），不是人物的 uuid");
+      else if (table && table !== "politician_elections" && !isUuid(p.target_id)) push("payload.target_id", `${table} 的 target_id 要是 uuid`);
       const { changes } = normalizeCorrection(p);
       const usesChanges = Array.isArray(p.changes);
       if (changes.length === 0) push(usesChanges ? "payload.changes" : "payload.field", "至少要一個要更正的欄位：changes:[{field, current_value, correct_value}]（或舊格式 field＋correct_value）");
