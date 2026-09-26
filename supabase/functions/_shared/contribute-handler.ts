@@ -221,6 +221,27 @@ export async function handleContribute(
   }
   const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
 
+  // 政見只給姓名、而同名人物不只一位：交件時就擋（2026-09-26：陳瑩兩筆，政見過了驗證才在落庫時炸、重試到退件）
+  for (const item of validation.items) {
+    if (item.contribution_type !== "policy" && item.contribution_type !== "policy_progress") continue;
+    const p = (item.payload ?? {}) as Record<string, unknown>;
+    if (typeof p.politician_id === "string" && p.politician_id) continue;
+    const name = typeof p.name === "string" ? p.name.trim() : typeof p.politician_name === "string" ? p.politician_name.trim() : "";
+    if (!name) continue;
+    // query-bounds: ok — 只要知道有沒有第二位，limit 5 夠列候選
+    const { data: same } = await supabase.from("politicians").select("id, region, party, birth_year").eq("name", name).is("merged_into", null).limit(5);
+    if ((same ?? []).length > 1) {
+      return {
+        status: 400,
+        body: {
+          success: false, error: "ambiguous_politician_name",
+          message: `「${name}」有 ${(same ?? []).length} 位同名人物，請在 payload 帶 politician_id 指定是哪一位（任務的 target 或 item.current 裡有 id）。這不算被拒。`,
+          candidates: same,
+        },
+      };
+    }
+  }
+
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
   const { data: existing, error: dupError } = await supabase
