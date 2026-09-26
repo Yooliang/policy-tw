@@ -233,3 +233,10 @@ Deno.test("現職不能是選舉名稱（politician 交件與更正都擋）", (
   const cor = validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://www.tcc.gov.tw/x"], payload: { target_table: "politicians", target_id: "7eae0842-608a-4dd1-af74-1d20e4ca477e", reason: "議會官網寫的現職是台北市議員", changes: [{ field: "current_position", current_value: "台北市議員", correct_value: "111年直轄市議員選舉" }] } });
   assertEquals(cor.errors.some((e) => e.path.endsWith("correct_value")), true);
 });
+
+// 2026-09-26：參選紀錄的 id 是整數；a-zhen 把人物 uuid 當成參選紀錄 id，落庫才炸、重試到退件
+Deno.test("correction 的 target_id 形狀要對：參選紀錄是整數、人物與政見是 uuid", () => {
+  const req = (target_table: string, target_id: string) => validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://db.cec.gov.tw/x"], payload: { target_table, target_id, reason: "中選會名冊上他 2026 沒有登記這一種選舉", changes: [{ field: "candidate_status", current_value: "registered", correct_value: "not_running" }] } });
+  assertEquals(req("politician_elections", "3d0bc501-7d9c-41a1-a230-badfc6769c98").errors.some((e) => e.path === "payload.target_id"), true);
+  assertEquals(req("politician_elections", "34957").errors.some((e) => e.path === "payload.target_id"), false);
+});
