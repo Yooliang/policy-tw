@@ -311,6 +311,7 @@ export async function findPoliticianByNameStrict(
     .from("politicians")
     .select("id, name, region, party")
     .eq("name", normalized)
+    .is("merged_into", null) // 已合併掉的那筆不算同名（不然合併過的人永遠被判同名多位）
     .limit(2);
   throwIf(error, "politicians lookup");
   const rows = data ?? [];
