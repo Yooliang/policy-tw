@@ -15,6 +15,7 @@ import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMac
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
 import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./apply-contribution.ts";
+import { precheckApplyTargets } from "./apply-precheck.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -377,6 +378,29 @@ export async function handleContribute(
         console.error("unreachable precheck failed:", e instanceof Error ? e.message : String(e));
       }
     }
+  }
+
+  // 落庫前置檢查（2026-09-27 裁決）：連續 5 次「驗證通過→落庫才失敗→重試三次退件」（#261／#262／#275／#276／#263），
+  // 每次都是事後補一條守門，投過票的人白投也看不出會失敗。這裡在寫入 contributions 之前，把 apply-contribution.ts
+  // 實際會查的對象（人物、政見、參選紀錄、任務）先唯讀查一遍，查到「一定落不了庫」就整批 400，不算被拒。
+  // 已被其他守門處理過的（併成同意票、單一答案已交過、24 小時內重複）不用再查。
+  const precheckSkip = new Set<number>([...blocked, ...mergedByIndex.keys(), ...bypassNotes.keys(), ...validation.items.map((_, i) => i).filter((i) => existingByHash.has(hashes[i]))]);
+  const precheckProblems = await precheckApplyTargets(supabase, validation.items, precheckSkip);
+  if (precheckProblems.length > 0) {
+    const allTargetNotFound = precheckProblems.every((p) => p.code === "target_not_found");
+    const code = allTargetNotFound ? "target_not_found" : "apply_would_fail";
+    try {
+      await supabase.from("gate_rejections").insert(precheckProblems.map((p) => ({ gate: p.code, endpoint: via, contribution_id: null, ip_hash: ipHash })));
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: code,
+        message: `這批有 ${precheckProblems.length} 筆送出後會在落庫時失敗，整批未收；請依 errors 修正後重送。這不算被拒`,
+        errors: precheckProblems.map(({ index, code: c, path, message }) => ({ index, code: c, path, message })),
+      },
+    };
   }
 
   const toInsert = validation.items

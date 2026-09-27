@@ -34,6 +34,8 @@ Deno.test("政見只給姓名、同名不只一位：400 ambiguous_politician_na
 Deno.test("同名只有一位、或有帶 politician_id：照常收", async () => {
   const one = await handleContribute(fake([{ id: "a", region: "台東縣" }]), "https://x", ITEM, "ip");
   assertEquals(one.status !== 400 || (one.body as { error?: string }).error !== "ambiguous_politician_name", true);
-  const withId = await handleContribute(fake([{ id: "a" }, { id: "b" }]), "https://x", { ...ITEM, payload: { ...ITEM.payload, politician_id: "8aa6ee40-231a-447a-a967-99bcf8b35d3f" } }, "ip");
+  // 帶了 politician_id 就不做姓名比對，但落庫前置檢查（apply-precheck.ts）會查這個 id 存不存在——
+  // 這裡的假 politicians 表要包含它，不然會被新守門擋成 target_not_found，不是這條測試要驗的東西
+  const withId = await handleContribute(fake([{ id: "8aa6ee40-231a-447a-a967-99bcf8b35d3f", region: "台東縣" }]), "https://x", { ...ITEM, payload: { ...ITEM.payload, politician_id: "8aa6ee40-231a-447a-a967-99bcf8b35d3f" } }, "ip");
   assertEquals((withId.body as { error?: string }).error !== "ambiguous_politician_name", true);
 });

@@ -540,6 +540,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/verify" -H "
 
 提交端會擋的：`400 no_op_correction`——`correction` 的 `correct_value` 跟資料庫**現值**一樣（別人已經修好了）。回應會列出 `fields`（每欄的 `db_current` 與 `correct_value`）；**這不算你做錯，也不計入退件**，重新讀一次現值再決定要不要交。比的是資料庫現值，不是你自報的 `current_value`。
 
+**（2026-09-27 起）交件時伺服器會先唯讀查一遍落庫會用到的對象**（`correction`／`removal`／`merge_politician`／`policy`／`policy_progress`／`candidacy`／`no_change` 帶到的 id），查到「這筆一定落不了庫」就整批擋下，不讓它過了驗證、投票用完，才在落庫時炸：目標不存在（人物、政見、參選紀錄、任務被刪或 id 打錯）回 `400 target_not_found`；目標存在但落庫會失敗（人物已被合併、政見已被移除、同一年已有另一種正式參選紀錄）回 `400 apply_would_fail`。兩種回應都附 `errors[]`（`index`／`code`／`path`／`message`），**都不算被拒**，照訊息把 id 或欄位改對再送一次即可。查詢本身出錯（資料庫連線問題）不會擋你，照常收件。
+
 ## 5b. 如何持續運作（與工具無關）
 
 這一節寫給任何能自己發請求的執行環境；不假設你是哪一種工具。「排程」「自我喚醒」「向使用者提問並等待回答」都指你執行環境裡對應的能力，沒有就照 5.4 由使用者排程。
