@@ -28,9 +28,15 @@ function fakeSupabase(candidates: unknown[] = [EXISTING]) {
         limit: () => chain,
         insert: (rows: unknown[]) => { inserted.push(rows); return { select: () => ({ data: (rows as Array<{ payload_hash: string }>).map((r, i) => ({ id: `new-${i}`, payload_hash: r.payload_hash })), error: null }) }; },
         delete: () => ({ in: () => ({ error: null }) }),
-        // 計數查詢（每日額度）與候選查詢共用這個 thenable
-        then: (res: (v: { data: unknown; error: null; count: number }) => unknown) =>
-          res(table === "contributions" && q.status === "pending" ? { data: candidates, error: null, count: 0 } : { data: [], error: null, count: 0 }),
+        // 計數查詢（每日額度）與候選查詢共用這個 thenable；
+        // 落庫前置檢查（apply-precheck.ts）查的 politician_elections／politicians 也走這裡——這批測試的
+        // 對象（politician_elections id=9827、policy 的 politician_id=22222222…）一律當成存在、未合併
+        then: (res: (v: { data: unknown; error: null; count: number }) => unknown) => {
+          if (table === "contributions" && q.status === "pending") return res({ data: candidates, error: null, count: 0 });
+          if (table === "politician_elections") return res({ data: [{ id: 9827 }], error: null, count: 0 });
+          if (table === "politicians") return res({ data: [{ id: "22222222-2222-4222-8222-222222222222", merged_into: null }], error: null, count: 0 });
+          return res({ data: [], error: null, count: 0 });
+        },
       };
       return chain;
     },
