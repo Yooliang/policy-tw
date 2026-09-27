@@ -40,6 +40,15 @@ export const MACHINE_MIN_VERIFIES = 2;
 export function machineOwesVerify(recentKindsNewestFirst: ReadonlyArray<"verify" | "task">): boolean {
   return recentKindsNewestFirst.slice(0, MACHINE_WINDOW).filter((k) => k === "verify").length < MACHINE_MIN_VERIFIES;
 }
+/**
+ * 插隊期間也要留一點驗證（2026-09-27）：縣市長＋議員插隊 1,800 多筆任務，插隊任務原本完全不看每台機器的 2:1，
+ * 插隊的驗證被領完之後，連續 40 分鐘一張驗證都沒派出去、只交件不驗，待驗池半小時漲 134 筆。
+ * 插隊時改成最近三次至少一次驗證（1:2），插隊的任務仍佔大多數。
+ */
+export const BOOST_MIN_VERIFIES = 1;
+export function machineOwesVerifyDuringBoost(recentKindsNewestFirst: ReadonlyArray<"verify" | "task">): boolean {
+  return recentKindsNewestFirst.slice(0, MACHINE_WINDOW).filter((k) => k === "verify").length < BOOST_MIN_VERIFIES;
+}
 /** 插隊段（人明確要求先做、網站訪客）：排隊時間在 2000 年以前 */
 export function isFrontQueueAt(v: string | null | undefined): boolean {
   const t = v ? Date.parse(v) : NaN;
