@@ -36,7 +36,8 @@ Deno.serve(async (req) => {
     const actorId = url.searchParams.get("actor_id");
     const type = url.searchParams.get("type");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 50);
-    const cursor = url.searchParams.get("cursor");
+    // 游標是時間戳（…+00:00）：沒 URL-encode 的話 + 會被解成空白、查詢回 500（W-Policy 09-28 回報）。空白一律還原成 +
+    const cursor = url.searchParams.get("cursor")?.replace(/ /g, "+") ?? null;
     if (status !== "all" && status !== "attention" && status !== "voting" && !STATUSES.includes(status)) return json({ success: false, error: `status 要是 all／attention／voting 或 ${STATUSES.join("/")}` }, 400);
 
     // 第一頁要回「目前這組篩選共幾筆」給畫面顯示。count 走 PostgREST 同一個請求的
