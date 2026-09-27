@@ -279,7 +279,7 @@ Deno.test("/next 不再有 3:1：沒有 chooseKind；驗證派出去也要蓋章
 });
 
 // 2026-09-24 每台機器自己的 2:1：自己交的不能自己驗，全站的 2:1 對單一台機器不成立（a-zhen 前面卡了 419 個任務）
-import { isFrontQueueAt, machineOwesVerify } from "./dispatch.ts";
+import { isFrontQueueAt, machineOwesVerify, machineOwesVerifyDuringBoost } from "./dispatch.ts";
 Deno.test("每台機器最近三次拿到的驗證不到兩次 → 先派驗證", () => {
   assertEquals(machineOwesVerify([]), true, "剛開始先驗");
   assertEquals(machineOwesVerify(["verify"]), true);
@@ -292,4 +292,11 @@ Deno.test("插隊段（2000 年以前）照舊優先", () => {
   assertEquals(isFrontQueueAt("1979-12-31T23:57:00+00:00"), true);
   assertEquals(isFrontQueueAt("2026-09-24T01:00:00Z"), false);
   assertEquals(isFrontQueueAt(null), false);
+});
+
+// 2026-09-27：縣市長＋議員插隊 1,800 多筆任務時驗證停擺 40 分鐘；插隊期間最近三次至少一次驗證
+Deno.test("插隊期間每台機器 1:2：最近三次沒有驗證就先派驗證", () => {
+  assertEquals(machineOwesVerifyDuringBoost(["task", "task", "task"]), true);
+  assertEquals(machineOwesVerifyDuringBoost(["task", "task", "verify"]), false);
+  assertEquals(machineOwesVerifyDuringBoost([]), true);
 });
