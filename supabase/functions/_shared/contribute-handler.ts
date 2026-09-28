@@ -16,6 +16,8 @@ import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
 import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./apply-contribution.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
+import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
+import { checkElectoralDistrict } from "./district-registry.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -195,6 +197,10 @@ export async function handleContribute(
   for (const item of validation.items) {
     (item as { payload: unknown }).payload = withTaskPolitician(item.contribution_type, item.payload, item.task_id);
   }
+  // 縣市議員候選人的選舉區寫法統一（2026-09-28）：有給就正規化，沒給就從 position 抽；就地修改 payload
+  for (const item of validation.items) {
+    if (item.contribution_type === "candidacy") normalizeCandidacyDistrictField(item.payload as Record<string, unknown>);
+  }
 
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
@@ -238,6 +244,32 @@ export async function handleContribute(
           success: false, error: "ambiguous_politician_name",
           message: `「${name}」有 ${(same ?? []).length} 位同名人物，請在 payload 帶 politician_id 指定是哪一位（任務的 target 或 item.current 裡有 id）。這不算被拒。`,
           candidates: same,
+        },
+      };
+    }
+  }
+
+  // 縣市議員候選人的選舉區存不存在（2026-09-28）：名冊裡有這個縣市時，統一寫法後的 electoral_district
+  // 一定要是名冊裡的選區，或該縣市的原住民保留議席；都不是就整批 400，不算被拒。
+  // 名冊裡沒有該縣市（例如新竹縣 2026）或查詢出錯，不擋——見 district-registry.ts 開頭的說明。
+  for (const item of validation.items) {
+    if (item.contribution_type !== "candidacy") continue;
+    const p = (item.payload ?? {}) as Record<string, unknown>;
+    if (p.election_type !== "縣市議員") continue;
+    const district = typeof p.electoral_district === "string" ? p.electoral_district : null;
+    const region = typeof p.region === "string" ? p.region : null;
+    const electionId = typeof p.election_id === "number" ? p.election_id : null;
+    if (!district || !region || electionId === null) continue;
+    const check = await checkElectoralDistrict(supabase, electionId, region, district);
+    if (check.status === "unknown") {
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: "unknown_electoral_district",
+          message: `${region}${electionId}年縣市議員選舉的名冊裡沒有「${district}」這個選區。${
+            check.validDistricts && check.validDistricts.length > 0 ? `${region}有效的選區：${check.validDistricts.join("、")}（含原住民保留議席）。` : ""
+          }請核對選區編號後重新提交；這不算被拒。`,
         },
       };
     }
