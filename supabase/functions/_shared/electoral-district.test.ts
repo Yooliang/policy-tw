@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { normalizeDistrict } from "./electoral-district.ts";
+import { isCouncilAboriginalDistrict, normalizeCandidacyDistrictField, normalizeDistrict } from "./electoral-district.ts";
 
 Deno.test("normalizeDistrict：阿拉伯數字，含個位數補零", () => {
   assertEquals(normalizeDistrict("第4選區"), { region: null, district: "第04選舉區" });
@@ -58,4 +58,62 @@ Deno.test("normalizeDistrict：找不到「第…選(舉)?區」樣式回傳 nul
 
 Deno.test("normalizeDistrict：第0選區不是合法選區，回傳 null", () => {
   assertEquals(normalizeDistrict("第0選舉區"), null);
+});
+
+// ── normalizeCandidacyDistrictField：交件時統一縣市議員候選人的選區寫法 ──────────────
+
+Deno.test("normalizeCandidacyDistrictField：election_type 不是縣市議員就不動 electoral_district", () => {
+  const p: Record<string, unknown> = { election_type: "縣市長", electoral_district: "第4選區" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, "第4選區");
+});
+
+Deno.test("normalizeCandidacyDistrictField：有給 electoral_district 就正規化寫回去", () => {
+  const p: Record<string, unknown> = { election_type: "縣市議員", electoral_district: "第4選區" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, "第04選舉區");
+});
+
+Deno.test("normalizeCandidacyDistrictField：electoral_district 正規化不出來就原樣留著", () => {
+  const p: Record<string, unknown> = { election_type: "縣市議員", electoral_district: "山地原住民" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, "山地原住民");
+});
+
+Deno.test("normalizeCandidacyDistrictField：沒給 electoral_district，從 position 抽出來填，position 原樣保留", () => {
+  const p: Record<string, unknown> = { election_type: "縣市議員", position: "台北市議員第6選舉區候選人" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, "第06選舉區");
+  assertEquals(p.position, "台北市議員第6選舉區候選人");
+});
+
+Deno.test("normalizeCandidacyDistrictField：沒給 electoral_district、position 也抽不出來就不動", () => {
+  const p: Record<string, unknown> = { election_type: "縣市議員", position: "縣市議員候選人" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, undefined);
+});
+
+Deno.test("normalizeCandidacyDistrictField：有給 electoral_district 時不會去看 position（electoral_district 優先）", () => {
+  const p: Record<string, unknown> = { election_type: "縣市議員", electoral_district: "第2選舉區", position: "台北市議員第6選舉區候選人" };
+  normalizeCandidacyDistrictField(p);
+  assertEquals(p.electoral_district, "第02選舉區");
+});
+
+// ── isCouncilAboriginalDistrict：原住民保留議席常數 ──────────────
+
+Deno.test("isCouncilAboriginalDistrict：已查證的縣市與號碼回 true", () => {
+  assertEquals(isCouncilAboriginalDistrict("台北市", "第07選舉區"), true);
+  assertEquals(isCouncilAboriginalDistrict("台北市", "第08選舉區"), true);
+  assertEquals(isCouncilAboriginalDistrict("彰化縣", "第09選舉區"), true, "既有的平地原住民席次");
+  assertEquals(isCouncilAboriginalDistrict("彰化縣", "第10選舉區"), true, "2026 新增的山地原住民席次");
+  assertEquals(isCouncilAboriginalDistrict("雲林縣", "第07選舉區"), true);
+  assertEquals(isCouncilAboriginalDistrict("雲林縣", "第08選舉區"), true);
+});
+
+Deno.test("isCouncilAboriginalDistrict：一般選區號碼回 false", () => {
+  assertEquals(isCouncilAboriginalDistrict("台北市", "第06選舉區"), false);
+});
+
+Deno.test("isCouncilAboriginalDistrict：沒有列在常數裡的縣市回 false（不是說它沒有保留議席，是還沒查證）", () => {
+  assertEquals(isCouncilAboriginalDistrict("屏東縣", "第09選舉區"), false);
 });

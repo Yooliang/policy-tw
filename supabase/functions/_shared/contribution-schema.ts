@@ -223,6 +223,9 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!oneOf(CANDIDATE_STATUSES, p.candidate_status)) push("payload.candidate_status", `candidate_status 必填，要是 ${CANDIDATE_STATUSES.join("／")} 之一`);
       validateHints({ ...p, election_type: undefined }, push);
       if (p.position !== undefined && !isStr(p.position, 1, 100)) push("payload.position", "要是非空字串");
+      // 選區文字驗證只管「有沒有給、是不是字串」；統一寫法（第NN選舉區）與是否存在於名冊，
+      // 是 contribute-handler.ts 接資料庫後才做的事（normalizeCandidacyDistrictField／checkElectoralDistrict）
+      if (p.electoral_district !== undefined && !isStr(p.electoral_district, 1, 100)) push("payload.electoral_district", "要是非空字串");
       if (p.cand_no !== undefined && !(isInt(p.cand_no) && p.cand_no > 0)) push("payload.cand_no", "號次要是正整數");
       // election_result_missing 任務要補的三欄：選填，但給了就要對（2026-09-19 前這三欄沒驗也沒寫進去）
       if (p.election_result !== undefined && !oneOf(ELECTION_RESULTS_LIST, p.election_result)) push("payload.election_result", "election_result 要是 elected／not_elected 之一");

@@ -133,7 +133,8 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     `education_level（要是這幾個之一：${["高中(職)以下","高中(職)","專科","大學","碩士","博士","其他"].join("／")}）／bio。` +
     "查不到的欄位不要填。",
   candidacy:
-    "payload：politician_id 或 name、election_id（選舉年份）、election_type、region、candidate_status。已投票的屆別可加 election_result、votes_received、vote_percentage、cand_no、position。",
+    "payload：politician_id 或 name、election_id（選舉年份）、election_type、region、candidate_status。已投票的屆別可加 election_result、votes_received、vote_percentage、cand_no、position。" +
+    "election_type 是縣市議員的話可加 electoral_district（第NN選舉區；伺服器會自動統一寫法，沒填也會從 position 抽）。",
   policy_progress:
     "payload：policy_id、status、progress（進度說明）、date、note。",
   correction:

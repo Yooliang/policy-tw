@@ -213,6 +213,24 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
   };
 }
 
+/**
+ * 縣市議員候選人有 electoral_district（已經被 contribute-handler.ts 統一寫法）時，
+ * 把參選紀錄的 region_id 指到 regions 表對應的那一列（region＋sub_region＝選區）。
+ *
+ * regions 沒有那一列就不動 region_id，不新建——這張表的既有列是怎麼跟 2022 資料掛上的，
+ * 目前看不出穩定規則（見任務回報），貿然新建可能建出跟既有列不一致的資料形狀，留給下一步
+ * （補候選人選區）處理。
+ */
+async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+  if (electionType !== "縣市議員") return {};
+  const district = str(p.electoral_district);
+  const region = str(p.region);
+  if (!district || !region) return {};
+  const { data } = await supabase.from("regions").select("id").eq("region", region).eq("sub_region", district).maybeSingle();
+  const regionId = (data as { id?: number } | null)?.id;
+  return regionId ? { region_id: regionId } : {};
+}
+
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -239,7 +257,12 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
 
   // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
   // 號次有給才寫（2026-09-25 補欄位；之前協議收了但沒地方放）
-  const resultPatch = { ...electionResultPatch(p), ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}) };
+  // 選區有給且 regions 表查得到對應列才寫 region_id（2026-09-28；見 districtRegionPatch 說明）
+  const resultPatch = {
+    ...electionResultPatch(p),
+    ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}),
+    ...(await districtRegionPatch(supabase, electionType, p)),
+  };
   const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,
