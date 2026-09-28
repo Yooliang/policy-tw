@@ -75,3 +75,12 @@ Deno.test("checkElectoralDistrict：同一個 electionId 短時間內重複查�
   await checkElectoralDistrict(client, 2026, "彰化縣", "第01選舉區");
   assertEquals(calls, 1, "第二次查詢應該吃快取，不再打資料庫");
 });
+
+// 主線 09-28：原住民保留議席沒查證的縣市，大於一般選區最大號的放行；一般範圍內對不上的照擋
+Deno.test("未查證原住民議席的縣市：超過一般選區號碼放行、範圍內對不上照擋", async () => {
+  resetDistrictRegistryCache();
+  const rows = [{ region: "屏東縣", electoral_district: "第01選舉區" }, { region: "屏東縣", electoral_district: "第07選舉區" }];
+  const db = { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: rows, error: null }) }) }) }) };
+  assertEquals((await checkElectoralDistrict(db, 2026, "屏東縣", "第09選舉區")).status, "ok");
+  assertEquals((await checkElectoralDistrict(db, 2026, "屏東縣", "第03選舉區")).status, "unknown");
+});

@@ -80,5 +80,12 @@ export async function checkElectoralDistrict(
   if (!set || set.size === 0) return { status: "no_registry" };
   if (set.has(district) || isCouncilAboriginalDistrict(region, district)) return { status: "ok" };
   const aboriginal = COUNCIL_ABORIGINAL_DISTRICTS[region] ?? [];
+  // 原住民保留議席還沒查證的縣市（屏東、苗栗、台東、花蓮、嘉義縣等）：號碼大於一般選區最大號的，查證不了就放行，
+  // 不然合法的原住民議席候選人會被誤擋（主線 09-28）。一般選區範圍內對不上的照樣擋。
+  if (!(region in COUNCIL_ABORIGINAL_DISTRICTS)) {
+    const num = (d: string) => Number(d.match(/\d+/)?.[0] ?? NaN);
+    const maxGeneral = Math.max(...[...set].map(num).filter((n) => !Number.isNaN(n)));
+    if (num(district) > maxGeneral) return { status: "ok" };
+  }
   return { status: "unknown", validDistricts: [...new Set([...set, ...aboriginal])].sort() };
 }
