@@ -36,7 +36,7 @@ const collapsed = ref(false)
 /**
  * 大頭照版（2026-09-28 小良哥試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
  * 一律預設大頭照（09-28 小良哥：「預設就改這樣顯示，包含下方的議員那些」）；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
- * 欄數：這一區有人要顯示選區／鄉鎮市區就四欄（字多），都沒有（縣市長、立委全國性）就六欄。
+ * 欄數跟著版面寬度走（09-29 小良哥）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，沒有就全寬 → 六欄，兩種卡片一樣大。
  * 預渲染一律出清單版（onMounted 才讀偏好），避免伺服器與瀏覽器畫面不一致。
  */
 const VIEW_KEY = 'election-grid-view-v2' // v2：預設改成大頭照，舊的偏好不沿用
@@ -51,8 +51,8 @@ const setView = (v: 'list' | 'portrait') => {
   try { localStorage.setItem(VIEW_KEY, v) } catch { /* 記不住就算了 */ }
 }
 const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
-// 有鄉鎮市區（縣市以下的選區）才用 4 欄，只有縣市的用 6 欄——每張卡都至少印縣市，拿 formatArea 判斷會永遠 4 欄
-const portraitGridClass = computed(() => props.politicians.some((p) => hasSubArea(p))
+// columns === 2 就是右側有篩選欄（ElectionPage 的 gridColumns）
+const portraitGridClass = computed(() => props.columns === 2
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
   : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
 
