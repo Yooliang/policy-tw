@@ -35,21 +35,25 @@ const collapsed = ref(false)
 
 /**
  * 大頭照版（2026-09-28 小良哥試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
- * 2026 預設大頭照、其他屆預設原本的清單；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
+ * 一律預設大頭照（09-28 小良哥：「預設就改這樣顯示，包含下方的議員那些」）；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
+ * 欄數：這一區有人要顯示選區／鄉鎮市區就四欄（字多），都沒有（縣市長、立委全國性）就六欄。
  * 預渲染一律出清單版（onMounted 才讀偏好），避免伺服器與瀏覽器畫面不一致。
  */
-const VIEW_KEY = 'election-grid-view'
+const VIEW_KEY = 'election-grid-view-v2' // v2：預設改成大頭照，舊的偏好不沿用
 const view = ref<'list' | 'portrait'>('list')
 onMounted(() => {
   let saved: string | null = null
   try { saved = localStorage.getItem(VIEW_KEY) } catch { /* 私密視窗等 */ }
-  view.value = saved === 'list' || saved === 'portrait' ? saved : (props.electionId === 2026 ? 'portrait' : 'list')
+  view.value = saved === 'list' ? 'list' : 'portrait'
 })
 const setView = (v: 'list' | 'portrait') => {
   view.value = v
   try { localStorage.setItem(VIEW_KEY, v) } catch { /* 記不住就算了 */ }
 }
 const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
+const portraitGridClass = computed(() => props.politicians.some((p) => formatArea(p))
+  ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
+  : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
 
 const getPledgeCount = (politicianId: string | number) =>
   policies.value.filter(p =>
@@ -150,7 +154,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
       </button>
     </h3>
     <!-- 大頭照版：四欄、直式人像 -->
-    <div v-if="!collapsed && politicians.length > 0 && view === 'portrait'" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div v-if="!collapsed && politicians.length > 0 && view === 'portrait'" :class="portraitGridClass">
       <div
         v-for="politician in politicians"
         :key="politician.id"
