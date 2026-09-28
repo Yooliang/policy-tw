@@ -396,7 +396,7 @@ async function copyCitation() {
                 {{ policyElection.shortName }}政見
               </span>
               <span v-if="policy.proposedDate" class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
-              <span class="flex items-center gap-1"><Activity :size="16" /> 更新：{{ policy.lastUpdated }}</span>
+              <span class="flex items-center gap-1" title="狀態是這一天的進度；之後的變化看下方時間軸"><Activity :size="16" /> 狀態截至：{{ policy.lastUpdated }}</span>
               <span class="flex items-center gap-1 cursor-pointer hover:text-white" @click="router.push(`/politician/${politician.id}`)">
                 {{ politician.name }} · {{ politician.position }}
               </span>
