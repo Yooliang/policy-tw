@@ -759,7 +759,10 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
       };
     }
     if (dupe) {
-      const review = { politician_id: dupe[1], fingerprint: dupe[2], agent_name: row.agent_name, contribution_id: row.id, note: check.note };
+      // 等票期間那個人可能被合併掉（輸家那筆刪除）：寫下去會撞外鍵、apply_failed 一直重試（2026-09-28 實例）
+      const { data: person } = await supabase.from("politicians").select("id").eq("id", dupe[1]).maybeSingle();
+      if (!person) return { status: "superseded", message: `人物 ${dupe[1]} 已不存在（多半是被合併了），這份清單沒得鎖，不重試` };
+      const review ={ politician_id: dupe[1], fingerprint: dupe[2], agent_name: row.agent_name, contribution_id: row.id, note: check.note };
       const { error: dupeError } = await supabase.from("policy_dupe_reviews").upsert(review, { onConflict: "politician_id" });
       throwIf(dupeError, "policy_dupe_reviews upsert");
       await recordInsert(supabase, ctxOf(row), "policy_dupe_reviews", dupe[1], review);
