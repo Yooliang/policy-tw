@@ -642,7 +642,7 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         politician: pick(data.politicians?.[0] ?? null, POLITICIAN_BRIEF),
         existing_policy_titles: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"])),
         similar_policies: (data.similar_policies ?? []).map((s) => ({ id: s.id, title: s.title, similarity: Math.round(s.similarity * 100) / 100 })),
-        hint: "先看重複：similar_policies 是系統用**字面**相似度撈的，中文換句話說的重複它抓不到（實測「加速都市更新」與「都更5夠力」的字面相似度低於兩筆不重複的政見），所以請把 existing_policy_titles 整份看過再判斷。與其中一條實質重複（同一承諾換句話說）就投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、標的不同（不同醫院、不同路線）就照來源核對。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
+        hint: "先看重複：similar_policies 是系統用**字面**相似度撈的，中文換句話說的重複它抓不到（實測「加速都市更新」與「都更5夠力」的字面相似度低於兩筆不重複的政見），所以請把 existing_policy_titles 整份看過再判斷。與其中一條實質重複（同一承諾換句話說）就投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、標的不同（不同醫院、不同路線）就照來源核對。來源一句話連著幾個承諾（「A 及 B」）時可以拆成幾條交：這一條只核它自己寫的那部分，只寫了其中一件而相符不算不完整，從同一句拆出來的兩條也不算重複（§2 第 10b 條）。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
       };
     case "policy_progress":
       return {
