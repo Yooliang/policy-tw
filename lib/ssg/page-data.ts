@@ -80,6 +80,7 @@ function emptySnapshot(full: DataSnapshot): PageSnapshot {
     politicians: [],
     discussions: [],
     stats: full.stats,
+    verificationSources: [],
   }
 }
 
@@ -153,6 +154,9 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
 
     case 'regional-data':
       return { ...base, regionStats: full.regionStats }
+
+    case 'sources':
+      return { ...base, verificationSources: full.verificationSources }
 
     default:
       return base

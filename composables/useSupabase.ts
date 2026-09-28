@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
   Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
-  RegionStats, ElectoralDistrictArea, ElectionTypeTableRow,
+  RegionStats, ElectoralDistrictArea, ElectionTypeTableRow, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
   RawElectionTypeRow,
@@ -23,6 +23,7 @@ const categories = ref<string[]>([])
 const locations = ref<string[]>([])
 const regionStats = ref<RegionStats[]>([])
 const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
+const verificationSources = ref<VerificationSource[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 /**
@@ -357,6 +358,21 @@ export function ensureDistricts(): Promise<void> {
   return districtsPromise
 }
 
+let verificationSourcesPromise: Promise<void> | null = null
+
+/** 查證來源清單：只有 /sources 頁用 */
+export function ensureVerificationSources(): Promise<void> {
+  if (verificationSources.value.length > 0) return Promise.resolve()
+  if (!verificationSourcesPromise) {
+    verificationSourcesPromise = (async () => {
+      const { data } = await withTimeoutAndRetry('verification_sources', (signal) =>
+        supabase.from('verification_sources').select('*').order('sort', { ascending: true }).abortSignal(signal).throwOnError())
+      verificationSources.value = (data || []) as VerificationSource[]
+    })().catch((err) => { verificationSourcesPromise = null; recordFailure('查證來源', err, ensureVerificationSources) })
+  }
+  return verificationSourcesPromise
+}
+
 /** 討論：只有討論頁用 */
 export function ensureDiscussions(): Promise<void> {
   if (discussions.value.length > 0) return Promise.resolve()
@@ -588,6 +604,7 @@ export interface DataSnapshot {
   politicians: Politician[]
   discussions: Discussion[]
   stats: DataStats
+  verificationSources: VerificationSource[]
 }
 
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
@@ -604,6 +621,7 @@ export function getDataSnapshot(): DataSnapshot {
     politicians: politicians.value,
     discussions: discussions.value,
     stats: stats.value,
+    verificationSources: verificationSources.value,
   }
 }
 
@@ -629,6 +647,7 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   politicians.value = snapshot.politicians
   discussions.value = snapshot.discussions
   stats.value = snapshot.stats
+  verificationSources.value = snapshot.verificationSources
 }
 
 export function useSupabase() {
@@ -753,6 +772,7 @@ export function useSupabase() {
     locations,
     regionStats,
     electoralDistrictAreas,
+    verificationSources,
     loading,
     loaded,
     error,
@@ -777,6 +797,7 @@ export function useSupabase() {
     ensureDistricts,
     ensureDiscussions,
     ensurePolicies,
+    ensureVerificationSources,
     policiesComplete,
     getPoliciesByCategory,
     loadPoliticianById,

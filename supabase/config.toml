@@ -540,3 +540,9 @@ enabled = true
 # 中選會已投票選舉候選人名單同步進 cec_candidates（排程呼叫，不驗 JWT；同一單位 24 小時內同步過就空轉，除非 force）
 verify_jwt = false
 entrypoint = "./functions/cec-sync/index.ts"
+
+[functions.sources]
+enabled = true
+# 查證來源清單（政黨／議會／政府／中選會官網），公開唯讀
+verify_jwt = false
+entrypoint = "./functions/sources/index.ts"

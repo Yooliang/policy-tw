@@ -11,6 +11,7 @@ import {
   ensureDistricts,
   ensureDiscussions,
   ensurePolicies,
+  ensureVerificationSources,
 } from '../../composables/useSupabase'
 import type { Politician, RawPolitician } from '../../types'
 import { analysisListedPolicyIds } from './page-data'
@@ -68,11 +69,11 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   ).catch(() => {
     throw new Error('[ssg] 基礎資料（政見／選舉／分類）連續三次載入失敗，中止建置以免產出空殼頁')
   })
-  // 首屏已經把政見清單／regions／選舉區對應／討論改成按需載入，但預渲染要靠完整
-  // 資料切片，所以建置端明確把四塊都補上。漏掉的話對應的頁面會預渲染成空的
+  // 首屏已經把政見清單／regions／選舉區對應／討論／查證來源改成按需載入，但預渲染要靠完整
+  // 資料切片，所以建置端明確把五塊都補上。漏掉的話對應的頁面會預渲染成空的
   // （政見那塊漏掉更嚴重：下面的「基礎資料為空」會直接中止建置）。
-  await withRetry('按需載入的四塊（政見／regions／選舉區／討論）', async () => {
-    await Promise.all([ensurePolicies(), ensureRegionStats(), ensureDistricts(), ensureDiscussions()])
+  await withRetry('按需載入的五塊（政見／regions／選舉區／討論／查證來源）', async () => {
+    await Promise.all([ensurePolicies(), ensureRegionStats(), ensureDistricts(), ensureDiscussions(), ensureVerificationSources()])
     return true
   }, (ok) => ok)
 
@@ -125,7 +126,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
 }
 
 /** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
-const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy']
+const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/sources']
 
 const VILLAGE_CHIEF = '村里長'
 
