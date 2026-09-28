@@ -51,7 +51,8 @@ const setView = (v: 'list' | 'portrait') => {
   try { localStorage.setItem(VIEW_KEY, v) } catch { /* 記不住就算了 */ }
 }
 const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
-const portraitGridClass = computed(() => props.politicians.some((p) => formatArea(p))
+// 有鄉鎮市區（縣市以下的選區）才用 4 欄，只有縣市的用 6 欄——每張卡都至少印縣市，拿 formatArea 判斷會永遠 4 欄
+const portraitGridClass = computed(() => props.politicians.some((p) => hasSubArea(p))
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
   : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
 
@@ -100,13 +101,15 @@ const shouldShowSubRegion = (status?: CandidateStatus) => {
  * 原本只顯示 subRegion，而縣市長的選區就是那個縣市本身——於是整頁 87 位縣市長參選人
  * 一個都看不出要選哪裡。縣市先顯示，鄉鎮／村里只在中選會正式資料時才加上去。
  */
+// 縣市長的選區就是那個縣市。politicians.sub_region 存的是這個人自己的身份
+// （例如鄭運鵬是桃園市第01選區的立委），印在縣市長卡片上會變成
+// 「縣市長候選人 ＋ 立委選區」這種讀不通的東西——177 位裡有 64 位會這樣。
+const hasSubArea = (politician: Politician): boolean =>
+  politician.electionType !== '縣市長' && !!(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)
+
 const formatArea = (politician: Politician): string | null => {
   const parts = [politician.region]
-  // 縣市長的選區就是那個縣市。politicians.sub_region 存的是這個人自己的身份
-  // （例如鄭運鵬是桃園市第01選區的立委），印在縣市長卡片上會變成
-  // 「縣市長候選人 ＋ 立委選區」這種讀不通的東西——177 位裡有 64 位會這樣。
-  const isCityWide = politician.electionType === '縣市長'
-  if (!isCityWide && (politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)) {
+  if (hasSubArea(politician)) {
     parts.push(formatSubRegion(politician) ?? '')
   }
   const out = parts.filter(Boolean).join(' ')
