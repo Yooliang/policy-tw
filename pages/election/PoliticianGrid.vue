@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import PartyBadge from '../../components/PartyBadge.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
-import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check } from 'lucide-vue-next'
+import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check, LayoutGrid, List } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
+import { getAvatarUrl } from '../../composables/useAvatar'
 
 const props = defineProps<{
   politicians: Politician[]
@@ -31,6 +32,24 @@ const gridClasses = computed(() => {
 const router = useRouter()
 const { policies } = useSupabase()
 const collapsed = ref(false)
+
+/**
+ * 大頭照版（2026-09-28 小良哥試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
+ * 2026 預設大頭照、其他屆預設原本的清單；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
+ * 預渲染一律出清單版（onMounted 才讀偏好），避免伺服器與瀏覽器畫面不一致。
+ */
+const VIEW_KEY = 'election-grid-view'
+const view = ref<'list' | 'portrait'>('list')
+onMounted(() => {
+  let saved: string | null = null
+  try { saved = localStorage.getItem(VIEW_KEY) } catch { /* 私密視窗等 */ }
+  view.value = saved === 'list' || saved === 'portrait' ? saved : (props.electionId === 2026 ? 'portrait' : 'list')
+})
+const setView = (v: 'list' | 'portrait') => {
+  view.value = v
+  try { localStorage.setItem(VIEW_KEY, v) } catch { /* 記不住就算了 */ }
+}
+const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
 
 const getPledgeCount = (politicianId: string | number) =>
   policies.value.filter(p =>
@@ -117,16 +136,55 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
   <div class="mb-12">
     <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> {{ title }} ({{ politicians.length }})
+      <span class="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden" role="group" aria-label="顯示方式">
+        <button @click="setView('portrait')" :class="['p-1.5', view === 'portrait' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600']" title="大頭照" :aria-pressed="view === 'portrait'"><LayoutGrid :size="16" /></button>
+        <button @click="setView('list')" :class="['p-1.5', view === 'list' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600']" title="清單" :aria-pressed="view === 'list'"><List :size="16" /></button>
+      </span>
       <button
         @click="collapsed = !collapsed"
-        class="ml-auto p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+        class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
         :title="collapsed ? '展開' : '收合'"
       >
         <ChevronUp v-if="!collapsed" :size="20" />
         <ChevronDown v-else :size="20" />
       </button>
     </h3>
-    <div v-if="!collapsed && politicians.length > 0" :class="gridClasses">
+    <!-- 大頭照版：四欄、直式人像 -->
+    <div v-if="!collapsed && politicians.length > 0 && view === 'portrait'" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div
+        v-for="politician in politicians"
+        :key="politician.id"
+        @click="router.push(`/politician/${politician.id}`)"
+        class="group bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
+      >
+        <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
+          <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" />
+          <span
+            v-if="politician.candNo"
+            class="absolute top-2 left-2 inline-flex items-center justify-center min-w-[2rem] h-7 px-2 rounded-full bg-navy-900/90 text-white text-sm font-black"
+            :title="`${politician.candNo} 號`"
+          >{{ politician.candNo }}號</span>
+          <span
+            v-else-if="politician.candidateStatus === 'registered'"
+            class="absolute top-2 left-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white"
+            title="已登記"
+          ><Check :size="14" :stroke-width="3" /></span>
+          <PartyBadge :party="politician.party" class="absolute bottom-2 right-2" />
+        </div>
+        <div class="p-3 text-left">
+          <h4 class="text-base font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
+            <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
+          </h4>
+          <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
+          <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
+          <span :class="['inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded mt-2 font-bold',
+                         getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
+            <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項政見
+          </span>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="!collapsed && politicians.length > 0" :class="gridClasses">
       <div
         v-for="politician in politicians"
         :key="politician.id"
