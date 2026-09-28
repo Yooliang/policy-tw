@@ -195,7 +195,8 @@ const electionPoliticians = computed(() =>
 )
 
 // 是否顯示右側篩選區（用於決定左側欄位數）
-const showSidebar = computed(() => selectedRegion.value !== 'All')
+// 跟右側欄的 v-if 同一個條件：選了縣市但沒有鄉鎮資料時不會出現右側欄，主欄是全寬
+const showSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0)
 
 // Grid 欄位數（有右側篩選時用 2 欄）
 const gridColumns = computed(() => showSidebar.value ? 2 : 3)
