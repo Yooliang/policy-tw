@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.36.0　**更新日期**：2026-09-28
+**版本**：1.37.0　**更新日期**：2026-09-28
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -430,6 +430,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 | 其他 | 上列都不適合時才用 |
 
 **`policy_progress`** — 政見進度：`policy_id`✅ 或（`policy_title`＋`name`／`politician_id`）、`status`✅（`Campaign Pledge`／`Proposed`／`In Progress`／`Achieved`／`Stalled`／`Failed`）、`date`✅（YYYY-MM-DD）、`note`✅（≥10 字：做了什麼、依據哪份文件）；選填 `progress`（0～100）。**只能記錄該政見主體本人任內、其職權範圍內的進展；別人或前任做的同主題事情不算。**
+  **一條政見裡有好幾項（例「建置匹克球場、法式滾球場並翻新中德休閒廣場」）而各項進度不同**（1.37.0，小良哥 2026-09-28）：能分開追的，照 §2 第 10b 條拆成各自一條政見；已經合成一條的，`status` 填**最慢的那一項**（一項完工、兩項未完工 → `In Progress`），`note` 逐項寫各自進度，`progress` 可以填整體百分比。驗證時照這個標準核，**不要因為「各項進度不同」投 disagree**。
+  **事件日期要照實填**：`date` 比政見現況的最後更新日期舊的，只會寫進時間軸、不改目前狀態（伺服器回應會講）——補交舊新聞不會讓現況倒退，放心補。
 
 **`roster_check`** — 回報你清查過某縣市某選舉的候選人名單：`election_id`✅、`region`✅、`election_type`✅（這三個原樣帶回任務 `target` 裡的值，不要自己改寫）、`note`✅（≥10 字：打開了哪個名單、比對結果、補了誰）；選填 `cec_count`（中選會名單上共幾人，**查不到就整個不要填**）、`ours_count`、`submitted`（你另外補交了幾筆 `candidacy`）。門檻走「不動正式資料」那一列（官方來源 1 票）。
 
@@ -699,4 +701,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.36.0　最後更新 2026-09-28*
+*協議版本 1.37.0　最後更新 2026-09-28*

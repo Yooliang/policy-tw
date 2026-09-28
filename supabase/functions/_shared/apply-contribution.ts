@@ -339,6 +339,13 @@ function notifySystemOne(subjectType: string, subjectId: string): void {
   }).catch((e) => console.warn(`[system-one] ask 送不出去：${e instanceof Error ? e.message : String(e)}`));
 }
 
+/** 進度事件比政見現況的最後更新日期舊（嚴格早於）→ 只記時間軸。現況沒有日期就當成新的 */
+export function isOlderEvent(eventDate: string, currentLastUpdated: unknown): boolean {
+  const cur = typeof currentLastUpdated === "string" ? currentLastUpdated.slice(0, 10) : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cur) || !/^\d{4}-\d{2}-\d{2}/.test(eventDate)) return false;
+  return eventDate.slice(0, 10) < cur;
+}
+
 async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -365,11 +372,16 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
     };
   }
 
-  const patch: Obj = { status: String(p.status), last_updated: String(p.date) };
+  // 事件日期比現況舊：只進時間軸、不動目前狀態（2026-09-28：先交「10 月已完成」、後補「3 月開始推動」會讓現況倒退成推動中）
+  const eventDate = String(p.date);
+  const olderThanCurrent = isOlderEvent(eventDate, before.last_updated);
+  const patch: Obj = { status: String(p.status), last_updated: eventDate };
   if (int(p.progress) !== null) patch.progress = p.progress;
-  const { error } = await supabase.from("policies").update(patch).eq("id", policyId);
-  throwIf(error, "policies update");
-  for (const [k, v] of Object.entries(patch)) await recordUpdate(supabase, ctx, "policies", policyId as string, k, before[k] ?? null, v);
+  if (!olderThanCurrent) {
+    const { error } = await supabase.from("policies").update(patch).eq("id", policyId);
+    throwIf(error, "policies update");
+    for (const [k, v] of Object.entries(patch)) await recordUpdate(supabase, ctx, "policies", policyId as string, k, before[k] ?? null, v);
+  }
 
   const logRow = {
     policy_id: policyId,
@@ -381,7 +393,12 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
   const { data: log, error: logError } = await supabase.from("tracking_logs").insert(logRow).select("*").maybeSingle();
   throwIf(logError, "tracking_logs insert");
   if (log) await recordInsert(supabase, ctx, "tracking_logs", String(log.id), log);
-  return { status: "applied", policy_id: policyId as string, message: "政見進度已更新並留下追蹤紀錄" };
+  return {
+    status: "applied", policy_id: policyId as string,
+    message: olderThanCurrent
+      ? `這則進度的日期（${eventDate}）比政見現況（${String(before.last_updated).slice(0, 10)}）舊，已記進時間軸，目前狀態不變`
+      : "政見進度已更新並留下追蹤紀錄",
+  };
 }
 
 /** correction：一筆可改多個欄位（changes[]），逐欄套用、各寫一筆 edit_history；舊的單欄位格式由 normalizeCorrection 相容 */
