@@ -130,6 +130,20 @@ Deno.test("duplicate_policy：confirmed 才鎖住那份清單的指紋", async (
   }
 });
 
+// 2026-09-28：等票期間那個人被合併掉了（輸家那筆刪除），upsert 撞外鍵 → apply_failed 重試到天荒地老。
+// 人都不在了，這份清單沒得鎖：直接 superseded，不重試。
+Deno.test("duplicate_policy：人已經不在（被合併）就 superseded，不寫 policy_dupe_reviews", async () => {
+  const { db, upserted } = fakeDb();
+  const gone = {
+    from: (table: string) => table === "politicians"
+      ? { select: (_c: string) => ({ eq: (_k: string, _v: string) => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }
+      : db.from(table),
+  };
+  const out = await applyContribution(gone, row(`auto:duplicate_policy:${PID}:0a1b2c3d`, "confirmed"));
+  assertEquals(out.status, "superseded");
+  assertEquals(upserted.filter((u) => u.table === "policy_dupe_reviews").length, 0);
+});
+
 Deno.test("not_running_recheck：confirmed 才把那筆參選紀錄標成已核對", async () => {
   // 這個章的代價是三者最大的：標成不參選之後，這個人的政見、基本資料、參選來源、
   // 選舉結果四種缺口同時不再被派。實查 2026 有 102 筆 not_running，而 candidate_status
