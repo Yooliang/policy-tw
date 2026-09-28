@@ -293,6 +293,25 @@ export interface ElectionTypeTableRow {
   type: string;
 }
 
+/** 查證來源清單（verification_sources 表，見 /sources 頁與 sources 端點；docs/DECISIONS.md 2026-09-28） */
+export interface VerificationSource {
+  id: number;
+  name: string;
+  kind: string;
+  party: string | null;
+  regions: string[] | null;
+  election_types: string[] | null;
+  provides: string[];
+  list_url: string | null;
+  detail_url_pattern: string | null;
+  access: string;
+  quality_note: string | null;
+  how_to: string | null;
+  last_checked: string | null;
+  status: string;
+  sort: number;
+}
+
 export interface RawElection {
   id: number;
   name: string;

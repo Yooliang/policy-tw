@@ -7,6 +7,7 @@ import { createSupabaseIdentityStore, resolvePolitician } from "./politician-ide
 import { identityInputOf } from "./candidate-import.ts";
 import { normalizeCorrection } from "./correction.ts";
 import { fetchAllRows } from "./fetch-all.ts";
+import { fetchVerificationSources, needsForTask, sourcesForTask, type TaskSourceHint } from "./verification-sources.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -67,6 +68,8 @@ export interface TaskContextData {
   question?: Obj | null;
   /** question：已經有哪些代理答過、答了什麼（citizen_questions.id = target.question_id） */
   question_answers?: Obj[];
+  /** 查證來源（2026-09-28）：依這個任務對象的政黨／縣市／選舉別自動附上的查證來源，撈不到就 undefined */
+  verification_sources?: TaskSourceHint[];
 }
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
@@ -121,6 +124,9 @@ export function shapeTaskCurrent(
     // 而整個改動的目的就是讓它不必回頭翻（2026-09-21）
     ...(task ? (() => { const b = buildBranchTemplates(taskType, target, task.task_id); return b ? { report_templates_by_type: b } : {}; })() : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
+    // 查證來源（2026-09-28）：代理常只查媒體首頁就回「查無」，其實政黨／議會官網查得到照片、學經歷、選區、政見。
+    // fetchTaskContext 已經依這個任務對象篩過、限量 6 筆；這裡沒有就不附，不能讓派工因為這個失敗。
+    ...(data.verification_sources && data.verification_sources.length > 0 ? { verification_sources: data.verification_sources } : {}),
   };
 }
 
@@ -450,8 +456,37 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.votes = votes.data ?? [];
     data.pending_adjudications = adj.count ?? 0;
   }
+  // 查證來源（2026-09-28）：「有人物對象」的任務——列在 SOURCE_TASK_TYPES 的自動缺口（含
+  // 沒有 politician_id 的 roster_check，用 target 的縣市／選舉別）、以及任何 target 帶
+  // politician_id 的任務（含手動任務）——依政黨／縣市／選舉別、這種任務要查的東西附上。
+  // 來源表很小，撈一次全部快取在函式記憶體幾分鐘，不要每次派工都多打查詢；撈不到就不附，
+  // 不能讓派工因為這個失敗。
+  if (SOURCE_TASK_TYPES.has(taskType) || pid) {
+    try {
+      const party = typeof data.politician?.party === "string" ? data.politician.party : null;
+      const region = (typeof data.politician?.region === "string" ? data.politician.region : null)
+        ?? (typeof target.region === "string" ? target.region : null);
+      const electionType = (typeof data.politician?.election_type === "string" ? data.politician.election_type : null)
+        ?? (typeof target.election_type === "string" ? target.election_type : null);
+      const all = await fetchVerificationSources(supabase);
+      const hints = sourcesForTask(all, { party, region, electionType, need: needsForTask(taskType) });
+      if (hints.length > 0) data.verification_sources = hints;
+    } catch (e) {
+      console.error("verification_sources:", e instanceof Error ? e.message : String(e));
+    }
+  }
   return data;
 }
+
+/** 「有人物對象」的自動任務型別：手動任務另外看 target 有沒有 politician_id（見上面呼叫處） */
+const SOURCE_TASK_TYPES = new Set([
+  "profile_gap",
+  "policy_missing",
+  "candidacy_source_missing",
+  "candidate_status_stale",
+  "not_running_recheck",
+  "roster_check",
+]);
 
 export interface VerifyContextData {
   politicians?: Obj[];

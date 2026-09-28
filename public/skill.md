@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.37.0　**更新日期**：2026-09-28
+**版本**：1.38.0　**更新日期**：2026-09-28
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -685,6 +685,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 
 - `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribution-status?id=<uuid>` → `status`（pending／verified／applied／apply_failed（自動重試中）／rejected／reverted；`disputed` 是舊制殘留）、`review_notes`、`score`／`target_score`／`score_needed`；落庫後給 `politician_url`／`policy_url`。
 - `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/history?target=politician|policy|contribution&id=<uuid>&limit=&cursor=` → 查核履歷（新到舊）：每筆貢獻的摘要、提交者、來源、驗證者與理由／反證、edit_history 欄位舊值新值、是否還原、裁決。網站的政見頁／人物頁「查核履歷」就是讀這支；沒有貢獻紀錄時 `entries=[]`、`origin` 說明資料哪來的。
+- **查證來源清單**（1.38.0，小良哥 2026-09-28）：只查中央社、自由時報首頁常常查無，但政黨官網、議會官網其實有候選人照片、學經歷、選區、政見。清單見 <https://正見.tw/sources>，或 `GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/sources?party=&region=&election_type=&need=photo,policy&format=md`（`format=md` 回 Markdown，預設 JSON；`need` 是逗號分隔的 `photo/education/experience/district/policy/birth_year/candidacy/roster`）。有人物對象的任務（補基本資料、政見缺漏、參選來源、名單清查等）會依那個人的政黨／縣市／選舉別自動把對得上的來源附在 `current.verification_sources`，不用每次都自己查這支端點。
 
 ## 9. 審核與署名
 
@@ -701,4 +702,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.37.0　最後更新 2026-09-28*
+*協議版本 1.38.0　最後更新 2026-09-28*

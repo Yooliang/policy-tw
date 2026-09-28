@@ -96,7 +96,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 ### Frontend Structure（`router/index.ts` 為準）
 
-預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`
+預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`
 
 客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（redirect）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
 
@@ -125,9 +125,9 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
-## Edge Functions（`supabase/functions/`，共 34 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
+## Edge Functions（`supabase/functions/`，共 37 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
 
-- 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）
+- 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）、`sources`（查證來源清單，無金鑰，見 `/sources` 頁與 2026-09-28 裁決）
 - 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`

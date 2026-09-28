@@ -91,6 +91,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Skill.vue'),
   },
   {
+    path: '/sources',
+    name: 'sources',
+    component: () => import('../pages/Sources.vue'),
+  },
+  {
     path: '/admin/dashboard',
     component: () => import('../pages/AdminDashboard.vue'),
     meta: { requiresAdmin: true },
