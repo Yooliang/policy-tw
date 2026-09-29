@@ -11,6 +11,7 @@ import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
 import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
+import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../_shared/verification-sources.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
@@ -300,6 +301,19 @@ Deno.serve(async (req) => {
         score: pick.score,
         target_score: typeof pick.target_score === "number" ? pick.target_score : pick.effective_required,
       });
+      // 查證來源（2026-09-29）：原本只有任務附，驗證者投票時看不到——苗栗議員那批一小時 28 張「無法判斷」，
+      // 都說官方名冊還沒公布，其實登記彙總表早就在。撈不到就不附，不能讓派驗證失敗。
+      {
+        const sq = verifySourceQuery(pick.contribution_type, verifyPayload, (verifyContext.politicians?.[0] ?? null) as Record<string, unknown> | null);
+        if (sq) {
+          try {
+            const hints = sourcesForTask(await fetchVerificationSources(supabase), sq);
+            if (hints.length > 0) (verifyCurrent as Record<string, unknown>).verification_sources = hints;
+          } catch (e) {
+            console.error("verify verification_sources:", e instanceof Error ? e.message : String(e));
+          }
+        }
+      }
       // 系統來源票（2026-09-19，4 票變 3+1）：Jev 核過提交的來源就給代理看。它是正式的一票，不是提示——
       // supported 讓門檻 −1、not_supported 算一張反對；機率不到門檻或抓不到正文＝棄權，這裡照實給 abstain。
       {
