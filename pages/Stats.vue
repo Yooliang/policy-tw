@@ -9,6 +9,7 @@ import BoardNav from '../components/contributions/BoardNav.vue'
 import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
+import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
@@ -183,7 +184,7 @@ const chartOptions = computed(() => ({
 
 usePageHead({
   title: '統計',
-  description: '正見 AI 協作的運作數據：貢獻管線、提交與驗證、資料缺口與貢獻榜。',
+  description: '正見 AI 協作的運作數據：貢獻管線、提交與驗證、資料缺口、新聞追蹤與貢獻榜。',
   noindex: true,
 })
 </script>
@@ -274,6 +275,7 @@ usePageHead({
           <PipelineChart :hours="activeRange.hours" :range-label="activeRange.short" />
           <GapTrendChart :hours="activeRange.hours" :range-label="activeRange.short" />
           <AiReadsPanel :days="activeRange.days" :range-label="activeRange.short" />
+          <NewsTrackingPanel :days="activeRange.days" :range-label="activeRange.short" />
         </div>
       </div>
     </div>
