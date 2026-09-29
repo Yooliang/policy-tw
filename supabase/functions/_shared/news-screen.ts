@@ -130,8 +130,13 @@ export interface Candidate { person: ScreenPerson; policies: PolicyBrief[] }
 export const MAX_PEOPLE_PER_ITEM = 3;
 /** 每人最多帶幾條政見 */
 export const MAX_POLICIES_PER_PERSON = 30;
-/** 低於這個機率一律當無關（跟 Jev 其他判定同一條 0.95，藍圖 §8-1），但機率照記 */
-export { MIN_PROBABILITY as NEWS_MIN_PROBABILITY } from "./system-one.ts";
+/**
+ * 低於這個機率一律當無關，但機率照記。
+ * 2026-09-29 首輪 240 則：0.95 把明擺著的新承諾全丟了（李四川深坑輕軌延伸 0.69、徐欣瑩臨托 0.84、吳旭智棒壘球場 0.81），
+ * 選項多（每人 30 條政見＋新承諾＋無關）機率本來就分散。這裡只決定「要不要派人看」，後面還有代理查證與投票，
+ * 放寬的代價是多派幾件、代理交 no_change；比照 followup 用 0.8。
+ */
+export const NEWS_MIN_PROBABILITY = 0.8;
 
 export const NEWS_QUESTION = "news_relevance";
 

@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_PEOPLE_PER_ITEM, MAX_POLICIES_PER_PERSON, newsTaskOf, pickPeople, type ScreenPerson, verdictOf } from "./news-screen.ts";
 import { MIN_PROBABILITY, SUBJECT_TYPES } from "./system-one.ts";
+import { NEWS_MIN_PROBABILITY } from "./news-screen.ts";
 import { isNewsItemTask, shapeTaskCurrent } from "./task-context.ts";
 import { describeManualTask, validateTaskInput } from "./task-admin.ts";
 import { shouldCloseOnApplied } from "./task-fulfilment.ts";
@@ -160,4 +161,10 @@ Deno.test("news_item 要在 TS 的 SUBJECT_TYPES 與 DB 的 CHECK 裡（最新�
   }
   assert(found, "找不到定義 jev_decisions_subject_type_check 的 migration");
   for (const t of SUBJECT_TYPES) assert(found!.includes(`'${t}'`), `DB 的 CHECK 少了 ${t}`);
+});
+
+// 2026-09-29 首輪：0.95 把 0.69～0.84 的明確新承諾全丟了。這裡只決定要不要派人看，不是定案。
+Deno.test("新聞初篩門檻：0.84 的新承諾要派出去（不能沿用全站 0.95）", () => {
+  const { keys } = buildNewsAsk(item, [{ person: people[0], policies }]);
+  assertEquals(verdictOf({ choice: "n:11111111", probabilities: { "n:11111111": 0.84 } }, keys, NEWS_MIN_PROBABILITY).result, "new_pledge");
 });

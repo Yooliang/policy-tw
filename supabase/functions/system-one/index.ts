@@ -41,7 +41,7 @@ import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf } from "../_shared/news-screen.ts";
+import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY } from "../_shared/news-screen.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -311,7 +311,7 @@ async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
     const res = await askJev(apiKey, state, questions);
     asked++; cost += res.usage.cost;
     const ans = res.answers[NEWS_QUESTION];
-    const verdict = verdictOf(ans, keys, MIN_PROBABILITY);
+    const verdict = verdictOf(ans, keys, NEWS_MIN_PROBABILITY);
     await insertRecords(supabase, [{
       subject_type: "news_item", subject_id: String(it.id), question: NEWS_QUESTION,
       choice: verdict.choice ?? "unrelated", probability: verdict.probability, confidence: ans?.confidence ?? null,
@@ -1132,7 +1132,7 @@ Deno.serve(async (req) => {
       const apiKey = Deno.env.get("OPENROUTER_API_KEY");
       if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || NEWS_SCREEN_MAX, 1), NEWS_SCREEN_MAX);
-      return json({ success: true, min_probability: MIN_PROBABILITY, ...(await newsScreen(supabase, apiKey, limit)) });
+      return json({ success: true, min_probability: NEWS_MIN_PROBABILITY, ...(await newsScreen(supabase, apiKey, limit)) });
     }
 
     // ---- record：外部批次腳本寫入 ----
