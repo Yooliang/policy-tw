@@ -197,3 +197,18 @@ export async function fetchVerificationSources(supabase: SupabaseLike): Promise<
   cached = { at: Date.now(), rows };
   return rows;
 }
+
+/**
+ * 驗證項目要附哪些查證來源（2026-09-29）：原本只有任務會附，驗證者投票時看不到——
+ * 苗栗縣議員那批 candidacy 一小時 28 張「無法判斷」，都說「官方名冊 11/17 才公布」，其實登記彙總表早就在。
+ * 回 null＝這種貢獻不附（更正、移除等要查的東西不固定，附了反而誤導）。
+ */
+export function verifySourceQuery(contributionType: string, payload: Record<string, unknown>, politician?: Record<string, unknown> | null): SourceQuery | null {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const region = str(payload.region) ?? str(politician?.region);
+  const party = str(payload.party) ?? str(politician?.party);
+  if (contributionType === "candidacy") return { region, party, electionType: str(payload.election_type), need: ["candidacy", "district", "roster"] };
+  if (contributionType === "politician") return { region, party, electionType: str(payload.election_type), need: DEFAULT_TASK_SOURCE_NEED };
+  if (contributionType === "policy") return { region, party, need: ["policy"] };
+  return null;
+}
