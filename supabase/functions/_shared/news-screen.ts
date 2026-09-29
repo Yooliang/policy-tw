@@ -271,3 +271,37 @@ export function newsTaskOf(t: NewsTaskInput) {
 function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
+
+// ---- 可調設定（news_settings，2026-09-29 小良哥：「讓頻率可以調整」）----
+
+export interface NewsSettings {
+  enabled: boolean;
+  screen_every_hours: number;
+  daily_task_cap: number;
+  last_screen_at: string | null;
+}
+
+/** 讀不到設定列（migration 還沒跑、表被刪）時照原本的行為：每小時篩、上限寬鬆 */
+export const DEFAULT_NEWS_SETTINGS: NewsSettings = { enabled: true, screen_every_hours: 1, daily_task_cap: 30, last_screen_at: null };
+
+/**
+ * 這一輪該不該篩。news-fetch 每小時第 5 分觸發，實際間隔會有幾分鐘抖動，
+ * 所以留 10 分鐘寬限：設 3 小時的話，2 小時 50 分之後的那一次就算到了。
+ */
+export function isScreenDue(lastScreenAt: string | null, everyHours: number, now: Date): boolean {
+  if (!lastScreenAt) return true;
+  const last = Date.parse(lastScreenAt);
+  if (Number.isNaN(last)) return true;
+  return now.getTime() - last >= Math.max(1, everyHours) * 3_600_000 - 10 * 60_000;
+}
+
+/** 台灣時間今天 00:00 的 UTC 時刻（算「今天開了幾件」用） */
+export function taipeiDayStart(now: Date): Date {
+  const tw = new Date(now.getTime() + 8 * 3_600_000);
+  return new Date(Date.UTC(tw.getUTCFullYear(), tw.getUTCMonth(), tw.getUTCDate()) - 8 * 3_600_000);
+}
+
+/** 今天還能開幾件 */
+export function remainingCap(cap: number, createdToday: number): number {
+  return Math.max(0, cap - createdToday);
+}

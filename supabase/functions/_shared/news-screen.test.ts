@@ -168,3 +168,17 @@ Deno.test("新聞初篩門檻：0.84 的新承諾要派出去（不能沿用全�
   const { keys } = buildNewsAsk(item, [{ person: people[0], policies }]);
   assertEquals(verdictOf({ choice: "n:11111111", probabilities: { "n:11111111": 0.84 } }, keys, NEWS_MIN_PROBABILITY).result, "new_pledge");
 });
+
+// 2026-09-29 小良哥：資源不多時要能放慢。只有「初篩→開任務」這一段可調，收錄照常每小時
+import { isScreenDue, remainingCap, taipeiDayStart } from "./news-screen.ts";
+Deno.test("可調設定：幾小時篩一次（留 10 分鐘寬限）、台灣日界、每日上限", () => {
+  const now = new Date("2026-09-29T12:05:00Z");
+  assertEquals(isScreenDue(null, 3, now), true, "沒篩過就篩");
+  assertEquals(isScreenDue("2026-09-29T11:05:00Z", 1, now), true, "每小時：一小時前篩過就該篩");
+  assertEquals(isScreenDue("2026-09-29T11:05:00Z", 3, now), false, "每 3 小時：一小時前篩過不篩");
+  assertEquals(isScreenDue("2026-09-29T09:10:00Z", 3, now), true, "差 5 分鐘也算到（排程抖動）");
+  assertEquals(taipeiDayStart(new Date("2026-09-29T17:00:00Z")).toISOString(), "2026-09-29T16:00:00.000Z", "台灣 01:00 已經是隔天");
+  assertEquals(taipeiDayStart(new Date("2026-09-29T15:59:00Z")).toISOString(), "2026-09-28T16:00:00.000Z");
+  assertEquals(remainingCap(10, 12), 0);
+  assertEquals(remainingCap(10, 3), 7);
+});
