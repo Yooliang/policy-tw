@@ -101,8 +101,9 @@ export function describeManualTask(t: ManualTaskRowLike): { what_we_need: string
   }
   // 掃 RSS：把來源網址提到 item.source_url，代理不用從敘述裡撈網址
   if (t.task_type === "news_sweep") {
-    const feed = typeof target.feed_url === "string" ? target.feed_url : null;
-    return { what_we_need: t.description ?? t.title, source_url: feed };
+    // 單則新聞（2026-09-29 起 Jev 初篩後建，target.kind='news_item'）：item.source_url 就是那則新聞
+    const url = typeof target.url === "string" ? target.url : typeof target.feed_url === "string" ? target.feed_url : null;
+    return { what_we_need: t.description ?? t.title, source_url: url };
   }
   if (t.task_type === "question") {
     return { what_we_need: `${QUESTION_WHAT_WE_NEED}。提問：「${t.description ?? t.title}」`, source_url: sourceUrl };

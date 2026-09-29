@@ -12,7 +12,7 @@ import { fetchVerificationSources, needsForTask, sourcesForTask, type TaskSource
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -99,17 +99,20 @@ export function shapeTaskCurrent(
   data: TaskContextData,
   task?: { task_id?: string | null; target?: unknown },
 ): Obj {
-  const inner = shapeTaskCurrentInner(taskType, data);
+  const target = (task?.target && typeof task.target === "object" ? task.target : null) as Obj | null;
+  // 單則新聞的 news_sweep（2026-09-29，Jev 初篩後建）跟整份 RSS 那種做法不同，current 與 hint 另外組
+  const newsItem = isNewsItemTask(taskType, target);
+  const inner = newsItem ? shapeNewsItemCurrent(target!, data) : shapeTaskCurrentInner(taskType, data);
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   const hint = inner.hint ?? TASK_GUIDANCE[taskType];
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
-  const suggested = SUGGESTED_TYPE[taskType] ?? "";
+  // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
+  const suggested = newsItem && target?.suggestion === "progress" ? "policy_progress" : (SUGGESTED_TYPE[taskType] ?? "");
   const shape = PAYLOAD_SHAPE[suggested];
   // 骨架把已知的 id 先填好。candidate_status_stale 要改 politician_elections 的某一列卻沒給
   // 那一列的 id，代理只能猜複合鍵——那個 id 其實一直在 task_id 裡（2026-09-21 實測回報）。
-  const target = (task?.target && typeof task.target === "object" ? task.target : null) as Obj | null;
   const template = task ? buildReportTemplate(taskType, suggested, target, task.task_id) : null;
   return {
     ...inner,
@@ -127,6 +130,35 @@ export function shapeTaskCurrent(
     // 查證來源（2026-09-28）：代理常只查媒體首頁就回「查無」，其實政黨／議會官網查得到照片、學經歷、選區、政見。
     // fetchTaskContext 已經依這個任務對象篩過、限量 6 筆；這裡沒有就不附，不能讓派工因為這個失敗。
     ...(data.verification_sources && data.verification_sources.length > 0 ? { verification_sources: data.verification_sources } : {}),
+  };
+}
+
+/** Jev 初篩後建的單則新聞任務（news_sweep 且 target.kind='news_item'）；舊的整份 RSS 任務 target 只有 feed_url */
+export function isNewsItemTask(taskType: string, target: Obj | null | undefined): boolean {
+  return taskType === "news_sweep" && !!target && target.kind === "news_item";
+}
+
+/** 單則新聞任務的 current：新聞本身、對應的政見（判成進度時）、這個人現有與等票中的政見（判成新承諾時查重用） */
+export function shapeNewsItemCurrent(target: Obj, data: TaskContextData): Obj {
+  const p = data.politician ?? null;
+  const queued = (data.queued_policies ?? []).map((c) => ({
+    contribution_id: c.id,
+    title: (c.payload && typeof c.payload === "object" ? (c.payload as Obj).title : null) ?? null,
+  })).filter((x) => typeof x.title === "string" && x.title.length > 0);
+  return {
+    news: {
+      url: target.url ?? null,
+      title: target.title ?? null,
+      source: target.source_label ?? null,
+      published_at: target.published_at ?? null,
+    },
+    suggestion: target.suggestion === "progress" ? "progress" : "new_pledge",
+    politician: pick(p, POLITICIAN_BRIEF),
+    policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "status", "progress", "source_url", "election_id", "last_updated"])!, ["description"]) : null,
+    recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
+    existing_policies: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "status", "election_id"])),
+    queued_policies: queued,
+    hint: newsItemGuidance(typeof target.suggestion === "string" ? target.suggestion : null),
   };
 }
 
@@ -406,7 +438,19 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies_total = pol.count ?? (data.policies ?? []).length;
     data.queued_policies = queued.data ?? [];
   }
-  if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity" || taskType === "policy_election_missing" || taskType === "policy_election_mismatch") && policyId) {
+  // 單則新聞任務（2026-09-29）：判成進度的要看那條政見與它的時間軸；判成新承諾的要看這個人已有／等票中的政見，免得重交
+  if (isNewsItemTask(taskType, target) && pid) {
+    const [pol, queued] = await Promise.all([
+      supabase.from("policies").select("id, title, status, election_id").eq("politician_id", pid).is("removed_at", null)
+        .order("proposed_date", { ascending: false, nullsFirst: false }).limit(MAX_EXISTING_POLICIES),
+      supabase.from("contributions").select("id, payload")
+        .eq("contribution_type", "policy").in("status", ["pending", "verified"])
+        .eq("payload->>politician_id", pid).order("created_at", { ascending: false }).limit(MAX_EXISTING_POLICIES),
+    ]);
+    data.policies = pol.data ?? [];
+    data.queued_policies = queued.data ?? [];
+  }
+  if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity" || taskType === "policy_election_missing" || taskType === "policy_election_mismatch" || isNewsItemTask(taskType, target)) && policyId) {
     const [pl, logs] = await Promise.all([
       supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
       supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),

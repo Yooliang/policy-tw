@@ -92,6 +92,24 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "訪客在政見頁貼了一個文件網址。打開它，核對內容與我們既有的相關政見／進度是否一致：不一致就提 correction 或 policy_progress，一致就提 no_change 回報無異動。",
 };
 
+/**
+ * 單則新聞的 news_sweep（target.kind='news_item'，2026-09-29 起由 Jev 初篩後建）：跟上面那條「讀整份 RSS」不同，
+ * 這一件只有一則（或同一條政見的幾則）新聞，系統已經猜好是「進度」還是「新承諾」。
+ * 猜的只是線索：代理照新聞內容判斷，兩條路都能走，判錯了就用 no_change 講清楚——那也是初篩準不準的資料。
+ * 由 task-context.ts 依 target.kind 選用；靜態表那條留給舊的整份 RSS 任務。
+ */
+export function newsItemGuidance(suggestion: string | null | undefined): string {
+  const lead = suggestion === "progress"
+    ? "系統初篩認為這則新聞講的是 policy 那條政見的進度。"
+    : "系統初篩認為這則新聞裡，這個人提出了 existing_policies 裡還沒有的具體承諾。";
+  return lead +
+    "先打開 news.url 讀全文（hint_sources 若有好幾則，每一則都要讀），照新聞實際寫的內容判斷，**初篩只是線索、不是結論**：" +
+    "**是某條既有政見的新進度**（開工、完工、編列預算、修法、延宕、放棄）→ 交 policy_progress，policy_id 用 policy.id（或 existing_policies 裡對得上的那一條），date 填新聞寫的事件日期；" +
+    "**是清單上沒有的具體承諾** → 交 policy：選前提的填 Campaign Pledge；現任者在任內新宣布的施政承諾填 Proposed、election_id 填他這一任當選那屆、proposed_date 填宣布日。一則新聞有幾個能各自查核的承諾就拆幾筆，先看 existing_policies 與 queued_policies，同一個承諾換句話說不要再交；" +
+    "**初篩判錯了**（只是行程、致詞、評論、選情、民調、口水，或看不出具體承諾）→ no_change，outcome=not_found，finding 寫新聞實際在講什麼、為什麼不算進度或承諾，checked_urls 放新聞網址；新聞打不開才用 unreachable。" +
+    "source_urls 一律放新聞原文網址。";
+}
+
 /** 這些型別的 hint 依當筆資料而變，由 shapeTaskCurrent 自己組（不走這張靜態表）。 */
 export const DYNAMIC_GUIDANCE_TYPES = [
   "legacy_audit",
