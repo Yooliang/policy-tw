@@ -14,8 +14,9 @@ export const JEV_MODEL = "typesafe/jev-1.13";
 /** 門檻 0.95：同題重問只有機率 ≤0.55 會換答案，兩次都 ≥0.95 的 155 題全數一致（藍圖 §8-1） */
 export const MIN_PROBABILITY = 0.95;
 
-export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election", "vote"] as const;
-export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget", "followup"] as const;
+// news_item／news_relevance：新聞初篩（2026-09-29，system-one?action=news_screen）
+export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election", "vote", "news_item"] as const;
+export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget", "followup", "news_relevance"] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number] | "vote";
 export type Question = (typeof QUESTIONS)[number];
 

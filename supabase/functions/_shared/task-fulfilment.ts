@@ -14,11 +14,14 @@ type Obj = Record<string, unknown>;
 /**
  * 這些任務型別不照上面的規則關：
  * - question：一題最多收 3 份答案（single-answer-guard 管），第一份上線不代表問完了
- * - news_sweep：一次掃 RSS 會交出很多筆，任務本身是週期性的
  * - adjudicate：裁決流程自己關（closeAdjudicationTasks）
  * - roster_check：一個縣市的名單會交出很多筆 candidacy，由 roster_check 型別的貢獻收尾
+ *
+ * news_sweep 原本也在這裡（一件任務＝讀整份 RSS，會交出很多筆、任務本身是週期性的）。2026-09-29 改成
+ * 一則新聞一件（Jev 初篩後建），整份 RSS 那種停掉了——一則新聞的進度或承諾上線就算做完，照一般規則關。
+ * 同一則裡其他還在等票的提交不受影響。
  */
-const KEEP_OPEN_TASK_TYPES: ReadonlySet<string> = new Set(["question", "news_sweep", "adjudicate", "roster_check"]);
+const KEEP_OPEN_TASK_TYPES: ReadonlySet<string> = new Set(["question", "adjudicate", "roster_check"]);
 
 /**
  * 這些貢獻型別有自己的收尾，不走這條：

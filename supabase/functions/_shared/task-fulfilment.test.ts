@@ -4,11 +4,12 @@ import { closeTaskIfFulfilled, type ContributionRow } from "./apply-contribution
 
 const TASK = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-Deno.test("任務何時算做完：補資料的貢獻上線就關；question／news_sweep／adjudicate／roster_check 不關", () => {
-  for (const t of ["policy_missing", "profile_gap", "progress_stale", "policy_validity", "audit", "fix_disputed"]) {
+Deno.test("任務何時算做完：補資料的貢獻上線就關；question／adjudicate／roster_check 不關", () => {
+  // news_sweep 2026-09-29 起是一則新聞一件：那則的進度或承諾上線就算做完
+  for (const t of ["policy_missing", "profile_gap", "progress_stale", "policy_validity", "audit", "fix_disputed", "news_sweep"]) {
     assert(shouldCloseOnApplied(t, "policy") || shouldCloseOnApplied(t, "politician"), `${t} 應該在補資料的貢獻上線後關閉`);
   }
-  for (const t of ["question", "news_sweep", "adjudicate", "roster_check"]) {
+  for (const t of ["question", "adjudicate", "roster_check"]) {
     assertEquals(shouldCloseOnApplied(t, "policy"), false, `${t} 不該因為一筆上線就關`);
   }
   // 有自己收尾的貢獻型別不走這條

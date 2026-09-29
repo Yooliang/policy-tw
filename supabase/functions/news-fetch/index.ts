@@ -99,7 +99,24 @@ Deno.serve(async (req) => {
     await Promise.allSettled(chunk.map(one));
   }
 
+  // 收完當場初篩（小良哥 2026-09-29：收錄跟 Jev 初篩做在一起，不另排每天兩次）。
+  // 初篩是另一支函式（system-one?action=news_screen，有自己的時間上限與 Jev 成本上限），這裡只觸發、不等它：
+  // 收錄本身最多用掉 110 秒，再等初篩會超過 Edge Function 的時間上限。只在這一輪真的抓了來源時才觸發——
+  // 外人狂打 news-fetch 時多半全在冷卻中，不會連帶一直叫初篩。初篩只撿還沒判過的，漏叫一次下一小時會補。
+  let screen: string = "這一輪沒有抓任何來源，不觸發初篩";
+  if (reports.length > 0) {
+    const screenUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/system-one?action=news_screen`;
+    const task = fetch(screenUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(150_000) })
+      .then(async (r) => { if (!r.ok) console.error(`news_screen ${r.status}: ${(await r.text()).slice(0, 300)}`); })
+      .catch((e) => console.error("news_screen:", e instanceof Error ? e.message : String(e)));
+    // Supabase 的 Edge Runtime 有 EdgeRuntime.waitUntil（回應送出後繼續跑）；本機 deno 沒有，就在背景放著
+    const rt = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
+    if (rt) rt.waitUntil(task);
+    screen = "已觸發 system-one?action=news_screen";
+  }
+
   return json({
+    screen,
     success: true,
     sources: reports,
     inserted: reports.reduce((n, r) => n + r.inserted, 0),
