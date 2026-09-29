@@ -229,11 +229,12 @@ usePageHead({
       </div>
 
       <!-- 2026-09-24 小良哥：原本這一整條是運作狀態，改放資料缺口與提交與驗證並排；運作狀態移到右欄 -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        <GapPanel />
-        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+      <!-- 電腦版同一列的兩張卡要等高（09-29 小良哥）：stretch 撐成同高，右邊的圖吃掉多出來的高度 -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        <GapPanel class="h-full" />
+        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5 h-full flex flex-col">
           <h3 class="font-black text-navy-900 mb-2 flex items-center gap-2"><CalendarDays :size="18" class="text-blue-600" />提交與驗證({{ activeRange.short }})</h3>
-          <div class="h-44">
+          <div class="h-44 lg:h-auto lg:flex-1 lg:min-h-44">
             <ClientOnly><apexchart v-if="activity" type="line" height="100%" :options="chartOptions" :series="chartSeries" /></ClientOnly>
           </div>
         </section>
