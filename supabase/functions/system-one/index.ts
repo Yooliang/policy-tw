@@ -41,7 +41,7 @@ import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY } from "../_shared/news-screen.ts";
+import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -228,6 +228,25 @@ type NewsRow = { id: number; source_id: number; url: string; title: string; summ
  */
 async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
   const startedAt = Date.now();
+  const now = new Date();
+
+  // 可調設定（news_settings 單列，2026-09-29）：暫停、幾小時篩一次、每天最多開幾件
+  const { data: setRow, error: setErr } = await supabase.from("news_settings")
+    .select("enabled, screen_every_hours, daily_task_cap, last_screen_at").eq("id", 1).maybeSingle();
+  if (setErr) console.error("news_settings:", setErr.message);
+  const settings: NewsSettings = { ...DEFAULT_NEWS_SETTINGS, ...((setRow ?? {}) as Partial<NewsSettings>) };
+  if (!settings.enabled) return { skipped: "disabled", settings };
+  if (!isScreenDue(settings.last_screen_at, settings.screen_every_hours, now)) return { skipped: "not_due", settings };
+  // 先蓋時間再篩：兩個呼叫同時進來，後到的看到時間還沒到就放手（設定每小時時兩個都會進來，靠下面的佔位防重複）
+  if (setRow) {
+    const { error } = await supabase.from("news_settings").update({ last_screen_at: now.toISOString() }).eq("id", 1);
+    if (error) console.error("news_settings last_screen_at:", error.message);
+  }
+  const { count: createdToday, error: ctErr } = await supabase.from("contribution_tasks")
+    .select("id", { count: "exact", head: true }).eq("task_type", "news_sweep").eq("target->>kind", "news_item")
+    .gte("created_at", taipeiDayStart(now).toISOString());
+  if (ctErr) throw new Error(`contribution_tasks today count: ${ctErr.message}`);
+  let capLeft = remainingCap(settings.daily_task_cap, createdToday ?? 0);
   // 成本上限：10 分鐘內 Jev 最多問 BACKFILL_MAX 則（跟 backfill／precheck 同一條，不帶金鑰的動作只能這樣守）
   const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
   const { count, error: cErr } = await supabase.from("jev_decisions")
@@ -246,7 +265,6 @@ async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
     .order("published_at", { ascending: true, nullsFirst: false }).order("id", { ascending: true }).limit(limit);
   if (iErr) throw new Error(`news_items: ${iErr.message}`);
   const items = (rows ?? []) as NewsRow[];
-  if (items.length === 0) return { candidates: 0, no_name: 0, asked: 0, tasks: 0, appended: 0, tally: {}, failures: [] };
 
   const { data: srcRows, error: sErr } = await supabase.from("news_sources").select("id, label, region").order("id", { ascending: true }).limit(500);
   if (sErr) throw new Error(`news_sources: ${sErr.message}`);
@@ -300,8 +318,67 @@ async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
     return policyCache.get(pid)!;
   };
 
-  let asked = 0, cost = 0, tasks = 0, appended = 0;
+  let asked = 0, cost = 0, tasks = 0, appended = 0, deferred = 0;
   const tally: Record<string, number> = { no_name: noName.length };
+
+  /** 有關的新聞 → 併進既有任務、開新任務，或（今天額度用完）記成 deferred 等明天 */
+  const dispatch = async (
+    it: { id: number; url: string; title: string; published_at: string | null },
+    srcLabel: string, person: ScreenPerson, policy: PolicyBrief | null, verdict: ScreenVerdict,
+  ): Promise<{ taskId: string | null; appendedTo: string | null; deferred: boolean }> => {
+    // 同一條政見的進度、同一個人的新承諾已經有 open 的新聞任務：把這則加進那件的 hint_sources，不另開（不佔額度）
+    // query-bounds: ok — 下面接 .order().limit(1)
+    let q = supabase.from("contribution_tasks").select("id, hint_sources").eq("status", "open").eq("task_type", "news_sweep")
+      .eq("target->>kind", "news_item").eq("target->>politician_id", person.id).eq("target->>suggestion", verdict.result);
+    if (policy) q = q.eq("target->>policy_id", policy.id);
+    const { data: open, error: oErr } = await q.order("created_at", { ascending: false }).limit(1);
+    if (oErr) throw new Error(`contribution_tasks lookup: ${oErr.message}`);
+    const existing = ((open ?? []) as Array<{ id: string; hint_sources: string[] | null }>)[0];
+    if (existing) {
+      const urls = existing.hint_sources ?? [];
+      if (!urls.includes(it.url) && urls.length < NEWS_TASK_MAX_URLS) {
+        const { error } = await supabase.from("contribution_tasks").update({ hint_sources: [...urls, it.url] }).eq("id", existing.id);
+        if (error) throw new Error(`contribution_tasks append: ${error.message}`);
+        appended++;
+      }
+      return { taskId: null, appendedTo: existing.id, deferred: false };
+    }
+    // 額度在 await 之前扣，並行的幾則才不會一起超過
+    if (capLeft <= 0) { deferred++; return { taskId: null, appendedTo: null, deferred: true }; }
+    capLeft--;
+    const t = await createTask(supabase, newsTaskOf({
+      news_item_id: it.id, url: it.url, title: it.title, source_label: srcLabel, published_at: it.published_at, person, policy, verdict,
+    }), { source: "manual", created_by: "news-screen" });
+    tasks++;
+    return { taskId: String(t.id), appendedTo: null, deferred: false };
+  };
+
+  // 昨天（或前幾輪）超額留下的先補開：新的優先，舊新聞留著不開也沒關係
+  if (capLeft > 0) {
+    const { data: held, error: hErr } = await supabase.from("news_items")
+      .select("id, source_id, url, title, published_at, screen").eq("screen->>deferred", "true").is("task_id", null)
+      .order("published_at", { ascending: false, nullsFirst: false }).order("id", { ascending: false }).limit(Math.min(capLeft, 50));
+    if (hErr) throw new Error(`news_items deferred: ${hErr.message}`);
+    const byId = new Map(pool.map((r) => [r.politician_id, { id: r.politician_id, name: r.name, region: r.region, role: r.role } as ScreenPerson]));
+    for (const h of (held ?? []) as Array<NewsRow & { screen: Record<string, unknown> }>) {
+      if (capLeft <= 0) break;
+      const sc = h.screen ?? {};
+      const person = byId.get(String(sc.politician_id ?? ""));
+      if (!person) {
+        // 人不在池子裡了（被合併、退選）：不再補開
+        await supabase.from("news_items").update({ screen: { ...sc, deferred: false, dropped: "person_gone" } }).eq("id", h.id);
+        continue;
+      }
+      const policy = sc.policy_id ? (await policiesOf(person.id)).find((p) => p.id === sc.policy_id) ?? null : null;
+      const verdict = { result: sc.result, choice: sc.choice, probability: sc.probability, politician_id: person.id, policy_id: policy?.id ?? null } as ScreenVerdict;
+      const out = await dispatch(h, sources.get(h.source_id)?.label ?? "", person, policy, verdict);
+      if (out.deferred) break;
+      const { error } = await supabase.from("news_items").update({
+        screen: { ...sc, deferred: false, ...(out.appendedTo ? { appended_to_task: out.appendedTo } : {}) }, task_id: out.taskId,
+      }).eq("id", h.id);
+      if (error) throw new Error(`news_items revive: ${error.message}`);
+    }
+  }
   const failures: Array<{ news_item_id: number; error: string }> = [];
   const one = async (w: { item: NewsRow; names: string[]; people: ScreenPerson[] }): Promise<void> => {
     const it = w.item;
@@ -326,30 +403,10 @@ async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
     if (verdict.result === "progress" || verdict.result === "new_pledge") {
       const person = w.people.find((p) => p.id === verdict.politician_id)!;
       const policy = verdict.policy_id ? (candidates.find((c) => c.person.id === person.id)?.policies.find((p) => p.id === verdict.policy_id) ?? null) : null;
-      // 同一條政見的進度、同一個人的新承諾已經有 open 的新聞任務：把這則加進那件的 hint_sources，不另開
-      // query-bounds: ok — 下面接 .order().limit(1)
-      let q = supabase.from("contribution_tasks").select("id, hint_sources").eq("status", "open").eq("task_type", "news_sweep")
-        .eq("target->>kind", "news_item").eq("target->>politician_id", person.id).eq("target->>suggestion", verdict.result);
-      if (policy) q = q.eq("target->>policy_id", policy.id);
-      const { data: open, error: oErr } = await q.order("created_at", { ascending: false }).limit(1);
-      if (oErr) throw new Error(`contribution_tasks lookup: ${oErr.message}`);
-      const existing = ((open ?? []) as Array<{ id: string; hint_sources: string[] | null }>)[0];
-      if (existing) {
-        const urls = existing.hint_sources ?? [];
-        if (!urls.includes(it.url) && urls.length < NEWS_TASK_MAX_URLS) {
-          const { error } = await supabase.from("contribution_tasks").update({ hint_sources: [...urls, it.url] }).eq("id", existing.id);
-          if (error) throw new Error(`contribution_tasks append: ${error.message}`);
-          appended++;
-        }
-        screen.appended_to_task = existing.id;
-      } else {
-        const t = await createTask(supabase, newsTaskOf({
-          news_item_id: it.id, url: it.url, title: it.title, source_label: src?.label ?? "", published_at: it.published_at,
-          person, policy, verdict,
-        }), { source: "manual", created_by: "news-screen" });
-        taskId = String(t.id);
-        tasks++;
-      }
+      const out = await dispatch(it, src?.label ?? "", person, policy, verdict);
+      taskId = out.taskId;
+      if (out.appendedTo) screen.appended_to_task = out.appendedTo;
+      if (out.deferred) screen.deferred = true;
     }
     const { error: uErr } = await supabase.from("news_items").update({ screened_at: new Date().toISOString(), screen, task_id: taskId }).eq("id", it.id);
     if (uErr) throw new Error(`news_items update: ${uErr.message}`);
@@ -379,9 +436,16 @@ async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
     const { error } = await supabase.from("news_items").update({ screened_at: null, screen: null }).in("id", release).is("task_id", null);
     if (error) console.error("news_items release:", error.message);
   }
+  // 這一輪沒篩完（撿滿 limit、或有放回的）：把時間往回撥，下一個整點就接著篩，不用等下一個間隔
+  if (setRow && (items.length >= limit || release.length > 0)) {
+    const back = new Date(now.getTime() - settings.screen_every_hours * 3_600_000).toISOString();
+    const { error } = await supabase.from("news_settings").update({ last_screen_at: back }).eq("id", 1);
+    if (error) console.error("news_settings rewind:", error.message);
+  }
   return {
     candidates: items.length, no_name: noName.length, with_name: withName.length, jev_budget: jevBudget,
-    asked, tasks, appended, released: release.length, cost_usd: Number(cost.toFixed(6)), tally, failures, elapsed_ms: Date.now() - startedAt,
+    asked, tasks, appended, deferred, cap_left: capLeft, released: release.length, cost_usd: Number(cost.toFixed(6)), tally, failures,
+    settings: { screen_every_hours: settings.screen_every_hours, daily_task_cap: settings.daily_task_cap }, elapsed_ms: Date.now() - startedAt,
   };
 }
 
