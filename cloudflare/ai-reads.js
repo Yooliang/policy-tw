@@ -8,6 +8,9 @@
  *   ai_training    大量抓資料訓練模型
  *   search_engine  傳統搜尋引擎（對照組）
  *   ai_referral    人從 AI 服務的回答點連結過來
+ *   agent_protocol 代理讀 /skill.md（協議）——多半是我們自己的貢獻代理領任務前讀協議（2026-09-29 小良哥：
+ *                  「AI 當場來讀」717 次全是這個，要分開算）。只有原本會歸成 ai_user 的才改歸這類；
+ *                  爬蟲、搜尋引擎讀 skill.md 照原類別
  *
  * 注意：被 Cloudflare 在邊緣直接擋掉的請求進不到 Worker，這裡數不到。
  */
@@ -42,7 +45,7 @@ export const AI_REFERRERS = [
   'copilot.microsoft.com', 'chat.deepseek.com', 'grok.com', 'you.com', 'poe.com',
 ]
 
-export const AI_READ_KINDS = ['ai_user', 'ai_search', 'ai_training', 'search_engine', 'ai_referral']
+export const AI_READ_KINDS = ['ai_user', 'ai_search', 'ai_training', 'search_engine', 'ai_referral', 'agent_protocol']
 
 /** 路徑歸類：只記「讀的是哪一種頁」，不記個別網址 */
 export function pathTypeOf(pathname) {
@@ -67,7 +70,10 @@ export function classifyRead(userAgent, referer, pathname) {
   if (!pathType) return null
   const ua = (userAgent || '').toLowerCase()
   for (const [name, kind] of AI_AGENTS) {
-    if (ua.includes(name.toLowerCase())) return { agent: name, kind, path_type: pathType }
+    if (ua.includes(name.toLowerCase())) {
+      const k = kind === 'ai_user' && pathType === 'skill' ? 'agent_protocol' : kind
+      return { agent: name, kind: k, path_type: pathType }
+    }
   }
   if (referer) {
     let host = ''

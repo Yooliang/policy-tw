@@ -8,6 +8,9 @@ Deno.test("AI 當場提問、AI 搜尋、訓練爬蟲、傳統搜尋分得開", 
   const ua = (s: string) => `Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ${s}; +https://example.com/bot`;
   assertEquals(classifyRead(ua("ChatGPT-User/1.0"), "", "/policy/abc")?.kind, "ai_user");
   assertEquals(classifyRead(ua("Claude-User/1.0"), "", "/politician/abc")?.kind, "ai_user");
+  // 2026-09-29：讀協議的是我們自己的貢獻代理，不算「AI 當場來讀」
+  assertEquals(classifyRead(ua("Claude-User/1.0"), "", "/skill.md")?.kind, "agent_protocol");
+  assertEquals(classifyRead(ua("ClaudeBot/1.0"), "", "/skill.md")?.kind, "ai_training", "爬蟲讀協議照原類別");
   assertEquals(classifyRead(ua("OAI-SearchBot/1.0"), "", "/")?.kind, "ai_search");
   assertEquals(classifyRead(ua("Claude-SearchBot/1.0"), "", "/")?.agent, "Claude-SearchBot", "要先比到 SearchBot，不能被 ClaudeBot 吃掉");
   assertEquals(classifyRead(ua("GPTBot/1.1"), "", "/policy/abc")?.kind, "ai_training");
@@ -38,12 +41,14 @@ Deno.test("頁種歸類：靜態資源不算讀；skill.md、llms.txt、sitemap 
 
 Deno.test("分類跟 DB 的 CHECK 一致（盯 migration 文字）", async () => {
   const sql = await Deno.readTextFile(new URL("../../migrations/20260923000008_ai_reads.sql", import.meta.url));
-  for (const k of AI_READ_KINDS) assert(sql.includes(`'${k}'`), `DB 的 kind CHECK 少了 ${k}`);
+  // kind 的 CHECK 與 ai_read_hits 白名單以最新一版為準（20260929000013 加了 agent_protocol）
+  const latest = await Deno.readTextFile(new URL("../../migrations/20260929000013_ai_reads_agent_protocol.sql", import.meta.url));
+  for (const k of AI_READ_KINDS) assert(latest.includes(`'${k}'`), `DB 的 kind CHECK 少了 ${k}`);
   for (const p of ["politician", "policy", "election", "skill", "llms", "sitemap", "other"]) assert(sql.includes(`'${p}'`), `DB 的 path_type CHECK 少了 ${p}`);
   const worker = await Deno.readTextFile(new URL("../../../cloudflare/ssr-worker.js", import.meta.url));
   assert(worker.includes("countRead(request, ctx)"), "Worker 要在每個請求呼叫 countRead");
   assert(worker.includes("rpc/ai_read_hits"), "Worker 要批次打 ai_read_hits（2026-09-24：每讀一次寫一次吃光了 Disk IO 額度）");
   assert(worker.includes("READ_FLUSH_MS"), "要累加後才寫，不能每讀一次寫一次");
-  const mig = await Deno.readTextFile(new URL("../../migrations/20260924000001_dispatch_io.sql", import.meta.url));
-  for (const k of AI_READ_KINDS) assert(mig.includes(`'${k}'`), `ai_read_hits 的 kind 白名單少了 ${k}`);
+  const hits = latest.slice(latest.indexOf("FUNCTION ai_read_hits("), latest.indexOf("REVOKE ALL ON FUNCTION ai_read_hits"));
+  for (const k of AI_READ_KINDS) assert(hits.includes(`'${k}'`), `ai_read_hits 的 kind 白名單少了 ${k}`);
 });
