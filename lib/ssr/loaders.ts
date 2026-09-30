@@ -65,7 +65,7 @@ async function politiciansByIds(ids: string[]): Promise<Politician[]> {
 }
 
 /**
- * 同選區其他候選人（2026-09-30）：同屆、同選舉類型、同選區（politician_elections.region_id；縣市長用 RPC 撈全縣）。
+ * 同選區其他候選人（2026-09-30）：同屆、同選舉類型、同選區（村里長用 politician_elections.region_id；其餘用 RPC 撈全縣再比對選區）。
  * 撈回來再用 lib/election-peers.ts 的同一套規則篩＋排序＋截 20 位，跟預渲染切片、頁面元件算的一致。
  * 撈不到（查詢失敗、沒有選區）就回空陣列：這塊是加分項，不能讓整頁掛掉。
  */
@@ -73,20 +73,32 @@ async function peersOf(self: Politician): Promise<Politician[]> {
   const rec = primaryElection(self)
   if (!rec || !rec.electionType || !isCounty(rec.region)) return []
   try {
-    let ids: string[] = []
-    if (rec.electionType === '縣市長') {
-      const { data, error } = await supabasePublic.rpc('get_politicians_by_filters', { p_election_id: rec.electionId, p_region: rec.region, p_election_types: ['縣市長'] })
-      if (error) throw error
-      const pool = ((data ?? []) as RawPolitician[]).filter((r) => !r.merged_into).map(mapPolitician)
+    // 村里長一個縣市上千人，只撈同一個 region_id（同村里）；其餘類型全縣撈（議員一縣最多兩百多人），
+    // 用文字的縣市／選區比對——region_id 不同但選區文字相同的人也要算進來，跟縣市頁點進來時看到的一致
+    if (rec.electionType !== '村里長') {
+      // RPC 靠 politician_elections.region_id 對縣市，region_id 是空的參選紀錄（例：台北市第03選區的楊寶楨）撈不到；
+      // 再用人物層的縣市＋選舉類型補一次，兩邊合併後交給 electionPeers 用參選紀錄的文字比對
+      // （election_ids 是 json 不是 jsonb，不能用 contains 篩屆別；撈回來由 electionPeers 比對屆別）
+      // query-bounds: ok — 單一縣市、單一選舉類型的人物（跨屆），最多三四百位
+      const [byRpc, byView] = await Promise.all([
+        supabasePublic.rpc('get_politicians_by_filters', { p_election_id: rec.electionId, p_region: rec.region, p_election_types: [rec.electionType] }),
+        supabasePublic.from('politicians_with_elections').select('*')
+          .eq('region', rec.region).eq('election_type', rec.electionType)
+          .order('id').limit(1000),
+      ])
+      if (byRpc.error) throw byRpc.error
+      const rows = [...((byRpc.data ?? []) as RawPolitician[]), ...(byView.error ? [] : (byView.data ?? []) as RawPolitician[])]
+      const seen = new Set<string>()
+      const pool = rows.filter((r) => !r.merged_into && !seen.has(r.id) && !!seen.add(r.id)).map(mapPolitician)
       return electionPeers(self, pool)
     }
     if (!rec.regionId) return []
-    // query-bounds: ok — 一個選區的同類型候選人最多幾十位
+    // query-bounds: ok — 一個村里的候選人最多個位數
     const { data, error } = await supabasePublic.from('politician_elections').select('politician_id')
       .eq('election_id', rec.electionId).eq('election_type', rec.electionType).eq('region_id', rec.regionId)
       .order('politician_id').limit(100)
     if (error) throw error
-    ids = Array.from(new Set(((data ?? []) as Array<{ politician_id: string }>).map((r) => String(r.politician_id))))
+    const ids = Array.from(new Set(((data ?? []) as Array<{ politician_id: string }>).map((r) => String(r.politician_id))))
       .filter((pid) => pid !== String(self.id))
     return electionPeers(self, await politiciansByIds(ids))
   } catch {
