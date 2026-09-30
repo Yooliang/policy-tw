@@ -3,6 +3,8 @@ import { supabasePublic } from '../supabase'
 import { getDataSnapshot, mapPolicy, mapPolitician, useSupabase, type DataSnapshot } from '../../composables/useSupabase'
 import type { Policy, Politician, RawPolicy, RawPolitician } from '../../types'
 import { collectRelayChainIds, type PageSnapshot } from '../ssg/page-data'
+import { electionPeers, primaryElection } from '../election-peers'
+import { isCounty } from '../election-regions'
 
 /**
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
@@ -62,11 +64,42 @@ async function politiciansByIds(ids: string[]): Promise<Politician[]> {
   return ((data ?? []) as RawPolitician[]).filter((r) => !r.merged_into).map(mapPolitician)
 }
 
+/**
+ * 同選區其他候選人（2026-09-30）：同屆、同選舉類型、同選區（politician_elections.region_id；縣市長用 RPC 撈全縣）。
+ * 撈回來再用 lib/election-peers.ts 的同一套規則篩＋排序＋截 20 位，跟預渲染切片、頁面元件算的一致。
+ * 撈不到（查詢失敗、沒有選區）就回空陣列：這塊是加分項，不能讓整頁掛掉。
+ */
+async function peersOf(self: Politician): Promise<Politician[]> {
+  const rec = primaryElection(self)
+  if (!rec || !rec.electionType || !isCounty(rec.region)) return []
+  try {
+    let ids: string[] = []
+    if (rec.electionType === '縣市長') {
+      const { data, error } = await supabasePublic.rpc('get_politicians_by_filters', { p_election_id: rec.electionId, p_region: rec.region, p_election_types: ['縣市長'] })
+      if (error) throw error
+      const pool = ((data ?? []) as RawPolitician[]).filter((r) => !r.merged_into).map(mapPolitician)
+      return electionPeers(self, pool)
+    }
+    if (!rec.regionId) return []
+    // query-bounds: ok — 一個選區的同類型候選人最多幾十位
+    const { data, error } = await supabasePublic.from('politician_elections').select('politician_id')
+      .eq('election_id', rec.electionId).eq('election_type', rec.electionType).eq('region_id', rec.regionId)
+      .order('politician_id').limit(100)
+    if (error) throw error
+    ids = Array.from(new Set(((data ?? []) as Array<{ politician_id: string }>).map((r) => String(r.politician_id))))
+      .filter((pid) => pid !== String(self.id))
+    return electionPeers(self, await politiciansByIds(ids))
+  } catch {
+    return []
+  }
+}
+
 export async function loadPoliticianPage(id: string): Promise<PageSnapshot | null> {
   const base = await loadBase()
   const [politicians, policies] = await Promise.all([politiciansByIds([id]), policiesOfPoliticians([id])])
   if (politicians.length === 0) return null
-  return { ...base, politicians, policies }
+  const peers = await peersOf(politicians[0])
+  return { ...base, politicians: [...politicians, ...peers], policies }
 }
 
 export async function loadPolicyPage(id: string): Promise<PageSnapshot | null> {

@@ -25,6 +25,10 @@ import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 // 日期格式跟同一頁的查核履歷共用同一支，兩條時間軸不要一個斜線一個橫線
 import { formatDate } from '../lib/history'
 import { hostOf, shortUrlsIn } from '../lib/url'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
+import type { BreadcrumbItem } from '../composables/usePageHead'
+import { electionRecordFor } from '../lib/election-peers'
+import { electionRegionPath, isCounty } from '../lib/election-regions'
 
 
 const route = useRoute()
@@ -93,6 +97,25 @@ watch(
 
 // 政見所屬選舉屆別的簡稱，例如「2024 大選」「2026 九合一」。沒有屆別（舊資料）就不顯示。
 const policyElection = computed(() => policy.value?.electionId != null ? getElectionById(policy.value.electionId) : undefined)
+
+/**
+ * 麵包屑（2026-09-30）：選舉 › 縣市 › 人物 › 本政見。選舉與縣市取政見所屬那一屆的參選紀錄，沒有就用人物最新一屆；
+ * 人物沒有任何參選紀錄就只剩「人物 › 政見」。
+ */
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+  const pol = politician.value
+  if (!policy.value || !pol) return []
+  const rec = electionRecordFor(pol, policy.value.electionId)
+  const items: BreadcrumbItem[] = []
+  if (rec) {
+    const el = getElectionById(rec.electionId)
+    items.push({ name: el?.shortName || el?.name || `選舉 ${rec.electionId}`, path: `/election/${rec.electionId}` })
+    if (isCounty(rec.region)) items.push({ name: rec.region, path: electionRegionPath(rec.electionId, rec.region) })
+  }
+  items.push({ name: pol.name, path: `/politician/${pol.id}` })
+  items.push({ name: policy.value.title })
+  return items
+})
 
 const otherPolicies = computed(() =>
   politician.value
@@ -350,6 +373,7 @@ usePageHead({
     license: DATA_LICENSE_URL,
     isAccessibleForFree: true,
   } : undefined,
+  breadcrumbs: () => breadcrumbs.value,
 })
 
 // 「引用這筆資料」：伺服器端就渲染出來，AI 讀網頁時看得到；複製鈕只在瀏覽器
@@ -367,6 +391,7 @@ async function copyCitation() {
 
 <template>
   <div v-if="policy && politician" class="bg-slate-50 min-h-screen">
+    <Breadcrumbs :items="breadcrumbs" />
     <Hero>
       <template #icon><FileText :size="400" class="text-blue-500" /></template>
       <template #title>

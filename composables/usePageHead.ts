@@ -19,6 +19,22 @@ interface PageHeadOptions {
   type?: 'website' | 'article'
   /** schema.org 結構化資料（JSON-LD）。搜尋引擎與 AI 讀得懂「這是誰的政見、出處在哪、由誰驗證、怎麼引用」。 */
   jsonLd?: MaybeRefOrGetter<Record<string, unknown> | undefined>
+  /** 麵包屑（2026-09-30）：輸出 schema.org BreadcrumbList；畫面上的麵包屑用 components/Breadcrumbs.vue */
+  breadcrumbs?: MaybeRefOrGetter<BreadcrumbItem[] | undefined>
+}
+
+/** 麵包屑 → schema.org BreadcrumbList（最後一層沒給 path 就用本頁網址） */
+export function breadcrumbJsonLd(items: BreadcrumbItem[], pageUrl: string): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((item, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: item.name,
+      item: item.path ? `${SITE_URL}${canonicalPath(item.path)}` : pageUrl,
+    })),
+  }
 }
 
 /** 資料授權（LICENSE-DATA.md）：CC BY 4.0，引用要標出處——這也是 AI 轉述時要帶上「正見」的依據 */
@@ -63,6 +79,13 @@ export function canonicalPath(path: string): string {
   return encodeURI(decoded).replace(/\/$/, '')
 }
 
+export interface BreadcrumbItem {
+  /** 顯示文字 */
+  name: string
+  /** 站內路徑；最後一層（本頁）可以不給 */
+  path?: string
+}
+
 /** 每頁統一的 <title>／description／robots／Open Graph。輸入可為 ref／getter，資料到位後會自動更新。 */
 export function usePageHead(options: PageHeadOptions): void {
   const title = computed(() => {
@@ -90,7 +113,11 @@ export function usePageHead(options: PageHeadOptions): void {
     ]),
     script: computed(() => {
       const ld = toValue(options.jsonLd)
-      return ld ? [{ key: 'page-jsonld', type: 'application/ld+json', innerHTML: jsonLdText(ld) }] : []
+      const crumbs = toValue(options.breadcrumbs)
+      return [
+        ...(ld ? [{ key: 'page-jsonld', type: 'application/ld+json', innerHTML: jsonLdText(ld) }] : []),
+        ...(crumbs && crumbs.length > 1 ? [{ key: 'breadcrumb-jsonld', type: 'application/ld+json', innerHTML: jsonLdText(breadcrumbJsonLd(crumbs, pageUrl.value)) }] : []),
+      ]
     }),
   })
 }

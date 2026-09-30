@@ -20,6 +20,10 @@ import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../compos
 import HeroAction from '../components/HeroAction.vue'
 import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
+import type { BreadcrumbItem } from '../composables/usePageHead'
+import { electionPeers, primaryElection } from '../lib/election-peers'
+import { electionRegionPath, isCounty } from '../lib/election-regions'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
@@ -226,6 +230,33 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
   return groups
 }
 
+/**
+ * 麵包屑與「同選區其他候選人」（2026-09-30 小良哥：所有的頁面都要可以互連）。
+ * 以最新一屆有在選的參選紀錄為準；沒有參選紀錄就只剩人名（麵包屑不顯示）。
+ * 同選區名單只從目前已載入的人物裡算（直接開網址時就是快照帶來的那批，見 lib/election-peers.ts），取不到就不顯示。
+ */
+const primaryRecord = computed(() => primaryElection(politician.value))
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+  const p = politician.value
+  if (!p) return []
+  const rec = primaryRecord.value
+  const items: BreadcrumbItem[] = []
+  if (rec) {
+    const el = getElectionById(rec.electionId)
+    items.push({ name: el?.shortName || el?.name || `選舉 ${rec.electionId}`, path: `/election/${rec.electionId}` })
+    if (isCounty(rec.region)) items.push({ name: rec.region, path: electionRegionPath(rec.electionId, rec.region) })
+  }
+  items.push({ name: p.name })
+  return items
+})
+const peers = computed(() => electionPeers(politician.value, politicians.value))
+const peerDistrict = computed(() => {
+  const rec = primaryRecord.value
+  if (!rec) return ''
+  const area = rec.electionType === '縣市長' ? rec.region : [rec.region, rec.subRegion, rec.village].filter(Boolean).join(' ')
+  return `${getElectionById(rec.electionId)?.shortName ?? rec.electionId}・${area}・${rec.electionType ?? ''}`
+})
+
 const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾'))
 const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見'))
 
@@ -259,11 +290,13 @@ usePageHead({
     publisher: PUBLISHER_LD,
     license: DATA_LICENSE_URL,
   } : undefined,
+  breadcrumbs: () => breadcrumbs.value,
 })
 </script>
 
 <template>
   <div v-if="politician" class="bg-slate-50 min-h-screen">
+    <Breadcrumbs :items="breadcrumbs" />
     <Hero>
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
@@ -619,6 +652,22 @@ usePageHead({
             </div>
             </div>
           </div>
+
+          <!-- 同選區其他候選人：每人一條真連結（爬蟲從任何一位走得到同選區所有人） -->
+          <section v-if="peers.length > 0" class="mt-10 text-left" data-testid="election-peers">
+            <h2 class="text-lg font-bold text-navy-900">同選區其他候選人</h2>
+            <p class="text-xs text-slate-500 mt-1 mb-3">{{ peerDistrict }}</p>
+            <ul class="flex flex-wrap gap-2">
+              <li v-for="c in peers" :key="c.id">
+                <RouterLink :to="`/politician/${c.id}`" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-medium text-navy-900 hover:border-violet-300 hover:text-violet-700 transition-colors">
+                  {{ c.name }}<span class="text-xs font-normal text-slate-400">{{ c.party }}</span>
+                </RouterLink>
+              </li>
+            </ul>
+            <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(primaryRecord.electionId, primaryRecord.region)" class="inline-block mt-3 text-sm font-bold text-violet-700 hover:underline">
+              看 {{ primaryRecord.region }} 全部候選人 →
+            </RouterLink>
+          </section>
 
           <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過 -->
           <div class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" /></div>

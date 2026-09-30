@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { Github, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { FEATURED_LOCAL_ELECTION_ID, TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 
 const { getActiveElection } = useSupabase()
 const activeElection = computed(() => getActiveElection())
@@ -66,7 +67,16 @@ const activeElection = computed(() => getActiveElection())
           </ul>
         </div>
       </div>
-      <div class="mt-12 pt-8 border-t border-navy-800 text-center text-xs">
+      <!-- 每一頁都有 22 縣市頁的連結（2026-09-30 小良哥：所有的頁面都要可以互連）：任何一頁兩步內到任何候選人 -->
+      <nav aria-label="各縣市候選人" class="mt-10 pt-8 border-t border-navy-800 text-left">
+        <h4 class="text-white font-semibold mb-3 text-sm">{{ FEATURED_LOCAL_ELECTION_ID }} 各縣市候選人</h4>
+        <ul class="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+          <li v-for="county in TAIWAN_COUNTIES" :key="county">
+            <RouterLink :to="electionRegionPath(FEATURED_LOCAL_ELECTION_ID, county)" class="hover:text-blue-400 transition-colors">{{ county }}</RouterLink>
+          </li>
+        </ul>
+      </nav>
+      <div class="mt-8 pt-8 border-t border-navy-800 text-center text-xs">
         <p>&copy; {{ new Date().getFullYear() }} 正見 Policy Tracker. All rights reserved.</p>
       </div>
     </div>

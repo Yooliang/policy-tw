@@ -4,6 +4,7 @@ import { PolicyStatus, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { policySortDate } from '../policy-date'
 import { isCounty } from '../election-regions'
+import { electionPeers } from '../election-peers'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -151,7 +152,9 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
 
     case 'politician': {
       const id = paramString(to.params.politicianId)
-      const politicians = full.politicians.filter((pl) => String(pl.id) === id)
+      const self = full.politicians.filter((pl) => String(pl.id) === id)
+      // 同選區其他候選人（lib/election-peers.ts；邊緣 SSR 的 loadPoliticianPage 算的是同一份）
+      const politicians = [...self, ...electionPeers(self[0], full.politicians)]
       const policies = full.policies.filter((p) => String(p.politicianId) === id)
       return { ...base, politicians, policies }
     }
