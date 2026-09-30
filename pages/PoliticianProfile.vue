@@ -302,7 +302,6 @@ usePageHead({
 
 <template>
   <div v-if="politician" class="bg-slate-50 min-h-screen">
-    <Breadcrumbs :items="breadcrumbs" />
     <Hero>
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
@@ -374,6 +373,8 @@ usePageHead({
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
+    <!-- 麵包屑放在 hero 下方（小良哥 2026-10-01） -->
+    <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
