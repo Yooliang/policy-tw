@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { isJunkTag, issueTagsOf } from "./issue-tags.ts";
 
-// 2026-09-22 小良哥：新北市議題頁的標籤出現「2026新北市長」「蘇巧慧」「2026」「中央社RSS」「務實施政」——都不是議題
+// 2026-09-22 維護者：新北市議題頁的標籤出現「2026新北市長」「蘇巧慧」「2026」「中央社RSS」「務實施政」——都不是議題
 const NAMES = new Set(["蘇巧慧", "李四川", "柯志恩"]);
 
 Deno.test("候選人名、年份、屆別標籤、來源、口號、縣市名都是垃圾", () => {

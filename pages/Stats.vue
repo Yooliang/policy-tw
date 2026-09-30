@@ -139,7 +139,7 @@ function leaderboardTitle(row: LeaderboardEntry): string {
   return `提交 ${row.submitted}・上線 ${row.applied}・驗證 ${row.verified_votes ?? 0}`
 }
 
-// 提交與驗證跟著整頁時間窗（2026-09-24 小良哥：要支援 30D／90D）：48 小時內按小時、以上按天，資料庫端聚合
+// 提交與驗證跟著整頁時間窗（2026-09-24 維護者：要支援 30D／90D）：48 小時內按小時、以上按天，資料庫端聚合
 type Activity = { bucket: string; submissions: number; verifications: number }
 const activity = ref<Activity[] | null>(null)
 async function loadActivity() {
@@ -228,8 +228,8 @@ usePageHead({
         </button>
       </div>
 
-      <!-- 2026-09-24 小良哥：原本這一整條是運作狀態，改放資料缺口與提交與驗證並排；運作狀態移到右欄 -->
-      <!-- 電腦版同一列的兩張卡要等高（09-29 小良哥）：stretch 撐成同高，右邊的圖吃掉多出來的高度 -->
+      <!-- 2026-09-24 維護者：原本這一整條是運作狀態，改放資料缺口與提交與驗證並排；運作狀態移到右欄 -->
+      <!-- 電腦版同一列的兩張卡要等高（09-29 維護者）：stretch 撐成同高，右邊的圖吃掉多出來的高度 -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         <GapPanel class="h-full" />
         <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5 h-full flex flex-col">

@@ -32,9 +32,9 @@ const { policies } = useSupabase()
 const collapsed = ref(false)
 
 /**
- * 大頭照版（2026-09-28 小良哥試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
- * 一律預設大頭照（09-28 小良哥：「預設就改這樣顯示，包含下方的議員那些」）；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
- * 欄數跟著版面寬度走（09-29 小良哥）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，沒有就全寬 → 六欄，兩種卡片一樣大。
+ * 大頭照版（2026-09-28 維護者試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
+ * 一律預設大頭照（09-28 維護者：「預設就改這樣顯示，包含下方的議員那些」）；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
+ * 欄數跟著版面寬度走（09-29 維護者）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，沒有就全寬 → 六欄，兩種卡片一樣大。
  * 預渲染一律出清單版（onMounted 才讀偏好），避免伺服器與瀏覽器畫面不一致。
  */
 const VIEW_KEY = 'election-grid-view-v2' // v2：預設改成大頭照，舊的偏好不沿用
@@ -207,7 +207,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
                 <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
                   <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
                 </h3>
-                <!-- 有號次（名單公告、抽籤後）就顯示「N號」取代狀態標（2026-09-25 小良哥）-->
+                <!-- 有號次（名單公告、抽籤後）就顯示「N號」取代狀態標（2026-09-25 維護者）-->
                 <span
                   v-if="politician.candNo"
                   class="inline-flex items-center justify-center min-w-[1.75rem] h-5 px-1.5 rounded-full bg-navy-900 text-white text-[11px] font-bold shrink-0"

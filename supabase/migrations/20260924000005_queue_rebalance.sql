@@ -1,4 +1,4 @@
--- 佇列由排程每 10 分鐘重排成 驗證：任務＝2:1（小良哥 2026-09-24：「你不能每次都手動調…用排程每十分鐘重排一次比較合理」）
+-- 佇列由排程每 10 分鐘重排成 驗證：任務＝2:1（維護者 2026-09-24：「你不能每次都手動調…用排程每十分鐘重排一次比較合理」）
 --
 -- 進表時的 queue_slot（驗證 +1 秒、任務 +2 秒）只管新進來的那一筆；冷卻中、有人回報查無異動的任務還佔著任務行列的位置，
 -- 派工時被跳過，實際比例就偏離 2:1。seed_auto_task_queue（每 10 分鐘）更新完缺口後呼叫 rebalance_queue() 整條重排：
@@ -87,7 +87,7 @@ BEGIN
    WHERE d.task_id LIKE 'verify:%'
      AND NOT EXISTS (SELECT 1 FROM contributions c WHERE c.status = 'pending' AND 'verify:' || c.id = d.task_id);
 
-  -- 每 10 分鐘重排成 驗證：任務＝2:1（小良哥 09-24：不要手動調）
+  -- 每 10 分鐘重排成 驗證：任務＝2:1（維護者 09-24：不要手動調）
   PERFORM rebalance_queue();
 
   RETURN v_new + v_verify;

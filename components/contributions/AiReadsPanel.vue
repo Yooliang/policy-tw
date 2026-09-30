@@ -12,7 +12,7 @@ const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
  * 資料是正見.tw 的 Worker 依 User-Agent／Referer 分類後的每日計數（ai_reads_daily，cloudflare/ai-reads.js）。
  * 被 Cloudflare 在邊緣擋掉的請求進不到 Worker，數不到。
  *
- * 2026-09-29 小良哥：改成圖表；代理讀協議（/skill.md，多半是我們自己的貢獻代理）另外算，不混進「AI 當場來讀」。
+ * 2026-09-29 維護者：改成圖表；代理讀協議（/skill.md，多半是我們自己的貢獻代理）另外算，不混進「AI 當場來讀」。
  */
 
 // 跟著統計頁的時間窗（2026-09-24）

@@ -2,7 +2,7 @@
  * 新聞初篩（system-one?action=news_screen）的純函式：名字命中、問 Jev 的題目、答案→任務。
  * 流程與理由見 system-one/index.ts 的 news_screen 那一段；這裡只放可測的部分。
  *
- * 兩段式（小良哥 2026-09-29 核准）：
+ * 兩段式（維護者 2026-09-29 核准）：
  *   1. 便宜篩：標題＋摘要裡沒有任何「在職或 2026 參選中」的人名 → 直接記 unrelated，不問 Jev。
  *      一小時收進來上百則，大多數（國際、社會、影劇）一個人名都沒有，這一段不花錢。
  *   2. 有人名的才問 Jev：把那些人的現行政見清單連同新聞一起給它，選「哪一條政見的進度／某人的新承諾／無關」。
@@ -272,7 +272,7 @@ function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-// ---- 可調設定（news_settings，2026-09-29 小良哥：「讓頻率可以調整」）----
+// ---- 可調設定（news_settings，2026-09-29 維護者：「讓頻率可以調整」）----
 
 export interface NewsSettings {
   enabled: boolean;

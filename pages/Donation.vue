@@ -31,7 +31,7 @@ const handleCopy = (address: string, symbol: string) => {
 
 
 
-// 運轉成本（2026-09-24 小良哥：「不用太顯眼，一個基本的資料就好」）：後端每 15 分鐘更新，這裡只讀。
+// 運轉成本（2026-09-24 維護者：「不用太顯眼，一個基本的資料就好」）：後端每 15 分鐘更新，這裡只讀。
 // 在瀏覽器才讀（onMounted），不進預渲染——數字會變，預渲染進去就是舊的。讀不到就整塊不顯示。
 type Costs = { balance_usd: number | null; jev_month_calls: number; jev_month_usd: number; db_bytes: number; refreshed_at: string | null }
 const costs = ref<Costs | null>(null)

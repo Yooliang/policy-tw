@@ -42,7 +42,7 @@ function getElectionType(politician: any): string | undefined {
 // Helper: 套用當前選舉的特定資料（解決跨選舉資料混亂問題）
 function withCurrentElectionData(politician: any): any {
   const electionData = getPoliticianElectionData(politician, electionId.value)
-  // 號次一定要換成這一屆的：全域人物物件會帶著上一屆（例如 2022）的號次，從 2022 切到 2026 會殘留（09-28 小良哥）
+  // 號次一定要換成這一屆的：全域人物物件會帶著上一屆（例如 2022）的號次，從 2022 切到 2026 會殘留（09-28 維護者）
   if (!electionData) return { ...politician, candNo: undefined }
   return {
     ...politician,

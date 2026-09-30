@@ -67,7 +67,7 @@ const activeElection = computed(() => getActiveElection())
           </ul>
         </div>
       </div>
-      <!-- 每一頁都有 22 縣市頁的連結（2026-09-30 小良哥：所有的頁面都要可以互連）：任何一頁兩步內到任何候選人 -->
+      <!-- 每一頁都有 22 縣市頁的連結（2026-09-30 維護者：所有的頁面都要可以互連）：任何一頁兩步內到任何候選人 -->
       <nav aria-label="各縣市候選人" class="mt-10 pt-8 border-t border-navy-800 text-left">
         <h4 class="text-white font-semibold mb-3 text-sm">{{ FEATURED_LOCAL_ELECTION_ID }} 各縣市候選人</h4>
         <ul class="flex flex-wrap gap-x-[0.8rem] gap-y-2 text-sm">

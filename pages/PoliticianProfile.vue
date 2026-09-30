@@ -32,7 +32,7 @@ const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
-// 競選承諾的呈現：卡片或表格（2026-09-23 小良哥）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
+// 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
 const campaignView = ref<CampaignView>('cards')
 onMounted(() => {
@@ -232,7 +232,7 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
 }
 
 /**
- * 麵包屑與「同選區其他候選人」（2026-09-30 小良哥：所有的頁面都要可以互連）。
+ * 麵包屑與「同選區其他候選人」（2026-09-30 維護者：所有的頁面都要可以互連）。
  * 以最新一屆有在選的參選紀錄為準；沒有參選紀錄就只剩人名（麵包屑不顯示）。
  * 同選區名單只從目前已載入的人物裡算（直接開網址時就是快照帶來的那批，見 lib/election-peers.ts），取不到就不顯示。
  */
@@ -373,13 +373,13 @@ usePageHead({
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
-    <!-- 麵包屑放在 hero 下方（小良哥 2026-10-01） -->
+    <!-- 麵包屑放在 hero 下方（維護者 2026-10-01） -->
     <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
         <div>
-          <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用四字（競選承諾／政績追蹤／基本資料／候選人，小良哥 2026-09-30），390px 寬一排放得下 -->
+          <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用四字（競選承諾／政績追蹤／基本資料／候選人，維護者 2026-09-30），390px 寬一排放得下 -->
           <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
             <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
               <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">競選承諾</span><span class="hidden sm:inline">競選承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
@@ -393,7 +393,7 @@ usePageHead({
               <User :size="18" class="hidden sm:block" /><span class="sm:hidden">基本資料</span><span class="hidden sm:inline">基本資料</span>
               <div v-if="activeTab === 'profile'" class="absolute bottom-0 left-0 w-full h-1 bg-emerald-600 rounded-t-full"></div>
             </button>
-            <!-- 同選區候選人（2026-09-30 小良哥：獨立成第四個分頁）；沒有同選區的人就不出現 -->
+            <!-- 同選區候選人（2026-09-30 維護者：獨立成第四個分頁）；沒有同選區的人就不出現 -->
             <button v-if="peers.length > 0" @click="activeTab = 'peers'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'peers' ? 'text-amber-600' : 'text-slate-400 hover:text-slate-600'}`">
               <Users :size="18" class="hidden sm:block" /><span class="sm:hidden">候選人</span><span class="hidden sm:inline">同選區候選人</span><span class="hidden sm:inline bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ peers.length }}</span>
               <div v-if="activeTab === 'peers'" class="absolute bottom-0 left-0 w-full h-1 bg-amber-500 rounded-t-full"></div>
@@ -415,23 +415,23 @@ usePageHead({
                       <table class="w-full text-sm">
                         <thead class="bg-slate-50 text-slate-500 text-xs">
                           <tr>
-                            <th class="text-left font-semibold px-3 py-2 w-10">#</th>
+                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2 w-10">#</th>
                             <th class="text-left font-semibold px-3 py-2">政見</th>
-                            <th class="text-left font-semibold px-3 py-2 w-32">類別</th>
+                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2 w-32">類別</th>
                             <th class="text-left font-semibold px-3 py-2 w-28">提出日期</th>
-                            <th class="text-left font-semibold px-3 py-2">標籤</th>
+                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2">標籤</th>
                           </tr>
                         </thead>
                         <tbody>
                           <tr v-for="(policy, i) in group.policies" :key="policy.id" class="border-t border-slate-100 hover:bg-violet-50/40 cursor-pointer" @click="router.push(`/policy/${policy.id}`)">
-                            <td class="px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
+                            <td class="hidden sm:table-cell px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
                             <td class="px-3 py-2">
                               <router-link :to="`/policy/${policy.id}`" class="block font-bold text-navy-900" @click.stop>{{ policy.title }}</router-link>
                               <div class="text-slate-500 text-xs line-clamp-2">{{ policy.description }}</div>
                             </td>
-                            <td class="px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
+                            <td class="hidden sm:table-cell px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
                             <td class="px-3 py-2 text-slate-500 whitespace-nowrap tabular-nums">{{ policy.proposedDate ?? '—' }}</td>
-                            <td class="px-3 py-2 text-slate-500 text-xs">{{ (policy.tags ?? []).join('、') }}</td>
+                            <td class="hidden sm:table-cell px-3 py-2 text-slate-500 text-xs">{{ (policy.tags ?? []).join('、') }}</td>
                           </tr>
                         </tbody>
                       </table>

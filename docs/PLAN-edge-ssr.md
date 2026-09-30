@@ -1,6 +1,6 @@
 # 計畫：預渲染搬到 Cloudflare Worker 邊緣 SSR（2026-09-23）
 
-小良哥 09-23 點頭：「Cloudflare 的函式可以處理 SSG 嗎」→ 走「SSR＋邊緣快取」，分兩步搬，Firebase 預渲染留著當退路。
+維護者 09-23 點頭：「Cloudflare 的函式可以處理 SSG 嗎」→ 走「SSR＋邊緣快取」，分兩步搬，Firebase 預渲染留著當退路。
 
 ## 為什麼
 

@@ -387,7 +387,7 @@ export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sour
 export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
 
 /**
- * 退件門檻：分數 ≤ −這個數就退件。固定 3（不動正式資料的型別 2），**不隨目標分數調整**（2026-09-23 小良哥）。
+ * 退件門檻：分數 ≤ −這個數就退件。固定 3（不動正式資料的型別 2），**不隨目標分數調整**（2026-09-23 維護者）。
  * 09-21 原本是 ≤ −目標，但目標會被 Jev 往上調（來源判不支持 → 4；票數預算接上後可到 5～7），
  * 退件跟著變難——Jev 已經說這筆撐不住，反而要更多反對票才退得掉，方向相反。SQL 同步：contribution_reject_floor。
  */
