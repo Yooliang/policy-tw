@@ -18,6 +18,7 @@ import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./a
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
+import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -272,6 +273,60 @@ export async function handleContribute(
           }請核對選區編號後重新提交；這不算被拒。`,
         },
       };
+    }
+  }
+
+  // 參選紀錄的兩道守門（維護者 2026-10-01，見 candidacy-guards.ts）：
+  //   1. 更正參選紀錄，reason 要寫出被改的那個人的名字（陳瑩／陳見賢那筆就是 target_id 填錯人）
+  //   2. 登記截止後標成 registered／confirmed，來源要有中選會或截止後的報導（陳琬惠那筆是拿 4 月的造勢新聞）
+  {
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    for (const item of validation.items) {
+      const p = (item.payload ?? {}) as Record<string, unknown>;
+      const urls = Array.isArray(item.source_urls) ? (item.source_urls as unknown[]).filter((u): u is string => typeof u === "string") : [];
+      if (item.contribution_type === "correction") {
+        const { target_table, target_id, changes, reason } = normalizeCorrection(p);
+        if (target_table !== "politician_elections" || !target_id) continue;
+        // query-bounds: ok — 按 id 取一列
+        let row: unknown = null;
+        try {
+          ({ data: row } = await supabase.from("politician_elections").select("id, election_id, politicians(name)").eq("id", target_id).maybeSingle());
+        } catch { continue; } // 查不到就不擋（跟 no-op 檢查同一個原則）
+        if (!row) continue; // 對象不存在由落庫前置檢查處理
+        const r = row as { election_id: number | null; politicians: { name?: string } | null };
+        const targetName = r.politicians?.name ?? null;
+        if (!reasonNamesTarget(reason, targetName)) {
+          return {
+            status: 400,
+            body: {
+              success: false, error: "reason_missing_target_name",
+              message: `這筆更正要改的是「${targetName}」的參選紀錄（target_id=${target_id}），但 reason 裡沒有寫到「${targetName}」。請確認 target_id 是不是本人那筆；是的話在 reason 寫出姓名再送。這不算被拒。`,
+              target: { id: target_id, name: targetName },
+            },
+          };
+        }
+        const toRegistered = changes.some((c) => c.field === "candidate_status" && REGISTERED_STATUSES.has(String(c.correct_value)));
+        if (toRegistered && !registrationEvidenceOk(urls, r.election_id, today)) {
+          return {
+            status: 400,
+            body: {
+              success: false, error: "registration_evidence_required",
+              message: `${r.election_id} 年的參選登記在 ${REGISTRATION_DEADLINE[r.election_id ?? 0]} 截止，之後要把人標成 registered／confirmed，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。政黨提名、造勢等截止前的消息證明不了他最後有登記。這不算被拒。`,
+            },
+          };
+        }
+      }
+      if (item.contribution_type === "candidacy") {
+        const electionId = typeof p.election_id === "number" ? p.election_id : null;
+        if (!REGISTERED_STATUSES.has(String(p.candidate_status)) || registrationEvidenceOk(urls, electionId, today)) continue;
+        return {
+          status: 400,
+          body: {
+            success: false, error: "registration_evidence_required",
+            message: `${electionId} 年的參選登記在 ${REGISTRATION_DEADLINE[electionId ?? 0]} 截止，之後交 candidate_status=${p.candidate_status} 的 candidacy，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。這不算被拒。`,
+          },
+        };
+      }
     }
   }
 
