@@ -23,6 +23,8 @@ const categories = ref<string[]>([])
 const locations = ref<string[]>([])
 const regionStats = ref<RegionStats[]>([])
 const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
+/** 快照只帶了部分選舉區對應（縣市頁只嵌該縣市）：ensureDistricts 仍要撈整份 */
+let districtsPartial = false
 const verificationSources = ref<VerificationSource[]>([])
 const loading = ref(false)
 const loaded = ref(false)
@@ -347,12 +349,13 @@ export function ensureRegionStats(): Promise<void> {
 
 /** 選舉區對應表：選舉頁篩議員選區用（77 KB） */
 export function ensureDistricts(): Promise<void> {
-  if (electoralDistrictAreas.value.length > 0) return Promise.resolve()
+  if (electoralDistrictAreas.value.length > 0 && !districtsPartial) return Promise.resolve()
   if (!districtsPromise) {
     districtsPromise = (async () => {
       const { data } = await withTimeoutAndRetry('electoral_district_areas', (signal) =>
         supabase.from('electoral_district_areas').select('*').abortSignal(signal).throwOnError())
       electoralDistrictAreas.value = (data || []) as ElectoralDistrictArea[]
+      districtsPartial = false
     })().catch((err) => { districtsPromise = null; recordFailure('選舉區對應', err, ensureDistricts) })
   }
   return districtsPromise
@@ -600,6 +603,8 @@ export interface DataSnapshot {
   locations: string[]
   regionStats: RegionStats[]
   electoralDistrictAreas: ElectoralDistrictArea[]
+  /** electoralDistrictAreas 只是其中一個縣市（縣市頁的切片）；沒給＝完整或空 */
+  electoralDistrictAreasPartial?: boolean
   policies: Policy[]
   politicians: Politician[]
   discussions: Discussion[]
@@ -643,6 +648,7 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   locations.value = snapshot.locations
   regionStats.value = snapshot.regionStats
   electoralDistrictAreas.value = snapshot.electoralDistrictAreas
+  districtsPartial = snapshot.electoralDistrictAreasPartial === true
   policies.value = snapshot.policies
   politicians.value = snapshot.politicians
   discussions.value = snapshot.discussions

@@ -55,6 +55,14 @@ export function summarize(text: string | undefined | null, max = 150): string {
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
 }
 
+/** 路由 path → canonical 用的路徑：去尾斜線、非 ASCII 字元 percent-encode（已編碼的不重複編碼） */
+export function canonicalPath(path: string): string {
+  if (path === '/' || path === '') return '/'
+  let decoded = path
+  try { decoded = decodeURI(path) } catch { /* 原樣 */ }
+  return encodeURI(decoded).replace(/\/$/, '')
+}
+
 /** 每頁統一的 <title>／description／robots／Open Graph。輸入可為 ref／getter，資料到位後會自動更新。 */
 export function usePageHead(options: PageHeadOptions): void {
   const title = computed(() => {
@@ -65,7 +73,8 @@ export function usePageHead(options: PageHeadOptions): void {
   // 每頁自己的 canonical／og:url（2026-09-23）：以前只有 index.html 寫死的首頁 og:url，每一頁分享出去都指首頁。
   // 用路由的 path（不含 query）：選舉頁的 ?region= 那些篩選不該各自成一個 canonical。
   const route = useRoute()
-  const pageUrl = computed(() => `${SITE_URL}${route.path === '/' ? '/' : route.path.replace(/\/$/, '')}`)
+  // 中文路徑（縣市頁 /election/2026/台北市）一律寫成 percent-encoded：預渲染時 route.path 是原字、瀏覽器裡是編碼過的，兩邊要一致
+  const pageUrl = computed(() => `${SITE_URL}${canonicalPath(route.path)}`)
 
   useHead({
     title,

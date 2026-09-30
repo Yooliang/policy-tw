@@ -3,6 +3,7 @@ import { withElectionData, type DataSnapshot } from '../../composables/useSupaba
 import { PolicyStatus, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { policySortDate } from '../policy-date'
+import { isCounty } from '../election-regions'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -129,6 +130,23 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
       // 只塞該屆的（2026 屆 223 筆），policiesComplete 照舊 false，瀏覽器端 ensurePolicies() 仍會抓整份。
       const policies = full.policies.filter((p) => p.electionId === electionId)
       return { ...base, politicians, policies }
+    }
+
+    case 'election-region': {
+      // 縣市頁：該屆該縣市所有在選的人（縣市長、議員、立委、鄉鎮市長、代表、村里長），跟瀏覽器端
+      // loadPoliticiansByElection(id, 縣市) 撈的是同一批；選舉區對應表只帶這個縣市（右側鄉鎮篩選要用）
+      const electionId = Number(paramString(to.params.electionId))
+      const region = paramString(to.params.region)
+      if (!isCounty(region)) return base
+      const politicians = full.politicians
+        .filter((pl) => pl.elections?.some((e) =>
+          e.electionId === electionId && e.region === region && isRunningCandidate(e.candidateStatus),
+        ))
+        .map((pl) => withElectionData(pl, electionId))
+      const ids = new Set(politicians.map((pl) => String(pl.id)))
+      const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
+      const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
+      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true }
     }
 
     case 'politician': {

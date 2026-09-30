@@ -5,10 +5,11 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { legacyRegionRedirect, regionUpstreamPath } from '../cloudflare/region-path.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
-const PORT = Number(process.argv[2] || 4180)
+const PORT = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) || 4180)
 const firebaseConfig = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'))
 const rewrites = firebaseConfig.hosting.rewrites || []
 
@@ -58,8 +59,16 @@ function send(res, status, file) {
   fs.createReadStream(file).pipe(res)
 }
 
+// 加 --no-worker 只模擬 Firebase；預設連正見.tw Worker 的兩條縣市頁規則一起模擬（ASCII 檔案路徑、舊 ?region= 的 301）
+const SIMULATE_WORKER = !process.argv.includes('--no-worker')
+
 http.createServer((req, res) => {
-  const urlPath = new URL(req.url, `http://localhost:${PORT}`).pathname
+  const url = new URL(req.url, `http://localhost:${PORT}`)
+  if (SIMULATE_WORKER) {
+    const moved = legacyRegionRedirect(url.pathname, url.searchParams)
+    if (moved) { res.writeHead(301, { Location: moved }); return res.end() }
+  }
+  const urlPath = (SIMULATE_WORKER && regionUpstreamPath(url.pathname)) || url.pathname
   const file = resolveFile(urlPath)
   if (file) return send(res, 200, file)
   const rule = rewriteRules.find((r) => r.re.test(urlPath))

@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { REGION_DIR, regionFilePath } from '../cloudflare/region-path.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -20,10 +21,44 @@ function walkHtml(dir, acc = []) {
   return acc
 }
 
+const REGION_FILE_RE = new RegExp(`^/election/(\\d+)/${REGION_DIR}/([0-9a-f]+)$`)
+
 function routeOf(file) {
   const rel = path.relative(DIST, file).split(path.sep).join('/')
   if (rel === 'index.html') return '/'
-  return `/${rel.replace(/\/index\.html$/, '')}`
+  const route = `/${rel.replace(/\/index\.html$/, '')}`
+  // 縣市頁的檔案在 ASCII 路徑，對外網址是中文（percent-encoded）
+  const m = route.match(REGION_FILE_RE)
+  if (m) return `/election/${m[1]}/${encodeURIComponent(Buffer.from(m[2], 'hex').toString('utf8'))}`
+  return route
+}
+
+/**
+ * 縣市頁（2026-09-30）：vite-ssg 照路由寫在 dist/election/<屆>/<中文縣市>/index.html，
+ * 搬到 ASCII 路徑 dist/election/<屆>/_r/<十六進位>/index.html（原因見 cloudflare/region-path.js）。
+ */
+function relocateRegionPages() {
+  const electionDir = path.join(DIST, 'election')
+  if (!fs.existsSync(electionDir)) return 0
+  let moved = 0
+  for (const year of fs.readdirSync(electionDir, { withFileTypes: true })) {
+    if (!year.isDirectory()) continue
+    const yearDir = path.join(electionDir, year.name)
+    for (const entry of fs.readdirSync(yearDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === REGION_DIR) continue
+      let region = entry.name
+      try { region = decodeURIComponent(entry.name) } catch { /* 原樣 */ }
+      if (!/[^\x00-\x7f]/.test(region)) continue
+      const from = path.join(yearDir, entry.name, 'index.html')
+      if (!fs.existsSync(from)) continue
+      const to = path.join(DIST, regionFilePath(year.name, region).slice(1), 'index.html')
+      fs.mkdirSync(path.dirname(to), { recursive: true })
+      fs.renameSync(from, to)
+      fs.rmSync(path.join(yearDir, entry.name), { recursive: true, force: true })
+      moved++
+    }
+  }
+  return moved
 }
 
 function mainHtml(html) {
@@ -41,6 +76,7 @@ function taipeiDate() {
 const failures = []
 const fail = (msg) => failures.push(msg)
 
+const relocatedRegionPages = relocateRegionPages()
 const allHtml = walkHtml(DIST)
 const pageFiles = allHtml.filter((f) => path.basename(f) === 'index.html')
 const routes = pageFiles.map(routeOf).sort()
@@ -112,6 +148,29 @@ const samples = [
   samplePolicy ? spotCheck(samplePolicy, '政見頁') : (edgeMode ? null : (fail('沒有任何 /policy/ 頁'), null)),
 ].filter(Boolean)
 
+// 3b. 縣市頁：每頁都要有候選人連結；單頁太大要看見（2026-09-30）
+const REGION_PAGE_WARN_BYTES = 3 * 1024 * 1024
+const regionPages = pageFiles
+  .filter((f) => REGION_FILE_RE.test(`/${path.relative(DIST, f).split(path.sep).join('/').replace(/\/index\.html$/, '')}`))
+  .map((f) => {
+    const html = fs.readFileSync(f, 'utf8')
+    const route = routeOf(f)
+    return {
+      route: decodeURIComponent(route),
+      kb: Math.round(Buffer.byteLength(html) / 1024),
+      politicianLinks: (html.match(/href="\/politician\//g) || []).length,
+      title: (html.match(/<title>([^<]*)<\/title>/) || [])[1] || '',
+      canonical: (html.match(/<link rel="canonical" href="([^"]*)"/) || [])[1] || '',
+    }
+  })
+  .sort((a, b) => a.route.localeCompare(b.route))
+for (const p of regionPages) {
+  if (p.politicianLinks === 0) fail(`縣市頁 ${p.route} 沒有任何 /politician/ 連結`)
+  if (p.kb * 1024 > REGION_PAGE_WARN_BYTES) console.warn(`[postbuild-ssg] 縣市頁 ${p.route} ${p.kb} KB，超過 3 MB`)
+  if (!p.title.includes(p.route.split('/').pop())) fail(`縣市頁 ${p.route} 的 <title> 沒有縣市名：${p.title}`)
+  if (!p.canonical.endsWith(encodeURIComponent(p.route.split('/').pop()))) fail(`縣市頁 ${p.route} 的 canonical 不對：${p.canonical}`)
+}
+
 // 4. 政治人物頁的 initialState 不該把整包政見塞進去（控制頁重）
 const politicianSample = samples.find((s) => s.route.startsWith('/politician/'))
 if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 initialState 過大：${politicianSample.stateKb} KB`)
@@ -161,6 +220,8 @@ const summary = {
   sitemaps: Object.fromEntries([...grouped].map(([f, l]) => [f, l.length])),
   byPrefix,
   pagesWithoutInitialState: noStatePages.length,
+  relocatedRegionPages,
+  regionPages,
   samples,
   failures,
 }

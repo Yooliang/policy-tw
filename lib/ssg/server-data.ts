@@ -16,6 +16,7 @@ import {
 import type { Politician, RawPolitician } from '../../types'
 import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
+import { TAIWAN_COUNTIES } from '../election-regions'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -142,6 +143,24 @@ function hasContent(pl: Politician, politicianIdsWithPolicies: Set<string>): boo
   return (pl.elections || []).some((e) => e.electionType && e.electionType !== VILLAGE_CHIEF)
 }
 
+/**
+ * 縣市頁（/election/:id/:縣市，2026-09-30）：每一屆、有在選候選人的縣市各一頁。
+ * 路徑用未編碼的中文交給 vite-ssg（它照路由渲染、照路徑寫檔）；postbuild 再把檔案搬到 ASCII 路徑（見 cloudflare/region-path.js）。
+ */
+export function electionRegionRoutes(full: DataSnapshot): string[] {
+  const paths: string[] = []
+  for (const election of full.elections) {
+    const regions = new Set<string>()
+    for (const pl of full.politicians) {
+      for (const e of pl.elections ?? []) {
+        if (e.electionId === election.id && isRunningCandidate(e.candidateStatus)) regions.add(e.region)
+      }
+    }
+    for (const county of TAIWAN_COUNTIES) if (regions.has(county)) paths.push(`/election/${election.id}/${county}`)
+  }
+  return paths
+}
+
 /** 建置時要預渲染的完整路徑清單。 */
 /** 邊緣渲染頁的清單寫給 scripts/postbuild-ssg.mjs 產網站地圖（它讀完就刪，不會部署出去） */
 export const EDGE_ROUTES_FILE = 'dist/.edge-routes.json'
@@ -168,6 +187,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
   const paths = [
     ...STATIC_CONTENT_ROUTES,
     ...full.elections.map((e) => `/election/${e.id}`),
+    ...electionRegionRoutes(full),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),
     ...(prerenderEdge ? edgePaths : []),

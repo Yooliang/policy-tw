@@ -25,5 +25,6 @@
 `cloudflare/ssr-worker.js`（wrangler.toml 的 main）：`/politician/:id`、`/policy/:id` 在邊緣 SSR（`entry-server.ts` → `pnpm build:ssr` → `dist-ssr/`），
 Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app。`POST /__purge`（`X-Purge-Secret`）清指定頁。
 部署：CI 的 `ssr-deploy` job（需 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`）或本機 `pnpm deploy:ssr`。
-回滾：把 `SSR_ROUTES` 清空重部署＝純代理。計畫與後續步驟見 `docs/PLAN-edge-ssr.md`。
+回滾：把 `SSR_ROUTES` 清空重部署＝純代理。
+縣市頁（2026-09-30）：`/election/:id/:縣市` 代理時換成 web.app 上的 ASCII 路徑 `/election/:id/_r/<十六進位>`；`/election/:id?region=縣市` 301 到路徑版。規則在 `region-path.js`（postbuild 與 serve-dist 共用）。計畫與後續步驟見 `docs/PLAN-edge-ssr.md`。
 
