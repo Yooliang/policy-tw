@@ -13,6 +13,7 @@ import AiContributeBanner from '../components/AiContributeBanner.vue'
 import { ArrowRight, Users, FileCheck, Vote, Star, CheckCircle2, Activity } from 'lucide-vue-next'
 
 import { RouterLink } from 'vue-router'
+import { TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
@@ -179,6 +180,10 @@ usePageHead({
                    立即進入專區 <ArrowRight :size="24" />
                 </RouterLink>
               </div>
+              <!-- 各縣市頁：首頁 → 縣市頁 → 人物頁 串起來（2026-09-30） -->
+              <nav aria-label="2026 各縣市候選人" class="mt-6 flex flex-wrap gap-x-3 gap-y-1.5 text-sm">
+                <RouterLink v-for="county in TAIWAN_COUNTIES" :key="county" :to="electionRegionPath(2026, county)" class="text-blue-200 hover:text-amber-300 transition-colors">{{ county }}</RouterLink>
+              </nav>
             </div>
             <div class="md:w-1/3 grid grid-cols-2 gap-4">
               <div class="bg-white/10 p-6 rounded-3xl backdrop-blur-sm border border-white/10 text-center">

@@ -3,6 +3,7 @@
  *
  * 路由：
  *   /politician/:id、/policy/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
+ *   /election/:id/:縣市 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；舊的 /election/:id?region=縣市 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
  *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取
  *   /next、/report… 等協議端點名 → 307 轉到 Supabase functions（見 apiRedirect）
@@ -15,6 +16,7 @@
 
 import { render, SUPABASE_PUBLIC } from '../dist-ssr/entry-server.js'
 import { classifyRead } from './ai-reads.js'
+import { legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
  * 記「誰在讀」（2026-09-23）：AI／搜尋引擎／從 AI 服務點過來的人，背景加一，不拖慢回應、失敗不影響頁面。
@@ -135,7 +137,9 @@ function assemble(shell, r) {
 
 async function proxy(request) {
   const incoming = new URL(request.url)
-  const target = new URL(incoming.pathname + incoming.search, ORIGIN)
+  // 縣市頁：預渲染檔放在 ASCII 路徑（中文目錄在 Firebase 上比對不保證），只有 GET／HEAD 需要
+  const upstreamPath = (request.method === 'GET' || request.method === 'HEAD') ? (regionUpstreamPath(incoming.pathname) ?? incoming.pathname) : incoming.pathname
+  const target = new URL(upstreamPath + incoming.search, ORIGIN)
   const headers = new Headers(request.headers)
   for (const h of DROP_REQUEST_HEADERS) headers.delete(h)
   headers.set('X-Forwarded-Host', incoming.host)
@@ -204,6 +208,11 @@ export default {
     }
     const api = apiRedirect(request)
     if (api) return api
+    // 縣市原本放在查詢字串，搜尋引擎不當獨立頁；舊連結一律 301 到路徑版（2026-09-30）
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      const moved = legacyRegionRedirect(url.pathname, url.searchParams)
+      if (moved) return new Response(null, { status: 301, headers: { Location: `${url.origin}${moved}`, 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'public, max-age=3600' } })
+    }
     if ((request.method === 'GET' || request.method === 'HEAD') && SSR_ROUTES.some((re) => re.test(url.pathname)) && !url.searchParams.has('__proxy')) {
       try {
         const res = await renderPage(request, ctx)

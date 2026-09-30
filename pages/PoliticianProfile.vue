@@ -3,7 +3,7 @@ import { shortUrlsIn } from '../lib/url'
 import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useSupabase } from '../composables/useSupabase'
+import { useSupabase, withElectionData } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
@@ -15,18 +15,23 @@ import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2 } from 'lucide-vue-next'
+import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
 import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
+import PoliticianGrid from './election/PoliticianGrid.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
+import type { BreadcrumbItem } from '../composables/usePageHead'
+import { electionPeers, primaryElection } from '../lib/election-peers'
+import { electionRegionPath, isCounty } from '../lib/election-regions'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
-const activeTab = ref<'campaign' | 'history' | 'profile'>('campaign')
+const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 小良哥）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
 const campaignView = ref<CampaignView>('cards')
@@ -226,6 +231,38 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
   return groups
 }
 
+/**
+ * 麵包屑與「同選區其他候選人」（2026-09-30 小良哥：所有的頁面都要可以互連）。
+ * 以最新一屆有在選的參選紀錄為準；沒有參選紀錄就只剩人名（麵包屑不顯示）。
+ * 同選區名單只從目前已載入的人物裡算（直接開網址時就是快照帶來的那批，見 lib/election-peers.ts），取不到就不顯示。
+ */
+const primaryRecord = computed(() => primaryElection(politician.value))
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+  const p = politician.value
+  if (!p) return []
+  const rec = primaryRecord.value
+  const items: BreadcrumbItem[] = []
+  if (rec) {
+    const el = getElectionById(rec.electionId)
+    items.push({ name: el?.shortName || el?.name || `選舉 ${rec.electionId}`, path: `/election/${rec.electionId}` })
+    if (isCounty(rec.region)) items.push({ name: rec.region, path: electionRegionPath(rec.electionId, rec.region) })
+  }
+  items.push({ name: p.name })
+  return items
+})
+// 卡片要顯示那一屆的號次／選區，跟選舉頁一樣先套上該屆的參選資料
+const peers = computed(() => {
+  const rec = primaryRecord.value
+  const list = electionPeers(politician.value, politicians.value)
+  return rec ? list.map(c => withElectionData(c, rec.electionId)) : list
+})
+const peerDistrict = computed(() => {
+  const rec = primaryRecord.value
+  if (!rec) return ''
+  const area = rec.electionType === '縣市長' ? rec.region : [rec.region, rec.subRegion, rec.village].filter(Boolean).join(' ')
+  return `${getElectionById(rec.electionId)?.shortName ?? rec.electionId}・${area}・${rec.electionType ?? ''}`
+})
+
 const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾'))
 const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見'))
 
@@ -259,11 +296,13 @@ usePageHead({
     publisher: PUBLISHER_LD,
     license: DATA_LICENSE_URL,
   } : undefined,
+  breadcrumbs: () => breadcrumbs.value,
 })
 </script>
 
 <template>
   <div v-if="politician" class="bg-slate-50 min-h-screen">
+    <Breadcrumbs :items="breadcrumbs" />
     <Hero>
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
@@ -339,19 +378,24 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
         <div>
-          <!-- 三個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機用短標、縮字級與內距、不換行 -->
+          <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用四字（競選承諾／政績追蹤／基本資料／候選人，小良哥 2026-09-30），390px 寬一排放得下 -->
           <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
-            <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <Megaphone :size="18" /><span class="sm:hidden">承諾</span><span class="hidden sm:inline">競選承諾</span><span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
+            <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">競選承諾</span><span class="hidden sm:inline">競選承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>
             </button>
-            <button @click="activeTab = 'history'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <CheckCircle2 :size="18" /><span class="sm:hidden">政績</span><span class="hidden sm:inline">過往政績與追蹤</span><span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
+            <button @click="activeTab = 'history'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <CheckCircle2 :size="18" class="hidden sm:block" /><span class="sm:hidden">政績追蹤</span><span class="hidden sm:inline">過往政績與追蹤</span><span class="hidden sm:inline bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
               <div v-if="activeTab === 'history'" class="absolute bottom-0 left-0 w-full h-1 bg-blue-600 rounded-t-full"></div>
             </button>
-            <button @click="activeTab = 'profile'" :class="`pb-3 sm:pb-4 px-3 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <User :size="18" /><span class="sm:hidden">資料</span><span class="hidden sm:inline">基本資料</span>
+            <button @click="activeTab = 'profile'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <User :size="18" class="hidden sm:block" /><span class="sm:hidden">基本資料</span><span class="hidden sm:inline">基本資料</span>
               <div v-if="activeTab === 'profile'" class="absolute bottom-0 left-0 w-full h-1 bg-emerald-600 rounded-t-full"></div>
+            </button>
+            <!-- 同選區候選人（2026-09-30 小良哥：獨立成第四個分頁）；沒有同選區的人就不出現 -->
+            <button v-if="peers.length > 0" @click="activeTab = 'peers'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'peers' ? 'text-amber-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <Users :size="18" class="hidden sm:block" /><span class="sm:hidden">候選人</span><span class="hidden sm:inline">同選區候選人</span><span class="hidden sm:inline bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ peers.length }}</span>
+              <div v-if="activeTab === 'peers'" class="absolute bottom-0 left-0 w-full h-1 bg-amber-500 rounded-t-full"></div>
             </button>
           </div>
           <div class="space-y-6">
@@ -617,6 +661,13 @@ usePageHead({
                 </div>
               </div>
             </div>
+            </div>
+            <!-- 同選區候選人分頁：用 v-show，非作用中時 HTML 裡仍有每個人的 <a href>（爬蟲走得到）；卡片重用選舉頁的 PoliticianGrid -->
+            <div v-if="peers.length > 0" v-show="activeTab === 'peers'" data-testid="election-peers">
+              <PoliticianGrid :politicians="peers" :title="peerDistrict" :columns="3" :election-id="primaryRecord?.electionId" />
+              <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(primaryRecord.electionId, primaryRecord.region)" class="inline-block -mt-6 text-sm font-bold text-violet-700 hover:underline">
+                看 {{ primaryRecord.region }} 全部候選人 →
+              </RouterLink>
             </div>
           </div>
 

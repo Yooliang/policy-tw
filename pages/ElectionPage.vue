@@ -12,7 +12,7 @@ import PoliticianGrid from './election/PoliticianGrid.vue'
 import PoliticianDropdown from './election/PoliticianDropdown.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import Hero from '../components/Hero.vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale, Swords,
@@ -26,6 +26,8 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
+import { electionPath, isCounty } from '../lib/election-regions'
+import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
@@ -60,7 +62,17 @@ const electionId = computed(() => Number(route.params.electionId))
 const election = computed(() => getElectionById(electionId.value))
 const electionLoading = ref(false)
 
-const selectedRegion = ref(globalRegion.value)
+/**
+ * 縣市頁 /election/:electionId/:region（2026-09-30）：網址上的縣市就是這一頁的縣市。
+ * 初始值先吃網址（預渲染與 hydrate 都看得到同一個縣市），之後由 useRegionQuerySync 跟全站的 globalRegion 對齊。
+ * 不合法的縣市名當成沒有，useRegionQuerySync 會把網址換回全台。
+ */
+const routeRegion = computed(() => {
+  const raw = route.params.region
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return isCounty(value) ? value : undefined
+})
+const selectedRegion = ref(routeRegion.value ?? globalRegion.value)
 const selectedSubRegion = ref<string>('All')  // 鄉鎮市區
 const selectedVillage = ref<string>('All')    // 村里
 
@@ -162,8 +174,13 @@ const selectedIssueTag = ref('')
 const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
 
 // 縣市／鄉鎮／村里／頁籤／PK 層級 ↔ 網址 ?region=&sub=&village=&view=&type=，可貼連結直達
+// 縣市在路徑上（/election/2026/台北市），鄉鎮／村里／頁籤仍是 query；舊的 ?region= 進來會換成路徑的寫法
 useRegionQuerySync({
-  routeName: 'election',
+  routeName: ['election', 'election-region'],
+  regionPath: {
+    get: () => routeRegion.value,
+    build: (region) => electionPath(electionId.value, region),
+  },
   sub: selectedSubRegion,
   village: selectedVillage,
   extra: {
@@ -171,6 +188,19 @@ useRegionQuerySync({
     type: queryField(comparisonLevel, ElectionType.MAYOR, { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
   },
 })
+
+/**
+ * 縣市選擇器的連結：到該縣市頁（或全台），保留目前的頁籤（view／type），鄉鎮與村里不帶過去（換縣市本來就會重設）。
+ * 預渲染時沒有 query，href 就是乾淨的 /election/2026/台北市。
+ */
+function regionLink(region: string): RouteLocationRaw {
+  const query: Record<string, string> = {}
+  for (const key of ['view', 'type']) {
+    const v = route.query[key]
+    if (typeof v === 'string' && v) query[key] = v
+  }
+  return { path: electionPath(electionId.value, region), query }
+}
 
 const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
 const OTHER_LOCATIONS = computed(() => locations.value.filter(loc => !SIX_CAPITALS.includes(loc)))
@@ -365,6 +395,43 @@ const councilorPoliticians = computed(() => {
   }
   return result
 })
+/**
+ * 縣市頁的「鄉鎮市區參選人名錄」（2026-09-30）：縣市層級原本只列縣市長與議員，
+ * 鄉鎮市長、代表、村里長要再點鄉鎮／村里才出現——預渲染的縣市頁裡就沒有他們的連結，爬蟲走不到。
+ * 這裡按鄉鎮分組列出名字連結（<details> 收合，畫面不變長），每個人都有一條 <a href>。
+ */
+const TOWNSHIP_LEVELS: Array<{ type: ElectionType; label: string }> = [
+  { type: ElectionType.TOWNSHIP_MAYOR, label: '鄉鎮市長' },
+  { type: ElectionType.INDIGENOUS_DISTRICT_CHIEF, label: '原住民區長' },
+  { type: ElectionType.REPRESENTATIVE, label: '鄉鎮市民代表' },
+  { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原住民區代表' },
+  { type: ElectionType.CHIEF, label: '村里長' },
+]
+const townshipDirectory = computed(() => {
+  if (selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return []
+  const byTownship = new Map<string, Map<string, Politician[]>>()
+  for (const c of filteredPoliticians.value) {
+    const type = getElectionType(c)
+    const level = TOWNSHIP_LEVELS.find(l => l.type === type)
+    if (!level) continue
+    // 原民區的 subRegion 是「XX區第YY選舉區」，歸到 XX區
+    const township = (c.subRegion || '').replace(/第.+選舉區$/, '') || '其他'
+    const groups = byTownship.get(township) ?? new Map<string, Politician[]>()
+    groups.set(level.label, [...(groups.get(level.label) ?? []), c])
+    byTownship.set(township, groups)
+  }
+  return Array.from(byTownship.entries())
+    .sort(([a], [b]) => sortByLengthThenStroke(a, b))
+    .map(([township, groups]) => ({
+      township,
+      total: Array.from(groups.values()).reduce((n, list) => n + list.length, 0),
+      groups: TOWNSHIP_LEVELS
+        .filter(l => groups.has(l.label))
+        .map(l => ({ label: l.label, people: groups.get(l.label)! })),
+    }))
+})
+const townshipDirectoryTotal = computed(() => townshipDirectory.value.reduce((n, t) => n + t.total, 0))
+
 const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.TOWNSHIP_MAYOR))
 const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
 const repPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.REPRESENTATIVE))
@@ -551,11 +618,35 @@ watch(visibleLevels, (levels) => {
   if (levels.length > 0 && !levels.some(l => l.type === comparisonLevel.value)) comparisonLevel.value = levels[0].type
 }, { immediate: true })
 
+/** 縣市頁的頁首：「2026 台北市 候選人與政見」；全台照舊 */
+const pageCounty = computed(() => isCounty(selectedRegion.value) ? selectedRegion.value : undefined)
+const countyLevelCounts = computed(() => {
+  const county = pageCounty.value
+  if (!county) return ''
+  return ALL_LEVELS
+    .map(l => ({ label: l.label, n: electionPoliticians.value.filter(c => {
+      const data = getPoliticianElectionData(c, electionId.value)
+      return data?.electionType === l.type && (data.region || c.region) === county
+    }).length }))
+    .filter(x => x.n > 0)
+    .map(x => `${x.label} ${x.n} 位`)
+    .join('、')
+})
 usePageHead({
-  title: () => election.value ? (election.value.shortName || election.value.name) : undefined,
-  description: () => election.value
-    ? `${election.value.name}（投票日 ${election.value.electionDate}）候選人名單與競選承諾：總統、立委、縣市長到議員、鄉鎮市長、村里長，依縣市與鄉鎮篩選，比較政見。`
-    : undefined,
+  title: () => {
+    if (!election.value) return undefined
+    return pageCounty.value
+      ? `${electionYear.value || election.value.id} ${pageCounty.value} 候選人與政見`
+      : (election.value.shortName || election.value.name)
+  },
+  description: () => {
+    if (!election.value) return undefined
+    if (pageCounty.value) {
+      const counts = countyLevelCounts.value ? `：${countyLevelCounts.value}` : ''
+      return `${election.value.name}${pageCounty.value}參選人名單與競選承諾${counts}。可依鄉鎮市區篩選、逐項比較政見。`
+    }
+    return `${election.value.name}（投票日 ${election.value.electionDate}）候選人名單與競選承諾：總統、立委、縣市長到議員、鄉鎮市長、村里長，依縣市與鄉鎮篩選，比較政見。`
+  },
 })
 </script>
 
@@ -565,7 +656,10 @@ usePageHead({
     <Hero full-width :background-image="heroBackgroundImage">
       <template #title>
         <div class="relative w-full">
-          <div>
+          <div v-if="pageCounty">
+            {{ electionYear || election.id }} {{ pageCounty }}<br/><span class="text-amber-400">候選人與政見</span>
+          </div>
+          <div v-else>
             預見未來，<br/><span class="text-amber-400">從您居住的城市開始</span>
           </div>
           <div class="hidden md:block absolute right-0 top-1/2 -translate-y-1/2">
@@ -599,7 +693,8 @@ usePageHead({
         </HeroAction>
       </template>
 
-      <GlobalRegionSelector />
+      <!-- 縣市是真連結（/election/2026/台北市），點起來跟以前一樣切縣市，爬蟲也走得到 -->
+      <GlobalRegionSelector :current="selectedRegion" :link-for="regionLink" />
     </Hero>
 
 
@@ -630,6 +725,29 @@ usePageHead({
         <template v-else-if="selectedSubRegion === 'All'">
           <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
           <PoliticianGrid v-if="councilorPoliticians.length > 0" :politicians="councilorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市議員參選人"><template #icon><Users class="text-blue-500" /></template></PoliticianGrid>
+          <!-- 2024 那種全國性選舉在縣市頁只有立委 -->
+          <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" :columns="gridColumns" :election-id="electionId" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
+          <!-- 鄉鎮市區參選人名錄：名字連結，收合在各鄉鎮底下 -->
+          <section v-if="townshipDirectory.length > 0" class="mb-12 text-left">
+            <h3 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2 border-l-4 border-blue-500 pl-3">
+              <Building2 class="text-indigo-500" /> 鄉鎮市區參選人名錄 ({{ townshipDirectoryTotal }})
+            </h3>
+            <p class="text-sm text-slate-500 mb-4">展開各{{ subRegionLabel }}看參選人名單；要看卡片請在右側選{{ subRegionLabel }}。</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <details v-for="t in townshipDirectory" :key="t.township" class="bg-white border border-slate-200 rounded-xl">
+                <summary class="px-4 py-2.5 cursor-pointer font-bold text-navy-900 flex items-center justify-between">
+                  <span>{{ t.township }}</span>
+                  <span class="text-xs font-medium text-slate-400">{{ t.total }} 位</span>
+                </summary>
+                <div class="px-4 pb-3 space-y-2 text-sm leading-relaxed">
+                  <p v-for="g in t.groups" :key="g.label">
+                    <span class="text-slate-500 font-medium">{{ g.label }}：</span>
+                    <template v-for="(person, i) in g.people" :key="person.id"><span v-if="i > 0" class="text-slate-300">、</span><RouterLink :to="`/politician/${person.id}`" class="text-blue-700 hover:underline">{{ person.name }}</RouterLink><span v-if="person.village" class="text-slate-400 text-xs">（{{ person.village }}）</span></template>
+                  </p>
+                </div>
+              </details>
+            </div>
+          </section>
         </template>
 
         <!-- ===== 第3級：鄉鎮市區 ===== -->

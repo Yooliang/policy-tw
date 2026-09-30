@@ -20,7 +20,8 @@
       { "source": "/policy/**", "destination": "/app.html" },
       { "source": "/politician/**", "destination": "/app.html" },
       { "source": "/analysis/**", "destination": "/app.html" },
-      { "source": "/community/**", "destination": "/app.html" }
+      { "source": "/community/**", "destination": "/app.html" },
+      { "source": "/election/*/*", "destination": "/app.html" }
     ]
   }
 }

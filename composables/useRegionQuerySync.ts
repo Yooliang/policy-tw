@@ -9,6 +9,7 @@ import { useGlobalState } from './useGlobalState'
  * - 切換：router.replace 更新 query（不推 history，返回鍵不會在縣市間來回）；回預設值就拿掉參數
  * - 只在 routeName 那一頁動網址；不屬於本頁的其他 query（例如 ?filter=）原樣保留
  * - 套用時機在 mounted 之後：預渲染的 HTML 是全國版，先 hydrate 一致再切，避免 hydration mismatch
+ *   （選舉頁的縣市在路徑上，預渲染本身就是該縣市版；見 regionPath）
  * - 各頁既有的篩選 ref 可用 extra 一起同步（分類、頁籤…），不新增篩選功能
  */
 export interface QueryField {
@@ -37,7 +38,16 @@ export function queryField<T extends string>(ref: Ref<T>, defaultValue: T, optio
 
 export interface RegionQuerySyncOptions {
   /** router 裡的 route name，只在這頁作用 */
-  routeName: string
+  routeName: string | string[]
+  /**
+   * 縣市放在路徑上的頁（選舉頁 /election/:id/:region，2026-09-30）：region 不寫進 query，改寫路徑。
+   * get 回傳路徑上的縣市（不合法就回 undefined＝全台）；網址還帶舊的 ?region= 時照樣讀進來，
+   * 之後同步網址時會換成路徑的寫法（舊連結自動升級）。
+   */
+  regionPath?: {
+    get: () => string | undefined
+    build: (region: string) => string
+  }
   /** 鄉鎮市區（依賴 region） */
   sub?: Ref<string>
   /** 村里（依賴 sub） */
@@ -102,19 +112,31 @@ export function sameQuery(a: LocationQuery, b: LocationQuery): boolean {
   return normalize(a) === normalize(b)
 }
 
+function decodePath(path: string): string {
+  try { return decodeURIComponent(path) } catch { return path }
+}
+
 export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   const route = useRoute()
   const router = useRouter()
   const { globalRegion } = useGlobalState()
   const fields = resolveFields(options, globalRegion)
+  const routeNames = Array.isArray(options.routeName) ? options.routeName : [options.routeName]
+  const regionPath = options.regionPath
   let active = false
   let applying = false
 
-  const hasOwnKeys = (query: LocationQuery) => fields.some((f) => query[f.key] !== undefined)
+  const isOwnRoute = () => routeNames.includes(String(route.name ?? ''))
+  /** 路徑上的縣市當成 query 的 region 一起解析（沒有才退回舊的 ?region=） */
+  const effectiveQuery = (query: LocationQuery): LocationQuery => {
+    const fromPath = regionPath?.get()
+    return fromPath ? { ...query, region: fromPath } : query
+  }
+  const hasOwnKeys = (query: LocationQuery) => !!regionPath?.get() || fields.some((f) => query[f.key] !== undefined)
 
   // 頁面既有的 watcher 會在上層變動時把下層重設（縣市變 → 鄉鎮／村里回 All），所以一個欄位設完等 watcher 跑完再設下一個
   async function applyQuery(query: LocationQuery): Promise<void> {
-    const target = parseRegionQuery(fields, query)
+    const target = parseRegionQuery(fields, effectiveQuery(query))
     applying = true
     try {
       for (const field of fields) {
@@ -129,15 +151,28 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   }
 
   function syncUrl(): void {
-    if (!active || applying || route.name !== options.routeName) return
+    if (!active || applying || !isOwnRoute()) return
     const query = buildRegionQuery(fields, route.query)
-    if (sameQuery(query, route.query)) return
-    void router.replace({ query })
+    if (!regionPath) {
+      if (sameQuery(query, route.query)) return
+      void router.replace({ query })
+      return
+    }
+    delete query.region
+    const path = regionPath.build(globalRegion.value)
+    if (decodePath(path) === decodePath(route.path) && sameQuery(query, route.query)) return
+    void router.replace({ path, query })
+  }
+
+  /** 套完網址後：縣市在路徑上的頁順手把網址整理成正式寫法（舊的 ?region= → 路徑） */
+  async function applyAndNormalize(query: LocationQuery): Promise<void> {
+    await applyQuery(query)
+    if (regionPath) syncUrl()
   }
 
   function onEnter(): void {
     active = true
-    if (hasOwnKeys(route.query)) void applyQuery(route.query)
+    if (hasOwnKeys(route.query)) void applyAndNormalize(route.query)
     else syncUrl()
   }
 
@@ -147,9 +182,15 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
 
   watch(fields.map((f) => f.ref), syncUrl)
 
-  // 同一頁上換了帶不同參數的連結（例如貼上分享連結）：以網址為準
-  watch(() => route.query, (query) => {
-    if (!active || applying || route.name !== options.routeName) return
+  // 同一頁上換了帶不同參數的連結（例如貼上分享連結、點縣市頁連結）：以網址為準
+  watch([() => route.query, () => regionPath?.get()], () => {
+    if (!active || applying || !isOwnRoute()) return
+    const query = route.query
+    if (regionPath) {
+      const target = parseRegionQuery(fields, effectiveQuery(query))
+      if (fields.some((f) => f.ref.value !== target[f.key]) || query.region !== undefined) void applyAndNormalize(query)
+      return
+    }
     if (!sameQuery(buildRegionQuery(fields, query), query)) void applyQuery(query)
   })
 }

@@ -11,7 +11,7 @@
 | `SSG_DEBUG_HYDRATION=1 pnpm build` | 客戶端 bundle 會在 console 印 hydration mismatch 細節，驗證用；正式 build 不要開 |
 | `pnpm build:spa` | 舊的純 SPA build（緊急 fallback，沒有預渲染、沒有殼檔） |
 | `pnpm preview` | 預覽 dist（已設 `appType: mpa`，`/politician/:id` 會對到 `politician/:id/index.html`；但無法模擬 firebase rewrites 與 404.html） |
-| `node scripts/serve-dist.mjs 4180` | 本機模擬 Firebase Hosting：cleanUrls、firebase.json rewrites、找不到回 `404.html`（HTTP 404）。驗 404／工具頁殼用這個 |
+| `node scripts/serve-dist.mjs 4180` | 本機模擬 Firebase Hosting：cleanUrls、firebase.json rewrites、找不到回 `404.html`（HTTP 404）。驗 404／工具頁殼用這個。預設連 Worker 的縣市頁規則一起模擬，加 `--no-worker` 只模擬 Firebase |
 
 ## 建置時發生什麼
 
@@ -24,7 +24,7 @@
 ## 哪些頁面會預渲染
 
 - 靜態：`/`、`/tracking`、`/analysis`、`/community`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`（`lib/ssg/server-data.ts` 的 `STATIC_CONTENT_ROUTES`）
-- `/election/:id`（每個選舉）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
+- `/election/:id`（每個選舉）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
 - `/analysis/:id` 只出「分析列表實際會連到」的那幾條（與 `PolicyAnalysis.relayCases` 同邏輯），不是全部政見
 - **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
 
