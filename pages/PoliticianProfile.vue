@@ -381,7 +381,7 @@ usePageHead({
                           <tr v-for="(policy, i) in group.policies" :key="policy.id" class="border-t border-slate-100 hover:bg-violet-50/40 cursor-pointer" @click="router.push(`/policy/${policy.id}`)">
                             <td class="px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
                             <td class="px-3 py-2">
-                              <div class="font-bold text-navy-900">{{ policy.title }}</div>
+                              <router-link :to="`/policy/${policy.id}`" class="block font-bold text-navy-900" @click.stop>{{ policy.title }}</router-link>
                               <div class="text-slate-500 text-xs line-clamp-2">{{ policy.description }}</div>
                             </td>
                             <td class="px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
@@ -397,7 +397,7 @@ usePageHead({
                   <div v-for="group in campaignGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
                     </div>
                   </div>
                 </div>
@@ -446,7 +446,7 @@ usePageHead({
                   <div v-for="group in historyGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :on-click="() => router.push(`/policy/${policy.id}`)" />
+                      <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" />
                     </div>
                   </div>
                 </div>

@@ -118,7 +118,7 @@ usePageHead({
         <template #badge>公民討論</template>
         <template #title>{{ discussion.title }}</template>
         <template #description>
-          針對：<button @click="router.push('/policy/' + discussion.policyId)" class="underline hover:text-blue-300 transition-colors">{{ discussion.policyTitle }}</button>
+          針對：<router-link :to="'/policy/' + discussion.policyId" class="underline hover:text-blue-300 transition-colors">{{ discussion.policyTitle }}</router-link>
         </template>
         <template #icon><MessageSquare :size="400" class="text-blue-500" /></template>
 
@@ -249,9 +249,9 @@ usePageHead({
             <!-- Related policy -->
             <div v-if="policy" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <h3 class="font-bold text-navy-900 mb-4">相關政見</h3>
-              <div
-                @click="router.push('/policy/' + policy.id)"
-                class="cursor-pointer group"
+              <router-link
+                :to="'/policy/' + policy.id"
+                class="block cursor-pointer group"
               >
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="font-bold text-sm text-slate-800 group-hover:text-blue-600 transition-colors line-clamp-2">{{ policy.title }}</h4>
@@ -261,7 +261,7 @@ usePageHead({
                   <div class="bg-blue-500 h-2 rounded-full transition-all" :style="{ width: policy.progress + '%' }"></div>
                 </div>
                 <p class="text-slate-400 text-xs">進度 {{ policy.progress }}%</p>
-              </div>
+              </router-link>
             </div>
 
             <!-- Other discussions on same policy -->
@@ -269,11 +269,10 @@ usePageHead({
               <h3 class="font-bold text-navy-900 mb-4">同政見討論</h3>
               <ul class="space-y-3">
                 <li v-for="rd in relatedDiscussions" :key="rd.id">
-                  <a
-                    @click.prevent="router.push('/community/' + rd.id)"
-                    href="#"
+                  <router-link
+                    :to="'/community/' + rd.id"
                     class="text-sm text-slate-600 hover:text-blue-600 transition-colors line-clamp-2 block cursor-pointer"
-                  >{{ rd.title }}</a>
+                  >{{ rd.title }}</router-link>
                   <div class="flex items-center gap-3 text-[10px] text-slate-400 mt-1">
                     <span class="flex items-center gap-1"><ThumbsUp :size="10" /> {{ rd.likes }}</span>
                     <span class="flex items-center gap-1"><MessageSquare :size="10" /> {{ rd.comments.length }}</span>

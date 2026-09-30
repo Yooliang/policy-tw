@@ -195,7 +195,6 @@ onMounted(() => { ensurePolicies() })
           :key="policy.id"
           :policy="policy"
           :politician="politicians.find(c => c.id === policy.politicianId)!"
-          :on-click="() => router.push(`/policy/${policy.id}`)"
         />
       </div>
 
@@ -267,17 +266,17 @@ onMounted(() => { ensurePolicies() })
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100">
                 <div class="p-6 hover:bg-blue-50/20 transition-colors">
-                  <div v-if="getPledge(politicianAId, category)" @click="router.push(`/policy/${getPledge(politicianAId, category)!.id}`)" class="cursor-pointer group">
+                  <router-link v-if="getPledge(politicianAId, category)" :to="`/policy/${getPledge(politicianAId, category)!.id}`" class="block cursor-pointer group">
                     <h4 class="font-bold text-lg text-navy-900 mb-2 group-hover:text-blue-600 transition-colors">{{ getPledge(politicianAId, category)!.title }}</h4>
                     <p class="text-slate-600 text-sm mb-4 line-clamp-3">{{ getPledge(politicianAId, category)!.description }}</p>
-                  </div>
+                  </router-link>
                   <span v-else class="text-slate-400 text-sm italic">未提出相關承諾</span>
                 </div>
                 <div class="p-6 hover:bg-red-50/20 transition-colors">
-                  <div v-if="getPledge(politicianBId, category)" @click="router.push(`/policy/${getPledge(politicianBId, category)!.id}`)" class="cursor-pointer group">
+                  <router-link v-if="getPledge(politicianBId, category)" :to="`/policy/${getPledge(politicianBId, category)!.id}`" class="block cursor-pointer group">
                     <h4 class="font-bold text-lg text-navy-900 mb-2 group-hover:text-red-600 transition-colors">{{ getPledge(politicianBId, category)!.title }}</h4>
                     <p class="text-slate-600 text-sm mb-4 line-clamp-3">{{ getPledge(politicianBId, category)!.description }}</p>
-                  </div>
+                  </router-link>
                   <span v-else class="text-slate-400 text-sm italic">未提出相關承諾</span>
                 </div>
               </div>

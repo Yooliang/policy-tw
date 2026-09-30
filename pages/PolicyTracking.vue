@@ -10,12 +10,10 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, TrendingUp, Star } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import PolicyViewNav from '../components/PolicyViewNav.vue'
-import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { policyMatchesRegion } from '../lib/policy-region'
 
-const router = useRouter()
 const { policies, politicians, locations, categories, loading, ensurePolicies } = useSupabase()
 const { globalRegion } = useGlobalState()
 
@@ -200,7 +198,6 @@ usePageHead({
               v-if="politicians.find(c => c.id === policy.politicianId)"
               :policy="policy"
               :politician="politicians.find(c => c.id === policy.politicianId)!"
-              :on-click="() => router.push(`/policy/${policy.id}`)"
             />
           </template>
         </template>

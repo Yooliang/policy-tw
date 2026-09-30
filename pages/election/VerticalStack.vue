@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { ElectionType, type Policy } from '../../types'
 import { ArrowDown } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
 import { issueTagsOf } from '../../lib/issue-tags'
 
@@ -17,7 +16,6 @@ const props = defineProps<{
   junkNames?: Set<string>
 }>()
 
-const router = useRouter()
 const { politicians } = useSupabase()
 
 const levelPoliticians = computed<LevelPolitician[]>(() => props.electionPoliticians ?? politicians.value)
@@ -73,18 +71,18 @@ const levels = computed(() => [
           </div>
           <div :class="`flex-1 grid ${level.cols} gap-4 text-left`">
             <template v-if="level.items.length > 0">
-              <div
+              <router-link
                 v-for="p in level.items"
                 :key="p.id"
-                @click="router.push(`/policy/${p.id}`)"
-                :class="`bg-white border-l-4 ${level.colorBorder} shadow-sm border-y border-r border-slate-100 p-4 rounded-r-lg hover:shadow-md cursor-pointer transition-all`"
+                :to="`/policy/${p.id}`"
+                :class="`block bg-white border-l-4 ${level.colorBorder} shadow-sm border-y border-r border-slate-100 p-4 rounded-r-lg hover:shadow-md cursor-pointer transition-all`"
               >
                 <div class="flex items-center gap-2 mb-2">
                   <Avatar :src="politicianOf(p)?.avatarUrl" :name="politicianOf(p)?.name || ''" size="xs" />
                   <span class="text-sm font-bold text-navy-900">{{ politicianOf(p)?.name }}</span>
                 </div>
                 <h4 class="font-bold text-sm text-navy-900 line-clamp-2">{{ p.title }}</h4>
-              </div>
+              </router-link>
             </template>
             <div v-else class="text-slate-400 text-sm italic py-4">{{ level.emptyMsg }}</div>
           </div>
