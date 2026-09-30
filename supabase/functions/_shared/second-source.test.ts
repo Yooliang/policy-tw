@@ -3,7 +3,7 @@ import { sameSiteAsSubmitted } from "./consensus.ts";
 import { scoringHint } from "./task-context.ts";
 import { correctionValue } from "./apply-contribution.ts";
 
-// 2026-09-23 小良哥：驗票儘量要求第二來源（協議 1.27.0）
+// 2026-09-23 維護者：驗票儘量要求第二來源（協議 1.27.0）
 
 Deno.test("evidence_url 跟提交者同網站 → 不算第二來源（www. 與大小寫不影響）", () => {
   const src = ["https://www.cna.com.tw/news/aipl/1.aspx", "https://udn.com/news/story/1"];

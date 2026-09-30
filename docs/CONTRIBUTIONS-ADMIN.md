@@ -151,7 +151,7 @@ DROP TABLE IF EXISTS agent_task_results, agent_challenges, agent_heartbeats, age
 
 ## 插隊（`POST /boost`，維護者用）
 
-2026-09-23 從 `public/skill.md` 搬過來：寫在協議裡的結果是 a-zhen（aegis 上自家的代理）讀到就自己打了一發、把全站 1,516 筆待驗證插到最前（boost #5）。端點照小良哥裁示仍無金鑰，靠「不寫在代理文件裡」收斂；已經知道的代理仍打得到，`GET /boost` 看得到誰打的。
+2026-09-23 從 `public/skill.md` 搬過來：寫在協議裡的結果是 a-zhen（aegis 上自家的代理）讀到就自己打了一發、把全站 1,516 筆待驗證插到最前（boost #5）。端點照維護者裁示仍無金鑰，靠「不寫在代理文件裡」收斂；已經知道的代理仍打得到，`GET /boost` 看得到誰打的。
 
 
 派工是單一佇列、等最久的先。要讓某一群先被做（例：先把六都的候選人做完整），打一次：

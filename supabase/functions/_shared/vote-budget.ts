@@ -171,7 +171,7 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       hit: { key: "unrelated", means: "來源內容與這筆資料無關，或打不開" },
       miss: { key: "related", means: "來源確實講到這筆資料" },
     },
-    // 2026-09-25 小良哥：「查無」只列首頁就交的，近 7 天 125 筆只有 1 筆通過。不另開交件守門，
+    // 2026-09-25 維護者：「查無」只列首頁就交的，近 7 天 125 筆只有 1 筆通過。不另開交件守門，
     // 當成同一次 Jev 多判一件事——網址本身看得出有沒有針對這個人找（首頁、通用公告、分類標籤頁都看不出）。
     {
       key: "search_not_targeted",

@@ -220,7 +220,7 @@ const NEWS_TASK_MAX_URLS = 10;
 type NewsRow = { id: number; source_id: number; url: string; title: string; summary: string | null; published_at: string | null };
 
 /**
- * 新聞初篩（2026-09-29 小良哥核准；同日改成每小時收完當場篩）：news-fetch 收完就呼叫。
+ * 新聞初篩（2026-09-29 維護者核准；同日改成每小時收完當場篩）：news-fetch 收完就呼叫。
  * 只撿 screened_at IS NULL 的，依發布時間。流程與取捨見 migrations/20260929000012_news_screen.sql 檔頭。
  *
  * 兩個呼叫同時進來時不能各開一件任務：先用條件式更新佔位（screened_at 從 NULL 改成現在），搶到的才問；
@@ -605,7 +605,7 @@ Deno.serve(async (req) => {
         } else {
           const { state, questions } = buildSourceSupportAsk(claim, srcUrl, combined);
           (state.page as Record<string, unknown>).urls = urls;
-          // 票數預算的風險題跟來源核對一起問（2026-09-23 小良哥：「可以集中一次問嗎」）：同一份正文、同一次呼叫。
+          // 票數預算的風險題跟來源核對一起問（2026-09-23 維護者：「可以集中一次問嗎」）：同一份正文、同一次呼叫。
           // 題名不衝突（來源題是 field:*、預算題是維度名）；維度題的 instructions 讀的是 state.target。
           const budgetQs = dimensionQuestions(c.contribution_type);
           const withBudget = Object.keys(budgetQs).length > 0;
@@ -743,7 +743,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ---- vote_budget_sweep：影子模式排進排程（小良哥 2026-09-23）----
+    // ---- vote_budget_sweep：影子模式排進排程（維護者 2026-09-23）----
     // 09-21 上線後只有 2 筆手動測試，「先看真實分布再決定」一直沒有分布可看。這裡每 10 分鐘撿 pending 且還沒算過
     // 票數預算的貢獻各問一次，只記錄不套用；累積到幾百筆再對照它們後來的結果（applied／rejected）決定閾值與要不要接上。
     if (action === "vote_budget_sweep") {
@@ -762,7 +762,7 @@ Deno.serve(async (req) => {
       const list = (cands ?? []) as VoteBudgetRow[];
       const startedAt = Date.now();
       const BUDGET_MS = 40_000;
-      // 2026-09-23 小良哥：「十分鐘內有提交的都稽查」。三天內最多一個十分鐘 36 筆，併發 2 在 40 秒內做不完
+      // 2026-09-23 維護者：「十分鐘內有提交的都稽查」。三天內最多一個十分鐘 36 筆，併發 2 在 40 秒內做不完
       const CONCURRENCY = 6;
       let asked = 0, cost = 0;
       const tally: Record<string, number> = {};
@@ -782,7 +782,7 @@ Deno.serve(async (req) => {
       return json({ success: true, shadow_mode: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, tally, failures });
     }
 
-    // ---- roster_batch：引用中選會登記名冊的待驗參選紀錄，逐位比對姓名／縣市／政黨，寫系統票（2026-09-24 小良哥選 B）----
+    // ---- roster_batch：引用中選會登記名冊的待驗參選紀錄，逐位比對姓名／縣市／政黨，寫系統票（2026-09-24 維護者選 B）----
     // 09-20「系統不解析 PDF」的例外，只限 web.cec.gov.tw 的名冊（_shared/cec-roster.ts）。不用 Jev：純比對。
     if (action === "roster_batch") {
       type Cand = { id: string; payload: Record<string, unknown>; source_urls: string[] | null };
@@ -843,7 +843,7 @@ Deno.serve(async (req) => {
       return json({ success: true, balance_usd: Number((credits - usage).toFixed(2)) });
     }
 
-    // ---- submission_followups：補跑——已交的提交補讀一輪說明（2026-09-26 小良哥「先補跑一輪」）----
+    // ---- submission_followups：補跑——已交的提交補讀一輪說明（2026-09-26 維護者「先補跑一輪」）----
     // 新進的提交在票數預算那次呼叫就會問（#269）；這裡給之前就交了的。一筆一次 Jev、只問 followup 這一題。
     // since_hours 預設 168（7 天）、limit 預設 60（上限 200）；dry=1 只回判定、不寫紀錄不開任務。
     if (action === "submission_followups") {
@@ -896,7 +896,7 @@ Deno.serve(async (req) => {
       return json({ success: true, dry, candidates: todo.length, asked, remaining: Math.max(0, todo.length - asked), flagged: found.length, opened_threshold: FOLLOWUP_MIN_PROBABILITY, found });
     }
 
-    // ---- followups：Jev 讀投票備註，範圍外的問題開成任務（2026-09-23 小良哥）----
+    // ---- followups：Jev 讀投票備註，範圍外的問題開成任務（2026-09-23 維護者）----
     // 協議叫驗證者把範圍外的缺陷另提 task_suggestion，實際上多半只寫在 note 裡、沒有下游。
     // dry=1：只回判定結果，不寫紀錄、不開任務（拿來掃一遍現況）。
     if (action === "followups") {
@@ -954,7 +954,7 @@ Deno.serve(async (req) => {
       return json({ success: true, dry, since, scanned: withNote.length, asked, remaining: list.length - cursor, created, cost_usd: Number(cost.toFixed(6)), found, ...(url.searchParams.get("all") === "1" ? { seen } : {}), failures });
     }
 
-    // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 小良哥：代理不該把判斷外包給 Jev）----
+    // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 維護者：代理不該把判斷外包給 Jev）----
     // +2／−2 不再由代理先打 judge 取得：票先是 ±1，這裡（cron 每 5 分鐘）抓那個網址、問 Jev 是否支持這張票的判定，
     // 核得過才把 judge_backed 翻 true → BEFORE 觸發器重算 weight → AFTER 觸發器重算共識。
     if (action === "evidence") {
@@ -1002,7 +1002,7 @@ Deno.serve(async (req) => {
         if (page.kind !== "html" || !hasUsableText(page.text, names)) return await finish(v, "fetch_failed", false);
         if (!nameHit(page.text, names)) return await finish(v, "no_subject", false);
         const { state, questions } = buildSourceSupportAsk(claim, v.evidence_url, focusText(page.text, names));
-        // 備註的範圍外問題跟第二來源一起問（2026-09-23 小良哥：「可以集中一次問嗎」）
+        // 備註的範圍外問題跟第二來源一起問（2026-09-23 維護者：「可以集中一次問嗎」）
         const fu = worthAsking(v) ? buildFollowupAsk(v, c as FollowupContribution) : null;
         const res = await askJev(apiKey, fu ? { ...state, ...fu.state } : state, fu ? { ...questions, ...fu.questions } : questions);
         cost += res.usage.cost; asked++;

@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { dueSources, FETCH_COOLDOWN_MINUTES, type FeedFormat, parseFeed } from "../_shared/news-feed.ts";
 
 /**
- * news-fetch — 把新聞來源（news_sources）逐則收進 news_items（2026-09-29 小良哥核准）。
+ * news-fetch — 把新聞來源（news_sources）逐則收進 news_items（2026-09-29 維護者核准）。
  *
  * 為什麼逐則收：原本的 news_sweep 是每 6 小時一件任務叫代理「讀整份中央社 RSS」，兩週 59 件、
  * 一半的輪次什麼都沒交也沒留紀錄——看過哪些、漏了哪些都答不出來。每則存一列之後，
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     await Promise.allSettled(chunk.map(one));
   }
 
-  // 收完當場初篩（小良哥 2026-09-29：收錄跟 Jev 初篩做在一起，不另排每天兩次）。
+  // 收完當場初篩（維護者 2026-09-29：收錄跟 Jev 初篩做在一起，不另排每天兩次）。
   // 初篩是另一支函式（system-one?action=news_screen，有自己的時間上限與 Jev 成本上限），這裡只觸發、不等它：
   // 收錄本身最多用掉 110 秒，再等初篩會超過 Edge Function 的時間上限。只在這一輪真的抓了來源時才觸發——
   // 外人狂打 news-fetch 時多半全在冷卻中，不會連帶一直叫初篩。初篩只撿還沒判過的，漏叫一次下一小時會補。

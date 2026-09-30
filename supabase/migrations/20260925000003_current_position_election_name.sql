@@ -1,8 +1,8 @@
--- 「現職」存的是選舉名稱，當成缺（2026-09-25，小良哥看到苗博雅頁面寫著「111年直轄市議員選舉」）
+-- 「現職」存的是選舉名稱，當成缺（2026-09-25，維護者看到苗博雅頁面寫著「111年直轄市議員選舉」）
 --
 -- 879 位人物的 current_position 是早期批次匯入填的選舉名稱（「111年直轄市議員選舉」「111年縣市長選舉」…），
 -- 不是職稱。這一欄非空，補基本資料任務就以為有了，永遠不會派人去補。
--- 不改資料（小良哥：改流程，不直接動資料）：讓 profile_gap 把「選舉名稱」當成缺，代理照流程用 politician 型別補上真正的現職。
+-- 不改資料（維護者：改流程，不直接動資料）：讓 profile_gap 把「選舉名稱」當成缺，代理照流程用 politician 型別補上真正的現職。
 -- 網頁也不再顯示這種值（lib/participation-label.ts 的 isElectionName），交件端擋新的（contribution-schema）。
 -- 函式本體取自線上的 pg_get_functiondef，只把三處 c.current_position IS NULL 換成 current_position_missing(...)。
 

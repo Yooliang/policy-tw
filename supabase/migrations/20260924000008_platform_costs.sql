@@ -1,4 +1,4 @@
--- 捐款頁的運轉成本（小良哥 2026-09-24，W-Policy 轉：「不用太顯眼，一個基本的資料就好」）
+-- 捐款頁的運轉成本（維護者 2026-09-24，W-Policy 轉：「不用太顯眼，一個基本的資料就好」）
 --
 -- AI 判定（Jev）的帳戶餘額要帶金鑰才查得到，所以由後端排程每 15 分鐘查一次存進 platform_costs，頁面只讀這張表。
 -- 餘額用 OpenRouter /credits 的 total_credits − total_usage（不是 /key 的 limit_remaining，那是花費上限，W-Policy 踩過）。

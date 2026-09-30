@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { TASK_GUIDANCE } from "./task-guidance.ts";
 
-// 2026-09-23 小良哥：賴清德 2024 當選、2026 宣布普發一萬——不是競選承諾，是任內施政承諾，也要追蹤（協議 1.28.0）
+// 2026-09-23 維護者：賴清德 2024 當選、2026 宣布普發一萬——不是競選承諾，是任內施政承諾，也要追蹤（協議 1.28.0）
 
 function policy(extra: Record<string, unknown>) {
   return validateContributionRequest({

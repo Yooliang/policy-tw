@@ -1,12 +1,12 @@
 """
 把政黨黨徽抓下來放進 public/party/，並產生 lib/party-emblems.ts 的對照表。
 
-來源（2026-09-16 小良哥指定）：
+來源（2026-09-16 維護者指定）：
   1. 內政部政黨資訊網 https://party.moi.gov.tw —— 官方、涵蓋 395 個備案政黨，
      但黨徽是嵌在頁面裡的 JPEG（約 4KB），不是向量圖。
   2. 維基共享資源的 SVG —— 只有幾個大黨有，畫質好、檔案小，優先用。
 
-輸出一律 50×50（小良哥指定）：SVG 原樣複製（本來就可縮放），JPEG 轉成 50×50 PNG。
+輸出一律 50×50（維護者指定）：SVG 原樣複製（本來就可縮放），JPEG 轉成 50×50 PNG。
 重跑這支腳本就能更新；平常不需要跑，圖檔直接進 repo。
 """
 import base64
@@ -40,7 +40,7 @@ SVG_SOURCES = {
     "台灣團結聯盟": "https://commons.wikimedia.org/wiki/Special:FilePath/Logo%20of%20former%20Taiwan%20Solidarity%20Union.svg",
     "中國國民黨": "https://upload.wikimedia.org/wikipedia/commons/a/a1/Emblem_of_the_Kuomintang.svg",
     # 民進黨不列在這裡：維基那張 SVG 是 3000×1000 的橫式標準字（「民主進步黨」五個字），
-    # 縮到 24 像素的圓圈只剩一團看不懂的東西（2026-09-17 小良哥一眼看出來）。
+    # 縮到 24 像素的圓圈只剩一團看不懂的東西（2026-09-17 維護者一眼看出來）。
     # 內政部登記的那張是綠十字加台灣島，才是黨徽。
     "台灣民眾黨": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Emblem_of_Taiwan_People%27s_Party_2019.svg",
     "新黨": "https://upload.wikimedia.org/wikipedia/commons/0/01/Np_logo.svg",

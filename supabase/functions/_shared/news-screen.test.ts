@@ -169,7 +169,7 @@ Deno.test("新聞初篩門檻：0.84 的新承諾要派出去（不能沿用全�
   assertEquals(verdictOf({ choice: "n:11111111", probabilities: { "n:11111111": 0.84 } }, keys, NEWS_MIN_PROBABILITY).result, "new_pledge");
 });
 
-// 2026-09-29 小良哥：資源不多時要能放慢。只有「初篩→開任務」這一段可調，收錄照常每小時
+// 2026-09-29 維護者：資源不多時要能放慢。只有「初篩→開任務」這一段可調，收錄照常每小時
 import { isScreenDue, remainingCap, taipeiDayStart } from "./news-screen.ts";
 Deno.test("可調設定：幾小時篩一次（留 10 分鐘寬限）、台灣日界、每日上限", () => {
   const now = new Date("2026-09-29T12:05:00Z");

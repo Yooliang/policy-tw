@@ -461,7 +461,7 @@ async function copyCitation() {
         <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
       </template>
     </Hero>
-    <!-- 麵包屑放在 hero 下方（小良哥 2026-10-01） -->
+    <!-- 麵包屑放在 hero 下方（維護者 2026-10-01） -->
     <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

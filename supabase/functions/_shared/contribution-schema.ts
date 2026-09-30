@@ -162,7 +162,7 @@ const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{
 // 填錯會讓舊屆的政見看起來像這次剛提出的。
 /**
  * status 不是競選承諾（Proposed 等）的，是「任內施政承諾」：這一任當選之後才宣布（例：2024 當選的總統 2026 年宣布普發一萬），
- * 提出日期本來就晚於屆別年份，不能擋（2026-09-23 小良哥：任內新提出的也要追蹤；原本這條把它們全擋掉，代理只好硬塞成競選承諾）。
+ * 提出日期本來就晚於屆別年份，不能擋（2026-09-23 維護者：任內新提出的也要追蹤；原本這條把它們全擋掉，代理只好硬塞成競選承諾）。
  */
 function isCampaignStatus(status: unknown): boolean {
   return status === undefined || status === null || status === "Campaign Pledge";

@@ -38,7 +38,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: pnpm build
-      # 建一次就好（2026-09-24 小良哥）：部署 job 直接拿這份，不再自己重建一次
+      # 建一次就好（2026-09-24 維護者）：部署 job 直接拿這份，不再自己重建一次
       - name: 保留建置結果給部署用
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -147,7 +147,7 @@ jobs:
   # revert 這個 commit 就會自動處理。真的要退版：先讓 Hosting／函式退回舊 commit，
   # 確認函式不再依賴新 schema 之後，才動 db。
   #
-  # environment: production —— 這是小良哥的裁示（2026-09-21，見 docs/DECISIONS.md）：
+  # environment: production —— 這是維護者的裁示（2026-09-21，見 docs/DECISIONS.md）：
   # 自動部署可以做，但「誰能讀到 Supabase 的 access token／DB 密碼」要收斂到
   # 「誰能把東西合進 main」，不能是「誰能對這個 repo 開一個 PR 分支」。單靠上面的
   # `if: github.ref == 'refs/heads/main'` 不夠——那只決定這個 job 跑不跑，repo 層級
@@ -162,7 +162,7 @@ jobs:
   # repo 層級的 Settings → Secrets and variables → Actions（加在那裡的話任何 job
   # 不管有沒有宣告 environment 都讀得到,等於沒設）。這個 environment 本身也要先建：
   # Deployment branches and tags 選 Selected branches and tags、只加 `main`；
-  # 不要加 required reviewers（小良哥要的是全程機器裁定，不是人工核准關卡）。
+  # 不要加 required reviewers（維護者要的是全程機器裁定，不是人工核准關卡）。
   # 2026-09-24 起不再一律等 Hosting：只有這次改了 public/skill.md 才需要「文件先上線、端點後上線」，
   # 那種情況由下面「等協議文件上線」那一步輪詢線上版號；沒改協議就跟 Hosting 同時部署。
   deploy-functions:

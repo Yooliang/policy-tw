@@ -5,13 +5,13 @@ import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
 import { taskTypeLabel } from '../lib/task-labels'
 
-// 派工佇列：全站接下來 1000 筆會被領走的順序（2026-09-23 小良哥：一行一筆、li 排下去、不用標題）。
+// 派工佇列：全站接下來 1000 筆會被領走的順序（2026-09-23 維護者：一行一筆、li 排下去、不用標題）。
 // 資料來自 queue_preview()（migration 20260923000001），跟 /next 同一把尺；不含每個代理各自的排除。
 type Row = { pos: number; kind: 'task' | 'verify'; task_id: string; task_type: string; subject: string | null; region: string | null; queue_at: string }
 
 const rows = ref<Row[] | null>(null)
 const failed = ref(false)
-// 誰領走了什麼（2026-09-24 小良哥：「a-zhen 領走的應該看的到吧」）：最近 30 分鐘的任務認領與驗證派發，只有代號、沒有 IP
+// 誰領走了什麼（2026-09-24 維護者：「a-zhen 領走的應該看的到吧」）：最近 30 分鐘的任務認領與驗證派發，只有代號、沒有 IP
 type Dispatch = { kind: 'task' | 'verify'; task_id: string; agent_name: string; dispatched_at: string; active_until: string }
 const recent = ref<Dispatch[]>([])
 const holderOf = computed(() => {

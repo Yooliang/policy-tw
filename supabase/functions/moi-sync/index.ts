@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { listUrl, MOI_KINDS, MOI_PAGE_SIZE, parseMoiList } from "../_shared/moi-officials.ts";
 
 /**
- * 內政部地方公職人員現職名單 → moi_officials（2026-09-24 小良哥：「這裡有一大堆現職的可以抓取」）。
+ * 內政部地方公職人員現職名單 → moi_officials（2026-09-24 維護者：「這裡有一大堆現職的可以抓取」）。
  * 排程每天呼叫（?kinds=KND0001,KND0002…，分批避免逾時）。不驗 JWT 讓 pg_cron 打得到，
  * 所以同一種職務 6 小時內抓過就不再抓：外人重複打也只會空轉，不會去打內政部或寫資料庫。
  */

@@ -175,7 +175,7 @@ for (const p of regionPages) {
 const politicianSample = samples.find((s) => s.route.startsWith('/politician/'))
 if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 initialState 過大：${politicianSample.stateKb} KB`)
 
-// 5. sitemap：按內容拆三份，sitemap.xml 是索引（2026-09-23 小良哥：Search Console 才看得出哪一類沒被收錄）
+// 5. sitemap：按內容拆三份，sitemap.xml 是索引（2026-09-23 維護者：Search Console 才看得出哪一類沒被收錄）
 //    提交的網址不變，一樣是 /sitemap.xml
 const lastmod = taipeiDate()
 const SITEMAP_GROUPS = [

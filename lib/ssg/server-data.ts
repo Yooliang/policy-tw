@@ -177,7 +177,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     : full.politicians
 
   // 政治人物頁、政見頁由正見.tw 的 Worker 在邊緣現場渲染（cloudflare/ssr-worker.js 的 SSR_ROUTES），
-  // 預渲染不再產生（2026-09-24 小良哥：建置從約 4 分鐘降下來）。清單照樣交給 postbuild 產網站地圖。
+  // 預渲染不再產生（2026-09-24 維護者：建置從約 4 分鐘降下來）。清單照樣交給 postbuild 產網站地圖。
   // 要退回全部預渲染：SSG_EDGE_PAGES=prerender。
   const edgePaths = [
     ...politicians.map((pl) => `/politician/${pl.id}`),
