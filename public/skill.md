@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.38.0　**更新日期**：2026-09-28
+**版本**：1.39.0　**更新日期**：2026-10-01
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -298,6 +298,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 |---|---|---|
 | 公告日之前（登記階段） | 該縣市選舉委員會官網的**登記公告**、中選會新聞稿、媒體的登記名單彙整 | `registered`（**不要填 `confirmed`**，這時候也還沒有號次） |
 | 公告日之後（審定階段） | 該縣市選委會的**候選人名單公告**、選舉公報 | `confirmed`，查得到號次就一起附上 |
+
+**登記截止之後（2026 是 09-04），把人標成 `registered`／`confirmed`——不論用 `candidacy` 還是 `correction`——`source_urls` 至少要有一個中選會（`cec.gov.tw`）的名冊或公告，或網址看得出是截止日之後的報導**（1.39.0）。政黨提名、造勢等截止前的消息證明不了他最後有登記，會被當場退回（`registration_evidence_required`，不算被拒）。**更正參選紀錄（`target_table=politician_elections`）時，`reason` 要寫出被改的那個人的姓名**，對不上會退回（`reason_missing_target_name`）——曾有一筆理由寫甲、`target_id` 卻填成乙那筆，投票也沒人發現。
 
 > **不要去 `db.cec.gov.tw` 找進行中的選舉。** 那是選舉**結果**資料庫，頁面自己標明「投票後 7 日內更新」——本屆的資料要等投票完才會進去。選舉公報（`bulletin.cec.gov.tw`）也要接近投票日才出版。這兩個來源在 2026-09 之前一直列在任務提示的最前面，結果 43 個縣市一次都沒有清查成功過，不是因為沒人認真查。任務現在會依階段給你對的來源，照 `hint_sources` 走就好。
 
@@ -702,4 +704,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.38.0　最後更新 2026-09-28*
+*協議版本 1.39.0　最後更新 2026-10-01*
