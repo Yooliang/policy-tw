@@ -412,26 +412,27 @@ usePageHead({
                   <div v-for="group in campaignGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-3">{{ group.label }}</h3>
                     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                      <table class="w-full text-sm">
+                      <!-- 手機上表格保持一定寬度、外框左右捲動（維護者 2026-10-01），不要把欄位擠成一字寬 -->
+                      <table class="w-full min-w-[40rem] text-sm">
                         <thead class="bg-slate-50 text-slate-500 text-xs">
                           <tr>
-                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2 w-10">#</th>
-                            <th class="text-left font-semibold px-3 py-2">政見</th>
-                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2 w-32">類別</th>
+                            <th class="text-left font-semibold px-3 py-2 w-10">#</th>
+                            <th class="text-left font-semibold px-3 py-2 min-w-[14rem]">政見</th>
+                            <th class="text-left font-semibold px-3 py-2 w-32">類別</th>
                             <th class="text-left font-semibold px-3 py-2 w-28">提出日期</th>
-                            <th class="hidden sm:table-cell text-left font-semibold px-3 py-2">標籤</th>
+                            <th class="text-left font-semibold px-3 py-2">標籤</th>
                           </tr>
                         </thead>
                         <tbody>
                           <tr v-for="(policy, i) in group.policies" :key="policy.id" class="border-t border-slate-100 hover:bg-violet-50/40 cursor-pointer" @click="router.push(`/policy/${policy.id}`)">
-                            <td class="hidden sm:table-cell px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
+                            <td class="px-3 py-2 text-slate-400 tabular-nums">{{ i + 1 }}</td>
                             <td class="px-3 py-2">
                               <router-link :to="`/policy/${policy.id}`" class="block font-bold text-navy-900" @click.stop>{{ policy.title }}</router-link>
                               <div class="text-slate-500 text-xs line-clamp-2">{{ policy.description }}</div>
                             </td>
-                            <td class="hidden sm:table-cell px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
+                            <td class="px-3 py-2 text-slate-600 whitespace-nowrap">{{ policy.category }}</td>
                             <td class="px-3 py-2 text-slate-500 whitespace-nowrap tabular-nums">{{ policy.proposedDate ?? '—' }}</td>
-                            <td class="hidden sm:table-cell px-3 py-2 text-slate-500 text-xs">{{ (policy.tags ?? []).join('、') }}</td>
+                            <td class="px-3 py-2 text-slate-500 text-xs">{{ (policy.tags ?? []).join('、') }}</td>
                           </tr>
                         </tbody>
                       </table>
