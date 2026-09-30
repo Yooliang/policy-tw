@@ -7,7 +7,6 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
 import { Search, GitBranch, Database, Milestone, ArrowRight } from 'lucide-vue-next'
 import PolicyViewNav from '../components/PolicyViewNav.vue'
-import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
@@ -15,7 +14,6 @@ import { policyMatchesRegion } from '../lib/policy-region'
 import { policySortDate, policyYear } from '../lib/policy-date'
 
 
-const router = useRouter()
 const { policies, politicians, categories, elections, ensurePolicies } = useSupabase()
 const { globalRegion } = useGlobalState()
 const searchTerm = ref('')
@@ -169,10 +167,10 @@ onMounted(() => { ensurePolicies() })
           <p class="font-bold">沒有找到符合條件的分析項目。</p>
           <p class="text-sm mt-1">試試其他縣市或分類。</p>
         </div>
-        <div
+        <router-link
           v-for="relayCase in relayCases"
           :key="relayCase.id"
-          @click="router.push(`/analysis/${relayCase.policies[relayCase.policies.length - 1].id}`)"
+          :to="`/analysis/${relayCase.policies[relayCase.policies.length - 1].id}`"
           class="group bg-white rounded-[32px] border border-slate-200 shadow-sm hover:shadow-2xl hover:border-blue-400 transition-all duration-500 cursor-pointer overflow-hidden flex flex-col"
         >
           <div class="p-8 flex-1">
@@ -217,7 +215,7 @@ onMounted(() => { ensurePolicies() })
             <span class="text-xs font-black text-slate-500 group-hover:text-white uppercase tracking-widest">進入深度審計詳情 Deep Audit</span>
             <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-navy-900 shadow-md group-hover:translate-x-1 transition-all"><ArrowRight :size="18" /></div>
           </div>
-        </div>
+        </router-link>
       </div>
     </div>
   </div>

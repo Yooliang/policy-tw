@@ -4,7 +4,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
 import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check, LayoutGrid, List } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import Avatar from '../../components/Avatar.vue'
 import { getAvatarUrl } from '../../composables/useAvatar'
 
@@ -29,7 +28,6 @@ const gridClasses = computed(() => {
   return 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
 })
 
-const router = useRouter()
 const { policies } = useSupabase()
 const collapsed = ref(false)
 
@@ -161,8 +159,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
       <div
         v-for="politician in politicians"
         :key="politician.id"
-        @click="router.push(`/politician/${politician.id}`)"
-        class="group bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
+        class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
           <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" />
@@ -180,7 +177,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         </div>
         <div class="p-3 text-left">
           <h4 class="text-base font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
-            <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
+            <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
           </h4>
           <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
           <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
@@ -195,7 +192,6 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
       <div
         v-for="politician in politicians"
         :key="politician.id"
-        @click="router.push(`/politician/${politician.id}`)"
         class="group relative bg-white p-6 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer flex items-center gap-6"
       >
         <div class="relative shrink-0">
@@ -209,7 +205,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
               <div class="flex items-center gap-2">
                 <!-- 真的 <a>：預渲染 HTML 才有選舉頁 → 候選人頁的連結給爬蟲走（卡片的 @click 是給人用的）-->
                 <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
-                  <router-link :to="`/politician/${politician.id}`" @click.stop>{{ politician.name }}</router-link>
+                  <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
                 </h3>
                 <!-- 有號次（名單公告、抽籤後）就顯示「N號」取代狀態標（2026-09-25 小良哥）-->
                 <span

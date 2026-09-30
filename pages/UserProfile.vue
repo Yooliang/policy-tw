@@ -405,7 +405,6 @@ usePageHead({ title: '個人頁面', noindex: true })
                   v-if="politicians.find(c => c.id === policy.politicianId)"
                   :policy="policy"
                   :politician="politicians.find(c => c.id === policy.politicianId)!"
-                  :on-click="() => router.push(`/policy/${policy.id}`)"
                 />
               </template>
             </div>

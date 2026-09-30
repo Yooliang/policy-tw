@@ -371,10 +371,10 @@ async function copyCitation() {
       <template #icon><FileText :size="400" class="text-blue-500" /></template>
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
-          <div class="relative cursor-pointer" @click="router.push(`/politician/${politician.id}`)">
+          <router-link :to="`/politician/${politician.id}`" class="relative block cursor-pointer" :aria-label="politician.name">
             <Avatar :src="politician.avatarUrl" :name="politician.name" class="w-28 h-28 md:w-36 md:h-36 border-4 border-white shadow-xl" />
             <PartyBadge :party="politician.party" :size="8" class="absolute bottom-2 right-2 shadow-md" />
-          </div>
+          </router-link>
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-3">
               <StatusBadge :status="policy.status" />
@@ -397,9 +397,9 @@ async function copyCitation() {
               </span>
               <span v-if="policy.proposedDate" class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
               <span class="flex items-center gap-1" title="狀態是這一天的進度；之後的變化看下方時間軸"><Activity :size="16" /> 狀態截至：{{ policy.lastUpdated }}</span>
-              <span class="flex items-center gap-1 cursor-pointer hover:text-white" @click="router.push(`/politician/${politician.id}`)">
+              <router-link :to="`/politician/${politician.id}`" class="flex items-center gap-1 cursor-pointer hover:text-white">
                 {{ politician.name }} · {{ politician.position }}
-              </span>
+              </router-link>
             </div>
           </div>
         </div>
@@ -458,11 +458,11 @@ async function copyCitation() {
               <div class="relative">
                 <div class="absolute top-8 left-8 right-8 h-1 bg-slate-200 -z-10"></div>
                 <div class="flex flex-col md:flex-row justify-between items-start gap-6 md:gap-0">
-                  <div
+                  <router-link
                     v-for="(p, index) in policyChain"
                     :key="p!.id"
+                    :to="`/policy/${p!.id}`"
                     class="flex flex-col items-center flex-1 relative cursor-pointer group"
-                    @click="router.push(`/policy/${p!.id}`)"
                   >
                     <div :class="`w-16 h-16 rounded-full border-4 flex items-center justify-center bg-white transition-all z-10
                       ${p!.id === policy?.id ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
@@ -481,7 +481,7 @@ async function copyCitation() {
                         <ArrowRightCircle :size="20" class="text-slate-400 bg-white rounded-full" />
                       </div>
                     </div>
-                  </div>
+                  </router-link>
                 </div>
               </div>
             </div>
@@ -705,13 +705,13 @@ async function copyCitation() {
         <!-- Sidebar -->
         <div class="lg:col-span-1 space-y-6">
           <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24">
-            <div class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors" @click="router.push(`/politician/${politician.id}`)">
+            <router-link :to="`/politician/${politician.id}`" class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors">
               <Avatar :src="politician.avatarUrl" :name="politician.name" size="lg" class="border-2 border-slate-100" />
               <div>
                 <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ politician.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
                 <p class="text-sm text-slate-500">{{ politician.position }}</p>
               </div>
-            </div>
+            </router-link>
 
             <div class="space-y-4">
               <div v-if="!isCampaign">
@@ -768,11 +768,11 @@ async function copyCitation() {
               <div v-if="otherPolicies.length > 0" class="pt-6 mt-2 border-t border-slate-100">
                 <h4 class="text-sm font-bold text-navy-900 mb-3">該候選人的其他政見</h4>
                 <div class="space-y-3">
-                  <div
+                  <router-link
                     v-for="p in otherPolicies"
                     :key="p.id"
-                    @click="router.push(`/policy/${p.id}`)"
-                    class="group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
+                    :to="`/policy/${p.id}`"
+                    class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
                   >
                     <div class="flex justify-between items-start mb-1">
                       <span :class="`text-xs px-1.5 py-0.5 rounded ${p.status === 'Campaign Pledge' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
@@ -781,14 +781,14 @@ async function copyCitation() {
                       <span class="text-[10px] text-slate-400">{{ p.category }}</span>
                     </div>
                     <h5 class="text-sm font-medium text-navy-900 group-hover:text-blue-600 line-clamp-1">{{ p.title }}</h5>
-                  </div>
-                  <button
+                  </router-link>
+                  <router-link
                     v-if="otherPolicies.length >= 3"
-                    @click="router.push(`/politician/${politician.id}`)"
+                    :to="`/politician/${politician.id}`"
                     class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
                   >
                     查看更多 <ChevronRight :size="12" />
-                  </button>
+                  </router-link>
                 </div>
               </div>
             </div>

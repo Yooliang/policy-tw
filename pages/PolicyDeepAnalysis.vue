@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shortUrlsIn } from '../lib/url'
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -371,12 +371,13 @@ onMounted(() => { ensurePolicies() })
                 <h5 class="font-black text-navy-900 text-base mb-3">{{ level.role }}</h5>
 
                 <div v-if="isLevelActiveForChain(level.type, idx)" class="space-y-3">
-                  <div
+                  <component
+                    :is="isPoliticianSelected(c.id) ? 'div' : RouterLink"
                     v-for="c in getPoliticiansForLevel(level.type, idx)"
                     :key="c.id"
+                    :to="isPoliticianSelected(c.id) ? undefined : `/analysis/${relayChain.find(p => p.politicianId === c.id)?.id}`"
                     :class="`flex items-center gap-3 p-2 rounded-xl transition-all duration-300
                       ${isPoliticianSelected(c.id) ? 'bg-blue-50 ring-2 ring-blue-500' : 'opacity-40 grayscale hover:opacity-70 hover:grayscale-0 cursor-pointer'}`"
-                    @click="!isPoliticianSelected(c.id) && router.push(`/analysis/${relayChain.find(p => p.politicianId === c.id)?.id}`)"
                   >
                     <Avatar
                       :src="c.avatarUrl"
@@ -388,7 +389,7 @@ onMounted(() => { ensurePolicies() })
                       <div :class="`text-sm font-black ${isPoliticianSelected(c.id) ? 'text-navy-900' : 'text-slate-400'}`">{{ c.name }}</div>
                       <div class="text-[11px] text-slate-400 font-bold">{{ c.position }}</div>
                     </div>
-                  </div>
+                  </component>
                 </div>
               </div>
             </div>

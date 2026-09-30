@@ -12,10 +12,9 @@ import Hero from '../components/Hero.vue'
 import AiContributeBanner from '../components/AiContributeBanner.vue'
 import { ArrowRight, Users, FileCheck, Vote, Star, CheckCircle2, Activity } from 'lucide-vue-next'
 
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 
-const router = useRouter()
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
 
 // 我的關注改走 useCheckpoints（2026-09-17）：登入後會與帳號同步，未登入照舊只存瀏覽器
@@ -269,7 +268,6 @@ usePageHead({
               v-if="politicians.find(pol => pol.id === p.politicianId)"
               :policy="p"
               :politician="politicians.find(pol => pol.id === p.politicianId)!"
-              :on-click="() => router.push(`/policy/${p.id}`)"
               />
           </template>
           </div>
@@ -293,7 +291,6 @@ usePageHead({
               v-if="politicians.find(c => c.id === policy.politicianId)"
               :policy="policy"
               :politician="politicians.find(c => c.id === policy.politicianId)!"
-              :on-click="() => router.push(`/policy/${policy.id}`)"
             />
           </template>
         </div>

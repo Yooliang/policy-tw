@@ -12,7 +12,6 @@ import { useSupabase } from '../composables/useSupabase'
 const props = withDefaults(defineProps<{
   policy: Policy
   politician: Politician
-  onClick?: () => void
   /**
    * 卡片上要不要印政治人物。
    * 2026-09-16 看人物頁：「裡面的卡片再一直重覆…就沒意義了吧」——
@@ -85,8 +84,10 @@ const toggleCheckpoint = (e: Event) => {
 <template>
   <div
     :class="`bg-white rounded-2xl border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden group relative flex flex-col h-full ${isCampaign ? 'border-violet-100 hover:border-violet-300' : 'border-slate-200 hover:border-blue-300'}`"
-    @click="onClick?.()"
   >
+    <!-- 整張卡可點靠標題那個 <router-link> 的 ::after 蓋滿整張卡（stretched link，2026-09-30）：
+         原本是外層 div @click="router.push"，預渲染出來的 HTML 沒有 <a href>，
+         Search Console 整站內部連結只剩 28 個。星星按鈕墊 relative z-10 浮在上面，照樣按得到。 -->
     <!-- Checkpoint Star -->
     <!-- 小卡下面沒有期待度長條，容器的底部內距與下面那行的 mb 會疊成一片空白 -->
     <div :class="['px-6 pt-6 flex-1 flex flex-col', isPastCampaign ? 'pb-2' : 'pb-6']">
@@ -105,12 +106,12 @@ const toggleCheckpoint = (e: Event) => {
       <!-- 收藏星星跟標題同一行：原本浮在右上角、還要 hover 才出現，跟狀態標籤也會疊到 -->
       <div class="flex items-start gap-2 mb-3">
         <h3 :class="`flex-1 text-lg font-black leading-tight transition-colors ${isCampaign ? 'text-violet-900 group-hover:text-violet-700' : 'text-navy-900 group-hover:text-blue-600'}`">
-          {{ policy.title }}
+          <router-link :to="`/policy/${policy.id}`" class="after:absolute after:inset-0 after:content-['']">{{ policy.title }}</router-link>
         </h3>
         <button
           v-if="!isPastCampaign"
           @click.stop="toggleCheckpoint"
-          :class="`shrink-0 -mt-1 p-1.5 rounded-full transition-colors ${isCheckpointed ? 'text-amber-500 hover:text-amber-600' : 'text-slate-300 hover:text-amber-400'}`"
+          :class="`relative z-10 shrink-0 -mt-1 p-1.5 rounded-full transition-colors ${isCheckpointed ? 'text-amber-500 hover:text-amber-600' : 'text-slate-300 hover:text-amber-400'}`"
           :title="starTitle"
           :aria-pressed="isCheckpointed"
         >
