@@ -208,7 +208,21 @@ export function effectiveOrRequired(row: { contribution_type: string; payload: u
 }
 
 /** supported → 門檻 −1，但最少 1；not_supported → 門檻 +1（多要一張人票，不算反對） */
-export function effectiveRequiredAgree(required: number, systemVote: SystemVote): number {
+/**
+ * 名冊逐位吻合（維護者 2026-10-01，調整 09-19「系統票 3+1」）：系統逐位比對中選會登記名冊（model 以這個前綴開頭，
+ * 見 cec-roster.ts 的 ROSTER_BATCH_MODEL）判 supported——姓名、縣市、政黨都對上——目標直接降到 1，一張普通同意就過，
+ * 而且參選紀錄不再要求兩台機器（系統逐位核過名冊就是另一雙眼睛）。反對照舊能擋（+1−1=0 不到 1）。
+ * 原因：名冊本身就是中選會，驗證者找不到不同網域的第二來源拿 +2，3−1=2 實際上要兩台機器各投一票（09-30 實測 89 筆、84 筆 0 票）。
+ * 一般 Jev 的 supported 維持 −1。SQL 版：contribution_roster_matched()／contribution_effective_agree()／contribution_apply_consensus()。
+ */
+export const ROSTER_MATCH_MODEL_PREFIX = "policy-tw/roster-batch";
+export const ROSTER_MATCHED_TARGET = 1;
+export function isRosterMatchModel(model: string | null | undefined): boolean {
+  return typeof model === "string" && model.startsWith(ROSTER_MATCH_MODEL_PREFIX);
+}
+/** rosterMatched：最新那張有效系統票是名冊逐位核對、而且 supported */
+export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false): number {
+  if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET);
   if (systemVote === "supported") return Math.max(1, required - 1);
   if (systemVote === "not_supported") return required + 1;
   return required;
@@ -396,11 +410,12 @@ export function rejectFloor(contributionType: string): number {
 }
 
 /** 總分 → 狀態。只在 pending／verified／disputed 之間轉；其餘狀態由維護者或系統決定。 */
-export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string }): string {
+export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string; rosterMatched?: boolean }): string {
   const { score, target, distinctIps, contributionType, current } = input;
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
   if (score <= -rejectFloor(contributionType)) return "rejected";
-  const needTwoIps = (SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType);
+  // 名冊逐位吻合的免兩台機器（2026-10-01）：系統已逐位核過官方名冊，目標 1 若還要兩台機器就等於沒降
+  const needTwoIps = (SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType) && !input.rosterMatched;
   if (score >= target && (!needTwoIps || distinctIps >= 2)) return "verified";
   return "pending";
 }

@@ -327,7 +327,12 @@ Deno.serve(async (req) => {
           const rosterState = typeof sv.model === "string" && sv.model.startsWith("policy-tw/roster-batch") ? (sv.state ?? {}) as Record<string, unknown> : null;
           if (rosterState) {
             (verifyCurrent as Record<string, unknown>).roster_check = sv.choice === "supported"
-              ? { result: "系統已逐位核對中選會名冊：姓名、縣市、政黨都對得上。", pdf_url: rosterState.pdf_url }
+              ? {
+                result: "系統已逐位核對中選會名冊：姓名、縣市、政黨都對得上。",
+                // 2026-10-01：名冊逐位吻合的目標分數是 1，一張同意就通過、不必兩台機器——所以這一票要真的對過名冊那一列
+                target_note: "名冊逐位吻合的參選紀錄目標分數是 1：你核對名冊無誤投 agree 就會通過。請打開名冊確認這一列的姓名、縣市、政黨、選舉別，note 寫出對到哪一列；發現任何一欄不對就投 disagree。",
+                pdf_url: rosterState.pdf_url,
+              }
               : {
                 conflict: `系統已逐位核對中選會名冊：${String(rosterState.reason ?? "有欄位對不上")}。`,
                 question: "請打開名冊判斷哪一個才對。名冊為準、本筆寫錯 → 投 disagree，evidence_url 放名冊網址、note 寫名冊上那一列；確定本筆才對（名冊有誤或系統讀錯）→ 投 agree 並寫明理由。「這個人確實在名冊上」不是投同意的理由——問題是本筆寫的欄位對不對。",
