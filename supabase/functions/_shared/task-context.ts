@@ -532,6 +532,37 @@ const SOURCE_TASK_TYPES = new Set([
   "roster_check",
 ]);
 
+/**
+ * 驗證項標明「這票通過後會改到誰」（維護者 2026-10-01）：一筆 correction 的 reason 寫陳瑩、target_id 卻是陳見賢那筆，
+ * 驗證者核了陳瑩、投同意，陳見賢被改成已登記。只給 target_id 看不出改的是誰，所以把人名攤在最上層。
+ */
+export const TARGET_SUMMARY_HINT = "先確認這個人就是交件理由與來源講的那個人；不是就投 disagree（note 寫「target_id 指的是另一個人」）。";
+
+const fmtValue = (v: unknown): string => (v === null || v === undefined || v === "" ? "（空白）" : typeof v === "object" ? JSON.stringify(v) : String(v));
+
+/** 純函式：correction（politicians／politician_elections）的「這筆通過後會改：…」；對象找不到或其他表回 null */
+export function correctionTargetSummary(
+  targetTable: unknown,
+  target: Obj | null | undefined,
+  person: { name?: string | null; region?: string | null } | null | undefined,
+  changes: ReadonlyArray<{ field: string; db_current: unknown; correct_value: unknown }>,
+): string | null {
+  if (!target || (targetTable !== "politicians" && targetTable !== "politician_elections")) return null;
+  const who = targetTable === "politicians" ? { name: target.name, region: target.region } : (person ?? {});
+  const name = typeof who.name === "string" && who.name.trim() ? who.name.trim() : "（查不到姓名）";
+  const parts = [typeof who.region === "string" && who.region.trim() ? who.region.trim() : null];
+  if (targetTable === "politician_elections") {
+    const election = [target.election_id, target.election_type].filter((x) => x !== null && x !== undefined && x !== "").join(" ");
+    if (election) parts.push(election);
+  }
+  const ctx = parts.filter(Boolean).join("，");
+  const diff = changes.filter((c) => c.field).map((c) => {
+    const cur = fmtValue(c.db_current);
+    return `${c.field}${cur.startsWith("（") ? "" : " "}${cur} → ${fmtValue(c.correct_value)}`;
+  }).join("；");
+  return `這筆通過後會改：${name}${ctx ? `（${ctx}）` : ""}的 ${diff || "（沒有欄位）"}。${TARGET_SUMMARY_HINT}`;
+}
+
 export interface VerifyContextData {
   politicians?: Obj[];
   elections?: Obj[];
@@ -543,6 +574,8 @@ export interface VerifyContextData {
   policy?: Obj | null;
   tracking_logs?: Obj[];
   target?: Obj | null;
+  /** correction 對 politician_elections：那筆參選紀錄是誰的（join politicians 出來的 name／region） */
+  target_politician?: { name?: string | null; region?: string | null } | null;
   /** merge_politician：跟 duplicate_politician 任務同一份 current（兩筆全欄、參選、政見、Jev 判定） */
   pair_current?: Obj | null;
   /** adjudication：跟 adjudicate 任務同一份 current（原貢獻＋正反票） */
@@ -733,7 +766,9 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       // 多欄位：每個 change 都附資料庫現值；第一個欄位另放在 field／current_value 維持相容
       const { changes } = normalizeCorrection(payload);
       const withCurrent = changes.map((c) => ({ field: c.field, claimed_current: c.current_value ?? null, db_current: data.target ? (data.target[c.field] ?? null) : null, correct_value: c.correct_value }));
+      const summary = correctionTargetSummary(payload.target_table, data.target, data.target_politician, withCurrent);
       return {
+        ...(summary ? { target_summary: summary } : {}),
         target_table: payload.target_table ?? null,
         target_id: payload.target_id ?? null,
         field: withCurrent[0]?.field ?? "",
@@ -898,8 +933,15 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     const table = typeof payload.target_table === "string" ? payload.target_table : null;
     const id = payload.target_id;
     if (table && id !== undefined && ["politicians", "politician_elections", "policies"].includes(table)) {
-      const { data: t } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
-      data.target = t ?? null;
+      // 參選紀錄 join 出人名（2026-10-01：驗證項要寫出這票改到誰）；人物另放 target_politician，target 只留那一列的欄位
+      const { data: t } = await supabase.from(table).select(table === "politician_elections" ? "*, politicians(name, region)" : "*").eq("id", id).maybeSingle();
+      if (t && table === "politician_elections") {
+        const { politicians: person, ...row } = t as Obj;
+        data.target = row;
+        data.target_politician = person && typeof person === "object" ? person as VerifyContextData["target_politician"] : null;
+      } else {
+        data.target = t ?? null;
+      }
     }
   }
   return data;
