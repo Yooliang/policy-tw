@@ -7,6 +7,7 @@
  */
 export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   policy_missing: '缺政見',
+  term_policy_missing: '補任期政見',
   profile_gap: '缺人物資料',
   policy_source_missing: '政見缺出處',
   source_mismatch: '來源不支持內容',

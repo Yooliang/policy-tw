@@ -165,8 +165,10 @@ export function shapeNewsItemCurrent(target: Obj, data: TaskContextData): Obj {
 function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
   const p = data.politician ?? null;
   switch (taskType) {
-    case "policy_missing": {
-      const list = (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"]));
+    // 補任期政見（2026-10-02）跟缺政見給同一份現況；既有政見帶 election_id，代理才看得出哪些是別屆的、不算這一屆
+    case "policy_missing":
+    case "term_policy_missing": {
+      const list = (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status", "election_id"]));
       // 已經有人交、還在等票的：交一樣的東西不會加分，看到同一件事請去投它的票
       const queued = (data.queued_policies ?? []).map((c) => ({
         contribution_id: c.id,
@@ -422,10 +424,10 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies = pol ?? [];
     data.policies_total = count ?? (data.policies ?? []).length;
   }
-  if (taskType === "policy_missing" && pid) {
+  if ((taskType === "policy_missing" || taskType === "term_policy_missing") && pid) {
     const [el, pol, queued] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
-      supabase.from("policies").select("id, title, category, status", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
+      supabase.from("policies").select("id, title, category, status, election_id", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
       // 還在等票的提交也要給代理看見（2026-09-17：「輪到這種任務時，要先問是不是
       // 已經有類似的政見了」）。只列已上線的害慘了李四川：21 筆等票的沒被列出來，
       // 代理看不到「居住新五箭」已經交過三次，於是交了第四次。
@@ -523,9 +525,10 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
 }
 
 /** 「有人物對象」的自動任務型別：手動任務另外看 target 有沒有 politician_id（見上面呼叫處） */
-const SOURCE_TASK_TYPES = new Set([
+export const SOURCE_TASK_TYPES: ReadonlySet<string> = new Set([
   "profile_gap",
   "policy_missing",
+  "term_policy_missing",
   "candidacy_source_missing",
   "candidate_status_stale",
   "not_running_recheck",

@@ -35,6 +35,14 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
     searchFirst("policy_missing"),
 
+  // 補任期政見（2026-10-02 維護者同意）：現任者那一屆當選時的競選政見。交成 Campaign Pledge＋該屆 election_id，
+  // 之後 progress_stale 才問得出「兌現了沒」（skill.md：競選承諾 status 用 Campaign Pledge、election_id 填那場選舉）。
+  term_policy_missing:
+    "找這個人**那一屆（target.election_id）當選時的競選政見，最多 5 筆**：每筆一個 policy、各附自己的出處，election_id 填那一屆，status 填 Campaign Pledge。找到幾筆交幾筆——**不要為了湊數交標語、口號、願景或個人表態**，那些不是政見。先看 queued_policies 與 existing_policies（看 election_id，別屆的不算這一屆），別人交了還在等票的不要再交。" +
+    "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
+    "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、2026 的新政見不是這一屆的競選政見**，這個任務不要交。" +
+    searchFirst("term_policy_missing"),
+
   profile_gap:
     "用一筆 politician 一次補齊，查不到的欄位不要填。" +
     "**照片要是人像照**：正方形或直式、短邊至少 120px。橫幅、活動看板、新聞情境照會被系統量尺寸擋下——官網的「縣長簡介」大圖常常是橫幅，請點開圖確認，或優先用維基百科、議會官網的個人照。" +
@@ -275,7 +283,8 @@ function buildPayload(
         title: "（4–200 字）",
         description: "（≥20 字）",
         category: "（19 種之一，見 payload_shape）",
-        status: "（Campaign Pledge／Proposed／…）",
+        // 補任期政見要的就是那一屆的競選承諾（2026-10-02）
+        status: taskType === "term_policy_missing" ? "Campaign Pledge" : "（Campaign Pledge／Proposed／…）",
       };
     case "politician":
       return {
