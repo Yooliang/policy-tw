@@ -89,7 +89,7 @@ function pick(row: Obj | null | undefined, keys: readonly string[]): Obj | null 
 export const NO_CHANGE_OUTCOMES_HINT = {
   confirmed: "確認無誤：你打開了來源、對過了，資料正確（只有這個值會把資料標成已核對）。例：政見來源報導寫到那條政見；登記公告名單上有他；確認不參選；進度沒變；要補的欄位資料庫已有且一致。不算：只看標題、看的不是提交的來源。",
   unreachable: "打不開：根本沒拿到內容。例：原文 404 且存檔也沒有；付費牆沒別的版本；網站整個連不上；只有圖片讀不出文字。不算（要回頭照內容判 confirmed／not_found）：403 加 UA 就開、404 但存檔有、PDF（你自己讀得了）、打得開只是沒寫到（那是 not_found）。填之前至少試過瀏覽器 UA、站內搜尋／另一家媒體、web.archive.org（遇 429 要退避重試）。2026-09-26 起伺服器會當場試抓：抓得到會退回 400 unreachable_but_fetchable 並附系統抓到的網址，請照那份內容改判；抓不到只記一次嘗試、不進投票、不用等別人驗證。",
-  not_found: "查無資料：內容拿得到，但就是沒有要的東西——你在主張「不存在」，要證明找對地方。例：官網臉書兩家媒體搜姓名都還沒發表政見；議會官網／內政部頁都沒照片；中選會有人但生年欄空白；來源打得開、主題相關，但全文沒有這條、另外也找不到出處；選委會還沒公告開票。要列帶姓名的搜尋網址或具體人物頁，不是首頁。不算：只列首頁；來源寫了你沒看到；來源跟資料矛盾（那是 correction）；找到別的出處（那是 correction 換來源）。",
+  not_found: "查無資料：內容拿得到，但就是沒有要的東西——你在主張「不存在」，要證明找對地方。例：官網臉書兩家媒體搜姓名都還沒發表政見；議會官網／內政部頁都沒照片；中選會有人但生年欄空白；來源打得開、主題相關，但全文沒有這條、另外也找不到出處；選委會還沒公告開票。要列帶姓名的搜尋網址或具體人物頁，不是首頁。政見缺漏、補基本資料回查無：一定要用搜尋引擎搜至少三組關鍵字（「姓名 政見」「姓名 參選 2026」「姓名 臉書」，照片加「姓名 照片」），看非官方來源（候選人臉書／IG／YouTube、READr 政見總覽 whoareyou.readr.tw、地方新聞、政黨候選人頁），checked_urls 至少 5 個、至少一個是搜尋結果頁，finding 寫出搜了哪些關鍵字；少於 5 個會被當場退回。不算：只列首頁；來源寫了你沒看到；來源跟資料矛盾（那是 correction）；找到別的出處（那是 correction 換來源）。",
   _note: "來源打得開、主題也相關、但那一頁沒寫到這筆宣稱 → 先找真出處，找到用 correction 換 source_url，確實找不到才 no_change + not_found。來源與資料矛盾 → correction 或 removal，不要回 no_change",
 } as const;
 
@@ -532,6 +532,37 @@ const SOURCE_TASK_TYPES = new Set([
   "roster_check",
 ]);
 
+/**
+ * 驗證項標明「這票通過後會改到誰」（維護者 2026-10-01）：一筆 correction 的 reason 寫陳瑩、target_id 卻是陳見賢那筆，
+ * 驗證者核了陳瑩、投同意，陳見賢被改成已登記。只給 target_id 看不出改的是誰，所以把人名攤在最上層。
+ */
+export const TARGET_SUMMARY_HINT = "先確認這個人就是交件理由與來源講的那個人；不是就投 disagree（note 寫「target_id 指的是另一個人」）。";
+
+const fmtValue = (v: unknown): string => (v === null || v === undefined || v === "" ? "（空白）" : typeof v === "object" ? JSON.stringify(v) : String(v));
+
+/** 純函式：correction（politicians／politician_elections）的「這筆通過後會改：…」；對象找不到或其他表回 null */
+export function correctionTargetSummary(
+  targetTable: unknown,
+  target: Obj | null | undefined,
+  person: { name?: string | null; region?: string | null } | null | undefined,
+  changes: ReadonlyArray<{ field: string; db_current: unknown; correct_value: unknown }>,
+): string | null {
+  if (!target || (targetTable !== "politicians" && targetTable !== "politician_elections")) return null;
+  const who = targetTable === "politicians" ? { name: target.name, region: target.region } : (person ?? {});
+  const name = typeof who.name === "string" && who.name.trim() ? who.name.trim() : "（查不到姓名）";
+  const parts = [typeof who.region === "string" && who.region.trim() ? who.region.trim() : null];
+  if (targetTable === "politician_elections") {
+    const election = [target.election_id, target.election_type].filter((x) => x !== null && x !== undefined && x !== "").join(" ");
+    if (election) parts.push(election);
+  }
+  const ctx = parts.filter(Boolean).join("，");
+  const diff = changes.filter((c) => c.field).map((c) => {
+    const cur = fmtValue(c.db_current);
+    return `${c.field}${cur.startsWith("（") ? "" : " "}${cur} → ${fmtValue(c.correct_value)}`;
+  }).join("；");
+  return `這筆通過後會改：${name}${ctx ? `（${ctx}）` : ""}的 ${diff || "（沒有欄位）"}。${TARGET_SUMMARY_HINT}`;
+}
+
 export interface VerifyContextData {
   politicians?: Obj[];
   elections?: Obj[];
@@ -543,6 +574,8 @@ export interface VerifyContextData {
   policy?: Obj | null;
   tracking_logs?: Obj[];
   target?: Obj | null;
+  /** correction 對 politician_elections：那筆參選紀錄是誰的（join politicians 出來的 name／region） */
+  target_politician?: { name?: string | null; region?: string | null } | null;
   /** merge_politician：跟 duplicate_politician 任務同一份 current（兩筆全欄、參選、政見、Jev 判定） */
   pair_current?: Obj | null;
   /** adjudication：跟 adjudicate 任務同一份 current（原貢獻＋正反票） */
@@ -733,7 +766,9 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       // 多欄位：每個 change 都附資料庫現值；第一個欄位另放在 field／current_value 維持相容
       const { changes } = normalizeCorrection(payload);
       const withCurrent = changes.map((c) => ({ field: c.field, claimed_current: c.current_value ?? null, db_current: data.target ? (data.target[c.field] ?? null) : null, correct_value: c.correct_value }));
+      const summary = correctionTargetSummary(payload.target_table, data.target, data.target_politician, withCurrent);
       return {
+        ...(summary ? { target_summary: summary } : {}),
         target_table: payload.target_table ?? null,
         target_id: payload.target_id ?? null,
         field: withCurrent[0]?.field ?? "",
@@ -898,8 +933,15 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     const table = typeof payload.target_table === "string" ? payload.target_table : null;
     const id = payload.target_id;
     if (table && id !== undefined && ["politicians", "politician_elections", "policies"].includes(table)) {
-      const { data: t } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
-      data.target = t ?? null;
+      // 參選紀錄 join 出人名（2026-10-01：驗證項要寫出這票改到誰）；人物另放 target_politician，target 只留那一列的欄位
+      const { data: t } = await supabase.from(table).select(table === "politician_elections" ? "*, politicians(name, region)" : "*").eq("id", id).maybeSingle();
+      if (t && table === "politician_elections") {
+        const { politicians: person, ...row } = t as Obj;
+        data.target = row;
+        data.target_politician = person && typeof person === "object" ? person as VerifyContextData["target_politician"] : null;
+      } else {
+        data.target = t ?? null;
+      }
     }
   }
   return data;
