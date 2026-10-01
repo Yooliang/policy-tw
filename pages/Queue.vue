@@ -44,6 +44,7 @@ onMounted(load)
 // 左邊框依型別上色：用 inline style，不走 Tailwind 動態 class（要 safelist）
 const BORDER: Record<string, string> = {
   policy_missing: '#1d4ed8',            // 政見缺口：藍
+  term_policy_missing: '#0369a1',       // 補任期政見：深天藍
   policy_election_missing: '#4338ca',   // 政見缺屆別：靛
   policy_election_mismatch: '#4338ca',
   profile_gap: '#d97706',               // 基本資料：琥珀

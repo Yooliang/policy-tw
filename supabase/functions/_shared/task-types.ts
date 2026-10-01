@@ -17,6 +17,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   not_running_recheck: "correction",
   legacy_audit: "no_change",
   policy_missing: "policy",
+  // 補任期政見（2026-10-02）：現任者那一屆當選時的競選政見，一樣用 policy 交（status 填 Campaign Pledge、election_id 填該屆）
+  term_policy_missing: "policy",
   profile_gap: "politician",
   policy_source_missing: "correction",
   // 來源存在但不支持內容（數字／承諾原文查無）：改寫或刪掉那段沒根據的文字，走 correction 改 policies.description；整筆都沒根據才 removal

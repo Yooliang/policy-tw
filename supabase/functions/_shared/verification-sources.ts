@@ -160,6 +160,7 @@ export const MAX_TASK_SOURCES = 6;
 export const TASK_SOURCE_NEEDS: Record<string, readonly string[]> = {
   profile_gap: ["photo", "education", "experience", "birth_year"],
   policy_missing: ["policy"],
+  term_policy_missing: ["policy"],
   candidacy_source_missing: ["candidacy", "district"],
   candidate_status_stale: ["candidacy"],
   not_running_recheck: ["candidacy"],

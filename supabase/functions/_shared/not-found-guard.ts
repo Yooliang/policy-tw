@@ -4,16 +4,18 @@
  * 抽 8 筆 policy_missing 的 no_change(not_found)：多半只看中選會、議會官網、中央社、自由時報，checked_urls 2～4 個，
  * 很少用搜尋引擎、沒有人查候選人臉書；另一隻代理用搜尋引擎就找到 READr 政見總覽（whoareyou.readr.tw）。
  * 「查無」是在主張不存在，要證明找過該找的地方：checked_urls 少於 5 個（去重）就 400，不算被拒，訊息講清楚要查哪些。
- * 只擋自動派的 policy_missing／profile_gap（task_id 是 auto:<型別>:<人物>）；手動任務、其他型別、其他 outcome 不擋。
+ * 只擋自動派的 policy_missing／profile_gap／term_policy_missing（task_id 是 auto:<型別>:<人物>[:<屆別>]）；手動任務、其他型別、其他 outcome 不擋。
+ * term_policy_missing（補任期政見，2026-10-02）一併納入：同樣是在主張「這個人沒有政見」。
  */
 
 export const NOT_FOUND_MIN_CHECKED_URLS = 5;
-export const NOT_FOUND_SEARCH_TASK_TYPES = ["policy_missing", "profile_gap"] as const;
+export const NOT_FOUND_SEARCH_TASK_TYPES = ["policy_missing", "profile_gap", "term_policy_missing"] as const;
 
 /** 搜尋關鍵字建議：任務說明、交件守門、協議三處同一份 */
 export const SEARCH_KEYWORDS: Record<(typeof NOT_FOUND_SEARCH_TASK_TYPES)[number], string> = {
   policy_missing: "「姓名 政見」「姓名 參選 2026」「姓名 臉書」（或「姓名 Facebook」）",
   profile_gap: "「姓名 參選 2026」「姓名 臉書」（或「姓名 Facebook」）「姓名 照片」",
+  term_policy_missing: "「姓名 政見 屆別年份」（例如「姓名 政見 2022」）「姓名 選舉公報」「姓名 臉書」（或「姓名 Facebook」）",
 };
 export const NON_OFFICIAL_SOURCES = "候選人臉書／IG／YouTube、READr 政見總覽（whoareyou.readr.tw）、地方新聞、政黨候選人頁";
 
