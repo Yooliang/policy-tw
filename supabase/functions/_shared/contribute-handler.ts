@@ -19,6 +19,7 @@ import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
 import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
+import { notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -228,6 +229,21 @@ export async function handleContribute(
     }
   }
   const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
+
+  // 政見／基本資料缺口回「查無」：checked_urls 至少 5 個（維護者 2026-10-01，見 not-found-guard.ts）。
+  // 「查無」是在主張不存在；只看中選會、議會官網、一兩家媒體就回報，14 天內這個缺口不再派。
+  for (const item of validation.items) {
+    if (item.contribution_type !== "no_change") continue;
+    const shortfall = notFoundSearchShortfall((item.payload as Record<string, unknown>)?.task_id ?? item.task_id, item.payload);
+    if (!shortfall) continue;
+    try {
+      await supabase.from("gate_rejections").insert({ gate: "not_found_search_insufficient", endpoint: via, contribution_id: null, ip_hash: ipHash });
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 400,
+      body: { success: false, error: "not_found_search_insufficient", message: notFoundSearchMessage(shortfall), checked: shortfall.checked, required: shortfall.required },
+    };
+  }
 
   // 政見只給姓名、而同名人物不只一位：交件時就擋（2026-09-26：陳瑩兩筆，政見過了驗證才在落庫時炸、重試到退件）
   for (const item of validation.items) {

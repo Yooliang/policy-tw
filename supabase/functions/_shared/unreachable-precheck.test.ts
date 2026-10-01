@@ -139,7 +139,9 @@ Deno.test("confirmed／not_found 不會觸發伺服器試抓", async () => {
   const spyPrecheck: typeof precheckUnreachable = () => { calls++; return Promise.resolve({ fetchedUrl: null, attempts: [] }); };
   for (const outcome of ["confirmed", "not_found"]) {
     const { client } = fakeSupabase();
-    const res = await handleContribute(client, "https://x", noChangeBody(AUTO_TASK, outcome), "ip-1", undefined, "contribute", unreachableImpl, spyPrecheck);
+    // 2026-10-01 起補基本資料回 not_found 要 5 個網址（not-found-guard.ts），這裡附足，測的是試抓不被觸發
+    const urls = outcome === "not_found" ? [URL_A, ...[1, 2, 3, 4].map((i) => `https://www.google.com/search?q=x${i}`)] : [URL_A];
+    const res = await handleContribute(client, "https://x", noChangeBody(AUTO_TASK, outcome, urls), "ip-1", undefined, "contribute", unreachableImpl, spyPrecheck);
     assertEquals(res.status, 201);
     assertEquals((res.body as Record<string, unknown>).status, "pending", `outcome=${outcome} 應該照常走投票流程`);
   }

@@ -18,16 +18,27 @@
  */
 import { POLICY_CATEGORIES } from "./category-map.ts";
 import { CANDIDATE_STATUSES, POLICY_STATUSES } from "./contribution-schema.ts";
+import { NON_OFFICIAL_SOURCES, NOT_FOUND_MIN_CHECKED_URLS, SEARCH_KEYWORDS } from "./not-found-guard.ts";
+
+/**
+ * 政見／基本資料缺口要用搜尋引擎、看非官方來源（維護者 2026-10-01）：抽 8 筆政見缺漏的「查無」，
+ * 多半只看中選會、議會官網、中央社、自由時報，很少用搜尋引擎、沒有人查候選人臉書。
+ */
+const searchFirst = (taskType: keyof typeof SEARCH_KEYWORDS) =>
+  `**一定要用搜尋引擎**，至少搜三組關鍵字：${SEARCH_KEYWORDS[taskType]}；**要看非官方來源**：${NON_OFFICIAL_SOURCES}——只看中選會、議會官網、一兩家媒體首頁不算查過。` +
+  `真的查不到才回 no_change＋outcome=not_found：checked_urls 至少 ${NOT_FOUND_MIN_CHECKED_URLS} 個不同網址、其中至少一個是搜尋結果頁，finding 寫出你搜了哪些關鍵字、各看到什麼（少於 ${NOT_FOUND_MIN_CHECKED_URLS} 個會被當場退回，不算被拒）。`;
 
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
-    "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。",
+    "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
+    searchFirst("policy_missing"),
 
   profile_gap:
     "用一筆 politician 一次補齊，查不到的欄位不要填。" +
-    "**照片要是人像照**：正方形或直式、短邊至少 120px。橫幅、活動看板、新聞情境照會被系統量尺寸擋下——官網的「縣長簡介」大圖常常是橫幅，請點開圖確認，或優先用維基百科、議會官網的個人照。",
+    "**照片要是人像照**：正方形或直式、短邊至少 120px。橫幅、活動看板、新聞情境照會被系統量尺寸擋下——官網的「縣長簡介」大圖常常是橫幅，請點開圖確認，或優先用維基百科、議會官網的個人照。" +
+    searchFirst("profile_gap"),
 
   candidate_status_stale:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
