@@ -39,19 +39,20 @@ async function requestAd(): Promise<void> {
 
 onMounted(requestAd)
 
-// v-if 在這個元件的 template 裡，元件自己從頭到尾只掛載一次——所以走過
-// /profile 這種排除頁再回來時，<ins> 是新的、但 onMounted 不會再跑，那個版位
-// 在這次 session 裡就再也不會有廣告。實測抓到：切回來後 push 次數還是 1。
-// 由隱藏轉可見時補一次 push，對應的正是那個新的 <ins>。
-watch(visible, (now, was) => {
-  if (now && !was) requestAd()
+// 元件在 App.vue 裡，整個 session 只掛載一次——onMounted 只跑一次。
+// 換頁就換一則（維護者 2026-10-01）：外層 div 用 route.path 當 key，換頁時 <ins> 是新的，
+// 這裡對新的 <ins> 補一次 push。只看 path：同一頁換篩選（query、hash）不算換頁，不重新要廣告。
+// 從 /profile 這種排除頁切回來也走這條（path 變了、visible 由 false 轉 true）；
+// 切到排除頁時 visible 是 false，requestAd 直接返回。
+watch(() => route.path, (now, was) => {
+  if (now !== was) requestAd()
 })
 </script>
 
 <template>
   <!-- overflow-hidden 是手機版的保險：data-full-width-responsive 的版位量錯寬度時
        會把整頁撐出去，這個站踩過一次橫向溢出 -->
-  <div v-if="visible" class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 overflow-hidden">
+  <div v-if="visible" :key="route.path" class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 overflow-hidden">
     <ins
       class="adsbygoogle"
       style="display: block"
