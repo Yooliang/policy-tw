@@ -40,7 +40,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request, mark: (name: string) => void): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
@@ -56,6 +56,7 @@ Deno.serve(async (req) => {
     // 身份：ditrust:<序號> 先向 agents-verify 換成代號與身份鍵；一般代號原樣（docs/BLUEPRINT-agent-identity.md §3）
     const ipHashForIdentity = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
     const identity = await resolveActorFromRequest(agentName, ipHashForIdentity);
+    mark("identity");
     if (!identity.ok) return json({ success: false, error: "identity_invalid", message: identity.error }, identity.status);
     const actor = identity.actor;
     agentName = actor.handle;
@@ -140,6 +141,7 @@ Deno.serve(async (req) => {
       if (r.error) throw new Error(r.error.message);
     }
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
+    mark("queries");
     // deno-lint-ignore no-explicit-any
     // 只排除這一次呼叫剛跳過的那一筆（別立刻派回同一題）；之前的 skip 靠「派過就排後面」處理
     const skippedTaskIds = new Set<string>(skipTaskId ? [skipTaskId] : []);
@@ -227,6 +229,7 @@ Deno.serve(async (req) => {
         if (typeof id === "string") deadEndTaskIds.add(id);
       }
     }
+    mark("scoped");
     const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manualRaw.length;
 
     // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他、
@@ -284,6 +287,7 @@ Deno.serve(async (req) => {
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL };
 
     const serveVerify = async (): Promise<Response> => {
+      mark("verify_start");
       // 單一佇列（2026-09-22）：池子已照 queue_at 排，第一筆就是等最久的（訪客看得到的、被插隊的在 1980 年段）。
       // 桶子（訪客／裁決／來源等級／隨機）全部退場：等最久的先，每一筆都輪得到。
       const pick = candidates[0]!;
@@ -475,6 +479,7 @@ Deno.serve(async (req) => {
 
     if (manualFirst) {
       const t = manualHead!;
+      mark("pick_manual");
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
       // 派出就蓋章，下一次排到後面（自動缺口是即時算出來的，沒有列可蓋）
@@ -502,6 +507,7 @@ Deno.serve(async (req) => {
         : (openTasks > 0 ? "目前所有缺口任務都在別人手上或已飽和，驗證池也空了；幾分鐘後再來" : "目前沒有待驗證、也沒有缺口任務");
       return json({ ...base, kind: "none", reason, retry_after_min: RETRY_AFTER_MIN });
     }
+    mark("pick_auto");
     const autoTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
     await lease(t.task_id, t.target);
     // 派過就排後面（task_dispatches）；記不成不影響派工
@@ -524,4 +530,19 @@ Deno.serve(async (req) => {
     console.error("next error:", message);
     return json({ success: false, error: "internal_error", message }, 500);
   }
+}
+
+// 每個請求各自記時間（2026-10-02：量 /next 那 4.5 秒的底在哪）。
+// 不用模組層級變數 —— Deno.serve 會在同一個 isolate 併發處理請求，共用變數會互相蓋掉。
+// Server-Timing 是標頭，不改回應內容，代理讀的 JSON 不受影響。各段數字是「從收到請求到該點」的累計毫秒。
+Deno.serve(async (req) => {
+  const t0 = performance.now();
+  const marks: Array<[string, number]> = [];
+  const mark = (name: string) => { marks.push([name, performance.now() - t0]); };
+  const res = await handle(req, mark);
+  mark("total");
+  const headers = new Headers(res.headers);
+  headers.set("Server-Timing", marks.map(([n, d]) => `${n};dur=${d.toFixed(0)}`).join(", "));
+  headers.set("Access-Control-Expose-Headers", "Server-Timing");
+  return new Response(res.body, { status: res.status, headers });
 });
