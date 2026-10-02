@@ -129,8 +129,8 @@ const grouped = computed(() => {
                 <span class="font-semibold text-slate-500">個人頁格式：</span>
                 <code class="text-xs bg-slate-100 px-1 rounded break-all">{{ source.detail_url_pattern }}</code>
               </p>
-              <p v-if="source.how_to" class="text-slate-700"><span class="font-semibold text-slate-500">怎麼查：</span>{{ source.how_to }}</p>
-              <p v-if="source.quality_note" class="text-slate-500"><span class="font-semibold">品質說明：</span>{{ source.quality_note }}</p>
+              <p v-if="source.how_to" class="text-slate-700 break-words"><span class="font-semibold text-slate-500">怎麼查：</span>{{ source.how_to }}</p>
+              <p v-if="source.quality_note" class="text-slate-500 break-words"><span class="font-semibold">品質說明：</span>{{ source.quality_note }}</p>
             </div>
           </div>
         </div>
