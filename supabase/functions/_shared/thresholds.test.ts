@@ -210,7 +210,14 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
   // 2026-09-21 分數制：達標判斷看 score，不看 agree_count；目標仍是有效門檻那一支函式
   // 2026-09-24：目標分數讀計票時寫入的欄位（省 Disk IO），還沒計過票才現算；計票函式要寫那個欄位
-  assert(pool.includes("c.score < COALESCE(c.target_score, contribution_effective_agree(c.id))"), "派工池要用分數對有效門檻，否則 not_supported 的那筆永久卡住");
+  // 2026-10-02：驗證池改從快照驅動，目標分數多一層「排程算好的 d.verify_target」，那一層也是同一支有效門檻函式算的。
+  assert(pool.includes("c.score < COALESCE(c.target_score, contribution_effective_agree(c.id))")
+      || pool.includes("c.score < COALESCE(c.target_score, d.verify_target, contribution_effective_agree(c.id))"),
+    "派工池要用分數對有效門檻，否則 not_supported 的那筆永久卡住");
+  if (pool.includes("d.verify_target")) {
+    const vt = await latestMigrationDefining("FUNCTION refresh_verify_targets");
+    assert(vt.includes("verify_target = contribution_effective_agree(c.id)"), "快照裡的目標分數也要用有效門檻那一支函式算，不然兩邊會不一致");
+  }
   assert(fn.includes("target_score = v_target"), "計票時要把目標分數寫進 contributions.target_score，派工池才讀得到");
   assert(pool.includes("effective_required"), "池子要把有效門檻回給 /next");
   assert(pool.includes("target_score"), "池子要把目標分數回給 /next（代理要知道自己這票能推多遠）");
@@ -232,10 +239,13 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
 // SQL 的 ORDER BY 跟 next/index.ts 的 serveVerify 是同一套規則的兩份寫法，改一邊沒改另一邊就會各派各的。
 Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveVerify 拿第一筆；合格判斷在 LIMIT 之前", async () => {
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
-  assert(/ORDER BY COALESCE\(d\.queue_at, c\.created_at\) ASC/.test(pool), "驗證池要照 queue_at 排（沒有列時用 created_at）");
+  // 2026-10-02：改從快照（task_dispatches）驅動後每筆一定有列，直接照 d.queue_at 排。
+  assert(/ORDER BY COALESCE\(d\.queue_at, c\.created_at\) ASC/.test(pool) || /ORDER BY d\.queue_at ASC/.test(pool), "驗證池要照 queue_at 排");
   assert(pool.includes("queue_at TIMESTAMPTZ"), "池子要把 queue_at 回給 /next，三個來源才比得起來");
   assert(!/AS bucket/.test(pool), "桶子（訪客／裁決）退場：訪客看得到的用 1980 表達");
-  assert(pool.includes("LEFT JOIN task_dispatches d ON d.task_id = 'verify:' || c.id"), "驗證列的鍵是 verify:<id>");
+  assert(pool.includes("LEFT JOIN task_dispatches d ON d.task_id = 'verify:' || c.id")
+      || (pool.includes("d.task_id LIKE 'verify:%'") && pool.includes("substring(d.task_id FROM 8)::uuid")),
+    "驗證列的鍵是 verify:<id>");
   assert(pool.includes("v2.verifier_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決");
   assert(pool.includes("o.contributor_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決");
   const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
