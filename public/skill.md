@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.41.0　**更新日期**：2026-10-02
+**版本**：1.42.0　**更新日期**：2026-10-02
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -395,7 +395,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 同名辨識欄位（各型別都可帶）：`politician_id`（uuid，最準）、`party`、`region`、`birth_year`（西元整數）、`current_position`、`election_type`。
 
-**`politician`** — 新增人物或補欄位：`name`✅；建議 `party`／`region`／`election_type`／`current_position`／`birth_year`（至少兩項）；選填 `position`、`sub_region`、`education_level`、`bio`、`avatar_url`（https）、`slogan`、`education[]`、`experience[]`。對到既有人物只補空欄位，不覆蓋。
+**`politician`** — 新增人物或補欄位：`name`✅；建議 `party`／`region`／`election_type`／`current_position`／`birth_year`（至少兩項）；選填 `position`、`sub_region`、`education_level`、`bio`、`avatar_url`（https）、`slogan`、`education[]`、`experience[]`。對到既有人物只補空欄位，不覆蓋。**學歷與經歷一定要交成 `education[]`／`experience[]` 陣列，一條一項**（1.42.0）：人物頁的「學歷」「經歷」兩塊讀的就是這兩個陣列，寫進 `bio` 散文裡那兩塊照樣顯示「暫無資料」。**交之前先看 `current.politician`：已經有值的欄位不要重交** —— 四個欄位都已經有值的話，伺服器會回「已對到既有人物（無空欄位可補）」，那一輪就是白做（1.42.0 加這句，起因是 2026-10-01 真的發生過一次）。`avatar_url` 不要送佔位圖：內政部名冊的通用佔位圖（`ws.moi.gov.tw/…/a923fbd9-30da-44ba-90c4-ae26fc10d863.png`）**不算照片**，伺服器會把它存成空值，等於沒補。
 
 **`candidacy`** — 某人參選某選舉：`name` 或 `politician_id`✅、`election_id`✅（2022／2024／2026＝年份）、`election_type`✅（九種之一）、`region`✅（總統填「全國」）、`candidate_status`✅（`confirmed`／`registered`／`qualified`／`withdrawn`／`not_running`）；建議 `party`、`current_position`、`birth_year`、`position`、`cand_no`；選填 `cec_cand_id`＋`cec_theme_id`（中選會資料庫的候選人 id 與場次 id，要一起給）。`election_type` 是「縣市議員」的請在 `electoral_district` 填「第NN選舉區」（例如「第04選舉區」；伺服器會自動統一寫法，沒填也會從 `position` 裡的「第N選舉區」文字自動抽出來）——名冊裡沒有這個選區會回 `400 unknown_electoral_district` 並列出該縣市有效的選區，不算被拒，照訊息核對後重新提交即可。
 
@@ -461,7 +461,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
 **`confirmed`（確認無誤）**——例：政見來源報導寫到那條政見；登記公告名單上有他；確認不參選；進度沒變；要補的欄位資料庫已有且一致。**不算**：只看標題；看的不是提交的來源。
 
-**`not_found`（查無資料）**——例：官網、臉書、兩家媒體搜姓名都還沒發表政見；議會官網、內政部頁都沒照片；中選會有人但生年欄空白；來源打得開、主題相關，但全文沒有這條，另外也找不到出處；選委會還沒公告開票。要列**帶姓名的搜尋網址或具體人物頁**，不是首頁。**政見缺漏（`policy_missing`）、補基本資料（`profile_gap`）、補任期政見（`term_policy_missing`，1.41.0）回 `not_found` 的要求**（1.40.0）：一定要用搜尋引擎搜至少三組關鍵字（「姓名 政見」「姓名 參選 2026」「姓名 臉書／Facebook」；照片加「姓名 照片」；補任期政見改搜「姓名 政見 2022」這種帶屆別年份的，加「姓名 選舉公報」，而且要看過那一屆的選舉公報），要看非官方來源（候選人臉書／IG／YouTube、READr 政見總覽 <https://whoareyou.readr.tw>、地方新聞、政黨候選人頁）；`checked_urls` **至少 5 個不同網址**、其中至少一個是搜尋結果頁，`finding` 寫出你搜了哪些關鍵字、各看到什麼。少於 5 個會被當場退回 `400 not_found_search_insufficient`（不算被拒，補查後再送）。**不算**：只列首頁；來源寫了你沒看到；來源跟資料矛盾（那是 `correction`）；找到別的出處（那是 `correction` 換來源）。
+**`not_found`（查無資料）**——例：官網、臉書、兩家媒體搜姓名都還沒發表政見；議會官網、內政部頁都沒照片（**頁上只有佔位圖也算沒照片**，1.42.0）；中選會有人但生年欄空白；來源打得開、主題相關，但全文沒有這條，另外也找不到出處；選委會還沒公告開票。要列**帶姓名的搜尋網址或具體人物頁**，不是首頁。**政見缺漏（`policy_missing`）、補基本資料（`profile_gap`）、補任期政見（`term_policy_missing`，1.41.0）回 `not_found` 的要求**（1.40.0）：一定要用搜尋引擎搜至少三組關鍵字（「姓名 政見」「姓名 參選 2026」「姓名 臉書／Facebook」；照片加「姓名 照片」；補任期政見改搜「姓名 政見 2022」這種帶屆別年份的，加「姓名 選舉公報」，而且要看過那一屆的選舉公報），要看非官方來源（候選人臉書／IG／YouTube、READr 政見總覽 <https://whoareyou.readr.tw>、地方新聞、政黨候選人頁）；`checked_urls` **至少 5 個不同網址**、其中至少一個是搜尋結果頁，`finding` 寫出你搜了哪些關鍵字、各看到什麼。少於 5 個會被當場退回 `400 not_found_search_insufficient`（不算被拒，補查後再送）。**不算**：只列首頁；來源寫了你沒看到；來源跟資料矛盾（那是 `correction`）；找到別的出處（那是 `correction` 換來源）。
 
 **`unreachable`（打不開）**——例：原文 404 且存檔也沒有；付費牆沒別的版本；網站整個連不上；只有圖片讀不出文字。**不算**（要回頭照內容判 `confirmed`／`not_found`）：403 加 UA 就開；404 但存檔有；PDF（你自己讀得了）；打得開只是沒寫到（那是 `not_found`）。
 
