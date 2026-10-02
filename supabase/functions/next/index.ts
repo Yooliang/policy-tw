@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
-    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, deadEndRows, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
+    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       pendingQuery,
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
       supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
@@ -108,10 +108,9 @@ Deno.serve(async (req) => {
       fetchAllRows<{ task_id: string }>("my submitted tasks", (from, to) =>
         supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
           .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to)),
-      // 任何人回報過「查了沒東西」且還在等票的任務：期間不要再派給別人重查
-      fetchAllRows<{ payload: Record<string, unknown> }>("no_change reports", (from, to) =>
-        supabase.from("contributions").select("payload").eq("contribution_type", "no_change")
-          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)),
+      // 自動缺口的候選（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
+      // 「有人回報查無」改成下面只查候選的那幾十筆，不再翻整張貢獻表。
+      supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName }),
       // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
       // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
@@ -140,6 +139,7 @@ Deno.serve(async (req) => {
     for (const r of [pendingRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
+    if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     // deno-lint-ignore no-explicit-any
     // 只排除這一次呼叫剛跳過的那一筆（別立刻派回同一題）；之前的 skip 靠「派過就排後面」處理
     const skippedTaskIds = new Set<string>(skipTaskId ? [skipTaskId] : []);
@@ -149,24 +149,6 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     const mySubmittedTaskIds = new Set<string>([...(mySubmittedRows as any[]), ...(myAnswersRows as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
-    // deno-lint-ignore no-explicit-any
-    // 任務底下還在等票幾筆：李四川那筆有 21 筆，於是它永遠不會關、也就永遠被派。
-    // 要翻頁撈——PostgREST 一次只回 1000 列，寫 .limit(5000) 只會拿到前 1000 筆，
-    // 排在後面的任務就會被當成「底下沒人做」一直派（2026-09-17 抓到同一個坑害貢獻榜失準）。
-    const inFlightRows = await fetchAllRows<{ task_id: string }>(
-      "in-flight by task",
-      (from, to) => supabase.from("contributions").select("task_id")
-        .in("status", ["pending", "verified", "disputed"]).not("task_id", "is", null)
-        .order("created_at", { ascending: true }).range(from, to),
-    );
-    const inFlightByTask = new Map<string, number>();
-    for (const r of inFlightRows) {
-      const id = r.task_id;
-      if (typeof id === "string") inFlightByTask.set(id, (inFlightByTask.get(id) ?? 0) + 1);
-    }
-    const deadEndTaskIds = new Set<string>((deadEndRows as any[])
-      .map((r) => (r.payload && typeof r.payload === "object" ? r.payload.task_id : null))
-      .filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
     const myVotedOriginalIds = new Set<string>((myVotedOnRows as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
 
@@ -216,6 +198,35 @@ Deno.serve(async (req) => {
     type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string; last_dispatched_at: string | null };
     // task_id 併進來的早一點加，dispatch.ts 的 TaskLike 系列函式都要它
     const manualRaw = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
+
+    // 在途數與「有人回報查無」只查這一輪的候選（手動前 20＋自動前 30），不再翻整張貢獻表（2026-10-02）。
+    // 這兩個集合只拿來過濾候選（下面手動、自動各一處），所以規則完全不變，只是範圍從「全站」縮到這幾十筆。
+    // 原本每次 /next 都把全站在途貢獻（約 3 千筆、3 頁）和所有「查無」回報翻完，只為了檢查 50 個候選。
+    const candidateTaskIds = [...new Set([
+      ...manualRaw.map((t) => t.task_id),
+      ...((autoRes.data ?? []) as Array<{ task_id: string }>).map((t) => t.task_id),
+    ].filter((v): v is string => typeof v === "string"))];
+    const inFlightByTask = new Map<string, number>();
+    const deadEndTaskIds = new Set<string>();
+    if (candidateTaskIds.length > 0) {
+      const [{ data: ifRows, error: ifErr }, { data: deRows, error: deErr }] = await Promise.all([
+        // query-bounds: ok — 只查候選（≤50 個 task_id）底下的在途貢獻
+        supabase.from("contributions").select("task_id")
+          .in("status", ["pending", "verified", "disputed"]).in("task_id", candidateTaskIds).limit(1000),
+        // query-bounds: ok — 只查候選 task_id 的「查無」回報（有 payload->>'task_id' 的表達式索引）
+        supabase.from("contributions").select("payload").eq("contribution_type", "no_change")
+          .in("status", ["pending", "verified"]).in("payload->>task_id", candidateTaskIds).limit(1000),
+      ]);
+      if (ifErr) throw new Error(`in-flight lookup: ${ifErr.message}`);
+      if (deErr) throw new Error(`no_change lookup: ${deErr.message}`);
+      for (const r of (ifRows ?? []) as Array<{ task_id: string | null }>) {
+        if (typeof r.task_id === "string") inFlightByTask.set(r.task_id, (inFlightByTask.get(r.task_id) ?? 0) + 1);
+      }
+      for (const r of (deRows ?? []) as Array<{ payload: Record<string, unknown> | null }>) {
+        const id = r.payload && typeof r.payload === "object" ? r.payload.task_id : null;
+        if (typeof id === "string") deadEndTaskIds.add(id);
+      }
+    }
     const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manualRaw.length;
 
     // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他、
@@ -422,8 +433,6 @@ Deno.serve(async (req) => {
     // 原本的 mayorFirst 特例（讓縣市長插到手動前面）一併拿掉——那是用特例壓特例。
     // queue_at 是 20260921000020 加的單一排序鍵，兩邊靠它比。
     type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string };
-    const autoRes = await supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName });
-    if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
     // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
     // 程式裡的過濾器留著當保險。2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
     const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
