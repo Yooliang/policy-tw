@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, MessageSquare, CircleUserRound, Loader2 } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2 } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
@@ -34,7 +34,10 @@ const navItems = computed(() => {
     // 「政見追蹤」而不是「政見」（2026-09-17）：這一頁是追進度的，
     // 只寫「政見」會讓人以為是政見列表。手機仍用兩個字，不然會擠掉旁邊兩項。
     { name: '政見追蹤', shortName: '政見', path: '/tracking', icon: TrendingUp },
-    { name: '參與貢獻', shortName: '參與', path: '/community', icon: MessageSquare },
+    // 「參與貢獻」連 /stats（貢獻紀錄），不是 /community（維護者 2026-10-02）：
+    // /community 在 MechanismNav 的標籤是「公民提問」，導覽列寫「參與貢獻」卻連到那裡，
+    // 按下去看到的是提問討論、不是貢獻。/community 的入口還在 MechanismNav 與政見頁的「去提問」。
+    { name: '參與貢獻', shortName: '參與', path: '/stats', icon: Milestone },
   ]
 
   if (activeElection.value) {
