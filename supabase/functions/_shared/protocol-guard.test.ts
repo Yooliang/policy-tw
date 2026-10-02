@@ -149,9 +149,12 @@ Deno.test("無異動的冷卻天數：SQL 與 TypeScript 要是同一個數字",
   // 的定義檔（它沒有冷卻過濾也沒有 LIMIT），這支測試就會在完全正確的改動上變紅。
   const { sql: tasksSql } = await latestMigrationDefining("contribution_auto_tasks(");
   const body = tasksSql.slice(tasksSql.lastIndexOf("FUNCTION contribution_auto_tasks("));
-  const filterAt = body.indexOf("task_checks");
+  // 2026-10-02：冷卻改成排程（refresh_dispatch_blocked）預先算進 task_dispatches.cooling，
+  // wrapper 裡看的是 cooling 欄位而不是直接查 task_checks。守的東西沒變：冷卻過濾要在 LIMIT 之前。
+  const filterAt = ["task_checks", "cooling"].map((k) => body.indexOf(k)).filter((i) => i > 0)
+    .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
   const limitAt = body.lastIndexOf("LIMIT");
-  assert(filterAt > 0 && limitAt > filterAt, "冷卻過濾要寫在 LIMIT 之前");
+  assert(Number.isFinite(filterAt) && limitAt > filterAt, "冷卻過濾要寫在 LIMIT 之前");
 });
 
 Deno.test("每一種貢獻型別的風險等級：SQL 與 TypeScript 要一致", async () => {
