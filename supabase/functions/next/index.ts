@@ -57,6 +57,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const ipHashForIdentity = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
     const identity = await resolveActorFromRequest(agentName, ipHashForIdentity);
     mark("identity");
+    // 逐一記 11 個平行查詢各自完成的時間（累計毫秒；起點都差不多，約等於各自耗時）
+    const timed = <T,>(name: string, p: PromiseLike<T>): Promise<T> => Promise.resolve(p).then((v) => { mark("q_" + name); return v; });
     if (!identity.ok) return json({ success: false, error: "identity_invalid", message: identity.error }, identity.status);
     const actor = identity.actor;
     agentName = actor.handle;
@@ -92,27 +94,27 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
     const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
-      pendingQuery,
-      supabase.rpc("contribution_auto_task_counts", { p_region: region }),
-      supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
+      timed("pool", pendingQuery),
+      timed("counts", supabase.rpc("contribution_auto_task_counts", { p_region: region })),
+      timed("manual", supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
         // 這裡只負責「把可能是前幾名的撈進來」，真正的排序由 TS 的 manualQueueAt 決定
         // （SQL 排不出 1980 那條規則）。沒派過的排前面保證了 FRONT_SOURCES 的任務一定在窗內，
         // 而手動任務總共只有 91 筆、窗口 20 筆，不會漏掉該派的。
         // last_dispatched_at 也真的 select 出來——原本只拿它排序、沒放進 select，
         // 所以 TS 那側拿不到值，根本沒辦法跟自動缺口比。
-        .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20),
-      // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
+        .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20)),
+      timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
-          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)),
-      // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
+          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to))),
+      timed("my_submitted", // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
       fetchAllRows<{ task_id: string }>("my submitted tasks", (from, to) =>
         supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
-          .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to)),
-      // 自動缺口的候選（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
+          .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to))),
+      timed("auto", // 自動缺口的候選（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
       // 「有人回報查無」改成下面只查候選的那幾十筆，不再翻整張貢獻表。
-      supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName }),
-      // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
+      supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
+      timed("my_votes", // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
       // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
       // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
@@ -120,22 +122,22 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       fetchAllRows<{ contribution_id: string }>("my votes", (from, to) =>
         supabase.from("contribution_votes").select("contribution_id")
           .eq("verifier_ip_hash", ipHash)
-          .order("created_at", { ascending: true }).range(from, to)),
-      // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
+          .order("created_at", { ascending: true }).range(from, to))),
+      timed("ip_contrib", // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
       // 所以這裡要按 ip_hash 數，按 agent_name 數會給出偏低的用量、讓代理以為還有很多。
       supabase.from("contributions").select("id", { count: "exact", head: true })
-        .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
-      supabase.from("contribution_votes").select("id", { count: "exact", head: true })
-        .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString()),
-      // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住。
+        .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString())),
+      timed("ip_vote", supabase.from("contribution_votes").select("id", { count: "exact", head: true })
+        .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString())),
+      timed("my_answers", // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住。
       // 含 applied 表示這份只會成長、不會退場，跟「my votes」同一類，要翻頁撈（2026-09-19）
       fetchAllRows<{ task_id: string }>("my answered questions", (from, to) =>
         supabase.from("contributions").select("task_id").eq("contribution_type", "question_answer")
           .or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
           .in("status", ["pending", "verified", "applied"]).not("task_id", "is", null)
-          .order("created_at", { ascending: true }).range(from, to)),
-      // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
-      Promise.resolve({ data: [], error: null }),
+          .order("created_at", { ascending: true }).range(from, to))),
+      timed("skips", // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
+      Promise.resolve({ data: [], error: null })),
     ]);
     for (const r of [pendingRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
