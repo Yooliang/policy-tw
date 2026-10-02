@@ -214,6 +214,20 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         } : {}),
       };
     }
+    // 補學經歷條列（2026-10-02）：bio 要原樣給（不截斷）—— 它是代理知道「要找什麼」的線索。
+    // 但 bio 沒有附來源，所以提醒它 source_urls 要放真的打開過的頁，不是照抄 bio。
+    case "profile_detail_gap": {
+      const emptyArray = (v: unknown) => !Array.isArray(v) || v.length === 0;
+      const missing = (["education", "experience"] as const).filter((f) => emptyArray(p?.[f]));
+      return {
+        politician: p,
+        missing_fields: missing,
+        present_fields: (["education", "experience"] as const).filter((f) => !missing.includes(f)),
+        bio_hint: p?.bio
+          ? "politician.bio 裡通常已經寫著學經歷，用它知道要找什麼；但 bio 本身沒有附來源，source_urls 要放你實際打開、看得到這些學經歷的網址，不是照抄 bio。bio 跟來源不一致時以來源為準，並在 note 說明。"
+          : null,
+      };
+    }
     case "candidacy_source_missing":
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
@@ -527,6 +541,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
 /** 「有人物對象」的自動任務型別：手動任務另外看 target 有沒有 politician_id（見上面呼叫處） */
 export const SOURCE_TASK_TYPES: ReadonlySet<string> = new Set([
   "profile_gap",
+  "profile_detail_gap",
   "policy_missing",
   "term_policy_missing",
   "candidacy_source_missing",

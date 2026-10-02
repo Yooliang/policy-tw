@@ -6,16 +6,19 @@
  * 「查無」是在主張不存在，要證明找過該找的地方：checked_urls 少於 5 個（去重）就 400，不算被拒，訊息講清楚要查哪些。
  * 只擋自動派的 policy_missing／profile_gap／term_policy_missing（task_id 是 auto:<型別>:<人物>[:<屆別>]）；手動任務、其他型別、其他 outcome 不擋。
  * term_policy_missing（補任期政見，2026-10-02）一併納入：同樣是在主張「這個人沒有政見」。
+ * profile_detail_gap（補學經歷條列，2026-10-02）一併納入：bio 裡通常已經寫著學經歷，
+ *   說「查不到」之前要真的去找支持它的來源頁，不能看一眼 bio 就放棄。
  */
 
 export const NOT_FOUND_MIN_CHECKED_URLS = 5;
-export const NOT_FOUND_SEARCH_TASK_TYPES = ["policy_missing", "profile_gap", "term_policy_missing"] as const;
+export const NOT_FOUND_SEARCH_TASK_TYPES = ["policy_missing", "profile_gap", "term_policy_missing", "profile_detail_gap"] as const;
 
 /** 搜尋關鍵字建議：任務說明、交件守門、協議三處同一份 */
 export const SEARCH_KEYWORDS: Record<(typeof NOT_FOUND_SEARCH_TASK_TYPES)[number], string> = {
   policy_missing: "「姓名 政見」「姓名 參選 2026」「姓名 臉書」（或「姓名 Facebook」）",
   profile_gap: "「姓名 參選 2026」「姓名 臉書」（或「姓名 Facebook」）「姓名 照片」",
   term_policy_missing: "「姓名 政見 屆別年份」（例如「姓名 政見 2022」）「姓名 選舉公報」「姓名 臉書」（或「姓名 Facebook」）",
+  profile_detail_gap: "「姓名 學歷」「姓名 經歷」「姓名 簡介」（議會／機關個人頁、維基百科）",
 };
 export const NON_OFFICIAL_SOURCES = "候選人臉書／IG／YouTube、READr 政見總覽（whoareyou.readr.tw）、地方新聞、政黨候選人頁";
 
