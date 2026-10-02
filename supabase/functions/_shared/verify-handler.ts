@@ -21,6 +21,18 @@ type SupabaseLike = any;
  * （目前 198 筆 pending）本來就該讓人一次消化得完。2026-09-14 從 200 調到 800。
  */
 export const VERIFY_DAILY_LIMIT_PER_IP = 800;
+/**
+ * DiTrust 帳號的每日驗證上限，按帳號算（2026-10-02 維護者裁示，跟提交額度同一個理由，見 contribute-handler）。
+ * 這只是「一天最多投幾票」的總量；「同一筆貢獻每個來源 IP 只算一票」的去重（tallyByIp）完全不動，獨立核對的防護不變。
+ */
+export const VERIFY_DAILY_LIMIT_PER_DITRUST = 2400;
+
+/** 這個身份的驗證額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
+export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
+  return actor.level === "ditrust"
+    ? { limit: VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源 IP" };
+}
 
 /**
  * 靠「退回」生效的守門要記下退回了幾次（2026-09-24，leatherback：「任何靠拒絕來生效的機制，都必須記錄它拒絕了多少次——
@@ -59,12 +71,13 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
 
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
+  const vq = verifyQuotaFor(actor, ipHash);
   const { count: used, error: countError } = await supabase
     .from("contribution_votes").select("id", { count: "exact", head: true })
-    .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString());
+    .eq(vq.column, vq.value).gte("created_at", todayStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
-  if ((used ?? 0) >= VERIFY_DAILY_LIMIT_PER_IP) {
-    return { status: 429, body: { success: false, error: "rate_limited", message: `每個來源 IP 每日最多驗 ${VERIFY_DAILY_LIMIT_PER_IP} 筆` } };
+  if ((used ?? 0) >= vq.limit) {
+    return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每日最多驗 ${vq.limit} 筆` } };
   }
 
   const { data: contribution, error: cError } = await supabase
