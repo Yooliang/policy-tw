@@ -8,8 +8,8 @@ import { withTaskPolitician } from "../_shared/task-politician.ts";
 import { isFrontQueueAt, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
-import { CONTRIBUTE_DAILY_LIMIT_PER_IP } from "../_shared/contribute-handler.ts";
-import { VERIFY_DAILY_LIMIT_PER_IP } from "../_shared/verify-handler.ts";
+import { submitQuotaFor } from "../_shared/contribute-handler.ts";
+import { verifyQuotaFor } from "../_shared/verify-handler.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../_shared/verification-sources.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
@@ -60,6 +60,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 逐一記 11 個平行查詢各自完成的時間（累計毫秒；起點都差不多，約等於各自耗時）
     const timed = <T,>(name: string, p: PromiseLike<T>): Promise<T> => Promise.resolve(p).then((v) => { mark("q_" + name); return v; });
     if (!identity.ok) return json({ success: false, error: "identity_invalid", message: identity.error }, identity.status);
+    // 提交額度：DiTrust 帳號按帳號算（600）、匿名按來源 IP（200）；跟 contribute-handler 用同一支判斷
+    const submitQuota = submitQuotaFor(identity.actor, ipHashForIdentity);
+    const verifyQuota = verifyQuotaFor(identity.actor, ipHashForIdentity);
     const actor = identity.actor;
     agentName = actor.handle;
     const nameProblem = agentNameProblem(agentName);
@@ -123,12 +126,12 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         supabase.from("contribution_votes").select("contribution_id")
           .eq("verifier_ip_hash", ipHash)
           .order("created_at", { ascending: true }).range(from, to))),
-      timed("ip_contrib", // 額度是「每個來源 IP 每日」算的，不是每個代號。同一台機器跑三個代號共用同一份，
-      // 所以這裡要按 ip_hash 數，按 agent_name 數會給出偏低的用量、讓代理以為還有很多。
+      timed("ip_contrib", // 匿名：「每個來源 IP 每日」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
+      // DiTrust 帳號：按帳號（actor_id）數，見 submitQuotaFor。
       supabase.from("contributions").select("id", { count: "exact", head: true })
-        .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString())),
+        .eq(submitQuota.column, submitQuota.value).gte("created_at", todayStart.toISOString())),
       timed("ip_vote", supabase.from("contribution_votes").select("id", { count: "exact", head: true })
-        .eq("verifier_ip_hash", ipHash).gte("created_at", todayStart.toISOString())),
+        .eq(verifyQuota.column, verifyQuota.value).gte("created_at", todayStart.toISOString())),
       timed("my_answers", // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住。
       // 含 applied 表示這份只會成長、不會退場，跟「my votes」同一類，要翻頁撈（2026-09-19）
       fetchAllRows<{ task_id: string }>("my answered questions", (from, to) =>
@@ -271,16 +274,16 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
     // 而 429 是在 POST /report 才發生——那時候查證的工都已經做完，白費。
     const quota = {
-      scope: "每個來源 IP，UTC 零時重置；同一台機器的多個代號共用",
+      scope: `提交：${submitQuota.scope}；驗證：${verifyQuota.scope}。UTC 零時重置；同一台機器的多個匿名代號共用`,
       submit: {
-        limit: CONTRIBUTE_DAILY_LIMIT_PER_IP,
+        limit: submitQuota.limit,
         used: ipContribRes.count ?? 0,
-        remaining: Math.max(0, CONTRIBUTE_DAILY_LIMIT_PER_IP - (ipContribRes.count ?? 0)),
+        remaining: Math.max(0, submitQuota.limit - (ipContribRes.count ?? 0)),
       },
       verify: {
-        limit: VERIFY_DAILY_LIMIT_PER_IP,
+        limit: verifyQuota.limit,
         used: ipVoteRes.count ?? 0,
-        remaining: Math.max(0, VERIFY_DAILY_LIMIT_PER_IP - (ipVoteRes.count ?? 0)),
+        remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)),
       },
     };
     // protocol_version：代理拿它跟自己手上那份 skill.md 的版本比，不一樣就要重讀再繼續。

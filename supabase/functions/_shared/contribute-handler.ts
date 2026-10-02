@@ -30,6 +30,20 @@ type SupabaseLike = any;
  * 額度卡住的是自己人。等真的有外部代理進來、也真的出現濫用再往下收。
  */
 export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 200;
+/**
+ * DiTrust 帳號（agent_name=ditrust:<序號>）的每日提交上限，按帳號算、不按 IP（2026-10-02 維護者裁示）。
+ * 藍圖 docs/BLUEPRINT-agent-identity.md §6：「帳號多拿的是額度（註冊誘因）與貢獻榜歸屬，不是票」——
+ * 投票照舊每個來源 IP 一票，獨立核對的防護不變。匿名代理照舊每 IP 200。
+ * 起因：雲端 VM 關機再開只會輪到同一小撮臨時 IP（10-03 凌晨三個 IP 輪流），撞到當天已交滿的 IP 那一輪就交不出東西。
+ */
+export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 600;
+
+/** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
+export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
+  return actor.level === "ditrust"
+    ? { limit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源 IP" };
+}
 export const DEDUPE_WINDOW_HOURS = 24;
 const SITE_URL = "https://policy-tw.web.app";
 
@@ -206,15 +220,16 @@ export async function handleContribute(
 
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
+  const sq = submitQuotaFor(actor, ipHash);
   const { count: usedToday, error: countError } = await supabase
     .from("contributions").select("id", { count: "exact", head: true })
-    .eq("contributor_ip_hash", ipHash).gte("created_at", todayStart.toISOString());
+    .eq(sq.column, sq.value).gte("created_at", todayStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
   const used = usedToday ?? 0;
-  if (used + validation.items.length > CONTRIBUTE_DAILY_LIMIT_PER_IP) {
+  if (used + validation.items.length > sq.limit) {
     return {
       status: 429,
-      body: { success: false, error: "rate_limited", message: `每個來源 IP 每日最多 ${CONTRIBUTE_DAILY_LIMIT_PER_IP} 筆，今日已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: "tomorrow (UTC)" },
+      body: { success: false, error: "rate_limited", message: `${sq.scope}每日最多 ${sq.limit} 筆，今日已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: "tomorrow (UTC)" },
     };
   }
 
@@ -673,7 +688,7 @@ export async function handleContribute(
       ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
-      daily_quota: { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, used: used + inserted.length + bypassResults.size },
+      daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
       docs: `${SITE_URL}/skill.md`,
     },
   };
