@@ -38,6 +38,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
+import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
@@ -1194,6 +1195,57 @@ Deno.serve(async (req) => {
     }
 
     // ---- news_screen：新聞逐則初篩＋派工（2026-09-29）。news-fetch 收完就叫；不帶金鑰，靠成本上限 ----
+    // ---- bio_gaps：簡介提到、學歷／經歷欄沒列的，開任務（2026-10-04） ----
+    if (action === "bio_gaps") {
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
+      const dry = url.searchParams.get("dry") === "1";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
+      // query-bounds: ok — 有簡介的人物目前 175 位，order＋limit 1000
+      const { data: people, error: pErr } = await supabase.from("politicians").select("id, name, bio, education, experience")
+        .not("bio", "is", null).is("merged_into", null).order("id").limit(1000);
+      if (pErr) throw new Error(`bio_gaps politicians: ${pErr.message}`);
+      const cands = ((people ?? []) as BioPerson[]).filter(worthScanning);
+      // 一人一次：問過（不論結果）就不再問
+      const ids = cands.map((p) => p.id);
+      // query-bounds: ok — in() 最多 1000 個 id，每人一列
+      const { data: done } = ids.length > 0
+        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "politician").eq("question", "bio_education").in("subject_id", ids).limit(1000)
+        : { data: [] };
+      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+      const todo = cands.filter((p) => !doneSet.has(p.id)).slice(0, limit);
+      const startedAt = Date.now();
+      let asked = 0, created = 0, cost = 0;
+      const found: Array<Record<string, unknown>> = [];
+      const failures: Array<{ id: string; error: string }> = [];
+      for (const p of todo) {
+        if (Date.now() - startedAt > 45_000) break;
+        try {
+          const { state, questions } = buildBioGapAsk(p);
+          const res = await askJev(apiKey, state, questions);
+          asked++; cost += res.usage.cost;
+          if (!dry) await insertRecords(supabase, toRecords("politician", p.id, state, res));
+          const hit = (q: string) => {
+            const a = res.answers[q];
+            return a?.choice === "missing" && (a.probabilities?.missing ?? 0) >= BIO_GAP_MIN_PROBABILITY;
+          };
+          const v = { education: hit("bio_education"), experience: hit("bio_experience") };
+          if (!v.education && !v.experience) continue;
+          const entry: Record<string, unknown> = { politician_id: p.id, name: p.name, ...v };
+          if (!dry) {
+            const existing = await findOpenTaskForTarget(supabase, { politician_id: p.id, policy_id: null, task_type: "other" });
+            if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
+            else { const t = await createTask(supabase, bioGapTask(p, v), { source: "suggested", suggested_by: "jev-bio", created_by: "jev-bio" }); entry.task_id = t.id; created++; }
+          }
+          found.push(entry);
+        } catch (e) {
+          failures.push({ id: p.id, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return json({ success: true, dry, candidates: cands.length, already_done: doneSet.size, asked, created,
+        remaining: Math.max(0, cands.length - doneSet.size - asked), cost_usd: Number(cost.toFixed(6)), found, failures, elapsed_ms: Date.now() - startedAt });
+    }
+
     if (action === "news_screen") {
       const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
       if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
