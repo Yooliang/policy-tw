@@ -10,6 +10,7 @@ import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
+import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
@@ -279,6 +280,9 @@ usePageHead({
           <NewsTrackingPanel :days="activeRange.days" :range-label="activeRange.short" />
         </div>
       </div>
+
+      <!-- 2026-10-03 維護者：各 AI 模型的交件與投票表現。表格寬，佔整列；期間自己一組（7／14／30 天） -->
+      <ModelQualityPanel />
     </div>
     </div>
   </div>
