@@ -149,6 +149,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Stats.vue'),
   },
   {
+    path: '/ai',
+    name: 'ai',
+    component: () => import('../pages/Ai.vue'),
+  },
+  {
     path: '/profile',
     component: () => import('../pages/UserProfile.vue'),
   },

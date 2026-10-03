@@ -8,9 +8,7 @@ import PipelineChart from '../components/PipelineChart.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
-import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
-import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
@@ -241,7 +239,7 @@ usePageHead({
         </section>
       </div>
 
-      <!-- 貢獻榜佔左欄（它最長），運作狀態／缺口走勢／AI 讀取在右欄疊著；手機是單欄，依序排下來 -->
+      <!-- 貢獻榜佔左欄（它最長），運作狀態／缺口走勢／新聞追蹤在右欄疊著（AI 讀取 2026-10-03 搬到 /ai）；手機是單欄，依序排下來 -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="leaderboard">
             <!-- 時間窗跟著整頁那一組走（原本這張榜自己有 總榜／30 天／7 天 三顆鈕） -->
@@ -276,13 +274,10 @@ usePageHead({
         <div class="space-y-6">
           <PipelineChart :hours="activeRange.hours" :range-label="activeRange.short" />
           <GapTrendChart :hours="activeRange.hours" :range-label="activeRange.short" />
-          <AiReadsPanel :days="activeRange.days" :range-label="activeRange.short" />
           <NewsTrackingPanel :days="activeRange.days" :range-label="activeRange.short" />
         </div>
       </div>
 
-      <!-- 2026-10-03 維護者：各 AI 模型的交件與投票表現。表格寬，佔整列；期間自己一組（7／14／30 天） -->
-      <ModelQualityPanel />
     </div>
     </div>
   </div>

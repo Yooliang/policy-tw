@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { MessageSquareText, ListChecks, BarChart3 } from 'lucide-vue-next'
+import { MessageSquareText, ListChecks, BarChart3, Bot } from 'lucide-vue-next'
 
 /**
- * 貢獻／任務／統計三頁共用的切換列。
+ * 統計／貢獻／任務／AI 四頁共用的切換列。
  * 2026-09-18：原本這三塊擠在 /ai-assistant 一頁裡用分頁切換，拆成三個網址。
  * 樣式沿用縣市選擇器（GlobalRegionSelector）：選中是藍底白字，未選是白底灰字、hover 才透出藍。
  * 站上「一組互斥的選擇」只有一種長相。
  */
 
-defineProps<{ current: 'contributions' | 'tasks' | 'stats' }>()
+defineProps<{ current: 'contributions' | 'tasks' | 'stats' | 'ai' }>()
 
 const ACTIVE = 'bg-blue-600 text-white border-blue-600 shadow-lg'
 const INACTIVE = 'bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600'
@@ -19,6 +19,8 @@ const LINKS = [
   { key: 'stats', to: '/stats', label: '統計', icon: BarChart3 },
   { key: 'contributions', to: '/contributions', label: '貢獻', icon: MessageSquareText },
   { key: 'tasks', to: '/tasks', label: '任務', icon: ListChecks },
+  // 2026-10-03 維護者：AI 讀取、各模型表現從統計頁搬到這裡
+  { key: 'ai', to: '/ai', label: 'AI', icon: Bot },
 ] as const
 </script>
 
