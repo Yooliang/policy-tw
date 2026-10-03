@@ -13,9 +13,10 @@ const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
  * 被 Cloudflare 在邊緣擋掉的請求進不到 Worker，數不到。
  *
  * 2026-09-29 維護者：改成圖表；代理讀協議（/skill.md，多半是我們自己的貢獻代理）另外算，不混進「AI 當場來讀」。
+ * 2026-10-03 維護者：代理讀協議改成列表裡的一列、只放數字（原本是表格下方一句註解）；不畫進折線圖。
  */
 
-// 跟著統計頁的時間窗（2026-09-24）
+// 時間窗由外層頁面決定（2026-10-03 起在 /ai 頁，頁上自己一組 7／14／30 天）
 const props = withDefaults(defineProps<{ days?: number; rangeLabel?: string }>(), { days: 7, rangeLabel: '7D' })
 
 interface Row { kind: string; agent: string; hits: number }
@@ -107,7 +108,10 @@ const chartOptions = computed(() => ({
 
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="ai-reads">
-    <h3 class="font-black text-navy-900 mb-1 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取({{ rangeLabel }})</h3>
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+      <h3 class="font-black text-navy-900 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取({{ rangeLabel }})</h3>
+      <slot name="actions" />
+    </div>
     <p class="text-xs text-slate-500 mb-3">AI 讀完正見直接回答使用者，不一定有人點進來；這裡數的是正見.tw 被讀了幾次（每日，對數刻度）。</p>
     <p v-if="loaded && failed" class="text-sm text-slate-500">暫時讀不到統計。</p>
     <p v-else-if="loaded && rows.length === 0" class="text-sm text-slate-500">還沒有資料（2026-09-23 開始記錄）。</p>
@@ -124,11 +128,14 @@ const chartOptions = computed(() => ({
             </td>
             <td class="py-1.5 text-right font-black text-navy-900 tabular-nums">{{ k.total.toLocaleString() }}</td>
           </tr>
+          <tr class="border-t border-slate-100" data-testid="ai-reads-protocol">
+            <td class="py-1.5 pr-2">
+              <div class="font-medium text-slate-800 flex items-center gap-1.5"><span class="w-2 h-2 shrink-0"></span>代理讀協議</div>
+            </td>
+            <td class="py-1.5 text-right font-black text-navy-900 tabular-nums">{{ protocolTotal.toLocaleString() }}</td>
+          </tr>
         </tbody>
       </table>
-      <p class="text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100">
-        另有代理讀協議 {{ protocolTotal.toLocaleString() }} 次（讀 /skill.md，多半是正見自己的貢獻代理領任務前讀規則，不算在上面）。
-      </p>
     </template>
   </section>
 </template>

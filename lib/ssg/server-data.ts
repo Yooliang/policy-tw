@@ -126,7 +126,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
   return { totalPoliticians: politicians.length, politiciansByElection }
 }
 
-/** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
+/** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /ai /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
 const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/sources']
 
 const VILLAGE_CHIEF = '村里長'
