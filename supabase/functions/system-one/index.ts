@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
-import { aggregateFieldVerdicts, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -81,7 +81,7 @@ async function insertRecords(supabase: Sb, rows: DecisionRecord[]): Promise<{ in
 }
 
 /** 組一筆政見的 state 並問 Jev。回傳寫入結果與答案；找不到政見回 null */
-async function askPolicy(supabase: Sb, apiKey: string, policyId: string) {
+async function askPolicy(supabase: Sb, apiKey: JevKeyLike, policyId: string) {
   const { data: target, error: tErr } = await supabase.from("policies")
     .select("id, politician_id, title, description, election_id").eq("id", policyId).is("removed_at", null).maybeSingle();
   if (tErr) throw new Error(`policies read: ${tErr.message}`);
@@ -124,7 +124,7 @@ type VoteBudgetRow = { id: string; contribution_type: string; payload: Record<st
  * 票數預算（影子模式）：對一筆貢獻逐維問 Jev、算出它「應該」要幾票，寫進 jev_decisions（question=vote_budget）。
  * 只記錄、不套用門檻。單筆端點（vote_budget）與排程掃描（vote_budget_sweep）共用。
  */
-async function voteBudgetFor(supabase: Sb, apiKey: string, c: VoteBudgetRow, requester: string | null) {
+async function voteBudgetFor(supabase: Sb, apiKey: JevKeyLike, c: VoteBudgetRow, requester: string | null) {
   const payload = (c.payload ?? {}) as Record<string, unknown>;
   const claim = claimOf(c.contribution_type, payload);
 
@@ -226,7 +226,7 @@ type NewsRow = { id: number; source_id: number; url: string; title: string; summ
  * 兩個呼叫同時進來時不能各開一件任務：先用條件式更新佔位（screened_at 從 NULL 改成現在），搶到的才問；
  * 這一輪沒做完（時間到、Jev 掛了）的放回去（screened_at 改回 NULL），下一小時再篩。
  */
-async function newsScreen(supabase: Sb, apiKey: string, limit: number) {
+async function newsScreen(supabase: Sb, apiKey: JevKeyLike, limit: number) {
   const startedAt = Date.now();
   const now = new Date();
 
@@ -464,8 +464,8 @@ Deno.serve(async (req) => {
     // ---- ask：落庫後的觸發叫這個。只收 service role，因為會花錢 ----
     if (action === "ask") {
       if (bearerOf(req) !== serviceKey) return json({ success: false, error: "ask 只收 service role" }, 401);
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       if (body.subject_type !== "policy" || typeof body.subject_id !== "string") {
         return json({ success: false, error: "目前只支援 subject_type=policy，subject_id 必填" }, 400);
       }
@@ -476,8 +476,8 @@ Deno.serve(async (req) => {
 
     // ---- backfill：排程叫這個。不帶金鑰，靠成本上限 ----
     if (action === "backfill") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), BACKFILL_MAX);
       // 成本上限：時間窗內已經問滿就什麼都不做。這樣不管誰打、打幾次，花費上限都是固定的。
       const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
@@ -507,8 +507,8 @@ Deno.serve(async (req) => {
 
     // ---- precheck：系統來源票。排程叫這個。不帶金鑰，靠成本上限 ----
     if (action === "precheck") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), BACKFILL_MAX);
       const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
       const { count, error: cErr } = await supabase.from("jev_decisions")
@@ -658,8 +658,8 @@ Deno.serve(async (req) => {
 
     // ---- legacy：早期匯入、有來源、沒查核履歷的政見，系統先核（排程）----
     if (action === "legacy") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
       // 候選：legacy_audit 任務會派的那些，扣掉已經判過的
       const { data: tasks, error: tErr } = await supabase.rpc("contribution_auto_tasks_legacy");
@@ -714,8 +714,8 @@ Deno.serve(async (req) => {
     // 超過閾值的維度各加一票。**只記錄、不套用門檻**——0～5 的加成沒有校準資料，
     // 先看真實分布再決定要不要接上去。設計與理由見 docs/PROPOSAL-jev-vote-budget.md。
     if (action === "vote_budget") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const contributionId = typeof body.contribution_id === "string" ? body.contribution_id.trim() : "";
       if (!/^[0-9a-f-]{36}$/i.test(contributionId)) return json({ success: false, error: "contribution_id 必填（uuid）" }, 400);
       const requester = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
@@ -747,8 +747,8 @@ Deno.serve(async (req) => {
     // 09-21 上線後只有 2 筆手動測試，「先看真實分布再決定」一直沒有分布可看。這裡每 10 分鐘撿 pending 且還沒算過
     // 票數預算的貢獻各問一次，只記錄不套用；累積到幾百筆再對照它們後來的結果（applied／rejected）決定閾值與要不要接上。
     if (action === "vote_budget_sweep") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
       const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
       const { count, error: cErr } = await supabase.from("jev_decisions")
@@ -847,8 +847,8 @@ Deno.serve(async (req) => {
     // 新進的提交在票數預算那次呼叫就會問（#269）；這裡給之前就交了的。一筆一次 Jev、只問 followup 這一題。
     // since_hours 預設 168（7 天）、limit 預設 60（上限 200）；dry=1 只回判定、不寫紀錄不開任務。
     if (action === "submission_followups") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const dry = url.searchParams.get("dry") === "1";
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
       const sinceHours = Math.min(Math.max(Number(url.searchParams.get("since_hours")) || 168, 1), 24 * 30);
@@ -900,8 +900,8 @@ Deno.serve(async (req) => {
     // 協議叫驗證者把範圍外的缺陷另提 task_suggestion，實際上多半只寫在 note 裡、沒有下游。
     // dry=1：只回判定結果，不寫紀錄、不開任務（拿來掃一遍現況）。
     if (action === "followups") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const dry = url.searchParams.get("dry") === "1";
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 60, 1), 200);
       const sinceHours = Math.min(Math.max(Number(url.searchParams.get("since_hours")) || 1, 1), 24 * 14);
@@ -917,10 +917,12 @@ Deno.serve(async (req) => {
       const withNote = ((votes ?? []) as Array<FollowupVote & { contribution_id: string }>).filter(worthAsking);
       const ids = withNote.map((v) => v.id);
       // query-bounds: ok — in() 最多 1000 個 id，一個 id 最多幾筆判定
+      // redo=1：補掃（2026-10-04 加 misattributed 之後）——以前判 none 的票再問一次；判過別類的不重問（任務早開了）
+      const redo = url.searchParams.get("redo") === "1";
       const { data: done } = ids.length > 0 && !dry
-        ? await supabase.from("jev_decisions").select("subject_id").eq("subject_type", "vote").eq("question", "followup").in("subject_id", ids).limit(1000)
+        ? await supabase.from("jev_decisions").select("subject_id, choice").eq("subject_type", "vote").eq("question", "followup").in("subject_id", ids).limit(1000)
         : { data: [] };
-      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string }>).map((d) => d.subject_id));
+      const doneSet = new Set(((done ?? []) as Array<{ subject_id: string; choice: string }>).filter((d) => !redo || d.choice !== "none").map((d) => d.subject_id));
       const list = withNote.filter((v) => !doneSet.has(v.id)).slice(0, limit);
       const cids = [...new Set(list.map((v) => v.contribution_id))];
       // query-bounds: ok — in() 最多 200 個 id，每個 id 一列
@@ -958,8 +960,8 @@ Deno.serve(async (req) => {
     // +2／−2 不再由代理先打 judge 取得：票先是 ±1，這裡（cron 每 5 分鐘）抓那個網址、問 Jev 是否支持這張票的判定，
     // 核得過才把 judge_backed 翻 true → BEFORE 觸發器重算 weight → AFTER 觸發器重算共識。
     if (action === "evidence") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 60);
       type Vote = { id: string; contribution_id: string; verdict: string; evidence_url: string; note: string | null; agent_name: string | null; created_at: string };
       // query-bounds: ok — 有 order 有 limit（≤60）
@@ -1040,8 +1042,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === "judge") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const contributionId = typeof body.contribution_id === "string" ? body.contribution_id.trim() : "";
       const targetUrl = typeof body.url === "string" ? body.url.trim() : "";
       if (!/^[0-9a-f-]{36}$/i.test(contributionId)) return json({ success: false, error: "contribution_id 必填（uuid）" }, 400);
@@ -1134,8 +1136,8 @@ Deno.serve(async (req) => {
 
     // ---- extract：代理找到第一來源，Jev 選值（使用者 2026-09-19：任務應該讓代理自己找來源，不一定要看既有的那個）----
     if (action === "extract") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const taskId = typeof body.task_id === "string" ? body.task_id.trim() : "";
       const targetUrl = typeof body.url === "string" ? body.url.trim() : "";
       const parsed = parseExtractTask(taskId);
@@ -1193,8 +1195,8 @@ Deno.serve(async (req) => {
 
     // ---- news_screen：新聞逐則初篩＋派工（2026-09-29）。news-fetch 收完就叫；不帶金鑰，靠成本上限 ----
     if (action === "news_screen") {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) return json({ success: false, error: "OPENROUTER_API_KEY is not configured" }, 500);
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || NEWS_SCREEN_MAX, 1), NEWS_SCREEN_MAX);
       return json({ success: true, min_probability: NEWS_MIN_PROBABILITY, ...(await newsScreen(supabase, apiKey, limit)) });
     }

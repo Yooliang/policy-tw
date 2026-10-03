@@ -171,6 +171,11 @@
 
 - **政見缺漏、補基本資料回「查無」要用搜尋引擎與非官方來源，`checked_urls` 至少 5 個；查證來源加 READr 政見總覽**（協議 1.40.0；維護者 2026-10-01 核准）｜做了什麼：`task-guidance.ts` 的 `policy_missing`／`profile_gap` 說明與 `not_found` 的提示加上：至少搜三組關鍵字（「姓名 政見」「姓名 參選 2026」「姓名 臉書」，照片加「姓名 照片」），看候選人臉書／IG／YouTube、READr 政見總覽、地方新聞、政黨候選人頁；回 `not_found` 時 `checked_urls` 至少 5 個、至少一個搜尋結果頁、`finding` 寫出搜了哪些關鍵字。交件守門（`not-found-guard.ts`）：自動派的這兩種任務回 `not_found` 而 `checked_urls` 去重後少於 5 個 → `400 not_found_search_insufficient`（不算被拒，記 `gate_rejections`）。`verification_sources` 加「READr 政見總覽」（media、provides policy；2026-10-01 實測 /2026 還是 404，個人頁 `/politics/<數字>` 有 2014～2024 歷次政見，站內沒有搜尋網址，要用搜尋引擎找）｜為什麼：抽 8 筆政見缺漏的 not_found，Haiku 代理多半只看中選會、議會官網、中央社、自由時報，checked_urls 2～4 個，很少用搜尋引擎、沒人查候選人臉書；Sonnet 代理用搜尋引擎找到 READr。「查無」一通過，這個缺口 14 天不再派｜錯了的代價：5 個是數量門檻，擋不住湊數（貼 5 個無關網址）——內容好壞仍靠驗證者與 Jev 的 `search_not_targeted` 維度；「至少一個搜尋結果頁」只寫在說明、沒做成守門（搜尋網址格式太多）。手動派的政見缺漏任務（task_id 是 uuid）不在守門範圍。
 
+## 2026-10-04
+
+- **Jev 直接接 TypeSafe，OpenRouter 退為備援**｜維護者：「正式進入 jev，而不是只過 openrouter」；設了 `TYPESAFE_API_KEY` 就打 `api.typesafe.ai/v1/systemone`（釘 `jev-1.13.0`），沒設才退回 OpenRouter｜紀錄的 model 存 `typesafe/jev-1.13.0`，跟 OpenRouter 時期的 `typesafe/jev-1.13-20260917` 分得開；TypeSafe 只回 token 數，成本用公告價（每百萬輸入 token 0.042 美元）換算。
+- **Jev 讀備註多一類「政見歸錯人」（misattributed）**｜林碩彥的政見其實是公報隔壁許育綸的，驗證者寫在備註裡，但那是在講被驗證的這筆本身，原本一律歸「沒有範圍外問題」，許育綸缺的政見沒人補｜判到這一類就開任務：去找真正的主人、缺就替他補；掛錯的那筆照投票流程退件。`followups` 加 `redo=1` 補掃以前判「沒有」的票。
+
 ## 2026-10-03
 
 - **名單清查加入鄉鎮市長、原住民區長，並插隊**｜盤點 2026 只收了縣市長與議員，其餘七種 0 筆，維護者：「要收」「插隊列入」｜這兩種人少（2022：489＋20），一縣市一筆任務清得完；範圍表加 regions，只派到真的有這種選舉的縣市（13 縣／4 直轄市）。村里長、鄉鎮市民代表、原住民區民代表（約一萬七千人）不派人逐筆抄，另案查中選會投票前是否公開結構化名單、走系統比對匯入。

@@ -1,6 +1,6 @@
 // Jev 讀投票備註找範圍外的問題（2026-09-23）。
 // 實例：陳泓維政見的驗證票寫「原文是親民黨提名，DB 是無黨籍……留給之後的 correction 處理」——沒有任何下游接手。
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { buildFollowupAsk, FOLLOWUP_CHOICES, followupTask, worthAsking } from "./vote-followup.ts";
 import { submissionFollowupTask, submissionText, worthAskingSubmission } from "./vote-followup.ts";
 import { QUESTIONS, SUBJECT_TYPES } from "./system-one.ts";
@@ -56,4 +56,14 @@ Deno.test("提交說明：note／finding／reason 合起來、太短不問、任
   assertEquals(String(t.description).includes("轉戰台北市"), true);
   assertEquals((t.target_extra as Record<string, unknown>).followup_of_contribution, "c1");
   assertEquals((t.target_extra as Record<string, unknown>).followup_of_vote, undefined);
+});
+
+Deno.test("misattributed：選項存在、任務說明叫人去補真正的主人", () => {
+  assert("misattributed" in FOLLOWUP_CHOICES);
+  const t = followupTask(
+    { id: "v1", verdict: "disagree", note: "這條其實是公報上隔壁許育綸（勞動黨）的政見，不是林碩彥的", agent_name: "felix", created_at: "2026-10-04T00:00:00Z" },
+    { id: "c1", contribution_type: "policy", payload: { politician_id: "p1", title: "勞權教育" } },
+    "misattributed", "林碩彥");
+  assertStringIncludes(t.title, "政見歸屬");
+  assertStringIncludes(t.description ?? "", "真正屬於誰");
 });
