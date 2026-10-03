@@ -21,6 +21,9 @@ export const FOLLOWUP_CHOICES = {
   policy_content: "指出另一條政見的標題、描述、數字、來源網址、提出日期或進度有問題（不是這次被驗證的那條）",
   duplicate: "指出資料庫裡有重複的人物或重複的政見",
   not_policy: "指出某條已上線的政見其實不是政見（標語、個人表態、別人的政績）",
+  // 2026-10-04：林碩彥的政見其實是公報上隔壁許育綸的，驗證者寫在備註裡，但那是在講「這筆本身」，
+  // 原本一律歸 none，許育綸那邊缺的政見沒人去補。這一類就是要把「真正的主人」撿起來。
+  misattributed: "指出這筆資料其實屬於另一位人物（例如公報上相鄰候選人的政見被掛到這個人名下），那位真正的人物可能缺這筆資料",
 } as const;
 export type FollowupChoice = keyof typeof FOLLOWUP_CHOICES;
 
@@ -75,7 +78,8 @@ export function buildFollowupAsk(v: FollowupVote, c: FollowupContribution): { st
         instructions:
           "vote.note 是一位驗證者對 being_verified 這筆資料投票時寫的理由。" +
           "判斷 note 有沒有**另外**指出一個不屬於這次驗證範圍的問題（別的欄位、別的人物、別條政見），而且這個問題值得有人去查。" +
-          "note 只是在解釋為什麼同意或反對 being_verified 本身 → none。note 提到範圍外問題 → 選問題落在的那一類。",
+          "note 只是在解釋為什麼同意或反對 being_verified 本身 → none。note 提到範圍外問題 → 選問題落在的那一類。" +
+          "例外：note 指出 being_verified 這筆其實是**另一位人物**的（點名或描述了真正的主人）→ misattributed，即使它也是反對的理由。",
         criteria: { ...FOLLOWUP_CHOICES },
       },
     },
@@ -90,7 +94,14 @@ const LABEL: Record<Exclude<FollowupChoice, "none">, string> = {
   policy_content: "政見內容",
   duplicate: "重複資料",
   not_policy: "是不是政見",
+  misattributed: "政見歸屬（疑似是別人的）",
 };
+
+/** 歸錯人：任務要去找「真正的主人」，不是改這筆（這筆照投票流程處理） */
+export const MISATTRIBUTED_GUIDE =
+  "這一類是「資料掛錯人」：請打開原始來源（選舉公報要對準候選人自己那一欄，圖片版就截圖放大核對，不要只靠抽文字），" +
+  "確認這段內容真正屬於誰。若那位人物在正見上還沒有這筆，就為**他**用 policy（或對應型別）補交，source_urls 附同一份來源；" +
+  "掛錯的那一筆不用你處理，它會照驗證流程退件。查完發現其實沒掛錯，就用 no_change 回報你核對了哪一欄。";
 
 /** Jev 判「有」→ 任務內容。標題與描述都引用驗證者原話，不讓 Jev 寫字 */
 export function followupTask(v: FollowupVote, c: FollowupContribution, choice: Exclude<FollowupChoice, "none">, subjectName: string | null): TaskInput {
@@ -103,6 +114,7 @@ export function followupTask(v: FollowupVote, c: FollowupContribution, choice: E
     `驗證者 ${v.agent_name ?? "（未具名）"} 在 ${v.created_at.slice(0, 10)} 驗證另一筆資料（${c.contribution_type}，${c.id}）時順手寫下：`,
     `「${String(v.note ?? "").trim().slice(0, 1400)}」`,
     "這是系統從備註裡撿出來的線索，不是結論。請自己打開來源查證：真的有錯就用 correction／removal 等對應型別提交；查過發現沒問題就用 no_change 回報你查了什麼。",
+    ...(choice === "misattributed" ? [MISATTRIBUTED_GUIDE] : []),
   ].join("\n");
   return {
     title,

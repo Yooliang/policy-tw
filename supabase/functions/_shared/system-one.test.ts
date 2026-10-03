@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { textSimilarity, SAME_CONTENT_THRESHOLD, buildPairAsk, nameHit, normalizeName, aggregateExtract, buildExtractAsk, parseExtractTask, aggregateFieldVerdicts, articleBodyFromJsonLd, combineSources, hasUsableText, flattenCorrection, askJev, buildPolicyAsk, buildSourceSupportAsk, claimOf, fetchSource, focusText, htmlToText, JEV_MODEL, toRecords, validateRecord } from "./system-one.ts";
 
 const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒補助10萬元", description: "承諾當選新北市長後，每位新生兒提供10萬元補助。", election_id: null };
@@ -287,4 +287,32 @@ Deno.test("textSimilarity：轉載幾乎一樣 → 高；不同稿 → 低", () 
 Deno.test("claimOf：no_change 送出宣告、查了哪裡、看到什麼", () => {
   const claim = claimOf("no_change", { task_id: "auto:policy_missing:x", outcome: "not_found", checked_urls: ["https://www.cna.com.tw/"], finding: "查了中央社首頁，沒有找到", agent_tool: "y" });
   assertEquals(Object.keys(claim).sort(), ["checked_urls", "finding", "outcome", "task_id"]);
+});
+
+// ---- TypeSafe 直連（2026-10-04） ----
+import { jevKeyFromEnv, TYPESAFE_MODEL, TYPESAFE_URL, validateRecord as _vr } from "./system-one.ts";
+
+Deno.test("jevKeyFromEnv：有 TYPESAFE_API_KEY 走 TypeSafe，沒有才退回 OpenRouter，都沒有回 null", () => {
+  assertEquals(jevKeyFromEnv((k) => ({ TYPESAFE_API_KEY: "t", OPENROUTER_API_KEY: "o" } as Record<string, string>)[k])?.provider, "typesafe");
+  assertEquals(jevKeyFromEnv((k) => ({ OPENROUTER_API_KEY: "o" } as Record<string, string>)[k])?.provider, "openrouter");
+  assertEquals(jevKeyFromEnv(() => undefined), null);
+});
+
+Deno.test("askJev（TypeSafe）：打原生端點、釘 jev-1.13.0，回應攤成 typesafe/ 前綴＋換算成本", async () => {
+  let seenUrl = "", seenBody: Record<string, unknown> = {};
+  const fake = (async (u: string | URL | Request, init?: RequestInit) => {
+    seenUrl = String(u); seenBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ model: "jev-1.13.0", answers: { q: { type: "choice", choice: "a", probabilities: { a: 1 }, confidence: 1 } }, usage: { input_tokens: 1_000_000, output_tokens: 5 } }));
+  }) as typeof fetch;
+  const res = await askJev({ provider: "typesafe", key: "k" }, { a: 1 }, {}, fake);
+  assertEquals(seenUrl, TYPESAFE_URL);
+  assertEquals(seenBody.model, TYPESAFE_MODEL);
+  assertEquals(res.model, "typesafe/jev-1.13.0");
+  assertEquals(Number(res.usage.cost.toFixed(3)), 0.042);
+});
+
+Deno.test("validateRecord：收 typesafe/jev-1.13.0（語意版本），仍拒 alias", () => {
+  const base = { subject_type: "policy", subject_id: "x", question: "is_policy", choice: "a", probability: 1, state: { a: 1 } } as const;
+  assertEquals(_vr({ ...base, model: "typesafe/jev-1.13.0" }), null);
+  assert(_vr({ ...base, model: "typesafe/jev-latest" }) !== null);
 });

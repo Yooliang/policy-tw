@@ -11,6 +11,29 @@
 export const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 /** 釘版本，不用 ~typesafe/jev-latest：alias 換版不通知，而我們要能回答「當初為什麼這樣定案」 */
 export const JEV_MODEL = "typesafe/jev-1.13";
+
+/**
+ * 直接接 TypeSafe（2026-10-04 維護者：「正式進入 jev，而不是只過 openrouter」）。
+ * 設了 TYPESAFE_API_KEY 就走 TypeSafe 自己的端點；沒設才退回 OpenRouter，金鑰換手期間不斷線。
+ * 版本一樣釘死（jev-1.13.0），理由同上。紀錄的 model 存 "typesafe/" ＋ 回應裡的版本（typesafe/jev-1.13.0），
+ * 跟 OpenRouter 時期的 typesafe/jev-1.13-20260917 分得開，platform_costs 的 LIKE 'typesafe/%' 照樣算得到。
+ * TypeSafe 只回 token 數、不回金額：成本用公告價（每百萬輸入 token 0.042 美元，輸出不計費）換算。
+ */
+export const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
+export const TYPESAFE_MODEL = "jev-1.13.0";
+export const TYPESAFE_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000;
+
+export interface JevKey { provider: "typesafe" | "openrouter"; key: string }
+/** 字串＝舊寫法（OpenRouter 金鑰），留給既有測試與呼叫端 */
+export type JevKeyLike = JevKey | string;
+
+export function jevKeyFromEnv(get: (name: string) => string | undefined): JevKey | null {
+  const ts = get("TYPESAFE_API_KEY")?.trim();
+  if (ts) return { provider: "typesafe", key: ts };
+  const or = get("OPENROUTER_API_KEY")?.trim();
+  return or ? { provider: "openrouter", key: or } : null;
+}
+export const JEV_KEY_MISSING = "TYPESAFE_API_KEY（或退回用的 OPENROUTER_API_KEY）未設定";
 /** 門檻 0.95：同題重問只有機率 ≤0.55 會換答案，兩次都 ≥0.95 的 155 題全數一致（藍圖 §8-1） */
 export const MIN_PROBABILITY = 0.95;
 
@@ -21,7 +44,8 @@ export type SubjectType = (typeof SUBJECT_TYPES)[number] | "vote";
 export type Question = (typeof QUESTIONS)[number];
 
 /** 帶日期的完整版本才收（typesafe/jev-1.13-20260917）。收了 alias，半年後沒人知道那個 latest 是哪一版 */
-export const MODEL_RE = /^[a-z0-9~._-]+\/[a-z0-9._-]+-\d{8}$/i;
+// TypeSafe 直連回的是語意版本（jev-1.13.0），存成 typesafe/jev-1.13.0：也是完整版本、不是 alias
+export const MODEL_RE = /^[a-z0-9~._-]+\/[a-z0-9._-]+-(\d{8}|\d+\.\d+\.\d+)$/i;
 
 // ---- 政見三判定的 state 與題目 ----
 
@@ -113,20 +137,45 @@ export interface JevResponse {
 }
 
 export async function askJev(
-  apiKey: string,
+  apiKey: JevKeyLike,
   state: Record<string, unknown>,
   questions: Record<string, JevQuestion>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<JevResponse> {
+  const k: JevKey = typeof apiKey === "string" ? { provider: "openrouter", key: apiKey } : apiKey;
+  if (k.provider === "typesafe") return askTypeSafe(k.key, state, questions, fetchImpl);
   const res = await fetchImpl(OPENROUTER_DECISIONS_URL, {
     method: "POST",
-    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers: { "Authorization": `Bearer ${k.key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: JEV_MODEL, state, questions }),
   });
   if (!res.ok) throw new Error(`openrouter decisions ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const body = await res.json() as JevResponse;
   if (!body?.answers || !body?.model) throw new Error("openrouter decisions 回應缺 answers 或 model");
   return body;
+}
+
+/** TypeSafe 原生端點：回應攤成跟 OpenRouter 同一個形狀（model 加 typesafe/ 前綴、usage 補上換算的 cost） */
+async function askTypeSafe(
+  key: string,
+  state: Record<string, unknown>,
+  questions: Record<string, JevQuestion>,
+  fetchImpl: typeof fetch,
+): Promise<JevResponse> {
+  const res = await fetchImpl(TYPESAFE_URL, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: TYPESAFE_MODEL, state, questions }),
+  });
+  if (!res.ok) throw new Error(`typesafe systemone ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const body = await res.json() as { model?: string; answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; output_tokens?: number } };
+  if (!body?.answers || !body?.model) throw new Error("typesafe systemone 回應缺 answers 或 model");
+  const input = Number(body.usage?.input_tokens ?? 0);
+  return {
+    model: body.model.includes("/") ? body.model : `typesafe/${body.model}`,
+    answers: body.answers,
+    usage: { input_tokens: input, output_tokens: Number(body.usage?.output_tokens ?? 0), cost: input * TYPESAFE_USD_PER_INPUT_TOKEN },
+  };
 }
 
 // ---- 紀錄 ----
@@ -185,7 +234,7 @@ export function validateRecord(r: Partial<DecisionRecord> | null | undefined): s
   if (!r.choice || typeof r.choice !== "string") return "choice 必填";
   if (typeof r.probability !== "number" || r.probability < 0 || r.probability > 1) return "probability 要是 0～1 的數字";
   if (r.confidence != null && (typeof r.confidence !== "number" || r.confidence < 0 || r.confidence > 1)) return "confidence 要是 0～1 的數字";
-  if (!r.model || !MODEL_RE.test(r.model)) return "model 要用回應裡帶日期的完整版本（例如 typesafe/jev-1.13-20260917），不收 alias";
+  if (!r.model || !MODEL_RE.test(r.model)) return "model 要用回應裡的完整版本（例如 typesafe/jev-1.13-20260917 或 typesafe/jev-1.13.0），不收 alias";
   if (r.state == null || typeof r.state !== "object" || Object.keys(r.state).length === 0) return "state 必填且不能是空物件——少了它事後無法重現";
   return null;
 }
