@@ -12,8 +12,9 @@ const activeElection = computed(() => getActiveElection())
 <template>
   <footer class="bg-navy-900 text-slate-400 py-12 border-t border-navy-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-6 gap-8">
-        <div class="col-span-1 md:col-span-2">
+      <!-- 手機版 2×2（2026-10-03 維護者）：「正見」簡介佔滿一列，政見／選舉／貢獻／關於兩欄排；電腦版不變 -->
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-8">
+        <div class="col-span-2 md:col-span-2">
           <h3 class="text-white text-lg font-bold mb-4">正見</h3>
           <p class="text-sm leading-relaxed mb-4 max-w-sm">
             匯聚多元視角，智能解析政見，讓正確被看見。<br/>
