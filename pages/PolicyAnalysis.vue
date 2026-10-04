@@ -40,7 +40,7 @@ const relayCases = computed(() => {
       cases.push({
         id: `case-${policy.id}`,
 
-        mainTitle: policy.title.includes('園區') ? '高屏產業聚落接力案' : policy.title,
+        mainTitle: policy.title,
         category: policy.category,
         policies: chain,
         involvedPoliticianIds: [...new Set(chain.map(p => p.politicianId))],

@@ -324,7 +324,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           : null,
         votes: (data.votes ?? []).map((v) => pick(v, ["verdict", "evidence_url", "note", "agent_name", "resolved_politician_id", "created_at"])),
         pending_adjudications: data.pending_adjudications ?? 0,
-        hint: "正方＝contribution.source_urls，反方＝votes 裡 disagree 的 evidence_url／note；都打開、獨立判斷。uphold＝原貢獻正確、reject＝原貢獻有誤；payload 帶 contribution_id、verdict、reason（≥20 字）、checked_urls；身份爭議多帶 resolved_politician_id。你的裁決會再被 3 票驗證才定案。",
+        hint: "正方＝contribution.source_urls，反方＝votes 裡 disagree 的 evidence_url／note；都打開、獨立判斷。uphold＝原貢獻正確、reject＝原貢獻有誤；payload 帶 contribution_id、verdict、reason（≥20 字）、checked_urls；身份爭議多帶 resolved_politician_id。**來源是選舉公報且為圖片版時，請截圖放大核對候選人自己那一欄，不要只看抽出來的文字**——公報圖片版常把相鄰候選人的政見黏在一起。你的裁決會再被 3 票驗證才定案。",
       };
     }
     default:
