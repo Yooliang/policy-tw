@@ -13,7 +13,7 @@
 #   本機 ：目前登入那個帳號的即時值，用 resets_at 比對認人後蓋掉 Aegis 的舊值
 #   🔴 10-01 ① Aegis 的 gs it 凍在 88%、實際 99%（回報排程指到搬走的舊路徑）
 #       ② 本機那支把帳號寫死成 gsit，但登入換成 cwen → 兩行都變 cwen
-import datetime, io, math, subprocess
+import datetime, io, math, subprocess, sys
 NL = chr(10)   # 不在字串字面值裡寫反斜線 n：工具參數會把它變成真的換行（10-02 連踩兩次）
 
 WEEK_UNITS = 192                                     # 一週切幾份
@@ -147,7 +147,7 @@ for acct in sorted(rows):
 total = sum(n for _, n in plans)
 names = []
 if total:
-    names = subprocess.run(['C:/Python312/python.exe', 'gen_names.py', str(total)],
+    names = subprocess.run([sys.executable, 'gen_names.py', str(total)],
                            capture_output=True, text=True).stdout.split()
 specs, i = [], 0
 for acct, n in plans:
