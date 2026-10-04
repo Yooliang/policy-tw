@@ -29,6 +29,7 @@ import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { officeTitles } from '../lib/politician-office'
 
 
 const route = useRoute()
@@ -57,6 +58,12 @@ const policyId = computed(() => route.params.policyId)
 watch(policyId, () => { progressRequest.reset(); validityRequest.reset() })
 const policy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 const politician = computed(() => policy.value ? politicians.value.find(c => String(c.id) === String(policy.value!.politicianId)) : null)
+/**
+ * 提出者的職稱＝現任公職（2026-10-04 維護者：職稱跟參選狀況分開）。
+ * 原本寫的是 position——那是「最近一筆參選紀錄」的職位，落選者也有，
+ * 於是落選候選人的政見頁把他標成現任。沒有現任職稱就只寫人名。
+ */
+const politicianTitle = computed(() => officeTitles(politician.value?.offices).join('、'))
 
 const policyLoading = ref(false)
 const politicianLoading = ref(false)
@@ -422,7 +429,7 @@ async function copyCitation() {
               <span v-if="policy.proposedDate" class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
               <span class="flex items-center gap-1" title="狀態是這一天的進度；之後的變化看下方時間軸"><Activity :size="16" /> 狀態截至：{{ policy.lastUpdated }}</span>
               <router-link :to="`/politician/${politician.id}`" class="flex items-center gap-1 cursor-pointer hover:text-white">
-                {{ politician.name }} · {{ politician.position }}
+                {{ politician.name }}<template v-if="politicianTitle"> · {{ politicianTitle }}</template>
               </router-link>
             </div>
           </div>
@@ -735,7 +742,7 @@ async function copyCitation() {
               <Avatar :src="politician.avatarUrl" :name="politician.name" size="lg" class="border-2 border-slate-100" />
               <div>
                 <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ politician.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
-                <p class="text-sm text-slate-500">{{ politician.position }}</p>
+                <p v-if="politicianTitle" class="text-sm text-slate-500">{{ politicianTitle }}</p>
               </div>
             </router-link>
 

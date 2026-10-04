@@ -6,6 +6,7 @@ import { PolicyStatus, type Politician, type CandidateStatus } from '../../types
 import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check, LayoutGrid, List } from 'lucide-vue-next'
 import Avatar from '../../components/Avatar.vue'
 import { getAvatarUrl } from '../../composables/useAvatar'
+import { officeTitles } from '../../lib/politician-office'
 
 const props = defineProps<{
   politicians: Politician[]
@@ -53,6 +54,13 @@ const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
 const portraitGridClass = computed(() => props.columns === 2
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
   : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
+
+/**
+ * 卡片上的現任職稱（2026-10-04 維護者：職稱跟參選狀況分開）。
+ * 卡片原本那一行寫的是「這一屆參選什麼」（選舉頁的卡片本來就是參選名單），
+ * 這裡另外標現任——看得出誰是爭取連任的現任者、誰是挑戰者。沒有現任職稱就不顯示。
+ */
+const currentTitle = (p: Politician) => officeTitles(p.offices).join('、')
 
 const getPledgeCount = (politicianId: string | number) =>
   policies.value.filter(p =>
@@ -181,6 +189,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           </h4>
           <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
           <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
+          <p v-if="currentTitle(politician)" class="text-[11px] text-sky-700 mt-1 line-clamp-1">現任 {{ currentTitle(politician) }}</p>
           <span :class="['inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded mt-2 font-bold',
                          getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
             <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項政見
@@ -228,6 +237,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
               </div>
               <div class="flex flex-col">
                 <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
+                <span v-if="currentTitle(politician)" class="text-xs bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded mt-1 w-fit">現任 {{ currentTitle(politician) }}</span>
                 <span v-if="formatArea(politician)" class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatArea(politician) }}</span>
               </div>
             </div>
