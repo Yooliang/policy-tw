@@ -5,6 +5,7 @@ import type { Policy, Politician, RawPolicy, RawPolitician } from '../../types'
 import { collectRelayChainIds, type PageSnapshot } from '../ssg/page-data'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
+import { fetchAllPages } from '../fetch-all-pages'
 
 /**
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
@@ -79,15 +80,21 @@ async function peersOf(self: Politician): Promise<Politician[]> {
       // RPC 靠 politician_elections.region_id 對縣市，region_id 是空的參選紀錄（例：台北市第03選區的楊寶楨）撈不到；
       // 再用人物層的縣市＋選舉類型補一次，兩邊合併後交給 electionPeers 用參選紀錄的文字比對
       // （election_ids 是 json 不是 jsonb，不能用 contains 篩屆別；撈回來由 electionPeers 比對屆別）
-      // query-bounds: ok — 單一縣市、單一選舉類型的人物（跨屆），最多三四百位
+      // 單一縣市、單一選舉類型的人物（跨屆）目前最多三四百位，但這跟
+      // composables/useSupabase.ts 用的是同一支沒有上限的 RPC，靠呼叫端自律遲早會踩到
+      // （人物層的 election_type 與參選紀錄層不同源，一有歪掉池子就破千）。一律分頁撈完。
       const [byRpc, byView] = await Promise.all([
-        supabasePublic.rpc('get_politicians_by_filters', { p_election_id: rec.electionId, p_region: rec.region, p_election_types: [rec.electionType] }),
+        fetchAllPages<RawPolitician>(
+          `同選區參選人 ${rec.electionId}/${rec.region}/${rec.electionType}`,
+          (from, to) => supabasePublic
+            .rpc('get_politicians_by_filters', { p_election_id: rec.electionId, p_region: rec.region, p_election_types: [rec.electionType] })
+            .order('id').range(from, to),
+        ),
         supabasePublic.from('politicians_with_elections').select('*')
           .eq('region', rec.region).eq('election_type', rec.electionType)
           .order('id').limit(1000),
       ])
-      if (byRpc.error) throw byRpc.error
-      const rows = [...((byRpc.data ?? []) as RawPolitician[]), ...(byView.error ? [] : (byView.data ?? []) as RawPolitician[])]
+      const rows = [...byRpc.rows, ...(byView.error ? [] : (byView.data ?? []) as RawPolitician[])]
       const seen = new Set<string>()
       const pool = rows.filter((r) => !r.merged_into && !seen.has(r.id) && !!seen.add(r.id)).map(mapPolitician)
       return electionPeers(self, pool)

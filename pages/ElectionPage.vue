@@ -33,7 +33,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -726,6 +726,16 @@ usePageHead({
 
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+
+      <!--
+        名單撈不完整時一定要講。少人比整頁空白難發現得多：高雄市 2022 曾經只載到村里長，
+        市長與議員整個區塊不見，畫面上看起來就只是「這一屆沒有人參選」。
+        這裡只說發生什麼、能怎麼辦；是哪支查詢撈到上限、撈了幾頁進 console。
+      -->
+      <div v-if="politicianListIncomplete" class="mb-8 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        參選人名單可能不完整，有些人沒有顯示出來。請重新整理頁面再試一次。
+      </div>
+
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->

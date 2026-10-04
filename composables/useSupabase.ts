@@ -10,6 +10,7 @@ import type {
 } from '../types'
 import { ElectionType } from '../types'
 import { isClientError, withTimeoutAndRetry } from '../lib/retry'
+import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -59,6 +60,15 @@ async function retry(): Promise<void> {
  * 而且因為「已經有資料了」再也不會去載，畫面看起來就是資料不見了。
  */
 const policiesComplete = ref(false)
+/**
+ * 目前這一屆／這個縣市的參選人名單是不是撈不完整（分頁撈到上限還沒撈完）。
+ *
+ * 2026-10-04：選區頁的 get_politicians_by_filters 原本沒有分頁，PostgREST 回前 1000 列
+ * 就靜靜截斷——高雄市 2022 的 1769 位參選人只載到 1000 位，而且那 1000 位剛好全是村里長，
+ * 市長、議員、原住民區代表整個區塊不見了，畫面上沒有任何訊號。
+ * 現在會分頁撈完；真的連分頁上限都撈不完時，就靠這個旗標讓畫面講一句話，而不是又少人。
+ */
+const politicianListIncomplete = ref(false)
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
@@ -361,9 +371,11 @@ export function ensureDistricts(): Promise<void> {
   if (electoralDistrictAreas.value.length > 0 && !districtsPartial) return Promise.resolve()
   if (!districtsPromise) {
     districtsPromise = (async () => {
-      const { data } = await withTimeoutAndRetry('electoral_district_areas', (signal) =>
-        supabase.from('electoral_district_areas').select('*').abortSignal(signal).throwOnError())
-      electoralDistrictAreas.value = (data || []) as ElectoralDistrictArea[]
+      // 要分頁：2026 屆一次匯入 357 列（21 縣市），加上 2022 屆已近 700 列，
+      // 再補一屆就會撞上 PostgREST 的 1000 列預設上限——而撞到的樣子是議員選區比對
+      // 靜靜地對不到幾個鄉鎮，不會報錯。
+      const rows = await fetchAllRows<ElectoralDistrictArea>('electoral_district_areas', '*', 'id')
+      electoralDistrictAreas.value = rows
       districtsPartial = false
     })().catch((err) => { districtsPromise = null; recordFailure('選舉區對應', err, ensureDistricts) })
   }
@@ -468,6 +480,7 @@ async function loadPoliticiansByElection(
     politicians.value = politicians.value.filter(p => keep.has(p.id))
     loadedRegions.value.clear()
     loadedElections.value.clear()
+    politicianListIncomplete.value = false
   }
   currentElectionId.value = electionId
 
@@ -506,19 +519,34 @@ async function loadPoliticiansByElection(
     }
 
     // 3. 使用 RPC 函數載入
-    const { data, error } = await supabase
-      .rpc('get_politicians_by_filters', {
-        p_election_id: electionId,
-        p_region: regionParam,
-        p_election_types: electionTypes
-      })
+    //
+    // 一定要分頁：選縣市時 p_election_types 是 null，撈的是該縣市「所有」層級。
+    // 高雄市 2022 有 1769 位參選人，其中村里長 1609 位；PostgREST 預設 max-rows=1000
+    // 會回前 1000 列、HTTP 200、不報錯，而那 1000 列剛好全是村里長——市長 4 位、議員 124 位、
+    // 原住民區代表 32 位一位都沒進來。六都與大縣市都會踩到。
+    //
+    // .order('id') 是分頁的前提。politician_elections 有 (politician_id, election_id) 的唯一索引
+    // （20260911000003_politician_elections_unique.sql），所以這支 RPC 的 INNER JOIN 一個人最多配到一列，
+    // id 在結果裡唯一、是個全序——分頁才不會同一位回兩次、另一位一次都沒回。
+    const { rows, truncated } = await fetchAllPages<RawPolitician>(
+      `參選人 ${electionId}/${region}`,
+      (from, to) => withTimeoutAndRetry(`get_politicians_by_filters ${from}-${to}`, (signal) =>
+        supabase
+          .rpc('get_politicians_by_filters', {
+            p_election_id: electionId,
+            p_region: regionParam,
+            p_election_types: electionTypes
+          })
+          .order('id')
+          .range(from, to)
+          .abortSignal(signal)
+          .throwOnError(),
+      ) as Promise<PageResponse<RawPolitician>>,
+    )
 
-    if (error) {
-      console.error(`[loadByElection] RPC 錯誤:`, error)
-      throw error
-    }
+    if (truncated) politicianListIncomplete.value = true
 
-    const pols = (data || []).map(mapPolitician).map(p => withElectionData(p, electionId))
+    const pols = rows.map(mapPolitician).map(p => withElectionData(p, electionId))
 
     // 合併到全域 state（不存入 IndexedDB 快取）
     // 重要：更新已存在候選人的 elections 陣列，確保跨選舉資料正確
@@ -701,11 +729,12 @@ export function useSupabase() {
 
   // 取得各分類的政見數量
   async function getPoliciesByCategory(): Promise<{ name: string; count: number }[]> {
-    const { data, error } = await supabase
-      .from('policies')
-      .select('category')
-
-    if (error) {
+    // 全表無條件撈，要分頁：政見目前幾百筆，破千之後首頁的分類排名會算在被截斷的樣本上，
+    // 名次錯了也不會有任何錯誤訊息。
+    let data: Array<{ category: string | null }>
+    try {
+      data = await fetchAllRows<{ category: string | null }>('policies', 'category', 'id')
+    } catch (error) {
       console.error('Failed to get policies by category:', error)
       return []
     }
@@ -793,6 +822,7 @@ export function useSupabase() {
     error,
     retry,
     loadedElections,
+    politicianListIncomplete,
     stats,
 
     fetchAll,
