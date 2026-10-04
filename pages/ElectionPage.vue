@@ -27,6 +27,7 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty } from '../lib/election-regions'
+import { classifyWard } from '../lib/ward-classification'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
@@ -445,6 +446,39 @@ const chiefPoliticians = computed(() => {
   return result
 })
 
+/**
+ * 直轄市的區分兩種（2026-10-04，見 lib/ward-classification.ts）：一般區區長官派、
+ * 原住民區區長與區代表皆民選。判斷不維護城市/區名單，直接看這個區有沒有原住民區長／
+ * 區代表候選人——indigenousChiefPoliticians／indigenousRepPoliticians 已經用
+ * subRegion 前綴把候選人篩到這個區（見 filteredPoliticians），這裡只是再問一次「有沒有」。
+ */
+const wardKind = computed(() => classifyWard({
+  isSpecialMunicipality: isSpecialMunicipality.value,
+  hasIndigenousRace: indigenousChiefPoliticians.value.length > 0 || indigenousRepPoliticians.value.length > 0,
+}))
+const isIndigenousWard = computed(() => selectedSubRegion.value !== 'All' && wardKind.value === 'indigenous')
+
+/**
+ * 直轄市的區選到里長：依里分組顯示全部候選人（2026-10-04）。順序照 availableVillages
+ * （已排好序），每組只留真的有候選人的里；選了特定里（chip 或右側篩選）時 chiefPoliticians
+ * 已經先篩過，這裡自然只剩一組。
+ */
+const wardVillageGroups = computed(() => {
+  const byVillage = new Map<string, Politician[]>()
+  for (const c of chiefPoliticians.value) {
+    const key = c.village ?? '其他'
+    byVillage.set(key, [...(byVillage.get(key) ?? []), c])
+  }
+  return availableVillages.value
+    .filter(v => byVillage.has(v))
+    .map(village => ({ village, people: byVillage.get(village)! }))
+})
+
+/** 里名快篩 chip：點了只看那個里，再點一次取消——跟右側「村里」篩選是同一個 selectedVillage */
+function toggleVillageChip(village: string) {
+  selectedVillage.value = selectedVillage.value === village ? 'All' : village
+}
+
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
 const hasLocalCandidates = computed(() => {
   const localTypes = [
@@ -750,32 +784,56 @@ usePageHead({
           </section>
         </template>
 
-        <!-- ===== 第3級：鄉鎮市區 ===== -->
-        <template v-else-if="selectedVillage === 'All'">
-          <!-- 直轄市的「區」是指派的，無選舉 -->
-          <template v-if="isSpecialMunicipality">
-            <div class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
-              <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
-              <h3 class="text-lg font-bold text-navy-900 mb-2">直轄市的區長為官派</h3>
-              <p class="text-slate-500">請選擇<span class="font-bold text-slate-700">里</span>查看里長參選人。</p>
-            </div>
-          </template>
-          <!-- 一般縣市的鄉鎮市有選舉 -->
-          <template v-else>
-            <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
+        <!-- ===== 第3級：直轄市的區（2026-10-04：不再卡在「選里」才看得到名單，直接列里長並可用 chip 快篩） ===== -->
+        <template v-else-if="isSpecialMunicipality">
+          <!-- 原住民區：區長、區代表皆民選，三種名單都列 -->
+          <template v-if="isIndigenousWard">
             <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-            <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
             <PoliticianGrid v-if="indigenousRepPoliticians.length > 0" :politicians="indigenousRepPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區代表參選人"><template #icon><MessageCircle class="text-teal-500" /></template></PoliticianGrid>
-            <!-- 無候選人時的提示 -->
-            <div v-if="!townshipMayorPoliticians.length && !indigenousChiefPoliticians.length && !repPoliticians.length && !indigenousRepPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
-              <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
-              <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無參選人資料</h3>
-              <p class="text-slate-500">請選擇其他{{ subRegionLabel }}，或選擇{{ villageLabel }}查看{{ villageLabel }}長。</p>
-            </div>
           </template>
+          <!-- 一般區：區長市府指派，一行小字說明，不擋里長名單 -->
+          <p v-else class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
+
+          <!-- 里長：依里分組；上方 chip 快篩單一里，再點一次取消 -->
+          <template v-if="wardVillageGroups.length > 0">
+            <div class="flex flex-wrap gap-1.5 mb-6">
+              <button
+                v-for="village in availableVillages"
+                :key="village"
+                @click="toggleVillageChip(village)"
+                :class="`px-3 py-1 rounded-full text-xs font-bold transition-all border ${selectedVillage === village ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50'}`"
+              >{{ village }}</button>
+            </div>
+            <PoliticianGrid
+              v-for="group in wardVillageGroups"
+              :key="group.village"
+              :politicians="group.people"
+              :columns="gridColumns"
+              :election-id="electionId"
+              :title="group.village"
+            ><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
+          </template>
+          <!-- 無候選人時的提示 -->
+          <div v-else class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+            <MapPin :size="48" class="mx-auto mb-4 text-slate-300" />
+            <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無{{ villageLabel }}長參選人資料</h3>
+            <p class="text-slate-500">請選擇其他{{ subRegionLabel }}查看。</p>
+          </div>
         </template>
 
-        <!-- ===== 第4級：村里 ===== -->
+        <!-- ===== 第3級：縣轄鄉鎮市（非直轄市，行為不變） ===== -->
+        <template v-else-if="selectedVillage === 'All'">
+          <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
+          <!-- 無候選人時的提示 -->
+          <div v-if="!townshipMayorPoliticians.length && !repPoliticians.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+            <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
+            <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無參選人資料</h3>
+            <p class="text-slate-500">請選擇其他{{ subRegionLabel }}，或選擇{{ villageLabel }}查看{{ villageLabel }}長。</p>
+          </div>
+        </template>
+
+        <!-- ===== 第4級：村里（非直轄市，行為不變） ===== -->
         <template v-else>
           <PoliticianGrid :election-id="electionId" v-if="chiefPoliticians.length > 0" :politicians="chiefPoliticians" :columns="gridColumns" :title="`${villageLabel}長參選人`"><template #icon><MapPin class="text-amber-500" /></template></PoliticianGrid>
           <!-- 無候選人時的提示 -->
