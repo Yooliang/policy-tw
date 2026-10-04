@@ -28,6 +28,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
+import { groupByVillage } from '../lib/village-grouping'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
@@ -461,18 +462,10 @@ const isIndigenousWard = computed(() => selectedSubRegion.value !== 'All' && war
 /**
  * 直轄市的區選到里長：依里分組顯示全部候選人（2026-10-04）。順序照 availableVillages
  * （已排好序），每組只留真的有候選人的里；選了特定里（chip 或右側篩選）時 chiefPoliticians
- * 已經先篩過，這裡自然只剩一組。
+ * 已經先篩過，這裡自然只剩一組。village 是空值、或對不上 availableVillages 的人
+ * （見 lib/village-grouping.ts）收進最後一組「未標示里別」，不會悄悄從畫面消失。
  */
-const wardVillageGroups = computed(() => {
-  const byVillage = new Map<string, Politician[]>()
-  for (const c of chiefPoliticians.value) {
-    const key = c.village ?? '其他'
-    byVillage.set(key, [...(byVillage.get(key) ?? []), c])
-  }
-  return availableVillages.value
-    .filter(v => byVillage.has(v))
-    .map(village => ({ village, people: byVillage.get(village)! }))
-})
+const wardVillageGroups = computed(() => groupByVillage(chiefPoliticians.value, availableVillages.value))
 
 /** 里名快篩 chip：點了只看那個里，再點一次取消——跟右側「村里」篩選是同一個 selectedVillage */
 function toggleVillageChip(village: string) {
