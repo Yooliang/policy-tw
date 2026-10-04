@@ -25,12 +25,13 @@ import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { candidacyBadge, officeTitles } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies } = useSupabase()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, getActiveElection, ensurePolicies } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
@@ -263,6 +264,38 @@ const peerDistrict = computed(() => {
   return `${getElectionById(rec.electionId)?.shortName ?? rec.electionId}・${area}・${rec.electionType ?? ''}`
 })
 
+/**
+ * 職稱與參選狀況是兩件事（2026-10-04 維護者：「職稱可能有多種，把他跟參選狀況分開來」）。
+ *   titles    現任職稱，可多個，沒有就是空的——空的就不顯示，不拿 position 或參選紀錄頂替
+ *   candidacy 這一屆的參選狀況，例如「2026 台南市長・已登記」；該屆沒紀錄就不顯示
+ * 規則在 lib/politician-office.ts，判「是不是現任」在資料庫（視圖 politician_offices）。
+ */
+const titles = computed(() => officeTitles(politician.value?.offices))
+/**
+ * 「這一屆」＝進行中的那一屆；都投完票了（例如 2027 年）就取最近一屆。
+ * 不直接吃 getActiveElection() 的 fallback——它在沒有進行中的選舉時回 elections[0]，
+ * 而 elections 是按 id 遞增載入的，那會拿到 2022（最舊的一屆）。
+ */
+const thisElectionId = computed<number | null>(() => {
+  const today = new Date().toISOString().slice(0, 10)
+  const active = getActiveElection()
+  if (active && active.startDate <= today && today <= active.endDate) return active.id
+  return elections.value.length ? Math.max(...elections.value.map((e) => e.id)) : null
+})
+const candidacy = computed(() => candidacyBadge(politician.value?.elections, thisElectionId.value))
+/** 側欄的現職：資料庫那欄若跟算出來的職稱講同一件事就不重複列 */
+const otherCurrentPosition = computed(() => {
+  const v = politician.value?.currentPosition
+  if (!v) return undefined
+  return titles.value.some((t) => t === v || v.includes(t)) ? undefined : v
+})
+/**
+ * 標題與摘要裡的身份：先用職稱；沒有職稱但這一屆有參選就寫「2026 台南市長候選人」——
+ * 那是參選狀況，不是職稱，所以一定帶「候選人」兩個字，不會被當成現任。都沒有就只有人名。
+ */
+const identity = computed(() => titles.value.join('、') || (candidacy.value?.running ? `${candidacy.value.what}候選人` : ''))
+const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
+
 const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾'))
 const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見'))
 
@@ -270,11 +303,13 @@ usePageHead({
   type: 'article',
   // firebase.json 把 /politician/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
   noindex: () => !loading.value && !politicianLoading.value && !politician.value,
-  title: () => politician.value ? `${politician.value.name}｜${politician.value.position}` : undefined,
+  // 標題與摘要用 identity（現任職稱優先，其次這一屆的參選），不用 position——
+  // position 是最近一筆參選紀錄，落選的人也會有，拿來當標題等於對外宣稱他是現任（2026-10-04）
+  title: () => politician.value ? [politician.value.name, identity.value].filter(Boolean).join('｜') : undefined,
   description: () => politician.value
     ? (politician.value.slogan || politician.value.bio
-        ? `${politician.value.name}（${politician.value.party}，${politician.value.region}${politician.value.position}）：${politician.value.slogan || politician.value.bio}`
-        : `${politician.value.name}，${politician.value.party}，${politician.value.region}${politician.value.position}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
+        ? `${politician.value.name}（${[politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}）：${politician.value.slogan || politician.value.bio}`
+        : `${politician.value.name}，${[politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
     : undefined,
   // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料；政見清單放 subjectOf，每筆帶固定網址，AI 轉述時才引得回來
   jsonLd: () => politician.value ? {
@@ -283,7 +318,8 @@ usePageHead({
     name: politician.value.name,
     url: `${SITE_URL}/politician/${politician.value.id}`,
     ...(politician.value.avatarUrl ? { image: politician.value.avatarUrl } : {}),
-    ...(politician.value.currentPosition ? { jobTitle: politician.value.currentPosition } : {}),
+    // jobTitle 是「現在的職稱」：現任公職（算出來的）＋資料庫登錄的現職（黨職之類），沒有就不給這個欄位
+    ...(jobTitles.value.length ? { jobTitle: jobTitles.value } : {}),
     ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
     ...(politician.value.region ? { homeLocation: { '@type': 'Place', name: politician.value.region } } : {}),
     subjectOf: campaignPledges.value.slice(0, 30).map((p) => ({
@@ -331,7 +367,17 @@ usePageHead({
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-2">
               <h1 class="text-4xl font-bold text-white">{{ politician.name }}</h1>
-              <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">{{ politician.position }}</span>
+              <!-- 職稱：現任公職，可以有多個；沒有就一顆都不出（2026-10-04 維護者：職稱跟參選狀況分開） -->
+              <span
+                v-for="title in titles"
+                :key="title"
+                class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"
+              ><Briefcase :size="14" /> {{ title }}</span>
+              <!-- 參選狀況：這一屆那一筆，跟職稱是兩回事，所以用不同顏色 -->
+              <span
+                v-if="candidacy"
+                class="bg-amber-400/90 text-navy-900 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1"
+              ><Vote :size="14" /> {{ candidacy.label }}</span>
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
               <span v-if="politician.birthYear" class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">
                 {{ politician.birthYear }} 年生 ({{ new Date().getFullYear() - politician.birthYear }} 歲)
@@ -574,10 +620,11 @@ usePageHead({
                   </div>
                 </div>
 
-                <!-- Current position -->
-                <div v-if="politician.currentPosition" class="pt-4 border-t border-slate-100">
-                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">現任職位</h4>
-                  <p class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ politician.currentPosition }}</p>
+                <!-- 現任職稱：民選公職由 politician_offices 算出來（可多個），加上資料庫登錄的現職（黨職之類） -->
+                <div v-if="titles.length || otherCurrentPosition" class="pt-4 border-t border-slate-100">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">現任職稱</h4>
+                  <p v-for="title in titles" :key="title" class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ title }}</p>
+                  <p v-if="otherCurrentPosition" class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ otherCurrentPosition }}</p>
                 </div>
 
                 <div class="pt-4 border-t border-slate-100">

@@ -21,7 +21,7 @@ node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（clea
 
 # Edge Functions 測試（CI 也跑）
 cd supabase/functions && deno test --allow-read _shared/
-deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts
+deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts lib/politician-office.test.ts   # 完整清單見 .github/workflows/ci.yml
 deno run --allow-read scripts/scan-secrets.ts
 
 # Database / Edge Functions
@@ -66,7 +66,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - 快取只有記憶體（模組級 ref），沒有 IndexedDB／localStorage 資料快取
 - **`composables/useGlobalState.ts`** — 跨頁共用的地區選擇
 - **`lib/ssg/server-data.ts`、`lib/ssg/page-data.ts`** — 建置時撈全站資料、切出每頁快照塞進 `window.__INITIAL_STATE__`；細節見 `docs/SSG-PRERENDER.md`
-- **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`discussions_full`、`elected_politicians`、`ai_usage_stats`
+- **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`politician_offices`（現任公職＝職稱的單一真相，2026-10-04）、`discussions_full`、`elected_politicians`、`ai_usage_stats`
 
 ### Database
 表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
@@ -123,6 +123,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 換到內容頁（人物、政見、分析、討論）一律用真連結 `<router-link>`，不要 `@click="router.push"`——預渲染的 HTML 沒有 `<a href>` 爬蟲就跟不到（2026-09-30 Search Console 整站內部連結只剩 28 個）。卡片裡沒有其他按鈕就外層直接是 `<router-link>`；有按鈕或內層連結就用 stretched link（標題的 `<router-link>` 加 `after:absolute after:inset-0 after:content-['']`、卡片 `relative`、按鈕 `relative z-10`），不要做出 `<a>` 包 `<a>`
 - Tailwind 走建置時編譯；動態組出來的 class 要加 `safelist`
 - 給人看的文字純中文
+- **職稱只能來自 `Politician.offices`（視圖 `politician_offices`）**，規則在 `lib/politician-office.ts`；`position` 是「最近一筆參選紀錄」的職位，落選的人也有，拿它當職稱會把落選者顯示成現任（2026-10-04 裁決）。參選狀況是另一回事，用 `candidacyBadge()`。
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 

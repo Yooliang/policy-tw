@@ -67,6 +67,21 @@ export interface PoliticianElectionData {
   sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
 }
 
+/**
+ * 一筆現任公職（資料庫視圖 `politician_offices` 的一列，由 `politicians_with_elections.offices` 帶出來）。
+ * 判「是不是現任」已經在資料庫做完（當選＋任期內，見 migration 20261004000005），
+ * 前端只負責組字與排序——職稱的規則在 `lib/politician-office.ts`。
+ */
+export interface PoliticianOffice {
+  electionId: number;
+  electionType?: string;
+  region?: string;
+  subRegion?: string;
+  village?: string;
+  /** 卸任日（任期最後一天） */
+  termEnd?: string;
+}
+
 export enum PoliticianStatus {
   INCUMBENT = 'incumbent',       // 現任
   POLITICIAN = 'politician',       // 已登記參選
@@ -101,6 +116,12 @@ export interface Politician {
 
   // Election-specific data (new)
   elections?: PoliticianElectionData[];
+
+  /**
+   * 現任公職（2026-10-04）。**職稱只能從這裡來**：`position` 是「最近一筆參選紀錄」的職位，
+   * 不分當選落選，拿它當職稱會讓落選者看起來像現任。空陣列就是沒有現任職稱，不要找別的欄位頂替。
+   */
+  offices?: PoliticianOffice[];
 }
 
 
@@ -359,6 +380,8 @@ export interface RawPolitician {
   birth_year?: number;
   education_level?: string;
   elections?: RawPoliticianElectionData[];
+  /** 現任公職；視圖已經用 camelCase 組好 JSON，跟 PoliticianOffice 同形狀 */
+  offices?: PoliticianOffice[];
 }
 
 export interface RawTrackingLog {
