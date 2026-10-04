@@ -1,0 +1,20 @@
+#!/bin/bash
+# 驗證 VM 進度＋額度一次讀（不印序號）
+cd "$(dirname "$0")"
+bash tick.sh >/dev/null 2>&1
+grep -oE "^(cwen|gsit) +已用 +[0-9.]+%" decision.txt | tr -s ' '
+echo "VM $(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(status)')"
+S1=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.ditrust-serial)') S2=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.ditrust-serial-2)') PYTHONIOENCODING=utf-8 C:/Python312/python.exe - <<'PY'
+import json,os,re,urllib.request,urllib.parse,pathlib
+env=dict(re.findall(r'^([A-Za-z_]+)=(.*)$',open("G:/Yooliang/policy-tw/.env",encoding="utf-8-sig").read(),re.M))
+U=env["VITE_SUPABASE_URL"].strip(); K=env["VITE_SUPABASE_ANON_KEY"].strip(); H={"apikey":K,"authorization":"Bearer "+K}
+for lab,k in (("帳號一","S1"),("帳號二","S2")):
+    q=json.loads(urllib.request.urlopen(urllib.request.Request(U+"/functions/v1/next?agent_tool=claude-code/claude-sonnet-5&agent_name="+urllib.parse.quote("ditrust:"+os.environ[k].strip()),headers=H),timeout=140).read()).get("quota") or {}
+    print(lab,q["submit"]["used"],q["verify"]["used"])
+b=json.load(urllib.request.urlopen(urllib.request.Request(U+"/functions/v1/contributions-feed?status=all&limit=1",headers=H),timeout=90))["summary"]["by_status"]
+print("待驗證",b.get("pending"),"上線",b.get("applied"),"退件",b.get("rejected"))
+tok=json.loads(pathlib.Path.home().joinpath('.claude/.credentials.json').read_text())['claudeAiOauth']['accessToken']
+w=json.loads(urllib.request.urlopen(urllib.request.Request('https://api.anthropic.com/api/oauth/usage',headers={'Authorization':'Bearer '+tok,'anthropic-beta':'oauth-2025-04-20'}),timeout=30).read())
+print("本機 five_hour",w['five_hour']['utilization'],"seven_day",w['seven_day']['utilization'])
+PY
+date
