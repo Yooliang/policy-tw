@@ -12,6 +12,7 @@ import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlin
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
+import { agentToolNotice } from "./agent-tool-hint.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -270,6 +271,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   const targetScore = effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []);
   const scoreBefore = (contribution as { score?: number | null }).score ?? 0;
   const scoreAfter = (after as { score?: number | null } | null)?.score ?? scoreBefore + weight;
+  const toolNotice = agentToolNotice(input.agent_tool);
 
   return {
     status: 201,
@@ -296,6 +298,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
       ...(autoApply.triggered ? { auto_apply: { status: autoApply.status, message: autoApply.outcome?.message ?? autoApply.error } } : {}),
       ...(finalStatus === "rejected" && contribution.status !== "rejected" ? { note: `分數 ${scoreAfter} 已跌到退件門檻（−${rejectFloor(contribution.contribution_type)}），這筆已退件並清出驗證池` } : {}),
       ...(finalStatus === "applied" ? { note: "同儕驗證通過，已自動上線（applied）；維護者可整筆還原" } : {}),
+      // agent_tool 只填別名時統計拆不出版本（投票品質也是按模型分列看的）：不擋票，附一句提醒（協議 1.44.0）
+      ...(toolNotice ? { notice: toolNotice } : {}),
     },
   };
 }

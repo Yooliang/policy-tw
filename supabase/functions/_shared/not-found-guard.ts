@@ -8,9 +8,23 @@
  * term_policy_missing（補任期政見，2026-10-02）一併納入：同樣是在主張「這個人沒有政見」。
  * profile_detail_gap（補學經歷條列，2026-10-02）一併納入：bio 裡通常已經寫著學經歷，
  *   說「查不到」之前要真的去找支持它的來源頁，不能看一眼 bio 就放棄。
+ *
+ * 2026-10-04（協議 1.44.0）：查無比例異常高的模型系列另有一套較嚴的門檻（7 個網址、≥4 個不同網域），
+ * 誰算「異常高」由 not-found-series.ts 依近 14 天的統計算，不綁任何模型名稱。
  */
 
 export const NOT_FOUND_MIN_CHECKED_URLS = 5;
+/** 一般門檻不看網域（0＝不檢查）：5 個網址已經上線三天，不動誠實代理現在的做法 */
+export const NOT_FOUND_MIN_DOMAINS = 0;
+/** 查無比例異常高的系列：網址 7 個 */
+export const NOT_FOUND_ELEVATED_MIN_CHECKED_URLS = 7;
+/**
+ * 查無比例異常高的系列：至少 4 個不同網域。
+ * 數量門檻擋不住湊數（2026-10-01 裁決自己寫了這句），「去過幾個不同的地方」才是查無該證明的事。
+ * 4 個對應協議本來就要求的搜尋引擎、候選人臉書／IG、READr、地方新聞或政黨頁。
+ */
+export const NOT_FOUND_ELEVATED_MIN_DOMAINS = 4;
+
 export const NOT_FOUND_SEARCH_TASK_TYPES = ["policy_missing", "profile_gap", "term_policy_missing", "profile_detail_gap"] as const;
 
 /** 搜尋關鍵字建議：任務說明、交件守門、協議三處同一份 */
@@ -28,20 +42,75 @@ export function autoTaskType(taskId: unknown): string | null {
   return taskId.split(":")[1] || null;
 }
 
-/** 純函式：這筆 no_change 是不是「查無但查得太少」；是就回缺多少，否則 null */
-export function notFoundSearchShortfall(taskId: unknown, payload: unknown): { task_type: string; checked: number; required: number } | null {
+/** 這筆是不是「這道守門管的查無」；是就回任務型別，否則 null。先判這個才知道要不要去查系列統計 */
+export function gatedNotFoundType(taskId: unknown, payload: unknown): string | null {
   const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   if (p.outcome !== "not_found") return null;
   const type = autoTaskType(taskId ?? p.task_id);
   if (!type || !(NOT_FOUND_SEARCH_TASK_TYPES as readonly string[]).includes(type)) return null;
-  const urls = Array.isArray(p.checked_urls) ? p.checked_urls.filter((u): u is string => typeof u === "string" && /^https?:\/\/\S+/.test(u.trim())) : [];
-  const checked = new Set(urls.map((u) => u.trim().replace(/\/+$/, "").toLowerCase())).size;
-  return checked < NOT_FOUND_MIN_CHECKED_URLS ? { task_type: type, checked, required: NOT_FOUND_MIN_CHECKED_URLS } : null;
+  return type;
 }
 
-export function notFoundSearchMessage(s: { task_type: string; checked: number; required: number }): string {
+export interface NotFoundRequirement {
+  urls: number;
+  domains: number;
+  elevated: boolean;
+}
+
+/** 這一筆要幾個網址、幾個網域 */
+export function notFoundRequirement(elevated: boolean): NotFoundRequirement {
+  return elevated
+    ? { urls: NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, domains: NOT_FOUND_ELEVATED_MIN_DOMAINS, elevated: true }
+    : { urls: NOT_FOUND_MIN_CHECKED_URLS, domains: NOT_FOUND_MIN_DOMAINS, elevated: false };
+}
+
+/** 網址正規化後去重；非 http(s) 的丟掉 */
+function checkedUrls(payload: Record<string, unknown>): string[] {
+  const urls = Array.isArray(payload.checked_urls)
+    ? payload.checked_urls.filter((u): u is string => typeof u === "string" && /^https?:\/\/\S+/.test(u.trim()))
+    : [];
+  return [...new Set(urls.map((u) => u.trim().replace(/\/+$/, "").toLowerCase()))];
+}
+
+/** 不同網域的個數：主機名去掉開頭的 www.；解析不出主機名的那一個算它自己一個 */
+export function distinctDomains(urls: readonly string[]): number {
+  const hosts = urls.map((u) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return u;
+    }
+  });
+  return new Set(hosts).size;
+}
+
+export interface NotFoundShortfall {
+  task_type: string;
+  checked: number;
+  required: number;
+  domains: number;
+  required_domains: number;
+  elevated: boolean;
+}
+
+/** 純函式：這筆 no_change 是不是「查無但查得太少」；是就回缺多少，否則 null */
+export function notFoundSearchShortfall(taskId: unknown, payload: unknown, elevated = false): NotFoundShortfall | null {
+  const type = gatedNotFoundType(taskId, payload);
+  if (!type) return null;
+  const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const urls = checkedUrls(p);
+  const req = notFoundRequirement(elevated);
+  const domains = distinctDomains(urls);
+  if (urls.length >= req.urls && domains >= req.domains) return null;
+  return { task_type: type, checked: urls.length, required: req.urls, domains, required_domains: req.domains, elevated: req.elevated };
+}
+
+export function notFoundSearchMessage(s: NotFoundShortfall): string {
   const kw = SEARCH_KEYWORDS[s.task_type as keyof typeof SEARCH_KEYWORDS] ?? SEARCH_KEYWORDS.policy_missing;
-  return `回報「查無」（not_found）要證明找過該找的地方：checked_urls 至少 ${s.required} 個不同網址，你附了 ${s.checked} 個。` +
+  const domainPart = s.required_domains > 0
+    ? `、而且要分布在至少 ${s.required_domains} 個不同網域（你附的 ${s.checked} 個網址只有 ${s.domains} 個網域）`
+    : "";
+  return `回報「查無」（not_found）要證明找過該找的地方：checked_urls 至少 ${s.required} 個不同網址${domainPart}，你附了 ${s.checked} 個。` +
     `請用搜尋引擎至少搜三組關鍵字：${kw}；並看非官方來源：${NON_OFFICIAL_SOURCES}。` +
     `checked_urls 至少要有一個搜尋結果頁的網址，finding 寫出你搜了哪些關鍵字、各看到什麼。只看中選會、議會官網、一兩家媒體首頁不夠。這不算被拒，補查後再送。`;
 }
