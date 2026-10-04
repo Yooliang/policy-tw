@@ -266,6 +266,64 @@ async function localRegionPatch(supabase: SupabaseLike, electionType: string, p:
   return id ? { region_id: id } : {};
 }
 
+const COUNTY_FALLBACK_TYPES = ["縣市長", "縣市議員"] as const;
+
+function regionIdOf(patch: Obj): number | null {
+  return typeof patch.region_id === "number" ? patch.region_id : null;
+}
+
+/**
+ * 縣市長／縣市議員：選區對不上時，至少把 region_id 指到「縣市層級」那一列（2026-10-04）。
+ *
+ * 在這之前，縣市議員少填 electoral_district、或填了但 regions 沒有那一列，region_id 就是 NULL；
+ * 縣市長更是從來走不到 districtRegionPatch。而 get_politicians_by_filters 是
+ * politician_elections LEFT JOIN regions 再比 r.region，region_id 空的那一筆用任何縣市篩選
+ * 都撈不到、也不報錯——盤點當下有 102 筆 2026 已登記的紀錄是這樣（見
+ * 20261004000020_fix_misassigned_regions.sql）。
+ *
+ * 只補到縣市，不猜選舉區：縣市長的選區就是那個縣市（2026 已經有 95 筆這樣指），
+ * 縣市議員則是「先讓他出現在對的縣市」，選舉區留給代理流程補。
+ * 畫面不會因此變差：politicians_with_elections 的 subRegion 是
+ * COALESCE(per.sub_region, r.sub_region, p.sub_region)，縣市層級列的 sub_region 是 NULL，
+ * 會自動落回原本那一層。
+ *
+ * 刻意不涵蓋 LOCAL_ELECTION_TYPES：那幾種的「region_id 是空的」正是
+ * contribution_auto_tasks_township_gap 用來派「補鄉鎮」任務的訊號，補成縣市會把那個缺口藏起來。
+ */
+async function countyRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+  if (!(COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)) return {};
+  const region = str(p.region);
+  if (!region) return {};
+  // query-bounds: ok —（region, sub_region, village）是唯一鍵，縣市層級最多一列
+  const { data } = await supabase.from("regions").select("id")
+    .eq("region", region).is("sub_region", null).is("village", null).maybeSingle();
+  const id = (data as { id?: number } | null)?.id;
+  return id ? { region_id: id } : {};
+}
+
+/**
+ * 地區沒解析出來，就在回覆裡說清楚是哪一步沒成、代理該補什麼——不要讓它靜靜地寫成 NULL
+ * （2026-10-04）。看這段訊息的是交件的代理，它就是能去補的那個人。
+ */
+function regionGapNote(
+  electionType: string,
+  p: Obj,
+  found: { resolved: number | null; county: number | null },
+): string {
+  if (!(COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)) return "";
+  const region = str(p.region);
+  if (found.resolved === null) {
+    return `；這筆還沒有對到地區，網站的縣市篩選撈不到他：region 填的是「${region ?? "（空的）"}」` +
+      `，系統的 regions 表裡找不到這個縣市${region ? "（縣市要用「台」不是「臺」，而且不要帶選區）" : ""}。` +
+      `請改好 region 用 candidacy 型別重交同一人同一屆。`;
+  }
+  if (found.county !== null && electionType === "縣市議員") {
+    return `；選區沒給或對不上 regions 表，這筆先只記到縣市（${region}）。` +
+      `之後請用 candidacy 型別重交同一人同一屆、electoral_district 填「第NN選舉區」補上選區。`;
+  }
+  return "";
+}
+
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -293,12 +351,27 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
   // 號次有給才寫（2026-09-25 補欄位；之前協議收了但沒地方放）
   // 選區有給且 regions 表查得到對應列才寫 region_id（2026-09-28；見 districtRegionPatch 說明）
-  const resultPatch = {
-    ...electionResultPatch(p),
-    ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}),
+  // 選區對不上時至少落到縣市層級，不要留 NULL（2026-10-04；見 countyRegionPatch 說明）
+  const districtPatch = {
     ...(await districtRegionPatch(supabase, electionType, p)),
     ...(await localRegionPatch(supabase, electionType, p)),
   };
+  const beforeRegionId = (before as { region_id?: number | null } | null)?.region_id ?? null;
+  const districtRegionId = regionIdOf(districtPatch);
+  const countyPatch = districtRegionId || beforeRegionId
+    ? {}
+    : await countyRegionPatch(supabase, electionType, p);
+  const countyRegionId = regionIdOf(countyPatch);
+  const resultPatch = {
+    ...electionResultPatch(p),
+    ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}),
+    ...districtPatch,
+    ...countyPatch,
+  };
+  const regionNote = regionGapNote(electionType, p, {
+    resolved: districtRegionId ?? countyRegionId ?? beforeRegionId,
+    county: countyRegionId,
+  });
   const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,
@@ -326,7 +399,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
-    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}`,
+    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${regionNote}`,
   };
 }
 
