@@ -198,14 +198,17 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
   // 缺口判斷「清查過了沒」必須只看 cec_count 有值的那些紀錄。
   // 少了這個 FILTER，一筆「我找不到名單」的回報就會把那個縣市壓住七天，
   // 跟真的把名單全部比對完一樣——2026-09-12 實際發生過。
-  const { sql } = await latestMigrationContaining("auto:roster_check:");
-  const body = sql.slice(sql.lastIndexOf("FUNCTION contribution_auto_tasks_raw("));
-  assert(
-    /MAX\(checked_at\)\s+FILTER\s+\(WHERE\s+cec_count\s+IS\s+NOT\s+NULL\)\s+AS\s+last_checked/.test(body),
-    "last_checked 要只算 cec_count 有值的紀錄，否則查不到名單也會被當成清查完成",
-  );
-  // 找不到名單的嘗試要另外壓一小段時間，不然同一個縣市會被無限重派
-  assert(body.includes("roster_attempt_cooldown_days()"), "查不到名單的嘗試要有自己的冷卻");
+  // 縣市層級（raw）與鄉鎮市區層級（2026-10-04 村里長 roster_villages）兩支臂都要守
+  for (const fn of ["contribution_auto_tasks_raw(", "contribution_auto_tasks_roster_villages("]) {
+    const { sql } = await latestMigrationDefining(fn);
+    const body = sql.slice(sql.lastIndexOf(`FUNCTION ${fn}`));
+    assert(
+      /MAX\(checked_at\)\s+FILTER\s+\(WHERE\s+cec_count\s+IS\s+NOT\s+NULL\)\s+AS\s+last_checked/.test(body),
+      `${fn} last_checked 要只算 cec_count 有值的紀錄，否則查不到名單也會被當成清查完成`,
+    );
+    // 找不到名單的嘗試要另外壓一小段時間，不然同一個縣市會被無限重派
+    assert(body.includes("roster_attempt_cooldown_days()"), `${fn} 查不到名單的嘗試要有自己的冷卻`);
+  }
   const { sql: fnSql } = await latestMigrationDefining("roster_attempt_cooldown_days");
   const m = fnSql.match(/FUNCTION roster_attempt_cooldown_days\(\)[\s\S]*?SELECT\s+(\d+)/);
   assert(m, "找不到嘗試冷卻天數");
