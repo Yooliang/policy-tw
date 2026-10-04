@@ -231,6 +231,41 @@ async function districtRegionPatch(supabase: SupabaseLike, electionType: string,
   return regionId ? { region_id: regionId } : {};
 }
 
+/**
+ * 鄉鎮市長、代表、村里長、原住民區長／代表（2026-10-04 名單清查擴到這幾種）：參選紀錄要記得「哪個鄉鎮市區、哪個村里」。
+ * 原本只有縣市議員會把 region_id 指到 regions 列（districtRegionPatch），這幾種的鄉鎮只靠人物表的 sub_region
+ * ——那正是要淘汰的舊欄位（見 issue #328），而且同一人換村里參選就對不上。這裡改成每筆參選紀錄自己指到
+ * regions（縣市＋鄉鎮市區［＋村里］）。regions 有 (region, sub_region, village) 唯一鍵，查不到就建一列，形狀固定。
+ */
+export const LOCAL_ELECTION_TYPES = ["鄉鎮市長", "鄉鎮市民代表", "村里長", "直轄市山地原住民區長", "直轄市山地原住民區民代表"] as const;
+
+export function localRegionKey(electionType: string, p: Obj): { region: string; sub_region: string; village: string | null } | null {
+  if (!(LOCAL_ELECTION_TYPES as readonly string[]).includes(electionType)) return null;
+  const region = str(p.region);
+  const township = str(p.sub_region);
+  if (!region || !township || /選舉區/.test(township)) return null;
+  const village = electionType === "村里長" ? str(p.village) : null;
+  if (electionType === "村里長" && !village) return null;
+  return { region, sub_region: township, village };
+}
+
+async function localRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+  const key = localRegionKey(electionType, p);
+  if (!key) return {};
+  const find = async () => {
+    // query-bounds: ok — (region, sub_region, village) 是唯一鍵，最多一列
+    let q = supabase.from("regions").select("id").eq("region", key.region).eq("sub_region", key.sub_region);
+    q = key.village ? q.eq("village", key.village) : q.is("village", null);
+    const { data } = await q.maybeSingle();
+    return (data as { id?: number } | null)?.id ?? null;
+  };
+  const existing = await find();
+  if (existing) return { region_id: existing };
+  const { data: created } = await supabase.from("regions").insert(key).select("id").maybeSingle();
+  const id = (created as { id?: number } | null)?.id ?? await find();
+  return id ? { region_id: id } : {};
+}
+
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -262,6 +297,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     ...electionResultPatch(p),
     ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}),
     ...(await districtRegionPatch(supabase, electionType, p)),
+    ...(await localRegionPatch(supabase, electionType, p)),
   };
   const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {

@@ -22,7 +22,7 @@ async function latestFunctionBody(fn: string): Promise<string> {
 
 Deno.test("arms()：八支臂都在，roster_check 依範圍過濾", async () => {
   const arms = (await latestFunctionBody("contribution_auto_tasks_arms")).replace(/\s+/g, " ");
-  for (const arm of ["raw", "dup", "legacy", "mismatch", "policy_dup", "not_running", "mayor_policies", "term_policies"]) {
+  for (const arm of ["raw", "dup", "legacy", "mismatch", "policy_dup", "not_running", "mayor_policies", "term_policies", "roster_villages"]) {
     assertStringIncludes(arms, `FROM contribution_auto_tasks_${arm}()`, `arms 漏了 contribution_auto_tasks_${arm}`);
   }
   assertStringIncludes(arms, "roster_scope_covers(r.target->>'election_type', r.region)");
