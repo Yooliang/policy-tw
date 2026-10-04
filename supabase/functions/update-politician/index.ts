@@ -35,7 +35,6 @@ interface PoliticianUpdate {
   id?: string; // Changed to string for UUID
   name?: string; // Used if id is not provided
   party?: string;
-  status?: "incumbent" | "politician" | "potential" | "former";
   electionType?: string;
   position?: string;
   region?: string;
@@ -87,7 +86,6 @@ Deno.serve(async (req) => {
     // Map camelCase to snake_case for DB
     const dbUpdate: any = {};
     if (update.party !== undefined) dbUpdate.party = update.party;
-    if (update.status !== undefined) dbUpdate.status = update.status;
     if (update.electionType !== undefined) dbUpdate.election_type = update.electionType;
     if (update.position !== undefined) dbUpdate.position = update.position;
     if (update.region !== undefined) dbUpdate.region = update.region;
