@@ -19,7 +19,9 @@ import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
 import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
-import { notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
+import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
+import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
+import { agentToolNotice } from "./agent-tool-hint.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -247,16 +249,44 @@ export async function handleContribute(
 
   // 政見／基本資料缺口回「查無」：checked_urls 至少 5 個（維護者 2026-10-01，見 not-found-guard.ts）。
   // 「查無」是在主張不存在；只看中選會、議會官網、一兩家媒體就回報，14 天內這個缺口不再派。
+  // 2026-10-04（協議 1.44.0）：自報的 agent_tool 歸到的那個模型系列，近 14 天查無比例異常高時門檻提高
+  // （7 個網址、≥4 個不同網域，見 not-found-series.ts）。統計拿不到就用一般門檻，不擋。
+  const gatedNotFound = validation.items.some((item) =>
+    item.contribution_type === "no_change" &&
+    gatedNotFoundType((item.payload as Record<string, unknown>)?.task_id ?? item.task_id, item.payload) !== null
+  );
+  let toolVerdict: SeriesVerdict | null = null;
+  if (gatedNotFound) {
+    const rates = await fetchNotFoundRates(supabase);
+    toolVerdict = rates ? agentToolVerdict(rates, validation.contributor.agent_tool) : null;
+  }
   for (const item of validation.items) {
     if (item.contribution_type !== "no_change") continue;
-    const shortfall = notFoundSearchShortfall((item.payload as Record<string, unknown>)?.task_id ?? item.task_id, item.payload);
+    const shortfall = notFoundSearchShortfall(
+      (item.payload as Record<string, unknown>)?.task_id ?? item.task_id,
+      item.payload,
+      toolVerdict?.elevated ?? false,
+    );
     if (!shortfall) continue;
+    const gate = shortfall.elevated ? "not_found_search_insufficient_elevated" : "not_found_search_insufficient";
     try {
-      await supabase.from("gate_rejections").insert({ gate: "not_found_search_insufficient", endpoint: via, contribution_id: null, ip_hash: ipHash });
+      await supabase.from("gate_rejections").insert({ gate, endpoint: via, contribution_id: null, ip_hash: ipHash });
     } catch { /* 記不成不影響回應 */ }
     return {
       status: 400,
-      body: { success: false, error: "not_found_search_insufficient", message: notFoundSearchMessage(shortfall), checked: shortfall.checked, required: shortfall.required },
+      body: {
+        success: false,
+        error: "not_found_search_insufficient",
+        message: notFoundSearchMessage(shortfall) +
+          (shortfall.elevated && toolVerdict ? `\n${seriesVerdictMessage(toolVerdict, shortfall.required, shortfall.required_domains)}` : ""),
+        checked: shortfall.checked,
+        required: shortfall.required,
+        domains: shortfall.domains,
+        required_domains: shortfall.required_domains,
+        ...(shortfall.elevated && toolVerdict
+          ? { elevated: { model: toolVerdict.model, not_found_rate: Number(toolVerdict.rate.toFixed(3)), site_rate: Number(toolVerdict.overall_rate.toFixed(3)), submitted: toolVerdict.submitted, window_days: NOT_FOUND_RATE_WINDOW_DAYS } }
+          : {}),
+      },
     };
   }
 
@@ -671,6 +701,8 @@ export async function handleContribute(
       body: { success: false, error: "already_submitted", message: results[0].message, ...(single ? results[0] : { results }), docs: `${SITE_URL}/skill.md` },
     };
   }
+  // agent_tool 只填別名（claude-code/haiku）時統計拆不出版本：不擋件，附一句提醒（協議 1.44.0）
+  const toolNotice = agentToolNotice(validation.contributor.agent_tool);
   const trailingVoteNote = needs.length > 0
     ? `；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`
     : "";
@@ -689,6 +721,7 @@ export async function handleContribute(
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
+      ...(toolNotice ? { notice: toolNotice } : {}),
       docs: `${SITE_URL}/skill.md`,
     },
   };
