@@ -324,7 +324,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           : null,
         votes: (data.votes ?? []).map((v) => pick(v, ["verdict", "evidence_url", "note", "agent_name", "resolved_politician_id", "created_at"])),
         pending_adjudications: data.pending_adjudications ?? 0,
-        hint: "正方＝contribution.source_urls，反方＝votes 裡 disagree 的 evidence_url／note；都打開、獨立判斷。uphold＝原貢獻正確、reject＝原貢獻有誤；payload 帶 contribution_id、verdict、reason（≥20 字）、checked_urls；身份爭議多帶 resolved_politician_id。你的裁決會再被 3 票驗證才定案。",
+        hint: "正方＝contribution.source_urls，反方＝votes 裡 disagree 的 evidence_url／note；都打開、獨立判斷。uphold＝原貢獻正確、reject＝原貢獻有誤；payload 帶 contribution_id、verdict、reason（≥20 字）、checked_urls；身份爭議多帶 resolved_politician_id。**來源是選舉公報且為圖片版時，請截圖放大核對候選人自己那一欄，不要只看抽出來的文字**——公報圖片版常把相鄰候選人的政見黏在一起。你的裁決會再被 3 票驗證才定案。",
       };
     }
     default:
@@ -615,7 +615,7 @@ export interface VerifyContextData {
  */
 export const SOURCE_HINTS: ReadonlyArray<{ host: RegExp; hint: string }> = [
   { host: /(^|\.)web\.cec\.gov\.tw$/, hint: "中選會登記公告：名單在頁面的 PDF 附件裡（候選人登記情形一覽表），系統不解析 PDF，你要自己下載讀。逐欄印的名冊不要用 pdftotext -layout（會錯配），各欄各抓成清單再 zip，三欄長度要相等。" },
-  { host: /(^|\.)bulletin\.cec\.gov\.tw$/, hint: "中選會選舉公報：PDF，政見常做成圖，pdftotext 抽到空字串不代表沒有——裁切渲染成圖目視核對。" },
+  { host: /(^|\.)bulletin\.cec\.gov\.tw$/, hint: "中選會選舉公報：PDF，政見常做成圖，pdftotext 抽到空字串不代表沒有——裁切渲染成圖目視核對。圖片版要先依候選人姓名定位到他自己那一欄再放大看，不要看成相鄰候選人的欄位。" },
   { host: /(^|\.)db\.cec\.gov\.tw$/, hint: "中選會候選人資料庫：頁面是 SPA、抓不到正文；直接用 API `/query/api/v1/elections/candidates/query?cand_name=<姓名>`——它證明「這個人是誰」（出生年、歷屆），證明不了「本屆有沒有登記」（只有已投票的選舉，2026 登記期不在裡面）；系統核到 election_id／candidate_status absent 回 cannot_tell 是對的。" },
   { host: /(^|\.)cna\.com\.tw$/, hint: "中央社：不帶瀏覽器 User-Agent 會 403，帶了就 200。" },
   { host: /(^|\.)chinatimes\.com$/, hint: "中時：Cloudflare 擋程式，帶 UA 仍常 403；改抓 web.archive.org/web/2026/<網址> 的快照。" },
@@ -772,7 +772,7 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         politician: pick(data.politicians?.[0] ?? null, POLITICIAN_BRIEF),
         existing_policy_titles: (data.policies ?? []).slice(0, MAX_EXISTING_POLICIES).map((x) => pick(x, ["id", "title", "category", "status"])),
         similar_policies: (data.similar_policies ?? []).map((s) => ({ id: s.id, title: s.title, similarity: Math.round(s.similarity * 100) / 100 })),
-        hint: "先看重複：similar_policies 是系統用**字面**相似度撈的，中文換句話說的重複它抓不到（實測「加速都市更新」與「都更5夠力」的字面相似度低於兩筆不重複的政見），所以請把 existing_policy_titles 整份看過再判斷。與其中一條實質重複（同一承諾換句話說）就投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、標的不同（不同醫院、不同路線）就照來源核對。來源一句話連著幾個承諾（「A 及 B」）時可以拆成幾條交：這一條只核它自己寫的那部分，只寫了其中一件而相符不算不完整，從同一句拆出來的兩條也不算重複（§2 第 10b 條）。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree",
+        hint: "先看重複：similar_policies 是系統用**字面**相似度撈的，中文換句話說的重複它抓不到（實測「加速都市更新」與「都更5夠力」的字面相似度低於兩筆不重複的政見），所以請把 existing_policy_titles 整份看過再判斷。與其中一條實質重複（同一承諾換句話說）就投 disagree 並在 note 寫「重複於 <policy_id>」；只是主題相近、標的不同（不同醫院、不同路線）就照來源核對。來源一句話連著幾個承諾（「A 及 B」）時可以拆成幾條交：這一條只核它自己寫的那部分，只寫了其中一件而相符不算不完整，從同一句拆出來的兩條也不算重複（§2 第 10b 條）。先確認來源證明的是這個人、年份與職權都對得上：主題相符的政府網頁不等於這位候選人的政見，把他人或前任的政績當成這位的政見來源要投 disagree。**來源是選舉公報且為圖片版時，請截圖放大核對候選人自己那一欄，不要只看抽出來的文字**——公報圖片版常把相鄰候選人的政見黏在一起；也要確認這不是議員議會質詢、總質詢時提出的主張（那不是政見）",
       };
     case "policy_progress":
       return {

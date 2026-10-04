@@ -270,29 +270,13 @@ onMounted(() => { ensurePolicies() })
           <div class="flex-1 p-12 overflow-y-auto custom-scrollbar border-r border-slate-100 text-left">
 
             <!-- AI Insight -->
-            <div class="mb-14">
+            <div v-if="relayChain.length > 1" class="mb-14">
               <div class="flex items-center justify-between mb-10">
                 <div class="flex flex-wrap gap-3">
-                  <div v-if="relayChain.length > 1" class="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-xs font-black border border-blue-100">
+                  <div class="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-xs font-black border border-blue-100">
                     <GitBranch :size="14" /> 市政接力 {{ relayChain.length }} 階段
                   </div>
                 </div>
-                <div class="text-right">
-                  <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest block mb-1">AUDIT_VERIFIED</span>
-                  <span class="text-xs font-bold text-emerald-600 flex items-center gap-1 justify-end">
-                    <ShieldCheck :size="16" /> 已通過 AI 鏈上稽核
-                  </span>
-                </div>
-              </div>
-
-              <div class="bg-gradient-to-br from-slate-50 to-blue-50/40 p-10 rounded-[32px] border border-slate-100 relative overflow-hidden mb-12 shadow-inner">
-                <div class="absolute top-0 right-0 p-8 opacity-5"><Bot :size="180" /></div>
-                <h3 class="text-xs font-black text-blue-600 uppercase tracking-[0.2em] mb-5 flex items-center gap-2">
-                  <Bot :size="18" /> Zheng Jian AI 治理洞察
-                </h3>
-                <p class="text-2xl text-slate-800 leading-relaxed font-bold italic tracking-tight">
-                  「此專案跨越了不同行政任期，體現了高強度的政策延續性。從初期規劃到目前階段，行政體系展現了穩定的接力特徵。目前的關鍵稽核點在於預算執行率與基層反饋的一致性。」
-                </p>
               </div>
             </div>
 

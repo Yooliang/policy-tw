@@ -28,11 +28,23 @@ const searchFirst = (taskType: keyof typeof SEARCH_KEYWORDS) =>
   `**一定要用搜尋引擎**，至少搜三組關鍵字：${SEARCH_KEYWORDS[taskType]}；**要看非官方來源**：${NON_OFFICIAL_SOURCES}——只看中選會、議會官網、一兩家媒體首頁不算查過。` +
   `真的查不到才回 no_change＋outcome=not_found：checked_urls 至少 ${NOT_FOUND_MIN_CHECKED_URLS} 個不同網址、其中至少一個是搜尋結果頁，finding 寫出你搜了哪些關鍵字、各看到什麼（少於 ${NOT_FOUND_MIN_CHECKED_URLS} 個會被當場退回，不算被拒）。`;
 
+/**
+ * 選舉公報常是圖片版 PDF（維護者 2026-10-04：林碩彥案例——代理把公報上隔壁許育綸的政見看成林碩彥的，
+ * 整段內容是看圖看錯欄、不是抽文字漏字）：抽出來的文字可能抽不到，也可能整欄黏到旁邊候選人的欄位去。
+ */
+const gazetteImageNote =
+  "**選舉公報常是圖片版**：抽文字常抽不到，或把相鄰候選人的欄位黏在一起。先依候選人姓名在頁面上的位置，把公報頁面定位、裁切到他自己那一欄再放大核對（例如用 PyMuPDF 依姓名座標裁切），不要只靠抽出來的文字；交件前再次確認這條政見確實印在「這位候選人」自己那一欄，不是相鄰候選人的。";
+
+/** 常見誤判（維護者 2026-10-04：Sonnet 把議員的議會質詢主張當成政見交了上來）。 */
+const notPolicyMisjudgmentNote =
+  "**常見誤判**：議員在議會質詢、總質詢時提出的建議或要求，是質詢主張，不是他下一屆的競選政見；任內已完成的施政成果、前任留下的建設、超出他職權範圍的表態，也都不是政見，查到這類內容不要交。";
+
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
     "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
+    gazetteImageNote + notPolicyMisjudgmentNote +
     searchFirst("policy_missing"),
 
   // 補任期政見（2026-10-02 維護者同意）：現任者那一屆當選時的競選政見。交成 Campaign Pledge＋該屆 election_id，
@@ -40,7 +52,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
   term_policy_missing:
     "找這個人**那一屆（target.election_id）當選時的競選政見，最多 5 筆**：每筆一個 policy、各附自己的出處，election_id 填那一屆，status 填 Campaign Pledge。找到幾筆交幾筆——**不要為了湊數交標語、口號、願景或個人表態**，那些不是政見。先看 queued_policies 與 existing_policies（看 election_id，別屆的不算這一屆），別人交了還在等票的不要再交。" +
     "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
+    gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、2026 的新政見不是這一屆的競選政見**，這個任務不要交。" +
+    notPolicyMisjudgmentNote +
     searchFirst("term_policy_missing"),
 
   // 補學經歷條列（2026-10-02 維護者裁示）：人物頁側欄的「學歷」「經歷」讀的是 education[]／experience[]，
