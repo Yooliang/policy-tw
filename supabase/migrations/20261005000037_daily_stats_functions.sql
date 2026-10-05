@@ -31,8 +31,12 @@ AS $$
     SELECT s, s + interval '1 day' AS e FROM d
   )
   SELECT
-    (SELECT count(*) FROM politicians x, r WHERE x.created_at >= r.s AND x.created_at < r.e),
-    (SELECT count(*) FROM policies x, r WHERE x.created_at >= r.s AND x.created_at < r.e),
+    -- politicians／policies 沒有 created_at（舊前端這兩格一直查錯、靜默顯示 0；10-05 db push 因此失敗）。
+    -- 改算「今天上線的貢獻」：資料都走貢獻流程，applied_at 就是它進正式資料的時間。
+    (SELECT count(*) FROM contributions x, r WHERE x.status = 'applied' AND x.contribution_type IN ('politician', 'candidacy')
+      AND x.applied_at >= r.s AND x.applied_at < r.e),
+    (SELECT count(*) FROM contributions x, r WHERE x.status = 'applied' AND x.contribution_type = 'policy'
+      AND x.applied_at >= r.s AND x.applied_at < r.e),
     (SELECT count(*) FROM ai_prompts x, r
       WHERE x.task_type = 'politician_update' AND x.status = 'completed'
         AND x.completed_at >= r.s AND x.completed_at < r.e),
