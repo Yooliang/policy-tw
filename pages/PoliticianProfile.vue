@@ -25,6 +25,7 @@ import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, officeTitles } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
@@ -238,16 +239,12 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
  * 同選區名單只從目前已載入的人物裡算（直接開網址時就是快照帶來的那批，見 lib/election-peers.ts），取不到就不顯示。
  */
 const primaryRecord = computed(() => primaryElection(politician.value))
+// 年 › 縣市 ›（鄉鎮）› 職位 › 人物（2026-10-05 多了職位層與鄉鎮層，規則與測試在 lib/election-breadcrumbs.ts，政見頁共用）
 const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   const p = politician.value
   if (!p) return []
   const rec = primaryRecord.value
-  const items: BreadcrumbItem[] = []
-  if (rec) {
-    const el = getElectionById(rec.electionId)
-    items.push({ name: el?.shortName || el?.name || `選舉 ${rec.electionId}`, path: `/election/${rec.electionId}` })
-    if (isCounty(rec.region)) items.push({ name: rec.region, path: electionRegionPath(rec.electionId, rec.region) })
-  }
+  const items: BreadcrumbItem[] = rec ? candidacyCrumbs(rec, getElectionById(rec.electionId), new Date()) : []
   items.push({ name: p.name })
   return items
 })

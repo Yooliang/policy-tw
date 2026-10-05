@@ -8,6 +8,7 @@ import { electionPeers } from '../election-peers'
 import { positionsToLoad } from '../election-levels'
 import { DIRECTORY_POSITION_TYPES, type DirectoryPerson } from '../township-directory'
 import { sameRegionName } from '../region-name'
+import { inTownship } from '../election-townships'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -186,6 +187,33 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
       const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
       const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
       return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true, townshipDirectory }
+    }
+
+    case 'election-township': {
+      // 鄉鎮頁（2026-10-05）：該屆該鄉鎮「這一層＋下一層」在選的人（鄉鎮市長、代表／原住民區長、區代表，加上村里長），
+      // 跟瀏覽器端 loadPoliticiansByElection(id, 縣市, 鄉鎮) 撈的是同一批：職位照 positionsToLoad 的鄉鎮層，
+      // 鄉鎮比對照 get_politicians_by_level 的規則（lib/election-townships.ts 的 inTownship，原住民區代表的
+      // 「那瑪夏區第01選舉區」也算那瑪夏區）。選舉區對應表帶整個縣市：右側的鄉鎮市區連結要列全縣市。
+      const electionId = Number(paramString(to.params.electionId))
+      const region = paramString(to.params.region)
+      const township = paramString(to.params.subRegion)
+      if (!isCounty(region) || !township) return base
+      const townshipPositions = positionsToLoad({
+        region,
+        subRegion: township,
+        isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
+      })
+      const politicians = full.politicians
+        .filter((pl) => pl.elections?.some((e) =>
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          && townshipPositions.includes(e.electionType as typeof townshipPositions[number])
+          && inTownship(e.subRegion, township),
+        ))
+        .map((pl) => withElectionData(pl, electionId))
+      const ids = new Set(politicians.map((pl) => String(pl.id)))
+      const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
+      const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
+      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true }
     }
 
     case 'politician': {

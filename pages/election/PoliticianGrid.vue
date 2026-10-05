@@ -8,6 +8,7 @@ import Avatar from '../../components/Avatar.vue'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles } from '../../lib/politician-office'
 
+// 根元素的 id（頁內錨點，人物頁麵包屑連到這裡）由呼叫端當 attribute 傳進來；scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住
 const props = defineProps<{
   politicians: Politician[]
   title: string
@@ -146,7 +147,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
 </script>
 
 <template>
-  <div class="mb-12">
+  <div class="mb-12 scroll-mt-20">
     <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> {{ title }} ({{ politicians.length }})
       <span class="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden" role="group" aria-label="顯示方式">

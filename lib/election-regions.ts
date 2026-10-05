@@ -26,7 +26,19 @@ export function electionRegionPath(electionId: number | string, region: string):
   return `/election/${electionId}/${encodeURIComponent(region)}`
 }
 
-/** 選舉頁網址：有縣市就是縣市頁，否則是全台 */
-export function electionPath(electionId: number | string, region?: string | null): string {
-  return isCounty(region) ? electionRegionPath(electionId, region) : `/election/${electionId}`
+/**
+ * 鄉鎮市區頁網址（2026-10-05）：/election/2022/嘉義縣/大林鎮，寫法同縣市頁。
+ * **站內所有指向鄉鎮頁的連結都從這裡產生**（選舉頁右側鄉鎮、人物頁與政見頁的麵包屑 lib/election-breadcrumbs.ts）。
+ * 以前鄉鎮只在查詢字串（/election/2022/嘉義縣?sub=大林鎮），canonical 指回縣市頁、搜尋引擎不當獨立頁；
+ * 舊網址由正見.tw 的 Worker 301 過來（cloudflare/region-path.js），客戶端也會換成這個寫法。
+ */
+export function electionTownshipPath(electionId: number | string, region: string, township: string): string {
+  return `${electionRegionPath(electionId, region)}/${encodeURIComponent(township)}`
+}
+
+/** 選舉頁網址：有縣市就是縣市頁，再有鄉鎮就是鄉鎮頁，否則是全台 */
+export function electionPath(electionId: number | string, region?: string | null, township?: string | null): string {
+  if (!isCounty(region)) return `/election/${electionId}`
+  const t = township?.trim()
+  return t && t !== 'All' ? electionTownshipPath(electionId, region, t) : electionRegionPath(electionId, region)
 }

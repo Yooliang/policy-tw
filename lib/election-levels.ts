@@ -19,9 +19,10 @@
  * |---|---|---|
  * | 全台 /election/:year | 總統副總統 | 各縣市長 |
  * | 縣市 /election/:year/嘉義縣 | 縣市長、縣市議員、立法委員 | 鄉鎮市長（直轄市：原住民區長） |
- * | 縣轄鄉鎮市 ?sub=大林鎮 | 鄉鎮市長、鄉鎮市民代表 | 村里長 |
- * | 直轄市一般區 ?sub=北區 | （區長官派，沒有這一層） | 里長 |
- * | 直轄市原住民區 ?sub=那瑪夏區 | 原住民區長、區代表 | 里長 |
+ * | 縣轄鄉鎮市 /election/:year/嘉義縣/大林鎮 | 鄉鎮市長、鄉鎮市民代表 | 村里長 |
+ * | 直轄市一般區 /election/:year/台南市/北區 | （區長官派，沒有這一層） | 里長 |
+ * | 直轄市原住民區 /election/:year/高雄市/那瑪夏區 | 原住民區長、區代表 | 里長 |
+ * （鄉鎮層 2026-10-05 以前是縣市頁上的 ?sub=大林鎮，舊網址 301 到路徑版）
  *
  *   - 「這一層」＝這一層的所有職位；「下一層」只帶首長（role: 'head'）——那是帶使用者往下走的入口，
  *     下一層的民代（鄉鎮市民代表、區代表）到了那一頁才列。
@@ -106,6 +107,23 @@ const BY_TYPE = new Map(POSITIONS.map(p => [p.type, p]))
 /** 職位的設定；表裡沒有的職位回 undefined（頁面就不畫它） */
 export function positionSpec(type: string): PositionSpec | undefined {
   return BY_TYPE.get(type as PositionType)
+}
+
+/**
+ * 選舉頁區塊的頁內錨點 id（2026-10-05）：人物頁麵包屑的職位層連到這裡（/election/2026/金門縣#縣市長）。
+ * 頁面畫區塊（pages/ElectionPage.vue）與麵包屑（lib/election-breadcrumbs.ts）都只從這個函式拿 id，
+ * 兩邊不會各寫各的——連到一個頁面上不存在的 id，瀏覽器只會安靜地不捲動，沒有任何錯誤。
+ *
+ *   整個職位的區塊      ＝職位名稱（POSITIONS 的 label）：#縣市長、#鄉鎮市長
+ *   有分組的職位再分組  ＝職位名稱-組名：議員的選舉區 #縣市議員-第01選舉區、村里長的里 #村里長-東門里
+ *
+ * 職位不在表裡回 undefined。組名裡的空白拿掉（id 不能有空白）。
+ */
+export function sectionAnchor(type: string, group?: string): string | undefined {
+  const spec = positionSpec(type)
+  if (!spec) return undefined
+  const name = group?.replace(/\s+/g, '')
+  return name ? `${spec.label}-${name}` : spec.label
 }
 
 /** 每個層級的頁面：這一層是哪一級、下一層是哪一級 */

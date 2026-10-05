@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pnpm dev                 # 開發伺服器
-pnpm build               # vue-tsc → vite-ssg build（預渲染約 20 頁；政治人物頁／政見頁由 Worker 邊緣渲染，只進網站地圖）→ scripts/postbuild-ssg.mjs（sitemap＋空殼檢查）
+pnpm build               # vue-tsc → vite-ssg build（預渲染約 450 頁，其中鄉鎮頁 364 頁；政治人物頁／政見頁由 Worker 邊緣渲染，只進網站地圖）→ scripts/postbuild-ssg.mjs（sitemap＋空殼檢查）
 SSG_EDGE_PAGES=prerender pnpm build      # 退回連政治人物頁／政見頁一起預渲染（約 16k 頁、4 分鐘）
 pnpm build:spa           # 純 SPA build（緊急 fallback，沒有預渲染）
 pnpm exec vue-tsc --noEmit
@@ -103,7 +103,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 ### Frontend Structure（`router/index.ts` 為準）
 
-預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`
+預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/election/:electionId`、`/election/:electionId/:region`（縣市頁）、`/election/:electionId/:region/:subRegion`（鄉鎮頁，2026-10-05；舊的 `?sub=` 由正見.tw 的 Worker 301）、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`
 
 客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（redirect）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
 
