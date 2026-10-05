@@ -77,6 +77,9 @@ export type OurElectionType = typeof OUR_ELECTION_TYPES[number];
 const CEC_TYPE_TO_OUR: Record<string, OurElectionType> = {
   President: "總統副總統",
   Legislator: "立法委員",
+  LegislatorPlainIndigenous: "立法委員",
+  LegislatorMountainIndigenous: "立法委員",
+  LegislatorParty: "立法委員",
   Mayor: "縣市長",
   CountyMayor: "縣市長",
   CouncilMember: "縣市議員",
@@ -101,7 +104,19 @@ export interface SyncUnitPlan {
   region: string;
   /** 中選會內部代碼（SUBJECT_MAP 的 key），決定要打哪個科目 */
   cecType: string;
+  /**
+   * 同一個（屆別, 選舉別, 縣市）底下還要再分的範圍：不分區／平地原住民／山地原住民立委都是
+   * region＝「全國」，同步是「整個範圍先刪再寫」，不再分一層的話三種會互相刪掉對方（2026-10-05）。
+   */
+  subRegion?: string;
 }
+
+/** 全國一個選區的立委（cec_candidates.sub_region 的值），順序就是同步順序 */
+export const LEGISLATOR_AT_LARGE_UNITS: readonly SyncUnitPlan[] = [
+  { region: "全國", cecType: "LegislatorParty", subRegion: "不分區" },
+  { region: "全國", cecType: "LegislatorPlainIndigenous", subRegion: "平地原住民" },
+  { region: "全國", cecType: "LegislatorMountainIndigenous", subRegion: "山地原住民" },
+];
 
 const NON_DIRECT_REGIONS = ALL_REGIONS.filter((r) => !DIRECT_CITIES.has(r));
 
@@ -111,7 +126,7 @@ export function planUnits(type: OurElectionType | string): SyncUnitPlan[] {
     case "總統副總統":
       return [{ region: "全國", cecType: "President" }];
     case "立法委員":
-      return ALL_REGIONS.map((region) => ({ region, cecType: "Legislator" }));
+      return [...ALL_REGIONS.map((region) => ({ region, cecType: "Legislator" })), ...LEGISLATOR_AT_LARGE_UNITS];
     case "縣市長":
       return [
         ...[...DIRECT_CITIES].map((region) => ({ region, cecType: "Mayor" })),
@@ -154,6 +169,37 @@ const KNOWN_ELECTIONS: readonly KnownElection[] = [
 export function votedElectionIds(today: Date = new Date()): number[] {
   const todayStr = today.toISOString().slice(0, 10);
   return KNOWN_ELECTIONS.filter((e) => e.voteDate <= todayStr).map((e) => e.electionId);
+}
+
+// ── 挑場次（theme） ─────────────────────────────────────────────
+export interface ThemeInfo {
+  themeId: string;
+  themeName: string;
+  voteDate?: string;
+  year?: number;
+  /** 立委的清單（ELC_L0）同一屆有四筆：L1 區域、L2 平地原住民、L3 山地原住民、L4 不分區政黨 */
+  legislatorTypeId?: string;
+}
+
+/**
+ * 挑該屆的 theme：同年可能不只一筆（如嘉義市 2022 縣市長重行選舉），優先選「不是重行選舉」的那筆，
+ * 這是已知的簡化——真的只有重行選舉那筆時仍會退回去用它，但那個特例縣市的名單目前不會被這支選到。
+ *
+ * 立委（subjectId L0）同一屆四種同在一份清單、同一個投票日，**要用 legislator_type_id 對上科目的 legisId**。
+ * 2026-10-05 前沒有對，四筆裡挑「第一筆」——剛好是 L1 區域，所以區域立委一直是對的，
+ * 但不分區與原住民立委從來沒被抓過（#332 第 2b 項）。
+ */
+export function pickTheme(
+  themes: readonly ThemeInfo[],
+  electionId: number,
+  subject?: { subjectId: string; legisId: string },
+): ThemeInfo | undefined {
+  const matches = themes.filter((t) =>
+    t.year === electionId &&
+    (subject?.subjectId !== "L0" || t.legislatorTypeId === subject.legisId)
+  );
+  if (matches.length === 0) return undefined;
+  return matches.find((t) => !t.themeName.includes("重行選舉")) ?? matches[0];
 }
 
 // ── CEC 列 → cec_candidates 列 ───────────────────────────────────

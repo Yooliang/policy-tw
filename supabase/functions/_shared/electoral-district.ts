@@ -141,3 +141,47 @@ export const COUNCIL_ABORIGINAL_DISTRICTS: Readonly<Record<string, readonly stri
 export function isCouncilAboriginalDistrict(region: string, district: string): boolean {
   return (COUNCIL_ABORIGINAL_DISTRICTS[region] ?? []).includes(district);
 }
+
+/**
+ * 立法委員的「選區」（2026-10-05，補選區自動派工）。
+ *
+ * 立委有兩種形狀，regions 表各自長這樣：
+ * - 區域立委：region＝縣市（台），sub_region＝中選會原字「<縣市>第NN選區」——縣市常是「臺」
+ *   （2024 的 312 筆全是這樣：台中市／「臺中市第01選區」、南投縣／「南投縣第01選區」）。
+ *   代理可能寫「第4選區」「第四選舉區」「臺中市第4選區」，先用 normalizeDistrict 收成號碼，
+ *   再把兩種縣市寫法都列出來去 regions 找；找不到就不動（跟縣市議員一樣不新建選區列）。
+ * - 不分區／平地原住民／山地原住民：全國一個選區，region＝「全國」（跟總統同一種寫法），
+ *   sub_region＝這三個名稱之一；形狀固定，查不到可以新建（跟鄉鎮層級的 localRegionPatch 同理）。
+ *   不給這一列的話 region_id 是空的、或掉回人物的縣市，中選會比對（cec_reconcile_findings）
+ *   會拿「全國」跟人物縣市比、誤報縣市不符。
+ *
+ * 純文字轉換，不接資料庫。認不出來回 null（呼叫端不寫 region_id，回覆裡請代理補）。
+ */
+export const LEGISLATOR_AT_LARGE_SEATS = ["不分區", "平地原住民", "山地原住民"] as const;
+
+export interface LegislatorDistrictKey {
+  region: string;
+  /** 依序去 regions 找的 sub_region 寫法（區域立委兩種縣市寫法；全國選區一種） */
+  sub_regions: string[];
+  /** 找不到時可不可以新建這一列（只有全國那三種可以） */
+  create: boolean;
+}
+
+export function legislatorDistrictKey(
+  region: string | null | undefined,
+  electoralDistrict: string | null | undefined,
+): LegislatorDistrictKey | null {
+  const text = (electoralDistrict ?? "").trim();
+  if (!text) return null;
+  if (/不分區/.test(text)) return { region: "全國", sub_regions: ["不分區"], create: true };
+  // 「山地原住民」「平地原住民」要寫全；只寫「原住民」分不出是哪一種，不猜
+  if (/山地原住民/.test(text)) return { region: "全國", sub_regions: ["山地原住民"], create: true };
+  if (/平地原住民/.test(text)) return { region: "全國", sub_regions: ["平地原住民"], create: true };
+  const parsed = normalizeDistrict(text);
+  if (!parsed) return null;
+  const county = normalizeCityName(region ?? undefined) || parsed.region;
+  if (!county || !(ALL_REGIONS as readonly string[]).includes(county)) return null;
+  const nn = parsed.district.replace("選舉區", "選區");
+  const official = county.replace(/^台/, "臺");
+  return { region: county, sub_regions: [...new Set([`${official}${nn}`, `${county}${nn}`])], create: false };
+}

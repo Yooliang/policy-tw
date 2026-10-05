@@ -22,6 +22,18 @@ export const SUBJECT_MAP: Record<string, { subjectId: string; legisId: string; d
   CityRepresentatives: { subjectId: "R2", legisId: "R1", defaultLevel: "A" },
   DistrictRepresentatives: { subjectId: "R1", legisId: "R3", defaultLevel: "A" },
   Village: { subjectId: "V0", legisId: "00", defaultLevel: "L" },
+  // 立委不只區域（L1）：平地原住民 L2、山地原住民 L3、不分區政黨 L4 都是全國一個選區（2026-10-05 補；
+  // 在這之前 cec-sync 只抓 L1，2024 不分區與原住民立委一位都沒進 cec_candidates）
+  LegislatorPlainIndigenous: { subjectId: "L0", legisId: "L2", defaultLevel: "N" },
+  LegislatorMountainIndigenous: { subjectId: "L0", legisId: "L3", defaultLevel: "N" },
+  LegislatorParty: { subjectId: "L0", legisId: "L4", defaultLevel: "N" },
+};
+
+/** 全國一個選區的立委種類 → cec_candidates.sub_region（跟 regions 的「全國／不分區」等列同一套名稱） */
+export const LEGISLATOR_AT_LARGE_SUBJECTS: Readonly<Record<string, string>> = {
+  LegislatorPlainIndigenous: "平地原住民",
+  LegislatorMountainIndigenous: "山地原住民",
+  LegislatorParty: "不分區",
 };
 
 export interface CecRow {
@@ -114,6 +126,8 @@ export function locateRow(
   const isNationalScope = row.prv_code === "00" && row.city_code === "000";
 
   if (electionType === "President") return { region: "全國" };
+  const atLarge = LEGISLATOR_AT_LARGE_SUBJECTS[electionType];
+  if (atLarge) return { region: "全國", subRegion: atLarge };
   if (electionType === "Mayor" || electionType === "CountyMayor") {
     // 縣市長：area_name 就是縣市
     return { region: areaName || codeCity || requestedCity || "未知" };

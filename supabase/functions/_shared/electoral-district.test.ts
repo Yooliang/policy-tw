@@ -1,5 +1,32 @@
 import { assertEquals } from "jsr:@std/assert";
-import { isCouncilAboriginalDistrict, normalizeCandidacyDistrictField, normalizeDistrict } from "./electoral-district.ts";
+import { isCouncilAboriginalDistrict, legislatorDistrictKey, normalizeCandidacyDistrictField, normalizeDistrict } from "./electoral-district.ts";
+
+// ── 立法委員的選區（2026-10-05） ─────────────────────────────────
+Deno.test("legislatorDistrictKey：區域立委，兩種縣市寫法都列出來（regions 用中選會原字「臺」）", () => {
+  assertEquals(legislatorDistrictKey("台中市", "第1選區"), { region: "台中市", sub_regions: ["臺中市第01選區", "台中市第01選區"], create: false });
+  assertEquals(legislatorDistrictKey("臺北市", "第四選舉區"), { region: "台北市", sub_regions: ["臺北市第04選區", "台北市第04選區"], create: false });
+  // 縣市名本來就沒有「台」的，只會有一種寫法
+  assertEquals(legislatorDistrictKey("南投縣", "第02選區"), { region: "南投縣", sub_regions: ["南投縣第02選區"], create: false });
+});
+
+Deno.test("legislatorDistrictKey：region 沒給，從選區文字抓縣市", () => {
+  assertEquals(legislatorDistrictKey(null, "臺東縣第1選區"), { region: "台東縣", sub_regions: ["臺東縣第01選區", "台東縣第01選區"], create: false });
+});
+
+Deno.test("legislatorDistrictKey：不分區、平地原住民、山地原住民都指到「全國」，可以新建", () => {
+  assertEquals(legislatorDistrictKey("全國", "不分區"), { region: "全國", sub_regions: ["不分區"], create: true });
+  assertEquals(legislatorDistrictKey("台北市", "全國不分區及僑居國外國民"), { region: "全國", sub_regions: ["不分區"], create: true });
+  assertEquals(legislatorDistrictKey("全國", "平地原住民"), { region: "全國", sub_regions: ["平地原住民"], create: true });
+  assertEquals(legislatorDistrictKey(null, "山地原住民立委"), { region: "全國", sub_regions: ["山地原住民"], create: true });
+});
+
+Deno.test("legislatorDistrictKey：認不出來的不猜（只寫「原住民」、沒縣市的區域選區、全國配區域選區）", () => {
+  assertEquals(legislatorDistrictKey("全國", "原住民"), null);
+  assertEquals(legislatorDistrictKey(null, "第3選區"), null);
+  assertEquals(legislatorDistrictKey("全國", "第3選區"), null);
+  assertEquals(legislatorDistrictKey("台北市", ""), null);
+  assertEquals(legislatorDistrictKey("台北市", "大安區"), null);
+});
 
 Deno.test("normalizeDistrict：阿拉伯數字，含個位數補零", () => {
   assertEquals(normalizeDistrict("第4選區"), { region: null, district: "第04選舉區" });

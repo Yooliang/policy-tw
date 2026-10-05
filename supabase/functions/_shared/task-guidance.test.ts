@@ -235,6 +235,46 @@ Deno.test("參選狀態的合法值要在骨架裡，不能只留在散文", () 
   }
 });
 
+// 補縣市／補選區（2026-10-05，contribution_auto_tasks_region_gap）
+Deno.test("補縣市：骨架不預填人物表的縣市（照抄等於沒查），狀態照現況帶", () => {
+  const tpl = buildReportTemplate("candidacy_source_missing", "candidacy", {
+    politician_id: "p1", region: "台北市", election_id: 2026, election_type: "縣市長", candidate_status: "not_running", missing: ["region"],
+  }, "auto:candidacy_source_missing:34940");
+  const p = tpl!.payload as Record<string, unknown>;
+  assert(String(p.region).includes("查證後填"), "缺縣市時 region 要是待填，不是人物表的「台北市」");
+  assertEquals(p.candidate_status, "not_running");
+  assertEquals("electoral_district" in p, false, "縣市長不問選區");
+});
+
+Deno.test("補選區：骨架要有 electoral_district，立委的寫法跟議員不同", () => {
+  const council = buildReportTemplate("candidacy_source_missing", "candidacy", {
+    politician_id: "p1", region: "苗栗縣", election_id: 2026, election_type: "縣市議員", candidate_status: "registered", missing: ["electoral_district"],
+  }, "auto:candidacy_source_missing:34993");
+  const cp = council!.payload as Record<string, unknown>;
+  assertEquals(cp.region, "苗栗縣", "只缺選區時縣市是對的，照帶");
+  assertEquals(cp.electoral_district, "（第NN選舉區）");
+  const leg = buildReportTemplate("candidacy_source_missing", "candidacy", {
+    politician_id: "p2", region: "台中市", election_id: 2028, election_type: "立法委員", candidate_status: "registered", missing: ["electoral_district"],
+  }, "auto:candidacy_source_missing:1");
+  assert(String((leg!.payload as Record<string, unknown>).electoral_district).includes("不分區"));
+});
+
+Deno.test("當選缺紀錄：骨架給姓名、當選、中選會名單上的選區（人物可能還不存在）", () => {
+  const tpl = buildReportTemplate("election_result_missing", "candidacy", {
+    name: "伍麗華", region: "全國", sub_region: "山地原住民", election_id: 2024, election_type: "立法委員", record_missing: true,
+  }, "auto:election_result_missing:cec:7fbf:203625");
+  const p = tpl!.payload as Record<string, unknown>;
+  assertEquals(p.name, "伍麗華");
+  assertEquals("politician_id" in p, false);
+  assertEquals(p.election_result, "elected");
+  assertEquals(p.candidate_status, "confirmed");
+  assertEquals(p.electoral_district, "山地原住民");
+  const town = buildReportTemplate("election_result_missing", "candidacy", {
+    name: "丁學忠", region: "雲林縣", sub_region: "虎尾鎮", election_id: 2022, election_type: "鄉鎮市長", record_missing: true,
+  }, "auto:election_result_missing:cec:664d:159115");
+  assertEquals((town!.payload as Record<string, unknown>).sub_region, "虎尾鎮");
+});
+
 // 2026-09-21 實測阻塞：代理真的查不到東西時，任務教它走 no_change、outcome 三個值
 // 也講清楚了，但骨架只示範 contribute 那一條，它猜成 {"kind":"no_change"} → 400。
 // 「查不到」正是我們最希望它敢回報的結果，不能卡在回報這一步。
