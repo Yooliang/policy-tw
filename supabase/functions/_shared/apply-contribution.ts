@@ -23,6 +23,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
+import { legislatorDistrictKey } from "./electoral-district.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -222,6 +223,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
  * （補候選人選區）處理。
  */
 async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+  if (electionType === "立法委員") return await legislatorRegionPatch(supabase, p);
   if (electionType !== "縣市議員") return {};
   const district = str(p.electoral_district);
   const region = str(p.region);
@@ -229,6 +231,34 @@ async function districtRegionPatch(supabase: SupabaseLike, electionType: string,
   const { data } = await supabase.from("regions").select("id").eq("region", region).eq("sub_region", district).maybeSingle();
   const regionId = (data as { id?: number } | null)?.id;
   return regionId ? { region_id: regionId } : {};
+}
+
+/**
+ * 立法委員（2026-10-05）：區域立委指到「<縣市>第NN選區」那一列，不分區／平地原住民／山地原住民
+ * 指到「全國」那一列（規則見 electoral-district.ts 的 legislatorDistrictKey）。
+ * 在這之前立委的參選紀錄從來走不到任何一條路，交件給了選區也一樣是 NULL。
+ */
+async function legislatorRegionPatch(supabase: SupabaseLike, p: Obj): Promise<Obj> {
+  const key = legislatorDistrictKey(str(p.region), str(p.electoral_district));
+  if (!key) return {};
+  const find = async () => {
+    for (const sub of key.sub_regions) {
+      // query-bounds: ok —（region, sub_region, village）是唯一鍵，最多一列
+      const { data } = await supabase.from("regions").select("id")
+        .eq("region", key.region).eq("sub_region", sub).is("village", null).maybeSingle();
+      const id = (data as { id?: number } | null)?.id;
+      if (id) return id;
+    }
+    return null;
+  };
+  const existing = await find();
+  if (existing) return { region_id: existing };
+  if (!key.create) return {};
+  // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
+  const { data: created } = await supabase.from("regions")
+    .insert({ region: key.region, sub_region: key.sub_regions[0], village: null }).select("id").maybeSingle();
+  const id = (created as { id?: number } | null)?.id ?? await find();
+  return id ? { region_id: id } : {};
 }
 
 /**
@@ -266,7 +296,11 @@ async function localRegionPatch(supabase: SupabaseLike, electionType: string, p:
   return id ? { region_id: id } : {};
 }
 
-const COUNTY_FALLBACK_TYPES = ["縣市長", "縣市議員"] as const;
+// 立法委員 2026-10-05 加入：區域立委選區對不上時至少落到縣市（不分區／原住民立委的 region 是「全國」，
+// regions 沒有「全國」的縣市層級列，落不下去，回覆會請代理補 electoral_district）
+const COUNTY_FALLBACK_TYPES = ["縣市長", "縣市議員", "立法委員"] as const;
+/** 這幾種要記到選區，只有縣市不算補齊（contribution_auto_tasks_region_gap 也是這樣判） */
+const DISTRICT_TYPES = ["縣市議員", "立法委員"] as const;
 
 function regionIdOf(patch: Obj): number | null {
   return typeof patch.region_id === "number" ? patch.region_id : null;
@@ -305,23 +339,39 @@ async function countyRegionPatch(supabase: SupabaseLike, electionType: string, p
  * 地區沒解析出來，就在回覆裡說清楚是哪一步沒成、代理該補什麼——不要讓它靜靜地寫成 NULL
  * （2026-10-04）。看這段訊息的是交件的代理，它就是能去補的那個人。
  */
+function districtHowTo(electionType: string): string {
+  return electionType === "立法委員"
+    ? "electoral_district 填「第NN選區」（區域立委）；不分區或原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」"
+    : "electoral_district 填「第NN選舉區」";
+}
+
 function regionGapNote(
   electionType: string,
   p: Obj,
-  found: { resolved: number | null; county: number | null },
+  found: { resolved: number | null; county: number | null; district: number | null },
 ): string {
   if (!(COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)) return "";
   const region = str(p.region);
+  const needsDistrict = (DISTRICT_TYPES as readonly string[]).includes(electionType);
   if (found.resolved === null) {
+    if (electionType === "立法委員") {
+      return `；這筆還沒有對到地區，網站的縣市篩選撈不到他：region 填的是「${region ?? "（空的）"}」` +
+        `、electoral_district 填的是「${str(p.electoral_district) ?? "（空的）"}」。請用 candidacy 型別重交同一人同一屆，${districtHowTo(electionType)}。`;
+    }
     return `；這筆還沒有對到地區，網站的縣市篩選撈不到他：region 填的是「${region ?? "（空的）"}」` +
       `，系統的 regions 表裡找不到這個縣市${region ? "（縣市要用「台」不是「臺」，而且不要帶選區）" : ""}。` +
       `請改好 region 用 candidacy 型別重交同一人同一屆。`;
   }
-  if (found.county !== null && electionType === "縣市議員") {
+  if (!needsDistrict || found.district !== null) return "";
+  if (found.county !== null) {
     return `；選區沒給或對不上 regions 表，這筆先只記到縣市（${region}）。` +
-      `之後請用 candidacy 型別重交同一人同一屆、electoral_district 填「第NN選舉區」補上選區。`;
+      `之後請用 candidacy 型別重交同一人同一屆、${districtHowTo(electionType)}補上選區。`;
   }
-  return "";
+  // 原本就有地區、這次給的選區卻對不上：照舊不動，但要講出來，不然「補選區」任務會一直派回來
+  const given = str(p.electoral_district);
+  return given
+    ? `；electoral_district「${given}」在 regions 表對不上，這筆的地區維持原狀。請核對寫法後重交（${districtHowTo(electionType)}）。`
+    : "";
 }
 
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
@@ -371,6 +421,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const regionNote = regionGapNote(electionType, p, {
     resolved: districtRegionId ?? countyRegionId ?? beforeRegionId,
     county: countyRegionId,
+    district: districtRegionId,
   });
   const newSourceNote = `${sourceNote(row)}${rawStatus === "withdrawn" ? "；已退選" : ""}`;
   const participation = await upsertParticipation(supabase, {

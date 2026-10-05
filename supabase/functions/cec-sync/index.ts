@@ -3,7 +3,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { CITY_CODES } from "../_shared/cec-city-codes.ts";
 import { CEC_BASE, type CecRow, fetchCecJson, SUBJECT_MAP } from "../_shared/cec-static-fetch.ts";
-import { OUR_ELECTION_TYPES, planUnits, toCecCandidateRow, votedElectionIds } from "../_shared/cec-sync.ts";
+import { OUR_ELECTION_TYPES, pickTheme, planUnits, type ThemeInfo, toCecCandidateRow, votedElectionIds } from "../_shared/cec-sync.ts";
+import { LEGISLATOR_AT_LARGE_SUBJECTS } from "../_shared/cec-static-fetch.ts";
 
 /**
  * cec-sync — 把中選會「已投票選舉」的候選人名單同步進 cec_candidates（供比對用的快照）。
@@ -37,13 +38,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-interface ThemeInfo {
-  themeId: string;
-  themeName: string;
-  voteDate?: string;
-  year?: number;
-}
-
 /** 中選會「該科目可用選舉」清單，同一次呼叫內用 Map 快取，同一個 cecType 的 22 個縣市不必各抓一次 */
 async function listThemes(cecType: string): Promise<ThemeInfo[]> {
   const subject = SUBJECT_MAP[cecType];
@@ -59,23 +53,14 @@ async function listThemes(cecType: string): Promise<ThemeInfo[]> {
       themeName: String(t.theme_name ?? ""),
       voteDate: t.vote_date ? String(t.vote_date) : undefined,
       year: t.vote_date ? parseInt(String(t.vote_date).slice(0, 4), 10) : undefined,
+      legislatorTypeId: t.legislator_type_id ? String(t.legislator_type_id) : undefined,
     }))
   );
 }
 
-/**
- * 挑該屆的 theme：同年可能不只一筆（如嘉義市 2022 縣市長重行選舉），優先選「不是重行選舉」的那筆，
- * 這是已知的簡化——真的只有重行選舉那筆時仍會退回去用它，但那個特例縣市的名單目前不會被這支選到。
- */
-function pickTheme(themes: readonly ThemeInfo[], electionId: number): ThemeInfo | undefined {
-  const matches = themes.filter((t) => t.year === electionId);
-  if (matches.length === 0) return undefined;
-  return matches.find((t) => !t.themeName.includes("重行選舉")) ?? matches[0];
-}
-
-/** 縣市長／總統這幾種只有全國範圍的檔（縣市範圍會 404），要抓全國檔再依縣市過濾 */
+/** 縣市長／總統／全國一個選區的立委只有全國範圍的檔（縣市範圍會 404），要抓全國檔再依縣市過濾 */
 function isNationalOnly(cecType: string): boolean {
-  return cecType === "President" || cecType === "Mayor" || cecType === "CountyMayor";
+  return cecType === "President" || cecType === "Mayor" || cecType === "CountyMayor" || cecType in LEGISLATOR_AT_LARGE_SUBJECTS;
 }
 
 function scopeFor(cecType: string, region: string): { prv: string; city: string } {
@@ -89,6 +74,8 @@ interface SyncUnit {
   ourType: string;
   cecType: string;
   region: string;
+  /** 全國一個選區的立委要再分一層（見 _shared/cec-sync.ts 的 SyncUnitPlan.subRegion） */
+  subRegion?: string;
 }
 
 function buildUnits(electionIds: readonly number[], ourTypes: readonly string[]): SyncUnit[] {
@@ -96,21 +83,22 @@ function buildUnits(electionIds: readonly number[], ourTypes: readonly string[])
   for (const electionId of electionIds) {
     for (const ourType of ourTypes) {
       for (const plan of planUnits(ourType)) {
-        units.push({ electionId, ourType, cecType: plan.cecType, region: plan.region });
+        units.push({ electionId, ourType, cecType: plan.cecType, region: plan.region, subRegion: plan.subRegion });
       }
     }
   }
   return units;
 }
 
-function unitKey(u: Pick<SyncUnit, "electionId" | "ourType" | "region">): string {
-  return `${u.electionId}|${u.ourType}|${u.region}`;
+function unitKey(u: Pick<SyncUnit, "electionId" | "ourType" | "region" | "subRegion">): string {
+  return `${u.electionId}|${u.ourType}|${u.region}|${u.subRegion ?? ""}`;
 }
 
 interface UnitReport {
   election_id: number;
   election_type: string;
   region: string;
+  sub_region?: string;
   fetched: number;
   written: number;
   skipped?: string;
@@ -120,6 +108,7 @@ interface UnitFailure {
   election_id: number;
   election_type: string;
   region: string;
+  sub_region?: string;
   error: string;
 }
 
@@ -141,9 +130,14 @@ Deno.serve(async (req) => {
   const electionIdFilter = qp("election_id") !== undefined ? Number(qp("election_id")) : undefined;
   const electionTypeFilter = qp("election_type") !== undefined ? String(qp("election_type")) : undefined;
   const force = qp("force") === true || qp("force") === "true";
-  const resumeFromRaw = body.resume_from as { election_id?: number; election_type?: string; region?: string } | undefined;
+  const resumeFromRaw = body.resume_from as { election_id?: number; election_type?: string; region?: string; sub_region?: string } | undefined;
   const resumeFromKey = resumeFromRaw?.election_id !== undefined && resumeFromRaw?.election_type && resumeFromRaw?.region
-    ? unitKey({ electionId: Number(resumeFromRaw.election_id), ourType: String(resumeFromRaw.election_type), region: String(resumeFromRaw.region) })
+    ? unitKey({
+      electionId: Number(resumeFromRaw.election_id),
+      ourType: String(resumeFromRaw.election_type),
+      region: String(resumeFromRaw.region),
+      subRegion: resumeFromRaw.sub_region ? String(resumeFromRaw.sub_region) : undefined,
+    })
     : undefined;
 
   if (electionTypeFilter && !(OUR_ELECTION_TYPES as readonly string[]).includes(electionTypeFilter)) {
@@ -172,32 +166,36 @@ Deno.serve(async (req) => {
   const units: UnitReport[] = [];
   const failed: UnitFailure[] = [];
   const started = Date.now();
-  let next: { election_id: number; election_type: string; region: string } | null = null;
+  let next: { election_id: number; election_type: string; region: string; sub_region?: string } | null = null;
 
   for (let i = startIndex; i < allUnits.length; i++) {
     if (Date.now() - started > TIME_BUDGET_MS) {
       const u = allUnits[i];
-      next = { election_id: u.electionId, election_type: u.ourType, region: u.region };
+      next = { election_id: u.electionId, election_type: u.ourType, region: u.region, ...(u.subRegion ? { sub_region: u.subRegion } : {}) };
       break;
     }
     const unit = allUnits[i];
-    const { electionId, ourType, cecType, region } = unit;
+    const { electionId, ourType, cecType, region, subRegion } = unit;
+    // 同步範圍（查最近同步時間、先刪後寫都用這一個）：全國一個選區的立委三種同在 region＝全國，要再用 sub_region 分開
+    // deno-lint-ignore no-explicit-any
+    const scoped = (q: any) => {
+      const base = q.eq("election_id", electionId).eq("election_type", ourType).eq("region", region);
+      return subRegion ? base.eq("sub_region", subRegion) : base;
+    };
 
     try {
       // 防重入：這個單位最近同步過就空轉，不再打中選會（force 可以跳過）
       if (!force) {
-        const { data: last } = await supabase
+        // query-bounds: ok — 下面接 .limit(1).maybeSingle()；scoped() 只加 eq 條件
+        const { data: last } = await scoped(supabase
           .from("cec_candidates")
-          .select("synced_at")
-          .eq("election_id", electionId)
-          .eq("election_type", ourType)
-          .eq("region", region)
+          .select("synced_at"))
           .order("synced_at", { ascending: false })
           .limit(1)
           .maybeSingle();
         const lastSyncedAt = (last as { synced_at?: string } | null)?.synced_at;
         if (lastSyncedAt && Date.now() - Date.parse(lastSyncedAt) < MIN_INTERVAL_HOURS * 3600_000) {
-          units.push({ election_id: electionId, election_type: ourType, region, fetched: 0, written: 0, skipped: `${MIN_INTERVAL_HOURS} 小時內同步過` });
+          units.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), fetched: 0, written: 0, skipped: `${MIN_INTERVAL_HOURS} 小時內同步過` });
           continue;
         }
       }
@@ -206,9 +204,9 @@ Deno.serve(async (req) => {
         await sleep(MIN_REQUEST_INTERVAL_MS);
         themeCache.set(cecType, await listThemes(cecType));
       }
-      const theme = pickTheme(themeCache.get(cecType) ?? [], electionId);
+      const theme = pickTheme(themeCache.get(cecType) ?? [], electionId, SUBJECT_MAP[cecType]);
       if (!theme) {
-        failed.push({ election_id: electionId, election_type: ourType, region, error: `找不到 ${electionId} 年的 theme（cecType=${cecType}）` });
+        failed.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), error: `找不到 ${electionId} 年的 theme（cecType=${cecType}）` });
         continue;
       }
 
@@ -253,21 +251,21 @@ Deno.serve(async (req) => {
           const ticket = row.cand_id !== undefined ? ticketsById.get(row.cand_id) : undefined;
           return toCecCandidateRow(row, ticket, { electionId, ourType, cecType, themeId: theme.themeId, requestedRegion, deptNames });
         })
-        // 全國範圍的檔（總統／縣市長）要再依縣市過濾；filter 用轉換後的 region 比對，跟 fetch-cec-data 邏輯一致
+        // 全國範圍的檔（總統／縣市長／全國一個選區的立委）要再依縣市過濾；filter 用轉換後的 region 比對，跟 fetch-cec-data 邏輯一致
         .filter((r): r is NonNullable<typeof r> => r !== null)
         .filter((r) => !isNationalOnly(cecType) || region === "全國" || r.region === region);
 
       // 先抓完、確認不是抓取失敗，才在同一個單位內先刪後寫
-      const { error: delError } = await supabase.from("cec_candidates").delete().eq("election_id", electionId).eq("election_type", ourType).eq("region", region);
+      const { error: delError } = await scoped(supabase.from("cec_candidates").delete());
       if (delError) throw new Error(`delete: ${delError.message}`);
       for (let b = 0; b < rows.length; b += INSERT_BATCH_SIZE) {
         const { error: insError } = await supabase.from("cec_candidates").insert(rows.slice(b, b + INSERT_BATCH_SIZE));
         if (insError) throw new Error(`insert: ${insError.message}`);
       }
 
-      units.push({ election_id: electionId, election_type: ourType, region, fetched: baseRows.length, written: rows.length });
+      units.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), fetched: baseRows.length, written: rows.length });
     } catch (e) {
-      failed.push({ election_id: electionId, election_type: ourType, region, error: e instanceof Error ? e.message : String(e) });
+      failed.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), error: e instanceof Error ? e.message : String(e) });
     }
   }
 

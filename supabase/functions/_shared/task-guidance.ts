@@ -100,10 +100,13 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   candidacy_source_missing:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
-    "這筆參選紀錄沒有網址來源。找該縣市選委會的公告或媒體報導，用 candidacy 補上；查不到就 no_change 說明你找過哪裡。",
+    "這筆參選紀錄缺東西，**缺什麼看 what_we_need 與 target.missing**：沒有網址來源、沒有縣市（region）、沒有選區（electoral_district），或鄉鎮層級選舉沒有鄉鎮（sub_region）。" +
+    "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘照現有資料原樣帶（candidate_status 不要順手改）；查不到就 no_change 說明你找過哪裡。" +
+    "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。",
 
   election_result_missing:
-    "這個人名下有政見，我們卻沒有他那場已投票選舉的結果。到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected，查得到就一起補得票數與得票率。" +
+    "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
+    "到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected，查得到就一起補得票數與得票率。" +
     "**這筆是承諾追蹤的前提**——不知道有沒有當選，就沒辦法問承諾兌現了沒有。查不到官方結果不要猜，用 no_change。",
 
   policy_election_missing:
@@ -297,14 +300,30 @@ function buildPayload(
         finding: "（你查了什麼、查到什麼）",
         checked_urls: ["（你實際打開過的網址）"],
       };
-    case "candidacy":
+    case "candidacy": {
+      // 補縣市／補選區（2026-10-05，contribution_auto_tasks_region_gap）：target.missing 列出缺哪幾欄。
+      // 缺縣市時不預填 target.region——那是人物表的縣市，照抄等於沒查證。
+      const missing = Array.isArray(t.missing) ? t.missing as unknown[] : [];
+      const legislator = t.election_type === "立法委員";
       return {
-        politician_id: t.politician_id ?? "（人物 id）",
+        // 中選會當選、我們沒有紀錄的（target.record_missing）：人物可能還不存在，先給姓名
+        ...(t.record_missing === true ? { name: t.name ?? "（姓名）" } : { politician_id: t.politician_id ?? "（人物 id）" }),
         election_id: t.election_id ?? "（選舉年份）",
         election_type: t.election_type ?? "（選舉類型）",
-        region: t.region ?? "（縣市）",
-        candidate_status: "（confirmed／registered／qualified／withdrawn／not_running 之一）",
+        region: missing.includes("region") ? "（縣市，查證後填；用「台」不用「臺」）" : t.region ?? "（縣市）",
+        ...(missing.includes("electoral_district")
+          ? { electoral_district: legislator ? "（第NN選區；不分區／原住民立委填 不分區／平地原住民／山地原住民）" : "（第NN選舉區）" }
+          : {}),
+        candidate_status: missing.length && typeof t.candidate_status === "string"
+          ? t.candidate_status
+          : t.record_missing === true ? "confirmed" : "（confirmed／registered／qualified／withdrawn／not_running 之一）",
+        ...(t.record_missing === true ? { election_result: "elected" } : {}),
+        // 中選會名單上的選區／鄉鎮：縣市議員與立委放 electoral_district，鄉鎮層級放 sub_region
+        ...(t.record_missing === true && typeof t.sub_region === "string" && t.sub_region
+          ? (t.election_type === "縣市議員" || legislator ? { electoral_district: t.sub_region } : { sub_region: t.sub_region })
+          : {}),
       };
+    }
     case "policy":
       return {
         politician_id: t.politician_id ?? "（人物 id）",

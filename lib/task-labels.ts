@@ -13,7 +13,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   policy_source_missing: '政見缺出處',
   source_mismatch: '來源不支持內容',
   progress_stale: '進度停滯',
-  candidacy_source_missing: '參選缺出處',
+  // 2026-10-05 起這個型別也派「補縣市／補選區／補鄉鎮」（缺什麼看任務說明），名稱不再只講出處
+  candidacy_source_missing: '參選紀錄待補',
   election_result_missing: '缺選舉結果',
   policy_election_missing: '政見缺屆別',
   policy_election_mismatch: '政見屆別對不上',

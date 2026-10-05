@@ -213,3 +213,96 @@ Deno.test("applyCandidacy：鄉鎮層級的選舉不套縣市退路（那個空�
   assertEquals(row?.region_id ?? null, null, "沒填 sub_region 就該留空，讓 township_gap 派補鄉鎮的任務");
   assertEquals(outcome.message?.includes("還沒有對到地區"), false);
 });
+
+/**
+ * 補縣市／補選區的自動派工（2026-10-05，contribution_auto_tasks_region_gap）收尾時走的就是這條：
+ * 代理用 candidacy 重交同一人同一屆、帶 electoral_district。下面幾個 case 守住「重交之後缺口真的會消失」，
+ * 不然任務會一直派回來。
+ */
+Deno.test("applyCandidacy：既有紀錄只到縣市，重交帶選區 → 升到選舉區那一列（補選區任務的收尾）", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 900 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第02選舉區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.id === 9001);
+  assertEquals(row?.region_id, 501);
+});
+
+Deno.test("applyCandidacy：既有紀錄只到縣市，重交的選區對不上 → 地區不動，但訊息要講出來", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 900 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第99選舉區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.id === 9001);
+  assertEquals(row?.region_id, 900);
+  assertStringIncludes(outcome.message ?? "", "對不上");
+});
+
+const LEGISLATOR = { election_id: 2024, election_type: "立法委員", candidate_status: "confirmed" };
+
+Deno.test("applyCandidacy：區域立委 → 指到「<縣市>第NN選區」那一列（regions 用的是中選會原字「臺」）", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [{ id: 700, region: "台中市", sub_region: "臺中市第01選區", village: null }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ ...LEGISLATOR, region: "台中市", electoral_district: "第1選區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 700);
+  assertEquals(outcome.message?.includes("選區"), false, "對到了就不該再要代理補選區");
+});
+
+Deno.test("applyCandidacy：不分區立委 → 指到「全國／不分區」，沒有就建一列，第二位沿用同一列", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }, { id: "p2", name: "李小華", merged_into: null }],
+    regions: [{ id: 1, region: "全國", sub_region: "全國", village: null }],
+    politician_elections: [],
+  });
+  const first = await applyContribution(client, candidacyRow({ ...LEGISLATOR, region: "全國", electoral_district: "不分區", election_result: "elected" }));
+  assertEquals(first.status, "applied");
+  const atLarge = (tables.get("regions") ?? []).find((r) => r.region === "全國" && r.sub_region === "不分區");
+  assertEquals(typeof atLarge?.id, "number", "要建出「全國／不分區」那一列");
+  const second = await applyContribution(client, {
+    ...candidacyRow({ ...LEGISLATOR, politician_id: "p2", name: "李小華", region: "全國", electoral_district: "全國不分區" }),
+    id: "c2",
+  });
+  assertEquals(second.status, "applied");
+  const rows = tables.get("politician_elections") ?? [];
+  assertEquals(rows.find((r) => r.politician_id === POL)?.region_id, atLarge?.id);
+  assertEquals(rows.find((r) => r.politician_id === "p2")?.region_id, atLarge?.id);
+  assertEquals((tables.get("regions") ?? []).filter((r) => r.sub_region === "不分區").length, 1, "第二位不可以再建一列");
+});
+
+Deno.test("applyCandidacy：區域立委選區對不上 → 落到縣市層級，訊息教他立委的選區怎麼寫", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ ...LEGISLATOR, electoral_district: "第09選區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 900);
+  assertStringIncludes(outcome.message ?? "", "第NN選區");
+  assertEquals((tables.get("regions") ?? []).length, 1, "區域選區查不到不新建");
+});
+
+Deno.test("applyCandidacy：立委填「全國」卻沒給選區 → 留空，訊息講出不分區／原住民怎麼填", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [{ id: 1, region: "全國", sub_region: "全國", village: null }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ ...LEGISLATOR, region: "全國" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id ?? null, null);
+  assertStringIncludes(outcome.message ?? "", "平地原住民");
+});
