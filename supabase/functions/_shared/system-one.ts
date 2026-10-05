@@ -263,6 +263,11 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   district_seats: ["election_id", "election_type", "region", "districts", "note"],
   // 政見三要素（#364）：票數預算的三維要看的就是每個要素寫了什麼、原句在哪
   policy_elements: ["policy_id", "elements"],
+  // 政策脈絡（#349）：票數預算的維度要看的是「憑什麼說是同一件事」「角色依據」「交接依據」
+  lineage: ["lineage_id", "new_lineage", "policy_ids", "detach_policy_ids", "note"],
+  lineage_participants: ["lineage_id", "participants"],
+  lineage_handover: ["lineage_id", "from_politician_id", "to_politician_id", "handover_type", "decided_on", "note", "source_locator"],
+  lineage_link: ["upper_lineage_id", "lower_lineage_id", "link_type", "note", "source_locator"],
 };
 const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
 const PAGE_TEXT_MAX = 6000;

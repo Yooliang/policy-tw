@@ -166,6 +166,95 @@ export interface Policy {
    * 視圖還沒有這一欄時（舊快照、資料流程那支 PR 還沒上線）是 undefined，一律當成三個都未調查。
    */
   elements?: PolicyElement[];
+  /** 屬於哪條政策脈絡（#349，policies.lineage_id）；沒歸入是 null／undefined */
+  lineageId?: string | null;
+  /** 所屬脈絡的摘要（視圖 policies_with_logs.lineage），政見頁「所屬脈絡」那一塊用 */
+  lineage?: LineageSummary | null;
+  /** 政見從哪裡來（#349，照日本站 policy_origin）：競選承諾／施政報告／議會提案／預算；還沒標是 null */
+  origin?: PolicyOrigin | null;
+}
+
+/** 政見從哪裡來（#349，照日本站 policy_origin） */
+export type PolicyOrigin = 'pledge' | 'policy_address' | 'assembly' | 'budget';
+/** 政策脈絡的層級：中央／縣市／鄉鎮市區 */
+export type LineageLevel = 'national' | 'county' | 'township';
+export type HandoverType = 'keep' | 'pivot' | 'shrink' | 'stop' | 'resume';
+export type ParticipantRole = 'proposer' | 'co_proposer' | 'cosigner' | 'advocate';
+export type ParticipantBasis = 'official_record' | 'self_claim';
+export type LineageLinkType = 'top_down' | 'bottom_up';
+
+/** 政策脈絡的摘要（政見頁、清單用） */
+export interface LineageSummary {
+  id: string;
+  title: string;
+  level: LineageLevel;
+  region: string | null;
+  subRegion: string | null;
+  category: string | null;
+  summary: string | null;
+}
+
+/** 出處（sources 一列的摘要） */
+export interface LineageSource {
+  url: string;
+  title?: string | null;
+  publisher?: string | null;
+  kind?: string | null;
+  archiveUrl?: string | null;
+}
+
+export interface LineageParticipant {
+  id: string;
+  politicianId: string;
+  name: string;
+  role: ParticipantRole;
+  basis: ParticipantBasis;
+  sourceUrl: string;
+  sourceLocator: string;
+  note: string | null;
+  source: LineageSource | null;
+}
+
+export interface LineageHandover {
+  id: string;
+  fromPoliticianId: string;
+  fromName: string;
+  fromElectionId: number | null;
+  toPoliticianId: string;
+  toName: string;
+  toElectionId: number | null;
+  handoverType: HandoverType;
+  decidedOn: string | null;
+  note: string;
+  sourceUrl: string;
+  sourceLocator: string;
+  source: LineageSource | null;
+}
+
+export interface LineageLink {
+  id: string;
+  /** upper＝對方是這條的上級；lower＝對方是這條的下級 */
+  direction: 'upper' | 'lower';
+  lineageId: string;
+  title: string;
+  level: LineageLevel;
+  region: string | null;
+  subRegion: string | null;
+  linkType: LineageLinkType;
+  note: string;
+  sourceUrl: string;
+  sourceLocator: string;
+  source: LineageSource | null;
+}
+
+/** 一條政策脈絡（視圖 lineages_full 一列，#349）：一件事在某一層級、某一地方的來龍去脈 */
+export interface Lineage extends LineageSummary {
+  policyIds: string[];
+  participants: LineageParticipant[];
+  handovers: LineageHandover[];
+  links: LineageLink[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type PolicyElementKind = 'target' | 'deadline' | 'funding';
@@ -455,6 +544,33 @@ export interface RawPolicy {
   related_policy_ids?: string[];
   /** 政見三要素（#364）：視圖 policies_with_logs 最後一欄；舊視圖沒有這一欄 */
   elements?: RawPolicyElement[] | null;
+  /** 政策脈絡（#349）：所屬脈絡 id、摘要、政見從哪裡來；舊視圖沒有這三欄 */
+  lineage_id?: string | null;
+  lineage?: RawLineageSummary | null;
+  origin?: string | null;
+}
+
+export interface RawLineageSummary {
+  id: string;
+  title: string;
+  level: string;
+  region?: string | null;
+  sub_region?: string | null;
+  category?: string | null;
+  summary?: string | null;
+}
+
+export interface RawLineageSource { url?: string | null; title?: string | null; publisher?: string | null; kind?: string | null; archive_url?: string | null }
+
+/** 視圖 lineages_full 一列（#349） */
+export interface RawLineage extends RawLineageSummary {
+  admin_code?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  policy_ids?: string[] | null;
+  participants?: Array<{ id: string; politician_id: string; name?: string | null; role: string; basis: string; source_url: string; source_locator: string; note?: string | null; source?: RawLineageSource | null }> | null;
+  handovers?: Array<{ id: string; from_politician_id: string; from_name?: string | null; from_election_id?: number | null; to_politician_id: string; to_name?: string | null; to_election_id?: number | null; handover_type: string; decided_on?: string | null; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  links?: Array<{ id: string; direction: string; lineage_id: string; title: string; level: string; region?: string | null; sub_region?: string | null; link_type: string; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
 }
 
 export interface RawPolicyElement {

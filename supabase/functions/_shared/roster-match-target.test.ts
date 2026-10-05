@@ -61,7 +61,10 @@ Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器�
   assert(eff.sql.includes("GREATEST(1, v_need - 1)"), "一般 supported 照舊 −1");
 
   const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
-  assert(fn.sql.includes("v_type NOT IN ('merge_politician', 'candidacy', 'removal') OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)"),
+  // 2026-10-06（#349）起「要兩台機器」的判斷抽成 contribution_needs_two_ips（多看 payload：中止交接），名冊吻合的例外照舊
+  assert(
+    fn.sql.includes("v_type NOT IN ('merge_politician', 'candidacy', 'removal') OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)")
+      || fn.sql.includes("NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)"),
     "名冊吻合的參選紀錄免兩台機器，否則目標 1 也要兩票");
 
   // 讓現有符合條件的 pending 立刻重算

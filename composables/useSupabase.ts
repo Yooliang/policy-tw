@@ -7,10 +7,11 @@ import type {
   RegionStats, ElectoralDistrictArea, ElectionTypeTableRow, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
-  RawElectionTypeRow,
+  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin,
 } from '../types'
+import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
-import { isClientError, isMissingFunction, withTimeoutAndRetry } from '../lib/retry'
+import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
@@ -34,6 +35,9 @@ const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 /** 快照只帶了部分選舉區對應（縣市頁只嵌該縣市）：ensureDistricts 仍要撈整份 */
 let districtsPartial = false
 const verificationSources = ref<VerificationSource[]>([])
+/** 政策脈絡（#349，視圖 lineages_full）。脈絡一覽要整份（lineagesComplete）；脈絡頁只放那一條 */
+const lineages = ref<Lineage[]>([])
+const lineagesComplete = ref(false)
 /**
  * 頁面資料快照的建置時間（epoch ms；沒有快照＝null）。預渲染端與客戶端 hydrate 時是同一個值，
  * 要依「今天」切畫面的頁面（選舉一覽的今後／過去）第一次渲染用它，掛載後才換成真的今天，不會 hydration mismatch。
@@ -305,8 +309,14 @@ export function mapPolicy(row: RawPolicy): Policy {
     relatedPolicyIds: (row.related_policy_ids || []).filter((id): id is string => typeof id === 'string'),
     // 政見三要素（#364）：視圖沒有這一欄時是 undefined，畫面一律當成三個都未調查
     elements: mapPolicyElements(row.elements),
+    // 政策脈絡（#349）：有值才帶，沒歸入脈絡、還沒標來源的政見快照不多三個空欄位
+    ...(row.lineage_id ? { lineageId: row.lineage_id } : {}),
+    ...(mapLineageSummary(row.lineage) ? { lineage: mapLineageSummary(row.lineage) } : {}),
+    ...(isPolicyOrigin(row.origin) ? { origin: row.origin } : {}),
   }
 }
+
+const isPolicyOrigin = (v: unknown): v is PolicyOrigin => v === 'pledge' || v === 'policy_address' || v === 'assembly' || v === 'budget'
 
 function mapDiscussion(row: RawDiscussion): Discussion {
   return {
@@ -472,6 +482,27 @@ export function ensureVerificationSources(): Promise<void> {
     })().catch((err) => { verificationSourcesPromise = null; recordFailure('查證來源', err, ensureVerificationSources) })
   }
   return verificationSourcesPromise
+}
+
+let lineagesPromise: Promise<void> | null = null
+
+/** 政策脈絡清單（#349）：只有脈絡一覽（/analysis）要整份；脈絡頁用 loadLineageById 撈那一條 */
+export function ensureLineages(): Promise<void> {
+  if (lineagesComplete.value) return Promise.resolve()
+  if (!lineagesPromise) {
+    lineagesPromise = (async () => {
+      try {
+        const rows = await fetchAllRows<RawLineage>('lineages_full', '*', 'id')
+        lineages.value = rows.map(mapLineage).filter((l): l is Lineage => !!l)
+      } catch (err) {
+        // 前端比 migration 早上線的那幾分鐘視圖還不存在：當成還沒有任何脈絡，不讓整頁變成載入失敗
+        if (!isMissingRelation(err)) throw err
+        lineages.value = []
+      }
+      lineagesComplete.value = true
+    })().catch((err) => { lineagesPromise = null; recordFailure('政策脈絡', err, ensureLineages) })
+  }
+  return lineagesPromise
 }
 
 /** 討論：只有討論頁用 */
@@ -781,6 +812,9 @@ export interface DataSnapshot {
   verificationSources: VerificationSource[]
   /** 縣市頁的鄉鎮市區名錄（只有縣市頁的切片有）。沒給＝這一頁不需要。 */
   townshipDirectory?: DirectoryPerson[]
+  /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
+  lineages?: Lineage[]
+  lineagesComplete?: boolean
 }
 
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
@@ -798,6 +832,8 @@ export function getDataSnapshot(): DataSnapshot {
     discussions: discussions.value,
     stats: stats.value,
     verificationSources: verificationSources.value,
+    // 建置端才會撈脈絡（ensureLineages）；沒撈就不帶，快照形狀不變
+    ...(lineagesComplete.value ? { lineages: lineages.value, lineagesComplete: true } : {}),
   }
 }
 
@@ -827,6 +863,10 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   stats.value = snapshot.stats
   verificationSources.value = snapshot.verificationSources
   if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
+  // 政策脈絡：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的脈絡不該留到下一頁）
+  lineages.value = snapshot.lineages ?? []
+  lineagesComplete.value = snapshot.lineagesComplete === true
+  if (!snapshot.lineages) lineagesPromise = null
 }
 
 export function useSupabase() {
@@ -943,7 +983,63 @@ export function useSupabase() {
     }
   }
 
+  /** 政策脈絡（#349）：脈絡頁直接開、或從政見頁點進來時，只撈那一條 */
+  async function loadLineageById(lineageId: string): Promise<Lineage | null> {
+    const existing = lineages.value.find(l => l.id === lineageId)
+    if (existing) return existing
+    try {
+      const { data } = await withTimeoutAndRetry(`lineage ${lineageId}`, (signal) =>
+        supabase.from('lineages_full').select('*').eq('id', lineageId).abortSignal(signal).maybeSingle().throwOnError())
+      const mapped = data ? mapLineage(data as RawLineage) : null
+      if (mapped && !lineages.value.some(l => l.id === mapped.id)) lineages.value = [...lineages.value, mapped]
+      return mapped
+    } catch (err) {
+      // id 格式錯、視圖還不存在之類的請求錯誤等於「找不到」；網路／伺服器問題才讓頁面顯示重試
+      if (isClientError(err)) { console.warn(`[loadLineageById] ${lineageId}：`, err); return null }
+      recordFailure('政策脈絡', err, async () => { await loadLineageById(lineageId) })
+      return null
+    }
+  }
+
+  /** 一條脈絡裡的政見（#349）：補進全域清單（同一個來源，已有的覆蓋成最新） */
+  async function loadPoliciesByLineage(lineageId: string): Promise<void> {
+    try {
+      // query-bounds: ok — 一條脈絡的政見最多幾十條
+      const { data } = await withTimeoutAndRetry(`lineage policies ${lineageId}`, (signal) =>
+        supabase.from('policies_with_logs').select('*').eq('lineage_id', lineageId).order('id').limit(500).abortSignal(signal).throwOnError())
+      const rows = ((data || []) as RawPolicy[]).filter(r => !r.removed_at).map(mapPolicy)
+      if (rows.length === 0) return
+      const ids = new Set(rows.map(r => r.id))
+      policies.value = [...policies.value.filter(p => !ids.has(p.id)), ...rows]
+    } catch (err) {
+      recordFailure('脈絡裡的政見', err, async () => { await loadPoliciesByLineage(lineageId) })
+    }
+  }
+
+  /** 一批人物（脈絡的參與者、前後任）：已在全域狀態的不重撈 */
+  async function loadPoliticiansByIds(ids: readonly string[]): Promise<void> {
+    const missing = [...new Set(ids)].filter(id => id && !politicians.value.some(p => p.id === id)).slice(0, 200)
+    if (missing.length === 0) return
+    try {
+      // query-bounds: ok — 一條脈絡提到的人最多兩百位（截在 200）
+      const { data } = await withTimeoutAndRetry(`politicians ${missing.length}`, (signal) =>
+        supabase.from('politicians_with_elections').select('*').in('id', missing).order('id').limit(200).abortSignal(signal).throwOnError())
+      const rows = ((data || []) as RawPolitician[]).filter(r => !r.merged_into).map(mapPolitician)
+      const seen = new Set(politicians.value.map(p => p.id))
+      const fresh = rows.filter(p => !seen.has(p.id))
+      if (fresh.length > 0) politicians.value = [...politicians.value, ...fresh]
+    } catch (err) {
+      recordFailure('政治人物', err, async () => { await loadPoliticiansByIds(ids) })
+    }
+  }
+
   return {
+    lineages,
+    lineagesComplete,
+    ensureLineages,
+    loadLineageById,
+    loadPoliciesByLineage,
+    loadPoliticiansByIds,
     elections,
     politicians,
     policies,

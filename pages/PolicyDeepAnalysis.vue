@@ -8,6 +8,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
+import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import {
   Bot, Link as LinkIcon, FileText,
   Layers, ShieldCheck, ArrowRight, Sparkles, Network, MapPin,
@@ -236,6 +237,11 @@ onMounted(() => { ensurePolicies() })
         <RouterLink :to="BOARD_PATH" class="ml-1 font-bold underline underline-offset-2 text-white">到任務看板看進度</RouterLink>
       </p>
     </Hero>
+
+    <!-- 所屬脈絡（#349）：這條政見歸入了政策脈絡就放一張真連結（還沒歸入就不出現） -->
+    <div v-if="selectedPolicy.lineage" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      <PolicyLineageCard :lineage="selectedPolicy.lineage" />
+    </div>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-20">
       <div class="bg-white rounded-[40px] border border-slate-200 shadow-2xl overflow-hidden flex flex-col min-h-[950px]">

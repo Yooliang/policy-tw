@@ -56,6 +56,7 @@ interface MyContribution {
 const TYPE_LABEL: Record<string, string> = {
   politician: '人物資料', candidacy: '參選狀態', policy: '新政見', policy_progress: '政見進度', correction: '資料更正', task_suggestion: '任務提議', no_change: '無異動', adjudication: '裁決',
   policy_elements: '政見三要素',
+  lineage: '政策脈絡', lineage_participants: '脈絡參與角色', lineage_handover: '脈絡交接', lineage_link: '脈絡上下級',
 }
 const STATUS_LABEL: Record<string, string> = {
   pending: '待驗證', verified: '已驗證', applied: '已上線', disputed: '爭議（舊制）',

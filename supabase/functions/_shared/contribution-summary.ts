@@ -49,6 +49,7 @@ export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
 import { normalizeCorrection } from "./correction.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
 import { elementPhrase } from "./policy-elements.ts";
+import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -191,6 +192,37 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     case "roster_check": {
       const cec = typeof p.cec_count === "number" ? `${p.cec_count} 人` : "查不到";
       summary = `清查 ${str(p.region)} ${str(p.election_id)} ${str(p.election_type)} 名單：中選會 ${cec}、我們 ${typeof p.ours_count === "number" ? `${p.ours_count} 人` : "?"}、另補 ${typeof p.submitted === "number" ? p.submitted : 0} 筆`;
+      targetName = null;
+      break;
+    }
+    // 政策脈絡（#349）：讀者要看得出建了／歸入了哪條脈絡、標了誰的角色、記了哪一段交接或關聯
+    case "lineage": {
+      const nl = (p.new_lineage && typeof p.new_lineage === "object" ? p.new_lineage : null) as Obj | null;
+      const n = Array.isArray(p.policy_ids) ? p.policy_ids.length : 0;
+      const d = Array.isArray(p.detach_policy_ids) ? p.detach_policy_ids.length : 0;
+      const parts = [n > 0 ? `歸入 ${n} 條政見` : "", d > 0 ? `拿掉 ${d} 條政見` : "", !nl && (p.title || p.summary || p.category) ? "更正脈絡內容" : ""].filter(Boolean);
+      summary = nl
+        ? `建立政策脈絡「${clip(nl.title, 60)}」（${lineagePlaceLabel(nl.level, nl.region, nl.sub_region)}）並${parts.join("、") || "歸入政見"}`
+        : `政策脈絡 ${str(p.lineage_id).slice(0, 8)}：${parts.join("、") || "（沒有動作）"}`;
+      targetName = nl ? str(nl.title) || null : null;
+      break;
+    }
+    case "lineage_participants": {
+      const items = Array.isArray(p.participants) ? (p.participants as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+      const roles = items.slice(0, 3).map((e) => e.remove === true ? `拿掉一項${PARTICIPANT_BASIS_LABEL[str(e.basis) as keyof typeof PARTICIPANT_BASIS_LABEL] ?? ""}角色` : participantPhrase(e));
+      summary = `為政策脈絡 ${str(p.lineage_id).slice(0, 8)} 標參與角色 ${items.length} 項：${roles.join("、")}${items.length > 3 ? "…" : ""}`;
+      targetName = null;
+      break;
+    }
+    case "lineage_handover": {
+      const label = HANDOVER_TYPE_LABEL[str(p.handover_type) as keyof typeof HANDOVER_TYPE_LABEL] ?? str(p.handover_type);
+      summary = `記政策脈絡 ${str(p.lineage_id).slice(0, 8)} 的交接：${label}——${clip(p.note, 80)}`;
+      targetName = null;
+      break;
+    }
+    case "lineage_link": {
+      const label = LINK_TYPE_LABEL[str(p.link_type) as keyof typeof LINK_TYPE_LABEL] ?? str(p.link_type);
+      summary = `記政策脈絡的上下級關聯（${label}）：${str(p.upper_lineage_id).slice(0, 8)} → ${str(p.lower_lineage_id).slice(0, 8)}——${clip(p.note, 60)}`;
       targetName = null;
       break;
     }

@@ -64,6 +64,10 @@ const BORDER: Record<string, string> = {
   duplicate_politician: '#78716c',      // 重複人物：石
   question: '#db2777',                  // 提問：粉
   policy_elements_missing: '#7c2d12',   // 政見三要素：赭
+  lineage_candidate: '#0f766e',         // 政策脈絡：深青（同一族）
+  handover_missing: '#115e59',
+  lineage_roles_missing: '#134e4a',
+  lineage_link_candidate: '#14b8a6',
   deadline_due: '#15803d',              // 期限到了查進度：深綠（同進度那一族）
 }
 // 驗證項目（contribution_type）另一套，彼此也拉開
@@ -82,6 +86,10 @@ const VERIFY_BORDER: Record<string, string> = {
   merge_politician: '#4338ca',  // 人物合併：靛
   adjudication: '#475569',
   policy_elements: '#9a3412',   // 政見三要素：赭
+  lineage: '#0f766e',           // 政策脈絡：深青
+  lineage_participants: '#134e4a',
+  lineage_handover: '#115e59',
+  lineage_link: '#14b8a6',
 }
 const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
@@ -101,6 +109,10 @@ const VERIFY_LABEL: Record<string, string> = {
   merge_politician: '人物合併',
   adjudication: '裁決',
   policy_elements: '政見三要素',
+  lineage: '政策脈絡',
+  lineage_participants: '脈絡參與角色',
+  lineage_handover: '脈絡交接',
+  lineage_link: '脈絡上下級',
 }
 const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
 const minsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000))

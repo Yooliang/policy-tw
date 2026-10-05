@@ -172,6 +172,38 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**不要自己判定跳票**：要有來源寫出結果，查不到就是查不到。查證後確定期限之後真的沒有任何消息，用 no_change 回報，finding 寫你查了哪些來源、最新的消息停在哪一天。" +
     "先確認來源講的是這個人任內、職權內做的事；前任或別人做的同主題事情不算。" +
     SOLE_SOURCE_TASK_NOTE,
+
+  // 政策脈絡（#349，2026-10-06）：一條脈絡＝一件事在某一層級、某一地方的來龍去脈。系統把同一層級、同一地方、同一類別的政見
+  // 放成一格交給你看，判斷「是不是同一件事」是你的事——字面相似不準（同議題常常用字完全不同），系統不替你猜。
+  lineage_candidate:
+    "整份看過 target.policies（current.policies 有每條的說明開頭），找出**講的是同一件事**的政見：同一個建設（同一條路線、同一座場館、同一塊基地）、同一部法律或條例、同一筆補助、同一個制度。" +
+    "主題相同但標的不同（不同的醫院、不同的捷運路線、不同的補助對象）**不是**同一件事；一份政見清單的「N 大政見」本來就是 N 件事。" +
+    "找到一組就交一筆 lineage：current.existing_lineages 裡已經有這件事就帶 lineage_id 歸入（不要另建一條）；沒有就用 new_lineage 建，title 用這件事的名稱（中性、照事實，不寫評價或口號），" +
+    "level 填這件事實際在哪一級政府決定與執行（中央的法律與預算 national、縣市政府的建設與福利 county、鄉鎮公所的 township；立委承諾的地方建設多半是 county），region／sub_region 照那一級填。" +
+    "政見已經在別條脈絡的（lineage_id 有值）不能再歸入；那兩條其實是同一件事的話，note 寫清楚、歸入其中一條就好。" +
+    "note 寫憑什麼判定是同一件事（政見原文裡共同的名稱、地點、金額或文件）。同一格裡有好幾件事就交好幾筆。" +
+    "只有一條政見、沒有別人或別屆談同一件事，不要建脈絡；整份看完沒有任何同一件事 → no_change，outcome=confirmed，finding 列出你比對過哪幾組、為什麼不是同一件事。",
+
+  handover_missing:
+    "記交接：脈絡裡前一任（target.from_politician_id）的那件事，後一任（target.to_politician_id）上任後怎麼處理。五選一：keep 接手（原樣延續）、pivot 轉向（目的不變、做法變了）、shrink 縮小（規模或預算縮水但沒停）、stop 中止（停掉）、resume 重新開始（曾經停掉後又重啟）。" +
+    "依據要是後任上任後的施政報告、預算書、議會議事錄或報導，寫出後任實際怎麼做；**後任的政見清單裡沒有這件事，不等於中止**——那叫查不到。" +
+    "中止要有來源明確寫出停止、喊卡、解約或終止，note 寫出誰、哪份文件、哪一天決定的；中止這一型要兩台不同機器的驗證票才會上線。" +
+    "用 lineage_handover 交：lineage_id、from_politician_id、from_election_id、to_politician_id、to_election_id 照 target 帶，decided_on 填判定依據的日期（知道的話），source_locator 寫依據在出處的哪裡。" +
+    "還查不到後任怎麼處理 → no_change，outcome=not_found，checked_urls 列你查過的施政報告、預算與議事錄。" +
+    SOLE_SOURCE_TASK_NOTE.replace("交 policy／policy_progress 時", "交 policy／policy_progress／lineage_handover 時"),
+
+  lineage_roles_missing:
+    "標參與角色：**以官方紀錄為準**。到立法院議事系統（議案、關係文書、提案人與連署人名單）或縣市議會網站（提案、議事錄、質詢）查這件事的官方紀錄，" +
+    "誰是提案人 proposer、共同提案人 co_proposer、連署人 cosigner，或在官方紀錄裡主張推動 advocate（例：質詢、臨時動議要求辦理）；不限 target.people，同一案的其他人也一起標（要是網站上已有的人物）。" +
+    "官方紀錄的角色 basis 填 official_record，出處放那一頁的網址（要是 ly.gov.tw、議會或 *.gov.tw 的網址），source_locator 寫議案編號、關係文書頁碼或會議日期與案由。" +
+    "本人在官網、新聞、答辯書裡自稱「我提的」「我推動的」：照官方紀錄標他的角色，另外加一項 basis 填 self_claim（本人宣稱）——本人宣稱不當作主導的證據。臉書、IG 讀不到，不收。" +
+    "已經標過的角色寫錯了，重交同一人同一種依據就會覆蓋；標錯人用 remove=true 拿掉。官方紀錄裡查不到 → no_change，outcome=not_found，checked_urls 列你查過的議事系統頁面。",
+
+  lineage_link_candidate:
+    "判斷上下級：這條脈絡（target.lineage_id）跟 target.upper_candidates 裡上一級的脈絡，有沒有**實際的法規、預算或政策連結**。" +
+    "上級立法或補助、這裡配套執行 → top_down（例：中央條例或前瞻補助核定 → 縣市的執行計畫）；這裡先做或爭取、上級後來採納 → bottom_up（例：縣市試辦或連署 → 中央入法、編列預算）。" +
+    "有就用 lineage_link 交：upper_lineage_id 填上級那條、lower_lineage_id 填這一條，note 寫依據（條文、補助核定公文、執行計畫寫到上級的哪一案），一對交一筆。" +
+    "同類別但只是主題相近、找不到實際連結的不算。逐條看完都沒有 → no_change，outcome=confirmed，finding 寫每一條的結論。",
 };
 
 /**
@@ -224,7 +256,8 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   // 另一隻只能從既有政見裡看到 19 個值中的 9 個當例子。
   policy:
     `payload：title（4–200 字）、description（≥20 字）、category（要是這 19 個之一：${POLICY_CATEGORIES.join("／")}）、` +
-    `status（${POLICY_STATUSES.join("／")}）、election_id（選舉年份）、politician_id 或 name。source_urls 放證明這筆政見的網址。`,
+    `status（${POLICY_STATUSES.join("／")}）、election_id（選舉年份）、politician_id 或 name。source_urls 放證明這筆政見的網址。` +
+    "可帶 origin（政見從哪裡來：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算；不帶的競選承諾自動標 pledge）。",
   // education_level 是固定值域（生產資料的實際分布），不是自由文字——
   // 實測回報代理只能猜（2026-09-21）
   politician:
@@ -260,6 +293,22 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：policy_id、elements[]（1～3 個，每個 {element：target 數值目標／deadline 達成期限／funding 財源；stated：true 原文有寫／false 查過原文沒寫；" +
     `text：原文的事實，${POLICY_ELEMENT_TEXT_MAX} 字內（stated=false 不填）；deadline_date：YYYY-MM-DD（只有原文寫了的達成期限、換得成日期才填）；` +
     "source_locator：原句在原文的位置（必填，stated=false 也要填查的是哪一段）；source_url：出自 source_urls 的哪一個（不填＝第一個）}）。source_urls 放原文網址。",
+  // 政策脈絡（#349）
+  lineage:
+    "payload：lineage_id（歸入既有的脈絡）或 new_lineage（建新的：{title 4～60 字、summary 200 字內、category 19 類之一、" +
+    "level：national 中央／county 縣市／township 鄉鎮市區、region 縣市、sub_region 鄉鎮}）二擇一；policy_ids（要歸入的政見 id，新脈絡至少 2 條、中央層級至少 1 條）；" +
+    "歸入既有脈絡時也可用 detach_policy_ids 拿掉歸錯的、用 title／summary／category 更正脈絡本身；note（20 字以上：憑什麼判定是同一件事）。",
+  lineage_participants:
+    "payload：lineage_id、participants[]（1～50 項，每項 {politician_id、role：proposer 提案／co_proposer 共同提案／cosigner 連署／advocate 主張推動、" +
+    "basis：official_record 官方紀錄（出處要是立法院、議會或 *.gov.tw）／self_claim 本人宣稱、source_locator 議案編號或頁碼（必填）、source_url 出自 source_urls 的哪一個（不填＝第一個）、note 選填；" +
+    "標錯的人加 remove=true 拿掉}）。臉書、IG 讀不到，不收。",
+  lineage_handover:
+    "payload：lineage_id、from_politician_id、from_election_id、to_politician_id、to_election_id（照任務 target 帶；那一屆不在網站上就不填）、" +
+    "handover_type（keep 接手／pivot 轉向／shrink 縮小／stop 中止／resume 重新開始）、decided_on（判定依據的日期，選填）、note（20～500 字：依據哪份文件、文件怎麼說）、" +
+    "source_locator（依據在出處的哪裡）、source_url（出自 source_urls 的哪一個，不填＝第一個）。中止要兩台不同機器的驗證票。",
+  lineage_link:
+    "payload：upper_lineage_id（上一級那條）、lower_lineage_id（下一級那條）、link_type（top_down 上級立法或補助，下級執行／bottom_up 下級爭取，上級採納）、" +
+    "note（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）、source_locator（條文、公文字號或頁碼）、source_url（選填，不填＝第一個）。",
 };
 
 /** correction／removal 這類要指定「改哪一列」的任務，target_table 是哪一張表。 */
@@ -428,6 +477,55 @@ function buildPayload(
           ...(k === "deadline" ? { deadline_date: "（YYYY-MM-DD；換不成日期就整欄拿掉）" } : {}),
           source_locator: "（原句在原文的位置：公報第幾頁哪一段、影片幾分幾秒；stated=false 寫查的是哪一段）",
         })),
+      };
+    }
+    // 政策脈絡（#349）：骨架照任務 target 先填好已知的 id
+    case "lineage": {
+      const existing = Array.isArray(t.existing_lineages) ? t.existing_lineages as Array<Record<string, unknown>> : [];
+      return {
+        ...(existing.length > 0 ? { lineage_id: `（歸入既有的就填 existing_lineages 裡的 lineage_id，例：${asText(existing[0].lineage_id)}；建新的就刪掉這一欄、改用 new_lineage）` } : {}),
+        new_lineage: {
+          title: "（這件事的名稱，4～60 字，中性、照事實）",
+          summary: "（一兩句話講這件事是什麼，200 字內；可刪）",
+          category: asText(t.category) ?? "（19 類之一）",
+          level: asText(t.level) ?? "（national／county／township）",
+          ...(t.region ? { region: asText(t.region) } : {}),
+          ...(t.sub_region ? { sub_region: asText(t.sub_region) } : {}),
+        },
+        policy_ids: ["（同一件事的政見 id，從 target.policies 抄）"],
+        note: "（憑什麼判定是同一件事：政見原文裡共同的名稱、地點、金額或文件）",
+      };
+    }
+    case "lineage_participants":
+      return {
+        lineage_id: asText(t.lineage_id) ?? "（脈絡 id）",
+        participants: (Array.isArray(t.people) && t.people.length > 0 ? t.people as Array<Record<string, unknown>> : [{}]).map((person) => ({
+          politician_id: asText(person.politician_id) ?? "（人物 id）",
+          role: "（proposer／co_proposer／cosigner／advocate）",
+          basis: "official_record",
+          source_locator: "（議案編號、關係文書頁碼或會議日期與案由）",
+        })),
+      };
+    case "lineage_handover":
+      return {
+        lineage_id: asText(t.lineage_id) ?? "（脈絡 id）",
+        from_politician_id: asText(t.from_politician_id) ?? "（前一任的人物 id）",
+        ...(t.from_election_id !== undefined && t.from_election_id !== null ? { from_election_id: t.from_election_id } : {}),
+        to_politician_id: asText(t.to_politician_id) ?? "（下一任的人物 id）",
+        ...(t.to_election_id !== undefined && t.to_election_id !== null ? { to_election_id: t.to_election_id } : {}),
+        handover_type: "（keep／pivot／shrink／stop／resume）",
+        decided_on: "（YYYY-MM-DD；不知道就刪掉這一欄）",
+        note: "（20～500 字：依據哪份文件、文件怎麼說）",
+        source_locator: "（依據在出處的哪裡）",
+      };
+    case "lineage_link": {
+      const uppers = Array.isArray(t.upper_candidates) ? t.upper_candidates as Array<Record<string, unknown>> : [];
+      return {
+        upper_lineage_id: uppers.length === 1 ? asText(uppers[0].lineage_id) : "（上一級那條的 lineage_id，從 target.upper_candidates 抄）",
+        lower_lineage_id: asText(t.lineage_id) ?? "（下一級那條的 lineage_id）",
+        link_type: "（top_down／bottom_up）",
+        note: "（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）",
+        source_locator: "（條文、公文字號或頁碼）",
       };
     }
     case "policy_progress":

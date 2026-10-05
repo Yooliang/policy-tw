@@ -1,6 +1,6 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { withElectionData, type DataSnapshot } from '../../composables/useSupabase'
-import { PolicyStatus, type Policy, type Politician } from '../../types'
+import { PolicyStatus, type Lineage, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { policySortDate } from '../policy-date'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
@@ -31,6 +31,15 @@ function paramString(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
+/** 政策脈絡頁提到的人（#349）：政見提出者、參與者、交接的前後任。預渲染與邊緣 SSR 共用 */
+export function lineagePeople(lineage: Lineage, policies: readonly Policy[]): string[] {
+  return [...new Set([
+    ...policies.map((p) => String(p.politicianId)),
+    ...lineage.participants.map((p) => p.politicianId),
+    ...lineage.handovers.flatMap((h) => [h.fromPoliticianId, h.toPoliticianId]),
+  ])]
+}
+
 function politiciansReferencedBy(policies: Policy[], all: Politician[]): Politician[] {
   const ids = new Set(policies.map((p) => String(p.politicianId)))
   return all.filter((pl) => ids.has(String(pl.id)))
@@ -55,7 +64,7 @@ export function collectRelayChainIds(startId: string, policies: Policy[]): Set<s
 }
 
 /**
- * 與 PolicyAnalysis.relayCases 同邏輯：分析列表實際會連到哪些 /analysis/:policyId。
+ * 與 PolicyAnalysis.progressCases 同邏輯：分析列表實際會連到哪些 /analysis/:policyId。
  * （有接力鏈的取鏈尾；否則非競選承諾且進度 > 50 的政見。）
  */
 export function analysisListedPolicyIds(policies: Policy[]): string[] {
@@ -106,8 +115,26 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
       return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies.slice(0, 3), full.politicians) }
 
     case 'tracking':
-    case 'analysis':
       return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians) }
+
+    case 'analysis':
+      // 政策脈絡一覽（#349）：整份脈絡＋原本的「進度過半的政見」要的整份政見
+      return {
+        ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians),
+        lineages: full.lineages ?? [], lineagesComplete: true,
+      }
+
+    case 'lineage': {
+      // 政策脈絡頁（#349）：那一條＋它的政見＋提到的人（邊緣 SSR 的 loadLineagePage 算的是同一份）
+      const id = paramString(to.params.lineageId)
+      const lineage = (full.lineages ?? []).find((l) => l.id === id)
+      if (!lineage) return base
+      const ids = new Set(lineage.policyIds)
+      const policies = full.policies.filter((p) => ids.has(String(p.id)))
+      const people = new Set(lineagePeople(lineage, policies))
+      const politicians = full.politicians.filter((pl) => people.has(String(pl.id)))
+      return { ...base, policies, politicians, lineages: [lineage], lineagesComplete: false }
+    }
 
     case 'policy': {
       const id = paramString(to.params.policyId)

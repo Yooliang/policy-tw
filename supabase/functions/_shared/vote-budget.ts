@@ -342,6 +342,59 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 政策脈絡（#349，2026-10-06）：影子模式一樣只記錄。要防的是「主題相近當成同一件事」「新聞或本人說法當成官方紀錄」
+  // 「後任沒提就當成中止」
+  lineage: [
+    {
+      key: "topic_not_same_matter",
+      instructions: "歸進同一條脈絡的政見，講的是同一個建設、同一部法律、同一筆補助或同一個制度嗎？還是只是主題相近（不同的醫院、不同的路線、不同的對象）？",
+      hit: { key: "only_similar", means: "只是主題相近，不是同一件事" },
+      miss: { key: "same_matter", means: "講的是同一件事，note 指得出共同的名稱、地點或文件" },
+    },
+    {
+      key: "level_mismatch",
+      instructions: "脈絡標的層級與地方（中央、縣市、鄉鎮）是這件事實際決定與執行的那一級政府嗎？",
+      hit: { key: "wrong_level", means: "層級或地方標錯（例：縣市建設標成中央）" },
+      miss: { key: "right_level", means: "層級與地方跟這件事實際的主管機關一致" },
+    },
+  ],
+  lineage_participants: [
+    {
+      key: "role_not_official",
+      instructions: "標成官方紀錄的角色，附的出處是立法院或議會的官方紀錄、而且那一頁列著這個人是提案、共同提案或連署嗎？還是新聞轉述或本人說法？",
+      hit: { key: "not_official", means: "依據不是官方紀錄，或官方紀錄沒有列這個人" },
+      miss: { key: "official", means: "官方紀錄列著這個人與這個角色" },
+    },
+    {
+      key: "self_claim_as_lead",
+      instructions: "本人自述（答辯書、受訪、官網）說自己是提案人，提交者有沒有把它當成官方角色交，而不是標成本人宣稱？",
+      hit: { key: "claim_promoted", means: "把本人宣稱當成官方角色" },
+      miss: { key: "claim_labeled", means: "本人宣稱都標成本人宣稱" },
+    },
+  ],
+  lineage_handover: [
+    {
+      key: "stop_by_absence",
+      instructions: "交接型態（尤其是中止）有來源明確寫出後任怎麼處理嗎？還是只因為後任的政見清單裡沒有這件事就推定？",
+      hit: { key: "inferred", means: "型態是推定的，來源沒有明確寫出處理結果" },
+      miss: { key: "stated", means: "來源明確寫出後任延續、改做法、縮小、停止或重啟" },
+    },
+    {
+      key: "wrong_terms",
+      instructions: "前後兩任（人與屆別）是這件事在這個地方真正的前任與後任嗎？",
+      hit: { key: "wrong_pair", means: "前後任對錯人或對錯屆" },
+      miss: { key: "right_pair", means: "前後任正確" },
+    },
+  ],
+  lineage_link: [
+    {
+      key: "topic_only",
+      instructions: "上下級兩條脈絡之間，有實際的法規、預算補助或執行計畫連結嗎？還是只是同一個主題？",
+      hit: { key: "topic_only", means: "只是主題相近，沒有實際連結" },
+      miss: { key: "linked", means: "有法規、補助核定或執行計畫把兩者連起來" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",

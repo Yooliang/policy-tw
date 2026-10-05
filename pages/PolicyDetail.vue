@@ -31,6 +31,7 @@ import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import PolicyElements from '../components/PolicyElements.vue'
+import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import { ELEMENTS_EXPLAINER } from '../lib/policy-elements'
 import { Columns3, ListChecks } from 'lucide-vue-next'
 
@@ -618,6 +619,9 @@ async function copyCitation() {
               </router-link>
             </p>
           </section>
+
+          <!-- 所屬脈絡（#349）：這條政見歸入的政策脈絡；還沒歸入就不出現 -->
+          <PolicyLineageCard v-if="policy.lineage" :lineage="policy.lineage" />
 
           <!-- 公民提問獨立一張卡（2026-09-18）：它是讀者跟 AI 的問答，
                跟政見內容是兩件事，混在同一張卡裡分不出哪句是政見、哪句是回答。

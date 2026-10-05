@@ -13,7 +13,9 @@ import {
   ensurePolicies,
   ensureVerificationSources,
 } from '../../composables/useSupabase'
-import type { Politician, RawPolitician } from '../../types'
+import type { Lineage, Politician, RawLineage, RawPolitician } from '../../types'
+import { mapLineage } from '../lineage'
+import { isMissingRelation } from '../retry'
 import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
 import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
@@ -102,8 +104,29 @@ async function loadFullDataset(): Promise<DataSnapshot> {
     console.warn(`[ssg] ${orphanPolicies.length} 筆政見的 politician_id 不在 politicians_with_elections（頁面會顯示找不到）：${[...new Set(orphanPolicies.map((p) => p.politicianId))].slice(0, 5).join(', ')}`)
   }
   const stats = computeStats(politicians, base)
-  console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length}`)
-  return { ...base, politicians, stats }
+  const lineages = await loadLineages()
+  console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length}`)
+  return { ...base, politicians, stats, lineages, lineagesComplete: true }
+}
+
+/**
+ * 政策脈絡（#349）：脈絡一覽要整份、脈絡頁進網站地圖。視圖還不存在（前端比 migration 早上線）就當成還沒有脈絡；
+ * 其他錯照樣重試、三次失敗中止建置（跟其他資料一樣，產出缺一塊的頁面比不建置更糟）。
+ * 不走 ensureLineages：那支失敗會寫全域的 error，預渲染的每一頁都會讀到。
+ */
+async function loadLineages(): Promise<Lineage[]> {
+  return await withRetry('lineages_full', async () => {
+    try {
+      const rows = await fetchAllRows<RawLineage>('lineages_full', '*', 'id')
+      return rows.map(mapLineage).filter((l): l is Lineage => !!l)
+    } catch (err) {
+      if (isMissingRelation(err)) {
+        console.warn('[ssg] lineages_full 還不存在（migration 還沒套上），政策脈絡先當成 0 條')
+        return []
+      }
+      throw err
+    }
+  }, () => true)
 }
 
 function dedupeById(politicians: Politician[]): Politician[] {
@@ -199,6 +222,8 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
   const edgePaths = [
     ...politicians.map((pl) => `/politician/${pl.id}`),
     ...full.policies.map((p) => `/policy/${p.id}`),
+    // 政策脈絡頁（#349）：跟政見頁一樣由 Worker 邊緣渲染，這裡只進網站地圖
+    ...(full.lineages ?? []).map((l) => `/lineage/${l.id}`),
   ]
   const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
   const paths = [

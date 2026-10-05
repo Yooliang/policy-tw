@@ -230,7 +230,8 @@ if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 in
 const lastmod = taipeiDate()
 const SITEMAP_GROUPS = [
   { file: 'sitemap-politicians.xml', match: (r) => r.startsWith('/politician/') },
-  { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') },
+  // 政策脈絡頁（/lineage/，#349）跟政見同一份：上線初期是 0 條，自己一份會是空檔
+  { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') || r.startsWith('/lineage/') },
   { file: 'sitemap-elections.xml', match: (r) => r.startsWith('/election/') },
   { file: 'sitemap-pages.xml', match: () => true },
 ]

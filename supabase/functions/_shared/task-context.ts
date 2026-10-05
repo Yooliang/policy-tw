@@ -74,6 +74,42 @@ export interface TaskContextData {
   verification_sources?: TaskSourceHint[];
   /** 政見三要素（#364）：這條政見已經有的要素列（沒有的那幾個＝未調查） */
   elements?: Obj[];
+  /** 政策脈絡（#349）：這條脈絡（lineages_full 一列：政見 id、參與者、交接、關聯） */
+  lineage?: Obj | null;
+  /** 政策脈絡（#349）：脈絡裡的政見，或候選格裡的政見（含說明開頭、提出者姓名） */
+  lineage_policies?: Obj[];
+  /** 政策脈絡（#349）：候選格同一層級同一地方已經有的脈絡；上下級候選的上一級脈絡 */
+  related_lineages?: Obj[];
+}
+
+/** 脈絡裡的政見給代理看的欄位（#349）：說明只取開頭，判「是不是同一件事」看得到主旨就夠 */
+function shapeLineagePolicy(row: Obj): Obj {
+  const person = row.politicians && typeof row.politicians === "object" ? row.politicians as Obj : null;
+  const desc = typeof row.description === "string" ? row.description : null;
+  return {
+    policy_id: row.id ?? row.policy_id ?? null,
+    title: row.title ?? null,
+    description: desc && desc.length > POLICY_DUPE_DESC_LIMIT ? `${desc.slice(0, POLICY_DUPE_DESC_LIMIT)}…` : desc,
+    politician_id: row.politician_id ?? null,
+    name: person?.name ?? row.name ?? null,
+    election_id: row.election_id ?? null,
+    status: row.status ?? null,
+    lineage_id: row.lineage_id ?? null,
+    source_url: row.source_url ?? null,
+  };
+}
+
+/** 一條脈絡給代理看的樣子（#349）：本身＋參與者、交接、關聯（政見另外給） */
+function shapeLineageBrief(row: Obj | null | undefined): Obj | null {
+  if (!row) return null;
+  return {
+    lineage_id: row.id ?? null,
+    ...pick(row, ["title", "summary", "category", "level", "region", "sub_region"]),
+    policy_ids: Array.isArray(row.policy_ids) ? row.policy_ids : [],
+    participants: Array.isArray(row.participants) ? (row.participants as Obj[]).map((x) => pick(x, ["politician_id", "name", "role", "basis", "source_url", "source_locator"])) : [],
+    handovers: Array.isArray(row.handovers) ? (row.handovers as Obj[]).map((x) => pick(x, ["from_politician_id", "from_name", "from_election_id", "to_politician_id", "to_name", "to_election_id", "handover_type", "decided_on", "note", "source_url"])) : [],
+    links: Array.isArray(row.links) ? (row.links as Obj[]).map((x) => pick(x, ["direction", "lineage_id", "title", "level", "region", "link_type", "note"])) : [],
+  };
 }
 
 /**
@@ -255,6 +291,24 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "candidacy_source_missing":
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    // 政策脈絡（#349）：候選格給整份政見（含說明開頭）＋同一地方已有的脈絡；其餘三種給那條脈絡與它的政見
+    case "lineage_candidate":
+      return {
+        policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
+        existing_lineages: (data.related_lineages ?? []).map(shapeLineageBrief),
+      };
+    case "handover_missing":
+    case "lineage_roles_missing":
+      return {
+        lineage: shapeLineageBrief(data.lineage),
+        lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
+      };
+    case "lineage_link_candidate":
+      return {
+        lineage: shapeLineageBrief(data.lineage),
+        lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
+        upper_candidates: (data.related_lineages ?? []).map(shapeLineageBrief),
+      };
     // 政見三要素（#364）：政見本身（description 是我們的摘要、不是原文——hint 有講）＋已經有的要素
     case "policy_elements_missing": {
       const existing = (data.elements ?? []).map((e) => pick(e, ELEMENT_FIELDS)!);
@@ -403,11 +457,58 @@ export function buildLookup(target: Obj): Record<string, string> {
   return out;
 }
 
+/** 政策脈絡（#349）：lineages_full 幾列（一次最多 30 條） */
+async function fetchLineagesFull(supabase: SupabaseLike, ids: readonly string[]): Promise<Obj[]> {
+  const list = [...new Set(ids.filter((x) => typeof x === "string" && x))].slice(0, 30);
+  if (list.length === 0) return [];
+  // query-bounds: ok — 最多 30 條脈絡
+  const { data } = await supabase.from("lineages_full").select("*").in("id", list).limit(30);
+  return (data ?? []) as Obj[];
+}
+
+/** 政策脈絡（#349）：一批政見（含提出者姓名）；一格最多 60 條，脈絡裡的政見也是這個量級 */
+const LINEAGE_POLICY_COLUMNS = "id, title, description, politician_id, election_id, status, lineage_id, source_url, politicians(name)";
+async function fetchPoliciesByIds(supabase: SupabaseLike, ids: readonly string[]): Promise<Obj[]> {
+  const list = [...new Set(ids.filter((x) => typeof x === "string" && x))].slice(0, MAX_POLICY_DUPE_LIST);
+  if (list.length === 0) return [];
+  // query-bounds: ok — 一格或一條脈絡最多 MAX_POLICY_DUPE_LIST 條
+  const { data } = await supabase.from("policies").select(LINEAGE_POLICY_COLUMNS).in("id", list).is("removed_at", null).limit(MAX_POLICY_DUPE_LIST);
+  return (data ?? []) as Obj[];
+}
+async function fetchLineagePolicies(supabase: SupabaseLike, lineageId: string): Promise<Obj[]> {
+  // query-bounds: ok — 一條脈絡的政見最多幾十條，取 MAX_POLICY_DUPE_LIST
+  const { data } = await supabase.from("policies").select(LINEAGE_POLICY_COLUMNS).eq("lineage_id", lineageId).is("removed_at", null)
+    .order("election_id", { ascending: true }).limit(MAX_POLICY_DUPE_LIST);
+  return (data ?? []) as Obj[];
+}
+
 /** 碰 DB：依 task_type／target 撈 current 要的資料 */
 export async function fetchTaskContext(supabase: SupabaseLike, taskType: string, target: Obj): Promise<TaskContextData> {
   const pid = typeof target.politician_id === "string" ? target.politician_id : null;
   const policyId = typeof target.policy_id === "string" ? target.policy_id : null;
   const data: TaskContextData = {};
+
+  // 政策脈絡（#349）
+  if (taskType === "lineage_candidate") {
+    const ids = (Array.isArray(target.policies) ? target.policies as Obj[] : []).map((x) => String(x.policy_id ?? ""));
+    const existing = (Array.isArray(target.existing_lineages) ? target.existing_lineages as Obj[] : []).map((x) => String(x.lineage_id ?? ""));
+    const [pols, lins] = await Promise.all([fetchPoliciesByIds(supabase, ids), fetchLineagesFull(supabase, existing)]);
+    // 照 target.policies 的順序（投票日、姓名）排回去
+    const order = new Map(ids.map((id, i) => [id, i]));
+    data.lineage_policies = pols.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
+    data.related_lineages = lins;
+  }
+  if ((taskType === "handover_missing" || taskType === "lineage_roles_missing" || taskType === "lineage_link_candidate") && typeof target.lineage_id === "string") {
+    const uppers = taskType === "lineage_link_candidate" && Array.isArray(target.upper_candidates)
+      ? (target.upper_candidates as Obj[]).map((x) => String(x.lineage_id ?? "")) : [];
+    const [lins, pols] = await Promise.all([
+      fetchLineagesFull(supabase, [target.lineage_id, ...uppers]),
+      fetchLineagePolicies(supabase, target.lineage_id),
+    ]);
+    data.lineage = lins.find((l) => l.id === target.lineage_id) ?? null;
+    data.related_lineages = lins.filter((l) => l.id !== target.lineage_id);
+    data.lineage_policies = pols;
+  }
 
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
@@ -699,7 +800,32 @@ export interface VerifyContextData {
   elements?: Obj[];
   /** policy_elements（#364）：這一任的卸任日（「任內」換算 deadline_date 用） */
   term_end?: string | null;
+  /** 政策脈絡（#349）：這筆動到的脈絡（lineages_full 列；關聯是上下兩條） */
+  lineages?: Obj[];
+  /** 政策脈絡（#349）：這筆要歸入／拿掉的政見，或脈絡裡現有的政見（含提出者姓名） */
+  lineage_policies?: Obj[];
 }
+
+/**
+ * 驗證政策脈絡（#349）：四種各一段提示。共同的重點——同一件事 vs 主題相近、角色以官方紀錄為準、中止要有來源明寫。
+ */
+export const LINEAGE_VERIFY_HINT: Record<string, string> = {
+  lineage:
+    "核對這些政見講的是不是**同一件事**（同一個建設、同一部法律、同一筆補助或同一個制度）：打開各條政見的出處與 note 引的依據，" +
+    "主題相近但標的不同（不同的醫院、不同的路線、不同的對象）就不是同一件事；新脈絡的層級與地方要是這件事實際決定與執行的那一級政府；標題要中性、照事實。" +
+    "existing 是網站上現在的脈絡（歸入既有的才有）。全部對得上投 agree；有任何一條政見不是同一件事、或層級地方標錯，投 disagree 並在 note 寫是哪一條、為什麼；出處打不開、確認不了投 unsure。",
+  lineage_participants:
+    "逐項核對角色：basis=official_record 的要打開那一頁官方紀錄（立法院議事系統、議會網站），確認這個人真的列在提案、共同提案或連署名單、或官方紀錄裡有他主張推動的發言；" +
+    "basis=self_claim 的要確認是本人說的（官網、答辯書、受訪），而且沒有被當成官方角色。新聞轉述不是官方紀錄。" +
+    "全部對得上投 agree；任一項角色或依據不對投 disagree，note 寫是誰、官方紀錄實際怎麼寫；打不開投 unsure。",
+  lineage_handover:
+    "核對交接：前後兩任要是這件事在這個地方真正的前任與後任；交接型態要有來源寫出後任實際怎麼處理——" +
+    "接手、轉向、縮小、中止、重新開始各自對得上來源的描述；**中止要有來源明確寫出停止、喊卡、解約或終止**，只因為後任政見裡沒提就判中止的，投 disagree。" +
+    "中止這一型要兩台不同機器的同意票才會上線。對得上投 agree；型態或前後任不對投 disagree 並寫來源實際怎麼說；打不開投 unsure。",
+  lineage_link:
+    "核對上下級：upper 要在 lower 的上一級（中央之於縣市或鄉鎮、縣市之於同縣市的鄉鎮），兩件事之間要有實際的法規、補助核定或執行計畫連結，" +
+    "方向對（top_down＝上級立法或補助、下級執行；bottom_up＝下級爭取、上級採納）。只是主題相近投 disagree；對得上投 agree；打不開投 unsure。",
+};
 
 /**
  * 按網域的查證提示（#4，2026-09-21）。任務側的 hint_sources 傳不到驗證側，沒被特別交代過的代理
@@ -848,6 +974,31 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
 
 function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: VerifyContextData): Obj {
   switch (contributionType) {
+    // 政策脈絡（#349）
+    case "lineage": {
+      const lid = typeof payload.lineage_id === "string" ? payload.lineage_id.toLowerCase() : null;
+      return {
+        existing: lid ? shapeLineageBrief((data.lineages ?? []).find((l) => String(l.id).toLowerCase() === lid)) : null,
+        policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
+        hint: LINEAGE_VERIFY_HINT.lineage,
+      };
+    }
+    case "lineage_participants":
+    case "lineage_handover":
+      return {
+        lineage: shapeLineageBrief((data.lineages ?? [])[0]),
+        lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
+        people: (data.politicians ?? []).map((x) => pick(x, POLITICIAN_BRIEF)),
+        hint: LINEAGE_VERIFY_HINT[contributionType],
+      };
+    case "lineage_link": {
+      const find = (v: unknown) => typeof v === "string" ? (data.lineages ?? []).find((l) => String(l.id).toLowerCase() === v.toLowerCase()) : undefined;
+      return {
+        upper: shapeLineageBrief(find(payload.upper_lineage_id)),
+        lower: shapeLineageBrief(find(payload.lower_lineage_id)),
+        hint: LINEAGE_VERIFY_HINT.lineage_link,
+      };
+    }
     case "politician":
     case "candidacy": {
       const elections = (data.elections ?? []).map((e) => pick(e, ["politician_id", "election_id", "election_type", "candidate_status", "source_note"]));
@@ -994,6 +1145,35 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
   const data: VerifyContextData = {};
   const pid = typeof payload.politician_id === "string" ? payload.politician_id : null;
   const name = typeof payload.name === "string" ? payload.name.trim() : null;
+
+  // 政策脈絡（#349）：動到的脈絡、要歸入或拿掉的政見、被標角色或交接的人
+  if (contributionType === "lineage") {
+    const ids = ["policy_ids", "detach_policy_ids"].flatMap((k) => Array.isArray(payload[k]) ? (payload[k] as unknown[]).filter((x): x is string => typeof x === "string") : []);
+    const [lins, pols] = await Promise.all([
+      typeof payload.lineage_id === "string" ? fetchLineagesFull(supabase, [payload.lineage_id]) : Promise.resolve([]),
+      fetchPoliciesByIds(supabase, ids),
+    ]);
+    data.lineages = lins;
+    data.lineage_policies = pols;
+  }
+  if ((contributionType === "lineage_participants" || contributionType === "lineage_handover") && typeof payload.lineage_id === "string") {
+    const people = contributionType === "lineage_participants"
+      ? (Array.isArray(payload.participants) ? payload.participants as Obj[] : []).map((x) => String(x?.politician_id ?? ""))
+      : [String(payload.from_politician_id ?? ""), String(payload.to_politician_id ?? "")];
+    const list = [...new Set(people.filter((x) => /^[0-9a-f-]{36}$/i.test(x)))];
+    const [lins, pols, ps] = await Promise.all([
+      fetchLineagesFull(supabase, [payload.lineage_id]),
+      fetchLineagePolicies(supabase, payload.lineage_id),
+      // query-bounds: ok — 一筆最多 MAX_PARTICIPANTS（50）位
+      list.length > 0 ? supabase.from("politicians").select("*").in("id", list).limit(60) : Promise.resolve({ data: [] }),
+    ]);
+    data.lineages = lins;
+    data.lineage_policies = pols;
+    data.politicians = (ps.data ?? []) as Obj[];
+  }
+  if (contributionType === "lineage_link") {
+    data.lineages = await fetchLineagesFull(supabase, [String(payload.upper_lineage_id ?? ""), String(payload.lower_lineage_id ?? "")]);
+  }
 
   if (contributionType === "politician" || contributionType === "candidacy" || contributionType === "policy") {
     let q = supabase.from("politicians").select("*").limit(10);
