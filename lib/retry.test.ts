@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { isClientError, withTimeoutAndRetry } from "./retry.ts";
+import { isClientError, isMissingFunction, withTimeoutAndRetry } from "./retry.ts";
 
 Deno.test("isClientError：SQLSTATE 與 PGRST 請求錯誤算客戶端錯誤；沒 code、PGRST0xx、AbortError 不算", () => {
   assertEquals(isClientError({ code: "22P02", message: "invalid input syntax for type uuid" }), true);
@@ -63,4 +63,20 @@ Deno.test("單次請求超過 timeout 會被 signal 中止，然後重試", asyn
   }), { delaysMs: [0], timeoutMs: 20 });
   assertEquals(v, "second");
   assertEquals(calls, 2);
+});
+
+// 2026-10-04：選舉頁分層用的 get_politicians_by_level 跟前端是同一個 PR，但 CI 的
+// 部署 job 是並行的，前端會有幾分鐘比 migration 早上線。那幾分鐘要退回舊查詢。
+Deno.test("PGRST202 是「函式不存在」，呼叫端要據此退回舊查詢", () => {
+  assertEquals(isMissingFunction({ code: "PGRST202" }), true);
+  // 不是這個碼的一概不算：退錯了會把真正的錯誤藏起來，變成「畫面有東西但資料是錯的」
+  assertEquals(isMissingFunction({ code: "PGRST201" }), false);
+  assertEquals(isMissingFunction({ code: "42501" }), false);
+  assertEquals(isMissingFunction(new Error("boom")), false);
+  assertEquals(isMissingFunction(null), false);
+  assertEquals(isMissingFunction(undefined), false);
+});
+
+Deno.test("函式不存在屬於 client error，不該被重試——再試幾次還是沒有那支函式", () => {
+  assertEquals(isClientError({ code: "PGRST202" }), true);
 });

@@ -3,8 +3,11 @@ import { withElectionData, type DataSnapshot } from '../../composables/useSupaba
 import { PolicyStatus, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { policySortDate } from '../policy-date'
-import { isCounty } from '../election-regions'
+import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { electionPeers } from '../election-peers'
+import { positionsToLoad } from '../election-levels'
+import { DIRECTORY_POSITION_TYPES, type DirectoryPerson } from '../township-directory'
+import { sameRegionName } from '../region-name'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -14,8 +17,15 @@ import { electionPeers } from '../election-peers'
  */
 export type PageSnapshot = DataSnapshot
 
-/** 與 useSupabase.loadPoliticiansByElection 全國模式一致：全台只載入這三類。 */
-export const NATIONAL_ELECTION_TYPES = ['總統副總統', '立法委員', '縣市長']
+/**
+ * 與 useSupabase.loadPoliticiansByElection 的全台層一致（lib/election-levels.ts 的
+ * positionsToLoad）：全台頁＝這一層（總統副總統）＋下一層（各縣市長）。
+ *
+ * 2026-10-04 拿掉立法委員：資料裡的立委全部是綁縣市選區的區域立委，屬縣市層。
+ * 這份清單一定要跟 positionsToLoad 的全台層同步——預渲染的切片比瀏覽器端多帶一種職位，
+ * hydrate 之後畫面會先有人再消失。
+ */
+export const NATIONAL_ELECTION_TYPES = ['總統副總統', '縣市長']
 
 function paramString(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
@@ -134,20 +144,49 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
     }
 
     case 'election-region': {
-      // 縣市頁：該屆該縣市所有在選的人（縣市長、議員、立委、鄉鎮市長、代表、村里長），跟瀏覽器端
-      // loadPoliticiansByElection(id, 縣市) 撈的是同一批；選舉區對應表只帶這個縣市（右側鄉鎮篩選要用）
+      // 縣市頁：該屆該縣市「這一層＋下一層」在選的人（縣市長、立委、議員，加上鄉鎮市長／
+      // 原住民區長），跟瀏覽器端 loadPoliticiansByElection(id, 縣市) 撈的是同一批。
+      // 2026-10-04 起依層級切，不再把整個縣市所有層級都塞進 initialState——高雄市那是 1,769 人，
+      // 而這一頁真正要顯示的是 128 人。這份清單一定要跟 positionsToLoad 的縣市層同步，
+      // 多帶一種職位，hydrate 之後畫面會先有人再消失。
+      // 選舉區對應表只帶這個縣市（右側鄉鎮篩選要用）
       const electionId = Number(paramString(to.params.electionId))
       const region = paramString(to.params.region)
       if (!isCounty(region)) return base
+      const countyPositions = positionsToLoad({
+        region,
+        subRegion: 'All',
+        isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
+      })
       const politicians = full.politicians
         .filter((pl) => pl.elections?.some((e) =>
-          e.electionId === electionId && e.region === region && isRunningCandidate(e.candidateStatus),
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          && countyPositions.includes(e.electionType as typeof countyPositions[number]),
         ))
         .map((pl) => withElectionData(pl, electionId))
+      // 鄉鎮市區名錄：這一頁唯一通往村里長人物頁的連結（13,338 位，爬蟲只能從這裡走到）。
+      // 卡片分層之後只有「這一層＋下一層」，所以名錄要另外切一份——只帶姓名、職位、
+      // 鄉鎮、村里四個欄位，塞進 initialState 的量遠小於整份人物物件。
+      // 層級清單跟瀏覽器端那支輕量查詢讀同一份（lib/township-directory.ts）。
+      const townshipDirectory: DirectoryPerson[] = full.politicians.flatMap((pl) => {
+        const rec = (pl.elections ?? []).find((e) =>
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          && DIRECTORY_POSITION_TYPES.includes(e.electionType ?? ''),
+        )
+        return rec
+          ? [{
+              politicianId: String(pl.id),
+              name: pl.name,
+              electionType: rec.electionType ?? '',
+              subRegion: rec.subRegion ?? null,
+              village: rec.village ?? null,
+            }]
+          : []
+      })
       const ids = new Set(politicians.map((pl) => String(pl.id)))
       const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
       const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
-      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true }
+      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true, townshipDirectory }
     }
 
     case 'politician': {

@@ -23,6 +23,19 @@ export function isClientError(err: unknown): boolean {
   return /^\d{2}[0-9A-Z]{3}$/.test(code) || /^PGRST[123]\d\d$/.test(code)
 }
 
+/**
+ * PostgREST 在 schema 裡找不到這支函式（PGRST202）。
+ *
+ * 會發生是因為 CI 的「部署 Supabase（migrations）」與「部署 Firebase Hosting」兩個 job
+ * 都掛在 needs: [typecheck, edge-tests] 底下，是並行的——前端有機會比 migration 早幾分鐘
+ * 上線。那幾分鐘裡新函式還不存在，呼叫端要自己接住退回舊查詢，不然畫面整頁空白。
+ *
+ * 這是 isClientError 的一種（PGRST2xx），所以不會被重試——再試幾次也還是沒有那支函式。
+ */
+export function isMissingFunction(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'PGRST202'
+}
+
 export async function withTimeoutAndRetry<T>(
   label: string,
   // PromiseLike：supabase-js 的 query builder 是 thenable，不是真的 Promise

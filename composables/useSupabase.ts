@@ -9,8 +9,12 @@ import type {
   RawElectionTypeRow,
 } from '../types'
 import { ElectionType } from '../types'
-import { isClientError, withTimeoutAndRetry } from '../lib/retry'
+import { isClientError, isMissingFunction, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
+import { positionsToLoad } from '../lib/election-levels'
+import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
+import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
+import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -69,6 +73,65 @@ const policiesComplete = ref(false)
  * 現在會分頁撈完；真的連分頁上限都撈不完時，就靠這個旗標讓畫面講一句話，而不是又少人。
  */
 const politicianListIncomplete = ref(false)
+/**
+ * 這一屆有哪些職位在選（get_election_types 的結果）。
+ *
+ * 分層之後頁面不能再從「撈回來的候選人」推論這一屆有什麼職位了——全台頁刻意不撈立委，
+ * 所以那一頁的候選人裡一位立委都沒有，但這一屆（2024）確實在選立委，頁面要據此
+ * 告訴使用者「立委在縣市頁」。沒有這份清單就只能硬編屆別。
+ */
+const availableElectionTypes = ref<string[]>([])
+
+/**
+ * 縣市頁「鄉鎮市區參選人名錄」的資料（2026-10-05）。
+ *
+ * 跟卡片分開撈。卡片分層之後只有「這一層＋下一層」（高雄市縣市頁 128 位），
+ * 但名錄要列到村里長——它是預渲染的縣市頁裡**唯一**通往那 13,338 位村里長人物頁的
+ * 連結（2026-09-30 加的，當時整站內部連結只剩 28 個）。
+ *
+ * 所以名錄走一支只取四個欄位的輕量查詢（姓名、職位、鄉鎮、村里），
+ * 每位約是完整人物物件的十分之一：高雄市 1,641 位的名錄比 128 位的卡片還省。
+ */
+const townshipDirectory = ref<DirectoryPerson[]>([])
+let directoryKey = ''
+
+/**
+ * 撈某一屆某縣市的名錄。只有縣市頁要（全台頁與鄉鎮頁不顯示名錄）。
+ * 照樣走 fetchAllPages 的分頁安全網：村里長一個縣市上千位，新北市 1,785 位已經破 1000。
+ */
+async function loadTownshipDirectory(electionId: number, region: string): Promise<void> {
+  const key = `${electionId}_${region}`
+  if (directoryKey === key) return
+  try {
+    const { rows, truncated } = await fetchAllPages<RawDirectoryRow>(
+      `名錄 ${electionId}/${region}`,
+      (from, to) => withTimeoutAndRetry(`township_directory ${from}-${to}`, (signal) =>
+        supabase
+          .from('politician_elections')
+          .select('politician_id,election_type,politicians!inner(name),regions!inner(sub_region,village)')
+          .eq('election_id', electionId)
+          // 「臺」「台」兩種寫法都查：PostgREST 的 .eq 沒辦法在資料庫端 replace，
+          // 只查一種就是靜靜地少掉另一種寫法的人（lib/region-name.ts）
+          .in('regions.region', regionNameVariants(region))
+          .in('election_type', DIRECTORY_POSITION_TYPES as string[])
+          .neq('candidate_status', 'not_running')
+          .order('politician_id')
+          .range(from, to)
+          .abortSignal(signal)
+          .throwOnError(),
+      ) as unknown as Promise<PageResponse<RawDirectoryRow>>,
+    )
+    if (truncated) politicianListIncomplete.value = true
+    townshipDirectory.value = rows
+      .map(toDirectoryPerson)
+      .filter((p): p is DirectoryPerson => p !== null)
+    directoryKey = key
+  } catch (err) {
+    // 名錄撈不到不該讓整頁掛掉——卡片是這一頁的主角。但也不要假裝成空名錄：
+    // 空名錄跟「這個縣市沒有鄉鎮層級參選人」看起來一樣，所以留 console 給要查的人。
+    console.info(`[選舉頁] 鄉鎮市區名錄載入失敗（${electionId}/${region}）`, err)
+  }
+}
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
@@ -467,10 +530,75 @@ async function loadPoliticiansWithPolicies(): Promise<void> {
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
 
-// 按選舉 + 地區載入候選人（按需載入，不使用 IndexedDB 快取）
+/**
+ * 撈一頁參選人。
+ *
+ * 用 get_politicians_by_level（migration 20261004000006）——它比舊的
+ * get_politicians_by_filters 多一個 p_sub_region，鄉鎮市區頁才能只撈那個鄉鎮
+ * （台南市北區 58 位，而不是撈全台南市 1,132 位再濾）。
+ *
+ * 新函式不存在時退回舊的：CI 的「部署 Supabase（migrations）」與「部署 Firebase Hosting」
+ * 兩個 job 都掛在 needs: [typecheck, edge-tests] 底下，是並行的，前端有機會比 migration
+ * 早幾分鐘上線。那幾分鐘裡不接住就是選舉頁整頁空白。
+ * 退回去撈的範圍比較大（舊函式篩不到鄉鎮，撈的是全縣市該層級），畫面靠 filteredPoliticians
+ * 自己篩鄉鎮，所以看到的東西是對的，只是多撈了一些。
+ */
+let levelRpcMissing = false
+
+function fetchPoliticianPage(
+  electionId: number,
+  region: string | null,
+  subRegion: string | null,
+  electionTypes: readonly string[],
+  from: number,
+  to: number,
+): Promise<PageResponse<RawPolitician>> {
+  const byFilters = () => withTimeoutAndRetry(`get_politicians_by_filters ${from}-${to}`, (signal) =>
+    supabase
+      .rpc('get_politicians_by_filters', {
+        p_election_id: electionId,
+        p_region: region,
+        p_election_types: electionTypes as string[],
+      })
+      .order('id').range(from, to).abortSignal(signal).throwOnError(),
+  ) as Promise<PageResponse<RawPolitician>>
+
+  // 一旦確定這個環境沒有新函式，後面每一頁、每一次換頁都不用再試一次才失敗
+  if (levelRpcMissing) return byFilters()
+
+  const byLevel = withTimeoutAndRetry(`get_politicians_by_level ${from}-${to}`, (signal) =>
+    supabase
+      .rpc('get_politicians_by_level', {
+        p_election_id: electionId,
+        p_region: region,
+        p_sub_region: subRegion,
+        p_election_types: electionTypes as string[],
+      })
+      .order('id').range(from, to).abortSignal(signal).throwOnError(),
+  ) as Promise<PageResponse<RawPolitician>>
+
+  return byLevel.catch((err) => {
+    if (!isMissingFunction(err)) throw err
+    levelRpcMissing = true
+    console.info('[選舉頁] 分層查詢 get_politicians_by_level 還沒上線，暫時改用舊查詢撈全縣市再由畫面篩', err)
+    return byFilters()
+  })
+}
+
+/**
+ * 按選舉 ＋ 層級載入參選人（按需載入，不使用 IndexedDB 快取）。
+ *
+ * 2026-10-04 起依層級只撈「這一層＋下一層」的職位，不再把整個縣市所有層級撈回來
+ * 再在前端濾（見 lib/election-levels.ts）。實測差距：
+ *   高雄市 2022 縣市頁   1,769 位（兩頁）→ 128 位（一頁）
+ *   嘉義縣 2022 縣市頁     708 位 → 93 位
+ *   嘉義縣大林鎮           708 位 → 43 位
+ *   台南市北區           1,240 位（兩頁）→ 58 位
+ */
 async function loadPoliticiansByElection(
   electionId: number,
-  region: string = 'All'
+  region: string = 'All',
+  subRegion: string = 'All',
 ): Promise<Politician[]> {
   // 切換不同選舉時，清掉上一個選舉載進來的候選人避免無限膨脹——
   // 但「有政見的人物」要留著：全清會把 fetchAll 載進來的那批一起清掉，
@@ -484,8 +612,9 @@ async function loadPoliticiansByElection(
   }
   currentElectionId.value = electionId
 
-  // 全國選 All 時載入總統/立委，選縣市時載入該縣市候選人
-  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}`
+  // 快取鍵要帶鄉鎮：同一個縣市的兩個鄉鎮撈的是不同職位、不同範圍，
+  // 只用 electionId_region 當鍵會讓第二個鄉鎮直接吃到第一個的快取，名單是別人的。
+  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}_${subRegion}`
 
   // 已經載入過就跳過（僅內存快取，不用 IndexedDB）
   if (loadedRegions.value.has(cacheKey)) {
@@ -500,48 +629,37 @@ async function loadPoliticiansByElection(
       .rpc('get_election_types', { p_election_id: electionId })
 
     const availableTypes = (typeData || []).map((t: RawElectionTypeRow) => t.election_type)
+    availableElectionTypes.value = availableTypes
 
-    // 3. 根據地區決定載入哪些類型
-    let electionTypes: string[] | null = null
-    let regionParam: string | null = null
+    // 3. 這一層＋下一層要哪些職位（lib/election-levels.ts），再跟「這一屆真的有選的職位」取交集。
+    //    取交集是為了「只列那一年真的有選的職位」：2022 沒有總統也沒有立委，
+    //    撈了也是零筆，但交集之後整個層級沒職位可撈時可以連查詢都不用發。
+    // 地名正規化成「台」再送進 RPC：資料庫裡「臺」與「台」混用（lib/region-name.ts），
+    // 沒正規化就是靜靜地回 0 筆。RPC 那一端也做同樣的轉換（migration 20261005000001）。
+    const regionParam = region === 'All' ? null : normalizeRegionName(region)
+    const subRegionParam = subRegion === 'All' ? null : normalizeRegionName(subRegion)
+    const electionTypes = positionsToLoad({
+      region,
+      subRegion,
+      isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
+    }).filter(t => availableTypes.includes(t))
 
-    if (region === 'All') {
-      // 全國：載入全國性類型（總統/立委/縣市長），但只載入該選舉有的
-      const nationalTypes = ['總統副總統', '立法委員', '縣市長']
-      electionTypes = nationalTypes.filter(t => availableTypes.includes(t))
-      if (electionTypes.length === 0) {
-        loadedRegions.value.add(cacheKey)
-        return []
-      }
-    } else {
-      // 特定縣市：載入該縣市的所有類型
-      regionParam = region
+    if (electionTypes.length === 0) {
+      loadedRegions.value.add(cacheKey)
+      return []
     }
 
-    // 3. 使用 RPC 函數載入
+    // 4. 撈。分頁是必要的安全網而不是常態：分層之後單頁都遠低於 1000 筆
+    //    （高雄市縣市頁 128、大林鎮 43），但 PostgREST 的 1000 列上限是靜默截斷——
+    //    回前 1000 列、HTTP 200、不報錯（見 lib/fetch-all-pages.ts 的實例），
+    //    所以哪天某個層級長到破千，要的是分頁撈完或講一句話，不是靜靜地少人。
     //
-    // 一定要分頁：選縣市時 p_election_types 是 null，撈的是該縣市「所有」層級。
-    // 高雄市 2022 有 1769 位參選人，其中村里長 1609 位；PostgREST 預設 max-rows=1000
-    // 會回前 1000 列、HTTP 200、不報錯，而那 1000 列剛好全是村里長——市長 4 位、議員 124 位、
-    // 原住民區代表 32 位一位都沒進來。六都與大縣市都會踩到。
-    //
-    // .order('id') 是分頁的前提。politician_elections 有 (politician_id, election_id) 的唯一索引
-    // （20260911000003_politician_elections_unique.sql），所以這支 RPC 的 INNER JOIN 一個人最多配到一列，
-    // id 在結果裡唯一、是個全序——分頁才不會同一位回兩次、另一位一次都沒回。
+    //    .order('id') 是分頁的前提：沒有全序的排序，每頁順序不保證一致，
+    //    會同一位回兩次、另一位一次都沒回。get_politicians_by_level 用 EXISTS，
+    //    一個人就是一列，所以 id 是全序。
     const { rows, truncated } = await fetchAllPages<RawPolitician>(
-      `參選人 ${electionId}/${region}`,
-      (from, to) => withTimeoutAndRetry(`get_politicians_by_filters ${from}-${to}`, (signal) =>
-        supabase
-          .rpc('get_politicians_by_filters', {
-            p_election_id: electionId,
-            p_region: regionParam,
-            p_election_types: electionTypes
-          })
-          .order('id')
-          .range(from, to)
-          .abortSignal(signal)
-          .throwOnError(),
-      ) as Promise<PageResponse<RawPolitician>>,
+      `參選人 ${electionId}/${region}/${subRegion}`,
+      (from, to) => fetchPoliticianPage(electionId, regionParam, subRegionParam, electionTypes, from, to),
     )
 
     if (truncated) politicianListIncomplete.value = true
@@ -647,6 +765,8 @@ export interface DataSnapshot {
   discussions: Discussion[]
   stats: DataStats
   verificationSources: VerificationSource[]
+  /** 縣市頁的鄉鎮市區名錄（只有縣市頁的切片有）。沒給＝這一頁不需要。 */
+  townshipDirectory?: DirectoryPerson[]
 }
 
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
@@ -691,6 +811,7 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   discussions.value = snapshot.discussions
   stats.value = snapshot.stats
   verificationSources.value = snapshot.verificationSources
+  if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
 }
 
 export function useSupabase() {
@@ -823,6 +944,9 @@ export function useSupabase() {
     retry,
     loadedElections,
     politicianListIncomplete,
+    availableElectionTypes,
+    townshipDirectory,
+    loadTownshipDirectory,
     stats,
 
     fetchAll,
