@@ -14,6 +14,8 @@
  * 這裡再守一次，是因為前端還會在「這一屆沒給」時拿人物層的值補（withElectionData、withCurrentElectionData）。
  */
 
+import { isFormalDistrict } from './district-grouping'
+
 export const COUNTY_LEVEL_ELECTION_TYPES: readonly string[] = ['總統副總統', '縣市長', '縣市議員', '立法委員']
 
 export interface AreaLike {
@@ -28,9 +30,19 @@ export function electionArea(
   person: AreaLike,
 ): { region: string; subRegion: string | undefined; village: string | undefined } {
   const ownOnly = !!electionType && COUNTY_LEVEL_ELECTION_TYPES.includes(electionType)
+  if (ownOnly) {
+    // 議員、立委只認自己這一屆的正式選區寫法；縣市長、總統沒有縣市以下的地區。
+    // 視圖改好之前（或舊快照裡）這一屆的 subRegion 可能還是借來的「大雅區」，這裡也不收
+    const own = election?.subRegion?.trim()
+    return {
+      region: election?.region || person.region || '',
+      subRegion: own && isFormalDistrict(own, electionType) ? own : undefined,
+      village: undefined,
+    }
+  }
   return {
     region: election?.region || person.region || '',
-    subRegion: ownOnly ? (election?.subRegion || undefined) : (election?.subRegion || person.subRegion || undefined),
-    village: ownOnly ? (election?.village || undefined) : (election?.village || person.village || undefined),
+    subRegion: election?.subRegion || person.subRegion || undefined,
+    village: election?.village || person.village || undefined,
   }
 }

@@ -15,6 +15,13 @@ Deno.test("議員那一屆有選區 → 用它", () => {
   assertEquals(electionArea("縣市議員", { region: "台中市", subRegion: "第05選舉區" }, person).subRegion, "第05選舉區");
 });
 
+Deno.test("議員那一屆的地區是借來的（視圖改好之前的舊資料）：不是正式選區就不收", () => {
+  assertEquals(electionArea("縣市議員", { region: "台中市", subRegion: "大雅區", village: "上雅里" }, person).subRegion, undefined);
+  assertEquals(electionArea("縣市議員", { region: "台中市", subRegion: "臺中市第03選區" }, person).subRegion, undefined);
+  assertEquals(electionArea("立法委員", { region: "台中市", subRegion: "臺中市第03選區" }, person).subRegion, "臺中市第03選區");
+  assertEquals(electionArea("縣市長", { region: "屏東縣", subRegion: "東勢區", village: "隆興里" }, person).village, undefined);
+});
+
 Deno.test("縣市長、立委、總統也不借；縣市沒有才退回人物的縣市", () => {
   for (const t of COUNTY_LEVEL_ELECTION_TYPES) {
     const a = electionArea(t, {}, person);
