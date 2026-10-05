@@ -20,6 +20,17 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/icon-32.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/brand/icon-512.png" />
     <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+    <!-- 字級與明暗（issue #350）：在第一次繪製前先把使用者的選擇套到 <html>，避免深色使用者看到一閃而過的白底。
+         key 與 class 名要跟 composables/useAppearance.ts 一致。讀 localStorage 包 try/catch；沒選過＝跟隨系統、字級標準。 -->
+    <script>
+      (function () {
+        var d = document.documentElement, t = null, f = null;
+        try { t = localStorage.getItem('zj-theme'); f = localStorage.getItem('zj-font'); } catch (e) {}
+        var dark = t === 'dark' || (t !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) d.classList.add('dark');
+        d.classList.add('zj-font-' + (f === 'sm' || f === 'lg' ? f : 'md'));
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>正見 | 智能政見追蹤平台</title>
     <!-- 分享到社群時的縮圖與敘述。在這之前完全沒有 og 標籤，貼進 LINE／Facebook

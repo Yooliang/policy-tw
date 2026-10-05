@@ -5,6 +5,7 @@ import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2 } from 
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
+import AppearanceMenu from './AppearanceMenu.vue'
 
 const isLoginModalOpen = ref(false)
 const isLoggingIn = ref(false)
@@ -96,6 +97,7 @@ const isActive = (path: string) => route.path === path
         <!-- Right Side Actions -->
         <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <GlobalSearch />
+          <AppearanceMenu />
 
           <!-- User Avatar (Logged In) -->
           <template v-if="isAuthenticated">
