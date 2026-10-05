@@ -17,7 +17,8 @@ import { POSITIONS } from "../../../lib/election-levels.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const FILE = "20261005003442_election_districts.sql";
-const sql = await Deno.readTextFile(new URL(FILE, MIGRATIONS));
+// Windows 取出的工作樹是 CRLF（autocrlf），下面比對用的字串都寫 \n，讀進來先統一
+const sql = (await Deno.readTextFile(new URL(FILE, MIGRATIONS))).replace(/\r\n/g, "\n");
 const code = sql.replace(/--[^\n]*/g, "");
 
 function between(text: string, start: string, end: string): string {

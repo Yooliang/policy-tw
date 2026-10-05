@@ -14,7 +14,8 @@ import { OUR_ELECTION_TYPES } from "./cec-sync.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const FILE = "20261005003441_election_identity.sql";
-const sql = await Deno.readTextFile(new URL(FILE, MIGRATIONS));
+// Windows 取出的工作樹是 CRLF（autocrlf），下面比對用的字串都寫 \n，讀進來先統一
+const sql = (await Deno.readTextFile(new URL(FILE, MIGRATIONS))).replace(/\r\n/g, "\n");
 
 /** 去掉 SQL 註解，免得說明文字裡的字眼被當成敘述 */
 const code = sql.replace(/--[^\n]*/g, "");
