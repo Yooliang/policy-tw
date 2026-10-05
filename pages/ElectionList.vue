@@ -7,7 +7,7 @@ import Breadcrumbs from '../components/Breadcrumbs.vue'
 import LoadError from '../components/LoadError.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
-import { daysUntil, splitElections, taipeiDay } from '../lib/election-list'
+import { daysUntil, splitElections, taipeiDay, turnoutText } from '../lib/election-list'
 import { electionPath } from '../lib/election-regions'
 import { POSITIONS, positionSpec } from '../lib/election-levels'
 import type { Election } from '../types'
@@ -135,6 +135,7 @@ usePageHead({
               >
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 mb-2">
                   <span class="inline-flex items-center gap-1"><CalendarDays :size="16" class="text-slate-400" />投票日 {{ voteDayText(e) }}</span>
+                  <span v-if="turnoutText(e)" class="text-slate-600">{{ turnoutText(e) }}</span>
                 </div>
                 <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700 flex items-center gap-1">
                   {{ e.shortName }}

@@ -34,6 +34,8 @@ export interface Election {
   endDate: string;
   electionDate: string;
   types: ElectionType[];
+  /** 投票率（%），首長選舉合計（elections.turnout 的註解）；投票前、還沒同步就沒有這個欄位 */
+  turnout?: number;
 }
 
 // Normalized region data
@@ -341,6 +343,8 @@ export interface RawElection {
   end_date: string;
   election_date: string;
   types?: ElectionType[];
+  /** NUMERIC(5,2)；PostgREST 回數字，保險起見也收字串 */
+  turnout?: number | string | null;
 }
 
 export interface RawPoliticianElectionData {

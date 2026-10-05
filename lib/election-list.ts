@@ -39,6 +39,18 @@ export function currentElection<T extends DatedElection>(elections: readonly T[]
   return upcoming[0] ?? past[0]
 }
 
+/**
+ * 投票率要連算法一起寫（主線 10-06）：elections.turnout 是**首長選舉合計**——地方選舉＝直轄市長＋縣市長兩場的
+ * 投票數合計÷選舉人數合計（涵蓋全國每一位選舉人），總統選舉＝總統副總統那一場（cec-sync 寫入）。
+ * 媒體常引的 2022「59.86%」只是直轄市長那一場，不寫明會被拿來對照、以為我們算錯。
+ * 沒有投票率（投票前、還沒同步）回 null。
+ */
+export function turnoutText(e: { turnout?: number | null; types?: readonly string[] }): string | null {
+  if (typeof e.turnout !== 'number' || !Number.isFinite(e.turnout)) return null
+  const basis = (e.types ?? []).includes('總統副總統') ? '總統副總統' : '直轄市長＋縣市長'
+  return `投票率 ${e.turnout.toFixed(2)}%（首長選舉合計：${basis}）`
+}
+
 /** 距離投票日幾天（今天投票是 0；已經投完是負數） */
 export function daysUntil(electionDate: string, today: string): number {
   const ms = Date.parse(`${electionDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)

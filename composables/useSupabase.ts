@@ -184,6 +184,8 @@ function mapElection(row: RawElection): Election {
     endDate: row.end_date,
     electionDate: row.election_date,
     types: (row.types || []) as ElectionType[],
+    // 有值才帶（沒有投票率的選舉不多一個空欄位，預渲染快照不變）
+    ...(row.turnout !== null && row.turnout !== undefined && row.turnout !== '' && Number.isFinite(Number(row.turnout)) ? { turnout: Number(row.turnout) } : {}),
   }
 }
 

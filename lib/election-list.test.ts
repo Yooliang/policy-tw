@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { currentElection, daysUntil, splitElections, taipeiDay } from "./election-list.ts";
+import { currentElection, daysUntil, splitElections, taipeiDay, turnoutText } from "./election-list.ts";
 
 // 線上的三筆（10-05）：id 剛好是年份；另造一場補選，id 不是年份、投票日夾在中間
 const E2022 = { id: 2022, electionDate: "2022-11-26" };
@@ -47,4 +47,13 @@ Deno.test("距離投票日：今天投票 0、明天 1、昨天 -1，跨月跨�
   assertEquals(daysUntil("2026-11-28", "2026-10-05"), 54);
   assertEquals(daysUntil("2026-11-28", "2026-11-29"), -1);
   assertEquals(daysUntil("2028-01-15", "2027-12-31"), 15);
+});
+
+Deno.test("投票率：寫明首長選舉合計與是哪幾場；沒有投票率不顯示", () => {
+  // 2022 地方選舉：直轄市長＋縣市長兩場合計 61.16%（不是媒體常引的直轄市長 59.86%）
+  assertEquals(turnoutText({ turnout: 61.16, types: ["縣市長", "縣市議員", "村里長"] }), "投票率 61.16%（首長選舉合計：直轄市長＋縣市長）");
+  assertEquals(turnoutText({ turnout: 71.86, types: ["總統副總統", "立法委員"] }), "投票率 71.86%（首長選舉合計：總統副總統）");
+  assertEquals(turnoutText({ turnout: 60.5, types: [] }), "投票率 60.50%（首長選舉合計：直轄市長＋縣市長）");
+  assertEquals(turnoutText({ turnout: null, types: ["縣市長"] }), null);
+  assertEquals(turnoutText({ types: ["縣市長"] }), null);
 });
