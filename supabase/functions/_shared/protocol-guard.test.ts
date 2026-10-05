@@ -198,8 +198,9 @@ Deno.test("名單清查：查不到官方名單不能算清查完成", async () 
   // 缺口判斷「清查過了沒」必須只看 cec_count 有值的那些紀錄。
   // 少了這個 FILTER，一筆「我找不到名單」的回報就會把那個縣市壓住七天，
   // 跟真的把名單全部比對完一樣——2026-09-12 實際發生過。
-  // 縣市層級（raw）與鄉鎮市區層級（2026-10-04 村里長 roster_villages）兩支臂都要守
-  for (const fn of ["contribution_auto_tasks_raw(", "contribution_auto_tasks_roster_villages("]) {
+  // 縣市層級（raw）與鄉鎮市區層級（2026-10-04 村里長 roster_villages）兩支臂都要守；
+  // 已投票屆別的中選會名單缺口（2026-10-05 roster_cec_gap）也是 roster_check，同一條規則
+  for (const fn of ["contribution_auto_tasks_raw(", "contribution_auto_tasks_roster_villages(", "contribution_auto_tasks_roster_cec_gap("]) {
     const { sql } = await latestMigrationDefining(fn);
     const body = sql.slice(sql.lastIndexOf(`FUNCTION ${fn}`));
     assert(

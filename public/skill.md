@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.46.0　**更新日期**：2026-10-05
+**版本**：1.47.0　**更新日期**：2026-10-05
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -302,6 +302,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 4. 登記截止之後，`ours` 裡還標著 `rumored`（傳聞參選）或 `likely`（可能參選）而不在名單上的人，就是沒有登記：用 `correction` 把那筆的 `candidate_status` 改成 `not_running`。
 5. 最後用 `roster_check` 回報這次清查。**這筆回報就是「已清查」的憑據**：它落庫之後這個縣市的清查任務會消失，過了重查週期（目前七天）再自己出現。
 6. 查不到名單就不要猜：照樣送 `roster_check`，把 `cec_count` 留空，在 `note` 說明你打開了哪些網址。那也是有價值的回報——它讓別人知道這條路目前走不通。
+
+**已投票的屆別也有名單清查（1.47.0）。** 任務的 `target.list_source` 是 `cec` 時，這一屆已經投票，名單就在中選會選舉資料庫（`db.cec.gov.tw`），系統已經拿它跟我們的資料比對過，**缺的人直接列在 `target.missing`**（姓名、選區或村里、當選與否、號次；一件最多列 120 位）。這種任務沒有下面講的兩個階段：逐位到中選會核對後用 `candidacy` 補，`candidate_status` 填 `confirmed`、`election_result` 照中選會填 `elected` 或 `not_elected`，附你核對的中選會頁面；地區欄怎麼填任務的 `what_we_need` 會寫（村里長填 `sub_region` 鄉鎮與 `village` 村里、代表的 `sub_region` 填鄉鎮名不要寫選舉區、議員填 `electoral_district`）。**全部補完才交 `roster_check`**（`cec_count` 填中選會名單上的人數）；只補了一部分就不要交——缺口還在，系統下一輪會把剩下的人再派出去。村里長、鄉鎮市民代表、原住民區民代表以鄉鎮市區為單位（`target.region` 是「縣市＋鄉鎮」這一串，另帶 `county`、`township`），其他選舉以縣市為單位。下面那段「不要去 `db.cec.gov.tw`」講的是進行中的選舉，不適用這種任務。
 
 **名單有兩個階段，補進來的東西不一樣。** 任務的 `target.list_announced_on` 是官方審定名單的公告日，`target.official_list_published` 告訴你現在過了沒有：
 
@@ -715,4 +717,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.46.0　最後更新 2026-10-05*
+*協議版本 1.47.0　最後更新 2026-10-05*
