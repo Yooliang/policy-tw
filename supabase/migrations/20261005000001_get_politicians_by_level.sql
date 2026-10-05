@@ -45,18 +45,22 @@ AS $$
     LEFT JOIN regions r ON r.id = pe.region_id
     WHERE pe.politician_id = pwe.id
       AND pe.election_id = p_election_id
-      AND (p_region IS NULL OR r.region = p_region)
+      -- 「臺」與「台」在這張表裡是混用的：regions.region 全寫「台」（台北市），
+      -- 但 2024 立委的 regions.sub_region 寫「臺」（臺北市第01選區）。兩邊都正規化成「台」
+      -- 再比，否則就是靜靜地回 0 筆——而 0 筆在畫面上跟「這一區沒人參選」長得一樣。
+      -- 前端的對應處理在 lib/region-name.ts，兩邊規則要一致。
+      AND (p_region IS NULL OR replace(r.region, '臺', '台') = replace(p_region, '臺', '台'))
       AND (p_election_types IS NULL OR pe.election_type = ANY(p_election_types))
       AND (
         p_sub_region IS NULL
-        OR r.sub_region = p_sub_region
+        OR replace(r.sub_region, '臺', '台') = replace(p_sub_region, '臺', '台')
         -- 同一個區的兩種職位在 sub_region 上長得不一樣：
         --   里長             那瑪夏區
         --   原住民區民代表    那瑪夏區第01選舉區
         -- 只用等值比對會把區代表整個漏掉（那一區的「這一層」就空了，而畫面上
         -- 空區塊看起來跟「這一屆沒人參選」一模一樣）。
         -- 鄉鎮市區名都是中文，不含 LIKE 的通用字元 % 與 _，所以不需要 escape。
-        OR r.sub_region LIKE p_sub_region || '第%選舉區'
+        OR replace(r.sub_region, '臺', '台') LIKE replace(p_sub_region, '臺', '台') || '第%選舉區'
       )
   );
 $$;

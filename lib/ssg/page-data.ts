@@ -6,6 +6,8 @@ import { policySortDate } from '../policy-date'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { electionPeers } from '../election-peers'
 import { positionsToLoad } from '../election-levels'
+import { DIRECTORY_POSITION_TYPES, type DirectoryPerson } from '../township-directory'
+import { sameRegionName } from '../region-name'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -158,14 +160,33 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
       })
       const politicians = full.politicians
         .filter((pl) => pl.elections?.some((e) =>
-          e.electionId === electionId && e.region === region && isRunningCandidate(e.candidateStatus)
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
           && countyPositions.includes(e.electionType as typeof countyPositions[number]),
         ))
         .map((pl) => withElectionData(pl, electionId))
+      // 鄉鎮市區名錄：這一頁唯一通往村里長人物頁的連結（13,338 位，爬蟲只能從這裡走到）。
+      // 卡片分層之後只有「這一層＋下一層」，所以名錄要另外切一份——只帶姓名、職位、
+      // 鄉鎮、村里四個欄位，塞進 initialState 的量遠小於整份人物物件。
+      // 層級清單跟瀏覽器端那支輕量查詢讀同一份（lib/township-directory.ts）。
+      const townshipDirectory: DirectoryPerson[] = full.politicians.flatMap((pl) => {
+        const rec = (pl.elections ?? []).find((e) =>
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          && DIRECTORY_POSITION_TYPES.includes(e.electionType ?? ''),
+        )
+        return rec
+          ? [{
+              politicianId: String(pl.id),
+              name: pl.name,
+              electionType: rec.electionType ?? '',
+              subRegion: rec.subRegion ?? null,
+              village: rec.village ?? null,
+            }]
+          : []
+      })
       const ids = new Set(politicians.map((pl) => String(pl.id)))
       const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
       const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
-      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true }
+      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true, townshipDirectory }
     }
 
     case 'politician': {

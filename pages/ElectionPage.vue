@@ -27,15 +27,17 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
-import { electionPath, isCounty } from '../lib/election-regions'
+import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
 import { groupByVillage } from '../lib/village-grouping'
 import { districtsOf, groupByDistrict } from '../lib/district-grouping'
+import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
+import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes } = useSupabase()
+const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -88,6 +90,11 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
     await loadPoliticiansByElection(id, region, subRegion)
   } finally {
     electionLoading.value = false
+  }
+  // 名錄只有縣市頁要，而且跟卡片分開撈（它要列到村里長，卡片只到下一層）。
+  // 不 await 在上面那個 try 裡：名錄慢或失敗都不該讓卡片等它或跟著掛掉。
+  if (region !== 'All' && subRegion === 'All') {
+    loadTownshipDirectory(id, region)
   }
 }
 
@@ -234,11 +241,8 @@ const showSidebar = computed(() => selectedRegion.value !== 'All' && availableSu
 // Grid 欄位數（有右側篩選時用 2 欄）
 const gridColumns = computed(() => showSidebar.value ? 2 : 3)
 
-// 排序：先照字數，再照筆畫
-const sortByLengthThenStroke = (a: string, b: string) => {
-  if (a.length !== b.length) return a.length - b.length
-  return a.localeCompare(b, 'zh-Hant-TW', { numeric: true })
-}
+// 地名排序（先字數再筆畫）跟名錄分組共用同一套規則，見 lib/region-name.ts
+const sortByLengthThenStroke = compareRegionName
 
 // 候選人排序（使用者 2026-09-20：多種排序讓人選，預設「最近更新」）。
 // 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
@@ -289,7 +293,7 @@ const availableSubRegions = computed(() => {
   electionPoliticians.value.map(withCurrentElectionData)
     .filter(c => {
       const type = getElectionType(c)
-      return c.region === selectedRegion.value && c.subRegion &&
+      return sameRegionName(c.region, selectedRegion.value) && c.subRegion &&
         type !== ElectionType.COUNCILOR &&
         type !== ElectionType.LEGISLATOR &&
         type !== ElectionType.INDIGENOUS_DISTRICT_CHIEF &&
@@ -301,11 +305,11 @@ const availableSubRegions = computed(() => {
   // 2. 從選舉區對應表取得（議員對應的鄉鎮區）
   // 優先使用當前選舉年份，若無則使用任何可用年份（鄉鎮區跨選舉相對穩定）
   const areasForYear = electoralDistrictAreas.value.filter(
-    m => m.region === selectedRegion.value && m.election_id === electionYear.value
+    m => sameRegionName(m.region, selectedRegion.value) && m.election_id === electionYear.value
   )
   const areasToUse = areasForYear.length > 0
     ? areasForYear
-    : electoralDistrictAreas.value.filter(m => m.region === selectedRegion.value)
+    : electoralDistrictAreas.value.filter(m => sameRegionName(m.region, selectedRegion.value))
   areasToUse.forEach(m => subRegions.add(m.township))
 
   // 過濾掉選舉區格式（如「第01選舉區」），並排序
@@ -324,8 +328,8 @@ const availableVillages = computed(() => {
     .filter(c => {
       const type = getElectionType(c)
       return type === ElectionType.CHIEF &&
-        c.region === selectedRegion.value &&
-        c.subRegion === selectedSubRegion.value &&
+        sameRegionName(c.region, selectedRegion.value) &&
+        sameRegionName(c.subRegion, selectedSubRegion.value) &&
         c.village
     })
     .forEach(c => villages.add(c.village!))
@@ -337,7 +341,7 @@ const filteredPoliticians = computed(() => {
   // 關鍵：套用當前選舉的特定資料，確保 candidateStatus/subRegion 等欄位正確
   let result = electionPoliticians.value.map(withCurrentElectionData)
   if (selectedRegion.value !== 'All') {
-    result = result.filter(c => c.region === selectedRegion.value)
+    result = result.filter(c => sameRegionName(c.region, selectedRegion.value))
   }
   // 鄉鎮市區篩選
   if (selectedSubRegion.value !== 'All') {
@@ -353,10 +357,10 @@ const filteredPoliticians = computed(() => {
       // 原民區長/代表：subRegion 格式是「XX區第YY選舉區」，用前綴匹配
       if (type === ElectionType.INDIGENOUS_DISTRICT_CHIEF ||
           type === ElectionType.INDIGENOUS_DISTRICT_REP) {
-        return c.subRegion?.startsWith(selectedSubRegion.value)
+        return normalizeRegionName(c.subRegion).startsWith(normalizeRegionName(selectedSubRegion.value))
       }
       // 其他（鄉鎮市長、代表、村里長）：完全匹配
-      return c.subRegion === selectedSubRegion.value
+      return sameRegionName(c.subRegion, selectedSubRegion.value)
     })
   }
   return sortPoliticians(result)
@@ -375,7 +379,7 @@ const presidentPoliticians = computed(() =>
 const legislatorPoliticians = computed(() => {
   let result = electionPoliticians.value.map(withCurrentElectionData).filter(c => getElectionType(c) === ElectionType.LEGISLATOR)
   if (selectedRegion.value !== 'All') {
-    result = result.filter(c => c.region === selectedRegion.value)
+    result = result.filter(c => sameRegionName(c.region, selectedRegion.value))
   }
   return sortPoliticians(result)
 })
@@ -383,7 +387,7 @@ const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => ge
 const councilorPoliticians = computed(() => {
   let result = electionPoliticians.value.map(withCurrentElectionData).filter(c => getElectionType(c) === ElectionType.COUNCILOR)
   if (selectedRegion.value !== 'All') {
-    result = result.filter(c => c.region === selectedRegion.value)
+    result = result.filter(c => sameRegionName(c.region, selectedRegion.value))
   }
   // 當選擇鄉鎮市區時，透過對應表找出該鄉鎮所屬的議員選舉區
   if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
@@ -393,47 +397,26 @@ const councilorPoliticians = computed(() => {
       electionYear.value
     )
     if (electoralDistrict) {
-      result = result.filter(c => c.subRegion === electoralDistrict)
+      result = result.filter(c => sameRegionName(c.subRegion, electoralDistrict))
     }
   }
   return result
 })
 /**
- * 縣市頁的「鄉鎮市區參選人名錄」（2026-09-30）：縣市層級原本只列縣市長與議員，
- * 鄉鎮市長、代表、村里長要再點鄉鎮／村里才出現——預渲染的縣市頁裡就沒有他們的連結，爬蟲走不到。
- * 這裡按鄉鎮分組列出名字連結（<details> 收合，畫面不變長），每個人都有一條 <a href>。
+ * 縣市頁的「鄉鎮市區參選人名錄」。
+ *
+ * 這份名錄是預渲染的縣市頁裡**唯一**通往村里長人物頁的連結（2026-09-30 加的，當時
+ * Search Console 整站內部連結只剩 28 個）。村里長有 13,338 位，爬蟲只能從這裡走到他們。
+ *
+ * 2026-10-05 分層之後卡片只撈「這一層＋下一層」，所以名錄不再從卡片的資料推——
+ * 它由 useSupabase 的 loadTownshipDirectory 用一支只取四個欄位的輕量查詢單獨撈
+ * （姓名、職位、鄉鎮、村里）。分組規則在 lib/township-directory.ts。
  */
-const TOWNSHIP_LEVELS: Array<{ type: ElectionType; label: string }> = [
-  { type: ElectionType.TOWNSHIP_MAYOR, label: '鄉鎮市長' },
-  { type: ElectionType.INDIGENOUS_DISTRICT_CHIEF, label: '原住民區長' },
-  { type: ElectionType.REPRESENTATIVE, label: '鄉鎮市民代表' },
-  { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原住民區代表' },
-  { type: ElectionType.CHIEF, label: '村里長' },
-]
-const townshipDirectory = computed(() => {
+const townshipDirectoryGroups = computed(() => {
   if (selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return []
-  const byTownship = new Map<string, Map<string, Politician[]>>()
-  for (const c of filteredPoliticians.value) {
-    const type = getElectionType(c)
-    const level = TOWNSHIP_LEVELS.find(l => l.type === type)
-    if (!level) continue
-    // 原民區的 subRegion 是「XX區第YY選舉區」，歸到 XX區
-    const township = (c.subRegion || '').replace(/第.+選舉區$/, '') || '其他'
-    const groups = byTownship.get(township) ?? new Map<string, Politician[]>()
-    groups.set(level.label, [...(groups.get(level.label) ?? []), c])
-    byTownship.set(township, groups)
-  }
-  return Array.from(byTownship.entries())
-    .sort(([a], [b]) => sortByLengthThenStroke(a, b))
-    .map(([township, groups]) => ({
-      township,
-      total: Array.from(groups.values()).reduce((n, list) => n + list.length, 0),
-      groups: TOWNSHIP_LEVELS
-        .filter(l => groups.has(l.label))
-        .map(l => ({ label: l.label, people: groups.get(l.label)! })),
-    }))
+  return buildTownshipDirectory(townshipDirectory.value, DIRECTORY_LEVELS)
 })
-const townshipDirectoryTotal = computed(() => townshipDirectory.value.reduce((n, t) => n + t.total, 0))
+const townshipDirectoryTotal = computed(() => directoryTotal(townshipDirectoryGroups.value))
 
 const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.TOWNSHIP_MAYOR))
 const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
@@ -443,7 +426,7 @@ const chiefPoliticians = computed(() => {
   let result = filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.CHIEF)
   // 村里篩選
   if (selectedVillage.value !== 'All') {
-    result = result.filter(c => c.village === selectedVillage.value)
+    result = result.filter(c => sameRegionName(c.village, selectedVillage.value))
   }
   return result
 })
@@ -540,14 +523,14 @@ const allCampaignPolicies = computed(() =>
     if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
     const politician = politicians.value.find(c => c.id === p.politicianId)
     if (!politician) return false
-    if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
+    if (selectedRegion.value !== 'All' && !sameRegionName(politician.region, selectedRegion.value)) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
       if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
-        if (politician.subRegion !== selectedSubRegion.value) return false
+        if (!sameRegionName(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
@@ -560,14 +543,14 @@ const regionPolicies = computed(() =>
     if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
     const politician = politicians.value.find(c => c.id === p.politicianId)
     if (!politician) return false
-    if (selectedRegion.value !== 'All' && politician.region !== selectedRegion.value) return false
+    if (selectedRegion.value !== 'All' && !sameRegionName(politician.region, selectedRegion.value)) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
       if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
-        if (politician.subRegion !== selectedSubRegion.value) return false
+        if (!sameRegionName(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
@@ -616,14 +599,14 @@ function poolForLevel(level: ElectionType) {
   return electionPoliticians.value.filter(c => {
     const type = getElectionType(c)
     if (!(type === level || (!type && level === ElectionType.MAYOR))) return false
-    if (selectedRegion.value !== 'All' && c.region !== selectedRegion.value) return false
+    if (selectedRegion.value !== 'All' && !sameRegionName(c.region, selectedRegion.value)) return false
     // 鄉鎮市區篩選：議員透過對應表查選舉區；鄉鎮層級直接比；全縣層級不套用
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && !COUNTY_WIDE_LEVELS.includes(level)) {
       if (type === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && c.subRegion !== electoralDistrict) return false
       } else {
-        if (c.subRegion !== selectedSubRegion.value) return false
+        if (!sameRegionName(c.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
@@ -800,9 +783,18 @@ usePageHead({
         <template v-if="selectedRegion === 'All'">
           <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" :election-id="electionId" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
           <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-          <p v-if="hasLegislatorRace" class="text-sm text-slate-500 mb-8">
-            立法委員依選區劃分，請在上方選擇縣市查看該選區的參選人。
-          </p>
+          <!-- 引導要能直接點過去，不是叫人自己去上面找（CLAUDE.md：換頁一律真連結，爬蟲才跟得到） -->
+          <section v-if="hasLegislatorRace" class="mb-12 text-left">
+            <p class="text-sm text-slate-600 mb-3">區域立委依選區劃分，請選擇縣市查看：</p>
+            <div class="flex flex-wrap gap-1.5">
+              <RouterLink
+                v-for="county in TAIWAN_COUNTIES"
+                :key="county"
+                :to="electionPath(electionId, county)"
+                class="px-3 py-1 rounded-full text-xs font-bold border bg-white text-slate-600 border-slate-200 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 transition-all"
+              >{{ county }}</RouterLink>
+            </div>
+          </section>
         </template>
 
         <!-- ===== 第2級：縣市 ===== -->
@@ -830,13 +822,13 @@ usePageHead({
           <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
 
           <!-- 鄉鎮市區參選人名錄：名字連結，收合在各鄉鎮底下 -->
-          <section v-if="townshipDirectory.length > 0" class="mb-12 text-left">
+          <section v-if="townshipDirectoryGroups.length > 0" class="mb-12 text-left">
             <h3 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2 border-l-4 border-blue-500 pl-3">
               <Building2 class="text-indigo-500" /> 鄉鎮市區參選人名錄 ({{ townshipDirectoryTotal }})
             </h3>
             <p class="text-sm text-slate-500 mb-4">展開各{{ subRegionLabel }}看參選人名單；要看卡片請在右側選{{ subRegionLabel }}。</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <details v-for="t in townshipDirectory" :key="t.township" class="bg-white border border-slate-200 rounded-xl">
+              <details v-for="t in townshipDirectoryGroups" :key="t.township" class="bg-white border border-slate-200 rounded-xl">
                 <summary class="px-4 py-2.5 cursor-pointer font-bold text-navy-900 flex items-center justify-between">
                   <span>{{ t.township }}</span>
                   <span class="text-xs font-medium text-slate-400">{{ t.total }} 位</span>
@@ -844,7 +836,7 @@ usePageHead({
                 <div class="px-4 pb-3 space-y-2 text-sm leading-relaxed">
                   <p v-for="g in t.groups" :key="g.label">
                     <span class="text-slate-500 font-medium">{{ g.label }}：</span>
-                    <template v-for="(person, i) in g.people" :key="person.id"><span v-if="i > 0" class="text-slate-300">、</span><RouterLink :to="`/politician/${person.id}`" class="text-blue-700 hover:underline">{{ person.name }}</RouterLink><span v-if="person.village" class="text-slate-400 text-xs">（{{ person.village }}）</span></template>
+                    <template v-for="(person, i) in g.people" :key="person.politicianId"><span v-if="i > 0" class="text-slate-300">、</span><RouterLink :to="`/politician/${person.politicianId}`" class="text-blue-700 hover:underline">{{ person.name }}</RouterLink><span v-if="person.village" class="text-slate-400 text-xs">（{{ person.village }}）</span></template>
                   </p>
                 </div>
               </details>

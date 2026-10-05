@@ -31,6 +31,16 @@ function loadEnv() {
   return env;
 }
 const env = loadEnv();
+/**
+ * 分頁撈整張表。
+ *
+ * ⚠️ 這裡用的 `Range` 標頭只對**表／視圖的 GET** 有效。**對 RPC 的 POST 不生效**：
+ * PostgREST 會忽略它，每一頁都回同一批前 1000 列，於是這個迴圈永遠不會遇到
+ * `chunk.length < page`，變成無聲的無限重複（2026-10-04 實測：撈 30 頁、30,000 列
+ * 全是重複資料，看起來像程式壞了，其實是分頁機制沒生效）。
+ * 要分頁 RPC 請改用 query params `?order=id&limit=1000&offset=N`
+ * ——supabase-js 的 `.range()` 送的就是這個，見 lib/fetch-all-pages.ts。
+ */
 async function fetchAll(table, select, filter = '') {
   const page = 1000; const rows = [];
   for (let from = 0; ; from += page) {

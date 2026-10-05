@@ -13,6 +13,8 @@ import { isClientError, isMissingFunction, withTimeoutAndRetry } from '../lib/re
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
+import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
+import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -79,6 +81,57 @@ const politicianListIncomplete = ref(false)
  * 告訴使用者「立委在縣市頁」。沒有這份清單就只能硬編屆別。
  */
 const availableElectionTypes = ref<string[]>([])
+
+/**
+ * 縣市頁「鄉鎮市區參選人名錄」的資料（2026-10-05）。
+ *
+ * 跟卡片分開撈。卡片分層之後只有「這一層＋下一層」（高雄市縣市頁 128 位），
+ * 但名錄要列到村里長——它是預渲染的縣市頁裡**唯一**通往那 13,338 位村里長人物頁的
+ * 連結（2026-09-30 加的，當時整站內部連結只剩 28 個）。
+ *
+ * 所以名錄走一支只取四個欄位的輕量查詢（姓名、職位、鄉鎮、村里），
+ * 每位約是完整人物物件的十分之一：高雄市 1,641 位的名錄比 128 位的卡片還省。
+ */
+const townshipDirectory = ref<DirectoryPerson[]>([])
+let directoryKey = ''
+
+/**
+ * 撈某一屆某縣市的名錄。只有縣市頁要（全台頁與鄉鎮頁不顯示名錄）。
+ * 照樣走 fetchAllPages 的分頁安全網：村里長一個縣市上千位，新北市 1,785 位已經破 1000。
+ */
+async function loadTownshipDirectory(electionId: number, region: string): Promise<void> {
+  const key = `${electionId}_${region}`
+  if (directoryKey === key) return
+  try {
+    const { rows, truncated } = await fetchAllPages<RawDirectoryRow>(
+      `名錄 ${electionId}/${region}`,
+      (from, to) => withTimeoutAndRetry(`township_directory ${from}-${to}`, (signal) =>
+        supabase
+          .from('politician_elections')
+          .select('politician_id,election_type,politicians!inner(name),regions!inner(sub_region,village)')
+          .eq('election_id', electionId)
+          // 「臺」「台」兩種寫法都查：PostgREST 的 .eq 沒辦法在資料庫端 replace，
+          // 只查一種就是靜靜地少掉另一種寫法的人（lib/region-name.ts）
+          .in('regions.region', regionNameVariants(region))
+          .in('election_type', DIRECTORY_POSITION_TYPES as string[])
+          .neq('candidate_status', 'not_running')
+          .order('politician_id')
+          .range(from, to)
+          .abortSignal(signal)
+          .throwOnError(),
+      ) as unknown as Promise<PageResponse<RawDirectoryRow>>,
+    )
+    if (truncated) politicianListIncomplete.value = true
+    townshipDirectory.value = rows
+      .map(toDirectoryPerson)
+      .filter((p): p is DirectoryPerson => p !== null)
+    directoryKey = key
+  } catch (err) {
+    // 名錄撈不到不該讓整頁掛掉——卡片是這一頁的主角。但也不要假裝成空名錄：
+    // 空名錄跟「這個縣市沒有鄉鎮層級參選人」看起來一樣，所以留 console 給要查的人。
+    console.info(`[選舉頁] 鄉鎮市區名錄載入失敗（${electionId}/${region}）`, err)
+  }
+}
 const loadedElections = ref<Set<number>>(new Set())  // 已載入的選舉 ID
 const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID（切換時清空舊資料）
 
@@ -581,8 +634,10 @@ async function loadPoliticiansByElection(
     // 3. 這一層＋下一層要哪些職位（lib/election-levels.ts），再跟「這一屆真的有選的職位」取交集。
     //    取交集是為了「只列那一年真的有選的職位」：2022 沒有總統也沒有立委，
     //    撈了也是零筆，但交集之後整個層級沒職位可撈時可以連查詢都不用發。
-    const regionParam = region === 'All' ? null : region
-    const subRegionParam = subRegion === 'All' ? null : subRegion
+    // 地名正規化成「台」再送進 RPC：資料庫裡「臺」與「台」混用（lib/region-name.ts），
+    // 沒正規化就是靜靜地回 0 筆。RPC 那一端也做同樣的轉換（migration 20261005000001）。
+    const regionParam = region === 'All' ? null : normalizeRegionName(region)
+    const subRegionParam = subRegion === 'All' ? null : normalizeRegionName(subRegion)
     const electionTypes = positionsToLoad({
       region,
       subRegion,
@@ -710,6 +765,8 @@ export interface DataSnapshot {
   discussions: Discussion[]
   stats: DataStats
   verificationSources: VerificationSource[]
+  /** 縣市頁的鄉鎮市區名錄（只有縣市頁的切片有）。沒給＝這一頁不需要。 */
+  townshipDirectory?: DirectoryPerson[]
 }
 
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
@@ -754,6 +811,7 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   discussions.value = snapshot.discussions
   stats.value = snapshot.stats
   verificationSources.value = snapshot.verificationSources
+  if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
 }
 
 export function useSupabase() {
@@ -887,6 +945,8 @@ export function useSupabase() {
     loadedElections,
     politicianListIncomplete,
     availableElectionTypes,
+    townshipDirectory,
+    loadTownshipDirectory,
     stats,
 
     fetchAll,
