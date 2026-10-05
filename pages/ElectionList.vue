@@ -9,7 +9,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { daysUntil, splitElections, taipeiDay } from '../lib/election-list'
 import { electionPath } from '../lib/election-regions'
-import { positionSpec } from '../lib/election-levels'
+import { POSITIONS, positionSpec } from '../lib/election-levels'
 import type { Election } from '../types'
 
 /**
@@ -39,8 +39,12 @@ function voteDayText(e: Election): string {
   return `${e.electionDate}（星期${WEEKDAYS[d.getUTCDay()]}）`
 }
 
+/** 職位標籤照選舉頁分層的順序（總統 → 村里長），不照資料庫回傳的順序 */
+const POSITION_ORDER = new Map(POSITIONS.map((p, i) => [p.type as string, i]))
 function typeLabels(e: Election): string[] {
-  return (e.types ?? []).map((t) => positionSpec(t)?.label ?? t)
+  return [...(e.types ?? [])]
+    .sort((a, b) => (POSITION_ORDER.get(a) ?? 99) - (POSITION_ORDER.get(b) ?? 99))
+    .map((t) => positionSpec(t)?.label ?? t)
 }
 
 function countdownText(e: Election): string {
