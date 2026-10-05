@@ -1,3 +1,128 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ------------------------------------------------------------------
+   字級（2026-10-05，issue #350）
+   Tailwind 的字級與間距都是 rem，改 <html> 的 font-size 整站一起放大。
+   選擇由 composables/useAppearance.ts 與 index.html 的 inline script 寫成 class。
+   寫死 px 的字（text-[10px]）不會跟著變，那幾處是頁首的小標籤。
+   ------------------------------------------------------------------ */
+html.zj-font-sm { font-size: 87.5%; }
+html.zj-font-md { font-size: 100%; }
+html.zj-font-lg { font-size: 118.75%; }
+
+/* ------------------------------------------------------------------
+   深色模式（2026-10-05，issue #350）
+   全站的顏色是直接寫死的淺色 Tailwind class（約 800 處），沒有 dark: 變體；
+   與其逐一改，這裡用 html.dark 把「淺色底＋深色字」那一族統一換成深色版。
+   原則：
+   - 已經是深色底或彩色實心底（bg-navy-900、bg-blue-600、bg-red-500…）配 text-white 的不動。
+   - 淺色底換深石板色，深色字換淺色字，淺色邊框換深色邊框。
+   - 彩色淺底（bg-emerald-50 等）換成同色相的低透明度底，彩色深字換成同色相的亮字。
+   - hover 規則要放在最後，才壓得過上面同一個元素的底色規則。
+   ------------------------------------------------------------------ */
+html.dark { color-scheme: dark; }
+
+/* 底色 */
+html.dark body { background-color: #0b1220; color: #e2e8f0; }
+html.dark .bg-slate-50, html.dark .bg-gray-50 { background-color: #0f172a; }
+html.dark .bg-white { background-color: #1e293b; }
+html.dark .bg-slate-100, html.dark .bg-gray-100 { background-color: #273449; }
+html.dark .bg-slate-200 { background-color: #334155; }
+html.dark .bg-slate-300 { background-color: #475569; }
+html.dark .bg-white\/50 { background-color: rgb(30 41 59 / 0.5); }
+html.dark .bg-white\/80 { background-color: rgb(30 41 59 / 0.8); }
+html.dark .bg-white\/90 { background-color: rgb(30 41 59 / 0.9); }
+html.dark .bg-slate-50\/50 { background-color: rgb(15 23 42 / 0.5); }
+html.dark .bg-slate-50\/90 { background-color: rgb(15 23 42 / 0.9); }
+html.dark .bg-slate-200\/50 { background-color: rgb(51 65 85 / 0.5); }
+
+/* 彩色淺底：同色相、低透明度 */
+html.dark .bg-blue-50, html.dark .bg-blue-100, html.dark .bg-blue-50\/20 { background-color: rgb(59 130 246 / 0.16); }
+html.dark .bg-sky-50, html.dark .bg-sky-100, html.dark .bg-cyan-50 { background-color: rgb(14 165 233 / 0.16); }
+html.dark .bg-emerald-50, html.dark .bg-emerald-100, html.dark .bg-emerald-200, html.dark .bg-emerald-50\/50,
+html.dark .bg-green-50, html.dark .bg-green-100 { background-color: rgb(16 185 129 / 0.16); }
+html.dark .bg-amber-50, html.dark .bg-amber-100, html.dark .bg-amber-50\/50 { background-color: rgb(245 158 11 / 0.16); }
+html.dark .bg-orange-100 { background-color: rgb(249 115 22 / 0.16); }
+html.dark .bg-red-50, html.dark .bg-red-100, html.dark .bg-red-200, html.dark .bg-red-50\/20,
+html.dark .bg-rose-50, html.dark .bg-rose-100 { background-color: rgb(239 68 68 / 0.16); }
+html.dark .bg-violet-50, html.dark .bg-violet-100, html.dark .bg-violet-50\/30, html.dark .bg-violet-50\/40,
+html.dark .bg-indigo-50, html.dark .bg-indigo-100 { background-color: rgb(139 92 246 / 0.16); }
+
+/* 漸層起訖的淺色端 */
+html.dark .from-slate-50, html.dark .from-blue-50, html.dark .from-amber-50 {
+  --tw-gradient-from: #0f172a var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+html.dark .to-orange-50, html.dark .to-indigo-50, html.dark .to-blue-50\/30 {
+  --tw-gradient-to: #172033 var(--tw-gradient-to-position);
+}
+
+/* 文字：深色字換淺色字 */
+html.dark .text-navy-900, html.dark .text-slate-900, html.dark .text-slate-800, html.dark .text-slate-700,
+html.dark .text-gray-800, html.dark .text-gray-700 { color: #e2e8f0; }
+html.dark .text-slate-600 { color: #cbd5e1; }
+html.dark .text-slate-500, html.dark .text-slate-400 { color: #94a3b8; }
+html.dark .text-slate-300 { color: #64748b; }
+
+/* 文字：彩色字換亮一階 */
+html.dark .text-blue-900, html.dark .text-blue-800, html.dark .text-blue-700, html.dark .text-blue-600 { color: #93c5fd; }
+html.dark .text-blue-500 { color: #60a5fa; }
+html.dark .text-sky-800, html.dark .text-sky-700, html.dark .text-sky-600, html.dark .text-cyan-700 { color: #7dd3fc; }
+html.dark .text-emerald-800, html.dark .text-emerald-700, html.dark .text-emerald-600,
+html.dark .text-green-700, html.dark .text-green-600 { color: #6ee7b7; }
+html.dark .text-emerald-500, html.dark .text-green-500 { color: #34d399; }
+html.dark .text-amber-900, html.dark .text-amber-800, html.dark .text-amber-700, html.dark .text-amber-600 { color: #fcd34d; }
+html.dark .text-amber-500 { color: #fbbf24; }
+html.dark .text-orange-800, html.dark .text-orange-600 { color: #fdba74; }
+html.dark .text-red-800, html.dark .text-red-700, html.dark .text-red-600, html.dark .text-red-500,
+html.dark .text-rose-600, html.dark .text-rose-500 { color: #fca5a5; }
+html.dark .text-violet-900, html.dark .text-violet-800, html.dark .text-violet-700, html.dark .text-violet-600,
+html.dark .text-indigo-700, html.dark .text-indigo-600 { color: #c4b5fd; }
+html.dark .text-violet-500, html.dark .text-indigo-500 { color: #a78bfa; }
+
+/* 邊框與分隔線 */
+html.dark .border-slate-50, html.dark .border-slate-100, html.dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #273449; }
+html.dark .border-slate-200, html.dark .divide-slate-200\/70 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
+html.dark .border-slate-300, html.dark .border-slate-400 { border-color: #475569; }
+html.dark .border-blue-100, html.dark .border-blue-200, html.dark .border-blue-300,
+html.dark .border-sky-100, html.dark .border-sky-200 { border-color: rgb(59 130 246 / 0.35); }
+html.dark .border-emerald-200, html.dark .border-emerald-300, html.dark .border-green-400 { border-color: rgb(16 185 129 / 0.35); }
+html.dark .border-amber-100, html.dark .border-amber-200, html.dark .border-amber-300,
+html.dark .border-orange-200 { border-color: rgb(245 158 11 / 0.35); }
+html.dark .border-red-200, html.dark .border-red-300 { border-color: rgb(239 68 68 / 0.4); }
+html.dark .border-violet-100, html.dark .border-violet-200, html.dark .border-violet-300 { border-color: rgb(139 92 246 / 0.4); }
+html.dark .ring-slate-100, html.dark .ring-slate-200 { --tw-ring-color: #334155; }
+
+/* hover（要在最後，壓過上面的底色規則） */
+html.dark .hover\:bg-slate-50:hover { background-color: #273449; }
+html.dark .hover\:bg-slate-100:hover { background-color: #334155; }
+html.dark .hover\:bg-slate-200:hover { background-color: #475569; }
+html.dark .hover\:bg-blue-50:hover { background-color: rgb(59 130 246 / 0.25); }
+html.dark .hover\:text-navy-900:hover, html.dark .hover\:text-slate-800:hover, html.dark .hover\:text-slate-700:hover { color: #f1f5f9; }
+html.dark .hover\:text-slate-600:hover { color: #e2e8f0; }
+
+/* 表單：沒有明確底色的輸入框、下拉選單在深色下也要看得到字 */
+html.dark input, html.dark select, html.dark textarea { color: #e2e8f0; }
+html.dark input::placeholder, html.dark textarea::placeholder { color: #64748b; }
+html.dark option { background-color: #1e293b; color: #e2e8f0; }
+
+/* 圖表（ApexCharts 的文字、格線、圖例預設是深灰） */
+html.dark .apexcharts-text, html.dark .apexcharts-xaxis-label, html.dark .apexcharts-yaxis-label { fill: #cbd5e1; }
+html.dark .apexcharts-legend-text { color: #cbd5e1 !important; }
+html.dark .apexcharts-gridline, html.dark .apexcharts-xaxis-tick { stroke: #334155; }
+
+/* 技術文件頁（/skill）：scoped 樣式裡寫死了淺色 */
+html.dark .skill-doc h1, html.dark .skill-doc h2, html.dark .skill-doc strong, html.dark .skill-doc th { color: #f1f5f9; }
+html.dark .skill-doc h2 { border-top-color: #334155; }
+html.dark .skill-doc h3, html.dark .skill-doc p, html.dark .skill-doc li { color: #cbd5e1; }
+html.dark .skill-doc a { color: #93c5fd; }
+html.dark .skill-doc code { background: #273449; color: #e2e8f0; }
+html.dark .skill-doc blockquote { background: rgb(59 130 246 / 0.14); }
+html.dark .skill-doc th { background: #1e293b; }
+html.dark .skill-doc pre code { background: transparent; color: inherit; }
+html.dark .skill-doc td, html.dark .skill-doc th, html.dark .skill-doc hr { border-color: #334155; }
+html.dark .election-2026-border { background: linear-gradient(to bottom, #1e293b 0%, #fbbf24 100%); }
