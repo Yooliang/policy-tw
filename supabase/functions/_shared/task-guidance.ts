@@ -69,6 +69,10 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "source_urls 放你實際打開、看得到這些學經歷的網址（所屬機關／議會的個人介紹頁最常有，其次維基百科、本人官網）。" +
     "bio 跟來源不一致以來源為準，並在 note 說明。只補查得到的那一個欄位也可以。" +
     "**已經有值的欄位不要重交**（看 current.present_fields）—— 伺服器只補空欄位，重交那一輪是白做。" +
+    // 學經歷補出處（#346，2026-10-06）：同一個型別，target.kind＝career_sources；這種任務反而就是要照原文重交
+    "**例外：學經歷補出處**（target.kind 是 career_sources，任務編號 auto:profile_detail_gap:sources:…）：學經歷已經有了、只是沒有出處（網站標「待補出處」，" +
+    "current.unsourced 列出是哪幾項）。這種任務要**照 unsourced 的原文**重交你查得到的那幾項（一條一項、字要一樣），source_urls 放看得到它們的頁面——" +
+    "伺服器只會把出處掛到文字相同的項目上，陣列本身不會變。查到的寫法不同或有這裡沒有的項目，照抄原文並在 note 說明。**臉書、IG、Threads 讀不到，不算出處**。" +
     searchFirst("profile_detail_gap"),
 
   profile_gap:

@@ -34,6 +34,7 @@ import {
   LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS,
   participantPhrase, participantValues,
 } from "./lineage.ts";
+import { careerSourceNote } from "./politician-careers.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -200,9 +201,11 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     },
   });
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
+  // 學經歷的出處由資料庫觸發器在落庫時掛（#346）；這裡只把掛不掛得上講清楚
+  const careerNote = careerSourceNote(p, row.source_urls);
   if (ensured.created) {
     await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
-    return { status: "applied", politician_id: ensured.politician_id, created_politician: true, message: `已建立新政治人物${avatarNote}` };
+    return { status: "applied", politician_id: ensured.politician_id, created_politician: true, message: `已建立新政治人物${avatarNote}${careerNote}` };
   }
   const filled = await fillBlanks(supabase, ctx, ensured.politician_id, {
     birth_year: int(p.birth_year),
@@ -219,7 +222,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: false,
-    message: `已對到既有人物${filled.length ? `，補上 ${filled.join("、")}` : "（無空欄位可補）"}${avatarNote}`,
+    message: `已對到既有人物${filled.length ? `，補上 ${filled.join("、")}` : "（無空欄位可補）"}${avatarNote}${careerNote}`,
   };
 }
 

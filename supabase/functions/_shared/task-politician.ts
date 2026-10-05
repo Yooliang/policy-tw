@@ -6,7 +6,9 @@
  * 走 INSERT 建一筆只有學歷經歷的新人物（這次是撞 position NOT NULL 才沒建成）。任務已經說了是誰，就不要再猜。
  */
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const PROFILE_GAP_RE = new RegExp(`^auto:profile_gap:(${UUID})$`, "i");
+// 補學經歷條列（profile_detail_gap）也是一個人一件：`auto:profile_detail_gap:<uuid>`，
+// 學經歷補出處（#346，2026-10-06）是 `auto:profile_detail_gap:sources:<uuid>`——代理照原文重交學經歷時常常只帶姓名
+const PROFILE_GAP_RE = new RegExp(`^auto:(?:profile_gap|profile_detail_gap(?::sources)?):(${UUID})$`, "i");
 
 export function politicianIdFromTask(taskId: unknown): string | null {
   if (typeof taskId !== "string") return null;
@@ -14,7 +16,7 @@ export function politicianIdFromTask(taskId: unknown): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-/** politician 型別、沒帶 politician_id、任務是 profile_gap → 補上任務指的那位；其餘原樣回傳 */
+/** politician 型別、沒帶 politician_id、任務是 profile_gap／profile_detail_gap → 補上任務指的那位；其餘原樣回傳 */
 export function withTaskPolitician(contributionType: string, payload: unknown, taskId: unknown): unknown {
   if (contributionType !== "politician" || !payload || typeof payload !== "object") return payload;
   const p = payload as Record<string, unknown>;
