@@ -1,4 +1,5 @@
 import { displayCurrentPosition, participationLabel } from '../lib/participation-label'
+import { electionArea } from '../lib/election-area'
 import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
@@ -250,15 +251,16 @@ export function mapPolitician(row: RawPolitician): Politician {
 export function withElectionData(p: Politician, electionId: number): Politician {
   const currentElection = p.elections?.find(e => e.electionId === electionId)
   if (!currentElection) return p
+  const electionType = currentElection.electionType || p.electionType
   return {
     ...p,
     candidateStatus: currentElection.candidateStatus,
     candNo: currentElection.candNo,
     sourceNote: currentElection.sourceNote,
     position: currentElection.position || p.position,
-    electionType: currentElection.electionType || p.electionType,
-    region: currentElection.region || p.region,
-    subRegion: currentElection.subRegion || p.subRegion,
+    electionType,
+    // 縣市長／議員／立委這一屆沒有選區就是沒有，不借人物的鄉鎮村里（2026-10-05，lib/election-area.ts）
+    ...electionArea(electionType, currentElection, p),
   }
 }
 

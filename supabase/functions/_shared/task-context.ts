@@ -87,7 +87,8 @@ export function rosterOursScope(target: Obj): { county: string; township: string
 export const ROSTER_CEC_GAP_HINT =
   "這一屆已經投票：中選會選舉資料庫（db.cec.gov.tw）上的名單我們已經比對過，缺的人列在任務 target.missing（姓名、選區或村里、當選與否、號次）。" +
   "逐位到中選會核對後用 candidacy 補一筆（candidate_status 填 confirmed、election_result 照中選會填），附你核對的中選會頁面；ours 是我們現有的，" +
-  "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。";
+  "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。" +
+  "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
 const PROFILE_FIELDS = ["birth_year", "current_position", "avatar_url", "education_level", "bio", "sub_region"] as const;
@@ -269,7 +270,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         previous_checks: r?.history ?? [],
         hint: r?.list_source === "cec"
           ? ROSTER_CEC_GAP_HINT
-          : "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
+          : "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。**縣市議員每一筆都要填 electoral_district**：名冊每一列都印著「<縣市>第N選舉區」，照抄成「第NN選舉區」；沒填會整批退回（400 electoral_district_required，不算被拒）——只抄姓名、政黨、縣市，網站就只能把他記到縣市，選區分組找不到他。",
       };
     }
     case "question": {

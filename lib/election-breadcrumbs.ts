@@ -21,6 +21,7 @@
 import { positionSpec, sectionAnchor, type PositionSpec } from './election-levels'
 import { electionRegionPath, electionTownshipPath, isCounty } from './election-regions'
 import { townshipNameOf } from './township-directory'
+import { isFormalDistrict } from './district-grouping'
 
 /** 跟 composables/usePageHead 的 BreadcrumbItem 同形；這支要零依賴（deno 直接測），所以不 import 它 */
 export interface Crumb {
@@ -72,7 +73,9 @@ function groupOf(
 ): { key: string; shown: string } | undefined {
   if (spec.display === 'district') {
     const key = rec.subRegion?.trim()
-    if (!key) return undefined
+    // 不是這種選舉的正式選區（議員紀錄借到的「大雅區」「臺中市第03選區」）就當沒有：選舉頁把這種人收在「選區待補」，
+    // 麵包屑不能寫出一個頁面上不存在的選區、也不能連到不存在的錨點（2026-10-05，lib/district-grouping.ts）
+    if (!key || !isFormalDistrict(key, spec.type)) return undefined
     // 上面已經有一層的地名就不重複：區代表「那瑪夏區第01選舉區」→「第01選舉區」
     const prefix = [township, county].find((n): n is string => !!n && key.startsWith(n) && key.length > n.length)
     return { key, shown: prefix ? key.slice(prefix.length) : key }

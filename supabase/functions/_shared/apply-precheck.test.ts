@@ -245,7 +245,8 @@ function candidacyBody(politicianId: string, electionType = "縣市議員") {
   return {
     agent_name: "tester",
     contribution_type: "candidacy",
-    payload: { politician_id: politicianId, election_id: 2026, election_type: electionType, region: "新北市", candidate_status: "registered" },
+    // 縣市議員 1.48.0 起要帶選區（council-district-guard.ts），不然在這支要測的身份檢查之前就被退回
+    payload: { politician_id: politicianId, election_id: 2026, election_type: electionType, region: "新北市", candidate_status: "registered", ...(electionType === "縣市議員" ? { electoral_district: "第01選舉區" } : {}) },
     source_urls: ["https://db.cec.gov.tw/test"],
   };
 }

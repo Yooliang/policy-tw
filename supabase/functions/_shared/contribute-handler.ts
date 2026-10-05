@@ -18,6 +18,7 @@ import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./a
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
+import { councilDistrictProblems } from "./council-district-guard.ts";
 import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
@@ -328,6 +329,24 @@ export async function handleContribute(
         },
       };
     }
+  }
+
+  // 縣市議員要帶選舉區才收（2026-10-05，協議 1.48.0，見 council-district-guard.ts）：
+  // 2026 已登記的議員有 105 筆沒有選區，103 筆是照登記名冊交的——名冊上有選區，只是沒抄。不算被拒。
+  const districtMissing = councilDistrictProblems(validation.items);
+  if (districtMissing.length > 0) {
+    try {
+      await supabase.from("gate_rejections").insert(districtMissing.map(() => ({ gate: "electoral_district_required", endpoint: via, contribution_id: null, ip_hash: ipHash })));
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: "electoral_district_required",
+        message: "有縣市議員的參選紀錄沒填選舉區（electoral_district），整批未收；請照 errors 補上「第NN選舉區」後重送。這不算被拒。",
+        errors: districtMissing.map((d) => ({ path: `items[${d.index}].payload.electoral_district`, name: d.name, region: d.region, message: d.message })),
+      },
+    };
   }
 
   // 縣市議員候選人的選舉區存不存在（2026-09-28）：名冊裡有這個縣市時，統一寫法後的 electoral_district
