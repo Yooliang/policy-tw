@@ -54,17 +54,18 @@ import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BA
 type Obj = Record<string, unknown>;
 
 const CANDIDATE_STATUS_LABEL: Record<string, string> = {
-  rumored: "傳聞", likely: "可能參選", confirmed: "確認參選", registered: "已登記", qualified: "審定合格",
-  withdrawn: "退選", not_running: "未登記", elected: "當選", defeated: "落選",
+  rumored: "傳聞", likely: "可能參選", confirmed: "表態參選", registered: "已登記", qualified: "審定合格",
+  withdrawn: "退選", not_running: "不參選", elected: "當選", defeated: "落選",
 };
 const POLICY_STATUS_LABEL: Record<string, string> = {
   "Campaign Pledge": "競選承諾", Proposed: "提出", "In Progress": "進行中", Achieved: "已實現", Stalled: "滯後", Failed: "未達成",
 };
-const TABLE_LABEL: Record<string, string> = { politicians: "政治人物", politician_elections: "參選紀錄", policies: "政見" };
+const TABLE_LABEL: Record<string, string> = { politicians: "政治人物", politician_elections: "參選紀錄", policies: "政見", politician_offices: "任期" };
 const FIELD_LABEL: Record<string, string> = {
   name: "姓名", party: "政黨", birth_year: "出生年", current_position: "現職", region: "縣市", sub_region: "選區", education_level: "學歷",
   bio: "簡介", avatar_url: "照片", candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題",
   description: "內容", category: "分類", status: "狀態", proposed_date: "提出日", election_id: "所屬選舉", source_url: "來源網址",
+  end_date: "卸任日", end_reason: "卸任原因",
 };
 
 export function clip(value: unknown, limit = SUMMARY_TEXT_LIMIT): string {

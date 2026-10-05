@@ -405,7 +405,7 @@ function buildPayload(
           : {}),
         candidate_status: missing.length && typeof t.candidate_status === "string"
           ? t.candidate_status
-          : t.record_missing === true ? "confirmed" : "（confirmed／registered／qualified／withdrawn／not_running 之一）",
+          : t.record_missing === true ? "qualified" : "（confirmed 表態參選／registered 已登記／qualified 名單上／withdrawn／not_running 之一）",
         ...(t.record_missing === true ? { election_result: "elected" } : {}),
         // 中選會名單上的選區／鄉鎮：縣市議員與立委放 electoral_district，鄉鎮層級放 sub_region
         ...(t.record_missing === true && typeof t.sub_region === "string" && t.sub_region

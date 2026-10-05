@@ -8,7 +8,7 @@
  *   4. 觸發器：舊欄位有變以舊欄位為準；只有新欄位變才回寫舊欄位；清成 NULL 會重算
  */
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
-import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, candidacyStatusFromLegacy } from "./candidacy-status.ts";
+import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, candidacyStatusFromLegacy, isListPublished, narrowConfirmed, taipeiToday } from "./candidacy-status.ts";
 
 const sql = await Deno.readTextFile(new URL("../../migrations/20261006034500_candidacy_status.sql", import.meta.url));
 /** 去掉 SQL 註解（Windows 檢出是 CRLF，先切掉 \r） */
@@ -120,4 +120,27 @@ Deno.test("新→舊→新：六值在名單未公告時都回到原值（TS 規
     assertEquals(candidacyStatusFromLegacy(cs, er, false), s, s);
     assertMatch(reverse, new RegExp(`'${cs}'`), `回寫 ${s} 要寫 ${cs}`);
   }
+});
+
+// ── #345 後續：confirmed 收窄 ──
+Deno.test("confirmed 收窄：名單公告後換成 qualified；公告前、別的狀態、早期匯入的 confirmed 原樣重交都不換", () => {
+  assertEquals(narrowConfirmed("confirmed", true), { status: "qualified", converted: true });
+  assertEquals(narrowConfirmed("confirmed", true, "registered"), { status: "qualified", converted: true });
+  assertEquals(narrowConfirmed("confirmed", false), { status: "confirmed", converted: false });
+  assertEquals(narrowConfirmed("confirmed", true, "confirmed"), { status: "confirmed", converted: false });
+  for (const s of ["registered", "qualified", "not_running", "withdrawn"]) assertEquals(narrowConfirmed(s, true), { status: s, converted: false });
+  // 換成 qualified 之後新欄位還是 filed（名單上的人），跟舊資料讀法一致
+  assertEquals(candidacyStatusFromLegacy("qualified", null, true), candidacyStatusFromLegacy("confirmed", null, true));
+});
+
+Deno.test("isListPublished：問 SQL 的 candidacy_list_published；查不到一律當沒公告", async () => {
+  const calls: unknown[] = [];
+  const yes = { rpc: (n: string, a: unknown) => { calls.push([n, a]); return Promise.resolve({ data: true, error: null }); } };
+  assertEquals(await isListPublished(yes, 2026, "縣市議員", "2026-11-17"), true);
+  assertEquals(calls[0], ["candidacy_list_published", { p_election_id: 2026, p_election_type: "縣市議員", p_on: "2026-11-17" }]);
+  assertEquals(await isListPublished({ rpc: () => Promise.resolve({ data: null, error: { message: "x" } }) }, 2026, "縣市議員"), false);
+  assertEquals(await isListPublished({ rpc: () => Promise.reject(new Error("down")) }, 2026, "縣市議員"), false);
+  assertEquals(await isListPublished({}, 2026, "縣市議員"), false);
+  assertEquals(await isListPublished(yes, 2026, null), false);
+  assertEquals(taipeiToday(new Date("2026-11-16T16:30:00Z")), "2026-11-17", "台灣日期：UTC 16:30 已經是隔天");
 });

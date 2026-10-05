@@ -126,7 +126,7 @@ export function rosterOursScope(target: Obj): { county: string; township: string
 /** 已投票屆別的名單缺口（target.list_source＝cec）：名單就在中選會資料庫、缺的人已經列好，跟 2026 找登記名冊不同 */
 export const ROSTER_CEC_GAP_HINT =
   "這一屆已經投票：中選會選舉資料庫（db.cec.gov.tw）上的名單我們已經比對過，缺的人列在任務 target.missing（姓名、選區或村里、當選與否、號次）。" +
-  "逐位到中選會核對後用 candidacy 補一筆（candidate_status 填 confirmed、election_result 照中選會填），附你核對的中選會頁面；ours 是我們現有的，" +
+  "逐位到中選會核對後用 candidacy 補一筆（candidate_status 填 qualified——名單公告後在名單上的人都是 qualified，confirmed 只表示表態參選——election_result 照中選會填），附你核對的中選會頁面；ours 是我們現有的，" +
   "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。" +
   "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
 
@@ -752,13 +752,13 @@ export function correctionTargetSummary(
   person: { name?: string | null; region?: string | null } | null | undefined,
   changes: ReadonlyArray<{ field: string; db_current: unknown; correct_value: unknown }>,
 ): string | null {
-  if (!target || (targetTable !== "politicians" && targetTable !== "politician_elections")) return null;
+  if (!target || (targetTable !== "politicians" && targetTable !== "politician_elections" && targetTable !== "politician_offices")) return null;
   const who = targetTable === "politicians" ? { name: target.name, region: target.region } : (person ?? {});
   const name = typeof who.name === "string" && who.name.trim() ? who.name.trim() : "（查不到姓名）";
   const parts = [typeof who.region === "string" && who.region.trim() ? who.region.trim() : null];
-  if (targetTable === "politician_elections") {
+  if (targetTable === "politician_elections" || targetTable === "politician_offices") {
     const election = [target.election_id, target.election_type].filter((x) => x !== null && x !== undefined && x !== "").join(" ");
-    if (election) parts.push(election);
+    if (election) parts.push(targetTable === "politician_offices" ? `${election} 任期` : election);
   }
   const ctx = parts.filter(Boolean).join("，");
   const diff = changes.filter((c) => c.field).map((c) => {
@@ -1308,10 +1308,11 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
   if (contributionType === "correction") {
     const table = typeof payload.target_table === "string" ? payload.target_table : null;
     const id = payload.target_id;
-    if (table && id !== undefined && ["politicians", "politician_elections", "policies"].includes(table)) {
-      // 參選紀錄 join 出人名（2026-10-01：驗證項要寫出這票改到誰）；人物另放 target_politician，target 只留那一列的欄位
-      const { data: t } = await supabase.from(table).select(table === "politician_elections" ? "*, politicians(name, region)" : "*").eq("id", id).maybeSingle();
-      if (t && table === "politician_elections") {
+    if (table && id !== undefined && ["politicians", "politician_elections", "policies", "politician_offices"].includes(table)) {
+      // 參選紀錄、任期 join 出人名（2026-10-01：驗證項要寫出這票改到誰）；人物另放 target_politician，target 只留那一列的欄位
+      const withPerson = table === "politician_elections" || table === "politician_offices";
+      const { data: t } = await supabase.from(table).select(withPerson ? "*, politicians(name, region)" : "*").eq("id", id).maybeSingle();
+      if (t && withPerson) {
         const { politicians: person, ...row } = t as Obj;
         data.target = row;
         data.target_politician = person && typeof person === "object" ? person as VerifyContextData["target_politician"] : null;

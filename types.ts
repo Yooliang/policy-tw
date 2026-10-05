@@ -48,7 +48,7 @@ export interface Region {
 
 // Candidate status for elections (選舉前中後三階段)
 // 選前: rumored(傳聞), likely(可能參選)
-// 選中: confirmed(確認參選)
+// 選中: confirmed(表態參選：本人宣布、政黨提名；#345 後續起正式名單公告後在名單上的是 qualified)
 // 選後: elected(當選), defeated(落選)
 // registered＝中選會已登記、qualified＝已審定、not_running＝AI 推測但未登記（選舉頁不顯示）
 export type CandidateStatus = 'rumored' | 'likely' | 'confirmed' | 'registered' | 'qualified' | 'not_running' | 'elected' | 'defeated';
@@ -67,6 +67,31 @@ export interface PoliticianElectionData {
   candNo?: number;       // 選票上的號次（名單公告、抽籤後才有）
   electionResult?: 'elected' | 'not_elected'; // 那場選舉的結果；過去選舉九成還是空的（代理補中）
   sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
+  /** 參選狀態合一欄（#345，六值；第一階段畫面還讀 candidateStatus／electionResult） */
+  candidacyStatus?: CandidacyStatus;
+  /** 退選之前有沒有登記過：true 登記後退選／false 表態不參選／空的＝判斷不了（顯示「不參選」）。只在退選時有值（#345 後續） */
+  withdrawnAfterFiling?: boolean;
+}
+
+/** 參選狀態合一欄的六值（#345，跟日本站同一套；不收傳聞） */
+export type CandidacyStatus = 'considering' | 'declared' | 'filed' | 'withdrawn' | 'elected' | 'not_elected';
+
+/**
+ * 任期表 `politician_offices` 的一列（#345）。第一階段網站職稱還不讀它；人物頁只拿已卸任的來列「卸任的公職」。
+ * `endBasis` 是 inferred 的卸任日是推定的（轉任別的公職，記新任期就任前一天），畫面要標「推定」。
+ */
+export interface PoliticianTerm {
+  id: number;
+  electionId: number;
+  electionType: string;
+  region?: string;
+  subRegion?: string;
+  village?: string;
+  startDate: string;
+  endDate?: string;
+  endReason?: string;
+  endBasis?: 'law' | 'inferred' | 'source';
+  sourceUrl?: string;
 }
 
 /**
@@ -113,6 +138,8 @@ export interface Politician {
   education?: string[];
   experience?: string[];
   candidateStatus?: CandidateStatus; // 參選狀態 (for current election context)
+  /** 這一屆退選前有沒有登記過（for current election context；#345 後續） */
+  withdrawnAfterFiling?: boolean;
   candNo?: number; // 號次 (for current election context)
   sourceNote?: string; // 來源備註 (for current election context)
 
@@ -482,6 +509,8 @@ export interface RawPoliticianElectionData {
   candNo?: number;
   electionResult?: 'elected' | 'not_elected';
   sourceNote?: string;
+  candidacyStatus?: CandidacyStatus | null;
+  withdrawnAfterFiling?: boolean | null;
 }
 
 export interface RawPolitician {

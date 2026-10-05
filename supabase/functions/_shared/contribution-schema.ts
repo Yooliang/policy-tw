@@ -67,12 +67,16 @@ export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "with
 export const CORRECTION_CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "not_running"] as const;
 export { ELECTION_RESULTS } from "./candidacy-result.ts";
 import { ELECTION_RESULTS as ELECTION_RESULTS_LIST } from "./candidacy-result.ts";
-export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies"] as const;
+export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies", "politician_offices"] as const;
+/** 任期的卸任原因（跟資料庫 politician_offices.end_reason 的 CHECK 同一份；#345） */
+export const OFFICE_END_REASONS = ["term_expired", "took_other_office", "resigned", "recalled", "deceased", "removed", "other"] as const;
 
 /** correction 可改的欄位（其他欄位一律拒收，避免任意 UPDATE） */
 export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], readonly string[]> = {
   politicians: ["name", "party", "birth_year", "current_position", "region", "sub_region", "education_level", "bio", "avatar_url"],
   politician_elections: ["candidate_status", "position", "election_type"],
+  // 任期（#345 後續）：只開放卸任日與原因——轉任的卸任日是推定的，附出處可以更正；其餘欄位由參選紀錄同步
+  politician_offices: ["end_date", "end_reason"],
   // origin（政見從哪裡來，#349）：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算
   policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id", "origin"],
 };
@@ -570,7 +574,8 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       const table = oneOf(CORRECTION_TABLES, p.target_table) ? p.target_table : null;
       // 參選紀錄的 id 是整數、人物與政見是 uuid（09-26：a-zhen 把人物 uuid 當成參選紀錄 id 交，落庫時才炸、重試到退件）
       if (!isStr(p.target_id, 1, 64)) { /* 上面已報 */ } else if (table === "politician_elections" && !/^[1-9]\d{0,9}$/.test(String(p.target_id))) push("payload.target_id", "參選紀錄（politician_elections）的 target_id 是整數 id（任務 current 裡的參選紀錄 id），不是人物的 uuid");
-      else if (table && table !== "politician_elections" && !isUuid(p.target_id)) push("payload.target_id", `${table} 的 target_id 要是 uuid`);
+      else if (table === "politician_offices" && !/^[1-9]\d{0,17}$/.test(String(p.target_id))) push("payload.target_id", "任期（politician_offices）的 target_id 是整數 id（任期表那一列的 id）");
+      else if (table && table !== "politician_elections" && table !== "politician_offices" && !isUuid(p.target_id)) push("payload.target_id", `${table} 的 target_id 要是 uuid`);
       const { changes } = normalizeCorrection(p);
       const usesChanges = Array.isArray(p.changes);
       if (changes.length === 0) push(usesChanges ? "payload.changes" : "payload.field", "至少要一個要更正的欄位：changes:[{field, current_value, correct_value}]（或舊格式 field＋correct_value）");
@@ -587,6 +592,8 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         if (empty && !clearable) push(`${at}.correct_value`, "correct_value 必填");
         else if (empty) { /* 清空提出日期：合法 */ }
         else if (table === "politicians" && c.field === "current_position" && isElectionName(c.correct_value)) push(`${at}.correct_value`, CURRENT_POSITION_NOT_ELECTION);
+        else if (table === "politician_offices" && c.field === "end_date" && !isDate(c.correct_value)) push(`${at}.correct_value`, "卸任日要是 YYYY-MM-DD");
+        else if (table === "politician_offices" && c.field === "end_reason" && !oneOf(OFFICE_END_REASONS, c.correct_value)) push(`${at}.correct_value`, `卸任原因要是 ${OFFICE_END_REASONS.join("／")} 之一`);
         else if (table === "politician_elections" && c.field === "candidate_status" && !oneOf(CORRECTION_CANDIDATE_STATUSES, c.correct_value)) push(`${at}.correct_value`, `參選狀態只能改成 ${CORRECTION_CANDIDATE_STATUSES.join("／")} 之一：不收傳聞（rumored、likely），當選落選用 candidacy 帶 election_result，退選填 not_running（協議 1.51.0）`);
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));

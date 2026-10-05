@@ -12,6 +12,7 @@
 import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
+import { CONFIRMED_NARROWED_NOTE, isListPublished, narrowConfirmed } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
@@ -449,11 +450,15 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
-  // withdrawn 在 DB 沒有對應值，落成 not_running 並在 source_note 註明
   const rawStatus = String(p.candidate_status);
-  const candidateStatus = rawStatus === "withdrawn" ? "not_running" : rawStatus;
   const electionId = Number(p.election_id);
   const { data: before } = await supabase.from("politician_elections").select("*").eq("politician_id", ensured.politician_id).eq("election_id", electionId).maybeSingle();
+  // confirmed 收窄（#345 後續）：正式名單公告後（含已投票屆別）記成 qualified；早期匯入的 confirmed 原樣重交不改
+  const narrowed = rawStatus === "confirmed"
+    ? narrowConfirmed(rawStatus, await isListPublished(supabase, electionId, electionType), (before as { candidate_status?: string | null } | null)?.candidate_status)
+    : { status: rawStatus, converted: false };
+  // withdrawn 在 DB 沒有對應值，落成 not_running 並在 source_note 註明
+  const candidateStatus = narrowed.status === "withdrawn" ? "not_running" : narrowed.status;
 
   // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
   // 號次有給才寫（2026-09-25 補欄位；之前協議收了但沒地方放）
@@ -519,7 +524,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
-    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${regionNote}`,
+    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}`,
   };
 }
 
@@ -1066,11 +1071,33 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   if (bad) return { status: "failed", message: `${table}.${bad.field} 不在可修正欄位白名單` };
 
   const fields = changes.map((c) => c.field);
-  const { data: current, error: readError } = await supabase.from(table).select(`id, ${fields.join(", ")}`).eq("id", target_id).maybeSingle();
+  // 任期的卸任日要連根據一起看（#345 後續）；參選紀錄改 confirmed 要知道是哪一屆、哪種選舉（名單公告了沒）
+  const extraRead = table === "politician_offices" ? ["end_date", "end_reason", "end_basis", "source_url"]
+    : table === "politician_elections" ? ["election_id", "election_type"] : [];
+  const readCols = [...new Set(["id", ...fields, ...extraRead])];
+  const { data: current, error: readError } = await supabase.from(table).select(readCols.join(", ")).eq("id", target_id).maybeSingle();
   throwIf(readError, `${table} read`);
   if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
 
   const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(table, c.field, c.correct_value)]));
+  // confirmed 收窄（#345 後續）：正式名單公告後（含已投票屆別）改成 confirmed 的，記成 qualified
+  let narrowNote = "";
+  if (table === "politician_elections" && patch.candidate_status === "confirmed") {
+    const cur = current as { election_id?: number; election_type?: string | null; candidate_status?: string | null };
+    const n = narrowConfirmed("confirmed", await isListPublished(supabase, Number(cur.election_id), cur.election_type), cur.candidate_status);
+    if (n.converted) { patch.candidate_status = n.status; narrowNote = CONFIRMED_NARROWED_NOTE; }
+  }
+  // 任期的卸任日附出處更正（#345 後續：轉任的卸任日是推定的）：在任中的要連原因一起給（資料庫 CHECK 卸任日與原因成對）
+  let officeExtra: Obj = {};
+  if (table === "politician_offices" && ("end_date" in patch || "end_reason" in patch)) {
+    const cur = current as { end_date?: string | null; end_reason?: string | null };
+    const endDate = "end_date" in patch ? patch.end_date : cur.end_date;
+    const endReason = "end_reason" in patch ? patch.end_reason : cur.end_reason;
+    if (!endDate || !endReason) {
+      return { status: "failed", message: "任期更正要同時有卸任日（end_date）與卸任原因（end_reason）：在任中的任期兩欄都要給" };
+    }
+    officeExtra = { end_basis: "source", source_url: row.source_urls?.[0] ?? null };
+  }
   // 照片形狀守門（2026-09-19）：只改照片而照片不合格就退成爭議，理由帶回 fix_disputed 任務；連同別的欄位一起改就只跳過照片
   let avatarNote = "";
   if (table === "politicians" && typeof patch.avatar_url === "string" && patch.avatar_url) {
@@ -1086,17 +1113,22 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   if (Object.keys(changed).length === 0) {
     return { status: "superseded", message: `${table} 的 ${noop.join("、")} 現值已經跟這筆更正一樣（別人先修好了），不重複寫入` };
   }
-  const { error } = await supabase.from(table).update(changed).eq("id", target_id);
+  // 任期：卸任日或原因真的有改才把根據換成「有出處」
+  const extra: Obj = table === "politician_offices" && ("end_date" in changed || "end_reason" in changed)
+    ? Object.fromEntries(Object.entries(officeExtra).filter(([k, v]) => (current as Obj)[k] !== v))
+    : {};
+  const { error } = await supabase.from(table).update({ ...changed, ...extra, ...(table === "politician_offices" ? { updated_at: new Date().toISOString() } : {}) }).eq("id", target_id);
   throwIf(error, `${table} correction update`);
   const applied: string[] = [];
   if (noop.length > 0) avatarNote += `；${noop.join("、")} 現值已相同，略過`;
-  for (const [field, newValue] of Object.entries(changed)) {
+  avatarNote += narrowNote;
+  for (const [field, newValue] of Object.entries({ ...changed, ...extra })) {
     await recordUpdate(supabase, ctx, table, String(target_id), field, current[field] ?? null, newValue);
     applied.push(`${field}：「${current[field] ?? ""}」→「${newValue === null ? "（清空）" : String(newValue)}」`);
   }
   return {
     status: "applied",
-    message: `${table} 更正 ${applied.length} 個欄位：${applied.join("；")}`,
+    message: `${table} 更正 ${applied.length} 個欄位：${applied.join("；")}${avatarNote}`,
     ...(table === "politicians" ? { politician_id: String(target_id) } : {}),
     ...(table === "policies" ? { policy_id: String(target_id) } : {}),
   };

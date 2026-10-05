@@ -54,7 +54,8 @@ async function loadCurrent(supabase: SupabaseLike, rows: PendingCorrection[]): P
   const current = new Map<string, Map<string, Obj>>();
   for (const [table, idSet] of idsByTable) {
     // politician_elections 的 id 是整數；被填成 UUID 的混進 in() 會讓整批報錯
-    const ids = [...idSet].filter((id) => table !== "politician_elections" || /^\d+$/.test(id));
+    // 任期（politician_offices）的 id 也是整數（#345）
+    const ids = [...idSet].filter((id) => (table !== "politician_elections" && table !== "politician_offices") || /^\d+$/.test(id));
     const cols = ["id", ...fieldsByTable.get(table)!].join(", ");
     const byId = new Map<string, Obj>();
     for (let i = 0; i < ids.length; i += ID_CHUNK) {
