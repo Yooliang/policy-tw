@@ -5,6 +5,9 @@ import { CEC_BASE, fetchCecJson, SUBJECT_MAP } from "../_shared/cec-static-fetch
 import {
   type CecFetchDeps,
   collectUnitRows,
+  electionDistrictRows,
+  HEADLINE_TURNOUT_CEC_TYPES,
+  headlineTurnout,
   OUR_ELECTION_TYPES,
   planUnits,
   type SyncUnitPlan,
@@ -29,6 +32,10 @@ import {
  * 一次呼叫可能超時（Edge Function 上限約 150 秒，村里長 2022 一屆就有約 1.3 萬人）：
  * 用 TIME_BUDGET_MS 頂住，時間到了就停在目前的同步單位，回應的 next 告訴呼叫端下次從哪個單位繼續。
  * 也可以用 { election_id, election_type } 只跑一種，通常一種類型的 22 個縣市可以在一次呼叫內跑完。
+ *
+ * 2026-10-06（#344）：每個單位寫完名單，順手把名單上的選舉區記進 election_districts（只新增、不改既有的；
+ * 名額只寫法律定死的首長一席與立委席次，議員、代表的名額走 district_seats_missing 任務）；這次有跑到縣市長或總統的屆別，
+ * 另抓中選會投票概況算投票率寫進 elections.turnout（直轄市長＋縣市長兩場加總；總統那一場）。
  *
  * 請求 body（都可省略）：
  *   { election_id?: number, election_type?: string, resume_from?: { election_id, election_type, region }, force?: boolean }
@@ -92,6 +99,8 @@ interface UnitReport {
   skipped?: string;
   /** 這個單位實際用了哪些場次：「科目:場次 id:寫入筆數」 */
   themes?: string[];
+  /** 名單上的選舉區幾個（寫進 election_districts，既有的不動）；寫失敗時是錯誤訊息 */
+  districts?: number | string;
 }
 
 interface UnitFailure {
@@ -219,15 +228,48 @@ Deno.serve(async (req) => {
         if (insError) throw new Error(`insert: ${insError.message}`);
       }
 
+      // 選舉區（#344）：名單寫進去了才記；只新增、不改既有的列（名額、依據都不會被同步洗掉）。
+      // 寫不成不影響名單本身，只在回應裡記錯誤
+      let districts: number | string = 0;
+      try {
+        const districtRows = electionDistrictRows(electionId, ourType, got.parts);
+        for (let b = 0; b < districtRows.length; b += INSERT_BATCH_SIZE) {
+          const { error: dError } = await supabase.from("election_districts")
+            .upsert(districtRows.slice(b, b + INSERT_BATCH_SIZE), { onConflict: "election_id,election_type,region,sub_region,village", ignoreDuplicates: true });
+          if (dError) throw new Error(dError.message);
+        }
+        districts = districtRows.length;
+      } catch (e) {
+        districts = `選舉區沒寫成：${e instanceof Error ? e.message : String(e)}`;
+      }
+
       units.push({
         election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}),
         fetched: got.fetched, written: rows.length,
         themes: got.parts.map((p) => `${p.cecType}:${p.themeId}:${p.rows.length}`),
+        districts,
       });
     } catch (e) {
       failed.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), error: e instanceof Error ? e.message : String(e) });
     }
   }
 
-  return new Response(JSON.stringify({ success: true, units, failed, next, elapsed_ms: Date.now() - started }), { headers: { "Content-Type": "application/json" } });
+  // 投票率（#344）：這次有跑到縣市長或總統的屆別才抓（三四個請求）；抓不到就不寫，不影響名單同步
+  const turnout: Array<{ election_id: number; value?: number; election_type?: string; error?: string }> = [];
+  if (ourTypes.some((t) => t in HEADLINE_TURNOUT_CEC_TYPES)) {
+    for (const electionId of electionIds) {
+      try {
+        const got = await headlineTurnout(electionId, deps);
+        if (!got) continue;
+        // 同一個值再寫一次無害（每週一次）；中選會改了數字就跟著改
+        const { error: tError } = await supabase.from("elections").update({ turnout: got.value }).eq("id", electionId);
+        if (tError) throw new Error(tError.message);
+        turnout.push({ election_id: electionId, value: got.value, election_type: got.election_type });
+      } catch (e) {
+        turnout.push({ election_id: electionId, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  return new Response(JSON.stringify({ success: true, units, failed, next, turnout, elapsed_ms: Date.now() - started }), { headers: { "Content-Type": "application/json" } });
 });

@@ -64,6 +64,7 @@ export const TABLE_LABEL: Record<string, string> = {
   contribution_tasks: '任務',
   task_checks: '任務查核',
   roster_checks: '名單清查',
+  election_districts: '選舉區名額',
 }
 
 export function tableLabel(name: string | null | undefined): string {

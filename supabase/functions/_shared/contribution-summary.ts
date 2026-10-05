@@ -183,6 +183,13 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "district_seats": {
+      const ds = Array.isArray(p.districts) ? (p.districts as Array<Record<string, unknown>>) : [];
+      const total = ds.reduce((n, d) => n + (typeof d.seats === "number" ? d.seats : 0), 0);
+      summary = `補 ${str(p.region)} ${str(p.election_id)} ${str(p.election_type)} 應選名額：${ds.length} 個選舉區、共 ${total} 席`;
+      targetName = null;
+      break;
+    }
     case "merge_politician": {
       const keep = str(p.keep_id).slice(0, 8), remove = str(p.remove_id).slice(0, 8);
       summary = p.same_person === false

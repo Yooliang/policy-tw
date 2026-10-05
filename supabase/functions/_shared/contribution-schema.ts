@@ -6,6 +6,7 @@
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
+import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 
 /**
  * 現職存成選舉名稱（「111年直轄市議員選舉」）是早期匯入留下的錯，879 位（2026-09-25）。
@@ -18,10 +19,10 @@ const CURRENT_POSITION_NOT_ELECTION = "現職要寫職稱（例如「台北市�
 export const isTaskIdShape = (v: unknown): boolean =>
   typeof v === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^auto:[a-z0-9_]+:\S+$/.test(v));
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -264,6 +265,29 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.ours_count !== undefined && !(isInt(p.ours_count) && p.ours_count >= 0)) push("payload.ours_count", "要是 0 或正整數");
       if (p.submitted !== undefined && !(isInt(p.submitted) && p.submitted >= 0)) push("payload.submitted", "要是 0 或正整數");
       if (!isStr(p.note, 10, 2000)) push("payload.note", "note 必填（至少 10 字）：說明你打開了哪個名單、比對結果如何、補了誰");
+      break;
+    }
+    case "district_seats": {
+      // 應選名額（#344，2026-10-06）：一個縣市、一種選舉，照選舉公告把每個選舉區的名額交上來。
+      // 名額只能照公告抄——候選人數、當選人數都不是名額（同額不足、無人登記的選舉區對不上）。
+      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}（任務 target 原樣帶回）`);
+      if (!oneOf(DISTRICT_SEAT_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${DISTRICT_SEAT_TYPES.join("／")} 之一（名額法律定死的首長與立委不用交）`);
+      if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
+      if (!Array.isArray(p.districts) || p.districts.length === 0 || p.districts.length > MAX_DISTRICTS_PER_SUBMISSION) {
+        push("payload.districts", `districts 必填：公告上這個縣市每個選舉區一項 {district, seats}（1～${MAX_DISTRICTS_PER_SUBMISSION} 項）`);
+      } else {
+        const seen = new Set<string>();
+        (p.districts as unknown[]).forEach((d, i) => {
+          const item = (d && typeof d === "object" ? d : {}) as Obj;
+          const name = normalizeSeatDistrict(String(p.election_type ?? ""), item.district);
+          if (!name) push(`payload.districts[${i}].district`, "選舉區寫法認不出來：議員寫「第01選舉區」，代表寫「麥寮鄉第01選舉區」（一個鄉鎮只有一區的寫「蘭嶼鄉選舉區」）");
+          else if (seen.has(name)) push(`payload.districts[${i}].district`, `${name} 重複了`);
+          else seen.add(name);
+          if (!(isInt(item.seats) && item.seats >= 1 && item.seats <= MAX_SEATS_PER_DISTRICT)) push(`payload.districts[${i}].seats`, `名額要是 1～${MAX_SEATS_PER_DISTRICT} 的整數（照公告的應選名額，不是候選人數）`);
+          if (item.kind !== undefined && !oneOf(DISTRICT_SEAT_KINDS, item.kind)) push(`payload.districts[${i}].kind`, `kind 要是 ${DISTRICT_SEAT_KINDS.join("／")} 之一（一般選舉區不用填）`);
+        });
+      }
+      if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串");
       break;
     }
     case "removal": {

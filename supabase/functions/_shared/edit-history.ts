@@ -75,14 +75,35 @@ export function planRevert(edits: readonly (EditRecord & { id: number })[]): Rev
   return [...steps.filter((s) => s.op === "reinsert"), ...steps.filter((s) => s.op === "restore"), ...steps.filter((s) => s.op === "delete")];
 }
 
+/** 還原步驟裡同一列（表＋id）的欄位併成一個 patch（純函式） */
+export function groupRestores(steps: readonly RevertStep[]): Map<string, Record<string, unknown>> {
+  const out = new Map<string, Record<string, unknown>>();
+  for (const s of steps) {
+    if (s.op !== "restore") continue;
+    const key = `${s.table}#${s.record_id}`;
+    const patch = out.get(key) ?? {};
+    patch[s.field] = s.value;
+    out.set(key, patch);
+  }
+  return out;
+}
+
 export async function executeRevert(supabase: SupabaseLike, contributionId: string, revertedBy: string): Promise<{ steps: RevertStep[]; reverted: number }> {
   const { data, error } = await supabase.from("edit_history").select("*").eq("contribution_id", contributionId).order("id", { ascending: true });
   if (error) throw new Error(`edit_history read: ${error.message}`);
   const steps = planRevert((data ?? []) as (EditRecord & { id: number })[]);
+  // 同一列的欄位還原併成一次 UPDATE（2026-10-06，#344）：election_districts 的 CHECK 要求 seats 與 seats_basis
+  // 同時有值或同時空白，一欄一欄還原的話，中間那一步一定違反 CHECK、整筆還原失敗
+  const restores = groupRestores(steps);
+  const restored = new Set<string>();
   for (const s of steps) {
     if (s.op === "restore") {
-      const { error: e } = await supabase.from(s.table).update({ [s.field]: s.value }).eq("id", s.record_id);
-      if (e) throw new Error(`revert ${s.table}.${s.field}: ${e.message}`);
+      const key = `${s.table}#${s.record_id}`;
+      if (restored.has(key)) continue;
+      restored.add(key);
+      const patch = restores.get(key)!;
+      const { error: e } = await supabase.from(s.table).update(patch).eq("id", s.record_id);
+      if (e) throw new Error(`revert ${s.table}.${Object.keys(patch).join(",")}: ${e.message}`);
     } else if (s.op === "reinsert") {
       const { error: e } = await supabase.from(s.table).insert(s.row);
       if (e) throw new Error(`revert reinsert ${s.table}#${s.record_id}: ${e.message}`);

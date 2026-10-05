@@ -26,6 +26,7 @@ import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { councilDistrictKey, isCouncilAboriginalDistrict, legislatorDistrictKey, officialCouncilDistricts, regionFitFor } from "./electoral-district.ts";
 import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
+import { DISTRICT_SEAT_TYPES, type DistrictSeatKind, type ExistingDistrict, normalizeSeatDistrict, planDistrictSeats, type SeatInput, seatDistrictTown } from "./district-seats.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -774,6 +775,88 @@ async function applyRosterCheck(supabase: SupabaseLike, row: ContributionRow): P
 }
 
 /**
+ * 應選名額（#344，2026-10-06）：照選舉公告把一個縣市、一種選舉每個選舉區的名額寫進 election_districts。
+ *
+ * - 既有的選舉區（選舉區對照表、中選會名單同步建的）只改 seats／seats_basis／seats_source，一次 UPDATE 三欄
+ *   （表的 CHECK 要求名額與依據同時有值）；每一欄各寫一筆 edit_history，還原時併回一次 UPDATE（edit-history.ts）
+ * - 公告上有、我們沒有的（多半是原住民選舉區、2026 新竹縣議員）新增一列
+ * - 法律定死的名額（seats_basis=law）不讓交件覆蓋；名額一樣的不重寫（不洗掉第一個出處）
+ * - 代表的選舉區要落在這個縣市真的有的鄉鎮市區裡（看同一屆鄉鎮市長／原住民區長的選舉區），打錯字的鄉鎮整筆退件
+ */
+async function applyDistrictSeats(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const electionId = int(p.election_id);
+  const electionType = str(p.election_type);
+  const region = str(p.region);
+  if (!electionId || !electionType || !region || !(DISTRICT_SEAT_TYPES as readonly string[]).includes(electionType)) {
+    return { status: "failed", message: "缺 election_id／election_type／region，或選舉別不是議員或代表" };
+  }
+  const source = row.source_urls[0] ?? null;
+  const districts: SeatInput[] = [];
+  for (const d of (Array.isArray(p.districts) ? p.districts : []) as Obj[]) {
+    const name = normalizeSeatDistrict(electionType, d?.district);
+    const seats = int(d?.seats);
+    if (!name || !seats) return { status: "disputed", message: `選舉區「${String(d?.district ?? "")}」或名額看不懂` };
+    districts.push({ district: name, seats, ...(typeof d.kind === "string" ? { kind: d.kind as DistrictSeatKind } : {}) });
+  }
+  if (districts.length === 0) return { status: "disputed", message: "districts 是空的" };
+
+  // query-bounds: ok — 一個縣市一種選舉的選舉區（彰化縣代表約百區），上限 1000
+  const { data: existing, error: readError } = await supabase.from("election_districts")
+    .select("id, sub_region, village, district_kind, seats, seats_basis, seats_source")
+    .eq("election_id", electionId).eq("election_type", electionType).eq("region", region)
+    .limit(1000);
+  throwIf(readError, "election_districts read");
+
+  if (electionType !== "縣市議員") {
+    // 代表的選舉區要落在真的有的鄉鎮市區：鄉鎮市民代表看鄉鎮市長、原住民區民代表看原住民區長的選舉區
+    const headType = electionType === "鄉鎮市民代表" ? "鄉鎮市長" : "直轄市山地原住民區長";
+    // query-bounds: ok — 一個縣市的鄉鎮市區（最多 33 個）
+    const { data: heads, error: headError } = await supabase.from("election_districts")
+      .select("sub_region").eq("election_id", electionId).eq("election_type", headType).eq("region", region).limit(200);
+    throwIf(headError, "election_districts towns read");
+    const towns = new Set(((heads ?? []) as Obj[]).map((h) => str(h.sub_region)).filter((t): t is string => !!t));
+    const stray = districts.map((d) => d.district).filter((sub) => !towns.has(seatDistrictTown(sub) ?? ""));
+    if (towns.size === 0) return { status: "disputed", message: `${region} ${electionId} 沒有${headType}的選舉區可以對照鄉鎮，這種選舉不在這個縣市` };
+    if (stray.length > 0) return { status: "disputed", message: `這些選舉區的鄉鎮市區不在 ${region}：${stray.join("、")}` };
+  }
+
+  const plan = planDistrictSeats((existing ?? []) as ExistingDistrict[], districts);
+  if (plan.updates.length === 0 && plan.inserts.length === 0) {
+    return { status: "superseded", message: `${region} ${electionId} ${electionType} 這幾區的名額現值已經一樣（別人先補好了），不重複寫入` };
+  }
+  for (const u of plan.updates) {
+    const patch = { seats: u.seats, seats_basis: "cec_notice", seats_source: source };
+    const { error } = await supabase.from("election_districts").update(patch).eq("id", u.id);
+    throwIf(error, "election_districts update");
+    for (const [field, value] of Object.entries(patch)) {
+      const old = u.old[field as keyof typeof u.old] ?? null;
+      if (old !== value) await recordUpdate(supabase, ctx, "election_districts", String(u.id), field, old, value);
+    }
+  }
+  for (const ins of plan.inserts) {
+    const { data: created, error } = await supabase.from("election_districts").insert({
+      election_id: electionId, election_type: electionType, district_kind: ins.kind, region, sub_region: ins.district,
+      seats: ins.seats, seats_basis: "cec_notice", seats_source: source,
+    }).select("*").maybeSingle();
+    throwIf(error, "election_districts insert");
+    if (!created) throw new Error("election_districts insert 沒有回傳");
+    await recordInsert(supabase, ctx, "election_districts", String(created.id), created);
+  }
+  const notes = [
+    plan.locked.length > 0 ? `法律定死的名額不改：${plan.locked.join("、")}` : "",
+    plan.kind_mismatch.length > 0 ? `選舉區種類跟我們記的不同、沒改：${plan.kind_mismatch.join("、")}` : "",
+    plan.still_missing.length > 0 ? `這個縣市還有 ${plan.still_missing.length} 區沒有名額：${plan.still_missing.slice(0, 20).join("、")}` : "",
+  ].filter(Boolean);
+  return {
+    status: "applied",
+    message: `${region} ${electionId} ${electionType} 應選名額：更新 ${plan.updates.length} 區、新增 ${plan.inserts.length} 區、${plan.unchanged.length} 區原本就一樣` +
+      (notes.length > 0 ? `；${notes.join("；")}` : ""),
+  };
+}
+
+/**
  * 移除一筆明顯不該存在的資料。
  *
  * 刻意做成軟移除：打上 removed_at 讓它從網站消失，資料與整條查核履歷都留著。
@@ -1155,6 +1238,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "removal": return await applyRemoval(supabase, row);
     case "merge_politician": return await applyMergePolitician(supabase, row);
     case "roster_check": return await applyRosterCheck(supabase, row);
+    case "district_seats": return await applyDistrictSeats(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

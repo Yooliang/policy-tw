@@ -304,6 +304,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 應選名額（#344，2026-10-06）：出錯的方式是「不是這一份公告」與「拿人數當名額」
+  district_seats: [
+    {
+      key: "not_the_notice",
+      instructions: "附的來源是不是這一屆、這個縣市、這種選舉的選舉公告（應選名額表）或選舉公報？",
+      hit: { key: "other_document", means: "不是這一份公告：別屆、別縣市、別種選舉，或只是新聞報導" },
+      miss: { key: "the_notice", means: "是這一屆這個縣市這種選舉的官方公告或公報" },
+    },
+    {
+      key: "counted_not_copied",
+      instructions: "交上來的名額是照公告的應選名額抄的，還是看起來像拿候選人數或當選人數推出來的？",
+      hit: { key: "derived", means: "名額跟公告對不上，像是用候選人數或當選人數推的" },
+      miss: { key: "copied", means: "每一區的名額都對得上公告的應選名額" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",

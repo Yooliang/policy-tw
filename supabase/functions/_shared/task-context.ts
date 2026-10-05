@@ -6,6 +6,7 @@
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
 import { identityInputOf } from "./candidate-import.ts";
 import { normalizeCorrection } from "./correction.ts";
+import { normalizeSeatDistrict } from "./district-seats.ts";
 import { fetchAllRows } from "./fetch-all.ts";
 import { fetchVerificationSources, needsForTask, sourcesForTask, type TaskSourceHint } from "./verification-sources.ts";
 
@@ -646,6 +647,8 @@ export interface VerifyContextData {
   votes?: Array<{ verdict: string; weight?: number | null; note?: string | null; evidence_url?: string | null; created_at?: string | null }>;
   /** 提交者附的來源網址；shapeVerifyCurrent 用它算按網域的 source_hints（#4） */
   source_urls?: string[] | null;
+  /** district_seats：這個縣市這種選舉我們現有的選舉區與名額（election_districts） */
+  districts?: Obj[];
 }
 
 /**
@@ -867,6 +870,25 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
         hint: "看這筆政見的標題與內容：它是不是「當選後要做的具體事情」？口號、行程、表態、團隊組成不是政見 → agree 移除；是政見但只是缺出處 → disagree 並在 note 說應該用 correction 補 source_url",
       };
+    case "district_seats": {
+      // 逐區對照：交上來的名額、我們現有的名額（空白＝還沒有）、是不是公告上多出來的新選舉區
+      const have = new Map((data.districts ?? []).map((d) => [String(d.sub_region ?? ""), d]));
+      const given = (Array.isArray(payload.districts) ? payload.districts : []) as Obj[];
+      const rows = given.map((d) => {
+        const name = normalizeSeatDistrict(String(payload.election_type ?? ""), d.district) ?? String(d.district ?? "");
+        const cur = have.get(name);
+        return { district: name, claimed_seats: d.seats ?? null, db_seats: cur?.seats ?? null, ...(d.kind ? { kind: d.kind } : {}), new_district: !cur };
+      });
+      const givenNames = new Set(rows.map((r) => r.district));
+      return {
+        election_id: payload.election_id ?? null, election_type: payload.election_type ?? null, region: payload.region ?? null,
+        districts: rows,
+        not_in_submission: [...have.keys()].filter((k) => k && !givenNames.has(k)),
+        hint: "打開 source_urls 的選舉公告（應選名額表）或選舉公報，逐區核對：claimed_seats 是提交者照公告抄的名額，db_seats 是我們現有的（空白＝還沒有）。" +
+          "每一區都對得上公告、而且是這一屆這個縣市這種選舉的公告，才投 agree；任一區不符、公告上有的選舉區漏列（含原住民選舉區）、或名額看起來是拿候選人數或當選人數推的，投 disagree 並在 note 寫哪一區；" +
+          "not_in_submission 是我們有、這筆沒交的選舉區，公告上確實沒有的話不影響你的票。公告打不開或看不出是哪一份，投 unsure。",
+      };
+    }
     case "no_change":
       return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
     case "question_answer":
@@ -984,6 +1006,19 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     } else if (taskId) {
       const { data: t } = await supabase.from("contribution_tasks").select("id, task_type, title, description, target, source").eq("id", taskId).maybeSingle();
       data.task = t ? { task_id: taskId, ...pick(t, ["task_type", "title", "description", "target", "source"]) } : { task_id: taskId };
+    }
+  }
+  if (contributionType === "district_seats") {
+    const electionId = typeof payload.election_id === "number" ? payload.election_id : null;
+    const electionType = typeof payload.election_type === "string" ? payload.election_type : null;
+    const region = typeof payload.region === "string" ? payload.region : null;
+    if (electionId && electionType && region) {
+      // query-bounds: ok — 一個縣市一種選舉的選舉區（最多百來區）
+      const { data: ds } = await supabase.from("election_districts")
+        .select("sub_region, district_kind, seats, seats_basis, seats_source")
+        .eq("election_id", electionId).eq("election_type", electionType).eq("region", region)
+        .order("sub_region", { ascending: true }).limit(1000);
+      data.districts = (ds ?? []) as Obj[];
     }
   }
   if (contributionType === "correction") {

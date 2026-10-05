@@ -60,6 +60,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   correction: '資料更正',
   task_suggestion: '任務提議',
   roster_check: '名單清查',
+  district_seats: '應選名額',
   question_answer: '提問回答',
   removal: '建議移除',
   merge_politician: '人物合併',

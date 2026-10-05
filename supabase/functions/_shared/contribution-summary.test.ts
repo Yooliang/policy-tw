@@ -131,6 +131,7 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     question_answer: { question_id: "00000000-0000-4000-8000-000000000003", answer: "依市府預算書，這條路線的第一期經費已編列。" },
     removal: { target_table: "policies", target_id: "00000000-0000-4000-8000-000000000001", reason: "這是參選表態不是政見，也沒有任何來源。" },
     roster_check: { election_id: 2026, region: "彰化縣", election_type: "縣市議員", cec_count: 41, ours_count: 6, submitted: 35, note: "打開中選會候選人查詢，彰化縣縣市議員共 41 人，我們只有 6 人，另外 35 位已逐筆用 candidacy 補交。" },
+    district_seats: { election_id: 2026, election_type: "縣市議員", region: "彰化縣", districts: [{ district: "第01選舉區", seats: 6 }, { district: "第09選舉區", seats: 1, kind: "indigenous_plain" }] },
     merge_politician: { keep_id: "00000000-0000-4000-8000-000000000001", remove_id: "00000000-0000-4000-8000-000000000002", same_person: true, reason: "中選會歷屆參選同一筆：2022 朴子市長與 2026 縣長登記是同一位，出生年相同。" },
   };
 

@@ -12,8 +12,25 @@ Deno.test("票數預算排程：cron 打的 action 在 system-one 裡存在", ()
   assert(mig.includes("FUNCTION system_one_vote_budget_candidates"), "migration 要定義候選 RPC");
 });
 
-Deno.test("票數預算排程：候選型別清單 = VOTE_DIMENSIONS 有定義的型別", () => {
-  const m = mig.match(/contribution_type IN \(([\s\S]*?)\)/);
+// 候選型別清單看「最新一支重新定義 system_one_vote_budget_candidates 的 migration」：每加一種貢獻型別就要重定義一次
+// （20260925000001、#344 的 district_seats 都是），只讀最早那一支的話，新型別一加這裡就永遠紅、或永遠比對舊清單
+async function latestCandidatesMigration(): Promise<string> {
+  const dir = new URL("../../migrations/", import.meta.url);
+  const names: string[] = [];
+  for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
+  names.sort();
+  let latest = "";
+  for (const n of names) {
+    const text = await Deno.readTextFile(new URL(n, dir));
+    if (text.includes("FUNCTION system_one_vote_budget_candidates")) latest = text;
+  }
+  return latest;
+}
+
+Deno.test("票數預算排程：候選型別清單 = VOTE_DIMENSIONS 有定義的型別", async () => {
+  const latest = await latestCandidatesMigration();
+  const fn = latest.slice(latest.lastIndexOf("CREATE OR REPLACE FUNCTION system_one_vote_budget_candidates"));
+  const m = fn.match(/contribution_type IN \(([\s\S]*?)\)/);
   assert(m, "migration 要有 contribution_type IN (...)");
   const inSql = new Set([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]));
   const inTs = new Set(Object.keys(VOTE_DIMENSIONS).filter((k) => VOTE_DIMENSIONS[k].length > 0));

@@ -79,6 +79,7 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'correction', label: '資料更正' },
   { key: 'task_suggestion', label: '任務提議' },
   { key: 'roster_check', label: '名單清查' },
+  { key: 'district_seats', label: '應選名額' },
   { key: 'question_answer', label: '提問回答' },
   { key: 'removal', label: '建議移除' },
 ]
@@ -193,7 +194,7 @@ function detailOf(id: string): HistoryEntry | null {
 }
 
 /** 通過之後這筆「做了什麼」——移除不是上線（使用者 2026-09-21：「建議移除上面寫的『已上線』，到底是移除了還是沒移除？」） */
-const APPLIED_LABEL: Record<string, string> = { removal: '已移除', correction: '已更正', policy_progress: '已更新進度', merge_politician: '已合併', no_change: '已確認無異動' }
+const APPLIED_LABEL: Record<string, string> = { removal: '已移除', correction: '已更正', policy_progress: '已更新進度', merge_politician: '已合併', no_change: '已確認無異動', district_seats: '已補名額' }
 function statusLabel(it: FeedItem): string {
   if (it.status === 'applied') return APPLIED_LABEL[it.contribution_type] ?? '已上線'
   return STATUS_LABEL[it.status] ?? it.status
