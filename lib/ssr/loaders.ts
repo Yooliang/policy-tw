@@ -1,8 +1,9 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { supabasePublic } from '../supabase'
 import { getDataSnapshot, mapPolicy, mapPolitician, useSupabase, type DataSnapshot } from '../../composables/useSupabase'
-import type { Policy, Politician, RawPolicy, RawPolitician } from '../../types'
-import { collectRelayChainIds, type PageSnapshot } from '../ssg/page-data'
+import type { Lineage, Policy, Politician, RawLineage, RawPolicy, RawPolitician } from '../../types'
+import { collectRelayChainIds, lineagePeople, type PageSnapshot } from '../ssg/page-data'
+import { mapLineage } from '../lineage'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
 import { fetchAllPages } from '../fetch-all-pages'
@@ -147,12 +148,37 @@ export async function loadPolicyPage(id: string): Promise<PageSnapshot | null> {
   return { ...base, policies, politicians }
 }
 
+/**
+ * 政策脈絡頁（#349）：那一條脈絡（lineages_full）＋它的政見＋提到的人（政見提出者、參與者、前後任）。
+ * 跟 lib/ssg/page-data.ts 的 lineage 切片同一份：lineages 只放這一條、lineagesComplete=false。
+ */
+export async function loadLineagePage(id: string): Promise<PageSnapshot | null> {
+  const base = await loadBase()
+  // query-bounds: ok — 主鍵查一列
+  const { data, error } = await supabasePublic.from('lineages_full').select('*').eq('id', id).limit(1)
+  if (error) {
+    // id 不是 uuid 之類的請求錯誤＝找不到；其他照常丟出（Worker 會退回代理 web.app）
+    if (/invalid input syntax/i.test(error.message)) return null
+    throw new Error(`lineages_full: ${error.message}`)
+  }
+  const lineage = ((data ?? []) as RawLineage[]).map(mapLineage).find((l): l is Lineage => !!l)
+  if (!lineage) return null
+  // query-bounds: ok — 一條脈絡的政見最多幾十條
+  const { data: rows, error: policyError } = await supabasePublic.from('policies_with_logs').select('*').eq('lineage_id', lineage.id).order('id').limit(500)
+  if (policyError) throw new Error(`policies_with_logs by lineage: ${policyError.message}`)
+  const policies = ((rows ?? []) as RawPolicy[]).filter((r) => !r.removed_at).map(mapPolicy)
+  const people = lineagePeople(lineage, policies)
+  const politicians = await politiciansByIds(people)
+  return { ...base, policies, politicians, lineages: [lineage], lineagesComplete: false }
+}
+
 /** 路由 → 這一頁的快照；不是這一步負責的路由回 undefined（Worker 會退回代理 web.app） */
 export async function loadPageData(to: RouteLocationNormalized): Promise<PageSnapshot | null | undefined> {
   const param = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
   switch (to.name) {
     case 'politician': return await loadPoliticianPage(param(to.params.politicianId as string | string[]))
     case 'policy': return await loadPolicyPage(param(to.params.policyId as string | string[]))
+    case 'lineage': return await loadLineagePage(param(to.params.lineageId as string | string[]))
     default: return undefined
   }
 }

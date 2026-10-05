@@ -31,7 +31,7 @@ const activeElection = computed(() => getActiveElection())
           <h4 class="text-white font-semibold mb-4">政見</h4>
           <ul class="space-y-2 text-sm">
             <li><RouterLink to="/tracking" class="hover:text-blue-400 transition-colors">政見追蹤</RouterLink></li>
-            <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">市政接力</RouterLink></li>
+            <li><RouterLink to="/analysis" class="hover:text-blue-400 transition-colors">政策脈絡</RouterLink></li>
             <li><RouterLink to="/regional-data" class="hover:text-blue-400 transition-colors">縣市數據分佈</RouterLink></li>
           </ul>
         </div>

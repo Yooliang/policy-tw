@@ -36,6 +36,15 @@ export function isMissingFunction(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === 'PGRST202'
 }
 
+/**
+ * PostgREST 在 schema 裡找不到這張表或視圖（PGRST205；直連 Postgres 是 42P01）。同上：前端比 migration 早上線的那幾分鐘，
+ * 新視圖（例：政策脈絡的 lineages_full，#349）還不存在——當成「還沒有資料」，不要讓整頁變成載入失敗。
+ */
+export function isMissingRelation(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  return code === 'PGRST205' || code === '42P01'
+}
+
 export async function withTimeoutAndRetry<T>(
   label: string,
   // PromiseLike：supabase-js 的 query builder 是 thenable，不是真的 Promise

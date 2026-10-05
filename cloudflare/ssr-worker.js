@@ -2,7 +2,7 @@
  * 正見.tw 的 Worker（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
  *
  * 路由：
- *   /politician/:id、/policy/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
+ *   /politician/:id、/policy/:id、/lineage/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
  *   /election/:id/:縣市、/election/:id/:縣市/:鄉鎮 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；
  *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
@@ -63,7 +63,8 @@ function countRead(request, ctx) {
 
 const ORIGIN = 'https://policy-tw.web.app'
 const ORIGIN_HOST = 'policy-tw.web.app'
-const SSR_ROUTES = [/^\/politician\/[^/]+\/?$/, /^\/policy\/[^/]+\/?$/]
+// /lineage/:id：政策脈絡頁（#349，2026-10-06），跟政見頁一樣現場渲染、可被收錄（canonical 指正見.tw）
+const SSR_ROUTES = [/^\/politician\/[^/]+\/?$/, /^\/policy\/[^/]+\/?$/, /^\/lineage\/[^/]+\/?$/]
 /**
  * 協議端點打到網站網域上（2026-09-23：代理 kin／deepseek-flash 打 正見.tw/next?agent_name=…，拿到 404 後被前端導回首頁，
  * 它只看得到首頁內容、不知道錯在哪）。端點在 Supabase，不在網站上；這裡 307 轉過去（方法與 body 照留），回應本身也講清楚。
