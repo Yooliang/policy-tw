@@ -94,13 +94,17 @@ const selectedSubRegion = ref<string>(routeSubRegion.value ?? 'All')  // 鄉鎮�
 const selectedVillage = ref<string>('All')    // 村里
 
 // 載入這一屆、這一層的參選人（這一層＋下一層，見 lib/election-levels.ts）
+// 只有最後一次載入能把「載入中」關掉（2026-10-05）：舊網址 ?sub= 進來時先撈縣市、再撈鄉鎮，兩次重疊；
+// 先回來的縣市那次若把它關掉，頁內錨點會以為資料載完了、區塊還沒出現就放棄捲動
+let loadSeq = 0
 async function loadElectionData(id: number, region: string, subRegion: string) {
   if (!id) return
+  const seq = ++loadSeq
   electionLoading.value = true
   try {
     await loadPoliticiansByElection(id, region, subRegion)
   } finally {
-    electionLoading.value = false
+    if (seq === loadSeq) electionLoading.value = false
   }
   // 名錄只有縣市頁要，而且跟卡片分開撈（它要列到村里長，卡片只到下一層）。
   // 不 await 在上面那個 try 裡：名錄慢或失敗都不該讓卡片等它或跟著掛掉。
