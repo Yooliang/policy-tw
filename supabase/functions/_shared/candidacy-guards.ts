@@ -47,7 +47,7 @@ function isCecUrl(url: string): boolean {
 }
 
 /**
- * 登記截止後把人標成 registered／confirmed：附的來源至少要有一個是中選會（cec.gov.tw），
+ * 登記截止後把人標成 registered／qualified／confirmed：附的來源至少要有一個是中選會（cec.gov.tw），
  * 或網址看得出日期、而且是截止日當天或之後的報導。沒有截止日的屆別不檢查。
  */
 export function registrationEvidenceOk(urls: readonly string[], electionId: number | null, today: string): boolean {
@@ -57,4 +57,5 @@ export function registrationEvidenceOk(urls: readonly string[], electionId: numb
   return urls.some((u) => isCecUrl(u) || ((dateInUrl(u) ?? "") >= deadline));
 }
 
-export const REGISTERED_STATUSES = new Set(["registered", "confirmed"]);
+// qualified（已審定，名單公告後在名單上）同樣要附得出名冊——#345 後續把公告後的 confirmed 收窄成 qualified，這裡一起擋
+export const REGISTERED_STATUSES = new Set(["registered", "qualified", "confirmed"]);

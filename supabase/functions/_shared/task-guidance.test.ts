@@ -269,7 +269,8 @@ Deno.test("當選缺紀錄：骨架給姓名、當選、中選會名單上的選
   assertEquals(p.name, "伍麗華");
   assertEquals("politician_id" in p, false);
   assertEquals(p.election_result, "elected");
-  assertEquals(p.candidate_status, "confirmed");
+  // 已投票屆別中選會名單上的人：名單公告後一律 qualified（#345 後續，confirmed 只表示表態參選）
+  assertEquals(p.candidate_status, "qualified");
   assertEquals(p.electoral_district, "山地原住民");
   const town = buildReportTemplate("election_result_missing", "candidacy", {
     name: "丁學忠", region: "雲林縣", sub_region: "虎尾鎮", election_id: 2022, election_type: "鄉鎮市長", record_missing: true,

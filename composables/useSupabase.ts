@@ -7,7 +7,7 @@ import type {
   RegionStats, ElectoralDistrictArea, ElectionTypeTableRow, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
-  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin,
+  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin, PoliticianTerm,
 } from '../types'
 import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
@@ -210,6 +210,9 @@ export function mapPolitician(row: RawPolitician): Politician {
     candNo: e.candNo || undefined,
     electionResult: e.electionResult || undefined,
     sourceNote: e.sourceNote || undefined,
+    candidacyStatus: e.candidacyStatus || undefined,
+    // false 是有意義的值（表態不參選），不能用 || 吃掉
+    withdrawnAfterFiling: typeof e.withdrawnAfterFiling === 'boolean' ? e.withdrawnAfterFiling : undefined,
   }));
 
   // Get candidateStatus from the first election (for display purposes)
@@ -262,6 +265,7 @@ export function withElectionData(p: Politician, electionId: number): Politician 
   return {
     ...p,
     candidateStatus: currentElection.candidateStatus,
+    withdrawnAfterFiling: currentElection.withdrawnAfterFiling,
     candNo: currentElection.candNo,
     sourceNote: currentElection.sourceNote,
     position: currentElection.position || p.position,
@@ -958,6 +962,37 @@ export function useSupabase() {
     }
   }
 
+  /**
+   * 這個人已卸任的任期（任期表 politician_offices，#345）。人物頁「卸任的公職」用，瀏覽器端按需載入、不進預渲染。
+   * 拿不到就回空陣列：這一塊是補充資訊，不值得讓整頁顯示載入失敗。
+   */
+  async function loadPastTerms(politicianId: string): Promise<PoliticianTerm[]> {
+    try {
+      const { data } = await withTimeoutAndRetry(`past terms ${politicianId}`, (signal) =>
+        supabase.from('politician_offices')
+          .select('id, election_id, election_type, start_date, end_date, end_reason, end_basis, source_url, regions(region, sub_region, village)')
+          .eq('politician_id', politicianId).not('end_date', 'is', null)
+          .order('start_date', { ascending: false }).limit(50)
+          .abortSignal(signal).throwOnError())
+      return ((data ?? []) as unknown as Array<Record<string, unknown> & { regions?: { region?: string | null; sub_region?: string | null; village?: string | null } | null }>).map((r) => ({
+        id: Number(r.id),
+        electionId: Number(r.election_id),
+        electionType: String(r.election_type ?? ''),
+        region: r.regions?.region || undefined,
+        subRegion: r.regions?.sub_region || undefined,
+        village: r.regions?.village || undefined,
+        startDate: String(r.start_date ?? ''),
+        endDate: r.end_date ? String(r.end_date) : undefined,
+        endReason: r.end_reason ? String(r.end_reason) : undefined,
+        endBasis: (r.end_basis as PoliticianTerm['endBasis']) || undefined,
+        sourceUrl: r.source_url ? String(r.source_url) : undefined,
+      }))
+    } catch (err) {
+      console.warn(`[loadPastTerms] ${politicianId}：`, err)
+      return []
+    }
+  }
+
   // 根據 ID 載入單一 policy（用於直接訪問政見詳情頁面）
   async function loadPolicyById(policyId: string): Promise<Policy | null> {
     const existing = policies.value.find(p => p.id === policyId)
@@ -1083,5 +1118,6 @@ export function useSupabase() {
     getPoliciesByCategory,
     loadPoliticianById,
     loadPolicyById,
+    loadPastTerms,
   }
 }

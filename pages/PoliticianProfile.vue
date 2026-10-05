@@ -9,7 +9,7 @@ import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
 import { PolicyStatus } from '../types'
-import type { CandidateStatus, Policy } from '../types'
+import type { CandidateStatus, Policy, PoliticianTerm } from '../types'
 import { policySortDate } from '../lib/policy-date'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -26,13 +26,13 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
-import { candidacyBadge, officeTitles } from '../lib/politician-office'
+import { candidacyBadge, officeTitles, pastTermItems, withdrawalText } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, getActiveElection, ensurePolicies } = useSupabase()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, getActiveElection, ensurePolicies, loadPastTerms } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
@@ -106,27 +106,27 @@ function resultLabel(result?: 'elected' | 'not_elected'): string | null {
   return null
 }
 
-function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected'): string | null {
+function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected', withdrawnAfterFiling?: boolean): string | null {
   const byResult = resultLabel(result)
   if (byResult) return byResult
   const isPast = electionId ? isElectionPast(electionId) : false
 
-  // For past elections, only show elected/defeated（未登記參選是歷史事實，一併保留）
+  // For past elections, only show elected/defeated（不參選是歷史事實，一併保留；說法看退選前有沒有登記過，#345 後續）
   if (isPast) {
     switch (status) {
       case 'elected': return '當選'
       case 'defeated': return '落選'
-      case 'not_running': return '未登記參選'
+      case 'not_running': return withdrawalText(withdrawnAfterFiling)
       default: return null // Don't show "確認參選" for past elections
     }
   }
 
   // For future elections, show pre-election status
   switch (status) {
-    case 'confirmed': return '確認參選'
+    case 'confirmed': return '表態參選'
     case 'registered': return '已登記'
     case 'qualified': return '已審定'
-    case 'not_running': return '未登記參選'
+    case 'not_running': return withdrawalText(withdrawnAfterFiling)
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞參選'
     case 'elected': return '當選'
@@ -174,14 +174,27 @@ async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
 onMounted(async () => {
   // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
   ensurePolicies()
+  refreshPastTerms(String(route.params.politicianId))
   await ensurePoliticianLoaded(String(route.params.politicianId))
 })
+
+// 卸任的公職（任期表 politician_offices，#345 後續）：瀏覽器端按需載入；轉任的卸任日是推定的，畫面標「推定」
+const pastTerms = ref<PoliticianTerm[]>([])
+const pastTermList = computed(() => pastTermItems(pastTerms.value))
+async function refreshPastTerms(politicianId: string): Promise<void> {
+  pastTerms.value = []
+  if (!politicianId) return
+  const terms = await loadPastTerms(politicianId)
+  // 載入期間換了人就丟掉，免得 A 的任期掛到 B 頁上
+  if (String(route.params.politicianId) === politicianId) pastTerms.value = terms
+}
 
 // 站內從一位政治人物點到另一位，走的是同一個元件實例，onMounted 不會再跑。
 // 沒有這個 watch，只要對方還沒在全域 state 裡，頁面就直接顯示「找不到該政治人物」。
 // （直接開網址不受影響，那是預渲染的頁面。）
 watch(() => route.params.politicianId, (id) => {
   if (id) ensurePoliticianLoaded(String(id))
+  if (id) refreshPastTerms(String(id))
 })
 
 
@@ -610,8 +623,8 @@ usePageHead({
                         <Vote :size="14" />
                         <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}<span v-if="elec.candNo" class="ml-1 text-slate-500">（{{ elec.candNo }}號）</span></span>
                       </div>
-                      <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult)" class="text-xs">
-                        {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult) }}
+                      <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult, elec.withdrawnAfterFiling)" class="text-xs">
+                        {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult, elec.withdrawnAfterFiling) }}
                       </span>
                     </div>
                   </div>
@@ -622,6 +635,24 @@ usePageHead({
                   <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">現任職稱</h4>
                   <p v-for="title in titles" :key="title" class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ title }}</p>
                   <p v-if="otherCurrentPosition" class="text-navy-900 font-medium flex items-center gap-2"><Briefcase :size="16" class="text-slate-400" />{{ otherCurrentPosition }}</p>
+                </div>
+
+                <!-- 卸任的公職：任期表（#345 後續）。轉任的卸任日是推定的（新任期就任前一天），標「推定」；有出處的附連結 -->
+                <div v-if="pastTermList.length" class="pt-4 border-t border-slate-100">
+                  <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">卸任的公職</h4>
+                  <ul class="space-y-2">
+                    <li v-for="t in pastTermList" :key="t.key" class="text-sm text-slate-600">
+                      <span class="font-medium text-navy-900">{{ t.title }}</span>
+                      <span class="ml-1">{{ t.period }}</span>
+                      <span v-if="t.reason" class="ml-1 text-slate-500">（{{ t.reason }}）</span>
+                      <span
+                        v-if="t.inferred"
+                        class="ml-1 text-[10px] px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 font-bold"
+                        title="卸任日是推定的：我國不得同時擔任兩個民選公職，記成新任期就任的前一天；查得到實際卸任日可以附出處交更正"
+                      >推定</span>
+                      <a v-if="t.sourceUrl" :href="t.sourceUrl" target="_blank" rel="noopener noreferrer" class="ml-1 text-blue-600 hover:underline">出處</a>
+                    </li>
+                  </ul>
                 </div>
 
                 <div class="pt-4 border-t border-slate-100">

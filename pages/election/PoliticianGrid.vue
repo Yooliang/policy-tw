@@ -6,7 +6,7 @@ import { PolicyStatus, type Politician, type CandidateStatus } from '../../types
 import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check, LayoutGrid, List } from 'lucide-vue-next'
 import Avatar from '../../components/Avatar.vue'
 import { getAvatarUrl } from '../../composables/useAvatar'
-import { officeTitles } from '../../lib/politician-office'
+import { officeTitles, withdrawalText } from '../../lib/politician-office'
 
 // 根元素的 id（頁內錨點，人物頁麵包屑連到這裡）由呼叫端當 attribute 傳進來；scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住
 const props = defineProps<{
@@ -71,12 +71,12 @@ const getPledgeCount = (politicianId: string | number) =>
   ).length
 
 // 參選狀態顯示（選舉前中後三階段）
-const candidateStatusLabel = (status?: CandidateStatus) => {
+const candidateStatusLabel = (status?: CandidateStatus, withdrawnAfterFiling?: boolean) => {
   switch (status) {
     case 'confirmed': return null  // 已確認參選不需特別標註
     case 'registered': return '已登記'
     case 'qualified': return '已審定'
-    case 'not_running': return '未登記'  // 正常不會進到 grid（ElectionPage 已過濾），保底顯示
+    case 'not_running': return withdrawalText(withdrawnAfterFiling)  // 正常不會進到 grid（ElectionPage 已過濾），保底顯示；說法看退選前有沒有登記過（#345 後續）
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞'
     case 'elected': return '當選'
@@ -230,10 +230,10 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
                   title="已登記"
                 ><Check :size="11" :stroke-width="3" /></span>
                 <span
-                  v-else-if="candidateStatusLabel(politician.candidateStatus)"
+                  v-else-if="candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling)"
                   :class="`text-[10px] px-1.5 py-0.5 rounded border font-bold ${candidateStatusColor(politician.candidateStatus)}`"
                 >
-                  {{ candidateStatusLabel(politician.candidateStatus) }}
+                  {{ candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling) }}
                 </span>
               </div>
               <div class="flex flex-col">

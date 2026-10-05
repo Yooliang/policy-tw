@@ -11,7 +11,7 @@
  * 兩個都可能是空的，空的就不要顯示——不要拿另一個去充當。
  */
 import { participationLabel } from './participation-label'
-import type { CandidateStatus, PoliticianElectionData, PoliticianOffice } from '../types'
+import type { CandidateStatus, PoliticianElectionData, PoliticianOffice, PoliticianTerm } from '../types'
 
 /**
  * 職位位階，數字小的排前面。順序照 types.ts 的 ElectionType，不是自己排的
@@ -49,12 +49,25 @@ export function officeTitles(offices: PoliticianOffice[] | undefined): string[] 
 }
 
 /**
+ * 退選／不參選怎麼說（#345 後續，協調者 10-06 裁定）：退選之前登記過的是「登記後退選」，
+ * 沒登記過的是「表態不參選」，資料看不出來的就只說「不參選」——不替人多講一件沒查證的事。
+ * 依據是 politician_elections.withdrawn_after_filing（由同步觸發器照退選前的狀態寫、舊資料照查核履歷回填）。
+ */
+export function withdrawalText(withdrawnAfterFiling: boolean | null | undefined): string {
+  if (withdrawnAfterFiling === true) return '登記後退選'
+  if (withdrawnAfterFiling === false) return '表態不參選'
+  return '不參選'
+}
+
+/**
  * 參選狀況的狀態文字。投完票之後結果就是事實，優先於登記階段的狀態。
  * 選前那幾種照 politician_elections.candidate_status（協議的詞）。
+ * confirmed 只表示「表態參選」（#345 後續：正式名單公告後在名單上的是 qualified）。
  */
 export function candidacyStatusText(
   status: CandidateStatus | undefined,
   result: 'elected' | 'not_elected' | undefined,
+  withdrawnAfterFiling?: boolean | null,
 ): string | undefined {
   if (result === 'elected') return '當選'
   if (result === 'not_elected') return '落選'
@@ -63,16 +76,16 @@ export function candidacyStatusText(
     case 'defeated': return '落選'
     case 'qualified': return '已審定'
     case 'registered': return '已登記'
-    case 'confirmed': return '確認參選'
+    case 'confirmed': return '表態參選'
     case 'likely': return '可能參選'
     case 'rumored': return '傳聞參選'
-    case 'not_running': return '未參選'
+    case 'not_running': return withdrawalText(withdrawnAfterFiling)
     default: return undefined
   }
 }
 
 /**
- * 這一屆的參選狀況，例如「2026 台南市長・已登記」「2026 台南市長・未參選」。
+ * 這一屆的參選狀況，例如「2026 台南市長・已登記」「2026 台南市長・表態不參選」。
  * 該屆沒有參選紀錄、或紀錄裡看不出狀態就回 undefined——不顯示比瞎猜好。
  */
 export function candidacyBadge(
@@ -82,11 +95,48 @@ export function candidacyBadge(
   if (!elections || electionId == null) return undefined
   const record = elections.find((e) => e.electionId === electionId)
   if (!record) return undefined
-  const status = candidacyStatusText(record.candidateStatus, record.electionResult)
+  const status = candidacyStatusText(record.candidateStatus, record.electionResult, record.withdrawnAfterFiling)
   if (!status) return undefined
   const what = participationLabel(record) || record.position || ''
   if (!what) return undefined
   // running＝這一屆真的有在選（未參選、落選的不算）；標題寫「…候選人」時要看這個，別把沒選的人寫成候選人
   const running = record.candidateStatus !== 'not_running' && record.electionResult !== 'not_elected'
   return { label: `${electionId} ${what}・${status}`, what: `${electionId} ${what}`, status, running }
+}
+
+const END_REASON_TEXT: Record<string, string> = {
+  term_expired: '任期屆滿',
+  took_other_office: '轉任',
+  resigned: '辭職',
+  recalled: '罷免',
+  deceased: '死亡',
+  removed: '解職',
+  other: '其他',
+}
+
+/**
+ * 人物頁「卸任的公職」的每一行（任期表 politician_offices，#345 後續）：職稱、起訖、卸任原因，
+ * 卸任日是推定的（轉任別的公職，記新任期就任前一天）要標「推定」——那天不是查到的，是照
+ * 「我國不得同時擔任兩個民選公職」推出來的，有出處可以交更正改掉。最近卸任的排前面。
+ */
+export function pastTermItems(terms: PoliticianTerm[] | undefined): Array<{
+  key: number
+  title: string
+  period: string
+  reason?: string
+  inferred: boolean
+  sourceUrl?: string
+}> {
+  if (!terms) return []
+  return terms
+    .filter((t) => !!t.endDate)
+    .sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? '') || b.startDate.localeCompare(a.startDate))
+    .map((t) => ({
+      key: t.id,
+      title: participationLabel(t) || t.electionType,
+      period: `${t.startDate}～${t.endDate}`,
+      reason: t.endReason ? END_REASON_TEXT[t.endReason] ?? undefined : undefined,
+      inferred: t.endBasis === 'inferred',
+      sourceUrl: t.endBasis === 'source' ? t.sourceUrl : undefined,
+    }))
 }

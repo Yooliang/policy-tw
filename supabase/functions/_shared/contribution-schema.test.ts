@@ -203,6 +203,17 @@ Deno.test("candidacy：election_result 選填但要對；得票數、得票率�
   assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.election_result"]);
 });
 
+// 2026-10-06（#345 後續）：轉任的卸任日是推定的，允許附出處更正——只開放卸任日與原因，id 是整數
+Deno.test("correction 任期：只收 end_date／end_reason，id 是整數，值的格式要對", () => {
+  const req = (target_id: string, changes: unknown[]) => validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://www.ly.gov.tw/x"], payload: { target_table: "politician_offices", target_id, reason: "王小明 2024-01-15 辭去議員，議會公告", changes } });
+  assertEquals(req("5", [{ field: "end_date", current_value: "2024-01-31", correct_value: "2024-01-15" }]).errors, []);
+  assertEquals(req("5", [{ field: "end_date", correct_value: "2024-01-15" }, { field: "end_reason", correct_value: "resigned" }]).errors, []);
+  assertEquals(req("3d0bc501-7d9c-41a1-a230-badfc6769c98", [{ field: "end_date", correct_value: "2024-01-15" }]).errors.some((e) => e.path === "payload.target_id"), true);
+  assertEquals(req("5", [{ field: "end_date", correct_value: "2024/1/15" }]).errors.length, 1);
+  assertEquals(req("5", [{ field: "end_reason", correct_value: "quit" }]).errors.length, 1);
+  assertEquals(req("5", [{ field: "start_date", correct_value: "2022-12-25" }]).errors.length, 1, "就任日、職位等由參選紀錄同步，不開放更正");
+});
+
 // 2026-10-06（#345，協議 1.51.0）：不收傳聞——correction 不能把參選狀態改成 rumored／likely；當選落選走 candidacy 的 election_result
 Deno.test("correction 改參選狀態只收 confirmed／registered／qualified／not_running", () => {
   const req = (correct_value: unknown) => validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://db.cec.gov.tw/x"], payload: { target_table: "politician_elections", target_id: "34957", reason: "中選會名冊上他 2026 沒有登記這一種選舉", changes: [{ field: "candidate_status", current_value: "registered", correct_value }] } });
