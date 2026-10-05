@@ -1,5 +1,5 @@
 /**
- * 縣市議員選區錯亂的流程修正（2026-10-05，協議 1.47.0，migration 20261005004100）。
+ * 縣市議員選區錯亂的流程修正（2026-10-05，協議 1.48.0，migration 20261005004300）。
  *
  * 10-05 線上：2026 縣市議員已登記 105 筆沒有選區，103 筆是名單清查照中選會登記彙總表交的——名冊上有選區、代理沒抄；
  * 畫面再借人物自己的地區（里長那一筆的「大雅區 上雅里」、立委那一筆的「臺中市第03選區」）冒出假選區。
@@ -26,7 +26,7 @@ import { TASK_TYPES } from "./contribution-schema.ts";
 import { buildReportTemplate } from "./task-guidance.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
-const MIGRATION = "20261005004100_council_district_flow.sql";
+const MIGRATION = "20261005004300_council_district_flow.sql";
 const migration = await Deno.readTextFile(new URL(MIGRATION, MIGRATIONS));
 const municipal = await Deno.readTextFile(new URL("./fixtures/cec-roster-2026-municipal-council.txt", import.meta.url));
 const county = await Deno.readTextFile(new URL("./fixtures/cec-roster-2026-county-council.txt", import.meta.url));

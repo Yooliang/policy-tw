@@ -305,7 +305,7 @@ function buildPayload(
       // 缺縣市時不預填 target.region——那是人物表的縣市，照抄等於沒查證。
       const missing = Array.isArray(t.missing) ? t.missing as unknown[] : [];
       const legislator = t.election_type === "立法委員";
-      // 縣市議員有在選的一律要帶選區（2026-10-05，協議 1.47.0：沒帶交件就退回）——名單清查交的也一樣
+      // 縣市議員有在選的一律要帶選區（2026-10-05，協議 1.48.0：沒帶交件就退回）——名單清查交的也一樣
       const councilDistrict = t.election_type === "縣市議員" && !["not_running", "withdrawn"].includes(String(t.candidate_status ?? ""));
       return {
         // 中選會當選、我們沒有紀錄的（target.record_missing）：人物可能還不存在，先給姓名

@@ -10,7 +10,7 @@
  * 鄉鎮層級五種（鄉鎮市長、代表、村里長、原住民區長與區代表）照舊可以退回人物的鄉鎮村里：
  * 那幾種的地區本來就在鄉鎮村里，參選紀錄沒有地區時退回人物的是既有行為（township_gap 任務補上之後就不再退）。
  *
- * 視圖 politicians_with_elections 的 elections[].subRegion／village 也照同一條規則（migration 20261005004100）；
+ * 視圖 politicians_with_elections 的 elections[].subRegion／village 也照同一條規則（migration 20261005004300）；
  * 這裡再守一次，是因為前端還會在「這一屆沒給」時拿人物層的值補（withElectionData、withCurrentElectionData）。
  */
 

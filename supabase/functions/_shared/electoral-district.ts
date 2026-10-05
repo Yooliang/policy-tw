@@ -157,7 +157,7 @@ export function isCouncilAboriginalDistrict(region: string, district: string): b
  * 花蓮縣第 05～10、新竹縣第 11～14、嘉義縣第 07、苗栗縣第 07～08 選舉區在 regions 表沒有列，
  * 代理交了正確的選區，落庫也對不到、只能記到縣市；台中市第 17 選舉區更是交件就被當成「名冊沒有」擋掉。
  * 名冊是投票前就公告的官方文件，比逐縣市拼湊新聞可靠，所以 2026 直接以它為準。
- * regions 表要有的那幾列由 migration 20261005004100 依這份補齊（council-district-flow.test.ts 核對兩邊一致）。
+ * regions 表要有的那幾列由 migration 20261005004300 依這份補齊（council-district-flow.test.ts 核對兩邊一致）。
  */
 export const COUNCIL_DISTRICT_COUNT_2026: Readonly<Record<string, number>> = {
   台北市: 8,

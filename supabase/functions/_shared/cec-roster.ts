@@ -107,7 +107,7 @@ export function checkBatch(rows: readonly RosterRow[], batch: readonly BatchItem
       failed.push({ id: b.id, name: b.name, reason: `名冊上的政黨是 ${inRegion.map((h) => h.party).join("／")}，不是 ${b.party}` });
       continue;
     }
-    // 選舉區（2026-10-05）：交件有給、名冊那一列也看得出選區時才比；縣市議員交件 1.47.0 起必填選區，
+    // 選舉區（2026-10-05）：交件有給、名冊那一列也看得出選區時才比；縣市議員交件 1.48.0 起必填選區，
     // 「名冊吻合一票就過」不核選區的話，抄錯的選區也會一票過關
     const given = b.district ? normalizeDistrict(b.district)?.district ?? b.district : null;
     const known = inRegion.filter((h) => h.district);

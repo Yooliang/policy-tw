@@ -331,7 +331,7 @@ export async function handleContribute(
     }
   }
 
-  // 縣市議員要帶選舉區才收（2026-10-05，協議 1.47.0，見 council-district-guard.ts）：
+  // 縣市議員要帶選舉區才收（2026-10-05，協議 1.48.0，見 council-district-guard.ts）：
   // 2026 已登記的議員有 105 筆沒有選區，103 筆是照登記名冊交的——名冊上有選區，只是沒抄。不算被拒。
   const districtMissing = councilDistrictProblems(validation.items);
   if (districtMissing.length > 0) {

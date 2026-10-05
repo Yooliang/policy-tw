@@ -27,7 +27,7 @@ function between(text: string, start: string, end: string): string {
 }
 
 /**
- * 最後一支（照檔名排序）定義這個函式的 migration 全文——線上跑的是它（2026-10-05：20261005004100 重定義了
+ * 最後一支（照檔名排序）定義這個函式的 migration 全文——線上跑的是它（2026-10-05：20261005004300 重定義了
  * contribution_auto_tasks_region_gap，守門要看新的那一版，不能一直盯著 20261005000400）
  */
 async function latestSqlDefining(fnName: string): Promise<string> {
