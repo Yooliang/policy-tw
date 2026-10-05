@@ -139,7 +139,7 @@ Deno.test("schema 的必填欄位，payload 形狀不可以漏講", async () => 
   const required = await requiredFieldsFromSchema();
   // 這些是「條件式必填」或「其一即可」，不強制每一個都寫進精簡版
   const OPTIONAL_IN_SHAPE: Record<string, string[]> = {
-    candidacy: ["election_result", "votes_received", "vote_percentage", "cand_no", "position", "name"],
+    candidacy: ["election_result", "cand_no", "position", "name"],
     policy: ["name"],
     politician: ["avatar_url"],
     adjudication: ["resolved_politician_id"],

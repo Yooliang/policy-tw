@@ -314,9 +314,10 @@ Deno.test("最新的統計函式：排除名單跟 TS 一致、有貢獻者總�
 });
 
 // 2026-09-19：張嘉哲 2022 南投市長的選舉結果答案在動態牆上顯示成「參選狀態改為確認參選」，看不出補了什麼
-Deno.test("candidacy 帶選舉結果：摘要講結果不講狀態", () => {
+// 2026-10-06（#345）：得票數、得票率不收，摘要也不帶票數
+Deno.test("candidacy 帶選舉結果：摘要講結果不講狀態、不帶票數", () => {
   const r = summarizeContribution({ contribution_type: "candidacy", payload: { name: "張嘉哲", election_id: 2022, region: "南投縣", election_type: "鄉鎮市長", candidate_status: "confirmed", election_result: "elected", votes_received: 29150, vote_percentage: 53.7 } });
-  assertEquals(r.summary, "補 張嘉哲 2022 南投縣鄉鎮市長選舉結果：當選（29,150 票，53.7%）");
+  assertEquals(r.summary, "補 張嘉哲 2022 南投縣鄉鎮市長選舉結果：當選");
 });
 
 Deno.test("merge_politician 摘要：合併或不同人", () => {

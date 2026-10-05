@@ -24,6 +24,7 @@ import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } fro
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
+import { voteFieldsNotice } from "./candidacy-result.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -720,6 +721,13 @@ export async function handleContribute(
         ? (() => {
           const p = (item.payload && typeof item.payload === "object" ? item.payload : {}) as Record<string, unknown>;
           const notice = policyLikenessNotice(p.title, p.description);
+          return notice ? { warning: notice } : {};
+        })()
+        : {}),
+      // 得票數、得票率不收（#345）：照收這筆，只講一聲那兩欄略過
+      ...(item.contribution_type === "candidacy"
+        ? (() => {
+          const notice = voteFieldsNotice((item.payload && typeof item.payload === "object" ? item.payload : {}) as Record<string, unknown>);
           return notice ? { warning: notice } : {};
         })()
         : {}),

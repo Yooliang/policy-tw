@@ -52,6 +52,13 @@ export { POLICY_CATEGORIES } from "./category-map.ts";
 import { categoryErrorMessage, isCanonicalCategory, POLICY_CATEGORIES } from "./category-map.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
+/**
+ * correction 改參選紀錄的 candidate_status 只能改成這四種（#345，協議 1.51.0）。
+ * 不收傳聞：rumored（傳聞參選）、likely（可能參選）改不進去；當選落選是選舉結果，用 candidacy 帶 election_result 補；
+ * 退選落庫本來就是 not_running（apply 端把 withdrawn 落成 not_running），correction 直接寫，所以只收 not_running。
+ * 改之前資料庫 CHECK 只擋拼錯，代理交 rumored／elected 都進得去。
+ */
+export const CORRECTION_CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "not_running"] as const;
 export { ELECTION_RESULTS } from "./candidacy-result.ts";
 import { ELECTION_RESULTS as ELECTION_RESULTS_LIST } from "./candidacy-result.ts";
 export const CORRECTION_TABLES = ["politicians", "politician_elections", "policies"] as const;
@@ -230,10 +237,9 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       // 是 contribute-handler.ts 接資料庫後才做的事（normalizeCandidacyDistrictField／checkElectoralDistrict）
       if (p.electoral_district !== undefined && !isStr(p.electoral_district, 1, 100)) push("payload.electoral_district", "要是非空字串");
       if (p.cand_no !== undefined && !(isInt(p.cand_no) && p.cand_no > 0)) push("payload.cand_no", "號次要是正整數");
-      // election_result_missing 任務要補的三欄：選填，但給了就要對（2026-09-19 前這三欄沒驗也沒寫進去）
+      // election_result_missing 任務要補的結果：選填，但給了就要對（2026-09-19 前沒驗也沒寫進去）
       if (p.election_result !== undefined && !oneOf(ELECTION_RESULTS_LIST, p.election_result)) push("payload.election_result", "election_result 要是 elected／not_elected 之一");
-      if (p.votes_received !== undefined && !(isInt(p.votes_received) && p.votes_received >= 0)) push("payload.votes_received", "得票數要是非負整數");
-      if (p.vote_percentage !== undefined && !(typeof p.vote_percentage === "number" && p.vote_percentage >= 0 && p.vote_percentage <= 100)) push("payload.vote_percentage", "得票率要是 0～100 的數字");
+      // 得票數、得票率不收（#345）：不寫進去，也就不驗格式——為一個會被略過的欄位把整筆擋下來沒道理；回覆會講一聲（voteFieldsNotice）
       break;
     }
     case "policy": {
@@ -417,6 +423,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         if (empty && !clearable) push(`${at}.correct_value`, "correct_value 必填");
         else if (empty) { /* 清空提出日期：合法 */ }
         else if (table === "politicians" && c.field === "current_position" && isElectionName(c.correct_value)) push(`${at}.correct_value`, CURRENT_POSITION_NOT_ELECTION);
+        else if (table === "politician_elections" && c.field === "candidate_status" && !oneOf(CORRECTION_CANDIDATE_STATUSES, c.correct_value)) push(`${at}.correct_value`, `參選狀態只能改成 ${CORRECTION_CANDIDATE_STATUSES.join("／")} 之一：不收傳聞（rumored、likely），當選落選用 candidacy 帶 election_result，退選填 not_running（協議 1.51.0）`);
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
         else if (table === "policies" && c.field === "election_id" && !(isInt(c.correct_value) && KNOWN_ELECTION_IDS.includes(c.correct_value))) push(`${at}.correct_value`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);

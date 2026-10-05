@@ -134,8 +134,8 @@ Deno.serve(async (req) => {
         }
         // 既有人物缺出生年時由 ensurePolitician 統一補（欄位是 birth_year，舊碼寫成 birthYear 一直沒生效）
 
+        // 得票數不收（#345，2026-10-06）：站上不顯示票數，votes_received 第二階段刪欄，這裡不再寫
         const verifiedFields = {
-          votes_received: candidate.votes,
           election_result: candidate.elected ? "elected" : "not_elected",
           verified: true,
           verified_at: new Date().toISOString(),

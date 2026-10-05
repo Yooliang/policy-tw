@@ -107,7 +107,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   election_result_missing:
     "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
-    "到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected，查得到就一起補得票數與得票率。" +
+    "到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected（得票數、得票率不收，不用查）。" +
     "**這筆是承諾追蹤的前提**——不知道有沒有當選，就沒辦法問承諾兌現了沒有。查不到官方結果不要猜，用 no_change。",
 
   policy_election_missing:
@@ -233,7 +233,7 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     `education_level（要是這幾個之一：${["高中(職)以下","高中(職)","專科","大學","碩士","博士","其他"].join("／")}）／bio。` +
     "查不到的欄位不要填。",
   candidacy:
-    "payload：politician_id 或 name、election_id（選舉年份）、election_type、region、candidate_status。已投票的屆別可加 election_result、votes_received、vote_percentage、cand_no、position。" +
+    "payload：politician_id 或 name、election_id（選舉年份）、election_type、region、candidate_status。已投票的屆別可加 election_result、cand_no、position（得票數、得票率不收）。" +
     "election_type 是縣市議員的話可加 electoral_district（第NN選舉區；伺服器會自動統一寫法，沒填也會從 position 抽）。",
   policy_progress:
     "payload：policy_id、status、progress（進度說明）、date、note。",

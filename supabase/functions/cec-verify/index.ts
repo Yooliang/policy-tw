@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { attachTickets, CEC_DATA_URL, CEC_QUERY_URL, type CecCandidacy, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { CEC_QUERY_URL, type CecCandidacy, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
 import { CEC_VERIFIABLE_TYPES, decideByCec, scanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
 
@@ -84,17 +84,8 @@ Deno.serve(async (req) => {
       const name = typeof payload.name === "string" ? payload.name.trim() : "";
       if (!name) { skipped++; results.push({ contribution_id: row.id, action: "skip", reason: "payload 沒有姓名" }); continue; }
 
-      let list = await lookup(name, cache);
-      // candidacy 要比得票數／得票率時才多查一次 data 端點（多一次外部請求，只在必要時）
-      const electionId = typeof payload.election_id === "number" ? payload.election_id : null;
-      const needsTickets = row.contribution_type === "candidacy" && (payload.votes_received !== undefined || payload.vote_percentage !== undefined);
-      if (needsTickets && electionId) {
-        const one = list.find((c) => c.election_id === electionId);
-        if (one?.theme_id && one?.cand_id) {
-          const tickets = await cecFetch(`${CEC_DATA_URL}?theme_id=${one.theme_id}&cand_id=${one.cand_id}`);
-          if (tickets) list = list.map((c) => (c === one ? attachTickets(c, tickets) : c));
-        }
-      }
+      // 得票數、得票率不收（#345，2026-10-06）：不比票數，也就不必多查一次中選會的得票端點
+      const list = await lookup(name, cache);
 
       // 判斷要用「我們記的縣市」排除同名同姓（見 _shared/cec-verify.ts 的 sameRegion）：
       // 先用 payload.politician_id，沒有就用姓名找；找不到人就只能靠 payload.region
