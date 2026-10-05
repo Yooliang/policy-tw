@@ -15,7 +15,7 @@ declare module 'vue-router' {
  * 路由表。router 實例由 vite-ssg 建立（客戶端 web history／建置時 memory history），
  * 這裡只提供 routes 與守衛。`name` 供 SSG 資料切片與 sitemap 判別，頁面程式不依賴它。
  */
-// 兩條選舉路由共用同一個元件：換縣市時是同一個實例（KeepAlive 也認得），篩選狀態與捲動位置不會重來
+// 三條選舉路由（全台／縣市／鄉鎮）共用同一個元件：換縣市、換鄉鎮時是同一個實例（KeepAlive 也認得），篩選狀態與捲動位置不會重來
 const ElectionPage = () => import('../pages/ElectionPage.vue')
 
 export const routes: RouteRecordRaw[] = [
@@ -53,6 +53,12 @@ export const routes: RouteRecordRaw[] = [
     // 縣市頁（2026-09-30）：同一個元件、預選該縣市；舊的 ?region= 由頁面換成這個網址
     path: '/election/:electionId/:region',
     name: 'election-region',
+    component: ElectionPage,
+  },
+  {
+    // 鄉鎮頁（2026-10-05）：同一個元件、預選該縣市與鄉鎮市區；舊的 ?sub= 由正見.tw 的 Worker 301、頁面也會換成這個網址
+    path: '/election/:electionId/:region/:subRegion',
+    name: 'election-township',
     component: ElectionPage,
   },
   {

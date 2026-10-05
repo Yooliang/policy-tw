@@ -79,8 +79,18 @@ const routeRegion = computed(() => {
   const value = Array.isArray(raw) ? raw[0] : raw
   return isCounty(value) ? value : undefined
 })
+/**
+ * 鄉鎮頁 /election/:electionId/:region/:subRegion（2026-10-05）：網址上的鄉鎮市區就是這一頁的鄉鎮。
+ * 跟縣市一樣初始值先吃網址（預渲染與 hydrate 才會是同一個鄉鎮）；縣市不合法時鄉鎮也不算。
+ */
+const routeSubRegion = computed(() => {
+  if (!routeRegion.value) return undefined
+  const raw = route.params.subRegion
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.trim()
+  return value && value !== 'All' ? value : undefined
+})
 const selectedRegion = ref(routeRegion.value ?? globalRegion.value)
-const selectedSubRegion = ref<string>('All')  // 鄉鎮市區
+const selectedSubRegion = ref<string>(routeSubRegion.value ?? 'All')  // 鄉鎮市區
 const selectedVillage = ref<string>('All')    // 村里
 
 // 載入這一屆、這一層的參選人（這一層＋下一層，見 lib/election-levels.ts）
@@ -147,6 +157,10 @@ const heroBackgroundImage = computed(() => heroImages[electionYear.value] || '/i
 
 // Sync with global state
 watch(globalRegion, (newVal) => {
+  // 已經是這個縣市就不動（2026-10-05）：鄉鎮頁進來時，網址同步會把全站的縣市設成網址上的縣市，
+  // 這時候若照舊把鄉鎮重設成「全部」，畫面會先閃一下縣市頁、多撈一次整個縣市，再切回鄉鎮。
+  // 真的換縣市時 newVal 跟 selectedRegion 不同，照舊重設；回同一個縣市的縣市頁是換網址，由 useRegionQuerySync 設回「全部」。
+  if (newVal === selectedRegion.value) return
   selectedRegion.value = newVal
   selectedSubRegion.value = 'All'
   selectedVillage.value = 'All'
@@ -184,13 +198,15 @@ const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
 
-// 縣市／鄉鎮／村里／頁籤／PK 層級 ↔ 網址 ?region=&sub=&village=&view=&type=，可貼連結直達
-// 縣市在路徑上（/election/2026/台北市），鄉鎮／村里／頁籤仍是 query；舊的 ?region= 進來會換成路徑的寫法
+// 縣市／鄉鎮／村里／頁籤／PK 層級 ↔ 網址，可貼連結直達
+// 縣市與鄉鎮在路徑上（/election/2022/嘉義縣/大林鎮，鄉鎮 2026-10-05 起），村里／頁籤仍是 query（?village=&view=&type=）；
+// 舊的 ?region=、?sub= 進來會換成路徑的寫法（正見.tw 上 Worker 已經先 301 過了，這裡接住 web.app 與站內舊連結）
 useRegionQuerySync({
-  routeName: ['election', 'election-region'],
+  routeName: ['election', 'election-region', 'election-township'],
   regionPath: {
     get: () => routeRegion.value,
-    build: (region) => electionPath(electionId.value, region),
+    getSub: () => routeSubRegion.value,
+    build: (region, sub) => electionPath(electionId.value, region, sub),
   },
   sub: selectedSubRegion,
   village: selectedVillage,
@@ -205,12 +221,25 @@ useRegionQuerySync({
  * 預渲染時沒有 query，href 就是乾淨的 /election/2026/台北市。
  */
 function regionLink(region: string): RouteLocationRaw {
+  return { path: electionPath(electionId.value, region), query: tabQuery() }
+}
+
+/** 換頁時要帶過去的頁籤參數（view／type）；鄉鎮與村里不帶 */
+function tabQuery(): Record<string, string> {
   const query: Record<string, string> = {}
   for (const key of ['view', 'type']) {
     const v = route.query[key]
     if (typeof v === 'string' && v) query[key] = v
   }
-  return { path: electionPath(electionId.value, region), query }
+  return query
+}
+
+/**
+ * 右側鄉鎮市區的連結（2026-10-05）：到該鄉鎮頁（「全部」＝縣市頁），一樣保留頁籤、不帶村里。
+ * 以前是按鈕改 selectedSubRegion（網址變 ?sub=），預渲染的縣市頁裡沒有通往鄉鎮的 <a href>。
+ */
+function townshipLink(township: string): RouteLocationRaw {
+  return { path: electionPath(electionId.value, selectedRegion.value, township), query: tabQuery() }
 }
 
 const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
@@ -582,10 +611,13 @@ function scrollToPendingAnchor() {
   const id = pendingAnchor.value
   if (!id || typeof document === 'undefined') return
   // KeepAlive 下別頁的網址變動也會喊到這裡，只在選舉頁自己的網址上動作
-  if (route.name !== 'election' && route.name !== 'election-region') return
-  // 鄉鎮頁（?sub=）的錨點要等鄉鎮篩選套上之後才找，不然會先捲到縣市頁上同名的區塊（例如鄉鎮市長）
-  const sub = route.query.sub
-  if (typeof sub === 'string' && sub && selectedSubRegion.value !== sub) return
+  if (route.name !== 'election' && route.name !== 'election-region' && route.name !== 'election-township') return
+  // 鄉鎮頁的錨點要等鄉鎮套上之後才找，不然會先捲到縣市頁上同名的區塊（例如鄉鎮市長）。
+  // 鄉鎮在路徑上（/election/2022/金門縣/金城鎮#村里長-東門里，2026-10-05）；舊的 ?sub= 還沒被換成路徑之前
+  // （policy-tw.web.app、站內舊連結，正見.tw 上 Worker 已經先 301 過了）一樣要等
+  const legacySub = route.query.sub
+  const sub = routeSubRegion.value ?? (typeof legacySub === 'string' && legacySub ? legacySub : undefined)
+  if (sub && selectedSubRegion.value !== sub) return
   const el = document.getElementById(id)
   if (!el) {
     // 資料還在載入、區塊還沒畫出來：之後畫出來會再試；載完還沒有就是沒有這個區塊，放棄（免得之後切篩選時突然被捲過去）
@@ -801,15 +833,31 @@ const countyLevelCounts = computed(() => {
     .map(x => `${x.label} ${x.n} 位`)
     .join('、')
 })
+/**
+ * 鄉鎮頁的頁首（2026-10-05）：「2022 嘉義縣大林鎮 候選人與政見」。
+ * 人數照這一頁實際畫出來的區塊數（這一層＋下一層），不另外算一份——描述寫的人數要跟畫面一樣。
+ */
+const pageTownship = computed(() => pageCounty.value && selectedSubRegion.value !== 'All' ? selectedSubRegion.value : undefined)
+const townshipLevelCounts = computed(() => [...thisLevelSections.value, ...nextLevelSections.value]
+  .filter(s => s.people.length > 0)
+  .map(s => `${s.spec.label} ${s.people.length} 位`)
+  .join('、'))
 usePageHead({
   title: () => {
     if (!election.value) return undefined
+    const year = electionYear.value || election.value.id
+    if (pageTownship.value) return `${year} ${pageCounty.value}${pageTownship.value} 候選人與政見`
     return pageCounty.value
-      ? `${electionYear.value || election.value.id} ${pageCounty.value} 候選人與政見`
+      ? `${year} ${pageCounty.value} 候選人與政見`
       : (election.value.shortName || election.value.name)
   },
   description: () => {
     if (!election.value) return undefined
+    if (pageTownship.value) {
+      const counts = townshipLevelCounts.value ? `：${townshipLevelCounts.value}` : ''
+      const appointed = levelPlan.value.thisLevel.length === 0 ? `區長由市政府指派，不是選舉產生。` : ''
+      return `${election.value.name}${pageCounty.value}${pageTownship.value}參選人名單與競選承諾${counts}。${appointed}可依${villageLabel.value}篩選、逐項比較政見。`
+    }
     if (pageCounty.value) {
       const counts = countyLevelCounts.value ? `：${countyLevelCounts.value}` : ''
       return `${election.value.name}${pageCounty.value}參選人名單與競選承諾${counts}。可依鄉鎮市區篩選、逐項比較政見。`
@@ -826,7 +874,7 @@ usePageHead({
       <template #title>
         <div class="relative w-full">
           <div v-if="pageCounty">
-            {{ electionYear || election.id }} {{ pageCounty }}<br/><span class="text-amber-400">候選人與政見</span>
+            {{ electionYear || election.id }} {{ pageCounty }}{{ pageTownship }}<br/><span class="text-amber-400">候選人與政見</span>
           </div>
           <div v-else>
             預見未來，<br/><span class="text-amber-400">從您居住的城市開始</span>
@@ -1108,17 +1156,20 @@ usePageHead({
               <MapPin :size="16" class="text-slate-400" />
               <span class="text-sm font-bold text-slate-700">鄉鎮市區</span>
             </div>
+            <!-- 鄉鎮是真連結（/election/2022/嘉義縣/大林鎮，2026-10-05）：點起來跟以前一樣切鄉鎮，爬蟲也走得到 -->
             <div class="flex flex-wrap gap-0.5">
-              <button
-                @click="selectedSubRegion = 'All'"
+              <RouterLink
+                :to="townshipLink('All')"
+                :aria-current="selectedSubRegion === 'All' ? 'page' : undefined"
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
-              >全部</button>
-              <button
+              >全部</RouterLink>
+              <RouterLink
                 v-for="subRegion in availableSubRegions"
                 :key="subRegion"
-                @click="selectedSubRegion = subRegion"
+                :to="townshipLink(subRegion)"
+                :aria-current="selectedSubRegion === subRegion ? 'page' : undefined"
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === subRegion ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
-              >{{ subRegion }}</button>
+              >{{ subRegion }}</RouterLink>
             </div>
           </div>
 

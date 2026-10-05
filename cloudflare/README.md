@@ -27,4 +27,5 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 部署：CI 的 `ssr-deploy` job（需 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`）或本機 `pnpm deploy:ssr`。
 回滾：把 `SSR_ROUTES` 清空重部署＝純代理。
 縣市頁（2026-09-30）：`/election/:id/:縣市` 代理時換成 web.app 上的 ASCII 路徑 `/election/:id/_r/<十六進位>`；`/election/:id?region=縣市` 301 到路徑版。規則在 `region-path.js`（postbuild 與 serve-dist 共用）。計畫與後續步驟見 `docs/PLAN-edge-ssr.md`。
+鄉鎮頁（2026-10-05）：`/election/:id/:縣市/:鄉鎮` 代理時換成 `/election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>`；舊的 `/election/:id/:縣市?sub=鄉鎮` 與更舊的 `/election/:id?region=縣市&sub=鄉鎮` 一次 301 到鄉鎮頁（村里、頁籤參數照帶；sub 不像鄉鎮名就不轉）。規則與測試：`region-path.js`、`region-path.test.ts`。
 

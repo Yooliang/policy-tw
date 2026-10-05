@@ -22,7 +22,9 @@
       { "source": "/politician/**", "destination": "/app.html" },
       { "source": "/analysis/**", "destination": "/app.html" },
       { "source": "/community/**", "destination": "/app.html" },
-      { "source": "/election/*/*", "destination": "/app.html" }
+      { "source": "/election/*/*", "destination": "/app.html" },
+      { "source": "/election/*/_r/*/*", "destination": "/app.html" },
+      { "regex": "^/election/[^/]+/[^/_][^/]*/[^/]+/?$", "destination": "/app.html" }
     ]
   }
 }

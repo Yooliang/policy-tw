@@ -11,7 +11,7 @@
 | `SSG_DEBUG_HYDRATION=1 pnpm build` | 客戶端 bundle 會在 console 印 hydration mismatch 細節，驗證用；正式 build 不要開 |
 | `pnpm build:spa` | 舊的純 SPA build（緊急 fallback，沒有預渲染、沒有殼檔） |
 | `pnpm preview` | 預覽 dist（已設 `appType: mpa`，`/politician/:id` 會對到 `politician/:id/index.html`；但無法模擬 firebase rewrites 與 404.html） |
-| `node scripts/serve-dist.mjs 4180` | 本機模擬 Firebase Hosting：cleanUrls、firebase.json rewrites、找不到回 `404.html`（HTTP 404）。驗 404／工具頁殼用這個。預設連 Worker 的縣市頁規則一起模擬，加 `--no-worker` 只模擬 Firebase |
+| `node scripts/serve-dist.mjs 4180` | 本機模擬 Firebase Hosting：cleanUrls、firebase.json rewrites、找不到回 `404.html`（HTTP 404）。驗 404／工具頁殼用這個。預設連 Worker 的縣市頁／鄉鎮頁規則一起模擬，加 `--no-worker` 只模擬 Firebase |
 
 ## 建置時發生什麼
 
@@ -24,7 +24,7 @@
 ## 哪些頁面會預渲染
 
 - 靜態：`/`、`/tracking`、`/analysis`、`/community`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`（`lib/ssg/server-data.ts` 的 `STATIC_CONTENT_ROUTES`）
-- `/election/:id`（每個選舉）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
+- `/election/:id`（每個選舉）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/election/:id/:縣市/:鄉鎮`（2026-10-05：每屆「鄉鎮頁會列出的職位」——鄉鎮市長、代表、原住民區長、區代表、村里長——有人在選的鄉鎮市區各一頁，規則在 `lib/election-townships.ts`；搬到 `election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>/`；舊的 `?sub=` 由 Worker 301、客戶端也會換成路徑；一位都沒有的鄉鎮不出頁，舊網址轉過去落到 app 殼，見下面 Firebase 那節）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
 - `/analysis/:id` 只出「分析列表實際會連到」的那幾條（與 `PolicyAnalysis.relayCases` 同邏輯），不是全部政見
 - **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
 
@@ -33,6 +33,9 @@
 - `cleanUrls: true`，輸出為 `dirStyle: nested`（`/politician/123` → `dist/politician/123/index.html`），有無尾斜線都命中
 - 拿掉 `** → /index.html` 萬用 rewrite；工具頁與 `/admin/**` rewrite 到 `/app.html`（200 ＋ noindex，客戶端渲染）
 - 其餘找不到的路徑 Firebase 自動回 `404.html`（HTTP 404），殼會啟動 app 在客戶端渲染，所以建置後才新增的政治人物頁直接打開仍能顯示，只是狀態是 404
+- 選舉頁的縣市頁／鄉鎮頁（2026-10-05 起三條，`lib/election-regions.test.ts` 守著）：
+  - `/election/*/*`、`regex ^/election/[^/]+/[^/_][^/]*/[^/]+/?$` → `app.html`：直接打 policy-tw.web.app 的中文縣市頁、鄉鎮頁網址只給 app 殼（200＋noindex），預渲染檔在 ASCII 路徑、只有正見.tw 的 Worker 會去拿。regex 刻意排除 `_r` 開頭的第二段，不然亂打的縣市（Worker 換成 `_r/<十六進位>`）會從 404 變 200
+  - `/election/*/_r/*/*` → `app.html`：正見.tw 上沒預渲染的鄉鎮頁（例如 2026 還沒人登記的鄉鎮；舊的 `?sub=` 照樣 301 過來）回 app 殼、客戶端渲染、noindex，不 404——舊網址不能壞（10-05 常設裁決），空頁也不該被收錄
 
 ## 只能在瀏覽器跑的東西
 
