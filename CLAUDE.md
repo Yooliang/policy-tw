@@ -88,8 +88,15 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 | `politician_elections` | `election_id` | FK → `elections.id`（年份） | 2022, 2024, 2026 |
 | `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
 
-- `elections.id` 就是選舉年份，**不是自增 ID**
-- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）
+- 既有三筆的 `elections.id` 就是選舉年份，大量讀取端（SQL、Edge Function、前端、Worker、協議）把它當年份用
+- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）；這些網址要一直能用（小良哥 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）
+
+**過渡中（#344 第一階段，2026-10-05）**：年份存不下補選、罷免、重行選舉，所以加了新識別，舊的不動：
+- `elections.election_key`＝一場選舉的識別，格式 `投票日_種類[_地區代碼]`（`2022-11-26_local`、`2024-01-13_national`；種類 local／national／by 補選／recall 罷免／rerun 重行選舉），**建立後不改**（觸發器擋），新列沒給就自動產生
+- `election_reason`（事由）、`election_types`（這次選哪些職位，直接存在選舉上；舊表 `election_types` 第二階段刪，過渡期觸發器同步）、`notice_date`（選舉公告日）、`turnout`（投票率）
+- `id` 留著當內部整數主鍵、外鍵都不搬；**之後新增的選舉 id 不保證是年份**——新程式碼別再從 id 推年份或排先後，年份與先後用 `election_date`
+- `end_date` 名不副實（三筆存投票日、新建時卻寫 12-31），新程式碼讀 `election_date`
+- 還把 id 當年份的地方（第二階段要改）列在 #344 第一階段 PR 的盤點清單
 
 #### Electoral District Mapping
 `electoral_district_areas` 把鄉鎮市區對到選舉區，供議員篩選：`region`（縣市）+ `electoral_district`（第01選舉區）+ `township` + `election_id`（年份）。
