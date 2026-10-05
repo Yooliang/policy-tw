@@ -23,7 +23,8 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
-import { isCouncilAboriginalDistrict, legislatorDistrictKey } from "./electoral-district.ts";
+import { councilDistrictKey, isCouncilAboriginalDistrict, legislatorDistrictKey, officialCouncilDistricts, regionFitFor } from "./electoral-district.ts";
+import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -224,36 +225,38 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
 async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
   if (electionType === "立法委員") return await legislatorRegionPatch(supabase, p);
   if (electionType !== "縣市議員") return {};
-  const district = str(p.electoral_district);
-  const region = str(p.region);
-  if (!district || !region) return {};
-  const county = region.replace(/臺/g, "台");
+  // 2026-10-05：選區與縣市一律先正規化（councilDistrictKey）——縣市寫「臺」、選區寫「第4選區」、
+  // 或只寫在 position（「高雄市第10選舉區」）的，以前在這裡全都對不到，掉到縣市層級
+  const key = councilDistrictKey(str(p.region), str(p.electoral_district), str(p.position));
+  if (!key) return {};
   const find = async () => {
-    for (const r of new Set([region, county])) {
-      // query-bounds: ok —（region, sub_region, village）是唯一鍵，選區列最多一列
-      const { data } = await supabase.from("regions").select("id").eq("region", r).eq("sub_region", district).maybeSingle();
-      const id = (data as { id?: number } | null)?.id;
-      if (id) return id;
-    }
-    return null;
+    // query-bounds: ok —（region, sub_region, village）是唯一鍵，選區列最多一列
+    const { data } = await supabase.from("regions").select("id")
+      .eq("region", key.region).eq("sub_region", key.sub_region).is("village", null).maybeSingle();
+    return (data as { id?: number } | null)?.id ?? null;
   };
   const regionId = await find();
   if (regionId) return { region_id: regionId };
   // 原住民選區（2026-10-05）：regions 只有部分縣市有這幾列（花蓮、台東、屏東、苗栗、新竹縣……一列都沒有），
   // 中選會名單補進原住民選區之後，「補選區」與「當選缺紀錄」任務會請代理填這些選區，查不到列就永遠補不上。
-  // 只在選區有官方根據時才建：中選會名單（已投票屆別，cec_candidates）上有這個縣市這個選區，或是查證過的
-  // 原住民保留議席清單（COUNCIL_ABORIGINAL_DISTRICTS）。形狀跟既有選區列相同（縣市用「台」＋「第NN選舉區」）。
-  if (!(await councilDistrictConfirmed(supabase, int(p.election_id), county, district))) return {};
+  // 只在選區有官方根據時才建：中選會名單（已投票屆別，cec_candidates）上有這個縣市這個選區、查證過的
+  // 原住民保留議席清單（COUNCIL_ABORIGINAL_DISTRICTS），或 2026 中選會登記彙總表的選區清單（COUNCIL_DISTRICT_COUNT_2026）。
+  // 形狀跟既有選區列相同（縣市用「台」＋「第NN選舉區」）。
+  if (!(await councilDistrictConfirmed(supabase, int(p.election_id), key.region, key.sub_region))) return {};
   const { data: created } = await supabase.from("regions")
-    .insert({ region: county, sub_region: district, village: null }).select("id").maybeSingle();
+    .insert({ region: key.region, sub_region: key.sub_region, village: null }).select("id").maybeSingle();
   // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
   const id = (created as { id?: number } | null)?.id ?? await find();
   return id ? { region_id: id } : {};
 }
 
-/** 這個議員選區有沒有官方根據：查證過的原住民保留議席清單，或中選會名單（已投票的屆別）上有人登記在這個選區 */
+/**
+ * 這個議員選區有沒有官方根據：查證過的原住民保留議席清單、2026 登記彙總表的選區清單，
+ * 或中選會名單（已投票的屆別）上有人登記在這個選區
+ */
 async function councilDistrictConfirmed(supabase: SupabaseLike, electionId: number | null, county: string, district: string): Promise<boolean> {
   if (isCouncilAboriginalDistrict(county, district)) return true;
+  if (electionId && officialCouncilDistricts(electionId, county)?.includes(district)) return true;
   if (!electionId || !/^第\d+選舉區$/.test(district)) return false;
   // query-bounds: ok — 只要知道有沒有，limit(1)
   const { data } = await supabase.from("cec_candidates").select("id")
@@ -355,13 +358,31 @@ function regionIdOf(patch: Obj): number | null {
  */
 async function countyRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
   if (!(COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)) return {};
-  const region = str(p.region);
+  // regions 的縣市層級列一律寫「台」；交件寫「臺中市」的以前在這裡對不到，留成 NULL（2026-10-05）
+  const region = normalizeCityName(str(p.region) ?? undefined) || null;
   if (!region) return {};
   // query-bounds: ok —（region, sub_region, village）是唯一鍵，縣市層級最多一列
   const { data } = await supabase.from("regions").select("id")
     .eq("region", region).is("sub_region", null).is("village", null).maybeSingle();
   const id = (data as { id?: number } | null)?.id;
   return id ? { region_id: id } : {};
+}
+
+/**
+ * 既有參選紀錄指到的那一列，對這種選舉來說是哪一層（2026-10-05，規則在 electoral-district.ts 的 regionFitFor）。
+ * 只看縣市長、縣市議員、立委；鄉鎮層級五種的地區本來就是鄉鎮或村里。查不到那一列就回 null（照舊不動）。
+ */
+async function beforeRegionFit(
+  supabase: SupabaseLike,
+  electionType: string,
+  regionId: number,
+): Promise<{ fit: ReturnType<typeof regionFitFor>; label: string } | null> {
+  if (!(COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)) return null;
+  // query-bounds: ok — 按主鍵取一列
+  const { data } = await supabase.from("regions").select("region, sub_region, village").eq("id", regionId).maybeSingle();
+  if (!data) return null;
+  const row = data as { region?: string | null; sub_region?: string | null; village?: string | null };
+  return { fit: regionFitFor(electionType, row), label: [row.region, row.sub_region, row.village].filter(Boolean).join(" ") };
 }
 
 /**
@@ -437,7 +458,14 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   };
   const beforeRegionId = (before as { region_id?: number | null } | null)?.region_id ?? null;
   const districtRegionId = regionIdOf(districtPatch);
-  const countyPatch = districtRegionId || beforeRegionId
+  // 既有紀錄指到的列對這種選舉是掛錯層級（村里、鄉鎮、別種選舉的選區）就不算數，改記到縣市（2026-10-05）。
+  // 同一人同一屆只有一筆參選紀錄：里長紀錄改成議員時（選舉別換了），原本那個里會原封不動留下來，
+  // 畫面就把「大雅區 上雅里」當成議員的選區。
+  const beforeFit = beforeRegionId !== null && !districtRegionId
+    ? await beforeRegionFit(supabase, electionType, beforeRegionId)
+    : null;
+  const keepBefore = beforeRegionId !== null && beforeFit?.fit !== "wrong";
+  const countyPatch = districtRegionId || keepBefore
     ? {}
     : await countyRegionPatch(supabase, electionType, p);
   const countyRegionId = regionIdOf(countyPatch);
@@ -447,8 +475,13 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     ...districtPatch,
     ...countyPatch,
   };
-  const regionNote = regionGapNote(electionType, p, {
-    resolved: districtRegionId ?? countyRegionId ?? beforeRegionId,
+  const wrongLevelNote = beforeFit?.fit === "wrong"
+    ? countyRegionId
+      ? `；這筆原本掛在「${beforeFit.label}」，對${electionType}來說不是選區也不是縣市（多半是同一個人其他選舉的地區），已改記到縣市`
+      : `；這筆掛在「${beforeFit.label}」，對${electionType}來說不是選區也不是縣市，但 region 對不到縣市，地區先維持原狀`
+    : "";
+  const regionNote = wrongLevelNote + regionGapNote(electionType, p, {
+    resolved: districtRegionId ?? countyRegionId ?? (keepBefore ? beforeRegionId : null),
     county: countyRegionId,
     district: districtRegionId,
   });

@@ -133,13 +133,14 @@ Deno.test("candidacy：名冊裡沒有這個縣市（例如新竹縣 2026 還沒
   assertEquals(res.status, 201, JSON.stringify(res.body));
 });
 
-Deno.test("candidacy：electoral_district_areas 查詢本身出錯 → 不擋，照常收", async () => {
+// 2026 以中選會登記彙總表為準、不查資料庫（2026-10-05）；查詢出錯不擋的是其他屆別
+Deno.test("candidacy：electoral_district_areas 查詢本身出錯 → 不擋，照常收（2022 屆）", async () => {
   resetDistrictRegistryCache();
   const { client } = fakeSupabase({
     politicians: politiciansOk,
     electoral_district_areas: { data: [], error: { message: "boom：連線逾時" } },
   });
-  const res = await handleContribute(client, "https://x", candidacyBody({ electoral_district: "第99選舉區" }), "ip-1", noVote);
+  const res = await handleContribute(client, "https://x", candidacyBody({ election_id: 2022, candidate_status: "confirmed", electoral_district: "第99選舉區" }), "ip-1", noVote);
   assertEquals(res.status, 201, "查詢出錯不能擋代理");
 });
 

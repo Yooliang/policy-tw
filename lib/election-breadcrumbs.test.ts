@@ -71,11 +71,15 @@ Deno.test("縣市議員沒填選舉區：不帶括號，連到整個議員區塊
   assertEquals(last?.path, `/election/2022/${enc("新北市")}#${enc("縣市議員")}`);
 });
 
-Deno.test("選舉區字串自帶縣市前綴時，括號裡不重複，錨點仍用原字串（跟選舉頁分組同一個 key）", () => {
-  const rec: CrumbRecord = { electionId: 2026, electionType: "縣市議員", region: "台北市", subRegion: "台北市第03選區" };
-  const last = candidacyCrumbs(rec, E2026, NOW).at(-1);
-  assertEquals(last?.name, "縣市議員候選人（第03選區）");
-  assertEquals(last?.path, `/election/2026/${enc("台北市")}#${enc("縣市議員-台北市第03選區")}`);
+// 2026-10-05：「台北市第03選區」是立委選區的寫法，議員紀錄帶著它是借到了人物 2024 參選立委的地區（張烱春、李政憲）。
+// 選舉頁把這種人收進「選區待補」，麵包屑也不寫出假選區、連到整個議員區塊
+Deno.test("議員帶著不是議員選區的字串（立委選區、鄉鎮名）：當成沒填，不帶括號，連到 #縣市議員", () => {
+  for (const sub of ["台北市第03選區", "大雅區"]) {
+    const rec: CrumbRecord = { electionId: 2026, electionType: "縣市議員", region: "台北市", subRegion: sub };
+    const last = candidacyCrumbs(rec, E2026, NOW).at(-1);
+    assertEquals(last?.name, "縣市議員候選人", sub);
+    assertEquals(last?.path, `/election/2026/${enc("台北市")}#${enc("縣市議員")}`);
+  }
 });
 
 Deno.test("立法委員（縣市層、卡片排法）：不帶選區，連到 #立法委員", () => {
@@ -225,7 +229,7 @@ function anchorOf(crumbs: { path?: string }[]): string {
 Deno.test("議員：麵包屑的錨點＝選舉頁分組函式（groupByDistrict）算出來那一組的 id", () => {
   const rec: CrumbRecord = { electionId: 2026, electionType: "縣市議員", region: "金門縣", subRegion: "第02選舉區" };
   // 選舉頁把議員交給 groupByDistrict，再用 sectionAnchor(type, 組名) 當那一組的 id
-  const groups = groupByDistrict([{ subRegion: "第01選舉區" }, { subRegion: "第02選舉區" }]);
+  const groups = groupByDistrict([{ subRegion: "第01選舉區" }, { subRegion: "第02選舉區" }], "縣市議員");
   const pageIds = groups.map((g) => sectionAnchor("縣市議員", g.district));
   assert(pageIds.includes(anchorOf(candidacyCrumbs(rec, E2026, NOW))));
 });

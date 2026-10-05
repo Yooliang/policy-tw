@@ -26,6 +26,24 @@ function between(text: string, start: string, end: string): string {
   return text.slice(i, j < 0 ? undefined : j);
 }
 
+/**
+ * 最後一支（照檔名排序）定義這個函式的 migration 全文——線上跑的是它（2026-10-05：20261005004100 重定義了
+ * contribution_auto_tasks_region_gap，守門要看新的那一版，不能一直盯著 20261005000400）
+ */
+async function latestSqlDefining(fnName: string): Promise<string> {
+  const files: string[] = [];
+  for await (const e of Deno.readDir(MIGRATIONS)) if (e.isFile && e.name.endsWith(".sql")) files.push(e.name);
+  files.sort();
+  let last: string | null = null;
+  for (const f of files) {
+    const text = await Deno.readTextFile(new URL(f, MIGRATIONS));
+    if (text.includes(`CREATE OR REPLACE FUNCTION ${fnName}(`)) last = text;
+  }
+  assert(last, `找不到定義 ${fnName} 的 migration`);
+  return last;
+}
+const regionGapSql = await latestSqlDefining("contribution_auto_tasks_region_gap");
+
 /** 一支 migration 裡 contribution_auto_tasks_arms 的本體呼叫了哪幾支臂 */
 function armsCalled(text: string): Set<string> {
   const body = between(text, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()", "COMMENT ON FUNCTION contribution_auto_tasks_arms");
@@ -115,13 +133,13 @@ Deno.test("姓名鍵：SQL 的 cec_name_key 跟 cec_candidates.name_norm（TS �
   assertEquals(sqlKey("Icyang"), null, "全是拉丁字母的姓名不拿來比（空字串會跟別的空字串對上）");
   // 臂裡跟 cec_candidates 比姓名的地方都要用這個鍵，不能用沒去拉丁拼音的 cec_name_norm
   for (const fnName of ["contribution_auto_tasks_region_gap", "contribution_auto_tasks_elected_missing"]) {
-    const body = between(sql, `CREATE OR REPLACE FUNCTION ${fnName}`, `COMMENT ON FUNCTION ${fnName}`);
+    const body = between(fnName === "contribution_auto_tasks_region_gap" ? regionGapSql : sql, `CREATE OR REPLACE FUNCTION ${fnName}`, `COMMENT ON FUNCTION ${fnName}`);
     assertEquals(/cec_name_norm\(/.test(body), false, `${fnName} 用了 cec_name_norm，原住民姓名會對不上`);
   }
 });
 
 Deno.test("補縣市／補選區：只管縣市長、縣市議員、立委；表態不參選的不問選區", () => {
-  const body = between(sql, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_region_gap", "COMMENT ON FUNCTION contribution_auto_tasks_region_gap");
+  const body = between(regionGapSql, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_region_gap", "COMMENT ON FUNCTION contribution_auto_tasks_region_gap");
   assertStringIncludes(body, "pe.election_type IN ('縣市長', '縣市議員', '立法委員')");
   assertMatch(body, /pe\.election_type IN \('縣市議員', '立法委員'\)\s+AND pe\.candidate_status <> 'not_running'/);
   assertStringIncludes(body, "pe.region_id IS NULL AS no_region");

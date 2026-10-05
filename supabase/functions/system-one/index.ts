@@ -784,6 +784,7 @@ Deno.serve(async (req) => {
     }
 
     // ---- roster_batch：引用中選會登記名冊的待驗參選紀錄，逐位比對姓名／縣市／政黨，寫系統票（2026-09-24 維護者選 B）----
+    // 2026-10-05 起交件有選舉區（縣市議員必填）時連選舉區一起比：不比的話抄錯的選區也一票過關
     // 09-20「系統不解析 PDF」的例外，只限 web.cec.gov.tw 的名冊（_shared/cec-roster.ts）。不用 Jev：純比對。
     if (action === "roster_batch") {
       type Cand = { id: string; payload: Record<string, unknown>; source_urls: string[] | null };
@@ -804,7 +805,7 @@ Deno.serve(async (req) => {
         try { rows = parseRoster(await cecRosterText(url)); } catch (e) { report.push({ url, error: e instanceof Error ? e.message : String(e) }); continue; }
         // 解析出的人比要核對的還少，多半是這份名冊的版面沒認出來：整份跳過、不判，免得把對的判成「不支持」（09-24 嘉義縣名冊誤判 5 筆）
         if (rows.length < Math.max(10, group.length)) { report.push({ url, skipped: `名冊只解析出 ${rows.length} 位，少於要核對的 ${group.length} 筆，這份先不判` }); continue; }
-        const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null })));
+        const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null, district: typeof c.payload.electoral_district === "string" ? c.payload.electoral_district : null })));
         // 超過一半「找不到姓名」多半是版面沒認出來（09-24 宜蘭縣名冊 34 筆全誤判）：整份不判，交給人逐筆驗
         const notFound = check.failed.filter((f) => f.reason.includes("找不到")).length;
         if (notFound * 2 > group.length) { report.push({ url, rows_parsed: rows.length, skipped: `${notFound}／${group.length} 筆找不到姓名，疑似名冊版面沒認出來，這份先不判` }); continue; }
@@ -815,7 +816,7 @@ Deno.serve(async (req) => {
             subject_type: "contribution", subject_id: c.id, question: "source_support",
             choice: ok ? "supported" : "not_supported", probability: 1, confidence: null, probabilities: null,
             model: ROSTER_BATCH_MODEL,
-            state: { pdf_url: url, name: c.payload.name, region: c.payload.region, party: c.payload.party, rows_parsed: rows.length, ...(ok ? { result: "名冊上姓名、縣市、政黨都對得上" } : { reason: failedBy.get(c.id) }) },
+            state: { pdf_url: url, name: c.payload.name, region: c.payload.region, electoral_district: c.payload.electoral_district ?? null, party: c.payload.party, rows_parsed: rows.length, ...(ok ? { result: c.payload.electoral_district ? "名冊上姓名、縣市、選舉區、政黨都對得上" : "名冊上姓名、縣市、政黨都對得上" } : { reason: failedBy.get(c.id) }) },
             cost_usd: 0,
           };
         });

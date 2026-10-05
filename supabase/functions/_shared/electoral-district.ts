@@ -143,6 +143,107 @@ export function isCouncilAboriginalDistrict(region: string, district: string): b
 }
 
 /**
+ * 2026 年各縣市議員的選舉區數（2026-10-05，中選會 115 年候選人登記彙總表）。
+ *
+ * 來源是中選會自己的兩份登記名冊 PDF（製表日期 115 年 09 月 07 日），每一列都印著「<縣市>第N選舉區」：
+ * - 直轄市議員 https://web.cec.gov.tw/api/file/ccd7e51a-5fd0-4ea0-a81b-a120cd550c9c.pdf
+ *   （抽字結果是 fixtures/cec-roster-2026-municipal-council.txt）
+ * - 縣市議員   https://web.cec.gov.tw/api/file/729644ff-cb01-42bb-a052-c9b3c55a1289.pdf
+ *   （抽字結果是 fixtures/cec-roster-2026-county-council.txt）
+ * 兩份裡每個縣市的選舉區都是從第 1 號連續編到這個數字（electoral-district.test.ts 逐一核對）。
+ *
+ * 為什麼要這一份：electoral_district_areas 只收「鄉鎮↔一般地理選舉區」，原住民選舉區不對應鄉鎮、不在表裡；
+ * 上面 COUNCIL_ABORIGINAL_DISTRICTS 又只查證了 12 個縣市。結果 2026 屏東縣第 08～16、台東縣第 07～16、
+ * 花蓮縣第 05～10、新竹縣第 11～14、嘉義縣第 07、苗栗縣第 07～08 選舉區在 regions 表沒有列，
+ * 代理交了正確的選區，落庫也對不到、只能記到縣市；台中市第 17 選舉區更是交件就被當成「名冊沒有」擋掉。
+ * 名冊是投票前就公告的官方文件，比逐縣市拼湊新聞可靠，所以 2026 直接以它為準。
+ * regions 表要有的那幾列由 migration 20261005004100 依這份補齊（council-district-flow.test.ts 核對兩邊一致）。
+ */
+export const COUNCIL_DISTRICT_COUNT_2026: Readonly<Record<string, number>> = {
+  台北市: 8,
+  新北市: 13,
+  桃園市: 14,
+  台中市: 17,
+  台南市: 13,
+  高雄市: 15,
+  基隆市: 9,
+  新竹市: 7,
+  新竹縣: 14,
+  苗栗縣: 8,
+  彰化縣: 10,
+  南投縣: 8,
+  雲林縣: 8,
+  嘉義市: 2,
+  嘉義縣: 7,
+  屏東縣: 16,
+  宜蘭縣: 13,
+  花蓮縣: 10,
+  台東縣: 16,
+  澎湖縣: 6,
+  金門縣: 3,
+  連江縣: 4,
+};
+
+/** 有官方選舉區清單的屆別：選區號碼以清單為準（目前只有 2026） */
+export function officialCouncilDistricts(electionId: number, region: string): string[] | null {
+  if (electionId !== 2026) return null;
+  const n = COUNCIL_DISTRICT_COUNT_2026[region];
+  if (!n) return null;
+  return Array.from({ length: n }, (_, i) => `第${String(i + 1).padStart(2, "0")}選舉區`);
+}
+
+/**
+ * 縣市議員參選紀錄要指到的 regions 列（2026-10-05，比照 legislatorDistrictKey）。
+ *
+ * regions 的議員選舉區列一律長「region＝縣市（台）、sub_region＝第NN選舉區、village＝NULL」（線上 177 列全是這樣）。
+ * 選區先看 electoral_district，沒給再從 position 抽（2026-09-28 以前交進來的件只有 position：
+ * 「高雄市第10選舉區」，交件端的正規化當時還沒上線，落庫又只讀 electoral_district，於是 60 筆高雄市議員全掉到縣市層級）。
+ * 縣市用「台」；選區文字自己帶了縣市而且跟 region 不同時不猜，回 null。
+ * 純文字轉換，不接資料庫。認不出來回 null（呼叫端不寫選區、回覆裡請代理補）。
+ */
+export function councilDistrictKey(
+  region: string | null | undefined,
+  electoralDistrict: string | null | undefined,
+  position?: string | null,
+): { region: string; sub_region: string } | null {
+  const parsed = normalizeDistrict((electoralDistrict ?? "").trim()) ??
+    (electoralDistrict && electoralDistrict.trim() ? null : normalizeDistrict((position ?? "").trim()));
+  if (!parsed) return null;
+  const county = normalizeCityName(region ?? undefined) || parsed.region;
+  if (!county || !(ALL_REGIONS as readonly string[]).includes(county)) return null;
+  if (parsed.region && parsed.region !== county) return null;
+  return { region: county, sub_region: parsed.district };
+}
+
+/**
+ * 一筆參選紀錄指到的 regions 列，對這種選舉來說是哪一層（2026-10-05）。
+ *
+ * 縣市長、縣市議員、立委的參選紀錄只能指到「縣市層級」或「這種選舉的選區」；指到鄉鎮、村里或別種選舉的選區
+ * 都是掛錯層級——簡嘉佑、陳映辰、連佳振的議員紀錄在畫面上變成「桃園區」「大雅區」「豐原區」這種假選區，
+ * 就是同一個人的里長資料被拿來充當議員的地區。規則跟 SQL 的 region_is_electoral_district 同一套。
+ */
+export type RegionFit = "district" | "county" | "wrong";
+
+export function regionFitFor(
+  electionType: string,
+  row: { region?: string | null; sub_region?: string | null; village?: string | null } | null | undefined,
+): RegionFit {
+  if (!row) return "wrong";
+  const sub = row.sub_region ?? null;
+  const village = row.village ?? null;
+  if (village) return "wrong";
+  // 「全國」那一列對立委是「還沒分出不分區／原住民」的縣市層級（要補選區），對縣市長、議員就是掛錯
+  if (!sub) return !row.region ? "wrong" : row.region !== "全國" || electionType === "立法委員" ? "county" : "wrong";
+  if (electionType === "縣市議員") return /^第[0-9]+選舉區$/.test(sub) ? "district" : "wrong";
+  if (electionType === "立法委員") {
+    return /第[0-9]+選區$/.test(sub) || (row.region === "全國" && (LEGISLATOR_AT_LARGE_SEATS as readonly string[]).includes(sub))
+      ? "district"
+      : "wrong";
+  }
+  return "wrong";
+}
+
+/**
  * 立法委員的「選區」（2026-10-05，補選區自動派工）。
  *
  * 立委有兩種形狀，regions 表各自長這樣：

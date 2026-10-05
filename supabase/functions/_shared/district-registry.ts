@@ -10,12 +10,16 @@
  * 名冊裡沒有該縣市（例如新竹縣 2026，官方還沒公告逐里名單，migration 沒寫這個縣市）、
  * 或查詢本身出錯，都不擋——這是「統一寫法」的輔助檢查，不是資料驗證的守門，查不到名冊
  * 不代表選區不存在，錯誤的代價應該是「放行」而不是「擋住整批交件」。
+ *
+ * 2026-10-05 起 2026 這一屆改以中選會登記彙總表的完整選區清單為準（electoral-district.ts 的
+ * COUNCIL_DISTRICT_COUNT_2026，含原住民選舉區），不查 electoral_district_areas；其他屆別照舊。
  */
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
-import { COUNCIL_ABORIGINAL_DISTRICTS, isCouncilAboriginalDistrict } from "./electoral-district.ts";
+import { COUNCIL_ABORIGINAL_DISTRICTS, isCouncilAboriginalDistrict, officialCouncilDistricts } from "./electoral-district.ts";
+import { normalizeCityName } from "./cec-city-codes.ts";
 
 export type DistrictRegistryStatus = "ok" | "unknown" | "no_registry";
 
@@ -60,6 +64,7 @@ async function loadRegistry(supabase: SupabaseLike, electionId: number): Promise
 
 /**
  * 檢查 election_id／region／district（已正規化成「第NN選舉區」）在名冊裡站不站得住腳。
+ * - 2026：在中選會登記彙總表的選區清單裡 → "ok"，不在 → "unknown"（附整份清單）
  * - 查詢出錯，或名冊裡根本沒有這個縣市（那個縣市在這屆 electoral_district_areas 一筆都沒有）→ "no_registry"（不擋）
  * - 名冊裡有這個縣市，選區號碼也在裡面，或是該縣市的原住民保留議席 → "ok"
  * - 名冊裡有這個縣市，但選區號碼兩邊都對不上 → "unknown"
@@ -70,6 +75,12 @@ export async function checkElectoralDistrict(
   region: string,
   district: string,
 ): Promise<DistrictRegistryResult> {
+  // 2026 有中選會登記彙總表的完整選區清單（含原住民選舉區）：以它為準，不再靠「號碼大於一般選區就放行」猜
+  // （2026-10-05；那條放行讓台中市第 17 選舉區被誤擋、也讓屏東縣第 08～16 選舉區進來卻落不了庫，見 electoral-district.ts）
+  const official = officialCouncilDistricts(electionId, normalizeCityName(region) ?? region);
+  if (official) {
+    return official.includes(district) ? { status: "ok" } : { status: "unknown", validDistricts: official };
+  }
   let byRegion: Map<string, Set<string>>;
   try {
     byRegion = await loadRegistry(supabase, electionId);

@@ -32,6 +32,7 @@ import { classifyWard } from '../lib/ward-classification'
 import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
 import { groupByVillage } from '../lib/village-grouping'
 import { districtsOf, groupByDistrict } from '../lib/district-grouping'
+import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import type { RouteLocationRaw } from 'vue-router'
@@ -51,16 +52,16 @@ function withCurrentElectionData(politician: any): any {
   const electionData = getPoliticianElectionData(politician, electionId.value)
   // 號次一定要換成這一屆的：全域人物物件會帶著上一屆（例如 2022）的號次，從 2022 切到 2026 會殘留（09-28 維護者）
   if (!electionData) return { ...politician, candNo: undefined }
+  const electionType = electionData.electionType || politician.electionType
   return {
     ...politician,
     candNo: electionData.candNo,
     candidateStatus: electionData.candidateStatus,
     sourceNote: electionData.sourceNote,
     position: electionData.position || politician.position,
-    electionType: electionData.electionType || politician.electionType,
-    region: electionData.region || politician.region,
-    subRegion: electionData.subRegion || politician.subRegion,
-    village: electionData.village || politician.village,
+    electionType,
+    // 議員這一屆沒有選區就列「選區待補」，不借人物的里或立委選區冒充（2026-10-05，lib/election-area.ts）
+    ...electionArea(electionType, electionData, politician),
   }
 }
 const { globalRegion } = useGlobalState()
@@ -480,18 +481,19 @@ const wardKind = computed(() => classifyWard({
  * 兩者共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
  * 不會同時在畫面上，而換縣市或換鄉鎮時下面的 watch 會把它重設。
  *
- * 選區沒填的人（2022 有 41 筆議員的選區是空的）會被分組函式收進「未標示選舉區」那一組，
+ * 沒有正式選區的人（2022 有 44 筆、2026 有 105 筆議員只到縣市）會被分組函式收進「選區待補」那一組，
  * 不會從畫面上消失；那一組不進快篩清單，因為它不是一個點得下去的選區。
  */
 const selectedDistrict = ref<string>('All')
 function toggleDistrictChip(district: string) {
   selectedDistrict.value = selectedDistrict.value === district ? 'All' : district
 }
-function groupsByDistrict(people: Politician[]) {
+function groupsByDistrict(people: Politician[], electionType: string) {
   const picked = selectedDistrict.value === 'All'
     ? people
     : people.filter(c => c.subRegion === selectedDistrict.value)
-  return groupByDistrict(picked).map(g => ({ label: g.district, people: g.people }))
+  // 只認這種選舉的正式選區寫法，其餘收進「選區待補」（2026-10-05：不要冒出「大雅區」「臺中市第03選區」這種假選區）
+  return groupByDistrict(picked, electionType).map(g => ({ label: g.district, people: g.people }))
 }
 
 /** 里名快篩 chip：點了只看那個里，再點一次取消——跟右側「村里」篩選是同一個 selectedVillage */
@@ -551,8 +553,8 @@ function buildSection(spec: PositionSpec): LevelSection {
   if (spec.display === 'district') {
     // 議員與原住民區代表共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
     // 不會同時在畫面上，而換縣市或換鄉鎮時 watch 會把它重設。
-    const groups = withAnchors(spec, groupsByDistrict(people))
-    return { spec, people, groups, chips: districtsOf(people), empty: groups.length === 0, anchor }
+    const groups = withAnchors(spec, groupsByDistrict(people, spec.type))
+    return { spec, people, groups, chips: districtsOf(people, spec.type), empty: groups.length === 0, anchor }
   }
   if (spec.display === 'village') {
     // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，

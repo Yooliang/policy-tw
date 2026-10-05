@@ -376,3 +376,103 @@ Deno.test("applyCandidacy：中選會名單上沒有這個選區（花蓮縣第1
   assertEquals(row?.region_id, 950);
   assertStringIncludes(outcome.message ?? "", "只記到縣市");
 });
+
+/**
+ * 縣市議員選區錯亂（2026-10-05，見 council-district-flow.test.ts 檔頭）：落庫這一關。
+ * 選區先正規化（臺、第4選區、只寫在 position）；既有紀錄掛在村里、鄉鎮或立委選區（同一人同一屆只有一筆，
+ * 里長紀錄改成議員時原本的里會留下來）又沒給得出選區，就改記到縣市——不准議員掛村里。
+ */
+const TAICHUNG = { id: 950, region: "台中市", sub_region: null, village: null };
+const TAICHUNG_05 = { id: 951, region: "台中市", sub_region: "第05選舉區", village: null };
+const VILLAGE = { id: 4305, region: "台中市", sub_region: "大雅區", village: "上雅里" };
+const LEG_03 = { id: 960, region: "台中市", sub_region: "臺中市第03選區", village: null };
+
+Deno.test("applyCandidacy：議員縣市寫「臺」、選區寫「第5選區」→ 照樣對到「台中市 第05選舉區」", async () => {
+  const { client, tables } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], regions: [TAICHUNG, TAICHUNG_05], politician_elections: [] });
+  const outcome = await applyContribution(client, candidacyRow({ region: "臺中市", electoral_district: "第5選區" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL)?.region_id, 951);
+});
+
+Deno.test("applyCandidacy：選區只寫在 position（2026-09-28 以前的交件）→ 也對得到選區，不掉到縣市", async () => {
+  const { client, tables } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], regions: [TAICHUNG, TAICHUNG_05], politician_elections: [] });
+  const outcome = await applyContribution(client, candidacyRow({ region: "台中市", position: "臺中市第5選舉區" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL)?.region_id, 951);
+});
+
+Deno.test("applyCandidacy：縣市寫「臺」、沒有選區的縣市長 → 落到「台」的縣市層級，不是留空", async () => {
+  const { client, tables } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], regions: [TAICHUNG], politician_elections: [] });
+  const outcome = await applyContribution(client, candidacyRow({ election_type: "縣市長", region: "臺中市" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL)?.region_id, 950);
+});
+
+Deno.test("applyCandidacy：里長紀錄改成議員、沒給得出選區 → 不留在里上，改記到縣市並講出來", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [TAICHUNG, TAICHUNG_05, VILLAGE],
+    // 正式狀態的里長紀錄不准改寫成議員（electionTypeSwitch 會擋），傳聞的可以——改寫時原本的里會留下來
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "村里長", candidate_status: "rumored", region_id: 4305 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ region: "台中市" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.id === 9001);
+  assertEquals(row?.election_type, "縣市議員");
+  assertEquals(row?.region_id, 950, "議員不准掛村里");
+  assertStringIncludes(outcome.message ?? "", "大雅區 上雅里");
+  assertStringIncludes(outcome.message ?? "", "已改記到縣市");
+});
+
+Deno.test("applyCandidacy：既有議員紀錄掛在立委選區 → 有給選區就換成議員選區", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [TAICHUNG, TAICHUNG_05, LEG_03],
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 960 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ region: "台中市", electoral_district: "第05選舉區" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.id === 9001)?.region_id, 951);
+  assertEquals(outcome.message?.includes("已改記到縣市"), false);
+});
+
+Deno.test("applyCandidacy：既有議員紀錄掛在立委選區、這次選區對不上 → 退到縣市，不留在立委選區", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [TAICHUNG, TAICHUNG_05, LEG_03],
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 960 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ region: "台中市", electoral_district: "第99選舉區" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.id === 9001)?.region_id, 950);
+  assertStringIncludes(outcome.message ?? "", "臺中市第03選區");
+});
+
+Deno.test("applyCandidacy：縣市長紀錄掛在鄉鎮 → 改記到縣市；議員已在正式選區、這次沒帶選區 → 不動", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }, { id: "p2", name: "李小華", merged_into: null }],
+    regions: [TAICHUNG, TAICHUNG_05, { id: 970, region: "台中市", sub_region: "東勢區", village: null }],
+    politician_elections: [
+      { id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市長", candidate_status: "registered", region_id: 970 },
+      { id: 9002, politician_id: "p2", election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 951 },
+    ],
+  });
+  await applyContribution(client, candidacyRow({ election_type: "縣市長", region: "台中市" }));
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.id === 9001)?.region_id, 950);
+  await applyContribution(client, { ...candidacyRow({ politician_id: "p2", name: "李小華", region: "台中市" }), id: "c2" });
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.id === 9002)?.region_id, 951);
+});
+
+Deno.test("applyCandidacy：2026 屏東縣第13選舉區（登記彙總表的選區清單有、保留議席清單沒查證）regions 沒有 → 建一列；第17 不在清單 → 不建", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "鄭志偉", merged_into: null }, { id: "p2", name: "李小華", merged_into: null }],
+    regions: [{ id: 800, region: "屏東縣", sub_region: null, village: null }],
+    politician_elections: [],
+  });
+  await applyContribution(client, candidacyRow({ name: "鄭志偉", region: "屏東縣", electoral_district: "第13選舉區" }));
+  const created = (tables.get("regions") ?? []).find((r) => r.region === "屏東縣" && r.sub_region === "第13選舉區");
+  assertEquals(typeof created?.id, "number", "2026 以中選會登記彙總表為準，這個選區是真的");
+  assertEquals((tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL)?.region_id, created?.id);
+  await applyContribution(client, { ...candidacyRow({ politician_id: "p2", name: "李小華", region: "屏東縣", electoral_district: "第17選舉區" }), id: "c2" });
+  assertEquals((tables.get("regions") ?? []).some((r) => r.sub_region === "第17選舉區"), false, "清單外的號碼不建");
+});
