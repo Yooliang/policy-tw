@@ -12,6 +12,8 @@ import PoliticianGrid from './election/PoliticianGrid.vue'
 import PoliticianDropdown from './election/PoliticianDropdown.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
+import PolicyCompare from '../components/PolicyCompare.vue'
+import { gridCompareGroups } from '../lib/policy-compare'
 import Hero from '../components/Hero.vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
@@ -30,8 +32,8 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
 import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
-import { groupByVillage } from '../lib/village-grouping'
-import { districtsOf, groupByDistrict } from '../lib/district-grouping'
+import { groupByVillage, UNLABELED_VILLAGE } from '../lib/village-grouping'
+import { districtsOf, groupByDistrict, UNLABELED_DISTRICT } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
@@ -569,6 +571,18 @@ function sectionsOf(types: readonly string[]): LevelSection[] {
   return types.map(positionSpec).filter((s): s is PositionSpec => !!s).map(buildSection)
 }
 const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
+
+/**
+ * 政見並排比較（#364）：卡片排法的職位要先拆成「同一場」（縣市長一個縣市一場、立委一個選區一場…，
+ * 規則在 lib/policy-compare.ts）；依選區、依村里分組的職位已經分好，只要跳過「選區待補」「未標示里別」——
+ * 那一組的人不知道是不是同一場。
+ */
+function compareGroupsOf(section: LevelSection) {
+  return gridCompareGroups(section.people, section.spec.type)
+}
+function isComparableGroup(label: string): boolean {
+  return label !== UNLABELED_DISTRICT && label !== UNLABELED_VILLAGE
+}
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 
 /**
@@ -956,8 +970,13 @@ usePageHead({
             直轄市區  原住民區：區長、區代表｜里長；一般區：區長官派（一行小字）｜里長
           這裡只剩各層的「附加物」：全台頁的立委引導、縣市頁的名錄、鄉鎮層的空白提示。
         -->
+        <!--
+          政見並排比較（2026-10-05 #364）：只放在「這一層」的職位，每個同職位同選區一張（收合的 <details>，內容在預渲染 HTML 裡）。
+          下一層（縣市頁的鄉鎮市長、全台頁的各縣市長）到了它自己那一頁才比——那一頁它是「這一層」。
+          卡片排法的職位依 gridCompareGroups 拆選區；依選區、依村里分組的職位直接用那一組（「選區待補」「未標示里別」不並排）。
+        -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template><template #after><PolicyCompare v-for="g in compareGroupsOf(section)" :key="g.key" :people="g.people" :policies="policies" :election-id="electionId" :categories="categories" :position-label="section.spec.label" :district-label="g.label || undefined" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -968,7 +987,7 @@ usePageHead({
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
-          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
+          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template><template #group-after="{ group }"><PolicyCompare v-if="isComparableGroup(group.label)" :people="group.people" :policies="policies" :election-id="electionId" :categories="categories" :position-label="section.spec.label" :district-label="group.label" /></template></ChipFilteredGroups>
         </template>
 
         <!-- 直轄市一般區：區長市府指派，這一層沒有職位，一行小字說明，不擋里長名單 -->

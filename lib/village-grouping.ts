@@ -8,7 +8,7 @@
  * 2026-10-04 審查發現：舊寫法只留「在 knownVillages 裡」的人，其餘悄悄被濾掉，
  * 一個人都不剩地從畫面消失。改成收進「未標示里別」這組，放在最後，不漏掉任何人。
  */
-const UNLABELED_VILLAGE = '未標示里別'
+export const UNLABELED_VILLAGE = '未標示里別'
 
 export interface VillageGroup<T> {
   village: string

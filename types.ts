@@ -160,6 +160,39 @@ export interface Policy {
   stanceOppose: number;
   stancePriority: number;
   relatedPolicyIds?: string[]; // IDs of predecessor or successor policies (Cross-term tracking)
+  /**
+   * 政見三要素（#364，視圖 policies_with_logs.elements）：查過的要素才有一筆。
+   * **陣列裡沒有的要素＝未調查**；有而 stated=false＝未說明（原文沒寫）。兩者不能混，規則在 lib/policy-elements.ts。
+   * 視圖還沒有這一欄時（舊快照、資料流程那支 PR 還沒上線）是 undefined，一律當成三個都未調查。
+   */
+  elements?: PolicyElement[];
+}
+
+export type PolicyElementKind = 'target' | 'deadline' | 'funding';
+
+/** 政見三要素的一個要素（policy_elements 一列）。跟日本站 keifu 的 policy_elements 同一套欄位 */
+export interface PolicyElement {
+  element: PolicyElementKind;
+  /** true＝原文有寫；false＝查過原文、沒寫（未說明） */
+  stated: boolean;
+  /** 原文寫的事實（120 字內）；stated=false 時是 null */
+  text: string | null;
+  /** 達成期限換算的日期（會計年度是曆年）；換不成日期或不是期限就是 null */
+  deadlineDate: string | null;
+  /** 原句在原文的位置（公報第幾頁哪一段、影片時間點） */
+  sourceLocator: string | null;
+  /** 這個要素的出處（查的是哪份原文）；stated=false 也有 */
+  source: PolicyElementSource | null;
+}
+
+export interface PolicyElementSource {
+  url: string;
+  title?: string | null;
+  publisher?: string | null;
+  /** official 官方／self 本人／media 媒體／other 其他（sources.source_kind） */
+  kind?: string | null;
+  /** Wayback Machine 的存檔網址（選舉公報下架後還看得到） */
+  archiveUrl?: string | null;
 }
 
 
@@ -420,6 +453,19 @@ export interface RawPolicy {
   removed_at?: string | null;
   logs?: RawTrackingLog[];
   related_policy_ids?: string[];
+  /** 政見三要素（#364）：視圖 policies_with_logs 最後一欄；舊視圖沒有這一欄 */
+  elements?: RawPolicyElement[] | null;
+}
+
+export interface RawPolicyElement {
+  element: string;
+  stated: boolean;
+  text?: string | null;
+  deadline_date?: string | null;
+  source_locator?: string | null;
+  source_url?: string | null;
+  updated_at?: string | null;
+  source?: { url?: string | null; title?: string | null; publisher?: string | null; kind?: string | null; archive_url?: string | null } | null;
 }
 
 export interface RawDiscussionComment {

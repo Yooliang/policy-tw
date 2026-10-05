@@ -17,6 +17,7 @@ import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
+import { mapPolicyElements } from '../lib/policy-elements'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -302,6 +303,8 @@ export function mapPolicy(row: RawPolicy): Policy {
       description: l.description || undefined,
     })),
     relatedPolicyIds: (row.related_policy_ids || []).filter((id): id is string => typeof id === 'string'),
+    // 政見三要素（#364）：視圖沒有這一欄時是 undefined，畫面一律當成三個都未調查
+    elements: mapPolicyElements(row.elements),
   }
 }
 
