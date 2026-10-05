@@ -72,6 +72,23 @@ export interface TaskContextData {
   verification_sources?: TaskSourceHint[];
 }
 
+/**
+ * 名單清查要拿哪一塊「我們現有的人」給代理（2026-10-05）：以鄉鎮市區為單位的清查（2026 村里長、已投票屆別的
+ * 中選會名單缺口），target.region 是「縣市＋鄉鎮」這一串，另外帶 county／township；縣市層級的只有 region。
+ */
+export function rosterOursScope(target: Obj): { county: string; township: string | null } | null {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const county = str(target.county) ?? str(target.region);
+  if (!county) return null;
+  return { county, township: str(target.county) ? str(target.township) : null };
+}
+
+/** 已投票屆別的名單缺口（target.list_source＝cec）：名單就在中選會資料庫、缺的人已經列好，跟 2026 找登記名冊不同 */
+export const ROSTER_CEC_GAP_HINT =
+  "這一屆已經投票：中選會選舉資料庫（db.cec.gov.tw）上的名單我們已經比對過，缺的人列在任務 target.missing（姓名、選區或村里、當選與否、號次）。" +
+  "逐位到中選會核對後用 candidacy 補一筆（candidate_status 填 confirmed、election_result 照中選會填），附你核對的中選會頁面；ours 是我們現有的，" +
+  "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。";
+
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
 const PROFILE_FIELDS = ["birth_year", "current_position", "avatar_url", "education_level", "bio", "sub_region"] as const;
 
@@ -232,18 +249,27 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
     case "roster_check": {
-      const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string } | null;
+      const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string; list_source?: string } | null;
       // politician_elections 的 join 會把人物包在 politicians 裡，攤平成代理好比對的樣子
       const ours = (r?.rows ?? []).map((row) => {
         const who = (row.politicians ?? {}) as Obj;
-        return { name: who.name, party: who.party, region: r?.region ?? who.region, candidate_status: row.candidate_status, position: row.position };
+        const at = (row.regions ?? {}) as Obj;
+        return {
+          name: who.name, party: who.party, region: r?.region ?? who.region,
+          // 指到的選區／鄉鎮／村里（有的話），比對時看得出是不是同一個地方的同名者
+          ...(at.sub_region ? { sub_region: at.sub_region } : {}),
+          ...(at.village ? { village: at.village } : {}),
+          candidate_status: row.candidate_status, position: row.position,
+        };
       });
       return {
         region: r?.region ?? null,
         ours_count: ours.length,
         ours,
         previous_checks: r?.history ?? [],
-        hint: "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
+        hint: r?.list_source === "cec"
+          ? ROSTER_CEC_GAP_HINT
+          : "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。",
       };
     }
     case "question": {
@@ -404,29 +430,41 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     const electionId = typeof target.election_id === "number" ? target.election_id : null;
     const region = typeof target.region === "string" ? target.region : null;
     const electionType = typeof target.election_type === "string" ? target.election_type : null;
-    if (electionId && region && electionType) {
+    const scope = rosterOursScope(target);
+    if (electionId && region && electionType && scope) {
       // 縣市怎麼算跟 SQL 的 ours 一模一樣：COALESCE(參選紀錄選區所屬縣市, 人物的縣市)。
       // 原本撈全國同類選舉前 300 筆再在這裡篩縣市——縣市議員全國上千人，目標縣市的人
       // 可能根本不在那 300 筆裡，代理會以為我們缺人而重複補（2026-09-18）。
       // 拆兩段在資料庫篩：有選區的看選區、沒選區的看人物；各自翻頁撈完。
+      // 以鄉鎮市區為單位的清查（村里長等，target.region 是「縣市＋鄉鎮」）再加鄉鎮條件（2026-10-05；
+      // 在這之前拿「台北市中山區」去比 regions.region，ours 永遠是空的，代理會以為我們一個都沒有而重複補）。
       const base = "candidate_status, position, region_id";
       const [byDistrict, byPerson, history] = await Promise.all([
-        fetchAllRows<Obj>("roster ours by district", (from, to) => supabase.from("politician_elections")
-          .select(`${base}, regions!inner(region), politicians!inner(id, name, party, region)`)
-          .eq("election_id", electionId).eq("election_type", electionType)
-          .neq("candidate_status", "not_running").eq("regions.region", region)
-          .order("politician_id", { ascending: true }).range(from, to)),
-        fetchAllRows<Obj>("roster ours by person", (from, to) => supabase.from("politician_elections")
-          .select(`${base}, politicians!inner(id, name, party, region)`)
-          .eq("election_id", electionId).eq("election_type", electionType)
-          .neq("candidate_status", "not_running").is("region_id", null).eq("politicians.region", region)
-          .order("politician_id", { ascending: true }).range(from, to)),
+        fetchAllRows<Obj>("roster ours by district", (from, to) => {
+          const q = supabase.from("politician_elections")
+            .select(`${base}, regions!inner(region, sub_region, village), politicians!inner(id, name, party, region)`)
+            .eq("election_id", electionId).eq("election_type", electionType)
+            .neq("candidate_status", "not_running").eq("regions.region", scope.county);
+          return (scope.township ? q.eq("regions.sub_region", scope.township) : q)
+            .order("politician_id", { ascending: true }).range(from, to);
+        }),
+        fetchAllRows<Obj>("roster ours by person", (from, to) => {
+          const q = supabase.from("politician_elections")
+            .select(`${base}, politicians!inner(id, name, party, region, sub_region)`)
+            .eq("election_id", electionId).eq("election_type", electionType)
+            .neq("candidate_status", "not_running").is("region_id", null).eq("politicians.region", scope.county);
+          return (scope.township ? q.eq("politicians.sub_region", scope.township) : q)
+            .order("politician_id", { ascending: true }).range(from, to);
+        }),
         supabase.from("roster_checks")
           .select("checked_at, cec_count, ours_count, submitted, agent_name, source_url")
           .eq("election_id", electionId).eq("region", region).eq("election_type", electionType)
           .order("checked_at", { ascending: false }).limit(3),
       ]);
-      data.roster = { rows: [...byDistrict, ...byPerson], history: history.data ?? [], region };
+      data.roster = {
+        rows: [...byDistrict, ...byPerson], history: history.data ?? [], region,
+        ...(target.list_source === "cec" ? { list_source: "cec" } : {}),
+      };
     }
   }
   if (taskType === "duplicate_policy" && pid) {
