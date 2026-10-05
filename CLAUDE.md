@@ -75,7 +75,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - 核心：`elections`、`election_types`、`politicians`、`politician_elections`、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347 第一階段：舊的 `source_url` 欄仍保留、由觸發器同步）
 - 社群：`discussions`、`discussion_comments`、`comment_replies`、`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
 - 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`
-- 參考：`categories`、`locations`、`regions`、`electoral_district_areas`、`admin_divisions`（內政部官方行政區代碼，`regions.admin_code` 指過去；選舉區列沒有代碼。髒列候選看視圖 `region_audit`，正常是空的；#348）
+- 參考：`categories`、`locations`、`regions`、`electoral_district_areas`、`admin_divisions`（內政部官方行政區代碼，`regions.admin_code` 指過去；選舉區列沒有代碼。髒列候選看視圖 `region_audit`，正常是空的；#348）、`election_districts`（一列＝一場選舉、一種職位、一個選舉區＋應選名額，寫法跟 `cec_candidates` 同一套 region／sub_region／village；名額空白＝還沒查證，**不要用候選人數或當選人數推**；缺多少看視圖 `election_seat_totals`；#344）
 - AI 用量：`ai_prompts`、`ai_usage_logs`、`model_pricing`、`pipeline_snapshots`
 
 ENUMs：`policy_status`、`political_party`、`election_type`、`politician_status`
@@ -88,8 +88,15 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 | `politician_elections` | `election_id` | FK → `elections.id`（年份） | 2022, 2024, 2026 |
 | `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
 
-- `elections.id` 就是選舉年份，**不是自增 ID**
-- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）
+- 既有三筆的 `elections.id` 就是選舉年份，大量讀取端（SQL、Edge Function、前端、Worker、協議）把它當年份用
+- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）；這些網址要一直能用（小良哥 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）
+
+**過渡中（#344 第一階段，2026-10-05）**：年份存不下補選、罷免、重行選舉，所以加了新識別，舊的不動：
+- `elections.election_key`＝一場選舉的識別，格式 `投票日_種類[_地區代碼]`（`2022-11-26_local`、`2024-01-13_national`；種類 local／national／by 補選／recall 罷免／rerun 重行選舉），**建立後不改**（觸發器擋），新列沒給就自動產生
+- `election_reason`（事由）、`election_types`（這次選哪些職位，直接存在選舉上；舊表 `election_types` 第二階段刪，過渡期觸發器同步）、`notice_date`（選舉公告日）、`turnout`（投票率）
+- `id` 留著當內部整數主鍵、外鍵都不搬；**之後新增的選舉 id 不保證是年份**——新程式碼別再從 id 推年份或排先後，年份與先後用 `election_date`
+- `end_date` 名不副實（三筆存投票日、新建時卻寫 12-31），新程式碼讀 `election_date`
+- 還把 id 當年份的地方（第二階段要改）列在 #344 第一階段 PR 的盤點清單
 
 #### Electoral District Mapping
 `electoral_district_areas` 把鄉鎮市區對到選舉區，供議員篩選：`region`（縣市）+ `electoral_district`（第01選舉區）+ `township` + `election_id`（年份）。
