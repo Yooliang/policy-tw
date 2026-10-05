@@ -1,5 +1,6 @@
 /**
- * 直轄市的區選到里長時，依里分組顯示（見 ElectionPage.vue 的 wardVillageGroups，2026-10-04）。
+ * 村里長名單依村里分組顯示（見 ElectionPage.vue 的 villageChiefGroups 與
+ * pages/election/VillageChiefGroups.vue，2026-10-04）。直轄市的區與縣轄鄉鎮市都用這一套。
  *
  * 分組清單（availableVillages／knownVillages）來自「這個區有哪些里有候選人」，用來排順序；
  * 但候選人自己的 village 欄位不保證一定在這份清單裡——可能是空值（資料漏填），
