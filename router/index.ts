@@ -45,6 +45,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/PolicyDeepAnalysis.vue'),
   },
   {
+    // 政策脈絡頁（#349，2026-10-06）：正見.tw 由 Worker 邊緣渲染、進網站地圖；脈絡一覽照舊在 /analysis
+    path: '/lineage/:lineageId',
+    name: 'lineage',
+    component: () => import('../pages/LineagePage.vue'),
+  },
+  {
     // 選舉一覽（#344，2026-10-05）：今後與過去的選舉；各場的網址照舊是 /election/:electionId
     path: '/elections',
     name: 'elections',
