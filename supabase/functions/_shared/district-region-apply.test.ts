@@ -306,3 +306,73 @@ Deno.test("applyCandidacy：立委填「全國」卻沒給選區 → 留空，�
   assertEquals(row?.region_id ?? null, null);
   assertStringIncludes(outcome.message ?? "", "平地原住民");
 });
+
+/**
+ * 原住民選區的 regions 列（2026-10-05）：花蓮、台東、屏東、苗栗、新竹縣等縣市的原住民選區 regions 一列都沒有。
+ * cec-sync 補抓原住民選區之後，補選區／當選缺紀錄任務會請代理填這些選區；有官方根據（中選會名單上有、
+ * 或查證過的保留議席清單）才建列，其他照舊不建。
+ */
+const HUALIEN = { id: 950, region: "花蓮縣", sub_region: null, village: null };
+const CEC_HUALIEN_05 = { id: 1, election_id: 2022, election_type: "縣市議員", region: "花蓮縣", sub_region: "第05選舉區", name: "蔡依靜" };
+
+Deno.test("applyCandidacy：2022 花蓮縣第05選舉區（平地原住民）regions 沒有、中選會名單上有 → 建一列並指過去", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [HUALIEN],
+    politician_elections: [],
+    cec_candidates: [CEC_HUALIEN_05],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ election_id: 2022, region: "花蓮縣", electoral_district: "第05選舉區", candidate_status: "confirmed" }));
+  assertEquals(outcome.status, "applied");
+  const created = (tables.get("regions") ?? []).find((r) => r.region === "花蓮縣" && r.sub_region === "第05選舉區");
+  assertEquals(typeof created?.id, "number", "要建出「花蓮縣 第05選舉區」");
+  assertEquals(created?.village, null);
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, created?.id);
+  assertEquals(outcome.message?.includes("只記到縣市"), false);
+});
+
+Deno.test("applyCandidacy：代理寫「臺東縣」→ 建出來的列用「台東縣」，第二位同選區沿用同一列", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }, { id: "p2", name: "李小華", merged_into: null }],
+    regions: [],
+    politician_elections: [],
+    cec_candidates: [{ id: 2, election_id: 2022, election_type: "縣市議員", region: "台東縣", sub_region: "第12選舉區", name: "甲" }],
+  });
+  await applyContribution(client, candidacyRow({ election_id: 2022, region: "臺東縣", electoral_district: "第12選舉區", candidate_status: "confirmed" }));
+  await applyContribution(client, {
+    ...candidacyRow({ politician_id: "p2", name: "李小華", election_id: 2022, region: "台東縣", electoral_district: "第12選舉區", candidate_status: "confirmed" }),
+    id: "c2",
+  });
+  const rows = (tables.get("regions") ?? []).filter((r) => r.sub_region === "第12選舉區");
+  assertEquals(rows.map((r) => r.region), ["台東縣"], "只建一列、縣市用「台」");
+  const pe = tables.get("politician_elections") ?? [];
+  assertEquals(pe.find((r) => r.politician_id === POL)?.region_id, rows[0].id);
+  assertEquals(pe.find((r) => r.politician_id === "p2")?.region_id, rows[0].id);
+});
+
+Deno.test("applyCandidacy：2026 桃園市第13選舉區（查證過的保留議席清單）regions 沒有 → 建一列", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [],
+    politician_elections: [],
+  });
+  await applyContribution(client, candidacyRow({ region: "桃園市", electoral_district: "第13選舉區" }));
+  const created = (tables.get("regions") ?? []).find((r) => r.region === "桃園市" && r.sub_region === "第13選舉區");
+  assertEquals(typeof created?.id, "number");
+});
+
+Deno.test("applyCandidacy：中選會名單上沒有這個選區（花蓮縣第11選舉區）→ 照舊不建、落到縣市層級", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [HUALIEN],
+    politician_elections: [],
+    cec_candidates: [CEC_HUALIEN_05],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ election_id: 2022, region: "花蓮縣", electoral_district: "第11選舉區", candidate_status: "confirmed" }));
+  assertEquals(outcome.status, "applied");
+  assertEquals((tables.get("regions") ?? []).length, 1, "沒有官方根據的選區不新建");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 950);
+  assertStringIncludes(outcome.message ?? "", "只記到縣市");
+});

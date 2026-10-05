@@ -27,6 +27,14 @@ export const SUBJECT_MAP: Record<string, { subjectId: string; legisId: string; d
   LegislatorPlainIndigenous: { subjectId: "L0", legisId: "L2", defaultLevel: "N" },
   LegislatorMountainIndigenous: { subjectId: "L0", legisId: "L3", defaultLevel: "N" },
   LegislatorParty: { subjectId: "L0", legisId: "L4", defaultLevel: "N" },
+  // 議員與鄉鎮市民代表的原住民選區也是同一份清單裡的另一筆場次（legislator_type_id：T2 平地、T3 山地；
+  // 代表 R2 平地）。選區號碼接在一般選區後面（台北市第07、08 選舉區），檔案一樣是逐縣市（2026-10-05 補；
+  // 在這之前 cec-sync 只抓 T1／R1，2022 議員的原住民選區 153 人、代表的平地原住民選區 134 人一位都沒進 cec_candidates）
+  CouncilMemberPlainIndigenous: { subjectId: "T1", legisId: "T2", defaultLevel: "A" },
+  CouncilMemberMountainIndigenous: { subjectId: "T1", legisId: "T3", defaultLevel: "A" },
+  CountyCouncilMemberPlainIndigenous: { subjectId: "T2", legisId: "T2", defaultLevel: "A" },
+  CountyCouncilMemberMountainIndigenous: { subjectId: "T2", legisId: "T3", defaultLevel: "A" },
+  CityRepresentativesPlainIndigenous: { subjectId: "R2", legisId: "R2", defaultLevel: "A" },
 };
 
 /** 全國一個選區的立委種類 → cec_candidates.sub_region（跟 regions 的「全國／不分區」等列同一套名稱） */

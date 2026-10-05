@@ -23,7 +23,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
-import { legislatorDistrictKey } from "./electoral-district.ts";
+import { isCouncilAboriginalDistrict, legislatorDistrictKey } from "./electoral-district.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -218,9 +218,8 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
  * 縣市議員候選人有 electoral_district（已經被 contribute-handler.ts 統一寫法）時，
  * 把參選紀錄的 region_id 指到 regions 表對應的那一列（region＋sub_region＝選區）。
  *
- * regions 沒有那一列就不動 region_id，不新建——這張表的既有列是怎麼跟 2022 資料掛上的，
- * 目前看不出穩定規則（見任務回報），貿然新建可能建出跟既有列不一致的資料形狀，留給下一步
- * （補候選人選區）處理。
+ * regions 沒有那一列時，只有「選區有官方根據」才新建（2026-10-05，見 councilDistrictConfirmed）；
+ * 其他照舊不動 region_id、不新建——形狀不明的列建下去就是下一批髒列（#348），交給縣市層級退路與回覆。
  */
 async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
   if (electionType === "立法委員") return await legislatorRegionPatch(supabase, p);
@@ -228,9 +227,39 @@ async function districtRegionPatch(supabase: SupabaseLike, electionType: string,
   const district = str(p.electoral_district);
   const region = str(p.region);
   if (!district || !region) return {};
-  const { data } = await supabase.from("regions").select("id").eq("region", region).eq("sub_region", district).maybeSingle();
-  const regionId = (data as { id?: number } | null)?.id;
-  return regionId ? { region_id: regionId } : {};
+  const county = region.replace(/臺/g, "台");
+  const find = async () => {
+    for (const r of new Set([region, county])) {
+      // query-bounds: ok —（region, sub_region, village）是唯一鍵，選區列最多一列
+      const { data } = await supabase.from("regions").select("id").eq("region", r).eq("sub_region", district).maybeSingle();
+      const id = (data as { id?: number } | null)?.id;
+      if (id) return id;
+    }
+    return null;
+  };
+  const regionId = await find();
+  if (regionId) return { region_id: regionId };
+  // 原住民選區（2026-10-05）：regions 只有部分縣市有這幾列（花蓮、台東、屏東、苗栗、新竹縣……一列都沒有），
+  // 中選會名單補進原住民選區之後，「補選區」與「當選缺紀錄」任務會請代理填這些選區，查不到列就永遠補不上。
+  // 只在選區有官方根據時才建：中選會名單（已投票屆別，cec_candidates）上有這個縣市這個選區，或是查證過的
+  // 原住民保留議席清單（COUNCIL_ABORIGINAL_DISTRICTS）。形狀跟既有選區列相同（縣市用「台」＋「第NN選舉區」）。
+  if (!(await councilDistrictConfirmed(supabase, int(p.election_id), county, district))) return {};
+  const { data: created } = await supabase.from("regions")
+    .insert({ region: county, sub_region: district, village: null }).select("id").maybeSingle();
+  // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
+  const id = (created as { id?: number } | null)?.id ?? await find();
+  return id ? { region_id: id } : {};
+}
+
+/** 這個議員選區有沒有官方根據：查證過的原住民保留議席清單，或中選會名單（已投票的屆別）上有人登記在這個選區 */
+async function councilDistrictConfirmed(supabase: SupabaseLike, electionId: number | null, county: string, district: string): Promise<boolean> {
+  if (isCouncilAboriginalDistrict(county, district)) return true;
+  if (!electionId || !/^第\d+選舉區$/.test(district)) return false;
+  // query-bounds: ok — 只要知道有沒有，limit(1)
+  const { data } = await supabase.from("cec_candidates").select("id")
+    .eq("election_id", electionId).eq("election_type", "縣市議員").eq("region", county).eq("sub_region", district)
+    .limit(1);
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**

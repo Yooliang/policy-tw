@@ -28,5 +28,13 @@ Deno.test("fetch-cec-data 吃共用版縣市代碼，沒有自己再抄一份", 
 });
 
 Deno.test("cec-sync 吃共用版縣市代碼，沒有自己再抄一份", async () => {
-  assert(await importsSharedCityCodes("../cec-sync/index.ts"), "cec-sync 應該 import _shared/cec-city-codes.ts，且不再內嵌一份 CITY_CODES");
+  // 2026-10-05 起「抓一個同步單位」（含 scopeFor）搬進 _shared/cec-sync.ts，cec-sync/index.ts 經由它用共用版
+  const index = await Deno.readTextFile(new URL("../cec-sync/index.ts", import.meta.url));
+  const shared = await Deno.readTextFile(new URL("./cec-sync.ts", import.meta.url));
+  const embedsCopy = (src: string) => /"連江縣":\s*\{\s*prv:/.test(src);
+  assert(!embedsCopy(index) && !embedsCopy(shared), "cec-sync 不可以再內嵌一份 CITY_CODES");
+  assert(
+    /from\s+["']\.\.\/_shared\/cec-sync\.ts["']/.test(index) && /from\s+["']\.\/cec-city-codes\.ts["']/.test(shared),
+    "cec-sync 應該經由 _shared/cec-sync.ts 用 _shared/cec-city-codes.ts 的縣市代碼",
+  );
 });

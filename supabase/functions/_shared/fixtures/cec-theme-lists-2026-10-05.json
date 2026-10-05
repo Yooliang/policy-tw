@@ -1,0 +1,352 @@
+{
+ "P0": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "4d83db17c1707e3defae5dc4d4e9c800",
+     "theme_name": "第16任總統副總統選舉",
+     "vote_date": "2024-01-13",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "1f7d9f4f6bfe06fdaf4db7df2ed4d60c",
+     "theme_name": "第15任總統副總統選舉",
+     "vote_date": "2020-01-11",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ],
+ "L0": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "9c96a2080bfc199c590ec54f3a2bda7b",
+     "theme_name": "第11屆立法委員選舉",
+     "vote_date": "2024-01-13",
+     "legislator_type_id": "L1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "9f382748c91a4096d8a4f203530a57ab",
+     "theme_name": "第11屆立法委員選舉",
+     "vote_date": "2024-01-13",
+     "legislator_type_id": "L2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "7fbfcdb409c14531893107df396133cb",
+     "theme_name": "第11屆立法委員選舉",
+     "vote_date": "2024-01-13",
+     "legislator_type_id": "L3",
+     "legislator_desc": "山地原住民"
+    },
+    {
+     "theme_id": "e753a8e7a7bcc09fa51d1aea0024a843",
+     "theme_name": "第11屆立法委員選舉",
+     "vote_date": "2024-01-13",
+     "legislator_type_id": "L4",
+     "legislator_desc": "不分區政黨"
+    },
+    {
+     "theme_id": "be404784efb488c1004009663c892e18",
+     "theme_name": "第10屆立法委員選舉",
+     "vote_date": "2020-01-11",
+     "legislator_type_id": "L1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "199e3ebf417ddbebac3a19c0befd306f",
+     "theme_name": "第10屆立法委員選舉",
+     "vote_date": "2020-01-11",
+     "legislator_type_id": "L2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "e898416abb40b6d7704945aab529d34e",
+     "theme_name": "第10屆立法委員選舉",
+     "vote_date": "2020-01-11",
+     "legislator_type_id": "L3",
+     "legislator_desc": "山地原住民"
+    },
+    {
+     "theme_id": "e002307160cbb898376da0c9cbb9ba16",
+     "theme_name": "第10屆立法委員選舉",
+     "vote_date": "2020-01-11",
+     "legislator_type_id": "L4",
+     "legislator_desc": "不分區政黨"
+    }
+   ]
+  }
+ ],
+ "C1": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "05cc7b904c7a30cc7c88d5b10898c98e",
+     "theme_name": "111年直轄市長選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "a0222f6529a3ff2192a1a04f209eaac3",
+     "theme_name": "107年直轄市長選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ],
+ "C2": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "1275d73551f2c0caf202e803b1766057",
+     "theme_name": "111年嘉義市長重行選舉",
+     "vote_date": "2022-12-18",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "63615098f5afa8ec53159c4a86fc01d3",
+     "theme_name": "111年縣市長選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "f75e94cad2958f8764f9d090e72b5567",
+     "theme_name": "107年縣市長選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ],
+ "T1": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "25e12c45f9f5641aab4193598d5aff6e",
+     "theme_name": "111年直轄市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "44cf35b1708568b94bb3b4c38a3fc74c",
+     "theme_name": "111年直轄市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "699b1ece9739edf4ec4662cea25a0bb3",
+     "theme_name": "111年直轄市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T3",
+     "legislator_desc": "山地原住民"
+    },
+    {
+     "theme_id": "1250b1f46d13d83f30143138454d28cd",
+     "theme_name": "107年直轄市市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "53c908d0b8c39a46823606c95bdd1d1f",
+     "theme_name": "107年直轄市市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "0d1b4e88e63a9ea60fbf1b0611476a97",
+     "theme_name": "107年直轄市市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T3",
+     "legislator_desc": "山地原住民"
+    }
+   ]
+  }
+ ],
+ "T2": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "72976331a1ea6b85cfb1ed3380ae5f35",
+     "theme_name": "111年縣市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "c8f4dc82f282bed4ebcdf0f52552cf58",
+     "theme_name": "111年縣市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+     "theme_name": "111年縣市議員選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "T3",
+     "legislator_desc": "山地原住民"
+    },
+    {
+     "theme_id": "0863f605f58b84d598be62fabc0b3a7f",
+     "theme_name": "107年縣市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "cc1e43f0b40e734ff16bed7faf4b5d91",
+     "theme_name": "107年縣市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "aae1cbd3ea7b8fa21db2497250115e75",
+     "theme_name": "107年縣市議員選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "T3",
+     "legislator_desc": "山地原住民"
+    }
+   ]
+  }
+ ],
+ "D1": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "4adab8fcd6f5426b4f0347fbc985fbab",
+     "theme_name": "111年直轄市區長選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "8bb3e865d882c719da6b2bad8d8dc1bc",
+     "theme_name": "107年直轄市區長選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ],
+ "D2": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "664d46a37f4f38296ad0b9d0f24adab4",
+     "theme_name": "111年鄉鎮市長選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "e34d0b6d7e29a5d82fec3aeb226f4a2f",
+     "theme_name": "107年鄉鎮市長選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ],
+ "R1": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "d2aa09058066659f5b69af53ed16ccfa",
+     "theme_name": "111年直轄市區民代表選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "R3",
+     "legislator_desc": ""
+    },
+    {
+     "theme_id": "53e5c0160ee86073f56dc2b19ba79cf4",
+     "theme_name": "107年直轄市區民代表選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "R3",
+     "legislator_desc": ""
+    }
+   ]
+  }
+ ],
+ "R2": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "ca0467b0c2645f87fa3589a51eccc221",
+     "theme_name": "111年鄉鎮市民代表選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "R1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "17d56dd1b9d6a5cac41513c443ca1569",
+     "theme_name": "111年鄉鎮市民代表選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "R2",
+     "legislator_desc": "平地原住民"
+    },
+    {
+     "theme_id": "ce8e721f94e70dca972a09b71fc4058b",
+     "theme_name": "107年鄉鎮市民代表選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "R1",
+     "legislator_desc": "區域"
+    },
+    {
+     "theme_id": "f7c4c5f9be0da1f660ebb54aa51c43a1",
+     "theme_name": "107年鄉鎮市民代表選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "R2",
+     "legislator_desc": "平地原住民"
+    }
+   ]
+  }
+ ],
+ "V0": [
+  {
+   "area_name": "全國",
+   "theme_items": [
+    {
+     "theme_id": "0bd11a4b3f092aae2811741428ec3e3d",
+     "theme_name": "111年村里長選舉",
+     "vote_date": "2022-11-26",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    },
+    {
+     "theme_id": "80325f73197f1d752b987778c725d20d",
+     "theme_name": "107年村里長選舉",
+     "vote_date": "2018-11-24",
+     "legislator_type_id": "00",
+     "legislator_desc": null
+    }
+   ]
+  }
+ ]
+}
