@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { applyContribution } from "./apply-contribution.ts";
 
 /**
@@ -118,7 +118,7 @@ Deno.test("applyCandidacy：regions 表沒有對應列 → 不動 region_id、�
   assertEquals((tables.get("regions") ?? []).length, 0, "不能因為查不到就新建 regions 列");
 });
 
-Deno.test("applyCandidacy：沒有 electoral_district（例如縣市長候選人）→ 不查 regions、不動 region_id", async () => {
+Deno.test("applyCandidacy：沒有 electoral_district、regions 也沒有縣市層級的列 → region_id 還是空的，但訊息要講出來", async () => {
   const { client, tables } = makeDb({
     politicians: [{ id: POL, name: "王小明", merged_into: null }],
     regions: [{ id: 501, region: "台北市", sub_region: "第02選舉區" }],
@@ -128,6 +128,8 @@ Deno.test("applyCandidacy：沒有 electoral_district（例如縣市長候選人
   assertEquals(outcome.status, "applied");
   const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
   assertEquals(row?.region_id ?? null, null);
+  // 靜靜地寫 NULL 是這次要修掉的行為：撈不到人、也沒人知道
+  assertStringIncludes(outcome.message ?? "", "還沒有對到地區");
 });
 
 Deno.test("applyCandidacy：既有參選紀錄再交一次，regions 對得到 → 更新時也補上 region_id", async () => {
@@ -140,4 +142,74 @@ Deno.test("applyCandidacy：既有參選紀錄再交一次，regions 對得到 �
   assertEquals(outcome.status, "applied");
   const row = (tables.get("politician_elections") ?? []).find((r) => r.id === 9001);
   assertEquals(row?.region_id, 501);
+});
+
+/**
+ * 選區對不上時落回縣市層級（2026-10-04，見 apply-contribution.ts 的 countyRegionPatch）。
+ * 盤點當下有 102 筆 2026 已登記的參選紀錄 region_id 是空的，用任何縣市篩選都撈不到、也不報錯。
+ */
+const COUNTY = { id: 900, region: "台北市", sub_region: null, village: null };
+
+Deno.test("applyCandidacy：縣市長沒有選區 → region_id 指到縣市層級那一列", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ election_type: "縣市長" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 900);
+});
+
+Deno.test("applyCandidacy：縣市議員的選區對不上 regions → 落到縣市層級，並在訊息裡要代理補選區", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第99選舉區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 900, "選區對不上也要至少記到縣市");
+  assertStringIncludes(outcome.message ?? "", "只記到縣市");
+  assertEquals((tables.get("regions") ?? []).length, 2, "不能因為查不到就新建 regions 列");
+});
+
+Deno.test("applyCandidacy：選區對得到時不會被縣市退路蓋掉", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第02選舉區" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id, 501);
+  assertEquals(outcome.message?.includes("只記到縣市"), false);
+});
+
+Deno.test("applyCandidacy：既有紀錄已經指到選舉區，重交沒帶選區時不會被降級成縣市", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY, { id: 501, region: "台北市", sub_region: "第02選舉區" }],
+    politician_elections: [{ id: 9001, politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered", region_id: 501 }],
+  });
+  const outcome = await applyContribution(client, candidacyRow());
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.id === 9001);
+  assertEquals(row?.region_id, 501, "已經有選舉區層級的 region_id 就不要動它");
+});
+
+Deno.test("applyCandidacy：鄉鎮層級的選舉不套縣市退路（那個空值是 township_gap 派任務的訊號）", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "王小明", merged_into: null }],
+    regions: [COUNTY],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ election_type: "鄉鎮市民代表" }));
+  assertEquals(outcome.status, "applied");
+  const row = (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
+  assertEquals(row?.region_id ?? null, null, "沒填 sub_region 就該留空，讓 township_gap 派補鄉鎮的任務");
+  assertEquals(outcome.message?.includes("還沒有對到地區"), false);
 });
