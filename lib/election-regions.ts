@@ -26,6 +26,14 @@ export function electionRegionPath(electionId: number | string, region: string):
   return `/election/${electionId}/${encodeURIComponent(region)}`
 }
 
+/**
+ * 鄉鎮市區頁網址。**站內所有指向鄉鎮頁的連結都從這裡產生**（目前是縣市頁帶 ?sub=；
+ * 改成 /election/:年/:縣市/:鄉鎮 時只改這一個函式，不用到處找字串）。
+ */
+export function electionTownshipPath(electionId: number | string, region: string, township: string): string {
+  return `${electionRegionPath(electionId, region)}?sub=${encodeURIComponent(township)}`
+}
+
 /** 選舉頁網址：有縣市就是縣市頁，否則是全台 */
 export function electionPath(electionId: number | string, region?: string | null): string {
   return isCounty(region) ? electionRegionPath(electionId, region) : `/election/${electionId}`

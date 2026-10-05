@@ -108,6 +108,23 @@ export function positionSpec(type: string): PositionSpec | undefined {
   return BY_TYPE.get(type as PositionType)
 }
 
+/**
+ * 選舉頁區塊的頁內錨點 id（2026-10-05）：人物頁麵包屑的職位層連到這裡（/election/2026/金門縣#縣市長）。
+ * 頁面畫區塊（pages/ElectionPage.vue）與麵包屑（lib/election-breadcrumbs.ts）都只從這個函式拿 id，
+ * 兩邊不會各寫各的——連到一個頁面上不存在的 id，瀏覽器只會安靜地不捲動，沒有任何錯誤。
+ *
+ *   整個職位的區塊      ＝職位名稱（POSITIONS 的 label）：#縣市長、#鄉鎮市長
+ *   有分組的職位再分組  ＝職位名稱-組名：議員的選舉區 #縣市議員-第01選舉區、村里長的里 #村里長-東門里
+ *
+ * 職位不在表裡回 undefined。組名裡的空白拿掉（id 不能有空白）。
+ */
+export function sectionAnchor(type: string, group?: string): string | undefined {
+  const spec = positionSpec(type)
+  if (!spec) return undefined
+  const name = group?.replace(/\s+/g, '')
+  return name ? `${spec.label}-${name}` : spec.label
+}
+
 /** 每個層級的頁面：這一層是哪一級、下一層是哪一級 */
 const SCOPE_LEVELS: Record<ElectionScope, { own: AdminLevel; next: AdminLevel }> = {
   national: { own: 'national', next: 'county' },

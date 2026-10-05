@@ -10,13 +10,16 @@
  * 分組與排序交給 lib/village-grouping.ts 與 lib/district-grouping.ts；這裡只管畫。
  * 兩支分組函式都會把「沒填」的人收進最後一組而不是濾掉，所以 groups 的人數總和
  * 就是全部的人——這個元件不會讓任何人從畫面上消失。
+ *
+ * 頁內錨點（2026-10-05）：整個職位的 id 由呼叫端當 attribute 傳進來（落在根元素上），每一組的 id 用
+ * groups[].anchor；根元素的 scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住。
  */
 import PoliticianGrid from './PoliticianGrid.vue'
 import type { Politician } from '../../types'
 
 defineProps<{
-  /** 每組的標籤與人；標籤就是村里名或選舉區名 */
-  groups: Array<{ label: string; people: Politician[] }>
+  /** 每組的標籤與人；標籤就是村里名或選舉區名。anchor＝這一組標題的頁內錨點 id（人物頁麵包屑連到這裡） */
+  groups: Array<{ label: string; people: Politician[]; anchor?: string }>
   /** 可以點的快篩項（已排序，不含「沒填」那一組——那不是一個點得下去的選項） */
   chips: readonly string[]
   /** 目前選中的快篩項；'All' ＝沒有篩 */
@@ -34,7 +37,7 @@ defineEmits<{ toggle: [value: string] }>()
 </script>
 
 <template>
-  <div>
+  <div class="scroll-mt-20">
     <div v-if="chips.length > 1" class="flex flex-wrap gap-1.5 mb-6">
       <button
         v-for="chip in chips"
@@ -47,6 +50,7 @@ defineEmits<{ toggle: [value: string] }>()
     <PoliticianGrid
       v-for="group in groups"
       :key="group.label"
+      :id="group.anchor"
       :politicians="group.people"
       :columns="columns"
       :election-id="electionId"
