@@ -9,7 +9,8 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
 
 const MIG = new URL("../../migrations/", import.meta.url);
-const read = (f: string) => Deno.readTextFile(new URL(f, MIG));
+// Windows 檢出是 CRLF：先統一成 LF，下面的錨點才不必管換行
+const read = async (f: string) => (await Deno.readTextFile(new URL(f, MIG))).replace(/\r\n/g, "\n");
 const sql = await read("20261006060000_candidacy_followups.sql");
 const prevStatus = await read("20261006034500_candidacy_status.sql");
 const prevOffices = await read("20261006034510_politician_offices_table.sql");

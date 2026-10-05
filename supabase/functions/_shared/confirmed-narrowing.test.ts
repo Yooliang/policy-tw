@@ -1,5 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { applyContribution } from "./apply-contribution.ts";
+import { REGISTERED_STATUSES } from "./candidacy-guards.ts";
+
+Deno.test("登記截止後標 qualified 也要附名冊或截止後的報導（跟 registered／confirmed 同一道守門）", () => {
+  for (const s of ["registered", "qualified", "confirmed"]) assert(REGISTERED_STATUSES.has(s), s);
+  assertEquals(REGISTERED_STATUSES.has("not_running"), false);
+});
 
 /**
  * #345 後續（協調者 10-06 裁定）：

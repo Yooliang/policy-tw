@@ -55,6 +55,20 @@ Deno.test("candidacy 帶得票數、得票率：照收（201），回覆 warning
   assert(inserted.some((r) => r.table === "contributions"), "這筆要照收");
 });
 
+// #345 後續：任期的 id 跟參選紀錄一樣是整數、填錯一號就改到別人——reason 要寫出本人姓名
+Deno.test("任期更正：reason 沒寫到本人姓名 → 400 reason_missing_target_name；寫了就照收", async () => {
+  const office = { politician_offices: { data: [{ id: 5, election_id: 2022, politicians: { name: "王小明" } }] } };
+  const req = (reason: string) => ({
+    agent_name: "tester", contribution_type: "correction", source_urls: ["https://www.tcc.gov.tw/x"],
+    payload: { target_table: "politician_offices", target_id: "5", reason, changes: [{ field: "end_date", current_value: "2024-01-31", correct_value: "2024-01-15" }] },
+  });
+  const bad = await handleContribute(fakeSupabase(office).client, "https://x", req("議會公告 2024-01-15 辭職生效"), "ip-1", noVote);
+  assertEquals(bad.status, 400, JSON.stringify(bad.body));
+  assertEquals((bad.body as Record<string, unknown>).error, "reason_missing_target_name");
+  const good = await handleContribute(fakeSupabase(office).client, "https://x", req("議會公告王小明 2024-01-15 辭職生效"), "ip-1", noVote);
+  assertEquals(good.status, 201, JSON.stringify(good.body));
+});
+
 Deno.test("candidacy 沒帶票數：沒有 warning", async () => {
   const { client } = fakeSupabase({ politicians: { data: [{ id: POLITICIAN_ID, merged_into: null }] } });
   const res = await handleContribute(client, "https://x", body({}), "ip-1", noVote);
