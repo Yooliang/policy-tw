@@ -13,6 +13,7 @@ import { isClientError, isMissingFunction, withTimeoutAndRetry } from '../lib/re
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
+import { currentElection, taipeiDay } from '../lib/election-list'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 
@@ -399,12 +400,13 @@ function getElectionByYear(year: number): Election | undefined {
   return elections.value.find(e => e.electionDate?.startsWith(String(year)))
 }
 
+/**
+ * 「目前的選舉」（導覽列、頁尾、全站搜尋的預設）：還沒投票（含今天）裡最近的一場，都投完了就是最近投完的那場。
+ * 以前用 startDate ≤ 今天 ≤ endDate，而 end_date 存的是投票日——投票隔天（2026-11-29）就找不到進行中的選舉、
+ * 退回 elections[0]（依 id 排序＝2022 九合一）。改看投票日（#344；規則與測試在 lib/election-list.ts）。
+ */
 function getActiveElection(): Election {
-  const today = new Date().toISOString().slice(0, 10)
-  const active = elections.value
-    .filter(e => e.startDate <= today && today <= e.endDate)
-    .sort((a, b) => a.electionDate.localeCompare(b.electionDate))
-  return active[0] || elections.value[0]
+  return currentElection(elections.value, taipeiDay(Date.now())) ?? elections.value[0]
 }
 
 // ------------------------------------------------------------
