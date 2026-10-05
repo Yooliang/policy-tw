@@ -3,7 +3,7 @@ export default { name: 'ElectionPage' }
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onActivated, type Component } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Component } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import HeroAction from '../components/HeroAction.vue'
 import { PolicyStatus, ElectionType, type Politician } from '../types'
@@ -29,7 +29,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
-import { planLevels, positionSpec, type PositionSpec } from '../lib/election-levels'
+import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
 import { groupByVillage } from '../lib/village-grouping'
 import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
@@ -498,28 +498,36 @@ function peopleOf(type: string): Politician[] {
 interface LevelSection {
   spec: PositionSpec
   people: Politician[]
-  /** district／village 排法的分組（分組函式會把沒填的人收進最後一組，不會讓人從畫面消失） */
-  groups: Array<{ label: string; people: Politician[] }>
+  /** district／village 排法的分組（分組函式會把沒填的人收進最後一組，不會讓人從畫面消失）；anchor＝這一組的頁內錨點 id */
+  groups: Array<{ label: string; people: Politician[]; anchor?: string }>
   /** 快篩 chip：選舉區或村里名 */
   chips: readonly string[]
   empty: boolean
+  /** 整個職位區塊的頁內錨點 id（人物頁麵包屑的職位層連到這裡，見 lib/election-levels.ts 的 sectionAnchor） */
+  anchor?: string
+}
+
+/** 分組加上錨點 id：id 一律從 sectionAnchor 來，麵包屑（lib/election-breadcrumbs.ts）連的是同一個函式的輸出 */
+function withAnchors(spec: PositionSpec, groups: Array<{ label: string; people: Politician[] }>) {
+  return groups.map(g => ({ ...g, anchor: sectionAnchor(spec.type, g.label) }))
 }
 
 function buildSection(spec: PositionSpec): LevelSection {
   const people = peopleOf(spec.type)
+  const anchor = sectionAnchor(spec.type)
   if (spec.display === 'district') {
     // 議員與原住民區代表共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
     // 不會同時在畫面上，而換縣市或換鄉鎮時 watch 會把它重設。
-    const groups = groupsByDistrict(people)
-    return { spec, people, groups, chips: districtsOf(people), empty: groups.length === 0 }
+    const groups = withAnchors(spec, groupsByDistrict(people))
+    return { spec, people, groups, chips: districtsOf(people), empty: groups.length === 0, anchor }
   }
   if (spec.display === 'village') {
     // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，
     // 這裡自然只剩一組。村里是空值或對不上的人收進最後一組「未標示里別」（lib/village-grouping.ts）。
-    const groups = groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people }))
-    return { spec, people, groups, chips: availableVillages.value, empty: groups.length === 0 }
+    const groups = withAnchors(spec, groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people })))
+    return { spec, people, groups, chips: availableVillages.value, empty: groups.length === 0, anchor }
   }
-  return { spec, people, groups: [], chips: [], empty: people.length === 0 }
+  return { spec, people, groups: [], chips: [], empty: people.length === 0, anchor }
 }
 
 function sectionsOf(types: readonly string[]): LevelSection[] {
@@ -527,6 +535,75 @@ function sectionsOf(types: readonly string[]): LevelSection[] {
 }
 const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
+
+/**
+ * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
+ * #縣市議員-第01選舉區。區塊的 id 由 sectionAnchor 產生（lib/election-levels.ts），麵包屑連的是同一個函式的輸出。
+ *
+ * router 的 scrollBehavior 是關的（站內換頁不亂捲），所以這裡自己捲：從別頁點進來時區塊要等資料載入才畫得出來，
+ * 直接開網址時瀏覽器原生的 #錨點也只抓得到預渲染就有的區塊。想捲的 id 先記著，區塊出現了才捲。
+ *
+ * 捲到之後版面還會變，區塊會被往下推（2026-10-05 實測，約三成機率）：人物頁帶過來的同選區幾個人先把那一組畫出來，
+ * 資料載完才冒出排在前面的縣市長；選舉區對應表（77 KB）載完才出現右側的鄉鎮篩選欄，主欄變窄、上面的卡片從一排
+ * 變兩排。所以捲到之後不放手：版面高度一變就再捲一次，直到使用者自己動手（滾輪、觸控、按鍵、點擊）或過了
+ * FOLLOW_MS——之後換篩選、重新載入都不會再把使用者拉回去。
+ */
+const pendingAnchor = ref('')
+const FOLLOW_MS = 8000
+const FOLLOW_STOP_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+let stopFollowing: (() => void) | undefined
+function followAnchor(id: string) {
+  stopFollowing?.()
+  if (typeof ResizeObserver === 'undefined') return
+  let frame = 0
+  const observer = new ResizeObserver(() => {
+    if (frame) return
+    frame = requestAnimationFrame(() => { frame = 0; document.getElementById(id)?.scrollIntoView({ block: 'start' }) })
+  })
+  observer.observe(document.body)
+  const stop = () => {
+    observer.disconnect()
+    clearTimeout(timer)
+    cancelAnimationFrame(frame)
+    for (const ev of FOLLOW_STOP_EVENTS) window.removeEventListener(ev, stop)
+    stopFollowing = undefined
+  }
+  const timer = setTimeout(stop, FOLLOW_MS)
+  for (const ev of FOLLOW_STOP_EVENTS) window.addEventListener(ev, stop, { passive: true })
+  stopFollowing = stop
+}
+onDeactivated(() => stopFollowing?.())
+onBeforeUnmount(() => stopFollowing?.())
+function anchorInRoute(): string {
+  const raw = route.hash.replace(/^#/, '')
+  try { return decodeURIComponent(raw) } catch { return raw }
+}
+function scrollToPendingAnchor() {
+  const id = pendingAnchor.value
+  if (!id || typeof document === 'undefined') return
+  // KeepAlive 下別頁的網址變動也會喊到這裡，只在選舉頁自己的網址上動作
+  if (route.name !== 'election' && route.name !== 'election-region') return
+  // 鄉鎮頁（?sub=）的錨點要等鄉鎮篩選套上之後才找，不然會先捲到縣市頁上同名的區塊（例如鄉鎮市長）
+  const sub = route.query.sub
+  if (typeof sub === 'string' && sub && selectedSubRegion.value !== sub) return
+  const el = document.getElementById(id)
+  if (!el) {
+    // 資料還在載入、區塊還沒畫出來：之後畫出來會再試；載完還沒有就是沒有這個區塊，放棄（免得之後切篩選時突然被捲過去）
+    if (!electionLoading.value) pendingAnchor.value = ''
+    return
+  }
+  el.scrollIntoView({ block: 'start' })
+  pendingAnchor.value = ''
+  followAnchor(id)
+}
+function queueAnchorScroll() {
+  pendingAnchor.value = anchorInRoute()
+  void nextTick(scrollToPendingAnchor)
+}
+onMounted(queueAnchorScroll)
+onActivated(queueAnchorScroll)
+watch(() => route.hash, queueAnchorScroll)
+watch([thisLevelSections, nextLevelSections, selectedSubRegion, electionLoading], () => { void nextTick(scrollToPendingAnchor) })
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
 const hasLocalCandidates = computed(() => {
@@ -826,9 +903,10 @@ usePageHead({
           這裡只剩各層的「附加物」：全台頁的立委引導、縣市頁的名錄、鄉鎮層的空白提示。
         -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
+            :id="section.anchor"
             :groups="section.groups"
             :chips="section.chips"
             :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"
@@ -843,9 +921,10 @@ usePageHead({
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <template v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
+            :id="section.anchor"
             :groups="section.groups"
             :chips="section.chips"
             :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"

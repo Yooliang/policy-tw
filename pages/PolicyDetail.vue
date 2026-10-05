@@ -28,7 +28,7 @@ import { hostOf, shortUrlsIn } from '../lib/url'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
-import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 
 
@@ -106,19 +106,15 @@ watch(
 const policyElection = computed(() => policy.value?.electionId != null ? getElectionById(policy.value.electionId) : undefined)
 
 /**
- * 麵包屑（2026-09-30）：選舉 › 縣市 › 人物 › 本政見。選舉與縣市取政見所屬那一屆的參選紀錄，沒有就用人物最新一屆；
+ * 麵包屑（2026-09-30）：選舉 › 縣市 ›（鄉鎮）› 職位 › 人物 › 本政見（2026-10-05 多了職位層與鄉鎮層，
+ * 規則與測試在 lib/election-breadcrumbs.ts，人物頁共用）。選舉到職位取政見所屬那一屆的參選紀錄，沒有就用人物最新一屆；
  * 人物沒有任何參選紀錄就只剩「人物 › 政見」。
  */
 const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   const pol = politician.value
   if (!policy.value || !pol) return []
   const rec = electionRecordFor(pol, policy.value.electionId)
-  const items: BreadcrumbItem[] = []
-  if (rec) {
-    const el = getElectionById(rec.electionId)
-    items.push({ name: el?.shortName || el?.name || `選舉 ${rec.electionId}`, path: `/election/${rec.electionId}` })
-    if (isCounty(rec.region)) items.push({ name: rec.region, path: electionRegionPath(rec.electionId, rec.region) })
-  }
+  const items: BreadcrumbItem[] = rec ? candidacyCrumbs(rec, getElectionById(rec.electionId), new Date()) : []
   items.push({ name: pol.name, path: `/politician/${pol.id}` })
   items.push({ name: policy.value.title })
   return items

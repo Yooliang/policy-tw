@@ -96,11 +96,16 @@ export function toDirectoryPerson(row: RawDirectoryRow): DirectoryPerson | null 
 }
 
 /**
+ * 這筆參選紀錄的 subRegion 屬於哪個鄉鎮市區；填不出來（空的、或整串只是選舉區）回 undefined。
  * 原住民區代表的選區是「那瑪夏區第01選舉區」，要歸到「那瑪夏區」底下；
- * 其餘層級的 subRegion 本身就是鄉鎮市區名。
+ * 其餘層級的 subRegion 本身就是鄉鎮市區名。名錄與人物頁麵包屑（lib/election-breadcrumbs.ts）共用這一條規則。
  */
+export function townshipNameOf(subRegion: string | null | undefined): string | undefined {
+  return (subRegion || '').replace(/第.+選舉區$/, '') || undefined
+}
+
 export function townshipOf(subRegion: string | null | undefined): string {
-  return (subRegion || '').replace(/第.+選舉區$/, '') || UNKNOWN_TOWNSHIP
+  return townshipNameOf(subRegion) ?? UNKNOWN_TOWNSHIP
 }
 
 export function buildTownshipDirectory<T extends DirectoryPerson>(
