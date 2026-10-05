@@ -186,7 +186,7 @@ function policyBody(politicianId: string) {
     agent_name: "tester",
     contribution_type: "policy",
     payload: { politician_id: politicianId, title: "推動測試用市政建設方案", description: "這是一段至少二十個字的政見說明內容用來通過驗證", category: "都市發展與住宅" },
-    source_urls: ["https://www.cna.com.tw/news/aipl/test.aspx"],
+    source_urls: ["https://www.cna.com.tw/news/aipl/test.aspx", "https://udn.com/news/story/test"],
   };
 }
 
@@ -215,7 +215,7 @@ function policyProgressBody(policyId: string) {
     agent_name: "tester",
     contribution_type: "policy_progress",
     payload: { policy_id: policyId, status: "In Progress", progress: 40, note: "依市府新聞稿，工程已動工，預計明年完工", date: "2026-09-01" },
-    source_urls: ["https://www.cna.com.tw/news/aipl/test.aspx"],
+    source_urls: ["https://www.cna.com.tw/news/aipl/test.aspx", "https://udn.com/news/story/test"],
   };
 }
 

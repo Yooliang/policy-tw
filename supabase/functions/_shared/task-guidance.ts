@@ -19,6 +19,7 @@
 import { POLICY_CATEGORIES } from "./category-map.ts";
 import { CANDIDATE_STATUSES, POLICY_STATUSES } from "./contribution-schema.ts";
 import { NON_OFFICIAL_SOURCES, NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, NOT_FOUND_ELEVATED_MIN_DOMAINS, NOT_FOUND_MIN_CHECKED_URLS, SEARCH_KEYWORDS } from "./not-found-guard.ts";
+import { SOLE_SOURCE_TASK_NOTE } from "./sole-source-guard.ts";
 
 /**
  * 政見／基本資料缺口要用搜尋引擎、看非官方來源（維護者 2026-10-01）：抽 8 筆政見缺漏的「查無」，
@@ -44,7 +45,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
     "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
-    gazetteImageNote + notPolicyMisjudgmentNote +
+    gazetteImageNote + notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +
     searchFirst("policy_missing"),
 
   // 補任期政見（2026-10-02 維護者同意）：現任者那一屆當選時的競選政見。交成 Campaign Pledge＋該屆 election_id，
@@ -54,7 +55,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
     gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、2026 的新政見不是這一屆的競選政見**，這個任務不要交。" +
-    notPolicyMisjudgmentNote +
+    notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +
     searchFirst("term_policy_missing"),
 
   // 補學經歷條列（2026-10-02 維護者裁示）：人物頁側欄的「學歷」「經歷」讀的是 education[]／experience[]，
@@ -94,7 +95,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   progress_stale:
     "**第一步先判斷它是不是政見**：標語、團隊組成、行程、個人表態不是政見，追不出進度也不該追，那種用 removal 回報，不要為它補欄位。" +
-    "是政見才往下做，而且依狀態問兩種不同的事：施政中的問「近期進度如何」；已投票屆別的競選承諾問「這個人當選了嗎、承諾後來兌現了嗎」——elections 裡有他的參選紀錄與 election_result。當選就用 policy_progress 把 status 改成 In Progress／Achieved／Stalled／Failed；落選、或我們根本沒有他那場選舉的參選紀錄，就用 candidacy 補 election_result。真的查不到後續就 no_change 並說明你查了哪些來源。",
+    "是政見才往下做，而且依狀態問兩種不同的事：施政中的問「近期進度如何」；已投票屆別的競選承諾問「這個人當選了嗎、承諾後來兌現了嗎」——elections 裡有他的參選紀錄與 election_result。當選就用 policy_progress 把 status 改成 In Progress／Achieved／Stalled／Failed；落選、或我們根本沒有他那場選舉的參選紀錄，就用 candidacy 補 election_result。真的查不到後續就 no_change 並說明你查了哪些來源。" +
+    SOLE_SOURCE_TASK_NOTE,
 
   candidacy_source_missing:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
@@ -118,7 +120,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
   news_sweep:
     "打開 RSS 網址，挑出提到 2026 候選人具體政見、**現任者在任內新宣布的具體施政承諾**（例：總統宣布普發現金、市長宣布新計畫）、或既有政見有新進度的報導，每筆用 policy／policy_progress 提交。" +
     "任內施政承諾用 policy：status 填 Proposed、election_id 填他這一任當選的那屆、proposed_date 填宣布日——**不是競選承諾，不要填 Campaign Pledge**。" +
-    "**source_urls 放新聞原文網址**——RSS 裡 <link> 的值，不是 RSS 本身。看完沒有可提交的就用 no_change 並寫你看了幾筆。",
+    "**source_urls 放新聞原文網址**——RSS 裡 <link> 的值，不是 RSS 本身。看完沒有可提交的就用 no_change 並寫你看了幾筆。" +
+    SOLE_SOURCE_TASK_NOTE,
 
   fix_disputed:
     "有人的貢獻被兩票反對擋下來了，任務敘述帶著每一條反對理由。請提一筆**改好的新貢獻**，不要只重送原本那一欄——反對意見指出的連帶問題要一起修掉。",
@@ -152,7 +155,7 @@ export function newsItemGuidance(suggestion: string | null | undefined): string 
     "**是某條既有政見的新進度**（開工、完工、編列預算、修法、延宕、放棄）→ 交 policy_progress，policy_id 用 policy.id（或 existing_policies 裡對得上的那一條），date 填新聞寫的事件日期；" +
     "**是清單上沒有的具體承諾** → 交 policy：選前提的填 Campaign Pledge；現任者在任內新宣布的施政承諾填 Proposed、election_id 填他這一任當選那屆、proposed_date 填宣布日。一則新聞有幾個能各自查核的承諾就拆幾筆，先看 existing_policies 與 queued_policies，同一個承諾換句話說不要再交；" +
     "**初篩判錯了**（只是行程、致詞、評論、選情、民調、口水，或看不出具體承諾）→ no_change，outcome=not_found，finding 寫新聞實際在講什麼、為什麼不算進度或承諾，checked_urls 放新聞網址；新聞打不開才用 unreachable。" +
-    "source_urls 一律放新聞原文網址。";
+    "source_urls 放新聞原文網址；新聞不是官方來源，所以**再附一個不同網站的來源**（另一家媒體的同一則、市府或議會的新聞稿、候選人臉書），只附這一則會被當場退回（不算被拒；協議 1.45.0 媒體不能當唯一出處）。";
 }
 
 /** 這些型別的 hint 依當筆資料而變，由 shapeTaskCurrent 自己組（不走這張靜態表）。 */

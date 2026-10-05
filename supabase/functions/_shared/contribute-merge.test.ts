@@ -107,7 +107,7 @@ Deno.test("自由文字型別（policy）永遠不合併", async () => {
       description: "捷運開發沿線一律納入社會住宅，另推企業勞工宅、婚育宅最長可住二十年，並加碼興建高齡友善社宅，四年內達成新增戶數目標。",
       category: "都市發展與住宅",
     },
-    source_urls: ["https://www.cna.com.tw/news/aipl/1.aspx"],
+    source_urls: ["https://www.cna.com.tw/news/aipl/1.aspx", "https://udn.com/news/story/1"],
     agent_name: "lampstand",
   }, "ip-me", () => { voted++; return Promise.resolve({ status: 201, body: {} }); });
   assertEquals(voted, 0, "政見標題不同就是不同政見，不能合併");
