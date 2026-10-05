@@ -412,3 +412,132 @@ export async function collectUnitRows(
     parts,
   };
 }
+
+// ── 選舉區與投票率（#344，2026-10-06）：同步完一個單位，順手把中選會名單上的選舉區記進 election_districts ──
+//
+// 代表、村里長、議員原住民選舉區的名稱只在中選會名單上（選舉區對照表只收議員一般選舉區），
+// migration 讀 cec_candidates 會撞上同步中途（先刪後寫），所以由同步自己寫：只新增、不改既有的列
+// （upsert ignoreDuplicates），名額照舊留空走任務（district_seats_missing）——只有法律定死的一席（首長、
+// 區域立委）與憲法定的立委全國三區直接寫。投票率抓中選會的投票概況（profiles 檔的 vote_to_elect 那一組數字）。
+
+/** 首長與立委：名額法律定死，寫進 seats（seats_basis=law）；其他選舉的名額看公告，同步不寫 */
+const LAW_SEATS: Readonly<Record<string, { seats: number; source: string }>> = {
+  總統副總統: { seats: 1, source: "中華民國憲法增修條文第 2 條：總統、副總統候選人聯名登記，以得票最多之一組為當選" },
+  縣市長: { seats: 1, source: "地方制度法：直轄市、縣（市）置市長／縣長一人" },
+  鄉鎮市長: { seats: 1, source: "地方制度法：鄉（鎮、市）置鄉（鎮、市）長一人" },
+  直轄市山地原住民區長: { seats: 1, source: "地方制度法：直轄市山地原住民區置區長一人" },
+  村里長: { seats: 1, source: "地方制度法：村（里）置村（里）長一人" },
+  "立法委員|district": { seats: 1, source: "中華民國憲法增修條文第 4 條：區域立委依人口比例分配，按應選名額劃分同額選舉區（每區一席）" },
+  "立法委員|不分區": { seats: 34, source: "中華民國憲法增修條文第 4 條：全國不分區及僑居國外國民共 34 人" },
+  "立法委員|平地原住民": { seats: 3, source: "中華民國憲法增修條文第 4 條：自由地區平地原住民 3 人" },
+  "立法委員|山地原住民": { seats: 3, source: "中華民國憲法增修條文第 4 條：自由地區山地原住民 3 人" },
+};
+
+/** 以整個行政區為一區的選舉（跟 election_districts 的 CHECK election_districts_kind_matches_type 同一份） */
+export const AT_LARGE_ELECTION_TYPES: readonly string[] = ["總統副總統", "縣市長", "鄉鎮市長", "直轄市山地原住民區長", "村里長"];
+
+/** 中選會科目 → 選舉區種類（沒列的：首長是 at_large，其他是一般選舉區） */
+export const DISTRICT_KIND_BY_CEC_TYPE: Readonly<Record<string, string>> = {
+  LegislatorParty: "proportional",
+  LegislatorPlainIndigenous: "indigenous_plain",
+  LegislatorMountainIndigenous: "indigenous_mountain",
+  CouncilMemberPlainIndigenous: "indigenous_plain",
+  CouncilMemberMountainIndigenous: "indigenous_mountain",
+  CountyCouncilMemberPlainIndigenous: "indigenous_plain",
+  CountyCouncilMemberMountainIndigenous: "indigenous_mountain",
+  CityRepresentativesPlainIndigenous: "indigenous_plain",
+};
+
+export interface ElectionDistrictRow {
+  election_id: number;
+  election_type: string;
+  district_kind: string;
+  region: string;
+  sub_region: string | null;
+  village: string | null;
+  seats: number | null;
+  seats_basis: string | null;
+  seats_source: string | null;
+}
+
+/** 一個同步單位抓到的名單 → 該有的選舉區（去重；縣市認不出來、村里長缺鄉鎮或村里的列不收） */
+export function electionDistrictRows(electionId: number, ourType: string, parts: readonly Pick<PartResult, "cecType" | "rows">[]): ElectionDistrictRow[] {
+  const out = new Map<string, ElectionDistrictRow>();
+  const atLarge = AT_LARGE_ELECTION_TYPES.includes(ourType);
+  for (const part of parts) {
+    const kind = atLarge ? "at_large" : (DISTRICT_KIND_BY_CEC_TYPE[part.cecType] ?? "district");
+    for (const r of part.rows) {
+      if (!r.region || r.region === "未知") continue;
+      if (ourType === "村里長" && (!r.sub_region || !r.village)) continue;
+      // 首長：一個行政區一區——縣市長只看縣市、鄉鎮市長看到鄉鎮、村里長看到村里；總統只有全國一區
+      const sub = ourType === "總統副總統" || ourType === "縣市長" ? null : r.sub_region;
+      const village = ourType === "村里長" ? r.village : null;
+      if (!atLarge && !sub) continue;
+      const law = LAW_SEATS[ourType] ??
+        (ourType === "立法委員" ? LAW_SEATS[`立法委員|${kind === "district" ? "district" : sub}`] : undefined);
+      const row: ElectionDistrictRow = {
+        election_id: electionId, election_type: ourType, district_kind: kind,
+        region: r.region, sub_region: sub, village,
+        seats: law?.seats ?? null, seats_basis: law ? "law" : null, seats_source: law?.source ?? null,
+      };
+      out.set(`${row.region}|${row.sub_region ?? ""}|${row.village ?? ""}`, row);
+    }
+  }
+  return [...out.values()];
+}
+
+/** 投票率要看哪幾個科目：總統副總統的那一場；地方選舉是直轄市長＋縣市長兩場加總（每位選舉人只在其中一場） */
+export const HEADLINE_TURNOUT_CEC_TYPES: Readonly<Record<string, readonly string[]>> = {
+  總統副總統: ["President"],
+  縣市長: ["Mayor", "CountyMayor"],
+};
+
+/** 中選會投票概況（全國層級）網址 */
+export function profilesUrl(cecType: string, themeId: string): string {
+  const subject = SUBJECT_MAP[cecType];
+  return `${CEC_BASE}/data/profiles/ELC/${subject.subjectId}/${subject.legisId}/${themeId}/N/00_000_00_000_0000.json`;
+}
+
+/** 投票數 ÷ 選舉人數（多場加總），百分比、兩位小數；任何一場缺數字或選舉人數是 0 就回 null */
+export function turnoutFromProfiles(rows: ReadonlyArray<{ vote_ticket?: unknown; votable_population?: unknown }>): number | null {
+  if (rows.length === 0) return null;
+  let votes = 0, votable = 0;
+  for (const r of rows) {
+    const v = Number(r.vote_ticket), p = Number(r.votable_population);
+    if (r.vote_ticket === undefined || r.vote_ticket === null || !Number.isFinite(v) || !Number.isFinite(p) || p <= 0) return null;
+    votes += v;
+    votable += p;
+  }
+  return Math.round((votes / votable) * 10000) / 100;
+}
+
+/** 某一屆的投票日（KNOWN_ELECTIONS） */
+export function voteDateOf(electionId: number): string | undefined {
+  return KNOWN_ELECTIONS.find((e) => e.electionId === electionId)?.voteDate;
+}
+
+/**
+ * 某一屆的投票率：依 HEADLINE_TURNOUT_CEC_TYPES 的順序找第一種這一屆有場次的，抓那幾場的全國投票概況加總。
+ * 只用投票日當天那一場（嘉義市長 2022-12-18 重行選舉不算進 11-26 那一場）。抓不到或缺一場就回 null（不寫）。
+ */
+export async function headlineTurnout(electionId: number, deps: CecFetchDeps): Promise<{ value: number; election_type: string; themes: string[] } | null> {
+  const voteDate = voteDateOf(electionId);
+  if (!voteDate) return null;
+  for (const [ourType, cecTypes] of Object.entries(HEADLINE_TURNOUT_CEC_TYPES)) {
+    const rows: Array<{ vote_ticket?: unknown; votable_population?: unknown }> = [];
+    const themes: string[] = [];
+    for (const cecType of cecTypes) {
+      const theme = pickThemes(await deps.themes(cecType), electionId, SUBJECT_MAP[cecType]).find((t) => t.voteDate === voteDate);
+      if (!theme) continue;
+      const outcome = await deps.fetchJson(profilesUrl(cecType, theme.themeId));
+      if (outcome.kind !== "ok" || outcome.rows.length === 0) return null;
+      rows.push(outcome.rows[0] as { vote_ticket?: unknown; votable_population?: unknown });
+      themes.push(`${cecType}:${theme.themeId}`);
+    }
+    if (rows.length === 0) continue;
+    if (rows.length < cecTypes.length) return null;
+    const value = turnoutFromProfiles(rows);
+    return value === null ? null : { value, election_type: ourType, themes };
+  }
+  return null;
+}

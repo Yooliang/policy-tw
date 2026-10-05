@@ -139,6 +139,15 @@ export const TASK_GUIDANCE: Record<string, string> = {
     + "**找不到該縣市的名單** → no_change 且 outcome 填 unreachable 或 not_found，不會蓋章。"
     + "`source_note` 是匯入來歷，**不要拿它當證據**——實測很多寫著「可能再次挑戰」卻被標成不參選。",
 
+  // 應選名額（#344，2026-10-06）：議員、代表各選舉區選幾席。名額不能從候選人或當選人數推，要照選舉公告抄
+  district_seats_missing:
+    "找**這一屆、這個縣市、這種選舉的選舉公告**（選委會發布選舉公告時附的「應選名額表」；已投票的屆別，選舉公報每個選舉區的開頭也寫著應選名額），" +
+    "把公告上**這個縣市的每一個選舉區**都交進一筆 district_seats：districts 每區一項 {district, seats}——district 照公告的選舉區（議員寫「第01選舉區」，鄉鎮市民代表、原住民區民代表寫「麥寮鄉第01選舉區」，一個鄉鎮只有一區的寫「蘭嶼鄉選舉區」），seats 填公告的應選名額。" +
+    "**原住民選舉區**（平地原住民、山地原住民）也要列，加 kind：indigenous_plain 或 indigenous_mountain；一般選舉區不用填 kind。" +
+    "target.known_districts 是我們目前知道的選舉區（seats 是空的就是缺名額的）：公告上有、這裡沒有的照樣交；這裡有、公告上沒有的不要交，在 note 寫出來。" +
+    "**名額只能照公告抄，不要用候選人數或當選人數推**——同額不足、無人登記的選舉區，人數跟名額對不上。source_urls 第一個放公告本身（選委會網站的公告頁或 PDF）。" +
+    "公告還沒發布、或你找遍選委會網站都沒有這一份，就回 no_change＋outcome=not_found，finding 寫你看了哪些頁面。",
+
   audit:
     "訪客在政見頁貼了一個文件網址。打開它，核對內容與我們既有的相關政見／進度是否一致：不一致就提 correction 或 policy_progress，一致就提 no_change 回報無異動。",
 };
@@ -220,6 +229,8 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：question_id、answer。",
   roster_check:
     "payload：region、election_id、election_type、ours_count、cec_count、submitted、note。",
+  district_seats:
+    "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
 };
@@ -365,6 +376,19 @@ function buildPayload(
         submitted: "（這次補了幾筆）",
         note: "（你查的是哪一份名單）",
       };
+    case "district_seats": {
+      // 我們知道的選舉區先填好，代理只要對著公告填名額（公告上多的再加）
+      const known = Array.isArray(t.known_districts) ? (t.known_districts as Array<Record<string, unknown>>) : [];
+      return {
+        election_id: t.election_id ?? "（選舉年份）",
+        election_type: t.election_type ?? "（議員或代表）",
+        region: t.region ?? "（縣市）",
+        districts: known.length > 0
+          ? known.map((d) => ({ district: d.district, seats: "（公告的應選名額）", ...(d.kind && d.kind !== "district" ? { kind: d.kind } : {}) }))
+          : [{ district: "（公告上的選舉區）", seats: "（公告的應選名額）" }],
+        note: "（公告上沒有的選舉區、或其他要說明的；沒有就刪掉這一欄）",
+      };
+    }
     case "policy_progress":
       return {
         policy_id: t.policy_id ?? rowId ?? "（政見 id）",

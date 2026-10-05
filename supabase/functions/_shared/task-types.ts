@@ -37,6 +37,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   election_result_missing: "candidacy",
   // 名單清查用同名的型別回報
   roster_check: "roster_check",
+  // 應選名額（#344，2026-10-06）：一個縣市一種選舉，照選舉公告把每區名額交成一筆
+  district_seats_missing: "district_seats",
   // 公民提問用 question_answer 回報（非自動缺口，所以守門測試不會要求它，但它一樣該有）
   question: "question_answer",
   // 登記截止後還掛著「傳聞參選」的：查登記名單後用 correction 改成 registered 或 not_running
