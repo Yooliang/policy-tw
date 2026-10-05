@@ -3,7 +3,8 @@
  *
  * 路由：
  *   /politician/:id、/policy/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
- *   /election/:id/:縣市 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；舊的 /election/:id?region=縣市 → 301 到新網址
+ *   /election/:id/:縣市、/election/:id/:縣市/:鄉鎮 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；
+ *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
  *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取
  *   /next、/report… 等協議端點名 → 307 轉到 Supabase functions（見 apiRedirect）
@@ -137,7 +138,7 @@ function assemble(shell, r) {
 
 async function proxy(request) {
   const incoming = new URL(request.url)
-  // 縣市頁：預渲染檔放在 ASCII 路徑（中文目錄在 Firebase 上比對不保證），只有 GET／HEAD 需要
+  // 縣市頁、鄉鎮頁：預渲染檔放在 ASCII 路徑（中文目錄在 Firebase 上比對不保證），只有 GET／HEAD 需要
   const upstreamPath = (request.method === 'GET' || request.method === 'HEAD') ? (regionUpstreamPath(incoming.pathname) ?? incoming.pathname) : incoming.pathname
   const target = new URL(upstreamPath + incoming.search, ORIGIN)
   const headers = new Headers(request.headers)
@@ -208,7 +209,7 @@ export default {
     }
     const api = apiRedirect(request)
     if (api) return api
-    // 縣市原本放在查詢字串，搜尋引擎不當獨立頁；舊連結一律 301 到路徑版（2026-09-30）
+    // 縣市、鄉鎮原本放在查詢字串，搜尋引擎不當獨立頁；舊連結一律 301 到路徑版（縣市 2026-09-30、鄉鎮 2026-10-05）
     if (request.method === 'GET' || request.method === 'HEAD') {
       const moved = legacyRegionRedirect(url.pathname, url.searchParams)
       if (moved) return new Response(null, { status: 301, headers: { Location: `${url.origin}${moved}`, 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'public, max-age=3600' } })

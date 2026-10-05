@@ -16,7 +16,8 @@ import {
 import type { Politician, RawPolitician } from '../../types'
 import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
-import { TAIWAN_COUNTIES } from '../election-regions'
+import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
+import { townshipPagesOf } from '../election-townships'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -161,6 +162,22 @@ export function electionRegionRoutes(full: DataSnapshot): string[] {
   return paths
 }
 
+/**
+ * 鄉鎮頁（/election/:id/:縣市/:鄉鎮，2026-10-05）：每一屆、每個「鄉鎮頁會列出來的職位」有人在選的鄉鎮市區各一頁
+ * （規則在 lib/election-townships.ts，跟頁面撈的職位同一份）。一位都沒有的鄉鎮不出頁。
+ * 路徑一樣用未編碼的中文；postbuild 搬到 ASCII 路徑 election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>/。
+ */
+export function electionTownshipRoutes(full: DataSnapshot): string[] {
+  const knownElections = new Set(full.elections.map((e) => e.id))
+  const records = full.politicians.flatMap((pl) => (pl.elections ?? [])
+    .filter((e) => knownElections.has(e.electionId) && isRunningCandidate(e.candidateStatus)))
+  return townshipPagesOf(
+    records,
+    (region) => isCounty(region),
+    (region) => SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
+  ).map((p) => `/election/${p.electionId}/${p.region}/${p.township}`)
+}
+
 /** 建置時要預渲染的完整路徑清單。 */
 /** 邊緣渲染頁的清單寫給 scripts/postbuild-ssg.mjs 產網站地圖（它讀完就刪，不會部署出去） */
 export const EDGE_ROUTES_FILE = 'dist/.edge-routes.json'
@@ -188,6 +205,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...STATIC_CONTENT_ROUTES,
     ...full.elections.map((e) => `/election/${e.id}`),
     ...electionRegionRoutes(full),
+    ...electionTownshipRoutes(full),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),
     ...(prerenderEdge ? edgePaths : []),

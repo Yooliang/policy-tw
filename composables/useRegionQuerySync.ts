@@ -9,7 +9,7 @@ import { useGlobalState } from './useGlobalState'
  * - 切換：router.replace 更新 query（不推 history，返回鍵不會在縣市間來回）；回預設值就拿掉參數
  * - 只在 routeName 那一頁動網址；不屬於本頁的其他 query（例如 ?filter=）原樣保留
  * - 套用時機在 mounted 之後：預渲染的 HTML 是全國版，先 hydrate 一致再切，避免 hydration mismatch
- *   （選舉頁的縣市在路徑上，預渲染本身就是該縣市版；見 regionPath）
+ *   （選舉頁的縣市與鄉鎮在路徑上，預渲染本身就是該縣市／鄉鎮版；見 regionPath）
  * - 各頁既有的篩選 ref 可用 extra 一起同步（分類、頁籤…），不新增篩選功能
  */
 export interface QueryField {
@@ -46,7 +46,13 @@ export interface RegionQuerySyncOptions {
    */
   regionPath?: {
     get: () => string | undefined
-    build: (region: string) => string
+    /**
+     * 鄉鎮也在路徑上（/election/:id/:region/:sub，2026-10-05）：回傳路徑上的鄉鎮（沒有就 undefined）。
+     * 給了這個，sub 就不寫進 query、改寫路徑；網址還帶舊的 ?sub= 時照樣讀進來，之後換成路徑的寫法。
+     */
+    getSub?: () => string | undefined
+    /** sub 只在有 getSub 時傳入（'All' 之外的值） */
+    build: (region: string, sub?: string) => string
   }
   /** 鄉鎮市區（依賴 region） */
   sub?: Ref<string>
@@ -127,11 +133,17 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   let applying = false
 
   const isOwnRoute = () => routeNames.includes(String(route.name ?? ''))
-  /** 路徑上的縣市當成 query 的 region 一起解析（沒有才退回舊的 ?region=） */
+  /** 鄉鎮也放在路徑上嗎（舊的 ?sub= 要換成路徑） */
+  const subOnPath = !!regionPath?.getSub
+  /** 路徑上的縣市（與鄉鎮）當成 query 的 region（與 sub）一起解析（路徑上沒有才退回舊的 ?region=、?sub=） */
   const effectiveQuery = (query: LocationQuery): LocationQuery => {
     const fromPath = regionPath?.get()
-    return fromPath ? { ...query, region: fromPath } : query
+    if (!fromPath) return query
+    const subFromPath = regionPath?.getSub?.()
+    return subFromPath ? { ...query, region: fromPath, sub: subFromPath } : { ...query, region: fromPath }
   }
+  /** 網址還帶著該搬到路徑上的舊參數 */
+  const hasLegacyKeys = (query: LocationQuery) => query.region !== undefined || (subOnPath && query.sub !== undefined)
   const hasOwnKeys = (query: LocationQuery) => !!regionPath?.get() || fields.some((f) => query[f.key] !== undefined)
 
   // 頁面既有的 watcher 會在上層變動時把下層重設（縣市變 → 鄉鎮／村里回 All），所以一個欄位設完等 watcher 跑完再設下一個
@@ -159,9 +171,16 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
       return
     }
     delete query.region
-    const path = regionPath.build(globalRegion.value)
+    let sub: string | undefined
+    if (subOnPath) {
+      const written = query.sub
+      sub = typeof written === 'string' ? written : undefined
+      delete query.sub
+    }
+    const path = regionPath.build(globalRegion.value, sub)
     if (decodePath(path) === decodePath(route.path) && sameQuery(query, route.query)) return
-    void router.replace({ path, query })
+    // 頁內錨點照帶（舊的 ?sub=…#村里長-東門里 換成路徑時，麵包屑要捲到的區塊不能丟）
+    void router.replace({ path, query, hash: route.hash })
   }
 
   /** 套完網址後：縣市在路徑上的頁順手把網址整理成正式寫法（舊的 ?region= → 路徑） */
@@ -182,13 +201,13 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
 
   watch(fields.map((f) => f.ref), syncUrl)
 
-  // 同一頁上換了帶不同參數的連結（例如貼上分享連結、點縣市頁連結）：以網址為準
-  watch([() => route.query, () => regionPath?.get()], () => {
+  // 同一頁上換了帶不同參數的連結（例如貼上分享連結、點縣市頁或鄉鎮頁連結）：以網址為準
+  watch([() => route.query, () => regionPath?.get(), () => regionPath?.getSub?.()], () => {
     if (!active || applying || !isOwnRoute()) return
     const query = route.query
     if (regionPath) {
       const target = parseRegionQuery(fields, effectiveQuery(query))
-      if (fields.some((f) => f.ref.value !== target[f.key]) || query.region !== undefined) void applyAndNormalize(query)
+      if (fields.some((f) => f.ref.value !== target[f.key]) || hasLegacyKeys(query)) void applyAndNormalize(query)
       return
     }
     if (!sameQuery(buildRegionQuery(fields, query), query)) void applyQuery(query)
