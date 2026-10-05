@@ -238,7 +238,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     sourceNote: firstElection?.sourceNote || undefined,
     // New: election-specific data array
     elections,
-    // 現任公職（視圖 politician_offices 算好的）；職稱只能從這裡來，不要用 position 充當（2026-10-04）
+    // 現任公職（視圖 politician_offices_derived 算好的，#345 前叫 politician_offices）；職稱只能從這裡來，不要用 position 充當（2026-10-04）
     offices: (row.offices || []).map((o) => ({
       electionId: o.electionId,
       electionType: o.electionType || undefined,

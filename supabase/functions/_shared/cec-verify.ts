@@ -142,23 +142,7 @@ function checkCandidacyFields(payload: Record<string, unknown>, c: CecCandidacy)
     matched.push("election_result");
   }
 
-  const claimedVotes = num(payload.votes_received);
-  if (claimedVotes !== null) {
-    if (c.votes_received === null) return { action: "skip", reason: "中選會這一筆沒有得票數可以對" };
-    if (claimedVotes !== c.votes_received) {
-      return { action: "reject", reason: `得票數對不上：中選會是 ${c.votes_received}，這筆寫 ${claimedVotes}`, candidacy: c };
-    }
-    matched.push("votes_received");
-  }
-
-  const claimedPercent = num(payload.vote_percentage);
-  if (claimedPercent !== null) {
-    if (c.vote_percentage === null) return { action: "skip", reason: "中選會這一筆沒有得票率可以對" };
-    if (Math.abs(claimedPercent - c.vote_percentage) > PERCENT_TOLERANCE) {
-      return { action: "reject", reason: `得票率對不上：中選會是 ${c.vote_percentage}%，這筆寫 ${claimedPercent}%`, candidacy: c };
-    }
-    matched.push("vote_percentage");
-  }
+  // 得票數、得票率不收（#345，2026-10-06）：落庫不寫，這裡也不比——不能為一個會被略過的欄位把整筆退件
 
   if (matched.length === 0) return { action: "skip", reason: "沒有任何中選會查得到的欄位（例如只改參選狀態），留給同儕驗證" };
   return { action: "apply", matched, candidacy: c };

@@ -6,7 +6,7 @@
  * 所以 2024 落選的立委候選人也掛著「台南市立委」，跟現任立委長得一模一樣。
  *
  * 這裡分成兩個純函式：
- *   officeTitles()   職稱：只認現任（視圖 politician_offices，migration 20261004000005），沒有就是空陣列
+ *   officeTitles()   職稱：只認現任（視圖 politician_offices，migration 20261004000005；#345 起改名 politician_offices_derived，任期表第二階段才接手），沒有就是空陣列
  *   candidacyBadge() 參選狀況：這一屆那一筆參選紀錄，例如「2026 台南市長・已登記」
  * 兩個都可能是空的，空的就不要顯示——不要拿另一個去充當。
  */

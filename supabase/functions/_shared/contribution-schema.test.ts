@@ -195,11 +195,26 @@ Deno.test("提出日期：correction 允許清空，其他欄位不允許", () =
 });
 
 // 2026-09-19：election_result_missing 任務的答案帶三個結果欄位，之前 schema 直接無視
-Deno.test("candidacy：election_result／votes_received／vote_percentage 選填但要對", () => {
+// 2026-10-06（#345）：得票數、得票率不收——不寫進去也不驗，不能為一個會被略過的欄位把整筆擋下來
+Deno.test("candidacy：election_result 選填但要對；得票數、得票率不驗也不擋", () => {
   const ok = validateContributionRequest({ ...validCandidacy, payload: { ...validCandidacy.payload, election_result: "elected", votes_received: 29150, vote_percentage: 53.7 } });
   assertEquals(ok.errors, []);
   const bad = validateContributionRequest({ ...validCandidacy, payload: { ...validCandidacy.payload, election_result: "won", votes_received: -3, vote_percentage: 101 } });
-  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.election_result", "payload.vote_percentage", "payload.votes_received"]);
+  assertEquals(bad.errors.map((e) => e.path).sort(), ["payload.election_result"]);
+});
+
+// 2026-10-06（#345，協議 1.51.0）：不收傳聞——correction 不能把參選狀態改成 rumored／likely；當選落選走 candidacy 的 election_result
+Deno.test("correction 改參選狀態只收 confirmed／registered／qualified／not_running", () => {
+  const req = (correct_value: unknown) => validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://db.cec.gov.tw/x"], payload: { target_table: "politician_elections", target_id: "34957", reason: "中選會名冊上他 2026 沒有登記這一種選舉", changes: [{ field: "candidate_status", current_value: "registered", correct_value }] } });
+  for (const v of ["confirmed", "registered", "qualified", "not_running"]) {
+    assertEquals(req(v).errors.filter((e) => e.path.endsWith("correct_value")), [], v);
+  }
+  for (const v of ["rumored", "likely", "elected", "defeated", "withdrawn", "傳聞"]) {
+    assertEquals(req(v).errors.filter((e) => e.path.endsWith("correct_value")).length, 1, v);
+  }
+  // 別的表、別的欄位不受影響
+  const pos = validateContributionRequest({ agent_name: "tester", contribution_type: "correction", source_urls: ["https://db.cec.gov.tw/x"], payload: { target_table: "politician_elections", target_id: "34957", reason: "中選會名冊上的職稱是縣市長候選人", changes: [{ field: "position", current_value: "x", correct_value: "rumored" }] } });
+  assertEquals(pos.errors, []);
 });
 
 // 2026-09-19 同名人物流程：吳品叡（嘉義縣，1986）有兩筆

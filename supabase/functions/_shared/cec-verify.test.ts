@@ -15,14 +15,14 @@ const TICKETS = { theme_data: [{ ticket_data: [
 const LIST = () => withoutFutureResults(normalizeCandidacies(RAW), "2026-09-17");
 const WITH_TICKETS = () => LIST().map((c) => (c.election_id === 2024 ? attachTickets(c, TICKETS) : c));
 
-Deno.test("對得上就上線：選舉結果＋得票數＋得票率三項都符合", () => {
+Deno.test("對得上就上線：只比選舉結果（得票數、得票率不收，#345）", () => {
   const d = decideByCec({
     contribution_type: "candidacy",
     payload: { name: "蔡易餘", election_id: 2024, election_result: "elected", votes_received: 78551, vote_percentage: 59.22 },
     politician: { region: "嘉義縣" },
   }, WITH_TICKETS());
   assertEquals(d.action, "apply");
-  assertEquals(d.action === "apply" ? d.matched.sort() : [], ["election_result", "vote_percentage", "votes_received"]);
+  assertEquals(d.action === "apply" ? d.matched.sort() : [], ["election_result"]);
 });
 
 Deno.test("對不上就退件，理由帶中選會的實際數字", () => {
@@ -34,28 +34,23 @@ Deno.test("對不上就退件，理由帶中選會的實際數字", () => {
   assertEquals(wrong.action, "reject");
   assert(wrong.action === "reject" && wrong.reason.includes("當選"), wrong.action === "reject" ? wrong.reason : "");
 
-  const badVotes = decideByCec({
-    contribution_type: "candidacy",
-    payload: { name: "蔡易餘", election_id: 2024, election_result: "elected", votes_received: 78000 },
-    politician: { region: "嘉義縣" },
-  }, WITH_TICKETS());
-  assertEquals(badVotes.action, "reject");
-  assert(badVotes.action === "reject" && badVotes.reason.includes("78551"));
 });
 
-Deno.test("得票率四捨五入的誤差不算錯", () => {
-  const d = decideByCec({
+// 2026-10-06（#345）：得票數、得票率不收、落庫不寫——寫錯也不能因此把整筆退件
+Deno.test("得票數、得票率不比：寫錯不退件，只帶票數沒有結果的留給同儕", () => {
+  const badVotes = decideByCec({
     contribution_type: "candidacy",
-    payload: { name: "蔡易餘", election_id: 2024, election_result: "elected", vote_percentage: 59.24 },
+    payload: { name: "蔡易餘", election_id: 2024, election_result: "elected", votes_received: 78000, vote_percentage: 10 },
     politician: { region: "嘉義縣" },
   }, WITH_TICKETS());
-  assertEquals(d.action, "apply", "差 0.02 在容許範圍");
-  const far = decideByCec({
+  assertEquals(badVotes.action, "apply");
+  assertEquals(badVotes.action === "apply" ? badVotes.matched : [], ["election_result"]);
+  const onlyVotes = decideByCec({
     contribution_type: "candidacy",
     payload: { name: "蔡易餘", election_id: 2024, vote_percentage: 58.5 },
     politician: { region: "嘉義縣" },
   }, WITH_TICKETS());
-  assertEquals(far.action, "reject");
+  assertEquals(onlyVotes.action, "skip");
 });
 
 Deno.test("不敢自動決定的都留給同儕：還沒投票、查無此人、同名多筆、沒有可查欄位", () => {

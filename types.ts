@@ -70,7 +70,7 @@ export interface PoliticianElectionData {
 }
 
 /**
- * 一筆現任公職（資料庫視圖 `politician_offices` 的一列，由 `politicians_with_elections.offices` 帶出來）。
+ * 一筆現任公職（資料庫視圖 `politician_offices_derived` 的一列——#345 起舊視圖改名保留，任期表 `politician_offices` 第二階段才切過來，由 `politicians_with_elections.offices` 帶出來）。
  * 判「是不是現任」已經在資料庫做完（當選＋任期內，見 migration 20261004000005），
  * 前端只負責組字與排序——職稱的規則在 `lib/politician-office.ts`。
  */

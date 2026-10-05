@@ -1189,7 +1189,7 @@ Deno.serve(async (req) => {
         same_person: agg.person, value: agg.value, probability: agg.probability, counts: agg.counts, min_probability: MIN_PROBABILITY,
         current: { candidate_status: pe.candidate_status ?? null, election_result: pe.election_result ?? null },
         suggested_contribution: suggested,
-        hint: agg.counts ? "這一頁足以定值：把 suggested_contribution 原樣 POST /contribute（可補 votes_received／vote_percentage、note）"
+        hint: agg.counts ? "這一頁足以定值：把 suggested_contribution 原樣 POST /contribute（可補 note；得票數、得票率不收）"
           : agg.person.choice !== "same_person" ? "這一頁講的可能不是這個人（同名？）：換一個來源"
           : agg.value === null ? "這一頁沒講這一欄：換一個來源" : "值有了但不到門檻：換一個更明確的來源，或交 no_change 說明找過哪裡",
       });

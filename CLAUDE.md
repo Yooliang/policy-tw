@@ -66,13 +66,13 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - 快取只有記憶體（模組級 ref），沒有 IndexedDB／localStorage 資料快取
 - **`composables/useGlobalState.ts`** — 跨頁共用的地區選擇
 - **`lib/ssg/server-data.ts`、`lib/ssg/page-data.ts`** — 建置時撈全站資料、切出每頁快照塞進 `window.__INITIAL_STATE__`；細節見 `docs/SSG-PRERENDER.md`
-- **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`politician_offices`（現任公職＝職稱的單一真相，2026-10-04）、`discussions_full`、`elected_politicians`、`ai_usage_stats`
+- **Views**：`policies_with_logs`、`politicians_with_elections`、`politicians_with_policies`、`politician_offices_derived`（現任公職＝職稱的單一真相，2026-10-04；#345 第一階段從 `politician_offices` 改名保留，網站職稱仍讀它）、`politician_offices_gap`（舊視圖 vs 任期表的差異）、`discussions_full`、`elected_politicians`、`ai_usage_stats`
 
 ### Database
 表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
 
 主要群組：
-- 核心：`elections`、`election_types`、`politicians`、`politician_elections`、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347 第一階段：舊的 `source_url` 欄仍保留、由觸發器同步）、`policy_elements`（政見三要素：數值目標・達成期限・財源，一個要素一列；**沒有列＝未調查、`stated=false`＝未說明**，兩者不可混用；`policies_with_logs.elements` 帶出來，#364）
+- 核心：`elections`、`election_types`、`politicians`、`politician_offices`（任期表，#345：一個任期一列，現任＝已就任而且 `end_date` 為空；參選紀錄標當選由觸發器建、每日排程關掉屆滿與轉任的；第一階段網站職稱還沒切過來）、`politician_elections`（參選狀態看 `candidacy_status` 一欄六值：considering／declared／filed／withdrawn／elected／not_elected，不收傳聞；#345 第一階段舊的 `candidate_status`＋`election_result` 仍保留、觸發器兩邊同步，讀取端第二階段才切；`votes_received`／`vote_percentage` 待刪、不再寫入）、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347 第一階段：舊的 `source_url` 欄仍保留、由觸發器同步）、`policy_elements`（政見三要素：數值目標・達成期限・財源，一個要素一列；**沒有列＝未調查、`stated=false`＝未說明**，兩者不可混用；`policies_with_logs.elements` 帶出來，#364）
 - 社群：`discussions`、`discussion_comments`、`comment_replies`、`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
 - 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`
 - 參考：`categories`、`locations`、`regions`、`electoral_district_areas`、`admin_divisions`（內政部官方行政區代碼，`regions.admin_code` 指過去；選舉區列沒有代碼。髒列候選看視圖 `region_audit`，正常是空的；#348）、`election_districts`（一列＝一場選舉、一種職位、一個選舉區＋應選名額，寫法跟 `cec_candidates` 同一套 region／sub_region／village；名額空白＝還沒查證，**不要用候選人數或當選人數推**；缺多少看視圖 `election_seat_totals`；#344）
@@ -130,7 +130,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 換到內容頁（人物、政見、分析、討論）一律用真連結 `<router-link>`，不要 `@click="router.push"`——預渲染的 HTML 沒有 `<a href>` 爬蟲就跟不到（2026-09-30 Search Console 整站內部連結只剩 28 個）。卡片裡沒有其他按鈕就外層直接是 `<router-link>`；有按鈕或內層連結就用 stretched link（標題的 `<router-link>` 加 `after:absolute after:inset-0 after:content-['']`、卡片 `relative`、按鈕 `relative z-10`），不要做出 `<a>` 包 `<a>`
 - Tailwind 走建置時編譯；動態組出來的 class 要加 `safelist`
 - 給人看的文字純中文
-- **職稱只能來自 `Politician.offices`（視圖 `politician_offices`）**，規則在 `lib/politician-office.ts`；`position` 是「最近一筆參選紀錄」的職位，落選的人也有，拿它當職稱會把落選者顯示成現任（2026-10-04 裁決）。參選狀況是另一回事，用 `candidacyBadge()`。
+- **職稱只能來自 `Politician.offices`（第一階段是視圖 `politician_offices_derived`；第二階段改讀任期表 `politician_offices`，同一個欄位）**，規則在 `lib/politician-office.ts`；`position` 是「最近一筆參選紀錄」的職位，落選的人也有，拿它當職稱會把落選者顯示成現任（2026-10-04 裁決）。參選狀況是另一回事，用 `candidacyBadge()`。
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
