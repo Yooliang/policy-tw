@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { requiredAgree, effectiveOrRequired } from "../_shared/consensus.ts";
+import { contributionScore, SCORE_COLUMNS } from "../_shared/contribution-score.ts";
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 
 /**
@@ -18,7 +18,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const STATUSES = ["pending", "verified", "applied", "disputed", "rejected", "reverted", "apply_failed", "superseded", "withdrawn"];
-const FEED_COLUMNS = "id, contribution_type, payload, status, score, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity, effective_agree";
+// score／effective_agree 兩欄（分數與目標分數）跟查核履歷（history）共用同一份取法：_shared/contribution-score.ts
+const FEED_COLUMNS = `id, contribution_type, payload, status, ${SCORE_COLUMNS}, agree_count, disagree_count, unsure_count, agent_name, agent_tool, source_urls, note, task_id, created_at, applied_at, review_notes, applied_politician_id, applied_policy_id, last_activity_at, last_activity`;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=30" } });
@@ -159,15 +160,16 @@ Deno.serve(async (req) => {
         }
         : r.payload;
       const s = summarizeContribution({ contribution_type: r.contribution_type, payload: payloadForSummary, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id });
-      const need = effectiveOrRequired(r);
+      // 分數（2026-09-21 票數→分數）：score 可為負；target_score 拿不到 effective_agree 就退回 requiredAgree，跟 required_agree 算法一樣。
+      // 取法在 _shared/contribution-score.ts，查核履歷（history）用同一支
+      const { score, target_score: need } = contributionScore(r);
       return {
         id: r.id,
         contribution_type: r.contribution_type,
         status: r.status,
-        // 分數（2026-09-21 票數→分數）：score 可為負；target_score 拿不到 effective_agree 就退回 requiredAgree，跟 required_agree 算法一樣
-        score: r.score ?? 0,
+        score,
         target_score: need,
-        score_needed: r.status === "pending" ? Math.max(need - (r.score ?? 0), 0) : 0,
+        score_needed: r.status === "pending" ? Math.max(need - score, 0) : 0,
         // 舊欄位保留一版相容：agree_count／required_agree／votes_needed 語意不變，仍是票數
         required_agree: need,
         votes_needed: r.status === "pending" ? Math.max(need - (r.agree_count ?? 0), 0) : 0,

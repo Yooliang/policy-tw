@@ -1,7 +1,7 @@
 // 查核履歷：政見／人物／單筆貢獻三種對象，與完全沒有紀錄時的來源說明
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
-import { buildHistory, collectHistory, describeOrigin, pageEntries } from "./history.ts";
+import { buildHistory, collectHistory, describeOrigin, HISTORY_ENTRY_COLUMNS, pageEntries } from "./history.ts";
 
 const POL = "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9";
 const POLICY = "0c9c1a5e-1111-4222-8333-444444444444";
@@ -18,11 +18,11 @@ const seed = {
   politician_elections: [{ id: 901, politician_id: POL, election_id: 2026, candidate_status: "registered", source_note: "中央社 2026-09-04 登記參選名單" }],
   tracking_logs: [{ id: "t1", policy_id: POLICY, event: "預算通過" }],
   contributions: [
-    { id: C_POLICY, contribution_type: "policy", payload: { politician_id: POL, title: "長者健保全免", description: "x".repeat(30), category: "社會福利" }, source_urls: ["https://www.cna.com.tw/a"], note: null, agent_name: "alice", agent_tool: "claude-code/opus", status: "applied", review_notes: "[auto] 政見已建立", applied_at: "2026-09-10T01:00:00Z", applied_politician_id: POL, applied_policy_id: POLICY, created_at: "2026-09-09T23:00:00Z", agree_count: 2, disagree_count: 0, unsure_count: 0 },
+    { id: C_POLICY, contribution_type: "policy", payload: { politician_id: POL, title: "長者健保全免", description: "x".repeat(30), category: "社會福利" }, source_urls: ["https://www.cna.com.tw/a"], note: null, agent_name: "alice", agent_tool: "claude-code/opus", status: "applied", review_notes: "[auto] 政見已建立", applied_at: "2026-09-10T01:00:00Z", applied_politician_id: POL, applied_policy_id: POLICY, created_at: "2026-09-09T23:00:00Z", agree_count: 2, disagree_count: 0, unsure_count: 0, score: 3, effective_agree: 3 },
     { id: C_PROGRESS, contribution_type: "policy_progress", payload: { policy_id: POLICY, status: "In Progress", progress: 40, date: "2026-09-11", note: "預算三讀通過" }, source_urls: ["https://www.ly.gov.tw/b"], note: null, agent_name: "bob", agent_tool: null, status: "applied", review_notes: null, applied_at: "2026-09-11T02:00:00Z", applied_politician_id: null, applied_policy_id: POLICY, created_at: "2026-09-11T01:00:00Z", agree_count: 1, disagree_count: 0, unsure_count: 0 },
-    { id: C_CORR, contribution_type: "correction", payload: { target_table: "policies", target_id: POLICY, field: "proposed_date", correct_value: "2024-04-02", reason: "選舉公報上的日期" }, source_urls: ["https://db.cec.gov.tw/c"], note: null, agent_name: "carol", agent_tool: null, status: "disputed", review_notes: null, applied_at: null, applied_politician_id: null, applied_policy_id: null, created_at: "2026-09-12T03:00:00Z", agree_count: 0, disagree_count: 2, unsure_count: 0 },
+    { id: C_CORR, contribution_type: "correction", payload: { target_table: "policies", target_id: POLICY, field: "proposed_date", correct_value: "2024-04-02", reason: "選舉公報上的日期" }, source_urls: ["https://db.cec.gov.tw/c"], note: null, agent_name: "carol", agent_tool: null, status: "disputed", review_notes: null, applied_at: null, applied_politician_id: null, applied_policy_id: null, created_at: "2026-09-12T03:00:00Z", agree_count: 0, disagree_count: 2, unsure_count: 0, score: -2, effective_agree: 4 },
     { id: C_ADJ, contribution_type: "adjudication", payload: { contribution_id: C_CORR, verdict: "uphold", reason: "公報第 3 頁確實寫 2024-04-02，原更正正確。", checked_urls: ["https://db.cec.gov.tw/c"] }, source_urls: ["https://db.cec.gov.tw/c"], note: null, agent_name: "dave", agent_tool: null, status: "pending", review_notes: null, applied_at: null, applied_politician_id: null, applied_policy_id: null, created_at: "2026-09-12T05:00:00Z", agree_count: 1, disagree_count: 0, unsure_count: 0 },
-    { id: C_PERSON, contribution_type: "politician", payload: { name: "王小明", birth_year: 1966, current_position: "立法委員" }, source_urls: ["https://www.ly.gov.tw/p"], note: null, agent_name: "erin", agent_tool: null, status: "applied", review_notes: null, applied_at: "2026-09-08T00:00:00Z", applied_politician_id: POL, applied_policy_id: null, created_at: "2026-09-07T00:00:00Z", agree_count: 1, disagree_count: 0, unsure_count: 0 },
+    { id: C_PERSON, contribution_type: "politician", payload: { name: "王小明", birth_year: 1966, current_position: "立法委員" }, source_urls: ["https://www.ly.gov.tw/p"], note: null, agent_name: "erin", agent_tool: null, status: "applied", review_notes: null, applied_at: "2026-09-08T00:00:00Z", applied_politician_id: POL, applied_policy_id: null, created_at: "2026-09-07T00:00:00Z", agree_count: 1, disagree_count: 0, unsure_count: 0, score: 1, effective_agree: 1 },
     { id: C_CAND, contribution_type: "candidacy", payload: { name: "王小明", election_id: 2026, election_type: "縣市長", region: "彰化縣", candidate_status: "registered" }, source_urls: ["https://www.cna.com.tw/d"], note: null, agent_name: "frank", agent_tool: null, status: "reverted", review_notes: "[revert by xiaoliang] 還原 1 個變更", applied_at: "2026-09-06T00:00:00Z", applied_politician_id: POL, applied_policy_id: null, created_at: "2026-09-05T00:00:00Z", agree_count: 6, disagree_count: 0, unsure_count: 0 },
   ],
   contribution_votes: [
@@ -98,6 +98,22 @@ Deno.test("單筆貢獻：target=contribution 只回那一筆（含驗證者與�
   const p2 = pageEntries(all, 2, p1.next_cursor);
   assertEquals(p2.items.map((e) => e.id), [C_POLICY]);
   assertEquals(p2.has_more, false);
+});
+
+// 查核履歷每筆帶分數與目標分數（2026-10-05，畫成跟貢獻看板一樣的拉鋸條）。
+// 目標分數取 effective_agree（系統票已折進去）——C_CORR 的 4 就是 Jev 判不支持後的 3+1，不是型別矩陣的 3；
+// 沒帶 effective_agree 的（C_PROGRESS）退回 requiredAgree，沒帶 score 當 0。跟 contributions-feed 同一支 contributionScore。
+Deno.test("履歷每筆帶 score 與 target_score：分數可為負、目標取 effective_agree、拿不到就退回門檻矩陣", async () => {
+  const fake = createFakeSupabase(seed);
+  const entries = buildHistory(await collectHistory(fake.client, "policy", POLICY));
+  const by = Object.fromEntries(entries.map((e) => [e.id, [e.score, e.target_score]]));
+  assertEquals(by[C_POLICY], [3, 3]);
+  assertEquals(by[C_CORR], [-2, 4], "負分照實回；目標是 effective_agree 的 4，不是矩陣的 3");
+  assertEquals(by[C_PROGRESS], [0, 3], "沒有 score 當 0、沒有 effective_agree 退回 requiredAgree（官方來源一般型別 3）");
+});
+
+Deno.test("履歷查貢獻時要撈 score 與 effective_agree 兩欄（計算欄位不撈就永遠退回矩陣，畫面上的目標會悄悄不一樣）", () => {
+  for (const col of ["score", "effective_agree"]) assert(HISTORY_ENTRY_COLUMNS.split(", ").includes(col), `HISTORY_ENTRY_COLUMNS 要含 ${col}`);
 });
 
 Deno.test("沒有任何貢獻紀錄：entries 空、origin 用匯入的 source_url／source_note 說明；完全沒來源也講清楚", async () => {

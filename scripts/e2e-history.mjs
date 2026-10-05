@@ -50,6 +50,10 @@ try {
     check(toggleText.includes('查核履歷（3 筆）'), `${viewport.name}: 標題帶筆數「${toggleText.trim().replace(/\s+/g, ' ')}」`)
     check(await page.locator('[data-testid="history-entry"]').count() === 3, `${viewport.name}: 展開列 3 筆`)
     check((await page.locator('[data-testid="history-entry"]').first().textContent()).includes('裁決中'), `${viewport.name}: 最新一筆是裁決中的更正`)
+    // 分數拉鋸條：每筆一條（跟貢獻看板同一個元件）；fixture 第一筆是 −2／目標 4
+    const bars = page.locator('[data-testid="history-entry"] [data-testid="score-bar"]')
+    check(await bars.count() === 3, `${viewport.name}: 每筆履歷各有一條分數拉鋸條`)
+    check(((await bars.first().getAttribute('title')) ?? '').includes('分數 -2／通過 4、退件 −4'), `${viewport.name}: 拉鋸條的說明寫明分數與兩端門檻`)
 
     // 徽章：有 2 筆 applied → 標題區顯示「已查核 · 2 筆」，點擊平滑捲到履歷區塊
     const badge = page.locator('[data-testid="history-badge"]')

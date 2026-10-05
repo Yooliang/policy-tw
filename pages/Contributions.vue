@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 
 import MechanismNav from '../components/MechanismNav.vue'
+import ScoreBar from '../components/ScoreBar.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
 import { fetchHistory, type HistoryEntry } from '../lib/history'
@@ -197,13 +198,6 @@ function statusLabel(it: FeedItem): string {
   if (it.status === 'applied') return APPLIED_LABEL[it.contribution_type] ?? '已上線'
   return STATUS_LABEL[it.status] ?? it.status
 }
-/** 拉鋸條：左端 −目標＝退件、右端 ＋目標＝通過，標記在現在的分數。回 0～100 的百分比。 */
-function scorePercent(it: FeedItem): number {
-  const t = Math.max(1, it.target_score ?? it.required_agree ?? 1)
-  const s = Math.max(-t, Math.min(t, it.score ?? 0))
-  return Math.round(((s + t) / (2 * t)) * 100)
-}
-
 /** 這一列剛剛發生什麼事：投票要帶分數，看不懂的變動就不顯示 */
 function activityOf(it: FeedItem): string | null {
   return activityText(it.last_activity, { score: it.score ?? 0, target: it.target_score ?? it.required_agree })
@@ -313,25 +307,8 @@ usePageHead({
                 <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full border', STATUS_CLASS[it.status] ?? 'bg-slate-100 text-slate-600 border-slate-200']">
                   {{ statusLabel(it) }}
                 </span>
-                <!-- 拉鋸條（使用者 2026-09-21）：不是按讚數，是兩邊角力——左端 −目標＝退件、右端 ＋目標＝通過，
-                     標記在現在的分數。從中線往右填綠、往左填紅。 -->
-                <span
-                  v-if="(it.target_score ?? 0) > 0"
-                  class="inline-flex items-center gap-1 text-[10px] tabular-nums text-slate-400"
-                  :title="`分數 ${it.score}／通過 ${it.target_score}、退件 −${it.target_score}（同意 ${it.agree_count}・反對 ${it.disagree_count}・存疑 ${it.unsure_count}）`"
-                >
-                  <span class="text-red-500">−{{ it.target_score }}</span>
-                  <span class="relative inline-block w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
-                    <span class="absolute top-0 bottom-0 left-1/2 w-px bg-slate-400"></span>
-                    <span
-                      class="absolute top-0 bottom-0"
-                      :class="(it.score ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500'"
-                      :style="(it.score ?? 0) >= 0 ? { left: '50%', width: `${scorePercent(it) - 50}%` } : { left: `${scorePercent(it)}%`, width: `${50 - scorePercent(it)}%` }"
-                    ></span>
-                    <span class="absolute -top-0.5 w-1 h-3 rounded-sm bg-navy-900" :style="{ left: `calc(${scorePercent(it)}% - 2px)` }"></span>
-                  </span>
-                  <span class="text-emerald-600">+{{ it.target_score }}</span>
-                </span>
+                <!-- 拉鋸條（使用者 2026-09-21）：畫法抽成共用元件，查核履歷也用同一個 -->
+                <ScoreBar :score="it.score" :target="it.target_score" :agree="it.agree_count" :disagree="it.disagree_count" :unsure="it.unsure_count" />
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
               <p class="text-navy-900 leading-snug break-words">{{ shortUrlsIn(it.summary) }}</p>

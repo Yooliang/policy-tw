@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Un
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
+import ScoreBar from '../ScoreBar.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 
 /**
@@ -131,6 +132,9 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
                 <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 tabular-nums" title="反對"><ThumbsDown :size="11" />{{ e.disagree_count }}</span>
                 <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 tabular-nums" title="不確定"><CircleHelp :size="11" />{{ e.unsure_count }}</span>
               </span>
+              <!-- 分數拉鋸條（2026-10-05，使用者要求）：跟貢獻看板同一個元件。已上線、已退件的也照看板畫法，
+                   不另外特判——滿格綠＝達標上線、滿格紅＝退件，一眼分得出這筆是怎麼走到現在的 -->
+              <ScoreBar :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
               <span v-if="e.adjudications.length">有裁決</span>
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
             </div>

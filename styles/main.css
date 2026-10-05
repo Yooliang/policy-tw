@@ -97,6 +97,9 @@ html.dark .border-red-200, html.dark .border-red-300 { border-color: rgb(239 68 
 html.dark .border-violet-100, html.dark .border-violet-200, html.dark .border-violet-300 { border-color: rgb(139 92 246 / 0.4); }
 html.dark .ring-slate-100, html.dark .ring-slate-200 { --tw-ring-color: #334155; }
 
+/* 分數拉鋸條（components/ScoreBar.vue）的位置標記：淺色下是 bg-navy-900，放在深色軌道（#334155）上幾乎看不見，換成亮色 */
+html.dark .score-bar-tick { background-color: #f1f5f9; }
+
 /* hover（要在最後，壓過上面的底色規則） */
 html.dark .hover\:bg-slate-50:hover { background-color: #273449; }
 html.dark .hover\:bg-slate-100:hover { background-color: #334155; }
