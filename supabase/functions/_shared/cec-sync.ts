@@ -15,9 +15,9 @@
  * 但這裡的 name_norm 要先去掉才能跟 SQL 版對上。
  */
 
-import type { CecRow, LocatedRow } from "./cec-static-fetch.ts";
-import { locateRow, parseBirthYear } from "./cec-static-fetch.ts";
-import { ALL_REGIONS, DIRECT_CITIES } from "./cec-city-codes.ts";
+import type { CecRow, FetchOutcome, LocatedRow } from "./cec-static-fetch.ts";
+import { CEC_BASE, LEGISLATOR_AT_LARGE_SUBJECTS, locateRow, parseBirthYear, SUBJECT_MAP } from "./cec-static-fetch.ts";
+import { ALL_REGIONS, CITY_CODES, DIRECT_CITIES } from "./cec-city-codes.ts";
 
 /** 中選會罕見字逸出寫法：@十六進位碼位@ */
 const CEC_ESCAPE_RE = /@([0-9A-Fa-f]{4,5})@/g;
@@ -89,6 +89,12 @@ const CEC_TYPE_TO_OUR: Record<string, OurElectionType> = {
   CityRepresentatives: "鄉鎮市民代表",
   DistrictRepresentatives: "直轄市山地原住民區民代表",
   Village: "村里長",
+  // 原住民選區（2026-10-05）：選舉別跟一般選區相同，只是中選會另開一筆場次
+  CouncilMemberPlainIndigenous: "縣市議員",
+  CouncilMemberMountainIndigenous: "縣市議員",
+  CountyCouncilMemberPlainIndigenous: "縣市議員",
+  CountyCouncilMemberMountainIndigenous: "縣市議員",
+  CityRepresentativesPlainIndigenous: "鄉鎮市民代表",
 };
 
 export function ourElectionType(cecType: string): OurElectionType | null {
@@ -109,7 +115,20 @@ export interface SyncUnitPlan {
    * region＝「全國」，同步是「整個範圍先刪再寫」，不再分一層的話三種會互相刪掉對方（2026-10-05）。
    */
   subRegion?: string;
+  /**
+   * 同一個同步範圍裡要一起抓的其他科目：議員、鄉鎮市民代表的原住民選區（2026-10-05）。
+   * 原住民選區跟一般選區同一個縣市、選區號碼接在後面（台北市一般 01～06、原住民 07／08），
+   * sub_region 是各個選區、沒辦法像全國立委那樣拿來分範圍——拆成兩個單位的話後跑的會把先跑的刪掉，
+   * 所以併進同一個單位：全部科目都抓成功才在同一次「先刪再寫」裡一起寫。
+   */
+  extraCecTypes?: readonly string[];
 }
+
+/** 議員的原住民選區：直轄市（科目 T1）與縣市（科目 T2）各有平地、山地兩筆場次 */
+const COUNCIL_INDIGENOUS_DIRECT: readonly string[] = ["CouncilMemberPlainIndigenous", "CouncilMemberMountainIndigenous"];
+const COUNCIL_INDIGENOUS_COUNTY: readonly string[] = ["CountyCouncilMemberPlainIndigenous", "CountyCouncilMemberMountainIndigenous"];
+/** 鄉鎮市民代表的原住民選區：中選會清單（ELC_R2）2022 只有「區域」與「平地原住民」兩筆 */
+const REPRESENTATIVES_INDIGENOUS: readonly string[] = ["CityRepresentativesPlainIndigenous"];
 
 /** 全國一個選區的立委（cec_candidates.sub_region 的值），順序就是同步順序 */
 export const LEGISLATOR_AT_LARGE_UNITS: readonly SyncUnitPlan[] = [
@@ -134,15 +153,15 @@ export function planUnits(type: OurElectionType | string): SyncUnitPlan[] {
       ];
     case "縣市議員":
       return [
-        ...[...DIRECT_CITIES].map((region) => ({ region, cecType: "CouncilMember" })),
-        ...NON_DIRECT_REGIONS.map((region) => ({ region, cecType: "CountyCouncilMember" })),
+        ...[...DIRECT_CITIES].map((region) => ({ region, cecType: "CouncilMember", extraCecTypes: COUNCIL_INDIGENOUS_DIRECT })),
+        ...NON_DIRECT_REGIONS.map((region) => ({ region, cecType: "CountyCouncilMember", extraCecTypes: COUNCIL_INDIGENOUS_COUNTY })),
       ];
     case "鄉鎮市長":
       return NON_DIRECT_REGIONS.map((region) => ({ region, cecType: "CityMayor" }));
     case "直轄市山地原住民區長":
       return DISTRICT_REP_CITIES.map((region) => ({ region, cecType: "DistrictExecutive" }));
     case "鄉鎮市民代表":
-      return NON_DIRECT_REGIONS.map((region) => ({ region, cecType: "CityRepresentatives" }));
+      return NON_DIRECT_REGIONS.map((region) => ({ region, cecType: "CityRepresentatives", extraCecTypes: REPRESENTATIVES_INDIGENOUS }));
     case "直轄市山地原住民區民代表":
       return DISTRICT_REP_CITIES.map((region) => ({ region, cecType: "DistrictRepresentatives" }));
     case "村里長":
@@ -177,29 +196,56 @@ export interface ThemeInfo {
   themeName: string;
   voteDate?: string;
   year?: number;
-  /** 立委的清單（ELC_L0）同一屆有四筆：L1 區域、L2 平地原住民、L3 山地原住民、L4 不分區政黨 */
+  /**
+   * 同一份清單裡的哪一種（中選會的 legislator_type_id）：立委 L1 區域／L2 平地原住民／L3 山地原住民／L4 不分區政黨；
+   * 議員 T1 區域／T2 平地原住民／T3 山地原住民；鄉鎮市民代表 R1 區域／R2 平地原住民；只有一種的科目是「00」或該科目自己的代碼。
+   */
   legislatorTypeId?: string;
 }
 
-/**
- * 挑該屆的 theme：同年可能不只一筆（如嘉義市 2022 縣市長重行選舉），優先選「不是重行選舉」的那筆，
- * 這是已知的簡化——真的只有重行選舉那筆時仍會退回去用它，但那個特例縣市的名單目前不會被這支選到。
- *
- * 立委（subjectId L0）同一屆四種同在一份清單、同一個投票日，**要用 legislator_type_id 對上科目的 legisId**。
- * 2026-10-05 前沒有對，四筆裡挑「第一筆」——剛好是 L1 區域，所以區域立委一直是對的，
- * 但不分區與原住民立委從來沒被抓過（#332 第 2b 項）。
- */
-export function pickTheme(
-  themes: readonly ThemeInfo[],
-  electionId: number,
-  subject?: { subjectId: string; legisId: string },
-): ThemeInfo | undefined {
-  const matches = themes.filter((t) =>
-    t.year === electionId &&
-    (subject?.subjectId !== "L0" || t.legislatorTypeId === subject.legisId)
+/** 清單檔（ELC_<科目>.json）攤平成場次：列是「地區＋該地區的 theme_items」，不是候選人列 */
+export function themesFromList(rows: readonly unknown[]): ThemeInfo[] {
+  return (rows as Array<{ theme_items?: Array<Record<string, unknown>> }>).flatMap((area) =>
+    (area?.theme_items ?? []).map((t) => ({
+      themeId: String(t.theme_id ?? ""),
+      themeName: String(t.theme_name ?? ""),
+      voteDate: t.vote_date ? String(t.vote_date) : undefined,
+      year: t.vote_date ? parseInt(String(t.vote_date).slice(0, 4), 10) : undefined,
+      legislatorTypeId: t.legislator_type_id ? String(t.legislator_type_id) : undefined,
+    }))
   );
-  if (matches.length === 0) return undefined;
-  return matches.find((t) => !t.themeName.includes("重行選舉")) ?? matches[0];
+}
+
+type SubjectKey = { subjectId: string; legisId: string };
+
+/** 這筆場次是不是這個科目要的那一種（legislator_type_id 對上 SUBJECT_MAP 的 legisId） */
+function themeMatchesSubject(t: ThemeInfo, subject?: SubjectKey): boolean {
+  if (!subject) return true;
+  // 立委四種同一份清單、同一個投票日，清單沒標種類的就不收（#332 第 2b 項：不能退回去拿區域那筆）
+  if (subject.subjectId === "L0") return t.legislatorTypeId === subject.legisId;
+  // 其他科目：清單有標種類就要對上（議員、代表的原住民選區跟一般選區同屆同日，2026-10-05）
+  return t.legislatorTypeId === undefined || t.legislatorTypeId === subject.legisId;
+}
+
+/**
+ * 該屆可用的場次，依優先順序：先「不是重行選舉」的、再重行選舉的。
+ *
+ * 同年可能不只一筆：嘉義市 2022 縣市長原訂 11-26 因候選人過世延到 12-18「重行選舉」，中選會另開一筆場次，
+ * 而 11-26 那筆的全國檔裡根本沒有嘉義市。呼叫端（collectPart）依序試，哪一筆有這個縣市的人就用哪一筆；
+ * 2026-10-05 前只取第一筆，嘉義市長 2022 一位都沒進 cec_candidates。
+ *
+ * 種類（legislator_type_id）要對上科目的 legisId：立委、議員、代表的區域與原住民選區同屆同日、同在一份清單，
+ * 2026-10-05 前只有立委有對（#357），議員與代表照舊挑「第一筆」——剛好是區域那筆，原住民選區從來沒被抓過。
+ */
+export function pickThemes(themes: readonly ThemeInfo[], electionId: number, subject?: SubjectKey): ThemeInfo[] {
+  const matches = themes.filter((t) => t.year === electionId && themeMatchesSubject(t, subject));
+  const isRedo = (t: ThemeInfo) => t.themeName.includes("重行選舉");
+  return [...matches.filter((t) => !isRedo(t)), ...matches.filter(isRedo)];
+}
+
+/** pickThemes 的第一順位（舊介面，給只要一筆的呼叫端） */
+export function pickTheme(themes: readonly ThemeInfo[], electionId: number, subject?: SubjectKey): ThemeInfo | undefined {
+  return pickThemes(themes, electionId, subject)[0];
 }
 
 // ── CEC 列 → cec_candidates 列 ───────────────────────────────────
@@ -252,5 +298,117 @@ export function toCecCandidateRow(row: CecRow, ticket: CecRow | undefined, ctx: 
     elected,
     cec_theme_id: ctx.themeId,
     cec_cand_id: merged.cand_id ?? null,
+  };
+}
+
+// ── 一個同步單位要抓的東西（2026-10-05 從 cec-sync/index.ts 搬來，好讓「試哪幾筆場次、併哪幾個科目」有測試） ──
+
+/** 縣市長／總統／全國一個選區的立委只有全國範圍的檔（縣市範圍會 404），要抓全國檔再依縣市過濾 */
+export function isNationalOnly(cecType: string): boolean {
+  return cecType === "President" || cecType === "Mayor" || cecType === "CountyMayor" || cecType in LEGISLATOR_AT_LARGE_SUBJECTS;
+}
+
+export function scopeFor(cecType: string, region: string): { prv: string; city: string } {
+  if (isNationalOnly(cecType)) return { prv: "00", city: "000" };
+  const codes = CITY_CODES[region];
+  return { prv: codes?.prv ?? "00", city: codes?.city ?? "000" };
+}
+
+/** 抓中選會的外部依賴：呼叫端負責請求間隔與快取（測試塞假資料） */
+export interface CecFetchDeps {
+  /** 這個科目的場次清單（ELC_<科目>.json 攤平） */
+  themes: (cecType: string) => Promise<ThemeInfo[]>;
+  /** 抓一個靜態 JSON 檔 */
+  fetchJson: (url: string) => Promise<FetchOutcome>;
+}
+
+export interface PartResult {
+  cecType: string;
+  themeId: string;
+  /** 中選會檔案裡的列數（過濾縣市之前） */
+  fetched: number;
+  rows: CecCandidateRow[];
+}
+
+/** 用某一筆場次抓這個縣市的名單（候選人檔＋得票檔；村里長另抓鄉鎮名對照） */
+async function fetchThemeRows(
+  electionId: number,
+  ourType: string,
+  cecType: string,
+  region: string,
+  theme: ThemeInfo,
+  deps: CecFetchDeps,
+): Promise<PartResult> {
+  const subject = SUBJECT_MAP[cecType];
+  const { prv, city } = scopeFor(cecType, region);
+  const scope = `${prv}_${city}_00_000_0000`;
+  const pathTail = `ELC/${subject.subjectId}/${subject.legisId}/${theme.themeId}/${subject.defaultLevel}/${scope}.json`;
+  const candOutcome = await deps.fetchJson(`${CEC_BASE}/data/candidates/${pathTail}`);
+  const ticketOutcome = await deps.fetchJson(`${CEC_BASE}/data/tickets/${pathTail}`);
+  if (candOutcome.kind === "error") throw new Error(`candidates: ${candOutcome.message}`);
+  if (ticketOutcome.kind === "error") throw new Error(`tickets: ${ticketOutcome.message}`);
+
+  // 村里長：area_name 是里名，鄉鎮市區名要另抓 areas 檔用 dept_code 對
+  const deptNames = new Map<string, string>();
+  if (cecType === "Village") {
+    const areasOutcome = await deps.fetchJson(`${CEC_BASE}/data/areas/ELC/${subject.subjectId}/${subject.legisId}/${theme.themeId}/D/${scope}.json`);
+    if (areasOutcome.kind === "ok") {
+      for (const a of areasOutcome.rows) if (a.dept_code && a.area_name) deptNames.set(a.dept_code, a.area_name);
+    }
+    // areas 抓不到不算致命：subRegion 會是空的，候選人本身還是抓得到
+  }
+
+  const ticketsById = new Map<number, CecRow>();
+  if (ticketOutcome.kind === "ok") {
+    for (const t of ticketOutcome.rows) if (t.cand_id !== undefined) ticketsById.set(t.cand_id, t);
+  }
+  // 候選人檔為主；候選人檔不存在（404）時只用得票檔（得票檔也有姓名／政黨／出生年，村里長、代表的原住民選區就是這種情況）
+  const baseRows = candOutcome.kind === "ok" ? candOutcome.rows : [...ticketsById.values()];
+  const requestedRegion = region === "全國" ? undefined : region;
+  const rows = baseRows
+    .filter((row) => row.cand_name)
+    .map((row) => {
+      const ticket = row.cand_id !== undefined ? ticketsById.get(row.cand_id) : undefined;
+      return toCecCandidateRow(row, ticket, { electionId, ourType, cecType, themeId: theme.themeId, requestedRegion, deptNames });
+    })
+    .filter((r): r is CecCandidateRow => r !== null)
+    // 全國範圍的檔（總統／縣市長／全國一個選區的立委）要再依縣市過濾；用轉換後的 region 比對，跟 fetch-cec-data 一致
+    .filter((r) => !isNationalOnly(cecType) || region === "全國" || r.region === region);
+  return { cecType, themeId: theme.themeId, fetched: baseRows.length, rows };
+}
+
+/**
+ * 一個科目：依 pickThemes 的順序試場次，第一個抓得到這個縣市的人的就用它；都抓不到人就回第一順位的空結果。
+ * 找不到場次、或任何一個檔抓失敗（不是 404）就丟錯——呼叫端整個單位跳過、保留舊資料，不能當成「這裡沒有人」去刪。
+ */
+export async function collectPart(electionId: number, ourType: string, cecType: string, region: string, deps: CecFetchDeps): Promise<PartResult> {
+  const subject = SUBJECT_MAP[cecType];
+  if (!subject) throw new Error(`不認得的中選會科目 ${cecType}`);
+  const candidates = pickThemes(await deps.themes(cecType), electionId, subject);
+  if (candidates.length === 0) throw new Error(`找不到 ${electionId} 年的 theme（cecType=${cecType}）`);
+  let first: PartResult | undefined;
+  for (const theme of candidates) {
+    const got = await fetchThemeRows(electionId, ourType, cecType, region, theme, deps);
+    if (got.rows.length > 0) return got;
+    first ??= got;
+  }
+  return first!;
+}
+
+/** 一個同步單位（屆別×選舉別×縣市）：主科目＋同範圍的其他科目（原住民選區）全部抓成功才回傳 */
+export async function collectUnitRows(
+  electionId: number,
+  ourType: string,
+  plan: SyncUnitPlan,
+  deps: CecFetchDeps,
+): Promise<{ fetched: number; rows: CecCandidateRow[]; parts: PartResult[] }> {
+  const parts: PartResult[] = [];
+  for (const cecType of [plan.cecType, ...(plan.extraCecTypes ?? [])]) {
+    parts.push(await collectPart(electionId, ourType, cecType, plan.region, deps));
+  }
+  return {
+    fetched: parts.reduce((n, p) => n + p.fetched, 0),
+    rows: parts.flatMap((p) => p.rows),
+    parts,
   };
 }
