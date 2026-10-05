@@ -21,7 +21,8 @@ function between(text: string, start: string, end: string): string {
   return text.slice(i, j < 0 ? undefined : j);
 }
 /** 去掉 SQL 註解，免得註解裡的舊寫法被當成程式 */
-const code = (s: string) => s.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+// （Windows 檢出是 CRLF：先切掉 \r，不然 `.` 碰到 \r 就停、註解拿不掉）
+const code = (s: string) => s.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
 
 const latestFn = code(between(sql, "CREATE OR REPLACE FUNCTION politician_latest_election(", "COMMENT ON FUNCTION politician_latest_election"));
 const trigger = code(between(sql, "CREATE OR REPLACE FUNCTION sync_politician_latest_election()", "COMMENT ON FUNCTION sync_politician_latest_election"));
