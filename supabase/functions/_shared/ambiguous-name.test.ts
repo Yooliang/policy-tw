@@ -20,7 +20,7 @@ function fake(politicians: unknown[]) {
 const ITEM = {
   contribution_type: "policy",
   payload: { name: "陳瑩", title: "推動 AI 個性化學習支持", description: "在生生有平板基礎上善用 AI，為偏鄉學生提供個性化學習支持", election_id: 2026, category: "教育文化", status: "Campaign Pledge" },
-  source_urls: ["https://news.ltn.com.tw/news/politics/breakingnews/1"],
+  source_urls: ["https://news.ltn.com.tw/news/politics/breakingnews/1", "https://udn.com/news/story/1"],
   agent_name: "tester",
   agent_tool: "claude-code/sonnet",
 };

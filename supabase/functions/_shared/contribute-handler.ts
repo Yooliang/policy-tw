@@ -22,6 +22,7 @@ import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registra
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
+import { soleSourceProblems } from "./sole-source-guard.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -286,6 +287,24 @@ export async function handleContribute(
         ...(shortfall.elevated && toolVerdict
           ? { elevated: { model: toolVerdict.model, not_found_rate: Number(toolVerdict.rate.toFixed(3)), site_rate: Number(toolVerdict.overall_rate.toFixed(3)), submitted: toolVerdict.submitted, window_days: NOT_FOUND_RATE_WINDOW_DAYS } }
           : {}),
+      },
+    };
+  }
+
+  // 媒體不能當唯一出處（#347 第 3 項，協議 1.45.0）：政見與政見進度沒有官方來源時，要兩個不同網站的來源。
+  // 門檻表不分來源等級（一律 3），三張 +1 擋不住「整筆只建立在一篇報導上」；交件當下補一個來源最便宜。不算被拒。
+  const soleSource = soleSourceProblems(validation.items);
+  if (soleSource.length > 0) {
+    try {
+      await supabase.from("gate_rejections").insert(soleSource.map(() => ({ gate: "single_non_official_source", endpoint: via, contribution_id: null, ip_hash: ipHash })));
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: "single_non_official_source",
+        message: "有政見或政見進度只附了一個網站的非官方來源（媒體、社群或其他），整批未收；請照 errors 補第二個不同網站的來源或改附官方來源後重送。這不算被拒。",
+        errors: soleSource,
       },
     };
   }
