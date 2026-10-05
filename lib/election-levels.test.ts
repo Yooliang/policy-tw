@@ -3,10 +3,13 @@
  *   1. 要撈什麼不准問 wardKind（那要先有資料才判得出來），所以直轄市的區一律撈兩種原住民職位。
  *   2. 顯示的職位一定是「撈回來的」的子集——不然畫面上會有一個永遠空的區塊。
  */
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
+  DIRECTORY_POSITIONS,
   displayedPositions,
   planLevels,
+  POSITIONS,
+  positionSpec,
   positionsToLoad,
   scopeOf,
   type PositionType,
@@ -36,16 +39,17 @@ Deno.test("全台頁不列立法委員——資料裡的立委全是綁縣市選
   assertEquals(positionsToLoad({ region: "All", subRegion: "All", isSpecialMunicipality: false }).includes("立法委員"), false);
 });
 
-Deno.test("縣市頁（縣轄）：這一層是縣市長、立委、議員，下一層是鄉鎮市長", () => {
+// 順序就是畫面上區塊的順序（2026-10-05 起頁面照 planLevels 畫）：縣市長、議員、立委——跟分層之前模板寫死的順序一樣
+Deno.test("縣市頁（縣轄）：這一層是縣市長、議員、立委，下一層是鄉鎮市長", () => {
   const plan = planLevels({ region: "嘉義縣", subRegion: "All", isSpecialMunicipality: false, wardKind: "rural" });
   assertEquals(plan.scope, "county");
-  assertEquals(plan.thisLevel, ["縣市長", "立法委員", "縣市議員"]);
+  assertEquals(plan.thisLevel, ["縣市長", "縣市議員", "立法委員"]);
   assertEquals(plan.nextLevel, ["鄉鎮市長"]);
 });
 
 Deno.test("縣市頁（直轄市）：下一層是原住民區長，不是鄉鎮市長——直轄市沒有鄉鎮市", () => {
   const plan = planLevels({ region: "高雄市", subRegion: "All", isSpecialMunicipality: true, wardKind: "rural" });
-  assertEquals(plan.thisLevel, ["縣市長", "立法委員", "縣市議員"]);
+  assertEquals(plan.thisLevel, ["縣市長", "縣市議員", "立法委員"]);
   assertEquals(plan.nextLevel, ["直轄市山地原住民區長"]);
   assertEquals(displayedPositions(plan).includes("鄉鎮市長"), false);
 });
@@ -93,11 +97,11 @@ Deno.test("縣轄鄉鎮撈的是鄉鎮市長、代表、村里長，不含原住
 Deno.test("縣市頁撈的職位含下一層，才有東西可以帶到下一站", () => {
   assertEquals(
     positionsToLoad({ region: "嘉義縣", subRegion: "All", isSpecialMunicipality: false }),
-    ["縣市長", "立法委員", "縣市議員", "鄉鎮市長"],
+    ["縣市長", "縣市議員", "立法委員", "鄉鎮市長"],
   );
   assertEquals(
     positionsToLoad({ region: "高雄市", subRegion: "All", isSpecialMunicipality: true }),
-    ["縣市長", "立法委員", "縣市議員", "直轄市山地原住民區長"],
+    ["縣市長", "縣市議員", "立法委員", "直轄市山地原住民區長"],
   );
 });
 
@@ -132,4 +136,109 @@ Deno.test("撈的清單沒有重複職位——重複會讓 RPC 的型別篩選�
     const loaded = positionsToLoad(c);
     assertEquals(new Set(loaded).size, loaded.length, `${c.region}/${c.subRegion} 撈的清單有重複`);
   }
+});
+
+// ── 2026-10-05（#348）：分層收成設定（POSITIONS）之後的守門 ─────────────────────
+
+/**
+ * #342 寫死的版本，原樣凍結在這裡當對照組：收成設定之後，任何輸入算出來的職位集合都要跟它一樣。
+ * 唯一刻意的差別是縣市層的順序（縣市長、議員、立委）——頁面現在照 planLevels 的順序畫，
+ * 這個順序就是分層之前模板寫死的順序；以前 planLevels 沒有被頁面拿去畫，順序沒有意義。
+ */
+function legacyPositionsToLoad(input: { region: string; subRegion: string; isSpecialMunicipality: boolean }): PositionType[] {
+  const scope = scopeOf(input);
+  if (scope === "national") return ["總統副總統", "縣市長"];
+  if (scope === "county") {
+    return input.isSpecialMunicipality
+      ? ["縣市長", "立法委員", "縣市議員", "直轄市山地原住民區長"]
+      : ["縣市長", "立法委員", "縣市議員", "鄉鎮市長"];
+  }
+  return input.isSpecialMunicipality
+    ? ["直轄市山地原住民區長", "直轄市山地原住民區民代表", "村里長"]
+    : ["鄉鎮市長", "鄉鎮市民代表", "村里長"];
+}
+function legacyPlanLevels(input: { region: string; subRegion: string; isSpecialMunicipality: boolean; wardKind: WardKind }) {
+  const scope = scopeOf(input);
+  if (scope === "national") return { scope, thisLevel: ["總統副總統"], nextLevel: ["縣市長"] };
+  if (scope === "county") {
+    return { scope, thisLevel: ["縣市長", "立法委員", "縣市議員"], nextLevel: input.isSpecialMunicipality ? ["直轄市山地原住民區長"] : ["鄉鎮市長"] };
+  }
+  if (!input.isSpecialMunicipality) return { scope, thisLevel: ["鄉鎮市長", "鄉鎮市民代表"], nextLevel: ["村里長"] };
+  return { scope, thisLevel: input.wardKind === "indigenous" ? ["直轄市山地原住民區長", "直轄市山地原住民區民代表"] : [], nextLevel: ["村里長"] };
+}
+const sorted = (xs: readonly string[]) => [...xs].sort();
+
+Deno.test("收成設定之後，每一種輸入撈的與顯示的職位都跟 #342 寫死的版本一樣", () => {
+  for (const region of ["All", "嘉義縣", "高雄市"]) {
+    for (const subRegion of ["All", "大林鎮", "那瑪夏區"]) {
+      for (const isSpecialMunicipality of [false, true]) {
+        const input = { region, subRegion, isSpecialMunicipality };
+        assertEquals(sorted(positionsToLoad(input)), sorted(legacyPositionsToLoad(input)), `撈：${JSON.stringify(input)}`);
+        for (const wardKind of ["rural", "indigenous", "plain"] as WardKind[]) {
+          const now = planLevels({ ...input, wardKind });
+          const old = legacyPlanLevels({ ...input, wardKind });
+          assertEquals(now.scope, old.scope);
+          assertEquals(sorted(now.thisLevel), sorted(old.thisLevel), `這一層：${JSON.stringify({ ...input, wardKind })}`);
+          // 下一層的順序也要一樣（直轄市縣市頁只有一個，其餘都是一個）
+          assertEquals([...now.nextLevel], old.nextLevel, `下一層：${JSON.stringify({ ...input, wardKind })}`);
+          // 縣市層以外的這一層連順序都一樣
+          if (now.scope !== "county") assertEquals([...now.thisLevel], old.thisLevel);
+        }
+      }
+    }
+  }
+});
+
+Deno.test("設定表：每個職位剛好一列，鄉鎮層的職位都標了在哪種鄉鎮市區有，其他層不標", () => {
+  const all: PositionType[] = ["總統副總統", "立法委員", "縣市長", "縣市議員", "鄉鎮市長", "鄉鎮市民代表", "村里長", "直轄市山地原住民區長", "直轄市山地原住民區民代表"];
+  assertEquals(sorted(POSITIONS.map((p) => p.type)), sorted(all));
+  for (const p of POSITIONS) {
+    if (p.level === "township") assert(p.wards && p.wards.length > 0, `${p.type} 沒標 wards`);
+    else assertEquals(p.wards, undefined, `${p.type} 不是鄉鎮層，不該標 wards`);
+    assertEquals(positionSpec(p.type), p);
+  }
+  assertEquals(positionSpec("不存在的職位"), undefined);
+  // 每一級至少有一個首長，「下一層」才帶得出東西
+  for (const level of ["national", "county", "township", "village"]) {
+    assert(POSITIONS.some((p) => p.level === level && p.role === "head"), `${level} 沒有首長`);
+  }
+});
+
+Deno.test("設定表：分組排法只給選區是「第NN選舉區」的職位與村里長", () => {
+  const byDisplay = (d: string) => POSITIONS.filter((p) => p.display === d).map((p) => p.type);
+  assertEquals(sorted(byDisplay("district")), sorted(["縣市議員", "直轄市山地原住民區民代表"]));
+  assertEquals(byDisplay("village"), ["村里長"]);
+});
+
+Deno.test("名錄的職位從設定推，跟分層之前手寫的清單一字不差（順序與名稱）", () => {
+  assertEquals(DIRECTORY_POSITIONS.map((p) => ({ type: p.type, label: p.label })), [
+    { type: "鄉鎮市長", label: "鄉鎮市長" },
+    { type: "直轄市山地原住民區長", label: "原住民區長" },
+    { type: "鄉鎮市民代表", label: "鄉鎮市民代表" },
+    { type: "直轄市山地原住民區民代表", label: "原住民區代表" },
+    { type: "村里長", label: "村里長" },
+  ]);
+});
+
+Deno.test("區塊標題跟分層之前模板寫死的一樣（「〔名稱〕參選人」）", () => {
+  const titles = Object.fromEntries(POSITIONS.filter((p) => p.display === "grid").map((p) => [p.type, `${p.label}參選人`]));
+  assertEquals(titles, {
+    "總統副總統": "總統副總統參選人",
+    "縣市長": "縣市長參選人",
+    "立法委員": "立法委員參選人",
+    "鄉鎮市長": "鄉鎮市長參選人",
+    "鄉鎮市民代表": "鄉鎮市民代表參選人",
+    "直轄市山地原住民區長": "原住民區長參選人",
+  });
+});
+
+Deno.test("選舉頁照設定畫：設定用到的圖示都有註冊，模板不再寫死各職位的區塊", async () => {
+  const page = await Deno.readTextFile(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const icons = page.match(/const LEVEL_ICONS: Record<string, Component> = \{([^}]*)\}/);
+  assert(icons, "ElectionPage.vue 找不到 LEVEL_ICONS");
+  const registered = icons[1].split(",").map((s) => s.trim()).filter(Boolean);
+  for (const p of POSITIONS) assert(registered.includes(p.icon), `${p.type} 的圖示 ${p.icon} 沒有註冊——區塊會沒有圖示`);
+  // 區塊由設定產生：模板裡不該再出現寫死的「…參選人」標題或各職位專用的名單
+  assert(page.includes('v-for="section in thisLevelSections"') && page.includes('v-for="section in nextLevelSections"'));
+  assertEquals(page.match(/title="[^"]*參選人"/g), null, "模板裡又寫死了區塊標題");
 });

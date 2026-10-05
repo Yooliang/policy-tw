@@ -3,7 +3,7 @@ export default { name: 'ElectionPage' }
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onActivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, type Component } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import HeroAction from '../components/HeroAction.vue'
 import { PolicyStatus, ElectionType, type Politician } from '../types'
@@ -29,6 +29,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
+import { planLevels, positionSpec, type PositionSpec } from '../lib/election-levels'
 import { groupByVillage } from '../lib/village-grouping'
 import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
@@ -383,7 +384,6 @@ const legislatorPoliticians = computed(() => {
   }
   return sortPoliticians(result)
 })
-const mayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.MAYOR))
 const councilorPoliticians = computed(() => {
   let result = electionPoliticians.value.map(withCurrentElectionData).filter(c => getElectionType(c) === ElectionType.COUNCILOR)
   if (selectedRegion.value !== 'All') {
@@ -418,9 +418,7 @@ const townshipDirectoryGroups = computed(() => {
 })
 const townshipDirectoryTotal = computed(() => directoryTotal(townshipDirectoryGroups.value))
 
-const townshipMayorPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.TOWNSHIP_MAYOR))
 const indigenousChiefPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_CHIEF))
-const repPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.REPRESENTATIVE))
 const indigenousRepPoliticians = computed(() => filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.INDIGENOUS_DISTRICT_REP))
 const chiefPoliticians = computed(() => {
   let result = filteredPoliticians.value.filter(c => getElectionType(c) === ElectionType.CHIEF)
@@ -441,19 +439,6 @@ const wardKind = computed(() => classifyWard({
   isSpecialMunicipality: isSpecialMunicipality.value,
   hasIndigenousRace: indigenousChiefPoliticians.value.length > 0 || indigenousRepPoliticians.value.length > 0,
 }))
-const isIndigenousWard = computed(() => selectedSubRegion.value !== 'All' && wardKind.value === 'indigenous')
-
-/**
- * 村里長名單依村里分組（2026-10-04）。直轄市的區與縣轄鄉鎮市共用——分層之後兩邊的
- * 「下一層」都是村里長（lib/election-levels.ts）。
- *
- * 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里
- * （chip 或右側篩選）時 chiefPoliticians 已經先篩過，這裡自然只剩一組。
- * village 是空值、或對不上 availableVillages 的人（見 lib/village-grouping.ts）
- * 收進最後一組「未標示里別」，不會悄悄從畫面消失。
- */
-const villageChiefGroups = computed(() =>
-  groupByVillage(chiefPoliticians.value, availableVillages.value).map(g => ({ label: g.village, people: g.people })))
 
 /**
  * 議員與原住民區代表依選舉區分組＋選區快篩（2026-10-04，lib/district-grouping.ts）。
@@ -475,15 +460,73 @@ function groupsByDistrict(people: Politician[]) {
     : people.filter(c => c.subRegion === selectedDistrict.value)
   return groupByDistrict(picked).map(g => ({ label: g.district, people: g.people }))
 }
-const councilorDistricts = computed(() => districtsOf(councilorPoliticians.value))
-const councilorGroups = computed(() => groupsByDistrict(councilorPoliticians.value))
-const indigenousRepDistricts = computed(() => districtsOf(indigenousRepPoliticians.value))
-const indigenousRepGroups = computed(() => groupsByDistrict(indigenousRepPoliticians.value))
 
 /** 里名快篩 chip：點了只看那個里，再點一次取消——跟右側「村里」篩選是同一個 selectedVillage */
 function toggleVillageChip(village: string) {
   selectedVillage.value = selectedVillage.value === village ? 'All' : village
 }
+
+/**
+ * 這一頁畫哪些區塊（2026-10-05 #348）：照分層設定（lib/election-levels.ts 的 POSITIONS）算出
+ * 「這一層」「下一層」各有哪些職位，每個職位畫一個區塊——卡片（grid）、依選舉區分組（district）、
+ * 依村里分組（village）三種排法由設定決定。以前三個層級的區塊各自寫死在模板裡。
+ *
+ * 加一個職位：在 POSITIONS 加一列就會出現在對的頁面；排法是上面三種之一、圖示在 LEVEL_ICONS 裡，
+ * 這裡就不用改。名單預設從 filteredPoliticians 照職位取；只有幾個既有職位有自己的排序或篩法
+ * （PEOPLE_BY_TYPE），例如總統排在副總統前面、議員要照右側選的鄉鎮篩選區、村里長要照選的村里篩。
+ */
+const levelPlan = computed(() => planLevels({
+  region: selectedRegion.value,
+  subRegion: selectedSubRegion.value,
+  isSpecialMunicipality: isSpecialMunicipality.value,
+  wardKind: wardKind.value,
+}))
+
+/** 設定裡的圖示名稱 → 元件 */
+const LEVEL_ICONS: Record<string, Component> = { Crown, Flag, Users, ScrollText, Building2, Landmark, Mountain, MessageCircle, MapPin }
+
+const PEOPLE_BY_TYPE: Partial<Record<string, () => Politician[]>> = {
+  [ElectionType.PRESIDENT]: () => presidentPoliticians.value,
+  [ElectionType.LEGISLATOR]: () => legislatorPoliticians.value,
+  [ElectionType.COUNCILOR]: () => councilorPoliticians.value,
+  [ElectionType.CHIEF]: () => chiefPoliticians.value,
+}
+function peopleOf(type: string): Politician[] {
+  return PEOPLE_BY_TYPE[type]?.() ?? filteredPoliticians.value.filter(c => getElectionType(c) === type)
+}
+
+interface LevelSection {
+  spec: PositionSpec
+  people: Politician[]
+  /** district／village 排法的分組（分組函式會把沒填的人收進最後一組，不會讓人從畫面消失） */
+  groups: Array<{ label: string; people: Politician[] }>
+  /** 快篩 chip：選舉區或村里名 */
+  chips: readonly string[]
+  empty: boolean
+}
+
+function buildSection(spec: PositionSpec): LevelSection {
+  const people = peopleOf(spec.type)
+  if (spec.display === 'district') {
+    // 議員與原住民區代表共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
+    // 不會同時在畫面上，而換縣市或換鄉鎮時 watch 會把它重設。
+    const groups = groupsByDistrict(people)
+    return { spec, people, groups, chips: districtsOf(people), empty: groups.length === 0 }
+  }
+  if (spec.display === 'village') {
+    // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，
+    // 這裡自然只剩一組。村里是空值或對不上的人收進最後一組「未標示里別」（lib/village-grouping.ts）。
+    const groups = groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people }))
+    return { spec, people, groups, chips: availableVillages.value, empty: groups.length === 0 }
+  }
+  return { spec, people, groups: [], chips: [], empty: people.length === 0 }
+}
+
+function sectionsOf(types: readonly string[]): LevelSection[] {
+  return types.map(positionSpec).filter((s): s is PositionSpec => !!s).map(buildSection)
+}
+const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
+const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
 const hasLocalCandidates = computed(() => {
@@ -774,142 +817,96 @@ usePageHead({
           </select>
         </div>
         <!--
-          ===== 第1級：全台 =====
-          這一層＝總統副總統，下一層＝各縣市長。
-          立法委員不在這一層：資料裡的立委全部是綁縣市選區的區域立委（2024 那 312 位每一位
-          都掛在「XX第NN選區」底下），把他們全列在全台頁既不是全國層級，也跟縣市頁完全重複。
-          底下那行字就是帶使用者去他該去的地方。
+          分層（2026-10-05 #348 收成設定）：每一頁只畫「這一層＋下一層」，畫哪些職位、什麼順序、
+          用卡片還是分組，全部照 lib/election-levels.ts 的 POSITIONS。加職位只要在那張表加一列。
+            全台      總統副總統｜各縣市長
+            縣市      縣市長、縣市議員、立法委員｜鄉鎮市長（直轄市：原住民區長）
+            縣轄鄉鎮  鄉鎮市長、鄉鎮市民代表｜村里長
+            直轄市區  原住民區：區長、區代表｜里長；一般區：區長官派（一行小字）｜里長
+          這裡只剩各層的「附加物」：全台頁的立委引導、縣市頁的名錄、鄉鎮層的空白提示。
         -->
-        <template v-if="selectedRegion === 'All'">
-          <PoliticianGrid v-if="presidentPoliticians.length > 0" :politicians="presidentPoliticians" :columns="gridColumns" :election-id="electionId" title="總統副總統參選人"><template #icon><Crown class="text-amber-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-          <!-- 引導要能直接點過去，不是叫人自己去上面找（CLAUDE.md：換頁一律真連結，爬蟲才跟得到） -->
-          <section v-if="hasLegislatorRace" class="mb-12 text-left">
-            <p class="text-sm text-slate-600 mb-3">區域立委依選區劃分，請選擇縣市查看：</p>
-            <div class="flex flex-wrap gap-1.5">
-              <RouterLink
-                v-for="county in TAIWAN_COUNTIES"
-                :key="county"
-                :to="electionPath(electionId, county)"
-                class="px-3 py-1 rounded-full text-xs font-bold border bg-white text-slate-600 border-slate-200 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 transition-all"
-              >{{ county }}</RouterLink>
-            </div>
-          </section>
-        </template>
-
-        <!-- ===== 第2級：縣市 ===== -->
-        <template v-else-if="selectedSubRegion === 'All'">
-          <PoliticianGrid v-if="mayorPoliticians.length > 0" :politicians="mayorPoliticians" :columns="gridColumns" :election-id="electionId" title="縣市長參選人"><template #icon><Flag class="text-red-500" /></template></PoliticianGrid>
-          <!-- 議員依選舉區分組＋選區快篩：一個縣市上百位，攤平了找不到自己那一區 -->
+        <template v-for="section in thisLevelSections" :key="section.spec.type">
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
-            v-if="councilorGroups.length > 0"
-            :groups="councilorGroups"
-            :chips="councilorDistricts"
-            :selected="selectedDistrict"
+            v-else-if="section.spec.display !== 'grid' && !section.empty"
+            :groups="section.groups"
+            :chips="section.chips"
+            :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"
             :columns="gridColumns"
             :election-id="electionId"
-            title-prefix="縣市議員"
-            @toggle="toggleDistrictChip"
-          ><template #icon><Users class="text-blue-500" /></template></ChipFilteredGroups>
-          <!-- 2024 那種全國性選舉在縣市頁只有立委 -->
-          <PoliticianGrid v-if="legislatorPoliticians.length > 0" :politicians="legislatorPoliticians" :columns="gridColumns" :election-id="electionId" title="立法委員參選人"><template #icon><ScrollText class="text-purple-500" /></template></PoliticianGrid>
-
-          <!--
-            下一層（lib/election-levels.ts）：縣轄縣市是鄉鎮市長，直轄市是原住民區長
-            （一般區的區長官派，所以直轄市這一格通常是空的）。
-          -->
-          <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-
-          <!-- 鄉鎮市區參選人名錄：名字連結，收合在各鄉鎮底下 -->
-          <section v-if="townshipDirectoryGroups.length > 0" class="mb-12 text-left">
-            <h3 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2 border-l-4 border-blue-500 pl-3">
-              <Building2 class="text-indigo-500" /> 鄉鎮市區參選人名錄 ({{ townshipDirectoryTotal }})
-            </h3>
-            <p class="text-sm text-slate-500 mb-4">展開各{{ subRegionLabel }}看參選人名單；要看卡片請在右側選{{ subRegionLabel }}。</p>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <details v-for="t in townshipDirectoryGroups" :key="t.township" class="bg-white border border-slate-200 rounded-xl">
-                <summary class="px-4 py-2.5 cursor-pointer font-bold text-navy-900 flex items-center justify-between">
-                  <span>{{ t.township }}</span>
-                  <span class="text-xs font-medium text-slate-400">{{ t.total }} 位</span>
-                </summary>
-                <div class="px-4 pb-3 space-y-2 text-sm leading-relaxed">
-                  <p v-for="g in t.groups" :key="g.label">
-                    <span class="text-slate-500 font-medium">{{ g.label }}：</span>
-                    <template v-for="(person, i) in g.people" :key="person.politicianId"><span v-if="i > 0" class="text-slate-300">、</span><RouterLink :to="`/politician/${person.politicianId}`" class="text-blue-700 hover:underline">{{ person.name }}</RouterLink><span v-if="person.village" class="text-slate-400 text-xs">（{{ person.village }}）</span></template>
-                  </p>
-                </div>
-              </details>
-            </div>
-          </section>
+            :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
+            @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
+          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
 
-        <!-- ===== 第3級：直轄市的區（2026-10-04：不再卡在「選里」才看得到名單，直接列里長並可用 chip 快篩） ===== -->
-        <template v-else-if="isSpecialMunicipality">
-          <!-- 原住民區：區長、區代表皆民選，三種名單都列 -->
-          <template v-if="isIndigenousWard">
-            <PoliticianGrid v-if="indigenousChiefPoliticians.length > 0" :politicians="indigenousChiefPoliticians" :columns="gridColumns" :election-id="electionId" title="原住民區長參選人"><template #icon><Mountain class="text-emerald-600" /></template></PoliticianGrid>
-            <ChipFilteredGroups
-              v-if="indigenousRepGroups.length > 0"
-              :groups="indigenousRepGroups"
-              :chips="indigenousRepDistricts"
-              :selected="selectedDistrict"
-              :columns="gridColumns"
-              :election-id="electionId"
-              title-prefix="原住民區代表"
-              @toggle="toggleDistrictChip"
-            ><template #icon><MessageCircle class="text-teal-500" /></template></ChipFilteredGroups>
-          </template>
-          <!-- 一般區：區長市府指派，一行小字說明，不擋里長名單 -->
-          <p v-else class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
+        <!-- 直轄市一般區：區長市府指派，這一層沒有職位，一行小字說明，不擋里長名單 -->
+        <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
-          <!-- 下一層：里長，依里分組＋里名快篩 -->
+        <template v-for="section in nextLevelSections" :key="section.spec.type">
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
-            v-if="villageChiefGroups.length > 0"
-            :groups="villageChiefGroups"
-            :chips="availableVillages"
-            :selected="selectedVillage"
+            v-else-if="section.spec.display !== 'grid' && !section.empty"
+            :groups="section.groups"
+            :chips="section.chips"
+            :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"
             :columns="gridColumns"
             :election-id="electionId"
-            @toggle="toggleVillageChip"
-          ><template #icon><MapPin class="text-amber-500" /></template></ChipFilteredGroups>
-          <!-- 無候選人時的提示 -->
-          <div v-else class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
-            <MapPin :size="48" class="mx-auto mb-4 text-slate-300" />
-            <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無{{ villageLabel }}長參選人資料</h3>
-            <p class="text-slate-500">請選擇其他{{ subRegionLabel }}查看。</p>
-          </div>
+            :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
+            @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
+          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
 
         <!--
-          ===== 第3級：縣轄鄉鎮市 =====
-          這一層＝鄉鎮市長、鄉鎮市民代表，下一層＝村里長。
-          2026-10-04 起村里長就列在這一頁（依村里分組＋村里名快篩，跟直轄市的區同一個元件），
-          不再是「要先在右側選一個村里才看得到名單」——那讓一個鄉鎮的村里長名單藏在兩層操作後面。
-          選了特定村里時 chiefPoliticians 已經先篩過，所以下面自然只剩那一組。
+          全台頁的立委引導：立法委員不在全台層——資料裡的立委全部是綁縣市選區的區域立委（2024 那 312 位每一位
+          都掛在「XX第NN選區」底下），列在全台頁既不是全國層級，也跟縣市頁完全重複。
+          引導要能直接點過去，不是叫人自己去上面找（CLAUDE.md：換頁一律真連結，爬蟲才跟得到）。
         -->
-        <template v-else>
-          <PoliticianGrid v-if="townshipMayorPoliticians.length > 0" :politicians="townshipMayorPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市長參選人"><template #icon><Building2 class="text-indigo-500" /></template></PoliticianGrid>
-          <PoliticianGrid v-if="repPoliticians.length > 0" :politicians="repPoliticians" :columns="gridColumns" :election-id="electionId" title="鄉鎮市民代表參選人"><template #icon><Landmark class="text-green-500" /></template></PoliticianGrid>
-
-          <!-- 下一層：村里長 -->
-          <ChipFilteredGroups
-            v-if="villageChiefGroups.length > 0"
-            :groups="villageChiefGroups"
-            :chips="availableVillages"
-            :selected="selectedVillage"
-            :columns="gridColumns"
-            :election-id="electionId"
-            @toggle="toggleVillageChip"
-          ><template #icon><MapPin class="text-amber-500" /></template></ChipFilteredGroups>
-
-          <!-- 這一層與下一層都沒有人時才算真的空 -->
-          <div v-if="!townshipMayorPoliticians.length && !repPoliticians.length && !villageChiefGroups.length" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
-            <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
-            <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無參選人資料</h3>
-            <p class="text-slate-500">請選擇其他{{ subRegionLabel }}查看。</p>
+        <section v-if="levelPlan.scope === 'national' && hasLegislatorRace" class="mb-12 text-left">
+          <p class="text-sm text-slate-600 mb-3">區域立委依選區劃分，請選擇縣市查看：</p>
+          <div class="flex flex-wrap gap-1.5">
+            <RouterLink
+              v-for="county in TAIWAN_COUNTIES"
+              :key="county"
+              :to="electionPath(electionId, county)"
+              class="px-3 py-1 rounded-full text-xs font-bold border bg-white text-slate-600 border-slate-200 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 transition-all"
+            >{{ county }}</RouterLink>
           </div>
-        </template>
+        </section>
+
+        <!-- 縣市頁的鄉鎮市區參選人名錄：名字連結，收合在各鄉鎮底下（預渲染頁裡唯一通往村里長人物頁的連結） -->
+        <section v-if="levelPlan.scope === 'county' && townshipDirectoryGroups.length > 0" class="mb-12 text-left">
+          <h3 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2 border-l-4 border-blue-500 pl-3">
+            <Building2 class="text-indigo-500" /> 鄉鎮市區參選人名錄 ({{ townshipDirectoryTotal }})
+          </h3>
+          <p class="text-sm text-slate-500 mb-4">展開各{{ subRegionLabel }}看參選人名單；要看卡片請在右側選{{ subRegionLabel }}。</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <details v-for="t in townshipDirectoryGroups" :key="t.township" class="bg-white border border-slate-200 rounded-xl">
+              <summary class="px-4 py-2.5 cursor-pointer font-bold text-navy-900 flex items-center justify-between">
+                <span>{{ t.township }}</span>
+                <span class="text-xs font-medium text-slate-400">{{ t.total }} 位</span>
+              </summary>
+              <div class="px-4 pb-3 space-y-2 text-sm leading-relaxed">
+                <p v-for="g in t.groups" :key="g.label">
+                  <span class="text-slate-500 font-medium">{{ g.label }}：</span>
+                  <template v-for="(person, i) in g.people" :key="person.politicianId"><span v-if="i > 0" class="text-slate-300">、</span><RouterLink :to="`/politician/${person.politicianId}`" class="text-blue-700 hover:underline">{{ person.name }}</RouterLink><span v-if="person.village" class="text-slate-400 text-xs">（{{ person.village }}）</span></template>
+                </p>
+              </div>
+            </details>
+          </div>
+        </section>
+
+        <!-- 直轄市的區：下一層（里長）沒有人就提示（原住民區的區長、區代表名單照常列在上面） -->
+        <div v-if="levelPlan.scope === 'township' && isSpecialMunicipality && nextLevelSections.every(s => s.empty)" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+          <MapPin :size="48" class="mx-auto mb-4 text-slate-300" />
+          <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無{{ villageLabel }}長參選人資料</h3>
+          <p class="text-slate-500">請選擇其他{{ subRegionLabel }}查看。</p>
+        </div>
+        <!-- 縣轄鄉鎮市：這一層與下一層都沒有人時才算真的空 -->
+        <div v-if="levelPlan.scope === 'township' && !isSpecialMunicipality && [...thisLevelSections, ...nextLevelSections].every(s => s.empty)" class="text-center py-12 bg-white border border-dashed border-slate-300 rounded-xl">
+          <Building2 :size="48" class="mx-auto mb-4 text-slate-300" />
+          <h3 class="text-lg font-bold text-navy-900 mb-2">此{{ subRegionLabel }}無參選人資料</h3>
+          <p class="text-slate-500">請選擇其他{{ subRegionLabel }}查看。</p>
+        </div>
       </div>
 
       <!-- VIEW: Pledges -->

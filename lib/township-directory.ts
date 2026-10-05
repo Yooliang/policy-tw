@@ -11,6 +11,7 @@
  * 這就是「卡片輕、SEO 入口照舊」的做法。
  */
 import { compareRegionName } from './region-name'
+import { DIRECTORY_POSITIONS } from './election-levels'
 
 /** 名錄只需要這幾個欄位：連結要 politicianId，顯示要 name／village，分組要 electionType／subRegion */
 export interface DirectoryPerson {
@@ -48,15 +49,11 @@ export interface DirectoryLevelSpec {
  * 三處各寫一份的話，預渲染帶的人跟畫面要顯示的人會對不上——而對不上的樣子是
  * 名錄少一塊，看起來跟「這個縣市沒有那個層級」一樣。
  *
- * 順序就是畫面上的顯示順序（大到小）。
+ * 清單本身從分層設定推（lib/election-levels.ts 的 DIRECTORY_POSITIONS，2026-10-05 #348）：
+ * 鄉鎮層與村里層的全部職位，同一級首長在前——鄉鎮市長、原住民區長、鄉鎮市民代表、原住民區代表、村里長。
+ * 加職位只要改那張表，這裡跟著變。
  */
-export const DIRECTORY_LEVELS: readonly DirectoryLevelSpec[] = [
-  { type: '鄉鎮市長', label: '鄉鎮市長' },
-  { type: '直轄市山地原住民區長', label: '原住民區長' },
-  { type: '鄉鎮市民代表', label: '鄉鎮市民代表' },
-  { type: '直轄市山地原住民區民代表', label: '原住民區代表' },
-  { type: '村里長', label: '村里長' },
-]
+export const DIRECTORY_LEVELS: readonly DirectoryLevelSpec[] = DIRECTORY_POSITIONS.map(p => ({ type: p.type, label: p.label }))
 
 /** 名錄要撈的 election_type 清單 */
 export const DIRECTORY_POSITION_TYPES: readonly string[] = DIRECTORY_LEVELS.map(l => l.type)
