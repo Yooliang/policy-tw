@@ -258,5 +258,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
     <div v-else-if="!collapsed" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
       尚無此區域的{{ title }}資料
     </div>
+    <!-- 卡片下面的附加區塊（2026-10-05 #364：同選區參選人的政見並排比較），收合時一起收 -->
+    <slot v-if="!collapsed" name="after" />
   </div>
 </template>

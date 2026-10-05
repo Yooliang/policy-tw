@@ -13,8 +13,12 @@ import PolicyViewNav from '../components/PolicyViewNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { policyMatchesRegion } from '../lib/policy-region'
+import { dueDeadlinePolicies } from '../lib/policy-elements'
+import { taipeiDay } from '../lib/election-list'
+import { RouterLink } from 'vue-router'
+import { CalendarClock } from 'lucide-vue-next'
 
-const { policies, politicians, locations, categories, loading, ensurePolicies } = useSupabase()
+const { policies, politicians, locations, categories, loading, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
 const { globalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
@@ -69,6 +73,27 @@ const filteredPolicies = computed(() => {
     return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isNotCampaign
   })
 })
+
+/**
+ * 期限已到的政見（2026-10-05 #364）：原文寫的達成期限已經過了、還沒標達成或跳票、期限之後也沒有進度紀錄。
+ * 條件跟派工臂 deadline_due 同一套（lib/policy-elements.ts 的 deadlineDue）——這些會派給 AI 代理去查做到沒有。
+ * 只看縣市篩選（跟這一頁的縣市選擇一致），不看分類與關鍵字：這是一份待查清單，不是搜尋結果。
+ * 「今天」第一次渲染用資料快照的建置日（預渲染與 hydrate 一致），掛載後才換成今天（同選舉一覽頁的做法）。
+ */
+const today = ref(taipeiDay(dataAsOf.value ?? Date.now()))
+onMounted(() => { today.value = taipeiDay(Date.now()) })
+const politicianById = computed(() => new Map(politicians.value.map(p => [String(p.id), p])))
+const duePolicies = computed(() => dueDeadlinePolicies(
+  policies.value.filter(p => policyMatchesRegion(p, politicians.value, selectedLocation.value)),
+  {
+    today: today.value,
+    electionDateOf: (p) => (p.electionId != null ? getElectionById(p.electionId)?.electionDate : undefined),
+    electionResultOf: (p) => politicianById.value.get(String(p.politicianId))?.elections?.find(e => e.electionId === p.electionId)?.electionResult,
+  },
+))
+const STATUS_TEXT: Record<string, string> = {
+  'Campaign Pledge': '競選承諾', Proposed: '已提出', 'In Progress': '推動中', Stalled: '滯後',
+}
 
 // 以下兩個要放在 filteredPolicies 之後：watch 會立即求值一次來源，
 // 擺在前面會讀到還沒初始化的 const（暫時死區），整個 setup 拋 ReferenceError、
@@ -176,6 +201,41 @@ usePageHead({
         <Star :size="20" fill="currentColor" />
         <span>您正在查看我的關注（共 {{ filteredPolicies.length }} 項）</span>
       </div>
+
+      <!-- 期限已到的政見（#364）：一張待查清單，表格裡的政見與人物都是真連結 -->
+      <section v-if="!showCheckpointsOnly" class="mb-10 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 text-left" data-testid="due-policies">
+        <h2 class="text-lg font-bold text-navy-900 flex items-center gap-2">
+          <CalendarClock :size="20" class="text-amber-600" />期限已到的政見
+          <span class="text-sm font-medium text-slate-500">（{{ duePolicies.length }}）</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-500 leading-relaxed">原文寫的達成期限已經過了，還沒標「已實現」或「跳票」，期限之後也還沒有任何進度紀錄。這些會派給 AI 代理去查期限到了做到沒有；期限是照政見原文換算的日期（會計年度以曆年計）。</p>
+        <p v-if="duePolicies.length === 0" class="mt-4 text-sm text-slate-400">目前沒有期限已到、還沒有後續的政見。</p>
+        <div v-else class="mt-4 overflow-x-auto -mx-5 px-5 sm:mx-0 sm:px-0">
+          <table class="w-full min-w-[36rem] text-sm text-left border-collapse">
+            <thead>
+              <tr class="text-xs text-slate-500">
+                <th scope="col" class="py-2 pr-3 border-b border-slate-200 font-bold">政見</th>
+                <th scope="col" class="py-2 pr-3 border-b border-slate-200 font-bold">提出者</th>
+                <th scope="col" class="py-2 pr-3 border-b border-slate-200 font-bold">原文寫的期限</th>
+                <th scope="col" class="py-2 border-b border-slate-200 font-bold">目前狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in duePolicies" :key="d.policy.id" class="align-top">
+                <td class="py-2 pr-3 border-b border-slate-100"><RouterLink :to="`/policy/${d.policy.id}`" class="font-bold text-navy-900 hover:text-blue-700 hover:underline">{{ d.policy.title }}</RouterLink></td>
+                <td class="py-2 pr-3 border-b border-slate-100 whitespace-nowrap">
+                  <RouterLink v-if="politicianById.get(String(d.policy.politicianId))" :to="`/politician/${d.policy.politicianId}`" class="text-blue-700 hover:underline">{{ politicianById.get(String(d.policy.politicianId))!.name }}</RouterLink>
+                </td>
+                <td class="py-2 pr-3 border-b border-slate-100">
+                  <span class="text-slate-800">{{ d.deadlineText }}</span>
+                  <span class="block text-xs text-slate-500">{{ d.deadlineDate }}，已過 {{ d.daysOver }} 天</span>
+                </td>
+                <td class="py-2 border-b border-slate-100 whitespace-nowrap text-slate-600">{{ STATUS_TEXT[d.policy.status] ?? d.policy.status }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div v-if="unrenderablePolicies.length > 0" class="mb-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
         有 {{ unrenderablePolicies.length }} 筆政見暫時顯示不出來，重新整理通常就會出現。

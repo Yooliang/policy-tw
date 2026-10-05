@@ -55,6 +55,6 @@ defineEmits<{ toggle: [value: string] }>()
       :columns="columns"
       :election-id="electionId"
       :title="titlePrefix ? `${titlePrefix}・${group.label}` : group.label"
-    ><template #icon><slot name="icon" /></template></PoliticianGrid>
+    ><template #icon><slot name="icon" /></template><template #after><slot name="group-after" :group="group" /></template></PoliticianGrid>
   </div>
 </template>
