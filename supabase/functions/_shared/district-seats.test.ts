@@ -31,6 +31,7 @@ import {
   turnoutFromProfiles,
 } from "./cec-sync.ts";
 import { POSITIONS } from "../../../lib/election-levels.ts";
+import { turnoutText } from "../../../lib/election-list.ts";
 
 const T = "district_seats_missing";
 const C = "district_seats";
@@ -339,4 +340,14 @@ Deno.test("投票率：只算投票日當天那一場（嘉義市長 12-18 重�
   const p = await headlineTurnout(2024, deps);
   assertEquals([p?.value, p?.election_type], [71.86, "總統副總統"]);
   assertEquals(await headlineTurnout(2026, deps), null, "還沒有場次的屆別不寫");
+});
+
+Deno.test("投票率是首長選舉合計：欄位註解與 /elections 畫面都要寫明（主線 10-06，避免跟媒體只引直轄市長的數字混淆）", async () => {
+  const { sql } = await latestDefining("COMMENT ON COLUMN elections.turnout");
+  const comment = sql.slice(sql.lastIndexOf("COMMENT ON COLUMN elections.turnout"));
+  assertStringIncludes(comment.slice(0, comment.indexOf("';") + 2), "首長選舉合計");
+  assertStringIncludes(comment, "直轄市長＋縣市長");
+  assertStringIncludes(turnoutText({ turnout: 61.16, types: ["縣市長"] }) ?? "", "首長選舉合計");
+  // 畫面用的算法說明跟 cec-sync 實際加總的科目是同一組
+  assertStringIncludes(turnoutText({ turnout: 61.16, types: ["縣市長"] }) ?? "", "直轄市長＋縣市長");
 });
