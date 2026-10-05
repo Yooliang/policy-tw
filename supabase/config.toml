@@ -552,3 +552,9 @@ enabled = true
 # 新聞來源逐則收進 news_items（pg_cron 每小時呼叫，不驗 JWT；同一來源 30 分鐘內抓過就跳過）
 verify_jwt = false
 entrypoint = "./functions/news-fetch/index.ts"
+
+[functions.source-archive]
+enabled = true
+# 選舉公報／選委會公告類的出處送 Wayback Machine 存檔（pg_cron 每 10 分鐘呼叫，不驗 JWT；每筆有租約與失敗退避）
+verify_jwt = false
+entrypoint = "./functions/source-archive/index.ts"
