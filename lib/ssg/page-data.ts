@@ -18,14 +18,13 @@ import { sameRegionName } from '../region-name'
 export type PageSnapshot = DataSnapshot
 
 /**
- * 與 useSupabase.loadPoliticiansByElection 的全台層一致（lib/election-levels.ts 的
- * positionsToLoad）：全台頁＝這一層（總統副總統）＋下一層（各縣市長）。
+ * 全台頁要帶的職位：跟 useSupabase.loadPoliticiansByElection 的全台層同一份（lib/election-levels.ts 的
+ * positionsToLoad）＝這一層（總統副總統）＋下一層（各縣市長）。
  *
- * 2026-10-04 拿掉立法委員：資料裡的立委全部是綁縣市選區的區域立委，屬縣市層。
- * 這份清單一定要跟 positionsToLoad 的全台層同步——預渲染的切片比瀏覽器端多帶一種職位，
- * hydrate 之後畫面會先有人再消失。
+ * 2026-10-05（#348）起直接從分層設定推，不再另抄一份——抄的那份多帶一種職位，
+ * hydrate 之後畫面會先有人再消失；少帶一種，預渲染的 HTML 就少一整塊。
  */
-export const NATIONAL_ELECTION_TYPES = ['總統副總統', '縣市長']
+export const NATIONAL_ELECTION_TYPES: readonly string[] = positionsToLoad({ region: 'All', subRegion: 'All', isSpecialMunicipality: false })
 
 function paramString(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
