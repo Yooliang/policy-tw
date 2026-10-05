@@ -16,6 +16,8 @@
 
 import { normalizeCorrection } from "./correction.ts";
 import { electionTypeSwitch } from "./candidate-import.ts";
+import { linkLevelProblem } from "./lineage.ts";
+import { resolveLineagePlace } from "./apply-contribution.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -39,7 +41,8 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? 
 const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
 interface PoliticianRow { merged_into: string | null }
-interface PolicyRow { removed_at: string | null }
+interface PolicyRow { removed_at: string | null; lineage_id?: string | null; title?: string | null }
+interface LineageRow { id: string; title: string; level: string; region: string | null; sub_region: string | null }
 
 /**
  * `ok: false` 代表這次查詢本身失敗（DB 錯誤／丟例外）——呼叫端要把這批 id 一律當「查不到問題」放行，
@@ -66,12 +69,33 @@ async function lookupPolicies(supabase: SupabaseLike, ids: readonly string[]): P
   const rows = new Map<string, PolicyRow>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // query-bounds: ok — ids 來自這一批交件（最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("policies").select("id, removed_at").in("id", ids);
-    if (error) { console.error("precheck policies lookup failed:", error.message); return { rows, ok: false }; }
-    for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null }>) rows.set(r.id, { removed_at: r.removed_at ?? null });
+    // 脈絡一筆最多 60 個政見 id（#349），整批 20 筆可到上千個：切成 100 個一段，網址才不會超長
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      // query-bounds: ok — ids 來自這一批交件、每段 100 個，變數 in()
+      const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title").in("id", chunk);
+      if (error) { console.error("precheck policies lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null }>) {
+        rows.set(String(r.id).toLowerCase(), { removed_at: r.removed_at ?? null, lineage_id: r.lineage_id ?? null, title: r.title ?? null });
+      }
+    }
   } catch (e) {
     console.error("precheck policies lookup threw:", e instanceof Error ? e.message : String(e));
+    return { rows, ok: false };
+  }
+  return { rows, ok: true };
+}
+
+async function lookupLineages(supabase: SupabaseLike, ids: readonly string[]): Promise<LookupResult<Map<string, LineageRow>>> {
+  const rows = new Map<string, LineageRow>();
+  if (ids.length === 0) return { rows, ok: true };
+  try {
+    // query-bounds: ok — ids 來自這一批交件（每筆最多兩條脈絡，最多 MAX_BATCH 筆），變數 in()
+    const { data, error } = await supabase.from("lineages").select("id, title, level, region, sub_region").in("id", ids);
+    if (error) { console.error("precheck lineages lookup failed:", error.message); return { rows, ok: false }; }
+    for (const r of (data ?? []) as LineageRow[]) rows.set(String(r.id).toLowerCase(), r);
+  } catch (e) {
+    console.error("precheck lineages lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
   }
   return { rows, ok: true };
@@ -140,6 +164,7 @@ export async function precheckApplyTargets(
   const policyIds = new Set<string>();
   const electionRowIds = new Set<number>();
   const taskIds = new Set<string>();
+  const lineageIds = new Set<string>();
   interface CandidacyCheck { index: number; politicianId: string; electionId: number; electionType: string; position: string | null }
   const candidacyChecks: CandidacyCheck[] = [];
 
@@ -202,17 +227,47 @@ export async function precheckApplyTargets(
         if (taskId && !taskId.startsWith("auto:")) taskIds.add(taskId);
         break;
       }
+      // 政策脈絡（#349）：政見、人物、脈絡都要在；歸入的政見不能已經在別條脈絡；新脈絡的地方要對得到內政部行政區
+      case "lineage": {
+        const lid = str(p.lineage_id);
+        if (lid) lineageIds.add(lid.toLowerCase());
+        for (const k of ["policy_ids", "detach_policy_ids"]) {
+          for (const id of Array.isArray(p[k]) ? p[k] as unknown[] : []) if (typeof id === "string" && id.trim()) policyIds.add(id.trim().toLowerCase());
+        }
+        break;
+      }
+      case "lineage_participants": {
+        const lid = str(p.lineage_id);
+        if (lid) lineageIds.add(lid.toLowerCase());
+        for (const it of Array.isArray(p.participants) ? p.participants as unknown[] : []) {
+          const pid = it && typeof it === "object" ? str((it as Obj).politician_id) : null;
+          if (pid) politicianIds.add(pid);
+        }
+        break;
+      }
+      case "lineage_handover": {
+        const lid = str(p.lineage_id);
+        if (lid) lineageIds.add(lid.toLowerCase());
+        for (const k of ["from_politician_id", "to_politician_id"]) { const pid = str(p[k]); if (pid) politicianIds.add(pid); }
+        break;
+      }
+      case "lineage_link": {
+        for (const k of ["upper_lineage_id", "lower_lineage_id"]) { const lid = str(p[k]); if (lid) lineageIds.add(lid.toLowerCase()); }
+        break;
+      }
     }
   }
 
-  const [politicians, policies, electionRows, tasks, participations] = await Promise.all([
+  const [politicians, policies, electionRows, tasks, participations, lineages] = await Promise.all([
     lookupPoliticians(supabase, [...politicianIds]),
     lookupPolicies(supabase, [...policyIds]),
     lookupElectionRows(supabase, [...electionRowIds]),
     lookupTasks(supabase, [...taskIds]),
     lookupParticipations(supabase, [...new Set(candidacyChecks.map((c) => c.politicianId))], [...new Set(candidacyChecks.map((c) => c.electionId))]),
+    lookupLineages(supabase, [...lineageIds]),
   ]);
   const politicianRows = politicians.rows, policyRows = policies.rows, electionRowExists = electionRows.rows, taskRows = tasks.rows;
+  const lineageRows = lineages.rows;
 
   const problems: PrecheckProblem[] = [];
   // 查詢本身失敗（DB 錯誤／丟例外）：這批 id 一律當「查不到問題」放行，不能把系統的錯當成擋代理的理由
@@ -225,10 +280,16 @@ export async function precheckApplyTargets(
   };
   const checkPolicy = (i: number, id: string, path: string, verb: string, removedVerb: string): boolean => {
     if (!policies.ok) return true;
-    const row = policyRows.get(id);
+    const row = policyRows.get(id.toLowerCase());
     if (!row) { problems.push({ index: i, code: "target_not_found", path, message: `找不到政見 ${id}，${verb}` }); return false; }
     if (row.removed_at) { problems.push({ index: i, code: "apply_would_fail", path, message: `政見 ${id} 已被移除，${removedVerb}` }); return false; }
     return true;
+  };
+  const checkLineage = (i: number, id: string, path: string): LineageRow | null => {
+    if (!lineages.ok) return null;
+    const row = lineageRows.get(id.toLowerCase());
+    if (!row) problems.push({ index: i, code: "target_not_found", path, message: `找不到脈絡 ${id}：請照任務 target 裡的 lineage_id 帶，或用 new_lineage 建一條新的` });
+    return row ?? null;
   };
 
   for (const { item, i } of entries) {
@@ -284,6 +345,62 @@ export async function precheckApplyTargets(
         const taskId = str(p.task_id);
         if (taskId && !taskId.startsWith("auto:") && tasks.ok && !taskRows.has(taskId)) {
           problems.push({ index: i, code: "target_not_found", path: "payload.task_id", message: `找不到任務 ${taskId}，可能已被刪除或關閉，沒有可關的任務；請用 GET /next 領新任務` });
+        }
+        break;
+      }
+      case "lineage": {
+        const lid = str(p.lineage_id)?.toLowerCase() ?? null;
+        if (lid) checkLineage(i, lid, "payload.lineage_id");
+        const attach = Array.isArray(p.policy_ids) ? (p.policy_ids as unknown[]).filter((x): x is string => typeof x === "string") : [];
+        const detach = Array.isArray(p.detach_policy_ids) ? (p.detach_policy_ids as unknown[]).filter((x): x is string => typeof x === "string") : [];
+        attach.forEach((id, k) => {
+          if (!checkPolicy(i, id, `payload.policy_ids[${k}]`, "歸入不了脈絡：請照任務 target.policies 裡的 policy_id 帶", "不歸入脈絡")) return;
+          const cur = policyRows.get(id.toLowerCase())?.lineage_id;
+          if (policies.ok && cur && String(cur).toLowerCase() !== lid) {
+            problems.push({
+              index: i, code: "apply_would_fail", path: `payload.policy_ids[${k}]`,
+              message: `政見「${policyRows.get(id.toLowerCase())?.title ?? id}」已經在脈絡 ${cur}：同一件事就帶那條的 lineage_id 歸入；要改歸屬，先對那條用 detach_policy_ids 拿掉`,
+            });
+          }
+        });
+        detach.forEach((id, k) => { checkPolicy(i, id, `payload.detach_policy_ids[${k}]`, "拿不掉：請確認 policy_id", "不用拿掉"); });
+        const nl = p.new_lineage && typeof p.new_lineage === "object" ? p.new_lineage as Obj : null;
+        if (nl && nl.level !== "national") {
+          // 地方要對得到內政部行政區（落庫會用同一支函式查官方代碼）；查詢本身出錯不擋
+          try {
+            const place = await resolveLineagePlace(supabase, nl.level, nl.region, nl.sub_region);
+            if ("error" in place) problems.push({ index: i, code: "target_not_found", path: "payload.new_lineage.region", message: place.error });
+          } catch (e) {
+            console.error("precheck lineage place lookup failed:", e instanceof Error ? e.message : String(e));
+          }
+        }
+        break;
+      }
+      case "lineage_participants": {
+        const lid = str(p.lineage_id);
+        if (lid) checkLineage(i, lid, "payload.lineage_id");
+        (Array.isArray(p.participants) ? p.participants as unknown[] : []).forEach((it, k) => {
+          const pid = it && typeof it === "object" ? str((it as Obj).politician_id) : null;
+          if (pid) checkPolitician(i, pid, `payload.participants[${k}].politician_id`, "這個人還不在網站上，先不要標他的角色");
+        });
+        break;
+      }
+      case "lineage_handover": {
+        const lid = str(p.lineage_id);
+        if (lid) checkLineage(i, lid, "payload.lineage_id");
+        for (const k of ["from_politician_id", "to_politician_id"]) {
+          const pid = str(p[k]);
+          if (pid) checkPolitician(i, pid, `payload.${k}`, "記不了交接");
+        }
+        break;
+      }
+      case "lineage_link": {
+        const up = str(p.upper_lineage_id), down = str(p.lower_lineage_id);
+        const upper = up ? checkLineage(i, up, "payload.upper_lineage_id") : null;
+        const lower = down ? checkLineage(i, down, "payload.lower_lineage_id") : null;
+        if (upper && lower) {
+          const problem = linkLevelProblem(upper, lower);
+          if (problem) problems.push({ index: i, code: "apply_would_fail", path: "payload.upper_lineage_id", message: problem });
         }
         break;
       }

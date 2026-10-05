@@ -169,6 +169,11 @@ export const TASK_SOURCE_NEEDS: Record<string, readonly string[]> = {
   // 政見三要素要的是政見原文；期限到了查進度也是從政見那一頁找起（#364）
   policy_elements_missing: ["policy"],
   deadline_due: ["policy"],
+  // 政策脈絡（#349）：同一件事要看政見原文；交接、上下級要看施政與預算；角色要看議事紀錄
+  lineage_candidate: ["policy"],
+  handover_missing: ["policy"],
+  lineage_roles_missing: ["policy"],
+  lineage_link_candidate: ["policy"],
 };
 
 /** 沒特別登記的任務型別（含手動任務）預設要的東西：不知道具體要查什麼，給最常用的一組 */

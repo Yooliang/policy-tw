@@ -73,6 +73,8 @@ export interface HistoryEntry {
 const TYPE_LABEL: Record<string, string> = {
   politician: "更新人物欄位", candidacy: "參選狀態", policy: "新增政見", policy_progress: "進度更新", correction: "更正",
   task_suggestion: "任務提議", no_change: "無異動", adjudication: "裁決", answer: "回答提問", audit: "文件核對",
+  // 政策脈絡（#349）
+  lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯",
 };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待驗證", verified: "已驗證", applied: "已上線", apply_failed: "上線中（自動重試）", superseded: "同宣稱已由他筆上線", disputed: "裁決中", rejected: "退件", reverted: "已還原",
@@ -83,8 +85,14 @@ const FIELD_LABEL: Record<string, string> = {
   source_url: "來源網址", progress: "進度", last_updated: "最後更新", source_note: "來源備註", audit: "核對來源", "*": "整列",
   // 政見三要素（#364）
   stated: "原文有沒有寫", text: "要素內容", deadline_date: "期限日期", source_locator: "原句位置",
+  // 政策脈絡（#349）
+  lineage_id: "所屬脈絡", origin: "政見來源", summary: "摘要", role: "角色", basis: "依據", note: "說明",
+  handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
 };
-const TABLE_LABEL: Record<string, string> = { politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素" };
+const TABLE_LABEL: Record<string, string> = {
+  politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素",
+  lineages: "政策脈絡", lineage_participants: "脈絡參與角色", handovers: "脈絡交接", lineage_links: "脈絡上下級關聯", lineage_candidate_reviews: "脈絡候選清查",
+};
 
 function fmtValue(v: unknown): string {
   if (v === null || v === undefined || v === "") return "（空）";

@@ -83,6 +83,10 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'question_answer', label: '提問回答' },
   { key: 'removal', label: '建議移除' },
   { key: 'policy_elements', label: '政見要素' },
+  { key: 'lineage', label: '政策脈絡' },
+  { key: 'lineage_participants', label: '脈絡角色' },
+  { key: 'lineage_handover', label: '脈絡交接' },
+  { key: 'lineage_link', label: '脈絡上下級' },
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))

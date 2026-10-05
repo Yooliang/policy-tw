@@ -137,6 +137,16 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
       { element: "target", stated: true, text: "新建社會住宅 3,000 戶", source_locator: "公報第 2 頁〈居住〉第 1 點" },
       { element: "funding", stated: false, source_locator: "公報第 2 頁〈居住〉全段" },
     ] },
+    lineage: { new_lineage: { title: "台中捷運藍線", category: "交通建設", level: "county", region: "台中市" },
+      policy_ids: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"],
+      note: "兩條政見都是台中捷運藍線，計畫名稱與路線相同。" },
+    lineage_participants: { lineage_id: "00000000-0000-4000-8000-000000000009", participants: [
+      { politician_id: "00000000-0000-4000-8000-000000000001", role: "co_proposer", basis: "official_record", source_locator: "議案 1234" },
+    ] },
+    lineage_handover: { lineage_id: "00000000-0000-4000-8000-000000000009", from_politician_id: "00000000-0000-4000-8000-000000000001",
+      to_politician_id: "00000000-0000-4000-8000-000000000002", handover_type: "pivot", note: "後任把藍線改成先做第一階段，見 2027 年施政報告。", source_locator: "施政報告第 3 頁" },
+    lineage_link: { upper_lineage_id: "00000000-0000-4000-8000-000000000008", lower_lineage_id: "00000000-0000-4000-8000-000000000009",
+      link_type: "top_down", note: "中央前瞻軌道補助核定藍線第一階段，市府執行。", source_locator: "核定公文" },
   };
 
   for (const type of CONTRIBUTION_TYPES) {

@@ -6,6 +6,7 @@
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
 import { correctionTouches, correctionOnlyFromRumor } from "./correction.ts";
+import { HANDOVER_TWO_IP_TYPES } from "./lineage.ts";
 
 export const VOTE_WEIGHT = 1;
 /** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
@@ -401,6 +402,21 @@ export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sour
 export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
 
 /**
+ * 這一筆要不要兩台不同機器投過才上線（SQL 鏡像：contribution_needs_two_ips，migration 20261006034900）。
+ * 除了上面三種型別，「中止」交接也要（#349，小良哥 2026-10-05：中止要較高票數，比照 merge_politician 的兩台機器規則）——
+ * 錯的「中止」等於公開記錄「某任首長把這件事停了」，跟誤併人物同一級的傷害。其他交接型態走一般規則。
+ * 分數、目標分數、退件門檻都不變：只決定「分數到了之後，還要不要第二台機器」。
+ */
+export function needsTwoIps(contributionType: string, payload?: unknown): boolean {
+  if ((SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType)) return true;
+  if (contributionType === "lineage_handover") {
+    const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+    return (HANDOVER_TWO_IP_TYPES as readonly string[]).includes(String(p.handover_type ?? ""));
+  }
+  return false;
+}
+
+/**
  * 退件門檻：分數 ≤ −這個數就退件。固定 3（不動正式資料的型別 2），**不隨目標分數調整**（2026-09-23 維護者）。
  * 09-21 原本是 ≤ −目標，但目標會被 Jev 往上調（來源判不支持 → 4；票數預算接上後可到 5～7），
  * 退件跟著變難——Jev 已經說這筆撐不住，反而要更多反對票才退得掉，方向相反。SQL 同步：contribution_reject_floor。
@@ -410,12 +426,12 @@ export function rejectFloor(contributionType: string): number {
 }
 
 /** 總分 → 狀態。只在 pending／verified／disputed 之間轉；其餘狀態由維護者或系統決定。 */
-export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string; rosterMatched?: boolean }): string {
+export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string; rosterMatched?: boolean; payload?: unknown }): string {
   const { score, target, distinctIps, contributionType, current } = input;
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
   if (score <= -rejectFloor(contributionType)) return "rejected";
   // 名冊逐位吻合的免兩台機器（2026-10-01）：系統已逐位核過官方名冊，目標 1 若還要兩台機器就等於沒降
-  const needTwoIps = (SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType) && !input.rosterMatched;
+  const needTwoIps = needsTwoIps(contributionType, input.payload) && !input.rosterMatched;
   if (score >= target && (!needTwoIps || distinctIps >= 2)) return "verified";
   return "pending";
 }

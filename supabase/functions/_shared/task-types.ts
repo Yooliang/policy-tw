@@ -52,4 +52,10 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   policy_elements_missing: "policy_elements",
   // 達成期限到了、期限後沒有進度：查做到沒有，交 policy_progress（查不到後續用 no_change）
   deadline_due: "policy_progress",
+  // 政策脈絡（#349，2026-10-06）：同一格政見裡找同一件事 → 建立／歸入脈絡；前後任 → 記交接；民意代表 → 照官方紀錄標角色；
+  // 同類別上一級的脈絡 → 記上下級關聯（查無或沒有關係都用 no_change）
+  lineage_candidate: "lineage",
+  handover_missing: "lineage_handover",
+  lineage_roles_missing: "lineage_participants",
+  lineage_link_candidate: "lineage_link",
 };

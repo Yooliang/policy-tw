@@ -22,7 +22,8 @@
 
 import { sourceKind, type SourceKind } from "./source-priority.ts";
 
-export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress"] as const;
+// lineage_handover（交接，#349，協議 1.52.0）：講的是「後任把這件事怎麼了」，跟政見進度同一類事實，同一條規則
+export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress", "lineage_handover"] as const;
 /** 沒有官方來源時，至少要幾個不同網站 */
 export const MIN_DISTINCT_SITES_WITHOUT_OFFICIAL = 2;
 
@@ -80,7 +81,7 @@ export function soleSourceProblem(index: number, contributionType: string, sourc
   if (sources.some((s) => s.kind === "official")) return null;
   const sites = new Set(sources.map((s) => s.site).filter((s): s is string => s !== null)).size;
   if (sites >= MIN_DISTINCT_SITES_WITHOUT_OFFICIAL) return null;
-  const what = contributionType === "policy" ? "政見" : "政見進度";
+  const what = contributionType === "policy" ? "政見" : contributionType === "lineage_handover" ? "交接" : "政見進度";
   return {
     index,
     contribution_type: contributionType,

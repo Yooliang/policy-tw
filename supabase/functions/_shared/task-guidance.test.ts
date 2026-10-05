@@ -121,6 +121,8 @@ Deno.test("payload 形狀提到的欄位，schema 裡要真的有（拼錯的欄
   // 值（outcome 的三選一、verdict 的兩選一）與 changes[] 的子欄位長得跟欄位名一樣，但不是 payload 的欄位
   const NOT_PAYLOAD = new Set([
     "source_urls", "current_value", "correct_value", "policies_total", "not_found",
+    // 政策脈絡（#349）與政見來源的「值」：角色、依據、關聯方向、origin 的選項，不是欄位名
+    "co_proposer", "official_record", "self_claim", "top_down", "bottom_up", "policy_address",
   ]);
   for (const [type, shape] of Object.entries(PAYLOAD_SHAPE)) {
     const known = all[type];
