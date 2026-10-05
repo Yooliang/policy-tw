@@ -31,6 +31,11 @@ const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 /** 快照只帶了部分選舉區對應（縣市頁只嵌該縣市）：ensureDistricts 仍要撈整份 */
 let districtsPartial = false
 const verificationSources = ref<VerificationSource[]>([])
+/**
+ * 頁面資料快照的建置時間（epoch ms；沒有快照＝null）。預渲染端與客戶端 hydrate 時是同一個值，
+ * 要依「今天」切畫面的頁面（選舉一覽的今後／過去）第一次渲染用它，掛載後才換成真的今天，不會 hydration mismatch。
+ */
+const dataAsOf = ref<number | null>(null)
 const loading = ref(false)
 const loaded = ref(false)
 /**
@@ -798,6 +803,7 @@ const SNAPSHOT_FRESH_MS = 7 * 24 * 60 * 60 * 1000
  */
 export function applyDataSnapshot(snapshot: DataSnapshot): void {
   policiesComplete.value = snapshot.policiesComplete === true
+  dataAsOf.value = typeof snapshot.generatedAt === 'number' ? snapshot.generatedAt : null
   const fresh = typeof snapshot.generatedAt === 'number' && Date.now() - snapshot.generatedAt < SNAPSHOT_FRESH_MS
   if (fresh && snapshot.elections.length > 0) loaded.value = true
   elections.value = snapshot.elections
@@ -938,6 +944,7 @@ export function useSupabase() {
     regionStats,
     electoralDistrictAreas,
     verificationSources,
+    dataAsOf,
     loading,
     loaded,
     error,

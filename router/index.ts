@@ -45,6 +45,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/PolicyDeepAnalysis.vue'),
   },
   {
+    // 選舉一覽（#344，2026-10-05）：今後與過去的選舉；各場的網址照舊是 /election/:electionId
+    path: '/elections',
+    name: 'elections',
+    component: () => import('../pages/ElectionList.vue'),
+  },
+  {
     path: '/election/:electionId',
     name: 'election',
     component: ElectionPage,
@@ -62,8 +68,9 @@ export const routes: RouteRecordRaw[] = [
     component: ElectionPage,
   },
   {
+    // 以前轉到 /election/1（不存在的選舉，顯示找不到）；網址保持（小良哥 10-05）：轉到 2026 那一場
     path: '/election-2026',
-    redirect: '/election/1',
+    redirect: '/election/2026',
   },
   {
     path: '/politician/:politicianId',

@@ -46,6 +46,7 @@ const activeElection = computed(() => getActiveElection())
             </li>
             <li><RouterLink to="/election/2024" class="hover:text-blue-400 transition-colors">2024 總統大選</RouterLink></li>
             <li><RouterLink to="/election/2022" class="hover:text-blue-400 transition-colors">2022 九合一選舉</RouterLink></li>
+            <li><RouterLink to="/elections" class="hover:text-blue-400 transition-colors">選舉一覽</RouterLink></li>
           </ul>
         </div>
 
