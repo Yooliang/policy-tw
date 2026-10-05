@@ -65,6 +65,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   removal: '建議移除',
   merge_politician: '人物合併',
   adjudication: '裁決',
+  policy_elements: '政見三要素',
 }
 
 const n = (v: unknown): number => Number(v ?? 0) || 0

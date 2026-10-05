@@ -82,6 +82,7 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'district_seats', label: '應選名額' },
   { key: 'question_answer', label: '提問回答' },
   { key: 'removal', label: '建議移除' },
+  { key: 'policy_elements', label: '政見要素' },
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))

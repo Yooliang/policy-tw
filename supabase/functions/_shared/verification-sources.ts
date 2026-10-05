@@ -166,6 +166,9 @@ export const TASK_SOURCE_NEEDS: Record<string, readonly string[]> = {
   candidate_status_stale: ["candidacy"],
   not_running_recheck: ["candidacy"],
   roster_check: ["candidacy", "district", "roster"],
+  // 政見三要素要的是政見原文；期限到了查進度也是從政見那一頁找起（#364）
+  policy_elements_missing: ["policy"],
+  deadline_due: ["policy"],
 };
 
 /** 沒特別登記的任務型別（含手動任務）預設要的東西：不知道具體要查什麼，給最常用的一組 */

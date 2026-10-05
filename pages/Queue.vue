@@ -63,6 +63,8 @@ const BORDER: Record<string, string> = {
   duplicate_policy: '#a16207',          // 重複政見：暗黃
   duplicate_politician: '#78716c',      // 重複人物：石
   question: '#db2777',                  // 提問：粉
+  policy_elements_missing: '#7c2d12',   // 政見三要素：赭
+  deadline_due: '#15803d',              // 期限到了查進度：深綠（同進度那一族）
 }
 // 驗證項目（contribution_type）另一套，彼此也拉開
 const VERIFY_BORDER: Record<string, string> = {
@@ -79,6 +81,7 @@ const VERIFY_BORDER: Record<string, string> = {
   question_answer: '#db2777',   // 提問回答：粉
   merge_politician: '#4338ca',  // 人物合併：靛
   adjudication: '#475569',
+  policy_elements: '#9a3412',   // 政見三要素：赭
 }
 const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
@@ -97,6 +100,7 @@ const VERIFY_LABEL: Record<string, string> = {
   removal: '建議移除',
   merge_politician: '人物合併',
   adjudication: '裁決',
+  policy_elements: '政見三要素',
 }
 const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
 const minsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000))

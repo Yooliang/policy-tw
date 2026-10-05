@@ -72,7 +72,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
 
 主要群組：
-- 核心：`elections`、`election_types`、`politicians`、`politician_elections`、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347 第一階段：舊的 `source_url` 欄仍保留、由觸發器同步）
+- 核心：`elections`、`election_types`、`politicians`、`politician_elections`、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347 第一階段：舊的 `source_url` 欄仍保留、由觸發器同步）、`policy_elements`（政見三要素：數值目標・達成期限・財源，一個要素一列；**沒有列＝未調查、`stated=false`＝未說明**，兩者不可混用；`policies_with_logs.elements` 帶出來，#364）
 - 社群：`discussions`、`discussion_comments`、`comment_replies`、`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
 - 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`
 - 參考：`categories`、`locations`、`regions`、`electoral_district_areas`、`admin_divisions`（內政部官方行政區代碼，`regions.admin_code` 指過去；選舉區列沒有代碼。髒列候選看視圖 `region_audit`，正常是空的；#348）、`election_districts`（一列＝一場選舉、一種職位、一個選舉區＋應選名額，寫法跟 `cec_candidates` 同一套 region／sub_region／village；名額空白＝還沒查證，**不要用候選人數或當選人數推**；缺多少看視圖 `election_seat_totals`；#344）
