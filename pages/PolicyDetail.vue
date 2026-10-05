@@ -30,6 +30,9 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
+import PolicyElements from '../components/PolicyElements.vue'
+import { ELEMENTS_EXPLAINER } from '../lib/policy-elements'
+import { Columns3, ListChecks } from 'lucide-vue-next'
 
 
 const route = useRoute()
@@ -118,6 +121,21 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   items.push({ name: pol.name, path: `/politician/${pol.id}` })
   items.push({ name: policy.value.title })
   return items
+})
+
+/**
+ * 「跟同選區的參選人並排比較」（#364）：連到選舉頁那個職位的區塊（就是麵包屑的職位層那一格，#363），
+ * 並排比較就畫在區塊底下。只在這筆政見就是那一屆的承諾時給——人物最新一屆跟政見不同屆時，連過去比的是別場選舉。
+ * 村里長在鄉鎮頁是「下一層」，那裡不畫並排比較，不給連結。
+ */
+const compareLink = computed<{ path: string; name: string } | null>(() => {
+  const pol = politician.value
+  if (!policy.value || !pol) return null
+  const rec = electionRecordFor(pol, policy.value.electionId)
+  if (!rec || rec.electionId !== policy.value.electionId || rec.electionType === '村里長') return null
+  const items = breadcrumbs.value
+  const position = items[items.length - 3]
+  return position?.path && position.path.includes('#') ? { path: position.path, name: position.name } : null
 })
 
 const otherPolicies = computed(() =>
@@ -586,6 +604,20 @@ async function copyCitation() {
               </div>
             </div>
           </div>
+
+          <!-- 政見三要素（2026-10-05 #364，日本站同一套）：數值目標・達成期限・財源照原文拆。
+               「未說明」＝查過原文沒寫、「未調查」＝還沒有人查，兩者分開標（規則在 lib/policy-elements.ts）。
+               伺服器端渲染：要素與出處連結都在 HTML 裡，AI 與爬蟲讀得到。 -->
+          <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="policy-elements-card">
+            <h2 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />政見三要素</h2>
+            <p class="text-sm text-slate-500 leading-relaxed mb-4">{{ ELEMENTS_EXPLAINER }}</p>
+            <PolicyElements :elements="policy.elements" />
+            <p v-if="compareLink" class="mt-4 text-sm">
+              <router-link :to="compareLink.path" class="inline-flex items-center gap-1 font-bold text-violet-700 hover:underline">
+                <Columns3 :size="16" />跟同選區的{{ compareLink.name }}並排比較政見
+              </router-link>
+            </p>
+          </section>
 
           <!-- 公民提問獨立一張卡（2026-09-18）：它是讀者跟 AI 的問答，
                跟政見內容是兩件事，混在同一張卡裡分不出哪句是政見、哪句是回答。
