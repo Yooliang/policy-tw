@@ -18,7 +18,7 @@
 - [網址清單（索引）](https://xn--2lw665d.tw/sitemap.xml)：分成人物、政見、其他頁三份
 - 政治人物：`https://xn--2lw665d.tw/politician/<uuid>`（基本資料、參選紀錄、競選承諾、過往政績）
 - 政見：`https://xn--2lw665d.tw/policy/<uuid>`（內容、分類、狀態、原始出處、執行歷程、查核履歷）
-- 選舉：`https://xn--2lw665d.tw/election/2026`（2026 九合一，依縣市與層級篩選候選人）
+- 選舉：`https://xn--2lw665d.tw/election/2026`（2026 九合一，依縣市與層級篩選候選人）；全部選舉（今後與過去）：`https://xn--2lw665d.tw/elections`
 - 政見追蹤：`https://xn--2lw665d.tw/tracking`；市政接力（跨任期的同一建設案）：`https://xn--2lw665d.tw/analysis`
 
 ## 用程式讀資料
