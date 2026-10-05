@@ -26,6 +26,9 @@ export interface HistoryEntry {
   agree_count: number
   disagree_count: number
   unsure_count: number
+  /** 分數制（2026-09-21）：累計分數（可為負）與目標分數，取法跟貢獻看板一致；畫面用 ScoreBar 畫成拉鋸條 */
+  score: number
+  target_score: number
   verifiers: HistoryVerifier[]
   edits: HistoryEdit[]
   adjudications: HistoryAdjudication[]

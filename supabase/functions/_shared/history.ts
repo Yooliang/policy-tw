@@ -6,6 +6,7 @@
  */
 
 import { summarizeContribution } from "./contribution-summary.ts";
+import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -20,6 +21,8 @@ export interface HistoryContribution {
   agent_name: string | null; agent_tool: string | null; status: string; review_notes: string | null;
   applied_at: string | null; applied_politician_id: string | null; applied_policy_id: string | null; created_at: string;
   agree_count?: number | null; disagree_count?: number | null; unsure_count?: number | null; task_id?: string | null;
+  /** 分數與目標分數的來源欄位（SCORE_COLUMNS）；跟貢獻看板同一份取法，見 contribution-score.ts */
+  score?: number | null; effective_agree?: number | null;
 }
 export interface HistoryVote { contribution_id: string; verdict: string; note: string | null; evidence_url: string | null; agent_name: string | null; agent_tool: string | null; resolved_politician_id: string | null; created_at: string }
 export interface HistoryEdit { id: number; contribution_id: string | null; table_name: string; record_id: string; field: string; old_value: unknown; new_value: unknown; applied_at: string; reverted_at: string | null; reverted_by: string | null }
@@ -60,6 +63,8 @@ export interface HistoryEntry {
   at: string;
   reverted: boolean;
   agree_count: number; disagree_count: number; unsure_count: number;
+  /** 分數制（2026-09-21）：累計分數（可為負）與目標分數，取法與貢獻看板一致（contribution-score.ts）；畫面畫成拉鋸條 */
+  score: number; target_score: number;
   verifiers: HistoryVerifier[];
   edits: HistoryEditOut[];
   adjudications: HistoryAdjudication[];
@@ -179,6 +184,7 @@ export function buildHistory(data: HistoryData): HistoryEntry[] {
         at: c.applied_at ?? c.created_at,
         reverted: status === "reverted" || edits.some((e) => e.reverted_at !== null),
         agree_count: c.agree_count ?? 0, disagree_count: c.disagree_count ?? 0, unsure_count: c.unsure_count ?? 0,
+        ...contributionScore(c),
         verifiers,
         edits,
         adjudications,
@@ -215,7 +221,12 @@ export function describeOrigin(target: HistoryTarget, row: Obj | null, electionN
 }
 
 const CONTRIBUTION_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, status, review_notes, applied_at, applied_politician_id, applied_policy_id, created_at, agree_count, disagree_count, unsure_count, task_id";
-const VOTE_COLUMNS = "contribution_id, verdict, note, evidence_url, agent_name, agent_tool, resolved_politician_id, created_at";
+/**
+ * 要列在履歷上的貢獻：多撈分數與目標分數兩欄（SCORE_COLUMNS）。
+ * effective_agree 是 PostgREST 計算欄位，每列會多跑一次 SQL 函式，所以裁決那條查詢（只當附註、不列在時間軸上）不帶。
+ */
+export const HISTORY_ENTRY_COLUMNS = `${CONTRIBUTION_COLUMNS}, ${SCORE_COLUMNS}`;
+const VOTE_COLUMNS ="contribution_id, verdict, note, evidence_url, agent_name, agent_tool, resolved_politician_id, created_at";
 const EDIT_COLUMNS = "id, contribution_id, table_name, record_id, field, old_value, new_value, applied_at, reverted_at, reverted_by";
 
 function ok<T>(res: { data: T | null; error: { message: string } | null }, where: string): T {
@@ -225,7 +236,7 @@ function ok<T>(res: { data: T | null; error: { message: string } | null }, where
 
 async function contributionsForTarget(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryContribution[]> {
   if (target === "contribution") {
-    const res = await supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("id", id).limit(1);
+    const res = await supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).eq("id", id).limit(1);
     return ok<HistoryContribution[]>(res, "contribution read");
   }
   if (target === "question") {
@@ -233,8 +244,8 @@ async function contributionsForTarget(supabase: SupabaseLike, target: HistoryTar
     const tasks = ok<Array<{ id: string }>>(await supabase.from("contribution_tasks").select("id").eq("task_type", "question").eq("target->>question_id", id).limit(20), "question tasks");
     const taskIds = tasks.map((t) => String(t.id));
     const [answers, byTask] = await Promise.all([
-      supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("payload->>question_id", id).limit(200),
-      taskIds.length > 0 ? supabase.from("contributions").select(CONTRIBUTION_COLUMNS).in("task_id", taskIds).limit(200) : Promise.resolve({ data: [], error: null }),
+      supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).eq("payload->>question_id", id).limit(200),
+      taskIds.length > 0 ? supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).in("task_id", taskIds).limit(200) : Promise.resolve({ data: [], error: null }),
     ]);
     return [...ok<HistoryContribution[]>(answers, "question answers"), ...ok<HistoryContribution[]>(byTask, "question task contributions")];
   }
@@ -242,10 +253,10 @@ async function contributionsForTarget(supabase: SupabaseLike, target: HistoryTar
   const payloadCol = target === "policy" ? "payload->>policy_id" : "payload->>politician_id";
   const targetTable = target === "policy" ? "policies" : "politicians";
   const [applied, referenced, corrections] = await Promise.all([
-    supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq(appliedCol, id).limit(500),
-    supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq(payloadCol, id).limit(500),
+    supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).eq(appliedCol, id).limit(500),
+    supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).eq(payloadCol, id).limit(500),
     // correction 的目標寫在 payload.target_table／target_id
-    supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("contribution_type", "correction").eq("payload->>target_table", targetTable).eq("payload->>target_id", id).limit(500),
+    supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).eq("contribution_type", "correction").eq("payload->>target_table", targetTable).eq("payload->>target_id", id).limit(500),
   ]);
   return [
     ...ok<HistoryContribution[]>(applied, "contributions applied"),
@@ -276,7 +287,7 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
   const viaEdits = await contributionIdsFromEdits(supabase, target, id);
   const known = new Set(direct.map((c) => c.id));
   const missing = viaEdits.ids.filter((cid) => !known.has(cid));
-  const extra = missing.length > 0 ? ok<HistoryContribution[]>(await supabase.from("contributions").select(CONTRIBUTION_COLUMNS).in("id", missing), "contributions via edits") : [];
+  const extra = missing.length > 0 ? ok<HistoryContribution[]>(await supabase.from("contributions").select(HISTORY_ENTRY_COLUMNS).in("id", missing), "contributions via edits") : [];
   const contributions = [...new Map([...direct, ...extra].map((c) => [c.id, c])).values()];
   const ids = contributions.map((c) => c.id);
   if (ids.length === 0) {

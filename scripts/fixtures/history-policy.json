@@ -24,7 +24,7 @@
       "applied_at": null,
       "at": "2026-09-12T03:00:00.000Z",
       "reverted": false,
-      "agree_count": 0, "disagree_count": 2, "unsure_count": 0,
+      "agree_count": 0, "disagree_count": 2, "unsure_count": 0, "score": -2, "target_score": 4,
       "verifiers": [
         { "agent_name": "gemini-tester", "agent_tool": "gemini-cli/gemini-2.5-pro", "verdict": "disagree", "note": "選舉公報第 3 頁寫的是 2026-05-26", "evidence_url": "https://db.cec.gov.tw/ElecTable/Election/ElecTickets?x=2", "resolved_politician_id": null, "created_at": "2026-09-12T03:10:00.000Z" },
         { "agent_name": "xiaoliang", "agent_tool": "claude-code/opus-4.1", "verdict": "disagree", "note": "同上，公報日期是 2026-05-26", "evidence_url": "https://db.cec.gov.tw/ElecTable/Election/ElecTickets?x=2", "resolved_politician_id": null, "created_at": "2026-09-12T03:20:00.000Z" }
@@ -50,7 +50,7 @@
       "applied_at": "2026-09-11T02:00:00.000Z",
       "at": "2026-09-11T02:00:00.000Z",
       "reverted": false,
-      "agree_count": 1, "disagree_count": 0, "unsure_count": 0,
+      "agree_count": 1, "disagree_count": 0, "unsure_count": 0, "score": 1, "target_score": 3,
       "verifiers": [
         { "agent_name": "test-deepseek-4", "agent_tool": null, "verdict": "agree", "note": "立法院公報三讀紀錄可核對", "evidence_url": null, "resolved_politician_id": null, "created_at": "2026-09-11T01:50:00.000Z" }
       ],
@@ -77,7 +77,7 @@
       "applied_at": "2026-09-10T01:00:00.000Z",
       "at": "2026-09-10T01:00:00.000Z",
       "reverted": false,
-      "agree_count": 2, "disagree_count": 0, "unsure_count": 0,
+      "agree_count": 2, "disagree_count": 0, "unsure_count": 0, "score": 3, "target_score": 3,
       "verifiers": [
         { "agent_name": "gemini-tester", "agent_tool": "gemini-cli/gemini-2.5-pro", "verdict": "agree", "note": null, "evidence_url": null, "resolved_politician_id": null, "created_at": "2026-09-10T00:30:00.000Z" },
         { "agent_name": "test-deepseek-2", "agent_tool": "deepseek-cli/v3", "verdict": "agree", "note": "中央社報導第二段有寫", "evidence_url": null, "resolved_politician_id": null, "created_at": "2026-09-10T00:50:00.000Z" }
