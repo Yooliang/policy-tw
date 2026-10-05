@@ -7,6 +7,7 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
+import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 
 /**
  * 現職存成選舉名稱（「111年直轄市議員選舉」）是早期匯入留下的錯，879 位（2026-09-25）。
@@ -19,10 +20,11 @@ const CURRENT_POSITION_NOT_ELECTION = "現職要寫職稱（例如「台北市�
 export const isTaskIdShape = (v: unknown): boolean =>
   typeof v === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^auto:[a-z0-9_]+:\S+$/.test(v));
 
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats"] as const;
+// policy_elements（政見三要素，#364，2026-10-05）：DB CHECK、這份清單、skill.md、標籤四處一起加（thresholds.test 盯 CHECK）
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -255,6 +257,52 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isDate(p.date)) push("payload.date", "事件日期必填，YYYY-MM-DD");
       break;
     }
+    case "policy_elements": {
+      // 政見三要素（#364，協議 1.50.0）：一筆交一條政見的 1～3 個要素，同一個要素只交一次。
+      // stated=false（查過原文、沒寫）也是答案——畫面顯示「未說明」，跟「還沒有人查」（沒有列）分開。
+      // 不幫候選人補數字、不換算、不評價：text 只寫原文的事實，沒寫就不填。
+      if (!isUuid(p.policy_id)) push("payload.policy_id", "policy_id 必填（這條政見的 uuid，任務的 target.policy_id）");
+      if (!Array.isArray(p.elements) || p.elements.length === 0 || p.elements.length > POLICY_ELEMENT_KINDS.length) {
+        push("payload.elements", "elements 必填：1～3 個要素，每個是一個物件（target 數值目標／deadline 達成期限／funding 財源）");
+        break;
+      }
+      const seenKinds = new Set<string>();
+      (p.elements as unknown[]).forEach((raw, i) => {
+        const at = `payload.elements[${i}]`;
+        if (!isObj(raw)) { push(at, "每個要素要是物件：{element, stated, text, deadline_date, source_locator, source_url}"); return; }
+        const e = raw;
+        for (const k of ["text", "deadline_date", "source_locator", "source_url"]) {
+          if (e[k] !== undefined && e[k] !== null && typeof e[k] !== "string") push(`${at}.${k}`, "要是字串");
+        }
+        if (!oneOf(POLICY_ELEMENT_KINDS, e.element)) push(`${at}.element`, "element 要是 target（數值目標）／deadline（達成期限）／funding（財源）之一");
+        else if (seenKinds.has(e.element)) push(`${at}.element`, `${e.element} 重複了：同一條政見同一個要素只交一次`);
+        else seenKinds.add(e.element);
+        if (typeof e.stated !== "boolean") {
+          push(`${at}.stated`, "stated 必填：true＝原文有寫；false＝查過原文、沒寫（畫面會顯示「未說明」）");
+        } else if (e.stated) {
+          const text = typeof e.text === "string" ? e.text.trim() : "";
+          if (!text) push(`${at}.text`, "原文有寫（stated=true）就要填 text：照原文寫，不改寫、不補數字");
+          else if (charLength(text) > POLICY_ELEMENT_TEXT_MAX) push(`${at}.text`, `text 最多 ${POLICY_ELEMENT_TEXT_MAX} 字，只寫這個要素本身（原句太長就只留寫到數字、期限或財源的那一段）`);
+        } else if (typeof e.text === "string" && e.text.trim()) {
+          push(`${at}.text`, "stated=false（原文沒寫）時 text 不要填——沒寫就是沒寫，不要幫他補或寫「未說明」");
+        }
+        if (e.deadline_date !== undefined && e.deadline_date !== null && e.deadline_date !== "") {
+          if (e.element !== "deadline" || e.stated !== true) {
+            push(`${at}.deadline_date`, "只有原文寫了的達成期限（element=deadline、stated=true）才填 deadline_date");
+          } else if (!isRealDate(e.deadline_date) || Number(e.deadline_date.slice(0, 4)) < DEADLINE_YEAR_MIN || Number(e.deadline_date.slice(0, 4)) > DEADLINE_YEAR_MAX) {
+            push(`${at}.deadline_date`, "要是西元 YYYY-MM-DD 的真實日期。會計年度是曆年：「2028 年前」填 2028-12-31；換不成日期（例：「盡快」「兩年內」而原文沒寫起算日）就整個不要填");
+          }
+        }
+        const locator = typeof e.source_locator === "string" ? e.source_locator.trim() : "";
+        if (!locator || charLength(locator) > POLICY_ELEMENT_LOCATOR_MAX) {
+          push(`${at}.source_locator`, `source_locator 必填（1～${POLICY_ELEMENT_LOCATOR_MAX} 字）：原句在原文的位置，例如「公報第 2 頁〈交通〉第 3 點」「政見發表會 00:12:30」；stated=false 也要寫你查的是原文哪一段`);
+        }
+        if (e.source_url !== undefined && e.source_url !== null && e.source_url !== "" && !isHttpUrl(e.source_url)) {
+          push(`${at}.source_url`, "source_url 要是 http(s) 網址，而且是這筆 source_urls 的其中一個（這個要素出自哪一份原文）");
+        }
+      });
+      break;
+    }
     case "roster_check": {
       // 回報「我清查過某縣市某選舉的名單」。它不改核心資料，但會讓那個縣市的清查任務
       // 七天內不再派，所以要求附得出官方名單網址；查不到就讓 cec_count 留空並說明。
@@ -448,6 +496,14 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       raw.payload.task_id = raw.task_id;
     }
     validatePayload(raw.contribution_type, raw.payload, push);
+    // 三要素的每個要素指的出處，要是這筆交件的 source_urls 之一：驗證者只會打開 source_urls，指到別處等於沒給人核對
+    if (raw.contribution_type === "policy_elements" && Array.isArray(raw.payload.elements) && Array.isArray(sourceUrls)) {
+      const listed = new Set((sourceUrls as unknown[]).filter((u): u is string => typeof u === "string").map((u) => u.trim()));
+      (raw.payload.elements as unknown[]).forEach((e, i) => {
+        const url = isObj(e) && typeof e.source_url === "string" ? e.source_url.trim() : "";
+        if (url && isHttpUrl(url) && !listed.has(url)) push(`payload.elements[${i}].source_url`, "source_url 要是這筆 source_urls 的其中一個（驗證者只會打開 source_urls）；不填就是第一個");
+      });
+    }
     items.push({
       contribution_type: raw.contribution_type,
       payload: raw.payload,

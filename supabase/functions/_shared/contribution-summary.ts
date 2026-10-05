@@ -48,6 +48,7 @@ export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
 ]);
 import { normalizeCorrection } from "./correction.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
+import { elementPhrase } from "./policy-elements.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -126,6 +127,16 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const progress = typeof p.progress === "number" ? `（${p.progress}%）` : "";
       summary = `更新「${clip(title, 60)}」進度為「${status}」${progress}：${clip(p.note, 80)}`;
       targetName = str(p.policy_title) || name || null;
+      break;
+    }
+    case "policy_elements": {
+      // 政見三要素（#364）：讀者要看得出拆了哪條政見、每個要素原文有沒有寫
+      const title = str(p.policy_title) || (policyId ? `政見 ${policyId.slice(0, 8)}` : "政見");
+      const parts = (Array.isArray(p.elements) ? p.elements : [])
+        .filter((e): e is Obj => !!e && typeof e === "object")
+        .map((e) => elementPhrase(e, 30));
+      summary = `為「${clip(title, 60)}」拆政見三要素：${parts.join("；") || "（沒有要素）"}`;
+      targetName = str(p.policy_title) || null;
       break;
     }
     case "correction": {

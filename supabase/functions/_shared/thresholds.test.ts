@@ -260,6 +260,11 @@ Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveV
 
 // 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改
 Deno.test("contributions.contribution_type 的 CHECK 要包含 TS 的每一種型別", async () => {
-  const sql = await latestMigrationDefining("CONSTRAINT contributions_contribution_type_check");
-  for (const t of CONTRIBUTION_TYPES) assert(sql.includes(`'${t}'`), `DB 的 CHECK 少了型別 ${t}：加 migration 重建約束`);
+  const sql = await latestMigrationDefining("ADD CONSTRAINT contributions_contribution_type_check");
+  // 只看 CHECK 括號裡那一串：原本拿「這一行到檔尾」整段比，同一支 migration 後面只要提到型別名
+  // （例如派工臂查 contribution_type = 'policy_elements'），CHECK 漏了它也不會紅（2026-10-05 #364 還原驗證抓到）
+  const list = sql.match(/CHECK \(contribution_type IN \(([^)]*)\)\)/);
+  assert(list, "找不到 CHECK (contribution_type IN (...))");
+  const inCheck = new Set([...list![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  for (const t of CONTRIBUTION_TYPES) assert(inCheck.has(t), `DB 的 CHECK 少了型別 ${t}：加 migration 重建約束`);
 });

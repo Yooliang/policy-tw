@@ -8,6 +8,7 @@
  *   - #275 人物 uuid 填進參選紀錄 target_id（形狀已在 schema 擋）
  *   - #276 政見只給姓名、同名不只一位（已在 contribute-handler 的 ambiguous_politician_name 擋，這裡不重做）
  *   - #263 同一年已有另一種正式參選紀錄（electionTypeSwitch 會 throw）
+ *   - #364 政見三要素指到不存在或已移除的政見
  *
  * 一律唯讀；查詢本身出錯（資料庫錯誤）不擋交件，只 console.error——不能讓系統自己的錯擋掉代理。
  * 查詢批次化：同型別的 id 合成一次 `.in()`，一批最多 MAX_BATCH（20）筆，符合 query-bounds 的「變數 in() 有界」判準。
@@ -179,6 +180,11 @@ export async function precheckApplyTargets(
         if (polId) policyIds.add(polId);
         break;
       }
+      case "policy_elements": {
+        const polId = str(p.policy_id);
+        if (polId) policyIds.add(polId);
+        break;
+      }
       case "candidacy": {
         const pid = str(p.politician_id);
         if (pid) {
@@ -262,6 +268,11 @@ export async function precheckApplyTargets(
         if (pid) checkPolitician(i, pid, "payload.politician_id", "這筆進度更新無法落庫");
         const polId = str(p.policy_id);
         if (polId) checkPolicy(i, polId, "payload.policy_id", "這筆進度更新無法落庫", "不接受進度更新");
+        break;
+      }
+      case "policy_elements": {
+        const polId = str(p.policy_id);
+        if (polId) checkPolicy(i, polId, "payload.policy_id", "這筆三要素無法落庫：請確認 policy_id（任務的 target.policy_id）", "不接受三要素");
         break;
       }
       case "candidacy": {

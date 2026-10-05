@@ -27,6 +27,7 @@ import { councilDistrictKey, isCouncilAboriginalDistrict, legislatorDistrictKey,
 import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 import { DISTRICT_SEAT_TYPES, type DistrictSeatKind, type ExistingDistrict, normalizeSeatDistrict, planDistrictSeats, type SeatInput, seatDistrictTown } from "./district-seats.ts";
+import { changedElementFields, elementPhrase, POLICY_ELEMENT_LABEL, policyElementValues } from "./policy-elements.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -647,6 +648,65 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
   };
 }
 
+/**
+ * 政見三要素（#364，2026-10-05）：一條政見一個要素一列（policy_id, element 唯一）。
+ * 還沒有的那一列新增（edit_history 記整列），已經有的照這次覆蓋、每個變動的欄位記一筆——
+ * 重交同一條政見的某個要素，就是更正它的路（不另開 correction 欄位）。
+ * 出處由資料表觸發器把 source_url 同步進 source_refs（migration 20261005005640），這裡不必另外寫。
+ * 全部跟現有一樣 → superseded（別人先交了，不寫假的履歷）。
+ */
+async function applyPolicyElements(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const policyId = str(p.policy_id);
+  const elements = Array.isArray(p.elements) ? (p.elements as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+  if (!policyId || elements.length === 0) return { status: "failed", message: "policy_elements 要帶 policy_id 與 elements" };
+
+  const { data: policy, error: policyError } = await supabase.from("policies").select("id, title, removed_at, removed_reason").eq("id", policyId).maybeSingle();
+  throwIf(policyError, "policies read");
+  if (!policy) return { status: "failed", message: `找不到政見 ${policyId}` };
+  if (policy.removed_at) {
+    return { status: "failed", message: `政見 ${policyId} 已被移除（${policy.removed_reason ?? "未寫理由"}），不接受三要素；如果認為它其實是有效政見，請在 note 說明理由請維護者還原` };
+  }
+
+  // query-bounds: ok — 一條政見最多三列（policy_id, element 唯一）
+  const { data: existingRows, error: existingError } = await supabase.from("policy_elements").select("*").eq("policy_id", policyId).limit(3);
+  throwIf(existingError, "policy_elements read");
+  const existing = (existingRows ?? []) as Obj[];
+
+  const written: string[] = [];
+  const unchanged: string[] = [];
+  for (const raw of elements) {
+    const values = policyElementValues(raw, row.source_urls);
+    const label = POLICY_ELEMENT_LABEL[values.element] ?? values.element;
+    const current = existing.find((r) => r.element === values.element);
+    if (!current) {
+      const { data: inserted, error } = await supabase.from("policy_elements")
+        .insert({ policy_id: policyId, ...values, contribution_id: row.id }).select("*").maybeSingle();
+      throwIf(error, "policy_elements insert");
+      if (!inserted) throw new Error("policy_elements insert 沒有回傳 id");
+      await recordInsert(supabase, ctx, "policy_elements", String(inserted.id), inserted);
+      written.push(elementPhrase(values));
+      continue;
+    }
+    const fields = changedElementFields(current, values);
+    if (fields.length === 0) { unchanged.push(label); continue; }
+    const patch: Obj = Object.fromEntries(fields.map((f) => [f, values[f]]));
+    const { error } = await supabase.from("policy_elements").update({ ...patch, contribution_id: row.id }).eq("id", current.id);
+    throwIf(error, "policy_elements update");
+    for (const f of fields) await recordUpdate(supabase, ctx, "policy_elements", String(current.id), f, current[f] ?? null, values[f]);
+    written.push(elementPhrase(values));
+  }
+  if (written.length === 0) {
+    return { status: "superseded", message: `「${policy.title}」的${unchanged.join("、")}跟網站上現有的一樣（別人先交了），不重複寫入` };
+  }
+  return {
+    status: "applied",
+    policy_id: policyId,
+    message: `「${policy.title}」的政見三要素已上線：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.join("、")}跟現有的一樣，略過）` : ""}`,
+  };
+}
+
 /** correction：一筆可改多個欄位（changes[]），逐欄套用、各寫一筆 edit_history；舊的單欄位格式由 normalizeCorrection 相容 */
 // 空字串在 DATE 欄位會讓 PostgreSQL 直接報錯，而「查不到提出日期」是合法狀態，
 // 所以清空一律轉成 null。分類則順手正規化成 19 個正式名稱之一。
@@ -1239,6 +1299,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "merge_politician": return await applyMergePolitician(supabase, row);
     case "roster_check": return await applyRosterCheck(supabase, row);
     case "district_seats": return await applyDistrictSeats(supabase, row);
+    case "policy_elements": return await applyPolicyElements(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

@@ -48,4 +48,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   // 2026-09-22 shuwei-huang 實跑 8 題：6 題是真政見只缺出處、只有 2 題是口號——預設建議 removal 會把人往刪的方向帶；
   // 常態是補 source_url（correction），真的不是政見再走 removal（做法裡三條路照舊）
   policy_validity: "correction",
+  // 政見三要素（#364，2026-10-05）：從原文拆數值目標／達成期限／財源，交 policy_elements
+  policy_elements_missing: "policy_elements",
+  // 達成期限到了、期限後沒有進度：查做到沒有，交 policy_progress（查不到後續用 no_change）
+  deadline_due: "policy_progress",
 };

@@ -31,6 +31,9 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   duplicate_policy: '政見重複清查',
   not_running_recheck: '不參選待核對',
   legacy_audit: '早期匯入核對',
+  // 政見三要素（#364，2026-10-05）
+  policy_elements_missing: '拆政見三要素',
+  deadline_due: '期限到了查進度',
   other: '其他',
 }
 

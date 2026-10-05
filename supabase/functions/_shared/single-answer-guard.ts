@@ -14,6 +14,8 @@ export const SINGLE_ANSWER_TASK_TYPES: ReadonlySet<string> = new Set([
   "progress_stale",  // 查進度：一次回報
   "policy_validity", // 疑似不是政見：移除／更正／無異動三選一
   "profile_gap",     // 補人物資料：一次補齊
+  "policy_elements_missing", // 政見三要素：一條政見一次拆完（#364）
+  "deadline_due",    // 期限到了查進度：跟 progress_stale 一樣一次回報（#364）
 ]);
 
 /** 在排隊中的狀態（已上線或被退件的不算：上線後缺口本來就會消失，退件後應該讓人重交） */

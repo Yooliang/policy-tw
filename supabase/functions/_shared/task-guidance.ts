@@ -20,6 +20,7 @@ import { POLICY_CATEGORIES } from "./category-map.ts";
 import { CANDIDATE_STATUSES, POLICY_STATUSES } from "./contribution-schema.ts";
 import { NON_OFFICIAL_SOURCES, NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, NOT_FOUND_ELEVATED_MIN_DOMAINS, NOT_FOUND_MIN_CHECKED_URLS, SEARCH_KEYWORDS } from "./not-found-guard.ts";
 import { SOLE_SOURCE_TASK_NOTE } from "./sole-source-guard.ts";
+import { POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 
 /**
  * 政見／基本資料缺口要用搜尋引擎、看非官方來源（維護者 2026-10-01）：抽 8 筆政見缺漏的「查無」，
@@ -150,6 +151,27 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   audit:
     "訪客在政見頁貼了一個文件網址。打開它，核對內容與我們既有的相關政見／進度是否一致：不一致就提 correction 或 policy_progress，一致就提 no_change 回報無異動。",
+
+  // 政見三要素（#364，2026-10-05；與日本站同一套）：正見是第三方，不提政見、不補數字、不換算、不評價，
+  // 只把每條政見拆成同一個格式讓人並排比較。沒有列＝未調查、stated=false＝未說明，這個分別是整件事的核心。
+  policy_elements_missing:
+    "把這條政見拆成三要素：**數值目標**（做到多少、做到什麼程度：幾座、幾戶、幾%、多少錢、給誰、全部）、**達成期限**（什麼時候之前）、**財源**（錢從哪裡來：中央補助、縣市預算、基金、民間投資）。" +
+    "**先找原文**：選舉公報（候選人登記的政見原文）、政見發表會、候選人官網或競選文宣的政見頁。policy.source_url 若只是轉述的新聞，先找到原文；**policy.description 是我們的摘要，不是原文**，不可以拿它拆。" +
+    "每個要素三選一：原文有寫 → stated=true，text 照原文寫（120 字內，**不補數字、不換算、不評價**——原文寫「增加 3 座」就寫「增加 3 座」，不要算成百分比，也不要自己加「預計」「約」）；" +
+    "查過原文、沒寫 → stated=false，text 不填——這也是答案，網站會標「未說明」；沒找到原文 → 這個要素不要交，網站會標「未調查」。" +
+    "只寫「提升」「加強」「全面推動」而沒有可量的標的，不算數值目標，填 stated=false。" +
+    "**每個要素都要附 source_locator**＝原句在原文的位置（例：公報第 2 頁〈交通〉第 3 點、政見發表會影片 00:12:30、官網〈政見〉頁第 4 段），stated=false 也要寫你查的是原文哪一段；要素出自不同網址時用 source_url 指名（要是 source_urls 之一，不填就是第一個）。" +
+    "**達成期限換得成日期就填 deadline_date**（會計年度是曆年）：「2028 年前」「2028 年底」→ 2028-12-31；「2027 年 6 月」→ 2027-06-30；「任內」→ target.term_end（這一任的卸任日）；「兩年內」這種相對期限，原文寫得出從哪天起算才換，否則只填 text、不填 deadline_date。" +
+    "三個要素一起交成一筆 policy_elements；只查得到其中幾個就只交那幾個，沒交的會留在任務裡給別人。已經有的要素（existing_elements）寫錯了，重交那一個要素就會覆蓋。" +
+    "找不到這條政見的原文 → no_change，outcome=not_found，checked_urls 列你找過的地方。" +
+    gazetteImageNote,
+
+  deadline_due:
+    "這條政見原文寫了達成期限（target.deadline_text，換算 target.deadline_date），期限已經過了，期限之後卻沒有任何進度紀錄。請查**期限到了做到沒有**：施政報告、議會或立法院的議事紀錄與質詢、預算書與決算書、新聞。" +
+    "查到結果就用 policy_progress 交：date 填事件日期（不是今天）；status 依來源寫的結果填——做完了 Achieved、做了一部分還在做 In Progress、延宕或卡住 Stalled、確定放棄或做不到 Failed；note 寫清楚跟期限比的結果（例：「原訂 2025 年底完工，2026-03 才通車」）。" +
+    "**不要自己判定跳票**：要有來源寫出結果，查不到就是查不到。查證後確定期限之後真的沒有任何消息，用 no_change 回報，finding 寫你查了哪些來源、最新的消息停在哪一天。" +
+    "先確認來源講的是這個人任內、職權內做的事；前任或別人做的同主題事情不算。" +
+    SOLE_SOURCE_TASK_NOTE,
 };
 
 /**
@@ -233,6 +255,11 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
+  // 政見三要素（#364）：一筆一條政見、1～3 個要素
+  policy_elements:
+    "payload：policy_id、elements[]（1～3 個，每個 {element：target 數值目標／deadline 達成期限／funding 財源；stated：true 原文有寫／false 查過原文沒寫；" +
+    `text：原文的事實，${POLICY_ELEMENT_TEXT_MAX} 字內（stated=false 不填）；deadline_date：YYYY-MM-DD（只有原文寫了的達成期限、換得成日期才填）；` +
+    "source_locator：原句在原文的位置（必填，stated=false 也要填查的是哪一段）；source_url：出自 source_urls 的哪一個（不填＝第一個）}）。source_urls 放原文網址。",
 };
 
 /** correction／removal 這類要指定「改哪一列」的任務，target_table 是哪一張表。 */
@@ -387,6 +414,20 @@ function buildPayload(
           ? known.map((d) => ({ district: d.district, seats: "（公告的應選名額）", ...(d.kind && d.kind !== "district" ? { kind: d.kind } : {}) }))
           : [{ district: "（公告上的選舉區）", seats: "（公告的應選名額）" }],
         note: "（公告上沒有的選舉區、或其他要說明的；沒有就刪掉這一欄）",
+      };
+    }
+    case "policy_elements": {
+      // 只列還缺的要素（target.missing），沒給就三個都列；deadline 才有 deadline_date
+      const want = Array.isArray(t.missing) && t.missing.length > 0 ? (t.missing as unknown[]).map(String) : ["target", "deadline", "funding"];
+      return {
+        policy_id: asText(t.policy_id) ?? asText(rowId) ?? "（政見 id）",
+        elements: want.map((k) => ({
+          element: k,
+          stated: "true（原文有寫）或 false（查過原文、沒寫）",
+          text: `（原文寫的事實，${POLICY_ELEMENT_TEXT_MAX} 字內；stated=false 就整欄拿掉）`,
+          ...(k === "deadline" ? { deadline_date: "（YYYY-MM-DD；換不成日期就整欄拿掉）" } : {}),
+          source_locator: "（原句在原文的位置：公報第幾頁哪一段、影片幾分幾秒；stated=false 寫查的是哪一段）",
+        })),
       };
     }
     case "policy_progress":

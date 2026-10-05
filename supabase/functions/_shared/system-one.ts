@@ -261,6 +261,8 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   no_change: ["task_id", "outcome", "checked_urls", "finding"],
   // 應選名額（#344）：要看的是哪一屆哪個縣市、每區幾席
   district_seats: ["election_id", "election_type", "region", "districts", "note"],
+  // 政見三要素（#364）：票數預算的三維要看的就是每個要素寫了什麼、原句在哪
+  policy_elements: ["policy_id", "elements"],
 };
 const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
 const PAGE_TEXT_MAX = 6000;

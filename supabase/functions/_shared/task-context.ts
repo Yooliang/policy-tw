@@ -15,6 +15,7 @@ type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
+import { missingElements } from "./policy-elements.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
@@ -71,6 +72,8 @@ export interface TaskContextData {
   question_answers?: Obj[];
   /** 查證來源（2026-09-28）：依這個任務對象的政黨／縣市／選舉別自動附上的查證來源，撈不到就 undefined */
   verification_sources?: TaskSourceHint[];
+  /** 政見三要素（#364）：這條政見已經有的要素列（沒有的那幾個＝未調查） */
+  elements?: Obj[];
 }
 
 /**
@@ -92,6 +95,8 @@ export const ROSTER_CEC_GAP_HINT =
   "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
+/** 政見三要素一列給代理看的欄位（#364） */
+const ELEMENT_FIELDS = ["element", "stated", "text", "deadline_date", "source_url", "source_locator"] as const;
 const PROFILE_FIELDS = ["birth_year", "current_position", "avatar_url", "education_level", "bio", "sub_region"] as const;
 
 function pick(row: Obj | null | undefined, keys: readonly string[]): Obj | null {
@@ -250,6 +255,27 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "candidacy_source_missing":
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    // 政見三要素（#364）：政見本身（description 是我們的摘要、不是原文——hint 有講）＋已經有的要素
+    case "policy_elements_missing": {
+      const existing = (data.elements ?? []).map((e) => pick(e, ELEMENT_FIELDS)!);
+      return {
+        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "election_id", "source_url"])!, ["description"]) : null,
+        politician: pick(p, POLITICIAN_BRIEF),
+        existing_elements: existing,
+        missing_elements: missingElements(existing),
+      };
+    }
+    // 期限到了查進度（#364）：跟 progress_stale 同一份現況，另外帶原文寫的期限那一列
+    case "deadline_due": {
+      const deadline = (data.elements ?? []).find((e) => e.element === "deadline") ?? null;
+      return {
+        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "progress", "source_url", "proposed_date", "last_updated"])!, ["description"]) : null,
+        politician: pick(p, POLITICIAN_BRIEF),
+        deadline: deadline ? pick(deadline, ELEMENT_FIELDS) : null,
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
+        recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
+      };
+    }
     case "roster_check": {
       const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string; list_source?: string } | null;
       // politician_elections 的 join 會把人物包在 politicians 裡，攤平成代理好比對的樣子
@@ -521,6 +547,26 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       .eq("politician_id", pid).order("election_id", { ascending: false });
     data.elections = el ?? [];
   }
+  // 政見三要素／期限到了（#364）：政見本身、已經有的要素；期限到了另外要時間軸與參選紀錄（判斷當選與否）
+  if ((taskType === "policy_elements_missing" || taskType === "deadline_due") && policyId) {
+    const [pl, el, logs] = await Promise.all([
+      supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
+      // query-bounds: ok — 一條政見最多三列（policy_id, element 唯一）
+      supabase.from("policy_elements").select("element, stated, text, deadline_date, source_url, source_locator, updated_at").eq("policy_id", policyId).limit(3),
+      taskType === "deadline_due"
+        ? supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS)
+        : Promise.resolve({ data: [] }),
+    ]);
+    data.policy = pl.data ?? null;
+    data.elements = (el.data ?? []) as Obj[];
+    data.tracking_logs = (logs.data ?? []) as Obj[];
+  }
+  if (taskType === "deadline_due" && pid) {
+    const { data: el } = await supabase.from("politician_elections")
+      .select("election_id, election_type, candidate_status, election_result")
+      .eq("politician_id", pid).order("election_id", { ascending: false });
+    data.elections = el ?? [];
+  }
   if ((taskType === "candidacy_source_missing" || taskType === "election_result_missing") && pid) {
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
@@ -649,6 +695,10 @@ export interface VerifyContextData {
   source_urls?: string[] | null;
   /** district_seats：這個縣市這種選舉我們現有的選舉區與名額（election_districts） */
   districts?: Obj[];
+  /** policy_elements（#364）：這條政見現在已經有的要素列 */
+  elements?: Obj[];
+  /** policy_elements（#364）：這一任的卸任日（「任內」換算 deadline_date 用） */
+  term_end?: string | null;
 }
 
 /**
@@ -750,6 +800,16 @@ export function scoringHint(score: number, target: number, contributionType?: st
   if (short === 2) return { points_short: 2, hint: "這筆差 2 分：你附一個不同網域、系統核得過的第二來源（+2），這一票就能讓它上線；只投 +1 還要再等一台機器" };
   return { points_short: short, hint: `這筆差 ${short} 分：附第二來源（+2）能讓它少等一台機器；只投 +1 要再多兩台` };
 }
+
+/**
+ * 驗證三要素（#364）：逐個要素對原文。重點是「不補、不換算、不評價」與「未說明／未調查」的分別——
+ * 驗證者要確認的是 stated=false 的那幾個真的在原文那一段找不到，不是「我也沒看到」就算。
+ */
+export const POLICY_ELEMENTS_VERIFY_HINT =
+  "逐個要素打開原文核對（source_locator 指的那一段）：stated=true 的 text 要在原文找得到——數字、期限、財源一字一句對得上，不可以是提交者補的、換算的或評價的字；" +
+  "stated=false 的要在原文那一段確認真的沒寫（原文其實有寫就是錯的）；deadline_date 要照規則換算（會計年度是曆年：「2028 年前」＝2028-12-31；「任內」＝ term_end）。" +
+  "原文要是這位候選人自己的（公報上看清楚是他那一欄，不是相鄰候選人的）。existing_elements 是網站上現有的，這筆通過後同一個要素會被覆蓋。" +
+  "全部對得上投 agree；任一個要素不對投 disagree，note 寫是哪一個要素、原文實際怎麼寫；原文打不開、確認不了投 unsure。";
 
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
@@ -891,6 +951,14 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
     }
     case "no_change":
       return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
+    case "policy_elements":
+      return {
+        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "status", "election_id", "source_url"])!, ["description"]) : null,
+        politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
+        existing_elements: (data.elements ?? []).map((e) => pick(e, ELEMENT_FIELDS)),
+        term_end: data.term_end ?? null,
+        hint: POLICY_ELEMENTS_VERIFY_HINT,
+      };
     case "question_answer":
       return data.task ?? {};
     default:
@@ -970,6 +1038,42 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       ]);
       data.policy = pl.data ?? null;
       data.tracking_logs = logs.data ?? [];
+    }
+  }
+  if (contributionType === "policy_elements") {
+    const policyId = typeof payload.policy_id === "string" ? payload.policy_id : null;
+    if (policyId) {
+      const [pl, el] = await Promise.all([
+        supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
+        // query-bounds: ok — 一條政見最多三列（policy_id, element 唯一）
+        supabase.from("policy_elements").select("element, stated, text, deadline_date, source_url, source_locator, updated_at").eq("policy_id", policyId).limit(3),
+      ]);
+      const policy = (pl.data ?? null) as Obj | null;
+      data.policy = policy;
+      data.elements = (el.data ?? []) as Obj[];
+      const pid = typeof policy?.politician_id === "string" ? policy.politician_id : null;
+      const electionId = typeof policy?.election_id === "number" ? policy.election_id : null;
+      if (pid) {
+        const [{ data: person }, { data: pe }, { data: el }] = await Promise.all([
+          supabase.from("politicians").select("*").eq("id", pid).maybeSingle(),
+          electionId !== null
+            ? supabase.from("politician_elections").select("election_type").eq("politician_id", pid).eq("election_id", electionId).limit(1).maybeSingle()
+            : Promise.resolve({ data: null }),
+          electionId !== null
+            ? supabase.from("elections").select("election_date").eq("id", electionId).maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+        data.politicians = person ? [person] : [];
+        const electionType = (pe as Obj | null)?.election_type;
+        // 屆別年份從投票日取，不從 id 推（#344：之後新增的選舉 id 不保證是年份）；派工臂同一個寫法
+        const date = (el as Obj | null)?.election_date;
+        const year = typeof date === "string" && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null;
+        if (year !== null && typeof electionType === "string") {
+          // 卸任日跟派工臂、politician_offices 用同一支 SQL（office_term_end），不在這裡另算一份
+          const { data: end } = await supabase.rpc("office_term_end", { p_election_id: year, p_election_type: electionType });
+          data.term_end = typeof end === "string" ? end : null;
+        }
+      }
     }
   }
   if (contributionType === "merge_politician") {

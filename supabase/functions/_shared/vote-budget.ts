@@ -320,6 +320,28 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 政見三要素（#364，2026-10-05）：影子模式一樣只記錄。要防的是「幫候選人補數字」與「把沒查當成沒寫」
+  policy_elements: [
+    {
+      key: "added_content",
+      instructions: "標成原文有寫的要素裡，有沒有原文沒寫的數字、期限、財源，或是提交者自己換算、推估、評價的字？",
+      hit: { key: "added", means: "有原文沒寫、是提交者補上或換算出來的內容" },
+      miss: { key: "verbatim", means: "每個有寫的要素都是原文的事實" },
+    },
+    {
+      key: "unverified_not_stated",
+      instructions: "標成「原文沒寫」的要素，提交者有沒有指出查的是原文哪一段？還是根本沒有打開原文就標沒寫？",
+      hit: { key: "unchecked", means: "標成沒寫，卻說不出查的是原文哪一段" },
+      miss: { key: "checked", means: "標成沒寫的都指得出查過原文哪一段" },
+    },
+    {
+      key: "not_original_text",
+      instructions: "附的來源是這位候選人自己的政見原文（選舉公報、政見發表會、本人官網）嗎？還是轉述的新聞或我們網站上的摘要？",
+      hit: { key: "secondhand", means: "來源是轉述或摘要，不是政見原文" },
+      miss: { key: "original", means: "來源是候選人自己的政見原文" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",
