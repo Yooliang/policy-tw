@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { applyContribution, type ContributionRow, contributionStatusFor } from "../_shared/apply-contribution.ts";
-import { executeRevert } from "../_shared/edit-history.ts";
+import { executeRevert, RevertBlockedError } from "../_shared/edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "../_shared/task-admin.ts";
 
 /**
@@ -83,7 +83,14 @@ Deno.serve(async (req) => {
 
     if (action === "revert") {
       if (row.status !== "applied") return json({ success: false, error: `只有 applied 能 revert（目前 ${row.status}）` }, 409);
-      const result = await executeRevert(supabase, row.id, reviewer);
+      let result: Awaited<ReturnType<typeof executeRevert>>;
+      try {
+        result = await executeRevert(supabase, row.id, reviewer);
+      } catch (e) {
+        // 履歷裡有已刪欄位的變更（#345 第二階段 B）：整筆沒有動，講清楚是哪幾筆，不當成伺服器錯誤
+        if (e instanceof RevertBlockedError) return json({ success: false, error: "revert_blocked", message: e.message, unrevertable: e.blocked }, 409);
+        throw e;
+      }
       const notes = [row.review_notes, `[revert by ${reviewer}] 還原 ${result.reverted} 個變更${review_notes ? `：${review_notes}` : ""}`].filter(Boolean).join("；");
       const { error: e } = await supabase.from("contributions").update({ status: "reverted", review_notes: notes, reviewed_by: reviewer, reviewed_at: now }).eq("id", row.id);
       if (e) throw new Error(`contributions mark reverted: ${e.message}`);

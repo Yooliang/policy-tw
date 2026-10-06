@@ -53,7 +53,7 @@ export interface Region {
 }
 
 // 參選狀態是一欄六值 CandidacyStatus（見下面；#345 第二階段 A 起畫面只讀這一欄，
-// 舊的 candidate_status＋election_result 兩欄讀取端已不再使用，第二階段 B 刪欄）
+// 舊的 candidate_status＋election_result 兩欄已在第二階段 B〔2026-10-07〕從資料表刪除）
 
 // Election-specific data for a politician
 export interface PoliticianElectionData {

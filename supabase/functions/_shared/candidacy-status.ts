@@ -3,9 +3,10 @@
  *
  * 舊的兩欄 `candidate_status`（傳聞／可能參選／確認參選／已登記／審定合格／表態不參選…）＋`election_result`
  * （當選／落選／退選）重疊、會互相矛盾，日本站合併成一欄六值，正見照同一套。第一階段兩邊由觸發器同步；
- * 第二階段 A（2026-10-06）讀取端與寫入端都只認這一欄，舊兩欄只剩觸發器在同步（第二階段 B 刪）。
- * 這支放兩個方向的對應：`candidacyStatusFromLegacy()` 是 SQL `candidacy_status_from_legacy()` 的 TS 鏡像（測試直接讀 migration 的 CASE），
- * `nextCandidacyStatus()` 是落庫端把交件協議的詞（confirmed／registered…）換成新欄位值的規則。
+ * 第二階段 A（2026-10-06）讀取端與寫入端都只認這一欄；第二階段 B（2026-10-07）刪了舊兩欄與雙向同步，
+ * 舊的 `candidacyStatusFromLegacy()`（SQL `candidacy_status_from_legacy()` 的 TS 鏡像）一併拿掉。
+ * 這支放兩個對應：`nextCandidacyStatus()` 是落庫端把交件協議的詞（confirmed／registered…）換成新欄位值的規則，
+ * `protocolStatusFromCandidacy()` 反過來把新欄位換成協議的詞。
  */
 
 /** 六值，照日本站（政策の系譜 SCHEMA）的順序與代碼 */
@@ -29,9 +30,9 @@ export function taipeiToday(now: Date = new Date()): string {
 
 /**
  * 交件協議的詞（candidate_status：confirmed／registered／qualified／withdrawn／not_running，外加匯入端點的 likely、elected、defeated）
- * ＋選舉結果（election_result）→ 新欄位 candidacy_status（#345 第二階段 A：落庫只寫新欄位，舊兩欄由觸發器同步）。
+ * ＋選舉結果（election_result）→ 新欄位 candidacy_status（#345 第二階段 A 起落庫只寫新欄位；第二階段 B 舊兩欄已刪）。
  *
- * 規則（跟 SQL candidacy_status_from_legacy 同一套，只是多收協議的 withdrawn）：
+ * 規則（沿用舊兩欄的對應規則，只是多收協議的 withdrawn）：
  *   ① 有給選舉結果（elected／not_elected）→ 就是結果
  *   ② 這一筆原本已經有結果（elected／not_elected）而且這次沒給結果 → 維持原結果。結果比登記階段與不參選都大
  *      ——舊兩欄就是這樣（election_result 優先於 candidate_status），例如「照現況填 candidate_status」的更正任務不能把當選改回已登記
@@ -107,27 +108,3 @@ export async function isListPublished(supabase: RpcClient, electionId: number, e
   }
 }
 
-/**
- * 舊兩欄 → 新欄。`listPublished`＝這一屆這種選舉的正式候選人名單公告了沒（已投票也算），
- * 只用來決定 confirmed 是「表明參選」還是「已登記（名單上）」——見 migration 註解第 ③ 條。
- * 傳聞（rumored）與空值回 null：不收傳聞。
- */
-export function candidacyStatusFromLegacy(
-  candidateStatus: string | null | undefined,
-  electionResult: string | null | undefined,
-  listPublished: boolean,
-): CandidacyStatus | null {
-  if (electionResult === "elected") return "elected";
-  if (electionResult === "not_elected") return "not_elected";
-  if (electionResult === "withdrawn") return "withdrawn";
-  switch (candidateStatus) {
-    case "elected": return "elected";
-    case "defeated": return "not_elected";
-    case "not_running": return "withdrawn";
-    case "registered":
-    case "qualified": return "filed";
-    case "confirmed": return listPublished ? "filed" : "declared";
-    case "likely": return "considering";
-    default: return null;
-  }
-}
