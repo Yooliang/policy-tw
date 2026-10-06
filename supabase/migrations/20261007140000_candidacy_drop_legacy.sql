@@ -72,8 +72,9 @@ BEGIN
 END $$;
 
 -- ── ② 視圖 ──────────────────────────────────────────────────
--- 人物視圖：elections[] 拿掉 candidateStatus／electionResult 兩個鍵。欄位清單與順序不變；
--- offices 照第二階段 A 讀任期表（#345 第二階段：職稱改讀任期表）。CREATE OR REPLACE 會清掉 reloptions，security_invoker 要補回。
+-- 人物視圖：elections[] 拿掉 candidateStatus／electionResult 兩個鍵。欄位清單與順序不變；其餘照 #344 第二階段 A（20261007030000）的最新版
+-- （elections[]／offices[] 帶 electionDate、offices 依投票日排序）——以正式庫現行的定義為底，不是第二階段 A 的舊版。
+-- offices 讀任期表（#345 第二階段：職稱改讀任期表）。CREATE OR REPLACE 會清掉 reloptions，security_invoker 要補回。
 CREATE OR REPLACE VIEW politicians_with_elections AS
 SELECT p.id,
     p.name,
@@ -103,14 +104,16 @@ SELECT p.id,
                 CASE
                     WHEN (COALESCE(pe.election_type, p.election_type) = ANY (ARRAY['總統副總統'::text, '縣市長'::text, '縣市議員'::text, '立法委員'::text])) THEN per.village
                     ELSE COALESCE(per.village, r.village, p.village)
-                END, 'sourceNote', pe.source_note, 'candNo', pe.cand_no, 'candidacyStatus', pe.candidacy_status, 'withdrawnAfterFiling', pe.withdrawn_after_filing)) AS json_agg
-           FROM (politician_elections pe
+                END, 'sourceNote', pe.source_note, 'candNo', pe.cand_no, 'candidacyStatus', pe.candidacy_status, 'withdrawnAfterFiling', pe.withdrawn_after_filing, 'electionDate', pee.election_date)) AS json_agg
+           FROM ((politician_elections pe
              LEFT JOIN regions per ON ((pe.region_id = per.id)))
+             LEFT JOIN elections pee ON ((pee.id = pe.election_id)))
           WHERE (pe.politician_id = p.id)), '[]'::json) AS elections,
     p.merged_into,
-    COALESCE(( SELECT json_agg(json_build_object('electionId', o.election_id, 'electionType', o.election_type, 'region', COALESCE(orr.region, p.region), 'subRegion', COALESCE(orr.sub_region, p.sub_region), 'village', COALESCE(orr.village, p.village), 'termEnd', o.scheduled_end_date) ORDER BY o.election_id DESC) AS json_agg
-           FROM (politician_offices o
+    COALESCE(( SELECT json_agg(json_build_object('electionId', o.election_id, 'electionType', o.election_type, 'region', COALESCE(orr.region, p.region), 'subRegion', COALESCE(orr.sub_region, p.sub_region), 'village', COALESCE(orr.village, p.village), 'termEnd', o.scheduled_end_date, 'electionDate', oe.election_date) ORDER BY oe.election_date DESC, o.election_id DESC) AS json_agg
+           FROM ((politician_offices o
              LEFT JOIN regions orr ON ((orr.id = o.region_id)))
+             LEFT JOIN elections oe ON ((oe.id = o.election_id)))
           WHERE ((o.politician_id = p.id) AND (o.end_date IS NULL) AND (o.start_date <= CURRENT_DATE))), '[]'::json) AS offices
    FROM (politicians p
      LEFT JOIN regions r ON ((p.region_id = r.id)));
@@ -202,6 +205,7 @@ DROP FUNCTION IF EXISTS legacy_status_from_candidacy(TEXT, TEXT, TEXT, BOOLEAN);
 DROP FUNCTION IF EXISTS candidacy_status_from_legacy(TEXT, TEXT, BOOLEAN);
 
 -- 人物最新一屆：輸出欄 candidate_status（交件協議的詞）改成 candidacy_status（資料庫的值）。簽名變了，DROP 重建。
+-- 排序照 #344 第二階段 A（20261007030000）的最新版：看投票日（election_date），不看 election_id。
 -- 呼叫它的 sync_politician_latest_election() 與回填只用 position／slogan／election_type／region_id。
 DROP FUNCTION IF EXISTS politician_latest_election(UUID);
 CREATE FUNCTION politician_latest_election(p_politician_id UUID)
@@ -209,8 +213,9 @@ RETURNS TABLE(election_id INTEGER, candidacy_status TEXT, "position" TEXT, sloga
 LANGUAGE sql STABLE AS $$
   SELECT pe.election_id, pe.candidacy_status, pe."position", pe.slogan, pe.election_type, pe.region_id
     FROM politician_elections pe
+    JOIN elections e ON e.id = pe.election_id
    WHERE pe.politician_id = p_politician_id
-   ORDER BY (COALESCE(pe.candidacy_status, '') = 'withdrawn'), pe.election_id DESC
+   ORDER BY (COALESCE(pe.candidacy_status, '') = 'withdrawn'), e.election_date DESC, pe.election_id DESC
    LIMIT 1
 $$;
 COMMENT ON FUNCTION politician_latest_election IS '人物的「最新一屆」：最近一屆有在選的參選紀錄（表態不參選排最後，全部都是表態不參選才用最近一筆）。politicians 的 position／slogan／election_type／region_id 由它衍生（trg_sync_politician_latest），2026-10-05｜#345 第二階段 B（2026-10-07）：輸出欄 candidate_status 改成 candidacy_status（資料庫的值，不再換成協議的詞）';
