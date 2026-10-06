@@ -123,6 +123,23 @@ export function hasPolicies(people: readonly ComparePerson[], policies: readonly
  */
 export const PK_VIEW = 'comparison'
 
+/** 一場選舉的範圍是鄉鎮市區以下：要先在頁面右側選好鄉鎮市區，才知道比哪一場 */
+const TOWNSHIP_SCOPED = ['鄉鎮市長', '鄉鎮市民代表', '直轄市山地原住民區長', '直轄市山地原住民區民代表', '村里長']
+
+/**
+ * PK 還缺什麼地區範圍才知道要比哪一場（2026-10-06 小良哥：縣市、鄉鎮、選區的選擇只有頁面上方的縣市選擇器與右側面板那一處，PK 不另做一組）。
+ *   'county'    要先在上方選縣市：全台頁的縣市長（一縣一場）、議員、立委……全台沒有「全國一場」可比，只有總統副總統例外
+ *   'township'  要先在右側選鄉鎮市區：縣市頁的鄉鎮市長、鄉鎮市民代表、區長、區代表、村里長（一個鄉鎮才是一場、或一場的名單以鄉鎮為界）
+ *   null        範圍夠了；同一職位在同一縣市裡還有好幾個選舉區（議員、立委）時，選區在右側面板選
+ * region、subRegion 用選舉頁的 selectedRegion、selectedSubRegion（'All'＝沒選）。
+ */
+export function pkNeeds(electionType: string, region: string, subRegion: string): 'county' | 'township' | null {
+  if (electionType === '總統副總統') return null
+  if (region === 'All') return 'county'
+  if (TOWNSHIP_SCOPED.includes(electionType) && subRegion === 'All') return 'township'
+  return null
+}
+
 /** 連到 PK 的網址參數：職位一律寫明（沒帶 type 是「自動選」，按鈕要的是這個職位） */
 export function pkQuery(electionType: string, district?: string): Record<string, string> {
   const query: Record<string, string> = { view: PK_VIEW, type: electionType }

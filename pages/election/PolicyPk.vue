@@ -10,10 +10,10 @@
  * 選舉頁用 v-if 掛這個元件，預渲染時永遠是「候選人」頁籤，HTML 裡只有參選人卡片與「政見 PK」按鈕連結。
  *
  * 選哪個職位、哪一場、勾了誰由選舉頁管（都在網址上：type／district／pick，規則在 lib/policy-compare.ts），
- * 這裡只管畫。選區是真連結（<a href>），可以貼網址直達。
+ * 這裡只管畫。選區（議員的選舉區、村里長的村里）不在這裡選：跟其他頁籤一樣放在選舉頁右側面板（真連結，網址 district 參數照舊）。
  * 表比畫面寬時整張左右捲動，第一欄（類別）固定在左邊；手機上第一欄縮窄。
  */
-import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { RouterLink } from 'vue-router'
 import { Check, Swords } from 'lucide-vue-next'
 import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
@@ -27,8 +27,6 @@ const props = defineProps<{
   /** 勾選的人物 id */
   picked: readonly string[]
   matrix: CompareMatrix<Politician>
-  /** 這一頁這個職位的每一場（兩場以上才畫選區列） */
-  districts: Array<{ label: string; to: RouteLocationRaw; active: boolean }>
 }>()
 
 defineEmits<{ toggle: [id: string]; all: [] }>()
@@ -38,17 +36,6 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
 
 <template>
   <div class="text-left" data-testid="policy-pk">
-    <!-- 這一頁這個職位的每一場：真連結，換場時勾選重設成這一場全部 -->
-    <nav v-if="districts.length > 1" class="flex flex-wrap gap-1.5 mb-4" aria-label="選區">
-      <RouterLink
-        v-for="d in districts"
-        :key="d.label"
-        :to="d.to"
-        :aria-current="d.active ? 'page' : undefined"
-        :class="`px-3 py-1 rounded-full text-xs font-bold transition-all border ${d.active ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50'}`"
-      >{{ d.label }}</RouterLink>
-    </nav>
-
     <div v-if="candidates.length < 2" class="text-center py-16 text-slate-400 border border-dashed border-slate-300 rounded-xl">
       <Swords :size="48" class="mx-auto mb-4 opacity-50" />
       <p>這一層還沒有同一場、兩位以上的參選人可以並排。</p>
