@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-vue-next'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 
 /**
- * 麵包屑（2026-09-30）：接在深色 Hero 上方的一條窄列。每一層都是真連結（最後一層是本頁、不連）。
+ * 麵包屑（2026-09-30）：接在深色 Hero 下方的一條窄列（全站統一放 Hero 之後，不放在上方）。每一層都是真連結（最後一層是本頁、不連）。
  * 結構化資料（BreadcrumbList）由 usePageHead 的 breadcrumbs 選項輸出，這裡只管畫面。
  */
 defineProps<{ items: BreadcrumbItem[] }>()

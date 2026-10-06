@@ -130,9 +130,8 @@ usePageHead({
         <template v-else>
           <nav aria-label="姓氏" class="mb-6 bg-white rounded-xl border border-slate-200 p-4">
             <ul class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-x-4 gap-y-1.5 text-base">
-              <li v-for="s in sections" :key="s.char" class="flex items-baseline justify-between gap-1 min-w-0">
-                <a :href="`#${surnameAnchor(s.char)}`" class="text-blue-700 hover:underline font-bold min-w-[1.5rem] truncate">{{ s.char }}</a>
-                <span class="text-slate-500 text-xs tabular-nums text-right min-w-[2rem] shrink-0">{{ s.entries.length }}</span>
+              <li v-for="s in sections" :key="s.char" class="min-w-0">
+                <a :href="`#${surnameAnchor(s.char)}`" class="block text-blue-700 hover:underline font-bold truncate">{{ s.char }}</a>
               </li>
             </ul>
           </nav>
@@ -144,7 +143,7 @@ usePageHead({
             :aria-labelledby="`${surnameAnchor(s.char)}-h`"
           >
             <h2 :id="`${surnameAnchor(s.char)}-h`" class="text-xl font-black text-navy-900 mb-3 border-b border-slate-200 pb-2">
-              {{ s.char }}<span class="ml-2 text-sm font-semibold text-slate-500">{{ fmt(s.entries.length) }} 位</span>
+              {{ s.char }}
             </h2>
             <!-- 一組最多三千多筆：樣式寫在 .dir-list（styles/main.css），每一筆只帶兩個短 class -->
             <ul class="dir-list grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-1.5">

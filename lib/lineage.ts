@@ -18,11 +18,6 @@ import type {
 export const LINEAGE_NAME = '政策脈絡'
 export const LINEAGE_SHORT_NAME = '脈絡'
 
-/** 給讀者看的一句說明：脈絡是什麼、資料怎麼來 */
-export const LINEAGE_EXPLAINER =
-  '一條政策脈絡是一件事在某一層級、某一地方的來龍去脈：前後任怎麼交接、同一件事有哪些人提案或推動、跟上下級政府的哪條脈絡有關。' +
-  '角色以立法院、議會等官方紀錄為準，本人的說法只標「本人宣稱」。每一筆都由 AI 代理附出處交件、其他代理查證後才上線。'
-
 export const LEVEL_LABEL: Readonly<Record<LineageLevel, string>> = { national: '中央', county: '縣市', township: '鄉鎮市區' }
 export const HANDOVER_LABEL: Readonly<Record<HandoverType, string>> = { keep: '接手', pivot: '轉向', shrink: '縮小', stop: '中止', resume: '重新開始' }
 export const HANDOVER_HINT: Readonly<Record<HandoverType, string>> = {

@@ -83,7 +83,6 @@ usePageHead({
 <template>
   <LoadError v-if="error && elections.length === 0" />
   <div v-else class="bg-slate-50 min-h-screen pb-20">
-    <Breadcrumbs :items="breadcrumbs" />
     <Hero>
       <template #title>選舉一覽</template>
       <template #description>
@@ -91,6 +90,7 @@ usePageHead({
       </template>
       <template #icon><Vote :size="400" class="text-blue-500" /></template>
     </Hero>
+    <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
       <div v-if="elections.length === 0" class="text-slate-500 text-center py-20">

@@ -12,7 +12,7 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { useGlobalState } from '../composables/useGlobalState'
 import { policyMatchesRegion } from '../lib/policy-region'
 import { policySortDate, policyYear } from '../lib/policy-date'
-import { filterLineages, LEVEL_LABEL, LINEAGE_EXPLAINER, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
+import { filterLineages, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
 
 /**
  * /analysis：政策脈絡一覽（#349，2026-10-06；原本叫「市政接力」，網址不變）。
@@ -77,7 +77,7 @@ const progressCases = computed(() => {
 
 usePageHead({
   title: LINEAGE_NAME,
-  description: '政策脈絡：一件事在某一層級、某一地方的來龍去脈——前後任怎麼交接、同一件事有哪些人提案或推動、跟上下級政府的哪條脈絡有關，每一筆附出處、經過查證。',
+  description: '政策脈絡：一件事在某一層級、某一地方的來龍去脈。',
 })
 // 政見清單與脈絡都是按需載入的；這一頁兩份都要整份
 onMounted(() => { ensurePolicies(); ensureLineages() })
@@ -87,7 +87,6 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
     <Hero background-image="/images/heroes/ai.png">
       <template #title>{{ LINEAGE_NAME }}</template>
-      <template #description>{{ LINEAGE_EXPLAINER }}</template>
       <template #icon><Waypoints :size="400" class="text-blue-500" /></template>
 
       <template #actions>
@@ -161,8 +160,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
         <h2 class="text-2xl font-black text-navy-900 mb-6 flex items-center gap-2"><Waypoints class="text-blue-600" :size="24" />{{ LINEAGE_NAME }}<span class="text-base font-bold text-slate-400">{{ lineageList.length }} 條</span></h2>
         <div v-if="lineageList.length === 0" class="text-center py-16 px-6 text-slate-500 bg-white rounded-2xl border border-dashed border-slate-300">
           <Waypoints :size="40" class="mx-auto mb-3 opacity-30" />
-          <p class="font-bold text-slate-600">{{ lineages.length === 0 ? '還沒有任何政策脈絡。' : '這個縣市或分類還沒有政策脈絡。' }}</p>
-          <p class="text-sm mt-2 max-w-xl mx-auto leading-relaxed">系統把同一個地方、同一類、跨人或跨屆的政見放成一組一組，交給 AI 代理判斷哪些講的是同一件事；附出處、其他代理查證之後，脈絡才會出現在這裡。</p>
+          <p class="font-bold text-slate-600">還沒有脈絡。</p>
         </div>
         <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <router-link
@@ -187,8 +185,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
 
       <!-- 進度過半的政見（原本的卡片，連到 /analysis/:policyId，網址照舊） -->
       <section data-testid="progress-cases">
-        <h2 class="text-2xl font-black text-navy-900 mb-2 flex items-center gap-2"><Activity class="text-emerald-600" :size="24" />進度過半的政見</h2>
-        <p class="text-sm text-slate-500 mb-6">已經開始執行、進度超過一半的政見，點進去看深度分析與進度時間軸。</p>
+        <h2 class="text-2xl font-black text-navy-900 mb-6 flex items-center gap-2"><Activity class="text-emerald-600" :size="24" />進度過半的政見</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div v-if="progressCases.length === 0" class="col-span-full text-center py-16 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-300">
             <Search :size="40" class="mx-auto mb-3 opacity-20" />

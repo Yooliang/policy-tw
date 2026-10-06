@@ -70,8 +70,7 @@ usePageHead({
         </section>
 
         <section v-if="unregistered.length" aria-labelledby="unregistered-h">
-          <h2 id="unregistered-h" class="text-2xl font-black text-navy-900 mb-2">名冊查無此名稱的政黨名稱</h2>
-          <p class="text-sm text-slate-600 mb-4">資料裡有人登記這些政黨名稱參選，但內政部政黨名冊（擷取日）找不到同名的政黨，多半是已經改名或解散的舊名稱，待查證。</p>
+          <h2 id="unregistered-h" class="text-2xl font-black text-navy-900 mb-4 flex flex-wrap items-center gap-3">名冊查無此名稱的政黨名稱<span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">待查證</span></h2>
           <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <li v-for="p in unregistered" :key="p.id">
               <a :href="`/party/${p.id}`" class="block bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:shadow-md hover:border-blue-300 transition">
