@@ -24,6 +24,7 @@ import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } fro
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
+import { SEARCH_PAGE_GATE, searchPageProblems, strippedNotice, stripSearchPages } from "./search-page-guard.ts";
 import { voteFieldsNotice } from "./candidacy-result.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -250,6 +251,24 @@ export async function handleContribute(
   }
   const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
 
+  // 搜尋結果頁不是出處、也不算查過的網址（2026-10-06，見 search-page.ts）：不計入網址數，
+  // 扣掉之後一個實際頁面都不剩（或單一出處欄本身就是搜尋結果頁）→ 整批 400，不算被拒。
+  const searchPages = searchPageProblems(validation.items);
+  if (searchPages.length > 0) {
+    try {
+      await supabase.from("gate_rejections").insert(searchPages.map(() => ({ gate: SEARCH_PAGE_GATE, endpoint: via, contribution_id: null, ip_hash: ipHash })));
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: SEARCH_PAGE_GATE,
+        message: "搜尋結果頁不是出處，請附實際打開的頁面。有出處欄位扣掉搜尋結果頁之後不夠，整批未收；請照 errors 改附從搜尋結果點進去、實際打開的頁面後重送。這不算被拒。",
+        errors: searchPages,
+      },
+    };
+  }
+
   // 政見／基本資料缺口回「查無」：checked_urls 至少 5 個（維護者 2026-10-01，見 not-found-guard.ts）。
   // 「查無」是在主張不存在；只看中選會、議會官網、一兩家媒體就回報，14 天內這個缺口不再派。
   // 2026-10-04（協議 1.44.0）：自報的 agent_tool 歸到的那個模型系列，近 14 天查無比例異常高時門檻提高
@@ -271,7 +290,10 @@ export async function handleContribute(
       toolVerdict?.elevated ?? false,
     );
     if (!shortfall) continue;
-    const gate = shortfall.elevated ? "not_found_search_insufficient_elevated" : "not_found_search_insufficient";
+    // 搜尋結果頁被扣掉的另記一道，看得出新規則擋了幾次
+    const gate = shortfall.search_pages > 0
+      ? SEARCH_PAGE_GATE
+      : shortfall.elevated ? "not_found_search_insufficient_elevated" : "not_found_search_insufficient";
     try {
       await supabase.from("gate_rejections").insert({ gate, endpoint: via, contribution_id: null, ip_hash: ipHash });
     } catch { /* 記不成不影響回應 */ }
@@ -286,12 +308,18 @@ export async function handleContribute(
         required: shortfall.required,
         domains: shortfall.domains,
         required_domains: shortfall.required_domains,
+        ...(shortfall.search_pages > 0 ? { search_pages_excluded: shortfall.search_pages } : {}),
         ...(shortfall.elevated && toolVerdict
           ? { elevated: { model: toolVerdict.model, not_found_rate: Number(toolVerdict.rate.toFixed(3)), site_rate: Number(toolVerdict.overall_rate.toFixed(3)), submitted: toolVerdict.submitted, window_days: NOT_FOUND_RATE_WINDOW_DAYS } }
           : {}),
       },
     };
   }
+
+  // 通過上面兩道之後，搜尋結果頁從要存的出處裡拿掉（驗證者照 source_urls 核對，打開搜尋結果頁核不到東西）；
+  // 回應的 notice 會講拿掉幾個，不是默默吃掉。後面的「唯一出處」守門看的是拿掉之後的網址。
+  const strippedSearch = stripSearchPages(validation.items);
+  const strippedCount = [...strippedSearch.values()].reduce((n, l) => n + l.length, 0);
 
   // 媒體不能當唯一出處（#347 第 3 項，協議 1.45.0）：政見與政見進度沒有官方來源時，要兩個不同網站的來源。
   // 門檻表不分來源等級（一律 3），三張 +1 擋不住「整筆只建立在一篇報導上」；交件當下補一個來源最便宜。不算被拒。
@@ -782,7 +810,7 @@ export async function handleContribute(
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
-      ...(toolNotice ? { notice: toolNotice } : {}),
+      ...(toolNotice || strippedCount > 0 ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : ""].filter(Boolean).join("\n") } : {}),
       docs: `${SITE_URL}/skill.md`,
     },
   };

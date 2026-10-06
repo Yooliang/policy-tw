@@ -98,7 +98,7 @@ Deno.test("四處清點：TASK_TYPES、SUGGESTED_TYPE、task-labels（純中文�
 Deno.test("查無守門涵蓋 term_policy_missing：少於 5 個網址 → 400，訊息提選舉公報", async () => {
   assert((NOT_FOUND_SEARCH_TASK_TYPES as readonly string[]).includes(T));
   assertStringIncludes(SEARCH_KEYWORDS[T as keyof typeof SEARCH_KEYWORDS], "選舉公報");
-  const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://example${i}.tw/search?q=x`);
+  const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://example${i}.tw/news/x`);
   const taskId = `auto:${T}:${PID}:2022`;
   assertEquals(notFoundSearchShortfall(taskId, { outcome: "not_found", checked_urls: urls(4) })?.task_type, T);
   assertEquals(notFoundSearchShortfall(taskId, { outcome: "not_found", checked_urls: urls(5) }), null);
