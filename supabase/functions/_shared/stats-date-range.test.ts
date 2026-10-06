@@ -1,5 +1,5 @@
 /**
- * 統計 RPC 的「日期區間」多載守門測試（migration 20261007130000；站務主控台要台灣日曆日精確區間）。
+ * 統計 RPC 的「日期區間」多載守門測試（migration 20261007150000；站務主控台要台灣日曆日精確區間）。
  *
  * 這裡沒有資料庫。SQL 本身在 PGlite 上實跑驗過（見 PR 說明：舊呼叫結果逐位元相同、昨日／今日／近 7／30 日區間正確）；
  * 這支守住「改壞了不會報錯」的幾件事：
@@ -11,7 +11,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
-const FILE = "20261007130000_stats_date_range.sql";
+const FILE = "20261007150000_stats_date_range.sql";
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const sql = await read(FILE);
 const code = sql.replace(/--[^\n]*/g, "");
