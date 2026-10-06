@@ -36,6 +36,7 @@ import {
   participantPhrase, participantValues,
 } from "./lineage.ts";
 import { careerSourceNote } from "./politician-careers.ts";
+import { writeSourcesAfterApply } from "./source-write.ts";
 import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 import { loadReassignContext, personLabel, reassignProblems } from "./reassign-candidacy.ts";
 
@@ -69,6 +70,10 @@ export interface ApplyOutcome {
   politician_id?: string;
   policy_id?: string;
   created_politician?: boolean;
+  /** policy_progress 落庫寫進去的進度紀錄 id；出處（source_refs）掛在它上面（#347 第二階段 A） */
+  tracking_log_id?: string;
+  /** candidacy 落庫寫進／更新的參選紀錄 id；出處掛在它上面（#347 第二階段 A） */
+  politician_election_id?: string;
   similar_policies?: Array<{ id: string; title: string; similarity: number }>;
   task_id?: string;
   question_id?: string;
@@ -530,6 +535,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
+    politician_election_id: String(participation.id),
     message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}`,
   };
 }
@@ -660,6 +666,7 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
   if (log) await recordInsert(supabase, ctx, "tracking_logs", String(log.id), log);
   return {
     status: "applied", policy_id: policyId as string,
+    ...(log?.id !== undefined && log?.id !== null ? { tracking_log_id: String(log.id) } : {}),
     message: olderThanCurrent
       ? `這則進度的日期（${eventDate}）比政見現況（${String(before.last_updated).slice(0, 10)}）舊，已記進時間軸，目前狀態不變`
       : "政見進度已更新並留下追蹤紀錄",
@@ -1922,6 +1929,9 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     } catch (e) {
       console.error("supersedeDuplicates:", e instanceof Error ? e.message : String(e));
     }
+    // 出處直接寫進出處表（政見、進度、參選紀錄掛引用；任何型別都補等級與本人來源的認定根據，#347 第二階段 A）。
+    // 舊欄位的觸發器照舊同步主要出處，所以這步失敗不影響落庫，只少了佐證與等級（writeSourcesAfterApply 自己吞錯誤並記 log）
+    await writeSourcesAfterApply(supabase, row, outcome);
   }
   return outcome;
 }

@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Un
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
+import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 
@@ -102,6 +103,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         <TimelineNote label="尚未查核" :text="origin?.note ?? '這筆資料尚未經過 AI 貢獻流程'">
           <div class="mt-1 space-y-1">
             <a v-if="origin?.source_url" :href="origin.source_url" target="_blank" rel="noopener" class="text-xs text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-0.5 flex-shrink-0" />{{ hostOf(origin.source_url) }}</a>
+            <SourceMeta v-if="origin?.source" :kind="origin.source.kind" :self-evidence="origin.source.self_evidence" :archive-url="origin.source.archive_url" class="ml-2" />
             <ul v-if="origin?.source_notes?.length" class="list-disc pl-5 text-xs text-slate-500">
               <li v-for="n in origin.source_notes" :key="n">{{ n }}</li>
             </ul>

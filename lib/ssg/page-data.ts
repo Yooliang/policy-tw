@@ -3,6 +3,7 @@ import { withElectionData, type DataSnapshot } from '../../composables/useSupaba
 import { PolicyStatus, type Lineage, type Policy, type Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { policySortDate } from '../policy-date'
+import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { electionPeers } from '../election-peers'
 import { positionsToLoad } from '../election-levels'
@@ -141,6 +142,10 @@ function emptySnapshot(full: DataSnapshot): PageSnapshot {
 
 /** 依路由決定要嵌進頁面的資料切片。找不到對應資料時回傳基底切片，頁面自己會顯示「找不到」。 */
 export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapshot): PageSnapshot {
+  return trimPolicySources(buildPageSnapshotRaw(to, full), to.name === 'policy' ? paramString(to.params.policyId) : undefined)
+}
+
+function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): PageSnapshot {
   const base = emptySnapshot(full)
 
   switch (to.name) {

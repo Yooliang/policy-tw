@@ -5,14 +5,12 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
-import { supabasePublic as supabase } from '../lib/supabase'
-import { PolicyStatus } from '../types'
+import { PolicyStatus, type SourceRef } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
-import type { RawPolicySource } from '../types'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
@@ -25,6 +23,8 @@ import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 // 日期格式跟同一頁的查核履歷共用同一支，兩條時間軸不要一個斜線一個橫線
 import { formatDate } from '../lib/history'
 import { hostOf, shortUrlsIn } from '../lib/url'
+import { sourceDisplayName } from '../lib/sources'
+import SourceMeta from '../components/SourceMeta.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
@@ -202,23 +202,19 @@ function scrollToHistory() {
   historySectionEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// Policy sources state
-const sources = ref<RawPolicySource[]>([])
+// 資料來源（#347 第二階段 A）：讀出處表。policy.sources 隨政見一起來（視圖 policies_with_logs），主要出處在前，
+// 有等級就標小標籤、有存檔網址就多一個「存檔」連結；舊的 policy_sources 表（線上 0 筆）不再讀，
+// 視圖還沒有 sources 欄時 mapPolicy 用舊欄位 source_url 補一筆。伺服器端渲染：連結在 HTML 裡，爬蟲與 AI 讀得到
+const sources = computed(() => policy.value?.sources ?? [])
 const showAllSources = ref(false)
 const displayedSources = computed(() =>
   showAllSources.value ? sources.value : sources.value.slice(0, 5)
 )
 
-// Fetch policy sources
-watch(policyId, async (id) => {
+watch(policyId, (id) => {
   if (!id) return
   appliedHistoryCount.value = 0
-  const { data } = await supabase
-    .from('policy_sources')
-    .select('*')
-    .eq('policy_id', id)
-    .order('published_date', { ascending: false })
-  sources.value = data || []
+  showAllSources.value = false
 }, { immediate: true })
 
 // 按鈕與計數合併成一顆（2026-09-17）：原本上面一排數字、下面一排按鈕，
@@ -228,20 +224,23 @@ watch(policyId, async (id) => {
  * 落庫時 event 寫成「進度更新：In Progress」、description 尾巴接「貢獻者：X（網址）」，
  * 直接印出來就會在畫面上混出英文狀態與一句夾在內文裡的署名。
  */
-function parseLog(log: { event: string; description?: string | null; sourceUrl?: string | null }) {
+function parseLog(log: { event: string; description?: string | null; sourceUrl?: string | null; sources?: SourceRef[] }) {
   const m = /^(.+?)：(.+)$/.exec(log.event ?? '')
   const kind = m ? m[1] : (log.event || '進度更新')
   const rawStatus = m ? m[2].replace(/（.*?）$/, '').trim() : null
   const percent = m ? (/（(\d+)%）/.exec(m[2])?.[1] ?? null) : null
   const body = (log.description ?? '').replace(/\s*貢獻者：([^（]+)（([^）]+)）\s*$/, '')
   const who = /貢獻者：([^（]+)（([^）]+)）/.exec(log.description ?? '')
+  // 出處（#347 第二階段 A）：出處表的主要出處優先，沒有才退回 description 尾巴的署名網址
+  const source = log.sourceUrl ?? (who ? who[2].trim() : null)
   return {
     kind,
     status: rawStatus ? policyStatusLabel(rawStatus) : null,
     percent,
     body: body.trim(),
     agent: who ? who[1].trim() : null,
-    source: who ? who[2].trim() : (log.sourceUrl ?? null),
+    source,
+    sourceRef: source ? (log.sources ?? []).find((s) => s.url === source) ?? null : null,
   }
 }
 
@@ -663,7 +662,7 @@ async function copyCitation() {
               <span class="text-sm font-normal text-slate-400">({{ sources.length }})</span>
             </h3>
             <ul class="space-y-3">
-              <li v-for="src in displayedSources" :key="src.id" class="flex items-start gap-3 group">
+              <li v-for="src in displayedSources" :key="src.url" class="flex items-start gap-3 group">
                 <ExternalLink :size="16" class="text-slate-400 mt-1 shrink-0" />
                 <div class="min-w-0">
                   <a
@@ -672,12 +671,12 @@ async function copyCitation() {
                     rel="noopener noreferrer"
                     class="text-blue-600 hover:text-blue-800 font-medium text-sm line-clamp-1 break-all"
                   >
-                    {{ src.title || hostOf(src.url) }}
+                    {{ sourceDisplayName(src) }}
                   </a>
-                  <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                    <span v-if="src.source_name">{{ src.source_name }}</span>
-                    <span v-if="src.source_name && src.published_date">·</span>
-                    <span v-if="src.published_date">{{ src.published_date }}</span>
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400 mt-0.5">
+                    <SourceMeta :kind="src.kind" :self-evidence="src.selfEvidence" :archive-url="src.archiveUrl" />
+                    <span v-if="src.publisher && src.title">{{ src.publisher }}</span>
+                    <span v-if="src.publishedDate">{{ src.publishedDate }}</span>
                   </div>
                 </div>
               </li>
@@ -735,6 +734,7 @@ async function copyCitation() {
                   <a v-if="parseLog(log).source" :href="parseLog(log).source!" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 underline underline-offset-2 break-all">
                     <ExternalLink :size="11" />來源
                   </a>
+                  <SourceMeta v-if="parseLog(log).sourceRef" :kind="parseLog(log).sourceRef!.kind" :self-evidence="parseLog(log).sourceRef!.selfEvidence" :archive-url="parseLog(log).sourceRef!.archiveUrl" />
                 </div>
               </div>
             </div>

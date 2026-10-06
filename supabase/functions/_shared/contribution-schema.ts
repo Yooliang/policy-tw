@@ -61,6 +61,7 @@ export const ELECTION_TYPES = [
 
 export { POLICY_CATEGORIES } from "./category-map.ts";
 import { categoryErrorMessage, isCanonicalCategory, POLICY_CATEGORIES } from "./category-map.ts";
+import { parseSourceDetails, payloadSourceDetailsProblems } from "./source-write.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
 /**
@@ -811,9 +812,18 @@ export function validateContributionRequest(body: unknown): ValidationResult {
         if (typeof u === "string" && isUnreadableSocial(u)) push(`source_urls[${i}]`, "臉書、IG、Threads 讀不到（驗證者與系統都打不開），不算出處：請改附內政部政黨資訊網、政黨官網的公告或報導的網址");
       });
     }
+    // 出處等級與「本人來源」的認定根據（選填，#347 第二階段 A，協議 1.62.0）：跟 source_urls 同一層。
+    // 驗過的存進 payload.source_details（落庫時讀，不另開欄位）；payload 裡直接放的不收，免得繞過這道驗證。
+    let sourceDetails: ReturnType<typeof parseSourceDetails>["details"] = [];
+    for (const problem of payloadSourceDetailsProblems(raw.payload)) push(problem.path, problem.message);
+    if (raw.source_details !== undefined) {
+      const parsed = parseSourceDetails(raw.source_details, Array.isArray(sourceUrls) ? (sourceUrls as unknown[]).filter((u): u is string => typeof u === "string") : []);
+      for (const problem of parsed.problems) push(problem.path, problem.message);
+      sourceDetails = parsed.details;
+    }
     items.push({
       contribution_type: raw.contribution_type,
-      payload: raw.payload,
+      payload: sourceDetails.length > 0 ? { ...raw.payload, source_details: sourceDetails } : raw.payload,
       source_urls: Array.isArray(sourceUrls) ? (sourceUrls as string[]) : [],
       ...(raw.note !== undefined ? { note: String(raw.note) } : {}),
       ...(raw.task_id !== undefined ? { task_id: String(raw.task_id) } : {}),

@@ -106,7 +106,8 @@ Deno.test("registered 不受影響、不問名單", async () => {
   const { client, tables, rpcCalls } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, true);
   await applyContribution(client, candidacy("registered"));
   assertEquals(peOf(tables)?.candidate_status, "registered");
-  assertEquals(rpcCalls.length, 0);
+  // 不問名單：沒有 candidacy_list_published。落庫後另外寫出處表的 source_write（#347 第二階段 A）不算
+  assertEquals(rpcCalls.filter((c) => c.name !== "source_write").length, 0);
 });
 
 const correction = (target_table: string, target_id: string, changes: Row[]) => ({

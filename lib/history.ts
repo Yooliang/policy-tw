@@ -2,7 +2,12 @@
  * 查核履歷（GET /functions/v1/history）：某人物／政見／單筆貢獻被誰交、誰驗、改了什麼、有沒有裁決或還原。
  */
 
+import type { SourceLevel } from '../types'
+
 export type HistoryTarget = 'politician' | 'policy' | 'contribution' | 'question'
+
+/** 交件的一個來源網址，帶出處表的等級與存檔網址（#347 第二階段 A；出處表沒有的網址由伺服器依網域判斷等級，不會是 self） */
+export interface HistorySource { url: string; kind: SourceLevel; self_evidence: string | null; archive_url: string | null }
 
 export interface HistoryVerifier { agent_name: string | null; agent_tool: string | null; verdict: string; note: string | null; evidence_url: string | null; resolved_politician_id: string | null; created_at: string }
 export interface HistoryEdit { table: string; record_id: string; field: string; field_label: string; old_value: unknown; new_value: unknown; applied_at: string; reverted_at: string | null; reverted_by: string | null }
@@ -17,6 +22,8 @@ export interface HistoryEntry {
   agent_name: string | null
   agent_tool: string | null
   source_urls: string[]
+  /** 同一批網址帶等級與存檔；舊版端點沒有這一欄，畫面退回只列 source_urls */
+  sources?: HistorySource[]
   note: string | null
   review_notes: string | null
   created_at: string
@@ -33,7 +40,7 @@ export interface HistoryEntry {
   edits: HistoryEdit[]
   adjudications: HistoryAdjudication[]
 }
-export interface HistoryOrigin { kind: 'contributions' | 'imported' | 'unknown'; note: string | null; source_url?: string | null; source_notes?: string[] }
+export interface HistoryOrigin { kind: 'contributions' | 'imported' | 'unknown'; note: string | null; source_url?: string | null; source?: HistorySource | null; source_notes?: string[] }
 export interface HistoryResponse {
   success: boolean
   target: HistoryTarget

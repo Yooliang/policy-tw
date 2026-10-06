@@ -4,9 +4,17 @@ import { ref } from 'vue'
 import { ExternalLink, Scale, Undo2, ThumbsUp, ThumbsDown, CircleHelp, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { ADJ_VERDICT_LABEL, formatTime, formatValue, tableLabel, VERDICT_CLASS, VERDICT_LABEL, type HistoryEntry } from '../../lib/history'
 import { policyStatusLabel } from '../../composables/usePageHead'
+import SourceMeta from '../SourceMeta.vue'
 
 /** 一筆履歷的細節：驗證者與理由、欄位舊值新值、裁決、還原。查核履歷面板與貢獻看板共用（看板自己已顯示來源與備註，可關掉）。 */
 withDefaults(defineProps<{ entry: HistoryEntry; hideSources?: boolean; hideNotes?: boolean }>(), { hideSources: false, hideNotes: false })
+
+/** 來源清單：端點有帶出處表的等級與存檔（entry.sources）就用它；舊版端點只有網址，照舊列（沒有等級、沒有存檔） */
+function sourceRows(entry: HistoryEntry) {
+  return entry.sources && entry.sources.length > 0
+    ? entry.sources
+    : entry.source_urls.map((url) => ({ url, kind: undefined, self_evidence: null, archive_url: null }))
+}
 
 // 判定改用圖示（2026-09-17），跟上方摘要那三顆膠囊同一組符號；
 // 文字留在 title 裡，讀螢幕的人與滑過去的人還是讀得到。
@@ -59,8 +67,9 @@ function editValue(field: string, v: unknown): string {
     <div v-if="!hideSources && entry.source_urls.length">
       <p class="text-xs text-slate-400 mb-1">來源</p>
       <ul class="space-y-1">
-        <li v-for="u in entry.source_urls" :key="u">
-          <a :href="u" :title="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 flex items-center gap-1 min-w-0"><ExternalLink :size="12" class="flex-shrink-0" /><span class="truncate">{{ hostOf(u) }}</span></a>
+        <li v-for="s in sourceRows(entry)" :key="s.url" class="flex items-center gap-x-2 min-w-0">
+          <a :href="s.url" :title="s.url" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 flex items-center gap-1 min-w-0"><ExternalLink :size="12" class="flex-shrink-0" /><span class="truncate">{{ hostOf(s.url) }}</span></a>
+          <SourceMeta :kind="s.kind" :self-evidence="s.self_evidence" :archive-url="s.archive_url" />
         </li>
       </ul>
     </div>

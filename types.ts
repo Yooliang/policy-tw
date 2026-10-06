@@ -154,11 +154,36 @@ export interface Politician {
 }
 
 
+/** 出處等級（sources.source_kind，#347）：官方／本人（要有認定根據）／媒體（含沒有認定根據的社群）／其他 */
+export type SourceLevel = 'official' | 'self' | 'media' | 'other';
+
+/**
+ * 一筆資料引用的一個出處（出處表 sources 一列＋引用 source_refs，#347 第二階段 A）。
+ * 畫面：等級用小標籤、有存檔網址就多一個「存檔」小連結。
+ */
+export interface SourceRef {
+  url: string;
+  title?: string | null;
+  publisher?: string | null;
+  publishedDate?: string | null;
+  /** 出處等級；沒有出處表那一列（視圖還沒上線、只剩舊欄位 source_url 的退路）時沒有值，畫面就不標等級 */
+  kind?: SourceLevel;
+  /** 本人來源的認定根據：linked_by_official 被議會・選委會・政黨官網連結／mutual_link 與本人官網互相連結／platform_verified 平台認證 */
+  selfEvidence?: string | null;
+  /** Wayback Machine 的存檔網址（選舉公報、選委會公告類出處由排程存） */
+  archiveUrl?: string | null;
+  /** primary 主要出處／supporting 佐證 */
+  role: 'primary' | 'supporting';
+}
+
 export interface TrackingLog {
   id: number;
   date: string;
   event: string;
   description?: string;
+  /** 這則進度的主要出處網址：出處表優先，沒有才退回舊欄位 tracking_logs.source_url（#347 第二階段 A） */
+  sourceUrl?: string;
+  sources?: SourceRef[];
 }
 
 export interface Policy {
@@ -175,8 +200,13 @@ export interface Policy {
   lastUpdated: string;
   /** 內容最後一次變動的時間（timestamptz，DB 觸發器維護）；lastUpdated 只有「日」，排序用這個（2026-09-22） */
   updatedAt?: string;
-  /** 原始出處（policies.source_url）。2026-09-23 起帶到前端：結構化標記的 citation、給 AI 的「引用這筆資料」 */
+  /**
+   * 主要出處網址。2026-09-23 起帶到前端：結構化標記的 citation、給 AI 的「引用這筆資料」。
+   * #347 第二階段 A 起出處表（`sources`）優先，沒有才退回舊欄位 policies.source_url。
+   */
   sourceUrl?: string;
+  /** 這筆政見的所有出處（主要在前），帶等級與存檔網址；視圖還沒有這一欄時由舊的 source_url 補一筆 */
+  sources?: SourceRef[];
   progress: number; // 0-100
   tags: string[];
   logs: TrackingLog[];
@@ -539,11 +569,26 @@ export interface RawPolitician {
   offices?: PoliticianOffice[];
 }
 
+/** 視圖 policies_with_logs 的 sources（資料庫函式 source_brief_list 的一筆） */
+export interface RawSourceRef {
+  url: string;
+  title?: string | null;
+  publisher?: string | null;
+  published_date?: string | null;
+  kind?: string | null;
+  self_evidence?: string | null;
+  archive_url?: string | null;
+  role?: string | null;
+}
+
 export interface RawTrackingLog {
   id: number;
   date: string;
   event: string;
   description?: string;
+  /** 舊欄位（退路）；舊視圖沒有 */
+  source_url?: string | null;
+  sources?: RawSourceRef[] | null;
 }
 
 export interface RawPolicy {
@@ -577,6 +622,8 @@ export interface RawPolicy {
   lineage_id?: string | null;
   lineage?: RawLineageSummary | null;
   origin?: string | null;
+  /** 出處（#347 第二階段 A）：視圖 policies_with_logs 最後一欄；舊視圖沒有，那時退回上面的 source_url */
+  sources?: RawSourceRef[] | null;
 }
 
 export interface RawLineageSummary {
