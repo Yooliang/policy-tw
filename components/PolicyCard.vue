@@ -105,7 +105,7 @@ const toggleCheckpoint = (e: Event) => {
 
       <!-- 收藏星星跟標題同一行：原本浮在右上角、還要 hover 才出現，跟狀態標籤也會疊到 -->
       <div class="flex items-start gap-2 mb-3">
-        <h3 :class="`flex-1 text-lg font-black leading-tight transition-colors ${isCampaign ? 'text-violet-900 group-hover:text-violet-700' : 'text-navy-900 group-hover:text-blue-600'}`">
+        <h3 :class="`flex-1 min-w-0 break-words text-lg font-black leading-tight transition-colors ${isCampaign ? 'text-violet-900 group-hover:text-violet-700' : 'text-navy-900 group-hover:text-blue-600'}`">
           <router-link :to="`/policy/${policy.id}`" class="after:absolute after:inset-0 after:content-['']">{{ policy.title }}</router-link>
         </h3>
         <button
@@ -123,7 +123,7 @@ const toggleCheckpoint = (e: Event) => {
         {{ shortUrlsIn(policy.description) }}
       </p>
 
-      <div :class="['flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest', isPastCampaign ? 'mb-0' : 'mb-6']">
+      <div :class="['flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-black text-slate-400 uppercase tracking-widest', isPastCampaign ? 'mb-0' : 'mb-6']">
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
           <!-- 承諾的年份跟屆別走（分組、當選與否都看 election_id；2026-09-20 蔡培慧那筆提出日期 2026 卻標 2024，卡片自己打架），沒屆別才退回提出日期 -->

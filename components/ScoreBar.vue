@@ -25,7 +25,7 @@ const fillStyle = computed(() => (s.value >= 0 ? { left: '50%', width: `${pct.va
 </script>
 
 <template>
-  <span v-if="t > 0" class="inline-flex items-center gap-1 text-[10px] tabular-nums text-slate-400" :title="title" data-testid="score-bar">
+  <span v-if="t > 0" class="inline-flex items-center gap-1 text-xs tabular-nums text-slate-400" :title="title" data-testid="score-bar">
     <span class="text-red-500">−{{ t }}</span>
     <span class="relative inline-block w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
       <span class="absolute top-0 bottom-0 left-1/2 w-px bg-slate-400"></span>
