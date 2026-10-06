@@ -87,6 +87,7 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'lineage_participants', label: '脈絡角色' },
   { key: 'lineage_handover', label: '脈絡交接' },
   { key: 'lineage_link', label: '脈絡上下級' },
+  { key: 'party_info', label: '政黨資訊' },
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))

@@ -107,7 +107,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這筆參選紀錄缺東西，**缺什麼看 what_we_need 與 target.missing**：沒有網址來源、沒有縣市（region）、沒有選區（electoral_district），或鄉鎮層級選舉沒有鄉鎮（sub_region）。" +
     "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘照現有資料原樣帶（candidate_status 不要順手改）；查不到就 no_change 說明你找過哪裡。" +
-    "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。",
+    "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
+    // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
+    "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。",
 
   election_result_missing:
     "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
@@ -404,6 +406,21 @@ function buildPayload(
         checked_urls: ["（你實際打開過的網址）"],
       };
     case "candidacy": {
+      // 參選紀錄缺政黨（#346 第二階段，target.kind＝party）：照中選會名冊那一筆重交，地區照 target.fill、政黨照名冊原字
+      if (t.kind === "party") {
+        const cec = (t.cec && typeof t.cec === "object" ? t.cec : {}) as Record<string, unknown>;
+        const fill = (t.fill && typeof t.fill === "object" ? t.fill : {}) as Record<string, unknown>;
+        return {
+          politician_id: t.politician_id ?? "（人物 id）",
+          name: t.name ?? "（姓名，中選會自動核對要用）",
+          election_id: t.election_id ?? "（選舉年份）",
+          election_type: t.election_type ?? "（選舉類型）",
+          ...fill,
+          party: cec.party ?? "（中選會名冊上那一屆的推薦政黨，原字照抄）",
+          candidate_status: t.candidate_status ?? "（照現況）",
+          election_result: cec.election_result ?? "（elected 或 not_elected，照中選會）",
+        };
+      }
       // 補縣市／補選區（2026-10-05，contribution_auto_tasks_region_gap）：target.missing 列出缺哪幾欄。
       // 缺縣市時不預填 target.region——那是人物表的縣市，照抄等於沒查證。
       const missing = Array.isArray(t.missing) ? t.missing as unknown[] : [];

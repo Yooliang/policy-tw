@@ -188,8 +188,9 @@ Deno.test("toCecCandidateRow：候選人檔＋得票檔合併，得票檔的 is_
     prv_code: "10",
     city_code: "007",
     area_name: "彰化縣第01選舉區",
+    party_name: "中國國民黨",
   };
-  const ticket = { cand_id: 12345, is_victor: "*", ticket_num: 88888 };
+  const ticket = { cand_id: 12345, is_victor: "*", ticket_num: 88888, party_name: "中國國民黨" };
   const row2 = toCecCandidateRow(row, ticket, {
     electionId: 2022,
     ourType: "縣市議員",
@@ -210,6 +211,7 @@ Deno.test("toCecCandidateRow：候選人檔＋得票檔合併，得票檔的 is_
     elected: true,
     cec_theme_id: "theme-abc",
     cec_cand_id: 12345,
+    party: "中國國民黨",
   });
 });
 

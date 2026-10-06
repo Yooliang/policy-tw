@@ -90,6 +90,7 @@ const VERIFY_BORDER: Record<string, string> = {
   lineage_participants: '#134e4a',
   lineage_handover: '#115e59',
   lineage_link: '#14b8a6',
+  party_info: '#7c3aed',        // 政黨資訊：紫
 }
 const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
 const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
@@ -113,6 +114,7 @@ const VERIFY_LABEL: Record<string, string> = {
   lineage_participants: '脈絡參與角色',
   lineage_handover: '脈絡交接',
   lineage_link: '脈絡上下級',
+  party_info: '政黨資訊',
 }
 const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
 const minsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000))

@@ -28,6 +28,7 @@ import { councilDistrictKey, isCouncilAboriginalDistrict, legislatorDistrictKey,
 import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 import { DISTRICT_SEAT_TYPES, type DistrictSeatKind, type ExistingDistrict, normalizeSeatDistrict, planDistrictSeats, type SeatInput, seatDistrictTown } from "./district-seats.ts";
+import { missingAncestors, partyInfoIds, partyInfoItems, type PartyRow, planPartyInfo } from "./party-info.ts";
 import { changedElementFields, elementPhrase, POLICY_ELEMENT_LABEL, policyElementValues } from "./policy-elements.ts";
 import {
   changedLineageFields, HANDOVER_FIELDS, HANDOVER_TYPE_LABEL, type HandoverType, handoverValues, LINEAGE_LEVEL_LABEL, type LineageLevel,
@@ -1303,6 +1304,65 @@ async function applyDistrictSeats(supabase: SupabaseLike, row: ContributionRow):
 }
 
 /**
+ * 政黨資訊的那幾個政黨，連前身往上追幾代（看得出改名鏈有沒有繞圈）。找不到的就不在 Map 裡。
+ * 交件時的前置檢查（apply-precheck.ts）與落庫共用。
+ */
+export async function loadPartyChain(supabase: SupabaseLike, ids: readonly number[]): Promise<Map<number, PartyRow>> {
+  const rows = new Map<number, PartyRow>();
+  const tried = new Set<number>();
+  let want = [...new Set(ids)];
+  for (let depth = 0; want.length > 0 && depth < 10; depth++) {
+    for (const id of want) tried.add(id);
+    // query-bounds: ok — 一筆最多 5 個政黨（＋各自的前身），往上追每一代也只有幾個
+    const { data, error } = await supabase.from("parties").select("id, name, valid_from, valid_to, predecessor_id").in("id", want).limit(50);
+    throwIf(error, "parties read");
+    for (const r of (data ?? []) as Obj[]) {
+      rows.set(Number(r.id), {
+        id: Number(r.id), name: String(r.name ?? ""), valid_from: (r.valid_from as string | null) ?? null, valid_to: (r.valid_to as string | null) ?? null,
+        predecessor_id: r.predecessor_id === null || r.predecessor_id === undefined ? null : Number(r.predecessor_id),
+      });
+    }
+    want = missingAncestors(rows).filter((id) => !tried.has(id));
+  }
+  return rows;
+}
+
+const PARTY_FIELD_LABEL: Record<string, string> = { valid_from: "名稱起始日", valid_to: "名稱停用日", predecessor_id: "前身" };
+
+/**
+ * 政黨資訊（#346 第二階段，協議 1.56.0）：改名的前身與名稱起訖、解散日、名冊外政黨的對應，寫進 parties。
+ *
+ * - 一個政黨一次 UPDATE（parties 的 CHECK 要求 valid_to ≥ valid_from）；每一欄一筆 edit_history，還原時併回一次 UPDATE（edit-history.ts）
+ * - 值一樣的不重寫；找不到政黨、前身往上追會繞回自己、改完起訖顛倒的，整筆不寫（disputed，講清楚是哪一個）
+ * - 名稱、名冊狀態照內政部名冊（scripts/fetch-moi-parties.py），交件改不了
+ * - 出處由資料庫觸發器在落庫後掛到 source_refs（migration 20261006100100），這裡不另外寫
+ */
+async function applyPartyInfo(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const items = partyInfoItems(row.payload);
+  if (items.length === 0) return { status: "failed", message: "party_info 要帶 parties（每個政黨一項）" };
+  const rows = await loadPartyChain(supabase, partyInfoIds(items));
+  const plan = planPartyInfo(rows, items);
+  if (plan.problems.length > 0) return { status: "disputed", message: plan.problems.join("；") };
+  if (plan.updates.length === 0) {
+    return { status: "superseded", message: `這幾個政黨的資料現值已經一樣（${plan.unchanged.join("、")}，別人先補好了），不重複寫入` };
+  }
+  const ctx = ctxOf(row);
+  const done: string[] = [];
+  for (const u of plan.updates) {
+    const { error } = await supabase.from("parties").update(u.patch).eq("id", u.id);
+    throwIf(error, "parties update");
+    for (const [field, value] of Object.entries(u.patch)) {
+      await recordUpdate(supabase, ctx, "parties", String(u.id), field, u.old[field as keyof typeof u.old] ?? null, value);
+    }
+    done.push(`${u.name}（${u.id}）${Object.entries(u.patch).map(([f, v]) => `${PARTY_FIELD_LABEL[f] ?? f}「${u.old[f as keyof typeof u.old] ?? ""}」→「${v}」`).join("、")}`);
+  }
+  return {
+    status: "applied",
+    message: `政黨資訊更新 ${plan.updates.length} 個政黨：${done.join("；")}${plan.unchanged.length > 0 ? `；${plan.unchanged.join("、")} 現值已相同，略過` : ""}；出處掛到這幾個政黨（臉書、IG、Threads 不算）`,
+  };
+}
+
+/**
  * 移除一筆明顯不該存在的資料。
  *
  * 刻意做成軟移除：打上 removed_at 讓它從網站消失，資料與整條查核履歷都留著。
@@ -1701,6 +1761,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "merge_politician": return await applyMergePolitician(supabase, row);
     case "roster_check": return await applyRosterCheck(supabase, row);
     case "district_seats": return await applyDistrictSeats(supabase, row);
+    case "party_info": return await applyPartyInfo(supabase, row);
     case "policy_elements": return await applyPolicyElements(supabase, row);
     case "lineage": return await applyLineage(supabase, row);
     case "lineage_participants": return await applyLineageParticipants(supabase, row);

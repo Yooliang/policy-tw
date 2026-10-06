@@ -16,6 +16,7 @@ type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
+import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
@@ -179,6 +180,29 @@ export function isWithdrawnFilingTask(taskType: string, target: Obj | null | und
   return taskType === "not_running_recheck" && !!target && target.kind === "withdrawn_filing";
 }
 
+/**
+ * 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）：candidacy_source_missing 的 party 那一種（target.kind＝party，
+ * 任務編號 auto:candidacy_source_missing:party:<參選紀錄 id>，contribution_auto_tasks_party_gap 派）。
+ */
+export const PARTY_GAP_HINT =
+  "這一筆參選紀錄缺的是「那一次參選時的政黨」（target.missing＝party）。target.cec 是中選會名冊上這一屆的他（推薦政黨、號次、當選與否），" +
+  "target.person_party 是他現在登記的政黨——人會換黨，**party 要照中選會名冊那一屆填，不要填現在的**。" +
+  "先打開中選會選舉資料庫核對是同一個人（縣市、選區、出生年），再用 candidacy 重交同一人同一屆：politician_id、name、election_id、election_type 照 target，" +
+  "地區照 target.fill（縣市議員一定要有 electoral_district），party 照名冊原字（target.cec.party），candidate_status 照現況，election_result 照名冊（target.cec.election_result）。" +
+  "系統會用中選會的資料自動核對：我們只有一位同名、當選與否與推薦政黨都對得上就直接上線；推薦政黨對不上會被退件。" +
+  "名冊上的不是同一個人（同名同姓）就不要交 candidacy，改用 no_change 回報、finding 寫「掛錯人」。";
+
+/** candidacy_source_missing 的 party 那一種（參選紀錄缺政黨） */
+export function isPartyGapTask(taskType: string, target: Obj | null | undefined): boolean {
+  return taskType === "candidacy_source_missing" && !!target && target.kind === "party";
+}
+
+/** party_info（#346 第二階段）的驗證提示 */
+export const PARTY_INFO_VERIFY_HINT =
+  "打開 source_urls（內政部政黨資訊網、政黨官網的公告或報導），逐個政黨核對：claimed 是提交者要寫的值，db 是我們現有的（空白＝還沒有）。" +
+  "名稱起始日、停用日要是來源上寫得出來的日子（不是拿月初、年初或報導日期推的）；前身（predecessor）要是來源講明「同一個政黨改名」，名字像、理念相近不算。" +
+  "全部對得上才投 agree；任一項來源沒寫或對不上投 disagree，note 寫是哪一個政黨哪一欄；來源打不開投 unsure。";
+
 /** 參選紀錄給代理看的欄位（不參選重查：退選前有沒有登記、核對過名冊沒有） */
 const PARTICIPATION_FIELDS = ["id", "election_id", "election_type", "position", "candidate_status", "candidacy_status", "withdrawn_after_filing", "verified", "source_note"] as const;
 
@@ -218,7 +242,8 @@ export function shapeTaskCurrent(
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
-  const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT : TASK_GUIDANCE[taskType]);
+  const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
+    : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT : TASK_GUIDANCE[taskType]);
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
   // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
@@ -865,6 +890,8 @@ export interface VerifyContextData {
   source_urls?: string[] | null;
   /** district_seats：這個縣市這種選舉我們現有的選舉區與名額（election_districts） */
   districts?: Obj[];
+  /** party_info（#346 第二階段）：交件提到的政黨（含前身）現在的名稱起訖、前身、名冊狀態 */
+  parties?: Obj[];
   /** policy_elements（#364）：這條政見現在已經有的要素列 */
   elements?: Obj[];
   /** policy_elements（#364）：這一任的卸任日（「任內」換算 deadline_date 用） */
@@ -1150,6 +1177,22 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
         hint: "看這筆政見的標題與內容：它是不是「當選後要做的具體事情」？口號、行程、表態、團隊組成不是政見 → agree 移除；是政見但只是缺出處 → disagree 並在 note 說應該用 correction 補 source_url",
       };
+    case "party_info": {
+      // 逐個政黨對照：交上來的值、我們現有的值（空白＝還沒有）；名冊外的政黨（moi_no 空的）要特別看前身那一欄
+      const have = new Map((data.parties ?? []).map((x) => [Number(x.id), x]));
+      const nameOf = (id: unknown) => (have.get(Number(id))?.name as string | undefined) ?? null;
+      return {
+        parties: partyInfoItems(payload).map((it) => {
+          const cur = have.get(it.party_id) ?? null;
+          return {
+            party_id: it.party_id, name: cur?.name ?? null, moi_no: cur?.moi_no ?? null, moi_status: cur?.moi_status ?? null,
+            claimed: { ...it, ...(it.predecessor_id ? { predecessor_name: nameOf(it.predecessor_id) } : {}) },
+            db: cur ? { valid_from: cur.valid_from ?? null, valid_to: cur.valid_to ?? null, predecessor_id: cur.predecessor_id ?? null, predecessor_name: nameOf(cur.predecessor_id) } : null,
+          };
+        }),
+        hint: PARTY_INFO_VERIFY_HINT,
+      };
+    }
     case "district_seats": {
       // 逐區對照：交上來的名額、我們現有的名額（空白＝還沒有）、是不是公告上多出來的新選舉區
       const have = new Map((data.districts ?? []).map((d) => [String(d.sub_region ?? ""), d]));
@@ -1359,6 +1402,14 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     } else if (taskId) {
       const { data: t } = await supabase.from("contribution_tasks").select("id, task_type, title, description, target, source").eq("id", taskId).maybeSingle();
       data.task = t ? { task_id: taskId, ...pick(t, ["task_type", "title", "description", "target", "source"]) } : { task_id: taskId };
+    }
+  }
+  if (contributionType === "party_info") {
+    const ids = partyInfoIds(partyInfoItems(payload));
+    if (ids.length > 0) {
+      // query-bounds: ok — 一筆最多 5 個政黨（＋前身）
+      const { data: ps } = await supabase.from("parties").select("id, name, short_name, moi_no, moi_status, valid_from, valid_to, predecessor_id").in("id", ids).limit(20);
+      data.parties = (ps ?? []) as Obj[];
     }
   }
   if (contributionType === "district_seats") {

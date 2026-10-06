@@ -395,6 +395,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 政黨資訊（#346 第二階段）：出錯的方式是「日子是推的，不是來源寫的」與「把兩個不同的政黨當成改名」
+  party_info: [
+    {
+      key: "date_not_in_source",
+      instructions: "交上來的名稱起始日、停用日，來源上有寫出這一天嗎？還是看起來是拿月初、年初或報導日期推出來的？",
+      hit: { key: "inferred", means: "來源沒寫這一天，像是推出來或湊的日期" },
+      miss: { key: "stated", means: "每一個日期來源上都寫得出來" },
+    },
+    {
+      key: "not_same_party",
+      instructions: "說某個政黨是另一個政黨改名前的名字（前身），來源有講兩者是同一個政黨改名嗎？還是只是名字像、理念相近？",
+      hit: { key: "different_party", means: "來源沒說是改名，只是名字像或理念相近" },
+      miss: { key: "renamed", means: "來源講明是同一個政黨改名（或沒有交前身這一欄）" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",

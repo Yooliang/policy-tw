@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { CEC_QUERY_URL, type CecCandidacy, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
 import { CEC_VERIFIABLE_TYPES, decideByCec, scanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
+import { type PartyAliasRow, partyResolver } from "../_shared/party-alias.ts";
 
 /**
  * cec-verify — 用中選會的資料自動查證（cron 每 10 分鐘，無金鑰，與 apply-verified 同一種掃地機）。
@@ -75,6 +76,11 @@ Deno.serve(async (req) => {
     if (error) throw new Error(`contributions scan: ${error.message}`);
 
     const cache = new Map<string, CecCandidacy[]>();
+    // 推薦政黨要照政黨寫法對照表比（#346 第二階段）；讀不到就不比政黨，其他照舊
+    // query-bounds: ok — 政黨寫法對照表約 400 列（內政部名冊 397 個政黨＋幾種別寫法），上限 1000
+    const { data: aliasRows, error: aliasError } = await supabase.from("party_aliases").select("alias_key, party_id, kind").limit(1000);
+    if (aliasError) console.error("party_aliases:", aliasError.message);
+    const resolveParty = aliasRows && !aliasError ? partyResolver(aliasRows as PartyAliasRow[]) : undefined;
     const results: Array<Record<string, unknown>> = [];
     let applied = 0, rejected = 0, skipped = 0;
 
@@ -109,7 +115,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const decision = decideByCec({ contribution_type: row.contribution_type, payload, politician: ours }, list);
+      const decision = decideByCec({ contribution_type: row.contribution_type, payload, politician: ours }, list, resolveParty);
       const base = { contribution_id: row.id, type: row.contribution_type, name, action: decision.action };
 
       if (decision.action === "skip") {

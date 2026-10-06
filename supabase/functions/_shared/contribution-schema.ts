@@ -6,6 +6,7 @@
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
+import { partyInfoProblems } from "./party-info.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 import {
@@ -27,7 +28,7 @@ export const isTaskIdShape = (v: unknown): boolean =>
 
 // policy_elements（政見三要素，#364，2026-10-05）：DB CHECK、這份清單、skill.md、標籤四處一起加（thresholds.test 盯 CHECK）
 // lineage／lineage_participants／lineage_handover／lineage_link（政策脈絡，#349，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
 export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "other"] as const;
@@ -494,6 +495,11 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isStr(p.note, 10, 2000)) push("payload.note", "note 必填（至少 10 字）：說明你打開了哪個名單、比對結果如何、補了誰");
       break;
     }
+    case "party_info": {
+      // 政黨資訊（#346 第二階段，協議 1.56.0）：改名（前身、名稱起訖）、解散日、名冊外政黨的對應。格式規則在 party-info.ts
+      for (const problem of partyInfoProblems(p)) push(problem.path, problem.message);
+      break;
+    }
     case "district_seats": {
       // 應選名額（#344，2026-10-06）：一個縣市、一種選舉，照選舉公告把每個選舉區的名額交上來。
       // 名額只能照公告抄——候選人數、當選人數都不是名額（同額不足、無人登記的選舉區對不上）。
@@ -727,6 +733,12 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     // 政策脈絡（#349）：角色、交接、關聯各自的出處要是這筆 source_urls 之一；臉書讀不到不收；官方紀錄要附官方網址
     if (Array.isArray(sourceUrls) && (raw.contribution_type === "lineage_participants" || raw.contribution_type === "lineage_handover" || raw.contribution_type === "lineage_link")) {
       for (const problem of lineageSourceProblems(raw.contribution_type, raw.payload, sourceUrls as unknown[])) push(problem.path, problem.message);
+    }
+    // 政黨資訊（#346）：臉書、IG、Threads 讀不到（驗證者與系統都打不開），不算出處——跟學經歷、政策脈絡同一份清單
+    if (raw.contribution_type === "party_info" && Array.isArray(sourceUrls)) {
+      (sourceUrls as unknown[]).forEach((u, i) => {
+        if (typeof u === "string" && isUnreadableSocial(u)) push(`source_urls[${i}]`, "臉書、IG、Threads 讀不到（驗證者與系統都打不開），不算出處：請改附內政部政黨資訊網、政黨官網的公告或報導的網址");
+      });
     }
     items.push({
       contribution_type: raw.contribution_type,

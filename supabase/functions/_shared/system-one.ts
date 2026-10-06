@@ -268,6 +268,8 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   lineage_participants: ["lineage_id", "participants"],
   lineage_handover: ["lineage_id", "from_politician_id", "to_politician_id", "handover_type", "decided_on", "note", "source_locator"],
   lineage_link: ["upper_lineage_id", "lower_lineage_id", "link_type", "note", "source_locator"],
+  // 政黨資訊（#346 第二階段）：每個政黨改了什麼、依據怎麼說
+  party_info: ["parties", "note"],
 };
 const CLAIM_FIELDS_DEFAULT = ["name", "title", "description", "election_id"];
 const PAGE_TEXT_MAX = 6000;

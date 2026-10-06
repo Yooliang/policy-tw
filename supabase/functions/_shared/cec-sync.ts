@@ -37,6 +37,16 @@ export function cecCandidateName(raw: string | null | undefined): string {
   return decodeCecEscapes(String(raw ?? "")).trim();
 }
 
+/**
+ * cec_candidates.party：中選會名冊上這一筆的推薦政黨，原字照存（快照；「無黨籍及未經政黨推薦」也照存），只解回罕見字。
+ * 對到哪個政黨由資料庫的 party_aliases 決定（party_alias_key），不在這裡正規化——對不到的寫法會出現在 party_alias_gaps。
+ * 空的回 null（2026-10-06，#346 第二階段：補參選紀錄那一次的政黨）。
+ */
+export function cecPartyText(raw: string | null | undefined): string | null {
+  const s = decodeCecEscapes(String(raw ?? "")).trim();
+  return s === "" ? null : s;
+}
+
 /** 去掉尾端附註的拉丁拼音（原住民姓名常見，如「谷辣斯．尤達卡 Kolas Yotaka」） */
 function stripTrailingLatin(s: string): string {
   return s.replace(/[A-Za-z]+$/, "");
@@ -262,6 +272,8 @@ export interface CecCandidateRow {
   elected: boolean;
   cec_theme_id: string | null;
   cec_cand_id: number | null;
+  /** 推薦政黨（中選會原字；見 cecPartyText） */
+  party: string | null;
 }
 
 export interface RowContext {
@@ -298,6 +310,8 @@ export function toCecCandidateRow(row: CecRow, ticket: CecRow | undefined, ctx: 
     elected,
     cec_theme_id: ctx.themeId,
     cec_cand_id: merged.cand_id ?? null,
+    // 候選人檔與得票檔都有政黨；merged 以候選人檔為準
+    party: cecPartyText(merged.party_name),
   };
 }
 

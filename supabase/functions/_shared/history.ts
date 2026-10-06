@@ -75,6 +75,8 @@ const TYPE_LABEL: Record<string, string> = {
   task_suggestion: "任務提議", no_change: "無異動", adjudication: "裁決", answer: "回答提問", audit: "文件核對",
   // 政策脈絡（#349）
   lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯",
+  // 政黨（#346 第二階段）
+  party_info: "政黨資訊",
 };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待驗證", verified: "已驗證", applied: "已上線", apply_failed: "上線中（自動重試）", superseded: "同宣稱已由他筆上線", disputed: "裁決中", rejected: "退件", reverted: "已還原",
@@ -90,10 +92,13 @@ const FIELD_LABEL: Record<string, string> = {
   handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
   // 參選紀錄（#345 後續）：退選前有沒有登記；不參選重查蓋的章
   withdrawn_after_filing: "退選前有沒有登記", verified: "核對過登記名冊",
+  // 政黨（#346 第二階段）
+  valid_from: "名稱起始日", valid_to: "名稱停用日", predecessor_id: "前身",
 };
 const TABLE_LABEL: Record<string, string> = {
   politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素",
   lineages: "政策脈絡", lineage_participants: "脈絡參與角色", handovers: "脈絡交接", lineage_links: "脈絡上下級關聯", lineage_candidate_reviews: "脈絡候選清查",
+  parties: "政黨",
 };
 
 function fmtValue(v: unknown): string {

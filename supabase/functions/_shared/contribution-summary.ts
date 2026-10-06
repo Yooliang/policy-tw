@@ -230,6 +230,18 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "party_info": {
+      // 政黨資訊（#346 第二階段）：讀者要看得出補了哪個政黨的哪一欄
+      const items = (Array.isArray(p.parties) ? p.parties : []).filter((it): it is Obj => !!it && typeof it === "object");
+      const what = (it: Obj) => [
+        it.valid_from ? `名稱起始日 ${str(it.valid_from)}` : "",
+        it.valid_to ? `名稱停用日 ${str(it.valid_to)}` : "",
+        it.predecessor_id ? `前身是政黨 ${str(it.predecessor_id)}` : "",
+      ].filter(Boolean).join("、");
+      summary = `補政黨資訊：${items.map((it) => `政黨 ${str(it.party_id)}（${what(it)}）`).join("；") || "（沒有政黨）"}`;
+      targetName = null;
+      break;
+    }
     case "district_seats": {
       const ds = Array.isArray(p.districts) ? (p.districts as Array<Record<string, unknown>>) : [];
       const total = ds.reduce((n, d) => n + (typeof d.seats === "number" ? d.seats : 0), 0);

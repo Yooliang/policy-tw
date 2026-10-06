@@ -65,6 +65,7 @@ export const TABLE_LABEL: Record<string, string> = {
   task_checks: '任務查核',
   roster_checks: '名單清查',
   election_districts: '選舉區名額',
+  parties: '政黨',
 }
 
 export function tableLabel(name: string | null | undefined): string {
