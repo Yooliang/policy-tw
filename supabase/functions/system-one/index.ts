@@ -832,7 +832,7 @@ Deno.serve(async (req) => {
       return json({ success: true, candidates: list.length, report });
     }
 
-    // ---- results_batch：整批補選舉結果（election_results）的系統票（2026-10-06，小良哥：「改批次，票數 2 票，讓 jev 扣下來」）----
+    // ---- results_batch：整批補選舉結果（election_results）的系統票（2026-10-06，維護者：「改批次，票數 2 票，讓 jev 扣下來」）----
     // 逐位核對中選會名單（cec_candidates），全部對得上投 supported（目標 2−1＝1）、任何一位對不上不投票。
     // 不用 Jev 讀網頁：比對是純資料，規則只在 SQL 一份（election_results_system_check／election_result_cec_matches）。
     // 排程 results-batch-10min 叫；冪等（核過的不再核），不帶金鑰也只會把還沒核的核掉

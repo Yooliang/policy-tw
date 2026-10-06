@@ -28,7 +28,7 @@ const BADGE: Record<string, string> = {
 
 <template>
   <!-- 並排比較的格子裡三個都還沒查：縮成一個「未調查」，不要每條政見都疊三個（上線初期幾乎全部是這樣）。
-       標籤旁不加說明文字（小良哥 10-06：只留標籤本身） -->
+       標籤旁不加說明文字（維護者 10-06：只留標籤本身） -->
   <p v-if="compact && allUnchecked" class="text-xs leading-snug" data-testid="policy-elements-compact" data-state="unchecked">
     <span :class="['inline-block px-1.5 rounded text-[11px] font-bold', BADGE.unchecked]">{{ UNCHECKED_LABEL }}</span>
   </p>

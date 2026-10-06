@@ -6,8 +6,9 @@
 
 | 指令 | 說明 |
 |---|---|
-| `pnpm build` | `vue-tsc` → `vite-ssg build`（預渲染全部路由）→ `scripts/postbuild-ssg.mjs`（產 sitemap、驗證不是空殼，失敗就紅） |
-| `SSG_POLITICIANS=with-content pnpm build` | 只預渲染有簡介／口號／照片／政見或非村里長的政治人物（約 2,500 頁，1 分鐘），開發時用 |
+| `pnpm build` | `vue-tsc` → `vite-ssg build`（預渲染內容頁，約 450 頁；**人物頁、政見頁、脈絡頁預設不預渲染**，由正見.tw 的 Worker 邊緣渲染，只進網站地圖，見下一節）→ `scripts/postbuild-ssg.mjs`（產 sitemap、驗證不是空殼，失敗就紅） |
+| `SSG_EDGE_PAGES=prerender pnpm build` | 退回把人物頁、政見頁、脈絡頁也一起預渲染（約 16k 頁、4 分鐘）；邊緣渲染出問題時的退路 |
+| `SSG_POLITICIANS=with-content pnpm build` | 人物頁只收有簡介／口號／照片／政見或非村里長的政治人物（約 2,500 人）。預設下只影響網站地圖；搭配 `SSG_EDGE_PAGES=prerender` 才影響預渲染（約 1 分鐘），開發時用 |
 | `SSG_DEBUG_HYDRATION=1 pnpm build` | 客戶端 bundle 會在 console 印 hydration mismatch 細節，驗證用；正式 build 不要開 |
 | `pnpm build:spa` | 舊的純 SPA build（緊急 fallback，沒有預渲染、沒有殼檔） |
 | `pnpm preview` | 預覽 dist（已設 `appType: mpa`，`/politician/:id` 會對到 `politician/:id/index.html`；但無法模擬 firebase rewrites 與 404.html） |
@@ -23,8 +24,10 @@
 
 ## 哪些頁面會預渲染
 
-- 靜態：`/`、`/tracking`、`/analysis`、`/community`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`（`lib/ssg/server-data.ts` 的 `STATIC_CONTENT_ROUTES`）
-- `/election/:id`（每個選舉）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/election/:id/:縣市/:鄉鎮`（2026-10-05：每屆「鄉鎮頁會列出的職位」——鄉鎮市長、代表、原住民區長、區代表、村里長——有人在選的鄉鎮市區各一頁，規則在 `lib/election-townships.ts`；搬到 `election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>/`；舊的 `?sub=` 由 Worker 301、客戶端也會換成路徑；一位都沒有的鄉鎮不出頁，舊網址轉過去落到 app 殼，見下面 Firebase 那節）、`/policy/:id`（每條政見）、`/politician/:id`（每位政治人物）、`/community/:id`（每個討論串）
+- 靜態：`/`、`/tracking`、`/analysis`、`/elections`、`/community`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`、`/politicians`、`/parties`（`lib/ssg/server-data.ts` 的 `STATIC_CONTENT_ROUTES`）
+- `/politicians/:筆畫數`（人物一覽各組）、`/party/:id`（各黨頁，#346；網址都是 ASCII）
+- **邊緣渲染，不預渲染**（2026-09-24 起；清單由 `server-data.ts` 寫進 `dist/.edge-routes.json` 給 postbuild 產網站地圖，規則在 `cloudflare/ssr-worker.js` 的 `SSR_ROUTES`）：`/politician/:id`、`/policy/:id`、`/lineage/:id`。下面其餘各條都還是預渲染
+- `/election/:id`（每個選舉）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/election/:id/:縣市/:鄉鎮`（2026-10-05：每屆「鄉鎮頁會列出的職位」——鄉鎮市長、代表、原住民區長、區代表、村里長——有人在選的鄉鎮市區各一頁，規則在 `lib/election-townships.ts`；搬到 `election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>/`；舊的 `?sub=` 由 Worker 301、客戶端也會換成路徑；一位都沒有的鄉鎮不出頁，舊網址轉過去落到 app 殼，見下面 Firebase 那節）、`/community/:id`（每個討論串）
 - `/analysis/:id` 只出「分析列表實際會連到」的那幾條（與 `PolicyAnalysis.relayCases` 同邏輯），不是全部政見
 - **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
 

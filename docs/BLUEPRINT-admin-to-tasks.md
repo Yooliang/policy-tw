@@ -1,7 +1,7 @@
 # 藍圖：把管理員頁面拆成任務
 
-**狀態**：設計定案，尚未實作。想接手其中一項，直接開 PR。
-**最後更新**：2026-09-12
+**狀態（2026-10-06 補記）**：設計定案，部分已完成。已完成的：`add-politician`、`merge-politicians`、`update-avatar` 三支寫正式資料的函式已下架（人物合併走 `merge_politician` 貢獻、人物與照片走貢獻流程，見 `docs/DECISIONS.md` 09-21、09-23），`/admin/scraper` 頁已移除。仍在的管理頁：`AdminDashboard`、`AdminDuplicates`、`AdminAI`、`AdminImport`。想接手其中一項，直接開 PR。
+**盤點日期**：2026-09-12（下面「現況盤點」是當天快照，頁面、行號、函式數量已經變動，引用前先對一下現況）
 
 ---
 

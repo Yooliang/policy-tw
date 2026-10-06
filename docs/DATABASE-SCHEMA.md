@@ -4,11 +4,13 @@
 
 正見 (Zheng Jian) 平台使用 Supabase PostgreSQL 資料庫。
 
-> **本文件只涵蓋 2026-03 以前的核心表**（18 表／4 ENUM／6 視圖）。實際結構以 `supabase/migrations/` 為準，2026-09 為止約 36 張表。這裡沒寫到的：
+> **本文件只涵蓋 2026-03 以前的核心表**（18 表／4 ENUM／6 視圖）。實際結構以 `supabase/migrations/` 為準，2026-10 約 70 張表、約 20 個視圖，各表的用途與重要欄位的說明在 `CLAUDE.md` 的「Database」一節。這裡沒寫到的（只列大類）：
 > - 外部貢獻管線：`contributions`、`contribution_votes`、`contribution_tasks`、`contribution_task_leases`、`task_checks`、`roster_checks`、`roster_check_scope`、`news_sweep_feeds`、`edit_history`、`politician_keys`、`politician_identity_reviews`（見 `CONTRIBUTIONS-ADMIN.md`）
 > - 政見立場與來源：`policy_stances`、`policy_sources`；視圖 `politicians_with_policies`
 > - 公民提問：`citizen_questions`、`question_answers`、`question_stances`、`user_profiles`
 > - AI 用量：`ai_usage_logs`、`model_pricing`、`pipeline_snapshots`
+> - 2026-09 起：Jev 判決 `jev_decisions`、派工佇列 `task_dispatches`／`verify_dispatches`、插隊 `task_boosts`、中選會名冊 `cec_candidates`、新聞 `news_sources`／`news_items`
+> - 2026-10 起：出處 `sources`／`source_refs`、行政區 `admin_divisions`、選舉區名額 `election_districts`、任期 `politician_offices`、學經歷 `politician_careers`、政黨 `parties`／`party_aliases`、政見三要素 `policy_elements`、政策脈絡 `lineages` 等五張、選舉公報 `election_bulletins`
 > - `politician_stats_by_region` 曾是表，已在後續 migration 中 drop；`politician_duplicates` 亦已 drop
 
 ---

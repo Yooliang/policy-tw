@@ -163,11 +163,11 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/ai-scheduler
 ```bash
 # 同步技能檔案
 gcloud compute scp policy-ai-skills/*.md \
-  claude-pm-server:/home/cwen0/projects/policy-ai/skills/ \
+  claude-pm-server:/home/<user>/projects/policy-ai/skills/ \
   --zone=us-central1-a
 
 gcloud compute scp policy-ai-skills/task_manager.py \
-  claude-pm-server:/home/cwen0/projects/policy-ai/ \
+  claude-pm-server:/home/<user>/projects/policy-ai/ \
   --zone=us-central1-a
 ```
 
