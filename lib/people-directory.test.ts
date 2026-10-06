@@ -6,7 +6,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  buildDirectory, candidacyNote, chineseNumber, directoryLabel, firstChar, groupKeyOf, groupLabel, isGroupKey, OTHER_GROUP, RESULT_PENDING,
+  buildDirectory, candidacyNote, chineseNumber, directoryLabel, firstChar, groupKeyOf, groupLabel, groupTag, strokeTag, isGroupKey, OTHER_GROUP, RESULT_PENDING,
   sectionsBySurname, strokeCount,
 } from "./people-directory.ts";
 import type { Election, Politician } from "../types.ts";
@@ -41,6 +41,14 @@ Deno.test("組名：中文數字＋畫；網址的組名只認 1～64 與 other"
   assertEquals(groupLabel(OTHER_GROUP), "其他");
   for (const ok of ["1", "11", "64", OTHER_GROUP]) assert(isGroupKey(ok), ok);
   for (const bad of ["0", "65", "011", "abc", "", "11a", "../x"]) assert(!isGroupKey(bad), bad);
+});
+
+Deno.test("左欄筆畫標籤：一律兩個字（1～10 加畫、11～19 十＋個位、整十、其餘省略十）", () => {
+  const tag: Record<number, string> = { 1: "一畫", 9: "九畫", 10: "十畫", 11: "十一", 19: "十九", 20: "二十", 21: "二一", 29: "二九", 30: "三十", 31: "三一", 39: "三九", 64: "六四" };
+  for (const [n, want] of Object.entries(tag)) assertEquals(strokeTag(Number(n)), want, n);
+  for (let n = 1; n <= 64; n++) assertEquals(Array.from(strokeTag(n)).length, 2, `${n} 畫一定兩個字`);
+  assertEquals(groupTag("11"), "十一");
+  assertEquals(groupTag(OTHER_GROUP), "其他");
 });
 
 Deno.test("一行說明：現任職稱只來自任期；沒有就寫最近一次參選（照投票日）；落選的人不寫成現任", () => {

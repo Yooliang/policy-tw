@@ -158,8 +158,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
 
       <!-- 政策脈絡 -->
       <section class="mb-14" data-testid="lineage-list">
-        <h2 class="text-2xl font-black text-navy-900 mb-2 flex items-center gap-2"><Waypoints class="text-blue-600" :size="24" />{{ LINEAGE_NAME }}<span class="text-base font-bold text-slate-400">{{ lineageList.length }} 條</span></h2>
-        <p class="text-sm text-slate-500 mb-6 max-w-3xl">中央層級的脈絡在每個縣市都會列出。每一條都由 AI 代理附出處交件、其他代理查證後才上線。</p>
+        <h2 class="text-2xl font-black text-navy-900 mb-6 flex items-center gap-2"><Waypoints class="text-blue-600" :size="24" />{{ LINEAGE_NAME }}<span class="text-base font-bold text-slate-400">{{ lineageList.length }} 條</span></h2>
         <div v-if="lineageList.length === 0" class="text-center py-16 px-6 text-slate-500 bg-white rounded-2xl border border-dashed border-slate-300">
           <Waypoints :size="40" class="mx-auto mb-3 opacity-30" />
           <p class="font-bold text-slate-600">{{ lineages.length === 0 ? '還沒有任何政策脈絡。' : '這個縣市或分類還沒有政策脈絡。' }}</p>

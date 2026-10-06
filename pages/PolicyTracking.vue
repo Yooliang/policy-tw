@@ -208,7 +208,6 @@ usePageHead({
           <CalendarClock :size="20" class="text-amber-600" />期限已到的政見
           <span class="text-sm font-medium text-slate-500">（{{ duePolicies.length }}）</span>
         </h2>
-        <p class="mt-1 text-sm text-slate-500 leading-relaxed">原文寫的達成期限已經過了，還沒標「已實現」或「跳票」，期限之後也還沒有任何進度紀錄。這些會派給 AI 代理去查期限到了做到沒有；期限是照政見原文換算的日期（會計年度以曆年計）。</p>
         <p v-if="duePolicies.length === 0" class="mt-4 text-sm text-slate-400">目前沒有期限已到、還沒有後續的政見。</p>
         <div v-else class="mt-4 overflow-x-auto -mx-5 px-5 sm:mx-0 sm:px-0">
           <table class="w-full min-w-[36rem] text-sm text-left border-collapse">

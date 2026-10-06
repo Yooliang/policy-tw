@@ -14,7 +14,7 @@ import Hero from '../components/Hero.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
-import { groupLabel, isGroupKey, sectionsBySurname, surnameAnchor } from '../lib/people-directory'
+import { groupLabel, groupTag, isGroupKey, sectionsBySurname, surnameAnchor } from '../lib/people-directory'
 import { reloadForPrerendered } from '../lib/full-load'
 
 const route = useRoute()
@@ -74,8 +74,8 @@ usePageHead({
     <Hero>
       <template #title>{{ isIndex ? '人物一覽' : `姓氏${groupLabel(groupKey)}` }}</template>
       <template #description>
-        <template v-if="isIndex">正見收錄的每一位政治人物（含全台村里長），依姓氏筆畫分組。點姓氏看那一組的名單，點姓名到人物頁看參選紀錄、政見與出處。</template>
-        <template v-else-if="group">姓氏{{ group.label }}的 {{ fmt(group.entries.length) }} 位政治人物，依姓名筆畫排列。每位附現任職稱；沒有現任公職的寫最近一次參選。</template>
+        <template v-if="isIndex">正見收錄的每一位政治人物（含全台村里長）。點姓氏看那一組的名單，點姓名到人物頁看參選紀錄、政見與出處。</template>
+        <template v-else-if="group">姓氏{{ group.label }}的 {{ fmt(group.entries.length) }} 位政治人物。點姓名到人物頁看參選紀錄、政見與出處。</template>
         <template v-else>依姓氏筆畫分組的政治人物名單。</template>
       </template>
       <template #icon><Users :size="400" class="text-blue-500" /></template>
@@ -101,16 +101,19 @@ usePageHead({
       <template v-if="isIndex">
         <div v-if="!peopleIndex" class="text-slate-500 text-center py-20">{{ reloading ? '載入中…' : '這一頁在建置網站時產生，請重新整理。' }}</div>
         <template v-else>
-          <p class="text-sm text-slate-600 mb-6">共 {{ fmt(total) }} 位。姓氏依筆畫（台灣通用寫法）分組；漢字以外的姓名（原住民族語拼音等）歸在「其他」。</p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="people-index">
-            <section v-for="g in peopleIndex" :key="g.key" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 class="text-lg font-black text-navy-900 mb-3">
-                <a :href="groupPath(g.key)" class="hover:text-blue-700">{{ g.label }}</a>
-                <span class="ml-2 text-sm font-semibold text-slate-500">{{ fmt(g.count) }} 位</span>
-              </h2>
-              <ul class="flex flex-wrap gap-x-3 gap-y-1.5 text-sm">
+          <p class="text-sm text-slate-600 mb-6">共 {{ fmt(total) }} 位。</p>
+          <!-- 兩欄：左欄筆畫（固定寬，總人數小字放下面），右欄這個筆畫底下所有的姓（橫排自動換行）；手機也是兩欄 -->
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100" data-testid="people-index">
+            <section v-for="g in peopleIndex" :key="g.key" class="grid grid-cols-[4.5rem_minmax(0,1fr)] sm:grid-cols-[6rem_minmax(0,1fr)] gap-x-3 sm:gap-x-4 p-3 sm:p-4">
+              <div>
+                <h2 class="text-base sm:text-lg font-black text-navy-900 leading-tight">
+                  <a :href="groupPath(g.key)" :aria-label="`姓氏${g.label}`" class="hover:text-blue-700">{{ groupTag(g.key) }}</a>
+                </h2>
+                <p class="text-xs text-slate-500 tabular-nums mt-0.5">{{ fmt(g.count) }} 位</p>
+              </div>
+              <ul class="flex flex-wrap content-start gap-x-4 gap-y-1.5 text-sm sm:text-base">
                 <li v-for="s in g.surnames" :key="s.char">
-                  <a :href="`${groupPath(g.key)}#${surnameAnchor(s.char)}`" class="text-blue-700 hover:underline">{{ s.char }}</a><span class="text-slate-500 text-xs ml-0.5">{{ s.count }}</span>
+                  <a :href="`${groupPath(g.key)}#${surnameAnchor(s.char)}`" class="text-blue-700 hover:underline">{{ s.char }}</a>
                 </li>
               </ul>
             </section>
@@ -126,9 +129,10 @@ usePageHead({
         </div>
         <template v-else>
           <nav aria-label="姓氏" class="mb-6 bg-white rounded-xl border border-slate-200 p-4">
-            <ul class="flex flex-wrap gap-x-3 gap-y-1.5 text-base">
-              <li v-for="s in sections" :key="s.char">
-                <a :href="`#${surnameAnchor(s.char)}`" class="text-blue-700 hover:underline font-bold">{{ s.char }}</a><span class="text-slate-500 text-xs ml-0.5">{{ s.entries.length }}</span>
+            <ul class="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-x-4 gap-y-1.5 text-base">
+              <li v-for="s in sections" :key="s.char" class="flex items-baseline justify-between gap-1 min-w-0">
+                <a :href="`#${surnameAnchor(s.char)}`" class="text-blue-700 hover:underline font-bold min-w-[1.5rem] truncate">{{ s.char }}</a>
+                <span class="text-slate-500 text-xs tabular-nums text-right min-w-[2rem] shrink-0">{{ s.entries.length }}</span>
               </li>
             </ul>
           </nav>
