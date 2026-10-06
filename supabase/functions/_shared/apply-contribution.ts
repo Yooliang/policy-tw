@@ -1451,7 +1451,10 @@ async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow
  * - 新建的人照一般建人物的路（ensurePolitician force_new），整列記 edit_history
  * - UPDATE politician_elections.politician_id（只在還掛著原本那位時改），記 edit_history；兩人記成「不同人」（同名清查不再配這一對）
  * - 人物的衍生欄位（最新一屆）、任期由既有觸發器跟著 politician_id 的變動重算
- * - 整筆還原：參選紀錄改回原本那位、不同人的判定刪掉、新建的人刪掉
+ * - 掛在那一屆的政見（policies.politician_id＋election_id）跟著搬到新的那位，每筆各記一列 edit_history（2026-10-06）
+ * - 原人物改掛後變成空殼的，不在這裡刪：派工臂 contribution_auto_tasks_placeholder_politicians（target.kind＝orphan）
+ *   派 placeholder_politician 任務，走 removal 流程（20261007020000）
+ * - 整筆還原：參選紀錄改回原本那位、政見改回去、不同人的判定刪掉、新建的人刪掉
  */
 async function applyReassignCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
@@ -1500,13 +1503,22 @@ async function applyReassignCandidacy(supabase: SupabaseLike, row: ContributionR
     throwIf(resError, "politician_pair_resolutions upsert");
     if (res && typeof (res as Obj).id === "string") await recordInsert(supabase, ctx, "politician_pair_resolutions", String((res as Obj).id), res as Obj);
   }
-  // 舊的人名下同一屆的政見不會跟著搬：講出來，要不要搬由人判斷
-  // query-bounds: ok — 只要筆數
-  const { count: policyCount } = await supabase.from("policies").select("id", { count: "exact", head: true })
-    .eq("politician_id", pe.politician_id).eq("election_id", pe.election_id).is("removed_at", null);
-  const policyNote = policyCount && policyCount > 0
-    ? `；${from.name} 名下還有 ${policyCount} 筆 ${pe.election_id} 的政見沒有跟著搬，若也是掛錯請另外處理`
-    : "";
+  // 掛在那一屆參選的政見跟著搬（2026-10-06）：參選紀錄是「人物＋屆別」，那一屆的政見就是這一次參選提的，
+  // 參選紀錄掛錯人、政見也掛錯人。含已移除的（軟移除的政見留著，之後還原時要在正確的人身上）；每筆各記一列 edit_history，整筆還原會倒回去
+  // query-bounds: ok — 一個人一屆的政見（個位數到二十幾筆）
+  const { data: policyRows, error: policyReadError } = await supabase.from("policies").select("id, removed_at")
+    .eq("politician_id", pe.politician_id).eq("election_id", pe.election_id).limit(500);
+  throwIf(policyReadError, "policies read for reassign");
+  let movedPolicies = 0;
+  for (const pol of (policyRows ?? []) as Array<{ id: string; removed_at: string | null }>) {
+    const { data: movedPol, error: polError } = await supabase.from("policies").update({ politician_id: toId })
+      .eq("id", pol.id).eq("politician_id", pe.politician_id).select("id");
+    throwIf(polError, "policies reassign");
+    if (!movedPol || (movedPol as unknown[]).length === 0) continue;
+    await recordUpdate(supabase, ctx, "policies", String(pol.id), "politician_id", pe.politician_id, toId);
+    if (!pol.removed_at) movedPolicies++;
+  }
+  const policyNote = movedPolicies > 0 ? `；${pe.election_id} 這一屆的 ${movedPolicies} 筆政見跟著改掛` : "";
   return {
     status: "applied",
     politician_id: toId,
@@ -1548,10 +1560,13 @@ async function applyMergePolitician(supabase: SupabaseLike, row: ContributionRow
   }
   const { data, error } = await supabase.rpc("merge_politician", { p_keep: keep, p_remove: remove, p_contribution: row.id, p_agent: row.agent_name });
   if (error) return { status: "failed", message: `merge_politician: ${error.message}` };
-  const r = (data ?? {}) as { moved_policies?: number; moved_elections?: number; filled?: string[] };
+  const r = (data ?? {}) as { moved_policies?: number; moved_elections?: number; moved_participants?: number; moved_handovers?: number; filled?: string[] };
+  const lineageNote = (r.moved_participants ?? 0) + (r.moved_handovers ?? 0) > 0
+    ? `、${r.moved_participants ?? 0} 筆脈絡角色、${r.moved_handovers ?? 0} 筆交接`
+    : "";
   return {
     status: "applied", politician_id: keep, created_politician: false,
-    message: `已合併：${remove.slice(0, 8)} 併入 ${keep.slice(0, 8)}（搬 ${r.moved_policies ?? 0} 筆政見、${r.moved_elections ?? 0} 筆參選${(r.filled ?? []).length ? `，補上 ${(r.filled ?? []).join("、")}` : ""}）`,
+    message: `已合併：${remove.slice(0, 8)} 併入 ${keep.slice(0, 8)}（搬 ${r.moved_policies ?? 0} 筆政見、${r.moved_elections ?? 0} 筆參選${lineageNote}${(r.filled ?? []).length ? `，補上 ${(r.filled ?? []).join("、")}` : ""}）`,
   };
 }
 
