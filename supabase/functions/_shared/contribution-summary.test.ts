@@ -275,30 +275,41 @@ Deno.test("correction 有標題就用標題，沒有才退回 id 前八碼", () 
 
 // 統計從 2026-09-17 起改在資料庫算（contribution_feed_summary），TS 這份變成規格。
 // 兩份規則一漂開，畫面上的數字就會跟協議講的不一樣，而且不會有人發現——所以守住。
-async function summarySql(): Promise<string> {
+// contribution_leaderboard 有多個定義（天數版、2026-10-07 起還有區間版）：每一個都要守同一套規則
+async function leaderboardDefinitions(): Promise<{ name: string; sql: string }[]> {
   const dir = new URL("../../migrations/", import.meta.url);
   const names: string[] = [];
   for await (const e of Deno.readDir(dir)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
-  for (const name of names.sort().reverse()) {
-    const sql = await Deno.readTextFile(new URL(name, dir));
-    if (sql.includes("CREATE OR REPLACE FUNCTION contribution_leaderboard")) return sql;
+  const defs: { name: string; sql: string }[] = [];
+  for (const name of names.sort()) {
+    const sql = (await Deno.readTextFile(new URL(name, dir))).replace(/\r\n/g, "\n");
+    const re = /CREATE OR REPLACE FUNCTION contribution_leaderboard\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(sql))) {
+      const end = sql.indexOf("\n$$;", m.index);
+      defs.push({ name: `${name} @${m.index}`, sql: sql.slice(m.index, end + 4) });
+    }
   }
-  throw new Error("找不到定義 contribution_leaderboard 的 migration");
+  assert(defs.length >= 2, "找不到定義 contribution_leaderboard 的 migration（天數版與區間版都該在）");
+  return defs;
 }
 
 Deno.test("SQL 的貢獻榜規則要跟 TS 這份一致：排除名單、榜長、分數、同分排序", async () => {
-  const sql = await summarySql();
-  for (const name of EXCLUDED_AGENTS) {
-    assert(sql.includes(`'${name}'`), `SQL 的排除名單少了 ${name}`);
+  for (const { name, sql } of await leaderboardDefinitions()) {
+    for (const agent of EXCLUDED_AGENTS) {
+      assert(sql.includes(`'${agent}'`), `${name}：SQL 的排除名單少了 ${agent}`);
+    }
+    assert(sql.includes(`LIMIT ${LEADERBOARD_SIZE}`), `${name}：SQL 的榜長要是 ${LEADERBOARD_SIZE}`);
+    assert(sql.includes("submitted + applied + verified_votes"), `${name}：SQL 的分數要是三項相加`);
+    assert(
+      sql.includes("ORDER BY submitted + applied + verified_votes DESC, applied DESC, submitted DESC"),
+      `${name}：SQL 同分時要先看上線、再看提交`,
+    );
   }
-  assert(sql.includes(`LIMIT ${LEADERBOARD_SIZE}`), `SQL 的榜長要是 ${LEADERBOARD_SIZE}`);
-  assert(sql.includes("submitted + applied + verified_votes"), "SQL 的分數要是三項相加");
-  assert(
-    sql.includes("ORDER BY submitted + applied + verified_votes DESC, applied DESC, submitted DESC"),
-    "SQL 同分時要先看上線、再看提交",
-  );
-  assert(sql.includes("Asia/Taipei"), "每日統計要用台灣時間分日");
-  assert(sql.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);
+  // 每日統計與近 30 天貢獻者的窗在 contribution_feed_summary 裡
+  const feed = await latestFeedSummarySql();
+  assert(feed.includes("Asia/Taipei"), "每日統計要用台灣時間分日");
+  assert(feed.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);
 });
 
 // 統計函式會被新 migration 整支重寫（CREATE OR REPLACE），每重寫一次就有兩件事可能悄悄掉：
