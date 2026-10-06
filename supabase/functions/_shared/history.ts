@@ -222,7 +222,7 @@ export interface HistoryOrigin {
   kind: "contributions" | "imported" | "unknown";
   note: string | null;
   source_url?: string | null;
-  /** 同一個出處帶等級與存檔網址（出處表的主要出處；出處表沒有才退回 policies.source_url，那時只有 url 與自動判斷的等級） */
+  /** 同一個出處帶等級與存檔網址（出處表的主要出處；#347 第二階段 B 起沒有舊欄位 policies.source_url 的退路） */
   source?: SourceView | null;
   source_notes?: string[];
 }
@@ -231,9 +231,8 @@ export interface HistoryOrigin {
 export function describeOrigin(target: HistoryTarget, row: Obj | null, electionNotes: string[], hasEntries: boolean): HistoryOrigin {
   if (hasEntries) return { kind: "contributions", note: null };
   if (target === "policy") {
-    // 出處表的主要出處優先；沒有（函式比 migration 早上線、或這條沒有出處列）才退回舊欄位 policies.source_url
-    const legacyUrl = typeof row?.source_url === "string" && row.source_url ? row.source_url : null;
-    const sourceUrl = primaryUrlOf(row?.sources) ?? legacyUrl;
+    // 出處表的主要出處（#347 第二階段 B：資料表沒有 source_url 欄了）；沒有出處列＝我們沒有出處
+    const sourceUrl = primaryUrlOf(row?.sources);
     const ai = row?.ai_extracted === true;
     return {
       kind: sourceUrl || ai ? "imported" : "unknown",
@@ -377,14 +376,14 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
 
 async function originRowFor(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<{ row: Obj | null; notes: string[] }> {
   if (target === "policy") {
-    const res = await supabase.from("policies").select("id, title, source_url, ai_extracted, proposed_date").eq("id", id).maybeSingle();
+    const res = await supabase.from("policies").select("id, title, ai_extracted, proposed_date").eq("id", id).maybeSingle();
     const row = (res.data as Obj | null) ?? null;
     if (row) {
-      // 出處表的出處清單（主要在前）；RPC 還不存在或出錯就不帶，describeOrigin 退回舊欄位 source_url
+      // 出處表的出處清單（主要在前）；RPC 出錯就不帶，來源說明就當沒有出處（不會誤報成別的網址）
       try {
         const listed = await supabase.rpc("source_brief_list", { p_table: "policies", p_id: id });
         if (!listed.error && Array.isArray(listed.data)) row.sources = listed.data;
-      } catch { /* 退回舊欄位 */ }
+      } catch { /* 不帶出處清單 */ }
     }
     return { row, notes: [] };
   }

@@ -118,11 +118,12 @@ Deno.test("履歷查貢獻時要撈 score 與 effective_agree 兩欄（計算欄
 
 Deno.test("沒有任何貢獻紀錄：entries 空、origin 用匯入的 source_url／source_note 說明；完全沒來源也講清楚", async () => {
   const fake = createFakeSupabase({
-    policies: [{ id: POLICY, title: "x", source_url: "https://www.cec.gov.tw/bulletin.pdf", ai_extracted: true }],
+    // 出處在出處表（#347 第二階段 B）：來源說明讀 source_brief_list，不讀 policies.source_url
+    policies: [{ id: POLICY, title: "x", ai_extracted: true }],
     politicians: [{ id: POL, name: "王小明" }],
     politician_elections: [{ id: 1, politician_id: POL, source_note: "中央社 2026-09-04 登記參選名單" }, { id: 2, politician_id: POL, source_note: "中央社 2026-09-04 登記參選名單" }],
     contributions: [], contribution_votes: [], edit_history: [], contribution_tasks: [], tracking_logs: [],
-  });
+  }, { source_brief_list: () => [{ url: "https://www.cec.gov.tw/bulletin.pdf", role: "primary", kind: "official", self_evidence: null, archive_url: null }] });
   const policyData = await collectHistory(fake.client, "policy", POLICY);
   assertEquals(buildHistory(policyData), []);
   const policyOrigin = describeOrigin("policy", policyData.origin_row, [], false);

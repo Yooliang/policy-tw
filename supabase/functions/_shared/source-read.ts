@@ -1,10 +1,10 @@
 /**
  * 出處第二階段 A 的讀取端（#347；協議 1.62.0）：
  *   - 查核履歷、貢獻看板：交件的 source_urls 掛上出處表裡的等級、認定根據、存檔網址（`sources`）。
- *   - 派給代理的任務現況：政見與進度的 `source_url` 改讀出處表的主要出處，出處表沒有才退回舊欄位。
+ *   - 派給代理的任務現況：政見與進度的 `source_url` 讀出處表的主要出處（第二階段 B-1 起沒有舊欄位的退路——
+ *     資料表的 policies.source_url／tracking_logs.source_url 不再被讀；給代理的鍵名 source_url 照舊，值來自出處表）。
  *
- * 出處表還沒上線（migration 比函式晚套上的那幾分鐘）、或查詢出錯，一律退回舊的讀法，不擋頁面也不擋派工。
- * 舊欄位 policies.source_url、tracking_logs.source_url 是退路，第二階段 B 才刪。
+ * 出處表查詢出錯：不擋派工，那一欄不給（不是給 null——null 會被讀成「這筆沒有出處」，誤導代理去補一個其實已經有的出處），並記 log。
  */
 
 import { autoSourceKind, type SourceLevel } from "./source-write.ts";
@@ -82,10 +82,10 @@ export function viewFromList(list: unknown, url: string): SourceView {
   return { url, kind: isHttpUrl(url) ? autoSourceKind(url) : "other", self_evidence: null, archive_url: null };
 }
 
-/** 一批政見或進度紀錄的主要出處網址（target_id → url）；出錯回空表 */
+/** 一批政見或進度紀錄的主要出處網址（target_id → url）；查詢出錯回 null（呼叫端不要把「查不到」當成「沒有出處」） */
 export async function fetchPrimarySourceUrls(
   supabase: SupabaseLike, table: "policies" | "tracking_logs", ids: readonly (string | number)[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, string> | null> {
   const list = [...new Set(ids.map((i) => String(i)).filter(Boolean))].slice(0, 200);
   const out = new Map<string, string>();
   if (list.length === 0) return out;
@@ -93,26 +93,35 @@ export async function fetchPrimarySourceUrls(
     // query-bounds: ok — ids 最多 200 筆、每筆最多一個主要出處
     const { data, error } = await supabase.from("source_refs").select("target_id, sources(url)")
       .eq("target_table", table).eq("role", "primary").in("target_id", list).limit(1000);
-    if (error || !Array.isArray(data)) return out;
+    if (error || !Array.isArray(data)) {
+      console.error(`fetchPrimarySourceUrls(${table}):`, error?.message ?? "沒有回資料");
+      return null;
+    }
     for (const r of data as Array<{ target_id: string; sources: { url?: string } | Array<{ url?: string }> | null }>) {
       const s = Array.isArray(r.sources) ? r.sources[0] : r.sources;
       if (s && typeof s.url === "string" && s.url) out.set(String(r.target_id), s.url);
     }
-  } catch { /* 退回舊欄位 */ }
+  } catch (e) {
+    console.error(`fetchPrimarySourceUrls(${table}):`, e instanceof Error ? e.message : String(e));
+    return null;
+  }
   return out;
 }
 
-/** 純函式：把列上的 source_url 換成出處表的主要出處；出處表沒有就保留舊欄位的值（退路） */
-export function overlaySourceUrl(rows: readonly Obj[], primary: ReadonlyMap<string, string>): void {
+/**
+ * 純函式：幫每一列補上 source_url＝出處表的主要出處；這筆沒有主要出處就是 null（＝我們沒有出處）。
+ * primary 是 null（查詢出錯）時不動——欄位不給，比給 null 誠實。
+ */
+export function overlaySourceUrl(rows: readonly Obj[], primary: ReadonlyMap<string, string> | null): void {
+  if (!primary) return;
   for (const r of rows) {
     if (!r || r.id === undefined || r.id === null) continue;
-    const url = primary.get(String(r.id));
-    if (url) r.source_url = url;
+    r.source_url = primary.get(String(r.id)) ?? null;
   }
 }
 
 /**
- * 派給代理的任務現況（task-context 的 data）：政見與進度紀錄的 source_url 改讀出處表。
+ * 派給代理的任務現況（task-context 的 data）：政見與進度紀錄的 source_url 來自出處表（資料表的欄位不再被讀）。
  * data.policy（單筆）、data.policies／data.lineage_policies（清單）、data.tracking_logs（要帶 id）。
  */
 export async function overlayPrimarySources(supabase: SupabaseLike, data: Obj): Promise<void> {

@@ -36,7 +36,8 @@ import {
   participantPhrase, participantValues,
 } from "./lineage.ts";
 import { careerSourceNote } from "./politician-careers.ts";
-import { writeSourcesAfterApply } from "./source-write.ts";
+import { sourceWriteIsOnlyPath, writeSourcesAfterApply } from "./source-write.ts";
+import { fetchPrimarySourceUrls } from "./source-read.ts";
 import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 import { loadReassignContext, personLabel, reassignProblems } from "./reassign-candidacy.ts";
 
@@ -576,7 +577,7 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
     description: String(p.description),
     category: normalizeCategory(String(p.category)) ?? String(p.category),
     status: str(p.status) ?? "Campaign Pledge",
-    source_url: row.source_urls[0],
+    // 出處不寫在政見這一列（#347 第二階段 B-1）：落庫成功後由 writeSourcesAfterApply 寫進出處表（第一個網址是主要出處）
     ai_extracted: false,
     // 查不到提出日期就留空；填當天會把「資料送進來的日子」偽裝成「政見提出的日子」
     proposed_date: str(p.proposed_date) ?? null,
@@ -665,7 +666,7 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
     date: String(p.date),
     event: `進度更新：${p.status}${int(p.progress) !== null ? `（${p.progress}%）` : ""}`,
     description: `${String(p.note)}\n\n${sourceNote(row)}`,
-    source_url: row.source_urls[0],
+    // 出處不寫在進度這一列（#347 第二階段 B-1）：落庫成功後由 writeSourcesAfterApply 寫進出處表（第一個網址是主要出處）
   };
   const { data: log, error: logError } = await supabase.from("tracking_logs").insert(logRow).select("*").maybeSingle();
   throwIf(logError, "tracking_logs insert");
@@ -683,7 +684,7 @@ async function applyPolicyProgress(supabase: SupabaseLike, row: ContributionRow)
  * 政見三要素（#364，2026-10-05）：一條政見一個要素一列（policy_id, element 唯一）。
  * 還沒有的那一列新增（edit_history 記整列），已經有的照這次覆蓋、每個變動的欄位記一筆——
  * 重交同一條政見的某個要素，就是更正它的路（不另開 correction 欄位）。
- * 出處由資料表觸發器把 source_url 同步進 source_refs（migration 20261005005640），這裡不必另外寫。
+ * 出處由資料表觸發器把 policy_elements.source_url 同步進 source_refs（migration 20261005005640），這裡不必另外寫（跟 policies.source_url 無關）。
  * 全部跟現有一樣 → superseded（別人先交了，不寫假的履歷）。
  */
 async function applyPolicyElements(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
@@ -740,7 +741,7 @@ async function applyPolicyElements(supabase: SupabaseLike, row: ContributionRow)
 
 // ── 政策脈絡（#349，2026-10-06）──────────────────────────────────────────────────
 // 四種型別各自落一張表；每個新增／更動／刪除都寫 edit_history（整筆還原：新增的刪掉、改的倒回、刪的放回去）。
-// 出處由資料表觸發器把 source_url 同步進 source_refs（migration 20261006034900），這裡不必另外寫。
+// 出處由資料表觸發器把脈絡角色／交接／關聯自己的 source_url 同步進 source_refs（migration 20261006034900），這裡不必另外寫。
 
 const uuidList = (v: unknown): string[] =>
   Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim().toLowerCase()))] : [];
@@ -1090,14 +1091,23 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   if (bad) return { status: "failed", message: `${table}.${bad.field} 不在可修正欄位白名單` };
 
   // 參選紀錄的 candidate_status 是交件協議的詞，落庫寫的是新欄位 candidacy_status（#345 第二階段 A）：讀現值也讀新欄位
-  const fields = changes.map((c) => (table === "politician_elections" && c.field === "candidate_status" ? "candidacy_status" : c.field));
+  // 政見的 source_url（協議的欄位名）不在資料表裡（#347 第二階段 B-1）：現值讀出處表的主要出處、新值走 source_set_primary
+  const fields = changes.map((c) => (table === "politician_elections" && c.field === "candidate_status" ? "candidacy_status" : c.field))
+    .filter((f) => !(table === "policies" && f === "source_url"));
   // 任期的卸任日要連根據一起看（#345 後續）；參選紀錄改 confirmed 要知道是哪一屆、哪種選舉（名單公告了沒）
   const extraRead = table === "politician_offices" ? ["end_date", "end_reason", "end_basis", "source_url"]
     : table === "politician_elections" ? ["election_id", "election_type", "candidacy_status"] : [];
   const readCols = [...new Set(["id", ...fields, ...extraRead])];
-  const { data: current, error: readError } = await supabase.from(table).select(readCols.join(", ")).eq("id", target_id).maybeSingle();
+  const { data: currentRow, error: readError } = await supabase.from(table).select(readCols.join(", ")).eq("id", target_id).maybeSingle();
   throwIf(readError, `${table} read`);
+  const current = currentRow ? { ...currentRow } : currentRow; // 複本：下面會補上出處表的 source_url，不能動到讀回來的那一列
   if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
+  if (table === "policies" && changes.some((c) => c.field === "source_url")) {
+    // 查不到出處表不能當成「現值是空」：那會讓一筆其實已經一樣的更正被當成真的要改（或反過來）。讀失敗就丟出去，這筆稍後重試
+    const primary = await fetchPrimarySourceUrls(supabase, "policies", [String(target_id)]);
+    if (!primary) throw new Error("source_refs read: 讀不到這條政見的主要出處，稍後重試");
+    (current as Obj).source_url = primary.get(String(target_id)) ?? null;
+  }
 
   const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(table, c.field, c.correct_value)]));
   // 協議的 candidate_status → 新欄位 candidacy_status（規則見 candidacy-status.ts 的 nextCandidacyStatus）：
@@ -1156,8 +1166,25 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   const extra: Obj = table === "politician_offices" && ("end_date" in changed || "end_reason" in changed)
     ? Object.fromEntries(Object.entries(officeExtra).filter(([k, v]) => (current as Obj)[k] !== v))
     : {};
-  const { error } = await supabase.from(table).update({ ...changed, ...extra, ...(table === "politician_offices" ? { updated_at: new Date().toISOString() } : {}) }).eq("id", target_id);
-  throwIf(error, `${table} correction update`);
+  // 政見的主要出處在出處表：換掉主要出處走 source_set_primary（舊的主要出處引用刪掉、新網址升成主要），不更新資料表
+  let newSourceUrl: { value: string | null } | null = null;
+  if (table === "policies" && "source_url" in changed) {
+    newSourceUrl = { value: changed.source_url === null || changed.source_url === undefined ? null : String(changed.source_url) };
+  }
+  // 資料表的更新不含 source_url（履歷與訊息仍照 changes 的順序列出它）
+  const tableChanges: Obj = Object.fromEntries(Object.entries({ ...changed, ...extra }).filter(([k]) => !(table === "policies" && k === "source_url")));
+  if (Object.keys(tableChanges).length > 0 || newSourceUrl) {
+    // 只換出處也要動一下 updated_at：以前 source_url 在資料表的更新觸發清單裡，換出處會刷新 updated_at（sitemap、快取靠它）
+    const bump = table === "politician_offices" || (table === "policies" && Object.keys(tableChanges).length === 0) ? { updated_at: new Date().toISOString() } : {};
+    const { error } = await supabase.from(table).update({ ...tableChanges, ...bump }).eq("id", target_id);
+    throwIf(error, `${table} correction update`);
+  }
+  if (newSourceUrl) {
+    const { error: sourceError } = await supabase.rpc("source_set_primary", {
+      p_target_table: "policies", p_target_id: String(target_id), p_url: newSourceUrl.value, p_origin: "correction",
+    });
+    throwIf(sourceError, "source_set_primary");
+  }
   const applied: string[] = [];
   if (noop.length > 0) avatarNote += `；${noop.join("、")} 現值已相同，略過`;
   avatarNote += narrowNote;
@@ -1755,9 +1782,10 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
       };
     }
     if (legacy) {
-      const { data: pl } = await supabase.from("policies").select("id, source_url").eq("id", legacy[1]).maybeSingle();
+      const { data: pl } = await supabase.from("policies").select("id").eq("id", legacy[1]).maybeSingle();
       if (pl) {
-        let host = String((pl as { source_url?: string }).source_url ?? "");
+        // 來源網域只是履歷裡的說明文字：出處表讀不到就留空，不因此擋下蓋章
+        let host = (await fetchPrimarySourceUrls(supabase, "policies", [legacy[1]]))?.get(legacy[1]) ?? "";
         try { host = new URL(host).hostname.replace(/^www\./, ""); } catch { /* 原樣 */ }
         const note = check.note ? `：${String(check.note).slice(0, 200)}` : "";
         await recordUpdate(supabase, ctxOf(row), "policies", legacy[1], "audit", null, `已核對來源 ${host}${note}`);
@@ -1960,8 +1988,12 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
       console.error("supersedeDuplicates:", e instanceof Error ? e.message : String(e));
     }
     // 出處直接寫進出處表（政見、進度、參選紀錄掛引用；任何型別都補等級與本人來源的認定根據，#347 第二階段 A）。
-    // 舊欄位的觸發器照舊同步主要出處，所以這步失敗不影響落庫，只少了佐證與等級（writeSourcesAfterApply 自己吞錯誤並記 log）
-    await writeSourcesAfterApply(supabase, row, outcome);
+    // 政見與進度的出處只有這一條路寫（#347 第二階段 B-1）：失敗不回頭影響落庫（資料已經在了），但要讓人看得到——
+    // 缺出處的政見會被派工臂 policy_source_missing 重新派出去補（writeSourcesAfterApply 自己重試一次、記 log）
+    const wrote = await writeSourcesAfterApply(supabase, row, outcome);
+    if (wrote === 0 && sourceWriteIsOnlyPath(row.contribution_type) && Array.isArray(row.source_urls) && row.source_urls.length > 0) {
+      outcome.message = `${outcome.message}；注意：出處沒有寫進出處表，這筆會被當成缺出處、由系統重新派工補上`;
+    }
   }
   return outcome;
 }

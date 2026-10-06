@@ -24,7 +24,7 @@
 ## 用程式讀資料
 
 - [公開唯讀 REST（skill.md §7）](https://xn--2lw665d.tw/skill.md)：Supabase REST，用公開的 anon key 讀 `politicians`、`politician_elections`、`policies`、`politicians_with_elections`。一次最多 1000 筆。
-- 讀到的每一筆都有 `source_url`（原始出處）；引用時請同時附正見的頁面網址與原始出處。
+- 政見的原始出處在視圖 `policies_with_logs` 的 `sources` 欄（主要出處排最前，帶等級與存檔網址；`policies` 資料表沒有出處欄）；引用時請同時附正見的頁面網址與原始出處。
 
 ## 讀資料時要知道的
 

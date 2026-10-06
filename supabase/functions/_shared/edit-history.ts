@@ -88,6 +88,17 @@ export function groupRestores(steps: readonly RevertStep[]): Map<string, Record<
   return out;
 }
 
+/** 出處在出處表、資料表沒有 source_url 欄的兩張表（#347 第二階段 B）。履歷裡這兩張表的 field='source_url' 是「換主要出處」 */
+const SOURCE_URL_TABLES: ReadonlySet<string> = new Set(["policies", "tracking_logs"]);
+
+/** 把一筆政見／進度的主要出處換回舊網址（舊值空白＝沒有主要出處）；失敗丟出去，整筆還原不標成已還原 */
+async function restorePrimarySource(supabase: SupabaseLike, table: string, recordId: string, url: unknown): Promise<void> {
+  const { error } = await supabase.rpc("source_set_primary", {
+    p_target_table: table, p_target_id: String(recordId), p_url: typeof url === "string" ? url : null, p_origin: "revert",
+  });
+  if (error) throw new Error(`revert ${table}#${recordId}.source_url（source_set_primary）: ${error.message}`);
+}
+
 export async function executeRevert(supabase: SupabaseLike, contributionId: string, revertedBy: string): Promise<{ steps: RevertStep[]; reverted: number }> {
   const { data, error } = await supabase.from("edit_history").select("*").eq("contribution_id", contributionId).order("id", { ascending: true });
   if (error) throw new Error(`edit_history read: ${error.message}`);
@@ -101,12 +112,28 @@ export async function executeRevert(supabase: SupabaseLike, contributionId: stri
       const key = `${s.table}#${s.record_id}`;
       if (restored.has(key)) continue;
       restored.add(key);
-      const patch = restores.get(key)!;
-      const { error: e } = await supabase.from(s.table).update(patch).eq("id", s.record_id);
-      if (e) throw new Error(`revert ${s.table}.${Object.keys(patch).join(",")}: ${e.message}`);
+      const patch = { ...restores.get(key)! };
+      // 政見與進度的 source_url 不在資料表裡（#347 第二階段 B）：還原＝把主要出處換回舊網址（source_set_primary），不寫資料表
+      const hasSourceUrl = SOURCE_URL_TABLES.has(s.table) && "source_url" in patch;
+      const oldSourceUrl = hasSourceUrl ? patch.source_url : undefined;
+      if (hasSourceUrl) delete patch.source_url;
+      if (Object.keys(patch).length > 0) {
+        const { error: e } = await supabase.from(s.table).update(patch).eq("id", s.record_id);
+        if (e) throw new Error(`revert ${s.table}.${Object.keys(patch).join(",")}: ${e.message}`);
+      }
+      if (hasSourceUrl) await restorePrimarySource(supabase, s.table, s.record_id, oldSourceUrl);
     } else if (s.op === "reinsert") {
-      const { error: e } = await supabase.from(s.table).insert(s.row);
+      // 被刪掉的政見／進度放回去：整列快照裡的 source_url 不寫資料表，放回去之後把主要出處接回去
+      let row = s.row;
+      let primaryUrl: unknown;
+      if (SOURCE_URL_TABLES.has(s.table) && "source_url" in row) {
+        const { source_url, ...rest } = row;
+        row = rest;
+        primaryUrl = source_url;
+      }
+      const { error: e } = await supabase.from(s.table).insert(row);
       if (e) throw new Error(`revert reinsert ${s.table}#${s.record_id}: ${e.message}`);
+      if (typeof primaryUrl === "string" && primaryUrl.trim()) await restorePrimarySource(supabase, s.table, s.record_id, primaryUrl);
     } else {
       const { error: e } = await supabase.from(s.table).delete().eq("id", s.record_id);
       if (e) throw new Error(`revert delete ${s.table}#${s.record_id}: ${e.message}`);

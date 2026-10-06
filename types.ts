@@ -174,7 +174,7 @@ export interface SourceRef {
   title?: string | null;
   publisher?: string | null;
   publishedDate?: string | null;
-  /** 出處等級；沒有出處表那一列（視圖還沒上線、只剩舊欄位 source_url 的退路）時沒有值，畫面就不標等級 */
+  /** 出處等級；出處表那一列沒有等級時沒有值，畫面就不標等級 */
   kind?: SourceLevel;
   /** 本人來源的認定根據：linked_by_official 被議會・選委會・政黨官網連結／mutual_link 與本人官網互相連結／platform_verified 平台認證 */
   selfEvidence?: string | null;
@@ -189,7 +189,7 @@ export interface TrackingLog {
   date: string;
   event: string;
   description?: string;
-  /** 這則進度的主要出處網址：出處表優先，沒有才退回舊欄位 tracking_logs.source_url（#347 第二階段 A） */
+  /** 這則進度的主要出處網址（出處表的主要出處；#347 第二階段 B 起沒有舊欄位 tracking_logs.source_url） */
   sourceUrl?: string;
   sources?: SourceRef[];
 }
@@ -210,10 +210,10 @@ export interface Policy {
   updatedAt?: string;
   /**
    * 主要出處網址。2026-09-23 起帶到前端：結構化標記的 citation、給 AI 的「引用這筆資料」。
-   * #347 第二階段 A 起出處表（`sources`）優先，沒有才退回舊欄位 policies.source_url。
+   * 來自出處表（`sources` 的主要出處）；#347 第二階段 B 起沒有舊欄位 policies.source_url 的退路。
    */
   sourceUrl?: string;
-  /** 這筆政見的所有出處（主要在前），帶等級與存檔網址；視圖還沒有這一欄時由舊的 source_url 補一筆 */
+  /** 這筆政見的所有出處（主要在前），帶等級與存檔網址 */
   sources?: SourceRef[];
   progress: number; // 0-100
   tags: string[];
@@ -596,8 +596,7 @@ export interface RawTrackingLog {
   date: string;
   event: string;
   description?: string;
-  /** 舊欄位（退路）；舊視圖沒有 */
-  source_url?: string | null;
+  /** 這則進度的出處（出處表；主要在前）。#347 第二階段 B 起沒有舊欄位 source_url */
   sources?: RawSourceRef[] | null;
 }
 
@@ -612,8 +611,6 @@ export interface RawPolicy {
   proposed_date: string | null;
   last_updated: string;
   updated_at?: string;
-  /** 這筆政見的原始出處（policies.source_url）；結構化標記與「引用這筆資料」用 */
-  source_url?: string | null;
   progress: number;
   tags?: string[];
   ai_analysis?: string;
@@ -631,7 +628,7 @@ export interface RawPolicy {
   lineage_id?: string | null;
   lineage?: RawLineageSummary | null;
   origin?: string | null;
-  /** 出處（#347 第二階段 A）：視圖 policies_with_logs 最後一欄；舊視圖沒有，那時退回上面的 source_url */
+  /** 出處（#347）：視圖 policies_with_logs 最後一欄（出處表，主要在前）；第二階段 B 起沒有舊欄位 source_url */
   sources?: RawSourceRef[] | null;
 }
 
