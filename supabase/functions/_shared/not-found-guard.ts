@@ -11,7 +11,12 @@
  *
  * 2026-10-04（協議 1.44.0）：查無比例異常高的模型系列另有一套較嚴的門檻（7 個網址、≥4 個不同網域），
  * 誰算「異常高」由 not-found-series.ts 依近 14 天的統計算，不綁任何模型名稱。
+ *
+ * 2026-10-06：搜尋結果頁不計入網址數（search-page.ts）。更正 10-01「checked_urls 至少一個是搜尋結果頁」：
+ * 搜尋引擎照樣要用，但要附的是點進去實際打開的頁面；搜了哪些關鍵字寫在 finding。
  */
+
+import { isSearchResultPage, SEARCH_PAGE_NOT_SOURCE } from "./search-page.ts";
 
 export const NOT_FOUND_MIN_CHECKED_URLS = 5;
 /** 一般門檻不看網域（0＝不檢查）：5 個網址已經上線三天，不動誠實代理現在的做法 */
@@ -64,12 +69,17 @@ export function notFoundRequirement(elevated: boolean): NotFoundRequirement {
     : { urls: NOT_FOUND_MIN_CHECKED_URLS, domains: NOT_FOUND_MIN_DOMAINS, elevated: false };
 }
 
-/** 網址正規化後去重；非 http(s) 的丟掉 */
-function checkedUrls(payload: Record<string, unknown>): string[] {
-  const urls = Array.isArray(payload.checked_urls)
+/**
+ * 網址正規化後去重；非 http(s) 的丟掉。
+ * 搜尋結果頁不計入（2026-10-06，search-page.ts）：它只證明搜過、不證明看過，另外回傳扣掉了幾個。
+ */
+function checkedUrls(payload: Record<string, unknown>): { urls: string[]; searchPages: number } {
+  const raw = Array.isArray(payload.checked_urls)
     ? payload.checked_urls.filter((u): u is string => typeof u === "string" && /^https?:\/\/\S+/.test(u.trim()))
     : [];
-  return [...new Set(urls.map((u) => u.trim().replace(/\/+$/, "").toLowerCase()))];
+  const all = [...new Set(raw.map((u) => u.trim().replace(/\/+$/, "").toLowerCase()))];
+  const pages = all.filter((u) => !isSearchResultPage(u));
+  return { urls: pages, searchPages: all.length - pages.length };
 }
 
 /** 不同網域的個數：主機名去掉開頭的 www.；解析不出主機名的那一個算它自己一個 */
@@ -91,6 +101,8 @@ export interface NotFoundShortfall {
   domains: number;
   required_domains: number;
   elevated: boolean;
+  /** 扣掉、不計入的搜尋結果頁個數（去重後） */
+  search_pages: number;
 }
 
 /** 純函式：這筆 no_change 是不是「查無但查得太少」；是就回缺多少，否則 null */
@@ -98,11 +110,11 @@ export function notFoundSearchShortfall(taskId: unknown, payload: unknown, eleva
   const type = gatedNotFoundType(taskId, payload);
   if (!type) return null;
   const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
-  const urls = checkedUrls(p);
+  const { urls, searchPages } = checkedUrls(p);
   const req = notFoundRequirement(elevated);
   const domains = distinctDomains(urls);
   if (urls.length >= req.urls && domains >= req.domains) return null;
-  return { task_type: type, checked: urls.length, required: req.urls, domains, required_domains: req.domains, elevated: req.elevated };
+  return { task_type: type, checked: urls.length, required: req.urls, domains, required_domains: req.domains, elevated: req.elevated, search_pages: searchPages };
 }
 
 export function notFoundSearchMessage(s: NotFoundShortfall): string {
@@ -110,7 +122,11 @@ export function notFoundSearchMessage(s: NotFoundShortfall): string {
   const domainPart = s.required_domains > 0
     ? `、而且要分布在至少 ${s.required_domains} 個不同網域（你附的 ${s.checked} 個網址只有 ${s.domains} 個網域）`
     : "";
-  return `回報「查無」（not_found）要證明找過該找的地方：checked_urls 至少 ${s.required} 個不同網址${domainPart}，你附了 ${s.checked} 個。` +
+  const searchPart = s.search_pages > 0
+    ? `${SEARCH_PAGE_NOT_SOURCE}：你附的網址裡有 ${s.search_pages} 個是搜尋結果頁，不計入。`
+    : "";
+  return searchPart +
+    `回報「查無」（not_found）要證明找過該找的地方：checked_urls 至少 ${s.required} 個不同的實際頁面${domainPart}，你附了 ${s.checked} 個（搜尋結果頁不算）。` +
     `請用搜尋引擎至少搜三組關鍵字：${kw}；並看非官方來源：${NON_OFFICIAL_SOURCES}。` +
-    `checked_urls 至少要有一個搜尋結果頁的網址，finding 寫出你搜了哪些關鍵字、各看到什麼。只看中選會、議會官網、一兩家媒體首頁不夠。這不算被拒，補查後再送。`;
+    `checked_urls 放你從搜尋結果點進去、實際打開的頁面（候選人臉書、報導、公報、政黨頁），finding 寫出你搜了哪些關鍵字、各看到什麼。只看中選會、議會官網、一兩家媒體首頁不夠。這不算被拒，補查後再送。`;
 }

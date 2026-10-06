@@ -11,7 +11,7 @@ import { handleContribute } from "./contribute-handler.ts";
 import { NOT_FOUND_MIN_CHECKED_URLS, notFoundSearchShortfall } from "./not-found-guard.ts";
 
 const PID = "98b8b1ff-d085-4597-8384-a02461f773f6";
-const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://example${i}.tw/search?q=%E7%8E%8B%E5%B0%8F%E6%98%8E`);
+const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://example${i}.tw/news/%E7%8E%8B%E5%B0%8F%E6%98%8E`);
 
 function body(taskId: string, outcome: string, n: number) {
   return {

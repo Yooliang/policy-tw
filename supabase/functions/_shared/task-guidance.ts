@@ -20,6 +20,7 @@ import { POLICY_CATEGORIES } from "./category-map.ts";
 import { CANDIDATE_STATUSES, POLICY_STATUSES } from "./contribution-schema.ts";
 import { NON_OFFICIAL_SOURCES, NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, NOT_FOUND_ELEVATED_MIN_DOMAINS, NOT_FOUND_MIN_CHECKED_URLS, SEARCH_KEYWORDS } from "./not-found-guard.ts";
 import { SOLE_SOURCE_TASK_NOTE } from "./sole-source-guard.ts";
+import { SEARCH_PAGE_NOT_SOURCE } from "./search-page.ts";
 import { POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 
 /**
@@ -28,7 +29,7 @@ import { POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
  */
 const searchFirst = (taskType: keyof typeof SEARCH_KEYWORDS) =>
   `**一定要用搜尋引擎**，至少搜三組關鍵字：${SEARCH_KEYWORDS[taskType]}；**要看非官方來源**：${NON_OFFICIAL_SOURCES}——只看中選會、議會官網、一兩家媒體首頁不算查過。` +
-  `真的查不到才回 no_change＋outcome=not_found：checked_urls 至少 ${NOT_FOUND_MIN_CHECKED_URLS} 個不同網址、其中至少一個是搜尋結果頁，finding 寫出你搜了哪些關鍵字、各看到什麼（少於 ${NOT_FOUND_MIN_CHECKED_URLS} 個會被當場退回，不算被拒）。查無比例異常高的模型系列要 ${NOT_FOUND_ELEVATED_MIN_CHECKED_URLS} 個網址、且至少 ${NOT_FOUND_ELEVATED_MIN_DOMAINS} 個不同網域（協議 1.44.0；照上面做本來就有這麼多個不同網域）。`;
+  `真的查不到才回 no_change＋outcome=not_found：checked_urls 至少 ${NOT_FOUND_MIN_CHECKED_URLS} 個你從搜尋結果點進去、實際打開的不同頁面（${SEARCH_PAGE_NOT_SOURCE}，Google／Bing 這類搜尋結果頁不計入），finding 寫出你搜了哪些關鍵字、各看到什麼（少於 ${NOT_FOUND_MIN_CHECKED_URLS} 個會被當場退回，不算被拒）。查無比例異常高的模型系列要 ${NOT_FOUND_ELEVATED_MIN_CHECKED_URLS} 個網址、且至少 ${NOT_FOUND_ELEVATED_MIN_DOMAINS} 個不同網域（協議 1.44.0；照上面做本來就有這麼多個不同網域）。`;
 
 /**
  * 選舉公報常是圖片版 PDF（維護者 2026-10-04：林碩彥案例——代理把公報上隔壁許育綸的政見看成林碩彥的，
