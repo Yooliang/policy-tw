@@ -20,6 +20,7 @@ import { linkLevelProblem } from "./lineage.ts";
 import { loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 import { resultItems } from "./election-results.ts";
+import { loadReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -430,6 +431,15 @@ export async function precheckApplyTargets(
         for (const k of ["from_politician_id", "to_politician_id"]) {
           const pid = str(p[k]);
           if (pid) checkPolitician(i, pid, `payload.${k}`, "記不了交接");
+        }
+        break;
+      }
+      case "reassign_candidacy": {
+        // 同名人物接錯（2026-10-06）：跟落庫同一份檢查（reassign-candidacy.ts）。查詢本身出錯不擋
+        try {
+          for (const pr of reassignProblems(await loadReassignContext(supabase, p), p)) problems.push({ index: i, ...pr });
+        } catch (e) {
+          console.error("precheck reassign lookup failed:", e instanceof Error ? e.message : String(e));
         }
         break;
       }

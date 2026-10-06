@@ -57,6 +57,7 @@ const BORDER: Record<string, string> = {
   candidate_status_stale: '#be123c',
   election_result_missing: '#0f172a',   // 選舉結果：近黑
   election_results_missing: '#334155',  // 整批補選舉結果：深灰（同一族）
+  candidacy_owner_mismatch: '#9f1239',  // 參選紀錄疑似掛錯人：深玫紅（參選那一族）
   roster_check: '#06b6d4',              // 名冊清查：青
   district_seats_missing: '#0891b2',    // 補應選名額：深青
   legacy_audit: '#64748b',              // 舊資料稽核：灰
@@ -86,6 +87,7 @@ const VERIFY_BORDER: Record<string, string> = {
   roster_check: '#0284c7',      // 名單清查：天藍
   district_seats: '#0e7490',    // 應選名額：深青
   election_results: '#334155',  // 整批選舉結果：深灰
+  reassign_candidacy: '#9f1239', // 參選紀錄改掛：深玫紅
   question_answer: '#db2777',   // 提問回答：粉
   merge_politician: '#4338ca',  // 人物合併：靛
   adjudication: '#475569',
@@ -110,6 +112,7 @@ const VERIFY_LABEL: Record<string, string> = {
   roster_check: '名單清查',
   district_seats: '應選名額',
   election_results: '整批選舉結果',
+  reassign_candidacy: '參選紀錄改掛',
   question_answer: '提問回答',
   removal: '建議移除',
   merge_politician: '人物合併',

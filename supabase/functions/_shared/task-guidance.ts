@@ -126,6 +126,15 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "這一件只補結果，**不要順手改參選狀態、地區或姓名**；得票數、得票率不收。source_urls 第一個放你核對的中選會那一頁。" +
     "整個單位都查不到（中選會那一頁打不開、名單上一個都對不上）才回 no_change，finding 寫你看了哪幾頁。",
 
+  // 參選紀錄疑似掛錯人（2026-10-06）：同名的人資料混在一起。判斷依據要寫得出來，不能只看名字
+  candidacy_owner_mismatch:
+    "這筆參選紀錄可能掛到了**同名的另一個人**身上，target.signals 是系統懷疑的理由（中選會名冊出生年不同、交件寫的縣市不同、換縣市參選、有人寫過「不是同一人」）。" +
+    "先查中選會名冊：已投票的屆別看中選會選舉資料庫（出生年、選舉區、推薦政黨），2026 看候選人登記彙總表（選舉區、推薦政黨）；再看 target.other_records（這個人名下其他參選紀錄）是不是同一個人會走的路。" +
+    "**不是同一個人** → 交 reassign_candidacy：改掛到 target.same_name 裡真正的那一位（to_politician_id），都不是就新建（new_politician：姓名、出生年、推薦政黨）；" +
+    "evidence 寫出處上這一筆的出生年、推薦政黨或選舉區（至少一項，出生年最有力），reason 寫你憑什麼分辨。" +
+    "**是同一個人**（例如真的換了縣市或換了黨參選，有報導為證）→ 交 no_change、outcome=confirmed，finding 寫你怎麼確認的——確認過的這一筆不會再派。" +
+    "只有名字一樣、其他都對不上也查不到，不要猜：回 no_change、outcome=not_found。",
+
   policy_election_missing:
     "這筆政見沒標所屬屆別，網站上顯示「未標註屆別」。打開 source_url 確認是哪一場選舉的承諾，用 correction 把 policies.election_id 改成該年份。" +
     "**同一個人可能多屆都選過，來源沒寫清楚就不要猜**，用 no_change 回報。" +
@@ -319,6 +328,9 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：election_id、election_type、region、sub_region（四個照任務 target 原樣帶回；target 沒有 sub_region 就不填）、" +
     "items（你核對過的每一位一項 {politician_election_id：current.items 裡那一位的參選紀錄 id、election_result：elected 當選／not_elected 落選}，一筆最多 120 位）、" +
     "note（沒放進 items 的是哪幾位、為什麼；選填）。source_urls 第一個放中選會選舉資料庫那一頁。",
+  reassign_candidacy:
+    "payload：politician_election_id（要改掛的那一筆參選紀錄，整數 id）、from_politician_id（這筆現在掛的那一位的 uuid）、to_politician_id（改掛到既有的另一位，uuid）或 new_politician（新建一位：{name 同名、birth_year、party，可帶 region}）二擇一、" +
+    "evidence（出處上這一筆的分辨資料 {birth_year, party, district}，至少一項）、reason（≥20 字：憑什麼分辨不是現在掛的那位）。source_urls 放中選會名冊或報導。",
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
   // 政黨資訊（#346 第二階段）
@@ -551,6 +563,20 @@ function buildPayload(
         note: "（公告上沒有的選舉區、或其他要說明的；沒有就刪掉這一欄）",
       };
     }
+    case "reassign_candidacy": {
+      // 參選紀錄 id 照 target 填好；改掛對象二擇一，同名候選列出來讓代理挑（不預填——挑誰就是這一件要判斷的事）
+      const same = Array.isArray(t.same_name) ? (t.same_name as Array<Record<string, unknown>>) : [];
+      return {
+        politician_election_id: t.politician_election_id ?? asText(rowId) ?? "（要改掛的那一筆參選紀錄 id）",
+        from_politician_id: t.politician_id ?? "（這筆參選紀錄現在掛的那一位的 id）",
+        to_politician_id: same.length > 0
+          ? `（改掛到既有的哪一位：target.same_name 裡的 politician_id，例：${asText(same[0].politician_id)}；都不是就刪掉這一欄、改用 new_politician）`
+          : "（資料庫裡沒有同名的另一位：刪掉這一欄、改用 new_politician）",
+        new_politician: { name: t.name ?? "（同名）", birth_year: "（西元四位數，照名冊）", party: "（名冊的推薦政黨；無黨籍填「無黨籍」）" },
+        evidence: { birth_year: "（出處上這一筆的出生年）", party: "（推薦政黨）", district: "（選舉區或村里）" },
+        reason: "（≥20 字：名冊上的出生年／推薦政黨／選舉區，跟兩個人各自怎麼對）",
+      };
+    }
     case "election_results": {
       // 單位四欄照 target 填好；items 先列出每一位的參選紀錄 id，結果留給代理照中選會填（不預填系統的線索——照抄等於沒核對）
       const ids = Array.isArray(t.politician_election_ids) ? (t.politician_election_ids as unknown[]) : [];
@@ -722,6 +748,8 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   audit: ["correction", "policy_progress", "no_change"],
   placeholder_politician: ["removal", "no_change"],
   party_info_missing: ["party_info", "no_change"],
+  // 參選紀錄疑似掛錯人（2026-10-06）：不是同一人就改掛，是同一人就 no_change confirmed
+  candidacy_owner_mismatch: ["reassign_candidacy", "no_change"],
 };
 
 /** 這一種任務所有可能的回報骨架，key 是貢獻型別。單分支的回 null（用 report_template 就好）。 */

@@ -18,6 +18,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   election_result_missing: '缺選舉結果',
   // 2026-10-06：一個單位（屆別×選舉×縣市或鄉鎮）的結果一次補
   election_results_missing: '整批補選舉結果',
+  // 2026-10-06：同名人物接錯，參選紀錄疑似掛在別人身上
+  candidacy_owner_mismatch: '參選紀錄疑似掛錯人',
   policy_election_missing: '政見缺屆別',
   policy_election_mismatch: '政見屆別對不上',
   roster_check: '名單清查',

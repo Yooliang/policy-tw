@@ -45,6 +45,8 @@ export const BASE_VOTES = 2;
  */
 export const MIN_DISTINCT_VOTERS: Record<string, number> = {
   merge_politician: 2,
+  // 參選紀錄改掛（2026-10-06）比照合併
+  reassign_candidacy: 2,
   candidacy: 2,
   removal: 2,
 };
@@ -317,6 +319,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       instructions: "交上來的名額是照公告的應選名額抄的，還是看起來像拿候選人數或當選人數推出來的？",
       hit: { key: "derived", means: "名額跟公告對不上，像是用候選人數或當選人數推的" },
       miss: { key: "copied", means: "每一區的名額都對得上公告的應選名額" },
+    },
+  ],
+
+  // 參選紀錄改掛（2026-10-06）：出錯的方式是「其實是同一人換了地方」與「分辨根據撐不住」（影子模式，只記錄）
+  reassign_candidacy: [
+    {
+      key: "same_person_moved",
+      instructions: "這兩個同名的人，看起來會不會其實是同一個人（換了縣市、換了黨、換了選舉別參選）？看 reason 與 evidence 有沒有排除這種可能。",
+      hit: { key: "maybe_same", means: "沒有排除同一人換地方參選的可能，改掛可能是錯的" },
+      miss: { key: "distinct", means: "有具體根據（不同出生年、同一屆不同選區）說明是兩個人" },
+    },
+    {
+      key: "weak_distinguishing",
+      instructions: "分辨根據是不是來自中選會名冊或可信報導上的這一筆（出生年、推薦政黨、選舉區）？只憑名字或推測不算。",
+      hit: { key: "weak", means: "分辨根據不是出處上寫的，是推測或只有名字" },
+      miss: { key: "documented", means: "分辨根據是出處上這一筆寫的出生年、政黨或選舉區" },
     },
   ],
 

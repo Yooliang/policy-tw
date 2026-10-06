@@ -37,6 +37,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   election_result_missing: "candidacy",
   // 整批補選舉結果（2026-10-06）：一個單位（屆別×選舉×縣市，村里長與代表到鄉鎮）一件，交一筆 election_results
   election_results_missing: "election_results",
+  // 參選紀錄疑似掛錯人（2026-10-06）：不是這個人的 → reassign_candidacy 改掛；確認是同一人 → no_change confirmed
+  candidacy_owner_mismatch: "reassign_candidacy",
   // 名單清查用同名的型別回報
   roster_check: "roster_check",
   // 應選名額（#344，2026-10-06）：一個縣市一種選舉，照選舉公告把每區名額交成一筆

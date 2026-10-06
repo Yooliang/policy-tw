@@ -250,6 +250,12 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "reassign_candidacy": {
+      const to = p.to_politician_id ? `既有的 ${str(p.to_politician_id).slice(0, 8)}` : `新建的「${clip((p.new_politician as Obj | undefined)?.name, 30)}」`;
+      summary = `參選紀錄 ${str(p.politician_election_id)} 改掛到${to}：${clip(p.reason, 100)}`;
+      targetName = null;
+      break;
+    }
     case "election_results": {
       const items = resultItems(p);
       const elected = items.filter((it) => it.election_result === "elected").length;

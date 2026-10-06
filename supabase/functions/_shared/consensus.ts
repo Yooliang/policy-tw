@@ -199,12 +199,13 @@ export function isRubberStampAgree(note: string | null | undefined, evidenceUrl:
 // 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
 // merge_politician 不拿系統票：Jev 的 same_person 看的是我們自己的欄位，跟代理看的是同一批資料，不構成獨立證據（2026-09-20）
 // election_results（2026-10-06）：系統票由中選會名單逐位核對（SQL election_results_system_check），不是 Jev 讀網頁——見 CEC_CHECK_ONLY_TYPES
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "election_results"] as const;
+// reassign_candidacy（2026-10-06）：中選會名冊唯一對上那一列的出生年核新舊兩人（SQL reassign_candidacy_system_check），照現有 ±1 規則
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "election_results", "reassign_candidacy"] as const;
 /**
  * 系統票只由中選會名單核對來投的型別（SQL 鏡像 system_vote_cec_only）：一般預判（system-one?action=precheck，
  * 抓提交者的網頁問 Jev）不撿這些，免得讀網頁的判定蓋掉名單核對（contribution_system_vote 取最新一張）。
  */
-export const CEC_CHECK_ONLY_TYPES = ["election_results"] as const;
+export const CEC_CHECK_ONLY_TYPES = ["election_results", "reassign_candidacy"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {
@@ -409,8 +410,11 @@ export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sour
   return sourceUrls.some((u) => host(u) === ev);
 }
 
-/** 高風險型別：分數不得由單一來源 IP 湊足 */
-export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
+/**
+ * 高風險型別：分數不得由單一來源 IP 湊足。
+ * reassign_candidacy（2026-10-06，同名人物接錯改掛）比照 merge_politician：改錯了＝把一筆參選紀錄從對的人身上拿走
+ */
+export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "reassign_candidacy"] as const;
 
 /**
  * 這一筆要不要兩台不同機器投過才上線（SQL 鏡像：contribution_needs_two_ips，migration 20261006034900）。

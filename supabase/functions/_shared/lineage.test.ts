@@ -167,7 +167,8 @@ Deno.test("policies_with_logs 重建：前面的 p.*、logs、related_policy_ids
 Deno.test("中止交接要兩台機器：TS needsTwoIps 跟 SQL contribution_needs_two_ips 同一條規則", () => {
   const fn = between(sql, "CREATE OR REPLACE FUNCTION contribution_needs_two_ips", "$$;");
   const list = fn.match(/p_type IN \(([^)]+)\)/)![1];
-  assertEquals(quoted(list), [...SCORE_TWO_IP_TYPES], "既有的三種型別原樣保留");
+  // 這支 migration 當時的清單：既有三種原樣保留（之後的型別加在後面的 migration，最新那一份跟 SCORE_TWO_IP_TYPES 的比對在 reassign-candidacy.test.ts）
+  assertEquals(quoted(list), ["merge_politician", "candidacy", "removal"], "既有的三種型別原樣保留");
   assertStringIncludes(fn, "p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop'");
   assertEquals([...HANDOVER_TWO_IP_TYPES], ["stop"]);
   for (const t of SCORE_TWO_IP_TYPES) assert(needsTwoIps(t, {}), `${t} 照舊要兩台機器`);

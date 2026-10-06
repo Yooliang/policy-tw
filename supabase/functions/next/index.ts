@@ -17,6 +17,7 @@ import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
+import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -370,6 +371,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
             (verifyCurrent as Record<string, unknown>).results_check = sv.choice === "supported"
               ? { result: `系統已逐位核對中選會名單：${st.checked ?? "?"} 位全部對得上（同名、同縣市、地區與當選與否都一致）。`, target_note: "這一筆的目標分數因此是 1：你打開那一頁核對無誤投 agree 就會上線，note 寫你核對了哪一頁、幾位。" }
               : { result: `系統逐位核對中選會名單，有 ${Array.isArray(st.mismatches) ? st.mismatches.length : "?"} 位對不上，這一筆沒有系統票、目標分數 2。`, question: "對不上的那幾位在 current.items 最前面（status 不是 match）。請判斷是交件錯了、還是我們的地區或姓名寫法讓系統比不到。" };
+          }
+          // 參選紀錄改掛（2026-10-06）：系統拿中選會名冊那一列的出生年核新舊兩人，理由照實給
+          if (typeof sv.model === "string" && sv.model.startsWith(REASSIGN_MODEL_PREFIX)) {
+            const st = (sv.state ?? {}) as Record<string, unknown>;
+            (verifyCurrent as Record<string, unknown>).reassign_check = {
+              result: `系統核對中選會名冊：${String(st.reason ?? "")}`,
+              cec_birth_year: st.cec_birth_year ?? null, from_birth_year: st.from_birth_year ?? null, to_birth_year: st.to_birth_year ?? null,
+            };
           }
           (verifyCurrent as Record<string, unknown>).system_vote = {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,

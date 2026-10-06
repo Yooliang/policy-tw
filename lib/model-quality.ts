@@ -62,6 +62,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   roster_check: '名單清查',
   district_seats: '應選名額',
   election_results: '整批選舉結果',
+  reassign_candidacy: '參選紀錄改掛',
   question_answer: '提問回答',
   removal: '建議移除',
   merge_politician: '人物合併',

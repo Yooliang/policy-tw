@@ -19,6 +19,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
  *   ?action=extract  POST { task_id, url }          代理替 election_result_missing／candidate_status_stale 任務找到「第一來源」後，
  *                                                  讓 Jev 從那一頁選值（有限域欄位）。不帶金鑰，同 judge 的配額。回建議的 contribution。
  *   ?action=results_batch POST                           整批補選舉結果的系統票：逐位核對中選會名單（SQL），全部對得上才投（2026-10-06）。不帶金鑰、冪等。
+ *   ?action=reassign_check POST                          參選紀錄改掛的系統票：中選會名冊的出生年核新舊兩人（SQL，2026-10-06）。不帶金鑰、冪等。
  *   ?action=news_screen POST                             新聞逐則初篩：沒人名的直接記無關，有人名的問 Jev 是哪條政見的進度／新承諾／無關，
  *                                                        有關的開 news_sweep 任務（2026-09-29）。news-fetch 收完就叫。守法同 backfill。
  *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
@@ -839,6 +840,16 @@ Deno.serve(async (req) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 200);
       const { data, error } = await supabase.rpc("election_results_check_pending", { p_limit: limit });
       if (error) throw new Error(`election_results_check_pending: ${error.message}`);
+      return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
+    }
+
+    // ---- reassign_check：參選紀錄改掛（reassign_candidacy）的系統票（2026-10-06）----
+    // 中選會名冊（已投票的屆別）唯一對上那一列的出生年核新舊兩人，照現有規則：supported −1、not_supported +1、其餘棄權。
+    // 規則只在 SQL 一份（reassign_candidacy_system_check）；排程 reassign-check-10min 叫，冪等
+    if (action === "reassign_check") {
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 200);
+      const { data, error } = await supabase.rpc("reassign_candidacy_check_pending", { p_limit: limit });
+      if (error) throw new Error(`reassign_candidacy_check_pending: ${error.message}`);
       return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
     }
 

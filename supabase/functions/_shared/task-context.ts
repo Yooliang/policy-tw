@@ -18,6 +18,7 @@ import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
+import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
@@ -971,6 +972,8 @@ export interface VerifyContextData {
   lineage_policies?: Obj[];
   /** election_results（2026-10-06）：逐位跟中選會名單比的結果（SQL election_results_compare） */
   results_compare?: Obj[];
+  /** reassign_candidacy（2026-10-06）：這筆參選紀錄、新舊兩人、兩人各自的參選紀錄、中選會名冊唯一對上的那一列 */
+  reassign?: { ctx: ReassignContext; from_elections: Obj[]; to_elections: Obj[]; cec: Obj | null } | null;
 }
 
 /**
@@ -1291,6 +1294,31 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
           "not_in_submission 是我們有、這筆沒交的選舉區，公告上確實沒有的話不影響你的票。公告打不開或看不出是哪一份，投 unsure。",
       };
     }
+    case "reassign_candidacy": {
+      // 參選紀錄改掛（2026-10-06）：最上層寫清楚「這票通過後會把哪一筆從誰改到誰」，再列兩人各自的參選紀錄
+      const r = data.reassign;
+      if (!r || !r.ctx.pe) return { hint: "找不到這筆參選紀錄（可能已被改掛或刪除）：投 unsure" };
+      const { ctx, cec } = r;
+      const pe = r.ctx.pe;
+      const elRow = (e: Obj) => {
+        const reg = (e.regions && typeof e.regions === "object" ? e.regions : {}) as Obj;
+        return { politician_election_id: e.id, election_id: e.election_id, election_type: e.election_type, place: [reg.region, reg.sub_region, reg.village].filter(Boolean).join(" ") || null, election_result: e.election_result ?? null };
+      };
+      const problems = reassignProblems(ctx, payload);
+      return {
+        target_summary: `這筆通過後會把 ${ctx.from?.name ?? "?"} 的 ${pe.election_id} ${pe.election_type ?? ""}參選紀錄（${pe.county ?? ""}，id ${pe.id}）` +
+          `從 ${personLabel(ctx.from)} 改掛到 ${personLabel(ctx.to)}${ctx.to?.id ? "" : "（新建）"}，兩人記為不同人。`,
+        from: { ...ctx.from, elections: r.from_elections.map(elRow) },
+        to: ctx.to ? { ...ctx.to, is_new: !ctx.to.id, elections: r.to_elections.map(elRow) } : null,
+        evidence: (payload.evidence ?? null) as unknown,
+        cec_record: cec && cec.cec_hits === 1 ? { birth_year: cec.cec_birth_year ?? null, sub_region: cec.cec_sub_region ?? null, village: cec.cec_village ?? null, elected: cec.cec_elected ?? null } : null,
+        ...(problems.length > 0 ? { server_check: problems.map((x) => x.message) } : {}),
+        hint: "你要判的是**這筆參選紀錄是不是掛錯人**：打開 source_urls（中選會名冊、報導），看名冊上這一筆的出生年、推薦政黨、選舉區，跟 from（現在掛的）與 to（要改掛的）各自對不對得上；" +
+          "也看兩人各自的參選紀錄（elections）是不是同一個人會走的路。cec_record 是系統從中選會名冊（已投票的屆別）找到的那一列。" +
+          "改掛錯了＝把一筆參選紀錄從對的人身上拿走，**要兩台不同機器的同意票才會上線**。分辨根據站得住投 agree（note 寫你核對到的出生年／政黨／選區）；" +
+          "其實是同一個人（例如真的換縣市參選，有報導）或要改掛的對象不對，投 disagree 並附反證；查不到投 unsure。",
+      };
+    }
     case "election_results": {
       // 整批補選舉結果（2026-10-06）：逐位列出系統跟中選會名單比的結果，對不上的排前面
       const rows = shapeResultsRows((data.results_compare ?? []) as unknown as CompareRow[]);
@@ -1351,6 +1379,27 @@ async function dryRunIdentity(supabase: SupabaseLike, payload: Obj, name: string
 export async function fetchVerifyContext(supabase: SupabaseLike, contributionType: string, payload: Obj, contributionId?: string | null): Promise<VerifyContextData> {
   const data: VerifyContextData = {};
   // 整批補選舉結果（2026-10-06）：跟系統票同一支逐位比對（election_results_compare），驗證者看到的就是系統比的那一份
+  // 參選紀錄改掛（2026-10-06）：新舊兩人與各自的參選紀錄、中選會名冊那一列（跟系統票同一支比對）
+  if (contributionType === "reassign_candidacy") {
+    try {
+      const rc = await loadReassignContext(supabase, payload);
+      const els = async (pid: string | null | undefined) => {
+        if (!pid) return [] as Obj[];
+        // query-bounds: ok — 一個人的參選紀錄，最多十幾屆
+        const { data: rows } = await supabase.from("politician_elections")
+          .select("id, election_id, election_type, election_result, candidate_status, regions(region, sub_region, village)")
+          .eq("politician_id", pid).order("election_id", { ascending: true }).limit(50);
+        return (rows ?? []) as Obj[];
+      };
+      const [fromEls, toEls, cecRows] = await Promise.all([
+        els(rc.from?.id), els(rc.to?.id),
+        rc.pe ? supabase.rpc("election_result_cec_matches", { p_ids: [rc.pe.id] }) : Promise.resolve({ data: [] }),
+      ]);
+      data.reassign = { ctx: rc, from_elections: fromEls, to_elections: toEls, cec: (((cecRows as { data?: unknown }).data ?? []) as Obj[])[0] ?? null };
+    } catch (e) {
+      console.error("reassign verify context:", e instanceof Error ? e.message : String(e));
+    }
+  }
   if (contributionType === "election_results" && contributionId) {
     const { data: rows, error } = await supabase.rpc("election_results_compare", { p_contribution_id: contributionId });
     if (!error) data.results_compare = (rows ?? []) as Obj[];
