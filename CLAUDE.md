@@ -57,6 +57,20 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 
 **手動跑 `db push`／`functions deploy` 時，不要接 `| tail`／`| grep` 來判斷成功**——管線的結束碼是最後一個指令的，失敗會被吃掉、印出來像成功。先把輸出寫檔、看結束碼（`$?`，或 `set -o pipefail`），再打端點或查 `supabase_migrations.schema_migrations` 驗一個可觀察值才說上線。2026-09-21 晚因此把一支沒套上的 migration 對外說成已上線；這條教訓當時只記在一條 session 的暫存筆記裡，兩任之後的接班者又用了同一個寫法。CI 的步驟失敗會紅，不受影響。
 
+## 主線工作守則（2026-10，接手先讀）
+
+小良哥的常設裁決，細節與理由在 `docs/DECISIONS.md`；進度總表 issue #332（選前）、#351（兩站比較 35 項）。
+
+- **資料走流程**：正式資料只能經代理貢獻＋驗證上線。看到資料缺口，不寫 migration 直接補、也不問小良哥「要不要補」，去補「為什麼流程沒帶進來」（派工臂、同步排程、交件守門）。只有流程規則本身（門檻、協議、計分）要他裁；改計分合併後要通知日本站（policy-jp）跟著改。
+- **讓資料自己說話**：讀者看的頁面不放解釋規則、排序方式、方法論的說明文字；保留標籤（未說明／未調查／推定／結果待補）與出處連結。規則寫進 DECISIONS，不寫在畫面上。
+- **網址保持、內容頁可收錄**：改結構時舊網址照常可開或 301，不能 404；內容頁 canonical 指正見.tw。政見 PK 不是正文、不收錄（只在瀏覽器端畫）。
+- **子代理**：一律明寫 `model: sonnet`（純機械小改可 haiku），同時最多 2 個；opus 只用在高風險且要先問小良哥。小改動交給已在跑的子代理追加，不另開。小型 UI 改動不要截圖，CI 綠就合併上線，請小良哥自己看線上。
+- **協議版號與 migration 時間戳**：並行的 PR 很容易撞號。合併前以 main 為準：協議版號比 main 大一號、migration 時間戳大於遠端最新一支（`supabase_migrations.schema_migrations` 的 max；`db push` 不收比遠端還早的）。疊在別的 PR 上的分支：先 `gh pr merge <子> --merge` 進母分支，再 squash 母 PR；或子 PR 的 base 就是 main 時直接 `--merge`。
+- **量效能先實測**：`pg_stat_statements` 是從很久以前累計的，平均值會混進已經改善掉的舊查詢。下結論前用唯讀 `EXPLAIN ANALYZE` 實際量一次（10-06 曾因此誤判派工查詢 2.6 秒，實測 2 毫秒）。
+- **唯讀查正式庫**：`npx supabase db query --linked -f <檔>`，檔案第一行 `SET default_transaction_read_only = on;`。migration 用到的既有欄位先這樣確認存在（10-05 出過引用不存在欄位、正式庫失敗擋住整條部署）。
+- **CI 卡住先看 GitHub 狀態**：工作沒有紀錄、排隊 15 分鐘被取消，多半是 GitHub Actions 事故（https://www.githubstatus.com），等恢復後 `gh run rerun`，不要改程式。
+- **相關站台與機器**：日本站 policy-jp.web.app（repo Yooliang/keifu，P-日本負責）、站務主控台 policy-console.web.app（私人 repo Yooliang/site-console，GA4＋AdSense，GitHub Actions 每天抓）、驗證 VM `policy-verifier`（專案 greenshepherdcomtw，金鑰在 policy-tw 的 Secret Manager `verify-vm-*`，操作見 `scripts/verify-vm/README.md`，目前由工作機 P-工作機開輪）。三個 Firebase 網站都在 Firebase 專案 policy-tw，部署一律 `--only hosting:<site>`。
+
 ## Architecture
 
 ### Data Layer
