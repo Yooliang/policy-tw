@@ -9,8 +9,7 @@
  *   跟選舉頁卡片上的政黨同一個依據；參選紀錄的 party_id（那一次參選時的政黨）第二階段補齊後改讀它。
  */
 import { buildPartyIndex, matchParty, type PartyIndex, type PartyRegistry, type PartyRow } from './parties'
-import { officeTitles } from './politician-office'
-import { candidacyNote } from './people-directory'
+import { candidacyNote, officeTitles } from './politician-office'
 import { participationLabel } from './participation-label'
 import { POSITIONS, positionSpec } from './election-levels'
 import type { Election, Politician } from '../types'
@@ -187,7 +186,7 @@ export function partyPage(
           id: String(pl.id),
           name: pl.name,
           what: placeLabel(rec),
-          // 投完票的只講結果（結果還沒補上講「結果待補」），還沒投票的講登記階段（lib/people-directory.ts 的 candidacyNote）
+          // 投完票的只講結果（結果還沒補上講「結果待補」），還沒投票的講登記階段（lib/politician-office.ts 的 candidacyNote，跟人物頁、人物一覽同一份）
           status: candidacyNote(rec, e.electionDate < today),
         },
       })

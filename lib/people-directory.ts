@@ -10,9 +10,9 @@
  * 一筆只帶三樣：id、姓名、一行說明。說明照職稱規則（只來自任期，lib/politician-office.ts），沒有現任公職的寫最近一次參選，
  * 同名的人才分得出來。全是純函式：建置端算好放進頁面快照，瀏覽器不必再算一次（hydrate 跟 HTML 一致）。
  */
-import { candidacyStatusText, officeTitles, withdrawalText } from './politician-office'
+import { candidacyNote, officeTitles, RESULT_PENDING } from './politician-office'
 import { participationLabel } from './participation-label'
-import type { Election, Politician, PoliticianElectionData } from '../types'
+import type { Election, Politician } from '../types'
 
 export interface DirectoryEntry {
   id: string
@@ -96,22 +96,11 @@ export function isGroupKey(key: string): boolean {
   return /^[1-9]\d?$/.test(key) && Number(key) <= MAX_STROKES
 }
 
-/** 結果還沒補上的已投票屆別（#345：2022 這一屆一萬多筆的選舉結果還空著） */
-export const RESULT_PENDING = '結果待補'
-
 /**
- * 一筆參選紀錄的狀態字。投完票之後只講結果：當選、落選、不參選（退選）；結果還沒補上的講「結果待補」——
- * 不再講登記階段的「表態參選」「已登記」：2022 早期匯入的人狀態多半停在 confirmed，畫面上寫「表態參選」，
- * 其實他們都在選票上（#345 後續裁定：已投票屆別早期匯入的 confirmed 讀成已登記）。還沒投票的照人物頁同一套（candidacyStatusText）。
- * `voted`＝這一屆投票日已經過了。
+ * 一筆參選紀錄的狀態字（投完票只講結果、沒結果寫「結果待補」）跟人物頁、政黨頁同一份，
+ * 規則在 lib/politician-office.ts 的 candidacyNote（2026-10-06 主線裁定三處統一）；這裡轉出去給既有的引用，不再自己寫一份。
  */
-export function candidacyNote(rec: Pick<PoliticianElectionData, 'candidateStatus' | 'electionResult' | 'withdrawnAfterFiling'>, voted: boolean): string {
-  if (rec.electionResult === 'elected' || rec.candidateStatus === 'elected') return '當選'
-  if (rec.electionResult === 'not_elected' || rec.candidateStatus === 'defeated') return '落選'
-  if (rec.candidateStatus === 'not_running') return withdrawalText(rec.withdrawnAfterFiling)
-  if (voted) return RESULT_PENDING
-  return candidacyStatusText(rec.candidateStatus, rec.electionResult, rec.withdrawnAfterFiling) ?? ''
-}
+export { candidacyNote, RESULT_PENDING }
 
 /**
  * 一行說明。職稱只來自任期（officeTitles）；沒有現任公職的寫最近一次參選：「2022 台南市議員・落選」，

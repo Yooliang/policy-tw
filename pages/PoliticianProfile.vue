@@ -26,7 +26,7 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
-import { candidacyBadge, officeTitles, pastTermItems, withdrawalText } from '../lib/politician-office'
+import { candidacyBadge, candidacyNote, officeTitles, pastTermItems, withdrawalText } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
@@ -111,15 +111,10 @@ function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number, 
   if (byResult) return byResult
   const isPast = electionId ? isElectionPast(electionId) : false
 
-  // For past elections, only show elected/defeated（不參選是歷史事實，一併保留；說法看退選前有沒有登記過，#345 後續）
-  if (isPast) {
-    switch (status) {
-      case 'elected': return '當選'
-      case 'defeated': return '落選'
-      case 'not_running': return withdrawalText(withdrawnAfterFiling)
-      default: return null // Don't show "確認參選" for past elections
-    }
-  }
+  // 投完票的屆別只講結果：當選、落選、不參選（退選，說法看退選前有沒有登記過）；結果還沒補上的寫「結果待補」，
+  // 不講登記階段的「表態參選」——跟人物一覽、政黨頁同一份規則（lib/politician-office.ts 的 candidacyNote，2026-10-06 主線裁定統一）。
+  // 之前這裡回 null，2022 那一萬多筆停在 confirmed 的參選紀錄右邊什麼都沒寫。
+  if (isPast) return candidacyNote({ candidateStatus: status, electionResult: result, withdrawnAfterFiling }, true)
 
   // For future elections, show pre-election status
   switch (status) {
@@ -140,7 +135,7 @@ function getCandidateStatusColor(status?: CandidateStatus, electionId?: number, 
   if (result === 'not_elected') return 'bg-red-100 text-red-600 border-red-200'
   const isPast = electionId ? isElectionPast(electionId) : false
 
-  // For past elections without elected/defeated status, use neutral color
+  // For past elections without elected/defeated status, use neutral color（「結果待補」與不參選都用這個中性灰）
   if (isPast && status !== 'elected' && status !== 'defeated') {
     return 'bg-slate-50 text-slate-600 border-slate-200'
   }
@@ -292,7 +287,11 @@ const thisElectionId = computed<number | null>(() => {
   if (active && active.startDate <= today && today <= active.endDate) return active.id
   return elections.value.length ? Math.max(...elections.value.map((e) => e.id)) : null
 })
-const candidacy = computed(() => candidacyBadge(politician.value?.elections, thisElectionId.value))
+// 這一屆投完票了就只講結果（沒結果寫「結果待補」），跟下面參選紀錄同一個判斷（那一屆的投票日跟今天比）
+const candidacy = computed(() => {
+  const id = thisElectionId.value
+  return candidacyBadge(politician.value?.elections, id, id != null && isElectionPast(id))
+})
 /** 側欄的現職：資料庫那欄若跟算出來的職稱講同一件事就不重複列 */
 const otherCurrentPosition = computed(() => {
   const v = politician.value?.currentPosition
