@@ -6,6 +6,7 @@
  * 已有 2026 政見的現任者、不選 2026 的現任者永遠不會被派去補任期政見。
  *
  * 這支測試守四件事：SQL 的條件、加新任務型別要清點的四處（加看板顏色）、查無守門涵蓋新型別、交件骨架的 status。
+ * 2026-10-06 起推得出選舉公報的參選人（含落選、村里長、代表）也派這個型別，見 election-bulletin.test.ts。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { TASK_TYPES } from "./contribution-schema.ts";
@@ -54,7 +55,11 @@ Deno.test("SQL：對象＝2022 縣市長／縣市議員／鄉鎮市長、2024 �
   // 缺口：沒有「該人、該屆、未移除」的政見——補上一筆就從 _gaps 消失，seed_auto_task_queue 收回號碼牌
   assert(/NOT EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.election_id = \w+\.election_id AND pl\.removed_at IS NULL ?\)/.test(flat),
     "缺口條件要是：policies 沒有該人、該 election_id、removed_at IS NULL 的政見");
-  assert(!flat.includes("村里長") && !flat.includes("總統"), "不含村里長、總統");
+  assert(!flat.includes("總統"), "不含總統");
+  // 2026-10-06 起村里長也派，但只派推得出公報的（politician_bulletins），而且一次最多 term_policy_village_cap() 件
+  // （election-bulletin.test.ts 守住細節）；當選人那一段照舊不含村里長
+  assert(/pe\.election_type IN \('縣市長', '縣市議員', '鄉鎮市長'\)/.test(flat), "當選人那一段照舊");
+  assertStringIncludes(flat, "term_policy_village_cap()");
   assertStringIncludes(flat, "merged_into IS NULL", "被合併掉的人物不派");
   // 去重：2026 候選人而且整個人零政見的，只走 policy_missing（條件跟 raw 臂的 c2026 一致）
   assert(/NOT EXISTS \( ?SELECT 1 FROM politician_elections c WHERE c\.politician_id = \w+\.politician_id AND c\.election_id = 2026 AND c\.candidate_status NOT IN \('not_running'\) ?\) OR EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.removed_at IS NULL ?\)/.test(flat),
