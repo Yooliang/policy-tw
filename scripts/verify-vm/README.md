@@ -140,7 +140,7 @@ Aegis 目前沒有第三個帳號的額度，所以 `plan_round.py` 對 `acct3` 
 `boot-agent.sh` 讀金鑰的順序改成：**先讀 Secret Manager，讀不到才退回 metadata**。序列埠只會記每個鍵從哪裡讀到（`=== CRED <鍵> from secret-manager|metadata|missing ===`），不記內容。
 
 - metadata `secret-project`：放金鑰的 GCP 專案。沒設的話維持舊行為，只讀 metadata。
-- Secret 名稱＝`verify-vm-<metadata 鍵>`，共 8 個：`verify-vm-claude-token`、`verify-vm-cwen-token`、`verify-vm-claude3-token`、`verify-vm-openrouter-key`、`verify-vm-ditrust-serial`、`verify-vm-ditrust-serial-2`、`verify-vm-ditrust-serial-3`。
+- Secret 名稱＝`verify-vm-<metadata 鍵>`，共 7 個：`verify-vm-claude-token`、`verify-vm-cwen-token`、`verify-vm-claude3-token`、`verify-vm-openrouter-key`、`verify-vm-ditrust-serial`、`verify-vm-ditrust-serial-2`、`verify-vm-ditrust-serial-3`。
 
 上線前要先做三件事，都要小良哥點頭。截至 10-06 都還沒做：
 1. **決定放哪個專案**：`policy-tw` 目前沒綁帳單，要放這裡得先綁；`greenshepherdcomtw` 有帳單，Secret Manager 也已啟用。
