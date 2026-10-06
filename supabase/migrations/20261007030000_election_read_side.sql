@@ -270,8 +270,12 @@ BEGIN
   IF v_latest > 0 THEN
     RAISE EXCEPTION '#344 politician_latest_election 改看投票日後，有 % 位人物的最新一屆跟改之前不同，不切', v_latest;
   END IF;
-  IF (SELECT count(*) FROM e344_old_latest) <> (SELECT count(*) FROM politicians) THEN
-    RAISE EXCEPTION '#344 最新一屆快照的人數跟人物表對不上';
+  -- 快照的範圍＝「有參選紀錄的人」：politician_latest_election 對沒有任何參選紀錄的人不回列，
+  -- 所以不能拿整張人物表的人數去比（線上 16,286 位人物、16,266 位有參選紀錄，差的 20 位是沒參選過的）。
+  -- 比的是同一個範圍：有參選紀錄的人物數；資料正常增減（新增人物、新增參選紀錄）都不影響，因為快照與這個數是同一個交易裡算的
+  IF (SELECT count(*) FROM e344_old_latest)
+     <> (SELECT count(*) FROM politicians p WHERE EXISTS (SELECT 1 FROM politician_elections pe WHERE pe.politician_id = p.id)) THEN
+    RAISE EXCEPTION '#344 最新一屆快照的人數跟「有參選紀錄的人物數」對不上';
   END IF;
 
   SELECT count(*) INTO v_offices
@@ -373,8 +377,9 @@ BEGIN
   SELECT id, election_types INTO v_new, v_types FROM elections WHERE election_key = '2022-12-18_rerun_10020';
   IF v_new IS NULL THEN RAISE EXCEPTION '#344 嘉義市重行選舉沒有建出來'; END IF;
   IF v_types IS DISTINCT FROM ARRAY['縣市長']::TEXT[] THEN RAISE EXCEPTION '#344 嘉義市重行選舉的職位清單不是 {縣市長}：%', v_types; END IF;
-  IF (SELECT count(*) FROM elections) <> 4 THEN
-    RAISE EXCEPTION '#344 elections 現在應該是 4 筆（2022／2024／2026＋重行選舉），實際 % 筆', (SELECT count(*) FROM elections);
+  -- 原本的三場定期選舉還在、重行選舉是新增的那一場（不拿「總共幾筆」比：別人同時新增選舉是正常的資料變動，不該擋住這支）
+  IF (SELECT count(*) FROM elections WHERE id IN (2022, 2024, 2026) AND election_reason = 'regular') <> 3 THEN
+    RAISE EXCEPTION '#344 原本的三場定期選舉（2022／2024／2026）不見了或事由被改';
   END IF;
 
   -- 2022 底下不該還有嘉義市縣市長（參選紀錄、選舉區）
