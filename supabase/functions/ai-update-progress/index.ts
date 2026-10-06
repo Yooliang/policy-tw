@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { writeLegacySources } from "../_shared/legacy-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -333,16 +334,17 @@ Deno.serve(async (req) => {
           .eq("id", policy.id);
 
         // Add tracking log
-        await supabaseService.from("tracking_logs").insert({
+        const { data: newLog } = await supabaseService.from("tracking_logs").insert({
           policy_id: policy.id,
           date: today,
           event: update.new_status
             ? `狀態更新: ${update.new_status}`
             : "進度更新",
           description: update.event_description,
-          source_url: update.source_url,
           ai_extracted: true,
-        });
+        }).select("id").maybeSingle();
+        // 出處寫進出處表（#347 第二階段 B-1：資料表沒有 source_url 欄了）
+        await writeLegacySources(supabaseService, "tracking_logs", newLog?.id, [{ url: update.source_url }], "ai-update-progress");
       }
     }
 

@@ -1,7 +1,6 @@
 /**
  * 出處（#347 第二階段 A）：政見頁、進度紀錄、查核履歷的出處讀出處表，等級用小標籤、有存檔網址就多一個「存檔」小連結。
- * 舊欄位 policies.source_url／tracking_logs.source_url 是退路：視圖還沒有 sources 欄（migration 比前端晚上線、舊快照）時，
- * 用舊欄位補一筆「沒有等級」的出處，畫面照舊有連結、只是不標等級。第二階段 B 才拿掉退路。
+ * 第二階段 B 起沒有舊欄位 policies.source_url／tracking_logs.source_url 的退路：出處只讀視圖的 sources（資料庫 source_brief_list）。
  * 純函式、不碰瀏覽器 API（預渲染與邊緣 SSR 都會跑）。
  */
 import type { Policy, RawSourceRef, SourceLevel, SourceRef } from '../types'
@@ -39,9 +38,9 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 
 /**
  * 視圖的 sources（資料庫 source_brief_list）→ 前端的出處清單，主要出處在前。
- * 格式不對的項目略過；整個欄位沒有（舊視圖）或是空的、而舊欄位 source_url 有值，就用舊欄位補一筆（沒有等級）。
+ * 格式不對的項目略過；整個欄位沒有或是空的就是沒有出處。
  */
-export function mapSourceRefs(raw: readonly RawSourceRef[] | null | undefined, legacyUrl?: string | null): SourceRef[] {
+export function mapSourceRefs(raw: readonly RawSourceRef[] | null | undefined): SourceRef[] {
   const out: SourceRef[] = []
   const seen = new Set<string>()
   for (const r of Array.isArray(raw) ? raw : []) {
@@ -67,7 +66,6 @@ export function mapSourceRefs(raw: readonly RawSourceRef[] | null | undefined, l
   }
   // 主要出處排最前（資料庫已經排好；這裡再保險一次，穩定排序）
   out.sort((a, b) => Number(b.role === 'primary') - Number(a.role === 'primary'))
-  if (out.length === 0 && isHttp(legacyUrl)) out.push({ url: legacyUrl.trim(), role: 'primary' })
   return out
 }
 
@@ -91,11 +89,9 @@ export function trimPolicySources<T extends { policies: Policy[] }>(snapshot: T,
   }
 }
 
-/** 主要出處網址：出處表的主要出處優先，沒有才退回舊欄位 */
-export function primarySourceUrl(sources: readonly SourceRef[] | undefined, legacyUrl?: string | null): string | undefined {
-  const hit = (sources ?? []).find((s) => s.role === 'primary')
-  if (hit) return hit.url
-  return isHttp(legacyUrl) ? legacyUrl.trim() : undefined
+/** 主要出處網址：出處表的主要出處；沒有主要出處（只有佐證或沒有出處）就是 undefined */
+export function primarySourceUrl(sources: readonly SourceRef[] | undefined): string | undefined {
+  return (sources ?? []).find((s) => s.role === 'primary')?.url
 }
 
 /** 出處的顯示名稱：標題 → 發布者 → 網站網域 */

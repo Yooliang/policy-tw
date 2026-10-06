@@ -2,7 +2,7 @@ import { assert, assertEquals } from 'jsr:@std/assert@1'
 import { mapSourceRefs, primarySourceUrl, selfEvidenceLabel, SOURCE_LEVEL_LABEL, sourceDisplayName, trimPolicySources } from './sources.ts'
 import type { Policy, RawSourceRef, SourceRef } from '../types.ts'
 
-// #347 第二階段 A：前端讀出處表。新表優先、舊欄位 source_url 是退路。
+// #347：前端讀出處表。第二階段 B-1 起沒有舊欄位 source_url 的退路（資料表的欄位不再被讀）。
 
 const BULLETIN = 'https://eebulletin.cec.gov.tw/111/a.pdf'
 const ARCHIVE = 'https://web.archive.org/web/20261001000000/https://eebulletin.cec.gov.tw/111/a.pdf'
@@ -15,7 +15,7 @@ Deno.test('出處：主要在前、帶等級與存檔網址；沒有值的欄位
     { url: BULLETIN, role: 'primary', kind: 'official', title: '選舉公報', archive_url: ARCHIVE, published_date: '2022-11-01' },
     { url: OWN, role: 'supporting', kind: 'self', self_evidence: 'mutual_link' },
   ]
-  const got = mapSourceRefs(raw, 'https://old.example/ignored')
+  const got = mapSourceRefs(raw)
   assertEquals(got.map((s) => s.url), [BULLETIN, NEWS, OWN])
   assertEquals(got[0], { url: BULLETIN, title: '選舉公報', publishedDate: '2022-11-01', kind: 'official', archiveUrl: ARCHIVE, role: 'primary' })
   assertEquals(got[1], { url: NEWS, publisher: '自由時報', kind: 'media', role: 'supporting' })
@@ -23,14 +23,11 @@ Deno.test('出處：主要在前、帶等級與存檔網址；沒有值的欄位
   assert(!('archiveUrl' in got[1]) && !('title' in got[1]), '沒有存檔、沒有標題就不放這兩個鍵')
 })
 
-Deno.test('出處：舊欄位是退路——視圖沒有 sources 欄、或是空的，用 source_url 補一筆（沒有等級、不標小標籤）', () => {
-  for (const raw of [undefined, null, []]) {
-    assertEquals(mapSourceRefs(raw, NEWS), [{ url: NEWS, role: 'primary' }])
-  }
-  assertEquals(mapSourceRefs(undefined, null), [])
-  assertEquals(mapSourceRefs(undefined, ''), [])
-  assertEquals(mapSourceRefs(undefined, '不是網址'), [])
-  assertEquals(mapSourceRefs([{ url: BULLETIN, role: 'primary', kind: 'official' }], NEWS).map((s) => s.url), [BULLETIN], '出處表有就不再加舊欄位')
+Deno.test('出處：視圖沒有 sources 欄、或是空的＝沒有出處（不再用舊欄位 source_url 補一筆）', () => {
+  for (const raw of [undefined, null, []]) assertEquals(mapSourceRefs(raw), [])
+  // 多給的第二個參數（舊的退路）一律不理
+  // deno-lint-ignore no-explicit-any
+  assertEquals((mapSourceRefs as any)(undefined, NEWS), [], '舊欄位的網址不會冒出來')
 })
 
 Deno.test('出處：壞資料略過（不是網址、重複、等級不是四種之一就不標等級）', () => {
@@ -44,13 +41,12 @@ Deno.test('出處：壞資料略過（不是網址、重複、等級不是四種
   assert(!('archiveUrl' in got[2]))
 })
 
-Deno.test('主要出處網址：出處表的主要出處優先於舊欄位；沒有主要出處才退回舊欄位', () => {
+Deno.test('主要出處網址：出處表的主要出處；只有佐證或沒有出處就是 undefined', () => {
   const sources = mapSourceRefs([{ url: BULLETIN, role: 'primary' }, { url: NEWS, role: 'supporting' }])
-  assertEquals(primarySourceUrl(sources, NEWS), BULLETIN)
-  assertEquals(primarySourceUrl([{ url: NEWS, role: 'supporting' }], 'https://old.example/1'), 'https://old.example/1', '只有佐證時，主要出處仍是舊欄位的值')
-  assertEquals(primarySourceUrl(undefined, ' https://old.example/1 '), 'https://old.example/1')
-  assertEquals(primarySourceUrl(undefined, null), undefined)
-  assertEquals(primarySourceUrl([], ''), undefined)
+  assertEquals(primarySourceUrl(sources), BULLETIN)
+  assertEquals(primarySourceUrl([{ url: NEWS, role: 'supporting' }]), undefined, '只有佐證時沒有主要出處（不再退回舊欄位）')
+  assertEquals(primarySourceUrl(undefined), undefined)
+  assertEquals(primarySourceUrl([]), undefined)
 })
 
 Deno.test('顯示名稱：標題 → 發布者 → 網站網域；本人來源的認定根據只在 self 才有提示', () => {

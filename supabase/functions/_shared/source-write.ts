@@ -192,8 +192,9 @@ type SupabaseLike = any;
 
 /**
  * 落庫成功後直接寫出處表（政見、進度、參選紀錄掛引用；任何型別都補等級）。
- * 失敗只記 log、不回頭影響落庫：舊欄位的觸發器已經把主要出處同步過了，缺的只是佐證與等級，漏掉的看 source_refs_drift。
- * 回傳寫了幾個網址（測試與記錄用）。
+ * #347 第二階段 B-1 起這是政見與進度**唯一**的出處寫入路徑（落庫不再寫 policies.source_url／tracking_logs.source_url，
+ * 舊欄位的同步觸發器沒東西可聽）：政見與進度失敗會重試一次；還是失敗就只記 log、不回頭影響落庫——
+ * 缺出處的政見會被派工臂 policy_source_missing 抓到補上。回傳寫了幾個網址（0＝沒寫成或沒有要寫的），呼叫端用它提醒。
  */
 export async function writeSourcesAfterApply(
   supabase: SupabaseLike,
@@ -206,20 +207,26 @@ export async function writeSourcesAfterApply(
   const target = sourceTargetFor(row.contribution_type, outcome);
   // 沒有目標、也沒有任何等級要補：不用打資料庫
   if (!target && !list.some((s) => s.kind === "self")) return 0;
-  try {
-    const { error } = await supabase.rpc("source_write", {
-      p_target_table: target?.table ?? null,
-      p_target_id: target?.id ?? null,
-      p_sources: list,
-      p_origin: "contribution",
-    });
-    if (error) {
-      console.error(`source_write（${row.contribution_type}）失敗：${error.message}`);
-      return 0;
+  // 政見與進度只有這一條路寫出處：多試一次（source_write 是冪等的）
+  const attempts = target && (target.table === "policies" || target.table === "tracking_logs") ? 2 : 1;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const { error } = await supabase.rpc("source_write", {
+        p_target_table: target?.table ?? null,
+        p_target_id: target?.id ?? null,
+        p_sources: list,
+        p_origin: "contribution",
+      });
+      if (!error) return list.length;
+      console.error(`source_write（${row.contribution_type}，第 ${i}／${attempts} 次）失敗：${error.message}`);
+    } catch (e) {
+      console.error(`source_write（${row.contribution_type}，第 ${i}／${attempts} 次）例外：${e instanceof Error ? e.message : String(e)}`);
     }
-    return list.length;
-  } catch (e) {
-    console.error(`source_write（${row.contribution_type}）例外：${e instanceof Error ? e.message : String(e)}`);
-    return 0;
   }
+  return 0;
+}
+
+/** 這個型別的落庫，出處是不是只靠 source_write 寫（政見、進度）：寫不成要提醒呼叫端 */
+export function sourceWriteIsOnlyPath(contributionType: string): boolean {
+  return contributionType === "policy" || contributionType === "policy_progress";
 }

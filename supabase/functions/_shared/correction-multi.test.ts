@@ -57,10 +57,13 @@ Deno.test("門檻取最高風險：含 candidate_status 就走加減參選人級
 });
 
 Deno.test("落庫：逐欄套用並各寫一筆 edit_history（舊值→新值）；摘要與派工現況列出每個欄位", async () => {
+  // 政見的出處在出處表（#347 第二階段 B-1）：現值讀主要出處、換出處走 source_set_primary，不寫資料表
+  const setPrimary: Array<Record<string, unknown>> = [];
   const fake = createFakeSupabase({
-    policies: [{ id: POLICY, title: "候車亭改建", source_url: "https://old.example", description: "舊描述", category: "交通建設" }],
+    policies: [{ id: POLICY, title: "候車亭改建", description: "舊描述", category: "交通建設" }],
+    source_refs: [{ target_table: "policies", target_id: POLICY, role: "primary", sources: { url: "https://old.example" } }],
     edit_history: [],
-  });
+  }, { source_set_primary: (a) => { setPrimary.push(a); return a.p_url; } });
   const row = {
     id: "c-1", contribution_type: "correction" as const, source_urls: [CEC], note: null, agent_name: "tester", contributor_url: null,
     payload: { target_table: "policies", target_id: POLICY, changes: [
@@ -72,7 +75,8 @@ Deno.test("落庫：逐欄套用並各寫一筆 edit_history（舊值→新值�
   assertEquals(outcome.status, "applied");
   assertEquals(outcome.policy_id, POLICY);
   const policy = fake.db.policies[0];
-  assertEquals(policy.source_url, "https://www.cec.gov.tw/bulletin.pdf");
+  assertEquals("source_url" in policy, false, "資料表不寫 source_url");
+  assertEquals(setPrimary, [{ p_target_table: "policies", p_target_id: POLICY, p_url: "https://www.cec.gov.tw/bulletin.pdf", p_origin: "correction" }]);
   assertEquals(policy.description, "第一期候車亭 12 座已於 2026-03-15 驗收。");
   assertEquals(policy.title, "候車亭改建", "沒動到的欄位不變");
   const edits = fake.db.edit_history.filter((e) => e.contribution_id === "c-1");

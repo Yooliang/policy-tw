@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { writeLegacySources } from "../_shared/legacy-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -214,7 +215,7 @@ Deno.serve(async (req) => {
         last_updated: today,
         progress: 0,
         tags: body.policy.tags || [],
-        source_url: body.policy.source_url,
+        // 出處不寫在政見這一列（#347 第二階段 B-1）：下面用 writeLegacySources 寫進出處表
         ai_extracted: true,
         ai_confidence: analysisLog.confidence,
       })
@@ -233,6 +234,8 @@ Deno.serve(async (req) => {
         }
       );
     }
+
+    await writeLegacySources(supabaseService, "policies", policyData.id, [{ url: body.policy.source_url }], "ai-contribute");
 
     // Update the analysis log to mark as contributed
     await supabaseService
@@ -254,14 +257,14 @@ Deno.serve(async (req) => {
     });
 
     // Add initial tracking log
-    await supabaseService.from("tracking_logs").insert({
+    const { data: initialLog } = await supabaseService.from("tracking_logs").insert({
       policy_id: policyData.id,
       date: body.policy.proposed_date || today,
       event: "公民貢獻",
       description: `由公民透過 AI 輔助查核貢獻此政見資料`,
-      source_url: body.policy.source_url,
       ai_extracted: true,
-    });
+    }).select("id").maybeSingle();
+    await writeLegacySources(supabaseService, "tracking_logs", initialLog?.id, [{ url: body.policy.source_url }], "ai-contribute");
 
     const response: ContributeResponse = {
       success: true,

@@ -9,7 +9,7 @@ import { normalizeCorrection } from "./correction.ts";
 import { normalizeSeatDistrict } from "./district-seats.ts";
 import { fetchAllRows } from "./fetch-all.ts";
 import { fetchVerificationSources, needsForTask, sourcesForTask, type TaskSourceHint } from "./verification-sources.ts";
-import { overlayPrimarySources } from "./source-read.ts";
+import { fetchPrimarySourceUrls, overlayPrimarySources, overlaySourceUrl } from "./source-read.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -606,12 +606,13 @@ export function buildLookup(target: Obj): Record<string, string> {
   const out: Record<string, string> = {};
   if (pid) {
     out.politician = `${REST_BASE}/politicians?select=*&id=eq.${pid}`;
-    out.policies = `${REST_BASE}/policies?select=id,title,category,status,progress,source_url,election_id&politician_id=eq.${pid}&order=proposed_date.desc`;
+    // 出處在出處表（2026-10 起資料表沒有 source_url 欄）：政見清單改讀視圖 policies_with_logs 的 sources（主要出處排最前）
+    out.policies = `${REST_BASE}/policies_with_logs?select=id,title,category,status,progress,election_id,sources&politician_id=eq.${pid}&order=proposed_date.desc`;
     out.elections = `${REST_BASE}/politician_elections?select=id,election_id,election_type,position,candidacy_status,source_note,verified&politician_id=eq.${pid}`;
   }
   if (policyId) {
-    out.policy = `${REST_BASE}/policies?select=*&id=eq.${policyId}`;
-    out.tracking_logs = `${REST_BASE}/tracking_logs?select=date,event,description,source_url&policy_id=eq.${policyId}&order=date.desc&limit=20`;
+    out.policy = `${REST_BASE}/policies_with_logs?select=*&id=eq.${policyId}`;
+    out.tracking_logs = `${REST_BASE}/tracking_logs?select=id,date,event,description&policy_id=eq.${policyId}&order=date.desc&limit=20`;
   }
   return out;
 }
@@ -626,7 +627,7 @@ async function fetchLineagesFull(supabase: SupabaseLike, ids: readonly string[])
 }
 
 /** 政策脈絡（#349）：一批政見（含提出者姓名）；一格最多 60 條，脈絡裡的政見也是這個量級 */
-const LINEAGE_POLICY_COLUMNS = "id, title, description, politician_id, election_id, status, lineage_id, source_url, politicians(name)";
+const LINEAGE_POLICY_COLUMNS = "id, title, description, politician_id, election_id, status, lineage_id, politicians(name)";
 async function fetchPoliciesByIds(supabase: SupabaseLike, ids: readonly string[]): Promise<Obj[]> {
   const list = [...new Set(ids.filter((x) => typeof x === "string" && x))].slice(0, MAX_POLICY_DUPE_LIST);
   if (list.length === 0) return [];
@@ -764,7 +765,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   }
   if (taskType === "duplicate_policy" && pid) {
     const { data: pol, count } = await supabase.from("policies")
-      .select("id, title, description, category, status, election_id, proposed_date, source_url, ai_extracted", { count: "exact" })
+      .select("id, title, description, category, status, election_id, proposed_date, ai_extracted", { count: "exact" })
       .eq("politician_id", pid).is("removed_at", null)
       .order("proposed_date", { ascending: false, nullsFirst: false }).order("id", { ascending: true })
       .limit(MAX_POLICY_DUPE_LIST);
@@ -805,7 +806,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity" || taskType === "policy_election_missing" || taskType === "policy_election_mismatch" || isNewsItemTask(taskType, target)) && policyId) {
     const [pl, logs] = await Promise.all([
       supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
-      supabase.from("tracking_logs").select("id, date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
+      supabase.from("tracking_logs").select("id, date, event, description").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
     ]);
     data.policy = pl.data ?? null;
     data.tracking_logs = logs.data ?? [];
@@ -824,7 +825,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // query-bounds: ok — 一條政見最多三列（policy_id, element 唯一）
       supabase.from("policy_elements").select("element, stated, text, deadline_date, source_url, source_locator, updated_at").eq("policy_id", policyId).limit(3),
       taskType === "deadline_due"
-        ? supabase.from("tracking_logs").select("id, date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS)
+        ? supabase.from("tracking_logs").select("id, date, event, description").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS)
         : Promise.resolve({ data: [] }),
     ]);
     data.policy = pl.data ?? null;
@@ -917,8 +918,8 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       console.error("verification_sources:", e instanceof Error ? e.message : String(e));
     }
   }
-  // 政見與進度紀錄的 source_url 改讀出處表的主要出處（#347 第二階段 A）；出處表沒有就保留舊欄位的值。
-  // 出處表出錯不擋派工（overlayPrimarySources 自己吞掉錯誤）
+  // 政見與進度紀錄的 source_url 來自出處表的主要出處（#347 第二階段 B-1：資料表的欄位不再讀）；沒有主要出處就是 null。
+  // 出處表出錯不擋派工（overlayPrimarySources 自己記 log、那一欄不給）
   await overlayPrimarySources(supabase, data as Obj);
   return data;
 }
@@ -1509,7 +1510,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     if (policyId) {
       const [pl, logs] = await Promise.all([
         supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
-        supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
+        supabase.from("tracking_logs").select("id, date, event, description").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
       ]);
       data.policy = pl.data ?? null;
       data.tracking_logs = logs.data ?? [];
@@ -1626,6 +1627,11 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
         data.target = t ?? null;
       }
     }
+  }
+  // 政見與進度紀錄的 source_url 來自出處表的主要出處（#347 第二階段 B-1）：驗證者看的現值跟派給代理的同一份
+  await overlayPrimarySources(supabase, data as Obj);
+  if (contributionType === "correction" && payload.target_table === "policies" && data.target && typeof data.target === "object") {
+    overlaySourceUrl([data.target as Obj], await fetchPrimarySourceUrls(supabase, "policies", [String(payload.target_id)]));
   }
   return data;
 }

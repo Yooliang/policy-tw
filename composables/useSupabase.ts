@@ -304,8 +304,8 @@ function getPoliticianElectionData(
 
 
 export function mapPolicy(row: RawPolicy): Policy {
-  // 出處（#347 第二階段 A）：出處表優先（有等級、存檔網址），舊欄位 source_url 是退路——視圖還沒有 sources 欄時補一筆沒有等級的
-  const sources = mapSourceRefs(row.sources, row.source_url)
+  // 出處（#347）：讀視圖的 sources（出處表；有等級、存檔網址）。第二階段 B 起沒有舊欄位 source_url 的退路
+  const sources = mapSourceRefs(row.sources)
   return {
     id: row.id,
     politicianId: row.politician_id,
@@ -317,7 +317,7 @@ export function mapPolicy(row: RawPolicy): Policy {
     proposedDate: row.proposed_date ?? null,
     lastUpdated: row.last_updated,
     updatedAt: row.updated_at,
-    sourceUrl: primarySourceUrl(sources, row.source_url),
+    sourceUrl: primarySourceUrl(sources),
     ...(sources.length > 0 ? { sources } : {}),
     progress: row.progress,
     tags: row.tags || [],
@@ -342,11 +342,11 @@ export function mapPolicy(row: RawPolicy): Policy {
   }
 }
 
-/** 進度紀錄的出處：出處表優先，舊欄位 tracking_logs.source_url 是退路；兩邊都沒有就不多欄位（快照不長出空欄） */
+/** 進度紀錄的出處（出處表）；沒有出處就不多欄位（快照不長出空欄） */
 function mapLogSources(l: RawTrackingLog): { sourceUrl?: string; sources?: SourceRef[] } {
-  const sources = mapSourceRefs(l.sources, l.source_url)
+  const sources = mapSourceRefs(l.sources)
   if (sources.length === 0) return {}
-  return { sourceUrl: primarySourceUrl(sources, l.source_url), sources }
+  return { sourceUrl: primarySourceUrl(sources), sources }
 }
 
 const isPolicyOrigin = (v: unknown): v is PolicyOrigin => v === 'pledge' || v === 'policy_address' || v === 'assembly' || v === 'budget'

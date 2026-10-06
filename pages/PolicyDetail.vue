@@ -206,7 +206,7 @@ function scrollToHistory() {
 
 // 資料來源（#347 第二階段 A）：讀出處表。policy.sources 隨政見一起來（視圖 policies_with_logs），主要出處在前，
 // 有等級就標小標籤、有存檔網址就多一個「存檔」連結；舊的 policy_sources 表（線上 0 筆）不再讀，
-// 視圖還沒有 sources 欄時 mapPolicy 用舊欄位 source_url 補一筆。伺服器端渲染：連結在 HTML 裡，爬蟲與 AI 讀得到
+// 出處只讀視圖的 sources（第二階段 B 起沒有舊欄位 source_url 的退路）。伺服器端渲染：連結在 HTML 裡，爬蟲與 AI 讀得到
 const sources = computed(() => policy.value?.sources ?? [])
 const showAllSources = ref(false)
 const displayedSources = computed(() =>

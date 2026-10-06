@@ -10,6 +10,8 @@ import {
 } from "../_shared/candidate-import.ts";
 import { findPoliticianByNameStrict } from "../_shared/politician-identity.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
+import { listPolicySources, writeLegacySources } from "../_shared/legacy-source.ts";
+import { fetchPrimarySourceUrls } from "../_shared/source-read.ts";
 
 const ALLOWED_ORIGINS = [
   "https://policy-tw.web.app",
@@ -328,7 +330,6 @@ async function handleQueryPolicies(supabase: any, body: any): Promise<Response> 
       description,
       category,
       status,
-      source_url,
       politicians (
         id,
         name
@@ -357,6 +358,9 @@ async function handleQueryPolicies(supabase: any, body: any): Promise<Response> 
     return errorResponse(error.message, 500);
   }
 
+  // 出處在出處表（#347 第二階段 B-1）：主要出處網址照舊用 source_url 這個鍵回給呼叫端
+  const primaryUrls = await fetchPrimarySourceUrls(supabase, "policies", (data || []).map((p: any) => p.id));
+
   // 整理回傳格式
   const policies = (data || []).map((p: any) => ({
     id: p.id,
@@ -364,7 +368,7 @@ async function handleQueryPolicies(supabase: any, body: any): Promise<Response> 
     description: p.description,
     category: p.category,
     status: p.status,
-    source_url: p.source_url,
+    source_url: primaryUrls?.get(String(p.id)) ?? null,
     politician_name: p.politicians?.name,
   }));
 
@@ -707,7 +711,7 @@ async function handleAddPolicy(supabase: any, body: any): Promise<Response> {
       description: policy.description || null,
       category: policy.category || "其他",
       status: policy.status || "Campaign Pledge",
-      source_url: policy.source_url || null,
+      // 出處不寫在政見這一列（#347 第二階段 B-1）：下面寫進出處表
       ai_extracted: true,
       // 提出日期不知道就留空；填當天會把「抓到資料的日子」寫成「政見提出的日子」
       proposed_date: policy.proposed_date || null,
@@ -717,6 +721,7 @@ async function handleAddPolicy(supabase: any, body: any): Promise<Response> {
     .single();
 
   if (error) throw new Error(error.message);
+  await writeLegacySources(supabase, "policies", newPolicy.id, [{ url: policy.source_url }], "ai-action");
 
   return successResponse({ action: "created", policy_id: newPolicy.id, title: policy.title });
 }
@@ -801,7 +806,6 @@ async function handleAddTrackingLog(supabase: any, body: any): Promise<Response>
       policy_id: policyId,
       status: log.status || "進行中",
       content: log.content,
-      source_url: log.source_url || null,
       source_name: log.source_name || `AI(${prompt_id?.substring(0, 8) || '-'})`,
       log_date: log.date || new Date().toISOString().split('T')[0],
     })
@@ -809,6 +813,7 @@ async function handleAddTrackingLog(supabase: any, body: any): Promise<Response>
     .single();
 
   if (error) throw new Error(error.message);
+  await writeLegacySources(supabase, "tracking_logs", newLog.id, [{ url: log.source_url, publisher: log.source_name }], "ai-action");
 
   return successResponse({ action: "created", log_id: newLog.id });
 }
@@ -900,16 +905,17 @@ async function handleQueryDataQuality(supabase: any, body: any): Promise<Respons
     }))
     .slice(0, 20);
 
-  // 4. 今日新增的資料來源 URL
+  // 4. 今日新增的資料來源 URL（出處表：政見的出處引用，#347 第二階段 B-1 起不再讀舊表 policy_sources）
   const { data: recentSources } = await supabase
-    .from("policy_sources")
-    .select("id, policy_id, url")
+    .from("source_refs")
+    .select("target_id, sources(url)")
+    .eq("target_table", "policies")
     .gte("created_at", target_date)
     .limit(50);
 
   const urlsToCheck = (recentSources || []).map((s: any) => ({
-    policy_id: s.policy_id,
-    url: s.url,
+    policy_id: s.target_id,
+    url: (Array.isArray(s.sources) ? s.sources[0] : s.sources)?.url ?? null,
   }));
 
   // 5. 同一人出現在不同地區
@@ -1083,30 +1089,18 @@ async function handleAddPolicySource(supabase: any, body: any): Promise<Response
     return errorResponse("Missing policy_id or politician_name+policy_title");
   }
 
-  // 準備 upsert 資料
-  const rows = sources.map((s: any) => ({
-    policy_id: policyId,
-    url: s.url,
-    title: s.title || null,
-    source_name: s.source_name || null,
-    published_date: s.published_date || null,
-  }));
-
-  // upsert：衝突時不做任何事（避免重複 URL）
-  const { data, error } = await supabase
-    .from("policy_sources")
-    .upsert(rows, { onConflict: "policy_id,url", ignoreDuplicates: true })
-    .select("id");
-
-  if (error) {
-    return errorResponse(error.message, 500);
-  }
+  // 寫進出處表（#347 第二階段 B-1 起不再寫舊表 policy_sources）：一律記佐證；同一個網址重複送資料庫會自己略過
+  const written = await writeLegacySources(
+    supabase, "policies", policyId,
+    sources.map((s: any) => ({ url: s.url, title: s.title, publisher: s.source_name, role: "supporting" as const })),
+    "ai-action",
+  );
 
   return successResponse({
     action: "added",
     policy_id: policyId,
-    inserted_count: data?.length || 0,
-    message: `新增 ${data?.length || 0} 筆資料來源`,
+    inserted_count: written,
+    message: `送出 ${written} 筆資料來源（已經有的網址不會重複新增）`,
   });
 }
 
@@ -1120,29 +1114,17 @@ async function handleQueryPolicySources(supabase: any, body: any): Promise<Respo
     return errorResponse("Missing policy_id");
   }
 
-  let query = supabase
-    .from("policy_sources")
-    .select("*")
-    .eq("policy_id", policy_id)
-    .order("published_date", { ascending: false, nullsFirst: false });
-
-  if (queryLimit) {
-    query = query.limit(queryLimit);
-  }
-  if (queryOffset) {
-    query = query.range(queryOffset, queryOffset + (queryLimit || 50) - 1);
-  }
-
-  const { data, error } = await query;
+  // 讀出處表（#347 第二階段 B-1 起不再讀舊表 policy_sources）：主要出處在前；欄位名照舊（url、title、source_name、published_date）
+  const { rows, error } = await listPolicySources(supabase, String(policy_id), Number(queryLimit) || 50, Number(queryOffset) || 0);
 
   if (error) {
-    return errorResponse(error.message, 500);
+    return errorResponse(error, 500);
   }
 
   return successResponse({
     policy_id,
-    count: data?.length || 0,
-    sources: data || [],
+    count: rows.length,
+    sources: rows,
   });
 }
 
