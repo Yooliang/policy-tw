@@ -6,9 +6,15 @@
 #    ① Aegis 的 gs it 停在 88%、實際 99%（回報排程指向搬走的 OneStack 舊路徑，錯誤碼 2）
 #    ② quota_local.py 把帳號寫死成 gsit，但本機登入換成 cwen → 兩行都變 cwen
 cd "$(dirname "$0")"
-# 第三個帳號（acct3 ／ claude3）：VM metadata 有 claude3-token 這個「鍵」才派工（只列鍵名，不讀值、不印 token）。
-# 查不到（gcloud 失敗）就當沒有，寧可少派。
-if gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items[].key)' 2>/dev/null | tr ';' '\n' | grep -qx 'claude3-token'; then
+# 第三個帳號（acct3 ／ claude3）就緒判斷：下面兩個任一成立就派工（都只查「存不存在」，不讀值、不印 token）
+#   1. VM metadata 有 claude3-token 這個鍵（舊放法）
+#   2. Secret Manager 有 verify-vm-claude3-token（2026-10-06 起的放法；專案看 VM metadata secret-project，沒設就用 policy-tw）
+VM_KEYS=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items[].key)' 2>/dev/null | tr -d '\r' | tr ';' '\n')
+SECRET_PROJECT=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.secret-project)' 2>/dev/null | tr -d '\r\n')
+[ -n "$SECRET_PROJECT" ] || SECRET_PROJECT=policy-tw
+if printf '%s\n' "$VM_KEYS" | grep -qx 'claude3-token'; then
+  export ACCT3_READY=1
+elif gcloud secrets describe verify-vm-claude3-token --project "$SECRET_PROJECT" --format='value(name)' >/dev/null 2>&1; then
   export ACCT3_READY=1
 else
   export ACCT3_READY=0
