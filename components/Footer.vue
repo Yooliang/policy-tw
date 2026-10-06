@@ -3,10 +3,12 @@ import { computed } from 'vue'
 import { Github, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { footerElections, taipeiDay } from '../lib/election-list'
 import { FEATURED_LOCAL_ELECTION_ID, TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 
-const { getActiveElection } = useSupabase()
-const activeElection = computed(() => getActiveElection())
+const { elections } = useSupabase()
+// 最近要投票的一場＋過去由新到舊，最多 3 筆（lib/election-list.ts；依投票日動態判斷，不寫死屆別）
+const footerList = computed(() => footerElections(elections.value, taipeiDay(Date.now())))
 </script>
 
 <template>
@@ -40,12 +42,9 @@ const activeElection = computed(() => getActiveElection())
         <div>
           <h4 class="text-white font-semibold mb-4">選舉</h4>
           <ul class="space-y-2 text-sm">
-            <!-- 只放「最近要投票的那一場」（activeElection：依投票日，投完隔天換下一場，沒有未來的就放最近一場）；
-                 過去的屆別從「選舉一覽」進去（維護者 2026-10-06） -->
-            <li v-if="activeElection">
-              <RouterLink :to="`/election/${activeElection.id}`" class="hover:text-blue-400 transition-colors">
-                {{ activeElection.shortName }}
-              </RouterLink>
+            <!-- 最近要投票的那一場（若有）＋過去的屆別，最多 3 筆（維護者 2026-10-06）；其餘從「選舉一覽」進去 -->
+            <li v-for="e in footerList" :key="e.id">
+              <RouterLink :to="`/election/${e.id}`" class="hover:text-blue-400 transition-colors">{{ e.shortName }}</RouterLink>
             </li>
           </ul>
         </div>
