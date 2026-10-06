@@ -164,3 +164,15 @@ Deno.test("pick：全部勾選不寫（預設），勾掉幾位才寫；對不�
   assertEquals(parsePick("9,777", ids), ["9"], "別組的人丟掉");
   assertEquals(parsePick("777", ids), ids, "全對不上＝全部，不是空表");
 });
+
+Deno.test("選舉頁真的把「政見 PK」按鈕掛在每個區塊標題列：卡片區塊與分組區塊、這一層與下一層各一處；切換鈕拿掉了", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const grid = Deno.readTextFileSync(new URL("../pages/election/PoliticianGrid.vue", import.meta.url));
+  const chips = Deno.readTextFileSync(new URL("../pages/election/ChipFilteredGroups.vue", import.meta.url));
+  // 屬性要真的落在元件標籤上（寫到 > 後面會變成被丟掉的文字，畫面上就沒有按鈕——2026-10-06 實際踩過）
+  assertEquals(page.match(/<PoliticianGrid [^>]*:pk-link="sectionPkLink\(section\)"[^>]*>/g)?.length, 2);
+  assertEquals(page.match(/<ChipFilteredGroups(?:\s+[^>\s]+)*\s+:pk-link-for="groupPkLinkFor\(section\.spec\.type\)"\s*>/g)?.length, 2);
+  assert(/:pk-link="pkLinkFor\?\.\(group\)"/.test(chips));
+  assert(/<RouterLink\s+v-if="pkLink"\s+:to="pkLink"/.test(grid), "按鈕是真連結");
+  assert(!grid.includes("顯示方式") && !grid.includes("localStorage"), "大頭照／清單切換拿掉了");
+});

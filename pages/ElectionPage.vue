@@ -1013,7 +1013,7 @@ usePageHead({
           規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`">:pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1024,7 +1024,7 @@ usePageHead({
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
-                      :pk-link-for="groupPkLinkFor(section.spec.type)"
+            :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
 
