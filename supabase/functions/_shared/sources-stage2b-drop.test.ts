@@ -1,5 +1,5 @@
 /**
- * #347 第二階段 B-2：刪舊的出處欄位、舊表、同步觸發器（migration 20261007120000）的守門。
+ * #347 第二階段 B-2：刪舊的出處欄位、舊表、同步觸發器（migration 20261007150000）的守門。
  *
  * 守的是「刪得乾淨、順序對、不多刪、前置條件硬擋」：
  *   - policies.source_url、tracking_logs.source_url、policy_sources 與四支 sources_sync_* 觸發器／函式都刪了
@@ -12,7 +12,7 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
 
 const read = async (rel: string) => (await Deno.readTextFile(new URL(rel, import.meta.url))).replaceAll("\r\n", "\n");
-const MIGRATION = await read("../../migrations/20261007120000_sources_stage2b_drop_legacy.sql");
+const MIGRATION = await read("../../migrations/20261007150000_sources_stage2b_drop_legacy.sql");
 const code = (s: string) => s.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
 const sql = code(MIGRATION);
 const at = (needle: string) => {
@@ -109,7 +109,7 @@ Deno.test("B-2 之後沒有任何程式或 migration 再提 policies.source_url�
   }
   // 比 B-2 新的 migration 不能再碰舊欄位與舊表
   for await (const e of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
-    if (e.name.slice(0, 14) <= "20261007120000") continue;
+    if (e.name.slice(0, 14) <= "20261007150000") continue;
     const t = code(await read(`../../migrations/${e.name}`));
     if (/\b(pl|p|policies|tracking_logs|tl)\.source_url\b|policy_sources/.test(t)) hits.push(`${e.name}: 又提到舊欄位或舊表`);
   }
