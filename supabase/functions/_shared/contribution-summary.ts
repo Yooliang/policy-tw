@@ -65,8 +65,10 @@ const FIELD_LABEL: Record<string, string> = {
   name: "姓名", party: "政黨", birth_year: "出生年", current_position: "現職", region: "縣市", sub_region: "選區", education_level: "學歷",
   bio: "簡介", avatar_url: "照片", candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題",
   description: "內容", category: "分類", status: "狀態", proposed_date: "提出日", election_id: "所屬選舉", source_url: "來源網址",
-  end_date: "卸任日", end_reason: "卸任原因",
+  end_date: "卸任日", end_reason: "卸任原因", withdrawn_after_filing: "退選前有沒有登記",
 };
+/** 退選前有沒有登記（#345 後續）的值：網站上的說法 */
+const WITHDRAWN_AFTER_FILING_LABEL: Record<string, string> = { true: "登記後退選", false: "表態不參選（沒登記過）" };
 
 export function clip(value: unknown, limit = SUMMARY_TEXT_LIMIT): string {
   const s = typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
@@ -159,6 +161,7 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
         const raw = clip(v, 80);
         if (field === "candidate_status") return CANDIDATE_STATUS_LABEL[raw] ?? raw;
         if (field === "status") return POLICY_STATUS_LABEL[raw] ?? raw;
+        if (field === "withdrawn_after_filing") return WITHDRAWN_AFTER_FILING_LABEL[raw] ?? raw;
         return raw;
       };
       const { changes } = normalizeCorrection(p);

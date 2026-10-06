@@ -88,6 +88,8 @@ const FIELD_LABEL: Record<string, string> = {
   // 政策脈絡（#349）
   lineage_id: "所屬脈絡", origin: "政見來源", summary: "摘要", role: "角色", basis: "依據", note: "說明",
   handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
+  // 參選紀錄（#345 後續）：退選前有沒有登記；不參選重查蓋的章
+  withdrawn_after_filing: "退選前有沒有登記", verified: "核對過登記名冊",
 };
 const TABLE_LABEL: Record<string, string> = {
   politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素",

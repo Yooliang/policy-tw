@@ -159,6 +159,29 @@ export const ROSTER_CEC_GAP_HINT =
   "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。" +
   "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
 
+/**
+ * 退選前有沒有登記（#345 後續，協議 1.55.0）：not_running_recheck 的 filing 那一種（target.kind＝withdrawn_filing，
+ * 任務編號 auto:not_running_recheck:filing:<參選紀錄 id>，contribution_auto_tasks_withdrawn_filing 派）。
+ * 要的是 correction 改 withdrawn_after_filing，跟原本「他在不在名單上」那一種收尾的方式不同，hint 另外給。
+ */
+export const WITHDRAWN_FILING_HINT =
+  "這一列是退選，但看不出他退選之前有沒有登記過（politician_election.withdrawn_after_filing 是空的），網站只能寫「不參選」。" +
+  "打開任務附的中選會登記名冊（target.rosters；已投票的屆別看中選會選舉資料庫，target.cec_listed_as）找他：" +
+  "**不在名冊上** → correction 把 politician_elections 這一列的 withdrawn_after_filing 改成 false（沒登記過，網站寫「表態不參選」）；" +
+  "**在名冊上、後來宣布退選** → 改成 true（登記後退選），source_urls 另附一篇退選的報導；" +
+  "**在名冊上、而且還在選** → 這一列標錯了：不要改 withdrawn_after_filing，改用 correction 把 candidate_status 改成 registered。" +
+  "correction 的 target_id 是 target.politician_election_id（整數），reason 要寫出他的姓名與你核對的名冊；兩個欄位不要同一筆改。" +
+  "target.prior_not_on_roster 有值，代表之前不參選重查的代理已經回報過他「不在登記名單上」，可以先打開那份核對。" +
+  "找不到名冊就用 no_change（outcome 填 unreachable 或 not_found），不要猜。";
+
+/** not_running_recheck 的 filing 那一種（看不出退選前有沒有登記） */
+export function isWithdrawnFilingTask(taskType: string, target: Obj | null | undefined): boolean {
+  return taskType === "not_running_recheck" && !!target && target.kind === "withdrawn_filing";
+}
+
+/** 參選紀錄給代理看的欄位（不參選重查：退選前有沒有登記、核對過名冊沒有） */
+const PARTICIPATION_FIELDS = ["id", "election_id", "election_type", "position", "candidate_status", "candidacy_status", "withdrawn_after_filing", "verified", "source_note"] as const;
+
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
 /** 政見三要素一列給代理看的欄位（#364） */
 const ELEMENT_FIELDS = ["element", "stated", "text", "deadline_date", "source_url", "source_locator"] as const;
@@ -194,7 +217,8 @@ export function shapeTaskCurrent(
   const inner = newsItem ? shapeNewsItemCurrent(target!, data) : shapeTaskCurrentInner(taskType, data);
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
-  const hint = inner.hint ?? TASK_GUIDANCE[taskType];
+  // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
+  const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT : TASK_GUIDANCE[taskType]);
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
   // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
@@ -326,6 +350,9 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "candidacy_source_missing":
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    // 不參選重查（含 filing 那一種）：那一列的狀態、退選前有沒有登記、核對過名冊沒有（#345 後續）
+    case "not_running_recheck":
+      return { politician_election: pick(data.politician_election ?? null, PARTICIPATION_FIELDS), politician: pick(p, POLITICIAN_BRIEF) };
     // 政策脈絡（#349）：候選格給整份政見（含說明開頭）＋同一地方已有的脈絡；其餘三種給那條脈絡與它的政見
     case "lineage_candidate":
       return {
@@ -710,7 +737,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       .eq("politician_id", pid).order("election_id", { ascending: false });
     data.elections = el ?? [];
   }
-  if ((taskType === "candidacy_source_missing" || taskType === "election_result_missing") && pid) {
+  if ((taskType === "candidacy_source_missing" || taskType === "election_result_missing" || taskType === "not_running_recheck") && pid) {
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
     data.politician_election = pe ?? null;

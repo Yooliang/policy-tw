@@ -142,7 +142,10 @@ export const TASK_GUIDANCE: Record<string, string> = {
     + "**他在名單上** → correction 把 candidate_status 改成 registered，附那份名單；"
     + "**確實不在名單上** → no_change 且 outcome=confirmed，checked_urls 放你核對的那份名單；"
     + "**找不到該縣市的名單** → no_change 且 outcome 填 unreachable 或 not_found，不會蓋章。"
-    + "`source_note` 是匯入來歷，**不要拿它當證據**——實測很多寫著「可能再次挑戰」卻被標成不參選。",
+    + "`source_note` 是匯入來歷，**不要拿它當證據**——實測很多寫著「可能再次挑戰」卻被標成不參選。"
+    // 退選前有沒有登記（#345 後續，協議 1.55.0）：同一個型別的另一種，收尾是 correction 改 withdrawn_after_filing
+    + "**任務編號是 auto:not_running_recheck:filing:…（target.kind＝withdrawn_filing）的**問的是「退選前有沒有登記過」："
+    + "不在登記名冊上 → correction 把 withdrawn_after_filing 改成 false；在名冊上、後來宣布退選 → 改成 true；在名冊上、還在選 → 改 candidate_status 成 registered（不要兩欄同一筆改）。",
 
   // 應選名額（#344，2026-10-06）：議員、代表各選舉區選幾席。名額不能從候選人或當選人數推，要照選舉公告抄
   district_seats_missing:
@@ -370,6 +373,15 @@ function buildPayload(
   switch (contributionType) {
     case "correction":
       if (!table) return null;
+      // 不參選重查的 filing 那一種（#345 後續）：要改的就是退選前有沒有登記這一欄
+      if (taskType === "not_running_recheck" && t.kind === "withdrawn_filing") {
+        return {
+          target_table: table,
+          target_id: rowTarget ?? "（這一列的 id）",
+          changes: [{ field: "withdrawn_after_filing", current_value: null, correct_value: "（false＝不在登記名冊上、沒登記過；true＝在名冊上、後來宣布退選。布林值不加引號）" }],
+          reason: `（寫出他的姓名「${t.name ?? "姓名"}」與你核對的名冊；在名冊上、還在選的話不要交這一筆，改交 candidate_status）`,
+        };
+      }
       return {
         target_table: table,
         target_id: rowTarget ?? "（這一列的 id）",

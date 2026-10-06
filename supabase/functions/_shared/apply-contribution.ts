@@ -1076,7 +1076,7 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   const fields = changes.map((c) => c.field);
   // 任期的卸任日要連根據一起看（#345 後續）；參選紀錄改 confirmed 要知道是哪一屆、哪種選舉（名單公告了沒）
   const extraRead = table === "politician_offices" ? ["end_date", "end_reason", "end_basis", "source_url"]
-    : table === "politician_elections" ? ["election_id", "election_type"] : [];
+    : table === "politician_elections" ? ["election_id", "election_type", "candidacy_status"] : [];
   const readCols = [...new Set(["id", ...fields, ...extraRead])];
   const { data: current, error: readError } = await supabase.from(table).select(readCols.join(", ")).eq("id", target_id).maybeSingle();
   throwIf(readError, `${table} read`);
@@ -1089,6 +1089,17 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
     const cur = current as { election_id?: number; election_type?: string | null; candidate_status?: string | null };
     const n = narrowConfirmed("confirmed", await isListPublished(supabase, Number(cur.election_id), cur.election_type), cur.candidate_status);
     if (n.converted) { patch.candidate_status = n.status; narrowNote = CONFIRMED_NARROWED_NOTE; }
+  }
+  // 退選前有沒有登記（#345 後續，協議 1.55.0）只在退選的紀錄上有值（資料庫 CHECK）：等票期間這一列被改成不是退選
+  // （例如有人補成已登記），這筆就沒有東西可改了——標 superseded，不讓 CHECK 炸成 apply_failed 一直重試
+  if (table === "politician_elections" && "withdrawn_after_filing" in patch) {
+    const cur = current as { candidacy_status?: string | null };
+    if (cur.candidacy_status !== "withdrawn") {
+      return {
+        status: "superseded",
+        message: `這筆參選紀錄現在不是退選（candidacy_status＝${cur.candidacy_status ?? "空的"}），「退選前有沒有登記」沒有東西可改；他在名冊上、還在選的話，狀態已經有人改過了`,
+      };
+    }
   }
   // 任期的卸任日附出處更正（#345 後續：轉任的卸任日是推定的）：在任中的要連原因一起給（資料庫 CHECK 卸任日與原因成對）
   let officeExtra: Obj = {};
@@ -1469,7 +1480,9 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 不參選重查（2026-09-21）：確認他確實不在登記名單上，才把這一列標成已核對。
     // 這個章的代價特別大——標成不參選之後，這個人的政見／基本資料／參選來源／選舉結果
     // 四種缺口都不會再被派，所以只有 confirmed 能蓋，而且走 recordUpdate 留履歷、可還原。
-    const notRunning = /^auto:not_running_recheck:([0-9a-f-]{36})$/i.exec(taskId);
+    // 參選紀錄的 id 是整數（auto:not_running_recheck:35043）。2026-10-06 前這裡寫成 uuid 的樣子，一筆都對不上——
+    // 10-06 線上 72 筆「確實不在名單上」通過了，一筆都沒蓋到章（edit_history 的 verified 0 筆），同一列每 14 天又派一次（task_checks 的一般冷卻）
+    const notRunning = /^auto:not_running_recheck:(\d+)$/.exec(taskId);
     if (notRunning) {
       if (outcome !== "confirmed") {
         return {

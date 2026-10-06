@@ -71,10 +71,15 @@ export const CORRECTION_TABLES = ["politicians", "politician_elections", "polici
 /** 任期的卸任原因（跟資料庫 politician_offices.end_reason 的 CHECK 同一份；#345） */
 export const OFFICE_END_REASONS = ["term_expired", "took_other_office", "resigned", "recalled", "deceased", "removed", "other"] as const;
 
+/** correction 改 withdrawn_after_filing 的值（#345 後續，協議 1.55.0） */
+export const WITHDRAWN_AFTER_FILING_MSG =
+  "withdrawn_after_filing 要是 true（登記後退選：在登記名冊上、後來宣布退選）或 false（沒登記過：不在登記名冊上、只是表態不參選），布林值不加引號";
+
 /** correction 可改的欄位（其他欄位一律拒收，避免任意 UPDATE） */
 export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], readonly string[]> = {
   politicians: ["name", "party", "birth_year", "current_position", "region", "sub_region", "education_level", "bio", "avatar_url"],
-  politician_elections: ["candidate_status", "position", "election_type"],
+  // 退選前有沒有登記（#345 後續，協議 1.55.0）：true 登記後退選／false 沒登記過（表態不參選）；只在退選的紀錄上有值
+  politician_elections: ["candidate_status", "position", "election_type", "withdrawn_after_filing"],
   // 任期（#345 後續）：只開放卸任日與原因——轉任的卸任日是推定的，附出處可以更正；其餘欄位由參選紀錄同步
   politician_offices: ["end_date", "end_reason"],
   // origin（政見從哪裡來，#349）：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算
@@ -595,11 +600,16 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         else if (table === "politician_offices" && c.field === "end_date" && !isDate(c.correct_value)) push(`${at}.correct_value`, "卸任日要是 YYYY-MM-DD");
         else if (table === "politician_offices" && c.field === "end_reason" && !oneOf(OFFICE_END_REASONS, c.correct_value)) push(`${at}.correct_value`, `卸任原因要是 ${OFFICE_END_REASONS.join("／")} 之一`);
         else if (table === "politician_elections" && c.field === "candidate_status" && !oneOf(CORRECTION_CANDIDATE_STATUSES, c.correct_value)) push(`${at}.correct_value`, `參選狀態只能改成 ${CORRECTION_CANDIDATE_STATUSES.join("／")} 之一：不收傳聞（rumored、likely），當選落選用 candidacy 帶 election_result，退選填 not_running（協議 1.51.0）`);
+        else if (table === "politician_elections" && c.field === "withdrawn_after_filing" && typeof c.correct_value !== "boolean") push(`${at}.correct_value`, WITHDRAWN_AFTER_FILING_MSG);
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
         else if (table === "policies" && c.field === "election_id" && !(isInt(c.correct_value) && KNOWN_ELECTION_IDS.includes(c.correct_value))) push(`${at}.correct_value`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);
         else if (table === "policies" && c.field === "origin" && !oneOf(POLICY_ORIGINS, c.correct_value)) push(`${at}.correct_value`, ORIGIN_MSG);
       });
+      // 退選前有沒有登記只在「退選」的紀錄上有意義：同一筆又改參選狀態的話，落庫時狀態一變這一欄就被清掉（#345 後續）
+      if (table === "politician_elections" && changes.some((c) => c.field === "withdrawn_after_filing") && changes.some((c) => c.field === "candidate_status")) {
+        push(usesChanges ? "payload.changes" : "payload", "withdrawn_after_filing 不能跟 candidate_status 同一筆改：他其實還在選（在名冊上、沒退選）就只改 candidate_status；退選前有沒有登記另外交一筆");
+      }
       if (table === "policies") {
         // 同一筆裡同時改屆別與提出日期時，兩者要對得上
         const newElection = changes.find((c) => c.field === "election_id")?.correct_value;
