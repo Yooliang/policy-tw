@@ -20,9 +20,10 @@ export const VERIFIED_MAX_DISAGREE = 1;
 
 /**
  * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
- * past_result＝補一場已投票選舉的結果；removal＝移除既有資料；adjudication＝裁決
+ * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；
+ * removal＝移除既有資料；adjudication＝裁決
  */
-export type RiskLevel = "normal" | "high" | "light" | "past_result" | "removal" | "adjudication";
+export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -36,6 +37,9 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   high: { official: 3, media: 3, social: 3, other: 3 },
   light: { official: 2, media: 2, social: 2, other: 2 },
   past_result: { official: 3, media: 3, social: 3, other: 3 },
+  // 整批補已投票選舉的結果（小良哥 2026-10-06：「改批次，票數 2 票，讓 jev 扣下來」）：目標 2；
+  // 系統逐位核對中選會名單、整批對得上就投一張系統票（照 3+1 折進目標：2−1＝1），再一張代理同意就上線
+  batch_result: { official: 2, media: 2, social: 2, other: 2 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
@@ -59,6 +63,7 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (contributionType === "removal") return "removal";
   // 同名人物合併走 high（官方 4／媒體 6／社群 8）：誤併沒有便宜的回頭路（2026-09-20 審查建議 6；前一天訂 3 票）
   if (contributionType === "merge_politician") return "high";
+  if (contributionType === "election_results") return "batch_result";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
@@ -193,7 +198,14 @@ export function isRubberStampAgree(note: string | null | undefined, evidenceUrl:
 // not_supported 讓門檻 +1（只擋自動上線，**不觸發裁決**——同日晚上改：它判錯過一次就把 4 張人票推進裁決）；
 // 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
 // merge_politician 不拿系統票：Jev 的 same_person 看的是我們自己的欄位，跟代理看的是同一批資料，不構成獨立證據（2026-09-20）
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress"] as const;
+// election_results（2026-10-06）：系統票由中選會名單逐位核對（SQL election_results_system_check），不是 Jev 讀網頁——見 CEC_CHECK_ONLY_TYPES
+// reassign_candidacy（2026-10-06）：中選會名冊唯一對上那一列的出生年核新舊兩人（SQL reassign_candidacy_system_check），照現有 ±1 規則
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "election_results", "reassign_candidacy"] as const;
+/**
+ * 系統票只由中選會名單核對來投的型別（SQL 鏡像 system_vote_cec_only）：一般預判（system-one?action=precheck，
+ * 抓提交者的網頁問 Jev）不撿這些，免得讀網頁的判定蓋掉名單核對（contribution_system_vote 取最新一張）。
+ */
+export const CEC_CHECK_ONLY_TYPES = ["election_results", "reassign_candidacy"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {
@@ -398,8 +410,11 @@ export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sour
   return sourceUrls.some((u) => host(u) === ev);
 }
 
-/** 高風險型別：分數不得由單一來源 IP 湊足 */
-export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal"] as const;
+/**
+ * 高風險型別：分數不得由單一來源 IP 湊足。
+ * reassign_candidacy（2026-10-06，同名人物接錯改掛）比照 merge_politician：改錯了＝把一筆參選紀錄從對的人身上拿走
+ */
+export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "reassign_candidacy"] as const;
 
 /**
  * 這一筆要不要兩台不同機器投過才上線（SQL 鏡像：contribution_needs_two_ips，migration 20261006034900）。

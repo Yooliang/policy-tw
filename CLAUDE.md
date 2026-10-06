@@ -140,7 +140,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
 - 排程抓取（不驗 JWT，靠冷卻時間防濫用）：`cec-sync`（2026-10-06 起每個單位順手把名單上的選舉區記進 `election_districts`、算投票率寫 `elections.turnout`，名冊的推薦政黨原字存進 `cec_candidates.party`；議員與代表的應選名額不同步，走 `district_seats_missing` 任務）、`moi-sync`、`news-fetch`（新聞來源 `news_sources` 每小時逐則收進 `news_items`，收完觸發 `system-one?action=news_screen` 初篩派工，2026-09-29）；`source-archive`（選舉公報／選委會公告類出處每 10 分鐘送 Wayback Machine 存檔，寫 `sources.archive_url`，#347）
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
-- Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy／news_screen）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
+- Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy／news_screen／results_batch／reassign_check）；`reassign_check` 是參選紀錄改掛（`reassign_candidacy`）的系統票：中選會名冊那一列的出生年核新舊兩人，照現有 ±1 規則（2026-10-06）；`results_batch` 是整批補選舉結果（`election_results`）的系統票：逐位核對中選會名單（SQL `election_results_system_check`），全部對得上才投、目標 2−1＝1（2026-10-06）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 - `_shared/query-bounds.test.ts` 掃所有查詢鏈：沒 limit、`limit>1000`、翻頁沒 `.order` 都會紅（PostgREST max-rows=1000 靜默截斷）；真的有界就在那行上面寫 `// query-bounds: ok — 理由`
 

@@ -261,6 +261,10 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   no_change: ["task_id", "outcome", "checked_urls", "finding"],
   // 應選名額（#344）：要看的是哪一屆哪個縣市、每區幾席
   district_seats: ["election_id", "election_type", "region", "districts", "note"],
+  // 整批補選舉結果（2026-10-06）：票數預算的兩維看的是哪個單位、交了幾位、note 怎麼交代同名不同人
+  election_results: ["election_id", "election_type", "region", "sub_region", "items", "note"],
+  // 參選紀錄改掛（2026-10-06）：票數預算的兩維看分辨根據與改掛對象
+  reassign_candidacy: ["politician_election_id", "to_politician_id", "new_politician", "evidence", "reason"],
   // 政見三要素（#364）：票數預算的三維要看的就是每個要素寫了什麼、原句在哪
   policy_elements: ["policy_id", "elements"],
   // 政策脈絡（#349）：票數預算的維度要看的是「憑什麼說是同一件事」「角色依據」「交接依據」

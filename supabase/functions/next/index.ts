@@ -16,6 +16,8 @@ import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
+import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
+import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -312,7 +314,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       }
       // profile_gap 交的沒帶 politician_id：跟落庫一樣用任務編號指的那位，驗證者看到的身份比對才跟落庫一致（#215 的原則）
       const verifyPayload = (withTaskPolitician(pick.contribution_type, pick.payload && typeof pick.payload === "object" ? pick.payload : {}, pick.task_id)) as Record<string, unknown>;
-      const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload);
+      const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload, pick.id);
       // #7（2026-09-21）：既有票一併送去（去識別在 shapeVotes 做）。query-bounds: ok — 一筆貢獻的票是個位數
       const { data: priorVotes } = await supabase.from("contribution_votes")
         .select("verdict, weight, note, evidence_url, created_at").eq("contribution_id", pick.id).order("created_at", { ascending: true }).limit(50);
@@ -362,6 +364,21 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
                 question: "請打開名冊判斷哪一個才對。名冊為準、本筆寫錯 → 投 disagree，evidence_url 放名冊網址、note 寫名冊上那一列；確定本筆才對（名冊有誤或系統讀錯）→ 投 agree 並寫明理由。「這個人確實在名冊上」不是投同意的理由——問題是本筆寫的欄位對不對。",
                 pdf_url: rosterState.pdf_url,
               };
+          }
+          // 整批補選舉結果（2026-10-06）：系統逐位核對中選會名單，全部對得上才投；對不上的是哪幾位已列在 current.items
+          if (typeof sv.model === "string" && sv.model.startsWith(RESULTS_BATCH_MODEL_PREFIX)) {
+            const st = (sv.state ?? {}) as Record<string, unknown>;
+            (verifyCurrent as Record<string, unknown>).results_check = sv.choice === "supported"
+              ? { result: `系統已逐位核對中選會名單：${st.checked ?? "?"} 位全部對得上（同名、同縣市、地區與當選與否都一致）。`, target_note: "這一筆的目標分數因此是 1：你打開那一頁核對無誤投 agree 就會上線，note 寫你核對了哪一頁、幾位。" }
+              : { result: `系統逐位核對中選會名單，有 ${Array.isArray(st.mismatches) ? st.mismatches.length : "?"} 位對不上，這一筆沒有系統票、目標分數 2。`, question: "對不上的那幾位在 current.items 最前面（status 不是 match）。請判斷是交件錯了、還是我們的地區或姓名寫法讓系統比不到。" };
+          }
+          // 參選紀錄改掛（2026-10-06）：系統拿中選會名冊那一列的出生年核新舊兩人，理由照實給
+          if (typeof sv.model === "string" && sv.model.startsWith(REASSIGN_MODEL_PREFIX)) {
+            const st = (sv.state ?? {}) as Record<string, unknown>;
+            (verifyCurrent as Record<string, unknown>).reassign_check = {
+              result: `系統核對中選會名冊：${String(st.reason ?? "")}`,
+              cec_birth_year: st.cec_birth_year ?? null, from_birth_year: st.from_birth_year ?? null, to_birth_year: st.to_birth_year ?? null,
+            };
           }
           (verifyCurrent as Record<string, unknown>).system_vote = {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,

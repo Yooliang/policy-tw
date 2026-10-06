@@ -9,6 +9,7 @@ import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 import { partyInfoProblems } from "./party-info.ts";
 import { isPlaceholderName, PLACEHOLDER_NAME_MSG } from "./placeholder-name.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
+import { MAX_RESULTS_PER_SUBMISSION } from "./election-results.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 import {
   HANDOVER_TYPES, isOfficialUrl, isUnreadableSocial, LINEAGE_LEVELS, LINEAGE_MAX_POLICIES, LINEAGE_NOTE_MAX, LINEAGE_NOTE_MIN,
@@ -29,10 +30,12 @@ export const isTaskIdShape = (v: unknown): boolean =>
 
 // policy_elements（政見三要素，#364，2026-10-05）：DB CHECK、這份清單、skill.md、標籤四處一起加（thresholds.test 盯 CHECK）
 // lineage／lineage_participants／lineage_handover／lineage_link（政策脈絡，#349，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
+// election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
+// reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -528,6 +531,67 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         });
       }
       if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串");
+      break;
+    }
+    case "election_results": {
+      // 整批補已投票選舉的結果（2026-10-06）：一個單位（屆別×選舉×縣市，村里長與代表到鄉鎮）一筆，items 每位一項。
+      // 核對不了或不是同一個人的不要放進 items——系統票是「每一位都對得上中選會名單」才投，放一位猜的進來整批就少一票。
+      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}（任務 target 原樣帶回）`);
+      if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${ELECTION_TYPES.join("／")} 之一（任務 target 原樣帶回）`);
+      if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
+      if (p.sub_region !== undefined && p.sub_region !== null && !isStr(p.sub_region, 1, 20)) push("payload.sub_region", "sub_region 要是鄉鎮市區名稱（任務 target 有才帶）");
+      if (!Array.isArray(p.items) || p.items.length === 0 || p.items.length > MAX_RESULTS_PER_SUBMISSION) {
+        push("payload.items", `items 必填：這個單位你核對過的每一位一項 {politician_election_id, election_result}（1～${MAX_RESULTS_PER_SUBMISSION} 項）`);
+      } else {
+        const seen = new Set<number>();
+        (p.items as unknown[]).forEach((raw, i) => {
+          const at = `payload.items[${i}]`;
+          if (!isObj(raw)) { push(at, "每一項要是物件：{politician_election_id, election_result}"); return; }
+          const itemKeys = new Set<string>();
+          for (const k of ["politician_election_id", "election_result"]) itemKeys.add(k);
+          for (const k of Object.keys(raw)) {
+            if (!itemKeys.has(k)) push(`${at}.${k}`, `每一項只收 politician_election_id 與 election_result，${k} 不收（參選狀態、地區、姓名不在這一件改）`);
+          }
+          const id = raw.politician_election_id;
+          if (!(isInt(id) && id > 0)) push(`${at}.politician_election_id`, "politician_election_id 要是正整數（current.items 裡那一位的參選紀錄 id）");
+          else if (seen.has(id)) push(`${at}.politician_election_id`, `${id} 重複了`);
+          else seen.add(id);
+          if (!oneOf(ELECTION_RESULTS_LIST, raw.election_result)) push(`${at}.election_result`, "election_result 要是 elected（當選）或 not_elected（落選）");
+        });
+      }
+      if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串（沒放進 items 的是哪幾位、為什麼）");
+      break;
+    }
+    case "reassign_candidacy": {
+      // 同名人物接錯（2026-10-06）：一筆參選紀錄改掛到既有的另一位（to_politician_id）或新建一位（new_politician）。
+      // 分辨根據是這一型的核心：evidence 寫出處上這一筆的出生年／推薦政黨／選舉區（至少一項），reason 寫憑什麼分辨。
+      if (!(isInt(p.politician_election_id) && p.politician_election_id > 0)) push("payload.politician_election_id", "politician_election_id 必填：要改掛的那一筆參選紀錄的整數 id（任務 target 裡的）");
+      if (!isUuid(p.from_politician_id)) push("payload.from_politician_id", "from_politician_id 必填：這筆參選紀錄現在掛的那一位的 uuid（任務 target.politician_id）——等票期間被改過的話不會蓋過去");
+      const hasTo = p.to_politician_id !== undefined && p.to_politician_id !== null && p.to_politician_id !== "";
+      const hasNew = p.new_politician !== undefined && p.new_politician !== null;
+      if (hasTo === hasNew) push("payload.to_politician_id", "to_politician_id（改掛到既有的另一位）與 new_politician（新建一位）二擇一");
+      else if (hasTo && !isUuid(p.to_politician_id)) push("payload.to_politician_id", "to_politician_id 要是既有人物的 uuid（任務 target.same_name 裡的）");
+      if (hasNew) {
+        const n = isObj(p.new_politician) ? p.new_politician : null;
+        if (!n) push("payload.new_politician", "new_politician 要是物件：{name, birth_year, party, region}");
+        else {
+          if (!isStr(n.name, 2, 30)) push("payload.new_politician.name", "姓名必填（2～30 字，跟現在掛的那位同名）");
+          if (!(isInt(n.birth_year) && n.birth_year >= 1900 && n.birth_year <= new Date().getUTCFullYear())) push("payload.new_politician.birth_year", "出生年必填（西元四位數）：新建的人要分辨得出跟同名者不是同一個人");
+          if (!isStr(n.party, 1, 50)) push("payload.new_politician.party", "政黨必填（照名冊的推薦政黨；無黨籍就填「無黨籍」）");
+          if (n.region !== undefined && !isStr(n.region, 2, 20)) push("payload.new_politician.region", "縣市名要是字串（例：台中市）；不填就用這筆參選紀錄的縣市");
+        }
+      }
+      const ev = isObj(p.evidence) ? p.evidence : null;
+      if (!ev) push("payload.evidence", "evidence 必填：出處上這一筆的分辨資料 {birth_year, party, district}，至少一項（中選會名冊的出生年最有力）");
+      else {
+        if (ev.birth_year !== undefined && !(isInt(ev.birth_year) && ev.birth_year >= 1900 && ev.birth_year <= new Date().getUTCFullYear())) push("payload.evidence.birth_year", "出生年要是西元四位數");
+        if (ev.party !== undefined && !isStr(ev.party, 1, 50)) push("payload.evidence.party", "推薦政黨要是字串");
+        if (ev.district !== undefined && !isStr(ev.district, 1, 50)) push("payload.evidence.district", "選舉區或村里要是字串（例：台中市第09選舉區）");
+        let given = 0;
+        for (const k of ["birth_year", "party", "district"]) if (ev[k] !== undefined && ev[k] !== null && ev[k] !== "") given++;
+        if (given === 0) push("payload.evidence", "evidence 至少要有一項：birth_year（出生年）、party（推薦政黨）或 district（選舉區）");
+      }
+      if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字）：憑什麼分辨這筆不是現在掛的那位——寫出名冊上的出生年、推薦政黨或選舉區，跟兩個人各自怎麼對");
       break;
     }
     case "removal": {

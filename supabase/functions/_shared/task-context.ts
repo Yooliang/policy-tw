@@ -17,6 +17,8 @@ import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsI
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
+import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
+import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
@@ -85,6 +87,24 @@ export interface TaskContextData {
   lineage_policies?: Obj[];
   /** 政策脈絡（#349）：候選格同一層級同一地方已經有的脈絡；上下級候選的上一級脈絡 */
   related_lineages?: Obj[];
+  /** 整批補選舉結果（2026-10-06）：這一件每一位的參選紀錄＋系統比對到的中選會那一列（SQL election_result_cec_matches） */
+  results_items?: Obj[];
+}
+
+/** 整批補選舉結果的名單（2026-10-06）：每一位一列，cec 是線索不是答案 */
+export function shapeResultsTaskItems(rows: readonly Obj[]): Obj[] {
+  return rows.map((r) => ({
+    politician_election_id: r.politician_election_id ?? null,
+    politician_id: r.politician_id ?? null,
+    name: r.name ?? null,
+    place: [r.county, r.town, r.village].filter((x) => typeof x === "string" && x).join(" ") || null,
+    // 議員、代表的選舉區（村里長的 district 就是鄉鎮，跟 place 重複就不給）
+    ...(typeof r.district === "string" && r.district && r.district !== r.town ? { district: r.district } : {}),
+    current_result: r.current_result ?? null,
+    cec: r.cec_hits === 1
+      ? { elected: r.cec_elected ?? null, sub_region: r.cec_sub_region ?? null, village: r.cec_village ?? null, birth_year: r.cec_birth_year ?? null, cec_cand_id: r.cec_cand_id ?? null, cec_theme_id: r.cec_theme_id ?? null }
+      : null,
+  }));
 }
 
 /** 脈絡裡的政見給代理看的欄位（#349）：說明只取開頭，判「是不是同一件事」看得到主旨就夠 */
@@ -397,6 +417,11 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     // 不參選重查（含 filing 那一種）：那一列的狀態、退選前有沒有登記、核對過名冊沒有（#345 後續）
     case "not_running_recheck":
       return { politician_election: pick(data.politician_election ?? null, PARTICIPATION_FIELDS), politician: pick(p, POLITICIAN_BRIEF) };
+    // 整批補選舉結果（2026-10-06）：名單在派工當下才查（target 只放參選紀錄 id，佇列每 10 分鐘整批重寫 target）
+    case "election_results_missing": {
+      const items = shapeResultsTaskItems(data.results_items ?? []);
+      return { items, items_count: items.length };
+    }
     // 政策脈絡（#349）：候選格給整份政見（含說明開頭）＋同一地方已有的脈絡；其餘三種給那條脈絡與它的政見
     case "lineage_candidate":
       return {
@@ -796,6 +821,17 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       .eq("politician_id", pid).order("election_id", { ascending: false });
     data.elections = el ?? [];
   }
+  // 整批補選舉結果（2026-10-06）：名單細節派工當下查，跟系統票同一支比對（election_result_cec_matches）
+  if (taskType === "election_results_missing" && Array.isArray(target.politician_election_ids)) {
+    const ids = (target.politician_election_ids as unknown[]).filter((x): x is number => typeof x === "number" && Number.isInteger(x)).slice(0, 200);
+    if (ids.length > 0) {
+      const { data: rows, error } = await supabase.rpc("election_result_cec_matches", { p_ids: ids });
+      if (!error) {
+        const order = new Map(ids.map((id, i) => [id, i]));
+        data.results_items = ((rows ?? []) as Obj[]).sort((a, b) => (order.get(Number(a.politician_election_id)) ?? 0) - (order.get(Number(b.politician_election_id)) ?? 0));
+      }
+    }
+  }
   if ((taskType === "candidacy_source_missing" || taskType === "election_result_missing" || taskType === "not_running_recheck") && pid) {
     const electionId = typeof target.election_id === "number" ? target.election_id : 2026;
     const { data: pe } = await supabase.from("politician_elections").select("*").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
@@ -934,6 +970,10 @@ export interface VerifyContextData {
   lineages?: Obj[];
   /** 政策脈絡（#349）：這筆要歸入／拿掉的政見，或脈絡裡現有的政見（含提出者姓名） */
   lineage_policies?: Obj[];
+  /** election_results（2026-10-06）：逐位跟中選會名單比的結果（SQL election_results_compare） */
+  results_compare?: Obj[];
+  /** reassign_candidacy（2026-10-06）：這筆參選紀錄、新舊兩人、兩人各自的參選紀錄、中選會名冊唯一對上的那一列 */
+  reassign?: { ctx: ReassignContext; from_elections: Obj[]; to_elections: Obj[]; cec: Obj | null } | null;
 }
 
 /**
@@ -1254,6 +1294,47 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
           "not_in_submission 是我們有、這筆沒交的選舉區，公告上確實沒有的話不影響你的票。公告打不開或看不出是哪一份，投 unsure。",
       };
     }
+    case "reassign_candidacy": {
+      // 參選紀錄改掛（2026-10-06）：最上層寫清楚「這票通過後會把哪一筆從誰改到誰」，再列兩人各自的參選紀錄
+      const r = data.reassign;
+      if (!r || !r.ctx.pe) return { hint: "找不到這筆參選紀錄（可能已被改掛或刪除）：投 unsure" };
+      const { ctx, cec } = r;
+      const pe = r.ctx.pe;
+      const elRow = (e: Obj) => {
+        const reg = (e.regions && typeof e.regions === "object" ? e.regions : {}) as Obj;
+        return { politician_election_id: e.id, election_id: e.election_id, election_type: e.election_type, place: [reg.region, reg.sub_region, reg.village].filter(Boolean).join(" ") || null, election_result: e.election_result ?? null };
+      };
+      const problems = reassignProblems(ctx, payload);
+      return {
+        target_summary: `這筆通過後會把 ${ctx.from?.name ?? "?"} 的 ${pe.election_id} ${pe.election_type ?? ""}參選紀錄（${pe.county ?? ""}，id ${pe.id}）` +
+          `從 ${personLabel(ctx.from)} 改掛到 ${personLabel(ctx.to)}${ctx.to?.id ? "" : "（新建）"}，兩人記為不同人。`,
+        from: { ...ctx.from, elections: r.from_elections.map(elRow) },
+        to: ctx.to ? { ...ctx.to, is_new: !ctx.to.id, elections: r.to_elections.map(elRow) } : null,
+        evidence: (payload.evidence ?? null) as unknown,
+        cec_record: cec && cec.cec_hits === 1 ? { birth_year: cec.cec_birth_year ?? null, sub_region: cec.cec_sub_region ?? null, village: cec.cec_village ?? null, elected: cec.cec_elected ?? null } : null,
+        ...(problems.length > 0 ? { server_check: problems.map((x) => x.message) } : {}),
+        hint: "你要判的是**這筆參選紀錄是不是掛錯人**：打開 source_urls（中選會名冊、報導），看名冊上這一筆的出生年、推薦政黨、選舉區，跟 from（現在掛的）與 to（要改掛的）各自對不對得上；" +
+          "也看兩人各自的參選紀錄（elections）是不是同一個人會走的路。cec_record 是系統從中選會名冊（已投票的屆別）找到的那一列。" +
+          "改掛錯了＝把一筆參選紀錄從對的人身上拿走，**要兩台不同機器的同意票才會上線**。分辨根據站得住投 agree（note 寫你核對到的出生年／政黨／選區）；" +
+          "其實是同一個人（例如真的換縣市參選，有報導）或要改掛的對象不對，投 disagree 並附反證；查不到投 unsure。",
+      };
+    }
+    case "election_results": {
+      // 整批補選舉結果（2026-10-06）：逐位列出系統跟中選會名單比的結果，對不上的排前面
+      const rows = shapeResultsRows((data.results_compare ?? []) as unknown as CompareRow[]);
+      const mismatched = rows.filter((r) => r.status !== "match").length;
+      return {
+        unit: resultsUnitLabel(payload),
+        items: rows,
+        items_count: rows.length,
+        mismatched_count: mismatched,
+        hint: "打開 source_urls 的中選會選舉資料庫那一頁（這一屆、這種選舉、這個縣市或鄉鎮的結果表），逐位核對 items：是不是同一個人、claimed（交件的當選／落選）對不對。" +
+          (mismatched > 0
+            ? `系統逐位比對中選會名單，有 ${mismatched} 位對不上（status 不是 match 的那幾位，status_label 寫了原因），所以這一筆沒有系統票、要兩張同意。那幾位要特別看：交件對、系統比錯了（例如我們的村里寫錯）照樣可以 agree，note 寫你怎麼確認的；交件錯了就 disagree，note 寫是哪一位、中選會實際怎麼寫。`
+            : "系統已逐位比對中選會名單、每一位都對得上，所以投了系統票，你核對無誤投 agree 就會上線——這一票要真的打開那一頁，note 寫你核對了哪一頁、幾位。") +
+          "任何一位當選與否寫錯、或根本不是同一個人，投 disagree 並在 note 寫是哪一位；那一頁打不開、確認不了投 unsure。",
+      };
+    }
     case "no_change":
       return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
     case "policy_elements":
@@ -1295,8 +1376,34 @@ async function dryRunIdentity(supabase: SupabaseLike, payload: Obj, name: string
 }
 
 /** 碰 DB：依 contribution_type／payload 撈驗證用資料 */
-export async function fetchVerifyContext(supabase: SupabaseLike, contributionType: string, payload: Obj): Promise<VerifyContextData> {
+export async function fetchVerifyContext(supabase: SupabaseLike, contributionType: string, payload: Obj, contributionId?: string | null): Promise<VerifyContextData> {
   const data: VerifyContextData = {};
+  // 整批補選舉結果（2026-10-06）：跟系統票同一支逐位比對（election_results_compare），驗證者看到的就是系統比的那一份
+  // 參選紀錄改掛（2026-10-06）：新舊兩人與各自的參選紀錄、中選會名冊那一列（跟系統票同一支比對）
+  if (contributionType === "reassign_candidacy") {
+    try {
+      const rc = await loadReassignContext(supabase, payload);
+      const els = async (pid: string | null | undefined) => {
+        if (!pid) return [] as Obj[];
+        // query-bounds: ok — 一個人的參選紀錄，最多十幾屆
+        const { data: rows } = await supabase.from("politician_elections")
+          .select("id, election_id, election_type, election_result, candidate_status, regions(region, sub_region, village)")
+          .eq("politician_id", pid).order("election_id", { ascending: true }).limit(50);
+        return (rows ?? []) as Obj[];
+      };
+      const [fromEls, toEls, cecRows] = await Promise.all([
+        els(rc.from?.id), els(rc.to?.id),
+        rc.pe ? supabase.rpc("election_result_cec_matches", { p_ids: [rc.pe.id] }) : Promise.resolve({ data: [] }),
+      ]);
+      data.reassign = { ctx: rc, from_elections: fromEls, to_elections: toEls, cec: (((cecRows as { data?: unknown }).data ?? []) as Obj[])[0] ?? null };
+    } catch (e) {
+      console.error("reassign verify context:", e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (contributionType === "election_results" && contributionId) {
+    const { data: rows, error } = await supabase.rpc("election_results_compare", { p_contribution_id: contributionId });
+    if (!error) data.results_compare = (rows ?? []) as Obj[];
+  }
   const pid = typeof payload.politician_id === "string" ? payload.politician_id : null;
   const name = typeof payload.name === "string" ? payload.name.trim() : null;
 

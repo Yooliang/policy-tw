@@ -45,6 +45,8 @@ export const BASE_VOTES = 2;
  */
 export const MIN_DISTINCT_VOTERS: Record<string, number> = {
   merge_politician: 2,
+  // 參選紀錄改掛（2026-10-06）比照合併
+  reassign_candidacy: 2,
   candidacy: 2,
   removal: 2,
 };
@@ -317,6 +319,39 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       instructions: "交上來的名額是照公告的應選名額抄的，還是看起來像拿候選人數或當選人數推出來的？",
       hit: { key: "derived", means: "名額跟公告對不上，像是用候選人數或當選人數推的" },
       miss: { key: "copied", means: "每一區的名額都對得上公告的應選名額" },
+    },
+  ],
+
+  // 參選紀錄改掛（2026-10-06）：出錯的方式是「其實是同一人換了地方」與「分辨根據撐不住」（影子模式，只記錄）
+  reassign_candidacy: [
+    {
+      key: "same_person_moved",
+      instructions: "這兩個同名的人，看起來會不會其實是同一個人（換了縣市、換了黨、換了選舉別參選）？看 reason 與 evidence 有沒有排除這種可能。",
+      hit: { key: "maybe_same", means: "沒有排除同一人換地方參選的可能，改掛可能是錯的" },
+      miss: { key: "distinct", means: "有具體根據（不同出生年、同一屆不同選區）說明是兩個人" },
+    },
+    {
+      key: "weak_distinguishing",
+      instructions: "分辨根據是不是來自中選會名冊或可信報導上的這一筆（出生年、推薦政黨、選舉區）？只憑名字或推測不算。",
+      hit: { key: "weak", means: "分辨根據不是出處上寫的，是推測或只有名字" },
+      miss: { key: "documented", means: "分辨根據是出處上這一筆寫的出生年、政黨或選舉區" },
+    },
+  ],
+
+  // 整批補選舉結果（2026-10-06）：出錯的方式是「不是這個單位的結果表」與「同名不同人沒分辨」
+  // （系統票已經逐位核對中選會名單；這兩維是影子模式，跟其他型別一樣只記錄）
+  election_results: [
+    {
+      key: "not_the_unit",
+      instructions: "附的來源是不是這一屆、這種選舉、這個縣市（或鄉鎮）的中選會選舉結果？別屆、別縣市的結果表或只是新聞報導都不算。",
+      hit: { key: "other_unit", means: "不是這個單位的結果：別屆、別縣市、別種選舉，或只是新聞報導" },
+      miss: { key: "the_unit", means: "是這一屆這個單位這種選舉的中選會結果" },
+    },
+    {
+      key: "identity_unchecked",
+      instructions: "交件有沒有分辨同名不同人？看 note 有沒有交代核對了選區、村里或出生年，或把對不上的人排除在外。",
+      hit: { key: "unchecked", means: "看不出有分辨同名不同人，像是只照姓名對" },
+      miss: { key: "checked", means: "有交代怎麼分辨同名不同人，或對不上的已經排除" },
     },
   ],
 
