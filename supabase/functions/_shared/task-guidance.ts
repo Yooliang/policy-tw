@@ -161,7 +161,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   // 2026-10-06：測試資料的人物（removal 移除整個人）、政黨資訊缺口（party_info）
   placeholder_politician:
-    "這位人物的姓名看起來是測試資料（例如「測試候選人ABC」）。先查中選會選舉資料庫、選委會公告、媒體有沒有這個人：" +
+    "這位人物的姓名看起來是測試資料（例如「測試候選人ABC」），或（target.kind＝orphan）他的參選紀錄被改掛到別的同名的人身上之後名下已經什麼都沒有（空殼）。先查中選會選舉資料庫、選委會公告、媒體有沒有這個人：" +
     "**查無此人** → 用 removal 回報：target_table 填 politicians、target_id 填人物 id、reason（≥20 字）寫你查了哪些地方都沒有這個人；通過後整個人連參選紀錄一起刪（留履歷、可還原）；" +
     "**真有其人** → 用 no_change（outcome=confirmed）回報，checked_urls 放看得到他的官方頁面。",
   party_info_missing:
