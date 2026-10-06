@@ -20,9 +20,9 @@ defineProps<{
     <li class="relative pl-6">
       <span class="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 bg-slate-300 ring-slate-100"></span>
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{{ label }}</span>
+        <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{{ label }}</span>
       </div>
-      <p class="mt-1 text-sm leading-relaxed break-words text-slate-500">{{ text }}</p>
+      <p class="mt-1 text-xs leading-relaxed break-words text-slate-500">{{ text }}</p>
       <!-- 來源連結、補充說明之類的東西接在這句後面 -->
       <slot />
     </li>

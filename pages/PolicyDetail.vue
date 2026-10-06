@@ -32,7 +32,6 @@ import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
-import { ELEMENTS_EXPLAINER } from '../lib/policy-elements'
 import { Columns3, ListChecks } from 'lucide-vue-next'
 
 
@@ -607,11 +606,10 @@ async function copyCitation() {
           </div>
 
           <!-- 政見三要素（2026-10-05 #364，日本站同一套）：數值目標・達成期限・財源照原文拆。
-               「未說明」＝查過原文沒寫、「未調查」＝還沒有人查，兩者分開標（規則在 lib/policy-elements.ts）。
+               「未說明」＝查過原文沒寫、「未調查」＝還沒有人查，兩者分開標（規則在 lib/policy-elements.ts）。2026-10-06 拿掉了標題下面那段說明文字，只留三格與狀態標。
                伺服器端渲染：要素與出處連結都在 HTML 裡，AI 與爬蟲讀得到。 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="policy-elements-card">
-            <h2 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />政見三要素</h2>
-            <p class="text-sm text-slate-500 leading-relaxed mb-4">{{ ELEMENTS_EXPLAINER }}</p>
+            <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />政見三要素</h2>
             <PolicyElements :elements="policy.elements" />
             <p v-if="compareLink" class="mt-4 text-sm">
               <router-link :to="compareLink.path" class="inline-flex items-center gap-1 font-bold text-violet-700 hover:underline">
@@ -696,23 +694,6 @@ async function copyCitation() {
             </button>
           </div>
 
-          <!-- 引用這筆資料（2026-09-23）：伺服器端渲染，AI 讀網頁時看得到；資料是 CC BY 4.0，引用要標出處 -->
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="cite">
-            <h3 class="text-lg font-bold text-navy-900 mb-2 flex items-center gap-2">
-              <Quote class="text-blue-600" :size="20" />
-              引用這筆資料
-            </h3>
-            <p class="text-sm text-slate-700 leading-relaxed break-all select-all">{{ citation }}</p>
-            <div class="mt-3 flex items-center gap-3 text-xs text-slate-500">
-              <ClientOnly>
-                <button type="button" class="px-3 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700" @click="copyCitation">
-                  {{ citationCopied ? '已複製' : '複製引用' }}
-                </button>
-              </ClientOnly>
-              <span>資料依 <a :href="DATA_LICENSE_URL" target="_blank" rel="noopener noreferrer" class="underline">CC BY 4.0</a> 授權，轉載或 AI 轉述請附上這個網址。</span>
-            </div>
-          </div>
-
           <!-- Timeline -->
           <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <!-- 標題右邊擺一顆動作鈕，跟同一頁的公民提問一致（2026-09-18）：
@@ -767,35 +748,70 @@ async function copyCitation() {
           </div>
         </div>
 
-        <!-- Sidebar -->
+        <!-- Sidebar（2026-10-06）：四張外觀一致的卡，由上到下＝人物、該候選人的其他政見、其它學經歷、引用這筆資料。
+             手機單欄時照這個順序接在主內容之後。原本是一張大卡裝滿人物＋政黨＋學經歷＋其他政見，引用則在主欄；
+             拆開後每張卡一個主題，卡片樣式一律 bg-white p-6 rounded-xl border border-slate-200 shadow-sm，間距由外層 space-y-6 統一。 -->
         <div class="lg:col-span-1 space-y-6">
-          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm sticky top-24">
-            <router-link :to="`/politician/${politician.id}`" class="flex items-center gap-4 mb-6 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition-colors">
+          <!-- 1. 人物：頭像與名稱，點了到人物頁；進度條跟著這張卡（它講的是這位的這筆政見做到哪） -->
+          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="side-person">
+            <router-link :to="`/politician/${politician.id}`" class="flex items-center gap-4 cursor-pointer hover:bg-slate-50 p-2 -m-2 rounded-lg transition-colors">
               <Avatar :src="politician.avatarUrl" :name="politician.name" size="lg" class="border-2 border-slate-100" />
-              <div>
+              <div class="min-w-0">
                 <h3 class="text-lg font-bold text-navy-900 flex items-center gap-1">{{ politician.name }}<ChevronRight :size="16" class="text-slate-300" /></h3>
                 <p v-if="politicianTitle" class="text-sm text-slate-500">{{ politicianTitle }}</p>
               </div>
             </router-link>
 
-            <div class="space-y-4">
-              <div v-if="!isCampaign">
-                <div class="flex justify-between text-sm font-medium text-slate-600 mb-1">
-                  <span>當前進度</span>
-                  <span class="text-blue-600">{{ policy.progress }}%</span>
-                </div>
-                <div class="w-full bg-slate-100 rounded-full h-2.5">
-                  <div
-                    :class="`h-2.5 rounded-full transition-all duration-1000 ${
-                      policy.status === 'Achieved' ? 'bg-emerald-500' :
-                      policy.status === 'Failed' ? 'bg-red-500' : 'bg-blue-600'
-                    }`"
-                    :style="{ width: `${policy.progress}%` }"
-                  ></div>
-                </div>
+            <div v-if="!isCampaign" class="mt-6">
+              <div class="flex justify-between text-sm font-medium text-slate-600 mb-1">
+                <span>當前進度</span>
+                <span class="text-blue-600">{{ policy.progress }}%</span>
               </div>
+              <div class="w-full bg-slate-100 rounded-full h-2.5">
+                <div
+                  :class="`h-2.5 rounded-full transition-all duration-1000 ${
+                    policy.status === 'Achieved' ? 'bg-emerald-500' :
+                    policy.status === 'Failed' ? 'bg-red-500' : 'bg-blue-600'
+                  }`"
+                  :style="{ width: `${policy.progress}%` }"
+                ></div>
+              </div>
+            </div>
+          </div>
 
-              <div class="pt-4 border-t border-slate-100">
+          <!-- 2. 該候選人的其他政見 -->
+          <div v-if="otherPolicies.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="side-other-policies">
+            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><FileText class="text-slate-400" :size="20" />該候選人的其他政見</h3>
+            <div class="space-y-3">
+              <router-link
+                v-for="p in otherPolicies"
+                :key="p.id"
+                :to="`/policy/${p.id}`"
+                class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
+              >
+                <div class="flex justify-between items-start mb-1">
+                  <span :class="`text-xs px-1.5 py-0.5 rounded ${p.status === 'Campaign Pledge' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
+                    {{ p.status === 'Campaign Pledge' ? '承諾' : '追蹤中' }}
+                  </span>
+                  <span class="text-[10px] text-slate-400">{{ p.category }}</span>
+                </div>
+                <h5 class="text-sm font-medium text-navy-900 group-hover:text-blue-600 line-clamp-1">{{ p.title }}</h5>
+              </router-link>
+              <router-link
+                v-if="otherPolicies.length >= 3"
+                :to="`/politician/${politician.id}`"
+                class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
+              >
+                查看更多 <ChevronRight :size="12" />
+              </router-link>
+            </div>
+          </div>
+
+          <!-- 3. 其它學經歷：原本人物卡裡所屬政黨、選區、經歷、學歷那一段 -->
+          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="side-background">
+            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="20" />其它學經歷</h3>
+            <div class="space-y-4">
+              <div>
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">所屬政黨</h4>
                 <span :class="`inline-block px-3 py-1 rounded text-sm font-bold
                   ${politician.party === '國民黨' ? 'bg-blue-50 text-blue-700' :
@@ -811,7 +827,7 @@ async function copyCitation() {
               </div>
 
               <div class="pt-4 border-t border-slate-100">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h3>
+                <h4 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Briefcase class="text-slate-400" :size="18" /> 經歷</h4>
                 <ul class="space-y-3">
                   <template v-if="politician.experience?.length">
                     <li v-for="(exp, i) in politician.experience" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ exp }}</li>
@@ -821,7 +837,7 @@ async function copyCitation() {
               </div>
 
               <div class="pt-4 border-t border-slate-100">
-                <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h3>
+                <h4 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><GraduationCap class="text-slate-400" :size="18" /> 學歷</h4>
                 <ul class="space-y-3">
                   <template v-if="politician.education?.length">
                     <li v-for="(edu, i) in politician.education" :key="i" class="text-sm text-slate-600 pl-4 border-l-2 border-slate-200">{{ edu }}</li>
@@ -829,33 +845,23 @@ async function copyCitation() {
                   <li v-else class="text-slate-400 text-sm">暫無資料</li>
                 </ul>
               </div>
+            </div>
+          </div>
 
-              <div v-if="otherPolicies.length > 0" class="pt-6 mt-2 border-t border-slate-100">
-                <h4 class="text-sm font-bold text-navy-900 mb-3">該候選人的其他政見</h4>
-                <div class="space-y-3">
-                  <router-link
-                    v-for="p in otherPolicies"
-                    :key="p.id"
-                    :to="`/policy/${p.id}`"
-                    class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
-                  >
-                    <div class="flex justify-between items-start mb-1">
-                      <span :class="`text-xs px-1.5 py-0.5 rounded ${p.status === 'Campaign Pledge' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
-                        {{ p.status === 'Campaign Pledge' ? '承諾' : '追蹤中' }}
-                      </span>
-                      <span class="text-[10px] text-slate-400">{{ p.category }}</span>
-                    </div>
-                    <h5 class="text-sm font-medium text-navy-900 group-hover:text-blue-600 line-clamp-1">{{ p.title }}</h5>
-                  </router-link>
-                  <router-link
-                    v-if="otherPolicies.length >= 3"
-                    :to="`/politician/${politician.id}`"
-                    class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
-                  >
-                    查看更多 <ChevronRight :size="12" />
-                  </router-link>
-                </div>
-              </div>
+          <!-- 4. 引用這筆資料（2026-09-23；2026-10-06 從主欄移到右側欄最下面）：伺服器端渲染，AI 讀網頁時看得到；資料是 CC BY 4.0，引用要標出處 -->
+          <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="cite">
+            <h3 class="text-lg font-bold text-navy-900 mb-2 flex items-center gap-2">
+              <Quote class="text-blue-600" :size="20" />
+              引用這筆資料
+            </h3>
+            <p class="text-sm text-slate-700 leading-relaxed break-all select-all">{{ citation }}</p>
+            <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
+              <ClientOnly>
+                <button type="button" class="px-3 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 whitespace-nowrap shrink-0" @click="copyCitation">
+                  {{ citationCopied ? '已複製' : '複製引用' }}
+                </button>
+              </ClientOnly>
+              <span>資料依 <a :href="DATA_LICENSE_URL" target="_blank" rel="noopener noreferrer" class="underline">CC BY 4.0</a> 授權，轉載或 AI 轉述請附上這個網址。</span>
             </div>
           </div>
         </div>

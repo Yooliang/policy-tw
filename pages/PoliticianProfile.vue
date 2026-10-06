@@ -498,7 +498,7 @@ usePageHead({
                 <div v-else class="space-y-8">
                   <div v-for="group in campaignGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
                     </div>
                   </div>
@@ -547,7 +547,7 @@ usePageHead({
                 <div class="space-y-8">
                   <div v-for="group in historyGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" />
                     </div>
                   </div>

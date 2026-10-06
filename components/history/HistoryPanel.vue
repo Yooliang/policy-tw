@@ -9,6 +9,10 @@ import { hostOf, shortUrlsIn } from '../../lib/url'
 
 /**
  * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設展開、標題帶筆數；時間軸每筆可個別收合看驗證者與改動。
+ * 字級規則（2026-10-06，小良哥）：區塊「內容」不用粗體、不加大字，全部同一級 text-xs（原本中繼資料就是這一級）；層次只靠顏色與膠囊底色分，不靠粗細或大小。
+ * 標題列（圖示＋標題＋筆數）不在此限，維持跟頁面上其他區塊標題一致。狀態、型別膠囊保留顏色、不粗。
+ * 這條規則涵蓋子元件 HistoryEntryDetail、TimelineNote、ScoreBar；之後在這些元件加東西，也別再加 font-bold／font-medium 或 text-sm 以上。
+ * 沿革：2026-09-17 曾把摘要那句從預設 16px 粗體降到 text-sm font-medium，免得在 12px 的中繼資料裡跳得像主標；10-06 再往前一步，連 text-sm 與粗體都拿掉。
  * 沒有貢獻紀錄時顯示資料來源說明（匯入的 source_url／source_note），不留空白。
  */
 const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean }>(), { title: '查核履歷', compact: false })
@@ -85,11 +89,11 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
     />
 
     <div v-if="open" class="mt-4" data-testid="history-body">
-      <div v-if="loading && entries.length === 0" class="py-6 text-center text-slate-500"><Loader2 :size="22" class="animate-spin mx-auto mb-1 text-blue-500" />載入中…</div>
-      <div v-else-if="error" class="py-4 text-center text-sm" data-testid="history-error">
+      <div v-if="loading && entries.length === 0" class="py-6 text-center text-xs text-slate-500"><Loader2 :size="22" class="animate-spin mx-auto mb-1 text-blue-500" />載入中…</div>
+      <div v-else-if="error" class="py-4 text-center text-xs" data-testid="history-error">
         <AlertCircle :size="22" class="mx-auto mb-1 text-red-500" />
-        <p class="text-slate-700 font-bold">暫時讀不到履歷</p>
-        <button type="button" class="mt-2 px-3 py-1.5 rounded-lg bg-navy-900 text-white text-xs font-bold" @click="load()">再試一次</button>
+        <p class="text-slate-700">暫時讀不到履歷</p>
+        <button type="button" class="mt-2 px-3 py-1.5 rounded-lg bg-navy-900 text-white text-xs" @click="load()">再試一次</button>
       </div>
       <!-- 還沒有貢獻紀錄：排在同一條時間軸上講一句（2026-09-18），
            格式跟下面的紀錄、跟政見頁「還沒有人問」一致，不再是框外的一段小字。
@@ -110,21 +114,21 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
           <button type="button" class="w-full text-left" @click="toggleEntry(e.id)">
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span class="font-mono text-slate-400">{{ formatDate(e.at) }}</span>
-              <span class="font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
+              <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
               <!-- 已上線不再標籤（2026-09-17）：左邊那顆綠點講的就是這件事。
                    其他狀態留著——點只分得出綠（已上線）／橘（爭議）／琥珀（其餘），
                    「待驗證」與「驗證中」靠這個標籤才分得出來。 -->
-              <span v-if="e.status !== 'applied'" :class="['font-bold px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
+              <span v-if="e.status !== 'applied'" :class="['px-2 py-0.5 rounded-full', STATUS_CLASS[e.status] ?? 'bg-slate-100 text-slate-600']">{{ e.status_label }}</span>
               <!-- 改了幾處放在上面這一列（2026-09-17）：它跟型別、狀態一樣是這筆的屬性，
                    擺在下面那排跟「誰提交、幾票」混在一起，看的人要掃兩遍 -->
               <span v-if="e.edits.length" class="text-slate-500">改動 {{ e.edits.length }} 處</span>
               <span v-if="e.reverted" class="text-amber-700 inline-flex items-center gap-1"><Undo2 :size="11" /> 已還原</span>
             </div>
-            <!-- 一般大小就好（2026-09-17）：這是履歷的一列，不是標題，
+            <!-- 同一級大小、不粗（2026-09-17 降級，2026-10-06 再統一成 text-xs）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
-            <p :class="['mt-1 text-sm font-medium text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
+            <p :class="['mt-1 text-xs text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-              <span>提交：<b class="text-slate-700">{{ e.agent_name ?? '?' }}</b><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
+              <span>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <!-- 票數改成三顆小膠囊（2026-09-17）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」
                    在一排中繼資料裡最長，但講的只是三個數字 -->
               <span class="inline-flex items-center gap-1">
@@ -145,7 +149,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
         </li>
       </ol>
       <div v-if="hasMore" class="mt-4 text-center">
-        <button type="button" class="px-4 py-2 rounded-lg bg-white border border-slate-300 text-sm font-bold text-navy-900 hover:bg-slate-50" :disabled="loading" @click="load(nextCursor)" data-testid="history-more">
+        <button type="button" class="px-4 py-2 rounded-lg bg-white border border-slate-300 text-xs text-navy-900 hover:bg-slate-50" :disabled="loading" @click="load(nextCursor)" data-testid="history-more">
           <Loader2 v-if="loading" :size="14" class="animate-spin inline mr-1" />載入更多
         </button>
       </div>
