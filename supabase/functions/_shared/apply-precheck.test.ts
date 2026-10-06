@@ -268,7 +268,7 @@ Deno.test("candidacy：politician_id 已被合併 → 400 apply_would_fail", asy
 Deno.test("candidacy：同一年已有另一種正式參選紀錄 → 400 apply_would_fail（electionTypeSwitch 同一套判準）", async () => {
   const { client } = fakeSupabase({
     politicians: { data: [{ id: POLITICIAN_ID, merged_into: null }] },
-    politician_elections: { data: [{ politician_id: POLITICIAN_ID, election_id: 2026, election_type: "縣市長", candidate_status: "registered" }] },
+    politician_elections: { data: [{ politician_id: POLITICIAN_ID, election_id: 2026, election_type: "縣市長", candidacy_status: "filed" }] },
   });
   const res = await handleContribute(client, "https://x", candidacyBody(POLITICIAN_ID, "縣市議員"), "ip-1", noVote);
   assertEquals(res.status, 400);
@@ -279,7 +279,7 @@ Deno.test("candidacy：同一年已有另一種正式參選紀錄 → 400 apply_
 Deno.test("candidacy：同一年已有紀錄但不是正式狀態（傳聞）→ 照常收", async () => {
   const { client } = fakeSupabase({
     politicians: { data: [{ id: POLITICIAN_ID, merged_into: null }] },
-    politician_elections: { data: [{ politician_id: POLITICIAN_ID, election_id: 2026, election_type: "縣市長", candidate_status: "rumored" }] },
+    politician_elections: { data: [{ politician_id: POLITICIAN_ID, election_id: 2026, election_type: "縣市長", candidacy_status: null }] },
   });
   const res = await handleContribute(client, "https://x", candidacyBody(POLITICIAN_ID, "縣市議員"), "ip-1", noVote);
   assertEquals(res.status, 201);

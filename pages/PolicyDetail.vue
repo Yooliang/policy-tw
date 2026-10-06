@@ -30,6 +30,7 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
+import { electionOutcome } from '../lib/candidate-status'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import { ListChecks, Scale } from 'lucide-vue-next'
@@ -304,11 +305,11 @@ const { questions, loadQuestions, answersByQuestion, loadAnswers } = useCitizenQ
 /**
  * 這筆承諾所屬那場選舉的結果。落選就不會有執行進度——畫面要說出來，
  * 不然看的人只看到一片空白，不知道是還沒人追，還是根本不可能有（2026-09-18）。
- * 查不到結果（過去選舉九成還是空的）就什麼都不說，不猜。
+ * 查不到結果（已投票屆別九成還是空的）就什麼都不說，不猜。
  */
 const campaignResult = computed(() => {
   if (!isCampaign.value || !policy.value?.electionId) return null
-  return politician.value?.elections?.find((e) => e.electionId === policy.value!.electionId)?.electionResult ?? null
+  return electionOutcome(politician.value?.elections?.find((e) => e.electionId === policy.value!.electionId)?.candidacyStatus)
 })
 
 const policyQuestions = computed(() => (policy.value ? questions.value.filter((q) => q.policyId === policy.value!.id) : []))

@@ -6,13 +6,13 @@
  * 所以 2024 落選的立委候選人也掛著「台南市立委」，跟現任立委長得一模一樣。
  *
  * 這裡分成兩個純函式：
- *   officeTitles()   職稱：只認現任（視圖 politician_offices，migration 20261004000005；#345 起改名 politician_offices_derived，任期表第二階段才接手），沒有就是空陣列
+ *   officeTitles()   職稱：只認現任（任期表 politician_offices，由視圖 politicians_with_elections.offices 帶出來；#345 第二階段 A 起讀任期表，之前是舊視圖 politician_offices_derived），沒有就是空陣列
  *   candidacyBadge() 參選狀況：這一屆那一筆參選紀錄，例如「2026 台南市長・已登記」
  * 兩個都可能是空的，空的就不要顯示——不要拿另一個去充當。
  * 一筆參選紀錄的狀態字（投完票只講結果、沒結果寫「結果待補」）是 candidacyNote()，人物頁、人物一覽、政黨頁共用。
  */
 import { participationLabel } from './participation-label'
-import type { CandidateStatus, PoliticianElectionData, PoliticianOffice, PoliticianTerm } from '../types'
+import type { CandidacyStatus, PoliticianElectionData, PoliticianOffice, PoliticianTerm } from '../types'
 
 /**
  * 職位位階，數字小的排前面。順序照 types.ts 的 ElectionType，不是自己排的
@@ -61,26 +61,21 @@ export function withdrawalText(withdrawnAfterFiling: boolean | null | undefined)
 }
 
 /**
- * 參選狀況的狀態文字。投完票之後結果就是事實，優先於登記階段的狀態。
- * 選前那幾種照 politician_elections.candidate_status（協議的詞）。
- * confirmed 只表示「表態參選」（#345 後續：正式名單公告後在名單上的是 qualified）。
+ * 參選狀況的狀態文字（#345 第二階段 A：只讀 candidacy_status 一欄；結果與登記階段本來就在同一欄）。
+ * 退選／不參選的說法看退選前有沒有登記過（withdrawalText）；空值（傳聞，不收）回 undefined——不顯示比瞎猜好。
+ * 舊的「已審定」不再單獨標：正式名單上的人跟已登記同一個值 filed。
  */
 export function candidacyStatusText(
-  status: CandidateStatus | undefined,
-  result: 'elected' | 'not_elected' | undefined,
+  status: CandidacyStatus | null | undefined,
   withdrawnAfterFiling?: boolean | null,
 ): string | undefined {
-  if (result === 'elected') return '當選'
-  if (result === 'not_elected') return '落選'
   switch (status) {
     case 'elected': return '當選'
-    case 'defeated': return '落選'
-    case 'qualified': return '已審定'
-    case 'registered': return '已登記'
-    case 'confirmed': return '表態參選'
-    case 'likely': return '可能參選'
-    case 'rumored': return '傳聞參選'
-    case 'not_running': return withdrawalText(withdrawnAfterFiling)
+    case 'not_elected': return '落選'
+    case 'filed': return '已登記'
+    case 'declared': return '表態參選'
+    case 'considering': return '考慮參選'
+    case 'withdrawn': return withdrawalText(withdrawnAfterFiling)
     default: return undefined
   }
 }
@@ -91,16 +86,16 @@ export const RESULT_PENDING = '結果待補'
 /**
  * 一筆參選紀錄的狀態字，人物頁、人物一覽、政黨頁共用這一份（2026-10-06 主線裁定三處講法統一，原本在 lib/people-directory.ts）。
  * 投完票之後只講結果：當選、落選、不參選（退選）；結果還沒補上的講「結果待補」——
- * 不再講登記階段的「表態參選」「已登記」：2022 早期匯入的人狀態多半停在 confirmed，畫面上寫「表態參選」，
- * 其實他們都在選票上（#345 後續裁定：已投票屆別早期匯入的 confirmed 讀成已登記）。還沒投票的照登記階段（candidacyStatusText）。
+ * 不再講登記階段的「表態參選」「已登記」：2022 早期匯入的人登記階段多半是 filed，畫面上寫「已登記」，
+ * 其實他們都在選票上。還沒投票的照登記階段（candidacyStatusText）。
  * `voted`＝這一屆投票日已經過了。
  */
-export function candidacyNote(rec: Pick<PoliticianElectionData, 'candidateStatus' | 'electionResult' | 'withdrawnAfterFiling'>, voted: boolean): string {
-  if (rec.electionResult === 'elected' || rec.candidateStatus === 'elected') return '當選'
-  if (rec.electionResult === 'not_elected' || rec.candidateStatus === 'defeated') return '落選'
-  if (rec.candidateStatus === 'not_running') return withdrawalText(rec.withdrawnAfterFiling)
+export function candidacyNote(rec: Pick<PoliticianElectionData, 'candidacyStatus' | 'withdrawnAfterFiling'>, voted: boolean): string {
+  if (rec.candidacyStatus === 'elected') return '當選'
+  if (rec.candidacyStatus === 'not_elected') return '落選'
+  if (rec.candidacyStatus === 'withdrawn') return withdrawalText(rec.withdrawnAfterFiling)
   if (voted) return RESULT_PENDING
-  return candidacyStatusText(rec.candidateStatus, rec.electionResult, rec.withdrawnAfterFiling) ?? ''
+  return candidacyStatusText(rec.candidacyStatus, rec.withdrawnAfterFiling) ?? ''
 }
 
 /**
@@ -121,7 +116,7 @@ export function candidacyBadge(
   const what = participationLabel(record) || record.position || ''
   if (!what) return undefined
   // running＝這一屆真的有在選（未參選、落選的不算）；標題寫「…候選人」時要看這個，別把沒選的人寫成候選人
-  const running = record.candidateStatus !== 'not_running' && record.electionResult !== 'not_elected'
+  const running = record.candidacyStatus !== 'withdrawn' && record.candidacyStatus !== 'not_elected'
   return { label: `${electionId} ${what}・${status}`, what: `${electionId} ${what}`, status, running }
 }
 

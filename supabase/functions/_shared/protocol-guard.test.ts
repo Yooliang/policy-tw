@@ -431,7 +431,7 @@ Deno.test("競選承諾：還沒投票的屆別不可以被問「進度如何」
     "投票日條件不見了：競選承諾必須等所屬選舉的投票日過了才派 progress_stale（屆別空的也會被這個條件排掉）",
   );
   assert(
-    /election_result\s+IN\s*\(\s*'not_elected'\s*,\s*'withdrawn'\s*\)/.test(stale),
+    /candidacy_status\s+IN\s*\(\s*'not_elected'\s*,\s*'withdrawn'\s*\)/.test(stale),
     "落選／退選者的承諾永遠不會有進度，要排掉，否則每 14 天重派一次",
   );
   // 施政類不受影響：那一支問法本來就是對的，不要被一起排掉

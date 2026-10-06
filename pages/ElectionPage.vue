@@ -57,7 +57,7 @@ function withCurrentElectionData(politician: any): any {
   return {
     ...politician,
     candNo: electionData.candNo,
-    candidateStatus: electionData.candidateStatus,
+    candidacyStatus: electionData.candidacyStatus,
     sourceNote: electionData.sourceNote,
     position: electionData.position || politician.position,
     electionType,
@@ -272,11 +272,11 @@ const timeLeft = computed(() => {
   return { days: difference > 0 ? Math.floor(difference / (1000 * 60 * 60 * 24)) : 0 }
 })
 
-// 本選舉的候選人；AI 推測但未登記（not_running）的人不進選舉頁，各級 grid 與統計數字都由這裡衍生
+// 本選舉的候選人；退選（withdrawn，含 AI 推測但未登記的）與傳聞（空值）的人不進選舉頁，各級 grid 與統計數字都由這裡衍生
 const electionPoliticians = computed(() =>
   politicians.value.filter(c =>
     c.electionIds?.includes(electionId.value) &&
-    isRunningCandidate(getPoliticianElectionData(c, electionId.value)?.candidateStatus)
+    isRunningCandidate(getPoliticianElectionData(c, electionId.value)?.candidacyStatus)
   )
 )
 
@@ -384,7 +384,7 @@ const availableVillages = computed(() => {
 })
 
 const filteredPoliticians = computed(() => {
-  // 關鍵：套用當前選舉的特定資料，確保 candidateStatus/subRegion 等欄位正確
+  // 關鍵：套用當前選舉的特定資料，確保 candidacyStatus/subRegion 等欄位正確
   let result = electionPoliticians.value.map(withCurrentElectionData)
   if (selectedRegion.value !== 'All') {
     result = result.filter(c => sameRegionName(c.region, selectedRegion.value))

@@ -151,8 +151,9 @@ Deno.test("派工臂：接進 arms、缺口條件、一個單位一件最多 120
   assert(prevArms.length >= 20, `前一版 arms 只解析出 ${prevArms.length} 支`);
   for (const a of prevArms) assertStringIncludes(arms, a, `arms 掉了 ${a}`);
   const arm = await fnBody("contribution_auto_tasks_election_results");
-  assertStringIncludes(arm, "pe.election_result IS NULL");
-  assertStringIncludes(arm, "pe.candidate_status <> 'not_running'");
+  // #345 第二階段 A：結果空白＝狀態不是當選、落選，而且不是退選（讀 candidacy_status，不讀舊的 election_result／candidate_status）
+  assertStringIncludes(arm, "COALESCE(pe.candidacy_status, '') NOT IN ('elected', 'not_elected', 'withdrawn')");
+  assert(!/pe\.(election_result|candidate_status)/.test(arm), "派工臂不再讀舊的兩欄");
   assertStringIncludes(arm, "e.election_date < CURRENT_DATE", "還沒投票的屆別不派");
   assertStringIncludes(arm, "p.merged_into IS NULL");
   assertStringIncludes(arm, `(row_number() OVER w - 1) / ${MAX_RESULTS_PER_SUBMISSION} + 1 AS part,`, "派工臂的上限跟交件上限同一個數字");
@@ -194,11 +195,11 @@ Deno.test("交件：四欄照 target、items 每項只收兩欄、id 不重複�
 // ── 4. 落庫 ────────────────────────────────────────────────────────
 Deno.test("落庫規劃：只補空白；同結果略過；不同結果不覆蓋；別的屆別或選舉略過", () => {
   const plan = planElectionResults([
-    { id: 1, election_id: 2022, election_type: "村里長", election_result: null },
-    { id: 2, election_id: 2022, election_type: "村里長", election_result: "elected" },
-    { id: 3, election_id: 2022, election_type: "村里長", election_result: "not_elected" },
-    { id: 4, election_id: 2026, election_type: "村里長", election_result: null },
-    { id: 5, election_id: 2022, election_type: "縣市議員", election_result: null },
+    { id: 1, election_id: 2022, election_type: "村里長", candidacy_status: "filed" },
+    { id: 2, election_id: 2022, election_type: "村里長", candidacy_status: "elected" },
+    { id: 3, election_id: 2022, election_type: "村里長", candidacy_status: "not_elected" },
+    { id: 4, election_id: 2026, election_type: "村里長", candidacy_status: null },
+    { id: 5, election_id: 2022, election_type: "縣市議員", candidacy_status: "filed" },
   ], [
     { politician_election_id: 1, election_result: "elected" }, { politician_election_id: 2, election_result: "elected" },
     { politician_election_id: 3, election_result: "elected" }, { politician_election_id: 4, election_result: "elected" },
@@ -213,9 +214,9 @@ Deno.test("落庫規劃：只補空白；同結果略過；不同結果不覆蓋
 function seedCandidacies() {
   return {
     politician_elections: [
-      { id: 101, election_id: 2022, election_type: "村里長", election_result: null, politician_id: "p1" },
-      { id: 102, election_id: 2022, election_type: "村里長", election_result: null, politician_id: "p2" },
-      { id: 103, election_id: 2022, election_type: "村里長", election_result: "not_elected", politician_id: "p3" },
+      { id: 101, election_id: 2022, election_type: "村里長", candidacy_status: "filed", politician_id: "p1" },
+      { id: 102, election_id: 2022, election_type: "村里長", candidacy_status: null, politician_id: "p2" },
+      { id: 103, election_id: 2022, election_type: "村里長", candidacy_status: "not_elected", politician_id: "p3" },
     ],
     edit_history: [],
   };
@@ -227,15 +228,16 @@ Deno.test("落庫：結果空白的寫進去、每一位一筆 edit_history（�
   const out = await applyContribution(fake.client, row({ ...PAYLOAD, items: [...PAYLOAD.items, { politician_election_id: 103, election_result: "elected" }] }));
   assertEquals(out.status, "applied", out.message);
   const pe = (id: number) => fake.db.politician_elections.find((r) => r.id === id)!;
-  assertEquals([pe(101).election_result, pe(102).election_result, pe(103).election_result], ["elected", "not_elected", "not_elected"]);
+  assertEquals([pe(101).candidacy_status, pe(102).candidacy_status, pe(103).candidacy_status], ["elected", "not_elected", "not_elected"]);
+  assert(pe(101).election_result === undefined, "落庫不再寫舊的 election_result（由資料庫觸發器同步）");
   const edits = fake.db.edit_history.filter((e) => e.table_name === "politician_elections");
-  assertEquals(edits.map((e) => [e.record_id, e.field, e.old_value, e.new_value]).sort(), [["101", "election_result", null, "elected"], ["102", "election_result", null, "not_elected"]]);
+  assertEquals(edits.map((e) => [e.record_id, e.field, e.old_value, e.new_value]).sort(), [["101", "candidacy_status", "filed", "elected"], ["102", "candidacy_status", null, "not_elected"]]);
   assertStringIncludes(out.message, "已補 2 位（當選 1、落選 1）");
   assertStringIncludes(out.message, "103", "沒覆蓋的那一位要講出來");
   // 還原：倒回空白
   fake.db.edit_history.forEach((e, i) => { e.id = i + 1; });
   const steps = planRevert(fake.db.edit_history as never);
-  assertEquals(steps.map((s) => s.op === "restore" ? [s.record_id, s.field, s.value] : null).filter(Boolean).sort(), [["101", "election_result", null], ["102", "election_result", null]]);
+  assertEquals(steps.map((s) => s.op === "restore" ? [s.record_id, s.field, s.value] : null).filter(Boolean).sort(), [["101", "candidacy_status", "filed"], ["102", "candidacy_status", null]]);
   // 同一份再交一次：都補過了 → superseded
   const again = await applyContribution(fake.client, row(PAYLOAD, "c-2"));
   assertEquals(again.status, "superseded");

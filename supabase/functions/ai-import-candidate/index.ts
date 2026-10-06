@@ -4,6 +4,7 @@ import {
   ambiguousPayload,
   ensurePolitician,
   findOrCreateElection,
+  importCandidacyStatus,
   positionToElectionType,
   upsertParticipation,
 } from "../_shared/candidate-import.ts";
@@ -30,7 +31,7 @@ interface ImportRequest {
     party?: string;
     position: string;
     region: string;
-    status?: string; // confirmed, likely, rumored
+    status?: string; // confirmed, likely（rumored 不收，#345）
     current_position?: string;
     note?: string;
     confidence?: number;
@@ -158,14 +159,20 @@ async function handleImportCandidate(
     return json({ success: true, ...ambiguousPayload(candidate.name, ensured.resolution) });
   }
 
+  const electionType = positionToElectionType(candidate.position);
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,
     election_id: electionId,
     position: candidate.position,
-    election_type: positionToElectionType(candidate.position),
-    candidate_status: candidate.status || undefined,
+    election_type: electionType,
+    // 不收傳聞（#345）：rumored 與沒寫狀態的，既有紀錄不動、新增的不建
+    candidacy_status: await importCandidacyStatus(supabase, candidate.status, electionId, electionType),
     source_note: sourceNote,
   });
+
+  if (participation.outcome === "skipped") {
+    return json({ success: true, skipped: true, message: `沒有匯入 ${candidate.name}：${participation.reason}`, politician_id: ensured.politician_id });
+  }
 
   return json({
     success: true,

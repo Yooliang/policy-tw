@@ -4,6 +4,7 @@ import {
   ambiguousPayload,
   ensurePolitician,
   findOrCreateElection,
+  importCandidacyStatus,
   positionToElectionType,
   upsertParticipation,
 } from "../_shared/candidate-import.ts";
@@ -229,7 +230,7 @@ async function handleQueryCandidates(supabase: any, body: any): Promise<Response
       current_position,
       politician_elections!inner (
         id,
-        candidate_status,
+        candidacy_status,
         verified,
         elections!inner (
           id,
@@ -274,7 +275,7 @@ async function handleQueryCandidates(supabase: any, body: any): Promise<Response
     position: p.position,
     region: p.region,
     current_position: p.current_position,
-    candidate_status: p.politician_elections?.[0]?.candidate_status,
+    candidacy_status: p.politician_elections?.[0]?.candidacy_status,
     verified: p.politician_elections?.[0]?.verified,
   }));
 
@@ -461,14 +462,26 @@ async function handleImportCandidate(supabase: any, body: any): Promise<Response
     return successResponse(ambiguousPayload(candidate.name, ensured.resolution));
   }
 
+  const electionType = positionToElectionType(candidate.position);
   const participation = await upsertParticipation(supabase, {
     politician_id: ensured.politician_id,
     election_id: electionId,
     position: candidate.position,
-    election_type: positionToElectionType(candidate.position),
-    candidate_status: candidate.status || "rumored",
+    election_type: electionType,
+    // 不收傳聞（#345）：以前沒寫狀態就當 rumored 建一筆；現在 rumored 與沒寫的，既有紀錄不動、新增的不建
+    candidacy_status: await importCandidacyStatus(supabase, candidate.status, electionId, electionType),
     source_note: sourceNote,
   });
+
+  if (participation.outcome === "skipped") {
+    return successResponse({
+      skipped: true,
+      reason: "no_candidacy_status",
+      message: `沒有匯入 ${candidate.name}：${participation.reason}`,
+      name: candidate.name,
+      politician_id: ensured.politician_id,
+    });
+  }
 
   return successResponse({
     action: participation.outcome,
@@ -965,7 +978,7 @@ async function handleDeduplicateCandidates(supabase: any, body: any): Promise<Re
       politician_id,
       election_id,
       position,
-      candidate_status,
+      candidacy_status,
       created_at,
       politicians (
         id,

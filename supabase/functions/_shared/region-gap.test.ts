@@ -141,7 +141,7 @@ Deno.test("姓名鍵：SQL 的 cec_name_key 跟 cec_candidates.name_norm（TS �
 Deno.test("補縣市／補選區：只管縣市長、縣市議員、立委；表態不參選的不問選區", () => {
   const body = between(regionGapSql, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_region_gap", "COMMENT ON FUNCTION contribution_auto_tasks_region_gap");
   assertStringIncludes(body, "pe.election_type IN ('縣市長', '縣市議員', '立法委員')");
-  assertMatch(body, /pe\.election_type IN \('縣市議員', '立法委員'\)\s+AND pe\.candidate_status <> 'not_running'/);
+  assertMatch(body, /pe\.election_type IN \('縣市議員', '立法委員'\)\s+AND pe\.candidacy_status IS DISTINCT FROM 'withdrawn'/);
   assertStringIncludes(body, "pe.region_id IS NULL AS no_region");
   assertStringIncludes(body, "p.merged_into IS NULL");
   // 鄉鎮層級五種的「region_id 是空的」是 township_gap 的訊號，這裡不能搶

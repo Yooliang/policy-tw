@@ -4,8 +4,8 @@ import { PolicyStatus } from "../types.ts";
 
 // 2026-09-19：落選者的競選承諾只留在個人頁，首頁清單不再列
 Deno.test("isLostCampaignPromise：競選承諾＋那場結果 not_elected 才算；查不到結果、當選、非承諾都不算", () => {
-  const lost = { elections: [{ electionId: 2022, electionResult: "not_elected" as const }] };
-  const won = { elections: [{ electionId: 2022, electionResult: "elected" as const }] };
+  const lost = { elections: [{ electionId: 2022, candidacyStatus: "not_elected" as const }] };
+  const won = { elections: [{ electionId: 2022, candidacyStatus: "elected" as const }] };
   const unknown = { elections: [{ electionId: 2022 }] };
   const campaign2022 = { status: PolicyStatus.CAMPAIGN, electionId: 2022 };
   assertEquals(isLostCampaignPromise(campaign2022, lost as never), true);

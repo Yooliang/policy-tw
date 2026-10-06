@@ -38,6 +38,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
  */
 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
+import { protocolStatusFromCandidacy } from "../_shared/candidacy-status.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
@@ -92,7 +93,7 @@ async function askPolicy(supabase: Sb, apiKey: JevKeyLike, policyId: string) {
   // query-bounds: ok — 同一個人的政見，目前最多 26 筆，而且一個人不會有上千條政見
   const [{ data: sibs, error: sErr }, { data: els, error: eErr }] = await Promise.all([
     supabase.from("policies").select("id, title, description, election_id").eq("politician_id", target.politician_id).is("removed_at", null),
-    supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result").eq("politician_id", target.politician_id),
+    supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", target.politician_id),
   ]);
   if (sErr) throw new Error(`policies siblings: ${sErr.message}`);
   if (eErr) throw new Error(`politician_elections: ${eErr.message}`);
@@ -549,11 +550,11 @@ Deno.serve(async (req) => {
           const [pa, pb, ea, eb] = await Promise.all([
             supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", keep).maybeSingle(),
             supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", remove).maybeSingle(),
-            supabase.from("politician_elections").select("election_id, election_type, candidate_status").eq("politician_id", keep).limit(20),
-            supabase.from("politician_elections").select("election_id, election_type, candidate_status").eq("politician_id", remove).limit(20),
+            supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", keep).limit(20),
+            supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", remove).limit(20),
           ]);
           if (!pa.data || !pb.data) { tally["fetch:noperson"] = (tally["fetch:noperson"] ?? 0) + 1; return; }
-          const el = (rows: unknown[] | null) => (rows ?? []).map((e) => { const r = e as Record<string, unknown>; return `${r.election_id} ${r.election_type ?? ""} ${r.candidate_status ?? ""}`; });
+          const el = (rows: unknown[] | null) => (rows ?? []).map((e) => { const r = e as Record<string, unknown>; return `${r.election_id} ${r.election_type ?? ""} ${r.candidacy_status ?? ""}`; });
           const { state: st, questions } = buildPairAsk({ ...(pa.data as Record<string, unknown>), elections: el(ea.data) } as never, { ...(pb.data as Record<string, unknown>), elections: el(eb.data) } as never);
           const res = await askJev(apiKey, st, questions);
           cost += res.usage.cost; asked++;
@@ -1181,7 +1182,7 @@ Deno.serve(async (req) => {
       }
 
       const { data: pe, error: peErr } = await supabase.from("politician_elections")
-        .select("id, politician_id, election_id, election_type, candidate_status, election_result, politicians(name, party, region)")
+        .select("id, politician_id, election_id, election_type, candidacy_status, politicians(name, party, region)")
         .eq("id", parsed.pe_id).maybeSingle();
       if (peErr) throw new Error(`politician_elections read: ${peErr.message}`);
       const pol = (pe?.politicians ?? null) as { name?: string; party?: string | null; region?: string | null } | null;
@@ -1205,12 +1206,12 @@ Deno.serve(async (req) => {
       // 建議的貢獻：照 skill.md 的規矩——結果用 candidacy 補、登記狀態用 correction 改
       const suggested = !agg.counts ? null
         : parsed.task_type === "election_result_missing"
-          ? { contribution_type: "candidacy", task_id: taskId, source_urls: [targetUrl], payload: { politician_id: pe.politician_id, name: subject.name, election_id: subject.election_id, election_type: subject.election_type, region: subject.region, candidate_status: pe.candidate_status ?? "confirmed", election_result: agg.value } }
-          : { contribution_type: "correction", task_id: taskId, source_urls: [targetUrl], payload: { target_table: "politician_elections", target_id: String(pe.id), changes: [{ field: "candidate_status", current_value: pe.candidate_status ?? null, correct_value: agg.value }], reason: `Jev 依 ${targetUrl} 判定 ${agg.value}（${agg.probability}）` } };
+          ? { contribution_type: "candidacy", task_id: taskId, source_urls: [targetUrl], payload: { politician_id: pe.politician_id, name: subject.name, election_id: subject.election_id, election_type: subject.election_type, region: subject.region, candidate_status: protocolStatusFromCandidacy(pe.candidacy_status as string | null, true), election_result: agg.value } }
+          : { contribution_type: "correction", task_id: taskId, source_urls: [targetUrl], payload: { target_table: "politician_elections", target_id: String(pe.id), changes: [{ field: "candidate_status", current_value: protocolStatusFromCandidacy(pe.candidacy_status as string | null, false), correct_value: agg.value }], reason: `Jev 依 ${targetUrl} 判定 ${agg.value}（${agg.probability}）` } };
       return json({
         success: true, task_id: taskId, url: targetUrl, field,
         same_person: agg.person, value: agg.value, probability: agg.probability, counts: agg.counts, min_probability: MIN_PROBABILITY,
-        current: { candidate_status: pe.candidate_status ?? null, election_result: pe.election_result ?? null },
+        current: { candidacy_status: pe.candidacy_status ?? null },
         suggested_contribution: suggested,
         hint: agg.counts ? "這一頁足以定值：把 suggested_contribution 原樣 POST /contribute（可補 note；得票數、得票率不收）"
           : agg.person.choice !== "same_person" ? "這一頁講的可能不是這個人（同名？）：換一個來源"

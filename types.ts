@@ -46,12 +46,8 @@ export interface Region {
   village?: string;      // Village (村里)
 }
 
-// Candidate status for elections (選舉前中後三階段)
-// 選前: rumored(傳聞), likely(可能參選)
-// 選中: confirmed(表態參選：本人宣布、政黨提名；#345 後續起正式名單公告後在名單上的是 qualified)
-// 選後: elected(當選), defeated(落選)
-// registered＝中選會已登記、qualified＝已審定、not_running＝AI 推測但未登記（選舉頁不顯示）
-export type CandidateStatus = 'rumored' | 'likely' | 'confirmed' | 'registered' | 'qualified' | 'not_running' | 'elected' | 'defeated';
+// 參選狀態是一欄六值 CandidacyStatus（見下面；#345 第二階段 A 起畫面只讀這一欄，
+// 舊的 candidate_status＋election_result 兩欄讀取端已不再使用，第二階段 B 刪欄）
 
 // Election-specific data for a politician
 export interface PoliticianElectionData {
@@ -63,11 +59,12 @@ export interface PoliticianElectionData {
   region: string;        // Region name (選區)
   subRegion?: string;    // Sub-region (子選區)
   village?: string;      // Village (村里)
-  candidateStatus?: CandidateStatus; // 參選狀態：confirmed(已宣布)、likely(可能參選)、rumored(傳聞)
   candNo?: number;       // 選票上的號次（名單公告、抽籤後才有）
-  electionResult?: 'elected' | 'not_elected'; // 那場選舉的結果；過去選舉九成還是空的（代理補中）
   sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
-  /** 參選狀態合一欄（#345，六值；第一階段畫面還讀 candidateStatus／electionResult） */
+  /**
+   * 參選狀態合一欄（#345，六值：選前、選中、選後同一欄；不收傳聞，空值＝不顯示）。
+   * 取代舊的 candidateStatus（登記階段）＋electionResult（當選落選）兩欄；過去選舉的結果空著＝「結果待補」。
+   */
   candidacyStatus?: CandidacyStatus;
   /** 退選之前有沒有登記過：true 登記後退選／false 表態不參選／空的＝判斷不了（顯示「不參選」）。只在退選時有值（#345 後續） */
   withdrawnAfterFiling?: boolean;
@@ -77,7 +74,7 @@ export interface PoliticianElectionData {
 export type CandidacyStatus = 'considering' | 'declared' | 'filed' | 'withdrawn' | 'elected' | 'not_elected';
 
 /**
- * 任期表 `politician_offices` 的一列（#345）。第一階段網站職稱還不讀它；人物頁只拿已卸任的來列「卸任的公職」。
+ * 任期表 `politician_offices` 的一列（#345）。人物頁拿已卸任的來列「卸任的公職」；現任的職稱走 `PoliticianOffice`（同一張表，第二階段 A 起視圖 `politicians_with_elections.offices` 直接讀它）。
  * `endBasis` 是 inferred 的卸任日是推定的（轉任別的公職，記新任期就任前一天），畫面要標「推定」。
  */
 export interface PoliticianTerm {
@@ -95,8 +92,9 @@ export interface PoliticianTerm {
 }
 
 /**
- * 一筆現任公職（資料庫視圖 `politician_offices_derived` 的一列——#345 起舊視圖改名保留，任期表 `politician_offices` 第二階段才切過來，由 `politicians_with_elections.offices` 帶出來）。
- * 判「是不是現任」已經在資料庫做完（當選＋任期內，見 migration 20261004000005），
+ * 一筆現任公職（任期表 `politician_offices` 的一列：已就任而且卸任日為空；由 `politicians_with_elections.offices` 帶出來。
+ * #345 第二階段 A 起讀任期表，之前讀舊視圖 `politician_offices_derived`，兩邊 8,544 位職稱逐人比對一樣）。
+ * 判「是不是現任」已經在資料庫做完（見 migration 20261006034510），
  * 前端只負責組字與排序——職稱的規則在 `lib/politician-office.ts`。
  */
 export interface PoliticianOffice {
@@ -137,7 +135,7 @@ export interface Politician {
   educationLevel?: string;
   education?: string[];
   experience?: string[];
-  candidateStatus?: CandidateStatus; // 參選狀態 (for current election context)
+  candidacyStatus?: CandidacyStatus; // 參選狀態 (for current election context)
   /** 這一屆退選前有沒有登記過（for current election context；#345 後續） */
   withdrawnAfterFiling?: boolean;
   candNo?: number; // 號次 (for current election context)
@@ -535,9 +533,7 @@ export interface RawPoliticianElectionData {
   region?: string;
   subRegion?: string;
   village?: string;
-  candidateStatus?: CandidateStatus;
   candNo?: number;
-  electionResult?: 'elected' | 'not_elected';
   sourceNote?: string;
   candidacyStatus?: CandidacyStatus | null;
   withdrawnAfterFiling?: boolean | null;

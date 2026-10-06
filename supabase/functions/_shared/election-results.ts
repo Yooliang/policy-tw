@@ -64,7 +64,8 @@ export interface ExistingCandidacy {
   id: number;
   election_id: number;
   election_type: string | null;
-  election_result: string | null;
+  /** 參選狀態合一欄（#345 第二階段 A）：elected／not_elected 才算有結果，其餘（登記階段、退選、空值）都是結果空白 */
+  candidacy_status: string | null;
 }
 
 export interface ResultsPlan {
@@ -99,12 +100,13 @@ export function planElectionResults(
       plan.stray.push(it.politician_election_id);
       continue;
     }
-    if (cur.election_result === null || cur.election_result === undefined) {
+    const current = cur.candidacy_status === "elected" || cur.candidacy_status === "not_elected" ? cur.candidacy_status : null;
+    if (current === null) {
       plan.writes.push({ id: cur.id, election_result: it.election_result });
-    } else if (cur.election_result === it.election_result) {
+    } else if (current === it.election_result) {
       plan.unchanged.push(cur.id);
     } else {
-      plan.conflicts.push({ id: cur.id, current: cur.election_result, claimed: it.election_result });
+      plan.conflicts.push({ id: cur.id, current, claimed: it.election_result });
     }
   }
   return plan;

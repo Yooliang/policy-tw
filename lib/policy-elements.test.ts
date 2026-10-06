@@ -77,7 +77,7 @@ function policy(over: Partial<Policy> = {}): Policy {
 const ctx = (over: Partial<DueContext> = {}): DueContext => ({
   today: "2026-10-06",
   electionDateOf: () => "2022-11-26",
-  electionResultOf: () => "elected",
+  candidacyStatusOf: () => "elected",
   ...over,
 });
 
@@ -109,9 +109,9 @@ Deno.test("期限已到：競選承諾要等那場選舉投完票；落選、退
   assertEquals(deadlineDue(pledge, ctx({ electionDateOf: () => "2026-11-28" })), null, "還沒投票的承諾問不出做到沒有");
   assertEquals(deadlineDue(pledge, ctx({ electionDateOf: () => undefined })), null);
   assert(deadlineDue(pledge, ctx({ electionDateOf: () => "2022-11-26" })));
-  assertEquals(deadlineDue(policy(), ctx({ electionResultOf: () => "not_elected" })), null);
-  assertEquals(deadlineDue(policy(), ctx({ electionResultOf: () => "withdrawn" })), null);
-  assert(deadlineDue(policy(), ctx({ electionResultOf: () => undefined })), "不知道結果時照列（跟 SQL 一樣只排除明確落選、退選）");
+  assertEquals(deadlineDue(policy(), ctx({ candidacyStatusOf: () => "not_elected" })), null);
+  assertEquals(deadlineDue(policy(), ctx({ candidacyStatusOf: () => "withdrawn" })), null);
+  assert(deadlineDue(policy(), ctx({ candidacyStatusOf: () => undefined })), "不知道結果時照列（跟 SQL 一樣只排除明確落選、退選）");
 });
 
 Deno.test("期限已到的清單：期限早的在前", () => {
@@ -139,6 +139,6 @@ Deno.test("跟派工臂 deadline_due 同一套條件（SQL 文字比對）", asy
     "NOT IN ('Achieved', 'Failed')",
     "tl.date > d.deadline_date",
     "'Campaign Pledge'",
-    "election_result IN ('not_elected', 'withdrawn')",
+    "candidacy_status IN ('not_elected', 'withdrawn')",
   ]) assert(arm.includes(must), `SQL 的 deadline_due 少了「${must}」——前端的 deadlineDue 跟它要同一套`);
 });

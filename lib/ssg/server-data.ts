@@ -178,7 +178,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
   const politiciansByElection: Record<string, number> = {}
   for (const election of base.elections) {
     politiciansByElection[String(election.id)] = politicians
-      .filter((pl) => pl.elections?.some((e) => e.electionId === election.id && isRunningCandidate(e.candidateStatus)))
+      .filter((pl) => pl.elections?.some((e) => e.electionId === election.id && isRunningCandidate(e.candidacyStatus)))
       .length
   }
   return { totalPoliticians: politicians.length, politiciansByElection }
@@ -211,7 +211,7 @@ export function electionRegionRoutes(full: DataSnapshot): string[] {
     const regions = new Set<string>()
     for (const pl of full.politicians) {
       for (const e of pl.elections ?? []) {
-        if (e.electionId === election.id && isRunningCandidate(e.candidateStatus)) regions.add(e.region)
+        if (e.electionId === election.id && isRunningCandidate(e.candidacyStatus)) regions.add(e.region)
       }
     }
     for (const county of TAIWAN_COUNTIES) if (regions.has(county)) paths.push(`/election/${election.id}/${county}`)
@@ -227,7 +227,7 @@ export function electionRegionRoutes(full: DataSnapshot): string[] {
 export function electionTownshipRoutes(full: DataSnapshot): string[] {
   const knownElections = new Set(full.elections.map((e) => e.id))
   const records = full.politicians.flatMap((pl) => (pl.elections ?? [])
-    .filter((e) => knownElections.has(e.electionId) && isRunningCandidate(e.candidateStatus)))
+    .filter((e) => knownElections.has(e.electionId) && isRunningCandidate(e.candidacyStatus)))
   return townshipPagesOf(
     records,
     (region) => isCounty(region),

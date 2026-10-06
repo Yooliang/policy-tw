@@ -87,7 +87,7 @@ Deno.test('參與者：官方角色照 提案 → 共同提案 → 連署 → �
 })
 
 Deno.test('時間軸的職位：當選才寫職位，沒當選或還沒投票寫「參選人」（職稱只能從當選來）；競選承諾不重複印', () => {
-  const person = { elections: [{ electionId: 2022, electionType: '縣市長', electionResult: 'elected' }, { electionId: 2026, electionType: '縣市長' }], offices: [] }
+  const person = { elections: [{ electionId: 2022, electionType: '縣市長', candidacyStatus: 'elected' }, { electionId: 2026, electionType: '縣市長' }], offices: [] }
   assertEquals(termRoleLabel(person, 2022), '縣市長')
   assertEquals(termRoleLabel(person, 2026), '縣市長參選人')
   assertEquals(termRoleLabel({ elections: [{ electionId: 2022, electionType: '縣市議員' }], offices: [{ electionId: 2022 }] }, 2022), '縣市議員', '參選紀錄沒標當選、但現任公職就是那一屆，也算當選')

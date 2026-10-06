@@ -58,8 +58,8 @@ export interface PolicyLite {
 export interface ElectionLite {
   election_id: number;
   election_type: string | null;
-  candidate_status: string | null;
-  election_result: string | null;
+  /** 參選狀態合一欄（#345 第二階段 A；以前是 candidate_status＋election_result 兩欄） */
+  candidacy_status: string | null;
 }
 export interface JevQuestion {
   type: "choice";
@@ -105,7 +105,7 @@ export function buildPolicyAsk(target: PolicyLite, siblings: PolicyLite[], elect
     if (labelled.length > 0) state.already_labelled = labelled;
     const criteria: Record<string, string> = Object.fromEntries(elections.map((e) => [
       String(e.election_id),
-      `${e.election_id}年${e.election_type ?? ""}（${e.election_result ?? e.candidate_status ?? ""}）`,
+      `${e.election_id}年${e.election_type ?? ""}（${e.candidacy_status ?? ""}）`,
     ]));
     criteria.unknown = "從文字判斷不出來";
     questions.election = {

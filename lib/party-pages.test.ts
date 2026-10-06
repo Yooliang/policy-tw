@@ -19,15 +19,15 @@ const P = (p: Partial<Politician> & { id: string; name: string; party: string })
 
 const people: Politician[] = [
   P({ id: "1", name: "甲", party: "中國國民黨", offices: [{ electionId: 2022, electionType: "縣市長", region: "台中市" }],
-    elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市長", electionResult: "elected" }] }),
-  P({ id: "2", name: "乙", party: "國民黨", elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市議員", electionResult: "not_elected" }] }),
+    elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市長", candidacyStatus: "elected" }] }),
+  P({ id: "2", name: "乙", party: "國民黨", elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市議員", candidacyStatus: "not_elected" }] }),
   P({ id: "3", name: "丙", party: "中國國民黨", offices: [{ electionId: 2022, electionType: "鄉鎮市長", region: "屏東縣", subRegion: "東港鎮" }],
     elections: [
-      { electionId: 2022, position: "", region: "屏東縣", subRegion: "東港鎮", electionType: "鄉鎮市長", electionResult: "elected" },
-      { electionId: 2026, position: "", region: "屏東縣", electionType: "縣市長", candidateStatus: "registered" },
+      { electionId: 2022, position: "", region: "屏東縣", subRegion: "東港鎮", electionType: "鄉鎮市長", candidacyStatus: "elected" },
+      { electionId: 2026, position: "", region: "屏東縣", electionType: "縣市長", candidacyStatus: "filed" },
     ] }),
   P({ id: "4", name: "丁", party: "中國國民黨", offices: [{ electionId: 2022, electionType: "縣市議員", region: "台中市" }],
-    elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市議員", electionResult: "elected" }] }),
+    elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "縣市議員", candidacyStatus: "elected" }] }),
   P({ id: "5", name: "戊", party: "無黨籍及未經政黨推薦", elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "村里長" }] }),
   P({ id: "6", name: "己", party: "臺灣基進黨" }),
   P({ id: "7", name: "庚", party: "台灣團結聯盟" }),
@@ -74,7 +74,7 @@ Deno.test("各黨頁：現職只來自任期、首長與民代分開；落選者
   assertEquals(partyPage(16, people, seed, ELECTIONS, TODAY), null, "沒有人的政黨沒有頁面");
   assertEquals(partyPage(999999, people, seed, ELECTIONS, TODAY), null);
   // 投完票、結果還沒補上的：講「結果待補」，不講登記階段的字
-  const pending = partyPage(1, [P({ id: "x", name: "癸", party: "國民黨", elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "村里長", subRegion: "北區", village: "賴村里", candidateStatus: "confirmed" }] })], seed, ELECTIONS, TODAY)!;
+  const pending = partyPage(1, [P({ id: "x", name: "癸", party: "國民黨", elections: [{ electionId: 2022, position: "", region: "台中市", electionType: "村里長", subRegion: "北區", village: "賴村里", candidacyStatus: "filed" }] })], seed, ELECTIONS, TODAY)!;
   assertEquals(pending.elections[0].groups[0].people[0], { id: "x", name: "癸", what: "台中市北區賴村里長", status: "結果待補" });
 });
 

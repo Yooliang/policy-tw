@@ -67,7 +67,7 @@ export interface TownshipPage {
  * 一位都沒有的鄉鎮（例如 2026 還沒登記的）不出頁也不進網站地圖——空頁被收錄只是佔位；
  * 舊網址轉過去照樣打得開（firebase.json 讓沒預渲染的鄉鎮頁回 app 殼、客戶端渲染、noindex）。
  *
- * records 只要傳「在選的」參選紀錄（not_running 先濾掉，跟頁面一致）；isCounty／isSpecialMunicipality 由呼叫端給，
+ * records 只要傳「在選的」參選紀錄（退選與傳聞先濾掉，跟頁面一致）；isCounty／isSpecialMunicipality 由呼叫端給，
  * 這支檔案不依賴縣市清單。同一個鄉鎮的「臺」「台」兩種寫法算同一頁，網址用先看到的寫法（資料裡目前沒有兩種並存）。
  */
 export function townshipPagesOf(

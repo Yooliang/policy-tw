@@ -19,6 +19,7 @@ import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
+import { resultOfCandidacyStatus } from "./candidacy-status.ts";
 import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
@@ -239,7 +240,7 @@ export const PARTY_INFO_VERIFY_HINT =
   "全部對得上才投 agree；任一項來源沒寫或對不上投 disagree，note 寫是哪一個政黨哪一欄；來源打不開投 unsure。";
 
 /** 參選紀錄給代理看的欄位（不參選重查：退選前有沒有登記、核對過名冊沒有） */
-const PARTICIPATION_FIELDS = ["id", "election_id", "election_type", "position", "candidate_status", "candidacy_status", "withdrawn_after_filing", "verified", "source_note"] as const;
+const PARTICIPATION_FIELDS = ["id", "election_id", "election_type", "position", "candidacy_status", "withdrawn_after_filing", "verified", "source_note"] as const;
 
 const POLITICIAN_BRIEF = ["id", "name", "party", "region", "election_type", "current_position", "birth_year"] as const;
 /** 政見三要素一列給代理看的欄位（#364） */
@@ -374,7 +375,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       })).filter((x) => typeof x.title === "string" && x.title.length > 0);
       return {
         politician: p ? { ...pick(p, POLITICIAN_BRIEF), has_avatar: !!p.avatar_url } : null,
-        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "source_note"])),
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidacy_status", "source_note"])),
         existing_policies: list,
         existing_policies_total: data.policies_total ?? (data.policies ?? []).length,
         queued_policies: queued,
@@ -394,8 +395,8 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         policy,
         politician: pick(p, POLITICIAN_BRIEF),
         // 競選承諾的 progress_stale 問的是「當選了嗎？兌現了嗎？」，
-        // 所以參選紀錄（含 election_result）要一起給，代理不必為此多打一次 API。
-        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
+        // 所以參選紀錄（含結果：candidacy_status 的 elected／not_elected）要一起給，代理不必為此多打一次 API。
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidacy_status"])),
         recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
       };
     }
@@ -484,7 +485,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "progress", "source_url", "proposed_date", "last_updated"])!, ["description"]) : null,
         politician: pick(p, POLITICIAN_BRIEF),
         deadline: deadline ? pick(deadline, ELEMENT_FIELDS) : null,
-        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidacy_status"])),
         recent_tracking_logs: (data.tracking_logs ?? []).slice(0, MAX_TRACKING_LOGS).map((l) => truncateFields(pick(l, ["date", "event", "description", "source_url"])!, ["description"])),
       };
     }
@@ -499,7 +500,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           // 指到的選區／鄉鎮／村里（有的話），比對時看得出是不是同一個地方的同名者
           ...(at.sub_region ? { sub_region: at.sub_region } : {}),
           ...(at.village ? { village: at.village } : {}),
-          candidate_status: row.candidate_status, position: row.position,
+          candidacy_status: row.candidacy_status, position: row.position,
         };
       });
       return {
@@ -531,7 +532,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       return {
         policy,
         politician: pick(p, POLITICIAN_BRIEF),
-        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result"])),
+        elections: (data.elections ?? []).map((e) => pick(e, ["election_id", "election_type", "candidacy_status"])),
         system_check: data.system_check ?? null,
         hint: "打開 policy.source_url：這是不是這個人說過的承諾、標題與內容對不對、是哪一場選舉的。都對 → no_change 且 outcome=confirmed（note 寫你核對到什麼，只有 confirmed 會把這筆標成已核對）；來源拿不到 → no_change 且 outcome=unreachable（不會標成已核對，過幾天換人再試）；來源打得開卻沒寫到這筆政見 → 先找真出處，找到用 correction 換 source_url、找不到才 no_change + not_found；欄位錯 → correction；不是政見 → removal。**每一個網址都要打開**，同批匯入的政見會互相借錯連結。system_check 是系統逐欄核對的結果，contradicted 的欄位優先看；它判 cannot_tell 是「系統看不出來」，不是背書。",
       };
@@ -571,7 +572,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       const pr = data.pair;
       const side = (who: Obj | null, elections: Obj[], policies: Obj[]) => ({
         politician: who ? truncateFields(who, ["bio"]) : null,
-        elections: elections.map((e) => pick(e, ["election_id", "election_type", "candidate_status", "election_result", "position", "source_note"])),
+        elections: elections.map((e) => pick(e, ["election_id", "election_type", "candidacy_status", "position", "source_note"])),
         policies: policies.slice(0, 10).map((x) => pick(x, ["id", "title", "election_id", "status"])),
         policies_total: policies.length,
       });
@@ -606,7 +607,7 @@ export function buildLookup(target: Obj): Record<string, string> {
   if (pid) {
     out.politician = `${REST_BASE}/politicians?select=*&id=eq.${pid}`;
     out.policies = `${REST_BASE}/policies?select=id,title,category,status,progress,source_url,election_id&politician_id=eq.${pid}&order=proposed_date.desc`;
-    out.elections = `${REST_BASE}/politician_elections?select=id,election_id,election_type,position,candidate_status,source_note,verified&politician_id=eq.${pid}`;
+    out.elections = `${REST_BASE}/politician_elections?select=id,election_id,election_type,position,candidacy_status,source_note,verified&politician_id=eq.${pid}`;
   }
   if (policyId) {
     out.policy = `${REST_BASE}/policies?select=*&id=eq.${policyId}`;
@@ -687,7 +688,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (taskType === "legacy_audit" && policyId) {
     const [pl, el, jv] = await Promise.all([
       supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
-      pid ? supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result").eq("politician_id", pid).order("election_id", { ascending: false }).limit(10) : Promise.resolve({ data: [] }),
+      pid ? supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", pid).order("election_id", { ascending: false }).limit(10) : Promise.resolve({ data: [] }),
       supabase.from("jev_decisions").select("choice, probability, probabilities, asked_at").eq("subject_type", "policy").eq("subject_id", policyId).eq("question", "source_support").order("asked_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     data.policy = (pl.data as Obj | null) ?? null;
@@ -703,8 +704,8 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       const [pa, pb, ea, eb, la, lb, jv] = await Promise.all([
         supabase.from("politicians").select("*").eq("id", a).maybeSingle(),
         supabase.from("politicians").select("*").eq("id", b).maybeSingle(),
-        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, position, source_note").eq("politician_id", a).order("election_id", { ascending: false }).limit(20),
-        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, position, source_note").eq("politician_id", b).order("election_id", { ascending: false }).limit(20),
+        supabase.from("politician_elections").select("election_id, election_type, candidacy_status, position, source_note").eq("politician_id", a).order("election_id", { ascending: false }).limit(20),
+        supabase.from("politician_elections").select("election_id, election_type, candidacy_status, position, source_note").eq("politician_id", b).order("election_id", { ascending: false }).limit(20),
         supabase.from("policies").select("id, title, election_id, status").eq("politician_id", a).is("removed_at", null).order("proposed_date", { ascending: false }).limit(50),
         supabase.from("policies").select("id, title, election_id, status").eq("politician_id", b).is("removed_at", null).order("proposed_date", { ascending: false }).limit(50),
         supabase.from("jev_decisions").select("choice, probability, asked_at").eq("subject_type", "politician_pair").eq("subject_id", pairKey).eq("question", "same_person").order("asked_at", { ascending: false }).limit(1).maybeSingle(),
@@ -732,13 +733,13 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // 拆兩段在資料庫篩：有選區的看選區、沒選區的看人物；各自翻頁撈完。
       // 以鄉鎮市區為單位的清查（村里長等，target.region 是「縣市＋鄉鎮」）再加鄉鎮條件（2026-10-05；
       // 在這之前拿「台北市中山區」去比 regions.region，ours 永遠是空的，代理會以為我們一個都沒有而重複補）。
-      const base = "candidate_status, position, region_id";
+      const base = "candidacy_status, position, region_id";
       const [byDistrict, byPerson, history] = await Promise.all([
         fetchAllRows<Obj>("roster ours by district", (from, to) => {
           const q = supabase.from("politician_elections")
             .select(`${base}, regions!inner(region, sub_region, village), politicians!inner(id, name, party, region)`)
             .eq("election_id", electionId).eq("election_type", electionType)
-            .neq("candidate_status", "not_running").eq("regions.region", scope.county);
+            .or("candidacy_status.is.null,candidacy_status.neq.withdrawn").eq("regions.region", scope.county);
           return (scope.township ? q.eq("regions.sub_region", scope.township) : q)
             .order("politician_id", { ascending: true }).range(from, to);
         }),
@@ -746,7 +747,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
           const q = supabase.from("politician_elections")
             .select(`${base}, politicians!inner(id, name, party, region, sub_region)`)
             .eq("election_id", electionId).eq("election_type", electionType)
-            .neq("candidate_status", "not_running").is("region_id", null).eq("politicians.region", scope.county);
+            .or("candidacy_status.is.null,candidacy_status.neq.withdrawn").is("region_id", null).eq("politicians.region", scope.county);
           return (scope.township ? q.eq("politicians.sub_region", scope.township) : q)
             .order("politician_id", { ascending: true }).range(from, to);
         }),
@@ -772,7 +773,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   }
   if ((taskType === "policy_missing" || taskType === "term_policy_missing") && pid) {
     const [el, pol, queued, bul] = await Promise.all([
-      supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
+      supabase.from("politician_elections").select("election_id, election_type, candidacy_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
       supabase.from("policies").select("id, title, category, status, election_id", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
       // 還在等票的提交也要給代理看見（2026-09-17：「輪到這種任務時，要先問是不是
       // 已經有類似的政見了」）。只列已上線的害慘了李四川：21 筆等票的沒被列出來，
@@ -812,7 +813,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   // 承諾類的 progress_stale 要先判斷當選與否，把這個人的參選紀錄一起帶上
   if (taskType === "progress_stale" && pid) {
     const { data: el } = await supabase.from("politician_elections")
-      .select("election_id, election_type, candidate_status, election_result")
+      .select("election_id, election_type, candidacy_status")
       .eq("politician_id", pid).order("election_id", { ascending: false });
     data.elections = el ?? [];
   }
@@ -833,7 +834,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (taskType === "placeholder_politician" && pid) {
     // query-bounds: ok — 一個人的參選紀錄（一屆一筆）
     const { data: el } = await supabase.from("politician_elections")
-      .select("id, election_id, election_type, candidate_status, election_result, source_note")
+      .select("id, election_id, election_type, candidacy_status, source_note")
       .eq("politician_id", pid).order("election_id", { ascending: false }).limit(50);
     data.elections = el ?? [];
   }
@@ -847,7 +848,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   }
   if (taskType === "deadline_due" && pid) {
     const { data: el } = await supabase.from("politician_elections")
-      .select("election_id, election_type, candidate_status, election_result")
+      .select("election_id, election_type, candidacy_status")
       .eq("politician_id", pid).order("election_id", { ascending: false });
     data.elections = el ?? [];
   }
@@ -1081,7 +1082,7 @@ export function candidateReasons(candidate: Obj, payload: Obj, elections: Readon
   else if (candidate.region && payload.region) why.push(`縣市不同（清單 ${candidate.region}／提交 ${payload.region}）——清單的縣市可能標錯，以中選會 API 為準`);
   const mine = elections.filter((e) => e.politician_id === candidate.id);
   const sameType = mine.filter((e) => same(e.election_type, payload.election_type));
-  if (sameType.length > 0) why.push(`有 ${sameType.map((e) => `${e.election_id} ${e.election_type}（${e.candidate_status}）`).join("、")} 的紀錄`);
+  if (sameType.length > 0) why.push(`有 ${sameType.map((e) => `${e.election_id} ${e.election_type}（${e.candidacy_status}）`).join("、")} 的紀錄`);
   if (candidate.current_position) why.push(`現職 ${candidate.current_position}`);
   return why;
 }
@@ -1204,11 +1205,11 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
     }
     case "politician":
     case "candidacy": {
-      const elections = (data.elections ?? []).map((e) => pick(e, ["politician_id", "election_id", "election_type", "candidate_status", "source_note"]));
+      const elections = (data.elections ?? []).map((e) => pick(e, ["politician_id", "election_id", "election_type", "candidacy_status", "source_note"]));
       const candidates = (data.politicians ?? []).map((p) => ({
         ...pick(p, POLITICIAN_BRIEF),
         has_avatar: !!p.avatar_url,
-        elections: elections.filter((e) => e?.politician_id === p.id).map((e) => `${e?.election_id} ${e?.election_type}（${e?.candidate_status}）`),
+        elections: elections.filter((e) => e?.politician_id === p.id).map((e) => `${e?.election_id} ${e?.election_type}（${e?.candidacy_status}）`),
         // #8：為什麼被列進來——只講事實（同名／同出生年／同縣市／有哪一屆的紀錄），結論由你下
         why: candidateReasons(p, payload, (data.elections ?? []) as Obj[]),
       }));
@@ -1335,7 +1336,7 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       const pe = r.ctx.pe;
       const elRow = (e: Obj) => {
         const reg = (e.regions && typeof e.regions === "object" ? e.regions : {}) as Obj;
-        return { politician_election_id: e.id, election_id: e.election_id, election_type: e.election_type, place: [reg.region, reg.sub_region, reg.village].filter(Boolean).join(" ") || null, election_result: e.election_result ?? null };
+        return { politician_election_id: e.id, election_id: e.election_id, election_type: e.election_type, place: [reg.region, reg.sub_region, reg.village].filter(Boolean).join(" ") || null, election_result: resultOfCandidacyStatus(e.candidacy_status as string | null | undefined) };
       };
       const problems = reassignProblems(ctx, payload);
       return {
@@ -1420,7 +1421,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
         if (!pid) return [] as Obj[];
         // query-bounds: ok — 一個人的參選紀錄，最多十幾屆
         const { data: rows } = await supabase.from("politician_elections")
-          .select("id, election_id, election_type, election_result, candidate_status, regions(region, sub_region, village)")
+          .select("id, election_id, election_type, candidacy_status, regions(region, sub_region, village)")
           .eq("politician_id", pid).order("election_id", { ascending: true }).limit(50);
         return (rows ?? []) as Obj[];
       };
@@ -1476,7 +1477,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     data.politicians = ps ?? [];
     const ids = (data.politicians ?? []).map((p) => p.id as string);
     if (ids.length > 0 && contributionType !== "policy") {
-      const { data: el } = await supabase.from("politician_elections").select("politician_id, election_id, election_type, candidate_status, source_note").in("politician_id", ids).order("election_id", { ascending: false });
+      const { data: el } = await supabase.from("politician_elections").select("politician_id, election_id, election_type, candidacy_status, source_note").in("politician_id", ids).order("election_id", { ascending: false });
       data.elections = el ?? [];
     }
     if (ids.length === 1 && contributionType === "policy") {
@@ -1496,7 +1497,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       if (missing.length > 0) {
         const [{ data: more }, { data: moreEl }] = await Promise.all([
           supabase.from("politicians").select("*").in("id", missing),
-          supabase.from("politician_elections").select("politician_id, election_id, election_type, candidate_status, source_note").in("politician_id", missing).order("election_id", { ascending: false }),
+          supabase.from("politician_elections").select("politician_id, election_id, election_type, candidacy_status, source_note").in("politician_id", missing).order("election_id", { ascending: false }),
         ]);
         data.politicians = [...(data.politicians ?? []), ...(more ?? [])];
         data.elections = [...(data.elections ?? []), ...(moreEl ?? [])];
@@ -1567,7 +1568,7 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       const [{ data: p }, { data: el }] = await Promise.all([
         supabase.from("politicians").select("*").eq("id", id).maybeSingle(),
         // query-bounds: ok — 一個人的參選紀錄（一屆一筆）
-        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, source_note").eq("politician_id", id).order("election_id", { ascending: false }).limit(50),
+        supabase.from("politician_elections").select("election_id, election_type, candidacy_status, source_note").eq("politician_id", id).order("election_id", { ascending: false }).limit(50),
       ]);
       data.politicians = p ? [p] : [];
       data.elections = el ?? [];
