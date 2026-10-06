@@ -106,7 +106,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
   candidacy_source_missing:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這筆參選紀錄缺東西，**缺什麼看 what_we_need 與 target.missing**：沒有網址來源、沒有縣市（region）、沒有選區（electoral_district），或鄉鎮層級選舉沒有鄉鎮（sub_region）。" +
-    "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘照現有資料原樣帶（candidate_status 不要順手改）；查不到就 no_change 說明你找過哪裡。" +
+    "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘欄位照那一屆的名冊填（candidate_status 不要順手改；party 填那一屆的推薦政黨，不要照抄他現在的政黨——人會換黨），查不到就 no_change 說明你找過哪裡。" +
     "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
     "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。",
@@ -136,6 +136,16 @@ export const TASK_GUIDANCE: Record<string, string> = {
   fix_disputed:
     "有人的貢獻被兩票反對擋下來了，任務敘述帶著每一條反對理由。請提一筆**改好的新貢獻**，不要只重送原本那一欄——反對意見指出的連帶問題要一起修掉。",
 
+  // 2026-10-06：測試資料的人物（removal 移除整個人）、政黨資訊缺口（party_info）
+  placeholder_politician:
+    "這位人物的姓名看起來是測試資料（例如「測試候選人ABC」）。先查中選會選舉資料庫、選委會公告、媒體有沒有這個人：" +
+    "**查無此人** → 用 removal 回報：target_table 填 politicians、target_id 填人物 id、reason（≥20 字）寫你查了哪些地方都沒有這個人；通過後整個人連參選紀錄一起刪（留履歷、可還原）；" +
+    "**真有其人** → 用 no_change（outcome=confirmed）回報，checked_urls 放看得到他的官方頁面。",
+  party_info_missing:
+    "這個政黨缺的資訊寫在 target.kind 與 target.missing：rename＝改名的界線日（新名稱開始用的日子、舊名稱停用的日子）；" +
+    "off_registry＝內政部名冊查無此名稱的那幾個——是不是名冊上某個政黨改名前的名字（前身）、什麼時候停用；dissolved＝名冊狀態是解散、廢止、撤銷，停用日是哪一天。" +
+    "查內政部政黨資訊網的政黨頁、內政部的公告或政黨自己的公告，用 party_info 交：parties 每個政黨一項，改名要新舊兩筆一起交；" +
+    "**查不到確切的日子就不要交那一欄**（不要填月初、年初湊）；名字像不算改名，要有來源講明是同一個政黨改名。查不到就用 no_change 說明你查了哪些網址。",
   not_running_recheck:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這一列被標成「不參選」，但沒有人對過官方登記名單——多半是早期匯入時就這樣寫的。"
@@ -282,7 +292,7 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   correction:
     "payload：target_table、target_id、changes[]（每項 {field, current_value, correct_value}）、reason。",
   removal:
-    "payload：target_table、target_id、reason（說明為什麼整筆不該存在）。",
+    "payload：target_table（policies 政見；politicians 人物，只收測試資料、查無此人這種）、target_id（uuid）、reason（≥20 字，說明為什麼整筆不該存在）。",
   no_change:
     "payload：task_id、outcome（confirmed／unreachable／not_found）、finding（你查了什麼、查到什麼）、checked_urls[]（你實際打開過的網址）。",
   merge_politician:
@@ -297,6 +307,9 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
+  // 政黨資訊（#346 第二階段）
+  party_info:
+    "payload：parties（每個政黨一項 {party_id, valid_from, valid_to, predecessor_id}，1～5 項、每項至少一欄；改名新舊兩筆一起交）、note（≥10 字：依據哪一份公告、上面怎麼寫）。日期是 YYYY-MM-DD，查不到確切日子就不要交那一欄；臉書、IG、Threads 不算出處。",
   // 政見三要素（#364）：一筆一條政見、1～3 個要素
   policy_elements:
     "payload：policy_id、elements[]（1～3 個，每個 {element：target 數值目標／deadline 達成期限／funding 財源；stated：true 原文有寫／false 查過原文沒寫；" +
@@ -330,6 +343,7 @@ const TARGET_TABLE: Record<string, string> = {
   policy_election_missing: "policies",
   policy_election_mismatch: "policies",
   policy_validity: "policies",
+  placeholder_politician: "politicians",
   legacy_audit: "policies",
   duplicate_policy: "policies",
 };
@@ -371,7 +385,7 @@ function buildPayload(
   // 一律轉字串：同樣是 politician_elections，從 target 拿到的是整數、從 task_id 解出來的是字串，
   // 兩種任務給的型別不一樣（2026-09-21 跑任務的代理回報）。送出去都收，但不一致本身就會讓人猶豫。
   const asText = (v: unknown): string | null => (v === null || v === undefined || v === "" ? null : String(v));
-  const rowTarget = asText(table === "policies" ? t.policy_id : t.politician_election_id) ?? asText(rowId);
+  const rowTarget = asText(table === "policies" ? t.policy_id : table === "politicians" ? t.politician_id : t.politician_election_id) ?? asText(rowId);
   switch (contributionType) {
     case "correction":
       if (!table) return null;
@@ -396,8 +410,20 @@ function buildPayload(
         target_table: table,
         // duplicate_policy 沒有單一列：哪一筆該移除是代理要判斷的，所以這裡刻意不填
         target_id: rowTarget ?? (taskType === "duplicate_policy" ? "（你判定該移除的那一筆 policy_id）" : "（這一列的 id）"),
-        reason: "（為什麼整筆不該存在）",
+        reason: taskType === "placeholder_politician" ? "（≥20 字：你查了哪些地方都沒有這個人）" : "（為什麼整筆不該存在）",
       };
+    case "party_info": {
+      // 政黨資訊缺口（2026-10-06）：要補哪個政黨、缺哪幾欄照 target；改名的那一種新舊兩筆都列
+      const ids = Array.isArray(t.party_ids) ? (t.party_ids as unknown[]) : [t.party_id];
+      const missing = Array.isArray(t.missing) ? (t.missing as unknown[]).map(String) : ["valid_to"];
+      return {
+        parties: ids.map((id) => ({
+          party_id: id ?? "（政黨 id）",
+          ...Object.fromEntries(missing.filter((f) => f !== "predecessor_id" || id === t.party_id).map((f) => [f, f === "predecessor_id" ? "（改名前那一筆的政黨 id；不是改名就刪掉這一欄）" : "（YYYY-MM-DD，來源寫得出這一天才填；查不到就刪掉這一欄）"])),
+        })),
+        note: "（依據哪一份公告、名冊頁或報導，上面怎麼寫）",
+      };
+    }
     case "no_change":
       return {
         task_id: taskId ?? "（這筆任務的 task_id）",
@@ -407,6 +433,19 @@ function buildPayload(
       };
     case "candidacy": {
       // 參選紀錄缺政黨（#346 第二階段，target.kind＝party）：照中選會名冊那一筆重交，地區照 target.fill、政黨照名冊原字
+      if (t.kind === "party_roster") {
+        // 2026 這一屆還沒投票：照中選會候選人登記彙總表的「推薦之政黨」（2026-10-06）
+        return {
+          politician_id: t.politician_id ?? "（人物 id）",
+          name: t.name ?? "（姓名）",
+          election_id: t.election_id ?? "（選舉年份）",
+          election_type: t.election_type ?? "（選舉類型）",
+          region: t.region ?? "（縣市）",
+          ...(t.election_type === "縣市議員" ? { electoral_district: "（登記彙總表上的選舉區，第NN選舉區）" } : {}),
+          party: "（登記彙總表上這一列的推薦之政黨，原字照抄；寫「無」就填「無」）",
+          candidate_status: t.candidate_status ?? "（照現況）",
+        };
+      }
       if (t.kind === "party") {
         const cec = (t.cec && typeof t.cec === "object" ? t.cec : {}) as Record<string, unknown>;
         const fill = (t.fill && typeof t.fill === "object" ? t.fill : {}) as Record<string, unknown>;
@@ -653,6 +692,8 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   policy_election_mismatch: ["correction", "no_change"],
   news_sweep: ["policy", "policy_progress", "no_change"],
   audit: ["correction", "policy_progress", "no_change"],
+  placeholder_politician: ["removal", "no_change"],
+  party_info_missing: ["party_info", "no_change"],
 };
 
 /** 這一種任務所有可能的回報骨架，key 是貢獻型別。單分支的回 null（用 report_template 就好）。 */

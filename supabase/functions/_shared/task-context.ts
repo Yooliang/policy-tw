@@ -46,6 +46,8 @@ export function truncateFields<T extends Obj>(row: T, fields: readonly string[])
 }
 
 export interface TaskContextData {
+  /** party_info_missing（2026-10-06）：要補的政黨（改名的那一種新舊兩筆） */
+  parties?: Obj[];
   /** profile_gap：內政部地方公職人員名單上同名同縣市的現職紀錄（照片、機關、職稱、黨籍），沒有就 undefined */
   moi_official?: Obj | null;
   /** profile_detail_gap：這個人的學經歷一項一列（視圖 politician_careers_full，#346）；needs_source＝待補出處。表還沒上線就是 undefined */
@@ -192,6 +194,16 @@ export const PARTY_GAP_HINT =
   "系統會用中選會的資料自動核對：我們只有一位同名、當選與否與推薦政黨都對得上就直接上線；推薦政黨對不上會被退件。" +
   "名冊上的不是同一個人（同名同姓）就不要交 candidacy，改用 no_change 回報、finding 寫「掛錯人」。";
 
+/**
+ * 參選紀錄缺政黨、這一屆還沒投票（2026-10-06）：candidacy_source_missing 的 party_roster 那一種
+ * （contribution_auto_tasks_party_roster 派），照中選會候選人登記彙總表的「推薦之政黨」補。
+ */
+export const PARTY_ROSTER_HINT =
+  "這一筆參選紀錄缺的是「這一次參選時的政黨」，這一屆還沒投票，中選會選舉資料庫還沒有名單——照中選會候選人登記彙總表（target.rosters）補：" +
+  "找到他那一列（縣市、選舉區、姓名都要對得上），用 candidacy 重交同一人同一屆，party 照那一列的「推薦之政黨」原字填（寫「無」就填「無」，系統認得是無黨籍），" +
+  "不要填他現在登記的政黨（target.person_party）——人會換黨，這一欄記的是這一次。縣市議員要帶 electoral_district（名冊上的選舉區）。" +
+  "source_urls 第一個放那份登記彙總表的網址：系統會逐位核對名冊上的姓名、縣市、政黨，吻合的一票就過。名冊上找不到他就用 no_change 回報，不要猜。";
+
 /** candidacy_source_missing 的 party 那一種（參選紀錄缺政黨） */
 export function isPartyGapTask(taskType: string, target: Obj | null | undefined): boolean {
   return taskType === "candidacy_source_missing" && !!target && target.kind === "party";
@@ -243,7 +255,8 @@ export function shapeTaskCurrent(
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
   const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
-    : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT : TASK_GUIDANCE[taskType]);
+    : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT
+    : taskType === "candidacy_source_missing" && target?.kind === "party_roster" ? PARTY_ROSTER_HINT : TASK_GUIDANCE[taskType]);
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
   // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
@@ -375,6 +388,12 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "candidacy_source_missing":
     case "election_result_missing":
       return { politician_election: data.politician_election ?? null, politician: pick(p, POLITICIAN_BRIEF) };
+    // 疑似測試資料的人物（2026-10-06）：這個人與他的參選紀錄
+    case "placeholder_politician":
+      return { politician: pick(p, POLITICIAN_BRIEF), elections: data.elections ?? [] };
+    // 政黨資訊缺口（2026-10-06）：要補的政黨現在的名稱起訖、前身、名冊狀態
+    case "party_info_missing":
+      return { parties: (data.parties ?? []).map((x) => pick(x, ["id", "name", "short_name", "moi_no", "moi_name", "moi_status", "valid_from", "valid_to", "predecessor_id"])) };
     // 不參選重查（含 filing 那一種）：那一列的狀態、退選前有沒有登記、核對過名冊沒有（#345 後續）
     case "not_running_recheck":
       return { politician_election: pick(data.politician_election ?? null, PARTICIPATION_FIELDS), politician: pick(p, POLITICIAN_BRIEF) };
@@ -755,6 +774,21 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policy = pl.data ?? null;
     data.elements = (el.data ?? []) as Obj[];
     data.tracking_logs = (logs.data ?? []) as Obj[];
+  }
+  if (taskType === "placeholder_politician" && pid) {
+    // query-bounds: ok — 一個人的參選紀錄（一屆一筆）
+    const { data: el } = await supabase.from("politician_elections")
+      .select("id, election_id, election_type, candidate_status, election_result, source_note")
+      .eq("politician_id", pid).order("election_id", { ascending: false }).limit(50);
+    data.elections = el ?? [];
+  }
+  if (taskType === "party_info_missing") {
+    const ids = (Array.isArray(target.party_ids) ? target.party_ids : [target.party_id]).filter((x) => typeof x === "number");
+    if (ids.length > 0) {
+      // query-bounds: ok — 一件任務最多兩個政黨（改名的新舊兩筆）
+      const { data: ps } = await supabase.from("parties").select("id, name, short_name, moi_no, moi_name, moi_status, valid_from, valid_to, predecessor_id").in("id", ids).limit(10);
+      data.parties = (ps ?? []) as Obj[];
+    }
   }
   if (taskType === "deadline_due" && pid) {
     const { data: el } = await supabase.from("politician_elections")
@@ -1172,6 +1206,14 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       };
     }
     case "removal":
+      // 移除人物（2026-10-06，只收測試資料、查無此人）：給這個人與他的參選紀錄
+      if (payload.target_table === "politicians") {
+        return {
+          politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
+          elections: data.elections ?? [],
+          hint: "這筆要把整個人（連參選紀錄）移除，只該用在測試資料、查無此人。自己查一次中選會選舉資料庫、選委會公告、媒體：真的查無此人才 agree；查得到這個人就 disagree，note 附你找到的網址。",
+        };
+      }
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null,
         politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
@@ -1381,6 +1423,15 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
   }
   if (contributionType === "removal") {
     const id = typeof payload.target_id === "string" ? payload.target_id : null;
+    if (id && payload.target_table === "politicians") {
+      const [{ data: p }, { data: el }] = await Promise.all([
+        supabase.from("politicians").select("*").eq("id", id).maybeSingle(),
+        // query-bounds: ok — 一個人的參選紀錄（一屆一筆）
+        supabase.from("politician_elections").select("election_id, election_type, candidate_status, election_result, source_note").eq("politician_id", id).order("election_id", { ascending: false }).limit(50),
+      ]);
+      data.politicians = p ? [p] : [];
+      data.elections = el ?? [];
+    }
     if (id && payload.target_table === "policies") {
       const { data: pl } = await supabase.from("policies").select("*").eq("id", id).maybeSingle();
       data.policy = pl ?? null;

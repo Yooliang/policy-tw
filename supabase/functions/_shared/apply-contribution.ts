@@ -1407,7 +1407,8 @@ async function applyRemoval(supabase: SupabaseLike, row: ContributionRow): Promi
   const ctx = ctxOf(row);
   const table = str(p.target_table);
   const targetId = str(p.target_id);
-  if (table !== "policies") return { status: "failed", message: `目前只能移除政見，收到 ${table}` };
+  if (table === "politicians") return await applyPoliticianRemoval(supabase, row);
+  if (table !== "policies") return { status: "failed", message: `目前只能移除政見或人物，收到 ${table}` };
   if (!targetId) return { status: "failed", message: "缺 target_id" };
 
   const { data: current, error: readError } = await supabase
@@ -1427,6 +1428,67 @@ async function applyRemoval(supabase: SupabaseLike, row: ContributionRow): Promi
   // 只記 removed_at 這一欄就夠 revert 用：把它倒回 null，資料就回到網站上
   await recordUpdate(supabase, ctx, "policies", targetId, "removed_at", null, "removed");
   return { status: "applied", policy_id: targetId, message: `政見「${current.title}」已從網站移除（資料留著，可還原）：${reason}` };
+}
+
+/**
+ * 移除人物（2026-10-06）擋在什麼情況：只收測試資料、查無此人這種——它身上不能掛著任何真的內容。
+ * 有政見（含已移除的）、任期、學經歷、公民提問、政策脈絡的角色或交接、或別人併進來的，都不是「不存在的人」，
+ * 要嘛是同一人重複（走 merge_politician），要嘛是資料錯（走 correction）。交件前置檢查（apply-precheck.ts）與落庫共用。
+ * 回傳擋下的理由；空陣列＝可以移除。
+ */
+export async function politicianRemovalBlockers(supabase: SupabaseLike, politicianId: string): Promise<string[]> {
+  const checks: Array<[string, string, string]> = [
+    ["policies", "politician_id", "政見"],
+    ["politician_offices", "politician_id", "任期"],
+    ["politician_careers", "politician_id", "學經歷"],
+    ["citizen_questions", "politician_id", "公民提問"],
+    ["lineage_participants", "politician_id", "政策脈絡的角色"],
+    ["handovers", "from_politician_id", "政策脈絡的交接"],
+    ["handovers", "to_politician_id", "政策脈絡的交接"],
+    ["politicians", "merged_into", "併進來的人物"],
+  ];
+  const out: string[] = [];
+  for (const [table, col, label] of checks) {
+    // query-bounds: ok — 只看有沒有（head＋count），不撈列
+    const { count, error } = await supabase.from(table).select("*", { count: "exact", head: true }).eq(col, politicianId);
+    throwIf(error, `${table} count`);
+    if ((count ?? 0) > 0 && !out.includes(label)) out.push(label);
+  }
+  return out;
+}
+
+/**
+ * 移除人物（測試資料、查無此人；2026-10-06 主線裁定「測試候選人」走 removal 流程，不直接刪）：
+ * 他的參選紀錄與人物本身整列刪掉，每一列整列寫進 edit_history（old＝整列、new＝null），還原時整列放回去——
+ * 先記參選紀錄、最後記人物，還原由新到舊，所以人物先回去、參選紀錄再回去（外鍵）。
+ * 身份鍵（politician_keys）隨人物連帶刪掉，人物放回去時由觸發器重建。
+ */
+async function applyPoliticianRemoval(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const ctx = ctxOf(row);
+  const targetId = str(row.payload.target_id);
+  if (!targetId) return { status: "failed", message: "缺 target_id" };
+  const { data: person, error: readError } = await supabase.from("politicians").select("*").eq("id", targetId).maybeSingle();
+  throwIf(readError, "politicians read");
+  if (!person) return { status: "superseded", message: `人物 ${targetId} 已經不在了（先前移除或合併過），不重複處理` };
+  const blockers = await politicianRemovalBlockers(supabase, targetId);
+  if (blockers.length > 0) {
+    return { status: "disputed", message: `「${person.name}」身上還有${blockers.join("、")}，不是查無此人的資料，不能整個移除；同一人重複請用 merge_politician，資料錯請用 correction` };
+  }
+  // query-bounds: ok — 一個人的參選紀錄（一屆一筆）
+  const { data: elections, error: peError } = await supabase.from("politician_elections").select("*").eq("politician_id", targetId).limit(50);
+  throwIf(peError, "politician_elections read");
+  for (const pe of (elections ?? []) as Obj[]) {
+    await recordUpdate(supabase, ctx, "politician_elections", String(pe.id), "*", pe, null);
+    const { error } = await supabase.from("politician_elections").delete().eq("id", pe.id);
+    throwIf(error, "politician_elections delete");
+  }
+  await recordUpdate(supabase, ctx, "politicians", targetId, "*", person, null);
+  const { error: delError } = await supabase.from("politicians").delete().eq("id", targetId);
+  throwIf(delError, "politicians delete");
+  return {
+    status: "applied",
+    message: `「${person.name}」已移除（人物與 ${(elections ?? []).length} 筆參選紀錄整列留在查核履歷，可還原）：${str(row.payload.reason) ?? ""}`,
+  };
 }
 
 async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {

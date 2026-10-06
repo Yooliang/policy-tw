@@ -17,7 +17,7 @@
 import { normalizeCorrection } from "./correction.ts";
 import { electionTypeSwitch } from "./candidate-import.ts";
 import { linkLevelProblem } from "./lineage.ts";
-import { loadPartyChain, resolveLineagePlace } from "./apply-contribution.ts";
+import { loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -185,7 +185,8 @@ export async function precheckApplyTargets(
       }
       case "removal": {
         const id = str(p.target_id);
-        if (id) policyIds.add(id);
+        if (id && p.target_table === "politicians") politicianIds.add(id);
+        else if (id) policyIds.add(id);
         break;
       }
       case "merge_politician": {
@@ -271,6 +272,8 @@ export async function precheckApplyTargets(
   const lineageRows = lineages.rows;
 
   const problems: PrecheckProblem[] = [];
+  /** 移除人物（2026-10-06）：人在不在由 checkPolitician 看，身上有沒有真的內容另外查（politicianRemovalBlockers） */
+  const personRemovals: Array<{ index: number; id: string }> = [];
   // 查詢本身失敗（DB 錯誤／丟例外）：這批 id 一律當「查不到問題」放行，不能把系統的錯當成擋代理的理由
   const checkPolitician = (i: number, id: string, path: string, verb: string): boolean => {
     if (!politicians.ok) return true;
@@ -311,7 +314,9 @@ export async function precheckApplyTargets(
       }
       case "removal": {
         const id = str(p.target_id);
-        if (id) checkPolicy(i, id, "payload.target_id", "無法移除：請重新確認 target_id", "先前已經移除過了，不用再交一次");
+        if (id && p.target_table === "politicians") {
+          if (checkPolitician(i, id, "payload.target_id", "無法移除：請重新確認 target_id（人物的 uuid）")) personRemovals.push({ index: i, id });
+        } else if (id) checkPolicy(i, id, "payload.target_id", "無法移除：請重新確認 target_id", "先前已經移除過了，不用再交一次");
         break;
       }
       case "merge_politician": {
@@ -417,6 +422,18 @@ export async function precheckApplyTargets(
       electionTypeSwitch({ election_type: existing.election_type, candidate_status: existing.candidate_status }, { election_type: c.electionType, position: c.position });
     } catch (e) {
       problems.push({ index: c.index, code: "apply_would_fail", path: "payload.election_type", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  for (const r of personRemovals) {
+    try {
+      const blockers = await politicianRemovalBlockers(supabase, r.id);
+      if (blockers.length > 0) {
+        problems.push({ index: r.index, code: "apply_would_fail", path: "payload.target_id",
+          message: `這位人物身上還有${blockers.join("、")}，不是查無此人的資料，不能整個移除；同一人重複請用 merge_politician，資料錯請用 correction` });
+      }
+    } catch (e) {
+      console.error("precheck removal blockers failed:", e instanceof Error ? e.message : String(e));
     }
   }
 

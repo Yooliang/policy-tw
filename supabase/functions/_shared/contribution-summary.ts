@@ -264,6 +264,7 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       summary = `建議移除${table} ${id.slice(0, 8)}：${clip(p.reason, 120)}`;
       targetName = null;
       if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);
+      if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null);
       break;
     }
     case "question_answer": {
