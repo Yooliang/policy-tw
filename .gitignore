@@ -44,6 +44,3 @@ deno.lock
 .wrangler/
 
 # 驗證 VM 腳本的本機狀態檔（每台機器各自產生）
-scripts/verify-vm/quota_raw.txt
-scripts/verify-vm/decision.txt
-scripts/verify-vm/used_names.sorted

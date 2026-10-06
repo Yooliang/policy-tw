@@ -69,7 +69,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - **量效能先實測**：`pg_stat_statements` 是從很久以前累計的，平均值會混進已經改善掉的舊查詢。下結論前用唯讀 `EXPLAIN ANALYZE` 實際量一次（10-06 曾因此誤判派工查詢 2.6 秒，實測 2 毫秒）。
 - **唯讀查正式庫**：`npx supabase db query --linked -f <檔>`，檔案第一行 `SET default_transaction_read_only = on;`。migration 用到的既有欄位先這樣確認存在（10-05 出過引用不存在欄位、正式庫失敗擋住整條部署）。
 - **CI 卡住先看 GitHub 狀態**：工作沒有紀錄、排隊 15 分鐘被取消，多半是 GitHub Actions 事故（https://www.githubstatus.com），等恢復後 `gh run rerun`，不要改程式。
-- **相關站台與機器**：日本站「政策の系譜」policy-jp.web.app（repo `Yooliang/policy-jp`，P-日本負責；舊名 keifu）、站務主控台 policy-console.web.app（私人 repo `Yooliang/policy-console`，GA4＋AdSense，GitHub Actions 每天抓；舊名 site-console）、驗證 VM `policy-verifier`（專案 greenshepherdcomtw，金鑰在 policy-tw 的 Secret Manager `verify-vm-*`，目前由工作機 P-工作機開輪）。**驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`**（`scripts/verify-vm/README.md` 是操作手冊）。三個 Firebase 網站都在 Firebase 專案 policy-tw，部署一律 `--only hosting:<site>`。
+- **相關站台與機器**：日本站「政策の系譜」policy-jp.web.app（repo `Yooliang/policy-jp`，P-日本負責；舊名 keifu）、站務主控台 policy-console.web.app（私人 repo `Yooliang/policy-console`，GA4＋AdSense，GitHub Actions 每天抓；舊名 site-console）、驗證 VM `policy-verifier`（專案 greenshepherdcomtw，金鑰在 policy-tw 的 Secret Manager `verify-vm-*`，目前由工作機 P-工作機開輪）。**驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`**（該 repo 的 `scripts/verify-vm/README.md` 是操作手冊）。三個 Firebase 網站都在 Firebase 專案 policy-tw，部署一律 `--only hosting:<site>`。
 
 ## Architecture
 
@@ -209,4 +209,4 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 
 **交接與維運**
 
-- 驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`（`scripts/verify-vm/`、`docs/handoff/`）。`policy-tw` 裡的 `scripts/verify-vm/`、`docs/handoff/` 是過渡副本，工作機改用新位置後會刪除。
+- 驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`（`scripts/verify-vm/`、`docs/handoff/`）。policy-tw 不再放這兩個目錄（2026-10-06 移出）。
