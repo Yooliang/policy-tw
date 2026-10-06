@@ -11,8 +11,8 @@
 
 import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
-import { changedFields, electionResultLabel, electionResultPatch } from "./candidacy-result.ts";
-import { CONFIRMED_NARROWED_NOTE, isListPublished, narrowConfirmed } from "./candidacy-status.ts";
+import { changedFields, electionResultLabel } from "./candidacy-result.ts";
+import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
@@ -464,12 +464,16 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const rawStatus = String(p.candidate_status);
   const electionId = Number(p.election_id);
   const { data: before } = await supabase.from("politician_elections").select("*").eq("politician_id", ensured.politician_id).eq("election_id", electionId).maybeSingle();
-  // confirmed 收窄（#345 後續）：正式名單公告後（含已投票屆別）記成 qualified；早期匯入的 confirmed 原樣重交不改
-  const narrowed = rawStatus === "confirmed"
-    ? narrowConfirmed(rawStatus, await isListPublished(supabase, electionId, electionType), (before as { candidate_status?: string | null } | null)?.candidate_status)
-    : { status: rawStatus, converted: false };
-  // withdrawn 在 DB 沒有對應值，落成 not_running 並在 source_note 註明
-  const candidateStatus = narrowed.status === "withdrawn" ? "not_running" : narrowed.status;
+  // 交件協議的詞（candidate_status／election_result）換成新欄位 candidacy_status，落庫只寫這一欄（#345 第二階段 A；舊兩欄由觸發器同步）：
+  // 有結果就是結果、這一筆原本已有結果就維持（結果比登記階段大）；confirmed 只表示表態參選，正式名單公告後（含已投票屆別）
+  // 在名單上的記成已登記，早期匯入的 confirmed 原樣重交不改（規則見 candidacy-status.ts 的 nextCandidacyStatus）
+  const narrowed = nextCandidacyStatus({
+    candidateStatus: rawStatus,
+    electionResult: str(p.election_result),
+    listPublished: rawStatus === "confirmed" ? await isListPublished(supabase, electionId, electionType) : false,
+    existing: (before as { candidacy_status?: string | null } | null)?.candidacy_status,
+  });
+  const candidacyStatus = narrowed.status;
 
   // 選舉結果三欄（election_result_missing 任務補的）：有給才寫；2026-09-19 前這裡直接丟掉
   // 號次有給才寫（2026-09-25 補欄位；之前協議收了但沒地方放）
@@ -493,7 +497,6 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     : await countyRegionPatch(supabase, electionType, p);
   const countyRegionId = regionIdOf(countyPatch);
   const resultPatch = {
-    ...electionResultPatch(p),
     ...(int(p.cand_no) ? { cand_no: int(p.cand_no) } : {}),
     ...districtPatch,
     ...countyPatch,
@@ -514,10 +517,13 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     election_id: electionId,
     position: str(p.position) ?? `${electionType}候選人`,
     election_type: electionType,
-    candidate_status: candidateStatus,
+    candidacy_status: candidacyStatus,
     source_note: newSourceNote,
     always: resultPatch,
   });
+  if (participation.outcome === "skipped" || participation.id === null) {
+    return { status: "disputed", message: participation.reason ?? "沒有可寫的參選狀態，沒有建立參選紀錄" };
+  }
   if (participation.outcome === "created") {
     const { data: after } = await supabase.from("politician_elections").select("*").eq("id", participation.id).maybeSingle();
     await recordInsert(supabase, ctx, "politician_elections", String(participation.id), after ?? { id: participation.id });
@@ -525,7 +531,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     // 只記真的變的欄位：confirmed→confirmed 不進 edit_history
     // 選舉別換了（傳聞選縣市長、實際登記縣市議員）也要記進履歷，見 candidate-import.ts 的 electionTypeSwitch
     const switched = before && before.election_type !== electionType ? { election_type: electionType, position: str(p.position) ?? `${electionType}候選人` } : {};
-    const after = { candidate_status: candidateStatus, source_note: newSourceNote, ...resultPatch, ...switched };
+    const after = { ...(candidacyStatus ? { candidacy_status: candidacyStatus } : {}), source_note: newSourceNote, ...resultPatch, ...switched };
     for (const [field, oldValue, newValue] of changedFields(before ?? null, after)) {
       await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), field, oldValue, newValue);
     }
@@ -536,7 +542,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
     politician_election_id: String(participation.id),
-    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidateStatus}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}`,
+    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidacyStatus ?? "（狀態沒改）"}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}`,
   };
 }
 
@@ -1083,7 +1089,8 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   const bad = changes.find((c) => !CORRECTION_FIELDS[table]?.includes(c.field));
   if (bad) return { status: "failed", message: `${table}.${bad.field} 不在可修正欄位白名單` };
 
-  const fields = changes.map((c) => c.field);
+  // 參選紀錄的 candidate_status 是交件協議的詞，落庫寫的是新欄位 candidacy_status（#345 第二階段 A）：讀現值也讀新欄位
+  const fields = changes.map((c) => (table === "politician_elections" && c.field === "candidate_status" ? "candidacy_status" : c.field));
   // 任期的卸任日要連根據一起看（#345 後續）；參選紀錄改 confirmed 要知道是哪一屆、哪種選舉（名單公告了沒）
   const extraRead = table === "politician_offices" ? ["end_date", "end_reason", "end_basis", "source_url"]
     : table === "politician_elections" ? ["election_id", "election_type", "candidacy_status"] : [];
@@ -1093,12 +1100,20 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   if (!current) return { status: "failed", message: `${table} 找不到 id=${target_id}` };
 
   const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(table, c.field, c.correct_value)]));
-  // confirmed 收窄（#345 後續）：正式名單公告後（含已投票屆別）改成 confirmed 的，記成 qualified
+  // 協議的 candidate_status → 新欄位 candidacy_status（規則見 candidacy-status.ts 的 nextCandidacyStatus）：
+  // confirmed 只表示表態參選，正式名單公告後（含已投票屆別）改成 confirmed 的記成已登記；這一筆已經有結果的維持結果
   let narrowNote = "";
-  if (table === "politician_elections" && patch.candidate_status === "confirmed") {
-    const cur = current as { election_id?: number; election_type?: string | null; candidate_status?: string | null };
-    const n = narrowConfirmed("confirmed", await isListPublished(supabase, Number(cur.election_id), cur.election_type), cur.candidate_status);
-    if (n.converted) { patch.candidate_status = n.status; narrowNote = CONFIRMED_NARROWED_NOTE; }
+  if (table === "politician_elections" && "candidate_status" in patch) {
+    const cur = current as { election_id?: number; election_type?: string | null; candidacy_status?: string | null };
+    const raw = String(patch.candidate_status);
+    delete patch.candidate_status;
+    const n = nextCandidacyStatus({
+      candidateStatus: raw,
+      listPublished: raw === "confirmed" ? await isListPublished(supabase, Number(cur.election_id), cur.election_type) : false,
+      existing: cur.candidacy_status,
+    });
+    if (n.status) patch.candidacy_status = n.status;
+    if (n.converted) narrowNote = CONFIRMED_NARROWED_NOTE;
   }
   // 退選前有沒有登記（#345 後續，協議 1.55.0）只在退選的紀錄上有值（資料庫 CHECK）：等票期間這一列被改成不是退選
   // （例如有人補成已登記），這筆就沒有東西可改了——標 superseded，不讓 CHECK 炸成 apply_failed 一直重試
@@ -1372,12 +1387,12 @@ async function applyPartyInfo(supabase: SupabaseLike, row: ContributionRow): Pro
 }
 
 /**
- * 整批補已投票選舉的結果（2026-10-06）：一個單位一筆，items 每位寫一次 politician_elections.election_result。
+ * 整批補已投票選舉的結果（2026-10-06）：一個單位一筆，items 每位寫一次結果；落庫寫新欄位 candidacy_status（當選 elected、落選 not_elected），#345 第二階段 A 起不寫舊的 election_result。
  *
  * - **只補空白、不覆蓋**（planElectionResults）：已經有不同結果的那一位跳過、回覆講出來（要改走一位一筆的 candidacy／correction）
  * - 參選紀錄不是這一屆這種選舉的跳過（交件已擋過，等票期間被改了才會碰到）
  * - 同一個結果寫一次 UPDATE（當選一批、落選一批），每一位各記一筆 edit_history，整筆可還原
- * - 參選狀態（candidacy_status）由 #376 的觸發器同步、任期由 #377 的觸發器建，這裡不另外寫
+ * - 舊欄位 election_result 由 #376 的觸發器同步、任期由 #377 的觸發器建（觸發 UPDATE OF candidacy_status），這裡不另外寫
  */
 async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
@@ -1389,7 +1404,7 @@ async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow
 
   // query-bounds: ok — 一筆最多 MAX_RESULTS_PER_SUBMISSION（120）位，按主鍵取
   const { data: existing, error: readError } = await supabase.from("politician_elections")
-    .select("id, election_id, election_type, election_result")
+    .select("id, election_id, election_type, candidacy_status")
     .in("id", items.map((it) => it.politician_election_id)).limit(MAX_RESULTS_PER_SUBMISSION + 10);
   throwIf(readError, "politician_elections read");
   const plan = planElectionResults((existing ?? []) as ExistingCandidacy[], items, electionId, electionType);
@@ -1401,19 +1416,19 @@ async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow
     ].filter(Boolean).join("、");
     return { status: "superseded", message: `這一筆沒有要寫的：${why || "沒有結果空白的人"}` };
   }
-  const before = new Map(((existing ?? []) as ExistingCandidacy[]).map((e) => [e.id, e.election_result ?? null]));
+  const before = new Map(((existing ?? []) as ExistingCandidacy[]).map((e) => [e.id, e.candidacy_status ?? null]));
   const written: Array<{ id: number; election_result: string }> = [];
   for (const result of ["elected", "not_elected"] as const) {
     const ids = plan.writes.filter((w) => w.election_result === result).map((w) => w.id);
     if (ids.length === 0) continue;
-    // 只寫還空著的（等票期間別人可能先補了；照 is null 再篩一次，不覆蓋）
+    // 只寫還沒有結果的（等票期間別人可能先補了；再篩一次，不覆蓋）：狀態是空值、或不是 elected／not_elected
     // 履歷只記真的寫進去的那幾列
-    const { data: updated, error } = await supabase.from("politician_elections").update({ election_result: result })
-      .in("id", ids).is("election_result", null).select("id");
+    const { data: updated, error } = await supabase.from("politician_elections").update({ candidacy_status: result })
+      .in("id", ids).or("candidacy_status.is.null,candidacy_status.not.in.(elected,not_elected)").select("id");
     throwIf(error, "politician_elections results update");
     for (const u of (updated ?? []) as Array<{ id: number }>) {
       written.push({ id: u.id, election_result: result });
-      await recordUpdate(supabase, ctx, "politician_elections", String(u.id), "election_result", before.get(u.id) ?? null, result);
+      await recordUpdate(supabase, ctx, "politician_elections", String(u.id), "candidacy_status", before.get(u.id) ?? null, result);
     }
   }
   if (written.length === 0) return { status: "superseded", message: `${resultsUnitLabel(p)} 這幾位的結果在等票期間已經被別人補上了，不重複寫入` };

@@ -99,8 +99,8 @@ export interface DueContext {
   today: string
   /** 這條政見所屬那場選舉的投票日；沒有屆別或查不到回 undefined */
   electionDateOf: (policy: Policy) => string | undefined
-  /** 提出者在那場選舉的結果（elected／not_elected／withdrawn）；不知道回 undefined */
-  electionResultOf: (policy: Policy) => string | undefined
+  /** 提出者在那場選舉的參選狀態（candidacy_status：不看落選、退選要的是 not_elected／withdrawn）；不知道回 undefined */
+  candidacyStatusOf: (policy: Policy) => string | undefined
 }
 
 export interface DuePolicy {
@@ -129,7 +129,7 @@ export function deadlineDue(policy: Policy, ctx: DueContext): DuePolicy | null {
     const vote = ctx.electionDateOf(policy)
     if (!vote || !(vote < ctx.today)) return null
   }
-  const result = ctx.electionResultOf(policy)
+  const result = ctx.candidacyStatusOf(policy)
   if (result === 'not_elected' || result === 'withdrawn') return null
   const daysOver = Math.round((Date.parse(`${ctx.today}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86_400_000)
   return { policy, deadlineDate: d, deadlineText: deadline.text ?? '', daysOver }

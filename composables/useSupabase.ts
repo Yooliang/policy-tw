@@ -16,6 +16,7 @@ import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
+import { RUNNING_CANDIDACY_STATUSES } from '../lib/candidate-status'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 import { mapPolicyElements } from '../lib/policy-elements'
@@ -139,7 +140,8 @@ async function loadTownshipDirectory(electionId: number, region: string): Promis
           // 只查一種就是靜靜地少掉另一種寫法的人（lib/region-name.ts）
           .in('regions.region', regionNameVariants(region))
           .in('election_type', DIRECTORY_POSITION_TYPES as string[])
-          .neq('candidate_status', 'not_running')
+          // 在選的與選完的（#345：candidacy_status 一欄；退選與空值＝傳聞不算）
+          .in('candidacy_status', RUNNING_CANDIDACY_STATUSES)
           .order('politician_id')
           .range(from, to)
           .abortSignal(signal)
@@ -219,19 +221,17 @@ export function mapPolitician(row: RawPolitician): Politician {
     region: e.region || '',
     subRegion: e.subRegion || undefined,
     village: e.village || undefined,
-    candidateStatus: e.candidateStatus || undefined,
     candNo: e.candNo || undefined,
-    electionResult: e.electionResult || undefined,
     sourceNote: e.sourceNote || undefined,
     candidacyStatus: e.candidacyStatus || undefined,
     // false 是有意義的值（表態不參選），不能用 || 吃掉
     withdrawnAfterFiling: typeof e.withdrawnAfterFiling === 'boolean' ? e.withdrawnAfterFiling : undefined,
   }));
 
-  // Get candidateStatus from the first election (for display purposes)
+  // Get candidacyStatus from the first election (for display purposes)
   const firstElection = elections[0];
   // 人物層的職稱：最近一屆有在選的那一列組出來的；沒有參選紀錄才用人物表存的文字
-  const latest = [...elections].filter(e => e.candidateStatus !== 'not_running').sort((a, b) => b.electionId - a.electionId)[0];
+  const latest = [...elections].filter(e => e.candidacyStatus !== 'withdrawn').sort((a, b) => b.electionId - a.electionId)[0];
 
   return {
     id: row.id,
@@ -254,11 +254,11 @@ export function mapPolitician(row: RawPolitician): Politician {
     electionIds: row.election_ids || [],
     birthYear: row.birth_year || undefined,
     educationLevel: row.education_level || undefined,
-    candidateStatus: firstElection?.candidateStatus || undefined,
+    candidacyStatus: firstElection?.candidacyStatus || undefined,
     sourceNote: firstElection?.sourceNote || undefined,
     // New: election-specific data array
     elections,
-    // 現任公職（視圖 politician_offices_derived 算好的，#345 前叫 politician_offices）；職稱只能從這裡來，不要用 position 充當（2026-10-04）
+    // 現任公職（視圖 politicians_with_elections 從任期表 politician_offices 帶出來：已就任而且卸任日為空；#345 第二階段 A 起讀任期表，之前是舊視圖 politician_offices_derived）；職稱只能從這裡來，不要用 position 充當（2026-10-04）
     offices: (row.offices || []).map((o) => ({
       electionId: o.electionId,
       electionType: o.electionType || undefined,
@@ -270,14 +270,14 @@ export function mapPolitician(row: RawPolitician): Politician {
   }
 }
 
-// 覆蓋為特定選舉的資料（避免顯示舊選舉的 candidateStatus/sourceNote）
+// 覆蓋為特定選舉的資料（避免顯示舊選舉的 candidacyStatus/sourceNote）
 export function withElectionData(p: Politician, electionId: number): Politician {
   const currentElection = p.elections?.find(e => e.electionId === electionId)
   if (!currentElection) return p
   const electionType = currentElection.electionType || p.electionType
   return {
     ...p,
-    candidateStatus: currentElection.candidateStatus,
+    candidacyStatus: currentElection.candidacyStatus,
     withdrawnAfterFiling: currentElection.withdrawnAfterFiling,
     candNo: currentElection.candNo,
     sourceNote: currentElection.sourceNote,
@@ -922,7 +922,7 @@ export function useSupabase() {
       .from('politician_elections')
       .select('*', { count: 'exact', head: true })
       .eq('election_id', electionId)
-      .neq('candidate_status', 'not_running')  // AI 推測但未登記的人不算「已收錄人員」
+      .in('candidacy_status', RUNNING_CANDIDACY_STATUSES)  // 退選（含 AI 推測但未登記的）與傳聞不算「已收錄人員」
 
     if (error) {
       console.error('Failed to get election politician count:', error)

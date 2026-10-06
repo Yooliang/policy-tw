@@ -19,7 +19,7 @@ export interface ComparePerson {
   id: string | number
   name: string
   candNo?: number
-  candidateStatus?: string
+  candidacyStatus?: string
   electionType?: string
   region?: string
   subRegion?: string
@@ -40,7 +40,7 @@ export function compareColumnOrder(a: ComparePerson, b: ComparePerson): number {
 
 /** 會出現在選票上的人：表態不參選、退選的不並排 */
 export function comparablePeople<T extends ComparePerson>(people: readonly T[]): T[] {
-  return people.filter((p) => p.candidateStatus !== 'withdrawn' && p.candidateStatus !== 'not_running').sort(compareColumnOrder)
+  return people.filter((p) => p.candidacyStatus !== 'withdrawn').sort(compareColumnOrder)
 }
 
 /**

@@ -1,6 +1,7 @@
 /**
  * 測試用的記憶體版 supabase-js：支援本專案用到的鏈式呼叫
- *   from(t).select(cols, {count, head}).eq/neq/in/gte/lte/lt/gt/is().order().limit().maybeSingle()
+ *   from(t).select(cols, {count, head}).eq/neq/in/gte/lte/lt/gt/is/or().order().limit().maybeSingle()
+ *   or("a.is.null,a.not.in.(x,y)")：支援 eq／neq／is.null／in.(…)／not.in.(…) 五種條件，逗號分隔取聯集
  *   from(t).insert(row|rows).select().maybeSingle()   from(t).update(patch).eq()…select().maybeSingle()
  *   from(t).delete().eq()…   from(t).upsert(row)   rpc(name) → rpcHandlers[name] 或 { data: [] }
  * 篩選鍵支援 JSON 路徑 `col->>key`。每個 query 是 thenable，await 得 { data, error, count }。
@@ -47,6 +48,33 @@ class FakeQuery implements PromiseLike<Result> {
   lte(k: string, v: string | number) { this.filters.push((r) => (valueAt(r, k) as string | number) <= v); return this; }
   gt(k: string, v: string | number) { this.filters.push((r) => (valueAt(r, k) as string | number) > v); return this; }
   lt(k: string, v: string | number) { this.filters.push((r) => (valueAt(r, k) as string | number) < v); return this; }
+  or(expr: string) {
+    // PostgREST 的 or 篩選：頂層逗號分隔（括號裡的逗號不算）；每項 col.op.value
+    const parts: string[] = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < expr.length; i++) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")") depth--;
+      else if (expr[i] === "," && depth === 0) { parts.push(expr.slice(start, i)); start = i + 1; }
+    }
+    parts.push(expr.slice(start));
+    const conds = parts.map((part) => {
+      const m = /^([^.]+)\.(not\.)?(eq|neq|is|in)\.(.*)$/.exec(part);
+      if (!m) throw new Error(`fake supabase 不認得 or 條件：${part}`);
+      const [, col, neg, op, raw] = m;
+      return (r: Row): boolean => {
+        const v = valueAt(r, col);
+        let hit: boolean;
+        if (op === "is") hit = raw === "null" ? (v ?? null) === null : v === (raw === "true");
+        else if (op === "in") hit = raw.replace(/^\(|\)$/g, "").split(",").map((x) => x.replace(/^"|"$/g, "")).includes(String(v));
+        else if (op === "eq") hit = String(v) === raw;
+        else hit = v !== undefined && v !== null && String(v) !== raw;
+        return neg ? !hit : hit;
+      };
+    });
+    this.filters.push((r) => conds.some((c) => c(r)));
+    return this;
+  }
   order() { return this; }
   limit(n: number) { this.lim = n; return this; }
   maybeSingle() { this.single = true; return this; }

@@ -49,7 +49,7 @@ Deno.test("SQL：對象＝2022 縣市長／縣市議員／鄉鎮市長、2024 �
   const body = await latestFunctionBody("contribution_auto_tasks_term_policies");
   const flat = body.replace(/\s+/g, " ");
   assertStringIncludes(flat, `'auto:${T}:'`);
-  assertStringIncludes(flat, "pe.election_result = 'elected'");
+  assertStringIncludes(flat, "pe.candidacy_status = 'elected'");
   assertStringIncludes(flat, "pe.election_id = 2022 AND pe.election_type IN ('縣市長', '縣市議員', '鄉鎮市長')");
   assertStringIncludes(flat, "pe.election_id = 2024 AND pe.election_type = '立法委員'");
   // 缺口：沒有「該人、該屆、未移除」的政見——補上一筆就從 _gaps 消失，seed_auto_task_queue 收回號碼牌
@@ -62,7 +62,7 @@ Deno.test("SQL：對象＝2022 縣市長／縣市議員／鄉鎮市長、2024 �
   assertStringIncludes(flat, "term_policy_village_cap()");
   assertStringIncludes(flat, "merged_into IS NULL", "被合併掉的人物不派");
   // 去重：2026 候選人而且整個人零政見的，只走 policy_missing（條件跟 raw 臂的 c2026 一致）
-  assert(/NOT EXISTS \( ?SELECT 1 FROM politician_elections c WHERE c\.politician_id = \w+\.politician_id AND c\.election_id = 2026 AND c\.candidate_status NOT IN \('not_running'\) ?\) OR EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.removed_at IS NULL ?\)/.test(flat),
+  assert(/NOT EXISTS \( ?SELECT 1 FROM politician_elections c WHERE c\.politician_id = \w+\.politician_id AND c\.election_id = 2026 AND c\.candidacy_status IS DISTINCT FROM 'withdrawn' ?\) OR EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.removed_at IS NULL ?\)/.test(flat),
     "去重條件：不是 2026 候選人，或已經有任何政見（零政見的 2026 候選人留給 policy_missing）");
   // task_id 帶屆別：同一人可能 2022 選上議員、2024 選上立委，兩屆各一件
   assert(/'auto:term_policy_missing:' \|\| \w+\.politician_id \|\| ':' \|\| \w+\.election_id/.test(flat), "task_id 要是 auto:term_policy_missing:<人物>:<屆別>");

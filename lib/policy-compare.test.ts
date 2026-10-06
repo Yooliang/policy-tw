@@ -34,7 +34,7 @@ Deno.test("欄的順序不看政見多寡：政見多的人不會因此排前面
 });
 
 Deno.test("退選與不參選的人不上表", () => {
-  const people = [person("a", "甲", { candidateStatus: "registered" }), person("b", "乙", { candidateStatus: "withdrawn" }), person("c", "丙", { candidateStatus: "not_running" })];
+  const people = [person("a", "甲", { candidacyStatus: "filed" }), person("b", "乙", { candidacyStatus: "withdrawn" }), person("c", "丙", { candidacyStatus: "withdrawn" })];
   assertEquals(comparablePeople(people).map((p) => p.id), ["a"]);
 });
 
@@ -124,7 +124,7 @@ Deno.test("村里長一里一組", () => {
 
 Deno.test("PK 按鈕：至少兩位會出現在選票上的人才給", () => {
   assert(hasPk({ label: "x", people: [person("a", "甲"), person("b", "乙")] }));
-  assert(!hasPk({ label: "x", people: [person("a", "甲"), person("b", "乙", { candidateStatus: "withdrawn" })] }), "退選的不算");
+  assert(!hasPk({ label: "x", people: [person("a", "甲"), person("b", "乙", { candidacyStatus: "withdrawn" })] }), "退選的不算");
   assert(!hasPk(undefined));
 });
 

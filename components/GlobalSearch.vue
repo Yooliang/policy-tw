@@ -43,8 +43,8 @@ const TYPE_RANK: Record<string, number> = {
   直轄市山地原住民區長: 5, 鄉鎮市民代表: 6, 直轄市山地原住民區民代表: 7, 村里長: 8,
 }
 const rankOf = (t: string | null | undefined): number => (t && TYPE_RANK[t] !== undefined ? TYPE_RANK[t] : 9)
-/** AI 推測會選、但中選會名單裡沒有的（not_running）與退選的，不算「正在參選」 */
-const RUNNING_STATUSES = ['rumored', 'likely', 'confirmed', 'registered', 'qualified']
+/** 退選的（含 AI 推測會選、但中選會名單裡沒有的）與傳聞（空值），不算「正在參選」 */
+const RUNNING_STATUSES = ['considering', 'declared', 'filed']
 interface PolicyHit { id: string; title: string; status: string | null; election_id: number | null }
 
 const open = ref(false)
@@ -108,8 +108,8 @@ async function run(q: string) {
       years.length > 0
         ? withTimeoutAndRetry('search candidacies', (signal) =>
           supabase.from('politician_elections')
-            .select('election_id, election_type, candidate_status, politicians!inner(id, name, party, region, current_position)')
-            .in('election_id', years).in('candidate_status', [...highlightStatuses.value, 'elected'])
+            .select('election_id, election_type, candidacy_status, politicians!inner(id, name, party, region, current_position)')
+            .in('election_id', years).in('candidacy_status', [...highlightStatuses.value, 'elected'])
             .ilike('politicians.name', like).limit(40).abortSignal(signal))
         : Promise.resolve({ data: [] as unknown[] }),
       withTimeoutAndRetry('search politicians', (signal) =>
@@ -127,8 +127,8 @@ async function run(q: string) {
     for (const row of ((rows.data ?? []) as Array<Record<string, any>>)) {
       const who = row.politicians
       if (!who?.id) continue
-      const isThisTerm = row.election_id === year && highlightStatuses.value.includes(row.candidate_status)
-      const isIncumbent = row.candidate_status === 'elected' && recentVotedYears.value.includes(row.election_id)
+      const isThisTerm = row.election_id === year && highlightStatuses.value.includes(row.candidacy_status)
+      const isIncumbent = row.candidacy_status === 'elected' && recentVotedYears.value.includes(row.election_id)
       const prev = byId.get(who.id) ?? { ...who, election_ids: null, running_type: null, incumbent_type: null } as PersonHit
       if (isThisTerm && (!prev.running_type || rankOf(row.election_type) < rankOf(prev.running_type))) prev.running_type = row.election_type
       if (isIncumbent && (!prev.incumbent_type || rankOf(row.election_type) < rankOf(prev.incumbent_type))) prev.incumbent_type = row.election_type

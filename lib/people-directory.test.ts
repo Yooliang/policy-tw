@@ -53,38 +53,38 @@ Deno.test("左欄筆畫標籤：一律兩個字（1～10 加畫、11～19 十＋
 
 Deno.test("一行說明：現任職稱只來自任期；沒有就寫最近一次參選（照投票日）；落選的人不寫成現任", () => {
   const mayor = person({
-    id: "a", name: "甲", elections: [{ electionId: 2022, position: "", region: "台南市", electionType: "縣市長", electionResult: "elected", candidateStatus: "elected" }],
+    id: "a", name: "甲", elections: [{ electionId: 2022, position: "", region: "台南市", electionType: "縣市長", candidacyStatus: "elected" }],
     offices: [{ electionId: 2022, electionType: "縣市長", region: "台南市" }],
   });
   assertEquals(directoryLabel(mayor, dates, TODAY), "台南市長");
   const loser = person({
     id: "b", name: "乙", position: "台南市立委",
-    elections: [{ electionId: 2024, position: "台南市立委", region: "台南市", electionType: "立法委員", electionResult: "not_elected" }],
+    elections: [{ electionId: 2024, position: "台南市立委", region: "台南市", electionType: "立法委員", candidacyStatus: "not_elected" }],
   });
   assertEquals(directoryLabel(loser, dates, TODAY), "2024 台南市立委・落選", "position 不能當職稱");
   const byElection = person({
     id: "c", name: "丙",
     elections: [
-      { electionId: 2026, position: "", region: "高雄市", electionType: "縣市議員", candidateStatus: "registered" },
-      { electionId: 7, position: "", region: "高雄市", electionType: "立法委員", candidateStatus: "registered" },
+      { electionId: 2026, position: "", region: "高雄市", electionType: "縣市議員", candidacyStatus: "filed" },
+      { electionId: 7, position: "", region: "高雄市", electionType: "立法委員", candidacyStatus: "filed" },
     ],
   });
   assertEquals(directoryLabel(byElection, dates, TODAY), "2027 高雄市立委・已登記", "最近一次與年份都照投票日（補選 id 7 在 2027）");
   assertEquals(directoryLabel(person({ id: "d", name: "丁" }), dates, TODAY), "");
   // 2022 早期匯入的人狀態停在 confirmed：投完票之後不寫「表態參選」，結果還沒補上就寫「參選人」
-  const village = person({ id: "e", name: "戊", elections: [{ electionId: 2022, position: "", region: "屏東縣", subRegion: "東港鎮", village: "內關帝里", electionType: "村里長", candidateStatus: "confirmed" }] });
+  const village = person({ id: "e", name: "戊", elections: [{ electionId: 2022, position: "", region: "屏東縣", subRegion: "東港鎮", village: "內關帝里", electionType: "村里長", candidacyStatus: "filed" }] });
   assertEquals(directoryLabel(village, dates, TODAY), "2022 東港鎮內關帝里長參選人");
 });
 
 Deno.test("狀態字：投完票只講結果（沒結果寫結果待補），還沒投票講登記階段", () => {
-  assertEquals(candidacyNote({ candidateStatus: "confirmed" }, true), RESULT_PENDING);
-  assertEquals(candidacyNote({ candidateStatus: "registered" }, true), RESULT_PENDING);
-  assertEquals(candidacyNote({ candidateStatus: "confirmed" }, false), "表態參選");
-  assertEquals(candidacyNote({ candidateStatus: "registered" }, false), "已登記");
-  assertEquals(candidacyNote({ candidateStatus: "confirmed", electionResult: "elected" }, true), "當選");
-  assertEquals(candidacyNote({ candidateStatus: "defeated" }, true), "落選");
-  assertEquals(candidacyNote({ candidateStatus: "not_running", withdrawnAfterFiling: true }, true), "登記後退選");
-  assertEquals(candidacyNote({ candidateStatus: "not_running" }, false), "不參選");
+  assertEquals(candidacyNote({ candidacyStatus: "declared" }, true), RESULT_PENDING);
+  assertEquals(candidacyNote({ candidacyStatus: "filed" }, true), RESULT_PENDING);
+  assertEquals(candidacyNote({ candidacyStatus: "declared" }, false), "表態參選");
+  assertEquals(candidacyNote({ candidacyStatus: "filed" }, false), "已登記");
+  assertEquals(candidacyNote({ candidacyStatus: "elected" }, true), "當選");
+  assertEquals(candidacyNote({ candidacyStatus: "not_elected" }, true), "落選");
+  assertEquals(candidacyNote({ candidacyStatus: "withdrawn", withdrawnAfterFiling: true }, true), "登記後退選");
+  assertEquals(candidacyNote({ candidacyStatus: "withdrawn" }, false), "不參選");
 });
 
 Deno.test("分組：每一位都在、只在一組；已合併的不列；同一組照姓名筆畫排、同姓在一起", () => {

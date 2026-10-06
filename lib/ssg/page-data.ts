@@ -200,7 +200,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
         .filter((pl) => pl.elections?.some((e) =>
           e.electionId === electionId
           && NATIONAL_ELECTION_TYPES.includes(e.electionType || '')
-          && isRunningCandidate(e.candidateStatus),
+          && isRunningCandidate(e.candidacyStatus),
         ))
         .map((pl) => withElectionData(pl, electionId))
       // 2026-09-22：快照不帶政見的話，預渲染 HTML 每張候選人卡都是「0 項政見」（爬蟲與分享預覽看到的就是這份）。
@@ -226,7 +226,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       })
       const politicians = full.politicians
         .filter((pl) => pl.elections?.some((e) =>
-          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidacyStatus)
           && countyPositions.includes(e.electionType as typeof countyPositions[number]),
         ))
         .map((pl) => withElectionData(pl, electionId))
@@ -236,7 +236,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       // 層級清單跟瀏覽器端那支輕量查詢讀同一份（lib/township-directory.ts）。
       const townshipDirectory: DirectoryPerson[] = full.politicians.flatMap((pl) => {
         const rec = (pl.elections ?? []).find((e) =>
-          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidacyStatus)
           && DIRECTORY_POSITION_TYPES.includes(e.electionType ?? ''),
         )
         return rec
@@ -271,7 +271,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       })
       const politicians = full.politicians
         .filter((pl) => pl.elections?.some((e) =>
-          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidateStatus)
+          e.electionId === electionId && sameRegionName(e.region, region) && isRunningCandidate(e.candidacyStatus)
           && townshipPositions.includes(e.electionType as typeof townshipPositions[number])
           && inTownship(e.subRegion, township),
         ))

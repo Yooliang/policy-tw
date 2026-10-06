@@ -136,7 +136,6 @@ Deno.serve(async (req) => {
 
         // 得票數不收（#345，2026-10-06）：站上不顯示票數，votes_received 第二階段刪欄，這裡不再寫
         const verifiedFields = {
-          election_result: candidate.elected ? "elected" : "not_elected",
           verified: true,
           verified_at: new Date().toISOString(),
           verified_by: user.id,
@@ -148,7 +147,8 @@ Deno.serve(async (req) => {
           election_id: electionId,
           position: election_type,
           election_type: normalizedType,
-          candidate_status: "confirmed",
+          // 已投票的名單：結果就是狀態（當選 elected、落選 not_elected；#345 第二階段 A 起只寫新欄位 candidacy_status）
+          candidacy_status: candidate.elected ? "elected" : "not_elected",
           source_note: data_source,
           always: verifiedFields,
         });

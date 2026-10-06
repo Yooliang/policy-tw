@@ -14,14 +14,14 @@ export const PEER_LIMIT = 20
 export function primaryElection(p: Politician | null | undefined): PoliticianElectionData | undefined {
   if (!p?.elections?.length) return undefined
   return [...p.elections]
-    .filter((e) => isRunningCandidate(e.candidateStatus))
+    .filter((e) => isRunningCandidate(e.candidacyStatus))
     .sort((a, b) => b.electionId - a.electionId)[0]
 }
 
 /** 指定屆別的參選紀錄（政見頁用政見所屬的屆別）；沒有就退回最新一屆 */
 export function electionRecordFor(p: Politician | null | undefined, electionId?: number): PoliticianElectionData | undefined {
   if (electionId !== undefined) {
-    const hit = p?.elections?.find((e) => e.electionId === electionId && isRunningCandidate(e.candidateStatus))
+    const hit = p?.elections?.find((e) => e.electionId === electionId && isRunningCandidate(e.candidacyStatus))
     if (hit) return hit
   }
   return primaryElection(p)
@@ -38,7 +38,7 @@ export function isPeerOf(candidate: Politician, target: PoliticianElectionData):
   return (candidate.elections ?? []).some((e) =>
     e.electionId === target.electionId
     && e.electionType === target.electionType
-    && isRunningCandidate(e.candidateStatus)
+    && isRunningCandidate(e.candidacyStatus)
     && sameDistrict(e, target),
   )
 }

@@ -2,16 +2,17 @@
  * 參選狀態合一欄 `politician_elections.candidacy_status`（#345 第一階段，migration 20261006034500）。
  *
  * 舊的兩欄 `candidate_status`（傳聞／可能參選／確認參選／已登記／審定合格／表態不參選…）＋`election_result`
- * （當選／落選／退選）重疊、會互相矛盾，日本站合併成一欄六值，正見照同一套。第一階段兩邊由觸發器同步，
- * 讀取端還讀舊欄位；這支是 SQL `candidacy_status_from_legacy()` 的 TS 鏡像，給第二階段改讀新欄位時用，
- * 也讓測試盯住兩邊的對應規則一致（candidacy-status.test.ts 直接讀 migration 的 CASE）。
+ * （當選／落選／退選）重疊、會互相矛盾，日本站合併成一欄六值，正見照同一套。第一階段兩邊由觸發器同步；
+ * 第二階段 A（2026-10-06）讀取端與寫入端都只認這一欄，舊兩欄只剩觸發器在同步（第二階段 B 刪）。
+ * 這支放兩個方向的對應：`candidacyStatusFromLegacy()` 是 SQL `candidacy_status_from_legacy()` 的 TS 鏡像（測試直接讀 migration 的 CASE），
+ * `nextCandidacyStatus()` 是落庫端把交件協議的詞（confirmed／registered…）換成新欄位值的規則。
  */
 
 /** 六值，照日本站（政策の系譜 SCHEMA）的順序與代碼 */
 export const CANDIDACY_STATUSES = ["considering", "declared", "filed", "withdrawn", "elected", "not_elected"] as const;
 export type CandidacyStatus = (typeof CANDIDACY_STATUSES)[number];
 
-/** 給人看的字（第二階段畫面改讀新欄位時用；不收傳聞，所以沒有「傳聞」） */
+/** 給人看的字（不收傳聞，所以沒有「傳聞」） */
 export const CANDIDACY_STATUS_LABELS: Record<CandidacyStatus, string> = {
   considering: "考慮參選",
   declared: "表明參選",
@@ -27,22 +28,67 @@ export function taipeiToday(now: Date = new Date()): string {
 }
 
 /**
- * confirmed 收窄（#345 後續，協調者 10-06 裁定）：confirmed 只表示「表態參選」（本人宣布、政黨提名）；
- * 正式候選人名單公告之後（含已投票的屆別），在名單上的一律記成 qualified（已審定）。
- * 落庫端照這支換值、回覆講一聲；舊資料原樣重交（例如補選區任務叫代理「candidate_status 照現況填」）不順手改，
- * 免得一筆早期匯入的 confirmed 因為一件不相干的任務被改掉。
+ * 交件協議的詞（candidate_status：confirmed／registered／qualified／withdrawn／not_running，外加匯入端點的 likely、elected、defeated）
+ * ＋選舉結果（election_result）→ 新欄位 candidacy_status（#345 第二階段 A：落庫只寫新欄位，舊兩欄由觸發器同步）。
+ *
+ * 規則（跟 SQL candidacy_status_from_legacy 同一套，只是多收協議的 withdrawn）：
+ *   ① 有給選舉結果（elected／not_elected）→ 就是結果
+ *   ② 這一筆原本已經有結果（elected／not_elected）而且這次沒給結果 → 維持原結果。結果比登記階段與不參選都大
+ *      ——舊兩欄就是這樣（election_result 優先於 candidate_status），例如「照現況填 candidate_status」的更正任務不能把當選改回已登記
+ *   ③ confirmed 只表示表態參選（declared）；正式名單公告之後（含已投票屆別）在名單上的人記成 filed（舊制記成 qualified，
+ *      #345 後續的收窄）。這一筆原本就是 declared 的重交 confirmed 原樣不動——不能因為一件不相干的任務把早期匯入的值改掉
+ *   ④ registered／qualified → filed；withdrawn／not_running → withdrawn；likely → considering；elected／defeated → 結果
+ *   ⑤ 傳聞（rumored）與空值 → null：不收傳聞，呼叫端不寫狀態
+ * `converted`＝這次把 confirmed 換成了「已登記」（回覆講一聲）。
  */
-export function narrowConfirmed(
-  status: string,
-  listPublished: boolean,
-  existing?: string | null,
-): { status: string; converted: boolean } {
-  if (status !== "confirmed" || !listPublished || existing === "confirmed") return { status, converted: false };
-  return { status: "qualified", converted: true };
+export function nextCandidacyStatus(input: {
+  candidateStatus?: string | null;
+  electionResult?: string | null;
+  listPublished: boolean;
+  existing?: string | null;
+}): { status: CandidacyStatus | null; converted: boolean } {
+  const { candidateStatus, electionResult, listPublished, existing } = input;
+  if (electionResult === "elected" || electionResult === "not_elected") return { status: electionResult, converted: false };
+  if (existing === "elected" || existing === "not_elected") return { status: existing, converted: false };
+  switch (candidateStatus) {
+    case "confirmed":
+      if (listPublished && existing !== "declared") return { status: "filed", converted: existing !== "filed" };
+      return { status: "declared", converted: false };
+    case "registered":
+    case "qualified": return { status: "filed", converted: false };
+    case "withdrawn":
+    case "not_running": return { status: "withdrawn", converted: false };
+    case "likely": return { status: "considering", converted: false };
+    case "elected": return { status: "elected", converted: false };
+    case "defeated": return { status: "not_elected", converted: false };
+    default: return { status: null, converted: false };
+  }
 }
 
 export const CONFIRMED_NARROWED_NOTE =
-  "；正式名單已公告，confirmed 只表示表態參選，名單上的人記成 qualified（已審定）";
+  "；正式名單已公告，confirmed 只表示表態參選，名單上的人記成已登記（filed，含審定）";
+
+/** 新欄 → 選舉結果（只有 elected／not_elected 算結果，其餘 null） */
+export function resultOfCandidacyStatus(status: string | null | undefined): "elected" | "not_elected" | null {
+  return status === "elected" || status === "not_elected" ? status : null;
+}
+
+/**
+ * 新欄 → 交件協議的詞（派工說明「candidate_status 照現況填」那一句要填什麼）。SQL candidacy_protocol_status 的 TS 鏡像。
+ * 名單公告後在名單上的人填 qualified、公告前填 registered；選完了（當選、落選）名單早已公告，填 qualified；
+ * 空值（傳聞，不收）寫成 rumored——這是「現況」的描述，不是可以交的值（協議不收 rumored）。
+ */
+export function protocolStatusFromCandidacy(status: string | null | undefined, listPublished: boolean): string {
+  switch (status) {
+    case "withdrawn": return "not_running";
+    case "declared": return "confirmed";
+    case "filed": return listPublished ? "qualified" : "registered";
+    case "elected":
+    case "not_elected": return "qualified";
+    case "considering": return "likely";
+    default: return "rumored";
+  }
+}
 
 // deno-lint-ignore no-explicit-any
 type RpcClient = any;

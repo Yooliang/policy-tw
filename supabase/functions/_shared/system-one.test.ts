@@ -5,8 +5,8 @@ const target = { id: "aaaaaaaa-0000-0000-0000-000000000001", title: "新生兒�
 const sibDated = { id: "bbbbbbbb-0000-0000-0000-000000000002", title: "學童營養午餐全面免費", description: "x", election_id: 2024 };
 const sibUndated = { id: "cccccccc-0000-0000-0000-000000000003", title: "六大福利政見", description: null, election_id: null };
 const elections = [
-  { election_id: 2024, election_type: "立法委員", candidate_status: "confirmed", election_result: "elected" },
-  { election_id: 2026, election_type: "縣市長", candidate_status: "registered", election_result: null },
+  { election_id: 2024, election_type: "立法委員", candidacy_status: "elected" },
+  { election_id: 2026, election_type: "縣市長", candidacy_status: "filed" },
 ];
 
 // 藍圖 §2-1：事實放 state、選項放 criteria；§2-3：已知答案要放進 state 當參考

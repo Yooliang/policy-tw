@@ -230,12 +230,12 @@ Deno.serve(async (req) => {
           id,
           name,
           politician_elections!inner (
-            election_result
+            candidacy_status
           )
         )
       `
       )
-      .eq("politicians.politician_elections.election_result", "elected");
+      .eq("politicians.politician_elections.candidacy_status", "elected");
 
     if (body.policy_id) {
       policiesQuery = policiesQuery.eq("id", body.policy_id);
