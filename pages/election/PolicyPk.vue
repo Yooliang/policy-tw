@@ -3,10 +3,14 @@
  * 選舉頁「政見 PK」頁籤的本體（2026-10-06 小良哥：並排比較併進 PK、改成多人）。
  *
  *   列＝政見類別，欄＝同職位同選區的參選人（預設這一組全部，可勾選增減），格子＝那個人在這一類的政見與三要素。
- *   欄的順序依號次，沒有號次依姓名筆畫：只並排，不排名、不打分。三要素的「未說明／未調查」照 PolicyElements 標。
+ *   欄的順序依號次，沒有號次依姓名筆畫：只並排，不排名、不打分（規則在 lib/policy-compare.ts；畫面上不另寫說明，10-06）。
+ *   三要素的「未說明／未調查」照 PolicyElements 標。
+ *
+ * 只在瀏覽器端畫（小良哥 10-06）：PK 不是正文，政見的正文在政見頁與人物頁；並排的表進了預渲染 HTML 會被當成重複內容。
+ * 選舉頁用 v-if 掛這個元件，預渲染時永遠是「候選人」頁籤，HTML 裡只有參選人卡片與「政見 PK」按鈕連結。
  *
  * 選哪個職位、哪一場、勾了誰由選舉頁管（都在網址上：type／district／pick，規則在 lib/policy-compare.ts），
- * 這裡只管畫。選區是真連結（<a href>），預渲染的 HTML 裡就有每一場的入口。
+ * 這裡只管畫。選區是真連結（<a href>），可以貼網址直達。
  * 表比畫面寬時整張左右捲動，第一欄（類別）固定在左邊；手機上第一欄縮窄。
  */
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
@@ -53,9 +57,6 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
     <section v-else class="bg-white rounded-xl border border-slate-200 shadow-sm">
       <div class="px-4 pt-4">
         <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
-        <p class="text-xs text-slate-500 leading-relaxed mt-1">
-          欄的順序依號次；還沒有號次的依姓名筆畫。只並排，不排名、不打分。<template v-if="matrix.columns.length >= 3">表格比畫面寬時可以左右捲動，第一欄類別會固定在左邊。</template>
-        </p>
 
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
         <fieldset class="mt-3">

@@ -204,7 +204,7 @@ const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 /**
  * 政見 PK 的職位（網址 type）。空字串＝沒指定，自動選這一頁第一個有政見可比的職位（pkLevel）——
- * 2026-10-06 以前預設是縣市長，鄉鎮頁、或縣市長還沒有政見的縣市頁，PK 一打開（以及預渲染的 HTML）是空的。
+ * 2026-10-06 以前預設是縣市長，鄉鎮頁、或縣市長還沒有政見的縣市頁，PK 一打開是空的。
  */
 const comparisonLevel = ref<string>('')
 /** 政見 PK 選的是哪一場（組名，例如「第08選舉區」；空字串＝這一頁這個職位的第一場）與勾了誰（人物 id 以逗號隔開；空字串＝這一場全部）。2026-10-06 */
@@ -821,9 +821,8 @@ const subRegionIgnoredNote = computed(() =>
 
 /**
  * 政見 PK（2026-10-06 改成多人）：這一頁這個職位分成一場一場（lib/policy-compare.ts 的 pkGroups，只留至少兩位的），
- * 網址選的那一場（沒選或對不上＝第一場），預設這一場全部的人，可勾選增減。
- * 預渲染時沒有網址參數，畫的是這一頁預設的那一場（縣市頁＝縣市長、鄉鎮頁＝鄉鎮市長…）——PK 頁籤用 v-show，
- * 不在 PK 頁籤時表格也在 HTML 裡，爬蟲讀得到；其餘各場的入口是選區列與區塊標題列的真連結。
+ * 網址選的那一場（沒選或對不上＝第一個有政見的那一場），預設這一場全部的人，可勾選增減。
+ * 只在瀏覽器端畫、不進預渲染 HTML（小良哥 10-06：PK 不是正文，政見的正文在政見頁與人物頁），見模板的 VIEW: Comparison。
  */
 const pkGroupList = computed(() => pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
 const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
@@ -1156,8 +1155,9 @@ usePageHead({
         </template>
       </div>
 
-      <!-- VIEW: Comparison（政見 PK，2026-10-06 改成多人）：v-show 不是 v-if——預設那一場的表格在預渲染 HTML 裡，不在這個頁籤時也是 -->
-      <div v-show="viewMode === 'comparison'" class="animate-fade-in space-y-6">
+      <!-- VIEW: Comparison（政見 PK，2026-10-06 改成多人）：刻意用 v-if、只在瀏覽器端畫——PK 不是正文，不進預渲染 HTML（小良哥 10-06）。
+           預渲染時 viewMode 一律是「候選人」（網址參數在掛載後才套用），帶 ?view=comparison 的網址 canonical 指回選舉頁本身 -->
+      <div v-if="viewMode === 'comparison'" class="animate-fade-in space-y-6">
         <!-- 職位：真連結，換職位時選區與勾選重設 -->
         <div class="flex justify-start overflow-x-auto pb-2">
           <div class="inline-flex bg-slate-100 p-1 rounded-lg shrink-0">

@@ -101,7 +101,7 @@ export function hasPk<T extends ComparePerson>(group: CompareGroup<T> | undefine
 
 /**
  * 網址選的那一場；沒帶組名、或帶了這一頁沒有的組名，退回第一個 prefer 成立的組（選舉頁傳「有這一場的政見」），都沒有就第一組。
- * 退回的那一組也是預渲染 HTML 裡畫的那一張表——挑有政見的，爬蟲讀到的才不是一張空表。只影響「先看哪一場」，不影響欄的順序。
+ * 挑有政見的那一場：從按鈕以外的地方（PK 頁籤、舊網址）進來時，第一眼看到的不是一張空表。只影響「先看哪一場」，不影響欄的順序。
  */
 export function pickGroup<T>(groups: readonly CompareGroup<T>[], label: string, prefer?: (g: CompareGroup<T>) => boolean): CompareGroup<T> | undefined {
   return groups.find((g) => g.label === label) ?? (prefer && groups.find(prefer)) ?? groups[0]

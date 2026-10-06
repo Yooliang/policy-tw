@@ -176,3 +176,15 @@ Deno.test("選舉頁真的把「政見 PK」按鈕掛在每個區塊標題列：
   assert(/<RouterLink\s+v-if="pkLink"\s+:to="pkLink"/.test(grid), "按鈕是真連結");
   assert(!grid.includes("顯示方式") && !grid.includes("localStorage"), "大頭照／清單切換拿掉了");
 });
+
+Deno.test("PK 不進預渲染 HTML（不是正文，10-06 裁決）：頁籤用 v-if 掛；畫面上不放說明文字", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const pk = Deno.readTextFileSync(new URL("../pages/election/PolicyPk.vue", import.meta.url));
+  const elements = Deno.readTextFileSync(new URL("../components/PolicyElements.vue", import.meta.url));
+  // 預渲染時 viewMode 一律是候選人頁籤；改成 v-show 的話表格就會進 HTML
+  assert(/<div v-if="viewMode === 'comparison'"[^>]*>\s*<!-- 職位/.test(page), "PK 頁籤要用 v-if");
+  assertEquals(page.match(/<PolicyPk\b/g)?.length, 1);
+  const template = (s: string) => s.slice(s.indexOf("<template>"));
+  assert(!template(pk).includes("不排名"), "表格上方不放欄的順序說明");
+  assert(!/還沒有人查過原文|查過原文，沒有寫/.test(template(elements)), "未說明／未調查只留標籤");
+});
