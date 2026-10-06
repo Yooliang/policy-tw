@@ -13,7 +13,7 @@
 #   本機 ：目前登入那個帳號的即時值，用 resets_at 比對認人後蓋掉 Aegis 的舊值
 #   🔴 10-01 ① Aegis 的 gs it 凍在 88%、實際 99%（回報排程指到搬走的舊路徑）
 #       ② 本機那支把帳號寫死成 gsit，但登入換成 cwen → 兩行都變 cwen
-import datetime, io, math, subprocess, sys
+import datetime, io, math, os, subprocess, sys
 NL = chr(10)   # 不在字串字面值裡寫反斜線 n：工具參數會把它變成真的換行（10-02 連踩兩次）
 
 WEEK_UNITS = 192                                     # 一週切幾份
@@ -29,8 +29,21 @@ MAX_PER_ACCT = 4             # 平常單一帳號上限（4 隻以上派工吃�
 FINAL_HOURS = 5.0            # 收尾衝刺的時間窗
 FINAL_TARGET = 100.0
 FINAL_MAX_PER_ACCT = 8
-PROVIDER = {'gsit': 'claude', 'cwen': 'claude2'}
+PROVIDER = {'gsit': 'claude', 'cwen': 'claude2', 'acct3': 'claude3'}
 DEFAULT_MODEL = 'haiku'
+
+# --- 第三個帳號 acct3（2026-10-06；VM 用 provider=claude3、metadata claude3-token）---
+#   燒法：2 隻 Sonnet 慢慢跑滿整週。工作機實測 2 隻約 0.8~1.3 點/小時；4 隻 3.2 點/小時而且會撞 5 小時上限，
+#   所以平常上限鎖 2 隻（收尾衝刺那 FINAL_HOURS 小時照舊放寬，撞上限也無所謂）。
+#   步調線照舊：落後就跑 2 隻、超前就停，所以 2 隻實際上是「落後時才補上」。
+#   額度來源：Aegis 有這個帳號的列就照步調算；沒有（目前就是這樣）→ 額度未知，照固定 UNKNOWN_FIXED 隻跑，
+#   不做步調判斷，decision 裡會標「額度未知、照固定 2 隻」。
+#   啟用開關：只有環境變數 ACCT3_READY=1 才會派（tick.sh 查 VM metadata 有沒有 claude3-token 鍵後設定；
+#   token 還沒放進去時不派，免得每一輪白白產生被 AGENT-SKIP-SPEC 跳過的幾隻）。
+ACCT_MODEL = {'acct3': 'claude-sonnet-5'}
+ACCT_CAP = {'acct3': 2}                # 平常上限；沒列的帳號吃 MAX_PER_ACCT
+UNKNOWN_FIXED = {'acct3': 2}           # Aegis 沒有該帳號的列時固定開幾隻
+NEEDS_READY = {'acct3': 'ACCT3_READY'} # 帳號 → 要設成 1 才啟用的環境變數
 
 # --- burn 模式（小良哥 10-02 交辦：gs it 有一次重置機會，要在 3 天內把額度用完）---
 #   burn.txt 每行：帳號|model|隻數|目標%[|換手門檻:新model]
@@ -89,7 +102,17 @@ if local and rows:
 
 # --- 逐帳號算步調與隻數 ---
 plans, lines, switched = [], [], []
-for acct in sorted(rows):
+for acct in sorted(set(rows) | set(UNKNOWN_FIXED)):
+    if acct in NEEDS_READY and os.environ.get(NEEDS_READY[acct]) != '1':
+        plans.append((acct, 0))
+        lines.append('%-5s 未啟用（VM metadata 沒有 %s 的 token）｜→ 0 隻' % (acct, PROVIDER.get(acct)))
+        continue
+    if acct not in rows:
+        n = UNKNOWN_FIXED[acct]
+        plans.append((acct, n))
+        lines.append('%-5s 額度未知（Aegis 沒有這個帳號的列）｜→ %d 隻（額度未知、照固定 %d 隻；'
+                     '看 VM 實際用量或到帳號的使用量頁自己盯）' % (acct, n, n))
+        continue
     actual, reset = rows[acct]
     src = '本機即時' if acct == local_for else 'Aegis  '
     start = reset - datetime.timedelta(days=7)
@@ -107,7 +130,7 @@ for acct in sorted(rows):
     deficit = expected - actual
     sprint = hours_left <= FINAL_HOURS
     target = FINAL_TARGET if sprint else wt * 100.0
-    cap = FINAL_MAX_PER_ACCT if sprint else MAX_PER_ACCT
+    cap = FINAL_MAX_PER_ACCT if sprint else ACCT_CAP.get(acct, MAX_PER_ACCT)
     need_rate = max(target - actual, 0) / hours_left
 
     if acct in burn:
@@ -152,7 +175,7 @@ if total:
 specs, i = [], 0
 for acct, n in plans:
     for _ in range(n):
-        model = burn[acct][0] if acct in burn else DEFAULT_MODEL
+        model = burn[acct][0] if acct in burn else ACCT_MODEL.get(acct, DEFAULT_MODEL)
         specs.append('%s:%s=%s#fresh' % (PROVIDER.get(acct, 'claude2'), model, names[i])); i += 1
 
 io.open('agents.txt', 'w', encoding='utf-8').write('|'.join(specs))
