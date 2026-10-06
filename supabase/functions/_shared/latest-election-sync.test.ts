@@ -86,7 +86,7 @@ Deno.test("函式輸出欄的 \"position\" 加引號（SQL 關鍵字，不加是
   assertMatch(latestFn, /RETURNS TABLE \(election_id INTEGER, candidate_status TEXT, "position" TEXT,/);
 });
 
-Deno.test("前端組人物職稱用的也是「最近一筆非 not_running」（兩邊規則一致）", async () => {
+Deno.test("前端組人物職稱用的也是「最近一筆非退選（舊的 not_running）」（兩邊規則一致）", async () => {
   const src = await Deno.readTextFile(new URL("../../../composables/useSupabase.ts", import.meta.url));
-  assertMatch(src, /filter\(e => e\.candidateStatus !== 'not_running'\)\.sort\(\(a, b\) => b\.electionId - a\.electionId\)\[0\]/);
+  assertMatch(src, /filter\(e => e\.candidacyStatus !== 'withdrawn'\)\.sort\(\(a, b\) => b\.electionId - a\.electionId\)\[0\]/);
 });

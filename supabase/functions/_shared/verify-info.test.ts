@@ -53,7 +53,7 @@ Deno.test("candidateReasons：同出生年＋同縣市＋同型別紀錄都要�
   const why = candidateReasons(
     { id: "c1", name: "董森堡", region: "連江縣", birth_year: 1978, party: "無黨籍" },
     { name: "董森堡", region: "金門縣", birth_year: 1978, party: "無黨籍", election_type: "縣市議員" },
-    [{ politician_id: "c1", election_id: 2022, election_type: "縣市議員", candidate_status: "elected" }],
+    [{ politician_id: "c1", election_id: 2022, election_type: "縣市議員", candidacy_status: "elected" }],
   );
   assert(why.includes("同名"));
   assert(why.includes("同出生年 1978"));

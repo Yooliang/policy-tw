@@ -8,7 +8,7 @@
  *   4. 觸發器：舊欄位有變以舊欄位為準；只有新欄位變才回寫舊欄位；清成 NULL 會重算
  */
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
-import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, candidacyStatusFromLegacy, isListPublished, narrowConfirmed, taipeiToday } from "./candidacy-status.ts";
+import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, candidacyStatusFromLegacy, isListPublished, nextCandidacyStatus, protocolStatusFromCandidacy, resultOfCandidacyStatus, taipeiToday } from "./candidacy-status.ts";
 
 const sql = await Deno.readTextFile(new URL("../../migrations/20261006034500_candidacy_status.sql", import.meta.url));
 /** 去掉 SQL 註解（Windows 檢出是 CRLF，先切掉 \r） */
@@ -122,15 +122,85 @@ Deno.test("新→舊→新：六值在名單未公告時都回到原值（TS 規
   }
 });
 
-// ── #345 後續：confirmed 收窄 ──
-Deno.test("confirmed 收窄：名單公告後換成 qualified；公告前、別的狀態、早期匯入的 confirmed 原樣重交都不換", () => {
-  assertEquals(narrowConfirmed("confirmed", true), { status: "qualified", converted: true });
-  assertEquals(narrowConfirmed("confirmed", true, "registered"), { status: "qualified", converted: true });
-  assertEquals(narrowConfirmed("confirmed", false), { status: "confirmed", converted: false });
-  assertEquals(narrowConfirmed("confirmed", true, "confirmed"), { status: "confirmed", converted: false });
-  for (const s of ["registered", "qualified", "not_running", "withdrawn"]) assertEquals(narrowConfirmed(s, true), { status: s, converted: false });
-  // 換成 qualified 之後新欄位還是 filed（名單上的人），跟舊資料讀法一致
-  assertEquals(candidacyStatusFromLegacy("qualified", null, true), candidacyStatusFromLegacy("confirmed", null, true));
+// ── #345 第二階段 A：落庫端把協議的詞換成新欄位 ──
+Deno.test("nextCandidacyStatus：協議的詞 → 新欄位六值；傳聞與空值不收（回 null）", () => {
+  const next = (candidateStatus: string | null, listPublished = false, existing: string | null = null, electionResult: string | null = null) =>
+    nextCandidacyStatus({ candidateStatus, electionResult, listPublished, existing }).status;
+  assertEquals(next("registered"), "filed");
+  assertEquals(next("qualified"), "filed");
+  assertEquals(next("not_running"), "withdrawn");
+  assertEquals(next("withdrawn"), "withdrawn");
+  assertEquals(next("likely"), "considering");
+  assertEquals(next("elected"), "elected");
+  assertEquals(next("defeated"), "not_elected");
+  assertEquals(next("rumored"), null, "不收傳聞");
+  assertEquals(next(null), null);
+  assertEquals(next("亂寫的"), null);
+});
+
+Deno.test("nextCandidacyStatus：confirmed 只表示表態參選；名單公告後在名單上的記成已登記；原本就是表態參選的原樣重交不改", () => {
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", listPublished: false }), { status: "declared", converted: false });
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", listPublished: true }), { status: "filed", converted: true });
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", listPublished: true, existing: "considering" }), { status: "filed", converted: true });
+  // 早期匯入、公告前寫的表態參選：補選區任務叫代理「照現況填」，不能因為一件不相干的任務把它改掉
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", listPublished: true, existing: "declared" }), { status: "declared", converted: false });
+  // 已經是已登記（早期匯入的 confirmed 在名單公告後就讀成已登記）：值沒變，也不用講「換成」
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", listPublished: true, existing: "filed" }), { status: "filed", converted: false });
+  // 其他狀態不受名單公告影響
+  for (const s of ["registered", "qualified", "not_running", "withdrawn"]) {
+    assertEquals(nextCandidacyStatus({ candidateStatus: s, listPublished: true }).converted, false, s);
+  }
+});
+
+Deno.test("nextCandidacyStatus：結果比登記階段與不參選都大——有給結果就是結果；原本已有結果、這次沒給結果就維持", () => {
+  assertEquals(nextCandidacyStatus({ candidateStatus: "qualified", electionResult: "elected", listPublished: true }).status, "elected");
+  assertEquals(nextCandidacyStatus({ candidateStatus: "confirmed", electionResult: "not_elected", listPublished: true, existing: "filed" }).status, "not_elected");
+  // 改結果：給新結果就改（原本當選、這次交落選）
+  assertEquals(nextCandidacyStatus({ candidateStatus: "qualified", electionResult: "not_elected", listPublished: true, existing: "elected" }).status, "not_elected");
+  // 沒給結果：「照現況填 registered」「改成 confirmed」「改成 not_running」都不能把已經標好的結果蓋掉（舊兩欄就是這樣：election_result 優先）
+  for (const cs of ["registered", "qualified", "confirmed", "not_running", "likely"]) {
+    assertEquals(nextCandidacyStatus({ candidateStatus: cs, listPublished: true, existing: "elected" }).status, "elected", cs);
+    assertEquals(nextCandidacyStatus({ candidateStatus: cs, listPublished: false, existing: "not_elected" }).status, "not_elected", cs);
+  }
+});
+
+Deno.test("nextCandidacyStatus 跟舊的雙向規則一致：新欄位寫下去之後，舊兩欄的對應不會把它讀成別的", () => {
+  // 協議的詞 + 結果 → 新欄位 → 觸發器回寫舊兩欄 → 再讀回來，要是同一個值（名單未公告時；confirmed 公告後本來就換成 filed）
+  for (const cs of ["confirmed", "registered", "qualified", "not_running", "likely"]) {
+    for (const er of [null, "elected", "not_elected"]) {
+      const written = nextCandidacyStatus({ candidateStatus: cs, electionResult: er, listPublished: false }).status;
+      assertEquals(written, candidacyStatusFromLegacy(cs, er, false), `${cs}／${er}`);
+    }
+  }
+});
+
+Deno.test("protocolStatusFromCandidacy：新欄位 → 協議的詞（派工說明「candidate_status 照現況填」）；SQL 同名函式逐項一致", async () => {
+  assertEquals(protocolStatusFromCandidacy("withdrawn", false), "not_running");
+  assertEquals(protocolStatusFromCandidacy("declared", true), "confirmed");
+  assertEquals(protocolStatusFromCandidacy("filed", false), "registered", "名單公告前填 registered");
+  assertEquals(protocolStatusFromCandidacy("filed", true), "qualified", "名單公告後填 qualified（confirmed 只表示表態參選）");
+  assertEquals(protocolStatusFromCandidacy("elected", false), "qualified");
+  assertEquals(protocolStatusFromCandidacy("not_elected", true), "qualified");
+  assertEquals(protocolStatusFromCandidacy("considering", false), "likely");
+  assertEquals(protocolStatusFromCandidacy(null, false), "rumored", "空值是現況的描述，不是可以交的值");
+  // SQL 那一支（migration 20261006220000）：每個 WHEN 的對應都要跟 TS 一樣
+  const mig = (await Deno.readTextFile(new URL("../../migrations/20261006220000_candidacy_read_side.sql", import.meta.url))).replaceAll("\r\n", "\n");
+  const fn = code(between(mig, "CREATE OR REPLACE FUNCTION candidacy_protocol_status(", "COMMENT ON FUNCTION candidacy_protocol_status"));
+  for (const [status, listed, want] of [
+    ["withdrawn", false, "not_running"], ["declared", false, "confirmed"], ["filed", false, "registered"], ["filed", true, "qualified"],
+    ["elected", false, "qualified"], ["not_elected", false, "qualified"], ["considering", false, "likely"],
+  ] as const) {
+    assertEquals(protocolStatusFromCandidacy(status, listed), want);
+    assertMatch(fn, new RegExp(`WHEN '${status}' THEN .*'${want}'`), `SQL 的 ${status} 要對到 ${want}`);
+  }
+  assertMatch(fn, /WHEN 'filed' THEN CASE WHEN COALESCE\(p_list_published, false\) THEN 'qualified' ELSE 'registered' END/);
+  assertMatch(fn, /ELSE 'rumored'/);
+});
+
+Deno.test("resultOfCandidacyStatus：只有當選、落選算結果", () => {
+  assertEquals(resultOfCandidacyStatus("elected"), "elected");
+  assertEquals(resultOfCandidacyStatus("not_elected"), "not_elected");
+  for (const s of ["filed", "declared", "considering", "withdrawn", null, undefined]) assertEquals(resultOfCandidacyStatus(s), null);
 });
 
 Deno.test("isListPublished：問 SQL 的 candidacy_list_published；查不到一律當沒公告", async () => {

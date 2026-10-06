@@ -3,7 +3,7 @@ import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useSupabase } from '../../composables/useSupabase'
-import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
+import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
 import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
@@ -28,7 +28,7 @@ const props = defineProps<{
   pkLink?: RouteLocationRaw
 }>()
 
-const { policies } = useSupabase()
+const { policies, elections } = useSupabase()
 const collapsed = ref(false)
 
 /**
@@ -56,37 +56,39 @@ const getPledgeCount = (politicianId: string | number) =>
     (props.electionId === undefined || p.electionId === props.electionId)
   ).length
 
-// 參選狀態顯示（選舉前中後三階段）
-const candidateStatusLabel = (status?: CandidateStatus, withdrawnAfterFiling?: boolean) => {
+// 這一屆投完票了沒：投完票之後「已登記」那顆勾與「已登記」標籤沒有意思（人人都在選票上），只講結果
+const voted = computed(() => {
+  const d = elections.value.find((e) => e.id === props.electionId)?.electionDate
+  return !!d && d < new Date().toISOString().slice(0, 10)
+})
+
+// 參選狀態顯示（選前到選後同一欄 candidacy_status；#345 第二階段 A）
+const candidateStatusLabel = (status?: CandidacyStatus, withdrawnAfterFiling?: boolean) => {
   switch (status) {
-    case 'confirmed': return null  // 已確認參選不需特別標註
-    case 'registered': return '已登記'
-    case 'qualified': return '已審定'
-    case 'not_running': return withdrawalText(withdrawnAfterFiling)  // 正常不會進到 grid（ElectionPage 已過濾），保底顯示；說法看退選前有沒有登記過（#345 後續）
-    case 'likely': return '可能參選'
-    case 'rumored': return '傳聞'
+    case 'declared': return null  // 表態參選不需特別標註
+    case 'filed': return null  // 已登記標在照片上（勾），不重複標文字
+    case 'withdrawn': return withdrawalText(withdrawnAfterFiling)  // 正常不會進到 grid（ElectionPage 已過濾），保底顯示；說法看退選前有沒有登記過（#345 後續）
+    case 'considering': return '考慮參選'
     case 'elected': return '當選'
-    case 'defeated': return '落選'
+    case 'not_elected': return '落選'
     default: return null
   }
 }
 
-const candidateStatusColor = (status?: CandidateStatus) => {
+const candidateStatusColor = (status?: CandidacyStatus) => {
   switch (status) {
-    case 'registered': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    case 'qualified': return 'bg-emerald-200 text-emerald-800 border-emerald-300'
-    case 'not_running': return 'bg-slate-100 text-slate-500 border-slate-200'
-    case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
-    case 'rumored': return 'bg-slate-100 text-slate-500 border-slate-200'
+    case 'filed': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'withdrawn': return 'bg-slate-100 text-slate-500 border-slate-200'
+    case 'considering': return 'bg-amber-100 text-amber-700 border-amber-200'
     case 'elected': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    case 'defeated': return 'bg-red-100 text-red-600 border-red-200'
+    case 'not_elected': return 'bg-red-100 text-red-600 border-red-200'
     default: return ''
   }
 }
 
-// 只有 confirmed/elected 狀態才顯示「細到鄉鎮／村里」的選區（中選會正式資料）
-const shouldShowSubRegion = (status?: CandidateStatus) => {
-  return status === 'confirmed' || status === 'registered' || status === 'qualified' || status === 'elected' || status === 'defeated'
+// 只有表明參選以後（表明、已登記、當選、落選）才顯示「細到鄉鎮／村里」的選區（中選會正式資料）
+const shouldShowSubRegion = (status?: CandidacyStatus) => {
+  return status === 'declared' || status === 'filed' || status === 'elected' || status === 'not_elected'
 }
 
 /**
@@ -98,7 +100,7 @@ const shouldShowSubRegion = (status?: CandidateStatus) => {
 // （例如鄭運鵬是桃園市第01選區的立委），印在縣市長卡片上會變成
 // 「縣市長候選人 ＋ 立委選區」這種讀不通的東西——177 位裡有 64 位會這樣。
 const hasSubArea = (politician: Politician): boolean =>
-  politician.electionType !== '縣市長' && !!(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidateStatus)
+  politician.electionType !== '縣市長' && !!(politician.subRegion || politician.village) && shouldShowSubRegion(politician.candidacyStatus)
 
 const formatArea = (politician: Politician): string | null => {
   const parts = [politician.region]
@@ -167,7 +169,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
             :title="`${politician.candNo} 號`"
           >{{ politician.candNo }}號</span>
           <span
-            v-else-if="politician.candidateStatus === 'registered'"
+            v-else-if="politician.candidacyStatus === 'filed' && !voted"
             class="absolute top-2 left-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white"
             title="已登記"
           ><Check :size="14" :stroke-width="3" /></span>
@@ -181,9 +183,9 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
           <!-- 已登記以外的參選狀態（可能參選、當選、落選…）照舊文字標；已登記與有號次的已經標在照片上 -->
           <span
-            v-if="!politician.candNo && politician.candidateStatus !== 'registered' && candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling)"
-            :class="`inline-block text-[10px] px-1.5 py-0.5 rounded border font-bold mt-1 ${candidateStatusColor(politician.candidateStatus)}`"
-          >{{ candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling) }}</span>
+            v-if="!politician.candNo && candidateStatusLabel(politician.candidacyStatus, politician.withdrawnAfterFiling)"
+            :class="`inline-block text-[10px] px-1.5 py-0.5 rounded border font-bold mt-1 ${candidateStatusColor(politician.candidacyStatus)}`"
+          >{{ candidateStatusLabel(politician.candidacyStatus, politician.withdrawnAfterFiling) }}</span>
           <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
           <p v-if="currentTitle(politician)" class="text-[11px] text-sky-700 mt-1 line-clamp-1">現任 {{ currentTitle(politician) }}</p>
           <!-- 0 用灰色：純嚴格只算當屆之後，多數參選人是 0，全部紫色徽章會變成一片噪音；

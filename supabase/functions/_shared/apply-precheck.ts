@@ -158,14 +158,14 @@ async function lookupResultCandidacies(supabase: SupabaseLike, ids: readonly num
   return { rows, ok: true };
 }
 
-interface ExistingParticipation { politician_id: string; election_id: number; election_type: string | null; candidate_status: string | null }
+interface ExistingParticipation { politician_id: string; election_id: number; election_type: string | null; candidacy_status: string | null }
 
 async function lookupParticipations(supabase: SupabaseLike, politicianIds: readonly string[], electionIds: readonly number[]): Promise<LookupResult<ExistingParticipation[]>> {
   if (politicianIds.length === 0 || electionIds.length === 0) return { rows: [], ok: true };
   try {
     // query-bounds: ok — 兩邊 id 都來自這一批交件（最多 MAX_BATCH 筆），變數 in()
     const { data, error } = await supabase.from("politician_elections")
-      .select("politician_id, election_id, election_type, candidate_status")
+      .select("politician_id, election_id, election_type, candidacy_status")
       .in("politician_id", politicianIds).in("election_id", electionIds);
     if (error) { console.error("precheck candidacy lookup failed:", error.message); return { rows: [], ok: false }; }
     return { rows: (data ?? []) as ExistingParticipation[], ok: true };
@@ -479,7 +479,7 @@ export async function precheckApplyTargets(
     const existing = participations.rows.find((e) => e.politician_id === c.politicianId && e.election_id === c.electionId);
     if (!existing) continue;
     try {
-      electionTypeSwitch({ election_type: existing.election_type, candidate_status: existing.candidate_status }, { election_type: c.electionType, position: c.position });
+      electionTypeSwitch({ election_type: existing.election_type, candidacy_status: existing.candidacy_status }, { election_type: c.electionType, position: c.position });
     } catch (e) {
       problems.push({ index: c.index, code: "apply_would_fail", path: "payload.election_type", message: e instanceof Error ? e.message : String(e) });
     }

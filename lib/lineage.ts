@@ -198,13 +198,13 @@ export function buildTimeline(
  * 沒當選或還沒投票的寫「縣市長參選人」——職稱只能從當選來（2026-10-04 裁決），不能把參選人寫成首長。
  */
 export function termRoleLabel(
-  person: { elections?: Array<{ electionId: number; electionType?: string; electionResult?: string }>; offices?: Array<{ electionId: number }> } | undefined,
+  person: { elections?: Array<{ electionId: number; electionType?: string; candidacyStatus?: string }>; offices?: Array<{ electionId: number }> } | undefined,
   electionId: number | null,
 ): string {
   if (!person || electionId === null) return ''
   const rec = person.elections?.find((e) => e.electionId === electionId)
   if (!rec?.electionType) return ''
-  const elected = rec.electionResult === 'elected' || (person.offices ?? []).some((o) => o.electionId === electionId)
+  const elected = rec.candidacyStatus === 'elected' || (person.offices ?? []).some((o) => o.electionId === electionId)
   return elected ? rec.electionType : `${rec.electionType}參選人`
 }
 

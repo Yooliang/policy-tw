@@ -104,13 +104,13 @@ Deno.test("/next 驗證現況：policy 附 similar_policies 與重複規則；po
       { id: "p1", name: "陳素月", party: "民主進步黨", region: "彰化縣", election_type: "縣市長", current_position: "立法委員", birth_year: 1966 },
       { id: "p2", name: "陳素月", party: "無黨籍", region: "宜蘭縣", election_type: "村里長", current_position: null, birth_year: null },
     ],
-    elections: [{ politician_id: "p1", election_id: 2026, election_type: "縣市長", candidate_status: "registered", source_note: null }],
+    elections: [{ politician_id: "p1", election_id: 2026, election_type: "縣市長", candidacy_status: "filed", source_note: null }],
     identity: { decision: "ambiguous", politician_id: null, reason: "兩人各中一個面向", candidate_ids: ["p1", "p2"] },
   });
   assertEquals(amb.identity_pick_required, true);
   const cands = amb.identity_candidates as Array<Record<string, unknown>>;
   assertEquals(cands.length, 2);
-  assertEquals(cands[0].elections, ["2026 縣市長（registered）"]);
+  assertEquals(cands[0].elections, ["2026 縣市長（filed）"]);
   assert(String(amb.hint).includes("resolved_politician_id"));
   const matched = shapeVerifyCurrent("candidacy", { name: "陳素月" }, { politicians: [], identity: { decision: "matched", politician_id: "p1", reason: "", candidate_ids: ["p1"] } });
   assertEquals(matched.identity_pick_required, false);

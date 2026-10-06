@@ -88,7 +88,7 @@ const duePolicies = computed(() => dueDeadlinePolicies(
   {
     today: today.value,
     electionDateOf: (p) => (p.electionId != null ? getElectionById(p.electionId)?.electionDate : undefined),
-    electionResultOf: (p) => politicianById.value.get(String(p.politicianId))?.elections?.find(e => e.electionId === p.electionId)?.electionResult,
+    candidacyStatusOf: (p) => politicianById.value.get(String(p.politicianId))?.elections?.find(e => e.electionId === p.electionId)?.candidacyStatus,
   },
 ))
 const STATUS_TEXT: Record<string, string> = {

@@ -9,7 +9,7 @@ import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
 import { PolicyStatus } from '../types'
-import type { CandidateStatus, Policy, PoliticianTerm } from '../types'
+import type { Policy, PoliticianElectionData, PoliticianTerm } from '../types'
 import { policySortDate } from '../lib/policy-date'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -26,7 +26,7 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
-import { candidacyBadge, candidacyNote, officeTitles, pastTermItems, withdrawalText } from '../lib/politician-office'
+import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
@@ -93,62 +93,32 @@ function isElectionPast(electionId: number): boolean {
 
 // Candidate status helpers - considers whether election is past or future
 /**
- * 選舉結果優先於參選狀態（2026-09-18）。
+ * 參選狀態只讀 candidacy_status 一欄（#345 第二階段 A）。
  *
- * candidate_status 記的是「選前的登記狀態」，2024 那 318 筆全都停在 confirmed；
- * 選完的結果在另一個欄位 election_result（已用中選會資料回填：當選 75、落選 239）。
- * 這裡原本只讀 candidate_status，過去選舉又只認 elected/defeated，
- * 結果是「2024 總統候選人 賴清德」右邊一片空白——資料有，只是沒人去讀。
+ * 以前分兩欄：candidate_status 記「選前的登記狀態」，2024 那 318 筆全都停在 confirmed，選完的結果在另一欄 election_result，
+ * 畫面只讀前者而「2024 總統候選人 賴清德」右邊一片空白（2026-09-18）。現在選前到選後同一欄，結果就是狀態，不會再有讀漏的欄位。
+ * 投完票的屆別只講結果：當選、落選、不參選（退選，說法看退選前有沒有登記過）；結果還沒補上的寫「結果待補」，
+ * 不講登記階段的「表態參選」——跟人物一覽、政黨頁同一份規則（lib/politician-office.ts 的 candidacyNote，2026-10-06 主線裁定統一）。
  */
-function resultLabel(result?: 'elected' | 'not_elected'): string | null {
-  if (result === 'elected') return '當選'
-  if (result === 'not_elected') return '落選'
-  return null
+function getCandidateStatusLabel(rec: PoliticianElectionData): string | null {
+  const isPast = rec.electionId ? isElectionPast(rec.electionId) : false
+  return candidacyNote(rec, isPast) || null
 }
 
-function getCandidateStatusLabel(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected', withdrawnAfterFiling?: boolean): string | null {
-  const byResult = resultLabel(result)
-  if (byResult) return byResult
-  const isPast = electionId ? isElectionPast(electionId) : false
+function getCandidateStatusColor(rec: PoliticianElectionData): string {
+  const status = rec.candidacyStatus
+  if (status === 'elected') return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+  if (status === 'not_elected') return 'bg-red-100 text-red-600 border-red-200'
+  const isPast = rec.electionId ? isElectionPast(rec.electionId) : false
 
-  // 投完票的屆別只講結果：當選、落選、不參選（退選，說法看退選前有沒有登記過）；結果還沒補上的寫「結果待補」，
-  // 不講登記階段的「表態參選」——跟人物一覽、政黨頁同一份規則（lib/politician-office.ts 的 candidacyNote，2026-10-06 主線裁定統一）。
-  // 之前這裡回 null，2022 那一萬多筆停在 confirmed 的參選紀錄右邊什麼都沒寫。
-  if (isPast) return candidacyNote({ candidateStatus: status, electionResult: result, withdrawnAfterFiling }, true)
-
-  // For future elections, show pre-election status
-  switch (status) {
-    case 'confirmed': return '表態參選'
-    case 'registered': return '已登記'
-    case 'qualified': return '已審定'
-    case 'not_running': return withdrawalText(withdrawnAfterFiling)
-    case 'likely': return '可能參選'
-    case 'rumored': return '傳聞參選'
-    case 'elected': return '當選'
-    case 'defeated': return '落選'
-    default: return null
-  }
-}
-
-function getCandidateStatusColor(status?: CandidateStatus, electionId?: number, result?: 'elected' | 'not_elected'): string {
-  if (result === 'elected') return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-  if (result === 'not_elected') return 'bg-red-100 text-red-600 border-red-200'
-  const isPast = electionId ? isElectionPast(electionId) : false
-
-  // For past elections without elected/defeated status, use neutral color（「結果待補」與不參選都用這個中性灰）
-  if (isPast && status !== 'elected' && status !== 'defeated') {
-    return 'bg-slate-50 text-slate-600 border-slate-200'
-  }
+  // For past elections without a result, use neutral color（「結果待補」與不參選都用這個中性灰）
+  if (isPast) return 'bg-slate-50 text-slate-600 border-slate-200'
 
   switch (status) {
-    case 'confirmed': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    case 'registered': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    case 'qualified': return 'bg-emerald-200 text-emerald-800 border-emerald-300'
-    case 'not_running': return 'bg-slate-100 text-slate-500 border-slate-200'
-    case 'likely': return 'bg-amber-100 text-amber-700 border-amber-200'
-    case 'rumored': return 'bg-slate-100 text-slate-600 border-slate-200'
-    case 'elected': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    case 'defeated': return 'bg-red-100 text-red-600 border-red-200'
+    case 'declared': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'filed': return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    case 'withdrawn': return 'bg-slate-100 text-slate-500 border-slate-200'
+    case 'considering': return 'bg-amber-100 text-amber-700 border-amber-200'
     default: return 'bg-slate-50 text-slate-600 border-slate-200'
   }
 }
@@ -616,14 +586,14 @@ usePageHead({
                     <div
                       v-for="elec in politician.elections"
                       :key="elec.electionId"
-                      :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec.candidateStatus, elec.electionId, elec.electionResult)]"
+                      :class="['flex items-center justify-between p-2 rounded-lg text-sm border', getCandidateStatusColor(elec)]"
                     >
                       <div class="flex items-center gap-2">
                         <Vote :size="14" />
                         <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}<span v-if="elec.candNo" class="ml-1 text-slate-500">（{{ elec.candNo }}號）</span></span>
                       </div>
-                      <span v-if="getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult, elec.withdrawnAfterFiling)" class="text-xs">
-                        {{ getCandidateStatusLabel(elec.candidateStatus, elec.electionId, elec.electionResult, elec.withdrawnAfterFiling) }}
+                      <span v-if="getCandidateStatusLabel(elec)" class="text-xs">
+                        {{ getCandidateStatusLabel(elec) }}
                       </span>
                     </div>
                   </div>

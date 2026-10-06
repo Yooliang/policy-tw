@@ -34,10 +34,15 @@ function toggleNote(key: string) {
   openNotes.value = next
 }
 
-const STATUS_FIELDS = new Set(['status', 'candidate_status', 'election_result'])
+const STATUS_FIELDS = new Set(['status', 'candidate_status', 'candidacy_status', 'election_result'])
+// 參選狀態一欄六值（#345；舊履歷的 candidate_status／election_result 值照原樣印）
+const CANDIDACY_LABEL: Record<string, string> = {
+  considering: '考慮參選', declared: '表態參選', filed: '已登記', withdrawn: '退選／不參選', elected: '當選', not_elected: '落選',
+}
 function editValue(field: string, v: unknown): string {
   const raw = formatValue(v)
   if (!STATUS_FIELDS.has(field) || raw === '（空）') return raw
+  if (field === 'candidacy_status') return CANDIDACY_LABEL[raw] ?? raw
   return field === 'status' ? policyStatusLabel(raw) : raw
 }
 </script>

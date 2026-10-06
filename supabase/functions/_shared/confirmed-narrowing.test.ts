@@ -9,7 +9,7 @@ Deno.test("登記截止後標 qualified 也要附名冊或截止後的報導（�
 
 /**
  * #345 後續（協調者 10-06 裁定）：
- *   - confirmed 收窄：只表示表態參選；正式名單公告後（含已投票屆別）落庫記成 qualified，回覆講一聲；早期匯入的 confirmed 原樣重交不改
+ *   - confirmed 收窄：只表示表態參選；正式名單公告後（含已投票屆別）落庫記成已登記（新欄位 filed；#345 第二階段 A 起只寫 candidacy_status，舊制是 qualified），回覆講一聲；早期匯入的 confirmed（表態參選 declared）原樣重交不改
  *   - 任期的卸任日附出處更正：根據換成 source、出處記第一個網址；在任中的要連原因一起給
  * 假 db 跟 district-region-apply.test.ts 同一套，多一個 rpc（candidacy_list_published）。
  */
@@ -70,12 +70,13 @@ const candidacy = (status: string) => ({
 });
 const peOf = (tables: Map<string, Row[]>) => (tables.get("politician_elections") ?? []).find((r) => r.politician_id === POL);
 
-Deno.test("名單公告後交 confirmed：記成 qualified，回覆講一聲；有問名單公告了沒", async () => {
+Deno.test("名單公告後交 confirmed：記成已登記（filed），回覆講一聲；有問名單公告了沒", async () => {
   const { client, tables, rpcCalls } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, true);
   const out = await applyContribution(client, candidacy("confirmed"));
   assertEquals(out.status, "applied");
-  assertEquals(peOf(tables)?.candidate_status, "qualified");
-  assertStringIncludes(String(out.message), "qualified");
+  assertEquals(peOf(tables)?.candidacy_status, "filed");
+  assertEquals(peOf(tables)?.candidate_status, undefined, "落庫不寫舊欄位，由觸發器同步");
+  assertStringIncludes(String(out.message), "filed");
   assertEquals(rpcCalls[0]?.name, "candidacy_list_published");
   assertEquals(rpcCalls[0]?.args.p_election_type, "縣市長");
 });
@@ -83,29 +84,29 @@ Deno.test("名單公告後交 confirmed：記成 qualified，回覆講一聲；�
 Deno.test("名單還沒公告交 confirmed：照存（表態參選）", async () => {
   const { client, tables } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, false);
   await applyContribution(client, candidacy("confirmed"));
-  assertEquals(peOf(tables)?.candidate_status, "confirmed");
+  assertEquals(peOf(tables)?.candidacy_status, "declared");
 });
 
 Deno.test("早期匯入的 confirmed 原樣重交（補選區任務叫代理照現況填）：不順手改", async () => {
   const { client, tables } = makeDb({
     politicians: [{ id: POL, name: "王小明", merged_into: null }],
-    politician_elections: [{ id: 9, politician_id: POL, election_id: 2026, election_type: "縣市長", candidate_status: "confirmed" }],
+    politician_elections: [{ id: 9, politician_id: POL, election_id: 2026, election_type: "縣市長", candidacy_status: "declared" }],
   }, true);
   const out = await applyContribution(client, candidacy("confirmed"));
-  assertEquals(peOf(tables)?.candidate_status, "confirmed");
-  assertEquals(String(out.message).includes("qualified"), false);
+  assertEquals(peOf(tables)?.candidacy_status, "declared");
+  assertEquals(String(out.message).includes("filed"), false);
 });
 
 Deno.test("查不到名單公告了沒（沒有 rpc）：照原值寫，不猜", async () => {
   const { client, tables } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, "no-rpc");
   await applyContribution(client, candidacy("confirmed"));
-  assertEquals(peOf(tables)?.candidate_status, "confirmed");
+  assertEquals(peOf(tables)?.candidacy_status, "declared");
 });
 
 Deno.test("registered 不受影響、不問名單", async () => {
   const { client, tables, rpcCalls } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, true);
   await applyContribution(client, candidacy("registered"));
-  assertEquals(peOf(tables)?.candidate_status, "registered");
+  assertEquals(peOf(tables)?.candidacy_status, "filed");
   // 不問名單：沒有 candidacy_list_published。落庫後另外寫出處表的 source_write（#347 第二階段 A）不算
   assertEquals(rpcCalls.filter((c) => c.name !== "source_write").length, 0);
 });
@@ -115,14 +116,18 @@ const correction = (target_table: string, target_id: string, changes: Row[]) => 
   payload: { target_table, target_id, reason: "王小明的名冊與議會公告", changes },
 });
 
-Deno.test("correction 改參選狀態成 confirmed、名單已公告：記成 qualified", async () => {
+Deno.test("correction 改參選狀態成 confirmed、名單已公告：記成已登記（filed）；協議的 candidate_status 欄位落庫寫 candidacy_status", async () => {
   const { client, tables } = makeDb({
-    politician_elections: [{ id: "77", politician_id: POL, election_id: 2026, election_type: "縣市議員", candidate_status: "registered" }],
+    politician_elections: [{ id: "77", politician_id: POL, election_id: 2026, election_type: "縣市議員", candidacy_status: "considering" }],
   }, true);
-  const out = await applyContribution(client, correction("politician_elections", "77", [{ field: "candidate_status", current_value: "registered", correct_value: "confirmed" }]));
+  const out = await applyContribution(client, correction("politician_elections", "77", [{ field: "candidate_status", current_value: "likely", correct_value: "confirmed" }]));
   assertEquals(out.status, "applied");
-  assertEquals((tables.get("politician_elections") ?? [])[0].candidate_status, "qualified");
-  assertStringIncludes(String(out.message), "qualified");
+  const pe = (tables.get("politician_elections") ?? [])[0];
+  assertEquals(pe.candidacy_status, "filed");
+  assertEquals(pe.candidate_status, undefined, "不寫舊欄位");
+  assertStringIncludes(String(out.message), "filed");
+  const hist = (tables.get("edit_history") ?? []).map((h) => h.field);
+  assert(hist.includes("candidacy_status"), `履歷記新欄位：${hist.join(",")}`);
 });
 
 Deno.test("任期的推定卸任日附出處更正：根據換成 source、出處記第一個網址", async () => {

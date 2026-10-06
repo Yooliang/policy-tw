@@ -6,6 +6,7 @@ import StatusBadge from './StatusBadge.vue'
 import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyYear } from '../lib/policy-date'
+import { electionOutcome } from '../lib/candidate-status'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -36,7 +37,7 @@ const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
 // 用小卡（無期待度、無⭐）的兩種承諾（2026-09-18）：
 //   1. 那場選舉已經投完票——支持或反對一個 2024 年的承諾改變不了任何事
 //   2. 沒標屆別——不知道是哪一場，就不能當成進行中的來收集民意
-// 「當選了沒」不拿來當依據：election_result 目前九成是空的。
+// 「當選了沒」不拿來當依據：已投票屆別的結果（candidacy_status 的當選、落選）目前九成是空的。
 const { elections } = useSupabase()
 const isPastCampaign = computed(() => {
   if (!isCampaign) return false
@@ -55,7 +56,7 @@ const shownFollows = computed(() => followCount(props.policy.id, props.policy.st
 // 查不到（過去選舉九成還是空的）就不標，不猜。
 const campaignResult = computed(() => {
   if (!isCampaign || props.policy.electionId == null) return null
-  return props.politician.elections?.find((e) => e.electionId === props.policy.electionId)?.electionResult ?? null
+  return electionOutcome(props.politician.elections?.find((e) => e.electionId === props.policy.electionId)?.candidacyStatus)
 })
 
 // 第 3 種狀態（人為主）：競選承諾而且那場還沒投票。其餘走「標題為主軸」
