@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import PartyBadge from '../../components/PartyBadge.vue'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidateStatus } from '../../types'
-import { ArrowRight, Megaphone, ChevronDown, ChevronUp, Check, LayoutGrid, List } from 'lucide-vue-next'
-import Avatar from '../../components/Avatar.vue'
+import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 
@@ -20,36 +20,22 @@ const props = defineProps<{
    * 未標屆別的不算進來：那是「政見缺屆別」的資料缺口，不是當屆政見。
    */
   electionId?: number
+  /**
+   * 標題列的「政見 PK」按鈕連到哪裡（2026-10-06 小良哥：拿掉「大頭照／清單」切換，同一個位置放這顆）：
+   * 選舉頁「政見 PK」頁籤、已選好這個區塊的職位與選區、帶入這一組全部的參選人（網址規則在 lib/policy-compare.ts）。
+   * 真的 <a href>；沒給就不出現（同一場不到兩位、或不知道是哪一場）。
+   */
+  pkLink?: RouteLocationRaw
 }>()
-
-// Grid classes based on columns prop
-const gridClasses = computed(() => {
-  if (props.columns === 2) {
-    return 'grid grid-cols-1 md:grid-cols-2 gap-6'
-  }
-  return 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-})
 
 const { policies } = useSupabase()
 const collapsed = ref(false)
 
 /**
- * 大頭照版（2026-09-28 維護者試作，參考民眾黨候選人頁）：四欄、大張直式人像、名字＋號次＋政黨＋選區。
- * 一律預設大頭照（09-28 維護者：「預設就改這樣顯示，包含下方的議員那些」）；使用者切換後記在瀏覽器（拿不到 localStorage 就只在這次有效）。
- * 欄數跟著版面寬度走（09-29 維護者）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，沒有就全寬 → 六欄，兩種卡片一樣大。
- * 預渲染一律出清單版（onMounted 才讀偏好），避免伺服器與瀏覽器畫面不一致。
+ * 卡片（2026-09-28 維護者試作大頭照版，參考民眾黨候選人頁；2026-10-06 小良哥：拿掉「大頭照／清單」切換，只留這種卡片）：
+ * 大張直式人像、名字＋號次＋政黨＋選區。欄數跟著版面寬度走（09-29 維護者）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，
+ * 沒有就全寬 → 六欄，兩種卡片一樣大。預渲染與瀏覽器是同一種卡片（以前預渲染出清單版、掛載後才換，畫面會跳）。
  */
-const VIEW_KEY = 'election-grid-view-v2' // v2：預設改成大頭照，舊的偏好不沿用
-const view = ref<'list' | 'portrait'>('list')
-onMounted(() => {
-  let saved: string | null = null
-  try { saved = localStorage.getItem(VIEW_KEY) } catch { /* 私密視窗等 */ }
-  view.value = saved === 'list' ? 'list' : 'portrait'
-})
-const setView = (v: 'list' | 'portrait') => {
-  view.value = v
-  try { localStorage.setItem(VIEW_KEY, v) } catch { /* 記不住就算了 */ }
-}
 const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
 // columns === 2 就是右側有篩選欄（ElectionPage 的 gridColumns）
 const portraitGridClass = computed(() => props.columns === 2
@@ -149,22 +135,24 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
 <template>
   <div class="mb-12 scroll-mt-20">
     <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
-      <slot name="icon" /> {{ title }} ({{ politicians.length }})
-      <span class="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden" role="group" aria-label="顯示方式">
-        <button @click="setView('portrait')" :class="['p-1.5', view === 'portrait' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600']" title="大頭照" :aria-pressed="view === 'portrait'"><LayoutGrid :size="16" /></button>
-        <button @click="setView('list')" :class="['p-1.5', view === 'list' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600']" title="清單" :aria-pressed="view === 'list'"><List :size="16" /></button>
-      </span>
+      <slot name="icon" /> <span class="min-w-0">{{ title }} ({{ politicians.length }})</span>
+      <RouterLink
+        v-if="pkLink"
+        :to="pkLink"
+        class="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-bold text-violet-700 hover:bg-violet-100 transition-colors"
+        data-testid="pk-link"
+      ><Scale :size="15" />政見 PK</RouterLink>
       <button
         @click="collapsed = !collapsed"
-        class="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+        :class="['p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0', pkLink ? '' : 'ml-auto']"
         :title="collapsed ? '展開' : '收合'"
       >
         <ChevronUp v-if="!collapsed" :size="20" />
         <ChevronDown v-else :size="20" />
       </button>
     </h3>
-    <!-- 大頭照版：四欄、直式人像 -->
-    <div v-if="!collapsed && politicians.length > 0 && view === 'portrait'" :class="portraitGridClass">
+    <!-- 卡片：直式人像 -->
+    <div v-if="!collapsed && politicians.length > 0" :class="portraitGridClass">
       <div
         v-for="politician in politicians"
         :key="politician.id"
@@ -172,6 +160,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
           <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" />
+          <!-- 有號次（名單公告、抽籤後）就顯示「N號」；已登記＝綠色小勾 -->
           <span
             v-if="politician.candNo"
             class="absolute top-2 left-2 inline-flex items-center justify-center min-w-[2rem] h-7 px-2 rounded-full bg-navy-900/90 text-white text-sm font-black"
@@ -185,12 +174,20 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           <PartyBadge :party="politician.party" class="absolute bottom-2 right-2" />
         </div>
         <div class="p-3 text-left">
+          <!-- 真的 <a>：預渲染 HTML 才有選舉頁 → 候選人頁的連結給爬蟲走（stretched link，整張卡都點得到）-->
           <h4 class="text-base font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
             <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
           </h4>
           <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
+          <!-- 已登記以外的參選狀態（可能參選、當選、落選…）照舊文字標；已登記與有號次的已經標在照片上 -->
+          <span
+            v-if="!politician.candNo && politician.candidateStatus !== 'registered' && candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling)"
+            :class="`inline-block text-[10px] px-1.5 py-0.5 rounded border font-bold mt-1 ${candidateStatusColor(politician.candidateStatus)}`"
+          >{{ candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling) }}</span>
           <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
           <p v-if="currentTitle(politician)" class="text-[11px] text-sky-700 mt-1 line-clamp-1">現任 {{ currentTitle(politician) }}</p>
+          <!-- 0 用灰色：純嚴格只算當屆之後，多數參選人是 0，全部紫色徽章會變成一片噪音；
+               但不能直接藏起來——「這個人還沒有當屆政見」正是要讓人看見、有人去補的事 -->
           <span :class="['inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded mt-2 font-bold',
                          getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
             <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項政見
@@ -198,67 +195,8 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         </div>
       </div>
     </div>
-    <div v-else-if="!collapsed && politicians.length > 0" :class="gridClasses">
-      <div
-        v-for="politician in politicians"
-        :key="politician.id"
-        class="group relative bg-white p-6 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer flex items-center gap-6"
-      >
-        <div class="relative shrink-0">
-          <Avatar :src="politician.avatarUrl" :name="politician.name" size="xl" class="border-4 border-slate-50 group-hover:scale-105 transition-transform" />
-          <PartyBadge :party="politician.party" class="absolute -bottom-1 -right-1" />
-        </div>
-
-        <div class="flex-1 min-w-0">
-          <div class="flex justify-between items-start">
-            <div class="text-left">
-              <div class="flex items-center gap-2">
-                <!-- 真的 <a>：預渲染 HTML 才有選舉頁 → 候選人頁的連結給爬蟲走（卡片的 @click 是給人用的）-->
-                <h3 class="text-lg font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
-                  <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
-                </h3>
-                <!-- 有號次（名單公告、抽籤後）就顯示「N號」取代狀態標（2026-09-25 維護者）-->
-                <span
-                  v-if="politician.candNo"
-                  class="inline-flex items-center justify-center min-w-[1.75rem] h-5 px-1.5 rounded-full bg-navy-900 text-white text-[11px] font-bold shrink-0"
-                  :title="`${politician.candNo} 號`"
-                >{{ politician.candNo }}號</span>
-                <!-- 已登記＝綠色小勾（2026-09-22：登記名單上的人是常態，文字標太吵）；其他狀態照舊文字標 -->
-                <span
-                  v-else-if="politician.candidateStatus === 'registered'"
-                  class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 shrink-0"
-                  title="已登記"
-                ><Check :size="11" :stroke-width="3" /></span>
-                <span
-                  v-else-if="candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling)"
-                  :class="`text-[10px] px-1.5 py-0.5 rounded border font-bold ${candidateStatusColor(politician.candidateStatus)}`"
-                >
-                  {{ candidateStatusLabel(politician.candidateStatus, politician.withdrawnAfterFiling) }}
-                </span>
-              </div>
-              <div class="flex flex-col">
-                <p class="text-sm text-slate-500 font-medium">{{ politician.position || (politician.electionType || '縣市長') + '參選人' }}</p>
-                <span v-if="currentTitle(politician)" class="text-xs bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded mt-1 w-fit">現任 {{ currentTitle(politician) }}</span>
-                <span v-if="formatArea(politician)" class="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-1 w-fit">{{ formatArea(politician) }}</span>
-              </div>
-            </div>
-            <ArrowRight class="text-slate-300 group-hover:text-violet-400 group-hover:translate-x-1 transition-all" :size="20" />
-          </div>
-          <div class="mt-3 flex items-center gap-2">
-            <!-- 0 用灰色：純嚴格只算當屆之後，多數參選人是 0，全部紫色徽章會變成一片噪音；
-                 但不能直接藏起來——「這個人還沒有當屆政見」正是要讓人看見、有人去補的事 -->
-            <span :class="['inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md font-bold',
-                           getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
-              <Megaphone :size="12" /> {{ getPledgeCount(politician.id) }} 項政見
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
     <div v-else-if="!collapsed" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
       尚無此區域的{{ title }}資料
     </div>
-    <!-- 卡片下面的附加區塊（2026-10-05 #364：同選區參選人的政見並排比較），收合時一起收 -->
-    <slot v-if="!collapsed" name="after" />
   </div>
 </template>

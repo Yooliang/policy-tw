@@ -9,6 +9,7 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   candidacyCrumbs,
   candidacyWord,
+  pkLinkFor,
   taiwanDate,
   type CrumbElection,
   type CrumbRecord,
@@ -17,6 +18,7 @@ import { POSITIONS, sectionAnchor } from "./election-levels.ts";
 import { electionRegionPath, electionTownshipPath } from "./election-regions.ts";
 import { groupByDistrict } from "./district-grouping.ts";
 import { groupByVillage } from "./village-grouping.ts";
+import { pkGroups } from "./policy-compare.ts";
 
 const E2026: CrumbElection = { name: "2026 九合一地方公職人員選舉", shortName: "2026 九合一", electionDate: "2026-11-28" };
 const E2022: CrumbElection = { name: "111年地方公職人員選舉", shortName: "2022 九合一", electionDate: "2022-11-26" };
@@ -272,4 +274,27 @@ Deno.test("選舉頁真的把 id 掛在區塊上（不然麵包屑連到的錨�
   assertStringIncludes(chips, ':id="group.anchor"');
   // 麵包屑的連結用到的縣市頁網址，跟選舉頁的縣市頁是同一個函式
   assertEquals(electionRegionPath(2026, "金門縣"), `/election/2026/${enc("金門縣")}`);
+});
+
+// ── 政見頁的「政見 PK」連結（2026-10-06）──
+
+Deno.test("政見 PK 連結：議員到縣市頁的 PK 頁籤，帶職位與選舉區；組名就是 PK 分組算出來的那一組", () => {
+  const rec: CrumbRecord = { electionId: 2026, electionType: "縣市議員", region: "台北市", subRegion: "第08選舉區" };
+  const link = pkLinkFor(rec, E2026, NOW);
+  assertEquals(link?.path, `/election/2026/${enc("台北市")}`, "去掉頁內錨點，PK 是頁籤不是區塊");
+  assertEquals(link?.query, { view: "comparison", type: "縣市議員", district: "第08選舉區" });
+  assertEquals(pkGroups([{ id: 1, name: "甲", ...rec }], "縣市議員")[0].label, link?.query.district);
+});
+
+Deno.test("政見 PK 連結：縣市長 district＝縣市；村里長到鄉鎮頁、district＝里", () => {
+  assertEquals(pkLinkFor({ electionId: 2026, electionType: "縣市長", region: "金門縣" }, E2026, NOW)?.query, { view: "comparison", type: "縣市長", district: "金門縣" });
+  const chief = pkLinkFor({ electionId: 2022, electionType: "村里長", region: "金門縣", subRegion: "金城鎮", village: "東門里" }, E2022, NOW);
+  assertEquals(chief?.path, electionTownshipPath(2022, "金門縣", "金城鎮"));
+  assertEquals(chief?.query, { view: "comparison", type: "村里長", district: "東門里" });
+});
+
+Deno.test("政見 PK 連結：不知道是哪一場（選區待補）、目標頁定不出來（里長缺鄉鎮）就不給", () => {
+  assertEquals(pkLinkFor({ electionId: 2026, electionType: "縣市議員", region: "台北市", subRegion: "大安區" }, E2026, NOW), null);
+  assertEquals(pkLinkFor({ electionId: 2022, electionType: "村里長", region: "金門縣", village: "東門里" }, E2022, NOW), null);
+  assertEquals(pkLinkFor({ electionId: 2026, region: "金門縣" }, E2026, NOW), null);
 });

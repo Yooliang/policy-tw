@@ -27,10 +27,10 @@ const BADGE: Record<string, string> = {
 </script>
 
 <template>
-  <!-- 並排比較的格子裡三個都還沒查：縮成一行，不要每條政見都疊三個「未調查」（上線初期幾乎全部是這樣） -->
+  <!-- 並排比較的格子裡三個都還沒查：縮成一個「未調查」，不要每條政見都疊三個（上線初期幾乎全部是這樣）。
+       標籤旁不加說明文字（小良哥 10-06：只留標籤本身） -->
   <p v-if="compact && allUnchecked" class="text-xs leading-snug" data-testid="policy-elements-compact" data-state="unchecked">
     <span :class="['inline-block px-1.5 rounded text-[11px] font-bold', BADGE.unchecked]">{{ UNCHECKED_LABEL }}</span>
-    <span class="ml-1 text-slate-500">三要素都還沒有人查過原文</span>
   </p>
   <dl v-else-if="compact" class="space-y-1 text-xs leading-snug" data-testid="policy-elements-compact">
     <div v-for="c in cells" :key="c.kind" class="flex items-start gap-1.5" :data-state="c.state">
@@ -52,7 +52,6 @@ const BADGE: Record<string, string> = {
         </p>
         <p v-else>
           <span :class="['inline-block px-2 py-0.5 rounded text-xs font-bold', BADGE[c.state]]">{{ cellText(c) }}</span>
-          <span class="ml-2 text-xs text-slate-500">{{ c.state === 'not_stated' ? '查過原文，沒有寫這一項' : '還沒有人查過原文' }}</span>
         </p>
         <p v-if="c.state !== 'unchecked' && (c.sourceLocator || c.source)" class="mt-1 text-xs text-slate-500 leading-relaxed break-words">
           <template v-if="c.sourceLocator">原句位置：{{ c.sourceLocator }}</template>

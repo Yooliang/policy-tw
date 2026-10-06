@@ -28,11 +28,11 @@ import { hostOf, shortUrlsIn } from '../lib/url'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionRecordFor } from '../lib/election-peers'
-import { candidacyCrumbs } from '../lib/election-breadcrumbs'
+import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
-import { Columns3, ListChecks } from 'lucide-vue-next'
+import { ListChecks, Scale } from 'lucide-vue-next'
 
 
 const route = useRoute()
@@ -124,18 +124,16 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
 })
 
 /**
- * 「跟同選區的參選人並排比較」（#364）：連到選舉頁那個職位的區塊（就是麵包屑的職位層那一格，#363），
- * 並排比較就畫在區塊底下。只在這筆政見就是那一屆的承諾時給——人物最新一屆跟政見不同屆時，連過去比的是別場選舉。
- * 村里長在鄉鎮頁是「下一層」，那裡不畫並排比較，不給連結。
+ * 「政見 PK」連結（#364；2026-10-06 並排比較併進選舉頁的「政見 PK」頁籤）：到選舉頁那個職位區塊所在的那一頁，
+ * 開 PK 頁籤、選好職位與這一場、帶入同一組全部的參選人（網址規則在 lib/election-breadcrumbs.ts 的 pkLinkFor）。
+ * 只在這筆政見就是那一屆的承諾時給——人物最新一屆跟政見不同屆時，連過去比的是別場選舉。
  */
-const compareLink = computed<{ path: string; name: string } | null>(() => {
+const compareLink = computed(() => {
   const pol = politician.value
   if (!policy.value || !pol) return null
   const rec = electionRecordFor(pol, policy.value.electionId)
-  if (!rec || rec.electionId !== policy.value.electionId || rec.electionType === '村里長') return null
-  const items = breadcrumbs.value
-  const position = items[items.length - 3]
-  return position?.path && position.path.includes('#') ? { path: position.path, name: position.name } : null
+  if (!rec || rec.electionId !== policy.value.electionId) return null
+  return pkLinkFor(rec, getElectionById(rec.electionId), new Date())
 })
 
 const otherPolicies = computed(() =>
@@ -612,8 +610,8 @@ async function copyCitation() {
             <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />政見三要素</h2>
             <PolicyElements :elements="policy.elements" />
             <p v-if="compareLink" class="mt-4 text-sm">
-              <router-link :to="compareLink.path" class="inline-flex items-center gap-1 font-bold text-violet-700 hover:underline">
-                <Columns3 :size="16" />跟同選區的{{ compareLink.name }}並排比較政見
+              <router-link :to="{ path: compareLink.path, query: compareLink.query }" class="inline-flex items-center gap-1 font-bold text-violet-700 hover:underline">
+                <Scale :size="16" />政見 PK：跟同選區的{{ compareLink.name }}並排比較政見
               </router-link>
             </p>
           </section>
