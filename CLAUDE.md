@@ -66,7 +66,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - 快取只有記憶體（模組級 ref），沒有 IndexedDB／localStorage 資料快取
 - **`composables/useGlobalState.ts`** — 跨頁共用的地區選擇
 - **`lib/ssg/server-data.ts`、`lib/ssg/page-data.ts`** — 建置時撈全站資料、切出每頁快照塞進 `window.__INITIAL_STATE__`；細節見 `docs/SSG-PRERENDER.md`
-- **Views**：`politician_careers_full`（學經歷一項一列＋出處，`needs_source`＝待補出處，#346）、`politician_careers_drift`（陣列與學經歷表對不上的項目，正常是空的）、`party_alias_gaps`（政黨寫法對不到的，正常是空的）、`policies_with_logs`（2026-10-06 起最後一欄 `lineage`；policies 加欄位時 p.* 會插在中間，要照 20260921000028 DROP＋CREATE）、`politicians_with_elections`、`politicians_with_policies`、`politician_offices_derived`（現任公職＝職稱的單一真相，2026-10-04；#345 第一階段從 `politician_offices` 改名保留，網站職稱仍讀它）、`politician_offices_gap`（舊視圖 vs 任期表的差異）、`lineages_full`（政策脈絡一條一列，#349）、`discussions_full`、`elected_politicians`、`ai_usage_stats`
+- **Views**：`politician_careers_full`（學經歷一項一列＋出處，`needs_source`＝待補出處，#346）、`politician_careers_drift`（陣列與學經歷表對不上的項目，正常是空的）、`party_alias_gaps`（政黨寫法對不到的，正常是空的）、`policies_with_logs`（2026-10-06 起最後一欄 `lineage`；policies 加欄位時 p.* 會插在中間，要照 20260921000028 DROP＋CREATE）、`politicians_with_elections`、`politicians_with_policies`、`politician_offices_derived`（現任公職＝職稱的單一真相，2026-10-04；#345 第一階段從 `politician_offices` 改名保留，網站職稱仍讀它）、`politician_offices_gap`（舊視圖 vs 任期表的差異）、`lineages_full`（政策脈絡一條一列，#349）、`discussions_full`、`elected_politicians`、`ai_usage_stats`、`politician_bulletins`（參選紀錄 → 中選會選舉公報網址＋號次，表 `election_bulletins` 由 `scripts/build-election-bulletins.ts` 依公報站全站清單產生，推不出的不列；2026-10-06）
 
 ### Database
 表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。

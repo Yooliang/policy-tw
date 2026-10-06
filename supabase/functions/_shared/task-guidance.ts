@@ -44,6 +44,7 @@ const notPolicyMisjudgmentNote =
 
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
+    "**current 有 bulletins 的先看公報**：那是系統推得出來的中選會選舉公報與號次（候選人自己登記的政見原文），照公報交那一屆的政見。" +
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
     "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
@@ -55,6 +56,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
   term_policy_missing:
     "找這個人**那一屆（target.election_id）當選時的競選政見，最多 5 筆**：每筆一個 policy、各附自己的出處，election_id 填那一屆，status 填 Campaign Pledge。找到幾筆交幾筆——**不要為了湊數交標語、口號、願景或個人表態**，那些不是政見。先看 queued_policies 與 existing_policies（看 election_id，別屆的不算這一屆），別人交了還在等票的不要再交。" +
     "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
+    // 從公報補政見（2026-10-06）：系統推得出公報就直接給，對象也擴到落選人、村里長、代表
+    "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄確實空白或只有口號才回查無，checked_urls 要有這份公報。" +
     gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、2026 的新政見不是這一屆的競選政見**，這個任務不要交。" +
     notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +

@@ -7,7 +7,7 @@
  */
 export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   policy_missing: '缺政見',
-  term_policy_missing: '補任期政見',
+  term_policy_missing: '補該屆政見', // 2026-10-06 起也派給落選人、村里長、代表（照公報補），不只現任
   profile_detail_gap: '補學經歷條列',
   profile_gap: '缺人物資料',
   policy_source_missing: '政見缺出處',

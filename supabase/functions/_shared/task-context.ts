@@ -77,6 +77,8 @@ export interface TaskContextData {
   question?: Obj | null;
   /** question：已經有哪些代理答過、答了什麼（citizen_questions.id = target.question_id） */
   question_answers?: Obj[];
+  /** policy_missing／term_policy_missing：這個人歷屆推得出來的選舉公報（politician_bulletins_for，2026-10-06）；撈不到就 undefined */
+  bulletins?: Obj[];
   /** 查證來源（2026-09-28）：依這個任務對象的政黨／縣市／選舉別自動附上的查證來源，撈不到就 undefined */
   verification_sources?: TaskSourceHint[];
   /** 政見三要素（#364）：這條政見已經有的要素列（沒有的那幾個＝未調查） */
@@ -261,6 +263,29 @@ export const NO_CHANGE_OUTCOMES_HINT = {
   _note: "來源打得開、主題也相關、但那一頁沒寫到這筆宣稱 → 先找真出處，找到用 correction 換 source_url，確實找不到才 no_change + not_found。來源與資料矛盾 → correction 或 removal，不要回 no_change",
 } as const;
 
+/**
+ * 這個人歷屆推得出來的選舉公報（2026-10-06）：吳文振那件「網站訪客請求」的補政見任務只給了「cec.gov.tw 選舉公報」，
+ * 代理搜了六次 Google 就回查無；公報其實就在 eebulletin，他是號次 2。推得出來就直接放進現況。
+ */
+export function shapeBulletins(rows: readonly Obj[] | undefined): { bulletins: Obj[]; bulletins_note: string } | null {
+  const list = (rows ?? []).filter((r) => Array.isArray(r.urls) && (r.urls as unknown[]).length > 0).map((r) => ({
+    election_id: r.election_id ?? null,
+    election_type: r.election_type ?? null,
+    cand_no: r.cand_no ?? null,
+    elected: r.elected ?? null,
+    unit: [r.region, r.sub_region, r.village].filter((x) => typeof x === "string" && x.length > 0).join(" "),
+    urls: r.urls,
+  }));
+  if (list.length === 0) return null;
+  const first = list[0];
+  return {
+    bulletins: list,
+    bulletins_note: `中選會選舉公報已經找到：${first.election_id} ${first.election_type}（${first.unit}）${(first.urls as string[])[0]}，他是號次 ${first.cand_no ?? "？"}。` +
+      "公報上印的是候選人自己登記的政見原文，先看公報：依姓名與號次找到他自己那一欄（圖片版要裁切放大核對，不要看成隔壁的），" +
+      "把那一欄的政見逐條交成 policy（election_id 填那一屆、source_urls 放公報網址、note 寫第幾頁第幾點）。公報那一欄確實空白才算查無。",
+  };
+}
+
 /** 純函式：依 task_type 組 current（尾端統一補上 no_change 的 outcome 說明） */
 export function shapeTaskCurrent(
   taskType: string,
@@ -355,6 +380,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         queued_policies_note: queued.length > 0
           ? `已經有 ${queued.length} 筆在等票，內容重複的不要再交；找到同一件事請改去投那一筆的票。`
           : null,
+        ...(shapeBulletins(data.bulletins) ?? {}),
       };
     }
     case "policy_validity":
@@ -744,7 +770,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies_total = count ?? (data.policies ?? []).length;
   }
   if ((taskType === "policy_missing" || taskType === "term_policy_missing") && pid) {
-    const [el, pol, queued] = await Promise.all([
+    const [el, pol, queued, bul] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidate_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
       supabase.from("policies").select("id, title, category, status, election_id", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
       // 還在等票的提交也要給代理看見（2026-09-17：「輪到這種任務時，要先問是不是
@@ -753,7 +779,10 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       supabase.from("contributions").select("id, payload, agent_name")
         .eq("contribution_type", "policy").in("status", ["pending", "verified"])
         .eq("payload->>politician_id", pid).order("created_at", { ascending: false }).limit(MAX_EXISTING_POLICIES),
+      // 歷屆選舉公報（2026-10-06）：函式還沒上線（migration 比函式晚套上的那幾分鐘）或出錯就不給，不擋派工
+      supabase.rpc("politician_bulletins_for", { p_politician_id: pid }),
     ]);
+    if (!bul.error && Array.isArray(bul.data)) data.bulletins = bul.data as Obj[];
     data.elections = el.data ?? [];
     data.policies = pol.data ?? [];
     data.policies_total = pol.count ?? (data.policies ?? []).length;
