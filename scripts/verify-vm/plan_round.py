@@ -38,7 +38,7 @@ DEFAULT_MODEL = 'haiku'
 #   步調線照舊：落後就跑 2 隻、超前就停，所以 2 隻實際上是「落後時才補上」。
 #   額度來源：Aegis 有這個帳號的列就照步調算；沒有（目前就是這樣）→ 額度未知，照固定 UNKNOWN_FIXED 隻跑，
 #   不做步調判斷，decision 裡會標「額度未知、照固定 2 隻」。
-#   啟用開關：只有環境變數 ACCT3_READY=1 才會派（tick.sh 查 VM metadata 有沒有 claude3-token 鍵後設定；
+#   啟用開關：只有環境變數 ACCT3_READY=1 才會派（tick.sh 查 VM metadata 有沒有 claude3-token 鍵、或 Secret Manager 有沒有 verify-vm-claude3-token 後設定；
 #   token 還沒放進去時不派，免得每一輪白白產生被 AGENT-SKIP-SPEC 跳過的幾隻）。
 ACCT_MODEL = {'acct3': 'claude-sonnet-5'}
 ACCT_CAP = {'acct3': 2}                # 平常上限；沒列的帳號吃 MAX_PER_ACCT
