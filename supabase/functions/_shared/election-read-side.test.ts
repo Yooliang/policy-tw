@@ -102,9 +102,20 @@ Deno.test("兩段核對都在、都是 RAISE EXCEPTION（對不上整支退回�
   }
   assertEquals((one.match(/RAISE EXCEPTION/g) ?? []).length >= 5, true);
   const two = section("-- ── 核對二", "-- ── ⑥");
-  for (const needle of ["嘉義市重行選舉沒有建出來", "elections 現在應該是 4 筆", "底下還有", "不在移動名單上的人最新一屆變了", "現任公職陣列變了", "有任期掛在 2022 嘉義市縣市長上"]) {
+  for (const needle of ["嘉義市重行選舉沒有建出來", "原本的三場定期選舉", "底下還有", "不在移動名單上的人最新一屆變了", "現任公職陣列變了", "有任期掛在 2022 嘉義市縣市長上"]) {
     assert(two.includes(needle), `核對二少了「${needle}」`);
   }
+});
+
+// #412 上線失敗：快照只含「有參選紀錄的人」（politician_latest_election 對沒參選過的人不回列），
+// 卻拿整張人物表的人數去比（線上 16,286 位人物、16,266 位有參選紀錄，差的 20 位沒參選過）。自檢要比同一個範圍，也不能拿「總共幾筆」這種正常會變的數字去擋
+Deno.test("核對的範圍一致、不被正常的資料變動誤殺：快照人數比的是有參選紀錄的人物；elections 不比總筆數", () => {
+  const one = section("-- ── 核對一", "-- ── ④ 嘉義市");
+  assertMatch(one, /count\(\*\) FROM politicians p WHERE EXISTS \(SELECT 1 FROM politician_elections pe WHERE pe\.politician_id = p\.id\)/);
+  assertEquals(/count\(\*\) FROM politicians\)/.test(one), false, "不能拿整張人物表的人數比");
+  const two = section("-- ── 核對二", "-- ── ⑥");
+  assertEquals(/count\(\*\) FROM elections\) <> \d/.test(two), false, "不能比 elections 的總筆數");
+  assertMatch(two, /id IN \(2022, 2024, 2026\) AND election_reason = 'regular'/);
 });
 
 Deno.test("補選、重行選舉的 cec-sync 排程：逐場逐職位、只打已投票的", () => {
