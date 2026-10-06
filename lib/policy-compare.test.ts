@@ -8,7 +8,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  belongsToElection, buildPick, compareColumnOrder, compareMatrix, comparablePeople, hasPk, hasPolicies, parsePick, pickGroup, pkGroupLabel, pkGroups, pkQuery,
+  belongsToElection, buildPick, compareColumnOrder, compareMatrix, comparablePeople, hasPk, hasPolicies, parsePick, pickGroup, pkGroupLabel, pkGroups, pkNeeds, pkQuery,
   type ComparePerson,
 } from "./policy-compare.ts";
 import type { Policy } from "../types.ts";
@@ -187,4 +187,49 @@ Deno.test("PK 不進預渲染 HTML（不是正文，10-06 裁決）：頁籤用 
   const template = (s: string) => s.slice(s.indexOf("<template>"));
   assert(!template(pk).includes("不排名"), "表格上方不放欄的順序說明");
   assert(!/還沒有人查過原文|查過原文，沒有寫/.test(template(elements)), "未說明／未調查只留標籤");
+});
+
+// ── PK 跟上方地區選擇連動（2026-10-06 小良哥：縣市、鄉鎮、選區的選擇只有上方縣市選擇器與右側面板，PK 不另做一組）──
+
+Deno.test("PK 缺什麼範圍：全台頁要先選縣市（總統副總統例外）；縣市頁的鄉鎮首長、代表、村里長要先在右側選鄉鎮市區", () => {
+  assertEquals(pkNeeds("總統副總統", "All", "All"), null, "全國一場");
+  for (const t of ["縣市長", "縣市議員", "立法委員", "鄉鎮市長", "村里長"]) assertEquals(pkNeeds(t, "All", "All"), "county", `${t} 全台頁要先選縣市`);
+  for (const t of ["縣市長", "縣市議員", "立法委員"]) assertEquals(pkNeeds(t, "台北市", "All"), null, `${t} 縣市頁夠了（選區在右側面板選）`);
+  for (const t of ["鄉鎮市長", "鄉鎮市民代表", "直轄市山地原住民區長", "直轄市山地原住民區民代表", "村里長"]) {
+    assertEquals(pkNeeds(t, "嘉義縣", "All"), "township", `${t} 縣市頁要先選鄉鎮市區`);
+    assertEquals(pkNeeds(t, "嘉義縣", "大林鎮"), null, `${t} 鄉鎮頁夠了`);
+  }
+  assertEquals(pkNeeds("縣市長", "台北市", "大安區"), null);
+});
+
+Deno.test("不先擋掉的話，全台的縣市長池子會分成每縣市一組、縣市頁的鄉鎮市長池子會分成每鄉鎮一組——那就是不該畫成第二排按鈕的東西", () => {
+  const mayors = [person("a", "甲", { region: "台北市" }), person("b", "乙", { region: "台中市" })];
+  assertEquals(pkGroups(mayors, "縣市長").map((g) => g.label).length, 2);
+  const townMayors = [person("c", "丙", { region: "嘉義縣", subRegion: "大林鎮" }), person("d", "丁", { region: "嘉義縣", subRegion: "民雄鄉" })];
+  assertEquals(pkGroups(townMayors, "鄉鎮市長").map((g) => g.label).length, 2);
+  assertEquals(pkNeeds("縣市長", "All", "All"), "county");
+  assertEquals(pkNeeds("鄉鎮市長", "嘉義縣", "All"), "township");
+});
+
+Deno.test("選舉頁沒有自己的地區選擇：PK 本體不收選區、不畫選區列；範圍不夠就提示；選區放右側面板；右側面板不分頁籤", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const pk = Deno.readTextFileSync(new URL("../pages/election/PolicyPk.vue", import.meta.url));
+  // PK 本體：屬性只有標題、候選人、勾選、表；沒有縣市／鄉鎮／選區，也不畫選區列
+  const props = pk.slice(pk.indexOf("defineProps"), pk.indexOf("defineEmits"));
+  assert(!/regions?\??:|counties|townships?\??:|subRegions?\??:|districts\??:/.test(props), "PolicyPk 的屬性裡沒有縣市／鄉鎮／選區");
+  assert(!pk.includes('aria-label="選區"'), "PK 主欄沒有選區列");
+  // 範圍不夠：提示在 PolicyPk 之前，PolicyPk 用 v-else
+  assert(/v-if="pkMissing"[^>]*data-testid="pk-pick-region"[\s\S]*?先在上方選擇縣市[\s\S]*?先在右側選擇鄉鎮市區[\s\S]*?<PolicyPk\s+v-else/.test(page), "提示先選縣市／鄉鎮市區，取代 PK 本體");
+  assertEquals(page.match(/pkNeeds\(/g)?.length, 5, "區塊按鈕兩處（卡片與分組）、頁籤的範圍檢查、職位預設、職位列各看一次");
+  assert(/const pkGroupList = computed\(\(\) => pkMissing\.value \? \[\]/.test(page), "範圍不夠時沒有選區");
+  // 選區在右側面板（真連結），村里長的村里在 PK 頁籤只出現一份
+  assert(/<div v-if="pkDistrictPanel"[^>]*data-testid="pk-district-panel"/.test(page));
+  assert(/v-if="availableVillages\.length > 0 && viewMode !== 'comparison'"/.test(page), "PK 頁籤的村里選擇只有 PK 的那一份");
+  // 全台頁的職位列：有全國一場的職位就只列它（區域立委不列，舊網址 type=立法委員 退回第一個職位）
+  assert(/const national = levels\.filter\(l => !pkNeeds\(l\.type[^)]*\)\)\s*return selectedRegion\.value === 'All' && national\.length > 0 \? national : levels/.test(page), "全台頁的職位列只列全國性職位");
+  // 右側子地區面板的條件只看縣市與有沒有鄉鎮，不看頁籤；左欄可以縮（表很寬時不把右欄擠出畫面）
+  assert(/<div v-if="selectedRegion !== 'All' && availableSubRegions\.length > 0" class="order-first md:order-last md:w-1\/3 shrink-0">/.test(page), "子地區面板不分頁籤都在");
+  assert(/'flex-1 min-w-0 md:w-2\/3'/.test(page), "左欄 min-w-0");
+  // 桌機捲動時右側面板停在頁首（Navbar h-16＝4rem）下方，不被蓋住；手機版面板在上方、不 sticky
+  assert(/<div class="md:sticky md:top-\[4\.5rem\] space-y-4">/.test(page), "右側面板 sticky 距頂 4.5rem");
 });

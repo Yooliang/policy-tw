@@ -12,14 +12,14 @@ import PoliticianGrid from './election/PoliticianGrid.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
-import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkQuery } from '../lib/policy-compare'
+import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery } from '../lib/policy-compare'
 import Hero from '../components/Hero.vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, ArrowUpDown } from 'lucide-vue-next'
+  Crown, ScrollText, ArrowUpDown, Swords } from 'lucide-vue-next'
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
@@ -507,11 +507,6 @@ function groupsByDistrict(people: Politician[], electionType: string) {
   return groupByDistrict(picked, electionType).map(g => ({ label: g.district, people: g.people }))
 }
 
-/** 里名快篩 chip：點了只看那個里，再點一次取消——跟右側「村里」篩選是同一個 selectedVillage */
-function toggleVillageChip(village: string) {
-  selectedVillage.value = selectedVillage.value === village ? 'All' : village
-}
-
 /**
  * 這一頁畫哪些區塊（2026-10-05 #348）：照分層設定（lib/election-levels.ts 的 POSITIONS）算出
  * 「這一層」「下一層」各有哪些職位，每個職位畫一個區塊——卡片（grid）、依選舉區分組（district）、
@@ -546,7 +541,7 @@ interface LevelSection {
   people: Politician[]
   /** district／village 排法的分組（分組函式會把沒填的人收進最後一組，不會讓人從畫面消失）；anchor＝這一組的頁內錨點 id */
   groups: Array<{ label: string; people: Politician[]; anchor?: string }>
-  /** 快篩 chip：選舉區或村里名 */
+  /** 選舉區快篩（district 排法才有；村里在右側面板的「村里」，選舉區在右側面板的「○○選舉區」，列表上方不放選擇，2026-10-06） */
   chips: readonly string[]
   empty: boolean
   /** 整個職位區塊的頁內錨點 id（人物頁麵包屑的職位層連到這裡，見 lib/election-levels.ts 的 sectionAnchor） */
@@ -571,7 +566,7 @@ function buildSection(spec: PositionSpec): LevelSection {
     // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，
     // 這裡自然只剩一組。村里是空值或對不上的人收進最後一組「未標示里別」（lib/village-grouping.ts）。
     const groups = withAnchors(spec, groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people })))
-    return { spec, people, groups, chips: availableVillages.value, empty: groups.length === 0, anchor }
+    return { spec, people, groups, chips: [], empty: groups.length === 0, anchor }
   }
   return { spec, people, groups: [], chips: [], empty: people.length === 0, anchor }
 }
@@ -592,17 +587,27 @@ function pkLink(type: string, district?: string): RouteLocationRaw {
   return { path: electionPath(electionId.value, selectedRegion.value, selectedSubRegion.value), query: pkQuery(type, district) }
 }
 function sectionPkLink(section: LevelSection): RouteLocationRaw | undefined {
+  // 全台頁的縣市長、縣市頁的鄉鎮市長等區塊：PK 要先選縣市／鄉鎮，區塊上不放按鈕（請用上方的縣市選擇器與右側的鄉鎮市區）
+  if (pkNeeds(section.spec.type, selectedRegion.value, selectedSubRegion.value)) return undefined
   const groups = pkGroups(section.people, section.spec.type).filter(hasPk)
   if (groups.length === 0) return undefined
   return pkLink(section.spec.type, groups.length === 1 ? groups[0].label : undefined)
 }
 function groupPkLinkFor(type: string) {
   return (group: { label: string; people: Politician[] }): RouteLocationRaw | undefined => {
+    if (pkNeeds(type, selectedRegion.value, selectedSubRegion.value)) return undefined
     const g = pkGroups(group.people, type).find(x => x.label === group.label.trim())
     return hasPk(g) ? pkLink(type, g!.label) : undefined
   }
 }
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
+/**
+ * 右側面板的「選舉區」選擇（2026-10-06 小良哥：列表上方的選舉區／村里選擇改放右側，上方不重複）：
+ * 縣市頁的縣市議員、原住民區頁的區代表（只在「候選人」頁籤，其他頁籤不用選舉區）；選區不到兩個就不需要選。選了只看那一區（selectedDistrict，議員與區代表共用）。
+ */
+const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
+  .filter(sec => sec.spec.display === 'district' && !sec.empty && sec.chips.length > 1)
+  .map(sec => ({ type: sec.spec.type, title: `${sec.spec.label}選舉區`, chips: sec.chips })))
 
 /**
  * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
@@ -810,7 +815,11 @@ const comparisonPool = computed(() => poolForLevel(pkLevel.value))
 const levelCounts = computed(() => new Map(electionLevels.value.map(l => [l.type, poolForLevel(l.type).length])))
 const visibleLevels = computed(() => {
   const withPeople = electionLevels.value.filter(l => (levelCounts.value.get(l.type) ?? 0) > 0)
-  return withPeople.length > 0 ? withPeople : electionLevels.value
+  const levels = withPeople.length > 0 ? withPeople : electionLevels.value
+  // 全台頁：有全國一場的職位（總統副總統）就只列它，區域立委、縣市長…要先選縣市，不放進職位列
+  // （舊網址 ?type=立法委員 在全台頁對不上，退回第一個職位）；一個全國性職位都沒有（九合一）才全列、由提示說先選縣市
+  const national = levels.filter(l => !pkNeeds(l.type, selectedRegion.value, selectedSubRegion.value))
+  return selectedRegion.value === 'All' && national.length > 0 ? national : levels
 })
 /** 鄉鎮篩選對全縣層級沒作用時說一句，不然使用者會以為大武鄉的縣長候選人就是這幾位 */
 const subRegionIgnoredNote = computed(() =>
@@ -824,7 +833,9 @@ const subRegionIgnoredNote = computed(() =>
  * 網址選的那一場（沒選或對不上＝第一個有政見的那一場），預設這一場全部的人，可勾選增減。
  * 只在瀏覽器端畫、不進預渲染 HTML（小良哥 10-06：PK 不是正文，政見的正文在政見頁與人物頁），見模板的 VIEW: Comparison。
  */
-const pkGroupList = computed(() => pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
+/** 範圍還不夠的職位（全台頁的縣市長、縣市頁的鄉鎮市長…）：不另畫縣市／鄉鎮按鈕，提示去用上方的縣市選擇器或右側的鄉鎮市區（模板的提示） */
+const pkMissing = computed(() => pkNeeds(pkLevel.value, selectedRegion.value, selectedSubRegion.value))
+const pkGroupList = computed(() => pkMissing.value ? [] : pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
 const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
 const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value, groupHasPolicies))
 const pkCandidates = computed(() => pkGroup.value ? comparablePeople(pkGroup.value.people) : [])
@@ -834,12 +845,17 @@ const pkMatrix = computed(() => {
   const picked = new Set(pkPicked.value)
   return compareMatrix(pkCandidates.value.filter(c => picked.has(String(c.id))), policies.value, electionId.value, categories.value)
 })
+const levelLabel = (type: string) => ALL_LEVELS.find(l => l.type === type)?.label ?? type
 const pkTitle = computed(() => {
-  const label = ALL_LEVELS.find(l => l.type === pkLevel.value)?.label ?? pkLevel.value
+  const label = levelLabel(pkLevel.value)
   const g = pkGroup.value?.label
   return g && g !== '全國' && g !== selectedRegion.value ? `${label}・${g}` : label
 })
-const pkDistrictLinks = computed(() => pkGroupList.value.map(g => ({ label: g.label, to: pkLink(pkLevel.value, g.label), active: g === pkGroup.value })))
+/** PK 的選區（議員、立委的選舉區，村里長的村里）：放在右側面板，不放在 PK 主欄；一場就不需要選 */
+const pkDistrictPanel = computed(() => viewMode.value !== 'comparison' || pkGroupList.value.length < 2 ? null : {
+  title: pkLevel.value === ElectionType.CHIEF ? '村里' : `${levelLabel(pkLevel.value)}選舉區`,
+  links: pkGroupList.value.map(g => ({ label: g.label, to: pkLink(pkLevel.value, g.label), active: g === pkGroup.value })),
+})
 /** 勾選／取消一位（至少留一位）；全部勾選時網址不寫 pick */
 function togglePk(id: string) {
   const picked = new Set(pkPicked.value)
@@ -871,7 +887,7 @@ const pkLevel = computed<ElectionType>(() => {
   const levels = visibleLevels.value
   const explicit = levels.find(l => l.type === comparisonLevel.value)
   if (explicit) return explicit.type
-  const comparable = levels.map(l => ({ type: l.type, groups: pkGroups(poolForLevel(l.type), l.type).filter(hasPk) }))
+  const comparable = levels.map(l => ({ type: l.type, groups: pkNeeds(l.type, selectedRegion.value, selectedSubRegion.value) ? [] : pkGroups(poolForLevel(l.type), l.type).filter(hasPk) }))
   return (comparable.find(l => l.groups.some(groupHasPolicies)) ?? comparable.find(l => l.groups.length > 0))?.type
     ?? levels[0]?.type ?? ElectionType.MAYOR
 })
@@ -986,7 +1002,7 @@ usePageHead({
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 md:w-2/3' : 'w-full'">
+      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
 
       <!-- VIEW: Politicians -->
 
@@ -1017,12 +1033,9 @@ usePageHead({
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
             :groups="section.groups"
-            :chips="section.chips"
-            :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"
             :columns="gridColumns"
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
-            @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
             :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
@@ -1036,12 +1049,9 @@ usePageHead({
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
             :groups="section.groups"
-            :chips="section.chips"
-            :selected="section.spec.display === 'village' ? selectedVillage : selectedDistrict"
             :columns="gridColumns"
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
-            @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
             :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
@@ -1172,12 +1182,19 @@ usePageHead({
         </div>
         <p v-if="subRegionIgnoredNote" class="text-xs text-slate-500 -mt-4">{{ subRegionIgnoredNote }}</p>
 
+        <!-- 縣市由上方的縣市選擇器、鄉鎮與選區由右側面板決定，PK 不另做一組；範圍還不夠就提示去哪裡選 -->
+        <div v-if="pkMissing" class="text-center py-16 text-slate-500 border border-dashed border-slate-300 rounded-xl" data-testid="pk-pick-region">
+          <Swords :size="48" class="mx-auto mb-4 opacity-50" />
+          <p v-if="pkMissing === 'county'" class="font-bold text-slate-700">先在上方選擇縣市</p>
+          <p v-else class="font-bold text-slate-700">先在右側選擇鄉鎮市區</p>
+          <p class="text-sm mt-1">{{ levelLabel(pkLevel) }}的政見 PK 是一個{{ pkMissing === 'county' ? '縣市' : '鄉鎮市區' }}一場，選好之後就會並排這一場的參選人。</p>
+        </div>
         <PolicyPk
+          v-else
           :title="pkTitle"
           :candidates="pkCandidates"
           :picked="pkPicked"
           :matrix="pkMatrix"
-          :districts="pkDistrictLinks"
           @toggle="togglePk"
           @all="comparisonPick = ''"
         />
@@ -1187,7 +1204,7 @@ usePageHead({
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
       <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
-        <div class="sticky top-4 space-y-4">
+        <div class="md:sticky md:top-[4.5rem] space-y-4">
           <!-- 鄉鎮市區篩選 -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
@@ -1211,8 +1228,49 @@ usePageHead({
             </div>
           </div>
 
+          <!-- 選舉區篩選（議員、原住民區代表；2026-10-06 從列表上方移到這裡）：點了只看那一區，再點一次取消 -->
+          <div v-for="panel in districtPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+            <div class="flex items-center gap-2 mb-3">
+              <MapPin :size="16" class="text-blue-500" />
+              <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
+            </div>
+            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+              <button
+                type="button"
+                @click="selectedDistrict = 'All'"
+                :aria-pressed="selectedDistrict === 'All'"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+              >全部</button>
+              <button
+                v-for="district in panel.chips"
+                :key="district"
+                type="button"
+                @click="toggleDistrictChip(district)"
+                :aria-pressed="selectedDistrict === district"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+              >{{ district }}</button>
+            </div>
+          </div>
+
+          <!-- 政見 PK 的選區（跟其他頁籤的選舉區、村里同一個位置；真連結，網址 district 參數照舊） -->
+          <div v-if="pkDistrictPanel" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="pk-district-panel">
+            <div class="flex items-center gap-2 mb-3">
+              <MapPin :size="16" class="text-blue-500" />
+              <span class="text-sm font-bold text-slate-700">{{ pkDistrictPanel.title }}</span>
+            </div>
+            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+              <RouterLink
+                v-for="d in pkDistrictPanel.links"
+                :key="d.label"
+                :to="d.to"
+                :aria-current="d.active ? 'page' : undefined"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${d.active ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+              >{{ d.label }}</RouterLink>
+            </div>
+          </div>
+
           <!-- 村里篩選 -->
-          <div v-if="availableVillages.length > 0" class="bg-white rounded-xl border border-amber-200 p-4 shadow-sm">
+          <div v-if="availableVillages.length > 0 && viewMode !== 'comparison'" class="bg-white rounded-xl border border-amber-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-amber-500" />
               <span class="text-sm font-bold text-slate-700">村里</span>
@@ -1232,10 +1290,11 @@ usePageHead({
           </div>
 
           <!-- 篩選狀態摘要 -->
-          <div v-if="selectedSubRegion !== 'All'" class="bg-slate-50 rounded-xl p-4 text-sm text-slate-600">
+          <div v-if="selectedSubRegion !== 'All' || selectedDistrict !== 'All'" class="bg-slate-50 rounded-xl p-4 text-sm text-slate-600">
             <div class="flex items-center gap-2">
               <span class="font-medium">目前篩選：</span>
-              <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{{ selectedSubRegion }}</span>
+              <span v-if="selectedSubRegion !== 'All'" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{{ selectedSubRegion }}</span>
+              <span v-if="selectedDistrict !== 'All'" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{{ selectedDistrict }}</span>
               <span v-if="selectedVillage !== 'All'" class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded">{{ selectedVillage }}</span>
             </div>
           </div>
