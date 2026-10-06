@@ -9,7 +9,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowRight, ChevronLeft, FileText, GitFork, Landmark, Loader2, Users, Waypoints } from 'lucide-vue-next'
+import { ArrowRight, ChevronLeft, FileText, GitFork, Loader2, Users, Waypoints } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
@@ -18,7 +18,7 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead, DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import {
-  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, LEVEL_LABEL, LINEAGE_EXPLAINER, LINEAGE_NAME,
+  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, LEVEL_LABEL, LINEAGE_NAME,
   lineagePath, lineagePlace, LINK_LABEL, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
 } from '../lib/lineage'
 import type { Policy } from '../types'
@@ -82,7 +82,7 @@ usePageHead({
   title: () => (lineage.value ? `${lineage.value.title}｜${LINEAGE_NAME}` : LINEAGE_NAME),
   description: () => (lineage.value
     ? `${place.value}「${lineage.value.title}」的政策脈絡：${lineage.value.summary ? `${lineage.value.summary}。` : ''}${lineagePolicies.value.length} 條政見、${lineage.value.handovers.length} 筆前後任交接、${lineage.value.links.length} 條上下級關聯，每一筆附出處。`
-    : LINEAGE_EXPLAINER),
+    : '一件事在某一層級、某一地方的來龍去脈。'),
   type: 'article',
   // firebase.json 把 /lineage/** rewrite 到殼檔回 200，不存在的 id 也是 200；確定沒資料就標 noindex，免得被當 soft 404 收錄
   noindex: () => !loading.value && !lineageLoading.value && !lineage.value,
@@ -113,7 +113,7 @@ usePageHead({
         <span class="block text-base md:text-lg font-bold text-blue-300 tracking-normal mb-2">{{ LINEAGE_NAME }}</span>
         {{ lineage.title }}
       </template>
-      <template #description>{{ lineage.summary || LINEAGE_EXPLAINER }}</template>
+      <template v-if="lineage.summary" #description>{{ lineage.summary }}</template>
       <template #actions>
         <button @click="router.go(-1)" class="group inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white" aria-label="返回">
           <ChevronLeft :size="20" class="group-hover:-translate-x-1 transition-transform" />
@@ -174,7 +174,7 @@ usePageHead({
               </li>
             </ol>
             <p v-if="lineage.handovers.length === 0" class="mt-5 text-sm text-slate-500 border-t border-slate-100 pt-4">
-              還沒有交接紀錄。這個職位換人、前一任卸任之後，系統會派任務請 AI 代理查後任怎麼處理這件事，附出處、其他代理查證後才會出現在這裡。
+              還沒有交接紀錄。
             </p>
           </section>
 
@@ -211,8 +211,7 @@ usePageHead({
         <aside class="lg:col-span-1 space-y-6">
           <!-- 上下級 -->
           <section class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-links">
-            <h2 class="text-lg font-bold text-navy-900 mb-1 flex items-center gap-2"><GitFork class="text-slate-400" :size="20" />上下級脈絡</h2>
-            <p class="text-xs text-slate-500 mb-4">上級立法或補助、下級執行；或下級先爭取、上級後來採納。上下級是不同的脈絡，各有自己的來龍去脈。</p>
+            <h2 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><GitFork class="text-slate-400" :size="20" />上下級脈絡</h2>
             <template v-for="group in [{ key: 'upper', label: '上級', list: uppers }, { key: 'lower', label: '下級', list: lowers }]" :key="group.key">
               <div v-if="group.list.length > 0" class="mb-4 last:mb-0">
                 <h3 class="text-sm font-bold text-slate-600 mb-2">{{ group.label }}</h3>
@@ -230,12 +229,6 @@ usePageHead({
               </div>
             </template>
             <p v-if="uppers.length === 0 && lowers.length === 0" class="text-sm text-slate-500">還沒有上下級關聯。</p>
-          </section>
-
-          <section class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <h2 class="text-lg font-bold text-navy-900 mb-2 flex items-center gap-2"><Landmark class="text-slate-400" :size="20" />什麼是政策脈絡</h2>
-            <p class="text-sm text-slate-600 leading-relaxed">{{ LINEAGE_EXPLAINER }}</p>
-            <RouterLink to="/analysis" class="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700 hover:underline">所有政策脈絡 <ArrowRight :size="14" /></RouterLink>
           </section>
         </aside>
       </div>
