@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2, ThumbsUp, ThumbsDown, CircleHelp } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2 } from 'lucide-vue-next'
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
@@ -129,13 +129,6 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
             <p :class="['mt-1 text-xs text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
-              <!-- 票數改成三顆小膠囊（2026-09-17）：原本整句「驗證 2 人（同意 2／反對 0／不確定 0）」
-                   在一排中繼資料裡最長，但講的只是三個數字 -->
-              <span class="inline-flex items-center gap-1">
-                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 tabular-nums" title="同意"><ThumbsUp :size="11" />{{ e.agree_count }}</span>
-                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 tabular-nums" title="反對"><ThumbsDown :size="11" />{{ e.disagree_count }}</span>
-                <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 tabular-nums" title="不確定"><CircleHelp :size="11" />{{ e.unsure_count }}</span>
-              </span>
               <!-- 分數拉鋸條（2026-10-05，使用者要求）：跟貢獻看板同一個元件。已上線、已退件的也照看板畫法，
                    不另外特判——滿格綠＝達標上線、滿格紅＝退件，一眼分得出這筆是怎麼走到現在的 -->
               <ScoreBar :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
