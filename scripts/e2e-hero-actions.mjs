@@ -36,9 +36,6 @@ const check = (cond, msg) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); 
 // 真正的資源載入失敗改由 badResponses 統計。
 const AD_DOMAIN = /quarrelsomebitter\.com/
 const FAILED_RESOURCE_TEXT = /Failed to load resource/
-// PolicyDetail.vue 既有的 policy_sources 查詢（本次未改動）在目前這個 Supabase 專案打出 404，
-// 與這次動作列改動無關，過濾掉但仍回報給主線注意
-const KNOWN_BACKEND_ISSUE = /rest\/v1\/policy_sources/
 
 function attachConsoleGuard(page, label) {
   const problems = []
@@ -51,7 +48,7 @@ function attachConsoleGuard(page, label) {
   })
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`))
   page.on('response', (res) => {
-    if (res.status() >= 400 && !AD_DOMAIN.test(res.url()) && !KNOWN_BACKEND_ISSUE.test(res.url())) badResponses.push(`${res.status()} ${res.url()}`)
+    if (res.status() >= 400 && !AD_DOMAIN.test(res.url())) badResponses.push(`${res.status()} ${res.url()}`)
   })
   return { label, problems, badResponses }
 }
