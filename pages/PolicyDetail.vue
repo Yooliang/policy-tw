@@ -10,13 +10,14 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, GitCommit, ArrowRightCircle, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
+import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, PUBLISHER_LD, SITE_URL, summarize } from '../composables/usePageHead'
-import { policySortDate, policyYear } from '../lib/policy-date'
+import { policyYear } from '../lib/policy-date'
+import { lineageChain } from '../lib/policy-chain'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
@@ -40,7 +41,7 @@ const route = useRoute()
 const router = useRouter()
 const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
 
-// 這一頁除了主角那筆，還要「同一人的其他政見」與整條市政接力鏈（otherPolicies／policyChain），
+// 這一頁除了主角那筆，還要「同一人的其他政見」與同一條脈絡的其他政見（otherPolicies／lineageMates），
 // 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
 // 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
 // 兩個區塊會憑空變空。所以這一頁明確要整份。
@@ -144,17 +145,17 @@ const otherPolicies = computed(() =>
 )
 
 
-const policyChain = computed(() => {
-  if (!policy.value?.relatedPolicyIds) return []
-  const relatedPolicies = policies.value.filter(p =>
-    policy.value!.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.value!.id)
-  ).sort((a, b) => policySortDate(a) - policySortDate(b))
-
-  return [...relatedPolicies, policy.value]
-    .filter((p): p is typeof policy.value => !!p)
-    .sort((a, b) => policySortDate(a!) - policySortDate(b!))
-    .filter((v, i, a) => a.findIndex(t => t!.id === v!.id) === i)
-})
+// 同一條政策脈絡裡的其他政見，照提出時間排，列在「所屬脈絡」卡裡（#349 第二階段 A；原本讀 related_policies 互指，那張表線上 0 列、不再讀）
+const lineageMates = computed(() =>
+  lineageChain(policy.value, policies.value)
+    .filter(p => p.id !== policy.value?.id)
+    .map(p => ({
+      id: String(p.id),
+      title: p.title,
+      who: politicians.value.find(c => String(c.id) === String(p.politicianId))?.name ?? '',
+      year: policyYear(p, elections.value),
+    }))
+)
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
 
@@ -492,46 +493,6 @@ async function copyCitation() {
              包在最外層一次處理，之後新增的卡片不必各自記得補。 -->
         <div :class="['lg:col-span-2 space-y-6', campaignResult === 'not_elected' ? 'grayscale opacity-75' : '']">
 
-          <!-- Policy Relay -->
-          <div v-if="policyChain.length > 1" class="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm">
-            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
-              <GitCommit class="text-blue-600" />
-              <h2 class="text-lg font-bold text-navy-900">市政接力與傳承 Governance Relay</h2>
-            </div>
-            <div class="p-6">
-              <p class="text-sm text-slate-500 mb-6">這項建設跨越了不同任期，由多位首長接力完成。我們記錄這份傳承，確保每一步努力都被看見。</p>
-              <div class="relative">
-                <div class="absolute top-8 left-8 right-8 h-1 bg-slate-200 -z-10"></div>
-                <div class="flex flex-col md:flex-row justify-between items-start gap-6 md:gap-0">
-                  <router-link
-                    v-for="(p, index) in policyChain"
-                    :key="p!.id"
-                    :to="`/policy/${p!.id}`"
-                    class="flex flex-col items-center flex-1 relative cursor-pointer group"
-                  >
-                    <div :class="`w-16 h-16 rounded-full border-4 flex items-center justify-center bg-white transition-all z-10
-                      ${p!.id === policy?.id ? 'border-blue-500 shadow-lg scale-110' : 'border-slate-300 group-hover:border-blue-300'}`">
-                      <Avatar :src="politicians.find(pol => pol.id === p!.politicianId)?.avatarUrl" :name="politicians.find(pol => pol.id === p!.politicianId)?.name || ''" class="w-full h-full" />
-                    </div>
-                    <div class="mt-4 text-center">
-                      <span class="text-xs font-bold text-slate-400 block mb-1">{{ policyYear(p!, elections) ?? '—' }}</span>
-                      <h4 :class="`font-bold text-sm mb-1 ${p!.id === policy?.id ? 'text-blue-700' : 'text-slate-700'}`">
-                        {{ politicians.find(pol => pol.id === p!.politicianId)?.name }}
-                      </h4>
-                      <div :class="`text-xs px-2 py-1 rounded-full border inline-block
-                        ${p!.id === policy?.id ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`">
-                        {{ p!.status === 'Achieved' ? '完成階段' : p!.status === 'In Progress' ? '執行階段' : '規劃階段' }}
-                      </div>
-                      <div v-if="index < policyChain.length - 1" class="hidden md:block absolute top-8 -right-1/2 translate-x-1/2 z-0">
-                        <ArrowRightCircle :size="20" class="text-slate-400 bg-white rounded-full" />
-                      </div>
-                    </div>
-                  </router-link>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <!-- 政見詳情與讀者表態同一張卡（2026-09-17：「跟下方的政見詳情整合」）。
                原本表態獨立一塊紫底、還寫了一段說明它是什麼——看的人要的是內容與一個按鈕，
                不是一段解釋。計數以伺服器回的為準，不在本機加一。 -->
@@ -617,7 +578,7 @@ async function copyCitation() {
           </section>
 
           <!-- 所屬脈絡（#349）：這條政見歸入的政策脈絡；還沒歸入就不出現 -->
-          <PolicyLineageCard v-if="policy.lineage" :lineage="policy.lineage" />
+          <PolicyLineageCard v-if="policy.lineage" :lineage="policy.lineage" :mates="lineageMates" />
 
           <!-- 公民提問獨立一張卡（2026-09-18）：它是讀者跟 AI 的問答，
                跟政見內容是兩件事，混在同一張卡裡分不出哪句是政見、哪句是回答。

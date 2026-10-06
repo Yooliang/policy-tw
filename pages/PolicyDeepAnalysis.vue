@@ -21,7 +21,8 @@ import HeroAction from '../components/HeroAction.vue'
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
-import { policySortDate, policyYear } from '../lib/policy-date'
+import { policyYear } from '../lib/policy-date'
+import { lineageChain } from '../lib/policy-chain'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,31 +74,13 @@ async function submitAudit() {
 const policyId = computed(() => route.params.policyId)
 const selectedPolicy = computed(() => policies.value.find(p => String(p.id) === String(policyId.value)))
 
-const relayChain = computed(() => {
-  if (!selectedPolicy.value) return []
-  const visited = new Set<string>()
-  const queue = [selectedPolicy.value.id]
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (visited.has(id)) continue
-    visited.add(id)
-    const p = policies.value.find(pol => String(pol.id) === String(id))
-    if (!p) continue
-    // follow outgoing links
-    p.relatedPolicyIds?.forEach(rid => { if (!visited.has(rid)) queue.push(rid) })
-    // follow incoming links
-    policies.value.forEach(other => {
-      if (other.relatedPolicyIds?.includes(id) && !visited.has(other.id)) queue.push(other.id)
-    })
-  }
-  return policies.value.filter(p => visited.has(p.id))
-    .sort((a, b) => policySortDate(a) - policySortDate(b))
-})
+// 同一條政策脈絡裡的政見，照提出時間排（#349 第二階段 A；原本沿 related_policies 互指走訪接力鏈，那張表線上 0 列、不再讀）
+const lineageChainPolicies = computed(() => lineageChain(selectedPolicy.value, policies.value))
 
 const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => String(c.id) === String(selectedPolicy.value!.politicianId)) : null)
 
 const allPoliticians = computed(() => {
-  const ids = new Set(relayChain.value.map(p => String(p.politicianId)))
+  const ids = new Set(lineageChainPolicies.value.map(p => String(p.politicianId)))
   return politicians.value.filter(c => ids.has(String(c.id)))
 })
 
@@ -118,7 +101,7 @@ const LEVEL_ORDER: Record<string, number> = {
 }
 
 const allLogs = computed(() => {
-  return relayChain.value
+  return lineageChainPolicies.value
     .flatMap(p => {
       const c = politicians.value.find(c => String(c.id) === String(p.politicianId))
       const level = c?.electionType ? (LEVEL_ORDER[c.electionType] ?? 0) : 0
@@ -145,8 +128,8 @@ const getPoliticiansForLevel = (levelType: ElectionType, idx: number) => {
 const currentYear = new Date().getFullYear()
 const YEARS = Array.from({ length: 12 }, (_, i) => String(currentYear - 11 + i))
 
-// 頂軸時間刻度：接力鏈裡有沒有政見落在這一年（沒有提出日期的政見改看所屬選舉屆別／最後更新時間）
-const chainHasYear = (year: string) => relayChain.value.some(p => policyYear(p, elections.value) === year)
+// 頂軸時間刻度：同一條脈絡裡有沒有政見落在這一年（沒有提出日期的政見改看所屬選舉屆別／最後更新時間）
+const chainHasYear = (year: string) => lineageChainPolicies.value.some(p => policyYear(p, elections.value) === year)
 const selectedPolicyIsInYear = (year: string) => {
   const p = selectedPolicy.value
   if (!p) return false
@@ -166,7 +149,7 @@ const isLevelActive = (levelType: ElectionType, idx: number) => {
 }
 
 const isPoliticianSelected = (politicianId: string | number) => {
-  return relayChain.value.some(p => String(p.politicianId) === String(politicianId) && String(p.id) === String(policyId.value))
+  return lineageChainPolicies.value.some(p => String(p.politicianId) === String(politicianId) && String(p.id) === String(policyId.value))
 }
 
 
@@ -174,7 +157,7 @@ usePageHead({
   type: 'article',
   title: () => selectedPolicy.value ? `${selectedPolicy.value.title} 深度分析` : undefined,
   description: () => selectedPolicy.value
-    ? `${politician.value?.name ?? ''}「${selectedPolicy.value.title}」的接力軌跡與完整時間軸，進度 ${selectedPolicy.value.progress}%。${selectedPolicy.value.description}`
+    ? `${politician.value?.name ?? ''}「${selectedPolicy.value.title}」的完整時間軸，進度 ${selectedPolicy.value.progress}%。${selectedPolicy.value.description}`
     : undefined,
 })
 // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
@@ -276,11 +259,11 @@ onMounted(() => { ensurePolicies() })
           <div class="flex-1 p-12 overflow-y-auto custom-scrollbar border-r border-slate-100 text-left">
 
             <!-- AI Insight -->
-            <div v-if="relayChain.length > 1" class="mb-14">
+            <div v-if="lineageChainPolicies.length > 1" class="mb-14">
               <div class="flex items-center justify-between mb-10">
                 <div class="flex flex-wrap gap-3">
                   <div class="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-xs font-black border border-blue-100">
-                    <GitBranch :size="14" /> 市政接力 {{ relayChain.length }} 階段
+                    <GitBranch :size="14" /> 同一脈絡 {{ lineageChainPolicies.length }} 條政見
                   </div>
                 </div>
               </div>
@@ -340,9 +323,6 @@ onMounted(() => { ensurePolicies() })
               </div>
             </div>
 
-            <p v-if="relayChain.length > 1" class="text-[11px] text-slate-400 mt-10 bg-slate-50 p-4 rounded-xl italic font-bold leading-relaxed border border-slate-100">
-              * 這項建設跨越了不同任期，由多位首長接力完成。Zheng Jian AI 自動追蹤這份治理傳承，確保每一步行政努力在歷史座標中都被完整記錄。
-            </p>
           </div>
 
           <!-- RIGHT AXIS -->
@@ -365,7 +345,7 @@ onMounted(() => { ensurePolicies() })
                     :is="isPoliticianSelected(c.id) ? 'div' : RouterLink"
                     v-for="c in getPoliticiansForLevel(level.type, idx)"
                     :key="c.id"
-                    :to="isPoliticianSelected(c.id) ? undefined : `/analysis/${relayChain.find(p => p.politicianId === c.id)?.id}`"
+                    :to="isPoliticianSelected(c.id) ? undefined : `/analysis/${lineageChainPolicies.find(p => p.politicianId === c.id)?.id}`"
                     :class="`flex items-center gap-3 p-2 rounded-xl transition-all duration-300
                       ${isPoliticianSelected(c.id) ? 'bg-blue-50 ring-2 ring-blue-500' : 'opacity-40 grayscale hover:opacity-70 hover:grayscale-0 cursor-pointer'}`"
                   >

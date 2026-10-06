@@ -2,7 +2,8 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { supabasePublic } from '../supabase'
 import { getDataSnapshot, mapPolicy, mapPolitician, useSupabase, type DataSnapshot } from '../../composables/useSupabase'
 import type { Lineage, Policy, Politician, RawLineage, RawPolicy, RawPolitician } from '../../types'
-import { collectRelayChainIds, lineagePeople, type PageSnapshot } from '../ssg/page-data'
+import { lineagePeople, type PageSnapshot } from '../ssg/page-data'
+import { lineageMateIds } from '../policy-chain'
 import { mapLineage } from '../lineage'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
@@ -12,7 +13,7 @@ import { fetchAllPages } from '../fetch-all-pages'
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
  *
  * 跟 lib/ssg/page-data.ts 的切片邏輯一對一，但不是從全庫快照切，而是每個請求只向 Supabase 拿那一頁需要的表：
- * 人物頁＝那個人＋他的政見；政見頁＝那一筆＋接力鏈＋同一人的政見＋被提到的人物。
+ * 人物頁＝那個人＋他的政見；政見頁＝那一筆＋同一條脈絡的政見＋同一人的政見＋被提到的人物。
  * 回的是同一個 PageSnapshot 型別，所以既有頁面元件與 applyDataSnapshot 零改動。
  */
 
@@ -56,6 +57,13 @@ async function policiesByIds(ids: string[]): Promise<Policy[]> {
   const { data, error } = await supabasePublic.from('policies_with_logs').select('*').in('id', ids.slice(0, 500)).order('id').limit(500)
   if (error) throw new Error(`policies_with_logs by id: ${error.message}`)
   return ((data ?? []) as RawPolicy[]).map(mapPolicy)
+}
+
+async function policiesOfLineage(lineageId: string): Promise<Policy[]> {
+  // query-bounds: ok — 一條脈絡的政見最多幾十條
+  const { data, error } = await supabasePublic.from('policies_with_logs').select('*').eq('lineage_id', lineageId).order('id').limit(500)
+  if (error) throw new Error(`policies_with_logs by lineage: ${error.message}`)
+  return ((data ?? []) as RawPolicy[]).filter((r) => !r.removed_at).map(mapPolicy)
 }
 
 async function politiciansByIds(ids: string[]): Promise<Politician[]> {
@@ -126,24 +134,14 @@ export async function loadPolicyPage(id: string): Promise<PageSnapshot | null> {
   const base = await loadBase()
   const [start] = await policiesByIds([id])
   if (!start) return null
-  // 接力鏈：沿 relatedPolicyIds 逐跳撈，最多 4 跳；再加同一人的全部政見（page-data 的 policy case 就是這兩份）
+  // 同一條脈絡的政見（#349 第二階段 A，原本沿 related_policies 逐跳撈接力鏈）＋同一人的全部政見（page-data 的 policy case 就是這兩份）
   const pool = new Map<string, Policy>([[String(start.id), start]])
-  let frontier = start.relatedPolicyIds ?? []
-  for (let hop = 0; hop < 4 && frontier.length > 0; hop++) {
-    const missing = frontier.filter((x) => !pool.has(String(x)))
-    if (missing.length === 0) break
-    const got = await policiesByIds(missing.map(String))
-    frontier = []
-    for (const p of got) {
-      pool.set(String(p.id), p)
-      for (const r of p.relatedPolicyIds ?? []) if (!pool.has(String(r))) frontier.push(String(r))
-    }
-  }
+  if (start.lineage?.id) for (const p of await policiesOfLineage(start.lineage.id)) pool.set(String(p.id), p)
   for (const p of await policiesOfPoliticians([String(start.politicianId)])) pool.set(String(p.id), p)
   const all = Array.from(pool.values())
-  const keep = collectRelayChainIds(String(start.id), all)
-  all.filter((p) => String(p.politicianId) === String(start.politicianId)).forEach((p) => keep.add(p.id))
-  const policies = all.filter((p) => keep.has(p.id))
+  const keep = lineageMateIds(start, all)
+  all.filter((p) => String(p.politicianId) === String(start.politicianId)).forEach((p) => keep.add(String(p.id)))
+  const policies = all.filter((p) => keep.has(String(p.id)))
   const politicians = await politiciansByIds(Array.from(new Set(policies.map((p) => String(p.politicianId)))))
   return { ...base, policies, politicians }
 }

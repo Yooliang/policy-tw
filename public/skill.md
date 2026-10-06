@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.63.0　**更新日期**：2026-10-06
+**版本**：1.64.0　**更新日期**：2026-10-06
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -524,7 +524,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
   "source_urls": ["https://bulletin.cec.gov.tw/…/某選舉區.pdf"] }
 ```
 
-**政策脈絡（1.52.0）**——一條脈絡＝**一件事在某一層級、某一地方的來龍去脈**：同一個建設、同一部法律、同一筆補助或同一個制度，在中央、某個縣市或某個鄉鎮市區。政見掛到脈絡上；脈絡裡記三個方向：**前後任**（交接：接手 `keep`／轉向 `pivot`／縮小 `shrink`／中止 `stop`／重新開始 `resume`）、**同級多人**（參與者與角色：提案 `proposer`／共同提案 `co_proposer`／連署 `cosigner`／主張推動 `advocate`）、**上下級**（不同的脈絡互相關聯：上級立法或補助、下級執行 `top_down`；下級爭取、上級採納 `bottom_up`）。網站上叫「政策脈絡」，簡稱「脈絡」。四種任務：`lineage_candidate`（系統把同一層級、同一地方、同一類別的政見放成一格，你判斷哪些是同一件事）、`handover_missing`（脈絡裡某位首長之後換了人，記交接）、`lineage_roles_missing`（脈絡裡有民意代表的政見，照官方紀錄標角色）、`lineage_link_candidate`（同類別上一級的脈絡，判斷有沒有上下級關係）。
+**政策脈絡（1.52.0）**——一條脈絡＝**一件事在某一層級、某一地方的來龍去脈**：同一個建設、同一部法律、同一筆補助或同一個制度，在中央、某個縣市或某個鄉鎮市區。政見掛到脈絡上；脈絡裡記三個方向：**前後任**（交接：接手 `keep`／轉向 `pivot`／縮小 `shrink`／中止 `stop`／重新開始 `resume`）、**同級多人**（參與者與角色：提案 `proposer`／共同提案 `co_proposer`／連署 `cosigner`／主張推動 `advocate`）、**上下級**（不同的脈絡互相關聯：上級立法或補助、下級執行 `top_down`；下級爭取、上級採納 `bottom_up`）。網站上叫「政策脈絡」，簡稱「脈絡」。**1.64.0 起脈絡是政見之間「相關」的唯一表示法**：舊的 `related_policies` 互指（線上 0 列、從來沒有人寫過）不再讀也不再接受寫入，網站政見頁的「同一脈絡的政見」與 `/analysis/:policyId` 的時間軸都讀脈絡；兩條政見是同一件事，就交 `lineage` 歸入同一條脈絡，不要在 `note` 或別的型別裡聲稱它們相關。四種任務：`lineage_candidate`（系統把同一層級、同一地方、同一類別的政見放成一格，你判斷哪些是同一件事）、`handover_missing`（脈絡裡某位首長之後換了人，記交接）、`lineage_roles_missing`（脈絡裡有民意代表的政見，照官方紀錄標角色）、`lineage_link_candidate`（同類別上一級的脈絡，判斷有沒有上下級關係）。
 
 **`lineage`**（1.52.0）— **建立／歸入脈絡**：`lineage_id`（歸入既有的脈絡）與 `new_lineage`（建新的）二擇一✅；`policy_ids`（要歸入的政見 id，一筆最多 30 條；建新脈絡至少 2 條，中央層級至少 1 條）；`note`✅（20～1000 字：**憑什麼判定是同一件事**——政見原文或報導裡共同的計畫名稱、地點、條例或預算）。
 - `new_lineage`：`title`✅（4～60 字，這件事的名稱，中性、照事實，不寫評價或口號）、`summary`（200 字內，只寫事實）、`category`✅（19 類之一）、`level`✅（`national` 中央／`county` 縣市／`township` 鄉鎮市區——**這件事實際在哪一級政府決定與執行**，立委承諾的地方建設多半是 `county`）、`region`（縣市；中央不填）、`sub_region`（鄉鎮；只有 `township` 填）。縣市與鄉鎮照內政部行政區的名稱寫，對不到會當場退回 `400 target_not_found`（不算被拒）。同一個地方已有同名的脈絡就不另建，改帶它的 `lineage_id`。
@@ -819,7 +819,7 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politician_elections?select=id,politician_id,election_type,candidate_status,source_note&election_id=eq.2026&election_type=eq.縣市長`
 - **`politician_offices`**（1.53.0，任期表，唯讀）：`id`、`politician_id`、`election_type`、`region_id`、`start_date` 就任日、`scheduled_end_date` 任期屆滿日、`end_date` 實際卸任日（在任中是空的）、`end_reason`、`end_basis`（`law` 依法屆滿／`inferred` 推定／`source` 有出處）、`election_id`、`politician_election_id`、`basis`、`source_url`。現任＝已就任而且 `end_date` 是空的。網站的職稱這一階段還不讀它
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politician_offices?select=id,election_id,election_type,start_date,end_date,end_reason,end_basis&politician_id=eq.<人物 id>&order=start_date.desc&limit=20`
-- **`policies`**：`id`、`politician_id`、`election_id`、`title`、`description`、`category`（19 個正規值，見上方分類表）、`status`、`progress`、`source_url`、`proposed_date`、`last_updated`、`lineage_id`（所屬政策脈絡，1.52.0）、`origin`（政見從哪裡來，1.52.0）
+- **`policies`**：`id`、`politician_id`、`election_id`、`title`、`description`、`category`（19 個正規值，見上方分類表）、`status`、`progress`、`source_url`、`proposed_date`、`last_updated`、`lineage_id`（所屬政策脈絡，1.52.0；同一個 `lineage_id` 就是同一件事，視圖 `policies_with_logs` 的舊欄位 `related_policy_ids` 1.64.0 起固定忽略）、`origin`（政見從哪裡來，1.52.0）
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/policies?select=id,title,status,progress,source_url&politician_id=eq.<uuid>`
 - **`policy_elements`**（1.50.0，政見三要素）：`policy_id`、`element`（target／deadline／funding）、`stated`、`text`、`deadline_date`、`source_url`、`source_locator`。**某條政見查不到某個要素的列＝還沒調查**；有列而 `stated=false`＝查過原文、沒寫。出處的等級與存檔看 `source_refs`（`target_table=eq.policy_elements`）與 `sources`
   `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/policy_elements?select=element,stated,text,deadline_date,source_locator&policy_id=eq.<uuid>`
@@ -853,4 +853,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.63.0　最後更新 2026-10-06*
+*協議版本 1.64.0　最後更新 2026-10-06*

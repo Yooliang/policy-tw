@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
-import { PolicyStatus } from '../types'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
@@ -11,7 +10,8 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
 import { policyMatchesRegion } from '../lib/policy-region'
-import { policySortDate, policyYear } from '../lib/policy-date'
+import { policyYear } from '../lib/policy-date'
+import { isProgressCase } from '../lib/policy-chain'
 import { filterLineages, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
 
 /**
@@ -42,34 +42,15 @@ const regionPolicies = computed(() =>
 )
 
 /**
- * 進度過半的政見（原本的「市政接力」卡片）：哪些政見有一張卡，跟 lib/ssg/page-data.ts 的 analysisListedPolicyIds 同一套
- * （預渲染的 /analysis/:policyId 就是這些），改一邊要改另一邊。related_policies 線上是空的，接力那一支第二階段跟著那張表拿掉。
+ * 進度過半的政見（原本的「市政接力」卡片）：每一張卡一條政見——不是競選承諾、進度過半（lib/policy-chain.ts 的 isProgressCase，
+ * lib/ssg/page-data.ts 的 analysisListedPolicyIds 用同一支，預渲染的 /analysis/:policyId 就是這些）。
+ * #349 第二階段 A 拿掉了原本沿 related_policies 把接力鏈併成一張卡的那一支（那張表線上 0 列）；同一件事的關聯看上面的政策脈絡。
  */
 const progressCases = computed(() => {
-  const cases: Array<{ id: string; targetId: string; title: string; category: string; description: string; politicianIds: string[]; startYear: string | null; progress: number }> = []
-  const visitedPolicyIds = new Set<string>()
-
-  regionPolicies.value.forEach(policy => {
-    if (visitedPolicyIds.has(policy.id)) return
-    if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
-      const chain = policies.value.filter(p => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
-        .sort((a, b) => policySortDate(a) - policySortDate(b))
-      chain.forEach(p => visitedPolicyIds.add(p.id))
-      cases.push({
-        id: `case-${policy.id}`, targetId: chain[chain.length - 1].id, title: policy.title, category: policy.category, description: chain[0].description,
-        politicianIds: [...new Set(chain.map(p => p.politicianId))], startYear: policyYear(chain[0], elections.value),
-        progress: Math.round(chain.reduce((acc, p) => acc + p.progress, 0) / chain.length),
-      })
-    } else if (policy.status !== PolicyStatus.CAMPAIGN && policy.progress > 50) {
-      visitedPolicyIds.add(policy.id)
-      cases.push({
-        id: `case-${policy.id}`, targetId: policy.id, title: policy.title, category: policy.category, description: policy.description,
-        politicianIds: [policy.politicianId], startYear: policyYear(policy, elections.value), progress: policy.progress,
-      })
-    }
-  })
-
-  let result = cases
+  let result = regionPolicies.value.filter(isProgressCase).map(policy => ({
+    id: `case-${policy.id}`, targetId: policy.id, title: policy.title, category: policy.category, description: policy.description,
+    politicianIds: [policy.politicianId], startYear: policyYear(policy, elections.value), progress: policy.progress,
+  }))
   if (selectedCategory.value !== 'All') result = result.filter(c => c.category === selectedCategory.value)
   if (searchTerm.value.trim()) result = result.filter(c => c.title.toLowerCase().includes(searchTerm.value.toLowerCase()))
   return result

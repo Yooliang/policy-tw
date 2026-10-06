@@ -8,7 +8,7 @@ import { ArrowRight, Waypoints } from 'lucide-vue-next'
 import type { LineageSummary } from '../types'
 import { LEVEL_LABEL, LINEAGE_NAME, lineagePath, lineagePlace } from '../lib/lineage'
 
-defineProps<{ lineage: LineageSummary }>()
+defineProps<{ lineage: LineageSummary; mates?: Array<{ id: string; title: string; who: string; year: string | null }> }>()
 </script>
 
 <template>
@@ -25,5 +25,14 @@ defineProps<{ lineage: LineageSummary }>()
       <span v-if="lineage.summary" class="block text-sm text-slate-600 mt-1 break-words">{{ lineage.summary }}</span>
       <span class="mt-2 inline-flex items-center gap-1 text-sm font-bold text-blue-700">看這條脈絡 <ArrowRight :size="14" /></span>
     </RouterLink>
+    <ul v-if="mates && mates.length > 0" class="mt-4 divide-y divide-slate-100 border-t border-slate-100" data-testid="policy-lineage-mates">
+      <li v-for="m in mates" :key="m.id">
+        <RouterLink :to="`/policy/${m.id}`" class="flex items-baseline gap-3 py-2.5 text-sm hover:text-blue-700">
+          <span class="shrink-0 w-12 text-xs font-bold text-slate-400 tabular-nums">{{ m.year ?? '—' }}</span>
+          <span class="font-bold text-navy-900 break-words">{{ m.title }}</span>
+          <span v-if="m.who" class="shrink-0 text-xs text-slate-500">{{ m.who }}</span>
+        </RouterLink>
+      </li>
+    </ul>
   </section>
 </template>
