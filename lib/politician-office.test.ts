@@ -2,8 +2,11 @@
  * 職稱（現任公職）與參選狀況分開（2026-10-04 維護者：「職稱可能有多種，把他跟參選狀況分開來」）。
  * 守住三件事：落選者沒有職稱、現任跨屆只算最近一屆、該屆沒參選紀錄就不出參選標籤。
  */
-import { assertEquals } from "jsr:@std/assert@1";
-import { candidacyBadge, candidacyStatusText, officeTitles, pastTermItems, withdrawalText } from "./politician-office.ts";
+import { assert, assertEquals, assertMatch, assertStrictEquals } from "jsr:@std/assert@1";
+import {
+  candidacyBadge, candidacyNote, candidacyStatusText, officeTitles, pastTermItems, RESULT_PENDING, withdrawalText,
+} from "./politician-office.ts";
+import * as peopleDirectory from "./people-directory.ts";
 import type { PoliticianElectionData, PoliticianOffice } from "../types.ts";
 
 const office = (o: Partial<PoliticianOffice> & { electionId: number }): PoliticianOffice => ({ ...o });
@@ -67,7 +70,7 @@ Deno.test("candidacyBadge：這一屆的參選狀況，寫成「2026 台南市�
   const badge = candidacyBadge([
     run({ electionId: 2024, electionType: "立法委員", region: "台南市", candidateStatus: "confirmed", electionResult: "elected" }),
     run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "registered" }),
-  ], 2026);
+  ], 2026, false);
   assertEquals(badge?.label, "2026 台南市長・已登記");
   assertEquals(badge?.what, "2026 台南市長");
   assertEquals(badge?.running, true);
@@ -76,34 +79,129 @@ Deno.test("candidacyBadge：這一屆的參選狀況，寫成「2026 台南市�
 Deno.test("candidacyBadge：不參選也要講出來，但不算「有在選」", () => {
   const badge = candidacyBadge([
     run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running" }),
-  ], 2026);
+  ], 2026, false);
   assertEquals(badge?.label, "2026 台南市長・不參選");
-  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running", withdrawnAfterFiling: true })], 2026)?.label, "2026 台南市長・登記後退選");
-  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running", withdrawnAfterFiling: false })], 2026)?.label, "2026 台南市長・表態不參選");
+  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running", withdrawnAfterFiling: true })], 2026, false)?.label, "2026 台南市長・登記後退選");
+  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running", withdrawnAfterFiling: false })], 2026, false)?.label, "2026 台南市長・表態不參選");
   assertEquals(badge?.running, false);
   // 落選的也不算有在選（標題不能寫成「候選人」）
   assertEquals(
-    candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "confirmed", electionResult: "not_elected" })], 2026)?.running,
+    candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "confirmed", electionResult: "not_elected" })], 2026, false)?.running,
     false,
   );
 });
 
 Deno.test("candidacyBadge：該屆沒有參選紀錄就不顯示", () => {
   const only2022 = [run({ electionId: 2022, electionType: "縣市議員", region: "桃園市", candidateStatus: "confirmed" })];
-  assertEquals(candidacyBadge(only2022, 2026), undefined);
-  assertEquals(candidacyBadge(undefined, 2026), undefined);
-  assertEquals(candidacyBadge(only2022, null), undefined);
+  assertEquals(candidacyBadge(only2022, 2026, false), undefined);
+  assertEquals(candidacyBadge(undefined, 2026, false), undefined);
+  assertEquals(candidacyBadge(only2022, null, false), undefined);
   // 有紀錄但狀態是空的：寫不出狀況就不要掛一顆空標籤
-  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市" })], 2026), undefined);
+  assertEquals(candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市" })], 2026, false), undefined);
 });
 
 Deno.test("2024 落選立委不會有職稱，但參選狀況照實說", () => {
   // 于美人：2024 台北市立委 not_elected、2026 沒有紀錄 → 職稱空的、參選狀況也不顯示
   assertEquals(officeTitles([]), []);
   assertEquals(
-    candidacyBadge([run({ electionId: 2024, electionType: "立法委員", region: "台北市", candidateStatus: "confirmed", electionResult: "not_elected" })], 2024)?.label,
+    candidacyBadge([run({ electionId: 2024, electionType: "立法委員", region: "台北市", candidateStatus: "confirmed", electionResult: "not_elected" })], 2024, true)?.label,
     "2024 台北市立委・落選",
   );
+});
+
+// 2026-10-06 主線裁定：人物頁跟人物一覽、政黨頁講法統一——投完票的只講結果，結果還沒補上寫「結果待補」。
+// 斷言一律寫字面的「結果待補」，不拿 RESULT_PENDING 跟它自己比：常數被改成「表態參選」這裡要紅。
+Deno.test("candidacyNote：投完票的只講結果，結果還沒補上寫「結果待補」", () => {
+  assertEquals(RESULT_PENDING, "結果待補");
+  // 2022 早期匯入、停在 confirmed 的那一萬多筆：不講「表態參選」，也不留白
+  assertEquals(candidacyNote({ candidateStatus: "confirmed" }, true), "結果待補");
+  for (const s of ["registered", "qualified", "likely", "rumored"] as const) {
+    assertEquals(candidacyNote({ candidateStatus: s }, true), "結果待補", s);
+  }
+  assertEquals(candidacyNote({}, true), "結果待補", "狀態空的也一樣：投完票了，缺的是結果");
+  // 有結果就講結果
+  assertEquals(candidacyNote({ candidateStatus: "confirmed", electionResult: "elected" }, true), "當選");
+  assertEquals(candidacyNote({ candidateStatus: "confirmed", electionResult: "not_elected" }, true), "落選");
+  assertEquals(candidacyNote({ candidateStatus: "elected" }, true), "當選");
+  assertEquals(candidacyNote({ candidateStatus: "defeated" }, true), "落選");
+  // 不參選照 withdrawalText 的三種說法，不會被寫成「結果待補」
+  assertEquals(candidacyNote({ candidateStatus: "not_running", withdrawnAfterFiling: true }, true), "登記後退選");
+  assertEquals(candidacyNote({ candidateStatus: "not_running", withdrawnAfterFiling: false }, true), "表態不參選");
+  assertEquals(candidacyNote({ candidateStatus: "not_running" }, true), "不參選");
+});
+
+Deno.test("candidacyNote：還沒投票的照登記階段（跟 candidacyStatusText 同一套），不寫「結果待補」", () => {
+  assertEquals(candidacyNote({ candidateStatus: "confirmed" }, false), "表態參選");
+  assertEquals(candidacyNote({ candidateStatus: "registered" }, false), "已登記");
+  assertEquals(candidacyNote({ candidateStatus: "qualified" }, false), "已審定");
+  assertEquals(candidacyNote({ candidateStatus: "likely" }, false), "可能參選");
+  assertEquals(candidacyNote({ candidateStatus: "rumored" }, false), "傳聞參選");
+  assertEquals(candidacyNote({ candidateStatus: "not_running", withdrawnAfterFiling: true }, false), "登記後退選");
+  assertEquals(candidacyNote({ candidateStatus: "not_running" }, false), "不參選");
+  assertEquals(candidacyNote({}, false), "", "看不出狀態就不寫");
+});
+
+Deno.test("candidacyBadge：投票前講登記階段，投完票只講結果、沒結果寫「結果待補」", () => {
+  const confirmed = [run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "confirmed" })];
+  // 今天（2026-10-06）2026 還沒投票：畫面照舊
+  assertEquals(candidacyBadge(confirmed, 2026, false)?.label, "2026 台南市長・表態參選");
+  // 投完票、結果還沒補上
+  const after = candidacyBadge(confirmed, 2026, true);
+  assertEquals(after?.label, "2026 台南市長・結果待補");
+  assertEquals(after?.status, "結果待補");
+  assertEquals(after?.running, true, "結果待補的人這一屆確實在選，標題照樣寫「…候選人」");
+  const registered = [run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "registered" })];
+  assertEquals(candidacyBadge(registered, 2026, false)?.label, "2026 台南市長・已登記");
+  assertEquals(candidacyBadge(registered, 2026, true)?.label, "2026 台南市長・結果待補");
+  // 結果補上之後
+  const won = candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "confirmed", electionResult: "elected" })], 2026, true);
+  assertEquals(won?.label, "2026 台南市長・當選");
+  const lost = candidacyBadge([run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "confirmed", electionResult: "not_elected" })], 2026, true);
+  assertEquals(lost?.label, "2026 台南市長・落選");
+  assertEquals(lost?.running, false, "落選的不算有在選");
+  // 不參選投票前後都一樣，也不算有在選
+  const quit = [run({ electionId: 2026, electionType: "縣市長", region: "台南市", candidateStatus: "not_running", withdrawnAfterFiling: true })];
+  assertEquals(candidacyBadge(quit, 2026, false)?.label, "2026 台南市長・登記後退選");
+  assertEquals(candidacyBadge(quit, 2026, true)?.label, "2026 台南市長・登記後退選");
+  assertEquals(candidacyBadge(quit, 2026, true)?.running, false);
+});
+
+/** lib／pages／components／composables 底下的程式（不含測試） */
+function sourceFiles(dir: URL): Array<{ name: string; text: string }> {
+  const out: Array<{ name: string; text: string }> = [];
+  for (const entry of Deno.readDirSync(dir)) {
+    if (entry.isDirectory) {
+      out.push(...sourceFiles(new URL(`${entry.name}/`, dir)));
+    } else if (/\.(ts|vue)$/.test(entry.name) && !entry.name.endsWith(".test.ts")) {
+      const url = new URL(entry.name, dir);
+      out.push({ name: decodeURIComponent(url.pathname), text: Deno.readTextFileSync(url) });
+    }
+  }
+  return out;
+}
+
+Deno.test("規則只有一份：人物一覽轉出去的就是這裡的 candidacyNote，別的檔案沒有另抄一份", () => {
+  assertStrictEquals(peopleDirectory.candidacyNote, candidacyNote);
+  assertStrictEquals(peopleDirectory.RESULT_PENDING, RESULT_PENDING);
+  const root = new URL("../", import.meta.url);
+  const files = ["lib/", "pages/", "components/", "composables/"].flatMap((d) => sourceFiles(new URL(d, root)));
+  assert(files.some((f) => f.name.endsWith("/pages/PoliticianProfile.vue")), "掃描沒掃到人物頁");
+  for (const f of files) {
+    if (f.name.endsWith("/lib/politician-office.ts")) continue;
+    assertEquals(f.text.match(/(function|const|let)\s+candidacyNote\b/), null, `${f.name} 自己定義了 candidacyNote`);
+    assertEquals(f.text.match(/['"`]結果待補['"`]/), null, `${f.name} 把「結果待補」寫成字面字串——要用 lib/politician-office.ts 的 candidacyNote`);
+  }
+});
+
+Deno.test("人物頁真的用這份規則：參選紀錄已投票的那一支呼叫 candidacyNote，上方標籤有傳「投完票了沒」", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/PoliticianProfile.vue", import.meta.url));
+  const start = page.indexOf("function getCandidateStatusLabel(");
+  const end = page.indexOf("function getCandidateStatusColor(");
+  assert(start >= 0 && end > start, "PoliticianProfile.vue 找不到 getCandidateStatusLabel");
+  // 之前已投票的那一支自己寫 switch、其他一律回 null，2022 那一萬多筆 confirmed 右邊什麼都沒寫
+  assertMatch(page.slice(start, end), /if \(isPast\) return candidacyNote\(\{ candidateStatus: status, electionResult: result, withdrawnAfterFiling \}, true\)/);
+  // 上方的參選狀況標籤：第三個參數是「這一屆投完票了沒」，跟參選紀錄同一個判斷
+  assertMatch(page, /candidacyBadge\(politician\.value\?\.elections, [^,]+, [^)]*isElectionPast\(/);
 });
 
 // #345 後續（協調者 10-06）：退選分三種說法；轉任的卸任日是推定的要標出來

@@ -9,6 +9,7 @@
  *   officeTitles()   職稱：只認現任（視圖 politician_offices，migration 20261004000005；#345 起改名 politician_offices_derived，任期表第二階段才接手），沒有就是空陣列
  *   candidacyBadge() 參選狀況：這一屆那一筆參選紀錄，例如「2026 台南市長・已登記」
  * 兩個都可能是空的，空的就不要顯示——不要拿另一個去充當。
+ * 一筆參選紀錄的狀態字（投完票只講結果、沒結果寫「結果待補」）是 candidacyNote()，人物頁、人物一覽、政黨頁共用。
  */
 import { participationLabel } from './participation-label'
 import type { CandidateStatus, PoliticianElectionData, PoliticianOffice, PoliticianTerm } from '../types'
@@ -84,18 +85,38 @@ export function candidacyStatusText(
   }
 }
 
+/** 結果還沒補上的已投票屆別（#345：2022 這一屆一萬多筆的選舉結果還空著） */
+export const RESULT_PENDING = '結果待補'
+
+/**
+ * 一筆參選紀錄的狀態字，人物頁、人物一覽、政黨頁共用這一份（2026-10-06 主線裁定三處講法統一，原本在 lib/people-directory.ts）。
+ * 投完票之後只講結果：當選、落選、不參選（退選）；結果還沒補上的講「結果待補」——
+ * 不再講登記階段的「表態參選」「已登記」：2022 早期匯入的人狀態多半停在 confirmed，畫面上寫「表態參選」，
+ * 其實他們都在選票上（#345 後續裁定：已投票屆別早期匯入的 confirmed 讀成已登記）。還沒投票的照登記階段（candidacyStatusText）。
+ * `voted`＝這一屆投票日已經過了。
+ */
+export function candidacyNote(rec: Pick<PoliticianElectionData, 'candidateStatus' | 'electionResult' | 'withdrawnAfterFiling'>, voted: boolean): string {
+  if (rec.electionResult === 'elected' || rec.candidateStatus === 'elected') return '當選'
+  if (rec.electionResult === 'not_elected' || rec.candidateStatus === 'defeated') return '落選'
+  if (rec.candidateStatus === 'not_running') return withdrawalText(rec.withdrawnAfterFiling)
+  if (voted) return RESULT_PENDING
+  return candidacyStatusText(rec.candidateStatus, rec.electionResult, rec.withdrawnAfterFiling) ?? ''
+}
+
 /**
  * 這一屆的參選狀況，例如「2026 台南市長・已登記」「2026 台南市長・表態不參選」。
+ * 狀態字照 candidacyNote：`voted`（這一屆投完票了沒）為真就只講結果，結果還沒補上寫「2026 台南市長・結果待補」。
  * 該屆沒有參選紀錄、或紀錄裡看不出狀態就回 undefined——不顯示比瞎猜好。
  */
 export function candidacyBadge(
   elections: PoliticianElectionData[] | undefined,
   electionId: number | null | undefined,
+  voted: boolean,
 ): { label: string; what: string; status: string; running: boolean } | undefined {
   if (!elections || electionId == null) return undefined
   const record = elections.find((e) => e.electionId === electionId)
   if (!record) return undefined
-  const status = candidacyStatusText(record.candidateStatus, record.electionResult, record.withdrawnAfterFiling)
+  const status = candidacyNote(record, voted)
   if (!status) return undefined
   const what = participationLabel(record) || record.position || ''
   if (!what) return undefined
