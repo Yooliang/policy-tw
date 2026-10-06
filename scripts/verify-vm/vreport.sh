@@ -6,7 +6,11 @@ PY=${PY:-$( [ -x C:/Python312/python.exe ] && echo C:/Python312/python.exe || py
 bash tick.sh >/dev/null 2>&1
 grep -oE "^(cwen|gsit|acct3) +(已用 +[0-9.]+%|額度未知|未啟用)" decision.txt | tr -s ' '
 echo "VM $(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(status)')"
-S1=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.ditrust-serial)') S2=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.ditrust-serial-2)') S3=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.ditrust-serial-3)') PYTHONIOENCODING=utf-8 "$PY" - <<'PY'
+# 序號：先讀 Secret Manager（verify-vm-<鍵>，專案看 VM metadata secret-project，預設 policy-tw），讀不到退回 metadata；只進變數不印出
+SECRET_PROJECT=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items.secret-project)' 2>/dev/null | tr -d '\r\n')
+[ -n "$SECRET_PROJECT" ] || SECRET_PROJECT=policy-tw
+serial() { local v; v=$(gcloud secrets versions access latest --secret "verify-vm-$1" --project "$SECRET_PROJECT" 2>/dev/null | tr -d '\r\n'); [ -n "$v" ] || v=$(gcloud compute instances describe policy-verifier --zone us-central1-a --format="value(metadata.items.$1)" 2>/dev/null | tr -d '\r\n'); printf '%s' "$v"; }
+S1=$(serial ditrust-serial) S2=$(serial ditrust-serial-2) S3=$(serial ditrust-serial-3) PYTHONIOENCODING=utf-8 "$PY" - <<'PY'
 import json,os,re,urllib.request,urllib.parse,pathlib
 env=dict(re.findall(r'^([A-Za-z_]+)=(.*)$',open("../../.env",encoding="utf-8-sig").read(),re.M))
 U=env["VITE_SUPABASE_URL"].strip(); K=env["VITE_SUPABASE_ANON_KEY"].strip(); H={"apikey":K,"authorization":"Bearer "+K}
