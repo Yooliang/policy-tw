@@ -44,7 +44,35 @@ export type RevertStep =
   | { op: "delete"; table: string; record_id: string; edit_id: number }
   | { op: "restore"; table: string; record_id: string; field: string; value: unknown; edit_id: number }
   /** field='*'、old=整列、new=NULL：合併時被刪掉的列，還原＝整列 INSERT 回去（2026-09-20） */
-  | { op: "reinsert"; table: string; record_id: string; row: Record<string, unknown>; edit_id: number };
+  | { op: "reinsert"; table: string; record_id: string; row: Record<string, unknown>; edit_id: number }
+  /** 這一筆履歷改的欄位已經從資料表刪掉了，倒不回去（見 DROPPED_COLUMNS）。executeRevert 看到就整筆不還原 */
+  | { op: "unrevertable"; table: string; record_id: string; field: string; edit_id: number; reason: string };
+
+/**
+ * 已經從資料表刪掉的欄位（#345 第二階段 B，2026-10-07）：舊履歷裡這些欄位的 old_value 沒有地方可以寫回去。
+ * 不硬塞成別的欄位——單一欄位的舊值（例如 candidate_status 的 confirmed）對不回合一的 candidacy_status
+ * （要連同當時的結果欄一起看才算得出），猜錯會把當選改成登記。所以這些履歷標成「不可還原」，
+ * executeRevert 整筆貢獻都不動並講出是哪幾筆，由維護者手動處理。履歷與欄位名的對照（history.ts、HistoryEntryDetail.vue）照留，歷史仍看得懂。
+ */
+export const DROPPED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  politician_elections: ["candidate_status", "election_result", "votes_received", "vote_percentage"],
+};
+
+const isDropped = (table: string, field: string) => DROPPED_COLUMNS[table]?.includes(field) ?? false;
+
+/** 整列還原（reinsert）：整列快照裡有已刪欄位時，票數直接拿掉；舊兩欄只在快照沒有 candidacy_status 時才無法還原 */
+function sanitizeReinsertRow(table: string, row: Record<string, unknown>): { row: Record<string, unknown> } | { reason: string } {
+  const dropped = DROPPED_COLUMNS[table];
+  if (!dropped) return { row };
+  const hasDropped = dropped.some((c) => c in row);
+  if (!hasDropped) return { row };
+  if (table === "politician_elections" && !("candidacy_status" in row)) {
+    return { reason: "整列快照是舊欄位的樣子（沒有 candidacy_status），舊欄位已刪、對不回合一的欄位" };
+  }
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) if (!dropped.includes(k)) clean[k] = v;
+  return { row: clean };
+}
 
 /**
  * 純函式：把一筆貢獻的變更倒成還原步驟（由新到舊；已還原的跳過）。
@@ -57,10 +85,16 @@ export function planRevert(edits: readonly (EditRecord & { id: number })[]): Rev
   for (const e of live) {
     if (e.field === "*") {
       if (e.new_value === null && e.old_value && typeof e.old_value === "object") {
-        steps.push({ op: "reinsert", table: e.table_name, record_id: e.record_id, row: e.old_value as Record<string, unknown>, edit_id: e.id });
+        const clean = sanitizeReinsertRow(e.table_name, e.old_value as Record<string, unknown>);
+        if ("reason" in clean) steps.push({ op: "unrevertable", table: e.table_name, record_id: e.record_id, field: "*", edit_id: e.id, reason: clean.reason });
+        else steps.push({ op: "reinsert", table: e.table_name, record_id: e.record_id, row: clean.row, edit_id: e.id });
       } else {
         steps.push({ op: "delete", table: e.table_name, record_id: e.record_id, edit_id: e.id });
       }
+      continue;
+    }
+    if (isDropped(e.table_name, e.field)) {
+      steps.push({ op: "unrevertable", table: e.table_name, record_id: e.record_id, field: e.field, edit_id: e.id, reason: `欄位 ${e.table_name}.${e.field} 已從資料表刪除（#345 第二階段 B）` });
       continue;
     }
     const key = `${e.table_name}#${e.record_id}#${e.field}`;
@@ -71,8 +105,8 @@ export function planRevert(edits: readonly (EditRecord & { id: number })[]): Rev
     else steps.push(step);
     seen.add(key);
   }
-  // 先把被刪的列放回去、再還原欄位、最後刪掉當時新增的列（刪列後欄位還原沒意義，順序無害但清楚）
-  return [...steps.filter((s) => s.op === "reinsert"), ...steps.filter((s) => s.op === "restore"), ...steps.filter((s) => s.op === "delete")];
+  // 先把被刪的列放回去、再還原欄位、最後刪掉當時新增的列（刪列後欄位還原沒意義，順序無害但清楚）；不可還原的放最前面，executeRevert 一眼就看到
+  return [...steps.filter((s) => s.op === "unrevertable"), ...steps.filter((s) => s.op === "reinsert"), ...steps.filter((s) => s.op === "restore"), ...steps.filter((s) => s.op === "delete")];
 }
 
 /** 還原步驟裡同一列（表＋id）的欄位併成一個 patch（純函式） */
@@ -99,10 +133,21 @@ async function restorePrimarySource(supabase: SupabaseLike, table: string, recor
   if (error) throw new Error(`revert ${table}#${recordId}.source_url（source_set_primary）: ${error.message}`);
 }
 
+/** 這筆貢獻的履歷裡有倒不回去的（欄位已刪）：整筆都沒有動，呼叫端要把原因講給人看 */
+export class RevertBlockedError extends Error {
+  constructor(public readonly blocked: readonly Extract<RevertStep, { op: "unrevertable" }>[]) {
+    super(`這筆貢獻有 ${blocked.length} 個變更還原不了：${blocked.map((b) => `${b.table}#${b.record_id}.${b.field}（${b.reason}）`).join("；")}`);
+    this.name = "RevertBlockedError";
+  }
+}
+
 export async function executeRevert(supabase: SupabaseLike, contributionId: string, revertedBy: string): Promise<{ steps: RevertStep[]; reverted: number }> {
   const { data, error } = await supabase.from("edit_history").select("*").eq("contribution_id", contributionId).order("id", { ascending: true });
   if (error) throw new Error(`edit_history read: ${error.message}`);
   const steps = planRevert((data ?? []) as (EditRecord & { id: number })[]);
+  // 有倒不回去的就整筆不動（半套還原＝一部分改回去、一部分沒有，卻標成 reverted，是沉默的錯）
+  const blocked = steps.filter((s): s is Extract<RevertStep, { op: "unrevertable" }> => s.op === "unrevertable");
+  if (blocked.length > 0) throw new RevertBlockedError(blocked);
   // 同一列的欄位還原併成一次 UPDATE（2026-10-06，#344）：election_districts 的 CHECK 要求 seats 與 seats_basis
   // 同時有值或同時空白，一欄一欄還原的話，中間那一步一定違反 CHECK、整筆還原失敗
   const restores = groupRestores(steps);

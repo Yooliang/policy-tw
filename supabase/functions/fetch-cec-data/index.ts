@@ -118,7 +118,7 @@ async function handleByName(name: string, electionId?: number): Promise<Response
   const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? [], electionList));
   const picked = electionId ? all.filter((c) => c.election_id === electionId) : all;
 
-  // 指定屆別時順便把該場的得票抓回來：代理要填 votes_received／vote_percentage
+  // 指定屆別時順便把該場的得票抓回來給代理對照（票數站上不顯示、協議不收，資料表的票數欄位 2026-10-07 已刪）
   let tickets: unknown = null;
   let ticketsUrl: string | null = null;
   const one = picked[0];
