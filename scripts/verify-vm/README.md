@@ -134,3 +134,18 @@ Aegis 目前沒有第三個帳號的額度，所以 `plan_round.py` 對 `acct3` 
 
 - `plan_round.py` 需要同目錄有 `used_names.sorted`（`gen_names.py` 讀它；不在版控裡，第一次跑要先建一個空檔）。
 - `tick.sh` 寫死 Aegis 的 SSH 路徑與工作機的 Python 位置，家用機用 `PY` 環境變數覆寫。
+
+## 金鑰改放 Secret Manager（2026-10-06，過渡中）
+
+`boot-agent.sh` 讀金鑰的順序改成：**先讀 Secret Manager，讀不到才退回 metadata**。序列埠只會記每個鍵從哪裡讀到（`=== CRED <鍵> from secret-manager|metadata|missing ===`），不記內容。
+
+- metadata `secret-project`：放金鑰的 GCP 專案。沒設的話維持舊行為，只讀 metadata。
+- Secret 名稱＝`verify-vm-<metadata 鍵>`，共 7 個：`verify-vm-claude-token`、`verify-vm-cwen-token`、`verify-vm-claude3-token`、`verify-vm-openrouter-key`、`verify-vm-ditrust-serial`、`verify-vm-ditrust-serial-2`、`verify-vm-ditrust-serial-3`。
+
+上線前要先做三件事，都要小良哥點頭。截至 10-06 都還沒做：
+1. **決定放哪個專案**：`policy-tw` 目前沒綁帳單，要放這裡得先綁；`greenshepherdcomtw` 有帳單，Secret Manager 也已啟用。
+2. **給 VM 一個專用服務帳號**：只對上面那幾個 secret 有 `roles/secretmanager.secretAccessor`。現在用的預設 compute 服務帳號權限太大，scope 也不含 `cloud-platform`，讀不到 Secret Manager。VM 關機時就能換：
+   `gcloud compute instances set-service-account policy-verifier --zone us-central1-a --service-account <專用帳號> --scopes cloud-platform`
+3. **搬值**：從 metadata 讀出來，直接用管線寫進 secret，不落地、不印出。確認 VM 開機後序列埠每個鍵都是 `from secret-manager`，再刪掉 metadata 裡的明文。
+
+新的 `boot-agent.sh` 要另外上傳到 VM 的 `startup-script` 才會生效。上傳前請先確認上面三件事。

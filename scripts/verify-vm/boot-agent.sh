@@ -23,6 +23,32 @@
 U=ext_cwen0708_gmail_com
 D=/home/$U/policy-verifier
 md() { curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"; }
+# 金鑰讀法（2026-10-06，P-主線4 交辦）：先讀 Secret Manager，讀不到才退回 metadata（過渡期）。
+#   metadata secret-project  放金鑰的 GCP 專案（例如 policy-tw）；沒設＝只讀 metadata（舊行為）
+#   Secret 名稱＝verify-vm-<metadata 鍵>，例如 verify-vm-claude-token、verify-vm-ditrust-serial-2
+#   VM 的服務帳號要有那幾個 secret 的 roles/secretmanager.secretAccessor，且 VM scope 要含 cloud-platform。
+# 值只放進 shell 變數：不寫檔、不印出；log 只記「從哪裡讀到／沒讀到」，不記內容。
+SECRET_PROJECT=$(md secret-project)
+[[ "$SECRET_PROJECT" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || SECRET_PROJECT=""
+SM_TOKEN=""
+if [ -n "$SECRET_PROJECT" ]; then
+  SM_TOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')
+  [ -n "$SM_TOKEN" ] || echo "=== CRED secret-manager 取不到服務帳號權杖，全部退回 metadata ==="
+fi
+sm() {  # sm <metadata 鍵> → 印出 secret 值；讀不到印空字串
+  [ -n "$SM_TOKEN" ] || return 0
+  curl -sf -H "Authorization: Bearer $SM_TOKEN" \
+    "https://secretmanager.googleapis.com/v1/projects/$SECRET_PROJECT/secrets/verify-vm-$1/versions/latest:access" \
+    | tr -d '\n' | sed -n 's/.*"data" *: *"\([^"]*\)".*/\1/p' | base64 -d 2>/dev/null | tr -d '\r\n'
+}
+cred() {  # cred <metadata 鍵>：Secret Manager 優先，退回 metadata；只在 log 記來源
+  local v; v=$(sm "$1")
+  if [ -n "$v" ]; then echo "=== CRED $1 from secret-manager ===" >&2
+  else v=$(md "$1"); if [ -n "$v" ]; then echo "=== CRED $1 from metadata ===" >&2; else echo "=== CRED $1 missing ===" >&2; fi; fi
+  printf '%s' "$v"
+}
 
 # 上一輪各代理的最後幾行：VM 關機後序列埠就清了，靠這個才看得到上一輪到底卡在哪
 for f in "$D"/agent-*.log; do [ -f "$f" ] && { echo "=== PREV-LOG $(basename "$f") ==="; tail -12 "$f"; }; done
@@ -30,25 +56,25 @@ for f in "$D"/agent-*.log; do [ -f "$f" ] && { echo "=== PREV-LOG $(basename "$f
 if [ "$(md agent-disabled)" = "1" ]; then echo "=== AGENT-SKIP agent-disabled=1 ==="; exit 0; fi
 
 HOURS=$(md run-hours); [[ "$HOURS" =~ ^[0-9]+$ ]] && [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 24 ] || HOURS=3
-OR_KEY=$(md openrouter-key)
+OR_KEY=$(cred openrouter-key)
 # Claude 帳號表（表驅動，2026-10-06）：provider → 存 OAuth token 的 metadata 鍵。
 # 三個 provider 跑的都是同一支 claude CLI，只差用哪個帳號的 token。
 # 要加第四個帳號：這裡加一行（例如 [claude4]=claude4-token），別處都不用動。
 declare -A CLAUDE_TOKEN_KEY=( [claude]=claude-token [claude2]=cwen-token [claude3]=claude3-token )
 declare -A CLAUDE_TOKEN=()
-for p in "${!CLAUDE_TOKEN_KEY[@]}"; do CLAUDE_TOKEN[$p]=$(md "${CLAUDE_TOKEN_KEY[$p]}"); done
+for p in "${!CLAUDE_TOKEN_KEY[@]}"; do CLAUDE_TOKEN[$p]=$(cred "${CLAUDE_TOKEN_KEY[$p]}"); done
 is_claude() { [ -n "${CLAUDE_TOKEN_KEY[$1]+x}" ]; }
 # 正見 DiTrust 帳號序號（2026-10-03）：有設就用帳號報到（agent_name=ditrust:<序號>），
 # 提交／驗證額度按帳號算（600／2400），不再被 VM 輪到的臨時 IP 當天已用掉的額度卡住。
 # 沒設就照舊用每輪的代號（匿名，按 IP 算）。序號只放 metadata，不寫進任何檔案。
-DITRUST_SERIAL=$(md ditrust-serial)
+DITRUST_SERIAL=$(cred ditrust-serial)
 [[ "$DITRUST_SERIAL" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL=""
 # 第二個 DiTrust 帳號（2026-10-03）：有設就跟第一組輪替 —— 同一輪的代理單數用第一組、雙數用第二組，
 # 兩個帳號各自有 600／2400 的額度。同一筆每個 IP 仍只算一票（兩組都從這台 VM 出去，同一個 IP）。
-DITRUST_SERIAL_2=$(md ditrust-serial-2)
+DITRUST_SERIAL_2=$(cred ditrust-serial-2)
 # 第三個 DiTrust 帳號（2026-10-06）：專屬 claude3 的代理（第三個 Claude 帳號）。
 # 一個 Claude 帳號對一個 DiTrust 帳號，額度各算各的、不跟前兩組搶；沒設就退回輪替規則。
-DITRUST_SERIAL_3=$(md ditrust-serial-3)
+DITRUST_SERIAL_3=$(cred ditrust-serial-3)
 [[ "$DITRUST_SERIAL_3" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL_3=""
 # verify-only=1：只做驗證（2026-10-04 小良哥：待驗證堆積，VM 專門跑驗證）
 VERIFY_ONLY=$(md verify-only)
