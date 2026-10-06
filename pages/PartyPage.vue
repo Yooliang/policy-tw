@@ -14,6 +14,7 @@ import PartyBadge from '../components/PartyBadge.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { partyStatusText } from '../lib/parties'
+import { partyEmblem } from '../lib/party'
 import { OPEN_GROUP_MAX, type PartyGroup } from '../lib/party-pages'
 import { reloadForPrerendered } from '../lib/full-load'
 
@@ -32,6 +33,7 @@ onMounted(() => {
 const fmt = (n: number) => n.toLocaleString('zh-TW')
 const count = (groups: PartyGroup[]) => groups.reduce((n, g) => n + g.people.length, 0)
 const statusText = computed(() => (party.value ? partyStatusText({ moi_no: party.value.moiNo, moi_status: party.value.moiStatus }) : null))
+const emblem = computed(() => (party.value ? partyEmblem(party.value.name) : null))
 const headCount = computed(() => (page.value ? count(page.value.heads) : 0))
 const councilCount = computed(() => (page.value ? count(page.value.councils) : 0))
 
@@ -70,8 +72,14 @@ usePageHead({
     <Hero>
       <template #title>{{ party?.name ?? '政黨' }}</template>
       <template #description>
-        <template v-if="page">這個政黨在正見收錄的人物：現職首長、現職民意代表與歷屆參選人。依職位、地區、姓名筆畫排列，不排名。</template>
+        <template v-if="page">這個政黨在正見收錄的人物：現職首長、現職民意代表與歷屆參選人。</template>
         <template v-else>政黨：現職首長、民意代表與歷屆參選人。</template>
+      </template>
+      <template v-if="emblem && party" #logo>
+        <!-- 黨徽放在白底方塊上：頁首是深色底，有些黨徽是深色或透明底，直接放會看不清楚 -->
+        <span class="inline-flex items-center justify-center w-20 h-20 md:w-24 md:h-24 rounded-2xl bg-white p-2 shadow-lg" data-testid="party-emblem">
+          <img :src="emblem" :alt="`${party.name}黨徽`" class="w-full h-full object-contain" />
+        </span>
       </template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
     </Hero>
@@ -112,8 +120,6 @@ usePageHead({
             <a v-if="party.evidenceUrl" :href="party.evidenceUrl" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-blue-700 hover:underline">內政部政黨資訊網 該政黨頁<ExternalLink :size="12" /></a>
           </p>
         </section>
-
-        <p class="text-sm text-slate-600 mb-8">人物依他<strong>目前登記的政黨</strong>歸到這裡（跟選舉頁卡片上的政黨同一個依據）；當年參選時的政黨還在補齊，補齊後歷屆參選人改照當時的政黨列。</p>
 
         <!-- 現職首長、現職民代 -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">

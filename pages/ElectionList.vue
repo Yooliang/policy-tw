@@ -9,7 +9,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { daysUntil, splitElections, taipeiDay, turnoutText } from '../lib/election-list'
 import { electionPath } from '../lib/election-regions'
-import { POSITIONS, positionSpec } from '../lib/election-levels'
+import { electionPositionLabels } from '../lib/election-levels'
 import type { Election } from '../types'
 
 /**
@@ -39,12 +39,12 @@ function voteDayText(e: Election): string {
   return `${e.electionDate}（星期${WEEKDAYS[d.getUTCDay()]}）`
 }
 
-/** 職位標籤照選舉頁分層的順序（總統 → 村里長），不照資料庫回傳的順序 */
-const POSITION_ORDER = new Map(POSITIONS.map((p, i) => [p.type as string, i]))
-function typeLabels(e: Election): string[] {
-  return [...(e.types ?? [])]
-    .sort((a, b) => (POSITION_ORDER.get(a) ?? 99) - (POSITION_ORDER.get(b) ?? 99))
-    .map((t) => positionSpec(t)?.label ?? t)
+/** 職位標籤：中選會的九種名稱，順序照選舉頁分層（總統 → 村里長）；連到選舉頁上對應的區塊（規則見 lib/election-levels.ts） */
+function positionLinks(e: Election): Array<{ label: string; to: string }> {
+  return electionPositionLabels(e.types ?? []).map((p) => ({
+    label: p.label,
+    to: p.anchor ? `${electionPath(e.id)}#${p.anchor}` : electionPath(e.id),
+  }))
 }
 
 function countdownText(e: Election): string {
@@ -103,23 +103,23 @@ usePageHead({
           <p v-if="groups.upcoming.length === 0" class="text-slate-500 bg-white rounded-xl shadow p-6">目前沒有已排定投票日的選舉。</p>
           <ul v-else class="space-y-4">
             <li v-for="e in groups.upcoming" :key="e.id">
-              <RouterLink
-                :to="electionPath(e.id)"
-                class="group block bg-white rounded-xl shadow p-6 border-l-4 border-amber-500 hover:shadow-lg transition-shadow"
-              >
+              <div class="group relative bg-white rounded-xl shadow p-6 border-l-4 border-amber-500 hover:shadow-lg transition-shadow">
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 mb-2">
                   <span class="inline-flex items-center gap-1"><CalendarDays :size="16" class="text-amber-500" />投票日 {{ voteDayText(e) }}</span>
                   <span v-if="mounted" class="font-bold text-amber-600">{{ countdownText(e) }}</span>
                 </div>
-                <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700 flex items-center gap-1">
-                  {{ e.shortName }}
-                  <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
+                <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700">
+                  <!-- 整張卡片可點：標題連結撐滿卡片（stretched link），職位標籤各自是 z-10 的連結，不做出 <a> 包 <a> -->
+                  <RouterLink :to="electionPath(e.id)" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
+                    {{ e.shortName }}
+                    <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
+                  </RouterLink>
                 </h3>
                 <p class="text-sm text-slate-600 mt-1">{{ e.name }}</p>
-                <ul v-if="typeLabels(e).length" class="flex flex-wrap gap-2 mt-3" aria-label="選舉的職位">
-                  <li v-for="label in typeLabels(e)" :key="label" class="text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2.5 py-0.5">{{ label }}</li>
+                <ul v-if="positionLinks(e).length" class="relative z-10 flex flex-wrap gap-2 mt-3" aria-label="選舉的職位">
+                  <li v-for="p in positionLinks(e)" :key="p.label"><RouterLink :to="p.to" class="inline-block text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2.5 py-0.5 hover:bg-amber-100 hover:border-amber-300">{{ p.label }}</RouterLink></li>
                 </ul>
-              </RouterLink>
+              </div>
             </li>
           </ul>
         </section>
@@ -129,23 +129,23 @@ usePageHead({
           <p v-if="groups.past.length === 0" class="text-slate-500 bg-white rounded-xl shadow p-6">還沒有投票結束的選舉。</p>
           <ul v-else class="space-y-4">
             <li v-for="e in groups.past" :key="e.id">
-              <RouterLink
-                :to="electionPath(e.id)"
-                class="group block bg-white rounded-xl shadow p-6 border-l-4 border-slate-300 hover:shadow-lg transition-shadow"
-              >
+              <div class="group relative bg-white rounded-xl shadow p-6 border-l-4 border-slate-300 hover:shadow-lg transition-shadow">
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 mb-2">
                   <span class="inline-flex items-center gap-1"><CalendarDays :size="16" class="text-slate-400" />投票日 {{ voteDayText(e) }}</span>
                   <span v-if="turnoutText(e)" class="text-slate-600">{{ turnoutText(e) }}</span>
                 </div>
-                <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700 flex items-center gap-1">
-                  {{ e.shortName }}
-                  <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
+                <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700">
+                  <!-- 整張卡片可點：標題連結撐滿卡片（stretched link），職位標籤各自是 z-10 的連結，不做出 <a> 包 <a> -->
+                  <RouterLink :to="electionPath(e.id)" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
+                    {{ e.shortName }}
+                    <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
+                  </RouterLink>
                 </h3>
                 <p class="text-sm text-slate-600 mt-1">{{ e.name }}</p>
-                <ul v-if="typeLabels(e).length" class="flex flex-wrap gap-2 mt-3" aria-label="選舉的職位">
-                  <li v-for="label in typeLabels(e)" :key="label" class="text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 rounded-full px-2.5 py-0.5">{{ label }}</li>
+                <ul v-if="positionLinks(e).length" class="relative z-10 flex flex-wrap gap-2 mt-3" aria-label="選舉的職位">
+                  <li v-for="p in positionLinks(e)" :key="p.label"><RouterLink :to="p.to" class="inline-block text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 rounded-full px-2.5 py-0.5 hover:bg-slate-200 hover:border-slate-300">{{ p.label }}</RouterLink></li>
                 </ul>
-              </RouterLink>
+              </div>
             </li>
           </ul>
         </section>
