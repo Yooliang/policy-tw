@@ -226,3 +226,48 @@ export const DIRECTORY_POSITIONS: readonly PositionSpec[] = POSITIONS
     || (a.p.role === b.p.role ? 0 : a.p.role === 'head' ? -1 : 1)
     || a.i - b.i)
   .map(x => x.p)
+
+/**
+ * 選舉一覽卡片上的職位標籤（2026-10-06 維護者）：列中選會的九種名稱，不用站內分組的名稱。
+ * 站內分組比中選會的粗：縣市長與直轄市長同一個區塊、縣市議員與直轄市議員同一個區塊——所以一個站內職位可以
+ * 對到兩個中選會名稱，連到同一個錨點；原住民區長與區代表用中選會的全名。只改顯示，資料結構與分組不動。
+ */
+const CEC_NAMES: Readonly<Record<PositionType, readonly string[]>> = {
+  '總統副總統': ['總統副總統'],
+  '立法委員': ['立法委員'],
+  '縣市長': ['直轄市長', '縣市長'],
+  '縣市議員': ['直轄市議員', '縣市議員'],
+  '鄉鎮市長': ['鄉鎮市長'],
+  '鄉鎮市民代表': ['鄉鎮市民代表'],
+  '直轄市山地原住民區長': ['直轄市山地原住民區長'],
+  '直轄市山地原住民區民代表': ['直轄市山地原住民區民代表'],
+  '村里長': ['村里長'],
+}
+
+export interface ElectionPositionLabel {
+  /** 畫面上的名稱（中選會用語） */
+  label: string
+  /** 選舉頁上對應區塊的錨點 id（sectionAnchor）；這場選舉的全台頁沒有那個區塊就沒有 */
+  anchor?: string
+}
+
+/**
+ * 一場選舉的職位標籤，照站內職位表的順序（總統 → 村里長）。
+ *
+ * anchor 只給「選舉頁（全台那一頁）真的畫得出來的區塊」：總統副總統、縣市長。議員、鄉鎮市長、代表、村里長
+ * 的區塊在縣市頁以下才有，連到全台頁的 #縣市議員 是一個不存在的 id，瀏覽器只會安靜地不捲動——
+ * 所以那些標籤只連到選舉頁本身，沒有錨點。
+ */
+export function electionPositionLabels(types: readonly string[]): ElectionPositionLabel[] {
+  const onNationalPage = new Set<string>(displayedPositions(planLevels({ region: 'All', subRegion: 'All', isSpecialMunicipality: false, wardKind: 'rural' })))
+  const have = new Set(types)
+  const out: ElectionPositionLabel[] = []
+  for (const spec of POSITIONS) {
+    if (!have.has(spec.type)) continue
+    const anchor = onNationalPage.has(spec.type) ? sectionAnchor(spec.type) : undefined
+    for (const label of CEC_NAMES[spec.type]) out.push({ label, anchor })
+  }
+  // 站內職位表沒有的職位（資料裡出現了新職位）照原名列在最後，不讓它從畫面消失
+  for (const t of types) if (!positionSpec(t)) out.push({ label: t })
+  return out
+}

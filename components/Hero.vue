@@ -33,6 +33,9 @@ defineProps<{
 
         <!-- Content Area -->
         <div :class="fullWidth ? '' : 'max-w-3xl'">
+          <!-- 標題上方的標誌（選用，例如政黨頁的黨徽） -->
+          <div v-if="$slots.logo" class="mb-4"><slot name="logo" /></div>
+
           <h1 class="text-4xl md:text-5xl lg:text-6xl font-black mb-6 tracking-tight leading-tight">
 
             <slot name="title" />

@@ -40,6 +40,15 @@ export function currentElection<T extends DatedElection>(elections: readonly T[]
 }
 
 /**
+ * 頁尾「選舉」欄的清單（維護者 2026-10-06）：最近要投票的那一場（若有）＋投票日由新到舊的過去屆別，合計最多 max 筆。
+ * 沒有未來的選舉就是最近的 max 場過去屆別。其餘屆別從「選舉一覽」進去。
+ */
+export function footerElections<T extends DatedElection>(elections: readonly T[], today: string, max = 3): T[] {
+  const { upcoming, past } = splitElections(elections, today)
+  return [...upcoming.slice(0, 1), ...past].slice(0, max)
+}
+
+/**
  * 投票率要連算法一起寫（主線 10-06）：elections.turnout 是**首長選舉合計**——地方選舉＝直轄市長＋縣市長兩場的
  * 投票數合計÷選舉人數合計（涵蓋全國每一位選舉人），總統選舉＝總統副總統那一場（cec-sync 寫入）。
  * 媒體常引的 2022「59.86%」只是直轄市長那一場，不寫明會被拿來對照、以為我們算錯。

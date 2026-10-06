@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { currentElection, daysUntil, splitElections, taipeiDay, turnoutText } from "./election-list.ts";
+import { currentElection, daysUntil, footerElections, splitElections, taipeiDay, turnoutText } from "./election-list.ts";
 
 // 線上的三筆（10-05）：id 剛好是年份；另造一場補選，id 不是年份、投票日夾在中間
 const E2022 = { id: 2022, electionDate: "2022-11-26" };
@@ -56,4 +56,16 @@ Deno.test("投票率：寫明首長選舉合計與是哪幾場；沒有投票率
   assertEquals(turnoutText({ turnout: 60.5, types: [] }), "投票率 60.50%（首長選舉合計：直轄市長＋縣市長）");
   assertEquals(turnoutText({ turnout: null, types: ["縣市長"] }), null);
   assertEquals(turnoutText({ types: ["縣市長"] }), null);
+});
+
+Deno.test("頁尾選舉清單：最近要投票的一場＋過去由新到舊，合計最多 3 筆", () => {
+  // 選前：2026 在最前，後面接 2024、補選（過去由新到舊），2022 被 3 筆上限擋掉
+  assertEquals(footerElections([...ALL, BY], "2026-10-05").map((e) => e.id), [2026, 4, 2024]);
+  assertEquals(footerElections(ALL, "2026-10-05").map((e) => e.id), [2026, 2024, 2022]);
+});
+
+Deno.test("頁尾選舉清單：投完票隔天，沒有未來的選舉就放最近的 3 場過去屆別；今後有好幾場只放最近那一場", () => {
+  assertEquals(footerElections([...ALL, BY], "2026-11-29").map((e) => e.id), [2026, 4, 2024]);
+  assertEquals(footerElections([...ALL, { id: 5, electionDate: "2028-01-15" }], "2026-11-29").map((e) => e.id), [5, 2026, 2024]);
+  assertEquals(footerElections([], "2026-10-05"), []);
 });

@@ -3,18 +3,21 @@ import { computed } from 'vue'
 import { Github, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { footerElections, taipeiDay } from '../lib/election-list'
 import { FEATURED_LOCAL_ELECTION_ID, TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 
-const { getActiveElection } = useSupabase()
-const activeElection = computed(() => getActiveElection())
+const { elections } = useSupabase()
+// 最近要投票的一場＋過去由新到舊，最多 3 筆（lib/election-list.ts；依投票日動態判斷，不寫死屆別）
+const footerList = computed(() => footerElections(elections.value, taipeiDay(Date.now())))
 </script>
 
 <template>
   <footer class="bg-navy-900 text-slate-400 py-12 border-t border-navy-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <!-- 手機版 2×2（2026-10-03 維護者）：「正見」簡介佔滿一列，政見／選舉／貢獻／關於兩欄排；電腦版不變 -->
-      <div class="grid grid-cols-2 md:grid-cols-6 gap-8">
-        <div class="col-span-2 md:col-span-2">
+      <!-- 手機版 2 欄（2026-10-03 維護者）：「正見」簡介佔滿一列，其餘各欄兩欄排。
+           電腦版 8 欄（2026-10-06）：簡介 3 欄＋政見／選舉／一覽／貢獻／關於各 1 欄，剛好排滿 -->
+      <div class="grid grid-cols-2 md:grid-cols-8 gap-8">
+        <div class="col-span-2 md:col-span-3">
           <h3 class="text-white text-lg font-bold mb-4">正見</h3>
           <p class="text-sm leading-relaxed mb-4 max-w-sm">
             匯聚多元視角，智能解析政見，讓正確被看見。<br/>
@@ -39,13 +42,16 @@ const activeElection = computed(() => getActiveElection())
         <div>
           <h4 class="text-white font-semibold mb-4">選舉</h4>
           <ul class="space-y-2 text-sm">
-            <li v-if="activeElection">
-              <RouterLink :to="`/election/${activeElection.id}`" class="hover:text-blue-400 transition-colors">
-                {{ activeElection.shortName }}
-              </RouterLink>
+            <!-- 最近要投票的那一場（若有）＋過去的屆別，最多 3 筆（維護者 2026-10-06）；其餘從「選舉一覽」進去 -->
+            <li v-for="e in footerList" :key="e.id">
+              <RouterLink :to="`/election/${e.id}`" class="hover:text-blue-400 transition-colors">{{ e.shortName }}</RouterLink>
             </li>
-            <li><RouterLink to="/election/2024" class="hover:text-blue-400 transition-colors">2024 總統大選</RouterLink></li>
-            <li><RouterLink to="/election/2022" class="hover:text-blue-400 transition-colors">2022 九合一選舉</RouterLink></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="text-white font-semibold mb-4">一覽</h4>
+          <ul class="space-y-2 text-sm">
             <li><RouterLink to="/elections" class="hover:text-blue-400 transition-colors">選舉一覽</RouterLink></li>
             <!-- 人物一覽、政黨一覽（#346）只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） -->
             <li><a href="/politicians" class="hover:text-blue-400 transition-colors">人物一覽</a></li>

@@ -7,6 +7,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   DIRECTORY_POSITIONS,
   displayedPositions,
+  electionPositionLabels,
   planLevels,
   POSITIONS,
   positionSpec,
@@ -241,4 +242,32 @@ Deno.test("選舉頁照設定畫：設定用到的圖示都有註冊，模板不
   // 區塊由設定產生：模板裡不該再出現寫死的「…參選人」標題或各職位專用的名單
   assert(page.includes('v-for="section in thisLevelSections"') && page.includes('v-for="section in nextLevelSections"'));
   assertEquals(page.match(/title="[^"]*參選人"/g), null, "模板裡又寫死了區塊標題");
+});
+
+Deno.test("選舉一覽的職位標籤：地方選舉列中選會的九種名稱，縣市長與直轄市長連到同一個錨點", () => {
+  const types = ["縣市長", "縣市議員", "鄉鎮市長", "鄉鎮市民代表", "直轄市山地原住民區長", "直轄市山地原住民區民代表", "村里長"];
+  const labels = electionPositionLabels(types);
+  assertEquals(labels.map((l) => l.label), [
+    "直轄市長", "縣市長", "直轄市議員", "縣市議員", "鄉鎮市長", "鄉鎮市民代表",
+    "直轄市山地原住民區長", "直轄市山地原住民區民代表", "村里長",
+  ]);
+  // 全台頁真的有的區塊只有縣市長（下一層）：直轄市長與縣市長是同一個區塊；其他的區塊在縣市頁以下，不給錨點
+  assertEquals(labels.filter((l) => l.anchor).map((l) => [l.label, l.anchor]), [["直轄市長", "縣市長"], ["縣市長", "縣市長"]]);
+});
+
+Deno.test("選舉一覽的職位標籤：總統大選照它自己的職位列，總統副總統連到全台頁的區塊", () => {
+  const labels = electionPositionLabels(["立法委員", "總統副總統"]);
+  assertEquals(labels, [{ label: "總統副總統", anchor: "總統副總統" }, { label: "立法委員", anchor: undefined }]);
+});
+
+Deno.test("選舉一覽的職位標籤：錨點一定是全台頁會畫出來的區塊（displayedPositions）的 sectionAnchor", () => {
+  const onPage = new Set<string>(displayedPositions(planLevels({ region: "All", subRegion: "All", isSpecialMunicipality: false, wardKind: "rural" })));
+  for (const spec of POSITIONS) {
+    const [first] = electionPositionLabels([spec.type]);
+    assertEquals(first.anchor !== undefined, onPage.has(spec.type), spec.type);
+  }
+});
+
+Deno.test("選舉一覽的職位標籤：站內職位表沒有的職位照原名列在最後", () => {
+  assertEquals(electionPositionLabels(["村里長", "新職位"]).map((l) => l.label), ["村里長", "新職位"]);
 });

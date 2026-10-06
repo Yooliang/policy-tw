@@ -28,7 +28,7 @@ const categoryDataFromDB = ref<{ name: string; count: number }[]>([])
 // 載入首頁統計資料
 async function loadHomeStats() {
   // 2026 選舉人數
-  const election = elections.value.find(e => e.name.includes('2026'))
+  const election = elections.value.find(e => e.electionDate?.startsWith('2026'))
   if (election && politicians2026CountDirect.value === null) {
     politicians2026CountDirect.value = await getElectionPoliticianCount(election.id)
   }
@@ -79,7 +79,7 @@ const statusData = computed(() => [
 const totalPoliticians = computed(() => totalPoliticiansCount.value ?? stats.value.totalPoliticians ?? politicians.value.length)
 
 // 2026 選舉專區統計 - 使用直接從 DB 查詢的數量
-const election2026 = computed(() => elections.value.find(e => e.name.includes('2026')))
+const election2026 = computed(() => elections.value.find(e => e.electionDate?.startsWith('2026')))
 const politicians2026Count = computed(() => {
   // 優先使用直接查詢的結果
   if (politicians2026CountDirect.value !== null) {
