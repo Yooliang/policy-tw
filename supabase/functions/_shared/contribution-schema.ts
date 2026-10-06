@@ -7,6 +7,7 @@ import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
 import { partyInfoProblems } from "./party-info.ts";
+import { isPlaceholderName, PLACEHOLDER_NAME_MSG } from "./placeholder-name.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 import {
@@ -31,7 +32,7 @@ export const isTaskIdShape = (v: unknown): boolean =>
 export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -87,8 +88,12 @@ export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], reado
   policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id", "origin"],
 };
 
-/** 目前只開放移除政見。人物與參選紀錄牽動太多關聯資料，要先有可逆的合併設計。 */
-export const REMOVAL_TABLES = ["policies"] as const;
+/**
+ * 可以移除的：政見（軟移除）、人物（2026-10-06 起，只收測試資料、查無此人這種——沒有政見、任期、學經歷、提問、脈絡、
+ * 沒有別人併進來的人；整個人連參選紀錄一起刪、每一列整列留履歷可還原，見 apply-contribution.ts 的 politicianRemovalBlockers）。
+ * 參選紀錄本身不單獨移除：參選狀態錯了用 correction。
+ */
+export const REMOVAL_TABLES = ["policies", "politicians"] as const;
 
 export const MAX_BATCH = 20;
 export const MAX_SOURCE_URLS = 10;
@@ -256,6 +261,8 @@ function validateHints(p: Obj, push: (path: string, message: string) => void): v
 }
 
 function validatePayload(type: ContributionType, p: Obj, push: (path: string, message: string, code?: ValidationCode) => void): void {
+  // 測試資料的姓名（2026-10-06）：「測試候選人ABC」這種一看就不是人的，交件當下就擋（placeholder-name.ts）
+  if ((type === "politician" || type === "candidacy") && isPlaceholderName(p.name)) push("payload.name", PLACEHOLDER_NAME_MSG);
   switch (type) {
     case "politician": {
       if (!isStr(p.name, 2, 30)) push("payload.name", "姓名必填（2～30 字）");

@@ -58,4 +58,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   handover_missing: "lineage_handover",
   lineage_roles_missing: "lineage_participants",
   lineage_link_candidate: "lineage_link",
+  // 測試資料的人物（2026-10-06）：確認查無此人就用 removal 移除整個人；真有其人用 no_change
+  placeholder_politician: "removal",
+  // 政黨資訊缺口（#346 第二階段）：改名的界線日、名冊外政黨的對應、解散廢止的停用日，交 party_info
+  party_info_missing: "party_info",
 };

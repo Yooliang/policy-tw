@@ -68,6 +68,8 @@ const BORDER: Record<string, string> = {
   handover_missing: '#115e59',
   lineage_roles_missing: '#134e4a',
   lineage_link_candidate: '#14b8a6',
+  placeholder_politician: '#64748b', // 疑似測試資料：灰
+  party_info_missing: '#7c3aed',     // 補政黨資訊：紫
   deadline_due: '#15803d',              // 期限到了查進度：深綠（同進度那一族）
 }
 // 驗證項目（contribution_type）另一套，彼此也拉開

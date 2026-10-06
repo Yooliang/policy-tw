@@ -158,9 +158,12 @@ Deno.test("removal：目前只開放移除政見，理由至少 20 字；門檻�
   const shortReason = validateContributionRequest({ ...base, payload: { ...base.payload, reason: "不對" } });
   assert(shortReason.errors.some((e) => e.path === "payload.reason"));
 
-  // 人物與參選紀錄還不開放移除：牽動太多關聯資料，要先有可逆的合併設計
+  // 人物 2026-10-06 起可以移除（只收測試資料、查無此人；身上有東西的落庫與前置檢查會擋，見 round2-followups.test.ts）；
+  // 參選紀錄還是不單獨移除——狀態錯了用 correction
   const politicians = validateContributionRequest({ ...base, payload: { ...base.payload, target_table: "politicians" } });
-  assert(politicians.errors.some((e) => e.path === "payload.target_table"));
+  assertEquals(politicians.errors.length, 0);
+  const participation = validateContributionRequest({ ...base, payload: { ...base.payload, target_table: "politician_elections" } });
+  assert(participation.errors.some((e) => e.path === "payload.target_table"));
 
   // 門檻固定 3 票，官方與社群來源一樣
   assertEquals(requiredAgree("removal", base.payload, ["https://db.cec.gov.tw/x"]), 3);

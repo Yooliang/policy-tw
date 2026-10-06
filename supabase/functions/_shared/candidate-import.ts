@@ -6,6 +6,7 @@
 
 import { normElectionType, normParty, normText } from "./identity-normalize.ts";
 import { createSupabaseIdentityStore, resolvePolitician, type Resolution } from "./politician-identity.ts";
+import { isPlaceholderName } from "./placeholder-name.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -145,6 +146,8 @@ export async function ensurePolitician(
     return { resolution, politician_id: null, created: false };
   }
 
+  // 測試資料的姓名不建人物（2026-10-06）：管理端的匯入端點與交件落庫都走這裡；資料庫另有觸發器再擋一層
+  if (isPlaceholderName(name)) throw new Error(`姓名「${name}」看起來是測試資料，不建立人物`);
   const { data: inserted, error } = await supabase
     .from("politicians")
     .insert({
