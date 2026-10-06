@@ -107,7 +107,7 @@ Deno.test("提高後的要求：7 個網址、至少 4 個不同網域", () => {
   assertEquals(NOT_FOUND_ELEVATED_MIN_DOMAINS, 4);
   const task = `auto:policy_missing:${PID}`;
   const urls = (n: number, host = (i: number) => `example${i}.tw`) =>
-    Array.from({ length: n }, (_, i) => `https://${host(i)}/search?q=%E7%8E%8B%E5%B0%8F%E6%98%8E&i=${i}`);
+    Array.from({ length: n }, (_, i) => `https://${host(i)}/news/%E7%8E%8B%E5%B0%8F%E6%98%8E?i=${i}`);
 
   // 一般門檻：5 個同網域也過（不動誠實代理現在的做法）
   assertEquals(notFoundSearchShortfall(task, { outcome: "not_found", checked_urls: urls(5, () => "cec.gov.tw") }, false), null);
@@ -144,7 +144,7 @@ function body(agentTool: string | undefined, urls: string[]) {
 }
 
 const fiveDomains = [
-  "https://www.google.com/search?q=%E7%8E%8B%E5%B0%8F%E6%98%8E+%E6%94%BF%E8%A6%8B",
+  "https://www.instagram.com/wang/", // 2026-10-06 起搜尋結果頁不計入，這裡換成實際頁面
   "https://www.facebook.com/wang/posts",
   "https://whoareyou.readr.tw/politics/123",
   "https://db.cec.gov.tw/ElecTable/Election",
