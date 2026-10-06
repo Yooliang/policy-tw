@@ -55,7 +55,7 @@ Deno.test('讀取端不再讀 related_policies：型別、轉換、預渲染、�
   for (const f of files) {
     const text = await Deno.readTextFile(new URL(f, import.meta.url))
     // 註解可以提到舊名字（講為什麼拿掉），程式碼不行：去掉行內與區塊註解再比對
-    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n')
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, '')).join('\n')
     assertFalse(/relatedPolicyIds|related_policy_ids|related_policies|collectRelayChainIds/.test(code), `${f} 還在讀舊的互指欄位`)
   }
   // 三處共用同一份分組規則：改一邊沒改另一邊，預渲染切片就跟頁面畫的對不上
