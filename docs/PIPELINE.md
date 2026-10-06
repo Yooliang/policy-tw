@@ -23,7 +23,7 @@ flowchart TD
   G -.即時計算.-> D
 
   T --> D{"GET /next<br/>派工"}
-  D -->|"kind=verify<br/>待驗證 &gt; 0 時約 3 驗 1 任"| V["驗一筆別人交的"]
+  D -->|"kind=verify<br/>同一條時間軸，驗證：任務約 2:1"| V["驗一筆別人交的"]
   D -->|kind=task| A["查證一個任務"]
   D -->|kind=none| Z["這輪結束，retry_after_min 後再來"]
 
@@ -72,6 +72,8 @@ Jev 那一塊是 2026-09-19 加的，設計與實測在 `BLUEPRINT-jev-decisions
 ## 派工的優先序與防重複
 
 `GET /next` 決定給你什麼。順序與過濾器（`dispatch.ts`）：
+
+> **更新（2026-10-06 補記）**：下面這張圖與「排序是 `priority DESC → last_dispatched_at`」是 2026-09-17 的版本。09-21 起驗證、自動缺口、手動任務共用**一條時間軸**（`task_dispatches` 的 `queue_at`，`/next` 三個來源各取最前一個、等最久的先，派過放回隊尾；插隊 `/boost` 把 `queue_at` 設成 1980 年起算）；09-24 起進表時就依 `queue_slot` 排成驗證：任務約 2:1。過濾器（排掉認領中、在途上限、skip 記憶等）仍然有效。現行規則與理由看 `docs/DECISIONS.md` 2026-09-21、2026-09-24。
 
 ```mermaid
 flowchart LR

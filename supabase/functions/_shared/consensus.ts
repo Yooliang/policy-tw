@@ -37,7 +37,7 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   high: { official: 3, media: 3, social: 3, other: 3 },
   light: { official: 2, media: 2, social: 2, other: 2 },
   past_result: { official: 3, media: 3, social: 3, other: 3 },
-  // 整批補已投票選舉的結果（小良哥 2026-10-06：「改批次，票數 2 票，讓 jev 扣下來」）：目標 2；
+  // 整批補已投票選舉的結果（維護者 2026-10-06：「改批次，票數 2 票，讓 jev 扣下來」）：目標 2；
   // 系統逐位核對中選會名單、整批對得上就投一張系統票（照 3+1 折進目標：2−1＝1），再一張代理同意就上線
   batch_result: { official: 2, media: 2, social: 2, other: 2 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
@@ -418,7 +418,7 @@ export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "
 
 /**
  * 這一筆要不要兩台不同機器投過才上線（SQL 鏡像：contribution_needs_two_ips，migration 20261006034900）。
- * 除了上面三種型別，「中止」交接也要（#349，小良哥 2026-10-05：中止要較高票數，比照 merge_politician 的兩台機器規則）——
+ * 除了上面三種型別，「中止」交接也要（#349，維護者 2026-10-05：中止要較高票數，比照 merge_politician 的兩台機器規則）——
  * 錯的「中止」等於公開記錄「某任首長把這件事停了」，跟誤併人物同一級的傷害。其他交接型態走一般規則。
  * 分數、目標分數、退件門檻都不變：只決定「分數到了之後，還要不要第二台機器」。
  */

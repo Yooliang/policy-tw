@@ -78,7 +78,7 @@ export const routes: RouteRecordRaw[] = [
     component: ElectionPage,
   },
   {
-    // 以前轉到 /election/1（不存在的選舉，顯示找不到）；網址保持（小良哥 10-05）：轉到 2026 那一場
+    // 以前轉到 /election/1（不存在的選舉，顯示找不到）；網址保持（維護者 10-05）：轉到 2026 那一場
     path: '/election-2026',
     redirect: '/election/2026',
   },

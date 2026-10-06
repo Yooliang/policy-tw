@@ -119,7 +119,7 @@ Deno.test("isFormalDistrict：立委選區與全國三種；其他選舉別沒�
   assertEquals(isFormalDistrict("大雅區", "村里長"), false);
 });
 
-// ── 地區／分組的選擇只在右側面板（2026-10-06 小良哥：列表上方不放 chips）──
+// ── 地區／分組的選擇只在右側面板（2026-10-06 維護者：列表上方不放 chips）──
 
 Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選舉區在右側面板（議員、區代表），村里在右側面板的「村里」", () => {
   const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));

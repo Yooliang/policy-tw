@@ -41,11 +41,11 @@
 
 資料不完整，而且系統自己算不出來缺了什麼。
 
-**怎麼判斷**：`supabase/migrations/20260912000002_contributions.sql` 裡的 `contribution_auto_tasks()` 會即時算出「我們現在缺什麼」（沒有政見的候選人、沒有來源的政見、90 天沒進度的政見…）。如果某種缺漏它算不出來，就需要一個人工入口，或是一條新的自動缺口規則。
+**怎麼判斷**：SQL 函式 `contribution_auto_tasks()` 會即時算出「我們現在缺什麼」（沒有政見的候選人、沒有來源的政見、90 天沒進度的政見…）。如果某種缺漏它算不出來，就需要一個人工入口，或是一條新的自動缺口規則。
 
 **兩條路，先試前者**
 
-1. **能用 SQL 表達的，加進 `contribution_auto_tasks()`** ——這是最好的結果，因為缺口會自動出現也自動消失，不需要任何人按按鈕。
+1. **能用 SQL 表達的，加進 `contribution_auto_tasks()`** ——這是最好的結果，因為缺口會自動出現也自動消失，不需要任何人按按鈕。首版在 `20260912000002_contributions.sql`，之後每加一個派工臂都是用新的 migration 整支重寫它，所以**以最新那一支為底改**（`grep -l 'FUNCTION contribution_auto_tasks' supabase/migrations/*` 的最後一個）。
 2. **表達不出來的，加一個訪客入口**，走 `supabase/functions/request-task/index.ts` 那一套（`source='web_request'`）。前端呼叫方式看 `lib/request-task.ts`。
 
 **驗收**：`GET /tasks` 看得到新任務；資料補齊之後那筆任務會自己消失（自動缺口）或被關掉（人工入口）。
@@ -66,7 +66,7 @@
 
 ## 正在進行的大方向：把管理員頁面拆掉
 
-`pages/Admin*.vue` 那幾頁是這個專案目前最不乾淨的地方，它們是還沒被拆解的人工決策。方向是把裡面每一個動作都變成任務。
+`pages/Admin*.vue` 那幾頁（目前剩儀表板、重複人物、AI、匯入四頁；掃描器頁已隨 `add-politician` 在 2026-09-23 下架）是這個專案目前最不乾淨的地方，它們是還沒被拆解的人工決策。方向是把裡面每一個動作都變成任務。
 
 設計與拆解順序寫在 **[docs/BLUEPRINT-admin-to-tasks.md](docs/BLUEPRINT-admin-to-tasks.md)**。想接手其中一項，直接開 PR。
 
@@ -104,7 +104,8 @@ deno run --allow-read scripts/scan-secrets.ts              # 金鑰
 | `supabase/functions/<name>/index.ts` | HTTP 端點，薄薄一層，邏輯在 `_shared/` |
 | `supabase/migrations/` | 資料結構與 RLS。**投票門檻在 SQL 與 TypeScript 各有一份，必須一致** |
 | `pages/` `components/` | Vue 3 + vite-ssg，預渲染成靜態頁 |
-| `.github/workflows/ci.yml` | 型別、測試、協議守門、金鑰掃描 |
+| `.github/workflows/ci.yml` | 型別、測試、協議守門、金鑰掃描，以及 main 的自動部署 |
+| `docs/` | 設計與裁決文件；**`docs/DECISIONS.md`（裁決日誌）是流程規則的來源**，文件地圖見 `CLAUDE.md` 的「文件地圖」 |
 
 ## 送 PR 之前
 

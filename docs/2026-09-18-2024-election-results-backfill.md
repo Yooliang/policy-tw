@@ -4,7 +4,7 @@
 
 資料來源：中選會候選人查詢 API（`https://db.cec.gov.tw/query/api/v1/elections/candidates/query`）
 
-對應 migration：`supabase/migrations/20260918000005_backfill_2024_results.sql`（**尚未執行**，需人工複核後再 `npx supabase db push`）
+對應 migration：`supabase/migrations/20260918000005_backfill_2024_results.sql`（撰寫當天註明「尚未執行、需人工複核」；這支已在 `main`，2026-09-21 起 main 的 migration 由 CI 自動 `db push`，所以**現在不是待辦**，本表是它的對帳依據）
 
 ## 統計
 

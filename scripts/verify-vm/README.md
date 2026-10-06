@@ -1,5 +1,7 @@
 # 驗證 VM 腳本（policy-verifier）
 
+> **這個目錄已搬到私人 repo `Yooliang/policy-ops`**（`scripts/verify-vm/`），之後以那裡為準；policy-tw 這份是過渡副本，工作機改用新位置後會刪除。新位置的 `vreport.sh` 改用環境變數 `POLICY_TW_DIR`（預設 `../policy-tw`）找 policy-tw 的 `.env`。
+
 一台 GCP VM（`policy-verifier`，us-central1-a）專門跑驗證代理：開機 → 起幾隻代理 → 跑 `run-hours` 小時 → 自己關機。
 設定都放在 VM metadata，改設定不用 SSH。交接背景看 `docs/handoff/2026-10-05-P-工作機-to-P-主線4.md` 第四節。
 
@@ -142,11 +144,11 @@ Aegis 目前沒有第三個帳號的額度，所以 `plan_round.py` 對 `acct3` 
 - metadata `secret-project`：放金鑰的 GCP 專案。沒設的話維持舊行為，只讀 metadata。
 - Secret 名稱＝`verify-vm-<metadata 鍵>`，共 7 個：`verify-vm-claude-token`、`verify-vm-cwen-token`、`verify-vm-claude3-token`、`verify-vm-openrouter-key`、`verify-vm-ditrust-serial`、`verify-vm-ditrust-serial-2`、`verify-vm-ditrust-serial-3`。
 
-10-06 進度（小良哥點頭 A＝放 policy-tw、B＝專用服務帳號）：
+10-06 進度（維護者點頭 A＝放 policy-tw、B＝專用服務帳號）：
 - ✅ policy-tw 已綁「Yooliang Technology-侑良計費帳戶」、已啟用 Secret Manager。
-- ✅ 已建 5 個 secret 並從 metadata 搬值（以雜湊比對一致）：claude-token、cwen-token、openrouter-key、ditrust-serial、ditrust-serial-2。claude3-token、ditrust-serial-3 等小良哥放進 metadata 後再搬（或直接 `gcloud secrets versions add`）。
+- ✅ 已建 5 個 secret 並從 metadata 搬值（以雜湊比對一致）：claude-token、cwen-token、openrouter-key、ditrust-serial、ditrust-serial-2。claude3-token、ditrust-serial-3 等維護者放進 metadata 後再搬（或直接 `gcloud secrets versions add`）。
 - ✅ 專用服務帳號 `verify-vm@greenshepherdcomtw.iam.gserviceaccount.com`：專案層級沒有任何角色，只在上面 5 個 secret 各有 `secretAccessor`；VM 已改用它，scope＝cloud-platform；metadata `secret-project=policy-tw` 已設。
-- ⏳ 待辦：本 PR 合併後上傳新的 startup-script → 小良哥准許開機驗證（序列埠每個鍵都要是 `from secret-manager`）→ 刪 metadata 裡的明文。
+- ⏳ 待辦：本 PR 合併後上傳新的 startup-script → 維護者准許開機驗證（序列埠每個鍵都要是 `from secret-manager`）→ 刪 metadata 裡的明文。
 
 原本的三件事（留作紀錄）：
 1. **決定放哪個專案**：`policy-tw` 目前沒綁帳單，要放這裡得先綁；`greenshepherdcomtw` 有帳單，Secret Manager 也已啟用。

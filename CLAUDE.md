@@ -59,17 +59,17 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 
 ## 主線工作守則（2026-10，接手先讀）
 
-小良哥的常設裁決，細節與理由在 `docs/DECISIONS.md`；進度總表 issue #332（選前）、#351（兩站比較 35 項）。
+維護者的常設裁決，細節與理由在 `docs/DECISIONS.md`；進度總表 issue #332（選前）、#351（兩站比較 35 項）。
 
-- **資料走流程**：正式資料只能經代理貢獻＋驗證上線。看到資料缺口，不寫 migration 直接補、也不問小良哥「要不要補」，去補「為什麼流程沒帶進來」（派工臂、同步排程、交件守門）。只有流程規則本身（門檻、協議、計分）要他裁；改計分合併後要通知日本站（policy-jp）跟著改。
+- **資料走流程**：正式資料只能經代理貢獻＋驗證上線。看到資料缺口，不寫 migration 直接補、也不問維護者「要不要補」，去補「為什麼流程沒帶進來」（派工臂、同步排程、交件守門）。只有流程規則本身（門檻、協議、計分）要他裁；改計分合併後要通知日本站（policy-jp）跟著改。
 - **讓資料自己說話**：讀者看的頁面不放解釋規則、排序方式、方法論的說明文字；保留標籤（未說明／未調查／推定／結果待補）與出處連結。規則寫進 DECISIONS，不寫在畫面上。
 - **網址保持、內容頁可收錄**：改結構時舊網址照常可開或 301，不能 404；內容頁 canonical 指正見.tw。政見 PK 不是正文、不收錄（只在瀏覽器端畫）。
-- **子代理**：一律明寫 `model: sonnet`（純機械小改可 haiku），同時最多 2 個；opus 只用在高風險且要先問小良哥。小改動交給已在跑的子代理追加，不另開。小型 UI 改動不要截圖，CI 綠就合併上線，請小良哥自己看線上。
+- **子代理**：一律明寫 `model: sonnet`（純機械小改可 haiku），同時最多 2 個；opus 只用在高風險且要先問維護者。小改動交給已在跑的子代理追加，不另開。小型 UI 改動不要截圖，CI 綠就合併上線，請維護者自己看線上。
 - **協議版號與 migration 時間戳**：並行的 PR 很容易撞號。合併前以 main 為準：協議版號比 main 大一號、migration 時間戳大於遠端最新一支（`supabase_migrations.schema_migrations` 的 max；`db push` 不收比遠端還早的）。疊在別的 PR 上的分支：先 `gh pr merge <子> --merge` 進母分支，再 squash 母 PR；或子 PR 的 base 就是 main 時直接 `--merge`。
 - **量效能先實測**：`pg_stat_statements` 是從很久以前累計的，平均值會混進已經改善掉的舊查詢。下結論前用唯讀 `EXPLAIN ANALYZE` 實際量一次（10-06 曾因此誤判派工查詢 2.6 秒，實測 2 毫秒）。
 - **唯讀查正式庫**：`npx supabase db query --linked -f <檔>`，檔案第一行 `SET default_transaction_read_only = on;`。migration 用到的既有欄位先這樣確認存在（10-05 出過引用不存在欄位、正式庫失敗擋住整條部署）。
 - **CI 卡住先看 GitHub 狀態**：工作沒有紀錄、排隊 15 分鐘被取消，多半是 GitHub Actions 事故（https://www.githubstatus.com），等恢復後 `gh run rerun`，不要改程式。
-- **相關站台與機器**：日本站 policy-jp.web.app（repo Yooliang/keifu，P-日本負責）、站務主控台 policy-console.web.app（私人 repo Yooliang/site-console，GA4＋AdSense，GitHub Actions 每天抓）、驗證 VM `policy-verifier`（專案 greenshepherdcomtw，金鑰在 policy-tw 的 Secret Manager `verify-vm-*`，操作見 `scripts/verify-vm/README.md`，目前由工作機 P-工作機開輪）。三個 Firebase 網站都在 Firebase 專案 policy-tw，部署一律 `--only hosting:<site>`。
+- **相關站台與機器**：日本站「政策の系譜」policy-jp.web.app（repo `Yooliang/policy-jp`，P-日本負責；舊名 keifu）、站務主控台 policy-console.web.app（私人 repo `Yooliang/policy-console`，GA4＋AdSense，GitHub Actions 每天抓；舊名 site-console）、驗證 VM `policy-verifier`（專案 greenshepherdcomtw，金鑰在 policy-tw 的 Secret Manager `verify-vm-*`，目前由工作機 P-工作機開輪）。**驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`**（`scripts/verify-vm/README.md` 是操作手冊）。三個 Firebase 網站都在 Firebase 專案 policy-tw，部署一律 `--only hosting:<site>`。
 
 ## Architecture
 
@@ -83,7 +83,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 - **Views**：`politician_careers_full`（學經歷一項一列＋出處，`needs_source`＝待補出處，#346）、`politician_careers_drift`（陣列與學經歷表對不上的項目，正常是空的）、`party_alias_gaps`（政黨寫法對不到的，正常是空的）、`source_refs_drift`（出處新舊兩邊對不上的地方，正常是空的；第二階段 B 刪舊欄位前要先確認是空的，#347）、`policies_with_logs`（2026-10-06 起最後一欄 `sources`〔出處清單，帶等級與存檔網址，#347〕，前一欄 `lineage`；policies 加欄位時 p.* 會插在中間，要照 20260921000028 DROP＋CREATE）、`politicians_with_elections`、`politicians_with_policies`、`politician_offices_derived`（現任公職＝職稱的單一真相，2026-10-04；#345 第一階段從 `politician_offices` 改名保留，網站職稱仍讀它）、`politician_offices_gap`（舊視圖 vs 任期表的差異）、`lineages_full`（政策脈絡一條一列，#349）、`discussions_full`、`elected_politicians`、`ai_usage_stats`、`politician_bulletins`（參選紀錄 → 中選會選舉公報網址＋號次，表 `election_bulletins` 由 `scripts/build-election-bulletins.ts` 依公報站全站清單產生，推不出的不列；2026-10-06）
 
 ### Database
-表與視圖以 `supabase/migrations/` 為準（目前約 36 張表、6 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
+表與視圖以 `supabase/migrations/` 為準（2026-10 約 70 張表、約 20 個視圖、4 個 ENUM）。`docs/DATABASE-SCHEMA.md` 只涵蓋 2026-03 以前的核心表。
 
 主要群組：
 - 核心：`elections`、`election_types`、`politicians`（姓名含測試、範例、test 這類字的建不進去，資料庫觸發器 `politician_name_is_placeholder`；測試資料走 `removal`〔`target_table`＝politicians〕移除，1.57.0）、`politician_offices`（任期表，#345：一個任期一列，現任＝已就任而且 `end_date` 為空；參選紀錄標當選由觸發器建、每日排程關掉屆滿與轉任的；轉任的卸任日是推定的，`end_basis=inferred`、人物頁「卸任的公職」標「推定」，可用 correction 附出處改；第一階段網站職稱還沒切過來）、`politician_elections`（參選狀態看 `candidacy_status` 一欄六值：considering／declared／filed／withdrawn／elected／not_elected，不收傳聞；**confirmed 只表示表態參選**，名單公告後在名單上的是 qualified；退選的 `withdrawn_after_filing` 分「登記後退選／表態不參選／不參選」，看不出來的派 `auto:not_running_recheck:filing:` 任務、代理照中選會登記名冊用 correction 補（1.55.0）；#345 第一階段舊的 `candidate_status`＋`election_result` 仍保留、觸發器兩邊同步，讀取端第二階段才切；`votes_received`／`vote_percentage` 待刪、不再寫入）、`policies`、`tracking_logs`、`related_policies`、`policy_sources`、`policy_stances`、`sources`／`source_refs`（出處獨立成表，#347；**第二階段 A（2026-10-06）讀寫端已改用它**：政見頁、查核履歷、貢獻看板、任務現況讀它，落庫直接寫它〔`source_write()`〕，等級 official／self／media／other 由網域判斷、只有 `self`〔本人來源，要 `self_evidence`，社群與官方網域不行〕由交件的 `source_details` 決定，引用範圍含政見、進度、參選紀錄、學經歷、政黨等；舊的 `policies.source_url`、`tracking_logs.source_url`、`policy_sources` 與同步觸發器仍保留當退路，第二階段 B 才刪，清單與前置條件見 `docs/DECISIONS.md` 2026-10-06 與視圖 `source_refs_drift`〔新舊對不上的地方，正常是空的〕）、`politician_careers`（學經歷一項一列，出處走 `source_refs`；#346 第一階段由 `politicians.education[]`／`experience[]` 經觸發器同步、寫入端照舊寫陣列，交件落庫時把 `source_urls` 掛到文字相同的項目上，臉書、IG、Threads 不算；沒有出處的派 `profile_detail_gap`〔`target.kind`＝`career_sources`〕）、`parties`（內政部政黨名冊一個政黨一列，id＝政黨編號、名冊外的 10001 起；改名視為新的一筆，`predecessor_id`；名稱起訖、解散日、名冊外的前身由代理交 `party_info` 補，1.56.0；缺口派 `party_info_missing`，1.57.0）＋`party_aliases`（資料裡的寫法 → 政黨；無黨籍不是政黨、`party_id` 空的），`politicians.party_id` 照文字對照、`politician_elections.party_id`＋`party_basis` 是那一次參選時的政黨（#346 第一階段，政黨文字欄位保留；缺的照中選會名冊 `cec_candidates.party` 派 `candidacy_source_missing`〔`target.kind`＝`party`；還沒投票的照登記彙總表，`party_roster`，1.57.0〕，1.56.0）、`policy_elements`（政見三要素：數值目標・達成期限・財源，一個要素一列；**沒有列＝未調查、`stated=false`＝未說明**，兩者不可混用；`policies_with_logs.elements` 帶出來，#364）、政策脈絡 `lineages`（一件事在某一層級、某一地方的來龍去脈；政見以 `policies.lineage_id` 掛上來）＋`handovers`（前後任交接；`from_office_id`／`to_office_id` 由觸發器對到任期表）＋`lineage_participants`（同級多人的角色，官方紀錄或本人宣稱）＋`lineage_links`（上下級關聯），讀 `lineages_full`；`policies.origin` 是政見從哪裡來（#349）
@@ -103,7 +103,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 | `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
 
 - 既有三筆的 `elections.id` 就是選舉年份，大量讀取端（SQL、Edge Function、前端、Worker、協議）把它當年份用
-- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）；這些網址要一直能用（小良哥 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）
+- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）；這些網址要一直能用（維護者 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）
 
 **過渡中（#344 第一階段，2026-10-05）**：年份存不下補選、罷免、重行選舉，所以加了新識別，舊的不動：
 - `elections.election_key`＝一場選舉的識別，格式 `投票日_種類[_地區代碼]`（`2022-11-26_local`、`2024-01-13_national`；種類 local／national／by 補選／recall 罷免／rerun 重行選舉），**建立後不改**（觸發器擋），新列沒給就自動產生
@@ -117,9 +117,9 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 ### Frontend Structure（`router/index.ts` 為準）
 
-預渲染的內容頁：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/elections`（選舉一覽：今後／過去，依投票日切，`lib/election-list.ts`；#344）、`/election/:electionId`、`/election/:electionId/:region`（縣市頁）、`/election/:electionId/:region/:subRegion`（鄉鎮頁，2026-10-05；舊的 `?sub=` 由正見.tw 的 Worker 301）、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`、`/politicians`（人物一覽，依姓氏筆畫分組，各組一頁 `/politicians/:筆畫數`）、`/parties`（政黨一覽）、`/party/:id`（各黨頁，id＝內政部政黨編號；#346：名單在建置端算好放進快照，從站內別頁換頁進來沒有快照就整頁載入預渲染那一份，`lib/full-load.ts`）；`/lineage/:lineageId`（政策脈絡頁，#349）跟政見頁、人物頁一樣由正見.tw 的 Worker 邊緣渲染、只進網站地圖，`/analysis` 是脈絡一覽
+內容頁（建置時預渲染；其中 `/policy/:policyId`、`/politician/:politicianId` 與下面的 `/lineage/:lineageId` 預設改由正見.tw 的 Worker 邊緣渲染、只進網站地圖）：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/elections`（選舉一覽：今後／過去，依投票日切，`lib/election-list.ts`；#344）、`/election/:electionId`、`/election/:electionId/:region`（縣市頁）、`/election/:electionId/:region/:subRegion`（鄉鎮頁，2026-10-05；舊的 `?sub=` 由正見.tw 的 Worker 301）、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`、`/politicians`（人物一覽，依姓氏筆畫分組，各組一頁 `/politicians/:筆畫數`）、`/parties`（政黨一覽）、`/party/:id`（各黨頁，id＝內政部政黨編號；#346：名單在建置端算好放進快照，從站內別頁換頁進來沒有快照就整頁載入預渲染那一份，`lib/full-load.ts`）；`/lineage/:lineageId`（政策脈絡頁，#349）跟政見頁、人物頁一樣由正見.tw 的 Worker 邊緣渲染、只進網站地圖，`/analysis` 是脈絡一覽
 
-客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
+客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/ai`（2026-10-03 起 AI 讀取與各模型表現，從統計頁搬來）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
 
 共用元件在 `components/`；選舉頁子元件在 `pages/election/`。
 
@@ -150,9 +150,10 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 
 ## Edge Functions（`supabase/functions/`，共 39 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
 
+- 代理身分：`ditrust-agent`（登入者向 DiTrust 開戶、看序號、改代號；正見不存序號，見 `docs/BLUEPRINT-agent-identity.md`）
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）、`sources`（查證來源清單，無金鑰，見 `/sources` 頁與 2026-09-28 裁決）
 - 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
-- 排程抓取（不驗 JWT，靠冷卻時間防濫用）：`cec-sync`（2026-10-06 起每個單位順手把名單上的選舉區記進 `election_districts`、算投票率寫 `elections.turnout`，名冊的推薦政黨原字存進 `cec_candidates.party`；議員與代表的應選名額不同步，走 `district_seats_missing` 任務）、`moi-sync`、`news-fetch`（新聞來源 `news_sources` 每小時逐則收進 `news_items`，收完觸發 `system-one?action=news_screen` 初篩派工，2026-09-29）；`source-archive`（選舉公報／選委會公告類出處每 10 分鐘送 Wayback Machine 存檔，寫 `sources.archive_url`，#347）
+- 排程抓取（不驗 JWT，靠冷卻時間防濫用）：`cec-verify`（每 10 分鐘，拿中選會資料機器查證 pending 的參選／人物貢獻，對得上直接落庫，見 `docs/CONTRIBUTIONS-ADMIN.md`）、`cec-sync`（2026-10-06 起每個單位順手把名單上的選舉區記進 `election_districts`、算投票率寫 `elections.turnout`，名冊的推薦政黨原字存進 `cec_candidates.party`；議員與代表的應選名額不同步，走 `district_seats_missing` 任務）、`moi-sync`、`news-fetch`（新聞來源 `news_sources` 每小時逐則收進 `news_items`，收完觸發 `system-one?action=news_screen` 初篩派工，2026-09-29）；`source-archive`（選舉公報／選委會公告類出處每 10 分鐘送 Wayback Machine 存檔，寫 `sources.archive_url`，#347）
 - AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy／news_screen／results_batch／reassign_check）；`reassign_check` 是參選紀錄改掛（`reassign_candidacy`）的系統票：中選會名冊那一列的出生年核新舊兩人，照現有 ±1 規則（2026-10-06）；`results_batch` 是整批補選舉結果（`election_results`）的系統票：逐位核對中選會名單（SQL `election_results_system_check`），全部對得上才投、目標 2−1＝1（2026-10-06）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
@@ -161,9 +162,51 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 ## Claude Skills（`.claude/skills/`）
 
 - **`/find-avatar [name]`** — 從 Wikipedia 找政治人物頭像，可 `--all` 補缺圖；找到後交 `correction` 貢獻（同儕驗證通過才上線）
+- 2026-10 起不再有直接寫正式庫的指令：舊的 `/add-policy`、`/research-politician` 教人用 `execute_sql` 直接 INSERT 政見，牴觸「資料走流程」，已移除
 
-## Docs（`docs/`）
+## 文件地圖
 
-- 現行：`DECISIONS.md`（裁決日誌，流程規則的來源）、`PIPELINE.md`、`SSG-PRERENDER.md`、`CONTRIBUTIONS-ADMIN.md`、`BLUEPRINT-admin-to-tasks.md`、`BLUEPRINT-jev-decisions.md`、`BLUEPRINT-agent-identity.md`
-- 部分過時：`DATABASE-SCHEMA.md`（缺 2026-09 新表）
-- 歷史文件（2026-02 的 Claude-PM／管理頁架構，已被貢獻協議取代）：`AI-ARCHITECTURE.md`、`AI-CHAT-PROPOSAL.md`、`AI-SYSTEM-STATUS.md`、`ADMIN-PAGES-ANALYSIS.md`、`CHANGELOG-2026-02-01.md`
+衝突時的優先序：程式與 migration ＞ `public/skill.md`（對外協議）＞ `docs/DECISIONS.md`（規則的來源與理由）＞ 其他文件。其他文件描述的是某個時間點的設計，開頭有「狀態」說明的以那一行為準。
+
+**根目錄與設定**
+
+- `README.md` — 對外入口：專案是什麼、最需要的三種貢獻、跑起來、架構地圖、送 PR 規則、授權
+- `CLAUDE.md` — 本檔：給 Claude Code 的工作守則、指令、架構與慣例
+- `public/skill.md` — **對外協議的唯一真相**（AI 代理直接讀；版號規則見上面「協議版號」）
+- `SKILL.md`（根目錄）— 只是指路到 `public/skill.md`，刻意不放協議內容
+- `public/llms.txt` — 給 AI 爬蟲的站點簡介
+- `LICENSE`、`LICENSE-DATA.md`、`NOTICE` — 程式（Apache 2.0）、資料（CC BY 4.0）、貢獻授權
+- `cloudflare/README.md` — 正見.tw 的 Worker：憑證與代理設定、邊緣渲染（人物頁、政見頁、脈絡頁）、縣市頁／鄉鎮頁的 ASCII 路徑規則
+- `supabase/migrations/` — 資料結構、RLS、派工與計分 SQL 的真相（不是文件，但「表長什麼樣」以它為準）
+- `.claude/skills/find-avatar.md` — `/find-avatar` 技能（見下一節）
+- `scripts/agent/` — 協議代理的最小參考實作（`agent_round.py`、`relay_jev_verify.py`）；沒有獨立說明檔，用法看檔頭註解
+- `policy-ai-skills/` — 2026-02 舊 Claude-PM 管線的 skill 提示（對應 `ai-*` 函式），**不是現行協議**，現行協議只看 `public/skill.md`
+
+**`docs/` 現行**
+
+- `DECISIONS.md` — 裁決日誌：流程規則的來源，一條一條附日期、理由與錯了的代價；改規則前先讀，牴觸要寫「更正」
+- `PIPELINE.md` — 資料怎麼進站：任務來源、派工、共識、落庫、狀態機、自動缺口任務一覽
+- `CONTRIBUTIONS-ADMIN.md` — 維護者側的貢獻管線：資料表、自動落庫與裁決、`apply` 端點、查核履歷、插隊（`/boost`）
+- `SSG-PRERENDER.md` — 建置時預渲染：指令、哪些頁預渲染／哪些邊緣渲染、`firebase.json` 行為、只能在瀏覽器跑的東西
+- `BLUEPRINT-jev-decisions.md` — Jev（TypeSafe System One 決策模型）的導入設計與實測數字
+- `BLUEPRINT-agent-identity.md` — 代理身分改由 DiTrust 發序號、正見只消費的設計（已實作，見 `ditrust-agent`）
+- `BLUEPRINT-admin-to-tasks.md` — 把管理員頁面拆成任務的藍圖與盤點（2026-09-12 快照，部分已完成）
+- `PLAN-edge-ssr.md` — 預渲染搬到 Cloudflare 邊緣 SSR 的計畫（第 1 步已上線；第 2、3 步未做）
+- `DISTRICT-REGISTRY-2026.md` — 2026 議員選舉區名冊的查證報告（一次性查證，結論已進資料庫）
+- `REGION-MISASSIGN-2026-10-04.md` — `20261004000020` 那支 migration 改了哪些參選紀錄地區的逐筆依據
+- `2026-09-18-2024-election-results-backfill.md` — `20260918000005` 那支 migration 補 2024 結果的對帳表
+- `DATABASE-SCHEMA.md` — 2026-03 以前的核心表說明，**部分過時**（缺 2026-09 起的新表），以 migration 為準
+
+**`docs/` 設計提案（已被取代或仍在影子中，只供查脈絡；現況看 `DECISIONS.md`）**
+
+- `PLAN-tasks-as-rows.md` — 自動缺口實體化成任務列（實際走了「單一佇列＋`task_dispatches`」）
+- `PLAN-weighted-consensus.md`、`PROPOSAL-jev-vote-budget.md` — 加權共識與票數預算（目標分數仍一律 3，票數預算在影子模式）
+- `REVIEW-deepseek-weighted-consensus.md` — 外部審查上面那份計畫的意見
+
+**`docs/` 歷史（2026-02 的 Claude-PM／管理頁架構，已被貢獻協議取代）**
+
+- `AI-ARCHITECTURE.md`、`AI-CHAT-PROPOSAL.md`、`ADMIN-PAGES-ANALYSIS.md`、`CHANGELOG-2026-02-01.md`
+
+**交接與維運**
+
+- 驗證 VM 腳本與交接文件在私人 repo `Yooliang/policy-ops`（`scripts/verify-vm/`、`docs/handoff/`）。`policy-tw` 裡的 `scripts/verify-vm/`、`docs/handoff/` 是過渡副本，工作機改用新位置後會刪除。

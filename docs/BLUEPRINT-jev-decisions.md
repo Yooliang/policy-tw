@@ -292,7 +292,7 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 
 **不做**：把 Jev 的答案當 hint 塞進 `/next` 給代理看——錨定效應會讓對帳失去意義。
 
-### 6-1 `merge-politicians` 現況（2026-09-19 查）
+### 6-1 `merge-politicians` 現況（2026-09-19 查；**2026-09-21 已下架**，合併改走 `merge_politician` 貢獻，下面是下架前的評估）
 
 不能當執行器：`{ name }` 進去把該姓名**全部**合成一筆（李國璋新竹市三筆裡 Jev 判其中一筆是不同人）；
 `.delete()` 硬刪，沒有 `edit_history`、沒有還原路徑——比 `removal` 破壞性強卻一票不用，只要管理金鑰；
@@ -413,7 +413,7 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 
 ## 附錄：本次量測的原始輸出
 
-暫存在 session scratchpad（不進版控）：
+暫存在當時 session 的 scratchpad，**沒有進版控、現已不存在**，只留名稱說明當時量了什麼：（下表檔案在 repo 裡找不到是正常的）
 
 - `reviews.json` — 13 筆 `politician_identity_reviews`
 - `merge-candidates.json` — 17 對疑似重複人物

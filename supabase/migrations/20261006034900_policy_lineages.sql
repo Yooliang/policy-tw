@@ -1,4 +1,4 @@
--- 政策脈絡（issue #349 第一階段；小良哥 2026-10-05 點頭：名稱「政策脈絡」，網站簡稱「脈絡」）
+-- 政策脈絡（issue #349 第一階段；維護者 2026-10-05 點頭：名稱「政策脈絡」，網站簡稱「脈絡」）
 -- ============================================================
 --
 -- 一條脈絡＝一件事在某一層級、某一地方的來龍去脈。比照日本站（keifu SCHEMA 的 lineages／handovers），多兩個方向：
@@ -407,7 +407,7 @@ LANGUAGE sql IMMUTABLE AS $$
       OR (p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop')
 $$;
 COMMENT ON FUNCTION contribution_needs_two_ips IS
-  '分數不得由單一來源 IP 湊足的貢獻：同名合併、加減參選人、移除，以及「中止」交接（#349，小良哥 10-05：中止要較高票數，比照 merge_politician）';
+  '分數不得由單一來源 IP 湊足的貢獻：同名合併、加減參選人、移除，以及「中止」交接（#349，維護者 10-05：中止要較高票數，比照 merge_politician）';
 
 -- 計票：同 20261001000001，只把「高風險型別要兩台機器」的型別清單換成 contribution_needs_two_ips（多看 payload）
 CREATE OR REPLACE FUNCTION contribution_apply_consensus(p_contribution_id UUID) RETURNS TEXT

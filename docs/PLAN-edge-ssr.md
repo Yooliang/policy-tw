@@ -1,5 +1,7 @@
 # 計畫：預渲染搬到 Cloudflare Worker 邊緣 SSR（2026-09-23）
 
+> **狀態（2026-10-06 補記）**：**第 1 步已上線，第 2、3 步沒做。** 現況：`/politician/:id`、`/policy/:id`、`/lineage/:id` 由 `cloudflare/ssr-worker.js` 邊緣渲染（`entry-server.ts`、`lib/ssr/loaders.ts`、`pnpm build:ssr`），這三種頁不再預渲染、只進網站地圖；其餘頁（首頁、選舉頁、追蹤、分析、社群…）仍由 CI 的 vite-ssg 預渲染（約 450 頁），`SSG_EDGE_PAGES=prerender` 可退回全部預渲染。下文與現況的差別：沒有 `entry-client.ts`（`main.ts` 仍是 `ViteSSG`）、Worker 檔名是 `ssr-worker.js` 而不是改寫 `worker.js`、sitemap 仍由 `scripts/postbuild-ssg.mjs` 產。運作細節看 `cloudflare/README.md` 與 `docs/SSG-PRERENDER.md`。
+
 維護者 09-23 點頭：「Cloudflare 的函式可以處理 SSG 嗎」→ 走「SSR＋邊緣快取」，分兩步搬，Firebase 預渲染留著當退路。
 
 ## 為什麼

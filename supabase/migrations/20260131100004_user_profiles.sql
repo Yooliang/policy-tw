@@ -46,7 +46,7 @@ CREATE TRIGGER on_auth_user_created
 INSERT INTO user_profiles (id, email, is_admin)
 SELECT id, email, TRUE
 FROM auth.users
-WHERE email IN ('admin@zhengjian.tw', 'cwen0708@gmail.com')
+WHERE email IN ('admin@zhengjian.tw')
 ON CONFLICT (id) DO UPDATE SET is_admin = TRUE;
 
 -- Helper function to check if user is admin

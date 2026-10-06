@@ -577,7 +577,7 @@ function sectionsOf(types: readonly string[]): LevelSection[] {
 const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
 
 /**
- * 區塊標題列的「政見 PK」按鈕（2026-10-06 小良哥：取代區塊底下的並排比較，功能併進 PK 頁籤）。
+ * 區塊標題列的「政見 PK」按鈕（2026-10-06 維護者：取代區塊底下的並排比較，功能併進 PK 頁籤）。
  * 連到這一頁的 PK 頁籤、選好這個職位與這一場、帶入這一組全部的參選人；真連結，預渲染的 HTML 裡就有。
  *   卡片排法的區塊可能含好幾場（縣市頁的立委好幾個選區、鄉鎮市長好幾個鄉鎮）：只有一場就帶那一場，好幾場就只帶職位、到 PK 再選
  *   分組排法的區塊（議員依選區、村里長依里）：每一組各一顆，帶那一組；「選區待補」「未標示里別」不知道是哪一場，不給
@@ -602,7 +602,7 @@ function groupPkLinkFor(type: string) {
 }
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 /**
- * 右側面板的「選舉區」選擇（2026-10-06 小良哥：列表上方的選舉區／村里選擇改放右側，上方不重複）：
+ * 右側面板的「選舉區」選擇（2026-10-06 維護者：列表上方的選舉區／村里選擇改放右側，上方不重複）：
  * 縣市頁的縣市議員、原住民區頁的區代表（只在「候選人」頁籤，其他頁籤不用選舉區）；選區不到兩個就不需要選。選了只看那一區（selectedDistrict，議員與區代表共用）。
  */
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
@@ -831,7 +831,7 @@ const subRegionIgnoredNote = computed(() =>
 /**
  * 政見 PK（2026-10-06 改成多人）：這一頁這個職位分成一場一場（lib/policy-compare.ts 的 pkGroups，只留至少兩位的），
  * 網址選的那一場（沒選或對不上＝第一個有政見的那一場），預設這一場全部的人，可勾選增減。
- * 只在瀏覽器端畫、不進預渲染 HTML（小良哥 10-06：PK 不是正文，政見的正文在政見頁與人物頁），見模板的 VIEW: Comparison。
+ * 只在瀏覽器端畫、不進預渲染 HTML（維護者 10-06：PK 不是正文，政見的正文在政見頁與人物頁），見模板的 VIEW: Comparison。
  */
 /** 範圍還不夠的職位（全台頁的縣市長、縣市頁的鄉鎮市長…）：不另畫縣市／鄉鎮按鈕，提示去用上方的縣市選擇器或右側的鄉鎮市區（模板的提示） */
 const pkMissing = computed(() => pkNeeds(pkLevel.value, selectedRegion.value, selectedSubRegion.value))
@@ -1165,7 +1165,7 @@ usePageHead({
         </template>
       </div>
 
-      <!-- VIEW: Comparison（政見 PK，2026-10-06 改成多人）：刻意用 v-if、只在瀏覽器端畫——PK 不是正文，不進預渲染 HTML（小良哥 10-06）。
+      <!-- VIEW: Comparison（政見 PK，2026-10-06 改成多人）：刻意用 v-if、只在瀏覽器端畫——PK 不是正文，不進預渲染 HTML（維護者 10-06）。
            預渲染時 viewMode 一律是「候選人」（網址參數在掛載後才套用），帶 ?view=comparison 的網址 canonical 指回選舉頁本身 -->
       <div v-if="viewMode === 'comparison'" class="animate-fade-in space-y-6">
         <!-- 職位：真連結，換職位時選區與勾選重設 -->

@@ -1,5 +1,7 @@
 # DeepSeek 審查：加權共識規劃（PLAN-weighted-consensus）
 
+> **狀態（2026-10-06 補記）**：所審的計畫未被採用，見 `PLAN-weighted-consensus.md` 開頭；留作查脈絡。
+
 審查者：`cwen0708-pi`（pi/deepseek-v4-flash），2026-09-21。
 審查材料：`docs/PLAN-weighted-consensus.md`、`docs/PROPOSAL-jev-vote-budget.md`、
 `supabase/functions/_shared/vote-budget.ts`（含 `vote-budget.test.ts`）。

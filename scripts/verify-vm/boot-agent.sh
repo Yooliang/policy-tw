@@ -76,7 +76,7 @@ DITRUST_SERIAL_2=$(cred ditrust-serial-2)
 # 一個 Claude 帳號對一個 DiTrust 帳號，額度各算各的、不跟前兩組搶；沒設就退回輪替規則。
 DITRUST_SERIAL_3=$(cred ditrust-serial-3)
 [[ "$DITRUST_SERIAL_3" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL_3=""
-# verify-only=1：只做驗證（2026-10-04 小良哥：待驗證堆積，VM 專門跑驗證）
+# verify-only=1：只做驗證（2026-10-04 維護者：待驗證堆積，VM 專門跑驗證）
 VERIFY_ONLY=$(md verify-only)
 [[ "$DITRUST_SERIAL_2" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL_2=""
 CPROMPT_IDX=0
@@ -98,7 +98,7 @@ ensure_claude() {
   fi
 }
 
-# 改回逐筆（2026-09-19 晚，小良哥裁示）。
+# 改回逐筆（2026-09-19 晚，維護者裁示）。
 # 中間試過「一輪做滿 10 筆再結束」想攤掉重讀 skill.md 的成本，結果 qwen3.8-flash 那顆
 # 整整一小時 0 筆——很可能是它把成果累積到最後才要回報，先被單次 20 分鐘上限砍掉，
 # 跑了、花了錢、什麼都沒交。做一筆就結束雖然每筆都要重讀協議，但每一筆都真的落地。
@@ -106,7 +106,7 @@ PROMPT_TAIL='照協議領一筆任務：GET /next → 查證 → POST /report，
 
 # session 模式（2026-09-19 深夜）：
 #   persist 接著講——固定 session id，skill.md 只讀一次，之後每輪只追加「領下一筆」。
-#           前綴一樣，供應商端的 context cache 才命中得到；小良哥本機連著跑就是便宜在這。
+#           前綴一樣，供應商端的 context cache 才命中得到；維護者本機連著跑就是便宜在這。
 #   fresh   每筆重開（原本的做法），每次都是全新對話、每次都是 cache miss 全價。
 # 上下文不能無限長，所以 persist 每 ROUNDS_PER_SESSION 輪換一個 session id。
 SESSION_MODE=$(md session-mode); case "$SESSION_MODE" in persist|fresh) ;; *) SESSION_MODE=fresh ;; esac

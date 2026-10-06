@@ -375,13 +375,13 @@ async function handleImportCandidate(supabase: any, body: any) {
 gcloud compute ssh claude-pm-server --zone=us-central1-a --tunnel-through-iap
 
 # 查看服務狀態
-sudo -u cwen0 pm2 list
+sudo -u <user> pm2 list
 
 # 重啟服務
-sudo -u cwen0 pm2 restart all
+sudo -u <user> pm2 restart all
 
 # 查看日誌
-sudo -u cwen0 pm2 logs
+sudo -u <user> pm2 logs
 ```
 
 ### Edge Functions
@@ -399,11 +399,11 @@ npx supabase functions deploy ai-search --no-verify-jwt
 ```bash
 # 從本地上傳
 gcloud compute scp policy-ai-skills/*.md \
-  claude-pm-server:/home/cwen0/projects/policy-ai/skills/ \
+  claude-pm-server:/home/<user>/projects/policy-ai/skills/ \
   --zone=us-central1-a
 
 gcloud compute scp policy-ai-skills/task_manager.py \
-  claude-pm-server:/home/cwen0/projects/policy-ai/ \
+  claude-pm-server:/home/<user>/projects/policy-ai/ \
   --zone=us-central1-a
 ```
 
