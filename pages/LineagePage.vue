@@ -130,8 +130,7 @@ usePageHead({
         <div class="lg:col-span-2 space-y-6">
           <!-- 前後任：時間軸 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-timeline">
-            <h2 class="text-xl font-bold text-navy-900 mb-1 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />時間軸：前後任怎麼交接</h2>
-            <p class="text-sm text-slate-500 mb-5">一任一任的政見照投票日排；兩任之間記的是後任上任後怎麼處理這件事（接手、轉向、縮小、中止、重新開始），每一筆附出處。</p>
+            <h2 class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />時間軸：前後任怎麼交接</h2>
             <ol class="relative border-l-2 border-slate-200 ml-2 space-y-6">
               <li v-for="item in timeline" :key="item.key" class="pl-6 relative">
                 <template v-if="item.kind === 'term'">
@@ -181,8 +180,7 @@ usePageHead({
 
           <!-- 同級多人：參與者與角色 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-participants">
-            <h2 class="text-xl font-bold text-navy-900 mb-1 flex items-center gap-2"><Users class="text-slate-400" :size="22" />參與者與角色</h2>
-            <p class="text-sm text-slate-500 mb-5">角色以立法院、議會等官方紀錄為準；本人在官網、答辯書或受訪時的說法只標「本人宣稱」，不當作主導的證據。只提了政見、還沒有官方紀錄的，標「政見提出者」。</p>
+            <h2 class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><Users class="text-slate-400" :size="22" />參與者與角色</h2>
             <ul class="divide-y divide-slate-100">
               <li v-for="row in people" :key="row.politicianId" class="py-3 first:pt-0 last:pb-0 sm:grid sm:grid-cols-[11rem_1fr] sm:gap-4" data-testid="lineage-participant">
                 <RouterLink :to="`/politician/${row.politicianId}`" class="flex items-center gap-2 font-bold text-navy-900 hover:text-blue-700 hover:underline mb-1 sm:mb-0">

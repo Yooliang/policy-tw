@@ -29,7 +29,7 @@ const status = (p: PartySummary) => partyStatusText({ moi_no: p.moiNo, moi_statu
 const breadcrumbs: BreadcrumbItem[] = [{ name: '首頁', path: '/' }, { name: '政黨一覽' }]
 usePageHead({
   title: '政黨一覽',
-  description: () => `正見收錄的人物所屬的 ${registered.value.length} 個政黨（內政部政黨名冊）：各黨的現職首長、民意代表與歷屆參選人。依名稱筆畫排列，不排名。`,
+  description: () => `正見收錄的人物所屬的 ${registered.value.length} 個政黨（內政部政黨名冊）：各黨的現職首長、民意代表與歷屆參選人。`,
   breadcrumbs,
   jsonLd: () => ({
     '@context': 'https://schema.org',
@@ -46,7 +46,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20" data-testid="party-list">
     <Hero>
       <template #title>政黨一覽</template>
-      <template #description>正見收錄的人物所屬的政黨。點進去看各黨的現職首長、民意代表與歷屆參選人；依名稱筆畫排列，不依人數或席次排名。</template>
+      <template #description>正見收錄的人物所屬的政黨。點進去看各黨的現職首長、民意代表與歷屆參選人。<br />政黨名稱與狀態依<a href="https://party.moi.gov.tw/PartyMain.aspx?n=16100&amp;sms=13073" target="_blank" rel="noopener" class="underline hover:text-white">內政部政黨資訊網的政黨名冊</a>。</template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
     </Hero>
     <Breadcrumbs :items="breadcrumbs" />
@@ -54,11 +54,6 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-left">
       <div v-if="!partyList" class="text-slate-500 text-center py-20">{{ reloading ? '載入中…' : '這一頁在建置網站時產生，請重新整理。' }}</div>
       <template v-else>
-        <p class="text-sm text-slate-600 bg-white border border-slate-200 rounded-xl p-4 mb-8 leading-relaxed">
-          政黨名稱與狀態依<a href="https://party.moi.gov.tw/PartyMain.aspx?n=16100&amp;sms=13073" target="_blank" rel="noopener" class="text-blue-700 hover:underline">內政部政黨資訊網的政黨名冊</a>。
-          人物照他目前登記的政黨歸到各黨；無黨籍（中選會名冊寫成「無黨籍及未經政黨推薦」）不是政黨，這裡不列。
-        </p>
-
         <section aria-labelledby="registered-h" class="mb-12">
           <h2 id="registered-h" class="text-2xl font-black text-navy-900 mb-4">內政部政黨名冊上的政黨</h2>
           <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

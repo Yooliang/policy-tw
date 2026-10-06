@@ -48,7 +48,7 @@ usePageHead({
   description: () => {
     if (!page.value || !party.value) return '政黨：現職首長、民意代表與歷屆參選人。'
     const years = page.value.elections.map((e) => e.shortName).join('、')
-    return `${party.value.name}${party.value.shortName ? `（${party.value.shortName}）` : ''}在正見收錄的人物：現職首長 ${headCount.value} 位、現職民意代表 ${councilCount.value} 位，${years}的參選人。依職位與地區排列，不排名。`
+    return `${party.value.name}${party.value.shortName ? `（${party.value.shortName}）` : ''}在正見收錄的人物：現職首長 ${headCount.value} 位、現職民意代表 ${councilCount.value} 位，${years}的參選人。`
   },
   noindex: () => !page.value && !reloading.value,
   breadcrumbs: () => breadcrumbs.value,
@@ -125,10 +125,9 @@ usePageHead({
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
           <section v-for="block in [{ key: 'heads', title: '現職首長', icon: Landmark, groups: page.heads, n: headCount }, { key: 'councils', title: '現職民意代表', icon: Users, groups: page.councils, n: councilCount }]"
                    :key="block.key" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6" :aria-labelledby="`${block.key}-h`">
-            <h2 :id="`${block.key}-h`" class="text-xl font-black text-navy-900 mb-1 flex items-center gap-2">
+            <h2 :id="`${block.key}-h`" class="text-xl font-black text-navy-900 mb-4 flex items-center gap-2">
               <component :is="block.icon" :size="20" class="text-slate-400" />{{ block.title }}<span class="text-sm font-semibold text-slate-500">{{ fmt(block.n) }} 位</span>
             </h2>
-            <p class="text-xs text-slate-500 mb-4">職稱只來自任期紀錄（當選、而且任期還沒結束）。</p>
             <p v-if="block.groups.length === 0" class="text-sm text-slate-500">目前沒有。</p>
             <details v-for="g in block.groups" :key="g.type" :open="g.people.length <= OPEN_GROUP_MAX" class="mb-3 group">
               <summary class="cursor-pointer select-none font-bold text-slate-800 py-1">{{ g.label }}<span class="ml-1 text-sm font-normal text-slate-500">（{{ fmt(g.people.length) }} 位）</span></summary>

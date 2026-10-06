@@ -90,6 +90,25 @@ export function groupLabel(key: string): string {
   return Number.isInteger(n) && n > 0 && n < 100 ? `${chineseNumber(n)}畫` : key
 }
 
+/**
+ * 人物一覽左欄的筆畫標籤，一律兩個字：
+ * 1～10 數字＋畫（一畫…九畫、十畫）；11～19 十＋個位（十一…十九，不加畫）；20、30… 整十（二十、三十）；
+ * 21～29、31～39… 十位數字＋個位數字、省略「十」（二一、二二、三一）。
+ */
+export function strokeTag(n: number): string {
+  if (!Number.isInteger(n) || n < 1 || n > 99) return String(n)
+  if (n <= 10) return n === 10 ? '十畫' : `${DIGITS[n]}畫`
+  const tens = Math.floor(n / 10)
+  const ones = n % 10
+  if (tens === 1) return `十${DIGITS[ones]}`
+  return ones === 0 ? `${DIGITS[tens]}十` : `${DIGITS[tens]}${DIGITS[ones]}`
+}
+
+/** 左欄用：組鍵 → 兩個字的標籤（其他照舊） */
+export function groupTag(key: string): string {
+  return key === OTHER_GROUP ? '其他' : strokeTag(Number(key))
+}
+
 /** 網址上的組名是不是認得的（筆畫數 1～64 或 other） */
 export function isGroupKey(key: string): boolean {
   if (key === OTHER_GROUP) return true
