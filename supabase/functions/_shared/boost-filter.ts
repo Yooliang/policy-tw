@@ -45,7 +45,8 @@ export function validateBoostFilter(raw: unknown): { ok: true; filter: Record<st
         out.kinds = r; break;
       }
       case "election_id": {
-        if (typeof v !== "number" || !Number.isInteger(v) || v < 2000 || v > 2100) return { ok: false, error: "election_id 要是選舉年份（例：2026）" };
+        // elections 表的選舉 id（正整數）。新增的選舉（補選、罷免、重行選舉）id 不是年份，不能再限 2000～2100（#344 第二階段 A）
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 999_999) return { ok: false, error: "election_id 要是選舉 id（正整數；定期選舉＝年份，例：2026；補選等照 /next 任務 target 裡的 election_id）" };
         out.election_id = v; break;
       }
       case "missing_avatar": {

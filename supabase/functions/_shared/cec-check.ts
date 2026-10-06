@@ -3,7 +3,14 @@
  * db.cec.gov.tw 的候選人查詢 API 回姓名／選舉名稱／投票日／選區／政黨／出生年／當選與否——Jev 拿到的是欄位，
  * 不是攤平的表格，沒有「相鄰列的縣市被讀成主角的」那種誤判。2026 登記期中選會還沒有資料，查不到就退回提交者附的網頁。
  */
-import { CEC_QUERY_URL, normalizeCandidacies, withoutFutureResults, type CecCandidacy } from "./cec-candidate.ts";
+import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutFutureResults } from "./cec-candidate.ts";
+
+/** 後備：沒給選舉清單時只認得舊三屆（跟 contribution-schema.ts 的 FALLBACK_ELECTIONS 同值） */
+const FALLBACK_ELECTION_DATES: readonly ElectionDateRef[] = [
+  { id: 2022, election_date: "2022-11-26" },
+  { id: 2024, election_date: "2024-01-13" },
+  { id: 2026, election_date: "2026-11-28" },
+];
 
 const UA = "Mozilla/5.0 (compatible; policy-tw-system-one/1.0)";
 
@@ -12,7 +19,7 @@ export function cecRecordsText(list: readonly CecCandidacy[]): string {
   return list.map((c) => [
     `姓名：${c.name}`,
     c.election_name ? `選舉：${c.election_name}` : null,
-    c.vote_date ? `投票日：${c.vote_date}（屆別 ${c.election_id ?? "?"}）` : null,
+    c.vote_date ? `投票日：${c.vote_date}` : null,
     c.area ? `選區：${c.area}` : null,
     c.party ? `政黨：${c.party}` : null,
     c.birth_year ? `出生年：${c.birth_year}` : null,
@@ -25,7 +32,13 @@ export function cecRecordsText(list: readonly CecCandidacy[]): string {
  * 查中選會：同名的全部回（同名不同人由 Jev 依選區、政黨、出生年判），只留指定屆別。
  * 查不到、API 掛了都回 null，呼叫端退回網頁來源。
  */
-export async function cecCandidacyPage(name: string, electionId: number, fetchImpl: typeof fetch = fetch): Promise<{ url: string; text: string; count: number } | null> {
+export async function cecCandidacyPage(
+  name: string,
+  electionId: number,
+  fetchImpl: typeof fetch = fetch,
+  // 選舉清單（id＋投票日，呼叫端從 elections 表查來；沒給用舊三屆）：中選會的場次用投票日對到我們的選舉 id
+  elections: readonly ElectionDateRef[] = FALLBACK_ELECTION_DATES,
+): Promise<{ url: string; text: string; count: number } | null> {
   const n = name.trim();
   if (n.length < 2) return null;
   const url = `${CEC_QUERY_URL}?${new URLSearchParams({ cand_name: n })}`;
@@ -33,7 +46,7 @@ export async function cecCandidacyPage(name: string, electionId: number, fetchIm
     const res = await fetchImpl(url, { headers: { "User-Agent": UA, Referer: "https://db.cec.gov.tw/" }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const raw = await res.json();
-    const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? []));
+    const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? [], elections));
     const picked = all.filter((c) => c.election_id === electionId);
     if (picked.length === 0) return null;
     return { url, text: cecRecordsText(picked), count: picked.length };

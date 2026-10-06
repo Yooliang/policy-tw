@@ -298,3 +298,16 @@ Deno.test("政見 PK 連結：不知道是哪一場（選區待補）、目標�
   assertEquals(pkLinkFor({ electionId: 2022, electionType: "村里長", region: "金門縣", village: "東門里" }, E2022, NOW), null);
   assertEquals(pkLinkFor({ electionId: 2026, region: "金門縣" }, E2026, NOW), null);
 });
+
+// ── #344 第二階段 A：新增的選舉（id 不是年份）網址用 election_key；舊三屆照舊用 id ──
+Deno.test("麵包屑：舊三屆網址照舊 /election/2022…；新增的選舉（重行選舉 id 4）用 election_key", () => {
+  const rerun: CrumbElection = { name: "111年嘉義市市長重行選舉", shortName: "2022 嘉義市長重行選舉", electionDate: "2022-12-18", electionKey: "2022-12-18_rerun_10020" };
+  const legacy: CrumbElection = { ...E2022, electionKey: "2022-11-26_local" };
+  const rec: CrumbRecord = { electionId: 4, electionType: "縣市長", region: "嘉義市" };
+  const crumbs = candidacyCrumbs(rec, rerun, NOW);
+  assertEquals(crumbs[0].path, "/election/2022-12-18_rerun_10020");
+  assertEquals(crumbs[1].path, `/election/2022-12-18_rerun_10020/${enc("嘉義市")}`);
+  assertEquals(crumbs[0].name, "2022 嘉義市長重行選舉");
+  assertEquals(candidacyCrumbs({ electionId: 2022, electionType: "縣市長", region: "台北市" }, legacy, NOW)[0].path, "/election/2022", "舊三屆有 key 也照舊用 id");
+  assertEquals(candidacyCrumbs({ electionId: 2022, electionType: "縣市長", region: "台北市" }, E2022, NOW)[0].path, "/election/2022", "沒給 key（舊快取）退回 id");
+});

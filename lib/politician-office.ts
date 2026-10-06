@@ -11,6 +11,7 @@
  * 兩個都可能是空的，空的就不要顯示——不要拿另一個去充當。
  * 一筆參選紀錄的狀態字（投完票只講結果、沒結果寫「結果待補」）是 candidacyNote()，人物頁、人物一覽、政黨頁共用。
  */
+import { newerFirst } from './election-route'
 import { participationLabel } from './participation-label'
 import type { CandidacyStatus, PoliticianElectionData, PoliticianOffice, PoliticianTerm } from '../types'
 
@@ -41,7 +42,8 @@ const rankOf = (t?: string): number => (t && TYPE_RANK[t] !== undefined ? TYPE_R
  */
 export function officeTitles(offices: PoliticianOffice[] | undefined): string[] {
   if (!offices || offices.length === 0) return []
-  const latest = Math.max(...offices.map((o) => o.electionId))
+  // 最近一屆＝投票日最新的那一場（視圖帶 electionDate；沒有就退回 id，見 lib/election-route.ts 的 newerFirst）
+  const latest = [...offices].sort(newerFirst)[0].electionId
   return offices
     .filter((o) => o.electionId === latest)
     .sort((a, b) => rankOf(a.electionType) - rankOf(b.electionType))
@@ -117,7 +119,10 @@ export function candidacyBadge(
   if (!what) return undefined
   // running＝這一屆真的有在選（未參選、落選的不算）；標題寫「…候選人」時要看這個，別把沒選的人寫成候選人
   const running = record.candidacyStatus !== 'withdrawn' && record.candidacyStatus !== 'not_elected'
-  return { label: `${electionId} ${what}・${status}`, what: `${electionId} ${what}`, status, running }
+  // 前綴是投票年份（視圖帶 electionDate；舊視圖沒有時舊三屆的 id 就是年份，新增的選舉 id 不是年份就不印）
+  const year = record.electionDate?.slice(0, 4) ?? (electionId >= 1900 ? String(electionId) : '')
+  const prefix = year ? `${year} ` : ''
+  return { label: `${prefix}${what}・${status}`, what: `${prefix}${what}`, status, running }
 }
 
 const END_REASON_TEXT: Record<string, string> = {

@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2 } from 'lucide-vue-next'
+import { electionPath } from '../lib/election-regions'
+import { electionSegment } from '../lib/election-route'
 import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
@@ -45,7 +47,7 @@ const navItems = computed(() => {
     items.push({
       name: activeElection.value.shortName,
       shortName: '選舉',
-      path: `/election/${activeElection.value.id}`,
+      path: electionPath(electionSegment(activeElection.value)),
       icon: Vote
     })
   }

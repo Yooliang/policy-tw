@@ -29,6 +29,7 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
+import { electionSegment, electionYearOfDate, legacyKeySegmentTarget } from '../lib/election-route'
 import { classifyWard } from '../lib/ward-classification'
 import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
 import { groupByVillage } from '../lib/village-grouping'
@@ -40,7 +41,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionById, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
+const { politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -67,8 +68,22 @@ function withCurrentElectionData(politician: any): any {
 }
 const { globalRegion } = useGlobalState()
 
-const electionId = computed(() => Number(route.params.electionId))
-const election = computed(() => getElectionById(electionId.value))
+// 網址上那一段：舊三屆是 id（/election/2022）、新增的選舉（補選、罷免、重行選舉）是 election_key（#344 第二階段 A，lib/election-route.ts）
+const election = computed(() => getElectionBySegment(route.params.electionId))
+// 數字網址在選舉清單還沒載入時就先吃網址上的 id（預渲染與 hydrate 起手就能撈資料）；key 網址要等清單載入才找得到 id（NaN＝還沒有）
+const electionId = computed(() => {
+  if (election.value) return election.value.id
+  const raw = route.params.electionId
+  const seg = Array.isArray(raw) ? raw[0] : raw
+  return typeof seg === 'string' && /^\d+$/.test(seg) ? Number(seg) : NaN
+})
+// 站內連結用的那一段（舊三屆 id、其他 election_key）
+const electionSeg = computed(() => election.value ? electionSegment(election.value) : String(Array.isArray(route.params.electionId) ? route.params.electionId[0] : route.params.electionId))
+// 舊三屆的 key 寫法（/election/2022-11-26_local）換成年份寫法，canonical 只有一個；Worker 與 Firebase 也會 301，這裡是客戶端直接進來的後備
+watch(() => route.params.electionId, (seg) => {
+  const target = legacyKeySegmentTarget(seg)
+  if (target) router.replace({ name: route.name as string, params: { ...route.params, electionId: target }, query: route.query, hash: route.hash })
+}, { immediate: true })
 const electionLoading = ref(false)
 
 /**
@@ -148,10 +163,7 @@ watch([electionId, selectedRegion, selectedSubRegion], ([id, region, subRegion])
 })
 
 // 選舉年份（用於選舉區對應表查詢，因為該表存的是年份而非 election ID）
-const electionYear = computed(() => {
-  if (!election.value?.electionDate) return 0
-  return parseInt(election.value.electionDate.substring(0, 4))
-})
+const electionYear = computed(() => electionYearOfDate(election.value?.electionDate) ?? 0)
 
 // Hero 背景圖片（依選舉年份）
 const heroImages: Record<number, string> = {
@@ -219,7 +231,7 @@ useRegionQuerySync({
   regionPath: {
     get: () => routeRegion.value,
     getSub: () => routeSubRegion.value,
-    build: (region, sub) => electionPath(electionId.value, region, sub),
+    build: (region, sub) => electionPath(electionSeg.value, region, sub),
   },
   sub: selectedSubRegion,
   village: selectedVillage,
@@ -237,7 +249,7 @@ useRegionQuerySync({
  * 預渲染時沒有 query，href 就是乾淨的 /election/2026/台北市。
  */
 function regionLink(region: string): RouteLocationRaw {
-  return { path: electionPath(electionId.value, region), query: tabQuery() }
+  return { path: electionPath(electionSeg.value, region), query: tabQuery() }
 }
 
 /** 換頁時要帶過去的頁籤參數（view／type）；鄉鎮與村里不帶 */
@@ -255,7 +267,7 @@ function tabQuery(): Record<string, string> {
  * 以前是按鈕改 selectedSubRegion（網址變 ?sub=），預渲染的縣市頁裡沒有通往鄉鎮的 <a href>。
  */
 function townshipLink(township: string): RouteLocationRaw {
-  return { path: electionPath(electionId.value, selectedRegion.value, township), query: tabQuery() }
+  return { path: electionPath(electionSeg.value, selectedRegion.value, township), query: tabQuery() }
 }
 
 const SIX_CAPITALS = ['台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市']
@@ -584,7 +596,7 @@ const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
  *   同一場不到兩位會出現在選票上的人：沒有 PK 可看，不給
  */
 function pkLink(type: string, district?: string): RouteLocationRaw {
-  return { path: electionPath(electionId.value, selectedRegion.value, selectedSubRegion.value), query: pkQuery(type, district) }
+  return { path: electionPath(electionSeg.value, selectedRegion.value, selectedSubRegion.value), query: pkQuery(type, district) }
 }
 function sectionPkLink(section: LevelSection): RouteLocationRaw | undefined {
   // 全台頁的縣市長、縣市頁的鄉鎮市長等區塊：PK 要先選縣市／鄉鎮，區塊上不放按鈕（請用上方的縣市選擇器與右側的鄉鎮市區）
@@ -712,7 +724,8 @@ const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.m
  * 只認標了屆別的：沒標的（目前 150 筆）先不顯示，等 policy_election_missing 任務補上。
  * 三個檢視共用這一個判斷，不要各寫各的。
  */
-const belongsToThisElection = (p: { electionId?: number }) => p.electionId === electionYear.value
+// policies.election_id 是 elections.id（舊三屆剛好等於年份，新增的選舉不是）——比 id，不比年份（#344 第二階段 A）
+const belongsToThisElection = (p: { electionId?: number }) => p.electionId === electionId.value
 
 const allCampaignPolicies = computed(() =>
   policies.value.filter(p => {
@@ -918,7 +931,7 @@ const townshipLevelCounts = computed(() => [...thisLevelSections.value, ...nextL
 usePageHead({
   title: () => {
     if (!election.value) return undefined
-    const year = electionYear.value || election.value.id
+    const year = electionYear.value || election.value.electionDate.slice(0, 4)
     if (pageTownship.value) return `${year} ${pageCounty.value}${pageTownship.value} 候選人與政見`
     return pageCounty.value
       ? `${year} ${pageCounty.value} 候選人與政見`
@@ -947,7 +960,7 @@ usePageHead({
       <template #title>
         <div class="relative w-full">
           <div v-if="pageCounty">
-            {{ electionYear || election.id }} {{ pageCounty }}{{ pageTownship }}<br/><span class="text-amber-400">候選人與政見</span>
+            {{ electionYear || election.electionDate.slice(0, 4) }} {{ pageCounty }}{{ pageTownship }}<br/><span class="text-amber-400">候選人與政見</span>
           </div>
           <div v-else>
             預見未來，<br/><span class="text-amber-400">從您居住的城市開始</span>
@@ -1067,7 +1080,7 @@ usePageHead({
             <RouterLink
               v-for="county in TAIWAN_COUNTIES"
               :key="county"
-              :to="electionPath(electionId, county)"
+              :to="electionPath(electionSeg, county)"
               class="px-3 py-1 rounded-full text-xs font-bold border bg-white text-slate-600 border-slate-200 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 transition-all"
             >{{ county }}</RouterLink>
           </div>

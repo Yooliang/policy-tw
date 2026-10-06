@@ -9,15 +9,19 @@ Deno.test("更正參選紀錄：reason 要寫出被改的人名", () => {
   assertEquals(reasonNamesTarget("任何理由", "林"), true, "單字名不檢查");
 });
 
+// 登記截止日不再寫死在程式裡，由呼叫端從 roster_check_scope.registration_closed_on 算出來傳進來（#344 第二階段 A）
+const DEADLINE_2026 = "2026-09-04";
+
 // 2026-10-01：拿政黨 4 月的造勢新聞把陳琬惠改成 confirmed，但 9/4 截止時她沒登記
 Deno.test("登記截止後標已登記：要中選會來源或截止後的報導", () => {
   const today = "2026-10-01";
-  assertEquals(registrationEvidenceOk(["https://www.tpp.org.tw/newsdetail/4556"], 2026, today), false, "政黨新聞稿、網址沒日期");
-  assertEquals(registrationEvidenceOk(["https://web.cec.gov.tw/api/file/370f3bbf.pdf"], 2026, today), true);
-  assertEquals(registrationEvidenceOk(["https://www.cna.com.tw/news/aipl/202609045002.aspx"], 2026, today), true, "中央社截止日當天的名單");
-  assertEquals(registrationEvidenceOk(["https://www.ettoday.net/news/20260415/1.htm"], 2026, today), false, "截止前的報導");
-  assertEquals(registrationEvidenceOk(["https://x.example/a"], 2026, "2026-08-01"), true, "還沒截止不擋");
-  assertEquals(registrationEvidenceOk(["https://x.example/a"], 2022, today), true, "沒登記截止日的屆別不擋");
+  assertEquals(registrationEvidenceOk(["https://www.tpp.org.tw/newsdetail/4556"], DEADLINE_2026, today), false, "政黨新聞稿、網址沒日期");
+  assertEquals(registrationEvidenceOk(["https://web.cec.gov.tw/api/file/370f3bbf.pdf"], DEADLINE_2026, today), true);
+  assertEquals(registrationEvidenceOk(["https://www.cna.com.tw/news/aipl/202609045002.aspx"], DEADLINE_2026, today), true, "中央社截止日當天的名單");
+  assertEquals(registrationEvidenceOk(["https://www.ettoday.net/news/20260415/1.htm"], DEADLINE_2026, today), false, "截止前的報導");
+  assertEquals(registrationEvidenceOk(["https://x.example/a"], DEADLINE_2026, "2026-08-01"), true, "還沒截止不擋");
+  assertEquals(registrationEvidenceOk(["https://x.example/a"], undefined, today), true, "沒登記截止日的屆別不擋");
+  assertEquals(registrationEvidenceOk(["https://x.example/a"], null, today), true);
 });
 
 Deno.test("網址裡的日期", () => {

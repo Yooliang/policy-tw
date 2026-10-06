@@ -5,7 +5,7 @@ import { Policy, Politician, PolicyStatus } from '../types'
 import StatusBadge from './StatusBadge.vue'
 import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
-import { policyYear } from '../lib/policy-date'
+import { policyElectionYear, policyYear } from '../lib/policy-date'
 import { electionOutcome } from '../lib/candidate-status'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
@@ -128,7 +128,7 @@ const toggleCheckpoint = (e: Event) => {
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
           <!-- 承諾的年份跟屆別走（分組、當選與否都看 election_id；2026-09-20 蔡培慧那筆提出日期 2026 卻標 2024，卡片自己打架），沒屆別才退回提出日期 -->
-          <span>{{ isCampaign ? `${policy.electionId ?? policyYear(policy) ?? '—'} 承諾` : `狀態截至 ${policy.lastUpdated.slice(0, 7)}` }}</span>
+          <span>{{ isCampaign ? `${policyElectionYear(policy, elections) ?? policyYear(policy, elections) ?? '—'} 承諾` : `狀態截至 ${policy.lastUpdated.slice(0, 7)}` }}</span>
         </div>
         <div v-if="campaignResult" class="flex items-center gap-1.5">
           <span :class="['px-1.5 py-0.5 rounded-full', campaignResult === 'elected' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']"

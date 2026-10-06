@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { CEC_QUERY_URL, type CecCandidacy, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { loadElections } from "../_shared/elections.ts";
 import { CEC_VERIFIABLE_TYPES, decideByCec, scanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
 import { type PartyAliasRow, partyResolver } from "../_shared/party-alias.ts";
@@ -37,11 +38,11 @@ async function cecFetch(url: string): Promise<unknown | null> {
 }
 
 /** 查一個人的歷屆參選；同一輪掃描裡同名只查一次 */
-async function lookup(name: string, cache: Map<string, CecCandidacy[]>): Promise<CecCandidacy[]> {
+async function lookup(name: string, cache: Map<string, CecCandidacy[]>, elections: readonly ElectionDateRef[]): Promise<CecCandidacy[]> {
   const hit = cache.get(name);
   if (hit) return hit;
   const raw = await cecFetch(`${CEC_QUERY_URL}?${new URLSearchParams({ cand_name: name })}`) as { cand_data_list?: unknown[] } | null;
-  const list = withoutFutureResults(normalizeCandidacies((raw?.cand_data_list ?? []) as never[]));
+  const list = withoutFutureResults(normalizeCandidacies((raw?.cand_data_list ?? []) as never[], elections));
   cache.set(name, list);
   return list;
 }
@@ -76,6 +77,8 @@ Deno.serve(async (req) => {
     if (error) throw new Error(`contributions scan: ${error.message}`);
 
     const cache = new Map<string, CecCandidacy[]>();
+    // 中選會的場次用投票日對到我們的選舉 id（#344 第二階段 A）：選舉清單查 elections 表
+    const electionList = await loadElections(supabase);
     // 推薦政黨要照政黨寫法對照表比（#346 第二階段）；讀不到就不比政黨，其他照舊
     // query-bounds: ok — 政黨寫法對照表約 400 列（內政部名冊 397 個政黨＋幾種別寫法），上限 1000
     const { data: aliasRows, error: aliasError } = await supabase.from("party_aliases").select("alias_key, party_id, kind").limit(1000);
@@ -91,7 +94,7 @@ Deno.serve(async (req) => {
       if (!name) { skipped++; results.push({ contribution_id: row.id, action: "skip", reason: "payload 沒有姓名" }); continue; }
 
       // 得票數、得票率不收（#345，2026-10-06）：不比票數，也就不必多查一次中選會的得票端點
-      const list = await lookup(name, cache);
+      const list = await lookup(name, cache, electionList);
 
       // 判斷要用「我們記的縣市」排除同名同姓（見 _shared/cec-verify.ts 的 sameRegion）：
       // 先用 payload.politician_id，沒有就用姓名找；找不到人就只能靠 payload.region

@@ -10,6 +10,7 @@
  */
 import { buildPartyIndex, matchParty, type PartyIndex, type PartyRegistry, type PartyRow } from './parties'
 import { candidacyNote, officeTitles } from './politician-office'
+import { electionSegment, newerFirst } from './election-route'
 import { participationLabel } from './participation-label'
 import { POSITIONS, positionSpec } from './election-levels'
 import type { Election, Politician } from '../types'
@@ -50,6 +51,8 @@ export interface PartyGroup {
 
 export interface PartyElectionBlock {
   electionId: number
+  /** 網址上那一段（舊三屆是 id、新增的選舉是 election_key；lib/election-route.ts） */
+  segment: string
   name: string
   shortName: string
   electionDate: string
@@ -161,7 +164,7 @@ export function partyPage(
   for (const pl of members) {
     // 有沒有現任公職照 officeTitles（職稱只來自任期）；字面另外補縣市（同 placeLabel），全國的名單才分得出是哪裡
     if (officeTitles(pl.offices).length === 0) continue
-    const latest = Math.max(...(pl.offices ?? []).map((o) => o.electionId))
+    const latest = [...(pl.offices ?? [])].sort(newerFirst)[0].electionId
     const current = (pl.offices ?? [])
       .filter((o) => o.electionId === latest && o.electionType)
       .sort((a, b) => typeRank(a.electionType!) - typeRank(b.electionType!))
@@ -192,7 +195,7 @@ export function partyPage(
       })
     }
     if (entries.length === 0) continue
-    blocks.push({ electionId: e.id, name: e.name, shortName: e.shortName, electionDate: e.electionDate, groups: grouped(entries), count: entries.length })
+    blocks.push({ electionId: e.id, segment: electionSegment(e), name: e.name, shortName: e.shortName, electionDate: e.electionDate, groups: grouped(entries), count: entries.length })
   }
 
   return { party: partySummary(party, registry), heads: grouped(heads), councils: grouped(councils), elections: blocks }

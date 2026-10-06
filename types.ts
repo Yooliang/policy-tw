@@ -27,11 +27,17 @@ export enum ElectionType {
 }
 
 export interface Election {
+  /** 內部整數主鍵；舊三屆剛好等於投票年份，之後新增的選舉（補選、罷免、重行選舉）不是——年份與先後看 electionDate */
   id: number;
+  /** 一場選舉的識別「投票日_種類[_地區代碼]」，建立後不改；新增的選舉網址用它（lib/election-route.ts） */
+  electionKey: string;
+  /** regular 定期改選／by_election 補選／recall 罷免投票／rerun 重行選舉 */
+  electionReason?: string;
   name: string;
   shortName: string;
   startDate: string;
   endDate: string;
+  /** 投票日 YYYY-MM-DD（先後、年份、任期一律看這個，不看 id） */
   electionDate: string;
   types: ElectionType[];
   /** 投票率（%），首長選舉合計（elections.turnout 的註解）；投票前、還沒同步就沒有這個欄位 */
@@ -60,6 +66,8 @@ export interface PoliticianElectionData {
   subRegion?: string;    // Sub-region (子選區)
   village?: string;      // Village (村里)
   candNo?: number;       // 選票上的號次（名單公告、抽籤後才有）
+  /** 這場選舉的投票日（視圖帶出來；舊視圖、舊快取沒有就退回用 electionId 排先後，見 lib/election-route.ts 的 newerFirst） */
+  electionDate?: string;
   sourceNote?: string;   // 來源備註 (AI搜尋匯入的備註)
   /**
    * 參選狀態合一欄（#345，六值：選前、選中、選後同一欄；不收傳聞，空值＝不顯示）。
@@ -99,6 +107,8 @@ export interface PoliticianTerm {
  */
 export interface PoliticianOffice {
   electionId: number;
+  /** 選出這個任期的那場選舉的投票日（視圖帶出來；沒有就退回用 electionId） */
+  electionDate?: string;
   electionType?: string;
   region?: string;
   subRegion?: string;
@@ -513,6 +523,10 @@ export interface VerificationSource {
 
 export interface RawElection {
   id: number;
+  election_key: string;
+  election_reason?: string | null;
+  /** 這次選哪些職位（elections.election_types，#344；取代 election_types 表） */
+  election_types?: string[] | null;
   name: string;
   short_name: string;
   start_date: string;
@@ -525,6 +539,7 @@ export interface RawElection {
 
 export interface RawPoliticianElectionData {
   electionId: number;
+  electionDate?: string | null;
   position?: string;
   slogan?: string;
   electionType?: string;

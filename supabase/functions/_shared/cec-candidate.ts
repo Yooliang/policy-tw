@@ -38,7 +38,10 @@ export interface CecCandidacy {
   election_name: string | null;
   /** 投票日 YYYY-MM-DD */
   vote_date: string | null;
-  /** 我們資料庫用的屆別＝投票年份 */
+  /**
+   * 我們資料庫的選舉 id：用投票日對 elections.election_date 找（#344 第二階段 A；原本取投票年份當 id，同年兩場、補選都會對錯）。
+   * 呼叫端沒給選舉清單、或這個投票日不在 elections 表裡（2020 以前的選舉）就是 null。
+   */
   election_id: number | null;
   birth_year: number | null;
   party: string | null;
@@ -50,13 +53,20 @@ export interface CecCandidacy {
   vote_percentage: number | null;
 }
 
-function year(voteDate: unknown): number | null {
-  const m = typeof voteDate === "string" ? voteDate.match(/^(\d{4})/) : null;
-  return m ? Number(m[1]) : null;
+/** 選舉清單裡的最小欄位（跟 contribution-schema.ts 的 ElectionRef 同形；不 import 它，免得這支純函式檔多一層依賴） */
+export interface ElectionDateRef {
+  id: number;
+  election_date: string;
+}
+
+/** 投票日 → 我們的選舉 id；清單裡沒有這一天的選舉回 null */
+export function electionIdOfVoteDate(voteDate: unknown, elections: readonly ElectionDateRef[]): number | null {
+  if (typeof voteDate !== "string") return null;
+  return elections.find((e) => e.election_date === voteDate.slice(0, 10))?.id ?? null;
 }
 
 /** 純函式：把中選會的一筆整理成我們的欄位名 */
-export function normalizeCandidacy(raw: CecCandidacyRaw): CecCandidacy {
+export function normalizeCandidacy(raw: CecCandidacyRaw, elections: readonly ElectionDateRef[] = []): CecCandidacy {
   const birth = Number(raw.cand_birthyear);
   return {
     theme_id: raw.theme_id ?? null,
@@ -64,7 +74,7 @@ export function normalizeCandidacy(raw: CecCandidacyRaw): CecCandidacy {
     name: String(raw.cand_name ?? "").trim(),
     election_name: raw.theme_name ?? null,
     vote_date: raw.vote_date ?? null,
-    election_id: year(raw.vote_date),
+    election_id: electionIdOfVoteDate(raw.vote_date, elections),
     birth_year: Number.isInteger(birth) && birth > 1900 ? birth : null,
     party: raw.party_name ?? null,
     // is_victor 只有當選才給 "*"；沒有這個記號就是沒當選，但只有投票日已過才算數
@@ -79,8 +89,8 @@ export function normalizeCandidacy(raw: CecCandidacyRaw): CecCandidacy {
  * 同名的人會混在一起（中選會沒有我們的 politician_id），所以回全部、由呼叫端自己挑。
  * 依投票日新到舊排序：要查「最近那場選上沒有」的情況最多。
  */
-export function normalizeCandidacies(list: readonly CecCandidacyRaw[]): CecCandidacy[] {
-  return list.map(normalizeCandidacy).sort((a, b) => (b.vote_date ?? "").localeCompare(a.vote_date ?? ""));
+export function normalizeCandidacies(list: readonly CecCandidacyRaw[], elections: readonly ElectionDateRef[] = []): CecCandidacy[] {
+  return list.map((raw) => normalizeCandidacy(raw, elections)).sort((a, b) => (b.vote_date ?? "").localeCompare(a.vote_date ?? ""));
 }
 
 /** 還沒投票的選舉不能說「沒當選」：投票日在今天之後的，結果一律當作未知 */
@@ -88,7 +98,7 @@ export function withoutFutureResults(list: readonly CecCandidacy[], today = new 
   return list.map((c) => (c.vote_date && c.vote_date > today ? { ...c, election_result: null } : c));
 }
 
-/** 挑出某一屆（投票年份）的那一筆；同年多筆（例如立委區域與不分區）回第一筆 */
+/** 挑出某一場選舉（elections.id）的那一筆；同一場多筆（例如立委區域與不分區）回第一筆 */
 export function pickByElectionId(list: readonly CecCandidacy[], electionId: number): CecCandidacy | null {
   return list.find((c) => c.election_id === electionId) ?? null;
 }

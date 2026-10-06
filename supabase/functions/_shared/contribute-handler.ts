@@ -19,7 +19,8 @@ import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
 import { councilDistrictProblems } from "./council-district-guard.ts";
-import { REGISTERED_STATUSES, REGISTRATION_DEADLINE, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
+import { REGISTERED_STATUSES, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
+import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDeadlineOf } from "./elections.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
@@ -204,7 +205,9 @@ export async function handleContribute(
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
   body = identity.body;
   const actor: Actor = identity.actor;
-  const validation = validateContributionRequest(body);
+  // 允許的選舉 id 與 election_key 以資料庫 elections 表為準（#344 第二階段 A），驗證本身仍是純函式
+  const elections = await loadElections(supabase);
+  const validation = validateContributionRequest(body, elections);
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
     const category = validation.errors.some((e) => e.code === "category_invalid");
@@ -397,7 +400,7 @@ export async function handleContribute(
         body: {
           success: false,
           error: "unknown_electoral_district",
-          message: `${region}${electionId}年縣市議員選舉的名冊裡沒有「${district}」這個選區。${
+          message: `${region}${electionLabel(elections, electionId)}縣市議員選舉的名冊裡沒有「${district}」這個選區。${
             check.validDistricts && check.validDistricts.length > 0 ? `${region}有效的選區：${check.validDistricts.join("、")}（含原住民保留議席）。` : ""
           }請核對選區編號後重新提交；這不算被拒。`,
         },
@@ -410,6 +413,8 @@ export async function handleContribute(
   //   2. 登記截止後標成 registered／qualified／confirmed，來源要有中選會或截止後的報導（陳琬惠那筆是拿 4 月的造勢新聞）
   {
     const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    // 登記截止日讀 roster_check_scope（#344 第二階段 A），不再寫死在程式裡
+    const deadlines = await loadRegistrationDeadlines(supabase);
     for (const item of validation.items) {
       const p = (item.payload ?? {}) as Record<string, unknown>;
       const urls = Array.isArray(item.source_urls) ? (item.source_urls as unknown[]).filter((u): u is string => typeof u === "string") : [];
@@ -421,11 +426,12 @@ export async function handleContribute(
         let row: unknown = null;
         try {
           ({ data: row } = await supabase.from(target_table)
-            .select(target_table === "politician_elections" ? "id, election_id, candidacy_status, politicians(name)" : "id, election_id, politicians(name)")
+            .select(target_table === "politician_elections" ? "id, election_id, election_type, candidacy_status, politicians(name)" : "id, election_id, politicians(name)")
             .eq("id", target_id).maybeSingle());
         } catch { continue; } // 查不到就不擋（跟 no-op 檢查同一個原則）
         if (!row) continue; // 對象不存在由落庫前置檢查處理
         const r = row as { election_id: number | null; politicians: { name?: string } | null };
+        const rowType = (row as { election_type?: string | null }).election_type ?? null;
         const targetName = r.politicians?.name ?? null;
         if (!reasonNamesTarget(reason, targetName)) {
           return {
@@ -450,24 +456,25 @@ export async function handleContribute(
           };
         }
         const toRegistered = changes.some((c) => c.field === "candidate_status" && REGISTERED_STATUSES.has(String(c.correct_value)));
-        if (toRegistered && !registrationEvidenceOk(urls, r.election_id, today)) {
+        if (toRegistered && !registrationEvidenceOk(urls, registrationDeadlineOf(deadlines, r.election_id, rowType), today)) {
           return {
             status: 400,
             body: {
               success: false, error: "registration_evidence_required",
-              message: `${r.election_id} 年的參選登記在 ${REGISTRATION_DEADLINE[r.election_id ?? 0]} 截止，之後要把人標成 registered／qualified／confirmed，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。政黨提名、造勢等截止前的消息證明不了他最後有登記。這不算被拒。`,
+              message: `${electionLabel(elections, r.election_id)}的參選登記在 ${registrationDeadlineOf(deadlines, r.election_id, rowType)} 截止，之後要把人標成 registered／qualified／confirmed，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。政黨提名、造勢等截止前的消息證明不了他最後有登記。這不算被拒。`,
             },
           };
         }
       }
       if (item.contribution_type === "candidacy") {
         const electionId = typeof p.election_id === "number" ? p.election_id : null;
-        if (!REGISTERED_STATUSES.has(String(p.candidate_status)) || registrationEvidenceOk(urls, electionId, today)) continue;
+        const deadline = registrationDeadlineOf(deadlines, electionId, typeof p.election_type === "string" ? p.election_type : null);
+        if (!REGISTERED_STATUSES.has(String(p.candidate_status)) || registrationEvidenceOk(urls, deadline, today)) continue;
         return {
           status: 400,
           body: {
             success: false, error: "registration_evidence_required",
-            message: `${electionId} 年的參選登記在 ${REGISTRATION_DEADLINE[electionId ?? 0]} 截止，之後交 candidate_status=${p.candidate_status} 的 candidacy，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。這不算被拒。`,
+            message: `${electionLabel(elections, electionId)}的參選登記在 ${deadline} 截止，之後交 candidate_status=${p.candidate_status} 的 candidacy，source_urls 至少要有一個中選會（cec.gov.tw）的名冊或公告，或網址看得出是截止日之後的報導。這不算被拒。`,
           },
         };
       }

@@ -21,8 +21,9 @@ function walkHtml(dir, acc = []) {
   return acc
 }
 
-const REGION_FILE_RE = new RegExp(`^/election/(\\d+)/${REGION_DIR}/([0-9a-f]+)$`)
-const TOWNSHIP_FILE_RE = new RegExp(`^/election/(\\d+)/${REGION_DIR}/([0-9a-f]+)/([0-9a-f]+)$`)
+// 選舉那一段：舊三屆是數字 id，新增的選舉（補選、重行選舉）是 election_key（2022-12-18_rerun_10020），#344 第二階段 A
+const REGION_FILE_RE = new RegExp(`^/election/([0-9A-Za-z_-]+)/${REGION_DIR}/([0-9a-f]+)$`)
+const TOWNSHIP_FILE_RE = new RegExp(`^/election/([0-9A-Za-z_-]+)/${REGION_DIR}/([0-9a-f]+)/([0-9a-f]+)$`)
 
 /** dist 裡的檔案 → 不含 index.html 的路徑（縣市頁、鄉鎮頁是 ASCII 檔案路徑） */
 function fileRoute(file) {
