@@ -47,6 +47,9 @@ const activeElection = computed(() => getActiveElection())
             <li><RouterLink to="/election/2024" class="hover:text-blue-400 transition-colors">2024 總統大選</RouterLink></li>
             <li><RouterLink to="/election/2022" class="hover:text-blue-400 transition-colors">2022 九合一選舉</RouterLink></li>
             <li><RouterLink to="/elections" class="hover:text-blue-400 transition-colors">選舉一覽</RouterLink></li>
+            <!-- 人物一覽、政黨一覽（#346）只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） -->
+            <li><a href="/politicians" class="hover:text-blue-400 transition-colors">人物一覽</a></li>
+            <li><a href="/parties" class="hover:text-blue-400 transition-colors">政黨一覽</a></li>
           </ul>
         </div>
 

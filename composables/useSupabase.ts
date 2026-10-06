@@ -19,6 +19,9 @@ import { currentElection, taipeiDay } from '../lib/election-list'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 import { mapPolicyElements } from '../lib/policy-elements'
+import type { DirectoryGroup, DirectoryGroupSummary } from '../lib/people-directory'
+import type { PartyPageData, PartySummary } from '../lib/party-pages'
+import type { PartyRegistry } from '../lib/parties'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -106,6 +109,15 @@ const availableElectionTypes = ref<string[]>([])
  */
 const townshipDirectory = ref<DirectoryPerson[]>([])
 let directoryKey = ''
+
+/**
+ * 人物一覽與政黨頁（#346 第一階段，2026-10-06）：建置端從整份名冊算好、只放進那一頁的快照。
+ * 這四頁不在瀏覽器端重算（要一萬六千位的參選紀錄與任期才算得出來）；從別頁用站內連結點過來時頁面會整頁載入預渲染的那一份。
+ */
+const peopleIndex = ref<DirectoryGroupSummary[] | null>(null)
+const peopleGroup = ref<DirectoryGroup | null>(null)
+const partyList = ref<PartySummary[] | null>(null)
+const partyPage = ref<PartyPageData | null>(null)
 
 /**
  * 撈某一屆某縣市的名錄。只有縣市頁要（全台頁與鄉鎮頁不顯示名錄）。
@@ -819,6 +831,14 @@ export interface DataSnapshot {
   /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
   lineages?: Lineage[]
   lineagesComplete?: boolean
+  /** 人物一覽（#346）：索引頁帶各組的姓與人數、分組頁帶那一組的名單。沒給＝這一頁不需要 */
+  peopleIndex?: DirectoryGroupSummary[]
+  peopleGroup?: DirectoryGroup
+  /** 政黨一覽、各黨頁（#346）。沒給＝這一頁不需要 */
+  partyList?: PartySummary[]
+  partyPage?: PartyPageData
+  /** 建置端專用：政黨表與寫法對照（資料庫的 parties／party_aliases，還沒上線時是 lib/party-seed.json）。不進頁面快照 */
+  partyRegistry?: PartyRegistry
 }
 
 /** 取目前全域狀態的快照（SSG 建置時在 fetchAll 之後呼叫，當作切片來源）。 */
@@ -871,6 +891,11 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   lineages.value = snapshot.lineages ?? []
   lineagesComplete.value = snapshot.lineagesComplete === true
   if (!snapshot.lineages) lineagesPromise = null
+  // 人物一覽、政黨頁：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的名單不該留到下一頁）
+  peopleIndex.value = snapshot.peopleIndex ?? null
+  peopleGroup.value = snapshot.peopleGroup ?? null
+  partyList.value = snapshot.partyList ?? null
+  partyPage.value = snapshot.partyPage ?? null
 }
 
 export function useSupabase() {
@@ -1095,6 +1120,11 @@ export function useSupabase() {
     townshipDirectory,
     loadTownshipDirectory,
     stats,
+    // 人物一覽、政黨頁（#346）：只有預渲染的快照會帶
+    peopleIndex,
+    peopleGroup,
+    partyList,
+    partyPage,
 
     fetchAll,
     getElectionById,

@@ -9,6 +9,8 @@ import { positionsToLoad } from '../election-levels'
 import { DIRECTORY_POSITION_TYPES, type DirectoryPerson } from '../township-directory'
 import { sameRegionName } from '../region-name'
 import { inTownship } from '../election-townships'
+import { buildDirectory, isGroupKey, type DirectoryGroup, type DirectoryGroupSummary } from '../people-directory'
+import { partyList, partyPage, type PartySummary } from '../party-pages'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -84,6 +86,38 @@ export function analysisListedPolicyIds(policies: Policy[]): string[] {
     }
   }
   return Array.from(new Set(targets))
+}
+
+/**
+ * 人物一覽、政黨一覽（#346）：每一頁都要從整份名冊算，一萬六千位算一次就好——同一份 full 記住結果。
+ * 建置端的 full 整個建置期間是同一個物件。
+ */
+const directoryMemo = new WeakMap<DataSnapshot, { index: DirectoryGroupSummary[]; groups: Map<string, DirectoryGroup> }>()
+const partyListMemo = new WeakMap<DataSnapshot, PartySummary[]>()
+
+/** 判斷「投完票了沒」用的今天：快照的建置日（台北時間），預渲染整個建置期間是同一天 */
+function snapshotDay(full: DataSnapshot): string {
+  return new Date((full.generatedAt ?? Date.now()) + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+export function directoryFor(full: DataSnapshot): { index: DirectoryGroupSummary[]; groups: Map<string, DirectoryGroup> } {
+  let d = directoryMemo.get(full)
+  if (!d) {
+    d = buildDirectory(full.politicians, full.elections, snapshotDay(full))
+    directoryMemo.set(full, d)
+  }
+  return d
+}
+
+/** 政黨一覽（有人屬於它的政黨）；建置端沒載到政黨表就是空的 */
+export function partyListFor(full: DataSnapshot): PartySummary[] {
+  if (!full.partyRegistry) return []
+  let list = partyListMemo.get(full)
+  if (!list) {
+    list = partyList(full.politicians, full.partyRegistry)
+    partyListMemo.set(full, list)
+  }
+  return list
 }
 
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
@@ -268,6 +302,26 @@ export function buildPageSnapshot(to: RouteLocationNormalized, full: DataSnapsho
 
     case 'regional-data':
       return { ...base, regionStats: full.regionStats }
+
+    case 'politicians':
+      // 人物一覽的索引：每一組（筆畫）有哪些姓、幾位
+      return { ...base, peopleIndex: directoryFor(full).index }
+
+    case 'politicians-group': {
+      // 一組（例：十一畫）的名單：id、姓名、一行說明；網址的組名認不得就給基底切片（頁面顯示找不到、noindex）
+      const key = paramString(to.params.group)
+      const group = isGroupKey(key) ? directoryFor(full).groups.get(key) : undefined
+      return group ? { ...base, peopleIndex: directoryFor(full).index, peopleGroup: group } : base
+    }
+
+    case 'parties':
+      return { ...base, partyList: partyListFor(full) }
+
+    case 'party': {
+      const id = Number(paramString(to.params.partyId))
+      const page = Number.isInteger(id) && full.partyRegistry ? partyPage(id, full.politicians, full.partyRegistry, full.elections, snapshotDay(full)) : null
+      return page ? { ...base, partyPage: page } : base
+    }
 
     case 'sources':
       return { ...base, verificationSources: full.verificationSources }

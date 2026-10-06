@@ -47,6 +47,8 @@ export function truncateFields<T extends Obj>(row: T, fields: readonly string[])
 export interface TaskContextData {
   /** profile_gap：內政部地方公職人員名單上同名同縣市的現職紀錄（照片、機關、職稱、黨籍），沒有就 undefined */
   moi_official?: Obj | null;
+  /** profile_detail_gap：這個人的學經歷一項一列（視圖 politician_careers_full，#346）；needs_source＝待補出處。表還沒上線就是 undefined */
+  careers?: Obj[];
   roster?: unknown;
   politician?: Obj | null;
   elections?: Obj[];
@@ -121,6 +123,33 @@ export function rosterOursScope(target: Obj): { county: string; township: string
   const county = str(target.county) ?? str(target.region);
   if (!county) return null;
   return { county, township: str(target.county) ? str(target.township) : null };
+}
+
+/**
+ * 學經歷補出處（#346）：代理要做的是「照原文重交那幾項＋附看得到它們的頁面」，伺服器只把出處掛到文字相同的項目上。
+ * 臉書、IG、Threads 讀不到（驗證者與系統都打不開），掛不上去——跟政策脈絡的角色、交接同一份清單（lineage.ts）。
+ */
+export const CAREER_SOURCES_HINT =
+  "unsourced 列的是這個人還沒有出處的學經歷（網站上標「待補出處」）。找看得到這幾項的頁面（議會、機關的個人介紹頁最常有，其次本人官網、維基百科、新聞），" +
+  "用 politician 型別交：education／experience 照 unsourced 的原文抄你查得到的那幾項（一條一項、字要一樣），source_urls 放那些頁面。" +
+  "伺服器只會把出處掛到文字相同的項目上；查到的寫法不同或查到這裡沒有的項目，照抄原文並在 note 說明，不要改字。" +
+  "臉書、IG、Threads 讀不到，不算出處。查不到就用 no_change 回報你查了哪裡。";
+
+/** politician_careers_full 的列 → 給代理看的形狀（kind 換成跟交件同名的 education／experience） */
+export function shapeCareers(rows: Obj[]): { items: Obj[]; unsourced: { education: string[]; experience: string[] } } {
+  // 學歷在前、經歷在後，各自照陣列順序
+  const kindRank = (k: unknown) => (k === "career" ? 1 : 0);
+  const sorted = [...rows].sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+  const field = (kind: unknown) => (kind === "career" ? "experience" : "education");
+  const items = sorted.map((r) => ({
+    field: field(r.kind),
+    text: r.text ?? null,
+    needs_source: r.needs_source === true,
+    sources: Array.isArray(r.sources) ? (r.sources as Obj[]).map((s) => pick(s, ["url", "role", "archive_url"])) : [],
+  }));
+  const unsourced = { education: [] as string[], experience: [] as string[] };
+  for (const it of items) if (it.needs_source && typeof it.text === "string") unsourced[it.field as "education" | "experience"].push(it.text);
+  return { items, unsourced };
 }
 
 /** 已投票屆別的名單缺口（target.list_source＝cec）：名單就在中選會資料庫、缺的人已經列好，跟 2026 找登記名冊不同 */
@@ -276,9 +305,11 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     }
     // 補學經歷條列（2026-10-02）：bio 要原樣給（不截斷）—— 它是代理知道「要找什麼」的線索。
     // 但 bio 沒有附來源，所以提醒它 source_urls 要放真的打開過的頁，不是照抄 bio。
+    // 學經歷補出處（#346，2026-10-06）：同一個型別，另外給每一項學經歷現在有沒有出處（careers）、還缺出處的原文（unsourced）。
     case "profile_detail_gap": {
       const emptyArray = (v: unknown) => !Array.isArray(v) || v.length === 0;
       const missing = (["education", "experience"] as const).filter((f) => emptyArray(p?.[f]));
+      const careers = data.careers ? shapeCareers(data.careers) : null;
       return {
         politician: p,
         missing_fields: missing,
@@ -286,6 +317,10 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         bio_hint: p?.bio
           ? "politician.bio 裡通常已經寫著學經歷，用它知道要找什麼；但 bio 本身沒有附來源，source_urls 要放你實際打開、看得到這些學經歷的網址，不是照抄 bio。bio 跟來源不一致時以來源為準，並在 note 說明。"
           : null,
+        ...(careers ? { careers: careers.items, unsourced: careers.unsourced } : {}),
+        ...(careers && (careers.unsourced.education.length > 0 || careers.unsourced.experience.length > 0)
+          ? { career_sources_hint: CAREER_SOURCES_HINT }
+          : {}),
       };
     }
     case "candidacy_source_missing":
@@ -513,6 +548,13 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (pid) {
     const { data: p } = await supabase.from("politicians").select("*").eq("id", pid).maybeSingle();
     data.politician = p ?? null;
+  }
+  // 補學經歷條列／學經歷補出處（#346）：每一項現在有沒有出處。視圖還沒上線（migration 比函式晚套上的那幾分鐘）就不給
+  if (taskType === "profile_detail_gap" && pid) {
+    // query-bounds: ok — 一個人的學經歷，全站最多的一位 30 多項
+    const { data: rows, error } = await supabase.from("politician_careers_full")
+      .select("kind, text, sort_order, needs_source, sources").eq("politician_id", pid).order("sort_order").limit(200);
+    if (!error) data.careers = (rows ?? []) as Obj[];
   }
   // 補基本資料：內政部現職名單有這個人的話一起給（2026-09-24，陳雅倫的照片內政部就有，代理卻回報查無）
   if (taskType === "profile_gap" && pid) {

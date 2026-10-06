@@ -2,6 +2,8 @@ import type { Router, RouteRecordRaw } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import type { PageSnapshot } from '../lib/ssg/page-data'
 import { handleChunkLoadError, isChunkLoadError, setPendingPath } from '../lib/chunk-reload'
+// 記下第一次載入的路徑（人物一覽、政黨頁換頁進來要整頁載入預渲染那一份，見 lib/full-load.ts）
+import '../lib/full-load'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -17,6 +19,8 @@ declare module 'vue-router' {
  */
 // 三條選舉路由（全台／縣市／鄉鎮）共用同一個元件：換縣市、換鄉鎮時是同一個實例（KeepAlive 也認得），篩選狀態與捲動位置不會重來
 const ElectionPage = () => import('../pages/ElectionPage.vue')
+// 人物一覽的索引與分組（#346）共用同一個元件
+const PeopleDirectory = () => import('../pages/PeopleDirectory.vue')
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -82,6 +86,28 @@ export const routes: RouteRecordRaw[] = [
     path: '/politician/:politicianId',
     name: 'politician',
     component: () => import('../pages/PoliticianProfile.vue'),
+  },
+  {
+    // 人物一覽（#346，2026-10-06）：依姓氏筆畫分組，各組一頁（/politicians/11）；預渲染、進網站地圖
+    path: '/politicians',
+    name: 'politicians',
+    component: PeopleDirectory,
+  },
+  {
+    path: '/politicians/:group',
+    name: 'politicians-group',
+    component: PeopleDirectory,
+  },
+  {
+    // 政黨一覽與各黨頁（#346）：id＝內政部政黨編號（名冊查無此名稱的從 10001 起）
+    path: '/parties',
+    name: 'parties',
+    component: () => import('../pages/PartyList.vue'),
+  },
+  {
+    path: '/party/:partyId',
+    name: 'party',
+    component: () => import('../pages/PartyPage.vue'),
   },
   {
     path: '/community',
