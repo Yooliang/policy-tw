@@ -94,7 +94,7 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 
 ENUMs：`policy_status`、`political_party`、`election_type`、`politician_status`
 
-#### ⚠️ Election ID = 選舉年份（重要！）
+#### ⚠️ Election ID：舊三屆剛好是年份，之後新增的選舉不是（重要！）
 
 | 表格 | 欄位 | 存的是 | 範例 |
 |------|------|--------|------|
@@ -102,15 +102,16 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 | `politician_elections` | `election_id` | FK → `elections.id`（年份） | 2022, 2024, 2026 |
 | `electoral_district_areas` | `election_id` | **年份** | 2022, 2026 |
 
-- 既有三筆的 `elections.id` 就是選舉年份，大量讀取端（SQL、Edge Function、前端、Worker、協議）把它當年份用
-- 前端路由 `/election/:electionId` 的參數就是年份（如 `/election/2022`）；這些網址要一直能用（維護者 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）
+- 既有三筆的 `elections.id` 就是選舉年份；之後新增的選舉（補選、罷免投票、重行選舉，例如 2022-12-18 嘉義市長重行選舉，id＝4）id 照序號拿、不是年份。**年份、先後、「最新一屆」、任期起訖一律看 `election_date`**（#344 第二階段 A 起讀取端已切，`lib/election-route.ts`、`election_term_start／end`、`politician_latest_election`）
+- 前端路由 `/election/:electionId` 的那一段：舊三屆照舊用 id（`/election/2022`），新增的選舉用 `election_key`（`/election/2022-12-18_rerun_10020`）；舊三屆的 key 寫法由 Worker／Firebase 301 到年份寫法。這些網址要一直能用（維護者 10-05：網址保持，新識別另加路由，舊的照常顯示或 301，不能 404）。站內連結一律從 `lib/election-route.ts` 的 `electionSegment` 取那一段，不要自己拿 id 拼網址
 
-**過渡中（#344 第一階段，2026-10-05）**：年份存不下補選、罷免、重行選舉，所以加了新識別，舊的不動：
+**#344 第一階段（2026-10-05）加新識別、第二階段 A（2026-10-07）讀取端切過去，只加不刪**：年份存不下補選、罷免、重行選舉，所以加了新識別，舊的不動：
 - `elections.election_key`＝一場選舉的識別，格式 `投票日_種類[_地區代碼]`（`2022-11-26_local`、`2024-01-13_national`；種類 local／national／by 補選／recall 罷免／rerun 重行選舉），**建立後不改**（觸發器擋），新列沒給就自動產生
 - `election_reason`（事由）、`election_types`（這次選哪些職位，直接存在選舉上；舊表 `election_types` 第二階段刪，過渡期觸發器同步）、`notice_date`（選舉公告日）、`turnout`（投票率）
 - `id` 留著當內部整數主鍵、外鍵都不搬；**之後新增的選舉 id 不保證是年份**——新程式碼別再從 id 推年份或排先後，年份與先後用 `election_date`
-- `end_date` 名不副實（三筆存投票日、新建時卻寫 12-31），新程式碼讀 `election_date`
-- 還把 id 當年份的地方（第二階段要改）列在 #344 第一階段 PR 的盤點清單
+- `end_date` 名不副實（三筆存投票日、新建時卻寫 12-31），新程式碼讀 `election_date`（讀取端已不讀 `end_date`、`election_types` 表，**第二階段 B 才刪**：欄位 `end_date`、表 `election_types` 與同步觸發器 `sync_election_types_array`、`year_or_null`、舊視圖 `politician_offices_derived`／`_gap` 一起刪）
+- Edge Function 允許的選舉查 `elections`（`_shared/elections.ts`，找不到退回舊三屆）；交件用 `election_id` 或 `election_key` 擇一指選舉（協議 1.67.0）；cec-sync 由 `elections` 表驅動（場次用投票日對）
+- 還把 id 當年份的地方（派工臂裡寫死 2022／2026 的文案與條件、`task-context` 的 `.order("election_id")`）列在 #344 第二階段 A PR 說明的「沒動的」清單
 
 #### Electoral District Mapping
 `electoral_district_areas` 把鄉鎮市區對到選舉區，供議員篩選：`region`（縣市）+ `electoral_district`（第01選舉區）+ `township` + `election_id`（年份）。

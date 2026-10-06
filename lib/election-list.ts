@@ -13,6 +13,8 @@
 /** 只用到投票日的最小形狀；Election 本身符合 */
 export interface DatedElection {
   electionDate: string
+  /** regular 定期改選／by_election 補選／recall 罷免投票／rerun 重行選舉；沒給當定期改選 */
+  electionReason?: string
 }
 
 const TAIPEI_OFFSET_MS = 8 * 3600 * 1000
@@ -45,7 +47,9 @@ export function currentElection<T extends DatedElection>(elections: readonly T[]
  */
 export function footerElections<T extends DatedElection>(elections: readonly T[], today: string, max = 3): T[] {
   const { upcoming, past } = splitElections(elections, today)
-  return [...upcoming.slice(0, 1), ...past].slice(0, max)
+  // 過去的屆別只列定期改選：補選、重行選舉（例如 2022-12-18 嘉義市長）不佔頁尾的名額，從「選舉一覽」進去（#344 第二階段 A）
+  const pastRegular = past.filter((e) => !e.electionReason || e.electionReason === 'regular')
+  return [...upcoming.slice(0, 1), ...pastRegular].slice(0, max)
 }
 
 /**

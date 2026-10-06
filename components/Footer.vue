@@ -4,7 +4,8 @@ import { Github, Mail } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { footerElections, taipeiDay } from '../lib/election-list'
-import { FEATURED_LOCAL_ELECTION_ID, TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
+import { FEATURED_LOCAL_ELECTION_ID, TAIWAN_COUNTIES, electionPath, electionRegionPath } from '../lib/election-regions'
+import { electionSegment } from '../lib/election-route'
 
 const { elections } = useSupabase()
 // 最近要投票的一場＋過去由新到舊，最多 3 筆（lib/election-list.ts；依投票日動態判斷，不寫死屆別）
@@ -44,7 +45,7 @@ const footerList = computed(() => footerElections(elections.value, taipeiDay(Dat
           <ul class="space-y-2 text-sm">
             <!-- 最近要投票的那一場（若有）＋過去的屆別，最多 3 筆（維護者 2026-10-06）；其餘從「選舉一覽」進去 -->
             <li v-for="e in footerList" :key="e.id">
-              <RouterLink :to="`/election/${e.id}`" class="hover:text-blue-400 transition-colors">{{ e.shortName }}</RouterLink>
+              <RouterLink :to="electionPath(electionSegment(e))" class="hover:text-blue-400 transition-colors">{{ e.shortName }}</RouterLink>
             </li>
           </ul>
         </div>

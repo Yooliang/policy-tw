@@ -43,11 +43,16 @@ export function normalizeParty(party: string | null | undefined): string {
   return normParty(party) ?? DEFAULT_PARTY;
 }
 
-/** 找該年度的選舉，沒有就建一場地方選舉佈局。elections.id 就是年份。 */
+/**
+ * 找該年度的定期選舉，沒有就建一場地方選舉佈局（舊 AI 管線與管理匯入用，只收投票年份）。
+ * 只看 election_reason＝regular：同年的補選、重行選舉（例如 2022-12-18 嘉義市長）是另一場，不能混進來（#344 第二階段 A）。
+ * 新建的選舉明給 election_key（建立後不改），投票日當天＝end_date。
+ */
 export async function findOrCreateElection(supabase: SupabaseLike, electionYear: number): Promise<number> {
   const { data: rows, error } = await supabase
     .from("elections")
     .select("id")
+    .eq("election_reason", "regular")
     .gte("election_date", `${electionYear}-01-01`)
     .lte("election_date", `${electionYear}-12-31`)
     .order("id")
@@ -67,8 +72,10 @@ export async function findOrCreateElection(supabase: SupabaseLike, electionYear:
       name: `${electionYear}年地方公職人員選舉`,
       short_name: `${electionYear}地方選舉`,
       start_date: `${electionYear}-01-01`,
-      end_date: `${electionYear}-12-31`,
+      end_date: `${electionYear}-11-26`,
       election_date: `${electionYear}-11-26`,
+      election_key: `${electionYear}-11-26_local`,
+      election_reason: "regular",
     })
     .select("id")
     .maybeSingle();

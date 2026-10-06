@@ -13,10 +13,36 @@
 
 export const REGION_DIR = '_r'
 
-const REGION_PAGE_RE = /^\/election\/(\d+)\/([^/]+)\/?$/
-const TOWNSHIP_PAGE_RE = /^\/election\/(\d+)\/([^/]+)\/([^/]+)\/?$/
-const LEGACY_PAGE_RE = /^\/election\/(\d+)\/?$/
-const REGION_FILE_RE = new RegExp(`^/election/(\\d+)/${REGION_DIR}/([0-9a-f]+)(?:/([0-9a-f]+))?/?$`)
+// 選舉那一段：舊三屆是數字 id（/election/2022），新增的選舉（補選、罷免、重行選舉）是 election_key
+// （/election/2022-12-18_rerun_10020）；key 只有數字、英文字母、-、_（elections_election_key_format 的 CHECK），#344 第二階段 A
+const ELECTION_SEG = '([0-9A-Za-z_-]+)'
+const REGION_PAGE_RE = new RegExp(`^/election/${ELECTION_SEG}/([^/]+)/?$`)
+const TOWNSHIP_PAGE_RE = new RegExp(`^/election/${ELECTION_SEG}/([^/]+)/([^/]+)/?$`)
+const LEGACY_PAGE_RE = new RegExp(`^/election/${ELECTION_SEG}/?$`)
+const REGION_FILE_RE = new RegExp(`^/election/${ELECTION_SEG}/${REGION_DIR}/([0-9a-f]+)(?:/([0-9a-f]+))?/?$`)
+
+/**
+ * 舊三屆的 election_key 寫法 → 年份寫法（lib/election-route.ts 的 LEGACY_ELECTION_KEYS 是同一份，election-route.test.ts 盯兩邊一致）。
+ * 三屆的網址保持年份寫法（/election/2022）；key 寫法（/election/2022-11-26_local）也能開，301 過去，canonical 只有一個。
+ * 新增的選舉（id 不是年份）沒有年份寫法，key 就是正式網址，不在這張表。
+ */
+export const LEGACY_ELECTION_KEYS = {
+  '2022-11-26_local': '2022',
+  '2024-01-13_national': '2024',
+  '2026-11-28_local': '2026',
+}
+
+/**
+ * /election/<舊三屆的 key>[/縣市[/鄉鎮]] → 年份寫法（301）；不是就回 null。其餘路徑與查詢字串原樣帶著，一次轉到底。
+ * 回傳新的「路徑＋查詢字串」。
+ */
+export function legacyElectionKeyRedirect(pathname, search = '') {
+  const m = pathname.match(/^\/election\/([0-9A-Za-z_-]+)(\/.*)?$/)
+  if (!m) return null
+  const year = Object.prototype.hasOwnProperty.call(LEGACY_ELECTION_KEYS, m[1]) ? LEGACY_ELECTION_KEYS[m[1]] : null
+  if (!year) return null
+  return `/election/${year}${m[2] ?? ''}${search}`
+}
 /** 縣市名的樣子：兩個漢字＋市／縣（22 縣市都符合）；只用來判斷要不要轉址，真正的驗證在頁面上 */
 const COUNTY_LIKE_RE = /^[一-鿿]{2}[市縣]$/
 /**

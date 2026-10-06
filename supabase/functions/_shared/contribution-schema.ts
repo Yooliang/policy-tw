@@ -102,7 +102,38 @@ export const REMOVAL_TABLES = ["policies", "politicians"] as const;
 export const MAX_BATCH = 20;
 export const MAX_SOURCE_URLS = 10;
 export const MIN_POLICY_DESCRIPTION = 20;
-export const KNOWN_ELECTION_IDS = [2022, 2024, 2026];
+/**
+ * 選舉清單（#344 第二階段 A）：交件允許的選舉 id 以資料庫 elections 表為準，不再寫死三屆。
+ * 驗證本身是純函式（Deno／Node 都能跑、不碰資料庫），所以由呼叫端（contribute-handler）先查 elections 表、
+ * 當參數傳進 validateContributionRequest；沒傳（單元測試、離線）用下面這份舊三屆當後備。
+ * 新增的選舉 id 不保證是年份（補選、罷免、重行選舉照序號拿 id），代理用 election_key 指（/next 任務的 target 有給）。
+ */
+export interface ElectionRef {
+  id: number;
+  election_key: string;
+  /** 投票日 YYYY-MM-DD */
+  election_date: string;
+}
+export const FALLBACK_ELECTIONS: readonly ElectionRef[] = [
+  { id: 2022, election_key: "2022-11-26_local", election_date: "2022-11-26" },
+  { id: 2024, election_key: "2024-01-13_national", election_date: "2024-01-13" },
+  { id: 2026, election_key: "2026-11-28_local", election_date: "2026-11-28" },
+];
+/** @deprecated 舊三屆後備清單；讀取端一律用 isKnownElectionId／電子清單（#344） */
+export const KNOWN_ELECTION_IDS = FALLBACK_ELECTIONS.map((e) => e.id);
+// validateContributionRequest 是同步的：進來時設定、出去時還原，不會跨請求混用
+let activeElections: readonly ElectionRef[] = FALLBACK_ELECTIONS;
+export const isKnownElectionId = (v: unknown): v is number => isInt(v) && activeElections.some((e) => e.id === v);
+const electionIdsText = (): string => activeElections.map((e) => e.id).join("／");
+const electionKeysText = (): string => activeElections.map((e) => e.election_key).join("、");
+/** 這場選舉的投票年份（政見提出日期比對用）；不認得的選舉 id 回 undefined */
+export const electionYearOf = (id: unknown): number | undefined => {
+  const e = activeElections.find((x) => x.id === id);
+  return e ? Number(e.election_date.slice(0, 4)) : undefined;
+};
+/** election_key → 選舉 id；不認得回 undefined */
+export const electionIdOfKey = (key: unknown): number | undefined =>
+  typeof key === "string" ? activeElections.find((e) => e.election_key === key)?.id : undefined;
 
 /** 同名者辨識用欄位（politician／candidacy／policy 都可帶） */
 export interface IdentityHints {
@@ -215,9 +246,12 @@ function validateProposedDate(value: unknown, electionId: unknown, push: (path: 
     push("payload.proposed_date", "不能是未來日期");
     return;
   }
-  // election_id 就是選舉年份，競選承諾不會在那屆選完之後才提出；任內施政承諾（status 非 Campaign Pledge）不受這條限制
-  if (isInt(electionId) && Number(value.slice(0, 4)) > electionId && isCampaignStatus(status)) {
-    push("payload.proposed_date", `這筆掛在 ${electionId} 年那屆選舉，競選承諾的提出日期不會晚於 ${electionId} 年；查不到就別填。若這是他這一任當選後才宣布的施政承諾，status 請填 Proposed`);
+  // 競選承諾不會在那屆選完之後才提出；任內施政承諾（status 非 Campaign Pledge）不受這條限制。
+  // 屆別年份看選舉的投票日（elections.election_date；#344 第二階段 A），不再把 election_id 當年份——補選、重行選舉的 id 不是年份。
+  // 比到「年」、不比到「日」：線上已有 10 筆競選承諾的提出日晚於投票日但同一年，收緊到投票日要維護者點頭
+  const electionYear = electionYearOf(electionId);
+  if (electionYear !== undefined && Number(value.slice(0, 4)) > electionYear && isCampaignStatus(status)) {
+    push("payload.proposed_date", `這筆掛在 ${electionYear} 年投票的那場選舉，競選承諾的提出日期不會晚於 ${electionYear} 年；查不到就別填。若這是他這一任當選後才宣布的施政承諾，status 請填 Proposed`);
   }
 }
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
@@ -287,7 +321,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     }
     case "candidacy": {
       if (!isUuid(p.politician_id) && !isStr(p.name, 2, 30)) push("payload.name", "要給 politician_id 或姓名");
-      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);
+      if (!(isKnownElectionId(p.election_id))) push("payload.election_id", `election_id 要是 ${electionIdsText()}（elections 表的選舉 id；補選、罷免、重行選舉不是年份，改交 election_key：${electionKeysText()}）`);
       if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 必填，要是 ${ELECTION_TYPES.join("／")} 之一`);
       if (!isStr(p.region, 2, 20)) push("payload.region", "參選縣市必填（例：彰化縣；總統填「全國」）");
       if (!oneOf(CANDIDATE_STATUSES, p.candidate_status)) push("payload.candidate_status", `candidate_status 必填，要是 ${CANDIDATE_STATUSES.join("／")} 之一`);
@@ -308,7 +342,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isStr(p.description, MIN_POLICY_DESCRIPTION, 5000)) push("payload.description", `政見內容必填（至少 ${MIN_POLICY_DESCRIPTION} 字，寫清楚承諾了什麼）`);
       if (!isCanonicalCategory(p.category)) push("payload.category", categoryErrorMessage(p.category), "category_invalid");
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
-      if (p.election_id !== undefined && !(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `要是 ${KNOWN_ELECTION_IDS.join("／")}`);
+      if (p.election_id !== undefined && !(isKnownElectionId(p.election_id))) push("payload.election_id", `要是 ${electionIdsText()}`);
       validateProposedDate(p.proposed_date, p.election_id, push, p.status);
       validateHints(p, push);
       // 政見從哪裡來（#349，協議 1.52.0；照日本站 policy_origin）：選填，不給的話競選承諾由資料庫自動標 pledge
@@ -457,7 +491,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isUuid(p.from_politician_id)) push("payload.from_politician_id", "from_politician_id 必填（前一任的人物 uuid）");
       if (!isUuid(p.to_politician_id)) push("payload.to_politician_id", "to_politician_id 必填（下一任的人物 uuid）");
       for (const k of ["from_election_id", "to_election_id"] as const) {
-        if (p[k] !== undefined && p[k] !== null && !(isInt(p[k]) && KNOWN_ELECTION_IDS.includes(p[k] as number))) push(`payload.${k}`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（那一任是哪一屆選出的）；那一屆不在網站上（2018 以前）就不填`);
+        if (p[k] !== undefined && p[k] !== null && !(isKnownElectionId(p[k]))) push(`payload.${k}`, `要是 ${electionIdsText()}（那一任是哪一屆選出的）；那一屆不在網站上（2018 以前）就不填`);
       }
       if (isUuid(p.from_politician_id) && isUuid(p.to_politician_id) && p.from_politician_id.toLowerCase() === p.to_politician_id.toLowerCase()
         && (p.from_election_id ?? null) === (p.to_election_id ?? null)) {
@@ -497,7 +531,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "roster_check": {
       // 回報「我清查過某縣市某選舉的名單」。它不改核心資料，但會讓那個縣市的清查任務
       // 七天內不再派，所以要求附得出官方名單網址；查不到就讓 cec_count 留空並說明。
-      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}`);
+      if (!(isKnownElectionId(p.election_id))) push("payload.election_id", `election_id 要是 ${electionIdsText()}`);
       if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
       if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${ELECTION_TYPES.join("／")} 之一`);
       if (p.cec_count !== undefined && p.cec_count !== null && !(isInt(p.cec_count) && p.cec_count >= 0)) push("payload.cec_count", "中選會名單人數要是 0 或正整數；查不到就整個不要填");
@@ -514,7 +548,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "district_seats": {
       // 應選名額（#344，2026-10-06）：一個縣市、一種選舉，照選舉公告把每個選舉區的名額交上來。
       // 名額只能照公告抄——候選人數、當選人數都不是名額（同額不足、無人登記的選舉區對不上）。
-      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}（任務 target 原樣帶回）`);
+      if (!(isKnownElectionId(p.election_id))) push("payload.election_id", `election_id 要是 ${electionIdsText()}（任務 target 原樣帶回）`);
       if (!oneOf(DISTRICT_SEAT_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${DISTRICT_SEAT_TYPES.join("／")} 之一（名額法律定死的首長與立委不用交）`);
       if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
       if (!Array.isArray(p.districts) || p.districts.length === 0 || p.districts.length > MAX_DISTRICTS_PER_SUBMISSION) {
@@ -537,7 +571,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "election_results": {
       // 整批補已投票選舉的結果（2026-10-06）：一個單位（屆別×選舉×縣市，村里長與代表到鄉鎮）一筆，items 每位一項。
       // 核對不了或不是同一個人的不要放進 items——系統票是「每一位都對得上中選會名單」才投，放一位猜的進來整批就少一票。
-      if (!(isInt(p.election_id) && KNOWN_ELECTION_IDS.includes(p.election_id))) push("payload.election_id", `election_id 要是 ${KNOWN_ELECTION_IDS.join("／")}（任務 target 原樣帶回）`);
+      if (!(isKnownElectionId(p.election_id))) push("payload.election_id", `election_id 要是 ${electionIdsText()}（任務 target 原樣帶回）`);
       if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${ELECTION_TYPES.join("／")} 之一（任務 target 原樣帶回）`);
       if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
       if (p.sub_region !== undefined && p.sub_region !== null && !isStr(p.sub_region, 1, 20)) push("payload.sub_region", "sub_region 要是鄉鎮市區名稱（任務 target 有才帶）");
@@ -681,7 +715,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         else if (table === "politician_elections" && c.field === "withdrawn_after_filing" && typeof c.correct_value !== "boolean") push(`${at}.correct_value`, WITHDRAWN_AFTER_FILING_MSG);
         else if (table === "policies" && c.field === "category" && !isCanonicalCategory(c.correct_value)) push(`${at}.correct_value`, categoryErrorMessage(c.correct_value), "category_invalid");
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
-        else if (table === "policies" && c.field === "election_id" && !(isInt(c.correct_value) && KNOWN_ELECTION_IDS.includes(c.correct_value))) push(`${at}.correct_value`, `要是 ${KNOWN_ELECTION_IDS.join("／")}（就是選舉年份）`);
+        else if (table === "policies" && c.field === "election_id" && !(isKnownElectionId(c.correct_value))) push(`${at}.correct_value`, `要是 ${electionIdsText()}（elections 表的選舉 id）`);
         else if (table === "policies" && c.field === "origin" && !oneOf(POLICY_ORIGINS, c.correct_value)) push(`${at}.correct_value`, ORIGIN_MSG);
       });
       // 退選前有沒有登記只在「退選」的紀錄上有意義：同一筆又改參選狀態的話，落庫時狀態一變這一欄就被清掉（#345 後續）
@@ -735,7 +769,45 @@ export function lineageSourceProblems(type: string, payload: unknown, sourceUrls
 }
 
 /** 把請求 body 正規化成清單並逐筆驗證；有任何錯就整批不收（讓 AI 一次修完再送）。 */
-export function validateContributionRequest(body: unknown): ValidationResult {
+export function validateContributionRequest(body: unknown, elections?: readonly ElectionRef[]): ValidationResult {
+  const previous = activeElections;
+  activeElections = elections && elections.length > 0 ? elections : FALLBACK_ELECTIONS;
+  try {
+    return validateContributionRequestInner(body);
+  } finally {
+    activeElections = previous;
+  }
+}
+
+/**
+ * 選舉用 election_key 指（#344 第二階段 A，協議 1.65.0）：payload 的 election_key／from_election_key／to_election_key
+ * 換成對應的 election_id／from_election_id／to_election_id（落庫與去重都只認整數 id），correction 改 policies.election_id 的
+ * correct_value 也收 key。給了 key 又給了不一致的 id 要擋，不猜哪個對。
+ */
+function resolveElectionKeys(p: Obj, push: (path: string, message: string) => void): void {
+  for (const [keyField, idField] of [["election_key", "election_id"], ["from_election_key", "from_election_id"], ["to_election_key", "to_election_id"]] as const) {
+    if (p[keyField] === undefined) continue;
+    const id = electionIdOfKey(p[keyField]);
+    if (id === undefined) {
+      push(`payload.${keyField}`, `${keyField} 不認得（${String(p[keyField]).slice(0, 40)}）；要是 ${electionKeysText()} 之一`);
+    } else if (p[idField] !== undefined && p[idField] !== null && p[idField] !== id) {
+      push(`payload.${keyField}`, `${keyField}（對應 ${idField}＝${id}）跟 ${idField}＝${String(p[idField])} 不一致；兩個只給一個就好`);
+    } else {
+      p[idField] = id;
+    }
+    delete p[keyField];
+  }
+  if (Array.isArray(p.changes)) {
+    for (const c of p.changes as unknown[]) {
+      if (isObj(c) && c.field === "election_id" && typeof c.correct_value === "string") {
+        const id = electionIdOfKey(c.correct_value);
+        if (id !== undefined) c.correct_value = id;
+      }
+    }
+  }
+}
+
+function validateContributionRequestInner(body: unknown): ValidationResult {
   const errors: ValidationError[] = [];
   const items: ContributionInput[] = [];
   const contributor: Contributor = { agent_name: "" };
@@ -793,6 +865,7 @@ export function validateContributionRequest(body: unknown): ValidationResult {
     if (raw.contribution_type === "no_change" && isObj(raw.payload) && !raw.payload.task_id && typeof raw.task_id === "string" && raw.task_id) {
       raw.payload.task_id = raw.task_id;
     }
+    resolveElectionKeys(raw.payload, push);
     validatePayload(raw.contribution_type, raw.payload, push);
     // 三要素的每個要素指的出處，要是這筆交件的 source_urls 之一：驗證者只會打開 source_urls，指到別處等於沒給人核對
     if (raw.contribution_type === "policy_elements" && Array.isArray(raw.payload.elements) && Array.isArray(sourceUrls)) {

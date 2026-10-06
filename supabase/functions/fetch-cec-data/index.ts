@@ -26,7 +26,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import { CEC_DATA_URL, CEC_QUERY_URL, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { loadElections } from "../_shared/elections.ts";
 import { CITY_CODES, CITY_NAME_BY_CODE, normalizeCityName as normalizeCity } from "../_shared/cec-city-codes.ts";
 import {
   CEC_BASE,
@@ -111,7 +113,9 @@ async function handleByName(name: string, electionId?: number): Promise<Response
   const res = await fetch(queryUrl, { headers: { "User-Agent": USER_AGENT, Referer: "https://db.cec.gov.tw/" } });
   if (!res.ok) return json({ error: `中選會查詢失敗（HTTP ${res.status}）`, apiUrl: queryUrl }, 502);
   const raw = await res.json();
-  const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? []));
+  // 中選會的場次用投票日對到我們的選舉 id（#344 第二階段 A）：選舉清單查 elections 表
+  const electionList = await loadElections(createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!));
+  const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? [], electionList));
   const picked = electionId ? all.filter((c) => c.election_id === electionId) : all;
 
   // 指定屆別時順便把該場的得票抓回來：代理要填 votes_received／vote_percentage

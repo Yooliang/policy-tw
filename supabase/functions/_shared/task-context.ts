@@ -1529,23 +1529,17 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       const pid = typeof policy?.politician_id === "string" ? policy.politician_id : null;
       const electionId = typeof policy?.election_id === "number" ? policy.election_id : null;
       if (pid) {
-        const [{ data: person }, { data: pe }, { data: el }] = await Promise.all([
+        const [{ data: person }, { data: pe }] = await Promise.all([
           supabase.from("politicians").select("*").eq("id", pid).maybeSingle(),
           electionId !== null
             ? supabase.from("politician_elections").select("election_type").eq("politician_id", pid).eq("election_id", electionId).limit(1).maybeSingle()
             : Promise.resolve({ data: null }),
-          electionId !== null
-            ? supabase.from("elections").select("election_date").eq("id", electionId).maybeSingle()
-            : Promise.resolve({ data: null }),
         ]);
         data.politicians = person ? [person] : [];
         const electionType = (pe as Obj | null)?.election_type;
-        // 屆別年份從投票日取，不從 id 推（#344：之後新增的選舉 id 不保證是年份）；派工臂同一個寫法
-        const date = (el as Obj | null)?.election_date;
-        const year = typeof date === "string" && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null;
-        if (year !== null && typeof electionType === "string") {
-          // 卸任日跟派工臂、politician_offices 用同一支 SQL（office_term_end），不在這裡另算一份
-          const { data: end } = await supabase.rpc("office_term_end", { p_election_id: year, p_election_type: electionType });
+        if (electionId !== null && typeof electionType === "string") {
+          // 卸任日跟任期表用同一支 SQL（election_term_end：吃 elections.id、看投票日與事由，補選補足剩餘任期），不在這裡另算一份（#344 第二階段 A）
+          const { data: end } = await supabase.rpc("election_term_end", { p_election_id: electionId, p_election_type: electionType });
           data.term_end = typeof end === "string" ? end : null;
         }
       }

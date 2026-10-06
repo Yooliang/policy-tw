@@ -1,6 +1,7 @@
 import type { Politician, PoliticianElectionData } from '../types'
 import { isRunningCandidate } from './candidate-status'
 import { isCounty } from './election-regions'
+import { newerFirst } from './election-route'
 
 /**
  * 人物頁的「同選區其他候選人」與麵包屑（2026-09-30）。
@@ -15,7 +16,7 @@ export function primaryElection(p: Politician | null | undefined): PoliticianEle
   if (!p?.elections?.length) return undefined
   return [...p.elections]
     .filter((e) => isRunningCandidate(e.candidacyStatus))
-    .sort((a, b) => b.electionId - a.electionId)[0]
+    .sort(newerFirst)[0]
 }
 
 /** 指定屆別的參選紀錄（政見頁用政見所屬的屆別）；沒有就退回最新一屆 */

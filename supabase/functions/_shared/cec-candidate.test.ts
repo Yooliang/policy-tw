@@ -1,6 +1,16 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { normalizeCandidacies, pickByElectionId, withoutFutureResults } from "./cec-candidate.ts";
 
+// 選舉清單：中選會的場次用投票日對到我們的選舉 id（#344 第二階段 A）；2012／2020 是測試用的假 id
+const ELECTIONS = [
+  { id: 2026, election_date: "2026-11-28" },
+  { id: 2024, election_date: "2024-01-13" },
+  { id: 2020, election_date: "2020-01-11" },
+  { id: 2012, election_date: "2012-01-14" },
+  { id: 4, election_date: "2022-12-18" },
+  { id: 2022, election_date: "2022-11-26" },
+];
+
 // 2026-09-17 對 db.cec.gov.tw 實抓「蔡易餘」的回傳（只留用得到的欄位）
 const RAW = [
   { theme_id: "9c96a2080bfc199c590ec54f3a2bda7b", theme_name: "第11屆立法委員選舉 - 區域", vote_date: "2024-01-13", cand_id: 203374, cand_name: "蔡易餘", cand_birthyear: "1981", party_name: "民主進步黨", is_victor: "*", area_data: { current_area: { area_name: "嘉義縣嘉義縣第01選區" } } },
@@ -9,7 +19,7 @@ const RAW = [
 ];
 
 Deno.test("中選會回傳整理：依投票日新到舊、屆別取投票年份、is_victor 轉成 election_result", () => {
-  const list = normalizeCandidacies(RAW);
+  const list = normalizeCandidacies(RAW, ELECTIONS);
   assertEquals(list.map((c) => c.election_id), [2024, 2020, 2012], "新的在前");
   assertEquals(list[0].election_result, "elected");
   assertEquals(list[2].election_result, "not_elected", "is_victor 空字串＝沒當選");
@@ -23,11 +33,21 @@ Deno.test("還沒投票的選舉不能說沒當選", () => {
   const future = normalizeCandidacies([{ theme_name: "2026 縣市長", vote_date: "2026-11-28", cand_name: "某人", is_victor: "" }]);
   assertEquals(future[0].election_result, "not_elected", "整理階段照實轉");
   assertEquals(withoutFutureResults(future, "2026-09-17")[0].election_result, null, "投票日還沒到 → 結果未知");
-  assertEquals(withoutFutureResults(normalizeCandidacies(RAW), "2026-09-17")[0].election_result, "elected", "已投票的不受影響");
+  assertEquals(withoutFutureResults(normalizeCandidacies(RAW, ELECTIONS), "2026-09-17")[0].election_result, "elected", "已投票的不受影響");
+});
+
+Deno.test("選舉 id 用投票日對 elections：同年的重行選舉是另一場；清單裡沒有那一天（或沒給清單）就是 null，不拿年份湊", () => {
+  const raw = [
+    { theme_name: "111年縣市長選舉", vote_date: "2022-11-26", cand_name: "甲", is_victor: "*" },
+    { theme_name: "111年嘉義市長重行選舉", vote_date: "2022-12-18", cand_name: "黃敏惠", is_victor: "*" },
+  ];
+  assertEquals(normalizeCandidacies(raw, ELECTIONS).map((c) => [c.vote_date, c.election_id]), [["2022-12-18", 4], ["2022-11-26", 2022]]);
+  assertEquals(normalizeCandidacies(raw, [ELECTIONS[5]]).map((c) => c.election_id), [null, 2022], "清單沒有重行選舉那天 → null");
+  assertEquals(normalizeCandidacies(raw).map((c) => c.election_id), [null, null], "沒給清單 → 全部 null（不再拿投票年份當 id）");
 });
 
 Deno.test("挑某一屆：找得到回那筆，找不到回 null", () => {
-  const list = normalizeCandidacies(RAW);
+  const list = normalizeCandidacies(RAW, ELECTIONS);
   assertEquals(pickByElectionId(list, 2020)?.cand_id, 7228);
   assertEquals(pickByElectionId(list, 2026), null);
 });

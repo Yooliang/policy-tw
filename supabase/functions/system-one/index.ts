@@ -38,6 +38,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
  */
 
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
+import { loadElections } from "../_shared/elections.ts";
 import { protocolStatusFromCandidacy } from "../_shared/candidacy-status.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
@@ -140,7 +141,7 @@ async function voteBudgetFor(supabase: Sb, apiKey: JevKeyLike, c: VoteBudgetRow,
   }
 
   // 中選會折扣：參選類才問得到（cec-check 拿的是結構化資料，不是網頁）
-  const { confirmed: cecConfirmed, note: cecNote } = await cecConfirmedFor(c.contribution_type, payload, claim);
+  const { confirmed: cecConfirmed, note: cecNote } = await cecConfirmedFor(c.contribution_type, payload, claim, undefined, supabase);
 
   const state: Record<string, unknown> = {
     target: claim,
@@ -174,13 +175,13 @@ async function voteBudgetFor(supabase: Sb, apiKey: JevKeyLike, c: VoteBudgetRow,
  * 參選類的中選會折扣（票數預算用）：candidacy／correction 帶姓名與屆別時查得到就算確認。
  * precheck 已經為 candidacy 查過中選會的，直接帶進來不重查。
  */
-async function cecConfirmedFor(contributionType: string, payload: Record<string, unknown>, claim: Record<string, unknown>, known?: { count: number } | null): Promise<{ confirmed: boolean; note: string }> {
+async function cecConfirmedFor(contributionType: string, payload: Record<string, unknown>, claim: Record<string, unknown>, known?: { count: number } | null, supabase?: Sb): Promise<{ confirmed: boolean; note: string }> {
   if (contributionType !== "candidacy" && contributionType !== "correction") return { confirmed: false, note: "非參選類，不查中選會" };
   if (known !== undefined) return known && known.count > 0 ? { confirmed: true, note: `中選會查到 ${known.count} 筆` } : { confirmed: false, note: "中選會查不到" };
   const name = [payload.name, claim.name, payload.subject_name].find((x) => typeof x === "string") as string | undefined;
   const eid = Number(payload.election_id ?? claim.election_id);
   if (!name || !Number.isInteger(eid)) return { confirmed: false, note: "缺姓名或屆別，查不了" };
-  const hit = await cecCandidacyPage(name, eid);
+  const hit = await cecCandidacyPage(name, eid, fetch, supabase ? await loadElections(supabase) : undefined);
   return hit && hit.count > 0 ? { confirmed: true, note: `中選會查到 ${hit.count} 筆` } : { confirmed: false, note: "中選會查不到" };
 }
 
@@ -583,7 +584,7 @@ Deno.serve(async (req) => {
         const names = [payload.name, payload.politician_name, payload.title, ...subjects].map((v) => typeof v === "string" ? v : null);
         // 參選紀錄先問中選會的結構化資料（2026-09-20：系統不解析 PDF／Excel）；查不到（2026 登記期）才看提交者附的網頁
         const cec = c.contribution_type === "candidacy" && typeof payload.name === "string" && typeof payload.election_id === "number"
-          ? await cecCandidacyPage(payload.name, payload.election_id)
+          ? await cecCandidacyPage(payload.name, payload.election_id, fetch, await loadElections(supabase))
           : null;
         const urls = cec ? [cec.url] : c.source_urls.slice(0, 3);
         const fetched = cec
@@ -624,7 +625,7 @@ Deno.serve(async (req) => {
             probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state: askState, cost_usd: Number(res.usage.cost.toFixed(8)),
           }];
           if (withBudget) {
-            const cecInfo = await cecConfirmedFor(c.contribution_type, payload, claim, c.contribution_type === "candidacy" ? cec : undefined);
+            const cecInfo = await cecConfirmedFor(c.contribution_type, payload, claim, c.contribution_type === "candidacy" ? cec : undefined, supabase);
             const budget = computeVoteBudget(c.contribution_type, res.answers, cecInfo.confirmed);
             // 影子模式照舊：只記錄。費用已記在 source_support 那列，這列記 0 免得重算
             rows.push({

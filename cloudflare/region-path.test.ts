@@ -9,6 +9,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   fromHex,
+  legacyElectionKeyRedirect,
   legacyRegionRedirect,
   regionFilePath,
   regionPublicPathOfFile,
@@ -123,4 +124,40 @@ Deno.test("一路走一圈：舊網址 301 → 新網址 → ASCII 檔案 → �
     assertEquals(regionPublicPathOfFile(file), moved, `${county}${town}`);
     assertEquals(fromHex(toHex(town)), town);
   }
+});
+
+// ── #344 第二階段 A：選舉那一段可以是 election_key（新增的選舉：補選、罷免、重行選舉） ──
+const RERUN_KEY = "2022-12-18_rerun_10020";
+
+Deno.test("新增的選舉（election_key 網址）：縣市頁、鄉鎮頁同樣對到 ASCII 檔案路徑，算回同一個對外網址", () => {
+  assertEquals(regionUpstreamPath(`/election/${RERUN_KEY}/${enc("嘉義市")}`), `/election/${RERUN_KEY}/_r/${toHex("嘉義市")}`);
+  assertEquals(regionUpstreamPath(`/election/${RERUN_KEY}`), null);
+  assertEquals(regionUpstreamPath(`/election/${RERUN_KEY}/_r/${toHex("嘉義市")}`), null, "已經是 ASCII 的不再轉");
+  assertEquals(regionPublicPathOfFile(regionFilePath(RERUN_KEY, "嘉義市")), `/election/${RERUN_KEY}/${enc("嘉義市")}`);
+  assertEquals(
+    regionPublicPathOfFile(townshipFilePath("2027-03-06_by_66000", "台中市", "東區")),
+    `/election/2027-03-06_by_66000/${enc("台中市")}/${enc("東區")}`,
+  );
+});
+
+Deno.test("新增的選舉的舊 ?sub= 寫法也 301 到路徑版；key 原樣帶著", () => {
+  assertEquals(
+    legacyRegionRedirect(`/election/${RERUN_KEY}/${enc("嘉義市")}`, q(`sub=${enc("東區")}`)) && decodeURIComponent(legacyRegionRedirect(`/election/${RERUN_KEY}/${enc("嘉義市")}`, q(`sub=${enc("東區")}`))!),
+    `/election/${RERUN_KEY}/嘉義市/東區`,
+  );
+});
+
+Deno.test("舊三屆的 election_key 寫法 → 年份寫法（301，網址保持）；縣市、鄉鎮與查詢字串原樣帶著；新增的選舉不轉", () => {
+  assertEquals(legacyElectionKeyRedirect("/election/2022-11-26_local", ""), "/election/2022");
+  assertEquals(legacyElectionKeyRedirect("/election/2024-01-13_national/", ""), "/election/2024/");
+  assertEquals(legacyElectionKeyRedirect(`/election/2026-11-28_local/${enc("台北市")}`, "?view=pledges"), `/election/2026/${enc("台北市")}?view=pledges`);
+  assertEquals(
+    legacyElectionKeyRedirect(`/election/2022-11-26_local/${enc("嘉義縣")}/${enc("大林鎮")}`, ""),
+    `/election/2022/${enc("嘉義縣")}/${enc("大林鎮")}`,
+  );
+  assertEquals(legacyElectionKeyRedirect(`/election/${RERUN_KEY}`, ""), null, "新增的選舉 key 就是正式網址");
+  assertEquals(legacyElectionKeyRedirect("/election/2030-11-30_local", ""), null, "沒在舊三屆清單上的 key 不猜");
+  assertEquals(legacyElectionKeyRedirect("/election/2022", ""), null);
+  assertEquals(legacyElectionKeyRedirect("/politician/2022-11-26_local", ""), null);
+  assertEquals(legacyElectionKeyRedirect("/election/toString", ""), null, "原型鏈上的名字不當成 key");
 });

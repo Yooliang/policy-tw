@@ -69,3 +69,17 @@ Deno.test("頁尾選舉清單：投完票隔天，沒有未來的選舉就放最
   assertEquals(footerElections([...ALL, { id: 5, electionDate: "2028-01-15" }], "2026-11-29").map((e) => e.id), [5, 2026, 2024]);
   assertEquals(footerElections([], "2026-10-05"), []);
 });
+
+// #344 第二階段 A：2022-12-18 嘉義市長重行選舉（id 4）拆成自己的一場後，頁尾的過去屆別不能被它擠掉 2022 九合一
+const RERUN = { id: 4, electionDate: "2022-12-18", electionReason: "rerun" };
+const BY_ELECTION = { id: 5, electionDate: "2027-03-06", electionReason: "by_election" };
+Deno.test("頁尾選舉清單：過去的補選、重行選舉不佔名額（從選舉一覽進去）；今後最近的一場補選照樣算", () => {
+  assertEquals(footerElections([...ALL, RERUN], "2026-10-05").map((e) => e.id), [2026, 2024, 2022]);
+  assertEquals(footerElections([...ALL, RERUN, BY_ELECTION], "2026-11-29").map((e) => e.id), [5, 2026, 2024], "補選還沒投就是「最近要投票的那一場」");
+  assertEquals(footerElections([...ALL, RERUN, BY_ELECTION], "2027-03-07").map((e) => e.id), [2026, 2024, 2022], "補選投完就退到一覽");
+});
+
+Deno.test("選舉一覽與目前的選舉：重行選舉依投票日排在 2024 與 2022 之間，不看 id（id 4 比 2022 小、但日期比較晚）", () => {
+  assertEquals(splitElections([RERUN, ...ALL], "2026-10-05").past.map((e) => e.id), [2024, 4, 2022]);
+  assertEquals(currentElection([RERUN, ...ALL], "2026-10-05")?.id, 2026);
+});

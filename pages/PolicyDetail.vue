@@ -16,7 +16,7 @@ import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, PUBLISHER_LD, SITE_URL, summarize } from '../composables/usePageHead'
-import { policyYear } from '../lib/policy-date'
+import { policyElectionYear, policyYear } from '../lib/policy-date'
 import { lineageChain } from '../lib/policy-chain'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
@@ -388,7 +388,8 @@ usePageHead({
       ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
     },
     ...(policy.value.sourceUrl ? { citation: policy.value.sourceUrl, isBasedOn: policy.value.sourceUrl } : {}),
-    ...(policyElection.value ? { temporalCoverage: String(policy.value.electionId) } : {}),
+    // 投票年份看選舉的投票日，不把 electionId 當年份（新增的選舉 id 不是年份，#344 第二階段 A）
+    ...(policyElection.value ? { temporalCoverage: policyElectionYear(policy.value, elections.value) ?? undefined } : {}),
     publisher: PUBLISHER_LD,
     license: DATA_LICENSE_URL,
     isAccessibleForFree: true,

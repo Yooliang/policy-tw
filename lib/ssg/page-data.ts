@@ -5,6 +5,7 @@ import { isRunningCandidate } from '../candidate-status'
 import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
+import { findElectionBySegment } from '../election-route'
 import { electionPeers } from '../election-peers'
 import { positionsToLoad } from '../election-levels'
 import { DIRECTORY_POSITION_TYPES, type DirectoryPerson } from '../township-directory'
@@ -88,6 +89,11 @@ export function partyListFor(full: DataSnapshot): PartySummary[] {
   return list
 }
 
+/** 網址上的選舉那一段（舊三屆是 id、新增的選舉是 election_key）→ elections.id；找不到回 NaN（頁面會顯示找不到） */
+function electionIdOfParam(full: DataSnapshot, param: string | undefined): number {
+  return findElectionBySegment(full.elections, param)?.id ?? NaN
+}
+
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
   return {
     // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
@@ -162,7 +168,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
     }
 
     case 'election': {
-      const electionId = Number(paramString(to.params.electionId))
+      const electionId = electionIdOfParam(full, paramString(to.params.electionId))
       const politicians = full.politicians
         .filter((pl) => pl.elections?.some((e) =>
           e.electionId === electionId
@@ -183,7 +189,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       // 而這一頁真正要顯示的是 128 人。這份清單一定要跟 positionsToLoad 的縣市層同步，
       // 多帶一種職位，hydrate 之後畫面會先有人再消失。
       // 選舉區對應表只帶這個縣市（右側鄉鎮篩選要用）
-      const electionId = Number(paramString(to.params.electionId))
+      const electionId = electionIdOfParam(full, paramString(to.params.electionId))
       const region = paramString(to.params.region)
       if (!isCounty(region)) return base
       const countyPositions = positionsToLoad({
@@ -227,7 +233,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       // 跟瀏覽器端 loadPoliticiansByElection(id, 縣市, 鄉鎮) 撈的是同一批：職位照 positionsToLoad 的鄉鎮層，
       // 鄉鎮比對照 get_politicians_by_level 的規則（lib/election-townships.ts 的 inTownship，原住民區代表的
       // 「那瑪夏區第01選舉區」也算那瑪夏區）。選舉區對應表帶整個縣市：右側的鄉鎮市區連結要列全縣市。
-      const electionId = Number(paramString(to.params.electionId))
+      const electionId = electionIdOfParam(full, paramString(to.params.electionId))
       const region = paramString(to.params.region)
       const township = paramString(to.params.subRegion)
       if (!isCounty(region) || !township) return base

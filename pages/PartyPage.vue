@@ -144,7 +144,7 @@ usePageHead({
           <p v-if="page.elections.length === 0" class="text-sm text-slate-500">沒有參選紀錄。</p>
           <section v-for="e in page.elections" :key="e.electionId" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6" :aria-labelledby="`election-${e.electionId}-h`">
             <h3 :id="`election-${e.electionId}-h`" class="text-lg font-black text-navy-900 mb-3">
-              <RouterLink :to="`/election/${e.electionId}`" class="hover:text-blue-700">{{ e.name }}</RouterLink>
+              <RouterLink :to="`/election/${e.segment}`" class="hover:text-blue-700">{{ e.name }}</RouterLink>
               <span class="ml-2 text-sm font-semibold text-slate-500">投票日 {{ e.electionDate }}・{{ fmt(e.count) }} 位</span>
             </h3>
             <details v-for="g in e.groups" :key="g.type" :open="g.people.length <= OPEN_GROUP_MAX" class="mb-3">

@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
   Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
-  RegionStats, ElectoralDistrictArea, ElectionTypeTableRow, VerificationSource,
+  RegionStats, ElectoralDistrictArea, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
   RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin, PoliticianTerm, SourceRef,
@@ -16,6 +16,7 @@ import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
+import { findElectionBySegment, newerFirst } from '../lib/election-route'
 import { RUNNING_CANDIDACY_STATUSES } from '../lib/candidate-status'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
@@ -198,12 +199,15 @@ export async function fetchAllRows<T = Record<string, unknown>>(tableName: strin
 function mapElection(row: RawElection): Election {
   return {
     id: row.id,
+    electionKey: row.election_key,
+    ...(row.election_reason ? { electionReason: row.election_reason } : {}),
     name: row.name,
     shortName: row.short_name,
     startDate: row.start_date,
     endDate: row.end_date,
     electionDate: row.election_date,
-    types: (row.types || []) as ElectionType[],
+    // 這次選哪些職位：直接讀 elections.election_types（#344 第二階段 A；舊的 election_types 表不再讀，第二階段 B 刪）
+    types: (row.election_types || row.types || []) as ElectionType[],
     // 有值才帶（沒有投票率的選舉不多一個空欄位，預渲染快照不變）
     ...(row.turnout !== null && row.turnout !== undefined && row.turnout !== '' && Number.isFinite(Number(row.turnout)) ? { turnout: Number(row.turnout) } : {}),
   }
@@ -214,6 +218,7 @@ export function mapPolitician(row: RawPolitician): Politician {
   // 職稱由選舉別＋縣市組出來，不照抄存的 position（2026-09-25：「111年直轄市議員選舉」掛在 2026、議員被寫成市長）
   const elections: PoliticianElectionData[] = (row.elections || []).map((e: RawPoliticianElectionData) => ({
     electionId: e.electionId,
+    ...(e.electionDate ? { electionDate: e.electionDate } : {}),
     position: participationLabel({ electionType: e.electionType, position: e.position, region: e.region, subRegion: e.subRegion, village: e.village }),
     slogan: e.slogan || undefined,
     electionType: e.electionType || undefined,
@@ -231,7 +236,7 @@ export function mapPolitician(row: RawPolitician): Politician {
   // Get candidacyStatus from the first election (for display purposes)
   const firstElection = elections[0];
   // 人物層的職稱：最近一屆有在選的那一列組出來的；沒有參選紀錄才用人物表存的文字
-  const latest = [...elections].filter(e => e.candidacyStatus !== 'withdrawn').sort((a, b) => b.electionId - a.electionId)[0];
+  const latest = [...elections].filter(e => e.candidacyStatus !== 'withdrawn').sort(newerFirst)[0];
 
   return {
     id: row.id,
@@ -261,6 +266,7 @@ export function mapPolitician(row: RawPolitician): Politician {
     // 現任公職（視圖 politicians_with_elections 從任期表 politician_offices 帶出來：已就任而且卸任日為空；#345 第二階段 A 起讀任期表，之前是舊視圖 politician_offices_derived）；職稱只能從這裡來，不要用 position 充當（2026-10-04）
     offices: (row.offices || []).map((o) => ({
       electionId: o.electionId,
+      ...(o.electionDate ? { electionDate: o.electionDate } : {}),
       electionType: o.electionType || undefined,
       region: o.region || undefined,
       subRegion: o.subRegion || undefined,
@@ -402,25 +408,17 @@ async function fetchAllInner() {
     // 公民提問頁對這 348 KB 的全部用途是「用 id 找一個政見標題」，使用者回報載入很慢。
     const [
       electionsData,
-      electionTypesData,
       categoriesRes,
       locationsRes,
     ] = await Promise.all([
-      fetchAllRows<RawElection>('elections', '*', 'id'),
-      fetchAllRows<ElectionTypeTableRow>('election_types', 'election_id, type', 'election_id'),
+      // 依投票日排序（#344 第二階段 A）：新增的選舉 id 不是年份、也不保證越大越新；（同一天兩場的順序不保證，筆數遠小於 1000、只有一頁）
+      fetchAllRows<RawElection>('elections', '*', 'election_date'),
       withTimeoutAndRetry('categories', (signal) => supabase.from('categories').select('name').abortSignal(signal).throwOnError()),
       withTimeoutAndRetry('locations', (signal) => supabase.from('locations').select('name').abortSignal(signal).throwOnError()),
     ])
 
-    // Map elections
-    const typesByElection: Record<number, ElectionType[]> = {}
-    for (const row of electionTypesData || []) {
-      if (!typesByElection[row.election_id]) typesByElection[row.election_id] = []
-      typesByElection[row.election_id].push(row.type as ElectionType)
-    }
-    elections.value = (electionsData || []).map(row =>
-      mapElection({ ...row, types: typesByElection[row.id] || [] })
-    )
+    // Map elections（職位清單在 elections.election_types，不再另撈 election_types 表）
+    elections.value = (electionsData || []).map(mapElection)
     categories.value = (categoriesRes.data || []).map(r => r.name)
     locations.value = (locationsRes.data || []).map(r => r.name)
     // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
@@ -438,6 +436,11 @@ async function fetchAllInner() {
 // Helper functions (same API as constants.ts)
 function getElectionById(id: number): Election | undefined {
   return elections.value.find(e => e.id === id)
+}
+
+/** 網址上的一段（舊三屆是 id、其他是 election_key）→ 選舉；還沒載入或找不到回 undefined */
+function getElectionBySegment(segment: unknown): Election | undefined {
+  return findElectionBySegment(elections.value, segment)
 }
 
 function getElectionByYear(year: number): Election | undefined {
@@ -1139,6 +1142,7 @@ export function useSupabase() {
 
     fetchAll,
     getElectionById,
+    getElectionBySegment,
     getElectionByYear,
     getActiveElection,
     loadPoliticiansByElection,  // 新增：按選舉載入

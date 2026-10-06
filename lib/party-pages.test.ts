@@ -11,8 +11,8 @@ import type { Election, Politician } from "../types.ts";
 
 const seed: PartyRegistry = JSON.parse(await Deno.readTextFile(new URL("./party-seed.json", import.meta.url)));
 const ELECTIONS: Election[] = [
-  { id: 2022, name: "2022 地方公職人員選舉", shortName: "2022 地方", startDate: "", endDate: "", electionDate: "2022-11-26", types: [] },
-  { id: 2026, name: "2026 地方公職人員選舉", shortName: "2026 地方", startDate: "", endDate: "", electionDate: "2026-11-28", types: [] },
+  { id: 2022, electionKey: "2022-11-26_local", name: "2022 地方公職人員選舉", shortName: "2022 地方", startDate: "", endDate: "", electionDate: "2022-11-26", types: [] },
+  { id: 2026, electionKey: "2026-11-28_local", name: "2026 地方公職人員選舉", shortName: "2026 地方", startDate: "", endDate: "", electionDate: "2026-11-28", types: [] },
 ];
 const TODAY = "2026-10-06";
 const P = (p: Partial<Politician> & { id: string; name: string; party: string }): Politician => ({ position: "", region: "", ...p }) as Politician;
@@ -65,6 +65,8 @@ Deno.test("各黨頁：現職只來自任期、首長與民代分開；落選者
   ]);
   assertEquals(page.councils.map((g) => [g.label, g.people.map((p) => p.name)]), [["縣市議員", ["丁"]]], "乙落選，不在現職");
   assertEquals(page.elections.map((e) => e.electionId), [2026, 2022], "新到舊，照投票日");
+  // 網址那一段：舊三屆用 id（網址不變）；新增的選舉（補選、重行選舉）用 election_key（#344 第二階段 A）
+  assertEquals(page.elections.map((e) => e.segment), ["2026", "2022"]);
   const y2022 = page.elections.find((e) => e.electionId === 2022)!;
   assertEquals(y2022.groups.map((g) => g.label), ["縣市長", "縣市議員", "鄉鎮市長"], "照職位位階，不照人數");
   const council = y2022.groups.find((g) => g.label === "縣市議員")!;
