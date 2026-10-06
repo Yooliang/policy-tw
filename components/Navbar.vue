@@ -8,6 +8,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
+import MobileMenu from './MobileMenu.vue'
 
 const isLoginModalOpen = ref(false)
 const isLoggingIn = ref(false)
@@ -63,7 +64,7 @@ const isActive = (path: string) => route.path === path
   <nav class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
-        <div class="flex items-center">
+        <div class="flex items-center flex-shrink-0">
           <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
             <!-- 站徽（2026-09-17）：水墨「正見」，兩字都由五個政黨色暈染而成。
                  兩字間距是字高的 10%——原圖間隔超過半個字寬，縮到 4% 又會讓
@@ -99,13 +100,26 @@ const isActive = (path: string) => route.path === path
         <!-- Right Side Actions -->
         <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <GlobalSearch />
-          <AppearanceMenu />
+
+          <!-- 手機版（sm 以下）：Aa、登入／帳號、贊助收成一顆選單（2026-10-07，維護者）。
+               四顆圓鈕排在一起，360 寬時中間的三個主選單會被擠到跟站徽重疊。 -->
+          <MobileMenu
+            class="sm:hidden"
+            :is-authenticated="isAuthenticated"
+            :user-display-name="userDisplayName"
+            :user-avatar-url="userAvatarUrl"
+            @login="isLoginModalOpen = true"
+            @profile="router.push('/profile')"
+          />
+
+          <!-- 桌面版（sm 以上）維持原樣：Aa、登入／帳號、愛心各一顆 -->
+          <AppearanceMenu class="hidden sm:block" />
 
           <!-- User Avatar (Logged In) -->
           <template v-if="isAuthenticated">
             <button
               @click="router.push('/profile')"
-              class="flex items-center gap-1 sm:gap-2 bg-slate-100 hover:bg-slate-200 text-navy-900 p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-slate-200"
+              class="hidden sm:flex items-center gap-1 sm:gap-2 bg-slate-100 hover:bg-slate-200 text-navy-900 p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-slate-200"
             >
               <img
                 v-if="userAvatarUrl"
@@ -126,7 +140,7 @@ const isActive = (path: string) => route.path === path
                  文字拿掉了，所以 aria-label 與 title 一定要留，不然讀螢幕的人不知道這是什麼。 -->
             <button
               @click="isLoginModalOpen = true"
-              class="bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full flex items-center justify-center transition-colors border border-slate-200"
+              class="hidden sm:flex bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full items-center justify-center transition-colors border border-slate-200"
               aria-label="登入"
               title="登入"
             >
@@ -138,7 +152,7 @@ const isActive = (path: string) => route.path === path
                文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
           <RouterLink
             to="/donation"
-            class="bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
+            class="hidden sm:flex bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
             aria-label="贊助平台"
             title="贊助平台"
           >
