@@ -17,7 +17,8 @@
 import { normalizeCorrection } from "./correction.ts";
 import { electionTypeSwitch } from "./candidate-import.ts";
 import { linkLevelProblem } from "./lineage.ts";
-import { resolveLineagePlace } from "./apply-contribution.ts";
+import { loadPartyChain, resolveLineagePlace } from "./apply-contribution.ts";
+import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -416,6 +417,22 @@ export async function precheckApplyTargets(
       electionTypeSwitch({ election_type: existing.election_type, candidate_status: existing.candidate_status }, { election_type: c.electionType, position: c.position });
     } catch (e) {
       problems.push({ index: c.index, code: "apply_would_fail", path: "payload.election_type", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // 政黨資訊（#346 第二階段）：找不到政黨或前身、前身往上追會繞回自己、改完起訖顛倒——跟落庫同一份計畫（party-info.ts 的 planPartyInfo）
+  for (const { item, i } of entries) {
+    if (item.contribution_type !== "party_info") continue;
+    const items = partyInfoItems((item.payload && typeof item.payload === "object" ? item.payload : {}) as Obj);
+    if (items.length === 0) continue; // 格式問題 schema 已擋
+    try {
+      const plan = planPartyInfo(await loadPartyChain(supabase, partyInfoIds(items)), items);
+      for (const message of plan.problems) {
+        problems.push({ index: i, code: message.startsWith("找不到") ? "target_not_found" : "apply_would_fail", path: "payload.parties", message });
+      }
+    } catch (e) {
+      // 查詢本身失敗不擋交件
+      console.error("precheck parties lookup failed:", e instanceof Error ? e.message : String(e));
     }
   }
 

@@ -391,7 +391,9 @@ export async function handleContribute(
         // query-bounds: ok — 按 id 取一列
         let row: unknown = null;
         try {
-          ({ data: row } = await supabase.from(target_table).select("id, election_id, politicians(name)").eq("id", target_id).maybeSingle());
+          ({ data: row } = await supabase.from(target_table)
+            .select(target_table === "politician_elections" ? "id, election_id, candidacy_status, politicians(name)" : "id, election_id, politicians(name)")
+            .eq("id", target_id).maybeSingle());
         } catch { continue; } // 查不到就不擋（跟 no-op 檢查同一個原則）
         if (!row) continue; // 對象不存在由落庫前置檢查處理
         const r = row as { election_id: number | null; politicians: { name?: string } | null };
@@ -407,6 +409,17 @@ export async function handleContribute(
           };
         }
         if (target_table !== "politician_elections") continue;
+        // 退選前有沒有登記（#345 後續，協議 1.55.0）只在退選的紀錄上有意義（資料庫 CHECK）：交件當下就講，不要讓它進投票
+        const status = (row as { candidacy_status?: string | null }).candidacy_status ?? null;
+        if (changes.some((c) => c.field === "withdrawn_after_filing") && status !== "withdrawn") {
+          return {
+            status: 400,
+            body: {
+              success: false, error: "not_withdrawn",
+              message: `「${targetName}」這筆參選紀錄（target_id=${target_id}）現在不是退選（candidacy_status＝${status ?? "空的"}），withdrawn_after_filing 只在退選的紀錄上有值。他其實還在選就只改 candidate_status；這不算被拒。`,
+            },
+          };
+        }
         const toRegistered = changes.some((c) => c.field === "candidate_status" && REGISTERED_STATUSES.has(String(c.correct_value)));
         if (toRegistered && !registrationEvidenceOk(urls, r.election_id, today)) {
           return {

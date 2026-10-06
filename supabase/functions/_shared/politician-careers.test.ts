@@ -182,7 +182,9 @@ Deno.test("落庫回覆講得出學經歷的出處掛不掛得上（陣列沒變
 });
 
 Deno.test("協議 1.54.0：學經歷補出處、政黨與學經歷的唯讀欄位寫進 skill.md", async () => {
-  assertEquals(PROTOCOL_VERSION, "1.54.0");
+  // 之後的版本照樣要有這些段落（寫死 1.54.0 的話，下一支升版的 PR 就得改這支測試）
+  const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
+  assert(major > 1 || (major === 1 && minor >= 54), `協議版號 ${PROTOCOL_VERSION} 比 1.54.0 舊`);
   const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r/g, "");
   for (const s of ["auto:profile_detail_gap:sources:", "career_sources", "`unsourced`", "臉書、IG、Threads 讀不到，不算出處", "`politician_careers_full`", "**`parties`**（1.54.0", "`party_basis`"]) {
     assertStringIncludes(md, s);

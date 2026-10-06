@@ -65,8 +65,10 @@ const FIELD_LABEL: Record<string, string> = {
   name: "姓名", party: "政黨", birth_year: "出生年", current_position: "現職", region: "縣市", sub_region: "選區", education_level: "學歷",
   bio: "簡介", avatar_url: "照片", candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題",
   description: "內容", category: "分類", status: "狀態", proposed_date: "提出日", election_id: "所屬選舉", source_url: "來源網址",
-  end_date: "卸任日", end_reason: "卸任原因",
+  end_date: "卸任日", end_reason: "卸任原因", withdrawn_after_filing: "退選前有沒有登記",
 };
+/** 退選前有沒有登記（#345 後續）的值：網站上的說法 */
+const WITHDRAWN_AFTER_FILING_LABEL: Record<string, string> = { true: "登記後退選", false: "表態不參選（沒登記過）" };
 
 export function clip(value: unknown, limit = SUMMARY_TEXT_LIMIT): string {
   const s = typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
@@ -159,6 +161,7 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
         const raw = clip(v, 80);
         if (field === "candidate_status") return CANDIDATE_STATUS_LABEL[raw] ?? raw;
         if (field === "status") return POLICY_STATUS_LABEL[raw] ?? raw;
+        if (field === "withdrawn_after_filing") return WITHDRAWN_AFTER_FILING_LABEL[raw] ?? raw;
         return raw;
       };
       const { changes } = normalizeCorrection(p);
@@ -224,6 +227,18 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     case "lineage_link": {
       const label = LINK_TYPE_LABEL[str(p.link_type) as keyof typeof LINK_TYPE_LABEL] ?? str(p.link_type);
       summary = `記政策脈絡的上下級關聯（${label}）：${str(p.upper_lineage_id).slice(0, 8)} → ${str(p.lower_lineage_id).slice(0, 8)}——${clip(p.note, 60)}`;
+      targetName = null;
+      break;
+    }
+    case "party_info": {
+      // 政黨資訊（#346 第二階段）：讀者要看得出補了哪個政黨的哪一欄
+      const items = (Array.isArray(p.parties) ? p.parties : []).filter((it): it is Obj => !!it && typeof it === "object");
+      const what = (it: Obj) => [
+        it.valid_from ? `名稱起始日 ${str(it.valid_from)}` : "",
+        it.valid_to ? `名稱停用日 ${str(it.valid_to)}` : "",
+        it.predecessor_id ? `前身是政黨 ${str(it.predecessor_id)}` : "",
+      ].filter(Boolean).join("、");
+      summary = `補政黨資訊：${items.map((it) => `政黨 ${str(it.party_id)}（${what(it)}）`).join("；") || "（沒有政黨）"}`;
       targetName = null;
       break;
     }

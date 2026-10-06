@@ -13,6 +13,7 @@
  */
 
 import type { CecCandidacy } from "./cec-candidate.ts";
+import { type PartyResolver, sameParty } from "./party-alias.ts";
 
 /** 可自動查證的貢獻型別 */
 export const CEC_VERIFIABLE_TYPES = ["candidacy", "politician"] as const;
@@ -80,7 +81,10 @@ function matchesOurPerson(claim: VerifiableClaim, c: CecCandidacy, claimedName: 
  * 純函式：這筆貢獻能不能用中選會的資料自動定案。
  * candidacies 是「用 payload 裡的姓名查中選會」的結果（已經過 withoutFutureResults）。
  */
-export function decideByCec(claim: VerifiableClaim, candidacies: readonly CecCandidacy[]): CecDecision {
+/**
+ * resolveParty：政黨寫法 → 政黨（party_aliases）。有給才比推薦政黨（#346 第二階段）；沒給（對照表讀不到）就跟以前一樣不比。
+ */
+export function decideByCec(claim: VerifiableClaim, candidacies: readonly CecCandidacy[], resolveParty?: PartyResolver): CecDecision {
   const { contribution_type: type, payload } = claim;
   if (!(CEC_VERIFIABLE_TYPES as readonly string[]).includes(type)) {
     return { action: "skip", reason: "這個型別不在中選會查得到的範圍" };
@@ -123,12 +127,12 @@ export function decideByCec(claim: VerifiableClaim, candidacies: readonly CecCan
     if (narrowed.length !== 1) {
       return { action: "skip", reason: `${electionId} 這一屆有 ${sameElection.length} 位同名候選人，分不出是誰，交給人判斷` };
     }
-    return checkCandidacyFields(payload, narrowed[0]);
+    return checkCandidacyFields(payload, narrowed[0], resolveParty);
   }
-  return checkCandidacyFields(payload, sameElection[0]);
+  return checkCandidacyFields(payload, sameElection[0], resolveParty);
 }
 
-function checkCandidacyFields(payload: Record<string, unknown>, c: CecCandidacy): CecDecision {
+function checkCandidacyFields(payload: Record<string, unknown>, c: CecCandidacy, resolveParty?: PartyResolver): CecDecision {
   if (c.election_result === null) {
     return { action: "skip", reason: "這一屆還沒投票，沒有結果可以對" };
   }
@@ -143,6 +147,23 @@ function checkCandidacyFields(payload: Record<string, unknown>, c: CecCandidacy)
   }
 
   // 得票數、得票率不收（#345，2026-10-06）：落庫不寫，這裡也不比——不能為一個會被略過的欄位把整筆退件
+
+  // 推薦政黨（#346 第二階段，2026-10-06）：candidacy 交件的 party 會寫成那一筆參選紀錄的政黨（party_basis＝contribution），
+  // 跟選舉結果一樣是中選會名冊上查得到的事實，比法也一樣：對得上算一個可查欄位、對不上就退件。
+  // 寫法不同（國民黨／中國國民黨、無黨籍／無黨籍及未經政黨推薦）照 party_aliases 算同一個；任一邊對照表裡沒有就不比（不猜）。
+  // 這一欄講的是「那一次參選」：人會換黨，所以不能拿人物現在的政黨來比（同 sameRegion 那段的理由），只比同一屆那一筆
+  const claimedParty = str(payload.party);
+  if (claimedParty && c.party && resolveParty) {
+    const same = sameParty(resolveParty(claimedParty), resolveParty(c.party));
+    if (same === false) {
+      return {
+        action: "reject",
+        reason: `推薦政黨對不上：中選會 ${c.election_id ?? ""} 這一筆記的是「${c.party}」，這筆寫「${claimedParty}」（party 是那一次參選時的政黨，照中選會名冊填，不是他現在的政黨）`,
+        candidacy: c,
+      };
+    }
+    if (same === true) matched.push("party");
+  }
 
   if (matched.length === 0) return { action: "skip", reason: "沒有任何中選會查得到的欄位（例如只改參選狀態），留給同儕驗證" };
   return { action: "apply", matched, candidacy: c };

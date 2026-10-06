@@ -148,7 +148,9 @@ Deno.test("not_running_recheck：confirmed 才把那筆參選紀錄標成已核�
   // 這個章的代價是三者最大的：標成不參選之後，這個人的政見、基本資料、參選來源、
   // 選舉結果四種缺口同時不再被派。實查 2026 有 102 筆 not_running，而 candidate_status
   // 的修改紀錄只有 4 筆——絕大多數是匯入就那樣、從來沒人對過名單。
-  const PE = "44444444-4444-4444-8444-444444444444";
+  // 參選紀錄的 id 是整數（派工臂：'auto:not_running_recheck:' || pe.id；線上實例 auto:not_running_recheck:35043）。
+  // 這裡原本用自己編的 uuid，落庫的比對也寫成 uuid 的樣子——兩邊一起錯，測試全綠，線上 72 筆確認一筆都沒蓋到章（2026-10-06）
+  const PE = "35043";
   const taskId = `auto:not_running_recheck:${PE}`;
 
   const updates: Array<{ table: string; patch: Record<string, unknown> }> = [];
