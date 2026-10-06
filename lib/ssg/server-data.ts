@@ -20,6 +20,8 @@ import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
 import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
 import { townshipPagesOf } from '../election-townships'
+import type { PartyAliasRow, PartyRegistry, PartyRow } from '../parties'
+import { directoryFor, partyListFor } from './page-data'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -105,8 +107,40 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   }
   const stats = computeStats(politicians, base)
   const lineages = await loadLineages()
-  console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length}`)
-  return { ...base, politicians, stats, lineages, lineagesComplete: true }
+  const partyRegistry = await loadPartyRegistry()
+  console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length} parties=${partyRegistry.parties.length}`)
+  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry }
+}
+
+/**
+ * 政黨表與寫法對照（#346）：讀資料庫的 parties／party_aliases。表還不存在（前端比 migration 早上線：CI 先建置、
+ * 部署完 Hosting 才 db push）就用 lib/party-seed.json——它跟 migration 的資料段是同一份（lib/parties.test.ts 盯著），
+ * 政黨頁第一次建置就有內容，不必等下一次合併。其他錯照樣重試、三次失敗中止建置。
+ */
+async function loadPartyRegistry(): Promise<PartyRegistry> {
+  return await withRetry('parties／party_aliases', async () => {
+    try {
+      const [parties, aliases] = await Promise.all([
+        fetchAllRows<PartyRow>('parties', 'id,name,short_name,moi_no,moi_name,moi_status,valid_from,valid_to,predecessor_id,note', 'id'),
+        fetchAllRows<PartyAliasRow>('party_aliases', 'alias_key,alias,party_id,kind,note', 'alias_key'),
+      ])
+      // 改名的根據（內政部該政黨頁）在出處表；建置端只拿來附連結，跟 seed 那一份一樣
+      const seed = readPartySeed()
+      const evidence = new Map(seed.parties.filter((p) => p.evidence_url).map((p) => [p.id, p.evidence_url]))
+      return { parties: parties.map((p) => ({ ...p, evidence_url: evidence.get(p.id) ?? null })), aliases }
+    } catch (err) {
+      if (isMissingRelation(err)) {
+        console.warn('[ssg] parties／party_aliases 還不存在（migration 還沒套上），政黨先用 lib/party-seed.json')
+        return readPartySeed()
+      }
+      throw err
+    }
+  }, (r) => r.parties.length > 0)
+}
+
+function readPartySeed(): PartyRegistry {
+  const file = path.resolve(process.cwd(), 'lib/party-seed.json')
+  return JSON.parse(fs.readFileSync(file, 'utf8')) as PartyRegistry
 }
 
 /**
@@ -151,7 +185,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
 }
 
 /** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /ai /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
-const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/elections', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/sources']
+const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/elections', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/sources', '/politicians', '/parties']
 
 const VILLAGE_CHIEF = '村里長'
 
@@ -233,6 +267,9 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...electionTownshipRoutes(full),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),
+    // 人物一覽的各組（筆畫）、各黨頁（#346）：網址都是 ASCII（/politicians/11、/party/16）
+    ...directoryFor(full).index.map((g) => `/politicians/${g.key}`),
+    ...partyListFor(full).map((p) => `/party/${p.id}`),
     ...(prerenderEdge ? edgePaths : []),
   ]
   if (!prerenderEdge) writeEdgeRoutes(edgePaths)

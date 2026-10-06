@@ -221,6 +221,40 @@ for (const p of townshipPages) {
 const leftInChinese = pageFiles.map(fileRoute).filter((r) => r.startsWith('/election/') && /[^\x00-\x7f]|%[0-9A-Fa-f]{2}/.test(r))
 if (leftInChinese.length) fail(`${leftInChinese.length} 頁還在中文目錄沒搬到 ASCII 路徑，例：${leftInChinese.slice(0, 3).join(', ')}`)
 
+// 3d. 人物一覽與政黨頁（#346）：索引要連得到每一組／每一黨，每一頁都要有人物連結、canonical 是自己、不能 noindex。
+//     這幾頁只在建置時產生內容（客戶端不重算），整批沒產出就是壞了，不是「這次剛好沒有」。
+function checkDirectoryPage(route, label, { minPoliticianLinks = 1 } = {}) {
+  const file = path.join(DIST, route.slice(1), 'index.html')
+  if (!fs.existsSync(file)) { fail(`${label} ${route} 檔案不存在`); return null }
+  const html = fs.readFileSync(file, 'utf8')
+  const main = mainHtml(html)
+  const info = {
+    route,
+    kb: Math.round(Buffer.byteLength(html) / 1024),
+    politicianLinks: (main.match(/href="\/politician\//g) || []).length,
+    groupLinks: (main.match(/href="\/politicians\/[^"#]+"/g) || []).length,
+    partyLinks: (main.match(/href="\/party\/\d+"/g) || []).length,
+    canonical: (html.match(/<link rel="canonical" href="([^"]*)"/) || [])[1] || '',
+    robots: (html.match(/<meta name="robots" content="([^"]*)"/) || [])[1] || '',
+  }
+  if (info.politicianLinks < minPoliticianLinks) fail(`${label} ${route} 的人物連結只有 ${info.politicianLinks} 個`)
+  if (info.canonical !== `${SITE_URL}${route}`) fail(`${label} ${route} 的 canonical 不對：${info.canonical}`)
+  if (info.robots.includes('noindex')) fail(`${label} ${route} 帶了 noindex`)
+  if (info.kb * 1024 > REGION_PAGE_WARN_BYTES) console.warn(`[postbuild-ssg] ${label} ${route} ${info.kb} KB，超過 3 MB`)
+  return info
+}
+const peopleIndexPage = checkDirectoryPage('/politicians', '人物一覽', { minPoliticianLinks: 0 })
+const peopleGroupRoutes = routes.filter((r) => /^\/politicians\/[^/]+$/.test(r))
+if (peopleGroupRoutes.length === 0) fail('沒有任何人物一覽分組頁（/politicians/:組）')
+if (peopleIndexPage && peopleIndexPage.groupLinks < peopleGroupRoutes.length) fail(`人物一覽索引只連到 ${peopleIndexPage.groupLinks} 組，分組頁有 ${peopleGroupRoutes.length} 頁`)
+const peopleGroupPages = peopleGroupRoutes.map((r) => checkDirectoryPage(r, '人物一覽分組頁')).filter(Boolean)
+const partyIndexPage = checkDirectoryPage('/parties', '政黨一覽', { minPoliticianLinks: 0 })
+const partyRoutes = routes.filter((r) => /^\/party\/\d+$/.test(r))
+if (partyRoutes.length === 0) fail('沒有任何政黨頁（/party/:id）')
+if (partyIndexPage && partyIndexPage.partyLinks < partyRoutes.length) fail(`政黨一覽只連到 ${partyIndexPage.partyLinks} 黨，政黨頁有 ${partyRoutes.length} 頁`)
+const partyPages = partyRoutes.map((r) => checkDirectoryPage(r, '政黨頁')).filter(Boolean)
+const directoryPeopleLinks = peopleGroupPages.reduce((n, p) => n + p.politicianLinks, 0)
+
 // 4. 政治人物頁的 initialState 不該把整包政見塞進去（控制頁重）
 const politicianSample = samples.find((s) => s.route.startsWith('/politician/'))
 if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 initialState 過大：${politicianSample.stateKb} KB`)
@@ -282,6 +316,13 @@ const summary = {
     maxKb: townshipPages.length ? Math.max(...townshipPages.map((p) => p.kb)) : 0,
     samples: townshipPages.filter((_, i) => i % Math.max(1, Math.floor(townshipPages.length / 5)) === 0).slice(0, 5)
       .map(({ route, kb, politicianLinks, townshipLinks, title }) => ({ route, kb, politicianLinks, townshipLinks, title })),
+  },
+  directory: {
+    peopleGroups: peopleGroupPages.length,
+    peopleLinks: directoryPeopleLinks,
+    peopleMaxKb: peopleGroupPages.length ? Math.max(...peopleGroupPages.map((p) => p.kb)) : 0,
+    parties: partyPages.length,
+    partyMaxKb: partyPages.length ? Math.max(...partyPages.map((p) => p.kb)) : 0,
   },
   samples,
   failures,
