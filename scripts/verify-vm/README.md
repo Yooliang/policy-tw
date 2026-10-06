@@ -142,7 +142,13 @@ Aegis 目前沒有第三個帳號的額度，所以 `plan_round.py` 對 `acct3` 
 - metadata `secret-project`：放金鑰的 GCP 專案。沒設的話維持舊行為，只讀 metadata。
 - Secret 名稱＝`verify-vm-<metadata 鍵>`，共 7 個：`verify-vm-claude-token`、`verify-vm-cwen-token`、`verify-vm-claude3-token`、`verify-vm-openrouter-key`、`verify-vm-ditrust-serial`、`verify-vm-ditrust-serial-2`、`verify-vm-ditrust-serial-3`。
 
-上線前要先做三件事，都要小良哥點頭。截至 10-06 都還沒做：
+10-06 進度（小良哥點頭 A＝放 policy-tw、B＝專用服務帳號）：
+- ✅ policy-tw 已綁「Yooliang Technology-侑良計費帳戶」、已啟用 Secret Manager。
+- ✅ 已建 5 個 secret 並從 metadata 搬值（以雜湊比對一致）：claude-token、cwen-token、openrouter-key、ditrust-serial、ditrust-serial-2。claude3-token、ditrust-serial-3 等小良哥放進 metadata 後再搬（或直接 `gcloud secrets versions add`）。
+- ✅ 專用服務帳號 `verify-vm@greenshepherdcomtw.iam.gserviceaccount.com`：專案層級沒有任何角色，只在上面 5 個 secret 各有 `secretAccessor`；VM 已改用它，scope＝cloud-platform；metadata `secret-project=policy-tw` 已設。
+- ⏳ 待辦：本 PR 合併後上傳新的 startup-script → 小良哥准許開機驗證（序列埠每個鍵都要是 `from secret-manager`）→ 刪 metadata 裡的明文。
+
+原本的三件事（留作紀錄）：
 1. **決定放哪個專案**：`policy-tw` 目前沒綁帳單，要放這裡得先綁；`greenshepherdcomtw` 有帳單，Secret Manager 也已啟用。
 2. **給 VM 一個專用服務帳號**：只對上面那幾個 secret 有 `roles/secretmanager.secretAccessor`。現在用的預設 compute 服務帳號權限太大，scope 也不含 `cloud-platform`，讀不到 Secret Manager。VM 關機時就能換：
    `gcloud compute instances set-service-account policy-verifier --zone us-central1-a --service-account <專用帳號> --scopes cloud-platform`
