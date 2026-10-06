@@ -26,6 +26,7 @@ import { agentToolNotice } from "./agent-tool-hint.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
 import { SEARCH_PAGE_GATE, searchPageProblems, strippedNotice, stripSearchPages } from "./search-page-guard.ts";
 import { voteFieldsNotice } from "./candidacy-result.ts";
+import { detailsOfPayload, sourceLevelNotice } from "./source-write.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -792,6 +793,8 @@ export async function handleContribute(
   }
   // agent_tool 只填別名（claude-code/haiku）時統計拆不出版本：不擋件，附一句提醒（協議 1.44.0）
   const toolNotice = agentToolNotice(validation.contributor.agent_tool);
+  // 出處等級只有 self 由交件決定；交件說了別的等級，伺服器照網域重判，講一聲（#347 第二階段 A）
+  const levelNotice = [...new Set(validation.items.map((it) => sourceLevelNotice(detailsOfPayload(it.payload, it.source_urls))).filter(Boolean))].join("\n");
   const trailingVoteNote = needs.length > 0
     ? `；通過 ${needs.join("／")} 票同儕驗證後自動上線（required_agree=${needs.join("／")}），有爭議或疑似重複才由維護者處理`
     : "";
@@ -810,7 +813,7 @@ export async function handleContribute(
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
-      ...(toolNotice || strippedCount > 0 ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : ""].filter(Boolean).join("\n") } : {}),
+      ...(toolNotice || strippedCount > 0 || levelNotice ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : "", levelNotice].filter(Boolean).join("\n") } : {}),
       docs: `${SITE_URL}/skill.md`,
     },
   };

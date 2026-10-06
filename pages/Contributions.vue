@@ -8,7 +8,8 @@ import MechanismNav from '../components/MechanismNav.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
-import { fetchHistory, type HistoryEntry } from '../lib/history'
+import { fetchHistory, type HistoryEntry, type HistorySource } from '../lib/history'
+import SourceMeta from '../components/SourceMeta.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { activityText, relativeTime } from '../lib/activity'
 import {
@@ -39,6 +40,8 @@ interface FeedItem {
   agent_name: string
   agent_tool: string | null
   source_urls: string[]
+  /** 同一批網址帶出處表的等級與存檔（#347 第二階段 A）；舊版端點沒有這一欄 */
+  sources?: HistorySource[]
   task_id: string | null
   created_at: string
   /** 最後一次變動（投票或狀態改變）的時間與內容；排序吃前者，畫面講後者 */
@@ -181,6 +184,13 @@ async function loadMore() {
   } finally {
     loadingMore.value = false
   }
+}
+
+/** 來源清單：端點有帶出處表的等級與存檔（sources）就用它；舊版端點只有網址，照舊列（沒有等級、沒有存檔） */
+function feedSources(it: { source_urls: string[]; sources?: HistorySource[] }) {
+  return it.sources && it.sources.length > 0
+    ? it.sources
+    : it.source_urls.map((url) => ({ url, kind: undefined, self_evidence: null, archive_url: null }))
 }
 
 // 展開一筆時再去拿驗證者清單、改動與裁決（history?target=contribution），列表本身維持輕量
@@ -335,8 +345,9 @@ usePageHead({
               <div>
                 <p class="text-xs font-bold text-slate-400 mb-1">來源</p>
                 <ul class="space-y-1">
-                  <li v-for="u in it.source_urls" :key="u">
-                    <a :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ hostOf(u) }}</a>
+                  <li v-for="s in feedSources(it)" :key="s.url" class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <a :href="s.url" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ hostOf(s.url) }}</a>
+                    <SourceMeta :kind="s.kind" :self-evidence="s.self_evidence" :archive-url="s.archive_url" />
                   </li>
                 </ul>
               </div>

@@ -7,6 +7,7 @@
 
 import { summarizeContribution } from "./contribution-summary.ts";
 import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
+import { fetchSourceBriefs, primaryUrlOf, type SourceBrief, type SourceView, viewFromList, viewSources } from "./source-read.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -40,6 +41,8 @@ export interface HistoryData {
   politician_names?: Record<string, string>;
   policy_titles?: Record<string, string>;
   election_labels?: Record<string, string>;
+  /** 交件的 source_urls 在出處表裡的等級、認定根據與存檔網址（#347 第二階段 A）；沒給就照網域自動判斷 */
+  source_briefs?: ReadonlyMap<string, SourceBrief>;
 }
 
 export interface HistoryVerifier { agent_name: string | null; agent_tool: string | null; verdict: string; note: string | null; evidence_url: string | null; resolved_politician_id: string | null; created_at: string }
@@ -55,6 +58,8 @@ export interface HistoryEntry {
   agent_name: string | null;
   agent_tool: string | null;
   source_urls: string[];
+  /** 同一批網址，帶出處表的等級（official／self／media／other）、認定根據與存檔網址；畫面用小標籤與「存檔」連結（#347 第二階段 A） */
+  sources: SourceView[];
   note: string | null;
   review_notes: string | null;
   created_at: string;
@@ -194,6 +199,7 @@ export function buildHistory(data: HistoryData): HistoryEntry[] {
         agent_name: c.agent_name,
         agent_tool: c.agent_tool,
         source_urls: c.source_urls ?? [],
+        sources: viewSources(c.source_urls, data.source_briefs ?? new Map()),
         note: c.note,
         review_notes: c.review_notes,
         created_at: c.created_at,
@@ -215,6 +221,8 @@ export interface HistoryOrigin {
   kind: "contributions" | "imported" | "unknown";
   note: string | null;
   source_url?: string | null;
+  /** 同一個出處帶等級與存檔網址（出處表的主要出處；出處表沒有才退回 policies.source_url，那時只有 url 與自動判斷的等級） */
+  source?: SourceView | null;
   source_notes?: string[];
 }
 
@@ -222,9 +230,16 @@ export interface HistoryOrigin {
 export function describeOrigin(target: HistoryTarget, row: Obj | null, electionNotes: string[], hasEntries: boolean): HistoryOrigin {
   if (hasEntries) return { kind: "contributions", note: null };
   if (target === "policy") {
-    const sourceUrl = typeof row?.source_url === "string" ? row.source_url : null;
+    // 出處表的主要出處優先；沒有（函式比 migration 早上線、或這條沒有出處列）才退回舊欄位 policies.source_url
+    const legacyUrl = typeof row?.source_url === "string" && row.source_url ? row.source_url : null;
+    const sourceUrl = primaryUrlOf(row?.sources) ?? legacyUrl;
     const ai = row?.ai_extracted === true;
-    return { kind: sourceUrl || ai ? "imported" : "unknown", note: ai ? "早期由 AI 搜尋匯入，尚未經過貢獻流程；來源見下方網址" : sourceUrl ? "由匯入資料建立，尚未經過 AI 貢獻流程；來源見下方網址" : "這筆資料尚未經過 AI 貢獻流程，也沒有記錄來源", source_url: sourceUrl };
+    return {
+      kind: sourceUrl || ai ? "imported" : "unknown",
+      note: ai ? "早期由 AI 搜尋匯入，尚未經過貢獻流程；來源見下方網址" : sourceUrl ? "由匯入資料建立，尚未經過 AI 貢獻流程；來源見下方網址" : "這筆資料尚未經過 AI 貢獻流程，也沒有記錄來源",
+      source_url: sourceUrl,
+      source: sourceUrl ? viewFromList(row?.sources, sourceUrl) : null,
+    };
   }
   if (target === "question") {
     // 訪客的提問：沒有任何處理紀錄時要講清楚，不要留白（2026-09-20：一題 Facebook 提問卡了八天，頁面只寫「正在查證」）
@@ -324,7 +339,7 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
       ? [String(c.payload.target_id)]
       : []
   ))];
-  const [votes, edits, adjudications, tasks, originRow, names, titles, elecRows] = await Promise.all([
+  const [votes, edits, adjudications, tasks, originRow, names, titles, elecRows, sourceBriefs] = await Promise.all([
     // 1000 是伺服器上限（PostgREST max-rows），寫 2000 拿不到更多、只會讓人以為有保護。
     // 實測一筆查核履歷的票與 edit 最多 61 筆（2026-09-18 算過最壞情況）。
     supabase.from("contribution_votes").select(VOTE_COLUMNS).in("contribution_id", ids).limit(1000),
@@ -337,6 +352,8 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     electionRowIds.length > 0
       ? supabase.from("politician_elections").select("id, election_id, election_type, politicians(name)").in("id", electionRowIds)
       : Promise.resolve({ data: [], error: null }),
+    // 交件的網址在出處表的等級與存檔網址（#347 第二階段 A）；出處表拿不到就是空表，照網域自動判斷
+    fetchSourceBriefs(supabase, contributions.flatMap((c) => c.source_urls ?? [])),
   ]);
   return {
     contributions,
@@ -353,13 +370,22 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     ]))),
     origin_row: originRow.row,
     election_notes: originRow.notes,
+    source_briefs: sourceBriefs,
   };
 }
 
 async function originRowFor(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<{ row: Obj | null; notes: string[] }> {
   if (target === "policy") {
     const res = await supabase.from("policies").select("id, title, source_url, ai_extracted, proposed_date").eq("id", id).maybeSingle();
-    return { row: (res.data as Obj | null) ?? null, notes: [] };
+    const row = (res.data as Obj | null) ?? null;
+    if (row) {
+      // 出處表的出處清單（主要在前）；RPC 還不存在或出錯就不帶，describeOrigin 退回舊欄位 source_url
+      try {
+        const listed = await supabase.rpc("source_brief_list", { p_table: "policies", p_id: id });
+        if (!listed.error && Array.isArray(listed.data)) row.sources = listed.data;
+      } catch { /* 退回舊欄位 */ }
+    }
+    return { row, notes: [] };
   }
   if (target === "question") {
     const res = await supabase.from("citizen_questions").select("id, question, status, answer_count, created_at").eq("id", id).maybeSingle();

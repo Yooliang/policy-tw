@@ -9,6 +9,7 @@ import { normalizeCorrection } from "./correction.ts";
 import { normalizeSeatDistrict } from "./district-seats.ts";
 import { fetchAllRows } from "./fetch-all.ts";
 import { fetchVerificationSources, needsForTask, sourcesForTask, type TaskSourceHint } from "./verification-sources.ts";
+import { overlayPrimarySources } from "./source-read.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -803,7 +804,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if ((taskType === "progress_stale" || taskType === "policy_source_missing" || taskType === "policy_validity" || taskType === "policy_election_missing" || taskType === "policy_election_mismatch" || isNewsItemTask(taskType, target)) && policyId) {
     const [pl, logs] = await Promise.all([
       supabase.from("policies").select("*").eq("id", policyId).maybeSingle(),
-      supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
+      supabase.from("tracking_logs").select("id, date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS),
     ]);
     data.policy = pl.data ?? null;
     data.tracking_logs = logs.data ?? [];
@@ -822,7 +823,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // query-bounds: ok — 一條政見最多三列（policy_id, element 唯一）
       supabase.from("policy_elements").select("element, stated, text, deadline_date, source_url, source_locator, updated_at").eq("policy_id", policyId).limit(3),
       taskType === "deadline_due"
-        ? supabase.from("tracking_logs").select("date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS)
+        ? supabase.from("tracking_logs").select("id, date, event, description, source_url").eq("policy_id", policyId).order("date", { ascending: false }).limit(MAX_TRACKING_LOGS)
         : Promise.resolve({ data: [] }),
     ]);
     data.policy = pl.data ?? null;
@@ -915,6 +916,9 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       console.error("verification_sources:", e instanceof Error ? e.message : String(e));
     }
   }
+  // 政見與進度紀錄的 source_url 改讀出處表的主要出處（#347 第二階段 A）；出處表沒有就保留舊欄位的值。
+  // 出處表出錯不擋派工（overlayPrimarySources 自己吞掉錯誤）
+  await overlayPrimarySources(supabase, data as Obj);
   return data;
 }
 

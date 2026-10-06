@@ -7,7 +7,7 @@ import type {
   RegionStats, ElectoralDistrictArea, ElectionTypeTableRow, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
-  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin, PoliticianTerm,
+  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin, PoliticianTerm, SourceRef,
 } from '../types'
 import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
@@ -19,6 +19,7 @@ import { currentElection, taipeiDay } from '../lib/election-list'
 import { normalizeRegionName, regionNameVariants } from '../lib/region-name'
 import { DIRECTORY_POSITION_TYPES, toDirectoryPerson, type DirectoryPerson, type RawDirectoryRow } from '../lib/township-directory'
 import { mapPolicyElements } from '../lib/policy-elements'
+import { mapSourceRefs, primarySourceUrl } from '../lib/sources'
 import type { DirectoryGroup, DirectoryGroupSummary } from '../lib/people-directory'
 import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
@@ -297,6 +298,8 @@ function getPoliticianElectionData(
 
 
 export function mapPolicy(row: RawPolicy): Policy {
+  // 出處（#347 第二階段 A）：出處表優先（有等級、存檔網址），舊欄位 source_url 是退路——視圖還沒有 sources 欄時補一筆沒有等級的
+  const sources = mapSourceRefs(row.sources, row.source_url)
   return {
     id: row.id,
     politicianId: row.politician_id,
@@ -308,7 +311,8 @@ export function mapPolicy(row: RawPolicy): Policy {
     proposedDate: row.proposed_date ?? null,
     lastUpdated: row.last_updated,
     updatedAt: row.updated_at,
-    sourceUrl: row.source_url || undefined,
+    sourceUrl: primarySourceUrl(sources, row.source_url),
+    ...(sources.length > 0 ? { sources } : {}),
     progress: row.progress,
     tags: row.tags || [],
     aiAnalysis: row.ai_analysis || undefined,
@@ -321,6 +325,7 @@ export function mapPolicy(row: RawPolicy): Policy {
       date: l.date,
       event: l.event,
       description: l.description || undefined,
+      ...mapLogSources(l),
     })),
     relatedPolicyIds: (row.related_policy_ids || []).filter((id): id is string => typeof id === 'string'),
     // 政見三要素（#364）：視圖沒有這一欄時是 undefined，畫面一律當成三個都未調查
@@ -330,6 +335,13 @@ export function mapPolicy(row: RawPolicy): Policy {
     ...(mapLineageSummary(row.lineage) ? { lineage: mapLineageSummary(row.lineage) } : {}),
     ...(isPolicyOrigin(row.origin) ? { origin: row.origin } : {}),
   }
+}
+
+/** 進度紀錄的出處：出處表優先，舊欄位 tracking_logs.source_url 是退路；兩邊都沒有就不多欄位（快照不長出空欄） */
+function mapLogSources(l: RawTrackingLog): { sourceUrl?: string; sources?: SourceRef[] } {
+  const sources = mapSourceRefs(l.sources, l.source_url)
+  if (sources.length === 0) return {}
+  return { sourceUrl: primarySourceUrl(sources, l.source_url), sources }
 }
 
 const isPolicyOrigin = (v: unknown): v is PolicyOrigin => v === 'pledge' || v === 'policy_address' || v === 'assembly' || v === 'budget'

@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { contributionScore, SCORE_COLUMNS } from "../_shared/contribution-score.ts";
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
+import { fetchSourceBriefs, viewSources } from "../_shared/source-read.ts";
 
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
@@ -139,6 +140,10 @@ Deno.serve(async (req) => {
       for (const w of (who ?? []) as any[]) nameById.set(w.id, w.name);
     }
 
+    // 交件的網址在出處表的等級、認定根據與存檔網址（#347 第二階段 A）；拿不到就照網域自動判斷
+    // deno-lint-ignore no-explicit-any
+    const sourceBriefs = await fetchSourceBriefs(supabase, page.flatMap((r: any) => (Array.isArray(r.source_urls) ? r.source_urls : [])));
+
     const items = page.map((r) => {
       const raw = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
       const hasName = typeof raw.name === "string" && raw.name.trim().length > 0;
@@ -179,6 +184,7 @@ Deno.serve(async (req) => {
         agent_name: r.agent_name,
         agent_tool: r.agent_tool,
         source_urls: r.source_urls ?? [],
+        sources: viewSources(r.source_urls, sourceBriefs),
         task_id: r.task_id,
         created_at: r.created_at,
         last_activity_at: r.last_activity_at ?? r.created_at,
