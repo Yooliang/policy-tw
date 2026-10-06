@@ -16,6 +16,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   // 2026-10-05 起這個型別也派「補縣市／補選區／補鄉鎮」（缺什麼看任務說明），名稱不再只講出處
   candidacy_source_missing: '參選紀錄待補',
   election_result_missing: '缺選舉結果',
+  // 2026-10-06：一個單位（屆別×選舉×縣市或鄉鎮）的結果一次補
+  election_results_missing: '整批補選舉結果',
   policy_election_missing: '政見缺屆別',
   policy_election_mismatch: '政見屆別對不上',
   roster_check: '名單清查',

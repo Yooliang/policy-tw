@@ -123,6 +123,8 @@ Deno.test("payload 形狀提到的欄位，schema 裡要真的有（拼錯的欄
     "source_urls", "current_value", "correct_value", "policies_total", "not_found",
     // 政策脈絡（#349）與政見來源的「值」：角色、依據、關聯方向、origin 的選項，不是欄位名
     "co_proposer", "official_record", "self_claim", "top_down", "bottom_up", "policy_address",
+    // 選舉結果的值（election_results 的 items 每項二選一）
+    "not_elected",
   ]);
   for (const [type, shape] of Object.entries(PAYLOAD_SHAPE)) {
     const known = all[type];

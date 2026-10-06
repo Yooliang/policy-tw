@@ -320,6 +320,23 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 整批補選舉結果（2026-10-06）：出錯的方式是「不是這個單位的結果表」與「同名不同人沒分辨」
+  // （系統票已經逐位核對中選會名單；這兩維是影子模式，跟其他型別一樣只記錄）
+  election_results: [
+    {
+      key: "not_the_unit",
+      instructions: "附的來源是不是這一屆、這種選舉、這個縣市（或鄉鎮）的中選會選舉結果？別屆、別縣市的結果表或只是新聞報導都不算。",
+      hit: { key: "other_unit", means: "不是這個單位的結果：別屆、別縣市、別種選舉，或只是新聞報導" },
+      miss: { key: "the_unit", means: "是這一屆這個單位這種選舉的中選會結果" },
+    },
+    {
+      key: "identity_unchecked",
+      instructions: "交件有沒有分辨同名不同人？看 note 有沒有交代核對了選區、村里或出生年，或把對不上的人排除在外。",
+      hit: { key: "unchecked", means: "看不出有分辨同名不同人，像是只照姓名對" },
+      miss: { key: "checked", means: "有交代怎麼分辨同名不同人，或對不上的已經排除" },
+    },
+  ],
+
   // 政見三要素（#364，2026-10-05）：影子模式一樣只記錄。要防的是「幫候選人補數字」與「把沒查當成沒寫」
   policy_elements: [
     {

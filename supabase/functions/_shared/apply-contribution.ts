@@ -36,6 +36,7 @@ import {
   participantPhrase, participantValues,
 } from "./lineage.ts";
 import { careerSourceNote } from "./politician-careers.ts";
+import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -1363,6 +1364,64 @@ async function applyPartyInfo(supabase: SupabaseLike, row: ContributionRow): Pro
 }
 
 /**
+ * 整批補已投票選舉的結果（2026-10-06）：一個單位一筆，items 每位寫一次 politician_elections.election_result。
+ *
+ * - **只補空白、不覆蓋**（planElectionResults）：已經有不同結果的那一位跳過、回覆講出來（要改走一位一筆的 candidacy／correction）
+ * - 參選紀錄不是這一屆這種選舉的跳過（交件已擋過，等票期間被改了才會碰到）
+ * - 同一個結果寫一次 UPDATE（當選一批、落選一批），每一位各記一筆 edit_history，整筆可還原
+ * - 參選狀態（candidacy_status）由 #376 的觸發器同步、任期由 #377 的觸發器建，這裡不另外寫
+ */
+async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const electionId = int(p.election_id);
+  const electionType = str(p.election_type);
+  const items = resultItems(p);
+  if (!electionId || !electionType || items.length === 0) return { status: "failed", message: "缺 election_id／election_type，或 items 是空的" };
+
+  // query-bounds: ok — 一筆最多 MAX_RESULTS_PER_SUBMISSION（120）位，按主鍵取
+  const { data: existing, error: readError } = await supabase.from("politician_elections")
+    .select("id, election_id, election_type, election_result")
+    .in("id", items.map((it) => it.politician_election_id)).limit(MAX_RESULTS_PER_SUBMISSION + 10);
+  throwIf(readError, "politician_elections read");
+  const plan = planElectionResults((existing ?? []) as ExistingCandidacy[], items, electionId, electionType);
+  if (plan.writes.length === 0) {
+    const why = [
+      plan.unchanged.length > 0 ? `${plan.unchanged.length} 位已經是同一個結果（別人先補了）` : "",
+      plan.conflicts.length > 0 ? `${plan.conflicts.length} 位已經有不同的結果，沒有覆蓋` : "",
+      plan.stray.length > 0 ? `${plan.stray.length} 位的參選紀錄不是這一屆這種選舉` : "",
+    ].filter(Boolean).join("、");
+    return { status: "superseded", message: `這一筆沒有要寫的：${why || "沒有結果空白的人"}` };
+  }
+  const before = new Map(((existing ?? []) as ExistingCandidacy[]).map((e) => [e.id, e.election_result ?? null]));
+  const written: Array<{ id: number; election_result: string }> = [];
+  for (const result of ["elected", "not_elected"] as const) {
+    const ids = plan.writes.filter((w) => w.election_result === result).map((w) => w.id);
+    if (ids.length === 0) continue;
+    // 只寫還空著的（等票期間別人可能先補了；照 is null 再篩一次，不覆蓋）
+    // 履歷只記真的寫進去的那幾列
+    const { data: updated, error } = await supabase.from("politician_elections").update({ election_result: result })
+      .in("id", ids).is("election_result", null).select("id");
+    throwIf(error, "politician_elections results update");
+    for (const u of (updated ?? []) as Array<{ id: number }>) {
+      written.push({ id: u.id, election_result: result });
+      await recordUpdate(supabase, ctx, "politician_elections", String(u.id), "election_result", before.get(u.id) ?? null, result);
+    }
+  }
+  if (written.length === 0) return { status: "superseded", message: `${resultsUnitLabel(p)} 這幾位的結果在等票期間已經被別人補上了，不重複寫入` };
+  const elected = written.filter((w) => w.election_result === "elected").length;
+  const notes = [
+    plan.unchanged.length > 0 ? `${plan.unchanged.length} 位已經是同一個結果、略過` : "",
+    plan.conflicts.length > 0 ? `${plan.conflicts.length} 位已經有不同的結果、沒有覆蓋（參選紀錄 ${plan.conflicts.map((c) => c.id).join("、")}；要改請一位一筆用 candidacy 交）` : "",
+    plan.stray.length > 0 ? `${plan.stray.length} 位的參選紀錄不是這一屆這種選舉、略過（${plan.stray.join("、")}）` : "",
+  ].filter(Boolean);
+  return {
+    status: "applied",
+    message: `${resultsUnitLabel(p)} 選舉結果已補 ${written.length} 位（當選 ${elected}、落選 ${written.length - elected}）${notes.length > 0 ? `；${notes.join("；")}` : ""}`,
+  };
+}
+
+/**
  * 移除一筆明顯不該存在的資料。
  *
  * 刻意做成軟移除：打上 removed_at 讓它從網站消失，資料與整條查核履歷都留著。
@@ -1824,6 +1883,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "roster_check": return await applyRosterCheck(supabase, row);
     case "district_seats": return await applyDistrictSeats(supabase, row);
     case "party_info": return await applyPartyInfo(supabase, row);
+    case "election_results": return await applyElectionResults(supabase, row);
     case "policy_elements": return await applyPolicyElements(supabase, row);
     case "lineage": return await applyLineage(supabase, row);
     case "lineage_participants": return await applyLineageParticipants(supabase, row);

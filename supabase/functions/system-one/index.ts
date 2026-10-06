@@ -18,6 +18,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
  *                                                        支不支持宣稱，寫 jev_decisions 後重算共識。守法同 backfill。
  *   ?action=extract  POST { task_id, url }          代理替 election_result_missing／candidate_status_stale 任務找到「第一來源」後，
  *                                                  讓 Jev 從那一頁選值（有限域欄位）。不帶金鑰，同 judge 的配額。回建議的 contribution。
+ *   ?action=results_batch POST                           整批補選舉結果的系統票：逐位核對中選會名單（SQL），全部對得上才投（2026-10-06）。不帶金鑰、冪等。
  *   ?action=news_screen POST                             新聞逐則初篩：沒人名的直接記無關，有人名的問 Jev 是哪條政見的進度／新承諾／無關，
  *                                                        有關的開 news_sweep 任務（2026-09-29）。news-fetch 收完就叫。守法同 backfill。
  *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
@@ -828,6 +829,17 @@ Deno.serve(async (req) => {
         report.push({ url, rows_parsed: rows.length, checked: group.length, passed: check.passed.length, failed: check.failed.length });
       }
       return json({ success: true, candidates: list.length, report });
+    }
+
+    // ---- results_batch：整批補選舉結果（election_results）的系統票（2026-10-06，小良哥：「改批次，票數 2 票，讓 jev 扣下來」）----
+    // 逐位核對中選會名單（cec_candidates），全部對得上投 supported（目標 2−1＝1）、任何一位對不上不投票。
+    // 不用 Jev 讀網頁：比對是純資料，規則只在 SQL 一份（election_results_system_check／election_result_cec_matches）。
+    // 排程 results-batch-10min 叫；冪等（核過的不再核），不帶金鑰也只會把還沒核的核掉
+    if (action === "results_batch") {
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 200);
+      const { data, error } = await supabase.rpc("election_results_check_pending", { p_limit: limit });
+      if (error) throw new Error(`election_results_check_pending: ${error.message}`);
+      return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
     }
 
     // ---- costs：AI 判定帳戶的儲值與已用，存給捐款頁（2026-09-24）。排程每 15 分鐘；不回任何金鑰相關內容 ----

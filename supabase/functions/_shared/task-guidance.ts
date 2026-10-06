@@ -116,6 +116,16 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected（得票數、得票率不收，不用查）。" +
     "**這筆是承諾追蹤的前提**——不知道有沒有當選，就沒辦法問承諾兌現了沒有。查不到官方結果不要猜，用 no_change。",
 
+  // 整批補選舉結果（2026-10-06）：一個單位一件、一筆交完。系統票是「每一位都對得上中選會名單」才投，
+  // 所以代理要做的是逐位核對、只交核對過的；對不上的留在 note，別猜
+  election_results_missing:
+    "這是**一整個單位**（一屆、一種選舉、一個縣市；村里長與代表到鄉鎮市區）還沒補的選舉結果，名單在 items：每一位附系統比對到的中選會那一列（cec），**那是線索不是答案**。" +
+    "打開中選會選舉資料庫這個單位的結果表（db.cec.gov.tw，依屆別、選舉、縣市點進去），逐位核對：是不是同一個人（同名不同人看選區、村里、出生年）、當選還是落選。" +
+    "核對過的交進**一筆** election_results：election_id／election_type／region／sub_region 照 target 帶，items 每位一項 {politician_election_id, election_result：elected 或 not_elected}。" +
+    "**核對不了、或不是同一個人的不要放進 items**，在 note 寫是哪幾位、為什麼——系統會逐位跟中選會名單比，整批都對得上才投系統票，放一位猜的進來整批就要多等一張票。" +
+    "這一件只補結果，**不要順手改參選狀態、地區或姓名**；得票數、得票率不收。source_urls 第一個放你核對的中選會那一頁。" +
+    "整個單位都查不到（中選會那一頁打不開、名單上一個都對不上）才回 no_change，finding 寫你看了哪幾頁。",
+
   policy_election_missing:
     "這筆政見沒標所屬屆別，網站上顯示「未標註屆別」。打開 source_url 確認是哪一場選舉的承諾，用 correction 把 policies.election_id 改成該年份。" +
     "**同一個人可能多屆都選過，來源沒寫清楚就不要猜**，用 no_change 回報。" +
@@ -305,6 +315,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：region、election_id、election_type、ours_count、cec_count、submitted、note。",
   district_seats:
     "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
+  election_results:
+    "payload：election_id、election_type、region、sub_region（四個照任務 target 原樣帶回；target 沒有 sub_region 就不填）、" +
+    "items（你核對過的每一位一項 {politician_election_id：current.items 裡那一位的參選紀錄 id、election_result：elected 當選／not_elected 落選}，一筆最多 120 位）、" +
+    "note（沒放進 items 的是哪幾位、為什麼；選填）。source_urls 第一個放中選會選舉資料庫那一頁。",
   task_suggestion:
     "payload：title、description、task_type、region，可帶 target_politician_id／target_policy_id／hint_sources。",
   // 政黨資訊（#346 第二階段）
@@ -535,6 +549,20 @@ function buildPayload(
           ? known.map((d) => ({ district: d.district, seats: "（公告的應選名額）", ...(d.kind && d.kind !== "district" ? { kind: d.kind } : {}) }))
           : [{ district: "（公告上的選舉區）", seats: "（公告的應選名額）" }],
         note: "（公告上沒有的選舉區、或其他要說明的；沒有就刪掉這一欄）",
+      };
+    }
+    case "election_results": {
+      // 單位四欄照 target 填好；items 先列出每一位的參選紀錄 id，結果留給代理照中選會填（不預填系統的線索——照抄等於沒核對）
+      const ids = Array.isArray(t.politician_election_ids) ? (t.politician_election_ids as unknown[]) : [];
+      return {
+        election_id: t.election_id ?? "（選舉年份）",
+        election_type: t.election_type ?? "（選舉類型）",
+        region: t.region ?? "（縣市）",
+        ...(t.sub_region ? { sub_region: t.sub_region } : {}),
+        items: ids.length > 0
+          ? ids.map((id) => ({ politician_election_id: id, election_result: "（elected 或 not_elected；核對不了就把這一項整個拿掉）" }))
+          : [{ politician_election_id: "（current.items 裡那一位的參選紀錄 id）", election_result: "（elected 或 not_elected）" }],
+        note: "（沒放進 items 的是哪幾位、為什麼；都放了就刪掉這一欄）",
       };
     }
     case "policy_elements": {

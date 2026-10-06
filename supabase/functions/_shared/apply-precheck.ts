@@ -19,6 +19,7 @@ import { electionTypeSwitch } from "./candidate-import.ts";
 import { linkLevelProblem } from "./lineage.ts";
 import { loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
+import { resultItems } from "./election-results.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -127,6 +128,30 @@ async function lookupTasks(supabase: SupabaseLike, ids: readonly string[]): Prom
     for (const r of (data ?? []) as Array<{ id: string }>) rows.add(r.id);
   } catch (e) {
     console.error("precheck contribution_tasks lookup threw:", e instanceof Error ? e.message : String(e));
+    return { rows, ok: false };
+  }
+  return { rows, ok: true };
+}
+
+interface ResultCandidacy { election_id: number; election_type: string | null; county: string | null; name: string | null }
+
+/** 整批補選舉結果的參選紀錄（含所在縣市：參選紀錄的地區，沒有才看人物的） */
+async function lookupResultCandidacies(supabase: SupabaseLike, ids: readonly number[]): Promise<LookupResult<Map<number, ResultCandidacy>>> {
+  const rows = new Map<number, ResultCandidacy>();
+  if (ids.length === 0) return { rows, ok: true };
+  try {
+    // 一批 20 筆、每筆最多 120 位：切成 100 個一段，網址才不會超長
+    for (let i = 0; i < ids.length; i += 100) {
+      // query-bounds: ok — ids 來自這一批交件、每段 100 個，按主鍵取
+      const { data, error } = await supabase.from("politician_elections")
+        .select("id, election_id, election_type, regions(region), politicians(name, region)").in("id", ids.slice(i, i + 100)).limit(100);
+      if (error) { console.error("precheck result candidacies lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ id: number; election_id: number; election_type: string | null; regions?: { region?: string | null } | null; politicians?: { name?: string | null; region?: string | null } | null }>) {
+        rows.set(Number(r.id), { election_id: r.election_id, election_type: r.election_type, county: r.regions?.region ?? r.politicians?.region ?? null, name: r.politicians?.name ?? null });
+      }
+    }
+  } catch (e) {
+    console.error("precheck result candidacies lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
   }
   return { rows, ok: true };
@@ -260,13 +285,21 @@ export async function precheckApplyTargets(
     }
   }
 
-  const [politicians, policies, electionRows, tasks, participations, lineages] = await Promise.all([
+  // 整批補選舉結果（2026-10-06）：每一位的參選紀錄要在、而且是這一屆這種選舉這個縣市的
+  const resultIds = new Set<number>();
+  for (const { item } of entries) {
+    if (item.contribution_type !== "election_results") continue;
+    for (const it of resultItems(item.payload)) resultIds.add(it.politician_election_id);
+  }
+
+  const [politicians, policies, electionRows, tasks, participations, lineages, resultRows] = await Promise.all([
     lookupPoliticians(supabase, [...politicianIds]),
     lookupPolicies(supabase, [...policyIds]),
     lookupElectionRows(supabase, [...electionRowIds]),
     lookupTasks(supabase, [...taskIds]),
     lookupParticipations(supabase, [...new Set(candidacyChecks.map((c) => c.politicianId))], [...new Set(candidacyChecks.map((c) => c.electionId))]),
     lookupLineages(supabase, [...lineageIds]),
+    lookupResultCandidacies(supabase, [...resultIds]),
   ]);
   const politicianRows = politicians.rows, policyRows = policies.rows, electionRowExists = electionRows.rows, taskRows = tasks.rows;
   const lineageRows = lineages.rows;
@@ -398,6 +431,23 @@ export async function precheckApplyTargets(
           const pid = str(p[k]);
           if (pid) checkPolitician(i, pid, `payload.${k}`, "記不了交接");
         }
+        break;
+      }
+      case "election_results": {
+        if (!resultRows.ok) break;
+        const electionId = int(p.election_id), electionType = str(p.election_type);
+        const county = (str(p.region) ?? "").replace(/臺/g, "台");
+        const missing: number[] = [], stray: string[] = [];
+        for (const it of resultItems(p)) {
+          const row = resultRows.rows.get(it.politician_election_id);
+          if (!row) { missing.push(it.politician_election_id); continue; }
+          const rowCounty = (row.county ?? "").replace(/臺/g, "台");
+          if (row.election_id !== electionId || row.election_type !== electionType || (rowCounty && county && rowCounty !== county)) {
+            stray.push(`${it.politician_election_id}（${row.name ?? "?"}：${row.election_id} ${row.election_type ?? ""} ${rowCounty}）`);
+          }
+        }
+        if (missing.length > 0) problems.push({ index: i, code: "target_not_found", path: "payload.items", message: `找不到這些參選紀錄：${missing.join("、")}——請照 current.items 的 politician_election_id 帶` });
+        if (stray.length > 0) problems.push({ index: i, code: "apply_would_fail", path: "payload.items", message: `這些參選紀錄不是 ${electionId} ${electionType ?? ""} ${county} 的，這一筆只收同一個單位的人：${stray.join("、")}` });
         break;
       }
       case "lineage_link": {

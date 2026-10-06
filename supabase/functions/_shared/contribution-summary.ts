@@ -48,6 +48,7 @@ export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
 ]);
 import { normalizeCorrection } from "./correction.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
+import { resultItems, resultsUnitLabel } from "./election-results.ts";
 import { elementPhrase } from "./policy-elements.ts";
 import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
 
@@ -246,6 +247,13 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const ds = Array.isArray(p.districts) ? (p.districts as Array<Record<string, unknown>>) : [];
       const total = ds.reduce((n, d) => n + (typeof d.seats === "number" ? d.seats : 0), 0);
       summary = `補 ${str(p.region)} ${str(p.election_id)} ${str(p.election_type)} 應選名額：${ds.length} 個選舉區、共 ${total} 席`;
+      targetName = null;
+      break;
+    }
+    case "election_results": {
+      const items = resultItems(p);
+      const elected = items.filter((it) => it.election_result === "elected").length;
+      summary = `補 ${resultsUnitLabel(p)} 的選舉結果：${items.length} 位（當選 ${elected}、落選 ${items.length - elected}）`;
       targetName = null;
       break;
     }
