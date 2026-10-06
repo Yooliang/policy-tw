@@ -9,16 +9,15 @@ import HeroAction from '../components/HeroAction.vue'
 import { PolicyStatus, ElectionType, type Politician } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
-import PoliticianDropdown from './election/PoliticianDropdown.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
-import PolicyCompare from '../components/PolicyCompare.vue'
-import { gridCompareGroups } from '../lib/policy-compare'
+import PolicyPk from './election/PolicyPk.vue'
+import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkQuery } from '../lib/policy-compare'
 import Hero from '../components/Hero.vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
-  Search, Layers, LayoutGrid, Clock, Scale, Swords,
+  Search, Layers, LayoutGrid, Clock, Scale,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
   Crown, ScrollText, ArrowUpDown } from 'lucide-vue-next'
 
@@ -32,8 +31,8 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { classifyWard } from '../lib/ward-classification'
 import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
-import { groupByVillage, UNLABELED_VILLAGE } from '../lib/village-grouping'
-import { districtsOf, groupByDistrict, UNLABELED_DISTRICT } from '../lib/district-grouping'
+import { groupByVillage } from '../lib/village-grouping'
+import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
@@ -203,9 +202,16 @@ const VIEW_TABS: Array<{ key: ElectionViewMode; label: string; short: string; ic
 ]
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
-const comparisonLevel = ref<ElectionType>(ElectionType.MAYOR)
+/**
+ * 政見 PK 的職位（網址 type）。空字串＝沒指定，自動選這一頁第一個有政見可比的職位（pkLevel）——
+ * 2026-10-06 以前預設是縣市長，鄉鎮頁、或縣市長還沒有政見的縣市頁，PK 一打開（以及預渲染的 HTML）是空的。
+ */
+const comparisonLevel = ref<string>('')
+/** 政見 PK 選的是哪一場（組名，例如「第08選舉區」；空字串＝這一頁這個職位的第一場）與勾了誰（人物 id 以逗號隔開；空字串＝這一場全部）。2026-10-06 */
+const comparisonDistrict = ref('')
+const comparisonPick = ref('')
 
-// 縣市／鄉鎮／村里／頁籤／PK 層級 ↔ 網址，可貼連結直達
+// 縣市／鄉鎮／村里／頁籤／PK 層級、選區、勾選 ↔ 網址，可貼連結直達（PK 的參數規則在 lib/policy-compare.ts 的 pkQuery）
 // 縣市與鄉鎮在路徑上（/election/2022/嘉義縣/大林鎮，鄉鎮 2026-10-05 起），村里／頁籤仍是 query（?village=&view=&type=）；
 // 舊的 ?region=、?sub= 進來會換成路徑的寫法（正見.tw 上 Worker 已經先 301 過了，這裡接住 web.app 與站內舊連結）
 useRegionQuerySync({
@@ -219,7 +225,10 @@ useRegionQuerySync({
   village: selectedVillage,
   extra: {
     view: queryField(viewMode, 'politicians', { allowed: VIEW_MODES }),
-    type: queryField(comparisonLevel, ElectionType.MAYOR, { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
+    type: queryField(comparisonLevel, '', { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
+    // 順序要在 type 後面：套網址時一個欄位設完才設下一個
+    district: queryField(comparisonDistrict, '', { when: () => viewMode.value === 'comparison' }),
+    pick: queryField(comparisonPick, '', { when: () => viewMode.value === 'comparison' }),
   },
 })
 
@@ -573,15 +582,25 @@ function sectionsOf(types: readonly string[]): LevelSection[] {
 const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
 
 /**
- * 政見並排比較（#364）：卡片排法的職位要先拆成「同一場」（縣市長一個縣市一場、立委一個選區一場…，
- * 規則在 lib/policy-compare.ts）；依選區、依村里分組的職位已經分好，只要跳過「選區待補」「未標示里別」——
- * 那一組的人不知道是不是同一場。
+ * 區塊標題列的「政見 PK」按鈕（2026-10-06 小良哥：取代區塊底下的並排比較，功能併進 PK 頁籤）。
+ * 連到這一頁的 PK 頁籤、選好這個職位與這一場、帶入這一組全部的參選人；真連結，預渲染的 HTML 裡就有。
+ *   卡片排法的區塊可能含好幾場（縣市頁的立委好幾個選區、鄉鎮市長好幾個鄉鎮）：只有一場就帶那一場，好幾場就只帶職位、到 PK 再選
+ *   分組排法的區塊（議員依選區、村里長依里）：每一組各一顆，帶那一組；「選區待補」「未標示里別」不知道是哪一場，不給
+ *   同一場不到兩位會出現在選票上的人：沒有 PK 可看，不給
  */
-function compareGroupsOf(section: LevelSection) {
-  return gridCompareGroups(section.people, section.spec.type)
+function pkLink(type: string, district?: string): RouteLocationRaw {
+  return { path: electionPath(electionId.value, selectedRegion.value, selectedSubRegion.value), query: pkQuery(type, district) }
 }
-function isComparableGroup(label: string): boolean {
-  return label !== UNLABELED_DISTRICT && label !== UNLABELED_VILLAGE
+function sectionPkLink(section: LevelSection): RouteLocationRaw | undefined {
+  const groups = pkGroups(section.people, section.spec.type).filter(hasPk)
+  if (groups.length === 0) return undefined
+  return pkLink(section.spec.type, groups.length === 1 ? groups[0].label : undefined)
+}
+function groupPkLinkFor(type: string) {
+  return (group: { label: string; people: Politician[] }): RouteLocationRaw | undefined => {
+    const g = pkGroups(group.people, type).find(x => x.label === group.label.trim())
+    return hasPk(g) ? pkLink(type, g!.label) : undefined
+  }
 }
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 
@@ -767,8 +786,10 @@ watch([() => selectedIssueCategory.value, () => selectedRegion.value, () => sele
 // Comparison mode
 /** 選區是整個縣市（或全國）的層級：鄉鎮篩選對它沒有意義，不套用（2026-09-22：台東縣＋大武鄉把縣市長 PK 篩成空池） */
 const COUNTY_WIDE_LEVELS: readonly string[] = [ElectionType.PRESIDENT, ElectionType.MAYOR]
+/** 套上這一屆資料的候選人（號次、選區要是這一屆的，不是人物最近一屆的） */
+const currentElectionPoliticians = computed(() => electionPoliticians.value.map(withCurrentElectionData))
 function poolForLevel(level: ElectionType) {
-  return electionPoliticians.value.filter(c => {
+  return currentElectionPoliticians.value.filter(c => {
     const type = getElectionType(c)
     if (!(type === level || (!type && level === ElectionType.MAYOR))) return false
     if (selectedRegion.value !== 'All' && !sameRegionName(c.region, selectedRegion.value)) return false
@@ -784,7 +805,7 @@ function poolForLevel(level: ElectionType) {
     return true
   })
 }
-const comparisonPool = computed(() => poolForLevel(comparisonLevel.value))
+const comparisonPool = computed(() => poolForLevel(pkLevel.value))
 /** 目前地區各層級有幾個人可以 PK；只列有人的層級，頁籤上帶人數（全部 0 才退回全部，讓使用者看得出是資料還沒有） */
 const levelCounts = computed(() => new Map(electionLevels.value.map(l => [l.type, poolForLevel(l.type).length])))
 const visibleLevels = computed(() => {
@@ -793,30 +814,39 @@ const visibleLevels = computed(() => {
 })
 /** 鄉鎮篩選對全縣層級沒作用時說一句，不然使用者會以為大武鄉的縣長候選人就是這幾位 */
 const subRegionIgnoredNote = computed(() =>
-  selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && COUNTY_WIDE_LEVELS.includes(comparisonLevel.value)
-    ? `${comparisonLevel.value}是全${selectedRegion.value.endsWith('市') ? '市' : '縣'}選舉，「${selectedSubRegion.value}」的篩選在這一層不套用；要看該鄉鎮的選區請切到議員或鄉鎮層級`
+  selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && COUNTY_WIDE_LEVELS.includes(pkLevel.value)
+    ? `${pkLevel.value}是全${selectedRegion.value.endsWith('市') ? '市' : '縣'}選舉，「${selectedSubRegion.value}」的篩選在這一層不套用；要看該鄉鎮的選區請切到議員或鄉鎮層級`
     : ''
 )
 
-const politicianAId = ref<string | number>('')
-const politicianBId = ref<string | number>('')
-
-watch([() => selectedRegion.value, () => selectedSubRegion.value, () => comparisonLevel.value], () => {
-  if (comparisonPool.value.length > 0) {
-    politicianAId.value = comparisonPool.value[0].id
-    politicianBId.value = comparisonPool.value.length > 1 ? comparisonPool.value[1].id : comparisonPool.value[0].id
-  } else {
-    politicianAId.value = ''
-    politicianBId.value = ''
-  }
-}, { immediate: true })
-
-const politicianA = computed(() => politicians.value.find(c => String(c.id) === String(politicianAId.value)))
-const politicianB = computed(() => politicians.value.find(c => String(c.id) === String(politicianBId.value)))
-
-const getPledge = (cId: string | number, category: string) =>
-  policies.value.find(p => String(p.politicianId) === String(cId) && p.status === PolicyStatus.CAMPAIGN && belongsToThisElection(p) && (p.category === category || issueTagsOf(p, electionPoliticianNames.value).includes(category)))
-
+/**
+ * 政見 PK（2026-10-06 改成多人）：這一頁這個職位分成一場一場（lib/policy-compare.ts 的 pkGroups，只留至少兩位的），
+ * 網址選的那一場（沒選或對不上＝第一場），預設這一場全部的人，可勾選增減。
+ * 預渲染時沒有網址參數，畫的是這一頁預設的那一場（縣市頁＝縣市長、鄉鎮頁＝鄉鎮市長…）——PK 頁籤用 v-show，
+ * 不在 PK 頁籤時表格也在 HTML 裡，爬蟲讀得到；其餘各場的入口是選區列與區塊標題列的真連結。
+ */
+const pkGroupList = computed(() => pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
+const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
+const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value, groupHasPolicies))
+const pkCandidates = computed(() => pkGroup.value ? comparablePeople(pkGroup.value.people) : [])
+const pkIds = computed(() => pkCandidates.value.map(c => String(c.id)))
+const pkPicked = computed(() => parsePick(comparisonPick.value, pkIds.value))
+const pkMatrix = computed(() => {
+  const picked = new Set(pkPicked.value)
+  return compareMatrix(pkCandidates.value.filter(c => picked.has(String(c.id))), policies.value, electionId.value, categories.value)
+})
+const pkTitle = computed(() => {
+  const label = ALL_LEVELS.find(l => l.type === pkLevel.value)?.label ?? pkLevel.value
+  const g = pkGroup.value?.label
+  return g && g !== '全國' && g !== selectedRegion.value ? `${label}・${g}` : label
+})
+const pkDistrictLinks = computed(() => pkGroupList.value.map(g => ({ label: g.label, to: pkLink(pkLevel.value, g.label), active: g === pkGroup.value })))
+/** 勾選／取消一位（至少留一位）；全部勾選時網址不寫 pick */
+function togglePk(id: string) {
+  const picked = new Set(pkPicked.value)
+  if (picked.has(id)) { if (picked.size > 1) picked.delete(id) } else picked.add(id)
+  comparisonPick.value = buildPick(picked, pkIds.value)
+}
 
 const ALL_LEVELS = [
   { type: ElectionType.PRESIDENT, label: '總統' },
@@ -834,10 +864,18 @@ const electionLevels = computed(() => {
   const types = election.value?.types ?? []
   return types.length > 0 ? ALL_LEVELS.filter(l => types.includes(l.type)) : ALL_LEVELS
 })
-// ?type= 帶了本屆沒有的層級（例：2026 帶 立法委員）→ 退回第一個有的；網址會跟著 useRegionQuerySync 改正
-watch(visibleLevels, (levels) => {
-  if (levels.length > 0 && !levels.some(l => l.type === comparisonLevel.value)) comparisonLevel.value = levels[0].type
-}, { immediate: true })
+/**
+ * PK 實際比的職位：網址指定的（本屆、這一頁有的）優先；沒指定或指定了沒有的（2026 帶立法委員、鄉鎮頁帶縣市長）→
+ * 第一個有政見可比的職位 → 第一個有人可比的職位 → 第一個職位。網址上的 type 不改寫，換頁回來照樣認。
+ */
+const pkLevel = computed<ElectionType>(() => {
+  const levels = visibleLevels.value
+  const explicit = levels.find(l => l.type === comparisonLevel.value)
+  if (explicit) return explicit.type
+  const comparable = levels.map(l => ({ type: l.type, groups: pkGroups(poolForLevel(l.type), l.type).filter(hasPk) }))
+  return (comparable.find(l => l.groups.some(groupHasPolicies)) ?? comparable.find(l => l.groups.length > 0))?.type
+    ?? levels[0]?.type ?? ElectionType.MAYOR
+})
 
 /** 縣市頁的頁首：「2026 台北市 候選人與政見」；全台照舊 */
 const pageCounty = computed(() => isCounty(selectedRegion.value) ? selectedRegion.value : undefined)
@@ -971,12 +1009,11 @@ usePageHead({
           這裡只剩各層的「附加物」：全台頁的立委引導、縣市頁的名錄、鄉鎮層的空白提示。
         -->
         <!--
-          政見並排比較（2026-10-05 #364）：只放在「這一層」的職位，每個同職位同選區一張（收合的 <details>，內容在預渲染 HTML 裡）。
-          下一層（縣市頁的鄉鎮市長、全台頁的各縣市長）到了它自己那一頁才比——那一頁它是「這一層」。
-          卡片排法的職位依 gridCompareGroups 拆選區；依選區、依村里分組的職位直接用那一組（「選區待補」「未標示里別」不並排）。
+          每個區塊標題列有一顆「政見 PK」（2026-10-06，取代 #364 放在區塊底下的並排比較）：連到 PK 頁籤、選好職位與那一場，
+          規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template><template #after><PolicyCompare v-for="g in compareGroupsOf(section)" :key="g.key" :people="g.people" :policies="policies" :election-id="electionId" :categories="categories" :position-label="section.spec.label" :district-label="g.label || undefined" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`">:pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -987,14 +1024,15 @@ usePageHead({
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
-          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template><template #group-after="{ group }"><PolicyCompare v-if="isComparableGroup(group.label)" :people="group.people" :policies="policies" :election-id="electionId" :categories="categories" :position-label="section.spec.label" :district-label="group.label" /></template></ChipFilteredGroups>
+                      :pk-link-for="groupPkLinkFor(section.spec.type)"
+          ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
 
         <!-- 直轄市一般區：區長市府指派，這一層沒有職位，一行小字說明，不擋里長名單 -->
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <template v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1005,6 +1043,7 @@ usePageHead({
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             @toggle="section.spec.display === 'village' ? toggleVillageChip($event) : toggleDistrictChip($event)"
+            :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </template>
 
@@ -1117,57 +1156,31 @@ usePageHead({
         </template>
       </div>
 
-      <!-- VIEW: Comparison -->
-      <div v-if="viewMode === 'comparison'" class="animate-fade-in space-y-8">
+      <!-- VIEW: Comparison（政見 PK，2026-10-06 改成多人）：v-show 不是 v-if——預設那一場的表格在預渲染 HTML 裡，不在這個頁籤時也是 -->
+      <div v-show="viewMode === 'comparison'" class="animate-fade-in space-y-6">
+        <!-- 職位：真連結，換職位時選區與勾選重設 -->
         <div class="flex justify-start overflow-x-auto pb-2">
           <div class="inline-flex bg-slate-100 p-1 rounded-lg shrink-0">
-            <button
+            <RouterLink
               v-for="level in visibleLevels"
               :key="level.type"
-              @click="comparisonLevel = level.type"
-              :class="`px-4 py-2 rounded-md text-sm font-bold transition-all whitespace-nowrap ${comparisonLevel === level.type ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
-            >{{ level.label }}<span class="ml-1 text-[11px] font-medium opacity-70">{{ levelCounts.get(level.type) ?? 0 }}</span></button>
+              :to="pkLink(level.type)"
+              :aria-current="pkLevel === level.type ? 'page' : undefined"
+              :class="`px-4 py-2 rounded-md text-sm font-bold transition-all whitespace-nowrap ${pkLevel === level.type ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
+            >{{ level.label }}<span class="ml-1 text-[11px] font-medium opacity-70">{{ levelCounts.get(level.type) ?? 0 }}</span></RouterLink>
           </div>
         </div>
         <p v-if="subRegionIgnoredNote" class="text-xs text-slate-500 -mt-4">{{ subRegionIgnoredNote }}</p>
 
-        <div class="bg-amber-50 rounded-xl border border-amber-200 p-6 flex flex-col md:flex-row items-center justify-between gap-8">
-          <PoliticianDropdown v-model="politicianAId" label="候選人 A" ring-color="blue-500" :selected-region="selectedRegion" :comparison-pool="comparisonPool" />
-          <div class="shrink-0 flex items-center justify-center w-12 h-12 bg-amber-500 rounded-full text-white font-black italic shadow-lg ring-4 ring-white">VS</div>
-          <PoliticianDropdown v-model="politicianBId" label="候選人 B" ring-color="red-500" :selected-region="selectedRegion" :comparison-pool="comparisonPool" />
-        </div>
-
-        <div v-if="!politicianA || !politicianB || politicianAId === politicianBId" class="text-center py-20 text-slate-400 border border-dashed border-slate-300 rounded-xl">
-          <Swords :size="48" class="mx-auto mb-4 opacity-50" />
-          <p>請選擇兩位不同的候選人。</p>
-        </div>
-        <div v-else class="grid grid-cols-1 gap-6 text-left">
-          <template v-for="category in categories" :key="category">
-            <div v-if="getPledge(politicianAId, category) || getPledge(politicianBId, category)" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div class="bg-slate-50 px-6 py-3 border-b border-slate-100 flex items-center gap-2">
-                <span class="w-2 h-6 bg-navy-800 rounded-sm"></span>
-                <h3 class="font-bold text-navy-900">{{ category }}</h3>
-
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100">
-                <div class="p-6 hover:bg-blue-50/20 transition-colors">
-                  <router-link v-if="getPledge(politicianAId, category)" :to="`/policy/${getPledge(politicianAId, category)!.id}`" class="block cursor-pointer group">
-                    <h4 class="font-bold text-lg text-navy-900 mb-2 group-hover:text-blue-600 transition-colors">{{ getPledge(politicianAId, category)!.title }}</h4>
-                    <p class="text-slate-600 text-sm mb-4 line-clamp-3">{{ getPledge(politicianAId, category)!.description }}</p>
-                  </router-link>
-                  <span v-else class="text-slate-400 text-sm italic">未提出相關承諾</span>
-                </div>
-                <div class="p-6 hover:bg-red-50/20 transition-colors">
-                  <router-link v-if="getPledge(politicianBId, category)" :to="`/policy/${getPledge(politicianBId, category)!.id}`" class="block cursor-pointer group">
-                    <h4 class="font-bold text-lg text-navy-900 mb-2 group-hover:text-red-600 transition-colors">{{ getPledge(politicianBId, category)!.title }}</h4>
-                    <p class="text-slate-600 text-sm mb-4 line-clamp-3">{{ getPledge(politicianBId, category)!.description }}</p>
-                  </router-link>
-                  <span v-else class="text-slate-400 text-sm italic">未提出相關承諾</span>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
+        <PolicyPk
+          :title="pkTitle"
+          :candidates="pkCandidates"
+          :picked="pkPicked"
+          :matrix="pkMatrix"
+          :districts="pkDistrictLinks"
+          @toggle="togglePk"
+          @all="comparisonPick = ''"
+        />
       </div>
 
       </div><!-- 左側內容結束 -->

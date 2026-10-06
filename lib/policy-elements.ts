@@ -28,9 +28,6 @@ export const NOT_STATED_LABEL = '未說明'
 /** 沒有列：還沒有人查過 */
 export const UNCHECKED_LABEL = '未調查'
 
-/** 給讀者看的一句說明：兩種「沒有內容」各是什麼意思 */
-export const ELEMENTS_EXPLAINER = '照原文拆成數值目標、達成期限、財源三項。「未說明」是查過原文、沒有寫；「未調查」是還沒有人查過原文。只記原文寫了什麼，不補數字、不換算、不評價。'
-
 export type ElementState = 'stated' | 'not_stated' | 'unchecked'
 
 export interface ElementCell {

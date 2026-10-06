@@ -22,6 +22,7 @@ import { positionSpec, sectionAnchor, type PositionSpec } from './election-level
 import { electionRegionPath, electionTownshipPath, isCounty } from './election-regions'
 import { townshipNameOf } from './township-directory'
 import { isFormalDistrict } from './district-grouping'
+import { pkGroupLabel, pkQuery } from './policy-compare'
 
 /** 跟 composables/usePageHead 的 BreadcrumbItem 同形；這支要零依賴（deno 直接測），所以不 import 它 */
 export interface Crumb {
@@ -123,4 +124,24 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
     path: anchor ? `${page.path}#${encodeURIComponent(anchor)}` : page.path,
   })
   return crumbs
+}
+
+/**
+ * 政見頁「政見 PK」連結（2026-10-06）：到職位區塊所在的那一頁（麵包屑職位層那一格的網址，去掉頁內錨點），
+ * 開「政見 PK」頁籤、選好這個職位與這一場（district），帶入這一組全部的參選人。
+ * 目標頁定不出來（缺縣市、缺鄉鎮，職位層沒有錨點）、或不知道是哪一場（選區待補）就不給——連過去比的不會是同一場。
+ */
+export function pkLinkFor(
+  rec: CrumbRecord & { position?: string },
+  election: CrumbElection | undefined,
+  now: Date,
+): { path: string; query: Record<string, string>; name: string } | null {
+  const spec = positionSpec(rec.electionType ?? '')
+  if (!spec) return null
+  const position = candidacyCrumbs(rec, election, now).at(-1)
+  const hash = position?.path?.indexOf('#') ?? -1
+  if (!position?.path || hash < 0) return null
+  const district = pkGroupLabel(rec, spec.type)
+  if (!district) return null
+  return { path: position.path.slice(0, hash), query: pkQuery(spec.type, district), name: position.name }
 }
