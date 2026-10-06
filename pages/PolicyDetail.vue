@@ -16,7 +16,8 @@ import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, PUBLISHER_LD, SITE_URL, summarize } from '../composables/usePageHead'
-import { policySortDate, policyYear } from '../lib/policy-date'
+import { policyYear } from '../lib/policy-date'
+import { lineageChain } from '../lib/policy-chain'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
@@ -40,7 +41,7 @@ const route = useRoute()
 const router = useRouter()
 const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
 
-// 這一頁除了主角那筆，還要「同一人的其他政見」與整條市政接力鏈（otherPolicies／policyChain），
+// 這一頁除了主角那筆，還要「同一人的其他政見」與同一條脈絡的政見（otherPolicies／policyChain），
 // 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
 // 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
 // 兩個區塊會憑空變空。所以這一頁明確要整份。
@@ -144,17 +145,8 @@ const otherPolicies = computed(() =>
 )
 
 
-const policyChain = computed(() => {
-  if (!policy.value?.relatedPolicyIds) return []
-  const relatedPolicies = policies.value.filter(p =>
-    policy.value!.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.value!.id)
-  ).sort((a, b) => policySortDate(a) - policySortDate(b))
-
-  return [...relatedPolicies, policy.value]
-    .filter((p): p is typeof policy.value => !!p)
-    .sort((a, b) => policySortDate(a!) - policySortDate(b!))
-    .filter((v, i, a) => a.findIndex(t => t!.id === v!.id) === i)
-})
+// 同一條政策脈絡裡的政見，照提出時間排（#349 第二階段 A；原本讀 related_policies 互指，那張表線上 0 列、不再讀）
+const policyChain = computed(() => lineageChain(policy.value, policies.value))
 
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
 
@@ -492,14 +484,13 @@ async function copyCitation() {
              包在最外層一次處理，之後新增的卡片不必各自記得補。 -->
         <div :class="['lg:col-span-2 space-y-6', campaignResult === 'not_elected' ? 'grayscale opacity-75' : '']">
 
-          <!-- Policy Relay -->
-          <div v-if="policyChain.length > 1" class="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm">
+          <!-- 同一條脈絡的政見（#349 第二階段 A：原本的「市政接力」，資料改讀脈絡） -->
+          <div v-if="policyChain.length > 1" class="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm" data-testid="policy-lineage-chain">
             <div class="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
               <GitCommit class="text-blue-600" />
-              <h2 class="text-lg font-bold text-navy-900">市政接力與傳承 Governance Relay</h2>
+              <h2 class="text-lg font-bold text-navy-900">同一脈絡的政見</h2>
             </div>
             <div class="p-6">
-              <p class="text-sm text-slate-500 mb-6">這項建設跨越了不同任期，由多位首長接力完成。我們記錄這份傳承，確保每一步努力都被看見。</p>
               <div class="relative">
                 <div class="absolute top-8 left-8 right-8 h-1 bg-slate-200 -z-10"></div>
                 <div class="flex flex-col md:flex-row justify-between items-start gap-6 md:gap-0">

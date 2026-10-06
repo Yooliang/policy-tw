@@ -214,7 +214,6 @@ export interface Policy {
   stanceSupport: number;
   stanceOppose: number;
   stancePriority: number;
-  relatedPolicyIds?: string[]; // IDs of predecessor or successor policies (Cross-term tracking)
   /**
    * 政見三要素（#364，視圖 policies_with_logs.elements）：查過的要素才有一筆。
    * **陣列裡沒有的要素＝未調查**；有而 stated=false＝未說明（原文沒寫）。兩者不能混，規則在 lib/policy-elements.ts。
@@ -611,7 +610,6 @@ export interface RawPolicy {
   /** 軟移除：有值代表這筆已被移除，前端一律過濾掉 */
   removed_at?: string | null;
   logs?: RawTrackingLog[];
-  related_policy_ids?: string[];
   /** 政見三要素（#364）：視圖 policies_with_logs 最後一欄；舊視圖沒有這一欄 */
   elements?: RawPolicyElement[] | null;
   /** 政策脈絡（#349）：所屬脈絡 id、摘要、政見從哪裡來；舊視圖沒有這三欄 */

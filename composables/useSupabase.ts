@@ -75,7 +75,7 @@ async function retry(): Promise<void> {
  * 政見清單是不是「完整的一份」。
  *
  * 刻意不用 policies.value.length > 0 判斷，那會是個假的已載入：
- *   1. 預渲染的政見詳情頁只嵌那一條政見（與同一人、同一條接力鏈）的切片；
+ *   1. 預渲染的政見詳情頁只嵌那一條政見（與同一人、同一條脈絡）的切片；
  *   2. loadPolicyById 查不到就把單筆 push 進 policies。
  * 兩種情況都讓 length > 0 而清單其實不完整——列表頁會只出現一張卡片，
  * 而且因為「已經有資料了」再也不會去載，畫面看起來就是資料不見了。
@@ -327,7 +327,6 @@ export function mapPolicy(row: RawPolicy): Policy {
       description: l.description || undefined,
       ...mapLogSources(l),
     })),
-    relatedPolicyIds: (row.related_policy_ids || []).filter((id): id is string => typeof id === 'string'),
     // 政見三要素（#364）：視圖沒有這一欄時是 undefined，畫面一律當成三個都未調查
     elements: mapPolicyElements(row.elements),
     // 政策脈絡（#349）：有值才帶，沒歸入脈絡、還沒標來源的政見快照不多三個空欄位
@@ -821,7 +820,7 @@ export interface DataSnapshot {
   generatedAt?: number
   /**
    * 這份切片裡的 policies 是不是完整的一份。
-   * 只有首頁、政見列表、市政接力列表拿得到全部政見；詳情頁只拿那一條鏈。
+   * 只有首頁、政見列表、政策脈絡一覽拿得到全部政見；詳情頁只拿那一條政見與它的脈絡。
    * 少了這個布林，hydrate 後 policiesComplete 就得靠猜，詳情頁的部分切片會被
    * 當成「已經載完了」，之後導到列表頁就只剩那一張卡片。
    */

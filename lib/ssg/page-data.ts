@@ -1,8 +1,8 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { withElectionData, type DataSnapshot } from '../../composables/useSupabase'
-import { PolicyStatus, type Lineage, type Policy, type Politician } from '../../types'
+import type { Lineage, Policy, Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
-import { policySortDate } from '../policy-date'
+import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { electionPeers } from '../election-peers'
@@ -48,45 +48,12 @@ function politiciansReferencedBy(policies: Policy[], all: Politician[]): Politic
   return all.filter((pl) => ids.has(String(pl.id)))
 }
 
-/** 與 PolicyDeepAnalysis.relayChain 同邏輯：沿 relatedPolicyIds 雙向走訪整條接力鏈（含起點）。 */
-export function collectRelayChainIds(startId: string, policies: Policy[]): Set<string> {
-  const visited = new Set<string>()
-  const queue = [startId]
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (visited.has(id)) continue
-    visited.add(id)
-    const current = policies.find((p) => String(p.id) === String(id))
-    if (!current) continue
-    current.relatedPolicyIds?.forEach((rid) => { if (!visited.has(rid)) queue.push(rid) })
-    policies.forEach((other) => {
-      if (other.relatedPolicyIds?.includes(id) && !visited.has(other.id)) queue.push(other.id)
-    })
-  }
-  return visited
-}
-
 /**
- * 與 PolicyAnalysis.progressCases 同邏輯：分析列表實際會連到哪些 /analysis/:policyId。
- * （有接力鏈的取鏈尾；否則非競選承諾且進度 > 50 的政見。）
+ * 分析列表實際會連到哪些 /analysis/:policyId：不是競選承諾而且進度過半的政見（lib/policy-chain.ts 的 isProgressCase，
+ * PolicyAnalysis 頁面用同一支）。#349 第二階段 A 之前這裡還有一支「沿 related_policies 取接力鏈尾」，那張表線上 0 列、已拿掉。
  */
 export function analysisListedPolicyIds(policies: Policy[]): string[] {
-  const visited = new Set<string>()
-  const targets: string[] = []
-  for (const policy of policies) {
-    if (visited.has(policy.id)) continue
-    if (policy.relatedPolicyIds && policy.relatedPolicyIds.length > 0) {
-      const chain = policies
-        .filter((p) => p.id === policy.id || policy.relatedPolicyIds?.includes(p.id) || p.relatedPolicyIds?.includes(policy.id))
-        .sort((a, b) => policySortDate(a) - policySortDate(b))
-      chain.forEach((p) => visited.add(p.id))
-      targets.push(chain[chain.length - 1].id)
-    } else if (policy.status !== PolicyStatus.CAMPAIGN && policy.progress > 50) {
-      visited.add(policy.id)
-      targets.push(policy.id)
-    }
-  }
-  return Array.from(new Set(targets))
+  return policies.filter(isProgressCase).map((p) => p.id)
 }
 
 /**
@@ -179,7 +146,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       const id = paramString(to.params.policyId)
       const policy = full.policies.find((p) => String(p.id) === id)
       if (!policy) return base
-      const keep = collectRelayChainIds(policy.id, full.policies)
+      const keep = lineageMateIdsOf(policy.id, full.policies)
       full.policies
         .filter((p) => String(p.politicianId) === String(policy.politicianId))
         .forEach((p) => keep.add(p.id))
@@ -189,7 +156,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
 
     case 'analysis-detail': {
       const id = paramString(to.params.policyId)
-      const chain = collectRelayChainIds(id, full.policies)
+      const chain = lineageMateIdsOf(id, full.policies)
       const policies = full.policies.filter((p) => chain.has(p.id))
       return { ...base, policies, politicians: politiciansReferencedBy(policies, full.politicians) }
     }
