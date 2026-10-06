@@ -1,11 +1,18 @@
 #!/bin/bash
-# 每小時一次：取兩帳號額度 → 算步調 → 寫出這一輪要跑的 agents。
+# 每小時一次：取各帳號額度（gsit／cwen／acct3） → 算步調 → 寫出這一輪要跑的 agents。
 #   Aegis：兩個帳號都有（各自的排程回報上去的，可能落後）
 #   本機 ：目前登入那一個帳號的即時值，用 resets_at 比對去蓋掉 Aegis 的舊值
 # 🔴 10-01 實際踩過兩次：
 #    ① Aegis 的 gs it 停在 88%、實際 99%（回報排程指向搬走的 OneStack 舊路徑，錯誤碼 2）
 #    ② quota_local.py 把帳號寫死成 gsit，但本機登入換成 cwen → 兩行都變 cwen
 cd "$(dirname "$0")"
+# 第三個帳號（acct3 ／ claude3）：VM metadata 有 claude3-token 這個「鍵」才派工（只列鍵名，不讀值、不印 token）。
+# 查不到（gcloud 失敗）就當沒有，寧可少派。
+if gcloud compute instances describe policy-verifier --zone us-central1-a --format='value(metadata.items[].key)' 2>/dev/null | tr ';' '\n' | grep -qx 'claude3-token'; then
+  export ACCT3_READY=1
+else
+  export ACCT3_READY=0
+fi
 # Python：工作機是 C:/Python312，家用機用 py 啟動器找 3.12；可用 PY 環境變數覆寫
 PY=${PY:-$( [ -x C:/Python312/python.exe ] && echo C:/Python312/python.exe || py -3.12 -c "import sys;print(sys.executable,end='')")}
 : > quota_raw.txt

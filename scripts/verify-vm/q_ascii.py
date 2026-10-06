@@ -16,7 +16,16 @@ for name, q in cur.fetchall():
         d = json.loads(q) if isinstance(q, str) else q
     except Exception:
         continue
-    slug = 'gsit' if 'it' in (name or '').lower() and 'gs' in (name or '').lower() else 'cwen'
+    nm = (name or '').lower()
+    # 第三個帳號（2026-10-06）：Aegis 登錄後，把它的名稱特徵加進 ACCT3_HINTS（小寫子字串），
+    # 額度就會以 acct3 出現；沒加之前它會落到下面的後備 cwen，所以登錄時務必同步改這裡。
+    ACCT3_HINTS = ('acct3', 'claude3')
+    if any(h in nm for h in ACCT3_HINTS):
+        slug = 'acct3'
+    elif 'it' in nm and 'gs' in nm:
+        slug = 'gsit'
+    else:
+        slug = 'cwen'
     for lim in d.get('limits', []):
         lb = str(lim.get('label', ''))
         # 週上限那一條：label 含「週」或 week

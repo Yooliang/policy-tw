@@ -11,6 +11,10 @@
 #   openrouter-key      provider=openrouter 時必填
 #   claude-token        provider=claude 時必填（Claude Code 的 OAuth token，sk-ant-oat…）
 #   cwen-token          provider=claude2 時必填＝第二個 Claude 帳號，讓兩個帳號在同一台 VM 併跑
+#   claude3-token       provider=claude3 時必填＝第三個 Claude 帳號（2026-10-06）。沒有就跳過那一隻
+#                       （再加第四個：只要改下面 CLAUDE_TOKEN_KEY 那張表，不用到處複製貼上）
+#   ditrust-serial／-2／-3  DiTrust 帳號序號（64 位十六進位）。claude3 的代理優先用 -3；
+#                       其餘代理在 -／-2 之間輪替；沒設的就退回匿名代號（細節見 write_cprompt）
 #   agents              多代理平行：`provider:model=代號` 用 | 分隔，例如
 #                       openrouter:qwen/qwen3.8-flash=chiawei09|openrouter:deepseek/deepseek-v4-flash=weilun87
 #                       有設就忽略上面的 provider/model/agent-names
@@ -27,9 +31,13 @@ if [ "$(md agent-disabled)" = "1" ]; then echo "=== AGENT-SKIP agent-disabled=1 
 
 HOURS=$(md run-hours); [[ "$HOURS" =~ ^[0-9]+$ ]] && [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 24 ] || HOURS=3
 OR_KEY=$(md openrouter-key)
-CLAUDE_TOKEN=$(md claude-token)
-# 第二個 Claude 帳號的 token。provider 寫 claude2 就用它（跑的還是同一支 claude CLI）。
-CWEN_TOKEN=$(md cwen-token)
+# Claude 帳號表（表驅動，2026-10-06）：provider → 存 OAuth token 的 metadata 鍵。
+# 三個 provider 跑的都是同一支 claude CLI，只差用哪個帳號的 token。
+# 要加第四個帳號：這裡加一行（例如 [claude4]=claude4-token），別處都不用動。
+declare -A CLAUDE_TOKEN_KEY=( [claude]=claude-token [claude2]=cwen-token [claude3]=claude3-token )
+declare -A CLAUDE_TOKEN=()
+for p in "${!CLAUDE_TOKEN_KEY[@]}"; do CLAUDE_TOKEN[$p]=$(md "${CLAUDE_TOKEN_KEY[$p]}"); done
+is_claude() { [ -n "${CLAUDE_TOKEN_KEY[$1]+x}" ]; }
 # 正見 DiTrust 帳號序號（2026-10-03）：有設就用帳號報到（agent_name=ditrust:<序號>），
 # 提交／驗證額度按帳號算（600／2400），不再被 VM 輪到的臨時 IP 當天已用掉的額度卡住。
 # 沒設就照舊用每輪的代號（匿名，按 IP 算）。序號只放 metadata，不寫進任何檔案。
@@ -38,12 +46,16 @@ DITRUST_SERIAL=$(md ditrust-serial)
 # 第二個 DiTrust 帳號（2026-10-03）：有設就跟第一組輪替 —— 同一輪的代理單數用第一組、雙數用第二組，
 # 兩個帳號各自有 600／2400 的額度。同一筆每個 IP 仍只算一票（兩組都從這台 VM 出去，同一個 IP）。
 DITRUST_SERIAL_2=$(md ditrust-serial-2)
+# 第三個 DiTrust 帳號（2026-10-06）：專屬 claude3 的代理（第三個 Claude 帳號）。
+# 一個 Claude 帳號對一個 DiTrust 帳號，額度各算各的、不跟前兩組搶；沒設就退回輪替規則。
+DITRUST_SERIAL_3=$(md ditrust-serial-3)
+[[ "$DITRUST_SERIAL_3" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL_3=""
 # verify-only=1：只做驗證（2026-10-04 小良哥：待驗證堆積，VM 專門跑驗證）
 VERIFY_ONLY=$(md verify-only)
 [[ "$DITRUST_SERIAL_2" =~ ^[0-9a-f]{64}$ ]] || DITRUST_SERIAL_2=""
 CPROMPT_IDX=0
 
-# Claude Code 是選配：只有 agents 裡出現 claude: 才裝，省開機時間。
+# Claude Code 是選配：只有 agents 裡出現 claude／claude2／claude3 才裝，省開機時間。
 # 裝進 root 的全域 npm，執行時由 sudo -u 借用 /usr/local/bin/claude。
 ensure_claude() {
   command -v claude >/dev/null 2>&1 && return 0
@@ -78,7 +90,7 @@ ROUNDS_PER_SESSION=8
 # 直接寫在 claude -p "..." 裡會踩到兩個坑：外層已經有好幾層引號，而範例 curl 裡的
 # <id> 會被 shell 當成輸入重導向，prompt 就被截成空字串（2026-09-23 實測整輪空轉）。
 write_cprompt() {
-  local N="$1" M="$2" F="$D/cprompt-$1.txt"
+  local N="$1" M="$2" P="$3" F="$D/cprompt-$1.txt"
   cat > "$F" <<'CPROMPT_EOF'
 你正在協助維護「正見」（policy-tw），台灣的政見追蹤開放資料平台，這台機器屬於該專案的維護者。工作是查證公開資料並投票，端點公開、不需金鑰。
 
@@ -111,9 +123,19 @@ CPROMPT_EOF
 6. 🔴 這一輪**只做驗證**：/next 回 kind=verify 照常核對投票；回 kind=task 就**不要做**，改打 /next 並在網址加 &skip=<那筆的 task_id> 跳過，伺服器會給下一件。連續三次 skip 都還是 task 才結束這一輪。停止條件改為：kind=none 連續三次／驗證額度剩餘低於 15%／已處理滿 60 筆。
 VONLY_EOF
   fi
-  CPROMPT_IDX=$((CPROMPT_IDX + 1))
-  local SER="$DITRUST_SERIAL"
-  [ -n "$DITRUST_SERIAL_2" ] && [ $((CPROMPT_IDX % 2)) -eq 0 ] && SER="$DITRUST_SERIAL_2"
+  # 代理身分序號怎麼分配（2026-10-06）：
+  #   1. claude3 的代理 → 有 ditrust-serial-3 就一律用它（第三個 Claude 帳號 ↔ 第三個 DiTrust 帳號）。
+  #   2. 其餘（claude／claude2，以及沒設 -3 的 claude3）→ 照舊在 serial／serial-2 之間輪替：
+  #      這些代理各自編號，單數用第一組、雙數用第二組；沒設 -2 就全用第一組；都沒設就匿名代號。
+  #      走規則 1 的代理不佔輪替編號，所以第三組的有無不會改變前兩組原本的輪替。
+  local SER
+  if [ "$P" = claude3 ] && [ -n "$DITRUST_SERIAL_3" ]; then
+    SER="$DITRUST_SERIAL_3"
+  else
+    CPROMPT_IDX=$((CPROMPT_IDX + 1))
+    SER="$DITRUST_SERIAL"
+    [ -n "$DITRUST_SERIAL_2" ] && [ $((CPROMPT_IDX % 2)) -eq 0 ] && SER="$DITRUST_SERIAL_2"
+  fi
   local LOGIN="$N"; [ -n "$SER" ] && LOGIN="ditrust:$SER"
   sed -i "s|__LOGIN__|$LOGIN|g; s|__NAME__|$N|g; s|__MODEL__|$M|g" "$F"
   chown "$U:" "$F" 2>/dev/null
@@ -122,20 +144,26 @@ VONLY_EOF
 # 一個代理 = 一個背景迴圈。$1 provider $2 model $3 代號
 start_agent() {
   local P="$1" M="$2" N="$3" SM="${4:-$SESSION_MODE}"
-  case "$P" in claude|claude2) write_cprompt "$N" "$M" ;; esac
+  is_claude "$P" && write_cprompt "$N" "$M" "$P"
   echo "=== AGENT-START name=$N provider=$P model=$M hours=$HOURS session=$SM ==="
   echo "$N $(date -u +%FT%TZ) hours=$HOURS provider=$P model=$M" >> "$D/agent-runs.log"
-  ( PROVIDER="$P" MODEL="$M" NAME="$N" ORK="$OR_KEY" CTOK="$( [ "$P" = claude2 ] && echo "$CWEN_TOKEN" || echo "$CLAUDE_TOKEN" )" TAIL="$PROMPT_TAIL" SMODE="$SM" RPS="$ROUNDS_PER_SESSION" \
-    timeout "${HOURS}h" sudo -u "$U" -H --preserve-env=PROVIDER,MODEL,NAME,ORK,CTOK,TAIL,SMODE,RPS bash -c '
+  local ISCL=0; is_claude "$P" && ISCL=1
+  ( PROVIDER="$P" MODEL="$M" NAME="$N" ORK="$OR_KEY" ISCL="$ISCL" CTOK="${CLAUDE_TOKEN[$P]}" TAIL="$PROMPT_TAIL" SMODE="$SM" RPS="$ROUNDS_PER_SESSION" \
+    timeout "${HOURS}h" sudo -u "$U" -H --preserve-env=PROVIDER,MODEL,NAME,ORK,ISCL,CTOK,TAIL,SMODE,RPS bash -c '
       set -a; . "$HOME/policy-verifier/.env"; set +a
       cd "$HOME/policy-verifier"
       # 刻意不讀 .env 的 POLICY_MODEL：那裡設的是 pro，2026-09-18 因此整輪跑成 pro。
       [ "$PROVIDER" = openrouter ] && export OPENROUTER_API_KEY="$ORK"
-      case "$PROVIDER" in claude|claude2) export CLAUDE_CODE_OAUTH_TOKEN="$CTOK" ;; esac
+      [ "$ISCL" = 1 ] && export CLAUDE_CODE_OAUTH_TOKEN="$CTOK"
       ROUND=0; SID=""
       while true; do
         ROUND=$((ROUND+1))
-        if [ "$SMODE" = persist ]; then
+        if [ "$ISCL" = 1 ]; then
+          # Claude Code：headless -p，跳過權限詢問（VM 上沒有人能按）。
+          # 協議網址用新網域（2026-09-22 啟用），端點仍在 Supabase，skill.md 裡寫得很清楚。
+          # 排在 persist 之前：persist 是 pi 的 session 機制，claude 一律每筆重開。
+          timeout 60m claude -p "$(cat "$HOME/policy-verifier/cprompt-$NAME.txt")" --model "$MODEL" --dangerously-skip-permissions 2>&1 | tee -a "$HOME/policy-verifier/agent-$NAME.log" | tail -40
+        elif [ "$SMODE" = persist ]; then
           # 每 RPS 輪換一個 session，避免上下文無限長
           if [ -z "$SID" ] || [ $(( (ROUND-1) % RPS )) -eq 0 ]; then
             SID="$NAME-$(date -u +%H%M%S)"; FIRST=1
@@ -148,10 +176,6 @@ start_agent() {
             MSG="繼續：$TAIL 協議你已經讀過，不必重讀（除非 /next 回的 protocol_version 跟你手上的不一樣）。"
           fi
           timeout 20m pi --provider "$PROVIDER" --model "$MODEL" --session-id "$SID" -p "$MSG" 2>&1 | tee -a "$HOME/policy-verifier/agent-$NAME.log" | tail -40
-        elif [ "$PROVIDER" = claude ] || [ "$PROVIDER" = claude2 ]; then
-          # Claude Code：headless -p，跳過權限詢問（VM 上沒有人能按）。
-          # 協議網址用新網域（2026-09-22 啟用），端點仍在 Supabase，skill.md 裡寫得很清楚。
-          timeout 60m claude -p "$(cat "$HOME/policy-verifier/cprompt-$NAME.txt")" --model "$MODEL" --dangerously-skip-permissions 2>&1 | tee -a "$HOME/policy-verifier/agent-$NAME.log" | tail -40
         else
           # 單次上限 20 分鐘：便宜模型（尤其 :free 那些）可能排隊排到天荒地老，
           # 卡住一次就吃掉整個時段。卡住就重來，下一輪換個任務。
@@ -177,10 +201,9 @@ if [ -n "$AGENTS" ]; then
     SM="$SESSION_MODE"
     case "$N" in *"#"*) SM="${N##*#}"; N="${N%%#*}" ;; esac
     case "$SM" in persist|fresh) ;; *) SM=fresh ;; esac
-    case "$P" in deepseek|openrouter|claude|claude2) ;; *) echo "=== AGENT-SKIP-SPEC provider 不合法：$spec ==="; continue ;; esac
-    if [ "$P" = claude ] || [ "$P" = claude2 ]; then
-      [ "$P" = claude  ] && [ -z "$CLAUDE_TOKEN" ] && { echo "=== AGENT-SKIP-SPEC 缺 claude-token：$spec ==="; continue; }
-      [ "$P" = claude2 ] && [ -z "$CWEN_TOKEN" ]   && { echo "=== AGENT-SKIP-SPEC 缺 cwen-token：$spec ==="; continue; }
+    case "$P" in deepseek|openrouter) ;; *) is_claude "$P" || { echo "=== AGENT-SKIP-SPEC provider 不合法：$spec ==="; continue; } ;; esac
+    if is_claude "$P"; then
+      [ -z "${CLAUDE_TOKEN[$P]}" ] && { echo "=== AGENT-SKIP-SPEC 缺 ${CLAUDE_TOKEN_KEY[$P]}：$spec ==="; continue; }
       ensure_claude
       command -v claude >/dev/null 2>&1 || { echo "=== AGENT-SKIP-SPEC claude 裝不起來：$spec ==="; continue; }
     fi
