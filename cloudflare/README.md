@@ -28,4 +28,5 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 回滾：把 `SSR_ROUTES` 清空重部署＝純代理。
 縣市頁（2026-09-30）：`/election/:id/:縣市` 代理時換成 web.app 上的 ASCII 路徑 `/election/:id/_r/<十六進位>`；`/election/:id?region=縣市` 301 到路徑版。規則在 `region-path.js`（postbuild 與 serve-dist 共用）。計畫與後續步驟見 `docs/PLAN-edge-ssr.md`。
 鄉鎮頁（2026-10-05）：`/election/:id/:縣市/:鄉鎮` 代理時換成 `/election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>`；舊的 `/election/:id/:縣市?sub=鄉鎮` 與更舊的 `/election/:id?region=縣市&sub=鄉鎮` 一次 301 到鄉鎮頁（村里、頁籤參數照帶；sub 不像鄉鎮名就不轉）。規則與測試：`region-path.js`、`region-path.test.ts`。
+選舉那一段（2026-10-07，#344 第二階段 A）：舊三屆是數字 id（`/election/2022`），新增的選舉（補選、罷免投票、重行選舉）是 `election_key`（`/election/2022-12-18_rerun_10020`，縣市頁、鄉鎮頁規則同上）；舊三屆的 key 寫法（`/election/2022-11-26_local[/…]`）由 Worker 301 到年份寫法（`legacyElectionKeyRedirect`，清單 `LEGACY_ELECTION_KEYS` 與前端 `lib/election-route.ts` 一致、有測試盯）；Firebase 那邊 `firebase.json` 的 `redirects` 也轉一份，給直接打 policy-tw.web.app 的。
 

@@ -158,7 +158,7 @@ function checkCandidacyFields(payload: Record<string, unknown>, c: CecCandidacy,
     if (same === false) {
       return {
         action: "reject",
-        reason: `推薦政黨對不上：中選會 ${c.election_id ?? ""} 這一筆記的是「${c.party}」，這筆寫「${claimedParty}」（party 是那一次參選時的政黨，照中選會名冊填，不是他現在的政黨）`,
+        reason: `推薦政黨對不上：中選會 ${c.vote_date ?? ""} 投票日這一筆記的是「${c.party}」，這筆寫「${claimedParty}」（party 是那一次參選時的政黨，照中選會名冊填，不是他現在的政黨）`,
         candidacy: c,
       };
     }

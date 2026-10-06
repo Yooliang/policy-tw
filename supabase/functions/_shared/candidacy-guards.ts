@@ -9,10 +9,11 @@
  * 兩道都在交件時擋（400、不算被拒），告訴代理怎麼改。
  */
 
-/** 各屆參選登記截止日（台灣日期）。截止之後要把人標成已登記／確定參選，證據要是名冊或截止之後的報導 */
-export const REGISTRATION_DEADLINE: Record<number, string> = {
-  2026: "2026-09-04",
-};
+/**
+ * 各屆參選登記截止日不再寫死在這裡：讀 roster_check_scope.registration_closed_on
+ * （elections.ts 的 loadRegistrationDeadlines，#344 第二階段 A），呼叫端算出那一屆（那個職位）的截止日再傳進來。
+ * 截止之後要把人標成已登記／確定參選，證據要是名冊或截止之後的報導。
+ */
 
 /**
  * 更正參選紀錄時，reason 裡要寫出被改的那個人的名字。
@@ -48,11 +49,9 @@ function isCecUrl(url: string): boolean {
 
 /**
  * 登記截止後把人標成 registered／qualified／confirmed：附的來源至少要有一個是中選會（cec.gov.tw），
- * 或網址看得出日期、而且是截止日當天或之後的報導。沒有截止日的屆別不檢查。
+ * 或網址看得出日期、而且是截止日當天或之後的報導。沒有截止日（deadline 空的）的屆別不檢查。
  */
-export function registrationEvidenceOk(urls: readonly string[], electionId: number | null, today: string): boolean {
-  if (electionId === null) return true;
-  const deadline = REGISTRATION_DEADLINE[electionId];
+export function registrationEvidenceOk(urls: readonly string[], deadline: string | null | undefined, today: string): boolean {
   if (!deadline || today < deadline) return true;
   return urls.some((u) => isCecUrl(u) || ((dateInUrl(u) ?? "") >= deadline));
 }

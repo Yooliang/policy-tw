@@ -9,11 +9,12 @@ import {
   HEADLINE_TURNOUT_CEC_TYPES,
   headlineTurnout,
   OUR_ELECTION_TYPES,
-  planUnits,
+  planElectionUnits,
+  type SyncElection,
   type SyncUnitPlan,
   type ThemeInfo,
   themesFromList,
-  votedElectionIds,
+  votedElections,
 } from "../_shared/cec-sync.ts";
 
 /**
@@ -37,8 +38,12 @@ import {
  * 名額只寫法律定死的首長一席與立委席次，議員、代表的名額走 district_seats_missing 任務）；這次有跑到縣市長或總統的屆別，
  * 另抓中選會投票概況算投票率寫進 elections.turnout（直轄市長＋縣市長兩場加總；總統那一場）。
  *
+ * 2026-10-06（#344 第二階段 A）：要同步哪些選舉、每場選哪些職位、場次對哪一天，都由 elections 表決定（election_date、election_types），
+ * 不再寫死三屆；補選、重行選舉（election_key 最後一段是行政區代碼）只同步它的那個縣市。2022 嘉義市長重行選舉（2022-12-18）
+ * 是自己的一場選舉，名單記在它自己的 election_id 底下。
+ *
  * 請求 body（都可省略）：
- *   { election_id?: number, election_type?: string, resume_from?: { election_id, election_type, region }, force?: boolean }
+ *   { election_id?: number, election_key?: string, election_type?: string, resume_from?: { election_id, election_type, region }, force?: boolean }
  * 回應：{ success, units: [{election_id, election_type, region, fetched, written, skipped?}], failed: [...], next?: {...} | null }
  */
 
@@ -64,6 +69,7 @@ async function listThemes(subjectId: string): Promise<ThemeInfo[]> {
 }
 
 interface SyncUnit {
+  election: SyncElection;
   electionId: number;
   ourType: string;
   region: string;
@@ -73,13 +79,11 @@ interface SyncUnit {
   plan: SyncUnitPlan;
 }
 
-function buildUnits(electionIds: readonly number[], ourTypes: readonly string[]): SyncUnit[] {
+function buildUnits(elections: readonly SyncElection[], ourTypes?: readonly string[]): SyncUnit[] {
   const units: SyncUnit[] = [];
-  for (const electionId of electionIds) {
-    for (const ourType of ourTypes) {
-      for (const plan of planUnits(ourType)) {
-        units.push({ electionId, ourType, region: plan.region, subRegion: plan.subRegion, plan });
-      }
+  for (const election of elections) {
+    for (const { ourType, plan } of planElectionUnits(election, ourTypes)) {
+      units.push({ election, electionId: election.id, ourType, region: plan.region, subRegion: plan.subRegion, plan });
     }
   }
   return units;
@@ -127,6 +131,7 @@ Deno.serve(async (req) => {
   const qp = (k: string) => body[k] ?? url.searchParams.get(k) ?? undefined;
 
   const electionIdFilter = qp("election_id") !== undefined ? Number(qp("election_id")) : undefined;
+  const electionKeyFilter = qp("election_key") !== undefined ? String(qp("election_key")) : undefined;
   const electionTypeFilter = qp("election_type") !== undefined ? String(qp("election_type")) : undefined;
   const force = qp("force") === true || qp("force") === "true";
   const resumeFromRaw = body.resume_from as { election_id?: number; election_type?: string; region?: string; sub_region?: string } | undefined;
@@ -143,16 +148,42 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: false, error: `不認得的 election_type: ${electionTypeFilter}` }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
 
-  const electionIds = electionIdFilter !== undefined ? [electionIdFilter] : votedElectionIds();
-  if (electionIdFilter !== undefined && !votedElectionIds().includes(electionIdFilter) && !force) {
-    return new Response(
-      JSON.stringify({ success: false, error: `election_id ${electionIdFilter} 還沒投票或不認得；已投票的屆別是 ${votedElectionIds().join("、")}（真要跑就加 force: true）` }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
-  const ourTypes = electionTypeFilter ? [electionTypeFilter] : [...OUR_ELECTION_TYPES];
+  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-  const allUnits = buildUnits(electionIds, ourTypes);
+  // 選舉清單以 elections 表為準（#344 第二階段 A）：已投票的、每場選哪些職位、投票日
+  // query-bounds: ok — elections 一共幾列（每場選舉一列）
+  const { data: electionRows, error: electionsError } = await supabase
+    .from("elections")
+    .select("id, election_key, election_date, election_reason, election_types")
+    .order("election_date", { ascending: true })
+    .limit(500);
+  if (electionsError || !electionRows) {
+    return new Response(JSON.stringify({ success: false, error: `讀不到 elections 表：${electionsError?.message ?? "沒有資料"}` }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+  const allElections: SyncElection[] = (electionRows as Array<Record<string, unknown>>).map((r) => ({
+    id: Number(r.id),
+    election_key: String(r.election_key),
+    election_date: String(r.election_date).slice(0, 10),
+    election_reason: String(r.election_reason ?? "regular"),
+    election_types: Array.isArray(r.election_types) ? (r.election_types as unknown[]).map(String) : [],
+  }));
+  const voted = votedElections(allElections);
+  let elections: SyncElection[] = voted;
+  if (electionIdFilter !== undefined || electionKeyFilter !== undefined) {
+    const picked = allElections.find((e) => (electionIdFilter === undefined || e.id === electionIdFilter) && (electionKeyFilter === undefined || e.election_key === electionKeyFilter));
+    if (!picked) {
+      return new Response(JSON.stringify({ success: false, error: `不認得的選舉（election_id=${electionIdFilter ?? "-"}、election_key=${electionKeyFilter ?? "-"}）；現有：${allElections.map((e) => `${e.id}=${e.election_key}`).join("、")}` }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    if (!voted.some((e) => e.id === picked.id) && !force) {
+      return new Response(
+        JSON.stringify({ success: false, error: `${picked.election_key}（id ${picked.id}）還沒投票；已投票的選舉是 ${voted.map((e) => `${e.id}=${e.election_key}`).join("、")}（真要跑就加 force: true）` }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    elections = [picked];
+  }
+
+  const allUnits = buildUnits(elections, electionTypeFilter ? [electionTypeFilter] : undefined);
   let startIndex = 0;
   if (resumeFromKey) {
     const idx = allUnits.findIndex((u) => unitKey(u) === resumeFromKey);
@@ -160,7 +191,6 @@ Deno.serve(async (req) => {
     if (idx >= 0) startIndex = idx;
   }
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   // 場次清單依科目快取（同一份 ELC_<科目>.json 只抓一次）；每個打中選會的請求前都先等 MIN_REQUEST_INTERVAL_MS
   const themeCache = new Map<string, ThemeInfo[]>();
   const deps: CecFetchDeps = {
@@ -217,7 +247,7 @@ Deno.serve(async (req) => {
 
       // 主科目＋同範圍的原住民選區全部抓完、確認不是抓取失敗（找不到場次、檔案回非 404 的錯）才往下；
       // 縣市長這種同屆有「重行選舉」另一筆場次的，collectPart 會依序試到抓得到這個縣市的人為止（嘉義市 2022）
-      const got = await collectUnitRows(electionId, ourType, unit.plan, deps);
+      const got = await collectUnitRows(unit.election, ourType, unit.plan, deps);
       const rows = got.rows;
 
       // 先抓完、確認不是抓取失敗，才在同一個單位內先刪後寫
@@ -256,10 +286,12 @@ Deno.serve(async (req) => {
 
   // 投票率（#344）：這次有跑到縣市長或總統的屆別才抓（三四個請求）；抓不到就不寫，不影響名單同步
   const turnout: Array<{ election_id: number; value?: number; election_type?: string; error?: string }> = [];
-  if (ourTypes.some((t) => t in HEADLINE_TURNOUT_CEC_TYPES)) {
-    for (const electionId of electionIds) {
+  if (electionTypeFilter === undefined ? true : electionTypeFilter in HEADLINE_TURNOUT_CEC_TYPES) {
+    for (const election of elections) {
+      const electionId = election.id;
+      if (!election.election_types.some((t) => t in HEADLINE_TURNOUT_CEC_TYPES)) continue;
       try {
-        const got = await headlineTurnout(electionId, deps);
+        const got = await headlineTurnout(election, deps);
         if (!got) continue;
         // 同一個值再寫一次無害（每週一次）；中選會改了數字就跟著改
         const { error: tError } = await supabase.from("elections").update({ turnout: got.value }).eq("id", electionId);

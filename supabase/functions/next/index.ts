@@ -1,4 +1,5 @@
 import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
+import { loadElections, withElectionKey } from "../_shared/elections.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
@@ -508,6 +509,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       mark("pick_manual");
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
+      const electionList = await loadElections(supabase);
       // 派出就蓋章，下一次排到後面（自動缺口是即時算出來的，沒有列可蓋）
       await supabase.from("contribution_tasks").update({ last_dispatched_at: new Date().toISOString() }).eq("id", t.id);
       return json({
@@ -515,7 +517,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         kind: "task",
         lease_minutes: LEASE_MINUTES,
         item: {
-          task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target, ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+          task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: withElectionKey(t.target, electionList), ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget), { task_id: t.id ?? null, target: manualTarget }),
           lookup: buildLookup(manualTarget),
         },
@@ -544,6 +546,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       lease_minutes: LEASE_MINUTES,
       item: {
         ...t,
+        target: withElectionKey(t.target, await loadElections(supabase)),
         source: "auto",
         suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
         current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget), { task_id: t.task_id ?? null, target: autoTarget }),

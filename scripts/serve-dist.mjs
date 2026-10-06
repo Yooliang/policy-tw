@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { legacyRegionRedirect, regionUpstreamPath } from '../cloudflare/region-path.js'
+import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from '../cloudflare/region-path.js'
 import { compileRewrites, rewriteFor } from './firebase-rewrites.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -57,6 +57,8 @@ const SIMULATE_WORKER = !process.argv.includes('--no-worker')
 http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`)
   if (SIMULATE_WORKER) {
+    const keyed = legacyElectionKeyRedirect(url.pathname, url.search)
+    if (keyed) { res.writeHead(301, { Location: keyed }); return res.end() }
     const moved = legacyRegionRedirect(url.pathname, url.searchParams)
     if (moved) { res.writeHead(301, { Location: moved }); return res.end() }
   }

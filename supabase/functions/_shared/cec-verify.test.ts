@@ -1,5 +1,14 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { attachTickets, normalizeCandidacies, withoutFutureResults } from "./cec-candidate.ts";
+import { attachTickets, normalizeCandidacies as normalizeRaw, withoutFutureResults } from "./cec-candidate.ts";
+
+// 選舉清單：中選會的場次用投票日對到我們的選舉 id（#344 第二階段 A）；2012／2020 是測試用的假 id
+const ELECTIONS = [
+  { id: 2026, election_date: "2026-11-28" },
+  { id: 2024, election_date: "2024-01-13" },
+  { id: 2020, election_date: "2020-01-11" },
+  { id: 2012, election_date: "2012-01-14" },
+];
+const normalizeCandidacies = (raw: Parameters<typeof normalizeRaw>[0]) => normalizeRaw(raw, ELECTIONS);
 import { decideByCec, scanOffset } from "./cec-verify.ts";
 
 // 2026-09-17 對中選會實抓的蔡易餘（2024 當選、2012 落選）

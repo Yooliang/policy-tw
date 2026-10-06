@@ -223,3 +223,31 @@ Deno.test("pastTermItems：只列卸任的、最近卸任的在前；推定的�
   assertEquals(items[0].sourceUrl, "https://x.gov.tw/a");
   assertEquals(pastTermItems(undefined), []);
 });
+
+// ── #344 第二階段 A：最近一屆看投票日，不看 id ──
+Deno.test("officeTitles：最近一屆看投票日（視圖帶 electionDate）；沒有才退回 id", () => {
+  // id 4 的重行選舉（2022-12-18）比 id 2022 的九合一（2022-11-26）晚：同時有兩列時取投票日最新的那一場
+  assertEquals(
+    officeTitles([
+      office({ electionId: 2022, electionDate: "2022-11-26", electionType: "縣市議員", region: "嘉義市" }),
+      office({ electionId: 4, electionDate: "2022-12-18", electionType: "縣市長", region: "嘉義市" }),
+    ]),
+    ["嘉義市長"],
+  );
+  // 沒有 electionDate（舊視圖）：舊三屆照舊用 id
+  assertEquals(
+    officeTitles([
+      office({ electionId: 2022, electionType: "縣市議員", region: "台北市" }),
+      office({ electionId: 2024, electionType: "立法委員", region: "台北市" }),
+    ]),
+    ["台北市立委"],
+  );
+});
+
+Deno.test("candidacyBadge：前綴是投票年份（看 electionDate）；新增的選舉 id 不是年份、沒有日期時不印", () => {
+  const rec = { electionId: 4, electionDate: "2022-12-18", electionType: "縣市長", region: "嘉義市", position: "", candidacyStatus: "filed" as const };
+  assertEquals(candidacyBadge([rec], 4, true)?.what, "2022 嘉義市長");
+  const noDate = { ...rec, electionDate: undefined };
+  assertEquals(candidacyBadge([noDate], 4, true)?.what, "嘉義市長", "id 4 不是年份：不印成「4 嘉義市長」");
+  assertEquals(candidacyBadge([{ ...noDate, electionId: 2026 }], 2026, false)?.what, "2026 嘉義市長", "舊視圖沒帶日期時，舊三屆的 id 就是年份");
+});

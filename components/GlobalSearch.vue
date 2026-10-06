@@ -5,6 +5,7 @@ import { Search, X, Loader2, User, FileText } from 'lucide-vue-next'
 import { supabasePublic as supabase } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { useSupabase } from '../composables/useSupabase'
+import { electionYearOfDate } from '../lib/election-route'
 
 /**
  * 全站搜尋（2026-09-17）：找人與找政見。
@@ -56,6 +57,11 @@ const inputEl = ref<HTMLInputElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let seq = 0
 
+/** 政見所屬的那場選舉的投票年份（election_id 是 id、不一定是年份） */
+function electionYearText(electionId: number): string {
+  return String(electionYearOfDate(elections.value.find((e) => e.id === electionId)?.electionDate) ?? '')
+}
+
 const refElection = computed(() => getActiveElection() ?? null)
 const activeYear = computed(() => refElection.value?.id ?? null)
 /**
@@ -81,8 +87,9 @@ const highlightStatuses = computed(() => (voted.value ? ['elected'] : RUNNING_ST
 const recentVotedYears = computed(() => {
   const today = new Date().toISOString().slice(0, 10)
   return elections.value
-    .filter((e) => e.electionDate < today && Number(e.id) >= new Date().getFullYear() - 4)
-    .map((e) => Number(e.id))
+    // 近四年：看投票日的年份，不看 id（新增的選舉 id 不是年份，#344 第二階段 A）
+    .filter((e) => e.electionDate < today && (electionYearOfDate(e.electionDate) ?? 0) >= new Date().getFullYear() - 4)
+    .map((e) => e.id)
 })
 const hasResults = computed(() => people.value.length > 0 || policies.value.length > 0)
 
@@ -243,7 +250,7 @@ function go(path: string) {
             <span v-if="x.status === 'Campaign Pledge'" class="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 shrink-0">承諾</span>
             <span v-else class="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">政見</span>
             <span :class="['truncate', x.status === 'Campaign Pledge' ? 'text-slate-500' : 'text-navy-900 font-medium']">{{ x.title }}</span>
-            <span v-if="x.election_id" class="text-xs text-slate-400 shrink-0">{{ x.election_id }}</span>
+            <span v-if="x.election_id" class="text-xs text-slate-400 shrink-0">{{ electionYearText(x.election_id) }}</span>
           </button>
         </div>
       </div>

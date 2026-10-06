@@ -20,6 +20,7 @@ import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
 import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
 import { townshipPagesOf } from '../election-townships'
+import { electionSegment, segmentOfId } from '../election-route'
 import type { PartyAliasRow, PartyRegistry, PartyRow } from '../parties'
 import { directoryFor, partyListFor } from './page-data'
 
@@ -214,7 +215,8 @@ export function electionRegionRoutes(full: DataSnapshot): string[] {
         if (e.electionId === election.id && isRunningCandidate(e.candidacyStatus)) regions.add(e.region)
       }
     }
-    for (const county of TAIWAN_COUNTIES) if (regions.has(county)) paths.push(`/election/${election.id}/${county}`)
+    // 網址那一段：舊三屆是 id、新增的選舉（補選、重行選舉）是 election_key（lib/election-route.ts）
+    for (const county of TAIWAN_COUNTIES) if (regions.has(county)) paths.push(`/election/${electionSegment(election)}/${county}`)
   }
   return paths
 }
@@ -232,7 +234,7 @@ export function electionTownshipRoutes(full: DataSnapshot): string[] {
     records,
     (region) => isCounty(region),
     (region) => SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
-  ).map((p) => `/election/${p.electionId}/${p.region}/${p.township}`)
+  ).map((p) => `/election/${segmentOfId(full.elections, p.electionId)}/${p.region}/${p.township}`)
 }
 
 /** 建置時要預渲染的完整路徑清單。 */
@@ -262,7 +264,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
   const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
   const paths = [
     ...STATIC_CONTENT_ROUTES,
-    ...full.elections.map((e) => `/election/${e.id}`),
+    ...full.elections.map((e) => `/election/${electionSegment(e)}`),
     ...electionRegionRoutes(full),
     ...electionTownshipRoutes(full),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),

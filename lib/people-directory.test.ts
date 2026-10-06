@@ -14,11 +14,11 @@ import type { Election, Politician } from "../types.ts";
 const person = (p: Partial<Politician> & { id: string; name: string }): Politician =>
   ({ party: "無黨籍", position: "", region: "", ...p }) as Politician;
 const ELECTIONS: Election[] = [
-  { id: 2022, name: "2022 地方選舉", shortName: "2022 地方", startDate: "", endDate: "", electionDate: "2022-11-26", types: [] },
-  { id: 2024, name: "2024 總統立委", shortName: "2024", startDate: "", endDate: "", electionDate: "2024-01-13", types: [] },
-  { id: 2026, name: "2026 地方選舉", shortName: "2026 地方", startDate: "", endDate: "", electionDate: "2026-11-28", types: [] },
+  { id: 2022, electionKey: "2022-11-26_local", name: "2022 地方選舉", shortName: "2022 地方", startDate: "", endDate: "", electionDate: "2022-11-26", types: [] },
+  { id: 2024, electionKey: "2024-01-13_national", name: "2024 總統立委", shortName: "2024", startDate: "", endDate: "", electionDate: "2024-01-13", types: [] },
+  { id: 2026, electionKey: "2026-11-28_local", name: "2026 地方選舉", shortName: "2026 地方", startDate: "", endDate: "", electionDate: "2026-11-28", types: [] },
   // 之後新增的選舉 id 不是年份（#344）：id 小、投票日最晚
-  { id: 7, name: "2027 補選", shortName: "2027 補選", startDate: "", endDate: "", electionDate: "2027-03-01", types: [] },
+  { id: 7, electionKey: "2027-03-01_by", name: "2027 補選", shortName: "2027 補選", startDate: "", endDate: "", electionDate: "2027-03-01", types: [] },
 ];
 const dates = new Map(ELECTIONS.map((e) => [e.id, e.electionDate]));
 const TODAY = "2026-10-06";

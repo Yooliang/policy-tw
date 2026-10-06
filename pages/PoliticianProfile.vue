@@ -25,6 +25,8 @@ import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { currentElection, taipeiDay } from '../lib/election-list'
+import { newerFirst, segmentOfId } from '../lib/election-route'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
@@ -32,7 +34,7 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, getActiveElection, ensurePolicies, loadPastTerms } = useSupabase()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies, loadPastTerms } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
@@ -176,10 +178,12 @@ interface PolicyGroup {
   policies: Policy[]
 }
 
-// 目前這屆＝elections 裡選舉日最新的一屆（不寫死年份，2026 過後自然換下一屆）。
+// 定期改選才算「這一屆」：補選、重行選舉（例如 2022-12-18 嘉義市長）是同一屆任期內的另一場，不是另一屆（#344 第二階段 A）
+const regularElections = computed(() => elections.value.filter((e) => !e.electionReason || e.electionReason === 'regular'))
+// 目前這屆＝定期改選裡投票日最新的一屆（不寫死年份，2026 過後自然換下一屆）。
 const latestElectionId = computed<number | null>(() => {
-  if (elections.value.length === 0) return null
-  return elections.value.reduce((latest, e) => (e.electionDate > latest.electionDate ? e : latest)).id
+  if (regularElections.value.length === 0) return null
+  return regularElections.value.reduce((latest, e) => (e.electionDate > latest.electionDate ? e : latest)).id
 })
 
 // 依所屬選舉屆別分組，新屆別在前、沒有屆別的（舊資料）排最後；組內依提出日期新到舊。
@@ -194,7 +198,10 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
     byElection.set(key, [...(byElection.get(key) ?? []), p])
   }
 
-  const knownYears = [...byElection.keys()].filter((id): id is number => id !== null).sort((a, b) => b - a)
+  // 新屆別在前：看投票日、不看 id（新增的選舉 id 不保證越大越新）
+  const dateOf = (id: number) => getElectionById(id)?.electionDate
+  const knownYears = [...byElection.keys()].filter((id): id is number => id !== null)
+    .sort((a, b) => newerFirst({ electionId: a, electionDate: dateOf(a) }, { electionId: b, electionDate: dateOf(b) }))
   const orderedKeys: (number | null)[] = byElection.has(null) ? [...knownYears, null] : knownYears
 
   const groups = orderedKeys.map((id): PolicyGroup => {
@@ -247,16 +254,11 @@ const peerDistrict = computed(() => {
  */
 const titles = computed(() => officeTitles(politician.value?.offices))
 /**
- * 「這一屆」＝進行中的那一屆；都投完票了（例如 2027 年）就取最近一屆。
- * 不直接吃 getActiveElection() 的 fallback——它在沒有進行中的選舉時回 elections[0]，
- * 而 elections 是按 id 遞增載入的，那會拿到 2022（最舊的一屆）。
+ * 「這一屆」＝還沒投票（含今天）裡最近的一屆定期改選；都投完票了（例如 2027 年）就取最近投完的那一屆。
+ * 看投票日（lib/election-list.ts 的 currentElection），不看 id、不看 startDate／endDate（#344 第二階段 A）：
+ * end_date 存的是投票日、新建時卻寫 12-31，id 也不保證越大越新。
  */
-const thisElectionId = computed<number | null>(() => {
-  const today = new Date().toISOString().slice(0, 10)
-  const active = getActiveElection()
-  if (active && active.startDate <= today && today <= active.endDate) return active.id
-  return elections.value.length ? Math.max(...elections.value.map((e) => e.id)) : null
-})
+const thisElectionId = computed<number | null>(() => currentElection(regularElections.value, taipeiDay(Date.now()))?.id ?? null)
 // 這一屆投完票了就只講結果（沒結果寫「結果待補」），跟下面參選紀錄同一個判斷（那一屆的投票日跟今天比）
 const candidacy = computed(() => {
   const id = thisElectionId.value
@@ -711,7 +713,7 @@ usePageHead({
             <!-- 同選區候選人分頁：用 v-show，非作用中時 HTML 裡仍有每個人的 <a href>（爬蟲走得到）；卡片重用選舉頁的 PoliticianGrid -->
             <div v-if="peers.length > 0" v-show="activeTab === 'peers'" data-testid="election-peers">
               <PoliticianGrid :politicians="peers" :title="peerDistrict" :columns="3" :election-id="primaryRecord?.electionId" />
-              <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(primaryRecord.electionId, primaryRecord.region)" class="inline-block -mt-6 text-sm font-bold text-violet-700 hover:underline">
+              <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(segmentOfId(elections, primaryRecord.electionId), primaryRecord.region)" class="inline-block -mt-6 text-sm font-bold text-violet-700 hover:underline">
                 看 {{ primaryRecord.region }} 全部候選人 →
               </RouterLink>
             </div>

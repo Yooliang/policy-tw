@@ -313,7 +313,7 @@ Deno.test("投票率：只算投票日當天那一場（嘉義市長 12-18 重�
   const lists: Record<string, unknown[]> = {
     Mayor: [{ themeId: "m22", themeName: "111年直轄市長選舉", voteDate: "2022-11-26", year: 2022 }],
     CountyMayor: [
-      // 場次名稱不一定帶「重行選舉」（pickThemes 只靠名稱把它排後面）；擋住它的是投票日
+      // 場次名稱不一定帶「重行選舉」；擋住它的是投票日（場次用投票日對）
       { themeId: "redo", themeName: "111年嘉義市長選舉", voteDate: "2022-12-18", year: 2022 },
       { themeId: "c22", themeName: "111年縣市長選舉", voteDate: "2022-11-26", year: 2022 },
     ],
@@ -334,12 +334,17 @@ Deno.test("投票率：只算投票日當天那一場（嘉義市長 12-18 重�
       return id ? { kind: "ok", rows: [profiles[id]] as never, url } : { kind: "nodata", url };
     },
   };
-  assertEquals((await headlineTurnout(2022, deps))?.value, 61.16);
+  const E22 = { id: 2022, election_date: "2022-11-26", election_key: "2022-11-26_local" };
+  assertEquals((await headlineTurnout(E22, deps))?.value, 61.16);
   assert(!fetched.some((u) => u.includes("/redo/")), "重行選舉那一場不抓");
   assert(fetched.every((u) => u.includes("/data/profiles/ELC/") && u.endsWith("/N/00_000_00_000_0000.json")));
-  const p = await headlineTurnout(2024, deps);
+  const p = await headlineTurnout({ id: 2024, election_date: "2024-01-13", election_key: "2024-01-13_national" }, deps);
   assertEquals([p?.value, p?.election_type], [71.86, "總統副總統"]);
-  assertEquals(await headlineTurnout(2026, deps), null, "還沒有場次的屆別不寫");
+  assertEquals(await headlineTurnout({ id: 2026, election_date: "2026-11-28", election_key: "2026-11-28_local" }, deps), null, "還沒有場次的屆別不寫");
+  // 重行選舉（12-18）只在一個縣市舉行，沒有全國投票率：不寫，也不去抓
+  const before = fetched.length;
+  assertEquals(await headlineTurnout({ id: 4, election_date: "2022-12-18", election_key: "2022-12-18_rerun_10020" }, deps), null);
+  assertEquals(fetched.length, before);
 });
 
 Deno.test("投票率是首長選舉合計：欄位註解與 /elections 畫面都要寫明（主線 10-06，避免跟媒體只引直轄市長的數字混淆）", async () => {

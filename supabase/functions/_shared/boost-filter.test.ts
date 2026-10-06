@@ -25,3 +25,13 @@ Deno.test("label 必填、有上限", () => {
   const r = validateBoostLabel("  六都 2026  ");
   assertEquals(r.ok && r.label, "六都 2026");
 });
+
+// #344 第二階段 A：新增的選舉（補選、罷免、重行選舉）id 不是年份，插隊篩選要收得下
+Deno.test("election_id 收任何正整數（新增選舉的 id 不是年份），0、負數、小數、文字不收", () => {
+  assertEquals(validateBoostFilter({ election_id: 4 }).ok, true);
+  assertEquals(validateBoostFilter({ election_id: 2026 }).ok, true);
+  assertEquals(validateBoostFilter({ election_id: 0 }).ok, false);
+  assertEquals(validateBoostFilter({ election_id: -4 }).ok, false);
+  assertEquals(validateBoostFilter({ election_id: 4.5 }).ok, false);
+  assertEquals(validateBoostFilter({ election_id: "4" }).ok, false);
+});

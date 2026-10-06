@@ -181,23 +181,56 @@ export function planUnits(type: OurElectionType | string): SyncUnitPlan[] {
   }
 }
 
-// ── 已投票的屆別 ──────────────────────────────────────────────────
-interface KnownElection {
-  electionId: number;
-  voteDate: string; // YYYY-MM-DD
+// ── 選舉由 elections 表驅動（#344 第二階段 A）─────────────────────────
+// 原本這裡寫死三屆（KNOWN_ELECTIONS）、用年份對中選會的場次；補選、重行選舉的 id 不是年份，年份也分不開同年的兩場。
+// 現在呼叫端（cec-sync/index.ts）查 elections 表，場次用投票日對（中選會清單每個場次的 vote_date 跟 elections.election_date 一致，
+// 2022／2024 全部科目 10-06 實抓核對過）。
+
+/** cec-sync 用到的選舉欄位（elections 表的子集） */
+export interface SyncElection {
+  id: number;
+  /** 投票日 YYYY-MM-DD */
+  election_date: string;
+  election_key: string;
+  election_reason: string;
+  /** 這次選哪些職位（九種之一）；空的＝不知道，同步所有職位 */
+  election_types: readonly string[];
 }
 
-// 2026 屆投票日是 2026-11-28（公告的九合一選舉日）；沒到那天之前不算「已投票」
-const KNOWN_ELECTIONS: readonly KnownElection[] = [
-  { electionId: 2022, voteDate: "2022-11-26" },
-  { electionId: 2024, voteDate: "2024-01-13" },
-  { electionId: 2026, voteDate: "2026-11-28" },
-];
-
-/** 已經投票的屆別（year）；預設用今天判斷 */
-export function votedElectionIds(today: Date = new Date()): number[] {
+/** 已經投票的選舉（投票日當天起算）；罷免投票不選人、沒有候選人名單，不算 */
+export function votedElections<T extends Pick<SyncElection, "election_date" | "election_reason">>(elections: readonly T[], today: Date = new Date()): T[] {
   const todayStr = today.toISOString().slice(0, 10);
-  return KNOWN_ELECTIONS.filter((e) => e.voteDate <= todayStr).map((e) => e.electionId);
+  return elections.filter((e) => e.election_date <= todayStr && e.election_reason !== "recall");
+}
+
+/**
+ * 不是全國同日的選舉（補選、重行選舉）的 election_key 最後一段是內政部行政區代碼（嘉義市＝10020），
+ * 對到縣市名；全國同日的（local／national）回 null。內政部代碼＝中選會的 prv＋city（63000 台北市、10020 嘉義市）。
+ */
+export function electionAreaRegion(election: Pick<SyncElection, "election_key">): string | null {
+  const code = election.election_key.split("_")[2];
+  if (!code) return null;
+  for (const [name, c] of Object.entries(CITY_CODES)) if (`${c.prv}${c.city}` === code) return name;
+  return null;
+}
+
+/** 這場選舉要同步的職位（elections.election_types ∩ 九種）；沒有職位清單就全部 */
+export function electionOurTypes(election: Pick<SyncElection, "election_types">): string[] {
+  const own = (OUR_ELECTION_TYPES as readonly string[]).filter((t) => election.election_types.includes(t));
+  return own.length > 0 ? own : [...OUR_ELECTION_TYPES];
+}
+
+/** 這場選舉的同步單位（職位 × 縣市）：補選、重行選舉只含它的那個縣市 */
+export function planElectionUnits(election: SyncElection, ourTypes?: readonly string[]): Array<{ ourType: string; plan: SyncUnitPlan }> {
+  const area = electionAreaRegion(election);
+  const out: Array<{ ourType: string; plan: SyncUnitPlan }> = [];
+  for (const ourType of ourTypes ?? electionOurTypes(election)) {
+    for (const plan of planUnits(ourType)) {
+      if (area && plan.region !== area) continue;
+      out.push({ ourType, plan });
+    }
+  }
+  return out;
 }
 
 // ── 挑場次（theme） ─────────────────────────────────────────────
@@ -238,24 +271,20 @@ function themeMatchesSubject(t: ThemeInfo, subject?: SubjectKey): boolean {
 }
 
 /**
- * 該屆可用的場次，依優先順序：先「不是重行選舉」的、再重行選舉的。
+ * 這場選舉可用的場次：投票日（vote_date）等於 elections.election_date 的那幾筆（#344 第二階段 A；原本用年份對、再把重行選舉排後面）。
  *
- * 同年可能不只一筆：嘉義市 2022 縣市長原訂 11-26 因候選人過世延到 12-18「重行選舉」，中選會另開一筆場次，
- * 而 11-26 那筆的全國檔裡根本沒有嘉義市。呼叫端（collectPart）依序試，哪一筆有這個縣市的人就用哪一筆；
- * 2026-10-05 前只取第一筆，嘉義市長 2022 一位都沒進 cec_candidates。
+ * 同年不只一場時（嘉義市 2022 縣市長原訂 11-26 因候選人過世延到 12-18 重行選舉，中選會另開一筆場次、11-26 那筆的全國檔裡沒有嘉義市）
+ * 現在是兩場選舉各自一個投票日（2022-11-26_local 與 2022-12-18_rerun_10020），各自挑到自己的場次，不用再靠名稱排順序、依序試。
  *
- * 種類（legislator_type_id）要對上科目的 legisId：立委、議員、代表的區域與原住民選區同屆同日、同在一份清單，
- * 2026-10-05 前只有立委有對（#357），議員與代表照舊挑「第一筆」——剛好是區域那筆，原住民選區從來沒被抓過。
+ * 種類（legislator_type_id）要對上科目的 legisId：立委、議員、代表的區域與原住民選區同屆同日、同在一份清單（2026-10-05）。
  */
-export function pickThemes(themes: readonly ThemeInfo[], electionId: number, subject?: SubjectKey): ThemeInfo[] {
-  const matches = themes.filter((t) => t.year === electionId && themeMatchesSubject(t, subject));
-  const isRedo = (t: ThemeInfo) => t.themeName.includes("重行選舉");
-  return [...matches.filter((t) => !isRedo(t)), ...matches.filter(isRedo)];
+export function pickThemes(themes: readonly ThemeInfo[], electionDate: string, subject?: SubjectKey): ThemeInfo[] {
+  return themes.filter((t) => t.voteDate === electionDate && themeMatchesSubject(t, subject));
 }
 
 /** pickThemes 的第一順位（舊介面，給只要一筆的呼叫端） */
-export function pickTheme(themes: readonly ThemeInfo[], electionId: number, subject?: SubjectKey): ThemeInfo | undefined {
-  return pickThemes(themes, electionId, subject)[0];
+export function pickTheme(themes: readonly ThemeInfo[], electionDate: string, subject?: SubjectKey): ThemeInfo | undefined {
+  return pickThemes(themes, electionDate, subject)[0];
 }
 
 // ── CEC 列 → cec_candidates 列 ───────────────────────────────────
@@ -344,6 +373,9 @@ export interface PartResult {
   rows: CecCandidateRow[];
 }
 
+/** 選舉的 id（寫進 cec_candidates.election_id）與投票日（對中選會場次的 vote_date） */
+export type SyncElectionRef = Pick<SyncElection, "id" | "election_date">;
+
 /** 用某一筆場次抓這個縣市的名單（候選人檔＋得票檔；村里長另抓鄉鎮名對照） */
 async function fetchThemeRows(
   electionId: number,
@@ -395,14 +427,14 @@ async function fetchThemeRows(
  * 一個科目：依 pickThemes 的順序試場次，第一個抓得到這個縣市的人的就用它；都抓不到人就回第一順位的空結果。
  * 找不到場次、或任何一個檔抓失敗（不是 404）就丟錯——呼叫端整個單位跳過、保留舊資料，不能當成「這裡沒有人」去刪。
  */
-export async function collectPart(electionId: number, ourType: string, cecType: string, region: string, deps: CecFetchDeps): Promise<PartResult> {
+export async function collectPart(election: SyncElectionRef, ourType: string, cecType: string, region: string, deps: CecFetchDeps): Promise<PartResult> {
   const subject = SUBJECT_MAP[cecType];
   if (!subject) throw new Error(`不認得的中選會科目 ${cecType}`);
-  const candidates = pickThemes(await deps.themes(cecType), electionId, subject);
-  if (candidates.length === 0) throw new Error(`找不到 ${electionId} 年的 theme（cecType=${cecType}）`);
+  const candidates = pickThemes(await deps.themes(cecType), election.election_date, subject);
+  if (candidates.length === 0) throw new Error(`找不到投票日 ${election.election_date} 的 theme（cecType=${cecType}）`);
   let first: PartResult | undefined;
   for (const theme of candidates) {
-    const got = await fetchThemeRows(electionId, ourType, cecType, region, theme, deps);
+    const got = await fetchThemeRows(election.id, ourType, cecType, region, theme, deps);
     if (got.rows.length > 0) return got;
     first ??= got;
   }
@@ -411,14 +443,14 @@ export async function collectPart(electionId: number, ourType: string, cecType: 
 
 /** 一個同步單位（屆別×選舉別×縣市）：主科目＋同範圍的其他科目（原住民選區）全部抓成功才回傳 */
 export async function collectUnitRows(
-  electionId: number,
+  election: SyncElectionRef,
   ourType: string,
   plan: SyncUnitPlan,
   deps: CecFetchDeps,
 ): Promise<{ fetched: number; rows: CecCandidateRow[]; parts: PartResult[] }> {
   const parts: PartResult[] = [];
   for (const cecType of [plan.cecType, ...(plan.extraCecTypes ?? [])]) {
-    parts.push(await collectPart(electionId, ourType, cecType, plan.region, deps));
+    parts.push(await collectPart(election, ourType, cecType, plan.region, deps));
   }
   return {
     fetched: parts.reduce((n, p) => n + p.fetched, 0),
@@ -525,23 +557,19 @@ export function turnoutFromProfiles(rows: ReadonlyArray<{ vote_ticket?: unknown;
   return Math.round((votes / votable) * 10000) / 100;
 }
 
-/** 某一屆的投票日（KNOWN_ELECTIONS） */
-export function voteDateOf(electionId: number): string | undefined {
-  return KNOWN_ELECTIONS.find((e) => e.electionId === electionId)?.voteDate;
-}
-
 /**
- * 某一屆的投票率：依 HEADLINE_TURNOUT_CEC_TYPES 的順序找第一種這一屆有場次的，抓那幾場的全國投票概況加總。
- * 只用投票日當天那一場（嘉義市長 2022-12-18 重行選舉不算進 11-26 那一場）。抓不到或缺一場就回 null（不寫）。
+ * 某一場選舉的投票率：依 HEADLINE_TURNOUT_CEC_TYPES 的順序找第一種這場選舉有場次的，抓那幾場的全國投票概況加總。
+ * 場次用投票日對（同年的重行選舉是另一個投票日、另一場選舉，不會混進來）。補選、重行選舉只在一個縣市舉行，沒有全國投票率，不寫。
+ * 抓不到或缺一場就回 null（不寫）。
  */
-export async function headlineTurnout(electionId: number, deps: CecFetchDeps): Promise<{ value: number; election_type: string; themes: string[] } | null> {
-  const voteDate = voteDateOf(electionId);
-  if (!voteDate) return null;
+export async function headlineTurnout(election: SyncElectionRef & Pick<SyncElection, "election_key">, deps: CecFetchDeps): Promise<{ value: number; election_type: string; themes: string[] } | null> {
+  if (electionAreaRegion(election)) return null;
+  const voteDate = election.election_date;
   for (const [ourType, cecTypes] of Object.entries(HEADLINE_TURNOUT_CEC_TYPES)) {
     const rows: Array<{ vote_ticket?: unknown; votable_population?: unknown }> = [];
     const themes: string[] = [];
     for (const cecType of cecTypes) {
-      const theme = pickThemes(await deps.themes(cecType), electionId, SUBJECT_MAP[cecType]).find((t) => t.voteDate === voteDate);
+      const theme = pickThemes(await deps.themes(cecType), voteDate, SUBJECT_MAP[cecType])[0];
       if (!theme) continue;
       const outcome = await deps.fetchJson(profilesUrl(cecType, theme.themeId));
       if (outcome.kind !== "ok" || outcome.rows.length === 0) return null;

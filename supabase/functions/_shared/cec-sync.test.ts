@@ -8,7 +8,10 @@ import {
   pickTheme,
   planUnits,
   toCecCandidateRow,
-  votedElectionIds,
+  electionAreaRegion,
+  electionOurTypes,
+  planElectionUnits,
+  votedElections,
 } from "./cec-sync.ts";
 import { SUBJECT_MAP } from "./cec-static-fetch.ts";
 
@@ -126,28 +129,30 @@ Deno.test("planUnits：立法委員＝22 縣市區域＋不分區、平地原住
 
 // 中選會 ELC_L0 清單實際長這樣（2026-10-05 抓的 2024 那四筆，欄位節錄）：同一屆、同一個投票日、四種立委
 const L0_2024 = [
-  { themeId: "9c96a2080bfc199c590ec54f3a2bda7b", themeName: "第11屆立法委員選舉", year: 2024, legislatorTypeId: "L1" },
-  { themeId: "9f382748c91a4096d8a4f203530a57ab", themeName: "第11屆立法委員選舉", year: 2024, legislatorTypeId: "L2" },
-  { themeId: "7fbfcdb409c14531893107df396133cb", themeName: "第11屆立法委員選舉", year: 2024, legislatorTypeId: "L3" },
-  { themeId: "e753a8e7a7bcc09fa51d1aea0024a843", themeName: "第11屆立法委員選舉", year: 2024, legislatorTypeId: "L4" },
-  { themeId: "be404784efb488c1004009663c892e18", themeName: "第10屆立法委員選舉", year: 2020, legislatorTypeId: "L1" },
+  { themeId: "9c96a2080bfc199c590ec54f3a2bda7b", themeName: "第11屆立法委員選舉", voteDate: "2024-01-13", year: 2024, legislatorTypeId: "L1" },
+  { themeId: "9f382748c91a4096d8a4f203530a57ab", themeName: "第11屆立法委員選舉", voteDate: "2024-01-13", year: 2024, legislatorTypeId: "L2" },
+  { themeId: "7fbfcdb409c14531893107df396133cb", themeName: "第11屆立法委員選舉", voteDate: "2024-01-13", year: 2024, legislatorTypeId: "L3" },
+  { themeId: "e753a8e7a7bcc09fa51d1aea0024a843", themeName: "第11屆立法委員選舉", voteDate: "2024-01-13", year: 2024, legislatorTypeId: "L4" },
+  { themeId: "be404784efb488c1004009663c892e18", themeName: "第10屆立法委員選舉", voteDate: "2020-01-11", year: 2020, legislatorTypeId: "L1" },
 ];
 
 Deno.test("pickTheme：立委四種同在一份清單，要用 legislator_type_id 挑，不是挑第一筆", () => {
-  assertEquals(pickTheme(L0_2024, 2024, SUBJECT_MAP.Legislator)?.themeId, "9c96a2080bfc199c590ec54f3a2bda7b");
-  assertEquals(pickTheme(L0_2024, 2024, SUBJECT_MAP.LegislatorPlainIndigenous)?.themeId, "9f382748c91a4096d8a4f203530a57ab");
-  assertEquals(pickTheme(L0_2024, 2024, SUBJECT_MAP.LegislatorMountainIndigenous)?.themeId, "7fbfcdb409c14531893107df396133cb");
-  assertEquals(pickTheme(L0_2024, 2024, SUBJECT_MAP.LegislatorParty)?.themeId, "e753a8e7a7bcc09fa51d1aea0024a843");
-  assertEquals(pickTheme(L0_2024, 2020, SUBJECT_MAP.LegislatorParty), undefined, "2020 清單裡只放了區域，不分區不能退回去拿區域那筆");
+  assertEquals(pickTheme(L0_2024, "2024-01-13", SUBJECT_MAP.Legislator)?.themeId, "9c96a2080bfc199c590ec54f3a2bda7b");
+  assertEquals(pickTheme(L0_2024, "2024-01-13", SUBJECT_MAP.LegislatorPlainIndigenous)?.themeId, "9f382748c91a4096d8a4f203530a57ab");
+  assertEquals(pickTheme(L0_2024, "2024-01-13", SUBJECT_MAP.LegislatorMountainIndigenous)?.themeId, "7fbfcdb409c14531893107df396133cb");
+  assertEquals(pickTheme(L0_2024, "2024-01-13", SUBJECT_MAP.LegislatorParty)?.themeId, "e753a8e7a7bcc09fa51d1aea0024a843");
+  assertEquals(pickTheme(L0_2024, "2020-01-11", SUBJECT_MAP.LegislatorParty), undefined, "2020 清單裡只放了區域，不分區不能退回去拿區域那筆");
 });
 
-Deno.test("pickTheme：不是立委的科目照舊（不看 legislator_type_id），重行選舉排後面", () => {
+Deno.test("pickTheme：不是立委的科目照舊（不看 legislator_type_id）；場次用投票日對，同年的重行選舉是另一天、另一場選舉", () => {
   const themes = [
-    { themeId: "redo", themeName: "嘉義市長重行選舉", year: 2022 },
-    { themeId: "main", themeName: "111年直轄市長選舉", year: 2022 },
+    { themeId: "redo", themeName: "嘉義市長重行選舉", voteDate: "2022-12-18", year: 2022 },
+    { themeId: "main", themeName: "111年直轄市長選舉", voteDate: "2022-11-26", year: 2022 },
   ];
-  assertEquals(pickTheme(themes, 2022, SUBJECT_MAP.Mayor)?.themeId, "main");
-  assertEquals(pickTheme(themes, 2022)?.themeId, "main");
+  assertEquals(pickTheme(themes, "2022-11-26", SUBJECT_MAP.Mayor)?.themeId, "main");
+  assertEquals(pickTheme(themes, "2022-11-26")?.themeId, "main");
+  assertEquals(pickTheme(themes, "2022-12-18")?.themeId, "redo", "重行選舉有自己的投票日，挑到自己的場次");
+  assertEquals(pickTheme(themes, "2022-12-19"), undefined, "沒有這一天的場次就是沒有，不退回同年別的場次");
 });
 
 Deno.test("toCecCandidateRow：不分區立委 → region＝全國、sub_region＝不分區，候選人檔的當選記號照收", () => {
@@ -167,15 +172,46 @@ Deno.test("toCecCandidateRow：不分區立委 → region＝全國、sub_region�
   assertEquals([plain?.region, plain?.sub_region, plain?.elected], ["全國", "平地原住民", true]);
 });
 
-// ── 已投票屆別 ──────────────────────────────────────────────────
-Deno.test("votedElectionIds：2026 投票日之前只有 2022、2024", () => {
-  assertEquals(votedElectionIds(new Date("2026-09-26T00:00:00Z")), [2022, 2024]);
-  assertEquals(votedElectionIds(new Date("2026-11-27T23:59:59Z")), [2022, 2024]);
+// ── 已投票的選舉（由 elections 表決定，#344 第二階段 A）──────────────────
+const ELECTIONS = [
+  { id: 2022, election_key: "2022-11-26_local", election_date: "2022-11-26", election_reason: "regular", election_types: ["縣市長", "縣市議員"] },
+  { id: 4, election_key: "2022-12-18_rerun_10020", election_date: "2022-12-18", election_reason: "rerun", election_types: ["縣市長"] },
+  { id: 2024, election_key: "2024-01-13_national", election_date: "2024-01-13", election_reason: "regular", election_types: ["總統副總統", "立法委員"] },
+  { id: 2026, election_key: "2026-11-28_local", election_date: "2026-11-28", election_reason: "regular", election_types: ["縣市長"] },
+  { id: 5, election_key: "2025-07-26_recall", election_date: "2025-07-26", election_reason: "recall", election_types: ["立法委員"] },
+];
+
+Deno.test("votedElections：2026 投票日之前只有 2022、重行選舉、2024（罷免投票不選人、不算）", () => {
+  assertEquals(votedElections(ELECTIONS, new Date("2026-09-26T00:00:00Z")).map((e) => e.id), [2022, 4, 2024]);
+  assertEquals(votedElections(ELECTIONS, new Date("2026-11-27T23:59:59Z")).map((e) => e.id), [2022, 4, 2024]);
+  assertEquals(votedElections(ELECTIONS, new Date("2022-12-17T00:00:00Z")).map((e) => e.id), [2022], "重行選舉投票前不算");
 });
 
-Deno.test("votedElectionIds：2026-11-28 投票日當天起算入 2026", () => {
-  assertEquals(votedElectionIds(new Date("2026-11-28T00:00:00Z")), [2022, 2024, 2026]);
-  assertEquals(votedElectionIds(new Date("2027-01-01T00:00:00Z")), [2022, 2024, 2026]);
+Deno.test("votedElections：2026-11-28 投票日當天起算入 2026", () => {
+  assertEquals(votedElections(ELECTIONS, new Date("2026-11-28T00:00:00Z")).map((e) => e.id), [2022, 4, 2024, 2026]);
+  assertEquals(votedElections(ELECTIONS, new Date("2027-01-01T00:00:00Z")).map((e) => e.id), [2022, 4, 2024, 2026]);
+});
+
+Deno.test("electionAreaRegion：補選、重行選舉的 election_key 最後一段是行政區代碼；全國同日的沒有", () => {
+  assertEquals(electionAreaRegion(ELECTIONS[1]), "嘉義市");
+  assertEquals(electionAreaRegion({ election_key: "2027-03-06_by_66000" }), "台中市");
+  assertEquals(electionAreaRegion({ election_key: "2027-03-06_by_09020" }), "金門縣", "金門 09020（中選會 09_020）");
+  assertEquals(electionAreaRegion({ election_key: "2027-03-06_by_09007" }), "連江縣");
+  assertEquals(electionAreaRegion(ELECTIONS[0]), null);
+  assertEquals(electionAreaRegion(ELECTIONS[2]), null);
+  assertEquals(electionAreaRegion({ election_key: "2027-03-06_by_99999" }), null, "對不到縣市的代碼不猜");
+});
+
+Deno.test("planElectionUnits：職位看 elections.election_types；重行選舉只同步它的那個縣市；沒有職位清單就全部", () => {
+  const rerun = planElectionUnits(ELECTIONS[1]);
+  assertEquals(rerun.map((u) => [u.ourType, u.plan.region, u.plan.cecType]), [["縣市長", "嘉義市", "CountyMayor"]]);
+  const national = planElectionUnits(ELECTIONS[2]);
+  assertEquals([...new Set(national.map((u) => u.ourType))], ["總統副總統", "立法委員"], "2024 不再去抓地方職位（以前這些單位都是『找不到場次』的失敗）");
+  const local = planElectionUnits(ELECTIONS[0]);
+  assertEquals([...new Set(local.map((u) => u.ourType))], ["縣市長", "縣市議員"]);
+  assertEquals(local.filter((u) => u.ourType === "縣市長").length, 22);
+  assertEquals(electionOurTypes({ election_types: [] }).length, 9, "沒有職位清單＝全部九種");
+  assertEquals(planElectionUnits(ELECTIONS[0], ["縣市議員"]).every((u) => u.ourType === "縣市議員"), true, "--election_type 篩選");
 });
 
 // ── CEC 列 → cec_candidates 列 ───────────────────────────────────

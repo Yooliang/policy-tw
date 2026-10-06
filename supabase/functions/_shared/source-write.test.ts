@@ -416,7 +416,9 @@ Deno.test("落庫：失敗的不寫出處（找不到人 → failed，不打 sou
 // ── 6. 協議 ────────────────────────────────────────────────────────────────
 
 Deno.test("協議 1.62.0：skill.md 寫清楚 source_details、self 的條件、社群不收、平台認證不收、不改計分", () => {
-  assertEquals(PROTOCOL_VERSION, "1.64.0");
+  // 版號只要不比 1.62.0 舊（每次升版都回頭改這一行，並行的 PR 一定撞）
+  const [maj, min] = PROTOCOL_VERSION.split(".").map(Number);
+  assert(maj > 1 || (maj === 1 && min >= 62), `協議版號 ${PROTOCOL_VERSION} 比 1.62.0 舊`);
   const at = skill.indexOf("1c. **出處可以標等級");
   assert(at > 0, "skill.md 缺第 1c 條");
   const rule = skill.slice(at, skill.indexOf("\n2. **來源必須證明", at));

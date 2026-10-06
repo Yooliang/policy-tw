@@ -9,6 +9,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { daysUntil, splitElections, taipeiDay, turnoutText } from '../lib/election-list'
 import { electionPath } from '../lib/election-regions'
+import { electionSegment } from '../lib/election-route'
 import { electionPositionLabels } from '../lib/election-levels'
 import type { Election } from '../types'
 
@@ -43,7 +44,7 @@ function voteDayText(e: Election): string {
 function positionLinks(e: Election): Array<{ label: string; to: string }> {
   return electionPositionLabels(e.types ?? []).map((p) => ({
     label: p.label,
-    to: p.anchor ? `${electionPath(e.id)}#${p.anchor}` : electionPath(e.id),
+    to: p.anchor ? `${electionPath(electionSegment(e))}#${p.anchor}` : electionPath(electionSegment(e)),
   }))
 }
 
@@ -74,7 +75,7 @@ usePageHead({
       '@type': 'ListItem',
       position: i + 1,
       name: e.name,
-      url: `${SITE_URL}${electionPath(e.id)}`,
+      url: `${SITE_URL}${electionPath(electionSegment(e))}`,
     })),
   }),
 })
@@ -110,7 +111,7 @@ usePageHead({
                 </div>
                 <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700">
                   <!-- 整張卡片可點：標題連結撐滿卡片（stretched link），職位標籤各自是 z-10 的連結，不做出 <a> 包 <a> -->
-                  <RouterLink :to="electionPath(e.id)" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
+                  <RouterLink :to="electionPath(electionSegment(e))" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
                     {{ e.shortName }}
                     <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
                   </RouterLink>
@@ -136,7 +137,7 @@ usePageHead({
                 </div>
                 <h3 class="text-xl font-black text-navy-900 group-hover:text-blue-700">
                   <!-- 整張卡片可點：標題連結撐滿卡片（stretched link），職位標籤各自是 z-10 的連結，不做出 <a> 包 <a> -->
-                  <RouterLink :to="electionPath(e.id)" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
+                  <RouterLink :to="electionPath(electionSegment(e))" class="flex items-center gap-1 after:absolute after:inset-0 after:content-['']">
                     {{ e.shortName }}
                     <ChevronRight :size="20" class="text-slate-400 group-hover:text-blue-600 shrink-0" />
                   </RouterLink>

@@ -19,6 +19,7 @@
  *     網址仍是那一頁，不新增可收錄的頁面。
  */
 import { positionSpec, sectionAnchor, type PositionSpec } from './election-levels'
+import { electionSegment } from './election-route'
 import { electionRegionPath, electionTownshipPath, isCounty } from './election-regions'
 import { townshipNameOf } from './township-directory'
 import { isFormalDistrict } from './district-grouping'
@@ -43,6 +44,8 @@ export interface CrumbRecord {
 export interface CrumbElection {
   name?: string
   shortName?: string
+  /** election_key：新增的選舉（補選、罷免、重行選舉）網址用它；舊三屆照舊用 id（lib/election-route.ts）。沒給就用 id */
+  electionKey?: string
   /** 投票日，YYYY-MM-DD（台灣日期） */
   electionDate?: string
 }
@@ -93,12 +96,16 @@ function groupOf(
  * 職位那層一定有連結：區塊的錨點在目標頁上才帶，目標頁定不出來（缺縣市、缺鄉鎮）就退到最深的那一頁、不帶錨點。
  */
 export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | undefined, now: Date): Crumb[] {
-  const yearPath = `/election/${rec.electionId}`
+  // 網址那一段：舊三屆是 id、新增的選舉是 election_key（#344 第二階段 A）
+  const seg = election?.electionKey
+    ? electionSegment({ id: rec.electionId, electionKey: election.electionKey, electionDate: election.electionDate ?? '' })
+    : String(rec.electionId)
+  const yearPath = `/election/${seg}`
   const crumbs: Crumb[] = [{ name: election?.shortName || election?.name || `選舉 ${rec.electionId}`, path: yearPath }]
 
   const region = rec.region?.trim()
   const county = isCounty(region) ? region : undefined
-  const countyPath = county ? electionRegionPath(rec.electionId, county) : undefined
+  const countyPath = county ? electionRegionPath(seg, county) : undefined
   if (county && countyPath) crumbs.push({ name: county, path: countyPath })
 
   const spec = positionSpec(rec.electionType ?? '')
@@ -107,7 +114,7 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
   // 鄉鎮層：職位在鄉鎮之下才有
   const belowCounty = spec.level === 'township' || spec.level === 'village'
   const township = county && belowCounty ? townshipNameOf(rec.subRegion?.trim()) : undefined
-  const townshipPath = county && township ? electionTownshipPath(rec.electionId, county, township) : undefined
+  const townshipPath = county && township ? electionTownshipPath(seg, county, township) : undefined
   if (township && townshipPath) crumbs.push({ name: township, path: townshipPath })
 
   // 職位的區塊畫在哪一頁（跟選舉頁的分層一致，見 election-levels.ts 檔頭的表）：

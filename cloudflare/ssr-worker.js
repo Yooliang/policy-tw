@@ -17,7 +17,7 @@
 
 import { render, SUPABASE_PUBLIC } from '../dist-ssr/entry-server.js'
 import { classifyRead } from './ai-reads.js'
-import { legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
+import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
  * 記「誰在讀」（2026-09-23）：AI／搜尋引擎／從 AI 服務點過來的人，背景加一，不拖慢回應、失敗不影響頁面。
@@ -212,6 +212,9 @@ export default {
     if (api) return api
     // 縣市、鄉鎮原本放在查詢字串，搜尋引擎不當獨立頁；舊連結一律 301 到路徑版（縣市 2026-09-30、鄉鎮 2026-10-05）
     if (request.method === 'GET' || request.method === 'HEAD') {
+      // 舊三屆的 election_key 寫法（/election/2022-11-26_local）→ 年份寫法（/election/2022）：三屆的正式網址不變、只有一個 canonical（#344 第二階段 A）
+      const keyed = legacyElectionKeyRedirect(url.pathname, url.search)
+      if (keyed) return new Response(null, { status: 301, headers: { Location: `${url.origin}${keyed}`, 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'public, max-age=3600' } })
       const moved = legacyRegionRedirect(url.pathname, url.searchParams)
       if (moved) return new Response(null, { status: 301, headers: { Location: `${url.origin}${moved}`, 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'public, max-age=3600' } })
     }
