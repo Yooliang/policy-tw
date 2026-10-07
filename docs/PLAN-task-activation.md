@@ -186,6 +186,19 @@ activity_overrides (id, activity, election_id NULL, election_type NULL,
 
 用途：某次延期、某場選舉要提早啟動、緊急關掉一支出問題的臂（不用等 migration）。`reason` 必填、`expires_at` 建議必填；每次寫入記 `edit_history`（見第 4 節）。**覆寫不是常態**：如果同一個覆寫反覆出現，代表規則寫錯了，回頭改規則。
 
+### 2.5 每個缺口都有出生紀錄（2026-10-07 維護者裁示）
+
+> 維護者：「所有的缺口都要有一筆記錄去計算它什麼時候產出這個缺口。」
+
+現況【查】：`task_dispatches` 只有 `queue_at`、`last_dispatched_at`、`refreshed_at`，**沒有「這個缺口何時出現、因為哪一筆資料出現」**；缺口補上時派工列被 DELETE，歷史也跟著消失。
+
+規則：
+1. **缺口的開啟日一定由一筆資料算出來**：`activity_open()` 回傳的不只是真假，而是「開窗的那條規則＋那筆里程碑（`election_id`、`kind`、`on_date`）」。沒有對應里程碑就不開（fail closed）；P1 的 `always` 種子也要是一條有名字的規則列，不是程式裡的常數。
+2. **派工列記出生**：`task_dispatches` 加 `opened_at`（第一次被 seed 看到的時間，之後不改）與 `opened_by`（`rule_id`、`election_id`、`milestone_kind`、`milestone_on_date`、`expected_open_on`＝里程碑日期＋偏移）。
+3. **開關事件只增不刪**：新表 `gap_events (task_id, task_type, event 'opened'|'closed'|'reopened', at, rule_id, election_id, milestone_kind, milestone_on_date, reason 'window'|'filled'|'override'|'rule_change')`，由 `seed_auto_task_queue` 在新增／收回派工列的同一個交易裡寫入。派工列被收回後，從這張表仍查得到它何時出生、何時、為何關閉。
+4. **對帳**：`expected_open_on` 與 `opened_at` 的差距就是「規則說該開、實際晚了多久才派」，健康檢查視圖列出差距 > 1 天的缺口（排程漏跑、規則寫錯都會在這裡現形）。
+5. **既有約 7,000 筆**：P0 回填 `opened_at = LEAST(queue_at, refreshed_at)`、`opened_by.basis = 'backfill'`，`gap_events` 補一筆 `opened`（標 backfill），不假裝知道真正出生時間。
+
 ### 2.4 與既有設定表的整合（建議）
 
 | 既有 | 建議 | 理由 |
@@ -286,7 +299,7 @@ WHERE activity_open(g.arm, election_id, election_type, activity_today(...))
 
 | 期 | 內容 | 行為變化 | 守門 |
 |---|---|---|---|
-| **P0** | 建 `election_milestones`、`activity_rules`、`activity_overrides`、`activity_today()`、`activity_open()`；回填里程碑（`election_date`→polling、`roster_check_scope` 的兩個日期、`election_term_*` 視圖）；建 `activity_open_now`；三表的審計觸發器 | **無**（沒有人呼叫） | 回填對照：新里程碑視圖與舊欄位逐列相同 |
+| **P0** | 建 `election_milestones`、`activity_rules`、`activity_overrides`、`activity_today()`、`activity_open()`；`task_dispatches.opened_at`／`opened_by` 與 `gap_events`（2.5，含回填與 seed 寫入事件）；回填里程碑（`election_date`→polling、`roster_check_scope` 的兩個日期、`election_term_*` 視圖）；建 `activity_open_now`；三表的審計觸發器 | **無**（沒有人呼叫） | 回填對照：新里程碑視圖與舊欄位逐列相同 |
 | **P1** | `contribution_auto_tasks_arms()` 改成貼臂名＋過濾；所有活動的規則種子＝`always`（永遠開） | **無** | 全站派工清單差集為空（全欄雜湊三方相等） |
 | **P2** | **一支臂一個 PR**，把現有條件翻成規則（`progress_stale` 的投票日條件、`not_running`／`withdrawn_filing` 的登記截止→投票日、`election_results`／`election_result_missing` 的投票後、`party_gap`／`party_roster`、`policy_elements` 的已投票／未投票兩個窗…），臂內的日期比較拿掉；`term_policies` 併入 `election_task_config`（再開一個 PR 刪舊表，分兩次上） | 每支臂**今天**輸出不變；之後的日期自動依規則走 | 同 P1，加該臂的假時鐘測試與還原驗證 |
 | **P3** | **寫死 2026 的臂**（`raw` 三段、`mayor_policies`、`roster_villages`、`township_gap`、`region_gap`；`term_policies` 的去重也在這一期）改成「對規則開著的每一場選舉各算一遍」（臂內的 `election_id = 2026` 改成 JOIN `activity_open_now`）；先把 `raw` 拆成一個 task_type 一支函式；`cec_sync_phase` 與 `cec-sync` 排程改讀規則 | 今天只有 2026 開著，輸出不變；2028 自動涵蓋 | 同上；這是最大的一期，要拆小 PR |
