@@ -508,3 +508,10 @@ enabled = true
 # 但函式自己驗呼叫者：x-cron-secret（密鑰只在 Vault，函式用 RPC console_fetch_cron_secret_ok 請資料庫比對）或 service role bearer，驗不過一律拒絕
 verify_jwt = false
 entrypoint = "./functions/console-fetch/index.ts"
+
+[functions.bulletin-watch]
+enabled = true
+# 偵測中選會公報站某一屆的資料夾出現了沒，出現就記下實際上網日（pg_cron：每天 01:23 UTC 全部、每小時第 41 分只看預估上架日前後各 14 天內）。
+# 閘道不驗 JWT 是為了讓 pg_cron 打得到，但函式自己驗呼叫者：x-cron-secret（密鑰只在 Vault，函式用 RPC bulletin_watch_cron_secret_ok 請資料庫比對）或 service role bearer，驗不過一律拒絕
+verify_jwt = false
+entrypoint = "./functions/bulletin-watch/index.ts"
