@@ -135,6 +135,7 @@ const NOT_REDIRECTED: Record<string, string> = {
   "cec-verify": "排程查證（cron 打 Supabase），不對外",
   "moi-sync": "排程抓取，不對外",
   "news-fetch": "排程抓取，不對外",
+  "console-fetch": "站務主控台的 GA4／AdSense 抓取（cron 打 Supabase，要帶憑證），不對外",
   "source-archive": "排程存檔，不對外",
   "sources": "已知缺口（2026-10-07 盤點時就是這樣）：skill.md 有寫 GET /functions/v1/sources，但網站也有 /sources 頁，不在 API_ALSO_PAGE，代理打網站網域會拿到頁面。要不要補請維護者決定",
 };
