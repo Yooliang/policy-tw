@@ -13,7 +13,8 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 export const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 export const P0_MIG = "20261008001000_activity_windows_p0.sql";
 export const P1_MIG = "20261008060000_activity_windows_p1.sql";
-export const BASE_ARMS_MIG = "20261006141600_reassign_candidacy.sql";
+export const P2_ER_MIG = "20261008070000_activity_windows_p2_election_results.sql";
+export const BASE_ARMS_MIG ="20261006141600_reassign_candidacy.sql";
 export const BASE_DROP_MIG = "20260924000001_dispatch_io.sql";
 
 export const readMig = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -137,6 +138,12 @@ export type EnvOptions = {
   applyP1?: boolean;
   /** 改壞 P1 migration 文字（還原驗證用） */
   mutateP1?: (sql: string) => string;
+  /**
+   * P1 之後再套的 P2 migration（一支臂一個 PR）。這些 migration 會 CREATE OR REPLACE 真的臂本體（引用 PGlite 沒有的表），
+   * 所以跑的時候關掉 check_function_bodies，跑完把 restub 列的分支換回「回放 _b_<名字>」的 stub——臂內部不在 PGlite 重算
+   * （各臂有自己的文字守門與正式庫快照比對），這裡測的是規則與總表。
+   */
+  p2?: { migs: { name: string; mutate?: (sql: string) => string }[]; restub: readonly (typeof ARM_BRANCHES)[number][] };
   /** migration 當下的假「今天」，預設 2026-10-08（P0 回填里程碑 status 用） */
   migrationToday?: string;
 };
@@ -169,8 +176,22 @@ export async function buildArmsDb(o: EnvOptions = {}): Promise<PGlite> {
   await db.exec(`SET app.activity_today = '${o.migrationToday ?? "2026-10-08"}'`);
   await db.exec(await read(P0_MIG));
   if (o.applyP1 !== false) await db.exec((o.mutateP1 ?? ((s) => s))(await read(P1_MIG)));
+  for (const m of o.p2?.migs ?? []) await applyP2(db, (m.mutate ?? ((s) => s))(await read(m.name)), o.p2!.restub);
   await db.exec("RESET app.activity_today");
   return db;
+}
+
+/** 套一支 P2 migration：關掉 check_function_bodies 跑（它會重定義真的臂本體），跑完把 restub 的分支換回回放 stub */
+export async function applyP2(db: PGlite, sql: string, restub: readonly (typeof ARM_BRANCHES)[number][]): Promise<void> {
+  await db.exec("SET check_function_bodies = off");
+  try {
+    await db.exec(sql);
+  } finally {
+    await db.exec("RESET check_function_bodies");
+  }
+  for (const n of restub) {
+    await db.exec(`CREATE OR REPLACE FUNCTION contribution_auto_tasks_${n}() RETURNS TABLE(${BRANCH_COLS}) LANGUAGE sql STABLE AS $$ SELECT * FROM _b_${n} $$`);
+  }
 }
 
 /** 7 個資料欄的全欄指紋與筆數（總表新版多的 arm、opened_by 不算——比的是「派工輸出」） */

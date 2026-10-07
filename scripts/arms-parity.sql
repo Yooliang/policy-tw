@@ -7,13 +7,14 @@ SET default_transaction_read_only = on;
 -- 做法：PGlite 裡 28 個分支函式換成「回放這個快照裡該分支的輸出」的 stub，其餘（總表本身、roster_scope_covers、整個啟用時間窗的表與函式）跑真的；
 -- 所以測的是「總表的組合方式」（貼臂名＋規則過濾）在正式庫真實輸出上有沒有改變結果，各臂內部（不在這次範圍）不重算。
 -- 每個分支的輸出轉成「文字」放進去：外層 JSON 被 JS 解析再寫回時數字會被正規化（jsonb 裡的 0.80 變 0.8，整列雜湊就對不上），文字不會。
+-- P1 上線後正式庫的總表多了 arm、opened_by 兩欄，所以雜湊與逐件指紋都先去掉這兩欄（比的是 7 個資料欄的派工輸出；P1 之前沒有這兩欄，去掉也不影響）。
 -- 只讀：快照只含派工輸出（本來就是公開資料與任務說明）與兩張小設定表，不含金鑰或個資。
 SELECT json_build_object(
   'taken_at', now(),
   'n', (SELECT count(*) FROM contribution_auto_tasks_arms()),
-  'hash', (SELECT md5(string_agg(to_jsonb(t)::text, '' ORDER BY t.task_id COLLATE "C")) FROM contribution_auto_tasks_arms() t),
+  'hash', (SELECT md5(string_agg((to_jsonb(t) - 'arm' - 'opened_by')::text, '' ORDER BY t.task_id COLLATE "C")) FROM contribution_auto_tasks_arms() t),
   -- 逐件指紋：全欄雜湊對不上時，用它找出是哪幾件走樣（[task_id, md5(整列 jsonb 文字)]）
-  'row_hashes', (SELECT json_agg(json_build_array(t.task_id, md5(to_jsonb(t)::text)) ORDER BY t.task_id COLLATE "C") FROM contribution_auto_tasks_arms() t),
+  'row_hashes', (SELECT json_agg(json_build_array(t.task_id, md5((to_jsonb(t) - 'arm' - 'opened_by')::text)) ORDER BY t.task_id COLLATE "C") FROM contribution_auto_tasks_arms() t),
   'elections', (SELECT json_agg(json_build_object('id', id, 'election_key', election_key, 'election_date', election_date, 'election_reason', election_reason, 'election_types', election_types, 'notice_date', notice_date)) FROM elections),
   'roster_check_scope', (SELECT json_agg(row_to_json(s)) FROM roster_check_scope s),
   'branches', json_build_object(
