@@ -71,7 +71,8 @@ Deno.test("CI 的前端測試整個資料夾交給 deno 找，不手寫檔名；
   assert(denoLines.length >= 2, "找不到 CI 的 deno test 步驟");
   const frontend = denoLines.filter((l) => !/_shared\//.test(l));
   assertEquals(frontend.length, 1, "前端純函式那一步");
-  assertMatch(frontend[0], /deno test --allow-read lib\/ cloudflare\/\s*$/);
+  // --node-modules-dir=auto：lib/md/html.ts 用到 npm 套件 marked，CI 這一步沒有 npm install（2026-10-07）
+  assertMatch(frontend[0], /deno test --allow-read (--node-modules-dir=auto )?lib\/ cloudflare\/\s*$/);
   for (const l of denoLines) assertNotMatch(l, /\.test\.ts/, "CI 不要再手寫測試檔名（漏加＝測試存在但沒跑）");
 
   // 範圍涵蓋所有真的有測試的資料夾：lib、cloudflare 以外不能出現新的前端測試資料夾
