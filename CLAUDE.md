@@ -210,6 +210,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `PLAN-tasks-as-rows.md` — 自動缺口實體化成任務列（實際走了「單一佇列＋`task_dispatches`」）
 - `PLAN-weighted-consensus.md`、`PROPOSAL-jev-vote-budget.md` — 加權共識與票數預算（目標分數仍一律 3，票數預算在影子模式）
 - `REVIEW-deepseek-weighted-consensus.md` — 外部審查上面那份計畫的意見
+- `PROPOSAL-roster-bulk-candidacy.md` — 系統整批把中選會名冊上的人建成參選紀錄（2026-10-08，10-08 缺口盤點 R1 的 PR 二）：沒有「系統當貢獻者」的先例、牴觸 09-19／10-01／10-05 三條裁決，**只有設計、沒有實作**，等維護者裁決；含四個替代方案與數字
 
 **`docs/` 歷史（2026-02 的 Claude-PM／管理頁架構，已被貢獻協議取代）**
 
