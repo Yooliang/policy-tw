@@ -14,7 +14,7 @@ const enc = encodeURIComponent
 
 /** 入口清單（index 與 404 共用） */
 export function listingLines(): string[] {
-  const lines: string[] = ['## 縣市（最新一屆的候選人與政見）', '']
+  const lines: string[] = ['## 縣市（最新一屆的候選人與競選承諾）', '']
   for (const r of TAIWAN_COUNTIES) lines.push(`- ${r}：${abs(`/data/${enc(r)}.md`)}`)
   lines.push('', '## 分類（全國，依縣市分組）', '')
   for (const c of CATEGORIES) {
@@ -40,17 +40,17 @@ export function buildIndexPage(input: IndexInput): MdPage {
   const body = [
     '## 概況', '',
     `- 最新一屆：${ctx.election.name}（投票日 ${ctx.election.electionDate}）`,
-    `- 資料庫目前收錄的政見 ${ctx.policies.length} 筆；${year} 屆在選候選人名下的政見 ${matrix.total} 筆`,
+    `- 資料庫目前收錄的政見 ${ctx.policies.length} 筆；${year} 屆競選承諾 ${matrix.total} 筆（本索引的範圍）`,
     `- 機器可讀索引（JSON）：${abs(dataIndexJsonPath(seg))}`,
     `- 縣市×分類矩陣（網頁）：${abs(`/election/${seg}/matrix`)}`,
     '',
     ...listingLines(),
   ]
   return {
-    title: `${year} 政見資料索引`,
+    title: `${year} 競選承諾資料索引`,
     htmlPath: null,
     dataAsOf: input.dataAsOf,
-    scope: `全站；最新一屆 ${year}；22 縣市、19 分類；${matrix.total} 筆`,
+    scope: `${year} 屆（${ctx.election.name}）競選承諾；22 縣市、19 分類；${matrix.total} 筆`,
     preface: [`本頁網址 ${abs(dataIndexMdPath(seg))}；全部檔案與筆數見 ${abs(dataIndexJsonPath(seg))}。`],
     body,
     rowCount: matrix.total,

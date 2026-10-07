@@ -1,7 +1,7 @@
 /**
  * 分類、縣市×分類的 Markdown（docs/PLAN-markdown-views.md 2.1；維護者 2026-10-07：「主題」就用既有分類 policies.category，數字直接按 category 算）。
  *
- * 兩種都從同一份「收錄的人」（lib/md/scope.ts：最新一屆在選候選人）與他們名下沒被移除的政見出發，只差篩選條件：
+ * 兩種都從同一份「收錄的人」（lib/md/scope.ts：最新一屆在選候選人）與他們名下「這一屆的競選承諾」（lib/md/pledge.ts；維護者 10-07：範圍由人改為政見）出發，只差篩選條件：
  * `policies.category` 等於它。排序：縣市照網站縣市順序、人物依姓名筆畫、同人政見依提出日期再依 id。
  * 0 筆時寫「資料庫目前沒有收錄」，不是 404。網址：
  *   /data/<屆>/<分類>.md            全國、依縣市分組（/category/<分類>.md 是它的最新一屆短網址）
@@ -10,6 +10,7 @@
 import type { Election, Policy } from '../../types'
 import { TAIWAN_COUNTIES } from '../election-regions'
 import { NATIONAL, type ScopedPerson } from './scope'
+import { pledgesOf } from './pledge'
 import {
   abs, compareByName, comparePolicies, dataCategoryMdPath, dataRegionCategoryMdPath, electionYear, latestTime, policyBullet,
   politicianMdPath, politicianUrl, type MdPage,
@@ -21,7 +22,7 @@ export interface ListContext {
   segment: string
   /** 收錄的人（scopePeople 的結果） */
   scoped: ScopedPerson[]
-  /** 全部沒被移除的政見（不只收錄的人的；用來數「不在此列」） */
+  /** 全部沒被移除的政見（不只收錄的人的、不只這一屆的競選承諾；pledgesOf 再篩） */
   policies: Policy[]
 }
 
@@ -32,7 +33,7 @@ interface Hit { person: ScopedPerson; policies: Policy[] }
 
 function policiesByPerson(ctx: ListContext): Map<string, Policy[]> {
   const m = new Map<string, Policy[]>()
-  for (const p of ctx.policies) m.set(p.politicianId, [...(m.get(p.politicianId) ?? []), p])
+  for (const p of pledgesOf(ctx.policies, ctx.election)) m.set(p.politicianId, [...(m.get(p.politicianId) ?? []), p])
   return m
 }
 
@@ -64,7 +65,7 @@ function personBlock(h: Hit, heading: string): string[] {
 const EMPTY = '資料庫目前沒有收錄符合的政見。'
 
 function scopeLine(ctx: ListContext, what: string, hs: Hit[]): string {
-  return `${electionYear(ctx.election)} 屆（${ctx.election.name}）在選候選人名下的政見；${what}；${hs.length} 位、${count(hs)} 筆政見`
+  return `${electionYear(ctx.election)} 屆（${ctx.election.name}）競選承諾；${what}；${hs.length} 位、${count(hs)} 筆政見`
 }
 
 /** `/data/<屆>/<分類>.md`：全國、依縣市分組 */
@@ -80,7 +81,7 @@ export function buildCategoryPage(category: string, ctx: ListContext): MdPage {
   }
   if (all.length === 0) body.push(EMPTY)
   return {
-    title: `${electionYear(ctx.election)} ${category}政見（依縣市分組）`,
+    title: `${electionYear(ctx.election)} ${category}競選承諾（依縣市分組）`,
     htmlPath: null,
     dataAsOf: latestTime(all.flatMap((h) => h.policies.map((p) => p.updatedAt ?? p.lastUpdated))),
     scope: scopeLine(ctx, `分類：${category}`, all),
@@ -97,7 +98,7 @@ export function buildRegionCategoryPage(region: string, category: string, ctx: L
   for (const h of hs) body.push(...personBlock(h, '##'))
   if (hs.length === 0) body.push(EMPTY)
   return {
-    title: `${region} ${electionYear(ctx.election)} ${category}政見`,
+    title: `${region} ${electionYear(ctx.election)} ${category}競選承諾`,
     htmlPath: null,
     dataAsOf: latestTime(hs.flatMap((h) => h.policies.map((p) => p.updatedAt ?? p.lastUpdated))),
     scope: scopeLine(ctx, `縣市：${region}；分類：${category}`, hs),

@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { loadCorpus } from '../lib/ssr/md-loaders'
 import { buildAll, MATRIX_PATH } from '../lib/md/dataset'
+import { SCOPE_VERSION } from '../lib/md/pledge'
 import { renderPage, type MdPage } from '../lib/md/format'
 
 const args = process.argv.slice(2)
@@ -34,7 +35,9 @@ const STAGE_FILE_MAX = 2_500_000
 
 interface Row { path: string; body: string; meta: Record<string, unknown>; row_count: number; content_sha: string }
 
-const sha = (o: unknown) => createHash('sha256').update(JSON.stringify(o)).digest('hex')
+// 內容雜湊把範圍版本（lib/md/pledge.ts SCOPE_VERSION）算進去：改範圍上線後的第一次排程，每一列的雜湊都跟舊的不同，整批作廢重建，
+// 不會有「內容碰巧一樣、只更新時間」的舊範圍列留在快取裡（維護者 10-07：範圍由人改為政見）
+const sha = (o: unknown) => createHash('sha256').update(JSON.stringify({ scope: SCOPE_VERSION, o })).digest('hex')
 const splitPage = (page: MdPage) => { const { body, ...meta } = page; return { bodyText: body.join('\n'), meta } }
 /** 一份頁面的內容雜湊（資料庫列的 content_sha 與 index.json 的 sha 用同一個函式） */
 const pageSha = (page: MdPage) => { const { bodyText, meta } = splitPage(page); return sha({ bodyText, meta }) }

@@ -7,6 +7,7 @@ import { useSupabase } from '../composables/useSupabase'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import PolicyCard from '../components/PolicyCard.vue'
 import { isLostCampaignPromise } from '../lib/policy-visibility'
+import { pledgeCounts } from '../lib/pledge-origin'
 
 import Hero from '../components/Hero.vue'
 import AiContributeBanner from '../components/AiContributeBanner.vue'
@@ -92,17 +93,14 @@ const politicians2026Count = computed(() => {
   if (fromStats !== undefined) return fromStats
   return politicians.value.filter(p => p.electionIds?.includes(electionId)).length
 })
-const totalPolicies = computed(() => policies.value.length)
+// 首頁只放筆數、不放比例（維護者 2026-10-07）：「追蹤中政見」拆成競選承諾與任內政見（任內＝不是競選承諾）兩個數字，
+// 只問 lib/pledge-origin.ts 的 isPledge，筆數直接來自目前載入的政見清單，沒有任何寫死的數字或建置快照
+const pledgeCount = computed(() => pledgeCounts(policies.value).pledge)
+const termCount = computed(() => pledgeCounts(policies.value).term)
 // 狀態數字用 status 算，不用 progress：293 筆裡 252 筆是還沒開始的競選承諾，progress 平均永遠趨近 0
 const countByStatus = (status: string) => policies.value.filter(p => p.status === status).length
 const achievedCount = computed(() => countByStatus('Achieved'))
 const inProgressCount = computed(() => countByStatus('In Progress'))
-const proposedCount = computed(() => countByStatus('Proposed'))
-// 已執行政見的達成率＝已達成 ÷（已達成＋進行中＋已提出），還沒開始的競選承諾不算進分母
-const executedAchievementRate = computed(() => {
-  const denominator = achievedCount.value + inProgressCount.value + proposedCount.value
-  return denominator === 0 ? 0 : Math.round((achievedCount.value / denominator) * 100)
-})
 
 const recentPolicies = computed(() => policies.value.filter(notLost).slice(0, 3))
 
@@ -204,24 +202,28 @@ usePageHead({
     <!-- Overall Stats -->
     <section class="py-20 bg-white">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 text-left mb-8" data-testid="home-stats">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-6 text-left mb-8" data-testid="home-stats">
+          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+            <div class="p-3 md:p-4 bg-violet-100 rounded-2xl mb-3 md:mb-4 text-violet-600"><Vote :size="28" /></div>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="pledge-policies">{{ pledgeCount.toLocaleString() }}<span class="ml-1 text-base font-bold text-slate-400">筆</span></h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">競選承諾</p>
+          </div>
           <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
             <div class="p-3 md:p-4 bg-blue-100 rounded-2xl mb-3 md:mb-4 text-blue-600"><FileCheck :size="28" /></div>
-            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="total-policies">{{ totalPolicies.toLocaleString() }}</h3>
-            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">追蹤中政見</p>
+            <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="term-policies">{{ termCount.toLocaleString() }}<span class="ml-1 text-base font-bold text-slate-400">筆</span></h3>
+            <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">任內政見</p>
           </div>
           <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
             <div class="p-3 md:p-4 bg-emerald-100 rounded-2xl mb-3 md:mb-4 text-emerald-600"><CheckCircle2 :size="28" /></div>
             <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="achieved">{{ achievedCount.toLocaleString() }}</h3>
             <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已達成</p>
-            <p class="text-[11px] text-slate-400 mt-1">已執行政見達成率 <span data-stat="executed-rate">{{ executedAchievementRate }}</span>%</p>
           </div>
           <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
             <div class="p-3 md:p-4 bg-sky-100 rounded-2xl mb-3 md:mb-4 text-sky-600"><Activity :size="28" /></div>
             <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="in-progress">{{ inProgressCount.toLocaleString() }}</h3>
             <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">進行中</p>
           </div>
-          <div class="bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+          <div class="col-span-2 md:col-span-1 bg-slate-50 p-5 md:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
             <div class="p-3 md:p-4 bg-amber-100 rounded-2xl mb-3 md:mb-4 text-amber-600"><Users :size="28" /></div>
             <h3 class="text-3xl md:text-4xl font-black text-navy-900" data-stat="total-politicians">{{ totalPoliticians.toLocaleString() }}</h3>
             <p class="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">已建檔政治人物</p>

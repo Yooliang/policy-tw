@@ -14,6 +14,7 @@ import { latestLocalElection, regionOfRecord, runningRecord, scopePeople } from 
 import { buildRegionPage } from './region'
 import { buildCategoryPage, buildRegionCategoryPage, categoryCount, type ListContext } from './lists'
 import { buildIndexPage } from './index-page'
+import { DATASET_KIND, SCOPE_VERSION, partitionPolicies } from './pledge'
 import {
   FORMAT_VERSION, LICENSE, LICENSE_URL, abs, dataCategoryMdPath, dataIndexJsonPath, dataIndexMdPath, dataRegionCategoryMdPath, dataRegionMdPath,
   latestTime, taipeiIso, type MdPage,
@@ -52,7 +53,7 @@ export interface GeneratedPage {
 /** 機器可讀索引（/data/<屆>/index.json）也進快取：路徑與內容字串 */
 export interface GeneratedJson { path: string; body: string; rowCount: number }
 
-/** 矩陣頁（/election/<屆>/matrix）要的數字：縣市×分類的政見筆數；只算最新一屆在選候選人 */
+/** 矩陣頁（/election/<屆>/matrix）要的數字：縣市×分類的政見筆數；只算最新一屆在選候選人名下、這一屆的競選承諾（lib/md/pledge.ts） */
 export interface Matrix {
   /** 這份矩陣算的是哪一屆 */
   election: { id: number; segment: string; name: string; year: string }
@@ -67,6 +68,9 @@ export interface Matrix {
 }
 
 export const MATRIX_PATH = '_matrix'
+
+/** index.json 的 changelog 裡這一次範圍改動那一行（維護者 2026-10-07：已導入 NotebookLM 的人要重新匯入） */
+export const CHANGELOG_SCOPE_BY_POLICY = '2026-10-07 範圍由人改為政見'
 
 export interface BuildOptions {
   /** 這一批的產生時間（epoch ms）：索引裡每個檔案都帶它，跟資料庫列的 generated_at 同一個值 */
@@ -110,7 +114,10 @@ export function buildAll(c: Corpus, opts: BuildOptions): BuildResult {
   let matrix: Matrix | null = null
   if (latest) {
     const segment = electionSegment(latest)
-    const ctx: ListContext = { election: latest, segment, scoped: scopePeople(c.people, latest, c.today), policies: c.policies }
+    const scoped = scopePeople(c.people, latest, c.today)
+    const ctx: ListContext = { election: latest, segment, scoped, policies: c.policies }
+    // 每一條政見要嘛在資料集（分類檔與矩陣）裡、要嘛算進 unassigned（依原因）；兩邊加起來剛好是全部（守門：下面的筆數核對與 md.test.ts）
+    const { assigned, unassigned } = partitionPolicies({ election: latest, policies: c.policies, scopedIds: new Set(scoped.map((s) => s.politician.id)), elections: c.elections })
     const counts: Matrix['counts'] = {}
     const regionTotals: Record<string, number> = {}
     const categoryTotals: Record<string, number> = {}
@@ -128,6 +135,10 @@ export function buildAll(c: Corpus, opts: BuildOptions): BuildResult {
       }
     }
     const total = Object.values(regionTotals).reduce((a, b) => a + b, 0)
+    // 分類檔的筆數加總＝資料集裡的政見數：分範圍的算法（pledge.ts）與分頁的算法（lists.ts）不一致就是 bug，這裡直接擋
+    const inCategoryPages = Object.values(categoryTotals).reduce((a, b) => a + b, 0)
+    if (inCategoryPages !== assigned.length) throw new Error(`分類頁筆數 ${inCategoryPages} 與資料集政見數 ${assigned.length} 不一致`)
+    if (assigned.length + unassigned.total !== c.policies.length) throw new Error('資料集與 unassigned 加起來不等於全部政見')
     matrix = {
       election: { id: latest.id, segment, name: latest.name, year: latest.electionDate.slice(0, 4) },
       regions: [...TAIWAN_COUNTIES], categories: [...CATEGORIES], counts, regionTotals, categoryTotals, total,
@@ -148,7 +159,7 @@ export function buildAll(c: Corpus, opts: BuildOptions): BuildResult {
         url: abs(dataRegionCategoryMdPath(segment, p.region!, p.category!)), type: 'region_category', region: p.region!, category: p.category!, count: p.page.rowCount, generated_at: at, sha: opts.sha(p.page),
       })),
     ]
-    const asOf = latestTime(c.policies.map((p) => p.updatedAt ?? p.lastUpdated))
+    const asOf = latestTime(assigned.map((p) => p.updatedAt ?? p.lastUpdated))
     const indexPage = buildIndexPage({ ctx, matrix, dataAsOf: asOf })
     pages.push({ path: `/data/${segment}/index.md`, type: 'index', page: indexPage })
     json.push({
@@ -165,6 +176,18 @@ export function buildAll(c: Corpus, opts: BuildOptions): BuildResult {
         license: LICENSE,
         license_url: LICENSE_URL,
         total_policies: total,
+        kind: DATASET_KIND,
+        scope: {
+          kind: DATASET_KIND,
+          version: SCOPE_VERSION,
+          election: segment,
+          policy_rule: '政見來源是競選承諾（origin 為 pledge，或 status 為 Campaign Pledge，兩者擇一成立即算），而且屆別（election_id）是本屆',
+          owner_rule: '擁有人是本屆的在選候選人（considering、declared、filed、elected、not_elected），職位限縣市長、縣市議員、立法委員、鄉鎮市長、原住民區長；落選者的承諾保留、標「未當選」；退選與已合併的人不收',
+          unit: '筆（一筆政見）',
+        },
+        overlaps: {},
+        unassigned,
+        changelog: [CHANGELOG_SCOPE_BY_POLICY],
         files,
       }, null, 1),
     })
