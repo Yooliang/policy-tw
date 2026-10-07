@@ -486,7 +486,7 @@ WHERE activity_open(g.arm, election_id, election_type, activity_today(...))
 
 ## 11. 實作現況
 
-- **P0（2026-10-08，migration `20261008001000_activity_windows_p0.sql`，守門 `supabase/functions/_shared/activity-windows.test.ts`）**：已建 `election_milestones`、`activity_rules`、`activity_overrides`、`gap_events`；`activity_today()`、`activity_open()`（回傳開窗的規則＋里程碑列，零列＝關）、`activity_level()`／`activity_jurisdiction()`（P4 加欄位前的過渡）；視圖 `election_milestones_all`、`activity_open_now`、`activity_health`（正常是空的）；三張表的審計觸發器與 `updated_at` 觸發器；`task_dispatches.opened_at`／`opened_by`；`seed_auto_task_queue()` 寫 `opened`／`closed`／`reopened`。**沒有任何一支臂讀這些表，`activity_rules` 沒有種子**（P1 才種）。
+- **P0（2026-10-08，migration `20261008001000_activity_windows_p0.sql`，守門 `supabase/functions/_shared/activity-windows.test.ts`）**：已建 `election_milestones`、`activity_rules`、`activity_overrides`、`gap_events`；`activity_today()`、`activity_open()`（回傳開窗的規則＋里程碑列，零列＝關）、`activity_level()`／`activity_jurisdiction()`（P4 加欄位前的過渡）；視圖 `election_milestones_all`、`activity_open_now`、`activity_health`（正常是空的）；三張表的審計觸發器與 `updated_at` 觸發器；`task_dispatches.opened_at`／`opened_by`；`task_dispatches` 上的觸發器（只管 `auto:` 列，涵蓋 seed、貢獻 applied 收回、`/next` 的 `task_dispatched` 三條路）寫 `opened`／`closed`／`reopened`，關閉原因由交易內設定 `gap.close_reason`／`gap.close_detail` 帶入。**沒有任何一支臂讀這些表，`activity_rules` 沒有種子**（P1 才種）。
 - 與本檔設計的差異：
   1. `election_milestones` 主鍵是 `id`（BIGSERIAL）加 `(election_id, kind, COALESCE(election_type, ''))` 的唯一索引（2.1 寫的 PRIMARY KEY 含 COALESCE 運算式，PostgreSQL 不允許）。
   2. `polling`、`term_start`、`term_end` 不能存進這張表（CHECK 擋），只存在視圖裡（單一真相仍在 `elections.election_date` 與 `election_term_start／end()`）。

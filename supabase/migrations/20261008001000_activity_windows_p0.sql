@@ -9,8 +9,8 @@
 --   * 沒有任何一支臂讀這些表（contribution_auto_tasks_arms() 與各臂一字沒動，那是 P1／P2）；
 --   * elections 的 status／key 規則沒動（P4）；
 --   * activity_rules 沒有種子（P1 才種「永遠開」）。
---   唯一碰到線上行為的是 seed_auto_task_queue()：同簽名、同回傳，派工列的內容與去留跟原本逐件相同，
---   只是多寫兩個新欄位（opened_at、opened_by）與一張只增不刪的流水（gap_events）。
+--   唯一碰到線上行為的是 seed_auto_task_queue() 與 task_dispatches_drop_applied()：同簽名、同回傳，派工列的內容與去留跟原本逐件相同，
+--   只是多寫兩個新欄位（opened_at、opened_by）與一張只增不刪的流水（gap_events，由 task_dispatches 的觸發器寫）。
 --
 -- 做了什麼（只加不刪、函式簽名都沒變，所以不用分兩次上）：
 --   1. election_milestones：每場選舉×里程碑一列的窄表（裁示：另開一張表，不在 elections 上加寬欄位）。
@@ -24,8 +24,11 @@
 --      （election_type 填職位）；舊欄位保留，兩邊對不上時 activity_health 會列出來（milestone_scope_drift）。
 --   7. 三張表各一個審計觸發器，寫 edit_history（照 sync_politician_office_from_election 的寫法：field='*'、整列 jsonb）。
 --   8. 缺口出生紀錄（計畫 2.5）：task_dispatches.opened_at／opened_by；新表 gap_events（只增不刪，觸發器擋 UPDATE／DELETE／TRUNCATE）；
---      seed_auto_task_queue() 在新增派工列時寫 opened_at／opened_by 與一筆 opened（之前出現過又消失的寫 reopened）、
---      收回派工列時寫一筆 closed——同一個函式、同一個交易。P0 沒有規則在過濾，opened_by 先填 {"basis":"seed"}，欄位留給 P1。
+--      事件由 task_dispatches 上的三個觸發器統一寫（只管 auto: 列；不靠每個呼叫端各寫各的——正式庫會寫這張表的有 seed_auto_task_queue、
+--      task_dispatches_drop_applied、task_dispatched 三條路）：新增列寫 opened（之前出現過又消失的寫 reopened，並補 opened_at／opened_by）、
+--      刪除列寫 closed（原因與是哪一筆貢獻由交易內設定 gap.close_reason／gap.close_detail 帶入），同一個交易。
+--      seed_auto_task_queue() 只機械式多寫 opened_at／opened_by 兩欄；task_dispatches_drop_applied() 只機械式多兩段 set_config。
+--      P0 沒有規則在過濾，seed 填 {"basis":"seed"}，欄位留給 P1。
 --      既有的 auto: 派工列回填：opened_at＝LEAST(queue_at, refreshed_at)、opened_by.basis＝'backfill'，gap_events 補一筆 opened（標 backfill）。
 --
 -- 回填的一個偏離（已在 PR 說明）：插隊的派工列 queue_at 是 1980-01-01 的哨兵值（線上 865 筆），照 LEAST 會把「出生時間」
@@ -429,7 +432,7 @@ COMMENT ON VIEW activity_health IS
 ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ;
 ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS opened_by JSONB;
 COMMENT ON COLUMN task_dispatches.opened_at IS
-  '這一列派工列（auto: 缺口）被 seed_auto_task_queue 第一次排進佇列的時間，之後不改。缺口收回後又出現是新的一列、新的 opened_at；完整的出生與關閉歷史看 gap_events。verify: 列沒有';
+  '這一列派工列（auto: 缺口）第一次排進佇列的時間（BEFORE INSERT 觸發器保證一定有值），之後不改。缺口收回後又出現是新的一列、新的 opened_at；完整的出生與關閉歷史看 gap_events。verify: 列沒有';
 COMMENT ON COLUMN task_dispatches.opened_by IS
   '缺口是因為哪一筆資料被開出來的：P0 是 {"basis":"seed"}（還沒有規則在過濾）；回填的既有列是 {"basis":"backfill"}；P1 起帶 rule_id、election_id、milestone_kind、milestone_on_date、expected_open_on（里程碑日期＋偏移）';
 
@@ -450,7 +453,7 @@ CREATE INDEX IF NOT EXISTS gap_events_task_idx ON gap_events (task_id, at);
 CREATE INDEX IF NOT EXISTS gap_events_at_idx ON gap_events (at);
 COMMENT ON TABLE gap_events IS
   '缺口的開關流水，只增不刪（觸發器擋 UPDATE／DELETE／TRUNCATE）：opened＝第一次排進佇列、closed＝收回、reopened＝收回後又出現。派工列被收回後，這裡仍查得到它何時出生、何時、為何關閉。'
-  'rule_id 不設外鍵（規則將來可能被 migration 改掉，流水不能跟著消失）。由 seed_auto_task_queue 在新增／收回派工列的同一個交易裡寫入。2026-10-08（PLAN-task-activation 2.5）';
+  'rule_id 不設外鍵（規則將來可能被 migration 改掉，流水不能跟著消失）。由 task_dispatches 上的觸發器在新增／刪除 auto: 派工列的同一個交易裡寫入（不論是 seed、貢獻 applied 的收回或 /next 的 UPSERT）。2026-10-08（PLAN-task-activation 2.5）';
 COMMENT ON COLUMN gap_events.reason IS '關閉的原因：window＝窗口關了｜filled＝缺口不存在了（補上了，或臂自己的條件不成立）｜override＝覆寫｜rule_change＝規則改了。P0 還沒有規則在過濾，收回一律記 filled；opened 不填';
 COMMENT ON COLUMN gap_events.detail IS 'opened：出生依據（P0 {"basis":"seed"}／回填 {"basis":"backfill"}）；closed：這一列的 opened_at 與 opened_by';
 
@@ -489,10 +492,88 @@ SELECT d.task_id, d.task_type, 'opened', d.opened_at, d.opened_by
  WHERE d.task_id LIKE 'auto:%'
    AND NOT EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = d.task_id);
 
+-- ------------------------------------------------------------
+-- 10. 事件由 task_dispatches 上的觸發器統一寫（不靠每個呼叫端各寫各的）
+-- ------------------------------------------------------------
+-- 正式庫會 INSERT／DELETE task_dispatches 的函式有四支：seed_auto_task_queue、task_dispatches_drop_applied（貢獻 applied 時直接刪 auto: 列）、
+-- task_dispatched（/next 派出時 UPSERT，auto: 列不存在就新增）、contribution_queue_row（只寫 verify: 列）。
+-- 所以記錄放在表上，只管 auto: 列（WHEN 條件；verify: 列不進 gap_events）：
+--   BEFORE INSERT：opened_at 空就填 now()、opened_by 空就填 {"basis":<gap.open_basis 設定，沒設是 'insert'>}（seed 自己明寫 'seed'）
+--   AFTER INSERT ：寫 opened（這個 task_id 以前有過事件就寫 reopened），列上的 opened_by 抄進 rule_id／election_id／milestone_*
+--   AFTER DELETE ：寫 closed；原因讀交易內設定 gap.close_reason（沒設或不在清單內記 filled），gap.close_detail（jsonb 文字）併進 detail
+-- 呼叫端要補資訊就在刪之前 set_config('gap.close_reason', 'filled', true)、set_config('gap.close_detail', '{"..."}', true)（第三個參數 true＝只在這個交易內）。
+CREATE OR REPLACE FUNCTION task_dispatches_gap_before_insert() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  NEW.opened_at := COALESCE(NEW.opened_at, now());
+  NEW.opened_by := COALESCE(NEW.opened_by, jsonb_build_object('basis', COALESCE(NULLIF(current_setting('gap.open_basis', true), ''), 'insert')));
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION task_dispatches_gap_after_insert() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  INSERT INTO gap_events (task_id, task_type, event, at, rule_id, election_id, milestone_kind, milestone_on_date, detail)
+  VALUES (NEW.task_id, NEW.task_type,
+          CASE WHEN EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = NEW.task_id) THEN 'reopened' ELSE 'opened' END,
+          NEW.opened_at, (NEW.opened_by->>'rule_id')::BIGINT, (NEW.opened_by->>'election_id')::INTEGER,
+          NEW.opened_by->>'milestone_kind', (NEW.opened_by->>'milestone_on_date')::DATE, NEW.opened_by);
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION task_dispatches_gap_after_delete() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_reason TEXT; v_extra JSONB;
+BEGIN
+  v_reason := COALESCE(NULLIF(current_setting('gap.close_reason', true), ''), 'filled');
+  v_extra := COALESCE(NULLIF(current_setting('gap.close_detail', true), '')::JSONB, '{}'::JSONB);
+  IF v_reason NOT IN ('window', 'filled', 'override', 'rule_change') THEN
+    v_extra := v_extra || jsonb_build_object('reason_raw', v_reason);
+    v_reason := 'filled';
+  END IF;
+  INSERT INTO gap_events (task_id, task_type, event, at, rule_id, election_id, milestone_kind, milestone_on_date, reason, detail)
+  VALUES (OLD.task_id, OLD.task_type, 'closed', now(), (OLD.opened_by->>'rule_id')::BIGINT, (OLD.opened_by->>'election_id')::INTEGER,
+          OLD.opened_by->>'milestone_kind', (OLD.opened_by->>'milestone_on_date')::DATE, v_reason,
+          jsonb_build_object('opened_at', OLD.opened_at, 'opened_by', OLD.opened_by) || v_extra);
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_task_dispatches_gap_before_insert ON task_dispatches;
+CREATE TRIGGER trg_task_dispatches_gap_before_insert BEFORE INSERT ON task_dispatches
+  FOR EACH ROW WHEN (NEW.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_before_insert();
+DROP TRIGGER IF EXISTS trg_task_dispatches_gap_after_insert ON task_dispatches;
+CREATE TRIGGER trg_task_dispatches_gap_after_insert AFTER INSERT ON task_dispatches
+  FOR EACH ROW WHEN (NEW.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_after_insert();
+DROP TRIGGER IF EXISTS trg_task_dispatches_gap_after_delete ON task_dispatches;
+CREATE TRIGGER trg_task_dispatches_gap_after_delete AFTER DELETE ON task_dispatches
+  FOR EACH ROW WHEN (OLD.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_after_delete();
+
+-- task_dispatches_drop_applied（貢獻 applied 時收回缺口）：照 20260924000001 的現行定義（與正式庫一字不差，2026-10-08 比對過），
+-- 只機械式加入標記起訖的兩段 set_config，讓 closed 事件的 detail 帶出是哪一筆貢獻補上的；其餘一字不動
+CREATE OR REPLACE FUNCTION task_dispatches_drop_applied() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%' THEN
+    -- >>> gap_events：收回原因與是哪一筆貢獻，交給 task_dispatches 的 AFTER DELETE 觸發器記進 closed 事件
+    PERFORM set_config('gap.close_reason', 'filled', true);
+    PERFORM set_config('gap.close_detail', jsonb_build_object('via', 'drop_applied', 'contribution_id', NEW.id)::TEXT, true);
+    -- <<< gap_events
+    DELETE FROM task_dispatches WHERE task_id = NEW.task_id;
+    -- >>> gap_events：用完就清，不影響同一個交易裡之後的刪除
+    PERFORM set_config('gap.close_reason', '', true);
+    PERFORM set_config('gap.close_detail', '', true);
+    -- <<< gap_events
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
 -- seed_auto_task_queue：照 20261002000007 的現行定義（與正式庫 pg_get_functiondef 一字不差，2026-10-08 比對過），只機械式加入：
---   ① 收回前寫 closed（-- >>> gap_events 起訖標記之間）
---   ② 新增前寫 opened／reopened（同上）
---   ③ 新增派工列時多寫 opened_at、opened_by（INSERT 的欄位清單與 SELECT 清單各多兩項）
+--   新增派工列時多寫 opened_at、opened_by（INSERT 的欄位清單與 SELECT 清單各多兩項）。
+--   opened／closed 事件由上面的觸發器寫，函式裡不再有 gap_events。
 -- 其餘（算缺口、收回、更新、新增、驗證列、重排、回傳值）一字不動；守門見 activity-windows.test.ts。
 CREATE OR REPLACE FUNCTION seed_auto_task_queue()
 RETURNS INTEGER
@@ -502,16 +583,6 @@ BEGIN
   -- 全站缺口只在這裡算（重，約 1.5 秒）；/next 只讀 task_dispatches
   DROP TABLE IF EXISTS _gaps;
   CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT DISTINCT ON (g.task_id) g.* FROM contribution_auto_tasks_arms() g ORDER BY g.task_id;
-
-  -- >>> gap_events：收回前記一筆 closed（同一個交易；P0 沒有規則在過濾，原因一律 filled）
-  INSERT INTO gap_events (task_id, task_type, event, at, rule_id, election_id, milestone_kind, milestone_on_date, reason, detail)
-  SELECT d.task_id, d.task_type, 'closed', now(), (d.opened_by->>'rule_id')::BIGINT, (d.opened_by->>'election_id')::INTEGER,
-         d.opened_by->>'milestone_kind', (d.opened_by->>'milestone_on_date')::DATE, 'filled',
-         jsonb_build_object('opened_at', d.opened_at, 'opened_by', d.opened_by)
-    FROM task_dispatches d
-   WHERE d.task_id LIKE 'auto:%'
-     AND NOT EXISTS (SELECT 1 FROM _gaps g WHERE g.task_id = d.task_id);
-  -- <<< gap_events
 
   -- 已經不存在的缺口（補上了）：收回號碼牌
   DELETE FROM task_dispatches d
@@ -525,14 +596,6 @@ BEGIN
 
   -- 新缺口排進任務行列
   v_base := queue_slot('task');
-  -- >>> gap_events：新增前記一筆 opened（以前出現過又消失的記 reopened）；判斷「新缺口」的條件與下面的 INSERT 相同
-  INSERT INTO gap_events (task_id, task_type, event, at, detail)
-  SELECT g.task_id, g.task_type,
-         CASE WHEN EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = g.task_id) THEN 'reopened' ELSE 'opened' END,
-         now(), '{"basis":"seed"}'::JSONB
-    FROM _gaps g
-   WHERE NOT EXISTS (SELECT 1 FROM task_dispatches d WHERE d.task_id = g.task_id);
-  -- <<< gap_events
   INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count, task_type, target, what_we_need, hint_sources, reward, region, refreshed_at, opened_at, opened_by)
   SELECT g.task_id, now(), v_base + (row_number() OVER (ORDER BY g.task_id) - 1) * INTERVAL '2 seconds', 0,
          g.task_type, g.target, g.what_we_need, g.hint_sources, g.reward, g.region, now(), now(), '{"basis":"seed"}'::JSONB

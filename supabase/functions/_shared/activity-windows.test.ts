@@ -4,9 +4,12 @@
  * P0 只建表與函式、沒有人呼叫；唯一碰到線上行為的是 seed_auto_task_queue()。守門分兩半，都只要 --allow-read（CI 的 deno test --allow-read _shared/ 就跑）：
  *
  *   A. 文字層（不開資料庫）
- *      1. 這支 migration 是 seed_auto_task_queue 的「緊接著的下一版」——中間沒有別人插一版（插了，我們抄的底就過期了）
- *      2. 新函式＝20261002000007 的現行定義（與正式庫 pg_get_functiondef 一字不差，2026-10-08 比對過）加標記起訖的事件寫入、INSERT 兩處欄位清單，其餘一字不差
+ *      1. 這支 migration 是 seed_auto_task_queue、task_dispatches_drop_applied 的「緊接著的下一版」——中間沒有別人插一版（插了，我們抄的底就過期了）
+ *      2. seed 新函式＝20261002000007 的現行定義加 INSERT 兩處欄位清單（opened_at、opened_by），其餘一字不差，函式裡沒有 gap_events；
+ *         drop_applied 新函式＝20260924000001 的現行定義（與正式庫一字不差，2026-10-08 比對過）加標記起訖的兩段 set_config，其餘一字不差
  *      3. 還原驗證：動一個不該動的字、少一處機械替換，上面那條都要紅
+ *
+ *   事件由 task_dispatches 上的觸發器統一寫（不靠各呼叫端）：seed、貢獻 applied 的收回、/next 的 task_dispatched 三條路都測。
  *
  *   B. PGlite（行為層）：stub 表灌正式庫唯讀快照（四場選舉、roster_check_scope 七列），真的跑 migration
  *      1. 回填對照：新里程碑視圖與舊欄位逐列相同（登記截止、名單公告、投票日、任期起訖）
@@ -71,15 +74,27 @@ const INSERT_COLS_NEW = "region, refreshed_at, opened_at, opened_by)\n  SELECT g
 const SELECT_OLD = "g.region, now()\n    FROM _gaps g\n   WHERE NOT EXISTS";
 const SELECT_NEW = "g.region, now(), now(), '{\"basis\":\"seed\"}'::JSONB\n    FROM _gaps g\n   WHERE NOT EXISTS";
 
-/** 把新函式倒推回舊函式：拿掉標記起訖之間的事件寫入、還原兩處欄位清單。結構不對就丟錯 */
+/** 把新函式倒推回舊函式：還原兩處欄位清單。結構不對就丟錯 */
 function reverseSeed(fn: string): string {
-  const blocks = fn.match(/  -- >>> gap_events[^\n]*\n[\s\S]*?  -- <<< gap_events\n\n?/g) ?? [];
-  assertEquals(blocks.length, 2, "事件寫入要剛好兩段（收回前、新增前），各有起訖標記");
-  let s = fn.replace(/  -- >>> gap_events[^\n]*\n[\s\S]*?  -- <<< gap_events\n\n?/g, "");
-  s = mutate(s, INSERT_COLS_NEW, INSERT_COLS_OLD);
+  let s = mutate(fn, INSERT_COLS_NEW, INSERT_COLS_OLD);
   s = mutate(s, SELECT_NEW, SELECT_OLD);
   return s;
 }
+const OLD_DROP = fnText(await read("20260924000001_dispatch_io.sql"), "task_dispatches_drop_applied");
+const NEW_DROP = fnText(MIG_SQL, "task_dispatches_drop_applied");
+const MARK_RE = /[ ]*-- >>> gap_events[^\n]*\n[\s\S]*?[ ]*-- <<< gap_events\n/g;
+/** drop_applied 倒推：拿掉標記起訖之間的 set_config（剛好兩段） */
+function reverseDrop(fn: string): string {
+  assertEquals((fn.match(MARK_RE) ?? []).length, 2, "set_config 要剛好兩段（刪之前、刪之後），各有起訖標記");
+  return fn.replace(MARK_RE, "");
+}
+const isMechanicalDrop = (fn: string) => {
+  try {
+    return reverseDrop(fn) === OLD_DROP;
+  } catch {
+    return false;
+  }
+};
 const isMechanical = (fn: string) => {
   try {
     return reverseSeed(fn) === OLD_SEED;
@@ -88,24 +103,28 @@ const isMechanical = (fn: string) => {
   }
 };
 
-Deno.test("A1 這支 migration 是 seed_auto_task_queue 緊接著 20261002000007 的下一版（中間沒有人插一版，抄的底才不會過期）", async () => {
-  const defining: string[] = [];
-  for (const n of await migrationNames()) if ((await read(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
-  const i = defining.indexOf(MIG);
-  assert(i > 0, "這支 migration 要在重新定義 seed_auto_task_queue 的清單裡");
-  assertEquals(defining[i - 1], BASE_SEED, `前一版應該是 ${BASE_SEED}；有人在中間改了 seed_auto_task_queue，要以那一版為底重做`);
-  assertEquals(defining.length - 1, i, "這支之後又有人改了 seed_auto_task_queue：那一版要以這支為底");
+Deno.test("A1 這支 migration 是 seed_auto_task_queue、task_dispatches_drop_applied 緊接著現行版的下一版（中間沒有人插一版，抄的底才不會過期）", async () => {
+  for (const [fn, base] of [["seed_auto_task_queue", BASE_SEED], ["task_dispatches_drop_applied", "20260924000001_dispatch_io.sql"]]) {
+    const defining: string[] = [];
+    for (const n of await migrationNames()) if ((await read(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
+    const i = defining.indexOf(MIG);
+    assert(i > 0, `這支 migration 要在重新定義 ${fn} 的清單裡`);
+    assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做`);
+    assertEquals(defining.length - 1, i, `這支之後又有人改了 ${fn}：那一版要以這支為底`);
+  }
 });
 
-Deno.test("A2 新 seed_auto_task_queue＝現行定義＋標記起訖的事件寫入＋INSERT 兩處欄位清單，其餘一字不差", () => {
+Deno.test("A2 seed 新函式＝現行定義＋INSERT 兩處欄位清單，其餘一字不差、不含 gap_events；drop_applied＝現行定義＋標記起訖的兩段 set_config", () => {
   assert(isMechanical(NEW_SEED));
   assertEquals(reverseSeed(NEW_SEED), OLD_SEED);
-  // 事件寫入就是 closed、opened／reopened 兩處，且都寫進 gap_events
-  assertEquals((NEW_SEED.match(/INSERT INTO gap_events/g) ?? []).length, 2);
-  assert(NEW_SEED.includes("'closed'") && NEW_SEED.includes("'reopened'") && NEW_SEED.includes("ELSE 'opened'"));
+  assert(!NEW_SEED.includes("gap_events"), "事件交給 task_dispatches 的觸發器，seed 函式裡不寫 gap_events");
+  assert(isMechanicalDrop(NEW_DROP));
+  assertEquals(reverseDrop(NEW_DROP), OLD_DROP);
+  // 三支觸發器函式與三個觸發器都在，而且只管 auto: 列
+  for (const t of ["BEFORE INSERT", "AFTER INSERT", "AFTER DELETE"]) assert(MIG_SQL.includes(`${t} ON task_dispatches\n  FOR EACH ROW WHEN (`), `缺 ${t} 觸發器（要有 WHEN 條件只管 auto: 列）`);
 });
 
-Deno.test("A3 還原驗證：動一個不該動的字、少一處機械替換、標記被拿掉，A2 都要紅", () => {
+Deno.test("A3 還原驗證：動一個不該動的字、少一處機械替換、把事件寫回 seed、動 drop_applied 的本體，A2 都要紅", () => {
   // 偷改收回條件
   assert(!isMechanical(mutate(NEW_SEED, "WHERE d.task_id LIKE 'auto:%'\n     AND NOT EXISTS (SELECT 1 FROM _gaps g WHERE g.task_id = d.task_id);\n\n  -- 既有的", "WHERE d.task_id LIKE 'auto:%' AND d.dispatch_count >= 0\n     AND NOT EXISTS (SELECT 1 FROM _gaps g WHERE g.task_id = d.task_id);\n\n  -- 既有的")));
   // 偷改 UPDATE 的內容欄位
@@ -114,10 +133,14 @@ Deno.test("A3 還原驗證：動一個不該動的字、少一處機械替換、
   assert(!isMechanical(mutate(NEW_SEED, "RETURN v_new + v_verify;", "RETURN v_new;")));
   // INSERT 少寫 opened_by（欄位清單只改一半）
   assert(!isMechanical(mutate(NEW_SEED, INSERT_COLS_NEW, "region, refreshed_at, opened_at)\n  SELECT g.task_id, now(), v_base")));
-  // 起訖標記被拿掉（沒有標記就倒推不回去）
-  assert(!isMechanical(mutate(NEW_SEED, "  -- <<< gap_events\n\n  -- 已經不存在的缺口", "\n  -- 已經不存在的缺口")));
-  // 反向：舊函式本身不是「機械」的（沒有事件寫入）
+  // 在 seed 裡又寫一段事件（跟觸發器重複記）
+  assert(!isMechanical(mutate(NEW_SEED, "  -- 既有的只更新內容", "  INSERT INTO gap_events (task_id, event) SELECT task_id, 'opened' FROM _gaps WHERE false;\n\n  -- 既有的只更新內容")));
+  // 反向：舊函式本身不是「機械」的（INSERT 沒有新欄位）
   assert(!isMechanical(OLD_SEED));
+  // drop_applied：偷改刪除條件、標記被拿掉（標記內 set_config 少寫的情況由行為層 drop_applied_* 守門與還原驗證負責）
+  assert(!isMechanicalDrop(mutate(NEW_DROP, "DELETE FROM task_dispatches WHERE task_id = NEW.task_id;", "DELETE FROM task_dispatches WHERE task_id = NEW.task_id AND true;")));
+  assert(!isMechanicalDrop(mutate(NEW_DROP, "    -- <<< gap_events\n    DELETE FROM", "    DELETE FROM")));
+  assert(!isMechanicalDrop(OLD_DROP));
 });
 
 // ============================================================
@@ -144,11 +167,24 @@ CREATE TABLE task_dispatches (task_id text PRIMARY KEY, last_dispatched_at times
   queue_at timestamptz NOT NULL DEFAULT now(), task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text, refreshed_at timestamptz,
   blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, verify_target integer);
 CREATE TABLE contributions (id uuid PRIMARY KEY, status text, contribution_type text, task_id text, created_at timestamptz);
+-- 貢獻 applied 時收回缺口的觸發器：現行（migration 前）的函式本體＋觸發器定義；migration 會把函式換成新版
+${OLD_DROP}
+CREATE TRIGGER contributions_drop_dispatch AFTER UPDATE OF status ON contributions
+  FOR EACH ROW WHEN (NEW.status = 'applied' AND OLD.status IS DISTINCT FROM 'applied') EXECUTE FUNCTION task_dispatches_drop_applied();
 -- seed_auto_task_queue 呼叫的東西：缺口來源換成可控的 stub 表，其餘是空殼（它們各自有自己的測試，這裡只看 seed 本身）
 CREATE TABLE _stub_arms (task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text);
 CREATE FUNCTION contribution_auto_tasks_arms() RETURNS TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text)
   LANGUAGE sql STABLE AS $$ SELECT * FROM _stub_arms $$;
 CREATE FUNCTION queue_slot(p text) RETURNS timestamptz LANGUAGE sql AS $$ SELECT timestamptz '2026-10-08 00:00:00+00' $$;
+-- /next 派出時呼叫的 task_dispatched：正式庫 2026-10-08 pg_get_functiondef 的原文（auto: 列不存在就新增）
+CREATE OR REPLACE FUNCTION task_dispatched(p_task_id text) RETURNS void LANGUAGE sql AS $$
+  INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count)
+  VALUES (p_task_id, now(), queue_slot(CASE WHEN p_task_id LIKE 'verify:%' THEN 'verify' ELSE 'task' END), 1)
+  ON CONFLICT (task_id) DO UPDATE
+    SET last_dispatched_at = now(),
+        queue_at = queue_slot(CASE WHEN p_task_id LIKE 'verify:%' THEN 'verify' ELSE 'task' END),
+        dispatch_count = task_dispatches.dispatch_count + 1
+$$;
 CREATE FUNCTION refresh_dispatch_blocked() RETURNS integer LANGUAGE sql AS $$ SELECT 0 $$;
 CREATE FUNCTION refresh_verify_targets() RETURNS integer LANGUAGE sql AS $$ SELECT 0 $$;
 CREATE FUNCTION rebalance_queue() RETURNS integer LANGUAGE sql AS $$ SELECT 0 $$;
@@ -599,6 +635,68 @@ async function runSuite(db: Db): Promise<Verdicts> {
     const gone = await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM task_dispatches WHERE task_id LIKE 'verify:%'`);
     return before.n === after.n && gone.n === 0;
   });
+  await guard(v, "drop_applied_records_closed", async () => {
+    // 貢獻 applied → 觸發器直接刪 auto: 列（不經 seed）：要有 closed 事件，detail 帶出是哪一筆貢獻；缺口還在時下一輪 seed 記 reopened
+    const cid = "44444444-4444-4444-4444-444444444444";
+    await db.exec(`INSERT INTO contributions VALUES ('${cid}', 'pending', 'policy', 'auto:d1', now())`);
+    await setArms(["auto:s1", "auto:s2", "auto:s3", "auto:d1"]);
+    await seed();
+    const before = (await events("auto:d1")).map((x) => x.event);
+    await db.exec(`UPDATE contributions SET status = 'applied' WHERE id = '${cid}'`);
+    const gone = await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM task_dispatches WHERE task_id = 'auto:d1'`);
+    const closed = await one<{ event: string; reason: string; via: string; cid: string; has_opened_at: boolean }>(db,
+      `SELECT event, reason, detail->>'via' AS via, detail->>'contribution_id' AS cid, (detail ? 'opened_at') AS has_opened_at FROM gap_events WHERE task_id = 'auto:d1' AND event = 'closed'`);
+    await seed(); // 缺口還在 → 重新出現
+    const after = (await events("auto:d1")).map((x) => x.event);
+    return JSON.stringify(before) === JSON.stringify(["opened"]) && gone.n === 0 && closed.reason === "filled" && closed.via === "drop_applied" && closed.cid === cid &&
+      closed.has_opened_at && JSON.stringify(after) === JSON.stringify(["opened", "closed", "reopened"]);
+  });
+  await guard(v, "drop_applied_cleans_settings", async () => {
+    // 交易內設定用完就清：同一個交易裡 drop_applied 之後的設定是空的，不會污染之後的刪除
+    const cid = "55555555-5555-5555-5555-555555555555";
+    await db.exec(`INSERT INTO contributions VALUES ('${cid}', 'pending', 'policy', 'auto:d2', now())`);
+    await setArms(["auto:s1", "auto:s2", "auto:s3", "auto:d2"]);
+    await seed();
+    const r = await db.exec(`UPDATE contributions SET status = 'applied' WHERE id = '${cid}'; SELECT COALESCE(current_setting('gap.close_detail', true), '') AS d, COALESCE(current_setting('gap.close_reason', true), '') AS r`);
+    const last = r[r.length - 1].rows[0] as { d: string; r: string };
+    return last.d === "" && last.r === "";
+  });
+  await guard(v, "task_dispatched_records_opened", async () => {
+    // /next 派出時 task_dispatched 新增 auto: 列（列剛好不存在）：要有 opened_at、opened_by、一筆 opened；再派一次（衝突改成更新）不重複記
+    await db.exec(`SELECT task_dispatched('auto:td1')`);
+    const row = await one<{ opened_at: string | null; basis: string | null; n: number }>(db,
+      `SELECT opened_at::text AS opened_at, opened_by->>'basis' AS basis, dispatch_count AS n FROM task_dispatches WHERE task_id = 'auto:td1'`);
+    const e1 = await events("auto:td1");
+    const same = await one<{ ok: boolean }>(db, `SELECT d.opened_at = e.at AS ok FROM task_dispatches d JOIN gap_events e ON e.task_id = d.task_id WHERE d.task_id = 'auto:td1'`);
+    await db.exec(`SELECT task_dispatched('auto:td1')`);
+    const row2 = await one<{ opened_at: string | null; n: number }>(db, `SELECT opened_at::text AS opened_at, dispatch_count AS n FROM task_dispatches WHERE task_id = 'auto:td1'`);
+    const e2 = await events("auto:td1");
+    // 缺口不存在（stub 缺口清單沒有它）→ 下一輪 seed 收回、記 closed
+    await seed();
+    const e3 = (await events("auto:td1")).map((x) => x.event);
+    return row.opened_at !== null && row.basis === "insert" && row.n === 1 && e1.length === 1 && e1[0].event === "opened" && same.ok &&
+      row2.opened_at === row.opened_at && row2.n === 2 && e2.length === 1 && JSON.stringify(e3) === JSON.stringify(["opened", "closed"]);
+  });
+  await guard(v, "verify_rows_never_in_gap_events", async () => {
+    // 驗證列（verify:）不管從哪條路進出都不進 gap_events、不填 opened_at：task_dispatched 新增、直接刪除
+    const before = await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM gap_events`);
+    await db.exec(`SELECT task_dispatched('verify:66666666-6666-6666-6666-666666666666')`);
+    const row = await one<{ opened_at: string | null; opened_by: string | null }>(db, `SELECT opened_at::text AS opened_at, opened_by::text AS opened_by FROM task_dispatches WHERE task_id = 'verify:66666666-6666-6666-6666-666666666666'`);
+    await db.exec(`DELETE FROM task_dispatches WHERE task_id = 'verify:66666666-6666-6666-6666-666666666666'`);
+    const after = await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM gap_events`);
+    const any = await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM gap_events WHERE task_id LIKE 'verify:%'`);
+    return before.n === after.n && any.n === 0 && row.opened_at === null && row.opened_by === null;
+  });
+  await guard(v, "close_reason_setting", async () => {
+    // 呼叫端用交易內設定帶關閉原因與補充；沒設記 filled；亂填的原因退回 filled 並把原值留在 detail
+    await db.exec(`INSERT INTO task_dispatches (task_id, task_type) VALUES ('auto:cr1', 'x'), ('auto:cr2', 'x'), ('auto:cr3', 'x')`);
+    await db.exec(`SELECT set_config('gap.close_reason', 'override', true), set_config('gap.close_detail', '{"by":"test"}', true); DELETE FROM task_dispatches WHERE task_id = 'auto:cr1'`);
+    await db.exec(`SELECT set_config('gap.close_reason', 'bogus', true); DELETE FROM task_dispatches WHERE task_id = 'auto:cr2'`);
+    await db.exec(`DELETE FROM task_dispatches WHERE task_id = 'auto:cr3'`);
+    const r = await rows<{ task_id: string; reason: string; by: string | null; raw: string | null }>(db,
+      `SELECT task_id, reason, detail->>'by' AS by, detail->>'reason_raw' AS raw FROM gap_events WHERE task_id IN ('auto:cr1', 'auto:cr2', 'auto:cr3') AND event = 'closed' ORDER BY task_id`);
+    return r.length === 3 && r[0].reason === "override" && r[0].by === "test" && r[1].reason === "filled" && r[1].raw === "bogus" && r[2].reason === "filled" && r[2].by === null && r[2].raw === null;
+  });
   await guard(v, "gap_events_append_only", async () => {
     let blocked = 0;
     for (const sql of [`UPDATE gap_events SET reason = 'window'`, `DELETE FROM gap_events`, `TRUNCATE gap_events`]) {
@@ -624,6 +722,7 @@ const ALL_GUARDS = [
   "audit_trigger_rules", "audit_trigger_milestones_and_overrides", "updated_at_touched", "rule_shape_checks",
   "backfill_opened_at", "backfill_sentinel_not_1980", "backfill_gap_events",
   "seed_writes_opened", "seed_idempotent_keeps_opened_at", "seed_writes_closed", "seed_writes_reopened", "seed_closes_backfilled_rows_too", "seed_verify_rows_no_events",
+  "drop_applied_records_closed", "drop_applied_cleans_settings", "task_dispatched_records_opened", "verify_rows_never_in_gap_events", "close_reason_setting",
   "gap_events_append_only",
 ];
 
@@ -682,13 +781,25 @@ const MUTATIONS: { name: string; breaks: string[]; edit: (sql: string) => string
     edit: (s) => mutate(s, "LEAST(CASE WHEN d.queue_at >= TIMESTAMPTZ '2026-09-20 00:00:00+00' THEN d.queue_at END, d.refreshed_at)", "LEAST(d.queue_at, d.refreshed_at)") },
   { name: "不回填 gap_events", breaks: ["backfill_gap_events", "seed_closes_backfilled_rows_too"],
     edit: (s) => mutate(s, "   AND NOT EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = d.task_id);", "   AND false;") },
-  { name: "seed 收回時不寫 closed", breaks: ["seed_writes_closed", "seed_writes_reopened", "seed_closes_backfilled_rows_too"],
-    edit: (s) => s.replace(/  -- >>> gap_events：收回前[^\n]*\n[\s\S]*?  -- <<< gap_events\n\n?/, "") },
-  { name: "seed 新增時不寫 opened", breaks: ["seed_writes_opened", "seed_idempotent_keeps_opened_at", "seed_writes_closed", "seed_writes_reopened"],
-    edit: (s) => s.replace(/  -- >>> gap_events：新增前[^\n]*\n[\s\S]*?  -- <<< gap_events\n/, "") },
-  { name: "seed 重新出現的缺口不標 reopened", breaks: ["seed_writes_reopened"],
-    edit: (s) => mutate(s, "CASE WHEN EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = g.task_id) THEN 'reopened' ELSE 'opened' END", "'opened'") },
-  { name: "seed 新增派工列不填 opened_at", breaks: ["seed_writes_opened"],
+  { name: "拿掉 AFTER DELETE 觸發器（收回不記 closed，不論 seed 或 drop_applied）", breaks: ["seed_writes_closed", "seed_writes_reopened", "seed_closes_backfilled_rows_too", "drop_applied_records_closed", "task_dispatched_records_opened", "close_reason_setting"],
+    edit: (s) => mutate(s, "CREATE TRIGGER trg_task_dispatches_gap_after_delete AFTER DELETE ON task_dispatches\n  FOR EACH ROW WHEN (OLD.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_after_delete();", "SELECT 1;") },
+  { name: "拿掉 AFTER INSERT 觸發器（新增不記 opened，不論 seed 或 task_dispatched）", breaks: ["seed_writes_opened", "seed_idempotent_keeps_opened_at", "seed_writes_closed", "seed_writes_reopened", "drop_applied_records_closed", "task_dispatched_records_opened"],
+    edit: (s) => mutate(s, "CREATE TRIGGER trg_task_dispatches_gap_after_insert AFTER INSERT ON task_dispatches\n  FOR EACH ROW WHEN (NEW.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_after_insert();", "SELECT 1;") },
+  { name: "拿掉 BEFORE INSERT 觸發器（task_dispatched 新增的 auto: 列沒有 opened_at）", breaks: ["task_dispatched_records_opened"],
+    edit: (s) => mutate(s, "CREATE TRIGGER trg_task_dispatches_gap_before_insert BEFORE INSERT ON task_dispatches\n  FOR EACH ROW WHEN (NEW.task_id LIKE 'auto:%') EXECUTE FUNCTION task_dispatches_gap_before_insert();", "SELECT 1;") },
+  { name: "AFTER INSERT 觸發器拿掉 WHEN（驗證列也進 gap_events）", breaks: ["verify_rows_never_in_gap_events"],
+    edit: (s) => mutate(s, "AFTER INSERT ON task_dispatches\n  FOR EACH ROW WHEN (NEW.task_id LIKE 'auto:%') EXECUTE", "AFTER INSERT ON task_dispatches\n  FOR EACH ROW EXECUTE") },
+  { name: "AFTER DELETE 觸發器拿掉 WHEN（驗證列被刪也記 closed）", breaks: ["verify_rows_never_in_gap_events", "seed_verify_rows_no_events"],
+    edit: (s) => mutate(s, "AFTER DELETE ON task_dispatches\n  FOR EACH ROW WHEN (OLD.task_id LIKE 'auto:%') EXECUTE", "AFTER DELETE ON task_dispatches\n  FOR EACH ROW EXECUTE") },
+  { name: "關閉原因不讀交易內設定", breaks: ["close_reason_setting"],
+    edit: (s) => mutate(s, "v_reason := COALESCE(NULLIF(current_setting('gap.close_reason', true), ''), 'filled');", "v_reason := 'filled';") },
+  { name: "drop_applied 不帶貢獻（拿掉第一段 set_config）", breaks: ["drop_applied_records_closed"],
+    edit: (s) => mutate(s, "PERFORM set_config('gap.close_detail', jsonb_build_object('via', 'drop_applied', 'contribution_id', NEW.id)::TEXT, true);", "") },
+  { name: "drop_applied 刪完不清設定", breaks: ["drop_applied_cleans_settings"],
+    edit: (s) => mutate(s, "PERFORM set_config('gap.close_detail', '', true);", "") },
+  { name: "重新出現的缺口不標 reopened", breaks: ["seed_writes_reopened", "drop_applied_records_closed"],
+    edit: (s) => mutate(s, "CASE WHEN EXISTS (SELECT 1 FROM gap_events e WHERE e.task_id = NEW.task_id) THEN 'reopened' ELSE 'opened' END", "'opened'") },
+  { name: "seed 的 opened_at 改填 NULL（BEFORE INSERT 觸發器補上，結果不變：雙重保險）", breaks: [],
     edit: (s) => mutate(s, "g.region, now(), now(), '{\"basis\":\"seed\"}'::JSONB\n    FROM _gaps g\n   WHERE NOT EXISTS", "g.region, now(), NULL, '{\"basis\":\"seed\"}'::JSONB\n    FROM _gaps g\n   WHERE NOT EXISTS") },
   { name: "gap_events 可以被改（拿掉只增不刪）", breaks: ["gap_events_append_only"],
     edit: (s) => mutate(s, "RAISE EXCEPTION 'gap_events 只增不刪（PLAN-task-activation 2.5）：不能 %', TG_OP;", "RETURN OLD;") },
@@ -747,5 +858,5 @@ Deno.test("B4 migration 只加不刪：沒有 DROP TABLE／DROP COLUMN／DELETE 
   assert(!/DROP TABLE (?!IF EXISTS _gaps)/i.test(code) && !/DROP COLUMN/i.test(code), "不該刪表或欄位（seed 函式裡原本就有的 DROP TABLE IF EXISTS _gaps 除外）");
   assert(!/(CREATE OR REPLACE FUNCTION|ALTER FUNCTION) contribution_auto_tasks_/i.test(code), "P0 不碰任何一支臂");
   assert(!/ALTER TABLE elections/i.test(code) && !/UPDATE elections/i.test(code), "P0 不動 elections 表");
-  assertEquals((code.match(/DELETE FROM task_dispatches/g) ?? []).length, 2, "DELETE 只有 seed 函式裡原本那兩處");
+  assertEquals((code.match(/DELETE FROM task_dispatches/g) ?? []).length, 3, "DELETE 只有 seed 函式裡原本那兩處與 drop_applied 裡原本那一處");
 });
