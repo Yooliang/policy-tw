@@ -10,7 +10,7 @@
  *      stub 沒走樣：回放現行輸出的總表筆數與全欄雜湊＝正式庫現行總表
  *   ③ 獨立重算：只用 roster_state 在 JS 裡算「照舊判準」與「照新判準」該派哪幾個縣市，必須等於 ① 兩個版本實際派出的 roster_check
  *      （期望值不呼叫被測的 SQL，也不用被測的欄位）
- *   ④ 列出實際新增的 task_id 與原因（最近一次回報的 cec_count、我們 filed＋declared、上次清查）
+ *   ④ 列出實際新增的 task_id 與原因（最近一次回報的 cec_count、我們的名冊內人數、上次清查）
  *
  * 用法（不進 CI：要連正式庫＋網路抓 PGlite；只讀，SQL 第一行 SET default_transaction_read_only = on）：
  *   deno run --node-modules-dir=none --allow-read --allow-write --allow-run --allow-net --allow-env scripts/raw-roster-parity.ts
@@ -42,7 +42,7 @@ const inject = `  'total7_hash', (SELECT md5(string_agg((to_jsonb(t) - 'arm' - '
              ORDER BY x.checked_at DESC, x.id DESC LIMIT 1) AS last_cec_count,
            (SELECT count(*) FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id LEFT JOIN regions r ON r.id = pe.region_id
              WHERE pe.election_id = s.election_id AND pe.election_type = s.election_type AND COALESCE(r.region, p.region) = l.name
-               AND pe.candidacy_status IN ('filed', 'declared'))::int AS n_listed
+               AND COALESCE(pe.candidacy_status, '') NOT IN ('considering', 'withdrawn'))::int AS n_listed
       FROM roster_check_scope s CROSS JOIN locations l) z),
 `;
 const marker = "  'branches', json_build_object(";
@@ -108,7 +108,7 @@ function expectedIds(withGap: boolean): string[] {
 const idsOf = (rows: Row[]) => rows.filter((r) => r.task_id.startsWith("auto:roster_check:")).map((r) => r.task_id).sort();
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 check("獨立重算：照舊判準（recheck_days 與嘗試冷卻）算出的縣市＝正式庫現行 raw 實際派的 roster_check", same(expectedIds(false), idsOf(oldRaw)), `${expectedIds(false).length} 件 vs ${idsOf(oldRaw).length} 件`);
-check("獨立重算：照新判準（缺口＝最近一次 cec_count > filed＋declared）算出的縣市＝新定義實際派的 roster_check", same(expectedIds(true), idsOf(newRaw)), `${expectedIds(true).length} 件 vs ${idsOf(newRaw).length} 件`);
+check("獨立重算：照新判準（缺口＝最近一次 cec_count > 名冊內人數）算出的縣市＝新定義實際派的 roster_check", same(expectedIds(true), idsOf(newRaw)), `${expectedIds(true).length} 件 vs ${idsOf(newRaw).length} 件`);
 
 // ── ② 總表層（PGlite 回放）────────────────────────────────────────────
 const branchRows = Object.fromEntries(ARM_BRANCHES.map((n) => [n, (snap.branches[n] as string | undefined) ?? "[]"]));
@@ -134,7 +134,7 @@ console.log("\n新增的 task_id（總表層，會真的派出去）與原因：
 const byId = new Map(states.map((s) => [`auto:roster_check:${s.election_id}:${s.region}:${s.election_type}`, s]));
 for (const id of bOnly) {
   const s = byId.get(id);
-  console.log(`  ${id}　最近一次回報 cec_count=${s?.last_cec_count}（${s?.last_checked?.slice(0, 10)}）、我們 filed＋declared=${s?.n_listed}、缺 ${(s?.last_cec_count ?? 0) - (s?.n_listed ?? 0)} 位；舊判準下 ${s?.recheck_days} 天內不會再派`);
+  console.log(`  ${id}　最近一次回報 cec_count=${s?.last_cec_count}（${s?.last_checked?.slice(0, 10)}）、我們的名冊內人數=${s?.n_listed}、缺 ${(s?.last_cec_count ?? 0) - (s?.n_listed ?? 0)} 位；舊判準下 ${s?.recheck_days} 天內不會再派`);
 }
 const rawOnly = added.filter((k) => !bOnly.includes(k));
 if (rawOnly.length) console.log(`raw 層新增但總表濾掉（不在 roster_check_scope 的範圍，與 activity 規則無關）：${rawOnly.join("、")}`);
