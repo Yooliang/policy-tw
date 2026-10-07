@@ -197,6 +197,24 @@ export interface SyncElection {
   election_types: readonly string[];
 }
 
+/** 同一個同步單位預設 24 小時內同步過就空轉（防止重複打中選會） */
+export const DEFAULT_MIN_INTERVAL_HOURS = 24;
+/** 呼叫端可以調短的下限：開票當晚要每小時更新一次結果，但不能短到變成連續轟炸中選會 */
+export const MIN_INTERVAL_HOURS_FLOOR = 0.25;
+
+/**
+ * 請求 body 的 min_interval_hours：這個單位多久內同步過就空轉。沒給＝24 小時；開票當晚的排程給 1（每小時重抓一次結果）。
+ * 只允許 0.25～24：比 24 長沒意義（預設就是 24）、比 0.25 短等於沒有防重入。不是數字就回錯誤，不靜默改回預設。
+ */
+export function parseMinIntervalHours(raw: unknown): { ok: true; hours: number } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === "") return { ok: true, hours: DEFAULT_MIN_INTERVAL_HOURS };
+  const n = typeof raw === "number" ? raw : /^\d+(\.\d+)?$/.test(String(raw).trim()) ? Number(String(raw).trim()) : NaN;
+  if (!Number.isFinite(n) || n < MIN_INTERVAL_HOURS_FLOOR || n > DEFAULT_MIN_INTERVAL_HOURS) {
+    return { ok: false, error: `min_interval_hours 要是 ${MIN_INTERVAL_HOURS_FLOOR}～${DEFAULT_MIN_INTERVAL_HOURS} 之間的數字（收到 ${JSON.stringify(raw)}）` };
+  }
+  return { ok: true, hours: n };
+}
+
 /** 已經投票的選舉（投票日當天起算）；罷免投票不選人、沒有候選人名單，不算 */
 export function votedElections<T extends Pick<SyncElection, "election_date" | "election_reason">>(elections: readonly T[], today: Date = new Date()): T[] {
   const todayStr = today.toISOString().slice(0, 10);

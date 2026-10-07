@@ -9,6 +9,7 @@ import {
   HEADLINE_TURNOUT_CEC_TYPES,
   headlineTurnout,
   OUR_ELECTION_TYPES,
+  parseMinIntervalHours,
   planElectionUnits,
   type SyncElection,
   type SyncUnitPlan,
@@ -21,8 +22,8 @@ import {
  * cec-sync — 把中選會「已投票選舉」的候選人名單同步進 cec_candidates（供比對用的快照）。
  *
  * 比照 moi-sync 的寫法：不驗 JWT（讓排程打得到），函式內用 service role 連 DB；
- * 同一個同步單位（屆別×選舉別×縣市）在 MIN_INTERVAL_HOURS 內同步過就空轉，防止重複打中選會，
- * 帶 { force: true } 可以跳過這個檢查。
+ * 同一個同步單位（屆別×選舉別×縣市）在 min_interval_hours（預設 24）內同步過就空轉，防止重複打中選會，
+ * 帶 { force: true } 可以跳過這個檢查；開票當晚的排程帶 { min_interval_hours: 1 }（每小時重抓一次結果，見 migration 20261007220000）。
  *
  * 同步單位＝屆別×選舉別×縣市（見 _shared/cec-sync.ts 的 planUnits）：先把該單位的候選人＋得票
  * 抓完、確認不是抓取失敗，才在同一個單位內「先刪後寫」；抓失敗就跳過那個單位、保留舊資料，
@@ -43,15 +44,13 @@ import {
  * 是自己的一場選舉，名單記在它自己的 election_id 底下。
  *
  * 請求 body（都可省略）：
- *   { election_id?: number, election_key?: string, election_type?: string, resume_from?: { election_id, election_type, region }, force?: boolean }
+ *   { election_id?: number, election_key?: string, election_type?: string, resume_from?: { election_id, election_type, region }, force?: boolean, min_interval_hours?: number（0.25～24，預設 24） }
  * 回應：{ success, units: [{election_id, election_type, region, fetched, written, skipped?}], failed: [...], next?: {...} | null }
  */
 
 const TIME_BUDGET_MS = 100_000;
 /** 打中選會的請求間隔（含 list／candidates／tickets／areas 每一支） */
 const MIN_REQUEST_INTERVAL_MS = 600;
-/** 同一個同步單位在這麼多小時內同步過，預設不再重打（force 可跳過） */
-const MIN_INTERVAL_HOURS = 24;
 /** 寫入 cec_candidates 每批最多幾筆（PostgREST／payload 大小考量） */
 const INSERT_BATCH_SIZE = 500;
 
@@ -134,6 +133,12 @@ Deno.serve(async (req) => {
   const electionKeyFilter = qp("election_key") !== undefined ? String(qp("election_key")) : undefined;
   const electionTypeFilter = qp("election_type") !== undefined ? String(qp("election_type")) : undefined;
   const force = qp("force") === true || qp("force") === "true";
+  const interval = parseMinIntervalHours(qp("min_interval_hours"));
+  if (!interval.ok) {
+    return new Response(JSON.stringify({ success: false, error: interval.error }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
+  /** 同一個同步單位在這麼多小時內同步過，不再重打（force 可跳過） */
+  const minIntervalHours = interval.hours;
   const resumeFromRaw = body.resume_from as { election_id?: number; election_type?: string; region?: string; sub_region?: string } | undefined;
   const resumeFromKey = resumeFromRaw?.election_id !== undefined && resumeFromRaw?.election_type && resumeFromRaw?.region
     ? unitKey({
@@ -239,8 +244,8 @@ Deno.serve(async (req) => {
           .limit(1)
           .maybeSingle();
         const lastSyncedAt = (last as { synced_at?: string } | null)?.synced_at;
-        if (lastSyncedAt && Date.now() - Date.parse(lastSyncedAt) < MIN_INTERVAL_HOURS * 3600_000) {
-          units.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), fetched: 0, written: 0, skipped: `${MIN_INTERVAL_HOURS} 小時內同步過` });
+        if (lastSyncedAt && Date.now() - Date.parse(lastSyncedAt) < minIntervalHours * 3600_000) {
+          units.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}), fetched: 0, written: 0, skipped: `${minIntervalHours} 小時內同步過` });
           continue;
         }
       }
