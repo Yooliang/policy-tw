@@ -907,7 +907,10 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   if (SOURCE_TASK_TYPES.has(taskType) || pid) {
     try {
       const party = typeof data.politician?.party === "string" ? data.politician.party : null;
+      // 村里長清查任務的 target.region 是「台北市松山區」（縣市＋鄉鎮市區），verification_sources.regions 是縣市清單：
+      // 優先取 target.county；沒有的話 sourceMatches 會從 region 取縣市前綴（countyKey）
       const region = (typeof data.politician?.region === "string" ? data.politician.region : null)
+        ?? (typeof target.county === "string" ? target.county : null)
         ?? (typeof target.region === "string" ? target.region : null);
       const electionType = (typeof data.politician?.election_type === "string" ? data.politician.election_type : null)
         ?? (typeof target.election_type === "string" ? target.election_type : null);

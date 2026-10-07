@@ -5,7 +5,8 @@
 -- 鄉鎮市長、鄉鎮市民代表、直轄市山地原住民區長、區民代表、村里長五份沒登錄：
 -- 這五種的任務（roster_check、candidacy_source_missing、party_roster、withdrawn_filing）附不到名冊網址，
 -- 驗證者也看不到——任務與驗證都是依 election_types＋regions 從這張表附來源，沒登錄就是沒有。
--- 登錄後 roster_batch（每 10 分鐘，system-one）逐位核對這五份也會生效：_shared/cec-roster.ts 的 parseRoster
+-- 登錄後 roster_batch（每 10 分鐘，system-one）逐位核對這份名冊也會生效（村里長那份 7.5 MB 超過 Edge 抽字的 3 MB 上限，
+-- 暫不自動核對、照舊交人工驗證，見 DECISIONS 10-08）：_shared/cec-roster.ts 的 parseRoster
 -- 同一個 PR 補了逐列版面（村里長、代表沒有選舉區欄、姓名與黨名被空白拆開），九份逐份解析出的人數都等於 PDF 的登記日期列數（合計 19,695）。
 --
 -- regions 是那份 PDF 裡真的有人的縣市（用 parseRoster 對實際 PDF 抽字逐列數出來）：

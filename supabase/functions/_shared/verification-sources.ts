@@ -7,6 +7,8 @@
  *   2. `_shared/task-context.ts`：派工時依人物的政黨／縣市／選舉別、任務要查的東西自動附上
  */
 
+import { ALL_REGIONS, normalizeCityName } from "./cec-city-codes.ts";
+
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
@@ -60,10 +62,20 @@ function scalarMatches(sourceValue: string | null, queryValue: string | null | u
   return sourceValue === null || sourceValue === queryValue;
 }
 
-/** 陣列欄位（regions／election_types）：query 沒給值就不篩；來源該欄位是 null（全部）或陣列包含 query 值才算符合 */
-function arrayMatches(sourceValues: string[] | null, queryValue: string | null | undefined): boolean {
+/**
+ * 縣市比對用的 key（2026-10-08）：臺→台，而且「台北市松山區」這種縣市＋鄉鎮市區的 region（村里長任務 target.region）
+ * 取出縣市前綴；不是縣市開頭的字串原樣回傳。以前是純字串比對：村里長任務的 region 是「台北市松山區」，
+ * 永遠比不到 verification_sources.regions（縣市清單）；正式庫也有 3 筆任務 target、2 筆交件寫「臺」。
+ */
+export function countyKey(region: string): string {
+  const n = (normalizeCityName(region) ?? region).trim();
+  return ALL_REGIONS.find((c) => n.startsWith(c)) ?? n;
+}
+
+/** 陣列欄位（regions／election_types）：query 沒給值就不篩；來源該欄位是 null（全部）或陣列包含 query 值才算符合；key 是比對前的正規化 */
+function arrayMatches(sourceValues: string[] | null, queryValue: string | null | undefined, key: (s: string) => string = (s) => s): boolean {
   if (!queryValue) return true;
-  return sourceValues === null || sourceValues.includes(queryValue);
+  return sourceValues === null || sourceValues.some((v) => key(v) === key(queryValue));
 }
 
 /** need 沒給就全部符合；有給就要跟 provides 有交集 */
@@ -75,7 +87,7 @@ function needMatches(provides: readonly string[], need: readonly string[] | null
 /** 單筆是否符合查詢條件（party 相符或 null、regions 包含或 null、election_types 包含或 null、need 有交集） */
 export function sourceMatches(source: VerificationSource, q: SourceQuery): boolean {
   return scalarMatches(source.party, q.party)
-    && arrayMatches(source.regions, q.region)
+    && arrayMatches(source.regions, q.region, countyKey)
     && arrayMatches(source.election_types, q.electionType)
     && needMatches(source.provides, q.need);
 }
