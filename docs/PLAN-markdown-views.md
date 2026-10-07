@@ -309,7 +309,7 @@ format_version: 1
 | 矩陣（網頁） | `/election/<屆>/matrix`，`/data` 沒帶查詢也轉到這裡 | 讀 `data_md_cache` 的 `_matrix` |
 
 - `<屆>` 是 `electionSegment`（2026）；舊三屆的 election_key 寫法 301 到年份；縣市「臺」、簡稱、分類常見說法一律 301 到正式寫法。
-- **範圍**：最新一屆定期選舉（投票日最新、選縣市長與縣市議員）在選候選人名下的政見——職位限縣市頁那一層與下一層（縣市長、縣市議員、立委、鄉鎮市長、原住民區長）；退選的、這一屆沒參選的現任者、村里長不收。矩陣的格子、縣市總數、分類總數與對應 .md 的筆數是同一個算法（`lib/md/dataset.ts` 直接擋不一致）。
+- **範圍（2026-10-07 更正：由「人名下全部政見」改為「該屆競選承諾」，見 `docs/PLAN-term-progress.md` 與 `docs/DECISIONS.md` 同日那一條）**：最新一屆定期選舉（投票日最新、選縣市長與縣市議員）在選候選人名下、`election_id` 是這一屆的競選承諾（`status＝Campaign Pledge` 或 `origin＝pledge`）；落選者保留、標「未當選」；任內政見、別屆承諾不收，進 index.json 的 `unassigned`——職位限縣市頁那一層與下一層（縣市長、縣市議員、立委、鄉鎮市長、原住民區長）；退選的、這一屆沒參選的現任者、村里長不收。矩陣的格子、縣市總數、分類總數與對應 .md 的筆數是同一個算法（`lib/md/dataset.ts` 直接擋不一致）。
 - **預產**：`.github/workflows/data-md.yml` 每小時（也接在 main 的 CI 成功之後、可手動）跑 `scripts/build-data-md.ts`，只用 anon 讀、輸出 SQL，用 supabase CLI 的管理權杖套進 `data_md_cache`；**一批全部檔案同一個 `generated_at`**（暫存表分批放入、一個交易併入）。Worker 只讀這張表，找不到回 404 的 Markdown。
 - **給程式批次撈**：200 帶 `ETag`（內容雜湊，排程重產但沒變時不變）、`Last-Modified`（內容最後變動）、`X-Data-Generated-At`；支援 `If-None-Match`／`If-Modified-Since` 回 304；`Access-Control-Allow-Origin: *`；邊緣 `s-maxage` 對齊排程（預產 3600、人物 600）。
 - 文字查詢詞表只有 `lib/data-query.ts` 一份（分類常見說法：每個至少兩字、只屬於一個分類、不等於分類全名，守門測試擋）。

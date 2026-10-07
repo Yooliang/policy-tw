@@ -192,6 +192,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `BLUEPRINT-jev-decisions.md` — Jev（TypeSafe System One 決策模型）的導入設計與實測數字
 - `BLUEPRINT-agent-identity.md` — 代理身分改由 DiTrust 發序號、正見只消費的設計（已實作，見 `ditrust-agent`）
 - `BLUEPRINT-admin-to-tasks.md` — 把管理員頁面拆成任務的藍圖與盤點（2026-09-12 快照，部分已完成）
+- `PLAN-term-progress.md` — 「承諾 → 任內 → 逐年進度」合併版規劃（維護者 10-07 裁決：`/data/2026` 範圍由人改為政見、首頁與矩陣只放筆數、任期與進度資料集下一期、狀態欄位拆分排到 2027 年 1–2 月；第 8 節是本次實作現況，第 10 節分已裁與待裁）
 - `PLAN-markdown-views.md` — 政見的 Markdown 檢視（人物／縣市／分類／縣市×分類 .md、矩陣頁、預產快取 `data_md_cache`、機器可讀索引；第 12 節是實作現況，主題改用既有分類、第二期取消）
 - `PLAN-edge-ssr.md` — 預渲染搬到 Cloudflare 邊緣 SSR 的計畫（第 1 步已上線；第 2、3 步未做）
 - `DISTRICT-REGISTRY-2026.md` — 2026 議員選舉區名冊的查證報告（一次性查證，結論已進資料庫）

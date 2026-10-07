@@ -2,15 +2,16 @@
  * 縣市（某屆）的 Markdown：`/election/<屆>/<縣市>.md`（HTML 縣市頁網址加 .md；docs/PLAN-markdown-views.md 2.1）。
  *
  * 內容跟縣市頁同一批人：那一屆在這個縣市在選的候選人（退選的不算），職位與分組照 lib/election-levels.ts 的職位表
- * （縣市長、縣市議員依選舉區、立法委員、鄉鎮市長依鄉鎮…），再接各人名下沒被移除的政見。人物排序＝姓名筆畫，同組政見依提出日期、再依 id。
+ * （縣市長、縣市議員依選舉區、立法委員、鄉鎮市長依鄉鎮…），再接各人名下「這一屆的競選承諾」（lib/md/pledge.ts；維護者 10-07：範圍由人改為政見；
+ * 落選者的承諾保留、標「未當選」）。人物排序＝姓名筆畫，同組政見依提出日期、再依 id。
  * 沒有政見的候選人不展開，一組一行列名字。
  */
 import type { Election, Policy, Politician } from '../../types'
 import { POSITIONS, positionSpec } from '../election-levels'
 import { compareRegionName } from '../region-name'
-import { candidacyNote } from '../politician-office'
 import { participationLabel } from '../participation-label'
-import { runningRecord } from './scope'
+import { mdCandidacyNote, runningRecord } from './scope'
+import { pledgesOf } from './pledge'
 import {
   abs, compareByName, comparePolicies, electionYear, latestTime, oneLine, policyBullet, politicianMdPath, politicianUrl,
   type MdPage,
@@ -39,7 +40,7 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
   const { election, region } = input
   const year = electionYear(election)
   const byPerson = new Map<string, Policy[]>()
-  for (const p of input.policies) byPerson.set(p.politicianId, [...(byPerson.get(p.politicianId) ?? []), p])
+  for (const p of pledgesOf(input.policies, election)) byPerson.set(p.politicianId, [...(byPerson.get(p.politicianId) ?? []), p])
 
   const rows: Row[] = []
   const seen = new Set<string>()
@@ -48,7 +49,7 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
     const rec = runningRecord(person, election.id)
     if (!rec) continue
     seen.add(person.id)
-    const note = candidacyNote(rec, election.electionDate < input.today)
+    const note = mdCandidacyNote(rec, election.electionDate < input.today)
     const what = participationLabel(rec) || rec.position || '參選'
     rows.push({
       person,
@@ -97,10 +98,10 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
 
   const typeLabels = types.map((t) => positionSpec(t)?.label ?? t)
   return {
-    title: `${region} ${year} 候選人與政見`,
+    title: `${region} ${year} 候選人與競選承諾`,
     htmlPath: `/election/${input.segment}/${encodeURIComponent(region)}`,
     dataAsOf: latestTime(input.policies.map((p) => p.updatedAt ?? p.lastUpdated)),
-    scope: `${year} 屆（${election.name}）${region}${typeLabels.length ? `；${typeLabels.join('、')}` : ''}；共 ${withPolicies.length} 位有政見的候選人、${policyCount} 筆政見（候選人 ${rows.length} 位）`,
+    scope: `${year} 屆（${election.name}）競選承諾；${region}${typeLabels.length ? `；${typeLabels.join('、')}` : ''}；共 ${withPolicies.length} 位有政見的候選人、${policyCount} 筆政見（候選人 ${rows.length} 位）`,
     preface: [],
     body,
     rowCount: policyCount,

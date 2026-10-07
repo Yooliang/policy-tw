@@ -13,7 +13,7 @@ import type { MdPage } from '../lib/md/format'
 import type { Matrix } from '../lib/md/dataset'
 
 /**
- * 政見矩陣（維護者 2026-10-07）：橫向 22 縣市、直列 19 個分類（照網站分類順序），格子＝該縣市該分類的政見筆數（只算這一屆在選候選人名下的政見，
+ * 政見矩陣（維護者 2026-10-07）：橫向 22 縣市、直列 19 個分類（照網站分類順序），格子＝該縣市該分類的競選承諾筆數（只算這一屆在選候選人名下、屬於這一屆的競選承諾，只放筆數、不放比例，
  * 直接按 policies.category 算）。三種粗切法都能一鍵拿到 .md：
  *   縣市欄標題 → 該縣市全部分類；分類列標題 → 該分類全部縣市；格子 → 該縣市的該分類；左上角 → 全部檔案的索引
  * 點了在下面展開那份 Markdown 摘要，並附「開 .md」連結。最後一列／最後一欄是各縣市與各分類的總數。
@@ -72,7 +72,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => [
 const pageTitle = computed(() => `${(election.value?.shortName || (year.value ? `${year.value} 九合一` : '')).replace(/選舉$/, '')}政見矩陣`.trim())
 usePageHead({
   title: () => pageTitle.value,
-  description: () => `${year.value} 年地方選舉候選人的政見，依 22 縣市與 19 個分類統計筆數，點開可看各縣市、各分類的 Markdown 摘要。`,
+  description: () => `${year.value} 年地方選舉候選人的競選承諾，依 22 縣市與 19 個分類統計筆數，點開可看各縣市、各分類的 Markdown 摘要。`,
   breadcrumbs: () => breadcrumbs.value,
 })
 
