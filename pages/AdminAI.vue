@@ -5,7 +5,7 @@ import { Bot, ExternalLink, ClipboardList } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
- * 舊的「後台 AI 任務」（ai-search／ai-prompt-status／ai-update-progress 管線）已停用：撿任務的 VM 關機、ai_prompts 不再處理。
+ * 舊的「後台 AI 任務」（ai-search／ai-prompt-status／ai-update-progress 管線，函式已於 2026-10-07 下架）已停用：撿任務的 VM 關機、ai_prompts 不再處理。
  * 資料貢獻改由公開協議（skill.md）進行，審核用維護者金鑰打 apply 端點，操作方式見 docs/CONTRIBUTIONS-ADMIN.md。
  * 這頁先保留路由與說明；維護者後台頁另開票。
  */
@@ -34,7 +34,7 @@ usePageHead({ title: '後台 AI 任務（已停用）', noindex: true })
           <RouterLink to="/contributions" class="px-4 py-2.5 rounded-xl bg-navy-900 text-white text-sm font-bold inline-flex items-center gap-2"><ClipboardList :size="16" /> 前往貢獻看板</RouterLink>
           <RouterLink to="/admin/dashboard" class="px-4 py-2.5 rounded-xl bg-white border border-slate-300 text-navy-900 text-sm font-bold">回後台首頁</RouterLink>
         </div>
-        <p class="text-xs text-slate-400">舊資料表 ai_prompts 與相關 Edge Function 暫時保留，是否下架另開票決定。</p>
+        <p class="text-xs text-slate-400">舊的 AI 任務相關 Edge Function 已下架（2026-10-07），舊資料表 ai_prompts 暫時保留。</p>
       </div>
     </div>
   </div>
