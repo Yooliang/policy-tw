@@ -61,8 +61,10 @@ jobs:
       - name: deno test（supabase/functions/_shared）
         working-directory: supabase/functions
         run: deno test --allow-read _shared/
+      # 整個資料夾交給 deno 自己找 *.test.ts（2026-10-07 起）：以前手寫 36 個檔名，新測試漏加就是「測試存在但沒跑」
+      # （ci-test-glob.test.ts 守這一行不再列檔名）
       - name: deno test（前端純函式）
-        run: deno test --allow-read lib/policy-date.test.ts lib/policy-elements.test.ts lib/policy-compare.test.ts lib/lineage.test.ts lib/policy-chain.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts lib/issue-tags.test.ts lib/participation-label.test.ts lib/model-quality.test.ts lib/politician-office.test.ts lib/ward-classification.test.ts lib/village-grouping.test.ts lib/fetch-all-pages.test.ts lib/election-levels.test.ts lib/district-grouping.test.ts lib/election-area.test.ts lib/region-name.test.ts lib/township-directory.test.ts lib/score-bar.test.ts lib/election-breadcrumbs.test.ts lib/election-townships.test.ts lib/election-regions.test.ts lib/election-list.test.ts lib/parties.test.ts lib/people-directory.test.ts lib/party-pages.test.ts cloudflare/region-path.test.ts lib/sources.test.ts lib/ad-request.test.ts lib/election-route.test.ts lib/data-query.test.ts lib/md/md.test.ts cloudflare/markdown.test.ts
+        run: deno test --allow-read lib/ cloudflare/
 
       # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
