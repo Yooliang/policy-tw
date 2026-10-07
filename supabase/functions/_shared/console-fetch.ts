@@ -1,11 +1,13 @@
 /**
  * console-fetch 的純函式與 I/O 層（2026-10-07，從私人 repo policy-console 的 scripts/fetch.mjs 搬來）。
  *
- * 做的事：抓 GA4（正見、政策の系譜兩個資源）與 AdSense，寫進 Firestore（專案 policy-tw）。
+ * 做的事：抓 GA4（正見、政策の系譜兩個資源），寫進 Firestore（專案 policy-tw）。
+ * 分工（2026-10-08 維護者裁定）：GA 只在這裡跑；AdSense 只在 policy-console 的 GitHub Actions 跑。
+ * 所以這裡完全不碰 AdSense：不讀 ADSENSE_* 、不呼叫 AdSense、meta/status 只寫 GA 的欄位（updatedAt、sources.ga-*）。
  * 站務主控台（policy-console.web.app）只讀那個 Firestore。原本由 GitHub Actions 每小時跑，
  * GitHub 常跳過排程，所以搬到 Supabase Edge Function ＋ pg_cron。
  *
- * 跟 fetch.mjs 逐項相同：GA 指標、回填天數、GA_BATCH／GA_WORKERS、429 指數退避、AdSense 的兩段式查詢、
+ * 跟 fetch.mjs 逐項相同：GA 指標、回填天數、GA_BATCH／GA_WORKERS、429 指數退避、
  * Firestore 文件路徑與欄位、meta/status。不一樣的只有幾處（見各處註解）：
  *   1. Firestore 走 REST（edge runtime 不保證能跑 gRPC 的 @google-cloud/firestore）；
  *   2. Google 存取權杖用服務帳號 JWT 自己換（Web Crypto RS256），不用 google-auth-library；
@@ -23,13 +25,12 @@ export const CONSOLE_CONFIG = {
   } as Record<string, { name: string; country: string; propertyId?: string }>,
   backfillDays: 30,
   maxHostsPerSite: 4,
-  adsenseAccount: "accounts/pub-6687848895101003" as string | undefined,
 };
 export type ConsoleConfig = typeof CONSOLE_CONFIG;
 
 export const PROJECT_ID = "policy-tw";
-/** 與 GitHub 上同名；另一台機器用這些名稱設定 Supabase secrets */
-export const REQUIRED_ENV = ["GCP_SA_KEY", "ADSENSE_REFRESH_TOKEN", "ADSENSE_CLIENT_ID", "ADSENSE_CLIENT_SECRET"] as const;
+/** 與 GitHub 上同名；另一台機器用這個名稱設定 Supabase secret */
+export const REQUIRED_ENV = ["GCP_SA_KEY"] as const;
 
 export const GA_METRICS = ["activeUsers", "sessions", "screenPageViews", "userEngagementDuration"];
 // GA 每個資源同時最多 10 個請求（一批裡每個查詢都算）：每批 4 個 × 2 個 worker＝8，留一點給別人
@@ -399,82 +400,10 @@ export async function fetchGaSummary(propertyId: string, token: string, nowMs: n
   return out;
 }
 
-// ---------- AdSense：報表整理（純函式） ----------
-export interface AdsenseReport {
-  headers?: { name: string; type?: string; currencyCode?: string }[];
-  rows?: { cells: { value?: string }[] }[];
-  totals?: { cells?: { value?: string }[] };
-}
-
-/** AdSense 報表查詢參數；dimensions 預設依日期＋網域 */
-export function adsenseParams(start: string, today: string, dimensions: string[] = ["DATE", "DOMAIN_NAME"]): URLSearchParams {
-  const p = new URLSearchParams({ dateRange: "CUSTOM" });
-  const [sy, sm, sd] = start.split("-").map(Number);
-  const [ey, em, ed] = today.split("-").map(Number);
-  p.set("startDate.year", String(sy)); p.set("startDate.month", String(sm)); p.set("startDate.day", String(sd));
-  p.set("endDate.year", String(ey)); p.set("endDate.month", String(em)); p.set("endDate.day", String(ed));
-  for (const d of dimensions) p.append("dimensions", d);
-  for (const m of ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "PAGE_VIEWS", "PAGE_VIEWS_RPM"]) p.append("metrics", m);
-  p.set("reportingTimeZone", "ACCOUNT_TIME_ZONE");
-  return p;
-}
-
-/** 只依日期查出來的報表 → 補上網域欄（記成「全部網站」），形狀跟依網域的一樣 */
-export function withAllSitesDomain(r2: AdsenseReport): AdsenseReport {
-  return {
-    ...r2,
-    headers: [...(r2.headers ?? []).slice(0, 1), { name: "DOMAIN_NAME", type: "DIMENSION" }, ...(r2.headers ?? []).slice(1)],
-    rows: (r2.rows ?? []).map((row) => ({ cells: [row.cells[0], { value: "全部網站" }, ...row.cells.slice(1)] })),
-  };
-}
-
-export interface AdsenseDomain { domain: string | undefined; earnings: number; impressions: number; clicks: number; pageViews: number; pageRpm: number }
-export interface AdsenseDoc {
-  date: string;
-  currency: string | null;
-  fetchedAt: string;
-  domains: AdsenseDomain[];
-  total: { earnings: number; impressions: number; clicks: number; pageViews: number; pageRpm: number };
-}
-
-/** 報表 → 每天一份文件（adsense/{yyyy-mm-dd}），日期順序依報表出現的順序 */
-export function adsenseDocs(report: AdsenseReport, fetchedAt: string): AdsenseDoc[] {
-  const names = (report.headers ?? []).map((h) => h.name);
-  const currency = (report.headers ?? []).find((h) => h.currencyCode)?.currencyCode ?? null;
-  const byDate = new Map<string, AdsenseDomain[]>();
-  for (const row of report.rows ?? []) {
-    const rec = Object.fromEntries(names.map((n, i) => [n, row.cells[i]?.value])) as Record<string, string | undefined>;
-    const entry: AdsenseDomain = {
-      domain: rec.DOMAIN_NAME,
-      earnings: num(rec.ESTIMATED_EARNINGS),
-      impressions: num(rec.IMPRESSIONS),
-      clicks: num(rec.CLICKS),
-      pageViews: num(rec.PAGE_VIEWS),
-      pageRpm: num(rec.PAGE_VIEWS_RPM),
-    };
-    const date = rec.DATE as string;
-    if (!byDate.has(date)) byDate.set(date, []);
-    byDate.get(date)!.push(entry);
-  }
-  const docs: AdsenseDoc[] = [];
-  for (const [date, domains] of byDate) {
-    const sum = (k: "earnings" | "impressions" | "clicks" | "pageViews") => domains.reduce((s, d) => s + d[k], 0);
-    const pv = sum("pageViews");
-    docs.push({
-      date,
-      currency,
-      fetchedAt,
-      domains,
-      total: { earnings: sum("earnings"), impressions: sum("impressions"), clicks: sum("clicks"), pageViews: pv, pageRpm: pv > 0 ? (sum("earnings") / pv) * 1000 : 0 },
-    });
-  }
-  return docs;
-}
-
 // ---------- 主流程 ----------
 export interface RunInput {
   config: ConsoleConfig;
-  /** 環境變數（只讀 REQUIRED_ENV 與選用的 ADSENSE_ACCOUNT） */
+  /** 環境變數（只讀 REQUIRED_ENV） */
   env: Record<string, string | undefined>;
   deps: Deps;
   store: Store;
@@ -492,7 +421,7 @@ export async function runConsoleFetch(input: RunInput): Promise<RunResult> {
   const backfill = config.backfillDays ?? 30;
   const maxHosts = config.maxHostsPerSite ?? 4;
   const startMs = deps.now();
-  const { today, dates } = dateWindow(startMs, backfill);
+  const { dates } = dateWindow(startMs, backfill);
   const nowIso = () => new Date(deps.now()).toISOString();
   const sourceStatus: Record<string, SourceStatus> = {};
   const setStatus = (id: string, label: string, state: SourceState, message?: string | null, success = false) => {
@@ -536,69 +465,10 @@ export async function runConsoleFetch(input: RunInput): Promise<RunResult> {
     }
   }
 
-  async function runAdsense(missingAdsense: string[]) {
-    const label = "AdSense";
-    if (missingAdsense.length) {
-      // fetch.mjs 這裡記「尚未授權」；搬過來依維護者要求改成失敗狀態並指名缺哪個變數
-      setStatus("adsense", label, "error", `缺少環境變數：${missingAdsense.join("、")}`);
-      return;
-    }
-    try {
-      const tokenRes = await callJson(
-        "https://oauth2.googleapis.com/token",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            refresh_token: env.ADSENSE_REFRESH_TOKEN!,
-            client_id: env.ADSENSE_CLIENT_ID!,
-            client_secret: env.ADSENSE_CLIENT_SECRET!,
-          }),
-        },
-        "AdSense 授權",
-        deps,
-      );
-      const headers = { Authorization: `Bearer ${tokenRes.access_token}` };
-      let account = env.ADSENSE_ACCOUNT;
-      if (!account) {
-        const accounts = await callJson("https://adsense.googleapis.com/v2/accounts", { headers }, "AdSense 帳號清單", deps);
-        const list: { name: string; displayName?: string }[] = accounts.accounts ?? [];
-        deps.log("AdSense 帳號數：", list.length, list.map((a) => `${a.name}（${a.displayName ?? ""}）`).join("、"));
-        const want = config.adsenseAccount;
-        account = want ? list.find((a) => a.name === want)?.name : list[0]?.name;
-        if (!account) {
-          throw new Error(
-            want
-              ? `授權的 Google 帳號看不到 ${want.replace("accounts/", "")}（只看得到：${list.map((a) => a.name.replace("accounts/", "")).join("、") || "無"}），請用擁有該 AdSense 的帳號重新授權`
-              : "此授權帳號底下沒有 AdSense 帳號",
-          );
-        }
-      }
-      const start = dates[0];
-      const p = adsenseParams(start, today);
-      let report: AdsenseReport = await callJson(`https://adsense.googleapis.com/v2/${account}/reports:generate?${p}`, { headers }, "AdSense 報表", deps);
-      if (!(report.rows ?? []).length) {
-        // 依網域拆分沒有列時，退回只依日期（網域記成「全部」）
-        const p2 = adsenseParams(start, today, ["DATE"]);
-        const r2: AdsenseReport = await callJson(`https://adsense.googleapis.com/v2/${account}/reports:generate?${p2}`, { headers }, "AdSense 報表（只依日期）", deps);
-        deps.log("只依日期的列數：", (r2.rows ?? []).length, "總計：", JSON.stringify(r2.totals?.cells?.map((c) => c.value) ?? null));
-        if ((r2.rows ?? []).length) report = withAllSitesDomain(r2);
-      }
-      const fetchedAt = nowIso();
-      for (const doc of adsenseDocs(report, fetchedAt)) await store.set(`adsense/${doc.date}`, doc as unknown as Record<string, unknown>);
-      deps.log("AdSense 報表列數：", (report.rows ?? []).length, "期間：", start, "～", today, "帳號：", account);
-      if (!(report.rows ?? []).length) setStatus("adsense", label, "ok", `報表 0 列（${start}～${today}）`, true);
-      else setStatus("adsense", label, "ok", null, true);
-    } catch (e) {
-      setStatus("adsense", label, "error", (e as Error).message);
-    }
-  }
-
   const missing = missingEnv(env);
   for (const [id, site] of Object.entries(config.sites)) await runGaSite(id, site);
-  await runAdsense(missing.filter((k) => k !== "GCP_SA_KEY"));
-  // 任一資料源失敗只記錄到 meta/status；只有這一步（Firestore 寫入本身壞掉）會往外丟
+  // 任一資料源失敗只記錄到 meta/status；只有這一步（Firestore 寫入本身壞掉）會往外丟。
+  // 只寫 GA 的欄位（updatedAt、sources.ga-*）：merge 的 updateMask 逐葉列出，別人寫的 sources.* 不會被動到。
   await store.merge("meta/status", { updatedAt: nowIso(), sources: sourceStatus });
   const summary = Object.fromEntries(Object.entries(sourceStatus).map(([k, v]) => [k, { state: v.state, message: v.message }]));
   deps.log("完成：", Object.fromEntries(Object.entries(summary).map(([k, v]) => [k, `${v.state}${v.message ? " - " + v.message : ""}`])));
