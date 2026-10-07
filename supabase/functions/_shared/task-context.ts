@@ -187,6 +187,24 @@ export const ROSTER_CEC_GAP_HINT =
   "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
 
 /**
+ * 還沒投票的屆別（2026）的名單缺口：中選會候選人登記彙總表已解析成資料表（cec_registrations，2026-10-08，協議 1.74.0），
+ * 系統比對過這個單位我們缺誰，直接附在 current.registration.missing——代理不必自己去找名冊、逐位比對。
+ * 有名冊資料的單位才用這段 hint；沒有的（名冊裡沒人、資料表查不到）照舊找名單。
+ */
+export const ROSTER_REGISTRATION_GAP_HINT =
+  "中選會登記彙總表（registration.source_urls）我們已經解析成資料表、跟 ours 比對過：這個單位名冊上共 registration.registered 位，我們已經有 registration.matched 位，" +
+  "缺的人列在 registration.missing（姓名、政黨、鄉鎮市區、村里、選舉區、名冊列序；一件最多列 120 位，truncated 為真代表還有，補完下一輪會列出剩下的）。不用自己找名冊、逐位比對。" +
+  "照 missing 逐位用 candidacy 補一筆：election_id、election_type、region 照任務；candidate_status 照任務敘述的階段填；" +
+  "鄉鎮市長、代表、區長的 sub_region 填 missing 的 sub_region，村里長再加 village（照 missing 的原字），縣市議員的 electoral_district 填 missing 的 district（第NN選舉區，沒填會被退回）；" +
+  "source_urls 第一個放 registration.source_urls 裡的那份名冊——系統會逐位核對名冊上的姓名、縣市、鄉鎮、政黨，對得上的一張同意就通過，核對不上的才逐筆驗。" +
+  "ours 裡已經有同名的人先確認是不是同一人，是同一人填他的 politician_id；名字相同不代表同一人。一次最多 20 筆，可分多次交。" +
+  "全部補完才交 roster_check（cec_count 填 registration.registered）；只補了一部分就不要交，系統下一輪會再派。" +
+  "registration.unnamed_count 不是 0 時，名冊上有幾列的姓名欄是空的（罕用字抽不出來），不在 missing 裡，要打開名冊 PDF 自己看。";
+
+/** 名單缺口附給代理的名冊比對結果（roster_registration_gap 的回傳）；一件最多列這麼多位 */
+export const ROSTER_GAP_LIMIT = 120;
+
+/**
  * 退選前有沒有登記（#345 後續，協議 1.55.0）：not_running_recheck 的 filing 那一種（target.kind＝withdrawn_filing，
  * 任務編號 auto:not_running_recheck:filing:<參選紀錄 id>，contribution_auto_tasks_withdrawn_filing 派）。
  * 要的是 correction 改 withdrawn_after_filing，跟原本「他在不在名單上」那一種收尾的方式不同，hint 另外給。
@@ -490,7 +508,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       };
     }
     case "roster_check": {
-      const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string; list_source?: string } | null;
+      const r = (data.roster ?? null) as { rows?: Obj[]; history?: Obj[]; region?: string; list_source?: string; registration?: Obj | null } | null;
       // politician_elections 的 join 會把人物包在 politicians 裡，攤平成代理好比對的樣子
       const ours = (r?.rows ?? []).map((row) => {
         const who = (row.politicians ?? {}) as Obj;
@@ -503,13 +521,16 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           candidacy_status: row.candidacy_status, position: row.position,
         };
       });
+      const reg = r?.registration && typeof r.registration === "object" ? r.registration : null;
       return {
         region: r?.region ?? null,
         ours_count: ours.length,
         ours,
         previous_checks: r?.history ?? [],
+        ...(reg ? { registration: pick(reg, ["source_urls", "registered", "matched", "missing_count", "unnamed_count", "truncated", "missing"]) } : {}),
         hint: r?.list_source === "cec"
           ? ROSTER_CEC_GAP_HINT
+          : reg ? ROSTER_REGISTRATION_GAP_HINT
           : "照任務敘述所說的階段去找名單（登記階段看該縣市選委會的登記公告或媒體整理的登記名單，審定公告後才看中選會），把名單全部列出來跟 ours 逐一比對。名單有、ours 沒有的，每一位用 candidacy 補一筆，附你查的那份名單網址；最後用 roster_check 回報這次清查。名字相同不代表同一人，比對時連政黨與選區一起看。**縣市議員每一筆都要填 electoral_district**：名冊每一列都印著「<縣市>第N選舉區」，照抄成「第NN選舉區」；沒填會整批退回（400 electoral_district_required，不算被拒）——只抄姓名、政黨、縣市，網站就只能把他記到縣市，選區分組找不到他。",
       };
     }
@@ -757,9 +778,19 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
           .eq("election_id", electionId).eq("region", region).eq("election_type", electionType)
           .order("checked_at", { ascending: false }).limit(3),
       ]);
+      // 還沒投票的屆別（2026）：名冊資料表算出這個單位缺誰，一起附上（2026-10-08）。已投票屆別（list_source＝cec）的缺口在任務 target.missing，不查。
+      // 函式還沒上線（migration 比函式晚套上的那幾分鐘）、出錯、這個單位名冊裡沒人（回 NULL）都不給，不擋派工
+      let registration: Obj | null = null;
+      if (target.list_source !== "cec") {
+        const gap = await supabase.rpc("roster_registration_gap", {
+          p_election_id: electionId, p_election_type: electionType, p_county: scope.county, p_town: scope.township, p_limit: ROSTER_GAP_LIMIT,
+        });
+        if (!gap.error && gap.data && typeof gap.data === "object") registration = gap.data as Obj;
+      }
       data.roster = {
         rows: [...byDistrict, ...byPerson], history: history.data ?? [], region,
         ...(target.list_source === "cec" ? { list_source: "cec" } : {}),
+        ...(registration ? { registration } : {}),
       };
     }
   }

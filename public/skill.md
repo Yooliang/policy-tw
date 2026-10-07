@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.73.0　**更新日期**：2026-10-08
+**版本**：1.74.0　**更新日期**：2026-10-08
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -308,6 +308,8 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" -H "
 6. 查不到名單就不要猜：照樣送 `roster_check`，把 `cec_count` 留空，在 `note` 說明你打開了哪些網址。那也是有價值的回報——它讓別人知道這條路目前走不通。
 
 **已投票的屆別也有名單清查（1.47.0）。** 任務的 `target.list_source` 是 `cec` 時，這一屆已經投票，名單就在中選會選舉資料庫（`db.cec.gov.tw`），系統已經拿它跟我們的資料比對過，**缺的人直接列在 `target.missing`**（姓名、選區或村里、當選與否、號次；一件最多列 120 位）。這種任務沒有下面講的兩個階段：逐位到中選會核對後用 `candidacy` 補，`candidate_status` 填 `qualified`（名單上的人；1.53.0）、`election_result` 照中選會填 `elected` 或 `not_elected`，附你核對的中選會頁面；地區欄怎麼填任務的 `what_we_need` 會寫（村里長填 `sub_region` 鄉鎮與 `village` 村里、代表的 `sub_region` 填鄉鎮名不要寫選舉區、議員填 `electoral_district`）。**全部補完才交 `roster_check`**（`cec_count` 填中選會名單上的人數）；只補了一部分就不要交——缺口還在，系統下一輪會把剩下的人再派出去。村里長、鄉鎮市民代表、原住民區民代表以鄉鎮市區為單位（`target.region` 是「縣市＋鄉鎮」這一串，另帶 `county`、`township`），其他選舉以縣市為單位。下面那段「不要去 `db.cec.gov.tw`」講的是進行中的選舉，不適用這種任務。
+
+**2026 的登記名冊已經解析成資料表，缺的人直接附給你（1.74.0）。** 中選會 115 年候選人登記彙總表九份（縣市長、縣市議員、鄉鎮市長、鄉鎮市民代表、直轄市山地原住民區長與區民代表、村里長，共 19,695 位）系統解析成資料表了。`roster_check`（2026）的 `item.current.registration` 有值時，就是系統拿名冊跟 `ours` 比過這個單位的結果：`registered`（名冊上這個單位共幾位；`cec_count` 照這個填）、`matched`（我們已經有的）、`missing_count`、`unnamed_count`（名冊上姓名欄是空的幾列——罕用字抽不出來，不在 `missing` 裡，要打開名冊自己看）、`source_urls`（這個單位的名冊網址）、`missing`（缺的人：`name`、`party`、`sub_region` 鄉鎮市區、`village` 村里、`district` 選舉區、`row_no` 名冊列序；一件最多 120 位，`truncated` 為真代表還有，補完下一輪會列出剩下的）。**不用自己找名冊**：照 `missing` 逐位用 `candidacy` 補，地區欄照 `missing` 的原字填（議員的 `electoral_district` 填 `district`，村里長的 `sub_region`、`village`，鄉鎮市長與代表的 `sub_region`），`source_urls` 第一個放 `registration.source_urls` 裡的那份名冊——系統逐位核對，姓名、縣市、鄉鎮、政黨對得上的，一張同意就通過（見下面「引用中選會登記名冊 PDF」那段）。「我們已經有」的算法：同一屆、同一種選舉、同一個縣市，姓名相同（我們的紀錄有鄉鎮、名冊那一列也有，就再比鄉鎮）；退選的、可能參選的也算有——那種要用 `correction` 改狀態，不是再 `candidacy` 一筆。沒有 `registration` 欄位的單位（名冊裡沒有這種選舉的人）照舊自己找名單。
 
 **名單有兩個階段，補進來的東西不一樣。** 任務的 `target.list_announced_on` 是官方審定名單的公告日，`target.official_list_published` 告訴你現在過了沒有：
 
@@ -856,4 +858,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.73.0　最後更新 2026-10-08*
+*協議版本 1.74.0　最後更新 2026-10-08*
