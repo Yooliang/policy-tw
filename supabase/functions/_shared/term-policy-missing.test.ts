@@ -45,20 +45,21 @@ Deno.test("SQL：任務臂掛進 contribution_auto_tasks_arms()", async () => {
   }
 });
 
-Deno.test("SQL：對象＝2022 縣市長／縣市議員／鄉鎮市長、2024 立委的當選者；條件＝沒有該屆、未移除的政見", async () => {
+Deno.test("SQL：對象＝設定表 election_task_config 開著的屆別裡、職位在 positions 的當選者（種子是 2022 縣市長／縣市議員／鄉鎮市長、2024 立委）；條件＝沒有該屆、未移除的政見", async () => {
   const body = await latestFunctionBody("contribution_auto_tasks_term_policies");
   const flat = body.replace(/\s+/g, " ");
   assertStringIncludes(flat, `'auto:${T}:'`);
   assertStringIncludes(flat, "pe.candidacy_status = 'elected'");
-  assertStringIncludes(flat, "pe.election_id = 2022 AND pe.election_type IN ('縣市長', '縣市議員', '鄉鎮市長')");
-  assertStringIncludes(flat, "pe.election_id = 2024 AND pe.election_type = '立法委員'");
+  // 2026-10-07：屆別與職位不再寫死在函式裡，讀 election_task_config（election-task-config.test.ts 守種子與逐字相同）
+  assertStringIncludes(flat, "JOIN election_task_config cfg ON cfg.election_id = pe.election_id AND cfg.enabled AND pe.election_type = ANY (cfg.positions)");
+  assert(!/pe\.election_id = 20\d\d/.test(flat), "當選人那一段不能再寫死屆別");
   // 缺口：沒有「該人、該屆、未移除」的政見——補上一筆就從 _gaps 消失，seed_auto_task_queue 收回號碼牌
   assert(/NOT EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.election_id = \w+\.election_id AND pl\.removed_at IS NULL ?\)/.test(flat),
     "缺口條件要是：policies 沒有該人、該 election_id、removed_at IS NULL 的政見");
   assert(!flat.includes("總統"), "不含總統");
   // 2026-10-06 起村里長也派，但只派推得出公報的（politician_bulletins），而且一次最多 term_policy_village_cap() 件
-  // （election-bulletin.test.ts 守住細節）；當選人那一段照舊不含村里長
-  assert(/pe\.election_type IN \('縣市長', '縣市議員', '鄉鎮市長'\)/.test(flat), "當選人那一段照舊");
+  // （election-bulletin.test.ts 守住細節）；當選人那一段只看設定表的 positions（種子不含村里長）
+  assertStringIncludes(flat, "JOIN election_task_config cfg ON cfg.election_id = b.election_id AND cfg.enabled");
   assertStringIncludes(flat, "term_policy_village_cap()");
   assertStringIncludes(flat, "merged_into IS NULL", "被合併掉的人物不派");
   // 去重：2026 候選人而且整個人零政見的，只走 policy_missing（條件跟 raw 臂的 c2026 一致）
@@ -75,9 +76,13 @@ Deno.test("SQL：任務說明——那一屆的競選政見、最多 5 筆、首
   assertStringIncludes(body, "Campaign Pledge");
   assertStringIncludes(body, "不要為了湊數");
   assertStringIncludes(body, "標語");
-  // 2022 地方選舉公報（111 年）與 2024 立委選舉公報（113 年第 11 屆）的實際查找入口
-  assertStringIncludes(body, "https://eebulletin.cec.gov.tw/?dir=111");
-  assertStringIncludes(body, "https://bulletin.cec.gov.tw/?dir=01%E9%81%B8%E8%88%89%E5%85%AC%E5%A0%B1%2F02%E7%AB%8B%E6%B3%95%E5%A7%94%E5%93%A1%2F113%E5%B9%B4%E7%AC%AC11%E5%B1%86");
+  // 公報的實際查找入口（2022 地方選舉公報 111 年、2024 立委選舉公報 113 年第 11 屆）2026-10-07 起放在設定表種子（election_task_config.bulletin_hint），
+  // 函式本身只讀它；沒填的屆別用公報站首頁加民國年的通用寫法
+  assertStringIncludes(body, "COALESCE(cfgx.bulletin_hint,");
+  assertStringIncludes(body, "cfgx.bulletin_roc_year");
+  const config = await Deno.readTextFile(new URL("../../migrations/20261007225000_election_task_config.sql", import.meta.url));
+  assertStringIncludes(config, "https://eebulletin.cec.gov.tw/?dir=111");
+  assertStringIncludes(config, "https://bulletin.cec.gov.tw/?dir=01%E9%81%B8%E8%88%89%E5%85%AC%E5%A0%B1%2F02%E7%AB%8B%E6%B3%95%E5%A7%94%E5%93%A1%2F113%E5%B9%B4%E7%AC%AC11%E5%B1%86");
 });
 
 Deno.test("四處清點：TASK_TYPES、SUGGESTED_TYPE、task-labels（純中文）、skill.md；另加做法、查證來源、看板顏色", async () => {
