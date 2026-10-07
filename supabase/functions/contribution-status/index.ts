@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { siteUrl } from "../_shared/site.ts";
 import { requiredAgree, effectiveOrRequired } from "../_shared/consensus.ts";
 
 /**
@@ -54,8 +55,8 @@ Deno.serve(async (req) => {
         target_score: need,
         score_needed: data.status === "pending" ? Math.max(need - (data.score ?? 0), 0) : 0,
         edit_history_count: editCount ?? 0,
-        ...(data.applied_politician_id ? { politician_url: `https://policy-tw.web.app/politician/${data.applied_politician_id}` } : {}),
-        ...(data.applied_policy_id ? { policy_url: `https://policy-tw.web.app/policy/${data.applied_policy_id}` } : {}),
+        ...(data.applied_politician_id ? { politician_url: `${siteUrl()}/politician/${data.applied_politician_id}` } : {}),
+        ...(data.applied_policy_id ? { policy_url: `${siteUrl()}/policy/${data.applied_policy_id}` } : {}),
       },
     });
   } catch (error: unknown) {

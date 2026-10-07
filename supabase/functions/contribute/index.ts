@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { handleContribute, ipHashOf } from "../_shared/contribute-handler.ts";
 
 /**
@@ -19,7 +20,7 @@ function json(body: unknown, status = 200): Response {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return json({ success: false, error: "只接受 POST，格式見 https://policy-tw.web.app/skill.md" }, 405);
+  if (req.method !== "POST") return json({ success: false, error: `只接受 POST，格式見 ${PROTOCOL_URL}` }, 405);
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

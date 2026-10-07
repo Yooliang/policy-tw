@@ -5,7 +5,7 @@ import { createHead, renderSSRHead } from '@unhead/vue/server'
 import App from './App.vue'
 import { routes, installRouterGuards } from './router'
 import { applyDataSnapshot } from './composables/useSupabase'
-import { loadPageData } from './lib/ssr/loaders'
+import { loadPageData, setBaseTtlMs } from './lib/ssr/loaders'
 import type { PageSnapshot } from './lib/ssg/page-data'
 import { latestPath, matchMarkdownRoute } from './lib/md/route'
 import { loadPoliticianMd } from './lib/ssr/md-loaders'
@@ -51,6 +51,11 @@ export interface RenderResult {
   bodyTagsOpen?: string
   bodyTags?: string
   state?: { page: PageSnapshot }
+}
+
+/** Worker 每個請求開頭呼叫一次：把環境變數來的營運參數交給 SSR 載入層（目前只有基礎資料的快取時間） */
+export function configureSsr(opts: { baseTtlMs?: number }): void {
+  if (opts.baseTtlMs !== undefined) setBaseTtlMs(opts.baseTtlMs)
 }
 
 // useSupabase 的狀態是模組級 ref，Worker 的一個 isolate 會同時處理多個請求：渲染一律排隊，

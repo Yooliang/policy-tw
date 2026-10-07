@@ -7,6 +7,11 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ORIGIN = "https://policy-tw.web.app"
+# 快取時間（秒）：改了 `wrangler deploy`、或到主控台 Variables 直接改就生效，不必發版。寫壞（非整數、超出範圍）一律退回預設。
+# 範圍與預設見 cloudflare/worker-config.js；選舉夜想讓頁面更即時就調小 SSR_CACHE_TTL_S（最小 10）。
+SSR_CACHE_TTL_S = "600"   # 頁面快取多久後背景重新渲染
+SSR_STALE_TTL_S = "3600"  # 邊緣快取最長保存（s-maxage）
+SSR_BASE_TTL_S = "600"    # 基礎資料（選舉／分類／地區）每個 isolate 多久重撈
 # PURGE_SECRET 用 `wrangler secret put PURGE_SECRET` 設，不寫在這裡
 
 [observability]

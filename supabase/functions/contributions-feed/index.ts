@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { contributionScore, SCORE_COLUMNS } from "../_shared/contribution-score.ts";
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 import { fetchSourceBriefs, viewSources } from "../_shared/source-read.ts";
@@ -213,7 +214,7 @@ Deno.serve(async (req) => {
       next_cursor: hasMore ? page[page.length - 1].last_activity_at : null,
       items,
       summary,
-      docs: "https://policy-tw.web.app/skill.md",
+      docs: PROTOCOL_URL,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

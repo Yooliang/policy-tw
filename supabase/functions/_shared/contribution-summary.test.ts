@@ -5,15 +5,15 @@ import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
   const policy = summarizeContribution({ contribution_type: "policy", payload: { name: "陳素月", title: "長者健保全免" }, applied_policy_id: "p-1", applied_politician_id: "bcdfd014" });
   assertEquals(policy.summary, "為「陳素月」新增政見：長者健保全免");
-  assertEquals(policy.policy_url, "https://policy-tw.web.app/policy/p-1");
-  assertEquals(policy.politician_url, "https://policy-tw.web.app/politician/bcdfd014");
+  assertEquals(policy.policy_url, "https://xn--2lw665d.tw/policy/p-1");
+  assertEquals(policy.politician_url, "https://xn--2lw665d.tw/politician/bcdfd014");
 
   const cand = summarizeContribution({ contribution_type: "candidacy", payload: { name: "徐千晴", election_id: 2026, region: "新竹市", election_type: "縣市議員", candidate_status: "registered" } });
   assertEquals(cand.summary, "將 徐千晴 2026 新竹市縣市議員參選狀態改為「已登記」");
 
   const corr = summarizeContribution({ contribution_type: "correction", payload: { target_table: "policies", target_id: "abcdef12-0000", field: "proposed_date", correct_value: "2024-04-02", reason: "…" } });
   assertEquals(corr.summary, "把政見 abcdef12 的提出日改為「2024-04-02」");
-  assertEquals(corr.policy_url, "https://policy-tw.web.app/policy/abcdef12-0000");
+  assertEquals(corr.policy_url, "https://xn--2lw665d.tw/policy/abcdef12-0000");
 
   const prog = summarizeContribution({ contribution_type: "policy_progress", payload: { policy_id: "p-2", status: "In Progress", progress: 40, note: "已編列預算" } });
   assert(prog.summary.startsWith("更新「政見 p-2」進度為「進行中」（40%）"));
@@ -296,8 +296,10 @@ async function leaderboardDefinitions(): Promise<{ name: string; sql: string }[]
 
 Deno.test("SQL 的貢獻榜規則要跟 TS 這份一致：排除名單、榜長、分數、同分排序", async () => {
   for (const { name, sql } of await leaderboardDefinitions()) {
+    // 排除名單：2026-10-07 起讀 excluded_agents 表（之前寫死在函式裡）；兩種寫法擇一，名單內容由 excluded-agents.test.ts 對照種子
+    const fromTable = sql.includes("FROM excluded_agents");
     for (const agent of EXCLUDED_AGENTS) {
-      assert(sql.includes(`'${agent}'`), `${name}：SQL 的排除名單少了 ${agent}`);
+      assert(fromTable || sql.includes(`'${agent}'`), `${name}：SQL 的排除名單少了 ${agent}`);
     }
     assert(sql.includes(`LIMIT ${LEADERBOARD_SIZE}`), `${name}：SQL 的榜長要是 ${LEADERBOARD_SIZE}`);
     assert(sql.includes("submitted + applied + verified_votes"), `${name}：SQL 的分數要是三項相加`);
@@ -328,8 +330,9 @@ async function latestFeedSummarySql(): Promise<string> {
 
 Deno.test("最新的統計函式：排除名單跟 TS 一致、有貢獻者總數、以定義者身分執行", async () => {
   const sql = await latestFeedSummarySql();
+  const fromTable = sql.includes("FROM excluded_agents");
   for (const name of EXCLUDED_AGENTS) {
-    assert(sql.includes(`'${name}'`), `統計函式的排除名單少了 ${name}`);
+    assert(fromTable || sql.includes(`'${name}'`), `統計函式的排除名單少了 ${name}`);
   }
   assert(sql.includes("'contributors_total'"), "統計函式要回 contributors_total");
   assert(sql.includes("INTERVAL '30 days'"), `近 30 天貢獻者的窗要是 ${CONTRIBUTORS_WINDOW_DAYS} 天`);

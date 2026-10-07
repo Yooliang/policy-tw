@@ -137,6 +137,12 @@ VITE_SUPABASE_ANON_KEY=<anon-key>
 ```
 anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等非 anon 的金鑰。
 
+**營運參數（2026-10-07 起，都有預設值、寫壞一律退回預設，不必發版就能調）**：
+- 站點網址：Edge Function 的 `SITE_URL`（Supabase secrets，`_shared/site.ts`；人物頁、政見頁、任務看板連結）、前端與 sitemap 的 `VITE_SITE_URL`（`lib/site.ts`、`scripts/postbuild-ssg.mjs`）；預設都是 正見.tw。`index.html` 的 og 標籤是靜態的，換網域要手改（測試盯著）。**`PROTOCOL_URL`（policy-tw.web.app/skill.md）不屬於這一組**，有 `protocol-guard.test` 守
+- 邊緣 Worker（`wrangler.toml` 的 `[vars]`，範圍與預設在 `cloudflare/worker-config.js`）：`SSR_CACHE_TTL_S`（600）、`SSR_STALE_TTL_S`（3600）、`SSR_BASE_TTL_S`（600）、`ORIGIN`
+- Jev 版本（Supabase secrets，`_shared/system-one.ts`）：`JEV_MODEL`（OpenRouter 退路）、`TYPESAFE_JEV_MODEL`（直連 TypeSafe）；要填具體版本、不要填 alias
+- 貢獻榜不列入的測試代號：資料表 `excluded_agents`（`INSERT` 一列就生效）
+
 ## Key Conventions
 
 - 所有頁面透過 `useSupabase()` 取資料；重資料一律 `ensure*()` 按需載入，不要在 `fetchAll` 裡加東西
