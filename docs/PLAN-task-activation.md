@@ -508,4 +508,5 @@ WHERE activity_open(g.arm, election_id, election_type, activity_today(...))
 - 已知限制：
   1. `scripts/arms-parity.ts` 用的是正式庫唯讀快照，不進 CI；CI 只有合成資料（`activity-arms.test.ts`）。每支改到總表或臂的 PR 要在 PR 說明附該腳本的結果。
   2. `activity-arms.test.ts` 的 A1 尾端守門（P1 之後有人重新定義總表或 seed 就紅）是刻意的：P2 每支臂的 PR 若動到總表或 seed，都要同步更新 A1 與機械式替換的比對。
-- 還沒做：各臂內部的日期條件翻成規則（P2，一臂一個 PR；翻到第一支時要讓 seed 分得出 `window` 與 `filled`）；`roster_check_scope` 其餘三個日期沒搬成里程碑（P2 動 `roster_check` 時）；寫死 2026 的臂（P3）；`elections` 的 status／key（P4）。
+- **P2「選舉結果」（2026-10-08，migration `20261008070000_activity_windows_p2_election_results.sql`，守門 `supabase/functions/_shared/activity-election-results.test.ts`＋`scripts/arms-parity-p2.ts`）**：`election_results` 與 `raw:election_result_missing` 兩支臂臂內的 `election_date < CURRENT_DATE` 拿掉（現行定義＋一處機械替換），兩條 P1 種子規則原地（rule_id 不變）改成 `event`／`polling`／+1／無迄日／不限範圍／`min_status=announced`（迄日不設：結果補上缺口自己消失，2022、2024、重行選舉的空白要持續派）；`elected_missing` 沒有日期條件，規則維持永遠開（它靠 `cec_candidates` 的列出現，開票夜就該派）；今天輸出逐件不變（正式庫唯讀快照 7,521 件、全欄雜湊與逐件 md5 相等；2026-11-28 當天不開、11-29 開 +1,442 件；偏移 0／不改規則／加迄日三種改壞版都紅）；窗口用台北日界，比原本 UTC 的 `CURRENT_DATE` 早 8 小時開。其餘臂的日期條件盤點清單見 PR 說明。
+- 還沒做：各臂內部的日期條件翻成規則（P2，一臂一個 PR；翻到第一支「有迄日」的臂時才要讓 seed 分得出 `window` 與 `filled`，選舉結果這組沒有迄日所以沒做）；`roster_check_scope` 其餘三個日期沒搬成里程碑（P2 動 `roster_check` 時）；寫死 2026 的臂（P3）；`elections` 的 status／key（P4）。

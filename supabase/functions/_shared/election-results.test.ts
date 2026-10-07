@@ -155,7 +155,9 @@ Deno.test("派工臂：接進 arms、缺口條件、一個單位一件最多 120
   // #345 第二階段 A：結果空白＝狀態不是當選、落選，而且不是退選（讀 candidacy_status，不讀舊的 election_result／candidate_status）
   assertStringIncludes(arm, "COALESCE(pe.candidacy_status, '') NOT IN ('elected', 'not_elected', 'withdrawn')");
   assert(!/pe\.(election_result|candidate_status)/.test(arm), "派工臂不再讀舊的兩欄");
-  assertStringIncludes(arm, "e.election_date < CURRENT_DATE", "還沒投票的屆別不派");
+  // 「還沒投票的屆別不派」派工時間窗 P2（20261008070000）起由規則 election_results（投票日 +1 起）決定，臂內不再比日期（守門見 activity-election-results.test.ts）
+  assertEquals(arm.includes("e.election_date < CURRENT_DATE"), false, "臂內不再比投票日，由規則決定");
+  assertStringIncludes(arm, "JOIN elections e ON e.id = pe.election_id\n", "仍然 JOIN elections（派工文字要用投票日）");
   assertStringIncludes(arm, "p.merged_into IS NULL");
   assertStringIncludes(arm, `(row_number() OVER w - 1) / ${MAX_RESULTS_PER_SUBMISSION} + 1 AS part,`, "派工臂的上限跟交件上限同一個數字");
   assertStringIncludes(arm, `- 1) / ${MAX_RESULTS_PER_SUBMISSION} + 1 AS parts`, "拆幾件也照同一個上限算");
