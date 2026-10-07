@@ -16,6 +16,7 @@ export const P1_MIG = "20261008060000_activity_windows_p1.sql";
 export const P2_ER_MIG = "20261008070000_activity_windows_p2_election_results.sql";
 export const P2_PG_MIG = "20261008120000_activity_windows_p2_party_gap.sql";
 export const P2_PR_MIG = "20261008121000_activity_windows_p2_party_roster.sql";
+export const BALLOT_MIG = "20261008150000_ballot_numbers_arm.sql";
 export const BASE_ARMS_MIG ="20261006141600_reassign_candidacy.sql";
 export const BASE_DROP_MIG = "20260924000001_dispatch_io.sql";
 
@@ -82,13 +83,14 @@ export type Scope = Record<string, unknown> & { election_id: number; election_ty
 const arr = (xs: string[]) => `ARRAY[${xs.map((x) => `'${x.replaceAll("'", "''")}'`).join(", ")}]`;
 
 /** migration 前的資料庫：與 activity-windows.test.ts（P0）的 BASE_SCHEMA 同一套 stub，加上真的總表、總表的相依函式、28 個分支的 stub */
-export async function baseSchemaSql(): Promise<string> {
+/** extra：28 個之外的分支名（新臂，例：補號次的 ballot_numbers）——也建一張回放表與 stub 函式，等它的 migration 以 CREATE OR REPLACE 換成真本體、跑完再換回來 */
+export async function baseSchemaSql(extra: readonly string[] = []): Promise<string> {
   const officeFns = await read("20261004000005_politician_offices.sql");
   const oldArms = fnText(await read(BASE_ARMS_MIG), "contribution_auto_tasks_arms");
   const legacyArms = oldArms.replace("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()", "CREATE OR REPLACE FUNCTION legacy_arms()");
   assert(legacyArms !== oldArms);
   const oldDrop = fnText(await read(BASE_DROP_MIG), "task_dispatches_drop_applied");
-  const stubs = ARM_BRANCHES.map((n) =>
+  const stubs = [...ARM_BRANCHES, ...extra].map((n) =>
     `CREATE TABLE _b_${n} (${BRANCH_COLS});
 CREATE FUNCTION contribution_auto_tasks_${n === "raw" ? "raw" : n}() RETURNS TABLE(${BRANCH_COLS}) LANGUAGE sql STABLE AS $$ SELECT * FROM _b_${n} $$;`
   ).join("\n");
@@ -135,7 +137,9 @@ export type EnvOptions = {
   elections?: Election[];
   scope?: Scope[];
   /** 分支名 → 該分支要回放的列 */
-  branches?: Partial<Record<(typeof ARM_BRANCHES)[number], GapRow[] | string>>;
+  branches?: Partial<Record<string, GapRow[] | string>>;
+  /** 28 個之外的新臂分支名（見 baseSchemaSql 的 extra） */
+  extraBranches?: readonly string[];
   /** 要不要套 P1（預設要）；false＝只到 P0，總表還是前一版的 7 欄 */
   applyP1?: boolean;
   /** 改壞 P1 migration 文字（還原驗證用） */
@@ -145,7 +149,7 @@ export type EnvOptions = {
    * 所以跑的時候關掉 check_function_bodies，跑完把 restub 列的分支換回「回放 _b_<名字>」的 stub——臂內部不在 PGlite 重算
    * （各臂有自己的文字守門與正式庫快照比對），這裡測的是規則與總表。
    */
-  p2?: { migs: { name: string; mutate?: (sql: string) => string }[]; restub: readonly (typeof ARM_BRANCHES)[number][] };
+  p2?: { migs: { name: string; mutate?: (sql: string) => string }[]; restub: readonly string[] };
   /** P1 之後、P2 migration 之前要先跑的 SQL（例：優先層 #443、測試名人物隔離 #448 需要的表、函式與欄位；它們本身各有自己的測試，這裡只讓後面的 migration 跑得動） */
   afterP1Sql?: string;
   /** migration 當下的假「今天」，預設 2026-10-08（P0 回填里程碑 status 用） */
@@ -163,7 +167,7 @@ export const DEFAULT_SCOPE: Scope[] = ALL_POSITIONS.map((t) => ({ election_id: 2
 
 export async function buildArmsDb(o: EnvOptions = {}): Promise<PGlite> {
   const db = new PGlite();
-  await db.exec(await baseSchemaSql());
+  await db.exec(await baseSchemaSql(o.extraBranches ?? []));
   for (const e of o.elections ?? DEFAULT_ELECTIONS) {
     await db.exec(`INSERT INTO elections (id, election_key, election_date, election_reason, election_types, notice_date) VALUES (${e.id}, '${e.election_key}', '${e.election_date}', '${e.election_reason}', ${arr(e.election_types)}, ${e.notice_date ? `'${e.notice_date}'` : "NULL"})`);
   }
@@ -187,7 +191,7 @@ export async function buildArmsDb(o: EnvOptions = {}): Promise<PGlite> {
 }
 
 /** 套一支 P2 migration：關掉 check_function_bodies 跑（它會重定義真的臂本體），跑完把 restub 的分支換回回放 stub */
-export async function applyP2(db: PGlite, sql: string, restub: readonly (typeof ARM_BRANCHES)[number][]): Promise<void> {
+export async function applyP2(db: PGlite, sql: string, restub: readonly string[]): Promise<void> {
   await db.exec("SET check_function_bodies = off");
   try {
     await db.exec(sql);

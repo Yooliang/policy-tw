@@ -113,7 +113,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘欄位照那一屆的名冊填（candidate_status 不要順手改；party 填那一屆的推薦政黨，不要照抄他現在的政黨——人會換黨），查不到就 no_change 說明你找過哪裡。" +
     "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
-    "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。",
+    "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。 " +
+    // 補號次（2026-10-08）
+    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次，詳細做法看這一件任務的 hint。",
 
   election_result_missing:
     "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
@@ -462,6 +464,23 @@ function buildPayload(
         checked_urls: ["（你實際打開過的網址）"],
       };
     case "candidacy": {
+      // 補號次（2026-10-08，target.kind＝cand_no）：整個單位一件，名單在 target.items；骨架給第一位，其餘照 items 逐位換
+      if (t.kind === "cand_no") {
+        const items = Array.isArray(t.items) ? (t.items as unknown[]) : [];
+        const first = (items[0] && typeof items[0] === "object" ? items[0] : {}) as Record<string, unknown>;
+        return {
+          politician_id: first.politician_id ?? "（target.items 裡這一位的 politician_id）",
+          name: first.name ?? "（target.items 裡這一位的姓名）",
+          election_id: t.election_id ?? "（選舉年份）",
+          election_type: t.election_type ?? "（選舉類型）",
+          region: t.region ?? "（縣市）",
+          ...(t.sub_region ? { sub_region: t.sub_region } : {}),
+          ...(first.village ? { village: first.village } : {}),
+          ...(first.electoral_district ? { electoral_district: first.electoral_district } : {}),
+          cand_no: "（公告上他的號次，正整數；公告上找不到他就不要交這一位）",
+          candidate_status: t.candidate_status ?? "（照現況）",
+        };
+      }
       // 參選紀錄缺政黨（#346 第二階段，target.kind＝party）：照中選會名冊那一筆重交，地區照 target.fill、政黨照名冊原字
       if (t.kind === "party_roster") {
         // 2026 這一屆還沒投票：照中選會候選人登記彙總表的「推薦之政黨」（2026-10-06）

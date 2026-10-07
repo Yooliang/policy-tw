@@ -44,7 +44,7 @@ import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FO
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
-import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
+import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, rosterBatchEligible, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
 const corsHeaders = {
@@ -796,7 +796,8 @@ Deno.serve(async (req) => {
       const { data: cands, error: cErr } = await supabase.rpc("roster_batch_candidates", { p_limit: 500 });
       if (cErr) throw new Error(`roster candidates: ${cErr.message}`);
       const list = (cands ?? []) as Cand[];
-      const todo = list;
+      // 帶號次（cand_no）的交件不撿：登記彙總表沒有號次，名冊判 supported 會讓沒人核過的號次一票過（補號次 2026-10-08；rosterBatchEligible）
+      const todo = list.filter((c) => rosterBatchEligible(c.payload));
       const byUrl = new Map<string, Cand[]>();
       for (const c of todo) {
         const url = (c.source_urls ?? []).find((u) => CEC_ROSTER_URL_RE.test(u));

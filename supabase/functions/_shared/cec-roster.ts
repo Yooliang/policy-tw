@@ -20,6 +20,17 @@ export const ROSTER_BATCH_MODEL = "policy-tw/roster-batch-20260924";
 export const ROSTER_PASS_RATIO = 0.9;
 
 /**
+ * 這筆待驗的 candidacy 可不可以拿登記名冊逐位核對（roster_batch 撿不撿）。
+ * 登記彙總表只有姓名、縣市、鄉鎮、村里、選舉區、政黨，**沒有號次**：帶 cand_no 的交件若也由名冊判 supported，
+ * 目標就降到 1，號次卻沒有任何人核過（09-24「登記名冊例外」只涵蓋名冊上有的欄位）。所以帶號次的不撿，走一般驗證。
+ * 補號次任務（target.kind＝cand_no，2026-10-08）每一筆都帶 cand_no。
+ */
+export function rosterBatchEligible(payload: Record<string, unknown> | null | undefined): boolean {
+  const n = payload?.cand_no;
+  return n === undefined || n === null || n === "";
+}
+
+/**
  * district：名冊那一列的選舉區，統一成「第NN選舉區」；看不出來是 null（2026-10-05 起一起核對）
  * place：縣市以後的地名（鄉鎮市區、村里；逐列版面才有，2026-10-08），例如「竹北市」「松山區莊敬里」；
  *        村里長沒有選舉區欄，鄉鎮市民代表、區民代表有 district
