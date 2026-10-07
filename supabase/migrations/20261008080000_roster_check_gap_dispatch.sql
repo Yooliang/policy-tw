@@ -7,7 +7,7 @@
 -- 改法：最近一次回報的 cec_count 大於我們目前的名冊內人數（排除 considering、withdrawn；缺口還在）→ 不套 recheck_days，繼續派；
 -- 落差為 0（或我們反而比較多）才套 recheck_days。只動 roster_check 這一段的 WHERE，再加兩個算缺口用的欄位
 -- （ours 多一欄 n_listed、LATERAL 多一欄 last_cec_count）；target、說明文字、hint_sources、reward、task_id 都沒動，
--- 所以只有「新增」的件、沒有任何一件變動或消失。其餘臂一字不動；現行定義＝20261008000001 那一版（已核對與正式庫現行函式逐字相同）。
+-- 所以只有「新增」的件、沒有任何一件變動或消失。其餘臂一字不動；現行定義＝20261008070000（P2 選舉結果）那一版。
 --
 -- 沒動的：嘗試冷卻（只是試過沒查到、cec_count 空的那種，roster_attempt_cooldown_days，目前 1 天）照舊壓著，
 -- 所以回報「查不到」之後隔天才會再派；也就是缺口在、而且上一位不是白跑，才立刻繼續派。
@@ -231,7 +231,7 @@ AS $function$
   JOIN elections e ON e.id = pe.election_id
   LEFT JOIN regions r ON r.id = pe.region_id
   WHERE COALESCE(pe.candidacy_status, '') NOT IN ('elected', 'not_elected', 'withdrawn')
-    AND e.election_date < CURRENT_DATE
+    -- 投票日之後才派：移到規則（activity_rules「raw:election_result_missing」：投票日 +1 起，P2 20261008070000）；這裡不再比日期
     -- 只問名下有政見的人。已投票屆別、結果空白的參選紀錄有 14,289 筆，全倒進任務池
     -- 會把其他缺口整個擠掉；而這個缺口的用途是解鎖承諾追蹤，沒政見的人解鎖了也沒用。
     -- 這個條件把 14,289 收斂成 54。

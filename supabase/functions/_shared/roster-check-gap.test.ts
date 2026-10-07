@@ -6,7 +6,7 @@
  * 新判準：最近一次回報的 cec_count 大於我們目前的名冊內人數（排除 considering、withdrawn） → 不套 recheck_days，繼續派；落差為 0（或我們比較多）才套。
  *
  * 守門三道：
- *   1. 前一版是對的：新定義緊接著 20261008000001（P1 之前最後一次改 raw），而且是最後一版（之後有人改了，抄的底就過期）
+ *   1. 前一版是對的：新定義緊接著 20261008070000（P2 選舉結果，最後一次改 raw），而且是最後一版（之後有人改了，抄的底就過期）
  *   2. 新定義＝現行定義＋三處機械替換（ours 多一欄、LATERAL 多一欄、WHERE 一條）：反向替換回去逐字等於前一版；
  *      所以 target、說明文字、hint_sources、reward、task_id、其他臂都沒動，輸出只會「多」不會「變」
  *   3. 行為：把 roster_check 那一段（含 ours）原文抽出來在 PGlite 上跑 15 個情境；再對它做 10 種還原驗證，每一種都必須讓指定情境轉紅
@@ -17,7 +17,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 
 export const GAP_MIG = "20261008080000_roster_check_gap_dispatch.sql";
-export const PREV_RAW_MIG = "20261008000001_roster_schedule_dates.sql";
+export const PREV_RAW_MIG = "20261008070000_activity_windows_p2_election_results.sql";
 const FN = "contribution_auto_tasks_raw";
 
 const bodyOf = (fn: string) => fn.slice(fn.indexOf("$function$") + "$function$".length, fn.lastIndexOf("$function$"));
@@ -45,7 +45,7 @@ const NEW_FN = fnText(await readMig(GAP_MIG), FN);
 const PREV_FN = fnText(await readMig(PREV_RAW_MIG), FN);
 const NEW_BODY = bodyOf(NEW_FN);
 
-Deno.test("R2-1 前一版是對的：新定義緊接著 20261008000001，而且是 raw 的最後一版（之後有人改了，抄的底就過期，要以最新那版為底重做）", async () => {
+Deno.test("R2-1 前一版是對的：新定義緊接著 20261008070000，而且是 raw 的最後一版（之後有人改了，抄的底就過期，要以最新那版為底重做）", async () => {
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${FN}(`)) defining.push(n);
   const i = defining.indexOf(GAP_MIG);
