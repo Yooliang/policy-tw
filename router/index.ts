@@ -172,8 +172,8 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/import',
-    component: () => import('../pages/AdminImport.vue'),
-    meta: { requiresAdmin: true },
+    // 資料匯入頁 2026-10-07 拆除；舊網址轉到後台首頁，不 404
+    redirect: '/admin/dashboard',
   },
   {
     path: '/verify',

@@ -57,8 +57,6 @@ Deno.test("寫入端只寫 candidacy_status：upsertParticipation／落庫不再
   }
   const imp = await Deno.readTextFile(new URL("candidate-import.ts", import.meta.url));
   assertEquals(imp.includes('"rumored"'), false, "匯入端不再預設寫傳聞（rumored）");
-  const ep = await Deno.readTextFile(new URL("../batch-import-candidates/index.ts", import.meta.url));
-  assertEquals(/election_result\s*:/.test(ep.replace(/\/\/.*$/gm, "")), false, "batch-import 不再寫 election_result");
 });
 
 // ── migration：函式與視圖不再讀舊兩欄；任期觸發器聽新欄位；職稱改讀任期表 ─────────
