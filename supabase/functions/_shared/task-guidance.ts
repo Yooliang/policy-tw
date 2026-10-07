@@ -59,7 +59,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     // 從公報補政見（2026-10-06）：系統推得出公報就直接給，對象也擴到落選人、村里長、代表
     "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄確實空白或只有口號才回查無，checked_urls 要有這份公報。" +
     gazetteImageNote +
-    "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、2026 的新政見不是這一屆的競選政見**，這個任務不要交。" +
+    "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、其他屆別的政見不是這一屆的競選政見**，這個任務不要交。" +
     notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +
     searchFirst("term_policy_missing"),
 
