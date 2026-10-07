@@ -110,8 +110,8 @@ Deno.test("A1 這支 migration 是 seed_auto_task_queue、task_dispatches_drop_a
     const i = defining.indexOf(MIG);
     assert(i > 0, `這支 migration 要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做`);
-    // 之後只允許 P1（20261008060000，只機械式把 seed 寫死的 opened_by 換成規則帶來的，守門在 activity-arms.test.ts）；多了別人的就要以最新那版為底重做
-    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008060000_activity_windows_p1.sql"] : [], `這支之後又有人改了 ${fn}：那一版要以這支為底`);
+    // 之後只允許 P1（20261008060000，只機械式把 seed 寫死的 opened_by 換成規則帶來的，守門在 activity-arms.test.ts）與優先層（20261008090000，只機械式加優先層區塊，守門在 queue-priority.test.ts）；多了別人的就要以最新那版為底重做
+    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008060000_activity_windows_p1.sql", "20261008090000_queue_priority_tiers.sql"] : [], `這支之後又有人改了 ${fn}：那一版要以這支為底`);
   }
 });
 
