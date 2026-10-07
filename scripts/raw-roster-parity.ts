@@ -17,7 +17,7 @@
  *   第一個參數（選填）：改壞的 migration 路徑——還原驗證用，這個守門腳本對它必須是紅的；
  *   第二個參數（選填）：已經存好的快照 json（不連正式庫）。
  */
-import { armsFingerprint, buildArmsDb, ARM_BRANCHES, fnText } from "../supabase/functions/_shared/arms-pglite.ts";
+import { armsFingerprint, buildArmsDb, ARM_BRANCHES, fnText, P2_ER_MIG } from "../supabase/functions/_shared/arms-pglite.ts";
 
 const GAP_MIG = new URL("../supabase/migrations/20261008080000_roster_check_gap_dispatch.sql", import.meta.url);
 const migPath = Deno.args[0] && Deno.args[0] !== "-" ? Deno.args[0] : null;
@@ -112,7 +112,8 @@ check("獨立重算：照新判準（缺口＝最近一次 cec_count > 名冊內
 
 // ── ② 總表層（PGlite 回放）────────────────────────────────────────────
 const branchRows = Object.fromEntries(ARM_BRANCHES.map((n) => [n, (snap.branches[n] as string | undefined) ?? "[]"]));
-const db = await buildArmsDb({ elections: snap.elections, scope: snap.roster_check_scope, branches: branchRows });
+// P2（選舉結果）已上線：選舉結果那兩支臂的規則是「投票日 +1 起」，要套進來總表才對得上正式庫（它們的本體仍是回放 stub）
+const db = await buildArmsDb({ elections: snap.elections, scope: snap.roster_check_scope, branches: branchRows, p2: { migs: [{ name: P2_ER_MIG }], restub: ["raw", "election_results"] } });
 const before = await armsFingerprint(db, "contribution_auto_tasks_arms");
 check("stub 沒走樣：回放現行輸出的總表＝正式庫現行總表（筆數與去掉 arm、opened_by 的 7 欄全欄雜湊）", before.n === snap.n && before.h === snap.total7_hash, `${before.n} 件 ${before.h}`);
 await db.exec(`CREATE TABLE _old_total AS SELECT task_id, (to_jsonb(t) - 'arm' - 'opened_by')::text AS j FROM contribution_auto_tasks_arms() t`);
