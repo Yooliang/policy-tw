@@ -1,4 +1,3 @@
-import type { RouteLocationRaw } from 'vue-router'
 import { electionPath } from './election-regions'
 
 /**
@@ -20,7 +19,7 @@ export const VIEW_TABS: ReadonlyArray<{ key: ElectionViewMode; label: string; sh
  * 從別的頁回到選舉頁開某個檢視：預設的「候選人」不帶參數（跟 useRegionQuerySync 寫網址的規則一致）；
  * 給了縣市就回那個縣市頁（/election/2026/台南市?view=pledges），沒給或是「全台」就回全台頁。
  */
-export function electionViewLink(segment: number | string, view: ElectionViewMode, region?: string | null): RouteLocationRaw {
+export function electionViewLink(segment: number | string, view: ElectionViewMode, region?: string | null): { path: string; query?: { view: ElectionViewMode } } {
   const path = electionPath(segment, region)
   return view === 'politicians' ? { path } : { path, query: { view } }
 }
