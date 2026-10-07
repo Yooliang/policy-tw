@@ -25,8 +25,24 @@ export const BULLETIN_BASE = "https://eebulletin.cec.gov.tw/";
 /** 立委（中央）選舉的公報在另一個站：bulletin.cec.gov.tw/01選舉公報/02立法委員/113年第11屆/02區域立法委員/<縣市>/<選區>/… */
 export const CENTRAL_BULLETIN_BASE = "https://bulletin.cec.gov.tw/";
 const CENTRAL_PREFIX = "01選舉公報/";
-/** 選舉年份 → 公報站的民國年資料夾（2024 立委在 bulletin.cec.gov.tw 的 113年第11屆） */
-export const BULLETIN_YEAR_DIR: Record<number, string> = { 2014: "103", 2018: "107", 2022: "111", 2024: "113" };
+/**
+ * 選舉 id → 公報站的民國年資料夾（2024 立委在 bulletin.cec.gov.tw 的 113年第11屆）。
+ *
+ * 真相在資料庫 `elections.bulletin_dir`（盤點 #2，2026-10-07），新一屆公報上架在表上填一個值就生效；
+ * 這份只是後備：2014、2018 是歷史（elections 表沒有這兩屆）、2022／2024／2026 與 migration 20261008000002 的回填一致
+ * （election-bulletin.test.ts 對照）。要用資料庫的值就用 {@link bulletinYearDirsFromElections} 合出來再傳給 matchBulletin。
+ */
+export const BULLETIN_YEAR_DIR: Readonly<Record<number, string>> = { 2014: "103", 2018: "107", 2022: "111", 2024: "113", 2026: "115" };
+
+/** elections 表的列（id＋bulletin_dir）→ 選舉 id → 民國年資料夾；表上有填的蓋過後備，沒填的沿用後備 */
+export function bulletinYearDirsFromElections(
+  rows: ReadonlyArray<{ id: number; bulletin_dir?: string | null }>,
+  fallback: Readonly<Record<number, string>> = BULLETIN_YEAR_DIR,
+): Record<number, string> {
+  const out: Record<number, string> = { ...fallback };
+  for (const r of rows) if (Number.isInteger(r.id) && typeof r.bulletin_dir === "string" && /^\d{3}$/.test(r.bulletin_dir)) out[r.id] = r.bulletin_dir;
+  return out;
+}
 /** 一個單位最多列幾份公報（多了代表規則沒對準，寧可不派） */
 export const MAX_BULLETINS_PER_UNIT = 4;
 
@@ -236,8 +252,13 @@ function namesVillage(seg: string, town: string): boolean {
 }
 
 /** 純函式：一個選舉單位對到哪幾份公報；對不到回原因 */
-export function matchBulletin(unit: BulletinUnit, index: BulletinIndex, electionId = 2022): BulletinMatch {
-  const year = BULLETIN_YEAR_DIR[electionId];
+export function matchBulletin(
+  unit: BulletinUnit,
+  index: BulletinIndex,
+  electionId = 2022,
+  yearDirs: Readonly<Record<number, string>> = BULLETIN_YEAR_DIR,
+): BulletinMatch {
+  const year = yearDirs[electionId];
   if (!year) return { ok: false, reason: `${electionId} 年不在 eebulletin 公報站` };
   const county = tw(unit.region);
   const files = index.byCategory.get(`${year}/${county}/${unit.election_type}`) ?? [];
