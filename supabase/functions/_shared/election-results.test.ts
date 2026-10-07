@@ -136,7 +136,8 @@ Deno.test("比對規則只有一份：同屆、同選舉、同縣市、cec_name_
 // ── 2. 派工 ────────────────────────────────────────────────────────
 Deno.test("派工臂：接進 arms、缺口條件、一個單位一件最多 120 位、等票中的不再派、對不上各自派而且不跟 raw 重複", async () => {
   const arms = await fnBody("contribution_auto_tasks_arms");
-  assertStringIncludes(arms, "UNION ALL SELECT * FROM contribution_auto_tasks_election_results()");
+  // 派工時間窗 P1（20261008060000）起每個分支貼臂名：SELECT * FROM f() → SELECT 'f' AS arm, t.* FROM f() t
+  assertStringIncludes(arms, "UNION ALL SELECT 'election_results' AS arm, t.* FROM contribution_auto_tasks_election_results() t");
   // 前一版 arms 的每一支臂都要還在（照抄時掉一支，那種任務就安靜地不再派）
   const names: string[] = [];
   for await (const e of Deno.readDir(MIGRATIONS)) if (e.isFile && e.name.endsWith(".sql")) names.push(e.name);
