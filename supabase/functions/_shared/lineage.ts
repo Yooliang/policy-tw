@@ -12,6 +12,10 @@
  */
 
 import { sourceKind } from "./source-priority.ts";
+import { hostInList, UNREADABLE_SOCIAL_HOSTS } from "./source-domains.ts";
+
+// 清單的單一來源在 source-domains.ts；這裡留著原本的匯出名字，舊的 import 不用改
+export { UNREADABLE_SOCIAL_HOSTS };
 
 type Obj = Record<string, unknown>;
 
@@ -88,12 +92,11 @@ export function charLength(s: string): number {
  * 讀不到的社群（臉書、IG、Threads）：驗證者與系統都打不開，角色與交接不收它當出處（#349 裁決：臉書讀不到不收）。
  * 跟 source-priority.ts 的 social 等級不同：YouTube、X 至少看得到內容，這裡只擋要登入才看得到的那一族。
  */
-export const UNREADABLE_SOCIAL_HOSTS = ["facebook.com", "fb.com", "fb.watch", "instagram.com", "threads.net"] as const;
 export function isUnreadableSocial(url: unknown): boolean {
   if (typeof url !== "string") return false;
   try {
     const host = new URL(url.trim()).hostname.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
-    return UNREADABLE_SOCIAL_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+    return hostInList(host, UNREADABLE_SOCIAL_HOSTS);
   } catch {
     return false;
   }

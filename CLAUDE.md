@@ -21,7 +21,7 @@ node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（clea
 
 # Edge Functions 測試（CI 也跑）
 cd supabase/functions && deno test --allow-read _shared/
-deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts lib/politician-office.test.ts   # 完整清單見 .github/workflows/ci.yml
+deno test --allow-read lib/ cloudflare/   # 前端純函式；整個資料夾，新的 *.test.ts 不用登記（.github/workflows/ci.yml 同一行）
 deno run --allow-read scripts/scan-secrets.ts
 
 # Database / Edge Functions

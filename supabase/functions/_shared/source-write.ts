@@ -18,7 +18,10 @@
  */
 
 import { isHttpUrl, matchPrioritySource } from "./source-priority.ts";
-import { UNREADABLE_SOCIAL_HOSTS } from "./lineage.ts";
+import { hostInList, SELF_INELIGIBLE_HOSTS } from "./source-domains.ts";
+
+// 清單的單一來源在 source-domains.ts；這裡留著原本的匯出名字，舊的 import 不用改
+export { SELF_INELIGIBLE_HOSTS };
 
 export const SOURCE_KINDS = ["official", "self", "media", "other"] as const;
 export type SourceLevel = (typeof SOURCE_KINDS)[number];
@@ -29,15 +32,6 @@ export type SelfEvidence = (typeof SELF_EVIDENCES)[number];
 
 export const SOURCE_TITLE_MAX = 200;
 export const SOURCE_PUBLISHER_MAX = 100;
-
-/**
- * 不能是「本人來源」的社群平台。跟 SQL 的 source_self_eligible() 同一份：
- * 讀不到的（臉書、IG、Threads——lineage.ts 的 UNREADABLE_SOCIAL_HOSTS）＋讀得到但不是本人官網的（YouTube、X、LINE、TikTok、Telegram）。
- */
-export const SELF_INELIGIBLE_HOSTS = [
-  ...UNREADABLE_SOCIAL_HOSTS,
-  "youtube.com", "youtu.be", "x.com", "twitter.com", "tiktok.com", "line.me", "lin.ee", "t.me",
-] as const;
 
 function hostOf(url: string): string | null {
   try {
@@ -61,7 +55,7 @@ export function autoSourceKind(url: string): Exclude<SourceLevel, "self"> {
 export function selfIneligibleReason(url: string): string | null {
   const host = hostOf(url);
   if (!host || !isHttpUrl(url)) return "不是 http(s) 網址";
-  if ((SELF_INELIGIBLE_HOSTS as readonly string[]).some((h) => host === h || host.endsWith(`.${h}`))) {
+  if (hostInList(host, SELF_INELIGIBLE_HOSTS)) {
     return "社群平台不能當本人來源（臉書、IG、Threads 讀不到，驗證者與系統都打不開；YouTube、X、LINE 等也不是本人官網）。本人來源只收打得開的本人官網、政黨刊載的本人頁面";
   }
   const auto = autoSourceKind(url);

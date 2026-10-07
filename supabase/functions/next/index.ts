@@ -17,6 +17,7 @@ import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
+import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 
@@ -348,7 +349,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           .eq("subject_type", "contribution").eq("subject_id", pick.id).eq("question", "source_support")
           .order("asked_at", { ascending: false }).limit(1).maybeSingle();
         if (sv) {
-          const counts = Number(sv.probability) >= 0.95 && (sv.choice === "supported" || sv.choice === "not_supported");
+          const counts = Number(sv.probability) >= MIN_PROBABILITY && (sv.choice === "supported" || sv.choice === "not_supported");
           // 中選會名冊逐位核對（2026-09-24）：系統知道哪一欄對不上，就把衝突攤給驗證者看、改問「哪一個才對」——
           // 光把門檻 3 拉到 4，只是把「這個人在不在名冊上」這個問錯的問題多問幾次（leatherback）。不給系統任何新權力。
           const rosterState = typeof sv.model === "string" && sv.model.startsWith("policy-tw/roster-batch") ? (sv.state ?? {}) as Record<string, unknown> : null;
@@ -385,7 +386,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,
             // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源
             fields: sv.probabilities ?? null,
-            min_probability: 0.95,
+            min_probability: MIN_PROBABILITY,
             note: counts
               ? "系統已核對提交的來源；這一票已折進門檻（supported＝門檻 −1、not_supported＝門檻 +1——它不是反對票、不會觸發裁決）。要不要反對，請你自己看第二個可信來源決定，不要只重看同一頁。"
               : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。fields 裡的逐欄判定沒有達到門檻，不能當反證。",
