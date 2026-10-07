@@ -94,8 +94,8 @@ COMMENT ON FUNCTION candidacy_is_listed IS '這個參選狀態算不算進「名
 -- 「同名」：同一屆、同一種選舉、同一個縣市，姓名鍵（cec_name_key）相同；我們的紀錄有鄉鎮市區、名冊那一列也有的話，鄉鎮市區也要相同。
 -- 村里不比：造字與寫法（臺／台、異體字）太雜，錯判成「沒有」只會讓代理多交一筆（落庫時同一人同一屆會併進既有紀錄），
 -- 錯判成「有」卻會讓那個人永遠不在清單上。
--- 一對一：同縣市同姓名鍵的登記者 k 位、我們算進名冊內人數的同名紀錄 m 筆，前 m 位算 matched，其餘 k−m 位不是 matched；
--- 不是 matched、而且我們有同名但不算進名冊內人數的紀錄（considering、withdrawn）的是 needs_status（挑 politician_election_id 最小的那筆），其餘是 missing。
+-- 一對一（配額只算這個比對範圍、同鄉鎮同姓名鍵的一組內真的命中的紀錄，細節見函式內註解）：名冊 k 位、命中的算進名冊內人數的紀錄 m 筆，前 m 位 matched；
+-- 其餘的前 q 位（q＝命中的 considering、withdrawn 紀錄數）各對上不同的一筆，是 needs_status；再多的是 missing。
 -- PDF 的姓名欄是空的那幾列（name_empty）不列：沒有名字可以抄；數量放在 unnamed_count。
 -- 回傳 NULL＝這個單位在名冊裡一個人都沒有（這屆、這種選舉沒有名冊資料，或沒人登記）。
 CREATE OR REPLACE FUNCTION roster_registration_gap(
@@ -103,7 +103,8 @@ CREATE OR REPLACE FUNCTION roster_registration_gap(
 ) RETURNS JSONB
 LANGUAGE sql STABLE AS $$
   WITH reg AS (
-    SELECT r.row_no, r.source_url, r.name, r.name_key, r.party, r.region, r.place, r.sub_region, r.village, r.district
+    SELECT r.row_no, r.source_url, r.name, r.name_key, r.party, r.region, r.place, r.sub_region, r.village, r.district,
+           COALESCE(replace(r.sub_region, '臺', '台'), '') AS rk
       FROM cec_registrations r
       JOIN cec_registration_sources s ON s.source_url = r.source_url AND s.superseded_by IS NULL
      WHERE r.election_id = p_election_id AND r.election_type = p_election_type
@@ -128,36 +129,57 @@ LANGUAGE sql STABLE AS $$
       FROM reg JOIN ours o ON o.nn = reg.name_key
                            AND (o.town IS NULL OR reg.sub_region IS NULL OR o.town = replace(reg.sub_region, '臺', '台'))
   ),
-  -- 一對一：名冊上同一個縣市、同姓名鍵的登記者有 k 位，我們算進名冊內人數的同名紀錄有 m 筆，就只有前 m 位算已有，其餘 k−m 位算缺
-  -- （派工判準比的是人數：cec_count＝名冊人數 > 我們的名冊內人數；同名兩位只有一筆紀錄時，如果兩位都算已有，任務顯示缺 0、派工端卻永遠差 1）
+  -- 一對一，而且配額只算「這個比對範圍內真的命中的」我們的紀錄（2026-10-08 第二輪審查）：
+  -- 名冊上同姓名鍵、同鄉鎮（rk；沒有鄉鎮的選舉別是同一組）的登記者有 k 位，這一組命中的、算進名冊內人數的我們的紀錄有 m 筆（以 pe_id 去重），
+  -- 前 m 位算 matched，其餘 k−m 位不是 matched；接著不是 matched、又命中不算進名冊內人數的紀錄（considering、withdrawn）共 q 筆的，前 q 位
+  -- 各自對上不同的一筆（needs_status，不會兩位指到同一個 pe_id），其餘落進 missing。
+  -- 為什麼不能拿「全縣同名者有幾位」當配額：問板橋區時 reg 只剩板橋區，ours 卻是全縣——三重區也有一位同名的，配額變 2，
+  -- 板橋區名冊上同名的兩位都被算成已有，真正缺的那位不出現在 missing（任務無聲消失）。
+  -- 派工判準比的是人數（cec_count＝名冊人數 > 我們的名冊內人數），同名兩位只有一筆紀錄時兩位都算已有，會是任務顯示缺 0、派工端永遠差 1。
   listed_hit AS (
     SELECT DISTINCT h.source_url, h.row_no FROM hit h WHERE h.listed
   ),
+  quota_listed AS (
+    SELECT reg.name_key, reg.rk, count(DISTINCT h.pe_id) AS n
+      FROM hit h JOIN reg ON reg.source_url = h.source_url AND reg.row_no = h.row_no
+     WHERE h.listed GROUP BY reg.name_key, reg.rk
+  ),
   ranked AS (
-    SELECT lh.source_url, lh.row_no, reg.name_key,
-           row_number() OVER (PARTITION BY reg.name_key ORDER BY lh.source_url, lh.row_no) AS rn
+    SELECT lh.source_url, lh.row_no, reg.name_key, reg.rk,
+           row_number() OVER (PARTITION BY reg.name_key, reg.rk ORDER BY lh.source_url, lh.row_no) AS rn
       FROM listed_hit lh JOIN reg ON reg.source_url = lh.source_url AND reg.row_no = lh.row_no
   ),
-  ours_cnt AS (
-    SELECT nn, count(*) AS n FROM ours WHERE listed GROUP BY nn
-  ),
   matched_rows AS (
-    SELECT r.source_url, r.row_no FROM ranked r JOIN ours_cnt c ON c.nn = r.name_key WHERE r.rn <= c.n
+    SELECT r.source_url, r.row_no FROM ranked r JOIN quota_listed c ON c.name_key = r.name_key AND c.rk = r.rk WHERE r.rn <= c.n
   ),
-  non_listed AS (
-    SELECT h.source_url, h.row_no,
-           (array_agg(h.politician_id ORDER BY h.pe_id))[1] AS pid,
-           (array_agg(h.pe_id ORDER BY h.pe_id))[1] AS pe_id,
-           (array_agg(h.status ORDER BY h.pe_id))[1] AS status
-      FROM hit h WHERE NOT h.listed GROUP BY h.source_url, h.row_no
+  -- 還沒對上的名冊列裡，命中不算進名冊內人數的紀錄的，同組內依列序編號
+  rest AS (
+    SELECT reg.source_url, reg.row_no, reg.name_key, reg.rk,
+           row_number() OVER (PARTITION BY reg.name_key, reg.rk ORDER BY reg.source_url, reg.row_no) AS rn2
+      FROM reg
+      LEFT JOIN matched_rows m ON m.source_url = reg.source_url AND m.row_no = reg.row_no
+     WHERE m.row_no IS NULL
+       AND EXISTS (SELECT 1 FROM hit h WHERE h.source_url = reg.source_url AND h.row_no = reg.row_no AND NOT h.listed)
+  ),
+  -- 這一組命中的、不算進名冊內人數的紀錄（以 pe_id 去重），依 pe_id 編號
+  non_listed_pes AS (
+    SELECT x.name_key, x.rk, x.pe_id, x.politician_id, x.status,
+           row_number() OVER (PARTITION BY x.name_key, x.rk ORDER BY x.pe_id) AS p
+      FROM (SELECT DISTINCT reg.name_key, reg.rk, h.pe_id, h.politician_id, h.status
+              FROM hit h JOIN reg ON reg.source_url = h.source_url AND reg.row_no = h.row_no
+             WHERE NOT h.listed) x
+  ),
+  assigned AS (
+    SELECT rest.source_url, rest.row_no, n.pe_id, n.politician_id AS pid, n.status
+      FROM rest JOIN non_listed_pes n ON n.name_key = rest.name_key AND n.rk = rest.rk AND n.p = rest.rn2
   ),
   marked AS (
     SELECT reg.*, (m.row_no IS NOT NULL) AS matched,
-           (m.row_no IS NULL AND nl.row_no IS NOT NULL) AS needs_status,
-           nl.pid, nl.pe_id, nl.status
+           (a.row_no IS NOT NULL) AS needs_status,
+           a.pid, a.pe_id, a.status
       FROM reg
       LEFT JOIN matched_rows m ON m.source_url = reg.source_url AND m.row_no = reg.row_no
-      LEFT JOIN non_listed nl ON nl.source_url = reg.source_url AND nl.row_no = reg.row_no
+      LEFT JOIN assigned a ON a.source_url = reg.source_url AND a.row_no = reg.row_no
   ),
   gap AS (
     SELECT * FROM marked WHERE NOT matched AND NOT needs_status AND name_key IS NOT NULL
