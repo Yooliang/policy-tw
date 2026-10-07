@@ -313,12 +313,35 @@ async function runSuite(db: Db): Promise<Verdicts> {
     const b = await ids(db, `task_type = 'policy_missing'`);
     return JSON.stringify(a) === JSON.stringify(["auto:pm"]) && JSON.stringify(b) === JSON.stringify(["auto:mp1"]);
   });
-  await g("no_rule_means_closed", async () => {
-    await db.exec(`DELETE FROM activity_rules WHERE activity = 'roster_villages'`);
+  await g("all_rules_disabled_means_closed", async () => {
+    // 規則存在但全部停用＝窗口關著（不丟錯）：一支臂、再所有臂
+    await db.exec(`UPDATE activity_rules SET enabled = false WHERE activity = 'roster_villages'`);
     const a = await ids(db, `arm = 'roster_villages'`);
-    await db.exec(`DELETE FROM activity_rules`);
+    await db.exec(`UPDATE activity_rules SET enabled = false`);
     const b = await ids(db);
     return a.length === 0 && b.length === 0;
+  });
+  await g("arm_without_rule_raises", async () => {
+    // 臂在 activity_rules 連一列規則都沒有（新分支漏登記）：總表與 seed 丟錯、訊息寫明是哪個臂，不是無聲濾掉
+    const raises = async (sql: string, arm: string) => {
+      await db.exec("SAVEPOINT s");
+      try {
+        await db.query(sql);
+        await db.exec("RELEASE SAVEPOINT s");
+        return false;
+      } catch (e) {
+        await db.exec("ROLLBACK TO SAVEPOINT s");
+        return String((e as Error).message).includes(`「${arm}」`);
+      }
+    };
+    await db.exec(`DELETE FROM activity_rules WHERE activity = 'dup'`);
+    const viaArms = await raises(`SELECT count(*) FROM contribution_auto_tasks_arms()`, "dup");
+    const viaSeed = await raises(`SELECT seed_auto_task_queue()`, "dup");
+    await db.exec(`INSERT INTO activity_rules (activity, window_kind) VALUES ('dup', 'always'); DELETE FROM activity_rules WHERE activity = 'raw:progress_stale'`);
+    const viaRaw = await raises(`SELECT count(*) FROM contribution_auto_tasks_arms()`, "raw:progress_stale");
+    await db.exec(`INSERT INTO activity_rules (activity, window_kind) VALUES ('raw:progress_stale', 'always')`);
+    const okAgain = (await ids(db)).length === EXPECTED_IDS.length;
+    return viaArms && viaSeed && viaRaw && okAgain;
   });
   await g("override_closed_closes_arm", async () => {
     await db.exec(`INSERT INTO activity_overrides (activity, "force", reason) VALUES ('election_results', 'closed', '還原驗證')`);
@@ -466,7 +489,7 @@ async function runSuite(db: Db): Promise<Verdicts> {
 const ALL_GUARDS = [
   "parity_same_rows", "every_arm_has_a_row_and_a_name", "arms_signature_stable",
   "rules_seeded_always", "health_empty_after_seed", "health_arm_without_rule",
-  "disable_rule_drops_exactly_that_arm", "raw_split_by_task_type", "mayor_policies_and_raw_policy_missing_are_separate", "no_rule_means_closed", "override_closed_closes_arm",
+  "disable_rule_drops_exactly_that_arm", "raw_split_by_task_type", "mayor_policies_and_raw_policy_missing_are_separate", "all_rules_disabled_means_closed", "arm_without_rule_raises", "override_closed_closes_arm",
   "window_per_election", "window_closes_after_until", "scope_election_types", "scope_reasons_and_levels",
   "opened_by_shape_always", "opened_by_shape_window", "opened_by_override",
   "seed_writes_rule_into_dispatch_and_events", "seed_dispatch_content_same_as_gaps", "seed_reclaims_when_rule_closes",
@@ -487,9 +510,10 @@ Deno.test("B1 P1 在 PGlite 上整支跑得動；全部守門都綠（派工輸�
 // ---- 還原驗證：migration 文字改壞一處（精確改一處），對應的守門必須紅 ----
 const JOIN_FRAG = "    FROM keyed g\n    JOIN opened o ON";
 const MUTATIONS: { name: string; breaks: string[]; edit: (sql: string) => string; buildFails?: boolean }[] = [
-  { name: "規則過濾的 JOIN 改成 LEFT JOIN（沒有開窗的規則也放行）", breaks: ["disable_rule_drops_exactly_that_arm", "raw_split_by_task_type", "no_rule_means_closed", "window_per_election", "override_closed_closes_arm", "scope_election_types", "seed_reclaims_when_rule_closes"],
+  { name: "規則過濾的 JOIN 改成 LEFT JOIN（沒有開窗的規則也放行）", breaks: ["disable_rule_drops_exactly_that_arm", "raw_split_by_task_type", "all_rules_disabled_means_closed", "window_per_election", "override_closed_closes_arm", "scope_election_types", "seed_reclaims_when_rule_closes"],
     edit: (s) => mutate(s, JOIN_FRAG, "    FROM keyed g\n    LEFT JOIN opened o ON") },
-  { name: "mayor_policies 那個分支貼成別人的臂名", breaks: ["mayor_policies_and_raw_policy_missing_are_separate", "every_arm_has_a_row_and_a_name"],
+  { name: "總表不檢查臂有沒有規則（新分支漏登記時缺口無聲消失）", breaks: ["arm_without_rule_raises"],
+    edit: (s) => mutate(s, "WHERE activity_require_rule(x.arm) OFFSET 0) k", "WHERE true OFFSET 0) k") },  { name: "mayor_policies 那個分支貼成別人的臂名", breaks: ["mayor_policies_and_raw_policy_missing_are_separate", "every_arm_has_a_row_and_a_name"],
     edit: (s) => mutate(s, "UNION ALL SELECT 'mayor_policies' AS arm, t.* FROM contribution_auto_tasks_mayor_policies() t", "UNION ALL SELECT 'term_policies' AS arm, t.* FROM contribution_auto_tasks_mayor_policies() t") },
   { name: "raw 不依任務型別拆開（臂名＝任務型別，沒有 raw: 前綴）", breaks: ["parity_same_rows", "raw_split_by_task_type", "every_arm_has_a_row_and_a_name"],
     edit: (s) => mutate(s, "SELECT 'raw:' || r.task_type AS arm,", "SELECT r.task_type AS arm,") },

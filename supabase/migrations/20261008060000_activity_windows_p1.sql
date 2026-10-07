@@ -14,6 +14,8 @@
 --      每個 UNION 分支貼臂名（SELECT * FROM f() → SELECT 'f' AS arm, t.* FROM f() t；第一個分支前面多一欄 'raw:' || task_type、說明欄補一個欄名），
 --      整串 UNION 包進 CTE tagged，其後多一段 keyed／opened（對「臂×選舉×職位」各問一次 activity_open）與最後的 JOIN（沒有開窗的規則＝濾掉）。
 --      28 支臂的簽名與內容一字沒動。
+--      過濾時對每個出現的臂名呼叫 activity_require_rule()：那支臂在 activity_rules 連一列規則都沒有（不是「規則存在但窗口關著」）就 RAISE EXCEPTION——
+--      新分支漏登記時 seed 會失敗（cron 失敗紀錄看得到），而不是缺口整批無聲消失。
 --      回傳多兩欄（arm、opened_by）：opened_by＝開窗的規則＋里程碑列（basis／rule_id／override_id／election_id／milestone_kind／milestone_on_date／
 --      expected_open_on，沒有的欄位不寫），給 seed 寫進 task_dispatches.opened_by（計畫 2.5 第 2 點）。
 --      **這一步改了回傳型別**，所以是 DROP FUNCTION＋CREATE（CREATE OR REPLACE 不能改 RETURNS TABLE）。CLAUDE.md 的「改 SQL 函式簽名要分兩次上」
@@ -104,6 +106,21 @@ $$;
 -- ------------------------------------------------------------
 -- 3. contribution_auto_tasks_arms：貼臂名＋過規則（回傳多 arm、opened_by 兩欄）
 -- ------------------------------------------------------------
+-- 總表過濾時對每個出現的臂名呼叫：這支臂在 activity_rules 連一列規則都沒有（不是「規則存在但窗口關著」）就丟錯。
+-- 為什麼要丟錯：有人在總表加了新分支卻忘了加進 activity_arm_names() 與規則種子，activity_open() 回 0 列、那支臂的缺口會整批無聲消失，
+-- 健康檢查是從名稱清單出發的、看不到沒登記的臂；丟錯讓 seed 失敗（cron 失敗紀錄看得到）比無聲消失好。
+-- 連帶：task_boost_matches() 也會讀總表，同樣會丟這個錯——設定沒補齊本來就該到處看得到，不是只有 seed。
+CREATE OR REPLACE FUNCTION activity_require_rule(p_arm TEXT) RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = p_arm) THEN
+    RAISE EXCEPTION '派工臂「%」在 activity_rules 沒有任何規則：總表加了新分支，要同時加進 activity_arm_names() 並種一條規則（PLAN-task-activation 3.1）', p_arm;
+  END IF;
+  RETURN true;
+END;
+$$;
+COMMENT ON FUNCTION activity_require_rule IS '總表對每個出現的臂名呼叫：沒有任何規則（規則存在但窗口關著不算）就 RAISE EXCEPTION，避免新臂漏登記時缺口無聲消失。2026-10-08';
+
 DROP FUNCTION IF EXISTS contribution_auto_tasks_arms();
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT, arm TEXT, opened_by JSONB)
@@ -154,7 +171,9 @@ LANGUAGE sql STABLE AS $$
        ),
        opened AS (
   SELECT k.arm, k.eid, k.etype, o.source, o.rule_id, o.override_id, o.milestone_kind, o.milestone_on_date, o.expected_open_on
-    FROM (SELECT DISTINCT d.arm, d.eid, d.etype FROM keyed d) k
+    FROM (SELECT x.arm, x.eid, x.etype
+            FROM (SELECT DISTINCT d.arm, d.eid, d.etype FROM keyed d OFFSET 0) x
+           WHERE activity_require_rule(x.arm) OFFSET 0) k  -- 每組（約 84 組）檢查一次；OFFSET 0 擋住檢查被推到 7 千多列上去
     CROSS JOIN LATERAL (
       SELECT * FROM activity_open(k.arm, k.eid, k.etype)
        ORDER BY expected_open_on NULLS LAST, rule_id NULLS LAST, override_id NULLS LAST LIMIT 1

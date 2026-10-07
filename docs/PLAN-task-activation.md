@@ -501,8 +501,11 @@ WHERE activity_open(g.arm, election_id, election_type, activity_today(...))
 - 與本檔設計的差異（P1）：
   1. **總表回傳型別多了兩欄 `arm`、`opened_by`**（原本 7 欄不變、順序不變），所以是 `DROP FUNCTION` ＋ `CREATE`，沒走 CLAUDE.md 的「改函式簽名分兩次上」：那條規則防的是「CI 先 db push、舊 Edge Function 碰到新簽名會炸」，唯讀查正式庫確認呼叫總表的只有 `seed_auto_task_queue()`（pg_cron）與 `task_boost_matches(jsonb)`（用欄位名取值），沒有 Edge Function 直接 RPC、沒有視圖或其他物件相依，ACL 是預設值，同一支 migration 內單一交易完成。
   2. 活動名：`raw` 依任務型別拆成 `raw:<型別>` 九個（policy_missing、profile_gap、policy_validity、progress_stale、candidacy_source_missing、roster_check、policy_election_missing、candidate_status_stale、election_result_missing），其餘 27 個用函式名去掉 `contribution_auto_tasks_` 前綴（`deadline_due` 那個 CTE 也叫 deadline_due）。P2 寫「`progress_stale` 的規則」時活動名是 `raw:progress_stale`。
-  3. 活動名清單 `activity_arm_names()` 是手維護的第二份清單，由守門測試對帳：必須等於總表本體實際貼的標籤＋最新 `contribution_auto_tasks_raw()` 實際會產出的任務型別。**新增一支臂要三處一起加**（總表標籤、清單、規則種子），漏任一處測試會紅；規則漏了，那支臂的缺口會整批無聲消失（migration 內也有一道檢查：有活動沒有啟用中的規則就整支失敗）。
+  3. 活動名清單 `activity_arm_names()` 是手維護的第二份清單，由守門測試對帳：必須等於總表本體實際貼的標籤＋最新 `contribution_auto_tasks_raw()` 實際會產出的任務型別。**新增一支臂要三處一起加**（總表標籤、清單、規則種子），漏任一處測試會紅；規則漏了，總表過濾時會對該臂 `RAISE EXCEPTION`（函式 `activity_require_rule()`，訊息寫明臂名；只有「連一列規則都沒有」才丟，規則存在但停用或窗口沒開是正常的關）——seed 失敗、cron 失敗紀錄看得到，`task_boost_matches` 也會丟同一個錯，而不是缺口整批無聲消失（同儕審查提出）；migration 內另有一道檢查：有活動沒有啟用中的規則就整支失敗。
   4. `gap_events` 的關閉原因仍一律記 `filled`，沒分 `window`：P1 規則全是永遠開，收回只可能是缺口補上了；要等 P2 第一支真的用窗口關掉缺口的臂，才需要 seed 同時知道「臂自己算出的缺口」與「被規則濾掉的」，那是 P2 的事。
   5. `gap_open_lateness` 是「要看的清單」不是警報：差距也可能只是資料晚到（窗口 11-29 開、那位候選人 12-20 才進資料庫）。P1 規則全是永遠開、沒有 `expected_open_on`，所以現在是空的。
   6. 回填的既有派工列（約 7,000 筆）的 `opened_by` 仍是 `backfill`：seed 對既有列只更新內容、不動出生紀錄；P1 之後新出現的缺口才帶規則。
+- 已知限制：
+  1. `scripts/arms-parity.ts` 用的是正式庫唯讀快照，不進 CI；CI 只有合成資料（`activity-arms.test.ts`）。每支改到總表或臂的 PR 要在 PR 說明附該腳本的結果。
+  2. `activity-arms.test.ts` 的 A1 尾端守門（P1 之後有人重新定義總表或 seed 就紅）是刻意的：P2 每支臂的 PR 若動到總表或 seed，都要同步更新 A1 與機械式替換的比對。
 - 還沒做：各臂內部的日期條件翻成規則（P2，一臂一個 PR；翻到第一支時要讓 seed 分得出 `window` 與 `filled`）；`roster_check_scope` 其餘三個日期沒搬成里程碑（P2 動 `roster_check` 時）；寫死 2026 的臂（P3）；`elections` 的 status／key（P4）。

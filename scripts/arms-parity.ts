@@ -110,9 +110,22 @@ const armN = Object.fromEntries(perArm.map((r) => [r.arm, r.n]));
 for (const a of ["term_policies", "election_results", "policy_elements", "raw:roster_check", "raw:progress_stale"]) {
   await expectLoss(`關掉「${a}」的規則`, `UPDATE activity_rules SET enabled = false WHERE activity = '${a}'`, armN[a]);
 }
-await expectLoss("刪光「roster_villages」的規則（沒規則＝關）", `DELETE FROM activity_rules WHERE activity = 'roster_villages'`, armN["roster_villages"]);
+await expectLoss("停用「roster_villages」的所有規則（規則存在但關著＝關）", `UPDATE activity_rules SET enabled = false WHERE activity = 'roster_villages'`, armN["roster_villages"]);
 await expectLoss("對「mayor_policies」下 closed 覆寫", `INSERT INTO activity_overrides (activity, "force", reason) VALUES ('mayor_policies', 'closed', '還原驗證')`, armN["mayor_policies"]);
-await expectLoss("刪光所有規則", `DELETE FROM activity_rules`, after.n);
+await expectLoss("停用所有規則", `UPDATE activity_rules SET enabled = false`, after.n);
+{
+  // 臂在 activity_rules 連一列規則都沒有（新分支漏登記）：總表要丟錯、訊息寫明臂名，不是無聲濾掉
+  await db.exec("BEGIN");
+  await db.exec(`DELETE FROM activity_rules WHERE activity = 'roster_villages'`);
+  let msg = "";
+  try {
+    await db.query(`SELECT count(*) FROM contribution_auto_tasks_arms()`);
+  } catch (e) {
+    msg = String((e as Error).message);
+  }
+  await db.exec("ROLLBACK");
+  check("負向對照：刪光「roster_villages」的規則（沒有任何規則）→ 總表丟錯並寫明臂名", msg.includes("「roster_villages」"), msg.slice(0, 60));
+}
 {
   // 窗口：把某臂的規則換成「投票日 +1 起」（每場選舉各自算窗口）。各日期下開著的件數，要等於「該臂在永遠開時、屬於已過窗口的選舉的件數」——
   // 期望值只用永遠開時的分組件數與快照裡的投票日在 JS 裡算，不呼叫 activity_open。target 沒有選舉的列（缺里程碑）永遠關。
