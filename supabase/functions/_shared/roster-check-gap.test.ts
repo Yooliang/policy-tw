@@ -1,5 +1,5 @@
 /**
- * 名單清查（roster_check）的重查判準（2026-10-08，10-08 缺口盤點 R2；migration 20261008080000）。
+ * 名單清查（roster_check）的重查判準（2026-10-08，10-08 缺口盤點 R2；migration 20261008112000）。
  *
  * 舊判準：last_checked IS NULL OR last_checked < now() - recheck_days。代理只要交一筆帶 cec_count 的 roster_check，
  * 任務就被收回 7 天，即使我們的人數遠少於它回報的 cec_count（彰化縣議員 10-02 回報中選會 86 位、我們 0 位，一直沒有任務）。
@@ -16,7 +16,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 
-export const GAP_MIG = "20261008080000_roster_check_gap_dispatch.sql";
+export const GAP_MIG = "20261008112000_roster_check_gap_dispatch.sql";
 export const PREV_RAW_MIG = "20261008070000_activity_windows_p2_election_results.sql";
 const FN = "contribution_auto_tasks_raw";
 
