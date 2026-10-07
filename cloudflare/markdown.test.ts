@@ -316,3 +316,24 @@ Deno.test("Worker 接線：Markdown 先於代理、purge 連 .md 一起清、rob
   const entry = await Deno.readTextFile(new URL("../entry-server.ts", import.meta.url));
   assert(entry.includes("export const markdownDeps"));
 });
+
+Deno.test("瀏覽器直接打開（Accept 帶 text/html）回 text/plain 才會顯示、不會下載；程式照舊拿 text/markdown；都帶 Vary: Accept", async () => {
+  const { get } = setup();
+  const browser = { headers: { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" } };
+  const a = await get(CELL, browser);
+  assertCommon(a, 200);
+  assertEquals(a!.headers.get("Content-Type"), "text/plain; charset=utf-8");
+  assertStringIncludes(a!.headers.get("Vary") ?? "", "Accept");
+  assertStringIncludes(await a!.text(), "## 本文");
+  // 第二次命中快取：快取裡存的是 text/markdown，瀏覽器照樣拿 text/plain
+  const b = await get(CELL, browser);
+  assertEquals(b!.headers.get("X-Cache"), "HIT");
+  assertEquals(b!.headers.get("Content-Type"), "text/plain; charset=utf-8");
+  const p = await get(`/politician/${ID}.md`, browser);
+  assertEquals(p!.headers.get("Content-Type"), "text/plain; charset=utf-8");
+  const prog = await get(CELL);
+  assertMd(prog, 200);
+  assertStringIncludes(prog!.headers.get("Vary") ?? "", "Accept");
+  const j = await get("/data/2026/index.json", browser);
+  assertEquals(j!.headers.get("Content-Type"), "application/json; charset=utf-8", "JSON 瀏覽器本來就顯示，不動");
+});
