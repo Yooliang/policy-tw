@@ -188,17 +188,23 @@ export const ROSTER_CEC_GAP_HINT =
 
 /**
  * 還沒投票的屆別（2026）的名單缺口：中選會候選人登記彙總表已解析成資料表（cec_registrations，2026-10-08，協議 1.74.0），
- * 系統比對過這個單位我們缺誰，直接附在 current.registration.missing——代理不必自己去找名冊、逐位比對。
+ * 系統比對過這個單位我們缺誰（missing）、誰要改狀態（needs_status），直接附在 current.registration——代理不必自己去找名冊、逐位比對。
  * 有名冊資料的單位才用這段 hint；沒有的（名冊裡沒人、資料表查不到）照舊找名單。
  */
 export const ROSTER_REGISTRATION_GAP_HINT =
-  "中選會登記彙總表（registration.source_urls）我們已經解析成資料表、跟 ours 比對過：這個單位名冊上共 registration.registered 位，我們已經有 registration.matched 位，" +
-  "缺的人列在 registration.missing（姓名、政黨、鄉鎮市區、村里、選舉區、名冊列序；一件最多列 120 位，truncated 為真代表還有，補完下一輪會列出剩下的）。不用自己找名冊、逐位比對。" +
-  "照 missing 逐位用 candidacy 補一筆：election_id、election_type、region 照任務；candidate_status 照任務敘述的階段填；" +
+  "中選會登記彙總表（registration.source_urls）我們已經解析成資料表、跟 ours 比對過：這個單位名冊上共 registration.registered 位，分三種——" +
+  "已有 registration.matched 位（我們有同名、而且狀態算進名冊內人數，不用動）；" +
+  "**要改狀態** registration.needs_status_count 位，列在 registration.needs_status（我們有同名的參選紀錄，但狀態是 considering〔可能參選〕或 withdrawn〔退選〕，帶 politician_id、politician_election_id、candidacy_status）；" +
+  "**缺的** registration.missing_count 位，列在 registration.missing（姓名、政黨、鄉鎮市區、村里、選舉區、名冊列序；一件最多列 120 位，truncated 為真代表還有，補完下一輪會列出剩下的）。不用自己找名冊、逐位比對。" +
+  "**needs_status 那一組不要再交 candidacy**（他已經有參選紀錄，要改的是狀態；走 correction 才看得到改前改後、留得下履歷）：用 correction，target_table 填 politician_elections、target_id 填 politician_election_id，" +
+  "changes 把 candidate_status 改成任務敘述的階段（登記階段填 registered，公告後填 qualified），source_urls 放那份名冊，reason 寫出他的姓名與你核對的名冊列。" +
+  "例外：withdrawn 的人如果真的是登記之後才退選（找得到退選的報導或公告），狀態是對的，不要改——這種人名冊上有、但我們的名冊內人數不算他，" +
+  "交 roster_check 時 cec_count 填 registration.registered 減掉這幾位（note 寫出是誰、退選的出處），不然任務會一直派。" +
+  "missing 那一組照 missing 逐位用 candidacy 補一筆：election_id、election_type、region 照任務；candidate_status 照任務敘述的階段填；" +
   "鄉鎮市長、代表、區長的 sub_region 填 missing 的 sub_region，村里長再加 village（照 missing 的原字），縣市議員的 electoral_district 填 missing 的 district（第NN選舉區，沒填會被退回）；" +
   "source_urls 第一個放 registration.source_urls 裡的那份名冊——系統會逐位核對名冊上的姓名、縣市、鄉鎮、政黨，對得上的一張同意就通過，核對不上的才逐筆驗。" +
   "ours 裡已經有同名的人先確認是不是同一人，是同一人填他的 politician_id；名字相同不代表同一人。一次最多 20 筆，可分多次交。" +
-  "全部補完才交 roster_check（cec_count 填 registration.registered）；只補了一部分就不要交，系統下一輪會再派。" +
+  "兩組都做完才交 roster_check（cec_count 填 registration.registered，除了上面那種登記後退選的）；只做了一部分就不要交，系統下一輪會再派。" +
   "registration.unnamed_count 不是 0 時，名冊上有幾列的姓名欄是空的（罕用字抽不出來），不在 missing 裡，要打開名冊 PDF 自己看。";
 
 /** 名單缺口附給代理的名冊比對結果（roster_registration_gap 的回傳）；一件最多列這麼多位 */
@@ -519,6 +525,8 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           ...(at.sub_region ? { sub_region: at.sub_region } : {}),
           ...(at.village ? { village: at.village } : {}),
           candidacy_status: row.candidacy_status, position: row.position,
+          // correction 改狀態要的兩個鍵（politician_elections 的 id 是 target_id）
+          politician_id: who.id, politician_election_id: row.id,
         };
       });
       const reg = r?.registration && typeof r.registration === "object" ? r.registration : null;
@@ -527,7 +535,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         ours_count: ours.length,
         ours,
         previous_checks: r?.history ?? [],
-        ...(reg ? { registration: pick(reg, ["source_urls", "registered", "matched", "missing_count", "unnamed_count", "truncated", "missing"]) } : {}),
+        ...(reg ? { registration: pick(reg, ["source_urls", "registered", "matched", "needs_status_count", "missing_count", "unnamed_count", "truncated", "missing", "needs_status", "needs_status_truncated"]) } : {}),
         hint: r?.list_source === "cec"
           ? ROSTER_CEC_GAP_HINT
           : reg ? ROSTER_REGISTRATION_GAP_HINT
@@ -755,13 +763,15 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // 拆兩段在資料庫篩：有選區的看選區、沒選區的看人物；各自翻頁撈完。
       // 以鄉鎮市區為單位的清查（村里長等，target.region 是「縣市＋鄉鎮」）再加鄉鎮條件（2026-10-05；
       // 在這之前拿「台北市中山區」去比 regions.region，ours 永遠是空的，代理會以為我們一個都沒有而重複補）。
-      const base = "candidacy_status, position, region_id";
+      // 退選的也列出來並帶狀態（2026-10-08）：以前用 .neq.withdrawn 濾掉，名冊上有、我們標成退選的人，代理在缺口與現有名單兩邊都看不到，
+      // 沒辦法用 correction 改狀態；名單清查的派工判準（n_listed）本來就不算退選與 considering，這裡要讓代理看得到是哪幾位
+      const base = "id, candidacy_status, position, region_id";
       const [byDistrict, byPerson, history] = await Promise.all([
         fetchAllRows<Obj>("roster ours by district", (from, to) => {
           const q = supabase.from("politician_elections")
             .select(`${base}, regions!inner(region, sub_region, village), politicians!inner(id, name, party, region)`)
             .eq("election_id", electionId).eq("election_type", electionType)
-            .or("candidacy_status.is.null,candidacy_status.neq.withdrawn").eq("regions.region", scope.county);
+            .eq("regions.region", scope.county);
           return (scope.township ? q.eq("regions.sub_region", scope.township) : q)
             .order("politician_id", { ascending: true }).range(from, to);
         }),
@@ -769,7 +779,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
           const q = supabase.from("politician_elections")
             .select(`${base}, politicians!inner(id, name, party, region, sub_region)`)
             .eq("election_id", electionId).eq("election_type", electionType)
-            .or("candidacy_status.is.null,candidacy_status.neq.withdrawn").is("region_id", null).eq("politicians.region", scope.county);
+            .is("region_id", null).eq("politicians.region", scope.county);
           return (scope.township ? q.eq("politicians.sub_region", scope.township) : q)
             .order("politician_id", { ascending: true }).range(from, to);
         }),

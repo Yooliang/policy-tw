@@ -279,18 +279,21 @@ async function addOurs(d: PGlite, o: Ours) {
   await d.query("INSERT INTO politician_elections (election_id, election_type, politician_id, region_id, candidacy_status) VALUES (2026, $1, $2, $3, $4)", [o.type, p.rows[0].id, regionId, o.status ?? "filed"]);
 }
 /** 一次灌很多筆（獨立重算用）：跟 addOurs 同一個形狀，只是用一個陳述式（id 用列號，只在這個測試資料庫裡用） */
+let bulkSeq = 0;
 async function addOursBulk(d: PGlite, list: Ours[]) {
-  const json = JSON.stringify(list.map((o) => ({ name: o.name, county: o.county, type: o.type, sub: o.district ?? o.town ?? null, town: o.town ?? null })));
+  if (list.length === 0) return;
+  const off = bulkSeq; bulkSeq += list.length;
+  const json = JSON.stringify(list.map((o) => ({ name: o.name, county: o.county, type: o.type, sub: o.district ?? o.town ?? null, town: o.town ?? null, status: o.status ?? 'filed' })));
   await d.query(`
-    WITH src AS (SELECT row_number() OVER () AS n, x.* FROM jsonb_to_recordset($1::jsonb) AS x(name text, county text, type text, sub text, town text)),
-    p AS (INSERT INTO politicians (id, name, region, sub_region) SELECT ('00000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid, name, county, town FROM src RETURNING id),
-    r AS (INSERT INTO regions (id, region, sub_region) SELECT 100000 + n, county, sub FROM src RETURNING id)
+    WITH src AS (SELECT row_number() OVER () AS n, x.* FROM jsonb_to_recordset($1::jsonb) AS x(name text, county text, type text, sub text, town text, status text)),
+    p AS (INSERT INTO politicians (id, name, region, sub_region) SELECT ('00000000-0000-0000-0000-' || lpad((n + $2::int)::text, 12, '0'))::uuid, name, county, town FROM src RETURNING id),
+    r AS (INSERT INTO regions (id, region, sub_region) SELECT 100000 + n + $2::int, county, sub FROM src RETURNING id)
     INSERT INTO politician_elections (election_id, election_type, politician_id, region_id, candidacy_status)
-    SELECT 2026, type, ('00000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid, 100000 + n, 'filed' FROM src`, [json]);
+    SELECT 2026, type, ('00000000-0000-0000-0000-' || lpad((n + $2::int)::text, 12, '0'))::uuid, 100000 + n + $2::int, status FROM src`, [json, off]);
 }
 const gap = async (d: PGlite, type: string, county: string, town: string | null = null, limit = 120) =>
   (await d.query<{ g: Record<string, unknown> | null }>("SELECT roster_registration_gap(2026, $1, $2, $3, $4) AS g", [type, county, town, limit])).rows[0].g as
-    | null | { registered: number; matched: number; missing_count: number; unnamed_count: number; truncated: boolean; source_urls: string[]; missing: Array<Record<string, string | number | null>> };
+    | null | { registered: number; matched: number; needs_status_count: number; missing_count: number; unnamed_count: number; truncated: boolean; needs_status_truncated: boolean; source_urls: string[]; missing: Array<Record<string, string | number | null>>; needs_status: Array<Record<string, string | number | null>> };
 
 Deno.test("名單缺口：沒有任何我們的人 → 名冊上的人全部列出來（附鄉鎮、村里、選舉區、列序）；沒有名冊的單位回 NULL", async () => {
   const d = await buildDb();
@@ -306,23 +309,34 @@ Deno.test("名單缺口：沒有任何我們的人 → 名冊上的人全部列�
   assertEquals((await d.query<{ g: unknown }>("SELECT roster_registration_gap(2022, '縣市長', '台北市') AS g")).rows[0].g, null);
 });
 
-Deno.test("名單缺口：我們已經有的人不列（有紀錄就不是缺，包含退選、可能參選）；臺／台、有沒有選區 id 都對得上", async () => {
+Deno.test("名單缺口：已有（算進名冊內人數）／要改狀態（considering、withdrawn）／缺 三分；臺／台、有沒有選區 id 都對得上", async () => {
   const d = await buildDb();
   const council = current.find((p) => p.source.label === "直轄市議員")!.records.filter((r) => r.region === "台北市");
   const [a, b, c, e] = [council[0], council[1], council[2], council[3]];
-  await addOurs(d, { name: a.name, county: "臺北市", type: "縣市議員", district: a.district! });          // 縣市寫「臺」
-  await addOurs(d, { name: b.name, county: "台北市", type: "縣市議員", status: "withdrawn" });            // 退選的
-  await addOurs(d, { name: c.name, county: "台北市", type: "縣市議員", status: "considering", via: "person" }); // 沒選區 id、靠人物的縣市
+  await addOurs(d, { name: a.name, county: "臺北市", type: "縣市議員", district: a.district! });          // 縣市寫「臺」，已登記
+  await addOurs(d, { name: b.name, county: "台北市", type: "縣市議員", status: "withdrawn" });            // 退選的：要改狀態
+  await addOurs(d, { name: c.name, county: "台北市", type: "縣市議員", status: "considering", via: "person" }); // 沒選區 id、可能參選：要改狀態
   await addOurs(d, { name: "名冊上沒有的人", county: "台北市", type: "縣市議員" });
   await addOurs(d, { name: e.name, county: "新北市", type: "縣市議員" });                                  // 同名但是別的縣市：不抵銷
-  const g = (await gap(d, "縣市議員", "台北市"))!;
+  const g = (await gap(d, "縣市議員", "台北市", null, 500))!;
   assertEquals(g.registered, council.length);
-  assertEquals(g.matched, 3 + council.filter((r, i) => i > 3 && [a.name, b.name, c.name].includes(r.name)).length);
+  assertEquals(g.matched, council.filter((r) => r.name === a.name).length);
+  const needs = g.needs_status.map((m) => m.name).sort();
+  assertEquals(needs, council.filter((r) => [b.name, c.name].includes(r.name)).map((r) => r.name).sort());
+  assertEquals(g.needs_status_count, needs.length);
+  const nb = g.needs_status.find((m) => m.name === b.name)!;
+  assertEquals([nb.candidacy_status, typeof nb.politician_id, typeof nb.politician_election_id], ["withdrawn", "string", "number"]);
+  assertEquals(g.needs_status.find((m) => m.name === c.name)!.candidacy_status, "considering");
   const missingNames = g.missing.map((m) => m.name);
-  for (const n of [a.name, b.name, c.name]) assertEquals(missingNames.includes(n), false, `${n} 我們有紀錄，不該列`);
+  for (const n of [a.name, b.name, c.name]) assertEquals(missingNames.includes(n), false, `${n} 我們有紀錄（已有或要改狀態），不該列在缺`);
   assert(missingNames.includes(e.name), "別的縣市的同名者不能抵銷這個縣市的缺");
-  assertEquals(g.missing[0].district, council.find((r) => !([a.name, b.name, c.name].includes(r.name)))!.district);
-  assertEquals(g.missing_count + g.matched, g.registered - g.unnamed_count);
+  assertEquals(g.missing[0].district, council.find((r) => ![a.name, b.name, c.name].includes(r.name))!.district);
+  assertEquals(g.matched + g.needs_status_count + g.missing_count + g.unnamed_count, g.registered, "三分加姓名空白要剛好等於名冊人數");
+  // 同一列對到好幾筆我們的紀錄：有一筆算進名冊內人數就是已有（不要求改狀態）
+  await addOurs(d, { name: b.name, county: "台北市", type: "縣市議員", status: "filed" });
+  const g2 = (await gap(d, "縣市議員", "台北市", null, 500))!;
+  assertEquals(g2.needs_status.some((m) => m.name === b.name), false);
+  assertEquals(g2.matched, g.matched + council.filter((r) => r.name === b.name).length);
 });
 
 Deno.test("名單缺口：不同鄉鎮的同名者不互相抵銷（村里長）；沒有鄉鎮資訊的紀錄才只比縣市", async () => {
@@ -384,21 +398,24 @@ Deno.test("名單缺口：用 JS 獨立重算全部單位（縣市層級＋每�
   const allRecs = current.flatMap((p) => p.records);
   const picked = allRecs.filter((r, i) => r.name && i % 16 === 5);
   const decoys = allRecs.filter((r, i) => r.name && i % 211 === 7 && r.election_type === "村里長").map((r) => ({ ...r, sub_region: r.sub_region === "大安區" ? "中山區" : "大安區" }));
+  // 狀態：每 7 筆一筆 considering、每 11 筆一筆 withdrawn，其餘 filed
+  const statusOf = (i: number) => (i % 7 === 3 ? "considering" : i % 11 === 4 ? "withdrawn" : "filed");
   await addOursBulk(d, [
-    ...picked.map((r) => ({ name: r.name, county: r.region, type: r.election_type, town: r.election_type === "縣市議員" ? undefined : r.sub_region ?? undefined, district: r.election_type === "縣市議員" ? r.district ?? undefined : undefined })),
+    ...picked.map((r, i) => ({ status: statusOf(i), name: r.name, county: r.region, type: r.election_type, town: r.election_type === "縣市議員" ? undefined : r.sub_region ?? undefined, district: r.election_type === "縣市議員" ? r.district ?? undefined : undefined })),
     ...decoys.map((r) => ({ name: r.name, county: r.region, type: "村里長", town: r.sub_region! })),
   ]);
+  const LISTED = (st: string) => !["considering", "withdrawn"].includes(st);
   // 獨立的姓名鍵（不呼叫任何 SQL）：NFKC、臺→台、黄→黃、去空白與間隔號、去尾端拉丁字母
   const norm0 = (s: string) => s.normalize("NFKC").replace(/臺/g, "台").replace(/黄/g, "黃").replace(/[\s·．.・‧•]/g, "");
   const key = (s: string) => norm0(s).replace(/[A-Za-z]+$/, "") || norm0(s) || null;
-  const ours = [...picked.map((r) => ({ type: r.election_type, county: r.region, nn: key(r.name), town: r.election_type === "縣市議員" ? null : r.sub_region })),
-    ...decoys.map((r) => ({ type: r.election_type, county: r.region, nn: key(r.name), town: r.sub_region }))];
+  const ours = [...picked.map((r, i) => ({ type: r.election_type, county: r.region, nn: key(r.name), town: r.election_type === "縣市議員" ? null : r.sub_region, listed: LISTED(statusOf(i)) })),
+    ...decoys.map((r) => ({ type: r.election_type, county: r.region, nn: key(r.name), town: r.sub_region, listed: true }))];
   const norm = (s: string | null) => (s ?? "").replace(/臺/g, "台");
   // 索引：選舉別｜縣市｜姓名鍵 → 我們那幾筆的鄉鎮（已抹平臺／台）
-  const oursBy = new Map<string, Array<{ town: string | null }>>();
+  const oursBy = new Map<string, Array<{ town: string | null; listed: boolean }>>();
   for (const o of ours) {
     const k = `${o.type}|${o.county}|${o.nn}`;
-    oursBy.set(k, [...(oursBy.get(k) ?? []), { town: o.town === null ? null : norm(o.town) }]);
+    oursBy.set(k, [...(oursBy.get(k) ?? []), { town: o.town === null ? null : norm(o.town), listed: o.listed }]);
   }
   const units = new Map<string, { type: string; county: string; town: string | null }>();
   for (const r of allRecs) {
@@ -409,15 +426,23 @@ Deno.test("名單缺口：用 JS 獨立重算全部單位（縣市層級＋每�
   let checked = 0;
   for (const u of all) {
     const reg = allRecs.filter((r) => r.election_type === u.type && r.region === u.county && (u.town === null || norm(r.sub_region) === norm(u.town)));
-    let matched = 0, missing = 0, unnamed = 0;
+    let matched = 0, needs = 0, missing = 0, unnamed = 0;
+    const used = new Map<string, number>();
     for (const r of reg) {
       const k = key(r.name);
       if (k === null) { unnamed++; continue; }
-      const hit = (oursBy.get(`${u.type}|${r.region}|${k}`) ?? []).some((o) => o.town === null || r.sub_region === null || o.town === norm(r.sub_region));
-      if (hit) matched++; else missing++;
+      const key2 = `${u.type}|${r.region}|${k}`;
+      const hits = (oursBy.get(key2) ?? []).filter((o) => o.town === null || r.sub_region === null || o.town === norm(r.sub_region));
+      if (hits.some((o) => o.listed)) {
+        // 一對一：我們算進名冊內人數的同名紀錄有 m 筆，名冊上同名的前 m 位算已有
+        const m = (oursBy.get(key2) ?? []).filter((o) => o.listed).length;
+        const rank = (used.get(key2) ?? 0) + 1;
+        used.set(key2, rank);
+        if (rank <= m) matched++; else if (hits.some((o) => !o.listed)) needs++; else missing++;
+      } else if (hits.length > 0) needs++; else missing++;
     }
     const g = (await gap(d, u.type, u.county, u.town, 500))!;
-    assertEquals([g.registered, g.matched, g.missing_count, g.unnamed_count], [reg.length, matched, missing, unnamed], `${u.type} ${u.county}${u.town ?? ""}`);
+    assertEquals([g.registered, g.matched, g.needs_status_count, g.missing_count, g.unnamed_count], [reg.length, matched, needs, missing, unnamed], `${u.type} ${u.county}${u.town ?? ""}`);
     checked++;
   }
   assert(checked > 350, `單位數 ${checked}`);
@@ -453,13 +478,20 @@ Deno.test("還原驗證：缺口函式不比鄉鎮 → 不同鄉鎮的同名里�
   });
 });
 
-Deno.test("還原驗證：缺口函式只認 candidacy_status 不是 withdrawn 的 → 退選的人被當成「沒有」（測試要紅）", async () => {
-  await expectRed("withdrawn 也算有紀錄", async () => {
-    const d = await buildDb({ schema: (s) => mutate(s, "WHERE pe.election_id = p_election_id AND pe.election_type = p_election_type\n       AND replace", "WHERE pe.election_id = p_election_id AND pe.election_type = p_election_type AND pe.candidacy_status IS DISTINCT FROM 'withdrawn'\n       AND replace") });
+Deno.test("還原驗證：「已有」不分狀態（candidacy_is_listed 永遠為真）→ considering、withdrawn 被當成已有，要改狀態的人消失（測試要紅）", async () => {
+  await expectRed("candidacy_is_listed", async () => {
+    const d = await buildDb({ schema: (s) => mutate(s, "SELECT COALESCE(p_status, '') NOT IN ('considering', 'withdrawn')", "SELECT true") });
     const council = current.find((p) => p.source.label === "直轄市議員")!.records.filter((r) => r.region === "台北市");
     await addOurs(d, { name: council[1].name, county: "台北市", type: "縣市議員", status: "withdrawn" });
-    const g = (await gap(d, "縣市議員", "台北市"))!;
-    assertEquals(g.missing.some((m) => m.name === council[1].name), false);
+    const g = (await gap(d, "縣市議員", "台北市", null, 500))!;
+    assertEquals(g.needs_status.some((m) => m.name === council[1].name), true);
+  });
+});
+
+Deno.test("還原驗證：不做一對一 → 名冊上同名兩位只有我們一筆紀錄時，兩位都算已有，缺口顯示 0 但派工端永遠差 1（測試要紅）", async () => {
+  await expectRed("rn <= c.n", async () => {
+    const d = await buildDb({ schema: (s) => mutate(s, "WHERE r.rn <= c.n", "") });
+    await dupNameScenario(d);
   });
 });
 
@@ -487,6 +519,153 @@ Deno.test("還原驗證：loadRegistrationRows 不檢查列數 → 殘缺的表�
   });
 });
 
+// ── 「已有」的定義與派工判準自洽（#447 的 n_listed）─────────────────────────
+// 派工判準（contribution_auto_tasks_raw 的 roster_check，20261008112000）：最近一次回報的 cec_count > 我們的名冊內人數（n_listed）就繼續派。
+// 這裡從那支 migration 原文抽出 ours 這段，在 PGlite 上對同一份資料算 n_listed，跟缺口函式的結果對起來。
+const GAP_DISPATCH_MIG = "20261008112000_roster_check_gap_dispatch.sql";
+async function dispatchOursCte(): Promise<string> {
+  const src = await readMig(GAP_DISPATCH_MIG);
+  const start = src.indexOf("  ours AS (");
+  const end = src.indexOf("\n  )\n", start) + 4;
+  assert(start > 0 && end > start, "抽不出派工判準的 ours 段");
+  return src.slice(start, end).trim();
+}
+/** 派工端算的「我們的名冊內人數」（縣市層級單位） */
+async function nListed(d: PGlite, type: string, county: string): Promise<number> {
+  const cte = await dispatchOursCte();
+  const r = await d.query<{ n: number }>(`WITH ${cte} SELECT COALESCE(sum(n_listed), 0)::int AS n FROM ours WHERE election_id = 2026 AND election_type = $1 AND region = $2`, [type, county]);
+  return r.rows[0].n;
+}
+/** 全部單位一次算（派工端 ours 這段對全表只跑一次）：選舉別|縣市 → n_listed */
+async function nListedAll(d: PGlite): Promise<Map<string, number>> {
+  const cte = await dispatchOursCte();
+  const r = await d.query<{ election_type: string; region: string; n: number }>(`WITH ${cte} SELECT election_type, region, n_listed::int AS n FROM ours WHERE election_id = 2026`);
+  return new Map(r.rows.map((x) => [`${x.election_type}|${x.region}`, x.n]));
+}
+/** 派工端的判斷：回報的 cec_count 比我們的名冊內人數多就繼續派（#447） */
+const dispatched = (cecCount: number, listed: number) => cecCount > listed;
+
+async function dupNameScenario(d: PGlite) {
+  // 名冊裡（現行版）沒有同縣市同選舉別同姓名的兩位，所以複製一列造出來：台北市第一位議員候選人在同一份名冊多一列（row_no 9999）
+  const first = current.find((p) => p.source.label === "直轄市議員")!.records.find((r) => r.region === "台北市" && r.name)!;
+  await d.query(
+    `INSERT INTO cec_registrations (election_id, election_type, region, place, sub_region, village, district, name, party, row_no, source_url, flags, parsed_at)
+     SELECT election_id, election_type, region, place, sub_region, village, district, name, party, 9999, source_url, flags, parsed_at
+       FROM cec_registrations WHERE source_url = $1 AND row_no = $2`, [first.source_url, first.row_no]);
+  await addOurs(d, { name: first.name, county: "台北市", type: "縣市議員", district: first.district! });
+  const g = (await gap(d, "縣市議員", "台北市", null, 500))!;
+  assertEquals(g.missing.filter((m) => m.name === first.name).length, 1, "名冊上同名兩位、我們一筆：另一位要算缺");
+  assertEquals(g.matched, 1);
+  assertEquals(g.matched + g.needs_status_count + g.missing_count + g.unnamed_count, g.registered);
+  assertEquals(dispatched(g.registered, await nListed(d, "縣市議員", "台北市")), true, "派工端：名冊人數 > 我們的名冊內人數，會派；任務要看得到缺的是哪一位");
+}
+
+Deno.test("名單缺口：名冊上同縣市同姓名兩位、我們只有一筆 → 一位已有、另一位算缺（人數跟派工判準一致）", async () => {
+  await dupNameScenario(await buildDb());
+});
+
+Deno.test("「已有」的定義跟 #447 的 n_listed 一個字不差：candidacy_is_listed 的條件＝派工判準裡 FILTER 的條件", async () => {
+  const dispatch = await readMig(GAP_DISPATCH_MIG);
+  const m = /COUNT\(\*\) FILTER \(WHERE (COALESCE\(pe\.candidacy_status, ''\) NOT IN \(([^)]+)\))\) AS n_listed/.exec(dispatch);
+  assert(m, "找不到派工判準的 n_listed");
+  const list = m![2].replace(/\s/g, "");
+  const schema = await readMig(SCHEMA_MIG);
+  const f = /FUNCTION candidacy_is_listed\(p_status TEXT\)[\s\S]*?SELECT COALESCE\(p_status, ''\) NOT IN \(([^)]+)\)/.exec(schema);
+  assert(f, "找不到 candidacy_is_listed");
+  assertEquals(f![1].replace(/\s/g, ""), list);
+  // 派工端的 ours 本來就先排除 withdrawn（所以退選的不會進 n_listed、也不會進 n）
+  assert(dispatch.includes("WHERE pe.candidacy_status IS DISTINCT FROM 'withdrawn'"));
+  // 缺口函式用的是這支函式，不是自己再寫一份
+  assert(schema.includes("candidacy_is_listed(pe.candidacy_status) AS listed"));
+  // 行為：每一種狀態，函式與派工的判斷相同
+  const d = await buildDb();
+  for (const st of [null, "considering", "declared", "filed", "withdrawn", "elected", "not_elected", "registered"]) {
+    const fn = (await d.query<{ b: boolean }>("SELECT candidacy_is_listed($1) AS b", [st])).rows[0].b;
+    const sqlExpr = (await d.query<{ b: boolean }>(`SELECT COALESCE($1::text, '') NOT IN (${m![2]}) AS b`, [st])).rows[0].b;
+    assertEquals(fn, sqlExpr, `狀態 ${st}`);
+  }
+});
+
+Deno.test("自洽：名冊 10 人、我們 10 筆但 1 筆是 considering → 任務要列出那 1 筆要改狀態；代理照做、回報後派工端不再派", async () => {
+  const d = await buildDb();
+  const unit = current.find((p) => p.source.election_type === "縣市長" && p.source.label === "縣市長（其餘 16 縣市）")!.records.filter((r) => r.region === "新竹縣");
+  const N = unit.length;
+  assert(N >= 2);
+  // 我們全有，但第一位是 considering
+  for (let i = 0; i < N; i++) await addOurs(d, { name: unit[i].name, county: "新竹縣", type: "縣市長", status: i === 0 ? "considering" : "filed" });
+  const g = (await gap(d, "縣市長", "新竹縣"))!;
+  // 以前的缺陷：任務說缺 0，派工端卻只算 N−1
+  assertEquals([g.registered, g.matched, g.needs_status_count, g.missing_count], [N, N - 1, 1, 0]);
+  assertEquals(g.needs_status[0].name, unit[0].name);
+  assertEquals(g.needs_status[0].candidacy_status, "considering");
+  assertEquals(dispatched(g.registered, await nListed(d, "縣市長", "新竹縣")), true, "回報 cec_count＝名冊人數，派工端只算到 N−1，所以會派（任務得看得到要改誰）");
+  // 代理照任務做：correction 把那一筆改成 filed（登記階段），再回報 cec_count＝registered
+  await d.query("UPDATE politician_elections SET candidacy_status = 'filed' WHERE id = $1", [g.needs_status[0].politician_election_id]);
+  const after = (await gap(d, "縣市長", "新竹縣"))!;
+  assertEquals([after.matched, after.needs_status_count, after.missing_count], [N, 0, 0]);
+  assertEquals(dispatched(after.registered, await nListed(d, "縣市長", "新竹縣")), false, "改完狀態，下一輪不再派");
+});
+
+Deno.test("自洽（全部縣市層級單位）：considering、withdrawn、缺、姓名空白混在一起，代理照提示做完回報 → 每個單位下一輪都不再派，缺口函式歸零", async () => {
+  const d = await buildDb();
+  const types = ["縣市長", "縣市議員", "鄉鎮市長", "鄉鎮市民代表", "直轄市山地原住民區長", "直轄市山地原住民區民代表"];
+  const recs = current.flatMap((p) => p.records).filter((r) => types.includes(r.election_type));
+  // 名冊每 6 位一組輪流：沒有紀錄／considering／withdrawn／filed×3
+  const ours: Ours[] = [];
+  recs.forEach((r, i) => {
+    if (!r.name) return;
+    const m = i % 6;
+    if (m === 0) return;
+    ours.push({ name: r.name, county: r.region, type: r.election_type, town: r.election_type === "縣市議員" ? undefined : r.sub_region ?? undefined,
+      district: r.election_type === "縣市議員" ? r.district ?? undefined : undefined, status: m === 1 ? "considering" : m === 2 ? "withdrawn" : "filed" });
+  });
+  await addOursBulk(d, ours);
+  const units = [...new Map(recs.map((r) => [`${r.election_type}|${r.region}`, { type: r.election_type, county: r.region }])).values()];
+  let before = 0, nextId = 5_000_000;
+  const listedBefore = await nListedAll(d);
+  const reports = new Map<string, number>();
+  for (const u of units) {
+    const g = (await gap(d, u.type, u.county, null, 500))!;
+    if (dispatched(g.registered, listedBefore.get(`${u.type}|${u.county}`) ?? 0)) before++;
+    // 代理照提示：缺的 → candidacy（filed）；要改狀態的 → correction；withdrawn 裡偶數列「確實登記後退選」→ 不改、cec_count 減掉；姓名空白的 → 打開 PDF 自己補
+    let kept = 0;
+    await addOursBulk(d, g.missing.map((m) => ({ name: String(m.name), county: u.county, type: u.type, town: u.type === "縣市議員" ? undefined : (m.sub_region as string | null) ?? undefined, district: u.type === "縣市議員" ? (m.district as string | null) ?? undefined : undefined })));
+    for (const n of g.needs_status) {
+      if (n.candidacy_status === "withdrawn" && Number(n.row_no) % 2 === 0) { kept++; continue; }
+      await d.query("UPDATE politician_elections SET candidacy_status = 'filed' WHERE id = $1", [n.politician_election_id]);
+    }
+    await addOursBulk(d, Array.from({ length: g.unnamed_count }, () => ({ name: `名冊空白姓名${nextId++}`, county: u.county, type: u.type })));
+    reports.set(`${u.type}|${u.county}`, g.registered - kept);
+    // 做完之後缺口函式歸零：每 3 個單位抽 1 個驗（PGlite 一次呼叫要幾百毫秒）；派工端的判斷下面對每個單位都驗
+    if (units.indexOf(u) % 3 === 0) {
+      const after = (await gap(d, u.type, u.county, null, 500))!;
+      assertEquals(after.missing_count, 0, `${u.type} ${u.county}：補完還有缺`);
+      assertEquals(after.needs_status_count, kept, `${u.type} ${u.county}：只剩確實登記後退選的`);
+    }
+  }
+  // 全部做完、回報之後：派工端對每個單位都不再派
+  const listedAfter = await nListedAll(d);
+  let loops = 0;
+  for (const u of units) {
+    const k = `${u.type}|${u.county}`;
+    assertEquals(dispatched(reports.get(k)!, listedAfter.get(k) ?? 0), false, `${k}：回報 cec_count＝${reports.get(k)}，派工端 n_listed＝${listedAfter.get(k)}，下一輪還在派`);
+    loops++;
+  }
+  assert(before > 50, `照做之前派工端會派的單位數 ${before}（太少代表情境沒有壓到）`);
+  assertEquals(loops, units.length);
+});
+
+Deno.test("還原驗證：任務不列要改狀態的人（舊版：只算同名就是已有）→ 自洽測試要紅", async () => {
+  await expectRed("considering 算已有", async () => {
+    const d = await buildDb({ schema: (s) => mutate(s, "SELECT COALESCE(p_status, '') NOT IN ('considering', 'withdrawn')", "SELECT true") });
+    const unit = current.find((p) => p.source.label === "縣市長（其餘 16 縣市）")!.records.filter((r) => r.region === "新竹縣");
+    for (let i = 0; i < unit.length; i++) await addOurs(d, { name: unit[i].name, county: "新竹縣", type: "縣市長", status: i === 0 ? "considering" : "filed" });
+    const g = (await gap(d, "縣市長", "新竹縣"))!;
+    // 這個斷言是自洽測試裡「派工會派」與「任務看得到要改誰」同時成立的那一條
+    assertEquals(dispatched(g.registered, await nListed(d, "縣市長", "新竹縣")) && g.needs_status_count === 0, false);
+  });
+});
+
 // ── 4. 名單清查任務附上缺的名單（task-context）────────────────────────────
 Deno.test("roster_check 的現況：有名冊比對結果就帶 registration 與專用提示；已投票屆別（list_source＝cec）仍用自己的提示；沒有就照舊", async () => {
   const d = await buildDb();
@@ -495,7 +674,7 @@ Deno.test("roster_check 的現況：有名冊比對結果就帶 registration 與
   const cur = shapeTaskCurrent("roster_check", { roster: { rows, history: [], region: "新竹縣", registration: g } });
   assertEquals(cur.hint, ROSTER_REGISTRATION_GAP_HINT);
   const reg = cur.registration as Record<string, unknown>;
-  assertEquals(Object.keys(reg).sort(), ["matched", "missing", "missing_count", "registered", "source_urls", "truncated", "unnamed_count"]);
+  assertEquals(Object.keys(reg).sort(), ["matched", "missing", "missing_count", "needs_status", "needs_status_count", "needs_status_truncated", "registered", "source_urls", "truncated", "unnamed_count"]);
   assertEquals((reg.missing as unknown[]).length, g.missing.length);
   assertEquals(cur.ours_count, 1);
   // 已投票屆別：缺口在 target.missing，提示不變
@@ -508,10 +687,11 @@ Deno.test("roster_check 的現況：有名冊比對結果就帶 registration 與
 
 Deno.test("提示與函式對得上：提示講的欄位函式真的回得出來；上限與函式預設一致", async () => {
   const sql = await readMig(SCHEMA_MIG);
-  for (const k of ["registered", "missing", "unnamed_count", "source_urls"]) {
+  for (const k of ["registered", "missing", "needs_status", "needs_status_count", "unnamed_count", "source_urls"]) {
     assert(ROSTER_REGISTRATION_GAP_HINT.includes(`registration.${k}`), `提示沒提到 registration.${k}`);
   }
-  for (const k of ["registered", "matched", "missing_count", "unnamed_count", "source_urls", "truncated", "missing"]) assert(sql.includes(`'${k}'`), `函式沒有回 ${k}`);
+  for (const k of ["registered", "matched", "needs_status_count", "needs_status", "needs_status_truncated", "missing_count", "unnamed_count", "source_urls", "truncated", "missing"]) assert(sql.includes(`'${k}'`), `函式沒有回 ${k}`);
+  for (const k of ["politician_id", "politician_election_id", "candidacy_status"]) assert(sql.includes(`'${k}'`), `needs_status 沒有 ${k}`);
   for (const k of ["name", "party", "region", "sub_region", "village", "district", "row_no"]) assert(sql.includes(`'${k}'`), `missing 沒有 ${k}`);
   assertEquals(ROSTER_GAP_LIMIT, 120);
   assert(sql.includes("p_limit INTEGER DEFAULT 120"));
