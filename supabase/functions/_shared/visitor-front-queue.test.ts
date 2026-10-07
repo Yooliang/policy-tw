@@ -229,7 +229,7 @@ Deno.test("D1 /next：另撈網站請求與公民提問的候選、合併去重�
 // ============================================================
 // E. queue_preview（/queue 頁）
 // ============================================================
-const MIG = "20261008160000_queue_preview_visitor_front.sql";
+const MIG = "20261008125000_queue_preview_visitor_front.sql";
 const OLD_FRAG = `           COALESCE(t.last_dispatched_at,
                     CASE WHEN t.source IN ('manual', 'auto_dispute', 'web_request') THEN TIMESTAMPTZ '1980-01-01' ELSE t.created_at END), 1
 `;

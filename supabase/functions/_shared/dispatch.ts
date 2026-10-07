@@ -412,7 +412,7 @@ export const QUEUE_VISITOR_FRONT = "1970-01-01T00:00:00.000Z";
 /**
  * 網站請求、公民提問派出去超過這麼久還沒解決（任務仍是 open），就回到最前面再插一次。
  * 派出後的 6 小時內照舊排在 last_dispatched_at（隊尾），讓別的任務有機會；過了就是「有人在關注、卻沒人做完」。
- * 純函式算，不另外開排程。queue_preview 的 SQL（20261008160000）寫死同一個 6 小時，守門測試 visitor-front-queue.test.ts 兩邊對齊。
+ * 純函式算，不另外開排程。queue_preview 的 SQL（20261008125000）寫死同一個 6 小時，守門測試 visitor-front-queue.test.ts 兩邊對齊。
  */
 export const VISITOR_REQUEUE_HOURS = 6;
 export const VISITOR_REQUEUE_MS = VISITOR_REQUEUE_HOURS * 60 * 60 * 1000;

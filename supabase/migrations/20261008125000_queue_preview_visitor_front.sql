@@ -55,6 +55,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
    ORDER BY i.queue_at, i.tie, i.task_id
    LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 1000), 2000));
 $$;
-COMMENT ON FUNCTION queue_preview IS '派工佇列預覽（/queue 頁）：跟 /next 同一個時間軸（task_dispatches.queue_at，進表時已按驗證：任務 2:1 排好）。網站請求與公民提問（open）沒派過或派出超過 6 小時＝1970，排在所有加推之前（20261008160000）';
+COMMENT ON FUNCTION queue_preview IS '派工佇列預覽（/queue 頁）：跟 /next 同一個時間軸（task_dispatches.queue_at，進表時已按驗證：任務 2:1 排好）。網站請求與公民提問（open）沒派過或派出超過 6 小時＝1970，排在所有加推之前（20261008125000）';
 REVOKE ALL ON FUNCTION queue_preview(INTEGER) FROM public;
 GRANT EXECUTE ON FUNCTION queue_preview(INTEGER) TO anon, authenticated;
