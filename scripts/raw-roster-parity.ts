@@ -1,5 +1,5 @@
 /**
- * 名單清查重查判準（migration 20261008080000）對正式庫唯讀快照的逐件比對（2026-10-08，10-08 缺口盤點 R2）。
+ * 名單清查重查判準（migration 20261008112000）對正式庫唯讀快照的逐件比對（2026-10-08，10-08 缺口盤點 R2）。
  * 沿用 scripts/arms-parity.ts 的做法（正式庫唯讀快照＋PGlite 回放各臂輸出＋全欄雜湊），改的是 raw 這一支，
  * 所以快照多帶一份「新定義在正式庫真實資料上的輸出」：
  *   快照 SQL＝scripts/arms-parity.sql ＋ raw_new（把新 migration 的函式本體原文當成子查詢跑）＋ roster_state（逐縣市的清查現況，
@@ -19,7 +19,7 @@
  */
 import { armsFingerprint, buildArmsDb, ARM_BRANCHES, fnText, P2_ER_MIG } from "../supabase/functions/_shared/arms-pglite.ts";
 
-const GAP_MIG = new URL("../supabase/migrations/20261008080000_roster_check_gap_dispatch.sql", import.meta.url);
+const GAP_MIG = new URL("../supabase/migrations/20261008112000_roster_check_gap_dispatch.sql", import.meta.url);
 const migPath = Deno.args[0] && Deno.args[0] !== "-" ? Deno.args[0] : null;
 const snapArg = Deno.args[1];
 
