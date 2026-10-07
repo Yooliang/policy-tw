@@ -5,7 +5,7 @@ export default { name: 'ElectionPage' }
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Component } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
-import HeroAction from '../components/HeroAction.vue'
+import ElectionHero from '../components/ElectionHero.vue'
 import { PolicyStatus, ElectionType, type Politician } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
@@ -13,19 +13,18 @@ import VerticalStack from './election/VerticalStack.vue'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
 import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery } from '../lib/policy-compare'
-import Hero from '../components/Hero.vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
-  Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
-  Search, Layers, LayoutGrid, Clock, Scale,
+  Vote, Flag, AlertCircle, Users, MapPin,
+  Search, Layers,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, ArrowUpDown, Swords, Grid3x3 } from 'lucide-vue-next'
+  Crown, ScrollText, ArrowUpDown, Swords } from 'lucide-vue-next'
 import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
 import { issueTagsOf } from '../lib/issue-tags'
-import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import { VIEW_MODES, type ElectionViewMode } from '../lib/election-view-tabs'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -168,14 +167,6 @@ watch([electionId, selectedRegion, selectedSubRegion], ([id, region, subRegion])
 // 選舉年份（用於選舉區對應表查詢，因為該表存的是年份而非 election ID）
 const electionYear = computed(() => electionYearOfDate(election.value?.electionDate) ?? 0)
 
-// Hero 背景圖片（依選舉年份）
-const heroImages: Record<number, string> = {
-  2022: '/images/heroes/election-2022.png',
-  2024: '/images/heroes/election-2024.png',
-  2026: '/images/heroes/election-2026.png',
-}
-const heroBackgroundImage = computed(() => heroImages[electionYear.value] || '/images/heroes/election-default.png')
-
 // Sync with global state
 watch(globalRegion, (newVal) => {
   // 已經是這個縣市就不動（2026-10-05）：鄉鎮頁進來時，網址同步會把全站的縣市設成網址上的縣市，
@@ -201,20 +192,7 @@ watch(selectedSubRegion, () => {
   selectedDistrict.value = 'All'
 })
 
-const VIEW_MODES = ['politicians', 'pledges', 'issues', 'comparison'] as const
-type ElectionViewMode = typeof VIEW_MODES[number]
 const viewMode = ref<ElectionViewMode>('politicians')
-
-/**
- * Hero 的四個檢視頁籤（文字與圖示）。VIEW_MODES 是給網址參數驗證用的字串清單，兩者分開。
- * short 是手機版用的兩字短標（使用者 2026-09-19：四顆要放進一排；圖示照舊）。
- */
-const VIEW_TABS: Array<{ key: ElectionViewMode; label: string; short: string; icon: typeof LayoutGrid }> = [
-  { key: 'politicians', label: '候選人', short: '候選人', icon: LayoutGrid },
-  { key: 'pledges', label: '競選承諾', short: '承諾', icon: Megaphone },
-  { key: 'issues', label: '議題串聯', short: '串聯', icon: Layers },
-  { key: 'comparison', label: '政見 PK', short: 'PK', icon: Scale },
-]
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 /**
@@ -280,12 +258,6 @@ const OTHER_LOCATIONS = computed(() => locations.value.filter(loc => !SIX_CAPITA
 const isSpecialMunicipality = computed(() => SIX_CAPITALS.includes(selectedRegion.value))
 const subRegionLabel = computed(() => isSpecialMunicipality.value ? '區' : '鄉鎮市區')
 const villageLabel = computed(() => isSpecialMunicipality.value ? '里' : '村里')
-
-const timeLeft = computed(() => {
-  if (!election.value) return { days: 0 }
-  const difference = +new Date(election.value.electionDate) - +new Date()
-  return { days: difference > 0 ? Math.floor(difference / (1000 * 60 * 60 * 24)) : 0 }
-})
 
 // 本選舉的候選人；退選（withdrawn，含 AI 推測但未登記的）與傳聞（空值）的人不進選舉頁，各級 grid 與統計數字都由這裡衍生
 const electionPoliticians = computed(() =>
@@ -961,55 +933,11 @@ usePageHead({
 <template>
   <div v-if="election" class="bg-slate-50 min-h-screen">
 
-    <Hero full-width :background-image="heroBackgroundImage">
-      <template #title>
-        <div class="relative w-full">
-          <div v-if="pageCounty">
-            {{ electionYear || election.electionDate.slice(0, 4) }} {{ pageCounty }}{{ pageTownship }}<br/><span class="text-amber-400">候選人與政見</span>
-          </div>
-          <div v-else>
-            預見未來，<br/><span class="text-amber-400">從您居住的城市開始</span>
-          </div>
-          <div class="hidden md:block absolute right-0 top-1/2 -translate-y-1/2">
-            <div class="bg-white/5 backdrop-blur-md border border-white/20 rounded-[32px] p-8 text-center transform rotate-2 hover:rotate-0 transition-all duration-500 shadow-2xl shadow-blue-500/10">
-              <div class="text-sm text-slate-400 mb-2 flex items-center justify-center gap-2 font-medium">
-                <Clock :size="18" class="text-amber-400" /> 距離投票日
-              </div>
-              <div class="text-7xl font-black text-white mb-1 font-mono tracking-tighter leading-none animate-pulse">
-                <!-- 倒數天數依當下日期計算，建置時算的會過期，只在瀏覽器渲染 -->
-                <ClientOnly>
-                  {{ timeLeft.days }}
-                  <template #placeholder>&nbsp;</template>
-                </ClientOnly>
-              </div>
-              <div class="text-sm font-bold text-amber-400 uppercase tracking-[0.3em] pl-[0.3em]">
-                Days Left
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <template #description>不僅是縣市長，我們深入記錄議員、鄉鎮代表等基層候選人的競選承諾。</template>
-
-      <!-- Hero Actions: View Mode Tabs -->
-      <template #actions>
-        <!-- 檢視切換一律走 HeroAction：尺寸與間距跟全站動作區一致；手機用兩字短標讓四顆擠進一排 -->
-        <HeroAction v-for="v in VIEW_TABS" :key="v.key" :active="viewMode === v.key" @click="viewMode = v.key">
-          <component :is="v.icon" :size="16" />
-          <span class="sm:hidden">{{ v.short }}</span>
-          <span class="hidden sm:inline">{{ v.label }}</span>
-        </HeroAction>
-        <!-- 政見矩陣（縣市×主題的政見筆數）：只有最新一屆定期選舉有，是另一個網址，不是頁內的檢視 -->
-        <HeroAction v-if="hasMatrix" :to="`/election/${electionSeg}/matrix`">
-          <Grid3x3 :size="16" />
-          <span class="sm:hidden">矩陣</span>
-          <span class="hidden sm:inline">政見矩陣</span>
-        </HeroAction>
-      </template>
-
-      <!-- 縣市是真連結（/election/2026/台北市），點起來跟以前一樣切縣市，爬蟲也走得到 -->
-      <GlobalRegionSelector :current="selectedRegion" :link-for="regionLink" />
-    </Hero>
+    <ElectionHero
+      :election="election" :election-seg="electionSeg" :view="viewMode" :has-matrix="hasMatrix"
+      :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="pageTownship"
+      @select="viewMode = $event"
+    />
 
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">

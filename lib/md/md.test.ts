@@ -684,6 +684,7 @@ Deno.test("首頁：只放筆數、不放比例；追蹤中政見拆成「競選
 
 Deno.test("矩陣頁：只放筆數，不放比例", async () => {
   const page = await Deno.readTextFile(new URL("../../pages/PolicyMatrix.vue", import.meta.url));
-  const tpl = page.slice(page.indexOf("<template>"));
+  // 只看畫面（<template>），不含底下的 <style>（抽屜裡 .md 預覽的 CSS 有 100% 這種寬度）
+  const tpl = page.slice(page.indexOf("<template>"), page.lastIndexOf("</template>"));
   assert(!/%|比例|達成率|占比|佔比/.test(tpl), "矩陣頁的畫面沒有百分比或比例");
 });
