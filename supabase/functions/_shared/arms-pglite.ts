@@ -14,6 +14,7 @@ export const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 export const P0_MIG = "20261008001000_activity_windows_p0.sql";
 export const P1_MIG = "20261008060000_activity_windows_p1.sql";
 export const P2_ER_MIG = "20261008070000_activity_windows_p2_election_results.sql";
+export const P2_PG_MIG = "20261008120000_activity_windows_p2_party_gap.sql";
 export const BASE_ARMS_MIG ="20261006141600_reassign_candidacy.sql";
 export const BASE_DROP_MIG = "20260924000001_dispatch_io.sql";
 
@@ -144,6 +145,8 @@ export type EnvOptions = {
    * （各臂有自己的文字守門與正式庫快照比對），這裡測的是規則與總表。
    */
   p2?: { migs: { name: string; mutate?: (sql: string) => string }[]; restub: readonly (typeof ARM_BRANCHES)[number][] };
+  /** P1 之後、P2 migration 之前要先跑的 SQL（例：優先層 #443、測試名人物隔離 #448 需要的表、函式與欄位；它們本身各有自己的測試，這裡只讓後面的 migration 跑得動） */
+  afterP1Sql?: string;
   /** migration 當下的假「今天」，預設 2026-10-08（P0 回填里程碑 status 用） */
   migrationToday?: string;
 };
@@ -176,6 +179,7 @@ export async function buildArmsDb(o: EnvOptions = {}): Promise<PGlite> {
   await db.exec(`SET app.activity_today = '${o.migrationToday ?? "2026-10-08"}'`);
   await db.exec(await read(P0_MIG));
   if (o.applyP1 !== false) await db.exec((o.mutateP1 ?? ((s) => s))(await read(P1_MIG)));
+  if (o.afterP1Sql) await db.exec(o.afterP1Sql);
   for (const m of o.p2?.migs ?? []) await applyP2(db, (m.mutate ?? ((s) => s))(await read(m.name)), o.p2!.restub);
   await db.exec("RESET app.activity_today");
   return db;
