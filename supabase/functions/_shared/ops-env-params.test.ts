@@ -129,7 +129,6 @@ function setOf(src: string, name: string): string[] {
 
 // 不轉的函式：每一個都要有理由（新增函式沒歸類，測試就紅，逼人想一次「代理會不會打到網站網域」）
 const NOT_REDIRECTED: Record<string, string> = {
-  "batch-import-candidates": "管理員匯入（要登入），不是代理協議",
   "fetch-cec-data": "管理員／內部查中選會資料，不是代理協議",
   "ditrust-agent": "登入者向 DiTrust 開戶（前端直接打），不是代理協議",
   "cec-sync": "排程抓取（cron 打 Supabase），不對外",
