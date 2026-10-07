@@ -4,14 +4,14 @@
 -- 而 last_checked 是「最近一次帶 cec_count 的 roster_check 回報」。代理只要交一筆帶 cec_count 的回報，任務就被收回 7 天，
 -- 即使我們的人數遠少於它回報的 cec_count。實例：彰化縣議員 10-02 回報中選會 86 位、我們 0 位，現在沒有任務。
 --
--- 改法：最近一次回報的 cec_count 大於我們目前 filed＋declared 的人數（缺口還在）→ 不套 recheck_days，繼續派；
+-- 改法：最近一次回報的 cec_count 大於我們目前的名冊內人數（排除 considering、withdrawn；缺口還在）→ 不套 recheck_days，繼續派；
 -- 落差為 0（或我們反而比較多）才套 recheck_days。只動 roster_check 這一段的 WHERE，再加兩個算缺口用的欄位
 -- （ours 多一欄 n_listed、LATERAL 多一欄 last_cec_count）；target、說明文字、hint_sources、reward、task_id 都沒動，
 -- 所以只有「新增」的件、沒有任何一件變動或消失。其餘臂一字不動；現行定義＝20261008000001 那一版（已核對與正式庫現行函式逐字相同）。
 --
 -- 沒動的：嘗試冷卻（只是試過沒查到、cec_count 空的那種，roster_attempt_cooldown_days，目前 1 天）照舊壓著，
 -- 所以回報「查不到」之後隔天才會再派；也就是缺口在、而且上一位不是白跑，才立刻繼續派。
--- 已知的代價：代理補的 candidacy 還在等票（pending）時，我們的 filed＋declared 還沒增加，缺口仍在，任務會繼續派給下一位代理——
+-- 已知的代價：代理補的 candidacy 還在等票（pending）時，我們的名冊內人數還沒增加，缺口仍在，任務會繼續派給下一位代理——
 -- 同一縣市可能有人重複補同一批人（重複的 candidacy 由同名同屆的重複偵測與驗證擋）。這是維護者要的「缺口沒補完就繼續派」的直接結果。
 --
 -- 守門：_shared/roster-check-gap.test.ts（新定義＝現行定義＋三處機械替換；roster_check 那一段在 PGlite 上跑十幾個情境；還原驗證）；
@@ -34,8 +34,8 @@ AS $function$
   ),
   ours AS (
     SELECT pe.election_id, pe.election_type, COALESCE(r.region, p.region) AS region, COUNT(*) AS n,
-           -- 名單缺口用：已登記或已表態的人數（rumored／considering 之類不算，退選的不算）
-           COUNT(*) FILTER (WHERE pe.candidacy_status IN ('filed', 'declared')) AS n_listed
+           -- 名單缺口用：名冊內人數＝排除 considering（可能參選）與 withdrawn（退選），其餘都算——已登記、已表態，選後的當選／落選也算（只算 filed、declared 的話，選後人數歸零、缺口永遠成立）
+           COUNT(*) FILTER (WHERE COALESCE(pe.candidacy_status, '') NOT IN ('considering', 'withdrawn')) AS n_listed
     FROM politician_elections pe
     JOIN politicians p ON p.id = pe.politician_id
     LEFT JOIN regions r ON r.id = pe.region_id
@@ -172,7 +172,7 @@ AS $function$
     WHERE x.election_id = s.election_id AND x.region = l.name AND x.election_type = s.election_type
   ) rc ON TRUE
   WHERE s.enabled
-    -- 最近一次回報的 cec_count 比我們現在的 filed＋declared 多＝缺口還在：不套 recheck_days，繼續派；落差為 0（或我們比較多）才套
+    -- 最近一次回報的 cec_count 比我們現在的名冊內人數多＝缺口還在：不套 recheck_days，繼續派；落差為 0（或我們比較多）才套
     AND (rc.last_checked IS NULL
          OR COALESCE(rc.last_cec_count, 0) > COALESCE(o.n_listed, 0)
          OR rc.last_checked < now() - (s.recheck_days || ' days')::INTERVAL)

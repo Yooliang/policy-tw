@@ -89,7 +89,7 @@ Deno.test("#1 回填：2026 九合一的三個日期，且只動 2026 的列", a
 Deno.test("#1 沒動計分／門檻：roster_check 臂的篩選條件、冷卻、派工分數照舊（重查條件 2026-10-08 起多一條缺口，recheck_days 與嘗試冷卻仍在）", async () => {
   const { def } = await latestDef("contribution_auto_tasks_raw");
   // 2026-10-08（缺口盤點 R2，migration 20261008080000）：重查條件從「沒清查過 OR 過了 recheck_days」變成
-  // 「沒清查過 OR 缺口還在（最近一次回報的 cec_count > 我們 filed＋declared）OR 過了 recheck_days」；細節與情境見 roster-check-gap.test.ts
+  // 「沒清查過 OR 缺口還在（最近一次回報的 cec_count > 我們的名冊內人數）OR 過了 recheck_days」；細節與情境見 roster-check-gap.test.ts
   assertStringIncludes(def, "AND (rc.last_checked IS NULL\n         OR COALESCE(rc.last_cec_count, 0) > COALESCE(o.n_listed, 0)\n         OR rc.last_checked < now() - (s.recheck_days || ' days')::INTERVAL)");
   assertStringIncludes(def, "rc.last_attempt_without_count < now() - (roster_attempt_cooldown_days() || ' days')::INTERVAL");
   assertStringIncludes(def, "         2, l.name\n  FROM roster_check_scope s");
