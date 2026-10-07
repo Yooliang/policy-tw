@@ -481,3 +481,18 @@ WHERE activity_open(g.arm, election_id, election_type, activity_today(...))
 - `Yooliang/policy-jp`（私人 repo，`gh api` 唯讀）：`docs/SCHEMA.md`、`src/data/elections.json`、`src/lib/constants.ts`、`README.md`。
 - 程式：`supabase/functions/_shared/contribute-handler.ts`（對 `auto:` 任務不查派工列）、`_shared/elections.ts`、`_shared/cec-sync.ts`、migration `20261007220000`（`cec_sync_phase`）與 `20261007225000`（`election_task_config`）。
 - **沒查**：中選會選務日程頁／各縣市選委會公告的實際格式、法定投票日規則的條文、日本総務省的日程頁、`/data/` 與矩陣有沒有寫死屆別的地方（P3 時逐一盤點）。
+
+---
+
+## 11. 實作現況
+
+- **P0（2026-10-08，migration `20261008001000_activity_windows_p0.sql`，守門 `supabase/functions/_shared/activity-windows.test.ts`）**：已建 `election_milestones`、`activity_rules`、`activity_overrides`、`gap_events`；`activity_today()`、`activity_open()`（回傳開窗的規則＋里程碑列，零列＝關）、`activity_level()`／`activity_jurisdiction()`（P4 加欄位前的過渡）；視圖 `election_milestones_all`、`activity_open_now`、`activity_health`（正常是空的）；三張表的審計觸發器與 `updated_at` 觸發器；`task_dispatches.opened_at`／`opened_by`；`seed_auto_task_queue()` 寫 `opened`／`closed`／`reopened`。**沒有任何一支臂讀這些表，`activity_rules` 沒有種子**（P1 才種）。
+- 與本檔設計的差異：
+  1. `election_milestones` 主鍵是 `id`（BIGSERIAL）加 `(election_id, kind, COALESCE(election_type, ''))` 的唯一索引（2.1 寫的 PRIMARY KEY 含 COALESCE 運算式，PostgreSQL 不允許）。
+  2. `polling`、`term_start`、`term_end` 不能存進這張表（CHECK 擋），只存在視圖裡（單一真相仍在 `elections.election_date` 與 `election_term_start／end()`）。
+  3. `window_kind` 的形狀有 CHECK：`always` 不掛里程碑；`event` 不掛任期里程碑；`term`／`recurring` 只掛任期里程碑；`recurring` 要有月份。
+  4. `activity_overrides.expires_at` 用 `DATE`（含當天），方便假時鐘測試。
+  5. P0 的 `gap_events` 收回一律記 `reason='filled'`——還沒有規則在過濾，分不出「窗口關了」與「缺口補上了」；P1 起帶規則後才分。
+  6. 回填 `opened_at`：插隊哨兵值 `queue_at = 1980-01-01` 的列（線上 865 筆）改取 `refreshed_at`，`opened_by` 記 `queue_at_sentinel`，不把出生時間填成 1980。
+  7. `roster_check_scope` 的 `ballot_draw_on`、`qualification_review_by`、`municipal_mayor_list_on` 沒有回填成里程碑（`draw` 等），P2 動 `roster_check` 臂時再一起搬；目前 `activity_health` 的 `milestone_scope_drift` 只比登記截止與名單公告兩個日期。
+- 還沒做（P1 起）：每支臂至少一條規則的健康檢查（要先有臂名清單）、`expected_open_on` 與 `opened_at` 的落差視圖（2.5 第 4 點，P1 才有 `expected_open_on`）。
