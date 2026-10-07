@@ -7,6 +7,24 @@ import { routes, installRouterGuards } from './router'
 import { applyDataSnapshot } from './composables/useSupabase'
 import { loadPageData } from './lib/ssr/loaders'
 import type { PageSnapshot } from './lib/ssg/page-data'
+import { latestPath, matchMarkdownRoute } from './lib/md/route'
+import { loadPoliticianMd } from './lib/ssr/md-loaders'
+import { renderPoliticianMd } from './lib/md/politician'
+import { renderPage as renderMarkdownPage } from './lib/md/format'
+import { buildNotFoundPage } from './lib/md/index-page'
+
+/**
+ * Markdown 檢視要的函式（cloudflare/markdown.js 用依賴注入拿，好在 Deno 測試裡換成假的）。
+ * 預產的那一半（loadCorpus、buildAll）不在 Worker 裡，由 scripts/build-data-md.ts 排程跑。
+ */
+export const markdownDeps = {
+  match: matchMarkdownRoute,
+  latestPath,
+  loadPerson: loadPoliticianMd,
+  renderPerson: renderPoliticianMd,
+  renderPage: renderMarkdownPage,
+  notFoundPage: buildNotFoundPage,
+}
 
 /**
  * 邊緣 SSR 入口（Cloudflare Worker 用，docs/PLAN-edge-ssr.md）。

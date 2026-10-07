@@ -42,6 +42,8 @@ Deno.test("路由表有三層選舉頁，鄉鎮頁是 /election/:electionId/:reg
   const election = readRoutes().filter((r) => r.path.startsWith("/election/"));
   assertEquals(election.map((r) => [r.name, r.path]), [
     ["election", "/election/:electionId"],
+    // 政見矩陣（2026-10-07）：要排在縣市頁前面，否則 matrix 會被當成縣市名
+    ["election-matrix", "/election/:electionId/matrix"],
     ["election-region", "/election/:electionId/:region"],
     ["election-township", "/election/:electionId/:region/:subRegion"],
   ]);

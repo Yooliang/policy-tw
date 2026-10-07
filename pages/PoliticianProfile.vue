@@ -18,7 +18,7 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
-import { HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
+import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
@@ -284,6 +284,7 @@ usePageHead({
   type: 'article',
   // firebase.json 把 /politician/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
   noindex: () => !loading.value && !politicianLoading.value && !politician.value,
+  markdown: () => !!politician.value, // 本頁網址加 .md ＝ Markdown 版（lib/md/politician.ts，由 Worker 現場產生）
   // 標題與摘要用 identity（現任職稱優先，其次這一屆的參選），不用 position——
   // position 是最近一筆參選紀錄，落選的人也會有，拿來當標題等於對外宣稱他是現任（2026-10-04）
   title: () => politician.value ? [politician.value.name, identity.value].filter(Boolean).join('｜') : undefined,
@@ -395,6 +396,8 @@ usePageHead({
             <Sparkles v-else :size="16" />
             {{ profileRequest.label('查簡介') }}
           </HeroAction>
+          <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：貼給 AI、丟進 NotebookLM 都能直接用 -->
+          <a :href="`/politician/${politician.id}.md`" target="_blank" rel="noopener" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown">.md 摘要</a>
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />

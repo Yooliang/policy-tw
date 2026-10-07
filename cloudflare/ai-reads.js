@@ -11,6 +11,8 @@
  *   agent_protocol 代理讀 /skill.md（協議）——多半是我們自己的貢獻代理領任務前讀協議（2026-09-29 維護者：
  *                  「AI 當場來讀」717 次全是這個，要分開算）。只有原本會歸成 ai_user 的才改歸這類；
  *                  爬蟲、搜尋引擎讀 skill.md 照原類別
+ *   unknown_md     讀 Markdown 版（path_type=markdown）但 UA／Referer 都認不得是哪個 AI（2026-10-07，docs/PLAN-markdown-views.md 第 8 節）：
+ *                  NotebookLM、使用者貼網址進 AI 工具時 UA 不一定認得；.md 本來就不是給一般瀏覽器開的，所以不認得的也記一筆
  *
  * 注意：被 Cloudflare 在邊緣直接擋掉的請求進不到 Worker，這裡數不到。
  */
@@ -45,10 +47,18 @@ export const AI_REFERRERS = [
   'copilot.microsoft.com', 'chat.deepseek.com', 'grok.com', 'you.com', 'poe.com',
 ]
 
-export const AI_READ_KINDS = ['ai_user', 'ai_search', 'ai_training', 'search_engine', 'ai_referral', 'agent_protocol']
+export const AI_READ_KINDS = ['ai_user', 'ai_search', 'ai_training', 'search_engine', 'ai_referral', 'agent_protocol', 'unknown_md']
+
+/** 頁種的白名單（DB 的 CHECK 與 ai_read_hits 同一份；測試盯 migration） */
+export const AI_READ_PATH_TYPES = ['politician', 'policy', 'election', 'skill', 'llms', 'sitemap', 'markdown', 'other']
+
+/** Markdown 版的網址（lib/md/route.ts 認得的那幾種）：人物、縣市、分類的 .md，以及整個 /data 底下（含查詢式入口） */
+const MARKDOWN_PATH = /^\/(?:(?:politician|election|category|data)\/.+\.md|data(?:\/.*)?)\/?$/
 
 /** 路徑歸類：只記「讀的是哪一種頁」，不記個別網址 */
 export function pathTypeOf(pathname) {
+  // Markdown 版要排在人物／縣市前面：/politician/<id>.md 也符合 politician 那條
+  if (MARKDOWN_PATH.test(pathname)) return 'markdown'
   if (/^\/politician\/[^/]+\/?$/.test(pathname)) return 'politician'
   if (/^\/policy\/[^/]+\/?$/.test(pathname)) return 'policy'
   if (/^\/election\//.test(pathname)) return 'election'
@@ -81,5 +91,7 @@ export function classifyRead(userAgent, referer, pathname) {
     const hit = AI_REFERRERS.find((h) => host === h || host.endsWith(`.${h}`))
     if (hit) return { agent: hit, kind: 'ai_referral', path_type: pathType }
   }
+  // 認不得是誰、但讀的是 Markdown 版：照樣記一筆（agent 固定 unknown，不記 UA 原文）
+  if (pathType === 'markdown') return { agent: 'unknown', kind: 'unknown_md', path_type: 'markdown' }
   return null
 }

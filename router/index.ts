@@ -66,6 +66,12 @@ export const routes: RouteRecordRaw[] = [
     component: ElectionPage,
   },
   {
+    // 政見矩陣（2026-10-07）：縣市×主題的政見筆數；要排在縣市頁前面（否則 matrix 會被當成縣市名）。瀏覽器渲染、沒有預渲染
+    path: '/election/:electionId/matrix',
+    name: 'election-matrix',
+    component: () => import('../pages/PolicyMatrix.vue'),
+  },
+  {
     // 縣市頁（2026-09-30）：同一個元件、預選該縣市；舊的 ?region= 由頁面換成這個網址
     path: '/election/:electionId/:region',
     name: 'election-region',

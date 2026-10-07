@@ -6,7 +6,8 @@
  *   /election/:id/:縣市、/election/:id/:縣市/:鄉鎮 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；
  *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
- *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取
+ *   /politician/:id.md、/election/:屆/:縣市.md、/category/:分類.md、/data/** → Markdown 檢視（cloudflare/markdown.js；人物讀時產生，其餘讀預產快取表 data_md_cache）
+ *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取（連同它們的 .md 版）
  *   /next、/report… 等協議端點名 → 307 轉到 Supabase functions（見 apiRedirect）
  *
  * 樣板：向 web.app 拿 /app.html（客戶端 bundle 的殼，含 assets 的 script／link），去掉 noindex，把 SSR 的 HTML、
@@ -15,8 +16,9 @@
  * 部署：wrangler deploy（wrangler.toml）。回滾：把 SSR_ROUTES 清空重部署，就回到純代理。
  */
 
-import { render, SUPABASE_PUBLIC } from '../dist-ssr/entry-server.js'
+import { render, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr/entry-server.js'
 import { classifyRead } from './ai-reads.js'
+import { handleMarkdown } from './markdown.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
@@ -59,6 +61,35 @@ function countRead(request, ctx) {
       }).catch(() => undefined),
     )
   } catch { /* 記不成就算了 */ }
+}
+
+/** 預產快取表 data_md_cache 的一列（只用 anon 讀）；表還沒建（migration 還沒套）當作沒有 */
+async function fetchCacheRow(key) {
+  if (!SUPABASE_PUBLIC.url || !SUPABASE_PUBLIC.anonKey) throw new Error('沒有 Supabase 連線資訊')
+  const r = await fetch(`${SUPABASE_PUBLIC.url}/rest/v1/data_md_cache?path=eq.${encodeURIComponent(key)}&select=body,meta,generated_at,changed_at,content_sha,row_count&limit=1`, {
+    headers: { apikey: SUPABASE_PUBLIC.anonKey, Authorization: `Bearer ${SUPABASE_PUBLIC.anonKey}` },
+  })
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`data_md_cache ${r.status}`)
+  const rows = await r.json()
+  return rows[0] ?? null
+}
+
+/** 最新一屆的選舉網址那一段（排程腳本把矩陣存在 _matrix 那一列）；每個 isolate 記一分鐘 */
+let latestSegmentAt = 0
+let latestSegmentValue = null
+async function latestSegment() {
+  if (Date.now() - latestSegmentAt < 60_000) return latestSegmentValue
+  const row = await fetchCacheRow('_matrix')
+  let seg = null
+  try { seg = row ? JSON.parse(row.body).election.segment : null } catch { seg = null }
+  latestSegmentAt = Date.now()
+  latestSegmentValue = seg
+  return seg
+}
+
+function markdownWorkerDeps() {
+  return { ...markdownDeps, fetchCacheRow, latestSegment, cache: caches.default }
 }
 
 const ORIGIN = 'https://policy-tw.web.app'
@@ -205,9 +236,16 @@ export default {
       const body = await request.json().catch(() => ({}))
       const paths = Array.isArray(body.paths) ? body.paths.slice(0, 200) : []
       let n = 0
-      for (const p of paths) { if (await caches.default.delete(new Request(`${url.origin}${String(p).replace(/\/$/, '')}`, { method: 'GET' }))) n++ }
+      for (const p of paths) {
+        const clean = String(p).replace(/\/$/, '')
+        // 人物頁、縣市頁的 Markdown 版（本頁網址加 .md）一併清掉
+        for (const k of [clean, `${clean}.md`]) { if (await caches.default.delete(new Request(`${url.origin}${k}`, { method: 'GET' }))) n++ }
+      }
       return new Response(JSON.stringify({ purged: n }), { headers: { 'Content-Type': 'application/json' } })
     }
+    // Markdown 檢視（2026-10-07）：.md 一律在這裡收掉，不退回代理——代理會把 app.html 當成 200 回給想讀 Markdown 的 AI
+    const md = await handleMarkdown(request, ctx, markdownWorkerDeps())
+    if (md) return md
     const api = apiRedirect(request)
     if (api) return api
     // 縣市、鄉鎮原本放在查詢字串，搜尋引擎不當獨立頁；舊連結一律 301 到路徑版（縣市 2026-09-30、鄉鎮 2026-10-05）
