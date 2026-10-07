@@ -9,6 +9,7 @@ import {
   REQUIRED_ENV,
   runConsoleFetch,
 } from "../_shared/console-fetch.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import { verifyCaller } from "../_shared/console-fetch-auth.ts";
 
 /**
@@ -16,9 +17,10 @@ import { verifyCaller } from "../_shared/console-fetch-auth.ts";
  * （policy-console.web.app）讀。從私人 repo policy-console 的 scripts/fetch.mjs 搬來（2026-10-07）：
  * 原本靠 GitHub Actions 每小時跑，GitHub 常跳過排程；改由 pg_cron 每小時第 17 分叫這支。
  *
- * 呼叫者驗證：x-cron-secret（pg_cron 從 Vault 帶）或 service role bearer，細節與理由見 _shared/console-fetch-auth.ts。
+ * 呼叫者驗證：x-cron-secret（pg_cron 從 Vault 帶；函式端用 RPC console_fetch_cron_secret_ok 請資料庫比對）或 service role bearer，
+ * 細節與理由見 _shared/console-fetch-auth.ts。
  * 環境變數（與 GitHub secrets 同名）：GCP_SA_KEY、ADSENSE_REFRESH_TOKEN、ADSENSE_CLIENT_ID、ADSENSE_CLIENT_SECRET；
- * 另有 CONSOLE_FETCH_CRON_SECRET（驗證用）、選用 ADSENSE_ACCOUNT。
+ * 選用 ADSENSE_ACCOUNT。驗證用的密鑰不在環境變數裡（只在 Vault）。
  * 缺環境變數：能寫 Firestore 就把失敗寫進 meta/status，並回 500，不靜默成功。
  * 單一資料源（GA 的某一站、AdSense）失敗只記進 meta/status、仍回 200（與 fetch.mjs 一致）；只有 Firestore 寫入本身壞掉才回 500。
  * 回應：{ success, missing_env?, sources: { "ga-tw": { state, message } … }, elapsed_ms }（不含任何金鑰）
@@ -29,9 +31,17 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ success: false, error: "method not allowed" }, 405);
 
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const check = await verifyCaller(req.headers, {
-    cronSecret: Deno.env.get("CONSOLE_FETCH_CRON_SECRET"),
-    serviceRoleKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+    serviceRoleKey,
+    checkCronSecret: serviceRoleKey && supabaseUrl
+      ? async (secret) => {
+        const { data, error } = await createClient(supabaseUrl, serviceRoleKey).rpc("console_fetch_cron_secret_ok", { p_secret: secret });
+        if (error) throw new Error(error.message);
+        return data === true;
+      }
+      : undefined,
   });
   if (!check.ok) return json({ success: false, error: check.error }, check.status);
 

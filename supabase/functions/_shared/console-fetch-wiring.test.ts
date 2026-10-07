@@ -29,7 +29,10 @@ Deno.test("console-fetch：POST 才收，而且在做任何事（讀金鑰、打
     assert(at > reject, `${later} 要排在驗證之後`);
   }
   assert(idx.includes('req.method !== "POST"'), "只收 POST");
-  assert(idx.includes('Deno.env.get("CONSOLE_FETCH_CRON_SECRET")') && idx.includes('Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")'), "驗證憑證來自環境變數");
+  // x-cron-secret 交給資料庫比對：用 Edge runtime 自帶的 URL 與 service role key 呼叫 RPC，函式端不持有密鑰
+  assert(idx.includes('Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")') && idx.includes('Deno.env.get("SUPABASE_URL")'), "驗證用的是 Edge runtime 自帶的環境變數");
+  assert(/createClient\(supabaseUrl, serviceRoleKey\)\s*\.rpc\("console_fetch_cron_secret_ok", \{ p_secret: secret \}\)/.test(idx), "要用 service role 呼叫 console_fetch_cron_secret_ok");
+  assert(!idx.includes("CONSOLE_FETCH_CRON_SECRET"), "函式端不再讀密鑰環境變數（密鑰只在 Vault）");
 });
 
 Deno.test("console-fetch：讀的環境變數名稱與 GitHub secrets 同名（另一台機器照這些名稱設 Supabase secrets）", async () => {
@@ -54,9 +57,43 @@ Deno.test("console-fetch 排程：每小時第 17 分、打 console-fetch、帶 
   assert(!/eyJ[A-Za-z0-9_-]{10,}/.test(sql), "不得有 JWT");
   assert(!/bearer\s+[A-Za-z0-9]/i.test(sql.replace(/--.*$/gm, "")), "SQL 本體不得寫死 Bearer");
   const body = sql.replace(/--.*$/gm, "");
-  assert(!/vault\.create_secret/.test(body), "建立 secret 不放在 migration（值不進版控）");
+  assert(!/create_secret\(\s*'/.test(body), "不得用寫死的字串建立 secret（值不進版控）");
   // 重複套用安全：先 unschedule（存在才做）再 schedule
   assertEquals(sql.includes("cron.unschedule('console-fetch-hourly')"), true);
+});
+
+Deno.test("console-fetch 密鑰：migration 在 Vault 沒有時才自己產隨機值（32 位元組），已經有就不動", async () => {
+  const { sql } = await cronMigration();
+  const body = sql.replace(/--.*$/gm, "");
+  const m = /IF NOT EXISTS \(SELECT 1 FROM vault\.decrypted_secrets WHERE name = 'console_fetch_cron_secret'\) THEN\s+PERFORM vault\.create_secret\(\s*encode\(extensions\.gen_random_bytes\(32\), 'hex'\),\s*'console_fetch_cron_secret'/.exec(body);
+  assert(m, "要有「沒有才建立」的保護，值來自 gen_random_bytes(32)，名稱 console_fetch_cron_secret");
+  assertEquals((body.match(/create_secret\(/g) ?? []).length, 1, "只有這一處建立 secret");
+});
+
+Deno.test("console-fetch RPC：SECURITY DEFINER、清空 search_path、比對 Vault、只授權 service_role（anon／authenticated／PUBLIC 不能執行）", async () => {
+  const { sql } = await cronMigration();
+  const body = sql.replace(/--.*$/gm, "");
+  const def = /CREATE OR REPLACE FUNCTION public\.console_fetch_cron_secret_ok\(p_secret text\)([\s\S]*?)\$\$;/.exec(body);
+  assert(def, "要定義 public.console_fetch_cron_secret_ok(p_secret text)");
+  assert(/RETURNS boolean/.test(def[1]));
+  assert(/SECURITY DEFINER/.test(def[1]), "要 SECURITY DEFINER（呼叫者讀不到 Vault）");
+  assert(/SET search_path = ''/.test(def[1]), "要清空 search_path");
+  assert(def[1].includes("vault.decrypted_secrets") && def[1].includes("name = 'console_fetch_cron_secret'"), "要跟 Vault 的那一筆比");
+  assert(/extensions\.digest\(s\.decrypted_secret, 'sha256'\) = extensions\.digest\(p_secret, 'sha256'\)/.test(def[1]), "比摘要不比原字串");
+  assert(/length\(p_secret\) >= 16/.test(def[1]), "太短的輸入不通過");
+  const defAt = body.indexOf("CREATE OR REPLACE FUNCTION public.console_fetch_cron_secret_ok");
+  for (const role of ["PUBLIC", "anon", "authenticated"]) {
+    const re = new RegExp(`REVOKE ALL ON FUNCTION public\\.console_fetch_cron_secret_ok\\(text\\) FROM ${role};`);
+    const at = body.search(re);
+    assert(at > defAt, `要在建立函式之後收回 ${role} 的執行權`);
+  }
+  // 授權只有一條、只給 service_role；沒有任何一條把它授給 anon／authenticated／PUBLIC
+  const grants = body.match(/GRANT [^;]*console_fetch_cron_secret_ok[^;]*;/gi) ?? [];
+  assertEquals(grants.length, 1);
+  const grant = grants[0] ?? "";
+  assert(/GRANT EXECUTE ON FUNCTION public\.console_fetch_cron_secret_ok\(text\) TO service_role;/.test(grant));
+  assert(!/TO[^;]*\b(anon|authenticated|PUBLIC)\b/i.test(grant));
+  assert(body.indexOf("TO service_role;") > body.indexOf("FROM authenticated;"), "先收回再授權");
 });
 
 Deno.test("console-fetch：CI 的部署清單會包含它（affected-functions 從 index.ts 的相對 import 追到 _shared）", async () => {

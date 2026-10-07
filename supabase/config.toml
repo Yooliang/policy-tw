@@ -505,6 +505,6 @@ entrypoint = "./functions/source-archive/index.ts"
 [functions.console-fetch]
 enabled = true
 # 站務主控台的 GA4／AdSense 抓取寫進 Firestore（pg_cron 每小時第 17 分呼叫）。閘道不驗 JWT 是為了讓 pg_cron 打得到，
-# 但函式自己驗呼叫者：x-cron-secret（＝CONSOLE_FETCH_CRON_SECRET）或 service role bearer，沒設定憑證時一律拒絕
+# 但函式自己驗呼叫者：x-cron-secret（密鑰只在 Vault，函式用 RPC console_fetch_cron_secret_ok 請資料庫比對）或 service role bearer，驗不過一律拒絕
 verify_jwt = false
 entrypoint = "./functions/console-fetch/index.ts"
