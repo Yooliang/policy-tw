@@ -5,8 +5,8 @@
  * 查過的結果：2026-01 早期整批匯入那段時間寫進來的——2024 那一段參選紀錄的 id 從 344xx 起，這三筆排在最前面；
  * 沒有任何交件（contributions）建立它們，查核履歷（edit_history）也是空的（那時還沒有履歷），
  * 01-31 的 migration 20260131100007 再把 2022／2024 全部標成「中選會官方資料」、已核對，連它們一起蓋了章。
- * 現在還能寫人物的路：交件落庫（politician／candidacy）、管理端的匯入端點（import-candidate、batch-import-candidates、
- * ai-import-candidate、ai-action，都走 candidate-import.ts 的 ensurePolitician）。另外 09-19 有一筆姓名就叫「測試」的 politician 交件還在等票。
+ * 現在還能寫人物的路：交件落庫（politician／candidacy，走 candidate-import.ts 的 ensurePolitician；管理端的匯入端點
+ * import-candidate、batch-import-candidates、ai-import-candidate、ai-action 已在 2026-10-07 下架）。另外 09-19 有一筆姓名就叫「測試」的 politician 交件還在等票。
  *
  * 守門三層：交件當下（contribution-schema.ts，400 不算被拒）、建人物時（ensurePolitician 拒建）、資料庫觸發器
  * （migration 20261006140000 的 politician_name_is_placeholder，任何寫入端新增或改名成測試名都擋——連查不到來路的那種）。
