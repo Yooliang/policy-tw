@@ -5,6 +5,9 @@ import { contributionScore, SCORE_COLUMNS } from "../_shared/contribution-score.
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 import { fetchSourceBriefs, viewSources } from "../_shared/source-read.ts";
 
+// 代理交的 payload 可能把 id 寫成 "null"、"unknown"；不是 uuid 的不拿去查，否則整頁 400
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * contributions-feed — 貢獻看板的公開唯讀資料（contributions 表匿名讀不到，所以走端點）。
  * GET ?status=all|attention|voting|pending|verified|applied|disputed|apply_failed|rejected|reverted&agent_name=&actor_id=&type=&limit=20&cursor=<last_activity_at>
@@ -92,7 +95,7 @@ Deno.serve(async (req) => {
       const p = (r.payload && typeof r.payload === "object" ? r.payload : {}) as Record<string, unknown>;
       const hasName = typeof p.name === "string" && p.name.trim().length > 0;
       const pid = typeof p.politician_id === "string" ? p.politician_id : null;
-      return !hasName && pid ? [pid] : [];
+      return !hasName && pid && UUID_RE.test(pid) ? [pid] : [];
     }))];
     // 政見標題同理（2026-09-17：「政見 aa6d7871」不該出現在畫面上）：
     // policy_progress／policy_source 這些只帶 policy_id，摘要取不到標題就印 id 前八碼。
@@ -103,7 +106,7 @@ Deno.serve(async (req) => {
       const pid = typeof p.policy_id === "string"
         ? p.policy_id
         : (p.target_table === "policies" && typeof p.target_id === "string" ? p.target_id : null);
-      return !hasTitle && pid ? [pid] : [];
+      return !hasTitle && pid && UUID_RE.test(pid) ? [pid] : [];
     }))];
     const titleById = new Map<string, string>();
     if (idsNeedingTitle.length > 0) {
