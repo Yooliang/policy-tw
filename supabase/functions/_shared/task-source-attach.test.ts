@@ -80,3 +80,34 @@ Deno.test("手動任務 target 帶 politician_id：即使 task_type 不在自動
   const hints = data.verification_sources ?? [];
   assertEquals(hints.length > 0, true);
 });
+
+// 2026-10-08：村里長清查任務的 target.region 是「台北市松山區」（縣市＋鄉鎮市區），verification_sources.regions 是縣市清單，
+// 以前純字串比對永遠比不到，村里長任務附不到名冊；正式庫也有 3 筆任務 target、2 筆交件寫「臺」。
+const VILLAGE_SOURCE = {
+  id: 9, name: "中選會 2026 村里長候選人登記彙總表", kind: "cec", party: null,
+  regions: ["台北市", "新北市", "屏東縣"], election_types: ["村里長"], provides: ["candidacy", "roster"],
+  list_url: "https://web.cec.gov.tw/api/file/f1abbda2-229b-4a02-8dfb-58beb3ceca61.pdf", detail_url_pattern: null,
+  access: "pdf", quality_note: null, how_to: "找本人那一列", last_checked: "2026-10-08", status: "ok", sort: 5,
+};
+async function villageHints(target: Record<string, unknown>) {
+  resetVerificationSourcesCache();
+  const { client } = createFakeSupabase({ ...seed(), verification_sources: [...SOURCES, VILLAGE_SOURCE] });
+  const data = await fetchTaskContext(client, "roster_check", target);
+  return (data.verification_sources ?? []).map((h) => h.name);
+}
+
+Deno.test("村里長清查：target.region 是「縣市＋鄉鎮市區」也附得到村里長名冊（有 county 用 county）", async () => {
+  assertEquals((await villageHints({ region: "台北市松山區", county: "台北市", township: "松山區", election_type: "村里長" })).includes(VILLAGE_SOURCE.name), true);
+  // 沒有 county（舊任務）：從 region 取縣市前綴
+  assertEquals((await villageHints({ region: "屏東縣屏東市", election_type: "村里長" })).includes(VILLAGE_SOURCE.name), true);
+});
+
+Deno.test("村里長清查：不在名冊縣市清單裡的縣市、別的選舉別，不會附到這份名冊（負向）", async () => {
+  assertEquals((await villageHints({ region: "宜蘭縣宜蘭市", county: "宜蘭縣", election_type: "村里長" })).includes(VILLAGE_SOURCE.name), false);
+  assertEquals((await villageHints({ region: "台北市松山區", county: "台北市", election_type: "縣市議員" })).includes(VILLAGE_SOURCE.name), false);
+});
+
+Deno.test("臺／台：任務 target 寫「臺北市」「臺北市松山區」也比得到「台北市」的來源", async () => {
+  assertEquals((await villageHints({ region: "臺北市", election_type: "村里長" })).includes(VILLAGE_SOURCE.name), true);
+  assertEquals((await villageHints({ region: "臺北市松山區", election_type: "村里長" })).includes(VILLAGE_SOURCE.name), true);
+});

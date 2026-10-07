@@ -44,7 +44,7 @@ import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FO
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
-import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, type RosterRow } from "../_shared/cec-roster.ts";
+import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
 const corsHeaders = {
@@ -804,12 +804,24 @@ Deno.serve(async (req) => {
       }
       const report: Array<Record<string, unknown>> = [];
       // 一輪最多讀 3 份名冊（PDF 抽字吃記憶體；見 precheck 那次 WORKER_RESOURCE_LIMIT）
-      for (const [url, group] of [...byUrl.entries()].slice(0, 3)) {
+      // 太大的名冊（村里長 7.5 MB，> ROSTER_MAX_BYTES）不在 Edge 上抽字：那批照舊交人工驗證，回報寫原因；
+      // 它不佔那 3 份的名額（不然每輪都排在前面、後面的名冊永遠輪不到）
+      let read = 0;
+      for (const [url, group] of byUrl.entries()) {
+        if (read >= 3) break;
         let rows: RosterRow[];
-        try { rows = parseRoster(await cecRosterText(url)); } catch (e) { report.push({ url, error: e instanceof Error ? e.message : String(e) }); continue; }
+        try {
+          rows = parseRoster(await cecRosterText(url));
+          read++;
+        } catch (e) {
+          if (e instanceof RosterTooLargeError) { report.push({ url, skipped: `${e.message}；這 ${group.length} 筆沒有系統票，照舊交人工驗證` }); continue; }
+          read++;
+          report.push({ url, error: e instanceof Error ? e.message : String(e) });
+          continue;
+        }
         // 解析出的人比要核對的還少，多半是這份名冊的版面沒認出來：整份跳過、不判，免得把對的判成「不支持」（09-24 嘉義縣名冊誤判 5 筆）
         if (rows.length < Math.max(10, group.length)) { report.push({ url, skipped: `名冊只解析出 ${rows.length} 位，少於要核對的 ${group.length} 筆，這份先不判` }); continue; }
-        const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null, district: typeof c.payload.electoral_district === "string" ? c.payload.electoral_district : null })));
+        const check = checkBatch(rows, group.map((c) => ({ id: c.id, name: String(c.payload.name), party: typeof c.payload.party === "string" ? c.payload.party : null, region: typeof c.payload.region === "string" ? c.payload.region : null, district: typeof c.payload.electoral_district === "string" ? c.payload.electoral_district : null, sub_region: typeof c.payload.sub_region === "string" ? c.payload.sub_region : null, village: typeof c.payload.village === "string" ? c.payload.village : null })));
         // 超過一半「找不到姓名」多半是版面沒認出來（09-24 宜蘭縣名冊 34 筆全誤判）：整份不判，交給人逐筆驗
         const notFound = check.failed.filter((f) => f.reason.includes("找不到")).length;
         if (notFound * 2 > group.length) { report.push({ url, rows_parsed: rows.length, skipped: `${notFound}／${group.length} 筆找不到姓名，疑似名冊版面沒認出來，這份先不判` }); continue; }
