@@ -136,7 +136,7 @@ Deno.test("交件當下擋測試名（politician、candidacy）", () => {
   assert(badC.errors.some((e) => e.path === "payload.name"));
 });
 
-Deno.test("建人物時拒建（管理端匯入端點與落庫共用的 ensurePolitician）", async () => {
+Deno.test("建人物時拒建（落庫與派工 dry-run 共用的 ensurePolitician）", async () => {
   const src = lf(await Deno.readTextFile(new URL("./candidate-import.ts", import.meta.url)));
   const i = src.indexOf("if (isPlaceholderName(name)) throw new Error(");
   const j = src.indexOf('.from("politicians")\n    .insert({');
