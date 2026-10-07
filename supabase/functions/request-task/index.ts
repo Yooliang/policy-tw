@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { siteUrl } from "../_shared/site.ts";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
 import { createTask, findOpenTaskForTarget, findRecentAuditTask } from "../_shared/task-admin.ts";
@@ -19,7 +20,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 // 這是前端頁面的網址：部署這支之前，正式站的 /tasks 要先是 200（前端先上、這支後上）。
-const BOARD_URL = "https://policy-tw.web.app/tasks";
+const boardUrl = () => `${siteUrl()}/tasks`;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status = 200): Response {
@@ -88,7 +89,7 @@ Deno.serve(async (req) => {
       supabase.rpc("contribution_auto_task_counts", { p_region: null }),
     ]);
     const autoTotal = ((counts ?? []) as Array<{ total: number }>).reduce((a, r) => a + Number(r.total), 0);
-    const base = { queue_position: openManual ?? 0, open_tasks: (openManual ?? 0) + autoTotal, board_url: BOARD_URL };
+    const base = { queue_position: openManual ?? 0, open_tasks: (openManual ?? 0) + autoTotal, board_url: boardUrl() };
 
     const decision = decideRequest({
       usedToday: usedToday ?? 0,

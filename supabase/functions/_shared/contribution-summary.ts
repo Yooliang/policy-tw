@@ -3,7 +3,7 @@
  * 純函式，可測。
  */
 
-export const SITE_URL = "https://policy-tw.web.app";
+import { siteUrl } from "./site.ts";
 export const SUMMARY_TEXT_LIMIT = 200;
 
 /** 貢獻榜最多列幾名 */
@@ -26,6 +26,10 @@ export function leaderboardScore(v: { submitted: number; applied: number; verifi
 
 /**
  * 不列入貢獻榜與「近 30 天貢獻者」的代號：維護者自己開的測試與探測代理。
+ *
+ * **線上的真相是資料庫的 excluded_agents 表**（2026-10-07，盤點 #5；contribution_leaderboard、contribution_feed_summary
+ * 讀它，要加新的測試代號就 INSERT 一列、不用發版）。這份是 TS 參考實作（buildLeaderboard／buildFeedSummary，只有測試在用，
+ * 線上走 SQL）的預設值，等於 migration 20261008000010 的種子；excluded-agents.test.ts 對照所有 migration 的 INSERT，不一致就紅。
  * 它們交的資料是真的（有幾筆已通過驗證上線，那些不動），但它們不是外部參與者，
  * 留在榜上會把參與程度講得比實際好看——這個站的重點就是數字不能說謊。
  *
@@ -298,8 +302,8 @@ function finish(summary: string, targetName: string | null, politicianId: string
     target_name: targetName,
     politician_id: politicianId,
     policy_id: policyId,
-    politician_url: politicianId ? `${SITE_URL}/politician/${politicianId}` : null,
-    policy_url: policyId ? `${SITE_URL}/policy/${policyId}` : null,
+    politician_url: politicianId ? `${siteUrl()}/politician/${politicianId}` : null,
+    policy_url: policyId ? `${siteUrl()}/policy/${policyId}` : null,
   };
 }
 
@@ -361,6 +365,7 @@ export function buildLeaderboard(
   votes: readonly VoteRow[],
   windowDays: number | null,
   now: number = Date.now(),
+  excluded: ReadonlySet<string> = EXCLUDED_AGENTS,
 ): LeaderboardEntry[] {
   const since = windowDays === null ? null : now - windowDays * 86400 * 1000;
   const inWindow = (iso: string | null | undefined): boolean => {
@@ -387,7 +392,7 @@ export function buildLeaderboard(
     bump(agentOf(v)).verified_votes++;
   }
   return [...byAgent.entries()]
-    .filter(([agent_name]) => !EXCLUDED_AGENTS.has(agent_name))
+    .filter(([agent_name]) => !excluded.has(agent_name))
     .map(([agent_name, v]) => ({ agent_name, ...v, score: leaderboardScore(v) }))
     // 同分時先看上線、再看提交，讓名次穩定可預測（不要靠 Map 的插入順序）
     .sort((a, b) => b.score - a.score || b.applied - a.applied || b.submitted - a.submitted)
@@ -395,7 +400,7 @@ export function buildLeaderboard(
     .slice(0, LEADERBOARD_SIZE);
 }
 
-export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now(), adjudicating = 0): FeedSummary {
+export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: number = Date.now(), adjudicating = 0, excluded: ReadonlySet<string> = EXCLUDED_AGENTS): FeedSummary {
   const byStatus: Record<string, number> = {};
   const byAgent = new Map<string, { submitted: number; applied: number; verified_votes: number }>();
   const recentAgents = new Set<string>();
@@ -417,8 +422,8 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     if (r.status === "applied") a.applied++;
     const t = Date.parse(r.created_at);
     // 測試代號不算貢獻者，否則卡片上的「貢獻者（近 30 天）」會跟榜上的名單對不起來
-    if (!Number.isNaN(t) && t >= since30 && !EXCLUDED_AGENTS.has(agentOf(r))) recentAgents.add(agentOf(r));
-    if (!EXCLUDED_AGENTS.has(agentOf(r))) allAgents.add(agentOf(r));
+    if (!Number.isNaN(t) && t >= since30 && !excluded.has(agentOf(r))) recentAgents.add(agentOf(r));
+    if (!excluded.has(agentOf(r))) allAgents.add(agentOf(r));
     if (!Number.isNaN(t)) {
       const d = taiwanDate(t);
       if (d in daily) daily[d].count++;
@@ -441,8 +446,8 @@ export function buildFeedSummary(rows: SummaryRow[], votes: VoteRow[], now: numb
     contributors_30d: recentAgents.size,
     contributors_total: allAgents.size,
     daily_last_7: Object.entries(daily).map(([date, v]) => ({ date, ...v })),
-    leaderboard: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.all, now),
-    leaderboard_30d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d30, now),
-    leaderboard_7d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d7, now),
+    leaderboard: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.all, now, excluded),
+    leaderboard_30d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d30, now, excluded),
+    leaderboard_7d: buildLeaderboard(rows, votes, LEADERBOARD_WINDOWS.d7, now, excluded),
   };
 }

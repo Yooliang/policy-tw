@@ -6,6 +6,7 @@
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
+import { PROTOCOL_URL } from "./protocol.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
 import { withTaskPolitician } from "./task-politician.ts";
@@ -53,7 +54,6 @@ export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; c
     : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源 IP" };
 }
 export const DEDUPE_WINDOW_HOURS = 24;
-const SITE_URL = "https://policy-tw.web.app";
 
 export interface HandlerResult {
   status: number;
@@ -795,7 +795,7 @@ export async function handleContribute(
   if (results.every((r) => r.status === "already_submitted")) {
     return {
       status: 409,
-      body: { success: false, error: "already_submitted", message: results[0].message, ...(single ? results[0] : { results }), docs: `${SITE_URL}/skill.md` },
+      body: { success: false, error: "already_submitted", message: results[0].message, ...(single ? results[0] : { results }), docs: PROTOCOL_URL },
     };
   }
   // agent_tool 只填別名（claude-code/haiku）時統計拆不出版本：不擋件，附一句提醒（協議 1.44.0）
@@ -821,7 +821,7 @@ export async function handleContribute(
       ...(single ? results[0] : { results }),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
       ...(toolNotice || strippedCount > 0 || levelNotice ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : "", levelNotice].filter(Boolean).join("\n") } : {}),
-      docs: `${SITE_URL}/skill.md`,
+      docs: PROTOCOL_URL,
     },
   };
 }

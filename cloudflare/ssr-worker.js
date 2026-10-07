@@ -16,7 +16,8 @@
  * 部署：wrangler deploy（wrangler.toml）。回滾：把 SSR_ROUTES 清空重部署，就回到純代理。
  */
 
-import { render, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr/entry-server.js'
+import { render, configureSsr, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr/entry-server.js'
+import { readWorkerConfig } from './worker-config.js'
 import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
@@ -92,8 +93,8 @@ function markdownWorkerDeps() {
   return { ...markdownDeps, fetchCacheRow, latestSegment, cache: caches.default }
 }
 
-const ORIGIN = 'https://policy-tw.web.app'
-const ORIGIN_HOST = 'policy-tw.web.app'
+// 上游網址與快取時間讀環境變數（wrangler.toml 的 [vars]，worker-config.js 給預設與範圍；2026-10-07）。每個請求開頭由 fetch() 重讀一次
+let cfg = readWorkerConfig({})
 // /lineage/:id：政策脈絡頁（#349，2026-10-06），跟政見頁一樣現場渲染、可被收錄（canonical 指正見.tw）
 const SSR_ROUTES = [/^\/politician\/[^/]+\/?$/, /^\/policy\/[^/]+\/?$/, /^\/lineage\/[^/]+\/?$/]
 /**
@@ -124,8 +125,6 @@ function apiRedirect(request) {
   return new Response(body, { status: 307, headers: { Location: target, 'Content-Type': 'application/json; charset=utf-8', 'X-Served-Via': 'cloudflare-worker', 'Cache-Control': 'no-store' } })
 }
 
-const CACHE_TTL_S = 600
-const STALE_TTL_S = 3600
 const DROP_REQUEST_HEADERS = ['host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'cf-worker', 'x-forwarded-proto', 'x-real-ip']
 
 /** 客戶端殼：每個 isolate 抓一次、10 分鐘後重抓（部署後最多 10 分鐘拿到舊 assets 清單） */
@@ -134,7 +133,7 @@ let shellAt = 0
 async function loadShell() {
   if (!shellPromise || Date.now() - shellAt > 10 * 60 * 1000) {
     shellAt = Date.now()
-    shellPromise = fetch(`${ORIGIN}/app.html`, { headers: { 'User-Agent': 'policy-tw-ssr' } })
+    shellPromise = fetch(`${cfg.origin}/app.html`, { headers: { 'User-Agent': 'policy-tw-ssr' } })
       .then((r) => { if (!r.ok) throw new Error(`shell ${r.status}`); return r.text() })
       .then((html) => html.replace(/\s*<meta name="robots" content="noindex">/, ''))
       .catch((e) => { shellPromise = null; throw e })
@@ -172,7 +171,7 @@ async function proxy(request) {
   const incoming = new URL(request.url)
   // 縣市頁、鄉鎮頁：預渲染檔放在 ASCII 路徑（中文目錄在 Firebase 上比對不保證），只有 GET／HEAD 需要
   const upstreamPath = (request.method === 'GET' || request.method === 'HEAD') ? (regionUpstreamPath(incoming.pathname) ?? incoming.pathname) : incoming.pathname
-  const target = new URL(upstreamPath + incoming.search, ORIGIN)
+  const target = new URL(upstreamPath + incoming.search, cfg.origin)
   const headers = new Headers(request.headers)
   for (const h of DROP_REQUEST_HEADERS) headers.delete(h)
   headers.set('X-Forwarded-Host', incoming.host)
@@ -183,8 +182,8 @@ async function proxy(request) {
   const location = out.get('Location')
   if (location) {
     try {
-      const l = new URL(location, ORIGIN)
-      if (l.host === ORIGIN_HOST) { l.protocol = 'https:'; l.host = incoming.host; out.set('Location', l.toString()) }
+      const l = new URL(location, cfg.origin)
+      if (l.host === cfg.originHost) { l.protocol = 'https:'; l.host = incoming.host; out.set('Location', l.toString()) }
     } catch { /* 原樣 */ }
   }
   out.set('X-Served-Via', 'cloudflare-worker')
@@ -199,7 +198,7 @@ async function renderPage(request, ctx) {
   const hit = await cache.match(cacheKey)
   if (hit) {
     const age = Number(hit.headers.get('X-Rendered-At') ?? 0)
-    if (Date.now() - age > CACHE_TTL_S * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache).catch(() => undefined))
+    if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache).catch(() => undefined))
     const h = new Headers(hit.headers); h.set('X-Cache', 'HIT')
     return new Response(hit.body, { status: hit.status, headers: h })
   }
@@ -212,7 +211,7 @@ async function renderAndStore(path, origin, cacheKey, cache) {
   if (r.status === 'passthrough') return null
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': `public, max-age=0, s-maxage=${STALE_TTL_S}`,
+    'Cache-Control': `public, max-age=0, s-maxage=${cfg.staleTtlS}`,
     'X-Served-Via': 'cloudflare-worker-ssr',
     'X-Rendered-At': String(Date.now()),
     'X-Cache': 'MISS',
@@ -229,6 +228,8 @@ async function renderAndStore(path, origin, cacheKey, cache) {
 
 export default {
   async fetch(request, env, ctx) {
+    cfg = readWorkerConfig(env)
+    configureSsr({ baseTtlMs: cfg.baseTtlMs })
     const url = new URL(request.url)
     countRead(request, ctx)
     if (request.method === 'POST' && url.pathname === '/__purge') {

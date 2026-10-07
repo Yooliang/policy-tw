@@ -21,7 +21,7 @@ node scripts/serve-dist.mjs 4180          # 本機模擬 Firebase Hosting（clea
 
 # Edge Functions 測試（CI 也跑）
 cd supabase/functions && deno test --allow-read _shared/
-deno test --allow-read lib/policy-date.test.ts lib/retry.test.ts lib/activity.test.ts lib/url.test.ts lib/policy-visibility.test.ts lib/politician-office.test.ts   # 完整清單見 .github/workflows/ci.yml
+deno test --allow-read lib/ cloudflare/   # 前端純函式；整個資料夾，新的 *.test.ts 不用登記（.github/workflows/ci.yml 同一行）
 deno run --allow-read scripts/scan-secrets.ts
 
 # Database / Edge Functions
@@ -120,7 +120,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 內容頁（建置時預渲染；其中 `/policy/:policyId`、`/politician/:politicianId` 與下面的 `/lineage/:lineageId` 預設改由正見.tw 的 Worker 邊緣渲染、只進網站地圖）：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/elections`（選舉一覽：今後／過去，依投票日切，`lib/election-list.ts`；#344）、`/election/:electionId`、`/election/:electionId/:region`（縣市頁）、`/election/:electionId/:region/:subRegion`（鄉鎮頁，2026-10-05；舊的 `?sub=` 由正見.tw 的 Worker 301）、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`、`/politicians`（人物一覽，依姓氏筆畫分組，各組一頁 `/politicians/:筆畫數`）、`/parties`（政黨一覽）、`/party/:id`（各黨頁，id＝內政部政黨編號；#346：名單在建置端算好放進快照，從站內別頁換頁進來沒有快照就整頁載入預渲染那一份，`lib/full-load.ts`）；`/lineage/:lineageId`（政策脈絡頁，#349）跟政見頁、人物頁一樣由正見.tw 的 Worker 邊緣渲染、只進網站地圖，`/analysis` 是脈絡一覽
 
-客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/election/:electionId/matrix`（政見矩陣：縣市×分類的政見筆數，讀預產快取表；路由要排在縣市頁前面）、`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/ai`（2026-10-03 起 AI 讀取與各模型表現，從統計頁搬來）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
+客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/election/:electionId/matrix`（政見矩陣：縣市×分類的政見筆數，讀預產快取表；路由要排在縣市頁前面）、`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/ai`（2026-10-03 起 AI 讀取與各模型表現，從統計頁搬來）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai；`/admin/import` 2026-10-07 起轉到 `/admin/dashboard`；scraper 2026-09-23 隨 `add-politician` 下架）
 
 共用元件在 `components/`；選舉頁子元件在 `pages/election/`。
 
@@ -137,6 +137,12 @@ VITE_SUPABASE_ANON_KEY=<anon-key>
 ```
 anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等非 anon 的金鑰。
 
+**營運參數（2026-10-07 起，都有預設值、寫壞一律退回預設，不必發版就能調）**：
+- 站點網址：Edge Function 的 `SITE_URL`（Supabase secrets，`_shared/site.ts`；人物頁、政見頁、任務看板連結）、前端與 sitemap 的 `VITE_SITE_URL`（`lib/site.ts`、`scripts/postbuild-ssg.mjs`）；預設都是 正見.tw。`index.html` 的 og 標籤是靜態的，換網域要手改（測試盯著）。**`PROTOCOL_URL`（policy-tw.web.app/skill.md）不屬於這一組**，有 `protocol-guard.test` 守
+- 邊緣 Worker（`wrangler.toml` 的 `[vars]`，範圍與預設在 `cloudflare/worker-config.js`）：`SSR_CACHE_TTL_S`（600）、`SSR_STALE_TTL_S`（3600）、`SSR_BASE_TTL_S`（600）、`ORIGIN`
+- Jev 版本（Supabase secrets，`_shared/system-one.ts`）：`JEV_MODEL`（OpenRouter 退路）、`TYPESAFE_JEV_MODEL`（直連 TypeSafe）；要填具體版本、不要填 alias
+- 貢獻榜不列入的測試代號：資料表 `excluded_agents`（`INSERT` 一列就生效）
+
 ## Key Conventions
 
 - 所有頁面透過 `useSupabase()` 取資料；重資料一律 `ensure*()` 按需載入，不要在 `fetchAll` 裡加東西
@@ -149,13 +155,12 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
-## Edge Functions（`supabase/functions/`，共 39 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
+## Edge Functions（`supabase/functions/`，共 25 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻；2026-02 的舊 AI 管線 13 支〔`ai-*` 九支、`add-policy`、`update-politician`、`import-candidate`、`debug-prompts`〕2026-10-07 下架、後台「資料匯入」頁與 `batch-import-candidates` 同日一併拆除，見 `docs/DECISIONS.md`）
 
 - 代理身分：`ditrust-agent`（登入者向 DiTrust 開戶、看序號、改代號；正見不存序號，見 `docs/BLUEPRINT-agent-identity.md`）
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）、`sources`（查證來源清單，無金鑰，見 `/sources` 頁與 2026-09-28 裁決）
-- 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
+- 資料維護（都要管理員登入或金鑰）：`fetch-cec-data`
 - 排程抓取（不驗 JWT，靠冷卻時間防濫用）：`cec-verify`（每 10 分鐘，拿中選會資料機器查證 pending 的參選／人物貢獻，對得上直接落庫，見 `docs/CONTRIBUTIONS-ADMIN.md`）、`cec-sync`（2026-10-06 起每個單位順手把名單上的選舉區記進 `election_districts`、算投票率寫 `elections.turnout`，名冊的推薦政黨原字存進 `cec_candidates.party`；議員與代表的應選名額不同步，走 `district_seats_missing` 任務；2026-10-07 起 2022、2024 與補選重行選舉各有既有週排程，2026 年以後的選舉由 `cec_sync_phase(投票日, 事由)` 依投票日自動換頻率〔開票夜每 10 分鐘、之後每 6 小時、兩週後每週〕，場次靠投票日對、不用設定表，開票夜看視圖 `cec_sync_status`，body 可帶 `min_interval_hours`）、`moi-sync`、`news-fetch`（新聞來源 `news_sources` 每小時逐則收進 `news_items`，收完觸發 `system-one?action=news_screen` 初篩派工，2026-09-29）；`source-archive`（選舉公報／選委會公告類出處每 10 分鐘送 Wayback Machine 存檔，寫 `sources.archive_url`，#347）
-- AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy／news_screen／results_batch／reassign_check）；`reassign_check` 是參選紀錄改掛（`reassign_candidacy`）的系統票：中選會名冊那一列的出生年核新舊兩人，照現有 ±1 規則（2026-10-06）；`results_batch` 是整批補選舉結果（`election_results`）的系統票：逐位核對中選會名單（SQL `election_results_system_check`），全部對得上才投、目標 2−1＝1（2026-10-06）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 - `_shared/query-bounds.test.ts` 掃所有查詢鏈：沒 limit、`limit>1000`、翻頁沒 `.order` 都會紅（PostgREST max-rows=1000 靜默截斷）；真的有界就在那行上面寫 `// query-bounds: ok — 理由`
@@ -181,7 +186,6 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `supabase/migrations/` — 資料結構、RLS、派工與計分 SQL 的真相（不是文件，但「表長什麼樣」以它為準）
 - `.claude/skills/find-avatar.md` — `/find-avatar` 技能（見下一節）
 - `scripts/agent/` — 協議代理的最小參考實作（`agent_round.py`、`relay_jev_verify.py`）；沒有獨立說明檔，用法看檔頭註解
-- `policy-ai-skills/` — 2026-02 舊 Claude-PM 管線的 skill 提示（對應 `ai-*` 函式），**不是現行協議**，現行協議只看 `public/skill.md`
 
 **`docs/` 現行**
 

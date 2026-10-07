@@ -45,15 +45,19 @@ const KNOWN_ELECTION_TYPES: ReadonlySet<string> = new Set([
   "村里長",
 ]);
 
-const PARTY_ALIASES: Readonly<Record<string, string>> = {
+/**
+ * 身份比對鍵用的政黨寫法 → 標準寫法。只放「會改字」的對照（原字不變的不用列）。
+ *
+ * 政黨寫法的真相是資料庫的 party_aliases（#346）；這份與 SQL identity_norm_party() 因為要純函式／IMMUTABLE
+ * （身份鍵寫進 politician_identity_keys 後不能因為表變動而漂移）所以不能直接讀表，改由 party-alias-parity.test.ts
+ * 對照三邊：這份＝SQL identity_norm_party 的 WHEN 清單＝party_aliases 的種子資料（同一個政黨、或同為無黨籍）。
+ * 新增寫法：先加 party_aliases（migration），再同步這裡與 identity_norm_party，測試沒對上會紅。
+ * （原本還有 5 筆（原字不變的 4 筆，加「無」——「無」在 normText 就被當空值，到不了這裡）；拿掉不改任何輸出。）
+ */
+export const PARTY_ALIASES: Readonly<Record<string, string>> = {
   "國民黨": "中國國民黨",
-  "中國國民黨": "中國國民黨",
   "民進黨": "民主進步黨",
-  "民主進步黨": "民主進步黨",
   "民眾黨": "台灣民眾黨",
-  "台灣民眾黨": "台灣民眾黨",
-  "無": "無黨籍",
-  "無黨籍": "無黨籍",
   "無黨": "無黨籍",
   "無黨籍及未經政黨推薦": "無黨籍",
   "無黨籍及未經政黨推薦者": "無黨籍",

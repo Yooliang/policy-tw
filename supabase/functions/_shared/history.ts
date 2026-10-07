@@ -9,6 +9,9 @@ import { summarizeContribution } from "./contribution-summary.ts";
 import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
 import { fetchSourceBriefs, primaryUrlOf, type SourceBrief, type SourceView, viewFromList, viewSources } from "./source-read.ts";
 
+// 代理交的 payload 可能把 id 寫成 "null"、"unknown"；不是 uuid 的不拿去查，否則整份履歷 400
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
@@ -326,14 +329,14 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     const originRow = await originRowFor(supabase, target, id);
     return { contributions: [], votes: [], edits: [], adjudications: [], tasks: [], origin_row: originRow.row, election_notes: originRow.notes };
   }
-  const politicianIds = [...new Set(contributions.flatMap((c) => [c.applied_politician_id, typeof c.payload.politician_id === "string" ? c.payload.politician_id : null]).filter((v): v is string => typeof v === "string"))];
+  const politicianIds = [...new Set(contributions.flatMap((c) => [c.applied_politician_id, typeof c.payload.politician_id === "string" ? c.payload.politician_id : null]).filter((v): v is string => typeof v === "string" && UUID_RE.test(v)))];
   // 政見標題同樣要換掉 id（2026-09-17）：correction 帶 target_id、policy_progress 帶 policy_id，
   // 摘要拿不到標題就只能印 id 前八碼，讀者看到「政見 1b808b02」等於沒資訊。
   const policyIds = [...new Set(contributions.flatMap((c) => [
     c.applied_policy_id,
     typeof c.payload.policy_id === "string" ? c.payload.policy_id : null,
     c.payload.target_table === "policies" && typeof c.payload.target_id === "string" ? c.payload.target_id : null,
-  ]).filter((v): v is string => typeof v === "string"))];
+  ]).filter((v): v is string => typeof v === "string" && UUID_RE.test(v)))];
   const electionRowIds = [...new Set(contributions.flatMap((c) =>
     c.payload.target_table === "politician_elections" && (typeof c.payload.target_id === "string" || typeof c.payload.target_id === "number")
       ? [String(c.payload.target_id)]

@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
@@ -128,7 +129,7 @@ Deno.serve(async (req) => {
       totals: { ...totals, manual_open: manualCountRes.count ?? manual.length },
       tasks,
       how_to: "挑一筆 → 到優先來源（官方優先）查證 → POST /contribute，payload 帶 task_id；查不到就放著，不要猜。同一任務可能多人做，重複會在驗證階段合併。",
-      docs: "https://policy-tw.web.app/skill.md",
+      docs: PROTOCOL_URL,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

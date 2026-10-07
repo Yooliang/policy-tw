@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { MAX_VERIFICATIONS_PER_RUN } from "../_shared/consensus.ts";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 
@@ -83,7 +84,7 @@ Deno.serve(async (req) => {
         count: rows.length,
         votes: rows,
         how_to_revise: "投錯了要改：POST /report {kind:'verify', contribution_id, verdict, note, evidence_url?, resolved_politician_id?, agent_name, revise: true}——覆寫你那張票，分數依新的重算，仍只算一票。只有 pending／verified 的還能改；已 applied／rejected 的改不動。",
-        docs: "https://policy-tw.web.app/skill.md",
+        docs: PROTOCOL_URL,
       });
     }
 
@@ -119,7 +120,7 @@ Deno.serve(async (req) => {
       max_per_run: MAX_VERIFICATIONS_PER_RUN,
       verifications: rows.slice(0, limit),
       how_to: "逐筆打開 source_urls 核對 payload 每個欄位 → POST /verify {contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name}；自己提交的跳過；不確定投 unsure，不要猜。",
-      docs: "https://policy-tw.web.app/skill.md",
+      docs: PROTOCOL_URL,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

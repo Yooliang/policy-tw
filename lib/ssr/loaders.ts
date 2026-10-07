@@ -18,11 +18,16 @@ import { fetchAllPages } from '../fetch-all-pages'
  */
 
 /** 基礎資料（選舉／分類／地區）：每個 isolate 撈一次、10 分鐘後重撈；這三張表幾天才變一次 */
-const BASE_TTL_MS = 10 * 60 * 1000
+const DEFAULT_BASE_TTL_MS = 10 * 60 * 1000
+let baseTtlMs = DEFAULT_BASE_TTL_MS
+/** Worker 依環境變數 SSR_BASE_TTL_S 設定（cloudflare/worker-config.js 給預設與範圍）；不是正整數就忽略 */
+export function setBaseTtlMs(ms: number): void {
+  if (Number.isFinite(ms) && ms > 0) baseTtlMs = ms
+}
 let basePromise: Promise<DataSnapshot> | null = null
 let baseAt = 0
 export function loadBase(): Promise<DataSnapshot> {
-  if (!basePromise || Date.now() - baseAt > BASE_TTL_MS) {
+  if (!basePromise || Date.now() - baseAt > baseTtlMs) {
     baseAt = Date.now()
     basePromise = (async () => {
       const { fetchAll } = useSupabase()

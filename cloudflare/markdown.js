@@ -106,7 +106,27 @@ export function notModified(request, headers) {
  * @param {Deps} deps
  * @returns {Promise<Response | null>}
  */
+/**
+ * 瀏覽器直接打開（網址列、點連結，Accept 帶 text/html）時改回 text/plain：text/markdown 瀏覽器會當成檔案下載，
+ * 點矩陣的「開 .md」只會跳下載、看不到內容（維護者 10-07）。程式（fetch、curl、NotebookLM）不送 text/html，照舊拿 text/markdown。
+ * 同一個網址兩種 Content-Type，所以帶 Vary: Accept，瀏覽器快取不會拿錯。
+ * @param {Request} request @param {Response|null} res
+ */
+export function adjustForBrowser(request, res) {
+  if (!res) return res
+  res.headers.append('Vary', 'Accept')
+  const accept = request.headers.get('Accept') || ''
+  if (accept.includes('text/html') && (res.headers.get('Content-Type') || '').startsWith('text/markdown')) {
+    res.headers.set('Content-Type', 'text/plain; charset=utf-8')
+  }
+  return res
+}
+
 export async function handleMarkdown(request, ctx, deps) {
+  return adjustForBrowser(request, await handleMarkdownRaw(request, ctx, deps))
+}
+
+async function handleMarkdownRaw(request, ctx, deps) {
   const isRead = request.method === 'GET' || request.method === 'HEAD'
   if (!isRead && request.method !== 'OPTIONS') return null
   const url = new URL(request.url)
