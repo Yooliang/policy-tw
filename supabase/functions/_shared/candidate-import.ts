@@ -1,5 +1,5 @@
 /**
- * 候選人匯入的共用流程（ai-action / ai-import-candidate / import-candidate / batch-import-candidates 共用）。
+ * 候選人匯入的共用流程（現在只有 batch-import-candidates 用；ai-action／ai-import-candidate／import-candidate 2026-10-07 已下架）。
  *
  * 全部查詢都走 maybeSingle() 並檢查 error——不再有「錯誤被當查無、再 insert」的路。
  */
@@ -197,8 +197,8 @@ export interface ParticipationInput {
 export type ParticipationOutcome = "created" | "updated" | "skipped";
 
 /**
- * 匯入端點（import-candidate／ai-import-candidate／ai-action）收的自由文字狀態 → 新欄位 candidacy_status。
- * 這幾支是管理端點、不是交件：status 寫 confirmed／likely／rumored 都可能。傳聞（rumored）與沒寫的回 null——
+ * 匯入端點收的自由文字狀態 → 新欄位 candidacy_status。
+ * 這是管理端點的流程、不是交件：status 寫 confirmed／likely／rumored 都可能。傳聞（rumored）與沒寫的回 null——
  * #345 起不收傳聞，新增時 upsertParticipation 不會建這一筆；likely 記成考慮參選。
  * confirmed 看這一屆的正式名單公告了沒（公告後記成已登記）。
  */

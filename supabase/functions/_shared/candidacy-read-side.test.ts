@@ -61,16 +61,6 @@ Deno.test("寫入端只寫 candidacy_status：upsertParticipation／落庫不再
   assertEquals(/election_result\s*:/.test(ep.replace(/\/\/.*$/gm, "")), false, "batch-import 不再寫 election_result");
 });
 
-Deno.test("三支匯入端點（ai-action／import-candidate／ai-import-candidate）不再寫傳聞：沒狀態或 rumored 就不建，回 skipped", async () => {
-  for (const name of ["ai-action", "import-candidate", "ai-import-candidate"]) {
-    const text = await Deno.readTextFile(new URL(`../${name}/index.ts`, import.meta.url));
-    assert(text.includes("importCandidacyStatus("), `${name} 要用 importCandidacyStatus 換狀態（傳聞回 null）`);
-    assertEquals(/candidate_status\s*:\s*candidate\.status/.test(text), false, `${name} 還在把 status 原樣寫成 candidate_status`);
-    assertEquals(/\|\|\s*["']rumored["']/.test(text), false, `${name} 還在預設 rumored`);
-    assert(text.includes('participation.outcome === "skipped"'), `${name} 要處理 skipped（不建傳聞）`);
-  }
-});
-
 // ── migration：函式與視圖不再讀舊兩欄；任期觸發器聽新欄位；職稱改讀任期表 ─────────
 
 Deno.test("migration 重定義的函式與視圖不再讀 politician_elections 的舊欄位", () => {

@@ -149,13 +149,12 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌），牴觸舊裁決要在那裡寫「更正」
 
-## Edge Functions（`supabase/functions/`，共 39 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻）
+## Edge Functions（`supabase/functions/`，共 26 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻；2026-02 的舊 AI 管線 13 支〔`ai-*` 九支、`add-policy`、`update-politician`、`import-candidate`、`debug-prompts`〕2026-10-07 下架，見 `docs/DECISIONS.md`）
 
 - 代理身分：`ditrust-agent`（登入者向 DiTrust 開戶、看序號、改代號；正見不存序號，見 `docs/BLUEPRINT-agent-identity.md`）
 - 外部貢獻協議（對應 `public/skill.md`）：`next`、`report`、`contribute`、`verify`、`apply`、`apply-verified`、`ask`、`tasks`、`request-task`、`history`、`verifications`、`contribution-status`、`contributions-feed`、`policy-stance`、`question-stance`、`boost`（插隊，無金鑰）、`sources`（查證來源清單，無金鑰，見 `/sources` 頁與 2026-09-28 裁決）
-- 資料維護（都要管理員登入或金鑰）：`add-policy`、`update-politician`、`import-candidate`、`batch-import-candidates`、`fetch-cec-data`
+- 資料維護（都要管理員登入或金鑰）：`batch-import-candidates`（後台「資料匯入」頁 `/admin/import` 還在用）、`fetch-cec-data`
 - 排程抓取（不驗 JWT，靠冷卻時間防濫用）：`cec-verify`（每 10 分鐘，拿中選會資料機器查證 pending 的參選／人物貢獻，對得上直接落庫，見 `docs/CONTRIBUTIONS-ADMIN.md`）、`cec-sync`（2026-10-06 起每個單位順手把名單上的選舉區記進 `election_districts`、算投票率寫 `elections.turnout`，名冊的推薦政黨原字存進 `cec_candidates.party`；議員與代表的應選名額不同步，走 `district_seats_missing` 任務；2026-10-07 起 2022、2024 與補選重行選舉各有既有週排程，2026 年以後的選舉由 `cec_sync_phase(投票日, 事由)` 依投票日自動換頻率〔開票夜每 10 分鐘、之後每 6 小時、兩週後每週〕，場次靠投票日對、不用設定表，開票夜看視圖 `cec_sync_status`，body 可帶 `min_interval_hours`）、`moi-sync`、`news-fetch`（新聞來源 `news_sources` 每小時逐則收進 `news_items`，收完觸發 `system-one?action=news_screen` 初篩派工，2026-09-29）；`source-archive`（選舉公報／選委會公告類出處每 10 分鐘送 Wayback Machine 存檔，寫 `sources.archive_url`，#347）
-- AI 管線（2026-02 的 Claude-PM 架構，正逐步被貢獻協議取代）：`ai-*`、`debug-prompts`
 - Jev（TypeSafe System One，決策模型）：`system-one`（record／ask／backfill／precheck／judge／extract／legacy／news_screen／results_batch／reassign_check）；`reassign_check` 是參選紀錄改掛（`reassign_candidacy`）的系統票：中選會名冊那一列的出生年核新舊兩人，照現有 ±1 規則（2026-10-06）；`results_batch` 是整批補選舉結果（`election_results`）的系統票：逐位核對中選會名單（SQL `election_results_system_check`），全部對得上才投、目標 2−1＝1（2026-10-06）；判決進 `jev_decisions`，`precheck` 對來源逐欄判定後以「系統票」參與共識（3+1 票，見 `contribution_system_vote`），`judge` 是給代理的免金鑰第二來源判定端點；抽 PDF／XLS 的 `import()` 必須是字串字面值（放變數線上會 Module not found）；設計與實測見 `docs/BLUEPRINT-jev-decisions.md`
 - 共用邏輯與測試在 `_shared/`；改門檻（SQL 與 TS 各一份）或改 `public/skill.md` 表格時，CI 的 `deno test` 會擋不一致
 - `_shared/query-bounds.test.ts` 掃所有查詢鏈：沒 limit、`limit>1000`、翻頁沒 `.order` 都會紅（PostgREST max-rows=1000 靜默截斷）；真的有界就在那行上面寫 `// query-bounds: ok — 理由`
@@ -181,7 +180,6 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `supabase/migrations/` — 資料結構、RLS、派工與計分 SQL 的真相（不是文件，但「表長什麼樣」以它為準）
 - `.claude/skills/find-avatar.md` — `/find-avatar` 技能（見下一節）
 - `scripts/agent/` — 協議代理的最小參考實作（`agent_round.py`、`relay_jev_verify.py`）；沒有獨立說明檔，用法看檔頭註解
-- `policy-ai-skills/` — 2026-02 舊 Claude-PM 管線的 skill 提示（對應 `ai-*` 函式），**不是現行協議**，現行協議只看 `public/skill.md`
 
 **`docs/` 現行**
 

@@ -138,18 +138,6 @@ Deno.test("前端與預渲染不讀舊欄位：型別、轉換、出處工具都
   assertEquals(/legacyUrl/.test(src), false, "lib/sources.ts 沒有舊欄位的退路");
 });
 
-Deno.test("舊 AI 管線（ai-action／ai-contribute／ai-update-progress）改寫出處表：insert 物件不帶 source_url，落庫後呼叫 writeLegacySources", async () => {
-  for (const name of ["ai-action", "ai-contribute", "ai-update-progress"]) {
-    const text = stripComments(await read(`../${name}/index.ts`));
-    assert(text.includes("writeLegacySources("), `${name} 要用 writeLegacySources 寫出處`);
-    for (const m of text.matchAll(/\.from\(\s*["'](policies|tracking_logs)["']\s*\)\s*\.(insert|update)\(\s*\{([^}]*)\}/g)) {
-      assertEquals(/\bsource_url\s*:/.test(m[3]), false, `${name} 的 ${m[1]}.${m[2]}({…}) 還在寫 source_url`);
-    }
-  }
-  const action = stripComments(await read("../ai-action/index.ts"));
-  assert(action.includes("listPolicySources("), "ai-action 查來源讀出處表");
-});
-
 Deno.test("派給代理的 lookup（REST 網址）不再叫代理 select 政見／進度的 source_url 欄（改讀視圖的 sources）", () => {
   const l = buildLookup({ politician_id: POL, policy_id: POLICY });
   for (const [k, url] of Object.entries(l)) {
