@@ -97,8 +97,8 @@ Deno.test("A1 總表與 seed 的前一版是對的：P1 緊接著 20261006141600
     const i = defining.indexOf(P1_MIG);
     assert(i > 0, `P1 要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做`);
-    // P1 之後只允許優先層那一版重新定義 seed（20261008090000，只機械式加優先層區塊，守門在 queue-priority.test.ts）；總表不允許
-    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql"] : [], `P1 之後又有人改了 ${fn}：新增派工臂請改這支總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
+    // P1 之後只允許兩支重新定義：優先層那一版改 seed（20261008090000，只機械式加優先層區塊，守門在 queue-priority.test.ts）、測試人物隔離那一版改總表（20261008114000，只機械式加 ph CTE 與最後的 WHERE，守門在 placeholder-isolation.test.ts）
+    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql"] : ["20261008114000_placeholder_task_isolation.sql"], `P1 之後又有人改了 ${fn}：新增派工臂請改這支總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
   }
 });
 
