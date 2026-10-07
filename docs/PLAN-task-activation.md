@@ -34,7 +34,7 @@
 | `raw` 的 policy_missing | policy_missing | 2026 候選人、非退選、名下零政見 | **寫死 `election_id = 2026`** |
 | `raw` 的 profile_gap | profile_gap | 2026 候選人缺生年／現職／照片 | **寫死 2026** |
 | `raw` 的 candidacy_source_missing | candidacy_source_missing | 2026 參選紀錄沒有可查證的網址 | **寫死 2026** |
-| `raw` 的 roster_check | roster_check | `roster_check_scope.enabled`；`recheck_days` 與嘗試冷卻；「登記階段／審定名單階段」文案看 `CURRENT_DATE >= list_announced_on` | 開關表＋日期比較（登記截止「2026-09-04」另寫死在文案裡） |
+| `raw` 的 roster_check | roster_check | `roster_check_scope.enabled`；`recheck_days` 與嘗試冷卻（2026-10-08 起：最近一次回報的 `cec_count` 大於我們 filed＋declared 時不套 `recheck_days`，見 DECISIONS 10-08）；「登記階段／審定名單階段」文案看 `CURRENT_DATE >= list_announced_on` | 開關表＋日期比較（登記截止「2026-09-04」另寫死在文案裡） |
 | `raw` 的 candidate_status_stale | candidate_status_stale | `registration_closed_on <= CURRENT_DATE` 而狀態還是傳聞／考慮 | 日期比較 |
 | `raw` 的 progress_stale | progress_stale | 90 天沒進度；**競選承諾要 `election_date < CURRENT_DATE`**；落選／退選排除 | 日期比較 |
 | `raw` 的 election_result_missing | election_result_missing | `election_date < CURRENT_DATE`＋結果空白＋名下有政見 | 日期比較 |
