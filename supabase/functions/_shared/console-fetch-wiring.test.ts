@@ -37,7 +37,35 @@ Deno.test("console-fetch：POST 才收，而且在做任何事（讀金鑰、打
 
 Deno.test("console-fetch：讀的環境變數名稱與 GitHub secrets 同名（另一台機器照這些名稱設 Supabase secrets）", async () => {
   const shared = await read("./console-fetch.ts");
-  assert(shared.includes('["GCP_SA_KEY", "ADSENSE_REFRESH_TOKEN", "ADSENSE_CLIENT_ID", "ADSENSE_CLIENT_SECRET"]'));
+  assert(shared.includes('REQUIRED_ENV = ["GCP_SA_KEY"] as const'), "只需要 GCP_SA_KEY（AdSense 的金鑰只在 GitHub）");
+});
+
+// 分工守門（2026-10-08）：GA 只在 Supabase 跑、AdSense 只在 GitHub 跑。
+// 這裡有任何 ADSENSE／adsense 的程式碼（讀環境變數、打 API、寫 adsense/ 文件、寫 meta/status 的 adsense 狀態）就會蓋掉 GitHub 寫的正常狀態。
+// 只檢查程式碼本身：註解可以提 AdSense 解釋分工，所以先剝掉註解（只剝整行註解、區塊註解與行尾「 // 」，不會誤剝網址的 ://）。
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
+
+Deno.test("console-fetch 分工守門：函式與 _shared 程式碼裡不得出現 ADSENSE／adsense（註解除外）", async () => {
+  const shared = await read("./console-fetch.ts");
+  for (const [name, src] of [["console-fetch/index.ts", idx], ["_shared/console-fetch.ts", shared]] as const) {
+    const code = stripComments(src);
+    assertEquals(code.match(/adsense/gi), null, `${name} 的程式碼不得提到 AdSense`);
+  }
+  // 剝註解的函式本身要有效：真的有 AdSense 呼叫時一定抓得到（以下是假的程式碼片段，不是 import）
+  assert(/adsense/i.test(stripComments('const r = await fetch("https://adsense.googleapis.com/v2/accounts"); // 打 API')));
+  assert(/adsense/i.test(stripComments('const k = Deno.env.get("ADSENSE_CLIENT_ID");')));
+  assert(!/adsense/i.test(stripComments(["// AdSense 在 GitHub", "/* AdSense */", "const x = 1; // AdSense"].join("\n"))));
+});
+
+Deno.test("console-fetch 分工守門：meta/status 只寫 updatedAt 與 GA 來源（寫入點只有一處、來源 id 只由 ga-<站> 組成）", async () => {
+  const shared = await read("./console-fetch.ts");
+  const code = stripComments(shared);
+  const writes = code.match(/store\.(merge|set)\(\s*["`]meta\/status["`][^;]*;/g) ?? [];
+  assertEquals(writes.length, 1, "meta/status 只有一個寫入點");
+  assert(/store\.merge\(\s*"meta\/status",\s*\{ updatedAt: nowIso\(\), sources: sourceStatus \}\)/.test(writes[0] ?? ""), "用 merge（帶 updateMask），欄位只有 updatedAt 與 sources");
+  const ids = [...code.matchAll(/setStatus\(\s*([^,]+),/g)].map((m) => (m[1] ?? "").trim());
+  assert(ids.length > 0 && ids.every((id) => id === "sid"), `setStatus 的來源 id 只能是 ga-<站>（sid）：${ids.join("|")}`);
+  assert(/const sid = `ga-\$\{siteId\}`/.test(code));
 });
 
 Deno.test("console-fetch：config.toml 有登記，verify_jwt 關（pg_cron 不帶 JWT），entrypoint 指對", () => {

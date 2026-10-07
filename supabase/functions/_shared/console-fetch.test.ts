@@ -1,7 +1,5 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
-  adsenseDocs,
-  adsenseParams,
   ApiError,
   backoffMs,
   base64Url,
@@ -28,7 +26,6 @@ import {
   scopeRequests,
   type Store,
   toTotals,
-  withAllSitesDomain,
 } from "./console-fetch.ts";
 
 // ---------- 假依賴 ----------
@@ -84,13 +81,14 @@ Deno.test("設定：與 policy-console 的 config/sites.json 一致", () => {
   assertEquals(Object.keys(CONSOLE_CONFIG.sites), ["tw", "jp"]);
   assertEquals(CONSOLE_CONFIG.backfillDays, 30);
   assertEquals(CONSOLE_CONFIG.maxHostsPerSite, 4);
-  assertEquals(CONSOLE_CONFIG.adsenseAccount, "accounts/pub-6687848895101003");
+  assertEquals("adsenseAccount" in CONSOLE_CONFIG, false, "AdSense 的設定不在這裡");
 });
 
-Deno.test("環境變數：缺哪些就回哪些名稱，空字串也算缺", () => {
-  assertEquals(missingEnv({}), ["GCP_SA_KEY", "ADSENSE_REFRESH_TOKEN", "ADSENSE_CLIENT_ID", "ADSENSE_CLIENT_SECRET"]);
-  assertEquals(missingEnv({ GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "", ADSENSE_CLIENT_ID: "y", ADSENSE_CLIENT_SECRET: "z" }), ["ADSENSE_REFRESH_TOKEN"]);
-  assertEquals(missingEnv({ GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "a", ADSENSE_CLIENT_ID: "y", ADSENSE_CLIENT_SECRET: "z" }), []);
+Deno.test("環境變數：只要 GCP_SA_KEY；缺了才算缺，空字串也算缺；ADSENSE_* 有沒有都不算", () => {
+  assertEquals(missingEnv({}), ["GCP_SA_KEY"]);
+  assertEquals(missingEnv({ GCP_SA_KEY: "" }), ["GCP_SA_KEY"]);
+  assertEquals(missingEnv({ GCP_SA_KEY: "x" }), []);
+  assertEquals(missingEnv({ GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "" }), []);
 });
 
 // ---------- GA 回應整理 ----------
@@ -125,63 +123,6 @@ Deno.test("listsFromReports：四份報表各自整理成 sources／landing／pa
   assertEquals(listsFromReports([{}, {}, {}, {}]), { sources: [], landing: [], pages: [], pairs: [] }, "沒有列也不會壞");
 });
 
-// ---------- AdSense 整理 ----------
-Deno.test("adsenseParams：自訂區間、依日期＋網域、帶帳號時區", () => {
-  const p = adsenseParams("2026-09-09", "2026-10-08");
-  assertEquals(p.get("dateRange"), "CUSTOM");
-  assertEquals([p.get("startDate.year"), p.get("startDate.month"), p.get("startDate.day")], ["2026", "9", "9"]);
-  assertEquals([p.get("endDate.year"), p.get("endDate.month"), p.get("endDate.day")], ["2026", "10", "8"]);
-  assertEquals(p.getAll("dimensions"), ["DATE", "DOMAIN_NAME"]);
-  assertEquals(p.getAll("metrics"), ["ESTIMATED_EARNINGS", "IMPRESSIONS", "CLICKS", "PAGE_VIEWS", "PAGE_VIEWS_RPM"]);
-  assertEquals(p.get("reportingTimeZone"), "ACCOUNT_TIME_ZONE");
-  assertEquals(adsenseParams("2026-09-09", "2026-10-08", ["DATE"]).getAll("dimensions"), ["DATE"]);
-});
-
-const adsenseReport = () => ({
-  headers: [
-    { name: "DATE", type: "DIMENSION" },
-    { name: "DOMAIN_NAME", type: "DIMENSION" },
-    { name: "ESTIMATED_EARNINGS", type: "METRIC_CURRENCY", currencyCode: "TWD" },
-    { name: "IMPRESSIONS", type: "METRIC_TALLY" },
-    { name: "CLICKS", type: "METRIC_TALLY" },
-    { name: "PAGE_VIEWS", type: "METRIC_TALLY" },
-    { name: "PAGE_VIEWS_RPM", type: "METRIC_RATIO" },
-  ],
-  rows: [
-    { cells: [{ value: "2026-10-07" }, { value: "a.tw" }, { value: "1.5" }, { value: "10" }, { value: "2" }, { value: "100" }, { value: "15" }] },
-    { cells: [{ value: "2026-10-07" }, { value: "b.tw" }, { value: "0.5" }, { value: "5" }, { value: "1" }, { value: "100" }, { value: "5" }] },
-    { cells: [{ value: "2026-10-08" }, { value: "a.tw" }, { value: "0" }, { value: "0" }, { value: "0" }, { value: "0" }, { value: "0" }] },
-  ],
-});
-
-Deno.test("adsenseDocs：每天一份、依網域列出、合計的頁面 RPM＝總收益 ÷ 總瀏覽 × 1000、沒瀏覽時為 0", () => {
-  const docs = adsenseDocs(adsenseReport(), "2026-10-08T00:00:00.000Z");
-  assertEquals(docs.map((d) => d.date), ["2026-10-07", "2026-10-08"]);
-  assertEquals(docs[0], {
-    date: "2026-10-07",
-    currency: "TWD",
-    fetchedAt: "2026-10-08T00:00:00.000Z",
-    domains: [
-      { domain: "a.tw", earnings: 1.5, impressions: 10, clicks: 2, pageViews: 100, pageRpm: 15 },
-      { domain: "b.tw", earnings: 0.5, impressions: 5, clicks: 1, pageViews: 100, pageRpm: 5 },
-    ],
-    total: { earnings: 2, impressions: 15, clicks: 3, pageViews: 200, pageRpm: 10 },
-  });
-  assertEquals(docs[1].total.pageRpm, 0);
-  assertEquals(adsenseDocs({}, "x"), [], "沒有列就沒有文件");
-});
-
-Deno.test("withAllSitesDomain：只依日期的報表補上網域欄「全部網站」，整理出來跟依網域的同形", () => {
-  const dateOnly = {
-    headers: [{ name: "DATE" }, { name: "ESTIMATED_EARNINGS", currencyCode: "TWD" }, { name: "IMPRESSIONS" }, { name: "CLICKS" }, { name: "PAGE_VIEWS" }, { name: "PAGE_VIEWS_RPM" }],
-    rows: [{ cells: [{ value: "2026-10-07" }, { value: "2" }, { value: "15" }, { value: "3" }, { value: "200" }, { value: "10" }] }],
-  };
-  const docs = adsenseDocs(withAllSitesDomain(dateOnly), "t");
-  assertEquals(docs[0].currency, "TWD");
-  assertEquals(docs[0].domains, [{ domain: "全部網站", earnings: 2, impressions: 15, clicks: 3, pageViews: 200, pageRpm: 10 }]);
-});
-
-// ---------- Firestore 編碼 ----------
 Deno.test("Firestore 值編碼：整數 integerValue（字串）、小數 doubleValue、null、巢狀、陣列", () => {
   assertEquals(encodeValue(3), { integerValue: "3" });
   assertEquals(encodeValue(0), { integerValue: "0" });
@@ -202,19 +143,19 @@ Deno.test("Firestore 欄位編碼：undefined 的欄位略過，其餘照編", (
 
 Deno.test("meta/status 的合併欄位：葉子逐一列出，含連字號的鍵用反引號；失敗時沒給 lastSuccess 就不在清單裡（舊值保留）", () => {
   const ok = makeStatus("GA4 正見（台灣）", "ok", null, "T", true);
-  const bad = makeStatus("AdSense", "error", "壞了", "T");
-  assertEquals(bad, { label: "AdSense", state: "error", message: "壞了", lastAttempt: "T" });
-  assertEquals(mergeFieldPaths({ updatedAt: "T", sources: { "ga-tw": ok, adsense: bad } }), [
+  const bad = makeStatus("GA4 政策の系譜（日本）", "error", "壞了", "T");
+  assertEquals(bad, { label: "GA4 政策の系譜（日本）", state: "error", message: "壞了", lastAttempt: "T" });
+  assertEquals(mergeFieldPaths({ updatedAt: "T", sources: { "ga-tw": ok, "ga-jp": bad } }), [
     "updatedAt",
     "sources.`ga-tw`.label",
     "sources.`ga-tw`.state",
     "sources.`ga-tw`.message",
     "sources.`ga-tw`.lastAttempt",
     "sources.`ga-tw`.lastSuccess",
-    "sources.adsense.label",
-    "sources.adsense.state",
-    "sources.adsense.message",
-    "sources.adsense.lastAttempt",
+    "sources.`ga-jp`.label",
+    "sources.`ga-jp`.state",
+    "sources.`ga-jp`.message",
+    "sources.`ga-jp`.lastAttempt",
   ]);
   assertEquals(fieldPathSegment("a`b"), "`a\\`b`");
   assertEquals(fieldPathSegment("_ok1"), "_ok1");
@@ -249,7 +190,7 @@ Deno.test("callJson：5xx 重試後成功；4xx 不重試直接丟；錯誤訊�
   assertEquals(a.sleeps, [2000, 3500]);
 
   const b = fakeDeps(() => jsonRes({ error: "invalid_grant", error_description: "Token expired" }, 400));
-  assertEquals((await assertRejects(() => callJson("https://x", {}, "AdSense 授權", b.deps), ApiError)).message, "AdSense 授權 400：Token expired");
+  assertEquals((await assertRejects(() => callJson("https://x", {}, "服務帳號權杖", b.deps), ApiError)).message, "服務帳號權杖 400：Token expired");
   assertEquals(b.calls.length, 1);
 
   const c = fakeDeps(() => jsonRes({ error: "invalid_grant" }, 400));
@@ -332,8 +273,8 @@ Deno.test("Firestore store：set 不帶 updateMask（整份取代）、merge 帶
   const u = new URL(calls[1].url);
   assertEquals(u.searchParams.getAll("updateMask.fieldPaths"), ["updatedAt", "sources.`ga-tw`.state"]);
 });
-// ---------- 整條流程（假 GA／AdSense／Firestore） ----------
-const ADSENSE_ENV = { GCP_SA_KEY: "(unused)", ADSENSE_REFRESH_TOKEN: "r", ADSENSE_CLIENT_ID: "c", ADSENSE_CLIENT_SECRET: "s" };
+// ---------- 整條流程（假 GA／Firestore） ----------
+const ENV = { GCP_SA_KEY: "(unused)" };
 const getTok = () => Promise.resolve("ga-token");
 
 function memStore(failPath?: string) {
@@ -358,7 +299,7 @@ type Sources = Record<string, { state: string; message: string | null; lastSucce
 const statusOf = (m: ReturnType<typeof memStore>) => (m.merges[0].data as { sources: Sources }).sources;
 
 // 假 Google：依請求形狀回資料。opts.gaFail＝逐日請求回這個狀態碼（摘要那次探測仍成功）
-function fakeGoogle(opts: { gaFail?: number; adsenseDomainRows?: boolean; adsenseNoAccount?: boolean } = {}) {
+function fakeGoogle(opts: { gaFail?: number } = {}) {
   type GaReq = { dateRanges: { startDate: string }[]; dimensions?: { name: string }[]; dimensionFilter?: unknown };
   const gaCalls: { property: string; requests: GaReq[] }[] = [];
   const t = fakeDeps((url, init) => {
@@ -389,28 +330,15 @@ function fakeGoogle(opts: { gaFail?: number; adsenseDomainRows?: boolean; adsens
       });
       return jsonRes({ reports });
     }
-    if (u.host === "oauth2.googleapis.com") return jsonRes({ access_token: "adsense-token" });
-    if (u.host === "adsense.googleapis.com") {
-      if (u.pathname === "/v2/accounts") {
-        return jsonRes({ accounts: opts.adsenseNoAccount ? [{ name: "accounts/pub-1", displayName: "別人" }] : [{ name: "accounts/pub-6687848895101003", displayName: "我" }, { name: "accounts/pub-2" }] });
-      }
-      const dims = u.searchParams.getAll("dimensions");
-      if (dims.length === 2) return jsonRes(opts.adsenseDomainRows ? adsenseReport() : { headers: [], rows: [] });
-      return jsonRes({
-        headers: [{ name: "DATE" }, { name: "ESTIMATED_EARNINGS", currencyCode: "TWD" }, { name: "IMPRESSIONS" }, { name: "CLICKS" }, { name: "PAGE_VIEWS" }, { name: "PAGE_VIEWS_RPM" }],
-        rows: [{ cells: [{ value: "2026-10-07" }, { value: "2" }, { value: "15" }, { value: "3" }, { value: "200" }, { value: "10" }] }],
-        totals: { cells: [{ value: "2" }] },
-      });
-    }
     return new Response("unexpected " + url, { status: 599 });
   });
   return { ...t, gaCalls };
 }
-const run = (g: { deps: Deps }, m: ReturnType<typeof memStore>, env: Record<string, string | undefined> = ADSENSE_ENV, config = CONSOLE_CONFIG) =>
+const run = (g: { deps: Deps }, m: ReturnType<typeof memStore>, env: Record<string, string | undefined> = ENV, config = CONSOLE_CONFIG) =>
   runConsoleFetch({ config, env, deps: g.deps, store: m.store, getToken: getTok });
 
-Deno.test("整條流程：兩站各 30 天＋摘要、AdSense 依網域、meta/status 全 ok", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: true });
+Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只有 GA 的文件與來源", async () => {
+  const g = fakeGoogle();
   const m = memStore();
   const res = await run(g, m);
   assertEquals(res.success, true);
@@ -421,7 +349,7 @@ Deno.test("整條流程：兩站各 30 天＋摘要、AdSense 依網域、meta/s
   assertEquals(paths.filter((p) => p.startsWith("daily/tw_")).length, 30);
   assertEquals(paths.filter((p) => p.startsWith("daily/jp_")).length, 30);
   assert(m.sets.has("summary/tw") && m.sets.has("summary/jp"));
-  assertEquals(paths.filter((p) => p.startsWith("adsense/")).sort(), ["adsense/2026-10-07", "adsense/2026-10-08"]);
+  assert(paths.every((p) => p.startsWith("daily/") || p.startsWith("summary/")), "只寫 GA 的文件（daily／summary），不寫 adsense/");
   assert(m.sets.has("daily/tw_2026-10-08") && m.sets.has("daily/tw_2026-09-09") && !m.sets.has("daily/tw_2026-09-08"));
 
   // summary 欄位
@@ -452,17 +380,11 @@ Deno.test("整條流程：兩站各 30 天＋摘要、AdSense 依網域、meta/s
   assertEquals(perDay.map((c) => c.requests.length), [4, 2, 4]);
   assert(perDay[2].requests.every((r) => r.dimensionFilter), "主機那批要帶 hostName 篩選");
 
-  // AdSense 文件
-  const ad = m.sets.get("adsense/2026-10-07") as { currency: string; domains: unknown[]; total: { pageRpm: number } };
-  assertEquals(ad.currency, "TWD");
-  assertEquals(ad.domains.length, 2);
-  assertEquals(ad.total.pageRpm, 10);
-
   // meta/status：一次合併寫入、三個來源
   assertEquals(m.merges.length, 1);
   assertEquals(m.merges[0].path, "meta/status");
   const sources = statusOf(m);
-  assertEquals(Object.keys(sources), ["ga-tw", "ga-jp", "adsense"]);
+  assertEquals(Object.keys(sources), ["ga-tw", "ga-jp"]);
   assertEquals(sources["ga-tw"].label, "GA4 正見（台灣）");
   assertEquals(sources["ga-jp"].label, "GA4 政策の系譜（日本）");
   for (const s of Object.values(sources)) {
@@ -470,21 +392,10 @@ Deno.test("整條流程：兩站各 30 天＋摘要、AdSense 依網域、meta/s
     assertEquals(s.message, null);
     assert(s.lastSuccess);
   }
-  assert(g.logs.some((l) => String(l[0]).startsWith("AdSense 帳號數")));
 });
 
-Deno.test("AdSense 依網域沒有列：退回只依日期，網域記成「全部網站」", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: false });
-  const m = memStore();
-  await run(g, m);
-  const ad = m.sets.get("adsense/2026-10-07") as { domains: { domain: string }[]; currency: string };
-  assertEquals(ad.domains.map((d) => d.domain), ["全部網站"]);
-  assertEquals(ad.currency, "TWD");
-  assertEquals(statusOf(m).adsense.state, "ok");
-});
-
-Deno.test("GA 逐日請求被拒（403）：佇列清空、不再往下打；該站記 error 並帶第一個錯誤；AdSense 照跑", async () => {
-  const g = fakeGoogle({ gaFail: 403, adsenseDomainRows: true });
+Deno.test("GA 逐日請求被拒（403）：佇列清空、不再往下打；該站記 error 並帶第一個錯誤", async () => {
+  const g = fakeGoogle({ gaFail: 403 });
   const m = memStore();
   const res = await run(g, m);
   assertEquals(res.success, true, "資料源失敗只記 meta/status、不算整體失敗（與 fetch.mjs 一致）");
@@ -494,7 +405,7 @@ Deno.test("GA 逐日請求被拒（403）：佇列清空、不再往下打；該
   assertEquals(s["ga-tw"].state, "error");
   assert(s["ga-tw"].message!.startsWith("部分日期失敗（"), s["ga-tw"].message!);
   assert(s["ga-tw"].message!.includes("GA 資料 API 403：forbidden"));
-  assertEquals(s.adsense.state, "ok");
+  assertEquals(Object.keys(s), ["ga-tw", "ga-jp"]);
   // 403 不重試、佇列清空：每站「摘要 1 次＋最多 GA_WORKERS 個在途請求」
   assert(g.gaCalls.filter((c) => c.property === "521879439").length <= 1 + 2);
 });
@@ -507,51 +418,61 @@ Deno.test("摘要就失敗（例如沒有 GA 權限）：該站只記 error，�
   assertEquals(statusOf(m)["ga-tw"].message, "GA 資料 API 403：no access");
 });
 
-Deno.test("缺 AdSense 環境變數：adsense 記 error 並指名缺哪些、整體 success＝false，GA 照跑", async () => {
+Deno.test("沒有任何 ADSENSE_* 環境變數：不算缺、整體 success、不打 AdSense／OAuth、不寫 adsense/、meta/status 沒有 adsense 來源", async () => {
   const g = fakeGoogle();
   const m = memStore();
-  const res = await run(g, m, { GCP_SA_KEY: "x", ADSENSE_CLIENT_ID: "c" });
-  assertEquals(res.success, false);
-  assertEquals(res.missing, ["ADSENSE_REFRESH_TOKEN", "ADSENSE_CLIENT_SECRET"]);
-  assertEquals(res.sources.adsense, { state: "error", message: "缺少環境變數：ADSENSE_REFRESH_TOKEN、ADSENSE_CLIENT_SECRET" });
-  assertEquals(res.sources["ga-tw"].state, "ok");
-  assert(!g.calls.some((c) => c.url.includes("adsense") || c.url.includes("oauth2")), "缺環境變數就不打 AdSense");
-  assert([...m.sets.keys()].some((p) => p.startsWith("daily/tw_")));
-  assertEquals(m.merges.length, 1, "失敗狀態有寫進 meta/status");
-  assertEquals(statusOf(m).adsense.state, "error");
+  const res = await run(g, m, { GCP_SA_KEY: "x" });
+  assertEquals(res.success, true);
+  assertEquals(res.missing, []);
+  assertEquals(Object.keys(res.sources), ["ga-tw", "ga-jp"]);
+  assert(!g.calls.some((c) => /adsense|oauth2/.test(c.url)), "不打 AdSense／OAuth 授權");
+  assert(![...m.sets.keys()].some((p) => p.startsWith("adsense")));
+  assertEquals(m.merges.length, 1);
+  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp"]);
 });
 
-Deno.test("AdSense 帳號對不上設定的 pub 編號：記 error，說出只看得到哪些", async () => {
-  const g = fakeGoogle({ adsenseNoAccount: true });
+Deno.test("就算環境裡有 ADSENSE_* ：也完全不讀、不打 AdSense（AdSense 只在 GitHub 跑）", async () => {
+  const g = fakeGoogle();
   const m = memStore();
-  const res = await run(g, m);
-  assertEquals(res.sources.adsense.state, "error");
-  assert(res.sources.adsense.message!.includes("pub-6687848895101003") && res.sources.adsense.message!.includes("只看得到：pub-1"));
+  await run(g, m, { GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "r", ADSENSE_CLIENT_ID: "c", ADSENSE_CLIENT_SECRET: "s", ADSENSE_ACCOUNT: "accounts/pub-9" });
+  assert(!g.calls.some((c) => /adsense|oauth2/.test(c.url)));
+  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp"]);
 });
 
-Deno.test("ADSENSE_ACCOUNT 環境變數指定帳號時不查帳號清單", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: true });
-  const m = memStore();
-  await run(g, m, { ...ADSENSE_ENV, ADSENSE_ACCOUNT: "accounts/pub-9" });
-  assert(!g.calls.some((c) => c.url.endsWith("/v2/accounts")));
-  assert(g.calls.some((c) => c.url.includes("/v2/accounts/pub-9/reports:generate")));
+Deno.test("守門：真的送到 Firestore 的 meta/status 只動 updatedAt 與 sources.ga-*（updateMask 不含任何 AdSense 欄位、body 也沒有）", async () => {
+  const g = fakeGoogle();
+  const fs = fakeDeps(() => jsonRes({}));
+  const store = makeFirestoreStore(() => Promise.resolve("TOK"), fs.deps);
+  await runConsoleFetch({ config: CONSOLE_CONFIG, env: { GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "r" }, deps: g.deps, store, getToken: getTok });
+  const statusCalls = fs.calls.filter((c) => new URL(c.url).pathname.endsWith("/documents/meta/status"));
+  assertEquals(statusCalls.length, 1);
+  const mask = new URL(statusCalls[0].url).searchParams.getAll("updateMask.fieldPaths");
+  assert(mask.length > 0, "有 updateMask（合併寫入、不是整份取代，別人寫的欄位才不會被清掉）");
+  for (const path of mask) assert(path === "updatedAt" || /^sources\.`ga-[a-z]+`\.(label|state|message|lastAttempt|lastSuccess)$/.test(path), `不該出現的欄位：${path}`);
+  assert(!mask.some((p) => /adsense/i.test(p)));
+  const body = JSON.parse(String(statusCalls[0].init.body)) as { fields: { sources: { mapValue: { fields: Record<string, unknown> } } } };
+  assertEquals(Object.keys(body.fields).sort(), ["sources", "updatedAt"]);
+  assertEquals(Object.keys(body.fields.sources.mapValue.fields), ["ga-tw", "ga-jp"]);
+  assert(!/adsense/i.test(String(statusCalls[0].init.body)));
+  // 所有 Firestore 寫入都只落在 daily／summary／meta/status
+  for (const c of fs.calls) assert(/\/documents\/(daily\/|summary\/|meta\/status$)/.test(new URL(c.url).pathname), c.url);
 });
 
 Deno.test("沒設定 GA 資源編號的站：記 unconfigured、不打 GA", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: true });
+  const g = fakeGoogle();
   const m = memStore();
-  const res = await run(g, m, ADSENSE_ENV, { ...CONSOLE_CONFIG, sites: { jp: { name: "政策の系譜", country: "日本" } } });
+  const res = await run(g, m, ENV, { ...CONSOLE_CONFIG, sites: { jp: { name: "政策の系譜", country: "日本" } } });
   assertEquals(res.sources["ga-jp"], { state: "unconfigured", message: "尚未設定 GA 資源編號" });
   assertEquals(g.gaCalls.length, 0);
 });
 
 Deno.test("Firestore 連 meta/status 都寫不進去：整個流程丟錯（對應 fetch.mjs 的非零結束）", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: true });
+  const g = fakeGoogle();
   await assertRejects(() => run(g, memStore("meta/status")), Error, "meta/status");
 });
 
 Deno.test("單日的 Firestore 寫入失敗：只算那天失敗，其他天照寫", async () => {
-  const g = fakeGoogle({ adsenseDomainRows: true });
+  const g = fakeGoogle();
   const m = memStore("daily/tw_2026-10-01");
   const res = await run(g, m);
   assertEquals([...m.sets.keys()].filter((p) => p.startsWith("daily/tw_")).length, 29);

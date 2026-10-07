@@ -13,16 +13,16 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { verifyCaller } from "../_shared/console-fetch-auth.ts";
 
 /**
- * console-fetch — 抓 GA4（正見、政策の系譜）與 AdSense，寫進 Firestore（專案 policy-tw），給站務主控台
+ * console-fetch — 抓 GA4（正見、政策の系譜），寫進 Firestore（專案 policy-tw），給站務主控台
  * （policy-console.web.app）讀。從私人 repo policy-console 的 scripts/fetch.mjs 搬來（2026-10-07）：
  * 原本靠 GitHub Actions 每小時跑，GitHub 常跳過排程；改由 pg_cron 每小時第 17 分叫這支。
+ * 分工（2026-10-08）：GA 只在這裡跑；AdSense 只留在 policy-console 的 GitHub Actions（這裡完全不碰，meta/status 也只寫 GA 的欄位）。
  *
  * 呼叫者驗證：x-cron-secret（pg_cron 從 Vault 帶；函式端用 RPC console_fetch_cron_secret_ok 請資料庫比對）或 service role bearer，
  * 細節與理由見 _shared/console-fetch-auth.ts。
- * 環境變數（與 GitHub secrets 同名）：GCP_SA_KEY、ADSENSE_REFRESH_TOKEN、ADSENSE_CLIENT_ID、ADSENSE_CLIENT_SECRET；
- * 選用 ADSENSE_ACCOUNT。驗證用的密鑰不在環境變數裡（只在 Vault）。
+ * 環境變數（與 GitHub secret 同名）：GCP_SA_KEY（服務帳號 JSON，GA 與 Firestore 共用）。驗證用的密鑰不在環境變數裡（只在 Vault）。
  * 缺環境變數：能寫 Firestore 就把失敗寫進 meta/status，並回 500，不靜默成功。
- * 單一資料源（GA 的某一站、AdSense）失敗只記進 meta/status、仍回 200（與 fetch.mjs 一致）；只有 Firestore 寫入本身壞掉才回 500。
+ * 單一資料源（GA 的某一站）失敗只記進 meta/status、仍回 200（與 fetch.mjs 一致）；只有 Firestore 寫入本身壞掉才回 500。
  * 回應：{ success, missing_env?, sources: { "ga-tw": { state, message } … }, elapsed_ms }（不含任何金鑰）
  */
 
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
   if (!check.ok) return json({ success: false, error: check.error }, check.status);
 
   const started = Date.now();
-  const env: Record<string, string | undefined> = { ADSENSE_ACCOUNT: Deno.env.get("ADSENSE_ACCOUNT") };
+  const env: Record<string, string | undefined> = {};
   for (const k of REQUIRED_ENV) env[k] = Deno.env.get(k);
 
   // 沒有服務帳號金鑰就寫不了 Firestore，也就沒地方記失敗狀態：只能回錯（Edge Function 日誌看得到）
