@@ -310,6 +310,10 @@
 - **名單清查說明的選舉時程讀 `roster_check_scope`，過了日期的不再出現**｜`contribution_auto_tasks_raw` 寫死「資格審查 10-16 前完成、10-23 抽號次」，10-16 過了還會派到 11-17｜`roster_check_scope` 加 `qualification_review_by`、`ballot_draw_on`、`municipal_mayor_list_on`，說明由 `roster_registration_phase_text()` 組；抽號次日過後也不再說「還沒有號次可填」。下一屆選舉只填表、不改函式。
 - **公報入口讀 `elections`，不在程式裡寫年份對照**｜TS `BULLETIN_YEAR_DIR` 與 SQL `CASE election_year WHEN 2022…` 兩份真相、都沒有 2026｜`elections` 加 `bulletin_dir`（民國年資料夾）、`bulletin_hint`（給代理的入口一行）、`bulletin_published_on`（上架日前不給，免得給死連結）；TS 的 `BULLETIN_YEAR_DIR` 留作後備並由測試對照 migration 回填。2026 的 `bulletin_published_on` 暫填 11-18（投票日前十日），上架日不同就改那一格。
 
+## 2026-10-08
+
+- **中選會 115 年登記彙總表九份都登錄為查證來源、都能被系統逐位核對（09-24「登記名冊例外」的範圍補齊，沒有擴大）**｜10-08 缺口盤點：中選會頁面（web.cec.gov.tw/central/article/64709）掛九份登記彙總表（19,695 位），`verification_sources` 只登錄了縣市長、縣市議員四份，鄉鎮市長、鄉鎮市民代表、直轄市山地原住民區長、區民代表、村里長五份沒有——這五種的清查、補政黨、退選前有沒有登記任務與驗證都是依 `election_types`＋`regions` 從該表附名冊網址，沒登錄就等於沒有名冊。同一天查出 `parseRoster` 對這五份的版面解不完整（對四份舊的也漏 3%：姓名裡有「年」被當頁首吃掉、族語姓名被空白拆開、黨名被換行拆開、換頁重印的欄名「推薦之政黨」被當成政黨）。修法：新增逐列版面（每列「縣市＋鄉鎮［＋村里或選舉區］ 登記日期 姓名 政黨」，地名從縣市名起頭），結構對不上才退回原本的逐欄配對；`RosterRow` 多一個 `place`（縣市以後的地名）。九份逐份解析出的人數＝PDF 的登記日期列數（鄉鎮市長 465、村里長 14,100、合計 19,695），守門在 `cec-roster-nine.test.ts`（fixtures 是 cecRosterText 對正式網址抽的原文，不是 pdftotext 的輸出）；另有 21 列（鄉鎮市民代表 3、村里長 18）PDF 自己的姓名欄是空的（罕用字），照列收下、姓名留空，不會對上任何人。migration `20261008070000` 登錄五份，regions 是那份 PDF 裡真的有人的縣市｜沒有新增任何自動寫入：roster_batch 本來就對交件引用的任何 web.cec.gov.tw 名冊 PDF 逐位核對，只是之前這五份解不出來（`rows.length` 太少就整份跳過、不判）。錯了的代價：黨名被拆成長短不一的兩塊時姓名多吃一塊、政黨只剩後半，那一列核對不上、交給人逐筆驗，不會誤判通過。
+
 ## 暫緩（有結論但沒動）
 
 - **記下每張票的「來源群組」（同一批提示／同一家模型／同一位維護者），先不使用**（W-Policy 09-23 建議）：將來收緊獨立性時才有依據，不必回頭補標。要做得先決定群組怎麼來（代理自報、DiTrust 帳號、或維護者登記代號清單）。
