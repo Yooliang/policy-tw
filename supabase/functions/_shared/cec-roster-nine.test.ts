@@ -122,9 +122,9 @@ Deno.test("舊版面（日期在前、選舉區在後、性別、出生年月日
 });
 
 // ── 查證來源：九份名冊都要登錄（verification_sources），任務與驗證都是靠它附名冊網址 ──
-// 鄉鎮市長、鄉鎮市民代表、區長、區民代表、村里長五份由 20261008071000 登錄；regions 必須等於那份 PDF 裡真的有人的縣市
+// 鄉鎮市長、鄉鎮市民代表、區長、區民代表、村里長五份由 20261008111000 登錄；regions 必須等於那份 PDF 裡真的有人的縣市
 Deno.test("查證來源 migration：五份名冊的選舉別、縣市、選舉區欄、網址都跟 PDF 解析結果一致", async () => {
-  const sql = await Deno.readTextFile(new URL("../../migrations/20261008071000_cec_roster_sources_rest.sql", import.meta.url));
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261008111000_cec_roster_sources_rest.sql", import.meta.url));
   const CASES = [
     { file: "cec-roster-2026-township-mayor.txt", name: "中選會 2026 鄉鎮市長候選人登記彙總表", type: "鄉鎮市長", url: "a7b4f3d3-dad3-4e61-9036-2cd21cf29d92" },
     { file: "cec-roster-2026-township-rep.txt", name: "中選會 2026 鄉鎮市民代表候選人登記彙總表", type: "鄉鎮市民代表", url: "437a9da7-eaa7-47b9-9571-789eeb48ed18" },
