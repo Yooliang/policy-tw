@@ -12,7 +12,7 @@
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 // @ts-ignore: 純 JS 模組（Worker 用）
-import { CACHE_TTL_S, ROW_TTL_S, SCHEDULE_S, fnv, handleMarkdown, notModified } from "./markdown.js";
+import { BROWSER_MAX_AGE_S, CACHE_TTL_S, PERSON_CACHE_CONTROL, ROW_CACHE_CONTROL, ROW_TTL_S, SCHEDULE_S, fnv, handleMarkdown, notModified } from "./markdown.js";
 import { latestPath, matchMarkdownRoute } from "../lib/md/route.ts";
 import { renderPage } from "../lib/md/format.ts";
 import { buildNotFoundPage } from "../lib/md/index-page.ts";
@@ -76,7 +76,8 @@ Deno.test("人物：200、標頭固定、第二次命中快取不再查資料庫
   const { calls, get } = setup();
   const a = await get(`/politician/${ID}.md`);
   assertMd(a, 200);
-  assertEquals(a!.headers.get("Cache-Control"), "public, max-age=0, s-maxage=600, stale-while-revalidate=3600");
+  assertEquals(a!.headers.get("Cache-Control"), "public, max-age=600, s-maxage=600, stale-while-revalidate=3600");
+  assertEquals(a!.headers.get("Cache-Control"), PERSON_CACHE_CONTROL);
   assertEquals(a!.headers.get("X-Cache"), "MISS");
   assert(a!.headers.get("ETag")!.startsWith('W/"p-'));
   assertEquals(a!.headers.get("X-Data-Generated-At"), "2026-10-07T03:00:00.000Z");
@@ -134,10 +135,40 @@ Deno.test("預產的頁：只讀快取表；generated_at 用快取列的；ETag�
   assertEquals(res!.headers.get("ETag"), `W/"${SHA.slice(0, 16)}-${fnv("/data/2026/台南市/交通建設.md")}"`);
   assertEquals(res!.headers.get("Last-Modified"), "Tue, 06 Oct 2026 10:00:00 GMT");
   assertEquals(res!.headers.get("X-Data-Generated-At"), "2026-10-07T02:00:00.000Z");
-  assertEquals(res!.headers.get("Cache-Control"), `public, max-age=0, s-maxage=${SCHEDULE_S}, stale-while-revalidate=${ROW_TTL_S}`);
+  assertEquals(res!.headers.get("Cache-Control"), `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${SCHEDULE_S}, stale-while-revalidate=${ROW_TTL_S}`);
+  assertEquals(res!.headers.get("Cache-Control"), ROW_CACHE_CONTROL);
+  assertEquals(BROWSER_MAX_AGE_S, 600, "瀏覽器最多舊 10 分鐘，不能比每小時預產還長（維護者 10-07）");
   assertEquals(SCHEDULE_S, 3600);
   assert(res!.headers.get("Access-Control-Expose-Headers")!.includes("ETag"));
   assertEquals(calls.person, 0);
+});
+
+// Cloudflare 的「瀏覽器快取 TTL」區域設定會在 caches.default 命中時把 max-age 抬到 14400（線上實測：MISS 是 max-age=0、HIT 變 14400）。
+// 假的 Cache 在 match 時照做同樣的事，驗證我們命中時有把 Cache-Control 蓋回來——拿掉那一行這個測試會紅。
+class RewritingCache extends FakeCache {
+  override async match(req: Request) {
+    const r = await super.match(req);
+    if (!r) return r;
+    const h = new Headers(r.headers);
+    h.set("Cache-Control", h.get("Cache-Control")!.replace(/max-age=\d+/, "max-age=14400"));
+    return new Response(r.body, { status: r.status, headers: h });
+  }
+}
+
+Deno.test("Cache API 命中時 Cloudflare 把 max-age 抬到 4 小時：回應前蓋回 600（人物、預產的頁、索引 JSON、304 都是）", async () => {
+  const cache = new RewritingCache();
+  const { get } = setup({ cache });
+  for (const path of [`/politician/${ID}.md`, CELL, "/data/2026/index.json"]) {
+    const miss = await get(path);
+    assert(/(^|, )max-age=600(,|$)/.test(miss!.headers.get("Cache-Control")!), `MISS ${path}`);
+    const hit = await get(path);
+    assertEquals(hit!.headers.get("X-Cache"), "HIT");
+    assert(/(^|, )max-age=600(,|$)/.test(hit!.headers.get("Cache-Control")!), `HIT ${path} 的 max-age 要是 600，不是 Cloudflare 抬高的 14400：${hit!.headers.get("Cache-Control")}`);
+    const etag = hit!.headers.get("ETag")!;
+    const nm = await get(path, { headers: { "If-None-Match": etag } });
+    assertEquals(nm!.status, 304);
+    assert(/(^|, )max-age=600(,|$)/.test(nm!.headers.get("Cache-Control")!), `304 ${path}`);
+  }
 });
 
 Deno.test("條件請求：If-None-Match（弱比對、可多個、*）與 If-Modified-Since；If-None-Match 優先", async () => {

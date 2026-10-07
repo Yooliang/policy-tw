@@ -502,3 +502,23 @@ Deno.test("預產排程：每小時、用 CLI 管理權杖寫入，不碰 servic
   assertStringIncludes(yml, "supabase db query --linked");
   assert(!/secrets\.[A-Z_]*SERVICE_ROLE/i.test(yml), "不得用 service_role 金鑰");
 });
+
+Deno.test("政見矩陣頁要預渲染（內容頁可收錄，不能是 app.html 空殼）：路由、快照、建置清單、頁面本身都接好；不加 noindex", async () => {
+  const read = (rel: string) => Deno.readTextFile(new URL(`../../${rel}`, import.meta.url));
+  const router = await read("router/index.ts");
+  assert(/path: '\/election\/:electionId\/matrix',\s*name: 'election-matrix'/.test(router), "路由名稱要是 election-matrix（page-data 的 case 靠它）");
+  const pageData = await read("lib/ssg/page-data.ts");
+  assert(pageData.includes("case 'election-matrix':") && pageData.includes("policyMatrix: full.policyMatrix"), "頁面快照要帶 policyMatrix");
+  const serverData = await read("lib/ssg/server-data.ts");
+  assert(serverData.includes("full.policyMatrix.election.segment}/matrix"), "建置要把矩陣頁放進預渲染清單（網站地圖也跟著有）");
+  assert(serverData.includes("loadPolicyMatrix") && serverData.includes("data_md_cache"), "建置端讀預產快取表的 _matrix");
+  assert(serverData.includes("isMissingRelation"), "表還沒建（migration 剛上）不能擋住整站建置");
+  const page = await read("pages/PolicyMatrix.vue");
+  assert(!/noindexs*:/.test(page), "矩陣頁可收錄");
+  assert(page.includes("policyMatrix") && page.includes("ref<Matrix | null>(policyMatrix.value)"), "起手用快照的資料（HTML 裡才有數字）");
+  // 表頭與格子是真連結（爬蟲看得到 .md 的網址），不是只有 click 的 button
+  for (const needle of [":href=\"pickAll().path\"", ":href=\"pickRegion(r).path\"", ":href=\"pickCategory(c).path\"", ":href=\"pickCell(r, c).path\""]) assert(page.includes(needle), `矩陣頁少了真連結 ${needle}`);
+  assert(page.includes("政見矩陣") && page.includes("pageTitle"), "標題是「<屆> 九合一政見矩陣」");
+  const store = await read("composables/useSupabase.ts");
+  assert(store.includes("policyMatrix.value = snapshot.policyMatrix ?? null"), "一頁一頁套快照，前一頁的矩陣不該留到下一頁");
+});

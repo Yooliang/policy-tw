@@ -20,7 +20,7 @@ import type { Matrix } from '../lib/md/dataset'
  *
  * 資料：排程每小時預產進 data_md_cache（scripts/build-data-md.ts），這裡只用 anon 讀同一份——筆數矩陣是 `_matrix` 那一列，
  * 展開的摘要是各 .md 對應的那一列。頁面不放說明文字，只留表頭與數字。
- * 純瀏覽器渲染（firebase.json 的 /election/*\/* rewrite 到 app.html）；沒有預渲染。
+ * 預渲染（內容頁、可收錄、進網站地圖）：建置端把 _matrix 放進頁面快照，HTML 裡就有數字與連結；掛載後背景換成最新一批。
  */
 
 interface CacheRow { body: string; meta: Record<string, unknown>; generated_at: string }
@@ -28,25 +28,28 @@ interface CacheRow { body: string; meta: Record<string, unknown>; generated_at: 
 interface Pick { id: string; row: string; path: string; title: string }
 
 const route = useRoute()
-const { elections } = useSupabase()
-const matrix = ref<Matrix | null>(null)
-const loading = ref(true)
+// 預渲染與 hydrate 起手就有資料（建置端放在頁面快照裡，HTML 裡就有數字與連結）；沒有（從站內別頁換頁進來）才等讀取
+const { elections, policyMatrix } = useSupabase()
+const matrix = ref<Matrix | null>(policyMatrix.value)
+const loading = ref(!policyMatrix.value)
 const failed = ref(false)
 
 const selected = ref<Pick | null>(null)
 const panel = ref<{ text: string; loading: boolean; failed: boolean }>({ text: '', loading: false, failed: false })
 
 async function loadMatrix() {
-  loading.value = true
+  // 已經有（快照帶來的）資料就留著顯示，背景換成最新一批
+  loading.value = !matrix.value
   failed.value = false
   try {
     // query-bounds: ok — 主鍵查一列
     const { data, error } = await supabasePublic.from('data_md_cache').select('body').eq('path', '_matrix').limit(1)
     if (error) throw error
     const row = (data ?? [])[0] as { body: string } | undefined
-    matrix.value = row ? (JSON.parse(row.body) as Matrix) : null
+    if (row) matrix.value = JSON.parse(row.body) as Matrix
   } catch {
-    failed.value = true
+    // 有快照的資料就不當成失敗（顯示舊一點的數字比整頁錯誤好）
+    failed.value = !matrix.value
   } finally {
     loading.value = false
   }
@@ -65,9 +68,11 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => [
   { name: '政見矩陣' },
 ])
 
+// 內容頁，可收錄（不加 noindex）：canonical 由 usePageHead 指正見.tw；標題「2026 九合一政見矩陣 | 正見」
+const pageTitle = computed(() => `${(election.value?.shortName || (year.value ? `${year.value} 九合一` : '')).replace(/選舉$/, '')}政見矩陣`.trim())
 usePageHead({
-  title: () => `${year.value} 政見矩陣`.trim(),
-  description: () => `${year.value} 年地方選舉候選人的政見，依縣市與分類統計筆數。`,
+  title: () => pageTitle.value,
+  description: () => `${year.value} 年地方選舉候選人的政見，依 22 縣市與 19 個分類統計筆數，點開可看各縣市、各分類的 Markdown 摘要。`,
   breadcrumbs: () => breadcrumbs.value,
 })
 
@@ -110,7 +115,7 @@ const HEAD = 'bg-slate-100 border-b border-slate-200 px-3 py-2 text-center font-
   <LoadError v-if="failed" inline message="政見矩陣讀取失敗" @retry="loadMatrix" />
   <div v-else class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>{{ year }} 政見矩陣</template>
+      <template #title>{{ pageTitle }}</template>
       <template #icon><Grid3x3 :size="400" class="text-blue-500" /></template>
     </Hero>
     <Breadcrumbs :items="breadcrumbs" />
@@ -125,10 +130,10 @@ const HEAD = 'bg-slate-100 border-b border-slate-200 px-3 py-2 text-center font-
             <thead>
               <tr>
                 <th scope="col" class="sticky left-0 z-20 border-r border-slate-200 p-0">
-                  <button type="button" :aria-pressed="is('all')" :class="[HEAD, 'w-full h-full text-left', is('all') ? '!bg-blue-600 !text-white' : '']" aria-label="全部檔案索引" @click="open(pickAll())">全部 {{ matrix.total }}</button>
+                  <a :href="pickAll().path" :aria-current="is('all') ? 'true' : undefined" :class="[HEAD, 'block w-full h-full text-left', is('all') ? '!bg-blue-600 !text-white' : '']" aria-label="全部檔案索引" @click.prevent="open(pickAll())">全部 {{ matrix.total }}</a>
                 </th>
                 <th v-for="r in matrix.regions" :key="r" scope="col" class="p-0">
-                  <button type="button" :aria-pressed="is(`r:${r}`)" :class="[HEAD, 'w-full', is(`r:${r}`) ? '!bg-blue-600 !text-white' : '']" @click="open(pickRegion(r))">{{ r }}</button>
+                  <a :href="pickRegion(r).path" :aria-current="is(`r:${r}`) ? 'true' : undefined" :class="[HEAD, 'block w-full', is(`r:${r}`) ? '!bg-blue-600 !text-white' : '']" @click.prevent="open(pickRegion(r))">{{ r }}</a>
                 </th>
                 <th scope="col" class="bg-slate-100 border-b border-l border-slate-200 px-3 py-2 text-center font-bold text-slate-500 whitespace-nowrap">合計</th>
               </tr>
@@ -136,19 +141,19 @@ const HEAD = 'bg-slate-100 border-b border-slate-200 px-3 py-2 text-center font-
             <tbody>
               <tr v-for="c in matrix.categories" :key="c" class="border-b border-slate-100">
                 <th scope="row" class="sticky left-0 z-10 border-r border-slate-200 p-0">
-                  <button type="button" :aria-pressed="is(`c:${c}`)" :class="['w-full bg-white px-3 py-2 text-left font-medium whitespace-nowrap transition-colors hover:bg-blue-50 hover:text-blue-800', is(`c:${c}`) ? '!bg-blue-600 !text-white' : 'text-slate-800']" @click="open(pickCategory(c))">{{ c }}</button>
+                  <a :href="pickCategory(c).path" :aria-current="is(`c:${c}`) ? 'true' : undefined" :class="['block w-full bg-white px-3 py-2 text-left font-medium whitespace-nowrap transition-colors hover:bg-blue-50 hover:text-blue-800', is(`c:${c}`) ? '!bg-blue-600 !text-white' : 'text-slate-800']" @click.prevent="open(pickCategory(c))">{{ c }}</a>
                 </th>
                 <td v-for="r in matrix.regions" :key="r" class="p-0 text-center">
-                  <button
-                    type="button"
+                  <a
+                    :href="pickCell(r, c).path"
                     :aria-label="`${r}${c} ${count(r, c)} 筆`"
-                    :aria-pressed="is(`${r}|${c}`)"
+                    :aria-current="is(`${r}|${c}`) ? 'true' : undefined"
                     :class="[
-                      'w-full min-w-[3.25rem] px-3 py-2 tabular-nums transition-colors',
+                      'block w-full min-w-[3.25rem] px-3 py-2 tabular-nums transition-colors',
                       is(`${r}|${c}`) ? 'bg-blue-600 text-white font-bold' : count(r, c) > 0 ? 'text-slate-900 font-semibold hover:bg-blue-50' : 'text-slate-300 hover:bg-slate-50',
                     ]"
-                    @click="open(pickCell(r, c))"
-                  >{{ count(r, c) > 0 ? count(r, c) : '—' }}</button>
+                    @click.prevent="open(pickCell(r, c))"
+                  >{{ count(r, c) > 0 ? count(r, c) : '—' }}</a>
                 </td>
                 <td class="border-l border-slate-200 bg-slate-50 px-3 py-2 text-center font-bold tabular-nums text-slate-600" data-testid="category-total">{{ matrix.categoryTotals[c] ?? 0 }}</td>
               </tr>

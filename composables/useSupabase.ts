@@ -25,6 +25,7 @@ import { mapSourceRefs, primarySourceUrl } from '../lib/sources'
 import type { DirectoryGroup, DirectoryGroupSummary } from '../lib/people-directory'
 import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
+import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -111,6 +112,8 @@ const availableElectionTypes = ref<string[]>([])
  * 每位約是完整人物物件的十分之一：高雄市 1,641 位的名錄比 128 位的卡片還省。
  */
 const townshipDirectory = ref<DirectoryPerson[]>([])
+/** 政見矩陣（/election/:屆/matrix，預產快取表 data_md_cache 的 _matrix 那一列）：預渲染時由建置端放進頁面快照，這樣 HTML 裡就有數字與連結（內容頁要可收錄）。沒帶＝null，頁面掛載後自己讀 */
+const policyMatrix = ref<PolicyMatrix | null>(null)
 let directoryKey = ''
 
 /**
@@ -842,6 +845,8 @@ export interface DataSnapshot {
   verificationSources: VerificationSource[]
   /** 縣市頁的鄉鎮市區名錄（只有縣市頁的切片有）。沒給＝這一頁不需要。 */
   townshipDirectory?: DirectoryPerson[]
+  /** 政見矩陣頁的資料（只有那一頁的切片有） */
+  policyMatrix?: PolicyMatrix | null
   /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
   lineages?: Lineage[]
   lineagesComplete?: boolean
@@ -901,6 +906,8 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   stats.value = snapshot.stats
   verificationSources.value = snapshot.verificationSources
   if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
+  // 快照沒帶就清空（預渲染一頁一頁套快照，前一頁的矩陣不該留到下一頁）
+  policyMatrix.value = snapshot.policyMatrix ?? null
   // 政策脈絡：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的脈絡不該留到下一頁）
   lineages.value = snapshot.lineages ?? []
   lineagesComplete.value = snapshot.lineagesComplete === true
@@ -1132,6 +1139,7 @@ export function useSupabase() {
     politicianListIncomplete,
     availableElectionTypes,
     townshipDirectory,
+    policyMatrix,
     loadTownshipDirectory,
     stats,
     // 人物一覽、政黨頁（#346）：只有預渲染的快照會帶

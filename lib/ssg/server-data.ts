@@ -22,6 +22,8 @@ import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-r
 import { townshipPagesOf } from '../election-townships'
 import { electionSegment, segmentOfId } from '../election-route'
 import type { PartyAliasRow, PartyRegistry, PartyRow } from '../parties'
+import type { Matrix as PolicyMatrix } from '../md/dataset'
+import { supabasePublic } from '../supabase'
 import { directoryFor, partyListFor } from './page-data'
 
 /**
@@ -110,7 +112,28 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   const lineages = await loadLineages()
   const partyRegistry = await loadPartyRegistry()
   console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length} parties=${partyRegistry.parties.length}`)
-  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry }
+  const policyMatrix = await loadPolicyMatrix()
+  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry, policyMatrix }
+}
+
+/**
+ * 政見矩陣（/election/:屆/matrix）：讀預產快取表 data_md_cache 的 `_matrix` 那一列（排程每小時產，scripts/build-data-md.ts）。
+ * 表或那一列還不存在（migration 剛上、排程還沒跑過第一輪）就回 null：矩陣頁這次不預渲染（客戶端照常讀得到時再顯示），
+ * 不中止建置——矩陣只是一頁，不該擋住整站上線。其他錯重試三次，仍失敗也當成沒有（同上，只記警告）。
+ */
+async function loadPolicyMatrix(): Promise<PolicyMatrix | null> {
+  try {
+    return await withRetry('data_md_cache（政見矩陣）', async () => {
+      // query-bounds: ok — 主鍵查一列
+      const { data, error } = await supabasePublic.from('data_md_cache').select('body').eq('path', '_matrix').limit(1)
+      if (error) { if (isMissingRelation(error)) return null; throw error }
+      const row = (data ?? [])[0] as { body: string } | undefined
+      return row ? (JSON.parse(row.body) as PolicyMatrix) : null
+    }, () => true)
+  } catch (err) {
+    console.warn(`[ssg] 政見矩陣讀不到，這次不預渲染矩陣頁：${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
 }
 
 /**
@@ -266,6 +289,8 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...STATIC_CONTENT_ROUTES,
     ...full.elections.map((e) => `/election/${electionSegment(e)}`),
     ...electionRegionRoutes(full),
+    // 政見矩陣頁：內容頁要可收錄，預渲染（有資料才有這一頁；網址那一段與矩陣算的那一屆同一個 electionSegment）
+    ...(full.policyMatrix ? [`/election/${full.policyMatrix.election.segment}/matrix`] : []),
     ...electionTownshipRoutes(full),
     ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),

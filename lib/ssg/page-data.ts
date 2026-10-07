@@ -182,6 +182,10 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
       return { ...base, politicians, policies }
     }
 
+    case 'election-matrix':
+      // 政見矩陣頁：資料是預產快取的 _matrix 那一列，建置端撈好放在 full.policyMatrix；那一屆對不上就不帶（頁面自己顯示「沒有矩陣」）
+      return full.policyMatrix && full.policyMatrix.election.segment === paramString(to.params.electionId) ? { ...base, policyMatrix: full.policyMatrix } : base
+
     case 'election-region': {
       // 縣市頁：該屆該縣市「這一層＋下一層」在選的人（縣市長、立委、議員，加上鄉鎮市長／
       // 原住民區長），跟瀏覽器端 loadPoliticiansByElection(id, 縣市) 撈的是同一批。
