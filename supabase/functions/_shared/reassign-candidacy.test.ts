@@ -148,8 +148,9 @@ Deno.test("派工臂：五種訊號、接進 arms、等票中與確認是同一�
   assertStringIncludes(arm, "tc.task_id = 'auto:candidacy_owner_mismatch:' || pe.id AND tc.outcome = 'confirmed'", "確認是同一人的不再派");
   for (const k of ["'other_records'", "'same_name'", "'cec_same_name'", "'signals'"]) assertStringIncludes(arm, k);
   const arms = await fnBody("contribution_auto_tasks_arms");
-  assertStringIncludes(arms, "UNION ALL SELECT * FROM contribution_auto_tasks_owner_mismatch()");
-  assertStringIncludes(arms, "UNION ALL SELECT * FROM contribution_auto_tasks_election_results()", "PR A 的臂照舊");
+  // 派工時間窗 P1（20261008060000）起每個分支貼臂名：SELECT * FROM f() → SELECT 'f' AS arm, t.* FROM f() t
+  assertStringIncludes(arms, "UNION ALL SELECT 'owner_mismatch' AS arm, t.* FROM contribution_auto_tasks_owner_mismatch() t");
+  assertStringIncludes(arms, "UNION ALL SELECT 'election_results' AS arm, t.* FROM contribution_auto_tasks_election_results() t", "PR A 的臂照舊");
 });
 
 // ── 4. 交件與落庫 ───────────────────────────────────────────────────
