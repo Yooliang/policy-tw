@@ -2,11 +2,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadEnv } from 'vite'
 import { REGION_DIR, regionFilePath, regionPublicPathOfFile, townshipFilePath } from '../cloudflare/region-path.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
-const SITE_URL = 'https://xn--2lw665d.tw' // 2026-09-22 自有網域 正見.tw；跟 composables/usePageHead.ts 同步
+// 站點網址跟 lib/site.ts 同一個規則：環境變數 VITE_SITE_URL（含 .env 檔；loadEnv 與 Vite 建置讀的是同一批），沒設＝正見.tw（2026-09-22 自有網域）
+const SITE_URL = (() => {
+  const raw = String(loadEnv('production', ROOT, 'VITE_').VITE_SITE_URL ?? '').trim().replace(/\/+$/, '')
+  if (!/^https:\/\/[^\s/?#]+$/i.test(raw)) return 'https://xn--2lw665d.tw'
+  try { return new URL(raw).origin } catch { return 'https://xn--2lw665d.tw' }
+})()
 const SHELL_FILES = ['404.html', 'app.html']
 /** <main> 內純文字少於這個長度視為空殼（村里長頁只有姓名／政黨／選區，本來就短） */
 const MIN_MAIN_TEXT = 120

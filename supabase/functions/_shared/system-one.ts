@@ -9,7 +9,11 @@
  */
 
 export const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
-/** 釘版本，不用 ~typesafe/jev-latest：alias 換版不通知，而我們要能回答「當初為什麼這樣定案」 */
+/**
+ * 釘版本，不用 ~typesafe/jev-latest：alias 換版不通知，而我們要能回答「當初為什麼這樣定案」。
+ * 這個是預設值；Jev 升版時設 Supabase secret JEV_MODEL（OpenRouter 退路）、TYPESAFE_JEV_MODEL（直連 TypeSafe）就換，不必發版
+ * （2026-10-07 盤點 #8）。**要填具體版本、不要填 alias**：決策紀錄存的是回應裡的完整版本，validateRecord 不收 alias。
+ */
 export const JEV_MODEL = "typesafe/jev-1.13";
 
 /**
@@ -21,6 +25,31 @@ export const JEV_MODEL = "typesafe/jev-1.13";
  */
 export const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
 export const TYPESAFE_MODEL = "jev-1.13.0";
+
+/** 模型名稱只收一般的版本寫法（字母數字與 . _ - /），其餘一律當沒設，避免環境變數寫壞整個系統票停擺 */
+const MODEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,79}$/;
+
+function envGet(name: string): string | undefined {
+  try {
+    return Deno.env.get(name);
+  } catch {
+    return undefined; // 沒有 env 權限（測試）就當沒設
+  }
+}
+
+/** 這次要問的 Jev 版本：環境變數有設且寫法正常就用它，否則用上面釘死的預設 */
+export function jevModelsFromEnv(get: (name: string) => string | undefined = envGet): { openrouter: string; typesafe: string } {
+  const pick = (name: string, fallback: string): string => {
+    const raw = get(name)?.trim();
+    if (!raw) return fallback;
+    if (!MODEL_NAME_RE.test(raw)) {
+      console.error(`${name} 的值不是一般的模型名稱，改用預設 ${fallback}：${raw}`);
+      return fallback;
+    }
+    return raw;
+  };
+  return { openrouter: pick("JEV_MODEL", JEV_MODEL), typesafe: pick("TYPESAFE_JEV_MODEL", TYPESAFE_MODEL) };
+}
 export const TYPESAFE_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000;
 
 export interface JevKey { provider: "typesafe" | "openrouter"; key: string }
@@ -141,13 +170,14 @@ export async function askJev(
   state: Record<string, unknown>,
   questions: Record<string, JevQuestion>,
   fetchImpl: typeof fetch = fetch,
+  models: { openrouter: string; typesafe: string } = jevModelsFromEnv(),
 ): Promise<JevResponse> {
   const k: JevKey = typeof apiKey === "string" ? { provider: "openrouter", key: apiKey } : apiKey;
-  if (k.provider === "typesafe") return askTypeSafe(k.key, state, questions, fetchImpl);
+  if (k.provider === "typesafe") return askTypeSafe(k.key, state, questions, fetchImpl, models.typesafe);
   const res = await fetchImpl(OPENROUTER_DECISIONS_URL, {
     method: "POST",
     headers: { "Authorization": `Bearer ${k.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: JEV_MODEL, state, questions }),
+    body: JSON.stringify({ model: models.openrouter, state, questions }),
   });
   if (!res.ok) throw new Error(`openrouter decisions ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const body = await res.json() as JevResponse;
@@ -161,11 +191,12 @@ async function askTypeSafe(
   state: Record<string, unknown>,
   questions: Record<string, JevQuestion>,
   fetchImpl: typeof fetch,
+  model: string = TYPESAFE_MODEL,
 ): Promise<JevResponse> {
   const res = await fetchImpl(TYPESAFE_URL, {
     method: "POST",
     headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: TYPESAFE_MODEL, state, questions }),
+    body: JSON.stringify({ model, state, questions }),
   });
   if (!res.ok) throw new Error(`typesafe systemone ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const body = await res.json() as { model?: string; answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; output_tokens?: number } };

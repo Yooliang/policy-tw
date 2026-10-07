@@ -24,7 +24,7 @@
       "review_notes": null,
       "summary": "為「王小明」新增政見：長者健保全免與生育補助",
       "target_name": "王小明",
-      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
+      "politician_url": "https://xn--2lw665d.tw/politician/00000000-0000-4000-8000-0000000000ff",
       "policy_url": null,
       "payload": {
         "name": "王小明",
@@ -54,7 +54,7 @@
       "review_notes": "[auto] 參選紀錄已更新為 registered",
       "summary": "將 徐千晴 2026 新竹市縣市議員參選狀態改為「已登記」",
       "target_name": "徐千晴",
-      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
+      "politician_url": "https://xn--2lw665d.tw/politician/00000000-0000-4000-8000-0000000000ff",
       "policy_url": null,
       "payload": {
         "name": "徐千晴",
@@ -84,8 +84,8 @@
       "review_notes": "[auto] 政見已建立",
       "summary": "為「陳志明」新增政見：桃園機場捷運延伸中壢",
       "target_name": "陳志明",
-      "politician_url": "https://policy-tw.web.app/politician/00000000-0000-4000-8000-0000000000ff",
-      "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-0000000000ff",
+      "politician_url": "https://xn--2lw665d.tw/politician/00000000-0000-4000-8000-0000000000ff",
+      "policy_url": "https://xn--2lw665d.tw/policy/00000000-0000-4000-8000-0000000000ff",
       "payload": {
         "name": "陳志明",
         "title": "桃園機場捷運延伸中壢",
@@ -114,7 +114,7 @@
       "summary": "把政見 abcdef12 的提出日改為「2024-04-02」",
       "target_name": null,
       "politician_url": null,
-      "policy_url": "https://policy-tw.web.app/policy/00000000-0000-4000-8000-0000000000ff",
+      "policy_url": "https://xn--2lw665d.tw/policy/00000000-0000-4000-8000-0000000000ff",
       "payload": {
         "target_table": "policies",
         "target_id": "00000000-0000-4000-8000-0000000000ff",
