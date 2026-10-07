@@ -30,3 +30,13 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 鄉鎮頁（2026-10-05）：`/election/:id/:縣市/:鄉鎮` 代理時換成 `/election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>`；舊的 `/election/:id/:縣市?sub=鄉鎮` 與更舊的 `/election/:id?region=縣市&sub=鄉鎮` 一次 301 到鄉鎮頁（村里、頁籤參數照帶；sub 不像鄉鎮名就不轉）。規則與測試：`region-path.js`、`region-path.test.ts`。
 選舉那一段（2026-10-07，#344 第二階段 A）：舊三屆是數字 id（`/election/2022`），新增的選舉（補選、罷免投票、重行選舉）是 `election_key`（`/election/2022-12-18_rerun_10020`，縣市頁、鄉鎮頁規則同上）；舊三屆的 key 寫法（`/election/2022-11-26_local[/…]`）由 Worker 301 到年份寫法（`legacyElectionKeyRedirect`，清單 `LEGACY_ELECTION_KEYS` 與前端 `lib/election-route.ts` 一致、有測試盯）；Firebase 那邊 `firebase.json` 的 `redirects` 也轉一份，給直接打 policy-tw.web.app 的。
 
+
+## Markdown 檢視（2026-10-07，docs/PLAN-markdown-views.md 第 12 節）
+
+`cloudflare/markdown.js`（由 `ssr-worker.js` 在代理之前呼叫；路由 `lib/md/route.ts`、組字 `lib/md/*`，隨 `pnpm build:ssr` 進 `dist-ssr/`）：
+
+- `/politician/<id>.md`：讀時產生＋Cache API（10 分鐘，過期先回舊的背景重算）。
+- `/election/<屆>/<縣市>.md`、`/data/<屆>/…`、`/category/<分類>.md`、`/data/<屆>/index.(md|json)`：只讀預產快取表 `data_md_cache`（每小時由 `.github/workflows/data-md.yml` 跑 `scripts/build-data-md.ts` 重產；本機 `pnpm build:md` 再 `node dist-md/build-data-md.js --sql-dir out/sql --out-dir out/md` 可以不寫庫看結果）。找不到回 404 的 Markdown，資料庫壞了回 503＋`Retry-After`，都不退回代理。
+- 所有回應 `X-Robots-Tag: noindex`、`Access-Control-Allow-Origin: *`；200 帶 `ETag`／`Last-Modified`／`X-Data-Generated-At`，支援 304。`robots.txt` 不得 Disallow `.md`。
+- `POST /__purge` 清某頁時連它的 `.md` 版一起清（只對人物與 Worker 的 Cache API 有效；預產的頁等下一批）。
+- policy-tw.web.app 上的 `.md`、`/data/**` 由 `firebase.json` 的 redirects 301 到正見.tw。

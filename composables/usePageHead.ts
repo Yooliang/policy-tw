@@ -2,10 +2,11 @@ import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useHead } from '@unhead/vue'
 import { useRoute } from 'vue-router'
 
-export const SITE_NAME = '正見'
+import { SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
+
+// 站名、網址、政見狀態標籤放在 lib/site.ts（純常數，Markdown 檢視 lib/md 也要用；單一份）
+export { SITE_NAME, SITE_URL, policyStatusLabel }
 export const SITE_TAGLINE = '智能政見追蹤平台'
-// 2026-09-22 換自有網域 正見.tw（punycode）；policy-tw.web.app 照常可用，但 canonical／og:url／sitemap 都指這裡
-export const SITE_URL = 'https://xn--2lw665d.tw'
 export const DEFAULT_DESCRIPTION =
   '正見是超越黨派色彩的政策歷史追蹤平台，記錄全台政治人物政見的提出與執行進度，並以 AI 進行客觀分析。'
 
@@ -21,6 +22,11 @@ interface PageHeadOptions {
   jsonLd?: MaybeRefOrGetter<Record<string, unknown> | undefined>
   /** 麵包屑（2026-09-30）：輸出 schema.org BreadcrumbList；畫面上的麵包屑用 components/Breadcrumbs.vue */
   breadcrumbs?: MaybeRefOrGetter<BreadcrumbItem[] | undefined>
+  /**
+   * 這一頁有 Markdown 版（本頁網址加 .md，docs/PLAN-markdown-views.md）：輸出 <link rel="alternate" type="text/markdown">。
+   * 只有人物頁與縣市頁有；資料還沒到、確定沒資料時給 false，免得指向一份 404。
+   */
+  markdown?: MaybeRefOrGetter<boolean | undefined>
 }
 
 /** 麵包屑 → schema.org BreadcrumbList（最後一層沒給 path 就用本頁網址） */
@@ -101,7 +107,10 @@ export function usePageHead(options: PageHeadOptions): void {
 
   useHead({
     title,
-    link: computed(() => [{ rel: 'canonical', href: pageUrl.value }]),
+    link: computed(() => [
+      { rel: 'canonical', href: pageUrl.value },
+      ...(toValue(options.markdown) ? [{ rel: 'alternate', type: 'text/markdown', href: `${pageUrl.value}.md` }] : []),
+    ]),
     meta: computed(() => [
       { name: 'description', content: description.value },
       { property: 'og:site_name', content: SITE_NAME },
@@ -122,16 +131,3 @@ export function usePageHead(options: PageHeadOptions): void {
   })
 }
 
-const POLICY_STATUS_LABELS: Record<string, string> = {
-  Proposed: '提出',
-  'In Progress': '進行中',
-  Achieved: '已實現',
-  Stalled: '滯後',
-  Failed: '未達成',
-  'Campaign Pledge': '競選承諾',
-}
-
-/** 政見狀態的中文標籤（meta description 用；畫面上的 StatusBadge 另有自己的顯示邏輯）。 */
-export function policyStatusLabel(status: string | undefined): string {
-  return (status && POLICY_STATUS_LABELS[status]) || status || ''
-}

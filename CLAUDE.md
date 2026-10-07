@@ -120,7 +120,7 @@ ENUMs：`policy_status`、`political_party`、`election_type`、`politician_stat
 
 內容頁（建置時預渲染；其中 `/policy/:policyId`、`/politician/:politicianId` 與下面的 `/lineage/:lineageId` 預設改由正見.tw 的 Worker 邊緣渲染、只進網站地圖）：`/`（Home）、`/tracking`、`/policy/:policyId`、`/analysis`、`/analysis/:policyId`、`/elections`（選舉一覽：今後／過去，依投票日切，`lib/election-list.ts`；#344）、`/election/:electionId`、`/election/:electionId/:region`（縣市頁）、`/election/:electionId/:region/:subRegion`（鄉鎮頁，2026-10-05；舊的 `?sub=` 由正見.tw 的 Worker 301）、`/politician/:politicianId`、`/community`、`/community/:discussionId`、`/regional-data`、`/donation`、`/skill`、`/vision`、`/privacy`、`/sources`、`/politicians`（人物一覽，依姓氏筆畫分組，各組一頁 `/politicians/:筆畫數`）、`/parties`（政黨一覽）、`/party/:id`（各黨頁，id＝內政部政黨編號；#346：名單在建置端算好放進快照，從站內別頁換頁進來沒有快照就整頁載入預渲染那一份，`lib/full-load.ts`）；`/lineage/:lineageId`（政策脈絡頁，#349）跟政見頁、人物頁一樣由正見.tw 的 Worker 邊緣渲染、只進網站地圖，`/analysis` 是脈絡一覽
 
-客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/ai`（2026-10-03 起 AI 讀取與各模型表現，從統計頁搬來）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
+客戶端渲染（firebase.json rewrite 到 `app.html`，noindex）：`/election/:electionId/matrix`（政見矩陣：縣市×分類的政見筆數，讀預產快取表；路由要排在縣市頁前面）、`/contributions`、`/tasks`、`/queue`（派工順序前 1000 筆）、`/stats`（2026-09-18 從 `/ai-assistant` 一頁三分頁拆開；舊網址只在站內用過，已移除）、`/ai`（2026-10-03 起 AI 讀取與各模型表現，從統計頁搬來）、`/verify`、`/profile`、`/auth/callback`、`/election-2026`（轉到 `/election/2026`）、`/admin/*`（dashboard、duplicates、ai、import；scraper 2026-09-23 隨 `add-politician` 下架）
 
 共用元件在 `components/`；選舉頁子元件在 `pages/election/`。
 
@@ -192,6 +192,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `BLUEPRINT-jev-decisions.md` — Jev（TypeSafe System One 決策模型）的導入設計與實測數字
 - `BLUEPRINT-agent-identity.md` — 代理身分改由 DiTrust 發序號、正見只消費的設計（已實作，見 `ditrust-agent`）
 - `BLUEPRINT-admin-to-tasks.md` — 把管理員頁面拆成任務的藍圖與盤點（2026-09-12 快照，部分已完成）
+- `PLAN-markdown-views.md` — 政見的 Markdown 檢視（人物／縣市／分類／縣市×分類 .md、矩陣頁、預產快取 `data_md_cache`、機器可讀索引；第 12 節是實作現況，主題改用既有分類、第二期取消）
 - `PLAN-edge-ssr.md` — 預渲染搬到 Cloudflare 邊緣 SSR 的計畫（第 1 步已上線；第 2、3 步未做）
 - `DISTRICT-REGISTRY-2026.md` — 2026 議員選舉區名冊的查證報告（一次性查證，結論已進資料庫）
 - `REGION-MISASSIGN-2026-10-04.md` — `20261004000020` 那支 migration 改了哪些參選紀錄地區的逐筆依據

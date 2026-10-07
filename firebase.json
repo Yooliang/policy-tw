@@ -13,7 +13,12 @@
       { "source": "/election/2024-01-13_national", "destination": "/election/2024", "type": 301 },
       { "source": "/election/2024-01-13_national/:rest*", "destination": "/election/2024/:rest*", "type": 301 },
       { "source": "/election/2026-11-28_local", "destination": "/election/2026", "type": 301 },
-      { "source": "/election/2026-11-28_local/:rest*", "destination": "/election/2026/:rest*", "type": 301 }
+      { "source": "/election/2026-11-28_local/:rest*", "destination": "/election/2026/:rest*", "type": 301 },
+      { "regex": "^/politician/([^/]+\\.md)$", "destination": "https://xn--2lw665d.tw/politician/:1", "type": 301 },
+      { "regex": "^/election/([^/]+/[^/]+\\.md)$", "destination": "https://xn--2lw665d.tw/election/:1", "type": 301 },
+      { "regex": "^/category/([^/]+\\.md)$", "destination": "https://xn--2lw665d.tw/category/:1", "type": 301 },
+      { "source": "/data", "destination": "https://xn--2lw665d.tw/data", "type": 301 },
+      { "source": "/data/:rest*", "destination": "https://xn--2lw665d.tw/data/:rest*", "type": 301 }
     ],
     "rewrites": [
       { "source": "/contributions", "destination": "/app.html" },

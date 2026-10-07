@@ -28,8 +28,9 @@ const KIND_LABEL: Record<string, { label: string; hint: string }> = {
   ai_search: { label: 'AI 搜尋建索引', hint: 'AI 搜尋服務收錄正見的頁面' },
   ai_training: { label: 'AI 訓練抓取', hint: '大量抓資料訓練模型' },
   search_engine: { label: '傳統搜尋引擎', hint: 'Google、Bing 等（對照用）' },
+  unknown_md: { label: '讀 Markdown 版（身分不明）', hint: '讀的是 .md 摘要，但認不出是哪個 AI（NotebookLM、貼網址進 AI 工具常是這樣）' },
 }
-const KIND_ORDER = ['ai_user', 'ai_referral', 'ai_search', 'ai_training', 'search_engine']
+const KIND_ORDER = ['ai_user', 'ai_referral', 'ai_search', 'ai_training', 'search_engine', 'unknown_md']
 const COLORS = [...CATEGORY_SERIES]
 
 const rows = ref<Row[]>([])

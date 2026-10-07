@@ -1,0 +1,62 @@
+# 預產 Markdown 摘要（維護者 2026-10-07：摘要定時預產、快取起來，不要每次被讀才算）。
+#
+# 每小時跑一次 scripts/build-data-md.ts：只用 anon 讀資料、組出所有縣市（某屆）、分類、縣市×分類、縣市×主題的 Markdown 與矩陣筆數，
+# 跟 data_md_cache 現有的內容雜湊比，輸出要套的 SQL（有變的 upsert、沒變的只更新 generated_at、不存在的刪掉），
+# 再用 supabase CLI 的管理權杖套進去（跟 CI 的 db push 同一個權杖、同一個 production 環境；不用 service_role key）。
+# Worker（cloudflare/markdown.js）與政見矩陣頁只讀這張表。人物的 Markdown 不在這裡（Worker 讀時產生）。
+#
+# 第一次要等 CI 把建表的 migration（20261007180000_data_md_cache.sql）套上才跑得起來：
+# 所以除了每小時排程，也接在 main 的 CI 成功之後跑一次（workflow_run），合併後不必等整點；也可以手動 Run workflow。
+name: 預產 Markdown 摘要
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: data-md
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 產生並寫入 data_md_cache
+    # workflow_run 只在 CI 成功時跑；排程與手動照跑
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 建置預產腳本
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: pnpm build:md
+      - name: 產生 SQL
+        run: node dist-md/build-data-md.js --sql-dir out/sql
+      - name: 連結 Supabase 專案並套用
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: wiiqoaytpqvegtknlbue
+        run: |
+          set -e
+          npx supabase link --project-ref "$PROJECT_REF"
+          for f in $(ls out/sql/*.sql 2>/dev/null | sort); do
+            echo "套用 $f（$(wc -c < "$f") 位元組）"
+            # 失敗要看得到錯誤（CLI 失敗結束碼非 0、錯誤寫在輸出裡）；成功時輸出沒有用，不印
+            if ! npx supabase db query --linked -f "$f" > out/apply.log 2>&1; then cat out/apply.log; exit 1; fi
+          done
+          cat out/sql/summary.json

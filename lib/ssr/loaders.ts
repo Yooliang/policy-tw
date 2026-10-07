@@ -21,7 +21,7 @@ import { fetchAllPages } from '../fetch-all-pages'
 const BASE_TTL_MS = 10 * 60 * 1000
 let basePromise: Promise<DataSnapshot> | null = null
 let baseAt = 0
-function loadBase(): Promise<DataSnapshot> {
+export function loadBase(): Promise<DataSnapshot> {
   if (!basePromise || Date.now() - baseAt > BASE_TTL_MS) {
     baseAt = Date.now()
     basePromise = (async () => {
@@ -46,7 +46,7 @@ function loadBase(): Promise<DataSnapshot> {
 async function policiesOfPoliticians(ids: string[]): Promise<Policy[]> {
   if (ids.length === 0) return []
   // query-bounds: ok — 一個人的政見最多幾十筆
-  const { data, error } = await supabasePublic.from('policies_with_logs').select('*').in('politician_id', ids).order('id').limit(1000)
+  const { data, error } = await supabasePublic.from('policies_with_logs').select('*').in('politician_id', ids).is('removed_at', null).order('id').limit(1000)
   if (error) throw new Error(`policies_with_logs by politician: ${error.message}`)
   return ((data ?? []) as RawPolicy[]).map(mapPolicy)
 }

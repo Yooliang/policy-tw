@@ -1,6 +1,6 @@
 # 計畫：政見的 Markdown 檢視（人物／縣市／分類，之後加「縣市＋主題」）（2026-10-07）
 
-> **狀態：規劃中，沒有任何程式。** 維護者 10-07 要求先規劃再動手；本檔只提方案與待裁項。數字是 10-07 用公開 anon key 唯讀查正式庫得來（`policies` 沒被移除的 1,198 筆；2026 屆有參選紀錄的人 1,273 位、其中 292 位名下有政見、共 1,111 筆）。
+> **狀態（10-07 更新）：第一期已實作（PR 見 Yooliang/policy-tw `feat/markdown-views-p1`），第二期取消。** 下面第 1～11 節是動工前的規劃原文，**實作以第 12 節為準**（主題改用既有分類、摘要改成每小時預產快取、新增選舉底下的矩陣頁、機器可讀索引與條件請求）。數字是 10-07 用公開 anon key 唯讀查正式庫得來（`policies` 沒被移除的 1,198 筆；2026 屆有參選紀錄的人 1,273 位、其中 292 位名下有政見、共 1,111 筆）。
 
 ## 0. 定位
 
@@ -58,6 +58,8 @@
 **建議：路徑式為唯一正式網址，查詢式只當入口、一律轉成路徑式。** 舊網址不動：本計畫沒有任何既有網址被改。
 
 ## 3. 「主題」從哪來
+
+> **維護者 10-07 裁示：改用既有分類（`policies.category`），第二期取消。** 最終目的是讓這些 .md 導入 NotebookLM 被問答，分得粗沒關係；數字直接按 category 算、不靠關鍵字。所以下面 3.1～3.4 的 16 個主題詞彙表、`policy_topics` 新表、新貢獻型別與協議升版**都不做**（`lib/topics.ts` 已刪，換成 `lib/data-query.ts`：只給文字查詢用的「分類常見說法」，育兒／托育／長照→社會福利、捷運／公車→交通建設）。以下保留原文只供查脈絡。
 
 ### 3.1 為什麼現有欄位不夠
 
@@ -288,3 +290,27 @@ format_version: 1
 - `lib/issue-tags.ts`：第二期只當候選的參考，不當主題
 - `composables/usePageHead.ts`：`<link rel="alternate" type="text/markdown">`
 - `public/llms.txt`：改寫
+
+## 12. 實作現況（2026-10-07，以這一節為準）
+
+維護者在動工當天多次裁示，與前面的規劃不同處如下。
+
+**網址**（全部只有正見.tw 提供；policy-tw.web.app 的 `.md`、`/data/**` 由 `firebase.json` 301 過來）：
+
+| 內容 | 網址 | 來源 |
+|---|---|---|
+| 人物 | `/politician/<id>.md` | Worker 讀時產生＋Cache API（不預產、不進 llms.txt 與矩陣；入口是人物頁的「.md 摘要」連結與 `<link rel="alternate">`） |
+| 縣市（全部分類） | `/data/<屆>/<縣市>.md`，同 `/election/<屆>/<縣市>.md` | 預產快取 |
+| 分類（全部縣市） | `/data/<屆>/<分類>.md`，最新一屆短網址 `/category/<分類>.md` | 預產快取 |
+| 縣市×分類 | `/data/<屆>/<縣市>/<分類>.md` | 預產快取 |
+| 索引 | `/data/<屆>/index.json`（機器可讀）、`/data/<屆>/index.md` | 預產快取 |
+| 短網址（301） | `/data/<縣市>.md`、`/data/<縣市>/<分類>.md`、`/data/index.md`、`/data/index.json` | 轉到最新一屆 |
+| 查詢式（302） | `/data?q=台南 育兒` → `/data/<屆>/台南市/社會福利.md` | 純規則 |
+| 矩陣（網頁） | `/election/<屆>/matrix`，`/data` 沒帶查詢也轉到這裡 | 讀 `data_md_cache` 的 `_matrix` |
+
+- `<屆>` 是 `electionSegment`（2026）；舊三屆的 election_key 寫法 301 到年份；縣市「臺」、簡稱、分類常見說法一律 301 到正式寫法。
+- **範圍**：最新一屆定期選舉（投票日最新、選縣市長與縣市議員）在選候選人名下的政見——職位限縣市頁那一層與下一層（縣市長、縣市議員、立委、鄉鎮市長、原住民區長）；退選的、這一屆沒參選的現任者、村里長不收。矩陣的格子、縣市總數、分類總數與對應 .md 的筆數是同一個算法（`lib/md/dataset.ts` 直接擋不一致）。
+- **預產**：`.github/workflows/data-md.yml` 每小時（也接在 main 的 CI 成功之後、可手動）跑 `scripts/build-data-md.ts`，只用 anon 讀、輸出 SQL，用 supabase CLI 的管理權杖套進 `data_md_cache`；**一批全部檔案同一個 `generated_at`**（暫存表分批放入、一個交易併入）。Worker 只讀這張表，找不到回 404 的 Markdown。
+- **給程式批次撈**：200 帶 `ETag`（內容雜湊，排程重產但沒變時不變）、`Last-Modified`（內容最後變動）、`X-Data-Generated-At`；支援 `If-None-Match`／`If-Modified-Since` 回 304；`Access-Control-Allow-Origin: *`；邊緣 `s-maxage` 對齊排程（預產 3600、人物 600）。
+- 文字查詢詞表只有 `lib/data-query.ts` 一份（分類常見說法：每個至少兩字、只屬於一個分類、不等於分類全名，守門測試擋）。
+- 不做的：`/data/全國/…`（用 `/category/<分類>.md`）、鄉鎮 .md、人物預產、`.json` 版的人物／縣市。

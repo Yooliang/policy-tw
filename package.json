@@ -10,6 +10,7 @@
     "build:spa": "vue-tsc --noEmit && vite build",
     "deploy:functions": "node scripts/deploy-functions.mjs",
     "build:ssr": "vite build --config vite.ssr.config.ts",
+    "build:md": "vite build --config vite.md.config.ts",
     "deploy:ssr": "pnpm build:ssr && wrangler deploy"
   },
   "dependencies": {

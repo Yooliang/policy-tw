@@ -19,7 +19,8 @@ import {
   Vote, Megaphone, Flag, AlertCircle, Users, MapPin,
   Search, Layers, LayoutGrid, Clock, Scale,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, ArrowUpDown, Swords } from 'lucide-vue-next'
+  Crown, ScrollText, ArrowUpDown, Swords, Grid3x3 } from 'lucide-vue-next'
+import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
@@ -41,7 +42,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
+const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -85,6 +86,8 @@ watch(() => route.params.electionId, (seg) => {
   if (target) router.replace({ name: route.name as string, params: { ...route.params, electionId: target }, query: route.query, hash: route.hash })
 }, { immediate: true })
 const electionLoading = ref(false)
+// 政見矩陣只做最新一屆定期選舉（lib/md/scope.ts 的 latestLocalElection，跟預產的 .md 同一個判斷）
+const hasMatrix = computed(() => !!election.value && latestLocalElection(elections.value)?.id === election.value.id)
 
 /**
  * 縣市頁 /election/:electionId/:region（2026-09-30）：網址上的縣市就是這一頁的縣市。
@@ -929,6 +932,8 @@ const townshipLevelCounts = computed(() => [...thisLevelSections.value, ...nextL
   .map(s => `${s.spec.label} ${s.people.length} 位`)
   .join('、'))
 usePageHead({
+  // 縣市頁有 Markdown 版（/election/<屆>/<縣市>.md，lib/md/region.ts）；全台頁與鄉鎮頁沒有
+  markdown: () => !!election.value && !!pageCounty.value && !pageTownship.value,
   title: () => {
     if (!election.value) return undefined
     const year = electionYear.value || election.value.electionDate.slice(0, 4)
@@ -993,6 +998,12 @@ usePageHead({
           <component :is="v.icon" :size="16" />
           <span class="sm:hidden">{{ v.short }}</span>
           <span class="hidden sm:inline">{{ v.label }}</span>
+        </HeroAction>
+        <!-- 政見矩陣（縣市×主題的政見筆數）：只有最新一屆定期選舉有，是另一個網址，不是頁內的檢視 -->
+        <HeroAction v-if="hasMatrix" :to="`/election/${electionSeg}/matrix`">
+          <Grid3x3 :size="16" />
+          <span class="sm:hidden">矩陣</span>
+          <span class="hidden sm:inline">政見矩陣</span>
         </HeroAction>
       </template>
 
