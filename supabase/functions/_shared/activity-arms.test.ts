@@ -21,7 +21,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { ARM_BRANCHES, armsDiff, armsFingerprint, BASE_ARMS_MIG, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, readMig } from "./arms-pglite.ts";
+import { ARM_BRANCHES, armsDiff, armsFingerprint, BASE_ARMS_MIG, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
 const P0 = await readMig(P0_MIG);
 const P1 = await readMig(P1_MIG);
@@ -97,8 +97,8 @@ Deno.test("A1 總表與 seed 的前一版是對的：P1 緊接著 20261006141600
     const i = defining.indexOf(P1_MIG);
     assert(i > 0, `P1 要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做`);
-    // P1 之後只允許兩支重新定義：優先層那一版改 seed（20261008090000，只機械式加優先層區塊，守門在 queue-priority.test.ts）、測試人物隔離那一版改總表（20261008114000，只機械式加 ph CTE 與最後的 WHERE，守門在 placeholder-isolation.test.ts）
-    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql"] : ["20261008114000_placeholder_task_isolation.sql"], `P1 之後又有人改了 ${fn}：新增派工臂請改這支總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
+    // P1 之後只允許：優先層那一版改 seed（20261008090000，守門在 queue-priority.test.ts）、測試人物隔離那一版改總表（20261008114000，守門在 placeholder-isolation.test.ts）、party_roster 那支 P2（20261008121000：總表多回傳被規則濾掉的列、seed 分 window／filled，以前兩者的版本為底；機械式替換與守門見 activity-party-roster.test.ts）；多了別人的就要以最新那版為底重做
+    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql", P2_PR_MIG] : ["20261008114000_placeholder_task_isolation.sql", P2_PR_MIG], `P1 之後又有人改了 ${fn}：新增派工臂請改最新那版的總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
   }
 });
 

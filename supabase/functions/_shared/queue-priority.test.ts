@@ -85,7 +85,8 @@ Deno.test("A1 這支 migration 是 rebalance_queue、seed_auto_task_queue 的最
     const defining: string[] = [];
     for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
     if (chain.length) assertEquals(defining, chain, `${fn} 的定義歷史：這支要緊接在現行版之後、而且是最後一版（有人在中間或之後改了，抄的底就過期）`);
-    else assertEquals(defining.slice(-3), [P0_MIG, P1_MIG, QP_MIG], `${fn} 最後三版應該是 P0、P1、這支；有人在中間或之後改了，要以最新那版為底重做`);
+    // 這支之後只允許 party_roster 那支 P2（20261008121000：seed 加 window／filled 兩段插入，與這支的優先層區塊互不相撞，守門在 activity-party-roster.test.ts）
+    else assertEquals(defining.slice(-4), [P0_MIG, P1_MIG, QP_MIG, "20261008121000_activity_windows_p2_party_roster.sql"], `${fn} 最後四版應該是 P0、P1、這支、party_roster 的 P2；有人在中間或之後改了，要以最新那版為底重做`);
   }
   const code = QP.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
   for (const untouched of ["contribution_auto_tasks_arms", "contribution_auto_tasks", "queue_slot", "task_dispatched", "task_boost", "task_boost_matches", "activity_open", "activity_require_rule"]) {

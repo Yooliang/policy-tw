@@ -15,6 +15,7 @@ export const P0_MIG = "20261008001000_activity_windows_p0.sql";
 export const P1_MIG = "20261008060000_activity_windows_p1.sql";
 export const P2_ER_MIG = "20261008070000_activity_windows_p2_election_results.sql";
 export const P2_PG_MIG = "20261008120000_activity_windows_p2_party_gap.sql";
+export const P2_PR_MIG = "20261008121000_activity_windows_p2_party_roster.sql";
 export const BASE_ARMS_MIG ="20261006141600_reassign_candidacy.sql";
 export const BASE_DROP_MIG = "20260924000001_dispatch_io.sql";
 
