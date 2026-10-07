@@ -1,15 +1,16 @@
 import { assertEquals } from "jsr:@std/assert";
-import { manualQueueAt, pickQueuedManual, QUEUE_FRONT } from "./dispatch.ts";
+import { manualQueueAt, pickQueuedManual, QUEUE_FRONT, QUEUE_VISITOR_FRONT } from "./dispatch.ts";
 
 // 這組測試盯的是 2026-09-21 的裁示：佇列只有一個時間軸。
 //   「最前面就是最舊的，最舊的那一些會被最先領走。」
 //   「領完就走…輪了 900 次之後可能出現 300 筆上線的資料；可是你如果把一筆複雜的
 //     任務卡在前面，900 筆過後可能只有 50 筆。」
 
-Deno.test("有人明確要求的任務排最前：維護者建的、裁決、訪客按按鈕", () => {
-  for (const source of ["manual", "auto_dispute", "web_request"]) {
+Deno.test("有人明確要求的任務排最前：維護者建的、裁決＝1980；訪客按按鈕的＝1970（2026-10-08 起排在所有加推之前，見 visitor-front-queue.test.ts）", () => {
+  for (const source of ["manual", "auto_dispute"]) {
     assertEquals(manualQueueAt({ source, created_at: "2026-09-21T00:00:00Z" }), QUEUE_FRONT, source);
   }
+  assertEquals(manualQueueAt({ source: "web_request", created_at: "2026-09-21T00:00:00Z" }), QUEUE_VISITOR_FRONT);
 });
 
 Deno.test("累積下來的待辦照進佇列的時間排，不插隊", () => {

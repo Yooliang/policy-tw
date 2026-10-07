@@ -38,6 +38,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const CANDIDATE_POOL = 30;
+// 網站請求／公民提問另撈的候選上限（見 visitor 查詢）；open 的總數是幾十筆
+const VISITOR_CANDIDATES = 40;
 // 2026-09-20：從 30 降到 5——回 none 幾乎都是暫時的（別人認領中、這一輪抽到的都不合格），等 30 分鐘是白等
 const RETRY_AFTER_MIN = 5;
 
@@ -101,7 +103,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
-    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
+    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, visitorRes] = await Promise.all([
       timed("pool", pendingQuery),
       timed("counts", supabase.rpc("contribution_auto_task_counts", { p_region: region })),
       timed("manual", supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
@@ -111,6 +113,13 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         // last_dispatched_at 也真的 select 出來——原本只拿它排序、沒放進 select，
         // 所以 TS 那側拿不到值，根本沒辦法跟自動缺口比。
         .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20)),
+      // 網站請求與公民提問另外撈一份（2026-10-08）：它們排在所有加推之前（manualQueueAt 的 QUEUE_VISITOR_FRONT），
+      // 派出超過 6 小時還沒解決就回到最前。上面那份窗口只有 20 筆，被沒派過的其他手動任務佔滿時，
+      // 排在最前的網站請求會根本不在候選裡（那天 web_request 有 57 筆 open）。這份照 last_dispatched_at 由舊到新
+      // （沒派過的最前、派得最久以前的次之），前幾筆就是「現在該插隊」的；6 小時內剛派過的排在後面、用不到。
+      timed("visitor", supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
+        .or("source.eq.web_request,task_type.eq.question")
+        .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(VISITOR_CANDIDATES)),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
@@ -147,7 +156,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       timed("skips", // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
       Promise.resolve({ data: [], error: null })),
     ]);
-    for (const r of [pendingRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
+    for (const r of [pendingRes, countsRes, manualRes, visitorRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
@@ -209,7 +218,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
     type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string; last_dispatched_at: string | null };
     // task_id 併進來的早一點加，dispatch.ts 的 TaskLike 系列函式都要它
-    const manualRaw = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
+    // 兩份候選合併去重（visitorRes 失敗就當沒有，不擋派工；原本那份失敗仍照舊丟錯）
+    const manualSeen = new Set<string>();
+    const manualMerged = [...((manualRes.data ?? []) as ManualRow[]), ...((visitorRes.data ?? []) as ManualRow[])].filter((t) => {
+      if (manualSeen.has(t.id)) return false;
+      manualSeen.add(t.id);
+      return true;
+    });
+    const manualRaw = manualMerged.filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
 
     // 在途數與「有人回報查無」只查這一輪的候選（手動前 20＋自動前 30），不再翻整張貢獻表（2026-10-02）。
     // 這兩個集合只拿來過濾候選（下面手動、自動各一處），所以規則完全不變，只是範圍從「全站」縮到這幾十筆。
@@ -475,19 +491,21 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 自動那側 SQL 已經排好序（Jev 對沒派過那一次的插隊 → queue_at），第一筆就是最佳候選。
     // 兩邊現在用同一個鍵比：queue_at。1980＝有人明確要求要先做，排程加進佇列的當下＝排隊尾。
     const autoHead = freeAuto[0] ?? null;
-    const manualHead = pickQueuedManual(freeManual, seed);
+    // 同一輪用同一個「現在」：網站請求／公民提問的 6 小時邊界不能在一次派工裡前後不一致
+    const nowMs = Date.now();
+    const manualHead = pickQueuedManual(freeManual, seed, nowMs);
     // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
     // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
     const verifyHead = candidates[0] ?? null;
     const head = pickQueueHead([
       verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
-      manualHead ? { kind: "manual", queue_at: manualQueueAt(manualHead) } : null,
+      manualHead ? { kind: "manual", queue_at: manualQueueAt(manualHead, nowMs) } : null,
       autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
     ]);
     if (head === "verify") return await serveVerify();
     // 每台機器自己的 2:1（2026-09-24）：佇列說該派任務，但這台機器最近三次拿到的驗證不到兩次、又有它能驗的 → 先派驗證。
     // 插隊期間放寬成 1:2（2026-09-27）。紀錄用派工本來就會寫的兩張表：驗證派發、任務認領（leased_until＝派出時間＋認領時長）。
-    const headAt = head === "manual" ? (manualHead ? manualQueueAt(manualHead) : null) : autoHead?.queue_at;
+    const headAt = head === "manual" ? (manualHead ? manualQueueAt(manualHead, nowMs) : null) : autoHead?.queue_at;
     // 插隊的任務也照看（1:2，見 dispatch.ts 的 machineOwesVerifyDuringBoost）：不然大量插隊時驗證整個停擺
     const boosting = isFrontQueueAt(headAt);
     if (candidates.length > 0) {

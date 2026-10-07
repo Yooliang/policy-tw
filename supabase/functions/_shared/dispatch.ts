@@ -398,18 +398,52 @@ export const QUEUE_FRONT = "1980-01-01T00:00:00.000Z";
  */
 const FRONT_SOURCES = new Set(["manual", "auto_dispute", "web_request"]);
 
+/**
+ * 網站請求與公民提問排在所有加推之前（2026-10-08 維護者：「網站請求裡面的任務每 6 小時幫忙插隊一次，
+ * 因為這個是有人在關注的東西」，公民提問一起照辦）。
+ *
+ * task_boost 把加推的任務設成 1980-01-01 減 n 分鐘（n＝第幾次加推，越新越早），加推多了就會一路往 1980 之前排
+ * （2026-10-08 有 307 筆在 1979-12-31 之前），所以光給網站請求 1980 年擠不到前面（那天 57 筆 web_request 被擠到後面，
+ * 最早一筆 09-28 建的還沒派出過）。這裡給 1970-01-01：加推永遠是 1980 減分鐘，不會比它早；
+ * 訪客看得到的驗證（contribution_queue_at：question_answer、web_request 任務的貢獻）早就用同一個值。
+ */
+export const QUEUE_VISITOR_FRONT = "1970-01-01T00:00:00.000Z";
+
+/**
+ * 網站請求、公民提問派出去超過這麼久還沒解決（任務仍是 open），就回到最前面再插一次。
+ * 派出後的 6 小時內照舊排在 last_dispatched_at（隊尾），讓別的任務有機會；過了就是「有人在關注、卻沒人做完」。
+ * 純函式算，不另外開排程。queue_preview 的 SQL（20261008160000）寫死同一個 6 小時，守門測試 visitor-front-queue.test.ts 兩邊對齊。
+ */
+export const VISITOR_REQUEUE_HOURS = 6;
+export const VISITOR_REQUEUE_MS = VISITOR_REQUEUE_HOURS * 60 * 60 * 1000;
+
 export interface QueuedTask {
   source?: string | null;
+  task_type?: string | null;
+  /** 只有 open 的任務會被插隊；沒給就當 open（撈手動任務時本來就只撈 open） */
+  status?: string | null;
   last_dispatched_at?: string | null;
   created_at?: string | null;
 }
 
+/** 有人在網站上等著的任務：訪客按按鈕的請求（source=web_request）與公民提問（task_type=question） */
+export function isVisitorFacingTask(task: QueuedTask): boolean {
+  return task.source === "web_request" || task.task_type === "question";
+}
+
 /**
  * 手動任務在佇列裡的時間。
- * 派過就用派出的時間（隊尾）；沒派過的看它是不是「有人明確要求」——是就 1980，
- * 不是就用它進佇列的時間（created_at）。
+ * 網站請求／公民提問（isVisitorFacingTask，且仍是 open）：沒派過、或派出已超過 VISITOR_REQUEUE_HOURS＝QUEUE_VISITOR_FRONT（比任何加推都早）；
+ *   6 小時內＝派出的時間（隊尾，照舊）。
+ * 其他：派過就用派出的時間（隊尾）；沒派過的看它是不是「有人明確要求」——是就 1980，不是就用它進佇列的時間（created_at）。
+ * now 可注入，測試用；正式一律用現在。
  */
-export function manualQueueAt(task: QueuedTask): string {
+export function manualQueueAt(task: QueuedTask, now: number | Date = Date.now()): string {
+  if (isVisitorFacingTask(task) && (task.status ?? "open") === "open") {
+    const nowMs = typeof now === "number" ? now : now.getTime();
+    const last = task.last_dispatched_at ? Date.parse(task.last_dispatched_at) : NaN;
+    if (Number.isNaN(last) || nowMs - last > VISITOR_REQUEUE_MS) return QUEUE_VISITOR_FRONT;
+  }
   if (task.last_dispatched_at) return task.last_dispatched_at;
   if (FRONT_SOURCES.has(task.source ?? "")) return QUEUE_FRONT;
   return task.created_at ?? QUEUE_FRONT;
@@ -423,13 +457,12 @@ export function manualQueueAt(task: QueuedTask): string {
  * （merge-queue 2026-09-21 指出；認領排除擋不住這個競賽窗口）。
  * 只在並列時散開，是因為唯一一筆剛建立的任務必須每次都被派出去，不能變成機率。
  */
-export function pickQueuedManual<T extends QueuedTask>(tasks: readonly T[], seed: string): T | null {
+export function pickQueuedManual<T extends QueuedTask>(tasks: readonly T[], seed: string, now: number | Date = Date.now()): T | null {
   if (tasks.length === 0) return null;
-  const sorted = [...tasks].sort((a, b) => {
-    const ka = manualQueueAt(a), kb = manualQueueAt(b);
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
-  const first = manualQueueAt(sorted[0]);
-  const tied = sorted.filter((t) => manualQueueAt(t) === first);
+  // 時間用 Date.parse 比：PostgREST 回 +00:00、常數是 Z，字串比會把同一刻當成不同
+  const at = (t: T) => { const v = Date.parse(manualQueueAt(t, now)); return Number.isNaN(v) ? Number.POSITIVE_INFINITY : v; };
+  const sorted = [...tasks].sort((a, b) => at(a) - at(b));
+  const first = at(sorted[0]);
+  const tied = sorted.filter((t) => at(t) === first);
   return tied.length > 1 ? pickBySeed(tied.slice(0, MANUAL_PICK_WINDOW), seed) : sorted[0];
 }
