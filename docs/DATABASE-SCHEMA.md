@@ -394,11 +394,9 @@
 政見資料含追蹤紀錄。
 ```sql
 SELECT p.*,
-  COALESCE(json_agg(l.*), '[]') as logs,
-  COALESCE(json_agg(rp.related_policy_id), '[]') as related_policy_ids
+  COALESCE(json_agg(l.*), '[]') as logs
 FROM policies p
 LEFT JOIN tracking_logs l ON p.id = l.policy_id
-LEFT JOIN related_policies rp ON p.id = rp.policy_id
 GROUP BY p.id
 ```
 
@@ -440,9 +438,7 @@ elections ───────────────────────�
               │                              │      │
               │                              ├── tracking_logs
               │                              │
-              │                              ├── policy_sources
-              │                              │
-              │                              └── related_policies
+              │                              └── policy_sources
               │
               │                              └── discussions
               │                                     │

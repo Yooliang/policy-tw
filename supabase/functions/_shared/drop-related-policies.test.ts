@@ -3,10 +3,12 @@
  *   1. migration 20261009220000：先查表與視圖是空的，依賴順序 DROP 觸發器、視圖、表、函式，policies_with_logs 重建後沒有 related_policy_ids、
  *      最後一欄仍是 no_public_progress，結尾自檢
  *   2. 之後的 migration 不得重建 related_policies／related_policies_uncovered／related_policy_ids
- *   3. repo 內（前端、Edge Function、腳本、Worker、協議文件）不得再有讀寫：from("related_policies")、SQL 的 FROM／JOIN／INSERT／UPDATE、related_policy_ids、relatedPolicyIds
- * SQL 本身另外在 PGlite（WASM Postgres）上實跑過，見 PR 說明；這裡沒有資料庫。
+ *   3. PGlite 實跑：空表時能刪、重建後欄位正確；表有資料時整支退回
+ *   4. repo 內（前端、Edge Function、腳本、Worker、協議文件）不得再有讀寫：from("related_policies")、SQL 的 FROM／JOIN／INSERT／UPDATE、related_policy_ids、relatedPolicyIds
+ * 
  */
-import { assert, assertFalse } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
+import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const ROOT = new URL("../../../", import.meta.url);
 const MIGRATIONS = new URL("supabase/migrations/", ROOT);
@@ -78,6 +80,7 @@ Deno.test("repo 內沒有任何讀寫 related_policies 的程式（前端、Edge
   ];
   const walk = async (dir: URL) => {
     for await (const e of Deno.readDir(dir)) {
+      if (e.name.startsWith(".")) continue; // 暫存檔（.pr.md、.pr.diff）與 .git／.claude 不是 repo 內容
       if (e.isDirectory) { if (!skipDirs.has(e.name)) await walk(new URL(e.name + "/", dir)); continue; }
       if (!exts.test(e.name) || e.name.endsWith(".test.ts") || e.name === "pnpm-lock.yaml") continue;
       const u = new URL(e.name, dir);
@@ -87,4 +90,62 @@ Deno.test("repo 內沒有任何讀寫 related_policies 的程式（前端、Edge
   };
   await walk(ROOT);
   assertFalse(hits.length > 0, `這些檔案還在讀寫 related_policies：${hits.join("、")}`);
+});
+
+// ── PGlite 實跑 ──────────────────────────────────────────────
+const BEFORE_VIEW = `SELECT p.*, (SELECT json_agg(rp.related_policy_id) FROM related_policies rp WHERE rp.policy_id = p.id) AS related_policy_ids FROM policies p`;
+async function freshDb(): Promise<PGlite> {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE ROLE anon; CREATE ROLE authenticated;
+    CREATE TABLE lineages (id uuid PRIMARY KEY, title text, level text, region text, sub_region text, category text, summary text);
+    CREATE TABLE policies (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text, lineage_id uuid);
+    CREATE TABLE tracking_logs (id bigserial PRIMARY KEY, date date, event text, description text, policy_id uuid);
+    CREATE TABLE policy_elements (id uuid PRIMARY KEY, policy_id uuid, element text, stated boolean, text text, deadline_date date, source_locator text, source_url text, updated_at timestamptz);
+    CREATE TABLE sources (id bigint PRIMARY KEY, url text, title text, publisher text, source_kind text, archive_url text);
+    CREATE TABLE source_refs (target_table text, target_id text, source_id bigint, role text);
+    CREATE FUNCTION source_brief_list(t text, i text) RETURNS json LANGUAGE sql AS $$ SELECT '[]'::json $$;
+    CREATE FUNCTION policy_no_public_progress(p uuid) RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
+    CREATE TABLE related_policies (id serial PRIMARY KEY, policy_id uuid REFERENCES policies(id), related_policy_id uuid REFERENCES policies(id));
+    CREATE FUNCTION related_policies_retired() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'retired'; END $$;
+    CREATE TRIGGER related_policies_no_write BEFORE INSERT OR UPDATE ON related_policies FOR EACH ROW EXECUTE FUNCTION related_policies_retired();
+    CREATE VIEW related_policies_uncovered AS SELECT policy_id, related_policy_id FROM related_policies;
+    CREATE VIEW policies_with_logs AS ${BEFORE_VIEW};
+    INSERT INTO policies (title) VALUES ('a'), ('b');
+  `);
+  return db;
+}
+const exists = async (db: PGlite, name: string) => (await db.query<{ r: string | null }>(`SELECT to_regclass('${name}')::text AS r`)).rows[0].r !== null;
+
+Deno.test("PGlite：空表時整支能跑，表、視圖、觸發器函式都沒了，policies_with_logs 欄位正確、列數不變", async () => {
+  const db = await freshDb();
+  try {
+    await db.exec(await Deno.readTextFile(new URL(FILE, MIGRATIONS)));
+    assertFalse(await exists(db, "related_policies"));
+    assertFalse(await exists(db, "related_policies_uncovered"));
+    const fn = await db.query(`SELECT 1 FROM pg_proc WHERE proname = 'related_policies_retired'`);
+    assertEquals(fn.rows.length, 0);
+    const cols = (await db.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name = 'policies_with_logs' ORDER BY ordinal_position`)).rows.map((r) => r.column_name);
+    assertEquals(cols.join(), "id,title,lineage_id,logs,elements,lineage,sources,no_public_progress");
+    assertEquals((await db.query(`SELECT 1 FROM policies_with_logs`)).rows.length, 2);
+    assertEquals((await db.query(`SELECT 1 FROM pg_class WHERE relname = '_drop_rp_before'`)).rows.length, 0, "暫存表要清掉");
+  } finally { await db.close(); }
+});
+
+Deno.test("PGlite：表有資料時整支 migration 退回，表、視圖、觸發器原封不動", async () => {
+  const db = await freshDb();
+  try {
+    await db.exec(`ALTER TABLE related_policies DISABLE TRIGGER related_policies_no_write;
+      INSERT INTO related_policies (policy_id, related_policy_id) SELECT a.id, b.id FROM policies a, policies b WHERE a.title = 'a' AND b.title = 'b';
+      ALTER TABLE related_policies ENABLE TRIGGER related_policies_no_write;`);
+    let err = "";
+    try { await db.exec(await Deno.readTextFile(new URL(FILE, MIGRATIONS))); } catch (e) { err = (e as Error).message; }
+    assert(/related_policies 不是空的/.test(err), `應該被前置檢查擋下：${err}`);
+    await db.exec("ROLLBACK").catch(() => {});
+    assert(await exists(db, "related_policies"));
+    assert(await exists(db, "related_policies_uncovered"));
+    const cols = (await db.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name = 'policies_with_logs'`)).rows.map((r) => r.column_name);
+    assert(cols.includes("related_policy_ids"), "退回後視圖要還是舊的");
+    assertEquals((await db.query(`SELECT 1 FROM related_policies`)).rows.length, 1);
+  } finally { await db.close(); }
 });
