@@ -39,6 +39,11 @@ const ED_SQL = await readMig(MIG_ED);
 /** 20261009130100 定義的函式（都不是複本：新臂，加上 130000 那兩支非複本的新版本） */
 const NONCOPY_ED = ["activity_arm_names", "contribution_auto_tasks_arms", "contribution_auto_tasks_election_discovery"];
 
+/** 130000 之後正見又改過、日本版跟進的複本：函式名 → 跟進的 migration（#490：rebalance_queue 零驗證列時起點退回 1.5 秒）。走樣比對改讀跟進版 */
+const FOLLOW_MIG = "20261009150100_policy_jp_rebalance_anchor.sql";
+const FOLLOW_SQL = await readMig(FOLLOW_MIG);
+const FOLLOWED: Record<string, string> = { rebalance_queue: FOLLOW_SQL };
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -192,7 +197,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -223,6 +228,19 @@ Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記
   const registered = [...PAIRS.map((p) => p.name), ...NONCOPY].sort();
   assertEquals(defined, registered);
   assertEquals(new Set(registered).size, registered.length, "登記重複");
+});
+
+Deno.test("走樣：跟進 migration（20261009150100）只定義登記的跟進複本，每支都在複本清單裡、前綴與 search_path 照 130000 的慣例，沒有 public. 引用", () => {
+  const defined = [...FOLLOW_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, Object.keys(FOLLOWED).sort());
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of defined) {
+    assert(copies.has(n), `${n} 要在複本清單裡`);
+    assert(fnText(FOLLOW_SQL, `policy_jp.${n}`).includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+  }
+  const stripped = FOLLOW_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped));
+  assert(!/\b(ALTER|GRANT|REVOKE|CREATE (OR REPLACE )?(VIEW|TRIGGER)|DROP (FUNCTION|VIEW|TRIGGER|TABLE (?!IF EXISTS _)))\b/i.test(stripped), "跟進只換函式本體，權限沿用 130000 的");
 });
 
 Deno.test("走樣：選舉發現 migration（20261009130100）定義的函式＝登記的三支非複本（新加函式不登記就紅）；它們都不在複本清單裡", () => {
