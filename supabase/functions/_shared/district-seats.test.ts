@@ -262,7 +262,10 @@ Deno.test("交件骨架：我們知道的選舉區先填好，代理只要對著
   const payload = tpl.payload as Record<string, unknown>;
   assertEquals(payload.region, "彰化縣");
   const ds = payload.districts as Array<Record<string, unknown>>;
-  assertEquals(ds.map((d) => d.district), ["第01選舉區", "第09選舉區"]);
+  // 預填已知的兩區，最後多一項「公告上還有、上面沒列的選舉區」的提醒（2026-10-08：代理照預填的幾項就交，屏東縣只交 7 區、公告 16 區）
+  assertEquals(ds.map((d) => d.district).slice(0, 2), ["第01選舉區", "第09選舉區"]);
+  assertEquals(ds.length, 3);
+  assertMatch(String(ds[2].district), /公告上還有、上面沒列的選舉區/);
   assertEquals(ds[1].kind, "indigenous_plain");
 });
 

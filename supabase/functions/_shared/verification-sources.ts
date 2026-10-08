@@ -19,6 +19,8 @@ export interface VerificationSource {
   party: string | null;
   regions: string[] | null;
   election_types: string[] | null;
+  /** 這筆來源只適用哪幾屆（elections.id）；null／沒有＝每一屆都適用（2026-10-09：應選名額的公告每屆不同，不能把 2026 的公告附給 2022 的任務） */
+  election_ids?: number[] | null;
   provides: string[];
   list_url: string | null;
   detail_url_pattern: string | null;
@@ -34,6 +36,8 @@ export interface SourceQuery {
   party?: string | null;
   region?: string | null;
   electionType?: string | null;
+  /** 哪一屆（elections.id）；沒給就不篩屆別。來源有填 election_ids 時，要包含這一屆才算符合 */
+  electionId?: number | null;
   need?: readonly string[] | null;
 }
 
@@ -54,6 +58,7 @@ export const PROVIDES_LABELS: Record<string, string> = {
   birth_year: "出生年",
   candidacy: "參選紀錄",
   roster: "名冊",
+  seats: "應選名額",
 };
 
 /** 純量欄位（如 party）：query 沒給值就不篩；來源該欄位是 null（不分）或跟 query 一樣才算符合 */
@@ -84,11 +89,19 @@ function needMatches(provides: readonly string[], need: readonly string[] | null
   return provides.some((p) => need.includes(p));
 }
 
-/** 單筆是否符合查詢條件（party 相符或 null、regions 包含或 null、election_types 包含或 null、need 有交集） */
+/** 屆別比對：query 沒給屆別就不篩；來源沒填 election_ids（null、空陣列）＝每一屆都適用；有填就要包含這一屆 */
+function electionIdMatches(sourceIds: readonly number[] | null | undefined, queryId: number | null | undefined): boolean {
+  if (queryId === null || queryId === undefined) return true;
+  if (!sourceIds || sourceIds.length === 0) return true;
+  return sourceIds.includes(queryId);
+}
+
+/** 單筆是否符合查詢條件（party 相符或 null、regions 包含或 null、election_types 包含或 null、election_ids 包含或 null、need 有交集） */
 export function sourceMatches(source: VerificationSource, q: SourceQuery): boolean {
   return scalarMatches(source.party, q.party)
     && arrayMatches(source.regions, q.region, countyKey)
     && arrayMatches(source.election_types, q.electionType)
+    && electionIdMatches(source.election_ids, q.electionId)
     && needMatches(source.provides, q.need);
 }
 
@@ -134,6 +147,7 @@ export function sourcesToMarkdown(sources: readonly VerificationSource[]): strin
       if (s.party) lines.push(`- 政黨：${s.party}`);
       lines.push(`- 適用縣市：${fmtList(s.regions, "全國")}`);
       lines.push(`- 適用選舉別：${fmtList(s.election_types, "全部")}`);
+      if (s.election_ids && s.election_ids.length > 0) lines.push(`- 適用屆別（選舉編號）：${s.election_ids.join("、")}`);
       lines.push(`- 能查：${fmtList(s.provides, "（無）", PROVIDES_LABELS)}`);
       if (s.list_url) lines.push(`- 列表頁：${s.list_url}`);
       if (s.detail_url_pattern) lines.push(`- 個人頁格式：${s.detail_url_pattern}`);
@@ -186,6 +200,8 @@ export const TASK_SOURCE_NEEDS: Record<string, readonly string[]> = {
   handover_missing: ["policy"],
   lineage_roles_missing: ["policy"],
   lineage_link_candidate: ["policy"],
+  // 應選名額（#344，2026-10-09）：要的是選舉公告（應選名額表）與登記彙總表的應選名額欄；不能走預設那組（會附一堆人物頁來源）
+  district_seats_missing: ["seats"],
 };
 
 /** 沒特別登記的任務型別（含手動任務）預設要的東西：不知道具體要查什麼，給最常用的一組 */
@@ -232,5 +248,11 @@ export function verifySourceQuery(contributionType: string, payload: Record<stri
   if (contributionType === "candidacy") return { region, party, electionType: str(payload.election_type), need: ["candidacy", "district", "roster"] };
   if (contributionType === "politician") return { region, party, electionType: str(payload.election_type), need: DEFAULT_TASK_SOURCE_NEED };
   if (contributionType === "policy") return { region, party, need: ["policy"] };
+  // 應選名額（2026-10-09）：驗證者要對著選舉公告逐區核對，附的是這一屆、這個縣市、這種選舉的公告來源；
+  // 以前這裡回 null，驗證者什麼來源都沒看到，只能自己找（找不到就投 unsure）
+  if (contributionType === "district_seats") {
+    const eid = typeof payload.election_id === "number" && Number.isFinite(payload.election_id) ? payload.election_id : null;
+    return { region, electionType: str(payload.election_type), electionId: eid, need: ["seats"] };
+  }
   return null;
 }
