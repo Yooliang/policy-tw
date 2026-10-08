@@ -236,24 +236,28 @@ export function checkBatch(rows: readonly RosterRow[], batch: readonly BatchItem
 
 /**
  * 名冊 PDF 的大小上限（位元組）。Edge Function 抽字吃記憶體，system-one 的 roster_batch 以前就出過 WORKER_RESOURCE_LIMIT；
- * 村里長那份是 7.5 MB（14,100 列），鄉鎮市民代表 2 MB、議員 0.4～0.6 MB。超過上限的不在 Edge 上抽字，那批照舊交人工驗證。
- * 根本解法是把九份名冊解析成資料表、checkBatch 改讀表（另一個 PR）。
+ * 村里長那份是 7.5 MB（14,100 列），鄉鎮市民代表 2 MB、議員 0.4～0.6 MB。超過上限的不在 Edge 上抽字。
+ * 2026-10-08 起九份名冊已解析成資料表 cec_registrations（產生腳本 scripts/gen-cec-registrations.ts 用 maxBytes 放寬這個上限在本機抽字），
+ * roster_batch 先查表（_shared/cec-registrations.ts），表裡沒有的名冊才走這裡的 PDF 加大小保護。
  */
 export const ROSTER_MAX_BYTES = 3_000_000;
 export class RosterTooLargeError extends Error {
-  constructor(public bytes: number) { super(`名冊 PDF ${(bytes / 1e6).toFixed(1)} MB，超過 ${ROSTER_MAX_BYTES / 1e6} MB，不在 Edge Function 上抽字`); }
+  constructor(public bytes: number, public limit: number = ROSTER_MAX_BYTES) { super(`名冊 PDF ${(bytes / 1e6).toFixed(1)} MB，超過 ${limit / 1e6} MB，不在 Edge Function 上抽字`); }
 }
 
-/** PDF 抽字：只給中選會名冊用（見檔頭）。import 必須是字串字面值，放變數線上會 Module not found */
-export async function cecRosterText(url: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+/**
+ * PDF 抽字：只給中選會名冊用（見檔頭）。import 必須是字串字面值，放變數線上會 Module not found。
+ * maxBytes 預設是 Edge 的保護上限；只有本機的產生腳本會放寬（村里長 7.5 MB）。
+ */
+export async function cecRosterText(url: string, fetchImpl: typeof fetch = fetch, maxBytes: number = ROSTER_MAX_BYTES): Promise<string> {
   if (!CEC_ROSTER_URL_RE.test(url)) throw new Error("只收中選會名冊網址（web.cec.gov.tw/api/file/*.pdf）");
-  const res = await fetchImpl(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; policy-tw-roster/1.0)" }, signal: AbortSignal.timeout(30_000) });
+  const res = await fetchImpl(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; policy-tw-roster/1.0)" }, signal: AbortSignal.timeout(maxBytes > ROSTER_MAX_BYTES ? 120_000 : 30_000) });
   if (!res.ok) throw new Error(`名冊下載失敗 HTTP ${res.status}`);
   // 先看 Content-Length：太大就連內容都不讀（不進記憶體）
   const declared = Number(res.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > ROSTER_MAX_BYTES) { await res.body?.cancel(); throw new RosterTooLargeError(declared); }
+  if (Number.isFinite(declared) && declared > maxBytes) { await res.body?.cancel(); throw new RosterTooLargeError(declared, maxBytes); }
   const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength > ROSTER_MAX_BYTES) throw new RosterTooLargeError(buf.byteLength);
+  if (buf.byteLength > maxBytes) throw new RosterTooLargeError(buf.byteLength, maxBytes);
   const { extractText, getDocumentProxy } = await import("https://esm.sh/unpdf@0.12.1?no-dts") as unknown as {
     getDocumentProxy(data: Uint8Array): Promise<unknown>;
     extractText(pdf: unknown, opts: { mergePages: true }): Promise<{ text: string | string[] }>;
