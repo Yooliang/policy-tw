@@ -441,6 +441,44 @@ Deno.test("索引頁：概況、JSON 索引與矩陣的連結", () => {
   assertStringIncludes(md, `資料庫目前收錄的政見 ${POLICIES.length} 筆；2026 屆競選承諾 6 筆（本索引的範圍）`);
 });
 
+Deno.test("網址後面一定是空白或行尾：各種 .md 逐行檢查（Markdown 自動連結不會把「｜」「（」連進網址，#506）", () => {
+  const multi = policy(王, "多來源政見", {
+    sources: [{ url: "https://example.com/a", role: "primary", title: "新聞稿", publisher: "某報", archiveUrl: "https://archive.example/a" } as never, { url: "https://example.com/b" } as never],
+  });
+  const policies = [...POLICIES, multi];
+  const docs: Array<[string, string]> = [];
+  const dataAsOf = "2026-09-10T08:00:00+00:00";
+  for (const p of ALL_PEOPLE) {
+    const md = renderPoliticianMd({ politician: p, policies: policies.filter((x) => x.politicianId === p.id), elections: [E2022, E2024, E2026], today: TODAY, generatedAt: NOW });
+    docs.push([`人物 ${p.name}`, md]);
+  }
+  const region = buildRegionPage({ election: E2026, segment: "2026", region: "台南市", candidates: [王, 李, 陳, 無政見, 退選], policies, today: TODAY });
+  docs.push(["縣市", renderPage({ ...region, dataAsOf }, "/election/2026/台南市.md", NOW)]);
+  const built = buildAll({ ...corpus(), policies }, { generatedAt: NOW, sha: fakeSha });
+  for (const p of built.pages) docs.push([p.path, renderPage({ ...p.page, dataAsOf }, p.path, NOW)]);
+  docs.push(["404", renderPage(buildNotFoundPage("「火星」"), "/data/x.md", NOW)]);
+  docs.push(["索引", renderPage(buildIndexPage({ ctx: CTX, matrix: built.matrix!, dataAsOf: null }), "/data/2026/index.md", NOW)]);
+
+  let urls = 0;
+  const bad: string[] = [];
+  for (const [name, md] of docs) {
+    for (const line of md.split(/\r?\n/)) {
+      for (const m of line.matchAll(/https?:\/\/[^\s]*/g)) {
+        urls++;
+        // 網址後面直接接的非空白字元，只能是網址本身合法的字元；全形標點（｜、（、）、；、，、。、、）一律不行
+        if (/[\u3000-\u303f\uff00-\uffef]/.test(m[0])) bad.push(`${name}：${line}`);
+      }
+    }
+  }
+  assert(urls > 50, `要真的掃到網址（掃到 ${urls} 個）`);
+  assertEquals(bad.slice(0, 5), [], "網址後面接了全形符號，自動連結會連成一條");
+  // 真的有走到的三種寫法
+  const all = docs.map(([, md]) => md).join("\n");
+  assertStringIncludes(all, " ｜ 正見：https://");
+  assertStringIncludes(all, " ｜ 摘要：https://");
+  assertStringIncludes(all, "https://example.com/a （");
+});
+
 // ───────── 對外文件 ─────────
 
 Deno.test("llms.txt：Markdown 入口的連結全部真的認得，清單跟索引頁同一份，指向 index.json／index.md", async () => {

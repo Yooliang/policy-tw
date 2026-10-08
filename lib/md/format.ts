@@ -121,7 +121,7 @@ export function frontMatter(m: MdMeta): string {
   const html = m.htmlPath ? abs(m.htmlPath) : null
   const asOf = taipeiDate(m.dataAsOf)
   // 引用格式沿用 llms.txt 與政見頁那一行：資料來源：正見（正見.tw）網址（資料更新：YYYY-MM-DD）
-  const cite = `資料來源：正見（正見.tw）${html ?? url}${asOf ? `（資料更新：${asOf}）` : ''}`
+  const cite = `資料來源：正見（正見.tw）${html ?? url}${asOf ? ` （資料更新：${asOf}）` : ''}`
   const fields: Array<[string, string | number | null]> = [
     ['title', m.title],
     ['source', '正見.tw'],
@@ -208,9 +208,9 @@ export function sourceText(s: SourceRef): string {
     s.title ? oneLine(s.title) : null,
     s.publisher ? oneLine(s.publisher) : null,
     s.publishedDate ? taipeiDate(s.publishedDate) : null,
-    s.archiveUrl ? `存檔 ${s.archiveUrl}` : null,
+    s.archiveUrl ? `存檔 ${s.archiveUrl} ` : null,
   ].filter((x): x is string => !!x)
-  return bits.length > 0 ? `${s.url}（${bits.join('；')}）` : s.url
+  return bits.length > 0 ? `${s.url} （${bits.join('；')}）` : s.url
 }
 
 /** 主要出處網址；沒有就 null */
@@ -253,7 +253,7 @@ export function policyBullet(p: Policy, opts: PolicyLineOptions): string[] {
   const desc = opts.descMax > 0 ? truncate(p.description, opts.descMax) : ''
   if (desc && desc !== oneLine(p.title)) lines.push(`  - 說明：${desc}`)
   if (opts.note) lines.push(`  - ${opts.note}`)
-  lines.push(`  - 出處：${primarySource(p) ?? NO_SOURCE}｜正見：${policyUrl(p.id)}`)
+  lines.push(`  - 出處：${primarySource(p) ?? NO_SOURCE} ｜ 正見：${policyUrl(p.id)}`)
   return lines
 }
 

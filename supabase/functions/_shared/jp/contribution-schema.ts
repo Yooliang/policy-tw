@@ -1,11 +1,14 @@
 /**
- * 日本站貢獻請求的格式與驗證（收 no_change、task_suggestion、correction、election 四種）。
+ * 日本站貢獻請求的格式與驗證（收 no_change、task_suggestion、correction、election、local_government、regional_stat 六種）。
  *
  * 複製自 ../contribution-schema.ts：validateContributionRequest／validateVerifyRequest／canonicalPayload，
  * 以及 validatePayload 裡 no_change、task_suggestion、correction 三段的欄位規則（欄位名、字數、錯誤文字都照抄）。
  * 日本站自己的：election（查到的選舉日程，policy-jp #41 ③、PR②；對應派工臂 election_discovery）——正見沒有這個型別，
  *   欄位照 policy_jp.elections 的 CHECK 寫（election_type／election_reason 的列舉、國政不帶 lg_code、補欠・増員只限議員選舉、
- *   告示日不晚於投票日）。本 PR 只收進來走同儕驗證，不落庫（落庫是下一個 PR：共識後才寫 elections，程式不從臂產生選舉資料）。
+ *   告示日不晚於投票日）。共識後由 SQL policy_jp.apply_contribution 落庫（20261009210000）。#503：lg_code 驗檢查碼、日期限 1947～2100、
+ *   帶 task_id 時 payload 的 lg_code（與 election 的職位種類）要跟 task_id 一致。
+ * 日本站自己的：local_government（地方公共団体，對應派工臂 local_government_missing）與 regional_stat（地域統計，對應 regional_stats_missing）——
+ *   欄位照 policy_jp.local_governments／regional_stats 的 CHECK 寫；source_urls 至少要有一個公的出典（総務省・e-Stat・*.go.jp・*.lg.jp・団体の公式サイト）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -21,10 +24,12 @@ import { checkSourceSet } from "../source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "../consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "../correction.ts";
 import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../contribution-schema.ts";
+import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
+import { isJpOfficialSource } from "./source-kind.ts";
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -35,6 +40,23 @@ export const JP_NATIONAL_ELECTION_TYPES = ["national_lower", "national_upper"] a
 /** 補欠選挙・増員選挙只有議員選舉（elections_by_election_assembly） */
 export const JP_ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly", "national_lower", "national_upper"] as const;
 export const JP_LG_CODE_RE = /^\d{6}$/;
+
+/** local_governments.kind 的列舉（policy_jp.local_governments 的 CHECK；對齊測試守著） */
+export const JP_LG_KINDS = ["prefecture", "designated_city", "core_city", "city", "special_ward", "admin_ward", "town", "village"] as const;
+/** 團體名稱的結尾要跟 kind 對得上（北海道・東京都・大阪府・京都府・○○県／○○市／○○区／○○町／○○村） */
+export const JP_LG_NAME_SUFFIX: Record<(typeof JP_LG_KINDS)[number], RegExp> = {
+  prefecture: /[都道府県]$/, designated_city: /市$/, core_city: /市$/, city: /市$/, special_ward: /区$/, admin_ward: /区$/, town: /町$/, village: /村$/,
+};
+const JP_LG_NAME_SUFFIX_HINT: Record<(typeof JP_LG_KINDS)[number], string> = {
+  prefecture: "都道府県要以 都／道／府／県 結尾", designated_city: "市要以 市 結尾", core_city: "市要以 市 結尾", city: "市要以 市 結尾",
+  special_ward: "區要以 区 結尾", admin_ward: "區要以 区 結尾", town: "町要以 町 結尾", village: "村要以 村 結尾",
+};
+/** kana 是「ひらがな」（五十音排序用；総務省コード表の半角カナは全部ひらがなに直して交件） */
+export const JP_KANA_RE = /^[ぁ-ゖー]+$/;
+
+/** regional_stats.stat_key 與單位（policy_jp.regional_stat_unit；一個 stat_key 只有一種單位，對齊測試守著） */
+export const JP_STAT_KEYS = ["population", "area_km2", "budget_expenditure", "aging_rate"] as const;
+export const JP_STAT_UNITS: Record<(typeof JP_STAT_KEYS)[number], string> = { population: "人", area_km2: "km2", budget_expenditure: "千円", aging_rate: "%" };
 
 /** 【待定】日本站已建的資料表（20261009000000_policy_jp_tables.sql）裡可以被更正的；落庫（apply）定案時一併收斂 */
 export const JP_CORRECTION_TABLES = ["politicians", "politician_elections", "politician_offices", "policies", "parties", "elections", "lineages"] as const;
@@ -101,12 +123,49 @@ const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !
 const isStr = (v: unknown, min = 1, max = 2000): v is string => typeof v === "string" && v.trim().length >= min && v.length <= max;
 const isUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
-/** YYYY-MM-DD 而且真的有這一天（2027-02-30 不算；用 UTC 往返比對，不吃執行環境的時區） */
-const isIsoDate = (v: unknown): v is string => {
-  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  const d = new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
-};
+/**
+ * 任務與交件對得上（#503 b）：自動缺口任務的 task_id 是 auto:<臂>:<對象>，三種資料型交件各有對應的臂，
+ * 帶了 task_id 就要確認「這筆交件講的是那個任務問的團體」——不然代理拿錯 task_id（或亂填）交進來，通過驗證後會落庫成別的團體的資料。
+ *   election_discovery 任務      → 只收 election；task_id 裡的 lg_code 與職位（head＝長、assembly＝議會）要跟 payload 一致
+ *   local_government_missing 任務 → 只收 local_government；lg_code 一致
+ *   regional_stats_missing 任務   → 只收 regional_stat；lg_code 一致
+ * 手動任務（uuid）與其他自動缺口任務不比對（no_change／task_suggestion／correction 也不在這裡管）。
+ */
+export const JP_TASK_ARMS = {
+  election_discovery: "election",
+  local_government_missing: "local_government",
+  regional_stats_missing: "regional_stat",
+} as const satisfies Record<string, JpContributionType>;
+const DATA_TYPES = ["election", "local_government", "regional_stat"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing):(.+)$/;
+const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
+const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
+const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
+
+export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskId: unknown, push: (path: string, message: string) => void): void {
+  if (typeof taskId !== "string" || !oneOf(DATA_TYPES, type)) return;
+  const m = TASK_ID_RE.exec(taskId);
+  if (!m) return;
+  const arm = m[1] as keyof typeof JP_TASK_ARMS;
+  if (JP_TASK_ARMS[arm] !== type) {
+    push("task_id", `這個 task_id 是 ${arm} 的任務，要用 contribution_type=${JP_TASK_ARMS[arm]} 回報（你交的是 ${type}）；查不到請改交 no_change`);
+    return;
+  }
+  let taskLg: string;
+  let officeKind: string | null = null;
+  if (arm === "election_discovery") {
+    const d = DISCOVERY_REST_RE.exec(m[2]);
+    if (!d) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:election_discovery:<満了日>:<團體碼>:<head|assembly>）"); return; }
+    taskLg = d[1];
+    officeKind = d[2];
+  } else {
+    if (!/^\d{6}$/.test(m[2])) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:<團體碼>）`); return; }
+    taskLg = m[2];
+  }
+  if (payload.lg_code !== taskLg) push("payload.lg_code", `payload.lg_code（${String(payload.lg_code ?? "未填")}）跟這個任務問的團體（${taskLg}）不一致：一個任務只回報它問的那個團體`);
+  if (officeKind === "head" && !oneOf(HEAD_ELECTION_TYPES, payload.election_type)) push("payload.election_type", `這個任務問的是「長」的選舉，election_type 要是 ${HEAD_ELECTION_TYPES.join("／")} 之一`);
+  if (officeKind === "assembly" && !oneOf(ASSEMBLY_ELECTION_TYPES, payload.election_type)) push("payload.election_type", `這個任務問的是「議会議員」的選舉，election_type 要是 ${ASSEMBLY_ELECTION_TYPES.join("／")} 之一`);
+}
 
 function validatePayload(type: JpContributionType, p: Obj, push: (path: string, message: string) => void): void {
   switch (type) {
@@ -166,13 +225,59 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         if (p.lg_code !== undefined && p.lg_code !== null) push("payload.lg_code", "國政選舉（national_lower／national_upper）不帶 lg_code，請拿掉這個欄位");
       } else if (oneOf(JP_ELECTION_TYPES, p.election_type)) {
         if (!(typeof p.lg_code === "string" && JP_LG_CODE_RE.test(p.lg_code))) push("payload.lg_code", "lg_code 必填：全国地方公共団体コード 6 碼數字（例：131130）");
+        else if (!lgCodeValid(p.lg_code)) push("payload.lg_code", "lg_code 的檢查碼不對（第 6 碼）：請照總務省「全国地方公共団体コード」抄正確的 6 碼");
       }
-      if (!isIsoDate(p.election_date)) push("payload.election_date", "election_date 必填：投票日，YYYY-MM-DD 而且要是真的有這一天");
+      if (!isJpDate(p.election_date)) push("payload.election_date", "election_date 必填：投票日，YYYY-MM-DD，要是真的有這一天，年份在 1947～2100");
       if (p.notice_date !== undefined) {
-        if (!isIsoDate(p.notice_date)) push("payload.notice_date", "notice_date 要是 YYYY-MM-DD（告示日）；不知道就不要填");
-        else if (isIsoDate(p.election_date) && p.notice_date > p.election_date) push("payload.notice_date", "notice_date（告示日）不能晚於 election_date（投票日）");
+        if (!isJpDate(p.notice_date)) push("payload.notice_date", "notice_date 要是 YYYY-MM-DD（告示日，年份 1947～2100）；不知道就不要填");
+        else if (isJpDate(p.election_date) && p.notice_date > p.election_date) push("payload.notice_date", "notice_date（告示日）不能晚於 election_date（投票日）");
       }
       if (p.name !== undefined && !isStr(p.name, 1, 100)) push("payload.name", "name 要是 1～100 字（選舉的名稱，例：○○市長選挙）；不知道就不要填");
+      break;
+    }
+    case "local_government": {
+      // 地方公共団体（總務省「全国地方公共団体コード」）：欄位照 policy_jp.local_governments 的 CHECK；網址用的 slug 由落庫端決定，不必交
+      const codeOk = lgCodeValid(p.lg_code);
+      if (!codeOk) push("payload.lg_code", "lg_code 必填：全国地方公共団体コード 6 碼數字，檢查碼（第 6 碼）要對，請照總務省的團體碼表抄");
+      const kindOk = oneOf(JP_LG_KINDS, p.kind);
+      if (!kindOk) push("payload.kind", `kind 必填：${JP_LG_KINDS.join("／")} 之一（政令指定都市 designated_city、中核市 core_city、東京23区 special_ward、政令市的行政区 admin_ward）`);
+      if (!(typeof p.pref_code === "string" && lgCodeValid(p.pref_code))) push("payload.pref_code", "pref_code 必填：所屬都道府県的團體碼（6 碼，檢查碼要對；都道府県自己填自己的 lg_code）");
+      else if (codeOk) {
+        if (p.pref_code !== lgPrefCode(p.lg_code as string)) push("payload.pref_code", `pref_code 要是 lg_code 前 2 碼＋000＋檢查碼（這個 lg_code 的都道府県是 ${lgPrefCode(p.lg_code as string)}）`);
+        else if (kindOk && (p.kind === "prefecture") !== (p.lg_code === p.pref_code)) {
+          push("payload.kind", p.kind === "prefecture"
+            ? "kind=prefecture 的 lg_code 要是都道府県的團體碼（前 2 碼＋000＋檢查碼，例：230006）；這個 lg_code 是市区町村"
+            : "這個 lg_code 是都道府県的團體碼（第 3～5 碼是 000），kind 要填 prefecture");
+        }
+      }
+      if (!isStr(p.name, 1, 40)) push("payload.name", "name 必填（1～40 字，總務省團體碼表的正式名稱，例：一宮市）");
+      else if (kindOk && !JP_LG_NAME_SUFFIX[p.kind as (typeof JP_LG_KINDS)[number]].test((p.name as string).trim())) {
+        push("payload.name", `name「${p.name}」的結尾跟 kind=${p.kind} 對不上（${JP_LG_NAME_SUFFIX_HINT[p.kind as (typeof JP_LG_KINDS)[number]]}）：kind 是不是填錯了`);
+      }
+      if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 必填（團體名稱的讀音）");
+      else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana 要全部是ひらがな（總務省團體碼表的半角カナ請改成ひらがな，例：いちのみやし；不含空白與括號）");
+      break;
+    }
+    case "regional_stat": {
+      // 地域統計：欄位照 policy_jp.regional_stats 的 CHECK；單位固定（一個 stat_key 一種單位），交件要明寫，讓驗證者一眼看出有沒有搞錯千円／円
+      if (!lgCodeValid(p.lg_code)) push("payload.lg_code", "lg_code 必填：全国地方公共団体コード 6 碼數字，檢查碼（第 6 碼）要對");
+      const keyOk = oneOf(JP_STAT_KEYS, p.stat_key);
+      if (!keyOk) push("payload.stat_key", `stat_key 必填：${JP_STAT_KEYS.join("／")} 之一`);
+      if (!(typeof p.year === "number" && Number.isInteger(p.year) && p.year >= 1900 && p.year <= 2100)) push("payload.year", "year 必填：西暦的整數（1900～2100；歳出是会計年度的開始年，例：令和5年度＝2023）");
+      if (!(typeof p.value === "number" && Number.isFinite(p.value))) push("payload.value", "value 必填：數字（不要帶單位、逗號或文字）");
+      else if (keyOk) {
+        const v = p.value as number;
+        const k = p.stat_key as (typeof JP_STAT_KEYS)[number];
+        if (v < 0) push("payload.value", "value 不能是負數");
+        else if (k === "aging_rate" && v > 100) push("payload.value", "aging_rate 是百分比，要在 0～100 之間（例：29.6）");
+        else if (k === "area_km2" && v <= 0) push("payload.value", "area_km2 要大於 0（單位 km2）");
+        else if ((k === "population" || k === "budget_expenditure") && !Number.isInteger(v)) push("payload.value", `${k} 要是整數（population 單位「人」、budget_expenditure 單位「千円」）`);
+      }
+      if (keyOk) {
+        const want = JP_STAT_UNITS[p.stat_key as (typeof JP_STAT_KEYS)[number]];
+        if (p.unit !== want) push("payload.unit", `${p.stat_key} 的 unit 要是「${want}」（值也要換算成這個單位）`);
+      } else if (!isStr(p.unit, 1, 20)) push("payload.unit", "unit 必填");
+      if (p.as_of !== undefined && !isJpDate(p.as_of)) push("payload.as_of", "as_of 要是 YYYY-MM-DD（基準日，年份 1947～2100，例：國勢調査 2020-10-01）；不知道就不要填");
       break;
     }
   }
@@ -233,6 +338,18 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       raw.payload.task_id = raw.task_id;
     }
     validatePayload(raw.contribution_type, raw.payload, push);
+    // 同一個欄位前面已經報過錯就不重複報（例：lg_code 格式不對，已經有一條了）
+    checkTaskAgreement(raw.contribution_type, raw.payload, raw.task_id, (path, message) => {
+      if (!errors.some((e) => e.index === index && e.path === path)) push(path, message);
+    });
+    // 地方公共団体・地域統計：出典は公的なもの——總務省・e-Stat・*.go.jp・*.lg.jp・団体の公式サイトを最低 1 つ（媒體・社群だけの交件は收不進來）
+    if ((raw.contribution_type === "local_government" || raw.contribution_type === "regional_stat") && Array.isArray(sourceUrls)
+        && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
+        && !(sourceUrls as string[]).some((u) => isJpOfficialSource(u, raw.contribution_type as string))) {
+      push("source_urls", raw.contribution_type === "local_government"
+        ? "source_urls 至少要有一個公的出典：總務省「全国地方公共団体コード」（soumu.go.jp）或該団体的公式サイト（*.lg.jp、city.／town.／vill.／pref. 開頭的 .jp 網域）"
+        : "source_urls 至少要有一個公的統計出典：e-Stat（e-stat.go.jp）、總務省・統計局（soumu.go.jp、stat.go.jp）或該団体的公式サイト（*.lg.jp 等）");
+    }
     items.push({
       contribution_type: raw.contribution_type,
       payload: raw.payload,

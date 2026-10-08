@@ -276,6 +276,8 @@
 - [「我看不到」不是「我反對」](decisions/2026-09-19-我看不到不是我反對.md)
 - [紅線](decisions/2026-09-19-紅線.md)
 
+- **日本站落庫與兩支新臂：資料一律走代理交件；cap 套在「可派」的缺口上；團體還沒進來就等，不繞外鍵（policy-jp #41、主線 #503；migration `20261009210000`／`210100`）**｜維護者 10-08：日本站前端全部改讀真實資料，都道府県・市区町村名單與地域統計（e-Stat 等）**也走代理交件**，不用 migration 匯入。做了什麼：新交件型別 `local_government`（團體碼、種類、所屬都道府県、名稱、ひらがな讀音）與 `regional_stat`（人口・面積・歳出・高齢化率，一個值一件，單位固定 人／km2／千円／%）；落庫是 SQL `policy_jp.apply_contribution`（同一交易寫正式列、`sources`／`source_refs`、`edit_history` 與貢獻狀態；已有一樣的＝成功、不一樣的不覆蓋退件、失敗 10 分鐘重試 3 次退件，照正見）；新臂 `local_government_missing`（總務省任期満了調查裡有、團體表沒有的，都道府県先）與 `regional_stats_missing`（缺 `min_year` 以後的統計；行政区沒有決算カード、不派）。｜#503 三項的取捨：(a) election_discovery 原本先 `LIMIT cap` 再被 no_change／冷卻擋掉，第 51 名以後永遠開不出來——選「cap 套在可派的缺口上」（臂在 LIMIT 前用 `task_unavailable()` 排除），不選「縮短 no_change 擋期」：病因是先截斷後過濾，擋的原因不只一種，而且縮短擋期要動走樣守門登記的 `refresh_dispatch_blocked` 複本；no_change 因此也要落庫（記 `task_checks`），否則通過的查無永遠停在 verified、冷卻永遠不開始。(b) 交件端驗團體碼檢查碼、日期 1947～2100、`task_id` 與 payload 的團體一致。(c) 選舉與統計指到的團體還沒落庫時，貢獻**保持 verified 等待**（`apply_blocker()` → waiting，排程只挑不再被擋的），不繞外鍵、也不先建空殼團體；等待中的不再派人重查。｜網址：市区町村的 `slug` 用團體碼（羅馬字會撞名：府中市、伊達市都不只一個）；47 都道府県用 policy-jp `prefectures.ts` 那一份固定羅馬字，列進來網址不變（測試盯兩邊一致）。讀音一律要ひらがな（總務省表是半角カナ，代理要轉；為了五十音排序一致）。｜錯了的代價：被排除的任務在冷卻期間不在派工列裡，`gap_events` 記成 closed（filled），語意不完全準；團體碼打對但真的不存在的貢獻會一直在 `apply_waiting`，目前沒有逾時退件也沒進 `activity_health`；落庫不寫 `reviews` 列、選舉落庫不順手建 `election_milestones`／`election_districts`；出處等級看網域（`*.go.jp`、`*.lg.jp`、`city.`／`town.`／`vill.`／`pref.` 開頭的 `.jp`），是啟發式不是白名單，內容對不對仍靠同儕驗證。日本站手冊（policy-jp `public/skill.md`）寫好新型別並上線後，再把 `JP_PROTOCOL_VERSION` 升到 0.6.0（文件領先端點）；在那之前代理靠任務描述裡的日文說明交件。
+
 ## 暫緩（有結論但沒動）
 
 - [「全 judge 票不能單獨通過」：等 `judge_backed` 數據。](decisions/pending-全judge票不能單獨通過等ju.md)
