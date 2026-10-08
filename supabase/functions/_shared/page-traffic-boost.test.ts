@@ -17,17 +17,19 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
+import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
 const MIG = "20261008190000_page_traffic_boost.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
 const MIG_SQL = await readMig(MIG);
-const PR_SQL = await readMig(P2_PR_MIG);
+const MAN_MIG = "20261008165000_manual_tasks_as_arm.sql";
+const MAN_SQL = await readMig(MAN_MIG);
+const QP_SQL = await readMig(QP_MIG);
 
 // ============================================================
 // A. 文字層
 // ============================================================
-const OLD_SEED = fnText(PR_SQL, "seed_auto_task_queue");
+const OLD_SEED = fnText(MAN_SQL, "seed_auto_task_queue");
 const NEW_SEED = fnText(MIG_SQL, "seed_auto_task_queue");
 const MARK = /  -- >>> 流量提層[^\n]*\n[\s\S]*?  -- <<< 流量提層\n\n?/g;
 const isMechanicalSeed = (fn: string) => {
@@ -48,13 +50,13 @@ const REPLACE_RPC = fnText(MIG_SQL.replace("CREATE OR REPLACE FUNCTION public.re
 const HOT_VIEW = viewText(MIG_SQL, "page_traffic_hot");
 const SEED_BLOCK = [...NEW_SEED.matchAll(MARK)].map((m) => m[0]).join("");
 
-Deno.test("A1 這支是 seed_auto_task_queue 的最後一版，緊接著 party_roster 的 P2；沒有動優先層、重排、總表、/next、插隊", async () => {
+Deno.test("A1 這支是 seed_auto_task_queue 的最後一版，緊接著手動任務變一支臂那支（#453）；沒有動優先層、重排、總表、/next、插隊", async () => {
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
   const i = defining.indexOf(MIG);
   assert(i > 0, "這支要在重新定義 seed 的清單裡");
-  assertEquals(defining[i - 1], P2_PR_MIG, "seed 的前一版應該是 party_roster 的 P2；有人在中間改了，要以那一版為底重做機械式替換");
-  assertEquals(defining.slice(i + 1), [], "這支之後又有人改了 seed：要以最新那版為底重做（#453、#455、#458 若改到 seed，後合的重做）");
+  assertEquals(defining[i - 1], MAN_MIG, "seed 的前一版應該是手動任務變一支臂那支（#453）；有人在中間改了，要以那一版為底重做機械式替換");
+  assertEquals(defining.slice(i + 1), [], "這支之後又有人改了 seed：要以最新那版為底重做（之後若有人改到 seed，後合的以最新那版為底重做）");
   const code = codeOf(MIG_SQL);
   for (const untouched of ["activity_priority", "rebalance_queue", "contribution_auto_tasks_arms", "contribution_auto_tasks", "queue_slot", "task_dispatched", "task_boost", "activity_open", "activity_require_rule"]) {
     assert(!new RegExp(`(CREATE OR REPLACE FUNCTION|DROP FUNCTION( IF EXISTS)?) ${untouched}\\(`).test(code), `這支不改 ${untouched}`);
@@ -64,7 +66,7 @@ Deno.test("A1 這支是 seed_auto_task_queue 的最後一版，緊接著 party_r
   assert(!/(UPDATE|INSERT INTO|DELETE FROM)\s+(politicians|policies|politician_elections|contributions|activity_rules|activity_overrides|task_priority_tiers|election_milestones)\b/i.test(code), "不寫任何正式資料表、規則表、里程碑表");
 });
 
-Deno.test("A2 seed 新定義＝party_roster 那支 P2 的定義＋一個標記起訖的區塊（PERFORM traffic_boost_apply），其餘一字不差", () => {
+Deno.test("A2 seed 新定義＝#453（手動任務變一支臂）的定義＋一個標記起訖的區塊（PERFORM traffic_boost_apply），其餘一字不差", () => {
   assert(isMechanicalSeed(NEW_SEED));
   assertEquals((NEW_SEED.match(/-- >>> 流量提層/g) ?? []).length, 1);
   assertEquals(codeOf(SEED_BLOCK).trim(), "PERFORM traffic_boost_apply();");
@@ -187,30 +189,46 @@ const IDS = Object.keys(ORIGINAL);
 /** PA 熱門時會被提到前段的（原層不是前段、target 指到 PA 或他名下的政見／參選紀錄） */
 const PA_LIFTED = ["aa_term", "dup_ab", "handover", "roles", "items", "pe_ids", "pe_one_a"];
 
-const RESTUB = ["raw", "election_results", "party_gap", "party_roster"] as const;
+const RESTUB = ["raw", "election_results", "party_gap", "party_roster", "ballot_numbers"] as const;
 
 async function buildDb(mutateMig: (s: string) => string = (s) => s, branches: Record<string, GapRow[]> = FIXTURE): Promise<Db> {
   const pre = `
+    -- Supabase 的預設授權：public 新函式的 EXECUTE 會明確授給 anon、authenticated、service_role（測試環境要模擬，不然 REVOKE ... FROM anon 拿掉也看不出來）
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
-    ALTER TABLE elections ADD COLUMN bulletin_published_on date;
-    UPDATE elections SET bulletin_published_on = DATE '2026-11-18' WHERE id = 2026;
-    ALTER TABLE contributions ADD COLUMN contributor_ip_hash text, ADD COLUMN agent_name text, ADD COLUMN payload jsonb;
-    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
-    CREATE FUNCTION task_target_key(t text, tg jsonb) RETURNS text LANGUAGE sql AS $$ SELECT t $$;
-    DROP FUNCTION queue_slot(text);
-    ${await latestFn("queue_slot")}
-    ${await latestFn("contribution_auto_tasks")}
-    ${await latestFn("task_dispatched")}
-    CREATE OR REPLACE FUNCTION contribution_queue_at(t text, k text, c timestamptz) RETURNS timestamptz LANGUAGE sql AS $$ SELECT queue_slot('verify') $$;
     CREATE TABLE politicians (id uuid PRIMARY KEY, name text NOT NULL, merged_into uuid);
     CREATE TABLE politician_elections (id integer PRIMARY KEY, politician_id uuid NOT NULL);
     CREATE TABLE policies (id uuid PRIMARY KEY, politician_id uuid NOT NULL);
-    ${await latestFn("politician_name_is_placeholder")}`;
+    ${await latestFn("politician_name_is_placeholder")}
+    ALTER TABLE elections ADD COLUMN bulletin_published_on date, ADD COLUMN bulletin_dir text;
+    ALTER TABLE politicians ADD COLUMN region text, ADD COLUMN avatar_url text;
+    ALTER TABLE politician_elections ADD COLUMN election_id integer, ADD COLUMN election_type text;
+    ${await latestFn("roster_scope_milestone_date")}
+    CREATE VIEW ballot_number_anomalies AS SELECT NULL::integer AS election_id, NULL::text AS election_type, NULL::text AS kind WHERE false;
+    CREATE FUNCTION contribution_subject_politician(p jsonb) RETURNS uuid LANGUAGE sql IMMUTABLE AS $$ SELECT NULL::uuid $$;
+    ${await latestFn("uuid_or_null")}
+    UPDATE elections SET bulletin_published_on = DATE '2026-11-18' WHERE id = 2026;
+    ALTER TABLE contributions ADD COLUMN contributor_ip_hash text, ADD COLUMN agent_name text, ADD COLUMN payload jsonb;
+    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+    ${await latestFn("task_target_key")}
+    DROP FUNCTION queue_slot(text);
+    ${await latestFn("queue_slot")}
+    ${await latestFn("contribution_auto_tasks")}
+    ${await latestFn("contribution_auto_task_counts")}
+    ${await latestFn("task_dispatched")}
+    CREATE TABLE contribution_tasks (
+      id uuid PRIMARY KEY, title text NOT NULL, description text, task_type text NOT NULL, target jsonb NOT NULL DEFAULT '{}'::jsonb, region text,
+      priority integer NOT NULL DEFAULT 1, reward integer NOT NULL DEFAULT 1, status text NOT NULL DEFAULT 'open', source text NOT NULL DEFAULT 'manual',
+      suggested_by text, hint_sources text[] NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE citizen_questions (id uuid PRIMARY KEY, stance_up integer NOT NULL DEFAULT 0, answer_count integer NOT NULL DEFAULT 0);
+    CREATE OR REPLACE FUNCTION contribution_queue_at(t text, k text, c timestamptz) RETURNS timestamptz LANGUAGE sql AS $$ SELECT queue_slot('verify') $$;
+    ${QP_SQL}`;
   const db = await buildArmsDb({
     branches,
+    extraBranches: ["ballot_numbers"],
     afterP1Sql: pre,
-    p2: { migs: [{ name: QP_MIG }, { name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }, { name: MIG, mutate: mutateMig }], restub: RESTUB },
+    p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }, { name: MAN_MIG }], restub: RESTUB },
   });
+  await applyP2(db, mutateMig(MIG_SQL), RESTUB);
   await db.exec(`
     INSERT INTO politicians VALUES ('${PA}', '甲', NULL), ('${PB}', '乙', NULL), ('${PD}', '丁', NULL);
     INSERT INTO politician_elections VALUES (${PE_A}, '${PA}'), (${PE_B}, '${PB}'), (903, '${PD}');
@@ -492,7 +510,7 @@ async function runSuite(db: Db): Promise<Verdicts> {
     by: (await rows<{ task_id: string; opened_by: unknown }>(db, `SELECT task_id, opened_by FROM task_dispatches WHERE task_id LIKE 'auto:%' ORDER BY task_id COLLATE "C"`)),
   });
   const parity = async (setup: () => Promise<void>) => {
-    // 舊 seed（party_roster 那支 P2 的定義）改名放進來，同一份資料各跑一次，輸出逐件比
+    // 舊 seed（#453 的定義）改名放進來，同一份資料各跑一次，輸出逐件比
     await db.exec(OLD_SEED.replace("FUNCTION seed_auto_task_queue()", "FUNCTION seed_old()"));
     await db.exec("SAVEPOINT p0");
     await setup();
@@ -514,10 +532,11 @@ async function runSuite(db: Db): Promise<Verdicts> {
     }));
 
   await g("new_gap_born_lifted", async () => {
+    await db.exec(`DELETE FROM task_dispatches WHERE task_id LIKE 'auto:%'`); // 建庫時 #453 已經先排過一輪：清掉，讓這一輪是「新缺口出生」
     await traffic(db, [hotA()]);
     await seed(db); // 新缺口出生就在前段
     const born = await rows<{ task_id: string; opened_by: Record<string, unknown> }>(db, `SELECT task_id, opened_by FROM task_dispatches WHERE task_id IN ('auto:aa_term', 'auto:a0_term') ORDER BY task_id`);
-    const ev = await rows<{ p: number | null }>(db, `SELECT priority::int AS p FROM gap_events WHERE task_id = 'auto:aa_term' AND event = 'opened'`);
+    const ev = await rows<{ p: number | null }>(db, `SELECT priority::int AS p FROM gap_events WHERE task_id = 'auto:aa_term' AND event IN ('opened', 'reopened') ORDER BY id DESC LIMIT 1`);
     const [cold, hot] = born; // a0_term（PD，不熱門）排在 aa_term（PA，熱門）前面
     return hot.opened_by.traffic_boost === true && hot.opened_by.priority === 1 && cold.opened_by.traffic_boost === undefined && cold.opened_by.priority === 3 && ev[0].p === 1;
   });
