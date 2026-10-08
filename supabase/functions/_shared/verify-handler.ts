@@ -15,6 +15,7 @@ import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-co
 import { agentToolNotice } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
+import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -97,6 +98,16 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     return { status: 400, body: { success: false, error: encoding ? "encoding_invalid" : "validation_failed", ...(encoding ? { message: ENCODING_INVALID_MESSAGE } : {}), errors: v.errors } };
   }
   const input = v.input;
+  // 出處不得引用正見自己（#486，協議 1.84.0）：evidence_url 是正見的網址＝循環引用，不是獨立查證。擋下、不算被拒；系統配對票（merge）不經這裡。
+  if (via !== "merge" && input.evidence_url && isSelfCitationUrl(input.evidence_url)) {
+    try {
+      await supabase.from("gate_rejections").insert({ gate: "self_citation", endpoint: via, contribution_id: isObj(body) && typeof (body as Record<string, unknown>).contribution_id === "string" ? (body as Record<string, unknown>).contribution_id : null, ip_hash: ipHash });
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 422,
+      body: { success: false, error: "self_citation", message: `${SELF_CITATION_MESSAGE}。evidence_url 不能是正見自己的網址（${input.evidence_url}），請換成原始出處後重送。這不算被拒。`, urls: [input.evidence_url] },
+    };
+  }
   // 投錯了要改（2026-09-21 #10）：提交者有 withdraw、投票者原本沒有出口——而 candidacy 的 agree 票挾帶會被套用的
   // 指認，投錯代價高。同一筆再送一次帶 revise:true，就覆寫自己那張票（同 IP 那張），計分不變一票。
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;

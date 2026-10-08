@@ -58,7 +58,8 @@ Deno.test("A1 這支是 seed_auto_task_queue、rebalance_queue 的最後一版�
     const i = defining.indexOf(MIG);
     assert(i > 0, `這支要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], prev, `${fn} 的前一版應該是 ${prev}；有人在中間改了，要以那一版為底重做機械式替換`);
-    assertEquals(defining.slice(i + 1), [], `這支之後又有人改了 ${fn}：後合併的以最新那版為底重做（並更新 activity-arms／queue-priority／activity-windows／page-traffic-boost／manual-open-arm 的 A1 清單）`);
+    // 這支之後只允許 #490（20261009150000：rebalance_queue 零驗證列時起點退回 1.5 秒，守門在 rebalance-anchor.test.ts；seed 沒有再改）
+    assertEquals(defining.slice(i + 1), fn === "rebalance_queue" ? ["20261009150000_rebalance_anchor_no_drift.sql"] : [], `這支之後又有人改了 ${fn}：後合併的以最新那版為底重做（並更新 activity-arms／queue-priority／activity-windows／page-traffic-boost／manual-open-arm 的 A1 清單）`);
   }
   const code = codeOf(MIG_SQL);
   assertEquals([...code.matchAll(/CREATE OR REPLACE FUNCTION (?:public\.)?([a-z_]+)\(/g)].map((m) => m[1]), ["rebalance_queue", "seed_auto_task_queue"]);
