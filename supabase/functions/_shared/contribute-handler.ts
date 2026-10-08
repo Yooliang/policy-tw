@@ -397,7 +397,7 @@ export async function handleContribute(
         success: false,
         error: "self_citation",
         message: `${SELF_CITATION_MESSAGE}。整批未收，請把下列網址換掉後重送。這不算被拒。`,
-        errors: selfCited.map((p) => ({ index: p.index, path: "source_urls", message: `引用了正見自己的網址：${p.urls.join("、")}`, urls: p.urls })),
+        errors: selfCited.map((p) => ({ index: p.index, path: p.path, message: `引用了正見自己的網址：${p.urls.join("、")}`, urls: p.urls })),
       },
     };
   }

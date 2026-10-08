@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
 import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
-import { isSelfCitationUrl } from "../_shared/self-hosts.ts";
+import { selfCitationEvidenceVerdict } from "../_shared/self-hosts.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -1053,7 +1053,7 @@ Deno.serve(async (req) => {
         if (!SECOND_SOURCE_TYPES.includes(c.contribution_type)) return await finish(v, "not_eligible", false);
         // 第二來源必須是另一個網域：提交者附的那一頁系統票已經核過
         const submitted = new Set(((c.source_urls ?? []) as string[]).map(hostOf));
-        if (isSelfCitationUrl(v.evidence_url)) return await finish(v, "self_citation", false); // #486：正見自己的網址不當第二來源
+        { const selfV = selfCitationEvidenceVerdict(v.evidence_url); if (selfV) return await finish(v, selfV.verdict, selfV.backed); } // #486：正見自己的網址不當第二來源
         if (submitted.has(hostOf(v.evidence_url))) return await finish(v, "same_source", false);
         const payload = { ...(c.payload ?? {}) } as Record<string, unknown>;
         const subjects = await subjectNamesOf(supabase, payload);

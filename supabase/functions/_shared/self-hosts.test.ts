@@ -2,7 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { handleContribute } from "./contribute-handler.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource } from "./system-one.ts";
-import { isSelfCitationUrl, SELF_HOSTS, selfCitationProblems, selfCitationUrls } from "./self-hosts.ts";
+import { isSelfCitationUrl, SELF_HOSTS, selfCitationEvidenceVerdict, selfCitationProblems, selfCitationUrls } from "./self-hosts.ts";
 
 // issue #486（協議 1.84.0）：出處不得引用正見自己（含日本站），防循環引用。
 
@@ -75,8 +75,22 @@ Deno.test("selfCitationUrls／selfCitationProblems：source_urls 與 checked_url
     { source_urls: ["https://policy-tw-foo.web.app/x"] },
   ]);
   assertEquals(problems, [
-    { index: 1, urls: ["https://正見.tw/politician/x"] },
-    { index: 2, urls: ["https://policy-jp.web.app/"] },
+    { index: 1, path: "source_urls", urls: ["https://正見.tw/politician/x"] },
+    { index: 2, path: "payload.checked_urls", urls: ["https://policy-jp.web.app/"] },
+  ]);
+})
+
+Deno.test("correction 改 source_url：新值是正見自己 → 回實際路徑（單欄與 changes 陣列）；改別的欄位不管", () => {
+  const SELFU = "https://policy-tw.web.app/policy/x";
+  const problems = selfCitationProblems([
+    { contribution_type: "correction", source_urls: ["https://www.cna.com.tw/a"], payload: { target_table: "policies", target_id: "t", field: "source_url", correct_value: SELFU } },
+    { contribution_type: "correction", source_urls: ["https://www.cna.com.tw/a"], payload: { target_table: "policies", target_id: "t", changes: [{ field: "title", correct_value: "x" }, { field: "source_url", correct_value: SELFU }] } },
+    { contribution_type: "correction", source_urls: ["https://www.cna.com.tw/a"], payload: { target_table: "policies", target_id: "t", field: "description", correct_value: SELFU } },
+    { contribution_type: "correction", source_urls: ["https://www.cna.com.tw/a"], payload: { target_table: "policies", target_id: "t", field: "source_url", correct_value: "https://udn.com/a" } },
+  ]);
+  assertEquals(problems, [
+    { index: 0, path: "payload.correct_value", urls: [SELFU] },
+    { index: 1, path: "payload.changes[1].correct_value", urls: [SELFU] },
   ]);
 });
 
@@ -141,6 +155,35 @@ Deno.test("交件端點：日本站與 /skill 路徑一樣擋；相似網域與�
   const { api } = fake();
   const ok = await handleContribute(api, "https://x", { ...POLICY, source_urls: [CNA, UDN, "https://policy-tw-foo.web.app/x"] }, "ip");
   assert((ok.body as { error?: string }).error !== "self_citation", JSON.stringify(ok.body).slice(0, 300));
+});
+
+Deno.test("交件端點：correction 把 source_url 改成正見自己 → 422，path 是實際欄位", async () => {
+  const { api, inserted } = fake();
+  const res = await handleContribute(api, "https://x", {
+    contribution_type: "correction",
+    payload: { target_table: "policies", target_id: "8aa6ee40-231a-447a-a967-99bcf8b35d3f", field: "source_url", correct_value: "https://policy-tw.web.app/policy/x", reason: "換成原始出處，網址更正" },
+    source_urls: [CNA], agent_name: "tester", agent_tool: "claude-code/claude-sonnet-4-5",
+  }, "ip");
+  assertEquals(res.status, 422, JSON.stringify(res.body).slice(0, 400));
+  const body = res.body as { error: string; errors: Array<{ path: string; urls: string[] }> };
+  assertEquals(body.error, "self_citation");
+  assertEquals(body.errors[0].path, "payload.correct_value");
+  assertEquals(inserted.contributions, undefined);
+});
+
+Deno.test("交件端點：no_change 的 checked_urls 含正見自己 → 422，path 是 payload.checked_urls", async () => {
+  const { api, inserted } = fake();
+  const res = await handleContribute(api, "https://x", {
+    contribution_type: "no_change",
+    payload: { task_id: "auto:policy_missing:abc", outcome: "confirmed", checked_urls: [CNA, "https://正見.tw/politician/x"], finding: "官網與兩家媒體都查過，沒有發表政見" },
+    agent_name: "tester", agent_tool: "claude-code/claude-sonnet-4-5",
+  }, "ip");
+  assertEquals(res.status, 422, JSON.stringify(res.body).slice(0, 400));
+  const body = res.body as { error: string; errors: Array<{ path: string; urls: string[] }> };
+  assertEquals(body.error, "self_citation");
+  assertEquals(body.errors.map((e) => e.path), ["payload.checked_urls"]);
+  assertEquals(body.errors[0].urls, ["https://正見.tw/politician/x"]);
+  assertEquals(inserted.contributions, undefined);
 });
 
 // ── 驗證端點：evidence_url ─────────────────────────────────
@@ -214,9 +257,23 @@ Deno.test("系統票：正見自己的網址不抓取，回 error（各路徑因
   assertEquals(ok.kind, "html");
 });
 
+Deno.test("第二來源核對（action=evidence）：自我引用標 self_citation、judge_backed=false；index.ts 在抓取前就用它", async () => {
+  assertEquals(selfCitationEvidenceVerdict("https://policy-tw.web.app/politician/x"), { verdict: "self_citation", backed: false });
+  assertEquals(selfCitationEvidenceVerdict("https://policy-jp.web.app/x"), { verdict: "self_citation", backed: false });
+  assertEquals(selfCitationEvidenceVerdict("https://www.cna.com.tw/a"), null);
+  assertEquals(selfCitationEvidenceVerdict(undefined), null);
+  const src = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
+  const use = src.indexOf("selfCitationEvidenceVerdict(v.evidence_url)");
+  assert(use > 0, "evidence 分支要用 selfCitationEvidenceVerdict");
+  assert(src.slice(use, use + 200).includes("finish(v, selfV.verdict, selfV.backed)"));
+  assert(use < src.indexOf("await fetchSource(v.evidence_url)"), "要在抓取之前");
+});
+
 Deno.test("協議寫明不可引用正見本身（含日本站）與錯誤碼", async () => {
   const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
   assert(skill.includes("出處不可引用正見本身（含日本站）"));
   assert(skill.includes("422 `self_citation`"));
-  for (const d of SELF_HOSTS) if (!d.endsWith(".supabase.co")) assert(skill.includes(d), `skill.md 要列出 ${d}`);
+  for (const d of SELF_HOSTS) assert(skill.includes(d), `skill.md 要列出 ${d}`);
+  assert(!skill.includes("*.supabase.co"), "不可寫成所有 supabase 專案");
+  assert(skill.includes("`422 self_citation`（evidence_url 引用正見或日本站自己"), "POST /verify 被擋的情況要列 422 self_citation");
 });
