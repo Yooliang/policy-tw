@@ -4,6 +4,7 @@ import { checkDispatchToken, dispatchTokenSecretFrom, issueDispatchToken } from 
 import { jpDispatchTokenSecretFrom } from "./jp/dispatch-secret.ts";
 import { ipHashOf } from "./jp/contribute-handler.ts";
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
+import { JP_PROTOCOL_VERSION } from "./jp/protocol.ts";
 
 /**
  * 日本站入口（jp-next／jp-report）的行為測試：真的載入入口、用真的 Request 打進去，底下是有狀態的假 PostgREST。
@@ -24,7 +25,7 @@ const netHash = (ip: string) => ipHashOf(new Request("https://x/", at(ip)), SALT
 
 type Row = Record<string, unknown>;
 
-function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[] } = {}) {
+function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[]; apply?: unknown } = {}) {
   const votes: Row[] = [];
   const contributions: Row[] = [];
   const dispatches: Row[] = [];
@@ -40,6 +41,7 @@ function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[] } = {}) {
     if (t === "rpc/contribution_verify_pool") return o.pool ?? [candidate];
     if (t === "rpc/contribution_queue_tasks") return o.queue ?? [];
     if (t === "rpc/contribution_effective_agree") return 3;
+    if (t === "rpc/apply_contribution") return o.apply;
     if (t === "contributions") {
       if (c.method === "POST") {
         const rows = (Array.isArray(c.body) ? c.body : [c.body]) as Row[];
@@ -106,7 +108,10 @@ Deno.test("jp-next：驗證項帶 policy_jp 標頭、發日本站憑證；每個
     const got = await getNext(next, N1);
     assertEquals(got.status, 200);
     assertEquals(got.json.kind, "verify");
-    assertEquals(got.json.protocol_version, "0.5.0");
+    // 端點回的版號要等於程式裡的常數，且不低於 0.6.0（手引き 0.6.0；不寫死現值）
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+    const [jMaj, jMin] = JP_PROTOCOL_VERSION.split(".").map(Number);
+    assert(jMaj > 0 || jMin >= 6, `協議版號 ${JP_PROTOCOL_VERSION} 比 0.6.0 舊`);
     const token = got.json.dispatch_token as string;
     assert(token?.startsWith("dpt1."));
     // 是日本站的鑰匙簽的，不是正見的
@@ -258,5 +263,93 @@ Deno.test("jp-report：kind 不認得 400；GET 405", async () => {
     assertEquals(r.status, 400);
     const g = await report.call(new Request("https://x/jp-report", at(N1)));
     assertEquals(g.status, 405);
+  });
+});
+
+// ---- 落庫（apply）接線：票數讓貢獻變 verified 的那一刻，jp-report 用 rpc 叫 SQL 的 policy_jp.apply_contribution ----
+const callsTo = (calls: RestCall[], target: string) => calls.filter((c) => c.target === target);
+
+Deno.test("驗證讓貢獻變 verified → jp-report 叫 rpc/apply_contribution（帶 policy_jp 標頭、p_retry=false）；回應帶 auto_apply 與落庫後的狀態", async () => {
+  const db = makeDb({ apply: { status: "applied", outcome: "applied", message: "新增選舉 2027-01-24_mayor_232033（一宮市長選挙）" } });
+  db.candidate.contribution_type = "election";
+  await withEntries(db, env(), async ({ next, report }) => {
+    await getNext(next, N1);
+    db.candidate.status = "verified"; // 領題之後、票投下去之後重新讀到的狀態（真正算分的是 DB 觸發器，這裡的假 PostgREST 直接給）
+    const ok = await post(report, N1, voteBody());
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    assertEquals(ok.json.status, "applied");
+    assertEquals(ok.json.auto_apply, { status: "applied", message: "新增選舉 2027-01-24_mayor_232033（一宮市長選挙）" });
+    const rpc = callsTo(report.calls, "rpc/apply_contribution");
+    assertEquals(rpc.length, 1);
+    assertEquals(rpc[0].body, { p_id: CID, p_retry: false });
+    assertAllJpSchema(report.calls);
+  });
+});
+
+Deno.test("落庫在等團體（waiting）：貢獻維持 verified、回應說明原因但不改 status；不落庫的型別（correction）不算觸發", async () => {
+  const waiting = makeDb({ apply: { status: "waiting", reason: "local_government_missing:232033", message: "外鍵指到的團體還沒落庫，等它進來再落" } });
+  waiting.candidate.contribution_type = "election";
+  await withEntries(waiting, env(), async ({ next, report }) => {
+    await getNext(next, N1);
+    waiting.candidate.status = "verified";
+    const ok = await post(report, N1, voteBody());
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    assertEquals(ok.json.status, "verified");
+    assertEquals(ok.json.auto_apply, { message: "外鍵指到的團體還沒落庫，等它進來再落" }, "只說明原因，沒有 status（貢獻還是 verified）");
+    assertEquals(callsTo(report.calls, "rpc/apply_contribution").length, 1);
+  });
+  const unsupported = makeDb({ apply: { status: "unsupported", contribution_type: "correction" } });
+  await withEntries(unsupported, env(), async ({ next, report }) => {
+    await getNext(next, N1);
+    unsupported.candidate.status = "verified"; // 預設的 candidate 就是 correction
+    const ok = await post(report, N1, voteBody());
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    assertEquals(ok.json.status, "verified");
+    assert(!("auto_apply" in ok.json), "不落庫的型別不算觸發了落庫");
+  });
+  // 還在 pending（票數不夠）就不叫落庫
+  const pending = makeDb({ apply: { status: "applied" } });
+  await withEntries(pending, env(), async ({ next, report }) => {
+    await getNext(next, N1);
+    const ok = await post(report, N1, voteBody());
+    assertEquals(ok.json.status, "pending");
+    assertEquals(callsTo(report.calls, "rpc/apply_contribution").length, 0);
+  });
+});
+
+const LG_SUBMIT = {
+  kind: "contribute", contribution_type: "local_government", task_id: "auto:local_government_missing:232033", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
+  payload: { lg_code: "232033", kind: "city", pref_code: "230006", name: "一宮市", kana: "いちのみやし" },
+  source_urls: ["https://www.soumu.go.jp/denshijiti/code.html"],
+};
+
+Deno.test("local_government／regional_stat 交件：收進來（目標 3 票）；非公的出典、團體碼與任務不符、型別與任務不符都是 400 validation_failed，不寫任何東西", async () => {
+  const db = makeDb({ pool: [], queue: [] });
+  await withEntries(db, env(), async ({ report }) => {
+    const ok = await post(report, N1, LG_SUBMIT);
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    assertEquals([ok.json.contribution_type, ok.json.status, ok.json.required_agree], ["local_government", "pending", 3]);
+    assertEquals(db.contributions.length, 1);
+    const stat = await post(report, N1, {
+      kind: "contribute", contribution_type: "regional_stat", task_id: "auto:regional_stats_missing:232033", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
+      payload: { lg_code: "232033", stat_key: "population", year: 2020, value: 386678, unit: "人" }, source_urls: ["https://www.e-stat.go.jp/regional-statistics/ssdsview/municipality"],
+    });
+    assertEquals(stat.status, 201, JSON.stringify(stat.json));
+    assertEquals(db.contributions.length, 2);
+
+    const before = db.contributions.length;
+    const wiki = await post(report, N1, { ...LG_SUBMIT, source_urls: ["https://ja.wikipedia.org/wiki/一宮市"] });
+    assertEquals([wiki.status, wiki.json.error], [400, "validation_failed"]);
+    assertEquals((wiki.json.errors as Array<{ path: string }>).map((e) => e.path), ["source_urls"]);
+    const wrongLg = await post(report, N1, { ...LG_SUBMIT, payload: { ...LG_SUBMIT.payload, lg_code: "230006", kind: "prefecture", name: "愛知県", kana: "あいちけん" } });
+    assertEquals((wrongLg.json.errors as Array<{ path: string }>).map((e) => e.path), ["payload.lg_code"]);
+    const wrongType = await post(report, N1, { ...LG_SUBMIT, task_id: "auto:regional_stats_missing:232033" });
+    assertEquals((wrongType.json.errors as Array<{ path: string }>).map((e) => e.path), ["task_id"]);
+    // election：別的團體塞進 election_discovery 任務、檢查碼錯、日期 0000 年
+    const edWrong = await post(report, N1, { ...ELECTION_SUBMIT, payload: { ...ELECTION_SUBMIT.payload, lg_code: "131130" } });
+    assertEquals([edWrong.status, (edWrong.json.errors as Array<{ path: string }>).map((e) => e.path)], [400, ["payload.lg_code"]]);
+    const edCheck = await post(report, N1, { ...ELECTION_SUBMIT, task_id: undefined, payload: { ...ELECTION_SUBMIT.payload, lg_code: "232034", election_date: "0000-01-01" } });
+    assertEquals((edCheck.json.errors as Array<{ path: string }>).map((e) => e.path).sort(), ["payload.election_date", "payload.lg_code"]);
+    assertEquals(db.contributions.length, before, "400 的請求不寫任何東西");
   });
 });

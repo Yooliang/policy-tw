@@ -2,10 +2,9 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PROTOCOL_URL, PROTOCOL_VERSION } from "./protocol.ts";
 
 // /next 每次回 protocol_version，協議要求代理版本不符就重讀 skill.md（2026-09-18）。
-// 這個機制只有在「三個地方的版本一致」時才有意義：
-//   - _shared/protocol.ts 的常數（/next 回的那個）
+// 這個機制只有在「兩個地方的版本一致」時才有意義（#492 起檔尾不再寫版號）：
+//   - _shared/protocol.ts 的常數（/next 回的那個，唯一真相）
 //   - public/skill.md 檔頭的版本（代理讀到的那份）
-//   - skill.md 檔尾的版本（同一份文件自己要一致）
 // 常數比 skill.md 新 → 代理被無限叫去重讀，讀到的還是舊的，永遠不會相符。
 // 常數比 skill.md 舊 → 協議改了也沒人被通知，這個機制等於不存在。
 
@@ -13,13 +12,14 @@ async function skillMd(): Promise<string> {
   return await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
 }
 
-Deno.test("協議版本：/next 回的版本、skill.md 檔頭與檔尾三處一致", async () => {
+Deno.test("協議版本：/next 回的版本（常數）與 skill.md 檔頭一致，檔尾不重複版號", async () => {
   const md = await skillMd();
   const head = md.match(/\*\*版本\*\*：([0-9]+\.[0-9]+\.[0-9]+)/)?.[1];
-  const foot = md.match(/\*協議版本 ([0-9]+\.[0-9]+\.[0-9]+)/)?.[1];
-  assert(head && foot, "skill.md 的檔頭或檔尾找不到版本號");
+  assert(head, "skill.md 找不到檔頭的版本號");
   assertEquals(head, PROTOCOL_VERSION, "skill.md 檔頭的版本跟 /next 回的不一致");
-  assertEquals(foot, PROTOCOL_VERSION, "skill.md 檔尾的版本跟檔頭不一致");
+  // 版號只放檔頭一處（#492）：檔尾再出現版號行＝多一個會跟別人撞衝突、又要記得同步的地方
+  assert(!/\*協議版本 \d+\.\d+\.\d+/.test(md), "skill.md 檔尾不要再寫版號（只寫檔頭）");
+  assertEquals((md.match(/\*\*版本\*\*：\d+\.\d+\.\d+/g) ?? []).length, 1, "「**版本**：x.y.z」只能出現一次");
 });
 
 Deno.test("協議有寫明：版本不符要重讀 skill.md，而且說得出要去哪裡讀", async () => {

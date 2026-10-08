@@ -19,10 +19,10 @@ export function listingLines(): string[] {
   lines.push('', '## 分類（全國，依縣市分組）', '')
   for (const c of CATEGORIES) {
     const words = CATEGORY_SYNONYMS[c] ?? []
-    lines.push(`- ${c}：${abs(`/category/${enc(c)}.md`)}${words.length > 0 ? `｜查詢常見說法：${words.join('、')}` : ''}`)
+    lines.push(`- ${c}：${abs(`/category/${enc(c)}.md`)}${words.length > 0 ? ` ｜ 查詢常見說法：${words.join('、')}` : ''}`)
   }
   lines.push('', '## 縣市×分類', '')
-  lines.push(`- 路徑式：${SITE_URL}/data/<縣市>/<分類>.md（最新一屆；轉到 /data/<屆>/<縣市>/<分類>.md），例：${abs(`/data/${enc('台南市')}/${enc('交通建設')}.md`)}`)
+  lines.push(`- 路徑式：${SITE_URL}/data/<縣市>/<分類>.md （最新一屆；轉到 /data/<屆>/<縣市>/<分類>.md），例：${abs(`/data/${enc('台南市')}/${enc('交通建設')}.md`)}`)
   lines.push(`- 查詢式（轉到路徑式）：${SITE_URL}/data?q=台南 育兒`)
   return lines
 }
@@ -51,7 +51,7 @@ export function buildIndexPage(input: IndexInput): MdPage {
     htmlPath: null,
     dataAsOf: input.dataAsOf,
     scope: `${year} 屆（${ctx.election.name}）競選承諾；22 縣市、19 分類；${matrix.total} 筆`,
-    preface: [`本頁網址 ${abs(dataIndexMdPath(seg))}；全部檔案與筆數見 ${abs(dataIndexJsonPath(seg))}。`],
+    preface: [`本頁網址 ${abs(dataIndexMdPath(seg))} ；全部檔案與筆數見 ${abs(dataIndexJsonPath(seg))} 。`],
     body,
     rowCount: matrix.total,
   }

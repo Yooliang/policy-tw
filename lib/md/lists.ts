@@ -56,7 +56,7 @@ function personBlock(h: Hit, heading: string): string[] {
   const { politician } = h.person
   const lines = ['', `${heading} ${politician.name}${politician.party ? `（${politician.party}）` : ''}`, '']
   lines.push(`- ${h.person.label}`)
-  lines.push(`- 人物頁：${politicianUrl(politician.id)}｜摘要：${abs(politicianMdPath(politician.id))}`)
+  lines.push(`- 人物頁：${politicianUrl(politician.id)} ｜ 摘要：${abs(politicianMdPath(politician.id))}`)
   lines.push(`- 政見 ${h.policies.length} 筆：`)
   for (const p of h.policies) lines.push(...policyBullet(p, { descMax: DESC_MAX }).map((l) => `  ${l}`))
   return lines

@@ -19,7 +19,7 @@
 
 `public/skill.md` 一處。改完記得：
 
-- 檔頭與檔尾的版本號一起改（`supabase/functions/_shared/protocol-guard.test.ts` 會檢查）
+- 版本號改 `supabase/functions/_shared/protocol.ts` 的 `PROTOCOL_VERSION`（唯一真相）和 `public/skill.md` 檔頭那一行，檔尾不寫版號（`protocol.test.ts` 會檢查）
 - 門檻、任務型別、冷卻天數這些同時存在於 SQL 與 TypeScript 的東西，
   那支守門測試會逐項比對三邊是否一致
 - 部署：`public/` 的檔案由 `pnpm build` 複製進 `dist/`，隨 Firebase Hosting 上線

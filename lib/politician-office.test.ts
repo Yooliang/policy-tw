@@ -251,3 +251,27 @@ Deno.test("candidacyBadge：前綴是投票年份（看 electionDate）；新增
   assertEquals(candidacyBadge([noDate], 4, true)?.what, "嘉義市長", "id 4 不是年份：不印成「4 嘉義市長」");
   assertEquals(candidacyBadge([{ ...noDate, electionId: 2026 }], 2026, false)?.what, "2026 嘉義市長", "舊視圖沒帶日期時，舊三屆的 id 就是年份");
 });
+
+// #332 2d：深度分析頁的職稱與「同選區其他候選人」那條 RPC，不得再讀舊職稱
+Deno.test("PolicyDeepAnalysis 的職稱只讀現任公職 offices，不讀 position／currentPosition", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/PolicyDeepAnalysis.vue", import.meta.url));
+  assertEquals(page.match(/\.(position|currentPosition)\b/), null, "深度分析頁又讀了舊職稱欄位");
+  const calls = [...page.matchAll(/officeTitles\(([^\n]*?)\)(?:\.join|\.length)/g)].map((m) => m[1]);
+  assert(calls.length >= 2, "至少兩處職稱都要走 officeTitles(offices)");
+  for (const arg of calls) assertMatch(arg, /\boffices\b/, `officeTitles 的參數不是 offices：${arg}`);
+});
+
+Deno.test("get_politicians_by_filters 回傳人物視圖（帶 offices），後來的 migration 不得改成別的回傳形狀", () => {
+  const dir = new URL("../supabase/migrations/", import.meta.url);
+  const defs: Array<{ name: string; ret: string }> = [];
+  for (const e of Deno.readDirSync(dir)) {
+    if (!e.name.endsWith(".sql")) continue;
+    const text = Deno.readTextFileSync(new URL(e.name, dir)).split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
+    for (const m of text.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?get_politicians_by_filters\s*\([^)]*\)\s*RETURNS\s+([^\n]+)/gi)) {
+      defs.push({ name: e.name, ret: m[1].trim() });
+    }
+  }
+  assert(defs.length > 0, "找不到 get_politicians_by_filters 的定義");
+  defs.sort((a, b) => a.name.localeCompare(b.name));
+  assertMatch(defs[defs.length - 1].ret, /^SETOF\s+politicians_with_elections\b/i, `${defs[defs.length - 1].name} 改了回傳形狀，offices 可能不見了`);
+});
