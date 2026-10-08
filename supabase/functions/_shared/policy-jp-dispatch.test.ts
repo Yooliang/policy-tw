@@ -1,5 +1,5 @@
 /**
- * 日本站派工與交件 SQL（policy-jp PR①a；migration 20261009070000_policy_jp_dispatch.sql）的行為測試。
+ * 日本站派工與交件 SQL（policy-jp PR①a；migration 20261009090000_policy_jp_dispatch.sql）的行為測試。
  *
  * 只要 --allow-read（CI 的 deno test --allow-read _shared/ 就跑）。PGlite 上只套 #479 的空 schema、tables migration、這支 migration——
  * 資料庫裡沒有任何正見（public）的派工物件，所以任何漏了 policy_jp. 前綴、悄悄退回 public 的引用都會在這裡直接壞掉（獨立性證明）。
@@ -19,7 +19,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const SCHEMA_SQL = await read("20261008195000_policy_jp_schema.sql");
 const TABLES_SQL = await read("20261009000000_policy_jp_tables.sql");
-const MIG = "20261009070000_policy_jp_dispatch.sql";
+const MIG = "20261009090000_policy_jp_dispatch.sql";
 const MIG_SQL = await read(MIG);
 
 const NEW_TABLES = [

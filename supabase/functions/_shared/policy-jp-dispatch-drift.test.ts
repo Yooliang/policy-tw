@@ -1,5 +1,5 @@
 /**
- * 日本站派工 SQL 的走樣守門（policy-jp PR①a；migration 20261009070000_policy_jp_dispatch.sql）。
+ * 日本站派工 SQL 的走樣守門（policy-jp PR①a；migration 20261009090000_policy_jp_dispatch.sql）。
  *
  * 日本站的派工、啟用時間窗、計分共識、系統票 SQL 是正見（public）現行定義的「抄本」，只允許一份固定清單的機械式替換。
  * 這個測試把 policy_jp 的每支複本函式還原回 public 的樣子，跟 migrations 裡 public 的「最新定義」逐字比對；
@@ -27,7 +27,7 @@
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { fnText, latestFn, readMig } from "./arms-pglite.ts";
 
-const MIG = "20261009070000_policy_jp_dispatch.sql";
+const MIG = "20261009090000_policy_jp_dispatch.sql";
 const MIG_SQL = await readMig(MIG);
 
 /** 不比對的函式（原因見檔頭） */
