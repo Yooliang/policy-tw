@@ -105,7 +105,7 @@ deno run --allow-read scripts/scan-secrets.ts              # 金鑰
 | `supabase/migrations/` | 資料結構與 RLS。**投票門檻在 SQL 與 TypeScript 各有一份，必須一致** |
 | `pages/` `components/` | Vue 3 + vite-ssg，預渲染成靜態頁 |
 | `.github/workflows/ci.yml` | 型別、測試、協議守門、金鑰掃描，以及 main 的自動部署 |
-| `docs/` | 設計與裁決文件；**`docs/DECISIONS.md`（裁決日誌）是流程規則的來源**，文件地圖見 `CLAUDE.md` 的「文件地圖」 |
+| `docs/` | 設計與裁決文件；**`docs/DECISIONS.md`（裁決日誌索引，本文在 `docs/decisions/`）是流程規則的來源**，文件地圖見 `CLAUDE.md` 的「文件地圖」 |
 
 ## 送 PR 之前
 

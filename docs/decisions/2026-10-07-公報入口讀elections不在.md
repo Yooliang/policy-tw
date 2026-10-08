@@ -1,0 +1,1 @@
+- **公報入口讀 `elections`，不在程式裡寫年份對照**｜TS `BULLETIN_YEAR_DIR` 與 SQL `CASE election_year WHEN 2022…` 兩份真相、都沒有 2026｜`elections` 加 `bulletin_dir`（民國年資料夾）、`bulletin_hint`（給代理的入口一行）、`bulletin_published_on`（上架日前不給，免得給死連結）；TS 的 `BULLETIN_YEAR_DIR` 留作後備並由測試對照 migration 回填。2026 的 `bulletin_published_on` 暫填 11-18（投票日前十日），上架日不同就改那一格。**（2026-10-08 更正：不用人改那一格——見下一條，上架日改由系統偵測，單一真相搬到里程碑表。）**

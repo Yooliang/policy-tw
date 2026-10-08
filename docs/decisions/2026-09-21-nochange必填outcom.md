@@ -1,0 +1,1 @@
+- **`no_change` 必填 `outcome`（confirmed／unreachable／not_found），只有 `confirmed` 才宣稱核對過**｜194 筆 no_change 裡混著兩種「我沒能確認」，而 legacy_audit 照著蓋「已核對來源」的章、蓋完就永不再派｜還沒釀成災（audit 章當時 0 筆）。舊資料沒有 outcome 一律不蓋章。

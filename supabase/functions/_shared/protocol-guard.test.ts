@@ -2,7 +2,7 @@
  * 守門測試：把「每次改完要記得同步的三個地方」變成會紅的燈。
  *
  * 這些規則原本靠人記得：門檻改了要同時改 SQL、TS 與 skill.md 的表格；
- * skill.md 不可以出現真實的紀錄 id；版本號寫在檔頭與檔尾兩處。
+ * skill.md 不可以出現真實的紀錄 id；版本號只寫在檔頭一處（#492）。
  * 只要有一處忘了，對外協議就會教錯規則，而且不會有任何東西變紅。
  *
  * 找 migration 一律用「掃目錄挑最新一支定義該函式的檔案」，不寫死檔名。
@@ -106,13 +106,10 @@ Deno.test("skill.md 不可以出現真實的紀錄 id，範例一律用預留的
   assertEquals(leaked, [], "這些是真實資料的 id，貼進對外協議等於把線上紀錄寫死在文件裡");
 });
 
-Deno.test("skill.md 檔頭與檔尾的版本號要一致", async () => {
+Deno.test("skill.md 的版本號只寫在檔頭一處（檔尾不重複，#492）", async () => {
   const md = await Deno.readTextFile(SKILL_MD);
-  const head = md.match(/\*\*版本\*\*：(\d+\.\d+\.\d+)/);
-  const foot = md.match(/\*協議版本 (\d+\.\d+\.\d+)/);
-  assert(head, "找不到檔頭的版本號");
-  assert(foot, "找不到檔尾的版本號");
-  assertEquals(head![1], foot![1], "檔頭改了、檔尾忘了改");
+  assert(/\*\*版本\*\*：\d+\.\d+\.\d+/.test(md), "找不到檔頭的版本號");
+  assert(!/\*協議版本 \d+\.\d+\.\d+/.test(md), "檔尾不要再寫一份版號：兩處版號是並行 PR 的衝突點");
 });
 
 Deno.test("管線快照：採樣函式與排程都在最新的 migration 裡，欄位與前端讀的對得上", async () => {

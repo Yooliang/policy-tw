@@ -1,0 +1,1 @@
+- **Edge Functions 自動部署（#142）合併上線**｜09-23 實例：協議 1.26.0（#200）手動部署只部署了 report／verify／system-one，`next`、`boost` 等 13 支共用 `consensus.ts`／`protocol.ts` 的端點落後一天，`/boost` 回報 1.25.0 而線上 skill.md 已是 1.26.0——「人記得要部署哪幾支」這件事本身就不可靠，差量要從 import 圖算。
