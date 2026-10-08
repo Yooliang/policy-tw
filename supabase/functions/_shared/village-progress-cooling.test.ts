@@ -195,7 +195,9 @@ Deno.test("A7 前端只讀視圖多出來的那一欄、只放標籤「查無公
 
 Deno.test("A8 協議：skill.md 版號 1.80.0（#482 的 1.79.0 先合併）、說明村里長與遞增冷卻；CLAUDE.md、計畫第 11 節、DECISIONS 一起更新", async () => {
   const skill = await readSrc("../../../public/skill.md");
-  assert(/\*\*版本\*\*：1\.80\.0/.test(skill), "協議版號 1.80.0");
+  // 1.80.0 起才有這段說明；之後的版本（例如 1.81.0 的派工憑證）只升不降，所以看「不低於 1.80.0」，不釘死等號
+  const ver = /\*\*版本\*\*：(\d+)\.(\d+)\.(\d+)/.exec(skill);
+  assert(ver && (Number(ver[1]) > 1 || Number(ver[2]) >= 80), "協議版號不低於 1.80.0");
   assert(skill.includes("term_policy_missing") && skill.includes("村里長不主動派"), "skill.md 寫了補該屆政見對村里長先停");
   assert(skill.includes("第二次起 30 天") && skill.includes("村里長"), "skill.md 寫了遞增冷卻與村里長");
   const claude = await readSrc("../../../CLAUDE.md");
