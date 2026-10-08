@@ -32,10 +32,11 @@ const viewBody = (sql: string, name: string) => {
   const a = sql.indexOf(head);
   return sql.slice(a + head.length, sql.indexOf(";\nCOMMENT ON VIEW", a));
 };
-/** 把 ballot_number_unit(a, b, c, d, e) 的呼叫換成函式本體的 CASE（唯讀快照不能建函式；正式庫還沒有這支函式） */
-function inlineUnitFn(sql: string, fnSql: string): string {
-  const body = fnSql.slice(fnSql.indexOf("SELECT CASE"), fnSql.lastIndexOf("\n$$"));
-  const key = "ballot_number_unit(";
+/** 把 SQL 函式的呼叫就地換成函式本體（唯讀快照不能建函式；正式庫還沒有這幾支）。params 是函式的參數名（按順序） */
+function inlineFn(sql: string, name: string, fnSql: string, params: string[]): string {
+  const head = fnSql.indexOf("AS $$") + "AS $$".length;
+  const body = fnSql.slice(head, fnSql.lastIndexOf("\n$$")).trim();
+  const key = `${name}(`;
   let s = sql;
   while (s.includes(key)) {
     const i = s.indexOf(key);
@@ -56,11 +57,17 @@ function inlineUnitFn(sql: string, fnSql: string): string {
     }
     args.push(cur.trim());
     let b = body;
-    ["p_election_type", "p_county", "p_district", "p_town", "p_village"].forEach((n, k) => { b = b.replaceAll(n, `(${args[k]})`); });
+    // 長的參數名先換（p_numbered 先於 p_numbers 不會互相踩，但保險起見照長度排）
+    params.map((n, k) => [n, args[k]] as const).sort((x, y) => y[0].length - x[0].length).forEach(([n, a]) => { b = b.replaceAll(n, `(${a})`); });
     s = s.slice(0, i) + `(${b})` + s.slice(j);
   }
   return s;
 }
+const FN_PARAMS: Record<string, string[]> = {
+  ballot_number_unit: ["p_election_type", "p_county", "p_district", "p_town", "p_village"],
+  ballot_number_dups: ["p_members"],
+  ballot_number_missing: ["p_registered", "p_numbered", "p_numbers"],
+};
 const fnBody = (fn: string) => {
   const m = /AS (\$[a-z]*\$)/.exec(fn)!;
   return fn.slice(fn.indexOf(m[0]) + m[0].length, fn.lastIndexOf(m[1])).trim();
@@ -71,11 +78,12 @@ if (mode === "gen") {
   const base = Deno.readTextFileSync(new URL("./arms-parity.sql", import.meta.url)).replace(/\r\n/g, "\n");
   const tail = "\n  )\n) AS j;";
   if (!base.trimEnd().endsWith(tail.trim())) throw new Error("arms-parity.sql 的結尾變了，這支要跟著改");
-  const body = fnBody(fnText(mig, "contribution_auto_tasks_ballot_numbers"));
+  const body = Object.entries(FN_PARAMS).reduce((acc, [n, ps]) => inlineFn(acc, n, fnText(mig, n), ps), fnBody(fnText(mig, "contribution_auto_tasks_ballot_numbers")));
   const part = `    'ballot_numbers', (SELECT coalesce(json_agg(row_to_json(x)), '[]'::json)::text FROM (\n${body}\n) AS x(${COLS}))`;
-  // 新臂本體讀視圖 ballot_number_anomalies（正式庫還沒有）：快照的最外層先用 CTE 把兩個視圖（函式呼叫就地展開）定義出來，唯讀、不建立任何物件
-  const unitFn = fnText(mig, "ballot_number_unit");
-  const ctes = `WITH ballot_number_units AS (${inlineUnitFn(viewBody(mig, "ballot_number_units"), unitFn)}),\n     ballot_number_anomalies AS (${viewBody(mig, "ballot_number_anomalies")})\n`;
+  // 新臂本體讀視圖 ballot_number_units，並呼叫 ballot_number_dups／ballot_number_missing（正式庫都還沒有）：
+  // 快照的最外層先用 CTE 把視圖（函式呼叫就地展開）定義出來，臂本體裡的函式呼叫也就地展開，唯讀、不建立任何物件
+  const expand = (sql: string) => Object.entries(FN_PARAMS).reduce((acc, [n, ps]) => inlineFn(acc, n, fnText(mig, n), ps), sql);
+  const ctes = `WITH ballot_number_units AS (${expand(viewBody(mig, "ballot_number_units"))})\n`;
   const sel = base.indexOf("SELECT json_build_object(");
   if (sel < 0) throw new Error("arms-parity.sql 找不到最外層的 SELECT json_build_object(");
   const withCtes = base.slice(0, sel) + ctes + base.slice(sel);
@@ -154,6 +162,8 @@ const openOn = (r: (typeof newRows)[number], day: string) => {
   const e = elDate(r.target.election_id);
   return d !== null && e !== null && d <= day && day <= e;
 };
+// seed 開 gap.arms_all 時看到的就是臂本體的完整輸出（規則濾掉的列也在）：已投票的屆別不該出現在裡面，不然每 10 分鐘要白算一大批歷史列
+check("② 臂本體的完整輸出（seed 開 gap.arms_all 時看到的）不含已投票的屆別（只掃還沒投票的，投票日隔天還算）", newRows.every((r) => { const e = elDate(r.target.election_id); return e !== null && e >= new Date(Date.parse(taipeiDay) - 86400_000).toISOString().slice(0, 10); }), `${newRows.length} 件`);
 check(`② 今天（${taipeiDay}）新臂的列全在窗口以外（抽籤日還沒到、或那一屆沒有 draw 里程碑）`, newRows.every((r) => !openOn(r, taipeiDay)), `${newRows.length} 件`);
 
 // ③④ 套這支 migration

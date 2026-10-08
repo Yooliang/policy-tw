@@ -16,6 +16,7 @@ import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "./cand-no-check.
 
 const DUP_MIG = "20261008151000_cand_no_dup_check.sql";
 const B = await readMig(BALLOT_MIG);
+const count = (x: string, sub: string) => x.split(sub).length - 1;
 const DUP = await readMig(DUP_MIG);
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const C = (n: number) => `00000000-0000-4000-8000-1${String(n).padStart(11, "0")}`;
@@ -46,15 +47,15 @@ async function build(mutateDup?: (s: string) => string): Promise<Db> {
 
 const REGIONS: Array<[number, string, string | null, string | null]> = [
   [1, "台北市", "第01選舉區", null], [2, "台北市", "第02選舉區", null], [3, "台北市", "中山區", "新生里"], [4, "台北市", "中山區", "長安里"], [5, "連江縣", "東引鄉", null],
-  [6, "台北市", "第05選舉區", null],
+  [6, "台北市", "第05選舉區", null], [7, "雲林縣", "臺西鄉", "臺西村"],
 ];
 type P = Record<string, unknown>;
 const pay = (o: P): P => ({ election_id: 2026, ...o });
 async function load(db: Db) {
   for (const r of REGIONS) await db.query(`INSERT INTO regions VALUES ($1, $2, $3, $4)`, r);
   // 已上線的參選紀錄：乙（議員第01選舉區，5 號）、丙（新生里村里長，2 號）
-  for (const [id, name, region] of [[1, "乙", "台北市"], [2, "丙", "台北市"], [3, "戌", "台北市"]] as const) await db.query(`INSERT INTO politicians VALUES ($1, $2, $3, NULL)`, [U(id), name, region]);
-  await db.exec(`INSERT INTO politician_elections VALUES (1, 2026, '${U(1)}', '縣市議員', 1, 'filed', 5), (2, 2026, '${U(2)}', '村里長', 3, 'filed', 2), (3, 2026, '${U(3)}', '縣市議員', 6, 'filed', 4)`);
+  for (const [id, name, region] of [[1, "乙", "台北市"], [2, "丙", "台北市"], [3, "戌", "台北市"], [4, "亥", "雲林縣"]] as const) await db.query(`INSERT INTO politicians VALUES ($1, $2, $3, NULL)`, [U(id), name, region]);
+  await db.exec(`INSERT INTO politician_elections VALUES (1, 2026, '${U(1)}', '縣市議員', 1, 'filed', 5), (2, 2026, '${U(2)}', '村里長', 3, 'filed', 2), (3, 2026, '${U(3)}', '縣市議員', 6, 'filed', 4), (4, 2026, '${U(4)}', '村里長', 7, 'filed', 1)`);
   const council = (d: string) => ({ election_type: "縣市議員", region: "台北市", electoral_district: d });
   const village = (v: string) => ({ election_type: "村里長", region: "台北市", sub_region: "中山區", village: v });
   const mayor = { election_type: "縣市長", region: "台北市" };
@@ -78,12 +79,13 @@ async function load(db: Db) {
     [17, "pending", pay({ election_type: "縣市長", region: "新北市", cand_no: 2, politician_id: U(25), name: "午" })], // 別的縣市同號 → 不標
     [18, "rejected", pay({ ...mayor, cand_no: 9, politician_id: U(26), name: "未" })],                        // 被退件的不算數
     [19, "pending", pay({ ...mayor, cand_no: 9, politician_id: U(27), name: "申" })],                         // 只跟退件的同號 → 不標
+    [20, "pending", pay({ election_type: "村里長", region: "雲林縣", sub_region: "台西鄉", village: "台西村", cand_no: 1, politician_id: U(28), name: "酉" })], // 臺西村（參選紀錄）vs 台西村（交件）：同一個村里 → 標
   ];
   for (const [n, status, payload, at] of list) {
     await db.query(`INSERT INTO contributions (id, contribution_type, status, payload, created_at) VALUES ($1, 'candidacy', $2, $3::jsonb, COALESCE($4::timestamptz, now() - ($5 || ' minutes')::interval))`, [C(n), status, JSON.stringify(payload), at ?? null, String(100 - n)]);
   }
 }
-const FLAGGED = [1, 3, 4, 5, 6, 9, 15];
+const FLAGGED = [1, 3, 4, 5, 6, 9, 15, 20];
 
 type Verdicts = Record<string, boolean>;
 async function suite(db: Db): Promise<Verdicts> {
@@ -99,10 +101,11 @@ async function suite(db: Db): Promise<Verdicts> {
   v.n_other_district_same_no_ok = !(await flagged()).includes(C(2));
   v.n_village_is_the_unit = !(await flagged()).includes(C(10)) && (await flagged()).includes(C(9));
   v.n_same_person_not_dup = !(await flagged()).includes(C(7)) && !(await flagged()).includes(C(8));
+  v.n_tai_variants_same_unit = (await flagged()).includes(C(20));
   v.n_unit_unknown_unchecked = !(await flagged()).includes(C(11)) && !(await flagged()).includes(C(12));
   v.n_other_county_ok = !(await flagged()).includes(C(17));
   v.n_rejected_not_counted = !(await flagged()).includes(C(19));
-  v.n_only_pending_with_numeric_picked = first.checked === 15; // 19 筆裡：非 pending 的 14（verified）、16（applied）、18（rejected）與 cand_no 不是數字的 13 不撿，剩 15 筆
+  v.n_only_pending_with_numeric_picked = first.checked === 16; // 19 筆裡：非 pending 的 14（verified）、16（applied）、18（rejected）與 cand_no 不是數字的 13 不撿，剩 15 筆
   const reason = (await rows<{ state: { reason: string; unit: string; cand_no: number }; probability: number; question: string; subject_type: string; model: string }>(db,
     `SELECT state, probability::float AS probability, question, subject_type, model FROM jev_decisions WHERE subject_id = $1`, [C(1)]))[0];
   v.n_reason_names_number_and_person = !!reason && reason.state.reason.startsWith("號次 5 與 乙 重複") && reason.state.cand_no === 5 && reason.probability === 1 && reason.question === "source_support" &&
@@ -118,7 +121,7 @@ async function suite(db: Db): Promise<Verdicts> {
   v.n_consensus_recomputed_once_each = callsBefore === FLAGGED.length;
   return v;
 }
-const ALL_N = ["n_flagged_set", "n_record_dup", "n_cross_batch_both_sides", "n_same_batch_both_sides", "n_verified_counts_as_other", "n_other_district_same_no_ok", "n_village_is_the_unit",
+const ALL_N = ["n_tai_variants_same_unit", "n_flagged_set", "n_record_dup", "n_cross_batch_both_sides", "n_same_batch_both_sides", "n_verified_counts_as_other", "n_other_district_same_no_ok", "n_village_is_the_unit",
   "n_same_person_not_dup", "n_unit_unknown_unchecked", "n_other_county_ok", "n_rejected_not_counted", "n_only_pending_with_numeric_picked", "n_reason_names_number_and_person",
   "n_reason_names_pending_other", "n_idempotent_no_double_vote", "n_consensus_recomputed_once_each"];
 
@@ -140,7 +143,13 @@ Deno.test("N2 排程與權限：cand-no-check-10min 打 system-one?action=cand_n
   assertEquals(sched[0].schedule, "4,14,24,34,44,54 * * * *");
   assert(sched[0].command.includes("system-one?action=cand_no_check") && !/apikey|service_role|Bearer|eyJ/i.test(sched[0].command));
   const code = DUP.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
-  assert(code.includes("REVOKE EXECUTE ON FUNCTION cand_no_dup_system_check(UUID) FROM PUBLIC, anon, authenticated;") && code.includes("GRANT EXECUTE ON FUNCTION cand_no_dup_check_pending(INTEGER) TO service_role;"));
+  for (const f of ["cand_no_dup_conflicts(UUID)", "cand_no_dup_flag(UUID, JSONB)", "cand_no_dup_system_check(UUID)", "cand_no_dup_check_pending(INTEGER)"]) {
+    assert(code.includes(`REVOKE EXECUTE ON FUNCTION ${f} FROM PUBLIC, anon, authenticated;`) && code.includes(`GRANT EXECUTE ON FUNCTION ${f} TO service_role;`), `${f} 只給 service_role`);
+  }
+  // 讀 contributions 的函式不能留公開執行權限（RLS 之下公開呼叫只會無聲回 NULL）；寫票的與寫戳記的是 SECURITY DEFINER＋search_path
+  assertEquals(count(DUP, "SECURITY DEFINER SET search_path = public"), 3, "flag／system_check／check_pending 三支是 SECURITY DEFINER");
+  assert(code.includes("ALTER TABLE cand_no_dup_checks ENABLE ROW LEVEL SECURITY;") && code.includes("CREATE POLICY cand_no_dup_checks_read ON cand_no_dup_checks FOR SELECT USING (true);"), "戳記表開 RLS、公開讀");
+  assert(!/GRANT (INSERT|UPDATE|DELETE|ALL)[^;]*cand_no_dup_checks/i.test(code), "戳記表沒有任何寫入授權");
   assert(code.includes("'policy-tw/cand-no-dup-20261008'") && "policy-tw/cand-no-dup-20261008".startsWith(CAND_NO_DUP_MODEL_PREFIX));
   assert(!/eyJ[A-Za-z0-9_-]{20,}|sb_secret|service_role_key/i.test(DUP), "migration 裡沒有金鑰");
   // 不改既有的共識函式：candidacy 本來就在系統票的型別裡
@@ -148,6 +157,54 @@ Deno.test("N2 排程與權限：cand-no-check-10min 打 system-one?action=cand_n
   const next = (await Deno.readTextFile(new URL("../next/index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   assert(next.includes("CAND_NO_DUP_MODEL_PREFIX") && next.includes("candNoCheckForVerify(") && next.includes(".cand_no_check ="));
   await db.close();
+});
+
+// ---- 輪替：積壓超過上限也每一筆都檢查得到；無衝突不投任何系統票；後來才出現的衝突找得到 ----
+async function starvation(mutateDup?: (s: string) => string) {
+  const db = await build(mutateDup);
+  for (const r of REGIONS) await db.query(`INSERT INTO regions VALUES ($1, $2, $3, $4)`, r);
+  // 250 筆待驗的縣市長號次，彼此不同號、沒有衝突
+  await db.exec(`INSERT INTO contributions (id, contribution_type, status, payload, created_at)
+    SELECT ('00000000-0000-4000-8000-2' || lpad(g::text, 11, '0'))::uuid, 'candidacy', 'pending',
+           jsonb_build_object('election_id', 2026, 'election_type', '縣市長', 'region', '台北市', 'cand_no', g, 'name', '人' || g, 'politician_id', '00000000-0000-4000-8000-3' || lpad(g::text, 11, '0')),
+           now() - (300 - g) * interval '1 minute' FROM generate_series(1, 250) g`);
+  const stamped = async () => (await rows<{ n: number }>(db, `SELECT count(*)::int AS n FROM cand_no_dup_checks`))[0].n;
+  const r1 = (await rows<{ r: { checked: number; flagged: number } }>(db, `SELECT cand_no_dup_check_pending(200) AS r`))[0].r;
+  const s1 = await stamped();
+  const r2 = (await rows<{ r: { checked: number; flagged: number } }>(db, `SELECT cand_no_dup_check_pending(200) AS r`))[0].r;
+  const s2 = await stamped();
+  // 全部都有戳記之後再來一輪：輪到的是戳記最舊的 200 筆（不是永遠同樣那 200 筆）
+  const before = await rows<{ contribution_id: string }>(db, `SELECT contribution_id FROM cand_no_dup_checks ORDER BY checked_at, contribution_id LIMIT 50`);
+  const r3 = (await rows<{ r: { checked: number; flagged: number } }>(db, `SELECT cand_no_dup_check_pending(200) AS r`))[0].r;
+  // 後來才出現的衝突：第 251 筆跟第 5 筆同號 → 沒戳記的最先檢查，兩邊都標（第 5 筆雖然已有戳記）
+  await db.exec(`INSERT INTO contributions (id, contribution_type, status, payload, created_at) VALUES
+    ('00000000-0000-4000-8000-299999999999', 'candidacy', 'pending', '{"election_id":2026,"election_type":"縣市長","region":"台北市","cand_no":5,"name":"新進","politician_id":"00000000-0000-4000-8000-399999999999"}'::jsonb, now())`);
+  const r4 = (await rows<{ r: { checked: number; flagged: number } }>(db, `SELECT cand_no_dup_check_pending(1) AS r`))[0].r;
+  const flagged = (await rows<{ subject_id: string }>(db, `SELECT subject_id FROM jev_decisions WHERE choice = 'not_supported' ORDER BY subject_id`)).map((x) => x.subject_id);
+  const votes = await rows<{ choice: string }>(db, `SELECT DISTINCT choice FROM jev_decisions`);
+  const refreshed = (await rows<{ n: number }>(db, `SELECT count(*)::int AS n FROM cand_no_dup_checks WHERE contribution_id = ANY ($1::uuid[]) AND checked_at >= (SELECT max(checked_at) FROM cand_no_dup_checks) - interval '1 minute'`, [before.map((b) => b.contribution_id)]))[0].n;
+  await db.close();
+  return { r1, s1, r2, s2, r3, flagged, votes: votes.map((v) => v.choice), r4, refreshed };
+}
+Deno.test("N5 輪替：250 筆無衝突的待驗，上限 200 也每一筆都檢查得到；無衝突不投任何系統票；已有戳記的會輪替再檢查；後到的衝突找得到而且兩邊都標", async () => {
+  const x = await starvation();
+  assertEquals([x.r1.checked, x.s1], [200, 200]);
+  assertEquals([x.r2.checked, x.s2], [200, 250], "第二輪：沒戳記的 50 筆先，上限內剩下的名額輪到戳記最舊的");
+  assertEquals(x.r3.checked, 200, "全部有戳記後仍然一輪 200 筆，從戳記最舊的開始");
+  assert(x.refreshed >= 50, "戳記最舊的那 50 筆這一輪被重新檢查（戳記更新）");
+  assertEquals([x.r1.flagged, x.r2.flagged, x.r3.flagged], [0, 0, 0]);
+  assertEquals(x.r4.checked, 1, "上限 1：只檢查沒戳記的新進那一筆");
+  assertEquals(x.r4.flagged, 1, "新進的第 251 筆跟第 5 筆同號：標它自己，並連帶標另一邊（已有戳記、本輪輪不到的第 5 筆）");
+  assertEquals(x.flagged, ["00000000-0000-4000-8000-200000000005", "00000000-0000-4000-8000-299999999999"]);
+  assertEquals(x.votes, ["not_supported"], "只有 not_supported；沒有 supported（那會讓目標 −1、等於不核來源就放行），也沒有任何無衝突的紀錄");
+});
+Deno.test("N6 還原驗證：無衝突不記戳記（舊版）→ 前 200 筆永遠佔住上限，第 250 筆從沒被檢查；N5 必須紅", async () => {
+  const x = await starvation((s) => mutate(s, "  INSERT INTO cand_no_dup_checks (contribution_id, checked_at, conflicts) VALUES (p_contribution_id, now(), v_n)\n  ON CONFLICT (contribution_id) DO UPDATE SET checked_at = excluded.checked_at, conflicts = excluded.conflicts;\n", ""));
+  assert(x.s2 < 250, "沒有戳記就無從輪替，一直撿同樣的 200 筆");
+});
+Deno.test("N7 還原驗證：不照戳記排序（永遠 created_at 由舊到新）→ 戳記沒有用，N5 的輪替必須紅", async () => {
+  const x = await starvation((s) => mutate(s, "     ORDER BY k.checked_at NULLS FIRST, c.created_at\n", "     ORDER BY c.created_at\n"));
+  assert(x.s2 < 250);
 });
 
 Deno.test("N3 驗證項：系統發現的重複攤給驗證者看（理由、衝突的是誰、問『哪一個才對』），不給系統退件權", () => {
@@ -172,13 +229,13 @@ const MUTATIONS: { name: string; breaks: string[]; edit: (s: string) => string }
   { name: "等票那一邊不算已驗證等落庫的", breaks: ["n_flagged_set", "n_verified_counts_as_other"],
     edit: (s) => mutate(s, "c2.status IN ('pending', 'verified')", "c2.status IN ('pending')") },
   { name: "已經標過的還會再寫一張", breaks: ["n_idempotent_no_double_vote"],
-    edit: (s) => mutate(s, "                AND j.model LIKE 'policy-tw/cand-no-dup%' AND j.choice = 'not_supported') THEN\n    RETURN 'not_supported';", "                AND j.model LIKE 'policy-tw/cand-no-dup%' AND j.choice = 'not_supported' AND false) THEN\n    RETURN 'not_supported';") },
+    edit: (s) => mutate(s, "                AND j.model LIKE 'policy-tw/cand-no-dup%' AND j.choice = 'not_supported') THEN\n    RETURN false;", "                AND j.model LIKE 'policy-tw/cand-no-dup%' AND j.choice = 'not_supported' AND false) THEN\n    RETURN false;") },
   { name: "標了不重算共識", breaks: ["n_consensus_recomputed_once_each", "n_idempotent_no_double_vote"],
-    edit: (s) => mutate(s, "  PERFORM contribution_apply_consensus(p_contribution_id);\n  RETURN 'not_supported';\nEND;", "  RETURN 'not_supported';\nEND;") },
+    edit: (s) => mutate(s, "  PERFORM contribution_apply_consensus(p_contribution_id);\n  RETURN true;\nEND;", "  RETURN true;\nEND;") },
   { name: "投成 supported（-1）而不是 not_supported", breaks: ["n_flagged_set", "n_record_dup"],
     edit: (s) => mutate(s, "VALUES ('contribution', p_contribution_id::TEXT, 'source_support', 'not_supported', 1,", "VALUES ('contribution', p_contribution_id::TEXT, 'source_support', 'supported', 1,") },
   { name: "原因沒寫號次與誰重複", breaks: ["n_reason_names_number_and_person", "n_reason_names_pending_other"],
-    edit: (s) => mutate(s, "jsonb_build_object('reason', '號次 ' || (v_res->>'cand_no') || ' 與 ' || v_names || ' 重複", "jsonb_build_object('reason', '號次重複' || ' 與 ' || v_names || ' 重複") },
+    edit: (s) => mutate(s, "jsonb_build_object('reason', '號次 ' || (p_res->>'cand_no') || ' 與 ' || v_names || ' 重複", "jsonb_build_object('reason', '號次重複' || ' 與 ' || v_names || ' 重複") },
   { name: "連非 pending 的也檢查（verified 的也被撿）", breaks: ["n_only_pending_with_numeric_picked"],
     edit: (s) => mutate(s, "     WHERE c.contribution_type = 'candidacy' AND c.status = 'pending'\n       AND (c.payload->>'cand_no') ~ '^[0-9]{1,6}$'", "     WHERE c.contribution_type = 'candidacy' AND c.status IN ('pending', 'verified')\n       AND (c.payload->>'cand_no') ~ '^[0-9]{1,6}$'") },
 ];

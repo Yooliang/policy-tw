@@ -9,11 +9,12 @@
 --   * 補號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:<屆別>:<選舉別>:<縣市>[:<鄉鎮市區>][:pN]）
 --     條件：candidacy_status＝filed（已登記；名單公告後仍是 filed，交件的詞換成 qualified）、cand_no 空、人物沒被併走。退選（withdrawn）、表態未登記（declared）不派。
 --     臂本身不比日期——「抽籤之後、投票日以前」由規則決定（見三）；也不限定屆別：只要某屆有 draw 里程碑，那一屆已登記沒號次的就會派，2028 不用再改。
+--     分件後綴穩定：名次與總數算在整個派工單位的全部已登記者上（號次補沒補不影響），補掉幾位不會讓 :p1／:p2 變成無後綴；task_id 只在這個單位的已登記人數本身跨 50 的門檻時才變。
 --     派工單位：屆別×選舉別×縣市；鄉鎮市長、直轄市山地原住民區長、村里長、鄉鎮市民代表、直轄市山地原住民區民代表再細到鄉鎮市區（一個鄉鎮的名單公告是一份；
 --     鄉鎮市長的參選紀錄多半還沒記到鄉鎮，記了才分、沒記的留在縣市那一件）。單位超過 50 位拆成幾件（:p1、:p2…，依選舉區、村里、姓名排序）。
 --     target 帶 election_id、election_type（總表用這兩個欄位對規則問窗口）、region（縣市）、sub_region、draw_on／list_on、candidate_status（名單公告前 registered、公告後 qualified）、
 --     items（politician_election_id、politician_id、name，另有的單位帶 electoral_district、sub_region、village）。整份 target 含人物 uuid，#448 的測試名人物隔離照常管用。
---     已經有人交了這一人這一屆帶 cand_no 的 candidacy、還在等票（pending／verified）的先不派；退件了就會再派。
+--     已經有人交了這一人這一屆帶 cand_no 的 candidacy、還在等票（pending／verified）的先不派（交件只給姓名、沒給 politician_id 的用姓名＋選舉別＋縣市對）；退件了就會再派。
 --   * 重查（target.kind＝cand_no_recheck，task_id auto:candidacy_source_missing:cand_no_recheck:…）：視圖 ballot_number_anomalies（見二）有列的號次單位，照派工單位聚成一件（一件最多 25 個號次單位），
 --     target.units 附每個單位的異常內容（重複的號次、缺的號次、成員與目前記的號次），任務說明逐單位寫出來。同一個活動名（ballot_numbers）、同一條規則，窗口一樣是抽籤當天起到投票日當天止。
 --
@@ -23,7 +24,7 @@
 --   等 #449 的登記彙總表資料表把 district 補進參選紀錄就能納入）。派工可以照舊按大單位，但檢查一定按號次單位。
 --   重複＝同一個單位兩位以上同號（人數沒到齊也算）。跳號＝已有號次的人數等於名單人數（到齊），而號次不是 1..N 連續；人數沒到齊不算，所以不誤報。
 --   注意名單人數是「我們的名單」：名單缺人（例如只收了當選人的 2022 屆、2026 還沒清查完的村里長）時，號次會看起來跳號——這正是要重查的：不是號次抄錯，就是公告上有人我們沒有。
---   視圖不分屆別都算（歷史屆別的列大多是名單缺落選人），但派工只在規則窗口內（目前只有 2026），activity_health 只報還沒投票的選舉。
+--   視圖只算還沒投票的選舉（投票日當天含）：已投票屆別的名單多半只收了當選人、號次全像跳號，沒有重查的意義，也不該讓 seed 每 10 分鐘去掃全部歷史；臂的主體同樣只掃還沒投票的屆別（等於規則的迄日，只是效能預篩）。
 --   交件時的重複檢查（系統票 not_supported）在 20261008151000_cand_no_dup_check.sql。
 --
 -- 三、draw 里程碑與規則
@@ -94,27 +95,41 @@ $$;
 -- ------------------------------------------------------------
 -- 號次是每個「號次單位」各自從 1 編起的，不是派工的單位：
 --   縣市長＝縣市；縣市議員＝選舉區（縣市＋第NN選舉區）；鄉鎮市長、直轄市山地原住民區長＝鄉鎮市區（縣市＋鄉鎮市區）；村里長＝村里（縣市＋鄉鎮市區＋村里）；
---   鄉鎮市民代表、直轄市山地原住民區民代表＝選舉區，但我們的參選紀錄與交件都只記到鄉鎮（沒有代表的選舉區），單位算不出來，所以回 NULL＝不檢查
+--   鄉鎮市民代表、直轄市山地原住民區民代表＝選舉區，但我們的參選紀錄與交件只記到鄉鎮（沒有代表的選舉區），單位算不出來，所以回 NULL＝不檢查
 --   （等 #449 的登記彙總表資料表把 district 補進參選紀錄之後才能納入；寧可不檢查，也不要拿「同鄉鎮同號」誤報成重複）。
 -- 算不出單位的（縣市議員沒記到選舉區、村里長沒記到村里、鄉鎮市長沒記到鄉鎮…）也回 NULL。
--- 派工單位（臂的 :p1 拆件、縣市×選舉別、村里長與代表到鄉鎮）可以照舊按大單位，但重複與跳號的檢查一定按這個單位。
+-- 縣市、選舉區、鄉鎮市區、村里的「臺／台」一律正規化成「台」（臺西鄉＝台西鄉，repo 的 SQL 慣例 replace(…, '臺', '台')）：交件寫「台西鄉」、regions 存「臺西鄉」是同一個單位。
+-- 派工單位（臂的 :pN 拆件、縣市×選舉別、鄉鎮市長／區長／村里長／代表到鄉鎮市區）可以照舊按大單位，但重複與跳號的檢查一定按這個單位。
 CREATE OR REPLACE FUNCTION ballot_number_unit(p_election_type TEXT, p_county TEXT, p_district TEXT, p_town TEXT, p_village TEXT)
 RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE
     WHEN NULLIF(btrim(p_county), '') IS NULL THEN NULL
     WHEN p_election_type = '縣市長' THEN replace(btrim(p_county), '臺', '台')
-    WHEN p_election_type = '縣市議員' AND btrim(COALESCE(p_district, '')) LIKE '%選舉區' THEN replace(btrim(p_county), '臺', '台') || '|' || replace(btrim(p_district), ' ', '')
-    WHEN p_election_type IN ('鄉鎮市長', '直轄市山地原住民區長') AND NULLIF(btrim(p_town), '') IS NOT NULL THEN replace(btrim(p_county), '臺', '台') || '|' || btrim(p_town)
-    WHEN p_election_type = '村里長' AND NULLIF(btrim(p_town), '') IS NOT NULL AND NULLIF(btrim(p_village), '') IS NOT NULL THEN replace(btrim(p_county), '臺', '台') || '|' || btrim(p_town) || '|' || btrim(p_village)
+    WHEN p_election_type = '縣市議員' AND btrim(COALESCE(p_district, '')) LIKE '%選舉區' THEN replace(btrim(p_county), '臺', '台') || '|' || replace(replace(btrim(p_district), ' ', ''), '臺', '台')
+    WHEN p_election_type IN ('鄉鎮市長', '直轄市山地原住民區長') AND NULLIF(btrim(p_town), '') IS NOT NULL THEN replace(btrim(p_county), '臺', '台') || '|' || replace(btrim(p_town), '臺', '台')
+    WHEN p_election_type = '村里長' AND NULLIF(btrim(p_town), '') IS NOT NULL AND NULLIF(btrim(p_village), '') IS NOT NULL THEN replace(btrim(p_county), '臺', '台') || '|' || replace(btrim(p_town), '臺', '台') || '|' || replace(btrim(p_village), '臺', '台')
     ELSE NULL
   END
 $$;
 COMMENT ON FUNCTION ballot_number_unit IS
-  '號次單位（每個單位各自從 1 編起）：縣市長＝縣市、縣市議員＝縣市|選舉區、鄉鎮市長與區長＝縣市|鄉鎮市區、村里長＝縣市|鄉鎮市區|村里；代表（沒有記選舉區）與資料不全的回 NULL＝不檢查。'
+  '號次單位（每個單位各自從 1 編起）：縣市長＝縣市、縣市議員＝縣市|選舉區、鄉鎮市長與區長＝縣市|鄉鎮市區、村里長＝縣市|鄉鎮市區|村里；代表（沒有記選舉區）與資料不全的回 NULL＝不檢查；臺／台正規化成台。'
   '參選紀錄（region_id 指到的 regions）與交件 payload（region／electoral_district／sub_region／village）共用這一支，補號次 20261008150000';
 
--- 每個號次單位一列：名單上有幾位（registered）、幾位有號次（numbered）、用了哪些號次、成員。
+-- 同一個單位裡被兩位以上用的號次、到齊時 1..N 裡沒出現的號次（視圖與臂共用）
+CREATE OR REPLACE FUNCTION ballot_number_dups(p_members JSONB) RETURNS INTEGER[]
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT ARRAY(SELECT (e->>'cand_no')::INTEGER FROM jsonb_array_elements(p_members) e WHERE e->>'cand_no' IS NOT NULL GROUP BY 1 HAVING count(*) > 1 ORDER BY 1)
+$$;
+CREATE OR REPLACE FUNCTION ballot_number_missing(p_registered INTEGER, p_numbered INTEGER, p_numbers INTEGER[]) RETURNS INTEGER[]
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE WHEN p_numbered = p_registered
+              THEN ARRAY(SELECT g FROM generate_series(1, p_registered) g EXCEPT SELECT unnest(p_numbers) ORDER BY 1)
+              ELSE ARRAY[]::INTEGER[] END
+$$;
+
+-- 每個號次單位一列：名單上有幾位（registered）、幾位有號次（numbered）、用了哪些號次、成員；kind＝duplicate／gap／NULL（沒問題）。
 -- 名單＝已登記（filed）＋已有結果（elected／not_elected）＋退選但有號次的（抽籤時他在名單裡，號次不會因為他退選而讓出來）。
+-- **只算還沒投票的選舉**（投票日當天含；隔天也還算，讓規則的窗口關了之後 seed 記得出 window 而不是 filled）：已投票屆別的名單多半只收了當選人，號次看起來全是跳號，沒有重查的意義；每 10 分鐘的 seed 也不該去掃全部歷史。
 CREATE OR REPLACE VIEW ballot_number_units AS
   WITH m AS (
     SELECT pe.id AS pe_id, pe.election_id, pe.election_type, pe.politician_id, p.name, pe.cand_no, pe.candidacy_status,
@@ -124,6 +139,7 @@ CREATE OR REPLACE VIEW ballot_number_units AS
            r.village,
            ballot_number_unit(pe.election_type, COALESCE(r.region, p.region), r.sub_region, r.sub_region, r.village) AS unit
       FROM politician_elections pe
+      JOIN elections e ON e.id = pe.election_id AND e.election_date >= activity_today() - 1
       JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
       LEFT JOIN regions r ON r.id = pe.region_id
      WHERE pe.candidacy_status IN ('filed', 'elected', 'not_elected') OR (pe.candidacy_status = 'withdrawn' AND pe.cand_no IS NOT NULL)
@@ -133,40 +149,40 @@ CREATE OR REPLACE VIEW ballot_number_units AS
          count(*)::INTEGER AS registered, count(m.cand_no)::INTEGER AS numbered, count(DISTINCT m.cand_no)::INTEGER AS distinct_numbers, max(m.cand_no) AS max_no,
          COALESCE(array_agg(DISTINCT m.cand_no ORDER BY m.cand_no) FILTER (WHERE m.cand_no IS NOT NULL), ARRAY[]::INTEGER[]) AS numbers,
          jsonb_agg(jsonb_build_object('politician_election_id', m.pe_id, 'politician_id', m.politician_id, 'name', m.name, 'cand_no', m.cand_no, 'candidacy_status', m.candidacy_status)
-                   ORDER BY m.cand_no NULLS LAST, m.pe_id) AS members
+                   ORDER BY m.cand_no NULLS LAST, m.pe_id) AS members,
+         -- 重複：兩位以上同號（人數沒到齊也算）。跳號：已有號次的人數等於名單人數（到齊），而號次不是 1..N 連續；人數沒到齊不算，所以不誤報
+         CASE WHEN count(DISTINCT m.cand_no) < count(m.cand_no) THEN 'duplicate'
+              WHEN count(m.cand_no) = count(*) AND count(DISTINCT m.cand_no) = count(*) AND max(m.cand_no) <> count(*) THEN 'gap' END AS kind
     FROM m
    WHERE m.unit IS NOT NULL
    GROUP BY m.election_id, m.election_type, m.unit;
 COMMENT ON VIEW ballot_number_units IS
-  '每個號次單位（ballot_number_unit）一列：名單人數 registered、有號次的 numbered、不重複的號次數 distinct_numbers、用了哪些號次 numbers、成員 members。補號次 20261008150000';
+  '每個號次單位（ballot_number_unit）一列：名單人數 registered、有號次的 numbered、不重複的號次數 distinct_numbers、用了哪些號次 numbers、成員 members、問題種類 kind（duplicate／gap／空＝沒問題）。只算還沒投票的選舉。補號次 20261008150000';
 
--- 重複與跳號。重複：同一個單位有兩位以上用同一個號次（人數沒到齊也算）。
--- 跳號：已有號次的人數等於名單人數（到齊了），而號次不是 1..N 連續。人數還沒到齊不算跳號（可能只是還沒補完），所以不誤報。
+-- 重複與跳號（units 裡 kind 有值的），附被重複用的號次與缺的號次
 CREATE OR REPLACE VIEW ballot_number_anomalies AS
-  SELECT u.election_id, u.election_type, u.unit, u.county, u.town, u.district, u.village, u.registered, u.numbered,
-         CASE WHEN u.distinct_numbers < u.numbered THEN 'duplicate' ELSE 'gap' END AS kind,
-         ARRAY(SELECT (e->>'cand_no')::INTEGER FROM jsonb_array_elements(u.members) e WHERE e->>'cand_no' IS NOT NULL
-                GROUP BY 1 HAVING count(*) > 1 ORDER BY 1) AS duplicates,
-         CASE WHEN u.numbered = u.registered
-              THEN ARRAY(SELECT g FROM generate_series(1, u.registered) g EXCEPT SELECT unnest(u.numbers) ORDER BY 1)
-              ELSE ARRAY[]::INTEGER[] END AS missing,
+  SELECT u.election_id, u.election_type, u.unit, u.county, u.town, u.district, u.village, u.registered, u.numbered, u.kind,
+         ballot_number_dups(u.members) AS duplicates,
+         ballot_number_missing(u.registered, u.numbered, u.numbers) AS missing,
          u.numbers, u.members
     FROM ballot_number_units u
-   WHERE u.distinct_numbers < u.numbered
-      OR (u.numbered = u.registered AND u.distinct_numbers = u.registered AND u.max_no <> u.registered);
+   WHERE u.kind IS NOT NULL;
 COMMENT ON VIEW ballot_number_anomalies IS
   '號次單位裡的重複（duplicate：兩位以上同號）與跳號（gap：號次人數＝名單人數卻不是 1..N 連續；人數未到齊不算）。duplicates＝被重複用的號次，missing＝到齊時 1..N 裡沒出現的號次。'
-  '正常是空的；有列＝要重查（派工臂 cand_no_recheck）。退選／資格不符造成的真跳號也會列在這裡，代理核對公告後用 no_change 確認。補號次 20261008150000';
+  '只算還沒投票的選舉；正常是空的，有列＝要重查（派工臂 cand_no_recheck）。名單缺人（我們的名單不完整）時也會列成跳號，退選／資格不符造成的真跳號也會列在這裡，代理核對公告後用 no_change 確認。補號次 20261008150000';
 GRANT SELECT ON ballot_number_units, ballot_number_anomalies TO anon, authenticated;
 
 -- ------------------------------------------------------------
 -- 4. 臂：contribution_auto_tasks_ballot_numbers（補號次 cand_no，與重複／跳號的重查 cand_no_recheck）
 -- ------------------------------------------------------------
+-- 分件後綴要穩定（agy 第二輪審查）：以前依「還沒有號次的人數」動態拆，補掉幾位之後人數跨過 50，:p1／:p2 變成無後綴，seed 把舊列當 filled 刪掉、
+-- 排隊位置與 task_checks 冷卻都重置。現在名次與總數都算在「整個派工單位的全部已登記者」上（號次有沒有補不影響名次），補號次只會讓某一件的 items 變少、
+-- 整件補完才消失；task_id 只在這個單位的已登記人數本身跨門檻（有人新登記、退選）時才變。重查同理：名次算在派工單位的全部號次單位上，不是只算有問題的。
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_ballot_numbers()
 RETURNS TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text)
 LANGUAGE sql STABLE AS $$
-  WITH g AS (
-    SELECT pe.id AS pe_id, pe.election_id, pe.election_type, p.id AS politician_id, p.name,
+  WITH g_all AS (
+    SELECT pe.id AS pe_id, pe.election_id, pe.election_type, pe.cand_no, p.id AS politician_id, p.name,
            replace(COALESCE(r.region, p.region), '臺', '台') AS county,
            -- 名單公告是一個鄉鎮一份的：鄉鎮市長、直轄市山地原住民區長、村里長、鄉鎮市民代表、直轄市山地原住民區民代表再細到鄉鎮市區
            -- （鄉鎮市長的參選紀錄多半還沒記到鄉鎮，r.sub_region 空＝留在縣市層級那一件，代理從公告上補 sub_region）
@@ -175,24 +191,35 @@ LANGUAGE sql STABLE AS $$
            CASE WHEN pe.election_type = '縣市議員' THEN r.sub_region END AS district,
            CASE WHEN pe.election_type = '村里長' THEN r.village END AS village
       FROM politician_elections pe
+      -- 抽籤之後、投票日以前才派：窗口（起點）由規則決定（activity_rules「ballot_numbers」：draw +0 起、polling +0 止，補號次 20261008150000）；
+      -- 這裡的 election_date 只是效能預篩（已投票的屆別不算，不然 seed 每 10 分鐘要掃全部歷史），不是第二份窗口。
+      -- 投票日隔天還要算（- 1）：規則的窗口在隔天才關，seed 要看得到「臂還算得出來、窗口關了」才會把收回記成 window，不是 filled
+      JOIN elections e ON e.id = pe.election_id AND e.election_date >= activity_today() - 1
       JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
       LEFT JOIN regions r ON r.id = pe.region_id
-     -- 抽籤之後、投票日以前才派：不在臂裡比日期，由規則決定（activity_rules「ballot_numbers」：draw +0 起、polling +0 止，補號次 20261008150000）
-     WHERE pe.candidacy_status = 'filed' AND pe.cand_no IS NULL AND pe.election_type IS NOT NULL
-       AND COALESCE(r.region, p.region) IS NOT NULL
-       -- 已經有人交了這一人這一屆帶號次的 candidacy、還在等票的先不派（退件了就會再派）
-       AND NOT EXISTS (SELECT 1 FROM contributions c
-                        WHERE c.contribution_type = 'candidacy' AND c.status IN ('pending', 'verified')
-                          AND c.payload->>'politician_id' = p.id::TEXT AND c.payload->>'election_id' = pe.election_id::TEXT
-                          AND c.payload->>'cand_no' IS NOT NULL)
+     WHERE pe.candidacy_status = 'filed' AND pe.election_type IS NOT NULL AND COALESCE(r.region, p.region) IS NOT NULL
   ),
-  numbered AS (
+  ranked AS (
     SELECT g.*,
            (row_number() OVER w - 1) / 50 + 1 AS part,
            (count(*) OVER (PARTITION BY g.election_id, g.election_type, g.county, g.unit_town) - 1) / 50 + 1 AS parts
-      FROM g
+      FROM g_all g
     WINDOW w AS (PARTITION BY g.election_id, g.election_type, g.county, g.unit_town
                  ORDER BY g.district NULLS LAST, g.village NULLS LAST, g.name, g.pe_id)
+  ),
+  numbered AS (
+    SELECT rk.*
+      FROM ranked rk
+     WHERE rk.cand_no IS NULL
+       -- 已經有人交了這一人這一屆帶號次的 candidacy、還在等票（pending／verified）的先不派（退件了就會再派）；
+       -- 交件可以只給姓名、沒給 politician_id（協議允許）：沒給的用姓名＋選舉別＋縣市對
+       AND NOT EXISTS (SELECT 1 FROM contributions c
+                        WHERE c.contribution_type = 'candidacy' AND c.status IN ('pending', 'verified')
+                          AND c.payload->>'election_id' = rk.election_id::TEXT AND c.payload->>'cand_no' IS NOT NULL
+                          AND (c.payload->>'politician_id' = rk.politician_id::TEXT
+                               OR (NULLIF(c.payload->>'politician_id', '') IS NULL AND btrim(c.payload->>'name') = rk.name
+                                   AND c.payload->>'election_type' = rk.election_type
+                                   AND replace(COALESCE(c.payload->>'region', rk.county), '臺', '台') = rk.county)))
   ),
   grouped AS (
     SELECT n.election_id, n.election_type, n.county, n.unit_town, n.part, max(n.parts) AS parts, count(*) AS items_count,
@@ -216,20 +243,25 @@ LANGUAGE sql STABLE AS $$
       FROM grouped gr
       JOIN elections e ON e.id = gr.election_id
   ),
-  -- 重複與跳號的重查：視圖 ballot_number_anomalies 一個號次單位一列，這裡照派工單位（跟上面同一套切法）聚成一件，一件最多 25 個號次單位
-  ra AS (
-    SELECT a.*, CASE WHEN a.election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表') THEN a.town END AS unit_town
-      FROM ballot_number_anomalies a
+  -- 重複與跳號的重查：號次單位的名次先算在派工單位的全部號次單位上，再留下有問題的（kind 有值），一件最多 25 個號次單位
+  ru AS (
+    SELECT bu.*,
+           CASE WHEN bu.election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表') THEN bu.town END AS unit_town,
+           (row_number() OVER w - 1) / 25 + 1 AS part,
+           (count(*) OVER (PARTITION BY bu.election_id, bu.election_type, bu.county,
+                           CASE WHEN bu.election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表') THEN bu.town END) - 1) / 25 + 1 AS parts
+      FROM ballot_number_units bu
+    WINDOW w AS (PARTITION BY bu.election_id, bu.election_type, bu.county,
+                              CASE WHEN bu.election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表') THEN bu.town END
+                 ORDER BY bu.unit)
   ),
   rn AS (
-    SELECT ra.*,
-           (row_number() OVER w - 1) / 25 + 1 AS part,
-           (count(*) OVER (PARTITION BY ra.election_id, ra.election_type, ra.county, ra.unit_town) - 1) / 25 + 1 AS parts,
-           CASE WHEN position('|' IN ra.unit) > 0 THEN replace(substr(ra.unit, position('|' IN ra.unit) + 1), '|', ' ') ELSE ra.county END AS label,
+    SELECT ru.*, ballot_number_dups(ru.members) AS duplicates, ballot_number_missing(ru.registered, ru.numbered, ru.numbers) AS missing,
+           CASE WHEN position('|' IN ru.unit) > 0 THEN replace(substr(ru.unit, position('|' IN ru.unit) + 1), '|', ' ') ELSE ru.county END AS label,
            (SELECT string_agg((t.m->>'name') || CASE WHEN t.m->>'cand_no' IS NOT NULL THEN '（' || (t.m->>'cand_no') || '號）' ELSE '（沒有號次）' END, '、' ORDER BY t.ord)
-              FROM jsonb_array_elements(ra.members) WITH ORDINALITY AS t(m, ord)) AS who
-      FROM ra
-    WINDOW w AS (PARTITION BY ra.election_id, ra.election_type, ra.county, ra.unit_town ORDER BY ra.unit)
+              FROM jsonb_array_elements(ru.members) WITH ORDINALITY AS t(m, ord)) AS who
+      FROM ru
+     WHERE ru.kind IS NOT NULL
   ),
   rg AS (
     SELECT n.election_id, n.election_type, n.county, n.unit_town, n.part, max(n.parts) AS parts, count(*) AS units_count,
