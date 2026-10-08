@@ -272,7 +272,8 @@ const noStrings = (sql: string) => stripSqlComments(sql).replace(/'(?:[^']|'')*'
 function retentionOf(s: Sources): { retention: Retention | null; problems: string[] } {
   const problems: string[] = [];
   const days = {} as Record<Table, number>;
-  const floor = {} as Record<Table, number>;
+  /** 每張表目前生效的 CHECK（名稱 → 下限）：PG 的 ADD CONSTRAINT 不會取代舊的，兩條並存時取較嚴的 */
+  const checks = {} as Record<Table, Map<string, number>>;
   const defining = s.migs.find((m) => /CREATE TABLE IF NOT EXISTS dispatch_records_settings/.test(m.sql));
   if (!defining) return { retention: null, problems: ["找不到 dispatch_records_settings 的 migration"] };
   const ddl = noStrings(defining.sql);
@@ -281,18 +282,48 @@ function retentionOf(s: Sources): { retention: Retention | null; problems: strin
     const m = new RegExp(`${c}\\s+INTEGER\\s+NOT NULL\\s+DEFAULT\\s+(\\d+)\\s+CHECK\\s*\\(\\s*${c}\\s+BETWEEN\\s+(\\d+)\\s+AND\\s+(\\d+)\\s*\\)`).exec(ddl);
     if (!m) { problems.push(`抽不出 ${c} 的預設值與 CHECK 範圍`); continue; }
     days[t] = Number(m[1]);
-    floor[t] = Number(m[2]);
+    checks[t] = new Map([[`dispatch_records_settings_${c}_check`, Number(m[2])]]); // 欄位內聯的 CHECK，PG 自動命名
   }
   for (const mig of s.migs) {
     if (mig.name < defining.name) continue;
-    for (const u of noStrings(mig.sql).matchAll(/UPDATE\s+dispatch_records_settings\s+SET([^;]*?)WHERE/gi)) {
+    const code = noStrings(mig.sql);
+    for (const u of code.matchAll(/UPDATE\s+dispatch_records_settings\s+SET([^;]*?)WHERE/gi)) {
       for (const t of TABLES) {
         const v = new RegExp(`\\b${COLS[t]}\\s*=\\s*(\\d+)`).exec(u[1]);
         if (v) days[t] = Number(v[1]);
       }
     }
+    // 之後的 ALTER TABLE … ADD／DROP CONSTRAINT：floor 要取「所有 migration 依序套用後」的最終值，不能只看建表那支
+    // （正式庫不會重跑建表那支；改它只會讓測試轉綠、正式庫的 CHECK 還是舊的）
+    for (const a of code.matchAll(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:public\.)?dispatch_records_settings\b([^;]*);/gi)) {
+      const body = a[1];
+      const events: Array<{ pos: number; fn: () => void }> = [];
+      let parsedAdds = 0;
+      let parsedDrops = 0;
+      for (const m of body.matchAll(/ADD\s+(?:CONSTRAINT\s+([A-Za-z_0-9]+)\s+)?CHECK\s*\(\s*([A-Za-z_0-9]+)\s+(?:BETWEEN\s+(\d+)\s+AND\s+\d+|>=\s*(\d+))\s*\)/gi)) {
+        parsedAdds++;
+        const t = TABLES.find((x) => COLS[x] === m[2]);
+        if (!t || !checks[t]) continue;
+        events.push({ pos: m.index!, fn: () => checks[t].set(m[1] ?? `anon:${mig.name}:${m.index}`, Number(m[3] ?? m[4])) });
+      }
+      for (const m of body.matchAll(/DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?([A-Za-z_0-9]+)/gi)) {
+        parsedDrops++;
+        events.push({ pos: m.index!, fn: () => {
+          const t = TABLES.find((x) => checks[x]?.has(m[1]));
+          if (t) checks[t].delete(m[1]);
+          else if (!/^dispatch_records_settings_(batch_size|max_batches)_check$/.test(m[1])) problems.push(`${mig.name}：DROP CONSTRAINT ${m[1]}，認不得是哪一欄的 CHECK`);
+        } });
+      }
+      // 解析不了的寫法（CHECK 條件不是 BETWEEN／>=、改名、ALTER CONSTRAINT）一律當問題：要求守門跟著更新
+      if ((body.match(/\bCHECK\b/gi) ?? []).length !== parsedAdds || (body.match(/DROP\s+CONSTRAINT/gi) ?? []).length !== parsedDrops || /ALTER\s+CONSTRAINT|RENAME\s+CONSTRAINT/i.test(body)) {
+        problems.push(`${mig.name}：ALTER TABLE dispatch_records_settings 動到 CHECK／CONSTRAINT 但寫法認不得，請更新 dispatch-records-purge.test.ts 的 retentionOf`);
+      }
+      for (const e of events.sort((x, y) => x.pos - y.pos)) e.fn();
+    }
   }
   if (TABLES.some((t) => days[t] === undefined)) return { retention: null, problems };
+  const floor = {} as Record<Table, number>;
+  for (const t of TABLES) floor[t] = Math.max(0, ...checks[t].values());
   return { retention: { days, floor }, problems };
 }
 
@@ -651,4 +682,63 @@ Deno.test("C8 清理函式改壞：不看時間（全刪）、跳過紀錄全刪
   } finally {
     await db.close();
   }
+});
+
+// ============================================================
+// D. CHECK 下限取「所有 migration 依序套用後」的最終值；已套用的建表 migration 不准改
+// ============================================================
+/** 建表那支（20261009080000）上線時的值。正式庫不會重跑它：之後要調，一律新增 migration（ALTER TABLE … DROP／ADD CONSTRAINT ＋ UPDATE），不能回頭改這支 */
+const APPLIED_DEFAULTS = { verify_dispatches: 14, contribution_task_skips: 7 };
+const APPLIED_FLOORS = { verify_dispatches: 8, contribution_task_skips: 2 };
+const extra = (sql: string): Sources => ({ ...REAL, migs: [...REAL.migs, { name: "29991231000000_x.sql", sql }] });
+const ALTER_VD = "ALTER TABLE dispatch_records_settings";
+const VD_CK = "dispatch_records_settings_verify_dispatches_days_check";
+
+Deno.test("D1 建表那支 migration 已套用：預設值與 CHECK 下限必須維持上線時的值（要調就新增 migration，不能改舊的）", () => {
+  const defining = REAL.migs.find((m) => m.name === PURGE_MIG)!;
+  const only: Sources = { ...REAL, migs: [defining] };
+  const r = retentionOf(only).retention!;
+  assertEquals(r.days, APPLIED_DEFAULTS, "建表 migration 的預設值被改了：正式庫上的值不會跟著變，請改成新增 migration 的 UPDATE，並同步更新這裡");
+  assertEquals(r.floor, APPLIED_FLOORS, "建表 migration 的 CHECK 下限被改了：正式庫上的 CHECK 不會跟著變，請新增 migration（ALTER TABLE … DROP CONSTRAINT／ADD CONSTRAINT），並同步更新這裡");
+});
+
+Deno.test("D2 之後的 migration 用 ALTER TABLE 換 CHECK：floor 取最終值（先 DROP 舊的再 ADD 新的＝新下限）", () => {
+  const raised = extra(`${ALTER_VD} DROP CONSTRAINT ${VD_CK}, ADD CONSTRAINT vd_days_floor CHECK (verify_dispatches_days BETWEEN 30 AND 365);`);
+  assertEquals(retentionOf(raised).retention?.floor.verify_dispatches, 30);
+  assertEquals(retentionOf(raised).problems, []);
+  // 只 ADD 不 DROP：兩條 CHECK 並存，較嚴的生效
+  const both = extra(`${ALTER_VD} ADD CONSTRAINT vd_days_floor CHECK (verify_dispatches_days >= 30);`);
+  assertEquals(retentionOf(both).retention?.floor.verify_dispatches, 30);
+  // 只 ADD 一條更鬆的：舊的還在，floor 不變
+  const looser = extra(`${ALTER_VD} ADD CONSTRAINT vd_days_loose CHECK (verify_dispatches_days >= 2);`);
+  assertEquals(retentionOf(looser).retention?.floor.verify_dispatches, 8);
+  // 分成兩個 statement 也一樣
+  const split = extra(`${ALTER_VD} DROP CONSTRAINT ${VD_CK};\n${ALTER_VD} ADD CONSTRAINT vd_days_floor CHECK (verify_dispatches_days BETWEEN 21 AND 365);`);
+  assertEquals(retentionOf(split).retention?.floor.verify_dispatches, 21);
+});
+
+Deno.test("D3 還原驗證：有人把下限 DROP 掉、放寬、或用認不得的寫法動 CONSTRAINT——守門必須紅", () => {
+  // 只 DROP：下限變 0，低於回看期 ＋ 邊際
+  const dropped = extra(`${ALTER_VD} DROP CONSTRAINT ${VD_CK};`);
+  assert(hasProblem(allProblems(dropped), "CHECK 下限 0 天"), allProblems(dropped).join("\n"));
+  // 認不得的條件寫法
+  const odd = extra(`${ALTER_VD} ADD CONSTRAINT vd_odd CHECK (verify_dispatches_days IN (14, 30));`);
+  assert(hasProblem(allProblems(odd), "寫法認不得"), allProblems(odd).join("\n"));
+  // DROP 一個認不得的名字
+  const unknown = extra(`${ALTER_VD} DROP CONSTRAINT some_other_name;`);
+  assert(hasProblem(allProblems(unknown), "認不得是哪一欄"), allProblems(unknown).join("\n"));
+  // 改名／ALTER CONSTRAINT
+  const rename = extra(`${ALTER_VD} RENAME CONSTRAINT ${VD_CK} TO x;`);
+  assert(hasProblem(allProblems(rename), "寫法認不得"), allProblems(rename).join("\n"));
+  // 回看期調高到 30 天、floor 卻只在「舊 migration」裡改成 31（誘導）：D1 紅；正確做法（新 migration 換 CHECK ＋ 調 days）則綠
+  const lure = mutateMig(mutateSrc(REAL, DISPATCH_FILE, "export const VERIFY_BINDING_DAYS = 7;", "export const VERIFY_BINDING_DAYS = 30;"), PURGE_MIG,
+    "DEFAULT 14 CHECK (verify_dispatches_days BETWEEN 8 AND 365)", "DEFAULT 40 CHECK (verify_dispatches_days BETWEEN 31 AND 365)");
+  assertEquals(allProblems(lure), [], "（前提：文字層只看最終值，改舊 migration 會轉綠——所以才需要 D1 把建表那支釘住）");
+  assert(retentionOf({ ...lure, migs: [lure.migs.find((m) => m.name === PURGE_MIG)!] }).retention!.floor.verify_dispatches !== APPLIED_FLOORS.verify_dispatches, "D1 的釘住比對看得出舊 migration 被改");
+  const proper = mutateSrc(REAL, DISPATCH_FILE, "export const VERIFY_BINDING_DAYS = 7;", "export const VERIFY_BINDING_DAYS = 30;");
+  const properWith = { ...proper, migs: [...proper.migs, { name: "29991231000000_x.sql", sql: `${ALTER_VD} DROP CONSTRAINT ${VD_CK}, ADD CONSTRAINT vd_days_floor CHECK (verify_dispatches_days BETWEEN 31 AND 365);\nUPDATE ${"dispatch_records_settings"} SET verify_dispatches_days = 40 WHERE id = 1;` }] };
+  assertEquals(allProblems(properWith), []);
+  // 正確做法少了 floor 的調整（只 UPDATE days）：CHECK 下限 8 天 < 30 天 ＋ 邊際，紅
+  const noFloor = { ...proper, migs: [...proper.migs, { name: "29991231000000_x.sql", sql: `UPDATE dispatch_records_settings SET verify_dispatches_days = 40 WHERE id = 1;` }] };
+  assert(hasProblem(allProblems(noFloor), "CHECK 下限 8 天"), allProblems(noFloor).join("\n"));
 });
