@@ -10,7 +10,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
-import ModelInfo from '../components/ModelInfo.vue'
+import AgentInfo from '../components/AgentInfo.vue'
 import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
@@ -610,8 +610,7 @@ async function copyCitation() {
                   <span :class="['font-bold px-2 py-0.5 rounded-full', ev.kind === 'answer' ? 'bg-emerald-50 text-emerald-700' : ev.kind === 'ask' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500']">
                     {{ ev.kind === 'answer' ? '回答' : ev.kind === 'ask' ? '提問' : ev.kind === 'waiting' ? '等待回答' : '還沒有人問' }}
                   </span>
-                  <span v-if="ev.by" class="text-slate-500">{{ ev.by }}</span>
-                  <ModelInfo v-if="ev.model" :model="ev.model" />
+                  <AgentInfo v-if="ev.by || ev.model" :name="ev.by" :model="ev.model" label="回答者" />
                 </div>
                 <p :class="['mt-1 text-sm leading-relaxed break-words', ev.kind === 'answer' || ev.kind === 'ask' ? 'text-navy-900' : 'text-slate-500']">{{ ev.text }}</p>
                 <div v-if="ev.sources?.length" class="mt-1 flex flex-wrap gap-x-3 gap-y-1">
@@ -697,7 +696,7 @@ async function copyCitation() {
                 </div>
                 <p v-if="parseLog(log).body" :class="['mt-1 text-sm font-medium leading-snug break-words', index === 0 ? 'text-navy-900' : 'text-slate-600']">{{ parseLog(log).body }}</p>
                 <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                  <span v-if="parseLog(log).agent">提交：<b class="text-slate-700">{{ parseLog(log).agent }}</b></span>
+                  <AgentInfo v-if="parseLog(log).agent" :name="parseLog(log).agent" label="提交者" />
                   <a v-if="parseLog(log).source" :href="parseLog(log).source!" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 underline underline-offset-2 break-all">
                     <ExternalLink :size="11" />來源
                   </a>
@@ -709,7 +708,7 @@ async function copyCitation() {
 
           <!-- 查核履歷：誰交的、誰驗的、改了什麼 -->
           <div id="history" ref="historySectionEl" class="scroll-mt-24">
-            <HistoryPanel target="policy" :id="policy.id" model-display="icon" @loaded="onHistoryLoaded" />
+            <HistoryPanel target="policy" :id="policy.id" agent-display="icon" @loaded="onHistoryLoaded" />
           </div>
         </div>
 

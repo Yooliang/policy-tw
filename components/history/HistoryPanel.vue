@@ -6,7 +6,7 @@ import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
-import ModelInfo from '../ModelInfo.vue'
+import AgentInfo from '../AgentInfo.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 
 /**
@@ -15,11 +15,11 @@ import { hostOf, shortUrlsIn } from '../../lib/url'
  * 標題列（圖示＋標題＋筆數）不在此限，維持跟頁面上其他區塊標題一致。狀態、型別膠囊保留顏色、不粗。
  * 這條規則涵蓋子元件 HistoryEntryDetail、TimelineNote、ScoreBar；之後在這些元件加東西，也別再加 font-bold／font-medium 或 text-sm 以上。
  * 沿革：2026-09-17 曾把摘要那句從預設 16px 粗體降到 text-sm font-medium，免得在 12px 的中繼資料裡跳得像主標；10-06 再往前一步，連 text-sm 與粗體都拿掉。
- * 模型名（agent_tool）怎麼露出由 modelDisplay 決定（2026-10-08，維護者）：政見頁與候選人頁傳 'icon'，收成 info 圖示、滑過或點一下才看得到；
- * 預設 'inline' 直接寫在代號後面（貢獻看板這類透明度頁面、公民提問的處理紀錄）。代號 agent_name 兩種模式都照舊顯示。
+ * 提交者代號（agent_name）與模型名（agent_tool）怎麼露出由 agentDisplay 決定（2026-10-08，維護者，#457、#475）：政見頁與候選人頁傳 'icon'，
+ * 代號與模型合成一顆人形圖示（AgentInfo），滑過或點一下才看得到；預設 'inline' 直接寫在文字裡（貢獻看板這類透明度頁面、公民提問的處理紀錄）。
  * 沒有貢獻紀錄時顯示資料來源說明（匯入的 source_url／source_note），不留空白。
  */
-const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean; modelDisplay?: 'inline' | 'icon' }>(), { title: '查核履歷', compact: false, modelDisplay: 'inline' })
+const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean; agentDisplay?: 'inline' | 'icon' }>(), { title: '查核履歷', compact: false, agentDisplay: 'inline' })
 const emit = defineEmits<{ loaded: [payload: { total: number; appliedCount: number }] }>()
 
 const open = ref(true)
@@ -136,7 +136,8 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
           <!-- 這一列放在按鈕外面、自己接點擊（2026-10-08）：info 圖示本身是一顆按鈕，按鈕不能包按鈕。
                鍵盤展開／收合走上面那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
           <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 cursor-pointer" @click="toggleEntry(e.id)">
-              <span>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><ModelInfo v-if="e.agent_tool && modelDisplay === 'icon'" :model="e.agent_tool" class="ml-1" /><span v-else-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
+              <AgentInfo v-if="agentDisplay === 'icon'" :name="e.agent_name" :model="e.agent_tool" label="提交者" />
+              <span v-else>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <!-- 分數拉鋸條（2026-10-05，使用者要求）：跟貢獻看板同一個元件。已上線、已退件的也照看板畫法，
                    不另外特判——滿格綠＝達標上線、滿格紅＝退件，一眼分得出這筆是怎麼走到現在的 -->
               <ScoreBar :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
@@ -144,7 +145,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
           </div>
           <div v-if="expanded.has(e.id)" class="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
-            <HistoryEntryDetail :entry="e" :model-display="modelDisplay" />
+            <HistoryEntryDetail :entry="e" :agent-display="agentDisplay" />
           </div>
         </li>
       </ol>
