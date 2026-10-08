@@ -7,6 +7,7 @@ import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types
 import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
+import { ballotLabel } from '../../lib/ballot-number'
 
 // 根元素的 id（頁內錨點，人物頁麵包屑連到這裡）由呼叫端當 attribute 傳進來；scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住
 const props = defineProps<{
@@ -164,10 +165,10 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" />
           <!-- 有號次（名單公告、抽籤後）就顯示「N號」；已登記＝綠色小勾 -->
           <span
-            v-if="politician.candNo"
+            v-if="ballotLabel(politician.candNo)"
             class="absolute top-2 left-2 inline-flex items-center justify-center min-w-[2rem] h-7 px-2 rounded-full bg-navy-900/90 text-white text-sm font-black"
-            :title="`${politician.candNo} 號`"
-          >{{ politician.candNo }}號</span>
+            :title="ballotLabel(politician.candNo)"
+          >{{ ballotLabel(politician.candNo) }}</span>
           <span
             v-else-if="politician.candidacyStatus === 'filed' && !voted"
             class="absolute top-2 left-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white"
@@ -183,7 +184,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           <p class="text-xs text-slate-500 mt-0.5">{{ politician.party }}</p>
           <!-- 已登記以外的參選狀態（可能參選、當選、落選…）照舊文字標；已登記與有號次的已經標在照片上 -->
           <span
-            v-if="!politician.candNo && candidateStatusLabel(politician.candidacyStatus, politician.withdrawnAfterFiling)"
+            v-if="!ballotLabel(politician.candNo) && candidateStatusLabel(politician.candidacyStatus, politician.withdrawnAfterFiling)"
             :class="`inline-block text-[10px] px-1.5 py-0.5 rounded border font-bold mt-1 ${candidateStatusColor(politician.candidacyStatus)}`"
           >{{ candidateStatusLabel(politician.candidacyStatus, politician.withdrawnAfterFiling) }}</span>
           <p v-if="formatArea(politician)" class="text-xs text-slate-600 mt-1 line-clamp-2">{{ formatArea(politician) }}</p>
