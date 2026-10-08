@@ -85,7 +85,7 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
       for (const r of group.filter((x) => x.policies.length > 0)) {
         body.push('', `${level} ${r.person.name}${r.person.party ? `（${r.person.party}）` : ''}`, '')
         body.push(`- 參選：${r.line}`)
-        body.push(`- 人物頁：${politicianUrl(r.person.id)}｜摘要：${abs(politicianMdPath(r.person.id))}`)
+        body.push(`- 人物頁：${politicianUrl(r.person.id)} ｜ 摘要：${abs(politicianMdPath(r.person.id))}`)
         body.push(`- 政見 ${r.policies.length} 筆：`)
         for (const p of r.policies) body.push(...policyBullet(p, { descMax: 120 }).map((l) => `  ${l}`))
       }
