@@ -1,5 +1,5 @@
 /**
- * 名單時程搬成里程碑（migration 20261008140000_roster_milestones.sql）前後的「逐件不變」守門（2026-10-08，docs/PLAN-task-activation.md 派工時間窗 P2）。
+ * 名單時程搬成里程碑（migration 20261008160000_roster_milestones.sql）前後的「逐件不變」守門（2026-10-08，docs/PLAN-task-activation.md 派工時間窗 P2）。
  *
  * 這支 migration 改的只有兩個會影響派工輸出的東西：
  *   ① candidacy_list_published()（6 支臂用它算 candidate_status 的字眼）——新舊兩個本體在正式庫唯讀快照上逐格比：
@@ -17,7 +17,7 @@
  */
 import { fnText, readMig } from "../supabase/functions/_shared/arms-pglite.ts";
 
-const MIG = "20261008140000_roster_milestones.sql";
+const MIG = "20261008160000_roster_milestones.sql";
 const [mode, path] = Deno.args;
 if (!["gen", "check"].includes(mode) || !path) {
   console.error("用法：roster-milestones-parity.ts gen <out.sql> ｜ roster-milestones-parity.ts check <snapshot.json>");
@@ -43,7 +43,7 @@ if (mode === "gen") {
         IS DISTINCT FROM candidacy_protocol_status(pe.candidacy_status, ${asScalar(body, "pe.election_id", "pe.election_type", `DATE '${day}'`)}))`;
   const keyDays = ["2026-09-04", "2026-10-08", "2026-10-16", "2026-10-23", "2026-11-12", "2026-11-16", "2026-11-17", "2026-11-28", "2026-11-29"];
   const sql = `SET default_transaction_read_only = on;
--- 名單時程搬成里程碑（20261008140000）改前改後的唯讀對照（scripts/roster-milestones-parity.ts gen 產生）
+-- 名單時程搬成里程碑（20261008160000）改前改後的唯讀對照（scripts/roster-milestones-parity.ts gen 產生）
 WITH cases AS (
   SELECT DISTINCT pe.election_id AS eid, pe.election_type AS t FROM politician_elections pe
   UNION SELECT s.election_id, s.election_type FROM roster_check_scope s

@@ -1,5 +1,5 @@
 /**
- * 名單時程的日期搬成里程碑（2026-10-08，派工時間窗 P2，docs/PLAN-task-activation.md；migration 20261008140000_roster_milestones.sql）。
+ * 名單時程的日期搬成里程碑（2026-10-08，派工時間窗 P2，docs/PLAN-task-activation.md；migration 20261008160000_roster_milestones.sql）。
  *
  * candidacy_list_published() 改讀 election_milestones_all 的 list_published；roster_check_scope 剩下三個日期（資格審查完成日、抽號次日、直轄市長名單公告日）
  * 搬成里程碑（qualification_review、draw、list_published＋election_type＝直轄市長）；單一真相是里程碑表，scope 的五個日期欄由觸發器衍生（做法照 #446）。
@@ -20,7 +20,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { buildArmsDb, fnText, latestFn, migrationNames, mutate, readMig, type Scope } from "./arms-pglite.ts";
 
-export const MIG_NAME = "20261008140000_roster_milestones.sql";
+export const MIG_NAME = "20261008160000_roster_milestones.sql";
 const MIG = await readMig(MIG_NAME);
 const BULLETIN = await readMig("20261008113000_bulletin_watch.sql");
 const count = (s: string, sub: string) => s.split(sub).length - 1;
