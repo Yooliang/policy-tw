@@ -87,7 +87,16 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
 
     // 跳過＝「這題我不答」（使用者 2026-09-20）：跟派過一樣排到後面，不再按 IP 記 24 小時不派（會連坐同機的其他代理）。
     // 要在分流之前寫：這一輪若輪到 verify，後面派任務的那段根本不會跑到。skips 表只留紀錄。
+    // 只有佇列上真實存在的 task_id 才算（#466 C）：`task_dispatched` 對不存在的 id 會新插一列（非 verify: 的列還會觸發 gap_events
+    // opened／closed，那張表只增不刪），匿名帶任意字串就能一直灌大。不存在的 skip 整段忽略（不記 skips、不推回隊尾），
+    // 下面「釋放自己的認領」與「這一輪別立刻派回同一筆」照舊（對不存在的 id 本來就沒東西可釋放或排除）。
+    let skipKnown = false;
     if (skipTaskId) {
+      const { data: known, error: knownErr } = await supabase.from("task_dispatches").select("task_id").eq("task_id", skipTaskId).maybeSingle();
+      if (knownErr) throw new Error(`skip lookup: ${knownErr.message}`);
+      skipKnown = !!known;
+    }
+    if (skipTaskId && skipKnown) {
       const { error: skipErr } = await supabase.from("contribution_task_skips").upsert(
         { task_id: skipTaskId, ip_hash: ipHash, agent_name: agentName, skipped_at: new Date().toISOString() },
         { onConflict: "task_id,ip_hash" },

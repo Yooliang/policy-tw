@@ -61,29 +61,29 @@
 
 ### 分類（全國，依縣市分組）
 
-- 交通建設：https://xn--2lw665d.tw/category/%E4%BA%A4%E9%80%9A%E5%BB%BA%E8%A8%AD.md｜查詢常見說法：交通、捷運、輕軌、公車、停車、道路、鐵路、高鐵、運輸
-- 都市發展與住宅：https://xn--2lw665d.tw/category/%E9%83%BD%E5%B8%82%E7%99%BC%E5%B1%95%E8%88%87%E4%BD%8F%E5%AE%85.md｜查詢常見說法：住宅、社宅、社會住宅、租屋、都更、房價、都市計畫、居住
-- 社會福利：https://xn--2lw665d.tw/category/%E7%A4%BE%E6%9C%83%E7%A6%8F%E5%88%A9.md｜查詢常見說法：育兒、托育、托嬰、長照、福利、津貼、身障、敬老、長者、老人、少子化
-- 醫療衛生：https://xn--2lw665d.tw/category/%E9%86%AB%E7%99%82%E8%A1%9B%E7%94%9F.md｜查詢常見說法：醫療、醫院、健保、防疫、食安、衛生、急診
-- 教育文化：https://xn--2lw665d.tw/category/%E6%95%99%E8%82%B2%E6%96%87%E5%8C%96.md｜查詢常見說法：教育、學校、幼兒園、文化、藝術、學童
-- 經濟發展與產業：https://xn--2lw665d.tw/category/%E7%B6%93%E6%BF%9F%E7%99%BC%E5%B1%95%E8%88%87%E7%94%A2%E6%A5%AD.md｜查詢常見說法：經濟、產業、招商、觀光、商圈、中小企業
-- 農漁業：https://xn--2lw665d.tw/category/%E8%BE%B2%E6%BC%81%E6%A5%AD.md｜查詢常見說法：農業、漁業、農民、漁民
-- 環境保護：https://xn--2lw665d.tw/category/%E7%92%B0%E5%A2%83%E4%BF%9D%E8%AD%B7.md｜查詢常見說法：環保、環境、空污、垃圾、淨零、減碳
-- 能源：https://xn--2lw665d.tw/category/%E8%83%BD%E6%BA%90.md｜查詢常見說法：電力、綠能、再生能源、核能
-- 治安消防與防災：https://xn--2lw665d.tw/category/%E6%B2%BB%E5%AE%89%E6%B6%88%E9%98%B2%E8%88%87%E9%98%B2%E7%81%BD.md｜查詢常見說法：治安、消防、防災、詐騙、防洪、淹水
-- 青年與勞工：https://xn--2lw665d.tw/category/%E9%9D%92%E5%B9%B4%E8%88%87%E5%8B%9E%E5%B7%A5.md｜查詢常見說法：青年、勞工、就業、薪資、創業
-- 性別與人權：https://xn--2lw665d.tw/category/%E6%80%A7%E5%88%A5%E8%88%87%E4%BA%BA%E6%AC%8A.md｜查詢常見說法：性別、人權、性平、平權
-- 原住民與族群：https://xn--2lw665d.tw/category/%E5%8E%9F%E4%BD%8F%E6%B0%91%E8%88%87%E6%97%8F%E7%BE%A4.md｜查詢常見說法：原住民、客家、新住民、族群
-- 體育休閒：https://xn--2lw665d.tw/category/%E9%AB%94%E8%82%B2%E4%BC%91%E9%96%92.md｜查詢常見說法：體育、運動、公園、休閒
-- 行政革新與數位治理：https://xn--2lw665d.tw/category/%E8%A1%8C%E6%94%BF%E9%9D%A9%E6%96%B0%E8%88%87%E6%95%B8%E4%BD%8D%E6%B2%BB%E7%90%86.md｜查詢常見說法：行政、數位、廉政、效能
-- 財政與稅務：https://xn--2lw665d.tw/category/%E8%B2%A1%E6%94%BF%E8%88%87%E7%A8%85%E5%8B%99.md｜查詢常見說法：財政、稅制、減稅、預算
-- 公平正義：https://xn--2lw665d.tw/category/%E5%85%AC%E5%B9%B3%E6%AD%A3%E7%BE%A9.md｜查詢常見說法：司法、正義
-- 政治議題：https://xn--2lw665d.tw/category/%E6%94%BF%E6%B2%BB%E8%AD%B0%E9%A1%8C.md｜查詢常見說法：選制、兩岸、國防、外交
+- 交通建設：https://xn--2lw665d.tw/category/%E4%BA%A4%E9%80%9A%E5%BB%BA%E8%A8%AD.md ｜ 查詢常見說法：交通、捷運、輕軌、公車、停車、道路、鐵路、高鐵、運輸
+- 都市發展與住宅：https://xn--2lw665d.tw/category/%E9%83%BD%E5%B8%82%E7%99%BC%E5%B1%95%E8%88%87%E4%BD%8F%E5%AE%85.md ｜ 查詢常見說法：住宅、社宅、社會住宅、租屋、都更、房價、都市計畫、居住
+- 社會福利：https://xn--2lw665d.tw/category/%E7%A4%BE%E6%9C%83%E7%A6%8F%E5%88%A9.md ｜ 查詢常見說法：育兒、托育、托嬰、長照、福利、津貼、身障、敬老、長者、老人、少子化
+- 醫療衛生：https://xn--2lw665d.tw/category/%E9%86%AB%E7%99%82%E8%A1%9B%E7%94%9F.md ｜ 查詢常見說法：醫療、醫院、健保、防疫、食安、衛生、急診
+- 教育文化：https://xn--2lw665d.tw/category/%E6%95%99%E8%82%B2%E6%96%87%E5%8C%96.md ｜ 查詢常見說法：教育、學校、幼兒園、文化、藝術、學童
+- 經濟發展與產業：https://xn--2lw665d.tw/category/%E7%B6%93%E6%BF%9F%E7%99%BC%E5%B1%95%E8%88%87%E7%94%A2%E6%A5%AD.md ｜ 查詢常見說法：經濟、產業、招商、觀光、商圈、中小企業
+- 農漁業：https://xn--2lw665d.tw/category/%E8%BE%B2%E6%BC%81%E6%A5%AD.md ｜ 查詢常見說法：農業、漁業、農民、漁民
+- 環境保護：https://xn--2lw665d.tw/category/%E7%92%B0%E5%A2%83%E4%BF%9D%E8%AD%B7.md ｜ 查詢常見說法：環保、環境、空污、垃圾、淨零、減碳
+- 能源：https://xn--2lw665d.tw/category/%E8%83%BD%E6%BA%90.md ｜ 查詢常見說法：電力、綠能、再生能源、核能
+- 治安消防與防災：https://xn--2lw665d.tw/category/%E6%B2%BB%E5%AE%89%E6%B6%88%E9%98%B2%E8%88%87%E9%98%B2%E7%81%BD.md ｜ 查詢常見說法：治安、消防、防災、詐騙、防洪、淹水
+- 青年與勞工：https://xn--2lw665d.tw/category/%E9%9D%92%E5%B9%B4%E8%88%87%E5%8B%9E%E5%B7%A5.md ｜ 查詢常見說法：青年、勞工、就業、薪資、創業
+- 性別與人權：https://xn--2lw665d.tw/category/%E6%80%A7%E5%88%A5%E8%88%87%E4%BA%BA%E6%AC%8A.md ｜ 查詢常見說法：性別、人權、性平、平權
+- 原住民與族群：https://xn--2lw665d.tw/category/%E5%8E%9F%E4%BD%8F%E6%B0%91%E8%88%87%E6%97%8F%E7%BE%A4.md ｜ 查詢常見說法：原住民、客家、新住民、族群
+- 體育休閒：https://xn--2lw665d.tw/category/%E9%AB%94%E8%82%B2%E4%BC%91%E9%96%92.md ｜ 查詢常見說法：體育、運動、公園、休閒
+- 行政革新與數位治理：https://xn--2lw665d.tw/category/%E8%A1%8C%E6%94%BF%E9%9D%A9%E6%96%B0%E8%88%87%E6%95%B8%E4%BD%8D%E6%B2%BB%E7%90%86.md ｜ 查詢常見說法：行政、數位、廉政、效能
+- 財政與稅務：https://xn--2lw665d.tw/category/%E8%B2%A1%E6%94%BF%E8%88%87%E7%A8%85%E5%8B%99.md ｜ 查詢常見說法：財政、稅制、減稅、預算
+- 公平正義：https://xn--2lw665d.tw/category/%E5%85%AC%E5%B9%B3%E6%AD%A3%E7%BE%A9.md ｜ 查詢常見說法：司法、正義
+- 政治議題：https://xn--2lw665d.tw/category/%E6%94%BF%E6%B2%BB%E8%AD%B0%E9%A1%8C.md ｜ 查詢常見說法：選制、兩岸、國防、外交
 - 其他：https://xn--2lw665d.tw/category/%E5%85%B6%E4%BB%96.md
 
 ### 縣市×分類
 
-- 路徑式：https://xn--2lw665d.tw/data/<縣市>/<分類>.md（最新一屆；轉到 /data/<屆>/<縣市>/<分類>.md），例：https://xn--2lw665d.tw/data/%E5%8F%B0%E5%8D%97%E5%B8%82/%E4%BA%A4%E9%80%9A%E5%BB%BA%E8%A8%AD.md
+- 路徑式：https://xn--2lw665d.tw/data/<縣市>/<分類>.md （最新一屆；轉到 /data/<屆>/<縣市>/<分類>.md），例：https://xn--2lw665d.tw/data/%E5%8F%B0%E5%8D%97%E5%B8%82/%E4%BA%A4%E9%80%9A%E5%BB%BA%E8%A8%AD.md
 - 查詢式（轉到路徑式）：https://xn--2lw665d.tw/data?q=台南 育兒
 
 ## 用程式讀資料
