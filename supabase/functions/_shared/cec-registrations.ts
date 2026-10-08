@@ -9,6 +9,7 @@
  */
 import type { RosterRow } from "./cec-roster.ts";
 import { fetchAllRows } from "./fetch-all.ts";
+import { chunksOf } from "./in-chunks.ts";
 
 export const REGISTRATION_ELECTION_ID = 2026;
 
@@ -142,4 +143,38 @@ export async function loadRegistrationRows(supabase: Client, url: string): Promi
   );
   if (rows.length !== src.row_count) return null;
   return rows.map(registrationToRosterRow);
+}
+
+/** 交件關卡要核對的範圍：縣市，以及這批在該縣市出現的鄉鎮市區（null＝這批有一筆沒給鄉鎮，整個縣市都要） */
+export interface RosterScope { region: string; towns: readonly string[] | null }
+
+/**
+ * 只撈這一批需要的範圍（2026-10-08，#455 審查）：交件時不能為了核對 150 筆把村里長 14,100 列整份拉回來（15 次往返、數 MB）。
+ * 做法：先確認這份名冊登記過、而且表裡的列數等於登記的列數（一次 count，不拉資料；對不上＝殘缺，回 null），
+ * 再依縣市（以及這批出現的鄉鎮市區，臺／台兩種寫法都查）撈那一塊，照 PDF 列序回傳。
+ */
+export async function loadRegistrationRowsScoped(supabase: Client, url: string, scopes: readonly RosterScope[]): Promise<RosterRow[] | null> {
+  const { data: src, error } = await supabase.from("cec_registration_sources").select("row_count").eq("source_url", url).maybeSingle();
+  if (error || !src || typeof src.row_count !== "number") return null;
+  const { count, error: countErr } = await supabase.from("cec_registrations").select("row_no", { count: "exact", head: true }).eq("source_url", url);
+  if (countErr || count !== src.row_count) return null;
+  type Row = { row_no: number; name: string; party: string; region: string; district: string | null; place: string | null };
+  const byRow = new Map<number, Row>();
+  for (const scope of scopes) {
+    const region = scope.region.replace(/臺/g, "台");
+    const towns = scope.towns ? [...new Set(scope.towns.flatMap((t) => [t, t.replace(/臺/g, "台"), t.replace(/台/g, "臺")]))] : null;
+    const queries = towns ? chunksOf(towns) : [null];
+    for (const townChunk of queries) {
+      const rows = await fetchAllRows<Row>(
+        "cec_registrations scoped",
+        (from, to) => townChunk
+          ? supabase.from("cec_registrations").select("row_no, name, party, region, district, place").eq("source_url", url).eq("region", region)
+            .in("sub_region", townChunk).order("row_no", { ascending: true }).range(from, to)
+          : supabase.from("cec_registrations").select("row_no, name, party, region, district, place").eq("source_url", url).eq("region", region)
+            .order("row_no", { ascending: true }).range(from, to),
+      );
+      for (const r of rows) byRow.set(r.row_no, r);
+    }
+  }
+  return [...byRow.values()].sort((a, b) => a.row_no - b.row_no).map(registrationToRosterRow);
 }

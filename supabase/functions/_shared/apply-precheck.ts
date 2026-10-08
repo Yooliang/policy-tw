@@ -11,9 +11,10 @@
  *   - #364 政見三要素指到不存在或已移除的政見
  *
  * 一律唯讀；查詢本身出錯（資料庫錯誤）不擋交件，只 console.error——不能讓系統自己的錯擋掉代理。
- * 查詢批次化：同型別的 id 合成一次 `.in()`，一批最多 MAX_BATCH（20）筆，符合 query-bounds 的「變數 in() 有界」判準。
+ * 查詢批次化：同型別的 id 合成 `.in()`，**每 IN_CHUNK（40）個一查再合併**（in-chunks.ts）——一批可到 MAX_BATCH_ROSTER（150）筆，150 個 uuid 的網址約 5.5 KB 會超過網址長度上限（#455 審查），符合 query-bounds 的「變數 in() 有界」判準。
  */
 
+import { chunksOf, IN_CHUNK } from "./in-chunks.ts";
 import { normalizeCorrection } from "./correction.ts";
 import { electionTypeSwitch } from "./candidate-import.ts";
 import { linkLevelProblem } from "./lineage.ts";
@@ -57,10 +58,12 @@ async function lookupPoliticians(supabase: SupabaseLike, ids: readonly string[])
   const rows = new Map<string, PoliticianRow>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // query-bounds: ok — ids 來自這一批交件（最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("politicians").select("id, merged_into").in("id", ids);
-    if (error) { console.error("precheck politicians lookup failed:", error.message); return { rows, ok: false }; }
-    for (const r of (data ?? []) as Array<{ id: string; merged_into: string | null }>) rows.set(r.id, { merged_into: r.merged_into ?? null });
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件，每段 IN_CHUNK 個，變數 in()
+      const { data, error } = await supabase.from("politicians").select("id, merged_into").in("id", chunk);
+      if (error) { console.error("precheck politicians lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ id: string; merged_into: string | null }>) rows.set(r.id, { merged_into: r.merged_into ?? null });
+    }
   } catch (e) {
     console.error("precheck politicians lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
@@ -72,10 +75,9 @@ async function lookupPolicies(supabase: SupabaseLike, ids: readonly string[]): P
   const rows = new Map<string, PolicyRow>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // 脈絡一筆最多 60 個政見 id（#349），整批 20 筆可到上千個：切成 100 個一段，網址才不會超長
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
-      // query-bounds: ok — ids 來自這一批交件、每段 100 個，變數 in()
+    // 脈絡一筆最多 60 個政見 id（#349），整批 20 筆可到上千個：切成 IN_CHUNK 個一段，網址才不會超長
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件、每段 IN_CHUNK 個，變數 in()
       const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title").in("id", chunk);
       if (error) { console.error("precheck policies lookup failed:", error.message); return { rows, ok: false }; }
       for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null }>) {
@@ -93,10 +95,12 @@ async function lookupLineages(supabase: SupabaseLike, ids: readonly string[]): P
   const rows = new Map<string, LineageRow>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // query-bounds: ok — ids 來自這一批交件（每筆最多兩條脈絡，最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("lineages").select("id, title, level, region, sub_region").in("id", ids);
-    if (error) { console.error("precheck lineages lookup failed:", error.message); return { rows, ok: false }; }
-    for (const r of (data ?? []) as LineageRow[]) rows.set(String(r.id).toLowerCase(), r);
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件（每筆最多兩條脈絡），每段 IN_CHUNK 個，變數 in()
+      const { data, error } = await supabase.from("lineages").select("id, title, level, region, sub_region").in("id", chunk);
+      if (error) { console.error("precheck lineages lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as LineageRow[]) rows.set(String(r.id).toLowerCase(), r);
+    }
   } catch (e) {
     console.error("precheck lineages lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
@@ -108,10 +112,12 @@ async function lookupElectionRows(supabase: SupabaseLike, ids: readonly number[]
   const rows = new Set<number>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // query-bounds: ok — ids 來自這一批交件（最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("politician_elections").select("id").in("id", ids);
-    if (error) { console.error("precheck politician_elections lookup failed:", error.message); return { rows, ok: false }; }
-    for (const r of (data ?? []) as Array<{ id: number }>) rows.add(r.id);
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件，每段 IN_CHUNK 個，變數 in()
+      const { data, error } = await supabase.from("politician_elections").select("id").in("id", chunk);
+      if (error) { console.error("precheck politician_elections lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ id: number }>) rows.add(r.id);
+    }
   } catch (e) {
     console.error("precheck politician_elections lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
@@ -123,10 +129,12 @@ async function lookupTasks(supabase: SupabaseLike, ids: readonly string[]): Prom
   const rows = new Set<string>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // query-bounds: ok — ids 來自這一批交件（最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("contribution_tasks").select("id").in("id", ids);
-    if (error) { console.error("precheck contribution_tasks lookup failed:", error.message); return { rows, ok: false }; }
-    for (const r of (data ?? []) as Array<{ id: string }>) rows.add(r.id);
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件，每段 IN_CHUNK 個，變數 in()
+      const { data, error } = await supabase.from("contribution_tasks").select("id").in("id", chunk);
+      if (error) { console.error("precheck contribution_tasks lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ id: string }>) rows.add(r.id);
+    }
   } catch (e) {
     console.error("precheck contribution_tasks lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows, ok: false };
@@ -141,11 +149,11 @@ async function lookupResultCandidacies(supabase: SupabaseLike, ids: readonly num
   const rows = new Map<number, ResultCandidacy>();
   if (ids.length === 0) return { rows, ok: true };
   try {
-    // 一批 20 筆、每筆最多 120 位：切成 100 個一段，網址才不會超長
-    for (let i = 0; i < ids.length; i += 100) {
-      // query-bounds: ok — ids 來自這一批交件、每段 100 個，按主鍵取
+    // 一批 20 筆、每筆最多 120 位：切成 IN_CHUNK 個一段，網址才不會超長
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件、每段 IN_CHUNK 個，按主鍵取
       const { data, error } = await supabase.from("politician_elections")
-        .select("id, election_id, election_type, regions(region), politicians(name, region)").in("id", ids.slice(i, i + 100)).limit(100);
+        .select("id, election_id, election_type, regions(region), politicians(name, region)").in("id", chunk).limit(IN_CHUNK);
       if (error) { console.error("precheck result candidacies lookup failed:", error.message); return { rows, ok: false }; }
       for (const r of (data ?? []) as Array<{ id: number; election_id: number; election_type: string | null; regions?: { region?: string | null } | null; politicians?: { name?: string | null; region?: string | null } | null }>) {
         rows.set(Number(r.id), { election_id: r.election_id, election_type: r.election_type, county: r.regions?.region ?? r.politicians?.region ?? null, name: r.politicians?.name ?? null });
@@ -163,12 +171,16 @@ interface ExistingParticipation { politician_id: string; election_id: number; el
 async function lookupParticipations(supabase: SupabaseLike, politicianIds: readonly string[], electionIds: readonly number[]): Promise<LookupResult<ExistingParticipation[]>> {
   if (politicianIds.length === 0 || electionIds.length === 0) return { rows: [], ok: true };
   try {
-    // query-bounds: ok — 兩邊 id 都來自這一批交件（最多 MAX_BATCH 筆），變數 in()
-    const { data, error } = await supabase.from("politician_elections")
-      .select("politician_id, election_id, election_type, candidacy_status")
-      .in("politician_id", politicianIds).in("election_id", electionIds);
-    if (error) { console.error("precheck candidacy lookup failed:", error.message); return { rows: [], ok: false }; }
-    return { rows: (data ?? []) as ExistingParticipation[], ok: true };
+    const all: ExistingParticipation[] = [];
+    for (const chunk of chunksOf(politicianIds)) {
+      // query-bounds: ok — 兩邊 id 都來自這一批交件，人物 id 每段 IN_CHUNK 個、屆別最多幾個，變數 in()
+      const { data, error } = await supabase.from("politician_elections")
+        .select("politician_id, election_id, election_type, candidacy_status")
+        .in("politician_id", chunk).in("election_id", electionIds);
+      if (error) { console.error("precheck candidacy lookup failed:", error.message); return { rows: [], ok: false }; }
+      all.push(...((data ?? []) as ExistingParticipation[]));
+    }
+    return { rows: all, ok: true };
   } catch (e) {
     console.error("precheck candidacy lookup threw:", e instanceof Error ? e.message : String(e));
     return { rows: [], ok: false };

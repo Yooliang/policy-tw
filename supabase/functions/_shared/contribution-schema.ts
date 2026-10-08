@@ -10,6 +10,7 @@ import { partyInfoProblems } from "./party-info.ts";
 import { isPlaceholderName, PLACEHOLDER_NAME_MSG } from "./placeholder-name.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 import { MAX_RESULTS_PER_SUBMISSION } from "./election-results.ts";
+import { CEC_ROSTER_URL_RE } from "./cec-roster.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 import {
   HANDOVER_TYPES, isOfficialUrl, isUnreadableSocial, LINEAGE_LEVELS, LINEAGE_MAX_POLICIES, LINEAGE_NOTE_MAX, LINEAGE_NOTE_MIN,
@@ -100,6 +101,19 @@ export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], reado
 export const REMOVAL_TABLES = ["policies", "politicians"] as const;
 
 export const MAX_BATCH = 20;
+/**
+ * 名冊逐位吻合的 candidacy 批次上限（2026-10-08，維護者裁示 B 案：只放寬這一種，其他型別維持 MAX_BATCH）。
+ * 這裡只看結構——整批每一筆都是 candidacy、而且 source_urls 引用中選會登記名冊 PDF；「逐位吻合」要查名冊資料表，在 contribute-handler
+ * （rosterBatchProblems），超過 MAX_BATCH 筆的批次每一筆都要跟名冊的姓名、縣市、鄉鎮、政黨、選舉區對上才收。
+ */
+export const MAX_BATCH_ROSTER = 150;
+/** 整批都是引用中選會登記名冊 PDF 的 candidacy（結構判斷，不查資料庫） */
+export function isRosterCandidacyBatch(list: readonly unknown[]): boolean {
+  return list.length > 0 && list.every((raw) => {
+    if (!isObj(raw) || raw.contribution_type !== "candidacy") return false;
+    return Array.isArray(raw.source_urls) && raw.source_urls.some((u) => typeof u === "string" && CEC_ROSTER_URL_RE.test(u));
+  });
+}
 export const MAX_SOURCE_URLS = 10;
 export const MIN_POLICY_DESCRIPTION = 20;
 /**
@@ -841,9 +855,13 @@ function validateContributionRequestInner(body: unknown): ValidationResult {
 
   const rawList: unknown[] = Array.isArray(body.contributions) ? body.contributions : [body];
   if (Array.isArray(body.contributions) && rawList.length === 0) errors.push({ index: -1, path: "contributions", message: "contributions 不能是空陣列" });
-  if (rawList.length > MAX_BATCH) errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆` });
+  // 超過 MAX_BATCH 筆只有一種例外：整批都是引用中選會登記名冊的 candidacy（上限 MAX_BATCH_ROSTER；逐位吻合名冊由 contribute-handler 查表把關）
+  const batchCap = rawList.length > MAX_BATCH && isRosterCandidacyBatch(rawList) ? MAX_BATCH_ROSTER : MAX_BATCH;
+  if (rawList.length > batchCap) {
+    errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆（整批都是 candidacy、source_urls 引用中選會登記名冊 PDF 而且逐位吻合名冊的，最多 ${MAX_BATCH_ROSTER} 筆）` });
+  }
 
-  rawList.slice(0, MAX_BATCH).forEach((raw, index) => {
+  rawList.slice(0, batchCap).forEach((raw, index) => {
     const push = (path: string, message: string, code?: ValidationCode) => errors.push({ index, path, message, ...(code ? { code } : {}) });
     if (!isObj(raw)) { push("", "每筆要是物件"); return; }
     if (!oneOf(CONTRIBUTION_TYPES, raw.contribution_type)) { push("contribution_type", `要是 ${CONTRIBUTION_TYPES.join("／")} 之一`); return; }
