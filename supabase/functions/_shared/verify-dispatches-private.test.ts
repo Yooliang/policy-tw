@@ -143,30 +143,60 @@ Deno.test("A5 migration 套用兩次成功（冪等）", async () => {
 // ============================================================
 // B. 文字層
 // ============================================================
-Deno.test("B1 前端目錄沒有直接讀 verify_dispatches", async () => {
+const TBL = String.raw`(?:"?public"?\.)?"?verify_dispatches"?`;
+const POLICY_RE = new RegExp(String.raw`CREATE\s+POLICY\s+(?:\w+|"[^"]+")\s+ON\s+${TBL}(?![\w"])`, "i");
+const GRANT_RE = new RegExp(String.raw`GRANT\s+[^;]*\bON\s+(?:TABLE\s+)?${TBL}(?![\w"])[^;]*\bTO\s+[^;]*\b(?:anon|authenticated|PUBLIC)\b`, "i");
+/** 回傳這段 SQL 重新公開 verify_dispatches 的原因（沒有就空陣列） */
+const reopens = (sql: string): string[] => {
+  const s = sql.replace(/--.*$/gm, "");
+  return [POLICY_RE.test(s) ? "policy" : "", GRANT_RE.test(s) ? "grant" : ""].filter(Boolean);
+};
+
+Deno.test("B1 前端沒有直接讀 verify_dispatches（含 router、根目錄的 .vue／.ts）", async () => {
   const hits: string[] = [];
+  const isSrc = (n: string) => /\.(vue|ts|tsx|js|mjs)$/.test(n) && !/\.test\.ts$/.test(n);
+  const check = async (dir: URL, name: string, rel: string) => {
+    if ((await Deno.readTextFile(new URL(name, dir))).includes("verify_dispatches")) hits.push(rel + name);
+  };
   async function walk(dir: URL, rel: string) {
     for await (const e of Deno.readDir(dir)) {
       if (e.isDirectory) await walk(new URL(e.name + "/", dir), rel + e.name + "/");
-      else if (/\.(vue|ts|tsx|js|mjs)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) {
-        if ((await Deno.readTextFile(new URL(e.name, dir))).includes("verify_dispatches")) hits.push(rel + e.name);
-      }
+      else if (isSrc(e.name)) await check(dir, e.name, rel);
     }
   }
-  for (const d of ["pages", "components", "composables", "lib"]) {
+  for (const d of ["pages", "components", "composables", "lib", "router"]) {
     try { await walk(new URL(d + "/", ROOT), d + "/"); } catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
   }
+  // 根目錄只看檔案本身（App.vue、main.ts…），不往下走
+  let rootScanned = 0;
+  for await (const e of Deno.readDir(ROOT)) if (e.isFile && isSrc(e.name)) { rootScanned++; await check(ROOT, e.name, ""); }
+  assert(rootScanned > 0, "根目錄應該掃得到 App.vue／main.ts");
   assertEquals(hits, [], "前端不得直接讀 verify_dispatches；要公開的欄位走 dispatch_recent()");
 });
 
 Deno.test("B2 本支之後沒有 migration 重新公開這張表", async () => {
   const later: string[] = [];
   for await (const e of Deno.readDir(MIGRATIONS)) if (e.isFile && e.name.endsWith(".sql") && e.name > FIX_MIG) later.push(e.name);
-  for (const name of later.sort()) {
-    const sql = (await read(name)).replace(/--.*$/gm, "");
-    assert(!/CREATE\s+POLICY\s+\w+\s+ON\s+(public\.)?verify_dispatches/i.test(sql), `${name} 不得為 verify_dispatches 建 policy`);
-    assert(!/GRANT\s+[^;]*\bON\s+(TABLE\s+)?(public\.)?verify_dispatches\b[^;]*\bTO\s+[^;]*\b(anon|authenticated|PUBLIC)\b/i.test(sql), `${name} 不得把 verify_dispatches 授權給公開角色`);
-  }
+  for (const name of later.sort()) assertEquals(reopens(await read(name)), [], `${name} 不得重新公開 verify_dispatches`);
+});
+
+Deno.test("B3 還原驗證：B2 的偵測對帶引號、帶空格的 policy 名稱與各種 GRANT 寫法會紅", () => {
+  const bad = [
+    'CREATE POLICY "Public read" ON verify_dispatches FOR SELECT USING (true);',
+    'create policy "x" on public.verify_dispatches for select using (true);',
+    'CREATE POLICY pub ON "public"."verify_dispatches" FOR SELECT USING (true);',
+    "GRANT SELECT ON verify_dispatches TO anon;",
+    "GRANT ALL ON TABLE public.verify_dispatches TO authenticated, service_role;",
+    "grant select on table verify_dispatches to public;",
+  ];
+  for (const sql of bad) assert(reopens(sql).length > 0, `應該抓到：${sql}`);
+  const good = [
+    "GRANT SELECT ON verify_dispatches TO service_role;",
+    "CREATE POLICY p ON other_table FOR SELECT USING (true);",
+    "-- CREATE POLICY p ON verify_dispatches FOR SELECT USING (true);",
+    "GRANT SELECT ON verify_dispatches_extra TO anon;",
+  ];
+  for (const sql of good) assertEquals(reopens(sql), [], `不該誤報：${sql}`);
 });
 
 // ============================================================
