@@ -4,6 +4,7 @@ import { checkDispatchToken, dispatchTokenSecretFrom, issueDispatchToken } from 
 import { jpDispatchTokenSecretFrom } from "./jp/dispatch-secret.ts";
 import { ipHashOf } from "./jp/contribute-handler.ts";
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
+import { JP_PROTOCOL_VERSION } from "./jp/protocol.ts";
 
 /**
  * 日本站入口（jp-next／jp-report）的行為測試：真的載入入口、用真的 Request 打進去，底下是有狀態的假 PostgREST。
@@ -107,7 +108,10 @@ Deno.test("jp-next：驗證項帶 policy_jp 標頭、發日本站憑證；每個
     const got = await getNext(next, N1);
     assertEquals(got.status, 200);
     assertEquals(got.json.kind, "verify");
-    assertEquals(got.json.protocol_version, "0.5.0");
+    // 端點回的版號要等於程式裡的常數，且不低於 0.6.0（手引き 0.6.0；不寫死現值）
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+    const [jMaj, jMin] = JP_PROTOCOL_VERSION.split(".").map(Number);
+    assert(jMaj > 0 || jMin >= 6, `協議版號 ${JP_PROTOCOL_VERSION} 比 0.6.0 舊`);
     const token = got.json.dispatch_token as string;
     assert(token?.startsWith("dpt1."));
     // 是日本站的鑰匙簽的，不是正見的
