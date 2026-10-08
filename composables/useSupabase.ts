@@ -342,6 +342,8 @@ export function mapPolicy(row: RawPolicy): Policy {
     ...(row.lineage_id ? { lineageId: row.lineage_id } : {}),
     ...(mapLineageSummary(row.lineage) ? { lineage: mapLineageSummary(row.lineage) } : {}),
     ...(isPolicyOrigin(row.origin) ? { origin: row.origin } : {}),
+    // 查無公開進度（#470）：視圖的最後一欄，true 才帶（快照不長出空欄）
+    ...(row.no_public_progress ? { noPublicProgress: true } : {}),
   }
 }
 

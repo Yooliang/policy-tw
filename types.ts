@@ -236,6 +236,11 @@ export interface Policy {
   lineage?: LineageSummary | null;
   /** 政見從哪裡來（#349，照日本站 policy_origin）：競選承諾／施政報告／議會提案／預算；還沒標是 null */
   origin?: PolicyOrigin | null;
+  /**
+   * 查無公開進度（#470，視圖 policies_with_logs.no_public_progress）：這條政見的進度追蹤正處於「查無」的冷卻中。
+   * 只在 true 時才帶；畫面只放標籤、不放說明。冷卻結束或新進度上線，視圖就不再回 true。
+   */
+  noPublicProgress?: boolean;
 }
 
 /** 政見從哪裡來（#349，照日本站 policy_origin） */
@@ -628,8 +633,10 @@ export interface RawPolicy {
   lineage_id?: string | null;
   lineage?: RawLineageSummary | null;
   origin?: string | null;
-  /** 出處（#347）：視圖 policies_with_logs 最後一欄（出處表，主要在前）；第二階段 B 起沒有舊欄位 source_url */
+  /** 出處（#347）：視圖 policies_with_logs 的 sources 欄（出處表，主要在前）；第二階段 B 起沒有舊欄位 source_url */
   sources?: RawSourceRef[] | null;
+  /** 查無公開進度（#470）：視圖 policies_with_logs 最後一欄；舊視圖沒有這一欄（當 false） */
+  no_public_progress?: boolean | null;
 }
 
 export interface RawLineageSummary {

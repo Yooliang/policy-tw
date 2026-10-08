@@ -164,7 +164,7 @@ const toggleCheckpoint = (e: Event) => {
            當選且有進度的話狀態早就不是「競選承諾」了，會落在人物頁的施政那一區） -->
       <div v-else-if="!isCampaign" class="mt-auto space-y-2">
         <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-          <span>當前執行進度</span>
+          <span class="flex items-center gap-2">當前執行進度<span v-if="policy.noPublicProgress" data-testid="no-public-progress" class="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 normal-case tracking-normal">查無公開進度</span></span>
           <span>{{ policy.progress }}%</span>
         </div>
         <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">

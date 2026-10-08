@@ -98,7 +98,7 @@ Deno.test("A1 總表與 seed 的前一版是對的：P1 緊接著 20261006141600
     assert(i > 0, `P1 要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做`);
     // P1 之後只允許：優先層那一版改 seed（20261008090000，守門在 queue-priority.test.ts）、測試人物隔離那一版改總表（20261008114000，守門在 placeholder-isolation.test.ts）、party_roster 那支 P2（20261008121000：總表多回傳被規則濾掉的列、seed 分 window／filled，以前兩者的版本為底；機械式替換與守門見 activity-party-roster.test.ts）、補號次那支新臂（20261008150000：總表在 owner_mismatch 後面多一行 UNION 分支，守門見 activity-ballot-numbers.test.ts，seed 不動）；多了別人的就要以最新那版為底重做
-    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql", P2_PR_MIG, "20261008165000_manual_tasks_as_arm.sql", "20261008190000_page_traffic_boost.sql"] : ["20261008114000_placeholder_task_isolation.sql", P2_PR_MIG, BALLOT_MIG, "20261008165000_manual_tasks_as_arm.sql"], `P1 之後又有人改了 ${fn}：新增派工臂請改最新那版的總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
+    assertEquals(defining.slice(i + 1), fn === "seed_auto_task_queue" ? ["20261008090000_queue_priority_tiers.sql", P2_PR_MIG, "20261008165000_manual_tasks_as_arm.sql", "20261008190000_page_traffic_boost.sql"] : ["20261008114000_placeholder_task_isolation.sql", P2_PR_MIG, BALLOT_MIG, "20261008165000_manual_tasks_as_arm.sql", "20261008200000_village_chief_progress_cooling.sql" /* #470：總表三處機械式替換（職位補查、規則的流量旗標、列層流量條件），守門在 village-progress-cooling.test.ts */], `P1 之後又有人改了 ${fn}：新增派工臂請改最新那版的總表（標籤、activity_arm_names、規則種子三處一起加），要以最新那版為底`);
   }
 });
 
