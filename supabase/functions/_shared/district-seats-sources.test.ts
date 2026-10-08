@@ -204,11 +204,12 @@ Deno.test("A5 TS 端：任務型別在 SOURCE_TASK_TYPES、需求是 seats、驗
   assertStringIncludes(endpoint, 'url.searchParams.get("election_id")');
 });
 
-Deno.test("A6 協議：1.83.0（#489 的 1.82.0 先合併）、skill.md 檔頭檔尾與程式一致、說明公告網址已附在任務裡與驗證要核對選舉區數量", async () => {
-  assertEquals(PROTOCOL_VERSION, "1.83.0");
+Deno.test("A6 協議：版號不低於 1.83.0（#489 的 1.82.0 先合併）、skill.md 檔頭檔尾與程式一致、說明公告網址已附在任務裡與驗證要核對選舉區數量", async () => {
+  const ver = (v: string) => v.split(".").map(Number).reduce((a, n) => a * 1000 + n, 0);
+  assert(ver(PROTOCOL_VERSION) >= ver("1.83.0"), "協議版號不低於 1.83.0");
   const skill = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r\n/g, "\n");
-  assertStringIncludes(skill, "**版本**：1.83.0");
-  assertStringIncludes(skill, "*協議版本 1.83.0");
+  assertStringIncludes(skill, `**版本**：${PROTOCOL_VERSION}`);
+  assertStringIncludes(skill, `*協議版本 ${PROTOCOL_VERSION}`);
   const i = skill.indexOf("### 補應選名額");
   const sec = skill.slice(i, skill.indexOf("### 整批補選舉結果"));
   for (const must of ["current.verification_sources", "web.cec.gov.tw", "article 63645", "known_districts` 常比公告少", "選舉區數量與名額加總也要對", "兩區的名額對調"]) assertStringIncludes(sec, must);
