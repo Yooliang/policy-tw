@@ -1,7 +1,7 @@
 -- 總務省「地方公共団体の議会の議員及び長の任期満了に関する調」令和8年中（令和7年11月1日現在） → policy_jp.term_expirations（policy-jp #41 ③）
 -- ============================================================
 -- 由 policy-jp 的 scripts/fetch/term-expirations-sql.mjs 產生（policy-jp 分支 feat/issue-41-dispatch，原檔名 20261009031000），內容一字未改，只換時間戳與這兩行。
--- 前提：20261009091000_policy_jp_election_discovery.sql（term_expirations 表）。
+-- 前提：20261009130000_policy_jp_election_discovery.sql（term_expirations 表）。
 --
 -- 出處：https://www.soumu.go.jp/main_content/001048082.xlsx
 --       （頁面 https://www.soumu.go.jp/senkyo/senkyo_s/data/ninki/ninki_r08.html；HTTP Last-Modified Wed, 31 Dec 2025 20:02:12 GMT）

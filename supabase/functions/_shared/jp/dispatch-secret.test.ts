@@ -24,3 +24,20 @@ Deno.test("正見簽的憑證日本站驗不過，反過來也一樣", async () 
   assert(!b.ok && b.reason === "bad_signature");
   assert((await checkDispatchToken(jp, jpTok!.token, "auto:x:1")).ok);
 });
+
+Deno.test("專用鑰匙有設但太短：照樣能發（退回加鹽的基底鑰匙），但警告一次；正常時不警告", async () => {
+  const { createJpSecretWarner } = await import("./dispatch-secret.ts");
+  const msgs: string[] = [];
+  const w = createJpSecretWarner((m) => msgs.push(m));
+  w(get({ SUPABASE_SERVICE_ROLE_KEY: KEY, DISPATCH_TOKEN_SECRET_JP: "jp-dedicated-secret-123" }));
+  w(get({ SUPABASE_SERVICE_ROLE_KEY: KEY }));
+  assertEquals(msgs.length, 0, "鑰匙正常不該警告");
+  w(get({ SUPABASE_SERVICE_ROLE_KEY: KEY, DISPATCH_TOKEN_SECRET_JP: "short" }));
+  w(get({ SUPABASE_SERVICE_ROLE_KEY: KEY, DISPATCH_TOKEN_SECRET_JP: "short" }));
+  assertEquals(msgs.length, 1, "同一個冷啟動只警告一次");
+  assert(msgs[0].includes("DISPATCH_TOKEN_SECRET_JP") && msgs[0].includes("短於"));
+  const none: string[] = [];
+  createJpSecretWarner((m) => none.push(m))(get({}));
+  assertEquals(none.length, 1);
+  assert(none[0].includes("沒有可用的憑證鑰匙"));
+});

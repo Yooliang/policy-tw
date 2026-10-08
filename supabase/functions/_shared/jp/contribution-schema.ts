@@ -125,8 +125,9 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       if (!isStr(p.title, 10, 100)) push("payload.title", "title 必填（10～100 字：一句話說要查什麼）");
       if (!isStr(p.description, 20, 2000)) push("payload.description", "description 必填（≥20 字：為什麼該查、預期能查到什麼）");
       if (p.task_type !== undefined && !(typeof p.task_type === "string" && JP_TASK_TYPE_RE.test(p.task_type))) push("payload.task_type", "task_type 要是小寫英數與底線組成的任務型別（例：policy_missing）");
-      if (p.target_politician_id !== undefined && !isUuid(p.target_politician_id)) push("payload.target_politician_id", "要是 uuid");
-      if (p.target_policy_id !== undefined && !isUuid(p.target_policy_id)) push("payload.target_policy_id", "要是 uuid");
+      // 日本站的人物、政見 id 是 TEXT（不是正見的 uuid）：跟 correction 的 target_id 一樣，只要求 1～64 字的非空字串
+      if (p.target_politician_id !== undefined && !isStr(p.target_politician_id, 1, 64)) push("payload.target_politician_id", "要是 1～64 字的 id 字串");
+      if (p.target_policy_id !== undefined && !isStr(p.target_policy_id, 1, 64)) push("payload.target_policy_id", "要是 1～64 字的 id 字串");
       if (p.region !== undefined && !isStr(p.region, 2, 20)) push("payload.region", "地區名要是字串");
       if (p.hint_sources !== undefined && !(Array.isArray(p.hint_sources) && (p.hint_sources as unknown[]).every((s) => isStr(s, 1, 300)))) push("payload.hint_sources", "要是字串陣列");
       break;

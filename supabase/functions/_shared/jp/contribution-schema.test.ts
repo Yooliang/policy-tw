@@ -170,3 +170,16 @@ Deno.test("canonicalPayload 與鍵順序無關", () => {
   const b = canonicalPayload({ contribution_type: "no_change", payload: { b: { d: 3, c: 2 }, a: 1 }, source_urls: [] });
   assertEquals(a, b);
 });
+
+Deno.test("task_suggestion 的 target_politician_id／target_policy_id：日本站的 id 是 TEXT，不要求 uuid（P-日本 審查 #498）", () => {
+  const ok = structuredClone(suggestion);
+  Object.assign(ok.payload, { target_politician_id: "pol-131130-0001", target_policy_id: "policy-2027-001" });
+  assertEquals(validateContributionRequest({ ...base, ...ok }).ok, true, "TEXT id 要照收");
+  for (const bad of ["", 123, "x".repeat(65)]) {
+    const s = structuredClone(suggestion);
+    Object.assign(s.payload, { target_politician_id: bad, target_policy_id: bad });
+    const v = validateContributionRequest({ ...base, ...s });
+    assertEquals(v.ok, false, `不合格的 id（${JSON.stringify(bad)}）要擋`);
+    assert(pathsOf(v).includes("payload.target_politician_id") && pathsOf(v).includes("payload.target_policy_id"));
+  }
+});

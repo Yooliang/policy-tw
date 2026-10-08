@@ -7,7 +7,7 @@ import { requiredAgree } from "../_shared/jp/consensus.ts";
 import { jpDispatchTokenSecretFrom, createJpSecretWarner } from "../_shared/jp/dispatch-secret.ts";
 import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { isFrontQueueAt, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
+import { isFrontQueueAt, MACHINE_LOOKBACK_HOURS, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { agentToolNotice } from "../_shared/agent-tool-hint.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
@@ -265,7 +265,7 @@ async function handle(req: Request): Promise<Response> {
     const headAt = head === "manual" ? (manualHead ? manualHead.queue_at : null) : autoHead?.queue_at;
     const boosting = isFrontQueueAt(headAt);
     if (candidates.length > 0) {
-      const since = new Date(Date.now() - 3 * 3600_000).toISOString();
+      const since = new Date(Date.now() - MACHINE_LOOKBACK_HOURS * 3600_000).toISOString();
       // query-bounds: ok — 只取這個來源網段最近 3 筆
       const [{ data: rv }, { data: rt }] = await Promise.all([
         supabase.from("verify_dispatches").select("dispatched_at").eq("ip_hash", ipHash).gte("dispatched_at", since).order("dispatched_at", { ascending: false }).limit(MACHINE_WINDOW),

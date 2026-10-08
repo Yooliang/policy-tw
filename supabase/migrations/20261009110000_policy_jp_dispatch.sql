@@ -14,8 +14,8 @@
 --   * 台灣專用的都沒搬：中選會名冊／登記彙總（roster_*、cec_*）、號次（cand_no、ballot_numbers）、村里長與頁面流量提層（page_traffic、traffic_boost）、
 --     測試名人物隔離（placeholder）、election_task_config、task_cooldown_settings、bulletin_watch、政策脈絡與其他 26 支臂。
 --
--- 內容：15 張內部表（RLS 開、不給 anon／authenticated 任何權限、service_role 全權）、派工佇列與時間窗函式、計分共識與系統票（Jev）、
---   gap_events 觸發器、手動任務臂（manual_visitor／manual_open）、每 10 分鐘的 seed（pg_cron 不在就略過）。
+-- 內容：16 張內部表（RLS 開、不給 anon／authenticated 任何權限、service_role 全權）、派工佇列與時間窗函式、計分共識與系統票（Jev）、
+--   gap_events 觸發器、手動任務臂（manual_visitor／manual_open）、每 10 分鐘的 seed、每天一次的派工紀錄清理（pg_cron 不在就略過）。
 --   貢獻型別只收 no_change／task_suggestion／correction；沒有 Edge Function、沒有 anon 可呼叫的函式（本 PR 不開放任何 RPC）。
 --
 -- 獨立於正見：這支 migration 不引用任何 public 物件（守門測試在一個完全沒有正見派工物件的資料庫上跑）。
@@ -1447,6 +1447,114 @@ END
 $$;
 
 -- ------------------------------------------------------------
+-- 派工紀錄定時清理（抄自正見 20261009080000_dispatch_records_purge.sql，#485／#493；policy-jp #498 審查補上）
+-- ------------------------------------------------------------
+-- verify_dispatches、contribution_task_skips 跟正見一樣只進不出，這裡照抄正見的清理：保留天數與批量放設定表（單列），
+-- 函式分批刪、用 FOR UPDATE SKIP LOCKED 跳過被鎖住的列，pg_cron 每天一次。
+--
+-- 日本站這兩張表的讀者與回看期（守門 dispatch-records-purge.test.ts 依 schema 分開從原始碼與本檔抽出來核對，保留天數 ＋ 1 天邊際必須 ≥ 每一處）：
+--   verify_dispatches
+--     1. jp-next 每台機器 2:1：最近 3 小時、最多 3 筆
+--     2. contribution_verify_pool：「剛派給這台機器的不要再派」，interval '15 minutes'
+--     3. 日本版 verify-handler 的派工綁定（POST jp-report{kind:"verify"} 沒帶憑證時）：VERIFY_BINDING_DAYS＝7 天（共用 _shared/dispatch.ts 的常數，.gte 明寫時限）
+--   contribution_task_skips：沒有任何讀者（jp-next 只 upsert 紀錄）
+-- 保留天數同正見：verify_dispatches 14 天（最長回看期 7 天 ＋ 7 天邊際）、skips 7 天；欄位 CHECK 下限 8／2（必須大於派工綁定的 7 天與曾經的 24 小時）。
+--
+-- 與正見不同的只有三處（函式本體逐字相同，走樣守門 policy-jp-dispatch-drift.test.ts 會還原成正見現行定義比對）：
+--   1. 設定表沒有 "Public read"／"Service role write" 兩條 policy：這個 schema 的內部表一律「開 RLS、不加 policy、不給 anon／authenticated 任何權限，
+--      service_role 靠 BYPASSRLS 全權」（本檔第 1 節與下面的權限區塊）；正見的設定表是公開唯讀，這裡的參數不對外
+--   2. 排程名 policy-jp-dispatch-records-purge、UTC 19:55（正見是 19:50，兩邊的刪除不同時跑）
+--   3. 排程只在 pg_cron 存在時建（跟上面的 seed 排程同一個保護；本機與 PGlite 測試沒有 pg_cron）
+-- 所有物件都帶 policy_jp. 前綴，函式釘 search_path = policy_jp, pg_temp；表的 RLS／權限在下面「權限」區塊的清單裡。
+CREATE TABLE IF NOT EXISTS policy_jp.dispatch_records_settings (
+  id                     SMALLINT PRIMARY KEY CHECK (id = 1),
+  enabled                BOOLEAN NOT NULL DEFAULT true,
+  verify_dispatches_days INTEGER NOT NULL DEFAULT 14 CHECK (verify_dispatches_days BETWEEN 8 AND 365),
+  task_skips_days        INTEGER NOT NULL DEFAULT 7  CHECK (task_skips_days BETWEEN 2 AND 365),
+  batch_size             INTEGER NOT NULL DEFAULT 5000 CHECK (batch_size BETWEEN 100 AND 50000),
+  max_batches            INTEGER NOT NULL DEFAULT 20 CHECK (max_batches BETWEEN 1 AND 200),
+  note                   TEXT,
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE policy_jp.dispatch_records_settings IS
+  '派工紀錄清理的參數（單列 id=1，同正見）。改值一行 UPDATE，例：UPDATE policy_jp.dispatch_records_settings SET verify_dispatches_days = 21, note = ''…'' WHERE id = 1;（每次修改進 policy_jp.edit_history，agent_name=activity-audit）。保留天數必須大於程式最長回看期，守門 dispatch-records-purge.test.ts 讀最終值比對';
+COMMENT ON COLUMN policy_jp.dispatch_records_settings.enabled IS 'false＝排程照跑但什麼都不刪';
+COMMENT ON COLUMN policy_jp.dispatch_records_settings.verify_dispatches_days IS 'verify_dispatches 保留幾天（dispatched_at 超過就刪）。下限 8＝必須大於派工綁定的 VERIFY_BINDING_DAYS（7）；程式端有更長的回看期時守門測試會要求調大';
+COMMENT ON COLUMN policy_jp.dispatch_records_settings.task_skips_days IS 'contribution_task_skips 保留幾天（skipped_at 超過就刪）。目前沒有任何程式讀它，只留紀錄；下限 2＝大於曾經的 24 小時';
+COMMENT ON COLUMN policy_jp.dispatch_records_settings.batch_size IS '每一批最多刪幾筆（每張表各自分批）';
+COMMENT ON COLUMN policy_jp.dispatch_records_settings.max_batches IS '每次排程每張表最多刪幾批；沒刪完的隔天接著刪';
+INSERT INTO policy_jp.dispatch_records_settings (id, note) VALUES (1, '初值：派工紀錄 14 天、跳過紀錄 7 天；每批 5,000 筆、最多 20 批（同正見 #485；policy-jp #498 審查補上）') ON CONFLICT (id) DO NOTHING;
+
+DROP TRIGGER IF EXISTS trg_dispatch_records_settings_touch ON policy_jp.dispatch_records_settings;
+CREATE TRIGGER trg_dispatch_records_settings_touch BEFORE UPDATE ON policy_jp.dispatch_records_settings FOR EACH ROW EXECUTE FUNCTION policy_jp.activity_touch_updated_at();
+DROP TRIGGER IF EXISTS trg_dispatch_records_settings_audit ON policy_jp.dispatch_records_settings;
+CREATE TRIGGER trg_dispatch_records_settings_audit AFTER INSERT OR UPDATE OR DELETE ON policy_jp.dispatch_records_settings FOR EACH ROW EXECUTE FUNCTION policy_jp.activity_audit();
+
+-- 抄自 20261009080000_dispatch_records_purge.sql：分批、跳過被鎖住的列，回傳這次各刪了幾筆
+CREATE OR REPLACE FUNCTION policy_jp.dispatch_records_purge() RETURNS JSONB
+LANGUAGE plpgsql SET search_path = policy_jp, pg_temp
+SET lock_timeout = '3s'
+SET statement_timeout = '120s'
+AS $$
+DECLARE
+  s policy_jp.dispatch_records_settings%ROWTYPE;
+  v_vd BIGINT := 0;
+  v_sk BIGINT := 0;
+  n BIGINT;
+  i INTEGER;
+BEGIN
+  SELECT * INTO s FROM policy_jp.dispatch_records_settings WHERE id = 1;
+  IF NOT FOUND OR NOT s.enabled THEN
+    RETURN jsonb_build_object('enabled', false, 'verify_dispatches', 0, 'contribution_task_skips', 0);
+  END IF;
+
+  FOR i IN 1..s.max_batches LOOP
+    DELETE FROM policy_jp.verify_dispatches d
+    USING (
+      SELECT contribution_id, ip_hash FROM policy_jp.verify_dispatches
+      WHERE dispatched_at < now() - make_interval(days => s.verify_dispatches_days)
+      LIMIT s.batch_size
+      FOR UPDATE SKIP LOCKED
+    ) o
+    WHERE d.contribution_id = o.contribution_id AND d.ip_hash = o.ip_hash;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    v_vd := v_vd + n;
+    EXIT WHEN n < s.batch_size;
+  END LOOP;
+
+  FOR i IN 1..s.max_batches LOOP
+    DELETE FROM policy_jp.contribution_task_skips d
+    USING (
+      SELECT task_id, ip_hash FROM policy_jp.contribution_task_skips
+      WHERE skipped_at < now() - make_interval(days => s.task_skips_days)
+      LIMIT s.batch_size
+      FOR UPDATE SKIP LOCKED
+    ) o
+    WHERE d.task_id = o.task_id AND d.ip_hash = o.ip_hash;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    v_sk := v_sk + n;
+    EXIT WHEN n < s.batch_size;
+  END LOOP;
+
+  RETURN jsonb_build_object('enabled', true, 'verify_dispatches', v_vd, 'contribution_task_skips', v_sk);
+END;
+$$;
+COMMENT ON FUNCTION policy_jp.dispatch_records_purge IS
+  '刪掉超過保留天數的 policy_jp.verify_dispatches、contribution_task_skips（天數與批量在 policy_jp.dispatch_records_settings）。每張表分批刪、跳過被鎖住的列；回傳各刪幾筆。pg_cron policy-jp-dispatch-records-purge 每天跑一次';
+REVOKE ALL ON FUNCTION policy_jp.dispatch_records_purge() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION policy_jp.dispatch_records_purge() TO service_role;
+
+-- 排程：UTC 19:55 每天一次（日本時間 04:55）。pg_cron 不在的環境（本機、測試）略過，不讓 migration 失敗；重跑先 unschedule 再 schedule，只留一條
+DO $$
+BEGIN
+  IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
+    EXECUTE $q$SELECT cron.unschedule('policy-jp-dispatch-records-purge') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'policy-jp-dispatch-records-purge')$q$;
+    EXECUTE $q$SELECT cron.schedule('policy-jp-dispatch-records-purge', '55 19 * * *', 'SELECT policy_jp.dispatch_records_purge();')$q$;
+  END IF;
+END
+$$;
+
+-- ------------------------------------------------------------
 -- 權限
 -- ------------------------------------------------------------
 DO $$
@@ -1454,7 +1562,7 @@ DECLARE t TEXT;
 BEGIN
   FOREACH t IN ARRAY ARRAY['task_priority_tiers', 'contributions', 'contribution_votes', 'edit_history', 'contribution_tasks', 'contribution_task_leases',
                            'contribution_task_skips', 'verify_dispatches', 'task_checks', 'jev_decisions', 'task_dispatches', 'gap_events',
-                           'election_milestones', 'activity_rules', 'activity_overrides'] LOOP
+                           'election_milestones', 'activity_rules', 'activity_overrides', 'dispatch_records_settings'] LOOP
     EXECUTE format('ALTER TABLE policy_jp.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('REVOKE ALL ON policy_jp.%I FROM PUBLIC, anon, authenticated', t);
     EXECUTE format('GRANT ALL ON policy_jp.%I TO service_role', t);
@@ -1488,7 +1596,7 @@ BEGIN
    WHERE g.table_schema = 'policy_jp' AND g.grantee IN ('anon', 'authenticated', 'PUBLIC')
      AND g.table_name IN ('task_priority_tiers', 'contributions', 'contribution_votes', 'edit_history', 'contribution_tasks', 'contribution_task_leases',
                           'contribution_task_skips', 'verify_dispatches', 'task_checks', 'jev_decisions', 'task_dispatches', 'gap_events',
-                          'election_milestones', 'activity_rules', 'activity_overrides', 'election_milestones_all', 'activity_health', 'gap_open_lateness');
+                          'election_milestones', 'activity_rules', 'activity_overrides', 'dispatch_records_settings', 'election_milestones_all', 'activity_health', 'gap_open_lateness');
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'policy_jp 派工：anon／authenticated 不該有任何權限：%', bad; END IF;
 
   -- 函式：anon／authenticated 只准有 tables migration 給的那兩支

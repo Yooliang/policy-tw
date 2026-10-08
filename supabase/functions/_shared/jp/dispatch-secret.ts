@@ -24,8 +24,15 @@ export function jpDispatchTokenSecretFrom(get: (name: string) => string | undefi
 export function createJpSecretWarner(warn: (msg: string) => void = (m) => console.warn(m)): (get: (name: string) => string | undefined) => void {
   let warned = false;
   return (get) => {
-    if (warned || jpDispatchTokenSecretFrom(get)) return;
+    if (warned) return;
+    const dedicated = get("DISPATCH_TOKEN_SECRET_JP");
+    const dedicatedTooShort = typeof dedicated === "string" && dedicated.length > 0 && dedicated.length < DISPATCH_SECRET_MIN_LENGTH;
+    const usable = jpDispatchTokenSecretFrom(get);
+    if (usable && !dedicatedTooShort) return;
     warned = true;
-    warn("[jp dispatch-token] 沒有可用的憑證鑰匙：jp-next 不會發 dispatch_token，跨網段的回報會吃 409 not_dispatched。DISPATCH_TOKEN_SECRET_JP／DISPATCH_TOKEN_SECRET／SUPABASE_SERVICE_ROLE_KEY 都不能用。");
+    // 同 dispatch-token.ts 的 createSecretWarner：專用鑰匙有設但太短時講一聲（不然會悄悄退回加鹽的正見鑰匙）
+    warn(usable
+      ? `[jp dispatch-token] DISPATCH_TOKEN_SECRET_JP 有設但短於 ${DISPATCH_SECRET_MIN_LENGTH} 字，已忽略，改用正見的基底鑰匙加鹽（憑證照樣能發、跟正見不互通）。`
+      : "[jp dispatch-token] 沒有可用的憑證鑰匙：jp-next 不會發 dispatch_token，跨網段的回報會吃 409 not_dispatched。DISPATCH_TOKEN_SECRET_JP／DISPATCH_TOKEN_SECRET／SUPABASE_SERVICE_ROLE_KEY 都不能用。");
   };
 }

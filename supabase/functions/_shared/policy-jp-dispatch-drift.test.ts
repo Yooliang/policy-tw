@@ -1,5 +1,5 @@
 /**
- * 日本站派工 SQL 的走樣守門（policy-jp PR①a；migration 20261009090000_policy_jp_dispatch.sql）。
+ * 日本站派工 SQL 的走樣守門（policy-jp PR①a；migration 20261009110000_policy_jp_dispatch.sql）。
  *
  * 日本站的派工、啟用時間窗、計分共識、系統票 SQL 是正見（public）現行定義的「抄本」，只允許一份固定清單的機械式替換。
  * 這個測試把 policy_jp 的每支複本函式還原回 public 的樣子，跟 migrations 裡 public 的「最新定義」逐字比對；
@@ -16,25 +16,27 @@
  *
  * 不是複本、不比對的（原因）：
  *   - contribution_auto_tasks_arms：總表骨架，只有手動任務臂兩個分支（正見 31 個分支、含測試名人物隔離、村里長流量開窗，整支搬過來沒有意義）；結構照抄，行為由 policy-jp-dispatch.test.ts 測。
- *     20261009091000 重新定義它＝這裡 090000 的版本剛好多一行 election_discovery 的 UNION 分支（機械替換比對在 policy-jp-election-discovery.test.ts）
+ *     20261009130000 重新定義它＝這裡 110000 的版本剛好多一行 election_discovery 的 UNION 分支（機械替換比對在 policy-jp-election-discovery.test.ts）
  *   - contribution_auto_tasks_manual：手動任務臂本體，日本站沒有公民提問（citizen_questions），拿掉 stance_up 與「已收滿答案」排除
- *   - activity_arm_names：日本版只有兩個名字；20261009091000 重新定義它＝多 election_discovery 一個名字（同上）
- *   - contribution_auto_tasks_election_discovery（20261009091000）：日本站自己的新臂（任期満了快到、沒有對應選舉 → 派任務），正見沒有對應物；行為由 policy-jp-election-discovery.test.ts 測
- *   ※ 20261009091000 定義的三支函式由「走樣：選舉發現 migration」一條登記（NONCOPY_ED），新加函式不登記就紅
+ *   - activity_arm_names：日本版只有兩個名字；20261009130000 重新定義它＝多 election_discovery 一個名字（同上）
+ *   - contribution_auto_tasks_election_discovery（20261009130000）：日本站自己的新臂（任期満了快到、沒有對應選舉 → 派任務），正見沒有對應物；行為由 policy-jp-election-discovery.test.ts 測
+ *   ※ 20261009130000 定義的三支函式由「走樣：選舉發現 migration」一條登記（NONCOPY_ED），新加函式不登記就紅
  *   - election_id_or_null：正見回 integer，日本版回 TEXT
  *   - activity_level／activity_jurisdiction：正見寫死台灣職位與 'tw'，日本版讀 policy_jp.election_level 與 elections.jurisdiction
  *   - 視圖 election_milestones_all／activity_health／gap_open_lateness：沒有 term_*、沒有台灣專用的健康檢查
  *   - 表、觸發器（CREATE TRIGGER）、RLS、權限：日本版自己的定義（表欄位 election_id 是 TEXT、貢獻型別只收三種…）
+ *     其中派工紀錄清理的設定表 dispatch_records_settings 欄位、預設值、CHECK 照抄正見，但沒有 "Public read"／"Service role write" 兩條 policy（內部表慣例）；
+ *     它的保留天數與排程由 dispatch-records-purge.test.ts 依 schema 分開守，函式 dispatch_records_purge 則是複本（見 PAIRS）
  *   ※ 以上每一項的存在由「migration 裡的函式＝PAIRS＋NONCOPY」一條守住，新加一支函式不登記就紅。
  */
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { fnText, latestFn, readMig } from "./arms-pglite.ts";
 
-const MIG = "20261009090000_policy_jp_dispatch.sql";
+const MIG = "20261009110000_policy_jp_dispatch.sql";
 const MIG_SQL = await readMig(MIG);
-const MIG_ED = "20261009091000_policy_jp_election_discovery.sql";
+const MIG_ED = "20261009130000_policy_jp_election_discovery.sql";
 const ED_SQL = await readMig(MIG_ED);
-/** 20261009091000 定義的函式（都不是複本：新臂，加上 090000 那兩支非複本的新版本） */
+/** 20261009130000 定義的函式（都不是複本：新臂，加上 110000 那兩支非複本的新版本） */
 const NONCOPY_ED = ["activity_arm_names", "contribution_auto_tasks_arms", "contribution_auto_tasks_election_discovery"];
 
 /** 不比對的函式（原因見檔頭） */
@@ -44,7 +46,7 @@ const NONCOPY = [
 const TABLES = [
   "task_priority_tiers", "contributions", "contribution_votes", "edit_history", "contribution_tasks", "contribution_task_leases", "contribution_task_skips",
   "verify_dispatches", "task_checks", "jev_decisions", "task_dispatches", "gap_events", "election_milestones_all", "election_milestones", "activity_rules",
-  "activity_overrides", "elections",
+  "activity_overrides", "elections", "dispatch_records_settings",
 ];
 
 // ---- 對照表（產生器與這個測試共用同一份文字；edits 是對 public 定義的精確替換） ----
@@ -146,6 +148,7 @@ const PAIRS: Pair[] = [
   { name: "task_check_cooldown_days" },
   { name: "task_unreachable_cooldown_days" },
   { name: "contribution_task_leases_purge" },
+  { name: "dispatch_records_purge" },
   { name: "task_dispatches_gap_before_insert" },
   { name: "task_dispatches_gap_after_insert" },
   { name: "task_dispatches_gap_after_delete" },
@@ -199,6 +202,22 @@ for (const p of PAIRS) {
   });
 }
 
+/** 設定表 dispatch_records_settings 的建表敘述（CREATE TABLE … ( … );）：欄位、預設值、CHECK 範圍 */
+const settingsDdl = (sql: string, name: string): string => {
+  const a = sql.indexOf(`CREATE TABLE IF NOT EXISTS ${name} (`);
+  assert(a >= 0, `找不到 ${name} 的建表`);
+  return sql.slice(a, sql.indexOf("\n);", a) + 3);
+};
+
+Deno.test("走樣：派工紀錄清理的設定表 dispatch_records_settings（欄位、預設、CHECK）還原後＝正見建表（保留天數與下限不能悄悄各走各的）", async () => {
+  const pub = settingsDdl(await readMig("20261009080000_dispatch_records_purge.sql"), "dispatch_records_settings");
+  const jp = settingsDdl(MIG_SQL, "policy_jp.dispatch_records_settings");
+  assertEquals(reverse(jp), pub);
+  // 還原驗證：預設值或 CHECK 下限改一個數字就紅
+  assertNotEquals(reverse(jp.replace("DEFAULT 14 CHECK (verify_dispatches_days BETWEEN 8 AND 365)", "DEFAULT 14 CHECK (verify_dispatches_days BETWEEN 2 AND 365)")), pub);
+  assertNotEquals(reverse(jp.replace("task_skips_days        INTEGER NOT NULL DEFAULT 7 ", "task_skips_days        INTEGER NOT NULL DEFAULT 3 ")), pub);
+});
+
 Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記的非複本（新加函式不登記就紅）", () => {
   const defined = [...MIG_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
   const registered = [...PAIRS.map((p) => p.name), ...NONCOPY].sort();
@@ -206,12 +225,12 @@ Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記
   assertEquals(new Set(registered).size, registered.length, "登記重複");
 });
 
-Deno.test("走樣：選舉發現 migration（20261009091000）定義的函式＝登記的三支非複本（新加函式不登記就紅）；它們都不在複本清單裡", () => {
+Deno.test("走樣：選舉發現 migration（20261009130000）定義的函式＝登記的三支非複本（新加函式不登記就紅）；它們都不在複本清單裡", () => {
   const defined = [...ED_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
   assertEquals(defined, [...NONCOPY_ED].sort());
   const copies = new Set(PAIRS.map((p) => p.name));
   for (const n of NONCOPY_ED) assert(!copies.has(n), `${n} 是非複本，不能同時登記成複本`);
-  // 其中兩支（總表、臂名清單）090000 就有一版，登記的非複本（NONCOPY）也要包含
+  // 其中兩支（總表、臂名清單）110000 就有一版，登記的非複本（NONCOPY）也要包含
   for (const n of ["activity_arm_names", "contribution_auto_tasks_arms"]) assert(NONCOPY.includes(n));
 });
 
@@ -223,9 +242,9 @@ Deno.test("獨立：選舉發現 migration 的函式、表都沒有 public. 引�
     const t = fnText(ED_SQL, `policy_jp.${p}`).replace(/--[^\n]*/g, "");
     const bare = new RegExp(`\\b(FROM|JOIN|INTO|UPDATE)\\s+(?:${[...TABLES, "term_expirations"].join("|")})\\b`, "i").exec(t);
     assertEquals(bare, null, `${p}：有不帶 policy_jp. 前綴的表引用 ${bare?.[0]}`);
-    // 熱路徑函式都是 LANGUAGE sql，釘 search_path 的方式跟 090000 一致（總表不加 SET、臂與臂名清單加）
+    // 熱路徑函式都是 LANGUAGE sql，釘 search_path 的方式跟 110000 一致（總表不加 SET、臂與臂名清單加）
     if (p !== "contribution_auto_tasks_arms") assert(t.includes("SET search_path = policy_jp, pg_temp"), `${p} 沒釘 search_path`);
-    else assert(!/SET search_path/.test(t), "總表（LANGUAGE sql 熱路徑）不加 SET，跟 090000 一致");
+    else assert(!/SET search_path/.test(t), "總表（LANGUAGE sql 熱路徑）不加 SET，跟 110000 一致");
   }
 });
 

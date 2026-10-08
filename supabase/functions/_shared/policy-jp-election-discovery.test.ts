@@ -1,12 +1,12 @@
 /**
  * 日本站「自動發現選舉」派工臂 election_discovery 的行為與守門測試
- * （policy-jp #41 ③、PR②；migration 20261009091000_policy_jp_election_discovery.sql＋20261009092000_policy_jp_term_expirations_r08.sql）。
+ * （policy-jp #41 ③、PR②；migration 20261009130000_policy_jp_election_discovery.sql＋20261009131000_policy_jp_term_expirations_r08.sql）。
  *
- * 只要 --allow-read。PGlite 上套 #479 的空 schema、tables migration、090000（派工）、091000（臂）、092000（總務省 3,571 列），
+ * 只要 --allow-read。PGlite 上套 #479 的空 schema、tables migration、110000（派工）、130000（臂）、131000（總務省 3,571 列），
  * 資料庫裡沒有任何正見（public）物件。
  *
- *   a. 文字守門：091000 的總表＝090000 的版本剛好多一行 UNION 分支、activity_arm_names＝090000 的清單剛好多一個名字（機械替換比對＋還原驗證）；
- *      091000 只定義這三支函式、沒有 public. 引用、程式從不寫 elections
+ *   a. 文字守門：130000 的總表＝110000 的版本剛好多一行 UNION 分支、activity_arm_names＝110000 的清單剛好多一個名字（機械替換比對＋還原驗證）；
+ *      130000 只定義這三支函式、沒有 public. 引用、程式從不寫 elections
  *   b. 資料：3,571 列、一個出處；假時鐘 2026-10-09 跑 seed，正好 50 件（cap）、依満了日由早到晚、
  *      投票日一定落在 2027 年的最早五個團體是 2027-01-31 満了的那五個；seed 後 elections 仍是 0 列（程式不產生選舉資料）
  *   c. 有對應選舉就不是缺口：elections 有符合 lg_code＋職位＋日期落在 [満了日−120, 満了日+60] 的列（rejected 不算），下一輪 seed 收回（filled）；窗口兩端含頭含尾
@@ -24,9 +24,9 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const SCHEMA_SQL = await read("20261008195000_policy_jp_schema.sql");
 const TABLES_SQL = await read("20261009000000_policy_jp_tables.sql");
-const MIG090 = await read("20261009090000_policy_jp_dispatch.sql");
-const MIG091 = await read("20261009091000_policy_jp_election_discovery.sql");
-const MIG092 = await read("20261009092000_policy_jp_term_expirations_r08.sql");
+const MIG090 = await read("20261009110000_policy_jp_dispatch.sql");
+const MIG091 = await read("20261009130000_policy_jp_election_discovery.sql");
+const MIG092 = await read("20261009131000_policy_jp_term_expirations_r08.sql");
 
 const ARM = "election_discovery";
 const SOUMU_URL = "https://www.soumu.go.jp/main_content/001048082.xlsx";
@@ -58,7 +58,7 @@ async function asRole<T>(db: PGlite, role: string, sql: string): Promise<T[]> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 獨立重算：從 092000 的檔案文字解出 3,571 列，在 JS 裡照規則算一遍「今天該有哪些缺口」，跟 SQL 逐件比
+// 獨立重算：從 131000 的檔案文字解出 3,571 列，在 JS 裡照規則算一遍「今天該有哪些缺口」，跟 SQL 逐件比
 // ---------------------------------------------------------------------------------------------
 type Term = { lg: string; pref: string; name: string; kind: "head" | "assembly"; etype: string; end: string; head: string | null };
 const ROW_RE = /^\s+\('(\d{6})', '([^']+)', '([^']+)', '(head|assembly)', '(\w+)', '(\d{4}-\d{2}-\d{2})', (NULL|'[^']*')\),?$/;
@@ -132,31 +132,31 @@ async function addElection(db: PGlite, lg: string, etype: string, date: string, 
 // ---------------------------------------------------------------------------------------------
 // a. 文字守門
 // ---------------------------------------------------------------------------------------------
-Deno.test("文字守門：總表＝090000 的版本剛好多一行 election_discovery 的 UNION 分支（機械替換比對＋還原驗證）", () => {
+Deno.test("文字守門：總表＝110000 的版本剛好多一行 election_discovery 的 UNION 分支（機械替換比對＋還原驗證）", () => {
   const FN = "policy_jp.contribution_auto_tasks_arms";
   const before = fnText(MIG090, FN);
   const after = fnText(MIG091, FN);
   const LAST_BRANCH = "  UNION ALL SELECT 'manual_open' AS arm, t.* FROM policy_jp.contribution_auto_tasks_manual(false) t\n";
   const ADDED = "  UNION ALL SELECT 'election_discovery' AS arm, t.* FROM policy_jp.contribution_auto_tasks_election_discovery() t\n";
   const expected = mutate(before, LAST_BRANCH, LAST_BRANCH + ADDED);
-  assertEquals(after, expected, "091000 的總表除了多一行分支，其餘必須一字不改");
+  assertEquals(after, expected, "130000 的總表除了多一行分支，其餘必須一字不改");
   // 剛好一行不同
   const a = before.split("\n"), b = after.split("\n");
   assertEquals(b.length, a.length + 1);
   assertEquals(b.filter((l) => !a.includes(l)), [ADDED.trimEnd()]);
   assertEquals(a.filter((l) => !b.includes(l)), []);
 
-  // 還原驗證：091000 的版本改一個字元、拿掉那一行、換臂名、UNION ALL 改成 UNION，比對都會紅
+  // 還原驗證：130000 的版本改一個字元、拿掉那一行、換臂名、UNION ALL 改成 UNION，比對都會紅
   assertNotEquals(after.replace("AS $$", "AS $$ "), expected);
   assertNotEquals(after.replace(ADDED, ""), expected);
   assertNotEquals(after.replace("'election_discovery' AS arm", "'election_discovery2' AS arm"), expected);
   assertNotEquals(after.replace("UNION ALL SELECT 'election_discovery'", "UNION SELECT 'election_discovery'"), expected);
   assertNotEquals(after.replace("contribution_auto_tasks_election_discovery() t", "contribution_auto_tasks_manual(false) t"), expected);
-  // 090000 那邊改一個字元，期望值跟著變，比對也會紅（兩邊都不能悄悄漂）
+  // 110000 那邊改一個字元，期望值跟著變，比對也會紅（兩邊都不能悄悄漂）
   assertNotEquals(mutate(before.replace("AS $$", "AS $$ "), LAST_BRANCH, LAST_BRANCH + ADDED), after);
 });
 
-Deno.test("文字守門：activity_arm_names＝090000 的清單剛好多 election_discovery 一個名字（還原驗證）", () => {
+Deno.test("文字守門：activity_arm_names＝110000 的清單剛好多 election_discovery 一個名字（還原驗證）", () => {
   const FN = "policy_jp.activity_arm_names";
   const before = fnText(MIG090, FN);
   const after = fnText(MIG091, FN);
@@ -167,11 +167,11 @@ Deno.test("文字守門：activity_arm_names＝090000 的清單剛好多 electio
   assertNotEquals(after.replace("AS $$", "AS $$ "), expected);
 });
 
-Deno.test("文字守門：091000 只定義這三支函式；沒有 public. 引用；程式從不寫 elections／local_governments", () => {
+Deno.test("文字守門：130000 只定義這三支函式；沒有 public. 引用；程式從不寫 elections／local_governments", () => {
   const defined = [...MIG091.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
   assertEquals(defined, ["activity_arm_names", "contribution_auto_tasks_arms", "contribution_auto_tasks_election_discovery"]);
   const code = MIG091.replace(/--[^\n]*/g, "");
-  assert(!/\bpublic\./.test(code), "091000 不能引用 public.");
+  assert(!/\bpublic\./.test(code), "130000 不能引用 public.");
   assert(!/search_path\s*=\s*public/i.test(code));
   // 「程式不產生選舉資料」：臂與整份 migration 都沒有對 elections（或團體表）的 INSERT／UPDATE／DELETE
   assert(!/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+policy_jp\.(elections|local_governments|election_districts|election_milestones)\b/i.test(code));
@@ -179,14 +179,14 @@ Deno.test("文字守門：091000 只定義這三支函式；沒有 public. 引�
   const arm = fnText(MIG091, "policy_jp.contribution_auto_tasks_election_discovery");
   assert(/LANGUAGE sql STABLE SET search_path = policy_jp, pg_temp/.test(arm));
   assert(!/\b(INSERT|UPDATE|DELETE)\b/.test(arm.replace(/--[^\n]*/g, "")), "臂本體不能寫任何東西");
-  // 092000 只寫出處與任期満了表
+  // 131000 只寫出處與任期満了表
   const data = MIG092.replace(/--[^\n]*/g, "");
   const writes = [...data.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(policy_jp\.\w+)/gi)].map((m) => m[1]).sort();
   assertEquals(writes, ["policy_jp.sources", "policy_jp.term_expirations"]);
   assert(!/\bpublic\./.test(data));
 });
 
-Deno.test("套用：三支 migration 依序套用，臂名清單有三個、每個都有規則、健康檢查是空的；091000 套兩次都成功", async () => {
+Deno.test("套用：三支 migration 依序套用，臂名清單有三個、每個都有規則、健康檢查是空的；130000 套兩次都成功", async () => {
   const db = await freshDb();
   await db.exec(MIG091); // 第二次
   assertEquals((await one<{ x: string[] }>(db, `SELECT policy_jp.activity_arm_names() AS x`)).x, ["manual_visitor", "manual_open", ARM]);
@@ -197,7 +197,7 @@ Deno.test("套用：三支 migration 依序套用，臂名清單有三個、每�
   assertEquals([r.window_kind, r.enabled, r.priority], ["always", true, null]);
   assertEquals(r.params, { cap: 50, lead_days: 180, scope_from: "2027-01-01", include_uncertain: true });
   assertEquals((await db.query(`SELECT * FROM policy_jp.activity_health`)).rows.length, 0, "健康檢查正常是空的");
-  // 092000 也能套兩次（ON CONFLICT DO NOTHING）
+  // 131000 也能套兩次（ON CONFLICT DO NOTHING）
   await db.exec(MIG092);
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.term_expirations`), 3571);
   await db.close();
@@ -622,7 +622,7 @@ Deno.test("term_expirations：CHECK（種類對應、head_name 只給長、代�
   await db.close();
 });
 
-Deno.test("自我檢查（還原驗證）：規則缺 cap、規則被刪、拿掉 RLS、給 anon 執行權限，重跑 091000 都會失敗", async () => {
+Deno.test("自我檢查（還原驗證）：規則缺 cap、規則被刪、拿掉 RLS、給 anon 執行權限，重跑 130000 都會失敗", async () => {
   // 規則缺 cap：臂會整支回 0 列（無聲消失）→ 重跑 migration 時自我檢查要擋
   let db = await freshDb({ data: false });
   await db.exec(`UPDATE policy_jp.activity_rules SET params = params - 'cap' WHERE activity = '${ARM}'`);
@@ -631,7 +631,7 @@ Deno.test("自我檢查（還原驗證）：規則缺 cap、規則被刪、拿�
   await db.close();
 
   // 規則被刪：這支臂的參數就存在規則裡，所以規則一沒有、臂就整支不吐東西（不會像一般臂那樣由總表 RAISE：沒有列就沒有東西可以問規則）。
-  // 守在 activity_health 的 arm_without_rule；重跑 091000 會把規則種回來。
+  // 守在 activity_health 的 arm_without_rule；重跑 130000 會把規則種回來。
   db = await freshDb();
   await clock(db, "2026-10-09");
   assertEquals((await armIds(db)).length, 50);

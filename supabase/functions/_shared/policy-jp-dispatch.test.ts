@@ -1,5 +1,5 @@
 /**
- * 日本站派工與交件 SQL（policy-jp PR①a；migration 20261009090000_policy_jp_dispatch.sql）的行為測試。
+ * 日本站派工與交件 SQL（policy-jp PR①a；migration 20261009110000_policy_jp_dispatch.sql）的行為測試。
  *
  * 只要 --allow-read（CI 的 deno test --allow-read _shared/ 就跑）。PGlite 上只套 #479 的空 schema、tables migration、這支 migration——
  * 資料庫裡沒有任何正見（public）的派工物件，所以任何漏了 policy_jp. 前綴、悄悄退回 public 的引用都會在這裡直接壞掉（獨立性證明）。
@@ -10,7 +10,9 @@
  *   3. 手動任務臂：新建 open 任務觸發器即時入列（網站請求 1970、維護者建 1980），gap_events 有 opened；contribution_queue_tasks 讀得到；關閉立刻收回
  *   4. 時間窗：activity_open 在假時鐘（SET app.activity_today）下含頭含尾；seed 在窗口外收回（reason=window）、窗口內補回（reopened）
  *   5. 共識：no_change 兩票（分數 2）verified、兩張反對 rejected、correction 要 3；系統票（照正見實際規則：correction 3→2／4，no_change 不吃一般系統票）
- *   6. 其他：驗證池、seed 可重跑、cron 有就排程沒有就略過、自我檢查（還原驗證）
+ *   6. 派工紀錄清理（抄正見 #485；policy-jp #498 審查補上）：超過保留天數的 verify_dispatches／contribution_task_skips 被刪、沒到期的不動（含派工綁定的 7 天內）、
+ *      清理前後驗證池與派工綁定查詢逐筆相同、只動 policy_jp（同名的 public 表原封不動）、CHECK 下限擋掉太小的保留天數、分批／停用／審計／權限
+ *   7. 其他：驗證池、seed 可重跑、cron 有就排程沒有就略過、自我檢查（還原驗證）
  */
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
@@ -19,13 +21,13 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const SCHEMA_SQL = await read("20261008195000_policy_jp_schema.sql");
 const TABLES_SQL = await read("20261009000000_policy_jp_tables.sql");
-const MIG = "20261009090000_policy_jp_dispatch.sql";
+const MIG = "20261009110000_policy_jp_dispatch.sql";
 const MIG_SQL = await read(MIG);
 
 const NEW_TABLES = [
   "task_priority_tiers", "contributions", "contribution_votes", "edit_history", "contribution_tasks", "contribution_task_leases",
   "contribution_task_skips", "verify_dispatches", "task_checks", "jev_decisions", "task_dispatches", "gap_events",
-  "election_milestones", "activity_rules", "activity_overrides",
+  "election_milestones", "activity_rules", "activity_overrides", "dispatch_records_settings",
 ];
 
 function mutate(sql: string, from: string, to: string): string {
@@ -377,6 +379,142 @@ Deno.test("refresh_dispatch_blocked／leases：飽和與冷卻標記、過期租
   await db.close();
 });
 
+/**
+ * 派工紀錄清理的情境：各種年紀的 verify_dispatches 與 contribution_task_skips，外加 public 的同名假表（證明只動 policy_jp）。
+ * 回傳哪裡不對（空＝沒問題）。mig 可以是改壞的 migration（還原驗證）。
+ */
+async function purgeScenario(mig = MIG_SQL): Promise<string[]> {
+  const problems: string[] = [];
+  const db = await freshDb(mig);
+  try {
+    // 同名的 public 假表：清理若跑錯 schema，這裡的舊列會被刪（設定表停用＝若讀到它，policy_jp 的清理就什麼都不刪，筆數檢查會紅）
+    await db.exec(`
+      CREATE TABLE public.verify_dispatches (contribution_id UUID, ip_hash TEXT, agent_name TEXT, dispatched_at TIMESTAMPTZ);
+      CREATE TABLE public.contribution_task_skips (task_id TEXT, ip_hash TEXT, agent_name TEXT, skipped_at TIMESTAMPTZ);
+      CREATE TABLE public.dispatch_records_settings (id SMALLINT PRIMARY KEY, enabled BOOLEAN, verify_dispatches_days INT, task_skips_days INT, batch_size INT, max_batches INT);
+      INSERT INTO public.verify_dispatches VALUES (gen_random_uuid(), 'A', 'pub', now() - interval '90 days');
+      INSERT INTO public.contribution_task_skips VALUES ('auto:pub', 'A', 'pub', now() - interval '90 days');
+      INSERT INTO public.dispatch_records_settings VALUES (1, false, 8, 2, 100, 1);`);
+    // 6 筆別人交的待驗證貢獻，各派給 A 一次，年紀不同（邊界附近留 1 小時以上的空隙）；B 台機器再派兩筆
+    const ages = ["5 minutes", "6 days", "8 days", "13 days", "15 days", "40 days"];
+    const ids: string[] = [];
+    for (const [i, age] of ages.entries()) {
+      const id = await addContribution(db, "no_change", i + 1);
+      ids.push(id);
+      await db.query(`INSERT INTO policy_jp.verify_dispatches (contribution_id, ip_hash, agent_name, dispatched_at) VALUES ($1, 'A', 'agent-a', now() - interval '${age}')`, [id]);
+    }
+    await db.query(`INSERT INTO policy_jp.verify_dispatches (contribution_id, ip_hash, agent_name, dispatched_at) VALUES ($1, 'B', 'agent-b', now() - interval '1 hour'), ($2, 'B', 'agent-b', now() - interval '30 days')`, [ids[0], ids[5]]);
+    for (const [i, age] of ["1 hour", "3 days", "6 days 23 hours", "8 days", "30 days"].entries()) {
+      await db.query(`INSERT INTO policy_jp.contribution_task_skips (task_id, ip_hash, agent_name, skipped_at) VALUES ($1, 'A', 'agent-a', now() - interval '${age}')`, [`auto:t${i}`]);
+    }
+    // 程式讀這兩張表的方式：驗證池（剛派的 15 分鐘）、日本版 verify-handler 的派工綁定（7 天）、jp-next 每台機器 2:1（3 小時）
+    const snapshot = async () => ({
+      pool: (await db.query<{ id: string }>(`SELECT id FROM policy_jp.contribution_verify_pool('A', NULL, 200, NULL) ORDER BY queue_at, id`)).rows.map((r) => r.id),
+      binding: await Promise.all(ids.map(async (id) => (await db.query(`SELECT 1 FROM policy_jp.verify_dispatches WHERE contribution_id = $1 AND ip_hash = 'A' AND dispatched_at >= now() - make_interval(days => 7)`, [id])).rows.length > 0)),
+      machine: (await db.query(`SELECT dispatched_at::TEXT FROM policy_jp.verify_dispatches WHERE ip_hash = 'A' AND dispatched_at >= now() - make_interval(hours => 3) ORDER BY dispatched_at DESC LIMIT 3`)).rows,
+    });
+    const count = async (t: string) => (await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.${t}`)).n;
+    const before = await snapshot();
+    const [vd0, sk0] = [await count("verify_dispatches"), await count("contribution_task_skips")];
+    const res = (await one<{ r: Record<string, unknown> }>(db, `SELECT policy_jp.dispatch_records_purge() AS r`)).r;
+    const after = await snapshot();
+    const [vd1, sk1] = [await count("verify_dispatches"), await count("contribution_task_skips")];
+
+    if (JSON.stringify(before) !== JSON.stringify(after)) problems.push("清理前後驗證池／派工綁定／每台機器 2:1 的查詢結果不同");
+    // 不是空轉：A 的 15 天、40 天 ＋ B 的 30 天 ＝ 3 筆；skips 的 8 天、30 天 ＝ 2 筆；其餘（含派工綁定 7 天內的 6 天前、超過 7 天但沒滿 14 天的 8 天與 13 天）都留著
+    if (vd0 - vd1 !== 3) problems.push(`verify_dispatches 該刪 3 筆，實際 ${vd0 - vd1}`);
+    if (sk0 - sk1 !== 2) problems.push(`contribution_task_skips 該刪 2 筆，實際 ${sk0 - sk1}`);
+    if (res.verify_dispatches !== 3 || res.contribution_task_skips !== 2 || res.enabled !== true) problems.push(`回傳的刪除筆數不對：${JSON.stringify(res)}`);
+    if ((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.verify_dispatches WHERE dispatched_at < now() - interval '14 days'`)).n !== 0) problems.push("還有超過 14 天的 verify_dispatches");
+    if ((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.verify_dispatches WHERE dispatched_at > now() - interval '14 days'`)).n !== 5) problems.push("沒到期的 verify_dispatches 應剩 5 筆");
+    // 情境要真的有東西可比：池子排除剛派的、機器查詢有東西、綁定有真有假
+    if ((before.pool as string[]).includes(ids[0]) || !(before.pool as string[]).includes(ids[1])) problems.push("情境沒造好：驗證池應排除 5 分鐘前派的、保留 6 天前派的");
+    if (before.machine.length !== 1) problems.push("情境沒造好：機器查詢應有 1 筆（3 小時內只有 5 分鐘前那筆）");
+    if (JSON.stringify(before.binding) !== JSON.stringify([true, true, false, false, false, false])) problems.push(`情境沒造好：派工綁定（7 天）應是 [真,真,假,假,假,假]，實際 ${JSON.stringify(before.binding)}`);
+    // public 的同名表一列都沒動
+    for (const t of ["verify_dispatches", "contribution_task_skips"]) {
+      if ((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM public.${t}`)).n !== 1) problems.push(`public.${t} 被動到了`);
+    }
+  } finally {
+    await db.close();
+  }
+  return problems;
+}
+
+Deno.test("派工紀錄清理：超過保留天數的刪、沒到期的不動；清理前後驗證池與派工綁定查詢逐筆相同；只動 policy_jp，public 同名表原封不動", async () => {
+  assertEquals(await purgeScenario(), []);
+});
+
+Deno.test("派工紀錄清理的還原驗證：不看時間全刪、什麼都不刪、跳過紀錄保留期改壞、掃到 public、停用不生效——情境必須紅", async () => {
+  const mustBeRed = async (name: string, mig: string) => assert((await purgeScenario(mig)).length > 0, `${name}：改壞了卻沒被抓到`);
+  await mustBeRed("verify_dispatches 不看保留期全刪", mutate(MIG_SQL, "WHERE dispatched_at < now() - make_interval(days => s.verify_dispatches_days)", "WHERE dispatched_at < now()"));
+  await mustBeRed("什麼都不刪", mutate(MIG_SQL, "WHERE dispatched_at < now() - make_interval(days => s.verify_dispatches_days)", "WHERE dispatched_at < now() - interval '1000 days'"));
+  await mustBeRed("skips 保留期改壞", mutate(MIG_SQL, "WHERE skipped_at < now() - make_interval(days => s.task_skips_days)", "WHERE skipped_at < now() - interval '1 hour'"));
+  // 改成讀／刪 public（自我檢查會讓 migration 直接失敗，連情境都跑不起來；兩種紅法都算抓到）
+  const toPublic = mutate(MIG_SQL, "DELETE FROM policy_jp.contribution_task_skips d", "DELETE FROM public.contribution_task_skips d");
+  await assertRejects(() => purgeScenario(toPublic), Error, "public.");
+  // 停用旗標沒生效：停用時照刪
+  const db = await freshDb(mutate(MIG_SQL, "IF NOT FOUND OR NOT s.enabled THEN", "IF NOT FOUND THEN"));
+  try {
+    const c = await addContribution(db, "no_change", 1);
+    await db.query(`INSERT INTO policy_jp.verify_dispatches (contribution_id, ip_hash, dispatched_at) VALUES ($1, 'A', now() - interval '40 days')`, [c]);
+    await db.exec(`UPDATE policy_jp.dispatch_records_settings SET enabled = false WHERE id = 1`);
+    await db.query(`SELECT policy_jp.dispatch_records_purge()`);
+    assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.verify_dispatches`)).n, 0, "改壞的版本停用也會刪（證明下面的停用檢查看得出來）");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("派工紀錄清理的設定：欄位 CHECK 擋掉不安全的保留天數；停用不刪；分批上限；改值進審計；只有 service_role 能執行；migration 重跑不多一列", async () => {
+  const db = await freshDb();
+  try {
+    // 下限：verify_dispatches_days ≥ 8（必須大於派工綁定的 7 天）、task_skips_days ≥ 2
+    for (const bad of ["verify_dispatches_days = 7", "verify_dispatches_days = 1", "verify_dispatches_days = 366", "task_skips_days = 1", "batch_size = 99999999", "batch_size = 99", "max_batches = 0"]) {
+      await assertRejects(() => db.exec(`UPDATE policy_jp.dispatch_records_settings SET ${bad} WHERE id = 1`), Error, "violates check constraint", `${bad} 應被 CHECK 擋掉`);
+    }
+    await db.exec(`UPDATE policy_jp.dispatch_records_settings SET verify_dispatches_days = 8, task_skips_days = 2 WHERE id = 1`); // 下限本身可以
+    await db.exec(`UPDATE policy_jp.dispatch_records_settings SET verify_dispatches_days = 14, task_skips_days = 7 WHERE id = 1`);
+    await assertRejects(() => db.exec(`INSERT INTO policy_jp.dispatch_records_settings (id) VALUES (2)`), Error, "violates check constraint");
+    assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.dispatch_records_settings`)).n, 1);
+
+    // 停用：照跑但什麼都不刪
+    for (let i = 1; i <= 250; i++) await addContribution(db, "no_change", i);
+    await db.exec(`INSERT INTO policy_jp.verify_dispatches (contribution_id, ip_hash, dispatched_at) SELECT id, 'A', now() - interval '30 days' FROM policy_jp.contributions`);
+    await db.exec(`UPDATE policy_jp.dispatch_records_settings SET enabled = false, note = '測試停用' WHERE id = 1`);
+    assertEquals((await one<{ r: unknown }>(db, `SELECT policy_jp.dispatch_records_purge() AS r`)).r, { enabled: false, verify_dispatches: 0, contribution_task_skips: 0 });
+    assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.verify_dispatches`)).n, 250);
+
+    // 分批：每批 100、最多 2 批 → 一次最多 200，沒刪完的下一次接著刪
+    await db.exec(`UPDATE policy_jp.dispatch_records_settings SET enabled = true, batch_size = 100, max_batches = 2 WHERE id = 1`);
+    const run = async () => (await one<{ r: Record<string, unknown> }>(db, `SELECT policy_jp.dispatch_records_purge() AS r`)).r.verify_dispatches;
+    assertEquals([await run(), await run(), await run()], [200, 50, 0]);
+
+    // 審計：每次改設定一列，agent_name = activity-audit，寫進 policy_jp.edit_history
+    const audit = await db.query<{ agent_name: string; d: string; b: string }>(
+      `SELECT agent_name, new_value->>'verify_dispatches_days' AS d, new_value->>'batch_size' AS b FROM policy_jp.edit_history WHERE table_name = 'dispatch_records_settings' ORDER BY id`);
+    assert(audit.rows.length >= 3, "每次修改各一列審計（初始那一列在觸發器建立之前就插了，沒有審計）");
+    assertEquals(audit.rows[audit.rows.length - 1], { agent_name: "activity-audit", d: "14", b: "100" });
+
+    // 權限：函式只有 service_role 能執行；設定表 anon／authenticated 讀寫都被擋（通用的表權限測試也涵蓋）
+    const can = async (role: string) => (await one<{ ok: boolean }>(db, `SELECT has_function_privilege('${role}', 'policy_jp.dispatch_records_purge()', 'EXECUTE') AS ok`)).ok;
+    assertEquals([await can("service_role"), await can("anon"), await can("authenticated")], [true, false, false]);
+    for (const role of ["anon", "authenticated"]) {
+      await assertRejects(() => asRole(db, role, `SELECT policy_jp.dispatch_records_purge()`), Error, "permission denied");
+      await assertRejects(() => asRole(db, role, `SELECT * FROM policy_jp.dispatch_records_settings`), Error, "permission denied");
+      await assertRejects(() => asRole(db, role, `UPDATE policy_jp.dispatch_records_settings SET enabled = false`), Error, "permission denied");
+    }
+    // 沒有 Public read 那種 policy：內部表慣例（只有擁有者與 service_role 的 BYPASSRLS 讀得到）
+    assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM pg_policies WHERE schemaname = 'policy_jp' AND tablename = 'dispatch_records_settings'`)).n, 0);
+
+    // migration 重跑：不多一列設定、不覆蓋已改的值
+    await db.exec(MIG_SQL);
+    assertEquals((await one<{ n: number; b: number }>(db, `SELECT count(*)::INT AS n, max(batch_size)::INT AS b FROM policy_jp.dispatch_records_settings`)), { n: 1, b: 100 });
+  } finally {
+    await db.close();
+  }
+});
+
 Deno.test("排程與自我檢查：有 pg_cron 就排、沒有就略過；還原驗證（拿掉 RLS／給 anon 權限／加 public. 引用）會讓 migration 失敗", async () => {
   // 有 cron
   const cron = `CREATE SCHEMA cron; CREATE TABLE cron.job (jobname TEXT, schedule TEXT, command TEXT);
@@ -384,8 +522,11 @@ Deno.test("排程與自我檢查：有 pg_cron 就排、沒有就略過；還原
     CREATE FUNCTION cron.unschedule(a TEXT) RETURNS BOOLEAN LANGUAGE sql AS $$ DELETE FROM cron.job WHERE jobname = a RETURNING true $$;`;
   const withCron = await freshDb(MIG_SQL, cron);
   await withCron.exec(MIG_SQL); // 第二次：先 unschedule 再 schedule，只留一條
-  const job = await withCron.query<{ jobname: string; schedule: string; command: string }>(`SELECT * FROM cron.job`);
-  assertEquals(job.rows, [{ jobname: "policy-jp-seed-10min", schedule: "*/10 * * * *", command: "SELECT policy_jp.seed_auto_task_queue();" }]);
+  const job = await withCron.query<{ jobname: string; schedule: string; command: string }>(`SELECT * FROM cron.job ORDER BY jobname`);
+  assertEquals(job.rows, [
+    { jobname: "policy-jp-dispatch-records-purge", schedule: "55 19 * * *", command: "SELECT policy_jp.dispatch_records_purge();" },
+    { jobname: "policy-jp-seed-10min", schedule: "*/10 * * * *", command: "SELECT policy_jp.seed_auto_task_queue();" },
+  ]);
   await withCron.close();
 
   // 還原驗證

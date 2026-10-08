@@ -3,6 +3,7 @@ import { loadEntry, type LoadedEntry, type RestCall } from "./jp/entry-harness.t
 import { checkDispatchToken, dispatchTokenSecretFrom, issueDispatchToken } from "./dispatch-token.ts";
 import { jpDispatchTokenSecretFrom } from "./jp/dispatch-secret.ts";
 import { ipHashOf } from "./jp/contribute-handler.ts";
+import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 
 /**
  * 日本站入口（jp-next／jp-report）的行為測試：真的載入入口、用真的 Request 打進去，底下是有狀態的假 PostgREST。
@@ -212,6 +213,23 @@ Deno.test("驗證一整圈：帶憑證跨網段投票 201；票的來源是領�
     assertEquals(db.votes.length, 1);
     assertEquals(db.votes[0].verifier_ip_hash, await netHash(N1));
     assertEquals(ok.json.required_agree, 3);
+    assertAllJpSchema(report.calls);
+  });
+});
+
+Deno.test("驗證（同網段、不帶憑證）：派工綁定的查詢帶 dispatched_at >= 現在 − VERIFY_BINDING_DAYS 天（#485，同正見 verify-handler）", async () => {
+  const db = makeDb();
+  await withEntries(db, env(), async ({ next, report }) => {
+    await getNext(next, N1); // 領一筆：寫 verify_dispatches（網段 N1）
+    const t0 = Date.now();
+    const ok = await post(report, N1, voteBody()); // 同網段、沒帶憑證：走 IP 綁定
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    const lookup = report.calls.find((c) => c.target === "verify_dispatches" && c.method === "GET");
+    assert(lookup, "應該查過 verify_dispatches");
+    const gte = lookup.url.searchParams.get("dispatched_at") ?? "";
+    assert(gte.startsWith("gte."), `綁定查詢沒帶時限（dispatched_at=${gte}）：派工紀錄會定時清掉，時限要明寫`);
+    const drift = Math.abs(Date.parse(gte.slice(4)) - (t0 - VERIFY_BINDING_DAYS * 86_400_000));
+    assert(drift < 60_000, `時限應是現在往前 ${VERIFY_BINDING_DAYS} 天，差了 ${drift} 毫秒`);
     assertAllJpSchema(report.calls);
   });
 });
