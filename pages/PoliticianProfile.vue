@@ -23,6 +23,7 @@ import AiLookupInline from '../components/AiLookupInline.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
+import { personShareImage, personTrackingText, publicImageUrl } from '../lib/seo'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-number'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
@@ -288,6 +289,8 @@ usePageHead({
   // firebase.json 把 /politician/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
   noindex: () => !loading.value && !politicianLoading.value && !politician.value,
   markdown: () => !!politician.value, // 本頁網址加 .md ＝ Markdown 版（lib/md/politician.ts，由 Worker 現場產生）
+  // 分享圖（#461）：本人照片（公開 https 網址才用，簽名網址、內網、svg 都不用），沒有就站內預設圖
+  image: () => politician.value ? personShareImage(politician.value.avatarUrl, politician.value.name) : undefined,
   // 標題與摘要用 identity（現任職稱優先，其次這一屆的參選），不用 position——
   // position 是最近一筆參選紀錄，落選的人也會有，拿來當標題等於對外宣稱他是現任（2026-10-04）
   // 有號次就帶「（2 號）」：選前「某某 號次」是高搜尋量的詞（#460）
@@ -295,7 +298,7 @@ usePageHead({
   description: () => politician.value
     ? (politician.value.slogan || politician.value.bio
         ? `${politician.value.name}（${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}）：${politician.value.slogan || politician.value.bio}`
-        : `${politician.value.name}，${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
+        : `${politician.value.name}，${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。${personTrackingText(campaignPledges.value.length, historicalPolicies.value.length)}`)
     : undefined,
   // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料；政見清單放 subjectOf，每筆帶固定網址，AI 轉述時才引得回來
   jsonLd: () => politician.value ? {
@@ -303,7 +306,7 @@ usePageHead({
     '@type': 'Person',
     name: politician.value.name,
     url: `${SITE_URL}/politician/${politician.value.id}`,
-    ...(politician.value.avatarUrl ? { image: politician.value.avatarUrl } : {}),
+    ...(publicImageUrl(politician.value.avatarUrl) ? { image: publicImageUrl(politician.value.avatarUrl) } : {}),
     // jobTitle 是「現在的職稱」：現任公職（算出來的）＋資料庫登錄的現職（黨職之類），沒有就不給這個欄位
     ...(jobTitles.value.length ? { jobTitle: jobTitles.value } : {}),
     ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
