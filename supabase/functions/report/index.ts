@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
-import { handleContribute, ipHashOf } from "../_shared/contribute-handler.ts";
+import { handleContribute, ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { handleVerify } from "../_shared/verify-handler.ts";
 import { handleWithdraw } from "../_shared/withdraw-handler.ts";
 
@@ -30,22 +30,24 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+    const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
+    const ipHash = await ipHashOf(req, ipSalt);
+    const legacyIpHash = await legacyIpHashOf(req, ipSalt);
 
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") return json({ success: false, error: "body 不是合法 JSON" }, 400);
     const kind = (body as Record<string, unknown>).kind;
 
     if (kind === "verify") {
-      const result = await handleVerify(supabase, body, ipHash, undefined, "report");
+      const result = await handleVerify(supabase, body, ipHash, undefined, "report", fetch, legacyIpHash);
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "contribute") {
-      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report");
+      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash);
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {
-      const result = await handleWithdraw(supabase, body, ipHash);
+      const result = await handleWithdraw(supabase, body, ipHash, legacyIpHash);
       return json({ kind, ...result.body }, result.status);
     }
     return json({ success: false, error: "kind 要是 verify、contribute 或 withdraw（前兩個就是 /next 給你的 kind，task 做完回報用 contribute；withdraw 是撤回自己交錯的那筆）" }, 400);

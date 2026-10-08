@@ -5,6 +5,7 @@
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { rosterBatchProblems } from "./roster-batch-gate.ts";
+import { networkOf } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
@@ -53,7 +54,7 @@ export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 600;
 export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
     ? { limit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源 IP" };
+    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 export const DEDUPE_WINDOW_HOURS = 24;
 
@@ -66,7 +67,22 @@ export function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
 }
 
+/**
+ * 來源身份的雜湊：看網段（IPv4 /24、IPv6 /64），不看單一 IP（#481，協議 1.79.0）。
+ * 派工綁定、計票去重、不能驗自己、撤回本人、每日額度全都吃這一個值，所以只在這裡改。
+ */
 export async function ipHashOf(req: Request, ipSalt: string): Promise<string> {
+  return await sha256Hex(`${ipSalt}|${networkOf(clientIp(req))}`);
+}
+
+/**
+ * 1.79.0 以前的雜湊（單一 IP）。只給過渡期用：切換前交的貢獻、投的票存的是這個，
+ * 不認它的話同一台機器能驗自己切換前交的、對切換前投過的再投一次。
+ * 只認得「切換前後都是同一個 IP」的固定 IP 機器；輪換 IP 的代理切換前用別的 IP 留下的資料，
+ * 單向雜湊無法換算成網段，認不出來（見 `isLegacySource`）。
+ * 切換前的貢獻都定案後（pending／disputed 裡沒有 1.79.0 以前的）就可以拿掉。
+ */
+export async function legacyIpHashOf(req: Request, ipSalt: string): Promise<string> {
   return await sha256Hex(`${ipSalt}|${clientIp(req)}`);
 }
 
@@ -201,6 +217,9 @@ export async function handleContribute(
   fetchImpl: typeof fetch = fetch,
   // 測試用：注入一個會丟例外的假試抓，驗證「試抓本身出錯」真的照舊收成 pending（不是沒東西可測的空話）
   precheckFn: typeof precheckUnreachable = precheckUnreachable,
+  // 1.79.0 以前的單一 IP 雜湊（過渡期，#481）：重複宣稱併成同意票時要帶進 handleVerify，
+  // 不然切換前自己交的待審宣稱，換個代號再交一次就能併成自己的一票
+  legacyIpHash?: string,
 ): Promise<HandlerResult> {
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
@@ -541,7 +560,7 @@ export async function handleContribute(
         ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
       // via "merge"：這一票是系統把重複提交配對成的，不是代理自己挑的題目——派發閘對它放行。
       // 2026-09-21 派發閘上線後，這條路安靜地被關了 10 小時（每筆重複都變新件），leatherback 打端點才發現。
-      }, ipHash, undefined, "merge");
+      }, ipHash, undefined, "merge", undefined, legacyIpHash);
       if (voted.status !== 201) continue; // 投不成就照原路收下
       claimed.add(target.id);
       const b = voted.body as Record<string, unknown>;

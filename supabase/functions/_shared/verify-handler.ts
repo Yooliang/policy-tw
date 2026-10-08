@@ -32,7 +32,7 @@ export const VERIFY_DAILY_LIMIT_PER_DITRUST = 2400;
 export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
     ? { limit: VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源 IP" };
+    : { limit: VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 
 /**
@@ -42,8 +42,11 @@ export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; c
  */
 export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_thin", "cec_count_required", "cec_count_mismatch"]);
 
-export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch): Promise<HandlerResult> {
-  const res = await handleVerifyInner(supabase, body, ipHash, applyFn, via, cecFetch);
+/**
+ * `legacyIpHash`：1.79.0 以前的單一 IP 雜湊（`legacyIpHashOf`），過渡期用來認出切換前同一台機器交的貢獻與投的票（#481）。
+ */
+export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyIpHash?: string): Promise<HandlerResult> {
+  const res = await handleVerifyInner(supabase, body, ipHash, applyFn, via, cecFetch, legacyIpHash);
   const code = (res.body as { error?: unknown } | undefined)?.error;
   if (res.status === 400 && typeof code === "string" && LOGGED_GATES.has(code)) {
     const cid = isObj(body) && typeof (body as Record<string, unknown>).contribution_id === "string" ? (body as Record<string, unknown>).contribution_id : null;
@@ -54,7 +57,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   return res;
 }
 
-async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch): Promise<HandlerResult> {
+async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyHashArg?: string): Promise<HandlerResult> {
+  // IP 認不得時新舊算法同值，那就沒有「舊票」可言（不然自己的新票會被當成舊票、不能 revise）
+  const legacyIpHash = legacyHashArg !== ipHash ? legacyHashArg : undefined;
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -91,14 +96,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
   }
-  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash })) {
+  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(contribution.contributor_ip_hash, legacyIpHash)) {
     return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同 agent_name 或同一來源 IP）提交的貢獻，請跳過這筆" } };
   }
   // 裁決的驗證：原貢獻的提交者也不能投（利益相關）
   if (contribution.contribution_type === "adjudication") {
     const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
     const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash").eq("id", originalId).maybeSingle() : { data: null };
-    if (original && isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash })) {
+    // 過渡期（#481）：原貢獻若是切換前交的，存的是單一 IP 雜湊，也要比舊雜湊
+    if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash))) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
   }
@@ -143,6 +149,26 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
       };
     }
     revising = { id: mine.id };
+  }
+  else {
+    // 過渡期（#481）：切換前用單一 IP 雜湊投的票也算同一個來源，不能再投第二張。
+    // 但那張舊票可以 revise：代理依 evidence_warning 之類的提示要改票時不該卡死，
+    // 而且改的時候 verifier_ip_hash 一併升級成網段雜湊（voteRow 本來就寫新的），舊票就此退場。
+    const legacyVote = ((existing ?? []) as Array<{ id: string; verifier_ip_hash: string | null }>)
+      .find((x) => isLegacySource(x.verifier_ip_hash, legacyIpHash));
+    if (legacyVote) {
+      if (!revise) {
+        return {
+          status: 409,
+          body: {
+            success: false,
+            error: "already_voted",
+            message: "這筆你這個來源在 1.79.0 改用網段之前已經投過票了（同一個來源只能投一次）。如果你是要改自己那張票：同一筆再送一次並帶 `revise: true`，會覆寫它；否則請直接領下一筆。",
+          },
+        };
+      }
+      revising = { id: legacyVote.id };
+    }
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
@@ -302,4 +328,17 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
       ...(toolNotice ? { notice: toolNotice } : {}),
     },
   };
+}
+
+/**
+ * 過渡期（#481）：存的雜湊等於「這個請求的來源 IP」的舊單一 IP 雜湊，才認定是切換前的同一個來源。
+ *
+ * 限制：認得出的只有「切換前那次的 IP 跟現在這次的 IP 一模一樣」——也就是固定 IP 的機器。
+ * 雜湊是單向的，存的 hash(salt|160.79.106.19) 沒辦法換算成網段，所以 IP 本來就會輪換的雲端代理，
+ * 切換前用 .19 交的／投的，切換後從 .21 來，這裡認不出來（hash(.19) ≠ hash(.21)）。
+ * 這些切換前的舊資料會一直留到定案為止；切換後新交的、新投的一律是網段雜湊，輪換 IP 不受影響。
+ * 所以這個函式保護的是固定 IP 機器的過渡，不是輪換 IP。
+ */
+export function isLegacySource(stored: string | null | undefined, legacyIpHash: string | undefined): boolean {
+  return !!legacyIpHash && !!stored && stored === legacyIpHash;
 }

@@ -2,7 +2,8 @@ import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
 import { loadElections, withElectionKey } from "../_shared/elections.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
+import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
@@ -60,7 +61,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 沒有這個出口的話，30 分鐘的軟認領會讓主流程一直卡在同一筆（外部代理實測踩到）。
     const skipTaskId = url.searchParams.get("skip")?.trim() || null;
     // 身份：ditrust:<序號> 先向 agents-verify 換成代號與身份鍵；一般代號原樣（docs/BLUEPRINT-agent-identity.md §3）
-    const ipHashForIdentity = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+    const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
+    const ipHashForIdentity = await ipHashOf(req, ipSalt);
+    // 1.79.0 以前的單一 IP 雜湊：只用來查切換前投過的票（fetchMyVotedRows），其他一律用網段雜湊（#481）
+    const legacyIpHash = await legacyIpHashOf(req, ipSalt);
     const identity = await resolveActorFromRequest(agentName, ipHashForIdentity);
     mark("identity");
     // 逐一記 11 個平行查詢各自完成的時間（累計毫秒；起點都差不多，約等於各自耗時）
@@ -121,10 +125,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
       // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
       // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
-      fetchAllRows<{ contribution_id: string }>("my votes", (from, to) =>
-        supabase.from("contribution_votes").select("contribution_id")
-          .eq("verifier_ip_hash", ipHash)
-          .order("created_at", { ascending: true }).range(from, to))),
+      // 過渡期（#481，1.79.0）：切換前的票存單一 IP 雜湊，新票存網段雜湊，兩個都查（_shared/my-votes.ts）
+      fetchMyVotedRows(supabase, voterHashes(ipHash, legacyIpHash))),
       timed("ip_contrib", // 匿名：「每個來源 IP 每日」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
       // DiTrust 帳號：按帳號（actor_id）數，見 submitQuotaFor。
       supabase.from("contributions").select("id", { count: "exact", head: true })
