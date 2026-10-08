@@ -2,10 +2,11 @@ import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useHead } from '@unhead/vue'
 import { useRoute } from 'vue-router'
 
-import { SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
+import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
+import { defaultShareImage, shareImageMeta, type ShareImage } from '../lib/seo'
 
-// 站名、網址、政見狀態標籤放在 lib/site.ts（純常數，Markdown 檢視 lib/md 也要用；單一份）
-export { SITE_NAME, SITE_URL, policyStatusLabel }
+// 站名、網址、政見狀態標籤、授權與發布者放在 lib/site.ts（純常數，Markdown 檢視 lib/md 也要用；單一份）
+export { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel }
 export const SITE_TAGLINE = '智能政見追蹤平台'
 export const DEFAULT_DESCRIPTION =
   '正見是超越黨派色彩的政策歷史追蹤平台，記錄全台政治人物政見的提出與執行進度，並以 AI 進行客觀分析。'
@@ -27,6 +28,11 @@ interface PageHeadOptions {
    * 只有人物頁與縣市頁有；資料還沒到、確定沒資料時給 false，免得指向一份 404。
    */
   markdown?: MaybeRefOrGetter<boolean | undefined>
+  /**
+   * 社群分享圖（og:image＋twitter:card，#461）。不給或給 undefined 就用站內預設圖（lib/seo.ts 的 defaultShareImage）。
+   * 人物頁、政見頁給 personShareImage(avatarUrl, name)：照片是公開網址用照片，否則仍是預設圖。
+   */
+  image?: MaybeRefOrGetter<ShareImage | undefined>
 }
 
 /** 麵包屑 → schema.org BreadcrumbList（最後一層沒給 path 就用本頁網址） */
@@ -42,18 +48,6 @@ export function breadcrumbJsonLd(items: BreadcrumbItem[], pageUrl: string): Reco
     })),
   }
 }
-
-/** 資料授權（LICENSE-DATA.md）：CC BY 4.0，引用要標出處——這也是 AI 轉述時要帶上「正見」的依據 */
-export const DATA_LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
-
-/** 結構化資料裡的「發布者」：每一筆政見、每一位人物都掛這個，AI 轉述時才知道是誰驗證的 */
-export const PUBLISHER_LD = {
-  '@type': 'Organization',
-  name: SITE_NAME,
-  alternateName: ['正見 Policy Tracker', 'policy-tw'],
-  url: SITE_URL,
-  sameAs: ['https://policy-tw.web.app', 'https://github.com/Yooliang/policy-tw'],
-} as const
 
 /** JSON-LD 放進 <script> 前要擋 `</script>` 截斷：把 `<` 換成 <（JSON 仍然合法） */
 export function jsonLdText(data: Record<string, unknown>): string {
@@ -118,6 +112,7 @@ export function usePageHead(options: PageHeadOptions): void {
       { property: 'og:title', content: title.value },
       { property: 'og:description', content: description.value },
       { property: 'og:url', content: pageUrl.value },
+      ...shareImageMeta(toValue(options.image) ?? defaultShareImage()),
       ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
     ]),
     script: computed(() => {

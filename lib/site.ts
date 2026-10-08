@@ -30,6 +30,18 @@ export const POLICY_STATUS_LABELS: Record<string, string> = {
   'Campaign Pledge': '競選承諾',
 }
 
+/** 資料授權（LICENSE-DATA.md）：CC BY 4.0，引用要標出處——這也是 AI 轉述時要帶上「正見」的依據 */
+export const DATA_LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
+
+/** 結構化資料裡的「發布者」：每一筆政見、每一位人物都掛這個，AI 轉述時才知道是誰驗證的 */
+export const PUBLISHER_LD = {
+  '@type': 'Organization',
+  name: SITE_NAME,
+  alternateName: ['正見 Policy Tracker', 'policy-tw'],
+  url: SITE_URL,
+  sameAs: ['https://policy-tw.web.app', 'https://github.com/Yooliang/policy-tw'],
+} as const
+
 /** 政見狀態的中文標籤（meta description 用；畫面上的 StatusBadge 另有自己的顯示邏輯）。 */
 export function policyStatusLabel(status: string | undefined): string {
   return (status && POLICY_STATUS_LABELS[status]) || status || ''

@@ -22,6 +22,7 @@ import { readWorkerConfig } from './worker-config.js'
 import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
 import { nonPageResponse } from './render-status.js'
+import { stripShellHead } from './shell-head.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
@@ -148,19 +149,12 @@ function escapeState(json) {
   return JSON.stringify(json).replace(/<\/script/gi, '<\\/script')
 }
 
-/** 殼裡的靜態 title／description／og:*（index.html 寫死的首頁版）要讓位給每頁的 head，不然爬蟲讀到第一個 <title> 就是首頁的 */
-const SHELL_HEAD_OVERRIDES = [
-  /<title>[^<]*<\/title>\s*/i,
-  /<meta name="description"[^>]*>\s*/i,
-  /<meta property="og:(title|description|url|type|site_name)"[^>]*>\s*/gi,
-  /<meta name="viewport"[^>]*>\s*/i,
-]
-
 function assemble(shell, r) {
   let html = shell
   if (r.htmlAttrs) html = html.replace('<html', `<html ${r.htmlAttrs}`)
   if (r.bodyAttrs) html = html.replace('<body', `<body ${r.bodyAttrs}`)
-  if (r.headTags) for (const re of SHELL_HEAD_OVERRIDES) html = html.replace(re, '')
+  // 殼裡的靜態 title／description／og:*／twitter:*（index.html 寫死的首頁版）要讓位給每頁的 head，不然爬蟲讀到第一個 <title> 就是首頁的（cloudflare/shell-head.js）
+  if (r.headTags) html = stripShellHead(html)
   html = html.replace('</head>', `${r.headTags ?? ''}\n  </head>`)
   const state = `<script>window.__INITIAL_STATE__=${escapeState(JSON.stringify(r.state ?? {}))}</script>`
   html = html.replace('<div id="app"></div>', `<div id="app">${r.html}</div>\n${state}`)

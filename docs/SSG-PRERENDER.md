@@ -49,7 +49,7 @@
 
 ## 每頁 head
 
-`composables/usePageHead.ts` 統一給 `<title>`、description、Open Graph；工具頁與後台傳 `noindex: true`。`App.vue` 用 `useHead` 釘 `<html lang="zh-TW">`（unhead 預設會寫成 `en`）。
+`composables/usePageHead.ts` 統一給 `<title>`、description、Open Graph（含 `og:image`／`twitter:card`，#461）；工具頁與後台傳 `noindex: true`。分享圖預設站內 `/brand/og-cover.png`，人物頁、政見頁用本人照片（`lib/seo.ts` 的 `personShareImage`，只收公開 https 網址）。摘要與結構化資料的組字（縣市頁摘要與 ItemList、政見頁摘要與 CreativeWork）都在 `lib/seo.ts`，預渲染與邊緣渲染共用同一份。邊緣渲染組頁時，殼裡寫死的首頁版 title／description／og:*／twitter:* 由 `cloudflare/shell-head.js` 拿掉；usePageHead 多輸出一種 meta，這裡就要跟著加。`App.vue` 用 `useHead` 釘 `<html lang="zh-TW">`（unhead 預設會寫成 `en`）。
 
 ## Tailwind
 

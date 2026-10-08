@@ -16,8 +16,9 @@ import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
-import { citationText, DATA_LICENSE_URL, policyStatusLabel, PUBLISHER_LD, SITE_URL, summarize } from '../composables/usePageHead'
+import { citationText, DATA_LICENSE_URL, policyStatusLabel, SITE_URL } from '../composables/usePageHead'
 import { policyElectionYear, policyYear } from '../lib/policy-date'
+import { personShareImage, policyDescription, policyLd } from '../lib/seo'
 import { lineageChain } from '../lib/policy-chain'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
 import { useCheckpoints } from '../composables/useCheckpoints'
@@ -367,36 +368,41 @@ usePageHead({
   // firebase.json 把 /policy/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
   noindex: () => !loading.value && !policyLoading.value && !politicianLoading.value && !policy.value,
   title: () => policy.value?.title,
+  // 摘要用資料組句（誰、哪一屆、什麼類別、狀態與進度、本文），標題已經寫過的本文開頭不重複（lib/seo.ts，#461）
   description: () => policy.value
-    ? `${politician.value?.name ?? ''}政見「${policy.value.title}」，狀態：${policyStatusLabel(policy.value.status)}，進度 ${policy.value.progress}%。${policy.value.description}`
+    ? policyDescription({
+        title: policy.value.title,
+        body: policy.value.description,
+        personName: politician.value?.name,
+        party: politician.value?.party,
+        electionLabel: policyElection.value?.shortName,
+        category: policy.value.category,
+        isPledge: isCampaign.value,
+        statusLabel: policyStatusLabel(policy.value.status),
+        progress: policy.value.progress,
+      })
     : undefined,
+  // 分享圖（#461）：提出者的照片（公開網址才用），沒有就站內預設圖
+  image: () => politician.value ? personShareImage(politician.value.avatarUrl, politician.value.name) : undefined,
   // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料——這是誰的政見、出處、狀態、由誰整理、CC BY 要標出處
-  jsonLd: () => policy.value && politician.value ? {
-    '@context': 'https://schema.org',
-    '@type': 'CreativeWork',
-    additionalType: isCampaign.value ? '競選承諾' : '政見',
-    name: policy.value.title,
-    headline: policy.value.title,
-    description: summarize(policy.value.description, 300),
-    url: `${SITE_URL}/policy/${policy.value.id}`,
-    inLanguage: 'zh-TW',
-    genre: policy.value.category,
-    creativeWorkStatus: policyStatusLabel(policy.value.status),
-    ...(policy.value.proposedDate ? { datePublished: policy.value.proposedDate } : {}),
-    dateModified: policy.value.updatedAt || policy.value.lastUpdated,
-    about: {
-      '@type': 'Person',
-      name: politician.value.name,
-      url: `${SITE_URL}/politician/${politician.value.id}`,
-      ...(politician.value.party ? { affiliation: { '@type': 'Organization', name: politician.value.party } } : {}),
-    },
-    ...(policy.value.sourceUrl ? { citation: policy.value.sourceUrl, isBasedOn: policy.value.sourceUrl } : {}),
-    // 投票年份看選舉的投票日，不把 electionId 當年份（新增的選舉 id 不是年份，#344 第二階段 A）
-    ...(policyElection.value ? { temporalCoverage: policyElectionYear(policy.value, elections.value) ?? undefined } : {}),
-    publisher: PUBLISHER_LD,
-    license: DATA_LICENSE_URL,
-    isAccessibleForFree: true,
-  } : undefined,
+  // 結構化資料在 lib/seo.ts 的 policyLd：提出者放 author 與 about，datePublished 只在有提出日時放，dateModified 用政見的更新時間
+  jsonLd: () => policy.value && politician.value
+    ? policyLd({
+        id: policy.value.id,
+        title: policy.value.title,
+        description: policy.value.description,
+        category: policy.value.category,
+        isPledge: isCampaign.value,
+        statusLabel: policyStatusLabel(policy.value.status),
+        proposedDate: policy.value.proposedDate,
+        updatedAt: policy.value.updatedAt,
+        lastUpdated: policy.value.lastUpdated,
+        sourceUrl: policy.value.sourceUrl,
+        // 投票年份看選舉的投票日，不把 electionId 當年份（新增的選舉 id 不是年份，#344 第二階段 A）
+        electionYear: (policyElection.value ? policyElectionYear(policy.value, elections.value) : null) ?? undefined,
+        person: { id: String(politician.value.id), name: politician.value.name, party: politician.value.party || undefined },
+      })
+    : undefined,
   breadcrumbs: () => breadcrumbs.value,
 })
 

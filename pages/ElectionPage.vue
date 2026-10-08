@@ -26,12 +26,13 @@ import { isRunningCandidate } from '../lib/candidate-status'
 import { issueTagsOf } from '../lib/issue-tags'
 import { VIEW_MODES, type ElectionViewMode } from '../lib/election-view-tabs'
 import LoadError from '../components/LoadError.vue'
-import { usePageHead } from '../composables/usePageHead'
+import { canonicalPath, SITE_URL, usePageHead } from '../composables/usePageHead'
+import { candidateListItems, itemListLd, regionDescription, type LevelCount } from '../lib/seo'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { electionPath, isCounty, TAIWAN_COUNTIES } from '../lib/election-regions'
 import { electionSegment, electionYearOfDate, legacyKeySegmentTarget } from '../lib/election-route'
 import { classifyWard } from '../lib/ward-classification'
-import { planLevels, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
+import { planLevels, POSITIONS, positionSpec, sectionAnchor, type PositionSpec } from '../lib/election-levels'
 import { groupByVillage } from '../lib/village-grouping'
 import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
@@ -896,27 +897,41 @@ const pkLevel = computed<ElectionType>(() => {
 
 /** 縣市頁的頁首：「2026 台北市 候選人與政見」；全台照舊 */
 const pageCounty = computed(() => isCounty(selectedRegion.value) ? selectedRegion.value : undefined)
-const countyLevelCounts = computed(() => {
+/**
+ * 縣市頁這個縣市的候選人（人、職位在 POSITIONS 裡的順位、號次）：摘要的人數、縣市長姓名與結構化資料的候選人清單共用這一份，
+ * 三處講的人數才會一致（#461）。職位不在 POSITIONS 裡的（總統副總統以外的全國性職位）不算進縣市頁。
+ */
+const countyRows = computed(() => {
   const county = pageCounty.value
-  if (!county) return ''
-  return ALL_LEVELS
-    .map(l => ({ label: l.label, n: electionPoliticians.value.filter(c => {
-      const data = getPoliticianElectionData(c, electionId.value)
-      return data?.electionType === l.type && (data.region || c.region) === county
-    }).length }))
-    .filter(x => x.n > 0)
-    .map(x => `${x.label} ${x.n} 位`)
-    .join('、')
+  if (!county) return []
+  return electionPoliticians.value.flatMap(person => {
+    const data = getPoliticianElectionData(person, electionId.value)
+    const rank = POSITIONS.findIndex(p => p.type === data?.electionType)
+    return data && rank >= 0 && (data.region || person.region) === county ? [{ person, rank, candNo: data.candNo }] : []
+  })
 })
+const countyLevelCounts = computed<LevelCount[]>(() => POSITIONS
+  .map((p, rank) => ({ label: p.label, n: countyRows.value.filter(r => r.rank === rank).length })))
+/** 縣市長候選人姓名（依號次、姓名排；摘要裡找「某某市長候選人」的人用） */
+const countyHeadNames = computed(() => {
+  const headRank = POSITIONS.findIndex(p => p.type === ElectionType.MAYOR)
+  return candidateListItems(
+    countyRows.value.filter(r => r.rank === headRank).map(r => ({ id: String(r.person.id), name: r.person.name, rank: r.rank, candNo: r.candNo })),
+    { cap: 1000 },
+  ).map(it => it.name)
+})
+/** 名下這一屆政見的筆數（只算傳進來的這些人；不管 policies 載完整了沒，同一批人同一屆的數字都一樣） */
+function policyCountOf(people: ReadonlyArray<{ id: string | number }>): number {
+  const ids = new Set(people.map(p => String(p.id)))
+  return policies.value.filter(p => p.electionId === electionId.value && ids.has(String(p.politicianId))).length
+}
 /**
  * 鄉鎮頁的頁首（2026-10-05）：「2022 嘉義縣大林鎮 候選人與政見」。
  * 人數照這一頁實際畫出來的區塊數（這一層＋下一層），不另外算一份——描述寫的人數要跟畫面一樣。
  */
 const pageTownship = computed(() => pageCounty.value && selectedSubRegion.value !== 'All' ? selectedSubRegion.value : undefined)
-const townshipLevelCounts = computed(() => [...thisLevelSections.value, ...nextLevelSections.value]
-  .filter(s => s.people.length > 0)
-  .map(s => `${s.spec.label} ${s.people.length} 位`)
-  .join('、'))
+const townshipSections = computed(() => [...thisLevelSections.value, ...nextLevelSections.value].filter(s => s.people.length > 0))
+const townshipLevelCounts = computed<LevelCount[]>(() => townshipSections.value.map(s => ({ label: s.spec.label, n: s.people.length })))
 usePageHead({
   // 縣市頁有 Markdown 版（/election/<屆>/<縣市>.md，lib/md/region.ts）；全台頁與鄉鎮頁沒有
   markdown: () => !!election.value && !!pageCounty.value && !pageTownship.value,
@@ -930,16 +945,38 @@ usePageHead({
   },
   description: () => {
     if (!election.value) return undefined
+    // 縣市頁、鄉鎮頁的摘要用資料組句：「2026 台中市候選人 128 位：縣市長 8 位、縣市議員 120 位，已收錄政見 35 項。」（lib/seo.ts，#461）
+    const year = electionYear.value || election.value.electionDate.slice(0, 4)
     if (pageTownship.value) {
-      const counts = townshipLevelCounts.value ? `：${townshipLevelCounts.value}` : ''
-      const appointed = levelPlan.value.thisLevel.length === 0 ? `區長由市政府指派，不是選舉產生。` : ''
-      return `${election.value.name}${pageCounty.value}${pageTownship.value}參選人名單與競選承諾${counts}。${appointed}可依${villageLabel.value}篩選、逐項比較政見。`
+      return regionDescription({
+        year,
+        place: `${pageCounty.value}${pageTownship.value}`,
+        levels: townshipLevelCounts.value,
+        policyCount: policyCountOf(townshipSections.value.flatMap(s => s.people)),
+        note: levelPlan.value.thisLevel.length === 0 ? '區長由市政府指派，不是選舉產生。' : undefined,
+      })
     }
     if (pageCounty.value) {
-      const counts = countyLevelCounts.value ? `：${countyLevelCounts.value}` : ''
-      return `${election.value.name}${pageCounty.value}參選人名單與競選承諾${counts}。可依鄉鎮市區篩選、逐項比較政見。`
+      return regionDescription({
+        year,
+        place: pageCounty.value,
+        levels: countyLevelCounts.value,
+        policyCount: policyCountOf(countyRows.value.map(r => r.person)),
+        heads: { label: '縣市長', names: countyHeadNames.value },
+      })
     }
     return `${election.value.name}（投票日 ${election.value.electionDate}）候選人名單與競選承諾：總統、立委、縣市長到議員、鄉鎮市長、村里長，依縣市與鄉鎮篩選，比較政見。`
+  },
+  // 縣市頁的候選人清單（schema.org ItemList，#461）：職位、號次、姓名排序，最多 100 位，完整人數放 numberOfItems
+  jsonLd: () => {
+    if (!election.value || !pageCounty.value || pageTownship.value || countyRows.value.length === 0) return undefined
+    const year = electionYear.value || election.value.electionDate.slice(0, 4)
+    return itemListLd({
+      name: `${year} ${pageCounty.value} 候選人`,
+      url: `${SITE_URL}${canonicalPath(route.path)}`,
+      items: candidateListItems(countyRows.value.map(r => ({ id: String(r.person.id), name: r.person.name, rank: r.rank, candNo: r.candNo }))),
+      total: countyRows.value.length,
+    })
   },
 })
 </script>
