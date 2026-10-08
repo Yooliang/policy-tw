@@ -153,4 +153,4 @@ stateDiagram-v2
 | `legacy_audit` | 早期匯入、有來源、沒人核 | `no_change`（通過寫 `policies.audit` 履歷）／`correction`／`removal` |
 | `roster_check`、`news_sweep`、`audit`、`question`、`adjudicate`、`fix_disputed` | 手動／訪客／爭議觸發 | 見 skill.md |
 
-派工規則與所有裁決的理由：`docs/DECISIONS.md`。
+派工規則與所有裁決的理由：`docs/DECISIONS.md`（索引，本文在 `docs/decisions/`）。
