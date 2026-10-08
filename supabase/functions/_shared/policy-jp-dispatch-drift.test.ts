@@ -28,6 +28,8 @@
  *     其中派工紀錄清理的設定表 dispatch_records_settings 欄位、預設值、CHECK 照抄正見，但沒有 "Public read"／"Service role write" 兩條 policy（內部表慣例）；
  *     它的保留天數與排程由 dispatch-records-purge.test.ts 依 schema 分開守，函式 dispatch_records_purge 則是複本（見 PAIRS）
  *   ※ 以上每一項的存在由「migration 裡的函式＝PAIRS＋NONCOPY」一條守住，新加一支函式不登記就紅。
+ *   ※ 後面的 policy_jp migration（落庫 20261009210000、缺口臂 20261009210100 等）不得重新定義任何已登記的複本——重新定義＝逃過上面的逐字比對
+ *      （「後續 migration 不得重新定義已登記的複本」一條守住）。唯一的例外是登記在 FOLLOWED 的跟進版（正見改了、日本版跟進，逐字比對改讀它）。那兩支的函式登記與機械替換比對在 policy-jp-apply.test.ts。
  */
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { fnText, latestFn, readMig } from "./arms-pglite.ts";
@@ -328,4 +330,24 @@ Deno.test("edits 本身有守門：找不到或找到兩處都會丟錯（登記
     try { applyEdits("SELECT 1 SELECT 2", bad); } catch { threw++; }
   }
   assertEquals(threw, 3);
+});
+
+Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的複本（重新定義＝逃過逐字比對）；非複本（臂名清單、總表）才能被後面的 migration 重新定義", async () => {
+  const { migrationNames } = await import("./arms-pglite.ts");
+  const copies = new Set(PAIRS.map((p) => p.name));
+  const later = (await migrationNames()).filter((n) => n.includes("_policy_jp_") && n !== MIG && n !== MIG_ED);
+  assert(later.includes("20261009210000_policy_jp_apply.sql") && later.includes("20261009210100_policy_jp_gap_arms.sql"), "抓得到後續的 policy_jp migration");
+  const offenders: string[] = [];
+  for (const name of later) {
+    const sql = await readMig(name);
+    for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
+      // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED)) offenders.push(`${name}：${m[1]}`);
+    }
+  }
+  assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
+  assert(later.includes(FOLLOW_MIG), "跟進版也在掃描範圍裡（放行靠登記，不是靠沒掃到）");
+  // 偵測器自己也驗一次：把一個複本函式名放進假的檔案文字，抓得到
+  const fake = "CREATE OR REPLACE FUNCTION policy_jp.contribution_required_agree(p_type TEXT) RETURNS INTEGER";
+  assertEquals([...fake.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).filter((n) => copies.has(n)), ["contribution_required_agree"]);
 });
