@@ -278,6 +278,8 @@ export function filterAnsweredQuestionTasks<T extends TaskLike & { task_type?: s
 }
 
 /**
+ * @deprecated 2026-10-08：/next 不再用它——提問的先後（stance_up 高的先、再依進佇列時間）由排程寫進 target、SQL 的 contribution_queue_tasks 排好（守門 manual-open-arm.test.ts）；留著給舊測試。
+ *
  * 提問任務彼此之間依 stance_up 高、建立時間早排序（讓比較多人想知道答案的題目優先派出）；
  * 只調整提問任務彼此佔的位置，其他任務的順序與位置完全不動——不讓提問任務整體插到前面，
  * 維持既有的派工比例與隨機分散（pickBySeed 仍在整個候選清單上挑）。
@@ -384,52 +386,30 @@ export function pickBySeed<T>(list: readonly T[], seed: string): T | null {
 // 現在只有一個鍵：queue_at。想排最前就給它 1980，想排最後就給它現在。
 // ============================================================
 
-/** 想排在最前面就用這個時間（使用者指定：「調到 1980 年這樣子好不好」） */
-export const QUEUE_FRONT = "1980-01-01T00:00:00.000Z";
-
 /**
- * 這些手動任務是「有人明確要求要做的」，進佇列就排最前：
- * 維護者手建的、爭議裁決、訪客按按鈕要求的。
- * 派出去一次之後就蓋成 now()、回到隊尾——它們拿到的是一次立刻被領走的機會，
- * 不是永久特權。這就是使用者說的「裁決一出來就會被領走做完，然後繼續跑我們
- * 原本缺口的任務」。
- *
- * 不在這裡面的（suggested）屬於累積下來的待辦，照進佇列的時間排。
+ * 佇列上的任務列（task_dispatches 裡不是 verify: 的列）：自動缺口 task_id 是 auto:…，
+ * 手動任務（contribution_tasks，2026-10-08 起也是派工臂 manual_visitor／manual_open 的缺口）task_id 是任務 uuid。
+ * 排隊位置（queue_at）全部由排程算好寫進 task_dispatches，這裡不再自己算：
+ * 網站請求與公民提問的最前、固定時段插隊、維護者任務的 1980 都在 SQL（20261008125000，守門 manual-open-arm.test.ts）。
  */
-const FRONT_SOURCES = new Set(["manual", "auto_dispute", "web_request"]);
-
-export interface QueuedTask {
-  source?: string | null;
-  last_dispatched_at?: string | null;
-  created_at?: string | null;
+export function isManualTaskId(taskId: string): boolean {
+  return !taskId.startsWith("auto:") && !taskId.startsWith("verify:");
 }
 
 /**
- * 手動任務在佇列裡的時間。
- * 派過就用派出的時間（隊尾）；沒派過的看它是不是「有人明確要求」——是就 1980，
- * 不是就用它進佇列的時間（created_at）。
- */
-export function manualQueueAt(task: QueuedTask): string {
-  if (task.last_dispatched_at) return task.last_dispatched_at;
-  if (FRONT_SOURCES.has(task.source ?? "")) return QUEUE_FRONT;
-  return task.created_at ?? QUEUE_FRONT;
-}
-
-/**
- * 手動任務裡最該派的一筆。
+ * 從已經過濾、照 queue_at 排好的任務列裡挑隊頭。
  *
- * 不是嚴格取第一名，而是在「並列第一」之間用 seed 挑——兩個代理同時打 /next 時，
- * 雙方都在對方寫入認領之前就撈完候選了，嚴格取第一名會讓它們固定撞同一筆
- * （merge-queue 2026-09-21 指出；認領排除擋不住這個競賽窗口）。
+ * 自動缺口：就是第一筆（跟以前一樣）。手動任務：不是嚴格取第一名，而是在「並列第一」之間用 seed 挑——
+ * 兩個代理同時打 /next，在任何一方寫下軟認領之前兩邊讀到的是同一份清單，嚴格取第一名會讓它們固定撞同一筆
+ * （merge-queue 2026-09-21 指出）。網站請求與公民提問全部排在同一個 1970 時間點，正是這種並列。
  * 只在並列時散開，是因為唯一一筆剛建立的任務必須每次都被派出去，不能變成機率。
+ * 傳進來的清單順序就是 SQL 的順序（queue_at、公民提問的支持度、task_id）。
  */
-export function pickQueuedManual<T extends QueuedTask>(tasks: readonly T[], seed: string): T | null {
-  if (tasks.length === 0) return null;
-  const sorted = [...tasks].sort((a, b) => {
-    const ka = manualQueueAt(a), kb = manualQueueAt(b);
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
-  const first = manualQueueAt(sorted[0]);
-  const tied = sorted.filter((t) => manualQueueAt(t) === first);
-  return tied.length > 1 ? pickBySeed(tied.slice(0, MANUAL_PICK_WINDOW), seed) : sorted[0];
+export function pickQueueTaskHead<T extends { task_id: string; queue_at: string }>(tasks: readonly T[], seed: string): T | null {
+  const first = tasks[0];
+  if (!first) return null;
+  if (!isManualTaskId(first.task_id)) return first;
+  const at = Date.parse(first.queue_at);
+  const tied = tasks.filter((t) => isManualTaskId(t.task_id) && Date.parse(t.queue_at) === at);
+  return tied.length > 1 ? pickBySeed(tied.slice(0, MANUAL_PICK_WINDOW), seed) : first;
 }

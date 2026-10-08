@@ -28,3 +28,6 @@ export const METRIC_COLOR = {
 
 /** 沒有固定語意的多類別（例如各種缺口）依序取色；超出的合併成「其他」 */
 export const CATEGORY_SERIES: readonly string[] = [BRAND.blue, BRAND.orange, BRAND.green, BRAND.teal, BRAND.yellow]
+
+/** 需要到 8 塊的圖（政見矩陣的甜甜圈）：站徽五色在前，再補三個不跟它們撞的色；合併項仍用 BRAND.other */
+export const SERIES_WIDE: readonly string[] = [...CATEGORY_SERIES, '#7c5aa6', '#c9477a', '#8a9a2b']
