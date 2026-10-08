@@ -45,6 +45,7 @@ import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
+import { loadRegistrationRows } from "../_shared/cec-registrations.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
 const corsHeaders = {
@@ -803,21 +804,28 @@ Deno.serve(async (req) => {
         if (url && typeof c.payload?.name === "string") byUrl.set(url, [...(byUrl.get(url) ?? []), c]);
       }
       const report: Array<Record<string, unknown>> = [];
-      // 一輪最多讀 3 份名冊（PDF 抽字吃記憶體；見 precheck 那次 WORKER_RESOURCE_LIMIT）
-      // 太大的名冊（村里長 7.5 MB，> ROSTER_MAX_BYTES）不在 Edge 上抽字：那批照舊交人工驗證，回報寫原因；
+      // 先查表（2026-10-08，10-08 缺口盤點 R1）：中選會 115 年登記彙總表九份已解析成 cec_registrations，表裡有這份網址的資料就不下載 PDF——
+      // 村里長那份 7.5 MB 不用在 Edge 上抽字，#440 加的 3 MB 保護對它自然解除。查表不吃記憶體，所以不佔下面「一輪 3 份 PDF」的名額；
+      // 表裡沒有的名冊（別的選舉、新版網址）照舊走 PDF 加大小保護。查表失敗（表還沒建、列數對不上）一律退回 PDF，不用殘缺的表判案。
+      // 一輪最多讀 3 份名冊 PDF（PDF 抽字吃記憶體；見 precheck 那次 WORKER_RESOURCE_LIMIT）
+      // 太大的名冊（> ROSTER_MAX_BYTES）不在 Edge 上抽字：那批照舊交人工驗證，回報寫原因；
       // 它不佔那 3 份的名額（不然每輪都排在前面、後面的名冊永遠輪不到）
       let read = 0;
       for (const [url, group] of byUrl.entries()) {
-        if (read >= 3) break;
-        let rows: RosterRow[];
-        try {
-          rows = parseRoster(await cecRosterText(url));
-          read++;
-        } catch (e) {
-          if (e instanceof RosterTooLargeError) { report.push({ url, skipped: `${e.message}；這 ${group.length} 筆沒有系統票，照舊交人工驗證` }); continue; }
-          read++;
-          report.push({ url, error: e instanceof Error ? e.message : String(e) });
-          continue;
+        let rows: RosterRow[] | null = null;
+        try { rows = await loadRegistrationRows(supabase, url); } catch (e) { console.error("roster_batch 查表失敗，退回 PDF：", e instanceof Error ? e.message : e); }
+        const via = rows ? "table" : "pdf";
+        if (!rows) {
+          if (read >= 3) continue;
+          try {
+            rows = parseRoster(await cecRosterText(url));
+            read++;
+          } catch (e) {
+            if (e instanceof RosterTooLargeError) { report.push({ url, skipped: `${e.message}；這 ${group.length} 筆沒有系統票，照舊交人工驗證` }); continue; }
+            read++;
+            report.push({ url, error: e instanceof Error ? e.message : String(e) });
+            continue;
+          }
         }
         // 解析出的人比要核對的還少，多半是這份名冊的版面沒認出來：整份跳過、不判，免得把對的判成「不支持」（09-24 嘉義縣名冊誤判 5 筆）
         if (rows.length < Math.max(10, group.length)) { report.push({ url, skipped: `名冊只解析出 ${rows.length} 位，少於要核對的 ${group.length} 筆，這份先不判` }); continue; }
@@ -841,7 +849,7 @@ Deno.serve(async (req) => {
           const { error } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.id });
           if (error) throw new Error(`apply_consensus: ${error.message}`);
         }
-        report.push({ url, rows_parsed: rows.length, checked: group.length, passed: check.passed.length, failed: check.failed.length });
+        report.push({ url, via, rows_parsed: rows.length, checked: group.length, passed: check.passed.length, failed: check.failed.length });
       }
       return json({ success: true, candidates: list.length, report });
     }
