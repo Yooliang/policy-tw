@@ -34,6 +34,8 @@ export interface BatchItem { id: string; name: string; party: string | null; reg
 export interface BatchCheck { passed: string[]; failed: Array<{ id: string; name: string; reason: string }> }
 
 const norm = (s: string | null | undefined) => String(s ?? "").replace(/\s/g, "").replace(/臺/g, "台");
+/** 名冊比對用的字串正規化（去空白、臺→台），交件關卡（roster-batch-gate.ts）要用同一套 */
+export const rosterNorm = norm;
 const HEADER = new Set(["選舉區", "登記日期", "姓名", "推薦之政黨", "備註", "登記之選舉區", "性別", "受理登記機關", "第", "頁", "列印筆數"]);
 const isDate = (x: string) => /^(\d{3}\/\d{2}\/\d{2})+$/.test(x);
 const isDistrict = (x: string) => x.endsWith("選舉區");
@@ -190,7 +192,7 @@ const partyNorm = (p: string | null | undefined) => {
  * 名冊的地名（縣市以後，例如「松山區莊敬里」「竹北市」「烏來區」）對得上交件的鄉鎮市區與村里嗎。
  * 村里只在名冊那一列真的有村里（以里／村結尾）時才比：PDF 抽字漏掉村里欄的幾列只剩鄉鎮市區，那就只比鄉鎮市區。
  */
-function placeMatches(place: string, town: string, village: string): boolean {
+export function placeMatches(place: string, town: string, village: string): boolean {
   if (town && !place.startsWith(town)) return false;
   if (village && /[里村]$/.test(place) && !place.endsWith(village)) return false;
   return true;
