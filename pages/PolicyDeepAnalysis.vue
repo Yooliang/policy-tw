@@ -23,6 +23,7 @@ import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { policyYear } from '../lib/policy-date'
 import { lineageChain } from '../lib/policy-chain'
+import { officeTitles } from '../lib/politician-office'
 
 const route = useRoute()
 const router = useRouter()
@@ -313,7 +314,7 @@ onMounted(() => { ensurePolicies() })
                       <div class="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
                         <Avatar :src="log.politicianAvatar" :name="log.politicianName" size="xs" class="border border-white shadow-sm shrink-0" />
                         <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.politicianName }}</span>
-                        <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ politicians.find(c => c.id === log.politicianId)?.position }}</span>
+                        <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ officeTitles(politicians.find(c => c.id === log.politicianId)?.offices).join('、') }}</span>
                         <span class="text-[10px] text-slate-300">·</span>
                         <span :class="`text-xs font-bold whitespace-nowrap ${log.isSelected ? 'text-blue-600' : 'text-slate-500'}`">{{ log.policyTitle }}</span>
                       </div>
@@ -357,7 +358,7 @@ onMounted(() => { ensurePolicies() })
                     />
                     <div class="flex-1">
                       <div :class="`text-sm font-black ${isPoliticianSelected(c.id) ? 'text-navy-900' : 'text-slate-400'}`">{{ c.name }}</div>
-                      <div class="text-[11px] text-slate-400 font-bold">{{ c.position }}</div>
+                      <div class="text-[11px] text-slate-400 font-bold">{{ officeTitles(c.offices).join('、') }}</div>
                     </div>
                   </component>
                 </div>
