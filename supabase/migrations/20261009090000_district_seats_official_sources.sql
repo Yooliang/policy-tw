@@ -24,9 +24,11 @@
 --   1. verification_sources 加 election_ids（INTEGER[]，NULL＝每一屆）：選舉公告每屆不同，不能把 2026 的公告附給 2022 的任務。
 --   2. 登錄 2026 年的官方來源（provides＝seats，只有應選名額任務與 district_seats 驗證項會附，名冊類任務的 roster 條件不受影響）：
 --      議員選舉公告、直轄市議員與縣市議員登記彙總表（應選名額欄，供交叉核對）、鄉鎮市民代表與區民代表的索引頁，
---      以及十三縣與四個直轄市原住民區各自的公告 PDF（註明文字可抽或掃描影像）；2022 年登錄中選會 111/08/18 的議員選舉公告。
---   3. contribution_auto_tasks_district_seats 照 20261005004900 的現行定義做三處機械替換：①去掉「公報也寫著應選名額」，指向 current.verification_sources；
---      ②加一句「公告上有幾區就交幾區、別只填 known_districts、名額加總對公告總額」；③hint_sources 換成可到達的網址與說明。
+--      以及十三縣與四個直轄市原住民區各自的公告 PDF（註明文字可抽或掃描影像）；2022 年登錄中選會 111/08/18 的議員選舉公告、
+--      十三縣的鄉鎮市民代表公告與新北、桃園、高雄三個直轄市的區民代表公告（2022 年台中市和平區的公告找不到，沒登錄——該任務由臂的 EXISTS 判斷，提示不說「已附」）。
+--   3. contribution_auto_tasks_district_seats 照 20261005004900 的現行定義做四處機械替換：①去掉「公報也寫著應選名額」，有登錄來源的任務指向 current.verification_sources、
+--      沒登錄的（目前只有 2022 年台中市和平區）老實說「還沒登錄、要自己找」並保留公報線索；②加一句「公告上有幾區就交幾區、別只填 known_districts、名額加總對公告總額」；
+--      ③hint_sources 換成可到達的網址與說明（同樣依有沒有登錄來源分岔）；④FROM 多一個 LATERAL EXISTS 判斷這個（屆別、選舉別、縣市）有沒有登錄來源，條件跟 TS 的 sourceMatches 同一組。
 --      want／have／queued 條件、task_id、target、reward、region 一個字沒動（正式庫唯讀 10-08 parity：44 件任務逐件相同，只有 what_we_need 與 hint_sources 兩欄換字，scripts/district-seats-parity.ts）。
 --   4. TS 端同一個 PR：SOURCE_TASK_TYPES 加 district_seats_missing、district_seats 驗證項附來源、交件骨架提醒補齊選舉區、skill.md 1.83.0。
 --
@@ -289,8 +291,184 @@ VALUES
     ARRAY['seats'],
     'https://web.cec.gov.tw/api/file/72529fa8-25c6-4260-bcbc-7de268017766.pdf', NULL, 'pdf',
     '中央選舉委員會 111/08/18 發布的選舉公告（中選務字第1113150255號，15 頁、文字可抽）。第 3 頁起是直轄市議員、縣（市）議員逐選舉區的表：選舉區、範圍（含「臺北市之平地原住民」「臺北市之山地原住民」這類原住民選舉區）、名額、應選出名額中應有婦女、競選經費最高金額。公告頁：https://web.cec.gov.tw/central/article/45849',
-    '打開 PDF 找這個縣市的每一個選舉區，把「名額」欄逐區抄成 districts；範圍欄寫平地原住民、山地原住民的要加 kind（indigenous_plain、indigenous_mountain）。我們目前記的 2022 議員選舉區只有一般選舉區，原住民選舉區要照公告補上',
+    '打開 PDF 找這個縣市的每一個選舉區，把「名額」欄逐區抄成 districts；範圍欄寫平地原住民、山地原住民的要加 kind（indigenous_plain、indigenous_mountain）。我們目前記的 2022 議員選舉區只有一般選舉區，原住民選舉區要照公告補上。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
     '2026-10-08', 'ok', 3
+  ),
+  (
+    '新竹縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['新竹縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/15e9d416-4b30-493b-9358-d38ad76e6414.pdf', NULL, 'pdf',
+    '新竹縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/hccec/article/35685）。掃描影像（11 頁），抽不出文字，要看圖讀。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '苗栗縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['苗栗縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/91e344e1-caa9-4d09-803f-d8167d5f8f4a.pdf', NULL, 'pdf',
+    '苗栗縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/mlec/article/35688）。掃描影像（5 頁），抽不出文字，要看圖讀。這一份是第22屆鄉鎮市民代表專屬的公告（同則還有鄉鎮市長、村里長各一份）。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '彰化縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['彰化縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/a3fa65a4-add5-4afa-a55a-9b4273fdbe57.pdf', NULL, 'pdf',
+    '彰化縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/chec/article/35620）。文字可抽（16 頁；另有蓋印的掃描版）。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '南投縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['南投縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/113c26cc-3f49-41c6-ae64-98bc2b31fd7c.pdf', NULL, 'pdf',
+    '南投縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/ntec/article/39724）。文字可抽（3 頁，「111年鄉(鎮、市)民代表選舉應選名額及競選經費最高金額」）。同一則公告頁還有鄉鎮市長、村里長的名額表與公告本文。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '雲林縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['雲林縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/0a7e6a6a-e3c9-4e8d-92fe-1b642ed7325e.pdf', NULL, 'pdf',
+    '雲林縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/ylec/article/35704）。掃描影像（20 頁），抽不出文字，要看圖讀。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '嘉義縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['嘉義縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/f8dfafe3-6dcc-4fd9-9ac8-fd968d1b88a6.pdf', NULL, 'pdf',
+    '嘉義縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/cycec/article/35567）。10 頁，大多是影像、文字很少，要看圖讀。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '屏東縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['屏東縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/6c7a1bcd-11d0-43a9-ba04-3885638cd284.pdf', NULL, 'pdf',
+    '屏東縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/ptec/article/35657）。文字可抽（22 頁，檔名「3.111年屏東縣鄉鎮市長代表村(里)長選舉公告」，含各鄉鎮市民代表選舉區與名額；同則的公告本文 12ef0065-02ae-4c29-92cb-284fbdebd621 只有 1 頁）。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '宜蘭縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['宜蘭縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/2513f5b4-2b1a-483e-bcd6-076835299b38.pdf', NULL, 'pdf',
+    '宜蘭縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/ilec/article/35654）。文字可抽（3 頁，「111年第22屆鄉鎮市民代表選舉其選舉區劃分、應選名額及競選經費最高金額一覽表」）。同一則公告頁還有鄉鎮市長、村里長的一覽表與公告本文。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '花蓮縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['花蓮縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/b394a6f1-fb66-42a5-ba4d-4ecd4589b414.pdf', NULL, 'pdf',
+    '花蓮縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/hlec/article/35659）。文字可抽（10 頁；另有蓋關防的掃描版）。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '台東縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['台東縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/70438e6f-b66a-4fa2-a649-c2573ca37f3c.pdf', NULL, 'pdf',
+    '台東縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/ttec/article/35626）。文字可抽（10 頁）。涵蓋鄉鎮市長、鄉鎮市民代表、村里長，找鄉鎮市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '澎湖縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['澎湖縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/51e2b8a4-bef8-42d6-b6e1-7c1beb007cb3.pdf', NULL, 'pdf',
+    '澎湖縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/phec/article/63020）。文字可抽（6 頁；另有蓋印的掃描版）。涵蓋鄉市長、鄉市民代表、村里長，找鄉市民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '金門縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['金門縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/b1193843-d37d-4077-9631-88a6bffd4fca.pdf', NULL, 'pdf',
+    '金門縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/kmec/article/35650）。文字可抽（3 頁）。涵蓋鄉鎮長、鄉鎮民代表、村里長，找鄉鎮民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '連江縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['連江縣'],
+    ARRAY['鄉鎮市民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/7bbd070f-a572-408e-8741-362802d2a1af.pdf', NULL, 'pdf',
+    '連江縣選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/lcec/article/35723）。掃描影像（4 頁），抽不出文字，要看圖讀。涵蓋鄉長、鄉民代表、村長，找鄉民代表的部分。只有一個選舉區的鄉鎮市，選舉區寫「<鄉鎮市>選舉區」',
+    '找「鄉（鎮、市）民代表」的部分，逐鄉鎮市把每個選舉區的「名額」欄抄成 districts（{district: "<鄉鎮市>第01選舉區", seats: N}）；公告的候選人登記須知等其他附件沒有名額。名額加總要對得上公告的鄉鎮市民代表總額。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '新北市選委會 2022 山地原住民區民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['新北市'],
+    ARRAY['直轄市山地原住民區民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/4191f811-24af-4ccd-837e-12317a96de9f.pdf', NULL, 'pdf',
+    '新北市選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/tpcec/article/35560）：烏來區第3屆區長、區民代表及新北市第4屆里長選舉的公告。文字可抽（14 頁），烏來區區長、區民代表與新北市里長各選舉區的名額與經費。逐選舉區列名額',
+    '找區民代表的部分，把每個選舉區的「名額」欄抄成 districts（{district: "<區>第01選舉區", seats: N}）；區長一席、不用交。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '桃園市選委會 2022 山地原住民區民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['桃園市'],
+    ARRAY['直轄市山地原住民區民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/b3f41902-9a46-40f0-b04c-6597f722b42a.pdf', NULL, 'pdf',
+    '桃園市選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/tyec/article/35666）：復興區第3屆區長、區民代表及桃園市第3屆里長選舉的公告。文字可抽（8 頁，標「網站」版）。逐選舉區列名額',
+    '找區民代表的部分，把每個選舉區的「名額」欄抄成 districts（{district: "<區>第01選舉區", seats: N}）；區長一席、不用交。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
+  ),
+  (
+    '高雄市選委會 2022 山地原住民區民代表選舉公告（應選名額）', 'cec', NULL,
+    ARRAY['高雄市'],
+    ARRAY['直轄市山地原住民區民代表'],
+    ARRAY[2022],
+    ARRAY['seats'],
+    'https://web.cec.gov.tw/api/file/54ac4da6-4647-4f9c-b6ed-d8121411cd34.pdf', NULL, 'pdf',
+    '高雄市選舉委員會 111 年發布的選舉公告（公告頁 https://web.cec.gov.tw/khec/article/35662）：桃源區、那瑪夏區、茂林區第3屆區長、區民代表及高雄市第4屆里長選舉的公告。文字可抽（11 頁，高市選一字第1113150116號）。逐選舉區列名額',
+    '找區民代表的部分，把每個選舉區的「名額」欄抄成 districts（{district: "<區>第01選舉區", seats: N}）；區長一席、不用交。web.cec.gov.tw 回網頁而不是 PDF 時，改用 www.cec.gov.tw 的同一路徑（2026-10-09 實測 web 主機對 2022 年的檔案曾回網頁）',
+    '2026-10-08', 'ok', 4
   )
 ON CONFLICT (name) DO NOTHING;
 
@@ -342,8 +520,11 @@ LANGUAGE sql STABLE AS $$
          w.county || ' ' || w.election_id || ' ' || w.election_type || '各選舉區的應選名額：'
            || CASE WHEN h.districts IS NULL THEN '我們一個選舉區都還沒有。'
                    ELSE '我們知道 ' || h.districts || ' 個選舉區、其中 ' || (h.districts - h.with_seats) || ' 個還沒有名額（target.known_districts）。' END
-           || '請找這一屆的選舉公告（附各選舉區應選名額表的 PDF；網址在 current.verification_sources 與 hint_sources，先看那幾個。'
-           || '選舉公報不一定印應選名額，鄉鎮市民代表的公報大多沒有，別在公報裡找半天），'
+           || CASE WHEN s.ok
+                   THEN '請找這一屆的選舉公告（附各選舉區應選名額表的 PDF；網址在 current.verification_sources 與 hint_sources，先看那幾個。'
+                     || '選舉公報不一定印應選名額，鄉鎮市民代表的公報大多沒有，別在公報裡找半天），'
+                   ELSE '請找這一屆的選舉公告（應選名額表；我們還沒登錄這一屆這個縣市的公告網址，要自己找，先看 hint_sources；'
+                     || '已投票的屆別，選舉公報有的在每個選舉區的開頭印著應選名額），' END
            || '把公告上這個縣市每一個選舉區的名額交成一筆 district_seats：election_id 填 ' || w.election_id
            || '、election_type 填「' || w.election_type || '」、region 填「' || w.county || '」，districts 每區一項 {district, seats}，'
            || '原住民選舉區加 kind（indigenous_plain 或 indigenous_mountain）。名額只能照公告抄，不要用候選人數或當選人數推。'
@@ -351,15 +532,24 @@ LANGUAGE sql STABLE AS $$
            || '交件前把你列的名額加總，對一下公告上這個縣市的名額總額。'
            || 'source_urls 第一個放公告本身。',
          CASE WHEN w.election_date < CURRENT_DATE
-              THEN ARRAY['current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）',
+              THEN ARRAY[CASE WHEN s.ok
+                              THEN 'current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）'
+                              ELSE 'https://eebulletin.cec.gov.tw/ ← 中選會選舉公報（我們還沒登錄這一屆這個縣市的公告網址）：依屆別、縣市、選舉別點到每個選舉區的公報，有的在開頭印著應選名額，鄉鎮市民代表的大多沒有' END,
                          'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：標題「公告…選舉之選舉種類、名額、選舉區之劃分、投票日期…」的那一則就是選舉公告，附件 PDF 有各選舉區應選名額表',
                          'https://db.cec.gov.tw/ElecTable/Election ← 中選會選舉資料庫：看得到有哪些選舉區（含原住民選舉區），但當選人數不是名額']
-              ELSE ARRAY['current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）',
+              ELSE ARRAY[CASE WHEN s.ok
+                              THEN 'current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）'
+                              ELSE '（我們還沒登錄這一屆這個縣市的公告網址，先看下面兩條自己找）' END,
                          'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：議員的選舉公告由中選會發布；鄉鎮市民代表、區民代表的由各縣市選委會發布，中選會同一天有一則索引（標題「…鄉(鎮、市)民代表…之選舉公告」），點進你的縣市',
                          '該縣市選舉委員會官網的「選舉公告」（附各選舉區應選名額表；列表頁常回 500，從中選會那則索引進去比較穩）']
          END,
          2, w.county
     FROM want w
+    CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM verification_sources v
+                         WHERE 'seats' = ANY (v.provides)
+                           AND (v.election_types IS NULL OR w.election_type = ANY (v.election_types))
+                           AND (v.regions IS NULL OR w.county = ANY (v.regions))
+                           AND (v.election_ids IS NULL OR cardinality(v.election_ids) = 0 OR w.election_id = ANY (v.election_ids))) AS ok) s
     LEFT JOIN have h ON h.election_id = w.election_id AND h.election_type = w.election_type AND h.region = w.county
    WHERE (h.districts IS NULL OR h.with_seats < h.districts)
      AND NOT EXISTS (SELECT 1 FROM queued q

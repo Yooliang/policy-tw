@@ -7,7 +7,7 @@
  *
  *   A. 文字層（只要 --allow-read）
  *      1. 這支是臂本體的最後一版、緊接 20261005004900；只重定義這一支臂；不寫任何正式資料（INSERT 只進 verification_sources）
- *      2. 臂的新定義＝前一版加三處機械替換（條件、task_id、target、reward、region 一字不動）
+ *      2. 臂的新定義＝前一版加四處機械替換（條件、task_id、target、reward、region 一字不動）
  *      3. 來源列：2026 年議員 22 縣市、鄉鎮市民代表 13 縣、原住民區 4 直轄市都有；2022 年議員一列；provides 只有 seats（不被名冊類任務撿走）；
  *         網址是 web.cec.gov.tw 的 PDF 或頁面；election_ids 標得出屆別
  *      4. TS 端三處（SOURCE_TASK_TYPES、驗證項的來源查詢、屆別比對）；協議 1.83.0 與 skill.md 說明；任務提示不再說「公報寫著應選名額」
@@ -39,37 +39,26 @@ const PREV_SQL = await readMig(PREV);
 const OLD_FN = fnText(PREV_SQL, FN);
 const NEW_FN = fnText(MIG_SQL, FN);
 
-/** 機械式替換（migration 與守門各寫一遍：守門把「前一版」套同樣的替換，必須等於 migration 的新定義） */
-const R1_FROM = "           || '請找這一屆的選舉公告（應選名額表；已投票的屆別，選舉公報每個選舉區的開頭也寫著應選名額），'\n";
-const R2_FROM = "           || '原住民選舉區加 kind（indigenous_plain 或 indigenous_mountain）。名額只能照公告抄，不要用候選人數或當選人數推。'\n";
-const R3_FROM = "         CASE WHEN w.election_date < CURRENT_DATE\n              THEN ARRAY['https://eebulletin.cec.gov.tw/ ← ";
-const mechanical = (old: string): string => {
-  let s = mutate(old, R1_FROM,
-    "           || '請找這一屆的選舉公告（附各選舉區應選名額表的 PDF；網址在 current.verification_sources 與 hint_sources，先看那幾個。'\n" +
-    "           || '選舉公報不一定印應選名額，鄉鎮市民代表的公報大多沒有，別在公報裡找半天），'\n");
-  s = mutate(s, R2_FROM, R2_FROM +
-    "           || '公告上這個縣市有幾個選舉區就交幾個（含原住民選舉區），不要只填 target.known_districts——那只是我們目前知道的，常比公告少；'\n" +
-    "           || '交件前把你列的名額加總，對一下公告上這個縣市的名額總額。'\n");
-  // hint_sources 整塊（從 CASE 到 END,）換成新的
-  const a = s.indexOf("         CASE WHEN w.election_date < CURRENT_DATE\n");
-  assert(a >= 0 && s.indexOf(R3_FROM) === a, "hint_sources 區塊要在原位");
-  const b = s.indexOf("         END,\n", a) + "         END,\n".length;
-  return s.slice(0, a) + HINT_BLOCK + s.slice(b);
-};
-const HINT_BLOCK = `         CASE WHEN w.election_date < CURRENT_DATE
-              THEN ARRAY['current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）',
-                         'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：標題「公告…選舉之選舉種類、名額、選舉區之劃分、投票日期…」的那一則就是選舉公告，附件 PDF 有各選舉區應選名額表',
-                         'https://db.cec.gov.tw/ElecTable/Election ← 中選會選舉資料庫：看得到有哪些選舉區（含原住民選舉區），但當選人數不是名額']
-              ELSE ARRAY['current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）',
-                         'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：議員的選舉公告由中選會發布；鄉鎮市民代表、區民代表的由各縣市選委會發布，中選會同一天有一則索引（標題「…鄉(鎮、市)民代表…之選舉公告」），點進你的縣市',
-                         '該縣市選舉委員會官網的「選舉公告」（附各選舉區應選名額表；列表頁常回 500，從中選會那則索引進去比較穩）']
-         END,
-`;
+/** 機械式替換（migration 與守門各寫一遍：守門把「前一版」套同樣的替換，必須等於 migration 的新定義）。四處：公報那句、補齊選舉區那句、hint_sources、FROM 的 LATERAL EXISTS */
+const REPLACEMENTS: Array<[string, string]> = [
+  ["           || '請找這一屆的選舉公告（應選名額表；已投票的屆別，選舉公報每個選舉區的開頭也寫著應選名額），'\n",
+   "           || CASE WHEN s.ok\n                   THEN '請找這一屆的選舉公告（附各選舉區應選名額表的 PDF；網址在 current.verification_sources 與 hint_sources，先看那幾個。'\n                     || '選舉公報不一定印應選名額，鄉鎮市民代表的公報大多沒有，別在公報裡找半天），'\n                   ELSE '請找這一屆的選舉公告（應選名額表；我們還沒登錄這一屆這個縣市的公告網址，要自己找，先看 hint_sources；'\n                     || '已投票的屆別，選舉公報有的在每個選舉區的開頭印著應選名額），' END\n"],
+  ["           || '原住民選舉區加 kind（indigenous_plain 或 indigenous_mountain）。名額只能照公告抄，不要用候選人數或當選人數推。'\n",
+   "           || '原住民選舉區加 kind（indigenous_plain 或 indigenous_mountain）。名額只能照公告抄，不要用候選人數或當選人數推。'\n           || '公告上這個縣市有幾個選舉區就交幾個（含原住民選舉區），不要只填 target.known_districts——那只是我們目前知道的，常比公告少；'\n           || '交件前把你列的名額加總，對一下公告上這個縣市的名額總額。'\n"],
+  ["         CASE WHEN w.election_date < CURRENT_DATE\n              THEN ARRAY['https://eebulletin.cec.gov.tw/ ← 中選會選舉公報：依屆別、縣市、選舉別點到每個選舉區的公報，開頭寫著應選名額',\n                         '該縣市選舉委員會官網的「選舉公告」（附各選舉區應選名額表）',\n                         'https://db.cec.gov.tw/ElecTable/Election ← 中選會選舉資料庫：看得到有哪些選舉區（含原住民選舉區），但當選人數不是名額']\n              ELSE ARRAY['該縣市選舉委員會官網的「選舉公告」（發布選舉公告那一份，附各選舉區應選名額表）',\n                         'https://web.cec.gov.tw/ ← 中選會：議員選舉區劃分與應選名額的公告、登記彙總表']\n         END,\n",
+   "         CASE WHEN w.election_date < CURRENT_DATE\n              THEN ARRAY[CASE WHEN s.ok\n                              THEN 'current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）'\n                              ELSE 'https://eebulletin.cec.gov.tw/ ← 中選會選舉公報（我們還沒登錄這一屆這個縣市的公告網址）：依屆別、縣市、選舉別點到每個選舉區的公報，有的在開頭印著應選名額，鄉鎮市民代表的大多沒有' END,\n                         'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：標題「公告…選舉之選舉種類、名額、選舉區之劃分、投票日期…」的那一則就是選舉公告，附件 PDF 有各選舉區應選名額表',\n                         'https://db.cec.gov.tw/ElecTable/Election ← 中選會選舉資料庫：看得到有哪些選舉區（含原住民選舉區），但當選人數不是名額']\n              ELSE ARRAY[CASE WHEN s.ok\n                              THEN 'current.verification_sources ← 這一屆這個縣市的選舉公告網址已經附在任務裡，先看那幾個（PDF 在 web.cec.gov.tw/api/file/<編號>.pdf）'\n                              ELSE '（我們還沒登錄這一屆這個縣市的公告網址，先看下面兩條自己找）' END,\n                         'https://web.cec.gov.tw/central/article/list/145 ← 中選會最新消息：議員的選舉公告由中選會發布；鄉鎮市民代表、區民代表的由各縣市選委會發布，中選會同一天有一則索引（標題「…鄉(鎮、市)民代表…之選舉公告」），點進你的縣市',\n                         '該縣市選舉委員會官網的「選舉公告」（附各選舉區應選名額表；列表頁常回 500，從中選會那則索引進去比較穩）']\n         END,\n"],
+  ["    FROM want w\n    LEFT JOIN have h ON",
+   "    FROM want w\n    CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM verification_sources v\n                         WHERE 'seats' = ANY (v.provides)\n                           AND (v.election_types IS NULL OR w.election_type = ANY (v.election_types))\n                           AND (v.regions IS NULL OR w.county = ANY (v.regions))\n                           AND (v.election_ids IS NULL OR cardinality(v.election_ids) = 0 OR w.election_id = ANY (v.election_ids))) AS ok) s\n    LEFT JOIN have h ON"],
+];
+const mechanical = (old: string): string => REPLACEMENTS.reduce((s, [from, to]) => mutate(s, from, to), old);
 
 const codeOf = (sql: string) => sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
 const COUNCIL_COUNTIES = ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣", "澎湖縣", "金門縣", "連江縣"];
 const REP_COUNTIES = ["新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣", "澎湖縣", "金門縣", "連江縣"];
 const IND_COUNTIES = ["新北市", "桃園市", "台中市", "高雄市"];
+/** 2022 年找不到官方公告的（臺中市和平區：台中市選委會網站與全站文章編號都查不到 111/08 的選舉種類、名額公告）——這幾件任務的提示要老實說「還沒登錄」，不能說「已附」 */
+const GAP_2022_IND = ["台中市"];
+const EXPECTED_UNCOVERED = ["auto:district_seats_missing:2022:台中市:直轄市山地原住民區民代表"];
 
 // ============================================================
 // A. 文字層（每條守門寫成「吃 migration 文字」的函式，C 組拿改壞的文字餵進去）
@@ -85,7 +74,7 @@ const SEATS_GUARDS: Record<string, (sql: string) => void> = {
     assertEquals([...new Set(writes)], ["verification_sources"], "只動查證來源這張表（來源清單與 election_ids 欄）");
     assert(!/election_districts\s+SET|INSERT INTO election_districts/i.test(code), "不用 migration 寫名額（資料走流程）");
   },
-  /** 新定義＝前一版＋三處機械替換 */
+  /** 新定義＝前一版＋四處機械替換 */
   mechanical(sql) {
     assertEquals(fnText(sql, FN), mechanical(OLD_FN));
   },
@@ -105,7 +94,14 @@ const SEATS_GUARDS: Record<string, (sql: string) => void> = {
   wording(sql) {
     const fn = fnText(sql, FN);
     assert(!fn.includes("選舉公報每個選舉區的開頭也寫著應選名額"), "不能再說公報開頭寫著應選名額");
-    assert(!fn.includes("https://eebulletin.cec.gov.tw/ ← 中選會選舉公報"), "hint_sources 不再把公報當第一來源");
+    // 公報線索只在「這個任務沒登錄來源」那一支（ELSE）裡出現，有來源的任務不再被帶去公報
+    assertEquals(fn.split("https://eebulletin.cec.gov.tw/").length - 1, 1);
+    assertStringIncludes(fn, "ELSE 'https://eebulletin.cec.gov.tw/ ← 中選會選舉公報（我們還沒登錄這一屆這個縣市的公告網址）");
+    // 說「已附」的句子只准出現在 s.ok 為真的那一支（沒登錄來源的任務不能被告知「已附」）
+    assert(/CASE WHEN s\.ok\s+THEN '請找這一屆的選舉公告（附各選舉區應選名額表的 PDF；網址在 current\.verification_sources/.test(fn));
+    assertEquals(fn.split("網址在 current.verification_sources").length - 1, 1);
+    assertEquals(fn.split("已經附在任務裡").length - 1, 2, "hint_sources 兩個分支各一句「已經附在任務裡」，都在 s.ok 為真的那一支");
+    assert(/CROSS JOIN LATERAL \(SELECT EXISTS \(SELECT 1 FROM verification_sources v\s+WHERE 'seats' = ANY \(v\.provides\)/.test(fn), "有沒有登錄來源要真的問 verification_sources");
     assertStringIncludes(fn, "current.verification_sources");
     assertStringIncludes(fn, "不要只填 target.known_districts");
     assertStringIncludes(fn, "名額加總");
@@ -129,8 +125,15 @@ const SEATS_GUARDS: Record<string, (sql: string) => void> = {
     assertEquals(regionsOf(2026, "鄉鎮市民代表"), new Set(REP_COUNTIES), "2026 年鄉鎮市民代表 13 縣都要有來源");
     assertEquals(regionsOf(2026, "直轄市山地原住民區民代表"), new Set(IND_COUNTIES), "2026 年原住民區民代表 4 直轄市都要有來源");
     // 每個縣自己的公告 PDF：13 縣＋4 直轄市各恰好一列（索引頁另算）
-    for (const c of REP_COUNTIES) assertEquals(rows.filter((r) => r.election_types.includes("鄉鎮市民代表") && r.regions.length === 1 && r.regions[0] === c && r.access === "pdf").length, 1, `${c}：鄉鎮市民代表的公告 PDF 恰好一列`);
-    for (const c of IND_COUNTIES) assertEquals(rows.filter((r) => r.election_types.includes("直轄市山地原住民區民代表") && r.regions.length === 1 && r.regions[0] === c && r.access === "pdf").length, 1, `${c}：區民代表的公告 PDF 恰好一列`);
+    assertEquals(regionsOf(2022, "鄉鎮市民代表"), new Set(REP_COUNTIES), "2022 年鄉鎮市民代表 13 縣都要有來源（111/08 各縣選委會的公告）");
+    assertEquals(regionsOf(2022, "直轄市山地原住民區民代表"), new Set(IND_COUNTIES.filter((c) => !GAP_2022_IND.includes(c))), "2022 年區民代表：4 直轄市，除了已知找不到的");
+    for (const year of [2022, 2026]) {
+      for (const c of REP_COUNTIES) assertEquals(rows.filter((r) => r.election_ids[0] === year && r.election_types.includes("鄉鎮市民代表") && r.regions.length === 1 && r.regions[0] === c && r.access === "pdf").length, 1, `${year} ${c}：鄉鎮市民代表的公告 PDF 恰好一列`);
+      for (const c of IND_COUNTIES) {
+        const n = rows.filter((r) => r.election_ids[0] === year && r.election_types.includes("直轄市山地原住民區民代表") && r.regions.length === 1 && r.regions[0] === c && r.access === "pdf").length;
+        assertEquals(n, year === 2022 && GAP_2022_IND.includes(c) ? 0 : 1, `${year} ${c}：區民代表的公告 PDF`);
+      }
+    }
     // 彙總表兩份加起來剛好是議員全部縣市（六都＋其餘 16），不重疊
     const summaries = rows.filter((r) => r.name.includes("登記情形彙總表"));
     assertEquals(summaries.length, 2);
@@ -167,7 +170,7 @@ Deno.test("A1 範圍：只重定義 district_seats 臂、只動查證來源這�
   assertEquals(definers.slice(i + 1), [], "這支之後又有人重新定義臂：要以最新那版為底重做");
 });
 
-Deno.test("A2 臂的新定義＝前一版的現行定義＋三處機械替換；條件與輸出欄位一字不動", () => {
+Deno.test("A2 臂的新定義＝前一版的現行定義＋四處機械替換；條件與輸出欄位一字不動", () => {
   SEATS_GUARDS.mechanical(MIG_SQL);
   SEATS_GUARDS.untouched(MIG_SQL);
 });
@@ -231,6 +234,8 @@ INSERT INTO election_districts (election_id, election_type, region, sub_region, 
   (2022, '鄉鎮市長', '屏東縣', '屏東市', 'at_large', 1), (2026, '鄉鎮市長', '屏東縣', '屏東市', 'at_large', 1),
   (2022, '鄉鎮市長', '台東縣', '台東市', 'at_large', 1), (2026, '鄉鎮市長', '台東縣', '台東市', 'at_large', 1),
   (2022, '直轄市山地原住民區長', '新北市', '烏來區', 'at_large', 1), (2026, '直轄市山地原住民區長', '新北市', '烏來區', 'at_large', 1),
+  -- 2022 年台中市和平區：官方公告找不到，沒登錄來源（提示要老實說「還沒登錄」）
+  (2022, '直轄市山地原住民區長', '台中市', '和平區', 'at_large', 1),
   -- 議員：台北市 2026 有兩區沒名額、台中市 2026 已經有名額（不派）、屏東縣 2026 一個選舉區列都沒有（派）
   (2026, '縣市議員', '台北市', '第01選舉區', 'district', NULL), (2026, '縣市議員', '台北市', '第02選舉區', 'district', NULL),
   (2026, '縣市議員', '台中市', '第01選舉區', 'district', 5),
@@ -244,12 +249,12 @@ INSERT INTO contributions (contribution_type, status, payload) VALUES
 type Out = { task_id: string; task_type: string; target: unknown; reward: number; region: string; what_we_need: string; hint_sources: string[] };
 const readOut = async (db: PGlite): Promise<Out[]> => (await db.query<Out>(`SELECT task_id, task_type, target, reward, region, what_we_need, hint_sources FROM ${FN}() ORDER BY task_id COLLATE "C"`)).rows;
 
-async function buildDb(migSql: string = MIG_SQL): Promise<{ db: PGlite; before: Out[]; after: Out[] }> {
+async function buildDb(migSql: string = MIG_SQL, seed: string = SEED): Promise<{ db: PGlite; before: Out[]; after: Out[] }> {
   const tableMig = await readMig(TABLE_MIG);
   const ddl = tableMig.slice(tableMig.indexOf("CREATE TABLE IF NOT EXISTS verification_sources"), tableMig.indexOf("COMMENT ON TABLE verification_sources"));
   const db = new PGlite();
   await db.exec(BASE_DDL(ddl));
-  await db.exec(SEED);
+  await db.exec(seed);
   await db.exec(OLD_FN);
   const before = await readOut(db);
   await db.exec(migSql);
@@ -259,8 +264,8 @@ async function buildDb(migSql: string = MIG_SQL): Promise<{ db: PGlite; before: 
 
 /** 舊定義與新定義逐件比：任務本體一件不差、說明與提示要換字、條件行為不變（還原驗證 C14 拿「又換回舊定義」餵進來，必須紅） */
 function parityCheck(before: Out[], after: Out[]): void {
-  // 預期的任務：議員 2 屆×5 縣市（台中 2026 已有名額不派）9 件、鄉鎮市民代表 3 件（台東縣 2026 有人交了在等票不派）、區民代表 2 件
-  assertEquals(before.length, 14);
+  // 預期的任務：議員 2 屆×5 縣市（台中 2026 已有名額不派）9 件、鄉鎮市民代表 3 件（台東縣 2026 有人交了在等票不派）、區民代表 3 件（新北 2022、2026、台中 2022）
+  assertEquals(before.length, 15);
   assertEquals(after.map((r) => r.task_id), before.map((r) => r.task_id));
   for (let i = 0; i < before.length; i++) {
     const [b, a] = [before[i], after[i]];
@@ -279,17 +284,40 @@ Deno.test("B1 行為層：同一份資料上舊定義與新定義逐件比——
   parityCheck(before, after);
 });
 
-Deno.test("B2 行為層：新提示的文字——沒有「公報寫著應選名額」、有 current.verification_sources、要求公告有幾區交幾區；已投票與未投票的屆別提示不同", async () => {
-  const { after } = await buildDb();
+/** 這個任務在登記的來源裡找得到幾個（跟 /next 附來源同一支 sourcesForTask） */
+function attachedCount(all: VerificationSource[], r: Out): number {
+  const t = r.target as { election_id: number; election_type: string };
+  return sourcesForTask(all, { region: r.region, electionType: t.election_type, electionId: t.election_id, need: ["seats"] }).length;
+}
+
+/** 提示說的跟實際附不附得到來源要一致：附得到才說「已附」；附不到就老實說「還沒登錄」並保留公報線索（還原驗證 C15、C16 餵改壞的 migration 進來，必須紅） */
+function wordingCheck(after: Out[], all: VerificationSource[]): void {
   for (const r of after) {
-    assertStringIncludes(r.what_we_need, "current.verification_sources");
+    const covered = attachedCount(all, r) > 0;
     assertStringIncludes(r.what_we_need, "不要只填 target.known_districts");
     assertStringIncludes(r.what_we_need, "不要用候選人數或當選人數推");
-    assert(!r.what_we_need.includes("選舉公報每個選舉區的開頭也寫著應選名額"));
-    assertEquals(r.hint_sources.length, 3);
-    assertStringIncludes(r.hint_sources[0], "current.verification_sources");
+    assertEquals(r.hint_sources.length, 3, r.task_id);
     assertStringIncludes(r.hint_sources[1], "https://web.cec.gov.tw/central/article/list/145");
+    assertEquals(r.what_we_need.includes("網址在 current.verification_sources"), covered, `${r.task_id}：只有真的附得到來源才能說「網址在 current.verification_sources」`);
+    assertEquals(r.hint_sources[0].startsWith("current.verification_sources"), covered, `${r.task_id}：hint_sources 第一條`);
+    if (covered) {
+      assert(!r.what_we_need.includes("還沒登錄"), r.task_id);
+      assert(!r.what_we_need.includes("選舉公報每個選舉區的開頭也寫著應選名額"));
+    } else {
+      assertStringIncludes(r.what_we_need, "我們還沒登錄這一屆這個縣市的公告網址");
+      assertStringIncludes(r.what_we_need, "選舉公報有的在每個選舉區的開頭印著應選名額");
+      assert(/還沒登錄/.test(r.hint_sources[0]), `${r.task_id}：沒來源的任務 hint_sources 第一條要說還沒登錄`);
+    }
   }
+}
+
+Deno.test("B2 行為層：提示跟有沒有附到來源一致——有來源的說「網址在 current.verification_sources」、沒來源的老實說「還沒登錄」並保留公報線索；已投票與未投票的屆別提示不同", async () => {
+  const { db, after } = await buildDb();
+  const all = await sourceRows(db);
+  wordingCheck(after, all);
+  const gap = after.find((r) => r.task_id === "auto:district_seats_missing:2022:台中市:直轄市山地原住民區民代表")!;
+  assertEquals(attachedCount(all, gap), 0, "合成資料裡 2022 年台中市區民代表是沒登錄來源的那一件");
+  assertStringIncludes(gap.hint_sources[0], "https://eebulletin.cec.gov.tw/");
   const past = after.find((r) => r.task_id === "auto:district_seats_missing:2022:台北市:縣市議員")!;
   const upcoming = after.find((r) => r.task_id === "auto:district_seats_missing:2026:台北市:縣市議員")!;
   assertStringIncludes(past.hint_sources[2], "db.cec.gov.tw");
@@ -320,8 +348,11 @@ async function selectionCheck(db: PGlite): Promise<void> {
   assertEquals(rep.length, 2);
   assert(rep[0].startsWith("中選會 2026 鄉鎮市長、鄉鎮市民代表、村里長選舉公告索引") || rep[0].startsWith("屏東縣選委會"), rep.join("、"));
   assert(rep.some((n) => n.startsWith("屏東縣選委會")) && rep.some((n) => n.includes("索引")));
-  // 2022 年的鄉鎮市民代表：沒登錄就沒有（不拿 2026 的充數）
-  assertEquals(q("屏東縣", "鄉鎮市民代表", 2022), []);
+  // 2022 年的鄉鎮市民代表：只有 2022 年屏東縣自己的公告（不拿 2026 的充數）
+  assertEquals(names(q("屏東縣", "鄉鎮市民代表", 2022)), ["屏東縣選委會 2022 鄉鎮市民代表選舉公告（應選名額）"]);
+  // 2022 年區民代表：新北市有、台中市（和平區）找不到公告所以沒登錄——要老實是空的，不拿別屆別縣的充數
+  assertEquals(names(q("新北市", "直轄市山地原住民區民代表", 2022)), ["新北市選委會 2022 山地原住民區民代表選舉公告（應選名額）"]);
+  assertEquals(q("台中市", "直轄市山地原住民區民代表", 2022), []);
   // 原住民區民代表：新北市烏來區
   const ind = names(q("新北市", "直轄市山地原住民區民代表", 2026));
   assert(ind.some((n) => n.startsWith("新北市選委會")) && ind.some((n) => n.includes("山地原住民區長、區民代表選舉公告索引")), ind.join("、"));
@@ -329,7 +360,7 @@ async function selectionCheck(db: PGlite): Promise<void> {
   for (const need of [["candidacy", "district", "roster"], ["candidacy", "district"], ["photo", "education", "experience", "district", "policy"], ["birth_year", "candidacy"]]) {
     assertEquals(sourcesForTask(all, { region: "屏東縣", electionType: "縣市議員", electionId: 2026, need }).filter((s) => s.provides.includes("seats")), [], `need=${need}`);
   }
-  assert(sourcesForTask(all, { region: "屏東縣", electionType: "鄉鎮市民代表", need: ["seats"] }).length >= 2, "沒給屆別＝不篩屆別");
+  assert(sourcesForTask(all, { region: "屏東縣", electionType: "鄉鎮市民代表", need: ["seats"] }).length >= 3, "沒給屆別＝不篩屆別（2026 兩個、2022 一個）");
   // 驗證項：district_seats 交件帶 election_id（整數），查詢與任務同一組條件
   const vq = verifySourceQuery("district_seats", { election_id: 2022, election_type: "縣市議員", region: "台北市" })!;
   assertEquals(names(sourcesForTask(all, vq)), tp22);
@@ -376,6 +407,32 @@ Deno.test("B5 sourceMatches 屆別：來源沒填 election_ids＝每一屆；有
   assert(sourceMatches({ ...base, election_ids: [2026] }, { electionId: null }));
 });
 
+
+// ── 端到端：正式庫上的每一個（屆別、選舉別、縣市）任務都要有來源，否則提示不准說「已附」 ──────────────
+// 合成資料照正式庫 10-06 派工當下的形狀：2022 與 2026 各 22 縣市議員、13 縣鄉鎮市民代表、4 直轄市區民代表（共 78 件），沒有任何交件
+const FULL_SEED = `
+INSERT INTO elections VALUES (2022, '2022-11-26', ARRAY[${ALL_TYPES.map((t) => `'${t}'`).join(",")}]), (2026, '2099-11-28', ARRAY[${ALL_TYPES.map((t) => `'${t}'`).join(",")}]);
+INSERT INTO admin_divisions VALUES ${COUNCIL_COUNTIES.map((c) => `('county', '${c.replace("台", "臺")}')`).join(", ")};
+INSERT INTO election_districts (election_id, election_type, region, sub_region, district_kind, seats) VALUES
+${[2022, 2026].flatMap((y) => [
+  ...REP_COUNTIES.map((c) => `  (${y}, '鄉鎮市長', '${c}', '某鄉', 'at_large', 1)`),
+  ...IND_COUNTIES.map((c) => `  (${y}, '直轄市山地原住民區長', '${c}', '某區', 'at_large', 1)`),
+]).join(",\n")};
+`;
+
+/** want 裡每一件都要有來源（除了已知找不到的），提示說「已附」的才是真的附得到；SQL 的 EXISTS 與 TS 的 sourcesForTask 同一個答案 */
+function coverageCheck(after: Out[], all: VerificationSource[]): void {
+  assertEquals(after.length, 78, "正式庫派工當下的 78 件：2 屆 ×（22 議員＋13 代表＋4 區民代表）");
+  const uncovered = after.filter((r) => attachedCount(all, r) === 0).map((r) => r.task_id).sort();
+  assertEquals(uncovered, EXPECTED_UNCOVERED, "沒登錄來源的任務只能是已知找不到的那幾件；多出來的要補登錄，補不到就加進 EXPECTED_UNCOVERED 並在 PR 說明");
+  wordingCheck(after, all);
+}
+
+Deno.test("B6 端到端：正式庫上每個（屆別、選舉別、縣市）任務至少附到 1 個來源；附不到的只有已知找不到的，而且它們的提示不說「已附」", async () => {
+  const { db, after } = await buildDb(MIG_SQL, FULL_SEED);
+  coverageCheck(after, await sourceRows(db));
+});
+
 // ============================================================
 // C. 還原驗證：把 migration／TS 改壞一處，對應的守門必須紅
 // ============================================================
@@ -397,9 +454,9 @@ const MIG_MUTATIONS: Array<{ why: string; guard: keyof typeof SEATS_GUARDS; muta
   { why: "順手把 reward 改成 3，mechanical 要紅", guard: "mechanical", mutate: (s) => mutate(s, "         2, w.county\n", "         3, w.county\n") },
   { why: "順手用 migration 寫名額（UPDATE election_districts），scope 要紅", guard: "scope", mutate: (s) => s.replace("NOTIFY pgrst", () => "UPDATE election_districts SET seats = 1 WHERE seats IS NULL;\nNOTIFY pgrst") },
   { why: "順手重定義別的臂，scope 要紅", guard: "scope", mutate: (s) => s.replace("NOTIFY pgrst", () => "CREATE OR REPLACE FUNCTION contribution_auto_tasks_region_gap() RETURNS TABLE(x int) LANGUAGE sql AS $$ SELECT 1 $$;\nNOTIFY pgrst") },
-  { why: "有一列來源 provides 多了 district（會被名冊類與預設任務撿走），rows 要紅", guard: "rows", mutate: (s) => mutate(s, "    ARRAY[2022],\n    ARRAY['seats'],", "    ARRAY[2022],\n    ARRAY['seats', 'district'],") },
-  { why: "2022 的那列忘了標屆別（election_ids 寫成 2026），rows 要紅（2022 的議員縣市沒有來源）", guard: "rows", mutate: (s) => mutate(s, "    ARRAY[2022],\n    ARRAY['seats'],", "    ARRAY[2026],\n    ARRAY['seats'],") },
-  { why: "宜蘭縣的鄉鎮市民代表公告被刪掉，rows 要紅", guard: "rows", mutate: (s) => mutate(s, "ARRAY['宜蘭縣'],\n    ARRAY['鄉鎮市民代表'],", "ARRAY['宜蘭縣'],\n    ARRAY['村里長'],") },
+  { why: "有一列來源 provides 多了 district（會被名冊類與預設任務撿走），rows 要紅", guard: "rows", mutate: (s) => mutate(s, "ARRAY['縣市議員'],\n    ARRAY[2022],\n    ARRAY['seats'],", "ARRAY['縣市議員'],\n    ARRAY[2022],\n    ARRAY['seats', 'district'],") },
+  { why: "2022 的那列忘了標屆別（election_ids 寫成 2026），rows 要紅（2022 的議員縣市沒有來源）", guard: "rows", mutate: (s) => mutate(s, "ARRAY['縣市議員'],\n    ARRAY[2022],", "ARRAY['縣市議員'],\n    ARRAY[2026],") },
+  { why: "宜蘭縣的鄉鎮市民代表公告被刪掉，rows 要紅", guard: "rows", mutate: (s) => mutate(s, "ARRAY['宜蘭縣'],\n    ARRAY['鄉鎮市民代表'],\n    ARRAY[2026],", "ARRAY['宜蘭縣'],\n    ARRAY['村里長'],\n    ARRAY[2026],") },
   { why: "網址換成別的網站，rows 要紅", guard: "rows", mutate: (s) => mutate(s, "https://web.cec.gov.tw/api/file/715772a7-6820-4bdb-8a57-36e5e6fd13a3.pdf", "https://example.com/715772a7-6820-4bdb-8a57-36e5e6fd13a3.pdf") },
 ];
 MIG_MUTATIONS.forEach((m, i) => {
@@ -414,7 +471,7 @@ MIG_MUTATIONS.forEach((m, i) => {
 Deno.test("C13 還原驗證（行為層）：2022 那列的 election_ids 寫成 2026，B3 的來源篩選要紅（先確認沒改壞時是綠的）", async () => {
   const good = await buildDb();
   await selectionCheck(good.db);
-  const bad = mutate(MIG_SQL, "    ARRAY[2022],\n    ARRAY['seats'],", "    ARRAY[2026],\n    ARRAY['seats'],");
+  const bad = mutate(MIG_SQL, "ARRAY['縣市議員'],\n    ARRAY[2022],", "ARRAY['縣市議員'],\n    ARRAY[2026],");
   const { db } = await buildDb(bad);
   let red = false;
   try {
@@ -432,6 +489,36 @@ Deno.test("C14 還原驗證（行為層）：臂換回舊定義（等於沒改�
   assert(oldFnInMig !== MIG_SQL);
   const bad = await buildDb(oldFnInMig);
   assert(throws(() => parityCheck(bad.before, bad.after)), "舊定義放回去，輸出跟改前一樣，B1 必須紅");
+});
+
+const COVERAGE_MUTATIONS: Array<{ why: string; mutate: (s: string) => string }> = [
+  {
+    why: "2022 年澎湖縣的鄉鎮市民代表公告被刪掉（任務附不到來源），提示還說「已附」——B6 要紅（EXPECTED_UNCOVERED 與提示一致性）",
+    mutate: (s) => mutate(s, "ARRAY['澎湖縣'],\n    ARRAY['鄉鎮市民代表'],\n    ARRAY[2022],", "ARRAY['澎湖縣'],\n    ARRAY['村里長'],\n    ARRAY[2022],"),
+  },
+  {
+    why: "臂的 EXISTS 問錯欄位（'roster' 而不是 'seats'）：全部任務都被當成沒來源，提示跟實際附到的來源不一致，B6 要紅",
+    mutate: (s) => mutate(s, "WHERE 'seats' = ANY (v.provides)", "WHERE 'roster' = ANY (v.provides)"),
+  },
+  {
+    why: "臂的 EXISTS 不比屆別：2022 年台中市區民代表被 2026 的來源撐成「有來源」，提示說「已附」但實際附不到，B6 要紅",
+    mutate: (s) => mutate(s, " AND (v.election_ids IS NULL OR cardinality(v.election_ids) = 0 OR w.election_id = ANY (v.election_ids))) AS ok)", ") AS ok)"),
+  },
+  {
+    why: "臂不分岔，一律說「已附」（CASE WHEN s.ok 換成 CASE WHEN true）——沒來源的任務被騙，B6 要紅",
+    mutate: (s) => mutate(s, "CASE WHEN s.ok\n                   THEN '請找這一屆", "CASE WHEN true\n                   THEN '請找這一屆"),
+  },
+];
+COVERAGE_MUTATIONS.forEach((m, i) => {
+  Deno.test(`C14${String.fromCharCode(97 + i)} 還原驗證（端到端）：${m.why}`, async () => {
+    const good = await buildDb(MIG_SQL, FULL_SEED);
+    coverageCheck(good.after, await sourceRows(good.db));
+    const bad = m.mutate(MIG_SQL);
+    assert(bad !== MIG_SQL);
+    const r = await buildDb(bad, FULL_SEED);
+    const all = await sourceRows(r.db);
+    assert(throws(() => coverageCheck(r.after, all)), "改壞之後 B6 的端到端守門必須紅");
+  });
 });
 
 const TS_MUTATIONS: Array<{ why: string; file: string; mutate: (s: string) => string; check: (s: string) => void }> = [
