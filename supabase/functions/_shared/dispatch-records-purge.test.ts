@@ -6,7 +6,7 @@
  *
  * 兩個 schema 各守各的（policy-jp #498 審查：日本站的同名表一樣會長大，清理排程是另一條、保留天數是另一份設定）：
  *   public    正見：dispatch_records_purge() 與排程 dispatch-records-purge（migration 20261009080000）
- *   policy_jp 日本站：policy_jp.dispatch_records_purge() 與排程 policy-jp-dispatch-records-purge（migration 20261009110000_policy_jp_dispatch.sql）
+ *   policy_jp 日本站：policy_jp.dispatch_records_purge() 與排程 policy-jp-dispatch-records-purge（migration 20261009130000_policy_jp_dispatch.sql）
  * 怎麼分：
  *   程式端——jp-next／jp-report 與 _shared/jp/ 底下的檔案，client 固定 db.schema=policy_jp（_shared/jp/client.ts），它們的 .from("verify_dispatches") 讀的是 policy_jp 的表；其餘檔案是 public。
  *   SQL 端——函式／視圖帶 policy_jp. 前綴的屬於 policy_jp；查詢裡 FROM／JOIN 的表帶前綴的以前綴為準，沒帶前綴的跟著所在函式的 schema（policy_jp 的函式釘 search_path）。
@@ -33,7 +33,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 const ROOT = new URL("../../../", import.meta.url);
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const PURGE_MIG = "20261009080000_dispatch_records_purge.sql";
-const JP_MIG = "20261009110000_policy_jp_dispatch.sql";
+const JP_MIG = "20261009130000_policy_jp_dispatch.sql";
 const TABLES = ["verify_dispatches", "contribution_task_skips"] as const;
 type Table = typeof TABLES[number];
 const TIME_COL: Record<Table, string> = { verify_dispatches: "dispatched_at", contribution_task_skips: "skipped_at" };

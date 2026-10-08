@@ -1,7 +1,7 @@
 -- 日本站「自動發現選舉」：任期満了快到、卻沒有對應選舉的團體 → 派 election_discovery 任務（policy-jp #41 ③、PR②）
 -- ============================================================
 --
--- 前提：20261009110000_policy_jp_dispatch.sql（派工機制）。
+-- 前提：20261009130000_policy_jp_dispatch.sql（派工機制）。
 --
 -- 原則（policy-jp #39 的 10/08 定案）：**程式不產生選舉資料。** 這支只找缺口、派任務；代理附選管的告示交件，
 --   共識後才寫進 elections（落庫是下一個 PR）。
@@ -9,12 +9,12 @@
 --   * 查到日程 → contribution_type = election（新型別，照「加新型別要清點四處」：本檔的 CHECK、jp/contribution-schema.ts、jp/consensus.ts、日本站 skill.md）
 --   * 選管還沒公布 → no_change，outcome = not_found，checked_urls 放看過的選管頁（正見既有的結果值，不另發明）
 -- 新增一支派工臂照正見的三處（CLAUDE.md「新增一支派工臂要三處一起加」）：總表多一行 UNION 分支、activity_arm_names() 多一個名字、
---   activity_rules 種一條規則。總表與名單是 110000 的版本加一行，守門 policy-jp-election-discovery.test.ts 做替換比對。
+--   activity_rules 種一條規則。總表與名單是 130000 的版本加一行，守門 policy-jp-election-discovery.test.ts 做替換比對。
 --
 -- 缺口的來源：總務省「地方公共団体の議会の議員及び長の任期満了に関する調」（每年 11/1 現在）。存成 term_expirations：
 --   * 每一列掛出處（source_id NOT NULL → sources）；
 --   * 只當缺口的來源，任何函式都不從它建 elections 列（測試檢查 seed 後 elections 仍是 0 列）。
---   資料由 20261009131000_policy_jp_term_expirations_r08.sql 匯入（policy-jp 的 scripts/fetch/term-expirations-sql.mjs 產生）。
+--   資料由 20261009130200_policy_jp_term_expirations_r08.sql 匯入（policy-jp 的 scripts/fetch/term-expirations-sql.mjs 產生）。
 --
 -- 範圍：投票日 2027-01-01 以後（params.scope_from）。任期満了選舉在満了日前 30 天內投票（公職選挙法 33 条），
 --   所以満了日 T 的投票日在 [T−30, T−1]。T−1 ≥ scope_from 才算缺口；T−30 < scope_from 的（投票日可能在 2026 年）
@@ -57,7 +57,7 @@ GRANT ALL ON policy_jp.term_expirations TO service_role;
 -- 2. 交件型別 election（查到的選舉日程；落庫是下一個 PR）
 -- ------------------------------------------------------------
 -- 名字刻意跟正見的 contributions_contribution_type_check 不同：正見的守門（thresholds、district-seats 等）找「最後一支 ADD 這個名字的 migration」
--- 檢查正見的型別清單，同名會被誤認成正見的最新版本。先拿掉 110000 欄位上的那條（PostgreSQL 自動命名），再加日本站自己的
+-- 檢查正見的型別清單，同名會被誤認成正見的最新版本。先拿掉 130000 欄位上的那條（PostgreSQL 自動命名），再加日本站自己的
 ALTER TABLE policy_jp.contributions DROP CONSTRAINT IF EXISTS contributions_contribution_type_check;
 ALTER TABLE policy_jp.contributions DROP CONSTRAINT IF EXISTS policy_jp_contributions_type_check;
 ALTER TABLE policy_jp.contributions ADD CONSTRAINT policy_jp_contributions_type_check
@@ -114,7 +114,7 @@ COMMENT ON FUNCTION policy_jp.contribution_auto_tasks_election_discovery IS
   '任期満了日（term_expirations）が近いのに対応する選挙がない団体 → election_discovery 任務。規則 election_discovery の params（scope_from、lead_days、include_uncertain、cap）を読む';
 
 -- ------------------------------------------------------------
--- 4. 臂名清單與總表：110000 的版本各多一個名字／一行分支（其餘一字不改；守門做替換比對）
+-- 4. 臂名清單與總表：130000 的版本各多一個名字／一行分支（其餘一字不改；守門做替換比對）
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION policy_jp.activity_arm_names() RETURNS TEXT[]
 LANGUAGE sql IMMUTABLE SET search_path = policy_jp, pg_temp AS $$
@@ -166,7 +166,7 @@ SELECT 'election_discovery', 'always', 'announced',
  WHERE NOT EXISTS (SELECT 1 FROM policy_jp.activity_rules r WHERE r.activity = 'election_discovery' AND r.priority IS NULL);
 
 -- ------------------------------------------------------------
--- 6. 權限與自我檢查（同 110000：新函式預設對 PUBLIC 可執行，要明寫收回）
+-- 6. 權限與自我檢查（同 130000：新函式預設對 PUBLIC 可執行，要明寫收回）
 -- ------------------------------------------------------------
 REVOKE EXECUTE ON FUNCTION policy_jp.contribution_auto_tasks_election_discovery() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION policy_jp.contribution_auto_tasks_arms() FROM PUBLIC, anon, authenticated;
