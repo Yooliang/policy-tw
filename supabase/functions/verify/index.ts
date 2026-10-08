@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
-import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { handleVerify } from "../_shared/verify-handler.ts";
 
 /**
@@ -26,9 +26,10 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+    const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
+    const ipHash = await ipHashOf(req, ipSalt);
     const body = await req.json().catch(() => null);
-    const result = await handleVerify(supabase, body, ipHash);
+    const result = await handleVerify(supabase, body, ipHash, undefined, "verify", fetch, await legacyIpHashOf(req, ipSalt));
     return json(result.body, result.status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

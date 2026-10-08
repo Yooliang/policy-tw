@@ -125,3 +125,14 @@ Deno.test("report 端點認得 withdraw，而且錯誤訊息講得出三種 kind
   const bad = src.slice(src.indexOf('error: "kind 要是'));
   assert(bad.includes("withdraw"), "kind 不對時的訊息要告訴代理還有 withdraw 這條路");
 });
+
+Deno.test("1.79.0 改用網段後，切換前用單一 IP 交件的本人仍能撤回；別人的舊雜湊不行（#481）", async () => {
+  // 存的是舊的單一 IP 雜湊（MINE），這次請求的網段雜湊是新的值
+  const ok = fakeDb(row());
+  const res = await handleWithdraw(ok.client, body(), "net-mine", MINE);
+  assertEquals(res.status, 200);
+  const no = fakeDb(row());
+  const res2 = await handleWithdraw(no.client, body(), "net-other", OTHER);
+  assertEquals(res2.status, 403);
+  assertEquals(no.updates.length, 0);
+});

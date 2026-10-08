@@ -52,7 +52,8 @@ export function validateWithdrawRequest(body: unknown): { ok: boolean; input?: W
   return { ok: true, input: { contribution_id: id, reason }, errors: [] };
 }
 
-export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHash: string): Promise<HandlerResult> {
+/** `legacyIpHash`：1.79.0 以前的單一 IP 雜湊，過渡期讓切換前交件的本人也能撤回（#481）。 */
+export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHash: string, legacyIpHash?: string): Promise<HandlerResult> {
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
   body = identity.body;
@@ -71,7 +72,7 @@ export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHa
   if (!row) return { status: 404, body: { success: false, error: "not_found", message: "沒有這筆貢獻" } };
 
   // 1. 只有提交者本人（同一個來源 IP）能撤回
-  if (row.contributor_ip_hash !== ipHash) {
+  if (row.contributor_ip_hash !== ipHash && !(legacyIpHash && row.contributor_ip_hash === legacyIpHash)) {
     return {
       status: 403,
       body: {

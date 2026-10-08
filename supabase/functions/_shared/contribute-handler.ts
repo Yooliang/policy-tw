@@ -5,6 +5,7 @@
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { rosterBatchProblems } from "./roster-batch-gate.ts";
+import { networkOf } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
@@ -53,7 +54,7 @@ export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 600;
 export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
     ? { limit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源 IP" };
+    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 export const DEDUPE_WINDOW_HOURS = 24;
 
@@ -66,7 +67,20 @@ export function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
 }
 
+/**
+ * 來源身份的雜湊：看網段（IPv4 /24、IPv6 /64），不看單一 IP（#481，協議 1.79.0）。
+ * 派工綁定、計票去重、不能驗自己、撤回本人、每日額度全都吃這一個值，所以只在這裡改。
+ */
 export async function ipHashOf(req: Request, ipSalt: string): Promise<string> {
+  return await sha256Hex(`${ipSalt}|${networkOf(clientIp(req))}`);
+}
+
+/**
+ * 1.79.0 以前的雜湊（單一 IP）。只給過渡期用：切換前交的貢獻、投的票存的是這個，
+ * 不認它的話同一台機器能驗自己切換前交的、對切換前投過的再投一次。
+ * 切換前的貢獻都定案後（pending／disputed 裡沒有 1.79.0 以前的）就可以拿掉。
+ */
+export async function legacyIpHashOf(req: Request, ipSalt: string): Promise<string> {
   return await sha256Hex(`${ipSalt}|${clientIp(req)}`);
 }
 
