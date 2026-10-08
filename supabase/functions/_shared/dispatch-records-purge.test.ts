@@ -42,6 +42,9 @@ async function walk(dir: URL, out: Src[], rel = ""): Promise<void> {
   for await (const e of Deno.readDir(dir)) {
     if (e.isDirectory) {
       if (["node_modules", ".git", ".claude", "dist", ".temp", ".wrangler", "migrations", "public", "docs"].includes(e.name)) continue;
+      // 日本站（jp-next／jp-report 與 _shared/jp/）的 client 固定 db.schema=policy_jp，讀的是 policy_jp.verify_dispatches 等同名表；
+      // 這裡守的是正見 public 表的清理排程，policy_jp 的表不在 dispatch_records_purge() 的範圍
+      if (/^supabase\/functions\/(_shared\/jp|jp-[a-z-]+)$/.test(rel + e.name)) continue;
       await walk(new URL(e.name + "/", dir), out, rel + e.name + "/");
     } else if (/\.(ts|tsx|vue|mjs|cjs|js)$/.test(e.name) && !/\.test\.ts$/.test(e.name) && !/\.d\.ts$/.test(e.name)) {
       out.push({ path: rel + e.name, text: norm(await Deno.readTextFile(new URL(e.name, dir))) });
