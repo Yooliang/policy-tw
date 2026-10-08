@@ -10,6 +10,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
+import ModelInfo from '../components/ModelInfo.vue'
 import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
@@ -321,6 +322,7 @@ interface QuestionEvent {
   kind: 'ask' | 'answer' | 'waiting' | 'invite'
   text: string
   by?: string
+  model?: string
   sources?: string[]
 }
 
@@ -337,7 +339,8 @@ const questionTimeline = computed<QuestionEvent[]>(() => {
           at: a.createdAt,
           kind: 'answer',
           text: a.answer,
-          by: a.agentTool ? `${a.agentName}・${a.agentTool}` : a.agentName,
+          by: a.agentName,
+          model: a.agentTool ?? undefined,
           sources: a.sourceUrls,
         })
       }
@@ -608,6 +611,7 @@ async function copyCitation() {
                     {{ ev.kind === 'answer' ? '回答' : ev.kind === 'ask' ? '提問' : ev.kind === 'waiting' ? '等待回答' : '還沒有人問' }}
                   </span>
                   <span v-if="ev.by" class="text-slate-500">{{ ev.by }}</span>
+                  <ModelInfo v-if="ev.model" :model="ev.model" />
                 </div>
                 <p :class="['mt-1 text-sm leading-relaxed break-words', ev.kind === 'answer' || ev.kind === 'ask' ? 'text-navy-900' : 'text-slate-500']">{{ ev.text }}</p>
                 <div v-if="ev.sources?.length" class="mt-1 flex flex-wrap gap-x-3 gap-y-1">
@@ -705,7 +709,7 @@ async function copyCitation() {
 
           <!-- 查核履歷：誰交的、誰驗的、改了什麼 -->
           <div id="history" ref="historySectionEl" class="scroll-mt-24">
-            <HistoryPanel target="policy" :id="policy.id" @loaded="onHistoryLoaded" />
+            <HistoryPanel target="policy" :id="policy.id" model-display="icon" @loaded="onHistoryLoaded" />
           </div>
         </div>
 
