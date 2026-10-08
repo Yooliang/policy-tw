@@ -678,7 +678,7 @@ LANGUAGE sql STABLE AS $$
                AND (f.election_id IS NULL OR pe.election_id = f.election_id))));
 $$;
 
--- activity_health：補號次版（20261008150000）的現行定義＋一行（app.queue_now 假時鐘也要被抓出來）
+-- activity_health：名單時程版（20261008160000）的現行定義＋一行（app.queue_now 假時鐘也要被抓出來）
 CREATE OR REPLACE VIEW activity_health AS
   SELECT 'election_without_polling'::TEXT AS check_name, e.id::TEXT AS subject, '選舉沒有投票日（elections.election_date 是空的），所有以投票日為起點的規則都開不起來'::TEXT AS detail
     FROM elections e WHERE e.election_date IS NULL
@@ -698,12 +698,13 @@ CREATE OR REPLACE VIEW activity_health AS
    WHERE r.enabled AND f.on_date + r.from_offset > u.on_date + r.until_offset
   UNION ALL
   SELECT 'milestone_scope_drift', s.election_id || ' / ' || s.election_type,
-         'roster_check_scope 的登記截止／名單公告日與 election_milestones 對不上（兩份真相）：改了舊欄位沒同步到里程碑，或相反'
+         'roster_check_scope 的五個日期欄（登記截止、名單公告、資格審查、抽號次、直轄市長名單公告）與 election_milestones 對不上：它們該由里程碑衍生（觸發器 roster_scope_derive_dates），對不上表示觸發器被停掉或繞過了'
     FROM roster_check_scope s
-   WHERE NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'registration_close'
-                        AND m.election_type = s.election_type AND m.on_date = s.registration_closed_on)
-      OR NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'list_published'
-                        AND m.election_type = s.election_type AND m.on_date = s.list_announced_on)
+   WHERE s.registration_closed_on IS DISTINCT FROM roster_scope_milestone_date(s.election_id, 'registration_close', s.election_type)
+      OR s.list_announced_on IS DISTINCT FROM roster_scope_milestone_date(s.election_id, 'list_published', s.election_type)
+      OR s.qualification_review_by IS DISTINCT FROM roster_scope_milestone_date(s.election_id, 'qualification_review', s.election_type)
+      OR s.ballot_draw_on IS DISTINCT FROM roster_scope_milestone_date(s.election_id, 'draw', s.election_type)
+      OR s.municipal_mayor_list_on IS DISTINCT FROM roster_scope_milestone_date(s.election_id, 'list_published', '直轄市長', false)
   UNION ALL
   SELECT 'arm_without_rule', a.arm, '派工臂「' || a.arm || '」沒有任何規則：contribution_auto_tasks_arms() 對它的每一列都會因為沒有開窗的規則而被濾掉（整支臂無聲消失）'
     FROM unnest(activity_arm_names()) AS a(arm)
@@ -728,7 +729,7 @@ CREATE OR REPLACE VIEW activity_health AS
   SELECT 'queue_clock_overridden', current_setting('app.queue_now', true), '派工時鐘被 app.queue_now 覆寫了：所有固定時段插隊都在用這個假時間（只該出現在測試）'
    WHERE NULLIF(current_setting('app.queue_now', true), '') IS NOT NULL;
 COMMENT ON VIEW activity_health IS
-  '派工時間窗的健康檢查，正常是空的：選舉缺投票日、活動的規則全停用、覆寫指到沒有規則的活動、窗口起迄顛倒、roster_check_scope 與里程碑對不上、派工臂沒有任何規則（arm_without_rule，P1）、'
+  '派工時間窗的健康檢查，正常是空的：選舉缺投票日、活動的規則全停用、覆寫指到沒有規則的活動、窗口起迄顛倒、roster_check_scope 的五個日期與里程碑對不上、派工臂沒有任何規則（arm_without_rule，P1）、'
   '有公報資料夾又還沒投票的選舉缺整場的 bulletin_published 里程碑（bulletin_milestone_missing，2026-10-08 公報偵測）、號次單位有重複或跳號（ballot_number_anomaly，還沒投票的選舉，補號次 20261008150000）、時鐘被覆寫。2026-10-08（PLAN-task-activation 3 風險第 2 點）'
   '｜20261008165000：加 queue_clock_overridden——app.queue_now 假時鐘被設了（固定時段插隊用的時鐘，只該出現在測試）。';
 

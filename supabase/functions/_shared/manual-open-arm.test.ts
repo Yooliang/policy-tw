@@ -34,6 +34,7 @@ const LIN_MIG = "20261006034900_policy_lineages.sql";
 const M = await readMig(MIG);
 const PR = await readMig(P2_PR_MIG);
 const BL = await readMig(BALLOT_MIG);
+const RM = await readMig("20261008160000_roster_milestones.sql");
 const QP = await readMig(QP_MIG);
 const P0 = await readMig(P0_MIG);
 const P1 = await readMig(P1_MIG);
@@ -138,7 +139,7 @@ Deno.test("A7 沒動 contribution_auto_tasks／task_dispatched／queue_slot／re
 });
 
 const EX = await readMig("20261007030000_election_read_side.sql");
-Deno.test("A10 task_boost_matches＝現行定義拿掉 contribution_tasks 那一段（手動任務在總表裡，不拿掉會算兩次）；activity_health＝補號次版加一行；drop_applied＝補號次版加一處", () => {
+Deno.test("A10 task_boost_matches＝現行定義拿掉 contribution_tasks 那一段（手動任務在總表裡，不拿掉會算兩次）；activity_health＝名單時程版（160000）加一行；drop_applied＝補號次版加一處", () => {
   const BRANCH = `    UNION ALL
     SELECT t.id::TEXT, 'task', t.task_type,
            uuid_or_null(t.target->>'politician_id'),
@@ -155,7 +156,7 @@ Deno.test("A10 task_boost_matches＝現行定義拿掉 contribution_tasks 那一
   UNION ALL
   SELECT 'queue_clock_overridden', current_setting('app.queue_now', true), '派工時鐘被 app.queue_now 覆寫了：所有固定時段插隊都在用這個假時間（只該出現在測試）'
    WHERE NULLIF(current_setting('app.queue_now', true), '') IS NOT NULL`;
-  assertEquals(mutate(view(M), ROW, ""), view(BL));
+  assertEquals(mutate(view(M), ROW, ""), view(RM));
   const NEW_IF = `  IF NEW.task_id IS NOT NULL AND (
        (NEW.task_id LIKE 'auto:%'
         -- 補號次與重查是一個單位一件、代理一位一筆交：一筆落庫不代表整件做完，由 seed 依缺口還在不在收回（補號次 20261008150000）
@@ -251,6 +252,7 @@ ${await latestFn("politician_name_is_placeholder")}
 ALTER TABLE elections ADD COLUMN bulletin_published_on date, ADD COLUMN bulletin_dir text;
 ALTER TABLE politicians ADD COLUMN region text, ADD COLUMN avatar_url text;
 ALTER TABLE politician_elections ADD COLUMN election_id integer, ADD COLUMN election_type text;
+${await latestFn("roster_scope_milestone_date")}
 CREATE VIEW ballot_number_anomalies AS SELECT NULL::integer AS election_id, NULL::text AS election_type, NULL::text AS kind WHERE false;
 CREATE FUNCTION contribution_subject_politician(p jsonb) RETURNS uuid LANGUAGE sql IMMUTABLE AS $$ SELECT NULL::uuid $$;
 ${await latestFn("uuid_or_null")}
