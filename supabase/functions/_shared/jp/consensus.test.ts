@@ -50,3 +50,15 @@ Deno.test("election：不拿系統票——可投型別清單沒有它，門檻�
   // 就算有人硬帶系統票結果，呼叫端也不會對 election 取（不 eligible），但函式本身的算法不分型別：eligible 的判斷在 systemVoteEligible
   assertEquals(effectiveRequiredAgree(requiredAgree("election"), null), 3);
 });
+
+// local_government、regional_stat（落庫那一批 PR）：跟 election 同級（SQL 走 ELSE 的 normal）；SQL 與 TS 的逐型別對齊在 policy-jp-apply.test.ts
+Deno.test("local_government／regional_stat：目標 3、退件 −3、不拿系統票、不需要兩個網段", () => {
+  for (const t of ["local_government", "regional_stat"]) {
+    assertEquals(riskLevel(t), "normal");
+    assertEquals(requiredAgree(t), 3);
+    assertEquals(requiredAgree(t, { lg_code: "232033" }, ["https://www.soumu.go.jp/denshijiti/code.html"]), 3);
+    assertEquals(rejectFloor(t), 3);
+    assertEquals(systemVoteEligible(t), false);
+    assertEquals(effectiveRequiredAgree(requiredAgree(t), null), 3);
+  }
+});

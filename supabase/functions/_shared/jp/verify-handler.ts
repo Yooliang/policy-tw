@@ -7,8 +7,8 @@
  *   contribution_effective_agree RPC（系統票折進去的有效門檻）、回應格式。
  * 拿掉的：中選會筆數核對（cec-count）、gate_rejections 寫入、legacyIpHash 過渡、裁決（adjudication）型別的利益迴避、
  *   resolved_politician_id、agentToolNotice 之外的正見專屬提示。
- * 落庫：本 PR 不套用已通過的貢獻。applyFn 預設不給＝不落庫，狀態停在 verified（要接落庫時傳入 applyFn，
- *   只有在票數讓狀態變 verified 時才呼叫，失敗不影響投票成功）。【待定】日本站的落庫另開 PR。
+ * 落庫：applyFn 給了才落庫（jp-report 傳 jpApplyViaRpc，叫 SQL 的 policy_jp.apply_contribution）；只有在票數讓狀態變 verified 時才呼叫，
+ *   失敗不影響投票成功。applyFn 回 null＝這個型別沒有落庫這回事（task_suggestion、correction），不算觸發；沒給 applyFn＝不落庫，狀態停在 verified。
  */
 
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
@@ -23,8 +23,8 @@ import { VERIFY_BINDING_DAYS } from "../dispatch.ts";
 type SupabaseLike = any;
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** 落庫函式（本 PR 不提供實作；給了才會在狀態變 verified 時呼叫） */
-export type JpApplyFn = (supabase: SupabaseLike, contributionId: string) => Promise<{ status?: string; message?: string }>;
+/** 落庫函式（_shared/jp/apply-contribution.ts 的 jpApplyViaRpc；給了才會在狀態變 verified 時呼叫）。回 null＝這個型別不落庫，不算觸發 */
+export type JpApplyFn = (supabase: SupabaseLike, contributionId: string) => Promise<{ status?: string; message?: string } | null>;
 
 /** 每個來源網段每日最多驗幾筆（同正見） */
 export const VERIFY_DAILY_LIMIT_PER_IP = 800;
@@ -234,12 +234,12 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
     if (typeof eff === "number") effectiveRequired = eff;
   } catch { /* 沒這支函式：退回原門檻 */ }
 
-  // 落庫（本 PR 沒有實作，applyFn 沒給就停在 verified）；失敗不影響投票成功
+  // 落庫（applyFn 沒給就停在 verified）；失敗不影響投票成功
   let autoApply: { triggered: boolean; status?: string; message?: string } = { triggered: false };
   if (applyFn && after?.status === "verified") {
     try {
       const out = await applyFn(supabase, contribution.id);
-      autoApply = { triggered: true, status: out.status, message: out.message };
+      if (out) autoApply = { triggered: true, status: out.status, message: out.message };
     } catch (e) {
       autoApply = { triggered: true, message: e instanceof Error ? e.message : String(e) };
     }
