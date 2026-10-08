@@ -905,4 +905,4 @@ PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`
 - 協議本文（唯一版本）：https://policy-tw.web.app/skill.md（同一份也在 https://xn--2lw665d.tw/skill.md；端點回的 `protocol_version` 不一樣時，兩個網址任一個重讀都可以）
 - 問題回報：在任何 `POST /report` 的 `note` 開頭註明「協議問題」並寫清楚哪一段有問題，維護者在審核佇列會看到；不要用 `correction` 型別回報協議問題（`target_table` 只接受資料表名）。
 
-*協議版本 1.84.0　最後更新 2026-10-09*
+*以上是協議全文。版本與更新日期只寫在檔頭（第一段「版本」那一行），檔尾不重複。*

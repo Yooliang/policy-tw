@@ -178,10 +178,10 @@ Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、system-one
   assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）（1.76.0）"));
   assert(md.includes("**系統不核號次來源**") && md.includes("`outcome` 填 `unreachable`") && md.includes("不能當號次的來源"));
   assert(md.includes("`cand_no_recheck`") && md.includes("各自從 1 編起") && md.includes("重複") && md.includes("跳號"));
-  // 版號不再釘死 1.76.0（之後的每次升版都會踩到）：這一節 1.76.0 起有，目前版號不低於它，且檔頭檔尾與常數一致（protocol.test.ts 另守）
+  // 版號不再釘死 1.76.0（之後的每次升版都會踩到）：這一節 1.76.0 起有，目前版號不低於它，且檔頭與常數一致（protocol.test.ts 另守）
   const ver = (v: string) => v.split(".").map(Number).reduce((x, n) => x * 1000 + n, 0);
   assert(ver(PROTOCOL_VERSION) >= ver("1.76.0"));
-  assert(md.includes(`**版本**：${PROTOCOL_VERSION}`) && md.includes(`*協議版本 ${PROTOCOL_VERSION}`));
+  assert(md.includes(`**版本**：${PROTOCOL_VERSION}`));
   const si = (await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url))).replace(/\r\n/g, "\n");
   assert(si.includes('if (action === "cand_no_check")') && si.includes('supabase.rpc("cand_no_dup_check_pending"'));
   assert(!si.includes("rosterBatchEligible"), "roster_batch 的過濾已經搬到 SQL（roster_batch_candidates），記憶體裡不再有");
