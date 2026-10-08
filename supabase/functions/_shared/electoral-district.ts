@@ -64,6 +64,33 @@ export function normalizeDistrict(text: string): NormalizedDistrict | null {
 }
 
 /**
+ * 代表（鄉鎮市民代表、直轄市山地原住民區民代表）的選舉區（#464，2026-10-09）。
+ * 代表的號次按選舉區各自從 1 編起：號次單位＝縣市|<鄉鎮>第NN選舉區；參選紀錄的選舉區記在 regions 的「<鄉鎮>第NN選舉區」那一列。
+ * 這支把交件寫法（sub_region＋electoral_district）收斂成一個鍵；落庫（apply-contribution.ts）與交件端的正規化（normalizeCandidacyDistrictField）共用。
+ * 看不出來（沒給、不是「第N選(舉)區」、沒有鄉鎮、鄉鎮互相矛盾）回 null，不猜。
+ */
+export const REP_ELECTION_TYPES = ["鄉鎮市民代表", "直轄市山地原住民區民代表"] as const;
+export const isRepElectionType = (t: unknown): boolean => typeof t === "string" && (REP_ELECTION_TYPES as readonly string[]).includes(t);
+
+export function repDistrictKey(electionType: string, p: Record<string, unknown>): { region: string; town: string; district: string } | null {
+  if (!isRepElectionType(electionType)) return null;
+  const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const region = normalizeCityName(s(p.region) ?? undefined);
+  const given = s(p.electoral_district);
+  if (!region || !given) return null;
+  const raw = given.replace(/[\s　]/g, "").replace(/臺/g, "台");
+  const district = normalizeDistrict(raw)?.district;
+  if (!district) return null;
+  // 鄉鎮：sub_region 優先（去掉尾巴的選舉區）；沒給就看 electoral_district 前面有沒有（「麥寮鄉第4選舉區」「連江縣北竿鄉第02選舉區」）。兩邊都有又不一樣＝矛盾，不猜
+  const fromSub = (s(p.sub_region) ?? "").replace(/[\s　]/g, "").replace(/臺/g, "台").replace(/(第.+?)?選舉?區$/, "");
+  const prefixRaw = raw.replace(/第.+?選舉?區$/, "");
+  const fromDistrict = prefixRaw.startsWith(region) ? prefixRaw.slice(region.length) : prefixRaw;
+  if (fromSub && fromDistrict && fromSub !== fromDistrict) return null;
+  const town = fromSub || fromDistrict;
+  return town ? { region, town, district } : null;
+}
+
+/**
  * 交件時統一縣市議員候選人的選舉區寫法（2026-09-28，就地修改 payload）：
  * - payload.electoral_district 有給、正規化得出來 → 換成「第NN選舉區」
  * - payload.electoral_district 有給、正規化不出來（不是「第…選(舉)?區」樣式）→ 原樣留著，
@@ -74,6 +101,18 @@ export function normalizeDistrict(text: string): NormalizedDistrict | null {
  * 只對 election_type==="縣市議員" 生效；其他選舉類型的候選人不會有這個欄位。
  */
 export function normalizeCandidacyDistrictField(payload: Record<string, unknown>): void {
+  // 代表（#464）：sub_region＝鄉鎮、electoral_district＝「第NN選舉區」。代理常寫「連江縣北竿鄉第02選舉區」「第二選舉區」「第2選區」，
+  // 不統一的話，號次重複檢查拿原字串算號次單位會跟參選紀錄對不上而漏報。解不出來的照原樣留著（不猜）
+  if (isRepElectionType(payload.election_type)) {
+    const key = repDistrictKey(payload.election_type as string, payload);
+    if (key) {
+      // sub_region 本來就是同一個鄉鎮（只差尾巴的選舉區）時沿用原字（臺西鄉不改成台西鄉，免得落庫時多建一列鄉鎮）；原本沒給才用解出來的
+      const sub = typeof payload.sub_region === "string" ? payload.sub_region.replace(/[\s　]/g, "").replace(/(第.+?)?選舉?區$/, "") : "";
+      payload.sub_region = sub && sub.replace(/臺/g, "台") === key.town ? sub : key.town;
+      payload.electoral_district = key.district;
+    }
+    return;
+  }
   if (payload.election_type !== "縣市議員") return;
   const existing = payload.electoral_district;
   if (typeof existing === "string" && existing.trim()) {

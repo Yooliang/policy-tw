@@ -36,6 +36,19 @@ export function pickQueueHead(heads: ReadonlyArray<{ kind: QueueHeadKind; queue_
  * 插隊的（1970／1980 年段）照舊最先，不受這條影響。
  */
 export const MACHINE_WINDOW = 3;
+/**
+ * 「這台機器最近拿到什麼」往回看多久（小時）：/next 讀 verify_dispatches 的 dispatched_at >= 現在 − 這麼久。
+ * 派工紀錄的清理（20261009080000，#485）以所有回看期的最大值加安全邊際定保留天數；守門 dispatch-records-purge.test.ts
+ * 從這個常數與 SQL 讀回看期，改大了保留天數不夠就紅。
+ */
+export const MACHINE_LOOKBACK_HOURS = 3;
+/**
+ * 派工綁定（verify_dispatches，POST /verify 與 POST /report{kind:"verify"} 沒帶憑證時）：只認派出後這麼多天內的紀錄。
+ * 以前沒有時限（紀錄不清，永遠認）；清理排程上線後，紀錄保留天數必須大於這個值，所以把它明寫成常數。
+ * 2026-10-08 正式庫實測：投票距派出 p50 約 28 秒、p99 約 4 分鐘、最久 51 小時（25,547 筆）；7 天是實測最久的三倍多。
+ * 超過就回 409 not_dispatched，代理重新 GET /next 領一筆（或帶 dispatch_token）。
+ */
+export const VERIFY_BINDING_DAYS = 7;
 export const MACHINE_MIN_VERIFIES = 2;
 export function machineOwesVerify(recentKindsNewestFirst: ReadonlyArray<"verify" | "task">): boolean {
   return recentKindsNewestFirst.slice(0, MACHINE_WINDOW).filter((k) => k === "verify").length < MACHINE_MIN_VERIFIES;

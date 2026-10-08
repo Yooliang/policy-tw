@@ -145,9 +145,14 @@ Deno.test("補縣市／補選區：只管縣市長、縣市議員、立委；表
   assertMatch(body, /pe\.election_type IN \('縣市議員', '立法委員'\)\s+AND pe\.candidacy_status IS DISTINCT FROM 'withdrawn'/);
   assertStringIncludes(body, "pe.region_id IS NULL AS no_region");
   assertStringIncludes(body, "p.merged_into IS NULL");
-  // 鄉鎮層級五種的「region_id 是空的」是 township_gap 的訊號，這裡不能搶
-  for (const local of ["鄉鎮市長", "鄉鎮市民代表", "村里長"]) {
-    assertEquals(body.includes(`pe.election_type IN ('${local}'`), false);
+  // 鄉鎮層級五種的「region_id 是空的」是 township_gap 的訊號，這裡不能搶。
+  // #464（20261009070000）起代表（鄉鎮市民代表、區民代表）「只記到鄉鎮、沒有選舉區」也由這支臂派，但只放在 rep_gaps 那一段，
+  // 而且那一段 INNER JOIN regions（region_id 是空的進不來）；其餘（縣市長／議員／立委那一段）仍然一個鄉鎮層級的選舉別都不能有
+  const repCte = body.slice(body.indexOf("  rep_gaps AS ("), body.indexOf("  gaps AS ("));
+  assert(repCte.includes("JOIN regions r ON r.id = pe.region_id") && !repCte.includes("LEFT JOIN regions") && !/region_id IS NULL/.test(repCte), "代表那一段要 INNER JOIN regions，不搶 township_gap 的 region_id 空缺");
+  const rest = body.replace(repCte, "");
+  for (const local of ["鄉鎮市長", "鄉鎮市民代表", "村里長", "直轄市山地原住民區長", "直轄市山地原住民區民代表"]) {
+    assertEquals(rest.includes(`pe.election_type IN ('${local}'`), false);
   }
   // 中選會線索只在全國同名同選舉別唯一時給
   assertStringIncludes(body, "CASE WHEN count(*) = 1");
