@@ -353,12 +353,6 @@ usePageHead({
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-2">
               <h1 class="text-4xl font-bold text-white">{{ politician.name }}</h1>
-              <!-- 號次：這一屆有號次才出，沒有就不放任何說明 -->
-              <span
-                v-if="ballotLabel(ballot)"
-                class="bg-white text-navy-900 px-3 py-1 rounded-full text-sm font-black"
-                data-testid="ballot-badge"
-              >{{ ballotLabel(ballot) }}</span>
               <!-- 職稱：現任公職，可以有多個；沒有就一顆都不出（2026-10-04 維護者：職稱跟參選狀況分開） -->
               <span
                 v-for="title in titles"
@@ -605,7 +599,7 @@ usePageHead({
                     >
                       <div class="flex items-center gap-2">
                         <Vote :size="14" />
-                        <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}<span v-if="elec.candNo" class="ml-1 text-slate-500">（{{ elec.candNo }}號）</span></span>
+                        <span class="font-medium">{{ getElectionYear(elec.electionId) }} {{ elec.position }}<span v-if="ballotLabel(elec.candNo)" class="ml-1 text-slate-500">（{{ ballotLabel(elec.candNo) }}）</span></span>
                       </div>
                       <span v-if="getCandidateStatusLabel(elec)" class="text-xs">
                         {{ getCandidateStatusLabel(elec) }}
