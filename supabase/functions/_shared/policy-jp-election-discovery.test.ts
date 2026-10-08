@@ -537,13 +537,13 @@ Deno.test("contributions 收 election、擋 foo；原有三種照收", async () 
      VALUES ($1, '{}', ARRAY['https://example.jp/a'], 'agent-' || $2::TEXT, 'ip-' || $2::TEXT, 'h' || $2::TEXT)`, [type, n]);
   let n = 0;
   for (const t of ["no_change", "task_suggestion", "correction", "election"]) await ins(t, ++n);
-  await assertRejects(() => ins("foo", ++n), Error, "contributions_contribution_type_check");
-  await assertRejects(() => ins("candidacy", ++n), Error, "contributions_contribution_type_check");
+  await assertRejects(() => ins("foo", ++n), Error, "policy_jp_contributions_type_check");
+  await assertRejects(() => ins("candidacy", ++n), Error, "policy_jp_contributions_type_check");
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.contributions`), 4);
-  // 約束名字沒變、只有一條
+  // 型別約束只剩日本站自己命名的這一條（110000 欄位上自動命名的那條已拿掉）
   const cons = await db.query<{ conname: string }>(
-    `SELECT conname FROM pg_constraint WHERE conrelid = 'policy_jp.contributions'::regclass AND contype = 'c' AND conname LIKE '%contribution_type%'`);
-  assertEquals(cons.rows.map((r) => r.conname), ["contributions_contribution_type_check"]);
+    `SELECT conname FROM pg_constraint WHERE conrelid = 'policy_jp.contributions'::regclass AND contype = 'c' AND (conname LIKE '%contribution_type%' OR conname LIKE '%contributions_type%')`);
+  assertEquals(cons.rows.map((r) => r.conname), ["policy_jp_contributions_type_check"]);
   await db.close();
 });
 

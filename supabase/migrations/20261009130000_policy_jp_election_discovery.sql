@@ -56,8 +56,11 @@ GRANT ALL ON policy_jp.term_expirations TO service_role;
 -- ------------------------------------------------------------
 -- 2. 交件型別 election（查到的選舉日程；落庫是下一個 PR）
 -- ------------------------------------------------------------
+-- 名字刻意跟正見的 contributions_contribution_type_check 不同：正見的守門（thresholds、district-seats 等）找「最後一支 ADD 這個名字的 migration」
+-- 檢查正見的型別清單，同名會被誤認成正見的最新版本。先拿掉 110000 欄位上的那條（PostgreSQL 自動命名），再加日本站自己的
 ALTER TABLE policy_jp.contributions DROP CONSTRAINT IF EXISTS contributions_contribution_type_check;
-ALTER TABLE policy_jp.contributions ADD CONSTRAINT contributions_contribution_type_check
+ALTER TABLE policy_jp.contributions DROP CONSTRAINT IF EXISTS policy_jp_contributions_type_check;
+ALTER TABLE policy_jp.contributions ADD CONSTRAINT policy_jp_contributions_type_check
   CHECK (contribution_type IN ('no_change', 'task_suggestion', 'correction', 'election'));
 
 -- ------------------------------------------------------------
