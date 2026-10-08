@@ -124,58 +124,28 @@ const isStr = (v: unknown, min = 1, max = 2000): v is string => typeof v === "st
 const isUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
 /**
- * 任務與交件對得上（#503 b）：自動缺口任務的 task_id 是 auto:<臂>:<對象>，帶了 task_id 就要確認「這筆交件講的是那個任務問的團體」——
- * 不然代理拿錯 task_id（或亂填）交進來，通過驗證後會落庫成別的團體的資料。
- *   area 任務（地區任務，policy-jp docs/PLAN-area-tasks.md）auto:area:<lg_code>:<満了日>:<階段>：
- *     election → lg_code 要是這個團體；local_government → 這個團體或它所屬的都道府県；regional_stat → 這個團體；
- *     no_change → payload.task_id 要是它的一項（<task_id>:election／:local_government／:regional_stats，查無只冷卻那一項）
- *   舊的三支臂（10-09 停用，交件照收）：election_discovery → 只收 election，lg_code 與職位（head＝長、assembly＝議會）要一致；
- *     local_government_missing → 只收 local_government；regional_stats_missing → 只收 regional_stat；lg_code 一致
- * 手動任務（uuid）與其他自動缺口任務不比對（task_suggestion／correction 也不在這裡管）。
+ * 任務與交件對得上（#503 b）：自動缺口任務的 task_id 是 auto:<臂>:<對象>，三種資料型交件各有對應的臂，
+ * 帶了 task_id 就要確認「這筆交件講的是那個任務問的團體」——不然代理拿錯 task_id（或亂填）交進來，通過驗證後會落庫成別的團體的資料。
+ *   election_discovery 任務      → 只收 election；task_id 裡的 lg_code 與職位（head＝長、assembly＝議會）要跟 payload 一致
+ *   local_government_missing 任務 → 只收 local_government；lg_code 一致
+ *   regional_stats_missing 任務   → 只收 regional_stat；lg_code 一致
+ * 手動任務（uuid）與其他自動缺口任務不比對（no_change／task_suggestion／correction 也不在這裡管）。
  */
 export const JP_TASK_ARMS = {
   election_discovery: "election",
   local_government_missing: "local_government",
   regional_stats_missing: "regional_stat",
 } as const satisfies Record<string, JpContributionType>;
-/** 地區任務可以交的資料型別，與每一項的回報 id 後綴（target.item_task_ids） */
-export const JP_AREA_TYPES = ["election", "local_government", "regional_stat"] as const;
-export const JP_AREA_ITEMS = ["election", "local_government", "regional_stats"] as const;
 const DATA_TYPES = ["election", "local_government", "regional_stat"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|area):(.+)$/;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing):(.+)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
-const AREA_REST_RE = /^(\d{6}):\d{4}-\d{2}-\d{2}:(pre|filed|result)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
 
-function checkAreaTask(type: JpContributionType, payload: Obj, taskId: string, rest: string, push: (path: string, message: string) => void): void {
-  const a = AREA_REST_RE.exec(rest);
-  if (!a) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:area:<團體碼>:<満了日>:<pre|filed|result>）"); return; }
-  const taskLg = a[1];
-  if (type === "no_change") {
-    // 任務本身的 id 不收：照抄的 refresh_dispatch_blocked 會把整件任務擋住，其他項目就派不出去
-    const allowed = JP_AREA_ITEMS.map((i) => `${taskId}:${i}`);
-    if (!allowed.includes(String(payload.task_id))) {
-      push("payload.task_id", `地區任務的查無要照項目回報：payload.task_id 填 ${JP_AREA_ITEMS.map((i) => `${taskId}:${i}`).join("／")} 其中之一（target.item_task_ids），只冷卻那一項、其他項目照樣派`);
-    }
-    return;
-  }
-  if (!oneOf(JP_AREA_TYPES, type)) return;
-  const pref = lgPrefCode(taskLg);
-  const ok = type === "local_government" ? (payload.lg_code === taskLg || payload.lg_code === pref) : payload.lg_code === taskLg;
-  if (!ok) {
-    push("payload.lg_code", type === "local_government"
-      ? `payload.lg_code（${String(payload.lg_code ?? "未填")}）要是這個任務的團體（${taskLg}）或它所屬的都道府県（${pref}）`
-      : `payload.lg_code（${String(payload.lg_code ?? "未填")}）跟這個任務的團體（${taskLg}）不一致：一個任務只回報它問的那個地區`);
-  }
-}
-
 export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskId: unknown, push: (path: string, message: string) => void): void {
-  if (typeof taskId !== "string") return;
+  if (typeof taskId !== "string" || !oneOf(DATA_TYPES, type)) return;
   const m = TASK_ID_RE.exec(taskId);
   if (!m) return;
-  if (m[1] === "area") { checkAreaTask(type, payload, taskId, m[2], push); return; }
-  if (!oneOf(DATA_TYPES, type)) return;
   const arm = m[1] as keyof typeof JP_TASK_ARMS;
   if (JP_TASK_ARMS[arm] !== type) {
     push("task_id", `這個 task_id 是 ${arm} 的任務，要用 contribution_type=${JP_TASK_ARMS[arm]} 回報（你交的是 ${type}）；查不到請改交 no_change`);

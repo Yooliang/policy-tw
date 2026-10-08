@@ -275,8 +275,8 @@ Deno.test("交件當下核對（p_ids）：只看指定的那幾筆，其他 pen
 });
 
 Deno.test("機器核對的審核者與型別：TS 清單跟 SQL 寫的一致", () => {
-  assertEquals([...JP_MACHINE_REVIEWERS], ["soumu-auto"]);
-  assertEquals([...JP_MACHINE_VERIFIABLE_TYPES], ["local_government"]);
+  assertEquals([...JP_MACHINE_REVIEWERS], ["soumu-auto", "estat-auto"]);
+  assertEquals([...JP_MACHINE_VERIFIABLE_TYPES], ["local_government", "regional_stat"]);
   assert(REG_SQL.includes("reviewed_by = 'soumu-auto'"));
   assert(REG_SQL.includes("contribution_type = 'local_government'"));
 });

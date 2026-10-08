@@ -1,7 +1,7 @@
 /**
  * e-Stat「令和7年国勢調査 都道府県・市区町村別の主な結果」→ policy_jp.stat_registry 的資料 migration（機器核對 regional_stat 用，不顯示）。
  *
- *   deno run -A --no-config --node-modules-dir=none scripts/gen-jp-stat-registry.ts [--out supabase/migrations/20261009210600_policy_jp_stat_registry_data.sql]
+ *   deno run -A --no-config --node-modules-dir=none scripts/gen-jp-stat-registry.ts [--out supabase/migrations/20261009210500_policy_jp_stat_registry_data.sql]
  *
  * 只收三項（國勢調査有的）：population＝総人口（人）、area_km2＝面積（参考，km2）、aging_rate＝65歳以上人口の構成比（%，不詳補完値）。
  * 歳出（決算カード）沒有可以整批比對的官方檔，不在這裡（regional_stat 的 budget_expenditure 照舊走同儕驗證）。
@@ -14,7 +14,7 @@ import * as XLSX from "npm:xlsx@0.18.5";
 
 const args = new Map<string, string>();
 for (let i = 0; i < Deno.args.length; i += 2) args.set(Deno.args[i], Deno.args[i + 1]);
-const OUT = args.get("--out") ?? "supabase/migrations/20261009210600_policy_jp_stat_registry_data.sql";
+const OUT = args.get("--out") ?? "supabase/migrations/20261009210500_policy_jp_stat_registry_data.sql";
 const LG_DATA = "supabase/migrations/20261009210300_policy_jp_lg_registry_data.sql";
 
 const STAT_INF_ID = "000040507382"; // 令和7年 都道府県・市区町村別の主な結果（e-Stat 公開 2026-09-29）
@@ -86,7 +86,7 @@ const values = out.sort((a, b) => (a.lg_code + a.stat_key < b.lg_code + b.stat_k
 const sql = `-- e-Stat「令和7年国勢調査 都道府県・市区町村別の主な結果」→ policy_jp.stat_registry（機器核對 regional_stat 用，不顯示）
 -- ============================================================
 -- 由 scripts/gen-jp-stat-registry.ts 產生，不要手改；之後的年份（或修正版）改腳本的 STAT_INF_ID 重產一支新的 migration。
--- 前提：20261009210500_policy_jp_stat_registry.sql（stat_registry 表）、20261009210300（團體碼表；只收表裡有的團體）。
+-- 前提：20261009210400_policy_jp_stat_registry.sql（stat_registry 表）、20261009210300（團體碼表；只收表裡有的團體）。
 --
 -- 出處：${FILE_URL}
 --       （一覧 ${LIST_URL}；檔名 major_results_2025.xlsx；SHA-256 ${sha}）
