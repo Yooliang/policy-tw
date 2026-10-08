@@ -154,7 +154,7 @@ DROP TABLE IF EXISTS agent_task_results, agent_challenges, agent_heartbeats, age
 2026-09-23 從 `public/skill.md` 搬過來：寫在協議裡的結果是 a-zhen（aegis 上自家的代理）讀到就自己打了一發、把全站 1,516 筆待驗證插到最前（boost #5）。端點照維護者裁示仍無金鑰，靠「不寫在代理文件裡」收斂；已經知道的代理仍打得到，`GET /boost` 看得到誰打的。
 
 
-派工是單一佇列：同一優先層內等最久的先，層由規則決定（2026-10-08 起：選前 180 天內的任務前段、歷史補資料後段，加權 6:3:1 交錯，後段不會餓死；見 `docs/PLAN-task-activation.md` 第 11 節）——**長期偏向某一群，改優先層規則，不要反覆插隊**。臨時要讓某一群先被做（例：先把六都的候選人做完整），打一次：
+派工是單一佇列：同一優先層內等最久的先，層由規則決定（2026-10-08 起：選前 180 天內的任務前段、歷史補資料後段，加權 6:3:1 交錯，後段不會餓死；見 `docs/PLAN-task-activation.md` 第 11 節）——**長期偏向某一群，改優先層規則，不要反覆插隊**。人物頁、政見頁近 7 天有真實流量（不重複訪客 ≥ 5）時，名下的缺口會自動提到前段，流量退了或 14 天沒產出會回原層／暫停；門檻與天數在 `traffic_boost_settings`（`UPDATE traffic_boost_settings SET min_users = 8 WHERE id = 1;`，修改進 `edit_history`），現況看視圖 `page_traffic_boosted_tasks`。臨時要讓某一群先被做（例：先把六都的候選人做完整），打一次：
 
 ```
 POST /boost

@@ -9,6 +9,7 @@ import {
   REQUIRED_ENV,
   runConsoleFetch,
 } from "../_shared/console-fetch.ts";
+import { runPageTrafficSync, type TrafficStore } from "../_shared/page-traffic.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { verifyCaller } from "../_shared/console-fetch-auth.ts";
 
@@ -21,9 +22,12 @@ import { verifyCaller } from "../_shared/console-fetch-auth.ts";
  * 呼叫者驗證：x-cron-secret（pg_cron 從 Vault 帶；函式端用 RPC console_fetch_cron_secret_ok 請資料庫比對）或 service role bearer，
  * 細節與理由見 _shared/console-fetch-auth.ts。
  * 環境變數（與 GitHub secret 同名）：GCP_SA_KEY（服務帳號 JSON，GA 與 Firestore 共用）。驗證用的密鑰不在環境變數裡（只在 Vault）。
+ * 頁面流量（2026-10-08）：GA 抓完之後多抓一份人物頁／政見頁近 N 天的流量，經 service_role RPC replace_page_traffic 整批覆寫 Supabase 的 page_traffic，
+ * 給 seed 的流量提層用（_shared/page-traffic.ts、migration 20261008190000）。N、停用開關讀 traffic_boost_settings。它的成敗不影響上面的 success：
+ * 失敗只記進回應的 traffic 欄與日誌，不寫 Firestore 的 meta/status。
  * 缺環境變數：能寫 Firestore 就把失敗寫進 meta/status，並回 500，不靜默成功。
  * 單一資料源（GA 的某一站）失敗只記進 meta/status、仍回 200（與 fetch.mjs 一致）；只有 Firestore 寫入本身壞掉才回 500。
- * 回應：{ success, missing_env?, sources: { "ga-tw": { state, message } … }, elapsed_ms }（不含任何金鑰）
+ * 回應：{ success, missing_env?, sources: { "ga-tw": { state, message } … }, traffic: { state, message, rows? }, elapsed_ms }（不含任何金鑰）
  */
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -59,20 +63,48 @@ Deno.serve(async (req) => {
 
   const getToken = makeTokenGetter(sa, realDeps);
   const store = makeFirestoreStore(getToken, realDeps);
+  let result: Awaited<ReturnType<typeof runConsoleFetch>> | undefined;
+  let fatal: Error | undefined;
   try {
-    const result = await runConsoleFetch({ config: CONSOLE_CONFIG, env, deps: realDeps, store, getToken });
-    return json(
-      {
-        success: result.success,
-        ...(result.missing.length ? { error: `缺少環境變數：${result.missing.join("、")}`, missing_env: result.missing } : {}),
-        sources: result.sources,
-        elapsed_ms: Date.now() - started,
-      },
-      result.success ? 200 : 500,
-    );
+    result = await runConsoleFetch({ config: CONSOLE_CONFIG, env, deps: realDeps, store, getToken });
   } catch (e) {
     // Firestore 寫入本身壞了（連 meta/status 都寫不進去）
-    console.error("console-fetch 失敗：", (e as Error).message);
-    return json({ success: false, error: (e as Error).message, elapsed_ms: Date.now() - started }, 500);
+    fatal = e as Error;
+    console.error("console-fetch 失敗：", fatal.message);
   }
+
+  // 頁面流量：與 Firestore 無關，主流程成敗都照跑；自己的失敗不往外丟（runPageTrafficSync 回 error 狀態）
+  const traffic = supabaseUrl && serviceRoleKey
+    ? await runPageTrafficSync({ getToken, store: makeTrafficStore(createClient(supabaseUrl, serviceRoleKey)) })
+    : { state: "error" as const, message: "沒有 SUPABASE_URL／SUPABASE_SERVICE_ROLE_KEY" };
+  if (traffic.state === "error") console.error("頁面流量失敗：", traffic.message);
+
+  if (fatal || !result) return json({ success: false, error: fatal?.message ?? "unknown", traffic, elapsed_ms: Date.now() - started }, 500);
+  return json(
+    {
+      success: result.success,
+      ...(result.missing.length ? { error: `缺少環境變數：${result.missing.join("、")}`, missing_env: result.missing } : {}),
+      sources: result.sources,
+      traffic,
+      elapsed_ms: Date.now() - started,
+    },
+    result.success ? 200 : 500,
+  );
 });
+
+/** 資料庫端的接縫：讀設定、呼叫 RPC（service role；RPC 只授權 service_role） */
+// deno-lint-ignore no-explicit-any
+function makeTrafficStore(db: any): TrafficStore {
+  return {
+    async readSettings() {
+      const { data, error } = await db.from("traffic_boost_settings").select("enabled, window_days").eq("id", 1).single();
+      if (error) throw new Error(error.message);
+      return { enabled: data.enabled === true, window_days: Number(data.window_days) };
+    },
+    async replace(rows, windowDays) {
+      const { data, error } = await db.rpc("replace_page_traffic", { p_rows: rows, p_window_days: windowDays });
+      if (error) throw new Error(error.message);
+      return Number(data ?? 0);
+    },
+  };
+}
