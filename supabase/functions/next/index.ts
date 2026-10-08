@@ -22,7 +22,7 @@ import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
-import { dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
+import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -41,6 +41,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const CANDIDATE_POOL = 30;
+// 憑證鑰匙不能用時，每次冷啟動警告一行（不含鑰匙）；不然 /next 靜靜地不發憑證，沒人知道跨網段為什麼還是 409
+const warnNoDispatchSecret = createSecretWarner();
 // 2026-09-20：從 30 降到 5——回 none 幾乎都是暫時的（別人認領中、這一輪抽到的都不合格），等 30 分鐘是白等
 const RETRY_AFTER_MIN = 5;
 
@@ -294,6 +296,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 派工憑證（#484，協議 1.81.0）：派出的那一筆簽一張，綁 task_id、派出時間、自報代號與這次領任務的來源網段，期限同認領期。
     // 不寫資料庫、不新增清單查詢；沒有鑰匙時不發（代理照舊走網段比對）。追查只進 log：只有識別碼與雜湊前 8 碼。
     const dispatchSecret = dispatchTokenSecretFrom((k) => Deno.env.get(k));
+    warnNoDispatchSecret((k) => Deno.env.get(k));
     const tokenFor = async (taskId: string): Promise<Record<string, unknown>> => {
       try {
         const issued = await issueDispatchToken(dispatchSecret, { taskId, agentName, ipHash });

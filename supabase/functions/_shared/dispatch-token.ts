@@ -56,7 +56,11 @@ function b64urlDecode(text: string): Uint8Array<ArrayBuffer> | null {
   try {
     const s = text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4);
     const raw = atob(s);
-    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    // atob 不拒絕尾端的非零位元（同一串位元組有多種寫法）：重新編碼要回到原字串，才是正規形式，
+    // 否則同一張憑證能有好幾個寫法，憑證識別碼（log 用）也會對不上
+    if (b64urlEncode(bytes) !== text) return null;
+    return bytes;
   } catch {
     return null;
   }
@@ -66,10 +70,36 @@ function hmacKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
-/** 取鑰匙：DISPATCH_TOKEN_SECRET 優先，其次 SUPABASE_SERVICE_ROLE_KEY。呼叫端傳讀環境變數的函式（測試不需要 --allow-env） */
+export const DISPATCH_SECRET_MIN_LENGTH = 16;
+const usable = (v: string | undefined): v is string => typeof v === "string" && v.length >= DISPATCH_SECRET_MIN_LENGTH;
+
+/**
+ * 取鑰匙：DISPATCH_TOKEN_SECRET 優先，其次 SUPABASE_SERVICE_ROLE_KEY。呼叫端傳讀環境變數的函式（測試不需要 --allow-env）。
+ * 專用鑰匙設了但太短（< 16 字）＝當沒設，退回 service role key；兩個都不能用才回 undefined。
+ */
 export function dispatchTokenSecretFrom(get: (name: string) => string | undefined): string | undefined {
-  const s = get("DISPATCH_TOKEN_SECRET") || get("SUPABASE_SERVICE_ROLE_KEY");
-  return s && s.length >= 16 ? s : undefined;
+  const dedicated = get("DISPATCH_TOKEN_SECRET");
+  if (usable(dedicated)) return dedicated;
+  const fallback = get("SUPABASE_SERVICE_ROLE_KEY");
+  return usable(fallback) ? fallback : undefined;
+}
+
+/**
+ * 鑰匙不能用時要有訊號（不然 /next 靜靜地不發憑證，代理只會一直吃跨網段的 409，沒人知道為什麼）。
+ * 每個實例（＝每次冷啟動）只警告一次；訊息不含鑰匙內容。
+ */
+export function createSecretWarner(warn: (msg: string) => void = (m) => console.warn(m)): (get: (name: string) => string | undefined) => void {
+  let warned = false;
+  return (get) => {
+    if (warned || dispatchTokenSecretFrom(get)) return;
+    warned = true;
+    const dedicated = get("DISPATCH_TOKEN_SECRET");
+    warn(
+      "[dispatch-token] 沒有可用的憑證鑰匙：/next 不會發 dispatch_token，跨網段的回報會繼續吃 409 not_dispatched。" +
+        (dedicated ? ` DISPATCH_TOKEN_SECRET 有設但短於 ${DISPATCH_SECRET_MIN_LENGTH} 字，已忽略；` : " DISPATCH_TOKEN_SECRET 沒設；") +
+        ` SUPABASE_SERVICE_ROLE_KEY 也不能用（沒設或短於 ${DISPATCH_SECRET_MIN_LENGTH} 字）。`,
+    );
+  };
 }
 
 /** 憑證的識別碼：憑證原文的 SHA-256 前 8 碼，只用在 log，反查「這張憑證何時派出、何時用掉」 */
@@ -99,7 +129,14 @@ export async function issueDispatchToken(
  * 驗憑證：簽章、期限、task_id。
  * `expectedTaskId` 給了就必須相符（投票：verify:<貢獻 id>）；沒給（交件，一批可含多個 task）就只驗簽章與期限，task 比對由呼叫端做。
  */
-export async function checkDispatchToken(secret: string | undefined, token: unknown, expectedTaskId: string | null, now = Date.now()): Promise<TokenCheck> {
+export async function checkDispatchToken(
+  secret: string | undefined,
+  token: unknown,
+  expectedTaskId: string | null,
+  now = Date.now(),
+  // 改票專用：簽章與 task 照驗，只放過「已過期」（見 verify-handler 的改票說明）
+  opts: { ignoreExpiry?: boolean } = {},
+): Promise<TokenCheck> {
   if (typeof token !== "string" || token.length === 0 || token.length > 2000) return { ok: false, reason: "malformed" };
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== PREFIX) return { ok: false, reason: "malformed" };
@@ -118,7 +155,7 @@ export async function checkDispatchToken(secret: string | undefined, token: unkn
   if (!p || typeof p.t !== "string" || typeof p.h !== "string" || typeof p.e !== "number" || typeof p.i !== "number" || typeof p.a !== "string") {
     return { ok: false, reason: "malformed" };
   }
-  if (now >= p.e) return { ok: false, reason: "expired" };
+  if (now >= p.e && !opts.ignoreExpiry) return { ok: false, reason: "expired" };
   if (expectedTaskId !== null && p.t !== expectedTaskId) return { ok: false, reason: "task_mismatch" };
   return { ok: true, payload: p, tokenId: await dispatchTokenId(token) };
 }
@@ -148,7 +185,7 @@ export function invalidTokenResult(reason: TokenFailure): { status: number; body
 export function logDispatchBinding(rec: {
   event: "dispatch_token_issued" | "dispatch_binding";
   endpoint?: string;
-  binding?: "token" | "ip" | "none";
+  binding?: "token" | "token_expired_revise" | "ip" | "none";
   task_id: string;
   agent_name: string;
   token_id?: string | null;

@@ -68,10 +68,19 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 合併票（via merge）是系統配對的，不帶憑證。
   let ipHash = reportIpHash;
   let tokenBinding: { tokenId: string; issuedNet: string; agent: string } | null = null;
+  // 改票（revise:true）遇到過期的憑證：簽章與 task 照驗，放過期限，但要求「同一個來源已經有這筆的票」才放行（見下面 expiredRevise）。
+  // 理由：evidence_warning 叫代理帶 revise 重送覆寫，而憑證只有 30 分鐘、/next 也不會再派同一筆，不放行的話雲端代理永遠改不了票
+  let expiredRevise = false;
   const tokenField = via === "merge" ? { present: false as const } : dispatchTokenOf(body);
   if (tokenField.present) {
     const rawId = isObj(body) ? (body as Record<string, unknown>).contribution_id : undefined;
-    const chk = await checkDispatchToken(dispatchSecret, tokenField.value, `verify:${typeof rawId === "string" ? rawId : ""}`);
+    const expectedTask = `verify:${typeof rawId === "string" ? rawId : ""}`;
+    let chk = await checkDispatchToken(dispatchSecret, tokenField.value, expectedTask);
+    if (!chk.ok && chk.reason === "expired" && isObj(body) && (body as Record<string, unknown>).revise === true) {
+      const again = await checkDispatchToken(dispatchSecret, tokenField.value, expectedTask, Date.now(), { ignoreExpiry: true });
+      chk = again; // 放過期限後仍不通過（簽章、task）就用那個更具體的原因
+      expiredRevise = again.ok;
+    }
     if (!chk.ok) return invalidTokenResult(chk.reason);
     ipHash = chk.payload.h;
     tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, agent: chk.payload.a };
@@ -135,7 +144,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     // 憑證已在開頭驗過（簽章、期限、task 相符）：這一筆確實是 /next 派的。不看 IP，不查 verify_dispatches。
     // 追查只進 log（維護者 10-08「用 log 看就好」）：綁定方式、task、代號、憑證識別碼、領取與交件網段的雜湊前 8 碼
     logDispatchBinding({
-      event: "dispatch_binding", endpoint: via, binding: "token", task_id: `verify:${contribution.id}`,
+      event: "dispatch_binding", endpoint: via, binding: expiredRevise ? "token_expired_revise" : "token", task_id: `verify:${contribution.id}`,
       agent_name: input.agent_name, token_id: tokenBinding.tokenId, issued_net: tokenBinding.issuedNet, report_net: reportIpHash,
     });
   } else if (via !== "merge") {
@@ -162,6 +171,13 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
+  if (expiredRevise) {
+    // 過期憑證只能用來改「自己那個來源」已經投的票：領任務的網段或回報網段在這筆上已有票才放行，並以那張票的來源為準
+    const own = ((existing ?? []) as Array<{ verifier_ip_hash: string | null }>)
+      .find((x) => !!x.verifier_ip_hash && (x.verifier_ip_hash === ipHash || x.verifier_ip_hash === reportIpHash));
+    if (!own) return invalidTokenResult("expired");
+    ipHash = own.verifier_ip_hash as string;
+  }
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
     const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
       .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
@@ -341,7 +357,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
       // 2026-09-23：evidence_url 跟提交者同網域的票當天有 229 張，全都只記 +1——當場講，不要等排程核完才發現
       ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
-        ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票" }
+        ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票（帶派工憑證投的，憑證過期了也一樣帶原本那張憑證加 revise:true 就能改）" }
         : {}),
       score: { before: scoreBefore, after: scoreAfter, target: targetScore },
       // 舊欄位保留一版給還沒升到 1.24.0 的代理

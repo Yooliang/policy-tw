@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {
-      const result = await handleWithdraw(supabase, body, ipHash, legacyIpHash);
+      const result = await handleWithdraw(supabase, body, ipHash, legacyIpHash, dispatchTokenSecretFrom((k) => Deno.env.get(k)));
       return json({ kind, ...result.body }, result.status);
     }
     return json({ success: false, error: "kind 要是 verify、contribute 或 withdraw（前兩個就是 /next 給你的 kind，task 做完回報用 contribute；withdraw 是撤回自己交錯的那筆）" }, 400);

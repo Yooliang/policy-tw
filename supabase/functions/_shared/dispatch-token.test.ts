@@ -378,19 +378,7 @@ Deno.test("交件：憑證不進內容雜湊，24 小時內容去重不受影響
 
 // ── 接線 ────────────────────────────────────────────────────────────────────
 
-Deno.test("接線：/next 派出時發憑證（驗證、手動任務、自動缺口三處），不新增清單查詢；report／verify／contribute 把鑰匙傳進處理器", async () => {
-  const next = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  assertEquals(next.split("...(await tokenFor(").length - 1, 3, "派出的三處（驗證、手動、自動）各發一張");
-  assertStringIncludes(next, "`verify:${pick.id}`");
-  assert(!/dispatch_tokens/.test(next), "憑證不存資料庫（維護者 10-08：用 log 看就好）");
-  const report = await Deno.readTextFile(new URL("../report/index.ts", import.meta.url));
-  assert(/handleVerify\([^;]*dispatchSecret/.test(report), "report 的 verify 要傳鑰匙");
-  assert(/handleContribute\([^;]*dispatchTokenSecretFrom/.test(report), "report 的 contribute 要傳鑰匙");
-  const verify = await Deno.readTextFile(new URL("../verify/index.ts", import.meta.url));
-  assert(/handleVerify\([^;]*dispatchTokenSecretFrom/.test(verify), "/verify 要傳鑰匙");
-  const contribute = await Deno.readTextFile(new URL("../contribute/index.ts", import.meta.url));
-  assert(/handleContribute\([^;]*dispatchTokenSecretFrom/.test(contribute), "/contribute 要傳鑰匙");
-});
+// 入口接線（/next 三處發憑證、report／verify／contribute 傳鑰匙）改在 dispatch-token-entry.test.ts 用真的入口與 Request 驗行為
 
 Deno.test("沒有新欄位、沒有新資料表：憑證與追查都不碰資料庫結構", async () => {
   const dir = new URL("../../migrations/", import.meta.url);

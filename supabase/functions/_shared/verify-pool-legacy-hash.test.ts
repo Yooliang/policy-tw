@@ -64,7 +64,7 @@ function poolOf(sql: string): string {
 
 Deno.test("SQL：新定義 = 緊接在前那一版（20261006034900）做固定幾處機械替換，其餘一字不動", async () => {
   const prev = poolOf(await readSql("20261006034900_policy_lineages.sql"));
-  const next = poolOf(await readSql("20261009030000_verify_pool_legacy_hash.sql"));
+  const next = poolOf(await readSql("20261009060000_verify_pool_legacy_hash.sql"));
   const replacements: Array<[string, string]> = [
     ["  p_type TEXT DEFAULT NULL\n)", "  p_type TEXT DEFAULT NULL,\n  p_legacy_ip_hash TEXT DEFAULT NULL\n)"],
     [
@@ -84,15 +84,10 @@ Deno.test("SQL：新定義 = 緊接在前那一版（20261006034900）做固定�
 });
 
 Deno.test("SQL：舊的四參數版本要 DROP（否則只傳 p_ip_hash 的 rpc 會同時符合兩個版本）；新參數有預設值", async () => {
-  const sql = await readSql("20261009030000_verify_pool_legacy_hash.sql");
+  const sql = await readSql("20261009060000_verify_pool_legacy_hash.sql");
   assertStringIncludes(sql, "DROP FUNCTION IF EXISTS contribution_verify_pool(TEXT, TEXT, INTEGER, TEXT);");
   assert(sql.indexOf("DROP FUNCTION IF EXISTS contribution_verify_pool") < sql.indexOf("CREATE OR REPLACE FUNCTION contribution_verify_pool"));
   assertStringIncludes(sql, "p_legacy_ip_hash TEXT DEFAULT NULL");
 });
 
-Deno.test("接線：/next 把舊雜湊傳進驗證池與 me（新舊相同值＝IP 認不得時不傳）", async () => {
-  const code = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  assertStringIncludes(code, "p_legacy_ip_hash: legacyForPool");
-  assertStringIncludes(code, "legacy_ip_hash: legacyForPool");
-  assertStringIncludes(code, "const legacyForPool = legacyIpHash !== ipHash ? legacyIpHash : undefined;");
-});
+// /next 把舊雜湊傳進驗證池的接線，改在 dispatch-token-entry.test.ts 用真的 /next 入口驗行為
