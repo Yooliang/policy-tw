@@ -73,7 +73,10 @@ const footerList = computed(() => footerElections(elections.value, taipeiDay(Dat
         <div>
           <h4 class="text-white font-semibold mb-4">關於</h4>
           <ul class="space-y-2 text-sm">
-            <li><RouterLink to="/vision" class="hover:text-blue-400 transition-colors">專案願景</RouterLink></li>
+            <!-- 「專案願景」改名「關於正見」（同一頁 /vision，不並存）；聯絡一律走 GitHub Issues，沒有公開信箱（跟隱私權頁一致） -->
+            <li><RouterLink to="/vision" class="hover:text-blue-400 transition-colors">關於正見</RouterLink></li>
+            <li><RouterLink to="/contact" class="hover:text-blue-400 transition-colors">聯絡我們</RouterLink></li>
+            <li><RouterLink to="/terms" class="hover:text-blue-400 transition-colors">使用條款</RouterLink></li>
             <li><RouterLink to="/privacy" class="hover:text-blue-400 transition-colors">隱私權政策</RouterLink></li>
             <li><RouterLink to="/donation" class="hover:text-blue-400 transition-colors">贊助支持</RouterLink></li>
           </ul>
