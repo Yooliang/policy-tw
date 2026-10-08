@@ -79,7 +79,7 @@ const isMechanicalView = (sql: string) => {
 
 Deno.test("A1 這支 migration 是 rebalance_queue、seed_auto_task_queue 的最後一版，緊接著現行版；沒有動總表、/next、queue_slot、task_dispatched", async () => {
   for (const [fn, chain] of [
-    ["rebalance_queue", ["20260924000005_queue_rebalance.sql", BASE_REBALANCE_MIG, QP_MIG, "20261008165000_manual_tasks_as_arm.sql", "20261009040000_seed_skip_unchanged.sql"]],
+    ["rebalance_queue", ["20260924000005_queue_rebalance.sql", BASE_REBALANCE_MIG, QP_MIG, "20261008165000_manual_tasks_as_arm.sql", "20261009040000_seed_skip_unchanged.sql", "20261009150000_rebalance_anchor_no_drift.sql" /* #490：起點在零驗證列時退回 1.5 秒，守門在 rebalance-anchor.test.ts */]],
     ["seed_auto_task_queue", [] as string[]], // seed 的完整歷史很長，只看最後三版
   ] as [string, string[]][]) {
     const defining: string[] = [];

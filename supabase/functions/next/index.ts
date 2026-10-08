@@ -7,7 +7,7 @@ import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
-import { isFrontQueueAt, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
+import { isFrontQueueAt, MACHINE_LOOKBACK_HOURS, MACHINE_WINDOW,machineOwesVerify, machineOwesVerifyDuringBoost, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { submitQuotaFor } from "../_shared/contribute-handler.ts";
@@ -500,7 +500,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 插隊的任務也照看（1:2，見 dispatch.ts 的 machineOwesVerifyDuringBoost）：不然大量插隊時驗證整個停擺
     const boosting = isFrontQueueAt(headAt);
     if (candidates.length > 0) {
-      const since = new Date(Date.now() - 3 * 3600_000).toISOString();
+      const since = new Date(Date.now() - MACHINE_LOOKBACK_HOURS * 3600_000).toISOString();
       // query-bounds: ok — 只取這個來源 IP 最近 3 筆
       const [{ data: rv }, { data: rt }] = await Promise.all([
         supabase.from("verify_dispatches").select("dispatched_at").eq("ip_hash", ipHash).gte("dispatched_at", since).order("dispatched_at", { ascending: false }).limit(MACHINE_WINDOW),

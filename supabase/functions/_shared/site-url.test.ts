@@ -62,8 +62,8 @@ Deno.test("PROTOCOL_URL 不動；回應的 docs 欄位與「格式見 skill.md�
 });
 
 Deno.test("Edge Function 的程式碼裡不再寫死 policy-tw.web.app（只有 PROTOCOL_URL 與給第三方看的 User-Agent）", async () => {
-  // 例外都是有理由的：protocol.ts＝PROTOCOL_URL；cec-verify／source-archive＝送給第三方網站的 User-Agent
-  const ALLOWED = new Set(["_shared/protocol.ts", "cec-verify/index.ts", "_shared/source-archive.ts"]);
+  // 例外都是有理由的：protocol.ts＝PROTOCOL_URL；cec-verify／source-archive＝送給第三方網站的 User-Agent；self-hosts.ts＝「出處不得引用正見自己」的網域封鎖清單（#486，不是給人點的連結）
+  const ALLOWED = new Set(["_shared/protocol.ts", "cec-verify/index.ts", "_shared/source-archive.ts", "_shared/self-hosts.ts"]);
   const hits: string[] = [];
   async function walk(dir: URL, rel: string) {
     for await (const e of Deno.readDir(dir)) {
