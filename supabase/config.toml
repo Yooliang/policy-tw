@@ -10,7 +10,7 @@ enabled = true
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public"]
+schemas = ["public", "graphql_public", "policy_jp"]
 # Extra schemas to add to the search_path of every request.
 extra_search_path = ["public", "extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
@@ -422,6 +422,16 @@ entrypoint = "./functions/next/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/report/index.ts"
+
+[functions.jp-next]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-next/index.ts"
+
+[functions.jp-report]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-report/index.ts"
 
 [functions.apply-verified]
 enabled = true
