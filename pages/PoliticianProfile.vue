@@ -24,6 +24,7 @@ import PoliticianGrid from './election/PoliticianGrid.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { electionPeers, primaryElection } from '../lib/election-peers'
+import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-number'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { newerFirst, segmentOfId } from '../lib/election-route'
@@ -274,6 +275,8 @@ const otherCurrentPosition = computed(() => {
  * 標題與摘要裡的身份：先用職稱；沒有職稱但這一屆有參選就寫「2026 台南市長候選人」——
  * 那是參選狀況，不是職稱，所以一定帶「候選人」兩個字，不會被當成現任。都沒有就只有人名。
  */
+// 這一屆的號次（中選會抽籤後才有）：姓名旁的徽章、標題與摘要都用；沒有就一律不顯示
+const ballot = computed(() => ballotNoOfElection(politician.value?.elections, thisElectionId.value))
 const identity = computed(() => titles.value.join('、') || (candidacy.value?.running ? `${candidacy.value.what}候選人` : ''))
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
@@ -287,11 +290,12 @@ usePageHead({
   markdown: () => !!politician.value, // 本頁網址加 .md ＝ Markdown 版（lib/md/politician.ts，由 Worker 現場產生）
   // 標題與摘要用 identity（現任職稱優先，其次這一屆的參選），不用 position——
   // position 是最近一筆參選紀錄，落選的人也會有，拿來當標題等於對外宣稱他是現任（2026-10-04）
-  title: () => politician.value ? [politician.value.name, identity.value].filter(Boolean).join('｜') : undefined,
+  // 有號次就帶「（2 號）」：選前「某某 號次」是高搜尋量的詞（#460）
+  title: () => politician.value ? [nameWithBallot(politician.value.name, ballot.value), identity.value].filter(Boolean).join('｜') : undefined,
   description: () => politician.value
     ? (politician.value.slogan || politician.value.bio
-        ? `${politician.value.name}（${[politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}）：${politician.value.slogan || politician.value.bio}`
-        : `${politician.value.name}，${[politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
+        ? `${politician.value.name}（${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}）：${politician.value.slogan || politician.value.bio}`
+        : `${politician.value.name}，${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。正見追蹤其競選承諾 ${campaignPledges.value.length} 項、過往政績 ${historicalPolicies.value.length} 項。`)
     : undefined,
   // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料；政見清單放 subjectOf，每筆帶固定網址，AI 轉述時才引得回來
   jsonLd: () => politician.value ? {
@@ -349,6 +353,12 @@ usePageHead({
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-2">
               <h1 class="text-4xl font-bold text-white">{{ politician.name }}</h1>
+              <!-- 號次：這一屆有號次才出，沒有就不放任何說明 -->
+              <span
+                v-if="ballotLabel(ballot)"
+                class="bg-white text-navy-900 px-3 py-1 rounded-full text-sm font-black"
+                data-testid="ballot-badge"
+              >{{ ballotLabel(ballot) }}</span>
               <!-- 職稱：現任公職，可以有多個；沒有就一顆都不出（2026-10-04 維護者：職稱跟參選狀況分開） -->
               <span
                 v-for="title in titles"

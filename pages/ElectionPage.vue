@@ -37,6 +37,7 @@ import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
+import { orderPeopleByBallotNo } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
@@ -279,14 +280,23 @@ const sortByLengthThenStroke = compareRegionName
 
 // 候選人排序（使用者 2026-09-20：多種排序讓人選，預設「最近更新」）。
 // 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
-type SortMode = 'updated' | 'stroke' | 'policies' | 'attention'
-const sortMode = ref<SortMode>('updated')
-const SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
+type SortMode = 'ballot' | 'updated' | 'stroke' | 'policies' | 'attention'
+// 沒選過就看有沒有號次：抽籤後名單上有號次，預設就是號次（#460）；之前維持「最近更新」
+const sortChoice = ref<SortMode | null>(null)
+const hasBallotNos = computed(() => electionPoliticians.value.some(c => !!getPoliticianElectionData(c, electionId.value)?.candNo))
+const sortMode = computed<SortMode>({
+  get: () => sortChoice.value ?? (hasBallotNos.value ? 'ballot' : 'updated'),
+  set: (v) => { sortChoice.value = v },
+})
+const ALL_SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
+  { key: 'ballot', label: '號次' },        // 同一場選舉內照號次，沒有號次的排後面（lib/ballot-number.ts）
   { key: 'updated', label: '最近更新' },   // 名下政見或進度最近有變動的在前
   { key: 'stroke', label: '姓名筆畫' },    // 中選會抽籤前的慣例
   { key: 'policies', label: '政見數' },    // 登錄的政見多的在前
   { key: 'attention', label: '關注度' },   // 支持、反對、關注的總數
 ]
+// 還沒有任何號次時不列「號次」這個選項
+const SORT_OPTIONS = computed(() => ALL_SORT_OPTIONS.filter(o => o.key !== 'ballot' || hasBallotNos.value))
 /** 每位候選人名下政見的統計：最後變動時間、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
 const policyStatsByPolitician = computed(() => {
   const m = new Map<string, { updated: string; count: number; attention: number }>()
@@ -305,15 +315,19 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
   const stats = policyStatsByPolitician.value
   const st = (c: Politician) => stats.get(c.id) ?? { updated: '', count: 0, attention: 0 }
   const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
+  const byUpdated = (a: Politician, b: Politician) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b)
   const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
+    // 號次：先照最近更新排（沒有號次的人維持這個順序），再由 orderPeopleByBallotNo 在每一場選舉內把有號次的挪到前面
+    ballot: byUpdated,
     // 2026-09-21 卡在李四川：last_updated 只到「日」，六個人同日並列，筆畫或筆數任一種並列規則都會讓同一個人永遠第一。
     // 2026-09-22 改用 updated_at（timestamptz，內容任何變動都會蓋，migration 000028），並列只剩極少數；退路仍是筆數→筆畫。
-    updated: (a, b) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b),
+    updated: byUpdated,
     stroke: byStroke,
     policies: (a, b) => (st(b).count - st(a).count) || byStroke(a, b),
     attention: (a, b) => (st(b).attention - st(a).attention) || byStroke(a, b),
   }
-  return [...list].sort(cmp[sortMode.value])
+  const sorted = [...list].sort(cmp[sortMode.value])
+  return sortMode.value === 'ballot' ? orderPeopleByBallotNo(sorted) : sorted
 }
 
 // 取得選定縣市的鄉鎮市區（合併所有來源）
