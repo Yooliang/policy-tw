@@ -423,6 +423,16 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/report/index.ts"
 
+[functions.jp-next]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-next/index.ts"
+
+[functions.jp-report]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-report/index.ts"
+
 [functions.apply-verified]
 enabled = true
 verify_jwt = false
