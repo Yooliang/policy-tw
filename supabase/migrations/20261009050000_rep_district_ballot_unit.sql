@@ -312,7 +312,7 @@ LANGUAGE sql STABLE AS $$
          WHERE c.election_id = pe.election_id AND c.election_type = pe.election_type
            AND c.region = replace(r.region, '臺', '台') AND c.district IS NOT NULL
            AND replace(c.sub_region, '臺', '台') = replace(r.sub_region, '臺', '台')
-           AND c.name_key = COALESCE(cec_name_key(p.name), NULLIF(cec_name_norm(p.name), ''))
+           AND c.name_key = cec_name_key(p.name)
       ) reg
      WHERE pe.election_type IN ('鄉鎮市民代表', '直轄市山地原住民區民代表')
        AND candidacy_is_listed(pe.candidacy_status) AND reg.n > 0

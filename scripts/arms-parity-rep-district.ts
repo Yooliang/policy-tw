@@ -78,7 +78,7 @@ const B = await rd(BALLOT);
 let N = await rd(NEW);
 if (mutation === "unit_cunli") N = mutate(N, "replace(btrim(p_county), '臺', '台') || '|' || replace(btrim(p_town), '臺', '台') || '|' || replace(btrim(p_village), '臺', '台')", "replace(btrim(p_county), '臺', '台') || '|' || btrim(p_town) || '|' || replace(btrim(p_village), '臺', '台')");
 if (mutation === "arm_cunli") N = mutate(N, "WHEN pe.election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '村里長') THEN r.sub_region END AS unit_town", "WHEN pe.election_type IN ('鄉鎮市長', '直轄市山地原住民區長') THEN r.sub_region END AS unit_town");
-if (mutation === "gap_name") N = mutate(N, "           AND c.name_key = COALESCE(cec_name_key(p.name), NULLIF(cec_name_norm(p.name), ''))\n", "");
+if (mutation === "gap_name") N = mutate(N, "           AND c.name_key = cec_name_key(p.name)\n", "");
 if (mutation === "view_cunli") N = mutate(N, "                ELSE r.sub_region END AS town,", "                ELSE NULL END AS town,");
 
 const oldUnit = fnBody(B, "ballot_number_unit");
