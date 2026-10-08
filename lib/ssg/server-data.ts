@@ -210,7 +210,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
 }
 
 /** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /ai /profile /auth/callback）與 /admin/* 刻意不預渲染。 */
-const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/elections', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/sources', '/politicians', '/parties']
+const STATIC_CONTENT_ROUTES = ['/', '/tracking', '/analysis', '/elections', '/community', '/regional-data', '/donation', '/skill', '/vision', '/privacy', '/terms', '/contact', '/sources', '/politicians', '/parties']
 
 const VILLAGE_CHIEF = '村里長'
 
