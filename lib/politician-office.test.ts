@@ -256,7 +256,9 @@ Deno.test("candidacyBadge：前綴是投票年份（看 electionDate）；新增
 Deno.test("PolicyDeepAnalysis 的職稱只讀現任公職 offices，不讀 position／currentPosition", () => {
   const page = Deno.readTextFileSync(new URL("../pages/PolicyDeepAnalysis.vue", import.meta.url));
   assertEquals(page.match(/\.(position|currentPosition)\b/), null, "深度分析頁又讀了舊職稱欄位");
-  assertEquals(page.match(/officeTitles\(/g)?.length, 2, "兩處職稱都要走 officeTitles(offices)");
+  const calls = [...page.matchAll(/officeTitles\(([^\n]*?)\)(?:\.join|\.length)/g)].map((m) => m[1]);
+  assert(calls.length >= 2, "至少兩處職稱都要走 officeTitles(offices)");
+  for (const arg of calls) assertMatch(arg, /\boffices\b/, `officeTitles 的參數不是 offices：${arg}`);
 });
 
 Deno.test("get_politicians_by_filters 回傳人物視圖（帶 offices），後來的 migration 不得改成別的回傳形狀", () => {

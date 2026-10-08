@@ -314,8 +314,10 @@ onMounted(() => { ensurePolicies() })
                       <div class="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
                         <Avatar :src="log.politicianAvatar" :name="log.politicianName" size="xs" class="border border-white shadow-sm shrink-0" />
                         <span class="text-xs font-bold text-slate-500 whitespace-nowrap">{{ log.politicianName }}</span>
+                        <template v-if="officeTitles(politicians.find(c => c.id === log.politicianId)?.offices).length">
                         <span class="text-[10px] text-slate-400 whitespace-nowrap">{{ officeTitles(politicians.find(c => c.id === log.politicianId)?.offices).join('、') }}</span>
                         <span class="text-[10px] text-slate-300">·</span>
+                      </template>
                         <span :class="`text-xs font-bold whitespace-nowrap ${log.isSelected ? 'text-blue-600' : 'text-slate-500'}`">{{ log.policyTitle }}</span>
                       </div>
                     </div>
