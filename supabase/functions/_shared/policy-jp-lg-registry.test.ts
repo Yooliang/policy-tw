@@ -15,6 +15,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { hiraganaOf } from "./jp/kana.ts";
 import { lgCodeValid, lgPrefCode } from "./jp/lg-code.ts";
 import { validateContributionRequest } from "./jp/contribution-schema.ts";
+import { JP_MACHINE_REVIEWERS, JP_MACHINE_VERIFIABLE_TYPES } from "./jp/machine-verify.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -261,6 +262,25 @@ Deno.test("掃描：47 都道府県＋任期満了調查裡的市區町村一次
   await db.close();
 });
 
+Deno.test("交件當下核對（p_ids）：只看指定的那幾筆，其他 pending 的留給排程", async () => {
+  const db = await freshDb();
+  const a = await submit(db, "local_government", payloadOf(reg("230006")));
+  const b = await submit(db, "local_government", payloadOf(reg("200000")));
+  assertEquals((await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.lg_registry_verify_pending(10, $1::UUID[]) AS r`, [[b]])).r,
+    { applied: 1, waiting: 0, rejected: 0, skipped: 0, other: 0 });
+  assertEquals((await contribution(db, a)).status, "pending");
+  assertEquals((await contribution(db, b)).status, "applied");
+  assertEquals((await runVerify(db)).applied, 1, "排程把剩下的掃掉");
+  await db.close();
+});
+
+Deno.test("機器核對的審核者與型別：TS 清單跟 SQL 寫的一致", () => {
+  assertEquals([...JP_MACHINE_REVIEWERS], ["soumu-auto"]);
+  assertEquals([...JP_MACHINE_VERIFIABLE_TYPES], ["local_government"]);
+  assert(REG_SQL.includes("reviewed_by = 'soumu-auto'"));
+  assert(REG_SQL.includes("contribution_type = 'local_government'"));
+});
+
 // =============================================================================================
 // e. 權限、排程、自我檢查
 // =============================================================================================
@@ -290,8 +310,8 @@ Deno.test("自我檢查（還原驗證）：沒開 RLS、給 anon 寫入、給 a
   await assertRejects(() => freshDb({ reg: noRls, data: false }), Error, "沒開 RLS");
   const anonWrite = mutate(REG_SQL, "GRANT SELECT ON policy_jp.lg_code_registry TO anon, authenticated;", "GRANT SELECT, INSERT ON policy_jp.lg_code_registry TO anon, authenticated;");
   await assertRejects(() => freshDb({ reg: anonWrite, data: false }), Error, "只能讀");
-  const anonExec = mutate(REG_SQL, "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER) TO service_role;",
-    "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER) TO service_role, anon;");
+  const anonExec = mutate(REG_SQL, "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;",
+    "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role, anon;");
   await assertRejects(() => freshDb({ reg: anonExec, data: false }), Error, "不該給 anon 執行");
   // 資料少一列 → 分布不對
   const firstRow = DATA_SQL.split("\n").find((l) => l.startsWith("    ('010006'"))!;

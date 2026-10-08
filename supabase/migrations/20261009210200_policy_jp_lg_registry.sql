@@ -91,7 +91,8 @@ $$;
 -- ------------------------------------------------------------
 -- 3. 掃 pending 的 local_government：對得上 → verified＋落庫；對不上 → 退件；判不了 → 不碰
 -- ------------------------------------------------------------
-CREATE OR REPLACE FUNCTION policy_jp.lg_registry_verify_pending(p_limit INTEGER DEFAULT 2000) RETURNS JSONB
+-- p_ids：只看這幾筆（jp-report 交件當下對剛收下的跑一次；machine-verify.ts）；NULL＝全部 pending（排程）
+CREATE OR REPLACE FUNCTION policy_jp.lg_registry_verify_pending(p_limit INTEGER DEFAULT 2000, p_ids UUID[] DEFAULT NULL) RETURNS JSONB
 LANGUAGE plpgsql SET search_path = policy_jp, pg_temp AS $$
 DECLARE
   c RECORD;
@@ -107,6 +108,7 @@ BEGIN
   FOR c IN
     SELECT id, payload FROM policy_jp.contributions
      WHERE status = 'pending' AND contribution_type = 'local_government'
+       AND (p_ids IS NULL OR id = ANY (p_ids))
      ORDER BY created_at, id
      LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 2000), 5000))
      FOR UPDATE SKIP LOCKED
@@ -160,8 +162,8 @@ $$;
 -- ------------------------------------------------------------
 -- 5. 權限與自我檢查
 -- ------------------------------------------------------------
-REVOKE EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER) TO service_role;
+REVOKE EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;
 
 DO $$
 DECLARE bad TEXT;
@@ -174,7 +176,7 @@ BEGIN
    WHERE g.table_schema = 'policy_jp' AND g.table_name = 'lg_code_registry'
      AND g.grantee IN ('anon', 'authenticated', 'PUBLIC') AND g.privilege_type <> 'SELECT';
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'lg_code_registry：anon／authenticated 只能讀：%', bad; END IF;
-  IF has_function_privilege('anon', 'policy_jp.lg_registry_verify_pending(integer)', 'EXECUTE')
+  IF has_function_privilege('anon', 'policy_jp.lg_registry_verify_pending(integer, uuid[])', 'EXECUTE')
      OR has_function_privilege('anon', 'policy_jp.lg_registry_decide(jsonb)', 'EXECUTE') THEN
     RAISE EXCEPTION 'lg_registry_*：不該給 anon 執行';
   END IF;

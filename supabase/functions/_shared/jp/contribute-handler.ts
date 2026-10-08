@@ -6,6 +6,7 @@
  *   每日額度（匿名按來源網段 200、DiTrust 按帳號 600，UTC 零時重置）、24 小時內相同內容去重、
  *   重複宣稱併成同意票（duplicate-claim.ts 原封沿用）、同一台機器重複宣稱的提示、提交後釋放任務認領、回應格式。
  * 落庫：重複提交併成的同意票若讓那一筆變 verified，由這一票呼叫 applyFn 落庫（沒給 applyFn 就交給排程）。
+ * 日本站加的：local_government 交件當下跟總務省的團體碼表核對（machine-verify.ts，照正見 cec-verify）。
  * 拿掉的：中選會名冊大批次（rosterBatchProblems）、單一答案型任務擋重複（single-answer-guard，任務型別是正見的）、
  *   公民提問檢查、搜尋結果頁／政見唯一出處／同名人物／議員選舉區／參選紀錄登記證據等守門（全是正見資料專屬）、
  *   「查無」要 5 個網址的守門（not-found-guard，綁正見的任務型別）與 agent_tool 查無比例、空操作更正檢查（要讀日本站目標列，待定）、
@@ -25,6 +26,7 @@ import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMac
 import { agentToolNotice } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
 import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
+import { machineVerifyInline } from "./machine-verify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -250,6 +252,9 @@ export async function handleContribute(
     inserted = data ?? [];
   }
   const insertedByHash = new Map(inserted.map((r) => [r.payload_hash, r.id]));
+  // 有官方表可比的型別（local_government）交件當下就核對一次：對得上直接落庫、不計額度（排程也會掃，這裡失敗不影響交件）
+  const typeByHash = new Map(toInsert.map((r) => [r.payload_hash, r.contribution_type]));
+  const machineVerify = await machineVerifyInline(supabase, inserted.map((r) => ({ id: r.id, contribution_type: typeByHash.get(r.payload_hash) ?? "" })));
 
   // 提交後釋放該任務的軟認領（別人可以接手同一目標）
   const taskIds = [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"))];
@@ -307,6 +312,7 @@ export async function handleContribute(
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
       daily_quota: { limit: sq.limit, used: used + inserted.length },
+      ...(machineVerify ? { machine_verify: { ...machineVerify, by: "總務省「全国地方公共団体コード」との自動照合（一致＝確定して反映、不一致＝差し戻し、判断できないもの＝同儕の検証待ち）" } } : {}),
       ...(toolNotice ? { notice: toolNotice } : {}),
       docs: JP_PROTOCOL_URL,
     },

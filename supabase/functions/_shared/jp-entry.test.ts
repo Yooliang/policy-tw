@@ -25,7 +25,7 @@ const netHash = (ip: string) => ipHashOf(new Request("https://x/", at(ip)), SALT
 
 type Row = Record<string, unknown>;
 
-function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[]; apply?: unknown } = {}) {
+function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[]; apply?: unknown; machineVerify?: unknown } = {}) {
   const votes: Row[] = [];
   const contributions: Row[] = [];
   const dispatches: Row[] = [];
@@ -42,6 +42,7 @@ function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[]; apply?: unkn
     if (t === "rpc/contribution_queue_tasks") return o.queue ?? [];
     if (t === "rpc/contribution_effective_agree") return 3;
     if (t === "rpc/apply_contribution") return o.apply;
+    if (t === "rpc/lg_registry_verify_pending") return o.machineVerify;
     if (t === "contributions") {
       if (c.method === "POST") {
         const rows = (Array.isArray(c.body) ? c.body : [c.body]) as Row[];
@@ -351,5 +352,29 @@ Deno.test("local_government／regional_stat 交件：收進來（目標 3 票）
     const edCheck = await post(report, N1, { ...ELECTION_SUBMIT, task_id: undefined, payload: { ...ELECTION_SUBMIT.payload, lg_code: "232034", election_date: "0000-01-01" } });
     assertEquals((edCheck.json.errors as Array<{ path: string }>).map((e) => e.path).sort(), ["payload.election_date", "payload.lg_code"]);
     assertEquals(db.contributions.length, before, "400 的請求不寫任何東西");
+  });
+});
+
+Deno.test("local_government：交件當下用剛收下的 id 跑一次總務省團體碼表核對（lg_registry_verify_pending），結果附在回應的 machine_verify；別的型別不呼叫", async () => {
+  const db = makeDb({ pool: [], machineVerify: { applied: 1, waiting: 0, rejected: 0, skipped: 0, other: 0 } });
+  await withEntries(db, env(), async ({ report }) => {
+    const res = await post(report, N1, {
+      kind: "contribute", contribution_type: "local_government", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
+      payload: { lg_code: "230006", kind: "prefecture", pref_code: "230006", name: "愛知県", kana: "あいちけん" },
+      source_urls: ["https://www.soumu.go.jp/denshijiti/code.html"],
+    });
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    const calls = report.calls.filter((c) => c.target === "rpc/lg_registry_verify_pending");
+    assertEquals(calls.length, 1);
+    assertEquals(calls[0].body, { p_limit: 1, p_ids: [db.contributions[0].id] });
+    assertEquals((res.json.machine_verify as Row).applied, 1);
+    assertAllJpSchema(report.calls);
+  });
+  const db2 = makeDb({ pool: [], queue: [edTaskRow] });
+  await withEntries(db2, env(), async ({ report }) => {
+    const res = await post(report, N1, ELECTION_SUBMIT);
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals(report.calls.filter((c) => c.target === "rpc/lg_registry_verify_pending").length, 0, "election 不跑團體碼表核對");
+    assertEquals(res.json.machine_verify, undefined);
   });
 });
