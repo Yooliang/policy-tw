@@ -278,6 +278,8 @@ export function filterAnsweredQuestionTasks<T extends TaskLike & { task_type?: s
 }
 
 /**
+ * @deprecated 2026-10-08：/next 不再用它——提問的先後（stance_up 高的先、再依進佇列時間）由排程寫進 target、SQL 的 contribution_queue_tasks 排好（守門 manual-open-arm.test.ts）；留著給舊測試。
+ *
  * 提問任務彼此之間依 stance_up 高、建立時間早排序（讓比較多人想知道答案的題目優先派出）；
  * 只調整提問任務彼此佔的位置，其他任務的順序與位置完全不動——不讓提問任務整體插到前面，
  * 維持既有的派工比例與隨機分散（pickBySeed 仍在整個候選清單上挑）。

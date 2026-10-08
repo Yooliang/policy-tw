@@ -170,7 +170,7 @@ $$;
 
 -- 規則種子：每個活動名一條「永遠開」（行為不變）
 INSERT INTO activity_rules (activity, window_kind, note)
-SELECT a.arm, 'always', '手動任務臂（20261008135000）：永遠開；任務關閉＝缺口消失'
+SELECT a.arm, 'always', '手動任務臂（20261008165000）：永遠開；任務關閉＝缺口消失'
   FROM unnest(activity_arm_names()) AS a(arm)
  WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = a.arm);
 
@@ -391,7 +391,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
    ORDER BY i.queue_at, i.tie, i.task_id
    LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 1000), 2000));
 $$;
-COMMENT ON FUNCTION queue_preview IS '派工佇列預覽（/queue 頁）：跟 /next 同一個時間軸（task_dispatches.queue_at，進表時已按驗證：任務 2:1 排好）。手動任務（網站請求、公民提問、維護者任務…）也是派工臂 manual_visitor／manual_open 的缺口，不再另算（20261008135000）';
+COMMENT ON FUNCTION queue_preview IS '派工佇列預覽（/queue 頁）：跟 /next 同一個時間軸（task_dispatches.queue_at，進表時已按驗證：任務 2:1 排好）。手動任務（網站請求、公民提問、維護者任務…）也是派工臂 manual_visitor／manual_open 的缺口，不再另算（20261008165000）';
 REVOKE ALL ON FUNCTION queue_preview(INTEGER) FROM public;
 GRANT EXECUTE ON FUNCTION queue_preview(INTEGER) TO anon, authenticated;
 
@@ -507,9 +507,9 @@ $$;
 DO $$
 DECLARE v_old TEXT := obj_description('contribution_auto_tasks_arms()'::regprocedure, 'pg_proc');
 BEGIN
-  IF v_old IS NOT NULL AND v_old NOT LIKE '%20261008135000%' THEN
+  IF v_old IS NOT NULL AND v_old NOT LIKE '%20261008165000%' THEN
     EXECUTE format('COMMENT ON FUNCTION contribution_auto_tasks_arms IS %L',
-                   v_old || '｜2026-10-08（20261008135000）：加第 29、30 個分支 manual_visitor、manual_open（open 的手動任務，task_id＝任務 uuid；總表現在 30 個分支、38 個活動名）');
+                   v_old || '｜2026-10-08（20261008165000）：加第 29、30 個分支 manual_visitor、manual_open（open 的手動任務，task_id＝任務 uuid；總表現在 30 個分支、38 個活動名）');
   END IF;
 END
 $$;

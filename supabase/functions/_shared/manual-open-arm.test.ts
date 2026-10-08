@@ -1,5 +1,5 @@
 /**
- * 手動任務也是一支派工臂：網站請求與公民提問排在所有加推之前、固定時段再插隊一次（2026-10-08 維護者；migration 20261008135000）。
+ * 手動任務也是一支派工臂：網站請求與公民提問排在所有加推之前、固定時段再插隊一次（2026-10-08 維護者；migration 20261008165000）。
  *
  *   「網站請求裡面的任務每 6 小時幫忙插隊一次，因為這個是有人在關注的東西」，公民提問一起照辦；「網站請求也可以視為一種缺口」。
  *
@@ -24,7 +24,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
-const MIG = "20261008135000_manual_tasks_as_arm.sql";
+const MIG = "20261008165000_manual_tasks_as_arm.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
 const POP_MIG = "20261002000006_queue_pop_head.sql";
 const LIN_MIG = "20261006034900_policy_lineages.sql";
@@ -480,6 +480,13 @@ Deno.test("B4 自動缺口逐件不變：沒有手動任務時 seed 的結果與
       await newFull.exec(`SELECT rebalance_queue()`);
       const w1 = await one<{ q: boolean; ready: boolean }>(newFull, `SELECT d.queue_at >= TIMESTAMPTZ '2000-01-01' AS q, EXISTS (SELECT 1 FROM contribution_queue_tasks(NULL, NULL, 100000, '', NULL, NULL) g WHERE g.task_id = d.task_id) AS ready FROM task_dispatches d WHERE d.task_id = $1`, [W1]);
       assert(w1.q && w1.ready);
+      // 手動任務列真的進了加權交錯，不是被當成「不可派」丟到最後：提議（預設層）重新排進來之後，位置在後來才派出的自動缺口（同一層、排得比它晚）前面
+      await newFull.exec(`UPDATE contribution_tasks SET status = 'open' WHERE id = '${S1}'`);
+      await seed(newFull);
+      await newFull.query(`SELECT task_dispatched('auto:dup1')`);
+      await newFull.exec(`SELECT rebalance_queue()`);
+      const order = await head(newFull, 100000);
+      assert(order.includes(S1) && order.indexOf(S1) < order.indexOf("auto:dup1"), order.join(","));
     });
   } finally {
     await oldDb.close();
