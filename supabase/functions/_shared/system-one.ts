@@ -8,6 +8,8 @@
  *   3. 我們已經知道的答案要放進 state 當參考（already_labelled 讓斷年度從 5/8 變 8/8）。
  */
 
+import { isSelfCitationUrl } from "./self-hosts.ts";
+
 export const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 /**
  * 釘版本，不用 ~typesafe/jev-latest：alias 換版不通知，而我們要能回答「當初為什麼這樣定案」。
@@ -660,6 +662,8 @@ const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 C
  * 帶瀏覽器 UA：skill.md 實測多數媒體的 403 是擋沒有 UA 的程式。
  */
 export async function fetchSource(url: string, fetchImpl: typeof fetch = fetch): Promise<{ kind: "html" | "pdf" | "error"; text: string; note: string }> {
+  // 出處不得引用正見自己（#486，協議 1.84.0）：連抓都不抓，回 error 讓每條路徑都棄權，不會把自己的頁面當支持證據
+  if (isSelfCitationUrl(url)) return { kind: "error", text: "", note: "self_citation：出處是正見自己的網址（循環引用），不當證據" };
   try {
     const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "zh-TW,zh;q=0.9" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
