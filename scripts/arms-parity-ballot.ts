@@ -26,6 +26,41 @@ if (!mode || !path || !["gen", "check"].includes(mode)) {
   Deno.exit(2);
 }
 const COLS = "task_id, task_type, target, what_we_need, hint_sources, reward, region";
+/** 視圖的 SELECT 本體（CREATE OR REPLACE VIEW name AS … ; COMMENT 之間） */
+const viewBody = (sql: string, name: string) => {
+  const head = `CREATE OR REPLACE VIEW ${name} AS`;
+  const a = sql.indexOf(head);
+  return sql.slice(a + head.length, sql.indexOf(";\nCOMMENT ON VIEW", a));
+};
+/** 把 ballot_number_unit(a, b, c, d, e) 的呼叫換成函式本體的 CASE（唯讀快照不能建函式；正式庫還沒有這支函式） */
+function inlineUnitFn(sql: string, fnSql: string): string {
+  const body = fnSql.slice(fnSql.indexOf("SELECT CASE"), fnSql.lastIndexOf("\n$$"));
+  const key = "ballot_number_unit(";
+  let s = sql;
+  while (s.includes(key)) {
+    const i = s.indexOf(key);
+    let j = i + key.length;
+    let depth = 1;
+    while (depth) {
+      if (s[j] === "(") depth++;
+      if (s[j] === ")") depth--;
+      j++;
+    }
+    const args: string[] = [];
+    let cur = "";
+    let d = 0;
+    for (const ch of s.slice(i + key.length, j - 1)) {
+      if (ch === "(") d++;
+      if (ch === ")") d--;
+      if (ch === "," && d === 0) { args.push(cur.trim()); cur = ""; } else cur += ch;
+    }
+    args.push(cur.trim());
+    let b = body;
+    ["p_election_type", "p_county", "p_district", "p_town", "p_village"].forEach((n, k) => { b = b.replaceAll(n, `(${args[k]})`); });
+    s = s.slice(0, i) + `(${b})` + s.slice(j);
+  }
+  return s;
+}
 const fnBody = (fn: string) => {
   const m = /AS (\$[a-z]*\$)/.exec(fn)!;
   return fn.slice(fn.indexOf(m[0]) + m[0].length, fn.lastIndexOf(m[1])).trim();
@@ -38,7 +73,13 @@ if (mode === "gen") {
   if (!base.trimEnd().endsWith(tail.trim())) throw new Error("arms-parity.sql 的結尾變了，這支要跟著改");
   const body = fnBody(fnText(mig, "contribution_auto_tasks_ballot_numbers"));
   const part = `    'ballot_numbers', (SELECT coalesce(json_agg(row_to_json(x)), '[]'::json)::text FROM (\n${body}\n) AS x(${COLS}))`;
-  const sql = base.trimEnd().slice(0, -tail.trim().length).trimEnd() + `\n  ),\n  -- 補號次 migration 裡新臂本體（子查詢原樣執行，唯讀、不建立任何物件）\n  'branches_new', json_build_object(\n${part}\n  ),\n  -- 測試名人物隔離（#448，20261008114000）已上線：回放環境要有同樣的人物與參選紀錄才對得上現行總表\n  'placeholder_people', (SELECT coalesce(json_agg(json_build_object('id', p.id, 'name', p.name)), '[]'::json) FROM politicians p WHERE politician_name_is_placeholder(p.name)),\n  'placeholder_pe_ids', (SELECT coalesce(json_agg(pe.id), '[]'::json) FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id WHERE politician_name_is_placeholder(p.name))\n) AS j;\n`;
+  // 新臂本體讀視圖 ballot_number_anomalies（正式庫還沒有）：快照的最外層先用 CTE 把兩個視圖（函式呼叫就地展開）定義出來，唯讀、不建立任何物件
+  const unitFn = fnText(mig, "ballot_number_unit");
+  const ctes = `WITH ballot_number_units AS (${inlineUnitFn(viewBody(mig, "ballot_number_units"), unitFn)}),\n     ballot_number_anomalies AS (${viewBody(mig, "ballot_number_anomalies")})\n`;
+  const sel = base.indexOf("SELECT json_build_object(");
+  if (sel < 0) throw new Error("arms-parity.sql 找不到最外層的 SELECT json_build_object(");
+  const withCtes = base.slice(0, sel) + ctes + base.slice(sel);
+  const sql = withCtes.trimEnd().slice(0, -tail.trim().length).trimEnd() + `\n  ),\n  -- 補號次 migration 裡新臂本體（子查詢原樣執行，唯讀、不建立任何物件）\n  'branches_new', json_build_object(\n${part}\n  ),\n  -- 測試名人物隔離（#448，20261008114000）已上線：回放環境要有同樣的人物與參選紀錄才對得上現行總表\n  'placeholder_people', (SELECT coalesce(json_agg(json_build_object('id', p.id, 'name', p.name)), '[]'::json) FROM politicians p WHERE politician_name_is_placeholder(p.name)),\n  'placeholder_pe_ids', (SELECT coalesce(json_agg(pe.id), '[]'::json) FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id WHERE politician_name_is_placeholder(p.name))\n) AS j;\n`;
   Deno.writeTextFileSync(path, sql);
   console.log(`已寫出 ${path}（${sql.length} 字元）`);
   Deno.exit(0);
@@ -57,7 +98,7 @@ const taipeiDay = new Date(Date.parse(snap.taken_at) + 8 * 3600_000).toISOString
 console.log(`快照 ${snap.taken_at}（台北 ${taipeiDay}）：正式庫總表 ${snap.n} 件 ${snap.hash}`);
 
 const oldBranches = Object.fromEntries(ARM_BRANCHES.map((n) => [n, (snap.branches[n] as string | undefined) ?? "[]"]));
-const newRows = JSON.parse(snap.branches_new.ballot_numbers as string) as Array<{ task_id: string; target: { election_id: number; election_type: string; items_count: number; kind: string } }>;
+const newRows = JSON.parse(snap.branches_new.ballot_numbers as string) as Array<{ task_id: string; target: { election_id: number; election_type: string; items_count?: number; units_count?: number; kind: string } }>;
 const MIG = await readMig(BALLOT_MIG);
 
 // 之前各步（選舉結果、#448、party_gap、party_roster）與 #443 的欄位：跟 arms-parity-p2.ts 同一套回放環境
@@ -72,6 +113,12 @@ const PRE_SQL = [
   ...people.map((p) => `INSERT INTO politicians (id, name) VALUES ('${p.id}', '${p.name.replaceAll("'", "''")}')`),
   "CREATE TABLE politician_elections (id integer PRIMARY KEY, politician_id uuid NOT NULL)",
   ...(people.length ? peIds.map((id) => `INSERT INTO politician_elections (id, politician_id) VALUES (${id}, '${people[0].id}')`) : []),
+  // 補號次 migration 的視圖要能建起來：參選紀錄、地區、貢獻的欄位（回放環境只放最小替身）
+  "ALTER TABLE elections ADD COLUMN bulletin_dir text",
+  "ALTER TABLE politicians ADD COLUMN region text",
+  "ALTER TABLE politician_elections ADD COLUMN election_id integer, ADD COLUMN election_type text, ADD COLUMN region_id integer, ADD COLUMN candidacy_status text, ADD COLUMN cand_no integer",
+  "CREATE TABLE regions (id integer PRIMARY KEY, region text, sub_region text, village text)",
+  "ALTER TABLE contributions ADD COLUMN payload jsonb, ADD COLUMN source_urls text[]",
   between(QP_SQL, "CREATE TABLE IF NOT EXISTS task_priority_tiers (", "ON CONFLICT (id) DO NOTHING;").replace(/;$/, ""),
   between(QP_SQL, "ALTER TABLE activity_rules ADD COLUMN IF NOT EXISTS priority", "CHECK ((activity LIKE 'priority:%') = (priority IS NOT NULL));").replace(/;$/, ""),
 ].join(";\n") + ";";
@@ -93,8 +140,11 @@ await db0.close();
 // ② 新臂本體在正式庫的輸出
 const byElection = new Map<string, number>();
 for (const r of newRows) byElection.set(`${r.target.election_id} ${r.target.election_type}`, (byElection.get(`${r.target.election_id} ${r.target.election_type}`) ?? 0) + 1);
-console.log(`新臂本體在正式庫輸出 ${newRows.length} 件（${newRows.reduce((s, r) => s + r.target.items_count, 0)} 位）：${[...byElection].map(([k, v]) => `${k}=${v}`).join("、")}`);
-check("② 新臂的每一件都是 target.kind＝cand_no、帶 election_id 與 election_type", newRows.every((r) => r.target.kind === "cand_no" && Number.isInteger(r.target.election_id) && typeof r.target.election_type === "string"));
+const main = newRows.filter((r) => r.target.kind === "cand_no");
+const recheck = newRows.filter((r) => r.target.kind === "cand_no_recheck");
+const main26 = main.filter((r) => r.target.election_id === 2026);
+console.log(`新臂本體在正式庫輸出 ${newRows.length} 件：補號次 ${main.length} 件（2026 屆 ${main26.length} 件、${main26.reduce((s, r) => s + (r.target.items_count ?? 0), 0)} 位）、重查 ${recheck.length} 件（${recheck.reduce((s, r) => s + (r.target.units_count ?? 0), 0)} 個號次單位，2026 屆 ${recheck.filter((r) => r.target.election_id === 2026).length} 件）：${[...byElection].map(([k, v]) => `${k}=${v}`).join("、")}`);
+check("② 新臂的每一件都是 target.kind＝cand_no 或 cand_no_recheck、帶 election_id 與 election_type", newRows.every((r) => (r.target.kind === "cand_no" || r.target.kind === "cand_no_recheck") && Number.isInteger(r.target.election_id) && typeof r.target.election_type === "string"));
 check("② task_id 沒有重複、也不跟現行總表的任何 task_id 撞號", new Set(newRows.map((r) => r.task_id)).size === newRows.length && newRows.every((r) => !(snap.row_hashes as [string, string][]).some(([id]) => id === r.task_id)));
 const scope = snap.roster_check_scope as Array<{ election_id: number; election_type: string; ballot_draw_on: string | null }>;
 const drawOf = (r: (typeof newRows)[number]) => scope.find((s) => s.election_id === r.target.election_id && s.election_type === r.target.election_type)?.ballot_draw_on ?? null;

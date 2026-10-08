@@ -115,7 +115,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
     "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。 " +
     // 補號次（2026-10-08）
-    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次，詳細做法看這一件任務的 hint。",
+    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。" +
+    "**target.kind＝cand_no_recheck**：同一個號次單位裡有重複或跳號，target.units 逐單位列出異常，要對公告重查，詳細做法同樣看 hint。",
 
   election_result_missing:
     "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
@@ -465,6 +466,25 @@ function buildPayload(
       };
     case "candidacy": {
       // 補號次（2026-10-08，target.kind＝cand_no）：整個單位一件，名單在 target.items；骨架給第一位，其餘照 items 逐位換
+      // 號次重查（kind＝cand_no_recheck）：一件含好幾個號次單位（t.units），骨架給第一個單位的第一位
+      if (t.kind === "cand_no_recheck") {
+        const units = Array.isArray(t.units) ? (t.units as unknown[]) : [];
+        const u0 = (units[0] && typeof units[0] === "object" ? units[0] : {}) as Record<string, unknown>;
+        const members = Array.isArray(u0.members) ? (u0.members as unknown[]) : [];
+        const m0 = (members[0] && typeof members[0] === "object" ? members[0] : {}) as Record<string, unknown>;
+        return {
+          politician_id: m0.politician_id ?? "（target.units[].members 裡要更正的那一位的 politician_id）",
+          name: m0.name ?? "（他的姓名）",
+          election_id: t.election_id ?? "（選舉年份）",
+          election_type: t.election_type ?? "（選舉類型）",
+          region: t.region ?? "（縣市）",
+          ...(u0.sub_region ? { sub_region: u0.sub_region } : {}),
+          ...(u0.village ? { village: u0.village } : {}),
+          ...(u0.electoral_district ? { electoral_district: u0.electoral_district } : {}),
+          cand_no: "（公告上他的號次，正整數；只交跟公告不同的那幾位）",
+          candidate_status: t.candidate_status ?? "（照現況）",
+        };
+      }
       if (t.kind === "cand_no") {
         const items = Array.isArray(t.items) ? (t.items as unknown[]) : [];
         const first = (items[0] && typeof items[0] === "object" ? items[0] : {}) as Record<string, unknown>;

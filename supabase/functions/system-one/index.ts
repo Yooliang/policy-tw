@@ -20,6 +20,7 @@ import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKe
  *                                                  讓 Jev 從那一頁選值（有限域欄位）。不帶金鑰，同 judge 的配額。回建議的 contribution。
  *   ?action=results_batch POST                           整批補選舉結果的系統票：逐位核對中選會名單（SQL），全部對得上才投（2026-10-06）。不帶金鑰、冪等。
  *   ?action=reassign_check POST                          參選紀錄改掛的系統票：中選會名冊的出生年核新舊兩人（SQL，2026-10-06）。不帶金鑰、冪等。
+ *   ?action=cand_no_check POST                           號次重複檢查的系統票：同一個號次單位裡跟已上線或等票中的另一位同號 → not_supported（目標 +1），內部一致性檢查、不核來源（SQL，2026-10-08）。不帶金鑰、冪等。
  *   ?action=news_screen POST                             新聞逐則初篩：沒人名的直接記無關，有人名的問 Jev 是哪條政見的進度／新承諾／無關，
  *                                                        有關的開 news_sweep 任務（2026-09-29）。news-fetch 收完就叫。守法同 backfill。
  *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
@@ -44,7 +45,7 @@ import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FO
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
-import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, rosterBatchEligible, type RosterRow } from "../_shared/cec-roster.ts";
+import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
 const corsHeaders = {
@@ -796,8 +797,7 @@ Deno.serve(async (req) => {
       const { data: cands, error: cErr } = await supabase.rpc("roster_batch_candidates", { p_limit: 500 });
       if (cErr) throw new Error(`roster candidates: ${cErr.message}`);
       const list = (cands ?? []) as Cand[];
-      // 帶號次（cand_no）的交件不撿：登記彙總表沒有號次，名冊判 supported 會讓沒人核過的號次一票過（補號次 2026-10-08；rosterBatchEligible）
-      const todo = list.filter((c) => rosterBatchEligible(c.payload));
+      const todo = list;
       const byUrl = new Map<string, Cand[]>();
       for (const c of todo) {
         const url = (c.source_urls ?? []).find((u) => CEC_ROSTER_URL_RE.test(u));
@@ -865,6 +865,16 @@ Deno.serve(async (req) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 200);
       const { data, error } = await supabase.rpc("reassign_candidacy_check_pending", { p_limit: limit });
       if (error) throw new Error(`reassign_candidacy_check_pending: ${error.message}`);
+      return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
+    }
+
+    // ---- cand_no_check：號次重複檢查的系統票（2026-10-08，補號次）----
+    // 交件的 cand_no 跟同一個號次單位（縣市長＝縣市、議員＝選舉區、鄉鎮市長與區長＝鄉鎮市區、村里長＝村里）裡已上線或等票中的另一位同號 → source_support／not_supported（目標 +1）。
+    // 內部一致性檢查，不核對來源；規則只在 SQL 一份（cand_no_dup_system_check）。排程 cand-no-check-10min 叫；冪等（標過的不再標）
+    if (action === "cand_no_check") {
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 1000);
+      const { data, error } = await supabase.rpc("cand_no_dup_check_pending", { p_limit: limit });
+      if (error) throw new Error(`cand_no_dup_check_pending: ${error.message}`);
       return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
     }
 

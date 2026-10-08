@@ -20,6 +20,7 @@ import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
+import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -381,6 +382,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
               result: `系統核對中選會名冊：${String(st.reason ?? "")}`,
               cec_birth_year: st.cec_birth_year ?? null, from_birth_year: st.from_birth_year ?? null, to_birth_year: st.to_birth_year ?? null,
             };
+          }
+          // 號次重複（2026-10-08，補號次）：同一個號次單位裡跟另一位同號，理由與衝突的是誰照實給
+          if (typeof sv.model === "string" && sv.model.startsWith(CAND_NO_DUP_MODEL_PREFIX)) {
+            (verifyCurrent as Record<string, unknown>).cand_no_check = candNoCheckForVerify((sv.state ?? {}) as Record<string, unknown>, (verifyPayload as Record<string, unknown>).cand_no);
           }
           (verifyCurrent as Record<string, unknown>).system_vote = {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,

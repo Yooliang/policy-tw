@@ -6,19 +6,21 @@
  * 只要 --allow-read（CI 的 deno test --allow-read _shared/ 就跑）。
  *
  *   A. 文字層：總表＝前一版（20261008121000）加一行 UNION 分支；臂名清單＝P1 的清單加一個名字；新增一支臂的三處登記（標籤、清單、規則）對得上；
- *      這支只動這幾樣（不碰 seed、candidacy_list_published、not_running、candidate_status_stale）；臂本體沒有寫死的年份／日期／職位；任務提示、skill.md、protocol 版號、roster_batch 的守門
+ *      drop_applied／roster_batch_candidates／activity_health 各是現行定義加一處；這支只動這幾樣（不碰 seed、candidacy_list_published、not_running、candidate_status_stale）；
+ *      臂本體沒有寫死的年份／日期；任務提示、skill.md、protocol 版號的守門
  *   B. PGlite（行為層，總表＋規則＋里程碑＋seed 跑真的，臂本體換 stub）：今天輸出不變；假時鐘 10-22 不開、10-23 開、11-28 開、11-29 關；舊選舉永遠不開；
  *      缺 draw 里程碑的職位關著；里程碑回填與 ON CONFLICT；opened_by 帶 draw 與 polling；seed 窗口關了記 window；每條守門做還原驗證
  *   C. 臂本體（真的 SQL 灌進 PGlite 的小資料表）：誰會被派（filed、沒號次、沒被併走、有縣市）、單位怎麼切（村里長與代表到鄉鎮、議員的選舉區放 items）、
  *      50 位拆件、已有人交了帶號次的 candidacy 先不派、candidate_status 隨名單公告翻
+ *   D. 端到端（真的臂本體＋總表＋規則＋seed＋觸發器，不換 stub）：窗口、seed、單筆落庫不收回整件、重查任務、roster_batch_candidates 不被帶號次的擠掉、health
+ *   E. 號次單位與重複／跳號視圖（真的 SQL）：重複、跳號、人數未齊不算、不同選舉區同號不算、村里長按村里、代表不檢查
  *
  * 正式庫快照版的「今天輸出逐件不變」見 scripts/arms-parity-p2.ts ballot_numbers（不進 CI；PR 說明附結果）。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { applyP2, armsFingerprint, BALLOT_MIG, buildArmsDb, DEFAULT_SCOPE, fnText, type GapRow, latestFn, migrationNames, mutate, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
-import { BALLOT_NUMBERS_HINT, CAND_NO_VERIFY_HINT, isBallotNumbersTask, shapeTaskCurrent, shapeVerifyCurrent, type TaskContextData, type VerifyContextData } from "./task-context.ts";
-import { rosterBatchEligible } from "./cec-roster.ts";
+import { applyP2, armsFingerprint, BALLOT_MIG, buildArmsDb, DEFAULT_SCOPE, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
+import { BALLOT_NUMBERS_HINT, BALLOT_NUMBERS_RECHECK_HINT, CAND_NO_VERIFY_HINT, isBallotNumbersRecheckTask, isBallotNumbersTask, shapeTaskCurrent, shapeVerifyCurrent, type TaskContextData, type VerifyContextData } from "./task-context.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
 
 const B = await readMig(BALLOT_MIG);
@@ -54,14 +56,48 @@ const namesIn = (fn: string): string[] => [...fn.slice(fn.indexOf("SELECT ARRAY[
 const tagsIn = (fn: string): string[] => [...fn.matchAll(/SELECT '([a-z_]+)' AS arm, t\.\*/g)].map((m) => m[1]);
 const ARM = fnText(B, "contribution_auto_tasks_ballot_numbers");
 
-Deno.test("A1 前一版是對的：總表緊接著 party_roster 那支 P2（20261008121000），活動名清單緊接著 P1（中間沒有人插一版，抄的底就過期）", async () => {
-  for (const [fn, base] of [["contribution_auto_tasks_arms", P2_PR_MIG], ["activity_arm_names", P1_MIG]]) {
+// 這支 migration 順手改的另外三個既有物件：每個都是「現行定義加一處」
+const DA_PREV = fnText(await readMig(P0_MIG), "task_dispatches_drop_applied");
+const DA_NEW = fnText(B, "task_dispatches_drop_applied");
+const DA_OLD_COND = "  IF NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%' THEN\n";
+const DA_NEW_COND = "  IF NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%'\n     -- 補號次與重查是一個單位一件、代理一位一筆交：一筆落庫不代表整件做完，由 seed 依缺口還在不在收回（補號次 20261008150000）\n     AND NEW.task_id NOT LIKE 'auto:candidacy_source_missing:cand_no%' THEN\n";
+const isMechanicalDropApplied = (fn: string) => {
+  try {
+    return mutate(fn, DA_NEW_COND, DA_OLD_COND) === DA_PREV;
+  } catch {
+    return false;
+  }
+};
+const RBC_MIG = "20260924000013_roster_batch.sql";
+const RBC_PREV = fnText(await readMig(RBC_MIG), "roster_batch_candidates");
+const RBC_NEW = fnText(B, "roster_batch_candidates");
+const RBC_ANCHOR = "   WHERE c.status = 'pending' AND c.contribution_type = 'candidacy'\n";
+const RBC_ADD = "     -- 帶號次的不撿：登記彙總表沒有號次，名冊判 supported 會讓沒人核過的號次一票過（補號次 20261008150000）；在查詢裡排除，不佔 LIMIT\n     AND (c.payload->>'cand_no' IS NULL OR c.payload->>'cand_no' = '')\n";
+const isMechanicalRosterBatch = (fn: string) => {
+  try {
+    return mutate(fn, RBC_ANCHOR + RBC_ADD, RBC_ANCHOR) === RBC_PREV;
+  } catch {
+    return false;
+  }
+};
+const HEALTH_PREV_SQL = await readMig("20261008113000_bulletin_watch.sql");
+const healthView = (sql: string) => sql.slice(sql.indexOf("CREATE OR REPLACE VIEW activity_health AS"), sql.indexOf("COMMENT ON VIEW activity_health IS"));
+const HEALTH_SEG = /  UNION ALL\n  SELECT 'ballot_number_anomaly'[\s\S]*?\n(?=  UNION ALL\n  SELECT 'clock_overridden')/;
+const isMechanicalHealth = (sql: string) => HEALTH_SEG.test(healthView(sql)) && healthView(sql).replace(HEALTH_SEG, "") === healthView(HEALTH_PREV_SQL);
+
+Deno.test("A1 前一版是對的：總表緊接著 party_roster 那支 P2、活動名清單緊接著 P1、drop_applied 緊接著 P0、roster_batch_candidates 緊接著 20260924000013（中間沒有人插一版，抄的底就過期）", async () => {
+  for (const [fn, base] of [["contribution_auto_tasks_arms", P2_PR_MIG], ["activity_arm_names", P1_MIG], ["task_dispatches_drop_applied", P0_MIG], ["roster_batch_candidates", RBC_MIG]]) {
     const defining: string[] = [];
     for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
     const i = defining.indexOf(BALLOT_MIG);
     assert(i > 0, `這支 migration 要在重新定義 ${fn} 的清單裡`);
     assertEquals(defining[i - 1], base, `${fn} 的前一版應該是 ${base}；有人在中間改了，要以那一版為底重做機械式替換`);
   }
+  const health: string[] = [];
+  for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE VIEW activity_health AS")) health.push(n);
+  const hi = health.indexOf(BALLOT_MIG);
+  assert(hi > 0);
+  assertEquals(health[hi - 1], "20261008113000_bulletin_watch.sql", "activity_health 的前一版應該是公報偵測那支");
 });
 
 Deno.test("A2 總表新定義＝前一版加一行 UNION 分支（臂名 ballot_numbers）；簽名、回傳型別、其餘分支與 #448／gap.arms_all 一字不動", () => {
@@ -89,22 +125,30 @@ Deno.test("A3 活動名清單＝P1 的清單加一個名字；新增一支臂的
   assertEquals(count(codeOf(B), "INSERT INTO activity_rules"), 1);
 });
 
-Deno.test("A4 這支只動這幾樣：三支函式、一條規則、draw 里程碑回填；不碰 seed、candidacy_list_published、not_running、candidate_status_stale；不建表不刪東西", () => {
+Deno.test("A4 這支只動這幾樣：新臂與號次單位函式／視圖、總表與清單各一處、drop_applied／roster_batch_candidates／activity_health 各加一處；不碰 seed、candidacy_list_published、not_running、candidate_status_stale；不建表不刪東西", () => {
   const code = codeOf(B);
   const defined = [...code.matchAll(/CREATE OR REPLACE FUNCTION ([a-z_]+)\(/g)].map((m) => m[1]).sort();
-  assertEquals(defined, ["activity_arm_names", "contribution_auto_tasks_arms", "contribution_auto_tasks_ballot_numbers"]);
-  assert(!/DROP FUNCTION|DROP TABLE|ALTER TABLE|CREATE TABLE|TRUNCATE|DELETE FROM|UPDATE (activity_rules|elections|election_milestones|politician_elections|roster_check_scope)/i.test(code), "不建表、不刪、不改別人的列");
+  assertEquals(defined, ["activity_arm_names", "ballot_number_unit", "contribution_auto_tasks_arms", "contribution_auto_tasks_ballot_numbers", "roster_batch_candidates", "task_dispatches_drop_applied"]);
+  assertEquals([...code.matchAll(/CREATE OR REPLACE VIEW ([a-z_]+)/g)].map((m) => m[1]), ["ballot_number_units", "ballot_number_anomalies", "activity_health"]);
+  // drop_applied 本來就有的那一句 DELETE FROM task_dispatches（P0 的現行定義）不算
+  assert(!/DROP FUNCTION|DROP TABLE|ALTER TABLE|CREATE TABLE|TRUNCATE|DELETE FROM|UPDATE (activity_rules|elections|election_milestones|politician_elections|roster_check_scope)/i.test(code.replace("DELETE FROM task_dispatches WHERE task_id = NEW.task_id;", "")), "不建表、不刪、不改別人的列");
   assert(!code.includes("FUNCTION seed_auto_task_queue"), "不碰 seed");
-  assertEquals(count(code, "candidacy_list_published("), 1, "candidacy_list_published 只被呼叫一次（不重寫它：另一條 PR 在改）");
+  assertEquals(count(code, "candidacy_list_published("), 2, "candidacy_list_published 只被呼叫兩次（補號次與重查各一，不重寫它：另一條 PR 在改）");
   assert(!/FUNCTION contribution_auto_tasks_(not_running|raw|party_roster|party_gap)/.test(code));
   const inserts = [...code.matchAll(/INSERT INTO ([a-z_]+)/g)].map((m) => m[1]);
   assertEquals(inserts, ["election_milestones", "activity_rules"]);
   // 里程碑回填：取 roster_check_scope.ballot_draw_on、一個職位一列、已存在的不動
   assert(code.includes("FROM roster_check_scope s\n WHERE s.ballot_draw_on IS NOT NULL\nON CONFLICT (election_id, kind, (COALESCE(election_type, ''))) DO NOTHING;"));
   assert(code.includes("SELECT s.election_id, 'draw', s.election_type, s.ballot_draw_on, 'official'"));
+  // 三個既有物件各是現行定義加一處
+  assert(isMechanicalDropApplied(DA_NEW));
+  assert(isMechanicalRosterBatch(RBC_NEW));
+  assert(isMechanicalHealth(B));
+  assertEquals(count(codeOf(DA_NEW), "set_config('gap.close_reason', 'filled', true)"), 1, "drop_applied 的 gap_events 收回原因那幾行不動");
+  assertEquals(codeOf(RBC_NEW).split("\n").filter((l) => l.includes("LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 500), 1000))")).length, 1, "LIMIT 不動：過濾在查詢裡，不是撈出來再丟");
 });
 
-Deno.test("A5 臂本體：沒有寫死的年份、日期、職位清單；單位與拆件規則在；條件是 filed、沒號次、沒被併走", () => {
+Deno.test("A5 臂本體：沒有寫死的年份、日期；單位與拆件規則在；條件是 filed、沒號次、沒被併走；五種選舉別再細到鄉鎮市區（含區長與鄉鎮市長）", () => {
   // 提示文字裡舉 2022 年的公告當「長相」範例（桃園市長名單、苗栗縣登記冊）是說明，不是條件；2026 或任何別的年份都不該出現
   assertEquals([...new Set(ARM.replace(/--.*$/gm, "").match(/\b(19|20)\d\d\b/g) ?? [])], ["2022"], "臂裡不寫死年份（只有提示文字裡的 2022 範例）");
   assert(!/election_date\s*[<>=]|CURRENT_DATE\s*[<>+-]|now\(\)/i.test(ARM), "臂裡不比日期（窗口在規則）");
@@ -112,46 +156,42 @@ Deno.test("A5 臂本體：沒有寫死的年份、日期、職位清單；單位
   assert(ARM.includes("pe.candidacy_status = 'filed' AND pe.cand_no IS NULL AND pe.election_type IS NOT NULL"));
   assert(ARM.includes("JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL"));
   assert(ARM.includes("/ 50 + 1"), "超過 50 位拆件");
-  assert(ARM.includes("pe.election_type IN ('村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')"), "村里長與代表再細到鄉鎮市區");
+  const FIVE = "('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')";
+  assertEquals(count(ARM, FIVE), 2, "補號次與重查切法一樣（鄉鎮市長、區長、村里長、代表到鄉鎮市區）");
   assert(ARM.includes("'kind', 'cand_no'") && ARM.includes("'election_id', u.election_id, 'election_type', u.election_type"), "target 帶 election_id 與 election_type（總表用它們問規則）");
-  assert(ARM.includes("'auto:candidacy_source_missing:cand_no:'"));
+  assert(ARM.includes("'kind', 'cand_no_recheck'") && ARM.includes("'election_id', rc.election_id, 'election_type', rc.election_type"), "重查也帶 election_id 與 election_type");
+  assert(ARM.includes("'auto:candidacy_source_missing:cand_no:'") && ARM.includes("'auto:candidacy_source_missing:cand_no_recheck:'"));
   assert(ARM.includes("c.payload->>'cand_no' IS NOT NULL"), "已經有人交了帶號次的 candidacy 先不派");
   assert(ARM.includes("candidacy_protocol_status('filed', candidacy_list_published(gr.election_id, gr.election_type, CURRENT_DATE))"), "candidate_status 照名單公告了沒翻（呼叫方式同 party_roster）");
+  assert(ARM.includes("FROM ballot_number_anomalies a"), "重查讀視圖（號次單位的檢查一定按號次單位）");
 });
 
-Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、roster_batch 的守門都在", async () => {
+Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、system-one 的守門都在；roster_batch 的過濾在 SQL 不在記憶體", async () => {
   assert(BALLOT_NUMBERS_HINT.includes("target.items") && BALLOT_NUMBERS_HINT.includes("登記彙總表") && BALLOT_NUMBERS_HINT.includes("unreachable") && BALLOT_NUMBERS_HINT.includes("不要回 no_change not_found"));
+  assert(BALLOT_NUMBERS_HINT.includes("各自從 1 編起") && BALLOT_NUMBERS_HINT.includes("not_supported"));
+  assert(BALLOT_NUMBERS_RECHECK_HINT.includes("duplicate") && BALLOT_NUMBERS_RECHECK_HINT.includes("gap") && BALLOT_NUMBERS_RECHECK_HINT.includes("units[].members") && BALLOT_NUMBERS_RECHECK_HINT.includes("no_change"));
   assert(CAND_NO_VERIFY_HINT.includes("payload.cand_no") && CAND_NO_VERIFY_HINT.includes("剛好等於"));
   const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r\n/g, "\n");
-  assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）（1.75.0）"));
-  assert(md.includes("**系統不核號次**") && md.includes("`outcome` 填 `unreachable`") && md.includes("不能當號次的來源"));
-  assert(md.includes("**版本**：1.75.0") && md.includes("*協議版本 1.75.0"));
-  assertEquals(PROTOCOL_VERSION, "1.75.0");
-  // roster_batch：帶號次的不撿
+  assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）（1.76.0）"));
+  assert(md.includes("**系統不核號次來源**") && md.includes("`outcome` 填 `unreachable`") && md.includes("不能當號次的來源"));
+  assert(md.includes("`cand_no_recheck`") && md.includes("各自從 1 編起") && md.includes("重複") && md.includes("跳號"));
+  assert(md.includes("**版本**：1.76.0") && md.includes("*協議版本 1.76.0"));
+  assertEquals(PROTOCOL_VERSION, "1.76.0");
   const si = (await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  assert(si.includes("const todo = list.filter((c) => rosterBatchEligible(c.payload));"));
-  assert(si.includes("rosterBatchEligible,"));
+  assert(si.includes('if (action === "cand_no_check")') && si.includes('supabase.rpc("cand_no_dup_check_pending"'));
+  assert(!si.includes("rosterBatchEligible"), "roster_batch 的過濾已經搬到 SQL（roster_batch_candidates），記憶體裡不再有");
   const guidance = (await Deno.readTextFile(new URL("./task-guidance.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  assert(guidance.includes("t.kind === \"cand_no\"") && guidance.includes("缺的是號次（target.kind＝cand_no"));
+  assert(guidance.includes("t.kind === \"cand_no\"") && guidance.includes("t.kind === \"cand_no_recheck\"") && guidance.includes("缺的是號次（target.kind＝cand_no"));
 });
 
-Deno.test("A7 rosterBatchEligible：有 cand_no 的不撿、沒有的照舊", () => {
-  assertEquals(rosterBatchEligible({ name: "甲", cand_no: 3 }), false);
-  assertEquals(rosterBatchEligible({ name: "甲", cand_no: "3" }), false);
-  assertEquals(rosterBatchEligible({ name: "甲" }), true);
-  assertEquals(rosterBatchEligible({ name: "甲", cand_no: null }), true);
-  assertEquals(rosterBatchEligible({ name: "甲", cand_no: "" }), true);
-  assertEquals(rosterBatchEligible(null), true);
-  assertEquals(rosterBatchEligible(undefined), true);
-});
-
-Deno.test("A8 任務現況與提示：補號次任務走 BALLOT_NUMBERS_HINT、骨架給第一位；驗證帶號次的 candidacy 多一句號次提示；沒帶的不多", () => {
+Deno.test("A8 任務現況與提示：補號次任務走 BALLOT_NUMBERS_HINT、骨架給第一位；重查走 RECHECK 提示、骨架給第一個單位的第一位；驗證帶號次的 candidacy 多一句號次提示；沒帶的不多", () => {
   const target = {
     kind: "cand_no", election_id: 2026, election_type: "縣市議員", region: "台北市", candidate_status: "registered", items_count: 2,
     items: [{ politician_election_id: 1, politician_id: "00000000-0000-4000-8000-000000000001", name: "甲", electoral_district: "第01選舉區" }, { politician_election_id: 2, politician_id: "00000000-0000-4000-8000-000000000002", name: "乙", electoral_district: "第02選舉區" }],
   };
   assert(isBallotNumbersTask("candidacy_source_missing", target));
   assert(!isBallotNumbersTask("candidacy_source_missing", { ...target, kind: "party" }));
+  assert(!isBallotNumbersTask("candidacy_source_missing", { ...target, kind: "cand_no_recheck" }));
   assert(!isBallotNumbersTask("policy_missing", target));
   const cur = shapeTaskCurrent("candidacy_source_missing", {} as TaskContextData, { task_id: "auto:candidacy_source_missing:cand_no:2026:縣市議員:台北市", target });
   assertEquals(cur.hint, BALLOT_NUMBERS_HINT);
@@ -164,6 +204,22 @@ Deno.test("A8 任務現況與提示：補號次任務走 BALLOT_NUMBERS_HINT、�
   assertEquals(tpl.electoral_district, "第01選舉區");
   assertEquals(tpl.candidate_status, "registered");
   assert(typeof tpl.cand_no === "string" && (tpl.cand_no as string).includes("號次"));
+  // 重查
+  const rt = {
+    kind: "cand_no_recheck", election_id: 2026, election_type: "村里長", region: "台北市", sub_region: "中山區", candidate_status: "qualified", units_count: 1,
+    units: [{ unit: "中山區 新生里", anomaly: "duplicate", registered: 2, numbered: 2, duplicates: [1], missing: [2], sub_region: "中山區", village: "新生里",
+      members: [{ politician_id: "00000000-0000-4000-8000-0000000000a1", name: "丙", cand_no: 1 }, { politician_id: "00000000-0000-4000-8000-0000000000a2", name: "丁", cand_no: 1 }] }],
+  };
+  assert(isBallotNumbersRecheckTask("candidacy_source_missing", rt));
+  assert(!isBallotNumbersTask("candidacy_source_missing", rt));
+  const cur2 = shapeTaskCurrent("candidacy_source_missing", {} as TaskContextData, { task_id: "auto:candidacy_source_missing:cand_no_recheck:2026:村里長:台北市:中山區", target: rt });
+  assertEquals(cur2.hint, BALLOT_NUMBERS_RECHECK_HINT);
+  assertEquals(cur2.units_count, 1);
+  const tpl2 = (cur2.report_template as { payload: Record<string, unknown> }).payload;
+  assertEquals(tpl2.politician_id, "00000000-0000-4000-8000-0000000000a1");
+  assertEquals(tpl2.village, "新生里");
+  assertEquals(tpl2.sub_region, "中山區");
+  assertEquals(tpl2.candidate_status, "qualified");
   const v = shapeVerifyCurrent("candidacy", { name: "甲", cand_no: 3 }, {} as VerifyContextData);
   assert(String(v.hint).includes(CAND_NO_VERIFY_HINT));
   const v2 = shapeVerifyCurrent("candidacy", { name: "甲" }, {} as VerifyContextData);
@@ -206,14 +262,27 @@ ALTER TABLE task_dispatches ADD COLUMN priority SMALLINT;
 CREATE FUNCTION activity_priority(p_activity TEXT, p_election_id INTEGER DEFAULT NULL, p_election_type TEXT DEFAULT NULL, p_today DATE DEFAULT NULL)
 RETURNS TABLE (priority SMALLINT, rule_id BIGINT, milestone_kind TEXT, milestone_on_date DATE, expected_open_on DATE)
 LANGUAGE sql STABLE AS $$ SELECT 2::SMALLINT, NULL::BIGINT, NULL::TEXT, NULL::DATE, NULL::DATE $$;`;
+// 這支 migration 建的視圖要能建起來：參選紀錄、地區、貢獻的欄位補齊（D 組端到端還會灌資料）；候選狀態換算用真的 candidacy_protocol_status，名單公告了沒用替身（預設沒公告）
+const FULL_STUB = QP_STUB + `
+ALTER TABLE elections ADD COLUMN bulletin_dir text;
+ALTER TABLE politicians ADD COLUMN region text;
+ALTER TABLE politician_elections ADD COLUMN election_id integer, ADD COLUMN election_type text, ADD COLUMN region_id integer, ADD COLUMN candidacy_status text, ADD COLUMN cand_no integer;
+CREATE TABLE regions (id integer PRIMARY KEY, region text, sub_region text, village text);
+ALTER TABLE contributions ADD COLUMN payload jsonb, ADD COLUMN source_urls text[];
+CREATE TABLE jev_decisions (id bigserial PRIMARY KEY, subject_type text, subject_id text, question text, choice text, model text);
+CREATE TABLE _lp (published boolean);
+INSERT INTO _lp VALUES (false);
+CREATE FUNCTION candidacy_list_published(p_election_id integer, p_election_type text, p_on date) RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT published FROM _lp $$;
+${await latestFn("candidacy_protocol_status")}`;
+
 Deno.test("B0 優先層替身的簽名與回傳欄位跟 #443 的真實定義一致", () => {
   assert(QP.includes("RETURNS TABLE (priority SMALLINT, rule_id BIGINT, milestone_kind TEXT, milestone_on_date DATE, expected_open_on DATE)"));
 });
 
 const buildBallot = (mutateB?: (s: string) => string, branches: Record<string, GapRow[]> = NEW_BRANCHES) =>
-  buildArmsDb({ branches, scope: SCOPE, extraBranches: EXTRA, afterP1Sql: QP_STUB, p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }, { name: BALLOT_MIG, mutate: mutateB }], restub: RESTUB } });
+  buildArmsDb({ branches, scope: SCOPE, extraBranches: EXTRA, afterP1Sql: FULL_STUB, p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }, { name: BALLOT_MIG, mutate: mutateB }], restub: RESTUB } });
 const buildBase = () =>
-  buildArmsDb({ branches: BASE_BRANCHES, scope: SCOPE, extraBranches: EXTRA, afterP1Sql: QP_STUB, p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }], restub: RESTUB.filter((n) => n !== "ballot_numbers") } });
+  buildArmsDb({ branches: BASE_BRANCHES, scope: SCOPE, extraBranches: EXTRA, afterP1Sql: FULL_STUB, p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }], restub: RESTUB.filter((n) => n !== "ballot_numbers") } });
 
 type Db = PGlite;
 const rows = async <T = Record<string, unknown>>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> => (await db.query<T>(sql, params)).rows;
@@ -472,7 +541,14 @@ const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}
 type Pe = { id: number; eid?: number; pid: number; type: string | null; region_id?: number | null; status?: string; cand_no?: number | null };
 type Person = { id: number; name: string; region?: string | null; merged?: boolean };
 type Region = { id: number; region: string; sub_region?: string | null; village?: string | null };
-async function buildArmDb(o: { people: Person[]; pes: Pe[]; regions?: Region[]; contributions?: Array<{ type: string; status: string; payload: Record<string, unknown> }>; listPublished?: boolean }): Promise<PGlite> {
+/** 號次單位函式、兩個視圖、臂本體（都是真的 SQL；mutateB 可以把 migration 文字改壞一處做還原驗證） */
+const viewSql = (sql: string, name: string) => {
+  const a = sql.indexOf(`CREATE OR REPLACE VIEW ${name} AS`);
+  assert(a >= 0, `找不到視圖 ${name}`);
+  return sql.slice(a, sql.indexOf(";\nCOMMENT ON VIEW", a) + 1);
+};
+const piecesSql = (b: string) => `${fnText(b, "ballot_number_unit")}\n${viewSql(b, "ballot_number_units")}\n${viewSql(b, "ballot_number_anomalies")}\n${fnText(b, "contribution_auto_tasks_ballot_numbers")}`;
+async function buildArmDb(o: { people: Person[]; pes: Pe[]; regions?: Region[]; contributions?: Array<{ type: string; status: string; payload: Record<string, unknown> }>; listPublished?: boolean; mutateB?: (s: string) => string }): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
     CREATE TABLE elections (id integer PRIMARY KEY, election_date date);
@@ -484,7 +560,7 @@ async function buildArmDb(o: { people: Person[]; pes: Pe[]; regions?: Region[]; 
     CREATE TABLE _lp (published boolean);
     CREATE FUNCTION candidacy_list_published(p_election_id integer, p_election_type text, p_on date) RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT published FROM _lp $$;
     ${await latestFn("candidacy_protocol_status")}
-    ${ARM}`);
+    ${piecesSql(o.mutateB ? o.mutateB(B) : B)}`);
   await db.exec(`INSERT INTO _lp VALUES (${o.listPublished ? "true" : "false"})`);
   await db.exec(`INSERT INTO elections VALUES (2026, '2026-11-28'), (2022, '2022-11-26')`);
   await db.exec(`INSERT INTO election_milestones_all VALUES (2026, 'draw', '縣市議員', '2026-10-23', 'announced'), (2026, 'list_published', NULL, '2026-11-17', 'announced')`);
@@ -605,3 +681,271 @@ Deno.test("C5 candidate_status 隨名單公告翻（公告前 registered、公�
     await db.close();
   }
 });
+
+// ============================================================
+// E. 號次單位與重複／跳號視圖（真的 SQL，一個資料庫灌一整組情境，逐單位看有沒有被列）
+// ============================================================
+function scenarioE() {
+  const people: Person[] = [];
+  const pes: Pe[] = [];
+  const add = (type: string, regionId: number | null, no: number | null, status = "filed", o: { eid?: number; region?: string | null; merged?: boolean } = {}) => {
+    const id = people.length + 1;
+    people.push({ id, name: `人${id}`, region: o.region === undefined ? "台北市" : o.region, merged: o.merged });
+    pes.push({ id, pid: id, type, region_id: regionId, status, cand_no: no, eid: o.eid });
+    return id;
+  };
+  const regions: Region[] = [
+    { id: 1, region: "台北市", sub_region: "第01選舉區" }, { id: 2, region: "台北市", sub_region: "第02選舉區" },
+    { id: 12, region: "台北市", sub_region: "第03選舉區" }, { id: 13, region: "台北市", sub_region: "第04選舉區" },
+    { id: 3, region: "台北市", sub_region: "中山區", village: "新生里" }, { id: 4, region: "台北市", sub_region: "中山區", village: "長安里" },
+    { id: 5, region: "台北市", sub_region: "中山區", village: "民族里" }, { id: 6, region: "台北市", sub_region: "中山區", village: "松江里" },
+    { id: 7, region: "台北市", sub_region: "中山區", village: "大直里" },
+    { id: 8, region: "新北市" }, { id: 9, region: "連江縣", sub_region: "東引鄉" },
+    { id: 10, region: "屏東縣", sub_region: "泰武鄉" }, { id: 11, region: "屏東縣", sub_region: "來義鄉" },
+  ];
+  // 縣市議員：第01選舉區 有人重複（2,2）、第02 正常（同樣用 1、2、3，不算重複）、第03 有一位退選但有號次（算進名單）、第04 重複但人數沒到齊
+  add("縣市議員", 1, 1); add("縣市議員", 1, 2); add("縣市議員", 1, 2);
+  add("縣市議員", 2, 1); add("縣市議員", 2, 2); add("縣市議員", 2, 3);
+  add("縣市議員", 12, 1); add("縣市議員", 12, 3); add("縣市議員", 12, 2, "withdrawn"); add("縣市議員", 12, null, "withdrawn");
+  add("縣市議員", 13, 1); add("縣市議員", 13, 1); add("縣市議員", 13, null);
+  add("縣市議員", 2, 2, "filed", { merged: true }); // 被併走的人不算
+  // 村里長：新生里重複（1,1）、長安里正常（同樣的 1、2）、民族里到齊卻跳號（1,3）、松江里人數沒到齊、大直里人數沒到齊而且最大號次大於人數
+  add("村里長", 3, 1); add("村里長", 3, 1);
+  add("村里長", 4, 1); add("村里長", 4, 2);
+  add("村里長", 5, 1); add("村里長", 5, 3);
+  add("村里長", 6, 2); add("村里長", 6, null);
+  add("村里長", 7, 3); add("村里長", 7, null);
+  add("村里長", 3, 1, "elected", { eid: 2022 }); // 別屆同一個村里的 1 號：不算重複
+  // 縣市長：台北市正常（1,2,3）、新北市重複（1,1）——兩個縣市都有 1 號不算重複
+  add("縣市長", null, 1); add("縣市長", null, 2); add("縣市長", null, 3);
+  add("縣市長", 8, 1, "filed", { region: "新北市" }); add("縣市長", 8, 1, "filed", { region: "新北市" });
+  // 代表：我們沒記選舉區，單位算不出來＝不檢查（即使同鄉鎮同號）
+  add("鄉鎮市民代表", 9, 1, "filed", { region: "連江縣" }); add("鄉鎮市民代表", 9, 1, "filed", { region: "連江縣" });
+  // 鄉鎮市長：沒記到鄉鎮的算不出單位＝不檢查；記到鄉鎮的按鄉鎮（泰武鄉重複、來義鄉正常）
+  add("鄉鎮市長", null, 1, "filed", { region: "台東縣" }); add("鄉鎮市長", null, 1, "filed", { region: "台東縣" });
+  add("鄉鎮市長", 10, 1, "filed", { region: "屏東縣" }); add("鄉鎮市長", 10, 1, "filed", { region: "屏東縣" });
+  add("鄉鎮市長", 11, 1, "filed", { region: "屏東縣" });
+  return { people, pes, regions };
+}
+const EXPECTED_ANOMALIES = [
+  "2026|台北市|第01選舉區|duplicate|2|3",
+  "2026|台北市|第04選舉區|duplicate|1|",
+  "2026|台北市|中山區|新生里|duplicate|1|2",
+  "2026|台北市|中山區|民族里|gap||2",
+  "2026|新北市|duplicate|1|2",
+  "2026|屏東縣|泰武鄉|duplicate|1|2",
+].sort();
+
+async function runE(mutateB?: (s: string) => string): Promise<Verdicts> {
+  const sc = scenarioE();
+  const db = await buildArmDb({ ...sc, mutateB });
+  const v: Verdicts = {};
+  const an = (await rows<{ election_id: number; unit: string; kind: string; duplicates: number[]; missing: number[]; members: unknown[] }>(db, `SELECT election_id, unit, kind, duplicates, missing, members FROM ballot_number_anomalies`));
+  const key = (r: (typeof an)[number]) => `${r.election_id}|${r.unit}|${r.kind}|${r.duplicates.join(",")}|${r.missing.join(",")}`;
+  const has = (unit: string) => an.filter((r) => r.unit === unit);
+  const units = await rows<{ unit: string; election_id: number; registered: number; numbered: number }>(db, `SELECT unit, election_id, registered, numbered FROM ballot_number_units`);
+  v.e_exact_set = JSON.stringify(an.map(key).sort()) === JSON.stringify(EXPECTED_ANOMALIES);
+  v.e_dup_detected = has("台北市|第01選舉區").length === 1 && has("台北市|第01選舉區")[0].duplicates.join() === "2" && has("台北市|中山區|新生里").length === 1 && has("新北市").length === 1;
+  v.e_dup_scoped_by_unit = has("台北市|第02選舉區").length === 0 && has("台北市|中山區|長安里").length === 0 && has("台北市").length === 0 && has("屏東縣|來義鄉").length === 0;
+  v.e_gap_complete = has("台北市|中山區|民族里").length === 1 && has("台北市|中山區|民族里")[0].kind === "gap" && has("台北市|中山區|民族里")[0].missing.join() === "2";
+  v.e_incomplete_not_gap = has("台北市|中山區|松江里").length === 0 && has("台北市|中山區|大直里").length === 0 &&
+    JSON.stringify(has("台北市|第04選舉區").map((r) => r.missing)) === "[[]]";
+  v.e_withdrawn_with_number_counted = has("台北市|第03選舉區").length === 0 && units.some((u) => u.unit === "台北市|第03選舉區" && u.registered === 3 && u.numbered === 3);
+  v.e_unknown_unit_unchecked = !units.some((u) => u.unit.startsWith("連江縣") || u.unit.startsWith("台東縣")) && units.filter((u) => u.unit.startsWith("屏東縣")).length === 2;
+  v.e_village_is_the_unit = units.some((u) => u.unit === "台北市|中山區|松江里" && u.registered === 2 && u.numbered === 1) && has("台北市|中山區|新生里")[0]?.members.length === 2;
+  v.e_election_scoped = units.filter((u) => u.unit === "台北市|中山區|新生里").map((u) => u.election_id).sort().join() === "2022,2026";
+  v.e_merged_ignored = units.some((u) => u.unit === "台北市|第02選舉區" && u.registered === 3);
+  await db.close();
+  return v;
+}
+const ALL_E = ["e_exact_set", "e_dup_detected", "e_dup_scoped_by_unit", "e_gap_complete", "e_incomplete_not_gap", "e_withdrawn_with_number_counted", "e_unknown_unit_unchecked", "e_village_is_the_unit", "e_election_scoped", "e_merged_ignored"];
+
+Deno.test("E1 號次單位與重複／跳號：重複、跳號、人數未齊不算、不同選舉區同號不算、村里長按村里、代表與單位不明不檢查、退選有號次算進名單、被併走不算、別屆不混", async () => {
+  const v = await runE();
+  const red = ALL_E.filter((g) => v[g] !== true);
+  assertEquals(red, [], `這些守門是紅的：${red.join("、")}`);
+});
+
+const UNIT_COUNCIL = "WHEN p_election_type = '縣市議員' AND btrim(COALESCE(p_district, '')) LIKE '%選舉區' THEN replace(btrim(p_county), '臺', '台') || '|' || replace(btrim(p_district), ' ', '')";
+const E_MUTATIONS: { name: string; breaks: string[]; edit: (s: string) => string }[] = [
+  { name: "縣市議員的號次單位只到縣市（不分選舉區）", breaks: ["e_exact_set", "e_dup_scoped_by_unit", "e_dup_detected"],
+    edit: (s) => mutate(s, UNIT_COUNCIL, "WHEN p_election_type = '縣市議員' AND btrim(COALESCE(p_district, '')) LIKE '%選舉區' THEN replace(btrim(p_county), '臺', '台')") },
+  { name: "村里長的號次單位只到鄉鎮市區（不分村里）", breaks: ["e_exact_set", "e_village_is_the_unit"],
+    edit: (s) => mutate(s, "|| '|' || btrim(p_town) || '|' || btrim(p_village)", "|| '|' || btrim(p_town)") },
+  { name: "把鄉鎮市民代表也當有單位（鄉鎮）", breaks: ["e_exact_set", "e_unknown_unit_unchecked"],
+    edit: (s) => mutate(s, "WHEN p_election_type IN ('鄉鎮市長', '直轄市山地原住民區長') AND", "WHEN p_election_type IN ('鄉鎮市長', '直轄市山地原住民區長', '鄉鎮市民代表') AND") },
+  { name: "跳號不看人數到齊（只看最大號次≠人數）", breaks: ["e_exact_set", "e_incomplete_not_gap"],
+    edit: (s) => mutate(s, "OR (u.numbered = u.registered AND u.distinct_numbers = u.registered AND u.max_no <> u.registered)", "OR (u.max_no <> u.registered)") },
+  { name: "退選但有號次的不算進名單", breaks: ["e_exact_set", "e_withdrawn_with_number_counted"],
+    edit: (s) => mutate(s, " OR (pe.candidacy_status = 'withdrawn' AND pe.cand_no IS NOT NULL)", "") },
+  { name: "缺的號次不管到不到齊都算", breaks: ["e_exact_set", "e_incomplete_not_gap"],
+    edit: (s) => mutate(s, "CASE WHEN u.numbered = u.registered\n", "CASE WHEN true\n") },
+  { name: "重複的判斷拿掉", breaks: ["e_exact_set", "e_dup_detected"],
+    edit: (s) => mutate(s, "WHERE u.distinct_numbers < u.numbered\n", "WHERE false\n") },
+  { name: "被併走的人也算", breaks: ["e_exact_set", "e_merged_ignored", "e_dup_scoped_by_unit"],
+    edit: (s) => mutate(s, "      JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL\n      LEFT JOIN regions r ON r.id = pe.region_id\n     WHERE pe.candidacy_status IN", "      JOIN politicians p ON p.id = pe.politician_id\n      LEFT JOIN regions r ON r.id = pe.region_id\n     WHERE pe.candidacy_status IN") },
+];
+for (const m of E_MUTATIONS) {
+  Deno.test(`E2 還原驗證：${m.name} → ${m.breaks.join("、")} 必須紅`, async () => {
+    const v = await runE(m.edit);
+    const red = ALL_E.filter((g) => v[g] !== true);
+    for (const b of m.breaks) assert(red.includes(b), `改壞了「${m.name}」，守門 ${b} 卻沒紅（紅的：${red.join("、") || "無"}）`);
+  });
+}
+
+// ============================================================
+// D. 端到端：真的臂本體＋總表＋規則＋seed＋觸發器（不換 stub）
+// ============================================================
+const buildD = (mutateB?: (s: string) => string) =>
+  buildArmsDb({ branches: {}, scope: SCOPE, extraBranches: EXTRA, afterP1Sql: FULL_STUB, p2: { migs: [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }, { name: BALLOT_MIG, mutate: mutateB }], restub: RESTUB.filter((n) => n !== "ballot_numbers") } });
+async function loadD(db: Db) {
+  const regions: Region[] = [
+    { id: 1, region: "台北市", sub_region: "第01選舉區" }, { id: 3, region: "台北市", sub_region: "中山區", village: "新生里" }, { id: 4, region: "台北市", sub_region: "中山區", village: "長安里" },
+    { id: 20, region: "高雄市", sub_region: "茂林區" }, { id: 21, region: "高雄市", sub_region: "那瑪夏區" }, { id: 22, region: "屏東縣", sub_region: "泰武鄉" },
+  ];
+  const people: Person[] = [];
+  const pes: Pe[] = [];
+  const add = (type: string, regionId: number | null, no: number | null, o: { eid?: number; region?: string; status?: string } = {}) => {
+    const id = people.length + 1;
+    people.push({ id, name: `人${id}`, region: o.region ?? "台北市" });
+    pes.push({ id, pid: id, type, region_id: regionId, cand_no: no, eid: o.eid, status: o.status });
+    return id;
+  };
+  add("縣市長", null, null); add("縣市長", null, null); add("縣市長", null, null);                 // pe 1-3
+  add("村里長", 3, 1); add("村里長", 3, 1); add("村里長", 3, null);                                   // pe 4-6：新生里重複＋一位沒號次
+  add("村里長", 4, 1); add("村里長", 4, 2);                                                           // pe 7-8：長安里正常
+  add("直轄市山地原住民區長", 20, null, { region: "高雄市" }); add("直轄市山地原住民區長", 21, null, { region: "高雄市" }); // pe 9-10
+  add("鄉鎮市長", 22, null, { region: "屏東縣" }); add("鄉鎮市長", null, null, { region: "屏東縣" });  // pe 11-12
+  add("縣市議員", 1, 1); add("縣市議員", 1, 1);                                                       // pe 13-14：第01選舉區重複
+  add("村里長", 3, 1, { eid: 2022, status: "elected" }); add("村里長", 3, 1, { eid: 2022, status: "elected" }); // pe 15-16：2022 的重複（已投票，health 不列、不在窗口）
+  for (const r of regions) await db.query(`INSERT INTO regions VALUES ($1, $2, $3, $4)`, [r.id, r.region, r.sub_region ?? null, r.village ?? null]);
+  for (const p of people) await db.query(`INSERT INTO politicians (id, name, region) VALUES ($1, $2, $3)`, [U(p.id), p.name, p.region]);
+  for (const e of pes) await db.query(`INSERT INTO politician_elections (id, election_id, politician_id, election_type, region_id, candidacy_status, cand_no) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [e.id, e.eid ?? 2026, U(e.pid), e.type, e.region_id ?? null, e.status ?? "filed", e.cand_no ?? null]);
+}
+const TID = (kind: string, rest: string) => `auto:candidacy_source_missing:${kind}:${rest}`;
+const MAIN_IDS = [
+  TID("cand_no", "2026:縣市長:台北市"), TID("cand_no", "2026:村里長:台北市:中山區"),
+  TID("cand_no", "2026:直轄市山地原住民區長:高雄市:茂林區"), TID("cand_no", "2026:直轄市山地原住民區長:高雄市:那瑪夏區"),
+  TID("cand_no", "2026:鄉鎮市長:屏東縣:泰武鄉"), TID("cand_no", "2026:鄉鎮市長:屏東縣"),
+];
+const RECHECK_IDS = [TID("cand_no_recheck", "2026:村里長:台北市:中山區"), TID("cand_no_recheck", "2026:縣市議員:台北市")];
+
+async function runD(db: Db): Promise<Verdicts> {
+  const v: Verdicts = {};
+  const g = (name: string, f: () => Promise<boolean>) => guard(v, db, name, f);
+  const open = async (day: string) => {
+    await clock(db, day);
+    return ids(db, `arm = 'ballot_numbers'`);
+  };
+  const seed = () => db.exec(`SELECT seed_auto_task_queue()`);
+  await g("d_window", async () => {
+    const want = [...MAIN_IDS, ...RECHECK_IDS];
+    return (await open("2026-10-22")).length === 0 && same(await open("2026-10-23"), want) && same(await open("2026-11-28"), want) && (await open("2026-11-29")).length === 0;
+  });
+  await g("d_past_election_anomaly_never_dispatched", async () => {
+    for (const d of ["2026-10-23", "2026-11-28"]) if ((await open(d)).some((i) => i.includes(":2022:"))) return false;
+    return true;
+  });
+  await g("d_dispatch_unit_splits_by_town_for_five_types", async () => {
+    await clock(db, "2026-10-23");
+    const t = await rows<{ task_id: string; target: Record<string, any> }>(db, `SELECT task_id, target FROM contribution_auto_tasks_arms() WHERE arm = 'ballot_numbers' AND target->>'kind' = 'cand_no'`);
+    const by = Object.fromEntries(t.map((r) => [r.task_id, r.target]));
+    const mao = by[TID("cand_no", "2026:直轄市山地原住民區長:高雄市:茂林區")];
+    const tai = by[TID("cand_no", "2026:鄉鎮市長:屏東縣:泰武鄉")];
+    const rest = by[TID("cand_no", "2026:鄉鎮市長:屏東縣")];
+    return mao?.sub_region === "茂林區" && mao.items[0].sub_region === "茂林區" && tai?.items[0].sub_region === "泰武鄉" && rest?.sub_region === undefined && rest.items.length === 1 &&
+      by[TID("cand_no", "2026:村里長:台北市:中山區")]?.items.map((i: any) => i.village).join() === "新生里" && by[TID("cand_no", "2026:村里長:台北市:中山區")]?.items_count === 1;
+  });
+  await g("d_recheck_target_and_scope", async () => {
+    await clock(db, "2026-10-23");
+    const t = await rows<{ task_id: string; target: Record<string, any>; what_we_need: string; region: string }>(db, `SELECT task_id, target, what_we_need, region FROM contribution_auto_tasks_arms() WHERE arm = 'ballot_numbers' AND target->>'kind' = 'cand_no_recheck'`);
+    const by = Object.fromEntries(t.map((r) => [r.task_id, r]));
+    const vil = by[RECHECK_IDS[0]];
+    const council = by[RECHECK_IDS[1]];
+    return t.length === 2 && vil.target.election_id === 2026 && vil.target.election_type === "村里長" && vil.target.sub_region === "中山區" && vil.target.units_count === 1 &&
+      vil.target.units[0].anomaly === "duplicate" && vil.target.units[0].village === "新生里" && vil.target.units[0].duplicates.join() === "1" && vil.target.units[0].members.length === 3 &&
+      vil.what_we_need.includes("新生里") && vil.what_we_need.includes("號次 1 重複") && !vil.what_we_need.includes("長安里") && vil.region === "台北市" &&
+      council.target.units[0].unit === "第01選舉區" && council.target.units[0].missing.join() === "2" && council.what_we_need.includes("缺 2") &&
+      by[RECHECK_IDS[0]].task_id !== MAIN_IDS[1];
+  });
+  await g("d_seed_opens_and_closes_as_window", async () => {
+    await db.exec(`DELETE FROM task_dispatches`);
+    const n = async (day: string) => {
+      await clock(db, day);
+      await seed();
+      return (await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = ANY ($1)`, [[...MAIN_IDS, ...RECHECK_IDS]])).length;
+    };
+    const a = await n("2026-10-22");
+    const b = await n("2026-10-23");
+    const c = await n("2026-11-29");
+    const closed = await rows<{ reason: string }>(db, `SELECT reason FROM gap_events WHERE event = 'closed' AND task_id = ANY ($1)`, [[...MAIN_IDS, ...RECHECK_IDS]]);
+    return a === 0 && b === 8 && c === 0 && closed.length === 8 && closed.every((x) => x.reason === "window");
+  });
+  await g("d_single_applied_candidacy_does_not_drop_whole_unit_task", async () => {
+    await db.exec(`DELETE FROM task_dispatches`);
+    await clock(db, "2026-10-23");
+    await seed();
+    const unitTask = TID("cand_no", "2026:村里長:台北市:中山區");
+    await db.exec(`INSERT INTO task_dispatches (task_id, task_type, target, what_we_need, hint_sources, reward) VALUES ('auto:other_kind:1', 'candidacy_source_missing', '{"election_id":2026}'::jsonb, 'x', '{}', 1)`);
+    await db.exec(`INSERT INTO contributions (id, status, contribution_type, task_id, created_at) VALUES ('00000000-0000-4000-8000-0000000000b1', 'pending', 'candidacy', '${unitTask}', now()), ('00000000-0000-4000-8000-0000000000b2', 'pending', 'candidacy', 'auto:other_kind:1', now())`);
+    await db.exec(`UPDATE contributions SET status = 'applied' WHERE id IN ('00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b2')`);
+    const unitStill = await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = $1`, [unitTask]);
+    const otherGone = await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = 'auto:other_kind:1'`);
+    return unitStill.length === 1 && otherGone.length === 0;
+  });
+  await g("d_health_counts_anomalies_for_unvoted_elections_only", async () => {
+    await clock(db, "2026-10-23");
+    const h = await rows<{ check_name: string; subject: string; detail: string }>(db, `SELECT check_name, subject, detail FROM activity_health WHERE check_name = 'ballot_number_anomaly' ORDER BY subject`);
+    return h.length === 2 && h.map((x) => x.subject).sort().join("|") === ["2026 / 村里長", "2026 / 縣市議員"].sort().join("|") && h.every((x) => x.detail.includes("ballot_number_anomalies"));
+  });
+  await g("d_roster_batch_candidates_filtered_in_sql_not_in_memory", async () => {
+    await db.exec(`DELETE FROM contributions`);
+    await db.exec(`INSERT INTO contributions (id, status, contribution_type, payload, source_urls, created_at)
+      SELECT gen_random_uuid(), 'pending', 'candidacy', '{"name":"甲","cand_no":3}'::jsonb, ARRAY['https://web.cec.gov.tw/api/file/0d48e35c-3938-4ea5-abdc-169a60d9218a.pdf'], now() - interval '1 day' - g * interval '1 second' FROM generate_series(1, 600) g`);
+    await db.exec(`INSERT INTO contributions (id, status, contribution_type, payload, source_urls, created_at) VALUES
+      ('00000000-0000-4000-8000-0000000000c1', 'pending', 'candidacy', '{"name":"乙"}'::jsonb, ARRAY['https://web.cec.gov.tw/api/file/0d48e35c-3938-4ea5-abdc-169a60d9218a.pdf'], now()),
+      ('00000000-0000-4000-8000-0000000000c2', 'pending', 'candidacy', '{"name":"丙","cand_no":null}'::jsonb, ARRAY['https://web.cec.gov.tw/api/file/0d48e35c-3938-4ea5-abdc-169a60d9218a.pdf'], now()),
+      ('00000000-0000-4000-8000-0000000000c3', 'pending', 'candidacy', '{"name":"丁","cand_no":""}'::jsonb, ARRAY['https://web.cec.gov.tw/api/file/0d48e35c-3938-4ea5-abdc-169a60d9218a.pdf'], now())`);
+    const r = await rows<{ id: string }>(db, `SELECT id FROM roster_batch_candidates(500)`);
+    return r.length === 3 && r.every((x) => x.id.startsWith("00000000-0000-4000-8000-0000000000c"));
+  });
+  return v;
+}
+const ALL_D = ["d_window", "d_past_election_anomaly_never_dispatched", "d_dispatch_unit_splits_by_town_for_five_types", "d_recheck_target_and_scope", "d_seed_opens_and_closes_as_window", "d_single_applied_candidacy_does_not_drop_whole_unit_task", "d_health_counts_anomalies_for_unvoted_elections_only", "d_roster_batch_candidates_filtered_in_sql_not_in_memory"];
+
+Deno.test("D1 端到端（真的臂本體）：窗口、區長與鄉鎮市長按鄉鎮切、重查只含有問題的單位、seed 開窗關窗記 window、單筆落庫不收回整件、health 只列還沒投票的、roster_batch 的過濾在 SQL", async () => {
+  const db = await buildD();
+  await loadD(db);
+  const v = await runD(db);
+  const red = ALL_D.filter((g) => v[g] !== true);
+  assertEquals(red, [], `這些守門是紅的：${red.join("、")}`);
+  assertEquals(Object.keys(v).sort(), [...ALL_D].sort());
+  await db.close();
+});
+
+const D_MUTATIONS: { name: string; breaks: string[]; edit: (s: string) => string }[] = [
+  { name: "drop_applied 沒有排除補號次（單筆落庫就收回整件）", breaks: ["d_single_applied_candidacy_does_not_drop_whole_unit_task"],
+    edit: (s) => mutate(s, "\n     AND NEW.task_id NOT LIKE 'auto:candidacy_source_missing:cand_no%' THEN", " THEN") },
+  { name: "roster_batch_candidates 沒有排除帶號次的", breaks: ["d_roster_batch_candidates_filtered_in_sql_not_in_memory"],
+    edit: (s) => mutate(s, "     AND (c.payload->>'cand_no' IS NULL OR c.payload->>'cand_no' = '')\n", "") },
+  { name: "區長沒有按鄉鎮切（補號次的 unit_town 少一種）", breaks: ["d_dispatch_unit_splits_by_town_for_five_types", "d_window"],
+    edit: (s) => s.replaceAll("('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')", "('鄉鎮市長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')") },
+  { name: "鄉鎮市長沒有按鄉鎮切", breaks: ["d_dispatch_unit_splits_by_town_for_five_types", "d_window"],
+    edit: (s) => s.replaceAll("('鄉鎮市長', '直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')", "('直轄市山地原住民區長', '村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表')") },
+  { name: "activity_health 少了 ballot_number_anomaly", breaks: ["d_health_counts_anomalies_for_unvoted_elections_only"],
+    edit: (s) => s.replace(/  UNION ALL\n  SELECT 'ballot_number_anomaly'[\s\S]*?\n(?=  UNION ALL\n  SELECT 'clock_overridden')/, "") },
+  { name: "activity_health 連已投票的選舉也列", breaks: ["d_health_counts_anomalies_for_unvoted_elections_only"],
+    edit: (s) => mutate(s, "   WHERE e.election_date >= activity_today()\n   GROUP BY a.election_id, a.election_type", "   GROUP BY a.election_id, a.election_type") },
+  { name: "重查不讀視圖而是漏掉（拿掉 UNION ALL 後半）", breaks: ["d_recheck_target_and_scope", "d_window"],
+    edit: (s) => mutate(s, "  UNION ALL\n  SELECT 'auto:candidacy_source_missing:cand_no_recheck:'", "  UNION ALL\n  SELECT 'auto:candidacy_source_missing:cand_no_recheck_off:'") },
+];
+for (const m of D_MUTATIONS) {
+  Deno.test(`D2 還原驗證：${m.name} → ${m.breaks.join("、")} 必須紅`, async () => {
+    const db = await buildD(m.edit);
+    await loadD(db);
+    const v = await runD(db);
+    const red = ALL_D.filter((g) => v[g] !== true);
+    for (const b of m.breaks) assert(red.includes(b), `改壞了「${m.name}」，守門 ${b} 卻沒紅（紅的：${red.join("、") || "無"}）`);
+    await db.close();
+  });
+}

@@ -229,7 +229,7 @@ export const PARTY_ROSTER_HINT =
   "source_urls 第一個放那份登記彙總表的網址：系統會逐位核對名冊上的姓名、縣市、政黨，吻合的一票就過。名冊上找不到他就用 no_change 回報，不要猜。";
 
 /**
- * 補號次（2026-10-08，協議 1.75.0）：candidacy_source_missing 的 cand_no 那一種（target.kind＝cand_no，
+ * 補號次（2026-10-08，協議 1.76.0）：candidacy_source_missing 的 cand_no 那一種（target.kind＝cand_no，
  * 任務編號 auto:candidacy_source_missing:cand_no:<屆別>:<選舉別>:<縣市>[:<鄉鎮市區>][:pN]，contribution_auto_tasks_ballot_numbers 派），
  * 一個單位一件，名單在 target.items。**系統不核號次**（登記彙總表沒有號次、各縣市選委會公告版面不一），所以每一筆都要有人在公告上親眼看到。
  */
@@ -243,7 +243,8 @@ export const BALLOT_NUMBERS_HINT =
   "target.sub_region 有值就填 sub_region、items 裡有 village／electoral_district 就照填，cand_no 填公告上的號次（正整數），candidate_status 照 target.candidate_status；政黨與其他欄位不用帶、不要改。" +
   "source_urls 第一個放你看到他號次的那一頁公告（縣市選委會的公告頁或選舉公報），note 寫「公告第幾頁、第幾選舉區／哪個里、他是幾號」。" +
   "同名同姓要連選舉區、村里一起對，對不上或公告上沒有這個人的就不要交那一位。" +
-  "**公告還沒出來、或打不開時不要回 no_change not_found**（會 14 天內不再派，錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。";
+  "**公告還沒出來、或打不開時不要回 no_change not_found**（會 14 天內不再派，錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。" +
+  "號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的，同一個單位不會有兩位同號：交件的號次跟同一個單位裡已上線或等票中的另一位相同，系統會多要一張同意票（not_supported，目標 +1），所以同號就是有人抄錯，先回頭看公告。";
 
 /**
  * 驗證帶號次（cand_no）的 candidacy（補號次，2026-10-08）：系統不核號次（登記彙總表沒有號次），這一票就是唯一的核對。
@@ -252,9 +253,28 @@ export const CAND_NO_VERIFY_HINT =
   "。**payload.cand_no 有值：這一筆的重點是號次**——打開 source_urls，在公告／選舉公報上找到他本人那一格（姓名、縣市，議員要對選舉區、村里長要對村里），" +
   "那一格印的號次必須剛好等於 payload.cand_no 才投 agree；只在登記彙總表上看到名字不算（登記彙總表沒有號次）；號次不同投 disagree 並在 note 寫公告上的號次與頁碼；同名同姓對不上人就投 unsure";
 
+/**
+ * 號次重查（2026-10-08，補號次的第二種任務）：candidacy_source_missing 的 cand_no_recheck 那一種（target.kind＝cand_no_recheck），
+ * 視圖 ballot_number_anomalies 有列的號次單位（重複或跳號），照派工單位聚成一件，target.units 附每個單位的異常內容。
+ */
+export const BALLOT_NUMBERS_RECHECK_HINT =
+  "這一件列出的是**號次對不起來的號次單位**（target.units，一個單位一項，任務說明逐單位寫了是哪種問題）。號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的：" +
+  "①anomaly＝duplicate：同一個單位有兩位以上同號（units[].duplicates 是被重複用的號次），至少一位的號次抄錯；" +
+  "②anomaly＝gap：我們這個單位的名單 registered 位都有號次，號次卻不是 1 到 registered 連續（missing 是缺的號次）——不是有號次抄錯，就是公告上有人我們名單沒有。" +
+  "每個單位的成員與目前記的號次在 units[].members。做法：打開該單位的候選人名單公告或選舉公報（去哪找同補號次的提示：縣市選委會網站的候選人名單公告、選舉公報、公所登記冊），逐位對號次：" +
+  "我們記錯的，用 candidacy 重交那一位（politician_id、name、election_id、election_type、region 照 target，sub_region／village／electoral_district 照 units，cand_no 填公告上的號次，candidate_status 照 target.candidate_status），**只交跟公告不同的**；" +
+  "公告上有、我們名單沒有的人，用 candidacy 補進來（附同一份公告）；公告本身就跳號（候選人退選或資格不符、號次沒有遞補）而我們的號次都跟公告一致，用 no_change（outcome 填 confirmed）回報，finding 寫公告上的號次與頁碼。" +
+  "公告還沒出來、或打不開時略過這一件，不要回 no_change not_found（14 天內不再派）。" +
+  "名單人數不到齊的單位不會被當成跳號；代表（鄉鎮市民代表、區民代表）的選舉區我們沒記，系統不檢查。";
+
 /** candidacy_source_missing 的 cand_no 那一種（補號次，整個單位一件） */
 export function isBallotNumbersTask(taskType: string, target: Obj | null | undefined): boolean {
   return taskType === "candidacy_source_missing" && !!target && target.kind === "cand_no";
+}
+
+/** candidacy_source_missing 的 cand_no_recheck 那一種（號次重複／跳號重查） */
+export function isBallotNumbersRecheckTask(taskType: string, target: Obj | null | undefined): boolean {
+  return taskType === "candidacy_source_missing" && !!target && target.kind === "cand_no_recheck";
 }
 
 /** candidacy_source_missing 的 party 那一種（參選紀錄缺政黨） */
@@ -328,8 +348,10 @@ export function shapeTaskCurrent(
   const newsItem = isNewsItemTask(taskType, target);
   // 補號次是整個單位一件，沒有單一人物／參選紀錄可附：名單在 target.items，現況只給件數與提醒
   const ballot = isBallotNumbersTask(taskType, target);
+  const recheck = isBallotNumbersRecheckTask(taskType, target);
   const inner = newsItem ? shapeNewsItemCurrent(target!, data)
-    : ballot ? { items_count: target!.items_count ?? (Array.isArray(target!.items) ? (target!.items as unknown[]).length : null), note: "名單在 target.items；系統不核號次，每一筆都要有人在公告上親眼看到" }
+    : ballot ? { items_count: target!.items_count ?? (Array.isArray(target!.items) ? (target!.items as unknown[]).length : null), note: "名單在 target.items；系統不核號次來源，每一筆都要有人在公告上親眼看到（只比對同一個號次單位有沒有同號）" }
+    : recheck ? { units_count: target!.units_count ?? (Array.isArray(target!.units) ? (target!.units as unknown[]).length : null), note: "每個號次單位的異常在 target.units；要對公告重查，只交跟公告不同的" }
     : shapeTaskCurrentInner(taskType, data);
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
@@ -337,6 +359,7 @@ export function shapeTaskCurrent(
   const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
     : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT
     : ballot ? BALLOT_NUMBERS_HINT
+    : recheck ? BALLOT_NUMBERS_RECHECK_HINT
     : taskType === "candidacy_source_missing" && target?.kind === "party_roster" ? PARTY_ROSTER_HINT : TASK_GUIDANCE[taskType]);
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
