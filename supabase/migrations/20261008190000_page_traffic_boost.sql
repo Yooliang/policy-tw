@@ -126,7 +126,7 @@ BEGIN
 
   DROP TABLE IF EXISTS _pt_src;
   CREATE TEMP TABLE _pt_src ON COMMIT DROP AS
-    SELECT x.kind, lower(x.target_id) AS target_id, sum(x.users)::INTEGER AS users, sum(x.views)::INTEGER AS views
+    SELECT x.kind, lower(x.target_id) AS target_id, COALESCE(sum(x.users), 0)::INTEGER AS users, COALESCE(sum(x.views), 0)::INTEGER AS views
       FROM jsonb_to_recordset(p_rows) AS x(kind text, target_id text, users integer, views integer)
      GROUP BY x.kind, lower(x.target_id);
 
@@ -186,10 +186,11 @@ CREATE POLICY "Service role write" ON page_traffic_boosts FOR ALL USING (auth.ro
 CREATE OR REPLACE VIEW page_traffic_boosted_tasks AS
 SELECT b.kind, b.target_id, b.boosted_since, d.task_id, d.task_type, d.priority
   FROM page_traffic_boosts b
+  JOIN page_traffic_hot h ON h.kind = b.kind AND h.target_id = b.target_id
   JOIN traffic_boost_settings s ON s.id = 1
   JOIN task_dispatches d ON d.task_id = ANY (b.lifted_task_ids)
- WHERE b.paused_until IS NULL AND d.priority <= s.boost_tier;
-COMMENT ON VIEW page_traffic_boosted_tasks IS '現在因頁面流量而排在 boost_tier（或更前）的派工列：哪一頁、哪一件。暫停中的頁面不列。2026-10-08';
+ WHERE s.enabled AND b.paused_until IS NULL AND d.priority <= s.boost_tier;
+COMMENT ON VIEW page_traffic_boosted_tasks IS '現在因頁面流量而排在 boost_tier（或更前）的派工列：哪一頁、哪一件。只列現在仍達標（page_traffic_hot）而且功能開著（enabled）的頁面；冷卻、停用、暫停中的不列。2026-10-08';
 
 -- ------------------------------------------------------------
 -- 4. traffic_boost_apply：seed 在算完每個缺口的層之後呼叫（讀暫存表 _gaps，把達標頁面名下的缺口層壓到 boost_tier）
@@ -234,10 +235,12 @@ BEGIN
              WHERE g.target->>'politician_election_id' IS NOT NULL AND COALESCE(g.priority, v_default) > s.boost_tier) gk
       JOIN _tb_keys k ON k.key = gk.key;
 
-  -- a. 暫停期滿：新的一期（重新計時）
-  UPDATE page_traffic_boosts
+  -- a. 暫停期滿：還達標的開新的一期（重新計時）；已經冷卻的直接清掉，等再次達標才開始計時
+  UPDATE page_traffic_boosts b
      SET paused_until = NULL, boosted_since = now(), last_yield_at = NULL, lifted_task_ids = '{}', updated_at = now()
-   WHERE paused_until IS NOT NULL AND paused_until <= now();
+   WHERE b.paused_until IS NOT NULL AND b.paused_until <= now()
+     AND EXISTS (SELECT 1 FROM _tb_hot h WHERE h.kind = b.kind AND h.target_id = b.target_id);
+  DELETE FROM page_traffic_boosts b WHERE b.paused_until IS NOT NULL AND b.paused_until <= now();
 
   -- b. 達標就記下時間
   UPDATE page_traffic_boosts b SET last_hot_at = now(), updated_at = now()
@@ -247,22 +250,25 @@ BEGIN
   INSERT INTO page_traffic_boosts (kind, target_id, boosted_since, last_hot_at, lifted_task_ids)
   SELECT p.kind, p.target_id, now(), now(), array_agg(DISTINCT p.task_id) FROM _tb_pages p GROUP BY p.kind, p.target_id
   ON CONFLICT (kind, target_id) DO UPDATE
-    SET lifted_task_ids = ARRAY(SELECT DISTINCT x FROM unnest(page_traffic_boosts.lifted_task_ids || EXCLUDED.lifted_task_ids) AS x ORDER BY x), updated_at = now()
+    SET boosted_since = CASE WHEN cardinality(page_traffic_boosts.lifted_task_ids) = 0 THEN now() ELSE page_traffic_boosts.boosted_since END,
+        lifted_task_ids = ARRAY(SELECT DISTINCT x FROM unnest(page_traffic_boosts.lifted_task_ids || EXCLUDED.lifted_task_ids) AS x ORDER BY x), updated_at = now()
     WHERE page_traffic_boosts.paused_until IS NULL;
 
   -- d. 產出：這一期提層過的任務上，最近一次型別不是 no_change／task_suggestion、狀態不是 rejected 的交件（查無與冷卻不算）
-  UPDATE page_traffic_boosts b SET last_yield_at = y.at, updated_at = now()
-    FROM (SELECT b2.kind, b2.target_id, max(c.created_at) AS at
-            FROM page_traffic_boosts b2
-            JOIN contributions c ON c.task_id = ANY (b2.lifted_task_ids)
-           WHERE b2.paused_until IS NULL AND c.created_at >= b2.boosted_since
-             AND c.contribution_type NOT IN ('no_change', 'task_suggestion') AND c.status <> 'rejected'
-           GROUP BY b2.kind, b2.target_id) y
-   WHERE y.kind = b.kind AND y.target_id = b.target_id AND b.last_yield_at IS DISTINCT FROM y.at;
+  -- 每輪依「現在仍有效的交件」重算：先前算進去的交件後來被駁回，就不再算（沒有任何有效交件就清成 NULL）
+  UPDATE page_traffic_boosts b
+     SET last_yield_at = (SELECT max(c.created_at) FROM contributions c
+                           WHERE c.task_id = ANY (b.lifted_task_ids) AND c.created_at >= b.boosted_since
+                             AND c.contribution_type NOT IN ('no_change', 'task_suggestion') AND c.status <> 'rejected'),
+         updated_at = now()
+   WHERE b.paused_until IS NULL
+     AND b.last_yield_at IS DISTINCT FROM (SELECT max(c.created_at) FROM contributions c
+                                            WHERE c.task_id = ANY (b.lifted_task_ids) AND c.created_at >= b.boosted_since
+                                              AND c.contribution_type NOT IN ('no_change', 'task_suggestion') AND c.status <> 'rejected');
 
   -- e. 暫停：現在達標、但從這一期開始（或最近一次有產出）起已經 no_yield_days 天沒有任何產出
   UPDATE page_traffic_boosts b SET paused_until = now() + make_interval(days => s.pause_days), updated_at = now()
-   WHERE b.paused_until IS NULL
+   WHERE b.paused_until IS NULL AND cardinality(b.lifted_task_ids) > 0
      AND EXISTS (SELECT 1 FROM _tb_hot h WHERE h.kind = b.kind AND h.target_id = b.target_id)
      AND GREATEST(b.boosted_since, COALESCE(b.last_yield_at, b.boosted_since)) <= now() - make_interval(days => s.no_yield_days);
 
@@ -276,6 +282,11 @@ BEGIN
   RETURN v_lifted;
 END;
 $$;
+-- 內部函式：讀 seed 的暫存表 _gaps、寫狀態表，不能是公開 RPC。Supabase 會把 public 新函式的 EXECUTE 明確授給 anon、authenticated、service_role，所以逐一收回，只留 service_role（seed 以擁有者或 service_role 身分執行）
+REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM anon;
+REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.traffic_boost_apply() TO service_role;
 COMMENT ON FUNCTION traffic_boost_apply IS
   '頁面流量提層（seed_auto_task_queue 每 10 分鐘呼叫，讀暫存表 _gaps）：達標頁面（page_traffic_hot）名下、現在的層比 boost_tier 靠後的缺口，層壓到 boost_tier；回傳提了幾件。'
   '狀態在 page_traffic_boosts：no_yield_days 天沒有產出就暫停 pause_days 天。參數全在 traffic_boost_settings。page_traffic 與狀態都是空的就直接回 0。2026-10-08';

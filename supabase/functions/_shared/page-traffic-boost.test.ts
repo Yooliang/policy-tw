@@ -109,6 +109,11 @@ Deno.test("A6 寫入只經 RPC：RPC 只授權 service_role；表開 RLS、公�
   for (const role of ["PUBLIC", "anon", "authenticated"]) assert(code.includes(`REVOKE ALL ON FUNCTION public.replace_page_traffic(jsonb, integer) FROM ${role};`), `收回 ${role}`);
   assert(code.includes("GRANT EXECUTE ON FUNCTION public.replace_page_traffic(jsonb, integer) TO service_role;"));
   assert(!/GRANT EXECUTE ON FUNCTION[^;]*TO (anon|authenticated|PUBLIC)/i.test(code));
+  // 這支新建的函式（seed 是 CREATE OR REPLACE 既有的，授權沿用）：每一個都逐一收回、只留 service_role
+  for (const fn of ["replace_page_traffic(jsonb, integer)", "traffic_boost_apply()"]) {
+    for (const role of ["PUBLIC", "anon", "authenticated"]) assert(code.includes(`REVOKE ALL ON FUNCTION public.${fn} FROM ${role};`), `${fn} 收回 ${role}`);
+    assert(code.includes(`GRANT EXECUTE ON FUNCTION public.${fn} TO service_role;`), `${fn} 只授 service_role`);
+  }
   assert(REPLACE_RPC.includes("SECURITY DEFINER") && REPLACE_RPC.includes("SET search_path = ''"));
   for (const t of ["traffic_boost_settings", "page_traffic", "page_traffic_boosts"]) {
     assert(code.includes(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`), `${t} 開 RLS`);
@@ -186,6 +191,7 @@ const RESTUB = ["raw", "election_results", "party_gap", "party_roster"] as const
 
 async function buildDb(mutateMig: (s: string) => string = (s) => s, branches: Record<string, GapRow[]> = FIXTURE): Promise<Db> {
   const pre = `
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
     ALTER TABLE elections ADD COLUMN bulletin_published_on date;
     UPDATE elections SET bulletin_published_on = DATE '2026-11-18' WHERE id = 2026;
     ALTER TABLE contributions ADD COLUMN contributor_ip_hash text, ADD COLUMN agent_name text, ADD COLUMN payload jsonb;
@@ -249,7 +255,8 @@ const GUARDS = [
   "returns_when_cold", "returns_when_stale", "returns_when_window_changes", "pauses_without_yield", "paused_stays_paused", "resumes_after_pause",
   "yield_counts", "no_change_not_yield", "rejected_not_yield", "old_contribution_not_yield", "yield_rolls_window", "continues_same_period", "forgets_after_cold",
   "settings_are_data", "disabled_does_nothing", "empty_traffic_parity", "unrelated_traffic_parity", "new_gap_born_lifted", "queue_front", "boosted_view", "audit_on_settings",
-  "rpc_replace", "rpc_rejects",
+  "rpc_replace", "rpc_rejects", "rpc_null_metrics", "function_privileges", "yield_recomputed_after_rejection", "expired_pause_cold_forgotten", "empty_period_not_paused",
+  "new_period_starts_at_first_lift", "boosted_view_requires_hot",
 ] as const;
 
 async function runSuite(db: Db): Promise<Verdicts> {
@@ -579,6 +586,94 @@ async function runSuite(db: Db): Promise<Verdicts> {
       (await rows(db, `SELECT 1 FROM page_traffic`)).length === 0;
   });
 
+  await g("rpc_null_metrics", async () => {
+    // users／views 是 null 或缺欄：轉成 0，不讓整批覆寫失敗
+    await db.query(`SELECT replace_page_traffic($1::jsonb, 7)`, [JSON.stringify([
+      { kind: "politician", target_id: PA, users: null, views: null }, { kind: "politician", target_id: PD, users: 4 }, { kind: "policy", target_id: POL_HOT, views: 3 },
+      { kind: "politician", target_id: PB, users: 2, views: 5 },
+    ])]);
+    const r = Object.fromEntries((await rows<{ target_id: string; users: number; views: number }>(db, `SELECT target_id, users, views FROM page_traffic`)).map((x) => [x.target_id, x]));
+    return Object.keys(r).length === 4 && r[PA].users === 0 && r[PA].views === 0 && r[PD].users === 4 && r[PD].views === 0 && r[POL_HOT].users === 0 && r[POL_HOT].views === 3 && r[PB].users === 2;
+  });
+
+  await g("function_privileges", async () => {
+    // anon／authenticated 不能執行（PostgREST 會把能執行的 public 函式當成公開 RPC）；service_role 可以
+    const can = async (role: string, fn: string) => (await one<{ ok: boolean }>(db, `SELECT has_function_privilege('${role}', '${fn}'::regprocedure, 'EXECUTE') AS ok`)).ok;
+    const fns = ["traffic_boost_apply()", "replace_page_traffic(jsonb, integer)"];
+    for (const fn of fns) {
+      if ((await can("anon", fn)) || (await can("authenticated", fn)) || !(await can("service_role", fn))) return false;
+      // PUBLIC 也不行：隨便建一個沒有任何授權的角色來試
+    }
+    await db.exec(`CREATE ROLE nobody_role`);
+    for (const fn of fns) if (await can("nobody_role", fn)) return false;
+    return true;
+  });
+
+  await g("yield_recomputed_after_rejection", async () => {
+    await traffic(db, [hotA()]);
+    await seed(db);
+    await age(db, 10);
+    await db.exec(`UPDATE page_traffic SET updated_at = now()`);
+    await contribute(db, "aa_term", "policy", "pending", 3); // 3 天前一筆實質交件（當時還有效）
+    await seed(db);
+    const counted = (await boost(db))!.last_yield_at !== null;
+    await db.exec(`UPDATE contributions SET status = 'rejected' WHERE task_id = 'auto:aa_term'`); // 後來被駁回
+    await seed(db);
+    const cleared = (await boost(db))!.last_yield_at === null;
+    await age(db, 5); // 這一期已滿 15 天、沒有任何有效產出 → 暫停
+    await seed(db);
+    return counted && cleared && (await boost(db))!.paused_until !== null;
+  });
+
+  await g("expired_pause_cold_forgotten", async () => {
+    await traffic(db, [hotA()]);
+    await seed(db);
+    await age(db, 15);
+    await seed(db); // 暫停
+    await db.exec(`UPDATE page_traffic_boosts SET paused_until = now() - interval '1 minute', last_hot_at = now() - interval '5 days' WHERE target_id = '${PA}'`);
+    await traffic(db, [hotA(1)]); // 期滿當天已經冷卻
+    await seed(db);
+    const gone = (await boost(db)) === undefined && sameTiers(await tiers(db), ORIGINAL); // 不開始新的觀察計時
+    await traffic(db, [hotA(8)]); // 之後再次達標才開始
+    await seed(db);
+    const b = (await boost(db))!;
+    const fresh = await one<{ ok: boolean }>(db, `SELECT boosted_since >= now() - interval '1 minute' AS ok FROM page_traffic_boosts WHERE target_id = $1`, [PA]);
+    return gone && b.paused_until === null && fresh.ok && (await tiers(db)).aa_term === 1;
+  });
+
+  await g("empty_period_not_paused", async () => {
+    // 達標、有狀態列，但名下已經沒有任何可提層的缺口（lifted 是空的）：沒提層過就不算「無產出」
+    await db.exec(`DELETE FROM _b_term_policies; DELETE FROM _b_dup; DELETE FROM _b_handover_missing; DELETE FROM _b_lineage_roles; DELETE FROM _b_policy_elements; DELETE FROM _b_mismatch; DELETE FROM _b_legacy`);
+    await traffic(db, [hotA()]);
+    await db.exec(`INSERT INTO page_traffic_boosts (kind, target_id, boosted_since, last_hot_at, lifted_task_ids) VALUES ('politician', '${PA}', now() - interval '20 days', now(), '{}')`);
+    await seed(db);
+    return (await boost(db))!.paused_until === null;
+  });
+
+  await g("new_period_starts_at_first_lift", async () => {
+    // 狀態列是空的一期（20 天前建的），這時才第一次有缺口被提層：觀察從現在才開始，不會當場被判 14 天無產出
+    await traffic(db, [hotA()]);
+    await db.exec(`INSERT INTO page_traffic_boosts (kind, target_id, boosted_since, last_hot_at, lifted_task_ids) VALUES ('politician', '${PA}', now() - interval '20 days', now(), '{}')`);
+    await seed(db);
+    const b = (await boost(db))!;
+    const fresh = await one<{ ok: boolean }>(db, `SELECT boosted_since >= now() - interval '1 minute' AS ok FROM page_traffic_boosts WHERE target_id = $1`, [PA]);
+    return b.paused_until === null && fresh.ok && b.lifted_task_ids.length === PA_LIFTED.length && (await tiers(db)).aa_term === 1;
+  });
+
+  await g("boosted_view_requires_hot", async () => {
+    await traffic(db, [hotA()]);
+    await seed(db);
+    const listed = async () => (await rows(db, `SELECT 1 FROM page_traffic_boosted_tasks`)).length;
+    const hot = (await listed()) === PA_LIFTED.length;
+    // 流量退了、還沒跑下一輪 seed：任務的層還是前段，但已經不是「因流量」排前段
+    await traffic(db, [hotA(1)]);
+    const cold = (await listed()) === 0;
+    await traffic(db, [hotA()]);
+    const back = (await listed()) === PA_LIFTED.length;
+    await db.exec(`UPDATE traffic_boost_settings SET enabled = false WHERE id = 1`);
+    return hot && cold && back && (await listed()) === 0;
+  });
+
   return v;
 }
 
@@ -594,15 +689,25 @@ Deno.test("B1 行為層：達標提層、退了回層、時效、暫停、產出
 // C. 還原驗證：把 migration 改壞一處，對應的守門必須紅
 // ============================================================
 const SEED_CALL = "  PERFORM traffic_boost_apply();\n";
-const MUTATIONS: { why: string; from: string; to: string; also?: [string, string]; red: (typeof GUARDS[number])[] }[] = [
+const MUTATIONS: { why: string; from: string; to: string; times?: number; also?: [string, string]; red: (typeof GUARDS[number])[] }[] = [
   { why: "seed 不呼叫提層", from: SEED_CALL, to: "", red: ["hot_lifts_all_shapes", "policy_page_lifts", "new_gap_born_lifted"] },
   { why: "門檻變成大於（剛好 5 人不算）", from: "AND t.users >= s.min_users", to: "AND t.users > s.min_users", red: ["threshold_exact", "hot_lifts_all_shapes"] },
   { why: "不看時間窗是否一致", from: "   AND t.window_days = s.window_days\n", to: "", red: ["returns_when_window_changes"] },
   { why: "不看資料時效", from: "   AND t.updated_at > now() - make_interval(hours => s.stale_after_hours)", to: "   AND true", red: ["returns_when_stale"] },
-  { why: "不暫停", from: "  UPDATE page_traffic_boosts b SET paused_until = now() + make_interval(days => s.pause_days), updated_at = now()\n   WHERE b.paused_until IS NULL\n", to: "  UPDATE page_traffic_boosts b SET paused_until = now() + make_interval(days => s.pause_days), updated_at = now()\n   WHERE false AND b.paused_until IS NULL\n", red: ["pauses_without_yield", "no_change_not_yield", "rejected_not_yield", "old_contribution_not_yield"] },
-  { why: "暫停期滿不重新計", from: "   WHERE paused_until IS NOT NULL AND paused_until <= now();", to: "   WHERE false;", red: ["resumes_after_pause"] },
-  { why: "no_change 也算產出", from: "c.contribution_type NOT IN ('no_change', 'task_suggestion')", to: "c.contribution_type NOT IN ('task_suggestion')", red: ["no_change_not_yield"] },
-  { why: "rejected 也算產出", from: "AND c.status <> 'rejected'", to: "", red: ["rejected_not_yield"] },
+  { why: "不暫停", from: "   WHERE b.paused_until IS NULL AND cardinality(b.lifted_task_ids) > 0\n     AND EXISTS (SELECT 1 FROM _tb_hot h WHERE h.kind = b.kind AND h.target_id = b.target_id)\n     AND GREATEST(", to: "   WHERE false AND b.paused_until IS NULL\n     AND EXISTS (SELECT 1 FROM _tb_hot h WHERE h.kind = b.kind AND h.target_id = b.target_id)\n     AND GREATEST(", red: ["pauses_without_yield", "no_change_not_yield", "rejected_not_yield", "old_contribution_not_yield"] },
+  { why: "暫停期滿不重新計", from: "   WHERE b.paused_until IS NOT NULL AND b.paused_until <= now()\n     AND EXISTS (SELECT 1 FROM _tb_hot h", to: "   WHERE false AND b.paused_until IS NOT NULL AND b.paused_until <= now()\n     AND EXISTS (SELECT 1 FROM _tb_hot h", also: ["  DELETE FROM page_traffic_boosts b WHERE b.paused_until IS NOT NULL AND b.paused_until <= now();", "  DELETE FROM page_traffic_boosts b WHERE false;"], red: ["resumes_after_pause"] },
+  { why: "no_change 也算產出", from: "c.contribution_type NOT IN ('no_change', 'task_suggestion')", to: "c.contribution_type NOT IN ('task_suggestion')", times: 2, red: ["no_change_not_yield"] },
+  { why: "rejected 也算產出", from: "AND c.status <> 'rejected'", to: "", times: 2, red: ["rejected_not_yield", "yield_recomputed_after_rejection"] },
+  { why: "被駁回後不重算（只在還有有效交件時才更新，沒有就留著舊值）", from: "     AND b.last_yield_at IS DISTINCT FROM (SELECT max(c.created_at)", to: "     AND EXISTS (SELECT 1 FROM contributions c WHERE c.task_id = ANY (b.lifted_task_ids) AND c.created_at >= b.boosted_since AND c.contribution_type NOT IN ('no_change', 'task_suggestion') AND c.status <> 'rejected')\n     AND b.last_yield_at IS DISTINCT FROM (SELECT max(c.created_at)", red: ["yield_recomputed_after_rejection"] },
+  { why: "期滿而冷卻的也重新計時（不清掉）", from: "  DELETE FROM page_traffic_boosts b WHERE b.paused_until IS NOT NULL AND b.paused_until <= now();", to: "  UPDATE page_traffic_boosts b SET paused_until = NULL, boosted_since = now() - interval '15 days', lifted_task_ids = '{}' WHERE b.paused_until IS NOT NULL AND b.paused_until <= now();", red: ["expired_pause_cold_forgotten"] },
+  { why: "沒提層過任何任務也判無產出", from: "WHERE b.paused_until IS NULL AND cardinality(b.lifted_task_ids) > 0", to: "WHERE b.paused_until IS NULL", red: ["empty_period_not_paused"] },
+  { why: "空的一期第一次提層時不從現在重新計時", from: "SET boosted_since = CASE WHEN cardinality(page_traffic_boosts.lifted_task_ids) = 0 THEN now() ELSE page_traffic_boosts.boosted_since END,", to: "SET boosted_since = page_traffic_boosts.boosted_since,", red: ["new_period_starts_at_first_lift"] },
+  { why: "視圖不看現在是否達標", from: "  JOIN page_traffic_hot h ON h.kind = b.kind AND h.target_id = b.target_id\n  JOIN traffic_boost_settings s ON s.id = 1\n  JOIN task_dispatches d", to: "  JOIN traffic_boost_settings s ON s.id = 1\n  JOIN task_dispatches d", red: ["boosted_view_requires_hot"] },
+  { why: "traffic_boost_apply 沒收回 anon", from: "REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM anon;\n", to: "", red: ["function_privileges"] },
+  { why: "traffic_boost_apply 沒收回 authenticated", from: "REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM authenticated;\n", to: "", red: ["function_privileges"] },
+  { why: "traffic_boost_apply 沒收回 PUBLIC", from: "REVOKE ALL ON FUNCTION public.traffic_boost_apply() FROM PUBLIC;\n", to: "", red: ["function_privileges"] },
+  { why: "replace_page_traffic 沒收回 PUBLIC", from: "REVOKE ALL ON FUNCTION public.replace_page_traffic(jsonb, integer) FROM PUBLIC;\n", to: "", red: ["function_privileges"] },
+  { why: "RPC 不把 NULL 的人數當 0", from: "COALESCE(sum(x.users), 0)::INTEGER AS users, COALESCE(sum(x.views), 0)::INTEGER AS views", to: "sum(x.users)::INTEGER AS users, sum(x.views)::INTEGER AS views", red: ["rpc_null_metrics"] },
   { why: "產出不更新觀察起點（只看第一天）", from: "GREATEST(b.boosted_since, COALESCE(b.last_yield_at, b.boosted_since))", to: "b.boosted_since", red: ["yield_counts", "yield_rolls_window"] },
   { why: "已在前段的缺口也開始計時、也被取代（不是 min）", from: "COALESCE(g.priority, v_default) > s.boost_tier\n            UNION\n            SELECT g.task_id, 'pe:' || e", to: "true\n            UNION\n            SELECT g.task_id, 'pe:' || e", red: ["front_gap_not_counted", "min_of_original_and_boost", "hot_lifts_all_shapes"] },
   { why: "提層寫死前段", from: "UPDATE _gaps g SET priority = s.boost_tier,", to: "UPDATE _gaps g SET priority = 1,", red: ["min_of_original_and_boost"] },
@@ -612,7 +717,7 @@ const MUTATIONS: { why: string; from: string; to: string; also?: [string, string
   { why: "只看第一個 uuid（target 整份比對變成只比 politician_id 欄）", from: "regexp_matches(g.target::TEXT, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'g')", to: "regexp_matches(coalesce(g.target->>'politician_id', ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'g')", red: ["hot_lifts_all_shapes"] },
   { why: "提層黏住：退了、過期了也照提（只看狀態列，不看現在達不達標）", from: "WHERE g.task_id IN (SELECT p.task_id FROM _tb_pages p JOIN page_traffic_boosts b ON b.kind = p.kind AND b.target_id = p.target_id WHERE b.paused_until IS NULL);", to: "WHERE g.task_id IN (SELECT p.task_id FROM _tb_pages p JOIN page_traffic_boosts b ON b.kind = p.kind AND b.target_id = p.target_id WHERE b.paused_until IS NULL) OR g.task_id IN (SELECT unnest(lifted_task_ids) FROM page_traffic_boosts WHERE paused_until IS NULL);", red: ["returns_when_cold", "returns_when_stale", "returns_when_window_changes"] },
   { why: "狀態列永不清掉", from: "DELETE FROM page_traffic_boosts b WHERE b.paused_until IS NULL AND b.last_hot_at < now() - make_interval(days => s.no_yield_days);", to: "DELETE FROM page_traffic_boosts b WHERE false;", red: ["forgets_after_cold"] },
-  { why: "退了再回來每次都重新計時", from: "ON CONFLICT (kind, target_id) DO UPDATE\n    SET lifted_task_ids", to: "ON CONFLICT (kind, target_id) DO UPDATE\n    SET boosted_since = now(), lifted_task_ids", red: ["continues_same_period"] },
+  { why: "退了再回來每次都重新計時", from: "SET boosted_since = CASE WHEN cardinality(page_traffic_boosts.lifted_task_ids) = 0 THEN now() ELSE page_traffic_boosts.boosted_since END,", to: "SET boosted_since = now(),", red: ["continues_same_period"] },
   { why: "停用開關不管用（函式與視圖都不看 enabled）", from: "IF NOT FOUND OR NOT s.enabled THEN RETURN 0; END IF;", to: "IF NOT FOUND THEN RETURN 0; END IF;", also: [" WHERE s.enabled\n", " WHERE true\n"], red: ["disabled_does_nothing"] },
   { why: "把門檻寫死回視圖", from: "AND t.users >= s.min_users", to: "AND t.users >= 5", red: ["settings_are_data"] },
   { why: "把暫停天數寫死回函式", from: "now() + make_interval(days => s.pause_days)", to: "now() + make_interval(days => 14)", red: ["settings_are_data"] },
@@ -626,7 +731,12 @@ const MUTATIONS: { why: string; from: string; to: string; also?: [string, string
 
 for (const [i, m] of MUTATIONS.entries()) {
   Deno.test(`C${i + 1} 還原驗證：${m.why}`, async () => {
-    const db = await buildDb((s) => (m.also ? mutate(mutate(s, m.from, m.to), m.also[0], m.also[1]) : mutate(s, m.from, m.to)));
+    const once = (sql: string, from: string, to: string) => {
+      if (!m.times) return mutate(sql, from, to);
+      assertEquals(sql.split(from).length - 1, m.times, `要改的字串必須剛好出現 ${m.times} 次：${from.slice(0, 60)}`);
+      return sql.replaceAll(from, to);
+    };
+    const db = await buildDb((s) => (m.also ? mutate(once(s, m.from, m.to), m.also[0], m.also[1]) : once(s, m.from, m.to)));
     const v = await runSuite(db);
     for (const name of m.red) assert(v[name] === false, `改壞「${m.why}」之後守門 ${name} 必須紅，實際是 ${v[name]}`);
   });
