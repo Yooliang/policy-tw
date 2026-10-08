@@ -12,6 +12,8 @@
  *   5. 沒有得票數、得票率欄位
  *   6. 還原驗證：把 migration 改壞一處（拿掉一張表的 RLS、加一個 votes 欄、給 anon INSERT），migration 自己的檢查要讓它失敗
  *   7. source_refs_orphans 抓得到指向不存在資料列的引用
+ *   8. agy 同儕審查（policy-tw#483）補的：reviews 只公開 published、衆院重複立候補兩列並存、
+ *      選挙区看母選舉是否 published、lg_code_valid 遇到非數字／空字串／NULL 不報錯
  */
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
@@ -197,8 +199,8 @@ Deno.test("policy_jp 表：沒有得票數、得票率欄位", async () => {
 });
 
 Deno.test("policy_jp 表：還原驗證——改壞一處，migration 自己的檢查要讓它失敗", async () => {
-  // (a) 拿掉一張表的 RLS（把 reviews 從公開讀清單移掉＝那張表沒開 RLS）
-  const noRls = mutate(MIG_SQL, `'assembly_factions', 'election_districts', 'reviews'] LOOP`, `'assembly_factions', 'election_districts'] LOOP`);
+  // (a) 拿掉一張表的 RLS（把 reviews 從 published 清單移掉＝那張表沒開 RLS）
+  const noRls = mutate(MIG_SQL, `'lineage_participants', 'lineage_links', 'handovers', 'reviews'] LOOP`, `'lineage_participants', 'lineage_links', 'handovers'] LOOP`);
   await assertRejects(() => freshDb(noRls), Error, "沒開 RLS");
   // (b) 偷加一個票數欄
   const withVotes = mutate(MIG_SQL, `  is_priority_list       BOOLEAN NOT NULL DEFAULT false,`, `  is_priority_list       BOOLEAN NOT NULL DEFAULT false,\n  votes                  INTEGER,`);
@@ -221,5 +223,105 @@ Deno.test("policy_jp 表：source_refs_orphans 抓得到指向不存在資料列
   `);
   const { rows } = await db.query<{ target_table: string; target_id: string }>(`SELECT target_table, target_id FROM policy_jp.source_refs_orphans`);
   assertEquals(rows, [{ target_table: "politicians", target_id: "pol-404" }]);
+  await db.close();
+});
+
+Deno.test("policy_jp 表：reviews 只公開 published（pending 的備註與查核者不外洩）", async () => {
+  const db = await freshDb();
+  await db.exec(BASE_ROWS);
+  await db.exec(`
+    INSERT INTO policy_jp.reviews (target_table, target_id, review_status, reviewer_kind, reviewer, note) VALUES
+      ('politicians', 'pol-1', 'published', 'human', '査核者A', '公開'),
+      ('politicians', 'pol-2', 'pending', 'agent', 'claude-x', '未發布資料的備註');
+  `);
+  for (const role of ["anon", "authenticated"]) {
+    const rows = await asRole<{ target_id: string }>(db, role, `SELECT target_id FROM policy_jp.reviews ORDER BY target_id`);
+    assertEquals(rows.map((r) => r.target_id), ["pol-1"], `${role} 讀不到 pending 的 reviews`);
+  }
+  await assertRejects(
+    () => db.exec(`INSERT INTO policy_jp.reviews (target_table, target_id, review_status, reviewer_kind, reviewer) VALUES ('election_districts', '1', 'published', 'human', 'x')`),
+    Error,
+    "reviews_target_table_check",
+    "election_districts 沒有 review_status，不在 reviews 的對象清單",
+  );
+  await db.close();
+});
+
+Deno.test("policy_jp 表：衆院選の重複立候補（同人同場、小選挙区＋比例代表兩列並存）", async () => {
+  const db = await freshDb();
+  await db.exec(BASE_ROWS);
+  await db.exec(`
+    INSERT INTO policy_jp.elections (id, name, election_date, election_type, election_reason, level) VALUES
+      ('2028-10-01_national_lower_national', '衆議院議員総選挙', '2028-10-01', 'national_lower', 'dissolution', 'national');
+    INSERT INTO policy_jp.politician_elections (id, politician_id, election_id, candidacy_status, status_date, district_kind, district_name, district_lg_code) VALUES
+      ('pe-d', 'pol-1', '2028-10-01_national_lower_national', 'filed', '2028-09-20', 'district', '東京都第1区', '130001');
+    INSERT INTO policy_jp.politician_elections (id, politician_id, election_id, candidacy_status, status_date, district_kind, district_name, list_rank) VALUES
+      ('pe-p', 'pol-1', '2028-10-01_national_lower_national', 'filed', '2028-09-20', 'proportional', '東京ブロック', 1);
+  `);
+  const { rows } = await db.query<{ n: number }>(`SELECT count(*)::INT AS n FROM policy_jp.politician_elections WHERE politician_id = 'pol-1' AND election_id = '2028-10-01_national_lower_national'`);
+  assertEquals(rows[0].n, 2);
+  await assertRejects(
+    () => db.exec(`INSERT INTO policy_jp.politician_elections (id, politician_id, election_id, candidacy_status, status_date, district_kind, district_name) VALUES
+      ('pe-d2', 'pol-1', '2028-10-01_national_lower_national', 'filed', '2028-09-20', 'district', '東京都第2区')`),
+    Error,
+    "politician_elections_unique",
+    "同人同場同 district_kind 仍然只能一列",
+  );
+  await db.close();
+});
+
+Deno.test("policy_jp 表：選挙区看母選舉——母選舉沒 published 就讀不到", async () => {
+  const db = await freshDb();
+  await db.exec(BASE_ROWS);
+  await db.exec(`
+    INSERT INTO policy_jp.elections (id, name, election_date, election_type, election_reason, level, lg_code, review_status) VALUES
+      ('2028-11-01_ward_mayor_131016', '千代田区長選挙', '2028-11-01', 'ward_mayor', 'regular', 'local', '131016', 'pending');
+    INSERT INTO policy_jp.election_districts (election_id, district_kind, seats, seats_basis) VALUES
+      ('2028-07-09_governor_130001', 'at_large', 1, 'law'),
+      ('2028-11-01_ward_mayor_131016', 'at_large', 1, 'law');
+  `);
+  for (const role of ["anon", "authenticated"]) {
+    const rows = await asRole<{ election_id: string }>(db, role, `SELECT election_id FROM policy_jp.election_districts ORDER BY election_id`);
+    assertEquals(rows.map((r) => r.election_id), ["2028-07-09_governor_130001"], `${role} 只讀得到 published 選舉的選挙区`);
+  }
+  const all = await asRole<{ n: number }>(db, "service_role", `SELECT count(*)::INT AS n FROM policy_jp.election_districts`);
+  assertEquals(all[0].n, 2);
+  await db.close();
+});
+
+Deno.test("policy_jp 表：lg_code_valid 遇到非數字、空字串、NULL 不報錯", async () => {
+  const db = await freshDb();
+  const { rows } = await db.query<{ input: string | null; ok: boolean | null }>(`
+    SELECT x AS input, policy_jp.lg_code_valid(x) AS ok
+      FROM (VALUES ('ABCDEF'), (''), (NULL::TEXT), ('13101'), ('1310160'), ('13101A'), ('131016'), ('131017')) AS v(x)`);
+  const got = Object.fromEntries(rows.map((r) => [String(r.input), r.ok]));
+  assertEquals(got["ABCDEF"], false);
+  assertEquals(got[""], false);
+  assert(got["null"] === null || got["null"] === false, "NULL 回 NULL 或 false");
+  assertEquals(got["13101"], false);
+  assertEquals(got["1310160"], false);
+  assertEquals(got["13101A"], false);
+  assertEquals(got["131016"], true, "千代田区 131016 是對的");
+  assertEquals(got["131017"], false, "檢查碼錯");
+  // 非數字的 lg_code 寫入被 CHECK 擋（不是 ::INT 的轉型錯誤）
+  await assertRejects(
+    () => db.exec(`INSERT INTO policy_jp.local_governments (lg_code, kind, pref_code, name, kana, slug) VALUES ('ABCDEF', 'prefecture', 'ABCDEF', 'x', 'x', 'x')`),
+    Error,
+    "local_governments_lg_code_check",
+  );
+  await db.close();
+});
+
+Deno.test("policy_jp 表：會派刪掉時任期的 faction_id 變空（ON DELETE SET NULL）", async () => {
+  const db = await freshDb();
+  await db.exec(BASE_ROWS);
+  await db.exec(`
+    INSERT INTO policy_jp.assembly_factions (id, lg_code, name) VALUES ('fa-1', '130001', '甲会派');
+    INSERT INTO policy_jp.politician_offices (id, politician_id, position, lg_code, term_no, start_date, scheduled_end_date, faction_id) VALUES
+      ('of-m', 'pol-1', 'pref_assembly_member', '130001', 1, '2025-07-23', '2029-07-22', 'fa-1');
+    DELETE FROM policy_jp.assembly_factions WHERE id = 'fa-1';
+  `);
+  const { rows } = await db.query<{ faction_id: string | null }>(`SELECT faction_id FROM policy_jp.politician_offices WHERE id = 'of-m'`);
+  assertEquals(rows[0].faction_id, null);
   await db.close();
 });
