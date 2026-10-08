@@ -381,7 +381,7 @@ onMounted(() => { ensurePolicies() })
 
     <!-- 這條政見的查核履歷（同 /policy 頁，target=policy） -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
-      <HistoryPanel target="policy" :id="selectedPolicy.id" title="這條政見的查核履歷" />
+      <HistoryPanel target="policy" :id="selectedPolicy.id" title="這條政見的查核履歷" model-display="icon" />
     </div>
   </div>
 </template>
