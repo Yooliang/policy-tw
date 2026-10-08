@@ -4,6 +4,7 @@ import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { handleContribute, ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { handleVerify } from "../_shared/verify-handler.ts";
 import { handleWithdraw } from "../_shared/withdraw-handler.ts";
+import { dispatchTokenSecretFrom } from "../_shared/dispatch-token.ts";
 
 /**
  * report — 統一回報端點（主流程之二）。無金鑰。
@@ -39,11 +40,12 @@ Deno.serve(async (req) => {
     const kind = (body as Record<string, unknown>).kind;
 
     if (kind === "verify") {
-      const result = await handleVerify(supabase, body, ipHash, undefined, "report", fetch, legacyIpHash);
+      const dispatchSecret = dispatchTokenSecretFrom((k) => Deno.env.get(k));
+      const result = await handleVerify(supabase, body, ipHash, undefined, "report", fetch, legacyIpHash, dispatchSecret);
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "contribute") {
-      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash);
+      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash, dispatchTokenSecretFrom((k) => Deno.env.get(k)));
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {

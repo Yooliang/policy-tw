@@ -22,6 +22,7 @@ import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
+import { dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
 /**
  * next — 統一派工端點（主流程之一）。無金鑰。
@@ -99,7 +100,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 待驗證池：在 SQL 裡就排掉這台機器提交的、投過的、已達門檻的，撈出來的就是真的能投的最早 N 筆。
     // 原本先取最早 30 筆再在這裡排，機器投完那 30 筆就整池是死的，第 31 筆之後永遠看不到（2026-09-19）。
     // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
-    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL });
+    // 過渡期（#484）：切換前交的貢獻存單一 IP 雜湊，自交排除要新舊一起比（舊雜湊與新的同值＝IP 認不得，不傳）
+    const legacyForPool = legacyIpHash !== ipHash ? legacyIpHash : undefined;
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, ...(legacyForPool ? { p_legacy_ip_hash: legacyForPool } : {}) });
 
     // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
     // 而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了
@@ -177,7 +180,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       queue_at?: string | null;
     };
     // deno-lint-ignore no-explicit-any
-    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
+    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds, ...(legacyForPool ? { legacy_ip_hash: legacyForPool } : {}) };
     const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
     // 裁決的驗證不派給原貢獻的提交者。
     // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，
@@ -288,6 +291,21 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const toolNotice = agentToolNotice(agentTool);
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
+    // 派工憑證（#484，協議 1.81.0）：派出的那一筆簽一張，綁 task_id、派出時間、自報代號與這次領任務的來源網段，期限同認領期。
+    // 不寫資料庫、不新增清單查詢；沒有鑰匙時不發（代理照舊走網段比對）。追查只進 log：只有識別碼與雜湊前 8 碼。
+    const dispatchSecret = dispatchTokenSecretFrom((k) => Deno.env.get(k));
+    const tokenFor = async (taskId: string): Promise<Record<string, unknown>> => {
+      try {
+        const issued = await issueDispatchToken(dispatchSecret, { taskId, agentName, ipHash });
+        if (!issued) return {};
+        logDispatchBinding({ event: "dispatch_token_issued", endpoint: "next", task_id: taskId, agent_name: agentName, token_id: issued.tokenId, issued_net: ipHash });
+        return { dispatch_token: issued.token, dispatch_token_expires_at: issued.expiresAt };
+      } catch (e) {
+        console.error("dispatch token:", e instanceof Error ? e.message : String(e));
+        return {};
+      }
+    };
+
     const serveVerify = async (): Promise<Response> => {
       mark("verify_start");
       // 單一佇列（2026-09-22）：池子已照 queue_at 排，第一筆就是等最久的（訪客看得到的、被插隊的在 1980 年段）。
@@ -389,6 +407,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       return json({
         ...base,
         kind: "verify",
+        ...(await tokenFor(`verify:${pick.id}`)),
         item: {
           current: verifyCurrent,
           contribution_id: pick.id,
@@ -421,7 +440,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           : pick.contribution_type === "no_change"
           ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
           : "打開 source_urls，逐欄核對 payload 與來源原文對不對得上。") +
-          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool}；不確定投 unsure，不要猜。",
+          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回；帶了就不看 IP，領取與回報出口 IP 不同網段也交得回去）；不確定投 unsure，不要猜。",
       });
     };
 
@@ -446,7 +465,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       );
       if (error) throw new Error(`lease upsert: ${error.message}`);
     };
-    const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
+    const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回）；查不到就不提交、回報時計入「查不到」。";
 
     // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
     // 自動缺口與手動任務是同一張佇列、用同一把尺（queue_at），由 contribution_queue_tasks 排好序。
@@ -524,6 +543,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         ...base,
         kind: "task",
         lease_minutes: LEASE_MINUTES,
+        ...(await tokenFor(t.id)),
         item: {
           task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: withElectionKey(t.target, electionList), ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget), { task_id: t.id ?? null, target: manualTarget }),
@@ -552,6 +572,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       ...base,
       kind: "task",
       lease_minutes: LEASE_MINUTES,
+      ...(await tokenFor(t.task_id)),
       item: {
         ...t,
         target: withElectionKey(t.target, await loadElections(supabase)),

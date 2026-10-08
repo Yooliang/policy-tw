@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
 import { ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { handleVerify } from "../_shared/verify-handler.ts";
+import { dispatchTokenSecretFrom } from "../_shared/dispatch-token.ts";
 
 /**
  * verify — 回報檢驗結果（進階端點；主流程用 /next + /report）。無金鑰、走 IP 每日限額。
@@ -29,7 +30,7 @@ Deno.serve(async (req) => {
     const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
     const ipHash = await ipHashOf(req, ipSalt);
     const body = await req.json().catch(() => null);
-    const result = await handleVerify(supabase, body, ipHash, undefined, "verify", fetch, await legacyIpHashOf(req, ipSalt));
+    const result = await handleVerify(supabase, body, ipHash, undefined, "verify", fetch, await legacyIpHashOf(req, ipSalt), dispatchTokenSecretFrom((k) => Deno.env.get(k)));
     return json(result.body, result.status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

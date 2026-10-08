@@ -75,6 +75,14 @@ export interface Requester {
   agent_name: string;
   ip_hash: string;
   voted_ids: ReadonlySet<string>;
+  /** 1.79.0 以前的單一 IP 雜湊（過渡期，#481／#484）：切換前交的貢獻存的是它，自交排除要新舊一起比 */
+  legacy_ip_hash?: string;
+}
+
+/** 這個雜湊是不是「我」的來源：新的網段雜湊，或過渡期的舊單一 IP 雜湊 */
+export function isMySource(stored: string | null | undefined, me: Pick<Requester, "ip_hash" | "legacy_ip_hash">): boolean {
+  if (!stored) return false;
+  return stored === me.ip_hash || (!!me.legacy_ip_hash && stored === me.legacy_ip_hash);
 }
 
 export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly T[], me: Requester): T[] {
@@ -88,7 +96,7 @@ export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly
       : (typeof r.effective_required === "number" ? r.effective_required : requiredAgree(r.contribution_type, r.payload, r.source_urls ?? []));
     return r.status === "pending" &&
       r.agent_name.toLowerCase() !== mine &&
-      r.contributor_ip_hash !== me.ip_hash &&
+      !isMySource(r.contributor_ip_hash, me) &&
       !me.voted_ids.has(r.id) &&
       current < target;
   });
@@ -341,7 +349,7 @@ export function excludeOwnAdjudications<T extends VerifyCandidate>(
   votedOriginalIds: ReadonlySet<string> = new Set(),
 ): T[] {
   const mine = me.agent_name.toLowerCase();
-  const own = new Set(originals.filter((o) => o.agent_name.toLowerCase() === mine || o.contributor_ip_hash === me.ip_hash).map((o) => o.id));
+  const own = new Set(originals.filter((o) => o.agent_name.toLowerCase() === mine || isMySource(o.contributor_ip_hash, me)).map((o) => o.id));
   return candidates.filter((c) => {
     if (c.contribution_type !== "adjudication") return true;
     const target = (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null);
