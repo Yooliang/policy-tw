@@ -56,7 +56,8 @@ Deno.test("A1 這支是 seed_auto_task_queue 的最後一版，緊接著手動�
   const i = defining.indexOf(MIG);
   assert(i > 0, "這支要在重新定義 seed 的清單裡");
   assertEquals(defining[i - 1], MAN_MIG, "seed 的前一版應該是手動任務變一支臂那支（#453）；有人在中間改了，要以那一版為底重做機械式替換");
-  assertEquals(defining.slice(i + 1), [], "這支之後又有人改了 seed：要以最新那版為底重做（之後若有人改到 seed，後合的以最新那版為底重做）");
+  // 這支之後只允許 #465（20261009040000：內容沒變不重寫，seed 內容 UPDATE 多一個 IS DISTINCT FROM 條件，守門在 seed-skip-unchanged.test.ts）
+  assertEquals(defining.slice(i + 1), ["20261009040000_seed_skip_unchanged.sql"], "這支之後又有人改了 seed：要以最新那版為底重做（之後若有人改到 seed，後合的以最新那版為底重做）");
   const code = codeOf(MIG_SQL);
   for (const untouched of ["activity_priority", "rebalance_queue", "contribution_auto_tasks_arms", "contribution_auto_tasks", "queue_slot", "task_dispatched", "task_boost", "activity_open", "activity_require_rule"]) {
     assert(!new RegExp(`(CREATE OR REPLACE FUNCTION|DROP FUNCTION( IF EXISTS)?) ${untouched}\\(`).test(code), `這支不改 ${untouched}`);
