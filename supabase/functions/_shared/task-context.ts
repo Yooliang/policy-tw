@@ -1013,8 +1013,10 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
         ?? (typeof target.region === "string" ? target.region : null);
       const electionType = (typeof data.politician?.election_type === "string" ? data.politician.election_type : null)
         ?? (typeof target.election_type === "string" ? target.election_type : null);
+      // 屆別：任務 target 的 election_id（整數）；來源有填 election_ids 的（應選名額的公告每屆不同）才會用它篩
+      const electionId = typeof target.election_id === "number" && Number.isFinite(target.election_id) ? target.election_id : null;
       const all = await fetchVerificationSources(supabase);
-      const hints = sourcesForTask(all, { party, region, electionType, need: needsForTask(taskType) });
+      const hints = sourcesForTask(all, { party, region, electionType, electionId, need: needsForTask(taskType) });
       if (hints.length > 0) data.verification_sources = hints;
     } catch (e) {
       console.error("verification_sources:", e instanceof Error ? e.message : String(e));
@@ -1036,6 +1038,8 @@ export const SOURCE_TASK_TYPES: ReadonlySet<string> = new Set([
   "candidate_status_stale",
   "not_running_recheck",
   "roster_check",
+  // 應選名額（#344，2026-10-09）：沒有人物對象，用 target 的縣市／選舉別／屆別附選舉公告與登記彙總表
+  "district_seats_missing",
 ]);
 
 /**
@@ -1427,8 +1431,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         election_id: payload.election_id ?? null, election_type: payload.election_type ?? null, region: payload.region ?? null,
         districts: rows,
         not_in_submission: [...have.keys()].filter((k) => k && !givenNames.has(k)),
-        hint: "打開 source_urls 的選舉公告（應選名額表）或選舉公報，逐區核對：claimed_seats 是提交者照公告抄的名額，db_seats 是我們現有的（空白＝還沒有）。" +
-          "每一區都對得上公告、而且是這一屆這個縣市這種選舉的公告，才投 agree；任一區不符、公告上有的選舉區漏列（含原住民選舉區）、或名額看起來是拿候選人數或當選人數推的，投 disagree 並在 note 寫哪一區；" +
+        hint: "打開 source_urls 的選舉公告（應選名額表；current.verification_sources 有附的話是這一屆這個縣市的公告網址，登記彙總表的「應選名額」欄可交叉核對；沒附就是我們還沒登錄，自己找公告）或選舉公報，逐區核對：claimed_seats 是提交者照公告抄的名額，db_seats 是我們現有的（空白＝還沒有）。" +
+          "每一區都對得上公告、而且是這一屆這個縣市這種選舉的公告，才投 agree；任一區不符、公告上有的選舉區漏列（含原住民選舉區；交件的選舉區數量與名額加總也要跟公告對，兩區名額對調而總和不變也算錯）、或名額看起來是拿候選人數或當選人數推的，投 disagree 並在 note 寫哪一區；" +
           "not_in_submission 是我們有、這筆沒交的選舉區，公告上確實沒有的話不影響你的票。公告打不開或看不出是哪一份，投 unsure。",
       };
     }

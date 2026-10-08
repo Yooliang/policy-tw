@@ -38,6 +38,7 @@ const PROVIDES_LABELS: Record<string, string> = {
   birth_year: '出生年',
   candidacy: '參選紀錄',
   roster: '名冊',
+  seats: '應選名額',
 }
 
 function providesText(source: VerificationSource): string {
