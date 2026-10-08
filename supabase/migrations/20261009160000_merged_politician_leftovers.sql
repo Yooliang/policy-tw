@@ -8,6 +8,13 @@
 --   politician_keys 77586、77587、77588：保留者各已有同 (key_type, key_value) 的 34426、34424、34427
 --   policy_dupe_reviews 4 筆（a356d6d1、732cbaa2、54472fee、90378e6f）：PK 是 politician_id，內容是舊政見集合的指紋，人物已併走所以過期
 --
+-- 刪列之前先處理掛在它們身上的出處（source_refs，沒有外鍵，從 20261006210000 起 target_table 含 politician_elections）：
+--   36446 有 1 筆（source 9276，primary，backfill:contribution），保留者的 35367 沒有 → 搬到 35367（改 target_id）；
+--   保留者已有同一個出處的就刪掉被刪那列的、不搬；兩邊都有不同的 primary 就 RAISE（不猜哪個算主要出處）。
+--   politician_keys 三把鍵正式庫查過沒有 source_refs，這裡仍照同樣方式處理（鍵的出處以保留者同鍵那一把為去處）。
+--   每個搬動或刪除各記一筆 edit_history（table_name='source_refs'，record_id＝'<target_table>:<target_id>:<source_id>'，
+--   搬＝field 'target_id' 舊→新、刪＝field '*' 整列）。
+--
 -- 防呆（用完整 id；列已不在＝重跑，安靜略過；列在但條件不符一律 RAISE、整支不動）：
 --   參選紀錄／身份鍵：那一列要掛在預期的已合併人物上、該人物 merged_into 指向預期保留者、保留者確實有同鍵的列
 --   重複審查：那位人物要真的已合併（merged_into 不為空）
@@ -18,7 +25,9 @@ DECLARE
   v_keep CONSTANT UUID := '8aa6ee40-231a-447a-a967-99bcf8b35d3f';
   v_agent CONSTANT TEXT := 'migration-466';
   v_merged_into UUID;
-  r RECORD;
+  r RECORD; sr RECORD;
+  v_keep_row BIGINT;
+  v_refs_moved INTEGER := 0; v_refs_dropped INTEGER := 0;
   v_elections INTEGER := 0; v_keys INTEGER := 0; v_reviews INTEGER := 0;
 BEGIN
   SELECT merged_into INTO v_merged_into FROM politicians WHERE id = v_old;
@@ -34,6 +43,25 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM politician_elections k WHERE k.politician_id = v_keep AND k.election_id = r.election_id) THEN
       RAISE EXCEPTION '保留者 % 沒有第 % 屆的參選紀錄，36446 不是撞鍵的殘列，不刪', v_keep, r.election_id;
     END IF;
+    -- 出處：搬到保留者同屆那一列，已有同出處就刪被刪那列的
+    SELECT id INTO v_keep_row FROM politician_elections WHERE politician_id = v_keep AND election_id = r.election_id;
+    FOR sr IN SELECT * FROM source_refs WHERE target_table = 'politician_elections' AND target_id = r.id::TEXT ORDER BY source_id LOOP
+      IF EXISTS (SELECT 1 FROM source_refs k WHERE k.target_table = 'politician_elections' AND k.target_id = v_keep_row::TEXT AND k.source_id = sr.source_id) THEN
+        INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+        VALUES ('source_refs', sr.target_table || ':' || sr.target_id || ':' || sr.source_id, '*', to_jsonb(sr), NULL, NULL, v_agent);
+        DELETE FROM source_refs WHERE target_table = sr.target_table AND target_id = sr.target_id AND source_id = sr.source_id;
+        v_refs_dropped := v_refs_dropped + 1;
+      ELSE
+        IF sr.role = 'primary' AND EXISTS (SELECT 1 FROM source_refs k WHERE k.target_table = 'politician_elections' AND k.target_id = v_keep_row::TEXT AND k.role = 'primary') THEN
+          RAISE EXCEPTION '保留者的參選紀錄 % 已有主要出處，36446 的主要出處 % 不自動搬，請維護者看', v_keep_row, sr.source_id;
+        END IF;
+        UPDATE source_refs SET target_id = v_keep_row::TEXT
+         WHERE target_table = sr.target_table AND target_id = sr.target_id AND source_id = sr.source_id;
+        INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+        VALUES ('source_refs', sr.target_table || ':' || sr.target_id || ':' || sr.source_id, 'target_id', to_jsonb(sr.target_id), to_jsonb(v_keep_row::TEXT), NULL, v_agent);
+        v_refs_moved := v_refs_moved + 1;
+      END IF;
+    END LOOP;
     INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
     VALUES ('politician_elections', r.id::TEXT, '*', to_jsonb(r), NULL, NULL, v_agent);
     DELETE FROM politician_elections WHERE id = r.id;
@@ -48,6 +76,24 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM politician_keys k WHERE k.politician_id = v_keep AND k.key_type = r.key_type AND k.key_value = r.key_value) THEN
       RAISE EXCEPTION '保留者 % 沒有同鍵（% / %），身份鍵 % 不是重複的，不刪', v_keep, r.key_type, r.key_value, r.id;
     END IF;
+    SELECT k.id INTO v_keep_row FROM politician_keys k WHERE k.politician_id = v_keep AND k.key_type = r.key_type AND k.key_value = r.key_value;
+    FOR sr IN SELECT * FROM source_refs WHERE target_table = 'politician_keys' AND target_id = r.id::TEXT ORDER BY source_id LOOP
+      IF EXISTS (SELECT 1 FROM source_refs k WHERE k.target_table = 'politician_keys' AND k.target_id = v_keep_row::TEXT AND k.source_id = sr.source_id) THEN
+        INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+        VALUES ('source_refs', sr.target_table || ':' || sr.target_id || ':' || sr.source_id, '*', to_jsonb(sr), NULL, NULL, v_agent);
+        DELETE FROM source_refs WHERE target_table = sr.target_table AND target_id = sr.target_id AND source_id = sr.source_id;
+        v_refs_dropped := v_refs_dropped + 1;
+      ELSE
+        IF sr.role = 'primary' AND EXISTS (SELECT 1 FROM source_refs k WHERE k.target_table = 'politician_keys' AND k.target_id = v_keep_row::TEXT AND k.role = 'primary') THEN
+          RAISE EXCEPTION '保留者的身份鍵 % 已有主要出處，身份鍵 % 的主要出處 % 不自動搬，請維護者看', v_keep_row, r.id, sr.source_id;
+        END IF;
+        UPDATE source_refs SET target_id = v_keep_row::TEXT
+         WHERE target_table = sr.target_table AND target_id = sr.target_id AND source_id = sr.source_id;
+        INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+        VALUES ('source_refs', sr.target_table || ':' || sr.target_id || ':' || sr.source_id, 'target_id', to_jsonb(sr.target_id), to_jsonb(v_keep_row::TEXT), NULL, v_agent);
+        v_refs_moved := v_refs_moved + 1;
+      END IF;
+    END LOOP;
     INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
     VALUES ('politician_keys', r.id::TEXT, '*', to_jsonb(r), NULL, NULL, v_agent);
     DELETE FROM politician_keys WHERE id = r.id;
@@ -70,6 +116,6 @@ BEGIN
     v_reviews := v_reviews + 1;
   END LOOP;
 
-  RAISE NOTICE '已合併人物殘列：參選紀錄 % 列、身份鍵 % 列、重複審查 % 列', v_elections, v_keys, v_reviews;
+  RAISE NOTICE '已合併人物殘列：參選紀錄 % 列、身份鍵 % 列、重複審查 % 列；出處搬 % 筆、刪 % 筆', v_elections, v_keys, v_reviews, v_refs_moved, v_refs_dropped;
 END;
 $$;
