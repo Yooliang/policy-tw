@@ -1,0 +1,1 @@
+- **Jev 直接接 TypeSafe，OpenRouter 退為備援**｜維護者：「正式進入 jev，而不是只過 openrouter」；設了 `TYPESAFE_API_KEY` 就打 `api.typesafe.ai/v1/systemone`（釘 `jev-1.13.0`），沒設才退回 OpenRouter｜紀錄的 model 存 `typesafe/jev-1.13.0`，跟 OpenRouter 時期的 `typesafe/jev-1.13-20260917` 分得開；TypeSafe 只回 token 數，成本用公告價（每百萬輸入 token 0.042 美元）換算。

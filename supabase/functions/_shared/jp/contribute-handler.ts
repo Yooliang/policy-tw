@@ -5,6 +5,7 @@
  * 保留的：派工憑證（task 比對、來源記領任務的網段）、身份（ditrust:<序號> 換代號）、schema 驗證、
  *   每日額度（匿名按來源網段 200、DiTrust 按帳號 600，UTC 零時重置）、24 小時內相同內容去重、
  *   重複宣稱併成同意票（duplicate-claim.ts 原封沿用）、同一台機器重複宣稱的提示、提交後釋放任務認領、回應格式。
+ * 落庫：重複提交併成的同意票若讓那一筆變 verified，由這一票呼叫 applyFn 落庫（沒給 applyFn 就交給排程）。
  * 拿掉的：中選會名冊大批次（rosterBatchProblems）、單一答案型任務擋重複（single-answer-guard，任務型別是正見的）、
  *   公民提問檢查、搜尋結果頁／政見唯一出處／同名人物／議員選舉區／參選紀錄登記證據等守門（全是正見資料專屬）、
  *   「查無」要 5 個網址的守門（not-found-guard，綁正見的任務型別）與 agent_tool 查無比例、空操作更正檢查（要讀日本站目標列，待定）、
@@ -23,7 +24,7 @@ import { JP_PROTOCOL_URL } from "./protocol.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "../duplicate-claim.ts";
 import { agentToolNotice } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
-import { handleVerify } from "./verify-handler.ts";
+import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -102,6 +103,8 @@ export async function handleContribute(
   via = "contribute",
   // 派工憑證的簽章鑰匙；沒給就驗不了憑證，帶憑證的請求回 403
   dispatchSecret?: string,
+  // 落庫函式：重複提交併成的同意票剛好讓那一筆變 verified 時，由這一票落庫（沒給＝交給排程 apply_verified_pending）
+  applyFn?: JpApplyFn,
 ): Promise<HandlerResult> {
   // 派工憑證：帶了就驗憑證（簽章、期限、task 相符），無效回 403 invalid_dispatch_token，不默默當作沒帶。
   // 通過時，額度、併票、提交者網段都用領任務時的網段（憑證裡簽的），跟 jp-next 回報給代理的額度同一把尺。
@@ -200,7 +203,7 @@ export async function handleContribute(
         note: mergeNote(validation.contributor.agent_name, item.source_urls, item.note),
         ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
       // via "merge"：這一票是系統把重複提交配對成的，不是代理自己挑的題目——派發閘對它放行。
-      }, ipHash, undefined, "merge");
+      }, ipHash, applyFn, "merge");
       if (voted.status !== 201) continue; // 投不成就照原路收下
       claimed.add(target.id);
       const b = voted.body as Record<string, unknown>;
@@ -290,7 +293,7 @@ export async function handleContribute(
   const single = !Array.isArray((body as Record<string, unknown>).contributions);
   const toolNotice = agentToolNotice(validation.contributor.agent_tool);
   const trailingVoteNote = needs.length > 0
-    ? `；通過 ${needs.join("／")} 票同儕驗證（required_agree=${needs.join("／")}）後標為 verified，落庫另行處理`
+    ? `；通過 ${needs.join("／")} 票同儕驗證（required_agree=${needs.join("／")}）後標為 verified 並自動落庫（task_suggestion、correction 這兩種停在 verified）`
     : "";
   return {
     status: 201,

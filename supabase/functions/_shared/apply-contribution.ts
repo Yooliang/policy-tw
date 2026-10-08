@@ -114,17 +114,41 @@ async function fillBlanks(supabase: SupabaseLike, ctx: EditContext, politicianId
   return Object.keys(patch);
 }
 
+/** 合併鏈最多走幾步（實際最深 1；留餘裕但有上限，防環） */
+export const MAX_MERGE_HOPS = 5;
+
+/**
+ * 沿著 politicians.merged_into 走到保留者（#466 A）：落庫不能再把參選紀錄、政見寫到已合併的舊人物 id 上
+ * （陳瑩 54472fee 併進 8aa6ee40 之後，又多了一筆參選紀錄 36446 掛在舊 id）。
+ * 起點查無此人原樣回傳（存在與否由呼叫端自己判斷）；鏈走到一半查無此人（merged_into 指到不存在的 id）、成環、超過深度上限都丟錯，不猜。
+ */
+export async function followMergedInto(supabase: SupabaseLike, id: string): Promise<string> {
+  const seen = new Set<string>([id]);
+  let current = id;
+  for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
+    const { data, error } = await supabase.from("politicians").select("id, merged_into").eq("id", current).maybeSingle();
+    throwIf(error, "politicians merged_into lookup");
+    if (hop > 0 && !data) throw new Error(`人物 ${id} 的 merged_into 鏈走到 ${current}，但這個人物不存在，請維護者檢查`);
+    const next = data?.merged_into ? String(data.merged_into) : null;
+    if (!next) return current;
+    if (seen.has(next)) throw new Error(`人物 ${id} 的 merged_into 成環（${[...seen, next].join(" → ")}）`);
+    seen.add(next);
+    current = next;
+  }
+  throw new Error(`人物 ${id} 的 merged_into 鏈超過 ${MAX_MERGE_HOPS} 層，請維護者檢查`);
+}
+
 async function locatePolitician(supabase: SupabaseLike, p: Obj): Promise<string | null> {
   const id = str(p.politician_id);
   if (id) {
     const { data, error } = await supabase.from("politicians").select("id").eq("id", id).maybeSingle();
     throwIf(error, "politicians lookup by id");
-    return data?.id ?? null;
+    return data?.id ? await followMergedInto(supabase, String(data.id)) : null;
   }
   const name = str(p.name);
   if (!name) return null;
   const found = await findPoliticianByNameStrict(supabase, name); // 同名多位會丟錯，要求帶 politician_id
-  return found?.id ?? null;
+  return found?.id ? await followMergedInto(supabase, String(found.id)) : null;
 }
 
 async function recordCreatedPolitician(supabase: SupabaseLike, ctx: EditContext, politicianId: string): Promise<void> {
@@ -147,7 +171,7 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
     const { data, error } = await supabase.from("politicians").select("id").eq("id", resolved).maybeSingle();
     throwIf(error, "politicians lookup resolved");
     if (!data) return { disputed: `指認的人物 ${resolved} 不存在，交維護者裁決` };
-    return { politician_id: String(data.id), created: false };
+    return { politician_id: await followMergedInto(supabase, String(data.id)), created: false };
   }
   // 提交者自己帶了 politician_id 就是那位（要存在），不再用姓名去猜身份。
   // 2026-09-19 抓到 7 筆落庫連續失敗＋蘇清泉 2 票齊了卻轉裁決：payload 都有 politician_id，
@@ -161,20 +185,30 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
     if (!data) return { disputed: `payload.politician_id ${given} 不存在，交維護者裁決` };
     // 帶了 id 也帶了姓名，兩者要是同一個人（2026-09-23 agy 審查）：id 填錯的話，參選紀錄會掛到別人名下。
     // 本名對不上再看別名（politician_keys alias_name），都不是才擋。
+    // 帶的是已合併的舊人物時，姓名／別名要對「舊人物或它的保留者」任一個（舊 id 的名字可能已過期，保留者的才是現在的名字）
+    const keeperId = await followMergedInto(supabase, String(data.id));
     const claimed = normText(candidate.name ?? null);
     if (claimed && claimed !== normText(String(data.name ?? ""))) {
-      const { data: alias } = await supabase.from("politician_keys").select("politician_id")
-        .eq("politician_id", given).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
-      if (!alias) return { disputed: `payload.politician_id ${given} 是「${data.name}」，但 payload.name 是「${candidate.name}」——id 與姓名不是同一人，這筆不落庫` };
+      let keeperName: string | null = null;
+      if (keeperId !== String(data.id)) {
+        const { data: keeper, error: keeperErr } = await supabase.from("politicians").select("id, name").eq("id", keeperId).maybeSingle();
+        throwIf(keeperErr, "politicians lookup keeper");
+        keeperName = keeper ? String(keeper.name ?? "") : null;
+      }
+      if (keeperName === null || claimed !== normText(keeperName)) {
+        const { data: alias } = await supabase.from("politician_keys").select("politician_id")
+          .in("politician_id", keeperId === String(data.id) ? [given] : [given, keeperId]).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
+        if (!alias) return { disputed: `payload.politician_id ${given} 是「${data.name}」，但 payload.name 是「${candidate.name}」——id 與姓名不是同一人，這筆不落庫` };
+      }
     }
-    return { politician_id: String(data.id), created: false };
+    return { politician_id: keeperId, created: false };
   }
   const ensured = await ensurePolitician(supabase, candidate, options);
   if (ensured.politician_id === null) {
     const names = ensured.resolution.candidates.map((c) => `${c.name ?? "?"}（${c.politician_id.slice(0, 8)}）`).join("、");
     return { disputed: `身份判不出（同名多位：${names || "見 politician_identity_reviews"}）且驗證者未指認 resolved_politician_id，交維護者裁決：${ensured.resolution.reason}` };
   }
-  return { politician_id: ensured.politician_id, created: ensured.created };
+  return { politician_id: await followMergedInto(supabase, ensured.politician_id), created: ensured.created };
 }
 
 async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {

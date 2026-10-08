@@ -205,7 +205,11 @@ Deno.test("A8 協議：skill.md 版號 1.80.0（#482 的 1.79.0 先合併）、�
   assert(claude.includes("task_cooldown_settings") && claude.includes("policy_no_public_progress") && claude.includes("except_election_types"));
   const plan = await readSrc("../../../docs/PLAN-task-activation.md");
   assert(plan.includes("20261009010000") && plan.includes("village-progress-cooling.test.ts"));
-  const decisions = await readSrc("../../../docs/DECISIONS.md");
+  // 裁決本文一條一個檔在 docs/decisions/（#492），DECISIONS.md 只是索引：把整個目錄讀進來
+  let decisions = "";
+  for await (const e of Deno.readDir(new URL("../../../docs/decisions/", import.meta.url))) {
+    decisions += await readSrc(`../../../docs/decisions/${e.name}`);
+  }
   assert(decisions.includes("村里長不主動追進度") && decisions.includes("20261009010000"));
 });
 
