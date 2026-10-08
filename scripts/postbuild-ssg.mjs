@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadEnv } from 'vite'
 import { REGION_DIR, regionFilePath, regionPublicPathOfFile, townshipFilePath } from '../cloudflare/region-path.js'
+import { newestLastmod, sitemapIndexXml, urlsetXml } from '../cloudflare/sitemap-xml.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -100,10 +101,6 @@ function textOf(fragment) {
   return fragment.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 }
 
-function taipeiDate() {
-  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
-}
-
 const failures = []
 const fail = (msg) => failures.push(msg)
 
@@ -118,6 +115,13 @@ const EDGE_FILE = path.join(DIST, '.edge-routes.json')
 const edgeRoutes = fs.existsSync(EDGE_FILE) ? JSON.parse(fs.readFileSync(EDGE_FILE, 'utf8')) : []
 if (fs.existsSync(EDGE_FILE)) fs.unlinkSync(EDGE_FILE)
 const edgeMode = edgeRoutes.length > 0
+
+// 網站地圖補充（lib/ssg/server-data.ts 寫，規則在 lib/sitemap.ts）：各網址的 lastmod、以及不進網站地圖的網址
+// （人物頁政見數不到門檻）。讀完刪掉（不部署出去）。沒有這個檔＝不套規則：全部照列、不寫 lastmod。
+const META_FILE = path.join(DIST, '.sitemap-meta.json')
+const sitemapMeta = fs.existsSync(META_FILE) ? JSON.parse(fs.readFileSync(META_FILE, 'utf8')) : { lastmod: {}, skip: [] }
+if (fs.existsSync(META_FILE)) fs.unlinkSync(META_FILE)
+const sitemapSkip = new Set(sitemapMeta.skip)
 
 // 1. 殼
 for (const shell of SHELL_FILES) {
@@ -268,7 +272,6 @@ if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 in
 
 // 5. sitemap：按內容拆份，sitemap.xml 是索引（2026-09-23 維護者：Search Console 才看得出哪一類沒被收錄）
 //    提交的網址不變，一樣是 /sitemap.xml。2026-10-05 選舉頁（全台、縣市、鄉鎮，約上千頁）另拆一份，鄉鎮頁有沒有被收錄才看得出來。
-const lastmod = taipeiDate()
 const SITEMAP_GROUPS = [
   { file: 'sitemap-politicians.xml', match: (r) => r.startsWith('/politician/') },
   // 政策脈絡頁（/lineage/，#349）跟政見同一份：上線初期是 0 條，自己一份會是空檔
@@ -277,26 +280,24 @@ const SITEMAP_GROUPS = [
   { file: 'sitemap-pages.xml', match: () => true },
 ]
 const grouped = new Map(SITEMAP_GROUPS.map((g) => [g.file, []]))
-for (const r of [...new Set([...routes, ...edgeRoutes])].sort()) grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
+// lastmod（2026-10-08，#466）：以前每個網址都寫建置當天，等於告訴爬蟲「全站天天都變」。現在只寫有可靠時間的
+// （政見＝policies.updated_at、人物＝名下政見最近變動、脈絡＝lineages.updated_at），沒有的不寫，來源與理由見 lib/sitemap.ts。
+// 人物頁政見數不到門檻的不進網站地圖（頁面照常可開、可被收錄）。
+const skippedByRule = []
+const allRoutes = [...new Set([...routes, ...edgeRoutes])].sort()
+for (const r of allRoutes) {
+  if (sitemapSkip.has(r)) { skippedByRule.push(r); continue }
+  grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
+}
+const groupEntries = new Map()
 for (const [file, list] of grouped) {
   if (list.length === 0) fail(`${file} 是空的`)
   if (list.length > 50000) fail(`${file} 超過 50,000 個網址（${list.length}），要再拆`)
-  const xml = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    ...list.map((r) => `  <url><loc>${SITE_URL}${r}</loc><lastmod>${lastmod}</lastmod></url>`),
-    '</urlset>',
-    '',
-  ].join('\n')
-  fs.writeFileSync(path.join(DIST, file), xml, 'utf8')
+  const entries = list.map((r) => ({ loc: `${SITE_URL}${r}`, lastmod: sitemapMeta.lastmod[r] ?? null }))
+  groupEntries.set(file, entries)
+  fs.writeFileSync(path.join(DIST, file), urlsetXml(entries), 'utf8')
 }
-const indexXml = [
-  '<?xml version="1.0" encoding="UTF-8"?>',
-  '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-  ...[...grouped.keys()].map((file) => `  <sitemap><loc>${SITE_URL}/${file}</loc><lastmod>${lastmod}</lastmod></sitemap>`),
-  '</sitemapindex>',
-  '',
-].join('\n')
+const indexXml = sitemapIndexXml([...grouped.keys()].map((file) => ({ loc: `${SITE_URL}/${file}`, lastmod: newestLastmod(groupEntries.get(file)) })))
 fs.writeFileSync(path.join(DIST, 'sitemap.xml'), indexXml, 'utf8')
 
 const byPrefix = routes.reduce((acc, r) => {
@@ -308,7 +309,9 @@ const byPrefix = routes.reduce((acc, r) => {
 const summary = {
   htmlFiles: allHtml.length,
   prerenderedPages: pageFiles.length,
-  sitemapUrls: new Set([...routes, ...edgeRoutes]).size,
+  sitemapUrls: allRoutes.length - skippedByRule.length,
+  sitemapSkippedPeople: skippedByRule.length,
+  sitemapUrlsWithLastmod: [...groupEntries.values()].reduce((n, es) => n + es.filter((e) => e.lastmod).length, 0),
   edgeRendered: edgeRoutes.length,
   sitemaps: Object.fromEntries([...grouped].map(([f, l]) => [f, l.length])),
   byPrefix,

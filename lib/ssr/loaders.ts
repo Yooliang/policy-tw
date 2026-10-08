@@ -8,6 +8,7 @@ import { mapLineage } from '../lineage'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
 import { fetchAllPages } from '../fetch-all-pages'
+import { followMerged } from './merge-chain'
 
 /**
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
@@ -127,10 +128,32 @@ async function peersOf(self: Politician): Promise<Politician[]> {
   }
 }
 
-export async function loadPoliticianPage(id: string): Promise<PageSnapshot | null> {
+/** 要 301 到別的網址（例：已合併的人物 → 保留者） */
+export interface PageRedirect { redirectTo: string }
+export const isPageRedirect = (v: unknown): v is PageRedirect => !!v && typeof v === 'object' && typeof (v as PageRedirect).redirectTo === 'string'
+
+/** 一位人物的合併指向（含已合併的列；politiciansByIds 會濾掉它們）。查無此人回 null */
+async function mergeLookup(id: string): Promise<{ id: string; mergedInto: string | null } | null> {
+  // query-bounds: ok — 主鍵查一列
+  const { data, error } = await supabasePublic.from('politicians_with_elections').select('id, merged_into').eq('id', id).limit(1)
+  if (error) {
+    // id 不是 uuid 之類的請求錯誤＝查無此人；其他照常丟出（Worker 會退回代理 web.app）
+    if (/invalid input syntax/i.test(error.message)) return null
+    throw new Error(`politicians_with_elections merge lookup: ${error.message}`)
+  }
+  const row = ((data ?? []) as Array<{ id: string; merged_into: string | null }>)[0]
+  return row ? { id: String(row.id), mergedInto: row.merged_into ? String(row.merged_into) : null } : null
+}
+
+export async function loadPoliticianPage(id: string): Promise<PageSnapshot | PageRedirect | null> {
   const base = await loadBase()
   const [politicians, policies] = await Promise.all([politiciansByIds([id]), policiesOfPoliticians([id])])
-  if (politicians.length === 0) return null
+  if (politicians.length === 0) {
+    // 查不到有兩種：真的沒有這個人，或已被軟合併（politiciansByIds 把 merged_into 的列濾掉了）。
+    // 後者舊網址要 301 到保留的那一位，不能 404（網址保持；2026-10-08 陳瑩 54472fee → 8aa6ee40，#466）
+    const moved = await followMerged(id, mergeLookup)
+    return moved.kind === 'redirect' ? { redirectTo: `/politician/${moved.to}` } : null
+  }
   const peers = await peersOf(politicians[0])
   return { ...base, politicians: [...politicians, ...peers], policies }
 }
@@ -176,7 +199,7 @@ export async function loadLineagePage(id: string): Promise<PageSnapshot | null> 
 }
 
 /** 路由 → 這一頁的快照；不是這一步負責的路由回 undefined（Worker 會退回代理 web.app） */
-export async function loadPageData(to: RouteLocationNormalized): Promise<PageSnapshot | null | undefined> {
+export async function loadPageData(to: RouteLocationNormalized): Promise<PageSnapshot | PageRedirect | null | undefined> {
   const param = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
   switch (to.name) {
     case 'politician': return await loadPoliticianPage(param(to.params.politicianId as string | string[]))

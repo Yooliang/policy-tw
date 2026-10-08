@@ -31,6 +31,11 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 選舉那一段（2026-10-07，#344 第二階段 A）：舊三屆是數字 id（`/election/2022`），新增的選舉（補選、罷免投票、重行選舉）是 `election_key`（`/election/2022-12-18_rerun_10020`，縣市頁、鄉鎮頁規則同上）；舊三屆的 key 寫法（`/election/2022-11-26_local[/…]`）由 Worker 301 到年份寫法（`legacyElectionKeyRedirect`，清單 `LEGACY_ELECTION_KEYS` 與前端 `lib/election-route.ts` 一致、有測試盯）；Firebase 那邊 `firebase.json` 的 `redirects` 也轉一份，給直接打 policy-tw.web.app 的。
 
 
+## 人物頁的 301／404 與網站地圖（2026-10-08，#466）
+
+- `/politician/:id` 不預渲染，**任何 id 都是請求時從資料庫現場渲染**；建置之後才新增的人物不會因此 404。查不到的兩種情況：真的沒有這個人 → 404（`no-store`，不快取）；人物已被軟合併（`merged_into`）→ 沿合併鏈 301 到保留的那位（`lib/ssr/merge-chain.ts`，最多 5 跳）。組回應在 `render-status.js`，測試 `render-status.test.ts`。
+- 網站地圖（`scripts/postbuild-ssg.mjs`）是建置時算的，新增的人物要等下一次建置才進去。人物頁只有名下政見 ≥ 6 筆才列；lastmod 取各頁實際的更新時間、沒有可靠時間就不寫；規則與理由在 `lib/sitemap.ts`，XML 組字在 `sitemap-xml.js`。
+
 ## Markdown 檢視（2026-10-07，docs/PLAN-markdown-views.md 第 12 節）
 
 `cloudflare/markdown.js`（由 `ssr-worker.js` 在代理之前呼叫；路由 `lib/md/route.ts`、組字 `lib/md/*`，隨 `pnpm build:ssr` 進 `dist-ssr/`）：
