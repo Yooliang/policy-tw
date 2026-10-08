@@ -6,7 +6,7 @@ import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
-import { isFrontQueueAt, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, manualQueueAt, pickQueuedManual, sortQuestionTasksBySupport, taskTargetKey } from "../_shared/dispatch.ts";
+import { isFrontQueueAt, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { submitQuotaFor } from "../_shared/contribute-handler.ts";
@@ -87,8 +87,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       );
       if (skipErr) throw new Error(`skip record: ${skipErr.message}`);
       try {
-        if (skipTaskId.startsWith("auto:")) await supabase.rpc("task_dispatched", { p_task_id: skipTaskId });
-        else await supabase.from("contribution_tasks").update({ last_dispatched_at: new Date().toISOString() }).eq("id", skipTaskId);
+        // 自動缺口與手動任務（task_id＝任務 uuid）都是佇列上的列，跳過一樣回到隊尾
+        await supabase.rpc("task_dispatched", { p_task_id: skipTaskId });
       } catch (e) { console.error("skip push-back:", e instanceof Error ? e.message : String(e)); }
     }
 
@@ -102,16 +102,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
-    const [pendingRes, countsRes, manualRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
+    const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       timed("pool", pendingQuery),
-      timed("counts", supabase.rpc("contribution_auto_task_counts", { p_region: region })),
-      timed("manual", supabase.from("contribution_tasks").select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at, last_dispatched_at").eq("status", "open")
-        // 這裡只負責「把可能是前幾名的撈進來」，真正的排序由 TS 的 manualQueueAt 決定
-        // （SQL 排不出 1980 那條規則）。沒派過的排前面保證了 FRONT_SOURCES 的任務一定在窗內，
-        // 而手動任務總共只有 91 筆、窗口 20 筆，不會漏掉該派的。
-        // last_dispatched_at 也真的 select 出來——原本只拿它排序、沒放進 select，
-        // 所以 TS 那側拿不到值，根本沒辦法跟自動缺口比。
-        .order("last_dispatched_at", { ascending: true, nullsFirst: true }).order("priority", { ascending: false }).order("created_at", { ascending: true }).limit(20)),
+      timed("counts", supabase.rpc("contribution_queue_task_counts", { p_region: region }) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單 */),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
@@ -120,9 +113,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       fetchAllRows<{ task_id: string }>("my submitted tasks", (from, to) =>
         supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
           .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to))),
-      timed("auto", // 自動缺口的候選（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
+      timed("auto", // 任務列的候選（自動缺口＋open 的手動任務，同一張佇列；2026-10-08 起手動任務也由排程寫進 task_dispatches）（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
       // 「有人回報查無」改成下面只查候選的那幾十筆，不再翻整張貢獻表。
-      supabase.rpc("contribution_auto_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
+      supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
       timed("my_votes", // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
       // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
@@ -148,7 +141,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       timed("skips", // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
       Promise.resolve({ data: [], error: null })),
     ]);
-    for (const r of [pendingRes, countsRes, manualRes, ipContribRes, ipVoteRes, skipsRes]) {
+    for (const r of [pendingRes, countsRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
     }
     if (autoRes.error) throw new Error(`auto tasks: ${autoRes.error.message}`);
@@ -207,18 +200,18 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     }
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
+    // 佇列上各型別的任務總數（contribution_queue_task_counts，含手動任務；不是 30 筆切片）
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
-    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string; last_dispatched_at: string | null };
-    // task_id 併進來的早一點加，dispatch.ts 的 TaskLike 系列函式都要它
-    const manualRaw = ((manualRes.data ?? []) as ManualRow[]).filter((t) => !region || t.region === region).map((m) => ({ ...m, task_id: m.id }));
+    // 任務列：自動缺口（auto:…）與 open 的手動任務（task_id＝任務 uuid，派工臂 manual_visitor／manual_open）在同一張佇列、同一支函式讀出來，
+    // 排隊位置（queue_at）全由排程算好——/next 不再撈 contribution_tasks 清單、不再自己算排位（2026-10-08；09-23 Disk IO 事故後的裁決：缺口由排程寫進佇列、派工只讀佇列）。
+    type QueueRow = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string };
+    const queueRaw = (autoRes.data ?? []) as QueueRow[];
+    type ManualRow = { id: string; title: string; description: string | null; task_type: string; target: unknown; region: string | null; priority: number; reward: number; source: string | null; suggested_by: string | null; hint_sources: string[] | null; created_at: string };
 
-    // 在途數與「有人回報查無」只查這一輪的候選（手動前 20＋自動前 30），不再翻整張貢獻表（2026-10-02）。
+    // 在途數與「有人回報查無」只查這一輪的候選（任務列前 30 筆），不再翻整張貢獻表（2026-10-02）。
     // 這兩個集合只拿來過濾候選（下面手動、自動各一處），所以規則完全不變，只是範圍從「全站」縮到這幾十筆。
     // 原本每次 /next 都把全站在途貢獻（約 3 千筆、3 頁）和所有「查無」回報翻完，只為了檢查 50 個候選。
-    const candidateTaskIds = [...new Set([
-      ...manualRaw.map((t) => t.task_id),
-      ...((autoRes.data ?? []) as Array<{ task_id: string }>).map((t) => t.task_id),
-    ].filter((v): v is string => typeof v === "string"))];
+    const candidateTaskIds = [...new Set(queueRaw.map((t) => t.task_id).filter((v): v is string => typeof v === "string"))];
     const inFlightByTask = new Map<string, number>();
     const deadEndTaskIds = new Set<string>();
     if (candidateTaskIds.length > 0) {
@@ -241,19 +234,19 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       }
     }
     mark("scoped");
-    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + manualRaw.length;
+    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0);
 
-    // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他、
-    // 彼此之間依 stance_up 排序（其他任務位置不動，見 sortQuestionTasksBySupport 的說明）
-    const questionIds = [...new Set(manualRaw
-      .filter((t) => t.task_type === "question")
+    // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他。
+    // 提問彼此的先後（支持度 stance_up 高的先、再依進佇列時間）已經由 SQL 排在 contribution_queue_tasks 的順序裡（stance_up 是排程寫進 target 的），這裡不再排序。
+    const questionRows = queueRaw.filter((t) => t.task_type === "question" && isManualTaskId(t.task_id));
+    const questionIds = [...new Set(questionRows
       .map((t) => (t.target && typeof t.target === "object" ? (t.target as Record<string, unknown>).question_id : null))
       .filter((v): v is string => typeof v === "string"))];
-    let manual = manualRaw;
+    let queueRows = queueRaw;
     if (questionIds.length > 0) {
-      const questionTaskIds = manualRaw.filter((t) => t.task_type === "question").map((t) => t.task_id);
+      const questionTaskIds = questionRows.map((t) => t.task_id);
       const [{ data: qRows, error: qErr }, { data: qaRows, error: qaErr }, { data: inFlightRows, error: ifErr }] = await Promise.all([
-        supabase.from("citizen_questions").select("id, stance_up, answer_count").in("id", questionIds),
+        supabase.from("citizen_questions").select("id, answer_count").in("id", questionIds),
         supabase.from("question_answers").select("question_id, agent_name").in("question_id", questionIds),
         // 還在等票的答案也佔名額
         supabase.from("contributions").select("task_id").eq("contribution_type", "question_answer")
@@ -262,19 +255,12 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       if (qErr) throw new Error(`citizen_questions lookup: ${qErr.message}`);
       if (qaErr) throw new Error(`question_answers lookup: ${qaErr.message}`);
       if (ifErr) throw new Error(`in-flight answers lookup: ${ifErr.message}`);
-      const stanceById = new Map(((qRows ?? []) as Array<{ id: string; stance_up: number }>).map((r) => [r.id, r.stance_up]));
       const inFlightByTaskId = new Map<string, number>();
       for (const r of (inFlightRows ?? []) as Array<{ task_id: string }>) inFlightByTaskId.set(r.task_id, (inFlightByTaskId.get(r.task_id) ?? 0) + 1);
-      const fullQuestionIds = fullQuestionIdsOf((qRows ?? []) as Array<{ id: string; answer_count: number }>, manualRaw, inFlightByTaskId);
+      const fullQuestionIds = fullQuestionIdsOf((qRows ?? []) as Array<{ id: string; answer_count: number }>, questionRows, inFlightByTaskId);
       const mine = agentName.toLowerCase();
       const answeredQuestionIds = new Set(((qaRows ?? []) as Array<{ question_id: string; agent_name: string }>).filter((r) => r.agent_name.toLowerCase() === mine).map((r) => r.question_id));
-      const withStance = manualRaw.map((t) => {
-        if (t.task_type !== "question") return t;
-        const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
-        const qid = typeof target.question_id === "string" ? target.question_id : null;
-        return { ...t, target: { ...target, stance_up: qid ? stanceById.get(qid) ?? 0 : 0 } };
-      });
-      manual = filterAnsweredQuestionTasks(sortQuestionTasksBySupport(withStance), answeredQuestionIds, fullQuestionIds);
+      queueRows = filterAnsweredQuestionTasks(queueRaw, answeredQuestionIds, fullQuestionIds);
     }
 
     // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
@@ -460,39 +446,33 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     };
     const howTo = "到優先來源（官方優先）查證 → POST /report {kind:'contribute', task_id, contribution_type, payload, source_urls, agent_name, agent_tool}；查不到就不提交、回報時計入「查不到」。";
 
-    // 手動任務優先（priority 高者），否則自動缺口隨機一筆
-    const freeManual = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
-      filterLeasedTasks(filterAdjudicateTasks(manual, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
-      mySubmittedTaskIds,
-    ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
     // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
-    // 自動缺口也先撈出來，兩邊用同一把尺比，不再是「手動清單有東西就手動贏」。
-    // 原本的 mayorFirst 特例（讓縣市長插到手動前面）一併拿掉——那是用特例壓特例。
-    // queue_at 是 20260921000020 加的單一排序鍵，兩邊靠它比。
-    type AutoTask = { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string };
+    // 自動缺口與手動任務是同一張佇列、用同一把尺（queue_at），由 contribution_queue_tasks 排好序。
     // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
-    // 程式裡的過濾器留著當保險。2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
-    const freeAuto = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
-      filterLeasedTasks(filterAdjudicateTasks((autoRes.data ?? []) as AutoTask[], agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
+    // 程式裡的過濾器留著當保險（手動任務的飽和、回報查無仍靠這裡）。
+    // 2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
+    const freeQueue = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
+      filterLeasedTasks(filterAdjudicateTasks(queueRows, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
 
-    // 自動那側 SQL 已經排好序（Jev 對沒派過那一次的插隊 → queue_at），第一筆就是最佳候選。
-    // 兩邊現在用同一個鍵比：queue_at。1980＝有人明確要求要先做，排程加進佇列的當下＝排隊尾。
-    const autoHead = freeAuto[0] ?? null;
-    const manualHead = pickQueuedManual(freeManual, seed);
+    // SQL 已經排好序：第一筆就是最佳候選；手動任務並列第一時用 seed 散開（pickQueueTaskHead）。
+    // 只用 id 分辨種類（auto: 開頭是自動缺口），種類給 pickQueueHead 比同一刻的先後。
+    const taskHead = pickQueueTaskHead(freeQueue, seed);
+    const manualHead = taskHead && isManualTaskId(taskHead.task_id) ? taskHead : null;
+    const autoHead = taskHead && !manualHead ? taskHead : null;
     // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
     // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
     const verifyHead = candidates[0] ?? null;
     const head = pickQueueHead([
       verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
-      manualHead ? { kind: "manual", queue_at: manualQueueAt(manualHead) } : null,
+      manualHead ? { kind: "manual", queue_at: manualHead.queue_at } : null,
       autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
     ]);
     if (head === "verify") return await serveVerify();
     // 每台機器自己的 2:1（2026-09-24）：佇列說該派任務，但這台機器最近三次拿到的驗證不到兩次、又有它能驗的 → 先派驗證。
     // 插隊期間放寬成 1:2（2026-09-27）。紀錄用派工本來就會寫的兩張表：驗證派發、任務認領（leased_until＝派出時間＋認領時長）。
-    const headAt = head === "manual" ? (manualHead ? manualQueueAt(manualHead) : null) : autoHead?.queue_at;
+    const headAt = head === "manual" ? (manualHead ? manualHead.queue_at : null) : autoHead?.queue_at;
     // 插隊的任務也照看（1:2，見 dispatch.ts 的 machineOwesVerifyDuringBoost）：不然大量插隊時驗證整個停擺
     const boosting = isFrontQueueAt(headAt);
     if (candidates.length > 0) {
@@ -510,14 +490,34 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     }
     const manualFirst = head === "manual";
 
+    // 隊頭是手動任務：用 id 單筆查描述等內容（不撈清單）。併發下它可能剛被關掉（派工列由觸發器收回，但這一輪的清單是之前讀的）——
+    // 查不到就跳過它、往下挑下一筆（最多 5 筆），不能直接回 none。往下挑到自動缺口就改派那一筆。
+    let manualRow: ManualRow | null = null;
+    let fallbackHead: { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string } | null = autoHead;
     if (manualFirst) {
-      const t = manualHead!;
+      let remaining = freeQueue;
+      fallbackHead = null;
+      for (let tries = 0; tries < 5; tries++) {
+        const h = pickQueueTaskHead(remaining, seed);
+        if (!h) break;
+        if (!isManualTaskId(h.task_id)) { fallbackHead = h; break; }
+        const { data: row, error: rowErr } = await supabase.from("contribution_tasks")
+          .select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at")
+          .eq("id", h.task_id).eq("status", "open").maybeSingle();
+        if (rowErr) throw new Error(`manual task lookup: ${rowErr.message}`);
+        if (row) { manualRow = row as ManualRow; break; }
+        remaining = remaining.filter((x) => x.task_id !== h.task_id);
+      }
+    }
+
+    if (manualRow) {
       mark("pick_manual");
+      const t = manualRow;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
       const electionList = await loadElections(supabase);
-      // 派出就蓋章，下一次排到後面（自動缺口是即時算出來的，沒有列可蓋）
-      await supabase.from("contribution_tasks").update({ last_dispatched_at: new Date().toISOString() }).eq("id", t.id);
+      // 派過就排後面（task_dispatches，跟自動缺口同一條路）；記不成不影響派工
+      try { await supabase.rpc("task_dispatched", { p_task_id: t.id }); } catch (e) { console.error("task_dispatched(manual):", e instanceof Error ? e.message : String(e)); }
       return json({
         ...base,
         kind: "task",
@@ -530,12 +530,12 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         how_to: howTo,
       });
     }
-    const t = autoHead;
+    const t = fallbackHead;
     if (!t) {
       // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
       // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）
       if (candidates.length > 0) return await serveVerify();
-      const all = (autoRes.data ?? []) as AutoTask[];
+      const all = queueRaw;
       const reason = all.length > 0
         ? "這一輪抽到的任務對你都不合格（你交過在等票、剛跳過、或裁決跟你有關），驗證池也空了；幾分鐘後再來會抽到別的"
         : (openTasks > 0 ? "目前所有缺口任務都在別人手上或已飽和，驗證池也空了；幾分鐘後再來" : "目前沒有待驗證、也沒有缺口任務");
