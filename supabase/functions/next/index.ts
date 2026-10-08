@@ -104,7 +104,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
     const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
       timed("pool", pendingQuery),
-      timed("counts", supabase.rpc("contribution_auto_task_counts", { p_region: region })),
+      timed("counts", supabase.rpc("contribution_queue_task_counts", { p_region: region }) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單 */),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
@@ -200,6 +200,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     }
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
+    // 佇列上各型別的任務總數（contribution_queue_task_counts，含手動任務；不是 30 筆切片）
     const autoTotals: Record<string, number> = Object.fromEntries(((countsRes.data ?? []) as any[]).map((r) => [String(r.task_type), Number(r.total)]));
     // 任務列：自動缺口（auto:…）與 open 的手動任務（task_id＝任務 uuid，派工臂 manual_visitor／manual_open）在同一張佇列、同一支函式讀出來，
     // 排隊位置（queue_at）全由排程算好——/next 不再撈 contribution_tasks 清單、不再自己算排位（2026-10-08；09-23 Disk IO 事故後的裁決：缺口由排程寫進佇列、派工只讀佇列）。
@@ -233,7 +234,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       }
     }
     mark("scoped");
-    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0) + queueRaw.filter((t) => isManualTaskId(t.task_id)).length;
+    const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0);
 
     // 提問任務（task_type="question"）：已滿 3 份答案的不再派、這個代理已經答過的不再派給他。
     // 提問彼此的先後（支持度 stance_up 高的先、再依進佇列時間）已經由 SQL 排在 contribution_queue_tasks 的順序裡（stance_up 是排程寫進 target 的），這裡不再排序。
@@ -489,18 +490,29 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     }
     const manualFirst = head === "manual";
 
+    // 隊頭是手動任務：用 id 單筆查描述等內容（不撈清單）。併發下它可能剛被關掉（派工列由觸發器收回，但這一輪的清單是之前讀的）——
+    // 查不到就跳過它、往下挑下一筆（最多 5 筆），不能直接回 none。往下挑到自動缺口就改派那一筆。
+    let manualRow: ManualRow | null = null;
+    let fallbackHead: { task_id: string; task_type: string; target: unknown; what_we_need: string; hint_sources: string[]; reward: number; queue_at: string } | null = autoHead;
     if (manualFirst) {
-      mark("pick_manual");
-      // 描述等內容：用 id 單筆查這一筆（不撈清單）。派工列由排程寫、任務一關閉觸發器也立刻收回，這裡仍確認它還是 open
-      const { data: manualRow, error: manualRowErr } = await supabase.from("contribution_tasks")
-        .select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at")
-        .eq("id", manualHead!.task_id).eq("status", "open").maybeSingle();
-      if (manualRowErr) throw new Error(`manual task lookup: ${manualRowErr.message}`);
-      if (!manualRow) {
-        if (candidates.length > 0) return await serveVerify();
-        return json({ ...base, kind: "none", reason: "剛好有一筆任務被關掉了；幾分鐘後再來會抽到別的", retry_after_min: RETRY_AFTER_MIN });
+      let remaining = freeQueue;
+      fallbackHead = null;
+      for (let tries = 0; tries < 5; tries++) {
+        const h = pickQueueTaskHead(remaining, seed);
+        if (!h) break;
+        if (!isManualTaskId(h.task_id)) { fallbackHead = h; break; }
+        const { data: row, error: rowErr } = await supabase.from("contribution_tasks")
+          .select("id, title, description, task_type, target, region, priority, reward, source, suggested_by, hint_sources, created_at")
+          .eq("id", h.task_id).eq("status", "open").maybeSingle();
+        if (rowErr) throw new Error(`manual task lookup: ${rowErr.message}`);
+        if (row) { manualRow = row as ManualRow; break; }
+        remaining = remaining.filter((x) => x.task_id !== h.task_id);
       }
-      const t = manualRow as ManualRow;
+    }
+
+    if (manualRow) {
+      mark("pick_manual");
+      const t = manualRow;
       const manualTarget = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
       await lease(t.id, t.target);
       const electionList = await loadElections(supabase);
@@ -518,7 +530,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         how_to: howTo,
       });
     }
-    const t = autoHead;
+    const t = fallbackHead;
     if (!t) {
       // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
       // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）

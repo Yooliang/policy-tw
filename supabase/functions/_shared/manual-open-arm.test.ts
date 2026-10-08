@@ -17,11 +17,14 @@
  *        4. 關閉＝缺口消失（觸發器立刻收回、seed 也收回，gap_events 有 closed；重開有 reopened）；內容每輪更新、位置不動
  *        5. 自動缺口的派工逐件不變（沒有手動任務時與舊 seed 的結果相同；有手動任務時自動缺口彼此的先後不變）；rebalance 不動 2000 年以前的列
  *        6. /tasks、/request-task 用的 contribution_auto_tasks 仍只回自動缺口；租約擋得住手動任務
+ *        7. 審查補強：已收滿答案的公民提問不入列也不被拉（佇列頭 40 筆滿額提問時前 30 筆仍是可派的）；新任務即時入列（觸發器）；
+ *           貢獻 applied 時即時收回（一題多份的不收）；加推計數不重複；open_tasks 讀佇列計數；health 抓得到 app.queue_now
  *
  * 每條守門的還原驗證見 PR 說明（拿掉被守的東西確認會紅）。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
+import { QUESTION_ANSWER_CAP } from "./dispatch.ts";
 import { applyP2, BALLOT_MIG, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
 const MIG = "20261008165000_manual_tasks_as_arm.sql";
@@ -128,10 +131,58 @@ Deno.test("A6 缺口出生／收回的觸發器：WHEN 條件從 auto: 改成「
 
 Deno.test("A7 沒動 contribution_auto_tasks／task_dispatched／queue_slot／refresh_dispatch_blocked／task_boost 等；只加不刪", () => {
   const code = M.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
-  for (const untouched of ["contribution_auto_tasks", "task_dispatched", "queue_slot", "refresh_dispatch_blocked", "task_boost", "task_boost_matches", "contribution_auto_task_counts", "contribution_verify_pool", "activity_priority", "activity_open"]) {
+  for (const untouched of ["contribution_auto_tasks", "task_dispatched", "queue_slot", "refresh_dispatch_blocked", "task_boost", "contribution_auto_task_counts", "contribution_verify_pool", "activity_priority", "activity_open"]) {
     assert(!new RegExp(`CREATE OR REPLACE FUNCTION ${untouched}\\(`).test(code), `這支不改 ${untouched}`);
   }
   assert(!/DROP FUNCTION|DROP COLUMN|DROP TABLE (?!IF EXISTS _)|TRUNCATE/.test(code), "只加不刪（seed 自己的暫存表 _gaps 不算）");
+});
+
+const EX = await readMig("20261007030000_election_read_side.sql");
+Deno.test("A10 task_boost_matches＝現行定義拿掉 contribution_tasks 那一段（手動任務在總表裡，不拿掉會算兩次）；activity_health＝補號次版加一行；drop_applied＝補號次版加一處", () => {
+  const BRANCH = `    UNION ALL
+    SELECT t.id::TEXT, 'task', t.task_type,
+           uuid_or_null(t.target->>'politician_id'),
+           COALESCE(t.region, t.target->>'region'),
+           election_id_or_null(t.target->>'election_id'),
+           t.target->>'election_type'
+      FROM contribution_tasks t WHERE t.status = 'open'
+`;
+  const tbm = fnText(M, "task_boost_matches");
+  assert(!tbm.includes("FROM contribution_tasks"));
+  assertEquals(tbm.replace("    UNION ALL\n    SELECT 'verify:' || c.id", BRANCH + "    UNION ALL\n    SELECT 'verify:' || c.id"), fnText(EX, "task_boost_matches"));
+  const view = (sql: string) => sql.slice(sql.indexOf("CREATE OR REPLACE VIEW activity_health AS"), sql.indexOf(";\nCOMMENT ON VIEW activity_health"));
+  const ROW = `
+  UNION ALL
+  SELECT 'queue_clock_overridden', current_setting('app.queue_now', true), '派工時鐘被 app.queue_now 覆寫了：所有固定時段插隊都在用這個假時間（只該出現在測試）'
+   WHERE NULLIF(current_setting('app.queue_now', true), '') IS NOT NULL`;
+  assertEquals(mutate(view(M), ROW, ""), view(BL));
+  const NEW_IF = `  IF NEW.task_id IS NOT NULL AND (
+       (NEW.task_id LIKE 'auto:%'
+        -- 補號次與重查是一個單位一件、代理一位一筆交：一筆落庫不代表整件做完，由 seed 依缺口還在不在收回（補號次 20261008150000）
+        AND NEW.task_id NOT LIKE 'auto:candidacy_source_missing:cand_no%')
+       -- 手動任務（task_id＝任務 uuid）：這筆貢獻上線就算做完的才收回（判斷同 TS 的 shouldCloseOnApplied；公民提問、裁決、名單清查是一題多份，不收）
+       OR manual_task_closes_on_applied(NEW.task_id, NEW.contribution_type)) THEN`;
+  const OLD_IF = `  IF NEW.task_id IS NOT NULL AND NEW.task_id LIKE 'auto:%'
+     -- 補號次與重查是一個單位一件、代理一位一筆交：一筆落庫不代表整件做完，由 seed 依缺口還在不在收回（補號次 20261008150000）
+     AND NEW.task_id NOT LIKE 'auto:candidacy_source_missing:cand_no%' THEN`;
+  assertEquals(mutate(fnText(M, "task_dispatches_drop_applied"), NEW_IF, OLD_IF), fnText(BL, "task_dispatches_drop_applied"));
+});
+
+Deno.test("A11 SQL 與 TS 的兩份真相對齊：一題最多答案數＝QUESTION_ANSWER_CAP；手動任務「補完就收」的型別清單＝task-fulfilment.ts 的 KEEP_OPEN／SELF_CLOSING", async () => {
+  assert(M.includes(`question_answer_cap() RETURNS INTEGER LANGUAGE sql IMMUTABLE AS $$ SELECT ${QUESTION_ANSWER_CAP} $$`));
+  const ts = (await Deno.readTextFile(new URL("./task-fulfilment.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  const setOf = (name: string) => {
+    const m = new RegExp(`const ${name}: ReadonlySet<string> = new Set\\(\\[([^\\]]*)\\]\\)`).exec(ts);
+    assert(m, name);
+    return [...m![1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]).sort();
+  };
+  const sqlList = (re: RegExp) => {
+    const m = re.exec(fnText(M, "manual_task_closes_on_applied"));
+    assert(m);
+    return [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort();
+  };
+  assertEquals(sqlList(/t\.task_type NOT IN \(([^)]*)\)/), setOf("KEEP_OPEN_TASK_TYPES"));
+  assertEquals(sqlList(/p_contribution_type NOT IN \(([^)]*)\)/), setOf("SELF_CLOSING_CONTRIBUTION_TYPES"));
 });
 
 Deno.test("A8 時段與常數只在 SQL：每 6 小時、前 20 分鐘、台北時區、1970；TS 沒有第二份", async () => {
@@ -153,10 +204,17 @@ Deno.test("A9 /next 只讀佇列：不撈 contribution_tasks 清單、沒有 man
   assertEquals(uses, 1);
   const at = src.indexOf('.from("contribution_tasks")');
   const chain = src.slice(at, src.indexOf(";", at));
-  assert(/\.eq\("id", manualHead!\.task_id\)\s*\.eq\("status", "open"\)\s*\.maybeSingle\(\)/.test(chain), chain);
+  assert(/\.eq\("id", h\.task_id\)\s*\.eq\("status", "open"\)\s*\.maybeSingle\(\)/.test(chain), chain);
   assert(!/\.(limit|order|in|range)\(/.test(chain), "單筆查不能是清單");
   assert(!src.includes("last_dispatched_at"), "不再寫 contribution_tasks.last_dispatched_at（派出蓋章走 task_dispatched）");
   assertEquals(src.split('rpc("task_dispatched"').length - 1, 4, "跳過、驗證、手動任務、自動缺口各一處");
+  // 併發下隊頭手動任務剛被關掉：跳過、往下挑，不能直接回 none
+  assert(!src.includes("剛好有一筆任務被關掉了"), "隊頭失效不能直接回 none");
+  assert(/for \(let tries = 0; tries < 5; tries\+\+\)[\s\S]*?remaining = remaining\.filter\(\(x\) => x\.task_id !== h\.task_id\)/.test(src), "查不到就從清單拿掉再挑下一筆");
+  // open_tasks 讀佇列計數（全部，不是 30 筆切片），不撈清單
+  assert(src.includes('rpc("contribution_queue_task_counts"') && !src.includes("queueRaw.filter((t) => isManualTaskId"), "open_tasks 讀 contribution_queue_task_counts");
+  // 滿額的公民提問仍有 TS 這道保險（SQL 的臂已排除，這裡是兩個 10 分鐘之間剛滿的）
+  assert(src.includes("fullQuestionIdsOf") && src.includes("filterAnsweredQuestionTasks"));
 });
 
 // ============================================================
@@ -190,7 +248,12 @@ const PREREQ = async () => `
 CREATE TABLE politicians (id uuid PRIMARY KEY, name text NOT NULL, merged_into uuid);
 CREATE TABLE politician_elections (id integer PRIMARY KEY, politician_id uuid NOT NULL);
 ${await latestFn("politician_name_is_placeholder")}
-ALTER TABLE elections ADD COLUMN bulletin_published_on date;
+ALTER TABLE elections ADD COLUMN bulletin_published_on date, ADD COLUMN bulletin_dir text;
+ALTER TABLE politicians ADD COLUMN region text, ADD COLUMN avatar_url text;
+ALTER TABLE politician_elections ADD COLUMN election_id integer, ADD COLUMN election_type text;
+CREATE VIEW ballot_number_anomalies AS SELECT NULL::integer AS election_id, NULL::text AS election_type, NULL::text AS kind WHERE false;
+CREATE FUNCTION contribution_subject_politician(p jsonb) RETURNS uuid LANGUAGE sql IMMUTABLE AS $$ SELECT NULL::uuid $$;
+${await latestFn("uuid_or_null")}
 UPDATE elections SET bulletin_published_on = DATE '2026-11-18' WHERE id = 2026;
 ALTER TABLE contributions ADD COLUMN contributor_ip_hash text, ADD COLUMN agent_name text, ADD COLUMN payload jsonb;
 CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
@@ -198,6 +261,7 @@ ${await latestFn("task_target_key")}
 DROP FUNCTION queue_slot(text);
 ${await latestFn("queue_slot")}
 ${await latestFn("contribution_auto_tasks")}
+${await latestFn("contribution_auto_task_counts")}
 ${await latestFn("task_dispatched")}
 CREATE TABLE contribution_tasks (
   id uuid PRIMARY KEY, title text NOT NULL, description text, task_type text NOT NULL, target jsonb NOT NULL DEFAULT '{}'::jsonb, region text,
@@ -408,9 +472,10 @@ Deno.test("B3 關閉＝缺口消失（觸發器與 seed 都收回，gap_events �
       const ev = await one<{ event: string; reason: string; via: string }>(db, `SELECT event, reason, detail->>'via' AS via FROM gap_events WHERE task_id = $1 ORDER BY id DESC LIMIT 1`, [M1]);
       assertEquals([ev.event, ev.reason, ev.via], ["closed", "filled", "task_closed"]);
     });
-    await t.step("重開後下一輪 seed 排回來（reopened）；位置照維護者任務的規則 1980", async () => {
+    await t.step("重開後立刻排回來（觸發器，reopened）；位置照維護者任務的規則 1980；seed 對帳不改它", async () => {
       await db.exec(`UPDATE contribution_tasks SET status = 'open' WHERE id = '${M1}'`);
-      assert(!(await hasRow(db, M1)), "seed 之前還沒有");
+      assert(await hasRow(db, M1), "不等 seed");
+      assertEquals(await qat(db, M1), MAINT);
       await seed(db);
       assertEquals(await qat(db, M1), MAINT);
       const ev = await one<{ event: string }>(db, `SELECT event FROM gap_events WHERE task_id = $1 ORDER BY id DESC LIMIT 1`, [M1]);
@@ -517,6 +582,202 @@ Deno.test("B5 /tasks、/request-task 用的 contribution_auto_tasks 仍只回自
       const r = (await rows<{ task_id: string }>(db, `SELECT task_id FROM contribution_queue_tasks('policy_missing', '台北市', 100, '', NULL, NULL)`)).map((x) => x.task_id);
       assertEquals(r, [W1]);
     });
+  } finally {
+    await db.close();
+  }
+});
+
+// ---- 審查補強（維護者 2026-10-08） ----
+const QF = (n: number) => `00000000-0000-4000-8000-00000000f${String(n).padStart(3, "0")}`; // 滿額的公民提問任務
+const QFID = (n: number) => `00000000-0000-4000-8000-00000000e${String(n).padStart(3, "0")}`;
+const FULL_N = 40;
+
+Deno.test("B6 已收滿答案的公民提問不是缺口：不入列、插隊時段不被拉；佇列頭有 40 筆滿額提問時前 30 筆仍是可派的任務", async (t) => {
+  const db = await buildDb();
+  try {
+    // 40 筆滿額：answer_count 3；另有「已上線 1＋在等票 2」湊滿的、「已上線 1＋在等票 1」還沒滿的
+    for (let i = 1; i <= FULL_N; i++) {
+      await db.exec(`INSERT INTO citizen_questions (id, stance_up, answer_count) VALUES ('${QFID(i)}', 100, 3);
+        INSERT INTO contribution_tasks (id, title, task_type, target, priority, source, created_at) VALUES ('${QF(i)}', '滿額提問${i}', 'question', '{"question_id":"${QFID(i)}"}', 3, 'web_request', '2026-09-01 00:00+00')`);
+    }
+    const MIXED_FULL = QF(41), MIXED_OPEN = QF(42);
+    await db.exec(`INSERT INTO citizen_questions (id, stance_up, answer_count) VALUES ('${QFID(41)}', 100, 1), ('${QFID(42)}', 100, 1);
+      INSERT INTO contribution_tasks (id, title, task_type, target, priority, source, created_at) VALUES
+        ('${MIXED_FULL}', '湊滿的提問', 'question', '{"question_id":"${QFID(41)}"}', 3, 'web_request', '2026-09-01 00:00+00'),
+        ('${MIXED_OPEN}', '還沒滿的提問', 'question', '{"question_id":"${QFID(42)}"}', 3, 'web_request', '2026-09-01 00:00+00');
+      INSERT INTO contributions (id, status, contribution_type, task_id, created_at) VALUES
+        ('00000000-0000-4000-8000-00000000a001', 'pending', 'question_answer', '${MIXED_FULL}', now()),
+        ('00000000-0000-4000-8000-00000000a002', 'verified', 'question_answer', '${MIXED_FULL}', now()),
+        ('00000000-0000-4000-8000-00000000a003', 'pending', 'question_answer', '${MIXED_OPEN}', now()),
+        ('00000000-0000-4000-8000-00000000a004', 'rejected', 'question_answer', '${MIXED_OPEN}', now())`);
+    await t.step("seed：滿額的一筆都不入列（含在等票湊滿的）；還沒滿的入列", async () => {
+      await seed(db);
+      for (let i = 1; i <= FULL_N; i++) assert(!(await hasRow(db, QF(i))), `滿額提問 ${i}`);
+      assert(!(await hasRow(db, MIXED_FULL)));
+      assert(await hasRow(db, MIXED_OPEN));
+      assertEquals(await qat(db, MIXED_OPEN), FRONT);
+    });
+    await t.step("佇列前 30 筆（/next 讀的那一頁）沒有任何滿額提問，全是可派的任務——不會被 TS 濾光而整站回 none", async () => {
+      const first30 = await head(db, 30);
+      const fullIds = new Set([...Array.from({ length: FULL_N }, (_, i) => QF(i + 1)), MIXED_FULL]);
+      assert(first30.length >= 10 && first30.length <= 30, String(first30.length));
+      assert(first30.every((id) => !fullIds.has(id)), "前 30 筆沒有滿額提問");
+      for (const id of [W1, W2, Q1, Q2, MIXED_OPEN, "auto:tp1"]) assert(first30.includes(id), id);
+    });
+    await t.step("插隊時段（台北 12:00:30）也不拉滿額的；一旦有人把答案數降下來（例：等票的被退件），下一輪 seed 重新入列", async () => {
+      await seed(db, "2026-10-09 12:00:30+08");
+      for (let i = 1; i <= FULL_N; i++) assert(!(await hasRow(db, QF(i))));
+      assert(!(await hasRow(db, MIXED_FULL)));
+      // 防線：就算有一筆滿額提問的派工列漏在表裡（兩次 seed 之間剛滿），插隊也不拉它
+      await db.exec(`INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count, task_type, target) VALUES ('${QF(1)}', now(), now() + interval '1 hour', 0, 'question', '{}'::jsonb)`);
+      assertEquals((await one<{ n: number }>(db, `SELECT manual_front_pull() AS n`)).n, 0);
+      assert(await isTail(db, QF(1)), "滿額的提問不被拉到 1970");
+      await db.exec(`DELETE FROM task_dispatches WHERE task_id = '${QF(1)}'`);
+      await db.exec(`UPDATE contributions SET status = 'rejected' WHERE id = '00000000-0000-4000-8000-00000000a001'`);
+      await seed(db, "2026-10-09 12:10:00+08");
+      assert(await hasRow(db, MIXED_FULL), "只剩 1＋1＝2 份，沒滿了");
+      const ev = await one<{ event: string }>(db, `SELECT event FROM gap_events WHERE task_id = $1 ORDER BY id DESC LIMIT 1`, [MIXED_FULL]);
+      assertEquals(ev.event, "reopened");
+    });
+    await t.step("排隊中的提問在兩次 seed 之間被答滿：下一輪 seed 收回（closed）", async () => {
+      await db.exec(`UPDATE citizen_questions SET answer_count = 3 WHERE id = '${QFID(42)}'`);
+      assert(await hasRow(db, MIXED_OPEN), "seed 之前還在（TS 的 filterAnsweredQuestionTasks 擋這 10 分鐘）");
+      await seed(db);
+      assert(!(await hasRow(db, MIXED_OPEN)));
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("B7 新任務即時入列（不等 seed）：網站請求 1970、維護者建的 1980、提議排隊尾、關閉的與滿額提問不入列；重開也即時", async (t) => {
+  const db = await buildDb({ withTasks: false });
+  try {
+    const NEW_W = "00000000-0000-4000-8000-0000000000f1", NEW_M = "00000000-0000-4000-8000-0000000000f2", NEW_S = "00000000-0000-4000-8000-0000000000f3";
+    const NEW_C = "00000000-0000-4000-8000-0000000000f4", NEW_QF = "00000000-0000-4000-8000-0000000000f5", NEW_Q = "00000000-0000-4000-8000-0000000000f6";
+    await db.exec(`INSERT INTO citizen_questions (id, stance_up, answer_count) VALUES ('${QFID(90)}', 7, 3), ('${QFID(91)}', 12, 0)`);
+    await db.exec(`INSERT INTO contribution_tasks (id, title, description, task_type, target, region, source, status) VALUES
+      ('${NEW_W}', '新的網站請求', '請查', 'policy_missing', '{"politician_id":"pol-1"}', '台北市', 'web_request', 'open'),
+      ('${NEW_M}', '新的維護者任務', NULL, 'audit', '{"policy_id":"pl-1"}', NULL, 'manual', 'open'),
+      ('${NEW_S}', '新的提議', NULL, 'politician_profile', '{"politician_id":"pol-3"}', NULL, 'suggested', 'open'),
+      ('${NEW_C}', '一建立就是關的', NULL, 'audit', '{}', NULL, 'manual', 'closed'),
+      ('${NEW_QF}', '滿額的新提問', NULL, 'question', '{"question_id":"${QFID(90)}"}', NULL, 'web_request', 'open'),
+      ('${NEW_Q}', '新提問', '預算多少？', 'question', '{"question_id":"${QFID(91)}"}', NULL, 'web_request', 'open')`);
+    await t.step("一建立就在佇列裡：位置照臂的規則", async () => {
+      assertEquals(await qat(db, NEW_W), FRONT);
+      assertEquals(await qat(db, NEW_Q), FRONT);
+      assertEquals(await qat(db, NEW_M), MAINT);
+      assert(await isTail(db, NEW_S));
+      assert(!(await hasRow(db, NEW_C)) && !(await hasRow(db, NEW_QF)));
+      assertEquals((await head(db, 10)).slice(0, 2).sort(), [NEW_Q, NEW_W].sort());
+    });
+    await t.step("內容與臂一致（含公民提問的 stance_up）、出生紀錄 basis＝task_insert、優先層：網站請求前段", async () => {
+      const r = await one<{ target: Record<string, unknown>; what_we_need: string; priority: number; opened_by: Record<string, unknown> }>(db,
+        `SELECT target, what_we_need, priority::int AS priority, opened_by FROM task_dispatches WHERE task_id = $1`, [NEW_Q]);
+      assertEquals([r.target.stance_up, r.target.question_id, r.what_we_need, r.priority, r.opened_by.basis], [12, QFID(91), "預算多少？", 1, "task_insert"]);
+      const ev = await rows<{ event: string }>(db, `SELECT event FROM gap_events WHERE task_id = $1`, [NEW_W]);
+      assertEquals(ev.map((e) => e.event), ["opened"]);
+    });
+    await t.step("seed 對帳：不重複建、不改位置；/next 讀得到（contribution_queue_tasks 帶 region 篩）", async () => {
+      const before = await qat(db, NEW_W);
+      await seed(db);
+      assertEquals(await qat(db, NEW_W), before);
+      assertEquals((await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM task_dispatches WHERE task_id = $1`, [NEW_W])).n, 1);
+      assertEquals((await rows(db, `SELECT task_id FROM contribution_queue_tasks('policy_missing', '台北市', 10, '', NULL, NULL)`)).length, 1);
+    });
+    await t.step("重開（closed → open）也即時入列", async () => {
+      await db.exec(`UPDATE contribution_tasks SET status = 'open' WHERE id = '${NEW_C}'`);
+      assert(await hasRow(db, NEW_C));
+      assertEquals(await qat(db, NEW_C), MAINT);
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("B8 貢獻 applied 時即時收回手動任務的派工列（一題多份的不收）；任務真的關掉由觸發器收回", async (t) => {
+  const db = await buildDb();
+  try {
+    await seed(db);
+    const C = (n: number) => `00000000-0000-4000-8000-00000000c${String(n).padStart(3, "0")}`;
+    const applied = async (n: number, type: string, taskId: string) => {
+      await db.exec(`INSERT INTO contributions (id, status, contribution_type, task_id, created_at) VALUES ('${C(n)}', 'pending', '${type}', '${taskId}', now())`);
+      await db.exec(`UPDATE contributions SET status = 'applied' WHERE id = '${C(n)}'`);
+    };
+    await t.step("一般任務（profile_gap）被一筆 policy 補完 → 立刻收回，gap_events 記 closed／drop_applied", async () => {
+      await applied(1, "policy", W2);
+      assert(!(await hasRow(db, W2)));
+      const ev = await one<{ event: string; via: string }>(db, `SELECT event, detail->>'via' AS via FROM gap_events WHERE task_id = $1 ORDER BY id DESC LIMIT 1`, [W2]);
+      assertEquals([ev.event, ev.via], ["closed", "drop_applied"]);
+    });
+    await t.step("公民提問被一份答案上線、裁決任務被裁決上線、自己收尾的型別（no_change）→ 派工列留著", async () => {
+      await applied(2, "question_answer", Q1);
+      assert(await hasRow(db, Q1), "一題多份，任務還是 open");
+      await applied(3, "adjudication", D1);
+      assert(await hasRow(db, D1));
+      await applied(4, "no_change", W1);
+      assert(await hasRow(db, W1));
+    });
+    await t.step("自動缺口的收回照舊；補號次不收（#452）", async () => {
+      await applied(5, "policy", "auto:tp1");
+      assert(!(await hasRow(db, "auto:tp1")));
+    });
+    await t.step("closeTaskIfFulfilled 把任務關掉（status＝closed）→ 觸發器立刻收回（含一題多份的提問被關掉）", async () => {
+      await db.exec(`UPDATE contribution_tasks SET status = 'closed' WHERE id = '${W1}'`);
+      assert(!(await hasRow(db, W1)));
+      await db.exec(`UPDATE contribution_tasks SET status = 'closed' WHERE id = '${Q1}'`);
+      assert(!(await hasRow(db, Q1)));
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("B9 加推計數不重複：task_boost_matches 的每個手動任務只算一次；篩選條件照舊；open_tasks 讀佇列計數", async (t) => {
+  const db = await buildDb();
+  try {
+    await seed(db);
+    const hits = async (filter: Record<string, unknown>) => (await rows<{ task_id: string; kind: string }>(db, `SELECT task_id, kind FROM task_boost_matches($1::jsonb)`, [JSON.stringify(filter)])).map((r) => r.task_id);
+    await t.step("不篩：每個 open 的手動任務剛好一次；自動缺口各一次", async () => {
+      const all = await hits({ kinds: ["task"] });
+      for (const id of [W1, W2, Q1, Q2, M1, D1, S1]) assertEquals(all.filter((x) => x === id).length, 1, id);
+      assert(!all.includes(X1));
+      assertEquals(new Set(all).size, all.length, "沒有任何重複");
+    });
+    await t.step("篩任務型別／縣市：手動任務也篩得到，且一次", async () => {
+      assertEquals(await hits({ kinds: ["task"], task_types: ["policy_missing"] }), [W1]);
+      assertEquals((await hits({ kinds: ["task"], regions: ["新北市"] })).sort(), [W2]);
+      assertEquals(await hits({ kinds: ["task"], politician_ids: [] }), [], "空名單＝沒有人符合");
+    });
+    await t.step("task_boost 的 queue_at 作用在派工列上：手動任務被加推也只算一次、1970 的不會被拉晚（LEAST）", async () => {
+      await db.exec(`UPDATE task_dispatches d SET queue_at = LEAST(d.queue_at, TIMESTAMPTZ '1979-12-31 23:57:00+00') FROM task_boost_matches('{"kinds":["task"],"task_types":["audit"]}'::jsonb) h WHERE h.task_id = d.task_id`);
+      assertEquals(await qat(db, M1), "1979-12-31T23:57:00");
+      await db.exec(`UPDATE task_dispatches d SET queue_at = LEAST(d.queue_at, TIMESTAMPTZ '1979-12-31 23:57:00+00') FROM task_boost_matches('{"kinds":["task"],"task_types":["policy_missing"]}'::jsonb) h WHERE h.task_id = d.task_id`);
+      assertEquals(await qat(db, W1), FRONT);
+    });
+    await t.step("open_tasks：contribution_queue_task_counts 是全部（不是 30 筆切片），含手動任務；contribution_auto_task_counts 仍只算自動缺口", async () => {
+      for (let i = 0; i < 45; i++) await db.exec(`INSERT INTO contribution_tasks (id, title, task_type, target, source) VALUES ('00000000-0000-4000-8000-00000000b${String(i).padStart(3, "0")}', '多一筆${i}', 'audit', '{}', 'manual')`);
+      const total = async (fn: string) => (await one<{ n: number }>(db, `SELECT COALESCE(sum(total), 0)::int AS n FROM ${fn}()`)).n;
+      const queue = await total("contribution_queue_task_counts");
+      const auto = await total("contribution_auto_task_counts");
+      const manual = (await one<{ n: number }>(db, `SELECT count(*)::int AS n FROM task_dispatches WHERE task_id !~ '^(auto|verify):'`)).n;
+      assert(manual > 30, "手動任務超過 30 筆也算得出總數");
+      assertEquals(queue, auto + manual);
+    });
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("B10 activity_health 抓得到 app.queue_now 假時鐘（跟 clock_overridden 並列）", async () => {
+  const db = await buildDb();
+  try {
+    const checks = async () => (await rows<{ check_name: string }>(db, `SELECT check_name FROM activity_health`)).map((r) => r.check_name);
+    await db.exec("RESET app.queue_now");
+    assert(!(await checks()).includes("queue_clock_overridden"));
+    await db.exec(`SET app.queue_now = '2026-10-09 12:00:30+08'`);
+    assert((await checks()).includes("queue_clock_overridden"));
+    await db.exec("RESET app.queue_now");
   } finally {
     await db.close();
   }

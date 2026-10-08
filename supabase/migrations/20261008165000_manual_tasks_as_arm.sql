@@ -39,6 +39,18 @@
 --   TS 端（supabase/functions/next/index.ts）不再撈 contribution_tasks 清單、不再算 manualQueueAt：任務清單改呼叫 contribution_queue_tasks；
 --   選中的是手動任務時，用 id 單筆查那一筆的描述等內容（單筆查，不撈清單）。派出時 task_dispatched 蓋章（跟所有缺口一樣），不再寫 contribution_tasks.last_dispatched_at。
 --
+-- 四、審查補強（agy 審查，維護者 2026-10-08）
+--   * 已收滿答案的公民提問不是缺口：任務本身永遠 open（KEEP_OPEN_TASK_TYPES 含 question），不排除就會被寫進佇列、固定時段又被拉回 1970，/next 前 30 筆全被「已滿額」濾掉而回 none。
+--     臂本體排除（滿額定義＝TS 的 fullQuestionIdsOf：answer_count＋同一題底下在等票的答案 ≥ question_answer_cap()＝3）；manual_front_pull 只拉臂的輸出，所以也不拉。
+--   * 新建（或重開）的手動任務由觸發器 contribution_tasks_insert_dispatch 即時入列（用臂本體的 p_id 只取那一筆），seed 只對帳。
+--   * task_dispatches_drop_applied 納入手動任務：這筆貢獻上線就算做完的才即時收回（manual_task_closes_on_applied，同 TS 的 shouldCloseOnApplied；question／adjudicate／roster_check 一題多份，不收）；
+--     任務真的被 closeTaskIfFulfilled 關掉時，contribution_tasks 上的觸發器立刻收回。
+--   * task_boost_matches 拿掉 contribution_tasks 那一段（總表已含手動任務，不拿掉會算兩次）。
+--   * contribution_queue_task_counts()：/next 的 open_tasks 讀佇列計數（全部，不是 30 筆切片）。
+--   * activity_health 加 queue_clock_overridden（app.queue_now 假時鐘被設了）。
+--   * /next 隊頭手動任務在併發下查不到（剛被關掉）：跳過、往下挑（最多 5 筆），不直接回 none。
+--   注意：即時入列的觸發器不經過總表層的過濾（測試名人物隔離等），那些由下一輪 seed 對帳收回——最多 10 分鐘。
+
 -- 沒動：contribution_auto_tasks／其他 28 支臂的內容、refresh_dispatch_blocked（手動任務的飽和／回報查無仍在 TS 過濾，行為不變）、task_dispatched、queue_slot、task_boost（加推手動任務
 --   現在改成作用在它的派工列上，LEAST(queue_at, 加推時間)，跟自動缺口一樣）。
 -- 守門：supabase/functions/_shared/manual-open-arm.test.ts（每一處替換對現行定義做機械比對；PGlite 跑真的 seed／rebalance／觸發器；假時鐘；還原驗證）。
@@ -84,28 +96,14 @@ LANGUAGE sql STABLE AS $$
 $$;
 COMMENT ON FUNCTION manual_front_at IS '手動任務第一次進佇列的位置（seed 新增派工列用）：網站請求／公民提問 1970、維護者建的與裁決 1980、其餘 NULL（排隊尾）。2026-10-08';
 
--- 固定時段插隊（seed 每輪呼叫）：不在時段內什麼都不做；時段內把「本時段開始後還沒派出過」的 open 網站請求／公民提問排回最前
-CREATE OR REPLACE FUNCTION manual_front_pull() RETURNS INTEGER
-LANGUAGE plpgsql AS $$
-DECLARE v_slot TIMESTAMPTZ := visitor_front_slot_start(); n INTEGER;
-BEGIN
-  IF v_slot IS NULL THEN RETURN 0; END IF;
-  UPDATE task_dispatches d SET queue_at = visitor_front_at()
-    FROM contribution_tasks t
-   WHERE t.id::TEXT = d.task_id AND t.status = 'open'
-     AND manual_task_is_visitor(t.source, t.task_type)
-     AND (d.dispatch_count = 0 OR d.last_dispatched_at < v_slot)
-     AND d.queue_at <> visitor_front_at();
-  GET DIAGNOSTICS n = ROW_COUNT;
-  RETURN n;
-END;
-$$;
-COMMENT ON FUNCTION manual_front_pull IS
-  '固定時段插隊（維護者 2026-10-08）：台北 00:00、06:00、12:00、18:00 各前 20 分鐘內跑的 seed，把仍 open 的網站請求與公民提問中「從沒派過、或最後派出時間早於本時段開始」的派工列排回 1970（比加推早）。'
-  '時段內第二次 seed 冪等：本時段開始後被領走的（last_dispatched_at ≥ 時段開始）不再拉；其他時段什麼都不做，派出後照常回隊尾。';
+-- 一題公民提問最多收幾份答案（已上線＋還在等票的都算）：TS 的 QUESTION_ANSWER_CAP（dispatch.ts）的 SQL 這一份，守門測試對兩邊
+CREATE OR REPLACE FUNCTION question_answer_cap() RETURNS INTEGER LANGUAGE sql IMMUTABLE AS $$ SELECT 3 $$;
+COMMENT ON FUNCTION question_answer_cap IS '一題公民提問最多收幾份答案（已上線的 citizen_questions.answer_count＋還在等票的 question_answer 貢獻）；跟 TS 的 QUESTION_ANSWER_CAP 同一個數字，滿了就不再派。2026-10-08';
 
--- 臂本體：open 的手動任務。p_visitor＝true 取網站請求與公民提問、false 取其餘
-CREATE OR REPLACE FUNCTION contribution_auto_tasks_manual(p_visitor BOOLEAN)
+-- 臂本體：open 的手動任務。p_visitor＝true 取網站請求與公民提問、false 取其餘；p_id 只取那一筆（新任務即時入列的觸發器用）
+-- 已收滿答案的公民提問不算缺口：任務本身永遠是 open（KEEP_OPEN_TASK_TYPES 含 question），不排除的話它們會佔住隊頭，
+-- 固定時段又被拉回 1970，/next 拿前 30 筆全被「已滿額」濾掉就回 none（滿額定義照 fullQuestionIdsOf：answer_count＋同一題所有任務底下還在等票的答案 ≥ 上限）
+CREATE OR REPLACE FUNCTION contribution_auto_tasks_manual(p_visitor BOOLEAN, p_id UUID DEFAULT NULL)
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT)
 LANGUAGE sql STABLE AS $$
   SELECT t.id::TEXT, t.task_type,
@@ -116,10 +114,36 @@ LANGUAGE sql STABLE AS $$
          COALESCE(NULLIF(t.description, ''), t.title), t.hint_sources, t.reward, t.region
     FROM contribution_tasks t
    WHERE t.status = 'open' AND manual_task_is_visitor(t.source, t.task_type) = p_visitor
+     AND (p_id IS NULL OR t.id = p_id)
+     AND NOT (t.task_type = 'question' AND t.target->>'question_id' IS NOT NULL
+              AND COALESCE((SELECT q.answer_count FROM citizen_questions q WHERE q.id::TEXT = t.target->>'question_id'), 0)
+                  + (SELECT count(*) FROM contributions c
+                      WHERE c.contribution_type = 'question_answer' AND c.status IN ('pending', 'verified')
+                        AND c.task_id IN (SELECT t2.id::TEXT FROM contribution_tasks t2 WHERE t2.task_type = 'question' AND t2.target->>'question_id' = t.target->>'question_id'))
+                  >= question_answer_cap())
 $$;
 COMMENT ON FUNCTION contribution_auto_tasks_manual IS
   '派工臂 manual_visitor（p_visitor＝true：網站請求與公民提問）／manual_open（false：維護者建、裁決、外部提議…）：contribution_tasks 裡 open 的任務。task_id＝任務 uuid，關閉＝缺口消失（seed 收回）。'
-  'target 在原 target 之外補 title、region（/queue 顯示用）與公民提問的 stance_up（支持度，排序用）；原 target 的鍵優先。2026-10-08';
+  'target 在原 target 之外補 title、region（/queue 顯示用）與公民提問的 stance_up（支持度，排序用）；原 target 的鍵優先。已收滿答案的公民提問不出現（見函式上方說明）。p_id 只取那一筆。2026-10-08';
+
+-- 固定時段插隊（seed 每輪呼叫）：不在時段內什麼都不做；時段內把「本時段開始後還沒派出過」的 open 網站請求／公民提問排回最前（已收滿答案的提問不是缺口，不拉）
+CREATE OR REPLACE FUNCTION manual_front_pull() RETURNS INTEGER
+LANGUAGE plpgsql AS $$
+DECLARE v_slot TIMESTAMPTZ := visitor_front_slot_start(); n INTEGER;
+BEGIN
+  IF v_slot IS NULL THEN RETURN 0; END IF;
+  UPDATE task_dispatches d SET queue_at = visitor_front_at()
+   WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(true) m)
+     AND (d.dispatch_count = 0 OR d.last_dispatched_at < v_slot)
+     AND d.queue_at <> visitor_front_at();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END;
+$$;
+COMMENT ON FUNCTION manual_front_pull IS
+  '固定時段插隊（維護者 2026-10-08）：台北 00:00、06:00、12:00、18:00 各前 20 分鐘內跑的 seed，把仍 open 的網站請求與公民提問（臂 manual_visitor 的輸出，已收滿答案的提問不在裡面）中「從沒派過、或最後派出時間早於本時段開始」的派工列排回 1970（比加推早）。'
+  '時段內第二次 seed 冪等：本時段開始後被領走的（last_dispatched_at ≥ 時段開始）不再拉；其他時段什麼都不做，派出後照常回隊尾。';
+
 
 -- ------------------------------------------------------------
 -- 2. 活動名（派工臂登記）與規則：先種規則，再換總表（否則總表會把新臂整支濾光）
@@ -534,6 +558,179 @@ CREATE TRIGGER trg_contribution_tasks_close_dispatch AFTER UPDATE OF status ON c
 DROP TRIGGER IF EXISTS trg_contribution_tasks_delete_dispatch ON contribution_tasks;
 CREATE TRIGGER trg_contribution_tasks_delete_dispatch AFTER DELETE ON contribution_tasks
   FOR EACH ROW EXECUTE FUNCTION contribution_tasks_drop_dispatch();
+
+-- 新任務即時入列（維護者 2026-10-08 審查）：contribution_tasks 一建立（或重開成 open）就用臂本體（contribution_auto_tasks_manual，p_id 只取這一筆）寫進佇列，
+-- 不等最多 10 分鐘的 seed——訪客按完按鈕，下一秒代理打 /next 就領得到。queue_at 照臂的規則（網站請求／公民提問 1970、維護者建的與裁決 1980、其餘隊尾）；
+-- 臂本體的條件一樣適用（已收滿答案的提問不入列）。seed 只負責對帳（內容、優先層、測試名人物等總表層的過濾由它在下一輪補上或收回）。
+CREATE OR REPLACE FUNCTION contribution_tasks_insert_dispatch() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM set_config('gap.open_basis', 'task_insert', true);
+  INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count, task_type, target, what_we_need, hint_sources, reward, region, refreshed_at, opened_at, priority)
+  SELECT m.task_id, now(), COALESCE(manual_front_at(m.task_id), queue_slot('task')), 0, m.task_type, m.target, m.what_we_need, m.hint_sources, m.reward, m.region, now(), now(),
+         (SELECT x.priority FROM activity_priority(CASE WHEN manual_task_is_visitor(NEW.source, NEW.task_type) THEN 'manual_visitor' ELSE 'manual_open' END, NULL, NULL) x LIMIT 1)
+    FROM contribution_auto_tasks_manual(manual_task_is_visitor(NEW.source, NEW.task_type), NEW.id) m
+  ON CONFLICT (task_id) DO NOTHING;
+  PERFORM set_config('gap.open_basis', '', true);
+  RETURN NULL;
+END;
+$$;
+COMMENT ON FUNCTION contribution_tasks_insert_dispatch IS '新建（或重開）的手動任務即時排進佇列（臂 manual_visitor／manual_open 的一筆）；出生紀錄 basis＝task_insert。seed 每 10 分鐘對帳。2026-10-08';
+DROP TRIGGER IF EXISTS trg_contribution_tasks_insert_dispatch ON contribution_tasks;
+CREATE TRIGGER trg_contribution_tasks_insert_dispatch AFTER INSERT ON contribution_tasks
+  FOR EACH ROW WHEN (NEW.status = 'open') EXECUTE FUNCTION contribution_tasks_insert_dispatch();
+DROP TRIGGER IF EXISTS trg_contribution_tasks_reopen_dispatch ON contribution_tasks;
+CREATE TRIGGER trg_contribution_tasks_reopen_dispatch AFTER UPDATE OF status ON contribution_tasks
+  FOR EACH ROW WHEN (OLD.status <> 'open' AND NEW.status = 'open') EXECUTE FUNCTION contribution_tasks_insert_dispatch();
+
+-- /next 的 open_tasks（回給代理的「現在有多少缺口任務」）：讀佇列的計數，不撈清單（contribution_auto_task_counts 的複本，改讀 contribution_queue_tasks，含手動任務；
+-- /tasks、/request-task 照舊用只算自動缺口的 contribution_auto_task_counts）
+CREATE OR REPLACE FUNCTION contribution_queue_task_counts(p_region TEXT DEFAULT NULL)
+RETURNS TABLE (task_type TEXT, total BIGINT)
+LANGUAGE sql STABLE AS $$
+  SELECT t.task_type, COUNT(*) FROM contribution_queue_tasks(NULL, p_region, 100000, '') t GROUP BY t.task_type ORDER BY 1;
+$$;
+COMMENT ON FUNCTION contribution_queue_task_counts IS '佇列上各型別的任務數（自動缺口＋open 的手動任務，跳過 blocked、冷卻中）。/next 的 open_tasks 用。2026-10-08';
+
+-- ------------------------------------------------------------
+-- 11. 審查補強（維護者 2026-10-08）
+-- ------------------------------------------------------------
+-- 手動任務被貢獻補完時即時收回派工列：判斷同 TS 的 shouldCloseOnApplied（task-fulfilment.ts；守門測試對兩邊的型別清單）。
+-- 一題多份的（question、adjudicate、roster_check）與自己收尾的貢獻型別不收——任務還是 open，派工列要留著；任務真的關掉時由 contribution_tasks 上的觸發器收回。
+CREATE OR REPLACE FUNCTION manual_task_closes_on_applied(p_task_id TEXT, p_contribution_type TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM contribution_tasks t
+                  WHERE t.id::TEXT = p_task_id AND t.status = 'open'
+                    AND t.task_type NOT IN ('question', 'adjudicate', 'roster_check')
+                    AND p_contribution_type NOT IN ('no_change', 'adjudication', 'task_suggestion', 'question_answer', 'roster_check'))
+$$;
+COMMENT ON FUNCTION manual_task_closes_on_applied IS '這筆貢獻上線後，它所屬的手動任務該不該關（同 TS 的 shouldCloseOnApplied）。task_dispatches_drop_applied 用它即時收回派工列。2026-10-08';
+
+-- task_dispatches_drop_applied：補號次版（20261008150000）的現行定義＋一處機械式替換（納入手動任務）
+CREATE OR REPLACE FUNCTION task_dispatches_drop_applied() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.task_id IS NOT NULL AND (
+       (NEW.task_id LIKE 'auto:%'
+        -- 補號次與重查是一個單位一件、代理一位一筆交：一筆落庫不代表整件做完，由 seed 依缺口還在不在收回（補號次 20261008150000）
+        AND NEW.task_id NOT LIKE 'auto:candidacy_source_missing:cand_no%')
+       -- 手動任務（task_id＝任務 uuid）：這筆貢獻上線就算做完的才收回（判斷同 TS 的 shouldCloseOnApplied；公民提問、裁決、名單清查是一題多份，不收）
+       OR manual_task_closes_on_applied(NEW.task_id, NEW.contribution_type)) THEN
+    -- >>> gap_events：收回原因與是哪一筆貢獻，交給 task_dispatches 的 AFTER DELETE 觸發器記進 closed 事件
+    PERFORM set_config('gap.close_reason', 'filled', true);
+    PERFORM set_config('gap.close_detail', jsonb_build_object('via', 'drop_applied', 'contribution_id', NEW.id)::TEXT, true);
+    -- <<< gap_events
+    DELETE FROM task_dispatches WHERE task_id = NEW.task_id;
+    -- >>> gap_events：用完就清，不影響同一個交易裡之後的刪除
+    PERFORM set_config('gap.close_reason', '', true);
+    PERFORM set_config('gap.close_detail', '', true);
+    -- <<< gap_events
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- task_boost_matches：20261007030000 的現行定義拿掉 contribution_tasks 那一段——手動任務現在就在總表裡（臂 manual_visitor／manual_open），不拿掉會算兩次
+CREATE OR REPLACE FUNCTION task_boost_matches(p_filter jsonb)
+RETURNS TABLE(task_id text, kind text)
+LANGUAGE sql STABLE AS $$
+  WITH f AS (
+    SELECT
+      CASE WHEN p_filter ? 'regions' THEN ARRAY(SELECT jsonb_array_elements_text(p_filter->'regions')) END AS regions,
+      NULLIF(p_filter->>'election_id', '')::INT AS election_id,
+      CASE WHEN p_filter ? 'election_types' THEN ARRAY(SELECT jsonb_array_elements_text(p_filter->'election_types')) END AS election_types,
+      CASE WHEN p_filter ? 'task_types' THEN ARRAY(SELECT jsonb_array_elements_text(p_filter->'task_types')) END AS task_types,
+      COALESCE((p_filter->>'missing_avatar')::BOOLEAN, false) AS missing_avatar,
+      CASE WHEN p_filter ? 'politician_ids' THEN ARRAY(SELECT jsonb_array_elements_text(p_filter->'politician_ids')::UUID) END AS politician_ids,
+      COALESCE(CASE WHEN p_filter ? 'kinds' THEN ARRAY(SELECT jsonb_array_elements_text(p_filter->'kinds')) END, ARRAY['task', 'verify']) AS kinds
+  ),
+  subjects AS (
+    -- 每一個佇列項目的主角、縣市、屆別、型別
+    SELECT g.task_id, 'task'::TEXT AS kind, g.task_type AS type_key,
+           uuid_or_null(g.target->>'politician_id') AS politician_id,
+           COALESCE(g.region, g.target->>'region') AS region,
+           election_id_or_null(g.target->>'election_id') AS election_id,
+           g.target->>'election_type' AS election_type
+      FROM contribution_auto_tasks_arms() g
+    UNION ALL
+    SELECT 'verify:' || c.id, 'verify', c.contribution_type,
+           contribution_subject_politician(c.payload),
+           c.payload->>'region',
+           election_id_or_null(c.payload->>'election_id'),
+           c.payload->>'election_type'
+      FROM contributions c WHERE c.status = 'pending'
+  )
+  SELECT s.task_id, s.kind
+    FROM subjects s
+    CROSS JOIN f
+    LEFT JOIN politicians p ON p.id = s.politician_id
+   WHERE s.kind = ANY(f.kinds)
+     AND (f.task_types IS NULL OR s.type_key = ANY(f.task_types))
+     AND (f.politician_ids IS NULL OR s.politician_id = ANY(f.politician_ids))
+     AND (NOT f.missing_avatar OR (p.id IS NOT NULL AND COALESCE(p.avatar_url, '') = ''))
+     AND (f.regions IS NULL OR COALESCE(s.region, p.region) = ANY(f.regions))
+     AND (f.election_id IS NULL OR s.election_id = f.election_id
+          OR (s.election_id IS NULL AND p.id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM politician_elections pe WHERE pe.politician_id = p.id AND pe.election_id = f.election_id)))
+     AND (f.election_types IS NULL OR s.election_type = ANY(f.election_types) OR (p.id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM politician_elections pe
+             WHERE pe.politician_id = p.id AND pe.election_type::TEXT = ANY(f.election_types)
+               AND (f.election_id IS NULL OR pe.election_id = f.election_id))));
+$$;
+
+-- activity_health：補號次版（20261008150000）的現行定義＋一行（app.queue_now 假時鐘也要被抓出來）
+CREATE OR REPLACE VIEW activity_health AS
+  SELECT 'election_without_polling'::TEXT AS check_name, e.id::TEXT AS subject, '選舉沒有投票日（elections.election_date 是空的），所有以投票日為起點的規則都開不起來'::TEXT AS detail
+    FROM elections e WHERE e.election_date IS NULL
+  UNION ALL
+  SELECT 'activity_all_rules_disabled', r.activity, '這個活動的規則全部停用，等於整類任務不派（要停就用覆寫 closed 留下理由）'
+    FROM activity_rules r GROUP BY r.activity HAVING NOT bool_or(r.enabled)
+  UNION ALL
+  SELECT 'override_without_rule', o.activity, '有覆寫但這個活動沒有任何規則（拼錯活動名？）'
+    FROM activity_overrides o WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = o.activity) GROUP BY o.activity
+  UNION ALL
+  SELECT 'window_inverted', 'rule ' || r.id || ' / election ' || f.election_id,
+         '起日 ' || (f.on_date + r.from_offset) || ' 晚於迄日 ' || (u.on_date + r.until_offset) || '，這條規則在這場選舉永遠不會開'
+    FROM activity_rules r
+    JOIN election_milestones_all f ON f.kind = r.from_kind
+    JOIN election_milestones_all u ON u.kind = r.until_kind AND u.election_id = f.election_id
+         AND (u.election_type IS NOT DISTINCT FROM f.election_type OR u.election_type IS NULL OR f.election_type IS NULL)
+   WHERE r.enabled AND f.on_date + r.from_offset > u.on_date + r.until_offset
+  UNION ALL
+  SELECT 'milestone_scope_drift', s.election_id || ' / ' || s.election_type,
+         'roster_check_scope 的登記截止／名單公告日與 election_milestones 對不上（兩份真相）：改了舊欄位沒同步到里程碑，或相反'
+    FROM roster_check_scope s
+   WHERE NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'registration_close'
+                        AND m.election_type = s.election_type AND m.on_date = s.registration_closed_on)
+      OR NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'list_published'
+                        AND m.election_type = s.election_type AND m.on_date = s.list_announced_on)
+  UNION ALL
+  SELECT 'arm_without_rule', a.arm, '派工臂「' || a.arm || '」沒有任何規則：contribution_auto_tasks_arms() 對它的每一列都會因為沒有開窗的規則而被濾掉（整支臂無聲消失）'
+    FROM unnest(activity_arm_names()) AS a(arm)
+   WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = a.arm)
+  UNION ALL
+  SELECT 'bulletin_milestone_missing', e.id::TEXT,
+         '選舉有公報資料夾（bulletin_dir）、還沒投票，卻沒有整場的 bulletin_published 里程碑：bulletin-watch 不會偵測它（bulletin_watch_targets 只看有里程碑列的選舉），「公報之前」的降級規則也開不起來。新增選舉時要在 election_milestones 補那一列（預估用 expected／statutory；公報已上架就補 done／official）'
+    FROM elections e
+   WHERE e.bulletin_dir IS NOT NULL
+     AND e.election_date >= activity_today()
+     AND NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = e.id AND m.kind = 'bulletin_published' AND m.election_type IS NULL)
+  UNION ALL
+  SELECT 'ballot_number_anomaly', a.election_id || ' / ' || a.election_type,
+         count(*) || ' 個號次單位的號次有重複或跳號（重複 ' || count(*) FILTER (WHERE a.kind = 'duplicate') || '、跳號 ' || count(*) FILTER (WHERE a.kind = 'gap') || '）：看視圖 ballot_number_anomalies；名單缺人時也會這樣，派工臂 cand_no_recheck 會請代理對公告重查'
+    FROM ballot_number_anomalies a JOIN elections e ON e.id = a.election_id
+   WHERE e.election_date >= activity_today()
+   GROUP BY a.election_id, a.election_type
+  UNION ALL
+  SELECT 'clock_overridden', current_setting('app.activity_today', true), '時鐘被 app.activity_today 覆寫了：所有時間窗都在用這個假日期（只該出現在測試）'
+   WHERE NULLIF(current_setting('app.activity_today', true), '') IS NOT NULL
+  UNION ALL
+  SELECT 'queue_clock_overridden', current_setting('app.queue_now', true), '派工時鐘被 app.queue_now 覆寫了：所有固定時段插隊都在用這個假時間（只該出現在測試）'
+   WHERE NULLIF(current_setting('app.queue_now', true), '') IS NOT NULL;
+COMMENT ON VIEW activity_health IS
+  '派工時間窗的健康檢查，正常是空的：選舉缺投票日、活動的規則全停用、覆寫指到沒有規則的活動、窗口起迄顛倒、roster_check_scope 與里程碑對不上、派工臂沒有任何規則（arm_without_rule，P1）、'
+  '有公報資料夾又還沒投票的選舉缺整場的 bulletin_published 里程碑（bulletin_milestone_missing，2026-10-08 公報偵測）、號次單位有重複或跳號（ballot_number_anomaly，還沒投票的選舉，補號次 20261008150000）、時鐘被覆寫。2026-10-08（PLAN-task-activation 3 風險第 2 點）'
+  '｜20261008165000：加 queue_clock_overridden——app.queue_now 假時鐘被設了（固定時段插隊用的時鐘，只該出現在測試）。';
 
 -- 套上就先算一次：手動任務排進佇列，不用等下一輪排程（新的 /next 只讀佇列）
 SELECT seed_auto_task_queue();
