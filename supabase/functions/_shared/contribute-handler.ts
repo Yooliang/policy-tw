@@ -30,6 +30,7 @@ import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, serie
 import { agentToolNotice } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
+import { SELF_CITATION_MESSAGE, selfCitationProblems } from "./self-hosts.ts";
 import { SEARCH_PAGE_GATE, searchPageProblems, strippedNotice, stripSearchPages } from "./search-page-guard.ts";
 import { voteFieldsNotice } from "./candidacy-result.ts";
 import { detailsOfPayload, sourceLevelNotice } from "./source-write.ts";
@@ -380,6 +381,23 @@ export async function handleContribute(
         ...(shortfall.elevated && toolVerdict
           ? { elevated: { model: toolVerdict.model, not_found_rate: Number(toolVerdict.rate.toFixed(3)), site_rate: Number(toolVerdict.overall_rate.toFixed(3)), submitted: toolVerdict.submitted, window_days: NOT_FOUND_RATE_WINDOW_DAYS } }
           : {}),
+      },
+    };
+  }
+
+  // 出處不得引用正見自己（#486，協議 1.84.0）：引自己的網站是循環引用，沒有獨立查證。交件時就擋、不算被拒，講清楚是哪個網址。
+  const selfCited = selfCitationProblems(validation.items);
+  if (selfCited.length > 0) {
+    try {
+      await supabase.from("gate_rejections").insert(selfCited.map(() => ({ gate: "self_citation", endpoint: via, contribution_id: null, ip_hash: ipHash })));
+    } catch { /* 記不成不影響回應 */ }
+    return {
+      status: 422,
+      body: {
+        success: false,
+        error: "self_citation",
+        message: `${SELF_CITATION_MESSAGE}。整批未收，請把下列網址換掉後重送。這不算被拒。`,
+        errors: selfCited.map((p) => ({ index: p.index, path: p.path, message: `引用了正見自己的網址：${p.urls.join("、")}`, urls: p.urls })),
       },
     };
   }
