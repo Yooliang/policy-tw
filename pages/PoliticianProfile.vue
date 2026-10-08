@@ -723,7 +723,7 @@ usePageHead({
           </div>
 
           <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過（只在「競選承諾」「過往政績與追蹤」兩個分頁顯示；用 v-show 保留預渲染內容） -->
-          <div v-show="activeTab === 'campaign' || activeTab === 'history'" class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" model-display="icon" /></div>
+          <div v-show="activeTab === 'campaign' || activeTab === 'history'" class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" agent-display="icon" /></div>
         </div>
 
       </div>
