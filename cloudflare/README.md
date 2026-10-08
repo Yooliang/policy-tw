@@ -34,7 +34,7 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 ## 人物頁的 301／404 與網站地圖（2026-10-08，#466）
 
 - `/politician/:id` 不預渲染，**任何 id 都是請求時從資料庫現場渲染**；建置之後才新增的人物不會因此 404。查不到的兩種情況：真的沒有這個人 → 404（`no-store`，不快取）；人物已被軟合併（`merged_into`）→ 沿合併鏈 301 到保留的那位（`lib/ssr/merge-chain.ts`，最多 5 跳）。組回應在 `render-status.js`，測試 `render-status.test.ts`。
-- 網站地圖（`scripts/postbuild-ssg.mjs`）是建置時算的，新增的人物要等下一次建置才進去。人物頁只有名下政見 ≥ 6 筆才列；lastmod 取各頁實際的更新時間、沒有可靠時間就不寫；規則與理由在 `lib/sitemap.ts`，XML 組字在 `sitemap-xml.js`。
+- 網站地圖（`scripts/postbuild-ssg.mjs`）是建置時算的，新增的人物要等下一次建置才進去。人物頁：有焦點屆別（`FEATURED_LOCAL_ELECTION_ID`）參選紀錄的一律列，其餘名下政見 ≥ 3 筆才列；lastmod 取各頁實際的更新時間、沒有可靠時間就不寫；規則與理由在 `lib/sitemap.ts`，XML 組字在 `sitemap-xml.js`。
 
 ## Markdown 檢視（2026-10-07，docs/PLAN-markdown-views.md 第 12 節）
 

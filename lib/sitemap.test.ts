@@ -9,29 +9,55 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   buildSitemapMeta,
+  hasElection,
   isSitemapPerson,
   latestLastmod,
   policyStatsByPolitician,
   SITEMAP_MIN_POLICIES_FOR_PERSON,
   toLastmod,
 } from "./sitemap.ts";
+import { FEATURED_LOCAL_ELECTION_ID } from "./election-regions.ts";
 
 const pol = (id: string, politicianId: string, updatedAt?: string | null) => ({ id, politicianId, updatedAt });
 const many = (politicianId: string, n: number, updatedAt = "2026-10-01T00:00:00Z") =>
   Array.from({ length: n }, (_, i) => pol(`${politicianId}-p${i}`, politicianId, updatedAt));
 
-Deno.test("門檻是 6：5 筆不進、6 筆進（政見數＝名下未移除的全部政見，不分屆別）", () => {
-  assertEquals(SITEMAP_MIN_POLICIES_FOR_PERSON, 6);
-  assertEquals(isSitemapPerson(5), false);
-  assertEquals(isSitemapPerson(6), true);
+Deno.test("門檻是 3：2 筆不進、3 筆進（政見數＝名下未移除的全部政見，不分屆別）", () => {
+  assertEquals(SITEMAP_MIN_POLICIES_FOR_PERSON, 3);
+  assertEquals(isSitemapPerson(2), false);
+  assertEquals(isSitemapPerson(3), true);
   assertEquals(isSitemapPerson(0), false);
   const meta = buildSitemapMeta({
-    politicianIds: ["five", "six", "none"],
-    policies: [...many("five", 5), ...many("six", 6)],
+    politicians: [{ id: "two" }, { id: "three" }, { id: "none" }],
+    policies: [...many("two", 2), ...many("three", 3)],
     lineages: [],
   });
-  assertEquals(meta.skip.sort(), ["/politician/five", "/politician/none"]);
-  assertEquals(Object.keys(meta.lastmod).filter((k) => k.startsWith("/politician/")), ["/politician/six"]);
+  assertEquals(meta.skip.sort(), ["/politician/none", "/politician/two"]);
+  assertEquals(Object.keys(meta.lastmod).filter((k) => k.startsWith("/politician/")), ["/politician/three"]);
+});
+
+Deno.test("有焦點屆別參選紀錄的一律收，不看政見數；別屆的不算；退選照收；焦點屆別來自網站常數", () => {
+  assertEquals(FEATURED_LOCAL_ELECTION_ID, 2026);
+  assertEquals(isSitemapPerson(0, true), true);
+  const meta = buildSitemapMeta({
+    politicians: [
+      { id: "cand", elections: [{ electionId: 2026 }] }, // 2026 候選人、零政見
+      { id: "cand-str", elections: [{ electionId: "2026" }] }, // id 型別不同也算
+      { id: "old", elections: [{ electionId: 2022 }] }, // 只有 2022：政見不足，不收
+      { id: "old-rich", elections: [{ electionId: 2022 }] }, // 只有 2022 但政見夠多：收
+    ],
+    policies: many("old-rich", 3),
+    lineages: [],
+  });
+  assertEquals(meta.skip, ["/politician/old"]);
+  // 候選人沒有政見＝沒有可靠時間：收，但不寫 lastmod
+  assertEquals("/politician/cand" in meta.lastmod, false);
+  assertEquals("/politician/old-rich" in meta.lastmod, true);
+  // 換屆只動常數：明確指定別的焦點屆別時，規則跟著走
+  const next = buildSitemapMeta({ politicians: [{ id: "cand", elections: [{ electionId: 2026 }] }], policies: [], lineages: [], featuredElectionId: 2030 });
+  assertEquals(next.skip, ["/politician/cand"]);
+  assertEquals(hasElection({ id: "x", elections: [{ electionId: 2026 }] }), true);
+  assertEquals(hasElection({ id: "x", elections: null }), false);
 });
 
 Deno.test("政見數按人分開算，id 型別不同（數字／字串）也是同一個人", () => {
@@ -47,7 +73,7 @@ Deno.test("人物 lastmod＝名下政見 updated_at 最晚的；政見、脈絡�
     pol("other", "b", "2026-12-31T00:00:00Z"),
   ];
   const meta = buildSitemapMeta({
-    politicianIds: ["a"],
+    politicians: [{ id: "a" }],
     policies,
     lineages: [{ id: "L1", updatedAt: "2026-10-06T03:00:00+00:00" }, { id: "L2", updatedAt: null }],
     analysisPolicyIds: ["newest"],
@@ -69,7 +95,7 @@ Deno.test("時間缺或不合法 → 不寫 lastmod", () => {
   assertEquals(toLastmod("2026-10-04 08:00:02.289+00"), "2026-10-04T08:00:02Z"); // PostgREST 的 timestamptz 寫法
   assertEquals(latestLastmod([null, "bad", undefined]), null);
   assertEquals(latestLastmod([null, "2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z"]), "2026-03-01T00:00:00Z");
-  const meta = buildSitemapMeta({ politicianIds: ["a"], policies: many("a", 6, "garbage"), lineages: [] });
+  const meta = buildSitemapMeta({ politicians: [{ id: "a" }], policies: many("a", 6, "garbage"), lineages: [] });
   assertEquals(meta.skip, []); // 政見夠多，進網站地圖
   assertEquals("/politician/a" in meta.lastmod, false); // 但時間不可靠，不寫
 });
@@ -78,6 +104,8 @@ Deno.test("接線：server-data 用 buildSitemapMeta 寫 .sitemap-meta.json，po
   const serverData = await Deno.readTextFile(new URL("./ssg/server-data.ts", import.meta.url));
   assertEquals(/buildSitemapMeta\(\{/.test(serverData), true);
   assertEquals(/writeSitemapMeta\(sitemapMeta\)/.test(serverData), true);
+  // 整個人物物件（帶參選紀錄）交進去，不是只傳 id——候選人一律收要看得到參選紀錄
+  assertEquals(/buildSitemapMeta\(\{\s*politicians,/.test(serverData), true);
   const postbuild = await Deno.readTextFile(new URL("../scripts/postbuild-ssg.mjs", import.meta.url));
   assertEquals(/\.sitemap-meta\.json/.test(postbuild), true);
   assertEquals(/sitemapSkip\.has\(r\)/.test(postbuild), true);

@@ -1,3 +1,5 @@
+import { FEATURED_LOCAL_ELECTION_ID } from './election-regions'
+
 /**
  * 網站地圖的內容規則（2026-10-08，#466）：誰進 sitemap-politicians.xml、各頁的 lastmod 取哪個時間。純函式，建置端
  * （lib/ssg/server-data.ts）算好交給 scripts/postbuild-ssg.mjs 寫檔；XML 本身在 cloudflare/sitemap-xml.js。
@@ -9,18 +11,23 @@
  *   - 人物頁 /politician/:id → 他名下政見 updated_at 的最大值。politicians 表沒有任何時間欄位，
  *     最近一次已上線貢獻（contributions.applied_at）只有 service_role 讀得到、建置端用的是 anon。
  *     人物頁的主要內容（競選承諾、政績追蹤）就是名下政見，所以這個值跟頁面實質變動同步；
- *     只改了簡介、照片這類人物欄位時不會動（可接受：政見數門檻保證每位進圖的人都有時間，且不會把「建置當天」當成更新時間）。
+ *     只改了簡介、照片這類人物欄位時不會動（可接受）。名下沒有政見的候選人（候選人一律收）沒有可靠時間，不寫 lastmod，不拿「建置當天」頂替。
  *   - 選舉頁、縣市頁、鄉鎮頁、人物一覽、政黨頁、社群與靜態頁 → 不寫。elections、parties 沒有時間欄位，
  *     頁面內容是「很多筆資料的合計」（候選人名單、政黨歸屬），任何一筆參選紀錄變動都算；拿政見時間頂替會漏報名單變動。
  */
 
 /**
- * 人物頁進 sitemap-politicians.xml 的政見數門檻（維護者 2026-10-08）：名下未移除的政見 **≥ 這個數** 才列。
+ * 人物頁進 sitemap-politicians.xml 的規則（維護者 2026-10-08，兩條擇一即收）：
+ *   1. 有焦點屆別參選紀錄的人，一律收，不看政見數。焦點屆別＝網站現行的 `FEATURED_LOCAL_ELECTION_ID`（lib/election-regions.ts，
+ *      頁尾、首頁那排縣市連結指的下一場地方選舉；現在是 2026）。選這個而不是「還沒投票的屆別」：它是網站已經在用的單一常數，
+ *      明天換屆（2026 投票後改成 2030）只動那一處，人物頁、頁尾、網站地圖一起跟；「還沒投票」要比日期、
+ *      補選與重行選舉也會算進來，會把不是這一輪主戰場的人混進去。只認有參選紀錄，退選的也算（紀錄在、頁面在）；已合併的人物不在建置清單裡。
+ *   2. 其餘人物：名下未移除的政見 **≥ SITEMAP_MIN_POLICIES_FOR_PERSON** 才收。
  * 只影響網站地圖——頁面本身不加 noindex，照常可被收錄、可被連結帶進來。
  * 政見數的定義跟人物頁一致：頁面兩個分頁（競選承諾＋過往政績與追蹤）加起來，即全域 state 裡 politicianId 等於他、
  * 且未軟移除（removed_at 空）的政見，不分屆別。
  */
-export const SITEMAP_MIN_POLICIES_FOR_PERSON = 6
+export const SITEMAP_MIN_POLICIES_FOR_PERSON = 3
 
 export interface SitemapPolicy { politicianId: string | number; updatedAt?: string | null }
 
@@ -61,9 +68,16 @@ export function policyStatsByPolitician(policies: ReadonlyArray<SitemapPolicy>):
   return new Map([...out].map(([id, v]) => [id, { count: v.count, lastmod: v.latest === null ? null : toLastmod(v.latest) }]))
 }
 
-/** 這位人物該不該列進網站地圖 */
-export function isSitemapPerson(policyCount: number): boolean {
-  return policyCount >= SITEMAP_MIN_POLICIES_FOR_PERSON
+/** 這位人物該不該列進網站地圖：有焦點屆別的參選紀錄，或政見數到門檻 */
+export function isSitemapPerson(policyCount: number, hasFeaturedElection = false): boolean {
+  return hasFeaturedElection || policyCount >= SITEMAP_MIN_POLICIES_FOR_PERSON
+}
+
+export interface SitemapPerson { id: string | number; elections?: ReadonlyArray<{ electionId: number | string }> | null }
+
+/** 有沒有焦點屆別的參選紀錄（不看參選狀態） */
+export function hasElection(person: SitemapPerson, electionId: number | string = FEATURED_LOCAL_ELECTION_ID): boolean {
+  return (person.elections ?? []).some((e) => String(e.electionId) === String(electionId))
 }
 
 /** 建置端交給 postbuild 的網站地圖補充：各網址的 lastmod、以及不進網站地圖的網址 */
@@ -73,7 +87,9 @@ export interface SitemapMeta {
 }
 
 export function buildSitemapMeta(input: {
-  politicianIds: ReadonlyArray<string | number>
+  politicians: ReadonlyArray<SitemapPerson>
+  /** 預設＝網站現行的焦點屆別 */
+  featuredElectionId?: number | string
   policies: ReadonlyArray<SitemapPolicy & { id: string | number }>
   lineages: ReadonlyArray<{ id: string | number; updatedAt?: string | null }>
   /** 只有「列進網站地圖的」預渲染分析頁需要；其餘不傳 */
@@ -82,11 +98,11 @@ export function buildSitemapMeta(input: {
   const lastmod: Record<string, string> = {}
   const skip: string[] = []
   const stats = policyStatsByPolitician(input.policies)
-  for (const id of input.politicianIds) {
-    const s = stats.get(String(id))
-    const route = `/politician/${id}`
-    if (!s || !isSitemapPerson(s.count)) { skip.push(route); continue }
-    if (s.lastmod) lastmod[route] = s.lastmod
+  for (const person of input.politicians) {
+    const s = stats.get(String(person.id))
+    const route = `/politician/${person.id}`
+    if (!isSitemapPerson(s?.count ?? 0, hasElection(person, input.featuredElectionId))) { skip.push(route); continue }
+    if (s?.lastmod) lastmod[route] = s.lastmod
   }
   const policyById = new Map(input.policies.map((p) => [String(p.id), p]))
   for (const p of input.policies) {

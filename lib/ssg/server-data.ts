@@ -295,7 +295,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
   const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
   const analysisIds = analysisListedPolicyIds(full.policies)
   const sitemapMeta = buildSitemapMeta({
-    politicianIds: politicians.map((pl) => pl.id),
+    politicians,
     policies: full.policies,
     lineages: full.lineages ?? [],
     analysisPolicyIds: analysisIds,
