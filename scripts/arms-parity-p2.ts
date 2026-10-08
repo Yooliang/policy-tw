@@ -13,7 +13,8 @@
  *           ⑤ 負向對照（還原驗證）：改壞這一步的 migration，上面的對應檢查必須紅；這組不紅，③④什麼都驗不出來
  *
  * 步驟（STEPS，依上線順序；「之前各步」假設已經上線——正式庫現行輸出已經反映它們，PGlite 套它們的規則）：
- *   election_results（起日型）、party_gap（起日型）、party_roster（迄日型：只有迄點，到投票日當天為止；這一步同時改總表與 seed，但正式庫快照比的是派工輸出，所以一樣比筆數與雜湊）。
+ *   election_results（起日型）、party_gap（起日型）、party_roster（迄日型：只有迄點，到投票日當天為止；這一步同時改總表與 seed，但正式庫快照比的是派工輸出，所以一樣比筆數與雜湊）、
+ *   not_running（窗口型：登記截止當天起、到投票日當天止；起迄兩端都是規則，假時鐘在 09-03／09-04／11-28／11-29 四個邊界日逐日比對筆數）。
  *
  * 已上線、不在 STEPS 裡的 #443（佇列優先層的欄位）與 #448（測試名人物隔離，總表多一道過濾）也會在回放環境裡套好（gen 會多抓測試名人物與他們的參選紀錄 id）。
  * election_results 是歷史步驟（#441 已上線，現行總表已經多了 #448 的過濾，直接 check 它會在 ① 對不上），之後的快照只用 party_gap 以後的步驟。
@@ -23,7 +24,7 @@
  *   npx supabase db query --linked -f snapshot.sql -o json > snapshot.json      （檔案第一行是 SET default_transaction_read_only = on）
  *   deno run --node-modules-dir=none --allow-read --allow-net --allow-env scripts/arms-parity-p2.ts check <step> snapshot.json
  */
-import { applyP2, ARM_BRANCHES, armsFingerprint, buildArmsDb, fnText, latestFn, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "../supabase/functions/_shared/arms-pglite.ts";
+import { applyP2, ARM_BRANCHES, armsFingerprint, buildArmsDb, fnText, latestFn, P2_ER_MIG, P2_NR_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "../supabase/functions/_shared/arms-pglite.ts";
 
 type Branch = (typeof ARM_BRANCHES)[number];
 type Step = {
@@ -33,8 +34,19 @@ type Step = {
   arms: readonly Branch[];
   /** 這一步改的規則的活動名 */
   activities: string[];
-  /** from＝起日型（投票日 +1 起，窗口以外＝投票日 +1 晚於今天）；until＝迄日型（到投票日當天為止，窗口以外＝投票日早於今天） */
-  kind: "from" | "until";
+  /** from＝起日型（投票日 +1 起，窗口以外＝投票日 +1 晚於今天）；until＝迄日型（到投票日當天為止，窗口以外＝投票日早於今天）；
+   *  window＝起迄兩端都有（起點不是投票日）：這種步驟要給 openAt（原臂內條件的轉寫）與 probeDays，逐個邊界日比對筆數 */
+  kind: "from" | "until" | "window";
+  /** window 型：某天這一列在窗口內嗎（原臂內日期條件的轉寫，SQL 布林運算式；列的別名是 t，用 t.target） */
+  openAt?: (day: string) => string;
+  /** window 型：要逐日比對筆數的邊界日 */
+  probeDays?: string[];
+  /** window 型：邊界日裡窗口關著的那幾天（其餘的邊界日窗口開著）。關著的日子，總表筆數比「這一步還沒動」的基準少；開著的日子相同 */
+  closedDays?: string[];
+  /** window 型：開著的列的 opened_by 應該長什麼樣（規則、起點里程碑、迄日） */
+  openedExpect?: (ob: Record<string, unknown>) => boolean;
+  /** window 型：負向對照的說明文字（offsetEdit、extraEdit 各改壞了什麼） */
+  badLabels?: { offset: string; extra: string };
   /** 「不改規則」那一刀的分界字串（migration 裡規則 UPDATE 那一節的標題） */
   ruleHeading: string;
   /** 規則偏移那一處的原文與改壞版 */
@@ -57,6 +69,21 @@ const STEPS: Step[] = [
     id: "party_roster", mig: P2_PR_MIG, arms: ["party_roster"], activities: ["party_roster"], kind: "until",
     ruleHeading: "-- 4. 規則", offsetEdit: ["until_kind = 'polling', until_offset = 0", "until_kind = 'polling', until_offset = -1"],
     extraEdit: ["until_kind = 'polling', until_offset = 0", "until_kind = 'polling', until_offset = 1"],
+  },
+  {
+    id: "not_running", mig: P2_NR_MIG, arms: ["not_running"], activities: ["not_running"], kind: "window",
+    ruleHeading: "-- 2. 規則",
+    // 偏移：起點晚一天（登記截止當天還沒開）／迄點早一天（投票日當天已經關）
+    offsetEdit: ["from_kind = 'registration_close', from_offset = 0, until_kind", "from_kind = 'registration_close', from_offset = 1, until_kind"],
+    extraEdit: ["until_kind = 'polling', until_offset = 0, min_status", "until_kind = 'polling', until_offset = -1, min_status"],
+    // 原臂內條件：s.registration_closed_on <= CURRENT_DATE AND (e.election_date IS NULL OR e.election_date >= CURRENT_DATE)
+    openAt: (d) => `COALESCE((SELECT s.registration_closed_on <= DATE '${d}' AND (e.election_date IS NULL OR e.election_date >= DATE '${d}')
+        FROM roster_check_scope s JOIN elections e ON e.id = s.election_id
+       WHERE s.election_id = NULLIF(t.target->>'election_id', '')::int AND s.election_type = t.target->>'election_type'), false)`,
+    probeDays: ["2026-09-03", "2026-09-04", "2026-10-08", "2026-11-28", "2026-11-29"],
+    closedDays: ["2026-09-03", "2026-11-29"],
+    openedExpect: (ob) => ob.milestone_kind === "registration_close" && ob.milestone_on_date === "2026-09-04" && ob.expected_open_on === "2026-09-04" && ob.open_until === "2026-11-28",
+    badLabels: { offset: "起點晚一天（登記截止當天還沒開）→ 09-04 的筆數不對", extra: "迄點早一天（投票日當天已經關）→ 11-28 的筆數不對" },
   },
 ];
 
@@ -137,6 +164,8 @@ const baseAt = async (day: string) => {
 };
 const base1128 = await baseAt("2026-11-28");
 const base1129 = await baseAt("2026-11-29");
+const baseProbe: Record<string, number> = {};
+if (step.kind === "window") for (const d of step.probeDays!) baseProbe[d] = await baseAt(d);
 await db0.close();
 
 // ② 這一步的臂：新輸出 vs 舊輸出（只多窗口以外的選舉的列）
@@ -147,7 +176,7 @@ for (const n of NEW_ARMS) {
 const q = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
 // 窗口以外：起日型＝該列的選舉投票日 +1 晚於快照當天；迄日型＝投票日早於快照當天（沒有選舉的列＝沒有里程碑＝也算窗口以外，但這些臂的列都有 election_id）
 const outside = step.kind === "from" ? `e.election_date + 1 > DATE '${taipeiDay}'` : `e.election_date < DATE '${taipeiDay}'`;
-const gated = `(SELECT ${outside} FROM elections e WHERE e.id = NULLIF(t.target->>'election_id', '')::int)`;
+const gated = step.kind === "window" ? `NOT (${step.openAt!(taipeiDay)})` : `(SELECT ${outside} FROM elections e WHERE e.id = NULLIF(t.target->>'election_id', '')::int)`;
 let early = 0;
 let oldTotal = 0;
 for (const n of NEW_ARMS) {
@@ -161,7 +190,7 @@ for (const n of NEW_ARMS) {
   early += extraN;
   oldTotal += oldN;
   check(`② ${n}：舊輸出的每一列新輸出都還在（少 0 件）`, lost === 0, `舊 ${oldN} 件、新 ${newN} 件`);
-  check(`② ${n}：新輸出多出來的 ${extraN} 列全是窗口以外的選舉（${step.kind === "from" ? `投票日 +1 晚於 ${taipeiDay}` : `投票日早於 ${taipeiDay}`}）`, extra.every((r) => r.g === true) && newN - oldN === extraN,
+  check(`② ${n}：新輸出多出來的 ${extraN} 列全是窗口以外的選舉（${step.kind === "window" ? `${taipeiDay} 不在窗口內` : step.kind === "from" ? `投票日 +1 晚於 ${taipeiDay}` : `投票日早於 ${taipeiDay}`}）`, extra.every((r) => r.g === true) && newN - oldN === extraN,
     extra.map((r) => `${r.ty}@${r.id}=${r.n}`).join(" ") || "無");
 }
 for (const n of ARM_BRANCHES) {
@@ -177,7 +206,7 @@ else check("② 這次快照確實有窗口以外的列可驗（沒有的話後�
 const base0 = await armsFingerprint(db, "contribution_auto_tasks_arms"); // 還沒套這一步：規則是永遠開，窗口以外的列會露出來
 if (early > 0) check("③ 還沒套這一步（規則是永遠開）：新臂輸出多露出窗口以外的列，總表比正式庫多（證明規則是必要的）", base0.n === snap.n + early && base0.h !== snap.hash, `${base0.n} 件`);
 
-type Eval = { today: { n: number; h: string | null }; d1128: number; d1129: number; rowsOk: boolean; opened: Record<string, unknown> | null; openedToday: Record<string, unknown> | null };
+type Eval = { today: { n: number; h: string | null }; d1128: number; d1129: number; rowsOk: boolean; opened: Record<string, unknown> | null; openedToday: Record<string, unknown> | null; probes: Record<string, number> };
 const ACT_SQL = step.activities.map((a) => `'${a}'`).join(", ");
 async function evaluate(p2sql: string): Promise<Eval> {
   await db.exec("BEGIN");
@@ -193,7 +222,14 @@ async function evaluate(p2sql: string): Promise<Eval> {
     await db.exec("SET app.activity_today = '2026-11-29'");
     const d1129 = (await armsFingerprint(db, "contribution_auto_tasks_arms")).n;
     const [opened] = await q<{ ob: Record<string, unknown> }>(`SELECT opened_by AS ob FROM contribution_auto_tasks_arms() WHERE arm IN (${ACT_SQL}) AND opened_by->>'election_id' = '2026' LIMIT 1`);
-    return { today, d1128, d1129, rowsOk, opened: opened?.ob ?? null, openedToday: openedToday?.ob ?? null };
+    const probes: Record<string, number> = {};
+    if (step.kind === "window") {
+      for (const d of step.probeDays!) {
+        await db.exec(`SET app.activity_today = '${d}'`);
+        probes[d] = (await armsFingerprint(db, "contribution_auto_tasks_arms")).n;
+      }
+    }
+    return { today, d1128, d1129, rowsOk, opened: opened?.ob ?? null, openedToday: openedToday?.ob ?? null, probes };
   } finally {
     await db.exec("ROLLBACK");
   }
@@ -225,6 +261,31 @@ if (step.kind === "until") {
   check("④ 2026-11-28 投票日當天仍開：筆數＝這一步還沒動時的 11-28 筆數（2026 的列都還在）", good.d1128 === e1128, `${good.d1128}（預期 ${e1128}，基準 ${base1128}）`);
   check("④ 2026-11-29 隔天關：筆數＝這一步還沒動時的 11-29 筆數－2026 的列", good.d1129 === e1129, `${good.d1129}（預期 ${e1129}，基準 ${base1129}）`);
   if (oldTotal > 0) check("④ 開著的列帶規則與迄日（open_until 2026-11-28）、不帶起點里程碑", good.openedToday !== null && good.openedToday.open_until === "2026-11-28" && good.openedToday.milestone_kind === undefined && good.openedToday.expected_open_on === undefined, JSON.stringify(good.openedToday));
+}
+
+// 窗口型：每個邊界日的預期筆數＝這一步還沒動時的筆數（舊輸出全算開著）－舊輸出裡這天窗口已關的列＋新輸出多出來的列裡這天窗口開著的列。
+// 「這天窗口開不開」是原臂內日期條件的轉寫（step.openAt）；實際筆數來自套上規則後的總表（假時鐘）
+async function expectedWindow(day: string): Promise<number> {
+  const open = step.openAt!(day);
+  let delta = 0;
+  for (const n of NEW_ARMS) {
+    const [{ x }] = await q<{ x: number }>(`SELECT count(*)::int AS x FROM _o_${n} t WHERE NOT ${open}`);
+    const [{ y }] = await q<{ y: number }>(`SELECT count(*)::int AS y FROM _b_${n} t WHERE md5(to_jsonb(t)::text) NOT IN (SELECT md5(to_jsonb(o)::text) FROM _o_${n} o) AND ${open}`);
+    delta += y - x;
+  }
+  return baseProbe[day] + delta;
+}
+const expectedProbe: Record<string, number> = {};
+if (step.kind === "window") {
+  for (const d of step.probeDays!) expectedProbe[d] = await expectedWindow(d);
+  for (const d of step.probeDays!) check(`④ ${d}：筆數＝這一步還沒動時的筆數（基準 ${baseProbe[d]}）－舊輸出裡窗口已關的列＋新輸出多出且窗口開著的列`, good.probes[d] === expectedProbe[d], `${good.probes[d]}（預期 ${expectedProbe[d]}）`);
+  if (oldTotal > 0) check("④ 開著的列帶規則與起迄（opened_by 的 rule_id、起點里程碑、expected_open_on、open_until）", good.openedToday !== null && good.openedToday.basis === "rule" && step.openedExpect!(good.openedToday), JSON.stringify(good.openedToday));
+  // 窗口真的有邊界：相對基準（這一步還沒動）的差，開著的日子是 0、關著的日子是負的（舊輸出的列被濾掉）；總筆數不能直接跨日比（別的臂的窗口也在動）
+  if (oldTotal > 0) {
+    const dl = (d: string) => good.probes[d] - baseProbe[d];
+    check(`④ 邊界日確實有開有關：${step.closedDays!.join("、")} 比基準少（舊輸出的列被濾掉），其餘邊界日與基準相同`,
+      step.probeDays!.every((d) => step.closedDays!.includes(d) ? dl(d) < 0 : dl(d) === 0), step.probeDays!.map((d) => `${d}=${dl(d)}`).join(" "));
+  }
 }
 
 // ⑤ 負向對照：改壞這一步的 migration，對應的檢查必須紅
@@ -261,6 +322,18 @@ if (step.kind === "until") {
     const bad2 = await evaluate(P2_SQL.slice(0, P2_SQL.indexOf(step.ruleHeading)));
     check("⑤ 規則沒改成窗口（還是永遠開）→ 今天就多出窗口以外的列，檢查 ③ 會紅", bad2.today.n === snap.n + early && bad2.today.h !== snap.hash, `${bad2.today.n}`);
   }
+}
+
+if (step.kind === "window") {
+  const differs = (e: Eval) => step.probeDays!.some((d) => e.probes[d] !== expectedProbe[d]);
+  if (oldTotal > 0) {
+    const bad1 = await evaluate(edit(noGuard(P2_SQL), ...step.offsetEdit));
+    check(`⑤ ${step.badLabels!.offset}，檢查 ④ 會紅`, differs(bad1), JSON.stringify(bad1.probes));
+    const bad2 = await evaluate(edit(noGuard(P2_SQL), ...step.extraEdit));
+    check(`⑤ ${step.badLabels!.extra}，檢查 ④ 會紅`, differs(bad2), JSON.stringify(bad2.probes));
+    const bad3 = await evaluate(P2_SQL.slice(0, P2_SQL.indexOf(step.ruleHeading)));
+    check("⑤ 規則沒改成窗口（還是永遠開）→ 09-03 或 11-29 還有列，檢查 ④ 會紅", differs(bad3), JSON.stringify(bad3.probes));
+  } else console.log("！ 這一步的臂在正式庫現行輸出是 0 件：「改邊界」三刀沒有東西可驗，略過（CI 的合成資料測試會驗）");
 }
 
 console.log(fails.length === 0 ? "\n全部通過" : `\n失敗 ${fails.length} 項：${fails.join("、")}`);
