@@ -24,7 +24,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
-import { councilDistrictKey, isCouncilAboriginalDistrict, legislatorDistrictKey, normalizeDistrict, officialCouncilDistricts, regionFitFor } from "./electoral-district.ts";
+import { councilDistrictKey, isCouncilAboriginalDistrict, isRepElectionType, legislatorDistrictKey, officialCouncilDistricts, REP_ELECTION_TYPES, regionFitFor, repDistrictKey } from "./electoral-district.ts";
 import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 import { DISTRICT_SEAT_TYPES, type DistrictSeatKind, type ExistingDistrict, normalizeSeatDistrict, planDistrictSeats, type SeatInput, seatDistrictTown } from "./district-seats.ts";
@@ -354,25 +354,9 @@ async function localRegionPatch(supabase: SupabaseLike, electionType: string, p:
  * 選舉區記在 regions 的「<鄉鎮>第NN選舉區」那一列（2022 區民代表 82 筆就是這個形狀；中選會名單、election_districts、讀取端 get_politicians_by_level 都是同一個寫法），
  * 所以交件帶 electoral_district（「第NN選舉區」）加 sub_region（鄉鎮）時，region_id 指到那一列，而不是鄉鎮那一列。
  */
-export const REP_ELECTION_TYPES = ["鄉鎮市民代表", "直轄市山地原住民區民代表"] as const;
-const isRepType = (t: string) => (REP_ELECTION_TYPES as readonly string[]).includes(t);
-
-export function repDistrictKey(electionType: string, p: Obj): { region: string; town: string; district: string } | null {
-  if (!isRepType(electionType)) return null;
-  const region = normalizeCityName(str(p.region) ?? undefined);
-  const given = str(p.electoral_district);
-  if (!region || !given) return null;
-  const raw = given.replace(/[\s　]/g, "").replace(/臺/g, "台");
-  const district = normalizeDistrict(raw)?.district;
-  if (!district) return null;
-  // 鄉鎮：sub_region 優先（去掉尾巴的選舉區）；沒給就看 electoral_district 前面有沒有（「麥寮鄉第4選舉區」）。兩邊都有又不一樣＝矛盾，不猜
-  const fromSub = (str(p.sub_region) ?? "").replace(/[\s　]/g, "").replace(/臺/g, "台").replace(/(第.+?)?選舉?區$/, "");
-  const prefixRaw = raw.replace(/第.+?選舉?區$/, "");
-  const fromDistrict = prefixRaw.startsWith(region) ? prefixRaw.slice(region.length) : prefixRaw;
-  if (fromSub && fromDistrict && fromSub !== fromDistrict) return null;
-  const town = fromSub || fromDistrict;
-  return town ? { region, town, district } : null;
-}
+// 規則在 electoral-district.ts（交件端 normalizeCandidacyDistrictField 與這裡共用同一份 repDistrictKey）
+export { REP_ELECTION_TYPES, repDistrictKey };
+const isRepType = isRepElectionType;
 
 /** 這個代表選舉區有官方根據：2026 的中選會登記彙總表（cec_registrations）或已投票屆別的中選會名單（cec_candidates）上有人登記在這個鄉鎮的這個選舉區 */
 async function repDistrictConfirmed(
@@ -380,10 +364,16 @@ async function repDistrictConfirmed(
 ): Promise<boolean> {
   if (!electionId) return false;
   const towns = [...new Set([key.town, key.town.replace(/台/g, "臺")])];
-  // query-bounds: ok — 只要知道有沒有，limit(1)
-  const { data: reg } = await supabase.from("cec_registrations").select("id")
-    .eq("election_id", electionId).eq("election_type", electionType).eq("region", key.region).eq("district", key.district).in("sub_region", towns).limit(1);
-  if (Array.isArray(reg) && reg.length > 0) return true;
+  // 名冊只認現行版（cec_registration_sources.superseded_by 是空的；被取代的舊版不算根據，同補選區臂的寫法）：先撈這一區有哪幾份名冊，再看有沒有現行版
+  // query-bounds: ok — 同一區的名冊列只會落在一兩份名冊，limit 100 足夠湊出 distinct 網址
+  const { data: reg } = await supabase.from("cec_registrations").select("source_url")
+    .eq("election_id", electionId).eq("election_type", electionType).eq("region", key.region).eq("district", key.district).in("sub_region", towns).limit(100);
+  const urls = [...new Set(((reg ?? []) as Array<{ source_url?: string }>).map((r) => r.source_url).filter((u): u is string => !!u))];
+  if (urls.length > 0) {
+    // query-bounds: ok — 只要知道有沒有，limit(1)
+    const { data: current } = await supabase.from("cec_registration_sources").select("source_url").in("source_url", urls).is("superseded_by", null).limit(1);
+    if (Array.isArray(current) && current.length > 0) return true;
+  }
   // query-bounds: ok — 只要知道有沒有，limit(1)
   const { data: cec } = await supabase.from("cec_candidates").select("id")
     .eq("election_id", electionId).eq("election_type", electionType).eq("region", key.region)
@@ -422,23 +412,27 @@ async function repDistrictRegionPatch(supabase: SupabaseLike, electionType: stri
  * 例：補號次、改狀態的重交只帶 sub_region——地區是 region_id 一欄，降級就等於把已經補好的選舉區弄丟、補選舉區任務又派回來。
  * 只在既有那一列是同縣市、同鄉鎮的選舉區列時才保留；其他（掛錯地方）照舊讓鄉鎮那一列蓋掉。
  */
-async function repKeepsDistrict(supabase: SupabaseLike, electionType: string, p: Obj, beforeRegionId: number | null): Promise<boolean> {
-  if (!isRepType(electionType) || beforeRegionId === null) return false;
+async function repKeepsDistrict(supabase: SupabaseLike, electionType: string, p: Obj, beforeRegionId: number | null): Promise<string | null> {
+  if (!isRepType(electionType) || beforeRegionId === null) return null;
   const region = normalizeCityName(str(p.region) ?? undefined);
   const town = (str(p.sub_region) ?? "").replace(/[\s　]/g, "").replace(/臺/g, "台").replace(/(第.+?)?選舉?區$/, "");
-  if (!region || !town) return false;
+  if (!region || !town) return null;
   // query-bounds: ok — 按主鍵取一列
   const { data } = await supabase.from("regions").select("region, sub_region, village").eq("id", beforeRegionId).maybeSingle();
   const row = data as { region?: string | null; sub_region?: string | null; village?: string | null } | null;
-  if (!row || row.village || !row.sub_region) return false;
-  const m = row.sub_region.replace(/臺/g, "台").match(/^(.+?)第[0-9]+選舉區$/);
-  return !!m && m[1] === town && (row.region ?? "").replace(/臺/g, "台") === region;
+  if (!row || row.village || !row.sub_region) return null;
+  const m = row.sub_region.replace(/臺/g, "台").match(/^(.+?)(第[0-9]+選舉區)$/);
+  return m && m[1] === town && (row.region ?? "").replace(/臺/g, "台") === region ? m[2] : null;
 }
 
 /** 代表交件帶了選舉區卻沒對上 regions／名冊：照實說，不要讓代理以為已經記上（補選舉區任務會一直派回來） */
-function repDistrictNote(electionType: string, p: Obj, resolved: boolean): string {
+function repDistrictNote(electionType: string, p: Obj, resolved: boolean, kept: string | null): string {
+  // 只看有沒有對上：已經對上就不說話；沒帶 electoral_district（補號次、改狀態的重交）也維持靜默
   if (!isRepType(electionType) || resolved || !str(p.electoral_district)) return "";
-  return `；electoral_district「${str(p.electoral_district)}」沒有對上 regions 表或中選會名冊的選舉區（sub_region 填鄉鎮、electoral_district 填「第NN選舉區」，` +
+  const given = str(p.electoral_district);
+  // 原本已經記了選舉區：沒對上就保留舊的，要明講——否則代理以為更正成功了（沉默成功）
+  if (kept) return `；electoral_district「${given}」沒有對上 regions 表或中選會名冊的選舉區，已保留原本的${kept}（沒有改成你給的）。請核對寫法後重交。`;
+  return `；electoral_district「${given}」沒有對上 regions 表或中選會名冊的選舉區（sub_region 填鄉鎮、electoral_district 填「第NN選舉區」，` +
     `而且名冊上那個鄉鎮真的有這一區），這筆先只記到鄉鎮。請核對寫法後重交。`;
 }
 
@@ -578,7 +572,8 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   // 代表帶了選舉區就指到「<鄉鎮>第NN選舉區」那一列，蓋過鄉鎮那一列（#464）；沒帶或對不上時，已經記了選舉區的不降回鄉鎮
   const repPatch = await repDistrictRegionPatch(supabase, electionType, p);
   const repResolved = regionIdOf(repPatch) !== null;
-  const keepRepDistrict = !repResolved && await repKeepsDistrict(supabase, electionType, p, beforeRegionId);
+  const keptRepDistrict = repResolved ? null : await repKeepsDistrict(supabase, electionType, p, beforeRegionId);
+  const keepRepDistrict = keptRepDistrict !== null;
   const districtPatch = {
     ...(await districtRegionPatch(supabase, electionType, p)),
     ...(keepRepDistrict ? {} : await localRegionPatch(supabase, electionType, p)),
@@ -606,7 +601,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
       ? `；這筆原本掛在「${beforeFit.label}」，對${electionType}來說不是選區也不是縣市（多半是同一個人其他選舉的地區），已改記到縣市`
       : `；這筆掛在「${beforeFit.label}」，對${electionType}來說不是選區也不是縣市，但 region 對不到縣市，地區先維持原狀`
     : "";
-  const regionNote = wrongLevelNote + repDistrictNote(electionType, p, repResolved || keepRepDistrict) + regionGapNote(electionType, p, {
+  const regionNote = wrongLevelNote + repDistrictNote(electionType, p, repResolved, keptRepDistrict) + regionGapNote(electionType, p, {
     resolved: districtRegionId ?? countyRegionId ?? (keepBefore ? beforeRegionId : null),
     county: countyRegionId,
     district: districtRegionId,

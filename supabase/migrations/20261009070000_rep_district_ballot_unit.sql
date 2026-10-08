@@ -45,16 +45,20 @@ RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
     WHEN p_election_type IN ('鄉鎮市民代表', '直轄市山地原住民區民代表') THEN (
       SELECT CASE WHEN rd.num IS NOT NULL AND rd.num <> '0' AND rd.town <> ''
                   THEN replace(btrim(p_county), '臺', '台') || '|' || replace(rd.town, '臺', '台') || '第' || lpad(rd.num, 2, '0') || '選舉區' END
-        FROM (SELECT (regexp_match(d.s, '第0*([0-9]+)選舉區$'))[1] AS num,
-                     COALESCE(NULLIF(regexp_replace(d.s, '第[0-9]+選舉區$', ''), ''),
-                              regexp_replace(replace(btrim(COALESCE(p_town, '')), ' ', ''), '(第[0-9]+)?選舉區$', '')) AS town
-                FROM (SELECT replace(btrim(COALESCE(p_district, '')), ' ', '') AS s) d) rd)
+        FROM (SELECT x.num,
+                     -- 選舉區前面有鄉鎮、鄉鎮欄也有，兩邊不一樣（含「連江縣北竿鄉第02選舉區」這種帶縣市的原字）＝矛盾，不猜
+                     CASE WHEN x.dtown <> '' AND x.ptown <> '' AND replace(x.dtown, '臺', '台') <> replace(x.ptown, '臺', '台') THEN ''
+                          ELSE COALESCE(NULLIF(x.dtown, ''), x.ptown) END AS town
+                FROM (SELECT (regexp_match(d.s, '第0*([0-9]+)選舉區$'))[1] AS num,
+                             regexp_replace(d.s, '第[0-9]+選舉區$', '') AS dtown,
+                             regexp_replace(replace(btrim(COALESCE(p_town, '')), ' ', ''), '(第[0-9]+)?選舉區$', '') AS ptown
+                        FROM (SELECT replace(btrim(COALESCE(p_district, '')), ' ', '') AS s) d) x) rd)
     ELSE NULL
   END
 $$;
 COMMENT ON FUNCTION ballot_number_unit IS
   '號次單位（每個單位各自從 1 編起）：縣市長＝縣市、縣市議員＝縣市|選舉區、鄉鎮市長與區長＝縣市|鄉鎮市區、村里長＝縣市|鄉鎮市區|村里、代表（鄉鎮市民代表、區民代表）＝縣市|鄉鎮第NN選舉區；沒有選舉區的代表與資料不全的回 NULL＝不檢查；臺／台正規化成台。'
-  '參選紀錄（region_id 指到的 regions）與交件 payload（region／electoral_district／sub_region／village）共用這一支，補號次 20261008150000；代表改用選舉區 20261009050000（#464）';
+  '參選紀錄（region_id 指到的 regions）與交件 payload（region／electoral_district／sub_region／village）共用這一支，補號次 20261008150000；代表改用選舉區 20261009070000（#464）';
 
 -- ------------------------------------------------------------
 -- 2. 視圖：代表的 town／district 拆開（其餘一字不差）
@@ -90,7 +94,7 @@ CREATE OR REPLACE VIEW ballot_number_units AS
    WHERE m.unit IS NOT NULL
    GROUP BY m.election_id, m.election_type, m.unit;
 COMMENT ON VIEW ballot_number_units IS
-  '每個號次單位（ballot_number_unit）一列：名單人數 registered、有號次的 numbered、不重複的號次數 distinct_numbers、用了哪些號次 numbers、成員 members、問題種類 kind（duplicate／gap／空＝沒問題）。只算還沒投票的選舉。補號次 20261008150000；代表的 town 是鄉鎮、district 是「第NN選舉區」（#464，20261009050000）';
+  '每個號次單位（ballot_number_unit）一列：名單人數 registered、有號次的 numbered、不重複的號次數 distinct_numbers、用了哪些號次 numbers、成員 members、問題種類 kind（duplicate／gap／空＝沒問題）。只算還沒投票的選舉。補號次 20261008150000；代表的 town 是鄉鎮、district 是「第NN選舉區」（#464，20261009070000）';
 
 -- ------------------------------------------------------------
 -- 3. 補號次臂：代表的派工單位照舊是鄉鎮，選舉區放 items（其餘一字不差）
@@ -263,7 +267,7 @@ COMMENT ON FUNCTION contribution_auto_tasks_ballot_numbers IS
   '補號次（缺口盤點 R8，2026-10-08）：已登記（candidacy_status＝filed）、沒有號次的參選紀錄，依單位（屆別×選舉別×縣市；鄉鎮市長、區長、村里長與代表到鄉鎮市區；超過 50 位拆件）整批派 candidacy_source_missing（target.kind＝cand_no，items 列名單）；'
   '另把號次單位裡的重複與跳號（視圖 ballot_number_anomalies）照派工單位聚成 cand_no_recheck（一件最多 25 個號次單位，target.units 附異常內容）。'
   '臂內沒有日期：抽籤當天起到投票日當天為止由規則 activity_rules「ballot_numbers」決定（draw +0、polling +0，補號次 20261008150000）。沒有來源的系統核對（見 DECISIONS 2026-10-08）；重複由 cand_no_dup_system_check 投系統票。'
-  '代表（#464，20261009050000）：派工單位照舊是鄉鎮，記了選舉區的代表 items 多帶 electoral_district。';
+  '代表（#464，20261009070000）：派工單位照舊是鄉鎮，記了選舉區的代表 items 多帶 electoral_district。';
 
 -- ------------------------------------------------------------
 -- 4. 補選區臂：多派「代表只記到鄉鎮、沒有選舉區」（名冊上找得到他才派；不新增臂）

@@ -97,7 +97,8 @@ Deno.test("R4 落庫：regions 沒有那一列，但中選會登記彙總表有�
   const { client, tables } = makeDb({
     politicians: [{ id: POL, name: "林加友", merged_into: null }],
     regions: [{ id: 10, region: "連江縣", sub_region: "北竿鄉", village: null }],
-    cec_registrations: [{ id: 1, election_id: 2026, election_type: "鄉鎮市民代表", region: "連江縣", sub_region: "北竿鄉", district: "第02選舉區" }],
+    cec_registrations: [{ id: 1, election_id: 2026, election_type: "鄉鎮市民代表", region: "連江縣", sub_region: "北竿鄉", district: "第02選舉區", source_url: "u-now" }],
+    cec_registration_sources: [{ source_url: "u-now", superseded_by: null }],
     politician_elections: [],
   });
   const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第2選舉區" }));
@@ -106,6 +107,20 @@ Deno.test("R4 落庫：regions 沒有那一列，但中選會登記彙總表有�
   assertEquals(made?.region, "連江縣");
   assertEquals(made?.village ?? null, null);
   assertEquals(peOf(tables)?.region_id, made?.id);
+});
+
+Deno.test("R4b 落庫：名冊只有被取代的舊版（superseded_by 有值）有這一區 → 不算官方根據，不新建 regions 列", async () => {
+  const { client, tables } = makeDb({
+    politicians: [{ id: POL, name: "林加友", merged_into: null }],
+    regions: [{ id: 10, region: "連江縣", sub_region: "北竿鄉", village: null }],
+    cec_registrations: [{ id: 1, election_id: 2026, election_type: "鄉鎮市民代表", region: "連江縣", sub_region: "北竿鄉", district: "第02選舉區", source_url: "u-old" }],
+    cec_registration_sources: [{ source_url: "u-old", superseded_by: "u-now" }, { source_url: "u-now", superseded_by: null }],
+    politician_elections: [],
+  });
+  const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第02選舉區" }));
+  assertEquals((tables.get("regions") ?? []).length, 1);
+  assertEquals(peOf(tables)?.region_id, 10);
+  assertStringIncludes(outcome.message, "沒有對上");
 });
 
 Deno.test("R5 落庫：已投票屆別（2022）沒有登記彙總表，靠中選會名單 cec_candidates 的選舉區當根據", async () => {
@@ -124,7 +139,8 @@ Deno.test("R6 落庫：選舉區沒有官方根據（名冊與中選會名單都
   const { client, tables } = makeDb({
     politicians: [{ id: POL, name: "林加友", merged_into: null }],
     regions: [{ id: 10, region: "連江縣", sub_region: "北竿鄉", village: null }],
-    cec_registrations: [{ id: 1, election_id: 2026, election_type: "鄉鎮市民代表", region: "連江縣", sub_region: "北竿鄉", district: "第02選舉區" }],
+    cec_registrations: [{ id: 1, election_id: 2026, election_type: "鄉鎮市民代表", region: "連江縣", sub_region: "北竿鄉", district: "第02選舉區", source_url: "u-now" }],
+    cec_registration_sources: [{ source_url: "u-now", superseded_by: null }],
     politician_elections: [],
   });
   const outcome = await applyContribution(client, candidacyRow({ electoral_district: "第09選舉區" }));
@@ -145,26 +161,44 @@ Deno.test("R7 落庫：沒帶選舉區的代表交件，行為跟以前一樣（
   assertEquals(outcome.message.includes("沒有對上"), false);
 });
 
-Deno.test("R8 已經記了選舉區的代表，重交（補號次、改狀態）只帶鄉鎮 → region_id 不降回鄉鎮；帶了別區的選舉區 → 改指新的那一區", async () => {
+Deno.test("R8 已經記了選舉區的代表：重交只帶鄉鎮（補號次、改狀態）→ 不降回鄉鎮、靜默；帶了別區 → 改指新的一區；改填別的鄉鎮 → 指到那個鄉鎮那一列", async () => {
   const seed = () => makeDb({
     politicians: [{ id: POL, name: "林加友", merged_into: null }],
     regions: [
       { id: 10, region: "連江縣", sub_region: "北竿鄉", village: null },
       { id: 11, region: "連江縣", sub_region: "北竿鄉第02選舉區", village: null },
       { id: 12, region: "連江縣", sub_region: "北竿鄉第05選舉區", village: null },
+      { id: 13, region: "連江縣", sub_region: "南竿鄉", village: null },
     ],
     politician_elections: [{ id: 1, politician_id: POL, election_id: 2026, election_type: "鄉鎮市民代表", region_id: 11, candidacy_status: "filed" }],
   });
   const a = seed();
-  await applyContribution(a.client, candidacyRow({ cand_no: 3 }));
+  const oa = await applyContribution(a.client, candidacyRow({ cand_no: 3 }));
   assertEquals(peOf(a.tables)?.region_id, 11, "沒帶選舉區：不降級");
   assertEquals(peOf(a.tables)?.cand_no, 3, "號次照樣寫進去");
+  assertEquals(oa.message.includes("沒有對上") || oa.message.includes("已保留"), false, "沒帶選舉區的重交維持靜默");
   const b = seed();
-  await applyContribution(b.client, candidacyRow({ electoral_district: "第05選舉區" }));
+  const ob = await applyContribution(b.client, candidacyRow({ electoral_district: "第05選舉區" }));
   assertEquals(peOf(b.tables)?.region_id, 12, "帶了別區的選舉區：照新的記");
+  assertEquals(ob.message.includes("沒有對上") || ob.message.includes("已保留"), false);
   const c = seed();
   await applyContribution(c.client, candidacyRow({ sub_region: "南竿鄉" }));
-  assertEquals(peOf(c.tables)?.region_id !== 11, true, "改填別的鄉鎮：不是同一個鄉鎮的選舉區列，不保留");
+  assertEquals(peOf(c.tables)?.region_id, 13, "改填別的鄉鎮：不是同一個鄉鎮的選舉區列，不保留，指到南竿鄉那一列");
+});
+
+Deno.test("R8b 沉默成功：原本記了第02選舉區，代理重交解不出來的選舉區（沒有第09區、寫歪了）→ region_id 維持原值，而且回覆明講『已保留原本的第02選舉區』", async () => {
+  for (const bad of ["第09選舉區", "蘭嶼鄉選舉區", "第二十選舉區"]) {
+    const { client, tables } = makeDb({
+      politicians: [{ id: POL, name: "林加友", merged_into: null }],
+      regions: [{ id: 10, region: "連江縣", sub_region: "北竿鄉", village: null }, { id: 11, region: "連江縣", sub_region: "北竿鄉第02選舉區", village: null }],
+      politician_elections: [{ id: 1, politician_id: POL, election_id: 2026, election_type: "鄉鎮市民代表", region_id: 11, candidacy_status: "filed" }],
+    });
+    const outcome = await applyContribution(client, candidacyRow({ electoral_district: bad }));
+    assertEquals(outcome.status, "applied");
+    assertEquals(peOf(tables)?.region_id, 11, `${bad}：維持原值`);
+    assertStringIncludes(outcome.message, `「${bad}」沒有對上`);
+    assertStringIncludes(outcome.message, "已保留原本的第02選舉區");
+  }
 });
 
 Deno.test("R9 縣市議員不受影響：議員帶 electoral_district 還是走自己的選舉區列", async () => {

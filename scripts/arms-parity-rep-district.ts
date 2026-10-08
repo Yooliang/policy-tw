@@ -1,5 +1,5 @@
 /**
- * 代表的號次單位改用選舉區（#464，migration 20261009050000_rep_district_ballot_unit.sql）上線前的「今天輸出逐件不變」對照
+ * 代表的號次單位改用選舉區（#464，migration 20261009070000_rep_district_ballot_unit.sql）上線前的「今天輸出逐件不變」對照
  * （2026-10-09；做法同 scripts/arms-parity-ballot.ts：不建立任何物件，新定義以子查詢原樣放進同一個唯讀查詢，新舊輸出是同一個時間點的快照）。
  *
  * 產生一支 SQL（第一行 SET default_transaction_read_only = on），在正式庫唯讀執行，每個檢查一列：check_name、old_n、new_n、old_hash、new_hash、same：
@@ -18,7 +18,7 @@
  */
 const MIG = new URL("../supabase/migrations/", import.meta.url);
 const rd = async (n: string) => (await Deno.readTextFile(new URL(n, MIG))).replace(/\r\n/g, "\n");
-const NEW = "20261009050000_rep_district_ballot_unit.sql";
+const NEW = "20261009070000_rep_district_ballot_unit.sql";
 const BALLOT = "20261008150000_ballot_numbers_arm.sql";
 
 const [mode, out, mutation] = Deno.args;

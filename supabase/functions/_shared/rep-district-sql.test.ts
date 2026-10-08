@@ -1,5 +1,5 @@
 /**
- * 代表的號次單位改用選舉區（#464，migration 20261009050000_rep_district_ballot_unit.sql）。
+ * 代表的號次單位改用選舉區（#464，migration 20261009070000_rep_district_ballot_unit.sql）。
  *
  * 真的 SQL 灌進 PGlite：兩個資料庫灌同一份資料——「舊」＝#452 的現行定義（20261008150000、20261006220000），「新」＝舊的再套這支 migration。
  *   ① 號次單位函式：代表改用選舉區（參選紀錄與交件兩邊算出同一個字串）；其餘選舉別在一整排輸入上新舊逐字相同
@@ -14,8 +14,9 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { BALLOT_MIG, fnText, latestFn, mutate, readMig } from "./arms-pglite.ts";
 import { BASE_SCHEMA_SQL, SCHEMA_MIG } from "./cec-registrations-pglite.ts";
+import { normalizeCandidacyDistrictField, repDistrictKey } from "./electoral-district.ts";
 
-const NEW_MIG = "20261009050000_rep_district_ballot_unit.sql";
+const NEW_MIG = "20261009070000_rep_district_ballot_unit.sql";
 const GAP_MIG = "20261006220000_candidacy_read_side.sql";
 const DUP_MIG = "20261008151000_cand_no_dup_check.sql";
 const B = await readMig(BALLOT_MIG);
@@ -322,6 +323,86 @@ Deno.test("D1 重複檢查：代表的號次按選舉區比（payload 與參選�
   assertEquals((await conflicts(5))?.conflicts.map((c) => c.name), ["新己"]);
   assertEquals((await conflicts(6))?.conflicts.map((c) => c.name), ["新戊"]);
   await dbN.close();
+});
+
+// ---------- ⑤b 交件寫法：TS 的 repDistrictKey 與 SQL 的 ballot_number_unit 落在同一個單位 ----------
+type Variant = { name: string; p: Record<string, unknown> };
+const VARIANTS: Variant[] = [
+  { name: "標準", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第02選舉區" } },
+  { name: "補零之外：第2選舉區", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第2選舉區" } },
+  { name: "空白：第 02 選舉區", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第 02 選舉區" } },
+  { name: "縣市前綴＋鄉鎮＋選舉區全寫在 electoral_district", p: { region: "連江縣", electoral_district: "連江縣北竿鄉第02選舉區" } },
+  { name: "縣市前綴、sub_region 也有給", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "連江縣北竿鄉第02選舉區" } },
+  { name: "鄉鎮寫在 electoral_district 前面", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "北竿鄉第2選舉區" } },
+  { name: "中文數字", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第二選舉區" } },
+  { name: "「選區」", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第2選區" } },
+  { name: "sub_region 誤帶選舉區", p: { region: "連江縣", sub_region: "北竿鄉第02選舉區", electoral_district: "第2選舉區" } },
+  { name: "臺→台", p: { region: "雲林縣", sub_region: "臺西鄉", electoral_district: "第3選舉區" } },
+  { name: "縣市寫臺", p: { region: "臺中市", sub_region: "和平區", electoral_district: "第一選舉區", election_type: "直轄市山地原住民區民代表" } },
+  // 解不出來：兩邊都要是 NULL（不檢查），不能 TS 解不出來、SQL 卻算出一個單位
+  { name: "沒有選舉區", p: { region: "連江縣", sub_region: "北竿鄉" } },
+  { name: "沒有鄉鎮", p: { region: "連江縣", electoral_district: "第02選舉區" } },
+  { name: "單一選區的寫法（沒有號碼）", p: { region: "台東縣", sub_region: "蘭嶼鄉", electoral_district: "蘭嶼鄉選舉區" } },
+  { name: "第00選舉區", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "第00選舉區" } },
+  { name: "鄉鎮互相矛盾", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "南竿鄉第01選舉區" } },
+  { name: "縣市前綴但沒給 sub_region 以外的矛盾（前綴是別的縣市）", p: { region: "連江縣", sub_region: "北竿鄉", electoral_district: "金門縣北竿鄉第02選舉區" } },
+];
+async function crossGuards(db: Db, normalize: (p: Record<string, unknown>) => void): Promise<string[]> {
+  const bad: string[] = [];
+  for (const v of VARIANTS) {
+    const type = (v.p.election_type as string | undefined) ?? "鄉鎮市民代表";
+    const original: Record<string, unknown> = { election_type: type, ...v.p };
+    const key = repDistrictKey(type, original);
+    const want = key ? `${key.region}|${key.town}${key.district}` : null;
+    const payload = { ...original };
+    normalize(payload); // 交件端（contribute-handler）入庫前做的事
+    const got = (await rows<{ u: string | null }>(db, `SELECT ballot_number_unit($1, $2, $3, $4, NULL) AS u`,
+      [type, payload.region ?? null, payload.electoral_district ?? null, payload.sub_region ?? null]))[0].u;
+    if (got !== want) bad.push(`${v.name}：TS=${want} SQL=${got}`);
+  }
+  return bad;
+}
+Deno.test("K1 交件端正規化：代理的各種寫法（縣市前綴、中文數字、「選區」、補零、帶選舉區的 sub_region）經 normalizeCandidacyDistrictField 之後，SQL 的號次單位＝TS 的 repDistrictKey；解不出來的兩邊都是 NULL", async () => {
+  const db = await buildReady("new");
+  assertEquals(await crossGuards(db, normalizeCandidacyDistrictField), []);
+  // 標準寫法與有解的變體落在同一個單位（連江縣|北竿鄉第02選舉區）
+  const canon = (await rows<{ u: string }>(db, `SELECT ballot_number_unit('鄉鎮市民代表', '連江縣', '第02選舉區', '北竿鄉', NULL) AS u`))[0].u;
+  for (const v of VARIANTS.slice(0, 9)) {
+    const pl: Record<string, unknown> = { election_type: "鄉鎮市民代表", ...v.p };
+    normalizeCandidacyDistrictField(pl);
+    assertEquals((await rows<{ u: string }>(db, `SELECT ballot_number_unit('鄉鎮市民代表', $1, $2, $3, NULL) AS u`, [pl.region, pl.electoral_district, pl.sub_region]))[0].u, canon, v.name);
+  }
+  // 臺西鄉：正規化不改原字（免得落庫時多建一列鄉鎮），單位照樣是「台西鄉」
+  const tai = { election_type: "鄉鎮市民代表", region: "雲林縣", sub_region: "臺西鄉", electoral_district: "第3選舉區" };
+  normalizeCandidacyDistrictField(tai);
+  assertEquals([tai.sub_region, tai.electoral_district], ["臺西鄉", "第03選舉區"]);
+  // 解不出來的原樣留著
+  const weird = { election_type: "鄉鎮市民代表", region: "台東縣", sub_region: "蘭嶼鄉", electoral_district: "蘭嶼鄉選舉區" };
+  normalizeCandidacyDistrictField(weird);
+  assertEquals(weird, { election_type: "鄉鎮市民代表", region: "台東縣", sub_region: "蘭嶼鄉", electoral_district: "蘭嶼鄉選舉區" });
+  // 議員不受影響
+  const council = { election_type: "縣市議員", region: "台北市", electoral_district: "第 2 選區" };
+  normalizeCandidacyDistrictField(council);
+  assertEquals(council.electoral_district, "第02選舉區");
+  // contribute-handler 真的對每一筆 candidacy 呼叫它
+  const handler = await Deno.readTextFile(new URL("./contribute-handler.ts", import.meta.url));
+  assert(/contribution_type === "candidacy"\) normalizeCandidacyDistrictField\(/.test(handler));
+  await db.close();
+});
+
+Deno.test("K2 還原驗證：交件端不正規化 → 帶縣市前綴、中文數字、「選區」的寫法在 SQL 算出別的單位或 NULL，K1 的對照必須紅", async () => {
+  const db = await buildReady("new");
+  const bad = await crossGuards(db, () => {});
+  assert(bad.length >= 4, `不正規化應該有好幾種寫法對不上：${bad.join("；")}`);
+  assert(bad.some((b) => b.startsWith("縣市前綴＋鄉鎮＋選舉區全寫在")) && bad.some((b) => b.startsWith("中文數字")) && bad.some((b) => b.startsWith("「選區」")));
+  await db.close();
+});
+
+Deno.test("K3 還原驗證：SQL 單位函式不處理矛盾（拿掉鄉鎮欄與選舉區前綴的比對）→ 帶別縣市前綴／鄉鎮矛盾的寫法 TS 是 NULL、SQL 卻算出單位，K1 的對照必須紅", async () => {
+  const db = await buildReady("new", (s) => mutate(s, "CASE WHEN x.dtown <> '' AND x.ptown <> '' AND replace(x.dtown, '臺', '台') <> replace(x.ptown, '臺', '台') THEN ''\n                          ELSE COALESCE(NULLIF(x.dtown, ''), x.ptown) END AS town", "COALESCE(NULLIF(x.dtown, ''), x.ptown) AS town"));
+  const bad = await crossGuards(db, normalizeCandidacyDistrictField);
+  assert(bad.some((b) => b.startsWith("鄉鎮互相矛盾")), bad.join("；"));
+  await db.close();
 });
 
 // ---------- ⑥ migration 的範圍 ----------
