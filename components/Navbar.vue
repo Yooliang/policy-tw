@@ -202,7 +202,7 @@ const isActive = (path: string) => route.path === path
             </button>
 
             <p class="text-center text-xs text-slate-400 mt-6">
-              登入即表示您同意我們的服務條款與隱私政策
+              登入即表示您同意我們的<RouterLink to="/terms" class="underline underline-offset-2 hover:text-slate-600" @click="isLoginModalOpen = false">服務條款</RouterLink>與<RouterLink to="/privacy" class="underline underline-offset-2 hover:text-slate-600" @click="isLoginModalOpen = false">隱私政策</RouterLink>
             </p>
           </div>
       </div>
