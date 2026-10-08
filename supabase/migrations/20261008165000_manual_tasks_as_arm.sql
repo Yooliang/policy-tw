@@ -42,7 +42,7 @@
 -- 沒動：contribution_auto_tasks／其他 28 支臂的內容、refresh_dispatch_blocked（手動任務的飽和／回報查無仍在 TS 過濾，行為不變）、task_dispatched、queue_slot、task_boost（加推手動任務
 --   現在改成作用在它的派工列上，LEAST(queue_at, 加推時間)，跟自動缺口一樣）。
 -- 守門：supabase/functions/_shared/manual-open-arm.test.ts（每一處替換對現行定義做機械比對；PGlite 跑真的 seed／rebalance／觸發器；假時鐘；還原驗證）。
--- 協議 1.75.0（skill.md 只動佇列順序的說明）。
+-- 協議 1.77.0（skill.md 只動佇列順序的說明）。
 
 -- ------------------------------------------------------------
 -- 1. 時間、常數與臂本體（單一真相在 SQL）
@@ -163,6 +163,7 @@ LANGUAGE sql IMMUTABLE AS $$
     'placeholder_politicians',
     'election_results',
     'owner_mismatch',
+    'ballot_numbers',
     'manual_visitor',
     'manual_open'
   ]::TEXT[]
@@ -191,7 +192,7 @@ END
 $$;
 
 -- ------------------------------------------------------------
--- 4. 總表 contribution_auto_tasks_arms：20261008121000 的現行定義＋兩行 UNION ALL
+-- 4. 總表 contribution_auto_tasks_arms：20261008150000 的現行定義＋兩行 UNION ALL
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT, arm TEXT, opened_by JSONB)
@@ -238,6 +239,7 @@ LANGUAGE sql STABLE AS $$
   UNION ALL SELECT 'placeholder_politicians' AS arm, t.* FROM contribution_auto_tasks_placeholder_politicians() t
   UNION ALL SELECT 'election_results' AS arm, t.* FROM contribution_auto_tasks_election_results() t
   UNION ALL SELECT 'owner_mismatch' AS arm, t.* FROM contribution_auto_tasks_owner_mismatch() t
+  UNION ALL SELECT 'ballot_numbers' AS arm, t.* FROM contribution_auto_tasks_ballot_numbers() t
   UNION ALL SELECT 'manual_visitor' AS arm, t.* FROM contribution_auto_tasks_manual(true) t
   UNION ALL SELECT 'manual_open' AS arm, t.* FROM contribution_auto_tasks_manual(false) t
        ),
@@ -509,7 +511,7 @@ DECLARE v_old TEXT := obj_description('contribution_auto_tasks_arms()'::regproce
 BEGIN
   IF v_old IS NOT NULL AND v_old NOT LIKE '%20261008165000%' THEN
     EXECUTE format('COMMENT ON FUNCTION contribution_auto_tasks_arms IS %L',
-                   v_old || '｜2026-10-08（20261008165000）：加第 29、30 個分支 manual_visitor、manual_open（open 的手動任務，task_id＝任務 uuid；總表現在 30 個分支、38 個活動名）');
+                   v_old || '｜2026-10-08（20261008165000）：加第 30、31 個分支 manual_visitor、manual_open（open 的手動任務，task_id＝任務 uuid；總表現在 31 個分支、39 個活動名）');
   END IF;
 END
 $$;

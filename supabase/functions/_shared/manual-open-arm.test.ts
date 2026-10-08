@@ -22,7 +22,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
+import { applyP2, BALLOT_MIG, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
 const MIG = "20261008165000_manual_tasks_as_arm.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
@@ -30,12 +30,13 @@ const POP_MIG = "20261002000006_queue_pop_head.sql";
 const LIN_MIG = "20261006034900_policy_lineages.sql";
 const M = await readMig(MIG);
 const PR = await readMig(P2_PR_MIG);
+const BL = await readMig(BALLOT_MIG);
 const QP = await readMig(QP_MIG);
 const P0 = await readMig(P0_MIG);
 const P1 = await readMig(P1_MIG);
 const POP = await readMig(POP_MIG);
 const LIN = await readMig(LIN_MIG);
-const RESTUB = ["raw", "election_results", "party_gap", "party_roster"] as const;
+const RESTUB = ["raw", "election_results", "party_gap", "party_roster", "ballot_numbers"] as const;
 
 // ============================================================
 // A. 文字層
@@ -48,20 +49,20 @@ const definersBefore = async (fn: string, before: string) => {
 
 Deno.test("A1 抄的底是現行版：總表、seed 最後是 party_roster（121000）、rebalance 是 #443、queue_preview 是 policy_lineages、活動名是 P1、contribution_auto_tasks 是 queue_pop_head", async () => {
   const last = async (fn: string) => (await definersBefore(fn, MIG)).at(-1);
-  assertEquals(await last("contribution_auto_tasks_arms"), P2_PR_MIG, "總表的底過期了：以最新那版為底重做");
+  assertEquals(await last("contribution_auto_tasks_arms"), BALLOT_MIG, "總表的底過期了：以最新那版為底重做");
   assertEquals(await last("seed_auto_task_queue"), P2_PR_MIG, "seed 的底過期了");
   assertEquals(await last("rebalance_queue"), QP_MIG, "rebalance 的底過期了");
   assertEquals(await last("queue_preview"), LIN_MIG, "queue_preview 的底過期了");
-  assertEquals(await last("activity_arm_names"), P1_MIG, "活動名的底過期了");
+  assertEquals(await last("activity_arm_names"), BALLOT_MIG, "活動名的底過期了");
   assertEquals(await last("contribution_auto_tasks"), POP_MIG, "contribution_auto_tasks 的底過期了（contribution_queue_tasks 是它的複本）");
 });
 
 Deno.test("A2 總表＝現行定義＋兩行 UNION ALL（manual_visitor、manual_open），其餘一字不差；活動名＝P1 的清單＋兩個名字", () => {
   const NEW_LINES = "  UNION ALL SELECT 'manual_visitor' AS arm, t.* FROM contribution_auto_tasks_manual(true) t\n  UNION ALL SELECT 'manual_open' AS arm, t.* FROM contribution_auto_tasks_manual(false) t\n";
-  assertEquals(mutate(fnText(M, "contribution_auto_tasks_arms"), NEW_LINES, ""), fnText(PR, "contribution_auto_tasks_arms"));
+  assertEquals(mutate(fnText(M, "contribution_auto_tasks_arms"), NEW_LINES, ""), fnText(BL, "contribution_auto_tasks_arms"));
   assertEquals(
-    mutate(fnText(M, "activity_arm_names"), "    'owner_mismatch',\n    'manual_visitor',\n    'manual_open'\n  ]::TEXT[]", "    'owner_mismatch'\n  ]::TEXT[]"),
-    fnText(P1, "activity_arm_names"),
+    mutate(fnText(M, "activity_arm_names"), "    'ballot_numbers',\n    'manual_visitor',\n    'manual_open'\n  ]::TEXT[]", "    'ballot_numbers'\n  ]::TEXT[]"),
+    fnText(BL, "activity_arm_names"),
   );
 });
 
@@ -224,7 +225,7 @@ type BuildOpts = { withMine?: boolean; withTasks?: boolean; mutateMig?: (s: stri
 async function buildDb(o: BuildOpts = {}): Promise<Db> {
   const withMine = o.withMine ?? true;
   const migs = [{ name: P2_ER_MIG }, { name: P2_PG_MIG }, { name: P2_PR_MIG }];
-  const db = await buildArmsDb({ branches: BRANCHES, afterP1Sql: await PREREQ(), p2: { migs, restub: RESTUB } });
+  const db = await buildArmsDb({ branches: BRANCHES, extraBranches: ["ballot_numbers"], afterP1Sql: await PREREQ(), p2: { migs, restub: RESTUB } });
   await db.exec("SET app.activity_today = '2026-10-08'");
   if (o.withTasks ?? true) await db.exec(TASKS_SQL);
   if (withMine) await applyP2(db, (o.mutateMig ?? ((s) => s))(M), RESTUB);

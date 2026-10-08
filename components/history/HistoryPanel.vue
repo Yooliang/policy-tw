@@ -6,6 +6,7 @@ import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
+import ModelInfo from '../ModelInfo.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 
 /**
@@ -14,9 +15,11 @@ import { hostOf, shortUrlsIn } from '../../lib/url'
  * 標題列（圖示＋標題＋筆數）不在此限，維持跟頁面上其他區塊標題一致。狀態、型別膠囊保留顏色、不粗。
  * 這條規則涵蓋子元件 HistoryEntryDetail、TimelineNote、ScoreBar；之後在這些元件加東西，也別再加 font-bold／font-medium 或 text-sm 以上。
  * 沿革：2026-09-17 曾把摘要那句從預設 16px 粗體降到 text-sm font-medium，免得在 12px 的中繼資料裡跳得像主標；10-06 再往前一步，連 text-sm 與粗體都拿掉。
+ * 模型名（agent_tool）怎麼露出由 modelDisplay 決定（2026-10-08，維護者）：政見頁與候選人頁傳 'icon'，收成 info 圖示、滑過或點一下才看得到；
+ * 預設 'inline' 直接寫在代號後面（貢獻看板這類透明度頁面、公民提問的處理紀錄）。代號 agent_name 兩種模式都照舊顯示。
  * 沒有貢獻紀錄時顯示資料來源說明（匯入的 source_url／source_note），不留空白。
  */
-const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean }>(), { title: '查核履歷', compact: false })
+const props = withDefaults(defineProps<{ target: HistoryTarget; id: string; title?: string; compact?: boolean; modelDisplay?: 'inline' | 'icon' }>(), { title: '查核履歷', compact: false, modelDisplay: 'inline' })
 const emit = defineEmits<{ loaded: [payload: { total: number; appliedCount: number }] }>()
 
 const open = ref(true)
@@ -113,7 +116,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
       <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
         <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
           <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : 'bg-amber-400 ring-amber-100']"></span>
-          <button type="button" class="w-full text-left" @click="toggleEntry(e.id)">
+          <button type="button" class="w-full text-left" :aria-expanded="expanded.has(e.id)" @click="toggleEntry(e.id)">
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span class="font-mono text-slate-400">{{ formatDate(e.at) }}</span>
               <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
@@ -129,17 +132,19 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
             <!-- 同一級大小、不粗（2026-09-17 降級，2026-10-06 再統一成 text-xs）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
             <p :class="['mt-1 text-xs text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
-            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-              <span>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
+          </button>
+          <!-- 這一列放在按鈕外面、自己接點擊（2026-10-08）：info 圖示本身是一顆按鈕，按鈕不能包按鈕。
+               鍵盤展開／收合走上面那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
+          <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 cursor-pointer" @click="toggleEntry(e.id)">
+              <span>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><ModelInfo v-if="e.agent_tool && modelDisplay === 'icon'" :model="e.agent_tool" class="ml-1" /><span v-else-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <!-- 分數拉鋸條（2026-10-05，使用者要求）：跟貢獻看板同一個元件。已上線、已退件的也照看板畫法，
                    不另外特判——滿格綠＝達標上線、滿格紅＝退件，一眼分得出這筆是怎麼走到現在的 -->
               <ScoreBar :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
               <span v-if="e.adjudications.length">有裁決</span>
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
-            </div>
-          </button>
+          </div>
           <div v-if="expanded.has(e.id)" class="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
-            <HistoryEntryDetail :entry="e" />
+            <HistoryEntryDetail :entry="e" :model-display="modelDisplay" />
           </div>
         </li>
       </ol>
