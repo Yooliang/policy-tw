@@ -3,6 +3,7 @@
  *
  * 路由：
  *   /politician/:id、/policy/:id、/lineage/:id → 邊緣 SSR（dist-ssr/entry-server.js）＋ Cache API（10 分鐘，過期先回舊的背景重算）
+ *     人物 id 是已合併的 → 301 到保留的那位；查無此人 → 404（不快取）。建置之後才新增的人物也是現場從資料庫渲染，不依賴預渲染
  *   /election/:id/:縣市、/election/:id/:縣市/:鄉鎮 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；
  *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
@@ -20,6 +21,7 @@ import { render, configureSsr, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr
 import { readWorkerConfig } from './worker-config.js'
 import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
+import { nonPageResponse } from './render-status.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
@@ -198,17 +200,24 @@ async function renderPage(request, ctx) {
   const hit = await cache.match(cacheKey)
   if (hit) {
     const age = Number(hit.headers.get('X-Rendered-At') ?? 0)
-    if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache).catch(() => undefined))
+    if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache, '').catch(() => undefined))
     const h = new Headers(hit.headers); h.set('X-Cache', 'HIT')
     return new Response(hit.body, { status: hit.status, headers: h })
   }
-  const res = await renderAndStore(path, url.origin, cacheKey, cache)
+  const res = await renderAndStore(path, url.origin, cacheKey, cache, url.search)
   return res
 }
 
-async function renderAndStore(path, origin, cacheKey, cache) {
+async function renderAndStore(path, origin, cacheKey, cache, search = '') {
   const [shell, r] = await Promise.all([loadShell(), render(path)])
   if (r.status === 'passthrough') return null
+  // 301（已合併的人物 → 保留者）與 404 的組法在 render-status.js（#466）；兩者都不進快取
+  const special = nonPageResponse(r, { shell, origin, search })
+  if (special) {
+    // 以前是 200 的頁現在變 301／404（人物剛被合併、被移除）：舊的快取不能再當 200 發
+    await cache.delete(cacheKey).catch(() => undefined)
+    return special
+  }
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': `public, max-age=0, s-maxage=${cfg.staleTtlS}`,
@@ -216,10 +225,6 @@ async function renderAndStore(path, origin, cacheKey, cache) {
     'X-Rendered-At': String(Date.now()),
     'X-Cache': 'MISS',
   })
-  if (r.status === 404) {
-    const body = shell.replace('<div id="app"></div>', '<div id="app"></div><script>window.__INITIAL_STATE__="{}"</script>')
-    return new Response(body, { status: 404, headers })
-  }
   const body = assemble(shell, r)
   const res = new Response(body, { status: 200, headers })
   await cache.put(cacheKey, res.clone())

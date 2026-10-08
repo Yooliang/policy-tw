@@ -3,7 +3,9 @@
  * 只寫 contributions（待審佇列）；schema 驗證、來源網址格式、每 IP 每日限額、24 小時去重。
  */
 
-import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { rosterBatchProblems } from "./roster-batch-gate.ts";
+import { chunksOf } from "./in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { PROTOCOL_URL } from "./protocol.ts";
@@ -73,17 +75,16 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
   const taskIds = [...new Set(items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))];
   if (taskIds.length === 0) return new Set();
   const manualIds = taskIds.filter((t) => !t.startsWith("auto:") && UUID_RE.test(t));
-  const [manualRes, inFlightRes] = await Promise.all([
-    manualIds.length > 0
-      ? supabase.from("contribution_tasks").select("id, task_type").in("id", manualIds)
-      : Promise.resolve({ data: [], error: null }),
-    supabase.from("contributions").select("task_id").eq("contributor_ip_hash", ipHash)
-      .in("task_id", taskIds).in("status", [...IN_FLIGHT_STATUSES]).limit(1000),
+  // 名冊大批次最多 150 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
+  const [manualResList, inFlightResList] = await Promise.all([
+    Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, task_type").in("id", chunk))),
+    Promise.all(chunksOf(taskIds).map((chunk) => supabase.from("contributions").select("task_id").eq("contributor_ip_hash", ipHash)
+      .in("task_id", chunk).in("status", [...IN_FLIGHT_STATUSES]).limit(1000))),
   ]);
-  if (manualRes.error) throw new Error(`task types lookup: ${manualRes.error.message}`);
-  if (inFlightRes.error) throw new Error(`in-flight lookup: ${inFlightRes.error.message}`);
-  const manualTypes = new Map<string, string>(((manualRes.data ?? []) as Array<{ id: string; task_type: string }>).map((r) => [r.id, r.task_type]));
-  const inFlight = new Set<string>(((inFlightRes.data ?? []) as Array<{ task_id: string }>).map((r) => r.task_id));
+  for (const r of manualResList) if (r.error) throw new Error(`task types lookup: ${r.error.message}`);
+  for (const r of inFlightResList) if (r.error) throw new Error(`in-flight lookup: ${r.error.message}`);
+  const manualTypes = new Map<string, string>(manualResList.flatMap((r) => ((r.data ?? []) as Array<{ id: string; task_type: string }>)).map((r) => [r.id, r.task_type]));
+  const inFlight = new Set<string>(inFlightResList.flatMap((r) => ((r.data ?? []) as Array<{ task_id: string }>)).map((r) => r.task_id));
   return blockedSingleAnswerIndexes(items, manualTypes, inFlight);
 }
 
@@ -169,15 +170,16 @@ async function fetchClaimCandidates(
     groups.set(gk, g);
   }
   if (groups.size === 0) return [];
-  const rows = await Promise.all([...groups.values()].map(async (g) => {
+  // 名冊大批次的 candidacy 一批最多 150 個 politician_id：每 IN_CHUNK 個一查再合併（網址長度，#455 審查）
+  const rows = await Promise.all([...groups.values()].flatMap((g) => chunksOf([...g.values]).map(async (chunk) => {
     const { data, error } = await supabase.from("contributions")
       .select("id, contribution_type, payload, agent_name, contributor_ip_hash, status")
       .eq("contribution_type", g.type).eq("status", "pending")
-      .in(`payload->>${g.field}`, [...g.values])
+      .in(`payload->>${g.field}`, chunk)
       .order("created_at", { ascending: true }).limit(200);
     if (error) throw new Error(`claim candidates (${g.type}): ${error.message}`);
     return (data ?? []) as ExistingClaim[];
-  }));
+  })));
   return rows.flat();
 }
 
@@ -228,6 +230,13 @@ export async function handleContribute(
     if (item.contribution_type === "candidacy") normalizeCandidacyDistrictField(item.payload as Record<string, unknown>);
   }
 
+  // 超過 MAX_BATCH 筆的批次（整批都是引用中選會登記名冊的 candidacy，結構已由 validateContributionRequest 限定）：
+  // 每一筆都要跟名冊資料表逐位吻合才收（2026-10-08，維護者裁示 B 案）；不算被拒
+  if (validation.items.length > MAX_BATCH) {
+    const gate = await rosterBatchProblems(supabase, validation.items);
+    if (!gate.ok) return { status: 400, body: { success: false, error: gate.error, message: gate.message, errors: gate.errors } };
+  }
+
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const sq = submitQuotaFor(actor, ipHash);
@@ -248,8 +257,9 @@ export async function handleContribute(
   // 查不到、連結打不開也要回一份說明——那才是訪客看得到的東西。
   const manualNoChange = validation.items.filter((it) => it.contribution_type === "no_change" && typeof it.task_id === "string" && !it.task_id.startsWith("auto:")).map((it) => it.task_id as string);
   if (manualNoChange.length > 0) {
-    const { data: qTasks } = await supabase.from("contribution_tasks").select("id").in("id", manualNoChange).eq("task_type", "question").limit(50);
-    if ((qTasks ?? []).length > 0) {
+    const qTaskLists = await Promise.all(chunksOf(manualNoChange).map((chunk) => supabase.from("contribution_tasks").select("id").in("id", chunk).eq("task_type", "question").limit(50)));
+    const qTasks = qTaskLists.flatMap((r) => (r.data ?? []) as unknown[]);
+    if (qTasks.length > 0) {
       return { status: 400, body: { success: false, error: "question_needs_answer", message: "提問任務只收 question_answer：查不到、連結需登入打不開，也請用 question_answer 回一份說明（訪客看得到的是回答，不是 no_change）", task_ids: ((qTasks ?? []) as Array<{ id: string }>).map((t) => t.id) } };
     }
   }
@@ -483,11 +493,16 @@ export async function handleContribute(
 
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
-  const { data: existing, error: dupError } = await supabase
-    .from("contributions").select("id, payload_hash, status").in("payload_hash", hashes).gte("created_at", since);
-  if (dupError) throw new Error(`dedupe lookup: ${dupError.message}`);
+  // 名冊大批次最多 150 筆：64 字元的雜湊 150 個放進一條網址太長，每 40 個一查
   type ExistingRow = { id: string; payload_hash: string; status: string };
-  const existingByHash = new Map<string, ExistingRow>(((existing ?? []) as ExistingRow[]).map((r) => [r.payload_hash, r]));
+  const existing: ExistingRow[] = [];
+  for (let i = 0; i < hashes.length; i += 40) {
+    const { data: part, error: dupError } = await supabase
+      .from("contributions").select("id, payload_hash, status").in("payload_hash", hashes.slice(i, i + 40)).gte("created_at", since);
+    if (dupError) throw new Error(`dedupe lookup: ${dupError.message}`);
+    existing.push(...((part ?? []) as ExistingRow[]));
+  }
+  const existingByHash = new Map<string, ExistingRow>(existing.map((r) => [r.payload_hash, r]));
 
   /**
    * 重複提交＝同意票（2026-09-18）。
@@ -641,9 +656,16 @@ export async function handleContribute(
     };
   }
 
+  // 同一批裡內容完全相同（雜湊相同）的只寫第一筆：不然 150 筆複製貼上會寫進 149 筆重複的貢獻，回應的編號還會被 Map 覆寫成同一個（#455 審查）
+  const seenInBatch = new Set<string>();
+  const dupInBatch = new Set<number>();
+  hashes.forEach((h, i) => {
+    if (existingByHash.has(h) || blocked.has(i) || mergedByIndex.has(i) || bypassNotes.has(i)) return;
+    if (seenInBatch.has(h)) dupInBatch.add(i); else seenInBatch.add(h);
+  });
   const toInsert = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
-    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i))
+    .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i))
     .map(({ item, hash }) => ({
       contribution_type: item.contribution_type,
       payload: item.payload,
@@ -718,8 +740,10 @@ export async function handleContribute(
   // 提交後釋放該任務的軟認領（別人可以接手同一目標）
   const taskIds = [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"))];
   if (taskIds.length > 0) {
-    const { error: leaseError } = await supabase.from("contribution_task_leases").delete().in("task_id", taskIds);
-    if (leaseError) console.error("lease release failed:", leaseError.message);
+    for (const chunk of chunksOf(taskIds)) {
+      const { error: leaseError } = await supabase.from("contribution_task_leases").delete().in("task_id", chunk);
+      if (leaseError) console.error("lease release failed:", leaseError.message);
+    }
   }
 
   const results = validation.items.map((item, i) => {
@@ -765,7 +789,7 @@ export async function handleContribute(
       index: i,
       contribution_type: item.contribution_type,
       contribution_id: id,
-      status: dup ? "duplicate" : "pending",
+      status: dup || dupInBatch.has(i) ? "duplicate" : "pending",
       required_agree: need,
       // 疑似口號／行程／個人表態：收下但當場告訴提交者，驗證者也會看到同一句（見 policy-likeness.ts）
       ...(item.contribution_type === "policy"
@@ -783,6 +807,7 @@ export async function handleContribute(
         })()
         : {}),
       ...(dup ? { existing_status: dup.status, message: `${DEDUPE_WINDOW_HOURS} 小時內已有相同內容的貢獻，沿用原 id` } : {}),
+      ...(!dup && dupInBatch.has(i) ? { existing_status: "pending", message: "這一批裡有內容完全相同的一筆，只收第一筆，沿用它的 id" } : {}),
       ...(sameMachineDup.has(i) ? { note: `同一台機器（同來源 IP）已經交過同對象的同一件事（${sameMachineDup.get(i)}），你這筆**不會**算成對它的同意票——一台機器只有一票。之後同對象的別再交，去驗別人的。` } : {}),
       ...(partialNoOp.has(i) ? { warning: `這幾欄改完跟現值一樣（別人先修好了）：${partialNoOp.get(i)!.join("、")}；只有其餘欄位會被驗證與套用` } : {}),
       review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${id}`,

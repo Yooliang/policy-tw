@@ -71,7 +71,12 @@ const FIELD_LABEL: Record<string, string> = {
   bio: "簡介", avatar_url: "照片", candidate_status: "參選狀態", position: "職位", election_type: "選舉類型", title: "標題",
   description: "內容", category: "分類", status: "狀態", proposed_date: "提出日", election_id: "所屬選舉", source_url: "來源網址",
   end_date: "卸任日", end_reason: "卸任原因", withdrawn_after_filing: "退選前有沒有登記",
+  slogan: "口號", education: "學歷", experience: "經歷",
 };
+/** politician 貢獻會帶的內容欄位（apply-contribution.ts applyPolitician 實際會寫的那幾個）；摘要只列有值的 */
+const POLITICIAN_SUMMARY_FIELDS = [
+  "party", "region", "sub_region", "position", "current_position", "birth_year", "education_level", "bio", "avatar_url", "slogan", "education", "experience",
+] as const;
 /** 退選前有沒有登記（#345 後續）的值：網站上的說法 */
 const WITHDRAWN_AFTER_FILING_LABEL: Record<string, string> = { true: "登記後退選", false: "表態不參選（沒登記過）" };
 
@@ -108,10 +113,18 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
 
   switch (input.contribution_type) {
     case "politician": {
-      const fields = ["party", "region", "current_position", "birth_year", "education_level", "bio", "avatar_url", "slogan"].filter((k) => p[k] !== undefined && p[k] !== null && p[k] !== "");
-      summary = fields.length > 0
-        ? `為「${name || "（未填姓名）"}」補基本資料：${fields.map((k) => FIELD_LABEL[k] ?? k).join("、")}`
-        : `新增政治人物「${name || "（未填姓名）"}」`;
+      // 帶 politician_id（或已落到既有人物）＝更新既有人物，不管補了什麼欄位都不能寫成「新增」
+      // （2026-10-08：補學經歷出處的貢獻只帶 education／experience，舊清單看不到，掉到「新增政治人物」，
+      // 維護者誤以為系統在派「新增已存在人物」的任務）。
+      const fields = [...new Set(POLITICIAN_SUMMARY_FIELDS
+        .filter((k) => { const v = p[k]; return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== ""; })
+        .map((k) => FIELD_LABEL[k] ?? k))];
+      const who = name || "（未填姓名）";
+      summary = politicianId
+        ? (fields.length > 0 ? `為「${who}」補資料：${fields.join("、")}` : `更新「${who}」的資料`)
+        : fields.length > 0
+        ? `為「${who}」補基本資料：${fields.join("、")}`
+        : `新增政治人物「${who}」`;
       break;
     }
     case "candidacy": {

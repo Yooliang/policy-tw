@@ -23,6 +23,7 @@ import {
   type RegistrationRecord,
 } from "./cec-registrations.ts";
 import { mutate, readMig } from "./arms-pglite.ts";
+import { MAX_BATCH_ROSTER } from "./contribution-schema.ts";
 import { buildRegistrationsDb, DATA_MIG, SCHEMA_MIG } from "./cec-registrations-pglite.ts";
 import { ROSTER_CEC_GAP_HINT, ROSTER_GAP_LIMIT, ROSTER_REGISTRATION_GAP_HINT, shapeTaskCurrent } from "./task-context.ts";
 import { readTownIndex, renderDataMigration, type ParsedSource } from "../../../scripts/cec-registrations-lib.ts";
@@ -827,8 +828,8 @@ Deno.test("提示與函式對得上：提示講的欄位函式真的回得出來
   for (const k of ["registered", "matched", "needs_status_count", "needs_status", "needs_status_truncated", "missing_count", "unnamed_count", "source_urls", "truncated", "missing"]) assert(sql.includes(`'${k}'`), `函式沒有回 ${k}`);
   for (const k of ["politician_id", "politician_election_id", "candidacy_status"]) assert(sql.includes(`'${k}'`), `needs_status 沒有 ${k}`);
   for (const k of ["name", "party", "region", "sub_region", "village", "district", "row_no"]) assert(sql.includes(`'${k}'`), `missing 沒有 ${k}`);
-  assertEquals(ROSTER_GAP_LIMIT, 120);
-  assert(sql.includes("p_limit INTEGER DEFAULT 120"));
+  assertEquals(ROSTER_GAP_LIMIT, MAX_BATCH_ROSTER);
+  assert(sql.includes("p_limit INTEGER DEFAULT 120"), "函式預設值不動（改預設值要另一支 migration）；task-context 一律明確傳 p_limit");
 });
 
 Deno.test("task-context 抓 roster_check 現況時才呼叫缺口函式：已投票屆別不呼叫、出錯不擋派工、傳縣市與鄉鎮", async () => {

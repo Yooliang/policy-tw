@@ -25,6 +25,7 @@ import type { PartyAliasRow, PartyRegistry, PartyRow } from '../parties'
 import type { Matrix as PolicyMatrix } from '../md/dataset'
 import { supabasePublic } from '../supabase'
 import { directoryFor, partyListFor } from './page-data'
+import { buildSitemapMeta } from '../sitemap'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -268,6 +269,13 @@ function writeEdgeRoutes(paths: string[]): void {
   fs.writeFileSync(EDGE_ROUTES_FILE, JSON.stringify(paths), 'utf8')
 }
 
+/** 網站地圖補充（各網址 lastmod、不進網站地圖的網址）寫給 postbuild；規則在 lib/sitemap.ts */
+export const SITEMAP_META_FILE = 'dist/.sitemap-meta.json'
+function writeSitemapMeta(meta: unknown): void {
+  fs.mkdirSync(path.dirname(SITEMAP_META_FILE), { recursive: true })
+  fs.writeFileSync(SITEMAP_META_FILE, JSON.stringify(meta), 'utf8')
+}
+
 export function collectRoutePaths(full: DataSnapshot): string[] {
   const scope = politicianScope()
   const idsWithPolicies = new Set(full.policies.map((p) => String(p.politicianId)))
@@ -285,6 +293,13 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...(full.lineages ?? []).map((l) => `/lineage/${l.id}`),
   ]
   const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
+  const analysisIds = analysisListedPolicyIds(full.policies)
+  const sitemapMeta = buildSitemapMeta({
+    politicians,
+    policies: full.policies,
+    lineages: full.lineages ?? [],
+    analysisPolicyIds: analysisIds,
+  })
   const paths = [
     ...STATIC_CONTENT_ROUTES,
     ...full.elections.map((e) => `/election/${electionSegment(e)}`),
@@ -292,7 +307,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     // 政見矩陣頁：內容頁要可收錄，預渲染（有資料才有這一頁；網址那一段與矩陣算的那一屆同一個 electionSegment）
     ...(full.policyMatrix ? [`/election/${full.policyMatrix.election.segment}/matrix`] : []),
     ...electionTownshipRoutes(full),
-    ...analysisListedPolicyIds(full.policies).map((id) => `/analysis/${id}`),
+    ...analysisIds.map((id) => `/analysis/${id}`),
     ...full.discussions.map((d) => `/community/${d.id}`),
     // 人物一覽的各組（筆畫）、各黨頁（#346）：網址都是 ASCII（/politicians/11、/party/16）
     ...directoryFor(full).index.map((g) => `/politicians/${g.key}`),
@@ -300,6 +315,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...(prerenderEdge ? edgePaths : []),
   ]
   if (!prerenderEdge) writeEdgeRoutes(edgePaths)
-  console.log(`[ssg] routes: ${paths.length} 預渲染＋${prerenderEdge ? 0 : edgePaths.length} 邊緣渲染 (politicians scope=${scope}: ${politicians.length}/${full.politicians.length})`)
+  writeSitemapMeta(sitemapMeta)
+  console.log(`[ssg] routes: ${paths.length} 預渲染＋${prerenderEdge ? 0 : edgePaths.length} 邊緣渲染 (politicians scope=${scope}: ${politicians.length}/${full.politicians.length}；網站地圖略過政見數不足的人物 ${sitemapMeta.skip.length}、有 lastmod 的網址 ${Object.keys(sitemapMeta.lastmod).length})`)
   return paths
 }

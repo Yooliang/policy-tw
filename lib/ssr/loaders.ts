@@ -8,6 +8,7 @@ import { mapLineage } from '../lineage'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
 import { fetchAllPages } from '../fetch-all-pages'
+import { followMerged, isPoliticianId, type MergeLookup } from './merge-chain'
 
 /**
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
@@ -71,12 +72,17 @@ async function policiesOfLineage(lineageId: string): Promise<Policy[]> {
   return ((data ?? []) as RawPolicy[]).filter((r) => !r.removed_at).map(mapPolicy)
 }
 
-async function politiciansByIds(ids: string[]): Promise<Politician[]> {
+/** 原始列（含已合併的）。人物頁要靠 merged_into 決定轉向，所以不在這裡濾 */
+async function politicianRowsByIds(ids: string[]): Promise<RawPolitician[]> {
   if (ids.length === 0) return []
   // query-bounds: ok — 一頁提到的人物是個位數
   const { data, error } = await supabasePublic.from('politicians_with_elections').select('*').in('id', ids.slice(0, 200)).order('id').limit(200)
   if (error) throw new Error(`politicians_with_elections by id: ${error.message}`)
-  return ((data ?? []) as RawPolitician[]).filter((r) => !r.merged_into).map(mapPolitician)
+  return (data ?? []) as RawPolitician[]
+}
+
+async function politiciansByIds(ids: string[]): Promise<Politician[]> {
+  return (await politicianRowsByIds(ids)).filter((r) => !r.merged_into).map(mapPolitician)
 }
 
 /**
@@ -127,10 +133,37 @@ async function peersOf(self: Politician): Promise<Politician[]> {
   }
 }
 
-export async function loadPoliticianPage(id: string): Promise<PageSnapshot | null> {
+/** 要 301 到別的網址（例：已合併的人物 → 保留者） */
+export interface PageRedirect { redirectTo: string }
+export const isPageRedirect = (v: unknown): v is PageRedirect => !!v && typeof v === 'object' && typeof (v as PageRedirect).redirectTo === 'string'
+
+/** 一位人物的合併指向（含已合併的列；politiciansByIds 會濾掉它們）。查無此人回 null */
+async function mergeLookup(id: string): Promise<{ id: string; mergedInto: string | null } | null> {
+  // query-bounds: ok — 主鍵查一列
+  const { data, error } = await supabasePublic.from('politicians_with_elections').select('id, merged_into').eq('id', id).limit(1)
+  if (error) {
+    // id 不是 uuid 之類的請求錯誤＝查無此人；其他照常丟出（Worker 會退回代理 web.app）
+    if (/invalid input syntax/i.test(error.message)) return null
+    throw new Error(`politicians_with_elections merge lookup: ${error.message}`)
+  }
+  const row = ((data ?? []) as Array<{ id: string; merged_into: string | null }>)[0]
+  return row ? { id: String(row.id), mergedInto: row.merged_into ? String(row.merged_into) : null } : null
+}
+
+export async function loadPoliticianPage(id: string): Promise<PageSnapshot | PageRedirect | null> {
+  // 不是 uuid 的 id（/politician/12345、/politician/undefined）不用問資料庫：直接 404，不要讓 PostgREST 的型別錯誤變成 SSR 錯誤、退回代理回 200
+  if (!isPoliticianId(id)) return null
   const base = await loadBase()
-  const [politicians, policies] = await Promise.all([politiciansByIds([id]), policiesOfPoliticians([id])])
-  if (politicians.length === 0) return null
+  const [rows, policies] = await Promise.all([politicianRowsByIds([id]), policiesOfPoliticians([id])])
+  const row = rows[0]
+  if (!row || row.merged_into) {
+    // 查不到有兩種：真的沒有這個人，或已被軟合併。後者舊網址要 301 到保留的那一位，不能 404
+    // （網址保持；2026-10-08 陳瑩 54472fee → 8aa6ee40，#466）。第一跳已經在手上，不再多查一次
+    const first: MergeLookup = async (pid) => (row && pid === id ? { id: String(row.id), mergedInto: row.merged_into ? String(row.merged_into) : null } : mergeLookup(pid))
+    const moved = await followMerged(id, first)
+    return moved.kind === 'redirect' ? { redirectTo: `/politician/${moved.to}` } : null
+  }
+  const politicians = [mapPolitician(row)]
   const peers = await peersOf(politicians[0])
   return { ...base, politicians: [...politicians, ...peers], policies }
 }
@@ -176,7 +209,7 @@ export async function loadLineagePage(id: string): Promise<PageSnapshot | null> 
 }
 
 /** 路由 → 這一頁的快照；不是這一步負責的路由回 undefined（Worker 會退回代理 web.app） */
-export async function loadPageData(to: RouteLocationNormalized): Promise<PageSnapshot | null | undefined> {
+export async function loadPageData(to: RouteLocationNormalized): Promise<PageSnapshot | PageRedirect | null | undefined> {
   const param = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
   switch (to.name) {
     case 'politician': return await loadPoliticianPage(param(to.params.politicianId as string | string[]))

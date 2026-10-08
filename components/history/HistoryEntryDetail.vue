@@ -5,11 +5,11 @@ import { ExternalLink, Scale, Undo2, ThumbsUp, ThumbsDown, CircleHelp, ChevronDo
 import { ADJ_VERDICT_LABEL, formatTime, formatValue, tableLabel, VERDICT_CLASS, VERDICT_LABEL, type HistoryEntry } from '../../lib/history'
 import { policyStatusLabel } from '../../composables/usePageHead'
 import SourceMeta from '../SourceMeta.vue'
-import ModelInfo from '../ModelInfo.vue'
+import AgentInfo from '../AgentInfo.vue'
 
 /** 一筆履歷的細節：驗證者與理由、欄位舊值新值、裁決、還原。查核履歷面板與貢獻看板共用（看板自己已顯示來源與備註，可關掉）。
- *  modelDisplay：驗證者的模型名直接寫出來（inline，貢獻看板）或收成 info 圖示（icon，政見頁與候選人頁，2026-10-08）。 */
-withDefaults(defineProps<{ entry: HistoryEntry; hideSources?: boolean; hideNotes?: boolean; modelDisplay?: 'inline' | 'icon' }>(), { hideSources: false, hideNotes: false, modelDisplay: 'inline' })
+ *  agentDisplay：驗證者與裁決者的代號、模型名直接寫出來（inline，貢獻看板）或收成一顆人形圖示（icon，政見頁與候選人頁，2026-10-08，#475）。 */
+withDefaults(defineProps<{ entry: HistoryEntry; hideSources?: boolean; hideNotes?: boolean; agentDisplay?: 'inline' | 'icon' }>(), { hideSources: false, hideNotes: false, agentDisplay: 'inline' })
 
 /** 來源清單：端點有帶出處表的等級與存檔（entry.sources）就用它；舊版端點只有網址，照舊列（沒有等級、沒有存檔） */
 function sourceRows(entry: HistoryEntry) {
@@ -89,8 +89,11 @@ function editValue(field: string, v: unknown): string {
           <span :title="VERDICT_LABEL[v.verdict] ?? v.verdict" :class="['inline-flex items-center px-1.5 py-1 rounded-full', VERDICT_CLASS[v.verdict] ?? 'bg-slate-100 text-slate-600']">
             <component :is="VERDICT_ICON[v.verdict] ?? CircleHelp" :size="12" />
           </span>
-          <span class="text-navy-900">{{ v.agent_name ?? '?' }}</span>
-          <ModelInfo v-if="v.agent_tool && modelDisplay === 'icon'" :model="v.agent_tool" /><span v-else-if="v.agent_tool" class="text-xs text-slate-400">{{ v.agent_tool }}</span>
+          <AgentInfo v-if="agentDisplay === 'icon'" :name="v.agent_name" :model="v.agent_tool" label="驗證者" />
+          <template v-else>
+            <span class="text-navy-900">{{ v.agent_name ?? '?' }}</span>
+            <span v-if="v.agent_tool" class="text-xs text-slate-400">{{ v.agent_tool }}</span>
+          </template>
           <span class="text-xs text-slate-400">{{ formatTime(v.created_at) }}</span>
           <span v-if="v.resolved_politician_id" class="text-xs text-slate-500">指認 {{ v.resolved_politician_id === 'new' ? '新人物' : v.resolved_politician_id.slice(0, 8) }}</span>
           <button
@@ -113,7 +116,8 @@ function editValue(field: string, v: unknown): string {
       <ul class="space-y-1.5">
         <li v-for="a in entry.adjudications" :key="a.contribution_id || a.task_id || a.created_at" class="text-slate-700">
           <template v-if="a.verdict">
-            <span class="text-navy-900">{{ a.agent_name ?? '?' }}</span>
+            <AgentInfo v-if="agentDisplay === 'icon'" :name="a.agent_name" label="裁決者" />
+            <span v-else class="text-navy-900">{{ a.agent_name ?? '?' }}</span>
             <span :class="['ml-2 text-xs px-2 py-0.5 rounded-full', a.verdict === 'uphold' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700']">{{ ADJ_VERDICT_LABEL[a.verdict] ?? a.verdict }}</span>
             <span class="ml-2 text-xs text-slate-400">{{ a.status === 'applied' ? '已定案' : '驗證中' }}・{{ formatTime(a.created_at) }}</span>
             <p v-if="a.reason" class="mt-0.5 break-words">{{ shortUrlsIn(a.reason) }}</p>

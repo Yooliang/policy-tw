@@ -5,7 +5,7 @@ import { createHead, renderSSRHead } from '@unhead/vue/server'
 import App from './App.vue'
 import { routes, installRouterGuards } from './router'
 import { applyDataSnapshot } from './composables/useSupabase'
-import { loadPageData, setBaseTtlMs } from './lib/ssr/loaders'
+import { isPageRedirect, loadPageData, setBaseTtlMs } from './lib/ssr/loaders'
 import type { PageSnapshot } from './lib/ssg/page-data'
 import { latestPath, matchMarkdownRoute } from './lib/md/route'
 import { loadPoliticianMd } from './lib/ssr/md-loaders'
@@ -43,7 +43,9 @@ const ClientOnly = defineComponent({
 })
 
 export interface RenderResult {
-  status: 200 | 404 | 'passthrough'
+  status: 200 | 301 | 404 | 'passthrough'
+  /** status 301 時的目的地（同站路徑，例：已合併的人物 → 保留者；#466） */
+  location?: string
   html?: string
   headTags?: string
   htmlAttrs?: string
@@ -75,6 +77,7 @@ async function renderOnce(url: string): Promise<RenderResult> {
   const snapshot = await loadPageData(target)
   if (snapshot === undefined) return { status: 'passthrough' }
   if (snapshot === null) return { status: 404 }
+  if (isPageRedirect(snapshot)) return { status: 301, location: snapshot.redirectTo }
 
   applyDataSnapshot(snapshot)
   const app = createSSRApp(App)
