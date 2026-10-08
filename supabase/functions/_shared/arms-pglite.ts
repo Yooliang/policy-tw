@@ -17,6 +17,7 @@ export const P2_ER_MIG = "20261008070000_activity_windows_p2_election_results.sq
 export const P2_PG_MIG = "20261008120000_activity_windows_p2_party_gap.sql";
 export const P2_PR_MIG = "20261008121000_activity_windows_p2_party_roster.sql";
 export const P2_NR_MIG = "20261008161000_activity_windows_p2_not_running.sql";
+export const P2_CS_MIG = "20261008162000_activity_windows_p2_candidate_status_stale.sql";
 export const BALLOT_MIG = "20261008150000_ballot_numbers_arm.sql";
 export const BASE_ARMS_MIG ="20261006141600_reassign_candidacy.sql";
 export const BASE_DROP_MIG = "20260924000001_dispatch_io.sql";

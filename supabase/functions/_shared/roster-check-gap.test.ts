@@ -51,7 +51,8 @@ Deno.test("R2-1 前一版是對的：新定義緊接著 20261008070000，而且�
   const i = defining.indexOf(GAP_MIG);
   assert(i > 0, "新 migration 要在重新定義 raw 的清單裡");
   assertEquals(defining[i - 1], PREV_RAW_MIG, `raw 的前一版應該是 ${PREV_RAW_MIG}；有人在中間改了，要以那一版為底重做`);
-  assertEquals(defining.length - 1, i, "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
+  // 之後只允許 P2 candidate_status_stale 那一支（20261008162000：把 candidate_status_stale 一段的日期條件移到規則，守門在 activity-candidate-status-stale.test.ts，它以這一版為底並檢查沒丟任何一處）
+  assertEquals(defining.slice(i + 1), ["20261008162000_activity_windows_p2_candidate_status_stale.sql"], "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
 });
 
 Deno.test("R2-2 新定義＝現行定義＋三處機械替換：反向替換回去逐字等於前一版（簽名、其他臂、roster_check 的 target／說明／reward 都沒動）", () => {
