@@ -13,6 +13,7 @@ import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
+import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -45,8 +46,8 @@ export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_t
 /**
  * `legacyIpHash`：1.79.0 以前的單一 IP 雜湊（`legacyIpHashOf`），過渡期用來認出切換前同一台機器交的貢獻與投的票（#481）。
  */
-export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyIpHash?: string): Promise<HandlerResult> {
-  const res = await handleVerifyInner(supabase, body, ipHash, applyFn, via, cecFetch, legacyIpHash);
+export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyIpHash?: string, dispatchSecret?: string): Promise<HandlerResult> {
+  const res = await handleVerifyInner(supabase, body, ipHash, applyFn, via, cecFetch, legacyIpHash, dispatchSecret);
   const code = (res.body as { error?: unknown } | undefined)?.error;
   if (res.status === 400 && typeof code === "string" && LOGGED_GATES.has(code)) {
     const cid = isObj(body) && typeof (body as Record<string, unknown>).contribution_id === "string" ? (body as Record<string, unknown>).contribution_id : null;
@@ -57,9 +58,33 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, ipHash
   return res;
 }
 
-async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyHashArg?: string): Promise<HandlerResult> {
+async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIpHash: string, applyFn?: ApplyFn, via = "verify", cecFetch: typeof fetch = fetch, legacyHashArg?: string, dispatchSecret?: string): Promise<HandlerResult> {
   // IP 認不得時新舊算法同值，那就沒有「舊票」可言（不然自己的新票會被當成舊票、不能 revise）
-  const legacyIpHash = legacyHashArg !== ipHash ? legacyHashArg : undefined;
+  const legacyIpHash = legacyHashArg !== reportIpHash ? legacyHashArg : undefined;
+  // 派工憑證（#484）：帶了就只驗憑證、不看 IP；帶了但無效回 403 invalid_dispatch_token（不默默退回網段比對）。
+  // 憑證通過時，這一票的「來源」是領任務時的網段（憑證裡簽的），不是交件當下的網段——
+  // 這樣一張憑證只能換一張票（第二次用同一張，來源一樣，被「每個來源一票」擋下），跨網段交件也不會多開來源。
+  // 其餘規則（去重、額度、自己不能驗自己）全部照舊，只是以領任務的網段為準；自己不能驗自己兩個網段都比。
+  // 合併票（via merge）是系統配對的，不帶憑證。
+  let ipHash = reportIpHash;
+  let tokenBinding: { tokenId: string; issuedNet: string; agent: string } | null = null;
+  // 改票（revise:true）遇到過期的憑證：簽章與 task 照驗，放過期限，但要求「同一個來源已經有這筆的票」才放行（見下面 expiredRevise）。
+  // 理由：evidence_warning 叫代理帶 revise 重送覆寫，而憑證只有 30 分鐘、/next 也不會再派同一筆，不放行的話雲端代理永遠改不了票
+  let expiredRevise = false;
+  const tokenField = via === "merge" ? { present: false as const } : dispatchTokenOf(body);
+  if (tokenField.present) {
+    const rawId = isObj(body) ? (body as Record<string, unknown>).contribution_id : undefined;
+    const expectedTask = `verify:${typeof rawId === "string" ? rawId : ""}`;
+    let chk = await checkDispatchToken(dispatchSecret, tokenField.value, expectedTask);
+    if (!chk.ok && chk.reason === "expired" && isObj(body) && (body as Record<string, unknown>).revise === true) {
+      const again = await checkDispatchToken(dispatchSecret, tokenField.value, expectedTask, Date.now(), { ignoreExpiry: true });
+      chk = again; // 放過期限後仍不通過（簽章、task）就用那個更具體的原因
+      expiredRevise = again.ok;
+    }
+    if (!chk.ok) return invalidTokenResult(chk.reason);
+    ipHash = chk.payload.h;
+    tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, agent: chk.payload.a };
+  }
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -96,7 +121,9 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
   }
-  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(contribution.contributor_ip_hash, legacyIpHash)) {
+  // 憑證路徑：領任務的網段與交件當下的網段，哪一個是提交者的都算自己
+  const isReportNet = (stored: string | null | undefined) => tokenBinding !== null && !!stored && stored === reportIpHash;
+  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(contribution.contributor_ip_hash, legacyIpHash) || isReportNet(contribution.contributor_ip_hash)) {
     return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同 agent_name 或同一來源 IP）提交的貢獻，請跳過這筆" } };
   }
   // 裁決的驗證：原貢獻的提交者也不能投（利益相關）
@@ -104,7 +131,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
     const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
     const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash").eq("id", originalId).maybeSingle() : { data: null };
     // 過渡期（#481）：原貢獻若是切換前交的，存的是單一 IP 雜湊，也要比舊雜湊
-    if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash))) {
+    if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash) || isReportNet(original.contributor_ip_hash))) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
   }
@@ -113,7 +140,14 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   // 代理自己挑題目是派發的問題，不是投票的問題，所以執行點在這裡而不是在權重上補丁。
   // 例外：via "merge"（重複提交被系統配對成同意票）——那不是代理挑的題目，是它獨立查證得到同一宣稱。
   // 這個例外有測試看著（verify-dispatch.test）：下次誰再加一道閘，不能再安靜地把併票關掉。
-  if (via !== "merge") {
+  if (tokenBinding) {
+    // 憑證已在開頭驗過（簽章、期限、task 相符）：這一筆確實是 /next 派的。不看 IP，不查 verify_dispatches。
+    // 追查只進 log（維護者 10-08「用 log 看就好」）：綁定方式、task、代號、憑證識別碼、領取與交件網段的雜湊前 8 碼
+    logDispatchBinding({
+      event: "dispatch_binding", endpoint: via, binding: expiredRevise ? "token_expired_revise" : "token", task_id: `verify:${contribution.id}`,
+      agent_name: input.agent_name, token_id: tokenBinding.tokenId, issued_net: tokenBinding.issuedNet, report_net: reportIpHash,
+    });
+  } else if (via !== "merge") {
     const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
       .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).maybeSingle();
     if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
@@ -123,16 +157,27 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
         body: {
           success: false,
           error: "not_dispatched",
-          message: "這一筆不是派給你的。工作只從 GET /next 來：呼叫一次，伺服器會給你一筆要驗的，做完再用 POST /report 回報那一筆。不要自己挑題目。",
+          message: "這一筆不是派給你的。工作只從 GET /next 來：呼叫一次，伺服器會給你一筆要驗的，做完再用 POST /report 回報那一筆。不要自己挑題目。如果你的領取（GET /next）與回報（POST /report）會從不同網段出去（雲端環境常見），回報時帶上 /next 給的 dispatch_token 就不看 IP。",
         },
       };
     }
+    logDispatchBinding({
+      event: "dispatch_binding", endpoint: via, binding: "ip", task_id: `verify:${contribution.id}`,
+      agent_name: input.agent_name, report_net: ipHash,
+    });
   }
 
   const { data: existing, error: eError } = await supabase
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
+  if (expiredRevise) {
+    // 過期憑證只能用來改「自己那個來源」已經投的票：領任務的網段或回報網段在這筆上已有票才放行，並以那張票的來源為準
+    const own = ((existing ?? []) as Array<{ verifier_ip_hash: string | null }>)
+      .find((x) => !!x.verifier_ip_hash && (x.verifier_ip_hash === ipHash || x.verifier_ip_hash === reportIpHash));
+    if (!own) return invalidTokenResult("expired");
+    ipHash = own.verifier_ip_hash as string;
+  }
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
     const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
       .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
@@ -312,7 +357,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
       weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
       // 2026-09-23：evidence_url 跟提交者同網域的票當天有 229 張，全都只記 +1——當場講，不要等排程核完才發現
       ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
-        ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票" }
+        ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票（帶派工憑證投的，憑證過期了也一樣帶原本那張憑證加 revise:true 就能改）" }
         : {}),
       score: { before: scoreBefore, after: scoreAfter, target: targetScore },
       // 舊欄位保留一版給還沒升到 1.24.0 的代理

@@ -28,6 +28,7 @@ import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDe
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
+import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
 import { SEARCH_PAGE_GATE, searchPageProblems, strippedNotice, stripSearchPages } from "./search-page-guard.ts";
 import { voteFieldsNotice } from "./candidacy-result.ts";
@@ -211,7 +212,7 @@ export async function handleContribute(
   supabase: SupabaseLike,
   supabaseUrl: string,
   body: unknown,
-  ipHash: string,
+  ipHashArg: string,
   verifyFn: VerifyFn = handleVerify,
   via = "contribute",
   fetchImpl: typeof fetch = fetch,
@@ -220,7 +221,23 @@ export async function handleContribute(
   // 1.79.0 以前的單一 IP 雜湊（過渡期，#481）：重複宣稱併成同意票時要帶進 handleVerify，
   // 不然切換前自己交的待審宣稱，換個代號再交一次就能併成自己的一票
   legacyIpHash?: string,
+  // 派工憑證的簽章鑰匙（#484）；沒給就驗不了憑證，帶憑證的請求回 403
+  dispatchSecret?: string,
 ): Promise<HandlerResult> {
+  // 派工憑證（#484）：帶了就驗憑證（簽章、期限、task 相符），無效回 403 invalid_dispatch_token，不默默當作沒帶。
+  // 這個入口本來就沒有派工綁定檢查（交件不要求「這個任務是派給你的」），所以憑證在這裡不開啟任何新權限；
+  // 它的作用是讓跨網段的回報有一致的來源：通過時，額度、單一答案、併票、提交者網段都用領任務時的網段（憑證裡簽的），
+  // 跟 /next 回報給代理的額度與驗證池的「自己交的不派給自己」同一把尺。
+  const reportIpHash = ipHashArg;
+  let ipHash = ipHashArg;
+  let tokenBinding: { tokenId: string; issuedNet: string; taskId: string; agent: string } | null = null;
+  const tokenField = via === "merge" ? { present: false as const } : dispatchTokenOf(body);
+  if (tokenField.present) {
+    const chk = await checkDispatchToken(dispatchSecret, tokenField.value, null);
+    if (!chk.ok) return invalidTokenResult(chk.reason);
+    ipHash = chk.payload.h;
+    tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, taskId: chk.payload.t, agent: chk.payload.a };
+  }
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
@@ -239,6 +256,24 @@ export async function handleContribute(
       ? validation.errors.find((e) => e.code === "category_invalid")!.message
       : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
     return { status: 400, body: { success: false, error, message, errors: validation.errors } };
+  }
+  // 憑證綁的是哪個任務，這批裡有 task_id 的每一筆都要是那一個（不同任務各自領各自的憑證）；一筆也對不上＝拿錯憑證
+  {
+    const itemTaskIds = validation.items.map((it) => it.task_id);
+    if (tokenBinding) {
+      const wrong = itemTaskIds.some((id) => typeof id === "string" && id !== tokenBinding!.taskId);
+      const matched = itemTaskIds.some((id) => id === tokenBinding!.taskId);
+      if (wrong || !matched) return invalidTokenResult("task_mismatch");
+    }
+    const firstTask = itemTaskIds.find((id): id is string => typeof id === "string");
+    // 追查只進 log：這個入口沒帶憑證時 binding 記 none（本來就沒有派工綁定檢查），帶了記 token
+    if (firstTask) {
+      logDispatchBinding({
+        event: "dispatch_binding", endpoint: via, binding: tokenBinding ? "token" : "none", task_id: firstTask,
+        agent_name: validation.contributor.agent_name, token_id: tokenBinding?.tokenId ?? null,
+        issued_net: tokenBinding?.issuedNet ?? null, report_net: reportIpHash,
+      });
+    }
   }
   // profile_gap 交的 politician 沒帶 id → 用任務編號裡的那位補上（存進 payload，驗證時的身份比對與落庫都看得到）
   for (const item of validation.items) {

@@ -19,6 +19,7 @@
  */
 import { resolveIdentity } from "./contribute-handler.ts";
 import type { Actor } from "./actor.ts";
+import { checkDispatchToken, dispatchTokenOf, invalidTokenResult } from "./dispatch-token.ts";
 
 export interface HandlerResult {
   status: number;
@@ -53,7 +54,19 @@ export function validateWithdrawRequest(body: unknown): { ok: boolean; input?: W
 }
 
 /** `legacyIpHash`：1.79.0 以前的單一 IP 雜湊，過渡期讓切換前交件的本人也能撤回（#481）。 */
-export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHash: string, legacyIpHash?: string): Promise<HandlerResult> {
+export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHashArg: string, legacyIpHash?: string, dispatchSecret?: string): Promise<HandlerResult> {
+  // 派工憑證（#484）：帶憑證交件時，貢獻存的 contributor_ip_hash 是領任務的網段（N1）；之後從回報網段（R）撤回，
+  // 若比對 R 就 403，雲端代理撤不回自己的件。所以撤回也收憑證：驗簽章與期限、憑證綁的 task 要等於那筆的 task_id，
+  // 再用憑證裡的網段比 contributor_ip_hash。沒帶憑證維持原樣（比回報網段與舊雜湊）。
+  let ipHash = ipHashArg;
+  let viaToken = false;
+  const tokenField = dispatchTokenOf(body);
+  const tokenCheck = tokenField.present ? await checkDispatchToken(dispatchSecret, tokenField.value, null) : null;
+  if (tokenCheck) {
+    if (!tokenCheck.ok) return invalidTokenResult(tokenCheck.reason);
+    ipHash = tokenCheck.payload.h;
+    viaToken = true;
+  }
   const identity = await resolveIdentity(body, ipHash);
   if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
   body = identity.body;
@@ -71,8 +84,13 @@ export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHa
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
   if (!row) return { status: 404, body: { success: false, error: "not_found", message: "沒有這筆貢獻" } };
 
-  // 1. 只有提交者本人（同一個來源 IP）能撤回
-  if (row.contributor_ip_hash !== ipHash && !(legacyIpHash && row.contributor_ip_hash === legacyIpHash)) {
+  // 憑證綁的任務要是這一筆的任務；沒有 task_id 的貢獻（不是從任務來的）沒有可對的憑證，拿憑證來撤一律不符
+  if (viaToken && tokenCheck?.ok && (typeof row.task_id !== "string" || row.task_id !== tokenCheck.payload.t)) {
+    return invalidTokenResult("task_mismatch");
+  }
+
+  // 1. 只有提交者本人（同一個來源 IP）能撤回；憑證路徑比的是領任務的網段（不再另比回報網段與舊雜湊——那是沒帶憑證時的身份）
+  if (row.contributor_ip_hash !== ipHash && !(!viaToken && legacyIpHash && row.contributor_ip_hash === legacyIpHash)) {
     return {
       status: 403,
       body: {
