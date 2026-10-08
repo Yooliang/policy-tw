@@ -141,6 +141,16 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Privacy.vue'),
   },
   {
+    path: '/terms',
+    name: 'terms',
+    component: () => import('../pages/Terms.vue'),
+  },
+  {
+    path: '/contact',
+    name: 'contact',
+    component: () => import('../pages/Contact.vue'),
+  },
+  {
     path: '/regional-data',
     name: 'regional-data',
     component: () => import('../pages/RegionalData.vue'),
