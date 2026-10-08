@@ -2,7 +2,7 @@
  * 名單時程搬成里程碑（migration 20261008160000_roster_milestones.sql）前後的「逐件不變」守門（2026-10-08，docs/PLAN-task-activation.md 派工時間窗 P2）。
  *
  * 這支 migration 改的只有兩個會影響派工輸出的東西：
- *   ① candidacy_list_published()（6 支臂用它算 candidate_status 的字眼）——新舊兩個本體在正式庫唯讀快照上逐格比：
+ *   ① candidacy_list_published()（7 支臂用它算 candidate_status 的字眼）——新舊兩個本體在正式庫唯讀快照上逐格比：
  *      （選舉×職位×日期）全格，以及 politician_elections 每一列在「今天、關鍵日」算出來的 candidate_status（candidacy_protocol_status 套新舊函式）。
  *      新本體不建立任何物件：gen 讀 migration 裡的新函式本體，把參數換成欄位名，以子查詢放進唯讀 SELECT。
  *   ② roster_check_scope 的五個日期欄——migration 回填里程碑、再由觸發器從里程碑算回欄位，所以「里程碑推回來的值＝欄位現值」逐列比
@@ -75,7 +75,10 @@ SELECT json_build_object(
   'scope_vs_existing_milestones', json_build_object(
     'registration_close_missing_or_different', (SELECT count(*) FROM roster_check_scope s WHERE NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'registration_close' AND m.election_type = s.election_type AND m.on_date = s.registration_closed_on)),
     'list_published_missing_or_different', (SELECT count(*) FROM roster_check_scope s WHERE NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'list_published' AND m.election_type = s.election_type AND m.on_date = s.list_announced_on)),
-    'milestone_rows_in_the_way', (SELECT count(*) FROM election_milestones m WHERE m.kind IN ('draw', 'qualification_review') OR m.election_type = '直轄市長'),
+    'milestone_rows_in_the_way', (SELECT count(*) FROM election_milestones m WHERE m.kind = 'qualification_review' OR m.election_type = '直轄市長'),
+    -- 補號次（#452，20261008150000）已經把 draw 搬成里程碑（每職位一列、與欄位相同）：這支的回填對它 ON CONFLICT DO NOTHING，只要求「已有的與欄位相同」
+    'draw_rows_existing', (SELECT count(*) FROM election_milestones m WHERE m.kind = 'draw'),
+    'draw_missing_or_different', (SELECT count(*) FROM roster_check_scope s WHERE s.ballot_draw_on IS NOT NULL AND EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = s.election_id AND m.kind = 'draw' AND m.election_type = s.election_type AND m.on_date <> s.ballot_draw_on)),
     'whole_election_rows_of_scope_kinds', (SELECT count(*) FROM election_milestones m WHERE m.election_type IS NULL AND m.kind IN ('registration_close', 'list_published', 'draw', 'qualification_review'))),
   'mayor_list_inconsistent_elections', (SELECT count(*) FROM (SELECT s.election_id FROM roster_check_scope s GROUP BY s.election_id
       HAVING count(DISTINCT s.municipal_mayor_list_on) > 1 OR (count(*) FILTER (WHERE s.municipal_mayor_list_on IS NULL) > 0 AND count(s.municipal_mayor_list_on) > 0)) x),
@@ -111,7 +114,8 @@ check("① 每一列參選紀錄的 candidate_status（今天與關鍵日）新�
 check("② 登記截止／名單公告的既有里程碑與欄位逐列相同（每個清查範圍列都有、日期相同）",
   snap.scope_vs_existing_milestones.registration_close_missing_or_different === 0 && snap.scope_vs_existing_milestones.list_published_missing_or_different === 0,
   JSON.stringify(snap.scope_vs_existing_milestones));
-check("② 沒有擋路的既有里程碑（draw、qualification_review、直轄市長，回填前是空的）", snap.scope_vs_existing_milestones.milestone_rows_in_the_way === 0);
+check("② 沒有擋路的既有里程碑（qualification_review、直轄市長，回填前是空的）", snap.scope_vs_existing_milestones.milestone_rows_in_the_way === 0);
+check("② 已有的 draw 里程碑（#452 先搬的）與欄位相同，沒有一列日期不同", snap.scope_vs_existing_milestones.draw_missing_or_different === 0, `已有 ${snap.scope_vs_existing_milestones.draw_rows_existing} 列`);
 check("② 沒有整場（election_type 空）的名單時程里程碑（否則衍生值可能與欄位不同）", snap.scope_vs_existing_milestones.whole_election_rows_of_scope_kinds === 0);
 check("② 直轄市長名單日在同一場選舉的各列一致（可以搬成一列整場里程碑）", snap.mayor_list_inconsistent_elections === 0);
 const dates = snap.scope_dates as Array<Record<string, string | null>>;
@@ -119,7 +123,7 @@ check("② 回填會新增 draw／qualification_review 各一列、直轄市長�
 check("② 五個日期欄現值：登記截止 2026-09-04、名單公告 2026-11-17、資格審查 2026-10-16、抽號次 2026-10-23、直轄市長名單 2026-11-12（七列相同）",
   dates.length === snap.scope_rows && dates.every((r) => r.reg === "2026-09-04" && r.list === "2026-11-17" && r.review === "2026-10-16" && r.draw === "2026-10-23" && r.mayor === "2026-11-12"));
 check("③ activity_health 目前是空的（回填的前提）", snap.activity_health_rows === 0);
-check("③ 呼叫 candidacy_list_published 的只有那 6 支臂", JSON.stringify(snap.callers_of_candidacy_list_published) === JSON.stringify(["contribution_auto_tasks_party_gap", "contribution_auto_tasks_party_roster", "contribution_auto_tasks_raw", "contribution_auto_tasks_region_gap", "contribution_auto_tasks_township_gap", "contribution_auto_tasks_withdrawn_filing"]),
+check("③ 呼叫 candidacy_list_published 的只有那 7 支臂（6 支加 #452 的 ballot_numbers）", JSON.stringify(snap.callers_of_candidacy_list_published) === JSON.stringify(["contribution_auto_tasks_ballot_numbers", "contribution_auto_tasks_party_gap", "contribution_auto_tasks_party_roster", "contribution_auto_tasks_raw", "contribution_auto_tasks_region_gap", "contribution_auto_tasks_township_gap", "contribution_auto_tasks_withdrawn_filing"]),
   JSON.stringify(snap.callers_of_candidacy_list_published));
 check("④ 負向對照：名單公告當天還說沒公告（<）→ 比對會紅", snap.bad_lt_mismatch > 0, `${snap.bad_lt_mismatch} 格不一致`);
 

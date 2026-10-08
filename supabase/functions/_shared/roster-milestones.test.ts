@@ -22,7 +22,8 @@ import { buildArmsDb, fnText, latestFn, migrationNames, mutate, readMig, type Sc
 
 export const MIG_NAME = "20261008160000_roster_milestones.sql";
 const MIG = await readMig(MIG_NAME);
-const BULLETIN = await readMig("20261008113000_bulletin_watch.sql");
+const PREV_VIEW_MIG = "20261008150000_ballot_numbers_arm.sql"; // activity_health 的現行版（補號次 #452，在公報偵測那版上多一段 ballot_number_anomaly）
+const PREV_VIEW_SQL = await readMig(PREV_VIEW_MIG);
 const count = (s: string, sub: string) => s.split(sub).length - 1;
 
 // ============================================================
@@ -49,7 +50,7 @@ const isMechanicalFn = (fn: string) => {
 
 const viewText = (sql: string) => sql.slice(sql.indexOf("CREATE OR REPLACE VIEW activity_health AS"), sql.indexOf(";\nCOMMENT ON VIEW activity_health"));
 const driftBlock = (v: string) => v.slice(v.indexOf("  SELECT 'milestone_scope_drift'"), v.indexOf("  UNION ALL\n  SELECT 'arm_without_rule'"));
-const PREV_VIEW = viewText(BULLETIN);
+const PREV_VIEW = viewText(PREV_VIEW_SQL);
 const NEW_VIEW = viewText(MIG);
 const isMechanicalView = (v: string) => {
   try {
@@ -59,7 +60,7 @@ const isMechanicalView = (v: string) => {
   }
 };
 
-Deno.test("A1 前一版是對的：candidacy_list_published 緊接在這支之前的定義是 20261006034500（與正式庫一字不差），之後沒有別人再改；activity_health 的現行版是 20261008113000", async () => {
+Deno.test("A1 前一版是對的：candidacy_list_published 緊接在這支之前的定義是 20261006034500（與正式庫一字不差），之後沒有別人再改；activity_health 的現行版是 20261008150000", async () => {
   const defining = async (needle: string) => {
     const out: string[] = [];
     for (const n of await migrationNames()) if ((await readMig(n)).includes(needle)) out.push(n);
@@ -68,7 +69,7 @@ Deno.test("A1 前一版是對的：candidacy_list_published 緊接在這支之�
   const fn = await defining("CREATE OR REPLACE FUNCTION candidacy_list_published(");
   assertEquals(fn, ["20261006034500_candidacy_status.sql", MIG_NAME], "前一版變了或之後又有人改：要以最新那版為底重做機械式替換");
   const view = await defining("CREATE OR REPLACE VIEW activity_health AS");
-  assertEquals(view.slice(-2), ["20261008113000_bulletin_watch.sql", MIG_NAME], "activity_health 的前一版應該是公報偵測那版；有人在中間改了，要以那一版為底重做");
+  assertEquals(view.slice(-2), [PREV_VIEW_MIG, MIG_NAME], "activity_health 的前一版應該是補號次那版（#452）；有人在中間改了，要以那一版為底重做");
 });
 
 Deno.test("A2 candidacy_list_published 新定義＝前一版加一處機械式替換（第二個 EXISTS 換成讀里程碑視圖），其餘一字不差", () => {
@@ -107,7 +108,7 @@ const driftComplete = (v: string) => {
     d.includes("'直轄市長', false");
 };
 
-Deno.test("A4 activity_health 新視圖＝現行版（20261008113000）只換 milestone_scope_drift 那一段；擴到五個日期欄", () => {
+Deno.test("A4 activity_health 新視圖＝現行版（20261008150000）只換 milestone_scope_drift 那一段；擴到五個日期欄", () => {
   assert(isMechanicalView(NEW_VIEW));
   assert(driftComplete(NEW_VIEW), "drift 要比五個日期欄，直轄市長名單不退回整場的名單公告日");
   // 其餘各段（含公報偵測加的那一段）一字不動
@@ -138,6 +139,8 @@ const scope7 = (): Scope[] =>
 
 const PRE_SQL = `
 ALTER TABLE elections ADD COLUMN bulletin_dir text;
+-- 補號次（#452）加在 activity_health 的那一段讀的視圖：這裡永遠是空的
+CREATE VIEW ballot_number_anomalies AS SELECT NULL::integer AS election_id, NULL::text AS election_type, NULL::text AS kind WHERE false;
 ${await latestFn("candidacy_list_published", MIG_NAME)}
 -- 舊版的複本：新舊逐格比對用
 ${(await latestFn("candidacy_list_published", MIG_NAME)).replace("FUNCTION candidacy_list_published(", "FUNCTION legacy_candidacy_list_published(")}

@@ -3,7 +3,7 @@
 --
 -- 起因：P0 把 roster_check_scope 的登記截止日、名單公告日「回填」成里程碑（registration_close、list_published），之後兩邊各有一份、靠健康檢查 milestone_scope_drift 對帳。
 -- 另外三個日期（資格審查完成日 qualification_review_by、抽號次日 ballot_draw_on、直轄市長名單公告日 municipal_mayor_list_on）20261008000001 才加在這張表上，一直沒搬。
--- 派工臂（6 支）判斷「名單公告了沒」呼叫 candidacy_list_published()，它讀的是 roster_check_scope.list_announced_on——不是規則讀的那份里程碑。
+-- 派工臂（7 支：6 支加 #452 的 ballot_numbers）判斷「名單公告了沒」呼叫 candidacy_list_published()，它讀的是 roster_check_scope.list_announced_on——不是規則讀的那份里程碑。
 -- 日期有兩份真相就會走鐘（改了一份、忘了另一份：規則說名單 11-12 公告，任務說明卻還說 11-17）。
 --
 -- ── 單一真相的選擇：election_milestones（里程碑表）為真，roster_check_scope 的五個日期欄由觸發器衍生（做法照 #446 公報上網日）──
@@ -38,8 +38,8 @@
 --   現在：投票日已到，或 election_milestones_all 的 list_published 里程碑 <= p_on。查找順序同 activity_open()：「職位相同」那一列優先，沒有才用「整場選舉（election_type 空）」那一列。
 --   優先「職位相同」是為了讓例外更正（某職位的名單公告日與整場不同）生效；原本只認職位相同那一列，現在整場的列也算——線上沒有整場的 list_published 列，所以今天結果相同；
 --   以後代理交「整場名單公告日」不會被默默忽略。回傳永遠是 true／false（不是 NULL）。簽名、回傳型別、語言、穩定度不動，ACL 不動（CREATE OR REPLACE）。
---   呼叫它的 6 支臂（party_gap、party_roster、raw、region_gap、township_gap、withdrawn_filing）仍然傳 CURRENT_DATE（資料庫 UTC 日期）；
---   換成 activity_today()（台北日界）要改這 6 支臂，留給各臂自己的 P2／P3 PR（差別只在台北 00:00～08:00 這 8 小時，且只有名單公告日當天）。
+--   呼叫它的 7 支臂（party_gap、party_roster、raw、region_gap、township_gap、withdrawn_filing，以及 #452 的 ballot_numbers）仍然傳 CURRENT_DATE（資料庫 UTC 日期）；
+--   換成 activity_today()（台北日界）要改這 7 支臂，留給各臂自己的 P2／P3 PR（差別只在台北 00:00～08:00 這 8 小時，且只有名單公告日當天）。
 --
 -- ── 今天輸出逐件不變 ──
 --   * 新增的里程碑列全是從 scope 欄位回填的，值相同；scope 欄位的值一個都沒變（migration 裡有檢查：回填完每個欄位都等於衍生值，否則整支失敗）。
@@ -52,7 +52,7 @@
 --
 -- 引用到的既有物件（2026-10-08 唯讀查正式庫確認存在）：election_milestones（P0，含 election_milestones_kind_check／election_type_check 兩個自動命名的 CHECK）、election_milestones_all、
 -- activity_today()、activity_audit 觸發器、activity_rules（activity_rules_from_kind_check／until_kind_check）、roster_check_scope（七列，五個日期欄、無觸發器）、
--- elections、視圖 activity_health（20261008113000 的版本）、candidacy_list_published（20261006034500，與正式庫 pg_get_functiondef 一字不差）。
+-- elections、視圖 activity_health（20261008150000 補號次 #452 的版本)、candidacy_list_published（20261006034500，與正式庫 pg_get_functiondef 一字不差）。
 -- 沒有 Edge Function 呼叫 candidacy_list_published，也沒有視圖依賴它（唯讀查 pg_proc／pg_class）。
 
 -- ------------------------------------------------------------
@@ -279,7 +279,7 @@ $$;
 COMMENT ON FUNCTION candidacy_list_published IS '這一屆這種選舉的正式候選人名單在 p_on 那天公告了沒（已投票也算）；決定舊值 confirmed 對到 filed 還是 declared（#345）｜2026-10-08（派工時間窗 P2）：名單公告日讀 election_milestones_all 的 list_published（職位相同的優先，沒有才取整場），不再讀 roster_check_scope.list_announced_on';
 
 -- ------------------------------------------------------------
--- 6. 健康檢查：milestone_scope_drift 擴到五個日期欄（視圖＝20261008113000 的版本，只換這一段）
+-- 6. 健康檢查：milestone_scope_drift 擴到五個日期欄（視圖＝20261008150000（補號次 #452）的版本，只換這一段）
 -- ------------------------------------------------------------
 CREATE OR REPLACE VIEW activity_health AS
   SELECT 'election_without_polling'::TEXT AS check_name, e.id::TEXT AS subject, '選舉沒有投票日（elections.election_date 是空的），所有以投票日為起點的規則都開不起來'::TEXT AS detail
@@ -319,11 +319,17 @@ CREATE OR REPLACE VIEW activity_health AS
      AND e.election_date >= activity_today()
      AND NOT EXISTS (SELECT 1 FROM election_milestones m WHERE m.election_id = e.id AND m.kind = 'bulletin_published' AND m.election_type IS NULL)
   UNION ALL
+  SELECT 'ballot_number_anomaly', a.election_id || ' / ' || a.election_type,
+         count(*) || ' 個號次單位的號次有重複或跳號（重複 ' || count(*) FILTER (WHERE a.kind = 'duplicate') || '、跳號 ' || count(*) FILTER (WHERE a.kind = 'gap') || '）：看視圖 ballot_number_anomalies；名單缺人時也會這樣，派工臂 cand_no_recheck 會請代理對公告重查'
+    FROM ballot_number_anomalies a JOIN elections e ON e.id = a.election_id
+   WHERE e.election_date >= activity_today()
+   GROUP BY a.election_id, a.election_type
+  UNION ALL
   SELECT 'clock_overridden', current_setting('app.activity_today', true), '時鐘被 app.activity_today 覆寫了：所有時間窗都在用這個假日期（只該出現在測試）'
    WHERE NULLIF(current_setting('app.activity_today', true), '') IS NOT NULL;
 COMMENT ON VIEW activity_health IS
   '派工時間窗的健康檢查，正常是空的：選舉缺投票日、活動的規則全停用、覆寫指到沒有規則的活動、窗口起迄顛倒、roster_check_scope 的五個日期與里程碑對不上、派工臂沒有任何規則（arm_without_rule，P1）、'
-  '有公報資料夾又還沒投票的選舉缺整場的 bulletin_published 里程碑（bulletin_milestone_missing，2026-10-08 公報偵測）、時鐘被覆寫。2026-10-08（PLAN-task-activation 3 風險第 2 點）';
+  '有公報資料夾又還沒投票的選舉缺整場的 bulletin_published 里程碑（bulletin_milestone_missing，2026-10-08 公報偵測）、號次單位有重複或跳號（ballot_number_anomaly，還沒投票的選舉，補號次 20261008150000）、時鐘被覆寫。2026-10-08（PLAN-task-activation 3 風險第 2 點）';
 
 NOTIFY pgrst, 'reload schema';
 
