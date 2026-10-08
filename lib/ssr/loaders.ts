@@ -8,7 +8,7 @@ import { mapLineage } from '../lineage'
 import { electionPeers, primaryElection } from '../election-peers'
 import { isCounty } from '../election-regions'
 import { fetchAllPages } from '../fetch-all-pages'
-import { followMerged } from './merge-chain'
+import { followMerged, isPoliticianId, type MergeLookup } from './merge-chain'
 
 /**
  * 邊緣 SSR 的每頁資料載入器（2026-09-23，docs/PLAN-edge-ssr.md 第 1 步）。
@@ -72,12 +72,17 @@ async function policiesOfLineage(lineageId: string): Promise<Policy[]> {
   return ((data ?? []) as RawPolicy[]).filter((r) => !r.removed_at).map(mapPolicy)
 }
 
-async function politiciansByIds(ids: string[]): Promise<Politician[]> {
+/** 原始列（含已合併的）。人物頁要靠 merged_into 決定轉向，所以不在這裡濾 */
+async function politicianRowsByIds(ids: string[]): Promise<RawPolitician[]> {
   if (ids.length === 0) return []
   // query-bounds: ok — 一頁提到的人物是個位數
   const { data, error } = await supabasePublic.from('politicians_with_elections').select('*').in('id', ids.slice(0, 200)).order('id').limit(200)
   if (error) throw new Error(`politicians_with_elections by id: ${error.message}`)
-  return ((data ?? []) as RawPolitician[]).filter((r) => !r.merged_into).map(mapPolitician)
+  return (data ?? []) as RawPolitician[]
+}
+
+async function politiciansByIds(ids: string[]): Promise<Politician[]> {
+  return (await politicianRowsByIds(ids)).filter((r) => !r.merged_into).map(mapPolitician)
 }
 
 /**
@@ -146,14 +151,19 @@ async function mergeLookup(id: string): Promise<{ id: string; mergedInto: string
 }
 
 export async function loadPoliticianPage(id: string): Promise<PageSnapshot | PageRedirect | null> {
+  // 不是 uuid 的 id（/politician/12345、/politician/undefined）不用問資料庫：直接 404，不要讓 PostgREST 的型別錯誤變成 SSR 錯誤、退回代理回 200
+  if (!isPoliticianId(id)) return null
   const base = await loadBase()
-  const [politicians, policies] = await Promise.all([politiciansByIds([id]), policiesOfPoliticians([id])])
-  if (politicians.length === 0) {
-    // 查不到有兩種：真的沒有這個人，或已被軟合併（politiciansByIds 把 merged_into 的列濾掉了）。
-    // 後者舊網址要 301 到保留的那一位，不能 404（網址保持；2026-10-08 陳瑩 54472fee → 8aa6ee40，#466）
-    const moved = await followMerged(id, mergeLookup)
+  const [rows, policies] = await Promise.all([politicianRowsByIds([id]), policiesOfPoliticians([id])])
+  const row = rows[0]
+  if (!row || row.merged_into) {
+    // 查不到有兩種：真的沒有這個人，或已被軟合併。後者舊網址要 301 到保留的那一位，不能 404
+    // （網址保持；2026-10-08 陳瑩 54472fee → 8aa6ee40，#466）。第一跳已經在手上，不再多查一次
+    const first: MergeLookup = async (pid) => (row && pid === id ? { id: String(row.id), mergedInto: row.merged_into ? String(row.merged_into) : null } : mergeLookup(pid))
+    const moved = await followMerged(id, first)
     return moved.kind === 'redirect' ? { redirectTo: `/politician/${moved.to}` } : null
   }
+  const politicians = [mapPolitician(row)]
   const peers = await peersOf(politicians[0])
   return { ...base, politicians: [...politicians, ...peers], policies }
 }

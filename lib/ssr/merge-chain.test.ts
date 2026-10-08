@@ -6,7 +6,7 @@
  *   3. 沒被合併的人、查無此人，一律不是 redirect（呼叫端照原本的規則處理）
  */
 import { assertEquals } from 'jsr:@std/assert@1'
-import { followMerged, MAX_MERGE_HOPS, type MergeLookup } from './merge-chain.ts'
+import { followMerged, isPoliticianId, MAX_MERGE_HOPS, type MergeLookup } from './merge-chain.ts'
 
 const table = (rows: Record<string, string | null>): MergeLookup => async (id) =>
   id in rows ? { id, mergedInto: rows[id] } : null
@@ -41,9 +41,26 @@ Deno.test('大小寫不同的 id 也算同一個（成環判斷）', async () =>
   assertEquals(await followMerged('AA', table({ AA: 'aa', aa: 'AA' })), { kind: 'broken' })
 })
 
+Deno.test('不是 uuid 的人物 id 不問資料庫（一律 404，不是 SSR 錯誤）', async () => {
+  assertEquals(isPoliticianId('54472fee-1dc4-475c-a104-64529aa0797a'), true)
+  assertEquals(isPoliticianId('54472FEE-1DC4-475C-A104-64529AA0797A'), true)
+  for (const bad of ['12345', 'undefined', 'not-a-uuid', '', '54472fee-1dc4-475c-a104-64529aa0797', '54472fee-1dc4-475c-a104-64529aa0797a1', ' 54472fee-1dc4-475c-a104-64529aa0797a', "x'; drop table politicians;--"]) {
+    assertEquals(isPoliticianId(bad), false, bad)
+  }
+  // 守在載入器入口、在任何查詢之前（接線）：入口第一行就 return null
+  const loaders = await Deno.readTextFile(new URL('./loaders.ts', import.meta.url))
+  assertEquals(/export async function loadPoliticianPage\(id: string\)[^{]*\{\s*(\/\/[^\n]*\n\s*)?if \(!isPoliticianId\(id\)\) return null/.test(loaders), true)
+})
+
+Deno.test('已合併的第一跳用手上的列，不再多查一次', async () => {
+  const loaders = await Deno.readTextFile(new URL('./loaders.ts', import.meta.url))
+  assertEquals(/followMerged\(id, first\)/.test(loaders), true)
+  assertEquals(/followMerged\(id, mergeLookup\)/.test(loaders), false)
+})
+
 Deno.test('接線：人物頁載入器查不到時走 followMerged，entry-server 把轉向變成 301', async () => {
   const loaders = await Deno.readTextFile(new URL('./loaders.ts', import.meta.url))
-  assertEquals(/followMerged\(id, mergeLookup\)/.test(loaders), true)
+  assertEquals(/followMerged\(id, first\)/.test(loaders), true)
   assertEquals(/redirectTo: `\/politician\/\$\{moved\.to\}`/.test(loaders), true)
   const entry = await Deno.readTextFile(new URL('../../entry-server.ts', import.meta.url))
   assertEquals(/status: 301, location: snapshot\.redirectTo/.test(entry), true)

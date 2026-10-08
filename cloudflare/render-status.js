@@ -11,18 +11,23 @@ export function safeLocalPath(location) {
   return location
 }
 
+/** 原網址的查詢字串（?view=、?tab=、?utm_…）轉向時照帶；不是 `?` 開頭、含換行就丟掉 */
+export function safeSearch(search) {
+  return typeof search === 'string' && search.startsWith('?') && search.length > 1 && !/[\r\n\s#]/.test(search) ? search : ''
+}
+
 /**
  * @param {{ status: number|string, location?: string }} r entry-server 的 RenderResult
- * @param {{ shell: string, origin: string }} ctx
+ * @param {{ shell: string, origin: string, search?: string }} ctx 原請求的查詢字串（301 照帶）
  * @returns {Response | null} 200／passthrough 回 null（由呼叫端照原本流程組頁面）
  */
-export function nonPageResponse(r, { shell, origin }) {
+export function nonPageResponse(r, { shell, origin, search = '' }) {
   if (r.status === 301) {
     const path = safeLocalPath(r.location)
     if (path) {
       return new Response(null, {
         status: 301,
-        headers: { Location: `${origin}${path}`, 'X-Served-Via': 'cloudflare-worker-ssr', 'Cache-Control': 'public, max-age=3600' },
+        headers: { Location: `${origin}${path}${safeSearch(search)}`, 'X-Served-Via': 'cloudflare-worker-ssr', 'Cache-Control': 'public, max-age=3600' },
       })
     }
     return notFound(shell)

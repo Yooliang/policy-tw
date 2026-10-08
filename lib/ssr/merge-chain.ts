@@ -17,6 +17,10 @@ export type MergeOutcome =
   /** 鏈上有人不存在、成環、或超過跳數：不轉，當成找不到 */
   | { kind: 'broken' }
 
+/** 人物 id 的格式（politicians.id 是 uuid）。不是這個格式的請求直接 404：丟給 PostgREST 會得到 invalid input syntax，變成 SSR 錯誤 */
+const POLITICIAN_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const isPoliticianId = (id: string): boolean => POLITICIAN_ID_RE.test(id)
+
 /** 合併鏈最多跟幾跳：正常是一跳，A→B 之後 B 又被併進 C 才會兩跳；超過就當資料有問題 */
 export const MAX_MERGE_HOPS = 5
 

@@ -7,7 +7,7 @@
  *   4. 200／passthrough 回 null，交給原本流程
  */
 import { assertEquals } from "jsr:@std/assert@1";
-import { nonPageResponse, safeLocalPath } from "./render-status.js";
+import { nonPageResponse, safeLocalPath, safeSearch } from "./render-status.js";
 
 const shell = '<html><body><div id="app"></div></body></html>';
 const ctx = { shell, origin: "https://xn--2lw665d.tw" };
@@ -17,6 +17,16 @@ Deno.test("301：Location 是本站網域＋保留者路徑，不快取成 200",
   assertEquals(res.status, 301);
   assertEquals(res.headers.get("Location"), "https://xn--2lw665d.tw/politician/8aa6ee40-231a-447a-a967-99bcf8b35d3f");
   assertEquals(await res.text(), "");
+});
+
+Deno.test("301 照帶原網址的查詢字串（?view=、?tab=、?utm_…），不帶時沒有多餘的 ?", () => {
+  const to = "/politician/8aa6ee40-231a-447a-a967-99bcf8b35d3f";
+  const withQ = nonPageResponse({ status: 301, location: to }, { ...ctx, search: "?tab=policies&utm_source=fb" })!;
+  assertEquals(withQ.headers.get("Location"), `https://xn--2lw665d.tw${to}?tab=policies&utm_source=fb`);
+  assertEquals(nonPageResponse({ status: 301, location: to }, { ...ctx, search: "" })!.headers.get("Location"), `https://xn--2lw665d.tw${to}`);
+  assertEquals(nonPageResponse({ status: 301, location: to }, ctx)!.headers.get("Location"), `https://xn--2lw665d.tw${to}`);
+  // 不是 ? 開頭、帶換行或空白、只有 ? → 丟掉，不拿來組標頭
+  for (const bad of ["tab=1", "?a=1\r\nSet-Cookie: x=1", "?a b", "?", "#frag"]) assertEquals(safeSearch(bad), "");
 });
 
 Deno.test("301 的目的地不是同站路徑 → 當 404，不轉", () => {
@@ -43,5 +53,7 @@ Deno.test("200 與 passthrough 不歸這裡管", () => {
 Deno.test("ssr-worker.js 真的把 render 結果交給 nonPageResponse（接線守門）", async () => {
   const src = await Deno.readTextFile(new URL("./ssr-worker.js", import.meta.url));
   assertEquals(/import \{ nonPageResponse \} from '\.\/render-status\.js'/.test(src), true);
-  assertEquals(/const special = nonPageResponse\(r, \{ shell, origin \}\)/.test(src), true);
+  assertEquals(/const special = nonPageResponse\(r, \{ shell, origin, search \}\)/.test(src), true);
+  // 查詢字串要從請求一路傳到 renderAndStore，不然 301 會丟掉 ?tab=
+  assertEquals(/renderAndStore\(path, url\.origin, cacheKey, cache, url\.search\)/.test(src), true);
 });
