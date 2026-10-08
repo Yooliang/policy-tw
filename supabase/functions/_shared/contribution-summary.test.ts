@@ -22,6 +22,31 @@ Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
   assertEquals(pol.summary, "為「王大明」補基本資料：出生年、簡介");
 });
 
+// 2026-10-08：補學經歷出處的貢獻帶 politician_id 與 education／experience，
+// 舊摘要看不到這兩欄，落到「新增政治人物『蔣萬安』」——但蔣萬安早就在庫裡
+Deno.test("politician 摘要：有 politician_id 永遠不寫成新增", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const onlyCareer = summarizeContribution({
+    contribution_type: "politician",
+    payload: { name: "蔣萬安", politician_id: id, education: ["美國加州大學"], experience: ["台北市長"] },
+  });
+  assertEquals(onlyCareer.summary, "為「蔣萬安」補資料：學歷、經歷");
+
+  const noFields = summarizeContribution({ contribution_type: "politician", payload: { name: "蔣萬安", politician_id: id } });
+  assertEquals(noFields.summary, "更新「蔣萬安」的資料");
+
+  // 已落到既有人物（applied_politician_id）也算更新；空陣列不算有值
+  const applied = summarizeContribution({ contribution_type: "politician", payload: { name: "蔣萬安", education: [] }, applied_politician_id: id });
+  assertEquals(applied.summary, "更新「蔣萬安」的資料");
+
+  // education_level 與 education 同叫「學歷」，不重複列
+  const dedup = summarizeContribution({ contribution_type: "politician", payload: { name: "蔣萬安", politician_id: id, education_level: "博士", education: ["x"], slogan: "s" } });
+  assertEquals(dedup.summary, "為「蔣萬安」補資料：學歷、口號");
+
+  const created = summarizeContribution({ contribution_type: "politician", payload: { name: "王新人" } });
+  assertEquals(created.summary, "新增政治人物「王新人」");
+});
+
 Deno.test("安全 payload：長文截 200 字", () => {
   const sp = safePayload({ bio: "很".repeat(500), tags: ["a"], n: 1 });
   assertEquals((sp.bio as string).length, 201);
