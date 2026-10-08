@@ -121,7 +121,10 @@ Deno.test("system-one roster_batch：太大的名冊回報原因、不佔一輪 
   const src = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
   assert(src.includes("RosterTooLargeError"), "roster_batch 要接 RosterTooLargeError");
   assert(src.includes("照舊交人工驗證"), "回報要寫原因：沒有系統票、交人工驗證");
-  assert(/let read = 0;[\s\S]*?if \(read >= 3\) break;/.test(src), "名額只算真的抽字的名冊（太大的不算，免得它每輪排在前面把別份擠掉）");
+  // 2026-10-08：先查 cec_registrations，查得到的不下載 PDF，所以「一輪 3 份」的上限只管 PDF 那條路，用 continue 而不是 break——
+  // break 會讓排在後面的、表裡查得到的名冊也被這個上限擋掉（cec-registrations.test.ts 守查表先於上限）
+  assert(/let read = 0;[\s\S]*?if \(read >= 3\) continue;/.test(src), "名額只算真的抽字的名冊（太大的不算，免得它每輪排在前面把別份擠掉）");
+  assert(!/if \(read >= 3\) break;/.test(src), "上限用 break 會把查得到表的名冊一起擋掉");
   assert(!src.includes("[...byUrl.entries()].slice(0, 3)"), "不能用 slice(0, 3) 先切（太大的會佔名額）");
   assert(src.includes("sub_region: typeof c.payload.sub_region") && src.includes("village: typeof c.payload.village"), "要把 sub_region／village 交給 checkBatch");
 });
