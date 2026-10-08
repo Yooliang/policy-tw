@@ -6,12 +6,11 @@
  * 還沒上線的設定表與規則欄位用 CTE 替身），不建立任何物件。
  *   parity：
  *     ① 總表：現行 contribution_auto_tasks_arms()（正式庫最新定義）vs migration 裡的新定義（activity_open 也用新本體、規則表換成帶新欄位的替身：
- *        P1 兩條「永遠開」規則加排除村里長，另加兩條「村里長、要流量」規則），旗標 gap.arms_all 關著與開著各比一次：雙向 EXCEPT ALL＋全欄雜湊。
- *        被收回的（舊有新沒有）按臂與任務型別列出——今天預期是 0 件；另外列出總表裡進度追蹤兩支臂各職位有幾件
+ *        raw:progress_stale、deadline_due、term_policies 三條 P1「永遠開」規則加排除村里長，另加三條「村里長、要流量」規則），旗標 gap.arms_all 關著與開著各比一次：雙向 EXCEPT ALL。
+ *        被收回的（舊有新沒有）按臂與任務型別列出：進度追蹤兩支臂今天預期 0 件；term_policies（補該屆政見 term_policy_missing，維護者 10-08 追加先停）只准收回村里長的列，件數逐一列出；新有舊沒有必須是 0
  *     ② 冷卻：現行 refresh_dispatch_blocked 的冷卻集合（task_checks）vs 新天數函式（設定表初值 14／30／progress_stale、deadline_due）：
  *        不同的任務逐件列出，必須全是「進度追蹤類、有第二次起的 not_found」
  *     ③ 標籤：新函式 policy_no_public_progress 對全部政見跑一遍，列出標上的件數與任務
- *     ④（--also-term）假設把 term_policy_missing 也對村里長關窗會收回幾件（只報數，不是這支 migration 的行為）
  *   time：總表整體 EXPLAIN (ANALYZE) 現行 vs 新定義；冷卻集合現行 vs 新；標籤對全部政見
  *
  * 用法：
@@ -30,10 +29,9 @@ const bodyOf = (s: string) => {
 };
 
 const args = Deno.args.filter((a) => !a.startsWith("--"));
-const alsoTerm = Deno.args.includes("--also-term");
 const [mode, arg1] = args;
 if (!["parity", "time"].includes(mode)) {
-  console.error("用法：arms-parity-villages.ts parity [改壞的 migration 路徑] [--also-term] ｜ arms-parity-villages.ts time [次數]");
+  console.error("用法：arms-parity-villages.ts parity [改壞的 migration 路徑] ｜ arms-parity-villages.ts time [次數]");
   Deno.exit(2);
 }
 const migSql = (mode === "parity" && arg1 ? Deno.readTextFileSync(arg1) : await readMig(MIG)).replace(/\r\n/g, "\n");
@@ -95,12 +93,19 @@ const openCall = "FROM activity_open(k.arm, k.eid, k.etype)";
   armsNew = once(armsNew, openCall, `FROM (${b}) ao`);
 }
 // 規則替身：P1 的兩條「永遠開」(id 5、24；以活動名認) 加排除村里長；另加兩條「村里長、要流量」（複製同一活動的規則列、改職位）
+// 規則替身的內容從 migration 的規則段解析（不在腳本裡另寫一份）：哪些活動加排除、排除哪些職位、哪些活動另種「要流量」的規則
+const EXCL_ACT = /UPDATE activity_rules\s+SET except_election_types = ARRAY\[([^\]]*)\],[\s\S]*?WHERE activity IN \(([^)]*)\)/.exec(migSql);
+const TRAFFIC_ACT = /FROM \(VALUES ([^\n]*)\) AS a\(activity\)/.exec(migSql);
+if (!EXCL_ACT || !TRAFFIC_ACT) throw new Error("migration 的規則段解析不到");
+const EXCL_TYPES = EXCL_ACT[1];
+const TREATED = EXCL_ACT[2];
+const TRAFFIC_LIST = [...TRAFFIC_ACT[1].matchAll(/\('([^']+)'\)/g)].map((m) => `'${m[1]}'`).join(", ");
 const rulesCte = (extraExcl: string[]) => `activity_rules AS (
-  SELECT r0.*, CASE WHEN r0.activity IN ('raw:progress_stale', 'deadline_due'${extraExcl.map((a) => `, '${a}'`).join("")}) AND r0.window_kind = 'always' AND r0.election_types IS NULL THEN ARRAY['村里長']::text[] END AS except_election_types, false AS requires_traffic
+  SELECT r0.*, CASE WHEN r0.activity IN (${TREATED}${extraExcl.map((a) => `, '${a}'`).join("")}) AND r0.window_kind = 'always' AND r0.election_types IS NULL THEN ARRAY[${EXCL_TYPES}]::text[] END AS except_election_types, false AS requires_traffic
     FROM public.activity_rules r0
   UNION ALL
   SELECT (jsonb_populate_record(NULL::public.activity_rules, to_jsonb(r1) || jsonb_build_object('id', r1.id + 100000, 'election_types', jsonb_build_array('村里長')))).*, NULL::text[] AS except_election_types, true AS requires_traffic
-    FROM public.activity_rules r1 WHERE r1.activity IN ('raw:progress_stale', 'deadline_due') AND r1.window_kind = 'always' AND r1.election_types IS NULL
+    FROM public.activity_rules r1 WHERE r1.activity IN (${TRAFFIC_LIST}) AND r1.window_kind = 'always' AND r1.election_types IS NULL
 )`;
 const withShims = (sql: string, shims: string[]) => once(sql, "WITH raw AS", `WITH ${shims.join(",\n")},\n       raw AS`);
 const armsNewSql = (extraExcl: string[] = []) => withShims(armsNew, [rulesCte(extraExcl)]);
@@ -151,7 +156,8 @@ SELECT (SELECT count(*) FROM o) AS n_old, (SELECT count(*) FROM n) AS n_new,
   (SELECT count(*) FROM (SELECT * FROM n EXCEPT ALL SELECT * FROM o) b) AS new_only,
   (SELECT md5(string_agg(t::text, '|' ORDER BY t.task_id COLLATE "C", t.arm)) FROM o t) AS h_old,
   (SELECT md5(string_agg(t::text, '|' ORDER BY t.task_id COLLATE "C", t.arm)) FROM n t) AS h_new;`);
-    check(`① 總表（gap.arms_all ${flag}）：現行 vs 新定義`, Number(r.old_only) === 0 && Number(r.new_only) === 0 && r.n_old === r.n_new && r.h_old === r.h_new,
+    // 旗標關著：被收回的就是村里長的 term_policy_missing（下面逐一核對件數）；旗標開著：同樣的列留在輸出裡（opened_by 變 NULL），所以只有 opened_by 不同
+    check(`① 總表（gap.arms_all ${flag}）：現行 vs 新定義，新有舊沒有必須是 0`, Number(r.new_only) === (flag === "on" ? Number(r.old_only) : 0) && (flag === "on" ? r.n_old === r.n_new : Number(r.n_new) <= Number(r.n_old)),
       `${r.n_old} 件 → ${r.n_new} 件，被收回（舊有新沒有）${r.old_only}、多出（新有舊沒有）${r.new_only}，全欄雜湊 ${r.h_old === r.h_new ? "相同 " + r.h_new : "不同"}`);
     if (flag === "off") offCount = Number(r.n_old);
     else check("① 旗標開著時總表比旗標關著多回傳被規則濾掉的列（兩種模式都真的比過）", Number(r.n_old) > offCount, `${offCount} → ${r.n_old}`);
@@ -160,7 +166,20 @@ SELECT (SELECT count(*) FROM o) AS n_old, (SELECT count(*) FROM n) AS n_new,
   const recalled = await query(`WITH o AS MATERIALIZED (SELECT * FROM contribution_auto_tasks_arms()),
 n(${AC}) AS MATERIALIZED (${armsNewSql()})
 SELECT t.arm, t.task_type, count(*) AS n FROM (SELECT task_id, task_type, arm FROM o EXCEPT SELECT task_id, task_type, arm FROM n) t GROUP BY 1, 2 ORDER BY 1, 2;`);
-  check("① 村里長進度類被收回的任務", recalled.length === 0, recalled.length === 0 ? "0 件" : recalled.map((r) => `${r.arm}／${r.task_type} ${r.n} 件`).join("、"));
+  check("① 進度追蹤兩支臂（progress_stale、deadline_due）被收回的任務", recalled.filter((r) => r.arm !== "term_policies").length === 0, recalled.filter((r) => r.arm !== "term_policies").length === 0 ? "0 件" : recalled.map((r) => `${r.arm}／${r.task_type} ${r.n} 件`).join("、"));
+  // term_policies：收回的每一件都必須是村里長（target.election_type），而且村里長的列全部收回（沒有流量達標的頁面時）
+  const [tv] = await query(`WITH o AS MATERIALIZED (SELECT * FROM contribution_auto_tasks_arms()),
+n(${AC}) AS MATERIALIZED (${armsNewSql()})
+SELECT (SELECT count(*) FROM o WHERE arm = 'term_policies') AS term_old,
+       (SELECT count(*) FROM o WHERE arm = 'term_policies' AND target->>'election_type' = '村里長') AS term_village_old,
+       (SELECT count(*) FROM n WHERE arm = 'term_policies') AS term_new,
+       (SELECT count(*) FROM n WHERE arm = 'term_policies' AND target->>'election_type' = '村里長') AS term_village_new,
+       (SELECT count(*) FROM (SELECT task_id FROM o WHERE arm = 'term_policies' EXCEPT SELECT task_id FROM n WHERE arm = 'term_policies') x
+         JOIN o ON o.task_id = x.task_id AND o.arm = 'term_policies' WHERE o.target->>'election_type' IS DISTINCT FROM '村里長') AS recalled_non_village,
+       (SELECT count(*) FROM page_traffic_hot) AS hot_pages;`);
+  const termRecalled = Number(tv.term_village_old) - Number(tv.term_village_new);
+  check("① term_policies：村里長的列全部收回（流量達標的頁面除外），沒有非村里長被收回", Number(tv.recalled_non_village) === 0 && Number(tv.term_new) === Number(tv.term_old) - termRecalled && (Number(tv.term_village_new) === 0 || Number(tv.hot_pages) > 0),
+    `term_policy_missing 現行 ${tv.term_old} 件（村里長 ${tv.term_village_old}）→ 新 ${tv.term_new} 件（村里長 ${tv.term_village_new}），收回村里長 ${termRecalled} 件；page_traffic_hot 目前 ${tv.hot_pages} 頁`);
   // 進度追蹤兩支臂各職位現況（新定義的職位補查）
   const dist = await query(`WITH n(${AC}) AS MATERIALIZED (${armsNewSql()}),
  p AS (SELECT n.arm, n.task_type, (SELECT string_agg(DISTINCT pe.election_type, ',') FROM politician_elections pe
@@ -202,14 +221,6 @@ SELECT task_id, side, min(k) AS first_day, max(k) AS last_day, count(*) AS days,
 SELECT count(*) AS n_policies, count(*) FILTER (WHERE v) AS n_label FROM l;`);
   console.log(`  標籤：全部 ${lab[0].n_policies} 條政見，標上「查無公開進度」的 ${lab[0].n_label} 條（缺口還在派工列、而且有一筆還在冷卻內的 not_found）`);
 
-  // ④ 假設也關 term_policy_missing（term_policies 臂）
-  if (alsoTerm) {
-    const [t] = await query(`WITH o AS MATERIALIZED (SELECT * FROM contribution_auto_tasks_arms()),
-n(${AC}) AS MATERIALIZED (${armsNewSql(["term_policies"])})
-SELECT (SELECT count(*) FROM o WHERE arm = 'term_policies') AS term_old, (SELECT count(*) FROM n WHERE arm = 'term_policies') AS term_new,
-       (SELECT count(*) FROM o WHERE arm = 'term_policies' AND target->>'election_type' = '村里長') AS term_village;`);
-    console.log(`  （假設）term_policy_missing 也對村里長關窗：term_policies 臂現行 ${t.term_old} 件，其中村里長 ${t.term_village} 件；關窗後（此腳本的替身規則，職位取 target.election_type）${t.term_new} 件`);
-  }
   console.log(fails.length ? `\n${fails.length} 項不過` : "\n全部通過");
   Deno.exit(fails.length ? 1 : 0);
 }

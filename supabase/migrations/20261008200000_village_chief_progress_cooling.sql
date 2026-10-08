@@ -2,23 +2,24 @@
 -- ============================================================
 --
 -- 起因：村里長人多（2026 登記 14,100 人）、媒體少，進度追蹤任務查不到就冷卻、14 天後再派，一直重複。維護者 10-08 裁示四點：
---   1. 村里長只收政見與結果，不主動派進度追蹤（用規則限定職位關窗）
+--   1. 村里長只收政見與結果，不主動派進度追蹤（用規則限定職位關窗）。維護者同日追加：村里長的「補該屆政見」term_policy_missing 也先停
 --   2. 有人關心才追蹤：網站請求、公民提問已經是手動任務臂（#453），不受影響；村里長的人物頁或政見頁在 page_traffic_hot（#474）達標也開窗
 --   3. 查無公開進度時冷卻遞增：同一個任務第一次查無（outcome=not_found）冷卻 14 天，第二次起 30 天；天數放設定表、可調
 --   4. 政見處於這個冷卻中時，政見頁與人物頁的進度區塊標「查無公開進度」（只放標籤，冷卻結束或缺口消失自動消失）
 --
 -- 做法（逐點）：
 --
---   1. 關窗＝規則，不改臂本體。進度追蹤的兩個活動 raw:progress_stale、deadline_due（P1 種的「永遠開」規則，rule_id 不變）原地加上 except_election_types＝{村里長}。
+--   1. 關窗＝規則，不改臂本體。進度追蹤的兩個活動 raw:progress_stale、deadline_due，加上維護者追加要先停的 term_policies（補該屆政見，產出 term_policy_missing）——三個活動的 P1「永遠開」規則（rule_id 不變）原地加上 except_election_types＝{村里長}。
 --      為什麼新增「排除」欄而不是用 election_types 列出其餘 8 種職位：這兩支臂的 target 沒有 election_type（只有 policy_id、politician_id、election_id），
 --      activity_open 對「職位未知」的處理是「有限定職位的規則比對不到」，列出其餘職位會讓所有職位未知的列（2026-10-08 正式庫 43 件 progress_stale 缺口裡有 3 件在那一屆沒有參選紀錄）被無聲關掉；
 --      排除欄在職位未知時不排除，寧可開著。日後新增職位（例如新的選舉別）也不會被正向清單漏掉。
 --      職位從哪來：總表 keyed 那一段，臂有「要看職位」的規則（except_election_types 有值）時，target 沒有 election_type 的列，職位改取這個人在這一屆（target.election_id）的參選紀錄
 --      politician_elections.election_type（一個人一屆一個職位；查不到就維持未知）。其餘臂的分組一個字不變，target 本身也不動，所以派工輸出逐件不變。
---      暫時無法限定的：target 沒有 election_id 的列（沒標屆別的政見）、人物在那一屆沒有參選紀錄的列——它們維持開著（照舊）。2026-10-08 正式庫：這兩種都沒有村里長的政見。
+--      term_policies 的 target 自己帶 election_type，不需要補查。
+--      暫時無法限定的（進度兩支臂）：target 沒有 election_id 的列（沒標屆別的政見）、人物在那一屆沒有參選紀錄的列——它們維持開著（照舊）。2026-10-08 正式庫：這兩種都沒有村里長的政見。
 --      收回走既有機制：窗口關了，seed 下一輪把派工列收回，原因記 window。
 --
---   2. 流量開窗＝同一個活動多一條規則（OR），規則多一個旗標 requires_traffic：活動 raw:progress_stale、deadline_due 各種一條「職位＝村里長、永遠開、requires_traffic」的規則。
+--   2. 流量開窗＝同一個活動多一條規則（OR），規則多一個旗標 requires_traffic：活動 raw:progress_stale、deadline_due、term_policies 各種一條「職位＝村里長、永遠開、requires_traffic」的規則。
 --      為什麼不在 activity_open 裡 OR 流量訊號：activity_open 是「臂×選舉×職位」一組問一次（約 84 組），流量訊號卻是「這一頁」的（人物或政見），
 --      放進去就要改它的簽名（多一個人物／政見參數）而且每組變成每列問一次；而且它分不出「被排除職位關著」與「窗口沒到關著」——流量只該打開前者。
 --      做法：規則只回答「這一組（臂×選舉×職位）有沒有一條規則願意開」，旗標 requires_traffic 讓總表在列這一層再加一道：這一列 target 的 politician_id 在 page_traffic_hot
@@ -38,7 +39,7 @@
 --      而且它有一筆 not_found 的查核紀錄還在冷卻內（天數同第 3 點的函式）。前端（政見頁、人物頁的政見卡）只讀這一欄，不另外查清單，只放標籤、不放說明文字。
 --
 -- 不做：不改臂本體（contribution_auto_tasks_raw／deadline_due 一個字不動）、不改 seed_auto_task_queue、rebalance_queue、task_dispatched、優先層；
---   term_policy_missing（補該屆政見）不關窗：它收的是「政見」，維護者說的是「村里長只收政見與結果」；要關是同一個欄位再種一條規則（見 PLAN 第 11 節）。
+--   （term_policy_missing 本來不在這支的範圍，維護者 10-08 追加後併入：村里長一次最多 term_policy_village_cap() 件的補該屆政見也先停，正式庫現行 300 件在下一輪 seed 以 window 收回；村里長的 2026 補政見 policy_missing、補基本資料、選舉結果不受影響。）
 --
 -- 同簽名：activity_open、contribution_auto_tasks_arms、refresh_dispatch_blocked 都是 CREATE OR REPLACE 同簽名、同回傳型別；policies_with_logs 只在最後多一欄；
 --   新欄位／新函式／新表都是只加不刪，先於程式上線沒有風險（前端讀不到 no_public_progress 時當 false）。
@@ -142,19 +143,19 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 -- ------------------------------------------------------------
--- 3. 規則：進度追蹤兩個活動對村里長關窗，村里長的頁面有流量才開
+-- 3. 規則：進度追蹤兩個活動與補該屆政見（term_policies）對村里長關窗，村里長的頁面有流量才開
 --    P1 的「永遠開」種子規則原地（rule_id 不變）加排除；新增一條只有村里長、要流量的規則
 -- ------------------------------------------------------------
 UPDATE activity_rules
    SET except_election_types = ARRAY['村里長'],
        note = '#470：永遠開，但不含村里長（村里長只收政見與結果，不主動追進度；有流量才開見同一活動的另一條規則）。原 P1 種子，rule_id 不變'
- WHERE activity IN ('raw:progress_stale', 'deadline_due')
+ WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies')
    AND window_kind = 'always' AND election_types IS NULL AND except_election_types IS NULL AND NOT requires_traffic;
 
 INSERT INTO activity_rules (activity, window_kind, election_types, requires_traffic, note)
 SELECT a.activity, 'always', ARRAY['村里長'], true,
-       '#470：村里長的進度追蹤只在「這一列的人物頁或政見頁現在在 page_traffic_hot（#474）」時才開；流量退了、資料過期，下一輪 seed 照 window 收回'
-  FROM (VALUES ('raw:progress_stale'), ('deadline_due')) AS a(activity)
+       '#470：村里長的進度追蹤（含補該屆政見）只在「這一列的人物頁或政見頁現在在 page_traffic_hot（#474）」時才開；流量退了、資料過期，下一輪 seed 照 window 收回'
+  FROM (VALUES ('raw:progress_stale'), ('deadline_due'), ('term_policies')) AS a(activity)
  WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = a.activity AND r.requires_traffic AND r.election_types = ARRAY['村里長']);
 
 -- 沒有 P1 種子可更新（例如被人刪了）就整支失敗，不替人決定
@@ -162,11 +163,11 @@ DO $$
 DECLARE v_n INTEGER;
 BEGIN
   SELECT count(*) INTO v_n FROM activity_rules r
-   WHERE r.activity IN ('raw:progress_stale', 'deadline_due') AND r.window_kind = 'always' AND r.except_election_types = ARRAY['村里長'] AND r.enabled;
-  IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale 與 deadline_due 各有一條「永遠開、排除村里長」的規則，實際 % 條', v_n; END IF;
+   WHERE r.activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') AND r.window_kind = 'always' AND r.except_election_types = ARRAY['村里長'] AND r.enabled;
+  IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale、deadline_due、term_policies 各有一條「永遠開、排除村里長」的規則，實際 % 條', v_n; END IF;
   SELECT count(*) INTO v_n FROM activity_rules r
-   WHERE r.activity IN ('raw:progress_stale', 'deadline_due') AND r.requires_traffic AND r.election_types = ARRAY['村里長'] AND r.enabled;
-  IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期兩個活動各有一條「村里長、要流量」的規則，實際 % 條', v_n; END IF;
+   WHERE r.activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') AND r.requires_traffic AND r.election_types = ARRAY['村里長'] AND r.enabled;
+  IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期三個活動各有一條「村里長、要流量」的規則，實際 % 條', v_n; END IF;
 END
 $$;
 

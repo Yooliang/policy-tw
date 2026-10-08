@@ -191,9 +191,10 @@ Deno.test("A7 前端只讀視圖多出來的那一欄、只放標籤「查無公
   }
 });
 
-Deno.test("A8 協議：skill.md 版號比 main 的 1.78.0 大一號、說明村里長與遞增冷卻；CLAUDE.md、計畫第 11 節、DECISIONS 一起更新", async () => {
+Deno.test("A8 協議：skill.md 版號 1.80.0（#482 的 1.79.0 先合併）、說明村里長與遞增冷卻；CLAUDE.md、計畫第 11 節、DECISIONS 一起更新", async () => {
   const skill = await readSrc("../../../public/skill.md");
-  assert(/\*\*版本\*\*：1\.79\.0/.test(skill), "協議版號 1.79.0");
+  assert(/\*\*版本\*\*：1\.80\.0/.test(skill), "協議版號 1.80.0");
+  assert(skill.includes("term_policy_missing") && skill.includes("村里長不主動派"), "skill.md 寫了補該屆政見對村里長先停");
   assert(skill.includes("第二次起 30 天") && skill.includes("村里長"), "skill.md 寫了遞增冷卻與村里長");
   const claude = await readSrc("../../../CLAUDE.md");
   assert(claude.includes("task_cooldown_settings") && claude.includes("policy_no_public_progress") && claude.includes("except_election_types"));
@@ -269,13 +270,19 @@ const FIXTURE = {
     G(`profile_gap:${PV1}`, "profile_gap", { politician_id: PV1, name: "n", election_id: 2026 }),
   ],
   deadline_due: [due(POL_M2, PM, 2022), due(POL_V1C, PV1, 2022)],
-  term_policies: [G(`term_policy_missing:${PV1}:2022`, "term_policy_missing", { politician_id: PV1, name: "n", election_id: 2022, election_type: "村里長" })],
+  // 補該屆政見：村里長的先停（維護者追加），別的職位照派；target 自己帶 election_type
+  term_policies: [
+    G(`term_policy_missing:${PV1}:2022`, "term_policy_missing", { politician_id: PV1, name: "n", election_id: 2022, election_type: "村里長" }),
+    G(`term_policy_missing:${PM}:2022`, "term_policy_missing", { politician_id: PM, name: "n", election_id: 2022, election_type: "縣市長" }),
+  ],
   election_results: [G(`election_results_missing:v`, "election_results_missing", { election_id: 2022, election_type: "村里長" })],
 };
-const PROG_ALL = [`progress_stale:${POL_M}`, `progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `progress_stale:${POL_V2}`, `progress_stale:${POL_V3}`, `progress_stale:${POL_N}`, `deadline_due:${POL_M2}`, `deadline_due:${POL_V1C}`];
-const OTHERS = [`policy_missing:${PV1}`, `profile_gap:${PV1}`, `term_policy_missing:${PV1}:2022`, `election_results_missing:v`];
-/** 村里長（職位查得到）的進度追蹤：沒有流量時關著 */
-const VILLAGE_PROG = [`progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `progress_stale:${POL_V2}`, `deadline_due:${POL_V1C}`];
+const TERM_V = `term_policy_missing:${PV1}:2022`;
+const TERM_M = `term_policy_missing:${PM}:2022`;
+const PROG_ALL = [TERM_V, TERM_M, `progress_stale:${POL_M}`, `progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `progress_stale:${POL_V2}`, `progress_stale:${POL_V3}`, `progress_stale:${POL_N}`, `deadline_due:${POL_M2}`, `deadline_due:${POL_V1C}`];
+const OTHERS = [`policy_missing:${PV1}`, `profile_gap:${PV1}`, `election_results_missing:v`];
+/** 村里長（職位查得到）的進度追蹤與補該屆政見：沒有流量時關著 */
+const VILLAGE_PROG = [TERM_V, `progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `progress_stale:${POL_V2}`, `deadline_due:${POL_V1C}`];
 /** 職位不是村里長、或查不到職位的：照舊開著 */
 const OPEN_PROG = PROG_ALL.filter((k) => !VILLAGE_PROG.includes(k));
 
@@ -406,7 +413,7 @@ async function runSuite(db: Db): Promise<Verdicts> {
   });
 
   await g("baseline_others_open", async () => {
-    // 村里長的「收政見」「補基本資料」「補該屆政見」「選舉結果」：不是進度追蹤，維持開著
+    // 村里長的「補 2026 政見」「補基本資料」「選舉結果」：維持開著（補該屆政見 term_policy_missing 維護者追加後也先停，見 VILLAGE_PROG）
     await seed(db);
     return has(await armIds(db), OTHERS) && has(await dispatchIds(db), OTHERS);
   });
@@ -420,12 +427,12 @@ async function runSuite(db: Db): Promise<Verdicts> {
   await g("activity_open_exclusion", async () => {
     const q = (act: string, et: string | null) => rows<{ rule_id: number }>(db, `SELECT rule_id FROM activity_open($1, 2022, $2)`, [act, et]);
     const rules = await rows<{ id: number; activity: string; except_election_types: string[] | null; requires_traffic: boolean; election_types: string[] | null }>(db,
-      `SELECT id, activity, except_election_types, requires_traffic, election_types FROM activity_rules WHERE activity IN ('raw:progress_stale', 'deadline_due') ORDER BY id`);
+      `SELECT id, activity, except_election_types, requires_traffic, election_types FROM activity_rules WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') ORDER BY id`);
     const excl = rules.filter((r) => r.except_election_types !== null);
     const gate = rules.filter((r) => r.requires_traffic);
-    if (excl.length !== 2 || gate.length !== 2 || rules.length !== 4) return false;
+    if (excl.length !== 3 || gate.length !== 3 || rules.length !== 6) return false;
     let ok = true;
-    for (const act of ["raw:progress_stale", "deadline_due"]) {
+    for (const act of ["raw:progress_stale", "deadline_due", "term_policies"]) {
       const ex = excl.find((r) => r.activity === act)!;
       const gt = gate.find((r) => r.activity === act)!;
       // 村里長：只有「要流量」那條開；縣市長與職位未知：只有「永遠開、排除村里長」那條開
@@ -435,13 +442,13 @@ async function runSuite(db: Db): Promise<Verdicts> {
       ok = ok && JSON.stringify(ex.except_election_types) === JSON.stringify(["村里長"]) && JSON.stringify(gt.election_types) === JSON.stringify(["村里長"]);
     }
     // P1 種子的 rule_id 沒變（原地更新）：兩條「排除」規則就是 P1 種的那兩條
-    const p1 = await rows<{ id: number }>(db, `SELECT id FROM activity_rules WHERE activity IN ('raw:progress_stale', 'deadline_due') AND note LIKE '#470：永遠開%' ORDER BY id`);
-    return ok && p1.length === 2 && p1.every((r) => Number(r.id) <= 40);
+    const p1 = await rows<{ id: number }>(db, `SELECT id FROM activity_rules WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') AND note LIKE '#470：永遠開%' ORDER BY id`);
+    return ok && p1.length === 3 && p1.every((r) => Number(r.id) <= 40);
   });
 
   await g("exclusion_is_data", async () => {
     // 規則是資料：停用兩條排除規則，村里長的進度追蹤又開了（不用改任何函式）
-    await db.exec(`UPDATE activity_rules SET except_election_types = NULL WHERE activity IN ('raw:progress_stale', 'deadline_due') AND except_election_types IS NOT NULL`);
+    await db.exec(`UPDATE activity_rules SET except_election_types = NULL WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') AND except_election_types IS NOT NULL`);
     return has(await armIds(db), VILLAGE_PROG);
   });
 
@@ -459,7 +466,7 @@ async function runSuite(db: Db): Promise<Verdicts> {
     await db.exec(`UPDATE activity_rules SET except_election_types = NULL WHERE except_election_types IS NOT NULL`); // 先讓它們進派工列
     await seed(db);
     const had = has(await dispatchIds(db), VILLAGE_PROG);
-    await db.exec(`UPDATE activity_rules SET except_election_types = ARRAY['村里長'] WHERE activity IN ('raw:progress_stale', 'deadline_due') AND window_kind = 'always' AND election_types IS NULL`);
+    await db.exec(`UPDATE activity_rules SET except_election_types = ARRAY['村里長'] WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies') AND window_kind = 'always' AND election_types IS NULL`);
     await seed(db);
     const gone = none(await dispatchIds(db), VILLAGE_PROG);
     const reasons = await Promise.all(VILLAGE_PROG.map((k) => gapReason(db, k)));
@@ -471,7 +478,7 @@ async function runSuite(db: Db): Promise<Verdicts> {
     await seed(db);
     const d = await dispatchIds(db);
     // PV1 的人物頁熱門：他名下的進度追蹤開（兩種活動都開）；PV2 不熱門、維持關
-    return has(d, [`progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `deadline_due:${POL_V1C}`]) && none(d, [`progress_stale:${POL_V2}`]) && has(d, OPEN_PROG);
+    return has(d, [TERM_V, `progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `deadline_due:${POL_V1C}`]) && none(d, [`progress_stale:${POL_V2}`]) && has(d, OPEN_PROG);
   });
 
   await g("traffic_opens_policy", async () => {
@@ -840,7 +847,9 @@ type G = (typeof GUARDS)[number];
 const MUTATIONS: { why: string; from: string; to: string; also?: [string, string]; red: G[] }[] = [
   { why: "activity_open 不排除職位", from: "       AND (r.except_election_types IS NULL OR p_election_type IS NULL OR NOT (p_election_type = ANY (r.except_election_types)))  -- 排除職位：職位未知（NULL）時不排除，寧可開著也不無聲關掉\n", to: "", red: ["baseline_village_progress_closed", "activity_open_exclusion", "dispatch_recalled_window"] },
   { why: "排除時把職位未知的也關掉（NULL 不安全）", from: "(r.except_election_types IS NULL OR p_election_type IS NULL OR NOT (p_election_type = ANY (r.except_election_types)))", to: "(r.except_election_types IS NULL OR NOT (p_election_type = ANY (r.except_election_types)))", red: ["unknown_position_stays_open", "activity_open_exclusion"] },
-  { why: "排除名單寫成縣市長（沒排除村里長）", from: "   SET except_election_types = ARRAY['村里長'],", to: "   SET except_election_types = ARRAY['縣市長'],", also: ["AND r.except_election_types = ARRAY['村里長'] AND r.enabled;\n  IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale", "AND r.except_election_types = ARRAY['縣市長'] AND r.enabled;\n  IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale"], red: ["baseline_village_progress_closed", "activity_open_exclusion"] },
+  { why: "排除名單寫成縣市長（沒排除村里長）", from: "   SET except_election_types = ARRAY['村里長'],", to: "   SET except_election_types = ARRAY['縣市長'],", also: ["AND r.except_election_types = ARRAY['村里長'] AND r.enabled;\n  IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale", "AND r.except_election_types = ARRAY['縣市長'] AND r.enabled;\n  IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale"], red: ["baseline_village_progress_closed", "activity_open_exclusion"] },
+  { why: "補該屆政見（term_policies）沒有種排除村里長的規則", from: " WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies')\n   AND window_kind = 'always'", to: " WHERE activity IN ('raw:progress_stale', 'deadline_due')\n   AND window_kind = 'always'", also: ["IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale、deadline_due、term_policies 各有一條「永遠開、排除村里長」", "IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale、deadline_due、term_policies 各有一條「永遠開、排除村里長」"], red: ["baseline_village_progress_closed", "activity_open_exclusion"] },
+  { why: "補該屆政見沒有種「村里長、要流量」的規則（熱門也不開）", from: "(VALUES ('raw:progress_stale'), ('deadline_due'), ('term_policies')) AS a(activity)", to: "(VALUES ('raw:progress_stale'), ('deadline_due')) AS a(activity)", also: ["IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期三個活動各有一條", "IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期三個活動各有一條"], red: ["traffic_opens_person", "activity_open_exclusion"] },
   { why: "總表不補職位（keyed 只看 target）", from: "                  CASE WHEN g.arm IN (SELECT n.activity FROM needs_etype n)\n", to: "                  CASE WHEN false\n", red: ["baseline_village_progress_closed", "dispatch_recalled_window", "traffic_opens_person"] },
   { why: "職位補查對所有臂都做（不只有規則要看職位的臂）", from: "                  CASE WHEN g.arm IN (SELECT n.activity FROM needs_etype n)\n", to: "                  CASE WHEN true\n", red: ["other_arms_group_unchanged"] },
   { why: "職位補查取錯屆別（寫死 2026）", from: "AND pe.election_id = election_id_or_null(g.target->>'election_id')\n", to: "AND pe.election_id = 2026\n", red: ["baseline_village_progress_closed"] },
