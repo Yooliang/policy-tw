@@ -1740,6 +1740,18 @@ async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow)
 export const TASK_CHECK_COOLDOWN_DAYS = 14;
 /** 跟 SQL 的 task_unreachable_cooldown_days() 同一個數字；「我拿不到來源」是換人再試，不是結案 */
 export const TASK_UNREACHABLE_COOLDOWN_DAYS = 2;
+/**
+ * 進度追蹤類（progress_stale、deadline_due）同一個任務第二次起回報查無（not_found）的冷卻天數：跟 SQL 設定表 task_cooldown_settings.not_found_repeat_days 的初值同一個數字。
+ * 設定表可調（一行 UPDATE），這裡只用在回給代理的那句話；village-progress-cooling.test.ts 盯著兩邊的初值一致。第一次查無沿用 TASK_CHECK_COOLDOWN_DAYS（設定表 not_found_first_days 的初值）。
+ */
+export const PROGRESS_REPEAT_COOLDOWN_DAYS = 30;
+/**
+ * 冷卻遞增適用的任務型別：跟 SQL 設定表 task_cooldown_settings.task_types 的初值同一份清單。
+ * **這裡是寫死的依賴**：設定表可以用一行 UPDATE 改型別名單，TS 不會跟著變，結果是代理收到的那句話（14 天／30 天）跟資料庫實際的冷卻對不上；
+ * 沒有每次讀表是因為這句話只是提示、資料庫才是準的，而且每筆 no_change 多一次查詢不值得。改設定表的型別名單或天數時，這裡要一起改；
+ * village-progress-cooling.test.ts 比對這份清單與 migration 的初值。term_policy_missing 不在名單裡（維持一律 14 天）。
+ */
+export const PROGRESS_COOLDOWN_TASK_TYPES = ["progress_stale", "deadline_due"] as const;
 
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
@@ -1855,6 +1867,10 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     }
     if (outcome === "unreachable") {
       return { status: "applied", message: `已記錄「拿不到來源、未能確認」，這筆缺口 ${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試（不是結案）`, task_id: taskId };
+    }
+    if (outcome === "not_found" && (PROGRESS_COOLDOWN_TASK_TYPES as readonly string[]).includes(taskId.split(":")[1])) {
+      // 進度追蹤類查無冷卻遞增（#470）：同一個任務第一次 14 天，第二次起 30 天
+      return { status: "applied", message: `已記錄「查無公開進度」：這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人（同一個任務第二次起回報查無，冷卻改 ${PROGRESS_REPEAT_COOLDOWN_DAYS} 天）；期間資料若補齊也會自行消失`, task_id: taskId };
     }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }

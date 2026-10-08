@@ -664,7 +664,11 @@ async function copyCitation() {
                  看起來像只有它能動。文字沿用 hero 那顆（查進度／查兌現情形），同一件事只有一種叫法。
                  這一區只在非競選政見出現，所以 canVerify 必為真，不必再處理擋下來的情況。 -->
             <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-              <h2 class="text-xl font-bold text-navy-900 flex items-center gap-2"><Calendar class="text-slate-400" :size="22" />執行歷程追蹤</h2>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h2 class="text-xl font-bold text-navy-900 flex items-center gap-2"><Calendar class="text-slate-400" :size="22" />執行歷程追蹤</h2>
+                <!-- 查無公開進度（#470）：只放標籤，資料由視圖 policies_with_logs.no_public_progress 帶來 -->
+                <span v-if="policy.noPublicProgress" data-testid="no-public-progress" class="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">查無公開進度</span>
+              </div>
               <button
                 type="button"
                 data-testid="timeline-progress"

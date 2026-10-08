@@ -138,7 +138,8 @@ Deno.test("管線快照：採樣函式與排程都在最新的 migration 裡，�
 });
 
 Deno.test("無異動的冷卻天數：SQL 與 TypeScript 要是同一個數字", async () => {
-  const { sql } = await latestMigrationDefining("task_check_cooldown_days");
+  // 要找 task_check_cooldown_days() 本身的定義；要帶括號，不帶會配到 20261009010000 的 task_check_cooldown_days_for（#470，它另有自己的守門）
+  const { sql } = await latestMigrationDefining("task_check_cooldown_days()");
   const m = sql.match(/FUNCTION task_check_cooldown_days\(\)[\s\S]*?SELECT\s+(\d+)/);
   assert(m, "找不到 SQL 的冷卻天數");
   assertEquals(Number(m![1]), TASK_CHECK_COOLDOWN_DAYS, "SQL 與 TS 的冷卻天數不一致；改一邊一定要改另一邊");
