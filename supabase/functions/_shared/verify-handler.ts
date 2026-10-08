@@ -14,6 +14,7 @@ import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-app
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
 import { agentToolNotice } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
+import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -148,8 +149,10 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       agent_name: input.agent_name, token_id: tokenBinding.tokenId, issued_net: tokenBinding.issuedNet, report_net: reportIpHash,
     });
   } else if (via !== "merge") {
+    // 只認派出後 VERIFY_BINDING_DAYS 天內的紀錄（派工紀錄會定時清掉更舊的，#485；時限明寫，清理前後結果才一樣）
+    const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
     const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
-      .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).maybeSingle();
+      .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle();
     if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
     if (!dispatched) {
       return {
