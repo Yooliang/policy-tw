@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, type RouteLocationRaw } from 'vue-router'
 import { Check, Copy, ExternalLink, X } from 'lucide-vue-next'
 import ElectionHero from '../components/ElectionHero.vue'
@@ -12,6 +12,10 @@ import { renderMdPreview } from '../lib/md/html'
 import { dataCategoryMdPath, dataIndexMdPath, dataRegionCategoryMdPath, dataRegionMdPath, renderPage } from '../lib/md/format'
 import type { MdPage } from '../lib/md/format'
 import type { Matrix } from '../lib/md/dataset'
+import { categoryItems, regionItems, sliceColors, topSlices, type Slice } from '../lib/matrix-share'
+import { CHART_LEGEND } from '../lib/chart-style'
+
+const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 
 /**
  * 政見矩陣（維護者 2026-10-07）：橫向 22 縣市、直列 19 個分類（照網站分類順序），格子＝該縣市該分類的競選承諾筆數（只算這一屆在選候選人名下、屬於這一屆的競選承諾，只放筆數、不放比例，
@@ -24,6 +28,8 @@ import type { Matrix } from '../lib/md/dataset'
  *
  * 資料：排程每小時預產進 data_md_cache（scripts/build-data-md.ts），這裡只用 anon 讀同一份——筆數矩陣是 `_matrix` 那一列，
  * 展開的摘要是各 .md 對應的那一列。頁面不放說明文字，只留表頭與數字。
+ * 表格上方兩張甜甜圈（lib/matrix-share.ts）：左＝政見分類占比、右＝各縣市占比，只用矩陣現有的數字；切片超過 8 塊取前 8、其餘合成「其他」，中間是總筆數；
+ * 點切片＝點對應的表頭（分類／縣市；選了縣市時分類切片＝該縣市的該分類格），「其他」不可點。圖只在瀏覽器畫（ClientOnly＋非同步載入，預渲染的 HTML 只有預留好高度的空框）。
  * 預渲染（內容頁、可收錄、進網站地圖）：建置端把 _matrix 放進頁面快照，HTML 裡就有數字與連結；掛載後背景換成最新一批。
  */
 
@@ -111,6 +117,72 @@ const pickAll = (): Pick => ({ id: 'all', row: `/data/${seg()}/index.md`, path: 
 const pickRegion = (r: string): Pick => ({ id: `r:${r}`, row: `/election/${seg()}/${r}.md`, path: dataRegionMdPath(seg(), r), title: `${r}　全部分類` })
 const pickCategory = (c: string): Pick => ({ id: `c:${c}`, row: `/data/${seg()}/${c}.md`, path: dataCategoryMdPath(seg(), c), title: `${c}　全部縣市` })
 const pickCell = (r: string, c: string): Pick => ({ id: `${r}|${c}`, row: `/data/${seg()}/${r}/${c}.md`, path: dataRegionCategoryMdPath(seg(), r, c), title: `${r}　${c}` })
+
+// 兩張甜甜圈：全台＝分類總數／22 縣市；選了縣市＝該縣市各分類／「所選縣市 vs 其他縣市合計」
+// （右圖選縣市時不維持 22 塊：22 塊裡所選縣市常掉進「其他」，看不到；兩塊直接回答「它占全台多少」，而且所選縣市可點）
+const categorySlices = computed<Slice[]>(() => (matrix.value ? topSlices(categoryItems(matrix.value, scopeRegion.value), '其餘分類') : []))
+const regionSlices = computed<Slice[]>(() => (matrix.value ? topSlices(regionItems(matrix.value, scopeRegion.value), '其他縣市') : []))
+
+/** 切片點下去等於點對應的表頭或格子；合併項回 null（不可點） */
+function pickCategorySlice(s: Slice): Pick | null {
+  if (s.isOther) return null
+  return oneRegion.value ? pickCell(scopeRegion.value, s.key) : pickCategory(s.key)
+}
+function pickRegionSlice(s: Slice): Pick | null {
+  return s.isOther ? null : pickRegion(s.key)
+}
+
+function donutOptions(slices: Slice[], pickOf: (s: Slice) => Pick | null) {
+  const total = slices.reduce((sum, s) => sum + s.value, 0)
+  return {
+    chart: {
+      type: 'donut' as const,
+      toolbar: { show: false },
+      events: {
+        dataPointSelection: (_e: unknown, _c: unknown, cfg: { dataPointIndex: number }) => {
+          const s = slices[cfg.dataPointIndex]
+          const p = s ? pickOf(s) : null
+          if (p) void open(p)
+        },
+        dataPointMouseEnter: (e: { target?: EventTarget | null }, _c: unknown, cfg: { dataPointIndex: number }) => {
+          const s = slices[cfg.dataPointIndex]
+          if (e.target instanceof SVGElement) e.target.style.cursor = s && pickOf(s) ? 'pointer' : 'default'
+        },
+      },
+    },
+    labels: slices.map((s) => s.label),
+    colors: sliceColors(slices),
+    stroke: { width: 2, colors: ['#ffffff'] },
+    dataLabels: { enabled: false },
+    // 圖例只當標示，點了不隱藏切片（隱藏後中間的總數就對不上）
+    legend: { ...CHART_LEGEND, onItemClick: { toggleDataSeries: false } },
+    states: { active: { filter: { type: 'none' } } },
+    plotOptions: {
+      pie: {
+        donut: {
+          size: '66%',
+          labels: {
+            show: true,
+            name: { show: true, fontSize: '12px', color: '#64748b', offsetY: -2 },
+            value: { show: true, fontSize: '22px', fontWeight: 800, color: '#0f172a', offsetY: 2, formatter: (v: string) => `${v}` },
+            total: { show: true, showAlways: true, label: '總筆數', fontSize: '12px', color: '#64748b', formatter: () => `${total}` },
+          },
+        },
+      },
+    },
+    // 只放筆數、不放百分比（DECISIONS 2026-10-07「首頁與矩陣只放筆數」；圓餅的切片大小本身就是比例）
+    tooltip: { y: { formatter: (v: number) => `${v} 筆` } },
+  }
+}
+const charts = computed(() => {
+  const one = oneRegion.value
+  const cat = categorySlices.value
+  const reg = regionSlices.value
+  return [
+    { id: 'category', title: one ? `${scopeRegion.value}　政見分類` : '政見分類', empty: cat.length === 0, options: donutOptions(cat, pickCategorySlice), series: cat.map((s) => s.value) },
+    { id: 'region', title: one ? `${scopeRegion.value}　與其他縣市` : '各縣市', empty: reg.length === 0, options: donutOptions(reg, pickRegionSlice), series: reg.map((s) => s.value) },
+  ]
+})
 
 /** 抽屜開著時：Esc 關閉、Tab 只在抽屜裡轉、背景不捲動；關掉後焦點回到點開它的那一格 */
 const drawerEl = ref<HTMLElement | null>(null)
@@ -227,6 +299,16 @@ const DRAWER_BTN = 'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1
       <div v-if="loading" class="text-slate-500 text-center py-20">載入中…</div>
       <div v-else-if="!valid" class="text-slate-500 text-center py-20">這一屆沒有政見矩陣</div>
       <template v-else-if="matrix">
+        <!-- 表格上方兩張甜甜圈：桌機並排、手機上下排；高度固定，圖在瀏覽器端載入前後版面不跳動 -->
+        <div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="matrix-charts">
+          <section v-for="c in charts" :key="c.id" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" :data-testid="`matrix-chart-${c.id}`">
+            <h2 class="mb-2 text-sm font-bold text-slate-700">{{ c.title }}</h2>
+            <div class="h-[22rem]">
+              <ClientOnly><apexchart v-if="!c.empty" type="donut" :height="352" :options="c.options" :series="c.series" /></ClientOnly>
+            </div>
+          </section>
+        </div>
+
         <!-- 手機：整張表可橫向捲動，首欄（分類）固定在左 -->
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="matrix-scroll">
           <table :class="['border-collapse text-sm', oneRegion ? 'w-full' : 'min-w-max']">
