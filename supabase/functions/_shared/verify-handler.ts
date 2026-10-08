@@ -103,7 +103,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   if (contribution.contribution_type === "adjudication") {
     const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
     const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash").eq("id", originalId).maybeSingle() : { data: null };
-    if (original && isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash })) {
+    // 過渡期（#481）：原貢獻若是切換前交的，存的是單一 IP 雜湊，也要比舊雜湊
+    if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash))) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
   }
@@ -132,13 +133,6 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
     .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
-  // 過渡期：切換前用單一 IP 雜湊投的票也算同一個來源，不能再投一張（那張舊票不能用 revise 改，#481）
-  if (((existing ?? []) as Array<{ verifier_ip_hash: string | null }>).some((x) => isLegacySource(x.verifier_ip_hash, legacyIpHash))) {
-    return {
-      status: 409,
-      body: { success: false, error: "already_voted", message: "這筆你這個來源在 1.79.0 改用網段之前已經投過票了（同一個來源只能投一次），請直接領下一筆。" },
-    };
-  }
   if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
     const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
       .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
@@ -155,6 +149,26 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
       };
     }
     revising = { id: mine.id };
+  }
+  else {
+    // 過渡期（#481）：切換前用單一 IP 雜湊投的票也算同一個來源，不能再投第二張。
+    // 但那張舊票可以 revise：代理依 evidence_warning 之類的提示要改票時不該卡死，
+    // 而且改的時候 verifier_ip_hash 一併升級成網段雜湊（voteRow 本來就寫新的），舊票就此退場。
+    const legacyVote = ((existing ?? []) as Array<{ id: string; verifier_ip_hash: string | null }>)
+      .find((x) => isLegacySource(x.verifier_ip_hash, legacyIpHash));
+    if (legacyVote) {
+      if (!revise) {
+        return {
+          status: 409,
+          body: {
+            success: false,
+            error: "already_voted",
+            message: "這筆你這個來源在 1.79.0 改用網段之前已經投過票了（同一個來源只能投一次）。如果你是要改自己那張票：同一筆再送一次並帶 `revise: true`，會覆寫它；否則請直接領下一筆。",
+          },
+        };
+      }
+      revising = { id: legacyVote.id };
+    }
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
@@ -316,7 +330,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, ipHash: 
   };
 }
 
-/** 過渡期（#481）：存的雜湊等於這個請求的舊單一 IP 雜湊，就是切換前的同一台機器。 */
+/**
+ * 過渡期（#481）：存的雜湊等於「這個請求的來源 IP」的舊單一 IP 雜湊，才認定是切換前的同一個來源。
+ *
+ * 限制：認得出的只有「切換前那次的 IP 跟現在這次的 IP 一模一樣」——也就是固定 IP 的機器。
+ * 雜湊是單向的，存的 hash(salt|160.79.106.19) 沒辦法換算成網段，所以 IP 本來就會輪換的雲端代理，
+ * 切換前用 .19 交的／投的，切換後從 .21 來，這裡認不出來（hash(.19) ≠ hash(.21)）。
+ * 這些切換前的舊資料會一直留到定案為止；切換後新交的、新投的一律是網段雜湊，輪換 IP 不受影響。
+ * 所以這個函式保護的是固定 IP 機器的過渡，不是輪換 IP。
+ */
 export function isLegacySource(stored: string | null | undefined, legacyIpHash: string | undefined): boolean {
   return !!legacyIpHash && !!stored && stored === legacyIpHash;
 }

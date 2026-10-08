@@ -41,8 +41,14 @@ Deno.test("舊雜湊（單一 IP）照舊算法，過渡期用來認出切換前
   assertNotEquals(a, await ipHashOf(req("160.79.106.21"), "s"));
 });
 
-Deno.test("過渡期判斷：只有存的雜湊等於這次請求的舊單一 IP 雜湊才算同一台", async () => {
+Deno.test("過渡期判斷：只認「切換前後是同一個 IP」——固定 IP 認得出，輪換 IP 認不出（單向雜湊換算不了網段）", async () => {
   const { isLegacySource } = await import("./verify-handler.ts");
+  // 真實的雜湊，不是 "h1" 對 "h1" 這種自己等於自己的假資料
+  const storedBeforeSwitch = await legacyIpHashOf(req("160.79.106.19"), "s");
+  assertEquals(isLegacySource(storedBeforeSwitch, await legacyIpHashOf(req("160.79.106.19"), "s")), true, "同一個 IP 認得");
+  // 雲端代理輪換：切換前用 .19 交的，切換後從同一個 /24 的 .21 來——新的網段雜湊相同，但舊雜湊對不上
+  assertEquals(await ipHashOf(req("160.79.106.19"), "s"), await ipHashOf(req("160.79.106.21"), "s"));
+  assertEquals(isLegacySource(storedBeforeSwitch, await legacyIpHashOf(req("160.79.106.21"), "s")), false, "輪換到同網段別的 IP，舊資料認不出來");
   assertEquals(isLegacySource("h1", "h1"), true);
   assertEquals(isLegacySource("h1", "h2"), false);
   assertEquals(isLegacySource(null, "h1"), false);

@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "contribute") {
-      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report");
+      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash);
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {

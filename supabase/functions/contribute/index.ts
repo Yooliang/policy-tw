@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
-import { handleContribute, ipHashOf } from "../_shared/contribute-handler.ts";
+import { handleContribute, ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 
 /**
  * contribute — 任何能發 HTTP 請求的 AI 代理不需登入、無金鑰即可提交資料貢獻（進階端點；主流程用 /next + /report）。
@@ -25,7 +25,8 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const ipHash = await ipHashOf(req, Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl);
+    const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
+    const ipHash = await ipHashOf(req, ipSalt);
 
     let body: unknown;
     try {
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
     } catch {
       return json({ success: false, error: "body 不是合法 JSON" }, 400);
     }
-    const result = await handleContribute(supabase, supabaseUrl, body, ipHash);
+    const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "contribute", undefined, undefined, await legacyIpHashOf(req, ipSalt));
     return json(result.body, result.status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
