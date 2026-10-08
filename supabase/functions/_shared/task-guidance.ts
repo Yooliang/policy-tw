@@ -111,7 +111,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這筆參選紀錄缺東西，**缺什麼看 what_we_need 與 target.missing**：沒有網址來源、沒有縣市（region）、沒有選區（electoral_district），或鄉鎮層級選舉沒有鄉鎮（sub_region）。" +
     "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘欄位照那一屆的名冊填（candidate_status 不要順手改；party 填那一屆的推薦政黨，不要照抄他現在的政黨——人會換黨），查不到就 no_change 說明你找過哪裡。" +
-    "選區寫法：縣市議員「第NN選舉區」；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
+    "選區寫法：縣市議員「第NN選舉區」；鄉鎮市民代表、區民代表 sub_region 填鄉鎮市區、electoral_district 填「第NN選舉區」（缺的是 electoral_district 時，target.cec_districts 是名冊那一列的選舉區）；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
     "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。 " +
     // 補號次（2026-10-08）

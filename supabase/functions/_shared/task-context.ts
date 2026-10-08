@@ -184,7 +184,8 @@ export const ROSTER_CEC_GAP_HINT =
   "這一屆已經投票：中選會選舉資料庫（db.cec.gov.tw）上的名單我們已經比對過，缺的人列在任務 target.missing（姓名、選區或村里、當選與否、號次）。" +
   "逐位到中選會核對後用 candidacy 補一筆（candidate_status 填 qualified——名單公告後在名單上的人都是 qualified，confirmed 只表示表態參選——election_result 照中選會填），附你核對的中選會頁面；ours 是我們現有的，" +
   "名字在 ours 裡的不要重補。名字相同不代表同一人，同名的先查他的參選紀錄與出生年。全部補完才交 roster_check（cec_count 填中選會名單人數），只補了一部分就不要交。" +
-  "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。";
+  "縣市議員要把 target.missing 裡的選區填進 electoral_district（第NN選舉區），沒填交件會被退回（400 electoral_district_required，不算被拒）。" +
+  "已投票屆別的代表，target.missing 的 sub_region 若是「麥寮鄉第04選舉區」這種，鄉鎮填「麥寮鄉」、electoral_district 填「第04選舉區」（代表的號次按選舉區編）。";
 
 /**
  * 還沒投票的屆別（2026）的名單缺口：中選會候選人登記彙總表已解析成資料表（cec_registrations，2026-10-08，協議 1.74.0），
@@ -201,7 +202,7 @@ export const ROSTER_REGISTRATION_GAP_HINT =
   "例外：withdrawn 的人如果真的是登記之後才退選（找得到退選的報導或公告），狀態是對的，不要改——這種人名冊上有、但我們的名冊內人數不算他，" +
   "交 roster_check 時 cec_count 填 registration.registered 減掉這幾位（note 寫出是誰、退選的出處），不然任務會一直派。" +
   "missing 那一組照 missing 逐位用 candidacy 補一筆：election_id、election_type、region 照任務；candidate_status 照任務敘述的階段填；" +
-  "鄉鎮市長、代表、區長的 sub_region 填 missing 的 sub_region，村里長再加 village（照 missing 的原字），縣市議員的 electoral_district 填 missing 的 district（第NN選舉區，沒填會被退回）；" +
+  "鄉鎮市長、代表、區長的 sub_region 填 missing 的 sub_region，村里長再加 village（照 missing 的原字），縣市議員的 electoral_district 填 missing 的 district（第NN選舉區，沒填會被退回），代表（鄉鎮市民代表、區民代表）也填 missing 的 district（號次按選舉區編，沒填不會被退回，但選舉區會變成補選區任務；district 是空的鄉鎮不用填）；" +
   "source_urls 第一個放 registration.source_urls 裡的那份名冊——系統會逐位核對名冊上的姓名、縣市、鄉鎮、政黨，對得上的一張同意就通過，核對不上的才逐筆驗。" +
   "ours 裡已經有同名的人先確認是不是同一人，是同一人填他的 politician_id；名字相同不代表同一人。**照 missing 補的 candidacy 一次最多 150 筆**（整批都是 candidacy、source_urls 放那份名冊，而且每一筆都跟名冊逐位吻合；有一筆對不上整批未收，把對不上的拆出去用 20 筆以內的批次交），其他型別、沒有名冊逐位吻合的批次仍是一次最多 20 筆。" +
   "兩組都做完才交 roster_check（cec_count 填 registration.registered，除了上面那種登記後退選的）；只做了一部分就不要交，系統下一輪會再派。" +
@@ -289,7 +290,7 @@ export const BALLOT_NUMBERS_RECHECK_HINT =
   "我們記錯的，用 candidacy 重交那一位（politician_id、name、election_id、election_type、region 照 target，sub_region／village／electoral_district 照 units，cand_no 填公告上的號次，candidate_status 照 target.candidate_status），**只交跟公告不同的**；" +
   "公告上有、我們名單沒有的人，用 candidacy 補進來（附同一份公告）；公告本身就跳號（候選人退選或資格不符、號次沒有遞補）而我們的號次都跟公告一致，用 no_change（outcome 填 confirmed）回報，finding 寫公告上的號次與頁碼。" +
   "公告還沒出來、或打不開時略過這一件，不要回 no_change not_found（14 天內不再派）。" +
-  "名單人數不到齊的單位不會被當成跳號；代表（鄉鎮市民代表、區民代表）的選舉區我們沒記，系統不檢查。";
+  "名單人數不到齊的單位不會被當成跳號；代表（鄉鎮市民代表、區民代表）的號次單位是選舉區：記了選舉區的才檢查，只記到鄉鎮的系統不檢查（補選區任務會請代理補）。";
 
 /** candidacy_source_missing 的 cand_no 那一種（補號次，整個單位一件） */
 export function isBallotNumbersTask(taskType: string, target: Obj | null | undefined): boolean {
