@@ -1,5 +1,5 @@
 /**
- * 村里長不主動追進度、有人看才追、查無公開進度冷卻遞增、政見標「查無公開進度」（#470，migration 20261008200000_village_chief_progress_cooling.sql）。
+ * 村里長不主動追進度、有人看才追、查無公開進度冷卻遞增、政見標「查無公開進度」（#470，migration 20261009010000_village_chief_progress_cooling.sql）。
  *
  * 維護者 10-08 裁示四點，守門分三半，只要 --allow-read（CI 的 deno test --allow-read _shared/ 就跑）：
  *
@@ -18,7 +18,7 @@ import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { applyContribution, PROGRESS_REPEAT_COOLDOWN_DAYS, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
-const MIG = "20261008200000_village_chief_progress_cooling.sql";
+const MIG = "20261009010000_village_chief_progress_cooling.sql";
 const MAN_MIG = "20261008165000_manual_tasks_as_arm.sql";
 const TRAFFIC_MIG = "20261008190000_page_traffic_boost.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
@@ -48,7 +48,9 @@ const OPEN_FROM = "       AND (r.election_types IS NULL OR p_election_type = ANY
 const OPEN_TO = OPEN_FROM + "       AND (r.except_election_types IS NULL OR p_election_type IS NULL OR NOT (p_election_type = ANY (r.except_election_types)))  -- 排除職位：職位未知（NULL）時不排除，寧可開著也不無聲關掉\n";
 const mechanicalOpen = (old: string) => once(old, OPEN_FROM, OPEN_TO);
 const RDB_FROM = "    WHERE tc.checked_at > now() - (\n      CASE WHEN tc.outcome = 'unreachable' THEN task_unreachable_cooldown_days() ELSE task_check_cooldown_days() END || ' days'\n    )::INTERVAL\n";
-const RDB_TO = "    WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL\n";
+const RDB_TO = "    WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL\n" +
+  "    -- 比任何一種冷卻都長的歷史紀錄不用逐筆問天數（task_checks 只會越積越多；agy 審查 #480）：上限是一個 InitPlan，只算一次\n" +
+  "      AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))\n";
 const mechanicalRdb = (old: string) => once(old, RDB_FROM, RDB_TO);
 
 /** 總表三處：keyed（職位補查）、opened（帶出 requires_traffic）、列層（流量條件）。標記區塊起訖：>>> 村里長進度、>>> 流量開窗 */
@@ -106,7 +108,7 @@ Deno.test("A1 這支是 activity_open、總表、refresh_dispatch_blocked、poli
   await last(/CREATE (OR REPLACE )?VIEW policies_with_logs AS/, VIEW_MIG);
   const code = codeOf(MIG_SQL);
   const defined = [...code.matchAll(/CREATE OR REPLACE FUNCTION (?:public\.)?([a-z_]+)\(/g)].map((m) => m[1]);
-  assertEquals(defined, ["activity_open", "contribution_auto_tasks_arms", "task_check_cooldown_days_for", "refresh_dispatch_blocked", "policy_no_public_progress"]);
+  assertEquals(defined, ["activity_open", "contribution_auto_tasks_arms", "task_check_cooldown_days_for", "task_cooldown_max_days", "refresh_dispatch_blocked", "policy_no_public_progress"]);
   for (const untouched of ["seed_auto_task_queue", "rebalance_queue", "activity_priority", "contribution_auto_tasks_raw", "contribution_auto_tasks_deadline_due", "contribution_auto_tasks_term_policies", "task_dispatched", "queue_slot", "traffic_boost_apply", "activity_require_rule"]) {
     assert(!code.includes(`FUNCTION ${untouched}(`), `這支不改 ${untouched}`);
   }
@@ -199,14 +201,20 @@ Deno.test("A8 協議：skill.md 版號 1.80.0（#482 的 1.79.0 先合併）、�
   const claude = await readSrc("../../../CLAUDE.md");
   assert(claude.includes("task_cooldown_settings") && claude.includes("policy_no_public_progress") && claude.includes("except_election_types"));
   const plan = await readSrc("../../../docs/PLAN-task-activation.md");
-  assert(plan.includes("20261008200000") && plan.includes("village-progress-cooling.test.ts"));
+  assert(plan.includes("20261009010000") && plan.includes("village-progress-cooling.test.ts"));
   const decisions = await readSrc("../../../docs/DECISIONS.md");
-  assert(decisions.includes("村里長不主動追進度") && decisions.includes("20261008200000"));
+  assert(decisions.includes("村里長不主動追進度") && decisions.includes("20261009010000"));
 });
 
 Deno.test("A9 回給代理的那句話：進度追蹤類查無說明遞增冷卻，別的任務型別維持一律 14 天；TS 的天數與設定表初值同一個數字", async () => {
   assertEquals(TASK_CHECK_COOLDOWN_DAYS, Number(/not_found_first_days\s+INTEGER NOT NULL DEFAULT (\d+)/.exec(MIG_SQL)![1]));
   assertEquals(PROGRESS_REPEAT_COOLDOWN_DAYS, Number(/not_found_repeat_days INTEGER NOT NULL DEFAULT (\d+)/.exec(MIG_SQL)![1]));
+  // TS 寫死的型別清單（apply-contribution.ts 的 PROGRESS_COOLDOWN_TASK_TYPES）要跟設定表的初值同一份
+  const tsTypes = [...(/PROGRESS_COOLDOWN_TASK_TYPES = \[([^\]]*)\]/.exec(await readSrc("./apply-contribution.ts"))![1].matchAll(/"([a-z_]+)"/g))].map((m) => m[1]);
+  const sqlTypes = [...(/task_types\s+TEXT\[\] NOT NULL DEFAULT ARRAY\[([^\]]+)\]/.exec(MIG_SQL)![1].matchAll(/'([a-z_]+)'/g))].map((m) => m[1]);
+  assertEquals(tsTypes, sqlTypes);
+  assert(!tsTypes.includes("term_policy_missing"), "term_policy_missing 不適用遞增冷卻（維持 14 天）");
+  assert(!/auto:\(progress_stale\|deadline_due\)/.test(await readSrc("./apply-contribution.ts")), "型別名單只寫在常數裡，不在程式中間再寫一份正規式");
   const inserted: Array<Record<string, unknown>> = [];
   const fake = {
     from: (_table: string) => ({
@@ -392,9 +400,9 @@ async function guard(out: Verdicts, db: Db, name: string, f: () => Promise<boole
 const GUARDS = [
   "baseline_village_progress_closed", "baseline_others_open", "unknown_position_stays_open", "activity_open_exclusion", "exclusion_is_data", "other_arms_group_unchanged",
   "dispatch_recalled_window", "traffic_opens_person", "traffic_opens_policy", "traffic_threshold", "traffic_cools_recalled", "traffic_stale_closes", "traffic_disabled_closes",
-  "traffic_opened_by", "non_village_unaffected_by_traffic", "traffic_rule_is_data", "arms_all_flag_keeps_closed",
+  "traffic_opened_by", "traffic_opens_when_exclusion_disabled", "non_village_unaffected_by_traffic", "traffic_rule_is_data", "arms_all_flag_keeps_closed",
   "first_not_found_14", "second_not_found_30", "third_stays_30", "deadline_due_escalates", "per_task_ordinal", "other_types_flat_14", "only_not_found_counts",
-  "unreachable_2_days_unchanged", "cooldown_settings_are_data", "cooldown_disabled_flat", "task_types_are_data", "cooling_parity_unaffected_types", "cooling_diff_only_repeat_progress",
+  "unreachable_2_days_unchanged", "cooldown_settings_are_data", "cooldown_disabled_flat", "task_types_are_data", "cooling_parity_unaffected_types", "cooling_diff_only_repeat_progress", "cool_bound_covers_settings",
   "label_on_when_cooling", "label_off_after_first_cooldown", "label_30_on_second", "label_off_when_gap_gone", "label_only_not_found", "label_per_policy", "label_deadline_due",
   "label_follows_settings", "label_view_shape", "label_fn_public", "rule_constraints", "settings_audit_and_rls",
 ] as const;
@@ -531,6 +539,19 @@ async function runSuite(db: Db): Promise<Verdicts> {
     const plain = await one<{ opened_by: Record<string, unknown> }>(db, `SELECT opened_by FROM task_dispatches WHERE task_id = $1`, [`auto:progress_stale:${POL_M}`]);
     const ev = await one<{ detail: Record<string, unknown> }>(db, `SELECT detail FROM gap_events WHERE task_id = $1 AND event IN ('opened', 'reopened') ORDER BY id DESC LIMIT 1`, [`auto:progress_stale:${POL_V1A}`]);
     return r.opened_by.traffic_gate === true && r.opened_by.basis === "rule" && !("traffic_gate" in plain.opened_by) && JSON.stringify(ev.detail).includes("traffic_gate");
+  });
+
+  await g("traffic_opens_when_exclusion_disabled", async () => {
+    // agy 審查 #480：排除規則被停用時，職位補查不能跟著停（正向的「村里長、要流量」規則還要靠職位才比對得到）。
+    // 停用兩條排除規則：沒流量的村里長頁仍然關著；熱門的村里長頁照樣開窗，而且帶流量旗標
+    await db.exec(`UPDATE activity_rules SET enabled = false WHERE except_election_types IS NOT NULL`);
+    await seed(db);
+    const cold = none(await dispatchIds(db), VILLAGE_PROG);
+    await traffic(db, [hotP(PV1, 50)]);
+    await seed(db);
+    const d = await dispatchIds(db);
+    const r = await one<{ opened_by: Record<string, unknown> } | undefined>(db, `SELECT opened_by FROM task_dispatches WHERE task_id = $1`, [`auto:progress_stale:${POL_V1A}`]);
+    return cold && has(d, [TERM_V, `progress_stale:${POL_V1A}`, `progress_stale:${POL_V1B}`, `deadline_due:${POL_V1C}`]) && none(d, [`progress_stale:${POL_V2}`]) && r?.opened_by.traffic_gate === true;
   });
 
   await g("non_village_unaffected_by_traffic", async () => {
@@ -717,6 +738,22 @@ async function runSuite(db: Db): Promise<Verdicts> {
     return m.one.o && m.one.n && m.conf.o && m.conf.n && !m.two.o && m.two.n;
   });
 
+  await g("cool_bound_covers_settings", async () => {
+    // 先濾掉太舊的紀錄只是省效能，不能改結果：很舊的紀錄不冷卻；設定把天數調長，上限跟著變長（第二次 150 天前、遞增天數 200 → 仍在冷卻）
+    await check(db, P, "not_found", 400);
+    await check(db, P, "not_found", 380);
+    await seed(db);
+    const old = (await cooling(db, P)) === false;
+    await db.exec(`UPDATE task_cooldown_settings SET not_found_repeat_days = 200 WHERE id = 1`);
+    await db.exec(`DELETE FROM task_checks`);
+    await check(db, P, "not_found", 300);
+    await check(db, P, "not_found", 150);
+    await seed(db);
+    const long = (await cooling(db, P)) === true;
+    const max = (await one<{ d: number }>(db, `SELECT task_cooldown_max_days() AS d`)).d;
+    return old && long && max === 200;
+  });
+
   // ── 標籤 ──
   await g("label_on_when_cooling", async () => {
     await check(db, P, "not_found", 5);
@@ -851,6 +888,7 @@ const MUTATIONS: { why: string; from: string; to: string; also?: [string, string
   { why: "補該屆政見（term_policies）沒有種排除村里長的規則", from: " WHERE activity IN ('raw:progress_stale', 'deadline_due', 'term_policies')\n   AND window_kind = 'always'", to: " WHERE activity IN ('raw:progress_stale', 'deadline_due')\n   AND window_kind = 'always'", also: ["IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale、deadline_due、term_policies 各有一條「永遠開、排除村里長」", "IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期 raw:progress_stale、deadline_due、term_policies 各有一條「永遠開、排除村里長」"], red: ["baseline_village_progress_closed", "activity_open_exclusion"] },
   { why: "補該屆政見沒有種「村里長、要流量」的規則（熱門也不開）", from: "(VALUES ('raw:progress_stale'), ('deadline_due'), ('term_policies')) AS a(activity)", to: "(VALUES ('raw:progress_stale'), ('deadline_due')) AS a(activity)", also: ["IF v_n <> 3 THEN RAISE EXCEPTION '村里長進度：預期三個活動各有一條", "IF v_n <> 2 THEN RAISE EXCEPTION '村里長進度：預期三個活動各有一條"], red: ["traffic_opens_person", "activity_open_exclusion"] },
   { why: "總表不補職位（keyed 只看 target）", from: "                  CASE WHEN g.arm IN (SELECT n.activity FROM needs_etype n)\n", to: "                  CASE WHEN false\n", red: ["baseline_village_progress_closed", "dispatch_recalled_window", "traffic_opens_person"] },
+  { why: "職位補查只看排除清單（漏了正向清單 election_types）", from: "(r.except_election_types IS NOT NULL OR r.election_types IS NOT NULL)", to: "r.except_election_types IS NOT NULL", red: ["traffic_opens_when_exclusion_disabled"] },
   { why: "職位補查對所有臂都做（不只有規則要看職位的臂）", from: "                  CASE WHEN g.arm IN (SELECT n.activity FROM needs_etype n)\n", to: "                  CASE WHEN true\n", red: ["other_arms_group_unchanged"] },
   { why: "職位補查取錯屆別（寫死 2026）", from: "AND pe.election_id = election_id_or_null(g.target->>'election_id')\n", to: "AND pe.election_id = 2026\n", red: ["baseline_village_progress_closed"] },
   { why: "總表忽略 requires_traffic（村里長永遠開）", from: "SELECT o.source IS NOT NULL AND (NOT o.requires_traffic OR EXISTS (", to: "SELECT o.source IS NOT NULL AND (true OR EXISTS (", red: ["traffic_threshold", "traffic_opens_policy", "traffic_cools_recalled"] },
@@ -867,6 +905,8 @@ const MUTATIONS: { why: string; from: string; to: string; also?: [string, string
   { why: "對所有任務型別都遞增（不看 task_types）", from: "WHEN p_outcome = 'not_found' AND s.enabled AND split_part(p_task_id, ':', 2) = ANY (s.task_types)", to: "WHEN p_outcome = 'not_found' AND s.enabled", red: ["other_types_flat_14", "task_types_are_data", "cooling_parity_unaffected_types"] },
   { why: "unreachable 不再是 2 天", from: "WHEN p_outcome = 'unreachable' THEN task_unreachable_cooldown_days()", to: "WHEN p_outcome = 'unreachable' THEN task_check_cooldown_days()", red: ["unreachable_2_days_unchanged", "cooling_parity_unaffected_types"] },
   { why: "設定開關不管用", from: "WHEN p_outcome = 'not_found' AND s.enabled AND split_part", to: "WHEN p_outcome = 'not_found' AND true AND split_part", red: ["cooldown_disabled_flat"] },
+  { why: "歷史紀錄的上限沒算設定表的遞增天數", from: "COALESCE(s.not_found_first_days, 0), COALESCE(s.not_found_repeat_days, 0))", to: "COALESCE(s.not_found_first_days, 0), 0)", red: ["cool_bound_covers_settings"] },
+  { why: "歷史紀錄的上限太小（只看 1 天）", from: "make_interval(days => (SELECT task_cooldown_max_days()))", to: "make_interval(days => 1)", red: ["first_not_found_14", "second_not_found_30"] },
   { why: "第一次的天數寫死 14", from: "THEN s.not_found_repeat_days ELSE s.not_found_first_days END", to: "THEN s.not_found_repeat_days ELSE 14 END", red: ["cooldown_settings_are_data"] },
   { why: "遞增的天數寫死 30", from: "THEN s.not_found_repeat_days ELSE s.not_found_first_days END", to: "THEN 30 ELSE s.not_found_first_days END", red: ["cooldown_settings_are_data"] },
   { why: "標籤不看缺口還在不在（只看查核紀錄）", from: "      JOIN task_dispatches d ON d.task_id = 'auto:' || t.task_type || ':' || p_policy_id::TEXT\n      JOIN task_checks c ON c.task_id = d.task_id AND c.outcome = 'not_found'\n", to: "      JOIN task_checks c ON c.task_id = 'auto:' || t.task_type || ':' || p_policy_id::TEXT AND c.outcome = 'not_found'\n", red: ["label_off_when_gap_gone"] },

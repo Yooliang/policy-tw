@@ -61,7 +61,7 @@ Deno.test("A1 這支是總表的最後一版，緊接著 P1（中間或之後有
   assert(i > 0, "這支要在重新定義總表的清單裡");
   assertEquals(defining[i - 1], P1_MIG, "總表的前一版應該是 P1；有人在中間改了，要以那一版為底重做");
   // 這支之後只允許 party_roster 那支 P2（20261008121000：總表多回傳被規則濾掉的列，這支的測試名人物過濾整段保留，守門在 activity-party-roster.test.ts）與補號次那支新臂（20261008150000：總表多一行 UNION 分支，守門在 activity-ballot-numbers.test.ts）
-  assertEquals(defining.slice(i + 1), ["20261008121000_activity_windows_p2_party_roster.sql", "20261008150000_ballot_numbers_arm.sql", "20261008165000_manual_tasks_as_arm.sql", "20261008200000_village_chief_progress_cooling.sql"], "這支之後又有人改了總表：要以最新那版為底重做");
+  assertEquals(defining.slice(i + 1), ["20261008121000_activity_windows_p2_party_roster.sql", "20261008150000_ballot_numbers_arm.sql", "20261008165000_manual_tasks_as_arm.sql", "20261009010000_village_chief_progress_cooling.sql"], "這支之後又有人改了總表：要以最新那版為底重做");
 });
 
 Deno.test("A2 總表新定義＝P1 的定義＋兩處機械替換（ph CTE、最後的 WHERE），簽名與 28 個分支一字不差", () => {

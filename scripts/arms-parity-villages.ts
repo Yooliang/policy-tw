@@ -1,5 +1,5 @@
 /**
- * 村里長不主動追進度＋查無公開進度冷卻遞增＋標籤（migration 20261008200000_village_chief_progress_cooling.sql，#470）
+ * 村里長不主動追進度＋查無公開進度冷卻遞增＋標籤（migration 20261009010000_village_chief_progress_cooling.sql，#470）
  * 對正式庫的「今天輸出逐件不變」比對與耗時（2026-10-08，docs/PLAN-task-activation.md 第 11 節）。
  *
  * 不進 CI（要連正式庫）；只讀：SQL 第一行 SET default_transaction_read_only = on，新定義以子查詢原樣執行（函式呼叫就地換成函式本體、
@@ -20,7 +20,7 @@
  */
 import { fnText, readMig } from "../supabase/functions/_shared/arms-pglite.ts";
 
-const MIG = "20261008200000_village_chief_progress_cooling.sql";
+const MIG = "20261009010000_village_chief_progress_cooling.sql";
 const COLS = "task_id, task_type, target, what_we_need, hint_sources, reward, region";
 const AC = `${COLS}, arm, opened_by`;
 const bodyOf = (s: string) => {
@@ -73,7 +73,8 @@ const once = (s: string, from: string, to: string) => {
 // ── 新定義（從 migration 取，不另寫一份）────────────────────────────────
 const COOL_PARAMS = ["p_task_id", "p_outcome", "p_checked_at", "p_id"];
 const coolBody = bodyOf(fnText(migSql, "task_check_cooldown_days_for"));
-const inlineCool = (sql: string) => inlineCall(sql, "task_check_cooldown_days_for", coolBody, COOL_PARAMS);
+const maxBody = bodyOf(fnText(migSql, "task_cooldown_max_days"));
+const inlineCool = (sql: string) => inlineCall(inlineCall(sql, "task_cooldown_max_days", maxBody, []), "task_check_cooldown_days_for", coolBody, COOL_PARAMS);
 const labelBody = inlineCool(bodyOf(fnText(migSql, "policy_no_public_progress")));
 const openBody = bodyOf(fnText(migSql, "activity_open"));
 const dflt = (re: RegExp) => Number(re.exec(migSql)?.[1] ?? NaN);
@@ -207,7 +208,7 @@ SELECT d.task_id, d.side, (SELECT count(*) FROM task_checks x WHERE x.task_id = 
     `${cnt.n_old} 件 → ${cnt.n_new} 件，不同 ${diff.length} 件${diff.length ? "：" + diff.map((r) => `${String(r.task_id).replace(/^auto:/, "").slice(0, 40)}（not_found ${r.nf} 次，最近一次 ${String(r.last_check).slice(0, 10)}）`).join("、") : ""}`);
 
   // ②b 同一批查核紀錄，往後看 0～45 天每一天的冷卻集合：新舊的差異只能出在「進度追蹤類、有第二次起 not_found」的任務，而且只會變長（今天看不出差別，因為那兩件第二次查無都還在 14 天內）
-  const atK = (c: string) => c.replace("now()", "(now() + make_interval(days => d.k))");
+  const atK = (c: string) => c.replaceAll("now()", "(now() + make_interval(days => d.k))");
   const future = await query(`WITH ${SETTINGS_CTE}, days AS (SELECT generate_series(0, 45) AS k),
  o AS (SELECT d.k, x.task_id FROM days d CROSS JOIN LATERAL (${atK(coolOld)}) x),
  n AS (SELECT d.k, x.task_id FROM days d CROSS JOIN LATERAL (${atK(coolNew)}) x),

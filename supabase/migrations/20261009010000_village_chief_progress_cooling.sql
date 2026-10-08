@@ -225,8 +225,9 @@ LANGUAGE sql STABLE AS $$
   UNION ALL SELECT 'manual_open' AS arm, t.* FROM contribution_auto_tasks_manual(false) t
        ),
        -- 每一列的選舉與職位（target 裡沒有就是「不屬於任何選舉」）；規則只對「臂×選舉×職位」各問一次，不是每一列問一次
-       -- >>> 村里長進度：target 沒有職位的臂（進度追蹤的 progress_stale、deadline_due），若這支臂有規則要看職位（except_election_types），職位從人物在那一屆的參選紀錄補；其餘臂的分組一個字不變
-       needs_etype AS MATERIALIZED (SELECT DISTINCT r.activity FROM activity_rules r WHERE r.enabled AND r.except_election_types IS NOT NULL),
+       -- >>> 村里長進度：target 沒有職位的臂（進度追蹤的 progress_stale、deadline_due），若這支臂有規則要看職位（except_election_types 排除清單或 election_types 正向清單，任何一種），職位從人物在那一屆的參選紀錄補；其餘臂的分組一個字不變
+       -- 兩種都要看：只看排除清單的話，排除規則一被停用，職位全是 NULL，「村里長、要流量」那條正向規則就永遠比對不到、缺口被無聲收回（agy 審查 #480）
+       needs_etype AS MATERIALIZED (SELECT DISTINCT r.activity FROM activity_rules r WHERE r.enabled AND (r.except_election_types IS NOT NULL OR r.election_types IS NOT NULL)),
        -- <<< 村里長進度
        keyed AS (
   SELECT g.*, election_id_or_null(g.target->>'election_id') AS eid,
@@ -315,6 +316,14 @@ COMMENT ON FUNCTION task_check_cooldown_days_for IS
   '一筆 task_checks 的冷卻天數：unreachable＝task_unreachable_cooldown_days()；型別在 task_cooldown_settings.task_types 且 outcome＝not_found 且設定開著＝第一次 not_found_first_days、第二次起 not_found_repeat_days；'
   '其餘＝task_check_cooldown_days()（與 20261002000006 之前一字不差的行為）。refresh_dispatch_blocked 與 policy_no_public_progress 共用。2026-10-08（#470）';
 
+-- 任何一筆查核紀錄可能拿到的最長冷卻天數（task_check_cooldown_days_for 的值域上界）：refresh_dispatch_blocked 用它先濾掉太舊的歷史紀錄，不必對每一筆都問天數
+CREATE OR REPLACE FUNCTION task_cooldown_max_days() RETURNS INTEGER
+LANGUAGE sql STABLE AS $$
+  SELECT GREATEST(task_check_cooldown_days(), task_unreachable_cooldown_days(), COALESCE(s.not_found_first_days, 0), COALESCE(s.not_found_repeat_days, 0))
+    FROM (SELECT 1) AS one LEFT JOIN task_cooldown_settings s ON s.id = 1
+$$;
+COMMENT ON FUNCTION task_cooldown_max_days IS 'task_check_cooldown_days_for 可能回傳的最大天數（含設定表兩個天數，不論 enabled）。refresh_dispatch_blocked 用它濾掉比這更舊的查核紀錄，歷史累積再多也只掃近期。2026-10-08（#470）';
+
 -- refresh_dispatch_blocked：20261002000006 的現行定義＋一處機械替換（冷卻天數的 CASE 改問函式）
 CREATE OR REPLACE FUNCTION refresh_dispatch_blocked() RETURNS INTEGER
 LANGUAGE plpgsql AS $$
@@ -334,6 +343,8 @@ BEGIN
   , cool AS (
     SELECT DISTINCT tc.task_id FROM task_checks tc
     WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL
+    -- 比任何一種冷卻都長的歷史紀錄不用逐筆問天數（task_checks 只會越積越多；agy 審查 #480）：上限是一個 InitPlan，只算一次
+      AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))
   )
   UPDATE task_dispatches d
      SET blocked = EXISTS (SELECT 1 FROM b WHERE b.task_id = d.task_id),
