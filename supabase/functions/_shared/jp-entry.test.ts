@@ -147,6 +147,59 @@ Deno.test("no_change 一整圈：N1 領任務、R 帶憑證交件 201，提交�
   });
 });
 
+// 選舉日程（election，PR②）：election_discovery 臂的任務，代理查到選管的告示後交 election
+const ED_TASK = "auto:election_discovery:2027-01-31:232033:head";
+const edTaskRow = {
+  task_id: ED_TASK, task_type: "election_discovery",
+  target: { lg_code: "232033", election_type: "mayor", office_kind: "head", term_end: "2027-01-31" },
+  what_we_need: "一宮市の長の任期は 2027-01-31 に満了します。", hint_sources: ["愛知県選挙管理委員会"], reward: 2, queue_at: "2026-10-01T00:00:00Z",
+};
+const ELECTION_SUBMIT = {
+  kind: "contribute", contribution_type: "election", task_id: ED_TASK, agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
+  payload: { lg_code: "232033", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "一宮市長選挙" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/"],
+};
+
+Deno.test("election 一整圈：領 election_discovery 任務、帶憑證交 election 201（目標 3 票、不是 light），提交者網段是領任務的網段；全程 policy_jp", async () => {
+  const db = makeDb({ pool: [], queue: [edTaskRow] });
+  await withEntries(db, env(), async ({ next, report }) => {
+    const got = await getNext(next, N1);
+    assertEquals(got.json.kind, "task");
+    assertEquals((got.json.item as Row).task_type, "election_discovery");
+    const res = await post(report, R, { ...ELECTION_SUBMIT, dispatch_token: got.json.dispatch_token });
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals(res.json.contribution_type, "election");
+    assertEquals(res.json.status, "pending");
+    assertEquals(res.json.required_agree, 3, "election 要 3 票同儕驗證（no_change 才是 2）");
+    assertEquals(db.contributions.length, 1);
+    const saved = db.contributions[0];
+    assertEquals(saved.contribution_type, "election");
+    assertEquals(saved.task_id, ED_TASK);
+    assertEquals(saved.contributor_ip_hash, await netHash(N1));
+    assertEquals((saved.payload as Row).election_date, "2027-01-24");
+    assertEquals(saved.source_urls, ELECTION_SUBMIT.source_urls);
+    // 提交後釋放認領（刪的是這個 task_id 的 lease）
+    assert(report.calls.some((c) => c.target === "contribution_task_leases" && c.method === "DELETE"));
+    assertAllJpSchema(report.calls);
+  });
+});
+
+Deno.test("election：格式不對整批 400（validation_failed），不寫任何東西", async () => {
+  const db = makeDb({ pool: [], queue: [edTaskRow] });
+  await withEntries(db, env(), async ({ report }) => {
+    const bad = { ...ELECTION_SUBMIT, payload: { ...ELECTION_SUBMIT.payload, election_date: "2027-02-30", lg_code: "23203" } };
+    const res = await post(report, N1, bad);
+    assertEquals(res.status, 400);
+    assertEquals(res.json.error, "validation_failed");
+    assertEquals((res.json.errors as Array<{ path: string }>).map((e) => e.path).sort(), ["payload.election_date", "payload.lg_code"]);
+    assertEquals(db.contributions.length, 0);
+    // 不認得的型別（foo）一樣被擋
+    const foo = await post(report, N1, { ...ELECTION_SUBMIT, contribution_type: "foo" });
+    assertEquals(foo.status, 400);
+    assertEquals(db.contributions.length, 0);
+  });
+});
+
 Deno.test("驗證一整圈：帶憑證跨網段投票 201；票的來源是領任務的網段", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {

@@ -1,5 +1,5 @@
 /**
- * 日本站同儕驗證共識規則（只有 no_change、task_suggestion、correction 三種貢獻）。
+ * 日本站同儕驗證共識規則（no_change、task_suggestion、correction、election 四種貢獻）。
  *
  * 複製自 ../consensus.ts：AGREE_THRESHOLDS／riskLevel／requiredAgree／rejectFloor。
  * 保留的：系統票（Jev）調門檻——supported 門檻 −1（最少 1）、not_supported +1（effectiveRequiredAgree，同正見）。
@@ -10,6 +10,8 @@
  *
  * 門檻要跟日本站 SQL 一致（policy_jp.contribution_required_agree／contribution_reject_floor，由另一份 migration 提供）：
  *   no_change／task_suggestion 目標 2，correction 目標 3；退件門檻 no_change／task_suggestion −2，其餘 −3。
+ * election（查到的選舉日程，PR②）：SQL 的 contribution_required_agree 走 ELSE 的 normal，目標 3、退件 −3；
+ *   system_vote_eligible 不收它（不拿 Jev 系統票，門檻不調）；不用兩個網段（contribution_needs_two_ips 沒列它）。TS 這邊不用多寫分支，由 consensus.test.ts 守著。
  * 純函式（不動資料）的守門規則（盲反對、罐頭備註、抄備註、同網站證據…）不複製，直接從正見的 consensus.ts 轉出，行為完全相同。
  */
 
@@ -28,9 +30,9 @@ export {
   weightReason,
 } from "../consensus.ts";
 
-export type JpContributionType = "no_change" | "task_suggestion" | "correction";
+export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election";
 
-/** light＝不動正式資料（無異動、提議任務）；normal＝更正 */
+/** light＝不動正式資料（無異動、提議任務）；normal＝更正、選舉日程（election） */
 export type JpRiskLevel = "normal" | "light";
 
 export const JP_AGREE_THRESHOLDS: Record<JpRiskLevel, number> = { normal: 3, light: 2 };

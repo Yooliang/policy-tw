@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { effectiveRequiredAgree, JP_AGREE_THRESHOLDS, rejectFloor, requiredAgree, systemVoteEligible } from "./consensus.ts";
+import { effectiveRequiredAgree, JP_AGREE_THRESHOLDS, riskLevel, rejectFloor, requiredAgree, SYSTEM_VOTE_ELIGIBLE_TYPES, systemVoteEligible } from "./consensus.ts";
 import { requiredAgree as twRequired, rejectFloor as twFloor } from "../consensus.ts";
 
 // 日本站 SQL（policy_jp.contribution_required_agree／contribution_reject_floor）與正見同值：no_change／task_suggestion 2、correction 3
@@ -33,4 +33,20 @@ Deno.test("系統票：supported −1（最少 1）、not_supported +1、棄權�
   assertEquals(effectiveRequiredAgree(3, null), 3);
   assertEquals(systemVoteEligible("correction"), true);
   assertEquals(systemVoteEligible("no_change"), false);
+});
+
+// election（查到的選舉日程，PR②）：SQL（policy_jp.contribution_required_agree／contribution_reject_floor／system_vote_eligible）
+// 沒有為它開分支，走 ELSE：目標 3、退件 −3、不拿系統票。SQL 那一邊由 policy-jp-election-discovery.test.ts 對齊。
+Deno.test("election：目標 3、退件 −3（跟 correction 同級，不是 light）", () => {
+  assertEquals(riskLevel("election"), "normal");
+  assertEquals(requiredAgree("election"), 3);
+  assertEquals(requiredAgree("election", { election_type: "mayor" }, ["https://www.city.example.lg.jp/senkyo/"]), 3);
+  assertEquals(rejectFloor("election"), 3);
+});
+
+Deno.test("election：不拿系統票——可投型別清單沒有它，門檻不被調", () => {
+  assertEquals(systemVoteEligible("election"), false);
+  assertEquals([...SYSTEM_VOTE_ELIGIBLE_TYPES], ["correction"]);
+  // 就算有人硬帶系統票結果，呼叫端也不會對 election 取（不 eligible），但函式本身的算法不分型別：eligible 的判斷在 systemVoteEligible
+  assertEquals(effectiveRequiredAgree(requiredAgree("election"), null), 3);
 });

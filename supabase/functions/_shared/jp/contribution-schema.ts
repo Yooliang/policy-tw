@@ -1,8 +1,11 @@
 /**
- * 日本站貢獻請求的格式與驗證（只收 no_change、task_suggestion、correction 三種）。
+ * 日本站貢獻請求的格式與驗證（收 no_change、task_suggestion、correction、election 四種）。
  *
  * 複製自 ../contribution-schema.ts：validateContributionRequest／validateVerifyRequest／canonicalPayload，
  * 以及 validatePayload 裡 no_change、task_suggestion、correction 三段的欄位規則（欄位名、字數、錯誤文字都照抄）。
+ * 日本站自己的：election（查到的選舉日程，policy-jp #41 ③、PR②；對應派工臂 election_discovery）——正見沒有這個型別，
+ *   欄位照 policy_jp.elections 的 CHECK 寫（election_type／election_reason 的列舉、國政不帶 lg_code、補欠・増員只限議員選舉、
+ *   告示日不晚於投票日）。本 PR 只收進來走同儕驗證，不落庫（落庫是下一個 PR：共識後才寫 elections，程式不從臂產生選舉資料）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -21,8 +24,17 @@ import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../co
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
+
+/** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
+export const JP_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor", "national_lower", "national_upper", "pref_assembly", "muni_assembly"] as const;
+export const JP_ELECTION_REASONS = ["regular", "resignation", "death", "recall", "dissolution", "by_election", "increase", "rerun"] as const;
+/** 國政選舉沒有 lg_code（elections_national_no_lg：level = national 才是 NULL） */
+export const JP_NATIONAL_ELECTION_TYPES = ["national_lower", "national_upper"] as const;
+/** 補欠選挙・増員選挙只有議員選舉（elections_by_election_assembly） */
+export const JP_ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly", "national_lower", "national_upper"] as const;
+export const JP_LG_CODE_RE = /^\d{6}$/;
 
 /** 【待定】日本站已建的資料表（20261009000000_policy_jp_tables.sql）裡可以被更正的；落庫（apply）定案時一併收斂 */
 export const JP_CORRECTION_TABLES = ["politicians", "politician_elections", "politician_offices", "policies", "parties", "elections", "lineages"] as const;
@@ -89,6 +101,12 @@ const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !
 const isStr = (v: unknown, min = 1, max = 2000): v is string => typeof v === "string" && v.trim().length >= min && v.length <= max;
 const isUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
+/** YYYY-MM-DD 而且真的有這一天（2027-02-30 不算；用 UTC 往返比對，不吃執行環境的時區） */
+const isIsoDate = (v: unknown): v is string => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+};
 
 function validatePayload(type: JpContributionType, p: Obj, push: (path: string, message: string) => void): void {
   switch (type) {
@@ -132,6 +150,28 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         if (empty) push(`${at}.correct_value`, "correct_value 必填");
       });
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");
+      break;
+    }
+    case "election": {
+      // 查到的選舉日程（選管的告示）：欄位照 policy_jp.elections 的 CHECK；出處（選管告示）走頂層 source_urls
+      const national = oneOf(JP_NATIONAL_ELECTION_TYPES, p.election_type);
+      if (!oneOf(JP_ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 必填：${JP_ELECTION_TYPES.join("／")} 之一`);
+      if (!oneOf(JP_ELECTION_REASONS, p.election_reason)) push("payload.election_reason", `election_reason 必填：${JP_ELECTION_REASONS.join("／")} 之一（任期満了＝regular）`);
+      else if ((p.election_reason === "by_election" || p.election_reason === "increase") && oneOf(JP_ELECTION_TYPES, p.election_type) && !oneOf(JP_ASSEMBLY_ELECTION_TYPES, p.election_type)) {
+        push("payload.election_reason", `${p.election_reason} 只有議員選舉才有（election_type 要是 ${JP_ASSEMBLY_ELECTION_TYPES.join("／")} 之一）`);
+      }
+      // 國政選舉不帶 lg_code、地方選舉一定要帶（lg_code＝全国地方公共団体コード 6 碼；election_type 填錯時不重複報 lg_code 的錯）
+      if (national) {
+        if (p.lg_code !== undefined && p.lg_code !== null) push("payload.lg_code", "國政選舉（national_lower／national_upper）不帶 lg_code，請拿掉這個欄位");
+      } else if (oneOf(JP_ELECTION_TYPES, p.election_type)) {
+        if (!(typeof p.lg_code === "string" && JP_LG_CODE_RE.test(p.lg_code))) push("payload.lg_code", "lg_code 必填：全国地方公共団体コード 6 碼數字（例：131130）");
+      }
+      if (!isIsoDate(p.election_date)) push("payload.election_date", "election_date 必填：投票日，YYYY-MM-DD 而且要是真的有這一天");
+      if (p.notice_date !== undefined) {
+        if (!isIsoDate(p.notice_date)) push("payload.notice_date", "notice_date 要是 YYYY-MM-DD（告示日）；不知道就不要填");
+        else if (isIsoDate(p.election_date) && p.notice_date > p.election_date) push("payload.notice_date", "notice_date（告示日）不能晚於 election_date（投票日）");
+      }
+      if (p.name !== undefined && !isStr(p.name, 1, 100)) push("payload.name", "name 要是 1～100 字（選舉的名稱，例：○○市長選挙）；不知道就不要填");
       break;
     }
   }

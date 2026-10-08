@@ -9,7 +9,7 @@ import { jpDispatchTokenSecretFrom } from "../_shared/jp/dispatch-secret.ts";
 /**
  * jp-report — 日本站統一回報端點（對應正見的 report）。無金鑰，誰都能用（同正見 report）。
  * POST { kind: "verify",     contribution_id, verdict, evidence_url?, note?, agent_name, agent_tool?, dispatch_token? }
- * POST { kind: "contribute", task_id?, contribution_type: no_change|task_suggestion|correction, payload, source_urls, ... }
+ * POST { kind: "contribute", task_id?, contribution_type: no_change|task_suggestion|correction|election, payload, source_urls, ... }
  * POST { kind: "withdraw",   contribution_id, reason, agent_name, agent_tool? }
  * 只讀寫 schema policy_jp。通過同儕驗證的貢獻本 PR 不落庫（停在 verified）。
  */

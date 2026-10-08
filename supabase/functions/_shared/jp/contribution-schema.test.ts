@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { canonicalPayload, validateContributionRequest, validateVerifyRequest } from "./contribution-schema.ts";
+import { canonicalPayload, JP_CONTRIBUTION_TYPES, validateContributionRequest, validateVerifyRequest } from "./contribution-schema.ts";
 
 const base = { agent_name: "jp-agent", agent_tool: "claude-code/claude-sonnet-5" };
 const noChange = {
@@ -17,12 +17,104 @@ const suggestion = {
   source_urls: ["https://www.pref.example.lg.jp/c"],
 };
 
-Deno.test("三種型別各一筆都過", () => {
-  for (const it of [noChange, correction, suggestion]) {
+const election = {
+  contribution_type: "election",
+  payload: { lg_code: "131130", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "渋谷区長選挙" },
+  source_urls: ["https://www.city.shibuya.tokyo.jp/senkyo/"],
+};
+const withElection = (patch: Record<string, unknown>, drop: string[] = []) => {
+  const e = structuredClone(election);
+  Object.assign(e.payload, patch);
+  for (const k of drop) delete (e.payload as Record<string, unknown>)[k];
+  return validateContributionRequest({ ...base, ...e });
+};
+const pathsOf = (v: ReturnType<typeof validateContributionRequest>) => v.errors.map((e) => e.path);
+
+Deno.test("四種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election"]);
+  for (const it of [noChange, correction, suggestion, election]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
   }
+});
+
+Deno.test("election：最小可過的 payload（notice_date、name 可省）；頂層 task_id 照收", () => {
+  const v = withElection({}, ["notice_date", "name"]);
+  assertEquals(v.errors, [], JSON.stringify(v.errors));
+  const withTask = validateContributionRequest({ ...base, ...structuredClone(election), task_id: "auto:election_discovery:2027-01-31:232033:head" });
+  assert(withTask.ok, JSON.stringify(withTask.errors));
+  assertEquals(withTask.items[0].task_id, "auto:election_discovery:2027-01-31:232033:head");
+  // 沒有出處就擋（跟其他非 no_change 型別一樣：source_urls 至少一個）
+  const noSrc = validateContributionRequest({ ...base, contribution_type: "election", payload: structuredClone(election.payload) });
+  assert(pathsOf(noSrc).includes("source_urls"));
+});
+
+Deno.test("election：lg_code 地方選舉必填且 6 碼數字", () => {
+  assert(pathsOf(withElection({}, ["lg_code"])).includes("payload.lg_code"));
+  for (const bad of ["13113", "1311300", "13113a", "", 131130]) assert(pathsOf(withElection({ lg_code: bad })).includes("payload.lg_code"), `lg_code=${bad}`);
+  // 縣級也是 6 碼（北海道 010006）
+  assert(withElection({ lg_code: "010006", election_type: "governor" }).ok);
+});
+
+Deno.test("election：國政選舉不帶 lg_code（帶了擋、不帶過；null 當沒帶）", () => {
+  for (const t of ["national_lower", "national_upper"]) {
+    assert(pathsOf(withElection({ election_type: t })).includes("payload.lg_code"), `${t} 帶了 lg_code 要擋`);
+    assert(withElection({ election_type: t }, ["lg_code"]).ok, `${t} 不帶 lg_code 要過`);
+    assert(withElection({ election_type: t, lg_code: null }).ok, `${t} lg_code=null 要過`);
+  }
+});
+
+Deno.test("election：election_type／election_reason 只收 policy_jp.elections 的列舉", () => {
+  for (const t of ["governor", "mayor", "ward_mayor", "town_mayor", "national_lower", "national_upper", "pref_assembly", "muni_assembly"]) {
+    assert(withElection({ election_type: t }, t.startsWith("national") ? ["lg_code"] : []).ok, `election_type=${t}`);
+  }
+  assert(pathsOf(withElection({ election_type: "village_head" })).includes("payload.election_type"));
+  assert(pathsOf(withElection({}, ["election_type"])).includes("payload.election_type"));
+  for (const r of ["regular", "resignation", "death", "recall", "dissolution", "rerun"]) assert(withElection({ election_reason: r }).ok, `election_reason=${r}`);
+  assert(pathsOf(withElection({ election_reason: "term_end" })).includes("payload.election_reason"));
+  assert(pathsOf(withElection({}, ["election_reason"])).includes("payload.election_reason"));
+  // election_type 填錯時只報 election_type，不連帶報 lg_code
+  assertEquals(pathsOf(withElection({ election_type: "nope" }, ["lg_code"])), ["payload.election_type"]);
+});
+
+Deno.test("election：補欠（by_election）・増員（increase）只限議員選舉（同 DB CHECK elections_by_election_assembly）", () => {
+  for (const r of ["by_election", "increase"]) {
+    for (const t of ["mayor", "governor", "ward_mayor", "town_mayor"]) assert(pathsOf(withElection({ election_type: t, election_reason: r })).includes("payload.election_reason"), `${t}＋${r} 要擋`);
+    for (const t of ["pref_assembly", "muni_assembly"]) assert(withElection({ election_type: t, election_reason: r }).ok, `${t}＋${r} 要過`);
+    for (const t of ["national_lower", "national_upper"]) assert(withElection({ election_type: t, election_reason: r }, ["lg_code"]).ok, `${t}＋${r} 要過`);
+  }
+});
+
+Deno.test("election：election_date 必填、要是真的有這一天；notice_date 選填、不晚於投票日", () => {
+  assert(pathsOf(withElection({}, ["election_date"])).includes("payload.election_date"));
+  for (const bad of ["2027/01/24", "2027-1-24", "令和9年1月24日", "2027-02-30", "2027-13-01", "2027-00-10", "", 20270124, null]) {
+    assert(pathsOf(withElection({ election_date: bad })).includes("payload.election_date"), `election_date=${String(bad)}`);
+  }
+  assert(withElection({ election_date: "2028-02-29", notice_date: "2028-02-20" }).ok, "閏日是真的有這一天");
+  assert(pathsOf(withElection({ election_date: "2027-02-29" })).includes("payload.election_date"), "2027 不是閏年");
+  assert(withElection({ notice_date: "2027-01-24" }).ok, "告示日＝投票日可以（只擋晚於）");
+  assert(pathsOf(withElection({ notice_date: "2027-01-25" })).includes("payload.notice_date"));
+  assert(pathsOf(withElection({ notice_date: "2027-02-30" })).includes("payload.notice_date"));
+  assert(pathsOf(withElection({ notice_date: "" })).includes("payload.notice_date"));
+  // 投票日本身不合格時，不拿它去比告示日（只報投票日的錯）
+  assertEquals(pathsOf(withElection({ election_date: "2027-02-30", notice_date: "2027-03-01" })), ["payload.election_date"]);
+});
+
+Deno.test("election：name 選填，給了要 1～100 字", () => {
+  assert(withElection({ name: "渋" }).ok);
+  assert(withElection({ name: "あ".repeat(100) }).ok);
+  assert(pathsOf(withElection({ name: "あ".repeat(101) })).includes("payload.name"));
+  assert(pathsOf(withElection({ name: "   " })).includes("payload.name"));
+  assert(pathsOf(withElection({ name: 123 })).includes("payload.name"));
+});
+
+Deno.test("election：多個欄位同時錯，一次全報（讓 AI 一次修完）；去重鍵與鍵順序無關", () => {
+  const v = withElection({ lg_code: "x", election_type: "mayor", election_reason: "death", election_date: "2027-99-99", notice_date: "2027-01-01", name: "" });
+  assertEquals(pathsOf(v).sort(), ["payload.election_date", "payload.lg_code", "payload.name"]);
+  const a = canonicalPayload({ contribution_type: "election", payload: { lg_code: "131130", election_date: "2027-01-24" }, source_urls: [] });
+  const b = canonicalPayload({ contribution_type: "election", payload: { election_date: "2027-01-24", lg_code: "131130" }, source_urls: [] });
+  assertEquals(a, b);
 });
 
 Deno.test("其他型別（正見的 candidacy 等）不收", () => {
