@@ -8,6 +8,7 @@ import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync } from '../composables/useRegionQuerySync'
+import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 
 const router = useRouter()
 const { regionStats, ensureRegionStats } = useSupabase()
@@ -248,7 +249,9 @@ usePageHead({
         </div>
 
         <!-- District Grid -->
-        <div class="lg:col-span-2 bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm">
+        <div class="lg:col-span-2 space-y-6">
+        <RegionalStatsPanel v-if="!isNational" :region="selectedRegion" />
+        <div class="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm">
            <div class="flex items-center justify-between mb-8">
               <h4 class="font-bold text-navy-900 flex items-center gap-2">
                  <Users :size="20" class="text-blue-500" />
@@ -268,6 +271,7 @@ usePageHead({
                  </p>
               </button>
            </div>
+        </div>
         </div>
       </div>
     </div>

@@ -55,6 +55,7 @@ import { electionResultLabel } from "./candidacy-result.ts";
 import { resultItems, resultsUnitLabel } from "./election-results.ts";
 import { elementPhrase } from "./policy-elements.ts";
 import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
+import { REGIONAL_STAT_LABEL, type RegionalStatKey } from "./contribution-schema.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -300,6 +301,14 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     }
     case "question_answer": {
       summary = `回答公民提問：${clip(p.answer, 120)}`;
+      targetName = null;
+      break;
+    }
+    case "regional_stat": {
+      // 地方基本統計（#508）：讀者要看得出補了哪個地區、哪個指標、哪個年度的值
+      const key = str(p.stat_key) as RegionalStatKey;
+      const label = REGIONAL_STAT_LABEL[key] ?? str(p.stat_key);
+      summary = `補 ${str(p.admin_code)}（地區代碼）${str(p.year)} 年的${label}：${String(p.value ?? "")} ${str(p.unit)}`;
       targetName = null;
       break;
     }

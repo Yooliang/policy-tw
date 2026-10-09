@@ -33,10 +33,31 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // lineage／lineage_participants／lineage_handover／lineage_link（政策脈絡，#349，2026-10-06）：同樣四處一起加
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "other"] as const;
+
+/**
+ * 地方基本統計（issue #508）：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例。
+ * 跟 SQL 的 regional_stat_unit()／regional_stat_label()（migration 20261009240000）同一份，regional-stats.test.ts 盯兩邊一致。
+ */
+export const REGIONAL_STAT_KEYS = ["population", "area_km2", "budget_expenditure", "aging_rate"] as const;
+export type RegionalStatKey = (typeof REGIONAL_STAT_KEYS)[number];
+export const REGIONAL_STAT_UNIT: Readonly<Record<RegionalStatKey, string>> = {
+  population: "人",
+  area_km2: "平方公里",
+  budget_expenditure: "千元",
+  aging_rate: "%",
+};
+export const REGIONAL_STAT_LABEL: Readonly<Record<RegionalStatKey, string>> = {
+  population: "人口",
+  area_km2: "面積",
+  budget_expenditure: "總預算歲出",
+  aging_rate: "65 歲以上人口比例",
+};
+/** admin_divisions 的縣市（5 碼）或鄉鎮市區（8 碼）代碼；不收村里（11 碼） */
+export const isRegionalStatAdminCode = (v: unknown): v is string => typeof v === "string" && /^\d{5}(\d{3})?$/.test(v);
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -580,6 +601,19 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         });
       }
       if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串");
+      break;
+    }
+    case "regional_stat": {
+      // 地方基本統計（#508）：一個地區一個指標一個年度一值。地區只收縣市（5 碼）或鄉鎮市區（8 碼），不收村里。
+      // 單位要照 REGIONAL_STAT_UNIT 填（落庫時資料庫也會比對一次）；年度是西元（歲出填會計年度）；查不到就整個別填，不要推估。
+      if (!isRegionalStatAdminCode(p.admin_code)) push("payload.admin_code", "admin_code 要是內政部行政區代碼，縣市 5 碼或鄉鎮市區 8 碼（任務 target 原樣帶回），不收村里");
+      if (!oneOf(REGIONAL_STAT_KEYS, p.stat_key)) push("payload.stat_key", `stat_key 要是 ${REGIONAL_STAT_KEYS.join("／")} 之一`);
+      else if (p.unit !== REGIONAL_STAT_UNIT[p.stat_key as RegionalStatKey]) push("payload.unit", `${String(p.stat_key)} 的 unit 要是「${REGIONAL_STAT_UNIT[p.stat_key as RegionalStatKey]}」`);
+      if (!(isInt(p.year) && p.year >= 1900 && p.year <= 2100)) push("payload.year", "year 要是 1900～2100 的整數（西元；歲出填會計年度）");
+      if (!(typeof p.value === "number" && Number.isFinite(p.value) && p.value >= 0)) push("payload.value", "value 要是 0 或正數");
+      else if (p.stat_key === "aging_rate" && p.value > 100) push("payload.value", "65 歲以上人口比例不能超過 100");
+      else if (p.stat_key === "area_km2" && p.value <= 0) push("payload.value", "面積要是正數");
+      if (p.as_of !== undefined && p.as_of !== null && !isDate(p.as_of)) push("payload.as_of", "as_of 要是 YYYY-MM-DD（基準日，選填）");
       break;
     }
     case "election_results": {

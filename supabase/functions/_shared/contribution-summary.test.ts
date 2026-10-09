@@ -176,6 +176,7 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
       link_type: "top_down", note: "中央前瞻軌道補助核定藍線第一階段，市府執行。", source_locator: "核定公文" },
     party_info: { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }, { party_id: 10001, valid_to: "2019-04-30" }],
       note: "內政部政黨資訊網記載台灣團結聯盟更名為台聯黨" },
+    regional_stat: { admin_code: "65000", stat_key: "population", year: 2024, value: 2800000, unit: "人" },
   };
 
   for (const type of CONTRIBUTION_TYPES) {
