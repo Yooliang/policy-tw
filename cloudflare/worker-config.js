@@ -66,3 +66,12 @@ export function readWorkerConfig(env) {
     originHost: new URL(origin).host,
   }
 }
+
+/**
+ * 邊緣渲染頁給瀏覽器的 Cache-Control：瀏覽器每次都問（max-age=0），Cloudflare 共用快取放 staleTtlS。
+ * 從 Cache API 取出的命中一定要重設這個標頭（policy-ops#37 部署後實測）：命中的回應被改成 max-age=14400（區域的瀏覽器快取 TTL），
+ * 瀏覽器會把舊頁留 4 小時，部署後指著已刪的 /assets 檔——正是 #540 要修的事。
+ */
+export function ssrCacheControl(cfg) {
+  return `public, max-age=0, s-maxage=${cfg.staleTtlS}`
+}
