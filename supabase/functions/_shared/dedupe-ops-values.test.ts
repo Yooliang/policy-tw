@@ -72,7 +72,8 @@ Deno.test("CI 的前端測試整個資料夾交給 deno 找，不手寫檔名；
   const frontend = denoLines.filter((l) => !/_shared\//.test(l));
   assertEquals(frontend.length, 1, "前端純函式那一步");
   // --node-modules-dir=auto：lib/md/html.ts 用到 npm 套件 marked，CI 這一步沒有 npm install（2026-10-07）
-  assertMatch(frontend[0], /deno test --allow-read (--node-modules-dir=auto )?lib\/ cloudflare\/\s*$/);
+  // --minimum-dependency-age=0：Deno 新版 24 小時年齡限制會讓上游剛發版就卡死 CI（2026-10-10）
+  assertMatch(frontend[0], /deno test --allow-read (--node-modules-dir=auto )?(--minimum-dependency-age=0 )?lib\/ cloudflare\/\s*$/);
   for (const l of denoLines) assertNotMatch(l, /\.test\.ts/, "CI 不要再手寫測試檔名（漏加＝測試存在但沒跑）");
 
   // 範圍涵蓋所有真的有測試的資料夾：lib、cloudflare 以外不能出現新的前端測試資料夾
