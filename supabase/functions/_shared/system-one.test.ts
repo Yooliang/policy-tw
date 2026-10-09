@@ -316,3 +316,13 @@ Deno.test("validateRecord：收 typesafe/jev-1.13.0（語意版本），仍拒 a
   assertEquals(_vr({ ...base, model: "typesafe/jev-1.13.0" }), null);
   assert(_vr({ ...base, model: "typesafe/jev-latest" }) !== null);
 });
+
+Deno.test("stripNulDeep：NUL 字元寫不進 jsonb（2026-10-09 系統票停擺），字串、陣列、物件的鍵與值都清掉；其他不動", async () => {
+  const { stripNulDeep, htmlToText } = await import("./system-one.ts");
+  const row = { state: { page: { text: "a\u0000b", urls: ["x\u0000"] }, ["k\u0000"]: 1 }, n: 3, ok: true, none: null };
+  assertEquals(stripNulDeep(row) as unknown, { state: { page: { text: "ab", urls: ["x"] }, k: 1 }, n: 3, ok: true, none: null });
+  assertEquals(JSON.stringify(stripNulDeep(row)).includes("\u0000"), false);
+  assertEquals(htmlToText("<p>傅崐萁\u0000說</p>").includes("\u0000"), false);
+  const precheck = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
+  assert(precheck.includes(".upsert(stripNulDeep(rows)"), "jev_decisions 寫入前要清 NUL");
+});
