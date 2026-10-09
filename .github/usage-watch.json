@@ -1,9 +1,9 @@
 {
-  "_說明": "資料庫傳輸量監看（#522）。alert=false 時只記錄不開 issue；第一週先看基準值，再依實測的每小時請求數填門檻（建議：過去 7 天每小時第 99 百分位 x 3）。改值直接改這個檔。",
+  "_說明": "資料庫請求量監看（#522）。alert=false 時只記錄不開 issue，第一週先看基準。門檻只看 usage.api-counts 的每小時 REST 加總與單分鐘峰值；usage.api-requests-count 時間窗不明，只記錄不判斷。API 沒有傳輸量（egress）欄位，要在 Supabase 後台 Usage 頁看。初值依 2026-10-09 實測基準（每小時約 1.2 萬、單分鐘最高 662）取約 10 倍，一週後改成 7 天第 99 百分位 x 3。改值直接改這個檔。",
   "alert": false,
   "project_ref": "wiiqoaytpqvegtknlbue",
-  "hourly_rest_requests_max": 1000000,
-  "hourly_egress_bytes_max": 5000000000,
+  "hourly_rest_requests_max": 120000,
+  "minute_rest_requests_max": 6000,
   "alert_repo": "Yooliang/policy-tw",
   "alert_label": "ops"
 }

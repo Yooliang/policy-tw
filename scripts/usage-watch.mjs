@@ -1,40 +1,34 @@
-// 讀 Management API 用量端點的原始回應（由 workflow 的 curl 存成檔），印數字摘要、判斷門檻。
-// 不碰權杖。用法：node scripts/usage-watch.mjs <回應目錄> <設定檔>
-import { readFileSync, readdirSync, appendFileSync, writeFileSync } from 'node:fs'
+// 讀 Management API 用量端點的回應（由 workflow 的 curl 存成檔），印摘要、判斷門檻。不碰權杖。
+// 用法：node scripts/usage-watch.mjs <回應目錄> <設定檔>
+import { readFileSync, appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const [dir, cfgPath] = process.argv.slice(2)
 const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
 const out = []
 const log = (s) => { console.log(s); out.push(s) }
+const read = (f) => { try { return JSON.parse(readFileSync(join(dir, f), 'utf8')) } catch { return null } }
 
-// 遞迴收集欄位名稱與數值欄位加總，端點回應格式第一次實跑前未知，所以不寫死欄位
-function walk(v, path, acc) {
-  if (Array.isArray(v)) { v.forEach((x) => walk(x, path + '[]', acc)); return }
-  if (v && typeof v === 'object') { for (const [k, x] of Object.entries(v)) walk(x, path ? `${path}.${k}` : k, acc); return }
-  if (typeof v === 'number') acc[path] = (acc[path] || 0) + v
-  else if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v) && !/time|date|stamp/i.test(path)) acc[path] = (acc[path] || 0) + Number(v)
-}
-
-const sums = {}
-for (const f of readdirSync(dir).filter((x) => x.endsWith('.json')).sort()) {
-  let j
-  try { j = JSON.parse(readFileSync(join(dir, f), 'utf8')) } catch { log(`### ${f}\n無法解析（非 JSON）`); continue }
-  const acc = {}
-  walk(j, '', acc)
-  const top = j && typeof j === 'object' ? Object.keys(j).join(', ') : typeof j
-  log(`### ${f}\n頂層欄位：${top}\n數值欄位加總：${JSON.stringify(acc)}`)
-  sums[f] = acc
-}
-
-// 門檻：用欄位名稱比對（含 request/count 的當請求數，含 byte/egress/size 的當傳輸量）
 const breaches = []
-for (const [f, acc] of Object.entries(sums)) {
-  for (const [k, v] of Object.entries(acc)) {
-    if (/byte|egress|size/i.test(k) && v > cfg.hourly_egress_bytes_max) breaches.push(`${f} ${k}=${v} > ${cfg.hourly_egress_bytes_max}`)
-    else if (/request|count/i.test(k) && !/byte/i.test(k) && v > cfg.hourly_rest_requests_max) breaches.push(`${f} ${k}=${v} > ${cfg.hourly_rest_requests_max}`)
-  }
+
+// usage.api-counts（interval=1hr）：result[] 每分鐘一列，total_rest_requests 等
+const counts = read('usage.api-counts.json')
+const rows = Array.isArray(counts?.result) ? counts.result : null
+if (!rows) {
+  log(`usage.api-counts 無法使用：${JSON.stringify(counts)?.slice(0, 200)}`)
+} else {
+  const rest = rows.map((r) => Number(r.total_rest_requests) || 0)
+  const hourly = rest.reduce((a, b) => a + b, 0)
+  const peak = rest.length ? Math.max(...rest) : 0
+  log(`REST 請求（${rows.length} 分鐘）：每小時加總 ${hourly}，單分鐘峰值 ${peak}`)
+  if (hourly > cfg.hourly_rest_requests_max) breaches.push(`每小時 REST 請求 ${hourly} > ${cfg.hourly_rest_requests_max}`)
+  if (peak > cfg.minute_rest_requests_max) breaches.push(`單分鐘 REST 請求峰值 ${peak} > ${cfg.minute_rest_requests_max}`)
 }
-log(`\n門檻檢查：${breaches.length ? breaches.join('；') : '未超過'}（alert=${cfg.alert}）`)
-if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## 資料庫用量\n\n```\n' + out.join('\n') + '\n```\n')
+
+// usage.api-requests-count：時間窗不明，只記錄不判斷
+const total = read('usage.api-requests-count.json')
+log(`usage.api-requests-count（只記錄，時間窗不明）：${total?.result?.[0]?.count ?? JSON.stringify(total)?.slice(0, 200)}`)
+
+log(`門檻檢查：${breaches.length ? breaches.join('；') : '未超過'}（alert=${cfg.alert}）`)
+if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## 資料庫 REST 請求量\n\n```\n' + out.join('\n') + '\n```\n')
 writeFileSync(join(dir, 'breaches.txt'), breaches.join('\n'))
