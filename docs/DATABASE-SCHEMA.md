@@ -195,7 +195,7 @@
 **約束:** `UNIQUE(policy_id, url)` — 防止同一政見的重複 URL
 
 ### 8. related_policies - 相關政見
-政見之間的關聯（如：前後任延續）。**2026-10-06 起已由政策脈絡取代（#349，政見的 `lineage_id`）：線上 0 列、讀取端不再讀、新增與修改由觸發器擋下，第二階段 B 刪除。**
+政見之間的關聯（如：前後任延續）。**這張表已於 2026-10-09 刪除（#349 第二階段 B，migration `20261009220000`）：改由政策脈絡取代（政見的 `lineage_id`），視圖 `policies_with_logs` 也不再有 `related_policy_ids`；以下只留歷史。**
 
 | 欄位 | 類型 | 說明 |
 |------|------|------|
@@ -394,11 +394,9 @@
 政見資料含追蹤紀錄。
 ```sql
 SELECT p.*,
-  COALESCE(json_agg(l.*), '[]') as logs,
-  COALESCE(json_agg(rp.related_policy_id), '[]') as related_policy_ids
+  COALESCE(json_agg(l.*), '[]') as logs
 FROM policies p
 LEFT JOIN tracking_logs l ON p.id = l.policy_id
-LEFT JOIN related_policies rp ON p.id = rp.policy_id
 GROUP BY p.id
 ```
 
@@ -440,9 +438,7 @@ elections ───────────────────────�
               │                              │      │
               │                              ├── tracking_logs
               │                              │
-              │                              ├── policy_sources
-              │                              │
-              │                              └── related_policies
+              │                              └── policy_sources
               │
               │                              └── discussions
               │                                     │
