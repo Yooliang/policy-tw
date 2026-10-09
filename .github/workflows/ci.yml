@@ -64,7 +64,10 @@ jobs:
       # 整個資料夾交給 deno 自己找 *.test.ts（2026-10-07 起）：以前手寫 36 個檔名，新測試漏加就是「測試存在但沒跑」
       # （ci-test-glob.test.ts 守這一行不再列檔名）
       - name: deno test（前端純函式）
-        run: deno test --allow-read --node-modules-dir=auto lib/ cloudflare/
+        # Deno 2.x 新版預設「發佈未滿 24 小時的 npm 套件不裝」，--node-modules-dir=auto 每次現解析，
+        # rollup 新版的平台選用套件剛發佈就讓這一步整批紅（2026-10-10）。這一步只跑純函式測試、不碰任何金鑰，
+        # 關掉年齡限制換 CI 不被上游發版卡住；建置與部署仍走 pnpm-lock 鎖定的版本。
+        run: deno test --allow-read --node-modules-dir=auto --minimum-dependency-age=0 lib/ cloudflare/
 
       # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
