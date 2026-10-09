@@ -446,6 +446,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 地方基本統計（#508）：出錯的方式是「數字不是來源寫的那個」與「單位、年度對不上」
+  regional_stat: [
+    {
+      key: "value_not_in_source",
+      instructions: "交上來的數值，來源上寫的是這個數字嗎？還是看起來是推算、換算或湊出來的？",
+      hit: { key: "inferred", means: "來源沒有直接寫這個數字，像是推算或換算出來的" },
+      miss: { key: "stated", means: "來源上就寫著這個數字" },
+    },
+    {
+      key: "year_or_unit_mismatch",
+      instructions: "交上來的年度（或會計年度）與單位，跟來源那一頁寫的一致嗎？",
+      hit: { key: "mismatch", means: "年度或單位跟來源對不起來" },
+      miss: { key: "match", means: "年度與單位都跟來源一致" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",

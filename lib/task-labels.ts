@@ -46,6 +46,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   // 2026-10-06
   placeholder_politician: '疑似測試資料或空殼人物',
   party_info_missing: '補政黨資訊',
+  // 地方基本統計（#508，2026-10-09）
+  regional_stat_missing: '缺地方統計',
   other: '其他',
 }
 

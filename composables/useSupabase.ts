@@ -26,6 +26,7 @@ import type { DirectoryGroup, DirectoryGroupSummary } from '../lib/people-direct
 import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
 import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
+import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -38,6 +39,8 @@ const discussions = ref<Discussion[]>([])
 const categories = ref<string[]>([])
 const locations = ref<string[]>([])
 const regionStats = ref<RegionStats[]>([])
+/** 地方基本統計（#508：人口、面積、總預算歲出、65 歲以上比例），讀 regional_stats_public 視圖 */
+const officialRegionalStats = ref<RegionalStat[]>([])
 const electoralDistrictAreas = ref<ElectoralDistrictArea[]>([])
 /** 快照只帶了部分選舉區對應（縣市頁只嵌該縣市）：ensureDistricts 仍要撈整份 */
 let districtsPartial = false
@@ -471,6 +474,7 @@ function getActiveElection(): Election {
 // 不要重打一次）、失敗清掉快取讓下一次能重試。
 // ------------------------------------------------------------
 let regionStatsPromise: Promise<void> | null = null
+let officialRegionalStatsPromise: Promise<void> | null = null
 let districtsPromise: Promise<void> | null = null
 let discussionsPromise: Promise<void> | null = null
 
@@ -486,6 +490,19 @@ export function ensureRegionStats(): Promise<void> {
     })().catch((err) => { regionStatsPromise = null; recordFailure('縣市統計', err, ensureRegionStats) })
   }
   return regionStatsPromise
+}
+
+/** 地方基本統計（#508）：縣市頁、鄉鎮頁、/regional-data 用；全站一次撈完（縣市 22＋鄉鎮約 368，每個最多 4 項指標） */
+export function ensureOfficialRegionalStats(): Promise<void> {
+  if (officialRegionalStats.value.length > 0) return Promise.resolve()
+  if (!officialRegionalStatsPromise) {
+    officialRegionalStatsPromise = (async () => {
+      // 縣市＋鄉鎮市區（約 390 地區）× 4 指標，上限約 1,560 筆，超過 PostgREST 1000 筆上限，要分頁（fetchAllRows，排序用 id）
+      const rows = await fetchAllRows<RawRegionalStat>('regional_stats_public', '*', 'id')
+      officialRegionalStats.value = rows.map(mapRegionalStat)
+    })().catch((err) => { officialRegionalStatsPromise = null; recordFailure('地方基本統計', err, ensureOfficialRegionalStats) })
+  }
+  return officialRegionalStatsPromise
 }
 
 /** 選舉區對應表：選舉頁篩議員選區用（77 KB） */
@@ -1130,6 +1147,7 @@ export function useSupabase() {
     categories,
     locations,
     regionStats,
+    officialRegionalStats,
     electoralDistrictAreas,
     verificationSources,
     dataAsOf,
@@ -1165,6 +1183,7 @@ export function useSupabase() {
     getTotalPoliticianCount,
     // 按需載入的三塊重資料：需要的頁面自己在 onMounted 呼叫
     ensureRegionStats,
+    ensureOfficialRegionalStats,
     ensureDistricts,
     ensureDiscussions,
     ensurePolicies,

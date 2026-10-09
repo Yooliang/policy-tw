@@ -9,7 +9,7 @@
  * 每個 UPDATE／INSERT 都寫 edit_history（revert 用）；每一步檢查 error。
  */
 
-import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape } from "./contribution-schema.ts";
+import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape, isRegionalStatAdminCode, REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel } from "./candidacy-result.ts";
 import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
@@ -865,6 +865,57 @@ async function applyPolicyElements(supabase: SupabaseLike, row: ContributionRow)
     policy_id: policyId,
     message: `「${policy.title}」的政見三要素已上線：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.join("、")}跟現有的一樣，略過）` : ""}`,
   };
+}
+
+// ── 地方基本統計（#508）────────────────────────────────────────────────────
+/** 一個地區一個指標一個年度一列；已有一樣的值＝冪等（superseded）、已有不一樣的值＝不覆蓋退件（disputed，沒有人工介入點） */
+async function applyRegionalStat(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const adminCode = str(p.admin_code);
+  const statKey = str(p.stat_key);
+  const year = int(p.year);
+  const value = typeof p.value === "number" && Number.isFinite(p.value) ? p.value : null;
+  const unit = str(p.unit);
+  const asOf = str(p.as_of);
+  const source = row.source_urls[0] ?? null;
+  if (
+    !adminCode || !isRegionalStatAdminCode(adminCode) || !statKey ||
+    !(REGIONAL_STAT_KEYS as readonly string[]).includes(statKey) || year === null || value === null || !unit || !source
+  ) {
+    return { status: "failed", message: "regional_stat 要帶 admin_code（縣市 5 碼或鄉鎮市區 8 碼）、stat_key、year、value、unit，而且有出處網址" };
+  }
+  const key = statKey as RegionalStatKey;
+  if (unit !== REGIONAL_STAT_UNIT[key]) {
+    return { status: "disputed", message: `${REGIONAL_STAT_LABEL[key]}（${statKey}）的 unit 要是「${REGIONAL_STAT_UNIT[key]}」，收到「${unit}」` };
+  }
+  if (value < 0 || (key === "aging_rate" && value > 100) || (key === "area_km2" && value <= 0)) {
+    return { status: "disputed", message: `${value} 超出${REGIONAL_STAT_LABEL[key]}的合理範圍` };
+  }
+
+  // query-bounds: ok — 單一地區單一指標單一年度，唯一鍵最多一列
+  const { data: existing, error: readError } = await supabase.from("regional_stats")
+    .select("id, value, unit").eq("admin_code", adminCode).eq("stat_key", statKey).eq("year", year).maybeSingle();
+  throwIf(readError, "regional_stats read");
+
+  const label = REGIONAL_STAT_LABEL[key];
+  if (existing) {
+    if (Number(existing.value) !== value || existing.unit !== unit) {
+      return {
+        status: "disputed",
+        message: `庫裡已有 ${adminCode} ${year} 年的${label} ＝ ${existing.value} ${existing.unit}，與提交的 ${value} ${unit} 不同，不覆蓋`,
+      };
+    }
+    return { status: "superseded", message: `${adminCode} ${year} 年的${label}跟網站上現有的一樣（別人先交了），不重複寫入` };
+  }
+
+  const { data: inserted, error } = await supabase.from("regional_stats")
+    .insert({ admin_code: adminCode, stat_key: statKey, year, value, unit, as_of: asOf, source_url: source, contribution_id: row.id })
+    .select("*").maybeSingle();
+  throwIf(error, "regional_stats insert");
+  if (!inserted) throw new Error("regional_stats insert 沒有回傳");
+  await recordInsert(supabase, ctx, "regional_stats", String(inserted.id), inserted);
+  return { status: "applied", message: `新增 ${adminCode} ${year} 年的${label} ＝ ${value} ${unit}` };
 }
 
 // ── 政策脈絡（#349，2026-10-06）──────────────────────────────────────────────────
@@ -2178,6 +2229,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "lineage_participants": return await applyLineageParticipants(supabase, row);
     case "lineage_handover": return await applyLineageHandover(supabase, row);
     case "lineage_link": return await applyLineageLink(supabase, row);
+    case "regional_stat": return await applyRegionalStat(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

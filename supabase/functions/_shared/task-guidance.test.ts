@@ -125,6 +125,8 @@ Deno.test("payload 形狀提到的欄位，schema 裡要真的有（拼錯的欄
     "co_proposer", "official_record", "self_claim", "top_down", "bottom_up", "policy_address",
     // 選舉結果的值（election_results 的 items 每項二選一）
     "not_elected",
+    // 地方基本統計（#508）的 stat_key 四選一，不是欄位名（population 沒有底線所以不會被抽到）
+    "area_km2", "budget_expenditure", "aging_rate",
   ]);
   for (const [type, shape] of Object.entries(PAYLOAD_SHAPE)) {
     const known = all[type];

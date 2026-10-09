@@ -21,6 +21,7 @@ import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
 import { resultOfCandidacyStatus } from "./candidacy-status.ts";
 import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
+import { REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
@@ -1116,6 +1117,10 @@ export interface VerifyContextData {
   results_compare?: Obj[];
   /** reassign_candidacy（2026-10-06）：這筆參選紀錄、新舊兩人、兩人各自的參選紀錄、中選會名冊唯一對上的那一列 */
   reassign?: { ctx: ReassignContext; from_elections: Obj[]; to_elections: Obj[]; cec: Obj | null } | null;
+  /** regional_stat（#508）：admin_divisions 查到的縣市／鄉鎮名稱（地區代碼對不到就是 null） */
+  regional_admin?: Obj | null;
+  /** regional_stat（#508）：這個地區現有的地方統計（跨 stat_key，給驗證者看有沒有其他年度的值可以交叉核對） */
+  regional_stats?: Obj[];
 }
 
 /**
@@ -1437,6 +1442,30 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
           "not_in_submission 是我們有、這筆沒交的選舉區，公告上確實沒有的話不影響你的票。公告打不開或看不出是哪一份，投 unsure。",
       };
     }
+    case "regional_stat": {
+      // 地方基本統計（#508）：這個地區現值一字排開，標出交上來那一筆對不對得上同一年度的現值
+      const key = payload.stat_key as RegionalStatKey | undefined;
+      const label = key ? (REGIONAL_STAT_LABEL[key] ?? String(key)) : null;
+      const admin = data.regional_admin as Obj | null;
+      const place = admin ? [admin.county, admin.level === "town" ? admin.town : null].filter(Boolean).join("") : null;
+      const rows: Obj[] = (data.regional_stats ?? []).map((r) => ({
+        ...r,
+        claimed: r.stat_key === payload.stat_key && r.year === payload.year,
+      }));
+      const existing = rows.find((r) => r.stat_key === payload.stat_key && r.year === payload.year) ?? null;
+      return {
+        admin_code: payload.admin_code ?? null,
+        place,
+        stat_key: payload.stat_key ?? null,
+        label,
+        claimed: { year: payload.year ?? null, value: payload.value ?? null, unit: payload.unit ?? null, as_of: payload.as_of ?? null },
+        db_existing: existing ? { value: existing.value, unit: existing.unit, as_of: existing.as_of, source_url: existing.source_url } : null,
+        other_years: rows.filter((r) => r.stat_key === payload.stat_key && r.year !== payload.year),
+        hint: `打開 source_urls，確認${place ?? "這個地區"}${label ?? ""} ${payload.year ?? ""} 年的數值跟來源上寫的一致（單位要是${key ? REGIONAL_STAT_UNIT[key] : "交件填的那個"}）：` +
+          "數字是來源直接寫的（不是推算、換算、或拿別的年度／別的地區湊）才投 agree；對不上、年度或單位不對投 disagree（附 evidence_url 與 note）；來源打不開投 unsure。" +
+          "db_existing 是資料庫裡同一年度的現值（空＝還沒有），other_years 是這個指標別的年度的既有值，可以用來看交上來的數字趨勢是否合理（但不能單靠趨勢判斷，還是要看來源）。",
+      };
+    }
     case "reassign_candidacy": {
       // 參選紀錄改掛（2026-10-06）：最上層寫清楚「這票通過後會把哪一筆從誰改到誰」，再列兩人各自的參選紀錄
       const r = data.reassign;
@@ -1718,6 +1747,16 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
         .eq("election_id", electionId).eq("election_type", electionType).eq("region", region)
         .order("sub_region", { ascending: true }).limit(1000);
       data.districts = (ds ?? []) as Obj[];
+    }
+  }
+  if (contributionType === "regional_stat") {
+    const adminCode = typeof payload.admin_code === "string" ? payload.admin_code : null;
+    if (adminCode) {
+      const { data: ad } = await supabase.from("admin_divisions").select("code, level, county, town").eq("code", adminCode).maybeSingle();
+      data.regional_admin = (ad ?? null) as Obj | null;
+      // query-bounds: ok — 一個地區最多 4 個指標
+      const { data: rs } = await supabase.from("regional_stats").select("stat_key, year, value, unit, as_of, source_url").eq("admin_code", adminCode).order("stat_key", { ascending: true }).limit(50);
+      data.regional_stats = (rs ?? []) as Obj[];
     }
   }
   if (contributionType === "correction") {

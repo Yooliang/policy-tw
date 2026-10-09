@@ -172,6 +172,12 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "off_registry＝內政部名冊查無此名稱的那幾個——是不是名冊上某個政黨改名前的名字（前身）、什麼時候停用；dissolved＝名冊狀態是解散、廢止、撤銷，停用日是哪一天。" +
     "查內政部政黨資訊網的政黨頁、內政部的公告或政黨自己的公告，用 party_info 交：parties 每個政黨一項，改名要新舊兩筆一起交；" +
     "**查不到確切的日子就不要交那一欄**（不要填月初、年初湊）；名字像不算改名，要有來源講明是同一個政黨改名。查不到就用 no_change 說明你查了哪些網址。",
+  // 地方基本統計（#508，2026-10-09）：縣市與鄉鎮市區缺人口／面積／總預算歲出／65歲以上比例
+  regional_stat_missing:
+    "target.missing 列出這個地區缺哪幾個指標（stat_key、min_year、unit）。請查官方統計：人口（內政部戶政司人口統計，https://www.ris.gov.tw/）、" +
+    "面積（內政部國土測繪中心全國土地面積統計）、總預算歲出（該縣市主計處總預算書）、65 歲以上人口比例（內政部戶政司人口統計或國家發展委員會的人口推估）。" +
+    "一個數值交一筆 regional_stat（admin_code 用任務的 target.admin_code，stat_key、year、value、unit 照 target.missing 列的填，unit 必須一字不差）。" +
+    "**查不到確切數字就不要推估、不要用候選人數或其他資料換算**，用 no_change 說明你查了哪些網址。",
   not_running_recheck:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "這一列被標成「不參選」，但沒有人對過官方登記名單——多半是早期匯入時就這樣寫的。"
@@ -336,6 +342,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：region、election_id、election_type、ours_count、cec_count、submitted、note。",
   district_seats:
     "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
+  // 地方基本統計（#508）：admin_code 用任務 target 帶回的代碼；unit 要照 stat_key 固定的單位（人／平方公里／千元／%）
+  regional_stat:
+    "payload：admin_code（縣市 5 碼或鄉鎮市區 8 碼，照任務 target.admin_code 原樣帶回）、stat_key（population 人口／area_km2 面積／budget_expenditure 總預算歲出／aging_rate 65歲以上比例）、" +
+    "year（統計年度，西元；歲出填會計年度）、value（數值）、unit（固定：population＝人／area_km2＝平方公里／budget_expenditure＝千元／aging_rate＝%）、as_of（基準日，選填）。source_urls 放官方統計出處。",
   election_results:
     "payload：election_id、election_type、region、sub_region（四個照任務 target 原樣帶回；target 沒有 sub_region 就不填）、" +
     "items（你核對過的每一位一項 {politician_election_id：current.items 裡那一位的參選紀錄 id、election_result：elected 當選／not_elected 落選}，一筆最多 120 位）、" +
