@@ -1,9 +1,9 @@
 /**
- * 日本站地域統計（regional_stat）的機器核對（migration 20261009210400_policy_jp_stat_registry.sql＋210500 資料；照正見 cec-verify，審核者 estat-auto）。
+ * 日本站地域統計（regional_stat）的機器核對（migration 20261009250200_policy_jp_stat_registry.sql＋250300 資料；照正見 cec-verify，審核者 estat-auto）。
  *
  * 只要 --allow-read。PGlite 上套日本站整條 migration（schema → tables → 130000 → 130100 → 130200 → 150100 → 200000 → 210000 → 210100
- * → 自治體的機器核對 210200／210300）再加這兩支。
- *   a. 參考表的資料：5,877 列＝1,959 團體×3 項（population／area_km2／aging_rate 各 1,959，跟 210500 自我檢查那行一致）、全是 2025 年・基準日 2025-10-01、
+ * → 自治體的機器核對 250000／250100）再加這兩支。
+ *   a. 參考表的資料：5,877 列＝1,959 團體×3 項（population／area_km2／aging_rate 各 1,959，跟 250300 自我檢查那行一致）、全是 2025 年・基準日 2025-10-01、
  *      單位＝regional_stat_unit、團體都在總務省團體碼表（沒對到的 6 個是北方領土）、值域（人口整數、面積 > 0 且最多兩位小數、高齢化率 0～100）、
  *      端點與抽樣對得上已知的值、加總一致（都道府県＝其下市區町村、政令市＝其行政區）；表的 CHECK／外鍵；產生器跟 migration 對得上
  *   b. 每一列照抄成交件，日本站的收件驗證（contribution-schema.ts）全收——機器核對得過的交件不會先在收件被擋
@@ -33,11 +33,11 @@ const CHAIN = [
   "20261008195000_policy_jp_schema.sql", "20261009000000_policy_jp_tables.sql", "20261009130000_policy_jp_dispatch.sql",
   "20261009130100_policy_jp_election_discovery.sql", "20261009130200_policy_jp_term_expirations_r08.sql", "20261009150100_policy_jp_rebalance_anchor.sql",
   "20261009200000_policy_jp_public_stats.sql", "20261009210000_policy_jp_apply.sql", "20261009210100_policy_jp_gap_arms.sql",
-  "20261009210200_policy_jp_lg_registry.sql", "20261009210300_policy_jp_lg_registry_data.sql",
+  "20261009250000_policy_jp_lg_registry.sql", "20261009250100_policy_jp_lg_registry_data.sql",
 ];
 const CHAIN_SQL = await Promise.all(CHAIN.map(read));
-const REG_FILE = "20261009210400_policy_jp_stat_registry.sql";
-const DATA_FILE = "20261009210500_policy_jp_stat_registry_data.sql";
+const REG_FILE = "20261009250200_policy_jp_stat_registry.sql";
+const DATA_FILE = "20261009250300_policy_jp_stat_registry_data.sql";
 const REG_SQL = await read(REG_FILE);
 const DATA_SQL = await read(DATA_FILE);
 const GEN_SCRIPT = (await Deno.readTextFile(new URL("../../../scripts/gen-jp-stat-registry.ts", import.meta.url))).replace(/\r\n/g, "\n");
@@ -150,7 +150,7 @@ Deno.test("參考表：5,877 列＝1,959 團體×3 項，各項 1,959，跟資�
   const tally: Record<string, number> = {};
   for (const s of STATS) tally[s.stat_key] = (tally[s.stat_key] ?? 0) + 1;
   assertEquals(tally, { aging_rate: 1959, area_km2: 1959, population: 1959 });
-  // 跟 210500 寫的一樣（標頭、自我檢查的預期字串）
+  // 跟 250300 寫的一樣（標頭、自我檢查的預期字串）
   const kinds = Object.entries(tally).sort().map(([k, n]) => `${k} ${n}`).join("、");
   assertEquals(kinds, "aging_rate 1959、area_km2 1959、population 1959");
   assert(DATA_SQL.includes(`團體 1959 個，共 5877 列：${kinds}。`), "標頭的團體數與列數");
@@ -789,7 +789,7 @@ Deno.test("排程：有 pg_cron 就排（重跑只留一條、不傷參考表、
 // =============================================================================================
 // 失敗的 migration 在 db.exec 裡是一個隱含交易（simple query）：中途丟例外整包回滾，所以同一個底庫可以重複拿來試
 const baseDb = await freshDb({ reg: "-- (沒套統計核對)", data: false }); // 只有前置 migration（含自治體核對）
-const regOnlyDb = await freshDb({ data: false }); // 套了 210400、沒灌資料
+const regOnlyDb = await freshDb({ data: false }); // 套了 250200、沒灌資料
 
 Deno.test("自我檢查（還原驗證）：沒開 RLS、給 anon／authenticated／PUBLIC 寫入、給 anon 執行、少收 PUBLIC 的 REVOKE，重跑都會失敗", async () => {
   const db = baseDb;
@@ -837,7 +837,7 @@ Deno.test("自我檢查（還原驗證）：資料 migration 少灌一列、靜�
   await db.exec(DATA_SQL);
   assertEquals(await count(), 5877);
   assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.sources WHERE origin = 'import:estat_census_2025'`)).n, 1, "出處只有一列（ON CONFLICT (url)）");
-  // 重跑 210400：表不重建、資料還在
+  // 重跑 250200：表不重建、資料還在
   await db.exec(REG_SQL);
   assertEquals(await count(), 5877);
 });

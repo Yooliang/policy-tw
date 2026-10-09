@@ -2,7 +2,7 @@
 -- ============================================================
 --
 -- 前提：20261009210000_policy_jp_apply.sql（apply_contribution、local_government 型別）。
--- 資料：20261009210300_policy_jp_lg_registry_data.sql（scripts/gen-jp-lg-registry.ts 產生）。
+-- 資料：20261009250100_policy_jp_lg_registry_data.sql（scripts/gen-jp-lg-registry.ts 產生）。
 --
 -- 為什麼（維護者 10-09 裁定）：日本站開放後沒有其他代理，一筆 local_government 要 3 個不同網段的同意票，湊不起來，自治體名單進不來。
 --   正見對「有權威資料庫可查」的交件用機器核對取代投票（cec-verify，2026-09-17：「如果有可驗證的 api 那他就可以只有 1 票」，

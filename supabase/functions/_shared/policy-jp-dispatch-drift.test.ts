@@ -37,7 +37,7 @@
  *   ① 複本——PAIRS（130000）、FOLLOWED（跟進版）、OTHER_COPIES（公開統計 200000，逐字比對在 policy-jp-public-stats.test.ts）；
  *   ② 日本專屬——登記在 JP_ONLY，附一行理由與「定義它的 migration 清單」（被後面的 migration 重新定義就要多寫一個，搬動或重定義會看得見）。
  * 兩邊不得重複；登記了卻再也沒有 migration 定義的名字（改名、刪除）也會紅。偵測器本身有還原驗證（假 migration 夾一支新函式／新視圖／漏前綴就抓得到）。
- * 選舉鏈（210600）的臂、總表、進度視圖逐一登記，不用「整支 migration 都放行」的寫法。
+ * 選舉鏈（250400）的臂、總表、進度視圖逐一登記，不用「整支 migration 都放行」的寫法。
  */
 import { assert, assertEquals, assertNotEquals, assertThrows } from "jsr:@std/assert@1";
 import { fnText, latestFn, migrationNames as listMigrations, readMig } from "./arms-pglite.ts";
@@ -371,9 +371,9 @@ const T_ED = ID(MIG_ED); // 130100
 const T_STATS = "20261009200000"; // 公開統計
 const T_APPLY = "20261009210000";
 const T_ARMS = "20261009210100";
-const T_LGR = "20261009210200";
-const T_STR = "20261009210400";
-const T_CHAIN = "20261009210600";
+const T_LGR = "20261009250000";
+const T_STR = "20261009250200";
+const T_CHAIN = "20261009250400";
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -408,7 +408,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
   activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，210600 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -438,19 +438,19 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261009210100 gap_arms：兩支新缺口臂＋#503 ----
   task_unavailable: { mig: [T_ARMS], why: "任務現在能不能派（飽和／no_change 等票或已通過／冷卻中／資料型交件通過等落庫），臂在 LIMIT cap 之前用它排除（#503）；前三項與 refresh_dispatch_blocked 同定義，有行為對照測試" },
   regional_stat_label: { mig: [T_ARMS], why: "統計項目的日文名（任務描述用）" },
-  contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；210600 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
-  contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；210600 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
+  contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；250400 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
+  contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
 
-  // ---- 20261009210200 lg_registry：自治體（local_government）機器核對，照正見 cec-verify ----
+  // ---- 20261009250000 lg_registry：自治體（local_government）機器核對，照正見 cec-verify ----
   lg_registry_decide: { mig: [T_LGR], why: "local_government 機器核對的判斷：payload 對總務省團體碼表 lg_code_registry → apply／reject／skip" },
   lg_registry_verify_pending: { mig: [T_LGR], why: "掃 pending 的 local_government：對得上 → verified＋落庫（reviewed_by soumu-auto），對不上 → 退件；排程 policy-jp-lg-registry-verify 與 jp-report 交件當下呼叫" },
 
-  // ---- 20261009210400 stat_registry：地域統計（regional_stat）機器核對，同一個做法 ----
+  // ---- 20261009250200 stat_registry：地域統計（regional_stat）機器核對，同一個做法 ----
   stat_registry_tolerance: { mig: [T_STR], why: "地域統計機器核對的容許差（人口一致、面積 0.005、高齢化率 0.05）" },
   stat_registry_decide: { mig: [T_STR], why: "regional_stat 機器核對的判斷：payload 對 e-Stat 國勢調査表 stat_registry → apply／reject／skip" },
   stat_registry_verify_pending: { mig: [T_STR], why: "掃 pending 的 regional_stat（同 lg_registry_verify_pending，reviewed_by estat-auto）；排程 policy-jp-stat-registry-verify" },
 
-  // ---- 20261009210600 election_chain：選舉鏈第 1 步（鏈上的臂、總表、進度視圖逐一登記；總表的 contribution_auto_tasks_arms 與兩支臂的重新定義已在上面各自的 mig 清單裡） ----
+  // ---- 20261009250400 election_chain：選舉鏈第 1 步（鏈上的臂、總表、進度視圖逐一登記；總表的 contribution_auto_tasks_arms 與兩支臂的重新定義已在上面各自的 mig 清單裡） ----
   election_chain_steps: { mig: [T_CHAIN], why: "選舉鏈的步驟清單（discovery／local_government／regional_stats／region），activity_rules.after_step 的 CHECK 對它" },
   date_or_null: { mig: [T_CHAIN], why: "交件 payload 的日期文字 → DATE，格式不對＝NULL（視圖不能因一筆壞資料整支丟例外）" },
   activity_chain_scope: { mig: [T_CHAIN], why: "派工列的範圍鍵（日本＝團體碼：target.chain_lg_code，沒有就用 lg_code）；總表的 gate 只透過它取，站別鍵名不寫進總表" },
@@ -516,7 +516,7 @@ async function readJpMigrations(): Promise<Record<string, string>> {
 Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本（PAIRS／FOLLOWED／公開統計）＋日本專屬清單 JP_ONLY（新加的不登記就紅、登記了卻沒人定義也紅）；偵測器有還原驗證", async () => {
   const files = await readJpMigrations();
   const ids = Object.keys(files).map(ID);
-  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, "20261008195000", "20261009130200", "20261009210300", "20261009210500"]) {
+  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, "20261008195000", "20261009130200", "20261009250100", "20261009250300"]) {
     assert(ids.includes(t), `掃描範圍要包含 ${t}（放行靠登記，不是靠沒掃到）`);
   }
   const scan = scanDefinitions(files);

@@ -1,7 +1,7 @@
 -- 總務省「全国地方公共団体コード」（R6.1.1）＋「中核市一覧」（R5.4.1）→ policy_jp.lg_code_registry（機器核對 local_government 用，不顯示）
 -- ============================================================
 -- 由 scripts/gen-jp-lg-registry.ts 產生，不要手改；代碼表換檔時改腳本的 CODE_XLSX／CODE_AS_OF 重產一支新的 migration。
--- 前提：20261009210200_policy_jp_lg_registry.sql（lg_code_registry 表）。
+-- 前提：20261009250000_policy_jp_lg_registry.sql（lg_code_registry 表）。
 --
 -- 出處：https://www.soumu.go.jp/main_content/000925835.xlsx（頁面 https://www.soumu.go.jp/denshijiti/code.html；SHA-256 7d04c8a7f6a6e76a7823a0414a8422bf2b26bb6070766971df76eab58ea6ff78）
 --       https://www.soumu.go.jp/main_content/000885088.pdf（中核市一覧，令和5年4月1日現在；SHA-256 8b83e4ba0c8ea9f464caa31cfb8138f180d4a2da6b412b296b711b3f1603de1f）

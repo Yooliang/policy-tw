@@ -1,5 +1,5 @@
 /**
- * 日本站自治體的機器核對（migration 20261009210200_policy_jp_lg_registry.sql＋210300 資料；照正見 cec-verify）。
+ * 日本站自治體的機器核對（migration 20261009250000_policy_jp_lg_registry.sql＋250100 資料；照正見 cec-verify）。
  *
  * 只要 --allow-read。PGlite 上套日本站整條 migration（schema → tables → 130000 → 130100 → 130200 → 150100 → 200000 → 210000 → 210100）再加這兩支。
  *   a. 參考表的資料：1,965 列、檢查碼、縣碼、讀音全是ひらがな、種類分布、任期満了調查的團體都查得到；
@@ -26,8 +26,8 @@ const CHAIN = [
   "20261009200000_policy_jp_public_stats.sql", "20261009210000_policy_jp_apply.sql", "20261009210100_policy_jp_gap_arms.sql",
 ];
 const CHAIN_SQL = await Promise.all(CHAIN.map(read));
-const REG_FILE = "20261009210200_policy_jp_lg_registry.sql";
-const DATA_FILE = "20261009210300_policy_jp_lg_registry_data.sql";
+const REG_FILE = "20261009250000_policy_jp_lg_registry.sql";
+const DATA_FILE = "20261009250100_policy_jp_lg_registry_data.sql";
 const REG_SQL = await read(REG_FILE);
 const DATA_SQL = await read(DATA_FILE);
 const TERM_SQL = CHAIN_SQL[4];

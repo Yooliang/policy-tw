@@ -1,7 +1,7 @@
 -- e-Stat「令和7年国勢調査 都道府県・市区町村別の主な結果」→ policy_jp.stat_registry（機器核對 regional_stat 用，不顯示）
 -- ============================================================
 -- 由 scripts/gen-jp-stat-registry.ts 產生，不要手改；之後的年份（或修正版）改腳本的 STAT_INF_ID 重產一支新的 migration。
--- 前提：20261009210400_policy_jp_stat_registry.sql（stat_registry 表）、20261009210300（團體碼表；只收表裡有的團體）。
+-- 前提：20261009250200_policy_jp_stat_registry.sql（stat_registry 表）、20261009250100（團體碼表；只收表裡有的團體）。
 --
 -- 出處：https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040507382&fileKind=0
 --       （一覧 https://www.e-stat.go.jp/stat-search/files?page=1&layout=datalist&toukei=00200521&tstat=000001049104&cycle=0&tclass1=000001049105&tclass2val=0；檔名 major_results_2025.xlsx；SHA-256 df06b2cc520c1c4a6c5f03fc7e6eb27b33e64424f0d706361ea5a738e8a5b5ed）

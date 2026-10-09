@@ -1,7 +1,7 @@
 /**
- * 日本站「選舉鏈」第 1 步（migration 20261009210600_policy_jp_election_chain.sql；policy-jp #57／#58／#59、主線條件）。
+ * 日本站「選舉鏈」第 1 步（migration 20261009250400_policy_jp_election_chain.sql；policy-jp #57／#58／#59、主線條件）。
  *
- * 只要 --allow-read。PGlite 上套日本站整條 migration（schema → tables → 130000 → 130100 → 130200 → 150100 → 200000 → 210000 → 210100 → 210200 → 210300 → 210400 → 210500）
+ * 只要 --allow-read。PGlite 上套日本站整條 migration（schema → tables → 130000 → 130100 → 130200 → 150100 → 200000 → 210000 → 210100 → 250000 → 250100 → 250200 → 250300）
  * 再加這一支；資料庫裡沒有任何正見（public）物件。時鐘用 `SET app.activity_today`，整條流程走 seed_auto_task_queue()＋task_dispatches／gap_events。
  *
  *   a. 範圍：沒有開著的選舉＝兩支臂一列都不出（舊的全國掃描沒了，term_expirations 3,571 列也不派）；等團體的選舉交件開出「團體＋所屬都道府県」兩件；
@@ -28,11 +28,11 @@ const CHAIN = [
   "20261008195000_policy_jp_schema.sql", "20261009000000_policy_jp_tables.sql", "20261009130000_policy_jp_dispatch.sql",
   "20261009130100_policy_jp_election_discovery.sql", "20261009130200_policy_jp_term_expirations_r08.sql", "20261009150100_policy_jp_rebalance_anchor.sql",
   "20261009200000_policy_jp_public_stats.sql", "20261009210000_policy_jp_apply.sql", "20261009210100_policy_jp_gap_arms.sql",
-  "20261009210200_policy_jp_lg_registry.sql", "20261009210300_policy_jp_lg_registry_data.sql", "20261009210400_policy_jp_stat_registry.sql",
-  "20261009210500_policy_jp_stat_registry_data.sql",
+  "20261009250000_policy_jp_lg_registry.sql", "20261009250100_policy_jp_lg_registry_data.sql", "20261009250200_policy_jp_stat_registry.sql",
+  "20261009250300_policy_jp_stat_registry_data.sql",
 ];
 const CHAIN_SQL = await Promise.all(CHAIN.map(read));
-const MIG_FILE = "20261009210600_policy_jp_election_chain.sql";
+const MIG_FILE = "20261009250400_policy_jp_election_chain.sql";
 const MIG_SQL = await read(MIG_FILE);
 const ARMS_SQL = CHAIN_SQL[8]; // 20261009210100：緊接在前的總表與兩支臂的版本
 const TOTAL = "policy_jp.contribution_auto_tasks_arms";
@@ -47,7 +47,7 @@ async function freshDb(o: { mig?: string | false } = {}): Promise<PGlite> {
   if (o.mig !== false) await db.exec(o.mig ?? MIG_SQL);
   return db;
 }
-// 唯讀檢查共用一個庫；「還原驗證」共用一個還沒套 210600 的庫（失敗的 migration 整個回滾，不留痕跡）
+// 唯讀檢查共用一個庫；「還原驗證」共用一個還沒套 250400 的庫（失敗的 migration 整個回滾，不留痕跡）
 const shared = await freshDb();
 const pre = await freshDb({ mig: false });
 
@@ -872,7 +872,7 @@ Deno.test("輸出契約：兩支臂的回傳型別跟 election_discovery 臂相�
   assertEquals(ed, SEVEN);
   assertEquals(await res(shared, ARM_LG), ed);
   assertEquals(await res(shared, ARM_ST), ed);
-  // 重新定義前後不變（套 210600 之前的庫 vs 之後）
+  // 重新定義前後不變（套 250400 之前的庫 vs 之後）
   for (const fn of [ARM_LG, ARM_ST, TOTAL]) assertEquals(await res(shared, fn), await res(pre, fn), `${fn} 的回傳型別沒變`);
   assertEquals(await res(shared, TOTAL), "TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text, arm text, opened_by jsonb)");
   // 兩支臂：唯讀、stable、釘 search_path
@@ -983,7 +983,7 @@ Deno.test("權限：新函式與兩個視圖 anon／authenticated 不能碰，se
 Deno.test("自我檢查（還原驗證）：少 chain_close_after_days・少後備里程碑・少 after_step・min_year 寫錯字・視圖或函式給了 anon・步驟清單改掉，重跑都會失敗，而且整支回滾", async () => {
   const fails = async (mutated: string, msg: string) => {
     await assertRejects(() => pre.exec(mutated), Error, msg);
-    // 失敗的 migration 整個回滾，不留痕跡（共用的『還沒套 210600』庫還是乾淨的）
+    // 失敗的 migration 整個回滾，不留痕跡（共用的『還沒套 250400』庫還是乾淨的）
     assertEquals((await one<{ v: string | null }>(pre, `SELECT to_regclass('policy_jp.chain_open_elections')::TEXT AS v`)).v, null);
     assertEquals(await count(pre, `SELECT 1 FROM information_schema.columns WHERE table_schema = 'policy_jp' AND table_name = 'activity_rules' AND column_name = 'after_step'`), 0);
   };

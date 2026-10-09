@@ -1,7 +1,7 @@
 /**
  * 總務省「全国地方公共団体コード」（R6.1.1）＋「中核市一覧」（R5.4.1）→ policy_jp.lg_code_registry 的資料 migration。
  *
- *   deno run -A scripts/gen-jp-lg-registry.ts [--out supabase/migrations/20261009210300_policy_jp_lg_registry_data.sql]
+ *   deno run -A scripts/gen-jp-lg-registry.ts [--out supabase/migrations/20261009250100_policy_jp_lg_registry_data.sql]
  *
  * 這張表只拿來「機器核對」代理交的 local_government（照正見 cec-verify：對得上直接落庫），不顯示在網站上；
  * 網站的自治體名單（local_governments）仍然只從通過的交件來（維護者 10-09 裁定）。
@@ -22,7 +22,7 @@ import { lgCodeValid, lgPrefCode } from "../supabase/functions/_shared/jp/lg-cod
 
 const args = new Map<string, string>();
 for (let i = 0; i < Deno.args.length; i += 2) args.set(Deno.args[i], Deno.args[i + 1]);
-const OUT = args.get("--out") ?? "supabase/migrations/20261009210300_policy_jp_lg_registry_data.sql";
+const OUT = args.get("--out") ?? "supabase/migrations/20261009250100_policy_jp_lg_registry_data.sql";
 
 const CODE_PAGE = "https://www.soumu.go.jp/denshijiti/code.html";
 const CODE_XLSX = "https://www.soumu.go.jp/main_content/000925835.xlsx";
@@ -150,7 +150,7 @@ const kinds = Object.entries(tally).sort().map(([k, n]) => `${k} ${n}`).join("�
 const sql = `-- 總務省「全国地方公共団体コード」（R6.1.1）＋「中核市一覧」（R5.4.1）→ policy_jp.lg_code_registry（機器核對 local_government 用，不顯示）
 -- ============================================================
 -- 由 scripts/gen-jp-lg-registry.ts 產生，不要手改；代碼表換檔時改腳本的 CODE_XLSX／CODE_AS_OF 重產一支新的 migration。
--- 前提：20261009210200_policy_jp_lg_registry.sql（lg_code_registry 表）。
+-- 前提：20261009250000_policy_jp_lg_registry.sql（lg_code_registry 表）。
 --
 -- 出處：${CODE_XLSX}（頁面 ${CODE_PAGE}；SHA-256 ${await sha256(xlsxBuf)}）
 --       ${CORE_PDF}（中核市一覧，令和5年4月1日現在；SHA-256 ${await sha256(pdfBuf)}）

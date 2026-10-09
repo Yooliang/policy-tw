@@ -2,8 +2,8 @@
  * 日本站的機器核對（照正見 cec-verify）：有權威資料可查的交件，交進來就跟官方的表比，對得上直接落庫。
  *
  * 目前兩種（都照交件型別分流）：
- *   local_government ↔ 總務省「全国地方公共団体コード」（SQL policy_jp.lg_registry_verify_pending，migration 20261009210200）
- *   regional_stat    ↔ e-Stat 令和7年国勢調査（SQL policy_jp.stat_registry_verify_pending，migration 20261009210400；人口・面積・高齢化率）
+ *   local_government ↔ 總務省「全国地方公共団体コード」（SQL policy_jp.lg_registry_verify_pending，migration 20261009250000）
+ *   regional_stat    ↔ e-Stat 令和7年国勢調査（SQL policy_jp.stat_registry_verify_pending，migration 20261009250200；人口・面積・高齢化率）
  * pg_cron 每 10 分鐘也會掃；這裡是交件當下就先跑一次，代理馬上看得到結果。
  */
 
