@@ -1,0 +1,9 @@
+{
+  "_說明": "資料庫傳輸量監看（#522）。alert=false 時只記錄不開 issue；第一週先看基準值，再依實測的每小時請求數填門檻（建議：過去 7 天每小時第 99 百分位 x 3）。改值直接改這個檔。",
+  "alert": false,
+  "project_ref": "wiiqoaytpqvegtknlbue",
+  "hourly_rest_requests_max": 1000000,
+  "hourly_egress_bytes_max": 5000000000,
+  "alert_repo": "Yooliang/policy-tw",
+  "alert_label": "ops"
+}
