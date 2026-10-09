@@ -2,6 +2,7 @@
 import { ScrollText } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
+import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
@@ -31,6 +32,7 @@ usePageHead({
         這一頁說明「正見」的資料從哪裡來、怎麼引用，以及使用上的限制。<br/>最後更新：{{ UPDATED }}
       </template>
       <template #icon><ScrollText :size="400" class="text-amber-500" /></template>
+      <template #actions><AboutNav current="terms" /></template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
