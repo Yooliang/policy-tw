@@ -29,6 +29,17 @@
 --   （override／milestone 本身的欄位都不是敏感資料；佇列件數只是數字）。
 --
 -- 守門：supabase/functions/_shared/console-admin.test.ts（RPC 驗證、ON CONFLICT upsert、撤銷保留雙重原因、reason 空擋下）。
+--
+-- 2026-10-09 agy 同儕審查退回修正（見 docs/decisions/2026-10-09-主控台手動調整派工開關與選舉日期518.md 的更正段）：
+--   1. console_admin_milestone_set 的 kind 白名單漏了 'qualification_review'（20261008160000 已把它加進 election_milestones.kind
+--      與 activity_rules.from_kind／until_kind 的 CHECK，roster_check_scope 五個衍生日期之一），補上。
+--   3. 空字串防禦：election_type／election_id／日期參數在 SQL 這層也用 NULLIF(btrim(...), '') 擋一次（Edge Function 那層已經
+--      把表單空字串正規化成 null，這裡是第二層防禦——直接打 RPC 不經過 Edge Function 的呼叫方式也不會把 "" 送進 DATE／CHECK 欄位）。
+--   4. console_active_overrides 補上 force='window' 且 open_until 已過期的過濾（原本只看 expires_at，'window' 覆寫很少另外填
+--      expires_at，過期後會一直留在「目前有效」清單裡，誤導維護者）。
+--   7. console_arm_status() 原本對每支「auto:」臂各跑一次 LATERAL 子查詢全表掃 task_dispatches（37 次掃描同一張表）；
+--      改成先用一個 GROUP BY 把 auto: 的件數一次算好（一次掃描），manual_visitor／manual_open 兩支仍各自查
+--      contribution_auto_tasks_manual()（只有兩次，資料量小）。唯讀 EXPLAIN ANALYZE 實測見 PR 說明。
 
 -- ------------------------------------------------------------
 -- 1. 唯讀：每支派工臂今天開／關、靠規則還是覆寫、佇列件數
@@ -50,6 +61,25 @@ LANGUAGE sql STABLE AS $$
   closed_ov AS (
     SELECT DISTINCT o.activity FROM activity_overrides o
      WHERE o."force" = 'closed' AND (o.expires_at IS NULL OR o.expires_at >= activity_today())
+  ),
+  -- 「auto:」缺口的件數一次用 GROUP BY 算好（一次掃描 task_dispatches），不要每支臂各自掃一次全表
+  -- （agy 審查第 7 點：37 支臂 × 全表掃描，改成單次掃描＋分組）
+  auto_counts AS (
+    SELECT d.opened_by->>'arm' AS arm, count(*) AS n
+      FROM task_dispatches d
+     WHERE d.task_id LIKE 'auto:%'
+     GROUP BY d.opened_by->>'arm'
+  ),
+  -- 手動任務（manual_visitor／manual_open）沒有 auto: 前綴、opened_by 也不保證有 arm 鍵，仍要各查一次臂本體；
+  -- 只有這兩支（資料量遠小於 task_dispatches 全表），不是 37 次
+  manual_counts AS (
+    SELECT 'manual_visitor'::TEXT AS arm, count(*) AS n
+      FROM task_dispatches d
+     WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(true) m)
+    UNION ALL
+    SELECT 'manual_open'::TEXT, count(*)
+      FROM task_dispatches d
+     WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(false) m)
   )
   SELECT ar.arm,
          COALESCE(ag.is_open, false) AS is_open,
@@ -57,25 +87,19 @@ LANGUAGE sql STABLE AS $$
               WHEN COALESCE(ag.via_rule, false) THEN 'rule'
               WHEN co.activity IS NOT NULL THEN 'override'
               ELSE 'closed' END AS via,
-         qc.queue_count
+         COALESCE(ac.n, mc.n) AS queue_count
     FROM arms ar
     LEFT JOIN agg ag ON ag.activity = ar.arm
     LEFT JOIN closed_ov co ON co.activity = ar.arm
-    LEFT JOIN LATERAL (
-      SELECT CASE
-        WHEN ar.arm IN ('manual_visitor', 'manual_open') THEN
-          (SELECT count(*) FROM task_dispatches d
-            WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(ar.arm = 'manual_visitor') m))
-        ELSE
-          (SELECT count(*) FROM task_dispatches d WHERE d.task_id LIKE 'auto:%' AND d.opened_by->>'arm' = ar.arm)
-      END AS queue_count
-    ) qc ON true
+    LEFT JOIN auto_counts ac ON ac.arm = ar.arm
+    LEFT JOIN manual_counts mc ON mc.arm = ar.arm
    ORDER BY ar.arm
 $$;
 COMMENT ON FUNCTION console_arm_status IS
   '主控台用：每支派工臂（activity_arm_names()）今天開不開（is_open）、靠規則還是覆寫（via：override／rule／closed，彙總 activity_open_now 所有選舉×職位的列）、'
-  '佇列裡目前有幾件（queue_count：manual_visitor／manual_open 兩支手動臂查 contribution_auto_tasks_manual()，其餘查 task_dispatches.opened_by->>''arm''，'
-  '只有 P1 起新增的派工列才會有這個鍵，舊列回填時沒有，count 會偏低——不是 bug，是歷史資料的已知落差）。公開唯讀。2026-10-09（#518）';
+  '佇列裡目前有幾件（queue_count：auto_counts 一次 GROUP BY 掃過 task_dispatches 算好各臂件數〔只有 P1 起新增的派工列才會有 opened_by.arm 這個鍵，'
+  '舊列回填時沒有，count 會偏低——不是 bug，是歷史資料的已知落差〕；manual_visitor／manual_open 兩支手動臂另外查 contribution_auto_tasks_manual()）。'
+  '公開唯讀。2026-10-09（#518，10-09 agy 審查第 7 點：改成單次掃描，不要每支臂各自全表掃）';
 
 -- ------------------------------------------------------------
 -- 2. 唯讀：目前有效的覆寫清單、各選舉里程碑日期
@@ -85,11 +109,15 @@ CREATE OR REPLACE VIEW console_active_overrides AS
          o."force", o.open_from, o.open_until, o.reason, o.created_by, o.created_at, o.expires_at
     FROM activity_overrides o
     LEFT JOIN elections e ON e.id = o.election_id
-   WHERE o.expires_at IS NULL OR o.expires_at >= activity_today()
+   WHERE (o.expires_at IS NULL OR o.expires_at >= activity_today())
+     -- force='window' 的覆寫通常不會另外填 expires_at，open_until 過了這個覆寫在 activity_open() 裡早就不生效，
+     -- 不濾掉的話會一直留在「目前有效」清單裡誤導維護者（agy 審查第 4 點，2026-10-09）
+     AND (o."force" <> 'window' OR o.open_until IS NULL OR o.open_until >= activity_today())
    ORDER BY o.created_at DESC;
 ALTER VIEW console_active_overrides SET (security_invoker = on);
 COMMENT ON VIEW console_active_overrides IS
-  '目前有效（沒撤銷、沒過期）的覆寫，給主控台顯示「目前有哪些覆寫」（維護者 10-09：覆寫反覆出現代表規則寫錯，要定期回頭看這張）。公開唯讀。2026-10-09（#518）';
+  '目前有效（沒撤銷、沒過期、force=window 的沒有過了 open_until）的覆寫，給主控台顯示「目前有哪些覆寫」'
+  '（維護者 10-09：覆寫反覆出現代表規則寫錯，要定期回頭看這張）。公開唯讀。2026-10-09（#518）';
 
 CREATE OR REPLACE VIEW console_election_milestones AS
   SELECT m.id, m.election_id, e.election_date, e.election_reason, m.kind, m.election_type,
@@ -118,7 +146,10 @@ BEGIN
     RAISE EXCEPTION 'reason 必填';
   END IF;
   INSERT INTO activity_overrides (activity, election_id, election_type, "force", open_from, open_until, reason, created_by, expires_at)
-  VALUES (p_activity, p_election_id, p_election_type, p_force, p_open_from, p_open_until, btrim(p_reason), p_created_by, p_expires_at)
+  -- 空字串防禦（第二層，Edge Function 已經把表單空字串正規化成 null；直接打 RPC 不經過它的呼叫方式還是可能送空字串進來）：
+  -- election_type 是 TEXT，空字串能綁定成功、CHECK 才會擋，所以這裡用 NULLIF 先擋掉，不要讓它撞 CHECK 違反才發現
+  VALUES (p_activity, p_election_id, NULLIF(btrim(COALESCE(p_election_type, '')), ''), p_force, p_open_from, p_open_until,
+          btrim(p_reason), p_created_by, p_expires_at)
   RETURNING * INTO v_row;
   RETURN v_row;
 END;
@@ -166,12 +197,15 @@ BEGIN
   IF p_reason IS NULL OR length(btrim(p_reason)) = 0 THEN
     RAISE EXCEPTION 'reason 必填';
   END IF;
+  -- 2026-10-09 agy 審查第 1 點：漏了 qualification_review（資格審查完成日，20261008160000 已加進 election_milestones.kind
+  -- 與 activity_rules.from_kind／until_kind 的 CHECK，roster_check_scope 五個衍生日期之一）
   IF p_kind NOT IN ('announced', 'registration_open', 'registration_close', 'list_published', 'draw',
-                     'bulletin_published', 'result_announced', 'certified') THEN
+                     'qualification_review', 'bulletin_published', 'result_announced', 'certified') THEN
     RAISE EXCEPTION '% 不是 election_milestones 可以改的里程碑（投票日與就任日／屆滿日的單一真相在 elections／election_term_*，不能在這裡改）', p_kind;
   END IF;
   INSERT INTO election_milestones (election_id, kind, election_type, on_date, basis, status, note)
-  VALUES (p_election_id, p_kind, p_election_type, p_on_date, 'override', p_status,
+  -- 空字串防禦（第二層，理由同 console_admin_override_create）
+  VALUES (p_election_id, p_kind, NULLIF(btrim(COALESCE(p_election_type, '')), ''), p_on_date, 'override', p_status,
           '主控台（' || COALESCE(p_set_by, '未知') || '）：' || btrim(p_reason))
   ON CONFLICT (election_id, kind, (COALESCE(election_type, '')))
   DO UPDATE SET on_date = EXCLUDED.on_date, status = EXCLUDED.status, basis = 'override', note = EXCLUDED.note

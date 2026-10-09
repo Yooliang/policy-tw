@@ -52,27 +52,35 @@ export interface Jwk {
 }
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
+/** 快取多久重抓一次（毫秒）：Google 金鑰輪替不快，但 Edge Function 的 worker 實例常常活很久，永久快取會在輪替期間鎖死所有新 token
+ * （agy 審查第 6 點）。Google 的回應本來就帶 Cache-Control: max-age，這裡先給一個保守的固定值，不解析那個標頭（避免又一種解析失敗）。 */
+const JWKS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時
 
-/** 預設從 Google 抓 JWKS；模組層快取（金鑰輪替很慢，一輪 function 的生命期內重用沒關係） */
-let cachedJwks: Promise<{ keys: Jwk[] }> | undefined;
-export async function fetchGoogleJwks(): Promise<{ keys: Jwk[] }> {
-  if (!cachedJwks) {
-    cachedJwks = fetch(GOOGLE_JWKS_URL).then((r) => {
+/** 模組層快取：{值、抓到的時間}；逾期或強制刷新就重抓 */
+let cachedJwks: { at: number; value: Promise<{ keys: Jwk[] }> } | undefined;
+// 注意：這支特意不宣告成 async——async function 回傳一個 promise 時，呼叫端拿到的是「包著它的新 promise」，
+// 不是同一個參照；這支要讓同一個 in-flight 的快取在重複呼叫時原樣傳回去（供 TTL 內的呼叫重用、測試驗證參照相等），
+// 用一般函式直接 return 那個 promise 才會是同一個物件。
+export function fetchGoogleJwks(force = false): Promise<{ keys: Jwk[] }> {
+  const stale = !cachedJwks || Date.now() - cachedJwks.at > JWKS_CACHE_TTL_MS;
+  if (force || stale) {
+    const value = fetch(GOOGLE_JWKS_URL).then((r) => {
       if (!r.ok) throw new Error(`JWKS ${r.status}`);
       return r.json() as Promise<{ keys: Jwk[] }>;
     }).catch((e) => {
       cachedJwks = undefined; // 失敗不要快取，下次重打
       throw e;
     });
+    cachedJwks = { at: Date.now(), value };
   }
-  return cachedJwks;
+  return cachedJwks!.value;
 }
 
 export interface VerifyOptions {
   /** Firebase 專案 id（aud 與 iss 都要對得上這個） */
   projectId: string;
-  /** 取代預設的 fetchGoogleJwks（測試用：餵自己簽的金鑰） */
-  getJwks?: () => Promise<{ keys: Jwk[] }>;
+  /** 取代預設的 fetchGoogleJwks（測試用：餵自己簽的金鑰）；參數 force＝true 代表要略過快取重抓一次 */
+  getJwks?: (force?: boolean) => Promise<{ keys: Jwk[] }>;
   /** 測試用假時鐘（epoch 秒） */
   nowSec?: number;
 }
@@ -97,13 +105,24 @@ export async function verifyFirebaseIdToken(token: string, opts: VerifyOptions):
   if (claims.iss !== `https://securetoken.google.com/${opts.projectId}`) return { ok: false, reason: "wrong_issuer" };
   if (!claims.sub || typeof claims.sub !== "string") return { ok: false, reason: "malformed" };
 
+  const getJwks = opts.getJwks ?? fetchGoogleJwks;
   let jwks: { keys: Jwk[] };
   try {
-    jwks = await (opts.getJwks ?? fetchGoogleJwks)();
+    jwks = await getJwks();
   } catch {
     return { ok: false, reason: "jwks_unavailable" };
   }
-  const jwk = jwks.keys.find((k) => k.kid === header.kid);
+  let jwk = jwks.keys.find((k) => k.kid === header.kid);
+  // Google 輪替金鑰時，快取裡還是舊的一批、新 token 的 kid 找不到（agy 審查第 6 點：永久快取會把這個情況鎖死）。
+  // 找不到就強制重抓一次再找一次；真的還是沒有才判 key_not_found。只重試一次，不要無限重抓拖慢回應。
+  if (!jwk) {
+    try {
+      jwks = await getJwks(true);
+      jwk = jwks.keys.find((k) => k.kid === header.kid);
+    } catch {
+      // 重抓失敗：維持原本找不到金鑰的判定，不要蓋成 jwks_unavailable（第一次抓明明是成功的）
+    }
+  }
   if (!jwk) return { ok: false, reason: "key_not_found" };
 
   const key = await crypto.subtle.importKey(
@@ -113,8 +132,16 @@ export async function verifyFirebaseIdToken(token: string, opts: VerifyOptions):
     false,
     ["verify"],
   );
+  // 簽名段如果含有非 base64url 字元，atob() 會丟 DOMException；沒攔到的話這支函式就會整個往外丟例外，
+  // 呼叫端（console-admin）會變成未攔截例外、回 500，而不是「這張 token 不合法」該有的 401（agy 審查第 5 點）。
+  let sigBytes: Uint8Array<ArrayBuffer>;
+  try {
+    sigBytes = b64urlToBytes(sigB64);
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
   const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64urlToBytes(sigB64), signedData);
+  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sigBytes, signedData);
   if (!ok) return { ok: false, reason: "bad_signature" };
   return { ok: true, claims };
 }

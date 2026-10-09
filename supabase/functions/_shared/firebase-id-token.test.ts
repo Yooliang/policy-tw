@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { isConsoleOwner, verifyFirebaseIdToken, type Jwk } from "./firebase-id-token.ts";
+import { fetchGoogleJwks, isConsoleOwner, verifyFirebaseIdToken, type Jwk } from "./firebase-id-token.ts";
 
 const PROJECT_ID = "policy-tw";
 const OWNER = "cwen0708@gmail.com";
@@ -11,6 +11,7 @@ function b64url(bytes: Uint8Array | string): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+let keyCounter = 0;
 async function makeKeyPair() {
   const pair = await crypto.subtle.generateKey(
     { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
@@ -18,7 +19,9 @@ async function makeKeyPair() {
     ["sign", "verify"],
   );
   const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey) as JsonWebKey;
-  return { privateKey: pair.privateKey, jwk: { kty: jwk.kty!, n: jwk.n!, e: jwk.e!, kid: "test-key-1", alg: "RS256" } as Jwk };
+  // 每把金鑰的 kid 要不一樣，才能測「JWKS 裡找不到這個 kid」「換一把私鑰」這類情境而不會因為 kid 剛好相同而誤判
+  const kid = `test-key-${++keyCounter}`;
+  return { privateKey: pair.privateKey, jwk: { kty: jwk.kty!, n: jwk.n!, e: jwk.e!, kid, alg: "RS256" } as Jwk };
 }
 
 async function sign(privateKey: CryptoKey, header: Record<string, unknown>, claims: Record<string, unknown>): Promise<string> {
@@ -112,6 +115,56 @@ Deno.test("verifyFirebaseIdToken：JWKS 端點打不到回 jwks_unavailable（�
   const r = await verifyFirebaseIdToken(token, { projectId: PROJECT_ID, getJwks: async () => { throw new Error("network down"); }, nowSec: NOW });
   assertEquals(r.ok, false);
   if (!r.ok) assertEquals(r.reason, "jwks_unavailable");
+});
+
+Deno.test("verifyFirebaseIdToken：簽名段含非 base64url 字元（解不出 bytes）回 malformed，不是丟例外／500（agy 審查第 5 點）", async () => {
+  const { privateKey, jwk } = await makeKeyPair();
+  const token = await sign(privateKey, { alg: "RS256", kid: jwk.kid }, baseClaims());
+  const [h, p] = token.split(".");
+  // atob() 碰到非 base64 字元（這裡用控制字元）會丟 DOMException；驗證函式不能讓它直接往外飄
+  const tampered = `${h}.${p}.!!!not-base64!!!`;
+  const r = await verifyFirebaseIdToken(tampered, { projectId: PROJECT_ID, getJwks: async () => ({ keys: [jwk] }), nowSec: NOW });
+  assertEquals(r.ok, false);
+  if (!r.ok) assertEquals(r.reason, "malformed");
+});
+
+Deno.test("verifyFirebaseIdToken：JWKS 快取裡沒有這個 kid（金鑰輪替）會強制重抓一次再找，第二次抓到就通過（agy 審查第 6 點）", async () => {
+  const { privateKey, jwk } = await makeKeyPair();
+  const token = await sign(privateKey, { alg: "RS256", kid: jwk.kid }, baseClaims());
+  let calls = 0;
+  const getJwks = async (force?: boolean) => {
+    calls++;
+    if (!force) return { keys: [] }; // 第一次：快取裡還是舊的一批，沒有這個 kid
+    return { keys: [jwk] }; // 強制重抓：拿到新金鑰
+  };
+  const r = await verifyFirebaseIdToken(token, { projectId: PROJECT_ID, getJwks, nowSec: NOW });
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(calls, 2, "要先用快取找一次，找不到才強制重抓一次");
+});
+
+Deno.test("verifyFirebaseIdToken：強制重抓之後還是找不到 kid，才真的回 key_not_found（不是無限重試）", async () => {
+  const { privateKey, jwk } = await makeKeyPair();
+  const other = await makeKeyPair();
+  const token = await sign(privateKey, { alg: "RS256", kid: jwk.kid }, baseClaims());
+  let calls = 0;
+  const getJwks = async () => {
+    calls++;
+    return { keys: [other.jwk] }; // 永遠沒有這個 kid
+  };
+  const r = await verifyFirebaseIdToken(token, { projectId: PROJECT_ID, getJwks, nowSec: NOW });
+  assertEquals(r.ok, false);
+  if (!r.ok) assertEquals(r.reason, "key_not_found");
+  assertEquals(calls, 2, "只重試一次，不是無限重抓");
+});
+
+Deno.test("fetchGoogleJwks：TTL 內重用同一個 in-flight promise；force=true 一定換一個新的", async () => {
+  // 不驗證內容（這支可能真的打網路，CI 沙箱裡大概會失敗）：只驗證 promise 參照本身的快取行為。
+  const p1 = fetchGoogleJwks();
+  const p2 = fetchGoogleJwks();
+  assertEquals(p1 === p2, true, "沒有 force，第二次呼叫要重用同一個 in-flight promise，不要重打");
+  const p3 = fetchGoogleJwks(true);
+  assertEquals(p3 === p1, false, "force=true 要換一個新的 promise");
+  await Promise.allSettled([p1, p2, p3]); // 吃掉可能的 rejection，避免噴未處理的拒絕噪音
 });
 
 Deno.test("isConsoleOwner：email 對不上，或 email_verified 不是 true，都不算擁有者", () => {

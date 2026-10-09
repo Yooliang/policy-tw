@@ -16,8 +16,17 @@ const MANUAL_STUB = `CREATE FUNCTION contribution_auto_tasks_manual(p_visitor bo
 RETURNS TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text)
 LANGUAGE sql STABLE AS $$ SELECT NULL::text, NULL::text, NULL::jsonb, NULL::text, NULL::text[], NULL::integer, NULL::text WHERE false $$;`;
 
+// 這個 P0+P1 環境沒有載入 20261008160000_roster_milestones.sql（更晚的 migration，把 qualification_review 加進
+// election_milestones.kind 的 CHECK）；要測「qualification_review 可以改」這個情境，表的 CHECK 本身要先認得這個值，
+// 否則連 INSERT 都過不了（跟我這支 migration 的白名單是不是漏寫無關，是測試環境的 CHECK 太舊）。只補這一處 CHECK，
+// 不整支載入 roster_milestones（它還牽涉 roster_check_scope 的觸發器與其他臂，不是這支要測的範圍）。
+const QUALIFICATION_REVIEW_CHECK = `ALTER TABLE election_milestones DROP CONSTRAINT election_milestones_kind_check;
+ALTER TABLE election_milestones ADD CONSTRAINT election_milestones_kind_check
+  CHECK (kind IN ('announced', 'registration_open', 'registration_close', 'list_published', 'draw', 'qualification_review',
+                   'bulletin_published', 'result_announced', 'certified'));`;
+
 async function db() {
-  const d = await buildArmsDb({ afterP1Sql: MANUAL_STUB });
+  const d = await buildArmsDb({ afterP1Sql: MANUAL_STUB + "\n" + QUALIFICATION_REVIEW_CHECK });
   await d.exec(MIG);
   return d;
 }
@@ -131,6 +140,64 @@ Deno.test("里程碑：reason 空被擋；kind 不是可編輯的里程碑（例
   const d = await db();
   await assertRejects(() => d.query("SELECT console_admin_milestone_set($1,$2,$3,$4,$5,$6,$7)", [2026, "draw", null, "2026-10-20", "announced", "", "a@example.com"]));
   await assertRejects(() => d.query("SELECT console_admin_milestone_set($1,$2,$3,$4,$5,$6,$7)", [2026, "polling", null, "2026-11-28", "done", "不該能改投票日", "a@example.com"]));
+});
+
+// 2026-10-09 agy 審查第 1 點退回修正：qualification_review（資格審查完成日）漏在白名單外，維護者在主控台改這個日期會被
+// RAISE EXCEPTION 擋下。20261008160000 已把它加進 election_milestones.kind 與 activity_rules 的 CHECK，這支臂的日期可以改。
+Deno.test("里程碑：qualification_review（資格審查完成日）可以改，不被白名單擋下", async () => {
+  const d = await db();
+  const row = (await d.query<{ kind: string; on_date: string }>(
+    "SELECT kind, on_date FROM console_admin_milestone_set($1,$2,$3,$4,$5,$6,$7)",
+    [2026, "qualification_review", "縣市長", "2026-10-16", "announced", "測試：資格審查完成日", "admin@example.com"],
+  )).rows[0];
+  assertEquals(row.kind, "qualification_review");
+  assertEquals(isoDate(row.on_date), "2026-10-16");
+});
+
+// 2026-10-09 agy 審查第 3 點退回修正：election_type 傳空字串（不是 null）要被正規化掉，不能讓它撞 CHECK 違反
+// （CHECK 允許 NULL 或白名單裡的職位，"" 兩邊都不是）。Edge Function 那層已經把表單空字串轉成 null，這裡測 SQL 這層的第二道防禦
+// ——直接打 RPC（不經過 Edge Function）送空字串也不該被 CHECK 擋下，而是視同沒有限定職位。
+Deno.test("里程碑：election_type 傳空字串（不是 null）視同不限職位，不撞 CHECK 違反（SQL 層防禦）", async () => {
+  const d = await db();
+  const row = (await d.query<{ election_type: string | null }>(
+    "SELECT election_type FROM console_admin_milestone_set($1,$2,$3,$4,$5,$6,$7)",
+    [2026, "bulletin_published", "", "2026-11-18", "expected", "測試：空字串職位", "admin@example.com"],
+  )).rows[0];
+  assertEquals(row.election_type, null);
+});
+
+Deno.test("覆寫新增：election_type 傳空字串視同不限職位，不撞 CHECK 違反（SQL 層防禦，同里程碑那條）", async () => {
+  const d = await db();
+  const row = (await d.query<{ election_type: string | null }>(
+    "SELECT election_type FROM console_admin_override_create($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    ["raw:policy_missing", null, "", "open", null, null, "測試：空字串職位", null, "a@example.com"],
+  )).rows[0];
+  assertEquals(row.election_type, null);
+});
+
+// 2026-10-09 agy 審查第 4 點退回修正：force='window' 的覆寫很少另外填 expires_at，open_until 過了之後這筆覆寫在
+// activity_open() 裡早就不生效，但原本的視圖只看 expires_at，會一直留在「目前有效」清單裡誤導維護者。
+Deno.test("console_active_overrides：force=window 且 open_until 已過期的覆寫，不算「目前有效」", async () => {
+  const d = await db();
+  await d.exec("SET app.activity_today = '2026-10-09'");
+  const past = (await d.query<{ id: number }>(
+    "SELECT id FROM console_admin_override_create($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    ["raw:policy_missing", null, null, "window", "2026-10-01", "2026-10-05", "測試：已經過去的期間", null, "a@example.com"],
+  )).rows[0];
+  const future = (await d.query<{ id: number }>(
+    "SELECT id FROM console_admin_override_create($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    ["raw:profile_gap", null, null, "window", "2026-10-01", "2026-12-31", "測試：還沒結束的期間", null, "a@example.com"],
+  )).rows[0];
+
+  const pastActive = (await d.query<{ n: number }>("SELECT count(*)::int AS n FROM console_active_overrides WHERE id = $1", [past.id])).rows[0];
+  assertEquals(pastActive.n, 0, "open_until 已經過了，不該出現在「目前有效」清單");
+  const futureActive = (await d.query<{ n: number }>("SELECT count(*)::int AS n FROM console_active_overrides WHERE id = $1", [future.id])).rows[0];
+  assertEquals(futureActive.n, 1, "open_until 還沒到，應該仍算有效");
+
+  // 但原始表仍然留著這一列（撤銷才會動它，單純過期不代表要清掉，審計看得到它曾經存在過）
+  const raw = (await d.query<{ n: number }>("SELECT count(*)::int AS n FROM activity_overrides WHERE id = $1", [past.id])).rows[0];
+  assertEquals(raw.n, 1);
+  await d.exec("RESET app.activity_today");
 });
 
 /** PGlite 的 DATE 欄位回傳 JS Date（UTC 午夜），轉回台北日曆日字串比對 */
