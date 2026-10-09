@@ -95,17 +95,18 @@ const definers = async (needle: string | RegExp) => {
 };
 
 Deno.test("A1 這支是 activity_open、總表、refresh_dispatch_blocked、policies_with_logs 的最後一版，緊接著前一版；沒有重新定義臂本體、seed、rebalance、優先層", async () => {
-  const last = async (needle: string | RegExp, prev: string) => {
+  const last = async (needle: string | RegExp, prev: string, after: string[] = []) => {
     const d = await definers(needle);
     const i = d.indexOf(MIG);
     assert(i > 0, `${needle} 要在重新定義它的清單裡`);
     assertEquals(d[i - 1], prev, `${needle} 的前一版應該是 ${prev}；有人在中間改了，要以那一版為底重做機械式替換`);
-    assertEquals(d.slice(i + 1), [], `${needle} 在這支之後又被重新定義：要以最新那版為底重做`);
+    assertEquals(d.slice(i + 1), after, `${needle} 在這支之後又被重新定義：要以最新那版為底重做`);
   };
   await last("CREATE OR REPLACE FUNCTION activity_open(", P0_MIG);
   await last("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(", MAN_MIG);
   await last("CREATE OR REPLACE FUNCTION refresh_dispatch_blocked(", RDB_MIG);
-  await last(/CREATE (OR REPLACE )?VIEW policies_with_logs AS/, VIEW_MIG);
+  // #349 第二階段 B（20261009220000）刪 related_policies 時 DROP＋CREATE 了這個視圖（只拿掉 related_policy_ids），是唯一允許排在後面的一版
+  await last(/CREATE (OR REPLACE )?VIEW policies_with_logs AS/, VIEW_MIG, ["20261009220000_drop_related_policies.sql"]);
   const code = codeOf(MIG_SQL);
   const defined = [...code.matchAll(/CREATE OR REPLACE FUNCTION (?:public\.)?([a-z_]+)\(/g)].map((m) => m[1]);
   assertEquals(defined, ["activity_open", "contribution_auto_tasks_arms", "task_check_cooldown_days_for", "task_cooldown_max_days", "refresh_dispatch_blocked", "policy_no_public_progress"]);
