@@ -62,6 +62,5 @@ jobs:
           [ "$(node -p "require('./.github/usage-watch.json').alert")" = true ] || { echo "alert=false，只記錄"; exit 0; }
           REPO=$(node -p "require('./.github/usage-watch.json').alert_repo")
           LABEL=$(node -p "require('./.github/usage-watch.json').alert_label")
-          gh issue create -R "$REPO" -l "$LABEL" -t "資料庫傳輸量超過門檻 $(date -u +%F\ %H:%M) UTC" -b "$(cat usage/breaches.txt)
-
-run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          { cat usage/breaches.txt; echo; echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; } > usage/issue-body.txt
+          gh issue create -R "$REPO" -l "$LABEL" -t "資料庫傳輸量超過門檻 $(date -u '+%F %H:%M') UTC" -F usage/issue-body.txt
