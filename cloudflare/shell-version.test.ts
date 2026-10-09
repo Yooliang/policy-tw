@@ -108,3 +108,11 @@ Deno.test("殼：同時多個請求只打一次", async () => {
   assertEquals(got, ["v1", "v1", "v1"]);
   assertEquals(f.calls(), 1);
 });
+
+Deno.test("邊緣渲染頁的 Cache-Control：瀏覽器 max-age=0，命中與 MISS 同一個值（ssr-worker 兩處都用 ssrCacheControl）", async () => {
+  const { ssrCacheControl } = await import("./worker-config.js");
+  assertEquals(ssrCacheControl({ staleTtlS: 3600 }), "public, max-age=0, s-maxage=3600");
+  const worker = await Deno.readTextFile(new URL("./ssr-worker.js", import.meta.url));
+  assert(worker.includes("h.set('Cache-Control', ssrCacheControl(cfg))"), "Cache API 命中要重設 Cache-Control（不然會被改成 max-age=14400）");
+  assert(worker.includes("'Cache-Control': ssrCacheControl(cfg),"), "MISS 也用同一個值");
+});

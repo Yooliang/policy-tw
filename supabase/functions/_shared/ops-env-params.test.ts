@@ -79,7 +79,10 @@ Deno.test("ssr-worker.js 用 readWorkerConfig(env)，不再寫死快取秒數與
   assertNotMatch(w, /policy-tw\.web\.app'/, "上游網址只能出現在 worker-config.js 的預設");
   assertMatch(w, /cfg = readWorkerConfig\(env\)/);
   assertMatch(w, /configureSsr\(\{ baseTtlMs: cfg\.baseTtlMs \}\)/);
-  for (const k of ["cfg.cacheTtlS", "cfg.staleTtlS", "cfg.origin", "cfg.originHost"]) assert(w.includes(k), k);
+  for (const k of ["cfg.cacheTtlS", "cfg.origin", "cfg.originHost"]) assert(w.includes(k), k);
+  // staleTtlS 只用在邊緣渲染頁的 Cache-Control，2026-10-09 起由 worker-config.js 的 ssrCacheControl(cfg) 組（命中與 MISS 同一個值，policy-ops#37）
+  assert(w.includes("ssrCacheControl(cfg)"), "ssrCacheControl(cfg)");
+  assert((await text("cloudflare/worker-config.js")).includes("s-maxage=${cfg.staleTtlS}"), "cfg.staleTtlS");
   const loaders = await text("lib/ssr/loaders.ts");
   assertMatch(loaders, /export function setBaseTtlMs\(ms: number\): void/);
   assertMatch(loaders, /Date\.now\(\) - baseAt > baseTtlMs/);
@@ -142,6 +145,7 @@ const NOT_REDIRECTED: Record<string, string> = {
   "jp-next": "日本站（policy_jp）的派工端點，代理照日本站 skill.md 直接打 Supabase 的端點根網址，不經正見.tw 的 Worker",
   "jp-report": "日本站（policy_jp）的回報端點，同 jp-next",
   "jp-contributions-feed": "日本站（policy_jp）貢獻看板的公開唯讀資料，同 jp-next",
+  "jp-history": "日本站（policy_jp）查核履歷的公開唯讀資料，日本站前端直接打 Supabase，同 jp-next",
 };
 
 Deno.test("API_ONLY／API_ALSO_PAGE 與 supabase/functions 目錄對照：每支函式都明確分類，名單裡沒有不存在的端點", async () => {
