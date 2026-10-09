@@ -62,13 +62,14 @@ COMMENT ON COLUMN policy_jp.activity_rules.after_step IS
 ALTER TABLE policy_jp.activity_rules DROP CONSTRAINT IF EXISTS activity_rules_chain_shape;
 ALTER TABLE policy_jp.activity_rules ADD CONSTRAINT activity_rules_chain_shape CHECK (
   (after_step IS NULL OR (priority IS NULL AND after_step = ANY (policy_jp.election_chain_steps())))
-  AND (NOT (params ? 'chain_fallback') OR (
+  -- COALESCE(…, false)：缺 kind 或缺 offset 時條件算出 NULL，CHECK 會把 NULL 當通過——那樣逃生門寫錯了也收得進來、而且永遠不會到
+  AND (NOT (params ? 'chain_fallback') OR COALESCE(
     after_step IS NOT NULL
     AND jsonb_typeof(params->'chain_fallback') = 'object'
     AND (params->'chain_fallback'->>'kind') IN ('announced', 'registration_open', 'registration_close', 'list_published', 'draw',
                                                  'bulletin_published', 'polling', 'result_announced', 'certified')
     AND jsonb_typeof(params->'chain_fallback'->'offset') = 'number'
-    AND (params->'chain_fallback'->>'offset') ~ '^-?[0-9]+$'))
+    AND (params->'chain_fallback'->>'offset') ~ '^-?[0-9]+$', false))
 );
 
 -- ------------------------------------------------------------

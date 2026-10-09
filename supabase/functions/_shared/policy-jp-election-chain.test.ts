@@ -911,11 +911,8 @@ Deno.test("CHECK activity_rules_chain_shape：after_step 要在步驟清單裡�
   await bad(upd(`after_step = NULL, ${fb('{"kind":"polling","offset":-45}')}`), "有後備卻沒有 after_step");
   await bad(upd(fb('{"kind":"polling","offset":-45}'), "election_discovery"), "沒有 after_step 的規則帶後備");
   for (const kind of ["term_start", "term_end", "nonsense", "Polling", ""]) await bad(upd(fb(`{"kind":"${kind}","offset":0}`)), `kind=${kind}`);
-  await bad(upd(fb('{"offset":0}')), "沒有 kind");
-  await bad(upd(fb('{"kind":null,"offset":0}')), "kind 是 null");
   await bad(upd(fb('{"kind":5,"offset":0}')), "kind 是數字");
   for (const off of ["1.5", "-45.5", "\"5\"", "\"-45\"", "null", "true", "[]", "{}"]) await bad(upd(fb(`{"kind":"polling","offset":${off}}`)), `offset=${off}`);
-  await bad(upd(fb('{"kind":"polling"}')), "沒有 offset");
   for (const notObj of ['"polling"', "[]", "null", "45", "true", '["polling", -45]']) await bad(upd(fb(notObj)), `chain_fallback=${notObj}`);
   // 現行的兩條規則本身合格
   assertEquals(await rows(db, `SELECT activity, after_step, params->'chain_fallback' AS fb FROM policy_jp.activity_rules WHERE after_step IS NOT NULL ORDER BY activity`), [
@@ -923,6 +920,18 @@ Deno.test("CHECK activity_rules_chain_shape：after_step 要在步驟清單裡�
     { activity: "regional_stats_missing", after_step: "local_government", fb: { kind: "polling", offset: -45 } },
   ]);
   assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM pg_constraint WHERE conname = 'activity_rules_chain_shape'`)).n, 1);
+});
+
+Deno.test("CHECK activity_rules_chain_shape（三值邏輯）：chain_fallback 缺 kind 或缺 offset 也要擋——不然逃生門悄悄失效（kind 對不上任何里程碑、offset 是 NULL，fallback 永遠不到）", async () => {
+  // CHECK 把 NULL 當通過：缺 kind／缺 offset 的 chain_fallback 條件會算出 NULL，所以 migration 把那一段包成 COALESCE(…, false)。
+  const db = shared;
+  const fb = (j: string) => `UPDATE policy_jp.activity_rules SET params = params || '{"chain_fallback": ${j}}'::JSONB WHERE activity = 'regional_stats_missing'`;
+  for (const [j, why] of [
+    ["{}", "空物件"], ['{"offset":0}', "沒有 kind"], ['{"kind":null,"offset":0}', "kind 是 null"],
+    ['{"kinds":"polling","offset":-45}', "kind 打成 kinds（打錯字）"], ['{"kind":"polling"}', "沒有 offset"], ['{"kind":"polling","offsets":-45}', "offset 打成 offsets"],
+  ] as const) {
+    await assertRejects(() => tryIn(db, fb(j)), Error, "activity_rules_chain_shape", `${why}：${j}`);
+  }
 });
 
 // =============================================================================================
