@@ -288,7 +288,7 @@ LANGUAGE sql STABLE SET search_path = policy_jp, pg_temp AS $$
      ORDER BY o.lg_code, o.election_date, o.election_id
   ),
   cand AS (
-    SELECT e.*, COALESCE(g.name, x.name, '（名称未確認）') AS name, COALESCE(g.kind, x.kind) AS kind,
+    SELECT e.*, (g.lg_code IS NOT NULL) AS lg_present, COALESCE(g.name, x.name, '（名称未確認）') AS name, COALESCE(g.kind, x.kind) AS kind,
            COALESCE((SELECT pr.name FROM policy_jp.local_governments pr WHERE pr.lg_code = policy_jp.lg_pref_code(e.lg_code)), x.pref_name, '（都道府県名未確認）') AS pref_name,
            policy_jp.chain_regional_stats_missing(e.lg_code) AS missing
       FROM els e
@@ -301,7 +301,9 @@ LANGUAGE sql STABLE SET search_path = policy_jp, pg_temp AS $$
     SELECT c.* FROM cand c
      WHERE c.missing IS NOT NULL
        AND NOT policy_jp.task_unavailable('auto:regional_stats_missing:' || c.lg_code)
-     ORDER BY COALESCE(c.kind = 'prefecture', false) DESC, c.election_date, c.lg_code
+     -- 團體已經進庫的排前面：cap 在總表的 gate 之前截斷，團體還沒進來的列（gate 會擋）排在前面會佔掉名額，
+     -- 後面團體已經進庫、可以開的反而開不出來（#503 同一種餓死）。只影響排序，開不開仍由 gate 決定
+     ORDER BY c.lg_present DESC, COALESCE(c.kind = 'prefecture', false) DESC, c.election_date, c.lg_code
      LIMIT (SELECT cap FROM p)
   )
   SELECT 'auto:regional_stats_missing:' || g.lg_code, 'regional_stats_missing',

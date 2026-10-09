@@ -160,6 +160,15 @@ Deno.test("判斷：一致→apply；名稱・讀音・種類・縣碼任一不�
   const badKana = await decide(db, { ...payloadOf(reg("232033")), kana: "いちみやし" });
   assertEquals(badKana.action, "reject");
   assert(badKana.reason!.includes("いちのみやし") && badKana.reason!.includes("ｲﾁﾉﾐﾔｼ"), badKana.reason);
+  // 讀音：小寫假名與大寫不分（kana_fold）——總務省的表有些把拗音・促音寫成大寫（北谷町 ﾁﾔﾀﾝﾁｮｳ、庄内町 ｼﾖｳﾅｲﾏﾁ），
+  // 照正確讀音交的不能被退件；表上那樣交的也照收。濁音、多一個字這類真的不同照樣退
+  assertEquals([reg("473260").kana, reg("064289").kana], ["ちやたんちょう", "しようないまち"]);
+  assertEquals((await decide(db, { ...payloadOf(reg("473260")), kana: "ちゃたんちょう" })).action, "apply");
+  assertEquals((await decide(db, { ...payloadOf(reg("064289")), kana: "しょうないまち" })).action, "apply");
+  assertEquals((await decide(db, payloadOf(reg("064289")))).action, "apply");
+  assertEquals((await decide(db, { ...payloadOf(reg("232033")), kana: "いちのみやじ" })).action, "reject");
+  assertEquals((await decide(db, { ...payloadOf(reg("473260")), kana: "ちゃたんちょうう" })).action, "reject");
+  assertEquals((await one<{ f: string }>(db, `SELECT policy_jp.kana_fold('ちゃっきょぉゎゕゖ') AS f`)).f, "ちやつきよおわかけ");
   // 種類：政令市交成一般市、町交成村 → reject
   assertEquals((await decide(db, { ...payloadOf(reg("011002")), kind: "city" })).action, "reject");
   assertEquals((await decide(db, { ...payloadOf(reg("233021")), kind: "village" })).action, "reject");
@@ -331,6 +340,7 @@ Deno.test("權限：anon 只能讀參考表、不能寫；兩支函式只給 ser
   await assertRejects(() => asRole(db, "anon", `INSERT INTO policy_jp.lg_code_registry (lg_code) VALUES ('010006')`));
   await assertRejects(() => asRole(db, "anon", `SELECT policy_jp.lg_registry_verify_pending()`));
   await assertRejects(() => asRole(db, "anon", `SELECT policy_jp.lg_registry_decide('{}'::JSONB)`));
+  await assertRejects(() => asRole(db, "anon", `SELECT policy_jp.kana_fold('ちゃ')`));
   await assertRejects(() => asRole(db, "authenticated", `SELECT policy_jp.lg_registry_verify_pending()`));
   assertEquals((await asRole<{ r: Record<string, number> }>(db, "service_role", `SELECT policy_jp.lg_registry_verify_pending() AS r`))[0].r.applied, 0);
 });
@@ -351,8 +361,8 @@ Deno.test("自我檢查（還原驗證）：沒開 RLS、給 anon 寫入、給 a
   await assertRejects(() => freshDb({ reg: noRls, data: false }), Error, "沒開 RLS");
   const anonWrite = mutate(REG_SQL, "GRANT SELECT ON policy_jp.lg_code_registry TO anon, authenticated;", "GRANT SELECT, INSERT ON policy_jp.lg_code_registry TO anon, authenticated;");
   await assertRejects(() => freshDb({ reg: anonWrite, data: false }), Error, "只能讀");
-  const anonExec = mutate(REG_SQL, "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;",
-    "GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role, anon;");
+  const anonExec = mutate(REG_SQL, "GRANT EXECUTE ON FUNCTION policy_jp.kana_fold(TEXT), policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;",
+    "GRANT EXECUTE ON FUNCTION policy_jp.kana_fold(TEXT), policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role, anon;");
   await assertRejects(() => freshDb({ reg: anonExec, data: false }), Error, "不該給 anon 執行");
   // 資料少一列 → 分布不對
   const firstRow = DATA_SQL.split("\n").find((l) => l.startsWith("    ('010006'"))!;

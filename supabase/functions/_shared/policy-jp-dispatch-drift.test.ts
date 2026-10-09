@@ -442,6 +442,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
 
   // ---- 20261009250000 lg_registry：自治體（local_government）機器核對，照正見 cec-verify ----
+  kana_fold: { mig: [T_LGR], why: "讀音比對用：小寫假名摺成大寫（總務省團體碼表的拗音・促音大小寫不一致，照正確讀音交的不該被退件）" },
   lg_registry_decide: { mig: [T_LGR], why: "local_government 機器核對的判斷：payload 對總務省團體碼表 lg_code_registry → apply／reject／skip" },
   lg_registry_verify_pending: { mig: [T_LGR], why: "掃 pending 的 local_government：對得上 → verified＋落庫（reviewed_by soumu-auto），對不上 → 退件；排程 policy-jp-lg-registry-verify 與 jp-report 交件當下呼叫" },
 

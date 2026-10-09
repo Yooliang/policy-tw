@@ -10,7 +10,7 @@
 --   網站上的自治體仍然只從代理的交件來（10-08 裁定「也走代理交件」不變）：這張參考表只拿來核對，不顯示、也不從它建任何正式列。
 --
 -- 判斷（lg_registry_decide，跟 cec-verify 一樣分三種）：
---   apply ：團體碼在表裡，而且 pref_code、name、kana、kind 全部一致 → 標 verified（reviewed_by='soumu-auto'）並走同一條落庫路徑
+--   apply ：團體碼在表裡，而且 pref_code、name、kana（小寫假名與大寫不分，kana_fold）、kind 全部一致 → 標 verified（reviewed_by='soumu-auto'）並走同一條落庫路徑
 --   reject：團體碼在表裡，但上面任一欄跟總務省不同（kind 的「市／中核市」除外）→ 退件，理由寫總務省的值
 --   skip  ：團體碼不在表裡（R6.1.1 之後新設的團體）、或只差在「市／中核市」（中核市一覧停在 R5.4.1，之後可能有新指定）→ 不碰，留給同儕
 -- 排程 policy-jp-lg-registry-verify 每 10 分鐘掃 pending 的 local_government（避開 seed 的整十分與落庫掃地機的 5 分）。
@@ -49,6 +49,15 @@ GRANT SELECT ON policy_jp.lg_code_registry TO anon, authenticated;
 GRANT ALL ON policy_jp.lg_code_registry TO service_role;
 
 -- ------------------------------------------------------------
+-- 讀音比對用：小寫假名摺成大寫（ゃ→や、っ→つ…）。總務省的表大多寫小寫（ちょう），少數寫成大寫（北谷町 ﾁﾔﾀﾝﾁｮｳ、
+-- 庄内町 ｼﾖｳﾅｲﾏﾁ、中之条町 ﾅｶﾉｼﾞﾖｳﾏﾁ），代理照正確讀音交（ちゃたんちょう）不該被退件；存進庫的仍是代理交的那一份
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION policy_jp.kana_fold(p_kana TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path = policy_jp, pg_temp AS $$
+  SELECT translate(p_kana, 'ぁぃぅぇぉっゃゅょゎゕゖ', 'あいうえおつやゆよわかけ')
+$$;
+
+-- ------------------------------------------------------------
 -- 2. 判斷：一筆 local_government 的 payload 跟總務省的表比
 --    回 {action: apply|reject|skip, reason?, matched?, official?}
 -- ------------------------------------------------------------
@@ -69,7 +78,9 @@ BEGIN
   END IF;
   IF v_pref IS DISTINCT FROM r.pref_code THEN bad := bad || format('pref_code 總務省是 %s、交件是 %s', r.pref_code, COALESCE(v_pref, '(空白)')); END IF;
   IF v_name IS DISTINCT FROM r.name THEN bad := bad || format('name 總務省是「%s」、交件是「%s」', r.name, v_name); END IF;
-  IF v_kana IS DISTINCT FROM r.kana THEN bad := bad || format('kana 總務省是「%s」（表上寫 %s）、交件是「%s」', r.kana, r.kana_raw, v_kana); END IF;
+  IF policy_jp.kana_fold(v_kana) IS DISTINCT FROM policy_jp.kana_fold(r.kana) THEN  -- 小寫／大寫假名不分（kana_fold）
+    bad := bad || format('kana 總務省是「%s」（表上寫 %s，小寫假名與大寫不分）、交件是「%s」', r.kana, r.kana_raw, v_kana);
+  END IF;
   IF v_kind IS DISTINCT FROM r.kind
      AND NOT (r.kind IN ('city', 'core_city') AND v_kind IN ('city', 'core_city')) THEN
     bad := bad || format('kind 總務省是 %s、交件是 %s', r.kind, COALESCE(v_kind, '(空白)'));
@@ -164,8 +175,8 @@ $$;
 -- ------------------------------------------------------------
 -- 5. 權限與自我檢查
 -- ------------------------------------------------------------
-REVOKE EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;
+REVOKE EXECUTE ON FUNCTION policy_jp.kana_fold(TEXT), policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION policy_jp.kana_fold(TEXT), policy_jp.lg_registry_decide(JSONB), policy_jp.lg_registry_verify_pending(INTEGER, UUID[]) TO service_role;
 
 DO $$
 DECLARE bad TEXT;

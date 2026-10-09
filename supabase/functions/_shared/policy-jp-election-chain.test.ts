@@ -387,6 +387,26 @@ Deno.test("範圍：壞資料不拖垮視圖——壞日期・缺欄位・不認
 // =============================================================================================
 // b. 三個主線情境
 // =============================================================================================
+/** cap＝1 時統計臂的那一件（一場等團體的選舉在前、一場團體已進庫的選舉在後） */
+async function capScenario(db: PGlite) {
+  await clock(db, "2027-03-01");
+  await db.exec(`UPDATE policy_jp.activity_rules SET params = params || '{"cap":1}'::JSONB WHERE activity = 'regional_stats_missing'`);
+  await waitingElection(db, ICHI, "2027-04-11"); // 投票日早、團體還沒進來（gate 會擋）
+  await insertElection(db, KOMORO, "2027-04-25"); // 投票日晚、團體已進庫（可以開）
+  const arm = (await rows<{ task_id: string }>(db, `SELECT task_id FROM ${ARM_ST}()`)).map((r) => r.task_id);
+  await seed(db);
+  return { arm, dispatched: (await chainIds(db)).filter((t) => t.startsWith("auto:regional_stats_missing:")) };
+}
+
+Deno.test("統計臂的 cap：團體已進庫的排前面——團體還沒進來（gate 會擋）的不會佔掉可以開的名額（#503 同一種餓死）；還原驗證：只照投票日排就餓死", async () => {
+  const db = await freshDb();
+  assertEquals(await capScenario(db), { arm: [`auto:regional_stats_missing:${KOMORO}`], dispatched: [`auto:regional_stats_missing:${KOMORO}`] });
+  await db.close();
+  const old = await freshDb({ mig: mutate(MIG_SQL, "ORDER BY c.lg_present DESC, COALESCE(c.kind = 'prefecture', false) DESC", "ORDER BY COALESCE(c.kind = 'prefecture', false) DESC") });
+  assertEquals(await capScenario(old), { arm: [`auto:regional_stats_missing:${ICHI}`], dispatched: [] }, "名額被等團體的一宮市佔住，小諸市開不出來");
+  await old.close();
+});
+
 Deno.test("情境 1　前一步完成才開：等團體的選舉，統計任務擋著；團體進庫（前一步 done）之後下一輪 seed 才開，opened_by 記 via=done", async () => {
   const db = await freshDb();
   await clock(db, "2027-03-01");
