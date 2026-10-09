@@ -39,11 +39,6 @@ jobs:
             echo "$e HTTP $code"
             [ "$code" = 200 ] || { echo "{\"http_status\": $code, \"body\": $(head -c 300 "usage/$e.json" | node -p 'JSON.stringify(require("fs").readFileSync(0,"utf8"))')}" > "usage/$e.json"; }
           done
-          # 探針：從 edge 記錄直接統計過去一小時 REST 請求數與回應位元組（欄位不一定存在，失敗只記錄）
-          SQL="select count(*) as requests, sum(cast(h.response.headers.content_length as int64)) as response_bytes from edge_logs cross join unnest(metadata) as m cross join unnest(m.response) as r cross join unnest(m.request) as q cross join unnest(r.headers) as h where q.path like '/rest/v1/%'"
-          code=$(curl -sS -o usage/logs-rest.json -w '%{http_code}' -G -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" --data-urlencode "sql=$SQL" --data-urlencode "iso_timestamp_start=$(date -u -d '1 hour ago' +%FT%TZ)" --data-urlencode "iso_timestamp_end=$(date -u +%FT%TZ)" "$B/logs.all")
-          echo "logs.all HTTP $code"
-          [ "$code" = 200 ] || echo "{\"http_status\": $code}" > usage/logs-rest.json
           exit 0
       - name: 摘要與門檻
         run: node scripts/usage-watch.mjs usage .github/usage-watch.json
@@ -61,4 +56,4 @@ jobs:
           REPO=$(node -p "require('./.github/usage-watch.json').alert_repo")
           LABEL=$(node -p "require('./.github/usage-watch.json').alert_label")
           { cat usage/breaches.txt; echo; echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; } > usage/issue-body.txt
-          gh issue create -R "$REPO" -l "$LABEL" -t "資料庫傳輸量超過門檻 $(date -u '+%F %H:%M') UTC" -F usage/issue-body.txt
+          gh issue create -R "$REPO" -l "$LABEL" -t "資料庫 REST 請求量超過門檻 $(date -u '+%F %H:%M') UTC" -F usage/issue-body.txt
