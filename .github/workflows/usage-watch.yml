@@ -7,6 +7,8 @@ on:
   schedule:
     - cron: '23 * * * *'
   workflow_dispatch:
+  push:
+    branches: [usage-watch-522]
 
 concurrency:
   group: usage-watch
