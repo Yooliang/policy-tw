@@ -95,6 +95,14 @@ usePageHead({
           </p>
         </section>
 
+        <section>
+          <h2 class="text-2xl font-black text-navy-900 mb-3">姊妹站</h2>
+          <p>
+            日本的地方選舉用同一套方法記錄在「政策の系譜」，兩站的入口在
+            <a href="https://hustings.net" class="text-blue-600 font-bold underline underline-offset-2" target="_blank" rel="noopener">hustings.net</a>。
+          </p>
+        </section>
+
       </div>
     </div>
   </div>
