@@ -168,7 +168,10 @@ Deno.test("e. SQL 與 TS 一致：依核得過的獨立來源數降分、上限 
   for (const x of ["j.question = 'source_support'", "j.probability >= system_one_min_probability()", "system_vote_eligible(c.contribution_type)", "ORDER BY j.asked_at DESC"]) assert(s.includes(x), x);
   const precheck = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
   assert(precheck.includes("askState.supported_sources = vote.supported_sources"), "system-one 寫的鍵要跟 SQL 讀的一樣，值來自 systemVoteFromAnswers");
-  assert(precheck.includes("pickIndependentSources(usable, names)"), "precheck 要挑獨立來源");
+  assert(precheck.includes("pickIndependentSources(usable, personNames)"), "precheck 要挑獨立來源（只用人名）");
+  assert(precheck.includes("asked: askedPages, names: personNames })"), "逐來源名字檢查只用人名");
+  const pn = /const personNames = \[([^\]]*)\]/.exec(precheck);
+  assert(pn && !pn[1].includes("payload.title"), "人名清單不能含政見標題（主線複審第 3 點）");
   assert(precheck.includes("systemVoteFromAnswers({"), "precheck 的判定走 systemVoteFromAnswers（行為測試在 c）");
   assert(precheck.includes("perSourceCount(Object.keys(questions).length"), "逐來源題數有上限");
 });
@@ -179,4 +182,26 @@ Deno.test("f. /next 的 current.system_vote.sources：舊系統票沒有就不�
   const out = systemVoteSources(st, "supported").sources as Record<string, unknown>;
   assertEquals(out.supported_independent, 2);
   assert(!("supported_independent" in (systemVoteSources(st, "not_supported").sources as Record<string, unknown>)), "不是 supported 不報降幾分");
+});
+
+Deno.test("g. 主線複審：矛盾也要那一頁有主角名字才翻票", () => {
+  const r = systemVoteFromAnswers({ contributionType: "policy", claim, names: NAMES, asked: [src("a.test"), src("b.test", "別人的新聞，沒有主角")],
+    answers: { "field:title": ok(), [perSourceQuestionKey(0, "title")]: ok(), [perSourceQuestionKey(1, "title")]: bad(0.99) } });
+  assertEquals([r.choice, r.supported_sources], ["supported", 1], "沒寫到主角的頁被判矛盾，不翻票、也不算核得過");
+  // 還原驗證：寫到主角的頁判矛盾照樣翻
+  const r2 = systemVoteFromAnswers({ contributionType: "policy", claim, names: NAMES, asked: [src("a.test"), src("b.test")],
+    answers: { "field:title": ok(), [perSourceQuestionKey(0, "title")]: ok(), [perSourceQuestionKey(1, "title")]: bad(0.99) } });
+  assertEquals(r2.choice, "not_supported");
+});
+
+Deno.test("g. 主線複審：媒體集團（中時、東森）併一；LINE TODAY 算新聞、LINE 其他服務不算；媒體底下的使用者自寫區不算", () => {
+  const cht = sourceGroupOf("https://www.chinatimes.com/realtimenews/1");
+  assertEquals([sourceGroupOf("https://www.ctee.com.tw/news/1"), sourceGroupOf("https://www.ctwant.com/article/1")], [cht, cht]);
+  assertEquals(sourceGroupOf("https://news.ebc.net.tw/news/1"), sourceGroupOf("https://www.ettoday.net/news/1"));
+  assertEquals(sourceGroupOf("https://today.line.me/tw/v2/article/1"), "today.line.me");
+  assertEquals(sourceGroupOf("https://page.line.me/abc"), SELF_OR_OTHER_GROUP, "LINE 官方帳號");
+  assertEquals(sourceGroupOf("https://linevoom.line.me/post/1"), SELF_OR_OTHER_GROUP, "LINE VOOM");
+  assertEquals(sourceGroupOf("https://blog.udn.com/x/1"), SELF_OR_OTHER_GROUP, "udn 部落格");
+  assertEquals(sourceGroupOf("https://talk.ltn.com.tw/article/1"), SELF_OR_OTHER_GROUP, "自由評論網");
+  assert(sourceGroupOf("https://udn.com/news/story/1") !== SELF_OR_OTHER_GROUP, "udn 新聞照算媒體");
 });

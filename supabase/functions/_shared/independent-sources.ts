@@ -31,7 +31,16 @@ export const MAX_PER_SOURCE_QUESTIONS = 24;
 export const MEDIA_GROUPS: Readonly<Record<string, string>> = {
   "yahoo.com.tw": "yahoo.com",
   "focustaiwan.tw": "cna.com.tw",
+  // 中時集團
+  "ctee.com.tw": "chinatimes.com",
+  "ctwant.com": "chinatimes.com",
+  // 東森集團
+  "ebc.net.tw": "ettoday.net",
 };
+/** 只有這個主機名才算新聞（同一個網站底下還有別的服務）：LINE TODAY 算，LINE 官方帳號／VOOM 不算 */
+export const NEWS_HOSTS: ReadonlySet<string> = new Set(["today.line.me"]);
+/** 媒體網站底下的使用者自寫區（部落格、讀者投書區）：不算媒體，跟社群、本人官網併成一組 */
+export const USER_SECTION_HOSTS: ReadonlySet<string> = new Set(["blog.udn.com", "talk.ltn.com.tw", "blog.ettoday.net", "opinion.udn.com"]);
 /** 社群與其他網站合併成的那一組 */
 export const SELF_OR_OTHER_GROUP = "self_or_other";
 /**
@@ -39,7 +48,7 @@ export const SELF_OR_OTHER_GROUP = "self_or_other";
  * 不在這裡也不在媒體清單的網站，一律跟社群、本人官網併成一組——認不出是不是本人的網站，就寧可少算（主線審查 #544 第 1 點）。
  */
 export const EXTRA_NEWS_SITES: ReadonlySet<string> = new Set([
-  "yahoo.com", "focustaiwan.tw", "line.me", "mirrormedia.mg", "nownews.com", "cts.com.tw", "ttv.com.tw", "ebc.net.tw",
+  "yahoo.com", "focustaiwan.tw", "mirrormedia.mg", "nownews.com", "cts.com.tw", "ttv.com.tw", "ebc.net.tw",
   "thenewslens.com", "businesstoday.com.tw", "cnyes.com", "ctee.com.tw", "ctwant.com", "tvbs.com.tw", "bnext.com.tw",
 ]);
 
@@ -56,6 +65,9 @@ function hostOf(url: string): string {
 
 /** 這個來源屬於哪一組：官方、媒體照網站（媒體集團併一），社群與其他網站併成一組 */
 export function sourceGroupOf(url: string): string {
+  const host = hostOf(unwrapArchiveUrl(url)).toLowerCase().replace(/^www\./, "");
+  if (USER_SECTION_HOSTS.has(host)) return SELF_OR_OTHER_GROUP;
+  if (NEWS_HOSTS.has(host)) return host;
   const site = siteOf(url) ?? hostOf(url);
   const grouped = MEDIA_GROUPS[site] ?? site;
   const kind = sourceKind(unwrapArchiveUrl(url));
@@ -196,7 +208,8 @@ export function systemVoteFromAnswers(input: {
     const r = aggregateFieldVerdicts(input.contributionType, input.claim, mine as never, min);
     return { url: s.url, host: s.host, choice: r.choice as PerSourceResult["choice"], probability: r.probability, name_hit: nameHit(s.text, [...input.names]), fields: r.fields };
   });
-  const contra = per_source.filter((r) => r.choice === "not_supported" && r.probability >= min);
+  // 矛盾也要那一頁真的寫到這個人：沒寫到主角的頁被判 contradicted 不能整票翻掉（同 precheck 的 noName 守門；主線複審第 1 點）
+  const contra = per_source.filter((r) => r.choice === "not_supported" && r.probability >= min && r.name_hit);
   const choice = contra.length > 0 ? "not_supported" : agg.choice as "supported" | "not_supported" | "cannot_tell";
   const probability = contra.length > 0
     ? Math.max(agg.choice === "not_supported" ? agg.probability : 0, ...contra.map((r) => r.probability))

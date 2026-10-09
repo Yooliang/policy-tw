@@ -597,7 +597,9 @@ Deno.serve(async (req) => {
           : await Promise.all(c.source_urls.slice(0, MAX_CHECKED_SOURCES).map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
         const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names));
         // 同站（同媒體子網域）與同一篇轉載只算一個；每個獨立來源在併起來的那段各佔一塊（4 個也塞得進 Jev 的長度）
-        const pick = pickIndependentSources(usable, names);
+        // 逐來源（轉載比對、名字檢查）只用人名，不用政見標題：標題的短字幾乎任何頁都命中（主線複審第 3 點）
+        const personNames = [payload.name, payload.politician_name, ...subjects].map((v) => typeof v === "string" ? v : null);
+        const pick = pickIndependentSources(usable, personNames);
         const indep = usable.filter((p) => pick.independent.some((x) => x.url === p.url));
         const pages = [...indep, ...usable.filter((p) => !indep.includes(p))];
         const combined = combineSources(pages, names, Math.min(2200, Math.floor(6000 / Math.max(1, pages.length)) - 40));
@@ -633,7 +635,7 @@ Deno.serve(async (req) => {
           cost += res.usage.cost;
           // 併起來那段收斂成一票（欄位細節放 probabilities 給 /next 與對帳看）；任一獨立來源明確矛盾 → not_supported；
           // supported 時記核得過的獨立來源數（那一頁要有主角名字），SQL 依它降 1～2 分。規則在 systemVoteFromAnswers
-          const vote = systemVoteFromAnswers({ contributionType: c.contribution_type, claim, answers: res.answers, asked: askedPages, names });
+          const vote = systemVoteFromAnswers({ contributionType: c.contribution_type, claim, answers: res.answers, asked: askedPages, names: personNames });
           const voteChoice = vote.choice, voteProbability = vote.probability;
           askState.sources = {
             checked: fetched.map((p) => p.url),
