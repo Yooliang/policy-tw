@@ -187,12 +187,59 @@ Deno.test("e. 權限：anon／authenticated 不能呼叫，service_role 可以�
 });
 
 Deno.test("f. 還原驗證：任期窗拿掉、只比投票日，「抄錯幾天」就對不上", async () => {
-  const from = "    RETURN p_other = p_ref;\n  END IF;\n  IF p_lg_code IS NOT NULL AND EXISTS (";
+  const from = "    RETURN p_other = p_ref;\n  END IF;\n";
   assertEquals(MIG_SQL.split(from).length - 1, 1, "替換點要剛好出現一次");
-  const broken = MIG_SQL.replace(from, "    RETURN p_other = p_ref;\n  END IF;\n  RETURN p_other = p_ref;\n  IF p_lg_code IS NOT NULL AND EXISTS (");
+  const broken = MIG_SQL.replace(from, "    RETURN p_other = p_ref;\n  END IF;\n  RETURN p_other = p_ref;\n");
   const d = await freshDb(broken);
   const e = await election(d, HEAD.lg_code, HEAD.election_type, addDays(TERM, -10));
   assertEquals(ids(await matches(d, "election", el(addDays(TERM, -3)))).existing, [], "壞掉的版本對不上");
   assertEquals(ids(await matches(d, "election", el(addDays(TERM, -10)))).existing, [e]);
   await d.close();
+});
+
+// ---- 主線審查（#531）退回的兩點：任期窗要對稱、事由空值＝regular（探查也一樣）；各附還原驗證 ----
+const SYM_FROM = "AND (p_ref BETWEEN te.term_end - 180 AND te.term_end + 60 OR p_other BETWEEN te.term_end - 180 AND te.term_end + 60)";
+const SYM_OLD = "AND p_ref BETWEEN te.term_end - 180 AND te.term_end + 60";
+const REASON_FROM = "v_reason := COALESCE(NULLIF(p->>'election_reason', ''), 'regular');";
+const REASON_OLD = "v_reason := COALESCE(NULLIF(p->>'election_reason', ''), CASE WHEN p ? 'election_type' THEN 'regular' END);";
+
+async function symmetryCase(d: PGlite): Promise<{ inThenOut: unknown[]; outThenIn: unknown[] }> {
+  // 一方在任期窗內（満了前 10 天）、另一方在窗外（満了後 100 天，差 110 天 ≤ 180）：不是同一屆，兩個方向都不該對上
+  const inside = addDays(TERM, -10), outside = addDays(TERM, 100);
+  const e = await election(d, HEAD.lg_code, HEAD.election_type, inside);
+  const inThenOut = ids(await matches(d, "election", el(outside))).existing;
+  await d.query(`DELETE FROM policy_jp.elections WHERE id = $1`, [e]);
+  await election(d, HEAD.lg_code, HEAD.election_type, outside);
+  const outThenIn = ids(await matches(d, "election", el(inside))).existing;
+  return { inThenOut, outThenIn };
+}
+
+Deno.test("g. 任期窗對稱：任一方在窗內就要兩方同窗（窗外 +100 天不會被當成同一屆）；還原驗證", async () => {
+  assertEquals(MIG_SQL.split(SYM_FROM).length - 1, 1, "替換點要剛好出現一次");
+  const d = await freshDb();
+  assertEquals(await symmetryCase(d), { inThenOut: [], outThenIn: [] });
+  await d.close();
+  const old = await freshDb(MIG_SQL.replace(SYM_FROM, SYM_OLD));
+  const r = await symmetryCase(old);
+  assert(r.inThenOut.length + r.outThenIn.length > 0, `舊寫法會把窗外判成同一屆：${JSON.stringify(r)}`);
+  await old.close();
+});
+
+async function probeCase(d: PGlite): Promise<unknown[]> {
+  // 任期窗內有一場出直し選舉；任務探查（沒有事由）不該列出它——交件端事由空值＝regular，列出來代理照抄 id 只會 claim_mismatch
+  await election(d, HEAD.lg_code, HEAD.election_type, addDays(TERM, -40), "resignation");
+  return ids(await matches(d, "election", { lg_code: HEAD.lg_code, office_kind: "head", term_end: TERM })).existing;
+}
+
+Deno.test("h. 事由空值＝regular，探查也一樣（不列出出直し選舉）；還原驗證", async () => {
+  assertEquals(MIG_SQL.split(REASON_FROM).length - 1, 1, "替換點要剛好出現一次");
+  const d = await freshDb();
+  assertEquals(await probeCase(d), []);
+  const reg = await election(d, HEAD.lg_code, HEAD.election_type, addDays(TERM, -10));
+  assertEquals(ids(await matches(d, "election", { lg_code: HEAD.lg_code, office_kind: "head", term_end: TERM })).existing, [reg]);
+  assertEquals(ids(await matches(d, "election", el(addDays(TERM, -10), { election_reason: "" }))).existing, [reg], "payload 事由空字串也當 regular");
+  await d.close();
+  const old = await freshDb(MIG_SQL.replace(REASON_FROM, REASON_OLD));
+  assertEquals((await probeCase(old)).length, 1, "舊寫法探查會列出出直し選舉");
+  await old.close();
 });

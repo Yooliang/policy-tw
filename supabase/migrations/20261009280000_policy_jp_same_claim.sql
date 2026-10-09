@@ -8,7 +8,7 @@
 -- 各型別「同一件事」的精確鍵（主線 10-09 裁定，#521 07:47 留言第 2 點）：
 --   election         團體碼＋職位（head＝首長、assembly＝議會；國政＝election_type 本身）＋election_reason（空值＝regular）＋同一屆
 --                    同一屆：regular＝兩個投票日落在同一列 term_expirations 的 [term_end−180, term_end+60]；
---                            這個團體職位查不到涵蓋新投票日的那一列，就看兩個投票日差 ≤ 180 天。
+--                            任一方落在某一列的窗口內，兩方就要在同一個窗口（對稱）；兩方都不在任何窗口，才看兩個投票日差 ≤ 180 天。
 --                            非 regular（出直し・補欠…）＝投票日相同。
 --                    elections.id（投票日＋種類＋團體）不拿來判斷：日期抄錯一天就是另一個 id。
 --   regional_stat    團體碼＋stat_key＋year
@@ -46,10 +46,11 @@ BEGIN
   IF COALESCE(p_reason, 'regular') <> 'regular' THEN
     RETURN p_other = p_ref;
   END IF;
+  -- 任一方落在某一列任期満了的窗口內，兩方就要在同一個窗口（對稱：A 比 B 與 B 比 A 結果相同）
   IF p_lg_code IS NOT NULL AND EXISTS (
     SELECT 1 FROM policy_jp.term_expirations te
      WHERE te.lg_code = p_lg_code AND te.office_kind = p_office
-       AND p_ref BETWEEN te.term_end - 180 AND te.term_end + 60
+       AND (p_ref BETWEEN te.term_end - 180 AND te.term_end + 60 OR p_other BETWEEN te.term_end - 180 AND te.term_end + 60)
   ) THEN
     RETURN EXISTS (
       SELECT 1 FROM policy_jp.term_expirations te
@@ -86,7 +87,8 @@ BEGIN
 
   IF p_type = 'election' THEN
     v_office := COALESCE(NULLIF(p->>'office_kind', ''), policy_jp.same_claim_office(NULLIF(p->>'election_type', '')));
-    v_reason := COALESCE(NULLIF(p->>'election_reason', ''), CASE WHEN p ? 'election_type' THEN 'regular' END);
+    -- 事由空值一律視為任期満了（主線 10-09 裁定 2）；探查也一樣，不然探查列出的出直し選舉，交件端會比不中而回 claim_mismatch
+    v_reason := COALESCE(NULLIF(p->>'election_reason', ''), 'regular');
     v_date := policy_jp.date_or_null(p->>'election_date');
     v_term_end := policy_jp.date_or_null(p->>'term_end');
     -- 拿不到鍵（沒有職位、或既沒有投票日也沒有任期満了日）＝不猜

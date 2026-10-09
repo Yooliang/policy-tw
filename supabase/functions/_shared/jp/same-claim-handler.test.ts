@@ -192,6 +192,15 @@ Deno.test("claimKey 型別（no_change）：併票投不成、或同一台機器
     () => Promise.resolve({ status: 409, body: { success: false, error: "already_voted", message: "這個來源已對這筆投過票" } }));
   assertEquals([res.status, (res.body as R).error], [409, "already_voted"]);
   assertEquals(a.inserted.length, 0, "正見會照原路收下；日本站不收");
+  // 同一批兩筆指向同一個在途提交（主線審查 #531 第 1 點）：第一筆併成票，第二筆不能照原路收下
+  const c = fakeSupabase({ candidates: [other] });
+  const twice = { agent_name: "tester-1", contributions: [item, { ...item, payload: { ...item.payload, finding: "総務省の団体コード表を再確認したが該当なし" } }] };
+  const votes: R[] = [];
+  const res3 = await handleContribute(c.api, "https://x", twice, "ip-me", (_s, v) => { votes.push(v as R); return okVote(); });
+  assertEquals(votes.length, 1, "只投一票");
+  assertEquals(c.inserted.length, 0, "第二筆不另收");
+  assertEquals(((res3.body as R).results as R[]).map((r) => [r.status, r.error ?? null]), [["counted_as_vote", null], ["not_accepted", "already_voted"]]);
+
   const b = fakeSupabase({ candidates: [{ ...other, contributor_ip_hash: "ip-me" }] });
   const res2 = await handleContribute(b.api, "https://x", body(item), "ip-me", noVote);
   assertEquals([res2.status, (res2.body as R).error], [409, "already_voted"], "同一台機器交過同一件事");

@@ -336,7 +336,8 @@ export async function handleContribute(
         if (sameMachine) blockedByIndex.set(i, alreadyVotedBlock(sameMachine.id));
         continue;
       }
-      if (claimed.has(target.id)) continue;
+      // 同一批裡前一筆已經對它投了這台機器的票：這筆也不收（一台機器只有一票，不能照原路另收）
+      if (claimed.has(target.id)) { blockedByIndex.set(i, alreadyVotedBlock(target.id)); continue; }
       if (await mergeInto(i, target.id, target.agent_name)) claimed.add(target.id);
     }
   }
