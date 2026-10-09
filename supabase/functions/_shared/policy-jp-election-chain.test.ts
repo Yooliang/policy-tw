@@ -106,7 +106,13 @@ async function submit(db: PGlite, type: string, payload: Record<string, unknown>
              TIMESTAMPTZ '2026-10-09 00:00:00+00' + make_interval(secs => $9)) RETURNING id`,
     [type, JSON.stringify(payload), o.urls ?? [SOUMU], o.task ?? null, `author-${n}`, `author-ip-${n}`, `h-${n}`, status, n])).id;
 }
-const electionPayload = (lg: string, date: string, type = "mayor") => ({ lg_code: lg, election_type: type, election_reason: "regular", election_date: date, notice_date: date.slice(0, 8) + "18" });
+const addDays = (iso: string, n: number): string => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+// 告示日は投票日の前（落庫で「告示日が投票日より後」は退件になる）
+const electionPayload = (lg: string, date: string, type = "mayor") => ({ lg_code: lg, election_type: type, election_reason: "regular", election_date: date, notice_date: addDays(date, -17) });
 /** 通過驗證、只在等團體落庫的選舉交件 */
 const waitingElection = (db: PGlite, lg: string, date: string, type = "mayor") => submit(db, "election", electionPayload(lg, date, type), { status: "verified", urls: [ELECTION_URL] });
 /** 通過驗證的交件都落庫（掃地機一輪只落「現在不被擋」的，被擋的等下一輪；到沒東西可落為止） */
@@ -144,7 +150,8 @@ async function sourceId(db: PGlite): Promise<number> {
   return (await one<{ id: number }>(db, `INSERT INTO policy_jp.sources (url, origin, source_kind) VALUES ($1, 'test', 'statistics')
     ON CONFLICT (url) DO UPDATE SET origin = EXCLUDED.origin RETURNING id::INT AS id`, [ESTAT])).id;
 }
-const STAT_ROWS: Array<[string, number, number]> = [["population", 2020, 386678], ["area_km2", 2020, 113.82], ["aging_rate", 2020, 28.6], ["budget_expenditure", 2023, 99999]];
+// 規則的 min_year：人口・面積・高齢化率＝令和7年国勢調査（2025）、歳出＝2023 會計年度
+const STAT_ROWS: Array<[string, number, number]> = [["population", 2025, 386678], ["area_km2", 2025, 113.82], ["aging_rate", 2025, 28.6], ["budget_expenditure", 2023, 99999]];
 /** 統計直接進庫；skip＝不放的 stat_key */
 async function fillStats(db: PGlite, lg: string, o: { skip?: string[]; status?: string } = {}): Promise<void> {
   const sid = await sourceId(db);
@@ -214,7 +221,7 @@ Deno.test("範圍：等團體的選舉交件 → 團體與所屬都道府県兩�
 
   const open = await rows<{ election_id: string; lg_code: string; election_type: string; basis: string; election_date: string; notice_date: string }>(
     db, `SELECT election_id, lg_code, election_type, basis, election_date::TEXT, notice_date::TEXT FROM policy_jp.chain_open_elections`);
-  assertEquals(open, [{ election_id: ICHI_ELECTION, lg_code: ICHI, election_type: "mayor", basis: "verified_waiting", election_date: "2027-04-25", notice_date: "2027-04-18" }]);
+  assertEquals(open, [{ election_id: ICHI_ELECTION, lg_code: ICHI, election_type: "mayor", basis: "verified_waiting", election_date: "2027-04-25", notice_date: "2027-04-08" }]);
 
   const lg = await rows<{ task_id: string; task_type: string; target: Record<string, unknown>; what_we_need: string; hint_sources: string[]; reward: number; region: string }>(
     db, `SELECT * FROM ${ARM_LG}() ORDER BY task_id`);
@@ -657,15 +664,15 @@ Deno.test("統計判準（臂與進度視圖共用 chain_regional_stats_missing�
   };
   await check(false, "什麼都沒有");
   assertEquals(await missing(), [
-    { stat_key: "aging_rate", min_year: 2020, unit: "%" }, { stat_key: "area_km2", min_year: 2020, unit: "km2" },
-    { stat_key: "budget_expenditure", min_year: 2023, unit: "千円" }, { stat_key: "population", min_year: 2020, unit: "人" }]);
-  await put("population", 2020, 386678);
-  await put("area_km2", 2019, 113.8);                  // min_year 未満
-  await put("aging_rate", 2020, 28.6, "pending");      // 還沒上線
+    { stat_key: "aging_rate", min_year: 2025, unit: "%" }, { stat_key: "area_km2", min_year: 2025, unit: "km2" },
+    { stat_key: "budget_expenditure", min_year: 2023, unit: "千円" }, { stat_key: "population", min_year: 2025, unit: "人" }]);
+  await put("population", 2025, 386678);
+  await put("area_km2", 2020, 113.8);                  // min_year（2025）未満：舊的國勢調査
+  await put("aging_rate", 2025, 28.6, "pending");      // 還沒上線
   await put("budget_expenditure", 2022, 1000);         // 歳出的 min_year 是 2023
   await check(false, "只有人口");
   assertEquals((await missing())!.map((m) => m.stat_key), ["aging_rate", "area_km2", "budget_expenditure"]);
-  await put("area_km2", 2023, 113.9);
+  await put("area_km2", 2025, 113.9);
   await db.exec(`UPDATE policy_jp.regional_stats SET review_status = 'published' WHERE stat_key = 'aging_rate'`);
   await put("budget_expenditure", 2023, 1200, "rejected");
   await check(false, "歳出只有 rejected");
@@ -675,11 +682,11 @@ Deno.test("統計判準（臂與進度視圖共用 chain_regional_stats_missing�
   assertEquals(done.done, true);
   assert(done.done_at);
 
-  // min_year 調高（規則一行）→ 又缺
+  // min_year 調高（規則一行，例：下一次國勢調査 2030）→ 又缺
+  await db.exec(`UPDATE policy_jp.activity_rules SET params = jsonb_set(params, '{min_year,population}', '2030') WHERE activity = 'regional_stats_missing'`);
+  await check(false, "population min_year 2030");
+  assertEquals((await missing())!.map((m) => [m.stat_key, m.min_year]), [["population", 2030]]);
   await db.exec(`UPDATE policy_jp.activity_rules SET params = jsonb_set(params, '{min_year,population}', '2025') WHERE activity = 'regional_stats_missing'`);
-  await check(false, "population min_year 2025");
-  assertEquals((await missing())!.map((m) => [m.stat_key, m.min_year]), [["population", 2025]]);
-  await db.exec(`UPDATE policy_jp.activity_rules SET params = jsonb_set(params, '{min_year,population}', '2020') WHERE activity = 'regional_stats_missing'`);
   await check(true, "min_year 還原");
 
   // 種類排除（規則一行）：core_city 排除 → 即使什麼都沒有也 done
@@ -752,4 +759,332 @@ Deno.test("逃生門 activity_chain_escape：後備里程碑到了＝fallback、
   assertEquals(await scope({ title: "x" }), null);
   assertEquals(await scope({ chain_lg_code: "", lg_code: "" }), null);
   await db.close();
+});
+
+// =============================================================================================
+// d. 文字守門：總表
+// =============================================================================================
+// 總表＝210100 的版本＋「選舉鏈」兩段（>>> 選舉鏈 … <<< 選舉鏈，整段拿掉）＋四處行內修改（照原樣改回去）。正見之後貼同一段的空轉版，兩邊逐字相同。
+const SEG_RE = /^[ \t]*-- >>> 選舉鏈[^\n]*\n[\s\S]*?^[ \t]*-- <<< 選舉鏈[^\n]*\n/gm;
+// 行內修改只比程式碼那一段；行尾的說明註解（-- 選舉鏈：…）改字不算走樣
+const E1_RE = /o\.open_until,\n {9}\(SELECT r\.after_step FROM policy_jp\.activity_rules r WHERE r\.id = o\.rule_id\) AS after_step,[^\n]*\n {9}\(SELECT r\.params->'chain_fallback' FROM policy_jp\.activity_rules r WHERE r\.id = o\.rule_id\) AS chain_fallback[^\n]*\n(    FROM \(SELECT x\.arm)/g;
+const E2_FROM = "CASE WHEN w.via IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(", E2_TO = "CASE WHEN o.source IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(";
+const E3_FROM = "'open_until', o.open_until,\n           'chain_gate', CASE WHEN o.after_step IS NOT NULL THEN jsonb_build_object('after_step', o.after_step, 'via', w.via) END)) END AS opened_by";
+const E3_TO = "'open_until', o.open_until)) END AS opened_by";
+const E4_FROM = "WHERE (w.via IS NOT NULL OR (SELECT current_setting('gap.arms_all', true) = 'on'))", E4_TO = "WHERE (o.source IS NOT NULL OR (SELECT current_setting('gap.arms_all', true) = 'on'))";
+function mutateRe(sql: string, re: RegExp, to: string): string {
+  const n = (sql.match(re) ?? []).length;
+  assertEquals(n, 1, `要改的樣式必須剛好出現一次（出現 ${n} 次）：${re.source.slice(0, 70)}`);
+  return sql.replace(re, to);
+}
+function revertChain(after: string): string {
+  let t = after.replace(SEG_RE, "");
+  t = mutateRe(t, E1_RE, "o.open_until\n$1");
+  t = mutate(t, E2_FROM, E2_TO);
+  t = mutate(t, E3_FROM, E3_TO);
+  t = mutate(t, E4_FROM, E4_TO);
+  return t;
+}
+
+Deno.test("文字守門：總表＝210100 的版本剛好多『選舉鏈』兩段＋四處行內修改，其餘一字不改（機械替換比對＋還原驗證）", () => {
+  const before = fnText(ARMS_SQL, TOTAL), after = fnText(MIG_SQL, TOTAL);
+  const segs: string[] = after.match(SEG_RE) ?? [];
+  assertEquals(segs.length, 2, "標記成對：兩段");
+  assert(segs[0]!.includes("chain AS MATERIALIZED") && segs[0]!.includes("policy_jp.election_chain_progress") && segs[0]!.includes("p.done"), "第一段：進度視圖只算一次（MATERIALIZED）、只取 done");
+  assert(segs[1]!.includes("policy_jp.activity_chain_scope(g.target)") && segs[1]!.includes("policy_jp.activity_chain_escape(o.chain_fallback, g.eid, g.etype, g.task_id)"), "第二段：gate");
+  assertEquals(revertChain(after), before, "拿掉兩段、把行內修改改回去，必須剛好是 210100 的總表");
+  // 前後只差：兩段（含標記）＋行內改的幾行
+  const a = before.split("\n"), b = after.split("\n");
+  const added = b.filter((l) => !a.includes(l));
+  const removed = a.filter((l) => !b.includes(l));
+  assertEquals(removed.length, 4, "被改掉的原行：opened 的 SELECT、CASE WHEN、open_until 那行、WHERE 四行");
+  assert(added.length > removed.length);
+  assert(a.length < b.length);
+
+  // 還原驗證：總表任何一處（兩段以外）被改動，都對不上（還原函式丟例外也算抓到）
+  const detects = (t: string): boolean => {
+    try {
+      return revertChain(t) !== before;
+    } catch {
+      return true;
+    }
+  };
+  assert(!detects(after));
+  for (const [what, t] of [
+    ["AS $$ 後面多一個空格", after.replace("AS $$", "AS $$ ")],
+    ["LEFT JOIN 變成 JOIN", after.replace("LEFT JOIN LATERAL (", "JOIN LATERAL (")],
+    ["UNION ALL 變成 UNION", after.replace("UNION ALL SELECT 'regional_stats_missing'", "UNION SELECT 'regional_stats_missing'")],
+    ["OFFSET 0 變 1", after.replace("OFFSET 0) k", "OFFSET 1) k")],
+    ["basis 欄打錯", after.replace("'basis', o.source", "'basis', o.sourcee")],
+    ["JOIN 條件少一個", after.replace("AND COALESCE(o.etype, '') = COALESCE(g.etype, '')", "")],
+    ["行內修改被動過（after_step 子查詢）", after.replace(") AS after_step,", ") AS after_stepx,")],
+    ["行內修改被動過（WHERE）", after.replace("WHERE (w.via IS NOT NULL OR", "WHERE (w.via IS NULL OR")],
+    ["行內修改被動過（chain_gate 的位置）", after.replace("'chain_gate', CASE", "'chain_gatex', CASE")],
+    ["標記沒成對（少一個 <<<）", after.replace(/^[ \t]*-- <<< 選舉鏈[^\n]*\n/m, "")],
+  ] as const) assert(detects(t), `${what}：要被抓到`);
+  // 210100 那邊改一個字元，期望值跟著變
+  assertNotEquals(revertChain(after), before.replace("AS $$", "AS $$ "));
+});
+
+Deno.test("文字守門：鏈的兩段與行內修改不含日本專用的字——站別專用的只有 activity_chain_scope()（總表那一段可以逐字搬到正見）", () => {
+  const after = fnText(MIG_SQL, TOTAL);
+  const segs = after.match(SEG_RE)!;
+  // 行內加上去的程式碼（不含註解）
+  const inline = [
+    ...(after.match(/\(SELECT r\.after_step FROM policy_jp\.activity_rules r WHERE r\.id = o\.rule_id\) AS after_step/g) ?? []),
+    ...(after.match(/\(SELECT r\.params->'chain_fallback' FROM policy_jp\.activity_rules r WHERE r\.id = o\.rule_id\) AS chain_fallback/g) ?? []),
+    "'chain_gate', CASE WHEN o.after_step IS NOT NULL THEN jsonb_build_object('after_step', o.after_step, 'via', w.via) END",
+    "CASE WHEN w.via IS NOT NULL", "(w.via IS NOT NULL OR",
+  ];
+  assertEquals(inline.length, 5);
+  const all = [...segs, ...inline].join("\n");
+  const code = all.replace(/--[^\n]*/g, "");
+  // 站別、型別、時區：一個都不能出現
+  for (const re of [/Asia\/Tokyo/, /\b(mayor|governor|ward_mayor|town_mayor|national_lower|national_upper|pref_assembly|muni_assembly)\b/,
+                    /local_government/, /regional_stat/, /prefecture/, /chain_lg_code/, /[ぁ-んァ-ヶ]/, /団体|選挙|都道府県/]) {
+    assertEquals(re.test(all), false, `鏈的段落不能出現 ${re}`);
+  }
+  // 不讀 target 的任何鍵（範圍鍵只透過 activity_chain_scope 取）
+  assertEquals(/target\s*->/.test(code), false);
+  assert(/activity_chain_scope\(g\.target\)/.test(code));
+  // lg_code 只能是進度視圖規格上的欄位名（p.lg_code、c.lg_code），不能是 JSON 的鍵或字面值
+  const lgTokens = [...code.matchAll(/[\w.]*lg_code\w*/g)].map((m) => m[0]);
+  assertEquals([...new Set(lgTokens)].sort(), ["c.lg_code", "p.lg_code"]);
+  assertEquals(/['"]lg_code['"]/.test(code), false);
+  // 碰到的資料庫物件：只有進度視圖、規則表、兩個站別/通用函式
+  const refs = [...new Set([...code.matchAll(/policy_jp\.(\w+)/g)].map((m) => m[1]))].sort();
+  assertEquals(refs, ["activity_chain_escape", "activity_chain_scope", "activity_rules", "election_chain_progress"]);
+  // 站別專用的函式在總表之外：scope 讀 target 的鍵，那才是日本的鍵名
+  const scopeBody = fnText(MIG_SQL, "policy_jp.activity_chain_scope");
+  assert(scopeBody.includes("chain_lg_code") && scopeBody.includes("lg_code"));
+  // 逃生門本身也是通用的（里程碑種類・偏移是參數，沒有站別字）
+  const esc = fnText(MIG_SQL, "policy_jp.activity_chain_escape").replace(/--[^\n]*/g, "");
+  assertEquals(/lg_code|Asia\/Tokyo|mayor|governor/.test(esc), false);
+});
+
+// =============================================================================================
+// e. 輸出契約
+// =============================================================================================
+Deno.test("輸出契約：兩支臂的回傳型別跟 election_discovery 臂相同、都是正見臂的七欄；總表的回傳型別跟 210100 一樣", async () => {
+  const res = async (db: PGlite, fn: string) => (await one<{ r: string }>(db, `SELECT pg_get_function_result('${fn}()'::regprocedure) AS r`)).r;
+  const SEVEN = "TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text)";
+  const ed = await res(shared, "policy_jp.contribution_auto_tasks_election_discovery");
+  assertEquals(ed, SEVEN);
+  assertEquals(await res(shared, ARM_LG), ed);
+  assertEquals(await res(shared, ARM_ST), ed);
+  // 重新定義前後不變（套 210600 之前的庫 vs 之後）
+  for (const fn of [ARM_LG, ARM_ST, TOTAL]) assertEquals(await res(shared, fn), await res(pre, fn), `${fn} 的回傳型別沒變`);
+  assertEquals(await res(shared, TOTAL), "TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text, arm text, opened_by jsonb)");
+  // 兩支臂：唯讀、stable、釘 search_path
+  for (const fn of [ARM_LG, ARM_ST]) {
+    const p = await one<{ volatile: string; cfg: string[] }>(shared, `SELECT provolatile AS volatile, proconfig AS cfg FROM pg_proc WHERE oid = '${fn}()'::regprocedure`);
+    assertEquals(p.volatile, "s");
+    assert(p.cfg.some((c) => c.startsWith("search_path=")));
+  }
+});
+
+// =============================================================================================
+// f. CHECK
+// =============================================================================================
+Deno.test("CHECK activity_rules_chain_shape：after_step 要在步驟清單裡、不能掛在優先層規則上；chain_fallback 要有 after_step、種類要對、offset 要是整數", async () => {
+  const db = shared;
+  const KINDS = ["announced", "registration_open", "registration_close", "list_published", "draw", "bulletin_published", "polling", "result_announced", "certified"];
+  const upd = (set: string, activity = "regional_stats_missing") => `UPDATE policy_jp.activity_rules SET ${set} WHERE activity = '${activity}'`;
+  const fb = (j: string) => `params = params || '{"chain_fallback": ${j}}'::JSONB`;
+  const bad = (sql: string, why: string) => assertRejects(() => tryIn(db, sql), Error, "activity_rules_chain_shape", why);
+  const ok = (sql: string) => tryIn(db, sql);
+
+  // after_step：步驟清單裡的才行
+  for (const step of ["discovery", "local_government", "regional_stats", "region"]) await ok(upd(`after_step = '${step}'`));
+  await ok(upd("after_step = NULL", "election_discovery"));
+  for (const step of ["bogus", "Discovery", "", "local_government ", "election", "term"]) await bad(upd(`after_step = '${step}'`), `after_step=${JSON.stringify(step)}`);
+  // 優先層規則（排序用）不能掛在鏈上；沒有 after_step 的優先層規則照收
+  await ok(`INSERT INTO policy_jp.activity_rules (activity, window_kind, priority) VALUES ('priority:chain_test', 'always', 1)`);
+  await bad(`INSERT INTO policy_jp.activity_rules (activity, window_kind, priority, after_step) VALUES ('priority:chain_test', 'always', 1, 'discovery')`, "優先層規則掛 after_step");
+  await bad(`INSERT INTO policy_jp.activity_rules (activity, window_kind, priority, after_step, params) VALUES ('priority:chain_test', 'always', 1, 'region', '{"chain_fallback":{"kind":"polling","offset":0}}')`, "優先層規則掛 after_step＋後備");
+
+  // chain_fallback：有 after_step、種類在清單裡、offset 是整數
+  for (const kind of KINDS) {
+    await ok(upd(`params = params || '{"chain_fallback":{"kind":"${kind}","offset":-45}}'::JSONB`));
+  }
+  for (const off of ["0", "-1", "7", "-365", "120"]) await ok(upd(fb(`{"kind":"polling","offset":${off}}`)));
+  await bad(upd(`after_step = NULL, ${fb('{"kind":"polling","offset":-45}')}`), "有後備卻沒有 after_step");
+  await bad(upd(fb('{"kind":"polling","offset":-45}'), "election_discovery"), "沒有 after_step 的規則帶後備");
+  for (const kind of ["term_start", "term_end", "nonsense", "Polling", ""]) await bad(upd(fb(`{"kind":"${kind}","offset":0}`)), `kind=${kind}`);
+  await bad(upd(fb('{"offset":0}')), "沒有 kind");
+  await bad(upd(fb('{"kind":null,"offset":0}')), "kind 是 null");
+  await bad(upd(fb('{"kind":5,"offset":0}')), "kind 是數字");
+  for (const off of ["1.5", "-45.5", "\"5\"", "\"-45\"", "null", "true", "[]", "{}"]) await bad(upd(fb(`{"kind":"polling","offset":${off}}`)), `offset=${off}`);
+  await bad(upd(fb('{"kind":"polling"}')), "沒有 offset");
+  for (const notObj of ['"polling"', "[]", "null", "45", "true", '["polling", -45]']) await bad(upd(fb(notObj)), `chain_fallback=${notObj}`);
+  // 現行的兩條規則本身合格
+  assertEquals(await rows(db, `SELECT activity, after_step, params->'chain_fallback' AS fb FROM policy_jp.activity_rules WHERE after_step IS NOT NULL ORDER BY activity`), [
+    { activity: "local_government_missing", after_step: "discovery", fb: null },
+    { activity: "regional_stats_missing", after_step: "local_government", fb: { kind: "polling", offset: -45 } },
+  ]);
+  assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM pg_constraint WHERE conname = 'activity_rules_chain_shape'`)).n, 1);
+});
+
+// =============================================================================================
+// g. 權限
+// =============================================================================================
+Deno.test("權限：新函式與兩個視圖 anon／authenticated 不能碰，service_role 可以", async () => {
+  const db = shared;
+  const FN: Array<[string, string]> = [
+    ["election_chain_steps()", `SELECT policy_jp.election_chain_steps()`],
+    ["date_or_null(text)", `SELECT policy_jp.date_or_null('2027-04-25')`],
+    ["activity_chain_scope(jsonb)", `SELECT policy_jp.activity_chain_scope('{}'::JSONB)`],
+    ["activity_chain_escape(jsonb, text, text, text, date)", `SELECT policy_jp.activity_chain_escape(NULL, 'x', 'mayor', 'y', DATE '2027-01-01')`],
+    ["chain_regional_stats_missing(text)", `SELECT policy_jp.chain_regional_stats_missing('232033')`],
+    ["contribution_auto_tasks_local_government_missing()", `SELECT * FROM ${ARM_LG}()`],
+    ["contribution_auto_tasks_regional_stats_missing()", `SELECT * FROM ${ARM_ST}()`],
+    ["contribution_auto_tasks_arms()", `SELECT * FROM ${TOTAL}()`],
+  ];
+  const VIEWS = ["policy_jp.chain_open_elections", "policy_jp.election_chain_progress"];
+  for (const [sig, call] of FN) {
+    for (const role of ["anon", "authenticated"]) {
+      assertEquals((await one<{ x: boolean }>(db, `SELECT has_function_privilege('${role}', 'policy_jp.${sig}', 'EXECUTE') AS x`)).x, false, `${role} 不能執行 ${sig}`);
+      await assertRejects(() => asRole(db, role, call), Error, "permission denied", `${role} ${sig}`);
+    }
+    assertEquals((await one<{ x: boolean }>(db, `SELECT has_function_privilege('service_role', 'policy_jp.${sig}', 'EXECUTE') AS x`)).x, true, `service_role 能執行 ${sig}`);
+    await asRole(db, "service_role", call);
+  }
+  for (const v of VIEWS) {
+    for (const role of ["anon", "authenticated"]) {
+      assertEquals((await one<{ x: boolean }>(db, `SELECT has_table_privilege('${role}', '${v}', 'SELECT') AS x`)).x, false, `${role} 不能讀 ${v}`);
+      await assertRejects(() => asRole(db, role, `SELECT * FROM ${v}`), Error, "permission denied", `${role} ${v}`);
+    }
+    assertEquals((await one<{ x: boolean }>(db, `SELECT has_table_privilege('service_role', '${v}', 'SELECT') AS x`)).x, true);
+    await asRole(db, "service_role", `SELECT * FROM ${v}`);
+  }
+  // 視圖不給 anon／authenticated 任何權限（不只是 SELECT）；service_role 是 schema 預設權限給的全權（ALTER DEFAULT PRIVILEGES），視圖不可更新，寫不進去
+  for (const v of VIEWS) for (const role of ["anon", "authenticated"]) for (const priv of ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]) {
+    assertEquals((await one<{ x: boolean }>(db, `SELECT has_table_privilege('${role}', '${v}', '${priv}') AS x`)).x, false, `${role} ${v} ${priv}`);
+  }
+  // 兩個視圖是 security_invoker：用呼叫者的權限讀底下的表
+  for (const v of ["chain_open_elections", "election_chain_progress"]) {
+    const o = await one<{ opts: string[] }>(db, `SELECT reloptions AS opts FROM pg_class WHERE oid = 'policy_jp.${v}'::regclass`);
+    assert(o.opts.includes("security_invoker=true"), v);
+  }
+});
+
+// =============================================================================================
+// h. 自我檢查（還原驗證）與冪等
+// =============================================================================================
+Deno.test("自我檢查（還原驗證）：少 chain_close_after_days・少後備里程碑・少 after_step・min_year 寫錯字・視圖或函式給了 anon・步驟清單改掉，重跑都會失敗，而且整支回滾", async () => {
+  const fails = async (mutated: string, msg: string) => {
+    await assertRejects(() => pre.exec(mutated), Error, msg);
+    // 失敗的 migration 整個回滾，不留痕跡（共用的『還沒套 210600』庫還是乾淨的）
+    assertEquals((await one<{ v: string | null }>(pre, `SELECT to_regclass('policy_jp.chain_open_elections')::TEXT AS v`)).v, null);
+    assertEquals(await count(pre, `SELECT 1 FROM information_schema.columns WHERE table_schema = 'policy_jp' AND table_name = 'activity_rules' AND column_name = 'after_step'`), 0);
+  };
+  // 套得上的前提：真的 migration 在這個庫上是可以套的（拿一個獨立的庫驗，不動共用庫）
+  const sane = await freshDb();
+  await sane.close();
+
+  await fails(mutate(MIG_SQL, `params = params || '{"chain_close_after_days":90}'::JSONB,`, `params = params,`), "chain_close_after_days");
+  await fails(mutate(MIG_SQL, `"chain_fallback":{"kind":"polling","offset":-45},`, ``), "沒有後備里程碑");
+  await fails(mutate(MIG_SQL, `SET after_step = 'discovery',`, `SET after_step = after_step,`), "沒有 after_step");
+  await fails(mutate(MIG_SQL, `SET after_step = 'local_government',`, `SET after_step = after_step,`), "activity_rules_chain_shape"); // 後備還在、after_step 沒設
+  await fails(mutate(MIG_SQL, `"aging_rate":2025,`, `"agin_rate":2025,`), "min_year 有不認得的 stat_key");
+  await fails(mutate(MIG_SQL, `ARRAY['discovery', 'local_government', 'regional_stats', 'region']`, `ARRAY['discover', 'local_government', 'regional_stats', 'region']`), "activity_rules_chain_shape");
+  const GRANT_VIEWS = "GRANT SELECT ON policy_jp.chain_open_elections, policy_jp.election_chain_progress TO service_role;";
+  await fails(mutate(MIG_SQL, GRANT_VIEWS, `${GRANT_VIEWS}\nGRANT SELECT ON policy_jp.chain_open_elections TO anon;`), "不該給 anon");
+  await fails(mutate(MIG_SQL, GRANT_VIEWS, `${GRANT_VIEWS}\nGRANT SELECT ON policy_jp.election_chain_progress TO anon;`), "不該給 anon");
+  await fails(mutate(MIG_SQL, "policy_jp.contribution_auto_tasks_arms()\n  TO service_role;", "policy_jp.contribution_auto_tasks_arms()\n  TO service_role, anon;"), "不該給 anon");
+  await fails(mutate(MIG_SQL, "  FROM PUBLIC, anon, authenticated;\nGRANT EXECUTE ON FUNCTION policy_jp.election_chain_steps()", "  FROM service_role;\nGRANT EXECUTE ON FUNCTION policy_jp.election_chain_steps()"), "不該給 anon");
+});
+
+Deno.test("行為的還原驗證：把 sticky・後備邊界・『前一步 done』任何一個拿掉，對應的情境就會紅", async () => {
+  // 拿掉 sticky：冷卻到期後，已開的統計任務被收回（情境 3 的核心）
+  const noSticky = await freshDb({ mig: mutate(MIG_SQL, "e.event IN ('opened', 'reopened')", "e.event IN ('never')") });
+  const s = await stickyScenario(noSticky);
+  assertEquals(s.statsStillDispatched, false);
+  assertEquals(s.statsViaAfterExpiry, undefined);
+  assertEquals(s.statsEvents, [["opened", null], ["closed", "window"]]);
+  await noSticky.close();
+
+  // 後備邊界差一天：前 45 天當天還是擋
+  const offByOne = await freshDb({ mig: mutate(MIG_SQL, "m.on_date + (p_fallback->>'offset')::INTEGER <= p_today", "m.on_date + (p_fallback->>'offset')::INTEGER < p_today") });
+  const f = await fallbackScenario(offByOne);
+  assertEquals(f.onTheDay.dispatched, []);
+  await offByOne.close();
+
+  // 『前一步 done』不看 done：統計任務在前一步沒完成時也開（情境 1 的核心）
+  const noDone = await freshDb({ mig: mutate(MIG_SQL, "WHERE p.done AND p.step IN", "WHERE p.step IN") });
+  await clock(noDone, "2027-03-01");
+  await waitingElection(noDone, ICHI, "2027-04-25");
+  await seed(noDone);
+  assertEquals(await chainIds(noDone), [`auto:local_government_missing:${AICHI}`, `auto:local_government_missing:${ICHI}`, `auto:regional_stats_missing:${ICHI}`]);
+  await noDone.close();
+
+  // 正常的 migration 三個情境都對（保證上面三個是因為被改壞而變紅，不是因為情境本身壞掉）
+  const good = await freshDb();
+  assertEquals((await stickyScenario(good)).statsStillDispatched, true);
+  await good.close();
+});
+
+Deno.test("冪等：整支重跑兩次都成功，規則・約束・視圖都不變（note 不重複接、不多寫 edit_history）", async () => {
+  const db = await freshDb();
+  const snap = async () => ({
+    rules: await rows(db, `SELECT id, activity, after_step, params, note, enabled FROM policy_jp.activity_rules ORDER BY id`),
+    audit: await count(db, `SELECT 1 FROM policy_jp.edit_history`),
+    constraints: await rows(db, `SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'policy_jp.activity_rules'::regclass ORDER BY conname`),
+    funcs: await rows(db, `SELECT proname, pg_get_functiondef(oid) AS def FROM pg_proc WHERE pronamespace = 'policy_jp'::regnamespace AND proname LIKE ANY (ARRAY['%chain%', 'date_or_null', 'contribution_auto_tasks%']) ORDER BY proname`),
+  });
+  const first = await snap();
+  await db.exec(MIG_SQL);
+  await db.exec(MIG_SQL);
+  const again = await snap();
+  assertEquals(again, first);
+  assert(first.audit > 0, "第一次套的規則修改有被審計（activity_audit 觸發器）");
+  // 重跑之後行為不變：開著的選舉空、臂空
+  await clock(db, "2027-03-01");
+  assertEquals(await count(db, `SELECT 1 FROM policy_jp.chain_open_elections`), 0);
+  await waitingElection(db, ICHI, "2027-04-25");
+  assertEquals((await armRows(db)).length, 2);
+  await db.close();
+});
+
+// =============================================================================================
+// i. 文字守門：這支 migration
+// =============================================================================================
+Deno.test("文字守門：沒有 public./ditrust 引用；這支只改 activity_rules，不寫 elections／local_governments／regional_stats；臂唯讀；函式都登記且釘 search_path", () => {
+  const code = MIG_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(code), "提到 public.");
+  assert(!/ditrust/i.test(code), "提到 ditrust");
+  assert(!/search_path\s*=\s*public/i.test(code));
+  assert(!/SECURITY DEFINER/i.test(code), "這支沒有 SECURITY DEFINER（只有 service_role 能執行，用呼叫者的權限）");
+  // 寫入的對象：只有 activity_rules（欄位・約束・三條規則）
+  const writes = [...new Set([...code.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?|ALTER\s+TABLE|DROP\s+TABLE)\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?(policy_jp\.\w+)/gi)].map((m) => m[1]))];
+  assertEquals(writes, ["policy_jp.activity_rules"]);
+  assert(!/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+policy_jp\.(elections|local_governments|regional_stats|election_milestones|task_checks|contributions|gap_events|task_dispatches|edit_history)\b/i.test(code));
+  // 定義的函式：新增就要登記（走樣 #498 慣例）；重新定義的 130000 複本只有非複本的總表
+  const defined = [...MIG_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
+  const NEW_FNS = ["election_chain_steps", "date_or_null", "activity_chain_scope", "activity_chain_escape", "chain_regional_stats_missing"];
+  const REDEFINED = ["contribution_auto_tasks_local_government_missing", "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_arms"];
+  assertEquals([...defined].sort(), [...NEW_FNS, ...REDEFINED].sort());
+  assertEquals((MIG_SQL.match(/CREATE OR REPLACE VIEW/g) ?? []).length, 2);
+  assertEquals((MIG_SQL.match(/WITH \(security_invoker = true\)/g) ?? []).length, 2);
+  for (const fn of defined) {
+    const body = fnText(MIG_SQL, `policy_jp.${fn}`);
+    if (fn !== "contribution_auto_tasks_arms") assert(body.includes("SET search_path = policy_jp, pg_temp"), `${fn} 沒釘 search_path`);
+    // 新函式與臂不寫任何東西
+    assert(!/\b(INSERT|UPDATE|DELETE|TRUNCATE)\b/.test(body.replace(/--[^\n]*/g, "")), `${fn} 不能寫東西`);
+  }
+  // 新函式與臂都在收回／授權清單裡（預設 PUBLIC 可執行，漏了就是洞）
+  const revoke = /REVOKE EXECUTE ON FUNCTION([\s\S]*?)FROM PUBLIC, anon, authenticated;/.exec(MIG_SQL)![1];
+  const grant = /GRANT EXECUTE ON FUNCTION([\s\S]*?)TO service_role;/.exec(MIG_SQL)![1];
+  for (const fn of defined) {
+    assert(revoke.includes(`policy_jp.${fn}(`), `${fn} 沒收回 PUBLIC 的執行權`);
+    assert(grant.includes(`policy_jp.${fn}(`), `${fn} 沒給 service_role`);
+  }
+  // 舊的全國掃描沒了：臂不再讀任期満了調査，改讀開著的選舉
+  for (const fn of ["contribution_auto_tasks_local_government_missing", "contribution_auto_tasks_regional_stats_missing"]) {
+    assert(fnText(ARMS_SQL, `policy_jp.${fn}`).replace(/--[^\n]*/g, "").length > 0);
+    const neu = fnText(MIG_SQL, `policy_jp.${fn}`).replace(/--[^\n]*/g, "");
+    assert(!neu.includes("term_expirations"), `${fn} 還在讀 term_expirations`);
+    assert(neu.includes("policy_jp.chain_open_elections"), `${fn} 沒有讀開著的選舉`);
+  }
+  assert(fnText(ARMS_SQL, ARM_LG).replace(/--[^\n]*/g, "").includes("term_expirations"), "對照：210100 的版本讀 term_expirations");
 });

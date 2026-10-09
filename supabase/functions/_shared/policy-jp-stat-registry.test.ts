@@ -8,10 +8,11 @@
  *      端點與抽樣對得上已知的值、加總一致（都道府県＝其下市區町村、政令市＝其行政區）；表的 CHECK／外鍵；產生器跟 migration 對得上
  *   b. 每一列照抄成交件，日本站的收件驗證（contribution-schema.ts）全收——機器核對得過的交件不會先在收件被擋
  *   c. 判斷 stat_registry_decide：一致／容許差內→apply（人口 0、面積 ±0.005、高齢化率 ±0.05，邊界含）、超出→reject（理由寫國勢調査的值）、
- *      單位或 as_of 不同→reject、別的年份／歳出／團體不在表裡→skip；全表逐列對自己 apply、全表擾動後 reject／apply 的筆數
+ *      單位或 as_of 不同→reject、別的年份／歳出／團體不在表裡→skip（decide 本身的判斷；掃描前已先濾掉）；全表逐列對自己 apply、全表擾動後 reject／apply 的筆數
  *   d. 掃描 stat_registry_verify_pending：一致→verified 並落庫進 regional_stats（reviewed_by=estat-auto、存代理交的值）、團體還沒進來維持 verified 等團體到了由
- *      落庫掃地機接手、退件寫理由、skip 的不動、別的型別不碰、p_ids 只看指定的、庫裡已有的照落庫規則（一樣＝成功、不同＝退件）、p_limit 的邊界；
- *      已知問題：older 的 skip 堆過 p_limit 時，排程掃不到後面一致的
+ *      落庫掃地機接手、退件寫理由、參考表查不到的（歳出・別的年份・團體不在表裡・年份不是整數）不掃不計數、判不了的（值不是數字）計入 skipped 且不動、
+ *      別的型別不碰、p_ids 只看指定的、庫裡已有的照落庫規則（一樣＝成功、不同＝退件）、p_limit 的邊界；
+ *      回歸：older 的查不到的 pending 堆過 p_limit 時，排程仍處理得到後面一致的（拿掉 EXISTS 濾網的還原驗證會失敗）
  *   e. TS／SQL 對齊：JP_MACHINE_VERIFIERS.regional_stat 的 rpc 名稱、參數名、reviewer 跟 SQL 一致；用 PGlite 當 supabase.rpc 跑 machineVerifyInline
  *   f. 權限：anon／authenticated 只能讀參考表、不能寫；三支函式只給 service_role
  *   g. 排程：有 pg_cron 就排（重跑只留一條、跟自治體核對與落庫掃地機錯開），沒有就略過
@@ -496,7 +497,7 @@ Deno.test("掃描：團體還沒進來的維持 verified 等著（estat-auto、�
   await db.close();
 });
 
-Deno.test("掃描：不一致的退件（理由寫國勢調査的值）、判不了的不動、別的型別不碰", async () => {
+Deno.test("掃描：不一致的退件（理由寫國勢調査的值）、查不到的不掃不計數、判不了的計入 skipped 不動、別的型別不碰", async () => {
   const db = await freshDb();
   await seedLg(db, ["232033"]);
   const wrongPop = await submit(db, "regional_stat", statPayload("232033", "population", 368789));
@@ -504,20 +505,23 @@ Deno.test("掃描：不一致的退件（理由寫國勢調査的值）、判不
   const wrongUnit = await submit(db, "regional_stat", exact("232033", "aging_rate", { unit: "％" }));
   const wrongDate = await submit(db, "regional_stat", exact("232033", "aging_rate", { as_of: "2020-10-01" }));
   const good = await submit(db, "regional_stat", exact("232033", "aging_rate"));
-  // 判不了的：別的年份、歳出、碼表沒有的團體、北方領土
-  const skips = [
+  // 參考表查不到的（別的年份、歳出、碼表沒有的團體、北方領土、年份不是整數）：掃描 SQL 先濾掉，不掃、不計數，一直停在 pending 等同儕
+  const unknown = [
     await submit(db, "regional_stat", statPayload("232033", "population", 380000, { year: 2020, as_of: "2020-10-01" })),
     await submit(db, "regional_stat", statPayload("232033", "budget_expenditure", 98765432, { year: 2023, as_of: undefined })),
     await submit(db, "regional_stat", statPayload("999997", "population", 100)),
     await submit(db, "regional_stat", statPayload("016951", "population", 0)),
+    await submit(db, "regional_stat", exact("232033", "population", { year: 2025.4 })),
   ];
+  // 查得到、但 decide 判不了的（value 不是數字：收件驗證會擋，直接寫庫才有）：掃到、計入 skipped、不動
+  const undecidable = [await submit(db, "regional_stat", statPayload("232033", "population", "368788"))];
   // 別的型別：即使 payload 長得像統計也不碰
   const others = [
     await submit(db, "local_government", lgPayloadOf(REGS.find((r) => r.lg_code === "230006")!)),
     await submit(db, "election", { lg_code: "232033", election_type: "mayor", election_reason: "regular", election_date: "2027-04-25" }),
     await submit(db, "no_change", exact("232033", "population")),
   ];
-  assertEquals(await runStat(db), out({ applied: 1, rejected: 4, skipped: 4 }));
+  assertEquals(await runStat(db), out({ applied: 1, rejected: 4, skipped: 1 }));
   assertEquals((await contribution(db, good)).status, "applied");
   for (const [id, expect] of [[wrongPop, "368788"], [wrongArea, "113.82"], [wrongUnit, "unit 要是「%」"], [wrongDate, "2025-10-01"]] as const) {
     const c = await contribution(db, id);
@@ -526,9 +530,9 @@ Deno.test("掃描：不一致的退件（理由寫國勢調査的值）、判不
     assert(c.review_notes!.startsWith("[estat-auto] 國勢調査（e-Stat）自動核對不通過：") && c.review_notes!.endsWith("。照國勢調査的值改正後重新交件"), c.review_notes!);
     assert(c.review_notes!.includes(expect), `${expect} ⊂ ${c.review_notes}`);
   }
-  for (const id of [...skips, ...others]) {
+  for (const id of [...unknown, ...undecidable, ...others]) {
     const c = await contribution(db, id);
-    assertEquals([c.status, c.reviewed_by, c.review_notes, c.verified_at], ["pending", null, null, null], "判不了的、別的型別都原封不動");
+    assertEquals([c.status, c.reviewed_by, c.review_notes, c.verified_at], ["pending", null, null, null], "查不到的、判不了的、別的型別都原封不動");
   }
   assertEquals((await statRows(db)).length, 1, "正式列只有 good 那一筆");
   await db.close();
@@ -562,11 +566,14 @@ Deno.test("交件當下核對（p_ids）：只看指定的那幾筆，其他 pen
   const a = await submit(db, "regional_stat", exact("232033", "population"));
   const b = await submit(db, "regional_stat", exact("232033", "area_km2"));
   const lg = await submit(db, "local_government", lgPayloadOf(REGS.find((r) => r.lg_code === "233021")!));
+  const budget = await submit(db, "regional_stat", statPayload("232033", "budget_expenditure", 98765432, { year: 2023, as_of: undefined }));
   const withIds = async (ids: string[] | null) =>
     (await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.stat_registry_verify_pending(10, $1::UUID[]) AS r`, [ids])).r;
   assertEquals(await withIds([]), ZERO);
   assertEquals(await withIds([lg]), ZERO, "指到 local_government 的 id：這支不碰");
   assertEquals((await contribution(db, lg)).status, "pending");
+  assertEquals(await withIds([budget]), ZERO, "指到參考表查不到的（歳出）：不掃、不計數，連 p_ids 也一樣");
+  assertEquals((await contribution(db, budget)).status, "pending");
   assertEquals(await withIds([b]), out({ applied: 1 }));
   assertEquals((await contribution(db, a)).status, "pending");
   assertEquals((await contribution(db, b)).status, "applied");
@@ -574,6 +581,7 @@ Deno.test("交件當下核對（p_ids）：只看指定的那幾筆，其他 pen
   assertEquals(await withIds(null), out({ applied: 1 }), "NULL＝全部 pending（排程）");
   assertEquals((await contribution(db, a)).status, "applied");
   assertEquals((await contribution(db, lg)).status, "pending");
+  assertEquals((await contribution(db, budget)).status, "pending");
   await db.close();
 });
 
@@ -598,37 +606,60 @@ Deno.test("掃描：p_limit 的邊界——0 當 1、照交件順序（舊的先
   assert(body.includes("LEAST(COALESCE(p_limit, 2000), 5000)"));
 });
 
-Deno.test("掃描：年份不是整數（直接寫庫才有可能，收件驗證會擋）——核對端當整數放行，落庫端擋下，最終不進正式表", async () => {
+Deno.test("掃描：年份不是整數（直接寫庫才有可能，收件驗證會擋）——參考表查不到，不掃不計數，維持 pending、不進正式表", async () => {
   const db = await freshDb();
   await seedLg(db, ["232033"]);
   const id = await submit(db, "regional_stat", exact("232033", "population", { year: 2025.4 }));
-  assertEquals(await runStat(db), out({ other: 1 }));
+  assertEquals(await runStat(db), ZERO);
+  assertEquals((await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.stat_registry_verify_pending(10, $1::UUID[]) AS r`, [[id]])).r, ZERO);
   const c = await contribution(db, id);
-  assertEquals(c.status, "rejected");
-  assert(c.review_notes!.includes("year 要是 1900～2100 的整數"), c.review_notes!);
+  assertEquals([c.status, c.reviewed_by, c.review_notes, c.verified_at], ["pending", null, null, null]);
   assertEquals(await statRows(db), []);
   await db.close();
 });
 
-Deno.test("掃描：older 的 skip（別的年份・歳出）堆過 p_limit 時，後面一致的仍要被排程處理——已知問題：目前會被餓死", async () => {
-  const db = await freshDb();
+/** 查不到的 pending 堆在前面、最後來一筆對得上的：交件當下（p_ids）與排程（預設 p_limit、沒有 p_ids）各會處理到幾筆 */
+async function starvationScenario(db: PGlite) {
   await seedLg(db, ["232033"]);
-  // 判不了的 pending（別的年份、歳出）會一直留著等同儕，而日本站同儕很少：先堆 2,100 筆比較舊的
+  // 參考表查不到的 pending（歳出、別的年份、北方領土）會一直留著等同儕，而日本站同儕很少：先堆 2,100 筆比較舊的
   await db.exec(`INSERT INTO policy_jp.contributions (contribution_type, payload, source_urls, agent_name, contributor_ip_hash, payload_hash, created_at)
     SELECT 'regional_stat',
-           CASE WHEN g % 2 = 0 THEN jsonb_build_object('lg_code', '232033', 'stat_key', 'budget_expenditure', 'year', 2023, 'value', 1000 + g, 'unit', '千円')
-                ELSE jsonb_build_object('lg_code', '232033', 'stat_key', 'population', 'year', 2020, 'value', 300000 + g, 'unit', '人', 'as_of', '2020-10-01') END,
+           CASE g % 3
+             WHEN 0 THEN jsonb_build_object('lg_code', '232033', 'stat_key', 'budget_expenditure', 'year', 2023, 'value', 1000 + g, 'unit', '千円')
+             WHEN 1 THEN jsonb_build_object('lg_code', '232033', 'stat_key', 'population', 'year', 2020, 'value', 300000 + g, 'unit', '人', 'as_of', '2020-10-01')
+             ELSE jsonb_build_object('lg_code', '016951', 'stat_key', 'population', 'year', 2025, 'value', g, 'unit', '人') END,
            ARRAY['${ESTAT}'], 'backlog-agent', 'backlog-ip-' || g, 'backlog-' || g, TIMESTAMPTZ '2026-09-01 00:00:00+00' + make_interval(secs => g)
       FROM generate_series(1, 2100) g`);
   const fresh = await submit(db, "regional_stat", exact("232033", "population"));
-  // 交件當下用 p_ids 的路不受堆積影響（jp-report 就是這樣叫）
-  assertEquals((await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.stat_registry_verify_pending(10, $1::UUID[]) AS r`, [[fresh]])).r, out({ applied: 1 }));
+  const viaIds = (await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.stat_registry_verify_pending(10, $1::UUID[]) AS r`, [[fresh]])).r;
   const fresh2 = await submit(db, "regional_stat", exact("232033", "area_km2"));
-  // 排程（預設 p_limit 2000、沒有 p_ids）：意圖是一致的都要處理。現況：前 2,000 筆全是 skip，後面的永遠輪不到
-  const r = await runStat(db);
-  assertEquals(r.applied, 1, `排程掃描沒處理到後面一致的交件（${JSON.stringify(r)}）：skip 的 pending 佔滿了 p_limit 名額，` +
-    "要在 SQL 先濾掉參考表裡沒有的（lg_code、stat_key、year）或把 skip 的不算進名額");
-  assertEquals((await contribution(db, fresh2)).status, "applied");
+  const sweep = await runStat(db);
+  const left = (await one<{ n: number }>(db,
+    `SELECT count(*)::INT AS n FROM policy_jp.contributions WHERE contribution_type = 'regional_stat' AND status = 'pending' AND agent_name = 'backlog-agent'`)).n;
+  return { viaIds, sweep, left, fresh2: (await contribution(db, fresh2)).status };
+}
+
+Deno.test("掃描（回歸）：older 的查不到的 pending（別的年份・歳出・北方領土）堆過 p_limit，後面一致的仍被排程處理；舊的不計數、原封不動", async () => {
+  const db = await freshDb();
+  const r = await starvationScenario(db);
+  assertEquals(r.viaIds, out({ applied: 1 }), "交件當下（p_ids）本來就不受堆積影響");
+  assertEquals(r.sweep, out({ applied: 1 }), "排程（預設 p_limit 2000）不被 2,100 筆查不到的佔滿名額，也不把它們算進 skipped");
+  assertEquals(r.fresh2, "applied");
+  assertEquals(r.left, 2100, "查不到的 2,100 筆都還在 pending 等同儕");
+  await db.close();
+});
+
+Deno.test("掃描（還原驗證）：拿掉掃描 SQL 的「只掃參考表查得到的」濾網，同一個情境排程就餓死（applied 0、skipped 2000）", async () => {
+  const filter = /\n[ \t]+AND EXISTS \(SELECT 1 FROM policy_jp\.stat_registry r\n[ \t]+WHERE r\.lg_code = payload->>'lg_code'[^\n]*\)\n/g;
+  assertEquals((REG_SQL.match(filter) ?? []).length, 1, "濾網在 migration 裡剛好出現一次");
+  const noFilter = REG_SQL.replace(filter, "\n");
+  assertNotEquals(noFilter, REG_SQL);
+  const db = await freshDb({ reg: noFilter });
+  const r = await starvationScenario(db);
+  assertEquals(r.viaIds, out({ applied: 1 }), "p_ids 的路沒有濾網也沒事");
+  assertEquals(r.sweep, out({ skipped: 2000 }), "沒有濾網：前 2,000 筆全是查不到的，後面一致的輪不到");
+  assertEquals(r.fresh2, "pending");
+  assertEquals(r.left, 2100);
   await db.close();
 });
 
@@ -681,7 +712,7 @@ Deno.test("交件當下核對：machineVerifyInline 用 PGlite 當 supabase.rpc�
     { id: good, contribution_type: "regional_stat" }, { id: bad, contribution_type: "regional_stat" }, { id: skip, contribution_type: "regional_stat" },
     { id: election, contribution_type: "election" },
   ]);
-  assertEquals(o, out({ applied: 3, rejected: 1, skipped: 1 }));
+  assertEquals(o, out({ applied: 3, rejected: 1 }), "歳出參考表查不到：不掃、不計數、維持 pending");
   assertEquals((await contribution(db, good)).reviewed_by, "estat-auto");
   assertEquals((await contribution(db, aichi)).reviewed_by, "soumu-auto");
   assertEquals((await contribution(db, bad)).status, "rejected");

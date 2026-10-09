@@ -7,7 +7,8 @@
  *   b. 讀音轉換（kana.ts）：半角カナ→ひらがな，跟資料裡的 kana_raw→kana 一致
  *   c. 判斷：一致→apply、任一欄不同→reject（理由帶總務省的值）、不在表裡／只差市・中核市→skip
  *   d. 掃描：pending 的 local_government 一致的直接落庫（reviewed_by=soumu-auto）、都道府県還沒進來的維持 verified 等落庫掃地機、
- *      退件寫理由、skip 的不動、別的型別不碰；整條：都道府県與市一起交 → 兩輪排程後都在 local_governments、網址 slug 照規則
+ *      退件寫理由、skip 的不動、別的型別不碰；整條：都道府県與市一起交 → 兩輪排程後都在 local_governments、網址 slug 照規則；
+ *      回歸：碼表查不到的團體碼（檢查碼正確但碼表沒有）的 pending 堆過 p_limit，後面一致的仍被排程處理（拿掉 EXISTS 濾網的還原驗證會失敗）
  *   e. 權限、排程、自我檢查（還原驗證）
  */
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
@@ -271,6 +272,46 @@ Deno.test("交件當下核對（p_ids）：只看指定的那幾筆，其他 pen
   assertEquals((await contribution(db, a)).status, "pending");
   assertEquals((await contribution(db, b)).status, "applied");
   assertEquals((await runVerify(db)).applied, 1, "排程把剩下的掃掉");
+  await db.close();
+});
+
+/** 碼表查不到的 pending 堆在前面、最後來一筆對得上的：交件當下（p_ids）與排程（預設 p_limit、沒有 p_ids）各會處理到幾筆 */
+async function starvationScenario(db: PGlite) {
+  // 團體碼檢查碼正確、但總務省的表裡沒有 → 一定是 skip，會一直停在 pending 等同儕：先堆 2,100 筆比較舊的
+  await db.exec(`INSERT INTO policy_jp.contributions (contribution_type, payload, source_urls, agent_name, contributor_ip_hash, payload_hash, created_at)
+    SELECT 'local_government',
+           jsonb_build_object('lg_code', c.code, 'kind', 'city', 'pref_code', policy_jp.lg_pref_code(c.code), 'name', '某' || c.n || '市', 'kana', 'なにがしし'),
+           ARRAY['${SOUMU}'], 'backlog-agent', 'backlog-ip-' || c.n, 'backlog-' || c.n, TIMESTAMPTZ '2026-09-01 00:00:00+00' + make_interval(secs => c.n)
+      FROM (SELECT p AS n, lpad(p::TEXT, 5, '0') || d::TEXT AS code FROM generate_series(90001, 92100) p, generate_series(0, 9) d
+             WHERE policy_jp.lg_code_valid(lpad(p::TEXT, 5, '0') || d::TEXT)) c
+     WHERE NOT EXISTS (SELECT 1 FROM policy_jp.lg_code_registry r WHERE r.lg_code = c.code)`);
+  assertEquals((await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.contributions WHERE agent_name = 'backlog-agent'`)).n, 2100);
+  const fresh = await submit(db, "local_government", payloadOf(reg("230006")));
+  const viaIds = (await one<{ r: Record<string, number> }>(db, `SELECT policy_jp.lg_registry_verify_pending(10, $1::UUID[]) AS r`, [[fresh]])).r;
+  const fresh2 = await submit(db, "local_government", payloadOf(reg("010006")));
+  const sweep = await runVerify(db);
+  const left = (await one<{ n: number }>(db, `SELECT count(*)::INT AS n FROM policy_jp.contributions WHERE status = 'pending' AND agent_name = 'backlog-agent'`)).n;
+  return { viaIds, sweep, left, fresh2: (await contribution(db, fresh2)).status };
+}
+
+Deno.test("掃描（回歸）：碼表查不到的團體碼堆過 p_limit，後面一致的仍被排程處理；舊的不計數、原封不動", async () => {
+  const db = await freshDb();
+  const r = await starvationScenario(db);
+  assertEquals(r.viaIds, { applied: 1, waiting: 0, rejected: 0, skipped: 0, other: 0 }, "交件當下（p_ids）本來就不受堆積影響");
+  assertEquals(r.sweep, { applied: 1, waiting: 0, rejected: 0, skipped: 0, other: 0 }, "排程（預設 p_limit 2000）不被 2,100 筆查不到的佔滿名額，也不把它們算進 skipped");
+  assertEquals(r.fresh2, "applied");
+  assertEquals(r.left, 2100, "查不到的 2,100 筆都還在 pending 等同儕");
+  await db.close();
+});
+
+Deno.test("掃描（還原驗證）：拿掉掃描 SQL 的「只掃碼表查得到的」濾網，同一個情境排程就餓死（applied 0、skipped 2000）", async () => {
+  const noFilter = mutate(REG_SQL, "AND EXISTS (SELECT 1 FROM policy_jp.lg_code_registry r WHERE r.lg_code = payload->>'lg_code')", "");
+  const db = await freshDb({ reg: noFilter });
+  const r = await starvationScenario(db);
+  assertEquals(r.viaIds, { applied: 1, waiting: 0, rejected: 0, skipped: 0, other: 0 }, "p_ids 的路沒有濾網也沒事");
+  assertEquals(r.sweep, { applied: 0, waiting: 0, rejected: 0, skipped: 2000, other: 0 }, "沒有濾網：前 2,000 筆全是碼表查不到的，後面一致的輪不到");
+  assertEquals(r.fresh2, "pending");
+  assertEquals(r.left, 2100);
   await db.close();
 });
 
