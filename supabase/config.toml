@@ -525,3 +525,12 @@ enabled = true
 # 閘道不驗 JWT 是為了讓 pg_cron 打得到，但函式自己驗呼叫者：x-cron-secret（密鑰只在 Vault，函式用 RPC bulletin_watch_cron_secret_ok 請資料庫比對）或 service role bearer，驗不過一律拒絕
 verify_jwt = false
 entrypoint = "./functions/bulletin-watch/index.ts"
+
+[functions.console-admin]
+enabled = true
+# 站務主控台（policy-console）手動調整派工開關與選舉里程碑（#518）。呼叫者帶的是 Firebase ID Token（policy-console 的 Google 登入），
+# 不是 Supabase 自己發的 JWT——閘道預設 verify_jwt=true 會拿 Supabase 的 JWT 密鑰去驗這張 token，簽發者不同一律 401，函式本體根本跑不到。
+# 所以這裡要關掉閘道驗證，函式自己驗（_shared/firebase-id-token.ts：RS256 簽名＋Google JWKS＋aud/iss 是這個 Firebase 專案＋email_verified＋
+# email 等於主控台擁有者），驗不過一律拒絕。
+verify_jwt = false
+entrypoint = "./functions/console-admin/index.ts"
