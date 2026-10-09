@@ -31,6 +31,10 @@
  *   ※ 後面的 policy_jp migration（落庫 20261009210000、缺口臂 20261009210100 等）不得重新定義任何已登記的複本——重新定義＝逃過上面的逐字比對
  *      （「後續 migration 不得重新定義已登記的複本」一條守住）。唯一的例外是登記在 FOLLOWED 的跟進版（正見改了、日本版跟進，逐字比對改讀它）。那兩支的函式登記與機械替換比對在 policy-jp-apply.test.ts。
  *
+ * 日本專屬的偏離（DEVIATED，20261009300000，維護者 10-09「最近的選舉先派」）：rebalance_queue（層內排序鍵 queue_at → 步驟順位 → 日期 → queue_at）與
+ * seed_auto_task_queue（選舉發現／等團體落庫的選舉沒有 polling 里程碑，多一段用 target 日期定層）在日本版多了標記的片段，台灣沒有選舉鏈、不跟。
+ * 這兩支仍在 PAIRS（跟正見的逐字比對讀「緊接在前的那一版」），另由 DEVIATED 守「偏離版 ＋ 登記的 jpEdits ＝ 緊接在前的那一版，逐字」，偏離只能是登記的幾處。
+ *
  * 日本專屬清單（JP_ONLY，檔尾；主線審查條件）：上面的 NONCOPY／NONCOPY_ED 只管 130000、130100 兩支 migration，之後的 migration（落庫、缺口臂、機器核對、選舉鏈…）
  * 新增的函式與視圖沒有人點名。所以掃描「所有」檔名帶 _policy_jp_ 的 migration（去掉 SQL 註解），每個 `CREATE [OR REPLACE] FUNCTION／VIEW policy_jp.<名>`
  * 都必須是下面兩種之一，否則整支測試紅：
@@ -53,6 +57,38 @@ const NONCOPY_ED = ["activity_arm_names", "contribution_auto_tasks_arms", "contr
 const FOLLOW_MIG = "20261009150100_policy_jp_rebalance_anchor.sql";
 const FOLLOW_SQL = await readMig(FOLLOW_MIG);
 const FOLLOWED: Record<string, string> = { rebalance_queue: FOLLOW_SQL };
+
+/**
+ * 日本專屬的偏離（20261009300000，維護者 10-09「最近的選舉先派」）：rebalance_queue、seed_auto_task_queue 在日本版多了標記的片段，
+ * 不再逐字等於正見（走樣比對仍讀它們「緊接在前的那一版」＝FOLLOWED／130000，所以跟正見的逐字比對不動）。
+ * 這裡另外守：偏離版 ＋ 登記的 jpEdits（把日本專屬片段換回原樣）＝緊接在前的那一版，逐字。偏離只能是登記的這幾處，別處一個字都不准動。
+ */
+const DEV_MIG = "20261009300000_policy_jp_chain_priority.sql";
+const DEV_SQL = await readMig(DEV_MIG);
+const DEVIATED: Record<string, { prev: string; why: string; jpEdits: Edit[] }> = {
+  rebalance_queue: {
+    prev: FOLLOW_SQL,
+    why: "層內排序鍵 queue_at → 步驟順位 → 日期 → queue_at（最近的選舉先派；手動任務步驟 0 仍排同層最前、照 queue_at）。台灣沒有選舉鏈，不跟",
+    jpEdits: [
+      [
+        ",\n           policy_jp.chain_step_rank(d.task_id, d.task_type) AS srank, policy_jp.chain_sort_date(d.task_id, d.target) AS sdate  -- 日本版：層內排序鍵\n      FROM",
+        "\n      FROM",
+      ],
+      [
+        "ORDER BY w.srank, w.sdate NULLS LAST, w.queue_at, w.task_id) AS k FROM w  -- 日本版：同層內 步驟 → 日期 → 先進先出",
+        "ORDER BY w.queue_at, w.task_id) AS k FROM w",
+      ],
+    ],
+  },
+  seed_auto_task_queue: {
+    prev: MIG_SQL,
+    why: "選舉發現的缺口沒有選舉列（沒有 polling 里程碑，規則算不出層），seed 多一段用 target 的 vote_window_from 定層（chain_date_tier）。台灣沒有這支臂",
+    jpEdits: [{
+      span: ["  -- >>> 日本版：選舉發現的層\n", "  -- <<< 日本版：選舉發現的層\n\n"],
+      with: "",
+    }],
+  },
+};
 
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
@@ -217,6 +253,33 @@ for (const p of PAIRS) {
   });
 }
 
+for (const [name, v] of Object.entries(DEVIATED)) {
+  Deno.test(`走樣（日本專屬偏離）${name}：偏離版 ＋ 登記的 jpEdits ＝ 緊接在前的那一版（逐字）；jpEdits 有效、不登記的偏離會紅`, () => {
+    assert(PAIRS.some((p) => p.name === name), `${name} 要在複本清單 PAIRS 裡（偏離＝複本加登記的日本專屬片段）`);
+    assert(v.why.length > 10 && v.jpEdits.length > 0);
+    const dev = fnText(DEV_SQL, `policy_jp.${name}`);
+    const prev = fnText(v.prev, `policy_jp.${name}`);
+    assertEquals(applyEdits(dev, v.jpEdits), prev);
+    assertNotEquals(dev, prev, "偏離版跟前一版一樣＝沒偏離，不用登記");
+    // 還原驗證：偏離版悄悄多改一個字（登記外的偏離），或登記的片段被改掉，就對不上
+    assertNotEquals(applyEdits(dev.replace("FROM _gaps g", "FROM _gaps g /* x */").replace("SELECT d.task_id", "SELECT d.task_id /* x */"), v.jpEdits), prev);
+  });
+}
+
+Deno.test("走樣（日本專屬偏離）：20261009300000 定義的函式＝登記的偏離複本＋JP_ONLY 登記的日本專屬函式；偏離的複本不能是別的 migration 跟進版", () => {
+  const defined = [...DEV_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
+  const dev = Object.keys(DEVIATED);
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of defined) {
+    if (copies.has(n)) assert(dev.includes(n), `${n} 是複本，在 ${DEV_MIG} 重新定義要登記到 DEVIATED（附 jpEdits）`);
+    else assert(JP_ONLY[n]?.mig.includes(T_PRIO), `${n} 要登記在 JP_ONLY，mig 含 ${T_PRIO}`);
+    assert(fnText(DEV_SQL, `policy_jp.${n}`).includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+  }
+  for (const n of dev) assert(defined.includes(n), `${n} 登記了偏離卻沒有定義`);
+  const stripped = DEV_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+});
+
 /** 設定表 dispatch_records_settings 的建表敘述（CREATE TABLE … ( … );）：欄位、預設值、CHECK 範圍 */
 const settingsDdl = (sql: string, name: string): string => {
   const a = sql.indexOf(`CREATE TABLE IF NOT EXISTS ${name} (`);
@@ -350,7 +413,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED)) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED)) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
@@ -375,6 +438,7 @@ const T_LGR = "20261009250000";
 const T_STR = "20261009250200";
 const T_CHAIN = "20261009250400";
 const T_SAME = "20261009280000"; // 同一件事（#521）
+const T_PRIO = "20261009300000"; // 選舉鏈依投票日遠近派工（層＋層內順序）
 const T_SAME2 = "20261009280100"; // 同一件事第二步：收編（#521，policy-ops#24）
 const T_CONSOLE = "20261009310000"; // 主控台日本站（#518 第二步）
 
@@ -441,8 +505,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261009210100 gap_arms：兩支新缺口臂＋#503 ----
   task_unavailable: { mig: [T_ARMS], why: "任務現在能不能派（飽和／no_change 等票或已通過／冷卻中／資料型交件通過等落庫），臂在 LIMIT cap 之前用它排除（#503）；前三項與 refresh_dispatch_blocked 同定義，有行為對照測試" },
   regional_stat_label: { mig: [T_ARMS], why: "統計項目的日文名（任務描述用）" },
-  contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；250400 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
-  contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
+  contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN, T_PRIO], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；250400 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
+  contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN, T_PRIO], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
 
   // ---- 20261009250000 lg_registry：自治體（local_government）機器核對，照正見 cec-verify ----
   kana_fold: { mig: [T_LGR], why: "讀音比對用：小寫假名摺成大寫（總務省團體碼表的拗音・促音大小寫不一致，照正確讀音交的不該被退件）" },
@@ -461,6 +525,9 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
+  chain_step_rank: { mig: [T_PRIO], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
+  chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
 
   // ---- 20261009280000 same_claim：同一件事只能有一筆（#521，日本站試點；正見九合一之後才接，所以不是複本） ----
@@ -537,7 +604,7 @@ async function readJpMigrations(): Promise<Record<string, string>> {
 Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本（PAIRS／FOLLOWED／公開統計）＋日本專屬清單 JP_ONLY（新加的不登記就紅、登記了卻沒人定義也紅）；偵測器有還原驗證", async () => {
   const files = await readJpMigrations();
   const ids = Object.keys(files).map(ID);
-  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, "20261008195000", "20261009130200", "20261009250100", "20261009250300"]) {
+  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, T_PRIO, "20261008195000", "20261009130200", "20261009250100", "20261009250300"]) {
     assert(ids.includes(t), `掃描範圍要包含 ${t}（放行靠登記，不是靠沒掃到）`);
   }
   const scan = scanDefinitions(files);
