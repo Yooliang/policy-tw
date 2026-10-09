@@ -62,6 +62,11 @@ Deno.test("清單只放網域、不放路徑與協定；中文網域與 punycode
   for (const d of SELF_HOSTS) assert(/^[a-z0-9.-]+$/.test(d), `清單項目要是小寫 ASCII 網域：${d}`);
   assertEquals(new URL("https://正見.tw/").hostname, "xn--2lw665d.tw");
   assert(SELF_HOSTS.includes("policy-jp.web.app"), "日本站前台要在清單裡");
+  assert(SELF_HOSTS.includes("hustings.net"), "兩站共用網域要在清單裡（1.87.0）");
+  for (const u of ["https://jp.hustings.net/pref/hokkaido", "https://tw.hustings.net/x", "https://www.hustings.net/", "https://hustings.net/"]) {
+    assert(isSelfCitationUrl(u), `hustings.net 與子網域要算自己：${u}`);
+  }
+  assertEquals(isSelfCitationUrl("https://nothustings.net/"), false, "相似網域不算");
   assert(SELF_HOSTS.includes("policy-tw.web.app"));
   assert(SELF_HOSTS.includes("xn--2lw665d.tw"));
 });
