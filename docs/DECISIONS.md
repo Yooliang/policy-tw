@@ -12,6 +12,7 @@
 ## 2026-10-09
 
 - [#349 第二階段 B：刪 `related_policies` 表、`related_poli…](decisions/2026-10-09-349第二階段B刪related_policies表.md)
+- [主控台（policy-console）手動調整派工開關與選舉日期（#518）：沿用 P0 設計（…](decisions/2026-10-09-主控台手動調整派工開關與選舉日期518.md)
 - [代表的號次單位改用選舉區：選舉區走「補選區臂＋candidacy 的 electoral_dis…](decisions/2026-10-09-代表的號次單位改用選舉區選舉區走.md)
 - [名單清查的重查判準扣掉登記後退選的人；Worker 把 `/functions/v1/sourc…](decisions/2026-10-09-名單清查判準扣掉登記後退選與Worker轉址sources.md)
 - [地方基本統計：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例，走代理交件，跟日本站 `…](decisions/2026-10-09-地方基本統計走代理交件同日本站同形.md)
