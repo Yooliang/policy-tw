@@ -23,7 +23,7 @@ import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
 import { nonPageResponse } from './render-status.js'
 import { stripShellHead } from './shell-head.js'
-import { sameShell, shellVersion } from './shell-version.js'
+import { createShellLoader, shellVersion, shouldRerender } from './shell-version.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
@@ -131,20 +131,15 @@ function apiRedirect(request) {
 
 const DROP_REQUEST_HEADERS = ['host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'cf-worker', 'x-forwarded-proto', 'x-real-ip']
 
-/** 客戶端殼：每個 isolate 抓一次、10 分鐘後重抓（部署後最多 10 分鐘拿到舊 assets 清單） */
-let shellPromise = null
-let shellAt = 0
-async function loadShell() {
-  // 殼每分鐘重抓一次（以前 10 分鐘）：取快取時要拿它比版本，部署後最多一分鐘就認得新版（app.html 是 no-cache，抓的是最新的）
-  if (!shellPromise || Date.now() - shellAt > 60 * 1000) {
-    shellAt = Date.now()
-    shellPromise = fetch(`${cfg.origin}/app.html`, { headers: { 'User-Agent': 'policy-tw-ssr' } })
-      .then((r) => { if (!r.ok) throw new Error(`shell ${r.status}`); return r.text() })
-      .then((html) => html.replace(/\s*<meta name="robots" content="noindex">/, ''))
-      .catch((e) => { shellPromise = null; throw e })
-  }
-  return shellPromise
-}
+/**
+ * 客戶端殼：每個 isolate 一份，每分鐘重抓（以前 10 分鐘）——取快取時要拿它比版本，部署後最多一分鐘就認得新版（app.html 是 no-cache）。
+ * 抓失敗後 10 秒內不重抓，有上一份就照用（shell-version.js 的 createShellLoader，policy-ops#37）。
+ */
+const shellLoader = createShellLoader(() =>
+  fetch(`${cfg.origin}/app.html`, { headers: { 'User-Agent': 'policy-tw-ssr' } })
+    .then((r) => { if (!r.ok) throw new Error(`shell ${r.status}`); return r.text() })
+    .then((html) => html.replace(/\s*<meta name="robots" content="noindex">/, '')))
+const loadShell = () => shellLoader.load()
 
 function escapeState(json) {
   // 跟 vite-ssg 一樣：字串化兩次，客戶端 JSON.parse；</script> 要拆開
@@ -194,8 +189,9 @@ async function renderPage(request, ctx) {
   const cache = caches.default
   const cacheKey = new Request(`${url.origin}${path}`, { method: 'GET' })
   const hit = await cache.match(cacheKey)
-  // 部署後快取裡的舊頁還指著舊的 /assets 檔（Firebase 部署會刪掉，回 404）：殼換版了就當沒命中、當場重算（policy-ops#37）
-  if (hit && !sameShell(hit.headers.get('X-Shell-Version'), shellVersion(await loadShell().catch(() => '')))) {
+  // 部署後快取裡的舊頁還指著舊的 /assets 檔（Firebase 部署會刪掉，回 404）：殼換版了就當沒命中、當場重算（policy-ops#37）。
+  // 拿不到殼時沿用快取（shouldRerender 回 false），不把完好的頁丟掉
+  if (hit && shouldRerender(hit.headers.get('X-Shell-Version'), await shellLoader.peek())) {
     return await renderAndStore(path, url.origin, cacheKey, cache, url.search)
   }
   if (hit) {
