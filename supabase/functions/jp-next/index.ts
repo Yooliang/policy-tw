@@ -12,6 +12,8 @@ import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { agentToolNotice } from "../_shared/agent-tool-hint.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
+import { isSameClaimType, RESOLVED_CLAIM_HELP } from "../_shared/same-claims.ts";
+import { jpSameClaimProbe } from "../_shared/jp/same-claim-probe.ts";
 
 /**
  * jp-next — 日本站統一派工端點（對應正見的 next）。無金鑰，誰都能用（同正見 next，沒有白名單）。
@@ -163,6 +165,18 @@ async function handle(req: Request): Promise<Response> {
       }
     };
 
+    // 同一件事（#521）：任務與驗證項都附 item.current.same_claims（在庫＋審議中，附 your_network_voted）；查不到不擋派工
+    const sameClaimsFor = async (type: string, payload: unknown, exclude: string | null = null): Promise<Record<string, unknown> | null> => {
+      try {
+        const { data, error } = await supabase.rpc("same_claim_matches", { p_type: type, p_payload: payload, p_ip_hash: ipHash, p_exclude: exclude });
+        if (error) throw new Error(error.message);
+        return data ? { existing: data.existing ?? [], pending: data.pending ?? [] } : null;
+      } catch (e) {
+        console.error("same_claim_matches:", e instanceof Error ? e.message : String(e));
+        return null;
+      }
+    };
+
     const serveVerify = async (): Promise<Response> => {
       const pick = candidates[0]!;
       try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
@@ -197,6 +211,10 @@ async function handle(req: Request): Promise<Response> {
               : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。fields 裡的逐欄判定沒有達到門檻，不能當反證。",
           };
         }
+      }
+      if (isSameClaimType("jp", pick.contribution_type)) {
+        const sc = await sameClaimsFor(pick.contribution_type, pick.payload, pick.id);
+        if (sc) verifyCurrent.same_claims = sc;
       }
       return json({
         ...base,
@@ -326,13 +344,15 @@ async function handle(req: Request): Promise<Response> {
     }
     await lease(t.task_id, t.target);
     try { await supabase.rpc("task_dispatched", { p_task_id: t.task_id }); } catch (e) { console.error("task_dispatched:", e instanceof Error ? e.message : String(e)); }
+    const probe = jpSameClaimProbe(t.task_id);
+    const sameClaims = probe ? await sameClaimsFor(probe.type, probe.payload) : null;
     return json({
       ...base,
       kind: "task",
       lease_minutes: LEASE_MINUTES,
       ...(await tokenFor(t.task_id)),
-      item: { ...t, source: "auto", suggested_contribution_type: null },
-      how_to: howTo,
+      item: { ...t, source: "auto", suggested_contribution_type: null, ...(sameClaims ? { current: { same_claims: sameClaims } } : {}) },
+      how_to: sameClaims ? `${howTo} 交件前先看 item.current.same_claims：${RESOLVED_CLAIM_HELP}。` : howTo,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

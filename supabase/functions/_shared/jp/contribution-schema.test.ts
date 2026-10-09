@@ -19,17 +19,17 @@ const suggestion = {
 
 const election = {
   contribution_type: "election",
-  payload: { lg_code: "131130", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "渋谷区長選挙" },
+  payload: { lg_code: "131130", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "渋谷区長選挙", resolved_claim: "new" },
   source_urls: ["https://www.city.shibuya.tokyo.jp/senkyo/"],
 };
 const localGovernment = {
   contribution_type: "local_government",
-  payload: { lg_code: "232033", kind: "city", pref_code: "230006", name: "一宮市", kana: "いちのみやし" },
+  payload: { lg_code: "232033", kind: "city", pref_code: "230006", name: "一宮市", kana: "いちのみやし", resolved_claim: "new" },
   source_urls: ["https://www.soumu.go.jp/denshijiti/code.html"],
 };
 const regionalStat = {
   contribution_type: "regional_stat",
-  payload: { lg_code: "232033", stat_key: "population", year: 2020, value: 386_678, unit: "人", as_of: "2020-10-01" },
+  payload: { lg_code: "232033", stat_key: "population", year: 2020, value: 386_678, unit: "人", as_of: "2020-10-01", resolved_claim: "new" },
   source_urls: ["https://www.e-stat.go.jp/regional-statistics/ssdsview/municipality"],
 };
 const withElection = (patch: Record<string, unknown>, drop: string[] = []) => {

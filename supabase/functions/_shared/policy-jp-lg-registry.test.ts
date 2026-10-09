@@ -138,7 +138,7 @@ Deno.test("參考表：任期満了調查（term_expirations）的每個團體�
 Deno.test("參考表：每一列照抄成交件，日本站的收件驗證全收（機器核對得過的不會先在收件被擋）", () => {
   const rejected: string[] = [];
   for (const r of REG) {
-    const v = validateContributionRequest({ agent_name: "tester", contribution_type: "local_government", payload: payloadOf(r), source_urls: [SOUMU] });
+    const v = validateContributionRequest({ agent_name: "tester", contribution_type: "local_government", payload: { ...payloadOf(r), resolved_claim: "new" }, source_urls: [SOUMU] });
     if (!v.ok) rejected.push(`${r.lg_code} ${r.name}：${v.errors.map((e) => e.message).join(" / ")}`);
   }
   assertEquals(rejected, []);

@@ -374,6 +374,7 @@ const T_ARMS = "20261009210100";
 const T_LGR = "20261009250000";
 const T_STR = "20261009250200";
 const T_CHAIN = "20261009250400";
+const T_SAME = "20261009280000"; // 同一件事（#521）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -459,6 +460,11 @@ const JP_ONLY: Record<string, JpOnly> = {
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
   election_chain_progress: { mig: [T_CHAIN], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
+
+  // ---- 20261009280000 same_claim：同一件事只能有一筆（#521，日本站試點；正見九合一之後才接，所以不是複本） ----
+  same_claim_office: { mig: [T_SAME], why: "選舉種類 → 比對用的職位（head／assembly；國政＝種類本身），同 term_expirations.office_kind" },
+  same_claim_same_term: { mig: [T_SAME], why: "選舉的「同一屆」：regular＝同一列任期満了的 [−180, +60] 窗口（查不到就差 ≤ 180 天）、其他事由＝同一天" },
+  same_claim_matches: { mig: [T_SAME], why: "登記表的 SQL 那一半：型別＋payload → 在庫列與審議中提交（附 your_network_voted）；jp-report 交件擋 resolved_claim、jp-next 附 same_claims" },
 };
 
 // ---- 掃描與比對（純函式，還原驗證也用它們） ----

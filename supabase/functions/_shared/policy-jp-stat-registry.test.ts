@@ -311,14 +311,14 @@ Deno.test("參考表：每一列照抄成 regional_stat 交件，日本站的收
   for (const s of STATS) {
     const v = validateContributionRequest({
       agent_name: "tester", contribution_type: "regional_stat",
-      payload: { lg_code: s.lg_code, stat_key: s.stat_key, year: s.year, value: s.value, unit: s.unit, as_of: s.as_of },
+      payload: { lg_code: s.lg_code, stat_key: s.stat_key, year: s.year, value: s.value, unit: s.unit, as_of: s.as_of, resolved_claim: "new" },
       source_urls: [ESTAT],
     });
     if (!v.ok) rejected.push(`${s.lg_code} ${s.stat_key}：${v.errors.map((e) => e.message).join(" / ")}`);
   }
   assertEquals(rejected, []);
   // 驗證器不是空轉：單位寫錯、人口帶小數會被擋
-  const bad = (p: Record<string, unknown>) => validateContributionRequest({ agent_name: "tester", contribution_type: "regional_stat", payload: p, source_urls: [ESTAT] }).ok;
+  const bad = (p: Record<string, unknown>) => validateContributionRequest({ agent_name: "tester", contribution_type: "regional_stat", payload: { ...p, resolved_claim: "new" }, source_urls: [ESTAT] }).ok;
   assertEquals(bad(statPayload("232033", "population", 368788)), true);
   assertEquals(bad(statPayload("232033", "population", 368788, { unit: "千円" })), false);
   assertEquals(bad(statPayload("232033", "population", 368788.5)), false);
