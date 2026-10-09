@@ -91,16 +91,14 @@ const footerList = computed(() => footerElections(elections.value, taipeiDay(Dat
           </li>
         </ul>
       </nav>
-      <!-- 各站頁尾互相連結（維護者 2026-10-09；policy-ops docs/decisions/2026-10-09-各站頁尾互相連結.md）：只放站名連結 -->
-      <nav aria-label="姊妹站" class="mt-8 pt-8 border-t border-navy-800 text-sm">
-        <ul class="flex flex-wrap justify-center gap-x-6 gap-y-2">
-          <li><span class="text-white font-semibold">姊妹站</span></li>
-          <li><a href="https://hustings.net" target="_blank" rel="noopener" class="hover:text-blue-400 transition-colors">hustings.net</a></li>
-          <li><a href="https://jp.hustings.net" target="_blank" rel="noopener" lang="ja" class="hover:text-blue-400 transition-colors">政策の系譜（日本）</a></li>
-        </ul>
-      </nav>
+      <!-- 各站頁尾互相連結（維護者 2026-10-09；policy-ops docs/decisions/2026-10-09-各站頁尾互相連結.md）：
+           跟版權放同一列、只放站名連結（維護者 2026-10-10「頁尾這個放同一列即可」） -->
       <div class="mt-8 pt-8 border-t border-navy-800 text-center text-xs">
-        <p>&copy; {{ new Date().getFullYear() }} 正見 Policy Tracker. All rights reserved.</p>
+        <p class="flex flex-wrap justify-center gap-x-3 gap-y-1">
+          <span>&copy; {{ new Date().getFullYear() }} 正見 Policy Tracker. All rights reserved.</span>
+          <a href="https://hustings.net" target="_blank" rel="noopener" class="hover:text-blue-400 transition-colors">hustings.net</a>
+          <a href="https://jp.hustings.net" target="_blank" rel="noopener" lang="ja" class="hover:text-blue-400 transition-colors">政策の系譜</a>
+        </p>
       </div>
     </div>
   </footer>
