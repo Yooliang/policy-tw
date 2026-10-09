@@ -252,7 +252,7 @@ export async function handleContribute(
     inserted = data ?? [];
   }
   const insertedByHash = new Map(inserted.map((r) => [r.payload_hash, r.id]));
-  // 有官方表可比的型別（local_government、regional_stat）交件當下就核對一次：對得上直接落庫、不計額度（排程也會掃，這裡失敗不影響交件）
+  // 有官方表可比的型別（local_government、regional_stat）交件當下就核對一次：對得上直接落庫（額度照算；排程也會掃，這裡失敗不影響交件）
   const typeByHash = new Map(toInsert.map((r) => [r.payload_hash, r.contribution_type]));
   const machineVerify = await machineVerifyInline(supabase, inserted.map((r) => ({ id: r.id, contribution_type: typeByHash.get(r.payload_hash) ?? "" })));
 

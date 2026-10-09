@@ -43,6 +43,7 @@ function makeDb(o: { pool?: Row[]; queue?: Row[]; allow?: string[]; apply?: unkn
     if (t === "rpc/contribution_effective_agree") return 3;
     if (t === "rpc/apply_contribution") return o.apply;
     if (t === "rpc/lg_registry_verify_pending") return o.machineVerify;
+    if (t === "rpc/stat_registry_verify_pending") return o.machineVerify;
     if (t === "contributions") {
       if (c.method === "POST") {
         const rows = (Array.isArray(c.body) ? c.body : [c.body]) as Row[];
@@ -375,6 +376,25 @@ Deno.test("local_government：交件當下用剛收下的 id 跑一次總務省�
     const res = await post(report, N1, ELECTION_SUBMIT);
     assertEquals(res.status, 201, JSON.stringify(res.json));
     assertEquals(report.calls.filter((c) => c.target === "rpc/lg_registry_verify_pending").length, 0, "election 不跑團體碼表核對");
+    assertEquals(report.calls.filter((c) => c.target === "rpc/stat_registry_verify_pending").length, 0, "election 不跑國勢調査核對");
     assertEquals(res.json.machine_verify, undefined);
+  });
+});
+
+Deno.test("regional_stat：交件當下用剛收下的 id 跑一次國勢調査核對（stat_registry_verify_pending），不跑團體碼表核對；結果附在回應的 machine_verify", async () => {
+  const db = makeDb({ pool: [], machineVerify: { applied: 0, waiting: 1, rejected: 0, skipped: 0, other: 0 } });
+  await withEntries(db, env(), async ({ report }) => {
+    const res = await post(report, N1, {
+      kind: "contribute", contribution_type: "regional_stat", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
+      payload: { lg_code: "232033", stat_key: "population", year: 2025, value: 378566, unit: "人", as_of: "2025-10-01" },
+      source_urls: ["https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040507382&fileKind=0"],
+    });
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    const calls = report.calls.filter((c) => c.target === "rpc/stat_registry_verify_pending");
+    assertEquals(calls.length, 1);
+    assertEquals(calls[0].body, { p_limit: 1, p_ids: [db.contributions[0].id] });
+    assertEquals(report.calls.filter((c) => c.target === "rpc/lg_registry_verify_pending").length, 0, "regional_stat 不跑團體碼表核對");
+    assertEquals((res.json.machine_verify as Row).waiting, 1);
+    assertAllJpSchema(report.calls);
   });
 });
