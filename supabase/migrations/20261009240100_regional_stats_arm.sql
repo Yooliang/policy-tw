@@ -237,4 +237,30 @@ BEGIN
 END
 $$;
 
+-- ------------------------------------------------------------
+-- 5. 票數預算影子模式的候選清單加 regional_stat（兩個維度在 vote-budget.ts；其餘照抄 20261006141600）
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION system_one_vote_budget_candidates(p_limit INTEGER DEFAULT 20)
+RETURNS TABLE (id UUID, contribution_type TEXT, payload JSONB, source_urls TEXT[])
+LANGUAGE sql STABLE AS $$
+  SELECT c.id, c.contribution_type, c.payload, c.source_urls
+  FROM contributions c
+  WHERE c.status = 'pending'
+    AND c.contribution_type IN ('policy', 'candidacy', 'correction', 'no_change', 'politician', 'policy_progress',
+                                'removal', 'merge_politician', 'question_answer', 'adjudication', 'roster_check', 'task_suggestion',
+                                'district_seats', 'policy_elements', 'lineage', 'lineage_participants', 'lineage_handover', 'lineage_link',
+                                'party_info', 'election_results', 'reassign_candidacy', 'regional_stat')
+    AND NOT EXISTS (
+      SELECT 1 FROM jev_decisions j
+      WHERE j.subject_type = 'contribution' AND j.subject_id = c.id::TEXT AND j.question = 'vote_budget'
+        AND (c.contribution_type <> 'no_change' OR j.state->'target' ? 'outcome')
+    )
+    AND (c.contribution_type <> 'no_change' OR (
+      SELECT COUNT(*) FROM jev_decisions j
+      WHERE j.subject_type = 'contribution' AND j.subject_id = c.id::TEXT AND j.question = 'vote_budget') < 2)
+  -- 新的先：新件的影子結果之後才對得到它的實際結果；舊件一天內也會輪到
+  ORDER BY c.created_at DESC
+  LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 20), 60));
+$$;
+
 NOTIFY pgrst, 'reload schema';
