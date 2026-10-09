@@ -23,6 +23,7 @@ import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
 import { nonPageResponse } from './render-status.js'
 import { stripShellHead } from './shell-head.js'
+import { sameShell, shellVersion } from './shell-version.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
 /**
@@ -134,7 +135,8 @@ const DROP_REQUEST_HEADERS = ['host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ra
 let shellPromise = null
 let shellAt = 0
 async function loadShell() {
-  if (!shellPromise || Date.now() - shellAt > 10 * 60 * 1000) {
+  // 殼每分鐘重抓一次（以前 10 分鐘）：取快取時要拿它比版本，部署後最多一分鐘就認得新版（app.html 是 no-cache，抓的是最新的）
+  if (!shellPromise || Date.now() - shellAt > 60 * 1000) {
     shellAt = Date.now()
     shellPromise = fetch(`${cfg.origin}/app.html`, { headers: { 'User-Agent': 'policy-tw-ssr' } })
       .then((r) => { if (!r.ok) throw new Error(`shell ${r.status}`); return r.text() })
@@ -192,6 +194,10 @@ async function renderPage(request, ctx) {
   const cache = caches.default
   const cacheKey = new Request(`${url.origin}${path}`, { method: 'GET' })
   const hit = await cache.match(cacheKey)
+  // 部署後快取裡的舊頁還指著舊的 /assets 檔（Firebase 部署會刪掉，回 404）：殼換版了就當沒命中、當場重算（policy-ops#37）
+  if (hit && !sameShell(hit.headers.get('X-Shell-Version'), shellVersion(await loadShell().catch(() => '')))) {
+    return await renderAndStore(path, url.origin, cacheKey, cache, url.search)
+  }
   if (hit) {
     const age = Number(hit.headers.get('X-Rendered-At') ?? 0)
     if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache, '').catch(() => undefined))
@@ -217,6 +223,7 @@ async function renderAndStore(path, origin, cacheKey, cache, search = '') {
     'Cache-Control': `public, max-age=0, s-maxage=${cfg.staleTtlS}`,
     'X-Served-Via': 'cloudflare-worker-ssr',
     'X-Rendered-At': String(Date.now()),
+    'X-Shell-Version': shellVersion(shell),
     'X-Cache': 'MISS',
   })
   const body = assemble(shell, r)
