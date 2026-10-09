@@ -79,6 +79,9 @@ const footerList = computed(() => footerElections(elections.value, taipeiDay(Dat
             <li><RouterLink to="/terms" class="hover:text-blue-400 transition-colors">使用條款</RouterLink></li>
             <li><RouterLink to="/privacy" class="hover:text-blue-400 transition-colors">隱私權政策</RouterLink></li>
             <li><RouterLink to="/donation" class="hover:text-blue-400 transition-colors">贊助支持</RouterLink></li>
+            <!-- 姊妹站互連（維護者 2026-10-09；policy-ops docs/decisions/2026-10-09-各站頁尾互相連結.md） -->
+            <li><a href="https://jp.hustings.net" target="_blank" rel="noopener" class="hover:text-blue-400 transition-colors">日本站：政策の系譜</a></li>
+            <li><a href="https://hustings.net" target="_blank" rel="noopener" class="hover:text-blue-400 transition-colors">hustings.net 入口</a></li>
           </ul>
         </div>
       </div>
