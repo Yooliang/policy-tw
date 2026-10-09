@@ -36,7 +36,23 @@ function sqlSameClaimTypes(sql: string): string[] {
   if (!m) throw new Error("same_claim_matches 沒有型別清單");
   return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
 }
-const SAME_CLAIM_MIG = migFiles.filter((f) => /same_claim/.test(f)).at(-1)!;
+/** 最新一支定義 same_claim_matches 的 migration */
+const SAME_CLAIM_MIG = migFiles.filter((f) => /FUNCTION policy_jp\.same_claim_matches\(/.test(readMig(f))).at(-1)!;
+/** 最新一支定義上線後收編觸發器的 migration，與它的型別清單 */
+const SUPERSEDE_MIG = migFiles.filter((f) => /CREATE TRIGGER contributions_same_claim_supersede/.test(readMig(f))).at(-1)!;
+function triggerTypes(sql: string): string[] {
+  const m = /CREATE TRIGGER contributions_same_claim_supersede[\s\S]*?NEW\.contribution_type IN \(([^)]*)\)/.exec(sql);
+  if (!m) throw new Error("收編觸發器沒有型別清單");
+  return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+}
+
+Deno.test("守門：上線後收編的觸發器型別＝登記表（jp）", () => {
+  const sql = readMig(SUPERSEDE_MIG);
+  assertEquals(triggerTypes(sql).sort(), sameClaimTypes("jp").sort());
+  const broken = sql.replace("NEW.contribution_type IN ('election', 'regional_stat', 'local_government')", "NEW.contribution_type IN ('election')");
+  assert(broken !== sql, "還原驗證的替換沒有命中");
+  assert(triggerTypes(broken).length === 1);
+});
 
 function guardApplyTypes(applyTypes: string[], registry: string[], dupTypes: readonly string[]): string[] {
   const problems: string[] = [];

@@ -375,6 +375,7 @@ const T_LGR = "20261009250000";
 const T_STR = "20261009250200";
 const T_CHAIN = "20261009250400";
 const T_SAME = "20261009280000"; // 同一件事（#521）
+const T_SAME2 = "20261009280100"; // 同一件事第二步：收編（#521，policy-ops#24）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -465,6 +466,10 @@ const JP_ONLY: Record<string, JpOnly> = {
   same_claim_office: { mig: [T_SAME], why: "選舉種類 → 比對用的職位（head／assembly；國政＝種類本身），同 term_expirations.office_kind" },
   same_claim_same_term: { mig: [T_SAME], why: "選舉的「同一屆」：regular＝同一列任期満了的 [−180, +60] 窗口（查不到就差 ≤ 180 天）、其他事由＝同一天" },
   same_claim_matches: { mig: [T_SAME], why: "登記表的 SQL 那一半：型別＋payload → 在庫列與審議中提交（附 your_network_voted）；jp-report 交件擋 resolved_claim、jp-next 附 same_claims" },
+  same_claim_same_content: { mig: [T_SAME2], why: "同一件事的兩筆內容是否相同（收編用：選舉＝投票日・種類・事由、統計＝值・單位、團體＝名稱・讀音・種類）" },
+  same_claim_supersede: { mig: [T_SAME2], why: "上線後收編（照正見 2026-09-21 supersedeDuplicates，正見是 TS、日本站是 SQL）：已落庫那筆 → 同一件事內容相同的等票提交 superseded＋edit_history" },
+  same_claim_supersede_trg: { mig: [T_SAME2], why: "觸發器函式：election／regional_stat／local_government 轉 applied 時呼叫 same_claim_supersede" },
+  same_claim_merge_pending: { mig: [T_SAME2], why: "一次性收編 #531 上線前的重複：兩筆都等票的，後交的票與交件者那一票併進先交的、後交的 superseded" },
 };
 
 // ---- 掃描與比對（純函式，還原驗證也用它們） ----
