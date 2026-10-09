@@ -19,6 +19,7 @@
 
 import { render, configureSsr, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr/entry-server.js'
 import { readWorkerConfig, ssrCacheControl } from './worker-config.js'
+import { HEALTH_PATH, healthResponse } from './health.js'
 import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
 import { nonPageResponse } from './render-status.js'
@@ -236,6 +237,8 @@ export default {
     configureSsr({ baseTtlMs: cfg.baseTtlMs })
     const url = new URL(request.url)
     countRead(request, ctx)
+    // 主控台的網域燈號（policy-ops#45）：回 200＋CORS，證明這個網域接到了這支 Worker
+    if (request.method === 'GET' && url.pathname === HEALTH_PATH) return healthResponse(request)
     if (request.method === 'POST' && url.pathname === '/__purge') {
       if (!env.PURGE_SECRET || request.headers.get('X-Purge-Secret') !== env.PURGE_SECRET) return new Response('forbidden', { status: 403 })
       const body = await request.json().catch(() => ({}))
