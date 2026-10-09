@@ -235,9 +235,10 @@ export function isRosterMatchModel(model: string | null | undefined): boolean {
   return typeof model === "string" && model.startsWith(ROSTER_MATCH_MODEL_PREFIX);
 }
 /** rosterMatched：最新那張有效系統票是名冊逐位核對、而且 supported */
-export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false): number {
+export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1): number {
   if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET);
-  if (systemVote === "supported") return Math.max(1, required - 1);
+  // 兩個以上獨立來源核得過再多降 1，上限 −2、最少 1（2026-10-09，policy-ops#39；SQL contribution_system_vote_sources）
+  if (systemVote === "supported") return Math.max(1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
   if (systemVote === "not_supported") return required + 1;
   return required;
 }

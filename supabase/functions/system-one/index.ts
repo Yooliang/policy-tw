@@ -2,8 +2,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
-import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, type JevQuestion, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
 import { selfCitationEvidenceVerdict } from "../_shared/self-hosts.ts";
+import { aggregatePerSource, MAX_CHECKED_SOURCES, perSourceQuestionKey, pickIndependentSources } from "../_shared/independent-sources.ts";
 
 /**
  * system-one — Jev（TypeSafe System One）在這個系統裡唯一的出入口。設計理由見 docs/BLUEPRINT-jev-decisions.md。
@@ -589,12 +590,19 @@ Deno.serve(async (req) => {
         const cec = c.contribution_type === "candidacy" && typeof payload.name === "string" && typeof payload.election_id === "number"
           ? await cecCandidacyPage(payload.name, payload.election_id, fetch, await loadElections(supabase))
           : null;
-        const urls = cec ? [cec.url] : c.source_urls.slice(0, 3);
+        // 最多看 4 個網址（policy-ops#39，原本 3 個）：獨立來源多一個，目標多降一分（上限 −2）
+        const urls = cec ? [cec.url] : c.source_urls.slice(0, MAX_CHECKED_SOURCES);
         const fetched = cec
           ? [{ url: cec.url, kind: "html" as const, text: cec.text, note: `cec-api（${cec.count} 筆）` }]
-          : await Promise.all(c.source_urls.slice(0, 3).map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
+          : await Promise.all(c.source_urls.slice(0, MAX_CHECKED_SOURCES).map(async (u) => ({ url: u, ...(await fetchSource(u)) })));
         const usable = fetched.filter((p) => p.kind === "html" && hasUsableText(p.text, names));
-        const combined = combineSources(usable, names);
+        // 同站（同媒體子網域）與同一篇轉載只算一個；每個獨立來源在併起來的那段各佔一塊（4 個也塞得進 Jev 的長度）
+        const pick = pickIndependentSources(usable, names);
+        const indep = usable.filter((p) => pick.independent.some((x) => x.url === p.url));
+        const pages = [...indep, ...usable.filter((p) => !indep.includes(p))];
+        const combined = combineSources(pages, names, Math.min(2200, Math.floor(6000 / Math.max(1, pages.length)) - 40));
+        // 只有真的進了併起來那段的獨立來源才另外問（被長度擠掉的問了也只會答 absent）
+        const askedSources = pick.independent.filter((s) => combined.includes(`【來源 ${s.host}】`));
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
         let key: string;
@@ -617,14 +625,39 @@ Deno.serve(async (req) => {
           // 題名不衝突（來源題是 field:*、預算題是維度名）；維度題的 instructions 讀的是 state.target。
           const budgetQs = dimensionQuestions(c.contribution_type);
           const withBudget = Object.keys(budgetQs).length > 0;
-          const askState = withBudget ? { ...state, target: claim, contribution_type: c.contribution_type } : state;
-          const res = await askJev(apiKey, askState, { ...questions, ...budgetQs });
+          const askState: Record<string, unknown> = withBudget ? { ...state, target: claim, contribution_type: c.contribution_type } : { ...state };
+          // 兩個以上獨立來源：每個來源各問一組欄位題（只看那一段），同一次呼叫（policy-ops#39）
+          const sourceQs: Record<string, JevQuestion> = {};
+          if (askedSources.length >= 2) {
+            askedSources.forEach((s, i) => {
+              for (const [k, q] of Object.entries(questions)) {
+                const field = k.replace(/^field:/, "");
+                sourceQs[perSourceQuestionKey(i, field)] = { ...q, instructions: `${q.instructions} 這一題只看【來源 ${s.host}】那一段，其他來源的文字不算。` };
+              }
+            });
+          }
+          const res = await askJev(apiKey, askState, { ...questions, ...budgetQs, ...sourceQs });
           cost += res.usage.cost;
           // 每欄一題，收斂成一票；欄位細節放 probabilities 給 /next 與對帳看
           const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
+          // 系統票照舊由併起來那段決定（任一來源明確矛盾仍是 not_supported）；supported 時記核得過的獨立來源數，SQL 依它降 1～2 分
+          const per = askedSources.length >= 2 ? aggregatePerSource(c.contribution_type, claim, res.answers, askedSources) : null;
+          askState.sources = {
+            checked: fetched.map((p) => p.url),
+            independent: pick.independent.map((s) => s.url),
+            dropped: pick.dropped,
+            per_source: per?.per_source.map((r) => ({ url: r.url, choice: r.choice, probability: r.probability })) ?? [],
+          };
+          // 任一獨立來源明確矛盾（過門檻）也是 not_supported：多看的來源只能多降分，不能把反證蓋掉
+          const contra = per?.per_source.filter((r) => r.choice === "not_supported" && r.probability >= MIN_PROBABILITY) ?? [];
+          const voteChoice = contra.length > 0 ? "not_supported" : agg.choice;
+          const voteProbability = contra.length > 0
+            ? Math.max(agg.choice === "not_supported" ? agg.probability : 0, ...contra.map((r) => r.probability))
+            : agg.probability;
+          if (voteChoice === "supported") askState.supported_sources = Math.max(1, per?.supported_sources ?? 1);
           rows = [{
             subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
-            choice: agg.choice, probability: agg.probability, confidence: null,
+            choice: voteChoice, probability: voteProbability, confidence: null,
             probabilities: agg.fields as unknown as Record<string, number>, model: res.model, state: askState, cost_usd: Number(res.usage.cost.toFixed(8)),
           }];
           if (withBudget) {
@@ -638,7 +671,7 @@ Deno.serve(async (req) => {
               model: res.model, state: { target: claim, contribution_type: c.contribution_type, page: state.page, budget, asked_with: "precheck" }, cost_usd: 0,
             });
           }
-          key = `${agg.choice}${agg.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
+          key = `${voteChoice}${voteProbability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
         }
         await insertRecords(supabase, rows);
         // 有票就重算共識：supported 可能讓門檻剛好達標、not_supported 可能直接進裁決
