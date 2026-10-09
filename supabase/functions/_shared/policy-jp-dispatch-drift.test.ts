@@ -137,9 +137,9 @@ const PAIRS: Pair[] = [
   { name: "contribution_system_vote" },
   {
     name: "contribution_effective_agree",
-    // 2026-10-09（policy-ops#39）正見改成「多個獨立來源降 1～2」，日本站先不跟（主線裁定：日本站暫不做），所以比對 20261009290000 之前的版本
-    before: "20261009290000_independent_sources_target.sql",
-    note: "只拿掉中選會名冊那條路（contribution_roster_matched）；系統票調門檻的邏輯照抄。取多個獨立來源（20261009290000，日本站暫不跟）之前的版本",
+    // 2026-10-09（policy-ops#39）正見改成「多個獨立來源降 1～2」，日本站先不跟（主線裁定：日本站暫不做），所以比對 20261009320000 之前的版本
+    before: "20261009320000_independent_sources_target.sql",
+    note: "只拿掉中選會名冊那條路（contribution_roster_matched）；系統票調門檻的邏輯照抄。取多個獨立來源（20261009320000，日本站暫不跟）之前的版本",
     edits: [[
       "RETURN CASE WHEN v_sys = 'supported' AND contribution_roster_matched(p_contribution_id) THEN LEAST(v_need, 1)\n              WHEN v_sys = 'supported' THEN",
       "RETURN CASE WHEN v_sys = 'supported' THEN",

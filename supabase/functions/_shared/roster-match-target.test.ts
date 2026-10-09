@@ -70,6 +70,6 @@ Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器�
     "名冊吻合的參選紀錄免兩台機器，否則目標 1 也要兩票");
 
   // 讓現有符合條件的 pending 立刻重算
-  // 2026-10-09（policy-ops#39）起 contribution_effective_agree 由 20261009290000 重新定義，重算那一段留在名冊那支 migration（定義 contribution_roster_matched 的那支）
+  // 2026-10-09（policy-ops#39）起 contribution_effective_agree 由 20261009320000 重新定義，重算那一段留在名冊那支 migration（定義 contribution_roster_matched 的那支）
   assert(/contribution_apply_consensus\(c\.id\)/.test(matched.sql) || /contribution_apply_consensus\(c\.id\)/.test(fn.sql), "migration 要把現有名冊吻合的 pending 重算一次");
 });
