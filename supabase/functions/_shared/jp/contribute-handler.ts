@@ -23,6 +23,8 @@
  */
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { selfCitationProblems } from "../self-hosts.ts";
+import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { networkOf } from "../ip-network.ts";
 import { chunksOf } from "../in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "../actor.ts";
@@ -207,6 +209,19 @@ export async function handleContribute(
       ? ENCODING_INVALID_MESSAGE
       : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
     return { status: 400, body: { success: false, error, message, errors: validation.errors } };
+  }
+  // 出處不得引用本站或正見（照搬正見 1.84.0 #486；日本協議 0.8.0）：引自己的網站是循環引用。整批不收、不算被拒，講清楚是哪個網址。
+  const selfCited = selfCitationProblems(validation.items);
+  if (selfCited.length > 0) {
+    return {
+      status: 422,
+      body: {
+        success: false,
+        error: "self_citation",
+        message: `${JP_SELF_CITATION_MESSAGE}。整批未收，請把下列網址換掉後重送。這不算被拒。`,
+        errors: selfCited.map((p) => ({ index: p.index, path: p.path, message: `引用了本站或正見的網址：${p.urls.join("、")}`, urls: p.urls })),
+      },
+    };
   }
   // 憑證綁的是哪個任務，這批裡有 task_id 的每一筆都要是那一個；一筆也對不上＝拿錯憑證
   {

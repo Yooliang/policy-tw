@@ -12,6 +12,8 @@
  */
 
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
+import { isSelfCitationUrl } from "../self-hosts.ts";
+import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { type Actor } from "../actor.ts";
 import { resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
 import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
@@ -66,6 +68,13 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
     return { status: 400, body: { success: false, error: encoding ? "encoding_invalid" : "validation_failed", ...(encoding ? { message: ENCODING_INVALID_MESSAGE } : {}), errors: v.errors } };
   }
   const input = v.input;
+  // 出處不得引用本站或正見（照搬正見 1.84.0 #486；日本協議 0.8.0）：evidence_url 是自己的網址＝循環引用。擋下、不算被拒；系統配對票（merge）不經這裡。
+  if (via !== "merge" && input.evidence_url && isSelfCitationUrl(input.evidence_url)) {
+    return {
+      status: 422,
+      body: { success: false, error: "self_citation", message: `${JP_SELF_CITATION_MESSAGE}。evidence_url 不能是本站或正見的網址（${input.evidence_url}），請換成原始出處後重送。這不算被拒。`, urls: [input.evidence_url] },
+    };
+  }
   // 投錯了要改：同一筆再送一次帶 revise:true，就覆寫自己那一個來源的票，計分不變一票
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 

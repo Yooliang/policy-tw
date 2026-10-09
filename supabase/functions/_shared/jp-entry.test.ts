@@ -208,6 +208,27 @@ Deno.test("election：格式不對整批 400（validation_failed），不寫任�
   });
 });
 
+Deno.test("自引用（照搬正見 1.84.0，日本 0.8.0）：出處或 evidence_url 是本站／正見／hustings.net → 422 self_citation，不寫任何東西、不算被拒", async () => {
+  const db = makeDb({ pool: [], queue: [edTaskRow] });
+  await withEntries(db, env(), async ({ report }) => {
+    for (const url of ["https://jp.hustings.net/pref/aichi", "https://policy-jp.web.app/city/232033", "https://xn--2lw665d.tw/x"]) {
+      const res = await post(report, N1, { ...ELECTION_SUBMIT, source_urls: [url] });
+      assertEquals(res.status, 422, `${url}：${JSON.stringify(res.json)}`);
+      assertEquals(res.json.error, "self_citation");
+      assertEquals((res.json.errors as Array<{ urls: string[] }>)[0].urls, [url]);
+    }
+    assertEquals(db.contributions.length, 0);
+  });
+  const db2 = makeDb();
+  await withEntries(db2, env(), async ({ next, report }) => {
+    const got = await getNext(next, N1);
+    const res = await post(report, R, voteBody({ dispatch_token: got.json.dispatch_token, evidence_url: "https://www.hustings.net/" }));
+    assertEquals(res.status, 422, JSON.stringify(res.json));
+    assertEquals(res.json.error, "self_citation");
+    assertEquals(db2.votes.length, 0);
+  });
+});
+
 Deno.test("驗證一整圈：帶憑證跨網段投票 201；票的來源是領任務的網段", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
