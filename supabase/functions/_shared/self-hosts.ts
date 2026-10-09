@@ -8,6 +8,7 @@
  * 清單只放網域（含子網域），不分路徑：整個網站都算，不必逐條列 /data、/skill 等。
  * 比對一律用解析後的主機名稱（URL 會把中文網域轉成 punycode、轉小寫），所以 正見.tw 與 xn--2lw665d.tw 是同一個。
  * 日本站（policy_jp，前台 policy-jp.web.app）也列進來：兩站互引一樣是循環。
+ * hustings.net（2026-10-09 起兩站共用的網域：jp.＝日本站正式網址、tw.＝轉到正見.tw、根與 www＝入口頁）整個網域列入（協議 1.87.0）。
  */
 
 import { normalizeCorrection } from "./correction.ts";
@@ -20,6 +21,7 @@ export const SELF_HOSTS = [
   "policy-tw.firebaseapp.com",
   "policy-jp.web.app", // 日本站前台
   "policy-jp.firebaseapp.com",
+  "hustings.net", // 兩站共用網域（含 jp.／tw.／www.），1.87.0
   "wiiqoaytpqvegtknlbue.supabase.co", // 正見的 API（Edge Function、REST）
 ] as const;
 
