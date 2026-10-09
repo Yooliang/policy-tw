@@ -7,6 +7,12 @@
  *   重複宣稱併成同意票（duplicate-claim.ts 原封沿用）、同一台機器重複宣稱的提示、提交後釋放任務認領、回應格式。
  * 落庫：重複提交併成的同意票若讓那一筆變 verified，由這一票呼叫 applyFn 落庫（沒給 applyFn 就交給排程）。
  * 日本站加的：local_government／regional_stat 交件當下跟官方的表核對（machine-verify.ts，照正見 cec-verify）。
+ * 同一件事只能有一筆（#521，協議 0.7.0，日本站試點）：election／regional_stat／local_government 交件要帶 payload.resolved_claim，
+ *   交件當下用 policy_jp.same_claim_matches 比對在庫與審議中的，照 ../same-claims.ts 的 decideSameClaim 處理——
+ *   new 卻撞到＝409 duplicate_claim、指向審議中那一筆＝併成同意票（這個網段交過或投過＝409 already_voted）、
+ *   指的 id 不在比對結果＝409 claim_mismatch、指向在庫列＝不另開（有任務的改記 no_change confirmed）、differs＝照常收。
+ *   正見的「併票投不成就照原路收下」在這裡拿掉：claimKey 型別併不成、或同一台機器交過同一件事，也一律不收（already_voted）。
+ *   一批裡有收下的照舊 201（被擋的在 results 標 not_accepted）；全部被擋才回 409。擋下的不算退件。
  * 拿掉的：中選會名冊大批次（rosterBatchProblems）、單一答案型任務擋重複（single-answer-guard，任務型別是正見的）、
  *   公民提問檢查、搜尋結果頁／政見唯一出處／同名人物／議員選舉區／參選紀錄登記證據等守門（全是正見資料專屬）、
  *   「查無」要 5 個網址的守門（not-found-guard，綁正見的任務型別）與 agent_tool 查無比例、空操作更正檢查（要讀日本站目標列，待定）、
@@ -27,6 +33,7 @@ import { agentToolNotice } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
 import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
 import { machineVerifyInline } from "./machine-verify.ts";
+import { decideSameClaim, isSameClaimType, parseResolvedClaim, type SameClaimMatches } from "../same-claims.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -94,6 +101,73 @@ function mergeNote(agentName: string, sourceUrls: readonly string[], note: strin
   const src = sourceUrls.length > 0 ? `對方的來源：${sourceUrls.join("、")}` : "";
   const own = note ? `對方備註：${note}` : "";
   return [head, src, own].filter(Boolean).join(" ").slice(0, 2000);
+}
+
+/** 沒收的那一筆回給代理的內容（#521；不算退件） */
+export interface BlockedClaim {
+  error: "duplicate_claim" | "already_voted" | "claim_mismatch" | string;
+  message: string;
+  existing_ids: string[];
+  pending_ids: string[];
+}
+
+function alreadyVotedBlock(id: string): BlockedClaim {
+  return {
+    error: "already_voted",
+    message: `同一件事已經有 ${id}，是這個來源網段交的、或已經投過票；一台機器只有一票，這筆沒有收。別再交同一件事，去做別的任務`,
+    existing_ids: [],
+    pending_ids: [id],
+  };
+}
+
+/** 併成同意票投不成：已投過／自己交的＝already_voted；那一筆剛好結案或其他原因＝照 verify 回的 error 轉述 */
+function voteFailedBlock(id: string, voted: { status: number; body: Record<string, unknown> }): BlockedClaim {
+  const err = typeof voted.body.error === "string" ? voted.body.error : "";
+  if (err === "already_voted" || err === "self_vote") return alreadyVotedBlock(id);
+  return {
+    error: err || "already_voted",
+    message: `同一件事已經有 ${id}，改記成對它的同意票沒有成功（${String(voted.body.message ?? err)}）；這筆沒有收，不要另交一筆`,
+    existing_ids: [],
+    pending_ids: [id],
+  };
+}
+
+/** 指向在庫列、而且是領任務來交的：改成 no_change confirmed（任務照 no_change 冷卻），不另開一筆 */
+function existingAsNoChange<T extends { contribution_type: string; payload: unknown; source_urls: string[]; note?: string | null; task_id?: string | null }>(item: T, existingId: string): T {
+  const own = item.note ? `代理備註：${item.note}` : "";
+  return {
+    ...item,
+    contribution_type: "no_change",
+    payload: {
+      task_id: item.task_id,
+      outcome: "confirmed",
+      checked_urls: item.source_urls,
+      finding: `已經在庫的 ${existingId} 就是這件事，查到的內容一致（resolved_claim＝${existingId}，系統改記為查核無異動）。${own}`.slice(0, 2000),
+    },
+  };
+}
+
+/** 同一批裡兩筆 new 是不是同一件事（跟 SQL same_claim_matches 的鍵同一套，選舉的「同一屆」這裡只用投票日差 ≤ 180 天近似） */
+function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b: { contribution_type: string; payload: unknown }): boolean {
+  if (a.contribution_type !== b.contribution_type) return false;
+  const p = a.payload as Record<string, unknown>;
+  const q = b.payload as Record<string, unknown>;
+  switch (a.contribution_type) {
+    case "local_government":
+      return p.lg_code === q.lg_code;
+    case "regional_stat":
+      return p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year;
+    case "election": {
+      const office = (t: unknown) => (["governor", "mayor", "ward_mayor", "town_mayor"].includes(String(t)) ? "head" : ["pref_assembly", "muni_assembly"].includes(String(t)) ? "assembly" : String(t));
+      if ((p.lg_code ?? null) !== (q.lg_code ?? null) || office(p.election_type) !== office(q.election_type)) return false;
+      const rp = p.election_reason ?? "regular", rq = q.election_reason ?? "regular";
+      if (rp !== rq) return false;
+      if (rp !== "regular") return p.election_date === q.election_date;
+      const days = Math.abs(Date.parse(String(p.election_date)) - Date.parse(String(q.election_date))) / 86_400_000;
+      return days <= 180;
+    }
+  }
+  return false;
 }
 
 export async function handleContribute(
@@ -167,6 +241,73 @@ export async function handleContribute(
     };
   }
 
+  const mergedByIndex = new Map<number, { existing_id: string; agree_count: number; status: string; required_agree: number; from_agent: string | null }>();
+  /** 擋下的（不寫入、不算退件）：#521 的三種 409，與 claimKey 型別併不成的 */
+  const blockedByIndex = new Map<number, BlockedClaim>();
+  /** 指向在庫列、又沒有任務可以記查核的：什麼都不寫 */
+  const alreadyInDb = new Map<number, string>();
+  const mergeInto = async (i: number, contributionId: string, fromAgent: string | null): Promise<boolean> => {
+    const item = validation.items[i];
+    const voted = await verifyFn(supabase, {
+      contribution_id: contributionId,
+      verdict: "agree",
+      agent_name: validation.contributor.agent_name,
+      ...(validation.contributor.agent_tool ? { agent_tool: validation.contributor.agent_tool } : {}),
+      note: mergeNote(validation.contributor.agent_name, item.source_urls, item.note),
+      ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
+    // via "merge"：這一票是系統把重複提交配對成的，不是代理自己挑的題目——派發閘對它放行。
+    }, ipHash, applyFn, "merge");
+    // 投不成就不收（#521）：不再照原路另收一筆，告訴代理那一筆是哪個
+    if (voted.status !== 201) { blockedByIndex.set(i, voteFailedBlock(contributionId, voted)); return false; }
+    const b = voted.body as Record<string, unknown>;
+    mergedByIndex.set(i, {
+      existing_id: contributionId,
+      agree_count: typeof b.agree_count === "number" ? b.agree_count : 0,
+      status: typeof b.status === "string" ? b.status : "pending",
+      required_agree: typeof b.required_agree === "number" ? b.required_agree : 0,
+      from_agent: fromAgent,
+    });
+    return true;
+  };
+
+  // 同一件事（#521）：登記型別先比對、照代理的宣告處理（指向在庫列又有任務的，改成 no_change confirmed 再走下面的路）
+  const sameClaimIdx = validation.items.map((item, i) => ({ item, i })).filter(({ item }) => isSameClaimType("jp", item.contribution_type));
+  if (sameClaimIdx.length > 0) {
+    const matches = await Promise.all(sameClaimIdx.map(async ({ item }) => {
+      const { data, error } = await supabase.rpc("same_claim_matches", { p_type: item.contribution_type, p_payload: item.payload, p_ip_hash: ipHash });
+      if (error) throw new Error(`same_claim_matches (${item.contribution_type}): ${error.message}`);
+      // 型別沒登記＝NULL；形狀不對時寧可當成什麼都沒比對到（new 就收、指 id 的回 claim_mismatch），不讓交件 500
+      const d = (data && typeof data === "object" && !Array.isArray(data) ? data : {}) as Partial<SameClaimMatches>;
+      return { type: item.contribution_type, existing: Array.isArray(d.existing) ? d.existing : [], pending: Array.isArray(d.pending) ? d.pending : [] };
+    }));
+    const newInBatch: Array<{ i: number; item: (typeof validation.items)[number] }> = [];
+    for (const [k, { item, i }] of sameClaimIdx.entries()) {
+      const resolved = parseResolvedClaim((item.payload as Record<string, unknown>).resolved_claim)!; // 格式在 schema 驗過
+      const m = matches[k];
+      const d = decideSameClaim(resolved, m);
+      if (d.action === "block") { blockedByIndex.set(i, { error: d.error, message: d.message, existing_ids: d.existing_ids, pending_ids: d.pending_ids }); continue; }
+      if (d.action === "vote") {
+        const p = m.pending.find((x) => String(x.contribution_id) === d.contribution_id);
+        await mergeInto(i, d.contribution_id, typeof p?.agent === "string" ? p.agent : null);
+        continue;
+      }
+      if (d.action === "existing") {
+        if (typeof item.task_id === "string" && item.task_id) validation.items[i] = existingAsNoChange(item, d.id);
+        else alreadyInDb.set(i, d.id);
+        continue;
+      }
+      // 同一批裡兩筆都說 new、又是同一件事：只收第一筆
+      if (resolved.kind === "new") {
+        const first = newInBatch.find((x) => sameClaimInBatch(x.item, item));
+        if (first) {
+          blockedByIndex.set(i, { error: "duplicate_claim", message: `這一批第 ${first.i} 筆已經是同一件事，這筆沒有收`, existing_ids: [], pending_ids: [] });
+          continue;
+        }
+        newInBatch.push({ i, item });
+      }
+    }
+  }
+
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
   type ExistingRow = { id: string; payload_hash: string; status: string };
@@ -179,13 +320,12 @@ export async function handleContribute(
   }
   const existingByHash = new Map<string, ExistingRow>(existing.map((r) => [r.payload_hash, r]));
 
-  // 重複提交＝同意票（說明見 ../contribute-handler.ts）：只對結構化型別生效，走 handleVerify 投票，投不成就照原路收下這筆
-  const mergedByIndex = new Map<number, { existing_id: string; agree_count: number; status: string; required_agree: number; from_agent: string | null }>();
-  /** 同對象的既有提交是同一台機器（同網段）交的：不能併成票，但要告訴它，不然它會一直重交 */
-  const sameMachineDup = new Map<number, string>();
+  // 重複提交＝同意票（說明見 ../contribute-handler.ts）：只對結構化型別生效，走 handleVerify 投票。
+  // #521：投不成、或同一台機器交過同一件事，都不收（正見是照原路收下／收下附提示）。
   const mergeCandidateIdx = validation.items
     .map((item, i) => ({ item, i }))
-    .filter(({ item, i }) => !existingByHash.has(hashes[i]) && claimKey(item.contribution_type, item.payload) !== null);
+    .filter(({ item, i }) => !existingByHash.has(hashes[i]) && !blockedByIndex.has(i) && !mergedByIndex.has(i) && !alreadyInDb.has(i) &&
+      claimKey(item.contribution_type, item.payload) !== null);
   if (mergeCandidateIdx.length > 0) {
     const candidates = await fetchClaimCandidates(supabase, mergeCandidateIdx.map(({ item }) => item));
     const claimed = new Set<string>(); // 同一批裡兩筆指向同一個既有貢獻時，只投一票
@@ -193,29 +333,12 @@ export async function handleContribute(
       const target = findMergeTarget(item, { agent_name: validation.contributor.agent_name, ip_hash: ipHash }, candidates);
       if (!target) {
         const sameMachine = findSameMachineClaim(item, { agent_name: validation.contributor.agent_name, ip_hash: ipHash }, candidates);
-        if (sameMachine) sameMachineDup.set(i, sameMachine.id);
+        if (sameMachine) blockedByIndex.set(i, alreadyVotedBlock(sameMachine.id));
         continue;
       }
-      if (claimed.has(target.id)) continue;
-      const voted = await verifyFn(supabase, {
-        contribution_id: target.id,
-        verdict: "agree",
-        agent_name: validation.contributor.agent_name,
-        ...(validation.contributor.agent_tool ? { agent_tool: validation.contributor.agent_tool } : {}),
-        note: mergeNote(validation.contributor.agent_name, item.source_urls, item.note),
-        ...(item.source_urls[0] ? { evidence_url: item.source_urls[0] } : {}),
-      // via "merge"：這一票是系統把重複提交配對成的，不是代理自己挑的題目——派發閘對它放行。
-      }, ipHash, applyFn, "merge");
-      if (voted.status !== 201) continue; // 投不成就照原路收下
-      claimed.add(target.id);
-      const b = voted.body as Record<string, unknown>;
-      mergedByIndex.set(i, {
-        existing_id: target.id,
-        agree_count: typeof b.agree_count === "number" ? b.agree_count : 0,
-        status: typeof b.status === "string" ? b.status : "pending",
-        required_agree: typeof b.required_agree === "number" ? b.required_agree : 0,
-        from_agent: target.agent_name,
-      });
+      // 同一批裡前一筆已經對它投了這台機器的票：這筆也不收（一台機器只有一票，不能照原路另收）
+      if (claimed.has(target.id)) { blockedByIndex.set(i, alreadyVotedBlock(target.id)); continue; }
+      if (await mergeInto(i, target.id, target.agent_name)) claimed.add(target.id);
     }
   }
 
@@ -223,12 +346,12 @@ export async function handleContribute(
   const seenInBatch = new Set<string>();
   const dupInBatch = new Set<number>();
   hashes.forEach((h, i) => {
-    if (existingByHash.has(h) || mergedByIndex.has(i)) return;
+    if (existingByHash.has(h) || mergedByIndex.has(i) || blockedByIndex.has(i) || alreadyInDb.has(i)) return;
     if (seenInBatch.has(h)) dupInBatch.add(i); else seenInBatch.add(h);
   });
   const toInsert = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
-    .filter(({ hash, i }) => !existingByHash.has(hash) && !mergedByIndex.has(i) && !dupInBatch.has(i))
+    .filter(({ hash, i }) => !existingByHash.has(hash) && !mergedByIndex.has(i) && !dupInBatch.has(i) && !blockedByIndex.has(i) && !alreadyInDb.has(i))
     .map(({ item, hash }) => ({
       contribution_type: item.contribution_type,
       payload: item.payload,
@@ -266,6 +389,15 @@ export async function handleContribute(
   }
 
   const results = validation.items.map((item, i) => {
+    const blocked = blockedByIndex.get(i);
+    if (blocked) return { index: i, contribution_type: item.contribution_type, status: "not_accepted", ...blocked };
+    const inDb = alreadyInDb.get(i);
+    if (inDb) {
+      return {
+        index: i, contribution_type: item.contribution_type, status: "already_exists", existing_id: inDb,
+        message: `已經在庫（${inDb}），內容一致，不用再交；這筆沒有任務可以記查核，所以什麼都沒寫入`,
+      };
+    }
     const merged = mergedByIndex.get(i);
     if (merged) {
       return {
@@ -290,24 +422,31 @@ export async function handleContribute(
       required_agree: need,
       ...(dup ? { existing_status: dup.status, message: `${DEDUPE_WINDOW_HOURS} 小時內已有相同內容的貢獻，沿用原 id` } : {}),
       ...(!dup && dupInBatch.has(i) ? { existing_status: "pending", message: "這一批裡有內容完全相同的一筆，只收第一筆，沿用它的 id" } : {}),
-      ...(sameMachineDup.has(i) ? { note: `同一台機器（同來源網段）已經交過同對象的同一件事（${sameMachineDup.get(i)}），你這筆**不會**算成對它的同意票——一台機器只有一票。之後同對象的別再交，去驗別人的。` } : {}),
     };
   });
 
   const needs = [...new Set(results.map((r) => ("required_agree" in r ? r.required_agree : null)).filter((n): n is number => typeof n === "number"))].sort((a, b) => a - b);
   const single = !Array.isArray((body as Record<string, unknown>).contributions);
+  // 全部被擋（沒寫入、沒併成票、也不是已在庫或重複）＝409；一批裡有別的結果照舊 201，被擋的看 results
+  const allBlocked = blockedByIndex.size === results.length;
+  if (allBlocked && single) {
+    return { status: 409, body: { success: false, ...blockedByIndex.get(0)!, agent_name: validation.contributor.agent_name, docs: JP_PROTOCOL_URL } };
+  }
+  const restCount = results.length - inserted.length - mergedByIndex.size - blockedByIndex.size - alreadyInDb.size;
   const toolNotice = agentToolNotice(validation.contributor.agent_tool);
   const trailingVoteNote = needs.length > 0
     ? `；通過 ${needs.join("／")} 票同儕驗證（required_agree=${needs.join("／")}）後標為 verified 並自動落庫（task_suggestion、correction 這兩種停在 verified）`
     : "";
   return {
-    status: 201,
+    status: allBlocked ? 409 : 201,
     body: {
-      success: true,
+      success: !allBlocked,
       message: [
         `已收到 ${inserted.length} 筆新貢獻`,
         mergedByIndex.size > 0 ? `${mergedByIndex.size} 筆與別人交過的是同一件事，改記為對那幾筆的同意票` : "",
-        results.length - inserted.length - mergedByIndex.size > 0 ? `${results.length - inserted.length - mergedByIndex.size} 筆重複` : "",
+        blockedByIndex.size > 0 ? `${blockedByIndex.size} 筆是已經有的同一件事，沒有收（不算退件，看 results 的 error 與 message）` : "",
+        alreadyInDb.size > 0 ? `${alreadyInDb.size} 筆已經在庫，不用再交` : "",
+        restCount > 0 ? `${restCount} 筆重複` : "",
       ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),

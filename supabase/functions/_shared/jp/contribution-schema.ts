@@ -26,6 +26,7 @@ import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "../correction.ts";
 import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../contribution-schema.ts";
 import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
 import { isJpOfficialSource } from "./source-kind.ts";
+import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../same-claims.ts";
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
@@ -338,6 +339,12 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       raw.payload.task_id = raw.task_id;
     }
     validatePayload(raw.contribution_type, raw.payload, push);
+    // 同一件事（#521，協議 0.7.0）：登記在 same-claims.ts 的型別，交件前要先看 item.current.same_claims 並宣告 resolved_claim
+    if (isSameClaimType("jp", raw.contribution_type)) {
+      const resolved = parseResolvedClaim(raw.payload.resolved_claim);
+      if (!resolved) push("payload.resolved_claim", RESOLVED_CLAIM_HELP);
+      else if (resolved.kind === "differs" && !isStr(raw.note, 10, 2000)) push("note", "resolved_claim 是 differs:<id> 時 note 必填（≥10 字）：跟那一筆差在哪、你的出典是哪一頁");
+    }
     // 同一個欄位前面已經報過錯就不重複報（例：lg_code 格式不對，已經有一條了）
     checkTaskAgreement(raw.contribution_type, raw.payload, raw.task_id, (path, message) => {
       if (!errors.some((e) => e.index === index && e.path === path)) push(path, message);

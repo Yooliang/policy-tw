@@ -164,7 +164,7 @@ const edTaskRow = {
 };
 const ELECTION_SUBMIT = {
   kind: "contribute", contribution_type: "election", task_id: ED_TASK, agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
-  payload: { lg_code: "232033", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "一宮市長選挙" },
+  payload: { lg_code: "232033", election_type: "mayor", election_reason: "regular", election_date: "2027-01-24", notice_date: "2027-01-17", name: "一宮市長選挙", resolved_claim: "new" },
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/"],
 };
 
@@ -321,7 +321,7 @@ Deno.test("落庫在等團體（waiting）：貢獻維持 verified、回應說�
 
 const LG_SUBMIT = {
   kind: "contribute", contribution_type: "local_government", task_id: "auto:local_government_missing:232033", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
-  payload: { lg_code: "232033", kind: "city", pref_code: "230006", name: "一宮市", kana: "いちのみやし" },
+  payload: { lg_code: "232033", kind: "city", pref_code: "230006", name: "一宮市", kana: "いちのみやし", resolved_claim: "new" },
   source_urls: ["https://www.soumu.go.jp/denshijiti/code.html"],
 };
 
@@ -334,7 +334,7 @@ Deno.test("local_government／regional_stat 交件：收進來（目標 3 票）
     assertEquals(db.contributions.length, 1);
     const stat = await post(report, N1, {
       kind: "contribute", contribution_type: "regional_stat", task_id: "auto:regional_stats_missing:232033", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
-      payload: { lg_code: "232033", stat_key: "population", year: 2020, value: 386678, unit: "人" }, source_urls: ["https://www.e-stat.go.jp/regional-statistics/ssdsview/municipality"],
+      payload: { lg_code: "232033", stat_key: "population", year: 2020, value: 386678, unit: "人", resolved_claim: "new" }, source_urls: ["https://www.e-stat.go.jp/regional-statistics/ssdsview/municipality"],
     });
     assertEquals(stat.status, 201, JSON.stringify(stat.json));
     assertEquals(db.contributions.length, 2);
@@ -361,7 +361,7 @@ Deno.test("local_government：交件當下用剛收下的 id 跑一次總務省�
   await withEntries(db, env(), async ({ report }) => {
     const res = await post(report, N1, {
       kind: "contribute", contribution_type: "local_government", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
-      payload: { lg_code: "230006", kind: "prefecture", pref_code: "230006", name: "愛知県", kana: "あいちけん" },
+      payload: { lg_code: "230006", kind: "prefecture", pref_code: "230006", name: "愛知県", kana: "あいちけん", resolved_claim: "new" },
       source_urls: ["https://www.soumu.go.jp/denshijiti/code.html"],
     });
     assertEquals(res.status, 201, JSON.stringify(res.json));
@@ -386,7 +386,7 @@ Deno.test("regional_stat：交件當下用剛收下的 id 跑一次國勢調査�
   await withEntries(db, env(), async ({ report }) => {
     const res = await post(report, N1, {
       kind: "contribute", contribution_type: "regional_stat", agent_name: "dave", agent_tool: "claude-code/claude-sonnet-5",
-      payload: { lg_code: "232033", stat_key: "population", year: 2025, value: 378566, unit: "人", as_of: "2025-10-01" },
+      payload: { lg_code: "232033", stat_key: "population", year: 2025, value: 378566, unit: "人", as_of: "2025-10-01", resolved_claim: "new" },
       source_urls: ["https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040507382&fileKind=0"],
     });
     assertEquals(res.status, 201, JSON.stringify(res.json));
