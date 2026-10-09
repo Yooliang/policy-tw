@@ -66,4 +66,6 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   placeholder_politician: "removal",
   // 政黨資訊缺口（#346 第二階段）：改名的界線日、名冊外政黨的對應、解散廢止的停用日，交 party_info
   party_info_missing: "party_info",
+  // 地方基本統計（#508，2026-10-09）：縣市與鄉鎮市區缺人口／面積／總預算歲出／65歲以上比例，一個數值交一筆 regional_stat
+  regional_stat_missing: "regional_stat",
 };

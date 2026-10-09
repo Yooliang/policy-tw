@@ -6,6 +6,7 @@ export default { name: 'ElectionPage' }
 import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Component } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
+import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 import { PolicyStatus, ElectionType, type Politician } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
@@ -992,6 +993,8 @@ usePageHead({
 
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+
+      <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" class="mb-8" />
 
       <!--
         名單撈不完整時一定要講。少人比整頁空白難發現得多：高雄市 2022 曾經只載到村里長，
