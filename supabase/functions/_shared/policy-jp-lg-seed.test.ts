@@ -1,5 +1,5 @@
 /**
- * 日本站自治體清單由總務省表一次建入（migration 20261009250500_policy_jp_lg_seed.sql；policy-jp #69）。
+ * 日本站自治體清單由總務省表一次建入（migration 20261009265000_policy_jp_lg_seed.sql；policy-jp #69）。
  *
  * 只要 --allow-read。PGlite 上套日本站整條 migration（到 210100）＋250000／250100（團體碼表與資料）再跑這支。
  *   a. 空庫：1,965 團體全部進來、47 都道府県、slug 照 local_government_slug、pref_code／kind 取自團體碼表；
@@ -20,7 +20,7 @@ const CHAIN = [
   "20261009200000_policy_jp_public_stats.sql", "20261009210000_policy_jp_apply.sql", "20261009210100_policy_jp_gap_arms.sql",
   "20261009250000_policy_jp_lg_registry.sql", "20261009250100_policy_jp_lg_registry_data.sql",
 ];
-const SEED_FILE = "20261009250500_policy_jp_lg_seed.sql";
+const SEED_FILE = "20261009265000_policy_jp_lg_seed.sql";
 const CHAIN_SQL = await Promise.all(CHAIN.map(read));
 const SEED_SQL = await read(SEED_FILE);
 
