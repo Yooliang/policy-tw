@@ -497,10 +497,9 @@ export function ensureOfficialRegionalStats(): Promise<void> {
   if (officialRegionalStats.value.length > 0) return Promise.resolve()
   if (!officialRegionalStatsPromise) {
     officialRegionalStatsPromise = (async () => {
-      // query-bounds: ok — 縣市＋鄉鎮市區（約 390 地區）× 4 指標，遠低於 1000 筆上限
-      const { data } = await withTimeoutAndRetry('regional_stats_public', (signal) =>
-        supabase.from('regional_stats_public').select('*').abortSignal(signal).throwOnError())
-      officialRegionalStats.value = ((data || []) as RawRegionalStat[]).map(mapRegionalStat)
+      // 縣市＋鄉鎮市區（約 390 地區）× 4 指標，上限約 1,560 筆，超過 PostgREST 1000 筆上限，要分頁（fetchAllRows，排序用 id）
+      const rows = await fetchAllRows<RawRegionalStat>('regional_stats_public', '*', 'id')
+      officialRegionalStats.value = rows.map(mapRegionalStat)
     })().catch((err) => { officialRegionalStatsPromise = null; recordFailure('地方基本統計', err, ensureOfficialRegionalStats) })
   }
   return officialRegionalStatsPromise

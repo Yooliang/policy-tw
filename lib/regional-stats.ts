@@ -7,6 +7,8 @@
  * （regional-stats.test.ts 盯著）。沒有列＝未調查，不是 0 或空白（照「讓資料自己說話」，不推估）。
  */
 
+import { sameRegionName } from './region-name'
+
 export const REGIONAL_STAT_KEYS = ['population', 'area_km2', 'budget_expenditure', 'aging_rate'] as const
 export type RegionalStatKey = (typeof REGIONAL_STAT_KEYS)[number]
 
@@ -80,7 +82,12 @@ export function pickRegionalStat(
   statKey: RegionalStatKey,
 ): RegionalStat | null {
   const wantSub = subRegion ?? null
-  const matches = rows.filter((r) => r.region === region && r.subRegion === wantSub && r.statKey === statKey)
+  // 用 sameRegionName（忽略臺／台、空白、大小寫）比對，不是嚴格 ===：視圖已經換成「台」寫法，
+  // 但呼叫端（縣市頁、鄉鎮頁）傳進來的 region/subRegion 偶爾還是路由上的原字，兩邊要能對上
+  const matches = rows.filter((r) =>
+    sameRegionName(r.region, region) &&
+    (wantSub === null ? r.subRegion === null : sameRegionName(r.subRegion, wantSub)) &&
+    r.statKey === statKey)
   if (matches.length === 0) return null
   return matches.reduce((latest, r) => (r.year > latest.year ? r : latest))
 }

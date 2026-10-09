@@ -105,6 +105,11 @@ DROP POLICY IF EXISTS "Public read" ON regional_stats;
 CREATE POLICY "Public read" ON regional_stats FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Service role write" ON regional_stats;
 CREATE POLICY "Service role write" ON regional_stats FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+-- 跟多數新表同一個慣例明寫 GRANT（例：politician_careers、parties、election_bulletins）：RLS policy 限制列，
+-- 這裡的 GRANT 限制欄／動作——anon／authenticated 只能 SELECT，寫入只留 service_role（RLS 的 WITH CHECK 再擋一次）
+REVOKE ALL ON regional_stats FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON regional_stats TO anon, authenticated;
+GRANT ALL ON regional_stats TO service_role;
 
 -- ------------------------------------------------------------
 -- 3. 貢獻型別：新增 regional_stat（CLAUDE.md「加新型別要清點四處」第一處——漏這個 CHECK 的話代理交件全被擋而測試全綠）
@@ -141,6 +146,7 @@ CREATE OR REPLACE VIEW regional_stats_public WITH (security_invoker = true) AS
     FROM regional_stats rs
     JOIN admin_divisions ad ON ad.code = rs.admin_code;
 COMMENT ON VIEW regional_stats_public IS '地方基本統計，換成網站慣用的縣市／鄉鎮市區寫法（#508），前端一次撈這個視圖即可，不用自己 join admin_divisions';
+GRANT SELECT ON regional_stats_public TO anon, authenticated;
 
 -- ------------------------------------------------------------
 -- 6. 自我檢查
@@ -153,6 +159,12 @@ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.role_table_grants g
               WHERE g.table_schema = 'public' AND g.table_name = 'regional_stats' AND g.grantee IN ('anon', 'authenticated') AND g.privilege_type <> 'SELECT') THEN
     RAISE EXCEPTION 'regional_stats：anon／authenticated 不該有除了 SELECT 以外的權限';
+  END IF;
+  IF NOT has_table_privilege('anon', 'regional_stats', 'SELECT') THEN
+    RAISE EXCEPTION 'regional_stats：anon 讀不到這張表（GRANT 沒生效）';
+  END IF;
+  IF NOT has_table_privilege('anon', 'regional_stats_public', 'SELECT') THEN
+    RAISE EXCEPTION 'regional_stats_public：anon 讀不到這個視圖（GRANT 沒生效）';
   END IF;
 END
 $$;

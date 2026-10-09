@@ -7,7 +7,14 @@
 -- 一個地區（縣市或鄉鎮市區，admin_divisions 的 county／town 代碼）一件任務，列出缺哪幾個 stat_key（跟日本站
 -- regional_stats_missing 同一個「一個團體一件、列出缺項」做法，20261009210100_policy_jp_gap_arms.sql）。
 -- min_year：每個 stat_key 最舊可接受的年份——新的年度資料進來就自動滿足，要求更新的年度改 activity_rules.params 一行
--- （不改函式）。已經有人交了、還在等票的地區先不派（queued CTE，同 district_seats／party_info 等既有臂的慣例）。
+-- （不改函式）。已經有人交了、還在等票的「地區×指標」先不派（queued CTE，同 district_seats／party_info 等既有臂的慣例；
+-- 排除的粒度是 admin_code＋stat_key，不是整個地區——一個指標在等票不該連帶擋住同一地區另外三個指標的派工）。
+--
+-- 參數讀取不卡 activity_rules.enabled：這支函式只負責「列出缺口」，開不開派（規則停用、窗口沒開）完全交給
+-- 外層 contribution_auto_tasks_arms() 的 activity_open() 判斷；min_year 用 COALESCE 的純量子查詢取現有規則列（不論
+-- enabled），查不到任何列（migration 的種子不該發生，但防呆）才退回預設值，確保規則被停用時臂仍然回得出候選列，
+-- 讓 gap.arms_all 的 window／filled 區分（見 CLAUDE.md「新增一支派工臂要三處一起加」那段）照常動作，不會被臂自己
+-- 內部的過濾搶先關掉而誤記成 filled。
 --
 -- 新增一支派工臂的三處（CLAUDE.md）：總表加 UNION 分支、activity_arm_names() 加名字、activity_rules 種規則——都在這支。
 -- 總表與臂名清單是 20261009010000 的版本加一行／一個名字（其餘一字不改；守門測試對照比對）。
@@ -21,27 +28,31 @@ CREATE OR REPLACE FUNCTION contribution_auto_tasks_regional_stats_missing()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT)
 LANGUAGE sql STABLE AS $$
   WITH p AS (
-    SELECT COALESCE(r.params -> 'min_year', '{"population":2024,"area_km2":2020,"budget_expenditure":2023,"aging_rate":2024}'::JSONB) AS min_year
-      FROM activity_rules r WHERE r.activity = 'regional_stats_missing' AND r.enabled ORDER BY r.id LIMIT 1
+    SELECT COALESCE(
+      (SELECT r.params -> 'min_year' FROM activity_rules r WHERE r.activity = 'regional_stats_missing' ORDER BY r.id LIMIT 1),
+      '{"population":2024,"area_km2":2020,"budget_expenditure":2023,"aging_rate":2024}'::JSONB
+    ) AS min_year
   ),
   want AS (
     SELECT k.key AS stat_key, k.value::INTEGER AS min_year FROM p, jsonb_each_text(p.min_year) AS k(key, value)
   ),
-  -- 已經有人交了這個地區的 regional_stat、還在等票的先不派（一個地區一次交一批指標，不用逐指標比對）
+  -- 已經有人交了這個地區這個指標的 regional_stat、還在等票的先不派這一項（粒度是 admin_code＋stat_key：
+  -- 一個指標在等票，不該連帶擋住同一地區另外三個指標的派工）
   queued AS (
-    SELECT DISTINCT c.payload ->> 'admin_code' AS admin_code
+    SELECT DISTINCT c.payload ->> 'admin_code' AS admin_code, c.payload ->> 'stat_key' AS stat_key
       FROM contributions c WHERE c.contribution_type = 'regional_stat' AND c.status IN ('pending', 'verified')
   ),
   cand AS (
     SELECT a.code AS admin_code, a.level, a.county, a.town,
            (SELECT jsonb_agg(jsonb_build_object('stat_key', w.stat_key, 'min_year', w.min_year, 'unit', regional_stat_unit(w.stat_key)) ORDER BY w.stat_key)
               FROM want w
-             WHERE NOT EXISTS (SELECT 1 FROM regional_stats s WHERE s.admin_code = a.code AND s.stat_key = w.stat_key AND s.year >= w.min_year)) AS missing
+             WHERE NOT EXISTS (SELECT 1 FROM regional_stats s WHERE s.admin_code = a.code AND s.stat_key = w.stat_key AND s.year >= w.min_year)
+               AND NOT EXISTS (SELECT 1 FROM queued q WHERE q.admin_code = a.code AND q.stat_key = w.stat_key)) AS missing
       FROM admin_divisions a
      WHERE a.level IN ('county', 'town')
   ),
   gaps AS (
-    SELECT c.* FROM cand c WHERE c.missing IS NOT NULL AND NOT EXISTS (SELECT 1 FROM queued q WHERE q.admin_code = c.admin_code)
+    SELECT c.* FROM cand c WHERE c.missing IS NOT NULL
   )
   SELECT 'auto:regional_stat_missing:' || g.admin_code, 'regional_stat_missing',
          jsonb_build_object('admin_code', g.admin_code, 'level', g.level, 'region', replace(g.county, '臺', '台'),

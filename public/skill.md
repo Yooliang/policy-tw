@@ -830,7 +830,7 @@ for k in ("five_hour", "seven_day"):
 
 | 型別 | official | media | social | other |
 |---|---|---|---|---|
-| `policy`／`policy_progress`／`policy_elements`／`politician`／`correction`（一般欄位）／`question_answer`／`district_seats`／`lineage`／`lineage_participants`／`lineage_link`／`lineage_handover`（中止以外）／`party_info`／`regional_stat` | 3 | 3 | 3 | 3 |
+| `policy`／`policy_progress`／`policy_elements`／`politician`／`correction`（一般欄位）／`question_answer`／`district_seats`／`lineage`／`lineage_participants`／`lineage_link`／`lineage_handover`（中止以外）／`regional_stat`／`party_info` | 3 | 3 | 3 | 3 |
 | `lineage_handover` 的 `stop`（中止；另要求 ≥2 個不同來源 IP） | 3 | 3 | 3 | 3 |
 | `candidacy`／`correction` 改 `candidate_status`（加減參選人；另要求 ≥2 個不同來源 IP） | 3 | 3 | 3 | 3 |
 | `correction` 把「傳聞參選／可能參選」改成登記或不參選（`current_value` 是 `rumored`／`likely`） | 3 | 3 | 3 | 3 |
