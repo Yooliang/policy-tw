@@ -79,7 +79,10 @@ Deno.test("ssr-worker.js 用 readWorkerConfig(env)，不再寫死快取秒數與
   assertNotMatch(w, /policy-tw\.web\.app'/, "上游網址只能出現在 worker-config.js 的預設");
   assertMatch(w, /cfg = readWorkerConfig\(env\)/);
   assertMatch(w, /configureSsr\(\{ baseTtlMs: cfg\.baseTtlMs \}\)/);
-  for (const k of ["cfg.cacheTtlS", "cfg.staleTtlS", "cfg.origin", "cfg.originHost"]) assert(w.includes(k), k);
+  for (const k of ["cfg.cacheTtlS", "cfg.origin", "cfg.originHost"]) assert(w.includes(k), k);
+  // staleTtlS 只用在邊緣渲染頁的 Cache-Control，2026-10-09 起由 worker-config.js 的 ssrCacheControl(cfg) 組（命中與 MISS 同一個值，policy-ops#37）
+  assert(w.includes("ssrCacheControl(cfg)"), "ssrCacheControl(cfg)");
+  assert((await text("cloudflare/worker-config.js")).includes("s-maxage=${cfg.staleTtlS}"), "cfg.staleTtlS");
   const loaders = await text("lib/ssr/loaders.ts");
   assertMatch(loaders, /export function setBaseTtlMs\(ms: number\): void/);
   assertMatch(loaders, /Date\.now\(\) - baseAt > baseTtlMs/);
