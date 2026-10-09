@@ -7,20 +7,23 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
-const SCHEMA_SQL = await read("20261008195000_policy_jp_schema.sql");
-const TABLES_SQL = await read("20261009000000_policy_jp_tables.sql");
-const DISPATCH_SQL = await read("20261009130000_policy_jp_dispatch.sql");
 const MIG_NAME = "20261009310000_policy_jp_console_admin.sql";
 const MIG_SQL = await read(MIG_NAME);
+// 這支之前的全部 policy_jp migration（依檔名排序），含缺口臂（210100）與選舉鏈（250400）：
+// 只套 schema／tables／dispatch 時 activity_arm_names() 只有兩支手動臂，auto: 臂的計數測不到（agy 10-10 指出的盲點）
+const BEFORE: string[] = [];
+for await (const e of Deno.readDir(MIGRATIONS)) {
+  if (e.isFile && e.name.includes("_policy_jp_") && e.name < MIG_NAME) BEFORE.push(e.name);
+}
+BEFORE.sort();
+const BEFORE_SQL = await Promise.all(BEFORE.map(read));
 
 const ELECTION = "2028-07-09_national_lower_national";
 
 async function freshDb(mig = MIG_SQL): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;`);
-  await db.exec(SCHEMA_SQL);
-  await db.exec(TABLES_SQL);
-  await db.exec(DISPATCH_SQL);
+  for (const sql of BEFORE_SQL) await db.exec(sql);
   await db.exec(mig);
   await db.exec(`INSERT INTO policy_jp.elections (id, name, election_date, election_type, election_reason, level, review_status)
     VALUES ('${ELECTION}', '衆議院議員総選挙', '2028-07-09', 'national_lower', 'regular', 'national', 'published')`);
@@ -170,4 +173,21 @@ Deno.test("還原驗證：拿掉函式裡的 reason 檢查，錯誤訊息就不�
   const db = await freshDb(bad);
   const err = await db.query(CREATE, ["manual_open", null, null, "open", null, null, "  ", null, "x"]).then(() => "", (e: Error) => e.message);
   assert(!err.includes("reason 必填"), "拿掉函式裡的檢查後訊息就不是『reason 必填』");
+});
+
+Deno.test("console_arm_status：auto: 臂（選舉發現、團體、地域統計）也在清單裡，queue_count 算的是該臂 auto: 開頭的派工列", async () => {
+  const db = await freshDb();
+  const names = (await one<{ a: string[] }>(db, "SELECT policy_jp.activity_arm_names() AS a")).a;
+  for (const arm of ["election_discovery", "local_government_missing", "regional_stats_missing"]) assert(names.includes(arm), `activity_arm_names 要有 ${arm}`);
+  const before = (await db.query<{ arm: string; queue_count: number | null }>("SELECT arm, queue_count FROM policy_jp.console_arm_status()")).rows;
+  const base = new Map(before.map((r) => [r.arm, Number(r.queue_count ?? 0)]));
+  // seed 寫派工列時 opened_by 帶臂名（console_arm_status 依它計數）
+  await db.exec(`INSERT INTO policy_jp.task_dispatches (task_id, task_type, target, queue_at, last_dispatched_at, dispatch_count, opened_by) VALUES
+    ('auto:regional_stats_missing:232033', 'regional_stats_missing', '{}'::jsonb, now(), now(), 0, '{"arm":"regional_stats_missing"}'::jsonb),
+    ('auto:regional_stats_missing:011002', 'regional_stats_missing', '{}'::jsonb, now(), now(), 0, '{"arm":"regional_stats_missing"}'::jsonb),
+    ('auto:election_discovery:2027-01-31:232033:head', 'election_discovery', '{}'::jsonb, now(), now(), 0, '{"arm":"election_discovery"}'::jsonb)`);
+  const after = new Map((await db.query<{ arm: string; queue_count: number | null }>("SELECT arm, queue_count FROM policy_jp.console_arm_status()")).rows.map((r) => [r.arm, Number(r.queue_count ?? 0)]));
+  assertEquals(after.get("regional_stats_missing")! - base.get("regional_stats_missing")!, 2);
+  assertEquals(after.get("election_discovery")! - base.get("election_discovery")!, 1);
+  assertEquals(after.get("local_government_missing"), base.get("local_government_missing"));
 });
