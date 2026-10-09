@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ShieldCheck } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
+import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
@@ -31,6 +32,7 @@ usePageHead({
         這一頁說明「正見」會蒐集什麼、不會蒐集什麼。<br/>最後更新：{{ UPDATED }}
       </template>
       <template #icon><ShieldCheck :size="400" class="text-emerald-500" /></template>
+      <template #actions><AboutNav current="privacy" /></template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

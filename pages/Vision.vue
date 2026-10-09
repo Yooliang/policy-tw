@@ -2,6 +2,7 @@
 import { Telescope } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
+import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
 /**
@@ -24,6 +25,7 @@ usePageHead({
         選舉過後，政見就消失了。<br/>我們想把它留下來——而且每一筆都查得到出處。
       </template>
       <template #icon><Telescope :size="400" class="text-blue-500" /></template>
+      <template #actions><AboutNav current="vision" /></template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
