@@ -19,6 +19,7 @@ import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
+import { systemVoteSources } from "../_shared/independent-sources.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
@@ -410,8 +411,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
             // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源
             fields: sv.probabilities ?? null,
             min_probability: MIN_PROBABILITY,
+            // 多個獨立來源（2026-10-09，policy-ops#39）：核了哪幾個網址、哪幾個算獨立、各自的判定；supported 時核得過的獨立來源數決定降 1 或 2 分
+            ...systemVoteSources(sv.state, sv.choice),
             note: counts
-              ? "系統已核對提交的來源；這一票已折進門檻（supported＝門檻 −1、not_supported＝門檻 +1——它不是反對票、不會觸發裁決）。要不要反對，請你自己看第二個可信來源決定，不要只重看同一頁。"
+              ? "系統已核對提交的來源；這一票已折進門檻（supported＝門檻 −1，兩個以上獨立來源都核得過 −2；not_supported＝門檻 +1——它不是反對票、不會觸發裁決）。要不要反對，請你自己看第二個可信來源決定，不要只重看同一頁。"
               : "系統核對提交的來源時無法確定（抓不到正文或信心不足），這一票棄權，門檻照舊。fields 裡的逐欄判定沒有達到門檻，不能當反證。",
           };
         }
