@@ -58,7 +58,9 @@ Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器�
   const eff = await latestMigrationDefining("FUNCTION contribution_effective_agree");
   assert(eff.sql.includes("contribution_roster_matched(p_contribution_id)"), "有效門檻要看名冊吻合");
   assert(eff.sql.includes(`THEN LEAST(v_need, ${ROSTER_MATCHED_TARGET})`), "名冊吻合的目標是 ROSTER_MATCHED_TARGET（跟 TS 的 Math.min 同義）");
-  assert(eff.sql.includes("GREATEST(1, v_need - 1)"), "一般 supported 照舊 −1");
+  // 一般 supported：依核得過的獨立來源數 −1～−2（2026-10-09，policy-ops#39），名冊吻合那一條排在它前面
+  assert(eff.sql.includes("GREATEST(1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))"), "一般 supported −1～−2、最少 1");
+  assert(eff.sql.indexOf("contribution_roster_matched(p_contribution_id)") < eff.sql.indexOf("contribution_system_vote_sources(p_contribution_id)"), "名冊吻合優先");
 
   const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
   // 2026-10-06（#349）起「要兩台機器」的判斷抽成 contribution_needs_two_ips（多看 payload：中止交接），名冊吻合的例外照舊
@@ -68,5 +70,6 @@ Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器�
     "名冊吻合的參選紀錄免兩台機器，否則目標 1 也要兩票");
 
   // 讓現有符合條件的 pending 立刻重算
-  assert(/contribution_apply_consensus\(c\.id\)/.test(eff.sql) || /contribution_apply_consensus\(c\.id\)/.test(fn.sql), "migration 要把現有名冊吻合的 pending 重算一次");
+  // 2026-10-09（policy-ops#39）起 contribution_effective_agree 由 20261009320000 重新定義，重算那一段留在名冊那支 migration（定義 contribution_roster_matched 的那支）
+  assert(/contribution_apply_consensus\(c\.id\)/.test(matched.sql) || /contribution_apply_consensus\(c\.id\)/.test(fn.sql), "migration 要把現有名冊吻合的 pending 重算一次");
 });
