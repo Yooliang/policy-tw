@@ -35,6 +35,8 @@
 --      regional_stats_missing    after_step=local_government、後備＝投票日前 45 天。第 1 步裡的先後：統計的外鍵指向團體，
 --                                團體沒進來時交了也只能等（apply_waiting），所以團體進來才開；團體卡住時投票日前 45 天照開（交件等外鍵，團體一進來就落）。
 --      election_discovery        params 加 chain_close_after_days（90）。
+--      regional_stats_missing 的 min_year：人口・面積・高齢化率 2020 → 2025（令和7年国勢調査 2026-09-29 已公表）。交 2025 年的值才對得上
+--        機器核對（20261009210400）；日本站沒有其他代理投票，交 2020 年的會一直停在 pending。歳出照舊 2023。
 --    常駐的全國掃描不做了（計畫第 1 節）：沒有開著的選舉，這兩支臂一列都不出。
 --
 -- 不做的（之後的步驟）：第 2 步以後的臂、往回補／往後接（lookback_years、deep_levels）、新聞線（#59：排在骨架之後）。
@@ -388,8 +390,8 @@ UPDATE policy_jp.activity_rules
 
 UPDATE policy_jp.activity_rules
    SET after_step = 'local_government',
-       params = params || '{"chain_fallback":{"kind":"polling","offset":-45}}'::JSONB,
-       note = '選挙鎖の第 1 歩（地域データ）：開いている選挙の団体の統計（人口・面積・高齢化率は国勢調査 2020 年以降、歳出は 2023 会計年度以降の最新）が足りないものを、e-Stat・総務省で確かめて regional_stat を回報させる。'
+       params = params || '{"chain_fallback":{"kind":"polling","offset":-45},"min_year":{"population":2025,"area_km2":2025,"aging_rate":2025,"budget_expenditure":2023}}'::JSONB,
+       note = '選挙鎖の第 1 歩（地域データ）：開いている選挙の団体の統計（人口・面積・高齢化率は令和7年国勢調査＝2025 年以降、歳出は 2023 会計年度以降の最新）が足りないものを、e-Stat・総務省で確かめて regional_stat を回報させる。'
               || '団体が local_governments に入ってから開く（統計の外部キーは団体）。団体が止まっていても投票日の 45 日前には開く（後備）。同時に開くのは最大 200 件。行政区は対象外'
  WHERE activity = 'regional_stats_missing' AND priority IS NULL AND after_step IS NULL;
 
@@ -431,6 +433,11 @@ BEGIN
     FROM policy_jp.activity_rules r
    WHERE r.after_step IS NOT NULL AND r.after_step <> 'discovery' AND NOT (r.params ? 'chain_fallback');
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'policy_jp：這些鏈上的規則沒有後備里程碑（params.chain_fallback）：%', bad; END IF;
+  -- min_year 的每個 key 都要是 regional_stats 認得的 stat_key（寫錯字會變成永遠要求一個不存在的統計，鏈的 regional_stats 永遠不 done）
+  SELECT string_agg(k.key, ', ') INTO bad
+    FROM policy_jp.activity_rules r, jsonb_each_text(r.params->'min_year') AS k(key, value)
+   WHERE r.activity = 'regional_stats_missing' AND policy_jp.regional_stat_unit(k.key) IS NULL;
+  IF bad IS NOT NULL THEN RAISE EXCEPTION 'policy_jp：regional_stats_missing 的 min_year 有不認得的 stat_key：%', bad; END IF;
   IF has_function_privilege('anon', 'policy_jp.activity_chain_escape(jsonb, text, text, text, date)', 'EXECUTE')
      OR has_function_privilege('anon', 'policy_jp.chain_regional_stats_missing(text)', 'EXECUTE')
      OR has_function_privilege('anon', 'policy_jp.contribution_auto_tasks_arms()', 'EXECUTE')

@@ -12,7 +12,8 @@
 --   apply ：表裡有（lg_code、stat_key、year），單位一致，值在容許差內（人口一致；面積 ±0.005 km2；高齢化率 ±0.05 %——小數一位四捨五入算對），
 --           as_of 沒填或跟表一樣
 --   reject：表裡有，但值超出容許差、單位不同、或 as_of 不同 → 退件，理由寫國勢調査的值
---   skip  ：表裡沒有（別的年份、歳出、團體不在表裡）→ 不碰，留給同儕
+--   skip  ：表裡沒有（別的年份、歳出、團體不在表裡）→ 不碰，留給同儕。掃描（stat_registry_verify_pending）一開始就只挑表裡查得到的，
+--           這種交件不進掃描、不佔每輪的筆數（否則堆多了會把新的擋在後面）
 -- 排程 policy-jp-stat-registry-verify 每 10 分鐘（跟自治體的錯開）；jp-report 交件當下也對剛收下的跑一次（_shared/jp/machine-verify.ts）。
 
 -- ------------------------------------------------------------
@@ -101,6 +102,10 @@ BEGIN
     SELECT id, payload FROM policy_jp.contributions
      WHERE status = 'pending' AND contribution_type = 'regional_stat'
        AND (p_ids IS NULL OR id = ANY (p_ids))
+       -- 只掃表裡查得到的（團體・項目・年份）：查不到的（歳出、別的年份）一定是 skip、會一直停在 pending 等同儕，
+       -- 不先濾掉的話堆到 p_limit 筆以上，排程每輪都只看到它們、新的對得上的永遠輪不到
+       AND EXISTS (SELECT 1 FROM policy_jp.stat_registry r
+                    WHERE r.lg_code = payload->>'lg_code' AND r.stat_key = payload->>'stat_key' AND r.year::TEXT = payload->>'year')
      ORDER BY created_at, id
      LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 2000), 5000))
      FOR UPDATE SKIP LOCKED

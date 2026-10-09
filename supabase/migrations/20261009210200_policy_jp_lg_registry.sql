@@ -109,6 +109,8 @@ BEGIN
     SELECT id, payload FROM policy_jp.contributions
      WHERE status = 'pending' AND contribution_type = 'local_government'
        AND (p_ids IS NULL OR id = ANY (p_ids))
+       -- 只掃表裡查得到的團體碼：查不到的一定是 skip、會一直停在 pending 等同儕，不先濾掉的話堆多了會把新的擋在後面
+       AND EXISTS (SELECT 1 FROM policy_jp.lg_code_registry r WHERE r.lg_code = payload->>'lg_code')
      ORDER BY created_at, id
      LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 2000), 5000))
      FOR UPDATE SKIP LOCKED
