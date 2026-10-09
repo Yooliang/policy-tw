@@ -172,6 +172,58 @@ Deno.test("g. 還原驗證：拿掉觸發器 → 不會自動收編；拿掉一�
   await noMerge.close();
 });
 
+// ---- 主線審查（#533）退回的三點：代號唯一約束、自己投自己、統計數值比對；各附還原驗證 ----
+async function agentCase(mig: string): Promise<{ firstVoters: Array<{ agent: string; ip: string }>; later: string }> {
+  const d = await baseDb();
+  const h = HEADS[0];
+  const first = await contribution(d, "election", el(h), { ip: "ip-x", at: "2026-10-09T03:00:00Z", agent: "same-agent" });
+  const later = await contribution(d, "election", el(h), { ip: "ip-y", at: "2026-10-09T04:00:00Z", agent: "same-agent" });
+  const v = (cid: string, agent: string, ip: string, at: string) =>
+    d.query(`INSERT INTO policy_jp.contribution_votes (contribution_id, verdict, agent_name, verifier_ip_hash, created_at) VALUES ($1, 'unsure', $2, $3, $4)`, [cid, agent, ip, at]);
+  await v(first, "dup-name", "ip-z2", "2026-10-09T05:00:00Z"); // 先交那筆已有同代號（不同網段）的票
+  await v(later, "dup-name", "ip-z1", "2026-10-09T05:00:00Z"); // 搬過去會撞 (contribution_id, agent_name)
+  await v(later, "w1", "ip-w", "2026-10-09T05:01:00Z"); // 同網段兩票：只搬最早那票
+  await v(later, "w2", "ip-w", "2026-10-09T05:02:00Z");
+  await d.exec(mig);
+  const firstVoters = (await all<{ agent: string; ip: string }>(d,
+    `SELECT agent_name AS agent, verifier_ip_hash AS ip FROM policy_jp.contribution_votes WHERE contribution_id = $1 ORDER BY 1`, [first]));
+  const st = await status(d, later);
+  await d.close();
+  return { firstVoters, later: st };
+}
+
+Deno.test("i. 搬票防代號唯一約束、同網段只搬一票；同一代理換網段重交不會變成自己投自己", async () => {
+  assertEquals(await agentCase(MIG_SQL), { firstVoters: [{ agent: "dup-name", ip: "ip-z2" }, { agent: "w1", ip: "ip-w" }], later: "superseded" });
+  // 還原驗證：拿掉「同代號」的排除，交件者 same-agent 會被記成對自己那筆的同意票
+  const SELF = "       AND lower(r.agent_name) IS DISTINCT FROM lower(first_c.agent_name)\n";
+  assertEquals(MIG_SQL.split(SELF).length - 1, 1);
+  const r = await agentCase(MIG_SQL.replace(SELF, ""));
+  assert(r.firstVoters.some((x) => x.agent === "same-agent"), "舊寫法會自己投自己");
+});
+
+async function numericCase(mig: string): Promise<string> {
+  const d = await baseDb();
+  await d.exec(mig);
+  const lg = HEADS[0].lg_code;
+  const mk = (raw: string, ip: string, at: string) => one<{ id: string }>(d,
+    `INSERT INTO policy_jp.contributions (contribution_type, payload, source_urls, agent_name, contributor_ip_hash, payload_hash, created_at)
+     VALUES ('regional_stat', $1::JSONB, ARRAY['https://www.e-stat.go.jp/a'], $2, $2, $2, $3) RETURNING id`,
+    [`{"lg_code":"${lg}","stat_key":"aging_rate","year":2025,"value":${raw},"unit":"%","resolved_claim":"new"}`, ip, at]);
+  const a = await mk("28.5", "ip-p", "2026-10-09T12:00:00Z");
+  const b = await mk("28.50", "ip-q", "2026-10-09T12:05:00Z");
+  await d.query(`UPDATE policy_jp.contributions SET status = 'applied' WHERE id = $1`, [a.id]);
+  const s = await status(d, b.id);
+  await d.close();
+  return s;
+}
+
+Deno.test("j. 統計數值用 NUMERIC 比（28.5 與 28.50 相同，跟 apply_regional_stat 同一判準）；還原驗證", async () => {
+  assertEquals(await numericCase(MIG_SQL), "superseded");
+  const NUM = /    WHEN 'regional_stat' THEN jsonb_typeof[\s\S]*?a->>'unit' IS NOT DISTINCT FROM b->>'unit'\n/;
+  assert(NUM.test(MIG_SQL));
+  assertEquals(await numericCase(MIG_SQL.replace(NUM, "    WHEN 'regional_stat' THEN (a->>'value', a->>'unit') IS NOT DISTINCT FROM (b->>'value', b->>'unit')\n")), "pending");
+});
+
 Deno.test("h. 文字守門：不碰 public／ditrust、不寫正式資料表、釘 search_path、不給 anon", async () => {
   const body = MIG_SQL.replace(/--[^\n]*/g, "");
   assert(!/\bpublic\.|ditrust/i.test(body));

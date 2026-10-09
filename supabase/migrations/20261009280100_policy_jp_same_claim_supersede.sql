@@ -19,7 +19,9 @@ LANGUAGE sql IMMUTABLE SET search_path = policy_jp, pg_temp AS $$
   SELECT CASE p_type
     WHEN 'election' THEN (a->>'election_date', a->>'election_type', COALESCE(NULLIF(a->>'election_reason', ''), 'regular'))
                      IS NOT DISTINCT FROM (b->>'election_date', b->>'election_type', COALESCE(NULLIF(b->>'election_reason', ''), 'regular'))
-    WHEN 'regional_stat' THEN (a->>'value', a->>'unit') IS NOT DISTINCT FROM (b->>'value', b->>'unit')
+    -- 數值比對跟 apply_regional_stat 同一判準（NUMERIC：28.5 與 28.50 相同）；不是數字的不算相同
+    WHEN 'regional_stat' THEN jsonb_typeof(a->'value') = 'number' AND jsonb_typeof(b->'value') = 'number'
+                              AND (a->>'value')::NUMERIC = (b->>'value')::NUMERIC AND a->>'unit' IS NOT DISTINCT FROM b->>'unit'
     WHEN 'local_government' THEN (a->>'name', a->>'kana', a->>'kind') IS NOT DISTINCT FROM (b->>'name', b->>'kana', b->>'kind')
     ELSE FALSE
   END
@@ -109,8 +111,15 @@ BEGIN
        SET contribution_id = first_c.id,
            note = left('（#521 收編：原本投在重複提交 ' || r.id || '）' || COALESCE(v.note, ''), 2000)
      WHERE v.contribution_id = r.id
+       -- 自己不能驗自己：先交那筆的交件者（網段或代號相同）的票不搬
        AND v.verifier_ip_hash IS DISTINCT FROM first_c.contributor_ip_hash
-       AND NOT EXISTS (SELECT 1 FROM policy_jp.contribution_votes x WHERE x.contribution_id = first_c.id AND x.verifier_ip_hash = v.verifier_ip_hash);
+       AND lower(v.agent_name) IS DISTINCT FROM lower(first_c.agent_name)
+       -- 一個網段、一個代號在一筆上只有一票（唯一約束 contribution_votes_one_per_agent 是 (contribution_id, agent_name)）
+       AND NOT EXISTS (SELECT 1 FROM policy_jp.contribution_votes x WHERE x.contribution_id = first_c.id
+                        AND (x.verifier_ip_hash = v.verifier_ip_hash OR x.agent_name = v.agent_name))
+       -- 同一網段在後交那筆上有兩票（代號不同）：只搬最早那一票
+       AND NOT EXISTS (SELECT 1 FROM policy_jp.contribution_votes y WHERE y.contribution_id = r.id
+                        AND y.verifier_ip_hash = v.verifier_ip_hash AND (y.created_at, y.id) < (v.created_at, v.id));
     -- 後交那筆的交件者＝對先交那筆的同意票（重複提交＝同意票）
     INSERT INTO policy_jp.contribution_votes (contribution_id, verdict, agent_name, agent_tool, verifier_ip_hash, actor_id, via, note, evidence_url)
     SELECT first_c.id, 'agree', r.agent_name, r.agent_tool, r.contributor_ip_hash, r.actor_id, 'merge',
@@ -118,7 +127,11 @@ BEGIN
                 || COALESCE('對方的來源：' || array_to_string(r.source_urls, '、'), ''), 2000),
            r.source_urls[1]
      WHERE r.contributor_ip_hash IS DISTINCT FROM first_c.contributor_ip_hash
-       AND NOT EXISTS (SELECT 1 FROM policy_jp.contribution_votes x WHERE x.contribution_id = first_c.id AND x.verifier_ip_hash = r.contributor_ip_hash);
+       -- 同一個代理（代號相同、網段不同）重交：不能變成自己對自己的同意票
+       AND lower(r.agent_name) IS DISTINCT FROM lower(first_c.agent_name)
+       AND NOT EXISTS (SELECT 1 FROM policy_jp.contribution_votes x WHERE x.contribution_id = first_c.id
+                        AND (x.verifier_ip_hash = r.contributor_ip_hash OR x.agent_name = r.agent_name))
+    ON CONFLICT DO NOTHING;
 
     INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
     VALUES ('contributions', r.id::TEXT, 'status', to_jsonb(r.status), to_jsonb('superseded'::TEXT), first_c.id, 'same-claim');
