@@ -107,8 +107,8 @@ const SSR_ROUTES = [/^\/politician\/[^/]+\/?$/, /^\/policy\/[^/]+\/?$/, /^\/line
  */
 const API_BASE = 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1'
 const API_ONLY = new Set(['next', 'report', 'contribute', 'ask', 'request-task', 'history', 'verifications', 'contribution-status', 'contributions-feed', 'policy-stance', 'question-stance', 'boost', 'apply', 'apply-verified', 'system-one'])
-const API_ALSO_PAGE = new Set(['tasks', 'verify'])
-const AGENT_PARAMS = ['agent_name', 'agent_tool', 'contribution_id', 'api_key']
+const API_ALSO_PAGE = new Set(['tasks', 'verify', 'sources'])
+const AGENT_PARAMS = ['agent_name', 'agent_tool', 'contribution_id', 'api_key', 'format', 'need']
 
 function apiRedirect(request) {
   const url = new URL(request.url)

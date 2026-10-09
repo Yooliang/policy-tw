@@ -140,7 +140,6 @@ const NOT_REDIRECTED: Record<string, string> = {
   "source-archive": "排程存檔，不對外",
   "jp-next": "日本站（policy_jp）的派工端點，代理照日本站 skill.md 直接打 Supabase 的端點根網址，不經正見.tw 的 Worker",
   "jp-report": "日本站（policy_jp）的回報端點，同 jp-next",
-  "sources": "已知缺口（2026-10-07 盤點時就是這樣）：skill.md 有寫 GET /functions/v1/sources，但網站也有 /sources 頁，不在 API_ALSO_PAGE，代理打網站網域會拿到頁面。要不要補請維護者決定",
 };
 
 Deno.test("API_ONLY／API_ALSO_PAGE 與 supabase/functions 目錄對照：每支函式都明確分類，名單裡沒有不存在的端點", async () => {
@@ -165,5 +164,5 @@ Deno.test("API_ONLY／API_ALSO_PAGE 與 supabase/functions 目錄對照：每支
   assertEquals(unclassified, [], "新函式請決定：代理會打到網站網域嗎？要轉就加進 ssr-worker.js 的 API_ONLY（或 API_ALSO_PAGE），不轉就寫進這支測試的 NOT_REDIRECTED 並附理由");
   // 目前的轉址名單（改動請連同這裡一起改）
   assertEquals(apiOnly.sort(), ["apply", "apply-verified", "ask", "boost", "contribute", "contribution-status", "contributions-feed", "history", "next", "policy-stance", "question-stance", "report", "request-task", "system-one", "verifications"]);
-  assertEquals(alsoPage.sort(), ["tasks", "verify"]);
+  assertEquals(alsoPage.sort(), ["sources", "tasks", "verify"]);
 });

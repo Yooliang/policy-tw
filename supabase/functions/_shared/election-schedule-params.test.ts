@@ -90,7 +90,9 @@ Deno.test("#1 沒動計分／門檻：roster_check 臂的篩選條件、冷卻�
   const { def } = await latestDef("contribution_auto_tasks_raw");
   // 2026-10-08（缺口盤點 R2，migration 20261008112000）：重查條件從「沒清查過 OR 過了 recheck_days」變成
   // 「沒清查過 OR 缺口還在（最近一次回報的 cec_count > 我們的名冊內人數）OR 過了 recheck_days」；細節與情境見 roster-check-gap.test.ts
-  assertStringIncludes(def, "AND (rc.last_checked IS NULL\n         OR COALESCE(rc.last_cec_count, 0) > COALESCE(o.n_listed, 0)\n         OR rc.last_checked < now() - (s.recheck_days || ' days')::INTERVAL)");
+  // 2026-10-09（#466，migration 20261009230000）：缺口那一行先扣掉登記後退選的人（cec_count − filed_out）再比 n_listed；細節見 roster-filed-withdrawn.test.ts
+  assertStringIncludes(def, "AND (rc.last_checked IS NULL\n");
+  assertStringIncludes(def, "         OR COALESCE(rc.last_cec_count, 0) - COALESCE(fo.n_filed_out, 0) > COALESCE(o.n_listed, 0)\n         OR rc.last_checked < now() - (s.recheck_days || ' days')::INTERVAL)");
   assertStringIncludes(def, "rc.last_attempt_without_count < now() - (roster_attempt_cooldown_days() || ' days')::INTERVAL");
   assertStringIncludes(def, "         2, l.name\n  FROM roster_check_scope s");
 });

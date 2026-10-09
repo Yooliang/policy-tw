@@ -200,12 +200,13 @@ export const ROSTER_REGISTRATION_GAP_HINT =
   "**needs_status 那一組不要再交 candidacy**（他已經有參選紀錄，要改的是狀態；走 correction 才看得到改前改後、留得下履歷）：用 correction，target_table 填 politician_elections、target_id 填 politician_election_id，" +
   "changes 把 candidate_status 改成任務敘述的階段（登記階段填 registered，公告後填 qualified），source_urls 放那份名冊，reason 寫出他的姓名與你核對的名冊列。" +
   "例外：withdrawn 的人如果真的是登記之後才退選（找得到退選的報導或公告），狀態是對的，不要改——這種人名冊上有、但我們的名冊內人數不算他，" +
-  "交 roster_check 時 cec_count 填 registration.registered 減掉這幾位（note 寫出是誰、退選的出處），不然任務會一直派。" +
+  "派工判準會把登記後退選的人從名冊人數裡系統扣，交 roster_check 時 cec_count 照樣填 registration.registered，不用自己減（note 寫出是誰、退選的出處）；" +
+  "他的 withdrawn_after_filing 還是空的就先查清楚、用 correction 補成 true，系統只扣標成 true 的人，不然任務會一直派。" +
   "missing 那一組照 missing 逐位用 candidacy 補一筆：election_id、election_type、region 照任務；candidate_status 照任務敘述的階段填；" +
   "鄉鎮市長、代表、區長的 sub_region 填 missing 的 sub_region，村里長再加 village（照 missing 的原字），縣市議員的 electoral_district 填 missing 的 district（第NN選舉區，沒填會被退回），代表（鄉鎮市民代表、區民代表）也填 missing 的 district（號次按選舉區編，沒填不會被退回，但選舉區會變成補選區任務；district 是空的鄉鎮不用填）；" +
   "source_urls 第一個放 registration.source_urls 裡的那份名冊——系統會逐位核對名冊上的姓名、縣市、鄉鎮、政黨，對得上的一張同意就通過，核對不上的才逐筆驗。" +
   "ours 裡已經有同名的人先確認是不是同一人，是同一人填他的 politician_id；名字相同不代表同一人。**照 missing 補的 candidacy 一次最多 150 筆**（整批都是 candidacy、source_urls 放那份名冊，而且每一筆都跟名冊逐位吻合；有一筆對不上整批未收，把對不上的拆出去用 20 筆以內的批次交），其他型別、沒有名冊逐位吻合的批次仍是一次最多 20 筆。" +
-  "兩組都做完才交 roster_check（cec_count 填 registration.registered，除了上面那種登記後退選的）；只做了一部分就不要交，系統下一輪會再派。" +
+  "兩組都做完才交 roster_check（cec_count 填 registration.registered）；只做了一部分就不要交，系統下一輪會再派。" +
   "registration.unnamed_count 不是 0 時，名冊上有幾列的姓名欄是空的（罕用字抽不出來），不在 missing 裡，要打開名冊 PDF 自己看。";
 
 /** 名單缺口附給代理的名冊比對結果（roster_registration_gap 的回傳）；一件最多列這麼多位（2026-10-08 起 150，跟名冊吻合的 candidacy 一次交件上限 MAX_BATCH_ROSTER 一樣） */
