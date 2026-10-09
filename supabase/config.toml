@@ -438,6 +438,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/jp-contributions-feed/index.ts"
 
+[functions.jp-history]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-history/index.ts"
+
 [functions.apply-verified]
 enabled = true
 verify_jwt = false
