@@ -18,7 +18,7 @@
  */
 
 import { render, configureSsr, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr/entry-server.js'
-import { readWorkerConfig } from './worker-config.js'
+import { readWorkerConfig, ssrCacheControl } from './worker-config.js'
 import { HEALTH_PATH, healthResponse } from './health.js'
 import { classifyRead } from './ai-reads.js'
 import { handleMarkdown } from './markdown.js'
@@ -199,6 +199,8 @@ async function renderPage(request, ctx) {
     const age = Number(hit.headers.get('X-Rendered-At') ?? 0)
     if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache, '').catch(() => undefined))
     const h = new Headers(hit.headers); h.set('X-Cache', 'HIT')
+    // 命中的回應會被改成 max-age=14400（區域的瀏覽器快取 TTL）：重設成跟 MISS 一樣，瀏覽器才不會把舊頁留 4 小時（policy-ops#37）
+    h.set('Cache-Control', ssrCacheControl(cfg))
     return new Response(hit.body, { status: hit.status, headers: h })
   }
   const res = await renderAndStore(path, url.origin, cacheKey, cache, url.search)
@@ -217,7 +219,7 @@ async function renderAndStore(path, origin, cacheKey, cache, search = '') {
   }
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': `public, max-age=0, s-maxage=${cfg.staleTtlS}`,
+    'Cache-Control': ssrCacheControl(cfg),
     'X-Served-Via': 'cloudflare-worker-ssr',
     'X-Rendered-At': String(Date.now()),
     'X-Shell-Version': shellVersion(shell),
