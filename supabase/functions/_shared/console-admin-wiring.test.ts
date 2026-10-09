@@ -27,6 +27,16 @@ Deno.test("console-admin：業務邏輯在 handleConsoleAdmin 裡驗 Firebase ID
   assert(verify > 0, "handleConsoleAdmin 要呼叫 verifyFirebaseIdToken（透過可注入的 deps.verifyToken）");
   const reject = handler.indexOf("!verified.ok");
   assert(reject > verify, "驗證沒過要直接回應、不能往下做（拿掉這一行等於不驗證）");
-  const firstRpc = handler.indexOf("deps.rpc(");
+  const firstRpc = handler.indexOf("deps.rpc"); // deps.rpc／deps.rpcJp 都算（2026-10-10 起依 site 選 RPC）
   assert(firstRpc > reject, "呼叫任何 RPC 都要在驗證通過之後");
+});
+
+Deno.test("console-admin：日本站走 _shared/jp/client.ts 的 jpClient（schema 寫死 policy_jp），index.ts 不從請求取 schema", async () => {
+  const idx = await read("../console-admin/index.ts");
+  assert(idx.includes('from "../_shared/jp/client.ts"') && idx.includes("jpClient("), "index.ts 要用 jpClient 組日本站 RPC");
+  assert(idx.includes("rpcJp"), "index.ts 要把 rpcJp 交給 handler");
+  assert(!/\.schema\(|db:\s*\{\s*schema/.test(idx), "index.ts 不自己組 schema（只經 jpClient）");
+  const handler = await read("./console-admin-handler.ts");
+  assert(/site !== "tw" && site !== "jp"/.test(handler), "handler 要有 site 白名單（只收 tw／jp）");
+  assert(!/schema/i.test(handler.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "").replace(/policy_jp/g, "")), "handler 不處理 schema 名稱");
 });

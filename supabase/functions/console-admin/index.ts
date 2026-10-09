@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleConsoleAdmin } from "../_shared/console-admin-handler.ts";
+import { jpClient } from "../_shared/jp/client.ts";
 
 /**
  * console-admin — 主控台（policy-console）手動調整派工開關與選舉日期（#518，2026-10-09）。
@@ -21,7 +22,7 @@ import { handleConsoleAdmin } from "../_shared/console-admin-handler.ts";
  * ⚠️ config.toml 要有 [functions.console-admin]、verify_jwt = false：閘道預設驗 Supabase 自己的 JWT，Firebase ID Token
  * 簽發者不同，閘道那層就會先擋下、函式本體跑不到（2026-10-09 agy 審查第一點，退回修正）。守門見 console-admin-wiring.test.ts。
  *
- * POST body：
+ * POST body（共通選填 site："tw"（預設）或 "jp"，只收這兩個字面值，其他一律 400；jp 走 policy_jp 的同名 RPC，election_id 為字串）：
  *   { action: "override_create", activity, election_id?, election_type?, force, open_from?, open_until?, reason, expires_at? }
  *   { action: "override_revoke", id, reason }
  *   { action: "milestone_set", election_id, kind, election_type?, on_date, status, reason }
@@ -37,12 +38,18 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+  // 日本站：schema 固定 policy_jp（client 內寫死），schema 名稱不從請求來
+  const supabaseJp = jpClient(supabaseUrl, serviceRoleKey);
 
   return handleConsoleAdmin(req, {
     projectId: Deno.env.get("CONSOLE_FIREBASE_PROJECT_ID") || DEFAULT_FIREBASE_PROJECT_ID,
     ownerEmail: Deno.env.get("CONSOLE_OWNER_EMAIL") || DEFAULT_OWNER_EMAIL,
     rpc: async (fn, args) => {
       const { data, error } = await supabase.rpc(fn, args).single();
+      return { data, error };
+    },
+    rpcJp: async (fn, args) => {
+      const { data, error } = await supabaseJp.rpc(fn, args).single();
       return { data, error };
     },
   });

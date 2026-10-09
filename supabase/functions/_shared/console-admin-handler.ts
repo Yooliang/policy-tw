@@ -15,8 +15,15 @@ export interface RpcResult {
 /** 呼叫一支 RPC（single row）；真正的實作在 index.ts 用 supabase-js 的 .rpc(fn, args).single() 包一層 */
 export type RpcClient = (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
 
+/** 站台白名單（2026-10-10 日本站）：body.site 只收這兩個字面值，永遠不接受 schema 名稱。 */
+export const CONSOLE_SITES = ["tw", "jp"] as const;
+export type ConsoleSite = typeof CONSOLE_SITES[number];
+
 export interface ConsoleAdminDeps {
+  /** 台灣站（public schema）的 RPC */
   rpc: RpcClient;
+  /** 日本站（policy_jp schema）的 RPC；沒給就拒絕 site=jp（500） */
+  rpcJp?: RpcClient;
   /** 這個 Firebase 專案的 id（aud／iss 都要對得上） */
   projectId: string;
   /** 主控台擁有者信箱 */
@@ -88,15 +95,25 @@ export async function handleConsoleAdmin(req: Request, deps: ConsoleAdminDeps): 
     return json({ success: false, error: "body 不是合法的 JSON" }, 400);
   }
   const action = body.action;
+
+  // site 白名單：只認 "tw"／"jp"（沒給＝tw，維持舊呼叫端相容）；其他任何值（含 schema 名稱、大小寫變體、非字串）一律 400
+  const site = body.site === undefined || body.site === null ? "tw" : body.site;
+  if (site !== "tw" && site !== "jp") return json({ success: false, error: "site 只能是 tw 或 jp" }, 400);
+  const rpc = site === "jp" ? deps.rpcJp : deps.rpc;
+  if (!rpc) return json({ success: false, error: "日本站尚未設定" }, 500);
+  // 選舉 id：台灣站是整數，日本站是 election_key 字串
+  const electionIdOk = (v: unknown) => (site === "jp" ? nonEmpty(v) : typeof v === "number");
+  const electionIdOrNull = (v: unknown) => (site === "jp" ? (nonEmpty(v) ? v.trim() : null) : typeof v === "number" ? v : null);
+
   if (!nonEmpty(body.reason)) return json({ success: false, error: "reason 必填" }, 400);
 
   try {
     if (action === "override_create") {
       if (!nonEmpty(body.activity)) return json({ success: false, error: "activity 必填" }, 400);
       if (!["open", "closed", "window"].includes(String(body.force))) return json({ success: false, error: "force 必須是 open／closed／window" }, 400);
-      const { data, error } = await deps.rpc("console_admin_override_create", {
+      const { data, error } = await rpc("console_admin_override_create", {
         p_activity: body.activity,
-        p_election_id: typeof body.election_id === "number" ? body.election_id : null,
+        p_election_id: electionIdOrNull(body.election_id),
         p_election_type: blank(body.election_type ?? null),
         p_force: body.force,
         p_open_from: blank(body.open_from ?? null),
@@ -111,7 +128,7 @@ export async function handleConsoleAdmin(req: Request, deps: ConsoleAdminDeps): 
 
     if (action === "override_revoke") {
       if (typeof body.id !== "number") return json({ success: false, error: "id 必填（覆寫的 id）" }, 400);
-      const { data, error } = await deps.rpc("console_admin_override_revoke", {
+      const { data, error } = await rpc("console_admin_override_revoke", {
         p_id: body.id, p_reason: body.reason, p_revoked_by: agentEmail,
       });
       if (error) throw error;
@@ -119,12 +136,12 @@ export async function handleConsoleAdmin(req: Request, deps: ConsoleAdminDeps): 
     }
 
     if (action === "milestone_set") {
-      if (typeof body.election_id !== "number") return json({ success: false, error: "election_id 必填" }, 400);
+      if (!electionIdOk(body.election_id)) return json({ success: false, error: "election_id 必填" }, 400);
       if (!nonEmpty(body.kind)) return json({ success: false, error: "kind 必填" }, 400);
       if (!nonEmpty(body.on_date)) return json({ success: false, error: "on_date 必填" }, 400);
       if (!nonEmpty(body.status)) return json({ success: false, error: "status 必填" }, 400);
-      const { data, error } = await deps.rpc("console_admin_milestone_set", {
-        p_election_id: body.election_id,
+      const { data, error } = await rpc("console_admin_milestone_set", {
+        p_election_id: site === "jp" ? String(body.election_id).trim() : body.election_id,
         p_kind: body.kind,
         p_election_type: blank(body.election_type ?? null),
         p_on_date: body.on_date,

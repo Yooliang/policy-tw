@@ -376,6 +376,7 @@ const T_STR = "20261009250200";
 const T_CHAIN = "20261009250400";
 const T_SAME = "20261009280000"; // 同一件事（#521）
 const T_SAME2 = "20261009280100"; // 同一件事第二步：收編（#521，policy-ops#24）
+const T_CONSOLE = "20261009310000"; // 主控台日本站（#518 第二步）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -470,6 +471,14 @@ const JP_ONLY: Record<string, JpOnly> = {
   same_claim_supersede: { mig: [T_SAME2], why: "上線後收編（照正見 2026-09-21 supersedeDuplicates，正見是 TS、日本站是 SQL）：已落庫那筆 → 同一件事內容相同的等票提交 superseded＋edit_history" },
   same_claim_supersede_trg: { mig: [T_SAME2], why: "觸發器函式：election／regional_stat／local_government 轉 applied 時呼叫 same_claim_supersede" },
   same_claim_merge_pending: { mig: [T_SAME2], why: "一次性收編 #531 上線前的重複：兩筆都等票的，後交的票與交件者那一票併進先交的、後交的 superseded" },
+
+  // ---- 20261009310000 console_admin：主控台日本站（#518 第二步；正見版在 20261009260000，參數型別與表都不同所以不是複本） ----
+  console_arm_status: { mig: [T_CONSOLE], why: "每支臂今天開／關與佇列件數（SECURITY DEFINER，anon 可讀）；正見版讀 activity_open_now 視圖，日本站沒有那張，targets 展開寫在函式裡，election_id 是 TEXT" },
+  console_active_overrides: { mig: [T_CONSOLE], why: "（視圖）目前有效的覆寫；擁有者權限的視圖＋明確 GRANT SELECT（日本站內部表不對 anon 開，正見版是 security_invoker）" },
+  console_election_milestones: { mig: [T_CONSOLE], why: "（視圖）每場選舉×里程碑一列，給主控台改日期；擁有者權限的視圖＋明確 GRANT SELECT" },
+  console_admin_override_create: { mig: [T_CONSOLE], why: "主控台新增覆寫（service_role 專用）；election_id 是 TEXT，釘 search_path = policy_jp, pg_temp" },
+  console_admin_override_revoke: { mig: [T_CONSOLE], why: "主控台撤銷覆寫（service_role 專用）：expires_at 設今天 -1、撤銷原因併進 reason" },
+  console_admin_milestone_set: { mig: [T_CONSOLE], why: "主控台改里程碑（service_role 專用）；kind 白名單照日本站八種 CHECK（沒有 qualification_review）" },
 };
 
 // ---- 掃描與比對（純函式，還原驗證也用它們） ----
