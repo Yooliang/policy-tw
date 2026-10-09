@@ -1,0 +1,65 @@
+# 資料庫傳輸量監看（#522 第 1 步）。每小時用 Management API 抓 PostgREST 用量，
+# 數字摘要寫進 job summary 與 artifact；超過 .github/usage-watch.json 的門檻且 alert=true 才開 issue。
+# 權杖只用 secrets.SUPABASE_ACCESS_TOKEN（與部署同一個），不印、不寫進資料庫。
+name: 資料庫用量監看
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: usage-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 抓用量端點
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set +e
+          mkdir -p usage
+          REF=$(node -p "require('./.github/usage-watch.json').project_ref")
+          B="https://api.supabase.com/v1/projects/$REF/analytics/endpoints"
+          for e in usage.api-counts usage.api-requests-count; do
+            code=$(curl -sS -o "usage/$e.json" -w '%{http_code}' -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" "$B/$e?interval=1hr")
+            echo "$e HTTP $code"
+            [ "$code" = 200 ] || { echo "{\"http_status\": $code, \"body\": $(head -c 300 "usage/$e.json" | node -p 'JSON.stringify(require("fs").readFileSync(0,"utf8"))')}" > "usage/$e.json"; }
+          done
+          # 探針：從 edge 記錄直接統計過去一小時 REST 請求數與回應位元組（欄位不一定存在，失敗只記錄）
+          SQL="select count(*) as requests, sum(cast(h.response.headers.content_length as int64)) as response_bytes from edge_logs cross join unnest(metadata) as m cross join unnest(m.response) as r cross join unnest(m.request) as q cross join unnest(r.headers) as h where q.path like '/rest/v1/%'"
+          code=$(curl -sS -o usage/logs-rest.json -w '%{http_code}' -G -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" --data-urlencode "sql=$SQL" --data-urlencode "iso_timestamp_start=$(date -u -d '1 hour ago' +%FT%TZ)" --data-urlencode "iso_timestamp_end=$(date -u +%FT%TZ)" "$B/logs.all")
+          echo "logs.all HTTP $code"
+          [ "$code" = 200 ] || echo "{\"http_status\": $code}" > usage/logs-rest.json
+          exit 0
+      - name: 摘要與門檻
+        run: node scripts/usage-watch.mjs usage .github/usage-watch.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usage-${{ github.run_id }}
+          path: usage/
+          retention-days: 30
+      - name: 超過門檻開 issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -s usage/breaches.txt ] || exit 0
+          [ "$(node -p "require('./.github/usage-watch.json').alert")" = true ] || { echo "alert=false，只記錄"; exit 0; }
+          REPO=$(node -p "require('./.github/usage-watch.json').alert_repo")
+          LABEL=$(node -p "require('./.github/usage-watch.json').alert_label")
+          gh issue create -R "$REPO" -l "$LABEL" -t "資料庫傳輸量超過門檻 $(date -u +%F\ %H:%M) UTC" -b "$(cat usage/breaches.txt)
+
+run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
