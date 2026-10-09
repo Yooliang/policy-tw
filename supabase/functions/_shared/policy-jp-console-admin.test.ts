@@ -1,5 +1,5 @@
 /**
- * 日本站主控台手動調整派工開關與選舉日期（#518 第二步，migration 20261009310000_policy_jp_console_admin.sql）。
+ * 日本站主控台手動調整派工開關與選舉日期（#518 第二步，migration 20261010010000_policy_jp_console_admin.sql）。
  * 對應台灣版 console-admin.test.ts。PGlite 上套 policy_jp 的 schema、tables、dispatch（含 activity_open／activity_arm_names）再疊這支。
  */
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
@@ -7,7 +7,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
-const MIG_NAME = "20261009310000_policy_jp_console_admin.sql";
+const MIG_NAME = "20261010010000_policy_jp_console_admin.sql";
 const MIG_SQL = await read(MIG_NAME);
 // 這支之前的全部 policy_jp migration（依檔名排序），含缺口臂（210100）與選舉鏈（250400）：
 // 只套 schema／tables／dispatch 時 activity_arm_names() 只有兩支手動臂，auto: 臂的計數測不到（agy 10-10 指出的盲點）
