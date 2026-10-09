@@ -30,9 +30,17 @@
  *   ※ 以上每一項的存在由「migration 裡的函式＝PAIRS＋NONCOPY」一條守住，新加一支函式不登記就紅。
  *   ※ 後面的 policy_jp migration（落庫 20261009210000、缺口臂 20261009210100 等）不得重新定義任何已登記的複本——重新定義＝逃過上面的逐字比對
  *      （「後續 migration 不得重新定義已登記的複本」一條守住）。唯一的例外是登記在 FOLLOWED 的跟進版（正見改了、日本版跟進，逐字比對改讀它）。那兩支的函式登記與機械替換比對在 policy-jp-apply.test.ts。
+ *
+ * 日本專屬清單（JP_ONLY，檔尾；主線審查條件）：上面的 NONCOPY／NONCOPY_ED 只管 130000、130100 兩支 migration，之後的 migration（落庫、缺口臂、機器核對、選舉鏈…）
+ * 新增的函式與視圖沒有人點名。所以掃描「所有」檔名帶 _policy_jp_ 的 migration（去掉 SQL 註解），每個 `CREATE [OR REPLACE] FUNCTION／VIEW policy_jp.<名>`
+ * 都必須是下面兩種之一，否則整支測試紅：
+ *   ① 複本——PAIRS（130000）、FOLLOWED（跟進版）、OTHER_COPIES（公開統計 200000，逐字比對在 policy-jp-public-stats.test.ts）；
+ *   ② 日本專屬——登記在 JP_ONLY，附一行理由與「定義它的 migration 清單」（被後面的 migration 重新定義就要多寫一個，搬動或重定義會看得見）。
+ * 兩邊不得重複；登記了卻再也沒有 migration 定義的名字（改名、刪除）也會紅。偵測器本身有還原驗證（假 migration 夾一支新函式／新視圖／漏前綴就抓得到）。
+ * 選舉鏈（250400）的臂、總表、進度視圖逐一登記，不用「整支 migration 都放行」的寫法。
  */
-import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
-import { fnText, latestFn, readMig } from "./arms-pglite.ts";
+import { assert, assertEquals, assertNotEquals, assertThrows } from "jsr:@std/assert@1";
+import { fnText, latestFn, migrationNames as listMigrations, readMig } from "./arms-pglite.ts";
 
 const MIG = "20261009130000_policy_jp_dispatch.sql";
 const MIG_SQL = await readMig(MIG);
@@ -350,4 +358,261 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
   // 偵測器自己也驗一次：把一個複本函式名放進假的檔案文字，抓得到
   const fake = "CREATE OR REPLACE FUNCTION policy_jp.contribution_required_agree(p_type TEXT) RETURNS INTEGER";
   assertEquals([...fake.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).filter((n) => copies.has(n)), ["contribution_required_agree"]);
+});
+
+// =====================================================================================================================
+// 日本專屬清單（JP_ONLY）：所有 policy_jp migration 定義的函式與視圖，不是複本就一定要在這裡點名（檔頭最後一段）
+// =====================================================================================================================
+/** migration 檔名 → 14 碼時間戳（清單裡一律寫時間戳，檔名太長） */
+const ID = (file: string) => file.slice(0, 14);
+const T_TABLES = "20261009000000"; // 20261009000000_policy_jp_tables.sql
+const T_DISPATCH = ID(MIG); // 130000
+const T_ED = ID(MIG_ED); // 130100
+const T_STATS = "20261009200000"; // 公開統計
+const T_APPLY = "20261009210000";
+const T_ARMS = "20261009210100";
+const T_LGR = "20261009250000";
+const T_STR = "20261009250200";
+const T_CHAIN = "20261009250400";
+
+type JpOnly = { mig: string[]; why: string };
+
+/**
+ * 公開統計 migration（T_STATS）的複本：逐字比對在 policy-jp-public-stats.test.ts 的 PAIRS，這裡只登記名字（不重複比對）。
+ * contribution_leaderboard 有兩個多載（天數版、區間版），用名字登記。下面另有檢查：這些名字只在 T_STATS 定義、而且那支測試真的登記了它們。
+ */
+const OTHER_COPY_GUARD = "policy-jp-public-stats.test.ts";
+const OTHER_COPIES = [
+  "model_display_name", "contribution_leaderboard", "contribution_feed_summary", "contribution_activity", "model_contribution_stats", "model_vote_stats",
+  "contribution_auto_task_counts", "pipeline_take_snapshot",
+];
+
+/**
+ * 不是正見複本的函式與視圖：名字 → { mig：定義它的 migration（被後面的 migration 重新定義就要多寫一個）, why：一行理由 }。
+ * （視圖）標在理由開頭。130000／130100 的非複本函式也登記在這裡（跟檔頭的 NONCOPY／NONCOPY_ED 互相對照，見下面的測試）。
+ */
+const JP_ONLY: Record<string, JpOnly> = {
+  // ---- 20261009000000 tables：建表用的共用函式與健康檢查視圖 ----
+  touch_updated_at: { mig: [T_TABLES], why: "各表共用的 updated_at 觸發器函式（建表用）" },
+  lg_code_valid: { mig: [T_TABLES], why: "全国地方公共団体コード 6 碼的檢查碼驗證（團體碼欄位的 CHECK 用）；TS 版 _shared/jp/lg-code.ts 有對齊測試" },
+  election_level: { mig: [T_TABLES], why: "選舉種類 → 層級（national／regional／local）的單一真相；正見的 activity_level 寫死台灣職位，日本版的 activity_level 改讀它" },
+  source_refs_orphans: { mig: [T_TABLES], why: "（視圖）出處引用指到不存在資料列的健康檢查，正常是空的；target_table 清單是日本站的表" },
+  source_archive_missing: { mig: [T_TABLES], why: "（視圖）選挙公報・選管公告類還沒有 archive_url 的出處，正常是空的；排程存檔補上" },
+
+  // ---- 20261009130000 dispatch：派工骨架裡不是複本的部分（原因見檔頭「不是複本、不比對的」） ----
+  election_id_or_null: { mig: [T_DISPATCH], why: "派工 target 的 election_id 轉 TEXT（空字串＝沒有）；日本站選舉 id 是 election_key 字串，正見同名函式回 integer" },
+  activity_level: { mig: [T_DISPATCH], why: "層級改讀 election_level；正見版寫死台灣職位" },
+  activity_jurisdiction: { mig: [T_DISPATCH], why: "管轄改讀 elections.jurisdiction（CHECK 固定 'jp'）；正見版寫死 'tw'" },
+  contribution_auto_tasks_manual: { mig: [T_DISPATCH], why: "手動任務臂本體；日本站沒有公民提問，拿掉 stance_up 與「已收滿答案」排除（正見版的簡化）" },
+  election_milestones_all: { mig: [T_DISPATCH], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
+  activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
+  gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+
+  // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
+  contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
+
+  // ---- 20261009200000 public_stats：唯一不是複本的一支 ----
+  pipeline_snapshots_since: { mig: [T_STATS], why: "管線快照的公開讀取（下界 90 天、上限 1000 筆）；正見把 pipeline_snapshots 開成 Public read 表，日本站不對 anon 開表，改由這支 SECURITY DEFINER 函式代讀（public-stats 測試的 NONCOPY）" },
+
+  // ---- 20261009210000 apply：落庫（SQL 函式，一個交易；正見的落庫是 TS 版 apply-contribution.ts） ----
+  lg_pref_code: { mig: [T_APPLY], why: "團體碼 → 所屬都道府県碼（前 2 碼＋000＋檢查碼）；TS 版 _shared/jp/lg-code.ts 有對齊測試" },
+  local_government_slug: { mig: [T_APPLY], why: "團體的網址 slug：市區町村用團體碼、47 都道府県用固定羅馬字（與 policy-jp prefectures.ts 同一份）" },
+  regional_stat_unit: { mig: [T_APPLY], why: "地域統計 stat_key → 唯一單位（人／km2／千円／%），交件與落庫都對這張表" },
+  apply_max_retries: { mig: [T_APPLY], why: "落庫重試次數（3），對齊正見 consensus.ts 的 APPLY_MAX_RETRIES（測試對齊）" },
+  apply_retry_delay_minutes: { mig: [T_APPLY], why: "落庫重試間隔（10 分鐘），對齊正見 consensus.ts 的 APPLY_RETRY_DELAY_MINUTES（測試對齊）" },
+  apply_types: { mig: [T_APPLY], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
+  source_kind_for_url: { mig: [T_APPLY], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試" },
+  election_default_name: { mig: [T_APPLY], why: "選舉預設名稱（交件沒給 name 時：<団体名>＋長／知事／議会議員＋選挙）" },
+  source_write: { mig: [T_APPLY], why: "登記 sources、掛 source_refs；正見同名 source_write() 的日本版，簽名與回傳都不同（網址陣列、回主要出處 id），不是複本、沒有逐字比對" },
+  apply_blocker: { mig: [T_APPLY], why: "落庫的等待條件：外鍵指到的團體還沒進 local_governments 就回等待原因（不繞過外鍵，#503 c）" },
+  apply_local_government: { mig: [T_APPLY], why: "local_government 交件落庫（寫 local_governments、出處、履歷）；日本專屬型別" },
+  apply_regional_stat: { mig: [T_APPLY], why: "regional_stat 交件落庫（寫 regional_stats）；日本專屬型別" },
+  apply_election: { mig: [T_APPLY], why: "election 交件落庫（寫 elections）；日本專屬型別" },
+  apply_no_change: { mig: [T_APPLY], why: "no_change 落庫＝記一筆 task_checks（冷卻），不動正式資料（#503）" },
+  apply_contribution: { mig: [T_APPLY], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
+  apply_verified_pending: { mig: [T_APPLY], why: "落庫排程掃地機（policy-jp-apply-verified）：撿行內落庫漏掉的 verified 與到期的 apply_failed，只挑不再被擋的列" },
+  apply_waiting: { mig: [T_APPLY], why: "（視圖）通過驗證、等團體落庫的交件清單（少數是正常，久了才是問題）；service_role 用" },
+
+  // ---- 20261009210100 gap_arms：兩支新缺口臂＋#503 ----
+  task_unavailable: { mig: [T_ARMS], why: "任務現在能不能派（飽和／no_change 等票或已通過／冷卻中／資料型交件通過等落庫），臂在 LIMIT cap 之前用它排除（#503）；前三項與 refresh_dispatch_blocked 同定義，有行為對照測試" },
+  regional_stat_label: { mig: [T_ARMS], why: "統計項目的日文名（任務描述用）" },
+  contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；250400 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
+  contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
+
+  // ---- 20261009250000 lg_registry：自治體（local_government）機器核對，照正見 cec-verify ----
+  kana_fold: { mig: [T_LGR], why: "讀音比對用：小寫假名摺成大寫（總務省團體碼表的拗音・促音大小寫不一致，照正確讀音交的不該被退件）" },
+  lg_registry_decide: { mig: [T_LGR], why: "local_government 機器核對的判斷：payload 對總務省團體碼表 lg_code_registry → apply／reject／skip" },
+  lg_registry_verify_pending: { mig: [T_LGR], why: "掃 pending 的 local_government：對得上 → verified＋落庫（reviewed_by soumu-auto），對不上 → 退件；排程 policy-jp-lg-registry-verify 與 jp-report 交件當下呼叫" },
+
+  // ---- 20261009250200 stat_registry：地域統計（regional_stat）機器核對，同一個做法 ----
+  stat_registry_tolerance: { mig: [T_STR], why: "地域統計機器核對的容許差（人口一致、面積 0.005、高齢化率 0.05）" },
+  stat_registry_decide: { mig: [T_STR], why: "regional_stat 機器核對的判斷：payload 對 e-Stat 國勢調査表 stat_registry → apply／reject／skip" },
+  stat_registry_verify_pending: { mig: [T_STR], why: "掃 pending 的 regional_stat（同 lg_registry_verify_pending，reviewed_by estat-auto）；排程 policy-jp-stat-registry-verify" },
+
+  // ---- 20261009250400 election_chain：選舉鏈第 1 步（鏈上的臂、總表、進度視圖逐一登記；總表的 contribution_auto_tasks_arms 與兩支臂的重新定義已在上面各自的 mig 清單裡） ----
+  election_chain_steps: { mig: [T_CHAIN], why: "選舉鏈的步驟清單（discovery／local_government／regional_stats／region），activity_rules.after_step 的 CHECK 對它" },
+  date_or_null: { mig: [T_CHAIN], why: "交件 payload 的日期文字 → DATE，格式不對＝NULL（視圖不能因一筆壞資料整支丟例外）" },
+  activity_chain_scope: { mig: [T_CHAIN], why: "派工列的範圍鍵（日本＝團體碼：target.chain_lg_code，沒有就用 lg_code）；總表的 gate 只透過它取，站別鍵名不寫進總表" },
+  activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
+  chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
+  chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
+  election_chain_progress: { mig: [T_CHAIN], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
+};
+
+// ---- 掃描與比對（純函式，還原驗證也用它們） ----
+/** 去掉 SQL 註解（-- 到行尾、塊註解）；字串字面值原樣保留（字串裡的 -- 不是註解），所以 EXECUTE '…CREATE FUNCTION…' 這種動態建立也抓得到 */
+function stripSqlComments(sql: string): string {
+  return sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith("'") ? m : ""));
+}
+/** CREATE [OR REPLACE] FUNCTION／PROCEDURE／[RECURSIVE|MATERIALIZED] VIEW <名字>：名字不限前綴，沒帶 policy_jp. 的另外記成 foreign */
+const DEFINE_RE = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE|(?:RECURSIVE\s+|MATERIALIZED\s+)?VIEW)\s+([^\s(]+)/gi;
+
+type Scan = { defined: Map<string, string[]>; foreign: string[] };
+/** files：檔名 → SQL。defined：名字 → 定義它的 migration 時間戳（排序、不重複）；foreign：沒有 policy_jp. 前綴的定義（會落在別的 schema，逃過這份登記） */
+function scanDefinitions(files: Record<string, string>): Scan {
+  const defined = new Map<string, Set<string>>();
+  const foreign: string[] = [];
+  for (const [file, sql] of Object.entries(files)) {
+    for (const m of stripSqlComments(sql).matchAll(DEFINE_RE)) {
+      const q = m[1].replaceAll('"', "");
+      const own = /^policy_jp\.(\w+)$/.exec(q);
+      if (!own) { foreign.push(`${ID(file)}：${q}`); continue; }
+      if (!defined.has(own[1])) defined.set(own[1], new Set());
+      defined.get(own[1])!.add(ID(file));
+    }
+  }
+  return { defined: new Map([...defined].map(([k, v]) => [k, [...v].sort()])), foreign };
+}
+
+function registryDrift(scan: Scan, copies: ReadonlySet<string>, jpOnly: Record<string, JpOnly>) {
+  const registered = new Set([...copies, ...Object.keys(jpOnly)]);
+  return {
+    foreign: scan.foreign,
+    unregistered: [...scan.defined.keys()].filter((n) => !registered.has(n)).sort(),
+    stale: [...registered].filter((n) => !scan.defined.has(n)).sort(),
+    overlap: [...copies].filter((n) => n in jpOnly).sort(),
+    misplaced: Object.entries(jpOnly)
+      .filter(([n, v]) => scan.defined.has(n) && scan.defined.get(n)!.join() !== [...v.mig].sort().join())
+      .map(([n, v]) => `${n}：登記 ${v.mig.join("、")}，實際 ${scan.defined.get(n)!.join("、")}`).sort(),
+  };
+}
+function assertNoDrift(d: ReturnType<typeof registryDrift>) {
+  assertEquals(d.foreign, [], "policy_jp migration 裡有沒帶 policy_jp. 前綴的函式／視圖（會建到別的 schema，逃過登記）");
+  assertEquals(d.unregistered, [], "新加的函式／視圖沒登記：是正見的複本就進 PAIRS（或 OTHER_COPIES），日本專屬就進 JP_ONLY（附理由）");
+  assertEquals(d.stale, [], "登記了卻再也沒有 policy_jp migration 定義的名字（改名或刪掉了？）：把登記拿掉或改名");
+  assertEquals(d.overlap, [], "同一個名字不能同時是複本又是日本專屬");
+  assertEquals(d.misplaced, [], "JP_ONLY 的 mig 清單跟實際定義它的 migration 對不上（被搬走或被重新定義了）：更新登記");
+}
+/** OTHER_COPIES 只准在 T_STATS 定義（後面的 migration 重新定義＝逃過 public-stats 測試的逐字比對） */
+const otherCopiesElsewhere = (scan: Scan) => OTHER_COPIES.filter((n) => scan.defined.get(n)?.join() !== T_STATS);
+
+async function readJpMigrations(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const n of await listMigrations()) if (n.includes("_policy_jp_")) out[n] = await readMig(n);
+  return out;
+}
+
+Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本（PAIRS／FOLLOWED／公開統計）＋日本專屬清單 JP_ONLY（新加的不登記就紅、登記了卻沒人定義也紅）；偵測器有還原驗證", async () => {
+  const files = await readJpMigrations();
+  const ids = Object.keys(files).map(ID);
+  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, "20261008195000", "20261009130200", "20261009250100", "20261009250300"]) {
+    assert(ids.includes(t), `掃描範圍要包含 ${t}（放行靠登記，不是靠沒掃到）`);
+  }
+  const scan = scanDefinitions(files);
+  for (const n of ["activity_today", "contribution_leaderboard", "apply_contribution", "election_chain_progress", "source_archive_missing"]) {
+    assert(scan.defined.has(n), `偵測器沒抓到 ${n}（偵測器壞了？）`);
+  }
+
+  // ---- 登記本身的整齊度 ----
+  assertEquals(new Set(OTHER_COPIES).size, OTHER_COPIES.length, "OTHER_COPIES 重複登記");
+  const pairNames = new Set(PAIRS.map((p) => p.name));
+  for (const n of OTHER_COPIES) assert(!pairNames.has(n), `${n} 已經在 PAIRS，不用再登記成公開統計的複本`);
+  for (const [n, v] of Object.entries(JP_ONLY)) {
+    assert(v.why.trim().length > 0, `${n} 要寫一行理由`);
+    assert(v.mig.length > 0 && new Set(v.mig).size === v.mig.length, `${n} 的 mig 清單不能空、不能重複`);
+    assertEquals(v.mig, [...v.mig].sort(), `${n} 的 mig 清單要照時間戳排序`);
+    for (const t of v.mig) assert(ids.includes(t), `${n} 登記的 migration ${t} 不存在`);
+  }
+
+  // ---- 主要比對：定義的＝複本 ∪ 日本專屬 ----
+  const copies = new Set([...PAIRS.map((p) => p.name), ...Object.keys(FOLLOWED), ...OTHER_COPIES]);
+  assertNoDrift(registryDrift(scan, copies, JP_ONLY));
+
+  // ---- 跟檔頭既有清單互相對照：130000／130100 的非複本都在 JP_ONLY 且 mig 含自己 ----
+  for (const n of NONCOPY) assert(JP_ONLY[n]?.mig.includes(T_DISPATCH), `${n}（NONCOPY）要登記在 JP_ONLY，mig 含 ${T_DISPATCH}`);
+  for (const n of NONCOPY_ED) assert(JP_ONLY[n]?.mig.includes(T_ED), `${n}（NONCOPY_ED）要登記在 JP_ONLY，mig 含 ${T_ED}`);
+  // 反過來：JP_ONLY 裡掛 130000／130100 的，也都在那兩份清單裡（視圖除外，視圖只在 JP_ONLY）
+  const viewsOnlyHere = new Set(["election_milestones_all", "activity_health", "gap_open_lateness"]);
+  for (const [n, v] of Object.entries(JP_ONLY)) {
+    if (v.mig.includes(T_DISPATCH) && !viewsOnlyHere.has(n)) assert(NONCOPY.includes(n), `${n} 掛在 130000，卻不在 NONCOPY（檔頭「不是複本」那份清單要同步）`);
+    if (v.mig.includes(T_ED)) assert(NONCOPY_ED.includes(n), `${n} 掛在 130100，卻不在 NONCOPY_ED`);
+  }
+
+  // ---- 公開統計的複本：只在 T_STATS 定義，而且 public-stats 測試真的登記了它們 ----
+  assertEquals(otherCopiesElsewhere(scan), [], "公開統計的複本被別的 migration 重新定義（逃過 public-stats 測試的逐字比對）");
+  const guard = await Deno.readTextFile(new URL(`./${OTHER_COPY_GUARD}`, import.meta.url));
+  for (const n of OTHER_COPIES) assert(guard.includes(`name: "${n}"`), `${OTHER_COPY_GUARD} 的 PAIRS 沒有登記 ${n}`);
+  assert(guard.includes(`const NONCOPY = ["pipeline_snapshots_since"]`), `${OTHER_COPY_GUARD} 的 NONCOPY 變了：pipeline_snapshots_since 的登記要同步`);
+
+  // ---- 還原驗證：偵測器真的會咬（假 migration 夾一支新的、漏前綴、改名、重新定義…都抓得到） ----
+  const FAKE = "20261231000000_policy_jp_fake.sql";
+  const CHAIN_FILE = Object.keys(files).find((n) => ID(n) === T_CHAIN)!;
+  const fn = (name: string) => `CREATE OR REPLACE FUNCTION policy_jp.${name}() RETURNS INTEGER LANGUAGE sql AS $$ SELECT 1 $$;`;
+  const bite = (extra: Record<string, string>, reg: Record<string, JpOnly> = JP_ONLY) => registryDrift(scanDefinitions({ ...files, ...extra }), copies, reg);
+  const biteScan = (extra: Record<string, string>) => scanDefinitions({ ...files, ...extra });
+
+  // 一、新函式、新視圖（兩種寫法，大小寫不拘）、藏在既有 migration 檔尾的，沒登記一律紅
+  let d = bite({ [FAKE]: fn("some_new_fn") });
+  assertEquals(d.unregistered, ["some_new_fn"]);
+  assertThrows(() => assertNoDrift(d));
+  d = bite({ [FAKE]: "CREATE VIEW policy_jp.some_new_view AS SELECT 1;\ncreate or replace view policy_jp.some_new_view2 AS SELECT 1;\nCREATE MATERIALIZED VIEW policy_jp.some_new_mv AS SELECT 1;" });
+  assertEquals(d.unregistered, ["some_new_mv", "some_new_view", "some_new_view2"]);
+  assertThrows(() => assertNoDrift(d));
+  d = bite({ [MIG]: files[MIG] + "\n" + fn("sneaky_in_old_migration") });
+  assertEquals(d.unregistered, ["sneaky_in_old_migration"]);
+  assertThrows(() => assertNoDrift(d));
+  d = bite({ [FAKE]: `DO $$ BEGIN EXECUTE 'CREATE FUNCTION policy_jp.made_by_execute() RETURNS INT LANGUAGE sql AS ''SELECT 1'''; END $$;` });
+  assertEquals(d.unregistered, ["made_by_execute"]);
+  assertThrows(() => assertNoDrift(d));
+
+  // 二、註解裡提到的不算（行註解、塊註解）；字串裡的 -- 不是註解
+  assertNoDrift(bite({ [FAKE]: "-- CREATE OR REPLACE FUNCTION policy_jp.in_line_comment()\n/* CREATE VIEW policy_jp.in_block_comment AS SELECT 1; */\nSELECT 1;" }));
+  d = bite({ [FAKE]: `SELECT '--'; ${fn("after_dashes_in_string")}` });
+  assertEquals(d.unregistered, ["after_dashes_in_string"]);
+
+  // 三、漏前綴（會建到別的 schema）紅
+  d = bite({ [FAKE]: "CREATE FUNCTION public.leaks_into_public() RETURNS INT LANGUAGE sql AS $$ SELECT 1 $$;\nCREATE OR REPLACE VIEW bare_view AS SELECT 1;" });
+  assertEquals(d.foreign, [`${ID(FAKE)}：public.leaks_into_public`, `${ID(FAKE)}：bare_view`]);
+  assertThrows(() => assertNoDrift(d));
+
+  // 四、登記了卻沒人定義（改名、刪除）紅：選舉鏈的函式與視圖各試一次
+  d = bite({ [CHAIN_FILE]: files[CHAIN_FILE].replace("CREATE OR REPLACE FUNCTION policy_jp.election_chain_steps(", "CREATE OR REPLACE FUNCTION policy_jp.election_chain_steps_v2(") });
+  assertEquals(d.stale, ["election_chain_steps"]);
+  assertEquals(d.unregistered, ["election_chain_steps_v2"]);
+  assertThrows(() => assertNoDrift(d));
+  d = bite({ [CHAIN_FILE]: files[CHAIN_FILE].replace("CREATE OR REPLACE VIEW policy_jp.election_chain_progress ", "CREATE OR REPLACE VIEW policy_jp.election_chain_progress_v2 ") });
+  assertEquals(d.stale, ["election_chain_progress"]);
+  assertThrows(() => assertNoDrift(d));
+  // 複本也一樣：PAIRS 登記的名字沒人定義了
+  d = registryDrift(scan, new Set([...copies, "ghost_copy"]), JP_ONLY);
+  assertEquals(d.stale, ["ghost_copy"]);
+  assertThrows(() => assertNoDrift(d));
+
+  // 五、JP_ONLY 的函式被後面的 migration 重新定義（或從 mig 清單漏寫）紅
+  d = bite({ [FAKE]: fn("task_unavailable") });
+  assertEquals(d.misplaced, [`task_unavailable：登記 ${T_ARMS}，實際 ${T_ARMS}、${ID(FAKE)}`]);
+  assertThrows(() => assertNoDrift(d));
+  d = bite({}, { ...JP_ONLY, contribution_auto_tasks_arms: { ...JP_ONLY.contribution_auto_tasks_arms, mig: [T_DISPATCH, T_ED, T_ARMS] } });
+  assertEquals(d.misplaced.length, 1);
+  assertThrows(() => assertNoDrift(d));
+
+  // 六、複本與日本專屬同名紅
+  d = registryDrift(scan, copies, { ...JP_ONLY, contribution_vote_weight: { mig: [T_DISPATCH], why: "假的" } });
+  assertEquals(d.overlap, ["contribution_vote_weight"]);
+  assertThrows(() => assertNoDrift(d));
+
+  // 七、公開統計的複本被後面的 migration 重新定義紅
+  assertEquals(otherCopiesElsewhere(biteScan({ [FAKE]: fn("model_vote_stats") })), ["model_vote_stats"]);
 });
