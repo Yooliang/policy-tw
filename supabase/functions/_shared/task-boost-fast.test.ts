@@ -1,5 +1,5 @@
 /**
- * 插隊端點 /boost 逾時（migration 20261010140000；工作單 Yooliang/policy-ops#71）。
+ * 插隊端點 /boost 逾時（migration 20261010160000；工作單 Yooliang/policy-ops#71）。
  *   A. 文字層：task_boost_matches＝前一版（20261008165000）只把任務那一半的來源從派工總表換成佇列 task_dispatches，其餘一字不動
  *   B. PGlite：佇列裡的任務照 task_type／縣市／屆別篩得到；驗證列不會被當成任務；待驗證貢獻照舊
  *   還原驗證：換回總表來源，A 的「不重算總表」就紅（量測：總表一次約 3 秒，見 PR 說明）
@@ -8,7 +8,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, latestFn, readMig } from "./arms-pglite.ts";
 
-const MIG = "20261010140000_boost_matches_from_queue.sql";
+const MIG = "20261010160000_boost_matches_from_queue.sql";
 const SQL = await readMig(MIG);
 const NEW = fnText(SQL, "task_boost_matches");
 const PREV = await latestFn("task_boost_matches", MIG);
