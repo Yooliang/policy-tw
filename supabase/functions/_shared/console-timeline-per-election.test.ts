@@ -12,6 +12,8 @@ import { buildArmsDb, migrationNames, readMig } from "./arms-pglite.ts";
 
 const TW_MIG = "20261010140000_console_timeline_per_election.sql";
 const JP_MIG = "20261010140100_policy_jp_console_timeline_per_election.sql";
+const TW_FIX = "20261010200000_console_timeline_fix.sql";
+const JP_FIX = "20261010200100_policy_jp_console_timeline_fix.sql";
 
 type ByType = { election_type: string | null; n: number; is_open: boolean; overridden: boolean };
 type Arm = { arm: string; stage: number; election_count: number; daily_count: number; stage_end: string | null; stale: boolean; queue_count: number | null; by_type: ByType[] };
@@ -31,6 +33,7 @@ async function twDb(): Promise<PGlite> {
   await d.exec(await readMig("20261009260000_console_admin.sql"));
   await d.exec(await readMig("20261010110000_console_arm_timeline.sql"));
   await d.exec(await readMig(TW_MIG));
+  await d.exec(await readMig(TW_FIX));
   await d.exec("SET app.activity_today = '2026-10-10'");
   return d;
 }
@@ -191,18 +194,22 @@ Deno.test("正見：各職位件數（target 的 election_type、參選紀錄、
   assertEquals(arm(t, "raw:progress_stale").by_type.find((b) => b.election_type === "縣市議員")?.n, 1, "從人物＋選舉補職位");
 });
 
-Deno.test("正見：anon 能讀件數與段的結束日、不能直接呼叫 console_dispatch_election；回應不含帳號資料", async () => {
+Deno.test("正見：anon 能讀件數與段的結束日、不能直接呼叫 console_dispatch_rows；console_arm_status 不會 42501；回應不含帳號資料", async () => {
   const d = await twDb();
+  // Supabase 的公開表與視圖 anon 本來就能 SELECT（預設權限）；PGlite 沒有，這裡補上，只讓函式自己的 GRANT 決定成敗
+  await d.exec("GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon");
   await d.transaction(async (tx) => {
     await tx.exec("SET LOCAL ROLE anon");
     await tx.query("SELECT * FROM console_arm_election_counts()");
+    // console_arm_status 是 SECURITY INVOKER：裡面呼叫只給 service_role 的函式，anon 就是 401（#569 上線後主控台壞掉的原因）
+    await tx.query("SELECT * FROM console_arm_status()");
     await tx.query("SELECT console_stage_end(2026, 3::smallint)");
     await tx.query("SELECT console_timeline('2026')");
   });
   await assertRejects(() =>
     d.transaction(async (tx) => {
       await tx.exec("SET LOCAL ROLE anon");
-      await tx.query(`SELECT console_dispatch_election('{"election_id":2026}'::jsonb)`);
+      await tx.query(`SELECT * FROM console_dispatch_rows()`);
     })
   );
   const t = JSON.stringify(await tl(d, "2026"));
@@ -221,12 +228,13 @@ async function jpDb(): Promise<PGlite> {
   await db.exec(`CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;`);
   for (const n of before) await db.exec(await readMig(n));
   await db.exec(await readMig(JP_MIG));
+  await db.exec(await readMig(JP_FIX));
   await db.exec(`INSERT INTO policy_jp.elections (id, name, election_date, notice_date, election_type, election_reason, level, review_status)
     VALUES ('${ELECTION}', '衆議院議員総選挙', '2028-07-09', '2028-06-27', 'national_lower', 'regular', 'national', 'published')`);
   return db;
 }
 
-Deno.test("日本站：只算這一屆、日常另計；投票日 +30 後開票段過段；anon 能讀、不能直接呼叫 console_dispatch_election", async () => {
+Deno.test("日本站：只算這一屆、日常另計；投票日 +30 後開票段過段；anon 能讀（含 console_arm_status）、不能直接呼叫 console_dispatch_rows", async () => {
   const d = await jpDb();
   await dispatch(d, "j1", "roster_check", { election_id: ELECTION }, "policy_jp");
   await dispatch(d, "j2", "roster_check", { election_id: "nope" }, "policy_jp");
@@ -248,19 +256,20 @@ Deno.test("日本站：只算這一屆、日常另計；投票日 +30 後開票�
   await d.transaction(async (tx) => {
     await tx.exec("SET LOCAL ROLE anon");
     await tx.query("SELECT * FROM policy_jp.console_arm_election_counts()");
+    await tx.query("SELECT * FROM policy_jp.console_arm_status()");
     await tx.query("SELECT policy_jp.console_timeline($1)", [ELECTION]);
   });
   await assertRejects(() =>
     d.transaction(async (tx) => {
       await tx.exec("SET LOCAL ROLE anon");
-      await tx.query(`SELECT policy_jp.console_dispatch_election('{}'::jsonb)`);
+      await tx.query(`SELECT * FROM policy_jp.console_dispatch_rows()`);
     })
   );
   void OLD;
 });
 
-Deno.test("日本站：這支 migration 只碰 policy_jp 的物件", async () => {
-  const stripped = (await readMig(JP_MIG)).replace(/--[^\n]*/g, "");
+for (const mig of [JP_MIG, JP_FIX]) Deno.test(`日本站：${mig} 只碰 policy_jp 的物件`, async () => {
+  const stripped = (await readMig(mig)).replace(/--[^\n]*/g, "");
   const objs = [...stripped.matchAll(/\b(?:FUNCTION|TABLE|VIEW|INTO|POLICY\s+"[^"]+"\s+ON)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([\w."]+)/gi)].map((m) => m[1]);
   assert(objs.length >= 8, `抽到的物件太少（${objs.length}），抽取壞了？`);
   assertEquals(objs.filter((n) => !n.startsWith("policy_jp.") && !/^v_\w+$/.test(n)), []);
