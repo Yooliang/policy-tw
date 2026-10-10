@@ -90,6 +90,39 @@ Deno.test("正見：console_stage_of_kind 起點與迄點對到 7 段", async ()
   }
 });
 
+Deno.test("正見：真實規則下，有日期規則的臂照規則歸段，而且對照表的後備值跟規則算出的一樣（審查 #565：以規則為準）", async () => {
+  // twDb 只有 P0＋P1（規則全是 always）；把之後各支 migration 搬日期條件的規則改寫（UPDATE／新臂的 INSERT）照順序套上，
+  // activity_arm_names() 換成最新一版，才是正式庫現在的規則
+  const d = await twDb();
+  await d.exec(await latestFn("activity_arm_names", TW_MIG));
+  const ruleStmt = /^(?:UPDATE activity_rules\s+SET window_kind\b|INSERT INTO activity_rules \(activity, window_kind, from_kind\b)[\s\S]*?;\s*$/gm;
+  let applied = 0;
+  for (const n of await listMigrations()) {
+    if (n <= "20261008060000" || n >= TW_MIG || n.includes("_policy_jp_")) continue;
+    for (const m of (await readMig(n)).matchAll(ruleStmt)) {
+      if (/'priority:/.test(m[0]) || /\bpriority\b/.test(m[0].split("SELECT")[0])) continue; // 優先層規則只管排序
+      await d.exec(m[0]);
+      applied++;
+    }
+  }
+  assert(applied >= 6, `套上的規則改寫太少（${applied}），抽取的寫法可能失效`);
+  const rows = (await d.query<Stage>("SELECT * FROM console_arm_stages()")).rows;
+  const map = new Map((await d.query<{ arm: string; stage: number }>("SELECT arm, stage FROM console_arm_stage_map")).rows.map((r) => [r.arm, r.stage]));
+  const ruled = Object.fromEntries(rows.filter((r) => r.stage_source === "rule").map((r) => [r.arm, r.stage]));
+  // 主線規劃原把參選狀態、政黨名冊放 2、政黨補齊放 5；規則實際是登記截止起、到投票日為止、投票日隔天起
+  const expected: Record<string, number> = {
+    "raw:candidate_status_stale": 3,
+    party_roster: 3,
+    party_gap: 4,
+    not_running: 3,
+    ballot_numbers: 3,
+    election_results: 4,
+    "raw:election_result_missing": 4,
+  };
+  for (const [arm, stage] of Object.entries(expected)) assertEquals(ruled[arm], stage, `${arm} 照規則應在第 ${stage} 段`);
+  for (const [arm, stage] of Object.entries(ruled)) assertEquals(map.get(arm), stage, `${arm} 的對照表後備值要跟規則算出的段一樣`);
+});
+
 Deno.test("正見：console_arm_stages 每支臂一列、都有登記（沒有 default）；有日期規則的臂照規則歸段、蓋過對照表", async () => {
   const d = await twDb();
   const names = (await d.query<{ a: string[] }>("SELECT activity_arm_names() AS a")).rows[0].a;
