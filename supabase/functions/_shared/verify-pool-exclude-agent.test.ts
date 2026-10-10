@@ -5,7 +5,7 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
  * 新定義 = 緊接在前那一版（20261009060000）做固定幾處機械替換，其餘一字不動；沒傳 p_agent_name（NULL）＝行為與前一版相同。
  */
 const PREV = "20261009060000_verify_pool_legacy_hash.sql";
-const NEXT = "20261010150000_verify_pool_exclude_agent.sql";
+const NEXT = "20261010180000_verify_pool_exclude_agent.sql";
 
 async function readSql(name: string): Promise<string> {
   return (await Deno.readTextFile(new URL(`../../migrations/${name}`, import.meta.url))).replace(/\r\n/g, "\n");
