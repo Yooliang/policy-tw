@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
-import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
+import { aggregateFieldVerdicts, askJev, stripNulDeep, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
 import { selfCitationEvidenceVerdict } from "../_shared/self-hosts.ts";
 import { MAX_CHECKED_SOURCES, perSourceCount, perSourceQuestions, pickIndependentSources, systemVoteFromAnswers } from "../_shared/independent-sources.ts";
 
@@ -82,7 +82,8 @@ function bearerOf(req: Request): string | null {
 async function insertRecords(supabase: Sb, rows: DecisionRecord[]): Promise<{ inserted: number; skipped: number }> {
   if (rows.length === 0) return { inserted: 0, skipped: 0 };
   const { data, error } = await supabase.from("jev_decisions")
-    .upsert(rows, { onConflict: CONFLICT, ignoreDuplicates: true })
+    // NUL 字元寫不進 jsonb／text（2026-10-09 系統票停擺的原因），寫入前一律清掉
+    .upsert(stripNulDeep(rows), { onConflict: CONFLICT, ignoreDuplicates: true })
     .select("id");
   if (error) throw new Error(`jev_decisions insert: ${error.message}`);
   const inserted = (data ?? []).length;
