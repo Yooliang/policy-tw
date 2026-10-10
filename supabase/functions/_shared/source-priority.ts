@@ -59,7 +59,7 @@ export const SOURCE_PRIORITY: readonly PrioritySource[] = [
   { host: "nextapple.com", label: "壹蘋新聞網", kind: "media" },
   { host: "epochtimes.com", label: "大紀元", kind: "media" },
   { host: "taiwannews.com.tw", label: "台灣英文新聞", kind: "media" },
-  { host: "knews.com.tw", label: "金門日報", kind: "media" },
+  { host: "knews.com.tw", label: "知新聞", kind: "media" },
   // 候選人官方社群
   { host: "facebook.com", label: "Facebook（候選人／競選辦公室官方帳號）", kind: "social" },
   { host: "instagram.com", label: "Instagram（候選人官方帳號）", kind: "social" },

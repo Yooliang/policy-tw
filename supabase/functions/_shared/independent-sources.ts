@@ -34,8 +34,11 @@ export const MEDIA_GROUPS: Readonly<Record<string, string>> = {
   // 中時集團
   "ctee.com.tw": "chinatimes.com",
   "ctwant.com": "chinatimes.com",
+  "ctinews.com": "chinatimes.com",
   // 東森集團
   "ebc.net.tw": "ettoday.net",
+  // 公廣集團（華視 2006 起併入，與公視同一集團）
+  "cts.com.tw": "pts.org.tw",
 };
 /** 只有這個主機名才算新聞（同一個網站底下還有別的服務）：LINE TODAY 算，LINE 官方帳號／VOOM 不算 */
 export const NEWS_HOSTS: ReadonlySet<string> = new Set(["today.line.me"]);

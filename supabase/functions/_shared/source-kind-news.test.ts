@@ -114,3 +114,16 @@ Deno.test("#544 分組：新加入的新聞網站各自一組；內容農場仍�
   assertEquals(sourceGroupOf("https://scooptw.com/a"), SELF_OR_OTHER_GROUP);
   assertEquals(sourceGroupOf("https://www.facebook.com/x"), SELF_OR_OTHER_GROUP);
 });
+
+Deno.test("#544 同集團併一：中天＝中時、華視＝公視；新加入的其他站各自一組（還原：拿掉 MEDIA_GROUPS 那一行就紅）", () => {
+  const { sourceGroupOf, MEDIA_GROUPS } = independent;
+  assertEquals(sourceGroupOf("https://ctinews.com/news/items/1.html"), sourceGroupOf("https://www.chinatimes.com/realtimenews/1"));
+  assertEquals(sourceGroupOf("https://news.cts.com.tw/cts/politics/1.html"), sourceGroupOf("https://news.pts.org.tw/article/1"));
+  assertEquals(MEDIA_GROUPS["ctinews.com"], "chinatimes.com");
+  assertEquals(MEDIA_GROUPS["cts.com.tw"], "pts.org.tw");
+  // 其餘新加入的各自獨立（2026-10-10 逐站查過：匯流、壹蘋、大紀元、知新聞、台灣英文新聞、遠見、今周刊、關鍵評論網、鉅亨網、數位時代、今日新聞、鏡週刊、台視彼此不同集團）
+  const solo = ["cnews.com.tw", "nextapple.com", "epochtimes.com", "knews.com.tw", "taiwannews.com.tw", "gvm.com.tw", "businesstoday.com.tw",
+    "thenewslens.com", "cnyes.com", "bnext.com.tw", "nownews.com", "mirrormedia.mg", "ttv.com.tw"];
+  const groups = solo.map((h) => sourceGroupOf(`https://www.${h}/a`));
+  assertEquals(new Set(groups).size, solo.length);
+});
