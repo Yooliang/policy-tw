@@ -4,7 +4,7 @@
  * 任務與交件不符 400；得票數欄位 400；完成合圖 no_change；（第 3、4 步）同一件事 resolved_claim。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { sameClaimInBatch } from "./jp/contribute-handler.ts";
+import { BATCH_SAME_CLAIM, sameClaimInBatch } from "./jp/contribute-handler.ts";
 import { callsTo, env, errorPaths, getNext, makeDb, N1, netHash, post, R, type Row, withEntries } from "./jp-entry-chain-db.ts";
 
 const E1 = "2027-04-25_mayor_232033";
@@ -258,18 +258,8 @@ Deno.test("sameClaimInBatch の policy 分岐：同じ参選＋空白・全半�
   assert(sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の　待機児童を なくす")));
   assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "別の公約です")));
   assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe2", "保育所の待機児童をなくす")));
-  // 還原：policy の case を消したソースのコピーを一時ファイルにして読み込む
-  const src = (await Deno.readTextFile(new URL("./jp/contribute-handler.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  const start = src.indexOf('    case "policy":\n      // 同じ参選');
-  const end = src.indexOf('    case "politician": {', start);
-  assert(start > 0 && end > start, "消す範囲が見つかる");
-  const mutated = src.slice(0, start) + src.slice(end);
-  const tmp = new URL("./jp/zz-mutated-contribute-handler.ts", import.meta.url);
-  await Deno.writeTextFile(tmp, mutated);
-  try {
-    const m = await import(`${tmp.href}?m=${Date.now()}`);
-    assert(!m.sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の待機児童をなくす")), "分岐がなければ同じ件と判定されない＝一批の重複を止められない");
-  } finally {
-    await Deno.remove(tmp);
-  }
+  // 還原：policy の判定を外した表を渡すと、同じ題名でも同じ件と判定できない（ファイルは書かない。CI は --allow-read だけ）
+  const { policy: _drop, ...withoutPolicy } = BATCH_SAME_CLAIM;
+  assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の待機児童をなくす"), withoutPolicy), "分岐がなければ同じ件と判定されない＝一批の重複を止められない");
+  assertEquals(Object.keys(withoutPolicy).length, Object.keys(BATCH_SAME_CLAIM).length - 1);
 });

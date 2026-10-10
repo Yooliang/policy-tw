@@ -149,37 +149,42 @@ function existingAsNoChange<T extends { contribution_type: string; payload: unkn
   };
 }
 
-/** 同一批裡兩筆 new 是不是同一件事（跟 SQL same_claim_matches 的鍵同一套，選舉的「同一屆」這裡只用投票日差 ≤ 180 天近似） */
-export function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b: { contribution_type: string; payload: unknown }): boolean {
+type BatchPayload = Record<string, unknown>;
+type BatchMatcher = (p: BatchPayload, q: BatchPayload) => boolean;
+
+/** 型別別の「同じ件」判定（跟 SQL same_claim_matches 的鍵同一套）。sameClaimInBatch 預設用這張表；測試的還原驗證傳拿掉某型別的表 */
+export const BATCH_SAME_CLAIM: Readonly<Record<string, BatchMatcher>> = {
+  local_government: (p, q) => p.lg_code === q.lg_code,
+  regional_stat: (p, q) => p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year,
+  // 同じ参選・同じ題名（NFKC・小文字・空白除去）
+  policy: (p, q) => p.politician_election_id === q.politician_election_id && policyTitleKey(p.title) === policyTitleKey(q.title),
+  politician: (p, q) => {
+    // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
+    if (p.politician_id !== q.politician_id) return false;
+    if (p.birth_year !== undefined && q.birth_year !== undefined) return true;
+    const texts = (v: unknown) => (Array.isArray(v) ? v.map((s) => String(s).trim()) : []);
+    return ["education", "career"].some((k) => texts(p[k]).some((t) => texts(q[k]).includes(t)));
+  },
+  election: (p, q) => {
+    const office = (t: unknown) => (["governor", "mayor", "ward_mayor", "town_mayor"].includes(String(t)) ? "head" : ["pref_assembly", "muni_assembly"].includes(String(t)) ? "assembly" : String(t));
+    if ((p.lg_code ?? null) !== (q.lg_code ?? null) || office(p.election_type) !== office(q.election_type)) return false;
+    const rp = p.election_reason ?? "regular", rq = q.election_reason ?? "regular";
+    if (rp !== rq) return false;
+    if (rp !== "regular") return p.election_date === q.election_date;
+    const days = Math.abs(Date.parse(String(p.election_date)) - Date.parse(String(q.election_date))) / 86_400_000;
+    return days <= 180;
+  },
+};
+
+/** 同一批裡兩筆 new 是不是同一件事（選舉的「同一屆」這裡只用投票日差 ≤ 180 天近似） */
+export function sameClaimInBatch(
+  a: { contribution_type: string; payload: unknown },
+  b: { contribution_type: string; payload: unknown },
+  matchers: Readonly<Record<string, BatchMatcher>> = BATCH_SAME_CLAIM,
+): boolean {
   if (a.contribution_type !== b.contribution_type) return false;
-  const p = a.payload as Record<string, unknown>;
-  const q = b.payload as Record<string, unknown>;
-  switch (a.contribution_type) {
-    case "local_government":
-      return p.lg_code === q.lg_code;
-    case "regional_stat":
-      return p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year;
-    case "policy":
-      // 同じ参選・同じ題名（NFKC・小文字・空白除去）
-      return p.politician_election_id === q.politician_election_id && policyTitleKey(p.title) === policyTitleKey(q.title);
-    case "politician": {
-      // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
-      if (p.politician_id !== q.politician_id) return false;
-      if (p.birth_year !== undefined && q.birth_year !== undefined) return true;
-      const texts = (v: unknown) => (Array.isArray(v) ? v.map((s) => String(s).trim()) : []);
-      return ["education", "career"].some((k) => texts(p[k]).some((t) => texts(q[k]).includes(t)));
-    }
-    case "election": {
-      const office = (t: unknown) => (["governor", "mayor", "ward_mayor", "town_mayor"].includes(String(t)) ? "head" : ["pref_assembly", "muni_assembly"].includes(String(t)) ? "assembly" : String(t));
-      if ((p.lg_code ?? null) !== (q.lg_code ?? null) || office(p.election_type) !== office(q.election_type)) return false;
-      const rp = p.election_reason ?? "regular", rq = q.election_reason ?? "regular";
-      if (rp !== rq) return false;
-      if (rp !== "regular") return p.election_date === q.election_date;
-      const days = Math.abs(Date.parse(String(p.election_date)) - Date.parse(String(q.election_date))) / 86_400_000;
-      return days <= 180;
-    }
-  }
-  return false;
+  const m = matchers[a.contribution_type];
+  return m ? m(a.payload as BatchPayload, b.payload as BatchPayload) : false;
 }
 
 export async function handleContribute(
