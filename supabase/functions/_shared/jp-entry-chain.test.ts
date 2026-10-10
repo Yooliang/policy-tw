@@ -92,5 +92,54 @@ Deno.test("協議版號：エンドポイントが返す版は 0.9.0 以上（�
   await withEntries(db, env(), async ({ next }) => {
     const got = await getNext(next, N1);
     assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+// ---------------------------------------------------------------------------------------------
+// politician（選舉鏈第 3 步）
+// ---------------------------------------------------------------------------------------------
+const PID = "5f0c8d6e-1111-4222-8333-444444444444";
+const PROFILE_TASK = `auto:profile_gap:${PID}`;
+const profileRow = {
+  task_id: PROFILE_TASK, task_type: "profile_gap",
+  target: { politician_id: PID, name: "山田太郎", kana: "やまだたろう", election_id: E1, lg_code: "232033", missing: ["birth_year"], chain_lg_code: "232033", chain_step: "profile" },
+  what_we_need: "生年が未登録です。", hint_sources: ["公式サイト"], reward: 1, queue_at: "2026-10-01T00:00:00Z",
+};
+const POL = {
+  kind: "contribute", contribution_type: "politician", task_id: PROFILE_TASK, ...AGENT,
+  payload: { politician_id: PID, birth_year: 1970, resolved_claim: "new" }, source_urls: ["https://www.city.ichinomiya.aichi.jp/gikai/"],
+};
+
+Deno.test("politician 一整圈：領 profile_gap 任務（item.current.same_claims が付く）→ resolved_claim=new で 201（目標 3 票）；全程 policy_jp", async () => {
+  const db = makeDb({ queue: [profileRow], sameClaims: { politician: { existing: [], pending: [] } } });
+  await withEntries(db, env(), async ({ next, report }) => {
+    const got = await getNext(next, N1);
+    assertEquals((got.json.item as Row).task_type, "profile_gap");
+    assertEquals(((got.json.item as Row).current as Row).same_claims, { existing: [], pending: [] });
+    const probe = callsTo(report.calls, "rpc/same_claim_matches")[0];
+    assertEquals((probe.body as Row).p_type, "politician");
+    assertEquals((probe.body as Row).p_payload, { politician_id: PID });
+    const res = await post(report, R, { ...POL, dispatch_token: got.json.dispatch_token });
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals([res.json.contribution_type, res.json.status, res.json.required_agree], ["politician", "pending", 3]);
+    assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
+    for (const c of report.calls) {
+      const ro = c.method === "GET" || c.method === "HEAD";
+      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+    }
+  });
+});
+
+Deno.test("politician：resolved_claim がない・事実なし・別の人の task は 400；既に庫にある事実を new で出すと 409 duplicate_claim で何も書かない", async () => {
+  const db = makeDb({ queue: [profileRow], sameClaims: { politician: { existing: [{ id: PID, fact: "birth_year" }], pending: [] } } });
+  await withEntries(db, env(), async ({ report }) => {
+    const noClaim = await post(report, N1, { ...POL, payload: { politician_id: PID, birth_year: 1970 } });
+    assertEquals([noClaim.status, errorPaths(noClaim.json)], [400, ["payload.resolved_claim"]]);
+    const noFact = await post(report, N1, { ...POL, payload: { politician_id: PID, resolved_claim: "new" } });
+    assertEquals(errorPaths(noFact.json), ["payload.birth_year"]);
+    const other = await post(report, N1, { ...POL, payload: { politician_id: "someone-else", birth_year: 1970, resolved_claim: "new" } });
+    assertEquals(errorPaths(other.json), ["payload.politician_id"]);
+    assertEquals(db.contributions.length, 0);
+    const dup = await post(report, N1, POL);
+    assertEquals(dup.status, 409, JSON.stringify(dup.json));
+    assertEquals(dup.json.error, "duplicate_claim");
+    assertEquals(db.contributions.length, 0, "409 は何も書かない");
   });
 });

@@ -46,9 +46,15 @@ const candidacy = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/"],
 };
 
-Deno.test("七種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy]) {
+const politician = {
+  contribution_type: "politician",
+  payload: { politician_id: "5f0c8d6e-1111-4222-8333-444444444444", birth_year: 1970, education: ["○○大学法学部卒業"], career: ["○○市議会議員"], resolved_claim: "new" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/gikai/"],
+};
+
+Deno.test("八種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);

@@ -6,7 +6,7 @@
  *     目標分數存在欄位 target_score（SQL 觸發器 contribution_apply_consensus 維護）。所以 select 改帶 target_score，
  *     空的（剛提交、還沒計過票）退回日本站的門檻（_shared/jp/consensus.ts），不是正見的門檻矩陣。
  *   - 標題解析：election → payload.name，沒有就用 policy_jp.elections 的 name（id＝日期_種類_團體碼）；
- *     local_government → payload.name；candidacy → payload.name＋candidacy_status（選舉 id）；regional_stat → payload.lg_code＋payload.stat_key；no_change → 核對的內容（finding；任務代號 payload.task_id 是內部識別碼，不印在摘要上，仍在 task_id 欄位）。
+ *     local_government → payload.name；politician → 補充的事實（生年・學歷・經歷的項數）；candidacy → payload.name＋candidacy_status（選舉 id）；regional_stat → payload.lg_code＋payload.stat_key；no_change → 核對的內容（finding；任務代號 payload.task_id 是內部識別碼，不印在摘要上，仍在 task_id 欄位）。
  *     其餘型別（task_suggestion、correction）仍走正見的 summarizeContribution，但不回人物／政見連結（那是正見網站的網址，日本站的 id 對不上）。
  */
 
@@ -73,6 +73,11 @@ const ELECTION_TYPE_LABEL: Record<string, string> = {
 const CANDIDACY_STATUS_LABEL: Record<string, string> = {
   considering: "檢討出馬", declared: "表明參選", filed: "已提出届出", withdrawn: "退選", elected: "當選", not_elected: "落選",
 };
+const POLITICIAN_FACTS = (p: Obj): string => [
+  p.birth_year !== undefined && p.birth_year !== null ? "生年" : "",
+  Array.isArray(p.education) && p.education.length > 0 ? `學歷 ${p.education.length} 項` : "",
+  Array.isArray(p.career) && p.career.length > 0 ? `經歷 ${p.career.length} 項` : "",
+].filter(Boolean).join("、");
 const STAT_LABEL: Record<string, string> = { population: "人口", area_km2: "面積", budget_expenditure: "歲出", aging_rate: "高齡化率" };
 
 /** 日本站五種有自己摘要的型別之外，仍用正見的摘要；一律不回人物／政見連結（正見網站的網址，日本站的 id 對不上） */
@@ -97,6 +102,10 @@ export function jpSummarizeContribution(input: SummaryInput): ContributionSummar
       const name = str(p.name);
       const status = CANDIDACY_STATUS_LABEL[str(p.candidacy_status)] ?? str(p.candidacy_status);
       return base(`回報${name ? `「${name}」` : "一位候選人"}在選舉 ${str(p.election_id)} 的參選狀態：${status}`, name || null);
+    }
+    case "politician": {
+      // 既存の人物に足す提出：人物 id は印刷しない（內部識別碼）。何を足すかだけ
+      return base(`補充人物資料：${POLITICIAN_FACTS(p) || "（未填）"}`, null);
     }
     case "regional_stat": {
       const key = str(p.stat_key);
