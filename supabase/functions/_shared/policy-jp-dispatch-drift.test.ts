@@ -487,6 +487,7 @@ const T_CAND = "20261010040000"; // 選舉鏈第 2 步：參選人有誰（roste
 const T_PROFILE = "20261010050000"; // 選舉鏈第 3 步：參選人建檔（profile_gap／profile_detail_gap＋politician）
 const T_POLICY = "20261010060000"; // 選舉鏈第 4 步：這次的政見（policy_missing＋policy）
 const T_KANA = "20261010120000"; // 告示前の読み（kana）は選填＋roster_check の not_found 冷卻を告示日で打ち切る（policy-ops#60）
+const T_TIMELINE = "20261010110100"; // 主控台派工開關的選舉時間軸（policy-ops #63；正見版在 20261010110000）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -592,6 +593,11 @@ const JP_ONLY: Record<string, JpOnly> = {
   console_admin_override_create: { mig: [T_CONSOLE], why: "主控台新增覆寫（service_role 專用）；election_id 是 TEXT，釘 search_path = policy_jp, pg_temp" },
   console_admin_override_revoke: { mig: [T_CONSOLE], why: "主控台撤銷覆寫（service_role 專用）：expires_at 設今天 -1、撤銷原因併進 reason" },
   console_admin_milestone_set: { mig: [T_CONSOLE], why: "主控台改里程碑（service_role 專用）；kind 白名單照日本站八種 CHECK（沒有 qualification_review）" },
+  // ---- 20261010110100 主控台時間軸（policy-ops #63；正見版 20261010110000，表的欄位與選舉 id 型別不同，不是複本） ----
+  console_stage_of_kind: { mig: [T_TIMELINE], why: "里程碑＋偏移 → 7 段；日本站告示日（立候補受付）起算第 3 段，正見的 announced 算第 2 段" },
+  console_arm_stages: { mig: [T_TIMELINE], why: "每支臂的時期：有日期規則照 activity_rules 自動算、否則查 console_arm_stage_map（SECURITY DEFINER，anon 可讀）" },
+  console_timeline_elections: { mig: [T_TIMELINE], why: "主控台時間軸的選舉下拉選單：離今天最近 300 場，退件與查無的不列；election_id 是 TEXT" },
+  console_timeline: { mig: [T_TIMELINE], why: "一場選舉的時間軸 jsonb（里程碑、各臂的段、今天開關、覆寫標記、規則區間）；一場選舉一個職位、沒有任期里程碑" },
   // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
   //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----
   task_boost_matches: { mig: [T_BOOST], why: "插隊條件 → 符合的佇列鍵；篩選詞彙是日本專屬（正見的 regions／election_id／election_types／missing_avatar／politician_ids 全拿掉）" },
