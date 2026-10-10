@@ -13,5 +13,5 @@
  * 版號寫成等號比對（守門：protocol-version-literal.test.ts）；要驗「這個功能
  * 從哪版起有」，用「不低於某版」。升版號由主線配號。
  */
-export const PROTOCOL_VERSION = "1.89.0";
+export const PROTOCOL_VERSION = "1.90.0";
 export const PROTOCOL_URL = "https://policy-tw.web.app/skill.md";
