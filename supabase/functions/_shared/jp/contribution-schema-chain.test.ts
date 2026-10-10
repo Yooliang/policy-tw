@@ -3,7 +3,7 @@
  * 純函式測試（不碰資料庫）。SQL 那一半（落庫、DB CHECK）在 policy-jp-chain-*.test.ts。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { JP_CONTRIBUTION_TYPES, JP_TASK_ARMS, JP_VOTE_FIELDS, validateContributionRequest } from "./contribution-schema.ts";
+import { JP_CONTRIBUTION_TYPES, JP_TASK_ARMS, JP_VOTE_FIELDS, jpTrim, validateContributionRequest } from "./contribution-schema.ts";
 
 const base = { agent_name: "jp-agent", agent_tool: "claude-code/claude-sonnet-5" };
 const E1 = "2027-04-25_mayor_232033";
@@ -187,4 +187,72 @@ Deno.test("politician：任務比對（profile_gap／profile_detail_gap／source
   const wrong = candidacy({}, [], { task_id: `auto:profile_gap:${PID}` });
   assertEquals(paths(wrong), ["task_id"]);
   assert(wrong.errors[0].message.includes("politician"));
+});
+
+// ---------------------------------------------------------------------------------------------
+// policy（選舉鏈第 4 步）
+// ---------------------------------------------------------------------------------------------
+const PEID = "5f0c8d6e-1111-4222-8333-444444444444:2027-04-25_mayor_232033:at_large";
+const policy = (patch: Record<string, unknown> = {}, drop: string[] = [], top: Record<string, unknown> = {}) => {
+  const payload: Record<string, unknown> = {
+    politician_election_id: PEID, title: "保育所の待機児童をなくす", description: "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。",
+    category: "子育て", source_locator: "選挙公報 2 頁「子育て」", resolved_claim: "new", ...patch,
+  };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "policy", payload, source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"], ...top });
+};
+
+Deno.test("policy：最小可過（必須 5 欄位＋resolved_claim）；proposed_date は任意", () => {
+  assert(policy().ok, JSON.stringify(policy().errors));
+  assert(policy({ proposed_date: "2026-09-01" }).ok);
+  assert(policy({ description: "あ".repeat(120) }).ok, "120 字ちょうど");
+  assert(policy({ description: "あ".repeat(10) }).ok, "10 字ちょうど");
+});
+
+Deno.test("policy：400 のケース（必須欄位・字數の境界・日付・origin／status・resolved_claim）", () => {
+  assertEquals(paths(policy({}, ["politician_election_id"])), ["payload.politician_election_id"]);
+  assertEquals(paths(policy({}, ["title"])), ["payload.title"]);
+  assertEquals(paths(policy({ title: "短い" })), ["payload.title"]);
+  assertEquals(paths(policy({ title: "あ".repeat(101) })), ["payload.title"]);
+  assertEquals(paths(policy({}, ["description"])), ["payload.description"]);
+  assertEquals(paths(policy({ description: "あ".repeat(9) })), ["payload.description"]);
+  assertEquals(paths(policy({ description: "あ".repeat(121) })), ["payload.description"]);
+  assertEquals(paths(policy({ description: 12345 })), ["payload.description"]);
+  assertEquals(paths(policy({}, ["category"])), ["payload.category"]);
+  assertEquals(paths(policy({ category: "あ".repeat(31) })), ["payload.category"]);
+  assertEquals(paths(policy({}, ["source_locator"])), ["payload.source_locator"]);
+  assertEquals(paths(policy({ proposed_date: "2027-13-01" })), ["payload.proposed_date"]);
+  assertEquals(paths(policy({ proposed_date: "2999-01-01" })), ["payload.proposed_date"]);
+  assertEquals(paths(policy({ origin: "budget" })), ["payload.origin"]);
+  assertEquals(paths(policy({ status: "achieved" })), ["payload.status"]);
+  assertEquals(paths(policy({}, ["resolved_claim"])), ["payload.resolved_claim"]);
+  assertEquals(paths(policy({ resolved_claim: "differs:abc" })), ["note"]);
+  assert(policy({ resolved_claim: "differs:abc" }, [], { note: "要約が違う（公報では 3 年ではなく 4 年）" }).ok);
+});
+
+Deno.test("policy：surrogate pair も 1 字と数える（SQL の char_length と同じ）；任務比對（policy_missing）", () => {
+  assert(policy({ description: "𠮷".repeat(120) }).ok, "120 コードポイント");
+  assertEquals(paths(policy({ description: "𠮷".repeat(121) })), ["payload.description"]);
+  assertEquals(JP_TASK_ARMS.policy_missing, "policy");
+  assertEquals(paths(policy({}, [], { task_id: `auto:policy_missing:${PEID}` })), []);
+  const other = policy({ politician_election_id: "someone:else:at_large" }, [], { task_id: `auto:policy_missing:${PEID}` });
+  assertEquals(paths(other), ["payload.politician_election_id"]);
+  const wrong = politician({}, [], { task_id: `auto:policy_missing:${PEID}` });
+  assertEquals(paths(wrong), ["task_id"]);
+  assert(wrong.errors[0].message.includes("policy"));
+});
+
+Deno.test("policy：字數は前後の空白（全角空白も）を落としてコードポイントで数える；proposed_date が投票日（参選 id の選挙 id の頭）より後なら TS でも 400", () => {
+  assertEquals(paths(policy({ title: "　　短い　　" })), ["payload.title"], "空白を除くと 2 字");
+  assert(policy({ title: "　四文字題名　" }).ok);
+  assertEquals(paths(policy({ description: "　" + "あ".repeat(9) + "　" })), ["payload.description"]);
+  assert(policy({ description: "　" + "あ".repeat(10) + "　" }).ok);
+  assertEquals(paths(policy({ category: "　" })), ["payload.category"]);
+  assertEquals(jpTrim("　 \t題名\n　"), "題名");
+  const past = "5f0c8d6e-1111-4222-8333-444444444444:2025-01-12_mayor_232033:at_large";
+  assert(policy({ politician_election_id: past, proposed_date: "2025-01-01" }).ok);
+  assert(policy({ politician_election_id: past, proposed_date: "2025-01-12" }).ok, "投票日当日は通る");
+  const late = policy({ politician_election_id: past, proposed_date: "2025-02-01" });
+  assertEquals(paths(late), ["payload.proposed_date"]);
+  assert(late.errors[0].message.includes("2025-01-12"));
 });

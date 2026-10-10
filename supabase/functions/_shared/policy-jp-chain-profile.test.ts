@@ -63,8 +63,8 @@ async function armRows(db: Db, all = false) {
 // a. 結構
 // =============================================================================================
 Deno.test("結構：步驟清單七步；臂名・總表・規則三處一起加；規則 after_step=candidacy＋後備（告示日當天）；優先層規則；步驟順位 5；型別清單 TS／SQL 對齊", async () => {
-  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s,
-    ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy", "profile"].slice(0, 7));
+  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s.slice(0, 7),
+    ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy", "profile"]);
   const names = (await one<{ a: string[] }>(shared, `SELECT policy_jp.activity_arm_names() AS a`)).a;
   for (const a of PROFILE) assert(names.includes(a), `臂名清單有 ${a}`);
   const total = fnText(MIG_SQL, TOTAL);
