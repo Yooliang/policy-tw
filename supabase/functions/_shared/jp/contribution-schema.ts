@@ -1,5 +1,5 @@
 /**
- * 日本站貢獻請求的格式與驗證（收 no_change、task_suggestion、correction、election、local_government、regional_stat 六種）。
+ * 日本站貢獻請求的格式與驗證（收 no_change、task_suggestion、correction、election、local_government、regional_stat、candidacy 七種）。
  *
  * 複製自 ../contribution-schema.ts：validateContributionRequest／validateVerifyRequest／canonicalPayload，
  * 以及 validatePayload 裡 no_change、task_suggestion、correction 三段的欄位規則（欄位名、字數、錯誤文字都照抄）。
@@ -9,6 +9,8 @@
  *   帶 task_id 時 payload 的 lg_code（與 election 的職位種類）要跟 task_id 一致。
  * 日本站自己的：local_government（地方公共団体，對應派工臂 local_government_missing）與 regional_stat（地域統計，對應 regional_stats_missing）——
  *   欄位照 policy_jp.local_governments／regional_stats 的 CHECK 寫；source_urls 至少要有一個公的出典（総務省・e-Stat・*.go.jp・*.lg.jp・団体の公式サイト）。
+ * 日本站自己的：candidacy（選舉鏈第 2 步，對應派工臂 roster_check；欄位照 policy_jp.politician_elections 的 CHECK：六個 candidacy_status、district_kind、status_date；
+ *   人物用 politician_id 或 name＋kana；得票數・得票率的欄位名一律 400；claimKey 併票型別，不進 same_claim 登記表）。落庫 SQL policy_jp.apply_candidacy（20261010040000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -30,7 +32,7 @@ import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../sam
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -58,6 +60,14 @@ export const JP_KANA_RE = /^[ぁ-ゖー]+$/;
 /** regional_stats.stat_key 與單位（policy_jp.regional_stat_unit；一個 stat_key 只有一種單位，對齊測試守著） */
 export const JP_STAT_KEYS = ["population", "area_km2", "budget_expenditure", "aging_rate"] as const;
 export const JP_STAT_UNITS: Record<(typeof JP_STAT_KEYS)[number], string> = { population: "人", area_km2: "km2", budget_expenditure: "千円", aging_rate: "%" };
+
+/** candidacy（第 2 步）：參選狀態的六個值（policy_jp.politician_elections 的 CHECK）與選舉區種類 */
+export const JP_CANDIDACY_STATUSES = ["considering", "declared", "filed", "withdrawn", "elected", "not_elected"] as const;
+export const JP_DISTRICT_KINDS = ["district", "proportional", "at_large"] as const;
+/** elections.id 的形狀（投票日_種類_團體碼；國政是 national） */
+export const JP_ELECTION_ID_RE = /^\d{4}-\d{2}-\d{2}_[a-z_]+_(\d{6}|national)$/;
+/** 得票數・得票率不收（CLAUDE.md：不存、不顯示）。這些欄位名出現在 candidacy 的 payload 就整筆 400 */
+export const JP_VOTE_FIELDS = ["votes", "vote_count", "votes_received", "vote_percentage", "vote_rate", "vote_share", "turnout"] as const;
 
 /** 【待定】日本站已建的資料表（20261009000000_policy_jp_tables.sql）裡可以被更正的；落庫（apply）定案時一併收斂 */
 export const JP_CORRECTION_TABLES = ["politicians", "politician_elections", "politician_offices", "policies", "parties", "elections", "lineages"] as const;
@@ -136,9 +146,11 @@ export const JP_TASK_ARMS = {
   election_discovery: "election",
   local_government_missing: "local_government",
   regional_stats_missing: "regional_stat",
+  // 選舉鏈第 2 步：名簿任務收 candidacy（完成的合図は no_change なので、no_change は型の比對に入らない）
+  roster_check: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check):(.+)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -150,6 +162,12 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   const arm = m[1] as keyof typeof JP_TASK_ARMS;
   if (JP_TASK_ARMS[arm] !== type) {
     push("task_id", `這個 task_id 是 ${arm} 的任務，要用 contribution_type=${JP_TASK_ARMS[arm]} 回報（你交的是 ${type}）；查不到請改交 no_change`);
+    return;
+  }
+  // roster_check：task_id の末尾は選挙 id（auto:roster_check:<election_id>）。1 つのタスクは 1 つの選挙だけ
+  if (arm === "roster_check") {
+    if (!JP_ELECTION_ID_RE.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:roster_check:<選舉 id>）"); return; }
+    if (payload.election_id !== m[2]) push("payload.election_id", `payload.election_id（${String(payload.election_id ?? "未填")}）跟這個任務問的選舉（${m[2]}）不一致：一個任務只回報它問的那場選舉的立候補者`);
     return;
   }
   let taskLg: string;
@@ -257,6 +275,47 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       }
       if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 必填（團體名稱的讀音）");
       else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana 要全部是ひらがな（總務省團體碼表的半角カナ請改成ひらがな，例：いちのみやし；不含空白與括號）");
+      break;
+    }
+    case "candidacy": {
+      // 參選人（選舉鏈第 2 步）：欄位照 policy_jp.politician_elections 的 CHECK；人物用 politician_id（已在庫）或 name＋kana（新的人）。
+      // 得票數・得票率は受け付けない（欄位名が出たら整筆 400，payload にも残さない）。政黨・推薦・合区はこの型では扱わない。
+      for (const k of JP_VOTE_FIELDS) if (k in p) push(`payload.${k}`, "得票數・得票率不收（站上不存、不顯示）：請把這個欄位拿掉");
+      const hasId = p.politician_id !== undefined && p.politician_id !== null;
+      if (hasId && !isStr(p.politician_id, 1, 64)) push("payload.politician_id", "politician_id 要是 1～64 字的 id（/next 的 target.ours 裡的值）");
+      if (!hasId || p.name !== undefined) {
+        if (!isStr(p.name, 1, 40)) push("payload.name", "name 必填（1～40 字，候選人的姓名，漢字）；已在庫的人改帶 politician_id");
+      }
+      if (!hasId || p.kana !== undefined) {
+        if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 必填（候選人姓名的讀音）；已在庫的人改帶 politician_id");
+        else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana 要全部是ひらがな（不含空白與括號）");
+      }
+      if (!(typeof p.election_id === "string" && JP_ELECTION_ID_RE.test(p.election_id))) push("payload.election_id", "election_id 必填：這場選舉的 id（投票日_種類_團體碼，例：2027-04-25_mayor_232033，照任務 target.election_id 抄）");
+      if (!oneOf(JP_CANDIDACY_STATUSES, p.candidacy_status)) push("payload.candidacy_status", `candidacy_status 必填：${JP_CANDIDACY_STATUSES.join("／")} 之一（告示前只有 considering／declared，filed 是告示日以後的届出）`);
+      if (!isJpDate(p.status_date)) push("payload.status_date", "status_date 必填：這個狀態的日期（表態日、届出日、投票日），YYYY-MM-DD，年份 1947～2100");
+      const kindOk = oneOf(JP_DISTRICT_KINDS, p.district_kind);
+      if (!kindOk) push("payload.district_kind", `district_kind 必填：${JP_DISTRICT_KINDS.join("／")} 之一（首長選舉 at_large，議員選舉依選挙区 district，比例代表 proportional）`);
+      if (p.district_name !== undefined && p.district_name !== null && !isStr(p.district_name, 1, 60)) push("payload.district_name", "district_name 要是 1～60 字（選挙区名）");
+      else if (kindOk) {
+        const named = typeof p.district_name === "string" && p.district_name.trim() !== "";
+        if (p.district_kind === "at_large" && named) push("payload.district_name", "district_kind=at_large 不帶 district_name（首長選舉・全域一區）");
+        if (p.district_kind !== "at_large" && !named) push("payload.district_name", `district_kind=${p.district_kind} 要帶 district_name（選挙区名，例：北区、四国ブロック）`);
+      }
+      if (p.district_lg_code !== undefined && p.district_lg_code !== null) {
+        if (!lgCodeValid(p.district_lg_code)) push("payload.district_lg_code", "district_lg_code 要是團體碼 6 碼（檢查碼要對）");
+        else if (p.district_kind !== "district") push("payload.district_lg_code", "district_lg_code 只有 district_kind=district 才帶");
+      }
+      if (p.list_rank !== undefined && p.list_rank !== null) {
+        if (!(typeof p.list_rank === "number" && Number.isInteger(p.list_rank) && p.list_rank >= 1)) push("payload.list_rank", "list_rank（名簿順位）要是 1 以上的整數");
+        else if (p.district_kind !== "proportional") push("payload.list_rank", "list_rank 只有 district_kind=proportional 才帶");
+      }
+      if (p.withdrawn_after_filing !== undefined && p.withdrawn_after_filing !== null) {
+        if (typeof p.withdrawn_after_filing !== "boolean") push("payload.withdrawn_after_filing", "withdrawn_after_filing 要是 true（届出後に辞退）或 false（届出前に取りやめ）");
+        else if (p.candidacy_status !== "withdrawn") push("payload.withdrawn_after_filing", "withdrawn_after_filing 只有 candidacy_status=withdrawn 才帶");
+      }
+      if (p.birth_year !== undefined && p.birth_year !== null && !(typeof p.birth_year === "number" && Number.isInteger(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
+        push("payload.birth_year", "birth_year 要是西曆四位數整數（例：1975）；不知道就不要填");
+      }
       break;
     }
     case "regional_stat": {

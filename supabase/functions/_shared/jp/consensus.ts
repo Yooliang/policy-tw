@@ -1,5 +1,5 @@
 /**
- * 日本站同儕驗證共識規則（no_change、task_suggestion、correction、election、local_government、regional_stat 六種貢獻）。
+ * 日本站同儕驗證共識規則（no_change、task_suggestion、correction、election、local_government、regional_stat、candidacy 七種貢獻）。
  *
  * 複製自 ../consensus.ts：AGREE_THRESHOLDS／riskLevel／requiredAgree／rejectFloor。
  * 保留的：系統票（Jev）調門檻——supported 門檻 −1（最少 1）、not_supported +1（effectiveRequiredAgree，同正見）。
@@ -14,6 +14,8 @@
  *   system_vote_eligible 不收它們（不拿 Jev 系統票，門檻不調）；不用兩個網段（contribution_needs_two_ips 沒列它們：
  *   這三種都有官方出處可以逐欄核對，且落庫有「已經有一樣的就當成功、不一樣的不覆蓋」的保護，不像正見的 candidacy 會建人）。
  *   TS 這邊不用多寫分支（riskLevel 預設 normal），由 consensus.test.ts 與 policy-jp-apply.test.ts 守著 SQL／TS 一致。
+ * candidacy（選舉鏈第 2 步）：目標 3、退件 −3（normal，同 SQL）；SQL 的 contribution_needs_two_ips 已列 candidacy＝分數要有 2 個以上不同來源網段才通過（手引き第 7 節）。
+ *   TS 這邊不鏡像網段條件（同 needsTwoIps／scoreStatus 不鏡像）。
  * 純函式（不動資料）的守門規則（盲反對、罐頭備註、抄備註、同網站證據…）不複製，直接從正見的 consensus.ts 轉出，行為完全相同。
  */
 
@@ -32,7 +34,7 @@ export {
   weightReason,
 } from "../consensus.ts";
 
-export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat";
+export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy";
 
 /** light＝不動正式資料（無異動、提議任務）；normal＝更正、選舉日程、地方公共団体、地域統計 */
 export type JpRiskLevel = "normal" | "light";
