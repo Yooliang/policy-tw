@@ -24,6 +24,7 @@
 --      「這個人」本身一定在庫裡，所以不能把人當鍵（會永遠 duplicate_claim）；鍵是這次要補的事實。
 --    SQL：same_claim_matches 改成分派器（20261009280000 的本體改名為 same_claim_matches_base，型別 politician 走新的 same_claim_matches_politician，
 --    其餘照舊交給 base），同一個入口 jp-next／jp-report 照呼叫；same_claim_same_content 多 politician 一個 WHEN；收編觸發器的型別清單多 politician。
+--    學歷・經歷は『出處つき』の項目だけが既存の事實（出處のない項目に出處を掛ける提出が自分で擋がれないように。正見も補出處は同じ文字の項目に掛けるだけで重複扱いしない）。
 --    （same_claim_merge_pending 是一次性函式，清單不跟：politician 沒有『上線前的既有重複』要併。）
 -- 5. 得票數不相關；payload 的 name／kana 不收（改名・讀音更正走 correction）。
 --
@@ -481,6 +482,9 @@ BEGIN
     SELECT 1 + pc.id, jsonb_build_object('id', pc.id::TEXT, 'fact', pc.kind, 'text', pc.text, 'summary', pc.kind || '：' || pc.text, 'why', '同じ人・同じ種類・同じ文字の学経歴が庫にある')
       FROM policy_jp.politician_careers pc
      WHERE pc.politician_id = v_pid AND pc.review_status = 'published'
+       -- 出處のない項目は『同じこと』ではない：補出處（career_sources 任務）の提出は、庫にある同じ文字の項目に出處を掛けるのが目的なので、
+       -- 出處つきの項目だけが既存の事実。ここに含めると new が 409 duplicate_claim、在庫 id 指定が no_change に化けて、出處が永遠に掛からない
+       AND EXISTS (SELECT 1 FROM policy_jp.source_refs r WHERE r.target_table = 'politician_careers' AND r.target_id = pc.id::TEXT)
        AND (NOT v_has_facts
             OR (pc.kind = 'education' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(p->'education') = 'array' THEN p->'education' ELSE '[]'::JSONB END) t WHERE btrim(t) = pc.text))
             OR (pc.kind = 'career' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(p->'career') = 'array' THEN p->'career' ELSE '[]'::JSONB END) t WHERE btrim(t) = pc.text)))
