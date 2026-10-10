@@ -549,3 +549,10 @@ enabled = true
 # email 等於主控台擁有者），驗不過一律拒絕。
 verify_jwt = false
 entrypoint = "./functions/console-admin/index.ts"
+
+[functions.console-vm]
+enabled = true
+# 站務主控台的驗證 VM 開關／狀態（工作單 Yooliang/policy-ops#65）。理由同 console-admin：呼叫者帶 Firebase ID Token，閘道驗 Supabase JWT 會先擋掉，
+# 所以閘道不驗、函式自己驗（Firebase 簽名＋擁有者信箱）。
+verify_jwt = false
+entrypoint = "./functions/console-vm/index.ts"

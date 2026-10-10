@@ -40,3 +40,20 @@ Deno.test("console-admin：日本站走 _shared/jp/client.ts 的 jpClient（sche
   assert(/site !== "tw" && site !== "jp"/.test(handler), "handler 要有 site 白名單（只收 tw／jp）");
   assert(!/schema/i.test(handler.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "").replace(/policy_jp/g, "")), "handler 不處理 schema 名稱");
 });
+
+Deno.test("console-vm：config.toml 有登記，verify_jwt 關，entrypoint 指對；handler 先驗 Firebase token 才碰 GCP", async () => {
+  const cfg = await read("../../config.toml");
+  const m = /\[functions\.console-vm\]([\s\S]*?)(?=\n\[|$)/.exec(cfg);
+  assert(m, "config.toml 要有 [functions.console-vm]");
+  assert(/verify_jwt = false/.test(m[1]), "verify_jwt 要是 false（Firebase ID Token 不是 Supabase 自己發的 JWT）");
+  assert(m[1].includes('entrypoint = "./functions/console-vm/index.ts"'));
+
+  const idx = await read("../console-vm/index.ts");
+  assert(idx.includes("handleConsoleVm("), "index.ts 要把 request 轉給 handleConsoleVm");
+  const handler = await read("./console-vm-handler.ts");
+  const reject = handler.indexOf("!verified.ok");
+  const owner = handler.indexOf("isConsoleOwner(verified.claims");
+  const firstGce = handler.indexOf("gce.");
+  assert(reject > 0 && owner > reject, "要先驗 token 再驗擁有者");
+  assert(firstGce > owner, "碰 GCP 一定在驗證之後");
+});
