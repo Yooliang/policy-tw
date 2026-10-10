@@ -92,6 +92,9 @@ Deno.test("協議版號：エンドポイントが返す版は 0.9.0 以上（�
   await withEntries(db, env(), async ({ next }) => {
     const got = await getNext(next, N1);
     assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // politician（選舉鏈第 3 步）
 // ---------------------------------------------------------------------------------------------
