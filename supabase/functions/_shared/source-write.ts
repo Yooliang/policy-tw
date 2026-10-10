@@ -19,6 +19,7 @@
 
 import { isHttpUrl, matchPrioritySource } from "./source-priority.ts";
 import { hostInList, SELF_INELIGIBLE_HOSTS } from "./source-domains.ts";
+import { unwrapArchiveUrl } from "./sole-source-guard.ts";
 
 // 清單的單一來源在 source-domains.ts；這裡留著原本的匯出名字，舊的 import 不用改
 export { SELF_INELIGIBLE_HOSTS };
@@ -43,9 +44,12 @@ function hostOf(url: string): string | null {
   }
 }
 
-/** 依網域自動判斷的等級（SQL source_auto_kind 的鏡像）：官方→official、媒體與社群→media、其餘→other；永遠不給 self */
+/**
+ * 依網域自動判斷的等級（SQL source_auto_kind 的鏡像）：官方→official、媒體與社群→media、其餘→other；永遠不給 self。
+ * web.archive.org 的存檔看原網址（2026-10-10，OPS #59：存檔的公報、新聞原本一律被標成 other）。
+ */
 export function autoSourceKind(url: string): Exclude<SourceLevel, "self"> {
-  const kind = matchPrioritySource(url)?.kind;
+  const kind = matchPrioritySource(unwrapArchiveUrl(url))?.kind;
   if (kind === "official") return "official";
   if (kind === "media" || kind === "social") return "media";
   return "other";

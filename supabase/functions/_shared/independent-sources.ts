@@ -43,14 +43,6 @@ export const NEWS_HOSTS: ReadonlySet<string> = new Set(["today.line.me"]);
 export const USER_SECTION_HOSTS: ReadonlySet<string> = new Set(["blog.udn.com", "talk.ltn.com.tw", "blog.ettoday.net", "opinion.udn.com"]);
 /** 社群與其他網站合併成的那一組 */
 export const SELF_OR_OTHER_GROUP = "self_or_other";
-/**
- * source-priority.ts 媒體清單以外、也照網站分的新聞網站（網站＝siteOf 的結果；同集團用 MEDIA_GROUPS 併一）。
- * 不在這裡也不在媒體清單的網站，一律跟社群、本人官網併成一組——認不出是不是本人的網站，就寧可少算（主線審查 #544 第 1 點）。
- */
-export const EXTRA_NEWS_SITES: ReadonlySet<string> = new Set([
-  "yahoo.com", "focustaiwan.tw", "mirrormedia.mg", "nownews.com", "cts.com.tw", "ttv.com.tw", "ebc.net.tw",
-  "thenewslens.com", "businesstoday.com.tw", "cnyes.com", "ctee.com.tw", "ctwant.com", "tvbs.com.tw", "bnext.com.tw",
-]);
 
 export interface IndependentPick {
   /** 算獨立的來源（依原順序） */
@@ -71,8 +63,9 @@ export function sourceGroupOf(url: string): string {
   const site = siteOf(url) ?? hostOf(url);
   const grouped = MEDIA_GROUPS[site] ?? site;
   const kind = sourceKind(unwrapArchiveUrl(url));
+  // 新聞網站只認 source-priority.ts 的媒體清單（2026-10-10 起單一真相，OPS #59）；清單外的網站一律跟社群、本人官網併成一組——
+  // 認不出是不是本人的網站，就寧可少算（主線審查 #544 第 1 點）
   if (kind === "official" || kind === "media") return grouped;
-  if (kind === "other" && (EXTRA_NEWS_SITES.has(site) || EXTRA_NEWS_SITES.has(grouped))) return grouped;
   return SELF_OR_OTHER_GROUP;
 }
 

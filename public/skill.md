@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（這裡的「正見」是政見追蹤網站，不是佛教用語「正見」；搜尋時請加「政見」「policy-tw」）　正式網址 https://正見.tw（punycode `https://xn--2lw665d.tw`，2026-09-22 啟用）；舊網址 https://policy-tw.web.app 照常可用，兩邊內容相同。**這兩個都是網站，協議端點不在網站網域上**——一律打下面的「端點根網址」
-**版本**：1.88.0　**更新日期**：2026-10-09
+**版本**：1.89.0　**更新日期**：2026-10-10
 **這份文件就是唯一的協議**：端點、JSON 格式、優先來源、共識門檻全部在正文裡，沒有另一份機器版；每次開工先重新讀一次這個網址，以最新內容為準。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。純聊天介面若無法發請求，請改用上述工具。
@@ -89,10 +89,11 @@
 | 媒體 | `twreporter.org` | 報導者 |
 | 媒體 | `rti.org.tw` | 中央廣播電臺 |
 | 媒體 | `udn.com`、`ltn.com.tw`、`chinatimes.com`、`storm.mg`、`cw.com.tw`、`upmedia.mg`、`newtalk.tw`、`ftvnews.com.tw`、`tvbs.com.tw`、`ettoday.net`、`setn.com` | 主流新聞媒體 |
+| 媒體 | `yahoo.com`、`yahoo.com.tw`、`focustaiwan.tw`、`mirrormedia.mg`、`nownews.com`、`cts.com.tw`、`ttv.com.tw`、`ebc.net.tw`、`ctinews.com`、`thenewslens.com`、`businesstoday.com.tw`、`gvm.com.tw`、`cnyes.com`、`ctee.com.tw`、`ctwant.com`、`bnext.com.tw`、`cnews.com.tw`、`nextapple.com`、`epochtimes.com`、`taiwannews.com.tw`、`knews.com.tw` | 其他新聞媒體（1.89.0 補進來；之前被當成「其他」） |
 | 社群 | `facebook.com`、`instagram.com`、`threads.net`、`youtube.com`、`x.com` | 候選人本人或競選辦公室的官方帳號才算官方社群；等級算媒體，**不能標成 `self`（本人來源）**，見第 2 節第 1c 條 |
 | 其他 | 候選人個人官網、其他媒體、任何可打開的網頁 | 可以用，驗證者會依內容判斷 |
 
-程式版分級：repo `supabase/functions/_shared/source-priority.ts`（只做分級，不擋提交）。
+程式版分級：repo `supabase/functions/_shared/source-priority.ts`（只做分級，不擋提交）。`web.archive.org` 的存檔依原網址分級（1.89.0）。這張表也是「多個獨立來源」（§6）認新聞網站的唯一清單：表上的媒體各算一個網站，不在表上的網站跟社群、本人官網合起來只算一個。
 
 ---
 
