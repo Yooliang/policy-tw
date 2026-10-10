@@ -41,3 +41,15 @@ Deno.test("任務票數：裁決任務對 payload.contribution_id，需 3 票，
   assertEquals(s.leading?.required_agree, 3, "2026-09-21：裁決 4 票降 3 票");
   assertEquals(s.leading?.verdict, "reject");
 });
+
+Deno.test("任務票數：帶分數與目標分數給拉鋸條（ScoreBar）；沒記目標分數就用門檻，沒記分數就是 0", () => {
+  const tasks = [{ task_id: "t1", task_type: "progress_stale", target: {} }, { task_id: "t2", task_type: "progress_stale", target: {} }];
+  const m = summarizeTaskVotes(tasks, [
+    c({ id: "a", task_id: "t1", agree_count: 1, score: 2, target_score: 2, unsure_count: 1 }),
+    c({ id: "b", task_id: "t2", agree_count: 0 }),
+  ]);
+  const a = m.get("t1")!.leading!;
+  assertEquals([a.score, a.target_score, a.unsure_count], [2, 2, 1]);
+  const b = m.get("t2")!.leading!;
+  assertEquals([b.score, b.target_score, b.unsure_count], [0, b.required_agree, 0]);
+});

@@ -15,6 +15,8 @@ const props = defineProps<{
   agree?: number
   disagree?: number
   unsure?: number
+  /** 窄版（任務頁，維護者 2026-10-10「寬度小一些」） */
+  narrow?: boolean
 }>()
 
 const s = computed(() => props.score ?? 0)
@@ -27,7 +29,7 @@ const fillStyle = computed(() => (s.value >= 0 ? { left: '50%', width: `${pct.va
 <template>
   <span v-if="t > 0" class="inline-flex items-center gap-1 text-xs tabular-nums text-slate-400" :title="title" data-testid="score-bar">
     <span class="text-red-500">−{{ t }}</span>
-    <span class="relative inline-block w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
+    <span class="relative inline-block h-2 rounded-full bg-slate-200 overflow-hidden" :class="narrow ? 'w-14' : 'w-24'">
       <span class="absolute top-0 bottom-0 left-1/2 w-px bg-slate-400"></span>
       <span class="absolute top-0 bottom-0" :class="s >= 0 ? 'bg-emerald-500' : 'bg-red-500'" :style="fillStyle"></span>
       <span class="score-bar-tick absolute -top-0.5 w-1 h-3 rounded-sm bg-navy-900" :style="{ left: `calc(${pct}% - 2px)` }"></span>
