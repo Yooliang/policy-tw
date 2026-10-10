@@ -443,6 +443,7 @@ const T_SAME = "20261009280000"; // 同一件事（#521）
 const T_PRIO = "20261009300000"; // 選舉鏈依投票日遠近派工（層＋層內順序）
 const T_SAME2 = "20261009280100"; // 同一件事第二步：收編（#521，policy-ops#24）
 const T_CONSOLE = "20261010010000"; // 主控台日本站（#518 第二步）
+const T_BOOST = "20261010030000"; // 插隊 jp-boost（正見 single_queue_boosts 的日本版，篩選詞彙不同）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -548,6 +549,11 @@ const JP_ONLY: Record<string, JpOnly> = {
   console_admin_override_create: { mig: [T_CONSOLE], why: "主控台新增覆寫（service_role 專用）；election_id 是 TEXT，釘 search_path = policy_jp, pg_temp" },
   console_admin_override_revoke: { mig: [T_CONSOLE], why: "主控台撤銷覆寫（service_role 專用）：expires_at 設今天 -1、撤銷原因併進 reason" },
   console_admin_milestone_set: { mig: [T_CONSOLE], why: "主控台改里程碑（service_role 專用）；kind 白名單照日本站八種 CHECK（沒有 qualification_review）" },
+  // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
+  //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----
+  task_boost_matches: { mig: [T_BOOST], why: "插隊條件 → 符合的佇列鍵；篩選詞彙是日本專屬（正見的 regions／election_id／election_types／missing_avatar／politician_ids 全拿掉）" },
+  task_boost: { mig: [T_BOOST], why: "插隊（1980 減 n 分鐘、LEAST、一次性）；骨架同正見 20260921000032，改叫 policy_jp 的表與 task_boost_matches" },
+  task_boost_remaining: { mig: [T_BOOST], why: "一筆插隊還剩多少沒領；同正見 20260921000030，改叫 policy_jp 的表" },
 };
 
 // ---- 掃描與比對（純函式，還原驗證也用它們） ----
@@ -606,7 +612,7 @@ async function readJpMigrations(): Promise<Record<string, string>> {
 Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本（PAIRS／FOLLOWED／公開統計）＋日本專屬清單 JP_ONLY（新加的不登記就紅、登記了卻沒人定義也紅）；偵測器有還原驗證", async () => {
   const files = await readJpMigrations();
   const ids = Object.keys(files).map(ID);
-  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, T_PRIO, "20261008195000", "20261009130200", "20261009250100", "20261009250300"]) {
+  for (const t of [T_TABLES, T_DISPATCH, T_ED, ID(FOLLOW_MIG), T_STATS, T_APPLY, T_ARMS, T_LGR, T_STR, T_CHAIN, T_PRIO, "20261008195000", "20261009130200", "20261009250100", "20261009250300", T_BOOST]) {
     assert(ids.includes(t), `掃描範圍要包含 ${t}（放行靠登記，不是靠沒掃到）`);
   }
   const scan = scanDefinitions(files);
