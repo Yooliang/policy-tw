@@ -163,3 +163,77 @@ Deno.test("handleConsoleAdmin：body 不是合法 JSON 回 400", async () => {
   const res = await handleConsoleAdmin(bad, deps(async () => ({ data: null, error: null })));
   assertEquals(res.status, 400);
 });
+
+// ---- 日本站（site=jp，2026-10-10）----
+
+function twJpDeps() {
+  const calls: { site: "tw" | "jp"; fn: string; args: Record<string, unknown> }[] = [];
+  const mk = (site: "tw" | "jp"): RpcClient => async (fn, args) => {
+    calls.push({ site, fn, args });
+    return { data: { id: 1 }, error: null };
+  };
+  return { calls, d: { rpc: mk("tw"), rpcJp: mk("jp"), projectId: "policy-tw", ownerEmail: OWNER, verifyToken: (async () => OK_VERIFY) as any } };
+}
+
+Deno.test("site 沒給＝tw：走台灣站 RPC（舊呼叫端相容）", async () => {
+  const { calls, d } = twJpDeps();
+  const res = await handleConsoleAdmin(req({ action: "override_revoke", id: 1, reason: "x" }), d);
+  assertEquals(res.status, 200);
+  assertEquals(calls.map((c) => c.site), ["tw"]);
+});
+
+Deno.test("site=jp：三個動作都走日本站 RPC（rpcJp），台灣站 RPC 一次都沒叫；election_id 用字串", async () => {
+  const { calls, d } = twJpDeps();
+  const key = "2028-07-09_national_lower_national";
+  const a = await handleConsoleAdmin(req({ site: "jp", action: "override_create", activity: "manual_open", election_id: key, force: "closed", reason: "測試" }), d);
+  const b = await handleConsoleAdmin(req({ site: "jp", action: "override_revoke", id: 7, reason: "撤" }), d);
+  const c = await handleConsoleAdmin(req({ site: "jp", action: "milestone_set", election_id: key, kind: "draw", election_type: "", on_date: "2028-06-20", status: "announced", reason: "改" }), d);
+  assertEquals([a.status, b.status, c.status], [200, 200, 200]);
+  assertEquals(calls.map((x) => `${x.site}:${x.fn}`), [
+    "jp:console_admin_override_create", "jp:console_admin_override_revoke", "jp:console_admin_milestone_set",
+  ]);
+  assertEquals(calls[0].args.p_election_id, key);
+  assertEquals(calls[2].args.p_election_id, key);
+  assertEquals(calls[2].args.p_election_type, null);
+});
+
+Deno.test("site=tw 明寫也行；site=jp 的 election_id 給數字被擋（日本站是字串），給字串的 tw 也被擋", async () => {
+  const { calls, d } = twJpDeps();
+  const ok = await handleConsoleAdmin(req({ site: "tw", action: "milestone_set", election_id: 2026, kind: "draw", on_date: "2026-10-20", status: "announced", reason: "x" }), d);
+  assertEquals(ok.status, 200);
+  const jpNum = await handleConsoleAdmin(req({ site: "jp", action: "milestone_set", election_id: 2026, kind: "draw", on_date: "2028-06-20", status: "announced", reason: "x" }), d);
+  assertEquals(jpNum.status, 400);
+  const twStr = await handleConsoleAdmin(req({ site: "tw", action: "milestone_set", election_id: "2026", kind: "draw", on_date: "2026-10-20", status: "announced", reason: "x" }), d);
+  assertEquals(twStr.status, 400);
+  assertEquals(calls.length, 1);
+});
+
+Deno.test("site 白名單：只收 tw／jp，其他（schema 名稱、大小寫變體、空字串、數字、物件）一律 400 且不呼叫任何 RPC", async () => {
+  const { calls, d } = twJpDeps();
+  for (const bad of ["policy_jp", "public", "JP", "Jp", "tw ", "", "ditrust", 1, true, {}, ["jp"]]) {
+    const res = await handleConsoleAdmin(req({ site: bad, action: "override_revoke", id: 1, reason: "x" }), d);
+    assertEquals(res.status, 400, `site=${JSON.stringify(bad)} 應該 400`);
+  }
+  assertEquals(calls.length, 0);
+});
+
+Deno.test("site 驗證不繞過身分驗證：沒帶 token 的 site=jp 請求先回 401；非擁有者先回 403", async () => {
+  const { calls, d } = twJpDeps();
+  const r1 = await handleConsoleAdmin(req({ site: "jp", action: "override_revoke", id: 1, reason: "x" }, { auth: null }), d);
+  assertEquals(r1.status, 401);
+  const r2 = await handleConsoleAdmin(req({ site: "jp", action: "override_revoke", id: 1, reason: "x" }), {
+    ...d, verifyToken: (async () => ({ ok: true, claims: { sub: "u", aud: "p", iss: "i", exp: 9e9, iat: 0, email: "x@example.com", email_verified: true } })) as any,
+  });
+  assertEquals(r2.status, 403);
+  assertEquals(calls.length, 0);
+});
+
+Deno.test("site=jp 但沒設日本站 RPC：回 500，不退回台灣站", async () => {
+  const calls: string[] = [];
+  const res = await handleConsoleAdmin(req({ site: "jp", action: "override_revoke", id: 1, reason: "x" }), {
+    rpc: async (fn) => { calls.push(fn); return { data: null, error: null }; },
+    projectId: "policy-tw", ownerEmail: OWNER, verifyToken: (async () => OK_VERIFY) as any,
+  });
+  assertEquals(res.status, 500);
+  assertEquals(calls.length, 0);
+});

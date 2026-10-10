@@ -359,11 +359,25 @@ export function articleBodyFromJsonLd(html: string): string {
   return out.join("\n");
 }
 
-/** 粗抽正文：JSON-LD 的 articleBody 優先，再接去標籤的頁面文字。不求完美，求可重現 */
+/**
+ * 把字串裡的 NUL（U+0000）拿掉，物件與陣列一路往下清。PostgreSQL 的 jsonb／text 不收 NUL：
+ * 2026-10-09 05:13 UTC 起某些網頁正文帶 NUL，jev_decisions 寫入一律失敗（unsupported Unicode escape sequence），
+ * 系統票停了半天以上（precheck 與 judge 都是）。寫進資料庫前一律過這一道。
+ */
+export function stripNulDeep<T>(value: T): T {
+  if (typeof value === "string") return value.replaceAll("\u0000", "") as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => stripNulDeep(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [stripNulDeep(k), stripNulDeep(v)])) as T;
+  }
+  return value;
+}
+
+/** 粗抽正文：JSON-LD 的 articleBody 優先，再接去標籤的頁面文字。不求完美，求可重現；NUL 字元拿掉（寫不進資料庫） */
 export function htmlToText(html: string): string {
   const body = articleBodyFromJsonLd(html);
   const stripped = stripHtml(html);
-  return body ? `${body}\n\n${stripped}` : stripped;
+  return stripNulDeep(body ? `${body}\n\n${stripped}` : stripped);
 }
 
 function stripHtml(html: string): string {
