@@ -21,7 +21,10 @@ BEGIN
   SELECT contribution_queue_at(c.contribution_type, c.task_id, c.created_at) < TIMESTAMPTZ '2000-01-01'
     INTO v_front
     FROM contributions c
-   WHERE c.id::TEXT = substr(NEW.task_id, 8) AND c.status = 'pending';
+   -- 走主鍵（驗證池也是這樣轉）；task_id 後段不是 uuid 的（不該有）就當不是這一類
+   WHERE c.id = CASE WHEN substr(NEW.task_id, 8) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                     THEN substr(NEW.task_id, 8)::uuid END
+     AND c.status = 'pending';
   IF COALESCE(v_front, false) THEN
     NEW.queue_at := COALESCE((SELECT max(d.queue_at) FROM task_dispatches d
                                WHERE d.task_id LIKE 'verify:%'

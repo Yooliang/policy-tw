@@ -109,3 +109,14 @@ Deno.test("判準只有一份：觸發器與拉回都用 contribution_queue_at�
   assert(!code.includes("question_answer"), "不另寫 question_answer");
   assertEquals(code.split("contribution_queue_at(").length - 1, 3, "觸發器、拉回、自我檢查三處都用它");
 });
+
+Deno.test("觸發器用主鍵找貢獻（不把 id 轉成文字比，否則每次派出全表掃描）；task_id 後段不是 uuid 也不出錯", async () => {
+  const fn = SQL.slice(SQL.indexOf("CREATE OR REPLACE FUNCTION verify_front_keep"), SQL.indexOf("COMMENT ON FUNCTION verify_front_keep"));
+  assert(!fn.includes("c.id::TEXT"), "不可以 c.id::TEXT = …");
+  assert(fn.includes("substr(NEW.task_id, 8)::uuid"));
+  const d = await db();
+  await d.exec(`INSERT INTO task_dispatches VALUES ('verify:not-a-uuid', NULL, '1970-01-01', 0)`);
+  await d.query(`SELECT task_dispatched('verify:not-a-uuid')`);
+  assert(new Date((await d.query<{ q: string }>(`SELECT queue_at AS q FROM task_dispatches WHERE task_id = 'verify:not-a-uuid'`)).rows[0].q).getTime() > Y2000);
+  await d.close();
+});
