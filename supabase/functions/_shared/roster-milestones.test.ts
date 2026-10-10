@@ -69,7 +69,9 @@ Deno.test("A1 前一版是對的：candidacy_list_published 緊接在這支之�
   const fn = await defining("CREATE OR REPLACE FUNCTION candidacy_list_published(");
   assertEquals(fn, ["20261006034500_candidacy_status.sql", MIG_NAME], "前一版變了或之後又有人改：要以最新那版為底重做機械式替換");
   const view = await defining("CREATE OR REPLACE VIEW activity_health AS");
-  assertEquals(view.slice(-3), [PREV_VIEW_MIG, MIG_NAME, "20261008165000_manual_tasks_as_arm.sql"], "activity_health 的前一版應該是補號次那版（#452）；有人在中間改了，要以那一版為底重做");
+  // 之後的版本（2026-10-10 起 20261010020000 加 system_vote_stalled）只要不插在中間就好：盯的是「這支的前一版是補號次那版」
+  const at = view.indexOf(PREV_VIEW_MIG);
+  assertEquals(view.slice(at, at + 3), [PREV_VIEW_MIG, MIG_NAME, "20261008165000_manual_tasks_as_arm.sql"], "activity_health 的前一版應該是補號次那版（#452）；有人在中間改了，要以那一版為底重做");
 });
 
 Deno.test("A2 candidacy_list_published 新定義＝前一版加一處機械式替換（第二個 EXISTS 換成讀里程碑視圖），其餘一字不差", () => {

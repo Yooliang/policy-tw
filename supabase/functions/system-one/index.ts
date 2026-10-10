@@ -4,6 +4,7 @@ import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
 import { aggregateFieldVerdicts, askJev, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
 import { selfCitationEvidenceVerdict } from "../_shared/self-hosts.ts";
+import { batchHttpStatus } from "../_shared/batch-status.ts";
 import { MAX_CHECKED_SOURCES, perSourceCount, perSourceQuestions, pickIndependentSources, systemVoteFromAnswers } from "../_shared/independent-sources.ts";
 
 /**
@@ -511,7 +512,7 @@ Deno.serve(async (req) => {
           if (failures.length >= 3) break;
         }
       }
-      return json({ success: true, asked, inserted, cost_usd: Number(cost.toFixed(6)), candidates: (cands ?? []).length, failures, min_probability: MIN_PROBABILITY });
+      return json({ success: true, asked, inserted, cost_usd: Number(cost.toFixed(6)), candidates: (cands ?? []).length, failures, min_probability: MIN_PROBABILITY }, batchHttpStatus(asked, failures));
     }
 
     // ---- precheck：系統來源票。排程叫這個。不帶金鑰，靠成本上限 ----
@@ -683,7 +684,8 @@ Deno.serve(async (req) => {
         // OpenRouter 掛了就整輪停，不要 200 筆各撞一次
         if (failures.length >= 5) break;
       }
-      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY });
+      // 這一輪有失敗而且一筆都沒寫成 → 500（2026-10-09 系統票無聲停擺 16 小時的教訓）
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY }, batchHttpStatus(asked, failures));
     }
 
     // ---- legacy：早期匯入、有來源、沒查核履歷的政見，系統先核（排程）----
@@ -736,7 +738,7 @@ Deno.serve(async (req) => {
         results.forEach((r, i) => { if (r.status === "rejected") failures.push({ policy_id: chunk[i].target.policy_id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) }); });
         if (failures.length >= 5) break;
       }
-      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, backlog: all.length - doneSet.size, remaining: list.length - cursor, tally, failures });
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, backlog: all.length - doneSet.size, remaining: list.length - cursor, tally, failures }, batchHttpStatus(asked, failures));
     }
 
     // ---- judge：代理的第二來源判定。公開，按來源 IP 配額 ----
@@ -1120,7 +1122,7 @@ Deno.serve(async (req) => {
         }
         if (failures.length >= 5) break;
       }
-      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures });
+      return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures }, batchHttpStatus(asked, failures));
     }
 
     if (action === "judge") {
