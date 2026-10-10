@@ -28,6 +28,8 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
   { type: "election", table: "elections", key: ["lg_code", "office", "election_reason", "term"], sites: ["jp"] },
   { type: "regional_stat", table: "regional_stats", key: ["lg_code", "stat_key", "year"], sites: ["jp"] },
   { type: "local_government", table: "local_governments", key: ["lg_code"], sites: ["jp"] },
+  // 選舉鏈第 3 步：人物は candidacy で作るので『この人』は必ず在庫にある。鍵は人物ではなく『これから足す事実』（生年・学歴・経歴の各項目）
+  { type: "politician", table: "politicians", key: ["politician_id", "fact"], sites: ["jp"] },
 ];
 
 /** 這一站要求 resolved_claim 的型別 */

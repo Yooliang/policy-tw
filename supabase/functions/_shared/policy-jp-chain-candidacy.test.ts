@@ -46,7 +46,8 @@ const submitCand = (db: Parameters<typeof submit>[0], o: Record<string, unknown>
 // a. 結構
 // =============================================================================================
 Deno.test("結構：步驟清單六步；臂名清單・總表・規則三處一起加；規則有 after_step 與後備里程碑；優先層規則；步驟順位", async () => {
-  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s,
+  // 後の migration（第 3、4 步）が末尾に步驟を足す：この步の六つが先頭にそのまま並んでいること
+  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s.slice(0, 6),
     ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy"]);
   assert((await one<{ a: string[] }>(shared, `SELECT policy_jp.activity_arm_names() AS a`)).a.includes("roster_check"), "臂名清單");
   const total = fnText(await readMig(MIG_FILE), TOTAL);
@@ -263,7 +264,7 @@ Deno.test("進度視圖：candidacy＝已上線の declared 以上の参選紀�
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
   await clock(db, "2027-03-20");
-  const steps = (await progress(db, E1)).map((p) => p.step);
+  const steps = (await progress(db, E1)).map((p) => p.step).filter((s) => ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy"].includes(s));
   assertEquals(steps, ["candidacy", "discovery", "local_government", "region", "regional_stats", "roster"]);
   assertEquals((await stepsDone(db, E1)).candidacy, false);
   const c1 = await submitCand(db, { candidacy_status: "withdrawn" , withdrawn_after_filing: false });

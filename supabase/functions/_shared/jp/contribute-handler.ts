@@ -159,6 +159,13 @@ function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b:
       return p.lg_code === q.lg_code;
     case "regional_stat":
       return p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year;
+    case "politician": {
+      // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
+      if (p.politician_id !== q.politician_id) return false;
+      if (p.birth_year !== undefined && q.birth_year !== undefined) return true;
+      const texts = (v: unknown) => (Array.isArray(v) ? v.map((s) => String(s).trim()) : []);
+      return ["education", "career"].some((k) => texts(p[k]).some((t) => texts(q[k]).includes(t)));
+    }
     case "election": {
       const office = (t: unknown) => (["governor", "mayor", "ward_mayor", "town_mayor"].includes(String(t)) ? "head" : ["pref_assembly", "muni_assembly"].includes(String(t)) ? "assembly" : String(t));
       if ((p.lg_code ?? null) !== (q.lg_code ?? null) || office(p.election_type) !== office(q.election_type)) return false;

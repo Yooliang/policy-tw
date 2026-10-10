@@ -30,14 +30,15 @@ function latestApplyTypes(files: string[]): string[] {
 }
 /** 最新一版 same_claim_matches 認得的型別（檔頭的 p_type NOT IN (…)） */
 function sqlSameClaimTypes(sql: string): string[] {
-  const body = /FUNCTION policy_jp\.same_claim_matches\([\s\S]*?\$\$([\s\S]*?)\$\$/.exec(sql);
+  // CREATE の定義だけを見る（選舉鏈の migration は ALTER ... RENAME で本体を same_claim_matches_base に改名し、同じ名前で分派器を作り直す）
+  const body = /CREATE (?:OR REPLACE )?FUNCTION policy_jp\.same_claim_matches\([\s\S]*?\$\$([\s\S]*?)\$\$/.exec(sql);
   if (!body) throw new Error("找不到 policy_jp.same_claim_matches");
   const m = /IF p_type NOT IN \(([^)]*)\) THEN/.exec(body[1]);
   if (!m) throw new Error("same_claim_matches 沒有型別清單");
   return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
 }
 /** 最新一支定義 same_claim_matches 的 migration */
-const SAME_CLAIM_MIG = migFiles.filter((f) => /FUNCTION policy_jp\.same_claim_matches\(/.test(readMig(f))).at(-1)!;
+const SAME_CLAIM_MIG = migFiles.filter((f) => /CREATE (?:OR REPLACE )?FUNCTION policy_jp\.same_claim_matches\(/.test(readMig(f))).at(-1)!;
 /** 最新一支定義上線後收編觸發器的 migration，與它的型別清單 */
 const SUPERSEDE_MIG = migFiles.filter((f) => /CREATE TRIGGER contributions_same_claim_supersede/.test(readMig(f))).at(-1)!;
 function triggerTypes(sql: string): string[] {
@@ -49,7 +50,8 @@ function triggerTypes(sql: string): string[] {
 Deno.test("守門：上線後收編的觸發器型別＝登記表（jp）", () => {
   const sql = readMig(SUPERSEDE_MIG);
   assertEquals(triggerTypes(sql).sort(), sameClaimTypes("jp").sort());
-  const broken = sql.replace("NEW.contribution_type IN ('election', 'regional_stat', 'local_government')", "NEW.contribution_type IN ('election')");
+  // 還原驗證：觸發器的型別清單少到只剩 election，就對不上登記表（清單寫法不寫死，選舉鏈每一步都會加型別）
+  const broken = sql.replace(/NEW\.contribution_type IN \([^)]*\)/, "NEW.contribution_type IN ('election')");
   assert(broken !== sql, "還原驗證的替換沒有命中");
   assert(triggerTypes(broken).length === 1);
 });
@@ -75,7 +77,7 @@ Deno.test("守門：SQL same_claim_matches 認得的型別＝登記表（jp）",
   const sql = readMig(SAME_CLAIM_MIG);
   assertEquals(sqlSameClaimTypes(sql).sort(), sameClaimTypes("jp").sort());
   // 還原驗證：SQL 少一種就對不上
-  const broken = sql.replace("IF p_type NOT IN ('election', 'regional_stat', 'local_government') THEN", "IF p_type NOT IN ('election', 'regional_stat') THEN");
+  const broken = sql.replace(/IF p_type NOT IN \([^)]*\) THEN/, "IF p_type NOT IN ('election', 'regional_stat') THEN");
   assert(broken !== sql, "還原驗證的替換沒有命中");
   assert(sqlSameClaimTypes(broken).sort().join() !== sameClaimTypes("jp").sort().join());
 });
@@ -86,6 +88,10 @@ Deno.test("守門：任務探查涵蓋每一種資料型任務，型別都在登
     ["auto:election_discovery:2027-04-30:131130:assembly", "election"],
     ["auto:local_government_missing:131130", "local_government"],
     ["auto:regional_stats_missing:131130", "regional_stat"],
+    // 選舉鏈第 3 步：建檔任務探查『這個人』的事實
+    ["auto:profile_gap:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
+    ["auto:profile_detail_gap:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
+    ["auto:profile_detail_gap:sources:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
   ];
   for (const [id, type] of cases) {
     const p = jpSameClaimProbe(id);

@@ -1,5 +1,5 @@
 /**
- * 日本站同儕驗證共識規則（no_change、task_suggestion、correction、election、local_government、regional_stat、candidacy 七種貢獻）。
+ * 日本站同儕驗證共識規則（no_change、task_suggestion、correction、election、local_government、regional_stat、candidacy、politician 八種貢獻）。
  *
  * 複製自 ../consensus.ts：AGREE_THRESHOLDS／riskLevel／requiredAgree／rejectFloor。
  * 保留的：系統票（Jev）調門檻——supported 門檻 −1（最少 1）、not_supported +1（effectiveRequiredAgree，同正見）。
@@ -34,7 +34,7 @@ export {
   weightReason,
 } from "../consensus.ts";
 
-export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy";
+export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy" | "politician";
 
 /** light＝不動正式資料（無異動、提議任務）；normal＝更正、選舉日程、地方公共団体、地域統計 */
 export type JpRiskLevel = "normal" | "light";

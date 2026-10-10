@@ -32,7 +32,7 @@ import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../sam
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -148,9 +148,12 @@ export const JP_TASK_ARMS = {
   regional_stats_missing: "regional_stat",
   // 選舉鏈第 2 步：名簿任務收 candidacy（完成的合図は no_change なので、no_change は型の比對に入らない）
   roster_check: "candidacy",
+  // 選舉鏈第 3 步：建檔任務收 politician（生年・学歴・経歴）
+  profile_gap: "politician",
+  profile_detail_gap: "politician",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap):(.+)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -168,6 +171,13 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   if (arm === "roster_check") {
     if (!JP_ELECTION_ID_RE.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:roster_check:<選舉 id>）"); return; }
     if (payload.election_id !== m[2]) push("payload.election_id", `payload.election_id（${String(payload.election_id ?? "未填")}）跟這個任務問的選舉（${m[2]}）不一致：一個任務只回報它問的那場選舉的立候補者`);
+    return;
+  }
+  // profile_gap／profile_detail_gap：task_id の末尾は人物 id（profile_detail_gap は sources:<人物 id> の形もある）。1 つの任務は 1 人だけ
+  if (arm === "profile_gap" || arm === "profile_detail_gap") {
+    const pid = arm === "profile_detail_gap" && m[2].startsWith("sources:") ? m[2].slice("sources:".length) : m[2];
+    if (!pid || /\s/.test(pid)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:<人物 id>）`); return; }
+    if (payload.politician_id !== pid) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${pid}）不一致：一個任務只回報它問的那一位`);
     return;
   }
   let taskLg: string;
@@ -316,6 +326,25 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       if (p.birth_year !== undefined && p.birth_year !== null && !(typeof p.birth_year === "number" && Number.isInteger(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
         push("payload.birth_year", "birth_year 要是西曆四位數整數（例：1975）；不知道就不要填");
       }
+      break;
+    }
+    case "politician": {
+      // 既存の人物に生年・学歴・経歴を足す（選舉鏈第 3 步）：人物は candidacy でだけ作る。name／kana は直さない（correction）。
+      // 学歴・経歴は一条一項の配列（日本站は politician_careers の一列一項目。kind=career が正見の experience）。落庫は SQL policy_jp.apply_politician（20261010050000）
+      for (const k of ["name", "kana"]) if (p[k] !== undefined) push(`payload.${k}`, "politician では名前・読みは直さない（改名・読みの訂正は correction）：この欄位を拿掉");
+      if (!isStr(p.politician_id, 1, 64)) push("payload.politician_id", "politician_id 必填（任務 target.politician_id の値）。新しい人は candidacy で作る");
+      const hasBirth = p.birth_year !== undefined && p.birth_year !== null;
+      if (hasBirth && !(typeof p.birth_year === "number" && Number.isInteger(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
+        push("payload.birth_year", "birth_year 要是西曆四位數整數（1900～今年，例：1975），不是和曆也不是文字");
+      }
+      let facts = hasBirth ? 1 : 0;
+      for (const k of ["education", "career"] as const) {
+        const v = p[k];
+        if (v === undefined) continue;
+        if (!(Array.isArray(v) && v.length >= 1 && v.length <= 30 && v.every((s) => isStr(s, 1, 200)))) push(`payload.${k}`, `${k} 要是 1～30 項的字串陣列，一項一個字串（每項 1～200 字；不要把多項寫成一段文章）`);
+        else facts++;
+      }
+      if (facts === 0) push("payload.birth_year", "birth_year・education・career 至少要有一個（這一筆要補什麼事實）");
       break;
     }
     case "regional_stat": {

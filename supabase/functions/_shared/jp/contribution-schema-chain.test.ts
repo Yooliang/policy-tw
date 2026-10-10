@@ -141,3 +141,50 @@ Deno.test("claimKey（重複提交＝同意票）：日本站の candidacy は c
   assertEquals(claimKey("candidacy", { politician_id: "abc", election_id: 2026, election_type: "縣市長", candidate_status: "registered", election_result: "elected" }),
     "candidacy|politician_id:abc|2026|縣市長|registered|elected");
 });
+
+// ---------------------------------------------------------------------------------------------
+// politician（選舉鏈第 3 步）
+// ---------------------------------------------------------------------------------------------
+const PID = "5f0c8d6e-1111-4222-8333-444444444444";
+const politician = (patch: Record<string, unknown> = {}, drop: string[] = [], top: Record<string, unknown> = {}) => {
+  const payload: Record<string, unknown> = { politician_id: PID, birth_year: 1970, education: ["○○大学法学部卒業"], career: ["○○市議会議員"], resolved_claim: "new", ...patch };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "politician", payload, source_urls: ["https://www.city.ichinomiya.aichi.jp/gikai/"], ...top });
+};
+
+Deno.test("politician：最小可過（事実が 1 つ＋politician_id＋resolved_claim）；3 つの事実を全部付けても過る", () => {
+  assert(politician({}, ["education", "career"]).ok);
+  assert(politician({}, ["birth_year", "career"]).ok);
+  assert(politician({}, ["birth_year", "education"]).ok);
+  assert(politician().ok);
+});
+
+Deno.test("politician：400 のケース（politician_id・事実なし・生年・配列の形・name／kana・resolved_claim）", () => {
+  assertEquals(paths(politician({}, ["politician_id"])), ["payload.politician_id"]);
+  assertEquals(paths(politician({}, ["birth_year", "education", "career"])), ["payload.birth_year"], "事実が 1 つもない");
+  assertEquals(paths(politician({ birth_year: 1899 })), ["payload.birth_year"]);
+  assertEquals(paths(politician({ birth_year: "1970" })), ["payload.birth_year"]);
+  assertEquals(paths(politician({ birth_year: 3000 })), ["payload.birth_year"]);
+  assertEquals(paths(politician({ education: [] })), ["payload.education"]);
+  assertEquals(paths(politician({ education: "○○大学" })), ["payload.education"]);
+  assertEquals(paths(politician({ career: [""] })), ["payload.career"]);
+  assertEquals(paths(politician({ career: ["x".repeat(201)] })), ["payload.career"]);
+  assertEquals(paths(politician({ career: Array.from({ length: 31 }, (_, i) => `経歴${i}`) })), ["payload.career"]);
+  assertEquals(paths(politician({ name: "別名" })), ["payload.name"]);
+  assertEquals(paths(politician({ kana: "べつ" })), ["payload.kana"]);
+  assertEquals(paths(politician({}, ["resolved_claim"])), ["payload.resolved_claim"]);
+  assertEquals(paths(politician({ resolved_claim: "differs:abc" })), ["note"], "differs は note 必須");
+  assert(politician({ resolved_claim: "differs:abc" }, [], { note: "出典の生年が違う（県のページは 1971 年）" }).ok);
+});
+
+Deno.test("politician：任務比對（profile_gap／profile_detail_gap／sources 版）の politician_id が違えば 400、型が違えば 400", () => {
+  for (const tid of [`auto:profile_gap:${PID}`, `auto:profile_detail_gap:${PID}`, `auto:profile_detail_gap:sources:${PID}`]) {
+    assertEquals(paths(politician({}, [], { task_id: tid })), [], tid);
+    assertEquals(paths(politician({ politician_id: "other" }, [], { task_id: tid })), ["payload.politician_id"], tid);
+  }
+  assertEquals(JP_TASK_ARMS.profile_gap, "politician");
+  assertEquals(JP_TASK_ARMS.profile_detail_gap, "politician");
+  const wrong = candidacy({}, [], { task_id: `auto:profile_gap:${PID}` });
+  assertEquals(paths(wrong), ["task_id"]);
+  assert(wrong.errors[0].message.includes("politician"));
+});
