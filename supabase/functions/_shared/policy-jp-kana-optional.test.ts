@@ -237,6 +237,34 @@ Deno.test("同一人：庫に読みがない人に読みつきの candidacy が�
   await db.close();
 });
 
+Deno.test("同一人：読みつき candidacy が衝突（状態の後戻り・選挙区違い）で差し戻されたら、庫の空の読みも埋めない（半端に書かない、#564 審查）。還原驗證：埋めるのを衝突チェックの前に戻すと読みが入ってしまう", async () => {
+  const scenario = async (db: Db) => {
+    await open(db);
+    const a = await addCand(db, noKana({ candidacy_status: "declared" }));
+    assertEquals(a.out.status, "applied", JSON.stringify(a.out));
+    // 後戻り（declared → considering）は conflict
+    const back = await addCand(db, candPayload({ candidacy_status: "considering" }));
+    // 選挙区違い（at_large → district）は別の参選列なので、同じ district_kind で選挙区名だけ変えた衝突は作れない。後戻りで見る
+    return { a, back };
+  };
+  const db = await freshDb();
+  const { a, back } = await scenario(db);
+  assertEquals(back.out.status, "rejected", JSON.stringify(back.out));
+  assertEquals((await politicians(db)).find((x) => x.id === a.pid)?.kana ?? null, null, "差し戻しなのに読みが書き込まれた");
+  assertEquals(await count(db, `SELECT 1 FROM policy_jp.edit_history WHERE table_name = 'politicians' AND field = 'kana'`), 0);
+  await db.close();
+  // 還原：挿入路の『空欄埋め』を v_peid の前（衝突チェックより前）へ移した版では、差し戻しでも読みが入る
+  const start = MIG_SQL.lastIndexOf("  -- 読みの空欄埋めは衝突チェックを通ってから");  // 3 か所目＝新しい参選を作る路
+  const block = MIG_SQL.slice(start, MIG_SQL.indexOf("  INSERT INTO policy_jp.politician_elections (id, politician_id", start));
+  assert(start > 0 && block.includes("UPDATE policy_jp.politicians SET kana = v_kana"), "戻す範囲が見つかる");
+  const PEID = "  v_peid := v_pid || ':' || v_eid || ':' || v_kind;\n";
+  const rv = await reverted([[block, ""], [PEID, block + PEID]]);
+  const r = await scenario(rv);
+  assertEquals(r.back.out.status, "rejected");
+  assertEquals((await politicians(rv)).find((x) => x.id === r.a.pid)?.kana, "やまだたろう", "還原版では差し戻しでも読みが入る（＝このテストが守っている）");
+  await rv.close();
+});
+
 // =============================================================================================
 // c. 読みがない人
 // =============================================================================================

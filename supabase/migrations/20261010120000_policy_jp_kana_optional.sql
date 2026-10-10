@@ -280,17 +280,6 @@ BEGIN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', 'source_urls に使える http(s) の URL がない');
   END IF;
 
-  -- 既にいる人で、庫に読みがなくて今回読みが付いた＝空欄を埋める（既にある読みは上書きしない）
-  IF NOT v_new_person AND v_kana <> '' THEN
-    UPDATE policy_jp.politicians SET kana = v_kana WHERE id = v_pid AND kana IS NULL;
-    GET DIAGNOSTICS v_n = ROW_COUNT;
-    IF v_n > 0 THEN
-      INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
-      VALUES ('politicians', v_pid, 'kana', NULL, to_jsonb(v_kana), c.id, 'auto-apply');
-      PERFORM policy_jp.source_write('politicians', v_pid, c.source_urls, 'candidacy');
-    END IF;
-  END IF;
-
   IF v_new_person THEN
     v_pid := gen_random_uuid()::TEXT;
     INSERT INTO policy_jp.politicians (id, name, kana, birth_year, review_status) VALUES (v_pid, v_name, NULLIF(v_kana, ''), v_birth, 'published');
@@ -307,6 +296,17 @@ BEGIN
         'message', format('庫裡的 %s は選挙区が「%s」で、提出の「%s」と違う。選挙区は上書きしない', pe.id, COALESCE(pe.district_name, '（なし）'), COALESCE(v_dname, '（なし）')));
     END IF;
     IF pe.candidacy_status = v_status THEN
+      -- 読みの空欄埋めは衝突チェックを通ってから（conflict で差し戻すときに読みだけ書き込まれる半端を防ぐ。#564 審查）
+      IF NOT v_new_person AND v_kana <> '' THEN
+        UPDATE policy_jp.politicians SET kana = v_kana WHERE id = v_pid AND kana IS NULL;
+        GET DIAGNOSTICS v_n = ROW_COUNT;
+        IF v_n > 0 THEN
+          INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+          VALUES ('politicians', v_pid, 'kana', NULL, to_jsonb(v_kana), c.id, 'auto-apply');
+          PERFORM policy_jp.source_write('politicians', v_pid, c.source_urls, 'candidacy');
+        END IF;
+      END IF;
+
       PERFORM policy_jp.source_write('politician_elections', pe.id, c.source_urls, 'candidacy');
       RETURN jsonb_build_object('outcome', 'unchanged', 'table_name', 'politician_elections', 'record_id', pe.id, 'message', format('%s は庫に同じ状態（%s）で既にある', pe.id, v_status));
     END IF;
@@ -316,6 +316,17 @@ BEGIN
       RETURN jsonb_build_object('outcome', 'conflict', 'table_name', 'politician_elections', 'record_id', pe.id,
         'message', format('庫の %s は %s（%s）。提出の %s（%s）は後戻り・終点の付け替え・日付の巻き戻しで、上書きしない', pe.id, pe.candidacy_status, pe.status_date, v_status, v_date));
     END IF;
+    -- 読みの空欄埋めは衝突チェックを通ってから（conflict で差し戻すときに読みだけ書き込まれる半端を防ぐ。#564 審查）
+    IF NOT v_new_person AND v_kana <> '' THEN
+      UPDATE policy_jp.politicians SET kana = v_kana WHERE id = v_pid AND kana IS NULL;
+      GET DIAGNOSTICS v_n = ROW_COUNT;
+      IF v_n > 0 THEN
+        INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+        VALUES ('politicians', v_pid, 'kana', NULL, to_jsonb(v_kana), c.id, 'auto-apply');
+        PERFORM policy_jp.source_write('politicians', v_pid, c.source_urls, 'candidacy');
+      END IF;
+    END IF;
+
     UPDATE policy_jp.politician_elections
        SET candidacy_status = v_status, status_date = v_date,
            withdrawn_after_filing = CASE WHEN v_status = 'withdrawn' THEN v_wd ELSE NULL END,
@@ -335,6 +346,17 @@ BEGIN
     UPDATE policy_jp.contributions SET applied_politician_id = v_pid WHERE id = c.id;
     RETURN jsonb_build_object('outcome', 'applied', 'table_name', 'politician_elections', 'record_id', pe.id,
       'message', format('%s の状態を %s → %s に更新', pe.id, pe.candidacy_status, v_status));
+  END IF;
+
+  -- 読みの空欄埋めは衝突チェックを通ってから（conflict で差し戻すときに読みだけ書き込まれる半端を防ぐ。#564 審查）
+  IF NOT v_new_person AND v_kana <> '' THEN
+    UPDATE policy_jp.politicians SET kana = v_kana WHERE id = v_pid AND kana IS NULL;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    IF v_n > 0 THEN
+      INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, contribution_id, agent_name)
+      VALUES ('politicians', v_pid, 'kana', NULL, to_jsonb(v_kana), c.id, 'auto-apply');
+      PERFORM policy_jp.source_write('politicians', v_pid, c.source_urls, 'candidacy');
+    END IF;
   END IF;
 
   INSERT INTO policy_jp.politician_elections (id, politician_id, election_id, candidacy_status, withdrawn_after_filing, status_date, district_kind,
