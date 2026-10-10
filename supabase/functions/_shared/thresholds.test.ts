@@ -75,8 +75,10 @@ Deno.test("question_answer 走一般資料門檻（沒有特例）：官方 2／
 
 Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority.ts 與 AGREE_THRESHOLDS；計票依來源 IP 去重", async () => {
   const sql = await Deno.readTextFile(new URL("../../migrations/20260912000009_zero_manual_points.sql", import.meta.url));
-  const fn = sql.slice(sql.indexOf("FUNCTION contribution_source_kind"), sql.indexOf("FUNCTION contribution_required_agree"));
-  const arrays = [...fn.matchAll(/ARRAY\[([^\]]+)\]/g)].map((m) => m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, "")));
+  // 網域清單：最後一支重新定義 contribution_source_kind 的 migration（2026-10-10 起是 20261010080000，OPS #59 擴媒體清單）
+  const kindSql = await latestMigrationDefining("FUNCTION contribution_source_kind");
+  const fn = kindSql.slice(0, kindSql.indexOf("$$;", kindSql.indexOf("$$") + 2));
+  const arrays = [...fn.matchAll(/ARRAY\[('[^\]]+)\]/g)].map((m) => m[1].split(",").map((s) => s.trim().replace(/^'|'$/g, "")));
   assertEquals(arrays.length, 3, "official／media／social 三組清單");
   const byKind = (kind: string) => SOURCE_PRIORITY.filter((s) => s.kind === kind).map((s) => s.host);
   assertEquals(arrays[0], byKind("official"));
