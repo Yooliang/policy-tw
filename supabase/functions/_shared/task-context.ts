@@ -380,6 +380,11 @@ export function shapeTaskCurrent(
     : ballot ? { items_count: target!.items_count ?? (Array.isArray(target!.items) ? (target!.items as unknown[]).length : null), note: "名單在 target.items；系統不核號次來源，每一筆都要有人在公告上親眼看到（只比對同一個號次單位有沒有同號）" }
     : recheck ? { units_count: target!.units_count ?? (Array.isArray(target!.units) ? (target!.units as unknown[]).length : null), note: "每個號次單位的異常在 target.units；要對公告重查，只交跟公告不同的" }
     : shapeTaskCurrentInner(taskType, data);
+  // 三要素派哪幾個要素由規則參數決定（OPS #61）：任務的 target.missing 只列有派的，現況跟著它，沒派的要素不要叫代理查
+  if (taskType === "policy_elements_missing" && Array.isArray(target?.missing) && Array.isArray(inner.missing_elements)) {
+    const assigned = new Set((target!.missing as unknown[]).map(String));
+    inner.missing_elements = (inner.missing_elements as string[]).filter((k) => assigned.has(k));
+  }
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
