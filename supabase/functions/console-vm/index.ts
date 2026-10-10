@@ -12,7 +12,8 @@ import { accessToken, parseServiceAccountKey, type ServiceAccountKey } from "../
  * 驗證同 console-admin（Firebase ID Token＋擁有者信箱），業務邏輯在 _shared/console-vm-handler.ts。
  *
  * GCP：Supabase secret CONSOLE_VM_SA_KEY＝服務帳號 console-vm@greenshepherdcomtw 的 JSON 金鑰。
- *   它只有自訂角色 consoleVmOperator（綁在三台 instance 上）：instances.get／start／stop／setMetadata／getSerialPortOutput＋zoneOperations.get。
+ *   它只有自訂角色 consoleVmOperator（綁在三台 instance 上）：instances.get／start／stop／setMetadata／setScheduling／getSerialPortOutput，
+ *   另一個 consoleVmOpsRead（專案層，只有 zoneOperations.get，用來等 operation 跑完）。
  *   不能建立、刪除 VM，也碰不到 Secret Manager 裡代理用的金鑰。
  * ⚠️ config.toml 要有 [functions.console-vm] verify_jwt = false（理由同 console-admin：帶的是 Firebase token，不是 Supabase JWT）。
  */
@@ -48,8 +49,14 @@ function restGce(key: ServiceAccountKey): Gce {
     setMetadata: async (name, zone, fingerprint, items) => {
       await wait(zone, await call("POST", `${BASE}/${zone}/instances/${name}/setMetadata`, { fingerprint, items }));
     },
+    // maxRunDuration：開機後滿這麼多秒 GCP 自己 STOP（不是刪除）；VM 要在關機狀態才能改
+    setMaxRun: async (name, zone, seconds) => {
+      const inst = await call("GET", `${BASE}/${zone}/instances/${name}`);
+      const scheduling = { ...(inst.scheduling ?? {}), maxRunDuration: { seconds: String(seconds) }, instanceTerminationAction: "STOP" };
+      await wait(zone, await call("POST", `${BASE}/${zone}/instances/${name}/setScheduling`, scheduling));
+    },
     start: async (name, zone) => {
-      await call("POST", `${BASE}/${zone}/instances/${name}/start`);
+      await wait(zone, await call("POST", `${BASE}/${zone}/instances/${name}/start`));
     },
     stop: async (name, zone) => {
       await call("POST", `${BASE}/${zone}/instances/${name}/stop`);

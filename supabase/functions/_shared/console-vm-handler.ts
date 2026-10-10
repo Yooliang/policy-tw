@@ -13,6 +13,9 @@ import { corsPreflight, errorMessage, json } from "./console-admin-handler.ts";
  *   - 沒指定機器就從關著的三台隨機挑一台
  * 驗證同 console-admin：Firebase ID Token＋主控台擁有者信箱。GCP 那邊用專用服務帳號 console-vm，只對三台有 get/start/stop/setMetadata/讀序列埠。
  * 序列埠只抽 `=== AGENT-START … ===` 標記行數，不回傳原文（原文會有代理的輸出）。
+ *
+ * 伺服器端硬上限（2026-10-10 正見主線安全審查第 1 點）：關機原本只靠 VM 內 startup-script 讀 run-hours，腳本掛了 VM 就一直開。
+ * 開機前一併設 scheduling.maxRunDuration＝hours＋寬限、到時 STOP，讓 GCP 自己關；設定失敗就不開機。
  */
 
 export const VMS = {
@@ -28,6 +31,8 @@ const PROVIDER_ACCOUNT: Record<string, string> = { claude: "gsit", claude2: "yoo
 const MODEL = "claude-sonnet-5";
 const MAX_AGENTS = 8;
 const MAX_HOURS = 6;
+/** maxRunDuration 的寬限：開機、裝 claude、最後一筆收尾都在 run-hours 之外 */
+export const GRACE_SECONDS = 30 * 60;
 
 export interface MetadataItem { key: string; value: string }
 export interface Instance {
@@ -38,7 +43,10 @@ export interface Instance {
 /** Compute Engine 的最小介面（index.ts 實作成真的 REST 呼叫；測試注入假的） */
 export interface Gce {
   get(name: string, zone: string): Promise<Instance>;
+  /** 都要等 operation 跑完才回（審查第 2 點：容量／配額不足是非同步失敗） */
   setMetadata(name: string, zone: string, fingerprint: string | undefined, items: MetadataItem[]): Promise<void>;
+  /** 伺服器端硬上限：maxRunDuration 秒後 GCP 自己 STOP */
+  setMaxRun(name: string, zone: string, seconds: number): Promise<void>;
   start(name: string, zone: string): Promise<void>;
   stop(name: string, zone: string): Promise<void>;
   serial(name: string, zone: string): Promise<string>;
@@ -131,6 +139,8 @@ export async function handleConsoleVm(req: Request, deps: ConsoleVmDeps): Promis
   } catch {
     return json({ success: false, error: "body 不是合法的 JSON" }, 400);
   }
+  // 審查第 3 點：null／陣列／數字這種合法 JSON 但不是物件，原本會在 body.action 丟 TypeError 變 502
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return json({ success: false, error: "body 要是 JSON 物件" }, 400);
   const gce = deps.gce;
   if (!gce) return json({ success: false, error: "VM 金鑰尚未設定（CONSOLE_VM_SA_KEY）" }, 500);
   const rnd = deps.random ?? Math.random;
@@ -193,6 +203,7 @@ export async function handleConsoleVm(req: Request, deps: ConsoleVmDeps): Promis
       const set: Record<string, string> = { "run-hours": String(hours), "verify-only": "0", site, agents };
       const items = (inst.metadata?.items ?? []).filter((i) => !(i.key in set)).concat(Object.entries(set).map(([key, value]) => ({ key, value })));
       await gce.setMetadata(VMS[k].name, VMS[k].zone, inst.metadata?.fingerprint, items);
+      await gce.setMaxRun(VMS[k].name, VMS[k].zone, (hours as number) * 3600 + GRACE_SECONDS);
       await gce.start(VMS[k].name, VMS[k].zone);
       return json({ success: true, vm: { key: k, name: VMS[k].name }, agents: parseAgents(agents) });
     }
