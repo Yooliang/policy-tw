@@ -30,6 +30,8 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
   { type: "local_government", table: "local_governments", key: ["lg_code"], sites: ["jp"] },
   // 選舉鏈第 3 步：人物は candidacy で作るので『この人』は必ず在庫にある。鍵は人物ではなく『これから足す事実』（生年・学歴・経歴の各項目）
   { type: "politician", table: "politicians", key: ["politician_id", "fact"], sites: ["jp"] },
+  // 選舉鏈第 4 步：公約は参選に掛かる。鍵は参選紀錄 id ＋ 題名（NFKC・小文字・空白除去）
+  { type: "policy", table: "policies", key: ["politician_election_id", "title"], sites: ["jp"] },
 ];
 
 /** 這一站要求 resolved_claim 的型別 */

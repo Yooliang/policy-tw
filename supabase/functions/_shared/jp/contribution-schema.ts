@@ -32,7 +32,7 @@ import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../sam
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -79,7 +79,10 @@ export const JP_TASK_TYPE_RE = /^[a-z][a-z0-9_]{0,59}$/;
 export const isTaskIdShape = (v: unknown): boolean =>
   typeof v === "string" && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) || /^auto:[a-z0-9_]+:\S+$/.test(v));
 
-export const NO_CHANGE_OUTCOMES = ["confirmed", "unreachable", "not_found"] as const;
+/** 政見の題名の正規化（同一件事の鍵）：NFKC・小文字・空白（全角も）を全部除く。SQL policy_jp.policy_title_key と同じ（對齊テスト） */
+export const policyTitleKey = (v: unknown): string => String(v ?? "").normalize("NFKC").toLowerCase().replace(/[\s　]+/g, "");
+
+export const NO_CHANGE_OUTCOMES =["confirmed", "unreachable", "not_found"] as const;
 export const MAX_BATCH = 20;
 export const MAX_SOURCE_URLS = 10;
 
@@ -151,9 +154,11 @@ export const JP_TASK_ARMS = {
   // 選舉鏈第 3 步：建檔任務收 politician（生年・学歴・経歴）
   profile_gap: "politician",
   profile_detail_gap: "politician",
+  // 選舉鏈第 4 步：政見任務收 policy（公約）
+  policy_missing: "policy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing):(.+)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -178,6 +183,11 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     const pid = arm === "profile_detail_gap" && m[2].startsWith("sources:") ? m[2].slice("sources:".length) : m[2];
     if (!pid || /\s/.test(pid)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:<人物 id>）`); return; }
     if (payload.politician_id !== pid) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${pid}）不一致：一個任務只回報它問的那一位`);
+    return;
+  }
+  // policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ
+  if (arm === "policy_missing") {
+    if (payload.politician_election_id !== m[2]) push("payload.politician_election_id", `payload.politician_election_id（${String(payload.politician_election_id ?? "未填")}）跟這個任務問的參選（${m[2]}）不一致：一個任務只回報它問的那一位的公約`);
     return;
   }
   let taskLg: string;
@@ -345,6 +355,21 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         else facts++;
       }
       if (facts === 0) push("payload.birth_year", "birth_year・education・career 至少要有一個（這一筆要補什麼事實）");
+      break;
+    }
+    case "policy": {
+      // 公約（選舉鏈第 4 步）：origin は常に pledge、status は not_started（サーバーが入れる）。欄位照 policy_jp.policies の CHECK。落庫は SQL policy_jp.apply_policy（20261010060000）
+      if (!isStr(p.politician_election_id, 1, 200)) push("payload.politician_election_id", "politician_election_id 必填（任務 target.politician_election_id 的值）");
+      if (!isStr(p.title, 4, 100)) push("payload.title", "title 必填（4～100 字：公約的題名）");
+      const desc = typeof p.description === "string" ? p.description.trim() : "";
+      if (typeof p.description !== "string" || Array.from(desc).length < 10 || Array.from(desc).length > 120) push("payload.description", "description 必填（10～120 字的要約：只寫事實，不抄原文的修辭）");
+      if (!isStr(p.category, 1, 30)) push("payload.category", "category 必填（1～30 字，分野，例：子育て）");
+      if (!isStr(p.source_locator, 1, 200)) push("payload.source_locator", "source_locator 必填（1～200 字：原文的哪裡，例：選挙公報 2 頁「子育て」）");
+      if (p.proposed_date !== undefined && p.proposed_date !== null) {
+        if (!isJpDate(p.proposed_date)) push("payload.proposed_date", "proposed_date 要是 YYYY-MM-DD（年份 1947～2100）；不知道就不要填");
+        else if (p.proposed_date > new Date().toISOString().slice(0, 10)) push("payload.proposed_date", "proposed_date 不能是未來的日期（也不能晚於投票日）");
+      }
+      for (const k of ["origin", "status"]) if (p[k] !== undefined) push(`payload.${k}`, "這一步只收公約（origin=pledge、status=not_started 由伺服器填）：把這個欄位拿掉");
       break;
     }
     case "regional_stat": {

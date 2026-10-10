@@ -22,7 +22,7 @@
  * 時區：正見這支只有登記截止日用 +8（已拿掉）；額度重置本來就是 UTC，日本站照舊，沒有要改的時區。
  */
 
-import { canonicalPayload, ENCODING_INVALID_MESSAGE, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { canonicalPayload, ENCODING_INVALID_MESSAGE, policyTitleKey, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { selfCitationProblems } from "../self-hosts.ts";
 import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { networkOf } from "../ip-network.ts";
@@ -159,6 +159,9 @@ function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b:
       return p.lg_code === q.lg_code;
     case "regional_stat":
       return p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year;
+    case "policy":
+      // 同じ参選・同じ題名（NFKC・小文字・空白除去）
+      return p.politician_election_id === q.politician_election_id && policyTitleKey(p.title) === policyTitleKey(q.title);
     case "politician": {
       // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
       if (p.politician_id !== q.politician_id) return false;

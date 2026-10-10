@@ -92,6 +92,8 @@ Deno.test("守門：任務探查涵蓋每一種資料型任務，型別都在登
     ["auto:profile_gap:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
     ["auto:profile_detail_gap:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
     ["auto:profile_detail_gap:sources:5f0c8d6e-1111-4222-8333-444444444444", "politician"],
+    // 選舉鏈第 4 步：政見任務探查『この参選』の公約
+    ["auto:policy_missing:5f0c8d6e-1111-4222-8333-444444444444:2027-04-25_mayor_232033:at_large", "policy"],
   ];
   for (const [id, type] of cases) {
     const p = jpSameClaimProbe(id);

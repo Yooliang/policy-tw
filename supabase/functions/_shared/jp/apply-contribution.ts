@@ -11,7 +11,7 @@
 import type { JpApplyFn } from "./verify-handler.ts";
 
 /** 會落庫的型別（SQL policy_jp.apply_types() 的鏡像，policy-jp-apply.test.ts 對齊）；task_suggestion、correction 這輪維持 verified */
-export const JP_APPLY_TYPES = ["local_government", "regional_stat", "election", "candidacy", "politician", "no_change"] as const;
+export const JP_APPLY_TYPES = ["local_government", "regional_stat", "election", "candidacy", "politician", "policy", "no_change"] as const;
 
 /** SQL 回傳的 status：applied／rejected／apply_failed 是貢獻的新狀態；waiting 是在等團體進來（狀態不變）；其餘不用理 */
 const FINAL = new Set(["applied", "rejected", "apply_failed"]);

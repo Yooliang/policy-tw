@@ -146,3 +146,72 @@ Deno.test("politician：resolved_claim がない・事実なし・別の人の t
     assertEquals(db.contributions.length, 0, "409 は何も書かない");
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// policy（選舉鏈第 4 步）
+// ---------------------------------------------------------------------------------------------
+const PEID = `${PID}:${E1}:at_large`;
+const POLICY_TASK = `auto:policy_missing:${PEID}`;
+const policyRow = {
+  task_id: POLICY_TASK, task_type: "policy_missing",
+  target: { politician_election_id: PEID, politician_id: PID, name: "山田太郎", election_id: E1, lg_code: "232033", queued_policies: [], chain_lg_code: "232033", chain_step: "policy" },
+  what_we_need: "公約がまだ 1 件も登録されていません。", hint_sources: ["選挙公報"], reward: 2, queue_at: "2026-10-01T00:00:00Z",
+};
+const POLICY = {
+  kind: "contribute", contribution_type: "policy", task_id: POLICY_TASK, ...AGENT,
+  payload: {
+    politician_election_id: PEID, title: "保育所の待機児童をなくす", description: "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。",
+    category: "子育て", source_locator: "選挙公報 2 頁", resolved_claim: "new",
+  },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
+};
+
+Deno.test("policy 一整圈：領 policy_missing 任務（同一件事の探査が政見の鍵で呼ばれる）→ 帶憑證交 policy 201（目標 3 票）；全程 policy_jp", async () => {
+  const db = makeDb({ queue: [policyRow], sameClaims: { policy: { existing: [], pending: [] } } });
+  await withEntries(db, env(), async ({ next, report }) => {
+    const got = await getNext(next, N1);
+    assertEquals((got.json.item as Row).task_type, "policy_missing");
+    const probe = callsTo(report.calls, "rpc/same_claim_matches")[0];
+    assertEquals([(probe.body as Row).p_type, (probe.body as Row).p_payload], ["policy", { politician_election_id: PEID }]);
+    const res = await post(report, R, { ...POLICY, dispatch_token: got.json.dispatch_token });
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals([res.json.contribution_type, res.json.status, res.json.required_agree], ["policy", "pending", 3]);
+    assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
+    for (const c of report.calls) {
+      const ro = c.method === "GET" || c.method === "HEAD";
+      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+    }
+  });
+});
+
+Deno.test("policy：400（resolved_claim なし・要約が長すぎる・別の参選の task・origin 指定）、審議中の同じ題名を new で出すと 409 duplicate_claim、指す id が違うと 409 claim_mismatch；何も書かない", async () => {
+  const pending = { contribution_id: "00000000-0000-4000-8000-0000000000aa", status: "pending", title: "保育所の待機児童をなくす" };
+  const db = makeDb({ queue: [policyRow], sameClaims: { policy: { existing: [], pending: [pending] } } });
+  await withEntries(db, env(), async ({ report }) => {
+    const noClaim = await post(report, N1, { ...POLICY, payload: { ...POLICY.payload, resolved_claim: undefined } });
+    assertEquals([noClaim.status, errorPaths(noClaim.json)], [400, ["payload.resolved_claim"]]);
+    const long = await post(report, N1, { ...POLICY, payload: { ...POLICY.payload, description: "あ".repeat(121) } });
+    assertEquals(errorPaths(long.json), ["payload.description"]);
+    const other = await post(report, N1, { ...POLICY, payload: { ...POLICY.payload, politician_election_id: "x:y:at_large" } });
+    assertEquals(errorPaths(other.json), ["payload.politician_election_id"]);
+    const origin = await post(report, N1, { ...POLICY, payload: { ...POLICY.payload, origin: "budget" } });
+    assertEquals(errorPaths(origin.json), ["payload.origin"]);
+    assertEquals(db.contributions.length, 0);
+    const dup = await post(report, N1, POLICY);
+    assertEquals([dup.status, dup.json.error], [409, "duplicate_claim"]);
+    const mismatch = await post(report, N1, { ...POLICY, payload: { ...POLICY.payload, resolved_claim: "00000000-0000-4000-8000-0000000000bb" } });
+    assertEquals([mismatch.status, mismatch.json.error], [409, "claim_mismatch"]);
+    assertEquals(db.contributions.length, 0, "409 は何も書かない");
+  });
+});
+
+Deno.test("協議版號：エンドポイントが返す版は 0.10.0 以上（第 4 步の政見まで受け付けた版）", async () => {
+  const { JP_PROTOCOL_VERSION } = await import("./jp/protocol.ts");
+  const [maj, min] = JP_PROTOCOL_VERSION.split(".").map(Number);
+  assert(maj > 0 || min >= 10, JP_PROTOCOL_VERSION);
+  const db = makeDb({ queue: [policyRow] });
+  await withEntries(db, env(), async ({ next }) => {
+    const got = await getNext(next, N1);
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+  });
+});

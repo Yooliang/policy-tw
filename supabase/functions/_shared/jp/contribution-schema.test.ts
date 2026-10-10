@@ -52,9 +52,15 @@ const politician = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/gikai/"],
 };
 
-Deno.test("八種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician]) {
+const policy = {
+  contribution_type: "policy",
+  payload: { politician_election_id: "pe-1", title: "保育所の待機児童をなくす", description: "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。", category: "子育て", source_locator: "選挙公報 2 頁", resolved_claim: "new" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
+};
+
+Deno.test("九種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
