@@ -156,6 +156,15 @@ ALTER TABLE policy_jp.contributions DROP CONSTRAINT IF EXISTS policy_jp_contribu
 ALTER TABLE policy_jp.contributions ADD CONSTRAINT policy_jp_contributions_type_check
   CHECK (contribution_type IN ('no_change', 'task_suggestion', 'correction', 'election', 'local_government', 'regional_stat', 'candidacy'));
 
+-- 名簿確認の任務（auto:roster_check:…）は一人ずつ candidacy で出す一題多份：最初の 1 筆が落庫しても任務は收回しない（完成の合図は no_change）。
+-- 正見は手動任務の roster_check を『一題多份は收回しない』（manual_task_closes_on_applied）にしている。日本站の roster_check は自動任務なので、
+-- 複本の task_dispatches_drop_applied には触れず、觸發器の WHEN で candidacy×auto:roster_check を除く（收回は no_change の落庫か seed の缺口判斷）
+DROP TRIGGER IF EXISTS contributions_drop_dispatch ON policy_jp.contributions;
+CREATE TRIGGER contributions_drop_dispatch AFTER UPDATE OF status ON policy_jp.contributions
+  FOR EACH ROW WHEN (NEW.status = 'applied' AND OLD.status IS DISTINCT FROM 'applied'
+                     AND NOT (NEW.contribution_type = 'candidacy' AND NEW.task_id LIKE 'auto:roster_check:%'))
+  EXECUTE FUNCTION policy_jp.task_dispatches_drop_applied();
+
 CREATE OR REPLACE FUNCTION policy_jp.apply_types() RETURNS TEXT[] LANGUAGE sql IMMUTABLE AS $$
   SELECT ARRAY['local_government', 'regional_stat', 'election', 'candidacy', 'no_change']::TEXT[]
 $$;
@@ -195,6 +204,8 @@ DECLARE
   v_name TEXT := btrim(COALESCE(p->>'name', ''));
   v_kana TEXT := btrim(COALESCE(p->>'kana', ''));
   v_birth INTEGER;
+  v_notice DATE;
+  v_prim BIGINT;
   v_ids TEXT[];
   v_new_person BOOLEAN := false;
   v_peid TEXT;
@@ -232,8 +243,11 @@ BEGIN
   IF v_status IN ('elected', 'not_elected') AND v_date < e.election_date THEN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', format('%s の status_date（%s）が投票日（%s）より前', v_status, v_date, e.election_date));
   END IF;
-  IF v_status = 'filed' AND (v_date > e.election_date OR (e.notice_date IS NOT NULL AND v_date < e.notice_date)) THEN
-    RETURN jsonb_build_object('outcome', 'invalid', 'message', format('filed（届出）の status_date（%s）は告示日（%s）以降・投票日（%s）以前', v_date, COALESCE(e.notice_date::TEXT, '未記'), e.election_date));
+  -- 告示日は里程碑の announced を読む（elections.notice_date は視圖が併進し、里程碑表に整場の announced 列があればそちらが勝つ＝維持者の上書きが効く）
+  SELECT m.on_date INTO v_notice FROM policy_jp.election_milestones_all m
+   WHERE m.election_id = e.id AND m.kind = 'announced' AND m.election_type IS NULL ORDER BY (m.origin = 'table') DESC, m.on_date LIMIT 1;
+  IF v_status = 'filed' AND (v_date > e.election_date OR (v_notice IS NOT NULL AND v_date < v_notice)) THEN
+    RETURN jsonb_build_object('outcome', 'invalid', 'message', format('filed（届出）の status_date（%s）は告示日（%s）以降・投票日（%s）以前', v_date, COALESCE(v_notice::TEXT, '未記'), e.election_date));
   END IF;
   IF v_status IN ('considering', 'declared') AND v_date > e.election_date THEN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', format('%s の status_date（%s）が投票日（%s）より後', v_status, v_date, e.election_date));
@@ -263,7 +277,12 @@ BEGIN
     END IF;
     v_wd := (p->>'withdrawn_after_filing')::BOOLEAN;
   END IF;
-  IF jsonb_typeof(p->'birth_year') = 'number' THEN v_birth := (p->>'birth_year')::NUMERIC::INTEGER; END IF;
+  IF p ? 'birth_year' AND jsonb_typeof(p->'birth_year') <> 'null' THEN
+    IF jsonb_typeof(p->'birth_year') <> 'number' OR (p->>'birth_year')::NUMERIC <> trunc((p->>'birth_year')::NUMERIC) OR (p->>'birth_year')::NUMERIC NOT BETWEEN 1900 AND 2100 THEN
+      RETURN jsonb_build_object('outcome', 'invalid', 'message', 'birth_year は 1900～2100 の整数（西暦）');
+    END IF;
+    v_birth := (p->>'birth_year')::INTEGER;
+  END IF;
 
   -- 人物：politician_id が最優先、なければ name＋kana で同一人を探す
   IF v_pid IS NOT NULL THEN
@@ -321,7 +340,12 @@ BEGIN
     VALUES ('politician_elections', pe.id, 'candidacy_status', to_jsonb(pe.candidacy_status), to_jsonb(pe_new.candidacy_status), c.id, 'auto-apply'),
            ('politician_elections', pe.id, 'status_date', to_jsonb(pe.status_date), to_jsonb(pe_new.status_date), c.id, 'auto-apply');
     PERFORM policy_jp.source_write('politician_elections', pe.id, c.source_urls, 'candidacy');
-    PERFORM policy_jp.source_write('politician_election_status', pe.id, c.source_urls, 'candidacy');
+    -- 状態が変わったので『目前狀態の出處』は新しい出處が主要になる（古い主要は佐證に降ろす。正見 source_set_primary の考え方）
+    v_prim := policy_jp.source_write('politician_election_status', pe.id, c.source_urls, 'candidacy');
+    IF v_prim IS NOT NULL THEN
+      UPDATE policy_jp.source_refs SET role = 'supporting' WHERE target_table = 'politician_election_status' AND target_id = pe.id AND role = 'primary' AND source_id <> v_prim;
+      UPDATE policy_jp.source_refs SET role = 'primary' WHERE target_table = 'politician_election_status' AND target_id = pe.id AND source_id = v_prim;
+    END IF;
     UPDATE policy_jp.contributions SET applied_politician_id = v_pid WHERE id = c.id;
     RETURN jsonb_build_object('outcome', 'applied', 'table_name', 'politician_elections', 'record_id', pe.id,
       'message', format('%s の状態を %s → %s に更新', pe.id, pe.candidacy_status, v_status));

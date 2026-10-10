@@ -312,7 +312,7 @@ async function ready() {
   return db;
 }
 
-Deno.test("落庫：新しい人は politicians＋politician_elections を作り、出処（参選・目前狀態・人物）と履歴を残し、applied_politician_id を付ける。task_id の派工列は收回", async () => {
+Deno.test("落庫：新しい人は politicians＋politician_elections を作り、出処（参選・目前狀態・人物）と履歴を残し、applied_politician_id を付ける。task_id の派工列は收回しない（一題多份）", async () => {
   const db = await ready();
   await seed(db);
   assertEquals(await dispatchIds(db, ROSTER), [TASK]);
@@ -331,10 +331,78 @@ Deno.test("落庫：新しい人は politicians＋politician_elections を作り
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.edit_history WHERE contribution_id = '${c}' AND table_name IN ('politicians', 'politician_elections') AND field = '*'`), 2);
   assertEquals((await one<{ applied_politician_id: string; status: string }>(db, `SELECT applied_politician_id, status FROM policy_jp.contributions WHERE id = '${c}'`)),
     { applied_politician_id: p.id, status: "applied" });
-  // task_id の派工列は contributions_drop_dispatch で收回。次の seed で arm が再び出す（名簿の完成合図はまだ）
-  assertEquals(await dispatchIds(db, ROSTER), [], "applied で派工列が收回される");
+  // roster_check は一人ずつ candidacy で出す一題多份：最初の 1 筆が落庫しても派工列は收回しない（收回は no_change の落庫か、seed の缺口判斷）
+  assertEquals(await dispatchIds(db, ROSTER), [TASK], "candidacy が applied でも名簿の任務は残る");
   await seed(db);
   assertEquals(await dispatchIds(db, ROSTER), [TASK]);
+  assertEquals((await events(db, TASK)).map((e) => e.event), ["opened"], "closed が入っていない");
+  // 完成の合図（no_change の落庫）で收回される
+  const nc = await submit(db, "no_change", { task_id: TASK, outcome: "confirmed", checked_urls: [ELECTION_URL], finding: "名簿を確認し、全員が登録済みだった" }, { status: "verified", task: TASK, urls: [ELECTION_URL] });
+  assertEquals((await applyOne(db, nc)).status, "applied");
+  assertEquals(await dispatchIds(db, ROSTER), [], "no_change confirmed で收回");
+  await db.close();
+});
+
+async function dropProbe(db: Awaited<ReturnType<typeof freshDb>>) {
+  await openElectionWithRegion(db, ICHI, POLLING);
+  await clock(db, "2027-03-01");
+  await seed(db);
+  await applyOne(db, await submitCand(db, {}, { task: TASK }));
+  return (await dispatchIds(db, ROSTER)).length;
+}
+
+Deno.test("還原驗證：觸發器の WHEN から『candidacy×auto:roster_check』の除外を外すと、最初の candidacy で任務が收回される（修正前の挙動）", async () => {
+  const ok = await freshDb();
+  assertEquals(await dropProbe(ok), 1);
+  await ok.close();
+  const db = await migratedDb({ before: MIG_FILE });
+  await db.exec(mutate(MIG_SQL, "AND NOT (NEW.contribution_type = 'candidacy' AND NEW.task_id LIKE 'auto:roster_check:%'))", ")"));
+  assertEquals(await dropProbe(db), 0, "除外がなければ收回される");
+  await db.close();
+});
+
+Deno.test("落庫：filed の告示日は里程碑の announced を読む（elections.notice_date ではなく、里程碑表の上書きが効く）", async () => {
+  const db = await ready(); // 告示日 2027-04-08
+  const filed = (date: string) => submitCand(db, { candidacy_status: "filed", status_date: date });
+  assertEquals((await applyOne(db, await filed("2027-04-05"))).outcome, "invalid", "告示日前の届出");
+  await db.query(`INSERT INTO policy_jp.election_milestones (election_id, kind, on_date, basis, status) VALUES ($1, 'announced', DATE '2027-04-01', 'override', 'announced')`, [E1]);
+  const ok = await applyOne(db, await filed("2027-04-05"));
+  assertEquals([ok.status, ok.outcome], ["applied", "applied"], "里程碑表で告示日が 04-01 に上書きされていれば 04-05 の届出は通る");
+  const early = await applyOne(db, await submitCand(db, { name: "佐藤花子", kana: "さとうはなこ", candidacy_status: "filed", status_date: "2027-03-30" }));
+  assertEquals(early.outcome, "invalid");
+  assert(early.message!.includes("2027-04-01"), early.message);
+  await db.close();
+});
+
+Deno.test("落庫：状態が変わると『目前狀態の出處』は新しい出處が主要になり、古い主要は佐證に降りる（同じ出處を使い回しても主要は 1 つ）", async () => {
+  const db = await ready();
+  const A = "https://www.city.ichinomiya.aichi.jp/hyomei/", B = "https://www.city.ichinomiya.aichi.jp/senkyo/todokede/";
+  await applyOne(db, await submitCand(db, {}, { urls: [A] }));
+  const peid = (await one<{ id: string }>(db, `SELECT id FROM policy_jp.politician_elections`)).id;
+  const refs = () => rows<{ url: string; role: string }>(db, `SELECT s.url, r.role FROM policy_jp.source_refs r JOIN policy_jp.sources s ON s.id = r.source_id WHERE r.target_table = 'politician_election_status' AND r.target_id = $1 ORDER BY s.url`, [peid]);
+  assertEquals(await refs(), [{ url: A, role: "primary" }]);
+  const out = await applyOne(db, await submitCand(db, { candidacy_status: "filed", status_date: "2027-04-10" }, { urls: [B] }));
+  assertEquals(out.outcome, "applied");
+  assertEquals(await refs(), [{ url: A, role: "supporting" }, { url: B, role: "primary" }]);
+  // 前の出處を使い回して次の状態へ：主要はその出處に戻り、主要は常に 1 つ
+  await clock(db, "2027-04-25");
+  const out2 = await applyOne(db, await submitCand(db, { candidacy_status: "elected", status_date: "2027-04-25" }, { urls: [A] }));
+  assertEquals(out2.outcome, "applied");
+  assertEquals(await refs(), [{ url: A, role: "primary" }, { url: B, role: "supporting" }]);
+  await db.close();
+});
+
+Deno.test("落庫：birth_year は SQL でも 1900～2100 の整数だけ（範囲外・小数・文字は invalid 退件で、CHECK 例外の重試には入らない）", async () => {
+  const db = await ready();
+  for (const by of [1899, 2101, 1970.5, "1970"]) {
+    const id = await submitCand(db, { birth_year: by });
+    const out = await applyOne(db, id);
+    assertEquals([out.status, out.outcome], ["rejected", "invalid"], String(by));
+    assert(out.message!.includes("birth_year"));
+    assertEquals((await one<{ retry_count: number }>(db, `SELECT retry_count FROM policy_jp.contributions WHERE id = $1`, [id])).retry_count, 0, "apply_failed の重試に入っていない");
+  }
+  assertEquals(await count(db, `SELECT 1 FROM policy_jp.politicians`), 0);
+  assertEquals((await applyOne(db, await submitCand(db, { birth_year: 1900 }))).outcome, "applied", "境界 1900 は通る");
   await db.close();
 });
 
