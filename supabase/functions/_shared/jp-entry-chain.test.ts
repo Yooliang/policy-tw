@@ -83,3 +83,14 @@ Deno.test("roster_check の完成合圖：no_change（confirmed／not_found）�
     assertEquals(db.contributions[0].task_id, ROSTER_TASK);
   });
 });
+
+Deno.test("協議版號：エンドポイントが返す版は 0.9.0 以上（選舉鏈第 2 步の交件型別 candidacy を受け付けるので手引きも 0.9.0）", async () => {
+  const { JP_PROTOCOL_VERSION } = await import("./jp/protocol.ts");
+  const [maj, min] = JP_PROTOCOL_VERSION.split(".").map(Number);
+  assert(maj > 0 || min >= 9, JP_PROTOCOL_VERSION);
+  const db = makeDb({ queue: [rosterRow] });
+  await withEntries(db, env(), async ({ next }) => {
+    const got = await getNext(next, N1);
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+  });
+});
