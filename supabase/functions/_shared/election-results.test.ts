@@ -166,7 +166,8 @@ Deno.test("派工臂：接進 arms、缺口條件、一個單位一件最多 120
   assertStringIncludes(arm, `'auto:${ELECTION_RESULTS_TASK}:'`);
   assertStringIncludes(arm, "WHERE m.cec_hits <> 1", "對不上的各自派");
   assertStringIncludes(arm, "'auto:election_result_missing:' || m.politician_election_id", "各自派用 raw 同一個 task_id 形狀");
-  assertStringIncludes(arm, "NOT EXISTS (SELECT 1 FROM policies pl WHERE pl.politician_id = m.politician_id AND pl.removed_at IS NULL)", "名下有政見的 raw 已經在派，不重複");
+  // 20261010170000（OPS #72）起逐筆版 raw:election_result_missing 收掉，名下有政見的也由這裡派（守門 retire-single-result.test.ts）
+  assert(!arm.includes("NOT EXISTS (SELECT 1 FROM policies pl WHERE pl.politician_id = m.politician_id AND pl.removed_at IS NULL)"), "名下有政見的也要派（raw 已經不派）");
   assertStringIncludes(arm, "IN ('村里長', '鄉鎮市民代表', '直轄市山地原住民區民代表') THEN m.town END AS unit_town", "村里長與代表到鄉鎮");
   assert(!/'items'\s*,\s*jsonb_agg\(jsonb_build_object/.test(arm), "target 只放參選紀錄 id，名單細節派工當下才查（佇列每 10 分鐘整批重寫 target）");
 });
