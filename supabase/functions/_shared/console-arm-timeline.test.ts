@@ -42,8 +42,11 @@ async function latestJpArmNames(): Promise<string[]> {
 
 Deno.test("文字層：正見每支派工臂都登記了時期，種子沒有不存在的臂", async () => {
   const arms = armNames(await latestFn("activity_arm_names"));
-  assert(arms.length >= 40, `抓到的臂太少（${arms.length}），抽取壞了？`);
-  const seeded = seededArms(TW_SQL, "console_arm_stage_map");
+  assert(arms.length >= 35, `抓到的臂太少（${arms.length}），抽取壞了？`);
+  // 之後的 migration 收掉的臂（DELETE FROM console_arm_stage_map WHERE arm = '…'，例：20261010170000 收掉 raw:election_result_missing）不算種子
+  const removed: string[] = [];
+  for (const n of await listMigrations()) if (n > TW_MIG) removed.push(...[...(await readMig(n)).matchAll(/DELETE FROM console_arm_stage_map WHERE arm = '([^']+)'/g)].map((m) => m[1]));
+  const seeded = seededArms(TW_SQL, "console_arm_stage_map").filter((a) => !removed.includes(a));
   assertEquals(new Set(seeded).size, seeded.length, "對照表種子重複");
   assertEquals(arms.filter((a) => !seeded.includes(a)), [], "新增的派工臂要在 console_arm_stage_map 登記時期（新 migration 補一列）");
   assertEquals(seeded.filter((a) => !arms.includes(a)), [], "對照表裡有 activity_arm_names() 沒有的臂");
