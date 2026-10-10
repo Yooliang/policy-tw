@@ -233,6 +233,18 @@ Deno.test("臂の中身：告示前は表明まで・告示後は届出（phase�
   await db.close();
 });
 
+Deno.test("臂の告示前／後：告示日は里程碑の announced を読む（里程碑表で上書きすると phase と target.notice_date が変わる）", async () => {
+  const db = await freshDb();
+  await openElectionWithRegion(db, ICHI, POLLING); // 告示日 2027-04-08
+  await clock(db, "2027-04-05");
+  const phase = async () => (await rows<{ target: { phase: string; notice_date: string } }>(db, `SELECT target FROM policy_jp.contribution_auto_tasks_roster_check()`))[0].target;
+  assertEquals((await phase()).phase, "pre_notice");
+  await db.query(`INSERT INTO policy_jp.election_milestones (election_id, kind, on_date, basis, status) VALUES ($1, 'announced', DATE '2027-04-01', 'override', 'announced')`, [E1]);
+  const t = await phase();
+  assertEquals([t.phase, t.notice_date], ["post_notice", "2027-04-01"]);
+  await db.close();
+});
+
 Deno.test("臂の対象：上線済みの選舉だけ（pending の選舉・等團體落庫の選舉交件・國政は出さない）", async () => {
   const db = await freshDb();
   await insertElection(db, ICHI, POLLING, { status: "pending" });

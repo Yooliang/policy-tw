@@ -448,10 +448,10 @@ LANGUAGE sql STABLE SET search_path = policy_jp, pg_temp AS $$
      ORDER BY r.id LIMIT 1
   ),
   gaps AS (
-    SELECT e.id AS election_id, e.name AS election_name, e.election_type, e.election_date, e.notice_date, e.lg_code,
+    SELECT e.id AS election_id, e.name AS election_name, e.election_type, e.election_date, nd.d AS notice_date, e.lg_code,
            COALESCE(g.name, '（名称未確認）') AS lg_name,
            COALESCE((SELECT pr.name FROM policy_jp.local_governments pr WHERE pr.lg_code = policy_jp.lg_pref_code(e.lg_code)), '（都道府県名未確認）') AS pref_name,
-           (e.notice_date IS NOT NULL AND policy_jp.activity_today() >= e.notice_date) AS after_notice,
+           (nd.d IS NOT NULL AND policy_jp.activity_today() >= nd.d) AS after_notice,
            (SELECT count(*) FROM policy_jp.politician_elections pe WHERE pe.election_id = e.id AND pe.review_status = 'published' AND pe.candidacy_status <> 'withdrawn') AS ours_count,
            COALESCE((SELECT jsonb_agg(jsonb_build_object('politician_id', pe.politician_id, 'name', pp.name, 'kana', pp.kana,
                                                           'candidacy_status', pe.candidacy_status, 'district_kind', pe.district_kind, 'district_name', pe.district_name)
@@ -461,6 +461,9 @@ LANGUAGE sql STABLE SET search_path = policy_jp, pg_temp AS $$
       FROM policy_jp.chain_open_elections o
       JOIN policy_jp.elections e ON e.id = o.election_id AND o.basis = 'published' AND e.review_status = 'published'
       JOIN policy_jp.local_governments g ON g.lg_code = e.lg_code
+      -- 告示日は里程碑の announced（elections.notice_date は視圖が併進し、里程碑表の整場 announced が勝つ）。apply_candidacy と同じ読み方
+      LEFT JOIN LATERAL (SELECT m.on_date AS d FROM policy_jp.election_milestones_all m
+                          WHERE m.election_id = e.id AND m.kind = 'announced' AND m.election_type IS NULL ORDER BY (m.origin = 'table') DESC, m.on_date LIMIT 1) nd ON true
       CROSS JOIN p
      WHERE p.cap IS NOT NULL
        AND NOT policy_jp.task_unavailable('auto:roster_check:' || e.id)
