@@ -103,6 +103,11 @@ const isMechanical = (n: string, fn: string) => {
   }
 };
 
+/** 這支之後、已知的後續版本（各自有守門測試以這支為底做機械式替換） */
+const LATER: Record<string, string[]> = {
+  [ELEMENTS]: ["20261010100000_policy_elements_config.sql"], // 三要素派工可設定（OPS #61，policy-elements-config.test.ts）
+};
+
 // ============================================================
 // A. 文字層
 // ============================================================
@@ -113,7 +118,7 @@ Deno.test("A1 前一版是對的：緊接在這支之前的定義各是預期的
     const i = defining.indexOf(MIG);
     assert(i > 0, `${n}：這支要在重新定義的清單裡`);
     assertEquals(defining[i - 1], PREV_MIG[n], `${n}：前一版變了——要以最新的為底重做機械式替換`);
-    assertEquals(defining.at(-1), MIG, `${n}：這支之後有人再定義了，這支就不是現行版`);
+    assertEquals(defining.slice(i + 1), LATER[n] ?? [], `${n}：這支之後有人再定義了，要登記在 LATER（新的那支自己守它的機械式替換）`);
   }
 });
 
