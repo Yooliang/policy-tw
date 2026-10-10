@@ -85,7 +85,8 @@ const namesIn = (sql: string): string[] => {
 /** 總表本體裡貼的臂名標籤（不含 raw 的動態標籤） */
 const tagsIn = (sql: string): string[] => [...fnText(sql, "contribution_auto_tasks_arms").matchAll(/SELECT '([a-z_]+)' AS arm, t\.\*/g)].map((m) => m[1]);
 /** raw 函式（最新一版）實際會產出的任務型別 */
-const rawTypes = async (): Promise<string[]> => [...new Set([...(await latestFn("contribution_auto_tasks_raw")).matchAll(/SELECT 'auto:([a-z_]+):'/g)].map((m) => m[1]))];
+// P1 當時的 raw（P1 之後有臂被收掉，例：20261010170000 拿掉 election_result_missing；這裡比的是 P1 那一版的清單）
+const rawTypes = async (): Promise<string[]> => [...new Set([...(await latestFn("contribution_auto_tasks_raw", P1_MIG + "~")).matchAll(/SELECT 'auto:([a-z_]+):'/g)].map((m) => m[1]))];
 
 Deno.test("A1 總表與 seed 的前一版是對的：P1 緊接著 20261006141600（總表）與 P0（seed）之後，而且是最後一版（中間或之後有人改了，抄的底就過期）", async () => {
   for (const [fn, base, signature] of [
