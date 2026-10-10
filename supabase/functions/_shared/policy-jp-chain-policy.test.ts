@@ -14,7 +14,7 @@
 import { assert, assertEquals, assertNotEquals, assertRejects } from "jsr:@std/assert@1";
 import { fnText } from "./arms-pglite.ts";
 import { JP_APPLY_TYPES } from "./jp/apply-contribution.ts";
-import { JP_CONTRIBUTION_TYPES, policyTitleKey } from "./jp/contribution-schema.ts";
+import { JP_CONTRIBUTION_TYPES, jpTrim, policyTitleKey } from "./jp/contribution-schema.ts";
 import { jpSameClaimProbe } from "./jp/same-claim-probe.ts";
 import { JP_PROTOCOL_VERSION } from "./jp/protocol.ts";
 import {
@@ -452,3 +452,44 @@ Deno.test("権限：新しい関数は anon／authenticated が呼べない（se
 });
 
 void rows;
+
+// ---------------------------------------------------------------------------------------------
+// #557 審査：未公開の同題名の列／字數と空白の口徑（TS と SQL をそろえる）
+// ---------------------------------------------------------------------------------------------
+Deno.test("未公開（published でない）の同題名の政見は『既存』にも unchanged／conflict の相手にもならない：same_claim_matches・apply_policy・臂・chain_policy_exists が同じ判準（published だけ）", async () => {
+  const db = await freshDb();
+  await openElectionWithRegion(db, ICHI, POLLING);
+  await clock(db, addDays(NOTICE, 2));
+  const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
+  await db.query(
+    `INSERT INTO policy_jp.policies (id, title, description, category, origin, source_locator, politician_election_id, lg_code, status, review_status)
+     VALUES ('legacy-1', '保育所の待機児童をなくす', '別の要約です。別の要約です。', '子育て', 'pledge', '公報', $1, $2, 'not_started', 'pending')`, [a.peid, ICHI]);
+  assertEquals((await one<{ r: { existing: unknown[] } }>(db, `SELECT policy_jp.same_claim_matches('policy', $1::JSONB) AS r`,
+    [JSON.stringify({ politician_election_id: a.peid, title: "保育所の待機児童をなくす" })])).r.existing, [], "pending の列は existing に出ない");
+  assertEquals((await one<{ r: { existing: unknown[] } }>(db, `SELECT policy_jp.same_claim_matches('policy', $1::JSONB) AS r`, [JSON.stringify({ politician_election_id: a.peid })])).r.existing, [], "探査でも出ない");
+  assertEquals((await one<{ e: boolean }>(db, `SELECT policy_jp.chain_policy_exists($1) AS e`, [a.peid])).e, false);
+  await seed(db);
+  assertEquals(await dispatchIds(db, POLICY), [`auto:policy_missing:${a.peid}`], "臂は published がないので出す");
+  // 落庫：pending の同題名があっても conflict／unchanged にならず、新しく入る → 臂が消える（循環しない）
+  const out = await applyOne(db, await submitPolicy(db, pol(a.peid)));
+  assertEquals([out.status, out.outcome], ["applied", "applied"]);
+  await seed(db);
+  assertEquals(await dispatchIds(db, POLICY), []);
+  await db.close();
+});
+
+Deno.test("字數と空白：SQL policy_trim と TS jpTrim が同じ（全角空白 U+3000 も落とす）；前後が全角空白の 9 字の要約は 10 字未満で invalid、10 字なら通る", async () => {
+  const samples = ["  あ  ", "　　題名　", "\t改行\n", "中　間　は残る", "", "　"];
+  for (const s of samples) {
+    assertEquals((await one<{ t: string }>(shared, `SELECT policy_jp.policy_trim($1) AS t`, [s])).t, jpTrim(s), JSON.stringify(s));
+  }
+  const db = await freshDb();
+  await openElectionWithRegion(db, ICHI, POLLING);
+  const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
+  const nine = await applyOne(db, await submitPolicy(db, pol(a.peid, { description: "　　" + "あ".repeat(9) + "　" })));
+  assertEquals([nine.status, nine.outcome], ["rejected", "invalid"]);
+  const ten = await applyOne(db, await submitPolicy(db, pol(a.peid, { title: "　四文字題名　", description: "　　" + "あ".repeat(10) + "　" })));
+  assertEquals(ten.outcome, "applied");
+  assertEquals((await one<{ title: string; description: string }>(db, `SELECT title, description FROM policy_jp.policies`)).title, "四文字題名", "前後の空白は保存しない");
+  await db.close();
+});

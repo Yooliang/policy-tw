@@ -150,7 +150,7 @@ function existingAsNoChange<T extends { contribution_type: string; payload: unkn
 }
 
 /** 同一批裡兩筆 new 是不是同一件事（跟 SQL same_claim_matches 的鍵同一套，選舉的「同一屆」這裡只用投票日差 ≤ 180 天近似） */
-function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b: { contribution_type: string; payload: unknown }): boolean {
+export function sameClaimInBatch(a: { contribution_type: string; payload: unknown }, b: { contribution_type: string; payload: unknown }): boolean {
   if (a.contribution_type !== b.contribution_type) return false;
   const p = a.payload as Record<string, unknown>;
   const q = b.payload as Record<string, unknown>;

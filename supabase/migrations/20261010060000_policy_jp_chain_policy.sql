@@ -163,6 +163,13 @@ CREATE OR REPLACE FUNCTION policy_jp.apply_types() RETURNS TEXT[] LANGUAGE sql I
   SELECT ARRAY['local_government', 'regional_stat', 'election', 'candidacy', 'politician', 'policy', 'no_change']::TEXT[]
 $$;
 
+-- 前後の空白を落とす（全角空白 U+3000 も。TS 側 contribution-schema.ts の jpTrim と同じ集合：ASCII の空白類＋U+3000）。btrim は半角スペースしか落とさない
+CREATE OR REPLACE FUNCTION policy_jp.policy_trim(p_text TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path = policy_jp, pg_temp AS $$
+  SELECT regexp_replace(regexp_replace(COALESCE(p_text, ''), '^[[:space:]　]+', ''), '[[:space:]　]+$', '')
+$$;
+COMMENT ON FUNCTION policy_jp.policy_trim IS '前後の空白（全角空白も）を落とす。政見の題名・要約・分野・原文位置の字數と比較に使う；TS の jpTrim と同じ';
+
 -- 政見の題名の正規化（同一件事の鍵）：NFKC・小文字・空白（全角も）を全部除く
 CREATE OR REPLACE FUNCTION policy_jp.policy_title_key(p_title TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE SET search_path = policy_jp, pg_temp AS $$
@@ -176,10 +183,10 @@ LANGUAGE plpgsql SET search_path = policy_jp, pg_temp AS $$
 DECLARE
   p JSONB := c.payload;
   v_peid TEXT := NULLIF(btrim(COALESCE(p->>'politician_election_id', '')), '');
-  v_title TEXT := btrim(COALESCE(p->>'title', ''));
-  v_desc TEXT := btrim(COALESCE(p->>'description', ''));
-  v_cat TEXT := btrim(COALESCE(p->>'category', ''));
-  v_loc TEXT := btrim(COALESCE(p->>'source_locator', ''));
+  v_title TEXT := policy_jp.policy_trim(p->>'title');
+  v_desc TEXT := policy_jp.policy_trim(p->>'description');
+  v_cat TEXT := policy_jp.policy_trim(p->>'category');
+  v_loc TEXT := policy_jp.policy_trim(p->>'source_locator');
   v_proposed DATE;
   pe policy_jp.politician_elections%ROWTYPE;
   e policy_jp.elections%ROWTYPE;
@@ -227,14 +234,15 @@ BEGIN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', 'source_urls に使える http(s) の URL がない');
   END IF;
 
-  -- 同じ参選・同じ題名（正規化）の政見が既にあるか
+  -- 同じ参選・同じ題名（正規化）の『上線済み』の政見が既にあるか（臂・chain_policy_exists・same_claim_matches_policy と同じ判準：published だけ。
+  -- 未公開の同題名の列があっても、ここで unchanged／conflict にして永遠に入らない、という循環を作らない）
   SELECT * INTO ex FROM policy_jp.policies pl
-   WHERE pl.politician_election_id = v_peid AND policy_jp.policy_title_key(pl.title) = policy_jp.policy_title_key(v_title)
+   WHERE pl.politician_election_id = v_peid AND pl.review_status = 'published' AND policy_jp.policy_title_key(pl.title) = policy_jp.policy_title_key(v_title)
    ORDER BY pl.created_at, pl.id LIMIT 1;
   IF FOUND THEN
-    IF policy_jp.policy_title_key(ex.description) <> policy_jp.policy_title_key(v_desc) OR ex.review_status IN ('rejected', 'not_found') THEN
+    IF policy_jp.policy_title_key(ex.description) <> policy_jp.policy_title_key(v_desc) THEN
       RETURN jsonb_build_object('outcome', 'conflict', 'table_name', 'policies', 'record_id', ex.id,
-        'message', format('庫に同じ題名の政見 %s があり、要約が違う（または退回済み）。上書きしない（直すなら correction）', ex.id));
+        'message', format('庫に同じ題名の政見 %s があり、要約が違う。上書きしない（直すなら correction）', ex.id));
     END IF;
     PERFORM policy_jp.source_write('policies', ex.id, c.source_urls, 'policy');
     UPDATE policy_jp.contributions SET applied_policy_id = ex.id, applied_politician_id = pe.politician_id WHERE id = c.id;
@@ -394,7 +402,7 @@ BEGIN
            ORDER BY pl.created_at, pl.id), '[]'::JSONB)
     INTO v_existing
     FROM policy_jp.policies pl
-   WHERE pl.politician_election_id = v_peid AND (v_key IS NULL OR policy_jp.policy_title_key(pl.title) = v_key);
+   WHERE pl.politician_election_id = v_peid AND pl.review_status = 'published' AND (v_key IS NULL OR policy_jp.policy_title_key(pl.title) = v_key);
   SELECT COALESCE(jsonb_agg(x.j ORDER BY x.created_at), '[]'::JSONB) INTO v_pending FROM (
     SELECT c.created_at, jsonb_build_object(
              'contribution_id', c.id, 'status', c.status, 'agent', c.agent_name, 'sources', to_jsonb(c.source_urls),
@@ -577,10 +585,10 @@ SELECT a.activity, 'event', a.from_kind, a.from_offset, a.until_kind, a.until_of
 -- ------------------------------------------------------------
 -- 9. 権限
 -- ------------------------------------------------------------
-REVOKE EXECUTE ON FUNCTION policy_jp.chain_policy_subjects(), policy_jp.chain_policy_exists(TEXT), policy_jp.policy_title_key(TEXT),
+REVOKE EXECUTE ON FUNCTION policy_jp.chain_policy_subjects(), policy_jp.chain_policy_exists(TEXT), policy_jp.policy_title_key(TEXT), policy_jp.policy_trim(TEXT),
   policy_jp.apply_policy(policy_jp.contributions), policy_jp.contribution_auto_tasks_policy_missing(), policy_jp.same_claim_matches_policy(JSONB, TEXT, UUID)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION policy_jp.chain_policy_subjects(), policy_jp.chain_policy_exists(TEXT), policy_jp.policy_title_key(TEXT),
+GRANT EXECUTE ON FUNCTION policy_jp.chain_policy_subjects(), policy_jp.chain_policy_exists(TEXT), policy_jp.policy_title_key(TEXT), policy_jp.policy_trim(TEXT),
   policy_jp.apply_policy(policy_jp.contributions), policy_jp.contribution_auto_tasks_policy_missing(), policy_jp.same_claim_matches_policy(JSONB, TEXT, UUID)
   TO service_role;
 

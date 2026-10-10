@@ -3,7 +3,7 @@
  * 純函式測試（不碰資料庫）。SQL 那一半（落庫、DB CHECK）在 policy-jp-chain-*.test.ts。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { JP_CONTRIBUTION_TYPES, JP_TASK_ARMS, JP_VOTE_FIELDS, validateContributionRequest } from "./contribution-schema.ts";
+import { JP_CONTRIBUTION_TYPES, JP_TASK_ARMS, JP_VOTE_FIELDS, jpTrim, validateContributionRequest } from "./contribution-schema.ts";
 
 const base = { agent_name: "jp-agent", agent_tool: "claude-code/claude-sonnet-5" };
 const E1 = "2027-04-25_mayor_232033";
@@ -240,4 +240,19 @@ Deno.test("policy：surrogate pair も 1 字と数える（SQL の char_length �
   const wrong = politician({}, [], { task_id: `auto:policy_missing:${PEID}` });
   assertEquals(paths(wrong), ["task_id"]);
   assert(wrong.errors[0].message.includes("policy"));
+});
+
+Deno.test("policy：字數は前後の空白（全角空白も）を落としてコードポイントで数える；proposed_date が投票日（参選 id の選挙 id の頭）より後なら TS でも 400", () => {
+  assertEquals(paths(policy({ title: "　　短い　　" })), ["payload.title"], "空白を除くと 2 字");
+  assert(policy({ title: "　四文字題名　" }).ok);
+  assertEquals(paths(policy({ description: "　" + "あ".repeat(9) + "　" })), ["payload.description"]);
+  assert(policy({ description: "　" + "あ".repeat(10) + "　" }).ok);
+  assertEquals(paths(policy({ category: "　" })), ["payload.category"]);
+  assertEquals(jpTrim("　 \t題名\n　"), "題名");
+  const past = "5f0c8d6e-1111-4222-8333-444444444444:2025-01-12_mayor_232033:at_large";
+  assert(policy({ politician_election_id: past, proposed_date: "2025-01-01" }).ok);
+  assert(policy({ politician_election_id: past, proposed_date: "2025-01-12" }).ok, "投票日当日は通る");
+  const late = policy({ politician_election_id: past, proposed_date: "2025-02-01" });
+  assertEquals(paths(late), ["payload.proposed_date"]);
+  assert(late.errors[0].message.includes("2025-01-12"));
 });

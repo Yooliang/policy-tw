@@ -577,6 +577,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261010060000 chain_policy：選舉鏈第 4 步（這次的政見）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
   chain_policy_subjects: { mig: [T_POLICY], why: "公約的對象：開著的、已上線的選舉裡 declared／filed／elected／not_elected 的上線參選紀錄（considering 與退選不派）" },
   chain_policy_exists: { mig: [T_POLICY], why: "這筆參選有沒有上線的政見；policy_missing 臂與 election_chain_progress 的 policy 共用" },
+  policy_trim: { mig: [T_POLICY], why: "前後の空白（全角空白も）を落とす（政見の題名・要約・分野・原文位置の字數判定）；TS の jpTrim と同じ集合（對齊テスト）" },
   policy_title_key: { mig: [T_POLICY], why: "政見題名的正規化（NFKC・小文字・空白除去）＝同一件事的鍵；TS 版 policyTitleKey 有對齊測試" },
   apply_policy: { mig: [T_POLICY], why: "policy 交件落庫（公約 origin=pledge 掛在參選上；同參選同題名＝unchanged／要約不同＝conflict）；日本專屬型別" },
   contribution_auto_tasks_policy_missing: { mig: [T_POLICY], why: "臂：開著的選舉的候選人（declared 以上）沒有任何公約 → policy_missing（正見 raw 臂 policy_missing 一段的日本版；term_policy_missing 屬於往回補，這一步不做）" },

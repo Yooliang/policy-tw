@@ -4,6 +4,7 @@
  * 任務與交件不符 400；得票數欄位 400；完成合圖 no_change；（第 3、4 步）同一件事 resolved_claim。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { sameClaimInBatch } from "./jp/contribute-handler.ts";
 import { callsTo, env, errorPaths, getNext, makeDb, N1, netHash, post, R, type Row, withEntries } from "./jp-entry-chain-db.ts";
 
 const E1 = "2027-04-25_mayor_232033";
@@ -214,4 +215,61 @@ Deno.test("協議版號：エンドポイントが返す版は 0.10.0 以上（�
     const got = await getNext(next, N1);
     assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// #557 審査：一つの任務に多份の公約（同一批の重複と別題名）
+// ---------------------------------------------------------------------------------------------
+const policyItem = (title: string, description: string) => ({
+  contribution_type: "policy", task_id: POLICY_TASK,
+  payload: { ...POLICY.payload, title, description },
+  source_urls: POLICY.source_urls,
+});
+
+Deno.test("同じ task_id に別の題名の公約が多份＝全部入庫（一題多份）。一批に同じ題名の new が 2 件＝最初の 1 件だけ入り、2 件目は duplicate_claim で止まる", async () => {
+  const db = makeDb({ queue: [policyRow], sameClaims: { policy: { existing: [], pending: [] } } });
+  await withEntries(db, env(), async ({ report }) => {
+    const many = await post(report, N1, {
+      kind: "contribute", ...AGENT,
+      contributions: [policyItem("保育所の待機児童をなくす", "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。"),
+        policyItem("道路の舗装を更新する", "道路の舗装を 5 年で 20 キロ更新する。"),
+        policyItem("防災無線を全戸に整える", "防災無線の戸別受信機を 2 年で全戸に配る。")],
+    });
+    assertEquals(many.status, 201, JSON.stringify(many.json));
+    assertEquals(db.contributions.length, 3, "別題名は 3 件とも入庫");
+    assertEquals(new Set(db.contributions.map((c) => c.task_id)), new Set([POLICY_TASK]));
+  });
+  const db2 = makeDb({ queue: [policyRow], sameClaims: { policy: { existing: [], pending: [] } } });
+  await withEntries(db2, env(), async ({ report }) => {
+    const dup = await post(report, N1, {
+      kind: "contribute", ...AGENT,
+      contributions: [policyItem("保育所の待機児童をなくす", "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。"),
+        policyItem("保育所の　待機児童を なくす", "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。")],
+    });
+    assertEquals(db2.contributions.length, 1, JSON.stringify(dup.json));
+    const results = (dup.json.results ?? []) as Array<Row>;
+    assertEquals(results[1].status, "not_accepted");
+    assertEquals(results[1].error, "duplicate_claim");
+  });
+});
+
+Deno.test("sameClaimInBatch の policy 分岐：同じ参選＋空白・全半角違いの題名＝同じ件、題名違い・参選違い＝別（還原驗證：分岐を消したコピーは同じ件と判定できない）", async () => {
+  const mk = (peid: string, title: string) => ({ contribution_type: "policy", payload: { politician_election_id: peid, title } });
+  assert(sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の　待機児童を なくす")));
+  assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "別の公約です")));
+  assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe2", "保育所の待機児童をなくす")));
+  // 還原：policy の case を消したソースのコピーを一時ファイルにして読み込む
+  const src = (await Deno.readTextFile(new URL("./jp/contribute-handler.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  const start = src.indexOf('    case "policy":\n      // 同じ参選');
+  const end = src.indexOf('    case "politician": {', start);
+  assert(start > 0 && end > start, "消す範囲が見つかる");
+  const mutated = src.slice(0, start) + src.slice(end);
+  const tmp = new URL("./jp/zz-mutated-contribute-handler.ts", import.meta.url);
+  await Deno.writeTextFile(tmp, mutated);
+  try {
+    const m = await import(`${tmp.href}?m=${Date.now()}`);
+    assert(!m.sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の待機児童をなくす")), "分岐がなければ同じ件と判定されない＝一批の重複を止められない");
+  } finally {
+    await Deno.remove(tmp);
+  }
 });
