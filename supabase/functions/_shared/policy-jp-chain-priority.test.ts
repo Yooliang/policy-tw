@@ -21,7 +21,12 @@ const MIG_FILE = "20261009300000_policy_jp_chain_priority.sql";
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
 const JP_SQL = Object.fromEntries(await Promise.all(JP_FILES.map(async (n) => [n, await read(n)] as const)));
 assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
-assertEquals(JP_FILES[JP_FILES.length - 1], MIG_FILE, "這支是日本站最後一支 migration（時間戳 20261009300000）");
+// 之後的 policy_jp migration 不得再改寫這支動到的函式（否則這裡測的就不是線上的版本）；改了要更新這支測試
+for (const later of JP_FILES.filter((n) => n > MIG_FILE)) {
+  for (const fn of ["rebalance_queue", "seed_auto_task_queue", "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_step_rank", "chain_sort_date"]) {
+    assert(!new RegExp("FUNCTION\\s+policy_jp\\." + fn + "\\s*\\(").test(JP_SQL[later]), `${later} 改寫了 policy_jp.${fn}，請更新 policy-jp-chain-priority.test.ts`);
+  }
+}
 
 const ROLES = `CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;`;
 /** 全部 policy_jp migration 套一遍；patch：換掉這支 migration 的內容（還原驗證用） */
