@@ -39,7 +39,7 @@ WITH pol AS (
       LEFT JOIN elections el ON el.id = d0.eid
       LEFT JOIN pe_by pb ON d0.eid IS NOT NULL AND pb.pid = d0.target->>'politician_id' AND pb.election_id = d0.eid
   )
-  SELECT x.task_id, x.arm, x.eid, x.etype
+  SELECT x.task_id, x.arm, x.eid AS election_id, x.etype AS election_type
     FROM (
       SELECT d.task_id, d.eid, d.etype,
              -- 歸臂：opened_by.arm；沒有（P1 之前回填的舊列）就照 task_id 的型別段歸回，兩支臂共用的型別照臂本體的條件分
@@ -111,7 +111,7 @@ WITH n AS (WITH pol AS (
       LEFT JOIN elections el ON el.id = d0.eid
       LEFT JOIN pe_by pb ON d0.eid IS NOT NULL AND pb.pid = d0.target->>'politician_id' AND pb.election_id = d0.eid
   )
-  SELECT x.task_id, x.arm, x.eid, x.etype
+  SELECT x.task_id, x.arm, x.eid AS election_id, x.etype AS election_type
     FROM (
       SELECT d.task_id, d.eid, d.etype,
              -- 歸臂：opened_by.arm；沒有（P1 之前回填的舊列）就照 task_id 的型別段歸回，兩支臂共用的型別照臂本體的條件分
