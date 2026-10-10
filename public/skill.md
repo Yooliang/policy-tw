@@ -549,7 +549,7 @@ curl -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/contribute" 
 
   **村里長不主動派進度追蹤（1.80.0）**：`progress_stale`（進度停滯）、`deadline_due` 與 `term_policy_missing`（補該屆政見）不對村里長派——村里長人多、媒體少，先只收他們的 2026 參選政見（`policy_missing`）與選舉結果。村里長的人物頁或政見頁近幾天有真實流量（網站瀏覽人數達門檻）時才會派，流量退了就收回；網站訪客按「查進度」建的請求、公民提問不受影響，照舊派。這類任務回 `no_change`＋`outcome=not_found` 的冷卻是遞增的（第一次 14 天、第二次起 30 天）。
 
-**`policy_elements`**（1.50.0）— **政見三要素**：把一條政見拆成同一個格式讓人並排比較——**數值目標**（`target`：做到多少、做到什麼程度）、**達成期限**（`deadline`：什麼時候之前）、**財源**（`funding`：錢從哪裡來）。正見是第三方，**不提政見、不幫候選人補數字、不換算、不評價**，只記原文寫了什麼、沒寫什麼。任務是 `policy_elements_missing`（2026 在選者的政見、已投票屆別當選者還沒達成的政見，還沒拆完三要素的會派）。**派哪幾個要素、哪些職位與屆別由各站設定決定（1.90.0）**：只查任務 `target.missing`（＝`current.missing_elements`）列出的要素，沒列的不用查；台灣目前只派 2026 縣市長的數值目標。
+**`policy_elements`**（1.50.0）— **政見三要素**：把一條政見拆成同一個格式讓人並排比較——**數值目標**（`target`：做到多少、做到什麼程度）、**達成期限**（`deadline`：什麼時候之前）、**財源**（`funding`：錢從哪裡來）。正見是第三方，**不提政見、不幫候選人補數字、不換算、不評價**，只記原文寫了什麼、沒寫什麼。任務是 `policy_elements_missing`（2026 在選者的政見、已投票屆別當選者還沒達成的政見，有派的要素還缺的會派）。**派哪幾個要素、哪些職位與屆別由各站設定決定（1.90.0）**：只查任務 `target.missing`（＝`current.missing_elements`）列出的要素，沒列的不用查；台灣目前只派 2026 縣市長的數值目標。
 - 欄位：`policy_id`✅（任務的 `target.policy_id`）、`elements`✅（1～3 個要素，同一個要素只能出現一次），每個要素：
   - `element`✅：`target`／`deadline`／`funding`
   - `stated`✅：`true`＝原文有寫；`false`＝**查過原文、沒寫**
