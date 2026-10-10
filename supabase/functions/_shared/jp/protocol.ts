@@ -7,5 +7,5 @@
  * 網址：2026-10-09 起日本站正式網址是 jp.hustings.net（policy-ops docs/decisions/2026-10-09-hustings網域.md）；
  * 舊的 policy-jp.web.app/skill.md 仍讀得到，所以換網址不升版。
  */
-export const JP_PROTOCOL_VERSION = "0.8.0";
+export const JP_PROTOCOL_VERSION = "0.9.0";
 export const JP_PROTOCOL_URL = "https://jp.hustings.net/skill.md";

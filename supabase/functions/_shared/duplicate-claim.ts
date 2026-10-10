@@ -88,7 +88,8 @@ export function claimKey(contributionType: string, payload: unknown): string | n
     case "candidacy":
       // 同一個人、同一屆、同一種選舉、同一個參選狀態、同一個選舉結果＝同一個宣稱
       // （帶結果的答案不能併進沒帶結果的那筆，否則結果會跟著被丟掉；2026-09-19）
-      return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status)}|${norm(p.election_result)}`;
+      // 日本站（jp-report）的欄位叫 candidacy_status（沒有 election_result）；正見的 payload 沒有這個欄位，鍵不變
+      return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status ?? p.candidacy_status)}|${norm(p.election_result)}`;
     case "merge_politician": {
       // 同一對人、同一個結論＝同一個宣稱（keep／remove 對調也算同一對）
       const pair = [norm(p.keep_id), norm(p.remove_id)].sort().join("~");

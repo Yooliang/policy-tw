@@ -40,9 +40,15 @@ const withElection = (patch: Record<string, unknown>, drop: string[] = []) => {
 };
 const pathsOf = (v: ReturnType<typeof validateContributionRequest>) => v.errors.map((e) => e.path);
 
-Deno.test("六種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat]) {
+const candidacy = {
+  contribution_type: "candidacy",
+  payload: { name: "山田太郎", kana: "やまだたろう", election_id: "2027-04-25_mayor_232033", candidacy_status: "declared", status_date: "2027-02-01", district_kind: "at_large" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/"],
+};
+
+Deno.test("七種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
@@ -129,8 +135,8 @@ Deno.test("election：多個欄位同時錯，一次全報（讓 AI 一次修完
   assertEquals(a, b);
 });
 
-Deno.test("其他型別（正見的 candidacy 等）不收", () => {
-  const v = validateContributionRequest({ ...base, contribution_type: "candidacy", payload: {}, source_urls: ["https://a.example/x"] });
+Deno.test("其他型別（正見的 policy_progress 等）不收", () => {
+  const v = validateContributionRequest({ ...base, contribution_type: "policy_progress", payload: {}, source_urls: ["https://a.example/x"] });
   assertEquals(v.ok, false);
   assertEquals(v.errors[0].path, "contribution_type");
 });

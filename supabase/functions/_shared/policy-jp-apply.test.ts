@@ -338,7 +338,9 @@ Deno.test("對齊：出處等級（source_kind_for_url／jpSourceKind）、單�
 
   // 重試規則、落庫型別
   assertEquals((await one<{ a: number; b: number }>(db, `SELECT policy_jp.apply_max_retries() AS a, policy_jp.apply_retry_delay_minutes() AS b`)), { a: APPLY_MAX_RETRIES, b: APPLY_RETRY_DELAY_MINUTES });
-  assertEquals((await one<{ t: string[] }>(db, `SELECT policy_jp.apply_types() AS t`)).t, [...JP_APPLY_TYPES]);
+  // この DB は 210000 の時点：選舉鏈（第 2～4 步）で後から足された型別は TS の清單にだけある（SQL 側の対齊は policy-jp-chain-*.test.ts が全 migration 適用後の庫で守る）
+  const ADDED_BY_CHAIN = ["candidacy", "politician", "policy"];
+  assertEquals((await one<{ t: string[] }>(db, `SELECT policy_jp.apply_types() AS t`)).t, JP_APPLY_TYPES.filter((t) => !ADDED_BY_CHAIN.includes(t)));
 
   // 共識門檻：六種型別 SQL 與 TS 一致（三個新型別目標 3、退件 −3、不拿系統票、不要兩個網段）
   const sql = async (q: string) => Object.values(await one<Record<string, unknown>>(db, q))[0];

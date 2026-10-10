@@ -21,9 +21,11 @@ const MIG_FILE = "20261009300000_policy_jp_chain_priority.sql";
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
 const JP_SQL = Object.fromEntries(await Promise.all(JP_FILES.map(async (n) => [n, await read(n)] as const)));
 assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
-// 之後的 policy_jp migration 不得再改寫這支動到的函式（否則這裡測的就不是線上的版本）；改了要更新這支測試
+// 之後的 policy_jp migration 不得再改寫這支動到的函式（否則這裡測的就不是線上的版本）；改了要更新這支測試。
+// 例外：chain_step_rank 是鏈上加步驟的擴充點（"多一行 WHEN"），第 2～4 步的 migration 各加一行；它們的順位由 policy-jp-chain-*.test.ts 守，
+// 這裡只守既有的相對順序（選舉發現 < 團體 < 統計）與『沒登記的 auto 型別排最後』（下面 f）
 for (const later of JP_FILES.filter((n) => n > MIG_FILE)) {
-  for (const fn of ["rebalance_queue", "seed_auto_task_queue", "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_step_rank", "chain_sort_date"]) {
+  for (const fn of ["rebalance_queue", "seed_auto_task_queue", "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
     assert(!new RegExp("FUNCTION\\s+policy_jp\\." + fn + "\\s*\\(").test(JP_SQL[later]), `${later} 改寫了 policy_jp.${fn}，請更新 policy-jp-chain-priority.test.ts`);
   }
 }
@@ -361,7 +363,9 @@ Deno.test("手動任務（無 auto: 前綴）步驟順位 0，排在同層鏈上
   assertEquals(chain.priority, 2);
   assert(manual.queue_at < chain.queue_at, "手動任務排在同層鏈上任務前面（插隊段在 2000 年前不參與重排，也在前；2000 年後的步驟順位 0 在前）");
   const rules = await rows<{ activity: string; priority: number }>(db, `SELECT activity, priority FROM policy_jp.activity_rules WHERE priority IS NOT NULL ORDER BY activity, priority`);
-  assertEquals(rules.map((r) => `${r.activity}:${r.priority}`), [
+  // 第 2 步以降の migration が鏈上の臂ごとに priority: 規則を足す（policy-jp-chain-*.test.ts が守る）：ここは最初の 3 本の臂の分だけ見る
+  const FIRST = ["priority:local_government_missing", "priority:manual_visitor", "priority:regional_stats_missing"];
+  assertEquals(rules.filter((r) => FIRST.includes(r.activity)).map((r) => `${r.activity}:${r.priority}`), [
     "priority:local_government_missing:1", "priority:local_government_missing:3",
     "priority:manual_visitor:1",
     "priority:regional_stats_missing:1", "priority:regional_stats_missing:3",

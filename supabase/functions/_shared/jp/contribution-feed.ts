@@ -6,7 +6,7 @@
  *     目標分數存在欄位 target_score（SQL 觸發器 contribution_apply_consensus 維護）。所以 select 改帶 target_score，
  *     空的（剛提交、還沒計過票）退回日本站的門檻（_shared/jp/consensus.ts），不是正見的門檻矩陣。
  *   - 標題解析：election → payload.name，沒有就用 policy_jp.elections 的 name（id＝日期_種類_團體碼）；
- *     local_government → payload.name；regional_stat → payload.lg_code＋payload.stat_key；no_change → 核對的內容（finding；任務代號 payload.task_id 是內部識別碼，不印在摘要上，仍在 task_id 欄位）。
+ *     local_government → payload.name；candidacy → payload.name＋candidacy_status（選舉 id）；regional_stat → payload.lg_code＋payload.stat_key；no_change → 核對的內容（finding；任務代號 payload.task_id 是內部識別碼，不印在摘要上，仍在 task_id 欄位）。
  *     其餘型別（task_suggestion、correction）仍走正見的 summarizeContribution，但不回人物／政見連結（那是正見網站的網址，日本站的 id 對不上）。
  */
 
@@ -70,6 +70,9 @@ const ELECTION_TYPE_LABEL: Record<string, string> = {
   governor: "知事選舉", mayor: "市長選舉", ward_mayor: "區長選舉", town_mayor: "町村長選舉",
   national_lower: "眾議院選舉", national_upper: "參議院選舉", pref_assembly: "都道府縣議會選舉", muni_assembly: "市區町村議會選舉",
 };
+const CANDIDACY_STATUS_LABEL: Record<string, string> = {
+  considering: "檢討出馬", declared: "表明參選", filed: "已提出届出", withdrawn: "退選", elected: "當選", not_elected: "落選",
+};
 const STAT_LABEL: Record<string, string> = { population: "人口", area_km2: "面積", budget_expenditure: "歲出", aging_rate: "高齡化率" };
 
 /** 日本站五種有自己摘要的型別之外，仍用正見的摘要；一律不回人物／政見連結（正見網站的網址，日本站的 id 對不上） */
@@ -88,6 +91,12 @@ export function jpSummarizeContribution(input: SummaryInput): ContributionSummar
     case "local_government": {
       const name = str(p.name);
       return base(`回報地方公共團體「${name || "（未填名稱）"}」的基本資料`, name || null);
+    }
+    case "candidacy": {
+      // 參選人（第 2 步）：人名只有新的人才帶（已在庫的只帶 politician_id，id 不印在摘要上）；絕不印得票數（payload 本來就不收）
+      const name = str(p.name);
+      const status = CANDIDACY_STATUS_LABEL[str(p.candidacy_status)] ?? str(p.candidacy_status);
+      return base(`回報${name ? `「${name}」` : "一位候選人"}在選舉 ${str(p.election_id)} 的參選狀態：${status}`, name || null);
     }
     case "regional_stat": {
       const key = str(p.stat_key);
