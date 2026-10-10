@@ -588,7 +588,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   same_claim_merge_pending: { mig: [T_SAME2], why: "一次性收編 #531 上線前的重複：兩筆都等票的，後交的票與交件者那一票併進先交的、後交的 superseded" },
 
   // ---- 20261010010000 console_admin：主控台日本站（#518 第二步；正見版在 20261009260000，參數型別與表都不同所以不是複本） ----
-  console_arm_status: { mig: [T_CONSOLE], why: "每支臂今天開／關與佇列件數（SECURITY DEFINER，anon 可讀）；正見版讀 activity_open_now 視圖，日本站沒有那張，targets 展開寫在函式裡，election_id 是 TEXT" },
+  console_arm_status: { mig: [T_CONSOLE, T_PER_ELECTION], why: "每支臂今天開／關與佇列件數（SECURITY DEFINER，anon 可讀）；正見版讀 activity_open_now 視圖，日本站沒有那張，targets 展開寫在函式裡，election_id 是 TEXT；#69 起沒有臂名的舊列照任務型別歸回臂" },
   console_active_overrides: { mig: [T_CONSOLE], why: "（視圖）目前有效的覆寫；擁有者權限的視圖＋明確 GRANT SELECT（日本站內部表不對 anon 開，正見版是 security_invoker）" },
   console_election_milestones: { mig: [T_CONSOLE], why: "（視圖）每場選舉×里程碑一列，給主控台改日期；擁有者權限的視圖＋明確 GRANT SELECT" },
   console_admin_override_create: { mig: [T_CONSOLE], why: "主控台新增覆寫（service_role 專用）；election_id 是 TEXT，釘 search_path = policy_jp, pg_temp" },
@@ -601,6 +601,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   console_timeline: { mig: [T_TIMELINE, T_PER_ELECTION], why: "一場選舉的時間軸 jsonb（里程碑、各臂的段、今天開關、覆寫標記、規則區間；#69 起多這一屆／日常件數與過段標記）；一場選舉一個職位、沒有任期里程碑" },
   console_dispatch_election: { mig: [T_PER_ELECTION], why: "派工列 target → 選舉（election_id、參選紀錄），沒有＝日常；只給主控台算件數，不 GRANT 給 anon" },
   console_arm_election_counts: { mig: [T_PER_ELECTION], why: "每支臂 × 每場選舉 × 職位的佇列件數（空＝日常），一次掃 task_dispatches；職位沒寫就用那場選舉的職位；公開唯讀" },
+  console_dispatch_arm: { mig: [T_PER_ELECTION], why: "派工列 → 臂（opened_by.arm，沒有就照 task_id 的任務型別歸回）；日本站的任務型別名就是臂名，不在臂清單的不算；只給主控台算件數" },
   console_stage_end: { mig: [T_PER_ELECTION], why: "一場選舉某一段的結束日（告示日、投票日、投票日 +30）；日本站沒有任期里程碑，5～7 段不會過段" },
   // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
   //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----

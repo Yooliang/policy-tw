@@ -25,7 +25,8 @@ async function twDb(): Promise<PGlite> {
   const d = await buildArmsDb({
     afterP1Sql: MANUAL_STUB + `
       ALTER TABLE elections ADD COLUMN IF NOT EXISTS name TEXT;
-      CREATE TABLE IF NOT EXISTS politician_elections (id integer PRIMARY KEY, election_id integer, election_type text, politician_id uuid);`,
+      CREATE TABLE IF NOT EXISTS politician_elections (id integer PRIMARY KEY, election_id integer, election_type text, politician_id uuid);
+      CREATE TABLE IF NOT EXISTS policies (id serial PRIMARY KEY, politician_id uuid, removed_at timestamptz);`,
   });
   await d.exec(await readMig("20261009260000_console_admin.sql"));
   await d.exec(await readMig("20261010110000_console_arm_timeline.sql"));
@@ -50,7 +51,7 @@ const arm = (t: Timeline, name: string) => {
   return a;
 };
 
-Deno.test("正見：派工列照 target 歸屆（election_id、election_key、參選紀錄），沒有選舉＝日常；舊列（沒有 arm）不計", async () => {
+Deno.test("正見：派工列照 target 歸屆（election_id、election_key、參選紀錄），沒有選舉＝日常；認不出型別的舊列不計", async () => {
   const d = await twDb();
   const key26 = (await d.query<{ k: string }>("SELECT election_key AS k FROM elections WHERE id = 2026")).rows[0].k;
   await d.exec("INSERT INTO politician_elections VALUES (501, 2022, '縣市長', NULL), (502, 2026, '村里長', NULL)");
@@ -79,6 +80,50 @@ Deno.test("正見：派工列照 target 歸屆（election_id、election_key、�
   ]);
 });
 
+/** 沒有 opened_by.arm 的舊列（P1 之前回填），用真的 task_id 寫法 */
+async function legacy(d: PGlite, taskId: string, taskType: string, target: unknown) {
+  await d.query(`INSERT INTO task_dispatches (task_id, task_type, target, opened_by) VALUES ($1, $2, $3::jsonb, '{"basis":"backfill"}'::jsonb)`, [
+    taskId,
+    taskType,
+    JSON.stringify(target),
+  ]);
+}
+
+Deno.test("正見：沒有臂名的舊列照任務型別歸回臂，時間軸與 console_arm_status 都算得到（主線 10-10）", async () => {
+  const d = await twDb();
+  const withPolicy = "00000000-0000-0000-0000-0000000000b1";
+  const noPolicy = "00000000-0000-0000-0000-0000000000b2";
+  await d.exec(`INSERT INTO politician_elections VALUES (601, 2022, '縣市長', '${withPolicy}'), (602, 2022, '縣市長', '${noPolicy}')`);
+  await d.query("INSERT INTO policies (politician_id) VALUES ($1)", [withPolicy]);
+  await legacy(d, "auto:election_results_missing:2022:縣市長:臺北市", "election_results_missing", { election_id: 2022, election_type: "縣市長" });
+  await legacy(d, "auto:election_results_missing:2022:縣市長:新北市", "election_results_missing", { election_id: 2022, election_type: "縣市長" });
+  await legacy(d, "auto:election_result_missing:601", "election_result_missing", { politician_id: withPolicy, politician_election_id: 601 });
+  await legacy(d, "auto:election_result_missing:602", "election_result_missing", { politician_id: noPolicy, politician_election_id: 602 });
+  await legacy(d, "auto:election_result_missing:cec:2022:臺北市", "election_result_missing", { election_id: 2022 });
+  await legacy(d, "auto:roster_check:2022:縣市長:臺北市", "roster_check", { election_id: 2022, election_type: "縣市長" });
+  await legacy(d, "auto:no_such_type:1", "no_such_type", { election_id: 2022 });
+
+  const counts = (await d.query<{ arm: string; n: number }>(
+    "SELECT arm, sum(n)::int AS n FROM console_arm_election_counts() WHERE election_id = 2022 GROUP BY 1 ORDER BY 1",
+  )).rows;
+  assertEquals(counts, [
+    { arm: "elected_missing", n: 1 },
+    { arm: "election_results", n: 3 },
+    { arm: "raw:election_result_missing", n: 1 },
+    { arm: "raw:roster_check", n: 1 },
+  ], "election_results_missing 兩件＋沒有政見的那一件；有政見的歸 raw；cec 歸 elected_missing；認不出的不算");
+
+  const status = new Map((await d.query<{ arm: string; queue_count: number | null }>("SELECT arm, queue_count FROM console_arm_status()")).rows
+    .map((r) => [r.arm, r.queue_count]));
+  assertEquals(status.get("election_results"), 3, "以前沒有臂名就不算，顯示「—」");
+  assertEquals(status.get("raw:election_result_missing"), 1);
+  assertEquals(status.get("elected_missing"), 1);
+
+  const t22 = await tl(d, "2022");
+  assertEquals([arm(t22, "election_results").election_count, arm(t22, "election_results").stale], [3, true]);
+  assertEquals(arm(t22, "election_results").queue_count, 3);
+});
+
 Deno.test("正見：選 2022 只算 2022；名單清查、開票結果過段標 stale，任內政見不標；日常另計、不隨屆別變", async () => {
   const d = await twDb();
   await d.exec("INSERT INTO politician_elections VALUES (501, 2022, '縣市長', NULL), (502, 2026, '村里長', NULL)");
@@ -92,7 +137,7 @@ Deno.test("正見：選 2022 只算 2022；名單清查、開票結果過段標 
   const t22 = await tl(d, "2022");
   assertEquals([t22.election_total, t22.daily_total], [4, 1]);
   const rc = arm(t22, "raw:roster_check");
-  assertEquals([rc.stage, rc.election_count, rc.daily_count, rc.stale], [2, 2, 0, true]);
+  assertEquals([rc.stage, rc.election_count, rc.daily_count, rc.stale], [3, 2, 0, true], "名單清查在第 3 段（10-10），2022 投票日已過");
   const er = arm(t22, "election_results");
   assertEquals([er.stage, er.election_count, er.stale], [4, 1, true]);
   assertEquals(er.stage_end, "2022-12-25", "開票段到就職日");
@@ -104,8 +149,8 @@ Deno.test("正見：選 2022 只算 2022；名單清查、開票結果過段標 
 
   const t26 = await tl(d, "2026");
   assertEquals([t26.election_total, t26.daily_total], [1, 1]);
-  // 2026 的登記截止（測試環境 09-04）已過：第 2 段（名單清查）還有件數就標紅
-  assertEquals([arm(t26, "raw:roster_check").election_count, arm(t26, "raw:roster_check").stale], [1, true]);
+  // 名單清查在第 3 段，到 2026 投票日（11-28）為止，今天還沒過段
+  assertEquals([arm(t26, "raw:roster_check").election_count, arm(t26, "raw:roster_check").stale], [1, false]);
   assertEquals(arm(t26, "election_results").election_count, 0);
   assertEquals(arm(t26, "dup").daily_count, 1, "日常不隨屆別變");
 

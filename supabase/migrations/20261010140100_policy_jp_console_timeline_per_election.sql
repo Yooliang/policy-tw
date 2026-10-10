@@ -22,6 +22,19 @@ COMMENT ON FUNCTION policy_jp.console_dispatch_election IS
 REVOKE ALL ON FUNCTION policy_jp.console_dispatch_election(JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION policy_jp.console_dispatch_election(JSONB) TO service_role;
 
+-- 派工列 → 臂（正見那支的日本版）：opened_by.arm；沒有就照 task_id 的型別段（日本站的型別段就是臂名）。
+CREATE OR REPLACE FUNCTION policy_jp.console_dispatch_arm(p_task_id TEXT, p_target JSONB, p_opened_by JSONB) RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = policy_jp, pg_temp AS $$
+  SELECT COALESCE(
+    NULLIF(p_opened_by->>'arm', ''),
+    CASE WHEN split_part(p_task_id, ':', 2) = ANY (policy_jp.activity_arm_names()) THEN split_part(p_task_id, ':', 2) END
+  )
+$$;
+COMMENT ON FUNCTION policy_jp.console_dispatch_arm IS
+  '主控台用：一筆派工列屬於哪一支臂；opened_by.arm，沒有就照 task_id 的型別段。只給主控台算件數。2026-10-10（policy-tw #569 審查）';
+REVOKE ALL ON FUNCTION policy_jp.console_dispatch_arm(TEXT, JSONB, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION policy_jp.console_dispatch_arm(TEXT, JSONB, JSONB) TO service_role;
+
 CREATE OR REPLACE FUNCTION policy_jp.console_arm_election_counts()
 RETURNS TABLE (arm TEXT, election_id TEXT, election_type TEXT, n BIGINT)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = policy_jp, pg_temp AS $$
@@ -29,9 +42,10 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = policy_jp, pg_temp AS $$
          CASE WHEN x.eid IS NULL THEN NULL
               ELSE COALESCE(NULLIF(x.target->>'election_type', ''), (SELECT e.election_type FROM policy_jp.elections e WHERE e.id = x.eid)) END,
          count(*)
-    FROM (SELECT d.opened_by->>'arm' AS arm, policy_jp.console_dispatch_election(d.target) AS eid, d.target
+    FROM (SELECT policy_jp.console_dispatch_arm(d.task_id, d.target, d.opened_by) AS arm, policy_jp.console_dispatch_election(d.target) AS eid, d.target
             FROM policy_jp.task_dispatches d
-           WHERE d.task_id LIKE 'auto:%' AND d.opened_by ? 'arm') x
+           WHERE d.task_id LIKE 'auto:%') x
+   WHERE x.arm IS NOT NULL
    GROUP BY 1, 2, 3
   UNION ALL
   SELECT 'manual_visitor', NULL::TEXT, NULL::TEXT, count(*)
@@ -158,3 +172,67 @@ COMMENT ON FUNCTION policy_jp.console_timeline IS
   '段的結束日 stage_end、過段仍在派 stale、每條規則的開放區間。找不到選舉回 NULL。公開唯讀。2026-10-10（policy-ops #63、#69）';
 REVOKE ALL ON FUNCTION policy_jp.console_timeline(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION policy_jp.console_timeline(TEXT) TO anon, authenticated, service_role;
+
+-- console_arm_status：件數改用 console_dispatch_arm（沒有臂名的舊列照型別歸回，不再漏算）；其餘一個字不變（照 20261010010000 的現行定義）
+CREATE OR REPLACE FUNCTION policy_jp.console_arm_status()
+RETURNS TABLE (arm TEXT, is_open BOOLEAN, via TEXT, queue_count BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = policy_jp, pg_temp AS $$
+  WITH arms AS (SELECT a AS arm FROM unnest(policy_jp.activity_arm_names()) AS a),
+  -- 「不屬於任何選舉」＋每場選舉整場＋每場選舉的職位（日本站一場選舉只有一個職位）
+  targets AS (
+    SELECT NULL::TEXT AS election_id, NULL::TEXT AS election_type
+    UNION ALL SELECT e.id, NULL::TEXT FROM policy_jp.elections e
+    UNION ALL SELECT e.id, e.election_type FROM policy_jp.elections e WHERE e.election_type IS NOT NULL
+  ),
+  opened AS (
+    SELECT a.arm, t.election_id, x.is_open, x.via_override, x.via_rule
+      FROM arms a
+      CROSS JOIN targets t
+      CROSS JOIN LATERAL (
+        SELECT count(*) > 0 AS is_open,
+               bool_or(o.override_id IS NOT NULL) AS via_override,
+               bool_or(o.rule_id IS NOT NULL) AS via_rule
+          FROM policy_jp.activity_open(a.arm, t.election_id, t.election_type) o
+      ) x
+  ),
+  agg AS (
+    SELECT o.arm, bool_or(o.is_open) AS is_open, bool_or(o.via_override) AS via_override, bool_or(o.via_rule) AS via_rule
+      FROM opened o
+     GROUP BY o.arm
+  ),
+  -- 全關的覆寫（force='closed'）在 activity_open() 裡回 0 列，這裡額外查：現在有生效中的 closed 覆寫蓋到這支臂就算 via=override
+  closed_ov AS (
+    SELECT DISTINCT o.activity FROM policy_jp.activity_overrides o
+     WHERE o."force" = 'closed' AND (o.expires_at IS NULL OR o.expires_at >= policy_jp.activity_today())
+  ),
+  auto_counts AS (
+    SELECT x.arm, count(*) AS n
+      FROM (SELECT policy_jp.console_dispatch_arm(d.task_id, d.target, d.opened_by) AS arm
+              FROM policy_jp.task_dispatches d
+             WHERE d.task_id LIKE 'auto:%') x
+     WHERE x.arm IS NOT NULL
+     GROUP BY x.arm
+  ),
+  manual_counts AS (
+    SELECT 'manual_visitor'::TEXT AS arm, count(*) AS n
+      FROM policy_jp.task_dispatches d
+     WHERE d.task_id IN (SELECT m.task_id FROM policy_jp.contribution_auto_tasks_manual(true) m)
+    UNION ALL
+    SELECT 'manual_open'::TEXT, count(*)
+      FROM policy_jp.task_dispatches d
+     WHERE d.task_id IN (SELECT m.task_id FROM policy_jp.contribution_auto_tasks_manual(false) m)
+  )
+  SELECT ar.arm,
+         COALESCE(ag.is_open, false) AS is_open,
+         CASE WHEN COALESCE(ag.via_override, false) THEN 'override'
+              WHEN COALESCE(ag.via_rule, false) THEN 'rule'
+              WHEN co.activity IS NOT NULL THEN 'override'
+              ELSE 'closed' END AS via,
+         COALESCE(ac.n, mc.n) AS queue_count
+    FROM arms ar
+    LEFT JOIN agg ag ON ag.arm = ar.arm
+    LEFT JOIN closed_ov co ON co.activity = ar.arm
+    LEFT JOIN auto_counts ac ON ac.arm = ar.arm
+    LEFT JOIN manual_counts mc ON mc.arm = ar.arm
+   ORDER BY ar.arm
+$$;
