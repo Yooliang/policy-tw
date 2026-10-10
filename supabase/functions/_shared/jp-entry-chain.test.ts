@@ -70,6 +70,85 @@ Deno.test("candidacy：欄位が不合格なら整批 400（validation_failed）
   });
 });
 
+const noKanaPayload = () => {
+  const { kana: _k, ...rest } = CAND.payload;
+  return rest;
+};
+
+Deno.test("candidacy の kana（policy-ops#60）：告示前は kana なしで 201、告示日以降は kana なしが 400（payload.kana）、読みがあれば・politician_id があれば告示後でも 201", async () => {
+  // ---- 告示前（rpc/candidacy_kana_required が false）----
+  {
+    const db = makeDb({ queue: [rosterRow] });
+    await withEntries(db, env(), async ({ next, report }) => {
+      const got = await getNext(next, N1);
+      const res = await post(report, R, { ...CAND, payload: noKanaPayload(), dispatch_token: got.json.dispatch_token });
+      assertEquals(res.status, 201, JSON.stringify(res.json));
+      assertEquals(db.contributions.length, 1);
+      assertEquals((db.contributions[0].payload as Row).kana, undefined, "読みなしのまま保存される");
+      const asked = callsTo(report.calls, "rpc/candidacy_kana_required");
+      assertEquals(asked.length, 1);
+      assertEquals((asked[0].body as Row).p_election_id, E1);
+      assertEquals(asked[0].headers["accept-profile"] ?? asked[0].headers["content-profile"], "policy_jp");
+    });
+  }
+  // ---- 告示日以降 ----
+  {
+    const db = makeDb({ queue: [rosterRow], kanaRequired: { [E1]: true } });
+    await withEntries(db, env(), async ({ next, report }) => {
+      const got = await getNext(next, N1);
+      const token = got.json.dispatch_token;
+      const missing = await post(report, R, { ...CAND, payload: noKanaPayload(), dispatch_token: token });
+      assertEquals([missing.status, missing.json.error], [400, "validation_failed"]);
+      assertEquals(errorPaths(missing.json), ["payload.kana"]);
+      assert(String((missing.json.errors as Array<{ message: string }>)[0].message).includes("告示日"));
+      assertEquals(db.contributions.length, 0, "400 の請求は何も書かない");
+      // 空文字・空白も『ない』と同じ（形式の検査が先に 400 にする）
+      const blank = await post(report, R, { ...CAND, payload: { ...CAND.payload, kana: "  " }, dispatch_token: token });
+      assertEquals([blank.status, errorPaths(blank.json)], [400, ["payload.kana"]]);
+      // 読みがあれば通る
+      const ok = await post(report, R, { ...CAND, dispatch_token: token });
+      assertEquals(ok.status, 201, JSON.stringify(ok.json));
+      // 既にいる人（politician_id）は告示後でも読み不要
+      const known = await post(report, R, {
+        ...CAND, payload: { ...noKanaPayload(), name: undefined, politician_id: "5f0c8d6e-1111-4222-8333-444444444444", candidacy_status: "filed", status_date: "2027-04-09" }, dispatch_token: token,
+      });
+      assertEquals(known.status, 201, JSON.stringify(known.json));
+      assertEquals(db.contributions.length, 2);
+    });
+  }
+  // ---- 一括：読みなしの一件だけが 400 の対象（index で指す）、同じ選挙は一度だけ問い合わせる ----
+  {
+    const db = makeDb({ queue: [rosterRow], kanaRequired: { [E1]: true } });
+    await withEntries(db, env(), async ({ next, report }) => {
+      const got = await getNext(next, N1);
+      const res = await post(report, R, {
+        kind: "contribute", ...AGENT, task_id: ROSTER_TASK, dispatch_token: got.json.dispatch_token,
+        contributions: [
+          { contribution_type: "candidacy", payload: CAND.payload, source_urls: OFFICIAL },
+          { contribution_type: "candidacy", payload: { ...noKanaPayload(), name: "佐藤花子" }, source_urls: OFFICIAL },
+          { contribution_type: "candidacy", payload: { ...noKanaPayload(), name: "鈴木一郎" }, source_urls: OFFICIAL },
+        ],
+      });
+      assertEquals(res.status, 400);
+      assertEquals((res.json.errors as Array<{ index: number; path: string }>).map((e) => [e.index, e.path]), [[1, "payload.kana"], [2, "payload.kana"]]);
+      assertEquals(db.contributions.length, 0, "一件でも不合格なら整批を収めない");
+      assertEquals(callsTo(report.calls, "rpc/candidacy_kana_required").length, 1, "同じ選挙は一度だけ問い合わせる");
+    });
+  }
+});
+
+Deno.test("politician の kana（policy-ops#60）：読みだけの提出は 201（空欄を埋める用）、名前は今も 400", async () => {
+  const db = makeDb({ queue: [profileRow], sameClaims: { politician: { existing: [], pending: [] } } });
+  await withEntries(db, env(), async ({ next, report }) => {
+    const got = await getNext(next, N1);
+    const ok = await post(report, R, { ...POL, payload: { politician_id: PID, kana: "やまだたろう", resolved_claim: "new" }, dispatch_token: got.json.dispatch_token });
+    assertEquals(ok.status, 201, JSON.stringify(ok.json));
+    assertEquals((db.contributions[0].payload as Row).kana, "やまだたろう");
+    const name = await post(report, R, { ...POL, payload: { politician_id: PID, name: "別名", kana: "やまだたろう", resolved_claim: "new" }, dispatch_token: got.json.dispatch_token });
+    assertEquals(errorPaths(name.json), ["payload.name"]);
+  });
+});
+
 Deno.test("roster_check の完成合圖：no_change（confirmed／not_found）は light で 2 票・task_id はこの任務；candidacy の task_id と合わなくても no_change は通る", async () => {
   const db = makeDb({ queue: [rosterRow] });
   await withEntries(db, env(), async ({ next, report }) => {
@@ -211,6 +290,17 @@ Deno.test("協議版號：エンドポイントが返す版は 0.10.0 以上（�
   const [maj, min] = JP_PROTOCOL_VERSION.split(".").map(Number);
   assert(maj > 0 || min >= 10, JP_PROTOCOL_VERSION);
   const db = makeDb({ queue: [policyRow] });
+  await withEntries(db, env(), async ({ next }) => {
+    const got = await getNext(next, N1);
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+  });
+});
+
+Deno.test("協議版號：エンドポイントが返す版は 0.11.0 以上（告示前の kana 選填を受け付けた版。手引き public/skill.md も 0.11.0）", async () => {
+  const { JP_PROTOCOL_VERSION } = await import("./jp/protocol.ts");
+  const [maj, min] = JP_PROTOCOL_VERSION.split(".").map(Number);
+  assert(maj > 0 || min >= 11, JP_PROTOCOL_VERSION);
+  const db = makeDb({ queue: [rosterRow] });
   await withEntries(db, env(), async ({ next }) => {
     const got = await getNext(next, N1);
     assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);

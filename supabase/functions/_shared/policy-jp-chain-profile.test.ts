@@ -303,7 +303,7 @@ Deno.test("落庫：生年は空欄だけ埋める（同じ値＝何も変えな
   await db.close();
 });
 
-Deno.test("落庫：不備は invalid で退件（politician_id なし・存在しない・name／kana・生年の範囲・配列の形・事実なし・出典 URL なし）。人物を新しく作ることはない", async () => {
+Deno.test("落庫：不備は invalid で退件（politician_id なし・存在しない・name・空の kana・生年の範囲・配列の形・事実なし・出典 URL なし）。人物を新しく作ることはない", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
@@ -315,7 +315,7 @@ Deno.test("落庫：不備は invalid で退件（politician_id なし・存在�
   await bad({ birth_year: 1970 }, "politician_id なし");
   await bad({ politician_id: "no-such", birth_year: 1970 }, "存在しない人物");
   await bad({ politician_id: a.pid, birth_year: 1970, name: "別名" }, "name は直さない");
-  await bad({ politician_id: a.pid, kana: "べつ" }, "kana は直さない");
+  await bad({ politician_id: a.pid, kana: " " }, "kana は空にできない（読みの訂正は correction。違う値は conflict になる＝policy-jp-kana-optional.test.ts）");
   await bad({ politician_id: a.pid }, "事実なし");
   await bad({ politician_id: a.pid, birth_year: 1899 }, "生年が範囲外");
   await bad({ politician_id: a.pid, birth_year: 1970.5 }, "生年が整数でない");
@@ -372,7 +372,7 @@ Deno.test("同一件事（politician）：鍵＝人物＋事実。庫に生年�
   assertEquals(dupEdu.existing.map((e) => e.text), ["○○大学卒業"], "重なる項目だけ");
   assertEquals((await m({ politician_id: a.pid, career: ["別の経歴"] })).existing, []);
   const probe = await m({ politician_id: a.pid });
-  assertEquals(probe.existing.map((e) => e.fact).sort(), ["birth_year", "career", "education"], "探査＝この人の事実を全部");
+  assertEquals(probe.existing.map((e) => e.fact).sort(), ["birth_year", "career", "education", "kana"], "探査＝この人の事実を全部（読みも：policy-ops#60）");
   // 審議中の提出
   const pend = await submit(db, "politician", { politician_id: a.pid, career: ["別の経歴"], resolved_claim: "new" }, { status: "pending", urls: [OFFICIAL], ip: "ip-owner" });
   const hit = await m({ politician_id: a.pid, career: ["別の経歴", "もう一つ"] }, "ip-other");
