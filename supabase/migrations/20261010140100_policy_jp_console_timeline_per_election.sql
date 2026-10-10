@@ -4,6 +4,7 @@
 -- 正見那半是 20261010140000_console_timeline_per_election.sql，說明看那支；這支是 policy_jp 同形的一套，只動 policy_jp 的物件。
 -- 跟正見不同的地方：
 --   * 選舉 id 是文字；console_dispatch_election 依序看 target 的 election_id、politician_election_id、politician_election_ids 的第一筆。
+--   * 一場選舉一個職位：各職位件數（by_type）的職位就是 target.election_type，沒有就是那場選舉的 election_type。
 --   * 沒有任期里程碑：2 參選期 → 告示日（announced，沒有就投票日）、3 → 投票日、4 開票 → 投票日 +30、其他段不會過段（NULL）。
 -- 登記在 policy-jp-dispatch-drift.test.ts 的 JP_ONLY（正見沒有對應的被抄函式）。
 
@@ -22,21 +23,25 @@ REVOKE ALL ON FUNCTION policy_jp.console_dispatch_election(JSONB) FROM PUBLIC, a
 GRANT EXECUTE ON FUNCTION policy_jp.console_dispatch_election(JSONB) TO service_role;
 
 CREATE OR REPLACE FUNCTION policy_jp.console_arm_election_counts()
-RETURNS TABLE (arm TEXT, election_id TEXT, n BIGINT)
+RETURNS TABLE (arm TEXT, election_id TEXT, election_type TEXT, n BIGINT)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = policy_jp, pg_temp AS $$
-  SELECT d.opened_by->>'arm', policy_jp.console_dispatch_election(d.target), count(*)
-    FROM policy_jp.task_dispatches d
-   WHERE d.task_id LIKE 'auto:%' AND d.opened_by ? 'arm'
-   GROUP BY 1, 2
+  SELECT x.arm, x.eid,
+         CASE WHEN x.eid IS NULL THEN NULL
+              ELSE COALESCE(NULLIF(x.target->>'election_type', ''), (SELECT e.election_type FROM policy_jp.elections e WHERE e.id = x.eid)) END,
+         count(*)
+    FROM (SELECT d.opened_by->>'arm' AS arm, policy_jp.console_dispatch_election(d.target) AS eid, d.target
+            FROM policy_jp.task_dispatches d
+           WHERE d.task_id LIKE 'auto:%' AND d.opened_by ? 'arm') x
+   GROUP BY 1, 2, 3
   UNION ALL
-  SELECT 'manual_visitor', NULL::TEXT, count(*)
+  SELECT 'manual_visitor', NULL::TEXT, NULL::TEXT, count(*)
     FROM policy_jp.task_dispatches d WHERE d.task_id IN (SELECT m.task_id FROM policy_jp.contribution_auto_tasks_manual(true) m)
   UNION ALL
-  SELECT 'manual_open', NULL::TEXT, count(*)
+  SELECT 'manual_open', NULL::TEXT, NULL::TEXT, count(*)
     FROM policy_jp.task_dispatches d WHERE d.task_id IN (SELECT m.task_id FROM policy_jp.contribution_auto_tasks_manual(false) m)
 $$;
 COMMENT ON FUNCTION policy_jp.console_arm_election_counts IS
-  '主控台用：每支派工臂 × 每場選舉的佇列件數（election_id 空＝日常）。手動兩臂算日常。公開唯讀。2026-10-10（policy-ops #69）';
+  '主控台用：每支派工臂 × 每場選舉 × 職位的佇列件數（election_id 空＝日常）。手動兩臂算日常。公開唯讀。2026-10-10（policy-ops #69）';
 REVOKE ALL ON FUNCTION policy_jp.console_arm_election_counts() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION policy_jp.console_arm_election_counts() TO anon, authenticated, service_role;
 
@@ -62,6 +67,7 @@ DECLARE
   v_el policy_jp.elections%ROWTYPE;
   v_today DATE := policy_jp.activity_today();
   v_counts JSONB;
+  v_types JSONB;
 BEGIN
   SELECT * INTO v_el FROM policy_jp.elections e WHERE e.id = p_election_id;
   IF NOT FOUND THEN RETURN NULL; END IF;
@@ -70,6 +76,11 @@ BEGIN
   SELECT COALESCE(jsonb_object_agg(c.arm, jsonb_build_object('e', c.e, 'd', c.d)), '{}'::JSONB) INTO v_counts
     FROM (SELECT x.arm, sum(x.n) FILTER (WHERE x.election_id = v_el.id) AS e, sum(x.n) FILTER (WHERE x.election_id IS NULL) AS d
             FROM policy_jp.console_arm_election_counts() x GROUP BY x.arm) c;
+  -- 臂 → {職位: 這一屆的件數}
+  SELECT COALESCE(jsonb_object_agg(c.arm, c.t), '{}'::JSONB) INTO v_types
+    FROM (SELECT x.arm, jsonb_object_agg(COALESCE(x.election_type, ''), x.n) AS t
+            FROM (SELECT y.arm, y.election_type, sum(y.n) AS n FROM policy_jp.console_arm_election_counts() y
+                   WHERE y.election_id = v_el.id GROUP BY 1, 2) x GROUP BY x.arm) c;
 
   RETURN jsonb_build_object(
     'today', v_today,
@@ -97,6 +108,21 @@ BEGIN
                'daily_count', COALESCE((v_counts->s.arm->>'d')::BIGINT, 0),
                'stage_end', se.d,
                'stale', COALESCE((v_counts->s.arm->>'e')::BIGINT, 0) > 0 AND se.d IS NOT NULL AND se.d < v_today,
+               'by_type', COALESCE((
+                 SELECT jsonb_agg(jsonb_build_object(
+                          'election_type', NULLIF(ty.t, ''),
+                          'n', COALESCE((v_types->s.arm->>ty.t)::BIGINT, 0),
+                          'is_open', EXISTS (SELECT 1 FROM policy_jp.activity_open(s.arm, v_el.id, NULLIF(ty.t, ''))),
+                          'overridden', EXISTS (
+                            SELECT 1 FROM policy_jp.activity_overrides o
+                             WHERE o.activity = s.arm AND (o.election_id IS NULL OR o.election_id = v_el.id)
+                               AND (o.election_type IS NULL OR o.election_type = NULLIF(ty.t, ''))
+                               AND (o.expires_at IS NULL OR o.expires_at >= v_today)
+                               AND (o."force" <> 'window' OR o.open_until IS NULL OR o.open_until >= v_today)))
+                          ORDER BY (NULLIF(ty.t, '') = v_el.election_type) DESC NULLS LAST, ty.t)
+                   FROM (SELECT v_el.election_type AS t
+                          UNION SELECT k FROM jsonb_object_keys(COALESCE(v_types->s.arm, '{}'::JSONB)) k) ty
+               ), '[]'::JSONB),
                'windows', COALESCE((
                  SELECT jsonb_agg(jsonb_build_object(
                           'rule_id', r.id, 'window_kind', r.window_kind, 'election_types', to_jsonb(r.election_types),

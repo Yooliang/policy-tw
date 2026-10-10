@@ -600,7 +600,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   console_timeline_elections: { mig: [T_TIMELINE], why: "主控台時間軸的選舉下拉選單：離今天最近 300 場，退件與查無的不列；election_id 是 TEXT" },
   console_timeline: { mig: [T_TIMELINE, T_PER_ELECTION], why: "一場選舉的時間軸 jsonb（里程碑、各臂的段、今天開關、覆寫標記、規則區間；#69 起多這一屆／日常件數與過段標記）；一場選舉一個職位、沒有任期里程碑" },
   console_dispatch_election: { mig: [T_PER_ELECTION], why: "派工列 target → 選舉（election_id、參選紀錄），沒有＝日常；只給主控台算件數，不 GRANT 給 anon" },
-  console_arm_election_counts: { mig: [T_PER_ELECTION], why: "每支臂 × 每場選舉的佇列件數（空＝日常），一次掃 task_dispatches；公開唯讀" },
+  console_arm_election_counts: { mig: [T_PER_ELECTION], why: "每支臂 × 每場選舉 × 職位的佇列件數（空＝日常），一次掃 task_dispatches；職位沒寫就用那場選舉的職位；公開唯讀" },
   console_stage_end: { mig: [T_PER_ELECTION], why: "一場選舉某一段的結束日（告示日、投票日、投票日 +30）；日本站沒有任期里程碑，5～7 段不會過段" },
   // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
   //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----

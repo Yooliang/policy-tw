@@ -9,7 +9,10 @@
 --     election_key、politician_election_id、politician_election_ids 的第一筆（同一件的參選紀錄都在同一場）；都沒有＝NULL＝日常。
 --     規則開窗（contribution_auto_tasks_arms 的 keyed）只看 target.election_id；這裡多認參選紀錄，是為了把「補政見」這類只帶
 --     參選紀錄的任務也歸到它的那一屆（只影響主控台的件數，不影響派工）。
---   * console_arm_election_counts()：每支臂 × 每場選舉的派工件數（election_id 空＝日常），一次掃 task_dispatches。
+--   * console_dispatch_election_type(target)：一筆派工列是哪個職位。target 的 election_type；沒有就從參選紀錄
+--     （politician_election_id、politician_election_ids 的第一筆、politician_id＋election_id）補；都沒有＝NULL（不分職位）。
+--   * console_arm_election_counts()：每支臂 × 每場選舉 × 職位的派工件數（election_id 空＝日常），一次掃 task_dispatches。
+--     維護者 10-10 追加：件數由資料端照「屆別 × 職位」算好，畫面預設照一屆彙總、每支臂可點開看各職位（policy-ops #69）。
 --     自動缺口的臂名照 console_arm_status 讀 opened_by.arm（P1 之前回填的舊列沒有這個鍵、不計，同一個已知落差）；
 --     兩支手動臂（manual_visitor／manual_open）一律算日常。
 --   * console_stage_end(選舉, 段)：這場選舉的某一段在哪一天結束（之後還有件數＝「過段仍在派」，主控台標紅）。
@@ -19,7 +22,9 @@
 --       5 就任、6 任期中 → 任期屆滿（就任段的任務〔補該屆政見〕整個任期都有效，不算過段）
 --       1 常時、7 卸任交接 → 不會過段（NULL）
 --   * console_timeline(選舉)：每支臂多 election_count（這一屆的件數）、daily_count（不屬於任何一屆的件數）、
---     stage_end、stale（這一屆的件數 > 0 而且這一段已經結束）；最上層多 election_total、daily_total。queue_count（全站）照舊。
+--     stage_end、stale（這一屆的件數 > 0 而且這一段已經結束）、by_type（這一屆各職位：件數、今天對這個職位開不開、有沒有覆寫蓋到；
+--     列出這場選舉的每個職位，加上件數裡出現的職位與「不分職位」〔election_type 空〕）；最上層多 election_total、daily_total。
+--     queue_count（全站）照舊。
 --
 -- 不動的：派工、seed、規則、覆寫、console_arm_status()、console_arm_stages()；不回 created_by 或任何帳號資料。
 -- 權限：照 20261010110000，SECURITY DEFINER、釘 search_path、REVOKE ALL FROM PUBLIC，公開的只 GRANT EXECUTE 給 anon／authenticated／service_role；
@@ -45,22 +50,43 @@ COMMENT ON FUNCTION console_dispatch_election IS
 REVOKE ALL ON FUNCTION console_dispatch_election(JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION console_dispatch_election(JSONB) TO service_role;
 
-CREATE OR REPLACE FUNCTION console_arm_election_counts()
-RETURNS TABLE (arm TEXT, election_id INTEGER, n BIGINT)
+CREATE OR REPLACE FUNCTION console_dispatch_election_type(p_target JSONB) RETURNS TEXT
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-  SELECT d.opened_by->>'arm', console_dispatch_election(d.target), count(*)
-    FROM task_dispatches d
-   WHERE d.task_id LIKE 'auto:%' AND d.opened_by ? 'arm'
-   GROUP BY 1, 2
+  SELECT COALESCE(
+    NULLIF(p_target->>'election_type', ''),
+    (SELECT pe.election_type FROM politician_elections pe WHERE pe.id = election_id_or_null(p_target->>'politician_election_id')),
+    (SELECT pe.election_type FROM politician_elections pe
+      WHERE jsonb_typeof(p_target->'politician_election_ids') = 'array'
+        AND pe.id = election_id_or_null(p_target->'politician_election_ids'->>0)),
+    (SELECT pe.election_type FROM politician_elections pe
+      WHERE p_target->>'politician_id' ~ '^[0-9a-fA-F-]{36}$' AND pe.politician_id::TEXT = p_target->>'politician_id'
+        AND pe.election_id = console_dispatch_election(p_target)
+      ORDER BY pe.id LIMIT 1)
+  )
+$$;
+COMMENT ON FUNCTION console_dispatch_election_type IS
+  '主控台用：一筆派工列（target）是哪個職位；target.election_type → 參選紀錄（politician_election_id、politician_election_ids[0]、人物＋選舉）；都沒有＝NULL（不分職位）。'
+  '只給主控台算件數，不影響派工。2026-10-10（policy-ops #69）';
+REVOKE ALL ON FUNCTION console_dispatch_election_type(JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION console_dispatch_election_type(JSONB) TO service_role;
+
+CREATE OR REPLACE FUNCTION console_arm_election_counts()
+RETURNS TABLE (arm TEXT, election_id INTEGER, election_type TEXT, n BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT x.arm, x.eid, CASE WHEN x.eid IS NULL THEN NULL ELSE console_dispatch_election_type(x.target) END, count(*)
+    FROM (SELECT d.opened_by->>'arm' AS arm, console_dispatch_election(d.target) AS eid, d.target
+            FROM task_dispatches d
+           WHERE d.task_id LIKE 'auto:%' AND d.opened_by ? 'arm') x
+   GROUP BY 1, 2, 3
   UNION ALL
-  SELECT 'manual_visitor', NULL::INTEGER, count(*)
+  SELECT 'manual_visitor', NULL::INTEGER, NULL::TEXT, count(*)
     FROM task_dispatches d WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(true) m)
   UNION ALL
-  SELECT 'manual_open', NULL::INTEGER, count(*)
+  SELECT 'manual_open', NULL::INTEGER, NULL::TEXT, count(*)
     FROM task_dispatches d WHERE d.task_id IN (SELECT m.task_id FROM contribution_auto_tasks_manual(false) m)
 $$;
 COMMENT ON FUNCTION console_arm_election_counts IS
-  '主控台用：每支派工臂 × 每場選舉的佇列件數（election_id 空＝日常，不屬於任何一屆）。自動缺口照 opened_by.arm 分臂（P1 之前回填的舊列不計，同 console_arm_status）；'
+  '主控台用：每支派工臂 × 每場選舉 × 職位的佇列件數（election_id 空＝日常，不屬於任何一屆，職位也是空；職位空而 election_id 有值＝這一屆不分職位）。自動缺口照 opened_by.arm 分臂（P1 之前回填的舊列不計，同 console_arm_status）；'
   '手動兩臂算日常。公開唯讀。2026-10-10（policy-ops #69）';
 REVOKE ALL ON FUNCTION console_arm_election_counts() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION console_arm_election_counts() TO anon, authenticated, service_role;
@@ -91,6 +117,7 @@ DECLARE
   v_el elections%ROWTYPE;
   v_today DATE := activity_today();
   v_counts JSONB;
+  v_types JSONB;
 BEGIN
   IF p_election_id IS NULL OR p_election_id !~ '^[0-9]+$' THEN RETURN NULL; END IF;
   v_id := p_election_id::INTEGER;
@@ -101,6 +128,11 @@ BEGIN
   SELECT COALESCE(jsonb_object_agg(c.arm, jsonb_build_object('e', c.e, 'd', c.d)), '{}'::JSONB) INTO v_counts
     FROM (SELECT x.arm, sum(x.n) FILTER (WHERE x.election_id = v_id) AS e, sum(x.n) FILTER (WHERE x.election_id IS NULL) AS d
             FROM console_arm_election_counts() x GROUP BY x.arm) c;
+  -- 臂 → {職位: 這一屆的件數}（職位空記成 ''＝不分職位）
+  SELECT COALESCE(jsonb_object_agg(c.arm, c.t), '{}'::JSONB) INTO v_types
+    FROM (SELECT x.arm, jsonb_object_agg(COALESCE(x.election_type, ''), x.n) AS t
+            FROM (SELECT y.arm, y.election_type, sum(y.n) AS n FROM console_arm_election_counts() y
+                   WHERE y.election_id = v_id GROUP BY 1, 2) x GROUP BY x.arm) c;
 
   RETURN jsonb_build_object(
     'today', v_today,
@@ -128,6 +160,21 @@ BEGIN
                'daily_count', COALESCE((v_counts->s.arm->>'d')::BIGINT, 0),
                'stage_end', se.d,
                'stale', COALESCE((v_counts->s.arm->>'e')::BIGINT, 0) > 0 AND se.d IS NOT NULL AND se.d < v_today,
+               'by_type', COALESCE((
+                 SELECT jsonb_agg(jsonb_build_object(
+                          'election_type', NULLIF(ty.t, ''),
+                          'n', COALESCE((v_types->s.arm->>ty.t)::BIGINT, 0),
+                          'is_open', EXISTS (SELECT 1 FROM activity_open(s.arm, v_id, NULLIF(ty.t, ''))),
+                          'overridden', EXISTS (
+                            SELECT 1 FROM activity_overrides o
+                             WHERE o.activity = s.arm AND (o.election_id IS NULL OR o.election_id = v_id)
+                               AND (o.election_type IS NULL OR o.election_type = NULLIF(ty.t, ''))
+                               AND (o.expires_at IS NULL OR o.expires_at >= v_today)
+                               AND (o."force" <> 'window' OR o.open_until IS NULL OR o.open_until >= v_today)))
+                          ORDER BY array_position(v_el.election_types, NULLIF(ty.t, '')) NULLS LAST, ty.t)
+                   FROM (SELECT x AS t FROM unnest(v_el.election_types) x
+                          UNION SELECT k FROM jsonb_object_keys(COALESCE(v_types->s.arm, '{}'::JSONB)) k) ty
+               ), '[]'::JSONB),
                'windows', COALESCE((
                  SELECT jsonb_agg(jsonb_build_object(
                           'rule_id', r.id, 'window_kind', r.window_kind, 'election_types', to_jsonb(r.election_types),

@@ -13,7 +13,8 @@ import { buildArmsDb, migrationNames, readMig } from "./arms-pglite.ts";
 const TW_MIG = "20261010140000_console_timeline_per_election.sql";
 const JP_MIG = "20261010140100_policy_jp_console_timeline_per_election.sql";
 
-type Arm = { arm: string; stage: number; election_count: number; daily_count: number; stage_end: string | null; stale: boolean; queue_count: number | null };
+type ByType = { election_type: string | null; n: number; is_open: boolean; overridden: boolean };
+type Arm = { arm: string; stage: number; election_count: number; daily_count: number; stage_end: string | null; stale: boolean; queue_count: number | null; by_type: ByType[] };
 type Timeline = { today: string; election_total: number; daily_total: number; arms: Arm[] };
 
 const MANUAL_STUB = `CREATE FUNCTION contribution_auto_tasks_manual(p_visitor boolean, p_id uuid DEFAULT NULL)
@@ -24,7 +25,7 @@ async function twDb(): Promise<PGlite> {
   const d = await buildArmsDb({
     afterP1Sql: MANUAL_STUB + `
       ALTER TABLE elections ADD COLUMN IF NOT EXISTS name TEXT;
-      CREATE TABLE IF NOT EXISTS politician_elections (id integer PRIMARY KEY, election_id integer);`,
+      CREATE TABLE IF NOT EXISTS politician_elections (id integer PRIMARY KEY, election_id integer, election_type text, politician_id uuid);`,
   });
   await d.exec(await readMig("20261009260000_console_admin.sql"));
   await d.exec(await readMig("20261010110000_console_arm_timeline.sql"));
@@ -52,7 +53,7 @@ const arm = (t: Timeline, name: string) => {
 Deno.test("正見：派工列照 target 歸屆（election_id、election_key、參選紀錄），沒有選舉＝日常；舊列（沒有 arm）不計", async () => {
   const d = await twDb();
   const key26 = (await d.query<{ k: string }>("SELECT election_key AS k FROM elections WHERE id = 2026")).rows[0].k;
-  await d.exec("INSERT INTO politician_elections VALUES (501, 2022), (502, 2026)");
+  await d.exec("INSERT INTO politician_elections VALUES (501, 2022, '縣市長', NULL), (502, 2026, '村里長', NULL)");
   await dispatch(d, "r1", "raw:roster_check", { election_id: 2022, region: "臺北市" });
   await dispatch(d, "r2", "raw:roster_check", { election_id: "2022", region: "新北市" });
   await dispatch(d, "r3", "raw:roster_check", { election_id: 2026 });
@@ -64,7 +65,7 @@ Deno.test("正見：派工列照 target 歸屆（election_id、election_key、�
   await dispatch(d, "o1", null, { election_id: 2022 });
 
   const counts = (await d.query<{ arm: string; election_id: number | null; n: number }>(
-    "SELECT arm, election_id, n::int AS n FROM console_arm_election_counts() WHERE n > 0 ORDER BY arm, election_id NULLS FIRST",
+    "SELECT arm, election_id, sum(n)::int AS n FROM console_arm_election_counts() WHERE n > 0 GROUP BY 1, 2 ORDER BY arm, election_id NULLS FIRST",
   )).rows;
   const e22key = (await d.query<{ k: string }>("SELECT election_key AS k FROM elections WHERE id = 2022")).rows[0].k;
   assertEquals(counts, [
@@ -80,7 +81,7 @@ Deno.test("正見：派工列照 target 歸屆（election_id、election_key、�
 
 Deno.test("正見：選 2022 只算 2022；名單清查、開票結果過段標 stale，任內政見不標；日常另計、不隨屆別變", async () => {
   const d = await twDb();
-  await d.exec("INSERT INTO politician_elections VALUES (501, 2022), (502, 2026)");
+  await d.exec("INSERT INTO politician_elections VALUES (501, 2022, '縣市長', NULL), (502, 2026, '村里長', NULL)");
   await dispatch(d, "r1", "raw:roster_check", { election_id: 2022 });
   await dispatch(d, "r2", "raw:roster_check", { election_id: 2022 });
   await dispatch(d, "r3", "raw:roster_check", { election_id: 2026 });
@@ -117,6 +118,32 @@ Deno.test("正見：選 2022 只算 2022；名單清查、開票結果過段標 
   assertEquals(await end(2024, 4), "2024-05-20", "就職日各職位取最晚");
   assertEquals(await end(2026, 1), null);
   assertEquals(await end(2026, 7), null);
+});
+
+Deno.test("正見：各職位件數（target 的 election_type、參選紀錄、人物＋選舉）與各職位開關、覆寫；這一屆的每個職位都列出來", async () => {
+  const d = await twDb();
+  await d.exec("INSERT INTO politician_elections VALUES (501, 2026, '縣市長', NULL), (502, 2026, '村里長', NULL), (503, 2026, '縣市議員', '00000000-0000-0000-0000-0000000000aa')");
+  await dispatch(d, "a", "raw:roster_check", { election_id: 2026, election_type: "村里長" });
+  await dispatch(d, "b", "raw:roster_check", { election_id: 2026, election_type: "村里長" });
+  await dispatch(d, "c", "raw:roster_check", { election_id: 2026, election_type: "縣市長" });
+  await dispatch(d, "e", "raw:roster_check", { election_id: 2026 });
+  await dispatch(d, "f", "raw:policy_missing", { politician_election_ids: [501] });
+  await dispatch(d, "g", "raw:progress_stale", { election_id: 2026, politician_id: "00000000-0000-0000-0000-0000000000aa" });
+  await d.query("SELECT console_admin_override_create($1,$2,$3,$4,$5,$6,$7,$8,$9)", ["raw:roster_check", 2026, "村里長", "closed", null, null, "測試", null, "t@example.com"]);
+
+  const t = await tl(d, "2026");
+  const rc = arm(t, "raw:roster_check");
+  assertEquals(rc.election_count, 4);
+  const types26 = (await d.query<{ t: string[] }>("SELECT election_types AS t FROM elections WHERE id = 2026")).rows[0].t;
+  // 這一屆的每個職位都列出來（件數 0 也列），照選舉的職位順序；不分職位的排最後
+  assertEquals(rc.by_type.map((b) => b.election_type), [...types26, null]);
+  const by = Object.fromEntries(rc.by_type.map((b) => [b.election_type ?? "", b]));
+  assertEquals([by["村里長"].n, by["縣市長"].n, by[""].n], [2, 1, 1]);
+  assertEquals(rc.by_type.reduce((n, b) => n + b.n, 0), rc.election_count, "各職位加起來等於這一屆");
+  assertEquals([by["村里長"].is_open, by["村里長"].overridden], [false, true], "只關村里長");
+  assertEquals([by["縣市長"].is_open, by["縣市長"].overridden], [true, false]);
+  assertEquals(arm(t, "raw:policy_missing").by_type.find((b) => b.election_type === "縣市長")?.n, 1, "從參選紀錄補職位");
+  assertEquals(arm(t, "raw:progress_stale").by_type.find((b) => b.election_type === "縣市議員")?.n, 1, "從人物＋選舉補職位");
 });
 
 Deno.test("正見：anon 能讀件數與段的結束日、不能直接呼叫 console_dispatch_election；回應不含帳號資料", async () => {
@@ -164,6 +191,7 @@ Deno.test("日本站：只算這一屆、日常另計；投票日 +30 後開票�
   let t = await tl(d, ELECTION, "policy_jp");
   assertEquals([t.election_total, t.daily_total], [1, 2], "election_id 指到不存在的選舉算日常");
   assertEquals([arm(t, "roster_check").election_count, arm(t, "roster_check").daily_count, arm(t, "roster_check").stale], [1, 1, false]);
+  assertEquals(arm(t, "roster_check").by_type.map((b) => [b.election_type, b.n]), [["national_lower", 1]], "沒寫職位就用那場選舉的職位");
   const end = async (s: number) =>
     (await d.query<{ d: string | null }>("SELECT policy_jp.console_stage_end($1, $2::smallint)::text AS d", [ELECTION, s])).rows[0].d;
   assertEquals([await end(2), await end(3), await end(4), await end(5)], ["2028-06-27", "2028-07-09", "2028-08-08", null]);
