@@ -90,6 +90,21 @@ const DEVIATED: Record<string, { prev: string; why: string; jpEdits: Edit[] }> =
   },
 };
 
+/**
+ * 日本專屬の偏離（二つ目、20261010120000，policy-ops#60）：refresh_dispatch_blocked の冷卻計算に「roster_check の not_found は告示日で打ち切る」を一行足す。
+ * 理由：冷卻は task_dispatches.cooling（/next が配るかどうか）を決めるので、臂の側（task_unavailable）だけ直しても告示日に配られない。
+ * 正見に告示日という概念はなく、跟進しない。走樣比對は引き続き 130000 の版（PAIRS）を読み、ここで「偏離版 ＋ jpEdits ＝ 130000 の版」を守る。
+ */
+const KANA_MIG = "20261010120000_policy_jp_kana_optional.sql";
+const KANA_SQL = await readMig(KANA_MIG);
+const DEVIATED_KANA: Record<string, { prev: string; why: string; jpEdits: Edit[] }> = {
+  refresh_dispatch_blocked: {
+    prev: MIG_SQL,
+    why: "roster_check の not_found の冷卻を min(14 日, 告示日の前日まで) にする（roster_not_found_released の一行）。正見に告示日の冷卻はない",
+    jpEdits: [["      AND NOT policy_jp.roster_not_found_released(tc.task_id, tc.outcome, tc.checked_at)  -- 日本版：roster_check の not_found だけ告示日で冷卻を打ち切る\n", ""]],
+  },
+};
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -268,6 +283,30 @@ for (const [name, v] of Object.entries(DEVIATED)) {
   });
 }
 
+for (const [name, v] of Object.entries(DEVIATED_KANA)) {
+  Deno.test(`走樣（日本專屬偏離・告示日）${name}：偏離版 ＋ 登記的 jpEdits ＝ 130000 の版（逐字）；偏離は一行だけ、登記外の変更は紅`, () => {
+    assert(PAIRS.some((p) => p.name === name), `${name} 要在複本清單 PAIRS 裡`);
+    assert(v.why.length > 10 && v.jpEdits.length > 0);
+    const dev = fnText(KANA_SQL, `policy_jp.${name}`);
+    const prev = fnText(v.prev, `policy_jp.${name}`);
+    assertEquals(applyEdits(dev, v.jpEdits), prev);
+    assertNotEquals(dev, prev, "偏離版と前の版が同じ＝偏離していない");
+    // 還原驗證：登記外の一字の変更、登記した行の削除（偏離が消えた版）はどちらも対応が崩れる
+    assertNotEquals(applyEdits(dev.replace("RETURNS INTEGER", "RETURNS INTEGER /* x */"), v.jpEdits), prev);
+    assertEquals(dev.split("roster_not_found_released").length - 1, 1, "偏離は roster_not_found_released の一か所だけ");
+  });
+}
+
+Deno.test("走樣（日本專屬偏離・告示日）：20261010120000 が複本を定義するのは登記した偏離だけ", () => {
+  const copies = new Set(PAIRS.map((p) => p.name));
+  const defined = [...KANA_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
+  for (const n of defined) if (copies.has(n)) assert(n in DEVIATED_KANA, `${n} は複本。${KANA_MIG} で再定義するなら DEVIATED_KANA に登記（jpEdits つき）`);
+  for (const n of Object.keys(DEVIATED_KANA)) assert(defined.includes(n), `${n} を偏離として登記したが定義がない`);
+  for (const n of defined) assert(fnText(KANA_SQL, `policy_jp.${n}`).includes("SET search_path = policy_jp, pg_temp"), `${n} の search_path が釘付けされていない`);
+  const stripped = KANA_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+});
+
 Deno.test("走樣（日本專屬偏離）：20261009300000 定義的函式＝登記的偏離複本＋JP_ONLY 登記的日本專屬函式；偏離的複本不能是別的 migration 跟進版", () => {
   const defined = [...DEV_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
   const dev = Object.keys(DEVIATED);
@@ -415,7 +454,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED)) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA)) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
@@ -447,6 +486,7 @@ const T_BOOST = "20261010030000"; // 插隊 jp-boost（正見 single_queue_boost
 const T_CAND = "20261010040000"; // 選舉鏈第 2 步：參選人有誰（roster_check＋candidacy）
 const T_PROFILE = "20261010050000"; // 選舉鏈第 3 步：參選人建檔（profile_gap／profile_detail_gap＋politician）
 const T_POLICY = "20261010060000"; // 選舉鏈第 4 步：這次的政見（policy_missing＋policy）
+const T_KANA = "20261010120000"; // 告示前の読み（kana）は選填＋roster_check の not_found 冷卻を告示日で打ち切る（policy-ops#60）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -509,7 +549,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_waiting: { mig: [T_APPLY], why: "（視圖）通過驗證、等團體落庫的交件清單（少數是正常，久了才是問題）；service_role 用" },
 
   // ---- 20261009210100 gap_arms：兩支新缺口臂＋#503 ----
-  task_unavailable: { mig: [T_ARMS], why: "任務現在能不能派（飽和／no_change 等票或已通過／冷卻中／資料型交件通過等落庫），臂在 LIMIT cap 之前用它排除（#503）；前三項與 refresh_dispatch_blocked 同定義，有行為對照測試" },
+  task_unavailable: { mig: [T_ARMS, T_KANA], why: "任務現在能不能派（飽和／no_change 等票或已通過／冷卻中／資料型交件通過等落庫），臂在 LIMIT cap 之前用它排除（#503）；前三項與 refresh_dispatch_blocked 同定義，有行為對照測試" },
   regional_stat_label: { mig: [T_ARMS], why: "統計項目的日文名（任務描述用）" },
   contribution_auto_tasks_local_government_missing: { mig: [T_ARMS, T_CHAIN, T_PRIO], why: "臂：任期満了調查裡出現卻不在 local_governments 的團體（都道府県先）；250400 改成選舉鏈第 1 步（只做開著的選舉的團體與所屬都道府県）" },
   contribution_auto_tasks_regional_stats_missing: { mig: [T_ARMS, T_CHAIN, T_PRIO], why: "臂：local_governments 裡統計（人口・面積・歳出・高齢化率）不齊的團體，一團體一件；250400 改成選舉鏈第 1 步（只做開著的選舉的團體）" },
@@ -540,7 +580,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   same_claim_office: { mig: [T_SAME], why: "選舉種類 → 比對用的職位（head／assembly；國政＝種類本身），同 term_expirations.office_kind" },
   same_claim_same_term: { mig: [T_SAME], why: "選舉的「同一屆」：regular＝同一列任期満了的 [−180, +60] 窗口（查不到就差 ≤ 180 天）、其他事由＝同一天" },
   same_claim_matches: { mig: [T_SAME, T_PROFILE, T_POLICY], why: "登記表的 SQL 那一半：型別＋payload → 在庫列與審議中提交（附 your_network_voted）；jp-report 交件擋 resolved_claim、jp-next 附 same_claims" },
-  same_claim_same_content: { mig: [T_SAME2, T_PROFILE, T_POLICY], why: "同一件事的兩筆內容是否相同（收編用：選舉＝投票日・種類・事由、統計＝值・單位、團體＝名稱・讀音・種類）" },
+  same_claim_same_content: { mig: [T_SAME2, T_PROFILE, T_POLICY, T_KANA], why: "同一件事的兩筆內容是否相同（收編用：選舉＝投票日・種類・事由、統計＝值・單位、團體＝名稱・讀音・種類）" },
   same_claim_supersede: { mig: [T_SAME2], why: "上線後收編（照正見 2026-09-21 supersedeDuplicates，正見是 TS、日本站是 SQL）：已落庫那筆 → 同一件事內容相同的等票提交 superseded＋edit_history" },
   same_claim_supersede_trg: { mig: [T_SAME2], why: "觸發器函式：election／regional_stat／local_government 轉 applied 時呼叫 same_claim_supersede" },
   same_claim_merge_pending: { mig: [T_SAME2], why: "一次性收編 #531 上線前的重複：兩筆都等票的，後交的票與交件者那一票併進先交的、後交的 superseded" },
@@ -559,20 +599,25 @@ const JP_ONLY: Record<string, JpOnly> = {
   task_boost_remaining: { mig: [T_BOOST], why: "一筆插隊還剩多少沒領；同正見 20260921000030，改叫 policy_jp 的表" },
 
   // ---- 20261010040000 chain_candidacy：選舉鏈第 2 步（參選人有誰）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
-  chain_task_checked: { mig: [T_CAND], why: "選舉鏈進度用：這個任務有人回報查過（confirmed／not_found）而且還在冷卻中的最近時間；roster 步驟的 done 靠它" },
-  candidacy_match_politicians: { mig: [T_CAND], why: "candidacy 落庫的同一人判定（SCHEMA.md：kana＋地區＋birth_year）：同名同讀音、生年不衝突、同團體有參選或任期的人" },
+  chain_task_checked: { mig: [T_CAND, T_KANA], why: "選舉鏈進度用：這個任務有人回報查過（confirmed／not_found）而且還在冷卻中的最近時間；roster 步驟的 done 靠它" },
+  candidacy_match_politicians: { mig: [T_CAND, T_KANA], why: "candidacy 落庫的同一人判定（SCHEMA.md：kana＋地區＋birth_year）：同名同讀音、生年不衝突、同團體有參選或任期的人" },
   candidacy_status_rank: { mig: [T_CAND], why: "參選狀態的先後（considering < declared < filed < withdrawn／elected／not_elected）；落庫只准往後走" },
-  apply_candidacy: { mig: [T_CAND], why: "candidacy 交件落庫（寫 politician_elections，新人才建 politicians；不存得票數）；日本專屬型別" },
-  contribution_auto_tasks_roster_check: { mig: [T_CAND], why: "臂：開著的、已上線的選舉的立候補者名簿 → roster_check（正見 raw 臂裡 roster_check 一段的日本版：沒有中選會名冊，完成合図是 no_change）" },
+  apply_candidacy: { mig: [T_CAND, T_KANA], why: "candidacy 交件落庫（寫 politician_elections，新人才建 politicians；不存得票數）；日本專屬型別" },
+  contribution_auto_tasks_roster_check: { mig: [T_CAND, T_KANA], why: "臂：開著的、已上線的選舉的立候補者名簿 → roster_check（正見 raw 臂裡 roster_check 一段的日本版：沒有中選會名冊，完成合図是 no_change）" },
 
   // ---- 20261010050000 chain_profile：選舉鏈第 3 步（參選人建檔）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
-  chain_profile_missing: { mig: [T_PROFILE], why: "人物建檔的缺口（birth_year／careers／career_sources）；齊了＝NULL。profile_gap・profile_detail_gap 臂與 election_chain_progress 的 profile 共用同一個判準" },
-  chain_profile_done: { mig: [T_PROFILE], why: "人物建檔是否已完成：缺口沒有，或缺口各自被回報查無（no_change not_found）而且還在冷卻中；人物不存在＝false" },
+  chain_profile_missing: { mig: [T_PROFILE, T_KANA], why: "人物建檔的缺口（birth_year／careers／career_sources）；齊了＝NULL。profile_gap・profile_detail_gap 臂與 election_chain_progress 的 profile 共用同一個判準" },
+  chain_profile_done: { mig: [T_PROFILE, T_KANA], why: "人物建檔是否已完成：缺口沒有，或缺口各自被回報查無（no_change not_found）而且還在冷卻中；人物不存在＝false" },
   chain_profile_subjects: { mig: [T_PROFILE], why: "建檔的對象：開著的、已上線的選舉裡有參選紀錄（上線、非退選）的人；多場選舉掛在投票日最早的那一場" },
-  apply_politician: { mig: [T_PROFILE], why: "politician 交件落庫（既存的人補生年、學歷・經歷；只補空欄位、違うなら conflict）；日本專屬型別" },
-  contribution_auto_tasks_profile_gap: { mig: [T_PROFILE], why: "臂：開著的選舉的參選人生年未登錄 → profile_gap（正見 raw 臂 profile_gap 一段的日本版：日本站人物表只有 name／kana／birth_year）" },
-  contribution_auto_tasks_profile_detail_gap: { mig: [T_PROFILE], why: "臂：參選人沒有學歷・經歷，或有項目沒有出處 → profile_detail_gap（正見 profile_details／career_sources 兩支臂的日本版，一支臂兩種 kind）" },
-  same_claim_matches_politician: { mig: [T_PROFILE], why: "同一件事（politician）的比對本體：人物 id ＋ 事實（生年・學歷・經歷各項）；same_claim_matches 分派器呼叫" },
+  apply_politician: { mig: [T_PROFILE, T_KANA], why: "politician 交件落庫（既存的人補生年、學歷・經歷；只補空欄位、違うなら conflict）；日本專屬型別" },
+  contribution_auto_tasks_profile_gap: { mig: [T_PROFILE, T_KANA], why: "臂：開著的選舉的參選人生年未登錄 → profile_gap（正見 raw 臂 profile_gap 一段的日本版：日本站人物表只有 name／kana／birth_year）" },
+  contribution_auto_tasks_profile_detail_gap: { mig: [T_PROFILE, T_KANA], why: "臂：參選人沒有學歷・經歷，或有項目沒有出處 → profile_detail_gap（正見 profile_details／career_sources 兩支臂的日本版，一支臂兩種 kind）" },
+  same_claim_matches_politician: { mig: [T_PROFILE, T_KANA], why: "同一件事（politician）的比對本體：人物 id ＋ 事實（生年・學歷・經歷各項）；same_claim_matches 分派器呼叫" },
+
+  // ---- 20261010120000 kana_optional（policy-ops#60）：既存の関数の再定義（上の各 mig 清單に T_KANA を足した）と新しい三つの小さな関数 ----
+  election_notice_date: { mig: [T_KANA], why: "選挙の告示日（election_milestones_all の announced・整場。里程碑表の列が優先、無ければ elections.notice_date）；記録がなければ NULL" },
+  candidacy_kana_required: { mig: [T_KANA], why: "candidacy に kana が要るか＝告示日以降か。告示日の記録がない選挙は告示前扱い。apply_candidacy と jp-report の入口（contribute-handler）が同じ関数を見る" },
+  roster_not_found_released: { mig: [T_KANA], why: "roster_check の not_found を、告示日が来たので冷卻に数えないか（冷卻＝min(14 日, 告示日の前日まで)）。refresh_dispatch_blocked・task_unavailable・chain_task_checked が共有する一つの判定" },
 
   // ---- 20261010060000 chain_policy：選舉鏈第 4 步（這次的政見）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
   chain_policy_subjects: { mig: [T_POLICY], why: "公約的對象：開著的、已上線的選舉裡 declared／filed／elected／not_elected 的上線參選紀錄（considering 與退選不派）" },
@@ -580,7 +625,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   policy_trim: { mig: [T_POLICY], why: "前後の空白（全角空白も）を落とす（政見の題名・要約・分野・原文位置の字數判定）；TS の jpTrim と同じ集合（對齊テスト）" },
   policy_title_key: { mig: [T_POLICY], why: "政見題名的正規化（NFKC・小文字・空白除去）＝同一件事的鍵；TS 版 policyTitleKey 有對齊測試" },
   apply_policy: { mig: [T_POLICY], why: "policy 交件落庫（公約 origin=pledge 掛在參選上；同參選同題名＝unchanged／要約不同＝conflict）；日本專屬型別" },
-  contribution_auto_tasks_policy_missing: { mig: [T_POLICY], why: "臂：開著的選舉的候選人（declared 以上）沒有任何公約 → policy_missing（正見 raw 臂 policy_missing 一段的日本版；term_policy_missing 屬於往回補，這一步不做）" },
+  contribution_auto_tasks_policy_missing: { mig: [T_POLICY, T_KANA], why: "臂：開著的選舉的候選人（declared 以上）沒有任何公約 → policy_missing（正見 raw 臂 policy_missing 一段的日本版；term_policy_missing 屬於往回補，這一步不做）" },
   same_claim_matches_policy: { mig: [T_POLICY], why: "同一件事（policy）的比對本體：參選紀錄 id ＋ 題名正規化；same_claim_matches 分派器呼叫" },
 };
 
@@ -725,8 +770,8 @@ Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本
   assertThrows(() => assertNoDrift(d));
 
   // 五、JP_ONLY 的函式被後面的 migration 重新定義（或從 mig 清單漏寫）紅
-  d = bite({ [FAKE]: fn("task_unavailable") });
-  assertEquals(d.misplaced, [`task_unavailable：登記 ${T_ARMS}，實際 ${T_ARMS}、${ID(FAKE)}`]);
+  d = bite({ [FAKE]: fn("lg_pref_code") });
+  assertEquals(d.misplaced, [`lg_pref_code：登記 ${T_APPLY}，實際 ${T_APPLY}、${ID(FAKE)}`]);
   assertThrows(() => assertNoDrift(d));
   d = bite({}, { ...JP_ONLY, contribution_auto_tasks_arms: { ...JP_ONLY.contribution_auto_tasks_arms, mig: [T_DISPATCH, T_ED, T_ARMS] } });
   assertEquals(d.misplaced.length, 1);

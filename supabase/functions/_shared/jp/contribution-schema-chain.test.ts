@@ -38,13 +38,14 @@ Deno.test("candidacy：最小可過的 payload（新的人＝name＋kana）；�
 
 Deno.test("candidacy：必須欄位が欠けると 400（人物・選挙・状態・日付・選挙区）", () => {
   assertEquals(paths(candidacy({}, ["name"])), ["payload.name"]);
-  assertEquals(paths(candidacy({}, ["kana"])), ["payload.kana"]);
+  // kana は告示前は選填（告示日以降は必須だが、それは庫を見る入口 contribute-handler と SQL 落庫が守る：policy-ops#60）
+  assert(candidacy({}, ["kana"]).ok, "schema の段階では kana なしも通る");
   assertEquals(paths(candidacy({}, ["election_id"])), ["payload.election_id"]);
   assertEquals(paths(candidacy({}, ["candidacy_status"])), ["payload.candidacy_status"]);
   assertEquals(paths(candidacy({}, ["status_date"])), ["payload.status_date"]);
   assertEquals(paths(candidacy({}, ["district_kind"])), ["payload.district_kind"]);
-  // politician_id がなければ name と kana の両方が要る
-  assertEquals(paths(candidacy({}, ["name", "kana"])), ["payload.kana", "payload.name"]);
+  // politician_id がなければ name が要る（kana は告示前なら省略できる）
+  assertEquals(paths(candidacy({}, ["name", "kana"])), ["payload.name"]);
 });
 
 Deno.test("candidacy：欄位の形が違うと 400（election_id・状態・日付・kana・生年・politician_id）", () => {
@@ -171,7 +172,11 @@ Deno.test("politician：400 のケース（politician_id・事実なし・生年
   assertEquals(paths(politician({ career: ["x".repeat(201)] })), ["payload.career"]);
   assertEquals(paths(politician({ career: Array.from({ length: 31 }, (_, i) => `経歴${i}`) })), ["payload.career"]);
   assertEquals(paths(politician({ name: "別名" })), ["payload.name"]);
-  assertEquals(paths(politician({ kana: "べつ" })), ["payload.kana"]);
+  // kana は空欄を埋める用に受け付ける（ひらがなだけ）。名前は今も直せない
+  assertEquals(paths(politician({ kana: "ベツ" })), ["payload.kana"]);
+  assertEquals(paths(politician({ kana: "" })), ["payload.kana"]);
+  assert(politician({ kana: "べつ" }).ok);
+  assert(politician({ kana: "べつ" }, ["birth_year", "education", "career"]).ok, "kana だけでも事実が一つある");
   assertEquals(paths(politician({}, ["resolved_claim"])), ["payload.resolved_claim"]);
   assertEquals(paths(politician({ resolved_claim: "differs:abc" })), ["note"], "differs は note 必須");
   assert(politician({ resolved_claim: "differs:abc" }, [], { note: "出典の生年が違う（県のページは 1971 年）" }).ok);
