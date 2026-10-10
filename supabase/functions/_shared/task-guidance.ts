@@ -219,7 +219,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "只寫「提升」「加強」「全面推動」而沒有可量的標的，不算數值目標，填 stated=false。" +
     "**每個要素都要附 source_locator**＝原句在原文的位置（例：公報第 2 頁〈交通〉第 3 點、政見發表會影片 00:12:30、官網〈政見〉頁第 4 段），stated=false 也要寫你查的是原文哪一段；要素出自不同網址時用 source_url 指名（要是 source_urls 之一，不填就是第一個）。" +
     "**達成期限換得成日期就填 deadline_date**（會計年度是曆年）：「2028 年前」「2028 年底」→ 2028-12-31；「2027 年 6 月」→ 2027-06-30；「任內」→ target.term_end（這一任的卸任日）；「兩年內」這種相對期限，原文寫得出從哪天起算才換，否則只填 text、不填 deadline_date。" +
-    "三個要素一起交成一筆 policy_elements；只查得到其中幾個就只交那幾個，沒交的會留在任務裡給別人。已經有的要素（existing_elements）寫錯了，重交那一個要素就會覆蓋。" +
+    "missing_elements 列出的要素一起交成一筆 policy_elements；只查得到其中幾個就只交那幾個，沒交的會留在任務裡給別人。已經有的要素（existing_elements）寫錯了，重交那一個要素就會覆蓋。" +
     "找不到這條政見的原文 → no_change，outcome=not_found，checked_urls 列你找過的地方。" +
     gazetteImageNote,
 
