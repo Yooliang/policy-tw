@@ -91,7 +91,8 @@ export function claimKey(contributionType: string, payload: unknown): string | n
       // 日本站（jp-report）的欄位叫 candidacy_status（沒有 election_result）；正見的 payload 沒有這個欄位，鍵不變
       // 日本站 A 期（policy-ops#95）：withdrawn の届出前後（withdrawn_after_filing）の答えが違えば別の宣稱（true と false を同意票にしない）。正見の payload にこの欄位はなく、鍵は変わらない
       return `${head}|${norm(p.election_id)}|${norm(p.election_type)}|${norm(p.candidate_status ?? p.candidacy_status)}|${norm(p.election_result)}`
-        + (p.withdrawn_after_filing === undefined ? "" : `|wd:${norm(p.withdrawn_after_filing)}`);
+        // null（明寫「不知道」）と書かないは同じ答え（#589 審查の後続：同じ答えの二件が別の宣稱になって票が割れていた）
+        + (p.withdrawn_after_filing == null ? "" : `|wd:${norm(p.withdrawn_after_filing)}`);
     case "merge_politician": {
       // 同一對人、同一個結論＝同一個宣稱（keep／remove 對調也算同一對）
       const pair = [norm(p.keep_id), norm(p.remove_id)].sort().join("~");
