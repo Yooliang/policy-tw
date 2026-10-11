@@ -131,9 +131,16 @@ const PAIRS: Pair[] = [
   { name: "activity_require_rule" },
   {
     name: "activity_open",
-    note: "拿掉排除職位那一行（except_election_types 欄是村里長專用，日本版 activity_rules 沒有這欄）",
+    note: "拿掉排除職位那一行（except_election_types 欄是村里長專用，日本版 activity_rules 沒有這欄）；拿掉 20261011030000 加的「查不到照開」那一段（正見政見進度專用，日本站不跟）",
     edits: [[
       "       AND (r.except_election_types IS NULL OR p_election_type IS NULL OR NOT (p_election_type = ANY (r.except_election_types)))  -- 排除職位：職位未知（NULL）時不排除，寧可開著也不無聲關掉\n",
+      "",
+    ], [
+      "         -- 查不到屆別或職位時照開（規則 params.open_when_unknown，OPS #81；同 #470「職位未知時不排除」）：資料缺不該讓任務被收回，查不到的里程碑當作已到\n" +
+        "         OR (COALESCE((r.params->>'open_when_unknown')::BOOLEAN, false)\n" +
+        "             AND (p_election_id IS NULL OR p_election_type IS NULL)\n" +
+        "             AND (r.from_kind IS NULL OR f.on_date IS NULL OR p_today >= f.on_date + r.from_offset)\n" +
+        "             AND (r.until_kind IS NULL OR u.on_date IS NULL OR p_today <= u.on_date + r.until_offset))\n",
       "",
     ]],
   },
