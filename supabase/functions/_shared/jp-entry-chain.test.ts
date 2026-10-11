@@ -353,3 +353,70 @@ Deno.test("sameClaimInBatch の policy 分岐：同じ参選＋空白・全半�
   assert(!sameClaimInBatch(mk("pe1", "保育所の待機児童をなくす"), mk("pe1", "保育所の待機児童をなくす"), withoutPolicy), "分岐がなければ同じ件と判定されない＝一批の重複を止められない");
   assertEquals(Object.keys(withoutPolicy).length, Object.keys(BATCH_SAME_CLAIM).length - 1);
 });
+
+// ---------------------------------------------------------------------------------------------
+// A 期（policy-ops#95）：候補者の状態を確かめる任務（candidate_status_stale／not_running_recheck／candidacy_source_missing）の一整圈
+// ---------------------------------------------------------------------------------------------
+const PID_A1 = "5f0c8d6e-1111-4222-8333-444444444444";
+const PE_A1 = `${PID_A1}:${E1}:at_large`;
+const STALE_TASK = `auto:candidate_status_stale:${PE_A1}`;
+const FILING_TASK = `auto:not_running_recheck:filing:${PE_A1}`;
+const NR_TASK = `auto:not_running_recheck:${PE_A1}`;
+const SRC_TASK = `auto:candidacy_source_missing:${PE_A1}`;
+const a1Row = (task_id: string, task_type: string, extra: Record<string, unknown> = {}) => ({
+  task_id, task_type,
+  target: { politician_election_id: PE_A1, politician_id: PID_A1, election_id: E1, election_type: "mayor", lg_code: "232033", district_kind: "at_large", chain_lg_code: "232033", chain_step: "candidacy", ...extra },
+  what_we_need: "一宮市長選挙の候補者の状態を選挙管理委員会の一覧で確かめます。", hint_sources: ["一宮市 選挙管理委員会"], reward: 1, queue_at: "2026-10-01T00:00:00Z",
+});
+const FILED = { politician_id: PID_A1, election_id: E1, candidacy_status: "filed", status_date: "2027-04-08", district_kind: "at_large" };
+
+Deno.test("協議版號：エンドポイントが返す版は 0.13.0 以上（候補者の状態を確かめる任務を受け付けた版。手引き public/skill.md も 0.13.0）", async () => {
+  const { JP_PROTOCOL_VERSION } = await import("./jp/protocol.ts");
+  const [maj, min] = JP_PROTOCOL_VERSION.split(".").map(Number);
+  assert(maj > 0 || min >= 13, JP_PROTOCOL_VERSION);
+  const db = makeDb({ queue: [a1Row(STALE_TASK, "candidate_status_stale")] });
+  await withEntries(db, env(), async ({ next }) => {
+    const got = await getNext(next, N1);
+    assertEquals(got.json.protocol_version, JP_PROTOCOL_VERSION);
+  });
+});
+
+Deno.test("A 期の一整圈：candidate_status_stale を領して filed を candidacy で交件 201（目標 3 票）；candidacy_source_missing は同じ filed に選管の出典を足して 201；全程 policy_jp", async () => {
+  for (const [task, type] of [[STALE_TASK, "candidate_status_stale"], [SRC_TASK, "candidacy_source_missing"], [FILING_TASK, "not_running_recheck"]] as const) {
+    const db = makeDb({ queue: [a1Row(task, type)] });
+    await withEntries(db, env(), async ({ next, report }) => {
+      const got = await getNext(next, N1);
+      assertEquals((got.json.item as Row).task_type, type);
+      assertEquals((got.json.item as Row).task_id, task);
+      const payload = type === "not_running_recheck" ? { ...FILED, candidacy_status: "withdrawn", status_date: "2027-03-20", withdrawn_after_filing: true } : FILED;
+      const res = await post(report, R, { kind: "contribute", contribution_type: "candidacy", task_id: task, ...AGENT, dispatch_token: got.json.dispatch_token, payload, source_urls: OFFICIAL });
+      assertEquals(res.status, 201, `${type}: ${JSON.stringify(res.json)}`);
+      assertEquals([res.json.contribution_type, res.json.status, res.json.required_agree], ["candidacy", "pending", 3]);
+      assertEquals(db.contributions[0].task_id, task);
+      assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
+      for (const c of report.calls) {
+        const ro = c.method === "GET" || c.method === "HEAD";
+        assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+      }
+    });
+  }
+});
+
+Deno.test("A 期の 400：別の参選の candidacy を任務に付ける／『照合』任務（filing なし）に candidacy／politician_id なし は整批 400 で何も書かない；照合には no_change が通る", async () => {
+  const db = makeDb({ queue: [a1Row(STALE_TASK, "candidate_status_stale")] });
+  await withEntries(db, env(), async ({ report }) => {
+    const other = await post(report, N1, { kind: "contribute", contribution_type: "candidacy", task_id: STALE_TASK, ...AGENT, payload: { ...FILED, politician_id: "someone-else" }, source_urls: OFFICIAL });
+    assertEquals([other.status, other.json.error], [400, "validation_failed"]);
+    assertEquals(errorPaths(other.json), ["payload"]);
+    const recheck = await post(report, N1, { kind: "contribute", contribution_type: "candidacy", task_id: NR_TASK, ...AGENT, payload: { ...FILED, candidacy_status: "withdrawn", status_date: "2027-03-20" }, source_urls: OFFICIAL });
+    assertEquals(errorPaths(recheck.json), ["task_id"]);
+    const noPid = await post(report, N1, { kind: "contribute", contribution_type: "candidacy", task_id: SRC_TASK, ...AGENT,
+      payload: { name: "山田太郎", kana: "やまだたろう", election_id: E1, candidacy_status: "filed", status_date: "2027-04-08", district_kind: "at_large" }, source_urls: OFFICIAL });
+    assertEquals(errorPaths(noPid.json), ["payload"]);
+    assertEquals(db.contributions.length, 0, "何も書かない");
+    const nc = await post(report, N1, { kind: "contribute", contribution_type: "no_change", task_id: NR_TASK, ...AGENT,
+      payload: { task_id: NR_TASK, outcome: "confirmed", checked_urls: OFFICIAL, finding: "選管の立候補者一覧に載っていないことを確認した" } });
+    assertEquals(nc.status, 201, JSON.stringify(nc.json));
+    assertEquals([nc.json.contribution_type, nc.json.required_agree], ["no_change", 2]);
+  });
+});

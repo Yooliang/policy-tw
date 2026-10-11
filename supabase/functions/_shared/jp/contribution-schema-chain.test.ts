@@ -261,3 +261,65 @@ Deno.test("policy：字數は前後の空白（全角空白も）を落として
   assertEquals(paths(late), ["payload.proposed_date"]);
   assert(late.errors[0].message.includes("2025-01-12"));
 });
+
+// =============================================================================================
+// A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別（candidate_status_stale／not_running_recheck／candidacy_source_missing）
+// =============================================================================================
+const PE1 = `${PID}:${E1}:at_large`;
+const stateCand = (patch: Record<string, unknown> = {}, task?: string, drop: string[] = []) => {
+  const payload: Record<string, unknown> = { politician_id: PID, election_id: E1, candidacy_status: "filed", status_date: "2027-04-08", district_kind: "at_large", ...patch };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "candidacy", payload, source_urls: OFFICIAL, ...(task ? { task_id: task } : {}) });
+};
+
+Deno.test("A 期の任務比對：三つの任務型別は candidacy を受ける（JP_TASK_ARMS）。参選 id（人物 id:選挙 id:district_kind）が payload の三つ組と一致しなければ 400", () => {
+  assertEquals(JP_TASK_ARMS.candidate_status_stale, "candidacy");
+  assertEquals(JP_TASK_ARMS.not_running_recheck, "candidacy");
+  assertEquals(JP_TASK_ARMS.candidacy_source_missing, "candidacy");
+  for (const task of [`auto:candidate_status_stale:${PE1}`, `auto:candidacy_source_missing:${PE1}`, `auto:not_running_recheck:filing:${PE1}`]) {
+    const v = stateCand({}, task);
+    assert(v.ok, `${task}: ${JSON.stringify(v.errors)}`);
+    assertEquals(v.items[0].task_id, task);
+  }
+  // 別の人・別の選挙・別の district_kind を、この任務のものとして出す
+  for (const patch of [{ politician_id: "someone-else" }, { election_id: "2027-04-25_mayor_231011" }, { district_kind: "proportional", district_name: "ブロック" }]) {
+    const v = stateCand(patch, `auto:candidate_status_stale:${PE1}`);
+    assertEquals(paths(v), ["payload"], JSON.stringify(patch));
+    assert(v.errors[0].message.includes("一致"));
+  }
+  // politician_id がない（name＋kana の新しい人）は、この任務の参選とは言えない
+  const noPid = validateContributionRequest({ ...base, contribution_type: "candidacy", task_id: `auto:candidacy_source_missing:${PE1}`,
+    payload: { name: "山田太郎", kana: "やまだたろう", election_id: E1, candidacy_status: "filed", status_date: "2027-04-08", district_kind: "at_large" }, source_urls: OFFICIAL });
+  assertEquals(paths(noPid), ["payload"]);
+  // task_id の形が壊れている
+  assertEquals(paths(stateCand({}, "auto:candidate_status_stale:not-a-pe-id")), ["task_id"]);
+  assertEquals(paths(stateCand({}, `auto:not_running_recheck:filing:${E1}`)), ["task_id"]);
+});
+
+Deno.test("A 期の任務比對：not_running_recheck の『照合』（filing が付かない）は candidacy では答えられない（no_change／task_suggestion）；filing 付きは candidacy。他の型別の提出は 400", () => {
+  const nr = stateCand({ candidacy_status: "withdrawn", withdrawn_after_filing: false, status_date: "2027-03-20" }, `auto:not_running_recheck:${PE1}`);
+  assertEquals(paths(nr), ["task_id"]);
+  assert(nr.errors[0].message.includes("no_change"));
+  // no_change／task_suggestion は比對を受けない
+  const nc = validateContributionRequest({ ...base, contribution_type: "no_change", task_id: `auto:not_running_recheck:${PE1}`,
+    payload: { task_id: `auto:not_running_recheck:${PE1}`, outcome: "confirmed", checked_urls: OFFICIAL, finding: "一覧に載っていないことを確認した" } });
+  assert(nc.ok, JSON.stringify(nc.errors));
+  const sug = validateContributionRequest({ ...base, contribution_type: "task_suggestion", task_id: `auto:not_running_recheck:${PE1}`,
+    payload: { title: "届出済みの取りやめ記録の訂正提案", description: "選管の立候補者一覧に載っている（掲載ページ参照）。記録は取りやめだが実際は届出済み", target_politician_id: PID }, source_urls: OFFICIAL });
+  assert(sug.ok, JSON.stringify(sug.errors));
+  // filing 付き：withdrawn＋withdrawn_after_filing
+  assert(stateCand({ candidacy_status: "withdrawn", withdrawn_after_filing: true, status_date: "2027-03-20" }, `auto:not_running_recheck:filing:${PE1}`).ok);
+  // 型違い
+  const pol = validateContributionRequest({ ...base, contribution_type: "politician", task_id: `auto:candidate_status_stale:${PE1}`, payload: { politician_id: PID, birth_year: 1970, resolved_claim: "new" }, source_urls: OFFICIAL });
+  assertEquals(paths(pol), ["task_id"]);
+  assert(pol.errors[0].message.includes("candidacy"));
+});
+
+Deno.test("claimKey（A 期）：withdrawn_after_filing の答えが違えば別の宣稱（true と false を同意票にしない）；書かない提出の鍵は従来どおり", async () => {
+  const { claimKey } = await import("../duplicate-claim.ts");
+  const wd = (o: Record<string, unknown> = {}) => claimKey("candidacy", { politician_id: "p-1", election_id: E1, candidacy_status: "withdrawn", ...o });
+  assert(wd({ withdrawn_after_filing: true }) !== wd({ withdrawn_after_filing: false }), "届出後と届出前は別");
+  assertEquals(wd({ withdrawn_after_filing: true }), wd({ withdrawn_after_filing: true, status_date: "2027-03-30", name: "別の書き方" }));
+  assert(wd() !== wd({ withdrawn_after_filing: false }));
+  assertEquals(wd(), "candidacy|politician_id:p-1|" + E1.toLowerCase() + "||withdrawn|", "書かない提出（と正見の payload）の鍵は変わらない");
+});

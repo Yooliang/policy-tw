@@ -160,9 +160,16 @@ export const JP_TASK_ARMS = {
   profile_detail_gap: "politician",
   // 選舉鏈第 4 步：政見任務收 policy（公約）
   policy_missing: "policy",
+  // A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別も candidacy（filed／withdrawn／同じ状態で選管の出典を足す）。
+  // not_running_recheck は「照合」（task_id に filing が付かない）だと no_change／task_suggestion で答える：下の checkTaskAgreement で candidacy を断る
+  candidate_status_stale: "candidacy",
+  not_running_recheck: "candidacy",
+  candidacy_source_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
 const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing):(.+)$/;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing):(.+)$/;
+/** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
+const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -187,6 +194,20 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     const pid = arm === "profile_detail_gap" && m[2].startsWith("sources:") ? m[2].slice("sources:".length) : m[2];
     if (!pid || /\s/.test(pid)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:<人物 id>）`); return; }
     if (payload.politician_id !== pid) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${pid}）不一致：一個任務只回報它問的那一位`);
+    return;
+  }
+  // candidate_status_stale／not_running_recheck／candidacy_source_missing：task_id の末尾は参選紀錄 id（<人物 id>:<選挙 id>:<district_kind>）。
+  // 1 つの任務は 1 人の 1 回の参選だけ。not_running_recheck は filing が付くものだけ candidacy で答える（付かない「照合」は no_change／correction）
+  if (arm === "candidate_status_stale" || arm === "not_running_recheck" || arm === "candidacy_source_missing") {
+    const filing = arm === "not_running_recheck" && m[2].startsWith("filing:");
+    const peId = filing ? m[2].slice("filing:".length) : m[2];
+    if (arm === "not_running_recheck" && !filing) {
+      push("task_id", "この任務（不出馬の照合）は candidacy では答えられません：名簿に載っていなければ no_change（outcome=confirmed）、載っていれば task_suggestion で報告してください");
+      return;
+    }
+    if (!JP_PE_ID_RE.test(peId)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:${filing ? "filing:" : ""}<参選紀錄 id>）`); return; }
+    const mine = `${String(payload.politician_id ?? "")}:${String(payload.election_id ?? "")}:${String(payload.district_kind ?? "")}`;
+    if (mine !== peId) push("payload", `payload の politician_id・election_id・district_kind（${mine}）が、この任務が問う参選（${peId}）と一致しません：一つの任務は、その参選の分だけを回報します（politician_id は必須）`);
     return;
   }
   // policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ

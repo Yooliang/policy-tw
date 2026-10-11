@@ -55,7 +55,13 @@ Deno.test("文字層：正見每支派工臂都登記了時期，種子沒有不
 Deno.test("文字層：日本站每支派工臂都登記了時期，種子沒有不存在的臂", async () => {
   const arms = await latestJpArmNames();
   assert(arms.includes("policy_missing") && arms.includes("election_discovery"), "日本站臂名抽取壞了？");
+  // 之後的 policy_jp migration 補登記的臂（INSERT INTO policy_jp.console_arm_stage_map … ON CONFLICT，例：20261011070000 的 A 期四支臂）也算種子
   const seeded = seededArms(JP_SQL, "policy_jp.console_arm_stage_map");
+  for (const n of await listMigrations()) {
+    if (!n.includes("_policy_jp_") || n <= JP_MIG) continue;
+    const sql = await readMig(n);
+    if (sql.includes("INSERT INTO policy_jp.console_arm_stage_map (arm, stage, note) VALUES")) seeded.push(...seededArms(sql, "policy_jp.console_arm_stage_map"));
+  }
   assertEquals(new Set(seeded).size, seeded.length, "對照表種子重複");
   assertEquals(arms.filter((a) => !seeded.includes(a)), [], "新增的派工臂要在 policy_jp.console_arm_stage_map 登記時期");
   assertEquals(seeded.filter((a) => !arms.includes(a)), [], "對照表裡有 policy_jp.activity_arm_names() 沒有的臂");
