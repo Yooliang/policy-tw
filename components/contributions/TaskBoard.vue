@@ -45,7 +45,10 @@ function voteTitle(t: BoardTask): string {
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
-const SOURCE_LABEL: Record<string, string> = { manual: '維護者', suggested: 'AI 提議', web_request: '網站請求', auto_dispute: '系統（爭議）' }
+// manual 是系統建的（新聞掃描、對帳、主線建的維護任務），標「系統維護」（維護者 2026-10-11，policy-ops #88）
+const SOURCE_LABEL: Record<string, string> = { manual: '系統維護', suggested: 'AI 提議', web_request: '網站請求', auto_dispute: '系統（爭議）' }
+/** 來源過濾按鈕的順序 */
+const SOURCES = ['manual', 'web_request', 'suggested', 'auto_dispute'] as const
 const SOURCE_CLASS: Record<string, string> = {
   manual: 'bg-navy-900 text-white', suggested: 'bg-violet-100 text-violet-800', web_request: 'bg-sky-100 text-sky-800', auto_dispute: 'bg-orange-100 text-orange-800',
 }
@@ -58,6 +61,10 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const showClosed = ref(false)
 const typeSel = ref(props.typeFilter ?? '')
+/** 來源過濾：空＝全部；選了就重抓那個來源（清單一次最多 50 筆，混在一起時少的那類會被擠掉） */
+const sourceSel = ref('')
+/** 各來源進行中的真實件數（PostgREST head count，不是當頁筆數）；讀不到就不顯示數字 */
+const sourceCounts = ref<Record<string, number | null>>({})
 watch(() => props.typeFilter, (v) => { typeSel.value = v ?? '' })
 watch(typeSel, (v) => emit('update:typeFilter', v))
 
@@ -70,10 +77,11 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch(`${FN_BASE}/tasks?include_closed=1&with_current=0&limit=50`, { headers: headers() })
+    const src = sourceSel.value ? `&source=${encodeURIComponent(sourceSel.value)}` : ''
+    const res = await fetch(`${FN_BASE}/tasks?include_closed=1&with_current=0&limit=50${src}`, { headers: headers() })
     const body = await res.json().catch(() => null)
     if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
-    tasks.value = (body.tasks as BoardTask[]).filter(t => t.source !== 'auto')
+    tasks.value = (body.tasks as BoardTask[]).filter(t => t.source !== 'auto' && (!sourceSel.value || t.source === sourceSel.value))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '讀取失敗'
     tasks.value = []
@@ -81,6 +89,27 @@ async function load() {
     loading.value = false
   }
 }
+
+async function loadCounts() {
+  const base = import.meta.env.VITE_SUPABASE_URL
+  const entries = await Promise.all(SOURCES.map(async (s): Promise<[string, number | null]> => {
+    try {
+      const res = await fetch(`${base}/rest/v1/contribution_tasks?select=id&status=eq.open&source=eq.${s}`, { method: 'HEAD', headers: { ...headers(), Prefer: 'count=exact' } })
+      const total = Number(res.headers.get('content-range')?.split('/')[1])
+      return [s, res.ok && Number.isFinite(total) ? total : null]
+    } catch {
+      return [s, null]
+    }
+  }))
+  sourceCounts.value = Object.fromEntries(entries)
+}
+const allCount = computed(() => {
+  const ns = SOURCES.map(s => sourceCounts.value[s])
+  return ns.every(n => typeof n === 'number') ? (ns as number[]).reduce((a, b) => a + b, 0) : null
+})
+watch(sourceSel, () => { void load() })
+/** 標題的進行中件數：選了來源用那個來源的真實總數，沒選用全部（讀不到退回當頁筆數） */
+const openTotal = computed(() => typeSel.value ? null : (sourceSel.value ? sourceCounts.value[sourceSel.value] ?? null : allCount.value))
 
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
 const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'))
@@ -108,7 +137,7 @@ function fmtTime(iso: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-onMounted(load)
+onMounted(() => { void load(); void loadCounts() })
 defineExpose({ load })
 </script>
 
@@ -117,12 +146,19 @@ defineExpose({ load })
     <!-- 任務清單 -->
     <div class="bg-white rounded-2xl shadow-lg border border-slate-200">
       <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
-        <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">進行中 {{ openTasks.length }}・已關閉 {{ closedTasks.length }}</span></h3>
+        <h3 class="font-black text-navy-900">任務清單 <span class="text-sm font-bold text-slate-400">進行中 {{ openTotal ?? openTasks.length }}<template v-if="openTotal != null && openTotal > openTasks.length">（列出最新 {{ openTasks.length }} 筆）</template><template v-if="showClosed">・已關閉 {{ closedTasks.length }}</template></span></h3>
         <select v-model="typeSel" class="ml-auto text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" data-testid="task-type-filter" aria-label="任務類型">
           <option value="">全部類型</option>
           <option v-for="(label, k) in TASK_TYPE_LABEL" :key="k" :value="k">{{ label }}</option>
         </select>
         <label class="text-xs text-slate-500 inline-flex items-center gap-1.5"><input v-model="showClosed" type="checkbox" class="rounded" data-testid="toggle-closed" /> 顯示已關閉</label>
+      </div>
+      <div class="px-4 sm:px-5 pt-3 flex flex-wrap gap-1.5" role="group" aria-label="任務來源" data-testid="task-source-filter">
+        <button v-for="s in ['', ...SOURCES]" :key="s" type="button"
+          :class="['text-xs font-bold px-2.5 py-1 rounded-full border', sourceSel === s ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50']"
+          :aria-pressed="sourceSel === s" :data-source="s || 'all'" @click="sourceSel = s">
+          {{ s ? SOURCE_LABEL[s] : '全部' }}<span v-if="(s ? sourceCounts[s] : allCount) != null" class="ml-1 font-normal opacity-80">{{ s ? sourceCounts[s] : allCount }}</span>
+        </button>
       </div>
       <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會出現在這裡；有爭議的貢獻不另開任務，反對票累計到門檻就自動退件。派工順序是公民提問優先，再來是這份清單，最後才是右邊的資料缺口。</p>
 
