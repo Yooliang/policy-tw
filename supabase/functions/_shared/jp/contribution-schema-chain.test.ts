@@ -323,3 +323,33 @@ Deno.test("claimKey（A 期）：withdrawn_after_filing の答えが違えば別
   assert(wd() !== wd({ withdrawn_after_filing: false }));
   assertEquals(wd(), "candidacy|politician_id:p-1|" + E1.toLowerCase() + "||withdrawn|", "書かない提出（と正見の payload）の鍵は変わらない");
 });
+
+// =============================================================================================
+// #589 審查の後続（policy-tw 主線）
+// =============================================================================================
+Deno.test("candidacy_source_missing：official 等級の網址がない candidacy は 400（報道だけだと unchanged で落庫→次の seed でまた開く無限再派工）", () => {
+  const task = `auto:candidacy_source_missing:${PE1}`;
+  const submit = (source_urls: string[], task_id: string | null = task) => validateContributionRequest({ ...base, contribution_type: "candidacy", ...(task_id ? { task_id } : {}),
+    payload: { politician_id: PID, election_id: E1, candidacy_status: "filed", status_date: "2027-04-08", district_kind: "at_large" }, source_urls });
+  const news = submit(["https://www.asahi.com/articles/xxx.html"]);
+  assertEquals(paths(news), ["source_urls"]);
+  assert(news.errors[0].message.includes("no_change"));
+  // 統計（e-stat）は official ではない：SQL candidacy_has_official_source は source_kind＝official だけを数える
+  assertEquals(paths(submit(["https://www.e-stat.go.jp/x"])), ["source_urls"]);
+  // official が一つでもあれば通る（報道との併記も可）
+  for (const u of ["https://www.city.ichinomiya.aichi.jp/senkyo/", "https://www.pref.aichi.jp/senkyo/", "https://www.soumu.go.jp/senkyo/", "https://www.city.toyota.lg.jp/x"]) {
+    const v = submit(["https://www.asahi.com/articles/xxx.html", u]);
+    assert(v.ok, `${u}: ${JSON.stringify(v.errors)}`);
+  }
+  // ほかの任務・任務なしの candidacy には出典の等級を求めない（従来どおり）
+  assert(submit(["https://www.asahi.com/articles/xxx.html"], `auto:candidate_status_stale:${PE1}`).ok);
+  assert(submit(["https://www.asahi.com/articles/xxx.html"], null).ok);
+});
+
+Deno.test("claimKey：withdrawn_after_filing を null と明寫した提出と書かない提出は同じ宣稱（票が割れない）", async () => {
+  const { claimKey } = await import("../duplicate-claim.ts");
+  const wd = (o: Record<string, unknown> = {}) => claimKey("candidacy", { politician_id: "p-1", election_id: E1, candidacy_status: "withdrawn", ...o });
+  assertEquals(wd({ withdrawn_after_filing: null }), wd());
+  assert(wd({ withdrawn_after_filing: null }) !== wd({ withdrawn_after_filing: false }), "null と false は別");
+  assert(wd({ withdrawn_after_filing: null }) !== wd({ withdrawn_after_filing: true }));
+});
