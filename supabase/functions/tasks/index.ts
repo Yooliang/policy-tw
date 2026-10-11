@@ -20,6 +20,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
+/** 手動任務的來源（contribution_tasks.source） */
+const MANUAL_SOURCES = new Set(["manual", "suggested", "web_request", "auto_dispute"]);
 const VOTE_COLUMNS = "id, contribution_type, payload, source_urls, status, agree_count, disagree_count, unsure_count, score, target_score, task_id, effective_agree";
 
 // deno-lint-ignore no-explicit-any
@@ -57,6 +59,9 @@ Deno.serve(async (req) => {
     const region = url.searchParams.get("region")?.replace(/臺/g, "台") || null;
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 10, 1), 50);
     const seed = url.searchParams.get("seed") || crypto.randomUUID();
+    // 任務頁的來源過濾（policy-ops #88）：只給看板用，跟 include_closed 一樣不寫進協議；不認得的值當沒給
+    const sourceParam = url.searchParams.get("source");
+    const source = sourceParam && MANUAL_SOURCES.has(sourceParam) ? sourceParam : null;
 
     const [autoRes, manualRes, countRes, manualCountRes] = await Promise.all([
       supabase.rpc("contribution_auto_tasks", { p_type: type, p_region: region, p_limit: limit, p_seed: seed }),
@@ -67,6 +72,7 @@ Deno.serve(async (req) => {
         if (url.searchParams.get("include_closed") !== "1") q = q.eq("status", "open");
         if (type) q = q.eq("task_type", type);
         if (region) q = q.eq("region", region);
+        if (source) q = q.eq("source", source);
         return q;
       })(),
       supabase.rpc("contribution_auto_task_counts", { p_region: region }),
@@ -111,7 +117,7 @@ Deno.serve(async (req) => {
     const auto = (autoRes.data ?? []).map((t: any) => ({ ...t, source: "auto", suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null }));
     // 每筆附現況與 lookup（?with_current=0 可關掉，省查詢）
     const withCurrent = url.searchParams.get("with_current") !== "0";
-    const picked = [...manualWithVotes, ...auto].slice(0, limit);
+    const picked = (source ? manualWithVotes : [...manualWithVotes, ...auto]).slice(0, limit);
     const tasks = withCurrent
       ? await Promise.all(picked.map(async (t) => {
         const target = (t.target && typeof t.target === "object" ? t.target : {}) as Record<string, unknown>;
