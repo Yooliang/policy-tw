@@ -30,14 +30,35 @@ const SEED: Array<[number, string]> = [
   [5, "raw:progress_stale"], [24, "deadline_due"], [36, "term_policies"], [47, "term_policies"],
 ];
 
+/**
+ * 規則表照正式的定義建（P0 的 CREATE TABLE 與它所有的 CHECK，加上後來幾支 migration 的 ALTER TABLE），
+ * 不是自己手寫一張寬鬆的表——#578 部署時 activity_rules_shape 擋下 event＋term_start，手寫的表沒有那條 CHECK，測試沒抓到。
+ */
+const P0 = await readMig("20261008001000_activity_windows_p0.sql");
+const TABLE_DDL = (() => {
+  const a = P0.indexOf("CREATE TABLE IF NOT EXISTS activity_rules (");
+  const b = P0.indexOf("\n);\n", a) + 4;
+  assert(a >= 0 && b > a);
+  return P0.slice(a, b);
+})();
+const LATER_ALTERS = (await Promise.all(["20261008090000_queue_priority_tiers.sql", "20261008160000_roster_milestones.sql", "20261009010000_village_chief_progress_cooling.sql"]
+  .map(readMig))).flatMap((sql) => [...strip(sql).matchAll(/ALTER TABLE activity_rules [^;]*;/g)].map((m) => m[0]));
+
 async function db(sql = RULES_SQL): Promise<PGlite> {
   const d = new PGlite();
-  await d.exec(`CREATE TABLE activity_rules (id bigint PRIMARY KEY, activity text, window_kind text, from_kind text, from_offset int DEFAULT 0,
-    until_kind text, until_offset int DEFAULT 0, note text, params jsonb NOT NULL DEFAULT '{}', enabled boolean DEFAULT true, priority smallint);
-    CREATE TABLE election_task_config (election_id int PRIMARY KEY, enabled boolean, note text, updated_at timestamptz);
+  await d.exec(`CREATE TABLE task_priority_tiers (id smallint PRIMARY KEY); INSERT INTO task_priority_tiers VALUES (1), (2), (3);`);
+  await d.exec(TABLE_DDL);
+  for (const a of LATER_ALTERS) await d.exec(a);
+  await d.exec(`CREATE TABLE election_task_config (election_id int PRIMARY KEY, enabled boolean, note text, updated_at timestamptz);
     INSERT INTO election_task_config VALUES (2022, true, '', now()), (2026, false, '', now());`);
   for (const [id, act] of SEED) {
-    await d.query(`INSERT INTO activity_rules (id, activity, window_kind, note) VALUES ($1, $2, 'always', 'P1 種子：永遠開')`, [id, act]);
+    const village = id === 47;
+    const exceptVillage = [5, 24, 36].includes(id);
+    await d.query(
+      `INSERT INTO activity_rules (id, activity, window_kind, note, election_types, except_election_types, requires_traffic)
+       VALUES ($1, $2, 'always', 'P1 種子：永遠開', $3, $4, $5)`,
+      [id, act, village ? ["村里長"] : null, exceptVillage ? ["村里長"] : null, village],
+    );
   }
   await d.exec(sql);
   return d;
@@ -172,4 +193,20 @@ Deno.test("activity_open＝前一版只多那一段 OR（其餘一字不動）",
   const prev = await latestFn("activity_open", MIG);
   const cut = AO.replace(/         -- 查不到屆別或職位時照開[\s\S]*?p_today <= u\.on_date \+ r\.until_offset\)\)\n/, "");
   assertEquals(cut, prev);
+});
+
+Deno.test("規則表吃得到正式的 CHECK：任期起訖用 event 會被 activity_rules_shape 擋下（還原驗證：#578 部署失敗的那個寫法）", async () => {
+  const bad = RULES_SQL.replace(/(UPDATE activity_rules SET window_kind = )'term'(, from_kind = 'term_start'[^;]*WHERE id = 5 AND activity = 'raw:progress_stale';)/, "$1'event'$2");
+  assert(bad !== RULES_SQL, "替換要真的換到 rule 5 那一句");
+  await assertRejects(() => db(bad), Error, "activity_rules_shape");
+});
+
+Deno.test("activity_open：term＋只有起點（就職日、不設迄日）跟 event 一樣算——就職前關、就職後一直開", async () => {
+  const d = await aoDb();
+  await d.exec(`UPDATE activity_rules SET window_kind = 'term' WHERE id = 5`);
+  assertEquals(await open(d, "raw:progress_stale", 2026, "縣市長", "2026-12-24"), false);
+  assertEquals(await open(d, "raw:progress_stale", 2026, "縣市長", "2026-12-25"), true);
+  assertEquals(await open(d, "raw:progress_stale", 2024, "立法委員", "2035-01-01"), true);
+  assertEquals(await open(d, "raw:progress_stale", null, null, "2026-10-11"), true, "查不到照開");
+  await d.close();
 });
