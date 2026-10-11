@@ -75,7 +75,7 @@ Deno.test("結構：步驟清單六步；臂名清單・總表・規則三處一
 Deno.test("情境 1　前一步完成才開：地區資料（統計）沒補完，名簿任務擋著；補完之後下一輪 seed 才開，opened_by 記 via=done", async () => {
   const db = await freshDb();
   await insertElection(db, ICHI, POLLING);
-  await clock(db, "2027-02-01");
+  await clock(db, "2027-03-01"); // 投票日前 55 天：60 天窗口內（20261011100000）、後備（2027-03-09）之前
   await seed(db);
   assertEquals(await dispatchIds(db, ROSTER), [], "地區資料沒完成、後備（2027-03-09）還沒到＝不開");
   assertEquals((await stepsDone(db, E1)).region, false);
@@ -127,7 +127,7 @@ Deno.test("情境 2 補：告示日不明（notice_date 空）＝沒有告示日
 Deno.test("情境 3　前一步重新變成未完成時，已開的下一步不收回（sticky）：統計補完 → 名簿任務開 → 統計被拿掉（region 又未完成）→ 任務照開", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
-  await clock(db, "2027-02-01");
+  await clock(db, "2027-03-01"); // 60 天窗口內（20261011100000）
   await seed(db);
   assertEquals(await dispatchIds(db, ROSTER), [TASK]);
   await db.exec(`DELETE FROM policy_jp.regional_stats WHERE lg_code = '${ICHI}'`);
@@ -157,6 +157,8 @@ Deno.test("窗口：投票日當天還派、翌日收回（記 window）；新�
 Deno.test("優先層：投票日前 60 天內＝前段（1）、61～180 天＝預設層、181 天以上＝後段（3）；步驟順位排在統計之後", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
+  // 開窗規則自 20261011100000 起只在投票日前 60 天內開；這裡只驗優先層規則本身，先把起點拿掉
+  await db.exec(`UPDATE policy_jp.activity_rules SET from_kind = NULL, from_offset = 0 WHERE activity = 'roster_check' AND priority IS NULL`);
   const prio = async (day: string) => {
     await clock(db, day);
     await seed(db);
@@ -166,6 +168,35 @@ Deno.test("優先層：投票日前 60 天內＝前段（1）、61～180 天＝�
   const mid = await prio(addDays(POLLING, -120));
   assertEquals(mid, (await one<{ id: number }>(db, `SELECT id::INT FROM policy_jp.task_priority_tiers WHERE is_default`)).id);
   assertEquals(await prio(addDays(POLLING, -200)), 3);
+  await db.close();
+});
+
+Deno.test("窗口起點（20261011100000，維護者 10-11）：地區資料已完成時，投票日前 61 天不開、前 60 天開（記 via=done）；後備照舊只在窗口內生效", async () => {
+  const db = await freshDb();
+  await openElectionWithRegion(db, ICHI, POLLING);
+  await clock(db, addDays(POLLING, -61));
+  await seed(db);
+  assertEquals(await dispatchIds(db, ROSTER), [], "前 61 天＝窗口外");
+  await clock(db, addDays(POLLING, -60));
+  await seed(db);
+  assertEquals(await dispatchIds(db, ROSTER), [TASK], "前 60 天＝開");
+  assertEquals((await dispatches(db, ROSTER))[0].opened_by?.chain_gate, { after_step: "region", via: "done" });
+  const r = await one<{ from_kind: string; from_offset: number; after_step: string; params: Record<string, unknown> }>(db,
+    `SELECT from_kind, from_offset, after_step, params FROM policy_jp.activity_rules WHERE activity = 'roster_check' AND priority IS NULL`);
+  assertEquals([r.from_kind, r.from_offset, r.after_step], ["polling", -60, "region"]);
+  assertEquals(r.params, { cap: 200, chain_fallback: { kind: "announced", offset: -30 } }, "後備與 cap 不動");
+  await db.close();
+});
+
+Deno.test("窗口起點 migration：重跑冪等（note 不重複加）；把起點改掉後自我檢查擋下", async () => {
+  const db = await freshDb();
+  const sql = await readMig("20261011100000_policy_jp_roster_check_60d.sql");
+  const note = async () => (await one<{ n: string }>(db, `SELECT note AS n FROM policy_jp.activity_rules WHERE activity = 'roster_check' AND priority IS NULL`)).n;
+  const before = await note();
+  await db.exec(sql);
+  assertEquals(await note(), before, "重跑不改 note");
+  await db.exec(`UPDATE policy_jp.activity_rules SET after_step = 'roster' WHERE activity = 'roster_check' AND priority IS NULL`);
+  await assertRejects(() => db.exec(sql), Error, "roster_check の規則");
   await db.close();
 });
 

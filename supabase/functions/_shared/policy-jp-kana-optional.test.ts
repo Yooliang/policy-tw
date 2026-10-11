@@ -541,11 +541,15 @@ Deno.test("冷卻：confirmed・unreachable は従来どおり（confirmed は 1
 });
 
 Deno.test("冷卻：告示日以降に報告された not_found は上限をかけない（従来どおり 14 日）／告示日の記録がない選挙も 14 日。還原驗證：『報告日が告示日より前』の条件を外すと即座に戻る", async () => {
+  // 投票日は今日の 15 日後：名簿任務は投票日前 60 天から開く（20261011100000）ので、窗口內の選挙で冷卻だけを比べる
+  const polling = addDays(REAL_TODAY, 15);
+  const task = `auto:roster_check:${polling}_mayor_${ICHI}`;
   const probe = async (db: Db, notice: string | null) => {
-    await openElectionWithRegion(db, ICHI, POLLING, { notice });
+    await openElectionWithRegion(db, ICHI, polling, { notice });
     await clock(db, REAL_TODAY);
     await seed(db);
-    await check(db, TASK, "not_found"); // 今日報告
+    assertEquals(await dispatchIds(db, ROSTER), [task], "前提：報告前は開いている");
+    await check(db, task, "not_found"); // 今日報告
     await clock(db, addDays(REAL_TODAY, 3));
     await seed(db);
     return await dispatchIds(db, ROSTER);
@@ -560,7 +564,7 @@ Deno.test("冷卻：告示日以降に報告された not_found は上限をか�
   await db2.close();
 
   const bad = await reverted([["AND (p_checked_at AT TIME ZONE 'Asia/Tokyo')::DATE < x.nd", ""]]);
-  assertEquals(await probe(bad, addDays(REAL_TODAY, -2)), [TASK], "報告日の条件を外すと、告示後の not_found がすぐ戻って回り続ける");
+  assertEquals(await probe(bad, addDays(REAL_TODAY, -2)), [task], "報告日の条件を外すと、告示後の not_found がすぐ戻って回り続ける");
   await bad.close();
 });
 
