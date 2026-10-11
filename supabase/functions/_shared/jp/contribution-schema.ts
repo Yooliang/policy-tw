@@ -310,8 +310,10 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       if (!hasId || p.name !== undefined) {
         if (!isStr(p.name, 1, 40)) push("payload.name", "name 必填（1～40 字，候選人的姓名，漢字）；已在庫的人改帶 politician_id");
       }
-      if (!hasId || p.kana !== undefined) {
-        if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 必填（候選人姓名的讀音）；已在庫的人改帶 politician_id");
+      // kana（工作單 policy-ops#60）：告示前選填、告示日起必填。有沒有過告示日要查庫（election 的 announced 里程碑），這裡只擋「帶了但格式不對」；
+      // 「告示日起沒帶」由 contribute-handler 查庫後回 400、SQL apply_candidacy 再擋一次。帶 politician_id（已在庫的人）不需要 kana。
+      if (p.kana !== undefined && p.kana !== null) {
+        if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 要是 1～80 字（候選人姓名的讀音，ひらがな）；告示前不知道就不要填");
         else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana 要全部是ひらがな（不含空白與括號）");
       }
       if (!(typeof p.election_id === "string" && JP_ELECTION_ID_RE.test(p.election_id))) push("payload.election_id", "election_id 必填：這場選舉的 id（投票日_種類_團體碼，例：2027-04-25_mayor_232033，照任務 target.election_id 抄）");
@@ -343,22 +345,27 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       break;
     }
     case "politician": {
-      // 既存の人物に生年・学歴・経歴を足す（選舉鏈第 3 步）：人物は candidacy でだけ作る。name／kana は直さない（correction）。
+      // 既存の人物に生年・読み（kana、空欄だけ）・学歴・経歴を足す（選舉鏈第 3 步）：人物は candidacy でだけ作る。name は直さない（correction）。
       // 学歴・経歴は一条一項の配列（日本站は politician_careers の一列一項目。kind=career が正見の experience）。落庫は SQL policy_jp.apply_politician（20261010050000）
-      for (const k of ["name", "kana"]) if (p[k] !== undefined) push(`payload.${k}`, "politician では名前・読みは直さない（改名・読みの訂正は correction）：この欄位を拿掉");
+      // 名前は直さない。読み（kana）は空欄を埋めるだけ（工作單 policy-ops#60）：庫に読みがあって違う値＝落庫で差し戻し（読みの訂正は correction）
+      if (p.name !== undefined) push("payload.name", "politician では名前は直さない（改名は correction）：この欄位を拿掉");
+      if (p.kana !== undefined) {
+        if (!isStr(p.kana, 1, 80)) push("payload.kana", "kana 要是 1～80 字（人物姓名的讀音，ひらがな）");
+        else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana 要全部是ひらがな（不含空白與括號）");
+      }
       if (!isStr(p.politician_id, 1, 64)) push("payload.politician_id", "politician_id 必填（任務 target.politician_id の値）。新しい人は candidacy で作る");
       const hasBirth = p.birth_year !== undefined && p.birth_year !== null;
       if (hasBirth && !(typeof p.birth_year === "number" && Number.isInteger(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
         push("payload.birth_year", "birth_year 要是西曆四位數整數（1900～今年，例：1975），不是和曆也不是文字");
       }
-      let facts = hasBirth ? 1 : 0;
+      let facts = (hasBirth ? 1 : 0) + (p.kana !== undefined ? 1 : 0);
       for (const k of ["education", "career"] as const) {
         const v = p[k];
         if (v === undefined) continue;
         if (!(Array.isArray(v) && v.length >= 1 && v.length <= 30 && v.every((s) => isStr(s, 1, 200)))) push(`payload.${k}`, `${k} 要是 1～30 項的字串陣列，一項一個字串（每項 1～200 字；不要把多項寫成一段文章）`);
         else facts++;
       }
-      if (facts === 0) push("payload.birth_year", "birth_year・education・career 至少要有一個（這一筆要補什麼事實）");
+      if (facts === 0) push("payload.birth_year", "birth_year・kana・education・career 至少要有一個（這一筆要補什麼事實）");
       break;
     }
     case "policy": {

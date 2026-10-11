@@ -22,6 +22,8 @@ export function makeDb(o: {
   /** rpc/same_claim_matches の戻り（型別 → {existing, pending}）。ない型別は null（登記なし）を返す */
   sameClaims?: Record<string, { existing: Row[]; pending: Row[] }>;
   apply?: unknown;
+  /** rpc/candidacy_kana_required の戻り（election_id → 告示日以降か）。ない選舉は false（告示前） */
+  kanaRequired?: Record<string, boolean>;
   /** 既に庫にある貢獻（claimKey 併票・去重の相手） */
   seeded?: Row[];
 } = {}) {
@@ -35,6 +37,7 @@ export function makeDb(o: {
     if (t === "rpc/contribution_queue_tasks") return o.queue ?? [];
     if (t === "rpc/contribution_effective_agree") return 3;
     if (t === "rpc/apply_contribution") return o.apply;
+    if (t === "rpc/candidacy_kana_required") return o.kanaRequired?.[(c.body as { p_election_id?: string } | null)?.p_election_id ?? ""] ?? false;
     if (t === "rpc/same_claim_matches") {
       const type = (c.body as { p_type?: string } | null)?.p_type ?? "";
       return o.sameClaims?.[type] ?? null;

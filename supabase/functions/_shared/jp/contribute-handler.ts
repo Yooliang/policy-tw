@@ -162,6 +162,7 @@ export const BATCH_SAME_CLAIM: Readonly<Record<string, BatchMatcher>> = {
     // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
     if (p.politician_id !== q.politician_id) return false;
     if (p.birth_year !== undefined && q.birth_year !== undefined) return true;
+    if (p.kana !== undefined && q.kana !== undefined) return true;
     const texts = (v: unknown) => (Array.isArray(v) ? v.map((s) => String(s).trim()) : []);
     return ["education", "career"].some((k) => texts(p[k]).some((t) => texts(q[k]).includes(t)));
   },
@@ -185,6 +186,38 @@ export function sameClaimInBatch(
   if (a.contribution_type !== b.contribution_type) return false;
   const m = matchers[a.contribution_type];
   return m ? m(a.payload as BatchPayload, b.payload as BatchPayload) : false;
+}
+
+/** 告示日起的 candidacy（沒帶 politician_id）一定要有 kana：回 400 用的錯誤清單。同一場選舉只查一次 */
+export async function kanaRequiredProblems(
+  supabase: SupabaseLike,
+  items: ReadonlyArray<{ contribution_type: string; payload: unknown }>,
+): Promise<Array<{ index: number; path: string; message: string }>> {
+  const asked = new Map<string, Promise<boolean>>();
+  const problems: Array<{ index: number; path: string; message: string }> = [];
+  for (const [index, item] of items.entries()) {
+    if (item.contribution_type !== "candidacy") continue;
+    const p = (item.payload ?? {}) as Record<string, unknown>;
+    const hasId = typeof p.politician_id === "string" && p.politician_id.trim() !== "";
+    const hasKana = typeof p.kana === "string" && p.kana.trim() !== "";
+    if (hasId || hasKana || typeof p.election_id !== "string") continue;
+    let q = asked.get(p.election_id);
+    if (!q) {
+      q = (async () => {
+        const { data, error } = await supabase.rpc("candidacy_kana_required", { p_election_id: p.election_id });
+        if (error) throw new Error(`candidacy_kana_required: ${error.message}`);
+        return data === true;
+      })();
+      asked.set(p.election_id, q);
+    }
+    if (await q) {
+      problems.push({
+        index, path: "payload.kana",
+        message: "kana 必填：這場選舉已過告示日（告示前才可省略）。candidacy 要帶 kana（候選人姓名的讀音，ひらがな）；已在庫的人改帶 politician_id",
+      });
+    }
+  }
+  return problems;
 }
 
 export async function handleContribute(
@@ -224,6 +257,12 @@ export async function handleContribute(
       ? ENCODING_INVALID_MESSAGE
       : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
     return { status: 400, body: { success: false, error, message, errors: validation.errors } };
+  }
+  // candidacy 的 kana（工作單 policy-ops#60）：告示前選填、告示日起必填。有沒有過告示日要查庫（election 的 announced 里程碑，與 SQL apply_candidacy 同一支
+  // policy_jp.candidacy_kana_required），所以放在純函式的 schema 驗證之後。帶 politician_id（已在庫的人）不需要 kana。沒有告示日資料＝視為告示前。
+  const kanaProblems = await kanaRequiredProblems(supabase, validation.items);
+  if (kanaProblems.length > 0) {
+    return { status: 400, body: { success: false, error: "validation_failed", message: "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）", errors: kanaProblems } };
   }
   // 出處不得引用本站或正見（照搬正見 1.84.0 #486；日本協議 0.8.0）：引自己的網站是循環引用。整批不收、不算被拒，講清楚是哪個網址。
   const selfCited = selfCitationProblems(validation.items);

@@ -402,7 +402,7 @@ Deno.test("/next 對驗證池：IP 認不得（新舊雜湊同值）時用舊簽
     // 兩個入口共用同一個假 fetch，最後安裝的是 report 那份，所以呼叫紀錄在它身上
     const pools = report.calls.filter((c) => c.target === "rpc/contribution_verify_pool");
     assertEquals(pools.length, 2);
-    assertEquals(Object.keys(pools[0].body as Row).sort(), ["p_ip_hash", "p_limit", "p_region"], "舊簽名（沒有 p_legacy_ip_hash）");
+    assertEquals(Object.keys(pools[0].body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "舊簽名（沒有 p_legacy_ip_hash；p_agent_name 是 policy-ops#70 加的）");
     const legacy = await legacyIpHashOf(new Request("https://x/", at(N1)), SALT);
     assertEquals((pools[1].body as Row).p_legacy_ip_hash, legacy);
     assertEquals((pools[1].body as Row).p_ip_hash, await netHash(N1));
