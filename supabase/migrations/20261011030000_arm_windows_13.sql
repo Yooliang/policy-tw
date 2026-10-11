@@ -257,11 +257,11 @@ UPDATE activity_rules SET window_kind = 'event', from_kind = 'polling', from_off
 UPDATE activity_rules SET window_kind = 'event', from_kind = 'polling', from_offset = 1, until_kind = NULL, until_offset = 0,
        note = '當屆類（OPS #81）：投票日 +1 起、不設迄日（只看開票後的中選會當選名單，在派的是 2022／2024 還沒補齊的人）；10-11 試算收回 0'
  WHERE id = 30 AND activity = 'elected_missing';
-UPDATE activity_rules SET window_kind = 'event', from_kind = 'term_start', from_offset = 0, until_kind = NULL, until_offset = 0,
+UPDATE activity_rules SET window_kind = 'term', from_kind = 'term_start', from_offset = 0, until_kind = NULL, until_offset = 0,
        params = params || '{"open_when_unknown": true}'::JSONB,
        note = '第 6 段任期中（OPS #81）：就職日起、不設迄日（任期屆滿後照常追，維護者 10-11）；屆別或職位查不到照開；排除村里長（村里長看 rule 45 有流量才開）；10-11 試算今天收回 1（2026 還沒就職）'
  WHERE id = 5 AND activity = 'raw:progress_stale';
-UPDATE activity_rules SET window_kind = 'event', from_kind = 'term_start', from_offset = 0, until_kind = NULL, until_offset = 0,
+UPDATE activity_rules SET window_kind = 'term', from_kind = 'term_start', from_offset = 0, until_kind = NULL, until_offset = 0,
        params = params || '{"open_when_unknown": true}'::JSONB,
        note = '第 6 段任期中（OPS #81）：就職日起、不設迄日（任期屆滿後照常追，維護者 10-11）；屆別或職位查不到照開；排除村里長（村里長看 rule 46 有流量才開）；10-11 沒有任務'
  WHERE id = 24 AND activity = 'deadline_due';
@@ -280,7 +280,7 @@ BEGIN
     RAISE EXCEPTION '補舊屆政見還有沒照投票日 +1 起的規則（2026 設定表打開後投票前會被派）';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM election_task_config WHERE election_id = 2026 AND enabled) THEN RAISE EXCEPTION '2026 補舊屆政見的設定表開關沒有打開'; END IF;
-  SELECT count(*) INTO v FROM activity_rules WHERE id IN (5, 24) AND window_kind = 'event' AND from_kind = 'term_start' AND until_kind IS NULL
+  SELECT count(*) INTO v FROM activity_rules WHERE id IN (5, 24) AND window_kind = 'term' AND from_kind = 'term_start' AND until_kind IS NULL
      AND (params->>'open_when_unknown')::BOOLEAN;
   IF v <> 2 THEN RAISE EXCEPTION '任期中兩支只改到 % 支（應為 2）', v; END IF;
   SELECT count(*) INTO v FROM activity_rules WHERE id IN (22, 6, 25, 26) AND window_kind = 'always' AND note LIKE '當屆類但維持永遠開（OPS #81）%';
