@@ -5,8 +5,11 @@ name = "hustings-api"
 main = "api-worker.js"
 compatibility_date = "2026-09-01"
 
+# custom_domain 建 DNS 與憑證；正見 Worker 在這個 zone 有萬用路由 *.hustings.net/*，會先把 api 接走，
+# 所以另加一條更精確的路由 api.hustings.net/*（精確的路由優先於萬用的；2026-10-11 上線時實測）
 routes = [
   { pattern = "api.hustings.net", custom_domain = true },
+  { pattern = "api.hustings.net/*", zone_name = "hustings.net" },
 ]
 
 [observability]
