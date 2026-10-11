@@ -108,6 +108,33 @@ const stillLoading = computed(() => loading.value && policies.value.length === 0
 const unrenderablePolicies = computed(() =>
   filteredPolicies.value.filter(policy => !politicians.value.find(c => c.id === policy.politicianId))
 )
+// 分頁（維護者 2026-10-11「一開始也載入的太多了吧，分頁功能?」）：卡片一頁 24 張；改任何篩選回第 1 頁。
+// 只畫找得到所屬人物的那些（顯示不出來的另外在上面報筆數），頁數才不會有空洞。
+const PAGE_SIZE = 24
+const page = ref(1)
+const renderablePolicies = computed(() => filteredPolicies.value.filter(p => politicianById.value.has(String(p.politicianId))))
+const pageCount = computed(() => Math.max(1, Math.ceil(renderablePolicies.value.length / PAGE_SIZE)))
+const currentPage = computed(() => Math.min(Math.max(1, page.value), pageCount.value))
+const pagedPolicies = computed(() => renderablePolicies.value.slice((currentPage.value - 1) * PAGE_SIZE, currentPage.value * PAGE_SIZE))
+/** 頁碼列：第一頁、最後一頁、目前頁前後各兩頁，中間用 null 代表省略 */
+const pageItems = computed<(number | null)[]>(() => {
+  const n = pageCount.value, c = currentPage.value
+  const keep = new Set([1, n, c - 2, c - 1, c, c + 1, c + 2].filter(x => x >= 1 && x <= n))
+  const out: (number | null)[] = []
+  let prev = 0
+  for (const x of [...keep].sort((a, b) => a - b)) {
+    if (x - prev > 1) out.push(null)
+    out.push(x)
+    prev = x
+  }
+  return out
+})
+const listTop = ref<HTMLElement | null>(null)
+function goToPage(n: number) {
+  page.value = Math.min(Math.max(1, n), pageCount.value)
+  listTop.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+watch([selectedLocation, selectedCategory, searchTerm, view], () => { page.value = 1 })
 // 畫面上只說「有幾筆顯示不出來」；要 debug 的人才需要 id，那進 devtools
 watch(unrenderablePolicies, (list) => {
   if (list.length > 0) {
@@ -250,15 +277,22 @@ usePageHead({
         </div>
       </div>
 
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
+      <div v-else ref="listTop" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left scroll-mt-24">
         <template v-if="filteredPolicies.length > 0">
-          <template v-for="policy in filteredPolicies" :key="policy.id">
-            <PolicyCard
-              v-if="politicians.find(c => c.id === policy.politicianId)"
-              :policy="policy"
-              :politician="politicians.find(c => c.id === policy.politicianId)!"
-            />
-          </template>
+          <PolicyCard
+            v-for="policy in pagedPolicies"
+            :key="policy.id"
+            :policy="policy"
+            :politician="politicianById.get(String(policy.politicianId))!"
+          />
+          <nav v-if="pageCount > 1" class="col-span-full flex flex-wrap items-center justify-center gap-1.5 pt-4" aria-label="分頁" data-testid="tracking-pager">
+            <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-bold text-slate-600 hover:bg-white disabled:opacity-30" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">上一頁</button>
+            <template v-for="(item, i) in pageItems" :key="item ?? `gap${i}`">
+              <span v-if="item === null" class="px-1 text-slate-400">…</span>
+              <button v-else type="button" class="min-w-[2.25rem] px-2 py-1.5 rounded-lg text-sm font-bold tabular-nums" :class="item === currentPage ? 'bg-navy-900 text-white' : 'text-slate-600 hover:bg-white'" :aria-current="item === currentPage ? 'page' : undefined" @click="goToPage(item)">{{ item }}</button>
+            </template>
+            <button type="button" class="px-3 py-1.5 rounded-lg text-sm font-bold text-slate-600 hover:bg-white disabled:opacity-30" :disabled="currentPage === pageCount" @click="goToPage(currentPage + 1)">下一頁</button>
+          </nav>
         </template>
         <div v-else class="col-span-full text-center py-32 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-300">
           <template v-if="showCheckpointsOnly">

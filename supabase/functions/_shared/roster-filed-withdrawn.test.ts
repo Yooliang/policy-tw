@@ -53,7 +53,8 @@ Deno.test("FW-1 新定義緊接著 20261008162000，而且是 raw 的最後一�
   const i = defining.indexOf(MIG);
   assert(i > 0, "新 migration 要在重新定義 raw 的清單裡");
   assertEquals(defining[i - 1], PREV_MIG, `raw 的前一版應該是 ${PREV_MIG}；有人在中間改了，要以那一版為底重做`);
-  assertEquals(defining.slice(i + 1), [], "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
+  // 20261010170000（OPS #72）只拿掉 election_result_missing 分支，其餘一字不動（retire-single-result.test.ts 逐字守）
+  assertEquals(defining.slice(i + 1), ["20261010170000_retire_single_election_result.sql"], "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
 });
 
 Deno.test("FW-2 新定義＝現行定義＋三處機械替換：反向替換回去逐字等於前一版（簽名、其他臂、roster_check 的 target／說明／reward 都沒動）", () => {

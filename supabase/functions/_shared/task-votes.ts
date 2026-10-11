@@ -22,6 +22,10 @@ export interface VoteContribution {
   task_id: string | null;
   /** PostgREST 計算欄位：有效門檻（2026-09-20） */
   effective_agree?: number | null;
+  /** 分數與目標分數、存疑票（2026-10-10，任務頁改畫跟貢獻看板同一種拉鋸條 ScoreBar） */
+  score?: number | null;
+  target_score?: number | null;
+  unsure_count?: number | null;
 }
 
 export interface TaskVoteSummary {
@@ -34,6 +38,10 @@ export interface TaskVoteSummary {
     agree_count: number;
     disagree_count: number;
     required_agree: number;
+    /** 拉鋸條用（ScoreBar）：現在的分數、目標分數（沒記就用 required_agree）、存疑票 */
+    score: number;
+    target_score: number;
+    unsure_count: number;
     /** 裁決任務才有：uphold＝維持原貢獻、reject＝原貢獻有誤 */
     verdict: string | null;
   } | null;
@@ -81,6 +89,9 @@ export function summarizeTaskVotes(tasks: readonly TaskRef[], contributions: rea
           agree_count: pick.c.agree_count,
           disagree_count: pick.c.disagree_count,
           required_agree: pick.need,
+          score: pick.c.score ?? 0,
+          target_score: pick.c.target_score ?? pick.need,
+          unsure_count: pick.c.unsure_count ?? 0,
           verdict: originalId ? payloadField(pick.c.payload, "verdict") : null,
         }
         : null,
