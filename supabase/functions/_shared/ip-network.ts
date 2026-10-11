@@ -46,3 +46,59 @@ function ipv6Groups(s: string): string[] | null {
   if (fill < 1) return null;
   return [...head, ...Array(fill).fill("0"), ...tail];
 }
+
+/**
+ * api.hustings.net 的 Worker（cloudflare/api-worker.js，OPS #85）轉送時，Supabase 看到的來源是 Cloudflare，
+ * 真實來源 IP 放在 x-hustings-client-ip，並帶共用密鑰 x-hustings-proxy-secret。
+ * 只有密鑰對（而且函式端有設、夠長）才採信那個 IP；否則一律照原本的來源判斷，所以直接打 Supabase 偽造這兩個標頭沒有用。
+ * 密鑰在 Supabase secrets（HUSTINGS_PROXY_SECRET），程式碼不寫值。
+ */
+export const PROXY_SECRET_HEADER = "x-hustings-proxy-secret";
+export const PROXY_CLIENT_IP_HEADER = "x-hustings-client-ip";
+/** 密鑰太短（含沒設）就當沒有，不採信任何轉送標頭 */
+export const PROXY_SECRET_MIN_LENGTH = 32;
+
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** 請求的來源 IP：密鑰對時用 Worker 轉送的真實 IP，否則 x-forwarded-for 第一個、x-real-ip、"unknown" */
+export function clientIpFrom(req: Request, proxySecret: string | undefined | null): string {
+  const key = (proxySecret ?? "").trim();
+  if (key.length >= PROXY_SECRET_MIN_LENGTH) {
+    const got = req.headers.get(PROXY_SECRET_HEADER)?.trim();
+    const ip = req.headers.get(PROXY_CLIENT_IP_HEADER)?.trim();
+    if (got && ip && sameSecret(got, key)) return ip;
+  }
+  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+}
+
+/**
+ * 有設但太短的密鑰：冷啟動提醒一次（不印值），免得兩邊對不上時完全沒訊號（主線審查 #580；照 dispatch-token.ts 的 createSecretWarner）。
+ * 回傳的函式拿到密鑰（已 trim）就檢查一次。
+ */
+export function createProxySecretWarner(warn: (msg: string) => void = (m) => console.warn(m)): (secret: string | undefined) => void {
+  let warned = false;
+  return (secret) => {
+    if (warned || !secret || secret.length >= PROXY_SECRET_MIN_LENGTH) return;
+    warned = true;
+    warn(`[proxy-ip] HUSTINGS_PROXY_SECRET 有設但短於 ${PROXY_SECRET_MIN_LENGTH} 字，已忽略：經 api.hustings.net 轉送的請求不會採信真實 IP，來源會退回 x-forwarded-for。`);
+  };
+}
+const warnShortProxySecret = createProxySecretWarner();
+
+/** 函式端的共用密鑰（Supabase secrets，trim 過）；讀不到（沒設、或測試環境沒給 env 權限）就當沒設 */
+export function proxySecretFromEnv(): string | undefined {
+  let raw: string | undefined;
+  try {
+    raw = Deno.env.get("HUSTINGS_PROXY_SECRET");
+  } catch {
+    return undefined;
+  }
+  const key = raw?.trim() || undefined;
+  warnShortProxySecret(key);
+  return key;
+}
