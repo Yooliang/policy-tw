@@ -67,19 +67,38 @@ function sameSecret(a: string, b: string): boolean {
 
 /** 請求的來源 IP：密鑰對時用 Worker 轉送的真實 IP，否則 x-forwarded-for 第一個、x-real-ip、"unknown" */
 export function clientIpFrom(req: Request, proxySecret: string | undefined | null): string {
-  if (proxySecret && proxySecret.length >= PROXY_SECRET_MIN_LENGTH) {
-    const got = req.headers.get(PROXY_SECRET_HEADER);
+  const key = (proxySecret ?? "").trim();
+  if (key.length >= PROXY_SECRET_MIN_LENGTH) {
+    const got = req.headers.get(PROXY_SECRET_HEADER)?.trim();
     const ip = req.headers.get(PROXY_CLIENT_IP_HEADER)?.trim();
-    if (got !== null && ip && sameSecret(got, proxySecret)) return ip;
+    if (got && ip && sameSecret(got, key)) return ip;
   }
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
 }
 
-/** 函式端的共用密鑰（Supabase secrets）；讀不到（沒設、或測試環境沒給 env 權限）就當沒設 */
+/**
+ * 有設但太短的密鑰：冷啟動提醒一次（不印值），免得兩邊對不上時完全沒訊號（主線審查 #580；照 dispatch-token.ts 的 createSecretWarner）。
+ * 回傳的函式拿到密鑰（已 trim）就檢查一次。
+ */
+export function createProxySecretWarner(warn: (msg: string) => void = (m) => console.warn(m)): (secret: string | undefined) => void {
+  let warned = false;
+  return (secret) => {
+    if (warned || !secret || secret.length >= PROXY_SECRET_MIN_LENGTH) return;
+    warned = true;
+    warn(`[proxy-ip] HUSTINGS_PROXY_SECRET 有設但短於 ${PROXY_SECRET_MIN_LENGTH} 字，已忽略：經 api.hustings.net 轉送的請求不會採信真實 IP，來源會退回 x-forwarded-for。`);
+  };
+}
+const warnShortProxySecret = createProxySecretWarner();
+
+/** 函式端的共用密鑰（Supabase secrets，trim 過）；讀不到（沒設、或測試環境沒給 env 權限）就當沒設 */
 export function proxySecretFromEnv(): string | undefined {
+  let raw: string | undefined;
   try {
-    return Deno.env.get("HUSTINGS_PROXY_SECRET");
+    raw = Deno.env.get("HUSTINGS_PROXY_SECRET");
   } catch {
     return undefined;
   }
+  const key = raw?.trim() || undefined;
+  warnShortProxySecret(key);
+  return key;
 }

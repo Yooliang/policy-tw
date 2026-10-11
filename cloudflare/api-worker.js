@@ -34,16 +34,24 @@ export function targetOf(url) {
   return null
 }
 
-const DROP_REQUEST_HEADERS = ['host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'cf-worker', 'x-real-ip', PROXY_SECRET_HEADER, PROXY_CLIENT_IP_HEADER]
+// 用戶端可以自己帶的來源類標頭一律拿掉：Cloudflare 會把真實 IP「附加」在用戶帶的 x-forwarded-for 後面，
+// 函式退回讀 XFF 第一個值時（密鑰沒設、太短、或兩邊對不上），用戶就能自選網段（主線審查 #580）。XFF 由下面重設成 cf-connecting-ip。
+const DROP_REQUEST_HEADERS = [
+  'host', 'cf-connecting-ip', 'cf-ipcountry', 'cf-ray', 'cf-visitor', 'cf-worker', 'x-real-ip',
+  'x-forwarded-for', 'forwarded', 'true-client-ip', 'x-forwarded-host', 'x-forwarded-proto',
+  PROXY_SECRET_HEADER, PROXY_CLIENT_IP_HEADER,
+]
 
 /** 組要送給 Supabase 的請求（純函式，測試直接呼叫） */
 export function upstreamRequest(request, target, secret) {
   const headers = new Headers(request.headers)
   for (const h of DROP_REQUEST_HEADERS) headers.delete(h)
-  const ip = request.headers.get('cf-connecting-ip')
-  if (secret && ip) {
+  const ip = (request.headers.get('cf-connecting-ip') || '').trim()
+  const key = (secret || '').trim()
+  if (ip) headers.set('x-forwarded-for', ip)
+  if (key && ip) {
     headers.set(PROXY_CLIENT_IP_HEADER, ip)
-    headers.set(PROXY_SECRET_HEADER, secret)
+    headers.set(PROXY_SECRET_HEADER, key)
   }
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
   return new Request(target, { method: request.method, headers, body: hasBody ? request.body : undefined, redirect: 'manual' })

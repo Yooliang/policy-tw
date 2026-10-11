@@ -72,3 +72,36 @@ Deno.test("Worker 本體：白名單外 404；轉送後回應原樣回來（狀�
     globalThis.fetch = realFetch;
   }
 });
+
+Deno.test("偽造的 XFF／forwarded 類標頭經 Worker 後被拿掉，x-forwarded-for 重設成 cf-connecting-ip", () => {
+  const incoming = new Request(`${BASE}/tw/next`, {
+    headers: {
+      "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "6.6.6.6, 7.7.7.7", forwarded: "for=6.6.6.6", "true-client-ip": "6.6.6.6",
+      "x-forwarded-host": "evil", "x-forwarded-proto": "http", "x-real-ip": "6.6.6.6",
+    },
+  });
+  for (const secret of [SECRET, undefined]) {
+    const up = upstreamRequest(incoming, `${API_ORIGIN}/next`, secret);
+    assertEquals(up.headers.get("x-forwarded-for"), "203.0.113.9", String(secret));
+    for (const h of ["forwarded", "true-client-ip", "x-forwarded-host", "x-forwarded-proto", "x-real-ip"]) assertEquals(up.headers.get(h), null, h);
+  }
+});
+
+Deno.test("有密鑰但沒有 cf-connecting-ip、又帶偽造標頭：IP 與密鑰兩個標頭都不存在，XFF 也被拿掉", () => {
+  const incoming = new Request(`${BASE}/tw/next`, { headers: { [PROXY_CLIENT_IP_HEADER]: "6.6.6.6", [PROXY_SECRET_HEADER]: "forged", "x-forwarded-for": "6.6.6.6" } });
+  const up = upstreamRequest(incoming, `${API_ORIGIN}/next`, SECRET);
+  assertEquals(up.headers.get(PROXY_CLIENT_IP_HEADER), null);
+  assertEquals(up.headers.get(PROXY_SECRET_HEADER), null);
+  assertEquals(up.headers.get("x-forwarded-for"), null);
+});
+
+Deno.test("路徑變形一律 404：編碼的斜線、雙斜線、大寫、多一層", () => {
+  for (const p of ["/tw/..%2Fsystem-one", "/tw%2Fnext", "/tw/next%2F", "//tw/next", "/TW/next", "/tw/NEXT", "/tw//next", "/tw/next/..%2F..%2Fsystem-one", "/jp/jp-next"]) {
+    assertEquals(targetOf(new URL(BASE + p)), null, p);
+  }
+});
+
+Deno.test("密鑰前後空白：Worker 送出去的是 trim 過的值", () => {
+  const up = upstreamRequest(new Request(`${BASE}/tw/next`, { headers: { "cf-connecting-ip": "203.0.113.9" } }), `${API_ORIGIN}/next`, ` ${SECRET}\n`);
+  assertEquals(up.headers.get(PROXY_SECRET_HEADER), SECRET);
+});
