@@ -95,16 +95,33 @@ export function protocolStatusFromCandidacy(status: string | null | undefined, l
 type RpcClient = any;
 
 /**
+ * 六都：中選會把直轄市長併在「縣市長」，參選紀錄也是，但直轄市長的候選人名單比縣市長早公告（2026：11-12 對 11-17）。
+ * 早的那天記在里程碑 list_published、職位「直轄市長」那一列（20261008160000），SQL candidacy_list_published 照職位找不到它，
+ * 所以六都的縣市長在這裡多問一次「直轄市長」（維護者 2026-10-11 裁決，見 policy-ops docs/decisions）。
+ */
+export const MUNICIPALITIES = ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市"] as const;
+
+export function isMunicipalMayor(electionType: string | null | undefined, county: string | null | undefined): boolean {
+  if (electionType !== "縣市長" || !county) return false;
+  return (MUNICIPALITIES as readonly string[]).includes(county.trim().replaceAll("臺", "台"));
+}
+
+/**
  * 這一屆這種選舉的正式名單在今天公告了沒（SQL candidacy_list_published，已投票也算）。
+ * 六都的縣市長（county 是六都）先問「直轄市長」那一天，沒公告再照縣市長問——直轄市長的名單只會比較早，兩個取「有一個公告就算」。
  * 查不到（RPC 失敗、沒有選舉別）就當沒公告——寧可照原值寫，也不要猜著換掉。
  */
-export async function isListPublished(supabase: RpcClient, electionId: number, electionType: string | null | undefined, today = taipeiToday()): Promise<boolean> {
+export async function isListPublished(supabase: RpcClient, electionId: number, electionType: string | null | undefined, today = taipeiToday(), county?: string | null): Promise<boolean> {
   if (!supabase || typeof supabase.rpc !== "function" || !electionType || !Number.isInteger(electionId)) return false;
-  try {
-    const { data, error } = await supabase.rpc("candidacy_list_published", { p_election_id: electionId, p_election_type: electionType, p_on: today });
-    return !error && data === true;
-  } catch {
-    return false;
-  }
+  const ask = async (type: string) => {
+    try {
+      const { data, error } = await supabase.rpc("candidacy_list_published", { p_election_id: electionId, p_election_type: type, p_on: today });
+      return !error && data === true;
+    } catch {
+      return false;
+    }
+  };
+  if (isMunicipalMayor(electionType, county) && await ask("直轄市長")) return true;
+  return await ask(electionType);
 }
 

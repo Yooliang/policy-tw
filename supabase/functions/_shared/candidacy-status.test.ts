@@ -10,7 +10,7 @@
  *   4. protocolStatusFromCandidacy 跟 SQL candidacy_protocol_status 逐項一致
  */
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
-import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, isListPublished, nextCandidacyStatus, protocolStatusFromCandidacy, resultOfCandidacyStatus, taipeiToday } from "./candidacy-status.ts";
+import { CANDIDACY_STATUS_LABELS, CANDIDACY_STATUSES, isListPublished, isMunicipalMayor, MUNICIPALITIES, nextCandidacyStatus, protocolStatusFromCandidacy, resultOfCandidacyStatus, taipeiToday } from "./candidacy-status.ts";
 
 const sql = await Deno.readTextFile(new URL("../../migrations/20261006034500_candidacy_status.sql", import.meta.url));
 /** 去掉 SQL 註解（Windows 檢出是 CRLF，先切掉 \r） */
@@ -123,4 +123,39 @@ Deno.test("isListPublished：問 SQL 的 candidacy_list_published；查不到一
   assertEquals(await isListPublished({}, 2026, "縣市議員"), false);
   assertEquals(await isListPublished(yes, 2026, null), false);
   assertEquals(taipeiToday(new Date("2026-11-16T16:30:00Z")), "2026-11-17", "台灣日期：UTC 16:30 已經是隔天");
+});
+
+Deno.test("isListPublished：六都的縣市長先問「直轄市長」那一天（2026 名單 11-12 公告，縣市長 11-17）；其他縣市、其他職位照舊只問一次", async () => {
+  // 假的 SQL：直轄市長 11-12、縣市長 11-17（里程碑 20261008160000 的形狀）
+  const published: Record<string, string> = { "直轄市長": "2026-11-12", "縣市長": "2026-11-17", "縣市議員": "2026-11-17" };
+  const calls: string[] = [];
+  const db = {
+    rpc: (_n: string, a: { p_election_type: string; p_on: string }) => {
+      calls.push(a.p_election_type);
+      return Promise.resolve({ data: published[a.p_election_type] <= a.p_on, error: null });
+    },
+  };
+  const ask = async (type: string, on: string, county?: string | null) => {
+    calls.length = 0;
+    return [await isListPublished(db, 2026, type, on, county), [...calls]];
+  };
+  assertEquals(await ask("縣市長", "2026-11-11", "台北市"), [false, ["直轄市長", "縣市長"]]);
+  assertEquals(await ask("縣市長", "2026-11-12", "台北市"), [true, ["直轄市長"]]);
+  assertEquals(await ask("縣市長", "2026-11-12", "臺南市"), [true, ["直轄市長"]], "臺／台都認");
+  assertEquals(await ask("縣市長", "2026-11-12", "新竹市"), [false, ["縣市長"]], "非六都照縣市長");
+  assertEquals(await ask("縣市長", "2026-11-12", null), [false, ["縣市長"]], "縣市不明照縣市長（寧可晚）");
+  assertEquals(await ask("縣市議員", "2026-11-12", "台北市"), [false, ["縣市議員"]], "直轄市議員跟縣市長同一天公告");
+  assertEquals(await ask("縣市長", "2026-11-17", "台北市"), [true, ["直轄市長"]]);
+  // 某一屆沒有直轄市長那一列（舊屆別）：問直轄市長回 false，退回縣市長那一天
+  const noMayorRow = { rpc: (_n: string, a: { p_election_type: string }) => Promise.resolve({ data: a.p_election_type === "縣市長", error: null }) };
+  assertEquals(await isListPublished(noMayorRow, 2022, "縣市長", "2022-12-01", "高雄市"), true);
+});
+
+Deno.test("isMunicipalMayor：只有縣市長＋六都", () => {
+  assertEquals(MUNICIPALITIES.length, 6);
+  for (const c of MUNICIPALITIES) assert(isMunicipalMayor("縣市長", c));
+  assert(isMunicipalMayor("縣市長", " 臺中市 "));
+  assert(!isMunicipalMayor("縣市長", "基隆市"));
+  assert(!isMunicipalMayor("縣市議員", "台北市"));
+  assert(!isMunicipalMayor(null, "台北市"));
 });
