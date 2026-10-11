@@ -27,7 +27,7 @@ import { isValidAgentName, isValidAgentTool, type Verdict } from "../consensus.t
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "../correction.ts";
 import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../contribution-schema.ts";
 import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
-import { isJpOfficialSource } from "./source-kind.ts";
+import { isJpOfficialSource, jpSourceKind } from "./source-kind.ts";
 import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../same-claims.ts";
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
@@ -507,6 +507,13 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       push("source_urls", raw.contribution_type === "local_government"
         ? "source_urls 至少要有一個公的出典：總務省「全国地方公共団体コード」（soumu.go.jp）或該団体的公式サイト（*.lg.jp、city.／town.／vill.／pref. 開頭的 .jp 網域）"
         : "source_urls 至少要有一個公的統計出典：e-Stat（e-stat.go.jp）、總務省・統計局（soumu.go.jp、stat.go.jp）或該団体的公式サイト（*.lg.jp 等）");
+    }
+    // candidacy_source_missing（#589 審查の後続）：この任務は「選管の公表ページ（official 等級）を足す」こと。報道だけの candidacy は
+    // 同じ状態の unchanged で落庫され派工は収回されるが、official の出典は付かないので次の seed で同じ任務がまた開く（無限に再派工）。入口で断る
+    if (raw.contribution_type === "candidacy" && typeof raw.task_id === "string" && raw.task_id.startsWith("auto:candidacy_source_missing:")
+        && Array.isArray(sourceUrls) && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
+        && !(sourceUrls as string[]).some((u) => jpSourceKind(u, "candidacy") === "official")) {
+      push("source_urls", "この任務は選挙管理委員会の公表ページを足すためのものです：source_urls に official 等級の網址（*.go.jp・*.lg.jp、city.／town.／vill.／pref.／ward. で始まる .jp の自治体公式サイト）を最低 1 つ入れてください。選管のページが見つからなければ candidacy ではなく no_change（outcome=not_found）で報告します");
     }
     items.push({
       contribution_type: raw.contribution_type,
