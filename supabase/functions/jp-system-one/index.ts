@@ -3,6 +3,7 @@ import { jpClient } from "../_shared/jp/client.ts";
 import { askJev, JEV_KEY_MISSING, jevKeyFromEnv, MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { batchHttpStatus } from "../_shared/batch-status.ts";
 import { type PrecheckCandidate, precheckOne } from "../_shared/jp/precheck.ts";
+import { verifyCaller } from "../_shared/console-fetch-auth.ts";
 
 /**
  * jp-system-one — 日本站の系統票（Jev が提出者の出典を確かめる）。正見 system-one の ?action=precheck だけを日本站に搬んだもの。
@@ -11,8 +12,11 @@ import { type PrecheckCandidate, precheckOne } from "../_shared/jp/precheck.ts";
  *                           出典を取って Jev に欄ごとに聞き、policy_jp.jev_decisions に source_support を一列書いて共識を計算し直す。
  *                           pg_cron policy-jp-system-one-precheck-10min が 10 分ごとに叩く（migration 20261011110000）。
  *
- * 金鑰は取らない（cron の呼び出しは開源の migration に書いてある）。代わりに成本上限：10 分以内に policy_jp.jev_decisions の
- * source_support が limit 件に達していれば、このラウンドは聞かない（正見と同じ守り方）。Jev の金鑰は正見と同じ secret を読む（新しい secret は要らない）。
+ * 呼び出し憑證（主線審查 2026-10-11）：一回の呼び出しで有料の Jev を何十回も聞くので公開しない。bulletin-watch／console-fetch と同じ：
+ * x-cron-secret（密鑰は Vault の jp_system_one_cron_secret だけにあり、関数は RPC policy_jp.jp_system_one_cron_secret_ok で照合を頼む）か
+ * service role の bearer。なし・誤りは 401、照合そのものが失敗したら 503（fail closed）。
+ * そのうえで成本上限：limit は 60（cron が使う値）まで、10 分以内に source_support が limit 件に達していればこのラウンドは聞かない。
+ * Jev の金鑰は正見と同じ secret を読む（新しい secret は要らない）。
  *
  * 系統票の意味は正見と同じ：supported ≥ 0.95 → 目標 −1（最少 1）、not_supported ≥ 0.95 → 目標 +1、それ以外は棄權。
  * candidacy が「異なる接続元 2 か所」を要るのは変わらない（contribution_needs_two_ips、計分は一字も変えていない）。
@@ -21,11 +25,11 @@ import { type PrecheckCandidate, precheckOne } from "../_shared/jp/precheck.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-/** 一ラウンドの上限と成本上限の時間窓（正見 BACKFILL_MAX／BACKFILL_WINDOW_MINUTES と同じ） */
-const PRECHECK_MAX = 300;
+/** 一ラウンドの上限（cron の limit=60 と同じ。憑證があっても大きい limit で一度に何百回も聞かせない）と成本上限の時間窓 */
+const PRECHECK_MAX = 60;
 const WINDOW_MINUTES = 10;
 /** 正見の 2026-09-19 の教訓（WORKER_RESOURCE_LIMIT）：2 件ずつ並行、40 秒で切り上げ、残りは次のラウンド（候選清單は冪等） */
 const BUDGET_MS = 40_000;
@@ -40,8 +44,22 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
   if (req.method !== "POST" || action !== "precheck") return json({ success: false, error: "POST ?action=precheck のみ" }, 404);
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const check = await verifyCaller(req.headers, {
+    serviceRoleKey,
+    checkCronSecret: serviceRoleKey && supabaseUrl
+      ? async (secret) => {
+        const { data, error } = await jpClient(supabaseUrl, serviceRoleKey).rpc("jp_system_one_cron_secret_ok", { p_secret: secret });
+        if (error) throw new Error(error.message);
+        return data === true;
+      }
+      : undefined,
+  });
+  if (!check.ok) return json({ success: false, error: check.error }, check.status);
+  if (!serviceRoleKey || !supabaseUrl) return json({ success: false, error: "SUPABASE_URL／SUPABASE_SERVICE_ROLE_KEY がない" }, 500);
   try {
-    const supabase = jpClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const supabase = jpClient(supabaseUrl, serviceRoleKey);
     const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
     if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), PRECHECK_MAX);

@@ -14,7 +14,11 @@
 --        ・正見的 system_vote_cec_only（只由中選會名單核對投票的型別）日本站沒有，不搬。
 --        ・「抓不到」的模型名是 policy-jp/fetch-only-00000000（正見 policy-tw/fetch-only-00000000），兩站的紀錄分得開。
 --   2. pg_cron policy-jp-system-one-precheck-10min：每 10 分鐘打 jp-system-one?action=precheck&limit=60（同正見 system-one-precheck-10min 的頻率與上限，
---      錯開分鐘：正見 3,13,…、日本 7,17,…）。端點不帶金鑰、靠成本上限守（10 分鐘內 policy_jp.jev_decisions 已判滿 limit 就不判），同正見。
+--      錯開分鐘：正見 3,13,…、日本 7,17,…）。
+--   3. 呼叫憑證（主線審查 10-11：每次呼叫都會逼出付費的 Jev，不能公開）：照 bulletin-watch／console-fetch，Vault 的 jp_system_one_cron_secret
+--      （沒有才由這支 migration 產一個隨機值）→ pg_cron 讀出來放 x-cron-secret → 函式用 policy_jp.jp_system_one_cron_secret_ok（SECURITY DEFINER、
+--      只授權 service_role）請資料庫比對，沒帶或錯就 401。函式端不持有密鑰。limit 在函式端夾到 60（cron 用的值）。
+--      正見 system-one 的 precheck 沒有憑證是同一個洞，另案處理，這支不動。
 --
 -- 計分規則一個字不動：系統票照舊只把目標 3 降成 2，candidacy 仍要兩個不同網段（contribution_needs_two_ips）。
 -- 日本站每個網段只算最新一票、每票 1 分，所以參選交件：沒有系統票＝3 個網段、有 supported 系統票＝2 個網段。
@@ -70,7 +74,51 @@ GRANT EXECUTE ON FUNCTION policy_jp.system_one_precheck_candidates(INTEGER) TO s
 GRANT EXECUTE ON FUNCTION policy_jp.system_one_precheck_types() TO anon, authenticated, service_role;
 
 -- ------------------------------------------------------------
--- 2. 排程（沒有 pg_cron／pg_net 的環境略過）
+-- 2. 呼叫憑證：密鑰沒有才產（64 字元十六進位）；驗證用 RPC（照 bulletin_watch_cron_secret_ok）
+--    沒有 Vault 的環境（PGlite 測試）不產密鑰；驗證函式用 plpgsql，建立時不檢查 vault 存在，呼叫時才讀。
+-- ------------------------------------------------------------
+DO $$
+BEGIN
+  -- vault がない環境では中の文を解析させない（plpgsql は IF の条件をまとめて解析する）ので、存在確認と本体を分ける
+  IF to_regclass('vault.decrypted_secrets') IS NULL THEN RETURN; END IF;
+  EXECUTE $q$
+    SELECT vault.create_secret(
+      encode(extensions.gen_random_bytes(32), 'hex'),
+      'jp_system_one_cron_secret',
+      'jp-system-one の pg_cron 呼び出し憑證（migration 20261011110000 が自動で作る；関数側は policy_jp.jp_system_one_cron_secret_ok で照合し、この値を持たない）'
+    )
+    WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'jp_system_one_cron_secret')
+  $q$;
+END
+$$;
+
+-- 比對兩邊的 SHA-256 摘要而不是原字串；太短的輸入一律不通過；只比 jp_system_one_cron_secret 這一筆；search_path 清空、全部寫全名
+CREATE OR REPLACE FUNCTION policy_jp.jp_system_one_cron_secret_ok(p_secret TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF p_secret IS NULL OR length(p_secret) < 16 THEN RETURN false; END IF;
+  RETURN EXISTS (
+    SELECT 1
+      FROM vault.decrypted_secrets s
+     WHERE s.name = 'jp_system_one_cron_secret'
+       AND extensions.digest(s.decrypted_secret, 'sha256') = extensions.digest(p_secret, 'sha256')
+  );
+END
+$$;
+REVOKE ALL ON FUNCTION policy_jp.jp_system_one_cron_secret_ok(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION policy_jp.jp_system_one_cron_secret_ok(TEXT) FROM anon;
+REVOKE ALL ON FUNCTION policy_jp.jp_system_one_cron_secret_ok(TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION policy_jp.jp_system_one_cron_secret_ok(TEXT) TO service_role;
+COMMENT ON FUNCTION policy_jp.jp_system_one_cron_secret_ok(TEXT) IS
+  'jp-system-one が x-cron-secret を照合する（2026-10-11）：入力値と Vault の jp_system_one_cron_secret を摘要で比べる。service_role だけ実行可；密鑰は migration が作り、資料庫の外に出ない';
+
+-- ------------------------------------------------------------
+-- 3. 排程（沒有 pg_cron／pg_net 的環境略過）
 -- ------------------------------------------------------------
 DO $$
 BEGIN
@@ -79,7 +127,10 @@ BEGIN
     EXECUTE $q$SELECT cron.schedule('policy-jp-system-one-precheck-10min', '7,17,27,37,47,57 * * * *',
       $c$SELECT net.http_post(
           url := 'https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/jp-system-one?action=precheck&limit=60',
-          headers := '{"Content-Type": "application/json"}'::jsonb,
+          headers := jsonb_build_object(
+            'Content-Type', 'application/json',
+            'x-cron-secret', COALESCE((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'jp_system_one_cron_secret' LIMIT 1), '')
+          ),
           body := '{}'::jsonb,
           timeout_milliseconds := 55000
         );$c$)$q$;
@@ -88,7 +139,7 @@ END
 $$;
 
 -- ------------------------------------------------------------
--- 3. 自我檢查
+-- 4. 自我檢查
 -- ------------------------------------------------------------
 DO $$
 DECLARE t TEXT;

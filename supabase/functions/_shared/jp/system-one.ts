@@ -201,43 +201,119 @@ export function detectCharset(contentType: string, head: Uint8Array): string {
 }
 
 export const JP_PDF_MAX_BYTES = 3_000_000;
+/** HTML はこの長さまでしか読まない（それ以上は本文の合成でどうせ切る） */
+export const JP_HTML_MAX_BYTES = 1_500_000;
+/** redirect は自分で一段ずつ追う（各段の行き先を検査するため）。この回数を超えたら諦める */
+export const JP_MAX_REDIRECTS = 5;
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36";
 
 export type JpFetched = { kind: "html" | "pdf" | "error"; text: string; note: string };
 
 /**
+ * 取りに行ってはいけない網址なら理由、よければ null（主線審查 2026-10-11：内網を叩かせない最小版）。
+ * 取った本文は anon が読める jev_decisions に残るので、内部のサービスや雲端のメタデータを読ませない。
+ *   ・http／https 以外、ユーザー名・パスワード付き、80／443 以外のポート
+ *   ・IP の字面（IPv4 の 10 進・8 進・16 進・整数表記も、IPv6 も全部）——自治體・選管・報道の出典は必ずホスト名
+ *   ・localhost、*.localhost、*.local、*.internal、*.lan、*.home.arpa、ドットのない単一ラベル
+ * 名前解決した先が内網の IP（DNS rebinding）までは見ない（Edge runtime で解決結果を固定できない）。残る風險として PR に書いた。
+ */
+export function jpUnsafeUrl(raw: string): string | null {
+  let u: URL;
+  try { u = new URL(raw); } catch { return "bad_url"; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return `scheme ${u.protocol}`;
+  if (u.username || u.password) return "userinfo";
+  if (u.port && u.port !== "80" && u.port !== "443") return `port ${u.port}`;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (!host) return "no_host";
+  if (host.startsWith("[") || host.includes(":")) return "ip_literal";
+  // URL は 0x7f.1、017700000001、2130706433 などを正規化して 127.0.0.1 にする；最後のラベルが数字だけ／0x… なら IP として扱う
+  const last = host.split(".").pop() ?? "";
+  if (/^\d+$/.test(last) || /^0x[0-9a-f]*$/i.test(last)) return "ip_literal";
+  if (!host.includes(".")) return "single_label";
+  if (/(^|\.)(localhost|local|internal|lan|home\.arpa|localdomain)$/.test(host)) return "internal_host";
+  return null;
+}
+
+/** 本文を上限まで流して読み、超えたら読むのをやめる（Content-Length がなくても全部は抱えない） */
+async function readCapped(res: Response, max: number): Promise<{ buf: Uint8Array; over: boolean }> {
+  if (!res.body) return { buf: new Uint8Array(), over: false };
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0, over = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (total + value.byteLength > max) {
+      parts.push(value.subarray(0, max - total));
+      total = max;
+      over = true;
+      await reader.cancel().catch(() => {});
+      break;
+    }
+    parts.push(value);
+    total += value.byteLength;
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { buf.set(p, off); off += p.byteLength; }
+  return { buf, over };
+}
+
+/**
  * 出典を取る。HTML は文字コードを見て解碼、PDF は 3 MB まで unpdf で抽字。表計算は読まない。
- * 本站・正見の網址（自引用）は取らずに error。pdfText は試験用の差し替え口。
+ * 本站・正見の網址（自引用）と内網（jpUnsafeUrl）は取らずに error。redirect は一段ずつ追い、行き先ごとに同じ検査をする。
+ * pdfText は試験用の差し替え口。
  */
 export async function jpFetchSource(
   url: string,
   fetchImpl: typeof fetch = fetch,
   pdfText: (buf: Uint8Array) => Promise<string> = unpdfText,
 ): Promise<JpFetched> {
-  if (isSelfCitationUrl(url)) return { kind: "error", text: "", note: "self_citation：本站・正見の網址は出典にならない" };
+  const blocked = (u: string): string | null => {
+    if (isSelfCitationUrl(u)) return "self_citation：本站・正見の網址は出典にならない";
+    const why = jpUnsafeUrl(u);
+    return why ? `blocked_host：${why}` : null;
+  };
+  const first = blocked(url);
+  if (first) return { kind: "error", text: "", note: first };
   try {
-    const res = await fetchImpl(url, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "ja,en;q=0.5" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+    const signal = AbortSignal.timeout(20_000);
+    let current = url;
+    let res: Response | null = null;
+    for (let hop = 0; hop <= JP_MAX_REDIRECTS; hop++) {
+      const r = await fetchImpl(current, { headers: { "User-Agent": FETCH_UA, "Accept-Language": "ja,en;q=0.5" }, redirect: "manual", signal });
+      if (r.status >= 300 && r.status < 400 && r.headers.get("location")) {
+        await r.body?.cancel();
+        const next = new URL(r.headers.get("location")!, current).toString();
+        const why = blocked(next);
+        if (why) return { kind: "error", text: "", note: `redirect → ${why}` };
+        current = next;
+        continue;
+      }
+      res = r;
+      break;
+    }
+    if (!res) return { kind: "error", text: "", note: `redirect > ${JP_MAX_REDIRECTS}` };
     if (!res.ok) { await res.body?.cancel(); return { kind: "error", text: "", note: `http ${res.status}` }; }
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.(xlsx?|ods|csv)(\?|$)/i.test(url)) {
+    if (ct.includes("ms-excel") || ct.includes("spreadsheetml") || /\.(xlsx?|ods|csv)(\?|$)/i.test(current)) {
       await res.body?.cancel();
       return { kind: "error", text: "", note: "表計算は読まない" };
     }
-    if (ct.includes("pdf") || /\.pdf(\?|$)/i.test(url)) {
+    if (ct.includes("pdf") || /\.pdf(\?|$)/i.test(current)) {
       const declared = Number(res.headers.get("content-length") ?? NaN);
       if (Number.isFinite(declared) && declared > JP_PDF_MAX_BYTES) { await res.body?.cancel(); return { kind: "pdf", text: "", note: `pdf ${declared} bytes > ${JP_PDF_MAX_BYTES}` }; }
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (buf.byteLength > JP_PDF_MAX_BYTES) return { kind: "pdf", text: "", note: `pdf ${buf.byteLength} bytes > ${JP_PDF_MAX_BYTES}` };
+      const { buf, over } = await readCapped(res, JP_PDF_MAX_BYTES);
+      if (over) return { kind: "pdf", text: "", note: `pdf > ${JP_PDF_MAX_BYTES} bytes` };
       const text = (await pdfText(buf)).replace(/\u0000/g, "");
       return { kind: text.trim() ? "html" : "pdf", text, note: `pdf:${buf.byteLength} | text:${text.length}` };
     }
-    const buf = new Uint8Array(await res.arrayBuffer());
-    const head = buf.slice(0, 1_500_000);
-    const charset = detectCharset(ct, head);
+    const { buf, over } = await readCapped(res, JP_HTML_MAX_BYTES);
+    const charset = detectCharset(ct, buf);
     let html: string;
-    try { html = new TextDecoder(charset).decode(head); } catch { html = new TextDecoder("utf-8").decode(head); }
+    try { html = new TextDecoder(charset).decode(buf); } catch { html = new TextDecoder("utf-8").decode(buf); }
     const text = htmlToText(html);
-    return { kind: "html", text, note: `raw:${buf.byteLength} | text:${text.length} | ${charset}` };
+    return { kind: "html", text, note: `raw:${buf.byteLength}${over ? "+" : ""} | text:${text.length} | ${charset}` };
   } catch (e) {
     return { kind: "error", text: "", note: e instanceof Error ? e.name : String(e) };
   }

@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  aggregateJpFieldVerdicts, buildJpSourceSupportAsk, combineJpSources, detectCharset, jpClaimOf, jpCoreFields, jpFetchSource, jpNameHit, JP_PDF_MAX_BYTES, JP_STATUS_PHRASES,
+  aggregateJpFieldVerdicts, buildJpSourceSupportAsk, combineJpSources, detectCharset, jpClaimOf, jpCoreFields, jpFetchSource, jpNameHit, JP_HTML_MAX_BYTES, JP_MAX_REDIRECTS, JP_PDF_MAX_BYTES, JP_STATUS_PHRASES, jpUnsafeUrl,
 } from "./system-one.ts";
 
 const ans = (choice: string, p: number) => ({ type: "choice", choice, probabilities: { [choice]: p } });
@@ -75,4 +75,62 @@ Deno.test("PDF：抽字した本文を使う、上限を超えたら読まない
   assertEquals([big.kind, big.text], ["pdf", ""]);
   const self = await jpFetchSource("https://jp.hustings.net/politician/x", (() => { throw new Error("取ってはいけない"); }) as unknown as typeof fetch);
   assertEquals(self.kind, "error");
+});
+
+Deno.test("内網は取らない：IP の字面（どの表記でも）・localhost・*.internal・単一ラベル・変なポートや scheme", () => {
+  for (const u of [
+    "http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/", "http://10.0.0.5/x", "http://[::1]/", "http://[fd00::1]/",
+    "http://2130706433/", "http://0x7f.1/", "http://017700000001/", "http://localhost/", "http://api.localhost/", "http://metadata.google.internal/",
+    "http://printer.local/", "http://intranet/", "https://www.city.example.lg.jp:8080/", "file:///etc/passwd", "ftp://example.jp/", "https://u:p@www.example.jp/",
+  ]) assert(jpUnsafeUrl(u) !== null, u);
+  for (const u of ["https://www.city.toyonaka.osaka.jp/senkyo/", "http://www.pref.okinawa.jp/a.pdf", "https://www.nhk.or.jp/senkyo/", "https://www.city.example.lg.jp:443/"]) {
+    assertEquals(jpUnsafeUrl(u), null, u);
+  }
+});
+
+Deno.test("redirect：一段ずつ追い、行き先が内網・自引用なら取らない；回数の上限", async () => {
+  const calls: string[] = [];
+  const hops = (map: Record<string, string>) => ((u: string, init?: RequestInit) => {
+    calls.push(u);
+    assertEquals(init?.redirect, "manual");
+    if (map[u]) return Promise.resolve(new Response(null, { status: 302, headers: { location: map[u] } }));
+    return Promise.resolve(new Response("<p>立候補者一覧 山田太郎 さん、無所属、新人</p>", { headers: { "content-type": "text/html; charset=utf-8" } }));
+  }) as unknown as typeof fetch;
+  // 公開 → 公開（相対 location も解決する）は追う
+  const ok = await jpFetchSource("https://www.city.example.lg.jp/a", hops({ "https://www.city.example.lg.jp/a": "/b" }));
+  assertEquals(ok.kind, "html");
+  assertEquals(calls, ["https://www.city.example.lg.jp/a", "https://www.city.example.lg.jp/b"]);
+  // 公開 → メタデータ：二段目は叩かない
+  calls.length = 0;
+  const meta = await jpFetchSource("https://www.city.example.lg.jp/a", hops({ "https://www.city.example.lg.jp/a": "http://169.254.169.254/latest/meta-data/" }));
+  assertEquals(meta.kind, "error");
+  assert(meta.note.includes("blocked_host"), meta.note);
+  assertEquals(calls, ["https://www.city.example.lg.jp/a"]);
+  // 公開 → 本站（自引用）
+  const self = await jpFetchSource("https://www.city.example.lg.jp/a", hops({ "https://www.city.example.lg.jp/a": "https://jp.hustings.net/politician/x" }));
+  assert(self.kind === "error" && self.note.includes("self_citation"), self.note);
+  // 無限 redirect
+  const loop = await jpFetchSource("https://www.city.example.lg.jp/a", hops({ "https://www.city.example.lg.jp/a": "/a" }));
+  assert(loop.kind === "error" && loop.note.includes(`${JP_MAX_REDIRECTS}`), loop.note);
+  // 最初から内網なら一度も叩かない
+  calls.length = 0;
+  assertEquals((await jpFetchSource("http://10.0.0.1/", hops({}))).kind, "error");
+  assertEquals(calls, []);
+});
+
+Deno.test("本文は上限まで流して読む：Content-Length のない巨大な HTML・PDF も全部は抱えない", async () => {
+  let pulled = 0;
+  const endless = (ct: string) => (() => {
+    const chunk = new Uint8Array(64 * 1024).fill(0x61);
+    const body = new ReadableStream<Uint8Array>({ pull(c) { pulled += chunk.byteLength; c.enqueue(chunk); } });
+    return Promise.resolve(new Response(body, { headers: { "content-type": ct } }));
+  }) as unknown as typeof fetch;
+  const html = await jpFetchSource("https://www.city.example.lg.jp/huge", endless("text/html"));
+  assertEquals(html.kind, "html");
+  assert(html.note.startsWith(`raw:${JP_HTML_MAX_BYTES}+`), html.note);
+  assert(pulled < JP_HTML_MAX_BYTES + 512 * 1024, String(pulled));
+  pulled = 0;
+  const pdf = await jpFetchSource("https://www.city.example.lg.jp/huge.pdf", endless("application/pdf"), () => { throw new Error("読まない"); });
+  assertEquals([pdf.kind, pdf.text], ["pdf", ""]);
+  assert(pulled < JP_PDF_MAX_BYTES + 512 * 1024, String(pulled));
 });

@@ -3,7 +3,7 @@
  * PGlite に _policy_jp_ の migration を全部当てた庫で試す（policy-jp-chain-db.ts）。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { freshDb, one, rows } from "./policy-jp-chain-db.ts";
+import { freshDb, one, readMig, rows } from "./policy-jp-chain-db.ts";
 import { JP_PRECHECK_TYPES, JP_FETCH_ONLY_MODEL } from "./jp/system-one.ts";
 import { systemVoteEligible } from "./jp/consensus.ts";
 
@@ -92,3 +92,56 @@ Deno.test("共識：系統票 supported（≥0.95）で candidacy の目標が 3
   await db.close();
 });
 
+
+Deno.test("呼び出し憑證：Vault の jp_system_one_cron_secret と摘要で照合、短い・別の排程の密鑰・NULL は通さない、service_role だけ実行可", async () => {
+  const db = await freshDb();
+  // Vault と pgcrypto の替身（bulletin-watch-db.test.ts と同じ）：digest は原字串の位元組を返す
+  await db.exec(`
+    CREATE SCHEMA vault; CREATE SCHEMA extensions;
+    CREATE TABLE vault.decrypted_secrets (name text, decrypted_secret text);
+    CREATE FUNCTION extensions.digest(t text, a text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$ SELECT convert_to(t, 'UTF8') $$;
+    INSERT INTO vault.decrypted_secrets VALUES ('jp_system_one_cron_secret', 'jp-secret-jp-secret-jp-secret'), ('bulletin_watch_cron_secret', 'other-secret-other-secret');
+  `);
+  const ok = async (s: string | null) => (await one<{ ok: boolean }>(db, `SELECT policy_jp.jp_system_one_cron_secret_ok($1) AS ok`, [s])).ok;
+  assertEquals(await ok("jp-secret-jp-secret-jp-secret"), true);
+  assertEquals(await ok("other-secret-other-secret"), false);
+  assertEquals(await ok("wrong-wrong-wrong-wrong"), false);
+  assertEquals(await ok(null), false);
+  await db.exec(`INSERT INTO vault.decrypted_secrets VALUES ('jp_system_one_cron_secret', 'tiny')`);
+  assertEquals(await ok("tiny"), false);
+  const grants = await rows<{ grantee: string }>(db,
+    `SELECT grantee::text FROM information_schema.routine_privileges WHERE routine_schema = 'policy_jp' AND routine_name = 'jp_system_one_cron_secret_ok' ORDER BY 1`);
+  assertEquals(grants.map((g) => g.grantee).filter((g) => ["anon", "authenticated", "PUBLIC", "service_role"].includes(g)), ["service_role"]);
+  await db.close();
+});
+
+Deno.test("端點：cron は x-cron-secret を Vault から読んで付ける；関数は verifyCaller で照合してから動き、limit は 60 まで", async () => {
+  const mig = await readMig("20261011110000_policy_jp_system_one_precheck.sql");
+  assert(mig.includes(`'x-cron-secret', COALESCE((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'jp_system_one_cron_secret' LIMIT 1), '')`));
+  assert(mig.includes("jp-system-one?action=precheck&limit=60"));
+  const src = await Deno.readTextFile(new URL("../jp-system-one/index.ts", import.meta.url));
+  assert(src.includes(`rpc("jp_system_one_cron_secret_ok"`));
+  assert(/const PRECHECK_MAX = 60;/.test(src));
+  // 憑證の照合は jpClient を作る・Jev の金鑰を読む・候選を拾うより前
+  const auth = src.indexOf("if (!check.ok) return");
+  assert(auth > 0 && auth < src.indexOf("jevKeyFromEnv(") && auth < src.indexOf(`rpc("system_one_precheck_candidates"`));
+});
+
+Deno.test("密鑰：Vault がある環境では migration が一度だけ作る（重跑しても増えない・既存の値は変えない）", async () => {
+  const db = await freshDb();
+  await db.exec(`
+    CREATE SCHEMA vault; CREATE SCHEMA extensions;
+    CREATE TABLE vault.decrypted_secrets (name text, decrypted_secret text);
+    CREATE FUNCTION extensions.gen_random_bytes(n integer) RETURNS bytea LANGUAGE sql AS $$ SELECT decode(repeat('ab', n), 'hex') $$;
+    CREATE FUNCTION vault.create_secret(new_secret text, new_name text, new_description text) RETURNS uuid LANGUAGE sql
+      AS $$ INSERT INTO vault.decrypted_secrets VALUES (new_name, new_secret) RETURNING gen_random_uuid() $$;
+  `);
+  const mig = await readMig("20261011110000_policy_jp_system_one_precheck.sql");
+  await db.exec(mig);
+  const secrets = async () => await rows<{ s: string }>(db, `SELECT decrypted_secret AS s FROM vault.decrypted_secrets WHERE name = 'jp_system_one_cron_secret'`);
+  assertEquals((await secrets()).map((r) => r.s), ["ab".repeat(32)]);
+  await db.exec(`UPDATE vault.decrypted_secrets SET decrypted_secret = 'rotated-rotated-rotated' WHERE name = 'jp_system_one_cron_secret'`);
+  await db.exec(mig);
+  assertEquals((await secrets()).map((r) => r.s), ["rotated-rotated-rotated"]);
+  await db.close();
+});
