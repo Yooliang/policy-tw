@@ -448,6 +448,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/jp-boost/index.ts"
 
+# 日本站の系統票（policy-jp-system-one-precheck-10min が叩く）。金鑰なし、成本上限は端點が守る（正見 system-one の precheck と同じ）
+[functions.jp-system-one]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-system-one/index.ts"
+
 [functions.apply-verified]
 enabled = true
 verify_jwt = false

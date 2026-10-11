@@ -5,8 +5,8 @@
  * 保留的：系統票（Jev）調門檻——supported 門檻 −1（最少 1）、not_supported +1（effectiveRequiredAgree，同正見）。
  * 拿掉的（日本站沒有或本 PR 不做）：candidacy／election_results／merge_politician／removal／adjudication 等風險級別、
  * 來源等級矩陣（正見的矩陣其實全是同一個值，日本站直接用單一門檻）、中選會名冊逐位吻合（ROSTER_*／rosterMatched 那條）、
- * 系統票可投型別縮成日本站有的 correction（no_change／task_suggestion 在正見也不拿系統票）、
- * needsTwoIps／scoreStatus（計分由 SQL 觸發器做，TS 這邊不鏡像）。jp-system-one 本身（投系統票的端點）留給下一個 PR。
+ * 系統票可投型別縮成日本站有的 candidacy・correction・politician・policy（no_change／task_suggestion 在正見也不拿系統票；SQL 的 system_vote_eligible 是正見複本、多收日本站沒有的型別）、
+ * needsTwoIps／scoreStatus（計分由 SQL 觸發器做，TS 這邊不鏡像）。投系統票的端點是 jp-system-one（20261011100000；目前只對 candidacy／politician／policy 投，correction 的宣稱形狀未定）。
  *
  * 門檻要跟日本站 SQL 一致（policy_jp.contribution_required_agree／contribution_reject_floor，由另一份 migration 提供）：
  *   no_change／task_suggestion 目標 2，correction 目標 3；退件門檻 no_change／task_suggestion −2，其餘 −3。
@@ -56,7 +56,7 @@ export function rejectFloor(contributionType: string): number {
 }
 
 // ---- 系統來源票（Jev）：同正見 SYSTEM_VOTE_ELIGIBLE_TYPES／effectiveRequiredAgree，拿掉名冊逐位吻合那條 ----
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["correction"] as const;
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["candidacy", "correction", "politician", "policy"] as const;
 export type SystemVote = "supported" | "not_supported" | null;
 
 export function systemVoteEligible(contributionType: string): boolean {

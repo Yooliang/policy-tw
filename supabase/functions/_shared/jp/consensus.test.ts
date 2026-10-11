@@ -46,7 +46,7 @@ Deno.test("election：目標 3、退件 −3（跟 correction 同級，不是 li
 
 Deno.test("election：不拿系統票——可投型別清單沒有它，門檻不被調", () => {
   assertEquals(systemVoteEligible("election"), false);
-  assertEquals([...SYSTEM_VOTE_ELIGIBLE_TYPES], ["correction"]);
+  assertEquals([...SYSTEM_VOTE_ELIGIBLE_TYPES], ["candidacy", "correction", "politician", "policy"]);
   // 就算有人硬帶系統票結果，呼叫端也不會對 election 取（不 eligible），但函式本身的算法不分型別：eligible 的判斷在 systemVoteEligible
   assertEquals(effectiveRequiredAgree(requiredAgree("election"), null), 3);
 });
