@@ -114,7 +114,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
     // 過渡期（#484）：切換前交的貢獻存單一 IP 雜湊，自交排除要新舊一起比（舊雜湊與新的同值＝IP 認不得，不傳）
     const legacyForPool = legacyIpHash !== ipHash ? legacyIpHash : undefined;
-    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, ...(legacyForPool ? { p_legacy_ip_hash: legacyForPool } : {}) });
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(legacyForPool ? { p_legacy_ip_hash: legacyForPool } : {}) });
 
     // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
     // 而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了
