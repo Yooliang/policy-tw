@@ -100,6 +100,7 @@ Deno.serve(async (req) => {
       p_region: region,
       p_limit: limit,
       p_type: type,
+      ...(agentName ? { p_agent_name: agentName } : {}),
     });
     if (error) throw new Error(`verify pool: ${error.message}`);
     type Row = { id: string; [k: string]: unknown };
