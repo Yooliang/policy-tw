@@ -102,7 +102,8 @@ Deno.test("A1 這支是 activity_open、總表、refresh_dispatch_blocked、poli
     assertEquals(d[i - 1], prev, `${needle} 的前一版應該是 ${prev}；有人在中間改了，要以那一版為底重做機械式替換`);
     assertEquals(d.slice(i + 1), after, `${needle} 在這支之後又被重新定義：要以最新那版為底重做`);
   };
-  await last("CREATE OR REPLACE FUNCTION activity_open(", P0_MIG);
+  // 20261011030000（OPS #81）只多「屆別或職位查不到時照開」一段 OR，其餘一字不動（arm-windows-13.test.ts 逐字守）
+  await last("CREATE OR REPLACE FUNCTION activity_open(", P0_MIG, ["20261011030000_arm_windows_13.sql"]);
   await last("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(", MAN_MIG, ["20261009240100_regional_stats_arm.sql"]);
   await last("CREATE OR REPLACE FUNCTION refresh_dispatch_blocked(", RDB_MIG);
   // #349 第二階段 B（20261009220000）刪 related_policies 時 DROP＋CREATE 了這個視圖（只拿掉 related_policy_ids），是唯一允許排在後面的一版
