@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-10-11
+
+- [照片不同時改成二選一](decisions/2026-10-11-照片不同時二選一.md)
+
 ## 2026-10-09
 
 - [#349 第二階段 B：刪 `related_policies` 表、`related_poli…](decisions/2026-10-09-349第二階段B刪related_policies表.md)
