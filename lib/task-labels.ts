@@ -48,6 +48,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   party_info_missing: '補政黨資訊',
   // 地方基本統計（#508，2026-10-09）
   regional_stat_missing: '缺地方統計',
+  // 2026-10-11：已經有照片又有人交了另一張，代理挑一張比較合適的
+  avatar_choice: '照片二選一',
   other: '其他',
 }
 

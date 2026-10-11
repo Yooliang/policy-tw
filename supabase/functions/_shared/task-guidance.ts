@@ -22,6 +22,7 @@ import { NON_OFFICIAL_SOURCES, NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, NOT_FOUND_EL
 import { SOLE_SOURCE_TASK_NOTE } from "./sole-source-guard.ts";
 import { SEARCH_PAGE_NOT_SOURCE } from "./search-page.ts";
 import { POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
+import { AVATAR_CHOICE_CRITERIA } from "./avatar-choice.ts";
 
 /**
  * 政見／基本資料缺口要用搜尋引擎、看非官方來源（維護者 2026-10-01）：抽 8 筆政見缺漏的「查無」，
@@ -83,6 +84,12 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "用一筆 politician 一次補齊，查不到的欄位不要填。" +
     "**照片要是人像照**：正方形或直式、短邊至少 120px。橫幅、活動看板、新聞情境照會被系統量尺寸擋下——官網的「縣長簡介」大圖常常是橫幅，請點開圖確認，或優先用維基百科、議會官網的個人照。" +
     searchFirst("profile_gap"),
+
+  // 照片二選一（2026-10-11，policy-ops#89）：挑選標準是維護者裁的，跟 avatar-choice.ts 同一句
+  avatar_choice:
+    "這位已經有照片，又有人交了另一張：**兩張都打開看（current.candidates），挑一張比較合適的本人人像照**。" + AVATAR_CHOICE_CRITERIA +
+    "挑新交的那張 → correction 把 politicians 的 avatar_url 從現有那張改成新那張（current_value 照 candidates 裡的現有照片原樣抄），reason 寫兩張各自的缺點、為什麼選它；" +
+    "現有那張比較合適 → no_change，outcome=confirmed，finding 寫兩張的比較。兩張都不是本人 → no_change，outcome=not_found，finding 說明。",
 
   candidate_status_stale:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
@@ -393,6 +400,7 @@ const TARGET_TABLE: Record<string, string> = {
   policy_election_mismatch: "policies",
   policy_validity: "policies",
   placeholder_politician: "politicians",
+  avatar_choice: "politicians",
   legacy_audit: "policies",
   duplicate_policy: "policies",
 };
@@ -445,6 +453,15 @@ function buildPayload(
           target_id: rowTarget ?? "（這一列的 id）",
           changes: [{ field: "withdrawn_after_filing", current_value: null, correct_value: "（false＝不在登記名冊上、沒登記過；true＝在名冊上、後來宣布退選。布林值不加引號）" }],
           reason: `（寫出他的姓名「${t.name ?? "姓名"}」與你核對的名冊；在名冊上、還在選的話不要交這一筆，改交 candidate_status）`,
+        };
+      }
+      // 照片二選一：挑新交的那張才走這條，欄位與兩個值都是已知的
+      if (taskType === "avatar_choice") {
+        return {
+          target_table: table,
+          target_id: rowTarget ?? "（人物 id）",
+          changes: [{ field: "avatar_url", current_value: t.current_avatar_url ?? null, correct_value: t.new_avatar_url ?? "（新交的照片網址）" }],
+          reason: "（兩張各自的缺點、為什麼新交的那張比較合適；留現有那張的話不要交這一筆，改交 no_change）",
         };
       }
       return {
@@ -813,6 +830,8 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   party_info_missing: ["party_info", "no_change"],
   // 參選紀錄疑似掛錯人（2026-10-06）：不是同一人就改掛，是同一人就 no_change confirmed
   candidacy_owner_mismatch: ["reassign_candidacy", "no_change"],
+  // 照片二選一（2026-10-11）：挑新的 → correction；留現有的 → no_change confirmed
+  avatar_choice: ["correction", "no_change"],
 };
 
 /** 這一種任務所有可能的回報骨架，key 是貢獻型別。單分支的回 null（用 report_template 就好）。 */
