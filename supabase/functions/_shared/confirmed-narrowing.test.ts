@@ -78,7 +78,14 @@ Deno.test("名單公告後交 confirmed：記成已登記（filed），回覆講
   assertEquals(peOf(tables)?.candidate_status, undefined, "落庫不寫舊欄位，由觸發器同步");
   assertStringIncludes(String(out.message), "filed");
   assertEquals(rpcCalls[0]?.name, "candidacy_list_published");
-  assertEquals(rpcCalls[0]?.args.p_election_type, "縣市長");
+  assertEquals(rpcCalls[0]?.args.p_election_type, "直轄市長", "台北市是六都：先問直轄市長那一天（名單比縣市長早公告，2026-10-11）");
+});
+
+Deno.test("非六都的縣市長交 confirmed：照縣市長問一次", async () => {
+  const { client, rpcCalls } = makeDb({ politicians: [{ id: POL, name: "王小明", merged_into: null }], politician_elections: [] }, true);
+  const c = candidacy("confirmed");
+  await applyContribution(client, { ...c, payload: { ...c.payload, region: "新竹縣" } });
+  assertEquals(rpcCalls.filter((x) => x.name === "candidacy_list_published").map((x) => x.args.p_election_type), ["縣市長"]);
 });
 
 Deno.test("名單還沒公告交 confirmed：照存（表態參選）", async () => {
@@ -128,6 +135,16 @@ Deno.test("correction 改參選狀態成 confirmed、名單已公告：記成已
   assertStringIncludes(String(out.message), "filed");
   const hist = (tables.get("edit_history") ?? []).map((h) => h.field);
   assert(hist.includes("candidacy_status"), `履歷記新欄位：${hist.join(",")}`);
+});
+
+Deno.test("correction 改六都市長成 confirmed：從 region_id 查縣市，先問直轄市長；非縣市長不查縣市", async () => {
+  const { client, tables, rpcCalls } = makeDb({
+    regions: [{ id: 3, region: "高雄市" }],
+    politician_elections: [{ id: "78", politician_id: POL, election_id: 2026, election_type: "縣市長", region_id: 3, candidacy_status: "considering" }],
+  }, true);
+  await applyContribution(client, correction("politician_elections", "78", [{ field: "candidate_status", current_value: "likely", correct_value: "confirmed" }]));
+  assertEquals((tables.get("politician_elections") ?? [])[0].candidacy_status, "filed");
+  assertEquals(rpcCalls.filter((x) => x.name === "candidacy_list_published").map((x) => x.args.p_election_type), ["直轄市長"]);
 });
 
 Deno.test("任期的推定卸任日附出處更正：根據換成 source、出處記第一個網址", async () => {
