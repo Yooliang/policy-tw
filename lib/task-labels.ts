@@ -25,7 +25,7 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   roster_check: '名單清查',
   district_seats_missing: '補應選名額',
   candidate_status_stale: '參選狀態待確認',
-  news_sweep: '掃新聞',
+  news_sweep: '新聞掃描', // 維護者 2026-10-11（policy-ops #88）
   policy_validity: '疑似不是政見',
   question: '公民提問',
   audit: '文件核對',
