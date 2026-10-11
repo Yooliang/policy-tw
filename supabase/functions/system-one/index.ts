@@ -226,7 +226,7 @@ async function settleFollowup(
 /** 新聞初篩一輪最多撿幾則（沒人名的不花 Jev，所以可以比 Jev 的上限多） */
 const NEWS_SCREEN_MAX = 400;
 /** 同一件新聞任務最多附幾則新聞（同一條政見、同一個人的新承諾，後來的新聞加進 hint_sources） */
-const NEWS_TASK_MAX_URLS = 10;
+const NEWS_TASK_MAX_URLS = 50; // 10 → 50：維護者 2026-10-11（policy-ops docs/decisions/2026-10-11-新聞任務參考網址上限50.md）
 
 type NewsRow = { id: number; source_id: number; url: string; title: string; summary: string | null; published_at: string | null };
 
