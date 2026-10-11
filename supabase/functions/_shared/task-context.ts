@@ -15,6 +15,7 @@ import { fetchPrimarySourceUrls, overlayPrimarySources, overlaySourceUrl } from 
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { shapeAvatarChoiceCurrent } from "./avatar-choice.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
@@ -379,6 +380,8 @@ export function shapeTaskCurrent(
   const inner = newsItem ? shapeNewsItemCurrent(target!, data)
     : ballot ? { items_count: target!.items_count ?? (Array.isArray(target!.items) ? (target!.items as unknown[]).length : null), note: "名單在 target.items；系統不核號次來源，每一筆都要有人在公告上親眼看到（只比對同一個號次單位有沒有同號）" }
     : recheck ? { units_count: target!.units_count ?? (Array.isArray(target!.units) ? (target!.units as unknown[]).length : null), note: "每個號次單位的異常在 target.units；要對公告重查，只交跟公告不同的" }
+    // 照片二選一（2026-10-11）：兩張照片在 target，現有那張讀人物表的現值
+    : taskType === "avatar_choice" ? shapeAvatarChoiceCurrent(target, data.politician ?? null)
     : shapeTaskCurrentInner(taskType, data);
   // 三要素派哪幾個要素由規則參數決定（OPS #61）：任務的 target.missing 只列有派的，現況跟著它，沒派的要素不要叫代理查
   if (taskType === "policy_elements_missing" && Array.isArray(target?.missing) && Array.isArray(inner.missing_elements)) {
@@ -400,7 +403,9 @@ export function shapeTaskCurrent(
   const shape = PAYLOAD_SHAPE[suggested];
   // 骨架把已知的 id 先填好。candidate_status_stale 要改 politician_elections 的某一列卻沒給
   // 那一列的 id，代理只能猜複合鍵——那個 id 其實一直在 task_id 裡（2026-09-21 實測回報）。
-  const template = task ? buildReportTemplate(taskType, suggested, target, task.task_id) : null;
+  // 照片二選一：骨架的 current_value 用人物表的現值（任務開了之後現有照片可能被換過）
+  const tplTarget = taskType === "avatar_choice" && target ? { ...target, current_avatar_url: data.politician?.avatar_url ?? null } : target;
+  const template = task ? buildReportTemplate(taskType, suggested, tplTarget, task.task_id) : null;
   return {
     ...inner,
     ...(hint ? { hint } : {}),
@@ -412,7 +417,7 @@ export function shapeTaskCurrent(
     // 多分支任務把每一條路的骨架都送出去：實測發現正確分支常常不是預設那個
     // （legacy_audit 預設 no_change、正確是 correction），代理只好回頭翻 payload_shape——
     // 而整個改動的目的就是讓它不必回頭翻（2026-09-21）
-    ...(task ? (() => { const b = buildBranchTemplates(taskType, target, task.task_id); return b ? { report_templates_by_type: b } : {}; })() : {}),
+    ...(task ? (() => { const b = buildBranchTemplates(taskType, tplTarget, task.task_id); return b ? { report_templates_by_type: b } : {}; })() : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
     // 查證來源（2026-09-28）：代理常只查媒體首頁就回「查無」，其實政黨／議會官網查得到照片、學經歷、選區、政見。
     // fetchTaskContext 已經依這個任務對象篩過、限量 6 筆；這裡沒有就不附，不能讓派工因為這個失敗。
