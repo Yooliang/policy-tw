@@ -500,7 +500,7 @@ const T_SET_BASED = "20261010200100"; // 件數改成一次集合查詢（#569 �
 const T_PASSIVE = "20261010230100"; // 主控台派工頁「被動」段（policy-ops #78；正見版在 20261010230000）
 const T_A1 = "20261011070000"; // 派工臂對齊正見 A 期第一支：candidate_status_stale／not_running／withdrawn_filing／candidacy_source_missing（policy-ops#95）
 const T_B = "20261011090000"; // 派工臂對齊正見 B 期：開票結果（election_results／elected_missing）＋新任期（politician_offices 同期）（policy-ops#95）
-const T_SYSONE = "20261011100000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
+const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -675,7 +675,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   politician_elections_office_sync: { mig: [T_B], why: "觸發器函式：參選的狀態・人物・選舉・公開狀態變了就同期那一筆。FOLLOWED 正見 trg_sync_politician_office（AFTER INSERT OR UPDATE OF …）；DEVIATED：欄位是日本站的 candidacy_status／review_status" },
   politician_offices_pending: { mig: [T_B], why: "（視圖）當選了但還沒有任期的參選：not_started（等就任日）／term_unknown（算不出任期，人確認）／national。正見的 politician_offices_gap 比的是中選會名單，台灣專用、不搬" },
 
-  // ---- 20261011100000 system_one_precheck（系統票の投票端）----
+  // ---- 20261011110000 system_one_precheck（系統票の投票端）----
   system_one_precheck_types: { mig: [T_SYSONE], why: "jp-system-one が出典を確かめて系統票を入れる交件型別（candidacy／politician／policy）。正見にない：正見は system_vote_eligible のうち cec_only 以外を全部聞く；日本站は宣稱の形が決まった型だけ（TS JP_PRECHECK_TYPES と対齊、policy-jp-system-one.test.ts）" },
   system_one_precheck_candidates: { mig: [T_SYSONE], why: "系統票の候選。FOLLOWED 正見 20261006141500 system_one_precheck_candidates（pending・出典あり・Jev が判定済みは二度と聞かない・fetch-only は 24 時間後に再取得で最多三次・未判定が先）；DEVIATED：型別を system_one_precheck_types() に絞る、system_vote_cec_only なし、fetch-only の model 名 policy-jp/fetch-only" },
 };

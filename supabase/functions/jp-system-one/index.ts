@@ -9,7 +9,7 @@ import { type PrecheckCandidate, precheckOne } from "../_shared/jp/precheck.ts";
  *
  *   ?action=precheck POST   pending で出典つき、まだ判定していない candidacy／politician／policy を拾い（SQL policy_jp.system_one_precheck_candidates）、
  *                           出典を取って Jev に欄ごとに聞き、policy_jp.jev_decisions に source_support を一列書いて共識を計算し直す。
- *                           pg_cron policy-jp-system-one-precheck-10min が 10 分ごとに叩く（migration 20261011100000）。
+ *                           pg_cron policy-jp-system-one-precheck-10min が 10 分ごとに叩く（migration 20261011110000）。
  *
  * 金鑰は取らない（cron の呼び出しは開源の migration に書いてある）。代わりに成本上限：10 分以内に policy_jp.jev_decisions の
  * source_support が limit 件に達していれば、このラウンドは聞かない（正見と同じ守り方）。Jev の金鑰は正見と同じ secret を読む（新しい secret は要らない）。

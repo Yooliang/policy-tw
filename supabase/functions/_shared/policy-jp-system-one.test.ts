@@ -1,5 +1,5 @@
 /**
- * 日本站の系統票（migration 20261011100000）：候選清單 policy_jp.system_one_precheck_candidates と、系統票が入ったときの共識。
+ * 日本站の系統票（migration 20261011110000）：候選清單 policy_jp.system_one_precheck_candidates と、系統票が入ったときの共識。
  * PGlite に _policy_jp_ の migration を全部当てた庫で試す（policy-jp-chain-db.ts）。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
