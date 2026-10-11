@@ -48,7 +48,8 @@ const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 // manual 是系統建的（新聞掃描、對帳、主線建的維護任務），標「系統維護」（維護者 2026-10-11，policy-ops #88）
 const SOURCE_LABEL: Record<string, string> = { manual: '系統維護', suggested: 'AI 提議', web_request: '網站請求', auto_dispute: '系統（爭議）' }
 /** 來源過濾按鈕的順序 */
-const SOURCES = ['manual', 'web_request', 'suggested', 'auto_dispute'] as const
+// auto_dispute（舊的裁決任務）2026-09-21 起不再建立，不給按鈕；舊的已關閉任務在「全部」照樣看得到（維護者 2026-10-11）
+const SOURCES = ['manual', 'web_request', 'suggested'] as const
 const SOURCE_CLASS: Record<string, string> = {
   manual: 'bg-navy-900 text-white', suggested: 'bg-violet-100 text-violet-800', web_request: 'bg-sky-100 text-sky-800', auto_dispute: 'bg-orange-100 text-orange-800',
 }
