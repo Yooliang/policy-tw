@@ -27,7 +27,7 @@ import { isValidAgentName, isValidAgentTool, type Verdict } from "../consensus.t
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "../correction.ts";
 import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../contribution-schema.ts";
 import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
-import { isJpOfficialSource } from "./source-kind.ts";
+import { isJpOfficialSource, jpSourceKind } from "./source-kind.ts";
 import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../same-claims.ts";
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
@@ -165,9 +165,11 @@ export const JP_TASK_ARMS = {
   candidate_status_stale: "candidacy",
   not_running_recheck: "candidacy",
   candidacy_source_missing: "candidacy",
+  // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
+  election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
 const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing):(.+)$/;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
@@ -208,6 +210,22 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     if (!JP_PE_ID_RE.test(peId)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:${filing ? "filing:" : ""}<参選紀錄 id>）`); return; }
     const mine = `${String(payload.politician_id ?? "")}:${String(payload.election_id ?? "")}:${String(payload.district_kind ?? "")}`;
     if (mine !== peId) push("payload", `payload の politician_id・election_id・district_kind（${mine}）が、この任務が問う参選（${peId}）と一致しません：一つの任務は、その参選の分だけを回報します（politician_id は必須）`);
+    return;
+  }
+  // election_result_missing（B 期）：task_id の末尾が参選紀錄 id なら当落（その参選だけ、elected／not_elected／withdrawn）、
+  // elected:<選挙 id> なら記録にない当選者（その選挙の elected だけ、一人一件で何件でも）
+  if (arm === "election_result_missing") {
+    if (m[2].startsWith("elected:")) {
+      const eid = m[2].slice("elected:".length);
+      if (!JP_ELECTION_ID_RE.test(eid)) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:election_result_missing:elected:<選舉 id>）"); return; }
+      if (payload.election_id !== eid) push("payload.election_id", `payload.election_id（${String(payload.election_id ?? "未填")}）跟這個任務問的選舉（${eid}）不一致：一個任務只回報它問的那場選舉的當選者`);
+      if (payload.candidacy_status !== "elected") push("payload.candidacy_status", "この任務（記録にない当選者）で出せるのは当選者（candidacy_status=elected）だけです。落選者は足さない；全員記録にあれば no_change（outcome=confirmed）");
+      return;
+    }
+    if (!JP_PE_ID_RE.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:election_result_missing:<参選紀錄 id>）"); return; }
+    const mine = `${String(payload.politician_id ?? "")}:${String(payload.election_id ?? "")}:${String(payload.district_kind ?? "")}`;
+    if (mine !== m[2]) push("payload", `payload の politician_id・election_id・district_kind（${mine}）が、この任務が問う参選（${m[2]}）と一致しません：一つの任務は、その参選の分だけを回報します（politician_id は必須）`);
+    else if (!oneOf(["elected", "not_elected", "withdrawn"] as const, payload.candidacy_status)) push("payload.candidacy_status", "この任務（当落）で出せる candidacy_status は elected（当選）／not_elected（落選）／withdrawn（届出していない・辞退）のどれかです");
     return;
   }
   // policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ
@@ -507,6 +525,13 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       push("source_urls", raw.contribution_type === "local_government"
         ? "source_urls 至少要有一個公的出典：總務省「全国地方公共団体コード」（soumu.go.jp）或該団体的公式サイト（*.lg.jp、city.／town.／vill.／pref. 開頭的 .jp 網域）"
         : "source_urls 至少要有一個公的統計出典：e-Stat（e-stat.go.jp）、總務省・統計局（soumu.go.jp、stat.go.jp）或該団体的公式サイト（*.lg.jp 等）");
+    }
+    // candidacy_source_missing（#589 審查の後続）：この任務は「選管の公表ページ（official 等級）を足す」こと。報道だけの candidacy は
+    // 同じ状態の unchanged で落庫され派工は収回されるが、official の出典は付かないので次の seed で同じ任務がまた開く（無限に再派工）。入口で断る
+    if (raw.contribution_type === "candidacy" && typeof raw.task_id === "string" && raw.task_id.startsWith("auto:candidacy_source_missing:")
+        && Array.isArray(sourceUrls) && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
+        && !(sourceUrls as string[]).some((u) => jpSourceKind(u, "candidacy") === "official")) {
+      push("source_urls", "この任務は選挙管理委員会の公表ページを足すためのものです：source_urls に official 等級の網址（*.go.jp・*.lg.jp、city.／town.／vill.／pref.／ward. で始まる .jp の自治体公式サイト）を最低 1 つ入れてください。選管のページが見つからなければ candidacy ではなく no_change（outcome=not_found）で報告します");
     }
     items.push({
       contribution_type: raw.contribution_type,

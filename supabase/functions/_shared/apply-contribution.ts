@@ -579,6 +579,13 @@ function regionGapNote(
     : "";
 }
 
+/** 參選紀錄的縣市（只有縣市長要問：六都的名單公告日比較早，見 candidacy-status.ts 的 isMunicipalMayor）；查不到回 null＝照縣市長 */
+async function candidacyCounty(supabase: SupabaseLike, electionType: string | null | undefined, regionId: number | null | undefined): Promise<string | null> {
+  if (electionType !== "縣市長" || regionId == null) return null;
+  const { data } = await supabase.from("regions").select("region").eq("id", regionId).maybeSingle();
+  return str((data as { region?: unknown } | null)?.region);
+}
+
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
   const ctx = ctxOf(row);
@@ -606,7 +613,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const narrowed = nextCandidacyStatus({
     candidateStatus: rawStatus,
     electionResult: str(p.election_result),
-    listPublished: rawStatus === "confirmed" ? await isListPublished(supabase, electionId, electionType) : false,
+    listPublished: rawStatus === "confirmed" ? await isListPublished(supabase, electionId, electionType, undefined, str(p.region)) : false,
     existing: (before as { candidacy_status?: string | null } | null)?.candidacy_status,
   });
   const candidacyStatus = narrowed.status;
@@ -1288,7 +1295,7 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
     .filter((f) => !(table === "policies" && f === "source_url"));
   // 任期的卸任日要連根據一起看（#345 後續）；參選紀錄改 confirmed 要知道是哪一屆、哪種選舉（名單公告了沒）
   const extraRead = table === "politician_offices" ? ["end_date", "end_reason", "end_basis", "source_url"]
-    : table === "politician_elections" ? ["election_id", "election_type", "candidacy_status"] : [];
+    : table === "politician_elections" ? ["election_id", "election_type", "candidacy_status", "region_id"] : [];
   const readCols = [...new Set(["id", ...fields, ...extraRead])];
   const { data: currentRow, error: readError } = await supabase.from(table).select(readCols.join(", ")).eq("id", target_id).maybeSingle();
   throwIf(readError, `${table} read`);
@@ -1306,12 +1313,14 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   // confirmed 只表示表態參選，正式名單公告後（含已投票屆別）改成 confirmed 的記成已登記；這一筆已經有結果的維持結果
   let narrowNote = "";
   if (table === "politician_elections" && "candidate_status" in patch) {
-    const cur = current as { election_id?: number; election_type?: string | null; candidacy_status?: string | null };
+    const cur = current as { election_id?: number; election_type?: string | null; candidacy_status?: string | null; region_id?: number | null };
     const raw = String(patch.candidate_status);
     delete patch.candidate_status;
     const n = nextCandidacyStatus({
       candidateStatus: raw,
-      listPublished: raw === "confirmed" ? await isListPublished(supabase, Number(cur.election_id), cur.election_type) : false,
+      listPublished: raw === "confirmed"
+        ? await isListPublished(supabase, Number(cur.election_id), cur.election_type, undefined, await candidacyCounty(supabase, cur.election_type, cur.region_id))
+        : false,
       existing: cur.candidacy_status,
     });
     if (n.status) patch.candidacy_status = n.status;
