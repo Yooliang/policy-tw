@@ -490,6 +490,7 @@ const T_KANA = "20261010120000"; // 告示前の読み（kana）は選填＋rost
 const T_TIMELINE = "20261010110100"; // 主控台派工開關的選舉時間軸（policy-ops #63；正見版在 20261010110000）
 const T_PER_ELECTION = "20261010140100"; // 時間軸日常與當屆選舉拆開（policy-ops #69；正見版在 20261010140000）
 const T_SET_BASED = "20261010200100"; // 件數改成一次集合查詢（#569 上線後 console_timeline 逾時；正見版在 20261010200000）
+const T_PASSIVE = "20261010230100"; // 主控台派工頁「被動」段（policy-ops #78；正見版在 20261010230000）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -604,6 +605,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   console_arm_election_counts: { mig: [T_PER_ELECTION, T_SET_BASED], why: "每支臂 × 每場選舉 × 職位的佇列件數（空＝日常），一次掃 task_dispatches；職位沒寫就用那場選舉的職位；公開唯讀" },
   console_dispatch_arm: { mig: [T_PER_ELECTION], why: "派工列 → 臂（opened_by.arm，沒有就照 task_id 的任務型別歸回）；日本站的任務型別名就是臂名，不在臂清單的不算；只給主控台算件數；20261010200100 刪掉（改由 console_dispatch_rows 一次算）" },
   console_dispatch_rows: { mig: [T_SET_BASED], why: "每一筆自動缺口派工列 → 臂、選舉、職位，一次集合查詢（取代逐列的 console_dispatch_arm／_election）；只給 service_role" },
+  console_passive: { mig: [T_PASSIVE], why: "主控台派工頁「被動」段：等驗證交件依來源（web_request／adjudication／agent）；日本站沒有新聞收錄與公民提問，news_* 為空；公開唯讀" },
   console_stage_end: { mig: [T_PER_ELECTION], why: "一場選舉某一段的結束日（告示日、投票日、投票日 +30）；日本站沒有任期里程碑，5～7 段不會過段" },
   // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
   //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----
