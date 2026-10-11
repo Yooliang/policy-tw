@@ -14,6 +14,7 @@ import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel } from "./candidacy-result.ts";
 import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
+import { openAvatarChoice } from "./avatar-choice.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
@@ -261,6 +262,18 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     education: Array.isArray(p.education) ? p.education : null,
     experience: Array.isArray(p.experience) ? p.experience : null,
   });
+  // 照片二選一（2026-10-11，policy-ops#89）：已經有照片、交的是另一張，不默默丟掉，開任務讓代理挑
+  const proposedAvatar = str(p.avatar_url);
+  if (proposedAvatar && !filled.includes("avatar_url")) {
+    const { data: now, error: nowErr } = await supabase.from("politicians").select("name, region, avatar_url").eq("id", ensured.politician_id).maybeSingle();
+    throwIf(nowErr, "politicians avatar read");
+    const currentAvatar = str(now?.avatar_url);
+    if (currentAvatar && currentAvatar !== proposedAvatar) {
+      avatarNote += await openAvatarChoice(supabase, {
+        politician_id: ensured.politician_id, name: str(now?.name), current_avatar_url: currentAvatar, new_avatar_url: proposedAvatar, contribution_id: row.id,
+      }, str(now?.region));
+    }
+  }
   return {
     status: "applied",
     politician_id: ensured.politician_id,

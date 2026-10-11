@@ -68,4 +68,6 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   party_info_missing: "party_info",
   // 地方基本統計（#508，2026-10-09）：縣市與鄉鎮市區缺人口／面積／總預算歲出／65歲以上比例，一個數值交一筆 regional_stat
   regional_stat_missing: "regional_stat",
+  // 照片二選一（2026-10-11，policy-ops#89）：挑新交的那張 → correction 改 avatar_url；留現有的 → no_change confirmed
+  avatar_choice: "correction",
 };
