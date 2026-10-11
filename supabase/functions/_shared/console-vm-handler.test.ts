@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { GRACE_SECONDS, type Gce, handleConsoleVm, type Instance, type MetadataItem, parseSpec, summarize } from "./console-vm-handler.ts";
+import { GRACE_SECONDS, type Gce, handleConsoleVm, type Instance, type MetadataItem, parseCounts, parseSpec, splitSites, summarize } from "./console-vm-handler.ts";
 import type { VerifyResult } from "./firebase-id-token.ts";
 
 /**
@@ -57,14 +57,13 @@ Deno.test("body 是 null／陣列／數字：400，不是 502，也不碰 GCP（
   }
 });
 
-Deno.test("parseSpec：只收 g／c，y（yooliang 留給開發）與格式錯誤、超過上限都擋", () => {
+Deno.test("parseSpec：收 g／y／c（10-11 起 yooliang 也可選），格式錯誤、超過上限都擋", () => {
   assert(!("error" in parseSpec("g4")));
   assert(!("error" in parseSpec("g2c2")));
-  assert("error" in parseSpec("y2"));
-  assert("error" in parseSpec("g2y2"));
+  assert(!("error" in parseSpec("g2y2")));
   assert("error" in parseSpec("a2"));
   assert("error" in parseSpec("g0"));
-  assert("error" in parseSpec("g9"));
+  assert("error" in parseSpec("g13"));
   assert("error" in parseSpec(""));
   assert("error" in parseSpec(4));
 });
@@ -125,7 +124,13 @@ Deno.test("start 參數檢查：site、hours、vm、spec 不合法都 400 且不
     { action: "start", site: "tw", spec: "g4", hours: 7 },
     { action: "start", site: "tw", spec: "g4", hours: 1.5 },
     { action: "start", site: "tw", spec: "g4", vm: "us2" },
-    { action: "start", site: "tw", spec: "y4" },
+    { action: "start", site: "tw", spec: "a4" },
+    { action: "start", site: "tw", counts: { g: 5 }, vm: "us" },
+    { action: "start", site: "tw", counts: { g: 0, y: 0, c: 0 }, vm: "us" },
+    { action: "start", site: "tw", counts: { g: 1.5 }, vm: "us" },
+    { action: "start", site: "tw", counts: { x: 1 }, vm: "us" },
+    { action: "start", site: "tw", counts: [1, 2], vm: "us" },
+    { action: "start", site: "us", counts: { g: 1 }, vm: "us" },
   ]) assertEquals((await handleConsoleVm(req(b), deps(f.gce))).status, 400, JSON.stringify(b));
   assertEquals(f.calls, [], "參數錯連 get 都不該打");
 });
@@ -163,4 +168,55 @@ Deno.test("金鑰沒設：500，訊息講清楚", async () => {
   const res = await handleConsoleVm(req({ action: "status" }), deps(null));
   assertEquals(res.status, 500);
   assert((await res.json()).error.includes("CONSOLE_VM_SA_KEY"));
+});
+
+Deno.test("splitSites：both 平均分、單數台灣多一隻；單站全部同一站", () => {
+  assertEquals(splitSites(4, "both"), ["tw", "tw", "jp", "jp"]);
+  assertEquals(splitSites(5, "both"), ["tw", "tw", "tw", "jp", "jp"]);
+  assertEquals(splitSites(1, "both"), ["tw"]);
+  assertEquals(splitSites(3, "jp"), ["jp", "jp", "jp"]);
+});
+
+Deno.test("parseCounts：g／y／c 各 0～4、合計至少 1", () => {
+  assertEquals(parseCounts({ g: 2, y: 2 }), { parts: [{ letter: "g", count: 2 }, { letter: "y", count: 2 }] });
+  assert("error" in parseCounts({ g: 0 }));
+  assert("error" in parseCounts({ c: 5 }));
+  assert("error" in parseCounts(null));
+});
+
+Deno.test("start 矩陣＋兩站都開：gsit 2＋yooliang 1＝3 隻 → 前 2 隻台灣、後 1 隻日本，VM site 記 tw", async () => {
+  const f = fakeGce(ALL_OFF);
+  const res = await handleConsoleVm(req({ action: "start", vm: "jp", counts: { g: 2, y: 1, c: 0 }, hours: 3, site: "both" }), deps(f.gce));
+  const j = await res.json();
+  assertEquals(res.status, 200, JSON.stringify(j));
+  const items = Object.fromEntries(f.meta["policy-verifier-jp"].map((i) => [i.key, i.value]));
+  assertEquals(items["site"], "tw");
+  assertEquals(items["run-hours"], "3");
+  const specs = items["agents"].split("|");
+  assertEquals(specs.map((x) => x.split(":")[0]), ["claude", "claude", "claude2"]);
+  assertEquals(specs.map((x) => x.slice(x.lastIndexOf("@") + 1)), ["tw", "tw", "jp"]);
+  assert(specs.every((x) => /#fresh@(tw|jp)$/.test(x)));
+  assertEquals(j.agents.map((a: { site: string }) => a.site), ["tw", "tw", "jp"]);
+  assertEquals(j.agents.map((a: { account: string }) => a.account), ["gsit", "gsit", "yooliang"]);
+});
+
+Deno.test("start 矩陣單站：agents 不加 @ 後綴（舊開機腳本也看得懂）", async () => {
+  const f = fakeGce(ALL_OFF);
+  const res = await handleConsoleVm(req({ action: "start", vm: "us", counts: { g: 1, c: 1 }, hours: 1, site: "jp" }), deps(f.gce));
+  assertEquals(res.status, 200);
+  const items = Object.fromEntries(f.meta["policy-verifier"].map((i) => [i.key, i.value]));
+  assertEquals(items["site"], "jp");
+  assert(!items["agents"].includes("@"));
+});
+
+Deno.test("summarize：代理各自站別；兩站混跑回 both", () => {
+  const s = summarize("tw", {
+    status: "RUNNING", lastStartTimestamp: "2026-10-10T11:00:00.000Z",
+    metadata: { items: [{ key: "run-hours", value: "1" }, { key: "site", value: "tw" }, { key: "agents", value: "claude:claude-sonnet-5=a#fresh@tw|claude2:claude-sonnet-5=b#fresh@jp" }] },
+  }, "");
+  assertEquals(s.site, "both");
+  assertEquals(s.agents.map((a) => [a.name, a.site]), [["a", "tw"], ["b", "jp"]]);
+  const one = summarize("us", { status: "TERMINATED", metadata: { items: [{ key: "site", value: "jp" }, { key: "agents", value: "claude:claude-sonnet-5=x#fresh" }] } }, "");
+  assertEquals(one.site, "jp");
+  assertEquals(one.agents[0].site, "jp");
 });

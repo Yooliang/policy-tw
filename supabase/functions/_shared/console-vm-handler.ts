@@ -7,10 +7,11 @@ import { corsPreflight, errorMessage, json } from "./console-admin-handler.ts";
  *
  * 規則跟 policy-ops scripts/verify-vm/go.sh 一致：
  *   - 三台：us＝policy-verifier（us-central1-a）、tw＝policy-verifier-tw（asia-east1-b）、jp＝policy-verifier-jp（asia-northeast1-a）
- *   - 站別只有 tw／jp，兩站都正常跑（verify-only=0）
- *   - 帳號字母：g＝gsit（provider claude）、c＝cwen（provider claude3）。y＝yooliang 不收——
- *     2026-10-10 小良哥裁：yooliang 全部留給開發（policy-ops docs/decisions/2026-10-10-yooliang帳號留給開發VM只用gsit.md）
- *   - 沒指定機器就從關著的三台隨機挑一台
+ *   - 站別 tw／jp／both，都正常跑（verify-only=0）。both＝同一台兩站都跑：代理平均分，單數台灣多一隻
+ *     （2026-10-11 小良哥），每隻代理在 agents 裡用 `@tw`／`@jp` 標站別（boot-agent.sh 認這個後綴）
+ *   - 帳號：g＝gsit（claude）、y＝yooliang（claude2）、c＝cwen（claude3），每個帳號 0～4 隻
+ *     （2026-10-11 小良哥要主控台也能選 yooliang，取代 10-10「VM 只用 gsit」那條；見 policy-ops docs/decisions）
+ *   - 主控台用 counts＋vm（每台一張矩陣）；舊的 spec 字串（g4、g2c2）仍收，沒指定機器就從關著的三台隨機挑一台
  * 驗證同 console-admin：Firebase ID Token＋主控台擁有者信箱。GCP 那邊用專用服務帳號 console-vm，只對三台有 get/start/stop/setMetadata/讀序列埠。
  * 序列埠只抽 `=== AGENT-START … ===` 標記行數，不回傳原文（原文會有代理的輸出）。
  *
@@ -26,11 +27,19 @@ export const VMS = {
 export type VmKey = keyof typeof VMS;
 const VM_KEYS = Object.keys(VMS) as VmKey[];
 
-export const ACCOUNTS = { g: { account: "gsit", provider: "claude" }, c: { account: "cwen", provider: "claude3" } } as const;
+export const ACCOUNTS = {
+  g: { account: "gsit", provider: "claude" },
+  y: { account: "yooliang", provider: "claude2" },
+  c: { account: "cwen", provider: "claude3" },
+} as const;
+type Letter = keyof typeof ACCOUNTS;
+const LETTERS: Letter[] = ["g", "y", "c"];
+const MAX_PER_ACCOUNT = 4;
 const PROVIDER_ACCOUNT: Record<string, string> = { claude: "gsit", claude2: "yooliang", claude3: "cwen" };
 const MODEL = "claude-sonnet-5";
-const MAX_AGENTS = 8;
+const MAX_AGENTS = 12;
 const MAX_HOURS = 6;
+export type Site = "tw" | "jp";
 /** maxRunDuration 的寬限：開機、裝 claude、最後一筆收尾都在 run-hours 之外 */
 export const GRACE_SECONDS = 30 * 60;
 
@@ -76,13 +85,12 @@ export function genNames(n: number, rnd: () => number): string[] {
 }
 
 /** "g2c2" → [{letter,count}]；格式不對、含 y、總數超過上限都回錯誤訊息 */
-export function parseSpec(spec: unknown): { parts: { letter: keyof typeof ACCOUNTS; count: number }[] } | { error: string } {
+export function parseSpec(spec: unknown): { parts: { letter: Letter; count: number }[] } | { error: string } {
   if (typeof spec !== "string" || !/^([a-z]\d+)+$/.test(spec)) return { error: "spec 要像 g4、g2c2" };
-  const parts: { letter: keyof typeof ACCOUNTS; count: number }[] = [];
+  const parts: { letter: Letter; count: number }[] = [];
   for (const m of spec.matchAll(/([a-z])(\d+)/g)) {
-    if (m[1] === "y") return { error: "yooliang 留給開發，驗證 VM 不能用" };
-    if (!(m[1] in ACCOUNTS)) return { error: `帳號字母只收 g（gsit）、c（cwen），不認得 ${m[1]}` };
-    parts.push({ letter: m[1] as keyof typeof ACCOUNTS, count: Number(m[2]) });
+    if (!(m[1] in ACCOUNTS)) return { error: `帳號字母只收 g（gsit）、y（yooliang）、c（cwen），不認得 ${m[1]}` };
+    parts.push({ letter: m[1] as Letter, count: Number(m[2]) });
   }
   const total = parts.reduce((a, p) => a + p.count, 0);
   if (total < 1) return { error: "至少要一隻代理" };
@@ -90,28 +98,53 @@ export function parseSpec(spec: unknown): { parts: { letter: keyof typeof ACCOUN
   return { parts };
 }
 
+/** 主控台矩陣：{ g, y, c } 各 0～4（整數），合計至少 1 */
+export function parseCounts(counts: unknown): { parts: { letter: Letter; count: number }[] } | { error: string } {
+  if (!counts || typeof counts !== "object" || Array.isArray(counts)) return { error: "counts 要像 {g:2,y:2,c:0}" };
+  const c = counts as Record<string, unknown>;
+  for (const k of Object.keys(c)) if (!LETTERS.includes(k as Letter)) return { error: `counts 只收 g、y、c，不認得 ${k}` };
+  const parts: { letter: Letter; count: number }[] = [];
+  for (const l of LETTERS) {
+    const n = c[l] ?? 0;
+    if (!Number.isInteger(n) || (n as number) < 0 || (n as number) > MAX_PER_ACCOUNT) return { error: `每個帳號 0～${MAX_PER_ACCOUNT} 隻` };
+    if ((n as number) > 0) parts.push({ letter: l, count: n as number });
+  }
+  if (parts.length === 0) return { error: "至少要一隻代理" };
+  return { parts };
+}
+
+/** both：前 ceil(n/2) 隻跑台灣、其餘日本（單數台灣多一隻）；單站就全部同一站 */
+export function splitSites(n: number, site: Site | "both"): Site[] {
+  if (site !== "both") return Array(n).fill(site);
+  const tw = Math.ceil(n / 2);
+  return Array.from({ length: n }, (_, i) => (i < tw ? "tw" : "jp"));
+}
+
 const md = (inst: Instance, key: string) => inst.metadata?.items?.find((i) => i.key === key)?.value;
 
-export function parseAgents(agents: string | undefined) {
+export function parseAgents(agents: string | undefined, defaultSite: Site = "tw") {
   return (agents ?? "").split("|").filter(Boolean).map((spec) => {
-    const m = spec.match(/^([a-z0-9]+):([^=]+)=([^#]+)/);
-    return m ? { account: PROVIDER_ACCOUNT[m[1]] ?? m[1], provider: m[1], name: m[3] } : null;
-  }).filter((x): x is { account: string; provider: string; name: string } => x !== null);
+    const m = spec.match(/^([a-z0-9]+):([^=]+)=([^#@]+)(?:#[a-z]+)?(?:@(tw|jp))?$/);
+    return m ? { account: PROVIDER_ACCOUNT[m[1]] ?? m[1], provider: m[1], name: m[3], site: (m[4] ?? defaultSite) as Site } : null;
+  }).filter((x): x is { account: string; provider: string; name: string; site: Site } => x !== null);
 }
 
 export function summarize(key: VmKey, inst: Instance, serial: string) {
   const running = inst.status === "RUNNING";
   const hours = Number(md(inst, "run-hours")) || null;
   const started = running && inst.lastStartTimestamp ? new Date(inst.lastStartTimestamp) : null;
-  const site = md(inst, "site");
+  const vmSite: Site = md(inst, "site") === "jp" ? "jp" : "tw";
+  const agents = parseAgents(md(inst, "agents"), vmSite);
+  const sites = new Set(agents.map((a) => a.site));
+  const site = sites.size > 1 ? "both" : sites.size === 1 ? [...sites][0] : (md(inst, "site") ? vmSite : null);
   return {
     key,
     name: VMS[key].name,
     region: VMS[key].region,
     status: inst.status,
-    site: site === "jp" ? "jp" : site === "tw" ? "tw" : null,
+    site,
     hours,
-    agents: parseAgents(md(inst, "agents")),
+    agents,
     started_at: started ? started.toISOString() : null,
     ends_at: started && hours ? new Date(started.getTime() + hours * 3600_000).toISOString() : null,
     agents_started: running ? (serial.match(/=== AGENT-START /g) ?? []).length : 0,
@@ -165,10 +198,10 @@ export async function handleConsoleVm(req: Request, deps: ConsoleVmDeps): Promis
 
     if (body.action === "start") {
       const site = body.site;
-      if (site !== "tw" && site !== "jp") return json({ success: false, error: "site 只能是 tw 或 jp" }, 400);
+      if (site !== "tw" && site !== "jp" && site !== "both") return json({ success: false, error: "site 只能是 tw、jp 或 both" }, 400);
       const hours = body.hours ?? 1;
       if (!Number.isInteger(hours) || (hours as number) < 1 || (hours as number) > MAX_HOURS) return json({ success: false, error: `hours 要是 1～${MAX_HOURS} 的整數` }, 400);
-      const parsed = parseSpec(body.spec);
+      const parsed = body.counts !== undefined ? parseCounts(body.counts) : parseSpec(body.spec);
       if ("error" in parsed) return json({ success: false, error: parsed.error }, 400);
 
       let k: VmKey;
@@ -194,18 +227,25 @@ export async function handleConsoleVm(req: Request, deps: ConsoleVmDeps): Promis
 
       const total = parsed.parts.reduce((a, p) => a + p.count, 0);
       const names = genNames(total, rnd);
+      const sites = splitSites(total, site);
       const specs: string[] = [];
       let n = 0;
-      for (const p of parsed.parts) for (let i = 0; i < p.count; i++) specs.push(`${ACCOUNTS[p.letter].provider}:${MODEL}=${names[n++]}#fresh`);
+      for (const p of parsed.parts) {
+        for (let i = 0; i < p.count; i++, n++) {
+          // 單站不加後綴（舊版開機腳本也看得懂）；both 才每隻標 @tw／@jp
+          specs.push(`${ACCOUNTS[p.letter].provider}:${MODEL}=${names[n]}#fresh${site === "both" ? "@" + sites[n] : ""}`);
+        }
+      }
       const agents = specs.join("|");
 
       // setMetadata 是整份取代：保留原本所有鍵（startup-script、secret-project…），只覆寫這四個
-      const set: Record<string, string> = { "run-hours": String(hours), "verify-only": "0", site, agents };
+      // both 時 VM 的 site 填 tw（沒標後綴的代理預設），每隻實際站別看後綴
+      const set: Record<string, string> = { "run-hours": String(hours), "verify-only": "0", site: site === "both" ? "tw" : site, agents };
       const items = (inst.metadata?.items ?? []).filter((i) => !(i.key in set)).concat(Object.entries(set).map(([key, value]) => ({ key, value })));
       await gce.setMetadata(VMS[k].name, VMS[k].zone, inst.metadata?.fingerprint, items);
       await gce.setMaxRun(VMS[k].name, VMS[k].zone, (hours as number) * 3600 + GRACE_SECONDS);
       await gce.start(VMS[k].name, VMS[k].zone);
-      return json({ success: true, vm: { key: k, name: VMS[k].name }, agents: parseAgents(agents) });
+      return json({ success: true, vm: { key: k, name: VMS[k].name }, agents: parseAgents(agents, site === "jp" ? "jp" : "tw") });
     }
 
     return json({ success: false, error: "action 只能是 status／start／stop" }, 400);
