@@ -140,6 +140,7 @@ const NOT_REDIRECTED: Record<string, string> = {
   "news-fetch": "排程抓取，不對外",
   "console-fetch": "站務主控台的 GA4／AdSense 抓取（cron 打 Supabase，要帶憑證），不對外",
   "console-admin": "站務主控台手動調整派工開關／里程碑（主控台前端直接打 Supabase，帶 Firebase ID token），不是代理協議",
+  "console-vm": "站務主控台開關驗證 VM／看狀態（主控台前端直接打 Supabase，帶 Firebase ID token），不是代理協議",
   "bulletin-watch": "偵測公報站資料夾、記下實際上網日（cron 打 Supabase，要帶憑證），不對外",
   "source-archive": "排程存檔，不對外",
   "jp-next": "日本站（policy_jp）的派工端點，代理照日本站 skill.md 直接打 Supabase 的端點根網址，不經正見.tw 的 Worker",
