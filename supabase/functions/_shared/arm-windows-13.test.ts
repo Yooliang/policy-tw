@@ -1,5 +1,5 @@
 /**
- * 當屆類 13 支臂補上起訖（migration 20261011010000；工作單 Yooliang/policy-ops#81）——提案版，維護者點頭才合。
+ * 當屆類 13 支臂補上起訖（migration 20261011030000；工作單 Yooliang/policy-ops#81）——提案版，維護者點頭才合。
  *   - 9 支改成照里程碑開關（rule_id 不變、原地 UPDATE）；4 支（交接缺漏、政見傳承三支）維持永遠開並寫明理由
  *   - 名單清查兩支起點是登記截止（照登記彙總表核對），不是名單公告日
  *   - 中選會名單對不上、當選人缺紀錄不設迄日（在派的是 2022／2024 還沒補齊的人）
@@ -10,7 +10,7 @@ import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { readMig } from "./arms-pglite.ts";
 
-const SQL = await readMig("20261011010000_arm_windows_13.sql");
+const SQL = await readMig("20261011030000_arm_windows_13.sql");
 
 const SEED: Array<[number, string]> = [
   [3, "raw:policy_missing"], [31, "mayor_policies"], [14, "raw:roster_check"], [1, "roster_villages"], [28, "district_seats"],
