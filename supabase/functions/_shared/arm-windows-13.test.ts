@@ -27,13 +27,13 @@ const SEED: Array<[number, string]> = [
   [3, "raw:policy_missing"], [31, "mayor_policies"], [14, "raw:roster_check"], [1, "roster_villages"], [28, "district_seats"],
   [19, "raw:candidacy_source_missing"], [27, "withdrawn_filing"], [21, "roster_cec_gap"], [30, "elected_missing"],
   [22, "handover_missing"], [6, "lineage_candidates"], [25, "lineage_links"], [26, "lineage_roles"],
-  [5, "raw:progress_stale"], [24, "deadline_due"], [36, "term_policies"],
+  [5, "raw:progress_stale"], [24, "deadline_due"], [36, "term_policies"], [47, "term_policies"],
 ];
 
 async function db(sql = RULES_SQL): Promise<PGlite> {
   const d = new PGlite();
   await d.exec(`CREATE TABLE activity_rules (id bigint PRIMARY KEY, activity text, window_kind text, from_kind text, from_offset int DEFAULT 0,
-    until_kind text, until_offset int DEFAULT 0, note text, params jsonb NOT NULL DEFAULT '{}');
+    until_kind text, until_offset int DEFAULT 0, note text, params jsonb NOT NULL DEFAULT '{}', enabled boolean DEFAULT true, priority smallint);
     CREATE TABLE election_task_config (election_id int PRIMARY KEY, enabled boolean, note text, updated_at timestamptz);
     INSERT INTO election_task_config VALUES (2022, true, '', now()), (2026, false, '', now());`);
   for (const [id, act] of SEED) {
@@ -45,8 +45,8 @@ async function db(sql = RULES_SQL): Promise<PGlite> {
 
 type Row = { activity: string; window_kind: string; from_kind: string | null; from_offset: number; until_kind: string | null; until_offset: number };
 async function rules(d: PGlite): Promise<Record<string, string>> {
-  const { rows } = await d.query<Row>(`SELECT activity, window_kind, from_kind, from_offset, until_kind, until_offset FROM activity_rules`);
-  return Object.fromEntries(rows.map((r) => [r.activity,
+  const { rows } = await d.query<Row & { id: number }>(`SELECT id::int, activity, window_kind, from_kind, from_offset, until_kind, until_offset FROM activity_rules`);
+  return Object.fromEntries(rows.map((r) => [r.activity === "term_policies" ? `term_policies#${r.id}` : r.activity,
     r.window_kind === "always" ? "always" : `${r.from_kind ?? "-"}+${r.from_offset}..${r.until_kind ?? "-"}+${r.until_offset}`]));
 }
 
@@ -62,7 +62,8 @@ Deno.test("規則：12 支照里程碑、4 支維持永遠開；2026 補舊屆�
     "withdrawn_filing": "registration_close+0..list_published+0",
     "roster_cec_gap": "polling+1..-+0",
     "elected_missing": "polling+1..-+0",
-    "term_policies": "polling+1..-+0",
+    "term_policies#36": "polling+1..-+0",
+    "term_policies#47": "polling+1..-+0",
     "raw:progress_stale": "term_start+0..-+0",
     "deadline_due": "term_start+0..-+0",
     "handover_missing": "always",
@@ -87,16 +88,20 @@ Deno.test("還原驗證：名單清查起點換成名單公告日，結果就不
   await d.close();
 });
 
-Deno.test("自我檢查：少改一支、或沒打開 2026 補舊屆政見，整支停下", async () => {
+Deno.test("自我檢查：少改一支、沒打開 2026 補舊屆政見、或補舊屆政見有一條沒照投票日 +1 起，整支停下", async () => {
   const a = RULES_SQL.replace(/UPDATE activity_rules SET window_kind = 'event'[^;]*WHERE id = 30 AND activity = 'elected_missing';/, "");
   assert(a !== RULES_SQL);
   await assertRejects(() => db(a));
   const b = RULES_SQL.replace(/UPDATE election_task_config[^;]*;/, "");
   assert(b !== RULES_SQL);
   await assertRejects(() => db(b));
+  // 還原驗證：村里長那條（rule 47）不改，2026 設定表打開後投票前會被派 → 停下
+  const c = RULES_SQL.replace(/UPDATE activity_rules SET window_kind = 'event'[^;]*WHERE id = 47 AND activity = 'term_policies';/, "");
+  assert(c !== RULES_SQL);
+  await assertRejects(() => db(c));
 });
 
-Deno.test("只動這 16 列規則、一列設定與兩支函式：不建表、不刪資料", () => {
+Deno.test("只動這 17 列規則、一列設定與兩支函式：不建表、不刪資料", () => {
   const code = strip(RULES_SQL);
   assert(!/CREATE|DROP|DELETE|INSERT|ALTER/.test(code.replace(/RAISE EXCEPTION[^;]*;/g, "")));
   assertEquals([...strip(SQL).matchAll(/CREATE OR REPLACE FUNCTION ([a-z_]+)\(/g)].map((m) => m[1]).sort(), ["activity_open", "contribution_auto_tasks_term_policies"]);

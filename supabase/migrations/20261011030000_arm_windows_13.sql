@@ -115,12 +115,16 @@ UPDATE activity_rules SET window_kind = 'event', from_kind = NULL, from_offset =
  WHERE id = 3 AND activity = 'raw:policy_missing';
 
 -- 補舊屆政見：投票日 +1 起自動開（維護者 10-11：不靠人 11-29 去 UPDATE）。規則照里程碑；2026 那一屆的設定表開關改成開著，
--- 投票前它本來就沒有可派的（只派當選人與推得出公報的參選人；公報上架後投票前那幾天由規則擋住）。村里長那條（rule 47，有流量才開）不動。
+-- 投票前它本來就沒有可派的（只派當選人與推得出公報的參選人；公報上架後投票前那幾天由規則擋住）。村里長那條（rule 47，有流量才開）也改同一個起點。
 -- 範圍提醒（PR 說明）：這支只對設定表的職位（2026：縣市長、縣市議員、鄉鎮市長）的當選人，加上推得出選舉公報的參選人（含落選人）；
 -- 推不出公報的落選人、村里長、代表，投票後不會被補。
 UPDATE activity_rules SET window_kind = 'event', from_kind = 'polling', from_offset = 1, until_kind = NULL, until_offset = 0,
        note = '當屆類（OPS #81）：投票日 +1 起、不設迄日（當屆缺政見投票日收，投票後由這支接手）；排除村里長（村里長看 rule 47 有流量才開）；2022／2024 投票已過，照舊開著'
  WHERE id = 36 AND activity = 'term_policies';
+-- 村里長那條（rule 47，有流量才開）也照同一個起點：以前靠 2026 設定表關著擋，打開後只剩公報檢視沒有 2026 列在擋（主線審查 #577）
+UPDATE activity_rules SET window_kind = 'event', from_kind = 'polling', from_offset = 1, until_kind = NULL, until_offset = 0,
+       note = '當屆類（OPS #81）：村里長、有流量才開；投票日 +1 起、不設迄日（跟 rule 36 同一個起點，2026 設定表打開後投票前不派）'
+ WHERE id = 47 AND activity = 'term_policies';
 UPDATE election_task_config
    SET enabled = true, updated_at = now(),
        note = '2026-10-11 起開著（OPS #81）：投票前由規則 term_policies（rule 36，投票日 +1 起）擋住，不再靠人 11-29 手動開'
@@ -269,8 +273,12 @@ UPDATE activity_rules SET note = '當屆類但維持永遠開（OPS #81）：任
 DO $$
 DECLARE v INTEGER;
 BEGIN
-  SELECT count(*) INTO v FROM activity_rules WHERE id IN (3, 31, 14, 1, 28, 19, 27, 21, 30, 36) AND window_kind = 'event' AND note LIKE '當屆類（OPS #81）%';
-  IF v <> 10 THEN RAISE EXCEPTION '當屆類起訖只改到 % 支（應為 10）', v; END IF;
+  SELECT count(*) INTO v FROM activity_rules WHERE id IN (3, 31, 14, 1, 28, 19, 27, 21, 30, 36, 47) AND window_kind = 'event' AND note LIKE '當屆類（OPS #81）%';
+  IF v <> 11 THEN RAISE EXCEPTION '當屆類起訖只改到 % 支（應為 11）', v; END IF;
+  IF EXISTS (SELECT 1 FROM activity_rules WHERE activity = 'term_policies' AND enabled AND priority IS NULL
+              AND NOT (window_kind = 'event' AND from_kind = 'polling' AND from_offset = 1)) THEN
+    RAISE EXCEPTION '補舊屆政見還有沒照投票日 +1 起的規則（2026 設定表打開後投票前會被派）';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM election_task_config WHERE election_id = 2026 AND enabled) THEN RAISE EXCEPTION '2026 補舊屆政見的設定表開關沒有打開'; END IF;
   SELECT count(*) INTO v FROM activity_rules WHERE id IN (5, 24) AND window_kind = 'event' AND from_kind = 'term_start' AND until_kind IS NULL
      AND (params->>'open_when_unknown')::BOOLEAN;
