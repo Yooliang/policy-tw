@@ -46,3 +46,40 @@ function ipv6Groups(s: string): string[] | null {
   if (fill < 1) return null;
   return [...head, ...Array(fill).fill("0"), ...tail];
 }
+
+/**
+ * api.hustings.net 的 Worker（cloudflare/api-worker.js，OPS #85）轉送時，Supabase 看到的來源是 Cloudflare，
+ * 真實來源 IP 放在 x-hustings-client-ip，並帶共用密鑰 x-hustings-proxy-secret。
+ * 只有密鑰對（而且函式端有設、夠長）才採信那個 IP；否則一律照原本的來源判斷，所以直接打 Supabase 偽造這兩個標頭沒有用。
+ * 密鑰在 Supabase secrets（HUSTINGS_PROXY_SECRET），程式碼不寫值。
+ */
+export const PROXY_SECRET_HEADER = "x-hustings-proxy-secret";
+export const PROXY_CLIENT_IP_HEADER = "x-hustings-client-ip";
+/** 密鑰太短（含沒設）就當沒有，不採信任何轉送標頭 */
+export const PROXY_SECRET_MIN_LENGTH = 32;
+
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** 請求的來源 IP：密鑰對時用 Worker 轉送的真實 IP，否則 x-forwarded-for 第一個、x-real-ip、"unknown" */
+export function clientIpFrom(req: Request, proxySecret: string | undefined | null): string {
+  if (proxySecret && proxySecret.length >= PROXY_SECRET_MIN_LENGTH) {
+    const got = req.headers.get(PROXY_SECRET_HEADER);
+    const ip = req.headers.get(PROXY_CLIENT_IP_HEADER)?.trim();
+    if (got !== null && ip && sameSecret(got, proxySecret)) return ip;
+  }
+  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+}
+
+/** 函式端的共用密鑰（Supabase secrets）；讀不到（沒設、或測試環境沒給 env 權限）就當沒設 */
+export function proxySecretFromEnv(): string | undefined {
+  try {
+    return Deno.env.get("HUSTINGS_PROXY_SECRET");
+  } catch {
+    return undefined;
+  }
+}

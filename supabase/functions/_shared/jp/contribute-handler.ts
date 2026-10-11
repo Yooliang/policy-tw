@@ -25,7 +25,7 @@
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, policyTitleKey, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { selfCitationProblems } from "../self-hosts.ts";
 import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
-import { networkOf } from "../ip-network.ts";
+import { clientIpFrom, networkOf, proxySecretFromEnv } from "../ip-network.ts";
 import { chunksOf } from "../in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "../actor.ts";
 import { requiredAgree } from "./consensus.ts";
@@ -58,8 +58,9 @@ export interface HandlerResult {
   body: Record<string, unknown>;
 }
 
+/** 來源 IP：經 api.hustings.net 轉送而且密鑰對時用真實 IP（OPS #85，見 ip-network.ts 的 clientIpFrom） */
 export function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+  return clientIpFrom(req, proxySecretFromEnv());
 }
 
 /** 來源身份的雜湊：看網段（IPv4 /24、IPv6 /64），同正見 ipHashOf（鹽也是同一個 CONTRIBUTION_IP_SALT；兩站資料表分開，雜湊相同不互通） */

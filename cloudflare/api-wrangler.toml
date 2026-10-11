@@ -1,0 +1,13 @@
+# api.hustings.net：兩站協議端點的固定網址（cloudflare/api-worker.js；工作單 Yooliang/policy-ops#85）
+# 部署：npx wrangler deploy -c cloudflare/api-wrangler.toml
+# 密鑰：npx wrangler secret put HUSTINGS_PROXY_SECRET -c cloudflare/api-wrangler.toml（Supabase secrets 同名同值），不寫在這裡
+name = "hustings-api"
+main = "api-worker.js"
+compatibility_date = "2026-09-01"
+
+routes = [
+  { pattern = "api.hustings.net", custom_domain = true },
+]
+
+[observability]
+enabled = true
