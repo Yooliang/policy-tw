@@ -61,7 +61,8 @@ const submitPolicy = (db: Db, payload: Record<string, unknown>, o: Parameters<ty
 // a. 結構
 // =============================================================================================
 Deno.test("結構：步驟清單八步；臂名・總表・規則三處一起加；規則 after_step=candidacy（逐人開）＋後備（告示日翌日）；優先層規則；步驟順位 6；型別清單 TS／SQL 對齊；協議版號 0.10.0 以上", async () => {
-  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s,
+  // 之後的步驟（例：20261011090000 的 results）加在末尾：前 8 步是這一版的全部
+  assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s.slice(0, 8),
     ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy", "profile", "policy"]);
   assert((await one<{ a: string[] }>(shared, `SELECT policy_jp.activity_arm_names() AS a`)).a.includes("policy_missing"));
   assert(fnText(MIG_SQL, TOTAL).includes("contribution_auto_tasks_policy_missing()"));

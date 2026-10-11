@@ -60,7 +60,8 @@ async function lastClosedReason(db: Db, taskId: string): Promise<string | null> 
 Deno.test("結構：臂名・総表・規則の三処一緒；規則＝告示日 +0 起／投票日 +0 止／after_step=candidacy／後備／cap；優先層；步驟順位；主控台の段", async () => {
   const names = (await one<{ a: string[] }>(shared, `SELECT policy_jp.activity_arm_names() AS a`)).a;
   for (const a of ARMS) assert(names.includes(a), `臂名清單に ${a}`);
-  assertEquals(names.length, 13);
+  // 之後的 migration 會在末尾再加臂（例：20261011090000 的開票結果兩支）：前 13 個是這一版的全部
+  assertEquals(names.slice(0, 13).at(-1), "candidacy_source_missing");
   const total = fnText(MIG_SQL, TOTAL);
   for (const a of ARMS) assert(total.includes(`SELECT '${a}' AS arm, t.* FROM policy_jp.contribution_auto_tasks_${a}() t`), `総表に ${a} の UNION 分支`);
   for (const a of ARMS) {

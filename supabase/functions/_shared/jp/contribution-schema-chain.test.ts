@@ -323,3 +323,34 @@ Deno.test("claimKey（A 期）：withdrawn_after_filing の答えが違えば別
   assert(wd() !== wd({ withdrawn_after_filing: false }));
   assertEquals(wd(), "candidacy|politician_id:p-1|" + E1.toLowerCase() + "||withdrawn|", "書かない提出（と正見の payload）の鍵は変わらない");
 });
+
+// =============================================================================================
+// B 期（policy-ops#95）：開票結果の任務型別 election_result_missing（当落＝参選 id／記録にない当選者＝elected:<選挙 id>）
+// =============================================================================================
+Deno.test("B 期の任務比對：当落（auto:election_result_missing:<参選 id>）は、その参選の elected／not_elected／withdrawn だけ。別の参選・filed は 400", () => {
+  assertEquals(JP_TASK_ARMS.election_result_missing, "candidacy");
+  const task = `auto:election_result_missing:${PE1}`;
+  for (const st of ["elected", "not_elected"]) {
+    const v = stateCand({ candidacy_status: st, status_date: "2027-04-25" }, task);
+    assert(v.ok, `${st}: ${JSON.stringify(v.errors)}`);
+  }
+  assert(stateCand({ candidacy_status: "withdrawn", withdrawn_after_filing: true, status_date: "2027-04-20" }, task).ok);
+  assertEquals(paths(stateCand({ candidacy_status: "filed" }, task)), ["payload.candidacy_status"], "当落の任務で filed は出せない");
+  assertEquals(paths(stateCand({ candidacy_status: "elected", status_date: "2027-04-25", politician_id: "someone-else" }, task)), ["payload"]);
+  assertEquals(paths(stateCand({ candidacy_status: "elected", status_date: "2027-04-25" }, "auto:election_result_missing:not-a-pe-id")), ["task_id"]);
+});
+
+Deno.test("B 期の任務比對：記録にない当選者（auto:election_result_missing:elected:<選挙 id>）は、その選挙の elected だけ（新しい人も可）。別の選挙・落選は 400；no_change は比對を受けない", () => {
+  const task = `auto:election_result_missing:elected:${E1}`;
+  const newPerson = (patch: Record<string, unknown> = {}) => validateContributionRequest({ ...base, contribution_type: "candidacy", task_id: task,
+    payload: { name: "高橋次郎", kana: "たかはしじろう", election_id: E1, candidacy_status: "elected", status_date: "2027-04-25", district_kind: "at_large", ...patch }, source_urls: OFFICIAL });
+  assert(newPerson().ok, JSON.stringify(newPerson().errors));
+  assert(stateCand({ candidacy_status: "elected", status_date: "2027-04-25" }, task).ok, "既にいる人を politician_id で指してもよい");
+  assertEquals(paths(newPerson({ candidacy_status: "not_elected" })), ["payload.candidacy_status"]);
+  assertEquals(paths(newPerson({ election_id: "2027-04-25_mayor_231011" })), ["payload.election_id"]);
+  assertEquals(paths(validateContributionRequest({ ...base, contribution_type: "candidacy", task_id: "auto:election_result_missing:elected:bad",
+    payload: { name: "高橋次郎", kana: "たかはしじろう", election_id: E1, candidacy_status: "elected", status_date: "2027-04-25", district_kind: "at_large" }, source_urls: OFFICIAL })), ["task_id"]);
+  const nc = validateContributionRequest({ ...base, contribution_type: "no_change", task_id: task,
+    payload: { task_id: task, outcome: "confirmed", checked_urls: OFFICIAL, finding: "開票結果の当選者は全員記録にあることを確認した" } });
+  assert(nc.ok, JSON.stringify(nc.errors));
+});
