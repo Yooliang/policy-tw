@@ -167,7 +167,8 @@ Deno.test("A1 範圍：只重定義 district_seats 臂、只動查證來源這�
   const i = definers.indexOf(MIG);
   assert(i > 0, "這支要在重新定義臂的清單裡");
   assertEquals(definers[i - 1], PREV, "前一版應該是 20261005004900；有人在中間改了，要以那一版為底重做機械替換");
-  assertEquals(definers.slice(i + 1), [], "這支之後又有人重新定義臂：要以最新那版為底重做");
+  // 之後只准 20261011080000（以登記名冊選舉區數當下限，policy-ops#23）以這一版為底做機械替換，它自己的守門在 district-seats-registered.test.ts
+  assertEquals(definers.slice(i + 1), ["20261011080000_district_seats_registered_floor.sql"], "這支之後又有人重新定義臂：要以最新那版為底重做");
 });
 
 Deno.test("A2 臂的新定義＝前一版的現行定義＋四處機械替換；條件與輸出欄位一字不動", () => {
