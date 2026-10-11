@@ -3,7 +3,7 @@
  *
  * 只要 --allow-read。PGlite 上套「所有」_policy_jp_ migration（policy-jp-chain-db.ts，照檔名排序，不寫死清單）；時鐘用 `SET app.activity_today`。
  *
- *   a. 結構：步驟清單八步、臂名・總表・規則三處一起加、規則 after_step=profile＋後備（告示日翌日）、優先層規則、chain_step_rank（6）、型別清單對齊、題名正規化 TS／SQL 對齊
+ *   a. 結構：步驟清單八步、臂名・總表・規則三處一起加、規則 after_step=candidacy（20261011060000 で profile から改めた）＋後備（告示日翌日）、優先層規則、chain_step_rank（6）、型別清單對齊、題名正規化 TS／SQL 對齊
  *   b. 鏈的三個情境（假時鐘＋seed）：1. 前一步（建檔）完成才開  2. 前一步卡住但後備（告示日翌日）到了照開  3. 已開的不收回
  *   c. 臂：對象（considering・退選は派さない）・公約が 1 件でもあれば消える・審議中の題名を渡す・冷卻・cap
  *   d. 進度視圖 policy：每一位對象都有政見（または查無で冷卻中）才 done
@@ -26,6 +26,8 @@ const MIG_FILE = "20261010060000_policy_jp_chain_policy.sql";
 const PREV_FILE = "20261010050000_policy_jp_chain_profile.sql";
 const MIG_SQL = await readMig(MIG_FILE);
 const PREV_SQL = await readMig(PREV_FILE);
+const PER_PERSON_FILE = "20261011060000_policy_jp_policy_per_person.sql";
+const PER_PERSON_SQL = await readMig(PER_PERSON_FILE);
 const POLLING = "2027-04-25";
 const NOTICE = "2027-04-08";
 const E1 = `${POLLING}_mayor_${ICHI}`;
@@ -58,14 +60,14 @@ const submitPolicy = (db: Db, payload: Record<string, unknown>, o: Parameters<ty
 // =============================================================================================
 // a. 結構
 // =============================================================================================
-Deno.test("結構：步驟清單八步；臂名・總表・規則三處一起加；規則 after_step=profile＋後備（告示日翌日）；優先層規則；步驟順位 6；型別清單 TS／SQL 對齊；協議版號 0.10.0 以上", async () => {
+Deno.test("結構：步驟清單八步；臂名・總表・規則三處一起加；規則 after_step=candidacy（逐人開）＋後備（告示日翌日）；優先層規則；步驟順位 6；型別清單 TS／SQL 對齊；協議版號 0.10.0 以上", async () => {
   assertEquals((await one<{ s: string[] }>(shared, `SELECT policy_jp.election_chain_steps() AS s`)).s,
     ["discovery", "local_government", "regional_stats", "region", "roster", "candidacy", "profile", "policy"]);
   assert((await one<{ a: string[] }>(shared, `SELECT policy_jp.activity_arm_names() AS a`)).a.includes("policy_missing"));
   assert(fnText(MIG_SQL, TOTAL).includes("contribution_auto_tasks_policy_missing()"));
   const rule = await one<{ after_step: string; params: Record<string, unknown>; window_kind: string }>(shared,
     `SELECT after_step, params, window_kind FROM policy_jp.activity_rules WHERE activity = 'policy_missing' AND priority IS NULL`);
-  assertEquals([rule.after_step, rule.window_kind], ["profile", "always"]);
+  assertEquals([rule.after_step, rule.window_kind], ["candidacy", "always"]);
   assertEquals(rule.params, { cap: 200, chain_fallback: { kind: "announced", offset: 1 } });
   assertEquals(await count(shared, `SELECT 1 FROM policy_jp.activity_rules WHERE activity = 'priority:policy_missing' AND priority IN (1, 3)`), 2);
   const rank = (id: string, t: string) => one<{ r: number }>(shared, `SELECT policy_jp.chain_step_rank($1, $2) AS r`, [id, t]).then((x) => x.r);
@@ -100,33 +102,26 @@ Deno.test("DB CHECK 還原驗證：この migration の前の庫は policy を�
 // =============================================================================================
 // b. 鏈の三個情境
 // =============================================================================================
-Deno.test("情境 1　前一步（建檔）完成才開：建檔が済んでいない間 policy_missing は擋ぐ（opened_by＝NULL）、済むと下一輪 seed で via=done で開く", async () => {
+Deno.test("情境 1　逐人開（20261011060000）：整場の建檔が済んでいなくても、正式に表明した人（declared 以上）がいれば建檔済みの参選人ごとに via=done で開く", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
   await clock(db, "2027-03-01");
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
   await seed(db);
+  assertEquals((await stepsDone(db, E1)).candidacy, true);
   assertEquals((await stepsDone(db, E1)).profile, false);
-  assertEquals(await dispatchIds(db, POLICY), [], "建檔未了・後備（告示日翌日）もまだ");
-  const blocked = await db.transaction(async (tx) => {
-    await tx.exec(`SELECT set_config('gap.arms_all', 'on', true)`);
-    return (await tx.query<{ task_id: string; opened_by: unknown }>(`SELECT task_id, opened_by FROM ${TOTAL}() WHERE arm = 'policy_missing'`)).rows;
-  });
-  assertEquals(blocked, [{ task_id: `auto:policy_missing:${a.peid}`, opened_by: null }]);
-  await profile(db, a.pid);
-  assertEquals((await stepsDone(db, E1)).profile, true);
-  await seed(db);
-  assertEquals(await dispatchIds(db, POLICY), [`auto:policy_missing:${a.peid}`]);
+  assertEquals(await dispatchIds(db, POLICY), [`auto:policy_missing:${a.peid}`], "建檔未了でも開く（後備＝告示日翌日もまだ）");
   const [d] = await dispatches(db, POLICY);
-  assertEquals(d.opened_by?.chain_gate, { after_step: "profile", via: "done" });
+  assertEquals(d.opened_by?.chain_gate, { after_step: "candidacy", via: "done" });
   assertEquals(d.target.chain_step, "policy");
   assertEquals(d.target.chain_lg_code, ICHI);
-  assertEquals((await events(db, d.task_id))[0].detail.chain_gate, { after_step: "profile", via: "done" });
+  assertEquals((await events(db, d.task_id))[0].detail.chain_gate, { after_step: "candidacy", via: "done" });
   await db.close();
 });
 
-Deno.test("情境 2　前一步が卡住でも後備（告示日の翌日＝選挙公報）が来れば開く：前日は擋、当日は via=fallback", async () => {
+Deno.test("情境 2　前一步が卡住でも後備（告示日の翌日＝選挙公報）が来れば開く：前日は擋、当日は via=fallback（gate 機構の確認のため規則を一時的に profile に戻して試す）", async () => {
   const db = await freshDb();
+  await db.exec(`UPDATE policy_jp.activity_rules SET after_step = 'profile' WHERE activity = 'policy_missing' AND priority IS NULL`);
   await openElectionWithRegion(db, ICHI, POLLING);
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared"); // 建檔しない
   await clock(db, NOTICE);
@@ -140,22 +135,49 @@ Deno.test("情境 2　前一步が卡住でも後備（告示日の翌日＝選�
   await db.close();
 });
 
-Deno.test("情境 3　前一步が未完了に戻っても、開いた政見任務は收回しない（sticky）：建檔済み → 開く → 生年が消える（profile 未完了）→ 任務は残る", async () => {
+Deno.test("情境 3　開いた政見任務は gate が閉じ直しても收回しない（sticky）：candidacy で開く → 規則を profile（未完了）に戻す → 任務は残る", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
   await clock(db, "2027-03-01");
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
-  await profile(db, a.pid);
   await seed(db);
   assertEquals(await dispatchIds(db, POLICY), [`auto:policy_missing:${a.peid}`]);
-  await db.exec(`UPDATE policy_jp.politicians SET birth_year = NULL WHERE id = '${a.pid}'`);
+  await db.exec(`UPDATE policy_jp.activity_rules SET after_step = 'profile' WHERE activity = 'policy_missing' AND priority IS NULL`);
   assertEquals((await stepsDone(db, E1)).profile, false);
   await seed(db);
   await seed(db);
   assertEquals(await dispatchIds(db, POLICY), [`auto:policy_missing:${a.peid}`], "既に開いたものは收回しない");
   assertEquals((await events(db, `auto:policy_missing:${a.peid}`)).map((e) => e.event), ["opened"]);
-  assertEquals((await dispatches(db, POLICY))[0].opened_by?.chain_gate, { after_step: "profile", via: "done" }, "派工列の記録は開いた時のまま（seed は内容が同じなら書き直さない）");
+  assertEquals((await dispatches(db, POLICY))[0].opened_by?.chain_gate, { after_step: "candidacy", via: "done" }, "派工列の記録は開いた時のまま（seed は内容が同じなら書き直さない）");
   await db.close();
+});
+
+Deno.test("情境 4　逐人開：表明した人がいる選挙では、人物建檔が未完了（生年なし）の人・読みなしの人にも政見任務が開く；considering・退選は派さない；新 migration を外すと擋ぐ（還原驗證）", async () => {
+  const probe = async (db: Db) => {
+    await openElectionWithRegion(db, ICHI, POLLING);
+    await clock(db, "2027-03-01");
+    const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
+    await profile(db, a.pid); // 建檔済み
+    const b = await addCand(db, "鈴木一郎", "すずきいちろう", "filed", { status_date: NOTICE }); // 生年なし＝建檔未了
+    const n = await addCand(db, "名無し三郎", undefined as unknown as string, "declared"); // 読みなし（告示前は選填）
+    const c = await addCand(db, "田中次郎", "たなかじろう", "considering", { status_date: "2027-02-20" });
+    const w = await addCand(db, "渡辺四郎", "わたなべしろう", "declared");
+    await db.exec(`UPDATE policy_jp.politician_elections SET candidacy_status = 'withdrawn', withdrawn_after_filing = false WHERE politician_id = '${w.pid}'`);
+    await seed(db);
+    return { a, b, n, c, w, ids: await dispatchIds(db, POLICY), ds: await dispatches(db, POLICY), profileDone: (await stepsDone(db, E1)).profile };
+  };
+  const db = await freshDb();
+  const r = await probe(db);
+  assertEquals(r.profileDone, false, "整場の建檔は未了");
+  assertEquals(r.ids, [r.a.peid, r.b.peid, r.n.peid].map((p) => `auto:policy_missing:${p}`).sort());
+  for (const d of r.ds) assertEquals(d.opened_by?.chain_gate, { after_step: "candidacy", via: "done" });
+  assert(!r.ids.some((t) => t.includes(r.c.peid) || t.includes(r.w.peid)), "considering・退選は派さない");
+  await db.close();
+  // 還原驗證：新 migration を適用しない庫（after_step=profile）では同じ情境で全部擋がれる
+  const old = await migratedDb({ before: PER_PERSON_FILE });
+  const ro = await probe(old);
+  assertEquals(ro.ids, [], "20261011060000 なし＝整場の建檔待ちで 1 件も開かない（失敗する側の再現）");
+  await old.close();
 });
 
 // =============================================================================================
@@ -433,8 +455,23 @@ Deno.test("自我檢查（還原驗證）：規則の after_step／cap が欠け
   await pre.close();
 });
 
-Deno.test("冪等：この migration を 2 回流しても失敗せず、規則が増えない", async () => {
+Deno.test("20261011060000 の自我檢查（還原驗證）：UPDATE を profile のままにする・chain_fallback／cap を欠く規則だと migration が失敗する；冪等", async () => {
+  const pre = await migratedDb({ before: PER_PERSON_FILE });
+  await assertRejects(() => pre.exec(mutate(PER_PERSON_SQL, "SET after_step = 'candidacy',", "SET after_step = 'profile',")), Error, undefined, "UPDATE が candidacy にならない");
+  await pre.exec(`UPDATE policy_jp.activity_rules SET params = params - 'cap' WHERE activity = 'policy_missing' AND priority IS NULL`);
+  await assertRejects(() => pre.exec(PER_PERSON_SQL), Error, undefined, "cap なし");
+  await pre.close();
   const db = await freshDb();
+  const rule = () => one<{ id: number; after_step: string; params: unknown }>(db, `SELECT id, after_step, params FROM policy_jp.activity_rules WHERE activity = 'policy_missing' AND priority IS NULL`);
+  const before = await rule();
+  await db.exec(PER_PERSON_SQL);
+  assertEquals(await rule(), before, "2 回流しても同じ（id・後備・cap も不変）");
+  assertEquals(before.after_step, "candidacy");
+  await db.close();
+});
+
+Deno.test("冪等：この migration を 2 回流しても失敗せず、規則が増えない（後続 20261011060000 の前の庫で流す：その後は規則が candidacy になり、この版の自我検査〔after_step=profile〕は意図的に通らない）", async () => {
+  const db = await migratedDb({ before: PER_PERSON_FILE });
   const before = await count(db, `SELECT 1 FROM policy_jp.activity_rules`);
   await db.exec(MIG_SQL);
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.activity_rules`), before);
