@@ -147,6 +147,7 @@ const NOT_REDIRECTED: Record<string, string> = {
   "jp-contributions-feed": "日本站（policy_jp）貢獻看板的公開唯讀資料，同 jp-next",
   "jp-history": "日本站（policy_jp）查核履歷的公開唯讀資料，日本站前端直接打 Supabase，同 jp-next",
   "jp-boost": "日本站（policy_jp）的插隊端點（無金鑰、固定詞彙），代理照日本站 skill.md 直接打 Supabase，同 jp-next",
+  "jp-system-one": "日本站（policy_jp）的系統票，只有 pg_cron 打（policy-jp-system-one-precheck-10min），代理不打",
 };
 
 Deno.test("API_ONLY／API_ALSO_PAGE 與 supabase/functions 目錄對照：每支函式都明確分類，名單裡沒有不存在的端點", async () => {

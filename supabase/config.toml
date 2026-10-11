@@ -448,6 +448,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/jp-boost/index.ts"
 
+# 日本站の系統票（policy-jp-system-one-precheck-10min が叩く）。閘道は JWT を見ない；関数が x-cron-secret（Vault の jp_system_one_cron_secret）か service role を照合する（bulletin-watch と同じ）
+[functions.jp-system-one]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-system-one/index.ts"
+
 [functions.apply-verified]
 enabled = true
 verify_jwt = false
