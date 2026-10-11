@@ -499,6 +499,7 @@ const T_PER_ELECTION = "20261010140100"; // 時間軸日常與當屆選舉拆開
 const T_SET_BASED = "20261010200100"; // 件數改成一次集合查詢（#569 上線後 console_timeline 逾時；正見版在 20261010200000）
 const T_PASSIVE = "20261010230100"; // 主控台派工頁「被動」段（policy-ops #78；正見版在 20261010230000）
 const T_A1 = "20261011070000"; // 派工臂對齊正見 A 期第一支：candidate_status_stale／not_running／withdrawn_filing／candidacy_source_missing（policy-ops#95）
+const T_B = "20261011090000"; // 派工臂對齊正見 B 期：開票結果（election_results／elected_missing）＋新任期（politician_offices 同期）（policy-ops#95）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -532,8 +533,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -577,16 +578,16 @@ const JP_ONLY: Record<string, JpOnly> = {
   stat_registry_verify_pending: { mig: [T_STR], why: "掃 pending 的 regional_stat（同 lg_registry_verify_pending，reviewed_by estat-auto）；排程 policy-jp-stat-registry-verify" },
 
   // ---- 20261009250400 election_chain：選舉鏈第 1 步（鏈上的臂、總表、進度視圖逐一登記；總表的 contribution_auto_tasks_arms 與兩支臂的重新定義已在上面各自的 mig 清單裡） ----
-  election_chain_steps: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY], why: "選舉鏈的步驟清單（discovery／local_government／regional_stats／region），activity_rules.after_step 的 CHECK 對它" },
+  election_chain_steps: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "選舉鏈的步驟清單（discovery／local_government／regional_stats／region），activity_rules.after_step 的 CHECK 對它" },
   date_or_null: { mig: [T_CHAIN], why: "交件 payload 的日期文字 → DATE，格式不對＝NULL（視圖不能因一筆壞資料整支丟例外）" },
   activity_chain_scope: { mig: [T_CHAIN], why: "派工列的範圍鍵（日本＝團體碼：target.chain_lg_code，沒有就用 lg_code）；總表的 gate 只透過它取，站別鍵名不寫進總表" },
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
-  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
-  election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
+  election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
 
   // ---- 20261009280000 same_claim：同一件事只能有一筆（#521，日本站試點；正見九合一之後才接，所以不是複本） ----
   same_claim_office: { mig: [T_SAME], why: "選舉種類 → 比對用的職位（head／assembly；國政＝種類本身），同 term_expirations.office_kind" },
@@ -660,6 +661,18 @@ const JP_ONLY: Record<string, JpOnly> = {
   contribution_auto_tasks_not_running: { mig: [T_A1], why: "臂：withdrawn＋withdrawn_after_filing=false、沒對過選管一覽的參選 → not_running_recheck。FOLLOWED 正見 20261008161000 not_running（task_id auto:not_running_recheck:<參選 id>、reward 2、排除 withdrawn_after_filing 空／true 與已有欄位變更履歷的）；DEVIATED：沒有 politician_elections.verified 欄，改看 no_change confirmed 的 task_checks；答案 correction（記錄誤、實際有届出的訂正）日本站放不下參選 id（target_id 上限 64 字）也不自動落庫，改 task_suggestion，說明文照實寫" },
   contribution_auto_tasks_withdrawn_filing: { mig: [T_A1], why: "臂：withdrawn＋withdrawn_after_filing 空的參選 → not_running_recheck（kind=withdrawn_filing）。FOLLOWED 正見 20261006220000 withdrawn_filing（task_id auto:not_running_recheck:filing:<參選 id>、reward 2、審議中的答案不重派）；DEVIATED：交件用 candidacy 不是 correction（日本站 correction 不自動落庫、target_id 上限 64 字放不下參選 id，任務會關不掉），apply_candidacy 加空欄位補完分支；不附中選會名冊／已投票屆別的 cec_candidates 線索" },
   contribution_auto_tasks_candidacy_source_missing: { mig: [T_A1], why: "臂：filed 但沒有 official 等級出典的參選 → candidacy_source_missing。FOLLOWED 正見 raw:candidacy_source_missing『參選紀錄沒有可查證的網址』那一種（task_id auto:candidacy_source_missing:<參選 id>、reward 1）；DEVIATED：正見這個型別另有缺縣市／選區／號次／政黨等台灣專屬子類，日本站不搬；判準由 source_note 有無網址改成 sources.source_kind；declared 以下不派（先走 candidate_status_stale）" },
+
+  // ---- 20261011090000 results_terms（policy-ops#95，派工臂對齊正見 B 期）：被重新定義的函式已在上面各自的 mig 清單裡加了這一支 ----
+  // 兩支臂與任期同期都不是正見的逐字複本（正見讀中選會名單與台灣的表）。why 寫 FOLLOWED／DEVIATED；正見改了這幾支（任務型別、task_id 形狀、任期的建立與卸任規則），要在這裡決定日本版跟不跟。
+  contribution_auto_tasks_election_results: { mig: [T_B], why: "臂：投票日後仍 considering／declared／filed 的參選 → election_result_missing（kind=result）。FOLLOWED 正見 20261010170000 election_results 的任務型別、『已當落／退選的不派』、日期條件寫在規則（投票日 +1 起）；DEVIATED：正見一單位一件、整批 election_results 型＋中選會名單系統票，日本站沒有機械可讀的開票名單也沒有系統票，一人一件交 candidacy（elected／not_elected／withdrawn）" },
+  election_seats_needed: { mig: [T_B], why: "選舉的定數（首長 1、議會 elections.seats）。正見沒有對應物（正見照中選會當選名單逐人派）；elected_missing 用它判斷當選者夠不夠" },
+  contribution_auto_tasks_elected_missing: { mig: [T_B], why: "臂：當選者少於定數或定數不明的選舉 → election_result_missing（kind=elected_missing、record_missing=true）。FOLLOWED 正見 20261006100000 elected_missing 的任務型別與 record_missing、交 candidacy（elected）、不收票數；DEVIATED：正見照中選會當選名單一人一件，日本站沒有名單，一選舉一件（auto:election_result_missing:elected:<選舉 id>），no_change confirmed 才算照過、一題多份（contributions_drop_dispatch 的 WHEN 排除）" },
+  office_position_for: { mig: [T_B], why: "選舉種類 → politician_offices.position（地方 6 種；國政 NULL）。正見 politician_offices 直接存選舉別，沒有對應物" },
+  office_term_for: { mig: [T_B], why: "任期的就任日・滿了日（法定）。FOLLOWED 正見 office_term_start／office_term_end 的角色；DEVIATED：台灣全國同一天就任（12-25 等固定日），日本照地方自治法・公職選舉法：定期＝term_expirations 前任滿了日的翌日（滿了在投票前則投票日）、辭職等＝投票日、補欠＝議會滿了日為止；再選舉・國政・查不到滿了日不算" },
+  office_id_for: { mig: [T_B], why: "自動建的任期 id（office:<參選 id>）。正見用序號＋politician_election_id 唯一索引；日本站 id 是 TEXT，用前綴標出同期管理的列" },
+  politician_offices_sync: { mig: [T_B], why: "任期同期（建・刪・期數・卸任・出典）。FOLLOWED 正見 20261006034510 sync_politician_office_from_election＋politician_offices_close_ended（當選建列、當選取消刪列並留全列履歷、屆滿 term_expired、轉任 took_other_office、只寫已經發生的卸任、edit_history agent office-sync）；DEVIATED：日本站『現職＝end_date 為空』（顯示端不看就任日），所以就任日到了才建列；首長後任就任時前任記 other（inferred）；term_no 是記錄上的回數（正見沒有這欄）" },
+  politician_elections_office_sync: { mig: [T_B], why: "觸發器函式：參選的狀態・人物・選舉・公開狀態變了就同期那一筆。FOLLOWED 正見 trg_sync_politician_office（AFTER INSERT OR UPDATE OF …）；DEVIATED：欄位是日本站的 candidacy_status／review_status" },
+  politician_offices_pending: { mig: [T_B], why: "（視圖）當選了但還沒有任期的參選：not_started（等就任日）／term_unknown（算不出任期，人確認）／national。正見的 politician_offices_gap 比的是中選會名單，台灣專用、不搬" },
 };
 
 // ---- 掃描與比對（純函式，還原驗證也用它們） ----
