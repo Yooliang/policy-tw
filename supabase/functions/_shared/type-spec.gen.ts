@@ -241,5 +241,119 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
    "question_answer"
   ],
   "text": "**`question_answer`** — 回答一則公民提問（見上方「回答公民提問」）：`question_id`✅（uuid，任務 `target.question_id`）、`answer`✅（30～4000 字，附出處，不要只寫結論）。`source_urls` 必填（同一般規則）。**一題最多 3 份答案、一個代號一題只能答一份**：兩者都是資料庫擋，超過或重複會回清楚的 `failed` 訊息；答同一個角度沒有加分，請看任務 `item.current.existing_answers` 補不同角度或指出前一份的錯誤。"
+ },
+ {
+  "tasks": [
+   "roster_check",
+   "candidacy_source_missing"
+  ],
+  "contributions": [
+   "candidacy",
+   "roster_check"
+  ],
+  "text": "**讀中選會名冊 PDF**：**中選會的候選人名單 PDF 不要用 `pdftotext -layout`**：那些名冊是逐欄印的（姓名一欄 48 行、性別擠成一行、政黨另外成行），`-layout` 靠座標猜行會對不齊——實測嘉義縣 53 人的登記彙總表，政黨 73%、性別 57% 讀錯，而且錯法不整齊（民進黨→無、無→民進黨、甚至整欄抓到隔壁），抽一列看正常不代表整份對。正確做法：用原始文字流（不加 `-layout`）把各欄各抓成有序清單，再依印刷順序 zip；**三個清單長度必須相等**（53／53／53），長度不等就是抽錯了，不必等到比對資料才發現。PyMuPDF 逐列讀出也可以。系統本身不解析 PDF（`judge` 回 422），這段只關你自己讀名冊時。"
+ },
+ {
+  "tasks": [],
+  "contributions": [
+   "policy"
+  ],
+  "text": "**重複也由驗證者擋**：**重複也由你擋**：`policy` 的驗證項會附 `current.similar_policies`（系統算出的相似既有政見與相似度）。若這筆與其中一條**實質重複**（同一個承諾換句話說），投 `disagree`，`note` 寫「重複於 <policy_id>」（`evidence_url` 可放那條政見的頁面）；只是主題相近、內容不同就照來源核對。落庫不再自己攔重複，靠你這一票。\n\n**一句話裡連著幾個承諾，可以拆**：**一句話裡連著幾個承諾，可以拆**（1.36.0，2026-09-28）：來源用「及」「並」「以及」「、」把兩件事連在一起（例：「督促市府落實長照 2.0 **及**降低公辦幼托收費政策」），可以拆成兩條政見分別交，也可以整句當一條交，兩種都對。驗證時**每一條只核它自己寫的那部分**：只寫了其中一件、而那件跟原文相符 → 不算「不完整」，不要因為「漏了另一半」投 disagree；從同一句拆出來的兩條**不算重複**（重複是同一個承諾交兩次，不是同一句話裡的兩件事）；整句當一條交的也不要因為「應該拆開」投 disagree。一條政見＝一個之後追得了進度的承諾，所以能拆就拆比較好。實例：蔡旺璉這句被拆成兩筆後，一筆被判「不完整」、另一筆被判「重複」，兩筆互卡、這條政見永遠進不來。"
+ },
+ {
+  "tasks": [],
+  "contributions": [
+   "politician",
+   "candidacy"
+  ],
+  "text": "**同名者由驗證者指認**：**同名者由你指認**：`politician`／`candidacy` 的驗證項會附 `current.identity`（系統比對結果）與 `current.identity_candidates`（同名或比對到的人物：id、政黨、縣市、出生年、參選紀錄）。`identity.decision = \"ambiguous\"`（`identity_pick_required: true`）時，投 `agree` **必須帶 `resolved_politician_id`**（1.30.0 起，已有同名者但這次的政黨／縣市／職務一項都對不上時也算 ambiguous——同一個人換了選區或黨籍很常見，不再自動當成新人）：候選人之一的 id，或 `\"new\"`（都不是，建新人物）；通過時採用 agree 票裡帶的指認——**目前一票指認即採用**，所以請確定你指的是對的人；兩票指不同（一票 `new`、一票某人也算不同）、或都沒指認，這筆會直接退件、不落庫；缺口會回到任務佇列，由之後的任務重新查一次（1.24.0 起沒有裁決，也沒有「等安置」的狀態）。`matched`／`new` 時不用帶，但你若認為系統對錯人，可帶 id 或 `\"new\"` 更正。 **指認先查「這個人是誰」，不是「這次誰登記」**（2026-09-21 第二版，照跑者實測改寫）：\n    1. 對 `identity_candidates` 裡的每一個名字，用中選會候選人查詢 API（`https://db.cec.gov.tw/query/api/v1/elections/candidates/query?cand_name=<姓名>`，回 JSON；只有已投票的選舉）查**姓名**，把回來的紀錄**按出生年收斂成「幾個不同的人」**——出生年不同就是不同人。\n    2. 再判斷**這次提交的人**是不是其中之一。判斷依據是**正面證據**：API 紀錄的縣市／職務跟這次提交相容（例如同縣、同層級、或明顯的職涯延續），或提交來源本身點名了他的既有身分。\n    3. **本屆登記人查不到 API 紀錄是正常的**（API 只收已投票的選舉，2026 登記期的人不在裡面），**「查無」不是「這是新人」的證據**。要判 `new`，要有正面證據——例如唯一同名者現在正在別處任職（台中的現任村里長 vs 金門的縣議員候選人），或職務層級與選區明顯不相容。\n    4. 兩種縣市欄位分開看：**資料庫**的縣市可能標錯（2026-09-21 金門／連江整批對調），不可當依據；**中選會 API 的 `area_name` 是權威的**，可用，但同一人跨屆的字串會變形（「金門縣金門縣選舉區」），比對時看縣市前綴、不要求整串相同。候選清單顯示的縣市跟 API 不一致時以 API 為準，並在 `note` 寫明「清單顯示 X、API 實際是 Y」（實例：王秀玉 `b24f7ec9`）。\n    5. **把第 1 步的數字寫進票裡（1.29.0）**：帶 `resolved_politician_id` 的 `agree` 票（不論指認既有的人或 `\"new\"`，也包含你主動更正系統比對的情況）要一併帶 `cec_hits`＝中選會 API 查這個姓名回幾筆、`cec_people`＝依出生年收斂成幾個人。伺服器收票當下會自己用同一個姓名查一次：`cec_hits` 對不上會退回 `400 cec_count_mismatch`（回應會告訴你系統查到幾筆），沒帶會退回 `400 cec_count_required`，兩種都**不算你被拒**，補查再送即可。API 是**子字串比對**（查「林淑芬」會連「洪林淑芬」一起回），`cec_hits` 填回傳的全部筆數或姓名完全相同的筆數都算對。中選會 API 當下掛了不會擋你的票。理由：出生年在 `identity_candidates` 裡抄得到，這兩個數字只有真的查過才拿得到；指認一票就採用，兩票讀同一份錯資料就等於一票（金門重複建檔就是這樣來的）。\n    登記名冊回答的是「這次誰登記了」，API 回答的是「這個人是誰」。"
+ },
+ {
+  "tasks": [
+   "policy_missing",
+   "term_policy_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`policy_missing`／`term_policy_missing` 給人物＋所有參選紀錄＋既有政見（最多 30 筆，超過看 `existing_policies_total`；每筆帶 `election_id`），1.61.0 起推得出中選會選舉公報的另給 `bulletins`（每一屆的公報網址 `urls`、號次 `cand_no`、選舉單位 `unit`）與 `bulletins_note`。"
+ },
+ {
+  "tasks": [
+   "progress_stale",
+   "policy_source_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`progress_stale`／`policy_source_missing` 給該政見全欄＋人物簡要＋最近 5 筆追蹤紀錄（`progress_stale` 另外給 `elections`＝這個人的參選紀錄與 `candidacy_status`——`elected` 當選、`not_elected` 落選，判斷當選與否看這一欄，1.63.0 起不再帶 `candidate_status`／`election_result`）。"
+ },
+ {
+  "tasks": [
+   "profile_gap"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`profile_gap` 給人物全欄＋`missing_fields`／`present_fields`。"
+ },
+ {
+  "tasks": [
+   "profile_detail_gap"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`profile_detail_gap`（1.42.0）給人物全欄（`bio` **不截斷**，它是你知道「要找什麼」的線索）＋`missing_fields`／`present_fields`（只看 `education`／`experience`）＋`bio_hint`，1.54.0 起另給 `careers`（每一項學經歷、有沒有出處）與 `unsourced`（還沒有出處的原文，`education`／`experience` 兩個陣列）。"
+ },
+ {
+  "tasks": [
+   "candidacy_source_missing",
+   "election_result_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`candidacy_source_missing`／`election_result_missing` 給該筆參選紀錄＋人物簡要。"
+ },
+ {
+  "tasks": [
+   "not_running_recheck"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`not_running_recheck`（1.55.0）給該筆參選紀錄（含 `candidacy_status`、`withdrawn_after_filing`、`verified`）＋人物簡要。"
+ },
+ {
+  "tasks": [
+   "policy_elements_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`policy_elements_missing`（1.50.0）給該政見（`description` 是我們的摘要、**不是原文**）＋人物簡要＋`existing_elements`（已經有的要素）＋`missing_elements`，`target.term_end` 是那一任的卸任日。"
+ },
+ {
+  "tasks": [
+   "deadline_due"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`deadline_due`（1.50.0）給該政見＋`deadline`（原文寫的期限那一列）＋`elections`＋最近 5 筆追蹤紀錄。"
+ },
+ {
+  "tasks": [
+   "lineage_candidate"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`lineage_candidate`（1.52.0）給 `policies`（這一格每條政見的標題、說明開頭、提出者、屆別、已歸入的脈絡）＋`existing_lineages`（同一層級同一地方已經有的脈絡）。"
+ },
+ {
+  "tasks": [
+   "handover_missing",
+   "lineage_roles_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`handover_missing`／`lineage_roles_missing`（1.52.0）給 `lineage`（那條脈絡的參與者、交接、關聯）＋`lineage_policies`。"
+ },
+ {
+  "tasks": [
+   "lineage_link_candidate"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`lineage_link_candidate`（1.52.0）另給 `upper_candidates`（候選的上一級脈絡）。"
+ },
+ {
+  "tasks": [
+   "election_results_missing"
+  ],
+  "contributions": [],
+  "text": "**這種任務的 `current` 帶什麼**：`election_results_missing`（1.58.0）給 `items`（這一件每一位的參選紀錄 id、姓名、地區，與系統比對到的中選會那一列 `cec`）。"
  }
 ];

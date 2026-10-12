@@ -11,6 +11,7 @@
  * SQL 本身另外在 PGlite 實跑（見 PR 說明），這裡沒有資料庫。
  */
 import { assert, assertEquals, assertMatch, assertRejects } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { DROPPED_COLUMNS, executeRevert, planRevert, RevertBlockedError } from "./edit-history.ts";
 
 const read = async (rel: string) => (await Deno.readTextFile(new URL(rel, import.meta.url))).replaceAll("\r\n", "\n");
@@ -111,7 +112,7 @@ Deno.test("沒有別的 migration 在這支之後又碰舊欄位（新增的 mig
 });
 
 Deno.test("協議文件：REST 範例與欄位說明不再叫代理讀已刪的欄位（舊欄位 REST 會回錯誤）", async () => {
-  const skill = await read("../../../public/skill.md");
+  const skill = await readSkillWithTypes();
   for (const m of skill.matchAll(/politician_elections\?select=([^&`\s]*)/g)) {
     for (const c of OLD) assertEquals(m[1].split(",").includes(c), false, `skill.md 的 REST 範例還在 select ${c}`);
   }
