@@ -17,8 +17,8 @@ async function contribution(db: Db, type: string, o: { status?: string; created?
     [type, JSON.stringify({ k: n }), `h-${n}`, o.status ?? "pending", o.created ?? new Date(Date.now() - (100 - n) * 60_000).toISOString()]);
   return r.id;
 }
-async function decision(db: Db, id: string, model: string, o: { choice?: string; p?: number; hoursAgo?: number } = {}) {
-  const state: Record<string, unknown> = { n: Math.random() };
+async function decision(db: Db, id: string, model: string, o: { choice?: string; p?: number; hoursAgo?: number; claim?: Record<string, unknown> } = {}) {
+  const state: Record<string, unknown> = { n: Math.random(), ...(o.claim ? { claim: o.claim } : {}) };
   await db.query(
     `INSERT INTO policy_jp.jev_decisions (subject_type, subject_id, question, choice, probability, model, state, asked_at)
      VALUES ('contribution', $1, 'source_support', $2, $3, $4, $5, now() - make_interval(hours => $6))`,
@@ -63,6 +63,22 @@ Deno.test("候選：Jev が判定したら二度と聞かない；fetch-only は
   const got = await candidates(db);
   assertEquals(got, [fresh, retry]); // 未判定が先、再取得が後
   assert(!got.includes(judged) && !got.includes(tooMany) && !got.includes(recent));
+  await db.close();
+});
+
+Deno.test("候選：宣稱の election に投票日が入っていた旧判定は一度だけ聞き直す（20261011130000）；新しい宣稱の判定が入れば二度と聞かない", async () => {
+  const db = await freshDb();
+  const old = await contribution(db, "candidacy");
+  const fresh = await contribution(db, "candidacy");
+  const redone = await contribution(db, "candidacy");
+  const plain = await contribution(db, "politician");
+  const oldClaim = { name: "山田太郎", election: "丸森町長選挙（投票日 2026-12-20）", candidacy_status: "立候補を表明した（出馬表明）" };
+  const newClaim = { name: "山田太郎", election: "丸森町長選挙", candidacy_status: "立候補を表明した（出馬表明）" };
+  await decision(db, old, "typesafe/jev-1.13.0", { choice: "supported", p: 0.52, claim: oldClaim });
+  await decision(db, redone, "typesafe/jev-1.13.0", { choice: "supported", p: 0.52, claim: oldClaim, hoursAgo: 2 });
+  await decision(db, redone, "typesafe/jev-1.13.0", { choice: "supported", p: 0.98, claim: newClaim });
+  await decision(db, plain, "typesafe/jev-1.13.0", { choice: "supported", p: 0.6, claim: { name: "山田太郎", birth_year: 1965 } });
+  assertEquals(await candidates(db), [fresh, old]); // 未判定が先、聞き直しは後ろ；聞き直し済み・投票日のない宣稱は拾わない
   await db.close();
 });
 

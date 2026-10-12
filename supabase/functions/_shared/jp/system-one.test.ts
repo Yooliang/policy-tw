@@ -9,7 +9,9 @@ Deno.test("宣稱（candidacy）：id は入れず頁面に出る字に換える
   const claim = jpClaimOf("candidacy", {
     politician_id: "p1", election_id: "2026-10-25_muni_assembly_472123", candidacy_status: "filed", status_date: "2026-10-18", district_kind: "at_large",
   }, { politicianName: "山田 太郎", electionName: "豊見城市議会議員一般選挙", electionDate: "2026-10-25" });
-  assertEquals(claim, { name: "山田 太郎", election: "豊見城市議会議員一般選挙（投票日 2026-10-25）", candidacy_status: JP_STATUS_PHRASES.filed });
+  // 投票日は宣稱に入れない（出馬表明の報道は投票日を書かないことが多く、election 欄が p≈0.5 に張り付いた。10-12）
+  assertEquals(claim, { name: "山田 太郎", election: "豊見城市議会議員一般選挙", candidacy_status: JP_STATUS_PHRASES.filed });
+  assert(!JSON.stringify(claim).includes("投票日"));
   assertEquals(jpCoreFields("candidacy", claim), ["name", "election", "candidacy_status"]);
   // payload の name が先、kana・選挙区・生年は核心外で入る
   const c2 = jpClaimOf("candidacy", { name: "高橋花子", kana: "たかはしはなこ", candidacy_status: "declared", district_name: "北区", birth_year: 1970 }, { politicianName: "別人" });

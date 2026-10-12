@@ -55,7 +55,11 @@ export function jpClaimOf(type: string, payload: Record<string, unknown>, ctx: J
     if (Array.isArray(v) && v.length === 0) return;
     out[k] = v;
   };
-  const election = [str(ctx.electionName), str(ctx.electionDate) ? `（投票日 ${ctx.electionDate}）` : null].filter(Boolean).join("");
+  // 選挙は選挙名だけ（投票日は入れない）：出馬表明の報道は「任期満了に伴う〇〇町長選」と書くだけで投票日がないことが多く、
+  // 投票日を宣稱に入れていた 10-11〜12 は election 欄が p≈0.5 に張り付き、candidacy の系統票が門檻 0.95 にほぼ届かなかった
+  // （32 件が supported なのに目標 3 のまま）。投票日は代理が主張したことでもない（庫が election_id から引いた値）。
+  // 前回以前の選挙の記事を通さないのは JP_FIELD_INSTRUCTIONS の「投票の終わった過去の選挙なら contradicted」が受け持つ。
+  const election = str(ctx.electionName) ?? "";
   if (type === "candidacy") {
     put("name", str(payload.name) ?? str(ctx.politicianName));
     put("kana", str(payload.kana));
@@ -91,7 +95,8 @@ export const JP_FIELD_INSTRUCTIONS =
   "基準：出典は「この人がそうした・そう言った・そうである」ことを示さなければならない（その出来事が存在するだけでは足りない）。同じ意味の書き方は一致とみなす：" +
   "姓と名の間の空白の有無、旧字体と新字体（髙＝高、﨑＝崎、邊・邉＝辺、齋＝斎）、ひらがなとカタカナの読み、和暦と西暦（令和8年＝2026年）、" +
   "「立候補を届け出た」「告示日に届出」「選挙管理委員会の立候補者一覧・候補者名簿に載っている」＝立候補の届出をした、「出馬を表明」「立候補を表明」＝立候補を表明した、" +
-  "「無投票当選」＝当選した、選挙名は「〇〇市長選挙」「〇〇市議会議員選挙」「〇〇市議選」などの略称でもよい（同じ団体・同じ投票日なら一致）。" +
+  "「無投票当選」＝当選した、選挙名は「〇〇市長選挙」「〇〇市議会議員選挙」「〇〇市議選」などの略称でもよい（同じ団体・同じ職なら一致）。" +
+  "選挙の欄に投票日は書いていない：本文に投票日や告示日がなくても、同じ団体・同じ職の選挙で、「任期満了に伴う」次の選挙や記事の日付から今度の選挙と読めれば confirmed；すでに投票の終わった過去の選挙のことなら contradicted。" +
   "学歴・経歴の配列は、全項目が本文で確かめられるときだけ confirmed。" +
   "本文の内容がこの欄と合っていれば confirmed；本文がはっきり違う値を書いている、または別人・前回の選挙のことなら contradicted；本文がこの欄に触れていなければ absent。";
 
