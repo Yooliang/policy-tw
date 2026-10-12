@@ -67,12 +67,15 @@ function localImportsOf(relPath) {
 // 建 _shared 內部的 import 圖（key/value 都是相對 FUNCTIONS_DIR 的路徑，如 "_shared/dispatch.ts"）
 // 排除 *.test.ts：測試檔不會被任何 index.ts import，改動它們不該觸發重部
 // _shared 目錄讀不到不是正常情況（跟上面單一檔案不同），不吞，讓它往上炸。
+// 子目錄（_shared/jp/）也要收：2026-10-12 只讀第一層時，jp-system-one → _shared/jp/precheck.ts
+// → _shared/jp/system-one.ts 這條鏈斷在 precheck.ts（圖裡沒有它的 import），#597 改了
+// system-one.ts、CI 卻算出「沒有受影響的函式」，migration 上了、函式沒重部。
 function buildSharedGraph() {
   const graph = new Map();
-  const entries = readdirSync(join(FUNCTIONS_DIR, "_shared"));
-  for (const name of entries) {
-    if (!name.endsWith(".ts") || name.endsWith(".test.ts")) continue;
-    const rel = `_shared/${name}`;
+  const entries = readdirSync(join(FUNCTIONS_DIR, "_shared"), { recursive: true });
+  for (const entry of entries) {
+    const rel = `_shared/${String(entry).replace(/\\/g, "/")}`;
+    if (!rel.endsWith(".ts") || rel.endsWith(".test.ts")) continue;
     graph.set(rel, localImportsOf(rel));
   }
   return graph;
