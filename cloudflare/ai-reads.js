@@ -62,7 +62,7 @@ export function pathTypeOf(pathname) {
   if (/^\/politician\/[^/]+\/?$/.test(pathname)) return 'politician'
   if (/^\/policy\/[^/]+\/?$/.test(pathname)) return 'policy'
   if (/^\/election\//.test(pathname)) return 'election'
-  if (pathname === '/skill.md') return 'skill'
+  if (pathname === '/skill.md' || pathname === '/skill-types.md') return 'skill'
   if (pathname === '/llms.txt') return 'llms'
   if (/^\/sitemap[-a-z]*\.xml$/.test(pathname)) return 'sitemap'
   if (/^\/(assets|images|brand|party)\//.test(pathname) || /\.(js|css|png|jpe?g|webp|svg|ico|woff2?)$/.test(pathname)) return null // 靜態資源不算「讀」

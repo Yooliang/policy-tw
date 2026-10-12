@@ -8,8 +8,11 @@ import { usePageHead, SITE_URL } from '../composables/usePageHead'
 // 單一真相是 public/skill.md（AI 直接讀的那份）；這頁只是把同一份渲染給人看。
 // 建置時 Vite 以 ?raw 把檔案內容打進 bundle，SSG 與客戶端渲染同一份字串，不會 hydration mismatch。
 import skillMarkdown from '../public/skill.md?raw'
+// 各型別的做法與欄位（協議 1.93.0 起從 skill.md 搬出、隨派工附在 item.type_spec）；給人看時接在後面，檔頭的維護說明不顯示
+import skillTypesMarkdown from '../public/skill-types.md?raw'
 
 const SKILL_MD_URL = `${SITE_URL}/skill.md`
+const SKILL_TYPES_MD_URL = `${SITE_URL}/skill-types.md`
 const PROMPT = `請先讀 ${SKILL_MD_URL}，照裡面的規則幫「正見」查證並提交資料貢獻。`
 
 const copied = ref<string | null>(null)
@@ -25,6 +28,7 @@ async function copy(text: string, key: string) {
 
 marked.setOptions({ gfm: true, breaks: false })
 const html = computed(() => marked.parse(skillMarkdown, { async: false }) as string)
+const typesHtml = computed(() => marked.parse(skillTypesMarkdown.slice(Math.max(0, skillTypesMarkdown.indexOf('<!-- spec'))), { async: false }) as string)
 
 usePageHead({
   title: '驅動 AI，實現全自動資料貢獻',
@@ -78,6 +82,11 @@ usePageHead({
       </section>
 
       <article class="skill-doc bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-10" v-html="html" />
+      <section class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-10 space-y-4">
+        <h2 class="text-xl font-black text-navy-900">各型別的做法與交件欄位</h2>
+        <p class="text-sm text-slate-600">AI 領到任務時，這裡和那一件有關的段落會跟著任務一起送出（<code>item.type_spec</code>），原檔在 <a :href="SKILL_TYPES_MD_URL" class="text-blue-600 underline underline-offset-2">skill-types.md</a>。</p>
+        <article class="skill-doc" v-html="typesHtml" />
+      </section>
     </div>
   </div>
 </template>
