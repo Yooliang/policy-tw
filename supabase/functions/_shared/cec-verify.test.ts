@@ -9,7 +9,7 @@ const ELECTIONS = [
   { id: 2012, election_date: "2012-01-14" },
 ];
 const normalizeCandidacies = (raw: Parameters<typeof normalizeRaw>[0]) => normalizeRaw(raw, ELECTIONS);
-import { decideByCec, scanOffset } from "./cec-verify.ts";
+import { decideByCec, resolveScanOffset, scanOffset } from "./cec-verify.ts";
 
 // 2026-09-17 對中選會實抓的蔡易餘（2024 當選、2012 落選）
 const RAW = [
@@ -125,4 +125,18 @@ Deno.test("佇列比一批還短時從頭掃，尾巴不足一批時退回最後
   assertEquals(scanOffset(12, 20, 7), 0);
   assertEquals(scanOffset(462, 20, 23), 442); // 第 24 批只剩 2 筆 → 退回 442 起算
   assertEquals(scanOffset(0, 20, 3), 0);
+});
+
+// 2026-10-12：排程網址不帶 ?offset=，舊寫法 Number(null)＝0，等於永遠掃最舊那一批
+Deno.test("沒帶 offset 時走時間切片輪流；帶了才照指定的", () => {
+  const total = 1587, limit = 20;
+  const seen = new Set<number>();
+  for (let slot = 0; slot < 100; slot++) seen.add(resolveScanOffset(null, total, limit, slot));
+  assert(seen.size > 1);
+  assertEquals(resolveScanOffset(null, total, limit, 3), scanOffset(total, limit, 3));
+  assertEquals(resolveScanOffset("", total, limit, 3), scanOffset(total, limit, 3));
+  assertEquals(resolveScanOffset("abc", total, limit, 3), scanOffset(total, limit, 3));
+  assertEquals(resolveScanOffset("0", total, limit, 3), 0);
+  assertEquals(resolveScanOffset("40", total, limit, 3), 40);
+  assertEquals(resolveScanOffset("99999", total, limit, 3), total - limit);
 });

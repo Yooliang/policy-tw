@@ -20,6 +20,18 @@ type Obj = Record<string, unknown>;
 
 export interface PendingCorrection { id: string; payload: unknown }
 
+/**
+ * 協議的欄位名在資料表裡已經不是同名欄位（2026-10-12 補）：政見的 source_url 在出處表（#347 第二階段 B-2 刪了欄位），
+ * 參選紀錄的 candidate_status 落庫換算成 candidacy_status（#345 第二階段 B 刪了舊欄位）。
+ * 掃地機把它們當欄位去 select 會讓整張表的那一批讀取報錯、整批跳過——同一表其他更正也跟著不退池。
+ * 這裡不讀它們；碰到這些欄位的更正不在掃地機判（等落庫時 apply 的 superseded 判），寧可不退也不誤退。
+ */
+const NOT_A_COLUMN: Record<string, readonly string[]> = {
+  policies: ["source_url"],
+  politician_elections: ["candidate_status"],
+};
+const isColumn = (table: string, field: string) => !(NOT_A_COLUMN[table] ?? []).includes(field);
+
 /** 純函式：給 pending 更正與現值（table → id → row），回要退池的 id 與各自一樣的欄位 */
 export function findNoOpPending(rows: PendingCorrection[], current: Map<string, Map<string, Obj>>): Array<{ id: string; fields: string[] }> {
   const out: Array<{ id: string; fields: string[] }> = [];
@@ -28,6 +40,7 @@ export function findNoOpPending(rows: PendingCorrection[], current: Map<string, 
     if (!target_table || !target_id || changes.length === 0) continue;
     const allowed = CORRECTION_FIELDS[target_table as keyof typeof CORRECTION_FIELDS] as readonly string[] | undefined;
     if (!allowed || changes.some((c) => !allowed.includes(c.field))) continue;
+    if (changes.some((c) => !isColumn(target_table, c.field))) continue;
     const dbRow = current.get(target_table)?.get(target_id);
     if (!dbRow) continue;
     const patch: Obj = Object.fromEntries(changes.map((c) => [c.field, correctionValue(target_table, c.field, c.correct_value)]));
@@ -49,7 +62,7 @@ async function loadCurrent(supabase: SupabaseLike, rows: PendingCorrection[]): P
     if (!target_table || !target_id || !allowed) continue;
     if (!idsByTable.has(target_table)) { idsByTable.set(target_table, new Set()); fieldsByTable.set(target_table, new Set()); }
     idsByTable.get(target_table)!.add(target_id);
-    for (const c of changes) if (allowed.includes(c.field)) fieldsByTable.get(target_table)!.add(c.field);
+    for (const c of changes) if (allowed.includes(c.field) && isColumn(target_table, c.field)) fieldsByTable.get(target_table)!.add(c.field);
   }
   const current = new Map<string, Map<string, Obj>>();
   for (const [table, idSet] of idsByTable) {

@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
 import { loadElections } from "../_shared/elections.ts";
-import { CEC_VERIFIABLE_TYPES, decideByCec, scanOffset } from "../_shared/cec-verify.ts";
+import { CEC_VERIFIABLE_TYPES, decideByCec, resolveScanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
 import { type PartyAliasRow, partyResolver } from "../_shared/party-alias.ts";
 
@@ -64,11 +64,8 @@ Deno.serve(async (req) => {
       .eq("status", "pending").in("contribution_type", [...CEC_VERIFIABLE_TYPES]);
     if (countError) throw new Error(`contributions count: ${countError.message}`);
     const total = count ?? 0;
-    const asked = Number(url.searchParams.get("offset"));
     // 一格＝一次排程間隔（10 分鐘）；用時間切片輪流，不必另外存游標
-    const offset = Number.isFinite(asked) && asked >= 0
-      ? Math.min(Math.trunc(asked), Math.max(0, total - limit))
-      : scanOffset(total, limit, Math.floor(Date.now() / (10 * 60 * 1000)));
+    const offset = resolveScanOffset(url.searchParams.get("offset"), total, limit, Math.floor(Date.now() / (10 * 60 * 1000)));
 
     const { data: rows, error } = await supabase.from("contributions")
       .select("id, contribution_type, payload, agent_name, created_at")

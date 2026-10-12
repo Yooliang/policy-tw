@@ -35,6 +35,18 @@ export function scanOffset(total: number, limit: number, slot: number): number {
   return Math.min(offset, total - limit);
 }
 
+/**
+ * 這一輪從哪裡開始掃：網址帶了 ?offset= 就照它（手動複查某一段），沒帶就用時間切片輪流（scanOffset）。
+ * 2026-10-12 修：以前寫 `Number(url.searchParams.get("offset"))`，沒帶時是 Number(null)＝0，
+ * 排程永遠掃最舊那 20 筆（全是 skip），後面一千五百多筆從來沒被機器核對過。
+ */
+export function resolveScanOffset(askedRaw: string | null, total: number, limit: number, slot: number): number {
+  const asked = askedRaw === null || askedRaw.trim() === "" ? NaN : Number(askedRaw);
+  return Number.isFinite(asked) && asked >= 0
+    ? Math.min(Math.trunc(asked), Math.max(0, total - limit))
+    : scanOffset(total, limit, slot);
+}
+
 export interface VerifiableClaim {
   contribution_type: string;
   payload: Record<string, unknown>;

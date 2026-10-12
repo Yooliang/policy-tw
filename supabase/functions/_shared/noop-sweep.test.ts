@@ -37,3 +37,53 @@ Deno.test("找不到目標列、不在白名單、沒有 changes → 不動", ()
   assertEquals(findNoOpPending([{ id: "b", payload: { target_table: "policies", target_id: "p1", changes: [{ field: "id", correct_value: "p1" }] } }], current), []);
   assertEquals(findNoOpPending([{ id: "c", payload: { target_table: "policies", target_id: "p1", changes: [] } }], current), []);
 });
+
+// 2026-10-12：source_url（政見）、candidate_status（參選紀錄）是協議的欄位名，資料表裡已沒有同名欄位。
+// 掃地機以前拿去 select，整張表那一批讀取報錯跳過（正式庫日誌每輪兩條），同表其他更正也不退池。
+Deno.test("協議欄位名不是資料表欄位：不判這筆、也不拿去讀", async () => {
+  assertEquals(findNoOpPending(
+    [{ id: "s", payload: { target_table: "policies", target_id: "p1", changes: [{ field: "source_url", correct_value: "https://a" }] } },
+     { id: "c", payload: { target_table: "politician_elections", target_id: "7", changes: [{ field: "candidate_status", correct_value: "registered" }] } }],
+    new Map<string, Map<string, Record<string, unknown>>>([
+      ["policies", new Map([["p1", { id: "p1", source_url: "https://a" }]])],
+      ["politician_elections", new Map([["7", { id: 7, candidate_status: "registered" }]])],
+    ]),
+  ), []);
+
+  const PE_COLUMNS = new Set(["id", "position", "election_type", "withdrawn_after_filing", "candidacy_status"]);
+  const POLICY_COLUMNS = new Set(["id", "title", "description", "category", "status", "proposed_date", "election_id", "origin"]);
+  const pending = [
+    { id: "s", payload: { target_table: "policies", target_id: "p1", changes: [{ field: "source_url", correct_value: "https://a" }] } },
+    { id: "e", payload: { target_table: "policies", target_id: "p1", changes: [{ field: "election_id", correct_value: 2024 }] } },
+    { id: "c", payload: { target_table: "politician_elections", target_id: "7", changes: [{ field: "candidate_status", correct_value: "registered" }] } },
+    { id: "t", payload: { target_table: "politician_elections", target_id: "7", changes: [{ field: "position", correct_value: "議員" }] } },
+  ];
+  const rows: Record<string, Record<string, unknown>> = {
+    policies: { id: "p1", election_id: 2024 },
+    politician_elections: { id: 7, position: "議員" },
+  };
+  const retired: string[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        select(cols: string) {
+          if (table === "contributions") {
+            const q = { eq: () => q, order: () => q, limit: () => Promise.resolve({ data: pending, error: null }) };
+            return q;
+          }
+          const known = table === "policies" ? POLICY_COLUMNS : PE_COLUMNS;
+          const bad = cols.split(",").map((c) => c.trim()).find((c) => !known.has(c));
+          return { in: () => Promise.resolve(bad ? { data: null, error: { message: `column ${table}.${bad} does not exist` } } : { data: [rows[table]], error: null }) };
+        },
+        update() {
+          let id = "";
+          const q = { eq: (k: string, v: string) => { if (k === "id") id = v; return q; }, select: () => { retired.push(id); return Promise.resolve({ data: [{ id }], error: null }); } };
+          return q;
+        },
+      };
+    },
+  };
+  const { sweepNoOpCorrections } = await import("./noop-sweep.ts");
+  const out = await sweepNoOpCorrections(client);
+  assertEquals(out.superseded.sort(), ["e", "t"]);
+});
