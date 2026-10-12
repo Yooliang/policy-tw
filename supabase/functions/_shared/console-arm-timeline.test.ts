@@ -47,6 +47,12 @@ Deno.test("文字層：正見每支派工臂都登記了時期，種子沒有不
   const removed: string[] = [];
   for (const n of await listMigrations()) if (n > TW_MIG) removed.push(...[...(await readMig(n)).matchAll(/DELETE FROM console_arm_stage_map WHERE arm = '([^']+)'/g)].map((m) => m[1]));
   const seeded = seededArms(TW_SQL, "console_arm_stage_map").filter((a) => !removed.includes(a));
+  // 之後的 migration 補登記的臂（INSERT INTO console_arm_stage_map … ON CONFLICT，例：20261011120000 的三支流量臂）也算種子
+  for (const n of await listMigrations()) {
+    if (n <= TW_MIG || n.includes("_policy_jp_")) continue;
+    const sql = await readMig(n);
+    if (sql.includes("INSERT INTO console_arm_stage_map (arm, stage, note) VALUES")) seeded.push(...seededArms(sql, "console_arm_stage_map"));
+  }
   assertEquals(new Set(seeded).size, seeded.length, "對照表種子重複");
   assertEquals(arms.filter((a) => !seeded.includes(a)), [], "新增的派工臂要在 console_arm_stage_map 登記時期（新 migration 補一列）");
   assertEquals(seeded.filter((a) => !arms.includes(a)), [], "對照表裡有 activity_arm_names() 沒有的臂");

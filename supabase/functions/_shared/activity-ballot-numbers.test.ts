@@ -118,7 +118,9 @@ Deno.test("A3 活動名清單＝P1 的清單加一個名字；新增一支臂的
   const rawTypes = [...new Set([...(await latestFn("contribution_auto_tasks_raw")).matchAll(/SELECT 'auto:([a-z_]+):'/g)].map((m) => m[1]))];
   const latestNames = namesIn(await latestFn("activity_arm_names"));
   const latestTags = tagsIn(await latestFn("contribution_auto_tasks_arms"));
-  assertEquals([...latestNames].sort(), [...latestTags, ...rawTypes.map((t) => `raw:${t}`)].sort(), "最新一版的清單與總表標籤＋raw 型別各說各話");
+  // 有人看才追（20261011120000）的三支流量臂不是 UNION 分支，是總表 keyed 那一段從來源臂換名出來的（traffic_watch_arm(來源臂)），守門見 traffic-watch-arms.test.ts
+  const trafficArms = (await latestFn("activity_arm_names")).includes("'traffic:") ? ["traffic:progress_stale", "traffic:deadline_due", "traffic:term_policies"] : [];
+  assertEquals([...latestNames].sort(), [...latestTags, ...rawTypes.map((t) => `raw:${t}`), ...trafficArms].sort(), "最新一版的清單與總表標籤＋raw 型別各說各話");
   assert(latestNames.includes("ballot_numbers") && latestTags.includes("ballot_numbers"));
   // 規則：直接種成窗口（不經過永遠開）
   assert(B.includes("'ballot_numbers', 'event', 'draw', 0, 'polling', 0, 'announced', true"));

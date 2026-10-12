@@ -104,7 +104,8 @@ Deno.test("A1 這支是 activity_open、總表、refresh_dispatch_blocked、poli
   };
   // 20261011030000（OPS #81）只多「屆別或職位查不到時照開」一段 OR，其餘一字不動（arm-windows-13.test.ts 逐字守）
   await last("CREATE OR REPLACE FUNCTION activity_open(", P0_MIG, ["20261011030000_arm_windows_13.sql"]);
-  await last("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(", MAN_MIG, ["20261009240100_regional_stats_arm.sql"]);
+  // 20261011120000（有人看才追）：村里長進度那兩段標記與流量開窗段保留，流量條件改看臂名（traffic-watch-arms.test.ts 逐字守）
+  await last("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(", MAN_MIG, ["20261009240100_regional_stats_arm.sql", "20261011120000_traffic_watch_arms.sql"]);
   await last("CREATE OR REPLACE FUNCTION refresh_dispatch_blocked(", RDB_MIG);
   // #349 第二階段 B（20261009220000）刪 related_policies 時 DROP＋CREATE 了這個視圖（只拿掉 related_policy_ids），是唯一允許排在後面的一版
   await last(/CREATE (OR REPLACE )?VIEW policies_with_logs AS/, VIEW_MIG, ["20261009220000_drop_related_policies.sql"]);
