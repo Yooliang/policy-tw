@@ -10,6 +10,7 @@ Deno.test("AI 當場提問、AI 搜尋、訓練爬蟲、傳統搜尋分得開", 
   assertEquals(classifyRead(ua("Claude-User/1.0"), "", "/politician/abc")?.kind, "ai_user");
   // 2026-09-29：讀協議的是我們自己的貢獻代理，不算「AI 當場來讀」
   assertEquals(classifyRead(ua("Claude-User/1.0"), "", "/skill.md")?.kind, "agent_protocol");
+  assertEquals(classifyRead(ua("Claude-User/1.0"), "", "/skill-types.md")?.kind, "agent_protocol");
   assertEquals(classifyRead(ua("ClaudeBot/1.0"), "", "/skill.md")?.kind, "ai_training", "爬蟲讀協議照原類別");
   assertEquals(classifyRead(ua("OAI-SearchBot/1.0"), "", "/")?.kind, "ai_search");
   assertEquals(classifyRead(ua("Claude-SearchBot/1.0"), "", "/")?.agent, "Claude-SearchBot", "要先比到 SearchBot，不能被 ClaudeBot 吃掉");
@@ -31,6 +32,7 @@ Deno.test("頁種歸類：靜態資源不算讀；skill.md、llms.txt、sitemap 
   assertEquals(pathTypeOf("/policy/abc/"), "policy");
   assertEquals(pathTypeOf("/election/2026"), "election");
   assertEquals(pathTypeOf("/skill.md"), "skill");
+  assertEquals(pathTypeOf("/skill-types.md"), "skill", "各型別的參考總表（協議 1.93.0）也算讀協議");
   assertEquals(pathTypeOf("/llms.txt"), "llms");
   assertEquals(pathTypeOf("/sitemap-policies.xml"), "sitemap");
   assertEquals(pathTypeOf("/assets/index-abc.js"), null);

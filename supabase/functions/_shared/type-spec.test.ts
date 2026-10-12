@@ -5,7 +5,7 @@
  *   - 搬走的段落不再留在 skill.md（兩份會走鐘）
  *   - 任務附得到它可能收尾的每一種型別、驗證附得到被驗的那一型
  */
-import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { parseTypeSpec } from "./type-spec.ts";
 import { TYPE_SPEC_BLOCKS } from "./type-spec.gen.ts";
 import { typeSpecForTask, typeSpecForVerify } from "./type-spec-for.ts";
