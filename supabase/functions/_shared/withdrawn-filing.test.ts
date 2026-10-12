@@ -6,6 +6,7 @@
  * 另外守住順手修的：不參選重查的章（verified）原本用 uuid 的樣子比對整數 id，一筆都蓋不到。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { handleContribute } from "./contribute-handler.ts";
 import { CORRECTION_FIELDS, isTaskIdShape, validateContributionRequest } from "./contribution-schema.ts";
@@ -310,7 +311,7 @@ Deno.test("貢獻摘要：退選前有沒有登記翻成網站上的說法", () 
 Deno.test("協議 1.55.0：correction 可改退選前有沒有登記、不參選重查的 filing 那一種寫進 skill.md", async () => {
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 55), `協議版號 ${PROTOCOL_VERSION} 比 1.55.0 舊`);
-  const md = lf(await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url)));
+  const md = lf(await readSkillWithTypes());
   for (const s of ["politician_elections→candidate_status／position／election_type／withdrawn_after_filing", "**`withdrawn_after_filing`＝退選前有沒有登記過**（1.55.0）",
                    "auto:not_running_recheck:filing:", "不能跟 `candidate_status` 同一筆改", "`not_running_recheck`（1.55.0）給該筆參選紀錄"]) {
     assertStringIncludes(md, s);

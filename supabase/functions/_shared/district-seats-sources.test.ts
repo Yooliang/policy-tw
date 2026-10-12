@@ -15,6 +15,7 @@
  *   C. 每條守門都做還原驗證：把 migration／TS 改壞一處（精確改一處，改不到就失敗），對應的守門必須紅
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
@@ -208,7 +209,7 @@ Deno.test("A5 TS 端：任務型別在 SOURCE_TASK_TYPES、需求是 seats、驗
 Deno.test("A6 協議：版號不低於 1.83.0（#489 的 1.82.0 先合併）、skill.md 檔頭與程式一致、說明公告網址已附在任務裡與驗證要核對選舉區數量", async () => {
   const ver = (v: string) => v.split(".").map(Number).reduce((a, n) => a * 1000 + n, 0);
   assert(ver(PROTOCOL_VERSION) >= ver("1.83.0"), "協議版號不低於 1.83.0");
-  const skill = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r\n/g, "\n");
+  const skill = (await readSkillWithTypes()).replace(/\r\n/g, "\n");
   assertStringIncludes(skill, `**版本**：${PROTOCOL_VERSION}`);
   const i = skill.indexOf("### 補應選名額");
   const sec = skill.slice(i, skill.indexOf("### 整批補選舉結果"));

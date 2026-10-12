@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { TASK_GUIDANCE } from "./task-guidance.ts";
 
@@ -42,7 +43,7 @@ Deno.test("三種任務的做法都講到任內施政承諾；協議本文也有
   for (const t of ["news_sweep", "policy_election_missing", "policy_election_mismatch"]) {
     assertStringIncludes(TASK_GUIDANCE[t], "Proposed", `${t} 要講任內施政承諾填 Proposed`);
   }
-  const md = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const md = await readSkillWithTypes();
   assertStringIncludes(md, "任內施政承諾");
   const sql = await Deno.readTextFile(new URL("../../migrations/20260923000010_news_sweep_in_term.sql", import.meta.url));
   assertStringIncludes(sql, "status 填 Proposed");

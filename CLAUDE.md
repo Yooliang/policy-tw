@@ -162,7 +162,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - Tailwind 走建置時編譯；動態組出來的 class 要加 `safelist`
 - 給人看的文字純中文
 - **職稱只能來自 `Politician.offices`（讀任期表 `politician_offices`：已就任而且卸任日為空；#345 第二階段 A 起，之前是視圖 `politician_offices_derived`）**，規則在 `lib/politician-office.ts`；`position` 是「最近一筆參選紀錄」的職位，落選的人也有，拿它當職稱會把落選者顯示成現任（2026-10-04 裁決）。參選狀況是另一回事，用 `candidacyBadge()`。
-- 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、`public/skill.md`、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
+- 加新的貢獻型別或任務型別要清點四處：DB CHECK（`contributions_contribution_type_check`）、TS 清單（`CONTRIBUTION_TYPES`／`TASK_TYPES`／`SUGGESTED_TYPE`）、協議（**型別的欄位與做法寫在 `public/skill-types.md`**，加一段帶 `<!-- spec … -->` 標記再跑 `deno run --allow-read --allow-write scripts/gen-type-spec.ts`；共通規則才寫 `public/skill.md`）、`lib/task-labels.ts`；漏 DB CHECK 的話代理交件全被擋而測試全綠（2026-09-20 踩過）
 - 流程規則改動先看 `docs/DECISIONS.md`（裁決日誌索引；本文在 `docs/decisions/`），牴觸舊裁決要在那裡寫「更正」
 
 ## Edge Functions（`supabase/functions/`，共 26 支；`merge-politicians` 硬刪 2026-09-21 下架，合併走 `merge_politician` 貢獻；`add-politician`／`update-avatar` 2026-09-23 下架——只要公開金鑰就能寫正式資料，人物與照片一律走貢獻；2026-02 的舊 AI 管線 13 支〔`ai-*` 九支、`add-policy`、`update-politician`、`import-candidate`、`debug-prompts`〕2026-10-07 下架、後台「資料匯入」頁與 `batch-import-candidates` 同日一併拆除，見 `docs/DECISIONS.md`）
@@ -191,6 +191,7 @@ anon key 是刻意公開的；`scripts/scan-secrets.ts` 只擋 service role 等�
 - `README.md` — 對外入口：專案是什麼、最需要的三種貢獻、跑起來、架構地圖、送 PR 規則、授權
 - `CLAUDE.md` — 本檔：給 Claude Code 的工作守則、指令、架構與慣例
 - `public/skill.md` — **對外協議的唯一真相**（AI 代理直接讀；版號規則見上面「協議版號」）
+- `public/skill-types.md` — 各任務型別的做法與各交件型別的欄位（協議 1.93.0 起從 skill.md 搬出）。`/next` 依任務型別或被驗的型別切出相關段落，放在 `item.type_spec` 隨派工送出（`_shared/type-spec*.ts`，產物 `type-spec.gen.ts` 由 `scripts/gen-type-spec.ts` 產生，守門 `type-spec.test.ts`）；協議守門測試要確認「協議有講到」用 `_shared/skill-text.ts` 的 `readSkillWithTypes()`
 - `SKILL.md`（根目錄）— 只是指路到 `public/skill.md`，刻意不放協議內容
 - `public/llms.txt` — 給 AI 爬蟲的站點簡介
 - `LICENSE`、`LICENSE-DATA.md`、`NOTICE` — 程式（Apache 2.0）、資料（CC BY 4.0）、貢獻授權

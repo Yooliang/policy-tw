@@ -12,6 +12,7 @@
  *   3. 還原驗證：把判準改壞，指定的情境必須轉紅
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 
@@ -170,7 +171,7 @@ Deno.test("FW-4 還原驗證：把判準改壞（5 種），指定的情境必�
 
 Deno.test("FW-5 文字同步：提示與協議不再叫代理自己減（task-context、skill.md 都改成「cec_count 填 registered，系統自己扣」）", async () => {
   const tc = await Deno.readTextFile(new URL("./task-context.ts", import.meta.url));
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   for (const [name, t] of [["task-context.ts", tc], ["skill.md", skill]] as const) {
     assert(!/registered\s*減掉/.test(t) && !t.includes("registered` 減掉"), `${name} 還叫代理把 registered 減掉登記後退選的人`);
     assert(!t.includes("除了③") && !t.includes("除了上面那種登記後退選的"), `${name} 的「兩組都做完才交」還留著「除了登記後退選」的例外`);

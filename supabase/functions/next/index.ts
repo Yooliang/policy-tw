@@ -18,6 +18,7 @@ import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
+import { typeSpecForTask, typeSpecForVerify } from "../_shared/type-spec-for.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { systemVoteSources } from "../_shared/independent-sources.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
@@ -438,6 +439,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           // 有效門檻（系統票已折進去）；池子沒回時退回原門檻
           required_agree: typeof pick.effective_required === "number" ? pick.effective_required : requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
+          // 這一型的交件欄位與驗證要點（協議 1.93.0：從 skill.md 搬出來，隨派工送）
+          type_spec: typeSpecForVerify(pick.contribution_type),
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
           ...(pick.contribution_type === "policy"
             ? (() => {
@@ -563,6 +566,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: withElectionKey(t.target, electionList), ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget), { task_id: t.id ?? null, target: manualTarget }),
           lookup: buildLookup(manualTarget),
+          type_spec: typeSpecForTask(t.task_type),
         },
         how_to: howTo,
       });
@@ -595,6 +599,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
         current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget), { task_id: t.task_id ?? null, target: autoTarget }),
         lookup: buildLookup(autoTarget),
+        // 這種任務的做法＋可能收尾的每一種交件型別的欄位（協議 1.93.0：從 skill.md 搬出來，隨派工送）
+        type_spec: typeSpecForTask(t.task_type),
       },
       how_to: howTo,
     });

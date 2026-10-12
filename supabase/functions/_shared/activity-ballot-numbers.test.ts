@@ -18,6 +18,7 @@
  * 正式庫快照版的「今天輸出逐件不變」見 scripts/arms-parity-p2.ts ballot_numbers（不進 CI；PR 說明附結果）。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { applyP2, armsFingerprint, BALLOT_MIG, buildArmsDb, DEFAULT_SCOPE, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P1_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 import { BALLOT_NUMBERS_HINT, BALLOT_NUMBERS_RECHECK_HINT, CAND_NO_VERIFY_HINT, isBallotNumbersRecheckTask, isBallotNumbersTask, shapeTaskCurrent, shapeVerifyCurrent, type TaskContextData, type VerifyContextData } from "./task-context.ts";
@@ -176,7 +177,7 @@ Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、system-one
   assert(BALLOT_NUMBERS_HINT.includes("各自從 1 編起") && BALLOT_NUMBERS_HINT.includes("not_supported"));
   assert(BALLOT_NUMBERS_RECHECK_HINT.includes("duplicate") && BALLOT_NUMBERS_RECHECK_HINT.includes("gap") && BALLOT_NUMBERS_RECHECK_HINT.includes("units[].members") && BALLOT_NUMBERS_RECHECK_HINT.includes("no_change"));
   assert(CAND_NO_VERIFY_HINT.includes("payload.cand_no") && CAND_NO_VERIFY_HINT.includes("剛好等於"));
-  const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r\n/g, "\n");
+  const md = (await readSkillWithTypes()).replace(/\r\n/g, "\n");
   assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）（1.76.0）"));
   assert(md.includes("**系統不核號次來源**") && md.includes("`outcome` 填 `unreachable`") && md.includes("不能當號次的來源"));
   assert(md.includes("`cand_no_recheck`") && md.includes("各自從 1 編起") && md.includes("重複") && md.includes("跳號"));

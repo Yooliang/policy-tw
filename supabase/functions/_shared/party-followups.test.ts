@@ -5,6 +5,7 @@
  *   2. 政黨資訊交件型別 party_info：改名（前身、名稱起訖）、解散日、名冊外政黨的對應，附出處、驗證上線
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { cecPartyText, toCecCandidateRow } from "./cec-sync.ts";
@@ -295,7 +296,7 @@ Deno.test("任務現況與骨架：party 那一種給專用 hint；骨架的政�
 Deno.test("協議 1.56.0：party_info 一節、參選紀錄缺政黨的任務、candidacy 的 party 是那一次的政黨", async () => {
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 56), `協議版號 ${PROTOCOL_VERSION} 比 1.56.0 舊`);
-  const md = lf(await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url)));
+  const md = lf(await readSkillWithTypes());
   for (const s of ["**`party_info`**（1.56.0）", "auto:candidacy_source_missing:party:", "**`party` 是那一次參選時的政黨**（1.56.0）", "**對不上會被退件**", "／`party_info` | 3 | 3 | 3 | 3 |"]) {
     assertStringIncludes(md, s);
   }

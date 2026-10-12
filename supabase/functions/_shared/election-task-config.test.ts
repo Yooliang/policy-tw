@@ -13,6 +13,7 @@
  *   5. 協議與派工指引裡「2026 的新政見不是這一屆」的點名字樣改成不點名屆別（開啟 2026 之後這句才不會自相矛盾）
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
 import { TASK_GUIDANCE } from "./task-guidance.ts";
 
@@ -155,7 +156,7 @@ Deno.test("只加不刪：函式簽名不變（派工總表 contribution_auto_ta
 });
 
 Deno.test("協議與派工指引：「2026 的新政見不是這一屆」改成不點名屆別（開啟 2026 之後不會自相矛盾）", async () => {
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   assert(!skill.includes("2026 的新政見"), "skill.md 不能再點名 2026 的新政見");
   assertStringIncludes(skill, "任內才宣布的施政、其他屆別的政見不是這個任務要的");
   assert(!TASK_GUIDANCE.term_policy_missing.includes("2026 的新政見"));
