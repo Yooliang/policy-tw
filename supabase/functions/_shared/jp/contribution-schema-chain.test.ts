@@ -384,3 +384,74 @@ Deno.test("B 期の任務比對：記録にない当選者（auto:election_resul
     payload: { task_id: task, outcome: "confirmed", checked_urls: OFFICIAL, finding: "開票結果の当選者は全員記録にあることを確認した" } });
   assert(nc.ok, JSON.stringify(nc.errors));
 });
+
+// ---- 政見三要素（policy_elements、policy-ops#95、規則は預設關）：欄位規則は正見の policy_elements と同じ、日本站の口吻 ----
+const PEPID = "5f0c8d6e-aaaa-4222-8333-444444444444";
+const elOk = (element: string, o: Record<string, unknown> = {}) => ({ element, stated: true, text: "原文の事実", source_locator: "選挙公報 3 頁", ...o });
+function pel(elements: unknown, patch: Record<string, unknown> = {}, drop: string[] = [], top: Record<string, unknown> = {}) {
+  const payload: Record<string, unknown> = { policy_id: PEPID, elements, resolved_claim: "new", ...patch };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "policy_elements", payload, source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"], ...top });
+}
+const pelPaths = (v: ReturnType<typeof pel>) => v.errors.map((e) => e.path);
+
+Deno.test("policy_elements：最小の交件が通る／policy_id・elements・resolved_claim は必須／要素は 1～3 個で重複不可", () => {
+  assert(pel([elOk("target")]).ok);
+  assert(pel([elOk("target"), elOk("deadline"), { element: "funding", stated: false, source_locator: "公報 3 頁を通読" }]).ok);
+  assertEquals(pelPaths(pel([elOk("target")], {}, ["policy_id"])), ["payload.policy_id"]);
+  assertEquals(pelPaths(pel([elOk("target")], { policy_id: "has space" })), ["payload.policy_id"]);
+  assertEquals(pelPaths(pel([elOk("target")], {}, ["resolved_claim"])), ["payload.resolved_claim"]);
+  assertEquals(pelPaths(pel([])), ["payload.elements"]);
+  assertEquals(pelPaths(pel("x")), ["payload.elements"]);
+  assertEquals(pelPaths(pel([elOk("target"), elOk("deadline"), elOk("funding"), elOk("target")])), ["payload.elements"]);
+  assertEquals(pelPaths(pel([elOk("target"), elOk("target")])), ["payload.elements[1].element"]);
+  assertEquals(pelPaths(pel([elOk("budget")])), ["payload.elements[0].element"]);
+  assertEquals(pelPaths(pel(["x"])), ["payload.elements[0]"]);
+  assertEquals(pelPaths(pel([elOk("target")], {}, [], { source_urls: [] })), ["source_urls"]);
+});
+
+Deno.test("policy_elements：stated と text（stated=true は text 必須で 120 字まで、stated=false は text を付けない＝未説明を text に書かない）、source_locator 必須", () => {
+  assertEquals(pelPaths(pel([{ element: "target", source_locator: "x" }])), ["payload.elements[0].stated"]);
+  assertEquals(pelPaths(pel([elOk("target", { text: undefined })])), ["payload.elements[0].text"]);
+  assertEquals(pelPaths(pel([elOk("target", { text: "　　" })])), ["payload.elements[0].text"]);
+  assert(pel([elOk("target", { text: "𠮷".repeat(120) })]).ok, "120 コードポイントまで");
+  assertEquals(pelPaths(pel([elOk("target", { text: "あ".repeat(121) })])), ["payload.elements[0].text"]);
+  assertEquals(pelPaths(pel([elOk("funding", { stated: false, text: "未説明" })])), ["payload.elements[0].text"]);
+  assert(pel([elOk("funding", { stated: false, text: undefined })]).ok);
+  assertEquals(pelPaths(pel([elOk("target", { source_locator: undefined })])), ["payload.elements[0].source_locator"]);
+  assertEquals(pelPaths(pel([elOk("target", { source_locator: "あ".repeat(201) })])), ["payload.elements[0].source_locator"]);
+  assertEquals(pelPaths(pel([elOk("target", { text: 5 })])), ["payload.elements[0].text"]);
+  assert(pel([elOk("target", { source_url: "https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf" })]).ok);
+  assertEquals(pelPaths(pel([elOk("target", { source_url: "ftp://x" })])), ["payload.elements[0].source_url"]);
+});
+
+Deno.test("policy_elements：deadline_date は deadline かつ stated=true のときだけ、実在する 1990～2100 年の日付（会計年度は 4/1～3/31＝『2028 年度まで』は 2029-03-31）", () => {
+  assert(pel([elOk("deadline", { text: "2028 年度まで", deadline_date: "2029-03-31" })]).ok);
+  assert(pel([elOk("deadline", { deadline_date: "" })]).ok, "空文字は付けないのと同じ");
+  assertEquals(pelPaths(pel([elOk("target", { deadline_date: "2029-03-31" })])), ["payload.elements[0].deadline_date"]);
+  assertEquals(pelPaths(pel([elOk("funding", { deadline_date: "2029-03-31" })])), ["payload.elements[0].deadline_date"]);
+  assertEquals(pelPaths(pel([{ element: "deadline", stated: false, source_locator: "x", deadline_date: "2029-03-31" }])), ["payload.elements[0].deadline_date"]);
+  for (const bad of ["2029-02-30", "2029/03/31", "令和11年3月31日", "1989-12-31", "2101-01-01"]) {
+    const v = pel([elOk("deadline", { deadline_date: bad })]);
+    assertEquals(pelPaths(v), ["payload.elements[0].deadline_date"], bad);
+    assert(v.errors[0].message.includes("2029-03-31"), "会計年度の説明が出る");
+  }
+});
+
+Deno.test("policy_elements：任務比對（policy_elements_missing）— policy_id が task_id の政見と一致、他の型別で答えると 400；JP_TASK_ARMS の登録", () => {
+  assertEquals(JP_TASK_ARMS.policy_elements_missing, "policy_elements");
+  assertEquals(pelPaths(pel([elOk("target")], {}, [], { task_id: `auto:policy_elements_missing:${PEPID}` })), []);
+  const other = pel([elOk("target")], { policy_id: "other-policy" }, [], { task_id: `auto:policy_elements_missing:${PEPID}` });
+  assertEquals(pelPaths(other), ["payload.policy_id"]);
+  const wrongType = validateContributionRequest({
+    ...base, contribution_type: "policy",
+    payload: { politician_election_id: "pe-1", title: "保育所の待機児童をなくす", description: "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。", category: "子育て", source_locator: "公報 2 頁", resolved_claim: "new" },
+    source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"], task_id: `auto:policy_elements_missing:${PEPID}`,
+  });
+  assertEquals(wrongType.errors.map((e) => e.path), ["task_id"]);
+  assert(wrongType.errors[0].message.includes("policy_elements"));
+  // 他の任務の task_id では policy_elements を受けない
+  const wrongArm = pel([elOk("target")], {}, [], { task_id: `auto:policy_missing:pe-1` });
+  assertEquals(pelPaths(wrongArm), ["task_id"]);
+  assert(JP_CONTRIBUTION_TYPES.includes("policy_elements"));
+});

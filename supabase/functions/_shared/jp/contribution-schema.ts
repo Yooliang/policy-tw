@@ -11,6 +11,8 @@
  *   欄位照 policy_jp.local_governments／regional_stats 的 CHECK 寫；source_urls 至少要有一個公的出典（総務省・e-Stat・*.go.jp・*.lg.jp・団体の公式サイト）。
  * 日本站自己的：candidacy（選舉鏈第 2 步，對應派工臂 roster_check；欄位照 policy_jp.politician_elections 的 CHECK：六個 candidacy_status、district_kind、status_date；
  *   人物用 politician_id 或 name＋kana；得票數・得票率的欄位名一律 400；claimKey 併票型別，不進 same_claim 登記表）。落庫 SQL policy_jp.apply_candidacy（20261010040000）。
+ * 日本站自己的：policy_elements（政見三要素，對應派工臂 policy_elements；欄位與規則照正見 contribution-schema.ts 的 policy_elements、共用 ../policy-elements.ts 的上限與日期範圍；
+ *   同一件事登記表的型別〔鍵＝政見 id ＋ 要素〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_policy_elements（20261011140000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -29,10 +31,11 @@ import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../co
 import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
 import { isJpOfficialSource, jpSourceKind } from "./source-kind.ts";
 import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../same-claims.ts";
+import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "../policy-elements.ts";
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -160,6 +163,8 @@ export const JP_TASK_ARMS = {
   profile_detail_gap: "politician",
   // 選舉鏈第 4 步：政見任務收 policy（公約）
   policy_missing: "policy",
+  // 政見三要素（policy-ops#95、規則は預設關）：政見 1 件につき要素 1～3 個を policy_elements で答える
+  policy_elements_missing: "policy_elements",
   // A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別も candidacy（filed／withdrawn／同じ状態で選管の出典を足す）。
   // not_running_recheck は「照合」（task_id に filing が付かない）だと no_change／task_suggestion で答える：下の checkTaskAgreement で candidacy を断る
   candidate_status_stale: "candidacy",
@@ -168,8 +173,8 @@ export const JP_TASK_ARMS = {
   // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
   election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
@@ -231,6 +236,12 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   // policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ
   if (arm === "policy_missing") {
     if (payload.politician_election_id !== m[2]) push("payload.politician_election_id", `payload.politician_election_id（${String(payload.politician_election_id ?? "未填")}）跟這個任務問的參選（${m[2]}）不一致：一個任務只回報它問的那一位的公約`);
+    return;
+  }
+  // policy_elements_missing：task_id の末尾は政見 id。1 つの任務は 1 つの政見だけ
+  if (arm === "policy_elements_missing") {
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:policy_elements_missing:<政見 id>）"); return; }
+    if (payload.policy_id !== m[2]) push("payload.policy_id", `payload.policy_id（${String(payload.policy_id ?? "未填")}）跟這個任務問的政見（${m[2]}）不一致：一個任務只回報它問的那一條政見的三要素`);
     return;
   }
   let taskLg: string;
@@ -426,6 +437,51 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         }
       }
       for (const k of ["origin", "status"]) if (p[k] !== undefined) push(`payload.${k}`, "這一步只收公約（origin=pledge、status=not_started 由伺服器填）：把這個欄位拿掉");
+      break;
+    }
+    case "policy_elements": {
+      // 政見三要素（正見 1.50.0 の日本版）：政見 1 件の要素 1～3 個。stated=false（原文を調べたが書いていない）も答え——画面は「未説明」、行がない（未調査）と分ける。
+      // 補わない・換算しない・評価しない：text は原文の事実だけ。落庫は SQL policy_jp.apply_policy_elements（policy_element_normalize が同じ規則）
+      if (!isStr(p.policy_id, 1, 64) || /\s/.test(p.policy_id)) push("payload.policy_id", "policy_id 必填（任務 target.policy_id の値）");
+      if (!Array.isArray(p.elements) || p.elements.length === 0 || p.elements.length > POLICY_ELEMENT_KINDS.length) {
+        push("payload.elements", "elements 必填：1～3 個、それぞれオブジェクト（target 数値目標／deadline 達成期限／funding 財源）");
+        break;
+      }
+      const seenKinds = new Set<string>();
+      (p.elements as unknown[]).forEach((raw, i) => {
+        const at = `payload.elements[${i}]`;
+        if (!isObj(raw)) { push(at, "各要素はオブジェクト：{element, stated, text, deadline_date, source_locator, source_url}"); return; }
+        const e = raw;
+        for (const k of ["text", "deadline_date", "source_locator", "source_url"]) {
+          if (e[k] !== undefined && e[k] !== null && typeof e[k] !== "string") push(`${at}.${k}`, "要是字串");
+        }
+        if (!oneOf(POLICY_ELEMENT_KINDS, e.element)) push(`${at}.element`, "element 要是 target（数値目標）／deadline（達成期限）／funding（財源）之一");
+        else if (seenKinds.has(e.element)) push(`${at}.element`, `${e.element} 重複：同じ政見の同じ要素は 1 回だけ`);
+        else seenKinds.add(e.element);
+        if (typeof e.stated !== "boolean") {
+          push(`${at}.stated`, "stated 必填：true＝原文に書いてある／false＝原文を調べたが書いていない（画面は「未説明」）");
+        } else if (e.stated) {
+          const text = typeof e.text === "string" ? jpTrim(e.text) : "";
+          if (!text) { if (e.text === undefined || e.text === null || typeof e.text === "string") push(`${at}.text`, "原文に書いてある（stated=true）なら text 必填：原文のとおり、言い換えない・数字を補わない"); }
+          else if (charLength(text) > POLICY_ELEMENT_TEXT_MAX) push(`${at}.text`, `text 最多 ${POLICY_ELEMENT_TEXT_MAX} 字：この要素だけを書く（原文が長いときは数字・期限・財源が書かれた部分だけ）`);
+        } else if (typeof e.text === "string" && jpTrim(e.text)) {
+          push(`${at}.text`, "stated=false（原文に書いていない）のときは text を付けない：書いていないものを補ったり「未説明」と書いたりしない");
+        }
+        if (e.deadline_date !== undefined && e.deadline_date !== null && e.deadline_date !== "") {
+          if (e.element !== "deadline" || e.stated !== true) {
+            push(`${at}.deadline_date`, "deadline_date は、原文に書いてある達成期限（element=deadline、stated=true）のときだけ付ける");
+          } else if (!isRealDate(e.deadline_date) || Number(e.deadline_date.slice(0, 4)) < DEADLINE_YEAR_MIN || Number(e.deadline_date.slice(0, 4)) > DEADLINE_YEAR_MAX) {
+            push(`${at}.deadline_date`, "西暦 YYYY-MM-DD の実在する日付。会計年度は 4/1～3/31：「2028 年度まで」は 2029-03-31、暦年の書き方「2028 年末まで」は 2028-12-31。日付にできない書き方（「早期に」など）は付けない");
+          }
+        }
+        const locator = typeof e.source_locator === "string" ? jpTrim(e.source_locator) : "";
+        if (!locator || charLength(locator) > POLICY_ELEMENT_LOCATOR_MAX) {
+          push(`${at}.source_locator`, `source_locator 必填（1～${POLICY_ELEMENT_LOCATOR_MAX} 字）：原文のどこか（例：選挙公報 2 頁「子育て」第 3 項）。stated=false でも、どの部分を調べたかを書く`);
+        }
+        if (e.source_url !== undefined && e.source_url !== null && e.source_url !== "" && !(typeof e.source_url === "string" && /^https?:\/\/\S+$/i.test(e.source_url))) {
+          push(`${at}.source_url`, "source_url は http(s) の URL（この交件の source_urls のどれか：この要素の原文）");
+        }
+      });
       break;
     }
     case "regional_stat": {
