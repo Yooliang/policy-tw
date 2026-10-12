@@ -9,6 +9,7 @@
  *   5. 四處清點與協議
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { CEC_CHECK_ONLY_TYPES, needsTwoIps, rejectFloor, requiredAgree, riskLevel, SCORE_TWO_IP_TYPES, scoreStatus, SYSTEM_VOTE_ELIGIBLE_TYPES } from "./consensus.ts";
 import {
   OWNER_MISMATCH_TASK, REASSIGN_MODEL_PREFIX, REASSIGN_TYPE, type ReassignContext, reassignProblems, reassignSystemVote, sameNameOrAlias,
@@ -243,6 +244,6 @@ Deno.test("四處清點：DB CHECK、TS 清單、skill.md、標籤；協議 1.59
   }
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 59), `協議版號 ${PROTOCOL_VERSION} 比 1.59.0 舊`);
-  const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r/g, "");
+  const md = (await readSkillWithTypes()).replace(/\r/g, "");
   for (const s of ["`candidacy_owner_mismatch` → `reassign_candidacy`", "**`reassign_candidacy`**", "| `reassign_candidacy`（同名人物接錯", "`removal`／`reassign_candidacy`（1.59.0）"]) assertStringIncludes(md, s);
 });

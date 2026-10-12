@@ -10,6 +10,7 @@
  *   5. 投票率：多場加總、只算投票日當天那一場（重行選舉不算）
  */
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import {
   DISTRICT_SEAT_TYPES,
   normalizeSeatDistrict,
@@ -243,7 +244,7 @@ Deno.test("四處清點：DB CHECK、TASK_TYPES／CONTRIBUTION_TYPES／SUGGESTED
   const labels = await Deno.readTextFile(new URL("../../../lib/task-labels.ts", import.meta.url));
   const label = labels.match(new RegExp(`\\b${T}:\\s*'([^']*)'`))?.[1];
   assert(label && !/[A-Za-z]/.test(label), `lib/task-labels.ts 要有純中文名稱：${label}`);
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   assertStringIncludes(skill, `\`${T}\``);
   assertStringIncludes(skill, `**\`${C}\`**`);
   const queue = await Deno.readTextFile(new URL("../../../pages/Queue.vue", import.meta.url));

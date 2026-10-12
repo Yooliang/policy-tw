@@ -12,6 +12,7 @@
  * SQL 本身另外在 PGlite（WASM Postgres）上實跑過，見 PR 說明；這裡沒有資料庫。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { CONTRIBUTION_TYPES, TASK_TYPES, validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
@@ -573,7 +574,7 @@ Deno.test("驗證說明：四種都講得出核什麼、投什麼；中止明講
 });
 
 Deno.test("協議（skill.md）講了四種型別、中止要兩台機器、官方紀錄要官方網址、臉書不收", async () => {
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) assertStringIncludes(skill, `**\`${t}\`**（1.52.0）`);
   assertStringIncludes(skill, "`handover_type=stop` 的 `lineage_handover`（1.52.0）另外要求分數來自**至少 2 個不同來源 IP**");
   assertStringIncludes(skill, "出處**一定要是官方網址**");

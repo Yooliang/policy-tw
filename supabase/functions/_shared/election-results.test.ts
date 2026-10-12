@@ -10,6 +10,7 @@
  *   5. 四處清點與協議
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import {
   AGREE_THRESHOLDS, CEC_CHECK_ONLY_TYPES, effectiveRequiredAgree, needsTwoIps, rejectFloor, requiredAgree, riskLevel, scoreStatus, SYSTEM_VOTE_ELIGIBLE_TYPES,
 } from "./consensus.ts";
@@ -298,7 +299,7 @@ Deno.test("四處清點：DB CHECK、TS 清單、skill.md、標籤；協議 1.58
   }
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 58), `協議版號 ${PROTOCOL_VERSION} 比 1.58.0 舊`);
-  const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r/g, "");
+  const md = (await readSkillWithTypes()).replace(/\r/g, "");
   // 合併衝突記號混進對外協議（這支 PR 第一版 rebase 時真的發生過，測試全綠沒有人發現）
   assert(!/^(<<<<<<<|>>>>>>>) /m.test(md), "skill.md 有合併衝突記號");
   for (const s of ["`election_results_missing` → `election_results`", "**`election_results`**", "整批補已投票選舉的結果（`election_results`，1.58.0）2", "| `election_results` **整批**補已投票選舉的結果"]) {

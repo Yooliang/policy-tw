@@ -11,6 +11,7 @@
  * SQL 本身另外在 PGlite（WASM Postgres）上實跑過，見 PR 說明；這裡沒有資料庫。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { CONTRIBUTION_TYPES, TASK_TYPES, validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
@@ -375,7 +376,7 @@ Deno.test("驗證項：逐個要素對原文，講得出 agree／disagree／unsu
 });
 
 Deno.test("協議文件：skill.md 有這一型的段落，講清楚未說明／未調查、原句位置、曆年換算", async () => {
-  const md = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const md = await readSkillWithTypes();
   const at = md.indexOf("**`policy_elements`**");
   assert(at > 0, "skill.md 要有 policy_elements 段落");
   const section = md.slice(at, md.indexOf("**`roster_check`**", at));

@@ -8,6 +8,7 @@
  * SQL 在 PGlite 上灌假資料實跑過（見 PR 說明）；這支守住「改壞了不會報錯」的事。每一條都做過還原驗證（見 PR 說明）。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { planRevert } from "./edit-history.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
@@ -20,7 +21,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const THIS = "20261007020000_reassign_merge_followups.sql";
 const lf = (s: string) => s.replace(/\r\n/g, "\n");
 const mine = lf(await Deno.readTextFile(new URL(THIS, MIGRATIONS)));
-const skill = lf(await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url)));
+const skill = lf(await readSkillWithTypes());
 
 function definitionIn(text: string, fn: string): string | null {
   const start = text.lastIndexOf(`CREATE OR REPLACE FUNCTION ${fn}(`);

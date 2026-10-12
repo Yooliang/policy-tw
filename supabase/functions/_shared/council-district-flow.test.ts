@@ -11,6 +11,7 @@
  *   5. 顯示：縣市層級以上的選舉不借人物的鄉鎮村里
  */
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import {
   COUNCIL_DISTRICT_COUNT_2026,
   councilDistrictKey,
@@ -157,7 +158,7 @@ Deno.test("交件端點：帶了選區（或寫在 position）照常收", async 
 });
 
 Deno.test("協議與任務骨架：skill.md 寫出錯誤代碼；名單清查補議員的骨架就帶 electoral_district", async () => {
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   assertStringIncludes(skill, "400 electoral_district_required");
   const tpl = buildReportTemplate("roster_check", "candidacy", { region: "台中市", election_id: 2026, election_type: "縣市議員" }, "auto:roster_check:2026:台中市:縣市議員");
   assert("electoral_district" in (tpl!.payload as Record<string, unknown>), "名單清查交的議員沒有選區，就是這次 103 筆的來源");

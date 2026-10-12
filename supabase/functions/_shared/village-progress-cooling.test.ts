@@ -14,6 +14,7 @@
  *   C. 每條守門都做還原驗證：把 migration 改壞一處（精確改一處，改不到就失敗），對應的守門必須紅
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { applyContribution, PROGRESS_REPEAT_COOLDOWN_DAYS, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
@@ -197,7 +198,7 @@ Deno.test("A7 前端只讀視圖多出來的那一欄、只放標籤「查無公
 });
 
 Deno.test("A8 協議：skill.md 版號 1.80.0（#482 的 1.79.0 先合併）、說明村里長與遞增冷卻；CLAUDE.md、計畫第 11 節、DECISIONS 一起更新", async () => {
-  const skill = await readSrc("../../../public/skill.md");
+  const skill = await readSkillWithTypes();
   // 1.80.0 起才有這段說明；之後的版本（例如 1.81.0 的派工憑證）只升不降，所以看「不低於 1.80.0」，不釘死等號
   const ver = /\*\*版本\*\*：(\d+)\.(\d+)\.(\d+)/.exec(skill);
   assert(ver && (Number(ver[1]) > 1 || Number(ver[2]) >= 80), "協議版號不低於 1.80.0");

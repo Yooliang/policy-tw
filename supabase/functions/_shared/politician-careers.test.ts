@@ -9,6 +9,7 @@
  * SQL 本身另外在 PGlite（WASM Postgres）上灌 10-06 唯讀快照實跑過（27 條），見 PR 說明。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { UNREADABLE_SOCIAL_HOSTS, isUnreadableSocial } from "./lineage.ts";
 import { careerItemCount, careerSourceNote, readableCareerSources } from "./politician-careers.ts";
 import { politicianIdFromTask, withTaskPolitician } from "./task-politician.ts";
@@ -185,7 +186,7 @@ Deno.test("協議 1.54.0：學經歷補出處、政黨與學經歷的唯讀欄�
   // 之後的版本照樣要有這些段落（寫死 1.54.0 的話，下一支升版的 PR 就得改這支測試）
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 54), `協議版號 ${PROTOCOL_VERSION} 比 1.54.0 舊`);
-  const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r/g, "");
+  const md = (await readSkillWithTypes()).replace(/\r/g, "");
   for (const s of ["auto:profile_detail_gap:sources:", "career_sources", "`unsourced`", "臉書、IG、Threads 讀不到，不算出處", "`politician_careers_full`", "**`parties`**（1.54.0", "`party_basis`"]) {
     assertStringIncludes(md, s);
   }

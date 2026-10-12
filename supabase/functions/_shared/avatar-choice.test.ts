@@ -6,6 +6,7 @@
  *   4. 補開的 migration 只新增任務、不改正式資料，條件跟落庫程式同一套
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
 import { AVATAR_CHOICE_CRITERIA, AVATAR_CHOICE_TASK_TYPE } from "./avatar-choice.ts";
@@ -128,7 +129,7 @@ Deno.test("挑選標準：維護者點名的缺點寫進做法與協議（1.91.0
   assertStringIncludes(TASK_GUIDANCE[AVATAR_CHOICE_TASK_TYPE], AVATAR_CHOICE_CRITERIA);
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 91), `協議版號 ${PROTOCOL_VERSION} 比 1.91.0 舊`);
-  const md = (await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url))).replace(/\r/g, "");
+  const md = (await readSkillWithTypes()).replace(/\r/g, "");
   for (const s of ["`avatar_choice`", "黑白照", "側臉", "**照片例外**"]) assertStringIncludes(md, s);
 });
 

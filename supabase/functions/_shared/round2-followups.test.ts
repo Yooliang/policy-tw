@@ -4,6 +4,7 @@
  *   4. 政黨資訊派工（party_info_missing）　5. 測試資料：姓名守門三層、removal 開放 politicians、placeholder_politician 派工
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { REMOVAL_TABLES, TASK_TYPES, validateContributionRequest } from "./contribution-schema.ts";
@@ -235,7 +236,7 @@ Deno.test("清點：兩個新任務型別都有 TS 清單、建議型別、做�
 Deno.test("協議：removal 收人物、測試名不收、party_roster 與 party_info_missing 寫進 skill.md；版號比 1.56.0 新", async () => {
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor > 56), PROTOCOL_VERSION);
-  const md = lf(await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url)));
+  const md = lf(await readSkillWithTypes());
   for (const s of ["**`politicians` 人物**", "**測試資料的姓名不收**", "`target.kind` 是 `party_roster`", "**`party_info_missing` 任務**", "**不要照抄 `target.person_party`**"]) {
     assertStringIncludes(md, s);
   }

@@ -7,6 +7,7 @@
  * 派工臂接進 contribution_auto_tasks_arms 而且沒有掉臂、SQL 與 TS 的單位對照一致。
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import {
   CONTRIBUTION_TYPES,
   isRegionalStatAdminCode,
@@ -145,7 +146,7 @@ Deno.test("四處清點：CONTRIBUTION_TYPES／TASK_TYPES／SUGGESTED_TYPE／tas
   const labelLine = labels.match(new RegExp(`${T}:\\s*'([^']*)'`))?.[1] ?? "";
   assert(!/[A-Za-z]/.test(labelLine), "任務看板的中文名稱不該夾雜英文字母（UI 文字純中文）");
 
-  const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+  const skill = await readSkillWithTypes();
   assertStringIncludes(skill, "`regional_stat`", "skill.md 要有這個型別的說明段落");
   assertStringIncludes(skill, T, "skill.md 要提到對應的任務型別");
 });

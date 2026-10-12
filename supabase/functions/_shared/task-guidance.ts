@@ -43,13 +43,20 @@ const gazetteImageNote =
 const notPolicyMisjudgmentNote =
   "**常見誤判**：議員在議會質詢、總質詢時提出的建議或要求，是質詢主張，不是他下一屆的競選政見；任內已完成的施政成果、前任留下的建設、超出他職權範圍的表態，也都不是政見，查到這類內容不要交。";
 
+/**
+ * 「最多 5 筆」碰上「媒體不能當唯一出處」時怎麼辦（使用者 2026-10-12 同意）：試跑的代理在新聞稿裡找到 5 條政見，
+ * 只有 1 條另有第二個網站，不知道另外 4 條要不要交。規則不改（1.45.0），只把做法講明。
+ */
+const soleSourceDeferNote =
+  "**只有單一來源的那幾條先不交**（同一篇新聞稿被幾家轉載只算一個來源）：在你交的那筆 policy 的 note（一筆都交不了就在 no_change 的 finding）列出它們的標題與網址，等找到第二個網站或選舉公報上架再交。";
+
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
     "**current 有 bulletins 的先看公報**：那是系統推得出來的中選會選舉公報與號次（候選人自己登記的政見原文），照公報交那一屆的政見。" +
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
     "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
-    gazetteImageNote + notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +
+    gazetteImageNote + notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +
     searchFirst("policy_missing"),
 
   // 補任期政見（2026-10-02 維護者同意）：現任者那一屆當選時的競選政見。交成 Campaign Pledge＋該屆 election_id，
@@ -61,7 +68,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄確實空白或只有口號才回查無，checked_urls 要有這份公報。" +
     gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、其他屆別的政見不是這一屆的競選政見**，這個任務不要交。" +
-    notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE +
+    notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +
     searchFirst("term_policy_missing"),
 
   // 補學經歷條列（2026-10-02 維護者裁示）：人物頁側欄的「學歷」「經歷」讀的是 education[]／experience[]，
