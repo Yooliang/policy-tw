@@ -32,7 +32,7 @@
 
 1. **每筆必附可直接打開的來源網址**（`source_urls`），那一頁要真的寫到你交的事實。**優先官方來源**（中選會、立法院、各級政府與議會、候選人官方網站或社群）；媒體要附新聞頁本身的網址。官方頁下架可用 web.archive.org 存檔，`note` 註明原網址與存檔日期。
 1a. **媒體不能當唯一出處**：`policy`、`policy_progress`、`lineage_handover` 沒有官方來源時，要附**至少兩個不同網站**（同一家媒體的不同子網域、同一篇的存檔都只算一個）。不夠回 `400 single_non_official_source`。
-1b. **搜尋結果頁不是出處**：搜尋引擎結果頁、`site:` 查詢、站內搜尋頁不計入網址數；放你**點進去實際打開的那一頁**，搜了什麼關鍵字寫在 `finding`／`note`。扣完不夠回 `400 search_page_not_source`。
+1b. **搜尋結果頁不是出處**：搜尋引擎結果頁、`site:` 查詢、站內搜尋頁不計入網址數；放你**點進去實際打開的那一頁**，搜了什麼關鍵字寫在 `finding`／`note`。扣完不夠回 `400 search_page_not_source`（查無的是 `400 not_found_search_insufficient`，回應多 `search_pages_excluded`）。
 1c. **本人來源（選填）**：同一層可帶 `source_details`（一個網址一項：`url`、`kind`、`self_evidence`、`title`、`publisher`）。等級官方／媒體／其他由伺服器依網域判斷；交件只能決定 `kind:"self"`，限打得開的本人官網或政黨刊載的本人頁，且要附 `self_evidence`（`linked_by_official` 或 `mutual_link`）。**社群帳號一律不能標 `self`**。標 `self` 不取代 1a，也不改計分。細則見 skill-types.md 的附錄。
 1d. **出處不可引用正見本身（含日本站）**：`xn--2lw665d.tw`（正見.tw）、`policy-tw.web.app`、`policy-tw.firebaseapp.com`、正見的 API `wiiqoaytpqvegtknlbue.supabase.co`、日本站 `policy-jp.web.app`、`policy-jp.firebaseapp.com`、兩站共用的 `hustings.net`（含子網域）底下任何網址都不能當出處或反證（循環引用），回 422 `self_citation`，不算被拒，改附原始出處重送。
 2. **來源必須證明「這個人說過或做過這件事」**，不是證明「這件事存在」。他人或前任的政績不能當某人的政見來源。
@@ -41,7 +41,7 @@
 5. **同名者要能區分**：帶出生年、參選縣市、現職、政黨中至少兩項。
 6. 一次一筆或一批 ≤20 筆（名冊逐位吻合的 `candidacy` 最多 150 筆）。同內容 24 小時內視為重複，沿用原編號。
 7. **先看 `item.current`**（現況：人物、參選紀錄、既有政見…），要更多用 `item.lookup` 的現成網址或 §7。已有的不用再送，錯的用 `correction`。
-8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**：`supported` 時**不要重看同一頁**，去找**不同網域的第二來源**放 `evidence_url`、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；提交者附的同一個網域不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
+8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**（例外：**登記期的參選紀錄通常拿不到 +2**——2026 登記名冊只有 PDF，系統不解析 PDF〔`judge` 回 `422 unsupported_source`〕，中選會候選人 API 只有已投票的選舉，這種 +1 就是正常的一票，`note` 寫出對到名冊哪一列即可）：`supported` 時**不要重看同一頁**，去找**不同網域的第二來源**放 `evidence_url`、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；提交者附的同一個網域不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
    - **來源打不開不等於假**：先加瀏覽器 User-Agent 重試，再試存檔或換路徑；確認不了投 `unsure`、`note` 寫「來源無法開啟」與試過什麼。**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**，而且要附反證 `evidence_url` 與說明；只寫「無法開啟」的反對票會被改記成 `unsure`。
    - 型別特有的驗證判斷（政見重複、同名指認、名冊怎麼讀）在那一件的 `type_spec`。
 9. **範圍外的缺陷另提**：驗證只看派給你的欄位；順手發現別的欄位有問題，照範圍投票，另交一筆 `task_suggestion`（`task_type:"other"`）。寫在投票 `note` 裡的東西沒有下游會處理。
