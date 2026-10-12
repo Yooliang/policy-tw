@@ -227,10 +227,10 @@ $$;
 -- 5. 規則：rule 45、46、47 改名成流量臂；rule 5、24、36 不再排除職位
 -- ------------------------------------------------------------
 UPDATE activity_rules SET activity = 'traffic:progress_stale', election_types = NULL, requires_traffic = false,
-       note = '有人看才追（10-12 從 rule 45「村里長、要流量」改名）：不分時期；哪些職位走這支看 traffic_watch_levels，頁面在 page_traffic_hot 才派'
+       note = '有人看才追（10-12 從 rule 45「村里長、要流量」改名）：不分時期（一般那條是就職日起；之後在 traffic_watch_levels 開其他職位，那些職位也改成不分時期）；哪些職位走這支看 traffic_watch_levels，頁面在 page_traffic_hot 才派'
  WHERE id = 45 AND activity = 'raw:progress_stale';
 UPDATE activity_rules SET activity = 'traffic:deadline_due', election_types = NULL, requires_traffic = false,
-       note = '有人看才追（10-12 從 rule 46「村里長、要流量」改名）：不分時期；哪些職位走這支看 traffic_watch_levels，頁面在 page_traffic_hot 才派'
+       note = '有人看才追（10-12 從 rule 46「村里長、要流量」改名）：不分時期（一般那條是就職日起；之後在 traffic_watch_levels 開其他職位，那些職位也改成不分時期）；哪些職位走這支看 traffic_watch_levels，頁面在 page_traffic_hot 才派'
  WHERE id = 46 AND activity = 'deadline_due';
 UPDATE activity_rules SET activity = 'traffic:term_policies', election_types = NULL, requires_traffic = false,
        note = '有人看才追（10-12 從 rule 47「村里長、要流量」改名）：投票日 +1 起（同一般那條 rule 36）；哪些職位走這支看 traffic_watch_levels，頁面在 page_traffic_hot 才派'
