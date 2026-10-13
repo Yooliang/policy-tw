@@ -40,7 +40,7 @@ export {
   weightReason,
 } from "../consensus.ts";
 
-export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy" | "politician" | "policy" | "policy_elements" | "district_seats" | "removal" | "policy_progress" | "lineage" | "lineage_participants" | "lineage_handover" | "lineage_link";
+export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy" | "politician" | "policy" | "policy_elements" | "district_seats" | "removal" | "policy_progress" | "lineage" | "lineage_participants" | "lineage_handover" | "lineage_link" | "party_info";
 
 /** light＝不動正式資料（無異動、提議任務）；normal＝更正、選舉日程、地方公共団体、地域統計 */
 export type JpRiskLevel = "normal" | "light";

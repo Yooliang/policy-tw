@@ -545,6 +545,7 @@ const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 dupli
 const T_PROG = "20261011200000"; // 派工臂對齊正見 C 期第 4b 步：政見進度 progress_stale／期限到了 deadline_due＋交件型別 policy_progress（policy-ops#95）
 const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策の継承 lineage_candidates／handover_missing／lineage_roles／lineage_links＋交件型別 lineage／lineage_participants／lineage_handover／lineage_link（policy-ops#95）
 const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
+const T_PARTY = "20261011230000"; // 派工臂對齊正見 D 期：政党名簿 party_roster／party_gap／party_info＋交件型別 party_info＋party_aliases（policy-ops#95）
 const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現職首長の公約 mayor_policies／term_policies（規則 enabled、新しい交件型別なし，policy-ops#95）
 const T_DS = "20261011170000"; // 派工臂對齊正見 2b：議員定数 district_seats_missing（規則最初から開く，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
@@ -582,8 +583,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -597,7 +598,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   regional_stat_unit: { mig: [T_APPLY], why: "地域統計 stat_key → 唯一單位（人／km2／千円／%），交件與落庫都對這張表" },
   apply_max_retries: { mig: [T_APPLY], why: "落庫重試次數（3），對齊正見 consensus.ts 的 APPLY_MAX_RETRIES（測試對齊）" },
   apply_retry_delay_minutes: { mig: [T_APPLY], why: "落庫重試間隔（10 分鐘），對齊正見 consensus.ts 的 APPLY_RETRY_DELAY_MINUTES（測試對齊）" },
-  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
+  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN, T_PARTY], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
   source_kind_for_url: { mig: [T_APPLY, T_ARCH], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試；T_ARCH 在最前面加一層還原存檔網址（source_unwrap_archive）、WARP 還原不了算 other，其餘分支不動" },
   source_unwrap_archive: { mig: [T_ARCH], why: "存檔網址 → 原網址（Wayback、archive.today 系、国立国会図書館 WARP）；正見同名函式只認 Wayback（public.source_unwrap_archive），日本版多兩種、WARP 原網址沒有 scheme 補 http://；TS 版 unwrapJpArchiveUrl 有對齊測試" },
   election_default_name: { mig: [T_APPLY], why: "選舉預設名稱（交件沒給 name 時：<団体名>＋長／知事／議会議員＋選挙）" },
@@ -607,7 +608,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_regional_stat: { mig: [T_APPLY], why: "regional_stat 交件落庫（寫 regional_stats）；日本專屬型別" },
   apply_election: { mig: [T_APPLY], why: "election 交件落庫（寫 elections）；日本專屬型別" },
   apply_no_change: { mig: [T_APPLY], why: "no_change 落庫＝記一筆 task_checks（冷卻），不動正式資料（#503）" },
-  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
+  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN, T_PARTY], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
   apply_verified_pending: { mig: [T_APPLY], why: "落庫排程掃地機（policy-jp-apply-verified）：撿行內落庫漏掉的 verified 與到期的 apply_failed，只挑不再被擋的列" },
   apply_waiting: { mig: [T_APPLY], why: "（視圖）通過驗證、等團體落庫的交件清單（少數是正常，久了才是問題）；service_role 用" },
 
@@ -634,7 +635,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
-  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
@@ -714,6 +715,16 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261011180000 重複政見（duplicate_policy、規則は預設關）＋交件型別 removal；正見 duplicate_policy／removal の日本版 ----
   contribution_auto_tasks_duplicate_policy: { mig: [T_DUP], why: "重複政見の清査臂（duplicate_policy）：開いている選挙の公開済みの参選で公開済み公約 2 件以上 → 1 参選 1 件、指紋＝[id,title,description] の md5；正見は一人単位・policy_dupe_reviews、日本は参選単位・task_checks confirmed が永久" },
   apply_removal: { mig: [T_DUP], why: "removal 交件落庫（SQL 版；正見は TS applyRemoval）：政見だけ、軟移除は review_status='rejected'（policies に removed_at がない）、edit_history に旧行・新行" },
+  // ---- 20261011230000 政党名簿（party_roster／party_gap／party_info，policy-ops#95 D 期；正見 20261006100100／20261007010000／20261008120000／20261008121000 の日本版）----
+  party_text_key: { mig: [T_PARTY], why: "政党の書き方 → 照合用の鍵（NFKC・小文字・空白と中黒を除く）。正見の party_alias_key（public、台湾の政党表記）とは別物" },
+  party_missing_subjects: { mig: [T_PARTY], why: "所属政党が分からない参選（party_basis も party_text も空・declared 以上・開いている選挙）。party_roster／party_gap の共有素材；正見は cec_candidates 名冊と突き合わせるが日本には機械照合できる名簿がない" },
+  party_known_list: { mig: [T_PARTY], why: "任務 target に載せる名簿の政党（選挙の日に存続していたもの最大 60）。代理が party_id を選べるように" },
+  party_missing_tasks: { mig: [T_PARTY], why: "party_roster／party_gap の共通本体（臂名で規則を引く）。task_type=party_missing、task_id=auto:party_missing:<参選 id>。正見は candidacy_source_missing の kind=party/party_roster だが、日本の candidacy_source_missing は official 出典を足す任務で衝突するため別型別" },
+  contribution_auto_tasks_party_roster: { mig: [T_PARTY], why: "臂 party_roster（投票日 +0 まで）：party_missing_tasks の薄い包み。FOLLOWED 正見 party_roster の窓；DEVIATED 型別は party_missing" },
+  contribution_auto_tasks_party_gap: { mig: [T_PARTY], why: "臂 party_gap（投票日 +1 から）：party_missing_tasks の薄い包み。FOLLOWED 正見 party_gap の窓；DEVIATED 型別は party_missing" },
+  contribution_auto_tasks_party_info: { mig: [T_PARTY], why: "臂 party_info（task_type=party_info_missing）：参選に書かれた政党の書き方が party_aliases に当たらない → 書き方の鍵ごと一件。正見 party_info_missing の前半だけ（改名・解散日の派工は未移植）" },
+  apply_party_info: { mig: [T_PARTY], why: "party_info 交件落庫（正見 applyPartyInfo の日本版＋新規作成）：name＋kana で作る／既存は空欄だけ補完／alias を足す（奪わない）／書き方が当たった参選へ party_id を反映" },
+  apply_candidacy_with_party: { mig: [T_PARTY], why: "candidacy 落庫の入口：party／party_id があれば所属の衝突判定→apply_candidacy（不変）→party_basis 空の参選にだけ所属を書く薄い包み" },
   // ---- 20261011210000 政策の継承（lineage／handover，policy-ops#95 C 期第 6 步；正見 20261006034900 の日本版）----
   lineage_level_of: { mig: [T_LIN], why: "団体コード → 脈絡の層級（NULL＝national、kind=prefecture＝regional、他＝local）。正見は region／sub_region の三つ組で county／township を決める、日本は lg_code 一本" },
   lineage_link_level_ok: { mig: [T_LIN], why: "上下級の関連が成り立つか（国→都道府県・市区町村、都道府県→その都道府県内の市区町村）。正見 linkLevelProblem（TS）の日本版、落庫と lineage_links 臂が共有" },
