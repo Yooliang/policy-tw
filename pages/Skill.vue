@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { marked } from 'marked'
-import { Bot, Copy, Check, FileText, ShieldCheck, Link as LinkIcon } from 'lucide-vue-next'
+import { Bot, Copy, Check, ChevronRight, FileText, ShieldCheck, Link as LinkIcon } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
 import MechanismNav from '../components/MechanismNav.vue'
 import { usePageHead, SITE_URL } from '../composables/usePageHead'
+import { skillTypeSections } from '../lib/skill-types-sections'
 // 單一真相是 public/skill.md（AI 直接讀的那份）；這頁只是把同一份渲染給人看。
 // 建置時 Vite 以 ?raw 把檔案內容打進 bundle，SSG 與客戶端渲染同一份字串，不會 hydration mismatch。
 import skillMarkdown from '../public/skill.md?raw'
@@ -28,7 +29,11 @@ async function copy(text: string, key: string) {
 
 marked.setOptions({ gfm: true, breaks: false })
 const html = computed(() => marked.parse(skillMarkdown, { async: false }) as string)
-const typesHtml = computed(() => marked.parse(skillTypesMarkdown.slice(Math.max(0, skillTypesMarkdown.indexOf('<!-- spec'))), { async: false }) as string)
+// 每段一個可收折的標題，預設收起（<details> 不靠 JS，預渲染的 HTML 照樣能展開）
+const typeSections = computed(() => skillTypeSections(skillTypesMarkdown).map((s) => ({
+  title: marked.parseInline(s.title, { async: false }) as string,
+  html: marked.parse(s.body, { async: false }) as string,
+})))
 
 usePageHead({
   title: '驅動 AI，實現全自動資料貢獻',
@@ -85,7 +90,15 @@ usePageHead({
       <section class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-10 space-y-4">
         <h2 class="text-xl font-black text-navy-900">各型別的做法與交件欄位</h2>
         <p class="text-sm text-slate-600">AI 領到任務時，這裡和那一件有關的段落會跟著任務一起送出（<code>item.type_spec</code>），原檔在 <a :href="SKILL_TYPES_MD_URL" class="text-blue-600 underline underline-offset-2">skill-types.md</a>。</p>
-        <article class="skill-doc" v-html="typesHtml" />
+        <div class="divide-y divide-slate-200 border-y border-slate-200">
+          <details v-for="(s, i) in typeSections" :key="i" class="type-section group">
+            <summary class="flex items-start gap-2 py-3 cursor-pointer select-none list-none text-sm font-bold text-navy-900 hover:text-blue-700">
+              <ChevronRight :size="16" class="flex-shrink-0 mt-0.5 transition-transform group-open:rotate-90" />
+              <span class="skill-title" v-html="s.title" />
+            </summary>
+            <article class="skill-doc pb-4 pl-6" v-html="s.html" />
+          </details>
+        </div>
       </section>
     </div>
   </div>
@@ -109,6 +122,8 @@ usePageHead({
 .skill-doc :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; background: #f1f5f9; padding: 0.1rem 0.35rem; border-radius: 0.3rem; color: #0f172a; overflow-wrap: anywhere; }
 .skill-doc :deep(pre) { background: #0f172a; color: #e2e8f0; border-radius: 0.75rem; padding: 1rem 1.25rem; overflow-x: auto; margin: 0.75rem 0 1rem; font-size: 0.8rem; line-height: 1.6; }
 .skill-doc :deep(pre code) { background: transparent; color: inherit; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.skill-title :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; background: #f1f5f9; padding: 0.05rem 0.3rem; border-radius: 0.3rem; overflow-wrap: anywhere; }
+.type-section summary::-webkit-details-marker { display: none; }
 .skill-doc :deep(blockquote) { border-left: 4px solid #3b82f6; background: #eff6ff; margin: 0.75rem 0; padding: 0.5rem 1rem; border-radius: 0 0.5rem 0.5rem 0; }
 .skill-doc :deep(table) { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1rem; font-size: 0.85rem; display: block; overflow-x: auto; }
 .skill-doc :deep(th), .skill-doc :deep(td) { border: 1px solid #e2e8f0; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
