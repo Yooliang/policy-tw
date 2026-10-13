@@ -312,8 +312,8 @@ Deno.test("協議 1.55.0：correction 可改退選前有沒有登記、不參選
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 55), `協議版號 ${PROTOCOL_VERSION} 比 1.55.0 舊`);
   const md = lf(await readSkillWithTypes());
-  for (const s of ["politician_elections→candidate_status／position／election_type／withdrawn_after_filing", "**`withdrawn_after_filing`＝退選前有沒有登記過**（1.55.0）",
-                   "auto:not_running_recheck:filing:", "不能跟 `candidate_status` 同一筆改", "`not_running_recheck`（1.55.0）給該筆參選紀錄"]) {
+  for (const s of ["politician_elections→candidate_status／position／election_type／withdrawn_after_filing", "**`withdrawn_after_filing`＝退選前有沒有登記過**",
+                   "auto:not_running_recheck:filing:", "不能跟 `candidate_status` 同一筆改", "`not_running_recheck` 給該筆參選紀錄"]) {
     assertStringIncludes(md, s);
   }
 });
