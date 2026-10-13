@@ -459,6 +459,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/jp-system-one/index.ts"
 
+# 日本站の新聞線（policy-jp-news-fetch-hourly が叩く）。閘道は JWT を見ない；関数が x-cron-secret（Vault の jp_news_cron_secret）か service role を照合する（jp-system-one と同じ）
+[functions.jp-news-fetch]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-news-fetch/index.ts"
+
 [functions.apply-verified]
 enabled = true
 verify_jwt = false

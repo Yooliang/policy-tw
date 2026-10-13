@@ -545,6 +545,7 @@ const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 dupli
 const T_PROG = "20261011200000"; // 派工臂對齊正見 C 期第 4b 步：政見進度 progress_stale／期限到了 deadline_due＋交件型別 policy_progress（policy-ops#95）
 const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策の継承 lineage_candidates／handover_missing／lineage_roles／lineage_links＋交件型別 lineage／lineage_participants／lineage_handover／lineage_link（policy-ops#95）
 const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
+const T_NEWS = "20261011250000"; // 新聞線 news_discovery（突発の選挙）＋測試名人物の入力拒否・総表での隔離（policy-ops#95）
 const T_CONS = "20261011240000"; // 派工臂對齊正見 D 期：資料一致性 placeholder_politicians／policy_validity／mismatch＋removal 加 target_table=politicians（policy-ops#95）
 const T_PARTY = "20261011230000"; // 派工臂對齊正見 D 期：政党名簿 party_roster／party_gap／party_info＋交件型別 party_info＋party_aliases（policy-ops#95）
 const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現職首長の公約 mayor_policies／term_policies（規則 enabled、新しい交件型別なし，policy-ops#95）
@@ -584,8 +585,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS, T_NEWS], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS, T_NEWS], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -727,12 +728,20 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_party_info: { mig: [T_PARTY], why: "party_info 交件落庫（正見 applyPartyInfo の日本版＋新規作成）：name＋kana で作る／既存は空欄だけ補完／alias を足す（奪わない）／書き方が当たった参選へ party_id を反映" },
   apply_candidacy_with_party: { mig: [T_PARTY], why: "candidacy 落庫の入口：party／party_id があれば所属の衝突判定→apply_candidacy（不変）→party_basis 空の参選にだけ所属を書く薄い包み" },
   // ---- 20261011240000 資料一致性（placeholder_politicians／policy_validity／mismatch，policy-ops#95 D 期；正見 20261007020000／20261010170000／20261007110000 の日本版）----
-  politician_name_is_placeholder: { mig: [T_CONS], why: "名前（と読み）がテスト用のデータに見えるか。正見 public.politician_name_is_placeholder（測試・範例・示範・假資料）の日本版（テスト・ダミー・サンプル・架空・てすと…、英語は単語として）；臂が検出するだけで、入力を拒む触発器は日本站にない" },
+  politician_name_is_placeholder: { mig: [T_CONS], why: "名前（と読み）がテスト用のデータに見えるか。正見 public.politician_name_is_placeholder（測試・範例・示範・假資料）の日本版（テスト・ダミー・サンプル・架空・てすと…、英語は単語として）；臂が検出する。入力を拒む触発器は 20261011250000 で追加" },
   politician_attached: { mig: [T_CONS], why: "人物に付いている内容の件数（政見・任期・学歴職歴・政策の継承の役割）。placeholder 任務の target.attached と apply_politician_removal の拒否が共有；正見 politicianRemovalBlockers（TS）の日本版" },
   apply_politician_removal: { mig: [T_CONS], why: "removal（target_table=politicians）の落庫：人物とその人の参選を軟移除（review_status='rejected'）、付いている内容があれば invalid；正見 applyPoliticianRemoval は DELETE（日本は軟移除）" },
   contribution_auto_tasks_placeholder_politicians: { mig: [T_CONS], why: "臂 placeholder_politicians（task_type=placeholder_politician）：テスト名に見える公開済みの人物 → 実在するか調べ removal。正見の『空殼』（orphan）は改掛 reassign_candidacy が前提で搬さない；隔離（他の任務を止める）も搬さない" },
   contribution_auto_tasks_policy_validity: { mig: [T_CONS], why: "臂 policy_validity（正見 raw:policy_validity）：primary の出典がない公開済みの公約 → removal／出典を付けた policy／no_change。正見の correction(source_url) は日本の correction が落庫しないので使わない" },
   contribution_auto_tasks_mismatch: { mig: [T_CONS], why: "臂 mismatch（task_type=policy_election_mismatch）：公約の proposed_date が参選の選挙の投票日より後。正見の Jev 判定と当選者の例外は日本站にない（公約と任期中の施政は origin で分ける）" },
+
+  // ---- 20261011250000 新聞線（news_discovery，policy-ops#95；正見 news-fetch／system-one news_screen の日本版）＋測試名人物の入力拒否 ----
+  news_lead_election_type: { mig: [T_NEWS], why: "団体の種類×職（head／assembly）→ 選挙の種類（governor／mayor／ward_mayor／town_mayor／pref_assembly／muni_assembly）。日本の団体種別に固有、行政区は NULL（正見にない）" },
+  news_lead_record: { mig: [T_NEWS], why: "新聞の線索を団体×職ごとに作る／併合する（ttl、1 日の新規上限）。正見は新聞から人物×政見の任務を直接開く（news_items.task_id）が、日本版は団体×職の線索表を挟む；jp-news-fetch が service_role で呼ぶ" },
+  news_purge: { mig: [T_NEWS], why: "keep_days より古い新聞記事を消す（pg_cron policy-jp-news-purge-daily）。正見は news_items を消さない" },
+  jp_news_cron_secret_ok: { mig: [T_NEWS], why: "jp-news-fetch の呼び出し憑證（x-cron-secret）を Vault の jp_news_cron_secret と照合する。jp_system_one_cron_secret_ok と同じ形（正見 bulletin_watch_cron_secret_ok 系）。正見 news-fetch は憑證なしで冷却だけに頼るが、日本版は主線審査 10-11 の流儀に揃えた" },
+  contribution_auto_tasks_news_discovery: { mig: [T_NEWS], why: "臂 news_discovery（task_type=election_discovery、target.discovery=news）：新聞の線索 → 突発の選挙の日程を確かめる任務。正見の news_sweep 臂（人物×政見）とは別物で、任期満了ではなく辞職・死去・解散・リコールが起点" },
+  politicians_reject_placeholder_name: { mig: [T_NEWS], why: "人物の名前（と読み）がテスト用に見えたら INSERT／UPDATE OF name,kana を拒む触発器関数。正見 politicians_reject_placeholder_name（20261006140000）の日本版（判定は politician_name_is_placeholder(名前, 読み)）" },
   // ---- 20261011210000 政策の継承（lineage／handover，policy-ops#95 C 期第 6 步；正見 20261006034900 の日本版）----
   lineage_level_of: { mig: [T_LIN], why: "団体コード → 脈絡の層級（NULL＝national、kind=prefecture＝regional、他＝local）。正見は region／sub_region の三つ組で county／township を決める、日本は lg_code 一本" },
   lineage_link_level_ok: { mig: [T_LIN], why: "上下級の関連が成り立つか（国→都道府県・市区町村、都道府県→その都道府県内の市区町村）。正見 linkLevelProblem（TS）の日本版、落庫と lineage_links 臂が共有" },

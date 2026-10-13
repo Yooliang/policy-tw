@@ -17,7 +17,7 @@ import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { fnText } from "./arms-pglite.ts";
 import {
   addDays, applyOne, asRole, check, clock, count, dispatches, dispatchIds, events, expireCooling, freshDb, ICHI, migratedDb, mutate, one,
-  openElectionWithRegion, readMig, rows, seed, submit,
+  openElectionWithRegion, readMig, renameAsPlaceholder, rows, seed, submit,
 } from "./policy-jp-chain-db.ts";
 import { JP_TASK_ALSO, JP_TASK_ARMS, validateContributionRequest } from "./jp/contribution-schema.ts";
 import { JP_APPLY_TYPES } from "./jp/apply-contribution.ts";
@@ -40,12 +40,17 @@ const shared = await freshDb();
 await shared.waitReady;
 type Db = Awaited<ReturnType<typeof freshDb>>;
 
+let seqCand = 0;
+/** 候補者を 1 人建てる。テスト用の名前（20261011250000 から入力で拒まれる）は、普通の名前で建ててから renameAsPlaceholder で書き換える */
 async function addCand(db: Db, name: string, kana: string): Promise<{ pid: string; peid: string }> {
-  const payload = { election_id: E1, name, kana, candidacy_status: "declared", status_date: "2027-03-01", district_kind: "at_large" };
+  const isPh = (await one<{ x: boolean }>(db, `SELECT policy_jp.politician_name_is_placeholder($1, $2) AS x`, [name, kana])).x;
+  const n = ++seqCand;
+  const payload = { election_id: E1, name: isPh ? `仮名${n}` : name, kana: isPh ? `かりめい${"あいうえおかきくけこ"[n % 10]}${"さしすせそたちつてと"[n % 10]}` : kana, candidacy_status: "declared", status_date: "2027-03-01", district_kind: "at_large" };
   const id = await submit(db, "candidacy", payload, { status: "verified", urls: [KOUHOU] });
   const out = await applyOne(db, id);
   assertEquals(out.status, "applied", JSON.stringify(out));
   const pid = (await one<{ applied_politician_id: string }>(db, `SELECT applied_politician_id FROM policy_jp.contributions WHERE id = $1`, [id])).applied_politician_id;
+  if (isPh) await renameAsPlaceholder(db, pid, name, kana);
   return { pid, peid: out.record_id! };
 }
 const POL_DESC = "認可保育所の定員を 3 年で 300 人増やし、待機児童を 0 にするとしている。";
