@@ -186,6 +186,8 @@ Deno.test("情境 4　逐人開：表明した人がいる選挙では、人物�
 // =============================================================================================
 Deno.test("臂：対象は declared／filed／elected／not_elected の上線済み参選だけ（considering・退選は派さない）；公約が 1 件でもあれば消える；審議中の題名を target.queued_policies で渡す", async () => {
   const db = await freshDb();
+  // この試験は policy_missing 臂だけを見る：20261011190000 の mayor_policies 臂（公約 1～4 件で同じ task_id を引き継ぐ）は止めておく（引き継ぎは policy-jp-term-policies.test.ts）
+  await db.exec(`UPDATE policy_jp.activity_rules SET enabled = false WHERE activity = 'mayor_policies' AND priority IS NULL`);
   await openElectionWithRegion(db, ICHI, POLLING);
   await clock(db, addDays(NOTICE, 2));
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
@@ -496,6 +498,8 @@ void rows;
 // ---------------------------------------------------------------------------------------------
 Deno.test("未公開（published でない）の同題名の政見は『既存』にも unchanged／conflict の相手にもならない：same_claim_matches・apply_policy・臂・chain_policy_exists が同じ判準（published だけ）", async () => {
   const db = await freshDb();
+  // この試験は policy_missing 臂だけを見る：20261011190000 の mayor_policies 臂（公約 1～4 件で同じ task_id を引き継ぐ）は止めておく（引き継ぎは policy-jp-term-policies.test.ts）
+  await db.exec(`UPDATE policy_jp.activity_rules SET enabled = false WHERE activity = 'mayor_policies' AND priority IS NULL`);
   await openElectionWithRegion(db, ICHI, POLLING);
   await clock(db, addDays(NOTICE, 2));
   const a = await addCand(db, "佐藤花子", "さとうはなこ", "declared");
