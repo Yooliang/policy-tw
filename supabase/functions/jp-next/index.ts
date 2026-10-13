@@ -7,7 +7,7 @@ import { requiredAgree } from "../_shared/jp/consensus.ts";
 import { jpDispatchTokenSecretFrom, createJpSecretWarner } from "../_shared/jp/dispatch-secret.ts";
 import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
-import { isFrontQueueAt, MACHINE_LOOKBACK_HOURS, MACHINE_WINDOW, machineOwesVerify, machineOwesVerifyDuringBoost, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
+import { filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { agentToolNotice } from "../_shared/agent-tool-hint.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
@@ -279,22 +279,8 @@ async function handle(req: Request): Promise<Response> {
       autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
     ]);
     if (head === "verify") return await serveVerify();
-    // 每台機器自己的 2:1：佇列說該派任務，但這台機器最近三次拿到的驗證不到兩次、又有它能驗的 → 先派驗證（插隊期間 1:2）
-    const headAt = head === "manual" ? (manualHead ? manualHead.queue_at : null) : autoHead?.queue_at;
-    const boosting = isFrontQueueAt(headAt);
-    if (candidates.length > 0) {
-      const since = new Date(Date.now() - MACHINE_LOOKBACK_HOURS * 3600_000).toISOString();
-      // query-bounds: ok — 只取這個來源網段最近 3 筆
-      const [{ data: rv }, { data: rt }] = await Promise.all([
-        supabase.from("verify_dispatches").select("dispatched_at").eq("ip_hash", ipHash).gte("dispatched_at", since).order("dispatched_at", { ascending: false }).limit(MACHINE_WINDOW),
-        supabase.from("contribution_task_leases").select("leased_until").eq("ip_hash", ipHash).order("leased_until", { ascending: false }).limit(MACHINE_WINDOW),
-      ]);
-      const recent = [
-        ...((rv ?? []) as Array<{ dispatched_at: string }>).map((r) => ({ k: "verify" as const, t: Date.parse(r.dispatched_at) })),
-        ...((rt ?? []) as Array<{ leased_until: string }>).map((r) => ({ k: "task" as const, t: Date.parse(r.leased_until) - LEASE_MINUTES * 60_000 })),
-      ].sort((a, b) => b.t - a.t).map((r) => r.k);
-      if (boosting ? machineOwesVerifyDuringBoost(recent) : machineOwesVerify(recent)) return await serveVerify();
-    }
+    // 每台機器自己的 2:1（插隊期間 1:2）2026-10-13 起拿掉（同正見 /next，20261011330000）：驗證與任務只照排序鍵（queue_at）先後，
+    // 驗證列本身多 14 天（policy_jp.queue_settings.verify_priority_seconds，20261011360000）
     const manualFirst = head === "manual";
 
     // 隊頭是手動任務：用 id 單筆查描述；併發下它可能剛被關掉，查不到就跳過往下挑（最多 5 筆）

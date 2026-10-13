@@ -23,7 +23,7 @@
  *      3. 排程：每天一次、先 unschedule 再 schedule、呼叫 dispatch_records_purge()
  *      4. 沒有登記的新讀者、沒有時限的讀者、抽不出時限的讀者，一律紅（要嘛加時限、要嘛評估後調保留天數）
  *   B. PGlite（行為層，public）：真的 contribution_verify_pool、dispatch_recent、這支清理函式
- *      清理前後，驗證池、/queue、每台機器 2:1 的查詢、派工綁定查詢逐筆相同；只有超過保留期的列被刪；分批上限；停用；設定改值；CHECK 下限；審計；權限；冪等
+ *      清理前後，驗證池、/queue、派工綁定查詢逐筆相同；只有超過保留期的列被刪；分批上限；停用；設定改值；CHECK 下限；審計；權限；冪等
  *      （policy_jp 的行為層在 policy-jp-dispatch.test.ts：同樣的情境加上「public 同名表原封不動」）
  *   C. 每條守門都做還原驗證：把原始碼或 migration 精確改壞一處（改不到就失敗），對應的檢查必須紅
  */
@@ -444,12 +444,11 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   const find = (rs: Reader[], schema: Schema, t: Table, frag: string) => of(rs, schema, t).find((r) => r.where.includes(frag));
 
   // ---- public（正見）----
-  // /next 每台機器 2:1 已在 2026-10-13 拿掉（派工排序改秒數），正見的 /next 不再讀 verify_dispatches；日本站 jp-next 照舊（見下）
+  // /next 與 jp-next 的每台機器 2:1 已在 2026-10-13 拿掉（派工排序改秒數；日本站 20261011360000），兩邊的派工入口都不再讀 verify_dispatches
   assertEquals(find(ts.readers, "public", "verify_dispatches", "next/index.ts"), undefined, "/next 不再讀 verify_dispatches");
   assertEquals(find(ts.readers, "public", "verify_dispatches", "verify-handler.ts")?.hours, consts.VERIFY_BINDING_DAYS * 24, "派工綁定");
   assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours, 15 / 60, "驗證池：剛派的 15 分鐘");
   assertEquals(find(sql.readers, "public", "verify_dispatches", "dispatch_recent")?.hours, 240 / 60, "/queue：上限 240 分鐘");
-  assertEquals(consts.MACHINE_LOOKBACK_HOURS, 3);
   assertEquals(consts.VERIFY_BINDING_DAYS, 7);
   // 寫入端不算讀者；skips 沒有任何讀者（正式庫 2026-10-08 查：沒有函式、視圖引用它）
   assertEquals(of(ts.readers, "public", "contribution_task_skips").length, 0, "skips 在程式裡只有 upsert");
@@ -460,10 +459,10 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   assert(!ts.readers.some((r) => r.schema === "public" && /jp-next|_shared\/jp\//.test(r.where)), "日本站的檔案不能算進 public");
 
   // ---- policy_jp（日本站）：client 固定 db.schema=policy_jp，讀的是 policy_jp 的同名表 ----
-  assertEquals(find(ts.readers, "policy_jp", "verify_dispatches", "jp-next/index.ts")?.hours, 3, "jp-next 每台機器 2:1（同正見，MACHINE_LOOKBACK_HOURS）");
+  assertEquals(find(ts.readers, "policy_jp", "verify_dispatches", "jp-next/index.ts"), undefined, "jp-next 不再讀 verify_dispatches");
   assertEquals(find(ts.readers, "policy_jp", "verify_dispatches", "_shared/jp/verify-handler.ts")?.hours, consts.VERIFY_BINDING_DAYS * 24, "日本版派工綁定（共用 VERIFY_BINDING_DAYS）");
   assertEquals(find(sql.readers, "policy_jp", "verify_dispatches", "contribution_verify_pool")?.hours, 15 / 60, "policy_jp 驗證池：剛派的 15 分鐘");
-  assertEquals(of(ts.readers, "policy_jp", "verify_dispatches").length, 2, "程式端 verify_dispatches 的讀者只有 jp-next 與日本版派工綁定");
+  assertEquals(of(ts.readers, "policy_jp", "verify_dispatches").length, 1, "程式端 verify_dispatches 的讀者只有日本版派工綁定");
   assertEquals(of(sql.readers, "policy_jp", "verify_dispatches").length, 1, "SQL 端只有 policy_jp.contribution_verify_pool");
   assertEquals(of(ts.readers, "policy_jp", "contribution_task_skips").length, 0, "jp-next 對 skips 只有 upsert");
   assertEquals(of(sql.readers, "policy_jp", "contribution_task_skips").length, 0, "policy_jp 的函式／視圖／排程都不讀 skips");
@@ -564,16 +563,15 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 const q = async (db: PGlite, sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows as Array<Record<string, unknown>>;
 
 const consts = constsOf(REAL);
-/** 這些查詢在程式裡的樣子（next/index.ts 的 since、verify-handler 的 bindingSince、驗證池、/queue）；清理前後各跑一次 */
+/** 這些查詢在程式裡的樣子（verify-handler 的 bindingSince、驗證池、/queue）；清理前後各跑一次 */
 async function snapshot(db: PGlite, ids: string[]): Promise<Record<string, unknown>> {
   const pool = await q(db, `SELECT id FROM contribution_verify_pool('A', NULL, 200, NULL, NULL) ORDER BY queue_at, id`);
   const recent = await q(db, `SELECT kind, task_id, agent_name, dispatched_at FROM dispatch_recent(240) ORDER BY 4 DESC, 2`);
-  const machine = await q(db, `SELECT dispatched_at FROM verify_dispatches WHERE ip_hash = 'A' AND dispatched_at >= now() - make_interval(hours => ${consts.MACHINE_LOOKBACK_HOURS}) ORDER BY dispatched_at DESC LIMIT 3`);
   const binding: boolean[] = [];
   for (const id of ids) {
     binding.push((await q(db, `SELECT 1 FROM verify_dispatches WHERE contribution_id = $1 AND ip_hash = 'A' AND dispatched_at >= now() - make_interval(days => ${consts.VERIFY_BINDING_DAYS})`, [id])).length > 0);
   }
-  return { pool: pool.map((r) => r.id), recent, machine, binding };
+  return { pool: pool.map((r) => r.id), recent, binding };
 }
 
 /** 一整套情境：各種年紀的派工紀錄與跳過紀錄；回傳這支清理有哪裡不對（空＝沒問題） */
@@ -611,9 +609,8 @@ async function scenario(purgeSql: string): Promise<string[]> {
     if (Number(res.verify_dispatches) !== 4 || Number(res.contribution_task_skips) !== 2) problems.push(`回傳的刪除筆數不對：${JSON.stringify(res)}`);
     const left = (await q(db, `SELECT count(*) c FROM verify_dispatches WHERE dispatched_at < now() - interval '14 days'`))[0].c;
     if (Number(left) !== 0) problems.push("還有超過 14 天的 verify_dispatches");
-    // 該有的情境條件：池子真的排除了剛派的、機器查詢真的有東西，不然「前後相同」是空的
+    // 該有的情境條件：池子真的排除了剛派的，不然「前後相同」是空的
     if (!(before.pool as string[]).includes(uuid(3)) || (before.pool as string[]).includes(uuid(1))) problems.push("情境沒造好：驗證池應排除 5 分鐘前派的、保留 20 分鐘前派的");
-    if ((before.machine as unknown[]).length !== 3) problems.push("情境沒造好：機器查詢應有 3 筆");
   } finally {
     await db.close();
   }
@@ -694,14 +691,17 @@ Deno.test("B5 排程在、冪等（migration 重跑還是一條）；清理函�
 // ============================================================
 // C. 還原驗證：把原始碼或 migration 精確改壞一處，對應的檢查必須紅
 // ============================================================
-const MACHINE_FILE = "supabase/functions/jp-next/index.ts"; // 正見 /next 的每台機器 2:1 已拿掉（2026-10-13），回看期的讀者剩日本站
 const BINDING_FILE = "supabase/functions/_shared/verify-handler.ts";
 const DISPATCH_FILE = "supabase/functions/_shared/dispatch.ts";
 const hasProblem = (ps: string[], frag: string) => ps.some((p) => p.includes(frag));
 
-Deno.test("C1 程式端回看期改大（3 小時→400 小時）：超過保留天數 ＋ 邊際，紅", () => {
-  const bad = mutateSrc(REAL, DISPATCH_FILE, "export const MACHINE_LOOKBACK_HOURS = 3;", "export const MACHINE_LOOKBACK_HOURS = 400;");
-  assert(hasProblem(allProblems(bad), "jp-next/index.ts"), allProblems(bad).join("\n"));
+Deno.test("C3 派工綁定的 since 改成寫死 400 天、或換成認不得的常數：紅（正見與日本站各一處）", () => {
+  for (const f of [BINDING_FILE, "supabase/functions/_shared/jp/verify-handler.ts"]) {
+    const hard = mutateSrc(REAL, f, "Date.now() - VERIFY_BINDING_DAYS * 86_400_000", "Date.now() - 400 * 86_400_000");
+    assert(hasProblem(allProblems(hard), f.replace("supabase/functions/", "")), allProblems(hard).join("\n"));
+    const unknown = mutateSrc(REAL, f, "Date.now() - VERIFY_BINDING_DAYS * 86_400_000", "Date.now() - SOME_NEW_LOOKBACK * 86_400_000");
+    assert(hasProblem(allProblems(unknown), "不認得的常數"), allProblems(unknown).join("\n"));
+  }
 });
 
 Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成無限）：紅", () => {
@@ -711,12 +711,6 @@ Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成�
   assert(hasProblem(allProblems(unbounded), "無限"), allProblems(unbounded).join("\n"));
 });
 
-Deno.test("C3 /next 的 since 改成寫死 30 天、或換成認不得的常數：紅", () => {
-  const hard = mutateSrc(REAL, MACHINE_FILE, "MACHINE_LOOKBACK_HOURS * 3600_000", "30 * 24 * 3600_000");
-  assert(hasProblem(allProblems(hard), "jp-next/index.ts"), allProblems(hard).join("\n"));
-  const unknown = mutateSrc(REAL, MACHINE_FILE, "MACHINE_LOOKBACK_HOURS * 3600_000", "SOME_NEW_LOOKBACK * 3600_000");
-  assert(hasProblem(allProblems(unknown), "不認得的常數"), allProblems(unknown).join("\n"));
-});
 
 Deno.test("C4 SQL 端回看期改大：驗證池 15 分鐘→30 天、dispatch_recent 上限 240→100000 分鐘，紅", () => {
   const poolMig = finalDefs(REAL.migs).get(defKey("function", "public", "contribution_verify_pool"))!.file; // 驗證池最後一版在哪支就改哪支
@@ -788,27 +782,18 @@ Deno.test("C8 清理函式改壞：不看時間（全刪）、跳過紀錄全刪
 // C9～C12：policy_jp 這一邊的還原驗證（policy-jp #498 審查補上）。每一條都檢查「只有該紅的那邊紅」：改壞日本站，public 不受牽連
 // ------------------------------------------------------------
 const JP_BINDING_FILE = "supabase/functions/_shared/jp/verify-handler.ts";
-const JP_NEXT_FILE = "supabase/functions/jp-next/index.ts";
 const jpOnly = (ps: string[]) => ps.filter((p) => p.startsWith("[policy_jp]"));
 const publicOnly = (ps: string[]) => ps.filter((p) => !p.startsWith("[policy_jp]"));
 const JP_VD_CK = "dispatch_records_settings_verify_dispatches_days_check";
 const JP_SCHEDULE = `EXECUTE $q$SELECT cron.schedule('policy-jp-dispatch-records-purge', '55 19 * * *', 'SELECT policy_jp.dispatch_records_purge();')$q$;`;
 const JP_UNSCHEDULE = `EXECUTE $q$SELECT cron.unschedule('policy-jp-dispatch-records-purge') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'policy-jp-dispatch-records-purge')$q$;`;
 
-Deno.test("C9 policy_jp 程式端：日本版派工綁定拿掉 .gte、jp-next 的 3 小時改成 400 小時、日本站新增沒有時限的讀者——紅；public 不受牽連", () => {
+Deno.test("C9 policy_jp 程式端：日本版派工綁定拿掉 .gte、日本站新增沒有時限的讀者——紅；public 不受牽連", () => {
   // 拿掉 .gte（變成無限）
   const unbounded = mutateSrc(REAL, JP_BINDING_FILE, `.eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle()`, `.eq("ip_hash", ipHash).maybeSingle()`);
   const p1 = allProblems(unbounded);
   assert(jpOnly(p1).some((p) => p.includes("_shared/jp/verify-handler.ts") && p.includes("無限")), p1.join("\n"));
   assertEquals(publicOnly(p1), [], "只有日本站紅");
-  // jp-next 每台機器 2:1 的回看期改大
-  const bigger = mutateSrc(REAL, JP_NEXT_FILE, "const since = new Date(Date.now() - MACHINE_LOOKBACK_HOURS * 3600_000).toISOString();", "const since = new Date(Date.now() - 400 * 3600_000).toISOString();");
-  const p2 = allProblems(bigger);
-  assert(jpOnly(p2).some((p) => p.includes("jp-next/index.ts")), p2.join("\n"));
-  assertEquals(publicOnly(p2), []);
-  // 認不得的常數、算不出的運算式一樣是問題
-  const unknown = mutateSrc(REAL, JP_NEXT_FILE, "Date.now() - MACHINE_LOOKBACK_HOURS * 3600_000", "Date.now() - SOME_NEW_LOOKBACK * 3600_000");
-  assert(jpOnly(allProblems(unknown)).some((p) => p.includes("不認得的常數")), allProblems(unknown).join("\n"));
   // 共用常數 VERIFY_BINDING_DAYS 改 30 天：兩個 schema 都要跟上（日本版的派工綁定讀同一個常數）
   const shared = allProblems(mutateSrc(REAL, DISPATCH_FILE, "export const VERIFY_BINDING_DAYS = 7;", "export const VERIFY_BINDING_DAYS = 30;"));
   assert(hasProblem(jpOnly(shared), "_shared/jp/verify-handler.ts") && hasProblem(publicOnly(shared), "verify-handler.ts"), shared.join("\n"));

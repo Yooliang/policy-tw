@@ -10,14 +10,20 @@
  *   d. 還原驗證：把 rebalance_queue 的層內排序鍵換回 queue_at，b 的順序就變回先進先出（測試咬得到）
  *   e. 不動的：手動任務（無 auto: 前綴）步驟 0 排同層最前、層間 6:3:1 交錯照舊（驗證列 2:1 由 policy-jp-dispatch.test.ts 守）；規則只多四條 priority: 規則，manual_visitor 規則還在
  *   f. 步驟順位函式可擴充：沒登記的 auto 型別排在已登記的後面；日期函式／層函式的邊界
+ *
+ * 20261011360000（派工排序改秒數，同正見 20261011320000／350000）起：層換成優先秒數（前段 +3 天、中段 0、後段 −30 天），queue_at＝排序鍵，
+ * rebalance_queue（層內「步驟 → 日期」與層間 6:3:1）刪掉。所以 a、b 的「層」照舊（讀派工列的秒數換回層號），層內改成先進先出；d 的兩條重排還原驗證拿掉，
+ * 「日期定層」那一段的還原驗證改到 360000 的 seed；e 的 6:3:1 改成「排序鍵＝進隊時間 − 那一層的秒數」。
  */
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { migrationNames } from "./arms-pglite.ts";
+import { PRIORITY_TIER_SQL } from "./policy-jp-chain-db.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const MIG_FILE = "20261009300000_policy_jp_chain_priority.sql";
+const SEC_FILE = "20261011360000_policy_jp_queue_priority_seconds.sql"; // 派工排序改秒數：seed 改寫、rebalance_queue 刪掉（這支測試跟著改了）
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
 const JP_SQL = Object.fromEntries(await Promise.all(JP_FILES.map(async (n) => [n, await read(n)] as const)));
 assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
@@ -25,17 +31,17 @@ assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
 // 例外：chain_step_rank 是鏈上加步驟的擴充點（"多一行 WHEN"），第 2～4 步的 migration 各加一行；它們的順位由 policy-jp-chain-*.test.ts 守，
 // 這裡只守既有的相對順序（選舉發現 < 團體 < 統計）與『沒登記的 auto 型別排最後』（下面 f）
 for (const later of JP_FILES.filter((n) => n > MIG_FILE)) {
-  for (const fn of ["rebalance_queue", "seed_auto_task_queue", "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
+  for (const fn of [...(later === SEC_FILE ? [] : ["rebalance_queue", "seed_auto_task_queue"]), "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
     assert(!new RegExp("FUNCTION\\s+policy_jp\\." + fn + "\\s*\\(").test(JP_SQL[later]), `${later} 改寫了 policy_jp.${fn}，請更新 policy-jp-chain-priority.test.ts`);
   }
 }
 
 const ROLES = `CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;`;
-/** 全部 policy_jp migration 套一遍；patch：換掉這支 migration 的內容（還原驗證用） */
-async function freshDb(patch?: (sql: string) => string): Promise<PGlite> {
+/** 全部 policy_jp migration 套一遍；patch：換掉 file（預設這支 migration）的內容（還原驗證用） */
+async function freshDb(patch?: (sql: string) => string, file = MIG_FILE): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(ROLES);
-  for (const n of JP_FILES) await db.exec(n === MIG_FILE && patch ? patch(JP_SQL[n]) : JP_SQL[n]);
+  for (const n of JP_FILES) await db.exec(n === file && patch ? patch(JP_SQL[n]) : JP_SQL[n]);
   return db;
 }
 const one = async <T>(db: PGlite, sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
@@ -102,7 +108,7 @@ async function onlyTerm(db: PGlite, lg: string, termEnd: string | null): Promise
 type D = { task_id: string; task_type: string; priority: number; queue_at: string };
 /** 鏈上與選舉發現的派工列，照派工順序（queue_at） */
 const queueOrder = (db: PGlite) => rows<D>(db,
-  `SELECT task_id, task_type, priority, queue_at FROM policy_jp.task_dispatches
+  `SELECT task_id, task_type, ${PRIORITY_TIER_SQL} AS priority, queue_at FROM policy_jp.task_dispatches d
     WHERE task_type IN ('election_discovery', 'local_government_missing', 'regional_stats_missing') ORDER BY queue_at, task_id`);
 const ids = (ds: D[]) => ds.map((d) => d.task_id);
 
@@ -148,7 +154,7 @@ Deno.test("層的邊界：投票日前 60 天＝前段、61 天＝中段、180 �
   for (const [lg, days] of cases) await insertElection(db, lg, addDays(TODAY, days));
   await seed(db);
   const got = await rows<{ lg: string; priority: number }>(db,
-    `SELECT target->>'lg_code' AS lg, priority FROM policy_jp.task_dispatches WHERE task_type = 'regional_stats_missing'`);
+    `SELECT target->>'lg_code' AS lg, ${PRIORITY_TIER_SQL} AS priority FROM policy_jp.task_dispatches d WHERE task_type = 'regional_stats_missing'`);
   const m = Object.fromEntries(got.map((g) => [g.lg, g.priority]));
   for (const [lg, days, tier] of cases) assertEquals(m[lg], tier, `${lg}（${days} 天後）`);
   // 日期 → 層函式與規則同一組數字
@@ -178,14 +184,14 @@ async function sameTierScenario(db: PGlite): Promise<void> {
   await seed(db);
 }
 
-Deno.test("同層內：選舉發現 → 團體（都道府県與市） → 統計，即使統計先開、日期更近；各步驟內由近到遠", async () => {
+Deno.test("同層內先進先出（20261011360000 起不再看步驟與日期）：統計先開就先派，再來團體、選舉發現", async () => {
   const db = await freshDb();
   await sameTierScenario(db);
   const q = await queueOrder(db);
-  assertEquals(q.map((d) => d.task_type), ["election_discovery", "local_government_missing", "local_government_missing", "regional_stats_missing"]);
+  assertEquals(q.map((d) => d.task_type), ["regional_stats_missing", "local_government_missing", "local_government_missing", "election_discovery"]);
   assertEquals(new Set(q.map((d) => d.priority)), new Set([2]), "三種都在中段（沒有 polling 里程碑的靠 target 日期定層：110／120 天後＝中段）");
-  assertEquals(q[0].task_id, `auto:election_discovery:${addDays(TODAY, 140)}:${ICHI}:head`);
-  assertEquals(q[3].task_id, `auto:regional_stats_missing:${KOMORO}`);
+  assertEquals(q[3].task_id, `auto:election_discovery:${addDays(TODAY, 140)}:${ICHI}:head`);
+  assertEquals(q[0].task_id, `auto:regional_stats_missing:${KOMORO}`);
   // 團體兩件同日，先進先出（先開的先）；是北海道與函館市
   assertEquals(new Set([q[1].task_id, q[2].task_id]), new Set([`auto:local_government_missing:010006`, `auto:local_government_missing:${HAKODATE}`]));
   await db.close();
@@ -211,22 +217,6 @@ Deno.test("同層同步驟：日期近的先（等團體落庫的選舉 30 天�
 // =============================================================================================
 // d. 還原驗證：層內排序鍵換回 queue_at，順序就變回先進先出
 // =============================================================================================
-Deno.test("還原驗證：rebalance_queue 的層內排序鍵換回 queue_at，同層的順序變成先進先出（統計、團體、選舉發現）", async () => {
-  const db = await freshDb((sql) => mutate(sql, "ORDER BY w.srank, w.sdate NULLS LAST, w.queue_at, w.task_id) AS k FROM w", "ORDER BY w.queue_at, w.task_id) AS k FROM w"));
-  await sameTierScenario(db);
-  const q = await queueOrder(db);
-  assertEquals(q.map((d) => d.task_type), ["regional_stats_missing", "local_government_missing", "local_government_missing", "election_discovery"], "先開的先派");
-  await db.close();
-});
-
-Deno.test("還原驗證：只拿掉步驟鍵、留日期鍵，三場選舉一樣由近到遠但同層的步驟順序就沒了（日期 100 天的統計排在 120 天的團體前面）", async () => {
-  const db = await freshDb((sql) => mutate(sql, "ORDER BY w.srank, w.sdate NULLS LAST, w.queue_at, w.task_id) AS k FROM w", "ORDER BY w.sdate NULLS LAST, w.queue_at, w.task_id) AS k FROM w"));
-  await sameTierScenario(db);
-  const q = await queueOrder(db);
-  assertEquals(q.map((d) => d.task_type), ["regional_stats_missing", "election_discovery", "local_government_missing", "local_government_missing"], "100 → 110 → 120 天");
-  await db.close();
-});
-
 Deno.test("還原驗證：選舉發現／等團體的選舉不定層（拿掉 seed 的日期定層一段），就都落預設層（中段）；有這一段：満了日 60 天後的選舉發現＝前段、300 天後才投票的等團體選舉＝後段", async () => {
   const run = async (db: PGlite) => {
     await clock(db, TODAY);
@@ -244,7 +234,7 @@ Deno.test("還原驗證：選舉發現／等團體的選舉不定層（拿掉 se
     const b = sql.indexOf("  -- <<< 日本版：選舉發現的層\n") + "  -- <<< 日本版：選舉發現的層\n".length;
     assert(a > 0 && b > a);
     return sql.slice(0, a) + sql.slice(b);
-  });
+  }, SEC_FILE);
   assertEquals(await run(db2), { discovery: 2, "010006": 2, [HAKODATE]: 2 }, "沒有定層＝預設層");
   await db2.close();
 });
@@ -345,7 +335,7 @@ Deno.test("cap 截斷（團體）：cap=1 時留下最近的選舉的團體，�
 // =============================================================================================
 // e. 不動的：手動任務、驗證列、規則
 // =============================================================================================
-Deno.test("手動任務（無 auto: 前綴）步驟順位 0，排在同層鏈上任務前面；層間仍是 6:3:1；原有的 manual_visitor 規則與前段規則都在", async () => {
+Deno.test("手動任務（無 auto: 前綴）第一次進佇列插隊一次，排在同層鏈上任務前面；層的秒數是前段 +3 天／中段 0／後段 −30 天；原有的 manual_visitor 規則與前段規則都在", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   await onlyTerm(db, ICHI, null);
@@ -355,13 +345,13 @@ Deno.test("手動任務（無 auto: 前綴）步驟順位 0，排在同層鏈上
   await db.query(`INSERT INTO policy_jp.contribution_tasks (title, task_type, description, source, status) VALUES ('手動任務', 'task_suggestion', '手動任務', 'manual', 'open')`);
   await seed(db);
   const all = await rows<{ task_id: string; task_type: string; priority: number | null; queue_at: string }>(db,
-    `SELECT task_id, task_type, priority, queue_at FROM policy_jp.task_dispatches WHERE task_id NOT LIKE 'verify:%' ORDER BY queue_at, task_id`);
+    `SELECT task_id, task_type, ${PRIORITY_TIER_SQL} AS priority, queue_at FROM policy_jp.task_dispatches d WHERE task_id NOT LIKE 'verify:%' ORDER BY queue_at, task_id`);
   const manual = all.find((d) => !d.task_id.startsWith("auto:"));
   const chain = all.find((d) => d.task_type === "regional_stats_missing");
   assert(manual && chain, JSON.stringify(all));
   assertEquals(manual.priority, 2);
   assertEquals(chain.priority, 2);
-  assert(manual.queue_at < chain.queue_at, "手動任務排在同層鏈上任務前面（插隊段在 2000 年前不參與重排，也在前；2000 年後的步驟順位 0 在前）");
+  assert(manual.queue_at < chain.queue_at, "手動任務排在同層鏈上任務前面（維護者建的第一次進佇列＝插隊 manual_front_seconds）");
   const rules = await rows<{ activity: string; priority: number }>(db, `SELECT activity, priority FROM policy_jp.activity_rules WHERE priority IS NOT NULL ORDER BY activity, priority`);
   // 第 2 步以降の migration が鏈上の臂ごとに priority: 規則を足す（policy-jp-chain-*.test.ts が守る）：ここは最初の 3 本の臂の分だけ見る
   const FIRST = ["priority:local_government_missing", "priority:manual_visitor", "priority:regional_stats_missing"];
@@ -370,12 +360,12 @@ Deno.test("手動任務（無 auto: 前綴）步驟順位 0，排在同層鏈上
     "priority:manual_visitor:1",
     "priority:regional_stats_missing:1", "priority:regional_stats_missing:3",
   ]);
-  const w = await rows<{ id: number; weight: number }>(db, `SELECT id, weight FROM policy_jp.task_priority_tiers ORDER BY id`);
-  assertEquals(w.map((x) => x.weight), [6, 3, 1], "層權重不變");
+  const w = await rows<{ id: number; seconds: number }>(db, `SELECT id, seconds FROM policy_jp.task_priority_tiers ORDER BY id`);
+  assertEquals(w.map((x) => x.seconds), [259200, 0, -2592000], "層的秒數（同正見）");
   await db.close();
 });
 
-Deno.test("層間 6:3:1 交錯不變：前段三件、中段三件、後段一件，第 k 筆的虛擬完成時間 k／權重（驗證列 2:1 由 policy-jp-dispatch.test.ts 守）", async () => {
+Deno.test("層間不再交錯（20261011360000）：同一輪開出來的七件，排序鍵＝進隊時間 − 那一層的秒數 → 前段三件、中段三件、後段一件依序；同層同時進隊的照 task_id", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   await onlyTerm(db, ICHI, null);
@@ -384,12 +374,14 @@ Deno.test("層間 6:3:1 交錯不變：前段三件、中段三件、後段一�
   for (let i = 0; i < lgs.length; i++) await insertElection(db, lgs[i], addDays(TODAY, days[i]));
   await seed(db);
   const q = await queueOrder(db);
-  assertEquals(q.map((d) => d.priority).sort(), [1, 1, 1, 2, 2, 2, 3]);
-  // 加權交錯：第 k 筆的虛擬完成時間 k／權重 → 前段 1/6、2/6、3/6；中段 1/3、2/3、1；後段 1
-  // 排序：前1(.167) 前2(.333) 中1(.333，同時間層號小的先) 前3(.5) 中2(.667) 中3(1) 後1(1)
-  assertEquals(q.map((d) => d.priority), [1, 1, 2, 1, 2, 2, 3]);
-  // 層內由近到遠
-  assertEquals(ids(q.filter((d) => d.priority === 1)).map((t) => t.split(":").pop()), [KOMORO, HAKODATE, SAPPORO]);
+  assertEquals(q.map((d) => d.priority), [1, 1, 1, 2, 2, 2, 3]);
+  // 同一輪進隊（last_dispatched_at 相同）：前段比中段早 3 天、後段比中段晚 30 天
+  const at = (k: number) => Date.parse(q[k].queue_at);
+  assertEquals(at(3) - at(0), 259200_000);
+  assertEquals(at(6) - at(3), 2592000_000);
+  const keys = await rows<{ ok: boolean }>(db,
+    `SELECT queue_at = policy_jp.task_queue_key(last_dispatched_at, priority_seconds, cool_until, boost_seconds) AS ok FROM policy_jp.task_dispatches WHERE task_id NOT LIKE 'verify:%'`);
+  assert(keys.length > 0 && keys.every((k) => k.ok), "queue_at 就是排序鍵");
   await db.close();
 });
 

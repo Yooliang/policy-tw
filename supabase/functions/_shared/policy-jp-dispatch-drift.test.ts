@@ -120,6 +120,17 @@ const DEVIATED_LINEAGE: Record<string, { prev: string; why: string; jpEdits: Edi
   },
 };
 
+/**
+ * 派工排序改秒數（20261011360000，維護者 10-13「a b 都作吧」）：日本站跟上正見 20261011320000／20261011350000。
+ * 下面幾支複本改讀這支 migration 的定義（SEC_FOLLOWED），走樣比對對正見的現行定義（不再取 320000 之前的版本）；
+ * 新增的五支（SEC_NEW：排序鍵、規則的優先秒數、手動任務的插隊秒數、驗證沿用的秒數、觸發器）同樣是複本，登記在 PAIRS。
+ * 日本版的 rebalance_queue、activity_priority、manual_front_at 在這支刪掉（正見 350000 也刪了），PAIRS 裡那三支仍比對 130000／150100 的歷史定義。
+ */
+const SEC_MIG = "20261011360000_policy_jp_queue_priority_seconds.sql";
+const SEC_SQL = await readMig(SEC_MIG);
+const SEC_NEW = ["task_queue_key", "activity_priority_seconds", "manual_front_seconds", "verify_inherited_priority_seconds", "task_dispatches_queue_key"];
+const SEC_FOLLOWED = [...SEC_NEW, "refresh_dispatch_blocked", "seed_auto_task_queue", "manual_front_pull", "contribution_tasks_insert_dispatch"];
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -164,7 +175,11 @@ const PAIRS: Pair[] = [
   { name: "queue_slot" },
   { name: "task_dispatched" },
   { name: "contribution_queue_at" },
-  { name: "refresh_dispatch_blocked", before: VILLAGE, note: "取村里長進度冷卻（task_cooldown_settings，台灣專用）之前的版本（20261002000006 的冷卻寫法）" },
+  {
+    name: "refresh_dispatch_blocked",
+    note: "冷卻天數換回日本站的兩個設定（task_cooldown_settings 與 task_check_cooldown_days_for 是台灣村里長進度專用）；roster_check 的 not_found 在告示日打斷冷卻（20261010120000 的偏離，秒數化時照帶）",
+    edits: [["max(tc.checked_at + (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL) AS until", "max(tc.checked_at + (CASE WHEN tc.outcome = 'unreachable' THEN task_unreachable_cooldown_days() ELSE task_check_cooldown_days() END || ' days')::INTERVAL) AS until"], ["    WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL\n    -- 比任何一種冷卻都長的歷史紀錄不用逐筆問天數（task_checks 只會越積越多；agy 審查 #480）：上限是一個 InitPlan，只算一次\n      AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))\n", "    WHERE tc.checked_at > now() - (CASE WHEN tc.outcome = 'unreachable' THEN task_unreachable_cooldown_days() ELSE task_check_cooldown_days() END || ' days')::INTERVAL\n      AND NOT roster_not_found_released(tc.task_id, tc.outcome, tc.checked_at)  -- 日本版：roster_check の not_found だけ告示日で冷卻を打ち切る\n"]],
+  },
   { name: "refresh_verify_targets" },
   { name: "rebalance_queue" },
   { name: "visitor_front_slot_hours" },
@@ -173,13 +188,12 @@ const PAIRS: Pair[] = [
   { name: "visitor_front_slot_start" },
   { name: "manual_task_is_visitor" },
   { name: "manual_front_at" },
-  { name: "manual_front_pull", before: "20261011320000_queue_priority_seconds.sql", note: "取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本" },
+  { name: "manual_front_pull" },
   { name: "manual_task_closes_on_applied" },
   {
     name: "seed_auto_task_queue",
-    before: "20261011320000_queue_priority_seconds.sql",
-    note: "拿掉流量提層一段（traffic_boost_apply，台灣專用）。取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本",
-    edits: [{ span: ["  -- >>> 流量提層", "  -- <<< 流量提層\n\n"], with: "" }],
+    note: "拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；換成日本專屬的「選舉鏈上沒有 polling 里程碑的缺口照日期定層」一段（20261009300000 的偏離，秒數化時照帶，秒數取那一層的秒數）",
+    edits: [{"span": ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], "with": ""}, {"span": ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], "with": "  -- >>> 日本版：選舉發現的層\n  -- 鏈上的臂裡「還沒有選舉列＝沒有 polling 里程碑」的缺口（選舉發現；等團體落庫的選舉的團體任務），規則算不出秒數，改用 target 的日期\n  -- （election_date，沒有就 vote_window_from）定層：60 天內前段、180 天內中段、更遠後段（chain_date_tier），秒數取那一層的 task_priority_tiers.seconds。有 polling 里程碑的照上面規則算的\n  UPDATE _gaps g SET priority_seconds = (SELECT t.seconds FROM task_priority_tiers t WHERE t.id = chain_date_tier(chain_sort_date(g.task_id, g.target))), priority_rule_id = NULL\n   WHERE g.arm IN ('election_discovery', 'local_government_missing', 'regional_stats_missing')\n     AND NOT EXISTS (SELECT 1 FROM election_milestones_all m WHERE m.election_id = NULLIF(g.target->>'election_id', '') AND m.kind = 'polling');\n  -- <<< 日本版：選舉發現的層\n"}],
   },
   { name: "contribution_queue_tasks" },
   { name: "contribution_queue_task_counts" },
@@ -248,7 +262,13 @@ const PAIRS: Pair[] = [
   { name: "contribution_votes_trg" },
   { name: "contribution_votes_set_weight" },
   { name: "contribution_tasks_drop_dispatch" },
-  { name: "contribution_tasks_insert_dispatch", before: "20261011320000_queue_priority_seconds.sql", note: "取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本" },
+  { name: "contribution_tasks_insert_dispatch" },
+  // 20261011360000 新增的複本（SEC_NEW）
+  { name: "task_queue_key" },
+  { name: "activity_priority_seconds" },
+  { name: "manual_front_seconds" },
+  { name: "verify_inherited_priority_seconds" },
+  { name: "task_dispatches_queue_key" },
 ];
 
 /** 精確改一處（出現次數必須剛好一次）；span：從起點標記（唯一）到其後第一個終點標記，整段（含兩端）換成 with */
@@ -283,7 +303,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -369,6 +389,27 @@ Deno.test("走樣（日本專屬偏離）：20261009300000 定義的函式＝登
   assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
 });
 
+Deno.test("走樣（秒數化）：20261011360000 定義的函式＝登記的複本（SEC_FOLLOWED）＋插隊兩支（JP_ONLY）；不碰 public；plpgsql 釘 search_path；舊的排序函式與欄位刪掉", () => {
+  const defined = [...SEC_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, [...SEC_FOLLOWED, "task_boost", "task_boost_remaining"].sort());
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of SEC_FOLLOWED) assert(copies.has(n), `${n} 要在複本清單 PAIRS 裡`);
+  for (const n of defined) {
+    const t = fnText(SEC_SQL, `policy_jp.${n}`);
+    if (/LANGUAGE plpgsql/.test(t)) assert(t.includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+  }
+  const stripped = SEC_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+  assert(!/\bshared\./.test(stripped), "shared.dispatch_plan 在另一支（日本站的測試環境只載 policy_jp 的 migration）");
+  for (const d of [
+    "DROP FUNCTION IF EXISTS policy_jp.rebalance_queue();",
+    "DROP FUNCTION IF EXISTS policy_jp.activity_priority(TEXT, TEXT, TEXT, DATE);",
+    "DROP FUNCTION IF EXISTS policy_jp.manual_front_at(TEXT);",
+    "ALTER TABLE policy_jp.task_dispatches DROP COLUMN IF EXISTS priority;",
+    "ALTER TABLE policy_jp.task_priority_tiers DROP COLUMN IF EXISTS weight;",
+  ]) assert(SEC_SQL.includes(d), `少了：${d}`);
+});
+
 /** 設定表 dispatch_records_settings 的建表敘述（CREATE TABLE … ( … );）：欄位、預設值、CHECK 範圍 */
 const settingsDdl = (sql: string, name: string): string => {
   const a = sql.indexOf(`CREATE TABLE IF NOT EXISTS ${name} (`);
@@ -387,7 +428,7 @@ Deno.test("走樣：派工紀錄清理的設定表 dispatch_records_settings（�
 
 Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記的非複本（新加函式不登記就紅）", () => {
   const defined = [...MIG_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
-  const registered = [...PAIRS.map((p) => p.name), ...NONCOPY].sort();
+  const registered = [...PAIRS.map((p) => p.name).filter((n) => !SEC_NEW.includes(n)), ...NONCOPY].sort();
   assertEquals(defined, registered);
   assertEquals(new Set(registered).size, registered.length, "登記重複");
 });
@@ -502,7 +543,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE)) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
@@ -553,6 +594,8 @@ const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現�
 const T_DS = "20261011170000"; // 派工臂對齊正見 2b：議員定数 district_seats_missing（規則最初から開く，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
 const T_SYSONE_REASK = "20261011130000"; // 系統票：宣稱に投票日が入っていた candidacy の旧判定を一度だけ聞き直す
+
+const T_SEC = ID(SEC_MIG); // 派工排序改秒數（正見 20261011320000／350000 的日本版）
 
 type JpOnly = { mig: string[]; why: string };
 
@@ -673,8 +716,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261010030000 插隊：正見 20260921000030～32／20261008165000 的 task_boost 系列的日本版。骨架（1980 減 n 分鐘、一次性、LEAST、TRUNCATE 暫存表）同正見，
   //      但 task_boost_matches 的篩選詞彙全換（pref_codes／lg_codes／task_types／kinds／election_before，沒有人物、頭像、縣市、屆別），不是逐字複本，所以登記為日本專屬；行為由 policy-jp-boost.test.ts 守 ----
   task_boost_matches: { mig: [T_BOOST], why: "插隊條件 → 符合的佇列鍵；篩選詞彙是日本專屬（正見的 regions／election_id／election_types／missing_avatar／politician_ids 全拿掉）" },
-  task_boost: { mig: [T_BOOST], why: "插隊（1980 減 n 分鐘、LEAST、一次性）；骨架同正見 20260921000032，改叫 policy_jp 的表與 task_boost_matches" },
-  task_boost_remaining: { mig: [T_BOOST], why: "一筆插隊還剩多少沒領；同正見 20260921000030，改叫 policy_jp 的表" },
+  task_boost: { mig: [T_BOOST, T_SEC], why: "插隊（驗證列 1980 減 n 分鐘、LEAST；任務列加插隊秒數，20261011360000 起同正見 20261011320000）；骨架同正見 20260921000032，改叫 policy_jp 的表與 task_boost_matches" },
+  task_boost_remaining: { mig: [T_BOOST, T_SEC], why: "一筆插隊還剩多少沒領（任務列看插隊秒數，20261011360000 起）；同正見 20260921000030，改叫 policy_jp 的表" },
 
   // ---- 20261010040000 chain_candidacy：選舉鏈第 2 步（參選人有誰）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
   chain_task_checked: { mig: [T_CAND, T_KANA], why: "選舉鏈進度用：這個任務有人回報查過（confirmed／not_found）而且還在冷卻中的最近時間；roster 步驟的 done 靠它" },

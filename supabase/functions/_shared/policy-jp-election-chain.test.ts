@@ -21,6 +21,7 @@
 import { assert, assertEquals, assertNotEquals, assertRejects } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText } from "./arms-pglite.ts";
+import { PRIORITY_TIER_SQL } from "./policy-jp-chain-db.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -169,7 +170,7 @@ const expireCooling = (db: PGlite) =>
 
 type Dispatch = { task_id: string; task_type: string; target: Record<string, unknown>; opened_by: Record<string, unknown>; what_we_need: string; priority: number; region: string };
 const chainDispatches = (db: PGlite) => rows<Dispatch>(db,
-  `SELECT task_id, task_type, target, opened_by, what_we_need, priority, region FROM policy_jp.task_dispatches WHERE task_type IN ${CHAIN_TYPES} ORDER BY task_id`);
+  `SELECT task_id, task_type, target, opened_by, what_we_need, ${PRIORITY_TIER_SQL} AS priority, region FROM policy_jp.task_dispatches d WHERE task_type IN ${CHAIN_TYPES} ORDER BY task_id`);
 const chainIds = async (db: PGlite) => (await chainDispatches(db)).map((d) => d.task_id);
 type Ev = { event: string; reason: string | null; detail: { chain_gate?: { after_step: string; via: string }; opened_by?: Record<string, unknown> } & Record<string, unknown> };
 const events = (db: PGlite, taskId: string) => rows<Ev>(db, `SELECT event, reason, detail FROM policy_jp.gap_events WHERE task_id = $1 ORDER BY id`, [taskId]);
