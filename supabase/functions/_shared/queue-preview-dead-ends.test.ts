@@ -27,10 +27,12 @@ Deno.test("queue_preview＝前一版＋一段 WHERE（等查無回報），其�
   assert(next.includes(`.eq("contribution_type", "no_change")`) && next.includes(`.in("status", ["pending", "verified"]).in("payload->>task_id", candidateTaskIds)`), "/next 的查無條件改了，預覽要跟著改");
 });
 
-Deno.test("/next 不再有每台機器 2:1：驗證與任務只照 queue_at 先後", async () => {
-  const next = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  for (const gone of ["machineOwesVerify", "machineOwesVerifyDuringBoost", "isFrontQueueAt", "MACHINE_LOOKBACK_HOURS"]) {
-    assert(!next.includes(gone), `/next 不該再用 ${gone}`);
+Deno.test("/next 與 jp-next 都不再有每台機器 2:1：驗證與任務只照 queue_at 先後（日本站 20261011360000 跟上）", async () => {
+  for (const f of ["../next/index.ts", "../jp-next/index.ts"]) {
+    const next = await Deno.readTextFile(new URL(f, import.meta.url));
+    for (const gone of ["machineOwesVerify", "machineOwesVerifyDuringBoost", "isFrontQueueAt", "MACHINE_LOOKBACK_HOURS"]) {
+      assert(!next.includes(gone), `${f} 不該再用 ${gone}`);
+    }
+    assert(/if \(head === "verify"\) return await serveVerify\(\);/.test(next), `${f}：隊頭是驗證就派驗證`);
   }
-  assert(/if \(head === "verify"\) return await serveVerify\(\);/.test(next), "隊頭是驗證就派驗證");
 });

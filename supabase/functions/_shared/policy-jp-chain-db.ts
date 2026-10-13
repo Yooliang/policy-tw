@@ -163,9 +163,16 @@ export const check = (db: PGlite, taskId: string, outcome: "confirmed" | "not_fo
 export const expireCooling = (db: PGlite) =>
   db.exec(`UPDATE policy_jp.task_checks SET checked_at = now() - ((policy_jp.task_check_cooldown_days() + 1) || ' days')::INTERVAL`);
 
+/**
+ * priority＝這一列在哪一層（1 前段、2 中段、3 後段）。20261011360000 起派工列不再存層、只存優先秒數（priority_seconds），
+ * 這裡用「秒數等於哪一層的 task_priority_tiers.seconds」換回層號，各步的斷言照舊讀層；那支之前的資料庫（upTo）照舊讀 priority 欄。
+ * 用 to_jsonb 讀欄位，兩種版本的資料庫都能跑同一條查詢。
+ */
+export const PRIORITY_TIER_SQL = `COALESCE((to_jsonb(d)->>'priority')::INT,
+  (SELECT t.id FROM policy_jp.task_priority_tiers t WHERE (to_jsonb(t)->>'seconds')::INT = (to_jsonb(d)->>'priority_seconds')::INT ORDER BY t.id LIMIT 1)::INT)`;
 export type Dispatch = { task_id: string; task_type: string; target: Record<string, unknown>; opened_by: Record<string, unknown> | null; what_we_need: string; priority: number; region: string };
 export const dispatches = (db: PGlite, types: string[]) => rows<Dispatch>(db,
-  `SELECT task_id, task_type, target, opened_by, what_we_need, priority, region FROM policy_jp.task_dispatches WHERE task_type = ANY ($1) ORDER BY task_id`, [types]);
+  `SELECT task_id, task_type, target, opened_by, what_we_need, ${PRIORITY_TIER_SQL} AS priority, region FROM policy_jp.task_dispatches d WHERE task_type = ANY ($1) ORDER BY task_id`, [types]);
 export const dispatchIds = async (db: PGlite, types: string[]) => (await dispatches(db, types)).map((d) => d.task_id);
 export type Ev = { event: string; reason: string | null; detail: { chain_gate?: { after_step: string; via: string } } & Record<string, unknown> };
 export const events = (db: PGlite, taskId: string) => rows<Ev>(db, `SELECT event, reason, detail FROM policy_jp.gap_events WHERE task_id = $1 ORDER BY id`, [taskId]);

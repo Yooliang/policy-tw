@@ -26,6 +26,7 @@ import { jpSourceKind } from "./jp/source-kind.ts";
 import { JP_ELECTION_REASONS, JP_ELECTION_TYPES, JP_LG_KINDS, JP_STAT_KEYS, JP_STAT_UNITS } from "./jp/contribution-schema.ts";
 import { JP_APPLY_TYPES } from "./jp/apply-contribution.ts";
 import { APPLY_MAX_RETRIES, APPLY_RETRY_DELAY_MINUTES } from "./consensus.ts";
+import { PRIORITY_TIER_SQL } from "./policy-jp-chain-db.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -451,7 +452,7 @@ Deno.test("local_government_missing：term_expirations 裡有、local_government
   assertEquals([...got].sort(), [...expectedIds()].sort(), "派出的 200 件＝47 都道府県＋團體碼最小的 153 個市区町村");
 
   const rowsOf = await rows<{ task_id: string; task_type: string; target: Record<string, unknown>; what_we_need: string; hint_sources: string[]; reward: number; region: string; priority: number; opened_by: Record<string, unknown> }>(
-    db, `SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region, priority, opened_by FROM policy_jp.task_dispatches WHERE task_id LIKE 'auto:local_government_missing:%' ORDER BY task_id`);
+    db, `SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region, ${PRIORITY_TIER_SQL} AS priority, opened_by FROM policy_jp.task_dispatches d WHERE task_id LIKE 'auto:local_government_missing:%' ORDER BY task_id`);
   for (const r of rowsOf) {
     assertEquals(r.task_type, "local_government_missing");
     assertEquals([r.reward, r.priority, r.opened_by.arm], [1, 2, "local_government_missing"], "沒有選舉＝預設層");

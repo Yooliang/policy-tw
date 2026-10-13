@@ -16,6 +16,7 @@
  */
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
+import { PRIORITY_TIER_SQL } from "./policy-jp-chain-db.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -130,7 +131,7 @@ Deno.test("手動任務臂：新任務即時入列（觸發器）、seed 對帳�
   const manual = await addTask(db, "manual", "維護者任務");
   const sug = await addTask(db, "suggested", "外部提議");
   const rows = await db.query<{ task_id: string; queue_at: string; priority: number | null; opened_by: Record<string, unknown> }>(
-    `SELECT task_id, queue_at::TEXT, priority, opened_by FROM policy_jp.task_dispatches ORDER BY task_id`);
+    `SELECT task_id, queue_at::TEXT, ${PRIORITY_TIER_SQL} AS priority, opened_by FROM policy_jp.task_dispatches d ORDER BY task_id`);
   assertEquals(rows.rows.length, 3);
   const by = Object.fromEntries(rows.rows.map((r) => [r.task_id, r]));
   assert(by[web].queue_at.startsWith("1970-01-01"), "網站請求 1970");

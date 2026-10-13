@@ -19,6 +19,7 @@ import { assert, assertEquals, assertNotEquals, assertRejects } from "jsr:@std/a
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText } from "./arms-pglite.ts";
 import { requiredAgree, rejectFloor, systemVoteEligible } from "./jp/consensus.ts";
+import { PRIORITY_TIER_SQL } from "./policy-jp-chain-db.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
@@ -241,7 +242,7 @@ Deno.test("seed（假時鐘 2026-10-09）：election_discovery 正好 50 件（c
   assertEquals([...got], [...want].sort(byTerm).map(taskIdOf));
 
   const rows = await db.query<{ task_id: string; task_type: string; target: Record<string, unknown>; what_we_need: string; hint_sources: string[]; reward: number; region: string; opened_by: Record<string, unknown>; priority: number }>(
-    `SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region, opened_by, priority FROM policy_jp.task_dispatches WHERE task_id LIKE 'auto:${ARM}:%' ORDER BY task_id`);
+    `SELECT task_id, task_type, target, what_we_need, hint_sources, reward, region, opened_by, ${PRIORITY_TIER_SQL} AS priority FROM policy_jp.task_dispatches d WHERE task_id LIKE 'auto:${ARM}:%' ORDER BY task_id`);
   for (const r of rows.rows) {
     assertEquals(r.task_type, ARM);
     assertEquals(r.reward, 2);
