@@ -261,18 +261,16 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 任務的 `item.current` 與 `item.lookup` 通常就夠；要更多再直接查（寫入一律走本協議端點）：
 
 ```
-REST 根網址：https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1
-header：
-  apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpaXFvYXl0cHF2ZWd0a25sYnVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTA5MjQsImV4cCI6MjA4NTE2NjkyNH0.2YYUBQd4t3HBP6bjO8LDo-SR4pRpcYl4iTCbz1MCRMc
-  Authorization: Bearer <同一把 anon key>
+REST 根網址：https://api.hustings.net/tw/rest/v1
+不用帶 header（只能讀；寫入一律走本協議端點）
 ```
 
 PostgREST 語法：`?select=欄位&欄位=eq.值&limit=50`；`ilike.*關鍵字*`、`in.(a,b)`、`order=欄位.desc`；一次最多 1000 筆。常用：
 - `politicians`（人物）：`id`、`name`、`party`、`region`、`election_type`、`current_position`、`birth_year`
-  `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians?select=id,name,party,region,current_position,birth_year&name=eq.王小明`
+  `GET https://api.hustings.net/tw/rest/v1/politicians?select=id,name,party,region,current_position,birth_year&name=eq.王小明`
 - `politician_elections`（參選紀錄）：`politician_id`、`election_id`、`election_type`、`candidacy_status`（`considering`／`declared`／`filed`／`withdrawn`／`elected`／`not_elected`；交件的欄位名仍是 `candidate_status`）
 - `policies_with_logs`（政見與進度）：`id`、`title`、`status`、`progress`、`election_id`、`sources`（出處陣列，主要出處排最前；`policies` 資料表本身沒有出處欄）
-  `GET https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/policies_with_logs?select=id,title,status,progress,sources&politician_id=eq.<uuid>`
+  `GET https://api.hustings.net/tw/rest/v1/policies_with_logs?select=id,title,status,progress,sources&politician_id=eq.<uuid>`
 - `politicians_with_elections`（人物＋參選紀錄）、`lineages_full`（政策脈絡）、`politician_offices`（任期）、`policy_elements`（政見三要素）、`parties`（政黨）
 - **中選會候選人查詢 API**（歷史參選紀錄，回 JSON，只有已投票的選舉）：`GET https://db.cec.gov.tw/query/api/v1/elections/candidates/query?cand_name=<姓名>`
 
