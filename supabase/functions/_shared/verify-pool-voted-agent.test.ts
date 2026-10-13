@@ -1,5 +1,5 @@
 /**
- * 驗證池排除「同代號已投過」＋網站請求的「查無」回報驗證排前段（migration 20261012230000）。
+ * 驗證池排除「同代號已投過」＋網站請求的「查無」回報驗證排前段（migration 20261011160000）。
  *
  * 10-12 主控台：最近 30 分鐘派出 110 筆全是驗證、任務 0 筆，佇列最前面 14 張網站請求任務都沒派出。原因有兩層：
  *   - 換出口網段的同代號，驗證池（只比網段）把它早就投過的又派回來；投票表有唯一索引（貢獻, 代號），只能 skip 或 409，
@@ -12,7 +12,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, readMig } from "./arms-pglite.ts";
 
 const PREV = await readMig("20261011020000_verify_pool_exclude_agent.sql");
-const SQL = await readMig("20261012230000_verify_pool_voted_agent_front_no_change.sql");
+const SQL = await readMig("20261011160000_verify_pool_voted_agent_front_no_change.sql");
 const RATIO = await readMig("20260924000002_queue_ratio.sql");
 const FRONT = await readMig("20261010130000_web_request_verify_front.sql");
 const BASE = ["queue_slot", "contribution_queue_at", "task_dispatched"].map((n) => fnText(RATIO, n)).join("\n");
