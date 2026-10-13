@@ -189,3 +189,17 @@ export const statusOf = async (db: PGlite, id: string) => (await one<{ status: s
 export async function applyOne(db: PGlite, id: string): Promise<{ status: string; outcome?: string; message?: string; table_name?: string; record_id?: string }> {
   return (await one<{ r: { status: string } }>(db, `SELECT policy_jp.apply_contribution($1::UUID) AS r`, [id])).r;
 }
+
+/**
+ * 人物の名前をテスト用の名前（politician_name_is_placeholder が真になるもの）に書き換える。
+ * 20261011250000 から、そういう名前の INSERT／UPDATE は触発器 trg_politicians_reject_placeholder_name が拒む（正見と同じ）。
+ * 『すでに庫にいる測試名人物』を作りたいテスト（placeholder_politicians 臂、隔離）は、触発器を一瞬止めてから書き換える。触発器の本体は変えない。
+ */
+export async function renameAsPlaceholder(db: PGlite, politicianId: string, name: string, kana: string | null): Promise<void> {
+  await db.exec(`ALTER TABLE policy_jp.politicians DISABLE TRIGGER trg_politicians_reject_placeholder_name`);
+  try {
+    await db.query(`UPDATE policy_jp.politicians SET name = $2, kana = $3 WHERE id = $1`, [politicianId, name, kana]);
+  } finally {
+    await db.exec(`ALTER TABLE policy_jp.politicians ENABLE TRIGGER trg_politicians_reject_placeholder_name`);
+  }
+}
