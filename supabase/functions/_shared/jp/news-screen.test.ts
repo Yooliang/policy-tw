@@ -168,7 +168,21 @@ Deno.test("取り込み：来源の失敗は隔離（last_error に残り、他�
   assertEquals(rep.tally, { lead: 1 });
   const g = fakeStore();
   const rep3 = await runNews(g.store, deps("<html>moved</html>"));
-  assert(rep3.sources[0].error?.includes("記事が 1 つもない"));
+  assert(rep3.sources[0].error?.startsWith("記事 0 件：HTTP 200、Content-Type なし、<item> 0 個、読めた 0 件"), rep3.sources[0].error);
+  assert(rep3.sources[0].error?.includes("先頭「<html>moved</html>」"));
+});
+
+Deno.test("取り込み：<item> はあるのに期限内が 0 件（古い記事だけ）も黙って通さない：HTTP 状態・Content-Type・古い件数・最新の日付を last_error に", async () => {
+  const f = fakeStore();
+  const xml = rss([
+    { title: "一宮市長が辞職の意向", url: "https://example.test/1", date: "Mon, 01 Sep 2025 10:00:00 +0900" },
+    { title: "きょうの天気", url: "https://example.test/2", date: "Tue, 02 Sep 2025 10:00:00 +0900" },
+  ]);
+  const rep = await runNews(f.store, { now: () => NOW, fetchText: () => Promise.resolve({ text: xml, status: 200, contentType: "application/xml" }) });
+  const err = rep.sources[0].error ?? "";
+  assert(err.startsWith("記事 0 件：HTTP 200、Content-Type application/xml、<item> 2 個、読めた 2 件（うち 3 日より古い 2 件、最新 2025-09-02T01:00:00.000Z）"), err);
+  assertEquals(f.errors.get(1), err);
+  assertEquals(f.items.length, 0);
 });
 
 Deno.test("取り込み：無効（news_settings.enabled=false）は何もしない、上限で capped、同じ記事は 2 度篩わない", async () => {

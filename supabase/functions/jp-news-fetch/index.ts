@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
           redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.text();
+        return { text: await res.text(), status: res.status, contentType: res.headers.get("content-type") };
       },
     });
     return json({ success: true, elapsed_ms: Date.now() - started, ...report }, report.failures.length >= 5 ? 500 : 200);
