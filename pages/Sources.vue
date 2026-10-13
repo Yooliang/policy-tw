@@ -86,7 +86,7 @@ const grouped = computed(() => {
           代理可以直接用端點讀這份清單（<code class="bg-slate-100 px-1 rounded">format=md</code> 回 Markdown）：
         </p>
         <code class="block bg-slate-900 text-slate-100 rounded p-3 overflow-x-auto text-xs">
-          GET https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/sources?party=&amp;region=&amp;election_type=&amp;need=photo,policy&amp;format=md
+          GET https://api.hustings.net/tw/sources?party=&amp;region=&amp;election_type=&amp;need=photo,policy&amp;format=md
         </code>
         <p class="mt-2 text-slate-500">
           有人物對象的任務（補基本資料、政見缺漏、參選來源、名單清查等）會依那個人的政黨、縣市、選舉別自動附上對得到的來源，不用每次都自己查這支端點。

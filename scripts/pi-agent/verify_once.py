@@ -35,7 +35,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1"
+BASE = "https://api.hustings.net/tw"  # 舊的 https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1 照常可用
 DEEPSEEK = "https://api.deepseek.com/chat/completions"
 AGENT_TOOL = "pi-verifier/{model}"
 TIMEOUT = 60

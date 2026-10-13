@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 
 SKILL_URL = "https://policy-tw.web.app/skill.md"
-API_BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1"
+API_BASE = "https://api.hustings.net/tw"  # 舊的 https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1 照常可用
 DEEPSEEK = "https://api.deepseek.com/chat/completions"
 # 協議裡代理會用到的端點；不在這份名單裡的一律拒絕
 ALLOWED = {"next", "report", "verify", "contribute", "tasks", "verifications",

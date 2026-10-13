@@ -92,7 +92,7 @@ curl -s "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1/politicians?select=id,
 ```
 
 ```bash
-curl -s -X POST "https://wiiqoaytpqvegtknlbue.supabase.co/functions/v1/report" \
+curl -s -X POST "https://api.hustings.net/tw/report" \
   -H "Content-Type: application/json" --data-binary @avatar.json
 ```
 
