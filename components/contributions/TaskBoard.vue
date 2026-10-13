@@ -31,7 +31,7 @@ interface BoardTask {
   /** 代理針對這筆任務交的貢獻：筆數與最接近通過那一筆的票數（後端 _shared/task-votes.ts） */
   votes?: {
     submissions: number
-    leading: { status: string; agree_count: number; disagree_count: number; required_agree: number; score: number; target_score: number; unsure_count: number; verdict: string | null } | null
+    leading: { contribution_type?: string; status: string; agree_count: number; disagree_count: number; required_agree: number; score: number; target_score: number; unsure_count: number; verdict: string | null } | null
   }
 }
 
@@ -185,6 +185,7 @@ defineExpose({ load })
             <!-- 票數：跟貢獻看板同一種拉鋸條（ScoreBar，−目標＝退件、＋目標＝通過），窄版（維護者 2026-10-10） -->
             <span v-if="t.votes?.leading" class="inline-flex items-center gap-1.5" data-testid="task-votes">
               <ScoreBar narrow :score="t.votes.leading.score" :target="t.votes.leading.target_score" :agree="t.votes.leading.agree_count" :disagree="t.votes.leading.disagree_count" :unsure="t.votes.leading.unsure_count" />
+              <span v-if="t.votes.leading.contribution_type === 'no_change'" class="text-[11px] text-slate-500" data-testid="task-not-found">回報查無</span>
               <span v-if="t.votes.leading.verdict" class="text-[11px] text-slate-500" :title="voteTitle(t)">{{ VERDICT_LABEL[t.votes.leading.verdict] ?? '' }}</span>
             </span>
             <span v-if="t.votes && t.status === 'open'" class="text-[11px] text-slate-400" data-testid="task-submissions">

@@ -7,6 +7,8 @@
  *   - 一般任務：contributions.task_id = 任務 id
  *   - 裁決任務：contribution_type=adjudication 且 payload.contribution_id = 任務 target.contribution_id
  *     （一份裁決本身也要 3 票同意才定案，見 consensus.ts 的 AGREE_THRESHOLDS.adjudication）
+ *   - 查無回報（no_change）：task_id 欄是空的，任務 id 只寫在 payload.task_id（2026-10-13：任務頁把
+ *     卡在待驗證查無回報的網站請求顯示成「還沒有人提交」，其實已經有人回報查無、在等第二票）
  */
 
 import { requiredAgree, effectiveOrRequired } from "./consensus.ts";
@@ -34,6 +36,8 @@ export interface TaskVoteSummary {
   /** 最接近通過的那一筆；沒有進行中的就是 null */
   leading: {
     contribution_id: string;
+    /** 這一筆的貢獻型別（no_change＝回報查無） */
+    contribution_type: string;
     status: string;
     agree_count: number;
     disagree_count: number;
@@ -66,13 +70,16 @@ function payloadField(payload: unknown, key: string): string | null {
 /** 純函式：任務 × 貢獻 → 每筆任務的票數摘要。已上線的那筆優先當 leading（已經過了），否則取同意票比例最高的進行中那筆 */
 export function summarizeTaskVotes(tasks: readonly TaskRef[], contributions: readonly VoteContribution[]): Map<string, TaskVoteSummary> {
   const out = new Map<string, TaskVoteSummary>();
+  // 呼叫端合併好幾個查詢的結果，同一筆可能出現兩次：依 id 去重，不然 submissions 會重算
+  const seen = new Set<string>();
+  contributions = contributions.filter((c) => !seen.has(c.id) && (seen.add(c.id), true));
   for (const t of tasks) {
     const originalId = adjudicatedIdOf(t);
     const mine = contributions.filter((c) =>
       COUNTED.has(c.status) &&
       (originalId
         ? c.contribution_type === "adjudication" && payloadField(c.payload, "contribution_id") === originalId
-        : c.task_id === t.task_id)
+        : c.task_id === t.task_id || (c.task_id == null && payloadField(c.payload, "task_id") === t.task_id))
     );
     const withNeed = mine.map((c) => ({ c, need: effectiveOrRequired(c) }));
     const applied = withNeed.find(({ c }) => c.status === "applied");
@@ -85,6 +92,7 @@ export function summarizeTaskVotes(tasks: readonly TaskRef[], contributions: rea
       leading: pick
         ? {
           contribution_id: pick.c.id,
+          contribution_type: pick.c.contribution_type,
           status: pick.c.status,
           agree_count: pick.c.agree_count,
           disagree_count: pick.c.disagree_count,
