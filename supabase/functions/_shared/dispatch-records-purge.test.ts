@@ -444,7 +444,8 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   const find = (rs: Reader[], schema: Schema, t: Table, frag: string) => of(rs, schema, t).find((r) => r.where.includes(frag));
 
   // ---- public（正見）----
-  assertEquals(find(ts.readers, "public", "verify_dispatches", "next/index.ts")?.hours, consts.MACHINE_LOOKBACK_HOURS, "/next 每台機器 2:1");
+  // /next 每台機器 2:1 已在 2026-10-13 拿掉（派工排序改秒數），正見的 /next 不再讀 verify_dispatches；日本站 jp-next 照舊（見下）
+  assertEquals(find(ts.readers, "public", "verify_dispatches", "next/index.ts"), undefined, "/next 不再讀 verify_dispatches");
   assertEquals(find(ts.readers, "public", "verify_dispatches", "verify-handler.ts")?.hours, consts.VERIFY_BINDING_DAYS * 24, "派工綁定");
   assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours, 15 / 60, "驗證池：剛派的 15 分鐘");
   assertEquals(find(sql.readers, "public", "verify_dispatches", "dispatch_recent")?.hours, 240 / 60, "/queue：上限 240 分鐘");
@@ -453,7 +454,7 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   // 寫入端不算讀者；skips 沒有任何讀者（正式庫 2026-10-08 查：沒有函式、視圖引用它）
   assertEquals(of(ts.readers, "public", "contribution_task_skips").length, 0, "skips 在程式裡只有 upsert");
   assertEquals(of(sql.readers, "public", "contribution_task_skips").length, 0, "skips 最後一版的函式／視圖／排程都不讀它");
-  assertEquals(of(ts.readers, "public", "verify_dispatches").length, 2, "程式端 verify_dispatches 的讀者只有 /next 與派工綁定");
+  assertEquals(of(ts.readers, "public", "verify_dispatches").length, 1, "程式端 verify_dispatches 的讀者只有派工綁定");
   assertEquals(of(sql.readers, "public", "verify_dispatches").length, 2, "SQL 端只有驗證池與 dispatch_recent");
   // public 的讀者不含日本站的檔案（jp-next 的路徑含 next/index.ts，沒分 schema 就會被當成 /next）
   assert(!ts.readers.some((r) => r.schema === "public" && /jp-next|_shared\/jp\//.test(r.where)), "日本站的檔案不能算進 public");
@@ -693,14 +694,14 @@ Deno.test("B5 排程在、冪等（migration 重跑還是一條）；清理函�
 // ============================================================
 // C. 還原驗證：把原始碼或 migration 精確改壞一處，對應的檢查必須紅
 // ============================================================
-const MACHINE_FILE = "supabase/functions/next/index.ts";
+const MACHINE_FILE = "supabase/functions/jp-next/index.ts"; // 正見 /next 的每台機器 2:1 已拿掉（2026-10-13），回看期的讀者剩日本站
 const BINDING_FILE = "supabase/functions/_shared/verify-handler.ts";
 const DISPATCH_FILE = "supabase/functions/_shared/dispatch.ts";
 const hasProblem = (ps: string[], frag: string) => ps.some((p) => p.includes(frag));
 
 Deno.test("C1 程式端回看期改大（3 小時→400 小時）：超過保留天數 ＋ 邊際，紅", () => {
   const bad = mutateSrc(REAL, DISPATCH_FILE, "export const MACHINE_LOOKBACK_HOURS = 3;", "export const MACHINE_LOOKBACK_HOURS = 400;");
-  assert(hasProblem(allProblems(bad), "next/index.ts"), allProblems(bad).join("\n"));
+  assert(hasProblem(allProblems(bad), "jp-next/index.ts"), allProblems(bad).join("\n"));
 });
 
 Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成無限）：紅", () => {
@@ -712,7 +713,7 @@ Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成�
 
 Deno.test("C3 /next 的 since 改成寫死 30 天、或換成認不得的常數：紅", () => {
   const hard = mutateSrc(REAL, MACHINE_FILE, "MACHINE_LOOKBACK_HOURS * 3600_000", "30 * 24 * 3600_000");
-  assert(hasProblem(allProblems(hard), "next/index.ts"), allProblems(hard).join("\n"));
+  assert(hasProblem(allProblems(hard), "jp-next/index.ts"), allProblems(hard).join("\n"));
   const unknown = mutateSrc(REAL, MACHINE_FILE, "MACHINE_LOOKBACK_HOURS * 3600_000", "SOME_NEW_LOOKBACK * 3600_000");
   assert(hasProblem(allProblems(unknown), "不認得的常數"), allProblems(unknown).join("\n"));
 });
