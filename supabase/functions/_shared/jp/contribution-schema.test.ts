@@ -93,7 +93,7 @@ const districtSeats = {
 };
 
 Deno.test("十三種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"]);
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link"]);
   for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats, removal, policyProgress]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));

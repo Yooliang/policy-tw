@@ -20,6 +20,9 @@
  * 日本站自己的：policy_progress（政策の経過、対応する派工臂 progress_stale／deadline_due。正見 policy_progress の日本版：policy_id・status〔日本の 6 値〕・date・note、progress〔％〕は使わない；
  *   status=discontinued は official 等級の出典が要る；claimKey 併票の型別〔duplicate-claim.ts、鍵＝policy_id＋status＋date〕，不進 same_claim 登記表，所以 resolved_claim 不要）。
  *   progress_stale の任務は『政策ではなかった』ときの removal でも答えられる（JP_TASK_ALSO）。落庫 SQL policy_jp.apply_policy_progress（20261011200000）。
+ * 日本站自己的：lineage／lineage_participants／lineage_handover／lineage_link（政策の継承，対応する派工臂 lineage_candidates／lineage_roles／handover_missing／lineage_links。正見の同名の型別の日本版：
+ *   層級は national／regional／local＋lg_code、交接は人物×選挙ではなく任期（politician_offices）から任期へ。同一件事の登記表にも claimKey 併票にも入れない
+ *   〔重複は DB の一意制約と落庫の冪等で止める＝same-claims.ts の APPLY_IDEMPOTENT_TYPES〕，所以 resolved_claim 不要）。落庫 SQL policy_jp.apply_lineage*（20261011210000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -42,7 +45,7 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link"] as const;
 /** policy_progress の status（policy_jp.policies.status の 6 値。正見の Campaign Pledge／Proposed／In Progress／Achieved／Stalled／Failed ではない） */
 export const JP_POLICY_STATUSES = ["not_started", "in_progress", "partial", "achieved", "discontinued", "unfulfilled"] as const;
 /** policy_progress の note と date の範囲（SQL apply_policy_progress と同じ） */
@@ -53,6 +56,23 @@ export const DISTRICT_SEATS_MAX = 200;
 export const DISTRICT_SEATS_MAX_DISTRICTS = 100;
 export const DISTRICT_SEATS_BASES = ["law", "notice"] as const;
 export const DISTRICT_SEATS_KINDS = ["at_large", "district"] as const;
+/** 政策の継承（脈絡）の上限・列挙（SQL policy_jp.apply_lineage* と同じ値） */
+export const JP_LINEAGE_LEVELS = ["national", "regional", "local"] as const;
+export const JP_LINEAGE_TITLE_MIN = 4;
+export const JP_LINEAGE_TITLE_MAX = 60;
+export const JP_LINEAGE_SUMMARY_MAX = 200;
+export const JP_LINEAGE_CATEGORY_MAX = 30;
+export const JP_LINEAGE_NOTE_MIN = 20;
+export const JP_LINEAGE_NOTE_MAX = 1000;
+export const JP_LINEAGE_MAX_POLICIES = 30;
+export const JP_LINEAGE_MAX_PARTICIPANTS = 50;
+export const JP_HANDOVER_TYPES = ["keep", "pivot", "shrink", "stop", "resume"] as const;
+export const JP_LINEAGE_ROLES = ["proposer", "co_proposer", "cosigner", "advocate"] as const;
+export const JP_LINEAGE_BASES = ["official_record", "self_claim"] as const;
+export const JP_LINK_TYPES = ["top_down", "bottom_up"] as const;
+export const JP_LINEAGE_LOCATOR_MAX = 200;
+export const JP_LINEAGE_REL_NOTE_MIN = 20;
+export const JP_LINEAGE_REL_NOTE_MAX = 500;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -101,6 +121,10 @@ export const isTaskIdShape = (v: unknown): boolean =>
 
 /** 政見の題名の正規化（同一件事の鍵）：NFKC・小文字・空白（全角も）を全部除く。SQL policy_jp.policy_title_key と同じ（對齊テスト） */
 /** 前後の空白を落とす（全角空白 U+3000 も）。SQL policy_jp.policy_trim と同じ集合（ASCII の空白類＋U+3000；對齊テスト） */
+/** 日本時間（Asia/Tokyo）の今日 YYYY-MM-DD。SQL の activity_today() と同じ日付の切り方（UTC ではない）。テストは jpSetNowForTest で時計を差し替える */
+let jpNow: () => Date = () => new Date();
+export const jpSetNowForTest = (fn: (() => Date) | null): void => { jpNow = fn ?? (() => new Date()); };
+export const jpTodayTokyo = (now: Date = jpNow()): string => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 export const jpTrim = (v: string): string => v.replace(/^[ \t\r\n\f\v\u3000]+|[ \t\r\n\f\v\u3000]+$/g, "");
 const cpLen = (v: string): number => Array.from(v).length;
 
@@ -200,15 +224,24 @@ export const JP_TASK_ARMS = {
   candidacy_source_missing: "candidacy",
   // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
   election_result_missing: "candidacy",
+  // C 期（policy-ops#95）：政策の継承。格の候補→lineage、交接→lineage_handover、同級多人の役割→lineage_participants、上下級の関連→lineage_link。
+  // 答えが「なかった」ときは no_change（lineage／lineage_link の confirmed は task_checks に永久、handover／roles の not_found は標準の冷却）
+  lineage_candidate: "lineage",
+  handover_missing: "lineage_handover",
+  lineage_roles_missing: "lineage_participants",
+  lineage_link_candidate: "lineage_link",
 } as const satisfies Record<string, JpContributionType>;
 /** 任務の型別（JP_TASK_ARMS）のほかに受ける交件型別（task_id が指す政策に対する removal だけ。落ちるのは checkTaskAgreement の target_id 照合） */
 export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"] };
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
 const DUP_POLICY_REST_RE = /^([^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_(?:\d{6}|national):(?:district|proportional|at_large)):([0-9a-f]{32})$/;
+/** lineage_candidate の task_id 末尾：<格の鍵 12 字>:<清單指紋 8 字>。lineage_link_candidate は <下級の脈絡 id>:<指紋 8 字>。handover_missing は <脈絡 id>:<指紋 8 字> */
+const LINEAGE_CAND_REST_RE = /^[0-9a-f]{12}:[0-9a-f]{8}$/;
+const LINEAGE_ID_FP_REST_RE = /^([^\s:]{1,64}):[0-9a-f]{8}$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -286,6 +319,29 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   // duplicate_policy：task_id の末尾は <参選紀錄 id>:<清單指紋>。removal の target_id が清單の政見かは DB を見ないと分からない（落庫側が政見の存在・公開済みを確かめる）ので、ここは形だけ
   if (arm === "duplicate_policy") {
     if (!DUP_POLICY_REST_RE.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:duplicate_policy:<参選紀錄 id>:<清單指紋>）");
+    return;
+  }
+  // 政策の継承：lineage_candidate は格の指紋だけ（どの政策かは payload.policy_ids が target.policies の中かを DB 側では見ない＝落庫が政策の実在・公開を確かめる）、
+  // 他の三つは task_id の脈絡 id と payload の脈絡 id が一致すること
+  if (arm === "lineage_candidate") {
+    if (!LINEAGE_CAND_REST_RE.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:lineage_candidate:<格の鍵>:<指紋>）");
+    return;
+  }
+  if (arm === "handover_missing") {
+    const r = LINEAGE_ID_FP_REST_RE.exec(m[2]);
+    if (!r) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:handover_missing:<脈絡 id>:<指紋>）"); return; }
+    if (payload.lineage_id !== r[1]) push("payload.lineage_id", `payload.lineage_id（${String(payload.lineage_id ?? "未填")}）跟這個任務問的脈絡（${r[1]}）不一致：一個任務只回報它問的那條脈絡的交接`);
+    return;
+  }
+  if (arm === "lineage_roles_missing") {
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:lineage_roles_missing:<脈絡 id>）"); return; }
+    if (payload.lineage_id !== m[2]) push("payload.lineage_id", `payload.lineage_id（${String(payload.lineage_id ?? "未填")}）跟這個任務問的脈絡（${m[2]}）不一致：一個任務只回報它問的那條脈絡的役割`);
+    return;
+  }
+  if (arm === "lineage_link_candidate") {
+    const r = LINEAGE_ID_FP_REST_RE.exec(m[2]);
+    if (!r) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:lineage_link_candidate:<下級の脈絡 id>:<指紋>）"); return; }
+    if (payload.lower_lineage_id !== r[1]) push("payload.lower_lineage_id", `payload.lower_lineage_id（${String(payload.lower_lineage_id ?? "未填")}）跟這個任務問的下級の脈絡（${r[1]}）不一致：一個任務只回報它問的那條下級の脈絡の関連`);
     return;
   }
   // progress_stale／deadline_due：task_id の末尾は政策 id。1 つの任務は 1 つの政策だけ（removal で答えるときは target_id が、policy_progress は policy_id がその政策）
@@ -378,7 +434,100 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       const noteLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
       if (noteLen < POLICY_PROGRESS_NOTE_MIN || noteLen > POLICY_PROGRESS_NOTE_MAX) push("payload.note", `note 必填（${POLICY_PROGRESS_NOTE_MIN}～${POLICY_PROGRESS_NOTE_MAX} 字：何が起きたか、どの文書に書いてあるか）`);
       if (!isJpDate(p.date)) push("payload.date", "date 必填：出来事の日付 YYYY-MM-DD，要是真的有這一天，年份在 1947～2100");
-      else if (p.date > new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)) push("payload.date", "date 不能是未來的日期");
+      else if (p.date > jpTodayTokyo()) push("payload.date", "date 不能是未來的日期（日本時間の今日まで）");
+      break;
+    }
+    case "lineage": {
+      // 脈絡を建てる／既存に政策を掛け外しする／題名等を直す（正見 lineage の日本版）。lineage_id（既存）と new_lineage（新規）はどちらか一方
+      const hasId = p.lineage_id !== undefined;
+      const nl = isObj(p.new_lineage) ? p.new_lineage : undefined;
+      if (p.new_lineage !== undefined && !nl) push("payload.new_lineage", "new_lineage はオブジェクト {title, summary, category, level, lg_code}");
+      if (hasId === (p.new_lineage !== undefined)) push("payload.lineage_id", "lineage_id（既存の脈絡に入れる）と new_lineage（新しく建てる）はどちらか一方だけ");
+      const idList = (key: string): string[] | undefined => {
+        const v = p[key];
+        if (v === undefined) return undefined;
+        if (!Array.isArray(v) || v.length > JP_LINEAGE_MAX_POLICIES || !v.every((x) => isStr(x, 1, 64) && !/\s/.test(x as string))) {
+          push(`payload.${key}`, `${key} は政策 id の配列（最大 ${JP_LINEAGE_MAX_POLICIES} 件）`);
+          return undefined;
+        }
+        return v as string[];
+      };
+      const attach = idList("policy_ids");
+      const detach = idList("detach_policy_ids");
+      if (attach && detach && attach.some((x) => detach.includes(x))) push("payload.detach_policy_ids", "同じ政策を掛けると同時に外すことはできない");
+      const noteLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
+      if (noteLen < JP_LINEAGE_NOTE_MIN || noteLen > JP_LINEAGE_NOTE_MAX) push("payload.note", `note 必填（${JP_LINEAGE_NOTE_MIN}～${JP_LINEAGE_NOTE_MAX} 字：なぜ同じ件と言えるか。同じ事業名・場所・法令・予算を原文や報道で引く）`);
+      const titleOk = (v: unknown) => typeof v === "string" && cpLen(jpTrim(v)) >= JP_LINEAGE_TITLE_MIN && cpLen(jpTrim(v)) <= JP_LINEAGE_TITLE_MAX;
+      if (nl) {
+        if (!titleOk(nl.title)) push("payload.new_lineage.title", `title 必填（${JP_LINEAGE_TITLE_MIN}～${JP_LINEAGE_TITLE_MAX} 字：この件の名称。中立・事実のまま）`);
+        if (nl.summary !== undefined && !(typeof nl.summary === "string" && cpLen(jpTrim(nl.summary)) <= JP_LINEAGE_SUMMARY_MAX)) push("payload.new_lineage.summary", `summary は ${JP_LINEAGE_SUMMARY_MAX} 字まで`);
+        if (!(typeof nl.category === "string" && cpLen(jpTrim(nl.category)) >= 1 && cpLen(jpTrim(nl.category)) <= JP_LINEAGE_CATEGORY_MAX)) push("payload.new_lineage.category", `category 必填（1～${JP_LINEAGE_CATEGORY_MAX} 字）`);
+        if (!oneOf(JP_LINEAGE_LEVELS, nl.level)) push("payload.new_lineage.level", `level 必填：${JP_LINEAGE_LEVELS.join("／")} 之一（この件を決め、実行するのはどの層か）`);
+        else if (nl.level === "national") {
+          if (nl.lg_code !== undefined && nl.lg_code !== null) push("payload.new_lineage.lg_code", "level=national の脈絡には lg_code を付けない");
+        } else if (!lgCodeValid(nl.lg_code)) push("payload.new_lineage.lg_code", "level が regional／local のときは lg_code 必須（全国地方公共団体コード 6 碼、検査碼要對。regional は都道府県、local は市区町村の団体）");
+        if (detach && detach.length > 0) push("payload.detach_policy_ids", "新しく建てる脈絡に、外す政策はない");
+        const min = nl.level === "national" ? 1 : 2;
+        if (!attach || attach.length < min) push("payload.policy_ids", `新しい脈絡には policy_ids を ${min} 件以上付ける`);
+      } else if (hasId) {
+        if (!isStr(p.lineage_id, 1, 64) || /\s/.test(p.lineage_id as string)) push("payload.lineage_id", "lineage_id は脈絡の id（1～64 字）");
+        if (p.title !== undefined && !titleOk(p.title)) push("payload.title", `title は ${JP_LINEAGE_TITLE_MIN}～${JP_LINEAGE_TITLE_MAX} 字`);
+        if (p.summary !== undefined && !(typeof p.summary === "string" && cpLen(jpTrim(p.summary)) <= JP_LINEAGE_SUMMARY_MAX)) push("payload.summary", `summary は ${JP_LINEAGE_SUMMARY_MAX} 字まで`);
+        if (p.category !== undefined && !(typeof p.category === "string" && cpLen(jpTrim(p.category)) >= 1 && cpLen(jpTrim(p.category)) <= JP_LINEAGE_CATEGORY_MAX)) push("payload.category", `category は 1～${JP_LINEAGE_CATEGORY_MAX} 字`);
+        if (!(attach && attach.length > 0) && !(detach && detach.length > 0) && p.title === undefined && p.summary === undefined && p.category === undefined) {
+          push("payload.policy_ids", "既存の脈絡に入れるときは policy_ids（掛ける政策）を付ける。外すなら detach_policy_ids、脈絡自体を直すなら title／summary／category");
+        }
+      }
+      break;
+    }
+    case "lineage_participants": {
+      // 同級多人の役割（議員の提案・賛成）。一人の一つの根拠（official_record／self_claim）に役割は一つ、remove=true で外す
+      if (!isStr(p.lineage_id, 1, 64) || /\s/.test(p.lineage_id as string)) push("payload.lineage_id", "lineage_id 必填（任務 target.lineage_id の値）");
+      if (!Array.isArray(p.participants) || p.participants.length < 1 || p.participants.length > JP_LINEAGE_MAX_PARTICIPANTS) {
+        push("payload.participants", `participants は 1～${JP_LINEAGE_MAX_PARTICIPANTS} 件の配列`);
+        break;
+      }
+      const seen = new Set<string>();
+      p.participants.forEach((it: unknown, i: number) => {
+        const at = `payload.participants[${i}]`;
+        if (!isObj(it)) { push(at, "各件はオブジェクト"); return; }
+        const remove = it.remove === true;
+        if (!isStr(it.politician_id, 1, 64) || /\s/.test(it.politician_id as string)) push(`${at}.politician_id`, "politician_id 必填（サイトに登録のある人物の id）");
+        if (!oneOf(JP_LINEAGE_BASES, it.basis)) push(`${at}.basis`, `basis 必填：${JP_LINEAGE_BASES.join("／")} 之一（公的な記録 or 本人の主張）`);
+        if (!remove && !oneOf(JP_LINEAGE_ROLES, it.role)) push(`${at}.role`, `role 必填：${JP_LINEAGE_ROLES.join("／")} 之一`);
+        if (!isStr(it.source_locator, 1, JP_LINEAGE_LOCATOR_MAX)) push(`${at}.source_locator`, `source_locator 必填（1～${JP_LINEAGE_LOCATOR_MAX} 字：議案番号・会議録の日付と案件・頁）`);
+        if (it.note !== undefined && !(typeof it.note === "string" && cpLen(jpTrim(it.note)) <= 200)) push(`${at}.note`, "note は 200 字まで");
+        if (it.source_url !== undefined && !(typeof it.source_url === "string" && /^https?:\/\/\S+$/.test(it.source_url))) push(`${at}.source_url`, "source_url は http(s) の網址");
+        const key = `${String(it.politician_id)}|${String(it.basis)}`;
+        if (seen.has(key)) push(at, "同じ人の同じ根拠は 1 回だけ（公的な記録は役割 1 つ、本人の主張は役割 1 つ）");
+        seen.add(key);
+      });
+      break;
+    }
+    case "lineage_handover": {
+      // 前後任の交接（任期から任期へ）。from/to は politician_offices の id。stop（中止）は official 等級の出典が要る（下の source 検査）
+      for (const k of ["lineage_id", "from_office_id", "to_office_id"] as const) {
+        if (!isStr(p[k], 1, 64) || /\s/.test(p[k] as string)) push(`payload.${k}`, `${k} 必填（任務 target の値）`);
+      }
+      if (p.from_office_id !== undefined && p.from_office_id === p.to_office_id) push("payload.to_office_id", "前任と後任の任期が同じ：交接は別々の二つの任期の間");
+      if (!oneOf(JP_HANDOVER_TYPES, p.handover_type)) push("payload.handover_type", `handover_type 必填：${JP_HANDOVER_TYPES.join("／")} 之一（keep 継承／pivot 転換／shrink 縮小／stop 中止／resume 再開）`);
+      const nLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
+      if (nLen < JP_LINEAGE_REL_NOTE_MIN || nLen > JP_LINEAGE_REL_NOTE_MAX) push("payload.note", `note 必填（${JP_LINEAGE_REL_NOTE_MIN}～${JP_LINEAGE_REL_NOTE_MAX} 字：どの文書に、どう書いてあるか）`);
+      if (!isStr(p.source_locator, 1, JP_LINEAGE_LOCATOR_MAX)) push("payload.source_locator", `source_locator 必填（1～${JP_LINEAGE_LOCATOR_MAX} 字：予算書の頁・会議録の日付と案件・報道の段落）`);
+      if (p.decided_on !== undefined && !isJpDate(p.decided_on)) push("payload.decided_on", "decided_on は YYYY-MM-DD（実在する日付、1947 年以降）");
+      else if (typeof p.decided_on === "string" && p.decided_on > jpTodayTokyo()) push("payload.decided_on", "decided_on は日本時間の今日までの日付（未来の日付は不可）");
+      break;
+    }
+    case "lineage_link": {
+      // 上下級の関連。上級が下級の一つ上の層かは DB を見ないと分からない（落庫が検査）ので、ここは形だけ
+      for (const k of ["upper_lineage_id", "lower_lineage_id"] as const) {
+        if (!isStr(p[k], 1, 64) || /\s/.test(p[k] as string)) push(`payload.${k}`, `${k} 必填（脈絡の id）`);
+      }
+      if (p.upper_lineage_id !== undefined && p.upper_lineage_id === p.lower_lineage_id) push("payload.lower_lineage_id", "上級と下級は別々の脈絡");
+      if (!oneOf(JP_LINK_TYPES, p.link_type)) push("payload.link_type", `link_type 必填：${JP_LINK_TYPES.join("／")} 之一（top_down 上が定め下が実行／bottom_up 下が先に動き上が採り入れた）`);
+      const nLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
+      if (nLen < JP_LINEAGE_REL_NOTE_MIN || nLen > JP_LINEAGE_REL_NOTE_MAX) push("payload.note", `note 必填（${JP_LINEAGE_REL_NOTE_MIN}～${JP_LINEAGE_REL_NOTE_MAX} 字：どの法令・補助・計画が二つの件をつないでいるか）`);
+      if (!isStr(p.source_locator, 1, JP_LINEAGE_LOCATOR_MAX)) push("payload.source_locator", `source_locator 必填（1～${JP_LINEAGE_LOCATOR_MAX} 字：条文・決定通知の番号・計画書の頁）`);
       break;
     }
     case "election": {
@@ -704,6 +853,23 @@ export function validateContributionRequest(body: unknown): ValidationResult {
         && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
         && !(sourceUrls as string[]).some((u) => jpSourceKind(u, "policy_progress") === "official")) {
       push("source_urls", "status=discontinued（中止）には公的な出典が要ります：source_urls に official 等級の網址（*.go.jp・*.lg.jp、city.／town.／vill.／pref.／ward. で始まる .jp の自治体公式サイト）を最低 1 つ入れてください");
+    }
+    // lineage_handover の stop（中止）：誰かが事業を取りやめたという主張なので official 等級の出典が最低 1 つ（SQL apply_lineage_handover も同じ判定）
+    if (raw.contribution_type === "lineage_handover" && raw.payload.handover_type === "stop" && Array.isArray(sourceUrls)
+        && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
+        && !(sourceUrls as string[]).some((u) => jpSourceKind(u, "lineage_handover") === "official")) {
+      push("source_urls", "handover_type=stop（中止）には公的な出典が要ります：source_urls に official 等級の網址（*.go.jp・*.lg.jp、city.／town.／vill.／pref.／ward. で始まる .jp の自治体公式サイト）を最低 1 つ入れてください");
+    }
+    // lineage_participants の basis=official_record：その人の出典（item.source_url、なければ頂層の source_urls）に official 等級が要る。SQL も同じ判定
+    if (raw.contribution_type === "lineage_participants" && Array.isArray(raw.payload.participants) && Array.isArray(sourceUrls)
+        && sourceUrls.every((u) => typeof u === "string")) {
+      (raw.payload.participants as unknown[]).forEach((it, i) => {
+        if (!isObj(it) || it.basis !== "official_record" || it.remove === true) return;
+        const urls = typeof it.source_url === "string" && it.source_url ? [it.source_url] : (sourceUrls as string[]);
+        if (urls.length > 0 && !urls.some((u) => jpSourceKind(u, "lineage_participants") === "official")) {
+          push(`payload.participants[${i}].source_url`, "basis=official_record（公的な記録）には official 等級の出典が要ります（*.go.jp・*.lg.jp、議会・自治体の公式サイト）。公的な記録でなければ basis=self_claim");
+        }
+      });
     }
     // candidacy_source_missing（#589 審查の後続）：この任務は「選管の公表ページ（official 等級）を足す」こと。報道だけの candidacy は
     // 同じ状態の unchanged で落庫され派工は収回されるが、official の出典は付かないので次の seed で同じ任務がまた開く（無限に再派工）。入口で断る

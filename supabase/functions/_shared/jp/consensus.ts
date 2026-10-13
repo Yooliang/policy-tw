@@ -20,6 +20,8 @@
  *   TS は riskLevel 預設 normal のまま、型別を足すだけ（policy-jp-duplicate-policy.test.ts が SQL 側を守る）。
  * policy_progress（政策の経過、20261011200000）：SQL は contribution_needs_two_ips に列挙しない（網段 1 つでよい）、contribution_required_agree は ELSE の normal（目標 3・退件 −3）、
  *   system_vote_eligible は正見の複本のまま policy_progress を含むが、jp-system-one の候選型別（system_one_precheck_types）には入れない＝系統票なし。TS は riskLevel 預設 normal のまま、型別を足すだけ。
+ * lineage／lineage_participants／lineage_handover／lineage_link（政策の継承、20261011210000）：SQL は contribution_required_agree が ELSE の normal（目標 3・退件 −3）、system_vote_eligible／jp-system-one の候選に入れない＝系統票なし。
+ *   contribution_needs_two_ips は lineage_handover の handover_type=stop だけ 2 網段（正見と同じ一句）。TS は riskLevel 預設 normal のまま、型別を足すだけ。
  * 純函式（不動資料）的守門規則（盲反對、罐頭備註、抄備註、同網站證據…）不複製，直接從正見的 consensus.ts 轉出，行為完全相同。
  */
 
@@ -38,7 +40,7 @@ export {
   weightReason,
 } from "../consensus.ts";
 
-export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy" | "politician" | "policy" | "policy_elements" | "district_seats" | "removal" | "policy_progress";
+export type JpContributionType = "no_change" | "task_suggestion" | "correction" | "election" | "local_government" | "regional_stat" | "candidacy" | "politician" | "policy" | "policy_elements" | "district_seats" | "removal" | "policy_progress" | "lineage" | "lineage_participants" | "lineage_handover" | "lineage_link";
 
 /** light＝不動正式資料（無異動、提議任務）；normal＝更正、選舉日程、地方公共団体、地域統計 */
 export type JpRiskLevel = "normal" | "light";
