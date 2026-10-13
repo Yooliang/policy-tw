@@ -39,6 +39,7 @@ import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
+import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
 import { orderPeopleByBallotNo } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 
@@ -347,9 +348,10 @@ const availableSubRegions = computed(() => {
         type !== ElectionType.LEGISLATOR &&
         type !== ElectionType.INDIGENOUS_DISTRICT_CHIEF &&
         type !== ElectionType.INDIGENOUS_DISTRICT_REP &&
-        !c.subRegion.includes('選區')
+        (!c.subRegion.includes('選區') || townshipOfSubRegion(c.subRegion) !== null)
     })
-    .forEach(c => subRegions.add(c.subRegion!))
+    // 代表記到「<鄉鎮>第NN選舉區」的（#464 起）收它的鄉鎮
+    .forEach(c => subRegions.add(townshipOfSubRegion(c.subRegion) ?? c.subRegion!))
 
   // 2. 從選舉區對應表取得（議員對應的鄉鎮區）
   // 優先使用當前選舉年份，若無則使用任何可用年份（鄉鎮區跨選舉相對穩定）
@@ -408,8 +410,9 @@ const filteredPoliticians = computed(() => {
           type === ElectionType.INDIGENOUS_DISTRICT_REP) {
         return normalizeRegionName(c.subRegion).startsWith(normalizeRegionName(selectedSubRegion.value))
       }
-      // 其他（鄉鎮市長、代表、村里長）：完全匹配
-      return sameRegionName(c.subRegion, selectedSubRegion.value)
+      // 其他（鄉鎮市長、代表、村里長）：等值，或代表記到「<鄉鎮>第NN選舉區」（#464 起）——跟預渲染、
+      // get_politicians_by_level 同一條規則（lib/election-townships.ts 的 inTownship）
+      return inTownship(c.subRegion, selectedSubRegion.value)
     })
   }
   return sortPoliticians(result)
@@ -730,7 +733,7 @@ const allCampaignPolicies = computed(() =>
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
-        if (!sameRegionName(politician.subRegion, selectedSubRegion.value)) return false
+        if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
@@ -750,7 +753,7 @@ const regionPolicies = computed(() =>
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
       } else {
-        if (!sameRegionName(politician.subRegion, selectedSubRegion.value)) return false
+        if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
@@ -808,7 +811,7 @@ function poolForLevel(level: ElectionType) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
         if (electoralDistrict && c.subRegion !== electoralDistrict) return false
       } else {
-        if (!sameRegionName(c.subRegion, selectedSubRegion.value)) return false
+        if (!inTownship(c.subRegion, selectedSubRegion.value)) return false
       }
     }
     return true
