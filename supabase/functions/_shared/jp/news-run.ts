@@ -28,9 +28,23 @@ export interface NewsStore {
   recordLead(lead: NewsLead, evidence: LeadEvidence[], seenOn: string): Promise<LeadResult>;
 }
 
+export interface FetchedPage { text: string; status: number; contentType: string | null }
 export interface NewsDeps {
-  fetchText(url: string): Promise<string>;
+  /** 文字列だけ返してもよい（テスト）。本番は HTTP 状態と Content-Type も返し、0 件のときの診断に使う */
+  fetchText(url: string): Promise<string | FetchedPage>;
   now(): Date;
+}
+
+/** 解析して 0 件だったときに last_error に残す診断（原因を突き止めるため）：HTTP 状態・Content-Type・<item>／<entry> の数・期限で落ちた数・最新の日付・先頭 200 字 */
+export function zeroItemsDiagnosis(page: FetchedPage, format: FeedFormat, now: Date, maxAgeDays: number): string {
+  const tag = format === "atom" ? "entry" : format === "rss" ? "item" : "url";
+  const blocks = (page.text.match(new RegExp(`<${tag}[\\s>]`, "gi")) ?? []).length;
+  const all = parseFeed(page.text, format, { now, maxAgeDays: 36_500 });
+  const dated = all.map((i) => i.published_at).filter((d): d is string => !!d).sort();
+  const old = all.length - parseFeed(page.text, format, { now, maxAgeDays }).length;
+  const head = page.text.slice(0, 200).replace(/\s+/g, " ");
+  return `記事 0 件：HTTP ${page.status}、Content-Type ${page.contentType ?? "なし"}、<${tag}> ${blocks} 個、読めた ${all.length} 件` +
+    `（うち ${maxAgeDays} 日より古い ${old} 件、最新 ${dated.at(-1) ?? "日付なし"}）、${page.text.length} 字、先頭「${head}」`;
 }
 
 export interface NewsReport {
@@ -65,11 +79,14 @@ export async function runNews(store: NewsStore, deps: NewsDeps, opts: { budgetMs
     if (!(await store.claimSource(s.id, cutoff, now.toISOString()))) return;
     let error: string | null = null, parsed = 0, inserted = 0;
     try {
-      const text = (await deps.fetchText(s.feed_url)).slice(0, MAX_BODY_CHARS);
+      const got = await deps.fetchText(s.feed_url);
+      const page: FetchedPage = typeof got === "string" ? { text: got, status: 200, contentType: null } : got;
+      const text = page.text.slice(0, MAX_BODY_CHARS);
       const items = parseFeed(text, s.format, { now, maxAgeDays: settings.max_age_days });
       parsed = items.length;
-      if (items.length === 0 && !/<(item|entry)[\s>]/i.test(text)) throw new Error(`応答に記事が 1 つもない（${text.length} 字）`);
-      if (items.length > 0) inserted = (await store.insertItems(s.id, items, now.toISOString())).length;
+      // 0 件は黙って通さない（10-13 初回の cron で NHK 3 本とも 0 件・エラーなしだった）：原因が分かる診断を last_error に残す
+      if (items.length === 0) throw new Error(zeroItemsDiagnosis({ ...page, text }, s.format, now, settings.max_age_days));
+      inserted = (await store.insertItems(s.id, items, now.toISOString())).length;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
