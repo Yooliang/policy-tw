@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import {
   autoSourceKind, detailsOfPayload, parseSourceDetails, SELF_EVIDENCES, SELF_INELIGIBLE_HOSTS, selfIneligibleReason,
   sourceLevelNotice, sourcesForWrite, sourceTargetFor, writeSourcesAfterApply,
@@ -17,7 +18,7 @@ const sql = await Deno.readTextFile(MIGRATION);
 /** 去掉 SQL 註解，斷言只看程式本體 */
 const code = (s: string) => s.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
 const body = code(sql);
-const skill = await Deno.readTextFile(new URL("../../../public/skill.md", import.meta.url));
+const skill = await readSkillWithTypes();
 
 const firstSql = await Deno.readTextFile(new URL("../../migrations/20261005000347_sources_table.sql", import.meta.url));
 function sqlFunction(name: string, from = sql): string {
@@ -421,7 +422,7 @@ Deno.test("協議 1.62.0：skill.md 寫清楚 source_details、self 的條件、
   assert(maj > 1 || (maj === 1 && min >= 62), `協議版號 ${PROTOCOL_VERSION} 比 1.62.0 舊`);
   const at = skill.indexOf("1c. **出處可以標等級");
   assert(at > 0, "skill.md 缺第 1c 條");
-  const rule = skill.slice(at, skill.indexOf("\n2. **來源必須證明", at));
+  const rule = skill.slice(at, skill.indexOf("\n\n", at));
   for (const need of [
     "source_details", "self_evidence", "linked_by_official", "mutual_link", "臉書、IG、Threads", "YouTube、X、LINE、TikTok、Telegram",
     "platform_verified", "官方網域", "新聞媒體不是本人來源", "不改計分", "不改門檻", "沒有認定根據的本人帳號一律算媒體",
