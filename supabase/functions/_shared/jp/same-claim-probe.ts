@@ -7,6 +7,7 @@
  *   auto:regional_stats_missing:<lg_code>
  *   auto:policy_missing:<參選紀錄 id>                                                          → policy（第 4 步）
  *   auto:policy_elements_missing:<政見 id>                                                     → policy_elements（政見三要素）
+ *   auto:district_seats_missing:<選挙 id>                                                      → district_seats（議員定数）
  *   auto:profile_gap:<人物 id>／auto:profile_detail_gap:<人物 id>／auto:profile_detail_gap:sources:<人物 id>  → politician（選舉鏈第 3 步）
  */
 export function jpSameClaimProbe(taskId: string): { type: string; payload: Record<string, unknown> } | null {
@@ -25,5 +26,8 @@ export function jpSameClaimProbe(taskId: string): { type: string; payload: Recor
   // 政見三要素の任務：要素を書かない探査＝この政見の庫にある要素と審議中の提出を全部
   m = /^auto:policy_elements_missing:(\S+)$/.exec(taskId);
   if (m) return { type: "policy_elements", payload: { policy_id: m[1] } };
+  // 議員定数の任務：定数を書かない探査＝この選挙の庫にある定数と選挙区行、審議中の提出を全部
+  m = /^auto:district_seats_missing:(\S+)$/.exec(taskId);
+  if (m) return { type: "district_seats", payload: { election_id: m[1] } };
   return null;
 }

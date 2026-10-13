@@ -455,3 +455,57 @@ Deno.test("policy_elements：任務比對（policy_elements_missing）— policy
   assertEquals(pelPaths(wrongArm), ["task_id"]);
   assert(JP_CONTRIBUTION_TYPES.includes("policy_elements"));
 });
+
+// ---- 議員定数（district_seats、policy-ops#95）：欄位規則は SQL district_seats_normalize と同じ ----
+const DSEID = "2027-04-25_muni_assembly_232033";
+const dsOk = (o: Record<string, unknown> = {}) => ({ district_kind: "district", district_name: "千種区", seats: 5, ...o });
+function dst(districts: unknown, patch: Record<string, unknown> = {}, drop: string[] = [], top: Record<string, unknown> = {}) {
+  const payload: Record<string, unknown> = { election_id: DSEID, seats_total: 8, seats_basis: "law", districts, resolved_claim: "new", ...patch };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "district_seats", payload, source_urls: ["https://www.city.ichinomiya.aichi.jp/reiki/teisuu.html"], ...top });
+}
+const dstPaths = (v: ReturnType<typeof dst>) => v.errors.map((e) => e.path);
+
+Deno.test("district_seats：最小の交件が通る（at_large 1 件／district 複数）／election_id・seats_total・seats_basis・districts・resolved_claim は必須", () => {
+  assert(dst([{ district_kind: "at_large", seats: 8 }]).ok);
+  assert(dst([dsOk(), dsOk({ district_name: "東区", seats: 3, district_lg_code: "231011" })]).ok);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8 })], {}, ["election_id"])), ["payload.election_id"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8 })], {}, ["seats_total"])), ["payload.seats_total"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8 })], { seats_basis: "decree" })), ["payload.seats_basis"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8 })], {}, ["seats_basis"])), ["payload.seats_basis"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8 })], {}, ["resolved_claim"])), ["payload.resolved_claim"]);
+  assertEquals(dstPaths(dst([])), ["payload.districts"]);
+  assertEquals(dstPaths(dst("x")), ["payload.districts"]);
+  assertEquals(dstPaths(dst(Array.from({ length: 101 }, (_, i) => dsOk({ district_name: `第${i}`, seats: 1 })), { seats_total: 101 })), ["payload.districts"]);
+});
+
+Deno.test("district_seats：定数の範囲（1～200 の整数）／種類の混在・at_large 複数・重複・合計不一致は不可", () => {
+  for (const bad of [0, -1, 201, 1.5, "8"]) assertEquals(dstPaths(dst([dsOk({ seats: 8 })], { seats_total: bad })), ["payload.seats_total"], String(bad));
+  assertEquals(dstPaths(dst([dsOk({ seats: 0 }), dsOk({ district_name: "東区", seats: 8 })])), ["payload.districts[0].seats"]);
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 3 }, dsOk({ seats: 5 })])), ["payload.districts"], "混在");
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 4 }, { district_kind: "at_large", seats: 4 }])), ["payload.districts[1].district_name", "payload.districts"], "at_large は 1 件だけ（重複としても報告される）");
+  assertEquals(dstPaths(dst([dsOk({ seats: 4 }), dsOk({ seats: 4 })])), ["payload.districts[1].district_name"], "重複");
+  assertEquals(dstPaths(dst([dsOk({ seats: 5 }), dsOk({ district_name: "東区", seats: 4 })])), ["payload.seats_total"], "合計 9 ≠ 8");
+});
+
+Deno.test("district_seats：district_name（district は必須、at_large は付けない）／district_lg_code（district のときだけ・6 桁・検査コード）", () => {
+  assertEquals(dstPaths(dst([dsOk({ district_name: undefined, seats: 8 })])), ["payload.districts[0].district_name"]);
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", district_name: "全域", seats: 8 }])), ["payload.districts[0].district_name"]);
+  assertEquals(dstPaths(dst([dsOk({ district_kind: "ward", seats: 8 })])), ["payload.districts[0].district_kind"]);
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", district_lg_code: "232033", seats: 8 }])), ["payload.districts[0].district_lg_code"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8, district_lg_code: "23" })])), ["payload.districts[0].district_lg_code"]);
+  assertEquals(dstPaths(dst([dsOk({ seats: 8, district_lg_code: "231012" })])), ["payload.districts[0].district_lg_code"], "検査コードが違う");
+  assert(dst([dsOk({ seats: 8, district_lg_code: "231011" })]).ok);
+});
+
+Deno.test("district_seats：任務比對（district_seats_missing）— election_id が task_id の選挙と一致、他の型別で答えると 400；JP_TASK_ARMS の登録", () => {
+  assertEquals(JP_TASK_ARMS.district_seats_missing, "district_seats");
+  const task = `auto:district_seats_missing:${DSEID}`;
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 8 }], {}, [], { task_id: task })), []);
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 8 }], { election_id: "2027-04-25_muni_assembly_231011" }, [], { task_id: task })), ["payload.election_id"]);
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 8 }], {}, [], { task_id: "auto:district_seats_missing:bad id" })), ["task_id"]);
+  const wrongType = pel([elOk("target")], {}, [], { task_id: task });
+  assertEquals(pelPaths(wrongType), ["task_id"]);
+  assert(wrongType.errors[0].message.includes("district_seats"));
+  assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 8 }], {}, [], { task_id: `auto:policy_elements_missing:${PEPID}` })), ["task_id"]);
+});

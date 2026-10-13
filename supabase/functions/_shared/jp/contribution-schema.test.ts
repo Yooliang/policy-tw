@@ -71,9 +71,18 @@ const policyElements = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
 };
 
-Deno.test("十種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements]) {
+const districtSeats = {
+  contribution_type: "district_seats",
+  payload: {
+    election_id: "2027-04-25_muni_assembly_232033", seats_total: 36, seats_basis: "law", resolved_claim: "new",
+    districts: [{ district_kind: "at_large", seats: 36 }],
+  },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/reiki/teisuu.html"],
+};
+
+Deno.test("十一種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);

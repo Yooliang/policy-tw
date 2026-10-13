@@ -34,6 +34,8 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
   { type: "policy", table: "policies", key: ["politician_election_id", "title"], sites: ["jp"] },
   // 政見の三要素（派工臂 policy_elements）：鍵は政見 id ＋ 要素（target／deadline／funding）。一つの政見の一つの要素に庫の行は一つだけ
   { type: "policy_elements", table: "policy_elements", key: ["policy_id", "element"], sites: ["jp"] },
+  // 議員定数（派工臂 district_seats）：鍵は選挙 id。一つの議会議員選挙に定数（合計と選挙区ごと）の記録は一組だけ
+  { type: "district_seats", table: "election_districts", key: ["election_id"], sites: ["jp"] },
 ];
 
 /** 這一站要求 resolved_claim 的型別 */
