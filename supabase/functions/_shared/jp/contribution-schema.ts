@@ -15,6 +15,8 @@
  *   同一件事登記表的型別〔鍵＝政見 id ＋ 要素〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_policy_elements（20261011140000）。
  * 日本站自己的：district_seats（議員定数，對應派工臂 district_seats；議会議員選挙 1 件の定数合計 seats_total と選挙区ごとの定数 districts[]；at_large と district は混ぜない、合計一致；
  *   同一件事の登記表の型別〔鍵＝選挙 id〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_district_seats（20261011170000）。
+ * 日本站自己的：removal（重複政見の清査 duplicate_policy の答え：政見 1 件の軟移除〔review_status=rejected〕。target_table は policies だけ、reason ≥20 字、keep_id 任意；
+ *   claimKey 併票の型別〔duplicate-claim.ts、鍵＝target_id〕，不進 same_claim 登記表，所以 resolved_claim 不要）。落庫 SQL policy_jp.apply_removal（20261011180000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -37,7 +39,7 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"] as const;
 /** district_seats の上限・列挙（SQL policy_jp.district_seats_normalize と同じ値） */
 export const DISTRICT_SEATS_MAX = 200;
 export const DISTRICT_SEATS_MAX_DISTRICTS = 100;
@@ -174,6 +176,8 @@ export const JP_TASK_ARMS = {
   policy_elements_missing: "policy_elements",
   // 議員定数（policy-ops#95）：議会議員選挙 1 件につき district_seats で答える
   district_seats_missing: "district_seats",
+  // 重複政見の清査（policy-ops#95、規則は預設關）：同じ約束の二重記録は removal（あいまいな方を取り除く）、なければ no_change（confirmed）
+  duplicate_policy: "removal",
   // A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別も candidacy（filed／withdrawn／同じ状態で選管の出典を足す）。
   // not_running_recheck は「照合」（task_id に filing が付かない）だと no_change／task_suggestion で答える：下の checkTaskAgreement で candidacy を断る
   candidate_status_stale: "candidacy",
@@ -182,10 +186,12 @@ export const JP_TASK_ARMS = {
   // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
   election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|district_seats_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
+/** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
+const DUP_POLICY_REST_RE = /^([^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_(?:\d{6}|national):(?:district|proportional|at_large)):([0-9a-f]{32})$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -259,6 +265,11 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     if (payload.election_id !== m[2]) push("payload.election_id", `payload.election_id（${String(payload.election_id ?? "未填")}）跟這個任務問的選舉（${m[2]}）不一致：一個任務只回報它問的那場選舉的議員定数`);
     return;
   }
+  // duplicate_policy：task_id の末尾は <参選紀錄 id>:<清單指紋>。removal の target_id が清單の政見かは DB を見ないと分からない（落庫側が政見の存在・公開済みを確かめる）ので、ここは形だけ
+  if (arm === "duplicate_policy") {
+    if (!DUP_POLICY_REST_RE.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:duplicate_policy:<参選紀錄 id>:<清單指紋>）");
+    return;
+  }
   let taskLg: string;
   let officeKind: string | null = null;
   if (arm === "election_discovery") {
@@ -318,6 +329,18 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         if (empty) push(`${at}.correct_value`, "correct_value 必填");
       });
       if (!isStr(p.reason, 10, 2000)) push("payload.reason", "reason 必填（至少 10 字，只放判斷依據；事實請放進 changes 的欄位）");
+      break;
+    }
+    case "removal": {
+      // 重複政見の軟移除（正見 removal の日本版）：政見だけ。取り除くのは行を消すことではなく review_status=rejected（画面から消えるが行は残り、履歴から戻せる）。
+      // 取り除く理由が本体なので reason は 20 字以上。source_urls は全型別共通で必須（確かめたページ）。keep_id は残す方の政見 id（任意、取り除く方とは別）
+      if (p.target_table !== "policies") push("payload.target_table", "removal で取り除けるのは policies（政見）だけ");
+      if (!isStr(p.target_id, 1, 64) || /\s/.test(p.target_id)) push("payload.target_id", "target_id 必填（取り除く政見の id）");
+      if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：なぜ取り除くか。重複なら残す政見の id と、同じ約束だと言える理由）");
+      if (p.keep_id !== undefined) {
+        if (!isStr(p.keep_id, 1, 64) || /\s/.test(p.keep_id)) push("payload.keep_id", "keep_id は残す政見の id（1～64 字）");
+        else if (p.keep_id === p.target_id) push("payload.keep_id", "keep_id と target_id が同じ：残す政見と取り除く政見は別のもの");
+      }
       break;
     }
     case "election": {

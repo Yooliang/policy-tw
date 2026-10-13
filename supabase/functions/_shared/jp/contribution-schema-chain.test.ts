@@ -509,3 +509,48 @@ Deno.test("district_seats：任務比對（district_seats_missing）— election
   assert(wrongType.errors[0].message.includes("district_seats"));
   assertEquals(dstPaths(dst([{ district_kind: "at_large", seats: 8 }], {}, [], { task_id: `auto:policy_elements_missing:${PEPID}` })), ["task_id"]);
 });
+
+// ---- 重複政見の軟移除（removal、policy-ops#95）：duplicate_policy の答え ----
+const DUPPE = `taro:${DSEID}:at_large`;
+const DUPFP = "0123456789abcdef0123456789abcdef";
+function rmv(patch: Record<string, unknown> = {}, drop: string[] = [], top: Record<string, unknown> = {}) {
+  const payload: Record<string, unknown> = {
+    target_table: "policies", target_id: "pol-0001", keep_id: "pol-0002", reason: "pol-0002 と同じ約束の言い換え。具体的な pol-0002 を残す", ...patch,
+  };
+  for (const k of drop) delete payload[k];
+  return validateContributionRequest({ ...base, contribution_type: "removal", payload, source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"], ...top });
+}
+const rmvPaths = (v: ReturnType<typeof rmv>) => v.errors.map((e) => e.path);
+
+Deno.test("removal：最小の交件が通る（keep_id は任意）／target_table は policies だけ／target_id・reason は必須（reason ≥20 字）／keep_id は別の政見", () => {
+  assert(rmv().ok);
+  assert(rmv({}, ["keep_id"]).ok);
+  assertEquals(rmvPaths(rmv({ target_table: "politicians" })), ["payload.target_table"]);
+  assertEquals(rmvPaths(rmv({}, ["target_table"])), ["payload.target_table"]);
+  assertEquals(rmvPaths(rmv({}, ["target_id"])), ["payload.target_id"]);
+  assertEquals(rmvPaths(rmv({ target_id: "a b" })), ["payload.target_id"]);
+  assertEquals(rmvPaths(rmv({}, ["reason"])), ["payload.reason"]);
+  assertEquals(rmvPaths(rmv({ reason: "短すぎる理由です" })), ["payload.reason"]);
+  assertEquals(rmvPaths(rmv({ keep_id: "pol-0001" })), ["payload.keep_id"]);
+  assertEquals(rmvPaths(rmv({ keep_id: 5 })), ["payload.keep_id"]);
+  // same_claim 登記表の型別ではないので resolved_claim は要らない（claimKey 併票）
+  assert(!("resolved_claim" in rmv().items[0].payload));
+});
+
+Deno.test("removal：任務比對（duplicate_policy）— task_id の形（<参選紀錄 id>:<指紋 32 字>）、他の臂の task_id では 400；JP_TASK_ARMS の登録", () => {
+  assertEquals(JP_TASK_ARMS.duplicate_policy, "removal");
+  const task = `auto:duplicate_policy:${DUPPE}:${DUPFP}`;
+  assertEquals(rmvPaths(rmv({}, [], { task_id: task })), []);
+  assertEquals(rmv({}, [], { task_id: task }).items[0].task_id, task);
+  assertEquals(rmvPaths(rmv({}, [], { task_id: `auto:duplicate_policy:${DUPPE}:abc` })), ["task_id"], "指紋が短い");
+  assertEquals(rmvPaths(rmv({}, [], { task_id: `auto:duplicate_policy:${DUPPE}` })), ["task_id"], "指紋がない");
+  assertEquals(rmvPaths(rmv({}, [], { task_id: `auto:duplicate_policy:bad:${DUPFP}` })), ["task_id"], "参選紀錄 id の形ではない");
+  const wrong = rmv({}, [], { task_id: `auto:policy_missing:${DUPPE}` });
+  assertEquals(rmvPaths(wrong), ["task_id"]);
+  assert(wrong.errors[0].message.includes("policy_missing") && wrong.errors[0].message.includes("policy"));
+  // duplicate_policy の task_id で別の型別（district_seats）を出すと 400（no_change は DATA_TYPES の外なので素通し＝重複なしの答え）
+  const wrongType = dst([{ district_kind: "at_large", seats: 8 }], {}, [], { task_id: `auto:duplicate_policy:${DUPPE}:${DUPFP}` });
+  assertEquals(dstPaths(wrongType), ["task_id"]);
+  assert(wrongType.errors[0].message.includes("removal"));
+  assert(JP_CONTRIBUTION_TYPES.includes("removal"));
+});
