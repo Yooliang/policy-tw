@@ -63,8 +63,9 @@ Deno.test("SQL：對象＝設定表 election_task_config 開著的屆別裡、�
   assertStringIncludes(flat, "term_policy_village_cap()");
   assertStringIncludes(flat, "merged_into IS NULL", "被合併掉的人物不派");
   // 去重：2026 候選人而且整個人零政見的，只走 policy_missing（條件跟 raw 臂的 c2026 一致）。
+  // 20261011310000 起 2026 改讀當屆（campaign_election_id()，campaign-election-arms-2.test.ts 逐字守）
   // 20261011030000（OPS #81）起只在 2026 還沒投票時去重：當屆缺政見投票日就收，投票隔天起這些人改由這支接手（arm-windows-13.test.ts 逐字守那一行）
-  assert(/NOT EXISTS \( ?SELECT 1 FROM politician_elections c JOIN elections ce ON ce\.id = c\.election_id WHERE c\.politician_id = \w+\.politician_id AND c\.election_id = 2026 AND ce\.election_date >= activity_today\(\) AND c\.candidacy_status IS DISTINCT FROM 'withdrawn' ?\) OR EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.removed_at IS NULL ?\)/.test(flat),
+  assert(/NOT EXISTS \( ?SELECT 1 FROM politician_elections c JOIN elections ce ON ce\.id = c\.election_id WHERE c\.politician_id = \w+\.politician_id AND c\.election_id = (?:2026|\(SELECT campaign_election_id\(\)\)) AND ce\.election_date >= activity_today\(\) AND c\.candidacy_status IS DISTINCT FROM 'withdrawn' ?\) OR EXISTS \( ?SELECT 1 FROM policies pl WHERE pl\.politician_id = \w+\.politician_id AND pl\.removed_at IS NULL ?\)/.test(flat),
     "去重條件：不是「還沒投票的 2026 候選人」，或已經有任何政見（零政見的 2026 候選人投票前留給 policy_missing）");
   assert(!/c\.election_id = 2026 AND c\.candidacy_status IS DISTINCT FROM 'withdrawn'/.test(flat), "舊的去重（不看投票日）不能留著：投票後兩邊都不派");
   // task_id 帶屆別：同一人可能 2022 選上議員、2024 選上立委，兩屆各一件

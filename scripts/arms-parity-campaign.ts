@@ -8,17 +8,19 @@
  *
  * 用法（不進 CI：要連正式庫）：
  *   deno run --allow-read --allow-write scripts/arms-parity-campaign.ts gen parity.sql
+ *   （之後的批次：… gen parity.sql 20261011310000_campaign_election_arms_2.sql region_gap township_gap roster_villages term_policies）
  *   npx supabase db query --linked -f parity.sql -o json      （檔案第一行是 SET default_transaction_read_only = on）
  * 結果每支臂一列：old_n、new_n（筆數）、only_old、only_new（EXCEPT ALL 兩個方向，都要 0）、old_md5＝new_md5（全欄排序後的雜湊）。
  */
 import { fnText, latestFn, readMig } from "../supabase/functions/_shared/arms-pglite.ts";
 
-const MIG = "20261011300000_campaign_election_arms.sql";
-const [mode, out] = Deno.args;
+const [mode, out, migArg, ...armArgs] = Deno.args;
 if (mode !== "gen" || !out) {
-  console.error("用法：arms-parity-campaign.ts gen <out.sql>");
+  console.error("用法：arms-parity-campaign.ts gen <out.sql> [migration 檔名] [臂名…]（預設 20261011300000 的 raw、mayor_policies）");
   Deno.exit(2);
 }
+const MIG = migArg ?? "20261011300000_campaign_election_arms.sql";
+const ARMS = armArgs.length ? armArgs : ["raw", "mayor_policies"];
 
 /** CREATE OR REPLACE FUNCTION … AS $tag$ 本體 $tag$; 取本體 */
 const body = (fn: string) => {
@@ -52,7 +54,7 @@ function inline(sql: string): string {
 
 const COLS = "task_id, task_type, target, what_we_need, hint_sources, reward, region";
 const parts: string[] = [];
-for (const arm of ["raw", "mayor_policies"]) {
+for (const arm of ARMS) {
   const name = `contribution_auto_tasks_${arm}`;
   const oldBody = body(await latestFn(name, MIG));
   const newBody = inline(body(fnText(mig, name)));
