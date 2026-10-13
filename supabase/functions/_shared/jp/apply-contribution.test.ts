@@ -39,6 +39,6 @@ Deno.test("jpApplyViaRpc：rpc 自體出錯就丟（verify-handler 會攔住，�
 });
 
 Deno.test("落庫する型別は十（task_suggestion／correction は含まない）", () => {
-  assertEquals([...JP_APPLY_TYPES].sort(), ["candidacy", "district_seats", "election", "local_government", "no_change", "policy", "policy_elements", "politician", "regional_stat", "removal"]);
+  assertEquals([...JP_APPLY_TYPES].sort(), ["candidacy", "district_seats", "election", "local_government", "no_change", "policy", "policy_elements", "policy_progress", "politician", "regional_stat", "removal"]);
   assert(!(JP_APPLY_TYPES as readonly string[]).includes("correction"));
 });

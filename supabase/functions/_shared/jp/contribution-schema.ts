@@ -17,6 +17,9 @@
  *   同一件事の登記表の型別〔鍵＝選挙 id〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_district_seats（20261011170000）。
  * 日本站自己的：removal（重複政見の清査 duplicate_policy の答え：政見 1 件の軟移除〔review_status=rejected〕。target_table は policies だけ、reason ≥20 字、keep_id 任意；
  *   claimKey 併票の型別〔duplicate-claim.ts、鍵＝target_id〕，不進 same_claim 登記表，所以 resolved_claim 不要）。落庫 SQL policy_jp.apply_removal（20261011180000）。
+ * 日本站自己的：policy_progress（政策の経過、対応する派工臂 progress_stale／deadline_due。正見 policy_progress の日本版：policy_id・status〔日本の 6 値〕・date・note、progress〔％〕は使わない；
+ *   status=discontinued は official 等級の出典が要る；claimKey 併票の型別〔duplicate-claim.ts、鍵＝policy_id＋status＋date〕，不進 same_claim 登記表，所以 resolved_claim 不要）。
+ *   progress_stale の任務は『政策ではなかった』ときの removal でも答えられる（JP_TASK_ALSO）。落庫 SQL policy_jp.apply_policy_progress（20261011200000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -39,7 +42,12 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"] as const;
+/** policy_progress の status（policy_jp.policies.status の 6 値。正見の Campaign Pledge／Proposed／In Progress／Achieved／Stalled／Failed ではない） */
+export const JP_POLICY_STATUSES = ["not_started", "in_progress", "partial", "achieved", "discontinued", "unfulfilled"] as const;
+/** policy_progress の note と date の範囲（SQL apply_policy_progress と同じ） */
+export const POLICY_PROGRESS_NOTE_MIN = 10;
+export const POLICY_PROGRESS_NOTE_MAX = 3000;
 /** district_seats の上限・列挙（SQL policy_jp.district_seats_normalize と同じ値） */
 export const DISTRICT_SEATS_MAX = 200;
 export const DISTRICT_SEATS_MAX_DISTRICTS = 100;
@@ -181,6 +189,10 @@ export const JP_TASK_ARMS = {
   district_seats_missing: "district_seats",
   // 重複政見の清査（policy-ops#95、規則は預設關）：同じ約束の二重記録は removal（あいまいな方を取り除く）、なければ no_change（confirmed）
   duplicate_policy: "removal",
+  // C 期（policy-ops#95）：政策の進捗追跡。progress_stale は『動きが止まっている』、deadline_due は『原文の達成期限が過ぎた』：どちらも policy_progress で答える（動きがなければ no_change）。
+  // progress_stale だけは『政策ではなかった』ときの removal も受ける（JP_TASK_ALSO）
+  progress_stale: "policy_progress",
+  deadline_due: "policy_progress",
   // A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別も candidacy（filed／withdrawn／同じ状態で選管の出典を足す）。
   // not_running_recheck は「照合」（task_id に filing が付かない）だと no_change／task_suggestion で答える：下の checkTaskAgreement で candidacy を断る
   candidate_status_stale: "candidacy",
@@ -189,8 +201,10 @@ export const JP_TASK_ARMS = {
   // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
   election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+/** 任務の型別（JP_TASK_ARMS）のほかに受ける交件型別（task_id が指す政策に対する removal だけ。落ちるのは checkTaskAgreement の target_id 照合） */
+export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"] };
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
@@ -204,8 +218,9 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   const m = TASK_ID_RE.exec(taskId);
   if (!m) return;
   const arm = m[1] as keyof typeof JP_TASK_ARMS;
-  if (JP_TASK_ARMS[arm] !== type) {
-    push("task_id", `這個 task_id 是 ${arm} 的任務，要用 contribution_type=${JP_TASK_ARMS[arm]} 回報（你交的是 ${type}）；查不到請改交 no_change`);
+  const also = JP_TASK_ALSO[arm] ?? [];
+  if (JP_TASK_ARMS[arm] !== type && !also.includes(type)) {
+    push("task_id", `這個 task_id 是 ${arm} 的任務，要用 contribution_type=${JP_TASK_ARMS[arm]}${also.length > 0 ? `（或 ${also.join("／")}）` : ""} 回報（你交的是 ${type}）；查不到請改交 no_change`);
     return;
   }
   // roster_check：task_id の末尾は選挙 id（auto:roster_check:<election_id>）。1 つのタスクは 1 つの選挙だけ
@@ -271,6 +286,13 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   // duplicate_policy：task_id の末尾は <参選紀錄 id>:<清單指紋>。removal の target_id が清單の政見かは DB を見ないと分からない（落庫側が政見の存在・公開済みを確かめる）ので、ここは形だけ
   if (arm === "duplicate_policy") {
     if (!DUP_POLICY_REST_RE.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:duplicate_policy:<参選紀錄 id>:<清單指紋>）");
+    return;
+  }
+  // progress_stale／deadline_due：task_id の末尾は政策 id。1 つの任務は 1 つの政策だけ（removal で答えるときは target_id が、policy_progress は policy_id がその政策）
+  if (arm === "progress_stale" || arm === "deadline_due") {
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:<政見 id>）`); return; }
+    const key = type === "removal" ? "target_id" : "policy_id";
+    if (payload[key] !== m[2]) push(`payload.${key}`, `payload.${key}（${String(payload[key] ?? "未填")}）跟這個任務問的政策（${m[2]}）不一致：一個任務只回報它問的那一條政策`);
     return;
   }
   let taskLg: string;
@@ -344,6 +366,19 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
         if (!isStr(p.keep_id, 1, 64) || /\s/.test(p.keep_id)) push("payload.keep_id", "keep_id は残す政見の id（1～64 字）");
         else if (p.keep_id === p.target_id) push("payload.keep_id", "keep_id と target_id が同じ：残す政見と取り除く政見は別のもの");
       }
+      break;
+    }
+    case "policy_progress": {
+      // 政策の経過（正見 policy_progress の日本版）：policy_id・status（日本の 6 値）・date（出来事の日付）・note。progress（％）は日本站の policies にない。落庫は SQL policy_jp.apply_policy_progress（同じ規則）
+      if (!isStr(p.policy_id, 1, 64) || /\s/.test(p.policy_id)) push("payload.policy_id", "policy_id 必填（任務 target.policy_id の値）");
+      if (!oneOf(JP_POLICY_STATUSES, p.status)) {
+        push("payload.status", `status 必填：${JP_POLICY_STATUSES.join("／")} 之一${typeof p.status === "string" && /^[A-Z]/.test(p.status) ? "（正見の Campaign Pledge／In Progress／Achieved／Stalled／Failed ではなく、日本站は 6 値：公約は origin で区別するので Campaign Pledge は not_started、Failed は unfulfilled）" : ""}`);
+      }
+      if (p.progress !== undefined) push("payload.progress", "progress（％）は日本站では使わない：この欄位を拿掉（段階は status で表す）");
+      const noteLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
+      if (noteLen < POLICY_PROGRESS_NOTE_MIN || noteLen > POLICY_PROGRESS_NOTE_MAX) push("payload.note", `note 必填（${POLICY_PROGRESS_NOTE_MIN}～${POLICY_PROGRESS_NOTE_MAX} 字：何が起きたか、どの文書に書いてあるか）`);
+      if (!isJpDate(p.date)) push("payload.date", "date 必填：出来事の日付 YYYY-MM-DD，要是真的有這一天，年份在 1947～2100");
+      else if (p.date > new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)) push("payload.date", "date 不能是未來的日期");
       break;
     }
     case "election": {
@@ -663,6 +698,12 @@ export function validateContributionRequest(body: unknown): ValidationResult {
       push("source_urls", raw.contribution_type === "local_government"
         ? "source_urls 至少要有一個公的出典：總務省「全国地方公共団体コード」（soumu.go.jp）或該団体的公式サイト（*.lg.jp、city.／town.／vill.／pref. 開頭的 .jp 網域）"
         : "source_urls 至少要有一個公的統計出典：e-Stat（e-stat.go.jp）、總務省・統計局（soumu.go.jp、stat.go.jp）或該団体的公式サイト（*.lg.jp 等）");
+    }
+    // policy_progress の discontinued（中止）：行政が取りやめを明確に決めたという主張なので、公的な出典（official 等級）を最低 1 つ。SQL apply_policy_progress も同じ判定（落庫で invalid）
+    if (raw.contribution_type === "policy_progress" && raw.payload.status === "discontinued" && Array.isArray(sourceUrls)
+        && sourceUrls.every((u) => typeof u === "string") && sourceUrls.length > 0
+        && !(sourceUrls as string[]).some((u) => jpSourceKind(u, "policy_progress") === "official")) {
+      push("source_urls", "status=discontinued（中止）には公的な出典が要ります：source_urls に official 等級の網址（*.go.jp・*.lg.jp、city.／town.／vill.／pref.／ward. で始まる .jp の自治体公式サイト）を最低 1 つ入れてください");
     }
     // candidacy_source_missing（#589 審查の後続）：この任務は「選管の公表ページ（official 等級）を足す」こと。報道だけの candidacy は
     // 同じ状態の unchanged で落庫され派工は収回されるが、official の出典は付かないので次の seed で同じ任務がまた開く（無限に再派工）。入口で断る

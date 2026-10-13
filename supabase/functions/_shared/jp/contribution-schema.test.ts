@@ -77,6 +77,12 @@ const removal = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
 };
 
+const policyProgress = {
+  contribution_type: "policy_progress",
+  payload: { policy_id: "pol-0001", status: "in_progress", date: "2026-06-01", note: "令和 8 年度当初予算に事業費が計上され、工事が始まった" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/zaisei/yosan.html"],
+};
+
 const districtSeats = {
   contribution_type: "district_seats",
   payload: {
@@ -86,9 +92,9 @@ const districtSeats = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/reiki/teisuu.html"],
 };
 
-Deno.test("十二種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats, removal]) {
+Deno.test("十三種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats, removal, policyProgress]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
@@ -175,8 +181,8 @@ Deno.test("election：多個欄位同時錯，一次全報（讓 AI 一次修完
   assertEquals(a, b);
 });
 
-Deno.test("其他型別（正見的 policy_progress 等）不收", () => {
-  const v = validateContributionRequest({ ...base, contribution_type: "policy_progress", payload: {}, source_urls: ["https://a.example/x"] });
+Deno.test("其他型別（正見の merge_politician 等）不收", () => {
+  const v = validateContributionRequest({ ...base, contribution_type: "merge_politician", payload: {}, source_urls: ["https://a.example/x"] });
   assertEquals(v.ok, false);
   assertEquals(v.errors[0].path, "contribution_type");
 });
