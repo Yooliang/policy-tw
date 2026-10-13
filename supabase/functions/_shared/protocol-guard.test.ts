@@ -9,6 +9,7 @@
  * 寫死檔名的測試在新增 migration 之後會繼續守著舊數字——這個專案踩過。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { AGREE_THRESHOLDS, riskLevel, type RiskLevel } from "./consensus.ts";
 import { TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { CONTRIBUTION_TYPES, NO_CHANGE_OUTCOMES, TASK_TYPES } from "./contribution-schema.ts";
@@ -77,11 +78,14 @@ Deno.test("門檻矩陣：最新 migration 的 SQL 與 AGREE_THRESHOLDS 逐格�
   }
 });
 
-Deno.test("門檻矩陣：skill.md 對外公布的表格與 AGREE_THRESHOLDS 相同", async () => {
-  const md = await Deno.readTextFile(SKILL_MD);
+Deno.test("門檻矩陣：skill-types.md 對照用的表格與 AGREE_THRESHOLDS 相同", async () => {
+  // 1.94.0 起表格搬到 skill-types.md 的維護者附錄（代理看伺服器回的 target_score）
+  const md = await readSkillWithTypes();
   const header = md.indexOf("| 型別 | official | media | social | other |");
   assert(header > 0, "skill.md 找不到門檻表格");
-  const table = md.slice(header).split("\n").slice(2).filter((l) => l.startsWith("|"));
+  const rest = md.slice(header).split("\n").slice(2);
+  const end = rest.findIndex((l) => !l.startsWith("|"));
+  const table = end < 0 ? rest : rest.slice(0, end);
   assert(table.length >= 4, "門檻表格至少要有四列");
 
   // 每一列的四個數字要能對到 AGREE_THRESHOLDS 裡的某一個風險等級；

@@ -9,6 +9,7 @@
  * 那是協議的介面，值來自出處表；policy_elements、lineage_*、politician_offices、roster_checks、ai_prompts 各自的 source_url 是別張表自己的欄位。
  */
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
+import { readSkillWithTypes } from "./skill-text.ts";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { executeRevert, planRevert } from "./edit-history.ts";
@@ -341,7 +342,7 @@ Deno.test("還原：被刪掉的政見放回去——整列快照的 source_url 
 // ── 協議文件 ──────────────────────────────────────────────────────
 
 Deno.test("協議 1.69.0：skill.md 的 REST 範例不再 select policies 的 source_url；講清楚出處在 policies_with_logs.sources、correction 的欄位名照舊", async () => {
-  const skill = await read("../../../public/skill.md");
+  const skill = await readSkillWithTypes();
   for (const m of skill.matchAll(/rest\/v1\/(policies|tracking_logs)\?select=([^&`"\s]*)/g)) {
     assertEquals(m[2].split(",").includes("source_url"), false, `skill.md 的 ${m[1]} REST 範例還在 select source_url`);
   }
