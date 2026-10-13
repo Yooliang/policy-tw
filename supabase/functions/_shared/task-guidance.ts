@@ -165,7 +165,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   policy_election_mismatch:
     "這筆政見標的屆別跟提出日期對不上——提出日期晚於那場選舉的投票日。打開來源確認是哪一屆，用 correction 改 election_id；是日期填錯就改 proposed_date；" +
-    "**若它其實是這個人當選後、任內才宣布的施政承諾**（不是選前的競選承諾），屆別與日期都沒錯，用 correction 把 status 改成 Proposed。分不出來用 no_change。",
+    "**若它其實是這個人當選後、任內才宣布的施政承諾**（不是選前的競選承諾），屆別與日期都沒錯，用 correction 把 status 改成 Proposed。" +
+    "**任內施政不要改掛到還沒投票的選舉**：提出日期晚於投票日正是任內施政的特徵，不是屆別錯了；伺服器會擋 status 不是 Campaign Pledge 又掛在未來選舉的更正。" +
+    "target 的 kind＝in_office_future 是反過來的情形：任內施政被掛到了還沒投票的那場，請照來源改回他這一任當選的那屆；它其實是這次選舉的競選承諾就把 status 改成 Campaign Pledge。分不出來用 no_change。",
 
   news_sweep:
     "打開 RSS 網址，挑出提到 2026 候選人具體政見、**現任者在任內新宣布的具體施政承諾**（例：總統宣布普發現金、市長宣布新計畫）、或既有政見有新進度的報導，每筆用 policy／policy_progress 提交。" +
