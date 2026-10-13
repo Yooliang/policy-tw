@@ -4,6 +4,7 @@
  *       disagree 必附 evidence_url；共識由 DB 觸發器算。
  */
 
+import { votePickProblem } from "./vote-pick-guard.ts";
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
@@ -132,6 +133,11 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   if (!contribution) return { status: 404, body: { success: false, error: "not_found", message: "沒有這筆貢獻" } };
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
+  }
+  // 非身份型別帶同名指認＝這張票多半是寫給另一件的（2026-10-13，vote-pick-guard.ts）
+  {
+    const pickProblem = votePickProblem(contribution.contribution_type, input.resolved_politician_id);
+    if (pickProblem) return { status: 400, body: { success: false, error: "pick_not_applicable", message: pickProblem } };
   }
   // 憑證路徑：領任務的網段與交件當下的網段，哪一個是提交者的都算自己
   const isReportNet = (stored: string | null | undefined) => tokenBinding !== null && !!stored && stored === reportIpHash;
