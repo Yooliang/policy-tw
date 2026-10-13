@@ -105,6 +105,21 @@ const DEVIATED_KANA: Record<string, { prev: string; why: string; jpEdits: Edit[]
   },
 };
 
+/**
+ * 日本專屬の偏離（三つ目、20261011210000，policy-ops#95 C 期第 6 步）：contribution_needs_two_ips は 130000 の複本が正見の一句
+ * （lineage_handover の handover_type=stop は 2 網段）だけ抜いてあった。日本にも脈絡ができたので、その一句を戻す＝正見の現行定義と逐字同じ本体。
+ * 走樣比對は引き続き 130000 の版（PAIRS の edits 付き）を読み、ここで「偏離版 ＋ jpEdits ＝ 130000 の版」を守る。
+ */
+const LIN_MIG = "20261011210000_policy_jp_lineage.sql";
+const LIN_SQL = await readMig(LIN_MIG);
+const DEVIATED_LINEAGE: Record<string, { prev: string; why: string; jpEdits: Edit[] }> = {
+  contribution_needs_two_ips: {
+    prev: MIG_SQL,
+    why: "lineage_handover の handover_type=stop（中止）は 2 網段（正見 20261006034900 の一句を戻す）。130000 の複本は日本に脈絡がなかったのでこの一句を抜いていた",
+    jpEdits: [["'reassign_candidacy')\n      OR (p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop')", "'reassign_candidacy')"]],
+  },
+};
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -314,6 +329,31 @@ Deno.test("走樣（日本專屬偏離・告示日）：20261010120000 が複本
   assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
 });
 
+for (const [name, v] of Object.entries(DEVIATED_LINEAGE)) {
+  Deno.test(`走樣（日本專屬偏離・脈絡）${name}：偏離版 ＋ 登記の jpEdits ＝ 130000 の版（逐字）；登記外の変更は紅`, () => {
+    assert(PAIRS.some((p) => p.name === name), `${name} 要在複本清單 PAIRS 裡`);
+    assert(v.why.length > 10 && v.jpEdits.length > 0);
+    const dev = fnText(LIN_SQL, `policy_jp.${name}`);
+    const prev = fnText(v.prev, `policy_jp.${name}`);
+    assertEquals(applyEdits(dev, v.jpEdits), prev);
+    assertNotEquals(dev, prev, "偏離版と前の版が同じ＝偏離していない");
+    // 還原驗證：登記外の一字の変更、登記した一句の削除（偏離が消えた版）はどちらも対応が崩れる
+    assertNotEquals(applyEdits(dev.replace("IMMUTABLE", "IMMUTABLE /* x */"), v.jpEdits), prev);
+    assertEquals(dev.split("lineage_handover").length - 1, 1, "偏離は lineage_handover の一句だけ");
+    // 正見の現行定義（PAIRS を通した複本）と同じ本体：stop の一句が付いている
+    assert(dev.includes("handover_type"));
+  });
+}
+
+Deno.test("走樣（日本專屬偏離・脈絡）：20261011210000 が複本を定義するのは登記した偏離だけ；不碰 public", () => {
+  const copies = new Set(PAIRS.map((p) => p.name));
+  const defined = [...LIN_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
+  for (const n of defined) if (copies.has(n)) assert(n in DEVIATED_LINEAGE, `${n} は複本。${LIN_MIG} で再定義するなら DEVIATED_LINEAGE に登記（jpEdits つき）`);
+  for (const n of Object.keys(DEVIATED_LINEAGE)) assert(defined.includes(n), `${n} を偏離として登記したが定義がない`);
+  const stripped = LIN_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+});
+
 Deno.test("走樣（日本專屬偏離）：20261009300000 定義的函式＝登記的偏離複本＋JP_ONLY 登記的日本專屬函式；偏離的複本不能是別的 migration 跟進版", () => {
   const defined = [...DEV_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]);
   const dev = Object.keys(DEVIATED);
@@ -461,7 +501,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA)) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE)) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
@@ -503,6 +543,7 @@ const T_B = "20261011090000"; // 派工臂對齊正見 B 期：開票結果（el
 const T_PE = "20261011140000"; // 派工臂對齊正見 2a：政見三要素 policy_elements_missing（規則預設關，policy-ops#95）
 const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 duplicate_policy（規則預設關）＋交件型別 removal（policy-ops#95）
 const T_PROG = "20261011200000"; // 派工臂對齊正見 C 期第 4b 步：政見進度 progress_stale／期限到了 deadline_due＋交件型別 policy_progress（policy-ops#95）
+const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策の継承 lineage_candidates／handover_missing／lineage_roles／lineage_links＋交件型別 lineage／lineage_participants／lineage_handover／lineage_link（policy-ops#95）
 const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現職首長の公約 mayor_policies／term_policies（規則 enabled、新しい交件型別なし，policy-ops#95）
 const T_DS = "20261011170000"; // 派工臂對齊正見 2b：議員定数 district_seats_missing（規則最初から開く，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
@@ -540,8 +581,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -555,7 +596,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   regional_stat_unit: { mig: [T_APPLY], why: "地域統計 stat_key → 唯一單位（人／km2／千円／%），交件與落庫都對這張表" },
   apply_max_retries: { mig: [T_APPLY], why: "落庫重試次數（3），對齊正見 consensus.ts 的 APPLY_MAX_RETRIES（測試對齊）" },
   apply_retry_delay_minutes: { mig: [T_APPLY], why: "落庫重試間隔（10 分鐘），對齊正見 consensus.ts 的 APPLY_RETRY_DELAY_MINUTES（測試對齊）" },
-  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
+  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
   source_kind_for_url: { mig: [T_APPLY], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試" },
   election_default_name: { mig: [T_APPLY], why: "選舉預設名稱（交件沒給 name 時：<団体名>＋長／知事／議会議員＋選挙）" },
   source_write: { mig: [T_APPLY], why: "登記 sources、掛 source_refs；正見同名 source_write() 的日本版，簽名與回傳都不同（網址陣列、回主要出處 id），不是複本、沒有逐字比對" },
@@ -564,7 +605,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_regional_stat: { mig: [T_APPLY], why: "regional_stat 交件落庫（寫 regional_stats）；日本專屬型別" },
   apply_election: { mig: [T_APPLY], why: "election 交件落庫（寫 elections）；日本專屬型別" },
   apply_no_change: { mig: [T_APPLY], why: "no_change 落庫＝記一筆 task_checks（冷卻），不動正式資料（#503）" },
-  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
+  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
   apply_verified_pending: { mig: [T_APPLY], why: "落庫排程掃地機（policy-jp-apply-verified）：撿行內落庫漏掉的 verified 與到期的 apply_failed，只挑不再被擋的列" },
   apply_waiting: { mig: [T_APPLY], why: "（視圖）通過驗證、等團體落庫的交件清單（少數是正常，久了才是問題）；service_role 用" },
 
@@ -591,7 +632,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
-  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
@@ -671,6 +712,19 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261011180000 重複政見（duplicate_policy、規則は預設關）＋交件型別 removal；正見 duplicate_policy／removal の日本版 ----
   contribution_auto_tasks_duplicate_policy: { mig: [T_DUP], why: "重複政見の清査臂（duplicate_policy）：開いている選挙の公開済みの参選で公開済み公約 2 件以上 → 1 参選 1 件、指紋＝[id,title,description] の md5；正見は一人単位・policy_dupe_reviews、日本は参選単位・task_checks confirmed が永久" },
   apply_removal: { mig: [T_DUP], why: "removal 交件落庫（SQL 版；正見は TS applyRemoval）：政見だけ、軟移除は review_status='rejected'（policies に removed_at がない）、edit_history に旧行・新行" },
+  // ---- 20261011210000 政策の継承（lineage／handover，policy-ops#95 C 期第 6 步；正見 20261006034900 の日本版）----
+  lineage_level_of: { mig: [T_LIN], why: "団体コード → 脈絡の層級（NULL＝national、kind=prefecture＝regional、他＝local）。正見は region／sub_region の三つ組で county／township を決める、日本は lg_code 一本" },
+  lineage_link_level_ok: { mig: [T_LIN], why: "上下級の関連が成り立つか（国→都道府県・市区町村、都道府県→その都道府県内の市区町村）。正見 linkLevelProblem（TS）の日本版、落庫と lineage_links 臂が共有" },
+  lineage_candidate_scope: { mig: [T_LIN], why: "lineage_candidates 臂の対象政策（公開済み・人物が引ける・公約は当選済み／届出済み・表明済みの人のもの）。正見は臂の中に直書き（立法委員の政見を県市の格にも入れる一段は日本版では入れない）" },
+  lineage_block_key: { mig: [T_LIN], why: "格（層・団体・分野）の鍵の md5 前 12 字（task_id に空白は入れられない）。正見は region/sub_region/category を task_id にそのまま使う" },
+  contribution_auto_tasks_lineage_candidates: { mig: [T_LIN], why: "臂 lineage_candidates：格に複数任期にまたがる政策があり脈絡に入っていないものがあれば 1 件（task_id=auto:lineage_candidate:<格の鍵>:<清單指紋>）。FOLLOWED 正見 20261006034900 の task_type・target 形・confirmed は永久；DEVIATED：lineage_candidate_reviews 表を持たず task_checks confirmed（duplicate_policy と同じ）、cap は規則 params" },
+  contribution_auto_tasks_handover_missing: { mig: [T_LIN], why: "臂 handover_missing：首長の任期が終わり後任が就いているのに交接の記録がない → task_id=auto:handover_missing:<脈絡 id>:<交接の指紋>。FOLLOWED 正見の task_type・同一人の再選は出さない；DEVIATED：人物×選挙でなく任期（politician_offices）から任期へ、from/to_policy_ids は落庫で自動" },
+  contribution_auto_tasks_lineage_roles: { mig: [T_LIN], why: "臂 lineage_roles：脈絡に議員の政策があり役割の記録がない → task_id=auto:lineage_roles_missing:<脈絡 id>。FOLLOWED 正見の task_type・民意代表の範囲；DEVIATED：議員任期の判定は日本の職位（pref_assembly_member 等）" },
+  contribution_auto_tasks_lineage_links: { mig: [T_LIN], why: "臂 lineage_links：同じ分野で一つ上の層の脈絡との関連がまだない → task_id=auto:lineage_link_candidate:<下級の脈絡 id>:<指紋>。FOLLOWED 正見の task_type・confirmed は永久；DEVIATED：層は national／regional／local（pref_code で結ぶ）、task_checks で見た記録" },
+  apply_lineage: { mig: [T_LIN], why: "lineage 交件落庫（SQL 版；正見は TS applyLineage）：脈絡を建てる／政策を掛け外し／題名等を直す。同名の脈絡・別の脈絡に入った政策は conflict" },
+  apply_lineage_participants: { mig: [T_LIN], why: "lineage_participants 交件落庫（正見 applyLineageParticipants の日本版）：一人の一つの根拠に役割は一つ、重交＝上書き、remove で外す。検査を先に全部終える" },
+  apply_lineage_handover: { mig: [T_LIN], why: "lineage_handover 交件落庫（正見 applyLineageHandover の日本版）：任期から任期へ、同じ脈絡・同じ一対は 1 件。stop は official 等級の出典。from/to_policy_ids は自動" },
+  apply_lineage_link: { mig: [T_LIN], why: "lineage_link 交件落庫（正見 applyLineageLink の日本版）：一対の脈絡で 1 件、上級は下級の一つ上の層" },
   progress_subjects: { mig: [T_PROG], why: "進度追跡の対象政策（progress_stale の素材）：公開済み・終わっていない・公約は当選済みの参選のみ。正見は raw 臂の中に直書き、日本は helper に出して deadline_due と共用" },
   deadline_due_subjects: { mig: [T_PROG], why: "達成期限が過ぎた政策（deadline_due の素材）：policy_elements の期限が過ぎ、期限より後の経過の記録がない。progress_stale の除外判断にも使う" },
   contribution_auto_tasks_progress_stale: { mig: [T_PROG], why: "政策の進捗追跡臂（progress_stale）：stale_days 日動きのない政策 → 1 政策 1 件、task_id=auto:progress_stale:<policy id>；deadline_due の対象は出さない。正見は raw:progress_stale、冷却の段階的延長は移植していない" },

@@ -10,7 +10,7 @@
  * 每條守門都有還原驗證（拿掉被守的東西確認會紅）。
  */
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { decideSameClaim, parseResolvedClaim, SAME_CLAIM_REGISTRY, sameClaimTypes, type SameClaimMatches } from "./same-claims.ts";
+import { APPLY_IDEMPOTENT_TYPES, decideSameClaim, parseResolvedClaim, SAME_CLAIM_REGISTRY, sameClaimTypes, type SameClaimMatches } from "./same-claims.ts";
 import { DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
 import { jpSameClaimProbe } from "./jp/same-claim-probe.ts";
 
@@ -56,10 +56,14 @@ Deno.test("守門：上線後收編的觸發器型別＝登記表（jp）", () =
   assert(triggerTypes(broken).length === 1);
 });
 
-function guardApplyTypes(applyTypes: string[], registry: string[], dupTypes: readonly string[]): string[] {
+function guardApplyTypes(applyTypes: string[], registry: string[], dupTypes: readonly string[], idempotent: readonly string[] = APPLY_IDEMPOTENT_TYPES): string[] {
   const problems: string[] = [];
-  for (const t of applyTypes) if (!registry.includes(t) && !dupTypes.includes(t)) problems.push(`${t} 會落庫，卻沒有登記「找同一件事」`);
+  for (const t of applyTypes) if (!registry.includes(t) && !dupTypes.includes(t) && !idempotent.includes(t)) problems.push(`${t} 會落庫，卻沒有登記「找同一件事」`);
   for (const t of registry) if (dupTypes.includes(t)) problems.push(`${t} 同時在登記表與 claimKey 併票`);
+  for (const t of idempotent) {
+    if (registry.includes(t) || dupTypes.includes(t)) problems.push(`${t} 同時在冪等清單與登記表／claimKey 併票`);
+    if (!applyTypes.includes(t)) problems.push(`${t} 在冪等清單，卻不會落庫（apply_types 沒有它）`);
+  }
   return problems;
 }
 
@@ -69,8 +73,13 @@ Deno.test("守門：日本站會落庫的型別都有「找同一件事」的做
   assertEquals(guardApplyTypes(applyTypes, sameClaimTypes("jp"), DUPLICATE_ELIGIBLE_TYPES), []);
   // 還原驗證：從登記表拿掉 election、或 apply_types 多一種沒登記的、或兩邊都登記，都要紅
   assertEquals(guardApplyTypes(applyTypes, sameClaimTypes("jp").filter((t) => t !== "election"), DUPLICATE_ELIGIBLE_TYPES).length, 1);
-  assertEquals(guardApplyTypes([...applyTypes, "lineage"], sameClaimTypes("jp"), DUPLICATE_ELIGIBLE_TYPES).length, 1);
+  assertEquals(guardApplyTypes([...applyTypes, "something_new"], sameClaimTypes("jp"), DUPLICATE_ELIGIBLE_TYPES).length, 1);
   assertEquals(guardApplyTypes(applyTypes, [...sameClaimTypes("jp"), "no_change"], DUPLICATE_ELIGIBLE_TYPES).length, 1);
+  // 第三條路（APPLY_IDEMPOTENT_TYPES）：政策の継承 4 型別；拿掉清單就會紅、又進登記表也會紅
+  for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) assert(applyTypes.includes(t) && APPLY_IDEMPOTENT_TYPES.includes(t), t);
+  assertEquals(guardApplyTypes(applyTypes, sameClaimTypes("jp"), DUPLICATE_ELIGIBLE_TYPES, []).length, 4, "冪等清單拿掉＝4 型別都沒有做法");
+  assertEquals(guardApplyTypes(applyTypes, [...sameClaimTypes("jp"), "lineage"], DUPLICATE_ELIGIBLE_TYPES).length, 1, "進了登記表又在冪等清單");
+  assertEquals(guardApplyTypes(applyTypes, sameClaimTypes("jp"), DUPLICATE_ELIGIBLE_TYPES, [...APPLY_IDEMPOTENT_TYPES, "ghost"]).length, 1, "冪等清單有不會落庫的型別");
 });
 
 Deno.test("守門：SQL same_claim_matches 認得的型別＝登記表（jp）", () => {

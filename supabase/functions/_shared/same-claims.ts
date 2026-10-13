@@ -38,6 +38,14 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
   { type: "district_seats", table: "election_districts", key: ["election_id"], sites: ["jp"] },
 ];
 
+/**
+ * 第三條路（日本站 20261011210000 起）：落庫本身冪等、重複由 DB 一意制約與落庫衝突處理的型別。
+ * 政策の継承（脈絡 lineage／交接 handover／同級多人 participants／上下級 link）：同一個脈絡的同一對任期／同一對脈絡／同一人同一根拠只有一列，
+ * 重交＝上書きか unchanged、同名の脈絡＝conflict（退件）。鍵是 DB 內的 id 組合，代理沒有「先查在庫再宣告」的對象，
+ * 所以既不進登記表（不要求 resolved_claim）也不進 claimKey 併票（DUPLICATE_ELIGIBLE_TYPES）。一個型別只能在三邊的其中一邊（守門：same-claims.test.ts）。
+ */
+export const APPLY_IDEMPOTENT_TYPES: readonly string[] = ["lineage", "lineage_participants", "lineage_handover", "lineage_link"];
+
 /** 這一站要求 resolved_claim 的型別 */
 export function sameClaimTypes(site: "jp" | "tw"): string[] {
   return SAME_CLAIM_REGISTRY.filter((e) => e.sites.includes(site)).map((e) => e.type);
