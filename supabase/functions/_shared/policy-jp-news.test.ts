@@ -70,7 +70,9 @@ Deno.test("結構：臂名・総表（前の版に足しただけ）・規則・
   const src = await rows<{ feed_url: string; enabled: boolean; format: string }>(db, `SELECT feed_url, enabled, format FROM policy_jp.news_sources ORDER BY id`);
   assert(src.length >= 3);
   for (const s of src) { assert(s.feed_url.startsWith("https://"), s.feed_url); assertEquals(s.format, "rss"); }
-  assert(src.some((s) => s.feed_url === "https://www3.nhk.or.jp/rss/news/cat4.xml" && s.enabled));
+  // 旧 www3 の RSS は 2026-08-08 で更新停止 → 20261011280000 で NHK ONE（news.web.nhk/n-data/conf/na/rss/）に換えた
+  assert(src.some((s) => s.feed_url === "https://news.web.nhk/n-data/conf/na/rss/cat4.xml" && s.enabled));
+  for (const s of src.filter((x) => x.feed_url.startsWith("https://www3.nhk.or.jp/rss/"))) assertEquals(s.enabled, false, s.feed_url);
   // robots.txt が自動取得を拒む来源（Yahoo!ニュース）は種子に入れても止めておく
   for (const s of src.filter((x) => x.feed_url.includes("yahoo.co.jp"))) assertEquals(s.enabled, false, s.feed_url);
   assertEquals(await one(db, `SELECT enabled, daily_lead_cap, max_age_days, keep_days FROM policy_jp.news_settings`), { enabled: true, daily_lead_cap: 10, max_age_days: 3, keep_days: 30 });
