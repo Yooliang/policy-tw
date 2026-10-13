@@ -359,12 +359,16 @@ function skeleton(def: string): string[] {
   return def.replace(/ SET search_path = policy_jp, pg_temp/g, "").replaceAll("policy_jp.", "")
     .split("\n").map((l) => l.replace(/--.*$/, "").trim().replace(/\s+/g, " ")).filter((l) => l !== "");
 }
+// 2026-10-13 正見改成「優先級秒數」（20261011320000：插隊改加 boost_seconds），日本站還沒有秒數模型，先不跟：
+// 日本版對照的是那支之前的正見定義；正見在那支之後再改，下面的「最後一版」斷言就紅，要重新決定跟不跟
+const TW_SECONDS_MIG = "20261011320000";
 async function twVsJp(name: string): Promise<{ tw: string[]; jp: string[] }> {
-  return { tw: skeleton(await latestFn(name)), jp: skeleton(fnText(JP_SQL[MIG_FILE], `policy_jp.${name}`)) };
+  return { tw: skeleton(await latestFn(name, TW_SECONDS_MIG)), jp: skeleton(fnText(JP_SQL[MIG_FILE], `policy_jp.${name}`)) };
 }
 
-Deno.test("骨架對照：policy_jp.task_boost／task_boost_remaining ＝ 正見現行定義（去註解、去 policy_jp. 前綴與 search_path）；正見改了這裡紅", async () => {
+Deno.test("骨架對照：policy_jp.task_boost／task_boost_remaining ＝ 正見秒數化之前的定義（去註解、去 policy_jp. 前綴與 search_path）；正見之後再改這裡紅", async () => {
   for (const name of ["task_boost", "task_boost_remaining"]) {
+    assertEquals(skeleton(await latestFn(name)), skeleton(await latestFn(name, TW_SECONDS_MIG + "_~")), `${name}：正見在 ${TW_SECONDS_MIG} 之後又改了，要決定日本版跟不跟`);
     const { tw, jp } = await twVsJp(name);
     assert(tw.length > 5);
     assertEquals(jp, tw, `${name}：日本站跟正見的現行定義不一致，要決定日本版跟不跟`);
