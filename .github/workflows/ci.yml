@@ -141,6 +141,15 @@ jobs:
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "沒有 CLOUDFLARE_API_TOKEN，略過 Worker 部署"; exit 0; fi
           npx wrangler deploy
+      # api.hustings.net（兩站協議端點與正見唯讀 REST 的固定網址，cloudflare/api-worker.js）。以前只能本機手動部署，
+      # 改成跟 SSR Worker 一起自動上；密鑰 HUSTINGS_PROXY_SECRET 是 wrangler secret，部署不會動到它。
+      - name: wrangler deploy（api.hustings.net）
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "沒有 CLOUDFLARE_API_TOKEN，略過 Worker 部署"; exit 0; fi
+          npx wrangler deploy -c cloudflare/api-wrangler.toml
 
   # Hosting 綠了才部署 Supabase（migrations 先、Edge Functions 後）——順序理由見
   # scripts/deploy-functions.mjs 檔頭：函式先上線、公開的 skill.md 還沒更新的話，

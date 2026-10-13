@@ -6,7 +6,7 @@
  *   - 回應原樣回來（狀態碼、CORS），多一個 X-Served-Via
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import worker, { API_ORIGIN, JP_FUNCTIONS, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, targetOf, TW_FUNCTIONS, upstreamRequest } from "./api-worker.js";
+import worker, { ANON_KEY, API_ORIGIN, REST_ORIGIN, restTargetOf, JP_FUNCTIONS, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, targetOf, TW_FUNCTIONS, upstreamRequest } from "./api-worker.js";
 
 const BASE = "https://api.hustings.net";
 const SECRET = "k".repeat(40);
@@ -104,4 +104,47 @@ Deno.test("路徑變形一律 404：編碼的斜線、雙斜線、大寫、多�
 Deno.test("密鑰前後空白：Worker 送出去的是 trim 過的值", () => {
   const up = upstreamRequest(new Request(`${BASE}/tw/next`, { headers: { "cf-connecting-ip": "203.0.113.9" } }), `${API_ORIGIN}/next`, ` ${SECRET}\n`);
   assertEquals(up.headers.get(PROXY_SECRET_HEADER), SECRET);
+});
+
+Deno.test("唯讀 REST：/tw/rest/v1/<表> 轉到 rest/v1、保留查詢字串；其他形狀 null（日本站、多一層、大寫、編碼）", () => {
+  assertEquals(restTargetOf(new URL(`${BASE}/tw/rest/v1/politicians?select=id&name=eq.王小明`)), `${REST_ORIGIN}/politicians?select=id&name=eq.%E7%8E%8B%E5%B0%8F%E6%98%8E`);
+  assertEquals(restTargetOf(new URL(`${BASE}/tw/rest/v1/policies_with_logs/`)), `${REST_ORIGIN}/policies_with_logs`);
+  for (const p of ["/jp/rest/v1/politicians", "/tw/rest/v1/rpc/x", "/tw/rest/v1/Politicians", "/tw/rest/v1/a%2Fb", "/tw/rest/v1/", "/tw/rest/politicians"]) {
+    assertEquals(restTargetOf(new URL(`${BASE}${p}`)), null, p);
+  }
+});
+
+Deno.test("唯讀 REST：沒帶 key 補 anon key、帶了照用；拿掉 schema 切換與來源標頭、不帶密鑰；寫入 405 不轉送", async () => {
+  const realFetch = globalThis.fetch;
+  const seen: Request[] = [];
+  globalThis.fetch = ((r: Request) => {
+    seen.push(r);
+    return Promise.resolve(new Response("[]", { status: 200, headers: { "content-type": "application/json" } }));
+  }) as typeof fetch;
+  try {
+    const env = { HUSTINGS_PROXY_SECRET: SECRET };
+    const a = await worker.fetch(new Request(`${BASE}/tw/rest/v1/politicians?limit=1`, {
+      headers: { "cf-connecting-ip": "203.0.113.9", "accept-profile": "policy_jp", [PROXY_SECRET_HEADER]: "forged" },
+    }), env);
+    assertEquals(a.status, 200);
+    assertEquals(a.headers.get("x-served-via"), "api.hustings.net");
+    assertEquals(seen[0].url, `${REST_ORIGIN}/politicians?limit=1`);
+    assertEquals(seen[0].headers.get("apikey"), ANON_KEY);
+    assertEquals(seen[0].headers.get("authorization"), `Bearer ${ANON_KEY}`);
+    assertEquals(seen[0].headers.get("accept-profile"), null, "只讀得到 public");
+    assertEquals(seen[0].headers.get(PROXY_SECRET_HEADER), null, "密鑰不送給 PostgREST");
+    assertEquals(seen[0].headers.get(PROXY_CLIENT_IP_HEADER), null);
+
+    await worker.fetch(new Request(`${BASE}/tw/rest/v1/parties`, { headers: { apikey: "mine", authorization: "Bearer mine" } }), env);
+    assertEquals(seen[1].headers.get("apikey"), "mine");
+    assertEquals(seen[1].headers.get("authorization"), "Bearer mine");
+
+    for (const method of ["POST", "PATCH", "DELETE", "PUT"]) {
+      const r = await worker.fetch(new Request(`${BASE}/tw/rest/v1/politicians`, { method, body: method === "DELETE" ? undefined : "{}" }), env);
+      assertEquals(r.status, 405, method);
+    }
+    assertEquals(seen.length, 2, "寫入不轉送");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

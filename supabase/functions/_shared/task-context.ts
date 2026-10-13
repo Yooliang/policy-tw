@@ -26,7 +26,7 @@ import { REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from ".
 
 export const POLICY_SIMILARITY_THRESHOLD = 0.6;
 
-export const REST_BASE = "https://wiiqoaytpqvegtknlbue.supabase.co/rest/v1";
+export const REST_BASE = "https://api.hustings.net/tw/rest/v1";
 export const TEXT_LIMIT = 500;
 export const MAX_EXISTING_POLICIES = 30;
 /** duplicate_policy：整份清單要給代理看完才判得出重複；全站最長的一份是 25 筆，留一倍餘裕 */
@@ -698,7 +698,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
   }
 }
 
-/** 現成 REST 查詢網址（要帶 apikey／Authorization header，見 skill.md §7） */
+/** 現成 REST 查詢網址（經 api.hustings.net 不用帶 header，見 skill.md §7） */
 export function buildLookup(target: Obj): Record<string, string> {
   const pid = typeof target.politician_id === "string" ? target.politician_id : null;
   const policyId = typeof target.policy_id === "string" ? target.policy_id : null;
