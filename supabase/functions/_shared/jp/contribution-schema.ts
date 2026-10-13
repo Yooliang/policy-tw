@@ -13,6 +13,8 @@
  *   人物用 politician_id 或 name＋kana；得票數・得票率的欄位名一律 400；claimKey 併票型別，不進 same_claim 登記表）。落庫 SQL policy_jp.apply_candidacy（20261010040000）。
  * 日本站自己的：policy_elements（政見三要素，對應派工臂 policy_elements；欄位與規則照正見 contribution-schema.ts 的 policy_elements、共用 ../policy-elements.ts 的上限與日期範圍；
  *   同一件事登記表的型別〔鍵＝政見 id ＋ 要素〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_policy_elements（20261011140000）。
+ * 日本站自己的：district_seats（議員定数，對應派工臂 district_seats；議会議員選挙 1 件の定数合計 seats_total と選挙区ごとの定数 districts[]；at_large と district は混ぜない、合計一致；
+ *   同一件事の登記表の型別〔鍵＝選挙 id〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_district_seats（20261011170000）。
  * 拿掉的：其他十八種貢獻型別、選舉 id／election_key 解析（resolveElectionKeys）、中選會名冊大批次（MAX_BATCH_ROSTER）、
  * 出處等級 source_details（正見 #347 的 sources 表，日本站有自己的 sources，本 PR 不接）、
  * 驗證請求裡的 resolved_politician_id／cec_hits／cec_people（身份指認與中選會筆數，日本站沒有）。
@@ -35,7 +37,12 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"] as const;
+/** district_seats の上限・列挙（SQL policy_jp.district_seats_normalize と同じ値） */
+export const DISTRICT_SEATS_MAX = 200;
+export const DISTRICT_SEATS_MAX_DISTRICTS = 100;
+export const DISTRICT_SEATS_BASES = ["law", "notice"] as const;
+export const DISTRICT_SEATS_KINDS = ["at_large", "district"] as const;
 export type JpContributionType = (typeof JP_CONTRIBUTION_TYPES)[number];
 
 /** election 的列舉：跟 policy_jp.elections 的 CHECK（election_type／election_reason）同一份；改一邊要改另一邊 */
@@ -165,6 +172,8 @@ export const JP_TASK_ARMS = {
   policy_missing: "policy",
   // 政見三要素（policy-ops#95、規則は預設關）：政見 1 件につき要素 1～3 個を policy_elements で答える
   policy_elements_missing: "policy_elements",
+  // 議員定数（policy-ops#95）：議会議員選挙 1 件につき district_seats で答える
+  district_seats_missing: "district_seats",
   // A 期（policy-ops#95）：候補者の状態を確かめる三つの任務型別も candidacy（filed／withdrawn／同じ状態で選管の出典を足す）。
   // not_running_recheck は「照合」（task_id に filing が付かない）だと no_change／task_suggestion で答える：下の checkTaskAgreement で candidacy を断る
   candidate_status_stale: "candidacy",
@@ -173,8 +182,8 @@ export const JP_TASK_ARMS = {
   // B 期（policy-ops#95）：開票結果の任務も candidacy（当落：一人一件／記録にない当選者：一選挙一件で何人分でも）
   election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|district_seats_missing|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
@@ -242,6 +251,12 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   if (arm === "policy_elements_missing") {
     if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:policy_elements_missing:<政見 id>）"); return; }
     if (payload.policy_id !== m[2]) push("payload.policy_id", `payload.policy_id（${String(payload.policy_id ?? "未填")}）跟這個任務問的政見（${m[2]}）不一致：一個任務只回報它問的那一條政見的三要素`);
+    return;
+  }
+  // district_seats_missing：task_id の末尾は選挙 id。1 つの任務は 1 つの選挙だけ
+  if (arm === "district_seats_missing") {
+    if (!JP_ELECTION_ID_RE.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:district_seats_missing:<選挙 id>）"); return; }
+    if (payload.election_id !== m[2]) push("payload.election_id", `payload.election_id（${String(payload.election_id ?? "未填")}）跟這個任務問的選舉（${m[2]}）不一致：一個任務只回報它問的那場選舉的議員定数`);
     return;
   }
   let taskLg: string;
@@ -482,6 +497,47 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
           push(`${at}.source_url`, "source_url は http(s) の URL（この交件の source_urls のどれか：この要素の原文）");
         }
       });
+      break;
+    }
+    case "district_seats": {
+      // 議員定数（正見 district_seats の日本版）：議会議員選挙 1 件の定数合計と選挙区ごとの定数。落庫は SQL policy_jp.apply_district_seats（district_seats_normalize が同じ規則）
+      if (!isStr(p.election_id, 1, 64) || /\s/.test(p.election_id)) push("payload.election_id", "election_id 必填（任務 target.election_id の値）");
+      const intIn = (v: unknown, lo: number, hi: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
+      if (!intIn(p.seats_total, 1, DISTRICT_SEATS_MAX)) push("payload.seats_total", `seats_total 必填：1～${DISTRICT_SEATS_MAX} の整数（その選挙の議員定数の合計）`);
+      if (!oneOf(DISTRICT_SEATS_BASES, p.seats_basis)) push("payload.seats_basis", "seats_basis 必填：law（議員定数条例）か notice（選挙管理委員会の告示）");
+      if (!Array.isArray(p.districts) || p.districts.length === 0 || p.districts.length > DISTRICT_SEATS_MAX_DISTRICTS) {
+        push("payload.districts", `districts 必填：1～${DISTRICT_SEATS_MAX_DISTRICTS} 件の配列（選挙区がなければ at_large を 1 件）`);
+        break;
+      }
+      const seenKeys = new Set<string>();
+      const kinds = new Set<string>();
+      let sum = 0;
+      let sumOk = true;
+      (p.districts as unknown[]).forEach((raw, i) => {
+        const at = `payload.districts[${i}]`;
+        if (!isObj(raw)) { push(at, "各件はオブジェクト：{district_kind, district_name, district_lg_code, seats}"); sumOk = false; return; }
+        const kind = raw.district_kind;
+        if (!oneOf(DISTRICT_SEATS_KINDS, kind)) push(`${at}.district_kind`, "district_kind は at_large（選挙区なし・全域で一つ）か district（選挙区）");
+        else kinds.add(kind);
+        const name = typeof raw.district_name === "string" ? jpTrim(raw.district_name) : "";
+        if (raw.district_name !== undefined && raw.district_name !== null && typeof raw.district_name !== "string") push(`${at}.district_name`, "要是字串");
+        else if (kind === "district" && (!name || name.length > 50)) push(`${at}.district_name`, "district_kind=district のときは district_name 必須（選挙区の名前、50 字まで）");
+        else if (kind === "at_large" && name) push(`${at}.district_name`, "district_kind=at_large のときは district_name を付けない");
+        const lg = typeof raw.district_lg_code === "string" ? jpTrim(raw.district_lg_code) : "";
+        if (raw.district_lg_code !== undefined && raw.district_lg_code !== null && raw.district_lg_code !== "") {
+          if (typeof raw.district_lg_code !== "string" || !/^\d{6}$/.test(lg)) push(`${at}.district_lg_code`, "district_lg_code は団体コード 6 桁");
+          else if (kind !== "district") push(`${at}.district_lg_code`, "district_lg_code は district_kind=district のときだけ付けられる");
+          else if (!lgCodeValid(lg)) push(`${at}.district_lg_code`, "district_lg_code の検査コード（第 6 桁）が合わない：総務省「全国地方公共団体コード」を確かめる");
+        }
+        if (!intIn(raw.seats, 1, DISTRICT_SEATS_MAX)) { push(`${at}.seats`, `seats は 1～${DISTRICT_SEATS_MAX} の整数（その選挙区の定数）`); sumOk = false; }
+        else sum += raw.seats;
+        const key = `${String(kind)}|${name}`;
+        if (seenKeys.has(key)) push(`${at}.district_name`, `選挙区が重複している：${name || "（at_large）"}`);
+        seenKeys.add(key);
+      });
+      if (kinds.size > 1) push("payload.districts", "at_large と district を一つの交件に混ぜない（選挙区がなければ at_large を 1 件、あれば district だけ）");
+      else if (kinds.has("at_large") && p.districts.length !== 1) push("payload.districts", "at_large は 1 件だけ");
+      if (sumOk && intIn(p.seats_total, 1, DISTRICT_SEATS_MAX) && sum !== p.seats_total) push("payload.seats_total", `districts の seats の合計（${sum}）が seats_total（${p.seats_total}）と合わない`);
       break;
     }
     case "regional_stat": {

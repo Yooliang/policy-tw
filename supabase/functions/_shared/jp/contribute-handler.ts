@@ -166,6 +166,8 @@ export const BATCH_SAME_CLAIM: Readonly<Record<string, BatchMatcher>> = {
     const qk = kinds(q.elements);
     return kinds(p.elements).some((k) => qk.includes(k));
   },
+  // 同じ選挙の議員定数（鍵は選挙 id だけ）
+  district_seats: (p, q) => p.election_id === q.election_id,
   politician: (p, q) => {
     // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
     if (p.politician_id !== q.politician_id) return false;
