@@ -4,8 +4,9 @@
 name: CI
 
 on:
+  # 分支只靠 pull_request 跑一次（2026-10-13）：以前 push 到任何分支也跑，開了 PR 的分支每次推都跑兩遍一模一樣的 CI
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -49,8 +50,14 @@ jobs:
           include-hidden-files: false
 
   edge-tests:
-    name: Edge Function 與協議守門測試
+    name: Edge Function 與協議守門測試（${{ matrix.shard }}/6）
     runs-on: ubuntu-latest
+    # 拆成六台同時跑（2026-10-13）：_shared/ 有 95 個測試檔各自在 PGlite 重放 migration，排成一條要 20 分鐘以上。
+    # deno 的 --shard 照檔名分組；needs: [edge-tests] 會等六台全綠
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -60,10 +67,11 @@ jobs:
       # 的表格與版本號是否跟著改。門檻只改一邊就會在這裡紅。
       - name: deno test（supabase/functions/_shared）
         working-directory: supabase/functions
-        run: deno test --allow-read _shared/
+        run: deno test --allow-read --shard=${{ matrix.shard }}/6 _shared/
       # 整個資料夾交給 deno 自己找 *.test.ts（2026-10-07 起）：以前手寫 36 個檔名，新測試漏加就是「測試存在但沒跑」
       # （ci-test-glob.test.ts 守這一行不再列檔名）
       - name: deno test（前端純函式）
+        if: matrix.shard == 1
         # Deno 2.x 新版預設「發佈未滿 24 小時的 npm 套件不裝」，--node-modules-dir=auto 每次現解析，
         # rollup 新版的平台選用套件剛發佈就讓這一步整批紅（2026-10-10）。這一步只跑純函式測試、不碰任何金鑰，
         # 關掉年齡限制換 CI 不被上游發版卡住；建置與部署仍走 pnpm-lock 鎖定的版本。
@@ -72,6 +80,7 @@ jobs:
       # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
       - name: 掃不該進版控的金鑰
+        if: matrix.shard == 1
         run: deno run --allow-read scripts/scan-secrets.ts
 
   # 部署只在 main、而且要等上面兩個 job 都綠。
