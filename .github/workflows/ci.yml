@@ -143,13 +143,19 @@ jobs:
           npx wrangler deploy
       # api.hustings.net（兩站協議端點與正見唯讀 REST 的固定網址，cloudflare/api-worker.js）。以前只能本機手動部署，
       # 改成跟 SSR Worker 一起自動上；密鑰 HUSTINGS_PROXY_SECRET 是 wrangler secret，部署不會動到它。
-      - name: wrangler deploy（api.hustings.net）
+      # 只換程式、不碰路由：CI 的權杖沒有 hustings.net zone 的 Workers Routes 權限（#631 合併後 `wrangler deploy` 在改路由那步 403），
+      # 所以用 versions upload＋versions deploy（不呼叫路由 API）。路由與 custom domain 要改時，照 api-wrangler.toml 檔頭在本機 wrangler deploy。
+      - name: wrangler 換程式（api.hustings.net，不動路由）
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "沒有 CLOUDFLARE_API_TOKEN，略過 Worker 部署"; exit 0; fi
-          npx wrangler deploy -c cloudflare/api-wrangler.toml
+          set -o pipefail
+          npx wrangler versions upload -c cloudflare/api-wrangler.toml 2>&1 | tee /tmp/api-upload.log
+          vid=$(grep -oE 'Worker Version ID: [0-9a-f-]{36}' /tmp/api-upload.log | awk '{print $4}' | tail -1)
+          if [ -z "$vid" ]; then echo "抓不到 Worker Version ID"; exit 1; fi
+          npx wrangler versions deploy "$vid@100%" --yes -c cloudflare/api-wrangler.toml
 
   # Hosting 綠了才部署 Supabase（migrations 先、Edge Functions 後）——順序理由見
   # scripts/deploy-functions.mjs 檔頭：函式先上線、公開的 skill.md 還沒更新的話，
