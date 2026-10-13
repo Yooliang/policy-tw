@@ -71,6 +71,12 @@ const policyElements = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
 };
 
+const removal = {
+  contribution_type: "removal",
+  payload: { target_table: "policies", target_id: "pol-0001", keep_id: "pol-0002", reason: "pol-0002 と同じ約束の言い換えで、pol-0002 の方が具体的なので残す" },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
+};
+
 const districtSeats = {
   contribution_type: "district_seats",
   payload: {
@@ -80,9 +86,9 @@ const districtSeats = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/reiki/teisuu.html"],
 };
 
-Deno.test("十一種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats]) {
+Deno.test("十二種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements, districtSeats, removal]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
