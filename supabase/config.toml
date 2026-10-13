@@ -443,6 +443,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/jp-history/index.ts"
 
+[functions.jp-tasks]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/jp-tasks/index.ts"
+
 [functions.jp-boost]
 enabled = true
 verify_jwt = false
