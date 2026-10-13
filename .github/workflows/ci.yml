@@ -50,14 +50,16 @@ jobs:
           include-hidden-files: false
 
   edge-tests:
-    name: Edge Function 與協議守門測試（${{ matrix.shard }}/6）
+    name: Edge Function 與協議守門測試（${{ matrix.shard }}/8）
     runs-on: ubuntu-latest
-    # 拆成六台同時跑（2026-10-13）：_shared/ 有 95 個測試檔各自在 PGlite 重放 migration，排成一條要 20 分鐘以上。
-    # deno 的 --shard 照檔名分組；needs: [edge-tests] 會等六台全綠
+    # 拆成八台同時跑（2026-10-13）：_shared/ 有 95 個測試檔各自在 PGlite 重放 migration，排成一條要 20 分鐘以上。
+    # 分法是「檔名排序後輪流發牌」，不用 deno 的 --shard：後者把排序後的檔案切成連續幾塊，
+    # 檔名開頭相同的 policy-jp-* 重放整包 migration 的測試全擠進同一片（實測 12.5 分鐘 vs 其他片 0.5～3 分鐘）。
+    # needs: [edge-tests] 會等八台全綠
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -67,7 +69,7 @@ jobs:
       # 的表格與版本號是否跟著改。門檻只改一邊就會在這裡紅。
       - name: deno test（supabase/functions/_shared）
         working-directory: supabase/functions
-        run: deno test --allow-read --shard=${{ matrix.shard }}/6 _shared/
+        run: deno test --allow-read $(find _shared/ -name '*test.ts' | LC_ALL=C sort | awk 'NR % 8 == ${{ matrix.shard }} % 8')
       # 整個資料夾交給 deno 自己找 *.test.ts（2026-10-07 起）：以前手寫 36 個檔名，新測試漏加就是「測試存在但沒跑」
       # （ci-test-glob.test.ts 守這一行不再列檔名）
       - name: deno test（前端純函式）
