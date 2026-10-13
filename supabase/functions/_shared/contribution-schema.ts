@@ -3,6 +3,7 @@
  * public/skill.md 描述的就是這份 schema，改欄位要兩處一起改。
  */
 
+import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "./correction.ts";
@@ -379,6 +380,11 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
       if (p.election_id !== undefined && !(isKnownElectionId(p.election_id))) push("payload.election_id", `要是 ${electionIdsText()}`);
       validateProposedDate(p.proposed_date, p.election_id, push, p.status);
+      {
+        // 任內施政承諾不能掛在還沒投票的選舉（2026-10-13，policy-term-guard.ts）
+        const problem = inOfficePolicyFutureElectionProblem(p.status, activeElections.find((e) => e.id === p.election_id), new Date().toISOString().slice(0, 10));
+        if (problem) push("payload.election_id", problem);
+      }
       validateHints(p, push);
       // 政見從哪裡來（#349，協議 1.52.0；照日本站 policy_origin）：選填，不給的話競選承諾由資料庫自動標 pledge
       if (p.origin !== undefined && !oneOf(POLICY_ORIGINS, p.origin)) push("payload.origin", ORIGIN_MSG);

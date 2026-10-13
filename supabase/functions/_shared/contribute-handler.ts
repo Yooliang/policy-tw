@@ -24,6 +24,7 @@ import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
 import { councilDistrictProblems } from "./council-district-guard.ts";
 import { REGISTERED_STATUSES, reasonNamesTarget, registrationEvidenceOk } from "./candidacy-guards.ts";
+import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDeadlineOf } from "./elections.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
@@ -503,6 +504,25 @@ export async function handleContribute(
       const urls = Array.isArray(item.source_urls) ? (item.source_urls as unknown[]).filter((u): u is string => typeof u === "string") : [];
       if (item.contribution_type === "correction") {
         const { target_table, target_id, changes, reason } = normalizeCorrection(p);
+        // 任內施政承諾不能改掛到還沒投票的選舉（2026-10-13，policy-term-guard.ts）：改完的 status 與 election_id 一起看
+        if (target_table === "policies" && target_id && changes.some((c) => c.field === "election_id" || c.field === "status")) {
+          // query-bounds: ok — 按 id 取一列
+          let cur: { status?: string | null; election_id?: number | null } | null = null;
+          try {
+            ({ data: cur } = await supabase.from("policies").select("status, election_id").eq("id", target_id).maybeSingle());
+          } catch { /* 查不到就不擋 */ }
+          if (cur) {
+            const changed = (f: string) => changes.find((c) => c.field === f);
+            const status = changed("status") ? changed("status")!.correct_value : cur.status;
+            const rawElection = changed("election_id") ? changed("election_id")!.correct_value : cur.election_id;
+            const election = elections.find((e) => e.id === Number(rawElection) || e.election_key === rawElection);
+            const problem = inOfficePolicyFutureElectionProblem(status, election, today);
+            if (problem) {
+              return { status: 400, body: { success: false, error: "in_office_policy_future_election", message: problem } };
+            }
+          }
+          continue;
+        }
         // 任期（#345 後續）跟參選紀錄一樣：id 是整數、填錯一號就改到別人，reason 要寫出本人姓名
         if ((target_table !== "politician_elections" && target_table !== "politician_offices") || !target_id) continue;
         // query-bounds: ok — 按 id 取一列

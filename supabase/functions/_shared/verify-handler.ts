@@ -4,6 +4,7 @@
  *       disagree 必附 evidence_url；共識由 DB 觸發器算。
  */
 
+import { votePickProblem } from "./vote-pick-guard.ts";
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
@@ -146,6 +147,12 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash) || isReportNet(original.contributor_ip_hash))) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
+  }
+
+  // 自己的票先擋（403），再看指認。非身份型別帶同名指認＝這張票多半是寫給另一件的（2026-10-13，vote-pick-guard.ts）
+  {
+    const pickProblem = votePickProblem(contribution.contribution_type, input.resolved_politician_id);
+    if (pickProblem) return { status: 400, body: { success: false, error: "pick_not_applicable", message: pickProblem } };
   }
 
   // 派發即綁定：只收「/next 派給你的那一筆」。2026-09-21 使用者裁示——
