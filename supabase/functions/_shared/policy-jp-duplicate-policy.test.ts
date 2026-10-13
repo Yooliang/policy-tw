@@ -292,13 +292,13 @@ Deno.test("落庫：keep_id なしでも通る；すでに rejected は unchange
   await db.close();
 });
 
-Deno.test("落庫：不合格は invalid で退件（何も変えない）— target_table が policies 以外／target_id なし／reason 短い／存在しない／pending の政見／keep_id が自分・存在しない・非公開・別の参選", async () => {
+Deno.test("落庫：不合格は invalid で退件（何も変えない）— target_table が policies／politicians 以外／target_id なし／reason 短い／存在しない／pending の政見／keep_id が自分・存在しない・非公開・別の参選", async () => {
   const db = await freshDb();
   const s = await stage(db);
   const pendingP = await addPolicy(db, s.a.peid, "下書きの公約", "まだ公開していない公約。");
   await db.query(`UPDATE policy_jp.policies SET review_status = 'pending' WHERE id = $1`, [pendingP]);
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["target_table が politicians", REMOVAL_ID_OK(s.p2, s.p1, { target_table: "politicians" }), "policies"],
+    ["target_table が elections（政見と人物の removal だけ）", REMOVAL_ID_OK(s.p2, s.p1, { target_table: "elections" }), "policies"],
     ["target_table なし", (() => { const p = REMOVAL_ID_OK(s.p2, s.p1); delete (p as Record<string, unknown>).target_table; return p; })(), "policies"],
     ["target_id なし", REMOVAL_ID_OK(s.p2, s.p1, { target_id: "" }), "target_id"],
     ["reason が短い", REMOVAL_ID_OK(s.p2, s.p1, { reason: "重複しているため" }), "reason"],
