@@ -66,13 +66,12 @@ Deno.test("結構：臂名・総表（前の版に足しただけ）・規則・
     assertEquals((await one<{ x: boolean }>(db, `SELECT has_function_privilege('anon', 'policy_jp.${f}', 'EXECUTE') AS x`)).x, false, f);
   }
   assertEquals(await asRole(db, "anon", `SELECT 1 AS x FROM pg_catalog.pg_tables WHERE tablename = 'news_items'`).then((r) => r.length), 1, "（カタログは見える）");
-  // 種子の来源：https の公開 RSS だけ
+  // 来源：RSS は一律受け付けない（維護者 2026-10-13、20261011260000）。250000 の RSS 種子は全部止まっていて、enabled なのは html だけ
   const src = await rows<{ feed_url: string; enabled: boolean; format: string }>(db, `SELECT feed_url, enabled, format FROM policy_jp.news_sources ORDER BY id`);
   assert(src.length >= 3);
-  for (const s of src) { assert(s.feed_url.startsWith("https://"), s.feed_url); assertEquals(s.format, "rss"); }
-  assert(src.some((s) => s.feed_url === "https://www3.nhk.or.jp/rss/news/cat4.xml" && s.enabled));
-  // robots.txt が自動取得を拒む来源（Yahoo!ニュース）は種子に入れても止めておく
-  for (const s of src.filter((x) => x.feed_url.includes("yahoo.co.jp"))) assertEquals(s.enabled, false, s.feed_url);
+  for (const s of src) assert(s.feed_url.startsWith("https://"), s.feed_url);
+  for (const s of src.filter((x) => x.format !== "html")) assertEquals(s.enabled, false, s.feed_url);
+  assertEquals(src.filter((s) => s.enabled && s.format !== "html"), []);
   assertEquals(await one(db, `SELECT enabled, daily_lead_cap, max_age_days, keep_days FROM policy_jp.news_settings`), { enabled: true, daily_lead_cap: 10, max_age_days: 3, keep_days: 30 });
   // 設定表は 1 行だけ
   let threw = false;
@@ -265,12 +264,26 @@ Deno.test("協議：news の任務 id は既存の election 交件の検査に�
   await clock(db, D0);
   await insertLg(db, ICHI);
   await record(db, ICHI, "head", "death", "https://n.test/1");
-  await db.exec(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format) VALUES ('t', 'media', 'https://t.test/x', 'rss')`);
+  await db.exec(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format, link_pattern) VALUES ('t', 'media', 'https://t.test/x', 'html', '^https://t\\.test/a/')`);
   const sid = (await one<{ id: number }>(db, `SELECT id::INT AS id FROM policy_jp.news_sources WHERE feed_url = 'https://t.test/x'`)).id;
   await db.query(`INSERT INTO policy_jp.news_items (source_id, url, title, fetched_at) VALUES ($1, 'https://t.test/old', 'old', now() - INTERVAL '31 days'), ($1, 'https://t.test/new', 'new', now())`, [sid]);
   assertEquals((await one<{ n: number }>(db, `SELECT policy_jp.news_purge() AS n`)).n, 1);
   assertEquals(await rows(db, `SELECT url FROM policy_jp.news_items WHERE source_id = $1`, [sid]), [{ url: "https://t.test/new" }]);
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.news_election_leads`), 1, "線索の証拠は記事を消しても残る");
+});
+
+Deno.test("来源は網頁だけ（20261011260000）：rss／atom は enabled にできない、html は link_pattern 必須、250000 の RSS 種子は止まっている", async () => {
+  const db = await freshDb();
+  const fails = async (sql: string) => { let t = false; try { await db.exec(sql); } catch { t = true; } return t; };
+  assert(await fails(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format) VALUES ('r', 'media', 'https://r.test/x.xml', 'rss')`), "enabled な RSS は入らない");
+  assert(await fails(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format, enabled) VALUES ('a', 'media', 'https://a.test/x.xml', 'atom', TRUE)`), "enabled な Atom も入らない");
+  assert(await fails(`UPDATE policy_jp.news_sources SET enabled = TRUE WHERE format = 'rss'`), "止めた RSS を戻せない");
+  assert(await fails(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format) VALUES ('h', 'media', 'https://h.test/', 'html')`), "link_pattern なしの html は入らない");
+  assert(await fails(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format, link_pattern) VALUES ('h', 'media', 'https://h.test/', 'html', '  ')`), "空白だけの link_pattern も不可");
+  await db.exec(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format, link_pattern) VALUES ('h', 'media', 'https://h.test/', 'html', '^https://h\\.test/n/')`);
+  await db.exec(`INSERT INTO policy_jp.news_sources (label, kind, feed_url, format, enabled) VALUES ('r2', 'media', 'https://r2.test/x.xml', 'rss', FALSE)`);
+  assertEquals(await count(db, `SELECT 1 FROM policy_jp.news_sources WHERE feed_url LIKE 'https://www3.nhk.or.jp/rss/%' AND NOT enabled`), 3, "NHK の RSS 3 本は止まった");
+  assertEquals(await count(db, `SELECT 1 FROM policy_jp.news_sources WHERE enabled AND format <> 'html'`), 0);
 });
 
 // =============================================================================================
@@ -280,7 +293,8 @@ Deno.test("還原驗證：臂の『選挙が記録されていたら缺口では
   const broken = MIG_SQL.replace(/       AND NOT EXISTS \(\n         SELECT 1 FROM policy_jp\.elections e\n[\s\S]*?e\.election_date BETWEEN[^\n]*\n/, "");
   assert(broken !== MIG_SQL);
   const db = await freshDb();
-  await db.exec(broken.replace(/DO \$\$\nBEGIN\n  IF NOT \('news_discovery'[\s\S]*$/, "")); // 自我檢查は外して本体だけ流し直す
+  // 自我檢查は外して本体だけ流し直す。RSS の種子は 260000 の CHECK（enabled は html だけ）に触れるので止めた形で流す
+  await db.exec(broken.replace(/DO \$\$\nBEGIN\n  IF NOT \('news_discovery'[\s\S]*$/, "").replaceAll("'rss', TRUE)", "'rss', FALSE)"));
   await clock(db, D0);
   await insertLg(db, ICHI);
   await record(db, ICHI, "head", "death", "https://n.test/1");

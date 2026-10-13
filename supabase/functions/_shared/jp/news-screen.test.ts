@@ -8,6 +8,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildLgIndex, jstDate, type LgEntry, screenItem } from "./news-screen.ts";
 import { type LeadEvidence, type LeadResult, type NewsStore, runNews, type SourceRow, type StoredItem } from "./news-run.ts";
 import type { FeedItem } from "../news-feed.ts";
+import { parseHtmlList } from "./news-html.ts";
 
 const LGS: LgEntry[] = [
   { lg_code: "230006", name: "愛知県", kind: "prefecture", pref_name: "愛知県" },
@@ -89,12 +90,14 @@ Deno.test("jstDate：UTC 15 時台は日本では翌日", () => {
 // b. 取り込み本体（偽の store／fetch）
 // =============================================================================================
 const NOW = new Date("2026-10-13T03:23:00Z");
-const rss = (items: Array<{ title: string; url: string; date?: string; desc?: string }>) =>
-  `<?xml version="1.0"?><rss version="2.0"><channel><title>x</title>${items.map((i) =>
-    `<item><title>${i.title}</title><link>${i.url}</link><description>${i.desc ?? ""}</description><pubDate>${i.date ?? "Tue, 13 Oct 2026 10:00:00 +0900"}</pubDate></item>`).join("")}</channel></rss>`;
+// 一覧ページ（網頁）。RSS は受け付けない（維護者 2026-10-13）
+const page = (items: Array<{ title: string; url: string }>) =>
+  `<!doctype html><html><body><nav><a href="/">トップ</a><a href="/list/">ニュース一覧へ戻る</a></nav><ul>${items.map((i) =>
+    `<li><a href="${i.url}"><span>${i.title}</span></a></li>`).join("")}</ul></body></html>`;
+const PAT = "^https://[a-z]+\\.test/\\d+$";
 
 function fakeStore(o: { sources?: SourceRow[]; enabled?: boolean; cap?: number } = {}) {
-  const sources = o.sources ?? [{ id: 1, label: "NHK 政治", feed_url: "https://example.test/a.xml", format: "rss" as const, enabled: true, last_fetched_at: null }];
+  const sources = o.sources ?? [{ id: 1, label: "NHK 政治", feed_url: "https://example.test/list/", format: "html" as const, link_pattern: PAT, enabled: true, last_fetched_at: null }];
   const items: StoredItem[] = [];
   const screened = new Map<number, Record<string, unknown>>();
   const recorded: Array<{ lg: string; kind: string; signal: string; ev: LeadEvidence[]; seenOn: string }> = [];
@@ -135,32 +138,32 @@ const deps = (xml: string | Error) => ({ now: () => NOW, fetchText: (_u: string)
 
 Deno.test("取り込み：記事を保存 → 篩い → 線索（証拠に出典名・URL・見出し・日本時間の日付）", async () => {
   const f = fakeStore();
-  const rep = await runNews(f.store, deps(rss([
-    { title: "一宮市長が辞職の意向", url: "https://example.test/1", date: "Mon, 12 Oct 2026 23:30:00 +0900" },
-    { title: "きょうの天気", url: "https://example.test/2" },
+  const rep = await runNews(f.store, deps(page([
+    { title: "一宮市長が辞職の意向", url: "https://example.test/1" },
+    { title: "きょうの天気は晴れ", url: "/2" },
     { title: "一宮市長が予算を説明", url: "https://example.test/3" },
   ])));
   assertEquals(rep.sources, [{ id: 1, label: "NHK 政治", parsed: 3, inserted: 3 }]);
   assertEquals(rep.screened, 3);
   assertEquals(rep.tally, { lead: 1, no_entity: 1, no_signal: 1 });
   assertEquals(f.recorded.length, 1);
-  assertEquals(f.recorded[0].seenOn, "2026-10-12", "23:30 JST は 12 日");
-  assertEquals(f.recorded[0].ev[0], { news_item_id: 1, url: "https://example.test/1", title: "一宮市長が辞職の意向", source: "NHK 政治", published_at: "2026-10-12T14:30:00.000Z", signal: "resignation" });
+  assertEquals(f.recorded[0].seenOn, "2026-10-13", "一覧ページに日付は無い：取り込んだ日（日本時間）");
+  assertEquals(f.recorded[0].ev[0], { news_item_id: 1, url: "https://example.test/1", title: "一宮市長が辞職の意向", source: "NHK 政治", published_at: null, signal: "resignation" });
   assertEquals(f.errors.get(1), null);
   // 2 回目：冷却中で飽和、記事は増えない
-  const rep2 = await runNews(f.store, deps(rss([])));
+  const rep2 = await runNews(f.store, deps(page([])));
   assertEquals(rep2.sources, []);
   assertEquals(rep2.screened, 0);
 });
 
 Deno.test("取り込み：来源の失敗は隔離（last_error に残り、他の来源は続く）、1 つも記事が無い応答はエラー", async () => {
   const f = fakeStore({ sources: [
-    { id: 1, label: "A", feed_url: "https://a.test/x", format: "rss", enabled: true, last_fetched_at: null },
-    { id: 2, label: "B", feed_url: "https://b.test/x", format: "rss", enabled: true, last_fetched_at: null },
+    { id: 1, label: "A", feed_url: "https://a.test/x", format: "html", link_pattern: PAT, enabled: true, last_fetched_at: null },
+    { id: 2, label: "B", feed_url: "https://b.test/x", format: "html", link_pattern: PAT, enabled: true, last_fetched_at: null },
   ] });
   const rep = await runNews(f.store, {
     now: () => NOW,
-    fetchText: (u) => u.startsWith("https://a.test") ? Promise.reject(new Error("HTTP 503")) : Promise.resolve(rss([{ title: "一宮市長が死去", url: "https://b.test/1" }])),
+    fetchText: (u) => u.startsWith("https://a.test") ? Promise.reject(new Error("HTTP 503")) : Promise.resolve(page([{ title: "一宮市長が死去", url: "https://b.test/1" }])),
   });
   assertEquals(rep.sources.find((s) => s.id === 1)?.error, "HTTP 503");
   assertEquals(f.errors.get(1), "HTTP 503");
@@ -168,27 +171,63 @@ Deno.test("取り込み：来源の失敗は隔離（last_error に残り、他�
   assertEquals(rep.tally, { lead: 1 });
   const g = fakeStore();
   const rep3 = await runNews(g.store, deps("<html>moved</html>"));
-  assert(rep3.sources[0].error?.includes("記事が 1 つもない"));
+  assert(rep3.sources[0].error?.includes("記事のリンクが 1 つもない"));
+});
+
+Deno.test("取り込み：RSS／Atom の行が万一 enabled でも取らない（fetch もしない）、link_pattern 無しも取らない", async () => {
+  const f = fakeStore({ sources: [
+    { id: 1, label: "R", feed_url: "https://r.test/x.xml", format: "rss", link_pattern: null, enabled: true, last_fetched_at: null },
+    { id: 2, label: "H", feed_url: "https://h.test/", format: "html", link_pattern: null, enabled: true, last_fetched_at: null },
+  ] });
+  const fetched: string[] = [];
+  const rep = await runNews(f.store, { now: () => NOW, fetchText: (u) => { fetched.push(u); return Promise.resolve(page([{ title: "一宮市長が死去", url: "https://r.test/1" }])); } });
+  assertEquals(fetched, []);
+  assert(rep.sources.find((s) => s.id === 1)?.error?.includes("RSS／Atom の来源は受け付けない"));
+  assert(rep.sources.find((s) => s.id === 2)?.error?.includes("link_pattern"));
+  assertEquals(f.items.length, 0);
+});
+
+Deno.test("一覧ページの解析：link_pattern に合う https の記事だけ・相対 URL を絶対に・# と javascript: を捨てる・同じ URL は 1 回・見出しはタグを外す・短い文字は title 属性", () => {
+  const html = `<html><head><script>var a='<a href="https://n.test/9">一宮市長が死去した</a>'</script></head><body>
+    <a href="/news/1?x=1#top"><b>一宮市長が</b>
+      辞職の意向&amp;会見</a>
+    <a href='https://n.test/news/1?x=1'>同じ記事の別リンクです</a>
+    <a href="http://n.test/news/2">http の記事は捨てる</a>
+    <a href="#news/3">アンカーだけの記事</a>
+    <a href="javascript:void(0)">スクリプトの記事</a>
+    <a href="/about/">このサイトについて</a>
+    <a href="/news/4" title="豊橋市議会が解散を決めた">詳細</a>
+    <a href="/news/5">短い</a>
+    <!-- <a href="/news/6">コメントの中の記事です</a> -->
+  </body></html>`;
+  assertEquals(parseHtmlList(html, "https://n.test/list/", "^https://n\\.test/news/\\d+"), [
+    { url: "https://n.test/news/1?x=1", title: "一宮市長が 辞職の意向&会見", summary: null, published_at: null },
+    { url: "https://n.test/news/4", title: "豊橋市議会が解散を決めた", summary: null, published_at: null },
+  ]);
+  assertEquals(parseHtmlList(html, "https://n.test/list/", "^https://n\\.test/news/", { maxItems: 1 }).length, 1);
+  let threw = false;
+  try { parseHtmlList(html, "https://n.test/", "("); } catch { threw = true; }
+  assert(threw, "不正な正規表現は例外（呼び出し側が last_error に残す）");
 });
 
 Deno.test("取り込み：無効（news_settings.enabled=false）は何もしない、上限で capped、同じ記事は 2 度篩わない", async () => {
   const off = fakeStore({ enabled: false });
-  assertEquals((await runNews(off.store, deps(rss([{ title: "一宮市長が死去", url: "https://x.test/1" }])))).disabled, true);
+  assertEquals((await runNews(off.store, deps(page([{ title: "一宮市長が死去", url: "https://x.test/1" }])))).disabled, true);
   assertEquals(off.items.length, 0);
 
   const f = fakeStore({ cap: 0 });
-  const rep = await runNews(f.store, deps(rss([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
+  const rep = await runNews(f.store, deps(page([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
   assertEquals(rep.tally, { capped: 1 });
   assertEquals(f.screened.get(1)?.result, "capped");
   f.sources[0].last_fetched_at = null;
-  const again = await runNews(f.store, deps(rss([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
+  const again = await runNews(f.store, deps(page([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
   assertEquals(again.screened, 0, "URL が同じ記事は入らない＝篩い直さない");
 });
 
 Deno.test("取り込み：線索の記録が失敗した記事は screened にしない（次の回に再試行）", async () => {
   const f = fakeStore();
   f.store.recordLead = () => Promise.reject(new Error("rpc down"));
-  const rep = await runNews(f.store, deps(rss([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
+  const rep = await runNews(f.store, deps(page([{ title: "一宮市長が死去", url: "https://x.test/1" }])));
   assertEquals(rep.screened, 0);
   assertEquals(rep.failures.length, 1);
   assertEquals(f.screened.size, 0);

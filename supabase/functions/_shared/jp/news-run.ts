@@ -2,13 +2,17 @@
  * jp-news-fetch の本体（網路と資料庫は引数で受ける：テストは偽物を渡す）。
  * 流れ：来源（news_sources）を取る → 記事を news_items に入れる → まだ篩っていない記事を便宜篩（news-screen.ts）→ 線索を news_lead_record で作る／併合。
  * 正見 news-fetch（取り込み）＋ system-one?action=news_screen（初篩）を 1 回の呼び出しにまとめたもの：
- * 日本の篩いは Jev を呼ばず安いので別の関数に分けない。取り込みの解析は正見の _shared/news-feed.ts をそのまま使う
- * （RSS 1.0／2.0／Atom、日付の読み方）。注意：タイムゾーンのない日付は正見の流儀で +08:00 と読まれる（日本の来源は NHK／Yahoo とも +09:00 付きで出す。ずれても 1 時間）。
+ * 日本の篩いは Jev を呼ばず安いので別の関数に分けない。
+ * 取り込み：維護者 2026-10-13「RSS は一律受け付けない、網頁だけ」。来源は format='html'（ニュースの一覧ページ）だけを取り、
+ * 記事は news-html.ts が link_pattern に合う <a href> から拾う。rss／atom の行は migration 20261011260000 で全部止めてあり、
+ * 万一 enabled でも取らずに last_error を残す（正見の parseFeed は使わない）。冷却と期限切れの判定（dueSources）だけ正見のものを使う。
  */
-import { dueSources, FETCH_COOLDOWN_MINUTES, type FeedFormat, type FeedItem, parseFeed } from "../news-feed.ts";
+import { dueSources, FETCH_COOLDOWN_MINUTES, type FeedItem } from "../news-feed.ts";
+import { parseHtmlList } from "./news-html.ts";
 import { buildLgIndex, jstDate, type LgEntry, type NewsLead, screenItem } from "./news-screen.ts";
 
-export interface SourceRow { id: number; label: string; feed_url: string; format: FeedFormat; enabled: boolean; last_fetched_at: string | null }
+export type JpNewsFormat = "html" | "rss" | "atom";
+export interface SourceRow { id: number; label: string; feed_url: string; format: JpNewsFormat; link_pattern: string | null; enabled: boolean; last_fetched_at: string | null }
 export interface StoredItem { id: number; source_id: number; url: string; title: string; summary: string | null; published_at: string | null }
 export interface NewsSettingsRow { enabled: boolean; max_age_days: number }
 export interface LeadResult { action: "created" | "merged" | "capped" | "skipped"; lead_id?: number; reason?: string }
@@ -65,10 +69,12 @@ export async function runNews(store: NewsStore, deps: NewsDeps, opts: { budgetMs
     if (!(await store.claimSource(s.id, cutoff, now.toISOString()))) return;
     let error: string | null = null, parsed = 0, inserted = 0;
     try {
+      if (s.format !== "html") throw new Error(`RSS／Atom の来源は受け付けない（format=${s.format}）`);
+      if (!s.link_pattern) throw new Error("link_pattern が無い");
       const text = (await deps.fetchText(s.feed_url)).slice(0, MAX_BODY_CHARS);
-      const items = parseFeed(text, s.format, { now, maxAgeDays: settings.max_age_days });
+      const items = parseHtmlList(text, s.feed_url, s.link_pattern);
       parsed = items.length;
-      if (items.length === 0 && !/<(item|entry)[\s>]/i.test(text)) throw new Error(`応答に記事が 1 つもない（${text.length} 字）`);
+      if (items.length === 0) throw new Error(`一覧ページに記事のリンクが 1 つもない（${text.length} 字）`);
       if (items.length > 0) inserted = (await store.insertItems(s.id, items, now.toISOString())).length;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

@@ -7,14 +7,14 @@ import type { FeedItem } from "../_shared/news-feed.ts";
 
 /**
  * jp-news-fetch — 日本站の新聞線。pg_cron policy-jp-news-fetch-hourly（毎時 23 分）が叩く（migration 20261011250000）。
- * 日本の公開 RSS（policy_jp.news_sources）を取って news_items に入れ、団体名＋首長／議会＋辞職・死去・議会解散・リコールの記事を
+ * 日本のニュースの一覧ページ（網頁、policy_jp.news_sources の format='html'。維護者 2026-10-13：RSS は一律受け付けない）を取って news_items に入れ、団体名＋首長／議会＋辞職・死去・議会解散・リコールの記事を
  * 「選挙が要りそうな団体×職」の線索（news_election_leads）にする。線索は派工臂 news_discovery が election_discovery 任務にする
  * （target.discovery='news'）。報道は手がかりで出典ではなく、選挙の記録は代理が選管の告示を出典に交件して初めて作られる。
  *
  * 正見 news-fetch（取り込み）と system-one?action=news_screen（初篩）の日本版。Jev はこの版では呼ばない（便宜篩だけ、次の刀）。
  * 呼び出し憑證は jp-system-one と同じ：x-cron-secret（Vault の jp_news_cron_secret を RPC policy_jp.jp_news_cron_secret_ok で照合）か
  * service role の bearer。なし・誤りは 401、照合が失敗したら 503（fail closed）。新しい secret を手で設定する必要はない。
- * 取り込みの解析（RSS／Atom、日付）は正見の _shared/news-feed.ts、篩いは _shared/jp/news-screen.ts、本体は _shared/jp/news-run.ts。
+ * 一覧ページの解析は _shared/jp/news-html.ts（link_pattern に合う <a href>）、篩いは _shared/jp/news-screen.ts、本体は _shared/jp/news-run.ts。
  */
 
 const corsHeaders = {
@@ -42,7 +42,7 @@ function storeOf(db: any): NewsStore {
       return r.data ?? { enabled: false, max_age_days: 3 };
     },
     async listSources() {
-      return must<SourceRow[]>(await db.from("news_sources").select("id, label, feed_url, format, enabled, last_fetched_at")
+      return must<SourceRow[]>(await db.from("news_sources").select("id, label, feed_url, format, link_pattern, enabled, last_fetched_at")
         .eq("enabled", true).order("id", { ascending: true }).limit(200), "news_sources");
     },
     async claimSource(id, cutoffIso, nowIso) {
@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
       now: () => new Date(),
       async fetchText(url) {
         const res = await fetch(url, {
-          headers: { "User-Agent": UA, "Accept": "application/rss+xml, application/atom+xml, application/rdf+xml, application/xml, text/xml, */*" },
+          headers: { "User-Agent": UA, "Accept": "text/html, application/xhtml+xml, */*;q=0.8" },
           redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
