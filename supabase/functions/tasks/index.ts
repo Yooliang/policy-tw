@@ -37,7 +37,7 @@ async function fetchTaskVotes(supabase: any, tasks: ReadonlyArray<{ task_id: str
   const [byTask, byNoChange, byAdjudication] = await Promise.all([
     supabase.from("contributions").select(VOTE_COLUMNS).in("task_id", ids).limit(1000),
     // 查無回報的任務 id 只在 payload（task_id 欄是空的），不另撈就會顯示成「還沒有人提交」（2026-10-13）
-    supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "no_change").in("payload->>task_id", ids).limit(1000),
+    supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "no_change").is("task_id", null).in("payload->>task_id", ids).limit(1000),
     originals.length > 0
       ? supabase.from("contributions").select(VOTE_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", originals).limit(1000)
       : Promise.resolve({ data: [], error: null }),

@@ -70,6 +70,9 @@ function payloadField(payload: unknown, key: string): string | null {
 /** 純函式：任務 × 貢獻 → 每筆任務的票數摘要。已上線的那筆優先當 leading（已經過了），否則取同意票比例最高的進行中那筆 */
 export function summarizeTaskVotes(tasks: readonly TaskRef[], contributions: readonly VoteContribution[]): Map<string, TaskVoteSummary> {
   const out = new Map<string, TaskVoteSummary>();
+  // 呼叫端合併好幾個查詢的結果，同一筆可能出現兩次：依 id 去重，不然 submissions 會重算
+  const seen = new Set<string>();
+  contributions = contributions.filter((c) => !seen.has(c.id) && (seen.add(c.id), true));
   for (const t of tasks) {
     const originalId = adjudicatedIdOf(t);
     const mine = contributions.filter((c) =>

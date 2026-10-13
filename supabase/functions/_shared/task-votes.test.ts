@@ -65,3 +65,10 @@ Deno.test("任務票數：查無回報的任務 id 只在 payload.task_id 也算
   assertEquals(s.leading?.contribution_id, "nc");
   assertEquals(s.leading?.contribution_type, "no_change");
 });
+
+Deno.test("任務票數：同一筆貢獻被兩個查詢各撈一次（task_id 欄與 payload.task_id 都有值）只算一次", () => {
+  const tasks = [{ task_id: "w1", task_type: "policy_missing", target: { politician_id: "p1" } }];
+  const both = c({ id: "nc", contribution_type: "no_change", task_id: "w1", payload: { task_id: "w1" }, agree_count: 1 });
+  const s = summarizeTaskVotes(tasks, [both, { ...both }]).get("w1")!;
+  assertEquals(s.submissions, 1);
+});
