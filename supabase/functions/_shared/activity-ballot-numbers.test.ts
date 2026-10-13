@@ -178,7 +178,7 @@ Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、system-one
   assert(BALLOT_NUMBERS_RECHECK_HINT.includes("duplicate") && BALLOT_NUMBERS_RECHECK_HINT.includes("gap") && BALLOT_NUMBERS_RECHECK_HINT.includes("units[].members") && BALLOT_NUMBERS_RECHECK_HINT.includes("no_change"));
   assert(CAND_NO_VERIFY_HINT.includes("payload.cand_no") && CAND_NO_VERIFY_HINT.includes("剛好等於"));
   const md = (await readSkillWithTypes()).replace(/\r\n/g, "\n");
-  assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）（1.76.0）"));
+  assert(md.includes("### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）"));
   assert(md.includes("**系統不核號次來源**") && md.includes("`outcome` 填 `unreachable`") && md.includes("不能當號次的來源"));
   assert(md.includes("`cand_no_recheck`") && md.includes("各自從 1 編起") && md.includes("重複") && md.includes("跳號"));
   // 版號不再釘死 1.76.0（之後的每次升版都會踩到）：這一節 1.76.0 起有，目前版號不低於它，且檔頭與常數一致（protocol.test.ts 另守）

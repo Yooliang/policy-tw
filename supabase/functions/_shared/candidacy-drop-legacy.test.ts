@@ -116,7 +116,7 @@ Deno.test("協議文件：REST 範例與欄位說明不再叫代理讀已刪的�
   for (const m of skill.matchAll(/politician_elections\?select=([^&`\s]*)/g)) {
     for (const c of OLD) assertEquals(m[1].split(",").includes(c), false, `skill.md 的 REST 範例還在 select ${c}`);
   }
-  assertMatch(skill, /1\.70\.0 起舊的 `candidate_status`、`election_result`、`votes_received`、`vote_percentage` 四個欄位已從資料表刪除/);
+  assertMatch(skill, /舊的 `candidate_status`、`election_result`、`votes_received`、`vote_percentage` 四個欄位已從資料表刪除/);
 });
 
 // ── 還原履歷：欄位已刪 ──────────────────────────────────────────

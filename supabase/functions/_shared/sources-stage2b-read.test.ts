@@ -346,7 +346,7 @@ Deno.test("協議 1.69.0：skill.md 的 REST 範例不再 select policies 的 so
   for (const m of skill.matchAll(/rest\/v1\/(policies|tracking_logs)\?select=([^&`"\s]*)/g)) {
     assertEquals(m[2].split(",").includes("source_url"), false, `skill.md 的 ${m[1]} REST 範例還在 select source_url`);
   }
-  assertMatch(skill, /政見的出處不在 `policies` 資料表裡\*\*（1\.69\.0 起資料表沒有 `source_url` 欄/);
+  assertMatch(skill, /政見的出處不在 `policies` 資料表裡\*\*（資料表沒有 `source_url` 欄/);
   assertMatch(skill, /policies_with_logs\?select=id,title,status,progress,sources/);
   assertMatch(skill, /changes: \[\{field:"source_url", …\}\]/, "correction 的欄位名照舊（待裁：要不要改名）");
 });

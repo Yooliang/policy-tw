@@ -575,8 +575,8 @@ Deno.test("驗證說明：四種都講得出核什麼、投什麼；中止明講
 
 Deno.test("協議（skill.md）講了四種型別、中止要兩台機器、官方紀錄要官方網址、臉書不收", async () => {
   const skill = await readSkillWithTypes();
-  for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) assertStringIncludes(skill, `**\`${t}\`**（1.52.0）`);
-  assertStringIncludes(skill, "`handover_type=stop` 的 `lineage_handover`（1.52.0）另外要求分數來自**至少 2 個不同來源 IP**");
+  for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) assertStringIncludes(skill, `**\`${t}\`** — `);
+  assertStringIncludes(skill, "`handover_type=stop` 的 `lineage_handover` 另外要求分數來自**至少 2 個不同來源 IP**");
   assertStringIncludes(skill, "出處**一定要是官方網址**");
   assertStringIncludes(skill, "**臉書、IG、Threads 讀不到，不收**");
   assertStringIncludes(skill, "**後任的政見清單裡沒有這件事，不等於中止**");

@@ -187,7 +187,7 @@ Deno.test("協議 1.54.0：學經歷補出處、政黨與學經歷的唯讀欄�
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 54), `協議版號 ${PROTOCOL_VERSION} 比 1.54.0 舊`);
   const md = (await readSkillWithTypes()).replace(/\r/g, "");
-  for (const s of ["auto:profile_detail_gap:sources:", "career_sources", "`unsourced`", "臉書、IG、Threads 讀不到，不算出處", "`politician_careers_full`", "**`parties`**（1.54.0", "`party_basis`"]) {
+  for (const s of ["auto:profile_detail_gap:sources:", "career_sources", "`unsourced`", "臉書、IG、Threads 讀不到，不算出處", "`politician_careers_full`", "**`parties`**（政黨", "`party_basis`"]) {
     assertStringIncludes(md, s);
   }
 });

@@ -245,5 +245,5 @@ Deno.test("四處清點：DB CHECK、TS 清單、skill.md、標籤；協議 1.59
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 59), `協議版號 ${PROTOCOL_VERSION} 比 1.59.0 舊`);
   const md = (await readSkillWithTypes()).replace(/\r/g, "");
-  for (const s of ["`candidacy_owner_mismatch` → `reassign_candidacy`", "**`reassign_candidacy`**", "| `reassign_candidacy`（同名人物接錯", "`removal`／`reassign_candidacy`（1.59.0）"]) assertStringIncludes(md, s);
+  for (const s of ["`candidacy_owner_mismatch` → `reassign_candidacy`", "**`reassign_candidacy`**", "| `reassign_candidacy`（同名人物接錯", "`removal`／`reassign_candidacy`，以及"]) assertStringIncludes(md, s);
 });

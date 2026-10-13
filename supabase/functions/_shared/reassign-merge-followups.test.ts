@@ -162,7 +162,7 @@ Deno.test("空殼：原本測試資料那一種一字不改；不動 contributio
 Deno.test("空殼：任務敘述（指引、標籤、skill.md）三處都講到空殼", () => {
   assertStringIncludes(TASK_GUIDANCE.placeholder_politician, "orphan");
   assertStringIncludes(TASK_TYPE_LABEL.placeholder_politician, "空殼");
-  assertStringIncludes(skill, "`target.kind`＝`orphan`，1.66.0");
+  assertStringIncludes(skill, "`target.kind`＝`orphan`");
   assertStringIncludes(skill, "`target.kind` 是 `orphan`");
 });
 
@@ -213,7 +213,7 @@ Deno.test("合併：兩張表的搬動能由 edit_history 還原（整列記下�
 Deno.test("協議 1.66.0：版號與 skill.md 一致、改掛政見跟著搬與合併的搬法寫進 skill.md", () => {
   const [maj, min] = PROTOCOL_VERSION.split(".").map(Number);
   assert(maj > 1 || (maj === 1 && min >= 66), `協議版號 ${PROTOCOL_VERSION} 比 1.66.0 舊`); // 版號跟 skill.md 一致由 protocol.test.ts 盯
-  assertStringIncludes(skill, "掛在那一屆的政見跟著改掛到新的那位（1.66.0");
+  assertStringIncludes(skill, "掛在那一屆的政見跟著改掛到新的那位（回覆會講");
   assert(!skill.includes("**不會**跟著搬"), "舊說法（政見不會跟著搬）要拿掉");
-  assertStringIncludes(skill, "政策脈絡的角色與交接（1.66.0）一起搬到保留的那位");
+  assertStringIncludes(skill, "政策脈絡的角色與交接一起搬到保留的那位");
 });

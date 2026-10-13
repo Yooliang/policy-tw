@@ -297,7 +297,7 @@ Deno.test("協議 1.56.0：party_info 一節、參選紀錄缺政黨的任務、
   const [major, minor] = PROTOCOL_VERSION.split(".").map(Number);
   assert(major > 1 || (major === 1 && minor >= 56), `協議版號 ${PROTOCOL_VERSION} 比 1.56.0 舊`);
   const md = lf(await readSkillWithTypes());
-  for (const s of ["**`party_info`**（1.56.0）", "auto:candidacy_source_missing:party:", "**`party` 是那一次參選時的政黨**（1.56.0）", "**對不上會被退件**", "／`party_info` | 3 | 3 | 3 | 3 |"]) {
+  for (const s of ["**`party_info`** — ", "auto:candidacy_source_missing:party:", "**`party` 是那一次參選時的政黨**：", "**對不上會被退件**", "／`party_info` | 3 | 3 | 3 | 3 |"]) {
     assertStringIncludes(md, s);
   }
 });
