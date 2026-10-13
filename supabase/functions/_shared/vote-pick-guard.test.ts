@@ -7,7 +7,7 @@ Deno.test("非身份型別帶指認：擋", () => {
 });
 
 Deno.test("身份型別帶指認、或沒帶指認：不擋", () => {
-  for (const t of ["politician", "candidacy", "policy"]) assertEquals(votePickProblem(t, "560acdb8-adee-4569-9988-468d2b9f9b77"), null);
+  for (const t of ["politician", "candidacy", "policy", "adjudication"]) assertEquals(votePickProblem(t, "560acdb8-adee-4569-9988-468d2b9f9b77"), null);
   assertEquals(votePickProblem("correction", undefined), null);
   assertEquals(votePickProblem("correction", null), null);
 });
