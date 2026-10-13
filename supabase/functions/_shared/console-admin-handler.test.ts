@@ -237,3 +237,28 @@ Deno.test("site=jp 但沒設日本站 RPC：回 500，不退回台灣站", async
   assertEquals(res.status, 500);
   assertEquals(calls.length, 0);
 });
+
+// ---- 派工規則（rule_save，2026-10-13）----
+Deno.test("rule_save：兩站都走台灣站 client 的 console_admin_rule_save，site 放在 p_site；id 不給＝新增", async () => {
+  const { calls, d } = twJpDeps();
+  const a = await handleConsoleAdmin(req({ site: "jp", action: "rule_save", id: 12, rule: { enabled: false }, reason: "先停" }), d);
+  const b = await handleConsoleAdmin(req({ action: "rule_save", rule: { activity: "ballot_numbers", window_kind: "always" }, reason: "新增" }), d);
+  assertEquals([a.status, b.status], [200, 200]);
+  assertEquals(calls.map((c) => [c.site, c.fn]), [["tw", "console_admin_rule_save"], ["tw", "console_admin_rule_save"]]);
+  assertEquals(calls[0].args, { p_site: "jp", p_id: 12, p_rule: { enabled: false }, p_reason: "先停", p_set_by: OWNER });
+  assertEquals(calls[1].args.p_id, null);
+  assertEquals(calls[1].args.p_site, "tw");
+});
+
+Deno.test("rule_save：rule 不是物件、id 不是整數、沒有 reason 都先擋，不叫 RPC", async () => {
+  const { calls, d } = twJpDeps();
+  const bad = [
+    { action: "rule_save", id: 1, reason: "x" },
+    { action: "rule_save", id: 1, rule: [1], reason: "x" },
+    { action: "rule_save", id: "1", rule: { enabled: true }, reason: "x" },
+    { action: "rule_save", id: 1.5, rule: { enabled: true }, reason: "x" },
+    { action: "rule_save", id: 1, rule: { enabled: true } },
+  ];
+  for (const body of bad) assertEquals((await handleConsoleAdmin(req(body), d)).status, 400, JSON.stringify(body));
+  assertEquals(calls.length, 0);
+});

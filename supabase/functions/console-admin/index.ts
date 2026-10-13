@@ -26,6 +26,8 @@ import { jpClient } from "../_shared/jp/client.ts";
  *   { action: "override_create", activity, election_id?, election_type?, force, open_from?, open_until?, reason, expires_at? }
  *   { action: "override_revoke", id, reason }
  *   { action: "milestone_set", election_id, kind, election_type?, on_date, status, reason }
+ *   { action: "rule_save", id?, rule, reason }（2026-10-13：派工規則新增／修改；id 不給＝新增。RPC console_admin_rule_save 在 public、
+ *     用 site 分站寫 shared.dispatch_plan，所以 site=jp 也走台灣站的 client）
  *
  * 回應：{ success: true, row } 或 { success: false, error }。
  */

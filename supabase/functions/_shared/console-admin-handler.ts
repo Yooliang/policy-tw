@@ -153,7 +153,24 @@ export async function handleConsoleAdmin(req: Request, deps: ConsoleAdminDeps): 
       return json({ success: true, row: data });
     }
 
-    return json({ success: false, error: `不認得的 action：${String(action)}（要是 override_create／override_revoke／milestone_set）` }, 400);
+    if (action === "rule_save") {
+      // 派工規則（2026-10-13 維護者裁決：規則的值可從主控台改）：兩站的規則都在 shared.dispatch_plan，
+      // 寫入的 RPC 在 public、用 p_site 分站，所以不管 site 都走台灣站的 client（日本站 client 固定 policy_jp schema，叫不到它）
+      const id = body.id === undefined || body.id === null ? null : body.id;
+      if (id !== null && (typeof id !== "number" || !Number.isInteger(id))) return json({ success: false, error: "id 要是規則的整數 id（新增就不給或給 null）" }, 400);
+      if (!body.rule || typeof body.rule !== "object" || Array.isArray(body.rule)) return json({ success: false, error: "rule 必填（要改的欄位：值）" }, 400);
+      const { data, error } = await deps.rpc("console_admin_rule_save", {
+        p_site: site,
+        p_id: id,
+        p_rule: body.rule,
+        p_reason: body.reason,
+        p_set_by: agentEmail,
+      });
+      if (error) throw error;
+      return json({ success: true, row: data });
+    }
+
+    return json({ success: false, error: `不認得的 action：${String(action)}（要是 override_create／override_revoke／milestone_set／rule_save）` }, 400);
   } catch (e) {
     // RPC 的 RAISE EXCEPTION（reason 必填、找不到可撤銷的覆寫、kind 不合法）與 CHECK 違反都是使用者端的輸入問題，回 400；
     // 其他（連線失敗等）才是伺服器端的問題。supabase-js 把 RPC 的錯誤都包成同一種形狀，這裡沒辦法細分，一律 400
