@@ -172,6 +172,9 @@ export const JP_TASK_ARMS = {
   profile_detail_gap: "politician",
   // 選舉鏈第 4 步：政見任務收 policy（公約）
   policy_missing: "policy",
+  // C 期（policy-ops#95）：現職首長の当選時の公約を遡って補う任務（term_policies 臂）も policy。task_id の末尾は policy_missing と同じ参選紀錄 id
+  // （mayor_policies 臂の任務型別は policy_missing なので、ここに足すものはない）
+  term_policy_missing: "policy",
   // 政見三要素（policy-ops#95、規則は預設關）：政見 1 件につき要素 1～3 個を policy_elements で答える
   policy_elements_missing: "policy_elements",
   // 議員定数（policy-ops#95）：議会議員選挙 1 件につき district_seats で答える
@@ -187,7 +190,7 @@ export const JP_TASK_ARMS = {
   election_result_missing: "candidacy",
 } as const satisfies Record<string, JpContributionType>;
 const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
@@ -248,8 +251,8 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     else if (!oneOf(["elected", "not_elected", "withdrawn"] as const, payload.candidacy_status)) push("payload.candidacy_status", "この任務（当落）で出せる candidacy_status は elected（当選）／not_elected（落選）／withdrawn（届出していない・辞退）のどれかです");
     return;
   }
-  // policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ
-  if (arm === "policy_missing") {
+  // policy_missing／term_policy_missing：task_id の末尾は参選紀錄 id。1 つの任務は 1 人の 1 回の参選だけ
+  if (arm === "policy_missing" || arm === "term_policy_missing") {
     if (payload.politician_election_id !== m[2]) push("payload.politician_election_id", `payload.politician_election_id（${String(payload.politician_election_id ?? "未填")}）跟這個任務問的參選（${m[2]}）不一致：一個任務只回報它問的那一位的公約`);
     return;
   }

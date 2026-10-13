@@ -502,6 +502,7 @@ const T_A1 = "20261011070000"; // 派工臂對齊正見 A 期第一支：candida
 const T_B = "20261011090000"; // 派工臂對齊正見 B 期：開票結果（election_results／elected_missing）＋新任期（politician_offices 同期）（policy-ops#95）
 const T_PE = "20261011140000"; // 派工臂對齊正見 2a：政見三要素 policy_elements_missing（規則預設關，policy-ops#95）
 const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 duplicate_policy（規則預設關）＋交件型別 removal（policy-ops#95）
+const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現職首長の公約 mayor_policies／term_policies（規則 enabled、新しい交件型別なし，policy-ops#95）
 const T_DS = "20261011170000"; // 派工臂對齊正見 2b：議員定数 district_seats_missing（規則最初から開く，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
 const T_SYSONE_REASK = "20261011130000"; // 系統票：宣稱に投票日が入っていた candidacy の旧判定を一度だけ聞き直す
@@ -538,8 +539,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -589,7 +590,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
-  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
@@ -669,6 +670,9 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261011180000 重複政見（duplicate_policy、規則は預設關）＋交件型別 removal；正見 duplicate_policy／removal の日本版 ----
   contribution_auto_tasks_duplicate_policy: { mig: [T_DUP], why: "重複政見の清査臂（duplicate_policy）：開いている選挙の公開済みの参選で公開済み公約 2 件以上 → 1 参選 1 件、指紋＝[id,title,description] の md5；正見は一人単位・policy_dupe_reviews、日本は参選単位・task_checks confirmed が永久" },
   apply_removal: { mig: [T_DUP], why: "removal 交件落庫（SQL 版；正見は TS applyRemoval）：政見だけ、軟移除は review_status='rejected'（policies に removed_at がない）、edit_history に旧行・新行" },
+  // ---- 20261011190000 現職首長の公約（mayor_policies／term_policies、規則 enabled）；新しい交件型別はなく policy で答える ----
+  contribution_auto_tasks_mayor_policies: { mig: [T_TERM], why: "首長候補の公約補充臂（mayor_policies）：開いている首長選挙の declared／filed で、公開済みの公約が 1 件以上 max_policies 件未満 → policy_missing 任務（task_id は policy_missing 臂と同じ）；正見は縣市長 2026 固定の is_2026_mayor_candidate、日本は chain_policy_subjects と規則の election_types" },
+  contribution_auto_tasks_term_policies: { mig: [T_TERM], why: "過去の任期の公約の往回補臂（term_policies）：公開済みの任期（politician_offices）の元になった当選の参選に公約が 1 件もなく、同じ団体・職位に開いている選挙がある → term_policy_missing 任務；正見は election_task_config の屆別開關、日本は lookback_years／deep_kinds の params" },
   same_claim_matches_district_seats: { mig: [T_DS], why: "同一件事（district_seats）の比對本體：選挙 id；same_claim_matches 分派器呼叫" },
   same_claim_matches_policy: { mig: [T_POLICY], why: "同一件事（policy）的比對本體：參選紀錄 id ＋ 題名正規化；same_claim_matches 分派器呼叫" },
 
