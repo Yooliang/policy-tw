@@ -522,10 +522,13 @@ function rmv(patch: Record<string, unknown> = {}, drop: string[] = [], top: Reco
 }
 const rmvPaths = (v: ReturnType<typeof rmv>) => v.errors.map((e) => e.path);
 
-Deno.test("removal：最小の交件が通る（keep_id は任意）／target_table は policies だけ／target_id・reason は必須（reason ≥20 字）／keep_id は別の政見", () => {
+Deno.test("removal：最小の交件が通る（keep_id は任意）／target_table は policies／politicians だけ／target_id・reason は必須（reason ≥20 字）／keep_id は別の政見", () => {
   assert(rmv().ok);
   assert(rmv({}, ["keep_id"]).ok);
-  assertEquals(rmvPaths(rmv({ target_table: "politicians" })), ["payload.target_table"]);
+  assertEquals(rmvPaths(rmv({ target_table: "elections" })), ["payload.target_table"]);
+  // D 期：人物（politicians）も取り除ける。keep_id は政見の removal だけ
+  assert(rmv({ target_table: "politicians" }, ["keep_id"]).ok);
+  assertEquals(rmvPaths(rmv({ target_table: "politicians" })), ["payload.keep_id"]);
   assertEquals(rmvPaths(rmv({}, ["target_table"])), ["payload.target_table"]);
   assertEquals(rmvPaths(rmv({}, ["target_id"])), ["payload.target_id"]);
   assertEquals(rmvPaths(rmv({ target_id: "a b" })), ["payload.target_id"]);

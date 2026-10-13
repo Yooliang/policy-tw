@@ -17,6 +17,8 @@
  *   同一件事の登記表の型別〔鍵＝選挙 id〕，所以 resolved_claim 必填）。落庫 SQL policy_jp.apply_district_seats（20261011170000）。
  * 日本站自己的：removal（重複政見の清査 duplicate_policy の答え：政見 1 件の軟移除〔review_status=rejected〕。target_table は policies だけ、reason ≥20 字、keep_id 任意；
  *   claimKey 併票の型別〔duplicate-claim.ts、鍵＝target_id〕，不進 same_claim 登記表，所以 resolved_claim 不要）。落庫 SQL policy_jp.apply_removal（20261011180000）。
+ * 日本站自己的（D 期、migration 20261011240000）：removal の target_table は policies に加えて politicians も受ける（人物の軟移除。対応する派工臂 placeholder_politicians の答え。keep_id は政見だけ）。
+ *   派工臂 policy_validity（政見に出典がない；policy／removal で答える）と mismatch（公約の日付が投票日より後；correction／removal で答える）の task_id もここで比對する。新しい交件型別はない。
  * 日本站自己的：policy_progress（政策の経過、対応する派工臂 progress_stale／deadline_due。正見 policy_progress の日本版：policy_id・status〔日本の 6 値〕・date・note、progress〔％〕は使わない；
  *   status=discontinued は official 等級の出典が要る；claimKey 併票の型別〔duplicate-claim.ts、鍵＝policy_id＋status＋date〕，不進 same_claim 登記表，所以 resolved_claim 不要）。
  *   progress_stale の任務は『政策ではなかった』ときの removal でも答えられる（JP_TASK_ALSO）。落庫 SQL policy_jp.apply_policy_progress（20261011200000）。
@@ -233,11 +235,16 @@ export const JP_TASK_ARMS = {
   // D 期（policy-ops#95）：政党。所属が分からない参選は candidacy（同じ状態＋party／party_id）、書き方が名簿に当たらないときは party_info。答えが「なかった」ときは no_change（not_found）
   party_missing: "candidacy",
   party_info_missing: "party_info",
+  // D 期（policy-ops#95）：資料の一致性と清理。測試名の人物は実在しなければ removal（target_table=politicians）。出典のない政見は出典を付けて policy で再提出（または removal）。
+  // 公約の日付が投票日より後のものは correction（政見の proposed_date／選挙の election_date）か removal。どれも確かめられなければ no_change
+  placeholder_politician: "removal",
+  policy_validity: "policy",
+  policy_election_mismatch: "correction",
 } as const satisfies Record<string, JpContributionType>;
 /** 任務の型別（JP_TASK_ARMS）のほかに受ける交件型別（task_id が指す政策に対する removal だけ。落ちるのは checkTaskAgreement の target_id 照合） */
-export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"] };
+export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"], policy_validity: ["removal"], policy_election_mismatch: ["removal"] };
 const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate|party_missing|party_info_missing):(.+)$/;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate|party_missing|party_info_missing|placeholder_politician|policy_validity|policy_election_mismatch):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
@@ -245,6 +252,8 @@ const DUP_POLICY_REST_RE = /^([^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_(?:\d{6}|na
 /** lineage_candidate の task_id 末尾：<格の鍵 12 字>:<清單指紋 8 字>。lineage_link_candidate は <下級の脈絡 id>:<指紋 8 字>。handover_missing は <脈絡 id>:<指紋 8 字> */
 const LINEAGE_CAND_REST_RE = /^[0-9a-f]{12}:[0-9a-f]{8}$/;
 const LINEAGE_ID_FP_REST_RE = /^([^\s:]{1,64}):[0-9a-f]{8}$/;
+/** policy_validity の task_id 末尾：<参選紀錄 id>:<政見 id> */
+const POLICY_VALIDITY_REST_RE = /^([^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_(?:\d{6}|national):(?:district|proportional|at_large)):([^\s:]{1,64})$/;
 const DISCOVERY_REST_RE = /^\d{4}-\d{2}-\d{2}:(\d{6}):(head|assembly)$/;
 const HEAD_ELECTION_TYPES = ["governor", "mayor", "ward_mayor", "town_mayor"] as const;
 const ASSEMBLY_ELECTION_TYPES = ["pref_assembly", "muni_assembly"] as const;
@@ -289,6 +298,32 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   // party_info_missing（D 期）：task_id の末尾は書き方の鍵の md5 前 12 字。答えは書き方（aliases／independent_aliases）に任務の書き方が入ることだが、鍵の計算は SQL（NFKC）なので落庫側が結ぶ。ここは形だけ
   if (arm === "party_info_missing") {
     if (!/^[0-9a-f]{12}$/.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:party_info_missing:<12 桁>）");
+    return;
+  }
+  // placeholder_politician（D 期）：task_id の末尾は人物 id。1 つの任務は 1 人だけ（removal の target_table は politicians、target_id がその人物）
+  if (arm === "placeholder_politician") {
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:placeholder_politician:<人物 id>）"); return; }
+    if (payload.target_table !== "politicians") push("payload.target_table", "この任務（測試名の人物）の removal は target_table=politicians で出します");
+    if (payload.target_id !== m[2]) push("payload.target_id", `payload.target_id（${String(payload.target_id ?? "未填")}）跟這個任務問的人物（${m[2]}）不一致：一個任務只回報它問的那一位`);
+    return;
+  }
+  // policy_validity（D 期）：task_id の末尾は <参選 id>:<政見 id>。policy で答えるなら payload の参選が一致、removal なら target_id がその政見
+  if (arm === "policy_validity") {
+    const r = POLICY_VALIDITY_REST_RE.exec(m[2]);
+    if (!r) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:policy_validity:<参選紀錄 id>:<政見 id>）"); return; }
+    if (type === "removal") {
+      if (payload.target_table !== "policies") push("payload.target_table", "この任務（出典のない政見）の removal は target_table=policies で出します");
+      if (payload.target_id !== r[2]) push("payload.target_id", `payload.target_id（${String(payload.target_id ?? "未填")}）跟這個任務問的政見（${r[2]}）不一致：一個任務只回報它問的那一條政見`);
+    } else if (payload.politician_election_id !== r[1]) {
+      push("payload.politician_election_id", `payload.politician_election_id（${String(payload.politician_election_id ?? "未填")}）跟這個任務問的參選（${r[1]}）不一致：出典を足すのは、この政見が掛かっている参選の分だけ`);
+    }
+    return;
+  }
+  // policy_election_mismatch（D 期）：task_id の末尾は政見 id。ここに来るのは removal（correction は型別の比對の外）：target_id がその政見
+  if (arm === "policy_election_mismatch") {
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:policy_election_mismatch:<政見 id>）"); return; }
+    if (payload.target_table !== "policies") push("payload.target_table", "この任務（日付が合わない政見）の removal は target_table=policies で出します");
+    if (payload.target_id !== m[2]) push("payload.target_id", `payload.target_id（${String(payload.target_id ?? "未填")}）跟這個任務問的政見（${m[2]}）不一致：一個任務只回報它問的那一條政見`);
     return;
   }
   // election_result_missing（B 期）：task_id の末尾が参選紀錄 id なら当落（その参選だけ、elected／not_elected／withdrawn）、
@@ -421,13 +456,15 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       break;
     }
     case "removal": {
-      // 重複政見の軟移除（正見 removal の日本版）：政見だけ。取り除くのは行を消すことではなく review_status=rejected（画面から消えるが行は残り、履歴から戻せる）。
-      // 取り除く理由が本体なので reason は 20 字以上。source_urls は全型別共通で必須（確かめたページ）。keep_id は残す方の政見 id（任意、取り除く方とは別）
-      if (p.target_table !== "policies") push("payload.target_table", "removal で取り除けるのは policies（政見）だけ");
-      if (!isStr(p.target_id, 1, 64) || /\s/.test(p.target_id)) push("payload.target_id", "target_id 必填（取り除く政見の id）");
+      // 重複政見の軟移除（正見 removal の日本版）：政見（policies）と人物（politicians、D 期）。取り除くのは行を消すことではなく review_status=rejected（画面から消えるが行は残り、履歴から戻せる）。
+      // 人物の場合は人物とその人の参選を一緒に（政見・任期・学歴職歴・政策の継承の役割が付いている人は落庫側が断る）。
+      // 取り除く理由が本体なので reason は 20 字以上。source_urls は全型別共通で必須（確かめたページ）。keep_id は残す方の政見 id（任意、取り除く方とは別、政見の removal だけ）
+      if (p.target_table !== "policies" && p.target_table !== "politicians") push("payload.target_table", "removal で取り除けるのは policies（政見）か politicians（人物）だけ");
+      if (!isStr(p.target_id, 1, 64) || /\s/.test(p.target_id)) push("payload.target_id", `target_id 必填（取り除く${p.target_table === "politicians" ? "人物" : "政見"}の id）`);
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：なぜ取り除くか。重複なら残す政見の id と、同じ約束だと言える理由）");
       if (p.keep_id !== undefined) {
-        if (!isStr(p.keep_id, 1, 64) || /\s/.test(p.keep_id)) push("payload.keep_id", "keep_id は残す政見の id（1～64 字）");
+        if (p.target_table === "politicians") push("payload.keep_id", "keep_id は政見の removal だけに使う（人物には使えない）");
+        else if (!isStr(p.keep_id, 1, 64) || /\s/.test(p.keep_id)) push("payload.keep_id", "keep_id は残す政見の id（1～64 字）");
         else if (p.keep_id === p.target_id) push("payload.keep_id", "keep_id と target_id が同じ：残す政見と取り除く政見は別のもの");
       }
       break;

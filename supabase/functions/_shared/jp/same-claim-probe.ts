@@ -7,6 +7,7 @@
  *   auto:regional_stats_missing:<lg_code>
  *   auto:policy_missing:<參選紀錄 id>                                                          → policy（第 4 步）
  *   auto:term_policy_missing:<參選紀錄 id>                                                     → policy（C 期：過去の任期の公約の往回補）
+ *   auto:policy_validity:<參選紀錄 id>:<政見 id>                                               → policy（D 期：出典のない公約に出典を足す）
  *   auto:policy_elements_missing:<政見 id>                                                     → policy_elements（政見三要素）
  *   auto:district_seats_missing:<選挙 id>                                                      → district_seats（議員定数）
  *   auto:profile_gap:<人物 id>／auto:profile_detail_gap:<人物 id>／auto:profile_detail_gap:sources:<人物 id>  → politician（選舉鏈第 3 步）
@@ -23,6 +24,9 @@ export function jpSameClaimProbe(taskId: string): { type: string; payload: Recor
   if (m) return { type: "politician", payload: { politician_id: m[1] } };
   // 政見の任務（選舉鏈第 4 步）：題名を書かない探査＝この参選に掛かっている公約と審議中の提出を全部
   m = /^auto:(?:term_)?policy_missing:(\S+)$/.exec(taskId);
+  if (m) return { type: "policy", payload: { politician_election_id: m[1] } };
+  // 出典のない公約の任務（D 期 policy_validity）：答えは policy（出典を付けた再提出）。この参選の公約と審議中の提出を全部見せる（resolved_claim=differs:<政見 id> を選べるように）
+  m = /^auto:policy_validity:([^\s:]+:\d{4}-\d{2}-\d{2}_[a-z_]+_(?:\d{6}|national):(?:district|proportional|at_large)):[^\s:]+$/.exec(taskId);
   if (m) return { type: "policy", payload: { politician_election_id: m[1] } };
   // 政見三要素の任務：要素を書かない探査＝この政見の庫にある要素と審議中の提出を全部
   m = /^auto:policy_elements_missing:(\S+)$/.exec(taskId);
