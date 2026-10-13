@@ -500,6 +500,7 @@ const T_SET_BASED = "20261010200100"; // 件數改成一次集合查詢（#569 �
 const T_PASSIVE = "20261010230100"; // 主控台派工頁「被動」段（policy-ops #78；正見版在 20261010230000）
 const T_A1 = "20261011070000"; // 派工臂對齊正見 A 期第一支：candidate_status_stale／not_running／withdrawn_filing／candidacy_source_missing（policy-ops#95）
 const T_B = "20261011090000"; // 派工臂對齊正見 B 期：開票結果（election_results／elected_missing）＋新任期（politician_offices 同期）（policy-ops#95）
+const T_PE = "20261011140000"; // 派工臂對齊正見 2a：政見三要素 policy_elements_missing（規則預設關，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
 const T_SYSONE_REASK = "20261011130000"; // 系統票：宣稱に投票日が入っていた candidacy の旧判定を一度だけ聞き直す
 
@@ -535,8 +536,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_milestones_all: { mig: [T_DISPATCH, T_CAND], why: "（視圖）規則讀的里程碑全貌（存的里程碑＋投票日）；沒有 term_* 任期里程碑（日本站的任期要從 politician_offices 來，還沒做）" },
   activity_health: { mig: [T_DISPATCH], why: "（視圖）派工時間窗的健康檢查，正常是空的；只有通用幾項，沒有 roster／公報／號次／村里長的台灣專用檢查" },
   gap_open_lateness: { mig: [T_DISPATCH], why: "（視圖）缺口出生對帳（規則說該開的日子 vs 實際出生差超過 1 天），日界用 Asia/Tokyo" },
-  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
-  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
+  activity_arm_names: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE], why: "臂名清單，日本站只有自己的臂（正見 36 個）；130100 加 election_discovery、210100 加 local_government_missing／regional_stats_missing" },
+  contribution_auto_tasks_arms: { mig: [T_DISPATCH, T_ED, T_ARMS, T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE], why: "派工總表骨架（正見 31 個分支）：130000 只有兩支手動任務臂，130100 加 election_discovery，210100 加兩支缺口臂，250400 加選舉鏈 gate 一段（>>> 選舉鏈 … <<<）" },
 
   // ---- 20261009130100 election_discovery：日本站自己的新臂 ----
   contribution_auto_tasks_election_discovery: { mig: [T_ED, T_ARMS], why: "臂：任期満了快到、沒有對應選舉的團體 → 派 election_discovery（正見沒有對應物）；210100 加 task_unavailable 排除（#503，cap 套在可派的缺口上）" },
@@ -550,7 +551,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   regional_stat_unit: { mig: [T_APPLY], why: "地域統計 stat_key → 唯一單位（人／km2／千円／%），交件與落庫都對這張表" },
   apply_max_retries: { mig: [T_APPLY], why: "落庫重試次數（3），對齊正見 consensus.ts 的 APPLY_MAX_RETRIES（測試對齊）" },
   apply_retry_delay_minutes: { mig: [T_APPLY], why: "落庫重試間隔（10 分鐘），對齊正見 consensus.ts 的 APPLY_RETRY_DELAY_MINUTES（測試對齊）" },
-  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
+  apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
   source_kind_for_url: { mig: [T_APPLY], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試" },
   election_default_name: { mig: [T_APPLY], why: "選舉預設名稱（交件沒給 name 時：<団体名>＋長／知事／議会議員＋選挙）" },
   source_write: { mig: [T_APPLY], why: "登記 sources、掛 source_refs；正見同名 source_write() 的日本版，簽名與回傳都不同（網址陣列、回主要出處 id），不是複本、沒有逐字比對" },
@@ -559,7 +560,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_regional_stat: { mig: [T_APPLY], why: "regional_stat 交件落庫（寫 regional_stats）；日本專屬型別" },
   apply_election: { mig: [T_APPLY], why: "election 交件落庫（寫 elections）；日本專屬型別" },
   apply_no_change: { mig: [T_APPLY], why: "no_change 落庫＝記一筆 task_checks（冷卻），不動正式資料（#503）" },
-  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
+  apply_contribution: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE], why: "落庫主函式：verified（或到期的 apply_failed）→ applied／rejected／apply_failed／waiting；重試規則照正見，實作是 SQL 不是 TS" },
   apply_verified_pending: { mig: [T_APPLY], why: "落庫排程掃地機（policy-jp-apply-verified）：撿行內落庫漏掉的 verified 與到期的 apply_failed，只挑不再被擋的列" },
   apply_waiting: { mig: [T_APPLY], why: "（視圖）通過驗證、等團體落庫的交件清單（少數是正常，久了才是問題）；service_role 用" },
 
@@ -586,7 +587,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   activity_chain_escape: { mig: [T_CHAIN], why: "選舉鏈逃生門：前一步沒完成時，後備里程碑到了（fallback）或這個任務開過（sticky）就照開" },
   chain_regional_stats_missing: { mig: [T_CHAIN], why: "團體缺的統計（臂與 election_chain_progress 共用同一個判準）；齊了、規則停用、行政区＝NULL" },
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
-  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
+  chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
@@ -594,8 +595,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261009280000 same_claim：同一件事只能有一筆（#521，日本站試點；正見九合一之後才接，所以不是複本） ----
   same_claim_office: { mig: [T_SAME], why: "選舉種類 → 比對用的職位（head／assembly；國政＝種類本身），同 term_expirations.office_kind" },
   same_claim_same_term: { mig: [T_SAME], why: "選舉的「同一屆」：regular＝同一列任期満了的 [−180, +60] 窗口（查不到就差 ≤ 180 天）、其他事由＝同一天" },
-  same_claim_matches: { mig: [T_SAME, T_PROFILE, T_POLICY], why: "登記表的 SQL 那一半：型別＋payload → 在庫列與審議中提交（附 your_network_voted）；jp-report 交件擋 resolved_claim、jp-next 附 same_claims" },
-  same_claim_same_content: { mig: [T_SAME2, T_PROFILE, T_POLICY, T_KANA], why: "同一件事的兩筆內容是否相同（收編用：選舉＝投票日・種類・事由、統計＝值・單位、團體＝名稱・讀音・種類）" },
+  same_claim_matches: { mig: [T_SAME, T_PROFILE, T_POLICY, T_PE], why: "登記表的 SQL 那一半：型別＋payload → 在庫列與審議中提交（附 your_network_voted）；jp-report 交件擋 resolved_claim、jp-next 附 same_claims" },
+  same_claim_same_content: { mig: [T_SAME2, T_PROFILE, T_POLICY, T_KANA, T_PE], why: "同一件事的兩筆內容是否相同（收編用：選舉＝投票日・種類・事由、統計＝值・單位、團體＝名稱・讀音・種類）" },
   same_claim_supersede: { mig: [T_SAME2], why: "上線後收編（照正見 2026-09-21 supersedeDuplicates，正見是 TS、日本站是 SQL）：已落庫那筆 → 同一件事內容相同的等票提交 superseded＋edit_history" },
   same_claim_supersede_trg: { mig: [T_SAME2], why: "觸發器函式：election／regional_stat／local_government 轉 applied 時呼叫 same_claim_supersede" },
   same_claim_merge_pending: { mig: [T_SAME2], why: "一次性收編 #531 上線前的重複：兩筆都等票的，後交的票與交件者那一票併進先交的、後交的 superseded" },
@@ -652,6 +653,12 @@ const JP_ONLY: Record<string, JpOnly> = {
   policy_title_key: { mig: [T_POLICY], why: "政見題名的正規化（NFKC・小文字・空白除去）＝同一件事的鍵；TS 版 policyTitleKey 有對齊測試" },
   apply_policy: { mig: [T_POLICY], why: "policy 交件落庫（公約 origin=pledge 掛在參選上；同參選同題名＝unchanged／要約不同＝conflict）；日本專屬型別" },
   contribution_auto_tasks_policy_missing: { mig: [T_POLICY, T_KANA], why: "臂：開著的選舉的候選人（declared 以上）沒有任何公約 → policy_missing（正見 raw 臂 policy_missing 一段的日本版；term_policy_missing 屬於往回補，這一步不做）" },
+  // ---- 20261011140000 政見三要素（policy_elements、規則預設關；正見 20261010100000 的日本版） ----
+  contribution_auto_tasks_policy_elements: { mig: [T_PE], why: "政見三要素缺口臂（policy_elements_missing）：日本版走選舉鏈（chain_open_elections）、不照搬正見的選前／選後條件；cap／要素／選舉由規則 params 決定" },
+  apply_policy_elements: { mig: [T_PE], why: "policy_elements 交件落庫（SQL 版；正見是 TS applyPolicyElements）：衝突不覆蓋已發布列、同內容只補出處" },
+  policy_element_normalize: { mig: [T_PE], why: "policy_elements 一個要素的正規化與驗證（與 TS contribution-schema 同規則）" },
+  policy_elements_signature: { mig: [T_PE], why: "policy_elements 內容簽章（同一件事比對與收編用）" },
+  same_claim_matches_policy_elements: { mig: [T_PE], why: "同一件事（policy_elements）的比對本體：政見 id ＋ 要素種類；same_claim_matches 分派器呼叫" },
   same_claim_matches_policy: { mig: [T_POLICY], why: "同一件事（policy）的比對本體：參選紀錄 id ＋ 題名正規化；same_claim_matches 分派器呼叫" },
 
   // ---- 20261011070000 arms_candidacy_status（policy-ops#95，派工臂對齊正見 A 期第一支）：被重新定義的函式已在上面各自的 mig 清單裡加了這一支 ----

@@ -159,6 +159,13 @@ export const BATCH_SAME_CLAIM: Readonly<Record<string, BatchMatcher>> = {
   regional_stat: (p, q) => p.lg_code === q.lg_code && p.stat_key === q.stat_key && p.year === q.year,
   // 同じ参選・同じ題名（NFKC・小文字・空白除去）
   policy: (p, q) => p.politician_election_id === q.politician_election_id && policyTitleKey(p.title) === policyTitleKey(q.title),
+  // 同じ政見の同じ要素が重なる
+  policy_elements: (p, q) => {
+    const kinds = (v: unknown): string[] => (Array.isArray(v) ? v.filter((e): e is Record<string, unknown> => !!e && typeof e === "object").map((e) => String(e.element)) : []);
+    if (p.policy_id !== q.policy_id) return false;
+    const qk = kinds(q.elements);
+    return kinds(p.elements).some((k) => qk.includes(k));
+  },
   politician: (p, q) => {
     // 同じ人で、足す事実が重なる（生年を両方が書く、または學歷・經歷の同じ文字が兩方にある）
     if (p.politician_id !== q.politician_id) return false;

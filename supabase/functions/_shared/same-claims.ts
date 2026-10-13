@@ -32,6 +32,8 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
   { type: "politician", table: "politicians", key: ["politician_id", "fact"], sites: ["jp"] },
   // 選舉鏈第 4 步：公約は参選に掛かる。鍵は参選紀錄 id ＋ 題名（NFKC・小文字・空白除去）
   { type: "policy", table: "policies", key: ["politician_election_id", "title"], sites: ["jp"] },
+  // 政見の三要素（派工臂 policy_elements）：鍵は政見 id ＋ 要素（target／deadline／funding）。一つの政見の一つの要素に庫の行は一つだけ
+  { type: "policy_elements", table: "policy_elements", key: ["policy_id", "element"], sites: ["jp"] },
 ];
 
 /** 這一站要求 resolved_claim 的型別 */

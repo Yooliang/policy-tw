@@ -58,9 +58,22 @@ const policy = {
   source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
 };
 
-Deno.test("九種型別各一筆都過", () => {
-  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy"]);
-  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy]) {
+const policyElements = {
+  contribution_type: "policy_elements",
+  payload: {
+    policy_id: "5f0c8d6e-aaaa-4222-8333-444444444444", resolved_claim: "new",
+    elements: [
+      { element: "target", stated: true, text: "待機児童を 0 にする", source_locator: "選挙公報 3 頁「子育て」" },
+      { element: "deadline", stated: true, text: "2028 年度まで", deadline_date: "2029-03-31", source_locator: "選挙公報 3 頁「子育て」" },
+      { element: "funding", stated: false, source_locator: "選挙公報 3 頁を通読（財源の記載なし）" },
+    ],
+  },
+  source_urls: ["https://www.city.ichinomiya.aichi.jp/senkyo/kouhou.pdf"],
+};
+
+Deno.test("十種型別各一筆都過", () => {
+  assertEquals([...JP_CONTRIBUTION_TYPES], ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements"]);
+  for (const it of [noChange, correction, suggestion, election, localGovernment, regionalStat, candidacy, politician, policy, policyElements]) {
     const v = validateContributionRequest({ ...base, ...structuredClone(it) });
     assertEquals(v.errors, [], JSON.stringify(v.errors));
     assert(v.ok);
