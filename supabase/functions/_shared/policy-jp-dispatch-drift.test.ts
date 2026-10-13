@@ -544,6 +544,7 @@ const T_PE = "20261011140000"; // 派工臂對齊正見 2a：政見三要素 pol
 const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 duplicate_policy（規則預設關）＋交件型別 removal（policy-ops#95）
 const T_PROG = "20261011200000"; // 派工臂對齊正見 C 期第 4b 步：政見進度 progress_stale／期限到了 deadline_due＋交件型別 policy_progress（policy-ops#95）
 const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策の継承 lineage_candidates／handover_missing／lineage_roles／lineage_links＋交件型別 lineage／lineage_participants／lineage_handover／lineage_link（policy-ops#95）
+const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
 const T_TERM = "20261011190000"; // 派工臂對齊正見 C 期第 4 步：現職首長の公約 mayor_policies／term_policies（規則 enabled、新しい交件型別なし，policy-ops#95）
 const T_DS = "20261011170000"; // 派工臂對齊正見 2b：議員定数 district_seats_missing（規則最初から開く，policy-ops#95）
 const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action=precheck の候選清單（PLAN-arms-parity「系統票」）
@@ -597,7 +598,8 @@ const JP_ONLY: Record<string, JpOnly> = {
   apply_max_retries: { mig: [T_APPLY], why: "落庫重試次數（3），對齊正見 consensus.ts 的 APPLY_MAX_RETRIES（測試對齊）" },
   apply_retry_delay_minutes: { mig: [T_APPLY], why: "落庫重試間隔（10 分鐘），對齊正見 consensus.ts 的 APPLY_RETRY_DELAY_MINUTES（測試對齊）" },
   apply_types: { mig: [T_APPLY, T_CAND, T_PROFILE, T_POLICY, T_PE, T_DS, T_DUP, T_PROG, T_LIN], why: "日本站會落庫的貢獻型別清單（local_government／regional_stat／election／no_change）" },
-  source_kind_for_url: { mig: [T_APPLY], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試" },
+  source_kind_for_url: { mig: [T_APPLY, T_ARCH], why: "出處網址的等級（依網域，日本六種來源等級）；TS 版 _shared/jp/source-kind.ts 有對齊測試；T_ARCH 在最前面加一層還原存檔網址（source_unwrap_archive）、WARP 還原不了算 other，其餘分支不動" },
+  source_unwrap_archive: { mig: [T_ARCH], why: "存檔網址 → 原網址（Wayback、archive.today 系、国立国会図書館 WARP）；正見同名函式只認 Wayback（public.source_unwrap_archive），日本版多兩種、WARP 原網址沒有 scheme 補 http://；TS 版 unwrapJpArchiveUrl 有對齊測試" },
   election_default_name: { mig: [T_APPLY], why: "選舉預設名稱（交件沒給 name 時：<団体名>＋長／知事／議会議員＋選挙）" },
   source_write: { mig: [T_APPLY], why: "登記 sources、掛 source_refs；正見同名 source_write() 的日本版，簽名與回傳都不同（網址陣列、回主要出處 id），不是複本、沒有逐字比對" },
   apply_blocker: { mig: [T_APPLY], why: "落庫的等待條件：外鍵指到的團體還沒進 local_governments 就回等待原因（不繞過外鍵，#503 c）" },
