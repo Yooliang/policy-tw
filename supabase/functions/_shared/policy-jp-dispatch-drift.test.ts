@@ -173,11 +173,12 @@ const PAIRS: Pair[] = [
   { name: "visitor_front_slot_start" },
   { name: "manual_task_is_visitor" },
   { name: "manual_front_at" },
-  { name: "manual_front_pull" },
+  { name: "manual_front_pull", before: "20261011320000_queue_priority_seconds.sql", note: "取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本" },
   { name: "manual_task_closes_on_applied" },
   {
     name: "seed_auto_task_queue",
-    note: "拿掉流量提層一段（traffic_boost_apply，台灣專用）",
+    before: "20261011320000_queue_priority_seconds.sql",
+    note: "拿掉流量提層一段（traffic_boost_apply，台灣專用）。取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本",
     edits: [{ span: ["  -- >>> 流量提層", "  -- <<< 流量提層\n\n"], with: "" }],
   },
   { name: "contribution_queue_tasks" },
@@ -247,7 +248,7 @@ const PAIRS: Pair[] = [
   { name: "contribution_votes_trg" },
   { name: "contribution_votes_set_weight" },
   { name: "contribution_tasks_drop_dispatch" },
-  { name: "contribution_tasks_insert_dispatch" },
+  { name: "contribution_tasks_insert_dispatch", before: "20261011320000_queue_priority_seconds.sql", note: "取派工排序改秒數（20261011320000，日本站還沒有秒數模型，主線決定跟不跟）之前的版本" },
 ];
 
 /** 精確改一處（出現次數必須剛好一次）；span：從起點標記（唯一）到其後第一個終點標記，整段（含兩端）換成 with */

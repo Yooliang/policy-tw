@@ -258,7 +258,7 @@ Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveV
   assert(body.includes("const pick = candidates[0]!"), "serveVerify 拿池子第一筆（等最久的），不再依來源等級／隨機挑");
   const seed = await latestMigrationDefining("FUNCTION seed_auto_task_queue");
   assert(seed.includes("'verify:' || c.id"), "排程要把漏掉的待驗證貢獻補進佇列");
-  assert(!seed.includes("task_priority_tier"), "誰先誰後由 task_boost 決定，排程不再硬編碼 2026 縣市長");
+  assert(!/task_priority_tier\(/.test(seed), "誰先誰後由 task_boost 決定，排程不再呼叫硬編碼 2026 縣市長的 task_priority_tier()（2026-10-08 起的優先層表 task_priority_tiers 是資料、不算）");
 });
 
 // 2026-09-20：merge_politician 進了 TS 清單、沒進 DB 的 CHECK，代理交了整天都被擋——兩份真相要一起改
