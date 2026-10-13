@@ -45,7 +45,7 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
 /** policy_progress の status（policy_jp.policies.status の 6 値。正見の Campaign Pledge／Proposed／In Progress／Achieved／Stalled／Failed ではない） */
 export const JP_POLICY_STATUSES = ["not_started", "in_progress", "partial", "achieved", "discontinued", "unfulfilled"] as const;
 /** policy_progress の note と date の範囲（SQL apply_policy_progress と同じ） */
@@ -230,11 +230,14 @@ export const JP_TASK_ARMS = {
   handover_missing: "lineage_handover",
   lineage_roles_missing: "lineage_participants",
   lineage_link_candidate: "lineage_link",
+  // D 期（policy-ops#95）：政党。所属が分からない参選は candidacy（同じ状態＋party／party_id）、書き方が名簿に当たらないときは party_info。答えが「なかった」ときは no_change（not_found）
+  party_missing: "candidacy",
+  party_info_missing: "party_info",
 } as const satisfies Record<string, JpContributionType>;
 /** 任務の型別（JP_TASK_ARMS）のほかに受ける交件型別（task_id が指す政策に対する removal だけ。落ちるのは checkTaskAgreement の target_id 照合） */
 export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"] };
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate|party_missing|party_info_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
@@ -269,9 +272,9 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     if (payload.politician_id !== pid) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${pid}）不一致：一個任務只回報它問的那一位`);
     return;
   }
-  // candidate_status_stale／not_running_recheck／candidacy_source_missing：task_id の末尾は参選紀錄 id（<人物 id>:<選挙 id>:<district_kind>）。
+  // candidate_status_stale／not_running_recheck／candidacy_source_missing／party_missing：task_id の末尾は参選紀錄 id（<人物 id>:<選挙 id>:<district_kind>）。
   // 1 つの任務は 1 人の 1 回の参選だけ。not_running_recheck は filing が付くものだけ candidacy で答える（付かない「照合」は no_change／correction）
-  if (arm === "candidate_status_stale" || arm === "not_running_recheck" || arm === "candidacy_source_missing") {
+  if (arm === "candidate_status_stale" || arm === "not_running_recheck" || arm === "candidacy_source_missing" || arm === "party_missing") {
     const filing = arm === "not_running_recheck" && m[2].startsWith("filing:");
     const peId = filing ? m[2].slice("filing:".length) : m[2];
     if (arm === "not_running_recheck" && !filing) {
@@ -281,6 +284,11 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
     if (!JP_PE_ID_RE.test(peId)) { push("task_id", `task_id 的格式不對：要照抄 jp-next 給的值（auto:${arm}:${filing ? "filing:" : ""}<参選紀錄 id>）`); return; }
     const mine = `${String(payload.politician_id ?? "")}:${String(payload.election_id ?? "")}:${String(payload.district_kind ?? "")}`;
     if (mine !== peId) push("payload", `payload の politician_id・election_id・district_kind（${mine}）が、この任務が問う参選（${peId}）と一致しません：一つの任務は、その参選の分だけを回報します（politician_id は必須）`);
+    return;
+  }
+  // party_info_missing（D 期）：task_id の末尾は書き方の鍵の md5 前 12 字。答えは書き方（aliases／independent_aliases）に任務の書き方が入ることだが、鍵の計算は SQL（NFKC）なので落庫側が結ぶ。ここは形だけ
+  if (arm === "party_info_missing") {
+    if (!/^[0-9a-f]{12}$/.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:party_info_missing:<12 桁>）");
     return;
   }
   // election_result_missing（B 期）：task_id の末尾が参選紀錄 id なら当落（その参選だけ、elected／not_elected／withdrawn）、
@@ -530,6 +538,37 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       if (!isStr(p.source_locator, 1, JP_LINEAGE_LOCATOR_MAX)) push("payload.source_locator", `source_locator 必填（1～${JP_LINEAGE_LOCATOR_MAX} 字：条文・決定通知の番号・計画書の頁）`);
       break;
     }
+    case "party_info": {
+      // 政党の名簿（D 期）：新しい政党は name＋kana、既存は party_id。aliases＝その政党の別の書き方、independent_aliases＝無所属を意味する書き方。出典は頂層 source_urls
+      const hasId = p.party_id !== undefined && p.party_id !== null;
+      const hasName = p.name !== undefined && p.name !== null;
+      const indep = p.independent_aliases;
+      const hasIndep = Array.isArray(indep) && indep.length > 0;
+      if (hasId && (!isStr(p.party_id, 1, 64) || /\s/.test(p.party_id as string))) push("payload.party_id", "party_id は名簿にある政党の id");
+      if (hasName && !isStr(p.name, 1, 60)) push("payload.name", "name は 1～60 字（政党の正式名）");
+      if (!hasId && !hasName && !hasIndep) push("payload", "party_id（既存の政党）、name＋kana（新しい政党）、independent_aliases（無所属の書き方）のどれかが要る");
+      if (hasName && !hasId) {
+        if (!isStr(p.kana, 1, 120)) push("payload.kana", "新しい政党には kana（ひらがなの読み）が要る");
+      }
+      if (p.kana !== undefined && p.kana !== null) {
+        if (!isStr(p.kana, 1, 120)) push("payload.kana", "kana は 1～120 字");
+        else if (!JP_KANA_RE.test((p.kana as string).trim())) push("payload.kana", "kana は全部ひらがな（長音「ー」は可、空白なし）");
+      }
+      if (p.short_name !== undefined && p.short_name !== null && !isStr(p.short_name, 1, 30)) push("payload.short_name", "short_name は 1～30 字（略称）");
+      for (const k of ["valid_from", "valid_to"] as const) {
+        if (p[k] !== undefined && p[k] !== null && !isJpDate(p[k])) push(`payload.${k}`, `${k} は YYYY-MM-DD（年 1947～2100）。分からなければ入れない`);
+      }
+      if (isJpDate(p.valid_from) && isJpDate(p.valid_to) && (p.valid_to as string) < (p.valid_from as string)) push("payload.valid_to", "valid_to は valid_from より後");
+      if (p.predecessor_id !== undefined && p.predecessor_id !== null && (!isStr(p.predecessor_id, 1, 64) || /\s/.test(p.predecessor_id as string))) push("payload.predecessor_id", "predecessor_id は前身の政党の id");
+      for (const k of ["aliases", "independent_aliases"] as const) {
+        const v = p[k];
+        if (v === undefined || v === null) continue;
+        if (!Array.isArray(v) || v.length > 20 || !v.every((x) => isStr(x, 1, 60))) push(`payload.${k}`, `${k} は 1～60 字の文字列の配列（20 個まで）`);
+      }
+      if (Array.isArray(p.aliases) && p.aliases.length > 0 && !hasId && !hasName) push("payload.aliases", "aliases はどの政党の別表記かが要る（party_id か name）");
+      for (const k of JP_VOTE_FIELDS) if (k in p) push(`payload.${k}`, "得票數・得票率不收");
+      break;
+    }
     case "election": {
       // 查到的選舉日程（選管的告示）：欄位照 policy_jp.elections 的 CHECK；出處（選管告示）走頂層 source_urls
       const national = oneOf(JP_NATIONAL_ELECTION_TYPES, p.election_type);
@@ -617,6 +656,12 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       if (p.birth_year !== undefined && p.birth_year !== null && !(typeof p.birth_year === "number" && Number.isInteger(p.birth_year) && p.birth_year >= 1900 && p.birth_year <= new Date().getUTCFullYear())) {
         push("payload.birth_year", "birth_year 要是西曆四位數整數（例：1975）；不知道就不要填");
       }
+      // 本人の所属（D 期）：party＝出典に書かれた政党名（無所属は「無所属」）、party_id＝名簿にある政党の id。どちらか一方。推薦・支持の政党は入れない
+      const hasParty = p.party !== undefined && p.party !== null;
+      const hasPartyId = p.party_id !== undefined && p.party_id !== null;
+      if (hasParty && !isStr(p.party, 1, 60)) push("payload.party", "party は 1～60 字（出典に書かれた所属政党の名前。無所属は「無所属」）");
+      if (hasPartyId && (!isStr(p.party_id, 1, 64) || /\s/.test(p.party_id as string))) push("payload.party_id", "party_id は名簿にある政党の id（任務 target.known_parties の値）");
+      if (hasParty && hasPartyId) push("payload.party", "party と party_id はどちらか一方だけ");
       break;
     }
     case "politician": {

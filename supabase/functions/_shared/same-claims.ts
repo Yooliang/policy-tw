@@ -44,7 +44,7 @@ export const SAME_CLAIM_REGISTRY: readonly SameClaimEntry[] = [
  * 重交＝上書きか unchanged、同名の脈絡＝conflict（退件）。鍵是 DB 內的 id 組合，代理沒有「先查在庫再宣告」的對象，
  * 所以既不進登記表（不要求 resolved_claim）也不進 claimKey 併票（DUPLICATE_ELIGIBLE_TYPES）。一個型別只能在三邊的其中一邊（守門：same-claims.test.ts）。
  */
-export const APPLY_IDEMPOTENT_TYPES: readonly string[] = ["lineage", "lineage_participants", "lineage_handover", "lineage_link"];
+export const APPLY_IDEMPOTENT_TYPES: readonly string[] = ["lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"];
 
 /** 這一站要求 resolved_claim 的型別 */
 export function sameClaimTypes(site: "jp" | "tw"): string[] {
