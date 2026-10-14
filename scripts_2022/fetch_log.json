@@ -1,0 +1,966 @@
+[
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "台北市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "新北市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "桃園市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "台中市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "台南市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "高雄市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "宜蘭縣",
+    "ourType": "縣市長",
+    "count": 6
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "新竹縣",
+    "ourType": "縣市長",
+    "count": 5
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "苗栗縣",
+    "ourType": "縣市長",
+    "count": 5
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "彰化縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "南投縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "雲林縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "嘉義縣",
+    "ourType": "縣市長",
+    "count": 2
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "屏東縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "台東縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "花蓮縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "澎湖縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "基隆市",
+    "ourType": "縣市長",
+    "count": 5
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "新竹市",
+    "ourType": "縣市長",
+    "count": 6
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "嘉義市",
+    "ourType": "縣市長",
+    "count": 0
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "連江縣",
+    "ourType": "縣市長",
+    "count": 3
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+    "region": "金門縣",
+    "ourType": "縣市長",
+    "count": 6
+  },
+  {
+    "electionType": "CountyMayor",
+    "themeId": "1275d73551f2c0caf202e803b1766057",
+    "region": "嘉義市",
+    "ourType": "縣市長",
+    "count": 5
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "宜蘭縣",
+    "ourType": "鄉鎮市長",
+    "count": 31
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "新竹縣",
+    "ourType": "鄉鎮市長",
+    "count": 36
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "苗栗縣",
+    "ourType": "鄉鎮市長",
+    "count": 34
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "彰化縣",
+    "ourType": "鄉鎮市長",
+    "count": 65
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "南投縣",
+    "ourType": "鄉鎮市長",
+    "count": 32
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "雲林縣",
+    "ourType": "鄉鎮市長",
+    "count": 54
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "嘉義縣",
+    "ourType": "鄉鎮市長",
+    "count": 37
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "屏東縣",
+    "ourType": "鄉鎮市長",
+    "count": 94
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "台東縣",
+    "ourType": "鄉鎮市長",
+    "count": 40
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "花蓮縣",
+    "ourType": "鄉鎮市長",
+    "count": 32
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "澎湖縣",
+    "ourType": "鄉鎮市長",
+    "count": 15
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "基隆市",
+    "ourType": "鄉鎮市長",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "新竹市",
+    "ourType": "鄉鎮市長",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "嘉義市",
+    "ourType": "鄉鎮市長",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "連江縣",
+    "ourType": "鄉鎮市長",
+    "count": 8
+  },
+  {
+    "electionType": "CityMayor",
+    "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+    "region": "金門縣",
+    "ourType": "鄉鎮市長",
+    "count": 11
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "台北市",
+    "ourType": "縣市議員",
+    "count": 112
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "台北市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "台北市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "新北市",
+    "ourType": "縣市議員",
+    "count": 114
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "新北市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "新北市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "桃園市",
+    "ourType": "縣市議員",
+    "count": 117
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "桃園市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "桃園市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "台中市",
+    "ourType": "縣市議員",
+    "count": 121
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "台中市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "台中市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "台南市",
+    "ourType": "縣市議員",
+    "count": 101
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "台南市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "台南市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+    "region": "高雄市",
+    "ourType": "縣市議員",
+    "count": 118
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+    "region": "高雄市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CouncilMember",
+    "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+    "region": "高雄市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "宜蘭縣",
+    "ourType": "縣市議員",
+    "count": 54
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "宜蘭縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "宜蘭縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "新竹縣",
+    "ourType": "縣市議員",
+    "count": 67
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "新竹縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "新竹縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "苗栗縣",
+    "ourType": "縣市議員",
+    "count": 68
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "苗栗縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "苗栗縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "彰化縣",
+    "ourType": "縣市議員",
+    "count": 84
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "彰化縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "彰化縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "南投縣",
+    "ourType": "縣市議員",
+    "count": 62
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "南投縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "南投縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "雲林縣",
+    "ourType": "縣市議員",
+    "count": 69
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "雲林縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "雲林縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "嘉義縣",
+    "ourType": "縣市議員",
+    "count": 56
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "嘉義縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "嘉義縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "屏東縣",
+    "ourType": "縣市議員",
+    "count": 81
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "屏東縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "屏東縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "台東縣",
+    "ourType": "縣市議員",
+    "count": 35
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "台東縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "台東縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "花蓮縣",
+    "ourType": "縣市議員",
+    "count": 35
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "花蓮縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "花蓮縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "澎湖縣",
+    "ourType": "縣市議員",
+    "count": 29
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "澎湖縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "澎湖縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "基隆市",
+    "ourType": "縣市議員",
+    "count": 53
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "基隆市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "基隆市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "新竹市",
+    "ourType": "縣市議員",
+    "count": 61
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "新竹市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "新竹市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "嘉義市",
+    "ourType": "縣市議員",
+    "count": 40
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "嘉義市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "嘉義市",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "連江縣",
+    "ourType": "縣市議員",
+    "count": 15
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "連江縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "連江縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+    "region": "金門縣",
+    "ourType": "縣市議員",
+    "count": 32
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+    "region": "金門縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "CountyCouncilMember",
+    "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+    "region": "金門縣",
+    "ourType": "縣市議員",
+    "count": 0,
+    "nodata": true
+  },
+  {
+    "electionType": "DistrictRepresentatives",
+    "themeId": "d2aa09058066659f5b69af53ed16ccfa",
+    "region": "新北市",
+    "ourType": "直轄市山地原住民區民代表",
+    "count": 14
+  },
+  {
+    "electionType": "DistrictRepresentatives",
+    "themeId": "d2aa09058066659f5b69af53ed16ccfa",
+    "region": "桃園市",
+    "ourType": "直轄市山地原住民區民代表",
+    "count": 21
+  },
+  {
+    "electionType": "DistrictRepresentatives",
+    "themeId": "d2aa09058066659f5b69af53ed16ccfa",
+    "region": "台中市",
+    "ourType": "直轄市山地原住民區民代表",
+    "count": 18
+  },
+  {
+    "electionType": "DistrictRepresentatives",
+    "themeId": "d2aa09058066659f5b69af53ed16ccfa",
+    "region": "高雄市",
+    "ourType": "直轄市山地原住民區民代表",
+    "count": 39
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "台北市",
+    "ourType": "村里長",
+    "count": 884
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "新北市",
+    "ourType": "村里長",
+    "count": 1688
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "桃園市",
+    "ourType": "村里長",
+    "count": 948
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "台中市",
+    "ourType": "村里長",
+    "count": 1113
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "台南市",
+    "ourType": "村里長",
+    "count": 1138
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "高雄市",
+    "ourType": "村里長",
+    "count": 1648
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "宜蘭縣",
+    "ourType": "村里長",
+    "count": 423
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "新竹縣",
+    "ourType": "村里長",
+    "count": 351
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "苗栗縣",
+    "ourType": "村里長",
+    "count": 517
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "彰化縣",
+    "ourType": "村里長",
+    "count": 1035
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "南投縣",
+    "ourType": "村里長",
+    "count": 501
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "雲林縣",
+    "ourType": "村里長",
+    "count": 725
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "嘉義縣",
+    "ourType": "村里長",
+    "count": 634
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "屏東縣",
+    "ourType": "村里長",
+    "count": 844
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "台東縣",
+    "ourType": "村里長",
+    "count": 291
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "花蓮縣",
+    "ourType": "村里長",
+    "count": 361
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "澎湖縣",
+    "ourType": "村里長",
+    "count": 166
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "基隆市",
+    "ourType": "村里長",
+    "count": 286
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "新竹市",
+    "ourType": "村里長",
+    "count": 229
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "嘉義市",
+    "ourType": "村里長",
+    "count": 138
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "連江縣",
+    "ourType": "村里長",
+    "count": 33
+  },
+  {
+    "electionType": "Village",
+    "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+    "region": "金門縣",
+    "ourType": "村里長",
+    "count": 68
+  }
+]

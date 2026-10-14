@@ -1,0 +1,140 @@
+{
+  "村里長": {
+    "total": 13338,
+    "matched": 13336,
+    "unmatchedNoCandidate": 0,
+    "ambiguousMultiMatch": 2,
+    "noCandExamples": [],
+    "ambiguousExamples": [
+      {
+        "name": "林淑芬",
+        "region": "新北市",
+        "sub_region": "永和區",
+        "village": "光明里",
+        "reason": "出生年或其他欄位不符，保守判定為不同人",
+        "candCount": 1,
+        "rowCount": 1
+      },
+      {
+        "name": "陳永和",
+        "region": "新竹市",
+        "sub_region": "北區",
+        "village": "湳雅里",
+        "reason": "出生年或其他欄位不符，保守判定為不同人",
+        "candCount": 1,
+        "rowCount": 1
+      }
+    ]
+  },
+  "直轄市山地原住民區民代表": {
+    "total": 82,
+    "matched": 82,
+    "unmatchedNoCandidate": 0,
+    "ambiguousMultiMatch": 0,
+    "noCandExamples": [],
+    "ambiguousExamples": []
+  },
+  "縣市議員": {
+    "total": 1554,
+    "matched": 1510,
+    "unmatchedNoCandidate": 43,
+    "ambiguousMultiMatch": 1,
+    "noCandExamples": [
+      {
+        "name": "李芳儒",
+        "region": "台北市",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "藞妏．尼卡兒",
+        "region": "新北市",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "楊春妹",
+        "region": "新北市",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "楊曉君",
+        "region": "新北市",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "林霈宸",
+        "region": "新北市",
+        "sub_region": null,
+        "village": null
+      }
+    ],
+    "ambiguousExamples": [
+      {
+        "name": "李明賢",
+        "region": "台北市",
+        "sub_region": "八德區",
+        "village": "大強里",
+        "reason": "我方同名同區有多筆（可能不同選區/村里混在一起)",
+        "candCount": 1,
+        "rowCount": 2
+      }
+    ]
+  },
+  "縣市長": {
+    "total": 96,
+    "matched": 91,
+    "unmatchedNoCandidate": 3,
+    "ambiguousMultiMatch": 2,
+    "noCandExamples": [
+      {
+        "name": "許鋐鋕",
+        "region": "宜蘭縣",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "劉雁祿",
+        "region": "新竹縣",
+        "sub_region": null,
+        "village": null
+      },
+      {
+        "name": "蕭翠蓮",
+        "region": "彰化縣",
+        "sub_region": null,
+        "village": null
+      }
+    ],
+    "ambiguousExamples": [
+      {
+        "name": "江聰淵",
+        "region": "宜蘭縣",
+        "sub_region": null,
+        "village": null,
+        "reason": "我方同名同區有多筆（可能不同選區/村里混在一起)",
+        "candCount": 1,
+        "rowCount": 2
+      },
+      {
+        "name": "江聰淵",
+        "region": "宜蘭縣",
+        "sub_region": null,
+        "village": null,
+        "reason": "我方同名同區有多筆（可能不同選區/村里混在一起)",
+        "candCount": 1,
+        "rowCount": 2
+      }
+    ]
+  },
+  "鄉鎮市長": {
+    "total": 468,
+    "matched": 468,
+    "unmatchedNoCandidate": 0,
+    "ambiguousMultiMatch": 0,
+    "noCandExamples": [],
+    "ambiguousExamples": []
+  }
+}

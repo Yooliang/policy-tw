@@ -1,0 +1,113 @@
+{
+  "CountyMayor": [
+    {
+      "themeId": "1275d73551f2c0caf202e803b1766057",
+      "themeName": "111年嘉義市長重行選舉",
+      "session": 111,
+      "voteDate": "2022-12-18",
+      "year": 2022,
+      "dataLevel": "C",
+      "areaName": "全國"
+    },
+    {
+      "themeId": "63615098f5afa8ec53159c4a86fc01d3",
+      "themeName": "111年縣市長選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "C",
+      "areaName": "全國"
+    }
+  ],
+  "CouncilMember": [
+    {
+      "themeId": "25e12c45f9f5641aab4193598d5aff6e",
+      "themeName": "111年直轄市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    },
+    {
+      "themeId": "44cf35b1708568b94bb3b4c38a3fc74c",
+      "themeName": "111年直轄市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    },
+    {
+      "themeId": "699b1ece9739edf4ec4662cea25a0bb3",
+      "themeName": "111年直轄市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    }
+  ],
+  "CountyCouncilMember": [
+    {
+      "themeId": "72976331a1ea6b85cfb1ed3380ae5f35",
+      "themeName": "111年縣市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    },
+    {
+      "themeId": "c8f4dc82f282bed4ebcdf0f52552cf58",
+      "themeName": "111年縣市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    },
+    {
+      "themeId": "4ad215cf6c4ef28b25278bd1a13bc7bf",
+      "themeName": "111年縣市議員選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    }
+  ],
+  "CityMayor": [
+    {
+      "themeId": "664d46a37f4f38296ad0b9d0f24adab4",
+      "themeName": "111年鄉鎮市長選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "D",
+      "areaName": "全國"
+    }
+  ],
+  "DistrictRepresentatives": [
+    {
+      "themeId": "d2aa09058066659f5b69af53ed16ccfa",
+      "themeName": "111年直轄市區民代表選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "A",
+      "areaName": "全國"
+    }
+  ],
+  "Village": [
+    {
+      "themeId": "0bd11a4b3f092aae2811741428ec3e3d",
+      "themeName": "111年村里長選舉",
+      "session": 111,
+      "voteDate": "2022-11-26",
+      "year": 2022,
+      "dataLevel": "L",
+      "areaName": "全國"
+    }
+  ]
+}
