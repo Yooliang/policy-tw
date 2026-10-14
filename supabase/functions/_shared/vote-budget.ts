@@ -377,6 +377,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 政見主題（第二期，2026-10-07）：影子模式一樣只記錄。要防的是「照關鍵字貼標」與「依據句不是政見裡的字」
+  policy_topic: [
+    {
+      key: "keyword_only",
+      instructions: "標的主題是這條政見主要在講的事嗎？還是只因為說明裡順口提到一個關鍵字（例：產業園區政見裡提到「托育」）就貼上？",
+      hit: { key: "keyword_match", means: "主題只是靠關鍵字沾邊，政見主要在講別的事" },
+      miss: { key: "about_it", means: "政見主要就在講這個主題" },
+    },
+    {
+      key: "evidence_not_in_text",
+      instructions: "每個主題的依據句，是這條政見的標題或說明裡真的有的字嗎？還是提交者自己改寫、概括、補上的？",
+      hit: { key: "not_in_text", means: "依據句不是政見裡的原句，是改寫或憑空補的" },
+      miss: { key: "in_text", means: "依據句是政見標題或說明裡的原句" },
+    },
+  ],
+
   // 政策脈絡（#349，2026-10-06）：影子模式一樣只記錄。要防的是「主題相近當成同一件事」「新聞或本人說法當成官方紀錄」
   // 「後任沒提就當成中止」
   lineage: [

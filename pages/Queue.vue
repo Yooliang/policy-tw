@@ -66,6 +66,7 @@ const BORDER: Record<string, string> = {
   duplicate_politician: '#78716c',      // 重複人物：石
   question: '#db2777',                  // 提問：粉
   policy_elements_missing: '#7c2d12',   // 政見三要素：赭
+  policy_topic_missing: '#9a3412',      // 政見主題：赭（同一族）
   lineage_candidate: '#0f766e',         // 政策脈絡：深青（同一族）
   handover_missing: '#115e59',
   lineage_roles_missing: '#134e4a',
@@ -92,6 +93,7 @@ const VERIFY_BORDER: Record<string, string> = {
   merge_politician: '#4338ca',  // 人物合併：靛
   adjudication: '#475569',
   policy_elements: '#9a3412',   // 政見三要素：赭
+  policy_topic: '#c2410c',      // 政見主題：赭（同一族）
   lineage: '#0f766e',           // 政策脈絡：深青
   lineage_participants: '#134e4a',
   lineage_handover: '#115e59',
@@ -118,6 +120,7 @@ const VERIFY_LABEL: Record<string, string> = {
   merge_politician: '人物合併',
   adjudication: '裁決',
   policy_elements: '政見三要素',
+  policy_topic: '政見主題',
   lineage: '政策脈絡',
   lineage_participants: '脈絡參與角色',
   lineage_handover: '脈絡交接',

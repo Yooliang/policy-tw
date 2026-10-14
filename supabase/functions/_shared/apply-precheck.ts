@@ -21,6 +21,7 @@ import { loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 import { resultItems } from "./election-results.ts";
 import { loadReassignContext, reassignProblems } from "./reassign-candidacy.ts";
+import { policyTopicItems } from "./policy-topics.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -44,7 +45,7 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? 
 const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
 interface PoliticianRow { merged_into: string | null }
-interface PolicyRow { removed_at: string | null; lineage_id?: string | null; title?: string | null }
+interface PolicyRow { removed_at: string | null; lineage_id?: string | null; title?: string | null; politician_id?: string | null }
 interface LineageRow { id: string; title: string; level: string; region: string | null; sub_region: string | null }
 
 /**
@@ -76,10 +77,10 @@ async function lookupPolicies(supabase: SupabaseLike, ids: readonly string[]): P
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
       // query-bounds: ok — ids 來自這一批交件、每段 100 個，變數 in()
-      const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title").in("id", chunk);
+      const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title, politician_id").in("id", chunk);
       if (error) { console.error("precheck policies lookup failed:", error.message); return { rows, ok: false }; }
-      for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null }>) {
-        rows.set(String(r.id).toLowerCase(), { removed_at: r.removed_at ?? null, lineage_id: r.lineage_id ?? null, title: r.title ?? null });
+      for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null; politician_id?: string | null }>) {
+        rows.set(String(r.id).toLowerCase(), { removed_at: r.removed_at ?? null, lineage_id: r.lineage_id ?? null, title: r.title ?? null, politician_id: r.politician_id ?? null });
       }
     }
   } catch (e) {
@@ -238,6 +239,13 @@ export async function precheckApplyTargets(
         if (polId) policyIds.add(polId);
         break;
       }
+      // 政見主題（第二期）：人物與每條政見都要在；政見要是這位人物的
+      case "policy_topic": {
+        const pid = str(p.politician_id);
+        if (pid) politicianIds.add(pid);
+        for (const it of policyTopicItems(p)) if (it.policy_id) policyIds.add(it.policy_id);
+        break;
+      }
       case "candidacy": {
         const pid = str(p.politician_id);
         if (pid) {
@@ -374,6 +382,21 @@ export async function precheckApplyTargets(
       case "policy_elements": {
         const polId = str(p.policy_id);
         if (polId) checkPolicy(i, polId, "payload.policy_id", "這筆三要素無法落庫：請確認 policy_id（任務的 target.policy_id）", "不接受三要素");
+        break;
+      }
+      case "policy_topic": {
+        const pid = str(p.politician_id);
+        if (pid) checkPolitician(i, pid, "payload.politician_id", "這筆政見主題無法落庫：請確認 politician_id（任務的 target.politician_id）");
+        const items = Array.isArray(p.items) ? p.items as unknown[] : [];
+        items.forEach((raw, k) => {
+          const id = raw && typeof raw === "object" ? str((raw as Obj).policy_id) : null;
+          if (!id) return;
+          if (!checkPolicy(i, id, `payload.items[${k}].policy_id`, "這筆政見主題無法落庫：請照任務 current.policies 裡的 policy_id 帶", "不接受主題")) return;
+          const owner = policyRows.get(id.toLowerCase())?.politician_id;
+          if (policies.ok && pid && owner && owner.toLowerCase() !== pid.toLowerCase()) {
+            problems.push({ index: i, code: "apply_would_fail", path: `payload.items[${k}].policy_id`, message: `政見 ${id} 不是這位人物的（payload.politician_id）：一筆交件只收同一位人物名下的政見，請照任務 current.policies 帶` });
+          }
+        });
         break;
       }
       case "candidacy": {

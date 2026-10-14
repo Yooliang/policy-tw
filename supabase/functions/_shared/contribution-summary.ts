@@ -50,6 +50,7 @@ import { normalizeCorrection } from "./correction.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
 import { resultItems, resultsUnitLabel } from "./election-results.ts";
 import { elementPhrase } from "./policy-elements.ts";
+import { NO_TOPIC_LABEL, topicLabel } from "./policy-topics.ts";
 import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
 
 type Obj = Record<string, unknown>;
@@ -142,6 +143,19 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
         .map((e) => elementPhrase(e, 30));
       summary = `為「${clip(title, 60)}」拆政見三要素：${parts.join("；") || "（沒有要素）"}`;
       targetName = str(p.policy_title) || null;
+      break;
+    }
+    case "policy_topic": {
+      // 政見主題（第二期）：列表上看得出標了幾條政見、各主題各幾條（沒有主題的也講出來）；政見標題這裡查不到，不依賴它
+      const items = Array.isArray(p.items) ? p.items.filter((e): e is Obj => !!e && typeof e === "object") : [];
+      const counts = new Map<string, number>();
+      for (const e of items) {
+        const topics = Array.isArray(e.topics) ? e.topics.filter((t): t is Obj => !!t && typeof t === "object") : [];
+        const labels = topics.length === 0 ? [NO_TOPIC_LABEL] : topics.map((t) => topicLabel(t.topic));
+        for (const l of labels) counts.set(l, (counts.get(l) ?? 0) + 1);
+      }
+      const parts = [...counts.entries()].map(([label, n]) => `${label} ${n} 條`);
+      summary = `為「${name || "（未填姓名）"}」的 ${items.length} 條政見標主題：${parts.join("、") || "（沒有政見）"}`;
       break;
     }
     case "correction": {

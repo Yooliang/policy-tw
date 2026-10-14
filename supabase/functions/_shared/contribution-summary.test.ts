@@ -139,6 +139,10 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
       { element: "target", stated: true, text: "新建社會住宅 3,000 戶", source_locator: "公報第 2 頁〈居住〉第 1 點" },
       { element: "funding", stated: false, source_locator: "公報第 2 頁〈居住〉全段" },
     ] },
+    policy_topic: { name: "王小明", politician_id: "00000000-0000-4000-8000-000000000002", items: [
+      { policy_id: "00000000-0000-4000-8000-000000000001", topics: [{ topic: "childcare", evidence: "擴大公共托育" }] },
+      { policy_id: "00000000-0000-4000-8000-000000000003", topics: [] },
+    ] },
     lineage: { new_lineage: { title: "台中捷運藍線", category: "交通建設", level: "county", region: "台中市" },
       policy_ids: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"],
       note: "兩條政見都是台中捷運藍線，計畫名稱與路線相同。" },

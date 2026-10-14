@@ -54,6 +54,8 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   policy_validity: "correction",
   // 政見三要素（#364，2026-10-05）：從原文拆數值目標／達成期限／財源，交 policy_elements
   policy_elements_missing: "policy_elements",
+  // 政見主題（第二期，2026-10-07）：一位人物名下還沒標主題的政見，每條判斷 0～2 個主題，交 policy_topic
+  policy_topic_missing: "policy_topic",
   // 達成期限到了、期限後沒有進度：查做到沒有，交 policy_progress（查不到後續用 no_change）
   deadline_due: "policy_progress",
   // 政策脈絡（#349，2026-10-06）：同一格政見裡找同一件事 → 建立／歸入脈絡；前後任 → 記交接；民意代表 → 照官方紀錄標角色；

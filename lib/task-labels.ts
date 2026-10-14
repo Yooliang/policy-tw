@@ -38,6 +38,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   // 政見三要素（#364，2026-10-05）
   policy_elements_missing: '拆政見三要素',
   deadline_due: '期限到了查進度',
+  // 政見主題（第二期，2026-10-07）
+  policy_topic_missing: '標政見主題',
   // 政策脈絡（#349，2026-10-06）
   lineage_candidate: '找同一件事的政見',
   handover_missing: '記前後任交接',

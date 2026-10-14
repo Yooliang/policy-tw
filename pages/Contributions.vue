@@ -88,6 +88,7 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'question_answer', label: '提問回答' },
   { key: 'removal', label: '建議移除' },
   { key: 'policy_elements', label: '政見要素' },
+  { key: 'policy_topic', label: '政見主題' },
   { key: 'lineage', label: '政策脈絡' },
   { key: 'lineage_participants', label: '脈絡角色' },
   { key: 'lineage_handover', label: '脈絡交接' },

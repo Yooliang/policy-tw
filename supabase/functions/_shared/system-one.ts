@@ -267,6 +267,8 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   reassign_candidacy: ["politician_election_id", "to_politician_id", "new_politician", "evidence", "reason"],
   // 政見三要素（#364）：票數預算的三維要看的就是每個要素寫了什麼、原句在哪
   policy_elements: ["policy_id", "elements"],
+  // 政見主題（第二期）：票數預算的維度要看的是每條政見標了什麼主題、依據句是什麼
+  policy_topic: ["politician_id", "items"],
   // 政策脈絡（#349）：票數預算的維度要看的是「憑什麼說是同一件事」「角色依據」「交接依據」
   lineage: ["lineage_id", "new_lineage", "policy_ids", "detach_policy_ids", "note"],
   lineage_participants: ["lineage_id", "participants"],

@@ -22,6 +22,7 @@ import { NON_OFFICIAL_SOURCES, NOT_FOUND_ELEVATED_MIN_CHECKED_URLS, NOT_FOUND_EL
 import { SOLE_SOURCE_TASK_NOTE } from "./sole-source-guard.ts";
 import { SEARCH_PAGE_NOT_SOURCE } from "./search-page.ts";
 import { POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
+import { POLICY_TOPIC_BATCH_MAX, POLICY_TOPIC_EVIDENCE_MAX, POLICY_TOPIC_MAX } from "./policy-topics.ts";
 
 /**
  * 政見／基本資料缺口要用搜尋引擎、看非官方來源（維護者 2026-10-01）：抽 8 筆政見缺漏的「查無」，
@@ -215,6 +216,18 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "先確認來源講的是這個人任內、職權內做的事；前任或別人做的同主題事情不算。" +
     SOLE_SOURCE_TASK_NOTE,
 
+  // 政見主題（第二期，2026-10-07）：主題是固定的 16 個（current.topics），一條政見至多 2 個。系統用關鍵字算了候選（current.policies[].candidates），
+  // 但關鍵字只是起點——判斷「這條政見主要在講什麼」是你的事。沒有列＝還沒標；查過、不屬於任何主題也是一個答案（topics 填 []），兩者不可混。
+  policy_topic_missing:
+    "這位人物名下有幾條政見還沒標主題（target.policies_total 條，這一件最多給 " + POLICY_TOPIC_BATCH_MAX + " 條，都在 current.policies 裡，每條有標題、說明、類別、出處）。" +
+    "對**每一條**判斷它主要在講什麼，從 current.topics 的詞彙表（16 個，用 key）挑 0～" + POLICY_TOPIC_MAX + " 個主題：政見的主要內容屬於哪個主題就標哪個，**不是**提到了哪個字就標哪個。" +
+    "**candidates 是系統用關鍵字算的候選**（依相關度排序，可能是空的）：只是起點，會撈到不相干的（說明裡順口提到「托育」的產業園區政見，主題不是少子化與育兒）；候選是空的也不代表沒有主題，你看了內容判斷。" +
+    "**每個主題都要附依據句 evidence**＝政見標題或說明裡支持這個主題的那一句**原句**（" + POLICY_TOPIC_EVIDENCE_MAX + " 字內，照原文，不改寫、不概括）；說不出依據句，就不要標這個主題。" +
+    "一條政見真的不屬於 16 個主題的任何一個（例：純屬某個地方的人事、儀式、口號），topics 填空陣列 []——那是答案，不是偷懶：網站會記成「查過、不屬於任何主題」，跟「還沒標」分開。" +
+    "看不出來、不確定的，**不要交那一條**，留給別人；沒交的政見會留在任務裡。" +
+    "不要為了湊主題而硬套，也不要因為候選有就照單全收；一條政見只標它主要在講的，最多 " + POLICY_TOPIC_MAX + " 個。" +
+    "用 policy_topic 型別交一筆：politician_id 照 target 帶，items 每條政見一項（policy_id＋topics）；source_urls 放你判斷時看的政見出處（current.policies[].source_url）。",
+
   // 政策脈絡（#349，2026-10-06）：一條脈絡＝一件事在某一層級、某一地方的來龍去脈。系統把同一層級、同一地方、同一類別的政見
   // 放成一格交給你看，判斷「是不是同一件事」是你的事——字面相似不準（同議題常常用字完全不同），系統不替你猜。
   lineage_candidate:
@@ -345,6 +358,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：policy_id、elements[]（1～3 個，每個 {element：target 數值目標／deadline 達成期限／funding 財源；stated：true 原文有寫／false 查過原文沒寫；" +
     `text：原文的事實，${POLICY_ELEMENT_TEXT_MAX} 字內（stated=false 不填）；deadline_date：YYYY-MM-DD（只有原文寫了的達成期限、換得成日期才填）；` +
     "source_locator：原句在原文的位置（必填，stated=false 也要填查的是哪一段）；source_url：出自 source_urls 的哪一個（不填＝第一個）}）。source_urls 放原文網址。",
+  // 政見主題（第二期）：一筆一位人物、1～30 條政見、每條 0～2 個主題
+  policy_topic:
+    "payload：politician_id、items[]（1～" + POLICY_TOPIC_BATCH_MAX + " 條，每條 {policy_id；topics：0～" + POLICY_TOPIC_MAX + " 個 {topic：current.topics 的 key；evidence：政見標題或說明裡支持這個主題的原句，" + POLICY_TOPIC_EVIDENCE_MAX + " 字內}，" +
+    "查過、不屬於任何主題就填空陣列 []}）、note（選填）。source_urls 放你判斷時看的政見出處。",
   // 政策脈絡（#349）
   lineage:
     "payload：lineage_id（歸入既有的脈絡）或 new_lineage（建新的：{title 4～60 字、summary 200 字內、category 19 類之一、" +
@@ -606,6 +623,17 @@ function buildPayload(
           text: `（原文寫的事實，${POLICY_ELEMENT_TEXT_MAX} 字內；stated=false 就整欄拿掉）`,
           ...(k === "deadline" ? { deadline_date: "（YYYY-MM-DD；換不成日期就整欄拿掉）" } : {}),
           source_locator: "（原句在原文的位置：公報第幾頁哪一段、影片幾分幾秒；stated=false 寫查的是哪一段）",
+        })),
+      };
+    }
+    // 政見主題（第二期）：每條政見一項，topics 先放一個範例主題；骨架不預填系統的候選（照抄候選等於沒判斷）
+    case "policy_topic": {
+      const ids = Array.isArray(t.policy_ids) ? (t.policy_ids as unknown[]).map(String) : [];
+      return {
+        politician_id: asText(t.politician_id) ?? "（人物 id）",
+        items: (ids.length > 0 ? ids : ["（current.policies 裡的 policy_id）"]).map((id) => ({
+          policy_id: id,
+          topics: [{ topic: "（current.topics 的 key；這條不屬於任何主題就把 topics 整個改成 []）", evidence: "（政見標題或說明裡支持這個主題的原句）" }],
         })),
       };
     }

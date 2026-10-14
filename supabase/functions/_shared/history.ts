@@ -93,6 +93,8 @@ const FIELD_LABEL: Record<string, string> = {
   source_url: "來源網址", progress: "進度", last_updated: "最後更新", source_note: "來源備註", audit: "核對來源", "*": "整列",
   // 政見三要素（#364）
   stated: "原文有沒有寫", text: "要素內容", deadline_date: "期限日期", source_locator: "原句位置",
+  // 政見主題（第二期）
+  topic_key: "主題", evidence: "依據句",
   // 政策脈絡（#349）
   lineage_id: "所屬脈絡", origin: "政見來源", summary: "摘要", role: "角色", basis: "依據", note: "說明",
   handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
@@ -102,7 +104,7 @@ const FIELD_LABEL: Record<string, string> = {
   valid_from: "名稱起始日", valid_to: "名稱停用日", predecessor_id: "前身",
 };
 const TABLE_LABEL: Record<string, string> = {
-  politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素",
+  politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素", policy_topics: "政見主題",
   lineages: "政策脈絡", lineage_participants: "脈絡參與角色", handovers: "脈絡交接", lineage_links: "脈絡上下級關聯", lineage_candidate_reviews: "脈絡候選清查",
   parties: "政黨",
 };

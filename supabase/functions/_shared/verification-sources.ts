@@ -169,6 +169,8 @@ export const TASK_SOURCE_NEEDS: Record<string, readonly string[]> = {
   // 政見三要素要的是政見原文；期限到了查進度也是從政見那一頁找起（#364）
   policy_elements_missing: ["policy"],
   deadline_due: ["policy"],
+  // 政見主題要看的是政見本身（標題、說明、原文），不是人物資料
+  policy_topic_missing: ["policy"],
   // 政策脈絡（#349）：同一件事要看政見原文；交接、上下級要看施政與預算；角色要看議事紀錄
   lineage_candidate: ["policy"],
   handover_missing: ["policy"],

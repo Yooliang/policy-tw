@@ -15,6 +15,7 @@ export const SINGLE_ANSWER_TASK_TYPES: ReadonlySet<string> = new Set([
   "policy_validity", // 疑似不是政見：移除／更正／無異動三選一
   "profile_gap",     // 補人物資料：一次補齊
   "policy_elements_missing", // 政見三要素：一條政見一次拆完（#364）
+  "policy_topic_missing", // 政見主題：一位人物名下一批政見一次標完（第二期）
   "deadline_due",    // 期限到了查進度：跟 progress_stale 一樣一次回報（#364）
   "handover_missing", // 記交接：一對前後任一筆（#349）
 ]);

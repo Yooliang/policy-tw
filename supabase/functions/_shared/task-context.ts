@@ -17,6 +17,7 @@ type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
+import { POLICY_TOPIC_BATCH_MAX, policyTopicCandidates, policyTopicItems, topicVocabulary } from "./policy-topics.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
 import { resultOfCandidacyStatus } from "./candidacy-status.ts";
@@ -468,6 +469,19 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
         lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
         upper_candidates: (data.related_lineages ?? []).map(shapeLineageBrief),
       };
+    // 政見主題（第二期）：這一件的每條政見（標題、說明、類別、出處）＋系統用關鍵字算的候選（只是候選）＋詞彙表。
+    // 候選用完整說明算（說明截 500 字給代理看，候選不能因此少算）
+    case "policy_topic_missing":
+      return {
+        politician: pick(p, POLITICIAN_BRIEF),
+        policies: (data.policies ?? []).map((pol) => ({
+          policy_id: pol.id ?? null,
+          ...truncateFields(pick(pol, ["title", "description", "category", "status", "election_id", "source_url"])!, ["description"]),
+          candidates: policyTopicCandidates(pol),
+        })),
+        policies_total: data.policies_total ?? (data.policies ?? []).length,
+        topics: topicVocabulary(),
+      };
     // 政見三要素（#364）：政見本身（description 是我們的摘要、不是原文——hint 有講）＋已經有的要素
     case "policy_elements_missing": {
       const existing = (data.elements ?? []).map((e) => pick(e, ELEMENT_FIELDS)!);
@@ -790,6 +804,21 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies = pol.data ?? [];
     data.policies_total = pol.count ?? (data.policies ?? []).length;
     data.queued_policies = queued.data ?? [];
+  }
+  // 政見主題（第二期）：這一件的政見（target.policy_ids，最多 30 條）；派工之後別人先標好的不再給
+  if (taskType === "policy_topic_missing" && Array.isArray(target.policy_ids)) {
+    const ids = (target.policy_ids as unknown[]).filter((x): x is string => typeof x === "string").slice(0, POLICY_TOPIC_BATCH_MAX);
+    if (ids.length > 0) {
+      const [pol, done] = await Promise.all([
+        // query-bounds: ok — ids 最多 30 條（POLICY_TOPIC_BATCH_MAX），變數 in()
+        supabase.from("policies").select("id, title, description, category, status, election_id").in("id", ids).is("removed_at", null).order("id", { ascending: true }).limit(POLICY_TOPIC_BATCH_MAX),
+        // query-bounds: ok — 30 條政見、每條最多 2 列主題＋1 列無主題
+        supabase.from("policy_topics").select("policy_id").in("policy_id", ids).limit(100),
+      ]);
+      const marked = new Set(((done.data ?? []) as Obj[]).map((r) => String(r.policy_id)));
+      data.policies = ((pol.data ?? []) as Obj[]).filter((r) => !marked.has(String(r.id)));
+      data.policies_total = typeof target.policies_total === "number" ? target.policies_total : data.policies.length;
+    }
   }
   // 單則新聞任務（2026-09-29）：判成進度的要看那條政見與它的時間軸；判成新承諾的要看這個人已有／等票中的政見，免得重交
   if (isNewsItemTask(taskType, target) && pid) {
@@ -1142,6 +1171,13 @@ export const POLICY_ELEMENTS_VERIFY_HINT =
   "原文要是這位候選人自己的（公報上看清楚是他那一欄，不是相鄰候選人的）。existing_elements 是網站上現有的，這筆通過後同一個要素會被覆蓋。" +
   "全部對得上投 agree；任一個要素不對投 disagree，note 寫是哪一個要素、原文實際怎麼寫；原文打不開、確認不了投 unsure。";
 
+/** 政見主題的驗證說明（第二期）：核對的是「這條政見主要在講什麼」與依據句，不是「有沒有提到某個字」 */
+export const POLICY_TOPIC_VERIFY_HINT =
+  "逐條核對 payload.items：對照 current.policies 裡那條政見的標題與說明，(1) 每個標的主題是不是這條政見**主要在講**的事——只因為說明裡順口提到一個字（例：產業園區政見裡提到「托育」）就貼上，投 disagree；" +
+  "(2) evidence 要是標題或說明裡真的有的原句（不是改寫、概括或憑空補的），而且確實支持那個主題；(3) topics 是空陣列＝提交者主張這條不屬於 16 個主題的任何一個，你看了內容也確實如此才同意（明明有主題卻填空陣列也是錯的）；" +
+  "(4) 最多 2 個主題。candidates 是系統用關鍵字算的候選，只是參考：提交者不照候選標沒有錯，照候選標也不代表對。這筆通過後，這幾條政見的主題會整組換成提交的（已有的主題列會被取代）。" +
+  "全部條目都對投 agree；任一條不對投 disagree，note 寫是哪一條（policy_id）、哪個主題或依據句有問題；看不懂政見、確認不了投 unsure。";
+
 const IDENTITY_HINT = {
   matched: "系統比對到唯一一位（identity.politician_id）；核對來源後 agree 即可，不用帶 resolved_politician_id",
   new: "系統找不到同一人，通過後會建新人物；若你認為其實是 identity_candidates 裡的某位，agree 時帶 resolved_politician_id（連同 cec_hits／cec_people，見 §2 第 11 條第 5 步）",
@@ -1372,6 +1408,17 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
     }
     case "no_change":
       return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
+    case "policy_topic":
+      return {
+        politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
+        policies: (data.policies ?? []).map((pol) => ({
+          policy_id: pol.id ?? null,
+          ...truncateFields(pick(pol, ["title", "description", "category", "status", "election_id", "source_url"])!, ["description"]),
+          candidates: policyTopicCandidates(pol),
+        })),
+        topics: topicVocabulary(),
+        hint: POLICY_TOPIC_VERIFY_HINT,
+      };
     case "policy_elements":
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "status", "election_id", "source_url"])!, ["description"]) : null,
@@ -1515,6 +1562,19 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
       data.policy = pl.data ?? null;
       data.tracking_logs = logs.data ?? [];
     }
+  }
+  if (contributionType === "policy_topic") {
+    const ids = policyTopicItems(payload).map((i) => i.policy_id).filter(Boolean).slice(0, POLICY_TOPIC_BATCH_MAX);
+    const pid = typeof payload.politician_id === "string" ? payload.politician_id : null;
+    const [pol, person] = await Promise.all([
+      ids.length > 0
+        // query-bounds: ok — ids 最多 30 條（schema 擋），變數 in()
+        ? supabase.from("policies").select("id, title, description, category, status, election_id").in("id", ids).order("id", { ascending: true }).limit(POLICY_TOPIC_BATCH_MAX)
+        : Promise.resolve({ data: [] }),
+      pid ? supabase.from("politicians").select("*").eq("id", pid).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    data.policies = (pol.data ?? []) as Obj[];
+    data.politicians = person.data ? [person.data as Obj] : [];
   }
   if (contributionType === "policy_elements") {
     const policyId = typeof payload.policy_id === "string" ? payload.policy_id : null;

@@ -30,6 +30,7 @@ import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplica
 import { DISTRICT_SEAT_TYPES, type DistrictSeatKind, type ExistingDistrict, normalizeSeatDistrict, planDistrictSeats, type SeatInput, seatDistrictTown } from "./district-seats.ts";
 import { missingAncestors, partyInfoIds, partyInfoItems, type PartyRow, planPartyInfo } from "./party-info.ts";
 import { changedElementFields, elementPhrase, POLICY_ELEMENT_LABEL, policyElementValues } from "./policy-elements.ts";
+import { parseApplyResult, policyTopicArrays, policyTopicItems, topicsPhrase } from "./policy-topics.ts";
 import {
   changedLineageFields, HANDOVER_FIELDS, HANDOVER_TYPE_LABEL, type HandoverType, handoverValues, LINEAGE_LEVEL_LABEL, type LineageLevel,
   LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS,
@@ -736,6 +737,58 @@ async function applyPolicyElements(supabase: SupabaseLike, row: ContributionRow)
     status: "applied",
     policy_id: policyId,
     message: `「${policy.title}」的政見三要素已上線：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.join("、")}跟現有的一樣，略過）` : ""}`,
+  };
+}
+
+/**
+ * 政見主題（第二期，2026-10-07）：一位人物名下一批政見的主題。每條政見的主題整組換成這次交的（SQL policy_topics_apply，一個交易）：
+ * 已經有的保留、不在新清單裡的刪、新的加；topics 空陣列＝寫一列「查過、不屬於任何主題」。
+ * 每個變動寫查核履歷（新增整列、刪掉的整列記下以便還原、依據句改了記欄位）。全部跟現有一樣 → superseded（別人先交了）。
+ * 政見已被移除、找不到、不是這位人物的就略過（投票期間才發生的事；交件時 precheck 已擋過），都略過了才算 failed。
+ */
+async function applyPolicyTopics(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const politicianId = str(p.politician_id);
+  const items = policyTopicItems(p);
+  if (!politicianId || items.length === 0) return { status: "failed", message: "policy_topic 要帶 politician_id 與 items" };
+
+  // query-bounds: ok — 一筆交件最多 30 條政見（POLICY_TOPIC_BATCH_MAX，schema 擋），變數 in()
+  const { data: policyRows, error: policyError } = await supabase.from("policies").select("id, title, politician_id, removed_at").in("id", items.map((i) => i.policy_id)).limit(100);
+  throwIf(policyError, "policies read");
+  const policies = new Map(((policyRows ?? []) as Obj[]).map((r) => [String(r.id).toLowerCase(), r]));
+
+  const written: string[] = [];
+  const unchanged: string[] = [];
+  const skipped: string[] = [];
+  for (const item of items) {
+    const policy = policies.get(item.policy_id);
+    if (!policy) { skipped.push(`${item.policy_id.slice(0, 8)}（找不到）`); continue; }
+    const title = String(policy.title ?? item.policy_id.slice(0, 8));
+    if (policy.removed_at) { skipped.push(`「${title}」（已被移除）`); continue; }
+    if (String(policy.politician_id).toLowerCase() !== politicianId.toLowerCase()) { skipped.push(`「${title}」（不是這位人物的政見）`); continue; }
+
+    const { keys, evidence } = policyTopicArrays(item);
+    const { data, error } = await supabase.rpc("policy_topics_apply", { p_policy_id: item.policy_id, p_keys: keys, p_evidence: evidence, p_contribution_id: row.id });
+    throwIf(error, "policy_topics_apply");
+    const result = parseApplyResult(data);
+    if (result.inserted.length === 0 && result.deleted.length === 0 && result.updated.length === 0) { unchanged.push(`「${title}」`); continue; }
+    // 刪掉的整列記下（還原＝整列放回去）、新增的記整列、依據句改了記欄位
+    for (const r of result.deleted) await recordUpdate(supabase, ctx, "policy_topics", String(r.id), "*", r, null);
+    for (const r of result.inserted) await recordInsert(supabase, ctx, "policy_topics", String(r.id), r);
+    for (const u of result.updated) await recordUpdate(supabase, ctx, "policy_topics", String(u.id), "evidence", u.old_evidence ?? null, u.new_evidence ?? null);
+    written.push(`「${title}」→${topicsPhrase(item.topics)}`);
+  }
+  if (written.length === 0 && unchanged.length === 0) {
+    return { status: "failed", message: `這一筆的政見都落不了庫：${skipped.join("、")}` };
+  }
+  if (written.length === 0) {
+    return { status: "superseded", message: `${unchanged.join("、")}的主題跟網站上現有的一樣（別人先交了），不重複寫入`, politician_id: politicianId };
+  }
+  return {
+    status: "applied",
+    politician_id: politicianId,
+    message: `政見主題已上線（${written.length} 條）：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.length} 條跟現有的一樣，略過）` : ""}${skipped.length > 0 ? `（略過 ${skipped.length} 條：${skipped.join("、")}）` : ""}`,
   };
 }
 
@@ -2030,6 +2083,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "election_results": return await applyElectionResults(supabase, row);
     case "reassign_candidacy": return await applyReassignCandidacy(supabase, row);
     case "policy_elements": return await applyPolicyElements(supabase, row);
+    case "policy_topic": return await applyPolicyTopics(supabase, row);
     case "lineage": return await applyLineage(supabase, row);
     case "lineage_participants": return await applyLineageParticipants(supabase, row);
     case "lineage_handover": return await applyLineageHandover(supabase, row);

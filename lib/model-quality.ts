@@ -68,6 +68,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   merge_politician: '人物合併',
   adjudication: '裁決',
   policy_elements: '政見三要素',
+  policy_topic: '政見主題',
   lineage: '政策脈絡',
   lineage_participants: '脈絡參與角色',
   lineage_handover: '脈絡交接',

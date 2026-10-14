@@ -11,6 +11,7 @@ import { isPlaceholderName, PLACEHOLDER_NAME_MSG } from "./placeholder-name.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 import { MAX_RESULTS_PER_SUBMISSION } from "./election-results.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
+import { POLICY_TOPIC_BATCH_MAX, POLICY_TOPIC_EVIDENCE_MAX, POLICY_TOPIC_EVIDENCE_MIN, POLICY_TOPIC_KEYS, POLICY_TOPIC_MAX } from "./policy-topics.ts";
 import {
   HANDOVER_TYPES, isOfficialUrl, isUnreadableSocial, LINEAGE_LEVELS, LINEAGE_MAX_POLICIES, LINEAGE_NOTE_MAX, LINEAGE_NOTE_MIN,
   LINEAGE_SUMMARY_MAX, LINEAGE_TITLE_MAX, LINEAGE_TITLE_MIN, LINK_NOTE_MAX, LINK_NOTE_MIN, LINK_TYPES, LOCATOR_MAX, MAX_PARTICIPANTS,
@@ -32,10 +33,11 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // lineage／lineage_participants／lineage_handover／lineage_link（政策脈絡，#349，2026-10-06）：同樣四處一起加
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy"] as const;
+// policy_topic（政見主題標註，第二期，2026-10-07）：同樣四處一起加（DB CHECK 在 20261007200000）
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "policy_topic"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "policy_topic_missing", "other"] as const;
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
@@ -402,6 +404,48 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         if (e.source_url !== undefined && e.source_url !== null && e.source_url !== "" && !isHttpUrl(e.source_url)) {
           push(`${at}.source_url`, "source_url 要是 http(s) 網址，而且是這筆 source_urls 的其中一個（這個要素出自哪一份原文）");
         }
+      });
+      break;
+    }
+    case "policy_topic": {
+      // 政見主題標註（第二期，協議 1.71.0）：一筆交一位人物名下 1～30 條政見的主題，每條 0～2 個主題。
+      // topics 空陣列＝查過、不屬於任何已定義主題（也是答案；沒交的政見才是「未調查」）。
+      // 每個主題都要附依據句（政見標題或說明裡的原句）；詞彙是固定的 16 個 key（lib/topics.ts）。
+      if (!isUuid(p.politician_id)) push("payload.politician_id", "politician_id 必填（這位人物的 uuid，任務的 target.politician_id）");
+      if (p.note !== undefined && p.note !== null && typeof p.note !== "string") push("payload.note", "要是字串");
+      if (!Array.isArray(p.items) || p.items.length === 0 || p.items.length > POLICY_TOPIC_BATCH_MAX) {
+        push("payload.items", `items 必填：1～${POLICY_TOPIC_BATCH_MAX} 筆，每筆是 {policy_id, topics}（任務 current.policies 裡的政見）`);
+        break;
+      }
+      const seenPolicies = new Set<string>();
+      (p.items as unknown[]).forEach((raw, i) => {
+        const at = `payload.items[${i}]`;
+        if (!isObj(raw)) { push(at, "每筆要是物件：{policy_id, topics:[{topic, evidence}]}"); return; }
+        // 兩個鍵都必填（topics 可以是空陣列；沒給＝代理忘了，不能當成「查過、沒有主題」）
+        for (const k of ["policy_id", "topics"]) {
+          if (raw[k] === undefined || raw[k] === null) push(`${at}.${k}`, k === "policy_id"
+            ? "policy_id 必填（政見的 uuid，任務 current.policies 裡的 policy_id）"
+            : `topics 必填：陣列，0～${POLICY_TOPIC_MAX} 個 {topic, evidence}；查過、不屬於任何主題就填空陣列 []（沒給不等於沒有主題）`);
+        }
+        if (raw.policy_id !== undefined && raw.policy_id !== null) {
+          if (!isUuid(raw.policy_id)) push(`${at}.policy_id`, "policy_id 要是政見的 uuid（任務 current.policies 裡的 policy_id）");
+          else if (seenPolicies.has(raw.policy_id.toLowerCase())) push(`${at}.policy_id`, "同一條政見只交一次");
+          else seenPolicies.add(raw.policy_id.toLowerCase());
+        }
+        if (raw.topics === undefined || raw.topics === null) return;
+        if (!Array.isArray(raw.topics)) { push(`${at}.topics`, `topics 要是陣列：0～${POLICY_TOPIC_MAX} 個 {topic, evidence}；查過、不屬於任何主題就填空陣列 []`); return; }
+        if (raw.topics.length > POLICY_TOPIC_MAX) push(`${at}.topics`, `一條政見最多 ${POLICY_TOPIC_MAX} 個主題，只標它主要在講的`);
+        const seenTopics = new Set<string>();
+        (raw.topics as unknown[]).slice(0, POLICY_TOPIC_MAX + 1).forEach((t, k) => {
+          const tat = `${at}.topics[${k}]`;
+          if (!isObj(t)) { push(tat, "每個主題要是物件：{topic, evidence}"); return; }
+          if (typeof t.topic !== "string" || !POLICY_TOPIC_KEYS.includes(t.topic)) push(`${tat}.topic`, `topic 要是 current.topics 詞彙表裡的 key：${POLICY_TOPIC_KEYS.join("／")}`);
+          else if (seenTopics.has(t.topic)) push(`${tat}.topic`, `${t.topic} 重複了：同一條政見同一個主題只標一次`);
+          else seenTopics.add(t.topic);
+          const evidence = typeof t.evidence === "string" ? t.evidence.trim() : "";
+          if (charLength(evidence) < POLICY_TOPIC_EVIDENCE_MIN) push(`${tat}.evidence`, `evidence 必填：政見標題或說明裡支持這個主題的那一句原句（至少 ${POLICY_TOPIC_EVIDENCE_MIN} 字）；標了主題卻說不出依據，就不要標`);
+          else if (charLength(evidence) > POLICY_TOPIC_EVIDENCE_MAX) push(`${tat}.evidence`, `evidence 最多 ${POLICY_TOPIC_EVIDENCE_MAX} 字，只留支持這個主題的那一句`);
+        });
       });
       break;
     }
