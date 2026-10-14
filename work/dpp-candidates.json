@@ -1,0 +1,942 @@
+[
+  {
+    "name": "林世宗",
+    "city": "台北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "陳賢蔚",
+    "city": "台北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "鍾佩玲",
+    "city": "台北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "陳慈慧",
+    "city": "台北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "林延鳳",
+    "city": "台北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "王孝維",
+    "city": "台北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "高嘉瑜",
+    "city": "台北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "陳又新",
+    "city": "台北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "何孟樺",
+    "city": "台北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "許淑華",
+    "city": "台北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "洪健益",
+    "city": "台北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "張文潔",
+    "city": "台北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "郭凡",
+    "city": "台北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "林亮君",
+    "city": "台北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "顏若芳",
+    "city": "台北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "林子揚",
+    "city": "台北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "賴俊翰",
+    "city": "台北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "劉耀仁",
+    "city": "台北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "洪婉臻",
+    "city": "台北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "馬郁雯",
+    "city": "台北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "張銘祐",
+    "city": "台北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "簡舒培",
+    "city": "台北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "王閔生",
+    "city": "台北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "陳聖文",
+    "city": "台北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "劉品妡",
+    "city": "台北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "林家豪",
+    "city": "台北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "林富寶",
+    "city": "高雄市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "林慧欣",
+    "city": "高雄市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "陳琳潔",
+    "city": "高雄市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "黃明太",
+    "city": "高雄市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "林志誠",
+    "city": "高雄市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "黃秋媖",
+    "city": "高雄市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "蔡秉璁",
+    "city": "高雄市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "張以理",
+    "city": "高雄市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "尹立",
+    "city": "高雄市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "李雅慧",
+    "city": "高雄市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "黃文志",
+    "city": "高雄市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "黃飛鳳",
+    "city": "高雄市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "邱俊憲",
+    "city": "高雄市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "江瑞鴻",
+    "city": "高雄市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "張勝富",
+    "city": "高雄市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "李喬如",
+    "city": "高雄市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "簡煥宗",
+    "city": "高雄市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "鄭孟洳",
+    "city": "高雄市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "康裕成",
+    "city": "高雄市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "何權峰",
+    "city": "高雄市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "郭建盟",
+    "city": "高雄市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "湯詠瑜",
+    "city": "高雄市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "黃文益",
+    "city": "高雄市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "林智鴻",
+    "city": "高雄市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "張漢忠",
+    "city": "高雄市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "陳慧文",
+    "city": "高雄市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "鄧巧佩",
+    "city": "高雄市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "蘇致榮",
+    "city": "高雄市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "鄭光峰",
+    "city": "高雄市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "吳昱鋒",
+    "city": "高雄市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "黃敬雅",
+    "city": "高雄市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "張耀中",
+    "city": "高雄市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "洪村銘",
+    "city": "高雄市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "李雨庭",
+    "city": "高雄市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "巫振興",
+    "city": "高雄市",
+    "district": "第12選舉區"
+  },
+  {
+    "name": "游明諺",
+    "city": "新北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "鄭宇恩",
+    "city": "新北市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "戴翎育",
+    "city": "新北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "李宇翔",
+    "city": "新北市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "陳岱吟",
+    "city": "新北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "吳奕萱",
+    "city": "新北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "林秉宥",
+    "city": "新北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "翁震州",
+    "city": "新北市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "陳俊維",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "彭佳芸",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "李余典",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "顏蔚慈",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "李倩萍",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "邱婷蔚",
+    "city": "新北市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "李昆穎",
+    "city": "新北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "戴瑋姍",
+    "city": "新北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "山田摩衣",
+    "city": "新北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "黃淑君",
+    "city": "新北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "陳俊諺",
+    "city": "新北市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "張維倩",
+    "city": "新北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "張志豪",
+    "city": "新北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "張嘉玲",
+    "city": "新北市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "羅文崇",
+    "city": "新北市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "許昭興",
+    "city": "新北市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "卓冠廷",
+    "city": "新北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "吳昇翰",
+    "city": "新北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "彭一書",
+    "city": "新北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "廖宜琨",
+    "city": "新北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "高乃芸",
+    "city": "新北市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "陳乃瑜",
+    "city": "新北市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "陳韋任",
+    "city": "新北市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "林裔綺",
+    "city": "新北市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "張錦豪",
+    "city": "新北市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "蔡美華",
+    "city": "新北市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "蘇錦雄paylang‧caya",
+    "city": "新北市",
+    "district": "第12選舉區"
+  },
+  {
+    "name": "布落．馬信",
+    "city": "新北市",
+    "district": "第13選舉區"
+  },
+  {
+    "name": "吳中源",
+    "city": "台中市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "施志昌",
+    "city": "台中市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "楊典忠",
+    "city": "台中市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "王立任",
+    "city": "台中市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "陳怡潔",
+    "city": "台中市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "曾威",
+    "city": "台中市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "張家銨",
+    "city": "台中市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "蔡怡萱",
+    "city": "台中市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "謝志忠",
+    "city": "台中市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "蕭隆澤",
+    "city": "台中市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "周永鴻",
+    "city": "台中市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "陳映辰",
+    "city": "台中市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "陳淑華",
+    "city": "台中市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "林祈烽",
+    "city": "台中市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "何文海",
+    "city": "台中市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "張耀中",
+    "city": "台中市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "陳信秀",
+    "city": "台中市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "謝家宜",
+    "city": "台中市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "曾咨耀",
+    "city": "台中市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "陳俞融",
+    "city": "台中市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "簡嘉佑",
+    "city": "台中市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "黃守達",
+    "city": "台中市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "江肇國",
+    "city": "台中市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "鄭功進",
+    "city": "台中市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "陳雅惠",
+    "city": "台中市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "何翊綾",
+    "city": "台中市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "張玉嬿",
+    "city": "台中市",
+    "district": "第12選舉區"
+  },
+  {
+    "name": "蔡耀頡",
+    "city": "台中市",
+    "district": "第12選舉區"
+  },
+  {
+    "name": "林德宇",
+    "city": "台中市",
+    "district": "第13選舉區"
+  },
+  {
+    "name": "李天生",
+    "city": "台中市",
+    "district": "第13選舉區"
+  },
+  {
+    "name": "張芬郁",
+    "city": "台中市",
+    "district": "第13選舉區"
+  },
+  {
+    "name": "詹智翔",
+    "city": "台中市",
+    "district": "第14選舉區"
+  },
+  {
+    "name": "李宗翰",
+    "city": "台南市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "王宣貿",
+    "city": "台南市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "沈家鳳",
+    "city": "台南市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "蔡蘇秋金",
+    "city": "台南市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "蔡秋蘭",
+    "city": "台南市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "謝舒凡",
+    "city": "台南市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "陳秋宏",
+    "city": "台南市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "吳通龍",
+    "city": "台南市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "賴懋慶",
+    "city": "台南市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "陳碧玉",
+    "city": "台南市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "林志展",
+    "city": "台南市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "余柷青",
+    "city": "台南市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "李偉智",
+    "city": "台南市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "郭品辰",
+    "city": "台南市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "蔡麗青",
+    "city": "台南市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "唐儀靜",
+    "city": "台南市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "黃肇輝",
+    "city": "台南市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "陳秋萍",
+    "city": "台南市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "朱正軒",
+    "city": "台南市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "沈震南",
+    "city": "台南市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "林建南",
+    "city": "台南市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "邱莉莉",
+    "city": "台南市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "周嘉韋",
+    "city": "台南市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "呂維胤",
+    "city": "台南市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "林依婷",
+    "city": "台南市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "李啓維",
+    "city": "台南市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "周麗津",
+    "city": "台南市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "蔡筱薇",
+    "city": "台南市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "陳金鐘",
+    "city": "台南市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "陳皇宇",
+    "city": "台南市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "郭鴻儀",
+    "city": "台南市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "鄭佳欣",
+    "city": "台南市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "黃瓊慧",
+    "city": "桃園市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "黃家齊",
+    "city": "桃園市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "李光達",
+    "city": "桃園市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "余信憲",
+    "city": "桃園市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "李柏瑟",
+    "city": "桃園市",
+    "district": "第01選舉區"
+  },
+  {
+    "name": "陳雅倫",
+    "city": "桃園市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "李宗豪",
+    "city": "桃園市",
+    "district": "第02選舉區"
+  },
+  {
+    "name": "蔡永芳",
+    "city": "桃園市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "許家睿",
+    "city": "桃園市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "呂林小鳳",
+    "city": "桃園市",
+    "district": "第03選舉區"
+  },
+  {
+    "name": "許清順",
+    "city": "桃園市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "胡家智",
+    "city": "桃園市",
+    "district": "第04選舉區"
+  },
+  {
+    "name": "游吾和",
+    "city": "桃園市",
+    "district": "第05選舉區"
+  },
+  {
+    "name": "陳治文",
+    "city": "桃園市",
+    "district": "第06選舉區"
+  },
+  {
+    "name": "彭俊豪",
+    "city": "桃園市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "魏筠",
+    "city": "桃園市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "張曉昀",
+    "city": "桃園市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "黃崇真",
+    "city": "桃園市",
+    "district": "第07選舉區"
+  },
+  {
+    "name": "劉仁照",
+    "city": "桃園市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "王珮毓",
+    "city": "桃園市",
+    "district": "第08選舉區"
+  },
+  {
+    "name": "鄭淑方",
+    "city": "桃園市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "項柏翰",
+    "city": "桃園市",
+    "district": "第09選舉區"
+  },
+  {
+    "name": "張贊聞",
+    "city": "桃園市",
+    "district": "第10選舉區"
+  },
+  {
+    "name": "陳睿生",
+    "city": "桃園市",
+    "district": "第11選舉區"
+  },
+  {
+    "name": "張佩芸",
+    "city": "桃園市",
+    "district": "第12選舉區"
+  },
+  {
+    "name": "林志強",
+    "city": "桃園市",
+    "district": "第13選舉區"
+  },
+  {
+    "name": "謝卓儒",
+    "city": "桃園市",
+    "district": "第14選舉區"
+  }
+]

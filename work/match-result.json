@@ -1,0 +1,527 @@
+{
+  "totals": {
+    "candidates": 836,
+    "matched": 829,
+    "directMatched": 824,
+    "prefixMatched": 5,
+    "notFound": 3,
+    "ambiguous": 0,
+    "districtNotInRegistry": 4,
+    "hsinchuCountyAccepted": 2,
+    "partyMismatch": 59,
+    "rosterRowsTotal": 1502
+  },
+  "parseFailures": [],
+  "notFound": [
+    {
+      "id": "36277",
+      "name": "楊寶楨",
+      "region": "台北市",
+      "party": "台灣民眾黨",
+      "existing_sub_region": "第03選舉區"
+    },
+    {
+      "id": "9904",
+      "name": "游智彬",
+      "region": "桃園市",
+      "party": "新黨",
+      "existing_sub_region": "桃園市第03選區"
+    },
+    {
+      "id": "36049",
+      "name": "李明璇",
+      "region": "高雄市",
+      "party": "中國國民黨",
+      "existing_sub_region": "高雄市第08選區"
+    }
+  ],
+  "crossRegionHints": [
+    {
+      "id": "36277",
+      "name": "楊寶楨",
+      "dbRegion": "台北市",
+      "foundIn": [
+        {
+          "region": "台中市",
+          "district": "第11選舉區",
+          "party": "無"
+        }
+      ]
+    },
+    {
+      "id": "9904",
+      "name": "游智彬",
+      "dbRegion": "桃園市",
+      "foundIn": [
+        {
+          "region": "台北市",
+          "district": "第06選舉區",
+          "party": "新黨"
+        }
+      ]
+    },
+    {
+      "id": "36049",
+      "name": "李明璇",
+      "dbRegion": "高雄市",
+      "foundIn": [
+        {
+          "region": "台北市",
+          "district": "第03選舉區",
+          "party": "中國國民黨"
+        }
+      ]
+    }
+  ],
+  "prefixMatched": [
+    {
+      "id": "36196",
+      "dbName": "Icyang",
+      "region": "台北市",
+      "rosterFullName": "林筱薇IcyangTamana",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "35617",
+      "dbName": "施余興望",
+      "region": "台南市",
+      "rosterFullName": "施余興望TjakumayTagaw",
+      "district": "第13選舉區"
+    },
+    {
+      "id": "35616",
+      "dbName": "辛晴晴",
+      "region": "台南市",
+      "rosterFullName": "辛晴晴LanguiTamapima",
+      "district": "第13選舉區"
+    },
+    {
+      "id": "35970",
+      "dbName": "林崇道",
+      "region": "基隆市",
+      "rosterFullName": "林崇道MotuQuyat",
+      "district": "第09選舉區"
+    },
+    {
+      "id": "35714",
+      "dbName": "馬見",
+      "region": "新北市",
+      "rosterFullName": "馬見Lahuy‧Ipin",
+      "district": "第13選舉區"
+    }
+  ],
+  "ambiguous": [],
+  "districtNotInRegistry": [
+    {
+      "id": "36221",
+      "name": "呂秀惠",
+      "region": "台中市",
+      "district": "第17選舉區"
+    },
+    {
+      "id": "36188",
+      "name": "朱元宏",
+      "region": "台中市",
+      "district": "第17選舉區"
+    },
+    {
+      "id": "36222",
+      "name": "柯靜志",
+      "region": "台中市",
+      "district": "第17選舉區"
+    },
+    {
+      "id": "35909",
+      "name": "武清山",
+      "region": "嘉義縣",
+      "district": "第07選舉區"
+    }
+  ],
+  "hsinchuCountyAccepted": [
+    {
+      "id": "41",
+      "name": "徐勝凌",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "40",
+      "name": "陳岫玫",
+      "district": "第03選舉區"
+    }
+  ],
+  "missingRegionRow": [
+    "台中市|第15選舉區",
+    "台中市|第16選舉區",
+    "台北市|第07選舉區",
+    "台北市|第08選舉區",
+    "台南市|第12選舉區",
+    "台南市|第13選舉區",
+    "基隆市|第08選舉區",
+    "基隆市|第09選舉區",
+    "宜蘭縣|第11選舉區",
+    "宜蘭縣|第12選舉區",
+    "宜蘭縣|第13選舉區",
+    "新北市|第12選舉區",
+    "新北市|第13選舉區",
+    "新竹市|第06選舉區",
+    "新竹市|第07選舉區",
+    "高雄市|第12選舉區",
+    "高雄市|第15選舉區"
+  ],
+  "partyMismatchDetail": [
+    {
+      "id": "36220",
+      "name": "古秀英",
+      "region": "台中市",
+      "district": "第16選舉區"
+    },
+    {
+      "id": "36270",
+      "name": "吳佩芸",
+      "region": "台中市",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "36186",
+      "name": "吳建德",
+      "region": "台中市",
+      "district": "第15選舉區"
+    },
+    {
+      "id": "9938",
+      "name": "彭振芳",
+      "region": "台中市",
+      "district": "第08選舉區"
+    },
+    {
+      "id": "36173",
+      "name": "林孟令",
+      "region": "台中市",
+      "district": "第03選舉區"
+    },
+    {
+      "id": "36176",
+      "name": "蔡怡萱",
+      "region": "台中市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "36219",
+      "name": "鄭伯其",
+      "region": "台中市",
+      "district": "第13選舉區"
+    },
+    {
+      "id": "36205",
+      "name": "黃朝淵",
+      "region": "台中市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "36151",
+      "name": "曾獻瑩",
+      "region": "台北市",
+      "district": "第06選舉區"
+    },
+    {
+      "id": "36138",
+      "name": "林亮君",
+      "region": "台北市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "36195",
+      "name": "林柏勛",
+      "region": "台北市",
+      "district": "第03選舉區"
+    },
+    {
+      "id": "36165",
+      "name": "陳重文",
+      "region": "台北市",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35632",
+      "name": "劉正昌",
+      "region": "台南市",
+      "district": "第11選舉區"
+    },
+    {
+      "id": "35570",
+      "name": "廖俊道",
+      "region": "台南市",
+      "district": "第05選舉區"
+    },
+    {
+      "id": "35667",
+      "name": "李宗霖",
+      "region": "台南市",
+      "district": "第10選舉區"
+    },
+    {
+      "id": "35604",
+      "name": "李文俊",
+      "region": "台南市",
+      "district": "第05選舉區"
+    },
+    {
+      "id": "35613",
+      "name": "杜素吟",
+      "region": "台南市",
+      "district": "第11選舉區"
+    },
+    {
+      "id": "35597",
+      "name": "林冠維",
+      "region": "台南市",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "35592",
+      "name": "楊中成",
+      "region": "台南市",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "35628",
+      "name": "翁語含",
+      "region": "台南市",
+      "district": "第11選舉區"
+    },
+    {
+      "id": "36117",
+      "name": "何苡睿",
+      "region": "嘉義市",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35978",
+      "name": "曾奕豪",
+      "region": "嘉義市",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "36125",
+      "name": "林詩涵",
+      "region": "嘉義市",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "36193",
+      "name": "王浩",
+      "region": "嘉義市",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "35977",
+      "name": "黃思婷",
+      "region": "嘉義市",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "36128",
+      "name": "黃敏修",
+      "region": "嘉義市",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "35917",
+      "name": "詹志暉",
+      "region": "嘉義縣",
+      "district": "第06選舉區"
+    },
+    {
+      "id": "36114",
+      "name": "張芳麗",
+      "region": "基隆市",
+      "district": "第03選舉區"
+    },
+    {
+      "id": "36115",
+      "name": "莊敬聖",
+      "region": "基隆市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35954",
+      "name": "莫璦緁",
+      "region": "基隆市",
+      "district": "第06選舉區"
+    },
+    {
+      "id": "35940",
+      "name": "郭美秀",
+      "region": "基隆市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35971",
+      "name": "林瑞文",
+      "region": "宜蘭縣",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "35972",
+      "name": "沈清山",
+      "region": "宜蘭縣",
+      "district": "第05選舉區"
+    },
+    {
+      "id": "36012",
+      "name": "陳漢澤",
+      "region": "宜蘭縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "36017",
+      "name": "陳漢鍾",
+      "region": "宜蘭縣",
+      "district": "第06選舉區"
+    },
+    {
+      "id": "36075",
+      "name": "黃定和",
+      "region": "宜蘭縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35747",
+      "name": "董俊良",
+      "region": "新北市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35699",
+      "name": "許宏平",
+      "region": "新北市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35636",
+      "name": "許登淇",
+      "region": "新竹市",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35635",
+      "name": "黃文政",
+      "region": "新竹市",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35793",
+      "name": "劉勝全",
+      "region": "桃園市",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35988",
+      "name": "吳政杰",
+      "region": "澎湖縣",
+      "district": "第02選舉區"
+    },
+    {
+      "id": "35985",
+      "name": "陳毓仁",
+      "region": "澎湖縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35735",
+      "name": "楊忠俊",
+      "region": "金門縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35729",
+      "name": "楊霈璿",
+      "region": "金門縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35722",
+      "name": "洪若珊",
+      "region": "金門縣",
+      "district": "第03選舉區"
+    },
+    {
+      "id": "35545",
+      "name": "廖郁賢",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35378",
+      "name": "張家閎",
+      "region": "雲林縣",
+      "district": "第04選舉區"
+    },
+    {
+      "id": "35539",
+      "name": "曾博鴻",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35535",
+      "name": "林靖冠",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35533",
+      "name": "許百芳",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35534",
+      "name": "邱世文",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "35537",
+      "name": "陳芳盈",
+      "region": "雲林縣",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "36295",
+      "name": "張博洋",
+      "region": "高雄市",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "36314",
+      "name": "李順進",
+      "region": "高雄市",
+      "district": "第10選舉區"
+    },
+    {
+      "id": "36297",
+      "name": "林于凱",
+      "region": "高雄市",
+      "district": "第07選舉區"
+    },
+    {
+      "id": "9975",
+      "name": "林義迪",
+      "region": "高雄市",
+      "district": "第01選舉區"
+    },
+    {
+      "id": "36315",
+      "name": "湯茹婷",
+      "region": "高雄市",
+      "district": "第10選舉區"
+    },
+    {
+      "id": "36303",
+      "name": "黃裕庭",
+      "region": "高雄市",
+      "district": "第08選舉區"
+    }
+  ]
+}

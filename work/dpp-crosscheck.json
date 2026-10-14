@@ -1,0 +1,13 @@
+{
+  "total": 188,
+  "agree": 187,
+  "disagreeDistrict": [],
+  "notInRoster": [
+    {
+      "name": "戴瑋姍",
+      "city": "新北市",
+      "district": "第05選舉區"
+    }
+  ],
+  "ambiguousInRoster": []
+}
