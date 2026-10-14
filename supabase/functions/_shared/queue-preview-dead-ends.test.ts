@@ -33,6 +33,7 @@ Deno.test("/next 與 jp-next 都不再有每台機器 2:1：驗證與任務只�
     for (const gone of ["machineOwesVerify", "machineOwesVerifyDuringBoost", "isFrontQueueAt", "MACHINE_LOOKBACK_HOURS"]) {
       assert(!next.includes(gone), `${f} 不該再用 ${gone}`);
     }
-    assert(/if \(head === "verify"\) return await serveVerify\(\);/.test(next), `${f}：隊頭是驗證就派驗證`);
+    // 2026-10-14：隊頭是驗證就派驗證；全被同網段的並行請求認領走（serveVerify 回 null）才改派任務
+    assert(/if \(head === "verify"\) \{\n\s+const served = await serveVerify\(\);\n\s+if \(served\) return served;/.test(next), `${f}：隊頭是驗證就派驗證`);
   }
 });

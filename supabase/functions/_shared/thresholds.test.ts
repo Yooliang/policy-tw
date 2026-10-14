@@ -254,8 +254,11 @@ Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveV
   const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
   const at = serve.indexOf("const serveVerify");
   assert(at > 0, "找不到 serveVerify");
-  const body = serve.slice(at, at + 800);
-  assert(body.includes("const pick = candidates[0]!"), "serveVerify 拿池子第一筆（等最久的），不再依來源等級／隨機挑");
+  const body = serve.slice(at, at + 1600);
+  // 2026-10-14：照池子順序認領，第一筆被同網段的並行請求認領走才換下一筆（_shared/verify-claim.ts）
+  assert(body.includes("claimVerifyCandidate(supabase, candidates,"), "serveVerify 照池子順序認領（等最久的先），不再依來源等級／隨機挑");
+  const claim = await Deno.readTextFile(new URL("./verify-claim.ts", import.meta.url));
+  assert(claim.includes("for (const c of candidates.slice(0, "), "認領照池子順序逐筆試");
   const seed = await latestMigrationDefining("FUNCTION seed_auto_task_queue");
   assert(seed.includes("'verify:' || c.id"), "排程要把漏掉的待驗證貢獻補進佇列");
   assert(!/task_priority_tier\(/.test(seed), "誰先誰後由 task_boost 決定，排程不再呼叫硬編碼 2026 縣市長的 task_priority_tier()（2026-10-08 起的優先層表 task_priority_tiers 是資料、不算）");

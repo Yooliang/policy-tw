@@ -9,6 +9,7 @@ import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
+import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
@@ -320,21 +321,24 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       }
     };
 
-    const serveVerify = async (): Promise<Response> => {
+    // 驗證只試一次認領（2026-10-14）：隊頭是驗證但全被同網段的並行請求認領走了，就改派任務；最後的「任務給不出來退回驗證」不再重試
+    let verifyTried = false;
+    const serveVerify = async (): Promise<Response | null> => {
+      if (verifyTried) return null;
+      verifyTried = true;
       mark("verify_start");
       // 單一佇列（2026-09-22）：池子已照 queue_at 排，第一筆就是等最久的（訪客看得到的、被插隊的在 1980 年段）。
       // 桶子（訪客／裁決／來源等級／隨機）全部退場：等最久的先，每一筆都輪得到。
-      const pick = candidates[0]!;
-      // 派過就排到隊尾（task_dispatched 蓋 now()）；記不成不影響派工
-      try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
       // 派發即綁定（2026-09-21）：記下「這一筆派給了這個來源 IP」，投票時要求對得上。
       // 代理不能自己挑題目——contributions-feed 是公開的、id 拿得到，所以光關掉
       // 可以列清單的端點擋不住，執行點在這裡。
-      {
-        const { error: dErr } = await supabase.from("verify_dispatches")
-          .upsert({ contribution_id: pick.id, ip_hash: ipHash, agent_name: agentName, dispatched_at: new Date().toISOString() }, { onConflict: "contribution_id,ip_hash" });
-        if (dErr) console.error("verify dispatch record failed:", dErr.message);
-      }
+      // 原子認領（2026-10-14）：同網段並行的 /next 都在對方寫入前讀了池子，會拿到同一筆；認領不到就換下一筆（_shared/verify-claim.ts）
+      const claim = await claimVerifyCandidate(supabase, candidates, { ipHash, agentName });
+      if (claim.taken.length > 0) console.log(JSON.stringify({ event: "verify_claim_taken", endpoint: "next", agent_name: agentName, net: ipHash.slice(0, 8), taken: claim.taken, served: claim.pick?.id ?? null }));
+      const pick = claim.pick;
+      if (!pick) return null;
+      // 派過就排到隊尾（task_dispatched 蓋 now()）；記不成不影響派工
+      try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
       // profile_gap 交的沒帶 politician_id：跟落庫一樣用任務編號指的那位，驗證者看到的身份比對才跟落庫一致（#215 的原則）
       const verifyPayload = (withTaskPolitician(pick.contribution_type, pick.payload && typeof pick.payload === "object" ? pick.payload : {}, pick.task_id)) as Record<string, unknown>;
       const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload, pick.id);
@@ -503,12 +507,19 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
     // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
     const verifyHead = candidates[0] ?? null;
-    const head = pickQueueHead([
+    const taskHeads = [
+      manualHead ? { kind: "manual" as const, queue_at: manualHead.queue_at } : null,
+      autoHead ? { kind: "auto" as const, queue_at: autoHead.queue_at } : null,
+    ];
+    let head = pickQueueHead([
       verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
-      manualHead ? { kind: "manual", queue_at: manualHead.queue_at } : null,
-      autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
+      ...taskHeads,
     ]);
-    if (head === "verify") return await serveVerify();
+    if (head === "verify") {
+      const served = await serveVerify();
+      if (served) return served;
+      head = pickQueueHead(taskHeads);
+    }
     // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：驗證與任務只照排序鍵（queue_at）先後，
     // 驗證列本身多 14 天（queue_settings.verify_priority_seconds），自己能驗的就排在前面（docs/decisions/2026-10-13-派工排序改秒數.md）
     const manualFirst = head === "manual";
@@ -559,7 +570,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     if (!t) {
       // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
       // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）
-      if (candidates.length > 0) return await serveVerify();
+      if (candidates.length > 0) {
+        const served = await serveVerify();
+        if (served) return served;
+      }
       const all = queueRaw;
       const reason = all.length > 0
         ? "這一輪抽到的任務對你都不合格（你交過在等票、剛跳過、或裁決跟你有關），驗證池也空了；幾分鐘後再來會抽到別的"
