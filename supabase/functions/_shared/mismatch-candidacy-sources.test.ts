@@ -1,5 +1,5 @@
 /**
- * 臂 mismatch 20261011370000 ＝ 20261011340000 的版本＋四處替換（多 by_no_candidacy、by_not_elected 兩個來源、kind、說明、LEFT JOIN）。
+ * 臂 mismatch 20261011380000 ＝ 20261011340000 的版本＋四處替換（多 by_no_candidacy、by_not_elected 兩個來源、kind、說明、LEFT JOIN）。
  * 其他地方被動到就紅。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
@@ -7,7 +7,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 const dir = new URL("../../migrations/", import.meta.url);
 const fnOf = (sql: string) => sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_mismatch()"));
 const prev = fnOf(await Deno.readTextFile(new URL("20261011340000_mismatch_in_office_future.sql", dir)));
-const next = fnOf(await Deno.readTextFile(new URL("20261011370000_mismatch_candidacy_sources.sql", dir)));
+const next = fnOf(await Deno.readTextFile(new URL("20261011380000_mismatch_candidacy_sources.sql", dir)));
 
 function cut(s: string, start: string, end: string): string {
   const a = s.indexOf(start);
