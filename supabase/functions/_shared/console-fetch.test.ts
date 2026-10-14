@@ -78,7 +78,8 @@ Deno.test("日期：UTC 15:59 還是台灣的同一天、16:00 換日", () => {
 Deno.test("設定：與 policy-console 的 config/sites.json 一致", () => {
   assertEquals(CONSOLE_CONFIG.sites.tw, { name: "正見", country: "台灣", propertyId: "521879439" });
   assertEquals(CONSOLE_CONFIG.sites.jp, { name: "政策の系譜", country: "日本", propertyId: "557622261" });
-  assertEquals(Object.keys(CONSOLE_CONFIG.sites), ["tw", "jp"]);
+  assertEquals(CONSOLE_CONFIG.sites.islandmade, { name: "島作", country: "台灣", propertyId: "558930893" });
+  assertEquals(Object.keys(CONSOLE_CONFIG.sites), ["tw", "jp", "islandmade"]);
   assertEquals(CONSOLE_CONFIG.backfillDays, 30);
   assertEquals(CONSOLE_CONFIG.maxHostsPerSite, 4);
   assertEquals("adsenseAccount" in CONSOLE_CONFIG, false, "AdSense 的設定不在這裡");
@@ -337,7 +338,7 @@ function fakeGoogle(opts: { gaFail?: number } = {}) {
 const run = (g: { deps: Deps }, m: ReturnType<typeof memStore>, env: Record<string, string | undefined> = ENV, config = CONSOLE_CONFIG) =>
   runConsoleFetch({ config, env, deps: g.deps, store: m.store, getToken: getTok });
 
-Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只有 GA 的文件與來源", async () => {
+Deno.test("整條流程：三站各 30 天＋摘要、meta/status 全 ok、只有 GA 的文件與來源", async () => {
   const g = fakeGoogle();
   const m = memStore();
   const res = await run(g, m);
@@ -348,7 +349,8 @@ Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只�
   const paths = [...m.sets.keys()];
   assertEquals(paths.filter((p) => p.startsWith("daily/tw_")).length, 30);
   assertEquals(paths.filter((p) => p.startsWith("daily/jp_")).length, 30);
-  assert(m.sets.has("summary/tw") && m.sets.has("summary/jp"));
+  assertEquals(paths.filter((p) => p.startsWith("daily/islandmade_")).length, 30);
+  assert(m.sets.has("summary/tw") && m.sets.has("summary/jp") && m.sets.has("summary/islandmade"));
   assert(paths.every((p) => p.startsWith("daily/") || p.startsWith("summary/")), "只寫 GA 的文件（daily／summary），不寫 adsense/");
   assert(m.sets.has("daily/tw_2026-10-08") && m.sets.has("daily/tw_2026-09-09") && !m.sets.has("daily/tw_2026-09-08"));
 
@@ -358,6 +360,7 @@ Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只�
   assertEquals(sum.propertyId, "521879439");
   assertEquals(sum.today, { users: 1, sessions: 2, views: 3, avgEngagementSec: 40 });
   assertEquals(m.sets.get("summary/jp")!.propertyId, "557622261");
+  assertEquals(m.sets.get("summary/islandmade")!.propertyId, "558930893");
 
   // 逐日欄位：total＋hosts（只留有瀏覽、非 (not set) 的主機，label 為解碼後網域）
   const day = m.sets.get("daily/tw_2026-10-07") as { site: string; date: string; propertyId: string; total: Record<string, unknown>; hosts: Record<string, unknown>[] };
@@ -374,7 +377,7 @@ Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只�
 
   // GA 請求：每批最多 4 個查詢（GA_BATCH）；每個資源的查詢都帶對 property
   assert(g.gaCalls.every((c) => c.requests.length <= 4));
-  assertEquals(new Set(g.gaCalls.map((c) => c.property)), new Set(["521879439", "557622261"]));
+  assertEquals(new Set(g.gaCalls.map((c) => c.property)), new Set(["521879439", "557622261", "558930893"]));
   // 每日：整體 6 個查詢切成 4＋2、有一個主機再一批 4 個
   const perDay = g.gaCalls.filter((c) => c.property === "521879439" && c.requests[0].dateRanges[0].startDate === "2026-10-07");
   assertEquals(perDay.map((c) => c.requests.length), [4, 2, 4]);
@@ -384,9 +387,10 @@ Deno.test("整條流程：兩站各 30 天＋摘要、meta/status 全 ok、只�
   assertEquals(m.merges.length, 1);
   assertEquals(m.merges[0].path, "meta/status");
   const sources = statusOf(m);
-  assertEquals(Object.keys(sources), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(sources), ["ga-tw", "ga-jp", "ga-islandmade"]);
   assertEquals(sources["ga-tw"].label, "GA4 正見（台灣）");
   assertEquals(sources["ga-jp"].label, "GA4 政策の系譜（日本）");
+  assertEquals(sources["ga-islandmade"].label, "GA4 島作（台灣）");
   for (const s of Object.values(sources)) {
     assertEquals(s.state, "ok");
     assertEquals(s.message, null);
@@ -405,7 +409,7 @@ Deno.test("GA 逐日請求被拒（403）：佇列清空、不再往下打；該
   assertEquals(s["ga-tw"].state, "error");
   assert(s["ga-tw"].message!.startsWith("部分日期失敗（"), s["ga-tw"].message!);
   assert(s["ga-tw"].message!.includes("GA 資料 API 403：forbidden"));
-  assertEquals(Object.keys(s), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(s), ["ga-tw", "ga-jp", "ga-islandmade"]);
   // 403 不重試、佇列清空：每站「摘要 1 次＋最多 GA_WORKERS 個在途請求」
   assert(g.gaCalls.filter((c) => c.property === "521879439").length <= 1 + 2);
 });
@@ -424,11 +428,11 @@ Deno.test("沒有任何 ADSENSE_* 環境變數：不算缺、整體 success、�
   const res = await run(g, m, { GCP_SA_KEY: "x" });
   assertEquals(res.success, true);
   assertEquals(res.missing, []);
-  assertEquals(Object.keys(res.sources), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(res.sources), ["ga-tw", "ga-jp", "ga-islandmade"]);
   assert(!g.calls.some((c) => /adsense|oauth2/.test(c.url)), "不打 AdSense／OAuth 授權");
   assert(![...m.sets.keys()].some((p) => p.startsWith("adsense")));
   assertEquals(m.merges.length, 1);
-  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp", "ga-islandmade"]);
 });
 
 Deno.test("就算環境裡有 ADSENSE_* ：也完全不讀、不打 AdSense（AdSense 只在 GitHub 跑）", async () => {
@@ -436,7 +440,7 @@ Deno.test("就算環境裡有 ADSENSE_* ：也完全不讀、不打 AdSense（Ad
   const m = memStore();
   await run(g, m, { GCP_SA_KEY: "x", ADSENSE_REFRESH_TOKEN: "r", ADSENSE_CLIENT_ID: "c", ADSENSE_CLIENT_SECRET: "s", ADSENSE_ACCOUNT: "accounts/pub-9" });
   assert(!g.calls.some((c) => /adsense|oauth2/.test(c.url)));
-  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(statusOf(m)), ["ga-tw", "ga-jp", "ga-islandmade"]);
 });
 
 Deno.test("守門：真的送到 Firestore 的 meta/status 只動 updatedAt 與 sources.ga-*（updateMask 不含任何 AdSense 欄位、body 也沒有）", async () => {
@@ -452,7 +456,7 @@ Deno.test("守門：真的送到 Firestore 的 meta/status 只動 updatedAt 與 
   assert(!mask.some((p) => /adsense/i.test(p)));
   const body = JSON.parse(String(statusCalls[0].init.body)) as { fields: { sources: { mapValue: { fields: Record<string, unknown> } } } };
   assertEquals(Object.keys(body.fields).sort(), ["sources", "updatedAt"]);
-  assertEquals(Object.keys(body.fields.sources.mapValue.fields), ["ga-tw", "ga-jp"]);
+  assertEquals(Object.keys(body.fields.sources.mapValue.fields), ["ga-tw", "ga-jp", "ga-islandmade"]);
   assert(!/adsense/i.test(String(statusCalls[0].init.body)));
   // 所有 Firestore 寫入都只落在 daily／summary／meta/status
   for (const c of fs.calls) assert(/\/documents\/(daily\/|summary\/|meta\/status$)/.test(new URL(c.url).pathname), c.url);
