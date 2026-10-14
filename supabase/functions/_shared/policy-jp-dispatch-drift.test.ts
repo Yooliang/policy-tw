@@ -587,6 +587,7 @@ const T_DUP = "20261011180000"; // 派工臂對齊正見 2c：重複政見 dupli
 const T_PROG = "20261011200000"; // 派工臂對齊正見 C 期第 4b 步：政見進度 progress_stale／期限到了 deadline_due＋交件型別 policy_progress（policy-ops#95）
 const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策の継承 lineage_candidates／handover_missing／lineage_roles／lineage_links＋交件型別 lineage／lineage_participants／lineage_handover／lineage_link（policy-ops#95）
 const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
+const T_CLAIM = "20261011370100"; // 驗證派工的原子認領（正見 20261011370000 的日本版；兩支本體只差 schema，逐字比對在 verify-claim.test.ts）
 const T_NEWS = "20261011250000"; // 新聞線 news_discovery（突発の選挙）＋測試名人物の入力拒否・総表での隔離（policy-ops#95）
 const T_CONS = "20261011240000"; // 派工臂對齊正見 D 期：資料一致性 placeholder_politicians／policy_validity／mismatch＋removal 加 target_table=politicians（policy-ops#95）
 const T_PARTY = "20261011230000"; // 派工臂對齊正見 D 期：政党名簿 party_roster／party_gap／party_info＋交件型別 party_info＋party_aliases（policy-ops#95）
@@ -718,6 +719,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   task_boost_matches: { mig: [T_BOOST], why: "插隊條件 → 符合的佇列鍵；篩選詞彙是日本專屬（正見的 regions／election_id／election_types／missing_avatar／politician_ids 全拿掉）" },
   task_boost: { mig: [T_BOOST, T_SEC], why: "插隊（驗證列 1980 減 n 分鐘、LEAST；任務列加插隊秒數，20261011360000 起同正見 20261011320000）；骨架同正見 20260921000032，改叫 policy_jp 的表與 task_boost_matches" },
   task_boost_remaining: { mig: [T_BOOST, T_SEC], why: "一筆插隊還剩多少沒領（任務列看插隊秒數，20261011360000 起）；同正見 20260921000030，改叫 policy_jp 的表" },
+  verify_dispatch_claim: { mig: [T_CLAIM], why: "驗證派工的原子認領（同網段並行的 /next 不再領到同一筆）；正見 20261011370000 verify_dispatch_claim 的日本版，只換 schema 與 search_path，逐字比對在 verify-claim.test.ts" },
 
   // ---- 20261010040000 chain_candidacy：選舉鏈第 2 步（參選人有誰）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
   chain_task_checked: { mig: [T_CAND, T_KANA], why: "選舉鏈進度用：這個任務有人回報查過（confirmed／not_found）而且還在冷卻中的最近時間；roster 步驟的 done 靠它" },

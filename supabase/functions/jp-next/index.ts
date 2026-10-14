@@ -14,6 +14,7 @@ import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 import { isSameClaimType, RESOLVED_CLAIM_HELP } from "../_shared/same-claims.ts";
 import { jpSameClaimProbe } from "../_shared/jp/same-claim-probe.ts";
+import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 
 /**
  * jp-next — 日本站統一派工端點（對應正見的 next）。無金鑰，誰都能用（同正見 next，沒有白名單）。
@@ -177,15 +178,17 @@ async function handle(req: Request): Promise<Response> {
       }
     };
 
-    const serveVerify = async (): Promise<Response> => {
-      const pick = candidates[0]!;
+    // 驗證只試一次認領（同正見 /next，2026-10-14）
+    let verifyTried = false;
+    const serveVerify = async (): Promise<Response | null> => {
+      if (verifyTried) return null;
+      verifyTried = true;
+      // 派發即綁定＋原子認領：同網段並行的請求認領不到就換下一筆（_shared/verify-claim.ts，rpc 落在 policy_jp）
+      const claim = await claimVerifyCandidate(supabase, candidates, { ipHash, agentName });
+      if (claim.taken.length > 0) console.log(JSON.stringify({ event: "verify_claim_taken", endpoint: "jp-next", agent_name: agentName, net: ipHash.slice(0, 8), taken: claim.taken, served: claim.pick?.id ?? null }));
+      const pick = claim.pick;
+      if (!pick) return null;
       try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
-      // 派發即綁定：記下「這一筆派給了這個來源網段」，投票時要求對得上
-      {
-        const { error: dErr } = await supabase.from("verify_dispatches")
-          .upsert({ contribution_id: pick.id, ip_hash: ipHash, agent_name: agentName, dispatched_at: new Date().toISOString() }, { onConflict: "contribution_id,ip_hash" });
-        if (dErr) console.error("verify dispatch record failed:", dErr.message);
-      }
       // 既有票一併送去（不含投票者身分）。query-bounds: ok — 一筆貢獻的票是個位數
       const { data: priorVotes } = await supabase.from("contribution_votes")
         .select("verdict, weight, note, evidence_url, created_at").eq("contribution_id", pick.id).order("created_at", { ascending: true }).limit(50);
@@ -273,12 +276,19 @@ async function handle(req: Request): Promise<Response> {
     const manualHead = taskHead && isManualTaskId(taskHead.task_id) ? taskHead : null;
     const autoHead = taskHead && !manualHead ? taskHead : null;
     const verifyHead = candidates[0] ?? null;
-    const head = pickQueueHead([
+    const taskHeads = [
+      manualHead ? { kind: "manual" as const, queue_at: manualHead.queue_at } : null,
+      autoHead ? { kind: "auto" as const, queue_at: autoHead.queue_at } : null,
+    ];
+    let head = pickQueueHead([
       verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
-      manualHead ? { kind: "manual", queue_at: manualHead.queue_at } : null,
-      autoHead ? { kind: "auto", queue_at: autoHead.queue_at } : null,
+      ...taskHeads,
     ]);
-    if (head === "verify") return await serveVerify();
+    if (head === "verify") {
+      const served = await serveVerify();
+      if (served) return served;
+      head = pickQueueHead(taskHeads);
+    }
     // 每台機器自己的 2:1（插隊期間 1:2）2026-10-13 起拿掉（同正見 /next，20261011330000）：驗證與任務只照排序鍵（queue_at）先後，
     // 驗證列本身多 14 天（policy_jp.queue_settings.verify_priority_seconds，20261011360000）
     const manualFirst = head === "manual";
@@ -322,7 +332,10 @@ async function handle(req: Request): Promise<Response> {
     const t = fallbackHead;
     if (!t) {
       // 任務給不出來就退回驗證
-      if (candidates.length > 0) return await serveVerify();
+      if (candidates.length > 0) {
+        const served = await serveVerify();
+        if (served) return served;
+      }
       const reason = queueRaw.length > 0
         ? "這一輪抽到的任務對你都不合格（你交過在等票、剛跳過），驗證池也空了；幾分鐘後再來會抽到別的"
         : (openTasks > 0 ? "目前所有缺口任務都在別人手上或已飽和，驗證池也空了；幾分鐘後再來" : "目前沒有待驗證、也沒有缺口任務");
