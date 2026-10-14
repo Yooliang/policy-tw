@@ -14,7 +14,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { verifyCaller } from "../_shared/console-fetch-auth.ts";
 
 /**
- * console-fetch — 抓 GA4（正見、政策の系譜），寫進 Firestore（專案 policy-tw），給站務主控台
+ * console-fetch — 抓 GA4（正見、政策の系譜、島作），寫進 Firestore（專案 policy-tw），給站務主控台
  * （policy-console.web.app）讀。從私人 repo policy-console 的 scripts/fetch.mjs 搬來（2026-10-07）：
  * 原本靠 GitHub Actions 每小時跑，GitHub 常跳過排程；改由 pg_cron 每小時第 17 分叫這支。
  * 分工（2026-10-08）：GA 只在這裡跑；AdSense 只留在 policy-console 的 GitHub Actions（這裡完全不碰，meta/status 也只寫 GA 的欄位）。

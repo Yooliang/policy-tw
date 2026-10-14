@@ -1,7 +1,7 @@
 /**
  * console-fetch 的純函式與 I/O 層（2026-10-07，從私人 repo policy-console 的 scripts/fetch.mjs 搬來）。
  *
- * 做的事：抓 GA4（正見、政策の系譜兩個資源），寫進 Firestore（專案 policy-tw）。
+ * 做的事：抓 GA4（正見、政策の系譜、島作三個資源），寫進 Firestore（專案 policy-tw）。
  * 分工（2026-10-08 維護者裁定）：GA 只在這裡跑；AdSense 只在 policy-console 的 GitHub Actions 跑。
  * 所以這裡完全不碰 AdSense：不讀 ADSENSE_* 、不呼叫 AdSense、meta/status 只寫 GA 的欄位（updatedAt、sources.ga-*）。
  * 站務主控台（policy-console.web.app）只讀那個 Firestore。原本由 GitHub Actions 每小時跑，
@@ -22,6 +22,8 @@ export const CONSOLE_CONFIG = {
   sites: {
     tw: { name: "正見", country: "台灣", propertyId: "521879439" },
     jp: { name: "政策の系譜", country: "日本", propertyId: "557622261" },
+    // 島作 IslandMade（islandmade.web.app，2026-10-14 加入主控台；同一個服務帳號已是該資源的檢視者）
+    islandmade: { name: "島作", country: "台灣", propertyId: "558930893" },
   } as Record<string, { name: string; country: string; propertyId?: string }>,
   backfillDays: 30,
   maxHostsPerSite: 4,
