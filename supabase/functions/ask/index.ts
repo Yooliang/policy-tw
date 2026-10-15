@@ -4,6 +4,9 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { ASK_DAILY_LIMIT_PER_IP, buildAskTaskTitle, decideAsk, isValidQuestionLength, QUESTION_MAX_LEN, QUESTION_MIN_LEN } from "../_shared/ask.ts";
 import { createTask, QUESTION_PRIORITY } from "../_shared/task-admin.ts";
+import { askJev, jevKeyFromEnv, stripNulDeep } from "../_shared/system-one.ts";
+import { ASK_SCREEN_QUESTION, ASK_SCREEN_SUBJECT, screenQuestion } from "../_shared/ask-screen.ts";
+import { sha256Hex } from "../_shared/contribution-schema.ts";
 
 /**
  * ask — 網站訪客「問一句話」（公開、無金鑰、每 IP 每日 20 次）。
@@ -12,6 +15,9 @@ import { createTask, QUESTION_PRIORITY } from "../_shared/task-admin.ts";
  *   → 建一筆 citizen_questions ＋一筆 contribution_tasks（task_type="question"、source="web_request"），
  *     `/next` 會派給代理去找有出處的答案；同一題最多收 3 份不同代理的答案。
  *   → 內容太短／灌水詞堆疊 → 400；24 小時內問過幾乎一樣的話 → 409；超額 → 429。
+ *   → 以上都過了、建提問之前，先問 Jev 一題（可答／無關／隱私，見 _shared/ask-screen.ts）：
+ *     判成無關或隱私且機率達門檻 → 400（error=off_topic／privacy，message 是給訪客看的白話）；
+ *     Jev 金鑰沒設、逾時、出錯 → 照舊收下，只記 console.error。
  */
 
 const corsHeaders = {
@@ -81,6 +87,29 @@ Deno.serve(async (req) => {
     }
     if (decision.action === "rejected" && decision.reason === "duplicate") {
       return json({ success: false, error: "duplicate", message: "你在 24 小時內問過幾乎一樣的問題了，正在等代理回答，請稍後查看結果" }, 409);
+    }
+
+    // Jev 先篩（2026-10-15）：壞掉一律放行，不因為篩選故障就關掉提問
+    const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+    const screen = await screenQuestion(question, apiKey ? (state, questions) => askJev(apiKey, state, questions) : null);
+    if (screen.error) console.error("ask screen skipped:", screen.error);
+    if (screen.response) {
+      // 判決記進 jev_decisions（subject_id＝提問文字的雜湊；不存 IP）。寫不進去不影響提問
+      try {
+        const a = screen.response.answers[ASK_SCREEN_QUESTION];
+        const { error: recError } = await supabase.from("jev_decisions").upsert(stripNulDeep([{
+          subject_type: ASK_SCREEN_SUBJECT, subject_id: await sha256Hex(question), question: ASK_SCREEN_QUESTION,
+          choice: screen.verdict.choice ?? a?.choice ?? "unknown", probability: screen.verdict.probability,
+          confidence: a?.confidence ?? null, probabilities: a?.probabilities ?? null, model: screen.response.model,
+          state: screen.state, cost_usd: Number(screen.response.usage.cost.toFixed(8)),
+        }]), { onConflict: "subject_type,subject_id,question,model,state_hash", ignoreDuplicates: true });
+        if (recError) console.error("ask screen record failed:", recError.message);
+      } catch (e) {
+        console.error("ask screen record failed:", e instanceof Error ? e.message : String(e));
+      }
+    }
+    if (screen.verdict.action === "block") {
+      return json({ success: false, error: screen.verdict.error, message: screen.verdict.message }, 400);
     }
 
     const { data: inserted, error: insertError } = await supabase.from("citizen_questions").insert({
