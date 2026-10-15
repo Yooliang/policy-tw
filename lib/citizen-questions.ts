@@ -4,6 +4,9 @@
  * 寫入一律走這裡的 edge functions，慣例沿用 lib/request-task.ts。
  */
 
+import { parseAskResponse, type AskQuestionResult } from './ask-response'
+export { AskRejectedError, parseAskResponse, type AskQuestionResult } from './ask-response'
+
 export const QUESTION_MIN_LENGTH = 8
 export const QUESTION_MAX_LENGTH = 300
 
@@ -20,11 +23,6 @@ export interface AskQuestionInput {
   policyId?: string
   politicianId?: string
   region?: string
-}
-
-export interface AskQuestionResult {
-  questionId: string
-  message: string
 }
 
 export interface StanceResult {
@@ -50,9 +48,7 @@ export async function askQuestion(input: AskQuestionInput): Promise<AskQuestionR
     }),
   })
   const body = await res.json().catch(() => null)
-  if (res.status === 429) throw new Error(body?.message || '今天的提問次數已達上限，明天再試')
-  if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
-  return { questionId: body.question_id, message: body.message }
+  return parseAskResponse(res.status, body)
 }
 
 /** 對一題表態贊同／不贊同，回傳伺服器算出的最新數字。 */
