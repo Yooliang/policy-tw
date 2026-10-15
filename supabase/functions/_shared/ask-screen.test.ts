@@ -41,7 +41,7 @@ Deno.test("隱私且達門檻：擋，error=privacy", async () => {
 });
 
 Deno.test("低於門檻：放行（差一點也放，剛好達標才擋）", () => {
-  const a = verdictOfAsk(reply("off_topic", 0.9));
+  const a = verdictOfAsk(reply("off_topic", 0.79));
   assertEquals(a.action, "allow");
   assertEquals(a.action === "allow" && a.reason, "below_threshold");
   assertEquals(verdictOfAsk(reply("privacy", ASK_SCREEN_MIN_PROBABILITY - 0.0001)).action, "allow");
