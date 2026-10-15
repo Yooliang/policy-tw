@@ -7,15 +7,15 @@
  * 篩選壞掉不能連帶關掉提問（呼叫端記 console.error）。
  */
 
-import { MIN_PROBABILITY, type JevQuestion, type JevResponse } from "./system-one.ts";
+import { type JevQuestion, type JevResponse } from "./system-one.ts";
 
 export const ASK_SCREEN_QUESTION = "ask_screen";
 export const ASK_SCREEN_SUBJECT = "citizen_question";
 /**
- * 擋人的門檻直接用 system-one 的 MIN_PROBABILITY：誤擋一個正常的公民，比多收一題閒聊貴；
- * 收下的閒聊後面還有代理端把關，擋錯的人卻只能放棄。所以寧可放。
+ * 擋人的門檻 0.80（維護者 2026-10-15：「門檻改 80% 嚴一些」；上線第一版用 MIN_PROBABILITY 0.95，
+ * 實測劉德華住處只有 0.97，太貼門檻）。被擋的人看得到理由，可以改寫再送。
  */
-export const ASK_SCREEN_MIN_PROBABILITY = MIN_PROBABILITY;
+export const ASK_SCREEN_MIN_PROBABILITY = 0.8;
 /** 呼叫 Jev 最久等幾毫秒，超過就照舊收下 */
 export const ASK_SCREEN_TIMEOUT_MS = 8000;
 
