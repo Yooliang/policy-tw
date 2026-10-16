@@ -138,7 +138,7 @@ function leaderboardTitle(row: LeaderboardEntry): string {
   return `提交 ${row.submitted}・上線 ${row.applied}・驗證 ${row.verified_votes ?? 0}`
 }
 
-// 提交與驗證跟著整頁時間窗（2026-09-24 維護者：要支援 30D／90D）：48 小時內按小時、以上按天，資料庫端聚合
+// 提交與驗證跟著整頁時間窗（2026-09-24 維護者：要支援 30D／90D）：7D 以內按小時（2026-10-16 維護者，48 小時以上的標籤帶日期）、以上按天，資料庫端聚合
 type Activity = { bucket: string; submissions: number; verifications: number }
 const activity = ref<Activity[] | null>(null)
 async function loadActivity() {
@@ -172,7 +172,8 @@ const chartOptions = computed(() => ({
   dataLabels: { enabled: false },
   xaxis: {
     categories: (activity.value ?? []).map(d => d.bucket),
-    tickAmount: Math.min(12, Math.max(1, (activity.value ?? []).length - 1)),
+    // 7D 按小時有 168 個點，標籤帶日期比較長，只標 7 個
+    tickAmount: Math.min((activity.value ?? []).length > 48 ? 7 : 12, Math.max(1, (activity.value ?? []).length - 1)),
     labels: { style: { colors: '#94a3b8', fontSize: '11px', fontWeight: 'bold' } },
     axisBorder: { show: false }, axisTicks: { show: false },
   },
