@@ -155,7 +155,7 @@ Deno.test("人物 .md：基本資料、參選紀錄、政見依屆別分組；�
   const iNone = md.indexOf("### 未標屆別");
   assert(i2026 > 0 && i2022 > i2026 && iNone > i2022, "屆別新的在前，沒屆別的最後");
   assert(md.indexOf("新闢捷運線") < md.indexOf("托育補助加碼") && md.indexOf("托育補助加碼") < md.indexOf("無日期的政見"));
-  assertStringIncludes(md, "- 三要素：數值目標：未調查｜達成期限：未調查｜財源：未調查");
+  assertStringIncludes(md, "- 三要素：數值目標：未調查｜達成期限：未調查｜財政來源：未調查");
 });
 
 Deno.test("人物 .md：沒有政見、沒有參選紀錄也要有明確的一句，不是空白", () => {

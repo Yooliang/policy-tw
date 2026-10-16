@@ -10,6 +10,8 @@ import { REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, regionalStatsFor } from '../li
 const props = defineProps<{
   region?: string | null
   subRegion?: string | null
+  /** 窄欄（選舉頁右側面板）：固定兩欄 */
+  compact?: boolean
 }>()
 
 const { officialRegionalStats, ensureOfficialRegionalStats } = useSupabase()
@@ -24,7 +26,7 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <div v-if="region" class="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="regional-stats-panel">
+  <div v-if="region" :class="['grid grid-cols-2 gap-3', compact ? '' : 'sm:grid-cols-4']" data-testid="regional-stats-panel">
     <div v-for="row in rows" :key="row.statKey" class="bg-white rounded-lg border border-slate-200 px-3 py-2">
       <div class="text-xs text-slate-500">{{ row.label }}</div>
       <div v-if="row.stat" class="mt-0.5">

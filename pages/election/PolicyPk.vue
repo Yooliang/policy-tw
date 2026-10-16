@@ -14,7 +14,7 @@
  * 表比畫面寬時整張左右捲動，第一欄（類別）固定在左邊；手機上第一欄縮窄。
  */
 import { RouterLink } from 'vue-router'
-import { Check, Swords } from 'lucide-vue-next'
+import { Check, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
 import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
 import PolicyElements from '../../components/PolicyElements.vue'
@@ -27,9 +27,11 @@ const props = defineProps<{
   /** 勾選的人物 id */
   picked: readonly string[]
   matrix: CompareMatrix<Politician>
+  /** 全畫面：選舉頁收掉右側面板、表格用滿寬度（2026-10-16 維護者） */
+  fullscreen?: boolean
 }>()
 
-defineEmits<{ toggle: [id: string]; all: [] }>()
+defineEmits<{ toggle: [id: string]; all: []; fullscreen: [] }>()
 
 const isPicked = (id: string | number) => props.picked.includes(String(id))
 </script>
@@ -43,7 +45,16 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
 
     <section v-else class="bg-white rounded-xl border border-slate-200 shadow-sm">
       <div class="px-4 pt-4">
-        <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
+          <button
+            type="button"
+            class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            :aria-pressed="!!fullscreen"
+            data-testid="pk-fullscreen"
+            @click="$emit('fullscreen')"
+          ><component :is="fullscreen ? Minimize2 : Maximize2" :size="14" />{{ fullscreen ? '還原' : '全畫面' }}</button>
+        </div>
 
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
         <fieldset class="mt-3">

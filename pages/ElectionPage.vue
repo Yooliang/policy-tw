@@ -197,6 +197,10 @@ watch(selectedSubRegion, () => {
 })
 
 const viewMode = ref<ElectionViewMode>('politicians')
+// 政見 PK 全畫面（2026-10-16 維護者）：收掉右側面板、表格用滿整個寬度；離開 PK 頁籤就恢復
+const pkFullscreen = ref(false)
+watch(viewMode, (v) => { if (v !== 'comparison') pkFullscreen.value = false })
+const hasSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0 && !(pkFullscreen.value && viewMode.value === 'comparison'))
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 /**
@@ -995,9 +999,7 @@ usePageHead({
     />
 
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-
-      <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" class="mb-8" />
+    <div :class="['mx-auto px-4 sm:px-6 lg:px-8 py-12', pkFullscreen && viewMode === 'comparison' ? 'max-w-none' : 'max-w-7xl']">
 
       <!--
         名單撈不完整時一定要講。少人比整頁空白難發現得多：高雄市 2022 曾經只載到村里長，
@@ -1011,7 +1013,7 @@ usePageHead({
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
+      <div :class="hasSidebar ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
 
       <!-- VIEW: Politicians -->
 
@@ -1204,15 +1206,19 @@ usePageHead({
           :candidates="pkCandidates"
           :picked="pkPicked"
           :matrix="pkMatrix"
+          :fullscreen="pkFullscreen"
+          @fullscreen="pkFullscreen = !pkFullscreen"
           @toggle="togglePk"
           @all="comparisonPick = ''"
         />
       </div>
 
+        <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
+        <RegionalStatsPanel v-if="pageCounty && !hasSidebar && !(pkFullscreen && viewMode === 'comparison')" :region="pageCounty" :sub-region="pageTownship" class="mt-8" />
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
-      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
+      <div v-if="hasSidebar" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
           <!-- 鄉鎮市區篩選 -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
@@ -1307,6 +1313,9 @@ usePageHead({
               <span v-if="selectedVillage !== 'All'" class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded">{{ selectedVillage }}</span>
             </div>
           </div>
+
+          <!-- 地方基本統計（2026-10-16 維護者：從內容上方移到右側面板最下方） -->
+          <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact />
         </div>
       </div>
 
