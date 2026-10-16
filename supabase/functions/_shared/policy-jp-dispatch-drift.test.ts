@@ -885,8 +885,11 @@ function assertNoDrift(d: ReturnType<typeof registryDrift>) {
   assertEquals(d.overlap, [], "同一個名字不能同時是複本又是日本專屬");
   assertEquals(d.misplaced, [], "JP_ONLY 的 mig 清單跟實際定義它的 migration 對不上（被搬走或被重新定義了）：更新登記");
 }
-/** OTHER_COPIES 只准在 T_STATS 定義（後面的 migration 重新定義＝逃過 public-stats 測試的逐字比對） */
-const otherCopiesElsewhere = (scan: Scan) => OTHER_COPIES.filter((n) => scan.defined.get(n)?.join() !== T_STATS);
+/** 公開統計複本的跟進版（正見改了、日本版跟進）：函式名 → 跟進的 migration；public-stats 測試的 STATS_FOLLOWED 逐字比對改讀它 */
+const OTHER_COPIES_FOLLOWED: Record<string, string> = { contribution_activity: "20261016000002" };
+/** OTHER_COPIES 只准在 T_STATS（＋登記的跟進版）定義（後面的 migration 重新定義＝逃過 public-stats 測試的逐字比對） */
+const otherCopiesElsewhere = (scan: Scan) =>
+  OTHER_COPIES.filter((n) => scan.defined.get(n)?.join() !== [T_STATS, ...(OTHER_COPIES_FOLLOWED[n] ? [OTHER_COPIES_FOLLOWED[n]] : [])].join());
 
 async function readJpMigrations(): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -934,6 +937,7 @@ Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本
   assertEquals(otherCopiesElsewhere(scan), [], "公開統計的複本被別的 migration 重新定義（逃過 public-stats 測試的逐字比對）");
   const guard = await Deno.readTextFile(new URL(`./${OTHER_COPY_GUARD}`, import.meta.url));
   for (const n of OTHER_COPIES) assert(guard.includes(`name: "${n}"`), `${OTHER_COPY_GUARD} 的 PAIRS 沒有登記 ${n}`);
+  for (const [n, t] of Object.entries(OTHER_COPIES_FOLLOWED)) assert(guard.includes(`${n}: "${t}_`), `${OTHER_COPY_GUARD} 的 STATS_FOLLOWED 沒有登記 ${n} 的跟進版 ${t}`);
   assert(guard.includes(`const NONCOPY = ["pipeline_snapshots_since"]`), `${OTHER_COPY_GUARD} 的 NONCOPY 變了：pipeline_snapshots_since 的登記要同步`);
 
   // ---- 還原驗證：偵測器真的會咬（假 migration 夾一支新的、漏前綴、改名、重新定義…都抓得到） ----

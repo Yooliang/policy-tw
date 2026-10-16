@@ -27,6 +27,11 @@ const DISPATCH_SQL = await readMig("20261009130000_policy_jp_dispatch.sql");
 const ED_SQL = await readMig("20261009130100_policy_jp_election_discovery.sql");
 const MIG = "20261009200000_policy_jp_public_stats.sql";
 const MIG_SQL = await readMig(MIG);
+/** 跟進版：正見改了被抄的函式、日本版跟進的 migration（函式名 → 檔名）。逐字比對改讀跟進版；dispatch-drift 的 OTHER_COPIES_FOLLOWED 對這份 */
+const STATS_FOLLOWED: Record<string, string> = {
+  contribution_activity: "20261016000002_policy_jp_stats_activity_hourly.sql", // 168 小時內按小時（維護者 2026-10-16）
+};
+const FOLLOW_SQL: Record<string, string> = Object.fromEntries(await Promise.all(Object.entries(STATS_FOLLOWED).map(async ([n, f]) => [n, await readMig(f)])));
 
 function mutate(sql: string, from: string, to: string): string {
   const n = sql.split(from).length - 1;
@@ -206,6 +211,7 @@ function expectedModelVotes(sinceH: number | null, untilH: number | null) {
 // ---------------------------------------------------------------------------------------------
 const main = await baseDb();
 await main.exec(MIG_SQL);
+for (const sql of Object.values(FOLLOW_SQL)) await main.exec(sql);
 await seed(main);
 
 const ANON_STATS = [
@@ -291,17 +297,23 @@ Deno.test("貢獻統計 contribution_feed_summary：總數、各狀態、需要�
   assertEquals(s.daily_last_7.reduce((a: number, d: { verifications: number }) => a + d.verifications, 0), VOTES.filter((v) => v.ageH <= 100).length);
 });
 
-Deno.test("提交與驗證 contribution_activity：48 小時內按小時、以上按天；加總＝種子", async () => {
+Deno.test("提交與驗證 contribution_activity：168 小時內按小時（48 小時以上帶日期）、以上按天；加總＝種子", async () => {
   const hours = await jrows(main, "anon", `SELECT * FROM policy_jp.contribution_activity(48)`);
   assertEquals(hours.length, 48);
   assert(hours.every((r) => /^\d\d:00$/.test(String(r.bucket))), "小時桶：HH:00");
   assertEquals(hours.reduce((a, r) => a + Number(r.submissions), 0), CONTRIBS.filter((c) => c.ageH <= 40).length);
   assertEquals(hours.reduce((a, r) => a + Number(r.verifications), 0), VOTES.filter((v) => v.ageH <= 40).length);
-  const days = await jrows(main, "anon", `SELECT * FROM policy_jp.contribution_activity(168)`);
-  assert(days.length === 7 || days.length === 8, `日桶 7 或 8 筆（${days.length}）`);
+  const week = await jrows(main, "anon", `SELECT * FROM policy_jp.contribution_activity(168)`);
+  assertEquals(week.length, 168);
+  assert(week.every((r) => /^\d\d-\d\d \d\d:00$/.test(String(r.bucket))), "7 天的小時桶：MM-DD HH:00");
+  assertEquals(new Set(week.map((r) => r.bucket)).size, 168, "小時桶不重複（帶日期）");
+  assertEquals(week.reduce((a, r) => a + Number(r.submissions), 0), CONTRIBS.filter((c) => c.ageH <= 160).length);
+  assertEquals(week.reduce((a, r) => a + Number(r.verifications), 0), VOTES.filter((v) => v.ageH <= 160).length);
+  const days = await jrows(main, "anon", `SELECT * FROM policy_jp.contribution_activity(720)`);
+  assert(days.length === 30 || days.length === 31, `日桶 30 或 31 筆（${days.length}）`);
   assert(days.every((r) => /^\d\d-\d\d$/.test(String(r.bucket))), "日桶：MM-DD");
-  assertEquals(days.reduce((a, r) => a + Number(r.submissions), 0), CONTRIBS.filter((c) => c.ageH <= 160).length);
-  assertEquals(days.reduce((a, r) => a + Number(r.verifications), 0), VOTES.filter((v) => v.ageH <= 160).length);
+  assertEquals(days.reduce((a, r) => a + Number(r.submissions), 0), CONTRIBS.filter((c) => c.ageH <= 28 * DAY).length);
+  assertEquals(days.reduce((a, r) => a + Number(r.verifications), 0), VOTES.filter((v) => v.ageH <= 28 * DAY).length);
   // 上限 90 天：給再大的值也只回 90 天的桶
   assert((await jrows(main, "anon", `SELECT * FROM policy_jp.contribution_activity(100000)`)).length <= 91);
 });
@@ -564,7 +576,7 @@ async function latestPublic(name: string, sig: RegExp): Promise<string> {
   return def;
 }
 function jpBody(name: string, sig: RegExp): string {
-  const found = allFnTexts(MIG_SQL, `policy_jp.${name}`).filter((t) => sig.test(argsOf(t)));
+  const found = allFnTexts(FOLLOW_SQL[name] ?? MIG_SQL, `policy_jp.${name}`).filter((t) => sig.test(argsOf(t)));
   assertEquals(found.length, 1, `${name} ${sig}：日本版應該剛好一份定義`);
   return found[0];
 }
