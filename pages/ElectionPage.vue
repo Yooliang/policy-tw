@@ -1010,7 +1010,7 @@ usePageHead({
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div :class="hasSidebar ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
+      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
 
       <!-- VIEW: Politicians -->
 
@@ -1213,7 +1213,7 @@ usePageHead({
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
-      <div v-if="hasSidebar" class="order-first md:order-last md:w-1/3 shrink-0">
+      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
           <!-- 鄉鎮市區篩選 -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
