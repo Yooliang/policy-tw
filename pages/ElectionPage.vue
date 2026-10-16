@@ -197,10 +197,7 @@ watch(selectedSubRegion, () => {
 })
 
 const viewMode = ref<ElectionViewMode>('politicians')
-// 政見 PK 全畫面（2026-10-16 維護者）：收掉右側面板、表格用滿整個寬度；離開 PK 頁籤就恢復
-const pkFullscreen = ref(false)
-watch(viewMode, (v) => { if (v !== 'comparison') pkFullscreen.value = false })
-const hasSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0 && !(pkFullscreen.value && viewMode.value === 'comparison'))
+const hasSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0)
 const selectedIssueCategory = ref('All')
 const selectedIssueTag = ref('')
 /**
@@ -999,7 +996,7 @@ usePageHead({
     />
 
 
-    <div :class="['mx-auto px-4 sm:px-6 lg:px-8 py-12', pkFullscreen && viewMode === 'comparison' ? 'max-w-none' : 'max-w-7xl']">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
       <!--
         名單撈不完整時一定要講。少人比整頁空白難發現得多：高雄市 2022 曾經只載到村里長，
@@ -1206,15 +1203,13 @@ usePageHead({
           :candidates="pkCandidates"
           :picked="pkPicked"
           :matrix="pkMatrix"
-          :fullscreen="pkFullscreen"
-          @fullscreen="pkFullscreen = !pkFullscreen"
           @toggle="togglePk"
           @all="comparisonPick = ''"
         />
       </div>
 
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
-        <RegionalStatsPanel v-if="pageCounty && !hasSidebar && !(pkFullscreen && viewMode === 'comparison')" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
+        <RegionalStatsPanel v-if="pageCounty && !hasSidebar" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
