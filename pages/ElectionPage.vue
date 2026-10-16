@@ -1214,7 +1214,7 @@ usePageHead({
       </div>
 
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
-        <RegionalStatsPanel v-if="pageCounty && !hasSidebar && !(pkFullscreen && viewMode === 'comparison')" :region="pageCounty" :sub-region="pageTownship" class="mt-8" />
+        <RegionalStatsPanel v-if="pageCounty && !hasSidebar && !(pkFullscreen && viewMode === 'comparison')" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
