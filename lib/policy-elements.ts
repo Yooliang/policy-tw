@@ -20,7 +20,7 @@ export const ELEMENT_KINDS: readonly PolicyElementKind[] = ['target', 'deadline'
 export const ELEMENT_LABEL: Readonly<Record<PolicyElementKind, string>> = {
   target: '數值目標',
   deadline: '達成期限',
-  funding: '財源',
+  funding: '財政來源',
 }
 
 /** 有列而 stated=false：查過原文、沒寫 */

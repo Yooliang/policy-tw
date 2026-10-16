@@ -13,8 +13,9 @@
  * 這裡只管畫。選區（議員的選舉區、村里長的村里）不在這裡選：跟其他頁籤一樣放在選舉頁右側面板（真連結，網址 district 參數照舊）。
  * 表比畫面寬時整張左右捲動，第一欄（類別）固定在左邊；手機上第一欄縮窄。
  */
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Check, Swords } from 'lucide-vue-next'
+import { Check, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
 import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
 import PolicyElements from '../../components/PolicyElements.vue'
@@ -31,6 +32,13 @@ const props = defineProps<{
 
 defineEmits<{ toggle: [id: string]; all: [] }>()
 
+// 全畫面（2026-10-16 維護者）：整張比較表蓋滿瀏覽器視窗；Esc 或「還原」離開，期間頁面本身不捲動
+const fullscreen = ref(false)
+watch(fullscreen, (on) => { document.body.style.overflow = on ? 'hidden' : '' })
+const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') fullscreen.value = false }
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); document.body.style.overflow = '' })
+
 const isPicked = (id: string | number) => props.picked.includes(String(id))
 </script>
 
@@ -41,9 +49,18 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
       <p>這一層還沒有同一場、兩位以上的參選人可以並排。</p>
     </div>
 
-    <section v-else class="bg-white rounded-xl border border-slate-200 shadow-sm">
+    <section v-else :class="fullscreen ? 'fixed inset-0 z-[100] overflow-auto bg-white' : 'bg-white rounded-xl border border-slate-200 shadow-sm'">
       <div class="px-4 pt-4">
-        <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
+          <button
+            type="button"
+            class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            :aria-pressed="fullscreen"
+            data-testid="pk-fullscreen"
+            @click="fullscreen = !fullscreen"
+          ><component :is="fullscreen ? Minimize2 : Maximize2" :size="14" />{{ fullscreen ? '還原' : '全畫面' }}</button>
+        </div>
 
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
         <fieldset class="mt-3">

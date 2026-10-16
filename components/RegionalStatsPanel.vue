@@ -10,6 +10,8 @@ import { REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, regionalStatsFor } from '../li
 const props = defineProps<{
   region?: string | null
   subRegion?: string | null
+  /** 窄欄（選舉頁右側面板）：固定兩欄 */
+  compact?: boolean
 }>()
 
 const { officialRegionalStats, ensureOfficialRegionalStats } = useSupabase()
@@ -24,7 +26,20 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <div v-if="region" class="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="regional-stats-panel">
+  <!-- 窄欄（選舉頁右側面板，2026-10-16 維護者）：一張卡片、一項一列，只顯示數值；數值本身連到出處 -->
+  <div v-if="region && compact" class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm" data-testid="regional-stats-panel">
+    <dl class="divide-y divide-slate-100 text-sm">
+      <div v-for="row in rows" :key="row.statKey" class="flex items-baseline justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+        <dt class="text-slate-500">{{ row.label }}</dt>
+        <dd v-if="row.stat" class="text-right">
+          <a :href="row.stat.sourceUrl" target="_blank" rel="noopener noreferrer" :title="`${row.stat.year} 年`" class="font-bold text-navy-900 hover:text-blue-700">{{ row.stat.value.toLocaleString('zh-TW') }}</a>
+          <span class="text-xs text-slate-500 ml-1">{{ row.stat.unit }}</span>
+        </dd>
+        <dd v-else class="text-slate-400">未調查</dd>
+      </div>
+    </dl>
+  </div>
+  <div v-else-if="region" class="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="regional-stats-panel">
     <div v-for="row in rows" :key="row.statKey" class="bg-white rounded-lg border border-slate-200 px-3 py-2">
       <div class="text-xs text-slate-500">{{ row.label }}</div>
       <div v-if="row.stat" class="mt-0.5">
