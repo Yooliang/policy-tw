@@ -6,6 +6,7 @@ import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
+import { scoreBarFull } from '../../lib/score-bar'
 import AgentInfo from '../AgentInfo.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 
@@ -116,8 +117,9 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
       <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
         <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
           <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : 'bg-amber-400 ring-amber-100']"></span>
-          <button type="button" class="w-full text-left" :aria-expanded="expanded.has(e.id)" @click="toggleEntry(e.id)">
-            <div class="flex flex-wrap items-center gap-2 text-xs">
+          <!-- 日期那一列放在按鈕外面、自己接點擊：列尾有 AgentInfo（本身是按鈕），按鈕不能包按鈕。
+               鍵盤展開／收合走下面摘要那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
+          <div class="flex flex-wrap items-center gap-2 text-xs cursor-pointer" @click="toggleEntry(e.id)">
               <span class="font-mono text-slate-400">{{ formatDate(e.at) }}</span>
               <span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ e.type_label }}</span>
               <!-- 已上線不再標籤（2026-09-17）：左邊那顆綠點講的就是這件事。
@@ -128,22 +130,19 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
                    擺在下面那排跟「誰提交、幾票」混在一起，看的人要掃兩遍 -->
               <span v-if="e.edits.length" class="text-slate-500">改動 {{ e.edits.length }} 處</span>
               <span v-if="e.reverted" class="text-amber-700 inline-flex items-center gap-1"><Undo2 :size="11" /> 已還原</span>
+              <!-- 提交者與分數條接在日期那一列後面（2026-10-18，維護者）；滿格（達標上線或跌到退件）就不畫條，狀態已經講完了。
+                   條件跟 ScoreBar 的填色同一套（lib/score-bar.ts scoreBarFull）。 -->
+              <AgentInfo v-if="agentDisplay === 'icon'" :name="e.agent_name" :model="e.agent_tool" label="提交者" />
+              <span v-else class="text-slate-500">提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
+              <ScoreBar v-if="!scoreBarFull(e.score, e.target_score)" :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
+              <span v-if="e.adjudications.length" class="text-slate-500">有裁決</span>
+              <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
             </div>
             <!-- 同一級大小、不粗（2026-09-17 降級，2026-10-06 再統一成 text-xs）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
+          <button type="button" class="w-full text-left" :aria-expanded="expanded.has(e.id)" @click="toggleEntry(e.id)">
             <p :class="['mt-1 text-xs text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.summary) }}</p>
           </button>
-          <!-- 這一列放在按鈕外面、自己接點擊（2026-10-08）：info 圖示本身是一顆按鈕，按鈕不能包按鈕。
-               鍵盤展開／收合走上面那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
-          <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 cursor-pointer" @click="toggleEntry(e.id)">
-              <AgentInfo v-if="agentDisplay === 'icon'" :name="e.agent_name" :model="e.agent_tool" label="提交者" />
-              <span v-else>提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
-              <!-- 分數拉鋸條（2026-10-05，使用者要求）：跟貢獻看板同一個元件。已上線、已退件的也照看板畫法，
-                   不另外特判——滿格綠＝達標上線、滿格紅＝退件，一眼分得出這筆是怎麼走到現在的 -->
-              <ScoreBar :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
-              <span v-if="e.adjudications.length">有裁決</span>
-              <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
-          </div>
           <div v-if="expanded.has(e.id)" class="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
             <HistoryEntryDetail :entry="e" :agent-display="agentDisplay" />
           </div>

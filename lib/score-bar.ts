@@ -16,3 +16,10 @@ export function scoreBarTitle(score: number, target: number, votes?: { agree?: n
   if (!votes || votes.agree === undefined || votes.disagree === undefined || votes.unsure === undefined) return base
   return `${base}（同意 ${votes.agree}・反對 ${votes.disagree}・存疑 ${votes.unsure}）`
 }
+
+/** 條是滿的：標記在最左（退件）或最右（通過）。查核履歷滿格就不畫條，條件跟 scorePercent 同一套 */
+export function scoreBarFull(score: number | null | undefined, target: number | null | undefined): boolean {
+  if ((target ?? 0) <= 0) return false
+  const p = scorePercent(score, target)
+  return p === 0 || p === 100
+}

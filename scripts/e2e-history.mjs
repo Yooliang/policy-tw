@@ -50,9 +50,9 @@ try {
     check(toggleText.includes('查核履歷（3 筆）'), `${viewport.name}: 標題帶筆數「${toggleText.trim().replace(/\s+/g, ' ')}」`)
     check(await page.locator('[data-testid="history-entry"]').count() === 3, `${viewport.name}: 展開列 3 筆`)
     check((await page.locator('[data-testid="history-entry"]').first().textContent()).includes('裁決中'), `${viewport.name}: 最新一筆是裁決中的更正`)
-    // 分數拉鋸條：每筆一條（跟貢獻看板同一個元件）；fixture 第一筆是 −2／目標 4
+    // 分數拉鋸條：沒滿格的才畫（跟貢獻看板同一個元件）；fixture 第一筆是 −2／目標 4、第三筆 3／3 滿格
     const bars = page.locator('[data-testid="history-entry"] [data-testid="score-bar"]')
-    check(await bars.count() === 3, `${viewport.name}: 每筆履歷各有一條分數拉鋸條`)
+    check(await bars.count() === 2, `${viewport.name}: 分數拉鋸條只畫沒滿格的（第三筆 3／3 已達標，不畫）`)
     check(((await bars.first().getAttribute('title')) ?? '').includes('分數 -2／通過 4、退件 −4'), `${viewport.name}: 拉鋸條的說明寫明分數與兩端門檻`)
 
     // 徽章：有 2 筆 applied → 標題區顯示「已查核 · 2 筆」，點擊平滑捲到履歷區塊
@@ -70,20 +70,20 @@ try {
     check(!!rect && rect.y <= 150, `${viewport.name}: 點擊徽章後捲動到履歷區塊（top=${rect?.y}）`)
 
     // 個別項目仍可各自收合展開
-    await page.locator('[data-testid="history-entry"]').nth(2).locator('button').first().click()
+    await page.locator('[data-testid="history-entry"]').nth(2).locator('button[aria-expanded]').first().click()
     await page.waitForSelector('[data-testid="history-entry-detail"]')
     check(await page.locator('[data-testid="verifier"]').count() === 2, `${viewport.name}: 再展開看到 2 位驗證者`)
     check((await page.locator('[data-testid="verifier"]').nth(1).textContent()).includes('中央社報導第二段有寫'), `${viewport.name}: 驗證者理由顯示`)
     const progressEntry = page.locator('[data-testid="history-entry"]').nth(1)
-    await progressEntry.locator('button').first().click()
+    await progressEntry.locator('button[aria-expanded]').first().click()
     check(await progressEntry.locator('[data-testid="edit-list"] li').count() === 3, `${viewport.name}: 進度更新那筆列 3 處改動（舊值→新值）`)
     const editText = await progressEntry.locator('[data-testid="edit-list"]').textContent()
     check(editText.includes('進度') && editText.includes('40'), `${viewport.name}: 改動顯示欄位與新值`)
     const corrEntry = page.locator('[data-testid="history-entry"]').nth(0)
-    await corrEntry.locator('button').first().click()
+    await corrEntry.locator('button[aria-expanded]').first().click()
     check((await corrEntry.locator('[data-testid="adjudication-list"]').textContent()).includes('裁決任務已建立'), `${viewport.name}: 裁決中的更正顯示裁決任務`)
     // 收合單筆後應仍留在展開的整體區塊中（單筆收合不影響整體展開狀態）
-    await corrEntry.locator('button').first().click()
+    await corrEntry.locator('button[aria-expanded]').first().click()
     check(await page.locator('[data-testid="history-body"]').count() === 1, `${viewport.name}: 收合單筆項目後整體區塊仍展開`)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     check(overflow <= 1, `${viewport.name}: 無橫向溢出（${overflow}）`)
