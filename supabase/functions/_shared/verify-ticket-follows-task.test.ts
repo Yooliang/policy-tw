@@ -455,8 +455,7 @@ Deno.test("C2 還原驗證：新增清單恆為假 → B2 的新增型劇本翻�
 });
 
 Deno.test("C3 還原驗證：驗證鍵不看母任務（退回進隊時間 − 優先秒數 − 14 天）→ B1 翻面；不呼叫 refresh → 母任務換鍵後不跟", async () => {
-  const noParent = await env(true, (s) => mutate(s, "ELSE COALESCE((SELECT p.queue_at FROM task_dispatches p WHERE p.task_id = t.parent_id) - make_interval(secs => s.vs),\n                         COALESCE(p_last_dispatched_at, now()) - make_interval(secs => COALESCE(p_priority_seconds, 0) + s.vs))",
-    "ELSE COALESCE(p_last_dispatched_at, now()) - make_interval(secs => COALESCE(p_priority_seconds, 0) + s.vs)"));
+  const noParent = await env(true, (s) => mutate(s, "FROM task_dispatches p WHERE p.task_id = t.parent_id) - make_interval(secs => s.vs),", "FROM task_dispatches p WHERE false) - make_interval(secs => s.vs),"));
   const p = await parent(noParent, { prio: 3 * DAY, agoDays: 2 });
   const s = await submit(noParent, { type: "correction", task: p });
   assert(Math.abs((await secs(noParent, s.vid)) - (5 * DAY + VS)) > DAY, "不看母任務：驗證票不在母任務的位置上");
@@ -509,4 +508,73 @@ Deno.test("C4 還原驗證：拿掉 contributions_drop_dispatch 觸發器，通�
   await db.exec(`UPDATE contributions SET status = 'applied' WHERE id = '${s1.id}'`);
   assertEquals((await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM task_dispatches WHERE task_id = '${q(gap)}'`)).rows[0]!.n, 1, "沒有觸發器：通過了列還在（所以 B5c 的「立刻收回」是那個觸發器的功勞）");
   await db.close();
+});
+
+Deno.test("A6 contribution_auto_tasks（/tasks、/request-task）：新定義＝20261002000006 的現行定義加一段「合格：任務停放」，其餘一字不動", async () => {
+  const prev = fnText(await readMig("20261002000006_queue_pop_head.sql"), "contribution_auto_tasks");
+  const neu = fnText(MIG, "contribution_auto_tasks");
+  const open = "    -- >>> 合格：任務停放\n";
+  const close = "    -- <<< 合格：任務停放\n";
+  assertEquals(neu.split(open).length - 1, 1);
+  assertEquals(neu.slice(0, neu.indexOf(open)) + neu.slice(neu.indexOf(close) + close.length), prev);
+  // 兩支讀者用同一段條件
+  const body = (s: string) => s.slice(s.indexOf(open) + open.length, s.indexOf(close)).split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assertEquals(body(neu), body(fnText(MIG, "contribution_queue_tasks")));
+});
+
+Deno.test("B7 驗證票的母任務優先秒數是負的（後段）：verify_inherit_negative＝false（預設）當 0、true 才照算（10-13 常設裁決「已經交的件不要等一個多月」）", async () => {
+  const db = await env(true);
+  const p = await parent(db, { prio: -30 * DAY });
+  near(await secs(db, p), -30 * DAY, "母任務在 30 天後才輪到");
+  const t = await submit(db, { type: "correction", task: p });
+  near(await secs(db, t.vid), VS, "預設：負的當 0 → 現在 − 14 天，不會落在未來");
+  await db.exec("UPDATE queue_settings SET verify_inherit_negative = true");
+  await db.exec("SELECT refresh_verify_ticket_keys()");
+  near(await secs(db, t.vid), VS - 30 * DAY, "打開設定：照母任務的鍵（未來）");
+  await db.exec("UPDATE queue_settings SET verify_inherit_negative = false");
+  await db.exec("SELECT refresh_verify_ticket_keys()");
+  near(await secs(db, t.vid), VS, "關回去又當 0");
+  // 正的優先秒數與插隊不受影響
+  const q2 = await parent(db, { prio: 3 * DAY, boost: 1000 });
+  const t2 = await submit(db, { type: "correction", task: q2 });
+  near(await secs(db, t2.vid), 3 * DAY + 1000 + VS, "正的照舊");
+  await db.close();
+});
+
+Deno.test("C5 還原驗證：拿掉負值的處理，B7 的預設情況翻面（驗證票落到未來）", async () => {
+  const db = await env(true, (s) => mutate(s, "CASE WHEN s.inherit_negative THEN p.priority_seconds ELSE GREATEST(p.priority_seconds, 0) END", "p.priority_seconds"));
+  const p = await parent(db, { prio: -30 * DAY });
+  const t = await submit(db, { type: "correction", task: p });
+  assert((await secs(db, t.vid)) < 0, "沒有處理負值：驗證票落在未來");
+  await db.close();
+});
+
+Deno.test("B8 /tasks、/request-task（contribution_auto_tasks）：停放的缺口不列；全被退又出現；三型例外；還原驗證", async () => {
+  const build = (mut?: (s: string) => string) => env(true, mut);
+  const listed = async (db: PGlite, id: string) => (await db.query<{ task_id: string }>(`SELECT task_id FROM contribution_auto_tasks(NULL, NULL, 1000, '')`)).rows.some((r) => r.task_id === id);
+  const db = await build();
+  const g = await parent(db, { type: "policy_missing" });
+  assertEquals(await listed(db, g), true);
+  const s1 = await submit(db, { type: "policy", task: g });
+  assertEquals(await listed(db, g), false, "有交件在途：不列");
+  const g2 = await parent(db, { type: "profile_gap" });
+  await submit(db, { type: "no_change", task: null, payloadTask: g2 });
+  assertEquals(await listed(db, g2), false, "任務編號只在 payload 的在途交件也停放");
+  const rc = await parent(db, { id: "auto:roster_check:台北市", type: "roster_check" });
+  await submit(db, { type: "candidacy", task: rc });
+  assertEquals(await listed(db, rc), true, "名單清查不停放");
+  await db.exec(`UPDATE contributions SET status = 'rejected' WHERE id = '${s1.id}'`);
+  assertEquals(await listed(db, g), true, "全部被退：又出現");
+  await db.close();
+  const open = "    -- >>> 合格：任務停放\n    -- 同 contribution_queue_tasks";
+  const bad = await build((s) => {
+    const a = s.indexOf("-- >>> 合格：任務停放", s.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks("));
+    const b = s.indexOf("-- <<< 合格：任務停放", a);
+    return s.slice(0, a) + s.slice(b);
+  });
+  const g3 = await parent(bad, { type: "policy_missing" });
+  await submit(bad, { type: "policy", task: g3 });
+  assertEquals(await listed(bad, g3), true, "拿掉停放條件：在途的缺口又被列出來");
+  assert(open.length > 0);
+  await bad.close();
 });

@@ -205,7 +205,7 @@ const PAIRS: Pair[] = [
     note: "取合格條件搬進 SQL（20261017000301，日本站暫不跟）之前的版本",
   },
   { name: "contribution_queue_task_counts" },
-  { name: "contribution_auto_tasks" },
+  { name: "contribution_auto_tasks", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：多一段合格：任務停放）之前的版本" },
   { name: "contribution_verify_pool", before: LEGACY, note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本" },
   { name: "contribution_vote_weight" },
   { name: "contribution_reject_floor" },

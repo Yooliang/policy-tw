@@ -82,7 +82,7 @@ COMMENT ON FUNCTION verify_ticket_priority_seconds IS '驗證票入列時記下�
 -- 排序鍵（驗證票所有寫入 queue_at 的路徑都經過這支，由觸發器 task_dispatches_queue_key 呼叫）：
 --   領走過一次（verify_follows_task＝false）：派出時間 − 優先秒數 − 14 天（照舊，回隊尾）
 --   還沒被領走、新增型：交件建立時間 − 14 天
---   還沒被領走、一般任務：母任務現在的排序鍵 − 14 天；母任務的派工列不在了（已結束）就退回 進隊時間 − 優先秒數 − 14 天（照舊）
+--   還沒被領走、一般任務：母任務現在的排序鍵（負的優先秒數照 verify_inherit_negative：預設當 0）− 14 天；母任務的派工列不在了（已結束）就退回 進隊時間 − 優先秒數 − 14 天（照舊）
 --   最後都再減自己的插隊秒數（/boost 每次加 queue_settings.boost_seconds）
 CREATE OR REPLACE FUNCTION verify_queue_key(
   p_task_id TEXT, p_follows_task BOOLEAN, p_last_dispatched_at TIMESTAMPTZ, p_priority_seconds INTEGER, p_boost_seconds BIGINT
@@ -93,10 +93,16 @@ LANGUAGE sql STABLE AS $$
              THEN COALESCE(p_last_dispatched_at, now()) - make_interval(secs => COALESCE(p_priority_seconds, 0) + s.vs)
            WHEN t.is_new
              THEN COALESCE(t.created_at, p_last_dispatched_at, now()) - make_interval(secs => s.vs)
-           ELSE COALESCE((SELECT p.queue_at FROM task_dispatches p WHERE p.task_id = t.parent_id) - make_interval(secs => s.vs),
+           -- 母任務的鍵：優先秒數是負的（後段 −30 天）時，queue_settings.verify_inherit_negative 為 false（預設，維護者 10-13「已經交的件不要等一個多月」）就當 0；
+           -- 母任務的優先秒數不是負的時，這個值就等於 p.queue_at
+           ELSE COALESCE((SELECT task_queue_key(COALESCE(p.last_dispatched_at, now()),
+                                                CASE WHEN s.inherit_negative THEN p.priority_seconds ELSE GREATEST(p.priority_seconds, 0) END,
+                                                p.cool_until, p.boost_seconds)
+                            FROM task_dispatches p WHERE p.task_id = t.parent_id) - make_interval(secs => s.vs),
                          COALESCE(p_last_dispatched_at, now()) - make_interval(secs => COALESCE(p_priority_seconds, 0) + s.vs))
          END - make_interval(secs => COALESCE(p_boost_seconds, 0))
-    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs) s
+    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs,
+                 COALESCE((SELECT q.verify_inherit_negative FROM queue_settings q WHERE q.id = 1), false) AS inherit_negative) s
     LEFT JOIN verify_ticket_parent(p_task_id) t ON true
 $$;
 COMMENT ON FUNCTION verify_queue_key IS '驗證票的排序鍵（2026-10-17）：一般任務＝母任務的排序鍵 − 14 天、新增型＝建立時間 − 14 天、派出後＝派出時間 − 優先秒數 − 14 天；再減自己的插隊秒數。沒有 1970／1980 年段';
@@ -435,6 +441,55 @@ COMMENT ON FUNCTION contribution_queue_tasks IS
   '所有合格條件都在 LIMIT 之前（20261017000301）：認領中、同機器交過、查無回報在等票、在途額滿（5）、提問滿額／答過、裁決不合格；/next 的過濾器只剩 skip 與舊雜湊投票兩項留在程式裡。'
   '20261017010000：底下有交件在途的任務停放（合格：任務停放；question、adjudicate、roster_check 除外）。'
   'contribution_auto_tasks（/tasks、/request-task 用）仍只回 auto: 列，輸出不變。同 queue_at 內公民提問依 target.stance_up 高的先。2026-10-08、2026-10-17';
+
+-- ------------------------------------------------------------
+-- 5b. /tasks、/request-task（contribution_auto_tasks，只回 auto: 列）也尊重停放：以 20261002000006 的現行定義為底，只多同一段「合格：任務停放」
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION contribution_auto_tasks(
+  p_type TEXT DEFAULT NULL,
+  p_region TEXT DEFAULT NULL,
+  p_limit INTEGER DEFAULT 20,
+  p_seed TEXT DEFAULT '',
+  p_ip_hash TEXT DEFAULT NULL,
+  p_agent TEXT DEFAULT NULL
+) RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, queue_at TIMESTAMPTZ)
+LANGUAGE sql STABLE AS $$
+  SELECT d.task_id, d.task_type, d.target, d.what_we_need, d.hint_sources, d.reward, d.queue_at
+  FROM task_dispatches d
+  WHERE d.task_id LIKE 'auto:%' AND d.task_type IS NOT NULL
+    AND NOT d.blocked
+    -- 插隊的（queue_at 早於 2000 年）跳過冷卻：人明確要求先做的，冷卻不該擋
+    AND (NOT d.cooling OR d.queue_at < '2000-01-01T00:00:00Z')
+    AND (p_type IS NULL OR d.task_type = p_type)
+    AND (p_region IS NULL OR d.region = p_region)
+    -- 下面兩項跟「是誰來領」有關，排程算不了；只對照時間走到的那幾筆查，到 p_limit 就停
+    AND (p_ip_hash IS NULL OR NOT EXISTS (
+      SELECT 1 FROM contribution_task_leases l
+      WHERE l.leased_until > now() AND (p_agent IS NULL OR lower(l.agent_name) <> lower(p_agent))
+        AND (l.task_id = d.task_id OR l.target_key = task_target_key(d.task_id, d.target))
+    ))
+    AND (p_ip_hash IS NULL OR NOT EXISTS (
+      SELECT 1 FROM contributions c
+      WHERE c.task_id = d.task_id AND c.status IN ('pending', 'verified', 'disputed')
+        AND (c.contributor_ip_hash = p_ip_hash OR (p_agent IS NOT NULL AND c.agent_name = p_agent))
+    ))
+    -- >>> 合格：任務停放
+    -- 同 contribution_queue_tasks：底下有交件在途（pending／verified／disputed，task_id 欄或欄空時 payload.task_id）的缺口停放，/tasks 不列、/request-task 領不到（20261017010000）。
+    -- 三型例外（question、adjudicate、roster_check）不停放；這支只回 auto: 列，所以 question 實際上不會出現
+    AND NOT EXISTS (
+      SELECT 1 FROM contributions f
+      WHERE d.task_type NOT IN ('question', 'adjudicate', 'roster_check')
+        AND f.status IN ('pending', 'verified', 'disputed') AND f.task_id = d.task_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM contributions f
+      WHERE d.task_type NOT IN ('question', 'adjudicate', 'roster_check')
+        AND f.status IN ('pending', 'verified', 'disputed') AND f.task_id IS NULL AND f.payload->>'task_id' = d.task_id
+    )
+    -- <<< 合格：任務停放
+  ORDER BY d.queue_at ASC, d.task_id
+  LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 20), 100000));
+$$;
 
 -- ------------------------------------------------------------
 -- 6. 既有的驗證票一次換算
