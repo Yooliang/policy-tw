@@ -278,7 +278,7 @@ const PAIRS: Pair[] = [
   // 20261011360000 新增的複本（SEC_NEW）
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
-  { name: "manual_front_seconds" },
+  { name: "manual_front_seconds", before: "20261017030000_overvoted_adjudication_pause.sql", note: "取投太多輪的裁決不插隊（20261017030000，日本站暫不跟：日本站沒有 auto-overvoted 裁決）之前的版本" },
   { name: "verify_inherited_priority_seconds" },
   { name: "task_dispatches_queue_key", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：驗證列改走 verify_queue_key、拿掉 1970／1980 年段）之前的版本" },
 ];
