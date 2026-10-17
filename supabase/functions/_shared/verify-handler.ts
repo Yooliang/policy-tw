@@ -13,7 +13,7 @@ import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlin
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
-import { agentToolNotice } from "./agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
@@ -373,7 +373,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   const targetScore = effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []);
   const scoreBefore = (contribution as { score?: number | null }).score ?? 0;
   const scoreAfter = (after as { score?: number | null } | null)?.score ?? scoreBefore + weight;
-  const toolNotice = agentToolNotice(input.agent_tool);
+  const toolNotice = await agentToolNoticeOnce(supabase, input.agent_name, input.agent_tool);
 
   return {
     status: 201,

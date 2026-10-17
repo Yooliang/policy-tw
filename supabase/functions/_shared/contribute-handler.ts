@@ -28,7 +28,7 @@ import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDeadlineOf } from "./elections.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
-import { agentToolNotice } from "./agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
 import { SELF_CITATION_MESSAGE, selfCitationProblems } from "./self-hosts.ts";
@@ -917,7 +917,7 @@ export async function handleContribute(
     };
   }
   // agent_tool 只填別名（claude-code/haiku）時統計拆不出版本：不擋件，附一句提醒（協議 1.44.0）
-  const toolNotice = agentToolNotice(validation.contributor.agent_tool);
+  const toolNotice = await agentToolNoticeOnce(supabase, validation.contributor.agent_name, validation.contributor.agent_tool);
   // 出處等級只有 self 由交件決定；交件說了別的等級，伺服器照網域重判，講一聲（#347 第二階段 A）
   const levelNotice = [...new Set(validation.items.map((it) => sourceLevelNotice(detailsOfPayload(it.payload, it.source_urls))).filter(Boolean))].join("\n");
   const trailingVoteNote = needs.length > 0
