@@ -197,9 +197,9 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_queue_tasks",
-    // 2026-10-17（正見 20261017000001）合格條件全搬進 SQL（查無回報在等票、在途額滿、提問、裁決）；日本站暫不跟（jp-next 的同構問題另開），比對讀這支之前的版本
-    before: "20261017000001_queue_tasks_eligibility_before_limit.sql",
-    note: "取合格條件搬進 SQL（20261017000001，日本站暫不跟）之前的版本",
+    // 2026-10-17（正見 20261017000301）合格條件全搬進 SQL（查無回報在等票、在途額滿、提問、裁決）；日本站暫不跟（jp-next 的同構問題另開），比對讀這支之前的版本
+    before: "20261017000301_queue_tasks_eligibility_before_limit.sql",
+    note: "取合格條件搬進 SQL（20261017000301，日本站暫不跟）之前的版本",
   },
   { name: "contribution_queue_task_counts" },
   { name: "contribution_auto_tasks" },

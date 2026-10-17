@@ -493,7 +493,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
 
     // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
     // 自動缺口與手動任務是同一張佇列、用同一把尺（queue_at），由 contribution_queue_tasks 排好序。
-    // 合格判斷在 SQL 裡、LIMIT 之前（contribution_queue_tasks，20261017000001）：認領中／同機器交過／查無回報在等票／在途額滿／提問滿額與答過／裁決不合格；派過的排後面。
+    // 合格判斷在 SQL 裡、LIMIT 之前（contribution_queue_tasks，20261017000301）：認領中／同機器交過／查無回報在等票／在途額滿／提問滿額與答過／裁決不合格；派過的排後面。
     // 下面這些過濾器發生在 LIMIT 之後，只是第二道保險，不能再是唯一的一道（2026-10-17：前 30 筆全是「查無回報在等票」，程式全剔掉就沒有任務可派、隊頭永遠派不出去；2026-09-20 同一類事故）。
     // 例外：skip（這次請求帶進來的單一一筆）與裁決任務的過渡期舊雜湊投票只在這裡；加新過濾器要在 SQL 的 >>> 合格 標記補一段並登記（守門 next-eligibility-before-limit.test.ts）。
     const freeQueue = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(

@@ -1,5 +1,5 @@
 /**
- * /next 的合格條件必須在 SQL、LIMIT 之前（2026-10-17，policy-ops docs/work/2026-10-17-派工隊頭堵塞.md；migration 20261017000001）。
+ * /next 的合格條件必須在 SQL、LIMIT 之前（2026-10-17，policy-ops docs/work/2026-10-17-派工隊頭堵塞.md；migration 20261017000301）。
  *
  * 事故：/next 呼叫 contribution_queue_tasks(…, p_limit 30, …) 之後才在程式裡套 filterReportedDeadEnds 等過濾器。
  * 前 30 筆全是「有查無回報在等票」的任務，程式把 30 筆全剔掉 → 沒有任務可派、這些頭永遠不被派出、佇列頭被釘死（2026-09-20 同一類事故，窗口 12 筆）。
@@ -16,7 +16,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { latestFn, mutate, readMig } from "./arms-pglite.ts";
 
 const NEXT_SRC = (await Deno.readTextFile(new URL("../next/index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-const MIG = "20261017000001_queue_tasks_eligibility_before_limit.sql";
+const MIG = "20261017000301_queue_tasks_eligibility_before_limit.sql";
 const QUEUE_SQL = await latestFn("contribution_queue_tasks");
 
 type Entry = { markers: string[]; tsOnly?: undefined } | { markers?: undefined; tsOnly: string };

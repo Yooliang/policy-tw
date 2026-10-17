@@ -129,7 +129,7 @@ LANGUAGE sql STABLE AS $$
 $$;
 COMMENT ON FUNCTION contribution_queue_tasks IS
   '/next、rebalance_queue、queue_preview 拿隊頭：task_dispatches 裡所有「任務」列（自動缺口 auto: 與 open 的手動任務 uuid，不含 verify:），照 queue_at 取，跳過 blocked、冷卻中（插隊的除外）、對這台機器不合格的。'
-  '所有合格條件都在 LIMIT 之前（20261017000001）：認領中、同機器交過、查無回報在等票、在途額滿（5）、提問滿額／答過、裁決不合格；/next 的過濾器只剩 skip 與舊雜湊投票兩項留在程式裡。'
+  '所有合格條件都在 LIMIT 之前（20261017000301）：認領中、同機器交過、查無回報在等票、在途額滿（5）、提問滿額／答過、裁決不合格；/next 的過濾器只剩 skip 與舊雜湊投票兩項留在程式裡。'
   'contribution_auto_tasks（/tasks、/request-task 用）仍只回 auto: 列，輸出不變。同 queue_at 內公民提問依 target.stance_up 高的先。2026-10-08、2026-10-17';
 
 -- ------------------------------------------------------------
