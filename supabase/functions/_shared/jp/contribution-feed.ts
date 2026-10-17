@@ -84,7 +84,7 @@ const STAT_LABEL: Record<string, string> = { population: "人口", area_km2: "�
 export function jpSummarizeContribution(input: SummaryInput): ContributionSummary {
   const p = asObj(input.payload);
   const base = (summary: string, targetName: string | null): ContributionSummary => ({
-    summary: clip(summary), target_name: targetName, politician_id: null, policy_id: null, politician_url: null, policy_url: null,
+    summary: clip(summary), detail: clip(summary), target_name: targetName, politician_id: null, policy_id: null, politician_url: null, policy_url: null,
   });
   switch (input.contribution_type) {
     case "election": {

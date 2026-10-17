@@ -21,8 +21,8 @@ interface Span { from: string; to: string; toExclusive?: boolean; why: string }
 const TW_SPANS: Span[] = [
   { from: 'import "jsr:@supabase/functions-js/edge-runtime.d.ts";', to: "*/", why: "檔頭與 import" },
   { from: "const supabase = createClient(", to: "const supabase = createClient(", why: "client 固定 schema policy_jp" },
-  { from: "// 代理可以用 politician_id 取代姓名提交。", to: "// 交件的網址在出處表的等級", toExclusive: true, why: "標題解析（政策、人物、參選紀錄）" },
-  { from: "const raw = (r.payload", to: "const s = summarizeContribution(", why: "摘要的 payload 補名稱與摘要本身" },
+  { from: "// 摘要是純函式、沒有資料庫：", to: "// 交件的網址在出處表的等級", toExclusive: true, why: "標題解析（政策、人物、參選紀錄）" },
+  { from: "const s = summarizeContribution(", to: "const s = summarizeContribution(", why: "摘要本身（正見帶 lookup）" },
   { from: 'console.error("contributions-feed error:"', to: 'console.error("contributions-feed error:"', why: "日誌名稱" },
 ];
 
@@ -244,7 +244,7 @@ Deno.test("jpSummarizeContribution：日本站四種型別的摘要；其餘走�
   const s = (contribution_type: string, payload: unknown, extra: Row = {}) => jpSummarizeContribution({ contribution_type, payload, ...extra });
   assertEquals(s("election", { name: "東京都知事選挙", election_date: "2027-04-11" }).summary, "回報選舉「東京都知事選挙」（投票日 2027-04-11）");
   assertEquals(s("election", { election_date: "2027-04-11", election_type: "governor" }).summary, "回報選舉「知事選舉」（投票日 2027-04-11）");
-  assertEquals(s("local_government", { name: "一宮市", kind: "city" }), { summary: "回報地方公共團體「一宮市」的基本資料", target_name: "一宮市", politician_id: null, policy_id: null, politician_url: null, policy_url: null });
+  assertEquals(s("local_government", { name: "一宮市", kind: "city" }), { summary: "回報地方公共團體「一宮市」的基本資料", detail: "回報地方公共團體「一宮市」的基本資料", target_name: "一宮市", politician_id: null, policy_id: null, politician_url: null, policy_url: null });
   assertEquals(s("regional_stat", { lg_code: "232190", stat_key: "population", year: 2020, value: 385000, unit: "人" }).summary, "補團體 232190 2020 年的人口：385000 人");
   assertEquals(s("regional_stat", { lg_code: "232190", stat_key: "aging_rate", year: 2020, value: 29.6 }).summary, "補團體 232190 2020 年的高齡化率：29.6 %");
   const nc = s("no_change", { task_id: "auto:policy_missing:abc123", finding: "公式サイトで一致を確認した" });

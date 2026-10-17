@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildFeedSummary, EXCLUDED_AGENTS, LEADERBOARD_SIZE, leaderboardScore, safePayload, summarizeContribution, CONTRIBUTORS_WINDOW_DAYS } from "./contribution-summary.ts";
+import { collectSummaryIds } from "./summary-lookup.ts";
+import { buildFeedSummary, type SummaryLookup, EXCLUDED_AGENTS, LEADERBOARD_SIZE, leaderboardScore, safePayload, summarizeContribution, CONTRIBUTORS_WINDOW_DAYS } from "./contribution-summary.ts";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
 
 Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
@@ -12,11 +13,11 @@ Deno.test("貢獻摘要：五種型別各一句人話＋目標連結", () => {
   assertEquals(cand.summary, "將 徐千晴 2026 新竹市縣市議員參選狀態改為「已登記」");
 
   const corr = summarizeContribution({ contribution_type: "correction", payload: { target_table: "policies", target_id: "abcdef12-0000", field: "proposed_date", correct_value: "2024-04-02", reason: "…" } });
-  assertEquals(corr.summary, "把政見 abcdef12 的提出日改為「2024-04-02」");
+  assertEquals(corr.summary, "把某條政見的提出日改為「2024-04-02」");
   assertEquals(corr.policy_url, "https://xn--2lw665d.tw/policy/abcdef12-0000");
 
   const prog = summarizeContribution({ contribution_type: "policy_progress", payload: { policy_id: "p-2", status: "In Progress", progress: 40, note: "已編列預算" } });
-  assert(prog.summary.startsWith("更新「政見 p-2」進度為「進行中」（40%）"));
+  assert(prog.summary.startsWith("更新「某條政見」進度為「進行中」（40%）"));
 
   const pol = summarizeContribution({ contribution_type: "politician", payload: { name: "王大明", birth_year: 1970, bio: "x".repeat(300) } });
   assertEquals(pol.summary, "為「王大明」補基本資料：出生年、簡介");
@@ -296,7 +297,7 @@ Deno.test("correction 有標題就用標題，沒有才退回 id 前八碼", () 
     payload: { target_table: "policies", target_id: "1b808b02-0000-4000-8000-000000000001", field: "election_id", correct_value: "2024" },
     applied_politician_id: null, applied_policy_id: null,
   }).summary;
-  assertEquals(withoutTitle, "把政見 1b808b02 的所屬選舉改為「2024」");
+  assertEquals(withoutTitle, "把某條政見的所屬選舉改為「2024」", "查不到標題也不能把 id 印出來");
 });
 
 // 統計從 2026-09-17 起改在資料庫算（contribution_feed_summary），TS 這份變成規格。
@@ -376,6 +377,113 @@ Deno.test("candidacy 帶選舉結果：摘要講結果不講狀態、不帶票�
 
 Deno.test("merge_politician 摘要：合併或不同人", () => {
   const A = "00000000-0000-4000-8000-000000000001", B = "00000000-0000-4000-8000-000000000002";
-  assertEquals(summarizeContribution({ contribution_type: "merge_politician", payload: { keep_id: A, remove_id: B, same_person: true, reason: "中選會歷屆參選同一筆，出生年相同" } }).summary, "合併同名人物：00000000 併入 00000000：中選會歷屆參選同一筆，出生年相同");
+  assertEquals(summarizeContribution({ contribution_type: "merge_politician", payload: { keep_id: A, remove_id: B, same_person: true, reason: "中選會歷屆參選同一筆，出生年相同" } }).summary, "合併同名人物：「另一位同名人物」併入「某位政治人物」：中選會歷屆參選同一筆，出生年相同");
   assertEquals(summarizeContribution({ contribution_type: "merge_politician", payload: { keep_id: A, remove_id: B, same_person: false, reason: "一位是金門縣議員一位是連江縣議員，出生年不同" } }).summary.startsWith("判定人物"), true);
+});
+
+// ---- 2026-10-18「把 id 都換成名稱」：摘要裡不准出現 id ----
+const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const LOOKUP: SummaryLookup = {
+  politicians: { [U(1)]: "邱威霖", [U(2)]: "王小明" },
+  policies: { [U(10)]: "規劃里民休閒空間" },
+  lineages: { [U(20)]: "市立游泳池興建", [U(21)]: "水域安全" },
+  parties: { "95": "台灣團結聯盟", "10001": "台聯黨" },
+  elections: { "9827": "邱威霖 2026 縣市議員", "36379": "王小明 2022 村里長" },
+  regions: { "65000": "新北市" },
+  contributions: { [U(30)]: "為「邱威霖」新增政見：規劃里民休閒空間" },
+};
+const sum = (contribution_type: string, payload: Record<string, unknown>, extra: { applied_politician_id?: string; lookup?: SummaryLookup } = {}) =>
+  summarizeContribution({ contribution_type, payload, lookup: LOOKUP, ...extra });
+
+Deno.test("id 換名稱：policy／policy_progress／policy_elements 用查到的人名與標題", () => {
+  assertEquals(sum("policy", { politician_id: U(1), title: "規劃里民休閒空間" }).summary, "為「邱威霖」新增政見：規劃里民休閒空間");
+  assertEquals(sum("policy", { title: "x" }, { applied_politician_id: U(2) }).summary, "為「王小明」新增政見：x");
+  assertEquals(sum("policy_progress", { policy_id: U(10), status: "In Progress", note: "動工" }).summary, "更新「規劃里民休閒空間」進度為「進行中」：動工");
+  assertEquals(sum("policy_elements", { policy_id: U(10), elements: [] }).summary, "為「規劃里民休閒空間」拆政見三要素：（沒有要素）");
+});
+
+Deno.test("id 換名稱：correction／removal 依目標表換成人名、標題、參選紀錄標籤", () => {
+  assertEquals(sum("correction", { target_table: "politicians", target_id: U(1), field: "party", correct_value: "無黨籍" }).summary, "把政治人物「邱威霖」的政黨改為「無黨籍」");
+  assertEquals(sum("correction", { target_table: "politician_elections", target_id: 9827, field: "candidate_status", correct_value: "registered" }).summary, "把參選紀錄「邱威霖 2026 縣市議員」的參選狀態改為「已登記」");
+  assertEquals(sum("removal", { target_table: "policies", target_id: U(10), reason: "重複" }).summary, "建議移除政見「規劃里民休閒空間」：重複");
+  assertEquals(sum("removal", { target_table: "politicians", target_id: U(99), reason: "測試資料" }).summary, "建議移除某位政治人物：測試資料");
+  assertEquals(sum("removal", { target_table: "tracking_logs", target_id: U(99), reason: "r" }).summary, "建議移除某筆資料：r");
+});
+
+Deno.test("id 換名稱：裁決用原貢獻自己的摘要，查不到說某筆貢獻", () => {
+  assertEquals(sum("adjudication", { contribution_id: U(30), verdict: "uphold", reason: "來源確實寫了" }).summary, "裁決「為「邱威霖」新增政見：規劃里民休閒空間」：認為原貢獻正確——來源確實寫了");
+  assertEquals(sum("adjudication", { contribution_id: U(31), verdict: "reject" }).summary, "裁決某筆貢獻：認為原貢獻有誤");
+});
+
+Deno.test("id 換名稱：政策脈絡四型別、政黨、改掛、合併、地區統計", () => {
+  assertEquals(sum("lineage", { lineage_id: U(20), policy_ids: [U(10)] }).summary, "政策脈絡「市立游泳池興建」：歸入 1 條政見");
+  assertEquals(sum("lineage_handover", { lineage_id: U(20), handover_type: "continued", note: "接續" }).summary.startsWith("記政策脈絡「市立游泳池興建」的交接"), true);
+  assertEquals(sum("lineage_participants", { lineage_id: U(99), participants: [] }).summary.startsWith("為政策脈絡「某條政策脈絡」標參與角色"), true);
+  assertEquals(sum("lineage_link", { upper_lineage_id: U(20), lower_lineage_id: U(21), link_type: "implements", note: "n" }).summary.includes("「市立游泳池興建」→「水域安全」"), true);
+  assertEquals(
+    sum("party_info", { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }, { party_id: 777, valid_to: "2019-04-30" }] }).summary,
+    "補政黨資訊：政黨「台灣團結聯盟」（名稱起始日 2019-05-01、前身是政黨「台聯黨」）；政黨「某個政黨」（名稱停用日 2019-04-30）",
+  );
+  assertEquals(sum("reassign_candidacy", { politician_election_id: 36379, to_politician_id: U(1), reason: "r" }).summary, "參選紀錄「王小明 2022 村里長」改掛到既有的「邱威霖」：r");
+  assertEquals(sum("reassign_candidacy", { politician_election_id: 1, to_politician_id: U(99), reason: "r" }).summary, "參選紀錄（某筆）改掛到既有的「某位政治人物」：r");
+  assertEquals(sum("merge_politician", { keep_id: U(1), remove_id: U(2), same_person: true, reason: "r" }).summary, "合併同名人物：「王小明」併入「邱威霖」：r");
+  assertEquals(sum("regional_stat", { admin_code: "65000", stat_key: "population", year: 2024, value: 1, unit: "人" }).summary, "補 新北市2024 年的人口：1 人");
+  assertEquals(sum("regional_stat", { admin_code: "99999", stat_key: "population", year: 2024, value: 1, unit: "人" }).summary.includes("某個地區"), true);
+});
+
+Deno.test("id 換名稱：不管查不查得到，摘要裡都不能出現 uuid 或數字 id", () => {
+  const payloads: Array<[string, Record<string, unknown>]> = [
+    ["policy", { politician_id: U(77), title: "t" }],
+    ["policy_progress", { policy_id: U(77), status: "Achieved", note: "n" }],
+    ["policy_elements", { policy_id: U(77), elements: [] }],
+    ["correction", { target_table: "policies", target_id: U(77), field: "title", correct_value: "x" }],
+    ["adjudication", { contribution_id: U(77), verdict: "uphold" }],
+    ["lineage", { lineage_id: U(77) }],
+    ["lineage_participants", { lineage_id: U(77), participants: [] }],
+    ["lineage_handover", { lineage_id: U(77), handover_type: "continued", note: "n" }],
+    ["lineage_link", { upper_lineage_id: U(77), lower_lineage_id: U(78), link_type: "implements", note: "n" }],
+    ["party_info", { parties: [{ party_id: 12345, predecessor_id: 54321 }] }],
+    ["reassign_candidacy", { politician_election_id: 98765, to_politician_id: U(77), reason: "r" }],
+    ["merge_politician", { keep_id: U(77), remove_id: U(78), same_person: false, reason: "r" }],
+    ["removal", { target_table: "politicians", target_id: U(77), reason: "r" }],
+    ["regional_stat", { admin_code: "12345", stat_key: "population", year: 2024, value: 1, unit: "人" }],
+  ];
+  for (const [type, payload] of payloads) {
+    for (const lookup of [undefined, {} as SummaryLookup]) {
+      const r = summarizeContribution({ contribution_type: type, payload, lookup });
+      for (const text of [r.summary, r.detail]) {
+        assert(!/[0-9a-f]{8}-[0-9a-f]{4}/i.test(text) && !text.includes("00000000"), `${type} 摘要印出了 uuid：${text}`);
+        assert(!/12345|54321|98765/.test(text), `${type} 摘要印出了數字 id：${text}`);
+      }
+    }
+  }
+});
+
+Deno.test("detail：去掉「誰＋做了什麼」前綴，其餘型別等於 summary", () => {
+  assertEquals(sum("policy", { politician_id: U(1), title: "規劃里民休閒空間" }).detail, "規劃里民休閒空間");
+  assertEquals(sum("policy_progress", { policy_id: U(10), status: "In Progress", progress: 40, note: "動工" }).detail, "進度為「進行中」（40%）：動工");
+  assertEquals(sum("politician", { politician_id: U(1), party: "無黨籍", education: ["a"] }).detail, "政黨、學歷");
+  assertEquals(sum("correction", { target_table: "politicians", target_id: U(1), field: "party", correct_value: "無黨籍" }).detail, "政黨改為「無黨籍」");
+  assertEquals(sum("correction", { target_table: "politician_elections", target_id: 9827, field: "candidate_status", correct_value: "registered" }).detail, "參選紀錄「邱威霖 2026 縣市議員」的參選狀態改為「已登記」");
+  assertEquals(sum("candidacy", { name: "王小明", election_id: 2026, region: "彰化縣", election_type: "縣市長", candidate_status: "registered" }).detail, "2026 彰化縣縣市長參選狀態改為「已登記」");
+  const other = sum("no_change", { note: "核對過" });
+  assertEquals(other.detail, other.summary);
+});
+
+Deno.test("collectSummaryIds：掃出各表要查的 id，濾掉格式不對的", () => {
+  const ids = collectSummaryIds([
+    { contribution_type: "policy", payload: { politician_id: U(1) }, applied_policy_id: U(10) },
+    { contribution_type: "correction", payload: { target_table: "politician_elections", target_id: 9827 } },
+    { contribution_type: "adjudication", payload: { contribution_id: U(30) } },
+    { contribution_type: "party_info", payload: { parties: [{ party_id: 95, predecessor_id: "10001" }] } },
+    { contribution_type: "regional_stat", payload: { admin_code: "65000" } },
+    { contribution_type: "lineage", payload: { lineage_id: "not-a-uuid" } },
+  ]);
+  assertEquals(ids.politicians, [U(1)]);
+  assertEquals(ids.policies, [U(10)]);
+  assertEquals(ids.elections, ["9827"]);
+  assertEquals(ids.contributions, [U(30)]);
+  assertEquals(ids.parties.sort(), ["10001", "95"]);
+  assertEquals(ids.regions, ["65000"]);
+  assertEquals(ids.lineages, []);
 });
