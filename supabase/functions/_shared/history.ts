@@ -5,7 +5,8 @@
  * collect*（碰 DB）與 buildHistory（純函式，可測）分開。
  */
 
-import { summarizeContribution } from "./contribution-summary.ts";
+import { summarizeContribution, type SummaryLookup } from "./contribution-summary.ts";
+import { loadSummaryLookup } from "./summary-lookup.ts";
 import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
 import { fetchSourceBriefs, primaryUrlOf, type SourceBrief, type SourceView, viewFromList, viewSources } from "./source-read.ts";
 
@@ -44,6 +45,8 @@ export interface HistoryData {
   politician_names?: Record<string, string>;
   policy_titles?: Record<string, string>;
   election_labels?: Record<string, string>;
+  /** 摘要用的完整 id → 名稱對照（政見、脈絡、政黨、地區、裁決的原貢獻…）；上面三個舊欄位保留給只給名字的呼叫端 */
+  summary_lookup?: SummaryLookup;
   /** 交件的 source_urls 在出處表裡的等級、認定根據與存檔網址（#347 第二階段 A）；沒給就照網域自動判斷 */
   source_briefs?: ReadonlyMap<string, SourceBrief>;
 }
@@ -56,6 +59,8 @@ export interface HistoryEntry {
   contribution_type: string;
   type_label: string;
   summary: string;
+  /** 去掉「誰＋做了什麼」前綴的版本（人物頁／政見頁的履歷已有型別標籤、頁面就是那個對象，用這個不重複）；沒有可去的前綴就等於 summary */
+  detail: string;
   status: string;
   status_label: string;
   agent_name: string | null;
@@ -117,36 +122,59 @@ function fmtValue(v: unknown): string {
   return "（整列）";
 }
 
-/** 有單一欄位更新時用「把 X 從 A 改為 B」，否則沿用 feed 的一句話摘要 */
-function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], names: Record<string, string>, titles: Record<string, string> = {}, elections: Record<string, string> = {}): string {
+/**
+ * 有單一欄位更新時用「把 X 從 A 改為 B」，否則沿用 feed 的一句話摘要。
+ * detail＝同一句拿掉「把人物／政見的」這種頁面本身已經講過的前綴。
+ */
+function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], lookup: SummaryLookup): { summary: string; detail: string } {
   const updates = edits.filter((e) => e.field !== "*");
   const inserts = edits.filter((e) => e.field === "*");
+  // 改的就是頁面主體（人物、政見）時省掉「把人物的」；其他表（參選紀錄、追蹤紀錄…）要留著讓讀者知道改了哪一筆
+  const selfTable = (t: string) => t === "politicians" || t === "policies";
   if (c.contribution_type === "correction" && updates.length === 1) {
     const e = updates[0];
-    return `把${TABLE_LABEL[e.table] ?? e.table}的${e.field_label}從「${fmtValue(e.old_value)}」改為「${fmtValue(e.new_value)}」`;
+    const change = `${e.field_label}從「${fmtValue(e.old_value)}」改為「${fmtValue(e.new_value)}」`;
+    const head = TABLE_LABEL[e.table] ?? "資料";
+    return { summary: `把${head}的${change}`, detail: selfTable(e.table) ? change : `${head}的${change}` };
   }
   if (c.contribution_type === "correction" && updates.length > 1) {
-    return `更正${TABLE_LABEL[updates[0].table] ?? updates[0].table}的 ${updates.length} 個欄位：${updates.map((e) => `${e.field_label}「${fmtValue(e.old_value)}」→「${fmtValue(e.new_value)}」`).join("；")}`;
+    const head = TABLE_LABEL[updates[0].table] ?? "資料";
+    const changes = updates.map((e) => `${e.field_label}「${fmtValue(e.old_value)}」→「${fmtValue(e.new_value)}」`).join("；");
+    return { summary: `更正${head}的 ${updates.length} 個欄位：${changes}`, detail: selfTable(updates[0].table) ? `${updates.length} 個欄位：${changes}` : `${head}的 ${updates.length} 個欄位：${changes}` };
   }
   if (c.contribution_type === "politician" && inserts.some((e) => e.table === "politicians")) {
-    return `新增人物「${typeof c.payload.name === "string" ? c.payload.name : "?"}」`;
+    const who = typeof c.payload.name === "string" ? c.payload.name : "（未填姓名）";
+    return { summary: `新增人物「${who}」`, detail: `「${who}」` };
   }
   if (c.contribution_type === "politician" && updates.length > 0) {
-    return `補上${updates.map((e) => e.field_label).join("、")}`;
+    const s = `補上${updates.map((e) => e.field_label).join("、")}`;
+    return { summary: s, detail: updates.map((e) => e.field_label).join("、") };
   }
-  const pid = c.applied_politician_id ?? (typeof c.payload.politician_id === "string" ? c.payload.politician_id : null);
-  const withName = typeof c.payload.name === "string" || !pid || !names[pid] ? c.payload : { ...c.payload, name: names[pid] };
   const polId = c.applied_policy_id
     ?? (typeof c.payload.policy_id === "string" ? c.payload.policy_id : null)
     ?? (c.payload.target_table === "policies" && typeof c.payload.target_id === "string" ? c.payload.target_id : null);
-  const withTitle = typeof c.payload.policy_title === "string" || !polId || !titles[polId]
+  const pid = c.applied_politician_id ?? (typeof c.payload.politician_id === "string" ? c.payload.politician_id : null);
+  const withName = typeof c.payload.name === "string" || !pid || !lookup.politicians?.[pid] ? c.payload : { ...c.payload, name: lookup.politicians[pid] };
+  const withTitle = typeof c.payload.policy_title === "string" || !polId || !lookup.policies?.[polId]
     ? withName
-    : { ...withName, policy_title: titles[polId] };
+    : { ...withName, policy_title: lookup.policies[polId] };
   const elecKey = c.payload.target_table === "politician_elections" && (typeof c.payload.target_id === "string" || typeof c.payload.target_id === "number")
     ? String(c.payload.target_id)
     : null;
-  const payload = elecKey && elections[elecKey] ? { ...withTitle, target_label: elections[elecKey] } : withTitle;
-  return summarizeContribution({ contribution_type: c.contribution_type, payload, applied_politician_id: c.applied_politician_id, applied_policy_id: c.applied_policy_id }).summary;
+  const payload = elecKey && lookup.elections?.[elecKey] ? { ...withTitle, target_label: lookup.elections[elecKey] } : withTitle;
+  const r = summarizeContribution({ contribution_type: c.contribution_type, payload, applied_politician_id: c.applied_politician_id, applied_policy_id: c.applied_policy_id, lookup });
+  return { summary: r.summary, detail: r.detail };
+}
+
+/** 舊三欄（只給名字的呼叫端）與完整對照合併；完整對照優先 */
+function summaryLookupOf(data: HistoryData): SummaryLookup {
+  const l = data.summary_lookup ?? {};
+  return {
+    ...l,
+    politicians: { ...(data.politician_names ?? {}), ...(l.politicians ?? {}) },
+    policies: { ...(data.policy_titles ?? {}), ...(l.policies ?? {}) },
+    elections: { ...(data.election_labels ?? {}), ...(l.elections ?? {}) },
+  };
 }
 
 function typeLabelFor(c: HistoryContribution, edits: HistoryEditOut[]): string {
@@ -197,7 +225,7 @@ export function buildHistory(data: HistoryData): HistoryEntry[] {
         id: c.id,
         contribution_type: c.contribution_type,
         type_label: typeLabelFor(c, edits),
-        summary: summaryFor(c, edits, data.politician_names ?? {}, data.policy_titles ?? {}, data.election_labels ?? {}),
+        ...summaryFor(c, edits, summaryLookupOf(data)),
         status,
         status_label: STATUS_LABEL[status] ?? status,
         agent_name: c.agent_name,
@@ -329,20 +357,7 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     const originRow = await originRowFor(supabase, target, id);
     return { contributions: [], votes: [], edits: [], adjudications: [], tasks: [], origin_row: originRow.row, election_notes: originRow.notes };
   }
-  const politicianIds = [...new Set(contributions.flatMap((c) => [c.applied_politician_id, typeof c.payload.politician_id === "string" ? c.payload.politician_id : null]).filter((v): v is string => typeof v === "string" && UUID_RE.test(v)))];
-  // 政見標題同樣要換掉 id（2026-09-17）：correction 帶 target_id、policy_progress 帶 policy_id，
-  // 摘要拿不到標題就只能印 id 前八碼，讀者看到「政見 1b808b02」等於沒資訊。
-  const policyIds = [...new Set(contributions.flatMap((c) => [
-    c.applied_policy_id,
-    typeof c.payload.policy_id === "string" ? c.payload.policy_id : null,
-    c.payload.target_table === "policies" && typeof c.payload.target_id === "string" ? c.payload.target_id : null,
-  ]).filter((v): v is string => typeof v === "string" && UUID_RE.test(v)))];
-  const electionRowIds = [...new Set(contributions.flatMap((c) =>
-    c.payload.target_table === "politician_elections" && (typeof c.payload.target_id === "string" || typeof c.payload.target_id === "number")
-      ? [String(c.payload.target_id)]
-      : []
-  ))];
-  const [votes, edits, adjudications, tasks, originRow, names, titles, elecRows, sourceBriefs] = await Promise.all([
+  const [votes, edits, adjudications, tasks, originRow, summaryLookup, sourceBriefs] = await Promise.all([
     // 1000 是伺服器上限（PostgREST max-rows），寫 2000 拿不到更多、只會讓人以為有保護。
     // 實測一筆查核履歷的票與 edit 最多 61 筆（2026-09-18 算過最壞情況）。
     supabase.from("contribution_votes").select(VOTE_COLUMNS).in("contribution_id", ids).limit(1000),
@@ -350,11 +365,8 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     supabase.from("contributions").select(CONTRIBUTION_COLUMNS).eq("contribution_type", "adjudication").in("payload->>contribution_id", ids).limit(500),
     supabase.from("contribution_tasks").select("id, task_type, status, target, created_at, closed_at").eq("task_type", "adjudicate").in("target->>contribution_id", ids).limit(500),
     originRowFor(supabase, target, id),
-    politicianIds.length > 0 ? supabase.from("politicians").select("id, name").in("id", politicianIds) : Promise.resolve({ data: [], error: null }),
-    policyIds.length > 0 ? supabase.from("policies").select("id, title").in("id", policyIds) : Promise.resolve({ data: [], error: null }),
-    electionRowIds.length > 0
-      ? supabase.from("politician_elections").select("id, election_id, election_type, politicians(name)").in("id", electionRowIds)
-      : Promise.resolve({ data: [], error: null }),
+    // 摘要裡出現的所有 id（人物、政見、參選紀錄、脈絡、政黨、地區、裁決的原貢獻）一次批次換成名稱
+    loadSummaryLookup(supabase, contributions),
     // 交件的網址在出處表的等級與存檔網址（#347 第二階段 A）；出處表拿不到就是空表，照網域自動判斷
     fetchSourceBriefs(supabase, contributions.flatMap((c) => c.source_urls ?? [])),
   ]);
@@ -364,13 +376,10 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     edits: ok<HistoryEdit[]>(edits, "edit_history"),
     adjudications: ok<HistoryContribution[]>(adjudications, "adjudications"),
     tasks: ok<HistoryTask[]>(tasks, "adjudicate tasks"),
-    politician_names: Object.fromEntries(ok<Array<{ id: string; name: string }>>(names, "politician names").map((p) => [p.id, p.name])),
-    policy_titles: Object.fromEntries(ok<Array<{ id: string; title: string }>>(titles, "policy titles").map((p) => [p.id, p.title])),
-    // deno-lint-ignore no-explicit-any
-    election_labels: Object.fromEntries((ok<any[]>(elecRows, "politician_elections").map((x) => [
-      String(x.id),
-      `${x.politicians?.name ?? "未指名"} ${x.election_id ?? ""} ${x.election_type ?? ""}`.trim(),
-    ]))),
+    politician_names: summaryLookup.politicians,
+    policy_titles: summaryLookup.policies,
+    election_labels: summaryLookup.elections,
+    summary_lookup: summaryLookup,
     origin_row: originRow.row,
     election_notes: originRow.notes,
     source_briefs: sourceBriefs,

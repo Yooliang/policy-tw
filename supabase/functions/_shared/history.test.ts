@@ -140,3 +140,17 @@ Deno.test("沒有任何貢獻紀錄：entries 空、origin 用匯入的 source_u
   assertEquals(bare.kind, "unknown");
   assert(bare.note?.includes("也沒有記錄來源"));
 });
+
+Deno.test("履歷每筆帶 detail：去掉「為誰新增政見」「把政見的」這種頁面已經講過的前綴，summary 保持完整", async () => {
+  const fake = createFakeSupabase(seed);
+  const entries = buildHistory(await collectHistory(fake.client, "politician", POL));
+  const byType = (t: string) => entries.find((e) => e.contribution_type === t)!;
+  const policy = byType("policy");
+  assertEquals(policy.summary, "為「王小明」新增政見：長者健保全免");
+  assertEquals(policy.detail, "長者健保全免");
+  const pol = buildHistory(await collectHistory(fake.client, "policy", POLICY));
+  const progress = pol.find((e) => e.contribution_type === "policy_progress")!;
+  assert(progress.summary.startsWith("更新「長者健保全免」進度"));
+  assertEquals(progress.detail.startsWith("進度為"), true);
+  for (const e of entries) assert(typeof e.detail === "string" && e.detail.length > 0, `${e.contribution_type} 沒有 detail`);
+});

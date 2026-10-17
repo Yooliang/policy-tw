@@ -270,10 +270,10 @@ Deno.test("驗證現況：逐個政黨並排交上來的值與現值（含前身
 });
 
 Deno.test("貢獻摘要：講得出補了哪個政黨的哪一欄", () => {
-  const s = summarizeContribution({ contribution_type: "party_info", payload: { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }] } });
-  assertStringIncludes(s.summary, "政黨 95");
+  const s = summarizeContribution({ contribution_type: "party_info", payload: { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }] }, lookup: { parties: { "95": "台灣團結聯盟", "10001": "台聯黨" } } });
+  assertStringIncludes(s.summary, "政黨「台灣團結聯盟」");
   assertStringIncludes(s.summary, "名稱起始日 2019-05-01");
-  assertStringIncludes(s.summary, "前身是政黨 10001");
+  assertStringIncludes(s.summary, "前身是政黨「台聯黨」");
 });
 
 // ── 參選紀錄缺政黨那一種任務：hint 與骨架 ───────────────────────────────

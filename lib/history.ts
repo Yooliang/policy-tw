@@ -17,6 +17,8 @@ export interface HistoryEntry {
   contribution_type: string
   type_label: string
   summary: string
+  /** 去掉「誰＋做了什麼」前綴的版本（頁面本身已是那個人／那條政見、型別標籤已在旁邊）；舊版端點沒有這欄，退回 summary */
+  detail?: string
   status: string
   status_label: string
   agent_name: string | null

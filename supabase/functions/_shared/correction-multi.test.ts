@@ -87,7 +87,7 @@ Deno.test("落庫：逐欄套用並各寫一筆 edit_history（舊值→新值�
   assert(String(outcome.message).includes("更正 2 個欄位"));
 
   const s = summarizeContribution({ contribution_type: "correction", payload: row.payload });
-  assert(s.summary.startsWith("更正政見") && s.summary.includes("來源網址") && s.summary.includes("內容"), s.summary);
+  assert(s.summary.startsWith("更正某條政見") && s.summary.includes("來源網址") && s.summary.includes("內容"), s.summary);
   const current = shapeVerifyCurrent("correction", row.payload, { target: { id: POLICY, source_url: "https://old.example", description: "舊描述" } });
   assertEquals((current.changes as Array<Record<string, unknown>>).map((c) => [c.field, c.db_current]), [["source_url", "https://old.example"], ["description", "舊描述"]]);
   assertEquals(current.field, "source_url", "第一欄仍放在 field／current_value 維持相容");

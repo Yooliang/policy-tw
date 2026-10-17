@@ -90,6 +90,11 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : v === nu
 
 export interface ContributionSummary {
   summary: string;
+  /**
+   * 去掉「誰＋做了什麼」前綴的版本：人物頁／政見頁的查核履歷已經有型別標籤、頁面本身就是那個人（那條政見），
+   * 再寫「為「王小明」新增政見：」是重複。沒有可去的前綴就等於 summary。
+   */
+  detail: string;
   target_name: string | null;
   politician_id: string | null;
   policy_id: string | null;
@@ -97,12 +102,39 @@ export interface ContributionSummary {
   policy_url: string | null;
 }
 
+/**
+ * 摘要裡的 id 換成名稱用的對照表（鍵一律是字串化的 id）。由呼叫端批次查好再傳進來（summary-lookup.ts），
+ * 純函式本身不碰資料庫。查不到的 id 一律退成「某位政治人物」這類中性說法，絕不把 id 印給讀者。
+ */
+export interface SummaryLookup {
+  /** politician id → 姓名 */
+  politicians?: Record<string, string>;
+  /** policy id → 標題 */
+  policies?: Record<string, string>;
+  /** lineage id → 脈絡標題 */
+  lineages?: Record<string, string>;
+  /** party id → 政黨名稱 */
+  parties?: Record<string, string>;
+  /** politician_elections 列 id → 「姓名 年份 選舉類型」 */
+  elections?: Record<string, string>;
+  /** 行政區代碼 → 地區名稱 */
+  regions?: Record<string, string>;
+  /** 貢獻 id → 該筆貢獻自己的一句話摘要（裁決用） */
+  contributions?: Record<string, string>;
+}
+
 export interface SummaryInput {
   contribution_type: string;
   payload: unknown;
   applied_politician_id?: string | null;
   applied_policy_id?: string | null;
+  lookup?: SummaryLookup;
 }
+
+/** 查不到名稱時的中性說法（對應 TABLE_LABEL 的 key） */
+const TABLE_NEUTRAL: Record<string, string> = {
+  politicians: "某位政治人物", politician_elections: "某筆參選紀錄", policies: "某條政見", politician_offices: "某筆任期",
+};
 
 export function summarizeContribution(input: SummaryInput): ContributionSummary {
   const p = (input.payload && typeof input.payload === "object" ? input.payload : {}) as Obj;
@@ -111,6 +143,12 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
   const policyId = input.applied_policy_id ?? (typeof p.policy_id === "string" ? p.policy_id : null);
   let summary: string;
   let targetName: string | null = name || null;
+  let detail: string | null = null;
+  const lk = input.lookup ?? {};
+  const find = (m: Record<string, string> | undefined, id: unknown): string => (m && (typeof id === "string" || typeof id === "number") ? m[String(id)] ?? "" : "");
+  const politicianName = (id: unknown, fallback = "某位政治人物"): string => find(lk.politicians, id) || fallback;
+  const policyTitle = (id: unknown, fallback = "某條政見"): string => find(lk.policies, id) || fallback;
+  const lineageTitle = (id: unknown): string => find(lk.lineages, id) || "某條政策脈絡";
 
   switch (input.contribution_type) {
     case "politician": {
@@ -120,7 +158,8 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const fields = [...new Set(POLITICIAN_SUMMARY_FIELDS
         .filter((k) => { const v = p[k]; return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== ""; })
         .map((k) => FIELD_LABEL[k] ?? k))];
-      const who = name || "（未填姓名）";
+      const who = name || find(lk.politicians, politicianId) || "（未填姓名）";
+      if (fields.length > 0) detail = fields.join("、");
       summary = politicianId
         ? (fields.length > 0 ? `為「${who}」補資料：${fields.join("、")}` : `更新「${who}」的資料`)
         : fields.length > 0
@@ -131,50 +170,47 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
     case "candidacy": {
       const status = CANDIDATE_STATUS_LABEL[str(p.candidate_status)] ?? str(p.candidate_status);
       const result = electionResultLabel(p);
+      const name = str(p.name) || find(lk.politicians, politicianId);
       // 帶選舉結果的（election_result_missing 的答案）重點是結果，不是「狀態改成確認參選」——那多半沒變
+      const unit = `${str(p.election_id)} ${str(p.region)}${str(p.election_type)}`;
+      detail = result ? `${unit}選舉結果：${result}` : `${unit}參選狀態改為「${status}」`;
       summary = result
         ? `補 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}選舉結果：${result}`
         : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」`;
       break;
     }
     case "policy": {
-      // 代理可以只帶 politician_id。呼叫端（contributions-feed）會先把 id 換成姓名；
-      // 真的換不到時退成 id 前八碼，至少讀者點得到那個人，不要只印一個空括號。
-      const who = name || (politicianId ? `政治人物 ${politicianId.slice(0, 8)}` : "未指名的政治人物");
+      // 代理可以只帶 politician_id。呼叫端會先批次查好姓名放進 lookup；真的換不到就印中性說法，不印 id。
+      const who = name || politicianName(politicianId);
       summary = `為「${who}」新增政見：${clip(p.title, 80)}`;
+      detail = clip(p.title, 80);
       break;
     }
     case "policy_progress": {
       const status = POLICY_STATUS_LABEL[str(p.status)] ?? str(p.status);
-      const title = str(p.policy_title) || (policyId ? `政見 ${policyId.slice(0, 8)}` : "政見");
+      const title = str(p.policy_title) || policyTitle(policyId);
       const progress = typeof p.progress === "number" ? `（${p.progress}%）` : "";
       summary = `更新「${clip(title, 60)}」進度為「${status}」${progress}：${clip(p.note, 80)}`;
-      targetName = str(p.policy_title) || name || null;
+      detail = `進度為「${status}」${progress}：${clip(p.note, 80)}`;
+      targetName = str(p.policy_title) || find(lk.policies, policyId) || name || null;
       break;
     }
     case "policy_elements": {
       // 政見三要素（#364）：讀者要看得出拆了哪條政見、每個要素原文有沒有寫
-      const title = str(p.policy_title) || (policyId ? `政見 ${policyId.slice(0, 8)}` : "政見");
+      const title = str(p.policy_title) || policyTitle(policyId);
       const parts = (Array.isArray(p.elements) ? p.elements : [])
         .filter((e): e is Obj => !!e && typeof e === "object")
         .map((e) => elementPhrase(e, 30));
       summary = `為「${clip(title, 60)}」拆政見三要素：${parts.join("；") || "（沒有要素）"}`;
-      targetName = str(p.policy_title) || null;
+      detail = parts.join("；") || "（沒有要素）";
+      targetName = str(p.policy_title) || find(lk.policies, policyId) || null;
       break;
     }
     case "correction": {
-      const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
+      const table = TABLE_LABEL[str(p.target_table)] ?? "資料";
       const id = str(p.target_id);
-      // 標題／姓名優先，沒有才退回 id 前八碼（2026-09-17：「把政見 1b808b02 的…」
-      // 這種畫面對讀者毫無意義）。呼叫端會先把 target_id 換成標題塞進 payload。
-      const targetLabel = str(p.target_table) === "policies"
-        ? str(p.policy_title)
-        : str(p.target_table) === "politicians"
-        ? str(p.name)
-        // 參選紀錄的列 id（9827）對讀者沒有意義，呼叫端會查成「某某某 2026 縣市議員」
-        : str(p.target_label);
-      // 沒有標題時維持舊格式「政見 abcdef12 的…」，那個空白是格式的一部分
-      const what = targetLabel ? `${table}「${clip(targetLabel, 40)}」` : `${table} ${id.slice(0, 8)} `;
+      const targetLabel = targetLabelOf(p, id, lk);
+      const what = targetLabel ? `${table}「${clip(targetLabel, 40)}」` : (TABLE_NEUTRAL[str(p.target_table)] ?? "某筆資料");
       // 值也要看得懂：candidate_status／status 是固定 enum，翻成中文；其餘照原樣印
       const valueLabel = (field: string, v: unknown): string => {
         const raw = clip(v, 80);
@@ -188,15 +224,21 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
         ? `把${what}的${FIELD_LABEL[changes[0]?.field ?? ""] ?? changes[0]?.field ?? "?"}改為「${valueLabel(changes[0]?.field ?? "", changes[0]?.correct_value)}」`
         : `更正${what}的 ${changes.length} 個欄位：${changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}→「${valueLabel(c.field, c.correct_value)}」`).join("、")}`;
       targetName = null;
-      if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null);
-      if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);
+      // 目標就是頁面上這個人時連「把人物」也省掉；其他目標（政見、參選紀錄）要留著讓讀者知道改的是哪一筆
+      const changeText = changes.length <= 1
+        ? `${FIELD_LABEL[changes[0]?.field ?? ""] ?? changes[0]?.field ?? "?"}改為「${valueLabel(changes[0]?.field ?? "", changes[0]?.correct_value)}」`
+        : `${changes.length} 個欄位：${changes.map((c) => `${FIELD_LABEL[c.field] ?? c.field}→「${valueLabel(c.field, c.correct_value)}」`).join("、")}`;
+      detail = str(p.target_table) === "politicians" ? changeText : `${what}的${changeText}`;
+      if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null, detail);
+      if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null, detail);
       break;
     }
     case "adjudication": {
       // 裁決是對別人那筆貢獻的定奪，讀者要看得出是支持還是推翻，以及依據
       const verdict = str(p.verdict) === "uphold" ? "認為原貢獻正確" : str(p.verdict) === "reject" ? "認為原貢獻有誤" : "裁決";
-      const cid = str(p.contribution_id).slice(0, 8);
-      summary = `裁決貢獻 ${cid}：${verdict}${str(p.reason) ? `——${clip(p.reason, 100)}` : ""}`;
+      // 原貢獻用它自己的一句話摘要稱呼（查不到就說「某筆貢獻」），不印貢獻 id
+      const orig = find(lk.contributions, p.contribution_id);
+      summary = `裁決${orig ? `「${clip(orig, 60)}」` : "某筆貢獻"}：${verdict}${str(p.reason) ? `——${clip(p.reason, 100)}` : ""}`;
       targetName = null;
       break;
     }
@@ -226,38 +268,39 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const parts = [n > 0 ? `歸入 ${n} 條政見` : "", d > 0 ? `拿掉 ${d} 條政見` : "", !nl && (p.title || p.summary || p.category) ? "更正脈絡內容" : ""].filter(Boolean);
       summary = nl
         ? `建立政策脈絡「${clip(nl.title, 60)}」（${lineagePlaceLabel(nl.level, nl.region, nl.sub_region)}）並${parts.join("、") || "歸入政見"}`
-        : `政策脈絡 ${str(p.lineage_id).slice(0, 8)}：${parts.join("、") || "（沒有動作）"}`;
+        : `政策脈絡「${lineageTitle(p.lineage_id)}」：${parts.join("、") || "（沒有動作）"}`;
       targetName = nl ? str(nl.title) || null : null;
       break;
     }
     case "lineage_participants": {
       const items = Array.isArray(p.participants) ? (p.participants as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
       const roles = items.slice(0, 3).map((e) => e.remove === true ? `拿掉一項${PARTICIPANT_BASIS_LABEL[str(e.basis) as keyof typeof PARTICIPANT_BASIS_LABEL] ?? ""}角色` : participantPhrase(e));
-      summary = `為政策脈絡 ${str(p.lineage_id).slice(0, 8)} 標參與角色 ${items.length} 項：${roles.join("、")}${items.length > 3 ? "…" : ""}`;
+      summary = `為政策脈絡「${lineageTitle(p.lineage_id)}」標參與角色 ${items.length} 項：${roles.join("、")}${items.length > 3 ? "…" : ""}`;
       targetName = null;
       break;
     }
     case "lineage_handover": {
       const label = HANDOVER_TYPE_LABEL[str(p.handover_type) as keyof typeof HANDOVER_TYPE_LABEL] ?? str(p.handover_type);
-      summary = `記政策脈絡 ${str(p.lineage_id).slice(0, 8)} 的交接：${label}——${clip(p.note, 80)}`;
+      summary = `記政策脈絡「${lineageTitle(p.lineage_id)}」的交接：${label}——${clip(p.note, 80)}`;
       targetName = null;
       break;
     }
     case "lineage_link": {
       const label = LINK_TYPE_LABEL[str(p.link_type) as keyof typeof LINK_TYPE_LABEL] ?? str(p.link_type);
-      summary = `記政策脈絡的上下級關聯（${label}）：${str(p.upper_lineage_id).slice(0, 8)} → ${str(p.lower_lineage_id).slice(0, 8)}——${clip(p.note, 60)}`;
+      summary = `記政策脈絡的上下級關聯（${label}）：「${lineageTitle(p.upper_lineage_id)}」→「${lineageTitle(p.lower_lineage_id)}」——${clip(p.note, 60)}`;
       targetName = null;
       break;
     }
     case "party_info": {
       // 政黨資訊（#346 第二階段）：讀者要看得出補了哪個政黨的哪一欄
       const items = (Array.isArray(p.parties) ? p.parties : []).filter((it): it is Obj => !!it && typeof it === "object");
+      const partyName = (id: unknown): string => find(lk.parties, id) || "某個政黨";
       const what = (it: Obj) => [
         it.valid_from ? `名稱起始日 ${str(it.valid_from)}` : "",
         it.valid_to ? `名稱停用日 ${str(it.valid_to)}` : "",
-        it.predecessor_id ? `前身是政黨 ${str(it.predecessor_id)}` : "",
+        it.predecessor_id ? `前身是政黨「${partyName(it.predecessor_id)}」` : "",
       ].filter(Boolean).join("、");
-      summary = `補政黨資訊：${items.map((it) => `政黨 ${str(it.party_id)}（${what(it)}）`).join("；") || "（沒有政黨）"}`;
+      summary = `補政黨資訊：${items.map((it) => `政黨「${partyName(it.party_id)}」（${what(it)}）`).join("；") || "（沒有政黨）"}`;
       targetName = null;
       break;
     }
@@ -269,8 +312,9 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       break;
     }
     case "reassign_candidacy": {
-      const to = p.to_politician_id ? `既有的 ${str(p.to_politician_id).slice(0, 8)}` : `新建的「${clip((p.new_politician as Obj | undefined)?.name, 30)}」`;
-      summary = `參選紀錄 ${str(p.politician_election_id)} 改掛到${to}：${clip(p.reason, 100)}`;
+      const to = p.to_politician_id ? `既有的「${politicianName(p.to_politician_id)}」` : `新建的「${clip((p.new_politician as Obj | undefined)?.name, 30)}」`;
+      const rec = find(lk.elections, p.politician_election_id);
+      summary = `參選紀錄${rec ? `「${clip(rec, 40)}」` : "（某筆）"}改掛到${to}：${clip(p.reason, 100)}`;
       targetName = null;
       break;
     }
@@ -282,18 +326,19 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       break;
     }
     case "merge_politician": {
-      const keep = str(p.keep_id).slice(0, 8), remove = str(p.remove_id).slice(0, 8);
+      const keep = `「${politicianName(p.keep_id)}」`, remove = `「${politicianName(p.remove_id, "另一位同名人物")}」`;
       summary = p.same_person === false
-        ? `判定人物 ${keep} 與 ${remove} 不是同一人：${clip(p.reason, 100)}`
-        : `合併同名人物：${remove} 併入 ${keep}：${clip(p.reason, 100)}`;
+        ? `判定人物${keep}與${remove}不是同一人：${clip(p.reason, 100)}`
+        : `合併同名人物：${remove}併入${keep}：${clip(p.reason, 100)}`;
       targetName = null;
       break;
     }
     case "removal": {
       // 移除是「這筆不該存在」，讀者最需要看到的是理由，不是 id
-      const table = TABLE_LABEL[str(p.target_table)] ?? str(p.target_table);
+      const table = TABLE_LABEL[str(p.target_table)] ?? "資料";
       const id = str(p.target_id);
-      summary = `建議移除${table} ${id.slice(0, 8)}：${clip(p.reason, 120)}`;
+      const targetLabel = targetLabelOf(p, id, lk);
+      summary = `建議移除${targetLabel ? `${table}「${clip(targetLabel, 40)}」` : (TABLE_NEUTRAL[str(p.target_table)] ?? "某筆資料")}：${clip(p.reason, 120)}`;
       targetName = null;
       if (str(p.target_table) === "policies") return finish(summary, targetName, null, id || null);
       if (str(p.target_table) === "politicians") return finish(summary, targetName, id || null, null);
@@ -308,19 +353,31 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       // 地方基本統計（#508）：讀者要看得出補了哪個地區、哪個指標、哪個年度的值
       const key = str(p.stat_key) as RegionalStatKey;
       const label = REGIONAL_STAT_LABEL[key] ?? str(p.stat_key);
-      summary = `補 ${str(p.admin_code)}（地區代碼）${str(p.year)} 年的${label}：${String(p.value ?? "")} ${str(p.unit)}`;
+      summary = `補 ${find(lk.regions, p.admin_code) || "某個地區"}${str(p.year)} 年的${label}：${String(p.value ?? "")} ${str(p.unit)}`;
       targetName = null;
       break;
     }
     default:
       summary = `（${input.contribution_type}）`;
   }
-  return finish(summary, targetName, politicianId, policyId);
+  return finish(summary, targetName, politicianId, policyId, detail);
 }
 
-function finish(summary: string, targetName: string | null, politicianId: string | null, policyId: string | null): ContributionSummary {
+/** correction／removal 的目標稱呼：payload 自帶的優先，再查 lookup（政見標題、人物姓名、參選紀錄標籤）；都沒有回空字串 */
+function targetLabelOf(p: Obj, id: string, lk: SummaryLookup): string {
+  const table = str(p.target_table);
+  const pick = (m: Record<string, string> | undefined) => (m && id ? m[id] ?? "" : "");
+  if (table === "policies") return str(p.policy_title) || pick(lk.policies);
+  if (table === "politicians") return str(p.name) || pick(lk.politicians);
+  // 參選紀錄的列 id（9827）對讀者沒有意義，查成「某某某 2026 縣市議員」
+  if (table === "politician_elections") return str(p.target_label) || pick(lk.elections);
+  return str(p.target_label);
+}
+
+function finish(summary: string, targetName: string | null, politicianId: string | null, policyId: string | null, detail: string | null = null): ContributionSummary {
   return {
     summary: clip(summary),
+    detail: clip(detail ?? summary),
     target_name: targetName,
     politician_id: politicianId,
     policy_id: policyId,
