@@ -371,13 +371,17 @@ function skeleton(def: string): string[] {
 // 2026-10-13 正見改成「優先級秒數」（20261011320000：插隊改加 boost_seconds），日本站在 20261011360000 跟上：
 // 日本版（SEC_FILE）對照正見的現行定義（20261011320000）；正見在那支之後再改，下面的「最後一版」斷言就紅，要重新決定跟不跟
 const TW_SECONDS_MIG = "20261011320000";
+// 2026-10-17 正見第二步（20261017010000：驗證票的插隊也改成秒數、跟著母任務）改了 task_boost／task_boost_remaining 的驗證那一段；
+// 日本站暫不跟（登記的偏離：「日本站還沒跟」）——比對改讀這支之前的正見版本，下面另有一條斷言守「正見的現行版確實偏離了」，不是悄悄漂走
+const TW_NOT_FOLLOWED_MIG = "20261017010000_verify_ticket_follows_task.sql";
 async function twVsJp(name: string): Promise<{ tw: string[]; jp: string[] }> {
-  return { tw: skeleton(await latestFn(name)), jp: skeleton(fnText(JP_SQL[SEC_FILE], `policy_jp.${name}`)) };
+  return { tw: skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), jp: skeleton(fnText(JP_SQL[SEC_FILE], `policy_jp.${name}`)) };
 }
 
 Deno.test("骨架對照：policy_jp.task_boost／task_boost_remaining ＝ 正見現行（秒數化）定義（去註解、去 policy_jp. 前綴與 search_path）；正見之後再改這裡紅", async () => {
   for (const name of ["task_boost", "task_boost_remaining"]) {
-    assertEquals(skeleton(await latestFn(name)), skeleton(await latestFn(name, TW_SECONDS_MIG + "_~")), `${name}：正見在 ${TW_SECONDS_MIG} 之後又改了，要決定日本版跟不跟`);
+    assertEquals(skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), skeleton(await latestFn(name, TW_SECONDS_MIG + "_~")), `${name}：正見在 ${TW_SECONDS_MIG} 之後、${TW_NOT_FOLLOWED_MIG} 之前又改了，要決定日本版跟不跟`);
+    assertNotEquals(skeleton(await latestFn(name)), skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), `${name}：登記的偏離（日本站暫不跟 ${TW_NOT_FOLLOWED_MIG}）不見了——正見現行版跟日本版一樣了就拿掉這個登記`);
     const { tw, jp } = await twVsJp(name);
     assert(tw.length > 5);
     assertEquals(jp, tw, `${name}：日本站跟正見的現行定義不一致，要決定日本版跟不跟`);
