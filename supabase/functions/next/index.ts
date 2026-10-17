@@ -25,6 +25,7 @@ import { systemVoteSources } from "../_shared/independent-sources.ts";
 import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
+import { fetchDisputeContext } from "../_shared/dispute-verify.ts";
 import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
 /**
@@ -344,6 +345,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       // profile_gap 交的沒帶 politician_id：跟落庫一樣用任務編號指的那位，驗證者看到的身份比對才跟落庫一致（#215 的原則）
       const verifyPayload = (withTaskPolitician(pick.contribution_type, pick.payload && typeof pick.payload === "object" ? pick.payload : {}, pick.task_id)) as Record<string, unknown>;
       const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload, pick.id);
+      // 爭點驗證（2026-10-18）：票數超過線（同主控台「投太多輪」，門檻只在 SQL）→ 附前面每一票的結論與理由，並改成針對爭點判斷
+      const dispute = await fetchDisputeContext(supabase, pick.id);
       // #7（2026-09-21）：既有票一併送去（去識別在 shapeVotes 做）。query-bounds: ok — 一筆貢獻的票是個位數
       const { data: priorVotes } = await supabase.from("contribution_votes")
         .select("verdict, weight, note, evidence_url, created_at").eq("contribution_id", pick.id).order("created_at", { ascending: true }).limit(50);
@@ -447,6 +450,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           created_at: pick.created_at,
           // 這一型的交件欄位與驗證要點（協議 1.93.0：從 skill.md 搬出來，隨派工送）
           type_spec: typeSpecForVerify(pick.contribution_type),
+          // 爭點驗證：只有超過線的才有這個欄位（votes、prior 每一票的 verdict／agent／note／evidence_url／at、instruction）
+          ...(dispute ? { dispute } : {}),
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
           ...(pick.contribution_type === "policy"
             ? (() => {
@@ -457,14 +462,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         },
         // 依型別給該問的第一個問題：驗一份裁決卻先講政見的判準，代理會照著問錯的東西
         // （selkie 2026-09-21）。共同的那一段（怎麼送票）不分型別。
-        how_to: (pick.contribution_type === "policy"
+        how_to: (dispute ? `${dispute.instruction}（前面每一票在 item.dispute.prior。）` : "") + (pick.contribution_type === "policy"
           ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。"
           : pick.contribution_type === "adjudication"
           ? "你判的是**這份裁決站不站得住**，不是自己重判一次爭議：看裁決者的 reason 能不能從它列的 checked_urls 推得出來、有沒有漏掉反方的反證。"
           : pick.contribution_type === "no_change"
           ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
           : "打開 source_urls，逐欄核對 payload 與來源原文對不對得上。") +
-          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回；帶了就不看 IP，領取與回報出口 IP 不同網段也交得回去）；不確定投 unsure，不要猜。",
+          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: " + (dispute ? "agree|disagree（這一輪不收 unsure）" : "agree|disagree|unsure") + ", evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回；帶了就不看 IP，領取與回報出口 IP 不同網段也交得回去）；" + (dispute ? "這一輪是爭點驗證、不收 unsure，請選同意或反對。" : "不確定投 unsure，不要猜。"),
       });
     };
 
