@@ -57,7 +57,7 @@ Deno.test("A1 這支是 seed_auto_task_queue 的最後一版，緊接著手動�
   assert(i > 0, "這支要在重新定義 seed 的清單裡");
   assertEquals(defining[i - 1], MAN_MIG, "seed 的前一版應該是手動任務變一支臂那支（#453）；有人在中間改了，要以那一版為底重做機械式替換");
   // 這支之後只允許 #465（20261009040000：內容沒變不重寫，seed 內容 UPDATE 多一個 IS DISTINCT FROM 條件，守門在 seed-skip-unchanged.test.ts）
-  assertEquals(defining.slice(i + 1), ["20261009040000_seed_skip_unchanged.sql", "20261011320000_queue_priority_seconds.sql" /* 排序改秒數，不動總表 */, "20261011350000_queue_priority_cleanup.sql" /* 收掉舊的層與重排：seed 拿掉算層、寫層兩段，守門在 queue-priority-cleanup.test.ts */], "這支之後又有人改了 seed：要以最新那版為底重做（之後若有人改到 seed，後合的以最新那版為底重做）");
+  assertEquals(defining.slice(i + 1), ["20261009040000_seed_skip_unchanged.sql", "20261011320000_queue_priority_seconds.sql" /* 排序改秒數，不動總表 */, "20261011350000_queue_priority_cleanup.sql" /* 收掉舊的層與重排：seed 拿掉算層、寫層兩段，守門在 queue-priority-cleanup.test.ts */, "20261017010000_verify_ticket_follows_task.sql" /* 第二步：驗證票跟著任務。seed 只多兩個標記區塊（補驗證列不呼叫 contribution_queue_at、最後 refresh_verify_ticket_keys），守門在 verify-ticket-follows-task.test.ts */], "這支之後又有人改了 seed：要以最新那版為底重做（之後若有人改到 seed，後合的以最新那版為底重做）");
   const code = codeOf(MIG_SQL);
   for (const untouched of ["activity_priority", "rebalance_queue", "contribution_auto_tasks_arms", "contribution_auto_tasks", "queue_slot", "task_dispatched", "task_boost", "activity_open", "activity_require_rule"]) {
     assert(!new RegExp(`(CREATE OR REPLACE FUNCTION|DROP FUNCTION( IF EXISTS)?) ${untouched}\\(`).test(code), `這支不改 ${untouched}`);

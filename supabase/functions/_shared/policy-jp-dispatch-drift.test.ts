@@ -148,6 +148,8 @@ type Pair = { name: string; before?: string; edits?: Edit[]; note?: string };
 
 const VILLAGE = "20261009010000_village_chief_progress_cooling.sql";
 const LEGACY = "20261009060000_verify_pool_legacy_hash.sql";
+/** 2026-10-17 正見第二步（驗證票的排序跟著母任務、任務有交件在途就停放）：這支改了下面三支複本，日本站暫不跟（「日本站還沒跟」的登記偏離），比對讀這支之前的版本 */
+const TW_VERIFY_TICKET = "20261017010000_verify_ticket_follows_task.sql";
 
 const PAIRS: Pair[] = [
   { name: "activity_today" },
@@ -192,7 +194,8 @@ const PAIRS: Pair[] = [
   { name: "manual_task_closes_on_applied" },
   {
     name: "seed_auto_task_queue",
-    note: "拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；換成日本專屬的「選舉鏈上沒有 polling 里程碑的缺口照日期定層」一段（20261009300000 的偏離，秒數化時照帶，秒數取那一層的秒數）",
+    before: TW_VERIFY_TICKET,
+    note: "取驗證票跟著任務（20261017010000，日本站暫不跟：補驗證列不再呼叫 contribution_queue_at、最後多 refresh_verify_ticket_keys）之前的版本；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；換成日本專屬的「選舉鏈上沒有 polling 里程碑的缺口照日期定層」一段（20261009300000 的偏離，秒數化時照帶，秒數取那一層的秒數）",
     edits: [{"span": ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], "with": ""}, {"span": ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], "with": "  -- >>> 日本版：選舉發現的層\n  -- 鏈上的臂裡「還沒有選舉列＝沒有 polling 里程碑」的缺口（選舉發現；等團體落庫的選舉的團體任務），規則算不出秒數，改用 target 的日期\n  -- （election_date，沒有就 vote_window_from）定層：60 天內前段、180 天內中段、更遠後段（chain_date_tier），秒數取那一層的 task_priority_tiers.seconds。有 polling 里程碑的照上面規則算的\n  UPDATE _gaps g SET priority_seconds = (SELECT t.seconds FROM task_priority_tiers t WHERE t.id = chain_date_tier(chain_sort_date(g.task_id, g.target))), priority_rule_id = NULL\n   WHERE g.arm IN ('election_discovery', 'local_government_missing', 'regional_stats_missing')\n     AND NOT EXISTS (SELECT 1 FROM election_milestones_all m WHERE m.election_id = NULLIF(g.target->>'election_id', '') AND m.kind = 'polling');\n  -- <<< 日本版：選舉發現的層\n"}],
   },
   {
@@ -202,7 +205,7 @@ const PAIRS: Pair[] = [
     note: "取合格條件搬進 SQL（20261017000301，日本站暫不跟）之前的版本",
   },
   { name: "contribution_queue_task_counts" },
-  { name: "contribution_auto_tasks" },
+  { name: "contribution_auto_tasks", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：多一段合格：任務停放）之前的版本" },
   { name: "contribution_verify_pool", before: LEGACY, note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本" },
   { name: "contribution_vote_weight" },
   { name: "contribution_reject_floor" },
@@ -263,7 +266,7 @@ const PAIRS: Pair[] = [
   { name: "task_dispatches_gap_after_insert" },
   { name: "task_dispatches_gap_after_delete" },
   { name: "gap_events_append_only" },
-  { name: "contribution_queue_row" },
+  { name: "contribution_queue_row", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：入列不再呼叫 contribution_queue_at 給 1970）之前的版本" },
   { name: "contribution_votes_trg" },
   { name: "contribution_votes_set_weight" },
   { name: "contribution_tasks_drop_dispatch" },
@@ -273,7 +276,7 @@ const PAIRS: Pair[] = [
   { name: "activity_priority_seconds" },
   { name: "manual_front_seconds" },
   { name: "verify_inherited_priority_seconds" },
-  { name: "task_dispatches_queue_key" },
+  { name: "task_dispatches_queue_key", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：驗證列改走 verify_queue_key、拿掉 1970／1980 年段）之前的版本" },
 ];
 
 /** 精確改一處（出現次數必須剛好一次）；span：從起點標記（唯一）到其後第一個終點標記，整段（含兩端）換成 with */

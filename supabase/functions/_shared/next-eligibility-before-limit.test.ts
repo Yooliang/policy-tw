@@ -25,9 +25,11 @@ type Entry = { markers: string[]; tsOnly?: undefined } | { markers?: undefined; 
 const REGISTRY: Record<string, Entry> = {
   filterAdjudicateTasks: { markers: ["合格：裁決任務"] },
   filterLeasedTasks: { markers: ["合格：認領中"] },
-  filterOwnSubmittedTasks: { markers: ["合格：同機器交過"] },
-  filterReportedDeadEnds: { markers: ["合格：查無回報在等票"] },
-  filterSaturatedTasks: { markers: ["合格：在途未額滿"] },
+  // 20261017010000（第二步）：底下有交件在途的任務停放（合格：任務停放），涵蓋「同機器交過」「查無回報在等票」「在途額滿」對大多數任務型別的效果；
+  // 例外三型（question、adjudicate、roster_check）不停放，那三個標記仍各自有效——它們的劇本用 roster_check 型別，才分得出是哪一段在擋
+  filterOwnSubmittedTasks: { markers: ["合格：同機器交過", "合格：任務停放"] },
+  filterReportedDeadEnds: { markers: ["合格：查無回報在等票", "合格：任務停放"] },
+  filterSaturatedTasks: { markers: ["合格：在途未額滿", "合格：任務停放"] },
   filterAnsweredQuestionTasks: { markers: ["合格：提問未滿額", "合格：提問這台答過"] },
   filterSkippedTasks: { tsOnly: "skip 是這一次請求帶進來的單一一筆 skip_task_id，SQL 沒有這個輸入；一次最多剔一筆，不會把窗口清空" },
 };
@@ -166,26 +168,37 @@ const SCENARIOS: Scenario[] = [
   { marker: "合格：認領中", name: "認領已過期 → 照給", excluded: false, target: { policy_id: "p-lease-old" }, ...ME,
     setup: "INSERT INTO contribution_task_leases VALUES ('auto:other', 'policy:p-lease-old', now() - interval '1 minutes', 'someone-else');" },
   // 同機器交過
-  { marker: "合格：同機器交過", name: "同 IP 交過在途 → 排除", excluded: true, ...ME,
+  { marker: "合格：同機器交過", type: "roster_check", name: "同 IP 交過在途 → 排除", excluded: true, ...ME,
     setup: "INSERT INTO contributions (task_id, contribution_type, status, contributor_ip_hash, agent_name) VALUES ('@T', 'policy', 'pending', 'ip-me', 'another-name');" },
-  { marker: "合格：同機器交過", name: "同代號交過在途 → 排除", excluded: true, ...ME,
+  { marker: "合格：同機器交過", type: "roster_check", name: "同代號交過在途 → 排除", excluded: true, ...ME,
     setup: "INSERT INTO contributions (task_id, contribution_type, status, contributor_ip_hash, agent_name) VALUES ('@T', 'policy', 'verified', 'ip-x', 'me');" },
-  { marker: "合格：同機器交過", name: "別人交過 → 照給", excluded: false, ...ME,
+  { marker: "合格：同機器交過", type: "roster_check", name: "別人交過 → 照給", excluded: false, ...ME,
     setup: "INSERT INTO contributions (task_id, contribution_type, status, contributor_ip_hash, agent_name) VALUES ('@T', 'policy', 'pending', 'ip-x', 'not-me');" },
   // 查無回報在等票
-  { marker: "合格：查無回報在等票", name: "no_change pending → 排除（有 ip）", excluded: true, ...ME,
+  { marker: "合格：查無回報在等票", type: "roster_check", name: "no_change pending → 排除（有 ip）", excluded: true, ...ME,
     setup: `INSERT INTO contributions (task_id, contribution_type, status, payload) VALUES (NULL, 'no_change', 'pending', '{"task_id":"@T"}');` },
-  { marker: "合格：查無回報在等票", name: "no_change verified → 排除（沒有 ip／代號：rebalance、queue_preview 的呼叫方式）", excluded: true, ip: null, agent: null,
+  { marker: "合格：查無回報在等票", type: "roster_check", name: "no_change verified → 排除（沒有 ip／代號：rebalance、queue_preview 的呼叫方式）", excluded: true, ip: null, agent: null,
     setup: `INSERT INTO contributions (task_id, contribution_type, status, payload) VALUES (NULL, 'no_change', 'verified', '{"task_id":"@T"}');` },
-  { marker: "合格：查無回報在等票", name: "no_change 已退件／已上線 → 照給", excluded: false, ...ME,
+  { marker: "合格：查無回報在等票", type: "roster_check", name: "no_change 已退件／已上線 → 照給", excluded: false, ...ME,
     setup: `INSERT INTO contributions (task_id, contribution_type, status, payload) VALUES (NULL, 'no_change', 'rejected', '{"task_id":"@T"}'), (NULL, 'no_change', 'applied', '{"task_id":"@T"}');` },
   // 在途額滿
-  { marker: "合格：在途未額滿", name: "在途 5 筆（pending／verified／disputed 混合）→ 排除，不分誰來領", excluded: true, ip: null, agent: null,
+  { marker: "合格：在途未額滿", type: "roster_check", name: "在途 5 筆（pending／verified／disputed 混合）→ 排除，不分誰來領", excluded: true, ip: null, agent: null,
     setup: `INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T','policy','pending'),('@T','policy','pending'),('@T','policy','verified'),('@T','policy','disputed'),('@T','policy','pending');` },
-  { marker: "合格：在途未額滿", name: "在途 4 筆 → 照給", excluded: false, ip: null, agent: null,
+  { marker: "合格：在途未額滿", type: "roster_check", name: "在途 4 筆 → 照給", excluded: false, ip: null, agent: null,
     setup: `INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T','policy','pending'),('@T','policy','pending'),('@T','policy','verified'),('@T','policy','disputed');` },
-  { marker: "合格：在途未額滿", name: "4 筆在途＋多筆已退件／已上線 → 照給", excluded: false, ip: null, agent: null,
+  { marker: "合格：在途未額滿", type: "roster_check", name: "4 筆在途＋多筆已退件／已上線 → 照給", excluded: false, ip: null, agent: null,
     setup: `INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T','policy','pending'),('@T','policy','pending'),('@T','policy','verified'),('@T','policy','disputed'),('@T','policy','rejected'),('@T','policy','applied');` },
+  // 任務停放（一般型別：profile_gap；任何一份在途交件就停放，不分誰來領）
+  { marker: "合格：任務停放", name: "pending 交件（task_id 欄）→ 排除，不分誰來領", excluded: true, ip: null, agent: null,
+    setup: "INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T', 'policy', 'pending');" },
+  { marker: "合格：任務停放", name: "任務編號只在 payload.task_id 的 correction（欄是空的）→ 排除", excluded: true, ip: null, agent: null,
+    setup: `INSERT INTO contributions (task_id, contribution_type, status, payload) VALUES (NULL, 'correction', 'verified', '{"task_id":"@T"}');` },
+  { marker: "合格：任務停放", name: "disputed 交件 → 排除", excluded: true, ip: null, agent: null,
+    setup: "INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T', 'correction', 'disputed');" },
+  { marker: "合格：任務停放", name: "全部被退（rejected／applied 之外沒有在途）→ 照給", excluded: false, ip: null, agent: null,
+    setup: "INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T', 'policy', 'rejected'), ('@T', 'correction', 'rejected');" },
+  { marker: "合格：任務停放", name: "名單清查（roster_check）有在途交件 → 不停放，照給", excluded: false, type: "roster_check", ip: null, agent: null,
+    setup: "INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T', 'candidacy', 'pending');" },
   // 提問未滿額
   { marker: "合格：提問未滿額", name: "已上線 2 份＋在等票 1 份＝3 → 排除，不分誰來領", excluded: true, type: "question", taskId: MANUAL(1), target: { question_id: uuid(501) }, ip: null, agent: null,
     setup: `INSERT INTO citizen_questions VALUES ('${uuid(501)}', 2); INSERT INTO contributions (task_id, contribution_type, status) VALUES ('@T','question_answer','pending');` },
@@ -258,7 +271,7 @@ Deno.test("B2 隊頭堵塞重現：最前面 35 筆都有查無回報在等票�
 
 Deno.test("B3 還原驗證（行為）：把任一標記整段拿掉，該標記的「排除」劇本全部翻面（被排除的任務又出現）", async () => {
   const markers = [...new Set(SCENARIOS.map((s) => s.marker))];
-  assertEquals(markers.sort(), Object.values(REGISTRY).flatMap((e) => e.markers ?? []).sort());
+  assertEquals(markers.sort(), [...new Set(Object.values(REGISTRY).flatMap((e) => e.markers ?? []))].sort());
   for (const m of markers) {
     const db = await buildDb(stripBlock(QUEUE_SQL, m));
     try {
