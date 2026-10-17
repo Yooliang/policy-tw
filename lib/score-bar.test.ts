@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { scoreBarTitle, scorePercent } from "./score-bar.ts";
+import { scoreBarFull, scoreBarTitle, scorePercent } from "./score-bar.ts";
 
 Deno.test("scorePercent：−目標在最左、0 在正中、＋目標在最右", () => {
   assertEquals(scorePercent(-3, 3), 0);
@@ -24,4 +24,13 @@ Deno.test("scoreBarTitle：寫明分數與兩端門檻；三種票數都給了�
   assertEquals(scoreBarTitle(2, 3), "分數 2／通過 3、退件 −3");
   assertEquals(scoreBarTitle(-1, 4, { agree: 1, disagree: 2, unsure: 0 }), "分數 -1／通過 4、退件 −4（同意 1・反對 2・存疑 0）");
   assertEquals(scoreBarTitle(2, 3, { agree: 2 }), "分數 2／通過 3、退件 −3");
+});
+
+Deno.test("scoreBarFull：到達兩端（通過或退件）才算滿，沒有目標不算", () => {
+  assertEquals(scoreBarFull(3, 3), true);
+  assertEquals(scoreBarFull(7, 3), true);
+  assertEquals(scoreBarFull(-3, 3), true);
+  assertEquals(scoreBarFull(2, 3), false);
+  assertEquals(scoreBarFull(0, 3), false);
+  assertEquals(scoreBarFull(3, 0), false);
 });

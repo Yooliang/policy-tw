@@ -2,7 +2,7 @@
 import ScoreBar from '../ScoreBar.vue'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, AlertCircle, Inbox, ExternalLink } from 'lucide-vue-next'
+import { Loader2, AlertCircle, Inbox, ExternalLink, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
 
 /**
@@ -112,6 +112,15 @@ watch(sourceSel, () => { void load() })
 /** 標題的進行中件數：選了來源用那個來源的真實總數，沒選用全部（讀不到退回當頁筆數） */
 const openTotal = computed(() => typeSel.value ? null : (sourceSel.value ? sourceCounts.value[sourceSel.value] ?? null : allCount.value))
 
+/** 展開的任務（跟貢獻看板同一種：點一列展開詳情，再點收合） */
+const expanded = ref<Set<string>>(new Set())
+function toggle(id: string) {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
+}
+
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
 const closedTasks = computed(() => tasks.value.filter(t => t.status === 'closed'))
 const visibleTasks = computed(() => (showClosed.value ? tasks.value : openTasks.value).filter(t => !typeSel.value || t.task_type === typeSel.value))
@@ -179,31 +188,52 @@ defineExpose({ load })
       </div>
       <ul v-else class="divide-y divide-slate-100" data-testid="task-list">
         <li v-for="t in visibleTasks" :key="t.task_id" class="p-4 sm:p-5" :class="t.status === 'closed' ? 'opacity-60' : ''" data-testid="task-item" :data-status="t.status" :data-source="t.source" :data-type="t.task_type">
-          <div class="flex flex-wrap items-center gap-2 mb-1.5">
-            <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', SOURCE_CLASS[t.source] ?? 'bg-slate-100 text-slate-600']">{{ SOURCE_LABEL[t.source] ?? t.source }}</span>
-            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ taskTypeLabel(t.task_type) }}</span>
-            <!-- 票數：跟貢獻看板同一種拉鋸條（ScoreBar，−目標＝退件、＋目標＝通過），窄版（維護者 2026-10-10） -->
-            <span v-if="t.votes?.leading" class="inline-flex items-center gap-1.5" data-testid="task-votes">
-              <ScoreBar narrow :score="t.votes.leading.score" :target="t.votes.leading.target_score" :agree="t.votes.leading.agree_count" :disagree="t.votes.leading.disagree_count" :unsure="t.votes.leading.unsure_count" />
-              <span v-if="t.votes.leading.contribution_type === 'no_change'" class="text-[11px] text-slate-500" data-testid="task-not-found">回報查無</span>
-              <span v-if="t.votes.leading.verdict" class="text-[11px] text-slate-500" :title="voteTitle(t)">{{ VERDICT_LABEL[t.votes.leading.verdict] ?? '' }}</span>
-            </span>
-            <span v-if="t.votes && t.status === 'open'" class="text-[11px] text-slate-400" data-testid="task-submissions">
-              {{ t.votes.submissions > 0 ? `已收到 ${t.votes.submissions} 筆` : '還沒有人提交' }}
-            </span>
-            <span v-if="t.status === 'closed'" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">已關閉{{ t.closed_at ? `・${fmtTime(t.closed_at)}` : '' }}</span>
-            <span v-if="t.region" class="text-[11px] text-slate-500">{{ t.region }}</span>
-            <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(t.created_at) }}</span>
-          </div>
-          <p class="font-bold text-navy-900 leading-snug break-words">{{ t.title }}</p>
-          <p v-if="t.description" class="mt-1 text-sm text-slate-600 whitespace-pre-wrap break-words">{{ shortUrlsIn(t.description) }}</p>
-          <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span v-if="t.suggested_by">提議者 {{ t.suggested_by }}</span>
-            <span v-else-if="t.created_by && t.source === 'manual'">建立者 {{ t.created_by }}</span>
-            <span>優先度 {{ priorityLabel(t.priority) }}</span>
-            <span v-if="contributionIdOf(t)" class="font-mono text-slate-400">貢獻 {{ contributionIdOf(t)!.slice(0, 8) }}</span>
-            <a v-if="targetLink(t)" :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 font-bold">{{ targetLink(t)!.label }}</a>
-            <a v-for="u in t.hint_sources" :key="u" :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 inline-flex items-center gap-1 break-all"><ExternalLink :size="10" />{{ hostOf(u) }}</a>
+          <button type="button" class="w-full text-left" :aria-expanded="expanded.has(t.task_id)" data-testid="task-toggle" @click="toggle(t.task_id)">
+            <div class="flex flex-wrap items-center gap-2 mb-1.5">
+              <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', SOURCE_CLASS[t.source] ?? 'bg-slate-100 text-slate-600']">{{ SOURCE_LABEL[t.source] ?? t.source }}</span>
+              <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ taskTypeLabel(t.task_type) }}</span>
+              <!-- 票數：跟貢獻看板同一種拉鋸條（ScoreBar，−目標＝退件、＋目標＝通過），窄版（維護者 2026-10-10） -->
+              <span v-if="t.votes?.leading" class="inline-flex items-center gap-1.5" data-testid="task-votes">
+                <ScoreBar narrow :score="t.votes.leading.score" :target="t.votes.leading.target_score" :agree="t.votes.leading.agree_count" :disagree="t.votes.leading.disagree_count" :unsure="t.votes.leading.unsure_count" />
+                <span v-if="t.votes.leading.contribution_type === 'no_change'" class="text-[11px] text-slate-500" data-testid="task-not-found">回報查無</span>
+                <span v-if="t.votes.leading.verdict" class="text-[11px] text-slate-500" :title="voteTitle(t)">{{ VERDICT_LABEL[t.votes.leading.verdict] ?? '' }}</span>
+              </span>
+              <span v-if="t.votes && t.status === 'open'" class="text-[11px] text-slate-400" data-testid="task-submissions">
+                {{ t.votes.submissions > 0 ? `已收到 ${t.votes.submissions} 筆` : '還沒有人提交' }}
+              </span>
+              <span v-if="t.status === 'closed'" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">已關閉{{ t.closed_at ? `・${fmtTime(t.closed_at)}` : '' }}</span>
+              <span v-if="t.region" class="text-[11px] text-slate-500">{{ t.region }}</span>
+              <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap">{{ fmtTime(t.created_at) }}</span>
+            </div>
+            <p class="font-bold text-navy-900 leading-snug break-words">{{ t.title }}</p>
+            <div class="mt-1.5 flex items-center text-xs text-slate-500">
+              <component :is="expanded.has(t.task_id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
+            </div>
+          </button>
+          <div v-if="expanded.has(t.task_id)" class="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-3 sm:p-4 text-sm space-y-3" data-testid="task-detail">
+            <div v-if="t.description">
+              <p class="text-xs font-bold text-slate-400 mb-1">說明</p>
+              <p class="text-slate-700 whitespace-pre-wrap break-words">{{ shortUrlsIn(t.description) }}</p>
+            </div>
+            <div v-if="t.hint_sources.length">
+              <p class="text-xs font-bold text-slate-400 mb-1">線索來源</p>
+              <ul class="space-y-1">
+                <li v-for="u in t.hint_sources" :key="u"><a :href="u" target="_blank" rel="noopener" class="text-blue-700 underline underline-offset-2 break-all inline-flex items-start gap-1"><ExternalLink :size="12" class="mt-1 flex-shrink-0" />{{ hostOf(u) }}</a></li>
+              </ul>
+            </div>
+            <div v-if="targetLink(t)">
+              <a :href="targetLink(t)!.href" class="text-blue-700 underline underline-offset-2 text-xs font-bold">{{ targetLink(t)!.label }}</a>
+            </div>
+            <dl class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+              <template v-if="t.suggested_by"><dt class="text-slate-400">提議者</dt><dd class="text-slate-700 break-words">{{ t.suggested_by }}</dd></template>
+              <template v-else-if="t.created_by && t.source === 'manual'"><dt class="text-slate-400">建立者</dt><dd class="text-slate-700 break-words">{{ t.created_by }}</dd></template>
+              <dt class="text-slate-400">優先度</dt><dd class="text-slate-700">{{ priorityLabel(t.priority) }}</dd>
+              <template v-if="t.region"><dt class="text-slate-400">地區</dt><dd class="text-slate-700">{{ t.region }}</dd></template>
+              <dt class="text-slate-400">建立時間</dt><dd class="text-slate-700">{{ fmtTime(t.created_at) }}</dd>
+              <template v-if="t.closed_at"><dt class="text-slate-400">關閉時間</dt><dd class="text-slate-700">{{ fmtTime(t.closed_at) }}</dd></template>
+              <template v-if="t.votes"><dt class="text-slate-400">交件</dt><dd class="text-slate-700">{{ t.votes.submissions > 0 ? `${t.votes.submissions} 筆` : '還沒有人提交' }}<template v-if="t.votes.leading">・{{ voteTitle(t) }}</template></dd></template>
+              <template v-if="contributionIdOf(t)"><dt class="text-slate-400">貢獻</dt><dd class="font-mono text-slate-500">{{ contributionIdOf(t)!.slice(0, 8) }}</dd></template>
+            </dl>
           </div>
         </li>
       </ul>
