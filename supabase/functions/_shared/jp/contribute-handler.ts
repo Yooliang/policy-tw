@@ -31,7 +31,7 @@ import { type Actor, resolveActor, resolveActorFromRequest } from "../actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { JP_PROTOCOL_URL } from "./protocol.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "../duplicate-claim.ts";
-import { agentToolNotice } from "../agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
 import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
 import { machineVerifyInline } from "./machine-verify.ts";
@@ -512,7 +512,7 @@ export async function handleContribute(
     return { status: 409, body: { success: false, ...blockedByIndex.get(0)!, agent_name: validation.contributor.agent_name, docs: JP_PROTOCOL_URL } };
   }
   const restCount = results.length - inserted.length - mergedByIndex.size - blockedByIndex.size - alreadyInDb.size;
-  const toolNotice = agentToolNotice(validation.contributor.agent_tool);
+  const toolNotice = await agentToolNoticeOnce(supabase, validation.contributor.agent_name, validation.contributor.agent_tool, true);
   const trailingVoteNote = needs.length > 0
     ? `；通過 ${needs.join("／")} 票同儕驗證（required_agree=${needs.join("／")}）後標為 verified 並自動落庫（task_suggestion、correction 這兩種停在 verified）`
     : "";

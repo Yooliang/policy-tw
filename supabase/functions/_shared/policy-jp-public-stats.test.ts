@@ -514,10 +514,14 @@ Deno.test("排程與重跑：有 pg_cron 就排一條每小時（重跑只留一
 // ---------------------------------------------------------------------------------------------
 type Edit = [string, string];
 type Mode = "public" | "none"; // 正見的 SECURITY DEFINER 是 SET search_path = public，或根本沒釘（INVOKER，或 pipeline_take_snapshot 的疏漏）
-type Pair = { name: string; sig: RegExp; mode: Mode; definer: boolean; edits?: Edit[]; note?: string };
+type Pair = { name: string; sig: RegExp; mode: Mode; definer: boolean; edits?: Edit[]; note?: string; before?: string };
 
 const PAIRS: Pair[] = [
-  { name: "model_display_name", sig: /./, mode: "none", definer: false },
+  {
+    name: "model_display_name", sig: /./, mode: "none", definer: false,
+    before: "20261018010000_agent_tool_undisclosed.sql",
+    note: "日本站不跟 20261018010000（正見加「工具/產品名」歸「產品名（未揭露模型）」的第 47 條規則）：比對停在它之前的正見定義",
+  },
   { name: "contribution_leaderboard", sig: /^\(p_days/, mode: "public", definer: true },
   { name: "contribution_leaderboard", sig: /^\(p_since/, mode: "public", definer: true },
   { name: "contribution_feed_summary", sig: /./, mode: "public", definer: true },
@@ -569,9 +573,9 @@ function allFnTexts(sql: string, name: string): string[] {
 }
 const argsOf = (t: string) => t.slice(t.indexOf("("), t.indexOf(")") + 1);
 /** migrations 裡 name（簽名符合 sig）最後一次的定義（照檔名排序，後蓋前；只看正見的、沒有 policy_jp. 前綴的） */
-async function latestPublic(name: string, sig: RegExp): Promise<string> {
+async function latestPublic(name: string, sig: RegExp, before?: string): Promise<string> {
   let def: string | null = null;
-  for (const n of await migrationNames()) for (const t of allFnTexts(await readMig(n), name)) if (sig.test(argsOf(t))) def = t;
+  for (const n of await migrationNames()) if (!before || n < before) for (const t of allFnTexts(await readMig(n), name)) if (sig.test(argsOf(t))) def = t;
   assert(def, `找不到正見的 ${name} ${sig}`);
   return def;
 }
@@ -584,13 +588,13 @@ const label = (p: Pair) => `${p.name}${p.sig.source === "." ? "" : p.sig.source.
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${label(p)}：還原後＝正見的現行定義${p.edits?.length ? "（扣掉登記的片段）" : ""}`, async () => {
-    const expected = applyEdits(await latestPublic(p.name, p.sig), p.edits);
+    const expected = applyEdits(await latestPublic(p.name, p.sig, p.before), p.edits);
     const jp = jpBody(p.name, p.sig);
     assertEquals(reverse(jp, p.mode), expected);
     if (p.edits?.length) assert(p.note, `${p.name} 有拿掉片段，必須寫 note 說明為什麼`);
     // SECURITY DEFINER 要跟正見一樣（只有 pipeline_take_snapshot 補上 search_path）
     assertEquals(/SECURITY DEFINER/.test(jp), p.definer, `${p.name}：SECURITY DEFINER`);
-    assertEquals(/SECURITY DEFINER/.test(await latestPublic(p.name, p.sig)), p.definer, `${p.name}：正見的 SECURITY DEFINER 變了，要決定日本版跟不跟`);
+    assertEquals(/SECURITY DEFINER/.test(await latestPublic(p.name, p.sig, p.before)), p.definer, `${p.name}：正見的 SECURITY DEFINER 變了，要決定日本版跟不跟`);
     // DEFINER 的一律釘 search_path；INVOKER 的熱路徑函式不加 SET（每個引用都帶前綴）
     if (p.definer) assert(jp.includes("SET search_path = policy_jp, pg_temp"), `${p.name} 沒釘 search_path`);
     else assert(!/SET search_path/.test(jp), `${p.name}：INVOKER 函式不加 SET`);
@@ -643,7 +647,7 @@ Deno.test("獨立：這支 migration 沒有 public. 引用、沒有 search_path 
 Deno.test("還原驗證（走樣）：每支複本改一個字元，比對就會紅；白名單以外的替換也抓得到", async () => {
   let n = 0;
   for (const p of PAIRS) {
-    const expected = applyEdits(await latestPublic(p.name, p.sig), p.edits);
+    const expected = applyEdits(await latestPublic(p.name, p.sig, p.before), p.edits);
     const jp = jpBody(p.name, p.sig);
     const bent = jp.replace("AS $$", "AS $$ "); // 一個字元
     assertNotEquals(bent, jp, `${p.name}：還原驗證沒改到東西`);

@@ -6,6 +6,7 @@
  *   - 要分到代別：Claude Sonnet 4.5 與 Claude Sonnet 5 是兩列（維護者：同系列不同代差很大）
  *   - 只寫系列沒寫版本的（claude-code/haiku）獨立一列「Claude Haiku（未標版本）」，不併進有版本的那列
  *   - 工具前綴不影響歸類：整串字找模型關鍵字，不管它在斜線哪一邊
+ *   - 平台不揭露底層模型、代理只能填「工具/產品名」（grok-bot/grok-bot）：歸「產品名（未揭露模型）」（最後一條規則，協議 1.97.0）
  *   - NULL／空白 →「未填」；一條規則都對不上 →「其他」
  *
  * SQL 那份在 migration 的 model_display_name()（統計由它算），這份是給 CI 跑測試向量用的；
@@ -14,6 +15,9 @@
  * 規則只能用 PostgreSQL 與 JavaScript 讀法相同的正規式語法：不用 |（兩邊的取捨規則不同，改成拆成多條規則）、
  * 不用 \b（PostgreSQL 是倒退鍵）、不用後顧。樣板裡的 \1、\2 換成第 1、2 個擷取群組，沒擷取到就換成空字串。
  */
+
+/** 「工具/產品名」歸出來的顯示名稱後綴；agent-tool-hint.ts 靠它認出這一類 */
+export const UNDISCLOSED_SUFFIX = "（未揭露模型）";
 
 /** [正規式, 顯示名稱樣板]，由上往下第一條符合的勝出 */
 export const MODEL_NAME_RULES: ReadonlyArray<readonly [string, string]> = [
@@ -69,6 +73,8 @@ export const MODEL_NAME_RULES: ReadonlyArray<readonly [string, string]> = [
   ["gemini-?(\\d+)-?flash", "Gemini \\1 Flash"],
   ["gemini-?(\\d+)", "Gemini \\1"],
   ["gemini", "Gemini（未標版本）"],
+  // 最後一條：前面都沒認出模型，但寫成「<工具>/<像識別碼的產品名>」→ 歸到產品名（平台不揭露模型，例 Grok Bot）
+  ["^[^/]+/([a-z0-9][a-z0-9.-]{1,39})$", "\\1" + UNDISCLOSED_SUFFIX],
 ];
 
 /** 跟 SQL 的 regexp_replace(lower(p_agent_tool), '[\s_]+', '-', 'g') 一樣 */

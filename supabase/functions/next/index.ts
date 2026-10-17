@@ -13,7 +13,7 @@ import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
 import { submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
-import { agentToolNotice } from "../_shared/agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../_shared/verification-sources.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
@@ -305,7 +305,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // agent：伺服器解析出來的身份（序號登入時代理不知道自己的代號是什麼，這裡告訴它；藍圖 §3）
     // notice：agent_tool 只填別名（claude-code/haiku）拆不出版本，統計頁只能歸進「未標版本」一列。
     // 不擋派工——agent_tool 選填、也驗不了真假；每輪提醒一次，代理下次就改得掉（協議 1.44.0）。
-    const toolNotice = agentToolNotice(agentTool);
+    const toolNotice = await agentToolNoticeOnce(supabase, agentName, agentTool);
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
     // 派工憑證（#484，協議 1.81.0）：派出的那一筆簽一張，綁 task_id、派出時間、自報代號與這次領任務的來源網段，期限同認領期。

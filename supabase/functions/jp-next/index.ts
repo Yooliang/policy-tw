@@ -9,7 +9,7 @@ import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
-import { agentToolNotice } from "../_shared/agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 import { isSameClaimType, RESOLVED_CLAIM_HELP } from "../_shared/same-claims.ts";
@@ -148,7 +148,7 @@ async function handle(req: Request): Promise<Response> {
       submit: { limit: submitQuota.limit, used: ipContribRes.count ?? 0, remaining: Math.max(0, submitQuota.limit - (ipContribRes.count ?? 0)) },
       verify: { limit: verifyQuota.limit, used: ipVoteRes.count ?? 0, remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)) },
     };
-    const toolNotice = agentToolNotice(agentTool);
+    const toolNotice = await agentToolNoticeOnce(supabase, agentName, agentTool, true);
     const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: JP_PROTOCOL_VERSION, docs: JP_PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
     // 派工憑證：派出的那一筆簽一張；鑰匙加了 policy_jp 鹽，正見的憑證在這裡驗不過（dispatch-secret.ts）

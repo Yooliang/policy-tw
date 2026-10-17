@@ -86,9 +86,13 @@ const REAL: Array<[string | null, string]> = [
   ["relay/jev-1.13", "Jev（系統）"],
   // 認不出模型：只有工具、或只寫「claude」
   ["claude-code", "其他"],
-  ["pi/claude", "其他"],
-  ["claude/claude", "其他"],
+  ["randomstring", "其他"],
   ["pi/x", "其他"],
+  // 平台不揭露底層模型：「工具/產品名」歸「產品名（未揭露模型）」（協議 1.97.0）；已認得模型的不受影響
+  ["grok-bot/grok-bot", "grok-bot（未揭露模型）"],
+  ["Grok Bot/Grok Bot", "grok-bot（未揭露模型）"],
+  ["pi/claude", "claude（未揭露模型）"],
+  ["claude/claude", "claude（未揭露模型）"],
   [null, "未填"],
   ["", "未填"],
   ["   ", "未填"],

@@ -17,7 +17,7 @@ import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { type Actor } from "../actor.ts";
 import { resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
 import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
-import { agentToolNotice } from "../agent-tool-hint.ts";
+import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
 import { VERIFY_BINDING_DAYS } from "../dispatch.ts";
 
@@ -258,7 +258,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   const targetScore = effectiveRequired ?? requiredAgree(contribution.contribution_type, contribution.payload, contribution.source_urls ?? []);
   const scoreBefore = (contribution as { score?: number | null }).score ?? 0;
   const scoreAfter = (after as { score?: number | null } | null)?.score ?? scoreBefore + weight;
-  const toolNotice = agentToolNotice(input.agent_tool);
+  const toolNotice = await agentToolNoticeOnce(supabase, input.agent_name, input.agent_tool, true);
 
   return {
     status: 201,
