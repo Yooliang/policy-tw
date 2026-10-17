@@ -44,6 +44,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 const CANDIDATE_POOL = 30;
+/** 任務佇列一次取幾筆（contribution_queue_tasks 的 p_limit）；合格條件都在 SQL 的 LIMIT 之前，這個窗口只是一頁的大小 */
+const QUEUE_WINDOW = 30;
 // 憑證鑰匙不能用時，每次冷啟動警告一行（不含鑰匙）；不然 /next 靜靜地不發憑證，沒人知道跨網段為什麼還是 409
 const warnNoDispatchSecret = createSecretWarner();
 // 2026-09-20：從 30 降到 5——回 none 幾乎都是暫時的（別人認領中、這一輪抽到的都不合格），等 30 分鐘是白等
@@ -136,7 +138,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to))),
       timed("auto", // 任務列的候選（自動缺口＋open 的手動任務，同一張佇列；2026-10-08 起手動任務也由排程寫進 task_dispatches）（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
       // 「有人回報查無」改成下面只查候選的那幾十筆，不再翻整張貢獻表。
-      supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
+      supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: QUEUE_WINDOW, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
       timed("my_votes", // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
       // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
       // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
@@ -491,13 +493,17 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
 
     // 派工合成單一佇列（2026-09-21，排序規則與理由見 _shared/dispatch.ts 的大段註解）：
     // 自動缺口與手動任務是同一張佇列、用同一把尺（queue_at），由 contribution_queue_tasks 排好序。
-    // 合格判斷在 SQL 裡、LIMIT 之前（認領中／同 IP 交過／在途飽和／skip 過／no_change 在途），派過的排後面；
-    // 程式裡的過濾器留著當保險（手動任務的飽和、回報查無仍靠這裡）。
-    // 2026-09-20：原本只抓 12 筆再過濾，優先層 ≥12 時那一頁永遠全在優先層，後面 800 筆輪不到
+    // 合格判斷在 SQL 裡、LIMIT 之前（contribution_queue_tasks，20261017000301）：認領中／同機器交過／查無回報在等票／在途額滿／提問滿額與答過／裁決不合格；派過的排後面。
+    // 下面這些過濾器發生在 LIMIT 之後，只是第二道保險，不能再是唯一的一道（2026-10-17：前 30 筆全是「查無回報在等票」，程式全剔掉就沒有任務可派、隊頭永遠派不出去；2026-09-20 同一類事故）。
+    // 例外：skip（這次請求帶進來的單一一筆）與裁決任務的過渡期舊雜湊投票只在這裡；加新過濾器要在 SQL 的 >>> 合格 標記補一段並登記（守門 next-eligibility-before-limit.test.ts）。
     const freeQueue = filterSaturatedTasks(filterSkippedTasks(filterReportedDeadEnds(filterOwnSubmittedTasks(
       filterLeasedTasks(filterAdjudicateTasks(queueRows, agentName, pendingAdjudicated, myVotedOriginalIds), leases, agentName),
       mySubmittedTaskIds,
     ), deadEndTaskIds), skippedTaskIds), inFlightByTask);
+    // 保險：SQL 給滿一整頁、程式過濾完卻是空的＝又有某個條件只存在程式裡（10-17 事故的樣子）；只記一行，不改行為
+    if (freeQueue.length === 0 && queueRaw.length >= QUEUE_WINDOW) {
+      console.error(`next: 佇列窗口 ${queueRaw.length}/${QUEUE_WINDOW} 筆全被程式過濾剔光（queueRows=${queueRows.length}、deadEnd=${deadEndTaskIds.size}、inFlight=${inFlightByTask.size}、leases=${leases.length}、submitted=${mySubmittedTaskIds.size}、skipped=${skippedTaskIds.size}）：有過濾器沒在 contribution_queue_tasks 的 SQL 裡`);
+    }
 
     // SQL 已經排好序：第一筆就是最佳候選；手動任務並列第一時用 seed 散開（pickQueueTaskHead）。
     // 只用 id 分辨種類（auto: 開頭是自動缺口），種類給 pickQueueHead 比同一刻的先後。
