@@ -545,6 +545,7 @@ CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, r
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
 CREATE FUNCTION contribution_effective_agree(uuid) RETURNS int LANGUAGE sql AS $$ SELECT 3 $$;
 CREATE FUNCTION contribution_needs_two_ips(text, jsonb) RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
+CREATE FUNCTION contribution_overvoted_stop_votes() RETURNS numeric LANGUAGE sql AS $$ SELECT 1000000::numeric $$;
 `;
 
 async function buildDb(purgeSql: string): Promise<PGlite> {
