@@ -150,6 +150,8 @@ const VILLAGE = "20261009010000_village_chief_progress_cooling.sql";
 const LEGACY = "20261009060000_verify_pool_legacy_hash.sql";
 /** 2026-10-17 正見第二步（驗證票的排序跟著母任務、任務有交件在途就停放）：這支改了下面三支複本，日本站暫不跟（「日本站還沒跟」的登記偏離），比對讀這支之前的版本 */
 const TW_VERIFY_TICKET = "20261017010000_verify_ticket_follows_task.sql";
+/** 2026-10-17 正見「不確定」第 2 張起每張 −1（20261017020000）與投太多輪（20261017020100）：日本站暫不跟（登記偏離），contribution_apply_consensus 的比對讀 20261017020000 之前的版本 */
+const TW_UNSURE = "20261017020000_unsure_penalty.sql";
 
 const PAIRS: Pair[] = [
   { name: "activity_today" },
@@ -243,7 +245,9 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_apply_consensus",
-    note: "拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
+    // 2026-10-17（正見 20261017020000 不確定第 2 張起每張 −1、20261017020100 投太多輪的 disputed 守衛）；日本站暫不跟（主線會通知日本站執行緒），比對讀這兩支之前的版本
+    before: TW_UNSURE,
+    note: "取不確定第 2 張起每張 −1（20261017020000，日本站暫不跟）之前的版本；拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
     edits: [
       [
         "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)) THEN",

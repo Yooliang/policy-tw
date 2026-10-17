@@ -372,11 +372,20 @@ export function planRetry(previousRetryCount: number, now: number = Date.now()):
 
 export type VoteWeight = -2 | -1 | 0 | 1 | 2;
 
-/** 一票值幾分：agree +1（Jev 核過來源 +2）、disagree −1（Jev 核過反證 −2）、unsure 0 */
+/** 一票值幾分：agree +1（Jev 核過來源 +2）、disagree −1（Jev 核過反證 −2）、unsure 0（第 2 張起的罰則看 unsurePenalty，不在單票權重裡） */
 export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
   if (verdict === "agree") return judgeBacked ? 2 : 1;
   if (verdict === "disagree") return judgeBacked ? -2 : -1;
   return 0;
+}
+
+/**
+ * 不確定的罰則（維護者 2026-10-17，補充 09-19「我看不到不是我反對」）：同一份交件的第 1 張 unsure 照舊 0 分，第 2 張起每張 −1，
+ * 所以 n 張不確定（每個來源 IP 只算最新一票）共扣 max(n−1, 0) 分。SQL 鏡像：contribution_unsure_penalty（20261017020000），
+ * 扣在 contribution_apply_consensus 計分那一步、不寫進 contribution_votes.weight——罰則只看張數不看順序，重算永遠一致；守門 unsure-penalty.test.ts。
+ */
+export function unsurePenalty(unsureCount: number): number {
+  return Math.max(Math.trunc(unsureCount || 0) - 1, 0);
 }
 
 /**
@@ -386,7 +395,7 @@ export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
  * 第二來源仍拿 +1，回應卻叫它「去附一個來源」——對已經附了的代理是誤導）。
  * 2026-09-23 起系統自己核 evidence_url（cron），代理不再、也不能叫 Jev 替它判。
  */
-export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence = false): string {
+export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence = false, unsureCount = 0): string {
   if (verdict === "agree") {
     if (judgeBacked) return "你附的 evidence_url 是獨立的第二來源，而且系統核過它直接支持這筆宣稱（+2）";
     if (hasEvidence) return "你附了 evidence_url：系統會在幾分鐘內自己核那個網址，核得過這票自動變 +2；你不用也不能叫系統替你判";
@@ -397,7 +406,9 @@ export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence 
     if (hasEvidence) return "你附了反證：系統會在幾分鐘內自己核那個網址，核心欄位確實矛盾這票自動變 −2";
     return "反對且理由具體；附上系統核過的反證（evidence_url）才是 −2";
   }
-  return "存疑不加減分；它記錄你看過，但不推動這筆往任何方向走";
+  // unsureCount＝投完之後這份交件的不確定張數（含這一張）；0＝呼叫端沒給
+  if (unsureCount >= 2) return `存疑，而且這是這份交件的第 ${unsureCount} 張不確定：第 2 張起每張 −1 分（第 1 張 0 分）。看不出來就別再補一張，換一份能打開的來源再判斷，確實確認不了才投 unsure`;
+  return "存疑：同一份交件的第 1 張不確定 0 分；第 2 張起每張 −1 分，所以確認不了又沒試過別的來源時先換來源再判斷";
 }
 
 /**

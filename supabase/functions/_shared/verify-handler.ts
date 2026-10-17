@@ -376,7 +376,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       ...(revising ? { revised: true, note_revise: "已覆寫你原本那張票；分數依新的 verdict 重算，仍只算一票" } : {}),
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       weight,
-      weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
+      weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url), finalVerdict === "unsure" ? (after?.unsure_count ?? 0) : 0),
       // 2026-09-23：evidence_url 跟提交者同網域的票當天有 229 張，全都只記 +1——當場講，不要等排程核完才發現
       ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
         ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票（帶派工憑證投的，憑證過期了也一樣帶原本那張憑證加 revise:true 就能改）" }
