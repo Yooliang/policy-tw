@@ -17,6 +17,7 @@ import { agentToolNotice } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
+import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -44,7 +45,7 @@ export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; c
  * 否則它在資料上跟從未生效無法區分，遲早會被當成冗餘拿掉」）。1.25.0 的 3:1 就是這樣被當成冗餘退場的。
  * 只記時間、哪一道、哪一筆、來源 IP 雜湊（看得出被退回後有沒有補好再送），不存備註內容。記不成不影響回應。
  */
-export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_thin", "cec_count_required", "cec_count_mismatch"]);
+export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_thin", "cec_count_required", "cec_count_mismatch", "dispute_no_unsure"]);
 
 /**
  * `legacyIpHash`：1.79.0 以前的單一 IP 雜湊（`legacyIpHashOf`），過渡期用來認出切換前同一台機器交的貢獻與投的票（#481）。
@@ -304,6 +305,14 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     const check = checkCecCount(cecName, { hits: input.cec_hits, people: input.cec_people }, await fetchCecNameHits(cecName, cecFetch));
     if (!check.ok) return { status: 400, body: { success: false, error: check.error, message: check.message } };
     cecSuffix = check.noteSuffix;
+  }
+  // 爭點驗證（2026-10-18）：票數超過線的交件不收不確定（盲反對會被改記 unsure，一併算）。系統配對票（merge）不經這裡。
+  // 以回報當下為準：派出之後票數才跨線也擋；擋下不算被拒，改投同意或反對再送。
+  if (via !== "merge" && (blind || input.verdict === "unsure")) {
+    const disputeVotes = await disputeVotesNow(supabase, contribution.id);
+    if (disputeVotes !== null) {
+      return { status: 400, body: { success: false, error: "dispute_no_unsure", message: disputeNoUnsureMessage(disputeVotes, blind), votes: disputeVotes } };
+    }
   }
   const finalVerdict = blind ? "unsure" : input.verdict;
   const baseNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
