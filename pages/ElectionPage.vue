@@ -40,7 +40,7 @@ import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
-import { orderPeopleByBallotNo } from '../lib/ballot-number'
+import { listByBallotNo } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
@@ -285,22 +285,20 @@ const sortByLengthThenStroke = compareRegionName
 // 候選人排序（使用者 2026-09-20：多種排序讓人選，預設「最近更新」）。
 // 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
 type SortMode = 'ballot' | 'updated' | 'stroke' | 'policies' | 'attention'
-// 沒選過就看有沒有號次：抽籤後名單上有號次，預設就是號次（#460）；之前維持「最近更新」
+// 頁面上有號次（抽籤後）就一律照號次排、不給排序下拉（維護者 10-18）；之前維持可選，預設「最近更新」
 const sortChoice = ref<SortMode | null>(null)
 const hasBallotNos = computed(() => electionPoliticians.value.some(c => !!getPoliticianElectionData(c, electionId.value)?.candNo))
 const sortMode = computed<SortMode>({
-  get: () => sortChoice.value ?? (hasBallotNos.value ? 'ballot' : 'updated'),
+  get: () => hasBallotNos.value ? 'ballot' : (sortChoice.value ?? 'updated'),
   set: (v) => { sortChoice.value = v },
 })
 const ALL_SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
-  { key: 'ballot', label: '號次' },        // 同一場選舉內照號次，沒有號次的排後面（lib/ballot-number.ts）
   { key: 'updated', label: '最近更新' },   // 名下政見或進度最近有變動的在前
   { key: 'stroke', label: '姓名筆畫' },    // 中選會抽籤前的慣例
   { key: 'policies', label: '政見數' },    // 登錄的政見多的在前
   { key: 'attention', label: '關注度' },   // 支持、反對、關注的總數
 ]
-// 還沒有任何號次時不列「號次」這個選項
-const SORT_OPTIONS = computed(() => ALL_SORT_OPTIONS.filter(o => o.key !== 'ballot' || hasBallotNos.value))
+const SORT_OPTIONS = ALL_SORT_OPTIONS
 /** 每位候選人名下政見的統計：最後變動時間、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
 const policyStatsByPolitician = computed(() => {
   const m = new Map<string, { updated: string; count: number; attention: number }>()
@@ -321,7 +319,7 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
   const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
   const byUpdated = (a: Politician, b: Politician) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b)
   const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
-    // 號次：先照最近更新排（沒有號次的人維持這個順序），再由 orderPeopleByBallotNo 在每一場選舉內把有號次的挪到前面
+    // 號次：先照最近更新排（沒有號次的場次維持這個順序），再由 listByBallotNo 在每一場選舉內照號次排、隱藏沒號次的人
     ballot: byUpdated,
     // 2026-09-21 卡在李四川：last_updated 只到「日」，六個人同日並列，筆畫或筆數任一種並列規則都會讓同一個人永遠第一。
     // 2026-09-22 改用 updated_at（timestamptz，內容任何變動都會蓋，migration 000028），並列只剩極少數；退路仍是筆數→筆畫。
@@ -331,7 +329,7 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
     attention: (a, b) => (st(b).attention - st(a).attention) || byStroke(a, b),
   }
   const sorted = [...list].sort(cmp[sortMode.value])
-  return sortMode.value === 'ballot' ? orderPeopleByBallotNo(sorted) : sorted
+  return sortMode.value === 'ballot' ? listByBallotNo(sorted) : sorted
 }
 
 // 取得選定縣市的鄉鎮市區（合併所有來源）
@@ -452,7 +450,7 @@ const councilorPoliticians = computed(() => {
       result = result.filter(c => sameRegionName(c.subRegion, electoralDistrict))
     }
   }
-  return result
+  return sortPoliticians(result)
 })
 /**
  * 縣市頁的「鄉鎮市區參選人名錄」。
@@ -802,7 +800,8 @@ const COUNTY_WIDE_LEVELS: readonly string[] = [ElectionType.PRESIDENT, ElectionT
 /** 套上這一屆資料的候選人（號次、選區要是這一屆的，不是人物最近一屆的） */
 const currentElectionPoliticians = computed(() => electionPoliticians.value.map(withCurrentElectionData))
 function poolForLevel(level: ElectionType) {
-  return currentElectionPoliticians.value.filter(c => {
+  // 有號次的場次照號次排、沒號次的人不列（lib/ballot-number.ts）；沒有號次的場次不變
+  return listByBallotNo(currentElectionPoliticians.value.filter(c => {
     const type = getElectionType(c)
     if (!(type === level || (!type && level === ElectionType.MAYOR))) return false
     if (selectedRegion.value !== 'All' && !sameRegionName(c.region, selectedRegion.value)) return false
@@ -816,7 +815,7 @@ function poolForLevel(level: ElectionType) {
       }
     }
     return true
-  })
+  }))
 }
 const comparisonPool = computed(() => poolForLevel(pkLevel.value))
 /** 目前地區各層級有幾個人可以 PK；只列有人的層級，頁籤上帶人數（全部 0 才退回全部，讓使用者看得出是資料還沒有） */
@@ -1016,7 +1015,7 @@ usePageHead({
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <!-- 排序選單：預設最近更新；不讓任何人固定排第一 -->
-        <div class="flex items-center justify-end gap-2 mb-4 text-sm">
+        <div v-if="!hasBallotNos" class="flex items-center justify-end gap-2 mb-4 text-sm">
           <label for="candidate-sort" class="text-slate-400" title="排序"><ArrowUpDown :size="16" /><span class="sr-only">排序</span></label>
           <select id="candidate-sort" v-model="sortMode" class="border border-slate-300 rounded-lg px-2 py-1 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
             <option v-for="o in SORT_OPTIONS" :key="o.key" :value="o.key">{{ o.label }}</option>

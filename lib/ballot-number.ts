@@ -85,3 +85,32 @@ export function ballotNoOfElection(
   if (!rec || rec.candidacyStatus === 'withdrawn') return undefined
   return ballotNo(rec.candNo)
 }
+
+/** 清單裡有沒有任何人有號次（頁面層級：有就不給排序下拉，一律照號次） */
+export function anyBallotNo(list: ReadonlyArray<{ candNo?: unknown }>): boolean {
+  return list.some((p) => ballotNo(p.candNo) !== undefined)
+}
+
+/**
+ * 候選人清單的號次呈現：同一場（同職位同選區）只要有人有號次，就純照號次排、沒有號次的人不列
+ * （例：新竹縣 2022 縣長 1–5 號之外還有一筆沒號次的重複紀錄，不該排在後面）。
+ * 退選的人不隱藏（退選的呈現照舊）；沒有任何號次的場次、分不出是哪一場的人完全不變。
+ * 每一場在清單裡佔的位置不動（同 orderPeopleByBallotNo）。
+ */
+export function listByBallotNo<T extends ComparePerson>(list: readonly T[]): T[] {
+  const groupOf = (p: T) => {
+    if (!p.electionType) return undefined
+    const label = pkGroupLabel(p, p.electionType)
+    return label === undefined ? undefined : `${p.electionType}|${label}`
+  }
+  const numbered = new Set<string>()
+  for (const p of list) {
+    const g = groupOf(p)
+    if (g !== undefined && ballotNo(p.candNo) !== undefined) numbered.add(g)
+  }
+  const kept = list.filter((p) => {
+    const g = groupOf(p)
+    return g === undefined || !numbered.has(g) || ballotNo(p.candNo) !== undefined || p.candidacyStatus === 'withdrawn'
+  })
+  return orderPeopleByBallotNo(kept)
+}

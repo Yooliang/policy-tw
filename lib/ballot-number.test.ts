@@ -8,8 +8,10 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   ballotLabel,
   ballotNo,
+  anyBallotNo,
   ballotNoOfElection,
   compareBallotNo,
+  listByBallotNo,
   nameWithBallot,
   orderByBallotNo,
   orderPeopleByBallotNo,
@@ -111,4 +113,50 @@ Deno.test("某一屆的號次：只認該屆、退選的不算", () => {
   assertEquals(ballotNoOfElection([{ electionId: 2026, candidacyStatus: "filed" }], 2026), undefined);
   assertEquals(ballotNoOfElection(undefined, 2026), undefined);
   assertEquals(ballotNoOfElection(els, null), undefined);
+});
+
+// ---- 有號次的場次純照號次、隱藏沒號次的人（維護者 10-18） ----
+const council = (id: number, candNo?: number, extra: Record<string, unknown> = {}) =>
+  ({ id, name: `議${id}`, candNo, electionType: "縣市議員", region: "新竹縣", subRegion: "第01選舉區", ...extra });
+const mayor = (id: number, name: string, candNo?: number) =>
+  ({ id, name, candNo, electionType: "縣市長", region: "新竹縣" });
+
+Deno.test("新竹縣 2022 第01選舉區：22 位亂序 → 1..22", () => {
+  const nos = [8, 21, 4, 13, 1, 22, 2, 3, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20];
+  const out = listByBallotNo(nos.map((n, i) => council(i, n)));
+  assertEquals(out.map((p) => p.candNo), Array.from({ length: 22 }, (_, i) => i + 1));
+});
+
+Deno.test("縣長 1..5 加一筆沒號次的重複紀錄：重複的隱藏", () => {
+  const list = [
+    mayor(1, "劉雁祿"), // 沒號次的重複紀錄
+    mayor(2, "甲", 3), mayor(3, "乙", 1), mayor(4, "丙", 5), mayor(5, "丁", 2), mayor(6, "戊", 4),
+  ];
+  const out = listByBallotNo(list);
+  assertEquals(out.map((p) => p.candNo), [1, 2, 3, 4, 5]);
+  assertEquals(out.some((p) => p.name === "劉雁祿"), false);
+});
+
+Deno.test("沒有任何號次的場次完全不變（含順序、不隱藏）", () => {
+  const list = [council(3), council(1), council(2)];
+  assertEquals(listByBallotNo(list), list);
+});
+
+Deno.test("隱藏只看同一場：別的選區沒號次的人不受影響", () => {
+  const a1 = council(1, 2), a2 = council(2, 1), a3 = council(3);
+  const b1 = council(4, undefined, { subRegion: "第02選舉區" }), b2 = council(5, undefined, { subRegion: "第02選舉區" });
+  const out = listByBallotNo([a1, b1, a3, b2, a2]);
+  assertEquals(out.map((p) => p.id), [2, 4, 5, 1]); // 第01區照號次且隱藏 a3；第02區原樣
+});
+
+Deno.test("退選的人不因沒號次被隱藏；分不出場次的人原地不動", () => {
+  const w = council(9, undefined, { candidacyStatus: "withdrawn" });
+  const noType = { id: 10, name: "無職位" };
+  const out = listByBallotNo([council(1, 2), w, noType, council(2, 1)]);
+  assertEquals(out.map((p) => p.id), [2, 1, 10, 9]); // 退選者留在清單、排在有號次的後面
+});
+
+Deno.test("anyBallotNo：只有合法號次算", () => {
+  assertEquals(anyBallotNo([{ candNo: 0 }, { candNo: undefined }]), false);
+  assertEquals(anyBallotNo([{}, { candNo: 3 }]), true);
 });
