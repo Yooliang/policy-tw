@@ -5,6 +5,8 @@ import { ElectionType, type Policy } from '../../types'
 import { ArrowDown } from 'lucide-vue-next'
 import Avatar from '../../components/Avatar.vue'
 import { issueTagsOf } from '../../lib/issue-tags'
+import { compareRegionName } from '../../lib/region-name'
+import { compareByPolicyDateDesc } from '../../lib/policy-date'
 
 type LevelPolitician = { id: string | number; name: string; avatarUrl?: string | null; electionType?: string | null }
 const props = defineProps<{
@@ -24,23 +26,28 @@ const names = computed(() => props.junkNames ?? new Set(levelPoliticians.value.m
 const politicianOf = (p: Policy): LevelPolitician | undefined =>
   byId.value.get(String(p.politicianId)) ?? politicians.value.find(c => String(c.id) === String(p.politicianId))
 
+// 層內照人的姓名筆畫、同一人新到舊（2026-10-19 維護者「至少依某個規則」；之前是資料庫 id＝隨機順序）
+const byPerson = (a: Policy, b: Policy) =>
+  compareRegionName(politicianOf(a)?.name ?? '', politicianOf(b)?.name ?? '') ||
+  String(a.politicianId).localeCompare(String(b.politicianId)) ||
+  compareByPolicyDateDesc(a, b)
 const getPoliciesByLevel = (type: ElectionType) =>
   props.policies.filter(p =>
     issueTagsOf(p, names.value).includes(props.tag) &&
     byId.value.get(String(p.politicianId))?.electionType === type
   )
 
-const mayors = computed(() => getPoliciesByLevel(ElectionType.MAYOR))
-const councilors = computed(() => getPoliciesByLevel(ElectionType.COUNCILOR))
+const mayors = computed(() => getPoliciesByLevel(ElectionType.MAYOR).sort(byPerson))
+const councilors = computed(() => getPoliciesByLevel(ElectionType.COUNCILOR).sort(byPerson))
 const adminLevel = computed(() => [
   ...getPoliciesByLevel(ElectionType.TOWNSHIP_MAYOR),
   ...getPoliciesByLevel(ElectionType.INDIGENOUS_DISTRICT_CHIEF)
-])
+].sort(byPerson))
 const commLevel = computed(() => [
   ...getPoliciesByLevel(ElectionType.REPRESENTATIVE),
   ...getPoliciesByLevel(ElectionType.INDIGENOUS_DISTRICT_REP)
-])
-const chiefs = computed(() => getPoliciesByLevel(ElectionType.CHIEF))
+].sort(byPerson))
+const chiefs = computed(() => getPoliciesByLevel(ElectionType.CHIEF).sort(byPerson))
 
 const levels = computed(() => [
   { label: '縣市長', colorBorder: 'border-red-400', colorBg: 'bg-red-100 text-red-700', items: mayors.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '縣市長層級尚未針對此議題表態。' },

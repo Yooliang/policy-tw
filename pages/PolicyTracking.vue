@@ -4,6 +4,7 @@ import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import { PolicyStatus } from '../types'
+import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
@@ -112,7 +113,8 @@ const unrenderablePolicies = computed(() =>
 // 只畫找得到所屬人物的那些（顯示不出來的另外在上面報筆數），頁數才不會有空洞。
 const PAGE_SIZE = 24
 const page = ref(1)
-const renderablePolicies = computed(() => filteredPolicies.value.filter(p => politicianById.value.has(String(p.politicianId))))
+// 提出日期新到舊（2026-10-19；之前是資料庫 id＝隨機順序）
+const renderablePolicies = computed(() => filteredPolicies.value.filter(p => politicianById.value.has(String(p.politicianId))).sort(compareByPolicyDateDesc))
 const pageCount = computed(() => Math.max(1, Math.ceil(renderablePolicies.value.length / PAGE_SIZE)))
 const currentPage = computed(() => Math.min(Math.max(1, page.value), pageCount.value))
 const pagedPolicies = computed(() => renderablePolicies.value.slice((currentPage.value - 1) * PAGE_SIZE, currentPage.value * PAGE_SIZE))

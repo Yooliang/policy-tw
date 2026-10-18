@@ -17,7 +17,7 @@ import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, SITE_URL } from '../composables/usePageHead'
-import { policyElectionYear, policyYear } from '../lib/policy-date'
+import { compareByPolicyDateDesc, policyElectionYear, policyYear } from '../lib/policy-date'
 import { personShareImage, policyDescription, policyLd } from '../lib/seo'
 import { lineageChain } from '../lib/policy-chain'
 import { castPolicyStance, myStance, type PolicyStance, type StanceCounts } from '../lib/policy-stance'
@@ -143,7 +143,7 @@ const compareLink = computed(() => {
 
 const otherPolicies = computed(() =>
   politician.value
-    ? policies.value.filter(p => String(p.politicianId) === String(politician.value!.id) && p.id !== policy.value?.id).slice(0, 3)
+    ? policies.value.filter(p => String(p.politicianId) === String(politician.value!.id) && p.id !== policy.value?.id).sort(compareByPolicyDateDesc).slice(0, 3)
     : []
 )
 

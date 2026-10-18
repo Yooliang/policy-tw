@@ -5,7 +5,8 @@ import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import MechanismNav from '../components/MechanismNav.vue'
 import AskQuestionForm from '../components/community/AskQuestionForm.vue'
 import CitizenQuestionCard from '../components/community/CitizenQuestionCard.vue'
-import { Loader2, MessageCircleQuestion } from 'lucide-vue-next'
+import { Clock, Eye, Loader2, MessageCircleQuestion } from 'lucide-vue-next'
+import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
@@ -54,9 +55,10 @@ const STATUS_OPTIONS: Array<{ key: StatusFilter; label: string }> = [
   { key: 'open', label: '待回答' },
   { key: 'answered', label: '已有答案' },
 ]
-const SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
-  { key: 'stance', label: '表態多的' },
-  { key: 'latest', label: '最新的' },
+// 排序統一用純圖示（components/SortIcons.vue，2026-10-19）
+const SORT_OPTIONS: SortIconOption<SortMode>[] = [
+  { key: 'latest', label: '最新的', icon: Clock },
+  { key: 'stance', label: '表態多的', icon: Eye },
 ]
 function chipClass(active: boolean): string {
   return active
@@ -171,8 +173,8 @@ usePageHead({
           <button v-for="opt in STATUS_OPTIONS" :key="opt.key" @click="statusFilter = opt.key" :class="chipClass(statusFilter === opt.key)">{{ opt.label }}</button>
         </div>
         <div class="w-px h-6 bg-slate-300 hidden sm:block"></div>
-        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
-          <button v-for="opt in SORT_OPTIONS" :key="opt.key" @click="sortMode = opt.key" :class="chipClass(sortMode === opt.key)">{{ opt.label }}</button>
+        <div class="sm:ml-auto">
+          <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
         </div>
       </div>
 
