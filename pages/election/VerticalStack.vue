@@ -43,11 +43,11 @@ const commLevel = computed(() => [
 const chiefs = computed(() => getPoliciesByLevel(ElectionType.CHIEF))
 
 const levels = computed(() => [
-  { label: '縣市長', colorBorder: 'border-red-400', colorBg: 'bg-red-100 text-red-700', items: mayors.value, cols: 'grid-cols-1', emptyMsg: '縣市長層級尚未針對此議題表態。' },
+  { label: '縣市長', colorBorder: 'border-red-400', colorBg: 'bg-red-100 text-red-700', items: mayors.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '縣市長層級尚未針對此議題表態。' },
   { label: '議員', colorBorder: 'border-blue-400', colorBg: 'bg-blue-100 text-blue-700', items: councilors.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無議員針對此議題提出質詢或預算案。' },
-  { label: '鄉長/區長', colorBorder: 'border-indigo-400', colorBg: 'bg-indigo-100 text-indigo-700', items: adminLevel.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無行政首長層級的規劃。' },
-  { label: '代表', colorBorder: 'border-green-400', colorBg: 'bg-green-100 text-green-700', items: commLevel.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無地方代表層級的具體建議。' },
-  { label: '里長', colorBorder: 'border-amber-400', colorBg: 'bg-amber-100 text-amber-700', items: chiefs.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無里長層級的具體建議。' },
+  { label: '鄉長/區長', colorBorder: 'border-indigo-400', colorBg: 'bg-indigo-100 text-indigo-700', items: adminLevel.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無行政首長層級的規劃。' },
+  { label: '代表', colorBorder: 'border-green-400', colorBg: 'bg-green-100 text-green-700', items: commLevel.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無地方代表層級的具體建議。' },
+  { label: '里長', colorBorder: 'border-amber-400', colorBg: 'bg-amber-100 text-amber-700', items: chiefs.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無里長層級的具體建議。' },
 ])
 </script>
 

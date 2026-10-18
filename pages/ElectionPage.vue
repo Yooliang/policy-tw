@@ -11,6 +11,8 @@ import { PolicyStatus, ElectionType, type Politician } from '../types'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import VerticalStack from './election/VerticalStack.vue'
+import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
+import { dataRegionCategoryMdPath, dataRegionMdPath } from '../lib/md/format'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
 import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery } from '../lib/policy-compare'
@@ -19,7 +21,7 @@ import {
   Vote, Flag, AlertCircle, Users, MapPin,
   Search, Layers,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, ArrowUpDown, Swords } from 'lucide-vue-next'
+  Crown, ScrollText, ArrowUpDown, Swords, FileText } from 'lucide-vue-next'
 import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
@@ -786,6 +788,21 @@ const availableTags = computed(() =>
   Object.keys(tagCounts.value).filter(tag => tagCounts.value[tag] > 0).sort((a, b) => tagCounts.value[b] - tagCounts.value[a])
 )
 
+// 議題串聯的 .md 抽屜（components/MdDrawer.vue，跟政見矩陣同一份預產快取 data_md_cache，2026-10-19 維護者）：
+// 只有最新一屆有預產；標籤剛好是分類名（九成以上的政見沒有自由標籤、退回分類）就開「縣市×分類」那份，其他開縣市全部分類
+const issuesMdPick = computed<MdPick | null>(() => {
+  const region = selectedRegion.value
+  if (!hasMatrix.value || region === 'All') return null
+  const seg = electionSeg.value
+  const tag = selectedIssueTag.value
+  if (tag && categories.value.includes(tag)) {
+    return { id: `${region}|${tag}`, row: `/data/${seg}/${region}/${tag}.md`, path: dataRegionCategoryMdPath(seg, region, tag), title: `${region}　${tag}` }
+  }
+  return { id: `r:${region}`, row: `/election/${seg}/${region}.md`, path: dataRegionMdPath(seg, region), title: `${region}　全部分類` }
+})
+const issuesMdOpen = ref<MdPick | null>(null)
+watch([viewMode, selectedRegion], () => { issuesMdOpen.value = null })
+
 watch([() => selectedIssueCategory.value, () => selectedRegion.value, () => selectedSubRegion.value, availableTags], () => {
   if (availableTags.value.length > 0 && (!selectedIssueTag.value || !availableTags.value.includes(selectedIssueTag.value))) {
     selectedIssueTag.value = availableTags.value[0]
@@ -1163,6 +1180,9 @@ usePageHead({
                 <Hash :size="12" /> {{ tag }}
               </button>
             </div>
+            <div v-if="issuesMdPick" class="flex justify-end -mt-4">
+              <a :href="issuesMdPick.path" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" data-testid="issues-md" @click.prevent="issuesMdOpen = issuesMdPick"><FileText :size="16" />{{ issuesMdPick.title }}</a>
+            </div>
             <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="categoryFilteredPolicies" :election-politicians="electionPoliticians.map(withCurrentElectionData)" :junk-names="electionPoliticianNames" />
           </div>
           <div v-else class="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
@@ -1208,6 +1228,7 @@ usePageHead({
       </div>
 
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
+        <MdDrawer :pick="issuesMdOpen" @close="issuesMdOpen = null" />
         <RegionalStatsPanel v-if="pageCounty && !hasSidebar" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
       </div><!-- 左側內容結束 -->
 
