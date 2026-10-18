@@ -188,7 +188,7 @@ Deno.test("任務現況：政見、清單、進度紀錄的 source_url 都來自
 const read = (rel: string) => Deno.readTextFileSync(new URL(rel, import.meta.url));
 
 Deno.test("接線：任務現況、查核履歷、貢獻看板都接了出處表的讀取", () => {
-  assert(/await overlayPrimarySources\(supabase, data as Obj\);\s*return data;/.test(read("./task-context.ts")), "fetchTaskContext 結尾要換掉 source_url");
+  assert(/await overlayPrimarySources\(supabase, data as Obj\);(?:\s*\/\/[^\n]*|\s*const pending = [^\n]*|\s*if \(pending[^\n]*)*\s*return data;/.test(read("./task-context.ts")), "fetchTaskContext 結尾要換掉 source_url");
   // 進度紀錄要帶 id 才換得掉；摘要出去的欄位仍只有 date／event／description／source_url
   assert(read("./task-context.ts").includes('supabase.from("tracking_logs").select("id, date, event, description")'));
   assert(!/from\("tracking_logs"\)\.select\("[^"]*source_url/.test(read("./task-context.ts")), "進度紀錄不再選 source_url 欄");

@@ -31,6 +31,18 @@ export function correctionTouches(payload: unknown, field: string): boolean {
 }
 
 /**
+ * 這筆 correction 是把一筆參選紀錄改成退選／不參選（candidate_status → not_running／withdrawn）？
+ * 協議 1.98.0：這種更正落庫時不再被既有選舉結果蓋掉（nextCandidacyStatus 的 explicitCorrection），
+ * 能把「已有結果」的紀錄改成退選，所以比照加減參選人，分數要來自 ≥2 個不同來源 IP（consensus.ts 的 needsTwoIps；
+ * SQL 鏡像 contribution_needs_two_ips）。payload 看不出現值有沒有結果（current_value 是自報的），所以一律算，不分現值。
+ */
+export function correctionWithdrawsCandidacy(payload: unknown): boolean {
+  const n = normalizeCorrection(payload);
+  return n.target_table === "politician_elections"
+    && n.changes.some((c) => c.field === "candidate_status" && (c.correct_value === "not_running" || c.correct_value === "withdrawn"));
+}
+
+/**
  * 這筆 correction 動 candidate_status，而且動的**全部**是「傳聞參選／可能參選」（rumored／likely）？
  * 2026-09-20 審查建議 12：把傳聞改成 registered 是補強、改成 not_running 抹掉的是一則傳聞，不是一筆已登記的參選——
  * 不該走加減參選人的 4／6／8 票（63 筆 candidate_status_stale 清不完）。真正要 4／6／8 的是 registered／confirmed → not_running。

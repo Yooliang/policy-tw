@@ -297,6 +297,13 @@ export function newsItemGuidance(suggestion: string | null | undefined): string 
     "source_urls 放新聞原文網址；新聞不是官方來源，所以**再附一個不同網站的來源**（另一家媒體的同一則、市府或議會的新聞稿、候選人臉書），只附這一則會被當場退回（不算被拒；協議 1.45.0 媒體不能當唯一出處）。";
 }
 
+/**
+ * 所有任務（與驗證）共用的一句話（協議 1.98.0）：current 有 pending_on_target 時隨它附出去，沒有就不附。
+ * 起因：「這人沒參選」的更正在等票，後來領到任務的代理看不到，另交了一筆。
+ */
+export const PENDING_ON_TARGET_GUIDE =
+  "先看 current.pending_on_target：已有人交同一個結論就去投那一筆，不要另交；你的結論跟其中一筆衝突，就在 note 寫明為什麼不同意，並對它投反對票。";
+
 /** 這些型別的 hint 依當筆資料而變，由 shapeTaskCurrent 自己組（不走這張靜態表）。 */
 export const DYNAMIC_GUIDANCE_TYPES = [
   "legacy_audit",
