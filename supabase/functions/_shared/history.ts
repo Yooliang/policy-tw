@@ -6,6 +6,7 @@
  */
 
 import { summarizeContribution, type SummaryLookup } from "./contribution-summary.ts";
+import { partyDisplayName } from "./party-alias.ts";
 import { loadSummaryLookup } from "./summary-lookup.ts";
 import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
 import { fetchSourceBriefs, primaryUrlOf, type SourceBrief, type SourceView, viewFromList, viewSources } from "./source-read.ts";
@@ -106,6 +107,8 @@ const FIELD_LABEL: Record<string, string> = {
   handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
   // 參選紀錄（#345 後續）：退選前有沒有登記；不參選重查蓋的章
   withdrawn_after_filing: "退選前有沒有登記", verified: "核對過登記名冊",
+  // 參選紀錄的政黨：觸發器 politician_election_party_from_candidacy 補 party 時寫（20261018020000）
+  party_id: "推薦政黨", party_basis: "政黨依據",
   // 政黨（#346 第二階段）
   valid_from: "名稱起始日", valid_to: "名稱停用日", predecessor_id: "前身",
 };
@@ -114,6 +117,34 @@ const TABLE_LABEL: Record<string, string> = {
   lineages: "政策脈絡", lineage_participants: "脈絡參與角色", handovers: "脈絡交接", lineage_links: "脈絡上下級關聯", lineage_candidate_reviews: "脈絡候選清查",
   parties: "政黨",
 };
+
+/** party_basis 的值（參選紀錄上政黨的根據）→ 給人看的字 */
+const PARTY_BASIS_LABEL: Record<string, string> = { contribution: "交件", person_single: "人物唯一一筆參選紀錄" };
+
+/**
+ * 履歷的 party_id／party_basis 變更：值換成給人看的字，UI 不印 id（#650）。
+ * party_id 的數字 → 政黨名稱（對照表沒有就「（已記錄）」）；party_id 空而同一次改動的 party_basis 有值＝那一次是無黨籍。
+ * party_id 空而依據也空＝不知道，維持空。
+ */
+function displayEditValues(edits: HistoryEditOut[], lookup: SummaryLookup): HistoryEditOut[] {
+  const basisOf = (e: HistoryEditOut, side: "old_value" | "new_value") =>
+    edits.find((b) => b.field === "party_basis" && b.table === e.table && b.record_id === e.record_id)?.[side] ?? null;
+  const partyName = (v: unknown): string => lookup.parties?.[String(v)] ?? "（已記錄）";
+  return edits.map((e) => {
+    if (e.field === "party_id") {
+      const one = (side: "old_value" | "new_value") => {
+        const v = e[side];
+        return v === null || v === undefined || v === "" ? (basisOf(e, side) ? "無黨籍" : null) : partyName(v);
+      };
+      return { ...e, old_value: one("old_value"), new_value: one("new_value") };
+    }
+    if (e.field === "party_basis") {
+      const one = (v: unknown) => (typeof v === "string" ? (PARTY_BASIS_LABEL[v] ?? "（已記錄）") : null);
+      return { ...e, old_value: one(e.old_value), new_value: one(e.new_value) };
+    }
+    return e;
+  });
+}
 
 function fmtValue(v: unknown): string {
   if (v === null || v === undefined || v === "") return "（空）";
@@ -149,6 +180,18 @@ function summaryFor(c: HistoryContribution, edits: HistoryEditOut[], lookup: Sum
   if (c.contribution_type === "politician" && updates.length > 0) {
     const s = `補上${updates.map((e) => e.field_label).join("、")}`;
     return { summary: s, detail: updates.map((e) => e.field_label).join("、") };
+  }
+  // 補政黨的 candidacy（party_roster 臂）：參選狀態其實沒改——沒有整列新增、也沒有狀態欄的變動——標題照實際改的欄位講，
+  // 不能沿用摘要的「參選狀態改為…」（蘇清吉 2026-10-18 的履歷就因此跟 10-07 的名冊清查長得一模一樣）
+  if (c.contribution_type === "candidacy" && edits.length > 0
+    && !edits.some((e) => e.field === "*" || e.field === "candidacy_status" || e.field === "candidate_status" || e.field === "election_result")) {
+    const party = updates.find((e) => e.field === "party_id");
+    if (party) {
+      const name = typeof party.new_value === "string" && party.new_value !== "（已記錄）" ? party.new_value : partyDisplayName(typeof c.payload.party === "string" ? c.payload.party : "") || "（已記錄）";
+      return { summary: `補上這一屆的推薦政黨：${name}`, detail: `推薦政黨：${name}` };
+    }
+    const labels = [...new Set(updates.map((e) => e.field_label))].join("、");
+    return { summary: `更新參選紀錄的${labels}`, detail: labels };
   }
   const polId = c.applied_policy_id
     ?? (typeof c.payload.policy_id === "string" ? c.payload.policy_id : null)
@@ -202,9 +245,9 @@ export function buildHistory(data: HistoryData): HistoryEntry[] {
   const entries = data.contributions
     .filter((c) => c.contribution_type !== "adjudication")
     .map((c): HistoryEntry => {
-      const edits: HistoryEditOut[] = (editsBy.get(c.id) ?? [])
+      const edits: HistoryEditOut[] = displayEditValues((editsBy.get(c.id) ?? [])
         .sort((a, b) => a.id - b.id)
-        .map((e) => ({ table: e.table_name, record_id: e.record_id, field: e.field, field_label: FIELD_LABEL[e.field] ?? e.field, old_value: e.old_value ?? null, new_value: e.new_value ?? null, applied_at: e.applied_at, reverted_at: e.reverted_at ?? null, reverted_by: e.reverted_by ?? null }));
+        .map((e) => ({ table: e.table_name, record_id: e.record_id, field: e.field, field_label: FIELD_LABEL[e.field] ?? e.field, old_value: e.old_value ?? null, new_value: e.new_value ?? null, applied_at: e.applied_at, reverted_at: e.reverted_at ?? null, reverted_by: e.reverted_by ?? null })), summaryLookupOf(data));
       const verifiers: HistoryVerifier[] = (votesBy.get(c.id) ?? [])
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map((v) => ({ agent_name: v.agent_name, agent_tool: v.agent_tool, verdict: v.verdict, note: v.note, evidence_url: v.evidence_url, resolved_politician_id: v.resolved_politician_id, created_at: v.created_at }));
@@ -370,10 +413,18 @@ export async function collectHistory(supabase: SupabaseLike, target: HistoryTarg
     // 交件的網址在出處表的等級與存檔網址（#347 第二階段 A）；出處表拿不到就是空表，照網域自動判斷
     fetchSourceBriefs(supabase, contributions.flatMap((c) => c.source_urls ?? [])),
   ]);
+  const editRows = ok<HistoryEdit[]>(edits, "edit_history");
+  // 履歷的 party_id 變更要顯示政黨名稱：交件 payload 裡只有政黨文字，id 要另外查（缺的才查，一次）
+  const editPartyIds = [...new Set(editRows.filter((e) => e.field === "party_id").flatMap((e) => [e.old_value, e.new_value])
+    .filter((v): v is number => typeof v === "number" && Number.isInteger(v)).map(String))].filter((v) => !summaryLookup.parties?.[v]);
+  if (editPartyIds.length > 0) {
+    const named = ok<Array<{ id: number; name: string }>>(await supabase.from("parties").select("id, name").in("id", editPartyIds).limit(500), "party names (edits)");
+    summaryLookup.parties = { ...(summaryLookup.parties ?? {}), ...Object.fromEntries(named.map((x) => [String(x.id), x.name])) };
+  }
   return {
     contributions,
     votes: ok<HistoryVote[]>(votes, "votes"),
-    edits: ok<HistoryEdit[]>(edits, "edit_history"),
+    edits: editRows,
     adjudications: ok<HistoryContribution[]>(adjudications, "adjudications"),
     tasks: ok<HistoryTask[]>(tasks, "adjudicate tasks"),
     politician_names: summaryLookup.politicians,

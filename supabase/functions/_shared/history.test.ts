@@ -154,3 +154,61 @@ Deno.test("履歷每筆帶 detail：去掉「為誰新增政見」「把政見�
   assertEquals(progress.detail.startsWith("進度為"), true);
   for (const e of entries) assert(typeof e.detail === "string" && e.detail.length > 0, `${e.contribution_type} 沒有 detail`);
 });
+
+// ── 蘇清吉（高雄市路竹區鴨寮里，politician_elections.id 36770）：10-07 名冊清查新增整列、10-18 補政黨 ──
+const SU = "aaaaaaaa-0000-4000-8000-000000000036";
+const mkCand = (id: string, over: Record<string, unknown>) => ({
+  id, contribution_type: "candidacy", source_urls: ["https://example.test/s"], note: null, agent_tool: null, status: "applied", review_notes: null,
+  applied_politician_id: SU, applied_policy_id: null, agree_count: 3, disagree_count: 0, unsure_count: 0, ...over,
+});
+const suData = (partyName: string | null, lookupParties: Record<string, string> = {}) => ({
+  contributions: [
+    mkCand("c-1007", { payload: { name: "蘇清吉", election_id: 2026, region: "高雄市", election_type: "村里長", candidate_status: "registered" }, agent_name: "roster-a", created_at: "2026-10-07T01:00:00Z", applied_at: "2026-10-07T02:00:00Z", task_id: "auto:roster_check:2026:高雄市路竹區:村里長" }),
+    mkCand("c-1018", { payload: { name: "蘇清吉", election_id: 2026, region: "高雄市", election_type: "村里長", candidate_status: "registered", ...(partyName ? { party: partyName } : {}) }, agent_name: "party-b", created_at: "2026-10-18T01:00:00Z", applied_at: "2026-10-18T02:00:00Z", task_id: "auto:candidacy_source_missing:party:36770" }),
+  ],
+  votes: [], adjudications: [], tasks: [],
+  edits: [
+    { id: 1, contribution_id: "c-1007", table_name: "politician_elections", record_id: "36770", field: "*", old_value: null, new_value: { id: 36770, candidacy_status: "filed" }, applied_at: "2026-10-07T02:00:00Z", reverted_at: null, reverted_by: null },
+    { id: 2, contribution_id: "c-1018", table_name: "politician_elections", record_id: "36770", field: "source_note", old_value: "舊", new_value: "新", applied_at: "2026-10-18T02:00:00Z", reverted_at: null, reverted_by: null },
+    { id: 3, contribution_id: "c-1018", table_name: "politician_elections", record_id: "36770", field: "party_id", old_value: null, new_value: null, applied_at: "2026-10-18T02:00:00Z", reverted_at: null, reverted_by: null },
+    { id: 4, contribution_id: "c-1018", table_name: "politician_elections", record_id: "36770", field: "party_basis", old_value: null, new_value: "contribution", applied_at: "2026-10-18T02:00:00Z", reverted_at: null, reverted_by: null },
+  ],
+  summary_lookup: { politicians: { [SU]: "蘇清吉" }, parties: lookupParties },
+});
+
+Deno.test("履歷：補政黨的 candidacy（edits 沒有整列新增、沒有狀態變動）標題講推薦政黨，不寫「參選狀態改為」；10-07 整列新增那筆照舊", () => {
+  const entries = buildHistory(suData("無") as never);
+  const [party, created] = entries;
+  assertEquals(created.id, "c-1007");
+  assertEquals(created.summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」");
+  assertEquals(party.id, "c-1018");
+  assert(!party.summary.includes("參選狀態改為"), party.summary);
+  assert(party.summary.includes("推薦政黨"), party.summary);
+  assertEquals(party.summary, "補上這一屆的推薦政黨：無黨籍");
+  assertEquals(party.detail, "推薦政黨：無黨籍");
+  // 欄位名與值：不印 id，party_id 空而依據有值＝無黨籍
+  const [, pid, basis] = party.edits.slice(0, 3).map((e) => e);
+  assertEquals([pid.field_label, pid.new_value], ["推薦政黨", "無黨籍"]);
+  assertEquals([basis.field_label, basis.new_value], ["政黨依據", "交件"]);
+});
+
+Deno.test("履歷：補的是有 id 的政黨 → 值換成政黨名稱；對照表沒有就「（已記錄）」、標題退回交件的政黨文字", () => {
+  const withName = suData("中國國民黨", { "1": "中國國民黨" });
+  withName.edits[2] = { ...withName.edits[2], new_value: 1 as never };
+  const a = buildHistory(withName as never)[0];
+  assertEquals(a.summary, "補上這一屆的推薦政黨：中國國民黨");
+  assertEquals(a.edits.find((e) => e.field === "party_id")?.new_value, "中國國民黨");
+
+  const noLookup = suData("中國國民黨");
+  noLookup.edits[2] = { ...noLookup.edits[2], new_value: 1 as never };
+  const b = buildHistory(noLookup as never)[0];
+  assertEquals(b.edits.find((e) => e.field === "party_id")?.new_value, "（已記錄）");
+  assert(!JSON.stringify(b.edits).includes('"new_value":1'), "不印 id");
+  assertEquals(b.summary, "補上這一屆的推薦政黨：中國國民黨");
+});
+
+Deno.test("履歷：candidacy 有 candidacy_status 變動或整列新增時，仍用交件的參選狀態句子", () => {
+  const d = suData("無");
+  d.edits = [{ ...d.edits[1], field: "candidacy_status", old_value: "declared", new_value: "filed" }];
+  assertEquals(buildHistory(d as never)[0].summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」，推薦政黨「無黨籍」");
+});

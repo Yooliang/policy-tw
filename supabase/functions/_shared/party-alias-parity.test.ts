@@ -11,6 +11,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { normParty, PARTY_ALIASES } from "./identity-normalize.ts";
+import { INDEPENDENT_ALIAS_KEYS, partyDisplayName } from "./party-alias.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 
@@ -85,4 +86,14 @@ Deno.test("行為不變：拿掉 5 筆沒用的別名後，每個舊輸出都一
     ["時代力量", "時代力量"], ["台灣基進", "台灣基進"], ["無黨籍及未經政黨推薦者", "無黨籍"],
   ];
   for (const [input, out] of cases) assertEquals(normParty(input), out, String(input));
+});
+
+// 顯示用的無黨籍那一族（party-alias.ts）＝ party_aliases 種子裡 kind＝independent 的全部寫法
+Deno.test("INDEPENDENT_ALIAS_KEYS ＝ party_aliases 種子 kind=independent 的寫法；顯示成「無黨籍」", async () => {
+  const seed = JSON.parse(await Deno.readTextFile(new URL("../../../lib/party-seed.json", import.meta.url)));
+  const keys = (seed.aliases as Array<{ alias_key: string; kind: string }>).filter((a) => a.kind === "independent").map((a) => a.alias_key).sort();
+  assertEquals([...INDEPENDENT_ALIAS_KEYS].sort(), keys);
+  for (const k of keys) assertEquals(partyDisplayName(k), "無黨籍");
+  assertEquals(partyDisplayName("中國國民黨"), "中國國民黨");
+  assertEquals(partyDisplayName(" "), "");
 });

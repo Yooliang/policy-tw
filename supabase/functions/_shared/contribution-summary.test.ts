@@ -487,3 +487,35 @@ Deno.test("collectSummaryIds：掃出各表要查的 id，濾掉格式不對的"
   assertEquals(ids.regions, ["65000"]);
   assertEquals(ids.lineages, []);
 });
+
+// ── candidacy 帶 party（補政黨的交件，party_roster 臂）：標題要講出推薦政黨，不能只剩「參選狀態改為」 ──
+const candParty = (party?: string) => summarizeContribution({
+  contribution_type: "candidacy",
+  payload: { name: "蘇清吉", election_id: 2026, region: "高雄市", election_type: "村里長", candidate_status: "registered", ...(party === undefined ? {} : { party }) },
+});
+
+Deno.test("candidacy 帶 party＝「無」：各種無黨籍寫法都顯示「無黨籍」", () => {
+  for (const w of ["無", "無黨", "無黨籍", "無黨籍及未經政黨推薦"]) {
+    const r = candParty(w);
+    assertEquals(r.summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」，推薦政黨「無黨籍」");
+    assertEquals(r.detail, "2026 高雄市村里長：已登記，推薦政黨「無黨籍」");
+  }
+});
+
+Deno.test("candidacy 帶 party＝中國國民黨：句子帶政黨原字", () => {
+  const r = candParty("中國國民黨");
+  assertEquals(r.summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」，推薦政黨「中國國民黨」");
+  assert(r.detail.includes("中國國民黨"));
+});
+
+Deno.test("candidacy 沒有 party：句子跟以前一字不差", () => {
+  const r = candParty();
+  assertEquals(r.summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」");
+  assertEquals(r.detail, "2026 高雄市村里長參選狀態改為「已登記」");
+  assertEquals(candParty("").summary, r.summary);
+});
+
+Deno.test("candidacy 帶選舉結果又帶 party：結果那條照舊（不講政黨）", () => {
+  const r = summarizeContribution({ contribution_type: "candidacy", payload: { name: "張嘉哲", election_id: 2022, region: "南投縣", election_type: "鄉鎮市長", candidate_status: "confirmed", election_result: "elected", party: "無" } });
+  assertEquals(r.summary, "補 張嘉哲 2022 南投縣鄉鎮市長選舉結果：當選");
+});
