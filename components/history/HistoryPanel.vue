@@ -116,7 +116,7 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
       </div>
       <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
         <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
-          <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : 'bg-amber-400 ring-amber-100']"></span>
+          <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : e.status === 'rejected' ? 'bg-red-700 ring-red-100' : 'bg-amber-400 ring-amber-100']"></span>
           <!-- 日期那一列放在按鈕外面、自己接點擊：列尾有 AgentInfo（本身是按鈕），按鈕不能包按鈕。
                鍵盤展開／收合走下面摘要那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
           <div class="flex flex-wrap items-center gap-2 text-xs cursor-pointer" @click="toggleEntry(e.id)">
