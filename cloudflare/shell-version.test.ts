@@ -113,6 +113,7 @@ Deno.test("邊緣渲染頁的 Cache-Control：瀏覽器 max-age=0，命中與 MI
   const { ssrCacheControl } = await import("./worker-config.js");
   assertEquals(ssrCacheControl({ staleTtlS: 3600 }), "public, max-age=0, s-maxage=3600");
   const worker = await Deno.readTextFile(new URL("./ssr-worker.js", import.meta.url));
-  assert(worker.includes("h.set('Cache-Control', ssrCacheControl(cfg))"), "Cache API 命中要重設 Cache-Control（不然會被改成 max-age=14400）");
-  assert(worker.includes("'Cache-Control': ssrCacheControl(cfg),"), "MISS 也用同一個值");
+  assert(worker.includes("h.set('Cache-Control', cacheControl)"), "Cache API 命中要重設 Cache-Control（不然會被改成 max-age=14400）");
+  assert(worker.includes("'Cache-Control': cacheControl,"), "MISS 也用同一個值");
+  assert(worker.includes("const cacheControl = ssrCacheControl({ staleTtlS: sMaxAgeForPath(path, cfg) })"), "兩處的值都由 ssrCacheControl 組出");
 });

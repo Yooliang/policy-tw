@@ -38,6 +38,7 @@ import {
 } from "./lineage.ts";
 import { careerSourceNote } from "./politician-careers.ts";
 import { sourceWriteIsOnlyPath, writeSourcesAfterApply } from "./source-write.ts";
+import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
 import { fetchPrimarySourceUrls } from "./source-read.ts";
 import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 import { loadReassignContext, personLabel, reassignProblems } from "./reassign-candidacy.ts";
@@ -2210,6 +2211,12 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     const wrote = await writeSourcesAfterApply(supabase, row, outcome);
     if (wrote === 0 && sourceWriteIsOnlyPath(row.contribution_type) && Array.isArray(row.source_urls) && row.source_urls.length > 0) {
       outcome.message = `${outcome.message}；注意：出處沒有寫進出處表，這筆會被當成缺出處、由系統重新派工補上`;
+    }
+    // 受影響的人物頁、政見頁（與 .md）請 Worker 清快取：不等結果、失敗不影響落庫（_shared/ssr-purge.ts）
+    try {
+      void purgeSsrPages(purgePathsFor(outcome));
+    } catch (e) {
+      console.error("purgeSsrPages:", e instanceof Error ? e.message : String(e));
     }
   }
   return outcome;

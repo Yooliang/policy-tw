@@ -21,6 +21,7 @@ import { render, configureSsr, SUPABASE_PUBLIC, markdownDeps } from '../dist-ssr
 import { readWorkerConfig, ssrCacheControl } from './worker-config.js'
 import { HEALTH_PATH, healthResponse } from './health.js'
 import { classifyRead } from './ai-reads.js'
+import { cacheTtlForPath, markFallback, renderOrFallback, sMaxAgeForPath, unavailableResponse, withBudget } from './fallback.js'
 import { handleMarkdown } from './markdown.js'
 import { nonPageResponse } from './render-status.js'
 import { stripShellHead } from './shell-head.js'
@@ -171,7 +172,13 @@ async function proxy(request) {
   headers.set('X-Forwarded-Host', incoming.host)
   headers.set('X-Forwarded-Proto', 'https')
   const hasBody = !['GET', 'HEAD'].includes(request.method)
-  const upstream = await fetch(target.toString(), { method: request.method, headers, body: hasBody ? request.body : undefined, redirect: 'manual' })
+  // 上游也有時間預算：Firebase 慢或斷線時回 503＋Retry-After，不讓 Worker 丟例外（Cloudflare 1101）或等到閘道 504（policy-ops#135）
+  let upstream
+  try {
+    upstream = await withBudget(() => fetch(target.toString(), { method: request.method, headers, body: hasBody ? request.body : undefined, redirect: 'manual' }))
+  } catch (e) {
+    return unavailableResponse(e)
+  }
   const out = new Headers(upstream.headers)
   const location = out.get('Location')
   if (location) {
@@ -190,24 +197,39 @@ async function renderPage(request, ctx) {
   const cache = caches.default
   const cacheKey = new Request(`${url.origin}${path}`, { method: 'GET' })
   const hit = await cache.match(cacheKey)
+  // 長尾頁（人物、政見）新鮮期 1 小時，其餘照 SSR_CACHE_TTL_S（fallback.js）
+  const ttlS = cacheTtlForPath(path, cfg)
+  const cacheControl = ssrCacheControl({ staleTtlS: sMaxAgeForPath(path, cfg) })
+  // 現場渲染要打資料庫：有時間預算，逾時或出錯先回快取裡舊的、沒有就退到上游的預渲染頁／殼（policy-ops#135）。
+  // 逾時後渲染不中斷，交給 waitUntil 跑完，結果照樣寫進快取暖下一個請求
+  const live = (search) => () => {
+    const p = renderAndStore(path, url.origin, cacheKey, cache, search, cacheControl)
+    ctx.waitUntil(p.catch(() => undefined))
+    return p
+  }
+  const stale = hit ? async () => hitResponse(hit, cacheControl) : null
+  const shell = () => proxy(request)
   // 部署後快取裡的舊頁還指著舊的 /assets 檔（Firebase 部署會刪掉，回 404）：殼換版了就當沒命中、當場重算（policy-ops#37）。
   // 拿不到殼時沿用快取（shouldRerender 回 false），不把完好的頁丟掉
   if (hit && shouldRerender(hit.headers.get('X-Shell-Version'), await shellLoader.peek())) {
-    return await renderAndStore(path, url.origin, cacheKey, cache, url.search)
+    return await renderOrFallback({ render: live(url.search), stale, shell })
   }
   if (hit) {
     const age = Number(hit.headers.get('X-Rendered-At') ?? 0)
-    if (Date.now() - age > cfg.cacheTtlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache, '').catch(() => undefined))
-    const h = new Headers(hit.headers); h.set('X-Cache', 'HIT')
-    // 命中的回應會被改成 max-age=14400（區域的瀏覽器快取 TTL）：重設成跟 MISS 一樣，瀏覽器才不會把舊頁留 4 小時（policy-ops#37）
-    h.set('Cache-Control', ssrCacheControl(cfg))
-    return new Response(hit.body, { status: hit.status, headers: h })
+    if (Date.now() - age > ttlS * 1000) ctx.waitUntil(renderAndStore(path, url.origin, cacheKey, cache, '', cacheControl).catch(() => undefined))
+    return hitResponse(hit, cacheControl)
   }
-  const res = await renderAndStore(path, url.origin, cacheKey, cache, url.search)
-  return res
+  return await renderOrFallback({ render: live(url.search), stale, shell })
 }
 
-async function renderAndStore(path, origin, cacheKey, cache, search = '') {
+function hitResponse(hit, cacheControl) {
+  const h = new Headers(hit.headers); h.set('X-Cache', 'HIT')
+  // 命中的回應會被改成 max-age=14400（區域的瀏覽器快取 TTL）：重設成跟 MISS 一樣，瀏覽器才不會把舊頁留 4 小時（policy-ops#37）
+  h.set('Cache-Control', cacheControl)
+  return new Response(hit.body, { status: hit.status, headers: h })
+}
+
+async function renderAndStore(path, origin, cacheKey, cache, search = '', cacheControl = ssrCacheControl(cfg)) {
   const [shell, r] = await Promise.all([loadShell(), render(path)])
   if (r.status === 'passthrough') return null
   // 301（已合併的人物 → 保留者）與 404 的組法在 render-status.js（#466）；兩者都不進快取
@@ -219,7 +241,7 @@ async function renderAndStore(path, origin, cacheKey, cache, search = '') {
   }
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': ssrCacheControl(cfg),
+    'Cache-Control': cacheControl,
     'X-Served-Via': 'cloudflare-worker-ssr',
     'X-Rendered-At': String(Date.now()),
     'X-Shell-Version': shellVersion(shell),
@@ -227,7 +249,8 @@ async function renderAndStore(path, origin, cacheKey, cache, search = '') {
   })
   const body = assemble(shell, r)
   const res = new Response(body, { status: 200, headers })
-  await cache.put(cacheKey, res.clone())
+  // 寫快取失敗（配額、太大）不該讓已經渲染好的頁變成錯誤
+  await cache.put(cacheKey, res.clone()).catch(() => undefined)
   return res
 }
 
@@ -242,17 +265,22 @@ export default {
     if (request.method === 'POST' && url.pathname === '/__purge') {
       if (!env.PURGE_SECRET || request.headers.get('X-Purge-Secret') !== env.PURGE_SECRET) return new Response('forbidden', { status: 403 })
       const body = await request.json().catch(() => ({}))
-      const paths = Array.isArray(body.paths) ? body.paths.slice(0, 200) : []
+      const paths = body && Array.isArray(body.paths) ? body.paths.slice(0, 200) : []
       let n = 0
       for (const p of paths) {
         const clean = String(p).replace(/\/$/, '')
         // 人物頁、縣市頁的 Markdown 版（本頁網址加 .md）一併清掉
-        for (const k of [clean, `${clean}.md`]) { if (await caches.default.delete(new Request(`${url.origin}${k}`, { method: 'GET' }))) n++ }
+        // 路徑不合法（不是 / 開頭、網址組不起來）或刪除失敗只略過這一筆，不讓整個 purge 丟例外
+        for (const k of [clean, `${clean}.md`]) {
+          try { if (await caches.default.delete(new Request(`${url.origin}${k}`, { method: 'GET' }))) n++ } catch { /* 略過 */ }
+        }
       }
       return new Response(JSON.stringify({ purged: n }), { headers: { 'Content-Type': 'application/json' } })
     }
     // Markdown 檢視（2026-10-07）：.md 一律在這裡收掉，不退回代理——代理會把 app.html 當成 200 回給想讀 Markdown 的 AI
-    const md = await handleMarkdown(request, ctx, markdownWorkerDeps())
+    // handleMarkdown 內部已接住大多數錯誤；這裡是最後一道，不讓例外漏出 Worker
+    let md = null
+    try { md = await handleMarkdown(request, ctx, markdownWorkerDeps()) } catch (e) { return unavailableResponse(e) }
     if (md) return md
     const api = apiRedirect(request)
     if (api) return api
@@ -270,9 +298,7 @@ export default {
         if (res) return res
       } catch (e) {
         // SSR 壞了就退回代理（預渲染頁還在），並留痕跡
-        const res = await proxy(request)
-        const h = new Headers(res.headers); h.set('X-SSR-Error', String(e && e.message ? e.message : e).slice(0, 200))
-        return new Response(res.body, { status: res.status, headers: h })
+        return markFallback(await proxy(request), 'shell', e)
       }
     }
     return proxy(request)

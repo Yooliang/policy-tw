@@ -55,5 +55,5 @@ Deno.test("ssr-worker.js 真的把 render 結果交給 nonPageResponse（接線�
   assertEquals(/import \{ nonPageResponse \} from '\.\/render-status\.js'/.test(src), true);
   assertEquals(/const special = nonPageResponse\(r, \{ shell, origin, search \}\)/.test(src), true);
   // 查詢字串要從請求一路傳到 renderAndStore，不然 301 會丟掉 ?tab=
-  assertEquals(/renderAndStore\(path, url\.origin, cacheKey, cache, url\.search\)/.test(src), true);
+  assertEquals(/renderAndStore\(path, url\.origin, cacheKey, cache, search, cacheControl\)/.test(src), true);
 });
