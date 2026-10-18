@@ -51,6 +51,7 @@ export const EXCLUDED_AGENTS: ReadonlySet<string> = new Set([
   "xiaoliang-probe",
 ]);
 import { normalizeCorrection } from "./correction.ts";
+import { partyDisplayName } from "./party-alias.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
 import { resultItems, resultsUnitLabel } from "./election-results.ts";
 import { elementPhrase } from "./policy-elements.ts";
@@ -173,10 +174,13 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const name = str(p.name) || find(lk.politicians, politicianId);
       // 帶選舉結果的（election_result_missing 的答案）重點是結果，不是「狀態改成確認參選」——那多半沒變
       const unit = `${str(p.election_id)} ${str(p.region)}${str(p.election_type)}`;
-      detail = result ? `${unit}選舉結果：${result}` : `${unit}參選狀態改為「${status}」`;
+      // 補政黨的交件（party_roster 臂）也是 candidacy：帶 party 就把推薦政黨講出來，不然標題只剩「參選狀態改為」，看不出補了什麼
+      const party = partyDisplayName(str(p.party));
+      const partyPart = party ? `，推薦政黨「${party}」` : "";
+      detail = result ? `${unit}選舉結果：${result}` : party ? `${unit}：${status}${partyPart}` : `${unit}參選狀態改為「${status}」`;
       summary = result
         ? `補 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}選舉結果：${result}`
-        : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」`;
+        : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」${partyPart}`;
       break;
     }
     case "policy": {

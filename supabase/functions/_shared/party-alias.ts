@@ -37,3 +37,18 @@ export function sameParty(a: PartyResolution, b: PartyResolution): boolean | nul
   if (a.kind === "independent" || b.kind === "independent") return a.kind === b.kind;
   return a.partyId === b.partyId;
 }
+
+/**
+ * party_aliases 裡 kind＝independent 的寫法（無黨籍那一族）的比對鍵。純函式顯示用（貢獻摘要、履歷），不碰資料庫；
+ * 跟 20261006073461_parties.sql 的種子逐一相同（party-alias-parity.test.ts 盯）。新增無黨籍寫法時兩邊一起加。
+ */
+export const INDEPENDENT_ALIAS_KEYS: ReadonlySet<string> = new Set([
+  "未經政黨推薦", "無", "無黨", "無黨籍", "無黨籍及未經政黨推薦", "無黨籍及未經政黨推薦者",
+]);
+
+/** 交件的 party 寫法 → 給人看的政黨名：無黨籍那一族統一顯示「無黨籍」，其他照原字（不猜）；空的回空字串 */
+export function partyDisplayName(text: string | null | undefined): string {
+  const key = partyAliasKey(text);
+  if (!key) return "";
+  return INDEPENDENT_ALIAS_KEYS.has(key) ? "無黨籍" : (text ?? "").trim();
+}
