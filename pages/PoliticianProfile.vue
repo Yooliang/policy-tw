@@ -36,7 +36,7 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies, loadPastTerms } = useSupabase()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, loadPoliciesByPolitician, loadPastTerms } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
@@ -141,8 +141,8 @@ async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
 }
 
 onMounted(async () => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
+  // 這一頁只要這個人的政見：撈他的，不撈整份清單
+  loadPoliciesByPolitician(String(route.params.politicianId))
   refreshPastTerms(String(route.params.politicianId))
   await ensurePoliticianLoaded(String(route.params.politicianId))
 })
@@ -164,6 +164,7 @@ async function refreshPastTerms(politicianId: string): Promise<void> {
 watch(() => route.params.politicianId, (id) => {
   if (id) ensurePoliticianLoaded(String(id))
   if (id) refreshPastTerms(String(id))
+  if (id) loadPoliciesByPolitician(String(id))
 })
 
 

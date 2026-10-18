@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { shortUrlsIn } from '../lib/url'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
@@ -18,7 +18,7 @@ import { usePageHead } from '../composables/usePageHead'
 
 const router = useRouter()
 const { isAuthenticated, signInWithGoogle, user, userDisplayName, userAvatarUrl, userEmail, signOut } = useAuth()
-const { policies, politicians, ensurePolicies } = useSupabase()
+const { policies, politicians, loadPoliciesByIds } = useSupabase()
 
 /** Hero 的三個頁籤。改文字或順序只動這裡。 */
 const TABS: Array<{ key: 'contributions' | 'tracking' | 'settings'; label: string; icon: typeof Star }> = [
@@ -198,12 +198,12 @@ function formatDate(dateStr: string | null): string {
 // 改走 useCheckpoints（2026-09-17）：登入後與帳號同步，換裝置也帶得走
 const { checkpoints, syncing: checkpointSyncing, synced: checkpointSynced } = useCheckpoints()
 
+watch(checkpoints, (ids) => { loadPoliciesByIds(ids) }, { immediate: true })
 const trackedPolicies = computed(() => policies.value.filter(policy => checkpoints.value.includes(policy.id)))
 
 // === Lifecycle ===
 onMounted(() => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
+  // 只要「我的關注」那幾條：依 id 撈，不撈整份清單（checkpoints 登入後才同步到，所以下面也盯著它）
   agentName.value = readStoredAgentName()
   agentInput.value = agentName.value
   // 登入了就自動連結 DiTrust（第一次會開戶並顯示序號一次）
