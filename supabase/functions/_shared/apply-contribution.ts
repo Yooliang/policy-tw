@@ -1322,6 +1322,7 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
         ? await isListPublished(supabase, Number(cur.election_id), cur.election_type, undefined, await candidacyCounty(supabase, cur.election_type, cur.region_id))
         : false,
       existing: cur.candidacy_status,
+      explicitCorrection: true, // 更正明講的「沒參選／退選」不被既有選舉結果蓋掉（協議 1.98.0）
     });
     if (n.status) patch.candidacy_status = n.status;
     if (n.converted) narrowNote = CONFIRMED_NARROWED_NOTE;

@@ -21,6 +21,7 @@ import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
 import { resultOfCandidacyStatus } from "./candidacy-status.ts";
+import { fetchPendingOnTarget, scopeOfPayload, scopeOfTarget, shapePendingOnTarget, type PendingOnTarget } from "./pending-on-target.ts";
 import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 import { REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
 
@@ -52,6 +53,8 @@ export function truncateFields<T extends Obj>(row: T, fields: readonly string[])
 }
 
 export interface TaskContextData {
+  /** 協議 1.98.0：目標落在這個人、他的參選紀錄或政見上的等票交件（pending／verified），最多 10 筆；撈失敗或沒有就是 undefined */
+  pending_on_target?: PendingOnTarget;
   /** party_info_missing（2026-10-06）：要補的政黨（改名的那一種新舊兩筆） */
   parties?: Obj[];
   /** profile_gap：內政部地方公職人員名單上同名同縣市的現職紀錄（照片、機關、職稱、黨籍），沒有就 undefined */
@@ -419,6 +422,7 @@ export function shapeTaskCurrent(
     // 而整個改動的目的就是讓它不必回頭翻（2026-09-21）
     ...(task ? (() => { const b = buildBranchTemplates(taskType, tplTarget, task.task_id); return b ? { report_templates_by_type: b } : {}; })() : {}),
     no_change_outcomes: NO_CHANGE_OUTCOMES_HINT,
+    ...shapePendingOnTarget(data.pending_on_target),
     // 查證來源（2026-09-28）：代理常只查媒體首頁就回「查無」，其實政黨／議會官網查得到照片、學經歷、選區、政見。
     // fetchTaskContext 已經依這個任務對象篩過、限量 6 筆；這裡沒有就不附，不能讓派工因為這個失敗。
     ...(data.verification_sources && data.verification_sources.length > 0 ? { verification_sources: data.verification_sources } : {}),
@@ -1037,6 +1041,9 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
   // 政見與進度紀錄的 source_url 來自出處表的主要出處（#347 第二階段 B-1：資料表的欄位不再讀）；沒有主要出處就是 null。
   // 出處表出錯不擋派工（overlayPrimarySources 自己記 log、那一欄不給）
   await overlayPrimarySources(supabase, data as Obj);
+  // 等票中的交件（協議 1.98.0）：任務已經選定之後才查，跟上面各段同一層；不進候選過濾、排序、seed（#233／#234）。撈失敗就不附
+  const pending = await fetchPendingOnTarget(supabase, scopeOfTarget(target));
+  if (pending && pending.items.length > 0) data.pending_on_target = pending;
   return data;
 }
 
@@ -1086,6 +1093,8 @@ export function correctionTargetSummary(
 }
 
 export interface VerifyContextData {
+  /** 協議 1.98.0：同上，排除被驗的那一筆本身 */
+  pending_on_target?: PendingOnTarget;
   politicians?: Obj[];
   elections?: Obj[];
   policies?: Obj[];
@@ -1296,6 +1305,7 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
   // #4：按網域的查證提示
   const hints = sourceHintsFor(data.source_urls);
   if (hints.length > 0) out = { ...out, source_hints: hints };
+  out = { ...out, ...shapePendingOnTarget(data.pending_on_target) };
   return out;
 }
 
@@ -1790,5 +1800,8 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
   if (contributionType === "correction" && payload.target_table === "policies" && data.target && typeof data.target === "object") {
     overlaySourceUrl([data.target as Obj], await fetchPrimarySourceUrls(supabase, "policies", [String(payload.target_id)]));
   }
+  // 等票中的交件（協議 1.98.0）：同一個對象上別筆等票的，排除被驗的這一筆自己。撈失敗就不附
+  const pending = await fetchPendingOnTarget(supabase, scopeOfPayload(payload), { excludeContributionId: contributionId ?? null });
+  if (pending && pending.items.length > 0) data.pending_on_target = pending;
   return data;
 }
