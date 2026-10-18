@@ -19,6 +19,7 @@ import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
 import { normElectionType, normText } from "./identity-normalize.ts";
+import { renameCollision, renameCollisionMessage } from "./person-identity-guard.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
@@ -159,6 +160,27 @@ async function recordCreatedPolitician(supabase: SupabaseLike, ctx: EditContext,
 
 type Ensured = { politician_id: string; created: boolean } | { disputed: string };
 
+/**
+ * 交件帶的姓名要跟目標人物是同一個人（2026-09-23 agy 審查；2026-10-18 resolved 分支也共用）：id 填錯的話，參選紀錄會掛到別人名下。
+ * 本名對不上再看別名（politician_keys alias_name），都不是回說明文字（呼叫端轉 disputed）；沒帶姓名不檢查。
+ * 目標是已合併的舊人物時，姓名／別名要對「舊人物或它的保留者」任一個（舊 id 的名字可能已過期，保留者的才是現在的名字）。
+ */
+export async function nameMismatchMessage(supabase: SupabaseLike, target: { id: string; name: string }, keeperId: string, claimedName: string | null, label: string): Promise<string | null> {
+  const claimed = normText(claimedName);
+  if (!claimed || claimed === normText(target.name)) return null;
+  let keeperName: string | null = null;
+  if (keeperId !== target.id) {
+    const { data: keeper, error: keeperErr } = await supabase.from("politicians").select("id, name").eq("id", keeperId).maybeSingle();
+    throwIf(keeperErr, "politicians lookup keeper");
+    keeperName = keeper ? String(keeper.name ?? "") : null;
+  }
+  if (keeperName !== null && claimed === normText(keeperName)) return null;
+  const { data: alias } = await supabase.from("politician_keys").select("politician_id")
+    .in("politician_id", keeperId === target.id ? [target.id] : [target.id, keeperId]).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
+  if (alias) return null;
+  return `${label} 是「${target.name}」，但 payload.name 是「${claimedName}」——id 與姓名不是同一人，這筆不落庫`;
+}
+
 /** 驗證者／維護者有指認就用那位（要存在）；否則多面向比對：matched／new 照常，ambiguous → disputed */
 async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, candidate: Parameters<typeof ensurePolitician>[1], options: Parameters<typeof ensurePolitician>[2]): Promise<Ensured> {
   const resolved = str(row.resolved_politician_id);
@@ -169,10 +191,15 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
     return { politician_id: forced.politician_id, created: forced.created };
   }
   if (resolved) {
-    const { data, error } = await supabase.from("politicians").select("id").eq("id", resolved).maybeSingle();
+    const { data, error } = await supabase.from("politicians").select("id, name").eq("id", resolved).maybeSingle();
     throwIf(error, "politicians lookup resolved");
     if (!data) return { disputed: `指認的人物 ${resolved} 不存在，交維護者裁決` };
-    return { politician_id: await followMergedInto(supabase, String(data.id)), created: false };
+    // 指認的人也要跟交件的姓名對得上（2026-10-18 72bad160：cec-verify 把 resolvedPoliticianId 塞進這條，
+    // 人物「劉雁祿」被寫上姓名為「劉復嵐」的落選結果）。先查 id 再查姓名，原本這條完全不比姓名。
+    const keeperId = await followMergedInto(supabase, String(data.id));
+    const mismatch = await nameMismatchMessage(supabase, { id: String(data.id), name: String(data.name ?? "") }, keeperId, candidate.name ?? null, `指認的人物 ${resolved}`);
+    if (mismatch) return { disputed: mismatch };
+    return { politician_id: keeperId, created: false };
   }
   // 提交者自己帶了 politician_id 就是那位（要存在），不再用姓名去猜身份。
   // 2026-09-19 抓到 7 筆落庫連續失敗＋蘇清泉 2 票齊了卻轉裁決：payload 都有 politician_id，
@@ -184,24 +211,9 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
     const { data, error } = await supabase.from("politicians").select("id, name").eq("id", given).maybeSingle();
     throwIf(error, "politicians lookup by payload id");
     if (!data) return { disputed: `payload.politician_id ${given} 不存在，交維護者裁決` };
-    // 帶了 id 也帶了姓名，兩者要是同一個人（2026-09-23 agy 審查）：id 填錯的話，參選紀錄會掛到別人名下。
-    // 本名對不上再看別名（politician_keys alias_name），都不是才擋。
-    // 帶的是已合併的舊人物時，姓名／別名要對「舊人物或它的保留者」任一個（舊 id 的名字可能已過期，保留者的才是現在的名字）
     const keeperId = await followMergedInto(supabase, String(data.id));
-    const claimed = normText(candidate.name ?? null);
-    if (claimed && claimed !== normText(String(data.name ?? ""))) {
-      let keeperName: string | null = null;
-      if (keeperId !== String(data.id)) {
-        const { data: keeper, error: keeperErr } = await supabase.from("politicians").select("id, name").eq("id", keeperId).maybeSingle();
-        throwIf(keeperErr, "politicians lookup keeper");
-        keeperName = keeper ? String(keeper.name ?? "") : null;
-      }
-      if (keeperName === null || claimed !== normText(keeperName)) {
-        const { data: alias } = await supabase.from("politician_keys").select("politician_id")
-          .in("politician_id", keeperId === String(data.id) ? [given] : [given, keeperId]).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
-        if (!alias) return { disputed: `payload.politician_id ${given} 是「${data.name}」，但 payload.name 是「${candidate.name}」——id 與姓名不是同一人，這筆不落庫` };
-      }
-    }
+    const mismatch = await nameMismatchMessage(supabase, { id: String(data.id), name: String(data.name ?? "") }, keeperId, candidate.name ?? null, `payload.politician_id ${given}`);
+    if (mismatch) return { disputed: mismatch };
     return { politician_id: keeperId, created: false };
   }
   const ensured = await ensurePolitician(supabase, candidate, options);
@@ -1362,6 +1374,12 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
   const { changed, noop } = splitNoOpChanges(patch, current as Record<string, unknown>);
   if (Object.keys(changed).length === 0) {
     return { status: "superseded", message: `${table} 的 ${noop.join("、")} 現值已經跟這筆更正一樣（別人先修好了），不重複寫入` };
+  }
+  // 改名撞到同一場選舉另一位同名的參選人＝同一人重複建檔（2026-10-18 劉雁祿→劉復嵐）：交件端查過一次，
+  // 等票期間可能有人先建了，落庫前再查一次；撞到就不改，交裁決（正解是 merge_politician）
+  if (table === "politicians" && typeof changed.name === "string") {
+    const collision = await renameCollision(supabase, String(target_id), changed.name);
+    if (collision) return { status: "disputed", message: renameCollisionMessage(String(target_id), collision) };
   }
   // 任期：卸任日或原因真的有改才把根據換成「有出處」
   const extra: Obj = table === "politician_offices" && ("end_date" in changed || "end_reason" in changed)
