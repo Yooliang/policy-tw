@@ -181,7 +181,11 @@ jobs:
   ssr-deploy:
     name: 部署邊緣 SSR Worker（正見.tw）
     needs: [deploy]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # always()＋明確看 deploy 成功：前端類 push 時 edge-tests 被略過，沒有狀態函式的 if 會被隱含的
+    # success() 連坐略過（Hosting 更新了、Worker 停在舊版、而且沒有任何錯誤）。Hosting 上了就一定要跟著上。
+    if: >-
+      always() && needs.deploy.result == 'success' &&
+      github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
