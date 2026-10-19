@@ -79,3 +79,10 @@ Deno.test("PK 詳情：沒政見的人照列、標示尚無政見", () => {
   const page = buildPkMdPage({ title: "縣市議員・第01選舉區", region: "台南市", year: 2026, matrix, htmlPath: "/election/2026/台南市" });
   assert(page.body.includes("- 這一場選舉尚無政見資料"));
 });
+
+Deno.test("PK 詳情是現場組的、沒有網址：path 空字串，MdDrawer 對空 path 不畫「另開視窗」", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const drawer = Deno.readTextFileSync(new URL("../components/MdDrawer.vue", import.meta.url));
+  assert(/id: `pk:[^\n]*\n\s*path: '',/.test(page), "PK 詳情的 pick 要是 path: ''");
+  assert(/<a v-if="pick\.path" :href="pick\.path"/.test(drawer), "MdDrawer 的另開視窗連結要 v-if pick.path");
+});
