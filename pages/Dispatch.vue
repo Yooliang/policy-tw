@@ -362,6 +362,21 @@ const FUNNEL: [string, string][] = [
 
             <!-- 日常：不跟選舉日曆走，沿用同一條軸好對照今天 -->
             <section v-if="dailyGroups.length" class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-daily-section">
+              <!-- 這一區自己的刻度列：日期刻度＋今天，不用往上對照 -->
+              <div class="flex border-b border-slate-200" data-testid="dispatch-daily-axis">
+                <div class="w-56 shrink-0 px-4 py-2 text-xs text-slate-500 self-end">任務</div>
+                <div class="relative h-28 flex-1">
+                  <div v-for="t in ticks" :key="t.day" class="absolute bottom-0 top-0 border-l" :style="{ left: `${x(t.day)}%`, borderColor: C.axis }" :title="t.title">
+                    <div class="absolute bottom-1 left-1 origin-bottom-left -rotate-[60deg] whitespace-nowrap text-[11px] text-slate-500">
+                      {{ t.label }} <span class="tabular-nums">{{ fromDay(t.day).slice(5) }}</span>
+                    </div>
+                  </div>
+                  <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today }" :title="`今天 ${tl.today}`">
+                    <span class="absolute left-1 top-0.5 whitespace-nowrap rounded px-1 text-[10px] font-medium text-white" :style="{ background: C.today }">今天 {{ tl.today.slice(5) }}</span>
+                  </div>
+                </div>
+                <div class="w-20 shrink-0 px-3 py-2 text-right text-xs text-slate-500 self-end">件數</div>
+              </div>
               <div class="flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 bg-slate-50 px-4 py-2">
                 <span class="font-black text-navy-900">日常</span>
                 <span class="text-xs text-slate-500">不跟選舉日曆走，不隨上面選的選舉變：<span class="tabular-nums">{{ fmt(dailyTotal) }}</span> 件<template v-if="newsQueued">（新聞任務 <span class="tabular-nums">{{ fmt(newsQueued) }}</span> 件列在下面的被動）</template></span>
@@ -397,7 +412,7 @@ const FUNNEL: [string, string][] = [
         </div>
 
         <!-- 被動：外面進來的，有東西進來就處理 -->
-        <section v-if="passive" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
+        <section v-if="passive && (newsTasks.length || visitorCount != null || passive.news_7d)" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
           <h3 class="font-black text-navy-900 mb-1">被動</h3>
           <p class="mb-3 text-xs text-slate-500">外面進來的（新聞、網站訪客），有東西進來就處理，只列件數。</p>
           <div class="grid gap-4 md:grid-cols-2">
@@ -425,7 +440,7 @@ const FUNNEL: [string, string][] = [
           </div>
         </section>
 
-        <section v-if="passive" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-verify-queue">
+        <section v-if="passive && pendingTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-verify-queue">
           <h3 class="font-black text-navy-900 mb-1">驗證佇列</h3>
           <p class="mb-3 text-xs text-slate-500">交件後等投票的，共 <span class="tabular-nums">{{ fmt(pendingTotal) }}</span> 筆。</p>
           <div class="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
