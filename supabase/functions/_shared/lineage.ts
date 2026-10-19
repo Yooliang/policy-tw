@@ -13,6 +13,10 @@
 
 import { sourceKind } from "./source-priority.ts";
 import { hostInList, UNREADABLE_SOCIAL_HOSTS } from "./source-domains.ts";
+import { isElectedTerm, taipeiToday } from "./elected-term.ts";
+
+// 今天（台北日期）的取法在最底層那支
+export { taipeiToday };
 
 // 清單的單一來源在 source-domains.ts；這裡留著原本的匯出名字，舊的 import 不用改
 export { UNREADABLE_SOCIAL_HOSTS };
@@ -237,6 +241,112 @@ export function participantPhrase(p: { role?: unknown; basis?: unknown; name?: u
   const basis = PARTICIPANT_BASIS_LABEL[p.basis as ParticipantBasis] ?? String(p.basis ?? "?");
   const who = typeof p.name === "string" && p.name ? `${p.name}：` : "";
   return `${who}${role}（${basis}）`;
+}
+
+// ── 脈絡只收「那一屆已投票且當選」的政見（維護者 2026-10-19，協議 1.99.0）──────────────────────────
+//
+// 「本來就該當選才叫政見啊，這之前叫承諾，這之後叫脈絡」：承諾 → 政見 → 脈絡。選前的是承諾、落選者的也不是政見，都不進脈絡。
+// 判斷看**那條政見所屬的那一屆**（policies.election_id）：那一屆已經投票（投票日早於今天），而且提出者在那一屆的參選紀錄是當選
+// （candidacy_status＝elected）。不是看這個人現在在不在任——2018 當選、2022 落選的人，2018 那一屆的政見仍然收。
+//
+// 兩層（#672「承諾→政見」要用同一個條件，不留兩份規則）：
+//   底層「那一屆已投票且當選」＝ elected-term.ts 的 isElectedTerm（SQL policy_is_elected_term(政見 id, 今天)，純函式、前端 lib 也可引用）；
+//   這裡的脈絡資格建在它上面：先排除找不到、已移除、沒標屆別，再問底層，不通過才分「還沒投票」或「沒當選」。
+// SQL 那一份是 migration 20261019020000 的 lineage_policy_ineligible_reason(政見 id)（派工臂、候選格範圍用），這裡是同一條規則的
+// TS 鏡像（交件前置檢查、落庫前用）；lineage-elected-only.test.ts 把兩邊放在同一批資料上逐案比對。改規則兩邊一起改。
+
+/** 不合格的原因（跟 SQL 函式回的字串同一組；合格是 null） */
+export const LINEAGE_INELIGIBLE_REASONS = ["not_found", "removed", "no_election", "not_voted_yet", "not_elected"] as const;
+export type LineageIneligibleReason = (typeof LINEAGE_INELIGIBLE_REASONS)[number];
+
+/** 判斷一條政見資不資格要用到的事實（都是資料庫裡的原值，不先下結論） */
+export interface LineageEligibilityFacts {
+  /** 政見本身；找不到這條政見給 null */
+  policy: { removed_at: string | null; election_id: number | null } | null;
+  /** 政見所屬那一屆的投票日（YYYY-MM-DD）；那一屆不存在給 null */
+  election_date: string | null;
+  /** 提出者在那一屆的每一筆參選紀錄的 candidacy_status（沒有紀錄就是空陣列） */
+  candidacy_statuses: ReadonlyArray<string | null>;
+}
+
+/**
+ * 這條政見能不能進脈絡：不能就回原因、能就回 null。順序跟 SQL 一樣：
+ * 找不到 → 已移除 → 沒標屆別（或那一屆不存在）→ 底層 isElectedTerm 通過就合格 → 沒通過：投票日還沒到（當天也算還沒）是「還沒投票」，否則是「沒當選」。
+ */
+export function lineagePolicyIneligibleReason(f: LineageEligibilityFacts, today: string = taipeiToday()): LineageIneligibleReason | null {
+  if (!f.policy) return "not_found";
+  if (f.policy.removed_at) return "removed";
+  if (f.policy.election_id === null || f.policy.election_id === undefined || !f.election_date) return "no_election";
+  if (isElectedTerm({ election_date: f.election_date, candidacy_statuses: f.candidacy_statuses }, today)) return null;
+  return f.election_date.slice(0, 10) >= today ? "not_voted_yet" : "not_elected";
+}
+
+/** 參選狀態給人看的字（只用在不合格的說明裡；跟 SQL 派工臂的 CASE 同一組） */
+export const CANDIDACY_STATUS_LABEL: Record<string, string> = {
+  considering: "評估中",
+  declared: "表態參選",
+  filed: "已登記",
+  withdrawn: "退選",
+  not_elected: "落選",
+  elected: "當選",
+};
+export const NO_CANDIDACY_LABEL = "沒有這一屆的參選紀錄";
+
+/** 提出者在那一屆的參選狀態，給人看的一句（沒有紀錄也講清楚） */
+export function candidacyStatusText(statuses: ReadonlyArray<string | null>): string {
+  const labels = [...new Set(statuses.map((s) => (s ? CANDIDACY_STATUS_LABEL[s] ?? s : "狀態未填")))];
+  return labels.length > 0 ? labels.join("、") : NO_CANDIDACY_LABEL;
+}
+
+/** 不合格的原因講給代理聽：哪一條、為什麼、怎麼辦（交件前置檢查與落庫共用，同一份話） */
+export function lineageIneligibleMessage(
+  reason: LineageIneligibleReason,
+  ctx: { policyId?: string; title?: string | null; electionDate?: string | null; statuses?: ReadonlyArray<string | null> },
+): string {
+  const which = `政見「${ctx.title ?? ctx.policyId ?? "?"}」`;
+  const date = ctx.electionDate ? ctx.electionDate.slice(0, 10) : null;
+  const rule = "脈絡只收那一屆已投票且當選的人提的政見（選前叫承諾、當選後才叫政見，政見串起來才叫脈絡）";
+  switch (reason) {
+    case "not_found": return `找不到${which}`;
+    case "removed": return `${which}已被移除，不歸入脈絡`;
+    case "no_election": return `${which}沒有記是哪一屆的，判斷不了它在不在資格內；${rule}，請先用 correction 補上它的 election_id`;
+    case "not_voted_yet": return `${which}屬於${date ? ` ${date} ` : ""}投票的那一屆，還沒投票，現在還是承諾、不是政見；${rule}，等開票、他當選之後才能歸入`;
+    case "not_elected": return `${which}屬於${date ? ` ${date} ` : ""}投票的那一屆，提出者在那一屆沒有當選（參選紀錄：${candidacyStatusText(ctx.statuses ?? [])}）；${rule}，落選者的承諾不收`;
+  }
+}
+
+// ── 同一人同一屆的多條政見不是脈絡（維護者 2026-10-19 檢討後追加，同一個協議版 1.99.0）─────────────────────────
+//
+// 脈絡串的是**跨人**（同級多人、前後任）或**跨屆**（承諾當選後的延續）的政見。同一位政治人物在同一屆提的多條政見講同一件事，
+// 那是重複政見，走重複清查（duplicate_policy），不是脈絡（例：澎湖「城市色彩」那條是陳佩真自己 2026 的 3 條承諾）。
+// 建新脈絡：政見（兩條以上）全都是同一人同一屆 → 擋；歸入既有脈絡：加入、拿掉之後整條脈絡不能只剩同一人同一屆。
+// 中央層級建新脈絡原本允許只有 1 條，照舊（一條政見談不上「全都是同一人同一屆」，這條規則只管兩條以上）。
+
+/** 判斷「同一人同一屆」要用到的欄位（policies 表的原值；沒有就是不知道，不下結論） */
+export interface LineageOwnedPolicy {
+  id: string;
+  title?: string | null;
+  politician_id?: string | null;
+  election_id?: number | null;
+}
+
+/** 兩條以上（id 不重複）的政見，而且全都是同一位政治人物在同一屆提的。人物或屆別有一條不知道就不算（不知道的另有資格判斷擋）。 */
+export function isSamePersonSameTerm(policies: ReadonlyArray<LineageOwnedPolicy>): boolean {
+  const byId = new Map<string, LineageOwnedPolicy>();
+  for (const p of policies) byId.set(String(p.id).toLowerCase(), p);
+  if (byId.size < 2) return false;
+  const all = [...byId.values()];
+  const person = typeof all[0].politician_id === "string" && all[0].politician_id ? all[0].politician_id.toLowerCase() : null;
+  const term = typeof all[0].election_id === "number" ? all[0].election_id : null;
+  if (person === null || term === null) return false;
+  return all.every((p) => typeof p.politician_id === "string" && p.politician_id.toLowerCase() === person && p.election_id === term);
+}
+
+/** 同一人同一屆的說明，講給代理聽：不是脈絡、是重複政見、改走哪裡 */
+export function lineageSamePersonMessage(policies: ReadonlyArray<LineageOwnedPolicy>): string {
+  const titles = [...new Map(policies.map((p) => [String(p.id).toLowerCase(), p.title ?? p.id])).values()].slice(0, 6).map((t) => `「${t}」`).join("、");
+  return `這些政見（${titles}）都是同一位政治人物在同一屆提的：同一個人同一屆的多條政見講同一件事，是重複政見、不是脈絡——請走重複清查（duplicate_policy 任務，用 removal 或 correction 處理重複）；` +
+    "脈絡串的是跨人（同級多人、前後任）或跨屆（承諾當選後的延續）的政見，加入之後整條脈絡不能只剩同一人同一屆的政見";
 }
 
 /**

@@ -1,4 +1,5 @@
 import { FEATURED_LOCAL_ELECTION_ID } from './election-regions'
+import { isLineageListed } from './lineage'
 
 /**
  * 網站地圖的內容規則（2026-10-08，#466）：誰進 sitemap-politicians.xml、各頁的 lastmod 取哪個時間。純函式，建置端
@@ -91,7 +92,8 @@ export function buildSitemapMeta(input: {
   /** 預設＝網站現行的焦點屆別 */
   featuredElectionId?: number | string
   policies: ReadonlyArray<SitemapPolicy & { id: string | number }>
-  lineages: ReadonlyArray<{ id: string | number; updatedAt?: string | null }>
+  /** policyIds 有給而且是空的＝空脈絡（政見都被拿掉了），不進網站地圖；沒給當成有政見 */
+  lineages: ReadonlyArray<{ id: string | number; updatedAt?: string | null; policyIds?: readonly string[] | null }>
   /** 只有「列進網站地圖的」預渲染分析頁需要；其餘不傳 */
   analysisPolicyIds?: ReadonlyArray<string | number>
 }): SitemapMeta {
@@ -114,6 +116,8 @@ export function buildSitemapMeta(input: {
     if (iso) lastmod[`/analysis/${id}`] = iso
   }
   for (const l of input.lineages) {
+    // 空脈絡（脈絡只收那一屆已投票且當選的政見，不合格的拿掉後可能剩 0 條）：頁面照常能開、標 noindex，不進網站地圖
+    if (!isLineageListed(l)) { skip.push(`/lineage/${l.id}`); continue }
     const iso = toLastmod(l.updatedAt)
     if (iso) lastmod[`/lineage/${l.id}`] = iso
   }

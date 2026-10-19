@@ -8,7 +8,7 @@
  */
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace,
+  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace,
   mapLineage, mapLineageSummary, needsHandoverRecord, officeTermEnd, ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
 } from './lineage.ts'
 import * as shared from '../supabase/functions/_shared/lineage.ts'
@@ -101,6 +101,14 @@ Deno.test('時間軸的職位：當選才寫職位，沒當選或還沒投票寫
 
 const L = (id: string, level: Lineage['level'], region: string | null, category = '交通建設', title = id): Lineage => ({
   id, title, level, region, subRegion: null, category, summary: null, policyIds: [], participants: [], handovers: [], links: [],
+})
+
+Deno.test('空脈絡（政見都被拿掉了，2026-10-19）：不列在一覽與網站地圖，頁面本身仍可開（只標 noindex，由 LineagePage 讀這支）', () => {
+  const withPolicy = { ...L('a', 'county', '台中市'), policyIds: ['p1'] }
+  assertEquals(isLineageListed(withPolicy), true)
+  assertEquals(isLineageListed(L('b', 'county', '台中市')), false, 'policyIds 空陣列＝空脈絡')
+  assertEquals(isLineageListed({ policyIds: undefined }), true, '沒給＝不知道，當成有')
+  assertEquals([withPolicy, L('b', 'county', '台中市')].filter(isLineageListed).map((l) => l.id), ['a'])
 })
 
 Deno.test('脈絡一覽篩選：中央層級在每個縣市都列；台／臺 算同一個縣市；分類與關鍵字', () => {

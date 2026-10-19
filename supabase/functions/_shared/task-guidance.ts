@@ -255,6 +255,9 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "level 填這件事實際在哪一級政府決定與執行（中央的法律與預算 national、縣市政府的建設與福利 county、鄉鎮公所的 township；立委承諾的地方建設多半是 county），region／sub_region 照那一級填。" +
     "政見已經在別條脈絡的（lineage_id 有值）不能再歸入；那兩條其實是同一件事的話，note 寫清楚、歸入其中一條就好。" +
     "note 寫憑什麼判定是同一件事（政見原文裡共同的名稱、地點、金額或文件）。同一格裡有好幾件事就交好幾筆。" +
+    "**脈絡只收那一屆已投票且當選的人提的政見**（選前叫承諾、當選後才叫政見，政見串起來才叫脈絡）：這一格的政見系統已經照這條篩過，選前的承諾與落選者的承諾不會出現在清單裡，歸入時也會被擋；**同一場選舉的候選人之間的比較不是脈絡**。" +
+    "**同一位政治人物在同一屆的多條政見講同一件事，是重複政見、不是脈絡**（走重複清查 duplicate_policy）：一組政見要跨人或跨屆才能建脈絡，全都是同一人同一屆的會被當場退回。" +
+    "new_lineage.summary 只寫這件事本身的事實（誰在哪一天決定了什麼），不寫各人的立場或承諾，每個事實句都要能在你附的來源找到。" +
     "只有一條政見、沒有別人或別屆談同一件事，不要建脈絡；整份看完沒有任何同一件事 → no_change，outcome=confirmed，finding 列出你比對過哪幾組、為什麼不是同一件事。",
 
   handover_missing:
@@ -389,9 +392,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "source_locator：原句在原文的位置（必填，stated=false 也要填查的是哪一段）；source_url：出自 source_urls 的哪一個（不填＝第一個）}）。source_urls 放原文網址。",
   // 政策脈絡（#349）
   lineage:
-    "payload：lineage_id（歸入既有的脈絡）或 new_lineage（建新的：{title 4～60 字、summary 200 字內、category 19 類之一、" +
+    "payload：lineage_id（歸入既有的脈絡）或 new_lineage（建新的：{title 4～60 字、summary 200 字內（只寫這件事本身的事實：誰在哪一天決定了什麼，不寫各人的立場或承諾，每個事實句要能在附的來源找到）、category 19 類之一、" +
     "level：national 中央／county 縣市／township 鄉鎮市區、region 縣市、sub_region 鄉鎮}）二擇一；policy_ids（要歸入的政見 id，新脈絡至少 2 條、中央層級至少 1 條）；" +
-    "歸入既有脈絡時也可用 detach_policy_ids 拿掉歸錯的、用 title／summary／category 更正脈絡本身；note（20 字以上：憑什麼判定是同一件事）。",
+    "歸入既有脈絡時也可用 detach_policy_ids 拿掉歸錯的、用 title／summary／category 更正脈絡本身；note（20 字以上：憑什麼判定是同一件事）。" +
+    "歸入的政見只收那一屆已投票且當選的人提的（選前的承諾、落選者的承諾會被當場退回，已經在脈絡裡才變得不合格的網站上不算它）；兩條以上全都是同一人同一屆的也會被退回（那是重複政見）；detach_policy_ids 不受這條限制。",
   lineage_participants:
     "payload：lineage_id、participants[]（1～50 項，每項 {politician_id、role：proposer 提案／co_proposer 共同提案／cosigner 連署／advocate 主張推動、" +
     "basis：official_record 官方紀錄（出處要是立法院、議會或 *.gov.tw）／self_claim 本人宣稱、source_locator 議案編號或頁碼（必填）、source_url 出自 source_urls 的哪一個（不填＝第一個）、note 選填；" +

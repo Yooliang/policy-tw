@@ -310,15 +310,20 @@ const REGIONS = [
   { id: 2, region: "台中市", sub_region: "大雅區", village: null, admin_code: "66000180" },
   { id: 3, region: "台中市", sub_region: "第01選舉區", village: null, admin_code: null },
 ];
+// 脈絡只收那一屆已投票且當選的政見（2026-10-19）：三條政見都屬於 2022 年那一屆、提出者都當選（資格本身的測試在 lineage-elected-only.test.ts）
 const POLICIES = [
-  { id: P1, title: "推動捷運藍線", removed_at: null, lineage_id: null },
-  { id: P2, title: "藍線延伸到大坑", removed_at: null, lineage_id: null },
-  { id: P3, title: "興建大雅運動中心", removed_at: null, lineage_id: L2 },
+  { id: P1, title: "推動捷運藍線", removed_at: null, lineage_id: null, politician_id: A, election_id: 2022 },
+  { id: P2, title: "藍線延伸到大坑", removed_at: null, lineage_id: null, politician_id: B, election_id: 2022 },
+  { id: P3, title: "興建大雅運動中心", removed_at: null, lineage_id: L2, politician_id: C, election_id: 2022 },
 ];
+const eligibilityTables = () => ({
+  elections: [{ id: 2022, election_date: "2022-11-26" }],
+  politician_elections: [A, B, C].map((id) => ({ politician_id: id, election_id: 2022, candidacy_status: "elected" })),
+});
 const BLOCK_TASK = "auto:lineage_candidate:0123456789ab:89abcdef";
 
 Deno.test("落庫：建新脈絡——地方照網站寫法、補上官方代碼；政見掛上去；每一步記履歷；候選格記為看過", async () => {
-  const fake = createFakeSupabase({ regions: REGIONS, policies: structuredClone(POLICIES), lineages: [], edit_history: [], lineage_candidate_reviews: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: structuredClone(POLICIES), lineages: [], edit_history: [], lineage_candidate_reviews: [] });
   const out = await applyContribution(fake.client, row("lineage", {
     new_lineage: { title: "台中捷運藍線", category: "交通建設", level: "county", region: "臺中市", summary: "台中捷運第二條路線" },
     policy_ids: [P1, P2], note: NOTE,
@@ -335,7 +340,7 @@ Deno.test("落庫：建新脈絡——地方照網站寫法、補上官方代碼
 });
 
 Deno.test("落庫：鄉鎮層級的脈絡對到那個鄉鎮的 8 碼代碼", async () => {
-  const fake = createFakeSupabase({ regions: REGIONS, policies: structuredClone(POLICIES), lineages: [], edit_history: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: structuredClone(POLICIES), lineages: [], edit_history: [] });
   const out = await applyContribution(fake.client, row("lineage", {
     new_lineage: { title: "大雅區公所運動中心", category: "體育休閒", level: "township", region: "台中市", sub_region: "大雅區" },
     policy_ids: [P1, P2], note: NOTE,
@@ -346,7 +351,7 @@ Deno.test("落庫：鄉鎮層級的脈絡對到那個鄉鎮的 8 碼代碼", asy
 });
 
 Deno.test("落庫：地方對不到內政部行政區（例如選舉區、拼錯的鄉鎮）→ failed，不建脈絡", async () => {
-  const fake = createFakeSupabase({ regions: REGIONS, policies: structuredClone(POLICIES), lineages: [], edit_history: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: structuredClone(POLICIES), lineages: [], edit_history: [] });
   const out = await applyContribution(fake.client, row("lineage", {
     new_lineage: { title: "大雅區公園", category: "體育休閒", level: "township", region: "台中市", sub_region: "第01選舉區" },
     policy_ids: [P1, P2], note: NOTE,
@@ -356,7 +361,7 @@ Deno.test("落庫：地方對不到內政部行政區（例如選舉區、拼錯
 });
 
 Deno.test("落庫：一條政見只屬於一條脈絡——已經在別條的不歸入（要先 detach），整筆不寫", async () => {
-  const fake = createFakeSupabase({ regions: REGIONS, policies: structuredClone(POLICIES), lineages: [{ id: L1, title: "台中捷運藍線", level: "county", region: "台中市" }, { id: L2, title: "大雅運動中心", level: "township" }], edit_history: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: structuredClone(POLICIES), lineages: [{ id: L1, title: "台中捷運藍線", level: "county", region: "台中市" }, { id: L2, title: "大雅運動中心", level: "township" }], edit_history: [] });
   const out = await applyContribution(fake.client, row("lineage", { lineage_id: L1, policy_ids: [P1, P3], note: NOTE }));
   assertEquals(out.status, "failed");
   assertStringIncludes(out.message, "detach_policy_ids");
@@ -367,7 +372,7 @@ Deno.test("落庫：一條政見只屬於一條脈絡——已經在別條的不
 Deno.test("落庫：歸入、拿掉、更正標題；一樣的就 superseded（不寫假的履歷）", async () => {
   const pols = structuredClone(POLICIES);
   pols[0].lineage_id = L1 as never;
-  const fake = createFakeSupabase({ regions: REGIONS, policies: pols, lineages: [{ id: L1, title: "藍線", summary: null, category: "交通建設", level: "county", region: "台中市" }], edit_history: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: pols, lineages: [{ id: L1, title: "藍線", summary: null, category: "交通建設", level: "county", region: "台中市" }], edit_history: [] });
   const out = await applyContribution(fake.client, row("lineage", { lineage_id: L1, policy_ids: [P2], detach_policy_ids: [P1], title: "台中捷運藍線", note: NOTE }));
   assertEquals(out.status, "applied", out.message);
   assertEquals(fake.db.policies.find((p) => p.id === P2)!.lineage_id, L1);
@@ -380,7 +385,7 @@ Deno.test("落庫：歸入、拿掉、更正標題；一樣的就 superseded（�
 });
 
 Deno.test("落庫：同一個地方已有同名的脈絡 → 不另建，叫代理歸入那一條", async () => {
-  const fake = createFakeSupabase({ regions: REGIONS, policies: structuredClone(POLICIES), lineages: [{ id: L1, title: "台中捷運藍線", level: "county", region: "台中市", admin_code: "66000" }], edit_history: [] });
+  const fake = createFakeSupabase({ regions: REGIONS, ...eligibilityTables(), policies: structuredClone(POLICIES), lineages: [{ id: L1, title: "台中捷運藍線", level: "county", region: "台中市", admin_code: "66000" }], edit_history: [] });
   const out = await applyContribution(fake.client, row("lineage", { new_lineage: { title: "台中捷運藍線", category: "交通建設", level: "county", region: "台中市" }, policy_ids: [P1, P2], note: NOTE }));
   assertEquals(out.status, "failed");
   assertStringIncludes(out.message, L1);
@@ -461,7 +466,7 @@ Deno.test("無異動：候選格 confirmed 才記結論（清單沒變就不再�
 
 Deno.test("交件前置檢查：脈絡不存在、政見已在別條、地方對不到、上下級層級反了，都當場講", async () => {
   const fake = createFakeSupabase({
-    regions: REGIONS,
+    regions: REGIONS, ...eligibilityTables(),
     policies: structuredClone(POLICIES),
     lineages: [{ id: L1, title: "前瞻軌道建設", level: "national", region: null, sub_region: null }, { id: L2, title: "大雅運動中心", level: "township", region: "台中市", sub_region: "大雅區" }],
   });
