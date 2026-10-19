@@ -66,3 +66,10 @@ Deno.test("safeHref：只放 http／https／mailto 與站內路徑", () => {
   assertEquals(safeHref("data:text/html,x"), null);
   assertEquals(safeHref(""), null);
 });
+
+Deno.test("比較表儲存格的 <br> 會換行，其他原始 HTML 仍跳脫", () => {
+  const out = renderMdPreview("| a | b |\n| --- | --- |\n| x<br>y | <b>z</b><script>1</script> |\n");
+  assertStringIncludes(out.html, "x<br>y");
+  assert(!out.html.includes("<b>"));
+  assert(!out.html.includes("<script"));
+});

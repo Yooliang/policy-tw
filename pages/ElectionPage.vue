@@ -1201,6 +1201,8 @@ usePageHead({
           :candidates="pkCandidates"
           :picked="pkPicked"
           :matrix="pkMatrix"
+          :year="electionYear || ''"
+          :region-label="selectedRegion !== 'All' ? selectedRegion : ''"
           @toggle="togglePk"
           @all="comparisonPick = ''"
         />

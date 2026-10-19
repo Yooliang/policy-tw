@@ -10,8 +10,23 @@ import type { MdPage } from '../lib/md/format'
  * .md 摘要抽屜（2026-10-19 從政見矩陣抽出來共用：政見矩陣、選舉頁「議題串聯」）。
  * 讀預產快取表 data_md_cache 的一列排成網頁；標題旁「複製給 AI」（整份原文含 front matter）與「另開視窗」（開 .md 網址）。
  * pick＝null 是關著；Esc、背景、叉叉都送 close，由呼叫端把 pick 設回 null。
+ * 不是快取表的內容也能開：給 text（呼叫端現場組好的原文，例如比較表）或 src（向 Worker 要的 .md 網址，例如人物頁）就不讀快取表。
+ * path 空字串就不顯示「另開視窗」。
  */
-export interface MdPick { id: string; row: string; path: string; title: string }
+export interface MdPick {
+  id: string
+  /** data_md_cache 的 path；有 text 或 src 時不用 */
+  row?: string
+  /** 「另開視窗」的網址；空字串不顯示 */
+  path: string
+  title: string
+  /** 呼叫端現場組好的 Markdown 原文 */
+  text?: string
+  /** 開的時候才 fetch 的 .md 網址（同站） */
+  src?: string
+  /** 複製按鈕字樣，預設「複製給 AI」 */
+  copyLabel?: string
+}
 interface CacheRow { body: string; meta: Record<string, unknown>; generated_at: string }
 
 const props = defineProps<{ pick: MdPick | null }>()
@@ -52,7 +67,22 @@ function unlock() {
 
 async function load(p: MdPick) {
   copied.value = false
+  if (p.text !== undefined) {
+    panel.value = { text: p.text, loading: false, failed: !p.text }
+    return
+  }
   panel.value = { text: '', loading: true, failed: false }
+  if (p.src) {
+    try {
+      const res = await fetch(p.src)
+      if (!res.ok) throw new Error(String(res.status))
+      const text = await res.text()
+      if (props.pick?.id === p.id) panel.value = { text, loading: false, failed: !text }
+    } catch {
+      if (props.pick?.id === p.id) panel.value = { text: '', loading: false, failed: true }
+    }
+    return
+  }
   try {
     // query-bounds: ok — 主鍵查一列
     const { data, error } = await supabasePublic.from('data_md_cache').select('body,meta,generated_at').eq('path', p.row).limit(1)
@@ -70,7 +100,7 @@ async function load(p: MdPick) {
 }
 
 watch(() => props.pick, async (now, before) => {
-  if (now && now.id !== before?.id) void load(now)
+  if (now && (now.id !== before?.id || now.text !== before?.text)) void load(now)
   if (now && !before) {
     opener = document.activeElement as HTMLElement | null
     document.body.style.overflow = 'hidden'
@@ -140,9 +170,9 @@ const DRAWER_BTN = 'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1
               data-testid="matrix-copy"
               @click="copyRaw"
             >
-              <component :is="copied ? Check : Copy" :size="16" />{{ copied ? '已複製' : '複製給 AI' }}
+              <component :is="copied ? Check : Copy" :size="16" />{{ copied ? '已複製' : (pick.copyLabel || '複製給 AI') }}
             </button>
-            <a :href="pick.path" target="_blank" rel="noopener" :class="[DRAWER_BTN, 'border-slate-200 text-slate-700 hover:bg-slate-50']">
+            <a v-if="pick.path" :href="pick.path" target="_blank" rel="noopener" :class="[DRAWER_BTN, 'border-slate-200 text-slate-700 hover:bg-slate-50']">
               <ExternalLink :size="16" />另開視窗
             </a>
           </div>
