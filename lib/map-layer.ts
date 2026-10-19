@@ -18,7 +18,10 @@ export interface Layer {
   ty: number
   fills: string[]
   boundary: string
+  /** 人數資料回來前是空的（名稱與邊界已經能畫），回來後由 applyRows 重建 */
   built: BuiltMap
+  /** 人數資料是否已經套上去（沒套上去的格子只畫中性底色，提示卡不顯示數字） */
+  ready: boolean
   stats: Array<UnitStat | null>
   box: Box
   transform: string
@@ -29,7 +32,13 @@ export function buildLayer(key: string, level: MapLevel, file: RasterFile, rows:
   const u = raster.cellM / 1000
   return {
     key, level, raster, u, tx: raster.ox * u, ty: raster.oy * u,
-    fills: unitFillPaths(raster), boundary: boundaryPath(raster), built: buildMap(raster, rows),
+    fills: unitFillPaths(raster), boundary: boundaryPath(raster), built: buildMap(raster, rows), ready: rows.length > 0,
     stats: unitStats(raster), box: layerBox(raster), transform: `translate(${raster.ox * u} ${raster.oy * u}) scale(${u})`,
   }
+}
+
+/** 人數資料回來：只重建各區的數字（名稱、幾何、path 都不動），畫面只重新上色 */
+export function applyRows(layer: Layer, rows: CountRow[]): void {
+  layer.built = buildMap(layer.raster, rows)
+  layer.ready = true
 }

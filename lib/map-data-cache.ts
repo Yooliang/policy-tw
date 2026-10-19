@@ -10,6 +10,9 @@ import type { CountRow } from './candidacy-map'
 export const rowsCache = createAsyncCache<CountRow[]>()
 export const fileCache = createAsyncCache<unknown>()
 
+/** 標籤避讓結果：依（圖層、縮放級距）快取，回到同一級不重算；名稱是靜態資料，所以不會失效 */
+export const labelCache = new Map<string, Array<{ code: string; text: string; x: number; y: number; fs: number }>>()
+
 export function rowsKey(electionId: number, level: string, parent?: string): string {
   return `${electionId}:${level}:${parent ?? ''}`
 }

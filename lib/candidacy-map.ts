@@ -117,14 +117,15 @@ export function normalizeRows(rows: ReadonlyArray<Record<string, unknown>>): Cou
 
 /**
  * 把點陣與人數合起來。
- * - 名稱與人數以資料庫為準（官方現行行政區與寫法）；點陣有、資料庫沒有的代碼人數當 0、名稱用代碼。
+ * - 名稱用點陣檔裡的靜態名稱（admin_divisions 官方現行寫法），沒有才用資料庫的、再沒有用代碼；人數以資料庫為準，
+ *   點陣有、資料庫沒有的代碼人數當 0。counts 可以先給空陣列（人數還沒回來，只畫名稱與邊界），回來再重建一次。
  * - 資料庫有、點陣沒有的，放進 unshaped，不畫格子。
  */
-export function buildMap(raster: Pick<DecodedRaster, 'codes'>, counts: ReadonlyArray<CountRow>): BuiltMap {
+export function buildMap(raster: Pick<DecodedRaster, 'codes'> & { names?: readonly string[] }, counts: ReadonlyArray<CountRow>): BuiltMap {
   const byCode = new Map(counts.map((c) => [c.code, c]))
   const unit = (code: string, idx: number): MapUnit => {
     const row = byCode.get(code)
-    return { code, name: row?.name || code, idx, candidates: row?.candidates ?? 0, registered: row?.registered ?? null, seats: row?.seats ?? null }
+    return { code, name: raster.names?.[idx] || row?.name || code, idx, candidates: row?.candidates ?? 0, registered: row?.registered ?? null, seats: row?.seats ?? null }
   }
   const units = raster.codes.map((code, idx) => unit(code, idx))
   const have = new Set(raster.codes)
