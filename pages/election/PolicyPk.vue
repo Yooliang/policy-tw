@@ -15,7 +15,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Copy, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
+import { FileText, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
 import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
 import PolicyElements from '../../components/PolicyElements.vue'
@@ -49,7 +49,7 @@ const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !mdOpen.value) f
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); document.body.style.overflow = '' })
 
-// 複製 Markdown（全畫面模式）：先開共用的 Markdown 抽屜預覽，從抽屜複製；附本頁網址、資料日期與 CC BY 4.0
+// 複製 Markdown（一般檢視與全畫面都有）：先開共用的 Markdown 抽屜預覽，從抽屜複製；附本頁網址、資料日期與 CC BY 4.0
 const mdPick = ref<MdPick | null>(null)
 const mdOpen = computed(() => mdPick.value !== null)
 // 抽屜關掉時會把 body 捲動還原；全畫面還開著就再鎖回去
@@ -94,13 +94,14 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
         <div class="flex items-start justify-between gap-3">
           <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
           <div class="flex shrink-0 items-center gap-2">
+          <!-- 複製 Markdown（2026-10-19 維護者）：一般檢視也顯示在「全畫面」旁，樣式同議題串聯的 .md 按鈕；原本只在全畫面才出現 -->
           <button
-            v-if="fullscreen && matrix.policyCount > 0"
+            v-if="matrix.policyCount > 0"
             type="button"
-            class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             data-testid="pk-copy-markdown"
             @click="openMarkdown"
-          ><Copy :size="14" />複製 Markdown</button>
+          ><FileText :size="16" />{{ regionLabel ? `${regionLabel}　` : '' }}政見 PK</button>
           <button
             type="button"
             class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
