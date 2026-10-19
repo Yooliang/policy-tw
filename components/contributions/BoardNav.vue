@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { MessageSquareText, ListChecks, BarChart3, Bot, Map as MapIcon } from 'lucide-vue-next'
+import { MessageSquareText, ListChecks, BarChart3, Bot, Map as MapIcon, ListOrdered } from 'lucide-vue-next'
 
 /**
- * 統計／貢獻／任務／AI 四頁共用的切換列。
+ * 統計／貢獻／任務／AI／地圖／隊列共用的切換列。
  * 2026-09-18：原本這三塊擠在 /ai-assistant 一頁裡用分頁切換，拆成三個網址。
  * 樣式沿用縣市選擇器（GlobalRegionSelector）：選中是藍底白字，未選是白底灰字、hover 才透出藍。
  * 站上「一組互斥的選擇」只有一種長相。
  */
 
-defineProps<{ current: 'contributions' | 'tasks' | 'stats' | 'map' | 'ai' }>()
+defineProps<{ current: 'contributions' | 'tasks' | 'stats' | 'map' | 'ai' | 'queue' }>()
 
 const ACTIVE = 'bg-blue-600 text-white border-blue-600 shadow-lg'
 const INACTIVE = 'bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600'
@@ -17,12 +17,14 @@ const INACTIVE = 'bg-white text-slate-500 border-slate-200 hover:border-blue-300
 // 統計排第一：它是「貢獻紀錄」進來的第一頁，先看整體再看單筆（2026-09-18）
 const LINKS = [
   { key: 'stats', to: '/stats', label: '統計', icon: BarChart3 },
-  // 2026-10-19（#680）：統計底下的參選地圖
-  { key: 'map', to: '/stats/map', label: '參選地圖', icon: MapIcon },
   { key: 'contributions', to: '/contributions', label: '貢獻', icon: MessageSquareText },
   { key: 'tasks', to: '/tasks', label: '任務', icon: ListChecks },
   // 2026-10-03 維護者：AI 讀取、各模型表現從統計頁搬到這裡
   { key: 'ai', to: '/ai', label: 'AI', icon: Bot },
+  // 2026-10-19（#680）：統計底下的參選地圖（頁面標題仍是「參選地圖」）
+  { key: 'map', to: '/stats/map', label: '地圖', icon: MapIcon },
+  // 2026-10-19（#684）：派工隊列，維護者：統計／貢獻／任務／AI／地圖／隊列同一組
+  { key: 'queue', to: '/queue', label: '隊列', icon: ListOrdered },
 ] as const
 </script>
 
