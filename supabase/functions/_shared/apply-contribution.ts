@@ -44,6 +44,7 @@ import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
 import { fetchPrimarySourceUrls } from "./source-read.ts";
 import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 import { loadReassignContext, personLabel, reassignProblems } from "./reassign-candidacy.ts";
+import { taipeiDate } from "./cec-candidate.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -72,6 +73,8 @@ export type ApplyStatus = "applied" | "disputed" | "failed" | "superseded";
 export interface ApplyOutcome {
   status: ApplyStatus;
   message: string;
+  /** status 是 failed 時：不是壞掉而是「還沒到可以寫的時候」（例：投票日當天），呼叫端保持原狀態、不消耗重試次數，下一輪再試 */
+  defer?: boolean;
   politician_id?: string;
   policy_id?: string;
   created_politician?: boolean;
@@ -1734,6 +1737,15 @@ async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow
   const electionType = str(p.election_type);
   const items = resultItems(p);
   if (!electionId || !electionType || items.length === 0) return { status: "failed", message: "缺 election_id／election_type，或 items 是空的" };
+
+  // 開票夜守門（維護者 2026-10-19，#678）：投票日當天（台北日期）算還沒投票，不寫當選／落選。
+  // defer＝還沒到可寫的時候：auto-apply 不把它當失敗（不消耗 apply_failed 的 3 次重試、不會被退件），貢獻留在 verified，apply-verified 每 10 分鐘再撿
+  const { data: electionRow, error: electionError } = await supabase.from("elections").select("election_date").eq("id", electionId).maybeSingle();
+  throwIf(electionError, "elections read");
+  const voteDate = (electionRow as { election_date?: string } | null)?.election_date ?? null;
+  if (voteDate && voteDate.slice(0, 10) >= taipeiDate()) {
+    return { status: "failed", defer: true, message: `${electionId} 的投票日是 ${voteDate.slice(0, 10)}，台北日期要過了投票日才能寫當選／落選（開票途中的名單不是結果）；下一輪再試` };
+  }
 
   // query-bounds: ok — 一筆最多 MAX_RESULTS_PER_SUBMISSION（120）位，按主鍵取
   const { data: existing, error: readError } = await supabase.from("politician_elections")

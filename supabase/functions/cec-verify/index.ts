@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutUnsettledResults } from "../_shared/cec-candidate.ts";
 import { loadElections } from "../_shared/elections.ts";
 import { CEC_VERIFIABLE_TYPES, decideByCec, resolveScanOffset } from "../_shared/cec-verify.ts";
 import { autoApplyContribution } from "../_shared/auto-apply.ts";
@@ -42,7 +42,7 @@ async function lookup(name: string, cache: Map<string, CecCandidacy[]>, election
   const hit = cache.get(name);
   if (hit) return hit;
   const raw = await cecFetch(`${CEC_QUERY_URL}?${new URLSearchParams({ cand_name: name })}`) as { cand_data_list?: unknown[] } | null;
-  const list = withoutFutureResults(normalizeCandidacies((raw?.cand_data_list ?? []) as never[], elections));
+  const list = withoutUnsettledResults(normalizeCandidacies((raw?.cand_data_list ?? []) as never[], elections));
   cache.set(name, list);
   return list;
 }

@@ -3,7 +3,7 @@
  * db.cec.gov.tw 的候選人查詢 API 回姓名／選舉名稱／投票日／選區／政黨／出生年／當選與否——Jev 拿到的是欄位，
  * 不是攤平的表格，沒有「相鄰列的縣市被讀成主角的」那種誤判。2026 登記期中選會還沒有資料，查不到就退回提交者附的網頁。
  */
-import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutFutureResults } from "./cec-candidate.ts";
+import { CEC_QUERY_URL, type CecCandidacy, type ElectionDateRef, normalizeCandidacies, withoutUnsettledResults } from "./cec-candidate.ts";
 
 /** 後備：沒給選舉清單時只認得舊三屆（跟 contribution-schema.ts 的 FALLBACK_ELECTIONS 同值） */
 const FALLBACK_ELECTION_DATES: readonly ElectionDateRef[] = [
@@ -46,7 +46,7 @@ export async function cecCandidacyPage(
     const res = await fetchImpl(url, { headers: { "User-Agent": UA, Referer: "https://db.cec.gov.tw/" }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const raw = await res.json();
-    const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? [], elections));
+    const all = withoutUnsettledResults(normalizeCandidacies(raw?.cand_data_list ?? [], elections));
     const picked = all.filter((c) => c.election_id === electionId);
     if (picked.length === 0) return null;
     return { url, text: cecRecordsText(picked), count: picked.length };

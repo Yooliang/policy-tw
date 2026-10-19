@@ -26,7 +26,7 @@ export const MAX_RESULTS_PER_SUBMISSION = 120;
 export const RESULTS_BATCH_MODEL_PREFIX = "policy-tw/cec-results-batch";
 
 /** 交件逐位比對的狀態（SQL election_results_compare 的 status） */
-export const COMPARE_STATUSES = ["match", "differs", "ambiguous", "not_found", "unknown", "wrong_unit", "no_record"] as const;
+export const COMPARE_STATUSES = ["match", "differs", "ambiguous", "not_found", "unknown", "wrong_unit", "no_record", "unit_open"] as const;
 export type CompareStatus = typeof COMPARE_STATUSES[number];
 
 export const COMPARE_STATUS_LABEL: Record<CompareStatus, string> = {
@@ -37,6 +37,7 @@ export const COMPARE_STATUS_LABEL: Record<CompareStatus, string> = {
   unknown: "中選會名單沒寫當選與否",
   wrong_unit: "這筆參選紀錄不是這一屆、這種選舉、這個縣市的",
   no_record: "參選紀錄不存在",
+  unit_open: "這個選區的開票還沒開完（中選會標當選的人數沒到應選席次、或投票日剛過），名單上沒標當選的不能當落選",
 };
 
 export interface ResultItem {

@@ -119,7 +119,7 @@ const TABLE_LABEL: Record<string, string> = {
 };
 
 /** party_basis 的值（參選紀錄上政黨的根據）→ 給人看的字 */
-const PARTY_BASIS_LABEL: Record<string, string> = { contribution: "交件", person_single: "人物唯一一筆參選紀錄" };
+const PARTY_BASIS_LABEL: Record<string, string> = { contribution: "交件", person_single: "人物唯一一筆參選紀錄", cec: "中選會名冊（系統直接寫）" };
 
 /**
  * 履歷的 party_id／party_basis 變更：值換成給人看的字，UI 不印 id（#650）。
