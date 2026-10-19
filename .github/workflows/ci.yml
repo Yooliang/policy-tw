@@ -15,6 +15,32 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # 依改動路徑決定 main push 要不要跑完整後端測試與 Supabase 部署（2026-10-19 維護者）。
+  # 只改前端的提交，8 組後端測試白跑 5 分鐘以上。分類規則與理由在 scripts/ci-changed-paths.mjs 檔頭；
+  # PR 一律 backend=true（PR 上的 CI 不變，仍跑完整測試）。
+  # 基準給兩個：上次成功部署函式的 tag（連續合併被略過的後端提交、上次部署失敗的後端改動都會算進來）與這次 push 的 before；
+  # 任一個算不出差異（第一次 push 的 0000、force push、tag 不存在）就當後端類。
+  changes:
+    name: 判斷改動路徑
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: classify
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "不是 push 到 main：照舊跑完整測試。"
+            exit 0
+          fi
+          DEPLOYED=$(git rev-parse -q --verify refs/tags/edge-functions-deployed || true)
+          node scripts/ci-changed-paths.mjs "$DEPLOYED" "${{ github.event.before }}" "${{ github.sha }}"
+
   typecheck:
     name: 型別檢查與建置
     runs-on: ubuntu-latest
@@ -51,6 +77,9 @@ jobs:
 
   edge-tests:
     name: Edge Function 與協議守門測試（${{ matrix.shard }}/8）
+    needs: [changes]
+    # main push 只改前端類路徑時略過（改由下面 frontend-tests 跑前端純函式與「會讀前端檔」的守門測試）
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     # 拆成八台同時跑（2026-10-13）：_shared/ 有 95 個測試檔各自在 PGlite 重放 migration，排成一條要 20 分鐘以上。
     # 分法是「檔名排序後輪流發牌」，不用 deno 的 --shard：後者把排序後的檔案切成連續幾塊，
@@ -70,10 +99,24 @@ jobs:
       - name: deno test（supabase/functions/_shared）
         working-directory: supabase/functions
         run: deno test --allow-read $(find _shared/ -name '*test.ts' | LC_ALL=C sort | awk 'NR % 8 == ${{ matrix.shard }} % 8')
+
+  # 前端純函式測試與金鑰掃描：每次都跑（PR、前端類 push、後端類 push），以前掛在 edge-tests 第 1 片，
+  # 前端類 push 略過 edge-tests 時它們不能跟著消失。
+  # 前端類 push 另外跑「會讀前端檔的後端守門測試」清單（_shared/frontend-guard-tests.txt）：
+  # 它們掃 pages/、components/、lib/ 等的原始碼（例如 Queue.vue 的顏色表、前端不得讀舊欄位），前端檔一改就可能紅。
+  # 後端類 push 與 PR 已經由 edge-tests 跑全部 310 支，這裡不重跑。清單由 ci-path-filter.test.ts 守著不漏。
+  frontend-tests:
+    name: 前端測試與守門
+    needs: [changes]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       # 整個資料夾交給 deno 自己找 *.test.ts（2026-10-07 起）：以前手寫 36 個檔名，新測試漏加就是「測試存在但沒跑」
       # （ci-test-glob.test.ts 守這一行不再列檔名）
       - name: deno test（前端純函式）
-        if: matrix.shard == 1
         # Deno 2.x 新版預設「發佈未滿 24 小時的 npm 套件不裝」，--node-modules-dir=auto 每次現解析，
         # rollup 新版的平台選用套件剛發佈就讓這一步整批紅（2026-10-10）。這一步只跑純函式測試、不碰任何金鑰，
         # 關掉年齡限制換 CI 不被上游發版卡住；建置與部署仍走 pnpm-lock 鎖定的版本。
@@ -82,10 +125,27 @@ jobs:
       # 解開 JWT 看裡面的 role，只擋 anon 以外的那幾把。
       # 這個專案的 anon key 是刻意公開的，抓長相會讓這道燈變成狼來了然後被關掉。
       - name: 掃不該進版控的金鑰
-        if: matrix.shard == 1
         run: deno run --allow-read scripts/scan-secrets.ts
 
-  # 部署只在 main、而且要等上面兩個 job 都綠。
+      - name: deno test（會讀前端檔的守門測試，只在前端類 push）
+        if: needs.changes.outputs.backend != 'true'
+        working-directory: supabase/functions
+        # 清單一行一支：「路徑」整支跑；「路徑 /正規式/」只跑名稱符合的那幾個測試（整支有 PGlite 重放要數分鐘，
+        # 其中只有一兩個測試讀前端檔，ci-path-filter.test.ts 驗證正規式涵蓋了所有讀前端檔的測試）
+        run: |
+          set -eo pipefail
+          deno test --allow-read $(tr -d '\r' < _shared/frontend-guard-tests.txt | grep -v ' ' | tr '\n' ' ')
+          # 篩選沒符合任何測試時 deno 也回 0（0 passed），所以要自己檢查：測試改名後篩選落空＝守門悄悄沒跑
+          tr -d '\r' < _shared/frontend-guard-tests.txt | grep ' ' | while read -r f flt || [ -n "$f" ]; do
+            NO_COLOR=1 deno test --allow-read --filter "$flt" "$f" 2>&1 | tee /tmp/guard-filter.log
+            if grep -q ' 0 passed' /tmp/guard-filter.log; then echo "::error::篩選 $flt 沒有符合 $f 的任何測試"; exit 1; fi
+          done
+
+  # 部署只在 main、而且要等測試都綠：型別檢查與建置、前端測試一定要綠；後端類 push 另外要 edge-tests 綠。
+  # 前端類 push 的 edge-tests 是「略過」（skipped），所以不能用預設的 needs 成功判斷（略過會連帶略過部署），
+  # 也不能寫成「略過也算過」（那樣後端類 push 的 edge-tests 被取消或略過會放行）：
+  # 條件明寫成「後端類 → edge-tests 必須 success；前端類 → 不需要」，always() 讓略過的上游不連坐。
+  # 測試失敗（failure／cancelled）在兩條路徑上都擋部署。
   # 2026-09-13 之前沒有這一段：每次上線都是有人在自己機器上跑 firebase deploy，
   # 當天就出過事——我從落後的分支建置後直接推上去，把另一個人剛加的 GA 和政見
   # 詳情頁修法從線上洗掉了。CI 部署的重點不是省事，是「上線的東西一定跟 main 一樣」。
@@ -94,8 +154,12 @@ jobs:
   # 只有 Hosting admin 權限，不是整個專案的 Editor。
   deploy:
     name: 部署到 Firebase Hosting
-    needs: [typecheck, edge-tests]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, typecheck, edge-tests, frontend-tests]
+    if: >-
+      always() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.changes.result == 'success' && needs.typecheck.result == 'success' &&
+      needs.frontend-tests.result == 'success' &&
+      (needs.changes.outputs.backend != 'true' || needs.edge-tests.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -198,8 +262,13 @@ jobs:
   # 那種情況由下面「等協議文件上線」那一步輪詢線上版號；沒改協議就跟 Hosting 同時部署。
   deploy-functions:
     name: 部署 Supabase（migrations ＋ Edge Functions）
-    needs: [typecheck, edge-tests]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # 只有後端類 push 才跑（前端類 push 不動 migration 與函式；上次沒部署成功的後端改動由 changes 的 tag 基準算進後端類）。
+    needs: [changes, typecheck, edge-tests, frontend-tests]
+    if: >-
+      always() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.changes.result == 'success' && needs.changes.outputs.backend == 'true' &&
+      needs.typecheck.result == 'success' && needs.edge-tests.result == 'success' &&
+      needs.frontend-tests.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     # 要在最後移動 edge-functions-deployed 這個 tag，需要 contents: write。
