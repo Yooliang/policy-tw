@@ -99,6 +99,8 @@ function sourceNote(row: ContributionRow): string {
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 const ctxOf = (row: ContributionRow): EditContext => ({ contribution_id: row.id, agent_name: row.agent_name });
+/** identity 的來源標記：交件落庫寫 contribution:<id>；系統自己寫入（名冊對帳，沒有 contributions 那一列）寫 system:<agent> */
+const sourceTagOf = (row: ContributionRow): string => (row.id ? `contribution:${row.id}` : `system:${row.agent_name ?? "unknown"}`);
 
 /** 純函式：標題互相包含（pg_trgm 的 similarity 在 SQL 算，這裡只補「包含」規則給沒有 DB 的測試用） */
 export function titlesContainEachOther(a: string, b: string): boolean {
@@ -250,7 +252,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     current_position: str(p.current_position),
     birth_year: int(p.birth_year),
   }, {
-    source: `contribution:${row.id}`,
+    source: sourceTagOf(row),
     extraInsert: {
       sub_region: str(p.sub_region),
       education_level: str(p.education_level),
@@ -617,7 +619,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     birth_year: int(p.birth_year),
     cec_cand_id: str(p.cec_cand_id) ?? int(p.cec_cand_id),
     cec_theme_id: str(p.cec_theme_id),
-  }, { source: `contribution:${row.id}` });
+  }, { source: sourceTagOf(row) });
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
@@ -2334,6 +2336,38 @@ export async function applyContribution(supabase: SupabaseLike, row: Contributio
     } catch (e) {
       console.error("purgeSsrPages:", e instanceof Error ? e.message : String(e));
     }
+  }
+  return outcome;
+}
+
+/**
+ * 系統自己寫入的參選紀錄（名冊對帳 roster-reconcile，#678，維護者 2026-10-19）：登記彙總表唯一對上、我們沒有的人。
+ * 走跟代理交件落庫同一支 applyCandidacy（身份、選區、結果欄位、出處都不另寫一套），差別只有三個：
+ *   * 沒有 contributions 那一列（id 為空）：edit_history.contribution_id 留空，改用 agent_name＝system:* 辨認、還原走 roster_reconcile_revert；
+ *   * 身份由呼叫端的名冊對帳決定，不再讓比對器猜：resolved_politician_id 是 "new"（全庫沒有同名者，直接建）或要掛的既有人物 id；
+ *   * 不做 closeTaskIfFulfilled／supersedeDuplicates（兩者都靠貢獻 id），也不逐筆清 SSR 快取（呼叫端一輪結束統一清）。
+ * agent_name 必須是 system: 開頭，免得冒用代理的名字寫履歷。
+ */
+export interface SystemCandidacyRow {
+  agent_name: string;
+  payload: Obj;
+  source_urls: string[];
+  /** "new"＝不比對、直接建新人物；其餘＝要掛的既有人物 id */
+  resolved_politician_id: string;
+  note?: string | null;
+}
+export async function applySystemCandidacy(supabase: SupabaseLike, input: SystemCandidacyRow): Promise<ApplyOutcome> {
+  if (!/^system:[a-z0-9-]+$/.test(input.agent_name)) throw new Error(`系統寫入的 agent_name 必須是 system:<名稱>，收到「${input.agent_name}」`);
+  if (input.source_urls.length === 0) throw new Error("系統寫入要記來源：source_urls 不能是空的");
+  // id 為空是故意的（見上）：ctxOf／sourceTagOf／sourceNote 都處理 id 為空的情況
+  const row = {
+    id: null as unknown as string, contribution_type: "candidacy" as const, payload: input.payload, source_urls: input.source_urls,
+    note: input.note ?? null, agent_name: input.agent_name, contributor_url: null, resolved_politician_id: input.resolved_politician_id,
+  } satisfies ContributionRow;
+  const outcome = await applyCandidacy(supabase, row);
+  if (outcome.status === "applied") {
+    await writeSourcesAfterApply(supabase, row, outcome);
+    // 清 SSR 快取不在這裡逐筆做（一輪 100 筆會發 100 個請求）：由呼叫端（roster-reconcile.ts）一輪結束統一清一次
   }
   return outcome;
 }

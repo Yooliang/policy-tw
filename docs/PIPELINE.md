@@ -151,6 +151,17 @@ stateDiagram-v2
 | `duplicate_politician` | 同名同縣市（或同出生年）的兩筆人物 | `merge_politician`（4／6／8 票，軟合併可整筆還原） |
 | `duplicate_policy` | 同一人 ≥2 筆政見、目前這份清單沒人逐組比對過 | `removal` 退空泛那筆（3 票）／`no_change`（寫進 `policy_dupe_reviews`，清單沒變不再派） |
 | `legacy_audit` | 早期匯入、有來源、沒人核 | `no_change`（通過寫 `policies.audit` 履歷）／`correction`／`removal` |
-| `roster_check`、`news_sweep`、`audit`、`question`、`adjudicate`、`fix_disputed` | 手動／訪客／爭議觸發 | 見 skill.md |
+| `roster_check`（2026 登記名冊） | 登記彙總表（`cec_registrations`）跟我們的參選紀錄對帳（視圖 `roster_reconcile`）後，**系統對不上**的人：同名多筆、人物對不唯一、兩邊不一對一、我們多出來、登記後退選標記不一致（唯一對上、我們沒有的由系統自己建，見下一節） | `candidacy`／`correction`／`merge_politician`，名單在 `target.reconcile.people` |
+| `news_sweep`、`audit`、`question`、`adjudicate`、`fix_disputed` | 手動／訪客／爭議觸發 | 見 skill.md |
 
 派工規則與所有裁決的理由：`docs/DECISIONS.md`（索引，本文在 `docs/decisions/`）。
+
+## 系統寫入：名冊對帳（2026-10-19，#678 第一階段）
+
+這是「資料一律走代理貢獻＋驗證」唯一的例外，只限一種：**中選會登記彙總表唯一對上、我們沒有的人**。
+視圖 `roster_reconcile` 把登記彙總表（19,695 人）跟我們的 2026 參選紀錄逐人對帳，分 `both`／`missing_creatable`／`missing_ambiguous`／`match_ambiguous`／`ours_extra`／`status_mismatch`；
+`missing_creatable`（我們一筆都沒有、名冊同縣市同選舉沒有第二位同名、全庫沒有同名者或剛好一位同名者在同縣市〔鄉鎮層級的選舉要同鄉鎮〕出現過）由 Edge Function `roster-reconcile`
+每 10 分鐘建一批（`roster_reconcile_settings.batch_limit`，`enabled=false` 就停）：落庫走跟交件同一支 `applyCandidacy`，來源記名冊那一列（`roster_reconcile_log`）、`edit_history` 記 `system:roster-reconcile`，
+可用 `roster_reconcile_revert` 整輪或逐筆還原；建不起來的記 `unresolved`／`error`、不重試，改派代理。名單清查只在單位有「對不上」的人時才派（`roster_reconcile_units`）。
+第二階段（11/17 名單公告）：對帳多一邊、兩個模型各讀一次、不一致的行派代理看原檔。細節與理由見 `docs/decisions/2026-10-19-名冊比對表唯一對上由系統建參選紀錄.md`。
+

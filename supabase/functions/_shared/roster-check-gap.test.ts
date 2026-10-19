@@ -55,7 +55,8 @@ Deno.test("R2-1 前一版是對的：新定義緊接著 20261008070000，而且�
   assertEquals(defining.slice(i + 1), ["20261008162000_activity_windows_p2_candidate_status_stale.sql", "20261009230000_roster_check_filed_withdrawn.sql",
     "20261010170000_retire_single_election_result.sql" /* 只拿掉 election_result_missing 分支，retire-single-result.test.ts 逐字守 */,
     "20261011300000_campaign_election_arms.sql" /* 年份改讀當屆選舉，campaign-election-arms.test.ts 逐字守 */,
-    "20261019110000_pledge_gap_2026.sql"] /* 只動 policy_missing 分支與 CTE 開頭，profile_gap 起逐字守在 policy-missing-current-term.test.ts */, "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
+    "20261019110000_pledge_gap_2026.sql",
+    "20261019120000_roster_reconcile.sql" /* 名冊對帳閘門與 target.reconcile，roster-reconcile-arms.test.ts 逐字守 */] /* 只動 policy_missing 分支與 CTE 開頭，profile_gap 起逐字守在 policy-missing-current-term.test.ts */, "新 migration 之後又有人改了 raw：請以最新那版為底，把這三處替換套上去");
 });
 
 Deno.test("R2-2 新定義＝現行定義＋三處機械替換：反向替換回去逐字等於前一版（簽名、其他臂、roster_check 的 target／說明／reward 都沒動）", () => {
