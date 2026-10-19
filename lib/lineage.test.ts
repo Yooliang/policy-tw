@@ -4,11 +4,12 @@
  *   2. 時間軸：一任一任照投票日排，交接放在後任前面；後任在脈絡裡沒有政見（例：停掉了）的交接也不能消失
  *   3. 參與者：官方紀錄的角色排前面，本人宣稱另外標、不當作官方角色；只提了政見的標「政見提出者」；不看黨派與政見數
  *   4. 收錄：脈絡頁走 Worker 邊緣渲染、進網站地圖、web.app 回殼檔（不 404）
+ *   5. 交接區與「還沒有角色」只在派工同一個條件成立時才出現（#670）：首長那一屆當選且已卸任才該有交接；當過民意代表才有官方角色可查
  */
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, LEVEL_LABEL, LINK_LABEL, lineagePlace, mapLineage, mapLineageSummary,
-  ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
+  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace,
+  mapLineage, mapLineageSummary, needsHandoverRecord, officeTermEnd, ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
 } from './lineage.ts'
 import * as shared from '../supabase/functions/_shared/lineage.ts'
 import type { Lineage, LineageHandover, LineageParticipant, Policy, RawLineage } from '../types.ts'
@@ -125,4 +126,89 @@ Deno.test('收錄：脈絡頁由正見.tw 的 Worker 邊緣渲染、進網站地
   assert(router.includes("path: '/lineage/:lineageId'") && router.includes("name: 'lineage'"))
   const postbuild = await Deno.readTextFile(new URL('../scripts/postbuild-ssg.mjs', import.meta.url))
   assert(postbuild.includes("r.startsWith('/lineage/')"), '網站地圖要把 /lineage/ 分進一份（不然掉進 sitemap-pages）')
+})
+
+// ── 交接區與「還沒有角色」什麼時候出現（#670）──────────────────────────────
+
+const TODAY = '2026-10-19'
+const DAYS = new Map([[2018, '2018-11-24'], [2022, '2022-11-26'], [2024, '2024-01-13'], [2026, '2026-11-28']])
+const who = (...elections: Array<{ electionId: number; electionType: string; candidacyStatus: string; electionDate?: string }>) => ({ elections })
+
+Deno.test('卸任日：任期四年，地方 12/24、立委 1/31、總統副總統 5/19（跟資料庫 office_term_end 同一個算法）', () => {
+  assertEquals(officeTermEnd(2022, '縣市長'), '2026-12-24')
+  assertEquals(officeTermEnd(2018, '鄉鎮市長'), '2022-12-24')
+  assertEquals(officeTermEnd(2024, '立法委員'), '2028-01-31')
+  assertEquals(officeTermEnd(2024, '總統副總統'), '2028-05-19')
+})
+
+Deno.test('交接區：只有首長那一屆當選、而且那一任已卸任才成立（跟派 handover_missing 同一個條件）', () => {
+  const mayor = (electionId: number, status: string, type = '縣市長') => who({ electionId, electionType: type, candidacyStatus: status })
+  const polis = (politicianId: string, electionId: number) => [pol('p', politicianId, electionId)]
+  const need = (people: Record<string, ReturnType<typeof who>>, policies: Policy[], today = TODAY) =>
+    needsHandoverRecord(policies, (id) => people[id], DAYS, today)
+
+  // 事件原樣：兩位 2026 候選人的承諾（還沒投票、沒當選）→ 不成立
+  assertEquals(need({ a: mayor(2026, 'filed'), b: mayor(2026, 'declared') }, [pol('p1', 'a', 2026), pol('p2', 'b', 2026)]), false, '選前候選人沒有「前後任」')
+  // 2018 當選的縣市長，2022-12-24 卸任 → 成立
+  assertEquals(need({ a: mayor(2018, 'elected') }, polis('a', 2018)), true)
+  assertEquals(need({ a: mayor(2018, 'elected', '鄉鎮市長') }, polis('a', 2018)), true, '鄉鎮市長也算')
+  assertEquals(need({ a: mayor(2018, 'elected', '直轄市山地原住民區長') }, polis('a', 2018)), true, '區長也算')
+  // 2022 當選的縣市長 2026-12-24 才卸任：今天還在任 → 不成立；卸任日當天仍在任、隔天才成立
+  assertEquals(need({ a: mayor(2022, 'elected') }, polis('a', 2022)), false, '還在任的首長')
+  assertEquals(need({ a: mayor(2022, 'elected') }, polis('a', 2022), '2026-12-24'), false, '卸任日當天還是他')
+  assertEquals(need({ a: mayor(2022, 'elected') }, polis('a', 2022), '2026-12-25'), true)
+  // 當選但不是首長（議員、立委）：派的是 lineage_roles 不是交接
+  assertEquals(need({ a: mayor(2018, 'elected', '縣市議員') }, polis('a', 2018)), false)
+  assertEquals(need({ a: mayor(2018, 'elected', '立法委員') }, polis('a', 2018)), false)
+  // 落選、退選不算當選（不看現在在不在任，只看那一屆有沒有當選）
+  assertEquals(need({ a: mayor(2018, 'not_elected') }, polis('a', 2018)), false)
+  assertEquals(need({ a: mayor(2018, 'withdrawn') }, polis('a', 2018)), false)
+  // 政見要掛在他當選的那一屆：2018 當選、政見掛 2022（那屆他沒當選）→ 不成立
+  assertEquals(need({ a: mayor(2018, 'elected') }, polis('a', 2022)), false)
+  assertEquals(need({ a: mayor(2018, 'elected') }, [{ ...pol('p', 'a', 2018), electionId: undefined }]), false, '政見沒有屆別')
+  // 人物還沒載入、或沒有任何政見
+  assertEquals(need({}, polis('a', 2018)), false)
+  assertEquals(need({ a: mayor(2018, 'elected') }, []), false)
+  // 脈絡裡只要有一條成立就成立（同一條脈絡混了候選人與卸任首長）
+  assertEquals(need({ a: mayor(2026, 'filed'), b: mayor(2018, 'elected') }, [pol('p1', 'a', 2026), pol('p2', 'b', 2018)]), true)
+})
+
+Deno.test('交接區：投票日用屆別表、沒有就退回參選紀錄帶的投票日；兩邊都沒有就不成立（不猜）', () => {
+  const rec = { electionId: 2018, electionType: '縣市長', candidacyStatus: 'elected' }
+  assertEquals(isRetiredExecutive(who({ ...rec, electionDate: '2018-11-24' }), 2018, new Map(), TODAY), true)
+  assertEquals(isRetiredExecutive(who(rec), 2018, new Map(), TODAY), false)
+  assertEquals(isRetiredExecutive(who(rec), null, DAYS, TODAY), false)
+  assertEquals(isRetiredExecutive(undefined, 2018, DAYS, TODAY), false)
+})
+
+Deno.test('民意代表：任何一屆當選、投票日已過的立委、議員、代表才算；首長、候選人、還沒投票的不算', () => {
+  const rep = (type: string, status = 'elected', electionId = 2022) => who({ electionId, electionType: type, candidacyStatus: status })
+  for (const type of ['立法委員', '縣市議員', '鄉鎮市民代表', '直轄市山地原住民區民代表']) {
+    assertEquals(hasBeenRepresentative(rep(type), DAYS, TODAY), true, `${type} 當選`)
+  }
+  assertEquals(hasBeenRepresentative(rep('縣市議員', 'elected', 2018), DAYS, TODAY), true, '前任也算，不限現任')
+  assertEquals(hasBeenRepresentative(rep('縣市長'), DAYS, TODAY), false, '首長沒有議事紀錄可查')
+  assertEquals(hasBeenRepresentative(rep('縣市議員', 'filed', 2026), DAYS, TODAY), false, '候選人')
+  assertEquals(hasBeenRepresentative(rep('縣市議員', 'elected', 2026), DAYS, TODAY), false, '投票日還沒到（標了當選也不算）')
+  assertEquals(hasBeenRepresentative(rep('縣市議員', 'not_elected'), DAYS, TODAY), false, '落選')
+  assertEquals(hasBeenRepresentative(rep('縣市議員', 'elected', 1999), DAYS, TODAY), false, '查不到投票日不猜')
+  assertEquals(hasBeenRepresentative(undefined, DAYS, TODAY), false)
+  const won = (electionType: string) => ({ electionId: 2022, electionType, candidacyStatus: 'elected' })
+  assertEquals(hasBeenRepresentative(who(won('縣市長'), won('縣市議員')), DAYS, TODAY), true, '多筆參選紀錄只要有一筆符合')
+})
+
+Deno.test('參與者：每一列帶 representative 旗標（頁面只對民意代表講「還沒有官方紀錄的角色」）', () => {
+  const nameOf = (id: string) => ({ a: '甲', b: '乙' } as Record<string, string | undefined>)[id]
+  const rows = participantRows([], [pol('p1', 'a', 2022), pol('p2', 'b', 2022)], nameOf, (id) => id === 'a')
+  assertEquals(Object.fromEntries(rows.map((r) => [r.name, r.representative])), { 甲: true, 乙: false })
+  assertEquals(participantRows([], [pol('p1', 'a', 2022)], nameOf)[0].representative, false, '沒給判斷函式一律不是（不替人多講一句沒查證的）')
+})
+
+Deno.test('脈絡頁：交接標題與「還沒有交接紀錄」掛在交接區條件上、「還沒有官方紀錄的角色」只對民意代表', async () => {
+  const page = (await Deno.readTextFile(new URL('../pages/LineagePage.vue', import.meta.url))).replace(/\r\n/g, '\n')
+  assert(/<h2 v-if="showHandovers"[^\n]*前後任怎麼交接/.test(page), '「前後任怎麼交接」標題只在交接區成立時才出現')
+  assert(/<p v-if="showHandovers && lineage\.handovers\.length === 0"[^>]*>\s*還沒有交接紀錄/.test(page), '「還沒有交接紀錄」不能無條件顯示')
+  assert(/<span v-if="row\.representative"[^>]*>還沒有官方紀錄的角色/.test(page), '「還沒有官方紀錄的角色」只對民意代表')
+  assert(/needsHandoverRecord\(/.test(page) && /hasBeenRepresentative\(/.test(page), '頁面要用 lib/lineage.ts 的判斷，不是自己另寫一份')
+  assertEquals(page.split('前後任怎麼交接').length - 1, 1, '交接標題只能出現一次')
 })

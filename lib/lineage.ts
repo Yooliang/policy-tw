@@ -208,6 +208,88 @@ export function termRoleLabel(
   return elected ? rec.electionType : `${rec.electionType}參選人`
 }
 
+// ── 什麼時候該有交接、誰算民意代表（跟派工同一個條件）──────────────────────────
+
+/** 行政首長的三種職位：這一任卸任後才該有交接（跟 contribution_auto_tasks_handover_missing 同一份） */
+export const EXECUTIVE_OFFICE_TYPES: readonly string[] = ['縣市長', '鄉鎮市長', '直轄市山地原住民區長']
+/** 民意代表的四種職位：當過才有「脈絡裡的角色」可查（跟 contribution_auto_tasks_lineage_roles 同一份） */
+export const REPRESENTATIVE_OFFICE_TYPES: readonly string[] = ['立法委員', '縣市議員', '鄉鎮市民代表', '直轄市山地原住民區民代表']
+
+/** 判斷用的人物：只要參選紀錄（Politician 的子集，lib 維持零執行期依賴） */
+export interface PersonElections {
+  elections?: Array<{ electionId: number; electionType?: string; candidacyStatus?: string; electionDate?: string }>
+}
+
+/**
+ * 卸任日（任期最後一天，ISO 日期）：任期四年，最後一天＝四年後那一屆就任日的前一天——
+ * 地方公職 12/24、立委 1/31、總統副總統 5/19。跟資料庫的 office_term_end 同一個算法
+ * （elections.end_date 存的是投票日，不能拿來當這個）。
+ */
+export function officeTermEnd(electionYear: number, electionType: string): string {
+  const year = electionYear + 4
+  if (electionType === '總統副總統') return `${year}-05-19`
+  if (electionType === '立法委員') return `${year}-01-31`
+  return `${year}-12-24`
+}
+
+const electionDateOf = (rec: { electionId: number; electionDate?: string }, electionDates: ReadonlyMap<number, string>): string | null =>
+  electionDates.get(rec.electionId) ?? rec.electionDate ?? null
+
+/**
+ * 這位持有人在那一屆（electionId）當選、職位是行政首長、而且那一任已卸任？
+ * 派 handover_missing 的條件之一：只看「當選」（candidacy_status = elected），參選、落選都不算，也不看現在在不在任。
+ * today 是 ISO 日期（YYYY-MM-DD），由呼叫端給，函式本身不讀時鐘。
+ */
+export function isRetiredExecutive(
+  person: PersonElections | undefined,
+  electionId: number | null,
+  electionDates: ReadonlyMap<number, string>,
+  today: string,
+): boolean {
+  if (!person || electionId === null) return false
+  return (person.elections ?? []).some((rec) => {
+    if (rec.electionId !== electionId || rec.candidacyStatus !== 'elected') return false
+    if (!rec.electionType || !EXECUTIVE_OFFICE_TYPES.includes(rec.electionType)) return false
+    const year = Number((electionDateOf(rec, electionDates) ?? '').slice(0, 4))
+    return Number.isInteger(year) && year > 0 && officeTermEnd(year, rec.electionType) < today
+  })
+}
+
+/**
+ * 這條脈絡該不該有交接區：脈絡裡有某條政見的持有人是在那一屆當選的行政首長、而且那一任已卸任
+ * （跟 contribution_auto_tasks_handover_missing 同一個條件，只是少了「後任是誰」——後任要換人才有，畫面不必等）。
+ * 選前的承諾（候選人）、民意代表的提案、還在任的首長都不成立。
+ */
+export function needsHandoverRecord(
+  policies: ReadonlyArray<Pick<Policy, 'politicianId' | 'electionId'>>,
+  personOf: (politicianId: string) => PersonElections | undefined,
+  electionDates: ReadonlyMap<number, string>,
+  today: string,
+): boolean {
+  return policies.some((p) => isRetiredExecutive(
+    personOf(String(p.politicianId)),
+    typeof p.electionId === 'number' ? p.electionId : null,
+    electionDates,
+    today,
+  ))
+}
+
+/**
+ * 當過民意代表（立委、縣市議員、鄉鎮市民代表、原住民區民代表）：任何一屆當選、投票日已過。
+ * 只有這些人，官方紀錄（議事系統、議會網站）才有他在某件事裡的角色可查；行政首長與候選人沒有。
+ */
+export function hasBeenRepresentative(
+  person: PersonElections | undefined,
+  electionDates: ReadonlyMap<number, string>,
+  today: string,
+): boolean {
+  return (person?.elections ?? []).some((rec) => {
+    if (rec.candidacyStatus !== 'elected' || !rec.electionType || !REPRESENTATIVE_OFFICE_TYPES.includes(rec.electionType)) return false
+    const date = electionDateOf(rec, electionDates)
+    return date !== null && date < today
+  })
+}
+
 /** 時間軸上一條政見的小字：政見從哪裡來＋目前進度；「競選承諾」本身是來源不是進度，不重複印 */
 export function policyMeta(p: Pick<Policy, 'origin' | 'status'>, statusLabel: (s: string) => string): string {
   const parts: string[] = []
@@ -226,6 +308,8 @@ export interface ParticipantRow {
   claim: LineageParticipant | null
   /** 這個人在這條脈絡裡有幾條政見 */
   policyCount: number
+  /** 當過民意代表（hasBeenRepresentative）：只有他們的「官方紀錄裡的角色」才查得到，沒有紀錄才有「還沒有」可講 */
+  representative: boolean
 }
 
 const ROLE_ORDER: readonly ParticipantRole[] = ['proposer', 'co_proposer', 'cosigner', 'advocate']
@@ -238,11 +322,12 @@ export function participantRows(
   participants: readonly LineageParticipant[],
   policies: readonly Policy[],
   nameOf: (politicianId: string) => string | undefined,
+  isRepresentative: (politicianId: string) => boolean = () => false,
 ): ParticipantRow[] {
   const rows = new Map<string, ParticipantRow>()
   const get = (pid: string, name: string) => {
     let r = rows.get(pid)
-    if (!r) { r = { politicianId: pid, name, official: null, claim: null, policyCount: 0 }; rows.set(pid, r) }
+    if (!r) { r = { politicianId: pid, name, official: null, claim: null, policyCount: 0, representative: isRepresentative(pid) }; rows.set(pid, r) }
     return r
   }
   for (const p of participants) {
