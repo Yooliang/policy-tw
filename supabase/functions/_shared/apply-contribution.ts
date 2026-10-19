@@ -64,6 +64,8 @@ export interface ContributionRow {
   resolved_politician_id?: string | null;
   /** 這筆貢獻是做哪個任務交的（contributions.task_id）。上線後拿它判斷任務該不該關，見 task-fulfilment.ts */
   task_id?: string | null;
+  /** 建新人物時姓名用原文（名冊對帳的系統寫入用；見 candidate-import.ts 的 keep_original_name） */
+  keep_original_name?: boolean;
 }
 
 /** applied＝落庫完成；disputed＝需要人裁決（身份判不出／指認衝突）；failed＝技術性失敗（會自動重試） */
@@ -623,7 +625,7 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     birth_year: int(p.birth_year),
     cec_cand_id: str(p.cec_cand_id) ?? int(p.cec_cand_id),
     cec_theme_id: str(p.cec_theme_id),
-  }, { source: sourceTagOf(row) });
+  }, { source: sourceTagOf(row), ...(row.keep_original_name ? { keep_original_name: true } : {}) });
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
@@ -2367,6 +2369,7 @@ export async function applySystemCandidacy(supabase: SupabaseLike, input: System
   const row = {
     id: null as unknown as string, contribution_type: "candidacy" as const, payload: input.payload, source_urls: input.source_urls,
     note: input.note ?? null, agent_name: input.agent_name, contributor_url: null, resolved_politician_id: input.resolved_politician_id,
+    keep_original_name: true,   // 名冊的姓名原文（空白、中間點、羅馬拼音都保留），不用比對用的正規化鍵當顯示名
   } satisfies ContributionRow;
   const outcome = await applyCandidacy(supabase, row);
   if (outcome.status === "applied") {

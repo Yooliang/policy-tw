@@ -16,6 +16,7 @@
 
 import { type ApplyOutcome, applySystemCandidacy, type SystemCandidacyRow } from "./apply-contribution.ts";
 import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
+import { displayNameOf } from "./candidate-import.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -46,7 +47,7 @@ export const BUDGET_MS = 100_000;
 /** 登記彙總表那一列 → 跟代理交 candidacy 一樣的 payload（協議的詞：candidate_status＝registered） */
 export function candidacyPayloadOf(c: ReconcileCandidate): Obj {
   return {
-    name: c.name,
+    name: displayNameOf(c.name),   // 名冊原文，只 trim、連續空白壓成一個；比對才用 roster_name_key
     election_id: c.election_id,
     election_type: c.election_type,
     region: c.county,
