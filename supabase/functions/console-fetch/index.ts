@@ -28,7 +28,7 @@ import { makeSupabaseGaMirror, makeTimeoutFetch, runGaSearchSync, teeStore } fro
  * 失敗只記進回應的 traffic 欄與日誌，不寫 Firestore 的 meta/status。
  * 缺環境變數：能寫 Firestore 就把失敗寫進 meta/status，並回 500，不靜默成功。
  * 單一資料源（GA 的某一站）失敗只記進 meta/status、仍回 200（與 fetch.mjs 一致）；只有 Firestore 寫入本身壞掉才回 500。
- * Supabase 另存（2026-10-20，policy-ops #148，migration 20261020010000）：寫 Firestore summary／daily 的同一份另外 upsert 進私有表
+ * Supabase 另存（2026-10-20，policy-ops #148，migration 20261020030000）：寫 Firestore summary／daily 的同一份另外 upsert 進私有表
  * ga_summary／ga_daily（_shared/ga-console-store.ts 的 teeStore），再抓正見站內搜尋詞進 ga_search_terms（GA 沒登記自訂維度就略過）。
  * 兩者的成敗都不影響 success 與 Firestore：只記進回應的 ga_store、search 欄與日誌。
  * 回應：{ success, missing_env?, sources: { "ga-tw": { state, message } … }, traffic: { state, message, rows? }, ga_store, search, elapsed_ms }（不含任何金鑰）

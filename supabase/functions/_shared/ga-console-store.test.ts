@@ -18,7 +18,7 @@ import {
   toSummaryRows,
 } from "./ga-console-store.ts";
 
-// GA 數字另存 Supabase 私有表（policy-ops #148，migration 20261020010000_ga_console_store.sql）
+// GA 數字另存 Supabase 私有表（policy-ops #148，migration 20261020030000_ga_console_store.sql）
 
 // 2026-10-19 17:00 UTC＝台灣時間 2026-10-20 01:00（跨日）
 const NOW_MS = Date.UTC(2026, 9, 19, 17, 0, 0);
@@ -356,7 +356,7 @@ Deno.test("站內搜尋詞：只有 search_term 沒有 results_count 時不帶�
 });
 
 // ---------- migration 守門：三張表私有 ----------
-const MIG = await Deno.readTextFile(new URL("../../migrations/20261020010000_ga_console_store.sql", import.meta.url));
+const MIG = await Deno.readTextFile(new URL("../../migrations/20261020030000_ga_console_store.sql", import.meta.url));
 const MIG_BODY = MIG.replace(/--.*$/gm, "");
 const TABLES = ["ga_daily", "ga_summary", "ga_search_terms"];
 

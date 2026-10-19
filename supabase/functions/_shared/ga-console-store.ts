@@ -1,5 +1,5 @@
 /**
- * 站務 GA 數字另存一份到 Supabase 私有表（2026-10-20，policy-ops 工作單 #148，migration 20261020010000_ga_console_store.sql）。
+ * 站務 GA 數字另存一份到 Supabase 私有表（2026-10-20，policy-ops 工作單 #148，migration 20261020030000_ga_console_store.sql）。
  *
  * console-fetch 抓 GA4 之後原本只寫 Firestore（規則只准站長以 Google 登入讀），代理讀不到。這裡做兩件事：
  *   1. teeStore：包住 Firestore 的 Store，寫 `summary/{site}`、`daily/{site}_{date}` 時把同一份轉成列、先收在記憶體
