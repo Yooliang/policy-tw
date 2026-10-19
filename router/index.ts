@@ -205,6 +205,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Queue.vue'),
   },
   {
+    // 派工日程（#703）：主控台「派工」頁的公開版，只讀、不自動更新；瀏覽器渲染、不收錄
+    path: '/dispatch',
+    name: 'dispatch',
+    component: () => import('../pages/Dispatch.vue'),
+  },
+  {
     path: '/stats',
     name: 'stats',
     component: () => import('../pages/Stats.vue'),
