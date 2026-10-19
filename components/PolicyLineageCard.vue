@@ -13,10 +13,7 @@ defineProps<{ lineage: LineageSummary; mates?: Array<{ id: string; title: string
 
 <template>
   <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="policy-lineage-card">
-    <h2 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />所屬脈絡</h2>
-    <p class="text-sm text-slate-500 leading-relaxed mb-4">
-      這條政見講的事，在{{ lineagePlace(lineage) }}有一條{{ LINEAGE_NAME }}：前後任怎麼交接、還有哪些人提案或推動、跟上下級政府的哪件事有關，都在脈絡頁。
-    </p>
+    <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />所屬脈絡</h2>
     <RouterLink :to="lineagePath(lineage.id)" class="group block rounded-lg border border-blue-200 bg-blue-50 p-4 hover:border-blue-300 transition-colors">
       <span class="block text-xs font-bold text-blue-700 mb-1">
         {{ LINEAGE_NAME }}・{{ LEVEL_LABEL[lineage.level] }}・{{ lineagePlace(lineage) }}<template v-if="lineage.category">・{{ lineage.category }}</template>

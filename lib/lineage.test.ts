@@ -212,3 +212,11 @@ Deno.test('脈絡頁：交接標題與「還沒有交接紀錄」掛在交接區
   assert(/needsHandoverRecord\(/.test(page) && /hasBeenRepresentative\(/.test(page), '頁面要用 lib/lineage.ts 的判斷，不是自己另寫一份')
   assertEquals(page.split('前後任怎麼交接').length - 1, 1, '交接標題只能出現一次')
 })
+
+Deno.test('別處不預設脈絡有交接：政見頁的脈絡卡不寫交接說明、脈絡一覽 0 筆交接不顯示', async () => {
+  const read = async (path: string) => (await Deno.readTextFile(new URL(path, import.meta.url))).replace(/\r\n/g, '\n')
+  const card = await read('../components/PolicyLineageCard.vue')
+  assert(!card.includes('前後任怎麼交接') && !card.includes('都在脈絡頁'), '脈絡卡不放解釋文字（也不能預設有前後任交接）')
+  const list = await read('../pages/PolicyAnalysis.vue')
+  assert(/<span v-if="lineageCounts\(l\)\.handovers > 0">交接 \{\{ lineageCounts\(l\)\.handovers \}\} 筆<\/span>/.test(list), '脈絡一覽的「交接 N 筆」0 筆時不顯示')
+})
