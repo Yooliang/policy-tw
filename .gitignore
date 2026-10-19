@@ -45,3 +45,6 @@ deno.lock
 .wrangler/
 
 # 驗證 VM 腳本的本機狀態檔（每台機器各自產生）
+
+# 參選地圖座標產生器的邊界資料暫存（scripts/build-tw-tile-grid.ts）
+scripts/.cache/
