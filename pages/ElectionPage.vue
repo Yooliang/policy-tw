@@ -44,8 +44,9 @@ import { districtsOf, groupByDistrict } from '../lib/district-grouping'
 import { electionArea } from '../lib/election-area'
 import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib/township-directory'
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
+import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
-import { listByBallotNo } from '../lib/ballot-number'
+import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
@@ -325,11 +326,11 @@ const policyStatsByPolitician = computed(() => {
 function sortPoliticians<T extends Politician>(list: T[]): T[] {
   const stats = policyStatsByPolitician.value
   const st = (c: Politician) => stats.get(c.id) ?? { updated: '', count: 0, attention: 0 }
-  const byStroke = (a: Politician, b: Politician) => sortByLengthThenStroke(a.name, b.name)
+  const byStroke = (a: Politician, b: Politician) => comparePerson(a, b)
   const byUpdated = (a: Politician, b: Politician) => st(b).updated.localeCompare(st(a).updated) || st(b).count - st(a).count || byStroke(a, b)
   const cmp: Record<SortMode, (a: Politician, b: Politician) => number> = {
-    // 號次：先照最近更新排（沒有號次的場次維持這個順序），再由 listByBallotNo 在每一場選舉內照號次排、隱藏沒號次的人
-    ballot: byUpdated,
+    // 號次：先照姓名筆畫排，再由 listByCountyBallot 依縣市（站上固定順序）→選舉區→號次排、沒號次的在該選區最後（跨縣市不交錯）
+    ballot: byStroke,
     // 2026-09-21 卡在李四川：last_updated 只到「日」，六個人同日並列，筆畫或筆數任一種並列規則都會讓同一個人永遠第一。
     // 2026-09-22 改用 updated_at（timestamptz，內容任何變動都會蓋，migration 000028），並列只剩極少數；退路仍是筆數→筆畫。
     updated: byUpdated,
@@ -338,7 +339,7 @@ function sortPoliticians<T extends Politician>(list: T[]): T[] {
     attention: (a, b) => (st(b).attention - st(a).attention) || byStroke(a, b),
   }
   const sorted = [...list].sort(cmp[sortMode.value])
-  return sortMode.value === 'ballot' ? listByBallotNo(sorted) : sorted
+  return sortMode.value === 'ballot' ? listByCountyBallot(sorted, TAIWAN_COUNTIES) : sorted
 }
 
 // 取得選定縣市的鄉鎮市區（合併所有來源）
@@ -758,7 +759,7 @@ const PLEDGE_SORT_OPTIONS: SortIconOption<PledgeSort>[] = [
 ]
 const sortedCampaignPolicies = computed(() => {
   const nameOf = new Map(politicians.value.map(c => [c.id, c.name]))
-  const byName = (a: Policy, b: Policy) => sortByLengthThenStroke(nameOf.get(a.politicianId) ?? '', nameOf.get(b.politicianId) ?? '')
+  const byName = (a: Policy, b: Policy) => comparePersonName(nameOf.get(a.politicianId) ?? '', nameOf.get(b.politicianId) ?? '')
   const cmp = pledgeSort.value === 'recent'
     ? (a: Policy, b: Policy) => compareByPolicyDateDesc(a, b) || byName(a, b)
     : (a: Policy, b: Policy) => byName(a, b) || String(a.politicianId).localeCompare(String(b.politicianId)) || compareByPolicyDateDesc(a, b)

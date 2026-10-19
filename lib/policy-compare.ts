@@ -13,6 +13,7 @@
  */
 import type { Policy } from '../types'
 import { compareRegionName } from './region-name'
+import { comparePersonName } from './person-name'
 import { isFormalDistrict } from './district-grouping'
 
 export interface ComparePerson {
@@ -28,14 +29,14 @@ export interface ComparePerson {
   position?: string
 }
 
-/** 欄的順序：有號次的照號次在前；還沒有號次的照姓名筆畫（先字數再筆畫，跟選舉頁「姓名筆畫」排序同一套） */
+/** 欄的順序：有號次的照號次在前；還沒有號次的照姓名筆畫（不先比字數，跟選舉頁「姓名筆畫」排序同一套） */
 export function compareColumnOrder(a: ComparePerson, b: ComparePerson): number {
   const an = typeof a.candNo === 'number' && a.candNo > 0 ? a.candNo : null
   const bn = typeof b.candNo === 'number' && b.candNo > 0 ? b.candNo : null
   if (an !== null && bn !== null && an !== bn) return an - bn
   if (an !== null && bn === null) return -1
   if (an === null && bn !== null) return 1
-  return compareRegionName(a.name, b.name)
+  return comparePersonName(a.name, b.name)
 }
 
 /** 會出現在選票上的人：表態不參選、退選的不並排 */

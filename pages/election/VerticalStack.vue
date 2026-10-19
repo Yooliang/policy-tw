@@ -5,7 +5,7 @@ import { ElectionType, type Policy } from '../../types'
 import { ArrowDown } from 'lucide-vue-next'
 import Avatar from '../../components/Avatar.vue'
 import { issueTagsOf } from '../../lib/issue-tags'
-import { compareRegionName } from '../../lib/region-name'
+import { comparePersonName } from '../../lib/person-name'
 import { compareByPolicyDateDesc } from '../../lib/policy-date'
 
 type LevelPolitician = { id: string | number; name: string; avatarUrl?: string | null; electionType?: string | null }
@@ -28,7 +28,7 @@ const politicianOf = (p: Policy): LevelPolitician | undefined =>
 
 // 層內照人的姓名筆畫、同一人新到舊（2026-10-19 維護者「至少依某個規則」；之前是資料庫 id＝隨機順序）
 const byPerson = (a: Policy, b: Policy) =>
-  compareRegionName(politicianOf(a)?.name ?? '', politicianOf(b)?.name ?? '') ||
+  comparePersonName(politicianOf(a)?.name ?? '', politicianOf(b)?.name ?? '') ||
   String(a.politicianId).localeCompare(String(b.politicianId)) ||
   compareByPolicyDateDesc(a, b)
 const getPoliciesByLevel = (type: ElectionType) =>

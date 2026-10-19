@@ -6,6 +6,8 @@
  * 純函式，不依賴 Vue，頁面、標題、預渲染都用這一份，deno 直接測。
  */
 import { pkGroupLabel, type ComparePerson } from './policy-compare'
+import { compareRegionName, normalizeRegionName } from './region-name'
+import { comparePerson } from './person-name'
 
 /** 合法號次：正整數；0、負數、小數、字串、null 都當成沒有號次 */
 export function ballotNo(value: unknown): number | undefined {
@@ -113,4 +115,29 @@ export function listByBallotNo<T extends ComparePerson>(list: readonly T[]): T[]
     return g === undefined || !numbered.has(g) || ballotNo(p.candNo) !== undefined || p.candidacyStatus === 'withdrawn'
   })
   return orderPeopleByBallotNo(kept)
+}
+
+/**
+ * 跨縣市清單的號次排序（維護者 2026-10-20）：號次是每個縣市、每個選舉區各自抽的，
+ * 全國清單照號次交錯排會像亂序（基隆 1 號、新竹市 1 號、桃園 1 號…基隆 2 號）。
+ * 所以先依縣市（站上固定的縣市順序 `counties`，不在名單上的排最後）分組，組內依選舉區／鄉鎮（地名固定順序）、
+ * 再依號次；沒有號次的放在該選區最後並依姓名筆畫。職位不同的人維持原本先後（依職位第一次出現的位置）。
+ * 同樣先套 listByBallotNo（同一場有號次就不列沒號次的、退選照舊）。
+ */
+export function listByCountyBallot<T extends ComparePerson>(list: readonly T[], counties: readonly string[]): T[] {
+  const countyIdx = new Map(counties.map((c, i) => [normalizeRegionName(c), i]))
+  const typeIdx = new Map<string, number>()
+  for (const p of list) {
+    const t = p.electionType ?? ''
+    if (!typeIdx.has(t)) typeIdx.set(t, typeIdx.size)
+  }
+  const rankOfCounty = (p: T) => countyIdx.get(normalizeRegionName(p.region)) ?? counties.length
+  return [...listByBallotNo(list)].sort((a, b) =>
+    (typeIdx.get(a.electionType ?? '') ?? 0) - (typeIdx.get(b.electionType ?? '') ?? 0) ||
+    rankOfCounty(a) - rankOfCounty(b) ||
+    compareRegionName(a.subRegion ?? '', b.subRegion ?? '') ||
+    compareRegionName(a.village ?? '', b.village ?? '') ||
+    compareBallotNo(a.candNo, b.candNo) ||
+    comparePerson(a, b),
+  )
 }
