@@ -183,8 +183,10 @@ FROM lineages l;
 ALTER VIEW lineages_full SET (security_invoker = on);
 GRANT SELECT ON lineages_full TO anon, authenticated;
 COMMENT ON VIEW lineages_full IS '政策脈絡一條一列（#349）：脈絡頁與脈絡一覽讀這個；政見只給 id（內容讀 policies_with_logs），參與者、交接、關聯各帶出處';
-ALTER VIEW lineages_full SET (security_invoker = on);
-GRANT SELECT ON lineages_full TO anon, authenticated;
+-- 視圖以呼叫者身分執行，用到的判斷函式明寫可執行
+GRANT EXECUTE ON FUNCTION policy_is_elected_term(UUID, DATE) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION lineage_policy_ineligible_reason(UUID, DATE) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION lineage_policy_eligible(UUID, DATE) TO anon, authenticated;
 
 -- ------------------------------------------------------------
 -- 4. 自我檢查

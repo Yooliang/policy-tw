@@ -1043,7 +1043,10 @@ export async function loadLineageMembers(supabase: SupabaseLike, lineageId: stri
   // query-bounds: ok — 一條脈絡的政見最多幾十條
   const { data, error } = await supabase.from("policies").select("id, title, politician_id, election_id").eq("lineage_id", lineageId).is("removed_at", null).limit(500);
   throwIf(error, "lineage members lookup");
-  return (data ?? []) as LineageOwnedPolicy[];
+  const rows = (data ?? []) as LineageOwnedPolicy[];
+  // 讀取端已經不算的（不合格、隱藏的）政見不能計入「整條脈絡是不是只剩同一人同一屆」，否則它們會掩護新的同人同屆違規
+  const hidden = await lineageIneligiblePolicies(supabase, rows);
+  return rows.filter((r) => !hidden.has(String(r.id).toLowerCase()));
 }
 
 /** 交了候選清查任務的脈絡或關聯並落庫＝這一份清單看過了；跟 no_change confirmed 寫同一列 */

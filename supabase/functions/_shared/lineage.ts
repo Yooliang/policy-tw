@@ -344,7 +344,7 @@ export function isSamePersonSameTerm(policies: ReadonlyArray<LineageOwnedPolicy>
 
 /** 同一人同一屆的說明，講給代理聽：不是脈絡、是重複政見、改走哪裡 */
 export function lineageSamePersonMessage(policies: ReadonlyArray<LineageOwnedPolicy>): string {
-  const titles = [...new Map(policies.map((p) => [String(p.id).toLowerCase(), p.title ?? p.id])).values()].slice(0, 6).map((t) => `「${t}」`).join("");
+  const titles = [...new Map(policies.map((p) => [String(p.id).toLowerCase(), p.title ?? p.id])).values()].slice(0, 6).map((t) => `「${t}」`).join("、");
   return `這些政見（${titles}）都是同一位政治人物在同一屆提的：同一個人同一屆的多條政見講同一件事，是重複政見、不是脈絡——請走重複清查（duplicate_policy 任務，用 removal 或 correction 處理重複）；` +
     "脈絡串的是跨人（同級多人、前後任）或跨屆（承諾當選後的延續）的政見，加入之後整條脈絡不能只剩同一人同一屆的政見";
 }

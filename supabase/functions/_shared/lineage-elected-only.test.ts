@@ -7,10 +7,10 @@
  *      lineage_candidate_scope（真的函式本體）收進來的政見＝合格的政見。還原驗證：把 SQL 任何一條判斷拿掉，這裡要紅
  *   C. 開票後當選人的政見自動進格（真的臂本體 contribution_auto_tasks_lineage_candidates）：政見一進範圍、那一格的指紋就變、重新派；
  *      同一場選舉兩位候選人（還沒投票）不會被放進同一格
- *   D. 系統套用 lineage_detach_ineligible（真的函式本體）：不合格的政見自動從脈絡拿掉並各寫一筆 edit_history、事實之後才變也會拿、
- *      拿光的脈絡不刪、migration 的一次套用核對筆數；還原驗證：拿掉或改壞函式任何一處，這裡要紅
+ *   D. 讀取端推導、資料不動（真的視圖 lineages_full）：policy_ids 只帶合格的、不合格的資料不動、事實之後才變視圖自動跟著變、台北日期、
+ *      合格數 0 的脈絡那一列還在且 existing_lineages 仍列出；還原驗證：拿掉視圖的合格條件，這裡要紅
  *   E. 交件前置檢查與落庫：歸入不合格的政見 → apply_would_fail／failed；detach 不受限；已經在這條脈絡裡的不再問；查詢出錯放行
- *   F. migration 文字守門（範圍函式機械替換、沒有派工臂、改資料只有系統套用那一處）與協議文字
+ *   F. migration 文字守門（範圍函式與視圖機械替換、不寫任何資料、沒有派工臂／觸發器／排程）與協議文字
  *   G. 同一人同一屆的多條政見不是脈絡（維護者同日檢討後追加）：純函式 isSamePersonSameTerm、前置檢查與落庫各判一次、協議文字
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
@@ -782,4 +782,18 @@ Deno.test("G8 協議文字：同一人同一屆是重複政見、驗證同步一
   ]) assertStringIncludes(skill, s);
   for (const s of ["同一位政治人物", "重複清查", "disagree"]) assertStringIncludes(LINEAGE_VERIFY_HINT.lineage, s);
   for (const s of ["重複政見", "duplicate_policy", "全都是同一人同一屆"]) assertStringIncludes(TASK_GUIDANCE.lineage_candidate, s);
+});
+
+Deno.test("G9 隱藏的（不合格的）既有政見不可掩護新的同人同屆違規：脈絡裡掛著 2099 未投票的承諾，再歸入同一人同一屆的兩條 → 照擋", async () => {
+  const fake = worldWithLineages();
+  fake.db.policies.find((p) => p.id === PL(7))!.lineage_id = null; // L6 先清空，再掛一條隱藏的（Z、2099 還沒投票）
+  fake.db.policies.find((p) => p.id === PL(4))!.lineage_id = L6;
+  fake.db.policies.push({ id: PL(9), title: "又一條當選的政見", removed_at: null, lineage_id: null, politician_id: Y, election_id: 2022 });
+  const problems = await precheckApplyTargets(fake.client, [{ contribution_type: "lineage", payload: { lineage_id: L6, policy_ids: [PL(7), PL(9)], note: NOTE } }], new Set());
+  assertEquals(problems.map((p) => p.path), ["payload.policy_ids"]);
+  assertStringIncludes(problems[0].message, "重複政見");
+  const out = await applyContribution(fake.client, row({ lineage_id: L6, policy_ids: [PL(7), PL(9)], note: NOTE }));
+  assertEquals(out.status, "failed");
+  assertStringIncludes(out.message, "重複政見");
+  assertStringIncludes(lineageSamePersonMessage([owned("a", X, 2022, "甲"), owned("b", X, 2022, "乙")]), "「甲」、「乙」");
 });
