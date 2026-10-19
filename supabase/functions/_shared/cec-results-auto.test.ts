@@ -155,9 +155,13 @@ async function build(edit: (sql: string) => string = (s) => s, clock: string | n
   await db.exec(edit(await readMig(MIG)));
   const after = await snapshot(db);
   if (clock) await db.exec(`SET app.activity_today = '${clock}'`);
+  await db.exec(`SELECT cec_results_auto_refresh()`); // 快取：部署後由排程算第一次
   return { db, before, after, migrationRows: 0 };
 }
-const clock = (db: PGlite, d: string) => db.exec(`SET app.activity_today = '${d}'`);
+const clock = async (db: PGlite, d: string) => {
+  await db.exec(`SET app.activity_today = '${d}'`);
+  await db.exec(`SELECT cec_results_auto_refresh()`); // 日期換了鍵就變，重算一次（排程每 10 分鐘會做）
+};
 const rows = async <T = Record<string, unknown>>(db: PGlite, sql: string) => (await db.query<T>(sql)).rows;
 const ids = async (db: PGlite, sql: string) => (await rows<{ id: number }>(db, sql)).map((r) => Number(r.id)).sort((a, b) => a - b);
 
@@ -440,8 +444,10 @@ const VIEW_DATE = " AND e.election_date < activity_today()) AS complete";
 Deno.test("還原驗證：拿掉『投票日已過』（單位開完 cec_unit_status.complete）→ 投票日當天單位算開完 → 要紅", async () => {
   await redWhen("單位開完的投票日檢查", VIEW_DATE, ") AS complete", checkNothingWrittenEarly);
 });
-Deno.test("還原驗證：計畫範圍與單位開完兩處的投票日檢查都拿掉 → 投票日當天會寫 → 要紅（兩處互為備援，單拿掉一處計畫仍然是空的，所以各自只測得到自己那一層）", async () => {
-  const both = (s: string) => mutate(mutate(s, VIEW_DATE, ") AS complete"), SCOPE_DATE, "       AND NOT politician_name_is_placeholder(p.name)");
+Deno.test("還原驗證：快取重算前、計畫範圍、單位開完三處的投票日檢查都拿掉 → 投票日當天會寫 → 要紅（三處互為備援，單拿掉一處計畫仍然是空的，所以各自只測得到自己那一層）", async () => {
+  // 三處互為備援：快取重算前的「有投票日已過的名單才算」、計畫範圍、單位開完
+  const GUARD = "JOIN elections e ON e.id = c.election_id WHERE e.election_date < activity_today()) THEN";
+  const both = (s: string) => mutate(mutate(mutate(s, VIEW_DATE, ") AS complete"), SCOPE_DATE, "       AND NOT politician_name_is_placeholder(p.name)"), GUARD, "JOIN elections e ON e.id = c.election_id WHERE true) THEN");
   mutate(await readMig(MIG), VIEW_DATE, ") AS complete"); // 兩處字串都要剛好出現一次
   let red = false;
   try {
@@ -477,6 +483,64 @@ Deno.test("還原驗證：拿掉派工臂對系統寫入的排除 → 寫得了�
   await redWhen("政黨臂排除", NL("       AND pe.id NOT IN (SELECT a.politician_election_id FROM cec_results_auto_plan() a WHERE a.write_party)"), "", async (db) => {
     const t = (await rows<{ task_id: string }>(db, `SELECT task_id FROM contribution_auto_tasks_party_gap()`)).map((r) => r.task_id);
     assert(!t.includes("auto:candidacy_source_missing:party:1"));
+  });
+});
+
+// ── 快取：有新同步才重算 ─────────────────────────────────────────
+const refreshed = async (db: PGlite) => (await rows<{ r: boolean }>(db, `SELECT cec_results_auto_refresh() AS r`))[0].r;
+const stateRow = async (db: PGlite) => (await rows<{ computed_at: string; rows_count: number; recomputed: boolean }>(db, `SELECT computed_at::text, rows_count, recomputed FROM cec_results_auto_state WHERE id = 1`))[0];
+
+const checkResyncRecomputes = async (db: PGlite) => {
+  assertEquals(await refreshed(db), false, "沒有新同步：沿用上次的結果");
+  await db.exec(`INSERT INTO cec_candidates (election_id, election_type, region, name, name_norm, elected, party) VALUES (2022, '縣市長', '新增縣', '新丁', cec_name_key('新丁'), false, '甲黨')`);
+  assertEquals(await refreshed(db), true, "有新同步（synced_at 變新）才重算");
+};
+
+Deno.test("快取：沒有新同步沿用上次（不重算）；有新同步、日期換了、開關變了才重算", async () => {
+  const { db } = await build();
+  const first = await stateRow(db);
+  assertEquals(first.recomputed, true);
+  assert(first.rows_count > 0);
+  assertEquals(await refreshed(db), false);
+  assertEquals(await refreshed(db), false);
+  assertEquals((await stateRow(db)).computed_at, first.computed_at, "沒重算：computed_at 不動");
+  // 計畫函式只讀快取：寫完以後馬上變空，不用重算
+  await db.exec(`SELECT cec_results_auto_apply()`);
+  assertEquals((await rows(db, `SELECT 1 FROM cec_results_auto_plan() WHERE write_result OR write_party`)).length, 0);
+  assertEquals((await rows(db, `SELECT 1 FROM cec_results_auto_plan() WHERE mismatch`)).length, 2, "不一致的還在，仍然不重算");
+  assertEquals((await stateRow(db)).computed_at, first.computed_at);
+  await checkResyncRecomputes(db);
+  assertEquals(await refreshed(db), false, "重算完又是沿用");
+  await clock(db, "2022-11-28"); // 日期換了
+  assertEquals((await stateRow(db)).recomputed, true);
+  assertEquals(await refreshed(db), false);
+  await db.exec(`UPDATE cec_results_auto_settings SET enabled = false WHERE id = 1`);
+  assertEquals(await refreshed(db), true, "開關變了鍵就變");
+  await db.close();
+});
+
+Deno.test("快取：所有名單的投票日都還沒到（2026 投票前）：只記鍵、清空快取、完全不叫重算本體", async () => {
+  const { db } = await build();
+  await db.exec(`DELETE FROM cec_candidates WHERE election_id = 2022`); // 只剩 2026 的名單
+  await clock(db, "2026-10-19");
+  const st = await stateRow(db);
+  assertEquals([st.recomputed, st.rows_count], [false, 0], "沒有投票日已過又有名單的單位：不重算");
+  assertEquals((await rows(db, `SELECT 1 FROM cec_results_auto_plan_rows`)).length, 0);
+  assertEquals((await rows(db, `SELECT 1 FROM cec_results_auto_plan()`)).length, 0);
+  assertEquals((await rows<{ r: Record<string, unknown> }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r.results_written, 0);
+  // 投票日過了、名單進來才算
+  await clock(db, "2026-11-29");
+  assertEquals((await stateRow(db)).recomputed, true);
+  assertEquals((await ids(db, `SELECT politician_election_id AS id FROM cec_results_auto_plan() WHERE write_result`)), [23, 24]);
+  await db.close();
+});
+
+Deno.test("還原驗證：鍵拿掉『最新同步時間』→ 有新同步也不重算 → 要紅", async () => {
+  await redWhen("鍵裡的同步時間", "COALESCE((SELECT max(c.synced_at)::TEXT FROM cec_candidates c), '') || '|' || ", "", checkResyncRecomputes);
+});
+Deno.test("還原驗證：重算前不先看鍵 → 沒有新同步也重算 → 要紅", async () => {
+  await redWhen("先看鍵", "IF NOT p_force AND EXISTS (SELECT 1 FROM cec_results_auto_state s WHERE s.id = 1 AND s.state_key = v_key) THEN", "IF FALSE THEN", async (db) => {
+    assertEquals(await refreshed(db), false, "沒有新同步：沿用上次的結果");
   });
 });
 

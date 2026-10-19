@@ -125,7 +125,7 @@ COMMENT ON TABLE cec_results_auto_log IS '系統直接寫入的比對證據：�
 --   write_party ：party_basis 空、唯一對上、單位開完、沒有第二筆對到同一位、名冊的政黨寫法對得到 party_aliases → 寫（無黨籍那一族＝party_id 空、party_basis＝cec）
 --   mismatch    ：我們已有結果（elected／not_elected），唯一對上、單位開完，而且跟中選會名單相反 → 不覆蓋，派代理
 -- 派工臂拿 write_result／write_party 排除、拿 mismatch 派；寫入函式只拿 write_*。關掉開關時一列都不回。
-CREATE OR REPLACE FUNCTION cec_results_auto_plan()
+CREATE OR REPLACE FUNCTION cec_results_auto_compute()
 RETURNS TABLE (
   politician_election_id INTEGER, politician_id UUID, name TEXT, election_id INTEGER, election_type TEXT,
   county TEXT, town TEXT, village TEXT,
@@ -188,9 +188,102 @@ LANGUAGE sql STABLE AS $$
     FROM f
    WHERE f.w_result OR f.w_party OR f.w_mismatch
 $$;
+ALTER FUNCTION cec_results_auto_compute() ROWS 2000;
+COMMENT ON FUNCTION cec_results_auto_compute IS
+  '（重算本體，很貴：正式庫約 0.9 秒，只在有新同步時由 cec_results_auto_refresh 呼叫，不要讓派工臂直接叫）中選會比對得上、選區已開完的：系統這一刻寫得了的（write_result／write_party）與「我們標的跟中選會相反」的（mismatch）。範圍＝投票日已過（台北日期）的全部參選紀錄；關掉 cec_results_auto_settings.enabled 一列都不回。寫入由 cec_results_auto_apply，派工臂用它排除／派不一致（#678，2026-10-19）';
+
+-- ── 5b. 快取：沒有新同步就不重算 ───────────────────────────────
+-- 維護者 2026-10-19：計畫函式約 0.9 秒，不能每輪 seed 重算。結果只在這幾件事變了才會變：中選會名單有新同步（cec_candidates.synced_at）、
+-- 台北日期換了（投票日過了、單位才算開完）、開關、參選紀錄新增。所以重算結果存在 cec_results_auto_plan_rows，
+-- cec_results_auto_state 記下上一次算的時候的鍵；鍵沒變就沿用。派工臂與寫入讀的 cec_results_auto_plan() 只讀快取，
+-- 再跟參選紀錄現況對一次（已經被寫掉的、被人改過的自動退出），不重算。
+-- 2026 投票前：沒有任何「投票日已過又有名單」的單位時，refresh 只記鍵、完全不叫重算本體。
+CREATE TABLE IF NOT EXISTS cec_results_auto_plan_rows (
+  politician_election_id INTEGER PRIMARY KEY, politician_id UUID, name TEXT, election_id INTEGER, election_type TEXT,
+  county TEXT, town TEXT, village TEXT,
+  cur_status TEXT, cur_party_id BIGINT, cur_party_basis TEXT,
+  cec_elected BOOLEAN, cec_sub_region TEXT, cec_village TEXT, cec_birth_year INTEGER, cec_cand_id INTEGER, cec_theme_id TEXT, cec_party TEXT,
+  unit_seats INTEGER, unit_elected INTEGER, new_party_id BIGINT,
+  write_result BOOLEAN, write_party BOOLEAN, mismatch BOOLEAN
+);
+ALTER TABLE cec_results_auto_plan_rows ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public read" ON cec_results_auto_plan_rows;
+CREATE POLICY "Public read" ON cec_results_auto_plan_rows FOR SELECT USING (true);
+CREATE TABLE IF NOT EXISTS cec_results_auto_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  state_key TEXT, computed_at TIMESTAMPTZ, rows_count INTEGER, recomputed BOOLEAN
+);
+ALTER TABLE cec_results_auto_state ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public read" ON cec_results_auto_state;
+CREATE POLICY "Public read" ON cec_results_auto_state FOR SELECT USING (true);
+COMMENT ON TABLE cec_results_auto_plan_rows IS '計畫函式的快取（cec_results_auto_compute 的結果）；只由 cec_results_auto_refresh 寫（#678）';
+COMMENT ON TABLE cec_results_auto_state IS '快取是用哪一把鍵算的（一列）：最新同步時間｜台北今天｜開關｜參選紀錄筆數與最大 id；鍵沒變就不重算（#678）';
+
+CREATE OR REPLACE FUNCTION cec_results_auto_state_key() RETURNS TEXT
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE((SELECT max(c.synced_at)::TEXT FROM cec_candidates c), '') || '|' || activity_today()::TEXT || '|'
+      || COALESCE((SELECT s.enabled::TEXT FROM cec_results_auto_settings s WHERE s.id = 1), '') || '|'
+      || (SELECT count(*)::TEXT || ':' || COALESCE(max(pe.id), 0)::TEXT FROM politician_elections pe)
+$$;
+COMMENT ON FUNCTION cec_results_auto_state_key IS '快取的鍵（便宜：一次掃 cec_candidates 取最大同步時間＋參選紀錄計數）（#678）';
+
+-- 鍵變了才重算，回傳這次有沒有重算。沒有任何「投票日已過又有中選會名單」的單位（2026 投票前）：只記鍵、清空快取、不叫重算本體
+CREATE OR REPLACE FUNCTION cec_results_auto_refresh(p_force BOOLEAN DEFAULT FALSE) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_key TEXT := cec_results_auto_state_key();
+  v_n INTEGER := 0;
+BEGIN
+  IF NOT p_force AND EXISTS (SELECT 1 FROM cec_results_auto_state s WHERE s.id = 1 AND s.state_key = v_key) THEN
+    RETURN FALSE;
+  END IF;
+  IF NOT pg_try_advisory_xact_lock(hashtext('cec_results_auto_refresh')) THEN
+    RETURN FALSE;
+  END IF;
+  DELETE FROM cec_results_auto_plan_rows;
+  IF EXISTS (SELECT 1 FROM cec_candidates c JOIN elections e ON e.id = c.election_id WHERE e.election_date < activity_today()) THEN
+    INSERT INTO cec_results_auto_plan_rows SELECT * FROM cec_results_auto_compute();
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    INSERT INTO cec_results_auto_state (id, state_key, computed_at, rows_count, recomputed) VALUES (1, v_key, now(), v_n, TRUE)
+      ON CONFLICT (id) DO UPDATE SET state_key = EXCLUDED.state_key, computed_at = EXCLUDED.computed_at, rows_count = EXCLUDED.rows_count, recomputed = TRUE;
+  ELSE
+    INSERT INTO cec_results_auto_state (id, state_key, computed_at, rows_count, recomputed) VALUES (1, v_key, now(), 0, FALSE)
+      ON CONFLICT (id) DO UPDATE SET state_key = EXCLUDED.state_key, computed_at = EXCLUDED.computed_at, rows_count = 0, recomputed = FALSE;
+  END IF;
+  RETURN TRUE;
+END;
+$$;
+COMMENT ON FUNCTION cec_results_auto_refresh IS '鍵（cec_results_auto_state_key）變了才重算快取，回傳有沒有動；沒有投票日已過又有名單的單位時完全不算（#678，維護者 2026-10-19）';
+REVOKE EXECUTE ON FUNCTION cec_results_auto_refresh(BOOLEAN) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION cec_results_auto_refresh(BOOLEAN) TO service_role;
+
+-- 派工臂與寫入讀的計畫：只讀快取，再跟參選紀錄現況對一次（寫過的、被人改過的自動退出）。開關關掉就一列都不回
+CREATE OR REPLACE FUNCTION cec_results_auto_plan()
+RETURNS TABLE (
+  politician_election_id INTEGER, politician_id UUID, name TEXT, election_id INTEGER, election_type TEXT,
+  county TEXT, town TEXT, village TEXT,
+  cur_status TEXT, cur_party_id BIGINT, cur_party_basis TEXT,
+  cec_elected BOOLEAN, cec_sub_region TEXT, cec_village TEXT, cec_birth_year INTEGER, cec_cand_id INTEGER, cec_theme_id TEXT, cec_party TEXT,
+  unit_seats INTEGER, unit_elected INTEGER, new_party_id BIGINT,
+  write_result BOOLEAN, write_party BOOLEAN, mismatch BOOLEAN)
+LANGUAGE sql STABLE AS $$
+  SELECT x.* FROM (
+    SELECT c.politician_election_id, c.politician_id, c.name, c.election_id, c.election_type, c.county, c.town, c.village,
+           pe.candidacy_status, pe.party_id, pe.party_basis,
+           c.cec_elected, c.cec_sub_region, c.cec_village, c.cec_birth_year, c.cec_cand_id, c.cec_theme_id, c.cec_party,
+           c.unit_seats, c.unit_elected, c.new_party_id,
+           (c.write_result AND COALESCE(pe.candidacy_status, '') NOT IN ('elected', 'not_elected', 'withdrawn')) AS write_result,
+           (c.write_party AND pe.party_basis IS NULL) AS write_party,
+           (c.mismatch AND pe.candidacy_status IS NOT DISTINCT FROM c.cur_status) AS mismatch
+      FROM cec_results_auto_plan_rows c
+      JOIN politician_elections pe ON pe.id = c.politician_election_id
+     WHERE COALESCE((SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1), false)
+  ) x
+  WHERE x.write_result OR x.write_party OR x.mismatch
+$$;
 ALTER FUNCTION cec_results_auto_plan() ROWS 2000;
 COMMENT ON FUNCTION cec_results_auto_plan IS
-  '中選會比對得上、選區已開完的：系統這一刻寫得了的（write_result／write_party）與「我們標的跟中選會相反」的（mismatch）。範圍＝投票日已過（台北日期）的全部參選紀錄；關掉 cec_results_auto_settings.enabled 一列都不回。寫入由 cec_results_auto_apply，派工臂用它排除／派不一致（#678，2026-10-19）';
+  '中選會比對得上、選區已開完的：系統這一刻寫得了的（write_result／write_party）與「我們標的跟中選會相反」的（mismatch）。讀快取（cec_results_auto_plan_rows，有新同步才由 cec_results_auto_refresh 重算），再跟參選紀錄現況對一次；關掉 cec_results_auto_settings.enabled 一列都不回。寫入由 cec_results_auto_apply，派工臂用它排除／派不一致（#678，2026-10-19）';
 
 -- ── 6. 寫入：只補空白、每筆進 edit_history、整次可還原 ───────────────
 CREATE OR REPLACE FUNCTION cec_results_auto_apply(p_limit INTEGER DEFAULT NULL, p_dry_run BOOLEAN DEFAULT FALSE) RETURNS JSONB
@@ -208,6 +301,8 @@ BEGIN
   IF NOT pg_try_advisory_xact_lock(hashtext('cec_results_auto_apply')) THEN
     RETURN jsonb_build_object('skipped', 'locked');
   END IF;
+  -- 有新同步（或日期換了）才重算快取；沒有就直接用上次的結果（便宜）
+  PERFORM cec_results_auto_refresh();
   v_limit := GREATEST(1, LEAST(COALESCE(p_limit, (SELECT s.batch_limit FROM cec_results_auto_settings s WHERE s.id = 1), 2000), 20000));
 
   IF p_dry_run THEN
