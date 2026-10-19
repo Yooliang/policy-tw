@@ -48,7 +48,8 @@ Deno.test("A1 seed：新定義＝20261011350000 的現行定義加兩處登記�
   // 前一版是不是還是 seed 的最新定義（中間有人插一版，這裡的底就過期）
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
-  assertEquals(defining.slice(-2), [prevName, MIG_NAME], "seed 的前一版變了：要以最新的為底重做替換");
+  // 這支之後只允許換號沿用排隊位置（20261019040000，守門在 rekey-keeps-queue-position.test.ts：以這支為底加 rekey-position-edits.ts 的替換）
+  assertEquals(defining.slice(-3), [prevName, MIG_NAME, "20261019040000_rekey_keeps_queue_position.sql"], "seed 的前一版變了：要以最新的為底重做替換");
   // 替換 1：補驗證列不再呼叫 contribution_queue_at（原本給 1970），位置由觸發器算
   const ins = "  -- >>> 驗證票跟著任務（20261017010000）：位置由觸發器 task_dispatches_queue_key 照 verify_queue_key 算，這裡不再呼叫 contribution_queue_at（原本給 1970）\n" +
     "  INSERT INTO task_dispatches (task_id, last_dispatched_at, queue_at, dispatch_count)\n  SELECT 'verify:' || c.id, now(), now(), 0\n  -- <<< 驗證票跟著任務\n";

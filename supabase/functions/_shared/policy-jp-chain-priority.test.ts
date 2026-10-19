@@ -24,6 +24,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const MIG_FILE = "20261009300000_policy_jp_chain_priority.sql";
 const SEC_FILE = "20261011360000_policy_jp_queue_priority_seconds.sql"; // 派工排序改秒數：seed 改寫、rebalance_queue 刪掉（這支測試跟著改了）
+const REKEY_FILE = "20261019040100_policy_jp_rekey_keeps_queue_position.sql"; // 換號沿用排隊位置（同形於正見 20261019040000）：seed 多一段記下舊列位置、新增時沿用；日期定層與排序鍵不動（policy-jp-dispatch-drift.test.ts 逐字守）
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
 const JP_SQL = Object.fromEntries(await Promise.all(JP_FILES.map(async (n) => [n, await read(n)] as const)));
 assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
@@ -31,7 +32,7 @@ assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
 // 例外：chain_step_rank 是鏈上加步驟的擴充點（"多一行 WHEN"），第 2～4 步的 migration 各加一行；它們的順位由 policy-jp-chain-*.test.ts 守，
 // 這裡只守既有的相對順序（選舉發現 < 團體 < 統計）與『沒登記的 auto 型別排最後』（下面 f）
 for (const later of JP_FILES.filter((n) => n > MIG_FILE)) {
-  for (const fn of [...(later === SEC_FILE ? [] : ["rebalance_queue", "seed_auto_task_queue"]), "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
+  for (const fn of [...(later === SEC_FILE ? [] : later === REKEY_FILE ? ["rebalance_queue"] : ["rebalance_queue", "seed_auto_task_queue"]), "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
     assert(!new RegExp("FUNCTION\\s+policy_jp\\." + fn + "\\s*\\(").test(JP_SQL[later]), `${later} 改寫了 policy_jp.${fn}，請更新 policy-jp-chain-priority.test.ts`);
   }
 }
@@ -234,7 +235,7 @@ Deno.test("還原驗證：選舉發現／等團體的選舉不定層（拿掉 se
     const b = sql.indexOf("  -- <<< 日本版：選舉發現的層\n") + "  -- <<< 日本版：選舉發現的層\n".length;
     assert(a > 0 && b > a);
     return sql.slice(0, a) + sql.slice(b);
-  }, SEC_FILE);
+  }, REKEY_FILE); // seed 的最新定義在換號沿用排隊位置那支（日期定層一段原樣帶著）
   assertEquals(await run(db2), { discovery: 2, "010006": 2, [HAKODATE]: 2 }, "沒有定層＝預設層");
   await db2.close();
 });
