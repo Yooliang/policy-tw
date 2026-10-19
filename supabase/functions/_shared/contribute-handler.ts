@@ -18,7 +18,8 @@ import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
-import { applyContribution, contributionStatusFor, type ApplyOutcome } from "./apply-contribution.ts";
+import { applyContribution, contributionStatusFor, followMergedInto, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
+import { identityNameProblems, NAME_MISMATCH_HINT, renameCollision, renameCollisionMessage, renameOf } from "./person-identity-guard.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
 import { checkElectoralDistrict } from "./district-registry.ts";
@@ -443,6 +444,42 @@ export async function handleContribute(
           success: false, error: "ambiguous_politician_name",
           message: `「${name}」有 ${(same ?? []).length} 位同名人物，請在 payload 帶 politician_id 指定是哪一位（任務的 target 或 item.current 裡有 id）。這不算被拒。`,
           candidates: same,
+        },
+      };
+    }
+  }
+
+  // 帶了 politician_id 又帶 name，兩者不是同一人（本名、別名都對不上）：整批 400，不算被拒（2026-10-18，劉雁祿）。
+  // 落庫端（nameMismatchMessage）擋的是等票之後；這裡在交件當下就講清楚，免得這筆走完驗證才被丟掉
+  const mismatched = await identityNameProblems(
+    supabase, validation.items,
+    (target, keeperId, claimed, label) => nameMismatchMessage(supabase, target, keeperId, claimed, label),
+    (id) => followMergedInto(supabase, id),
+  );
+  if (mismatched.length > 0) {
+    return {
+      status: 400,
+      body: {
+        success: false, error: "politician_name_mismatch",
+        message: `有交件的 politician_id 與 name 不是同一人，整批未收。${NAME_MISMATCH_HINT}`,
+        errors: mismatched.map((m) => ({ path: `items[${m.index}].payload.name`, politician_id: m.politician_id, name: m.name, politician_name: m.politician_name, message: m.message })),
+      },
+    };
+  }
+
+  // 改名撞到同一場選舉另一位同名的參選人（同屆、同選舉類型、同縣市）＝同一人重複建檔，請改交 merge_politician（2026-10-18）。不算被拒
+  for (const [index, item] of validation.items.entries()) {
+    if (item.contribution_type !== "correction") continue;
+    const rename = renameOf(item.payload);
+    if (!rename) continue;
+    const collision = await renameCollision(supabase, rename.target_id, rename.new_name);
+    if (collision) {
+      return {
+        status: 400,
+        body: {
+          success: false, error: "rename_duplicates_person",
+          message: `${renameCollisionMessage(rename.target_id, collision)}這不算被拒。`,
+          errors: [{ path: `items[${index}].payload`, existing_politician_id: collision.existing_id, message: renameCollisionMessage(rename.target_id, collision) }],
         },
       };
     }

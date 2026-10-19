@@ -555,6 +555,7 @@ async function buildDb(purgeSql: string): Promise<PGlite> {
   await db.exec(migSql("20260921000014_verify_dispatch.sql"));
   await db.exec(fnFromP0("activity_audit"));
   await db.exec(fnFromP0("activity_touch_updated_at"));
+  await db.exec(fnDefinition(REAL, "uuid_if_canonical")); // 驗證池 20261019010000 起用它比 uuid
   await db.exec(fnDefinition(REAL, "contribution_verify_pool"));
   await db.exec(fnDefinition(REAL, "dispatch_recent"));
   await db.exec(purgeSql);

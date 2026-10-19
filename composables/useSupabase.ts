@@ -179,7 +179,9 @@ const stats = ref<DataStats>({ totalPoliticians: null, politiciansByElection: {}
 // Pagination helper to fetch all rows from a table/view (bypasses 1000 row limit)
 // orderBy 是必填：超過 1000 筆的 view 若沒有排序，PostgREST 每頁順序不穩，會同一筆重複、另一筆漏掉，
 // 而且不會有任何錯誤——只是卡片靜靜地少幾張。
-export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string, orderBy: string): Promise<T[]> {
+// notRemoved：在伺服器端濾掉軟移除的列（removed_at 有值）；只有帶 removed_at 欄的視圖／表能用。
+// 以前整份撈回來才在瀏覽器濾，被移除的列白白傳一遍，翻頁數也跟著被它們撐大。
+export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string, orderBy: string, opts: { notRemoved?: boolean } = {}): Promise<T[]> {
   let allData: T[] = []
   let from = 0
   let to = 999
@@ -188,7 +190,8 @@ export async function fetchAllRows<T = Record<string, unknown>>(tableName: strin
   while (!finished) {
     // supabase-js 不會 reject，網路錯誤與中止都包在 error 裡回來；要 throwOnError 重試才看得到
     const { data } = await withTimeoutAndRetry(`${tableName} ${from}-${to}`, (signal) =>
-      supabase.from(tableName).select(selectStr).order(orderBy).range(from, to).abortSignal(signal).throwOnError(),
+      (opts.notRemoved ? supabase.from(tableName).select(selectStr).is('removed_at', null) : supabase.from(tableName).select(selectStr))
+        .order(orderBy).range(from, to).abortSignal(signal).throwOnError(),
     )
 
     if (!data || data.length < 1000) finished = true
@@ -587,17 +590,23 @@ export function ensurePolicies(): Promise<void> {
       // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
       // 兩份互不依賴，同時發；以前串行等於白付一次往返。
       const [rows] = await Promise.all([
-        fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id'),
+        fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id', { notRemoved: true }),
         loadPoliticiansWithPolicies(),
       ])
-      // 軟移除的政見不進全域 state。view 重建前沒有 removed_at 這一欄，
-      // 所以「明顯錯誤可以被移除」那套機制其實過濾不掉任何東西（見 migration 20260913000001）。
+      // 軟移除的政見不進全域 state：伺服器端已濾（notRemoved），這裡再濾一次是保險（見 migration 20260913000001）。
       // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
       policies.value = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
       policiesComplete.value = true
     })().catch((err) => { policiesPromise = null; recordFailure('政見清單', err, ensurePolicies) })
   }
   return policiesPromise
+}
+
+/** 把一批政見併進全域清單：已有的覆蓋成較新的、沒有的接在後面（整份清單的 policiesComplete 旗標不動） */
+function mergePolicies(rows: Policy[]): void {
+  if (rows.length === 0) return
+  const ids = new Set(rows.map(r => r.id))
+  policies.value = [...policies.value.filter(p => !ids.has(p.id)), ...rows]
 }
 
 /** 政見卡片與縣市篩選需要的人物＝有政見的那些人。切選舉時這批不能被清掉。 */
@@ -1116,6 +1125,58 @@ export function useSupabase() {
     }
   }
 
+  /**
+   * 一位人物名下的政見（人物頁、政見頁的「同一人的其他政見」）：只撈他的，不撈整份清單。
+   * 整份 ensurePolicies 是約 70 次分頁請求（每頁 1000 筆），這兩種頁面要的只是一個人的幾條。
+   */
+  async function loadPoliciesByPolitician(politicianId: string): Promise<void> {
+    if (!politicianId || policiesComplete.value) return
+    try {
+      // query-bounds: ok — 一個人的政見，上限 1000 筆已遠高於實際（最多的人也只有幾十條）
+      const { data } = await withTimeoutAndRetry(`politician policies ${politicianId}`, (signal) =>
+        supabase.from('policies_with_logs').select('*').eq('politician_id', politicianId).is('removed_at', null).order('id').limit(1000).abortSignal(signal).throwOnError())
+      mergePolicies(((data || []) as RawPolicy[]).filter(r => !r.removed_at).map(mapPolicy))
+    } catch (err) {
+      recordFailure('人物的政見', err, async () => { await loadPoliciesByPolitician(politicianId) })
+    }
+  }
+
+  /** 指定 id 的一批政見（我的關注）：已在全域狀態的不重撈；網址長度限制，一次最多 40 個 id */
+  async function loadPoliciesByIds(ids: readonly string[]): Promise<void> {
+    if (policiesComplete.value) return
+    const have = new Set(policies.value.map(p => p.id))
+    const missing = [...new Set(ids)].filter(id => id && !have.has(id))
+    for (let i = 0; i < missing.length; i += 40) {
+      const chunk = missing.slice(i, i + 40)
+      try {
+        // query-bounds: ok — id 清單最多 40 個，回來最多 40 筆
+        const { data } = await withTimeoutAndRetry(`policies ${chunk.length}`, (signal) =>
+          supabase.from('policies_with_logs').select('*').in('id', chunk).is('removed_at', null).order('id').limit(40).abortSignal(signal).throwOnError())
+        mergePolicies(((data || []) as RawPolicy[]).filter(r => !r.removed_at).map(mapPolicy))
+      } catch (err) {
+        recordFailure('關注的政見', err, async () => { await loadPoliciesByIds(ids) })
+        return
+      }
+    }
+  }
+
+  /**
+   * 一條政見頁需要的政見與人物：它自己、同一人的其他政見、同一條脈絡的政見，以及這些政見的提出者。
+   * 政見頁與深度分析頁用，取代整份 ensurePolicies。
+   */
+  async function loadPolicyContext(policyId: string): Promise<void> {
+    if (policiesComplete.value) return
+    const policy = await loadPolicyById(policyId)
+    if (!policy) return
+    await Promise.all([
+      loadPoliciesByPolitician(String(policy.politicianId)),
+      policy.lineage?.id ? loadPoliciesByLineage(policy.lineage.id) : Promise.resolve(),
+    ])
+    const lineageId = policy.lineage?.id
+    const whose = policies.value.filter(p => String(p.id) === String(policy.id) || (lineageId && p.lineage?.id === lineageId)).map(p => String(p.politicianId))
+    await loadPoliticiansByIds(whose)
+  }
+
   /** 一批人物（脈絡的參與者、前後任）：已在全域狀態的不重撈 */
   async function loadPoliticiansByIds(ids: readonly string[]): Promise<void> {
     const missing = [...new Set(ids)].filter(id => id && !politicians.value.some(p => p.id === id)).slice(0, 200)
@@ -1139,6 +1200,9 @@ export function useSupabase() {
     ensureLineages,
     loadLineageById,
     loadPoliciesByLineage,
+    loadPoliciesByPolitician,
+    loadPoliciesByIds,
+    loadPolicyContext,
     loadPoliticiansByIds,
     elections,
     politicians,
