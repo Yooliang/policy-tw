@@ -17,7 +17,8 @@ import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { dataRegionCategoryMdPath, dataRegionMdPath } from '../lib/md/format'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
-import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery } from '../lib/policy-compare'
+import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery, sameDistrict } from '../lib/policy-compare'
+import { renderPkMd } from '../lib/policy-pk-md'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
   Vote, Flag, AlertCircle, Users, MapPin,
@@ -738,7 +739,7 @@ const allCampaignPolicies = computed(() =>
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
       if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
-        if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
+        if (electoralDistrict && !sameDistrict(politician.subRegion, electoralDistrict)) return false
       } else {
         if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
@@ -775,7 +776,7 @@ const regionPolicies = computed(() =>
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
       if (getElectionType(politician) === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
-        if (electoralDistrict && politician.subRegion !== electoralDistrict) return false
+        if (electoralDistrict && !sameDistrict(politician.subRegion, electoralDistrict)) return false
       } else {
         if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
@@ -820,18 +821,32 @@ const issuesMdPick = computed<MdPick | null>(() => {
   }
   return { id: `r:${region}`, row: `/election/${seg}/${region}.md`, path: dataRegionMdPath(seg, region), title: `${region}　全部分類` }
 })
-// 政見 PK 的 .md 抽屜（2026-10-19 維護者）：跟政見矩陣一樣開預產的 /data/<屆>/<縣市>/<分類>.md；沒指定分類開縣市全部分類。
-// 預產只到「縣市×分類」（含該縣市各層級），沒有選區／單一層級的版本，所以字樣寫明「全縣市」，不假裝是這一場的範圍
+// 政見 PK 的 .md 抽屜：「PK 詳情」（不指定分類）由畫面上同一張比較表現場組成（lib/policy-pk-md.ts），範圍與標題的人數一致
+// （2026-10-20 維護者回報：原本開預產的縣市全部分類 .md，標題寫第01選舉區 8 位，詳情卻列出全縣市的議員）；
+// 點表格的分類名才開預產的 /data/<屆>/<縣市>/<分類>.md——預產只到「縣市×分類」，沒有選區版本，所以字樣寫明「全縣市」
 function pkMdPick(category?: string): MdPick | null {
   const region = selectedRegion.value
-  if (!hasMatrix.value || region === 'All') return null
-  const seg = electionSeg.value
-  if (category && categories.value.includes(category)) {
-    return { id: `${region}|${category}`, row: `/data/${seg}/${region}/${category}.md`, path: dataRegionCategoryMdPath(seg, region, category), title: `${region}全縣市　${category}` }
+  if (!category) {
+    if (pkMatrix.value.columns.length < 2 || !election.value) return null
+    const matrix = pkMatrix.value
+    const level = pkTitle.value
+    const regionName = region !== 'All' ? region : undefined
+    const year = electionYear.value || election.value.electionDate.slice(0, 4)
+    const electionName = election.value.name
+    const htmlPath = electionPath(electionSeg.value, selectedRegion.value, selectedSubRegion.value)
+    // text 用 getter：只在抽屜真的打開時才組，不在每次畫面更新時重組
+    return {
+      id: `pk:${electionSeg.value}|${region}|${pkLevel.value}|${pkGroup.value?.label ?? ''}|${pkPicked.value.join(',')}`,
+      path: '',
+      title: `${regionName ? `${regionName} ` : ''}${level} PK`,
+      get text() { return renderPkMd({ title: level, region: regionName, year, electionName, matrix, htmlPath }, Date.now()) },
+    }
   }
-  return { id: `r:${region}`, row: `/election/${seg}/${region}.md`, path: dataRegionMdPath(seg, region), title: `${region}全縣市　全部分類` }
+  if (!hasMatrix.value || region === 'All' || !categories.value.includes(category)) return null
+  const seg = electionSeg.value
+  return { id: `${region}|${category}`, row: `/data/${seg}/${region}/${category}.md`, path: dataRegionCategoryMdPath(seg, region, category), title: `${region}全縣市　${category}` }
 }
-/** PK 範圍比縣市窄（不是縣市長、或有選區）：提示 .md 是全縣市版本 */
+/** PK 範圍比縣市窄（不是縣市長、或有選區）：點分類名開的 .md 是全縣市版本，提示一句 */
 const pkMdNarrow = computed(() => pkLevel.value !== ElectionType.MAYOR || pkTitle.value !== levelLabel(pkLevel.value))
 const issuesMdOpen = ref<MdPick | null>(null)
 watch([viewMode, selectedRegion], () => { issuesMdOpen.value = null })
@@ -859,7 +874,7 @@ function poolForLevel(level: ElectionType) {
     if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All' && !COUNTY_WIDE_LEVELS.includes(level)) {
       if (type === ElectionType.COUNCILOR) {
         const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
-        if (electoralDistrict && c.subRegion !== electoralDistrict) return false
+        if (electoralDistrict && !sameDistrict(c.subRegion, electoralDistrict)) return false
       } else {
         if (!inTownship(c.subRegion, selectedSubRegion.value)) return false
       }

@@ -51,6 +51,33 @@ export function belongsToElection(p: Pick<Policy, 'electionId' | 'status'>, elec
   return p.electionId === electionId && p.status !== 'Proposed'
 }
 
+/**
+ * 選舉區名稱的比對鍵：「第1選舉區」「第01選舉區」「<區>第1選舉區」「第3選區」都補成兩位數再比，
+ * 資料上寫法不一致（2026-10-20 PK 詳情事件的檢查項）時不會把同一個選區當成兩個。其他字串只去頭尾空白。
+ */
+export function districtKey(label: string | null | undefined): string {
+  return (label ?? '').trim().replace(/第(\d+)(選舉區|選區)/, (_m, n: string, tail: string) => `第${n.padStart(2, '0')}${tail}`)
+}
+
+export function sameDistrict(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ka = districtKey(a)
+  return ka !== '' && ka === districtKey(b)
+}
+
+/**
+ * 頁面右側選了鄉鎮市區之後，參選人的選區記錄算不算在這個範圍內（PK 候選池與標題、詳情共用這一個判斷）。
+ *   議員：用「鄉鎮市區 → 選舉區」對應表查到的選舉區（electoralDistrict）比，寫法不同（第1／第01）視為同一區；
+ *         對應表查不到（electoralDistrict 空）時不篩，跟原本的行為一樣
+ *   其他職位：呼叫端給的 inTownship（選區記錄在這個鄉鎮內）
+ */
+export function inSubRegionScope(
+  personSubRegion: string | undefined,
+  scope: { isCouncilor: boolean; electoralDistrict?: string; inTownship: (sub: string | undefined) => boolean },
+): boolean {
+  if (scope.isCouncilor) return !scope.electoralDistrict || sameDistrict(personSubRegion, scope.electoralDistrict)
+  return scope.inTownship(personSubRegion)
+}
+
 /** 依選舉區分組的職位：選區只認正式寫法（「選區待補」那些人不知道是哪一場） */
 const DISTRICT_TYPES = ['縣市議員', '直轄市山地原住民區民代表', '立法委員']
 /** 地名當組名的職位：組的順序照地名（先字數再筆畫）；選舉區照自然排序（第02 在第10 前面） */
@@ -69,7 +96,7 @@ export function pkGroupLabel(p: Pick<ComparePerson, 'region' | 'subRegion' | 'vi
   if (electionType === '總統副總統') return p.position?.includes('副') ? undefined : '全國'
   if (electionType === '縣市長') return p.region?.trim() || undefined
   const sub = p.subRegion?.trim()
-  if (DISTRICT_TYPES.includes(electionType)) return sub && isFormalDistrict(sub, electionType) ? sub : undefined
+  if (DISTRICT_TYPES.includes(electionType)) return sub && isFormalDistrict(districtKey(sub), electionType) ? districtKey(sub) : undefined
   if (electionType === '村里長') return p.village?.trim() || undefined
   return sub || undefined
 }
