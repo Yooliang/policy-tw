@@ -33,6 +33,15 @@ npx supabase functions deploy <function-name>
 
 自 2026-09-13 起，push 到 `main` 就由 GitHub Actions（`.github/workflows/ci.yml`）建置並部署到 Firebase Hosting，且要等型別檢查與 Edge Function 測試都綠。曾經有人從落後的分支本機 build 後手動 deploy，把別人剛上線的改動洗掉——所以**手動 `firebase deploy` 是被明文禁止的動作**。要上線就開 PR 合進 `main`。
 
+### main push 依改動路徑決定測試範圍（2026-10-19）
+
+`ci.yml` 的 `changes` job 用 `scripts/ci-changed-paths.mjs` 把這次 push 的改動分兩類（基準有兩個：`edge-functions-deployed` tag 與 push 的 `before`，任一個算不出差異或有後端類檔案就是後端類；PR 一律後端類，CI 不變）：
+
+- **前端類**（只跑型別檢查與建置、`lib/ cloudflare/` 測試、金鑰掃描、`_shared/frontend-guard-tests.txt` 列的「會讀前端檔的後端守門測試」，然後直接部署 Hosting 與 Worker，不跑 `edge-tests`、不 `db push`、不部署函式）：`pages/ components/ composables/ lib/ router/ styles/ data/ cloudflare/`、`public/` 底下除了 `skill*.md` 與 `llms.txt`、根目錄的 `App.vue main.ts entry-server.ts index.html types.ts env.d.ts`。
+- **後端類**（完整測試，再 db push、部署函式、部署 Hosting）：其餘全部，包含 `supabase/ scripts/ .github/ docs/`、協議文件、`package.json`、設定檔與任何沒列在白名單的路徑；混合＝後端類。
+
+**新增前端資料夾**要先看有沒有後端測試讀它，再加進 `FRONTEND_PATTERNS`。**新增讀前端檔的後端測試**（路徑 `../../../pages/…`、`lib/…` 等，或掃整個 repo）要加進 `frontend-guard-tests.txt`（整支很慢、只有一兩個測試讀前端檔的，在路徑後面接 `/^A7 /` 這種名稱篩選，`ci-path-filter.test.ts` 會驗篩選涵蓋所有讀前端檔的測試；全部約 40 秒），`ci-path-filter.test.ts` 會從原始碼掃一遍，漏了會紅。部署 job 的條件：後端類要 `edge-tests` 成功、前端類不需要，測試失敗（含取消）一律擋部署。
+
 ### 部署順序：Hosting 先綠，才部署 Edge Function
 
 **2026-09-21 起這一步是自動的**：push 到 `main`、Hosting 部署成功之後，CI 的 `deploy-functions` job（`.github/workflows/ci.yml`）會接著自動跑 `npx supabase db push`，再用 `scripts/affected-functions.mjs` 算出這次 commit 真的動到哪幾支函式（自己的 `index.ts` 改了，或它 transitively import 的 `_shared/*.ts` 改了），只重部那幾支。2026-09-24 起只在這次改了 `public/skill.md` 時才等 Hosting（該 job 的「等協議文件上線」步驟輪詢線上版號），沒改協議就跟 Hosting 同時部署；建置也只在 typecheck job 做一次，部署 job 拿它的產物。之前這一步全靠人記得手動跑 `pnpm deploy:functions`，2026-09-21 同一天出過兩次「Hosting 綠、CI 也綠，但沒人手動跑這步」的事故——**別靠記得**這條規則，這次直接改成 CI 自動接手，不再是人要記住的事。

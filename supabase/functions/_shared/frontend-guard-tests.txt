@@ -1,0 +1,30 @@
+_shared/ai-reads.test.ts
+_shared/candidacy-read-side.test.ts
+_shared/cec-roster-hardening.test.ts
+_shared/dedupe-ops-values.test.ts
+_shared/dispatch-records-purge.test.ts
+_shared/district-seats-sources.test.ts /^A5 /
+_shared/district-seats.test.ts
+_shared/drop-related-policies.test.ts
+_shared/election-districts.test.ts
+_shared/election-results.test.ts
+_shared/latest-election-sync.test.ts
+_shared/lineage-elected-only.test.ts /^F4 /
+_shared/lineage.test.ts
+_shared/ops-env-params.test.ts
+_shared/party-alias-parity.test.ts
+_shared/party-followups.test.ts
+_shared/protocol-guard.test.ts
+_shared/proxy-client-ip.test.ts
+_shared/reassign-candidacy.test.ts
+_shared/reassign-merge-followups.test.ts
+_shared/regional-stats.test.ts
+_shared/round2-followups.test.ts
+_shared/second-source.test.ts
+_shared/seed-skip-unchanged.test.ts /^A6 /
+_shared/site-url.test.ts
+_shared/slow-queries.test.ts /^S5 /
+_shared/sources-stage2b-read.test.ts
+_shared/term-policy-missing.test.ts
+_shared/verify-dispatches-private.test.ts
+_shared/village-progress-cooling.test.ts /^A7 /
