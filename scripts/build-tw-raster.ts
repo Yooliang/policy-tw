@@ -111,7 +111,29 @@ function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, max
   const anchor = all.sort((a, b) => b.area - a.area)[0];
   // 取景只看本體：離最大一塊太遠的飛地不算（它們的行政區之後走「至少 1 格」）
   const near = (s: { cx: number; cy: number }) => Math.hypot(s.cx - anchor.cx, s.cy - anchor.cy) <= radiusKm;
-  const core = inputs.map((u) => ({ code: u.code, polys: u.polys.filter((p) => near(polygonStats(p))) }));
+  // 主體範圍：只有一塊的行政區（完整、不破碎）決定；全都破碎（澎湖那種群島）就用各區最大的一塊
+  const bboxOf = (p: RasterPolygon) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of p.rings[0]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return { x0, x1, y0, y1 };
+  };
+  const solid = inputs.filter((u) => u.polys.length === 1 && near(polygonStats(u.polys[0]))).map((u) => u.polys[0]);
+  const refPolys = solid.length ? solid : inputs.filter((u) => u.polys.length).map((u) => bigest(u.polys).p).filter((p) => near(polygonStats(p)));
+  const ref = refPolys.map(bboxOf).reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), y0: Math.min(a.y0, b.y0), y1: Math.max(a.y1, b.y1) }));
+  // 破碎的行政區（多塊：沙洲、島嶼、海埔地）只留離主體不遠的塊；塊與主體範圍的間距超過
+  // max(1.5 公里, 主體長邊的 15%) 就不畫（例：口湖鄉台子村的外傘頂洲沙洲離本島 10 公里以上，畫進來會把整個鄉擠成一角）
+  const margin = Math.max(1.5, 0.15 * Math.max(ref.x1 - ref.x0, ref.y1 - ref.y0));
+  const gapOf = (p: RasterPolygon) => {
+    const b = bboxOf(p);
+    return Math.hypot(Math.max(0, ref.x0 - b.x1, b.x0 - ref.x1), Math.max(0, ref.y0 - b.y1, b.y0 - ref.y1));
+  };
+  const core = inputs.map((u) => {
+    if (u.polys.length <= 1) return { code: u.code, polys: u.polys.filter((p) => near(polygonStats(p))) };
+    const kept = u.polys.filter((p) => near(polygonStats(p)) && gapOf(p) <= margin);
+    if (kept.length) return { code: u.code, polys: kept };
+    const nearest = u.polys.filter((p) => near(polygonStats(p))).sort((a, b) => gapOf(a) - gapOf(b))[0];
+    return { code: u.code, polys: nearest ? [nearest] : [] };
+  });
   let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
   for (const u of core) for (const p of u.polys) for (const [x, y] of p.rings[0]) {
     xMin = Math.min(xMin, x); xMax = Math.max(xMax, x); yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);

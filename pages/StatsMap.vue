@@ -11,7 +11,8 @@ import {
   NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, legendItems, tooltipLines, unitColor, unitHref, viewKey,
   type ColorMode, type CountRow, type MapUnit, type MapView,
 } from '../lib/candidacy-map'
-import { boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, type DecodedRaster, type RasterFile } from '../lib/raster-grid'
+import { boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, unitStats, type DecodedRaster, type RasterFile } from '../lib/raster-grid'
+import { clampCenter, ZOOM_AFTER_DRILL_DOWN, ZOOM_AFTER_DRILL_UP, resolveWheel, type Pt } from '../lib/map-zoom'
 import { Map as MapIcon, ChevronLeft, LayoutGrid, List, ExternalLink, Plus, Minus, RotateCcw } from 'lucide-vue-next'
 
 /**
@@ -100,7 +101,11 @@ async function show(v: MapView) {
   }
 }
 
-function go(v: MapView) {
+/** 換層之後的縮放：往下鑽從 ZOOM_AFTER_DRILL_DOWN 起；回上一層聚焦在剛才那個行政區上（滾輪縮放用） */
+let pendingFocus: { code: string | null; zoom: number } | null = null
+
+function go(v: MapView, focus: { code: string | null; zoom: number } | null = null) {
+  pendingFocus = focus
   view.value = v
   rows.value = []
   raster.value = null
@@ -200,7 +205,57 @@ function resetZoom() {
 function setZoom(k: number) {
   zoom.value = Math.min(8, Math.max(1, k))
 }
-watch(raster, (r) => { if (r) center.value = [r.w / 2, r.h / 2] })
+watch(raster, (r) => {
+  if (!r) return
+  center.value = [r.w / 2, r.h / 2]
+  const focus = pendingFocus
+  pendingFocus = null
+  if (!focus) return
+  zoom.value = focus.zoom
+  const idx = focus.code ? r.codes.indexOf(focus.code) : -1
+  const s = idx >= 0 ? unitStats(r)[idx] : null
+  if (s) center.value = clampCenter([s.cx, s.cy], focus.zoom, r.w, r.h)
+})
+
+// ── 滾輪縮放（以游標為中心）──
+// 只在游標位於地圖上時攔截滾輪（不用按 Ctrl）：地圖本身就是這頁的主角，要的是「捲一捲就放大」；
+// 游標移到地圖外（兩側、右邊的資料卡、標題區）頁面照常捲動。需要 Ctrl 的做法會讓一般滾輪使用者找不到縮放，
+// 而觸控板的捏合在瀏覽器本來就是帶 Ctrl 的滾輪事件，兩種都走同一條路。
+// 縮放到門檻（lib/map-zoom.ts）自動切到游標下行政區的下一層，縮小回最小倍率再縮一格回上一層；
+// 切層後 450 毫秒內忽略滾輪（慣性捲動不會一路連跳好幾層）。點擊下鑽與麵包屑照舊。
+let wheelLockUntil = 0
+function onWheel(e: WheelEvent) {
+  const r = raster.value
+  const svg = svgEl.value
+  if (!r || !svg) return
+  e.preventDefault()
+  if (performance.now() < wheelLockUntil) return
+  const ctm = svg.getScreenCTM()
+  if (!ctm) return
+  const pt = svg.createSVGPoint()
+  pt.x = e.clientX
+  pt.y = e.clientY
+  const p = pt.matrixTransform(ctm.inverse())
+  const gx = Math.floor(p.x)
+  const gy = Math.floor(p.y)
+  const idx = gx >= 0 && gy >= 0 && gx < r.w && gy < r.h ? r.cells[gy * r.w + gx] : -1
+  const unit = idx >= 0 ? built.value?.units[idx] ?? null : null
+  const act = resolveWheel(
+    { zoom: zoom.value, center: center.value as Pt, w: r.w, h: r.h, canDrillDown: drillable.value && !!unit, canDrillUp: view.value.level !== 'county' },
+    e.deltaY, e.ctrlKey, [p.x, p.y],
+  )
+  if (act.type === 'drillDown' && unit) {
+    wheelLockUntil = performance.now() + 450
+    go(drillDown(view.value, unit.code), { code: null, zoom: ZOOM_AFTER_DRILL_DOWN })
+  } else if (act.type === 'drillUp') {
+    wheelLockUntil = performance.now() + 450
+    const from = view.value.level === 'village' ? view.value.townCode : view.value.countyCode
+    go(drillUp(view.value), { code: from ?? null, zoom: ZOOM_AFTER_DRILL_UP })
+  } else if (act.type === 'zoom') {
+    zoom.value = act.zoom
+    center.value = act.center
+  }
+}
 function onDown(e: PointerEvent) {
   drag = { x: e.clientX, y: e.clientY, cx: center.value[0], cy: center.value[1], moved: false }
 }
@@ -298,9 +353,9 @@ usePageHead({
                 <button v-if="zoom > 1" type="button" aria-label="重設" class="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-blue-600" @click="resetZoom"><RotateCcw :size="16" /></button>
               </div>
               <svg ref="svgEl" :viewBox="viewBox" preserveAspectRatio="xMidYMid meet" class="w-full h-auto mx-auto block select-none touch-pan-y"
-                :style="{ maxHeight: '78vh', aspectRatio: `${raster.w} / ${raster.h}`, touchAction: zoom > 1 ? 'none' : 'pan-y' }"
+                :style="{ maxHeight: '78vh', aspectRatio: `${raster.w} / ${raster.h}`, touchAction: zoom > 1 ? 'none' : 'pan-y', overscrollBehavior: 'contain' }"
                 role="group" :aria-label="`${levelLabel}地圖`" data-testid="map-svg"
-                @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp" @pointerleave="onUp">
+                @wheel="onWheel" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp" @pointerleave="onUp">
                 <g shape-rendering="crispEdges">
                   <path v-for="u in built.units" :key="u.code" :d="fills[u.idx]" :fill="colorOf(u)"
                     class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.candidates} 人`"

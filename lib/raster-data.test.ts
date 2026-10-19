@@ -48,6 +48,77 @@ Deno.test("縣市層：每個縣市一個檔，鄉鎮市區代碼與官方一致
   }
 });
 
+/** 一個行政區格子的連通塊（8 方向）：[格數, 重心 x, 重心 y]，由大到小 */
+function components(file: RasterFile) {
+  const r = decodeRaster(file);
+  const seen = new Uint8Array(r.w * r.h);
+  const comps: Array<Array<[number, number, number]>> = r.codes.map(() => []);
+  for (let s = 0; s < r.cells.length; s += 1) {
+    if (seen[s] || r.cells[s] < 0) continue;
+    const v = r.cells[s];
+    const stack = [s];
+    seen[s] = 1;
+    let n = 0, sx = 0, sy = 0;
+    while (stack.length) {
+      const i = stack.pop()!;
+      const x = i % r.w, y = (i - x) / r.w;
+      n += 1; sx += x; sy += y;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= r.w || ny >= r.h) continue;
+          const j = ny * r.w + nx;
+          if (!seen[j] && r.cells[j] === v) { seen[j] = 1; stack.push(j); }
+        }
+      }
+    }
+    comps[v].push([n, sx / n, sy / n]);
+  }
+  comps.forEach((c) => c.sort((a, b) => b[0] - a[0]));
+  return { r, comps };
+}
+
+Deno.test("口湖鄉（雲林縣）：台子村的外傘頂洲沙洲不能把整個鄉擠成一角，台子村不會散到十幾公里外", async () => {
+  const file = await read("villages/10009190.json");
+  const { r, comps } = components(file);
+  assert(r.w * (r.cellM / 1000) <= 20 && r.h * (r.cellM / 1000) <= 20, `畫布 ${r.w}×${r.h} 格太大，鄉被擠到一角了`);
+  let land = 0;
+  for (const v of r.cells) if (v >= 0) land += 1;
+  assert(land / (r.w * r.h) > 0.3, "陸地占畫布的比例太低");
+  const taizi = file.codes.indexOf("10009190014");
+  assert(taizi >= 0);
+  const main = comps[taizi][0];
+  for (const c of comps[taizi].slice(1)) {
+    const km = Math.hypot(c[1] - main[1], c[2] - main[2]) * (r.cellM / 1000);
+    assert(km < 6, `台子村有一塊離主體 ${km.toFixed(1)} 公里`);
+  }
+});
+
+/** 讀實際的點陣，這幾個行政區本來就有多塊（外島、飛地、狹長形被 200 公尺格切斷），掃描時放行；新增異常會讓下面那條紅 */
+const KNOWN_SPLIT = new Set([
+  "10002040024", // 頭城鎮龜山里：龜山島離岸約 10 公里
+  "10013250004", // 枋山鄉善餘村：狹長形
+  "10013280005", // 瑪家鄉排灣村：兩塊飛地
+  "10016030011", // 白沙鄉通梁村：離島
+  "65000060021", // 新店區塗潭里：狹長形
+  "65000220006", // 石門區尖鹿里：狹長形
+  "67000100005", // 官田區大崎里：狹長形
+]);
+
+Deno.test("全國村里層：沒有村里的格子散成多塊且相距超過 3 公里（已知的 7 個例外除外）", async () => {
+  const flagged: string[] = [];
+  for (const town of level(8)) {
+    const file = await read(`villages/${town}.json`);
+    const { r, comps } = components(file);
+    comps.forEach((cs, i) => {
+      if (cs.length < 2) return;
+      const spread = Math.max(...cs.slice(1).map((c) => Math.hypot(c[1] - cs[0][1], c[2] - cs[0][2]) * (r.cellM / 1000)));
+      if (spread > 3 && !KNOWN_SPLIT.has(file.codes[i])) flagged.push(`${file.codes[i]}（${spread.toFixed(1)} 公里）`);
+    });
+  }
+  assertEquals(flagged, [], "村里格子散成相距很遠的多塊");
+});
+
 Deno.test("村里層：每個鄉鎮一個檔，村里代碼與官方一致、每里至少 1 格、尺度是 200 公尺的整數倍", async () => {
   let villages = 0;
   for (const town of level(8)) {
