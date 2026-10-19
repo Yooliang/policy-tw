@@ -17,8 +17,8 @@
 import { chunksOf, IN_CHUNK } from "./in-chunks.ts";
 import { normalizeCorrection } from "./correction.ts";
 import { electionTypeSwitch } from "./candidate-import.ts";
-import { linkLevelProblem } from "./lineage.ts";
-import { loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
+import { isSamePersonSameTerm, type LineageOwnedPolicy, lineageSamePersonMessage, linkLevelProblem } from "./lineage.ts";
+import { lineageIneligiblePolicies, loadLineageMembers, loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 import { resultItems } from "./election-results.ts";
 import { loadReassignContext, reassignProblems } from "./reassign-candidacy.ts";
@@ -45,7 +45,7 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? 
 const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
 interface PoliticianRow { merged_into: string | null }
-interface PolicyRow { removed_at: string | null; lineage_id?: string | null; title?: string | null }
+interface PolicyRow { removed_at: string | null; lineage_id?: string | null; title?: string | null; politician_id?: string | null; election_id?: number | null }
 interface LineageRow { id: string; title: string; level: string; region: string | null; sub_region: string | null }
 
 /**
@@ -78,10 +78,13 @@ async function lookupPolicies(supabase: SupabaseLike, ids: readonly string[]): P
     // 脈絡一筆最多 60 個政見 id（#349），整批 20 筆可到上千個：切成 IN_CHUNK 個一段，網址才不會超長
     for (const chunk of chunksOf(ids)) {
       // query-bounds: ok — ids 來自這一批交件、每段 IN_CHUNK 個，變數 in()
-      const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title").in("id", chunk);
+      const { data, error } = await supabase.from("policies").select("id, removed_at, lineage_id, title, politician_id, election_id").in("id", chunk);
       if (error) { console.error("precheck policies lookup failed:", error.message); return { rows, ok: false }; }
-      for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null }>) {
-        rows.set(String(r.id).toLowerCase(), { removed_at: r.removed_at ?? null, lineage_id: r.lineage_id ?? null, title: r.title ?? null });
+      for (const r of (data ?? []) as Array<{ id: string; removed_at: string | null; lineage_id?: string | null; title?: string | null; politician_id?: string | null; election_id?: number | null }>) {
+        rows.set(String(r.id).toLowerCase(), {
+          removed_at: r.removed_at ?? null, lineage_id: r.lineage_id ?? null, title: r.title ?? null,
+          politician_id: r.politician_id ?? null, election_id: typeof r.election_id === "number" ? r.election_id : null,
+        });
       }
     }
   } catch (e) {
@@ -415,6 +418,40 @@ export async function precheckApplyTargets(
             });
           }
         });
+        // 脈絡只收那一屆已投票且當選的政見（維護者 2026-10-19，協議 1.99.0）：歸入的逐條判，落庫當下 applyLineage 用同一支
+        // （lineageIneligiblePolicies）再判一次。已經在這條脈絡裡的不再問（落庫本來就不動它）；detach_policy_ids 不受限——拿掉不合格的
+        // 政見正是這條規則要的動作。查詢本身出錯放行。
+        if (policies.ok && attach.length > 0) {
+          const toCheck = attach
+            .map((id) => ({ id, row: policyRows.get(id.toLowerCase()) }))
+            .filter((x): x is { id: string; row: PolicyRow } => !!x.row && !x.row.removed_at && String(x.row.lineage_id ?? "").toLowerCase() !== lid)
+            .map((x) => ({ id: x.id, ...x.row }));
+          try {
+            const bad = await lineageIneligiblePolicies(supabase, toCheck);
+            attach.forEach((id, k) => {
+              const b = bad.get(id.toLowerCase());
+              if (b) problems.push({ index: i, code: "apply_would_fail", path: `payload.policy_ids[${k}]`, message: b.message });
+            });
+          } catch (e) {
+            console.error("precheck lineage eligibility lookup failed:", e instanceof Error ? e.message : String(e));
+          }
+          // 同一人同一屆的多條政見不是脈絡（同一個協議版 1.99.0）：建新脈絡全都是同一人同一屆 → 擋；歸入既有脈絡，加入、拿掉之後整條不能只剩同一人同一屆
+          // （純函式 isSamePersonSameTerm；落庫當下 applyLineage 用同一支再判一次；只拿掉不歸入的不查）。查詢出錯放行
+          try {
+            const detachSet = new Set(detach.map((x) => x.toLowerCase()));
+            const after = new Map<string, LineageOwnedPolicy>();
+            for (const m of lid ? await loadLineageMembers(supabase, lid) : []) if (!detachSet.has(String(m.id).toLowerCase())) after.set(String(m.id).toLowerCase(), m);
+            for (const id of attach) {
+              const row = policyRows.get(id.toLowerCase());
+              if (row && !row.removed_at) after.set(id.toLowerCase(), { id, title: row.title, politician_id: row.politician_id, election_id: row.election_id });
+            }
+            if (isSamePersonSameTerm([...after.values()])) {
+              problems.push({ index: i, code: "apply_would_fail", path: "payload.policy_ids", message: lineageSamePersonMessage([...after.values()]) });
+            }
+          } catch (e) {
+            console.error("precheck lineage same-person lookup failed:", e instanceof Error ? e.message : String(e));
+          }
+        }
         detach.forEach((id, k) => { checkPolicy(i, id, `payload.detach_policy_ids[${k}]`, "拿不掉：請確認 policy_id", "不用拿掉"); });
         const nl = p.new_lineage && typeof p.new_lineage === "object" ? p.new_lineage as Obj : null;
         if (nl && nl.level !== "national") {

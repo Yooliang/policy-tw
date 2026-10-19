@@ -804,7 +804,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   // ---- 20261011210000 政策の継承（lineage／handover，policy-ops#95 C 期第 6 步；正見 20261006034900 の日本版）----
   lineage_level_of: { mig: [T_LIN], why: "団体コード → 脈絡の層級（NULL＝national、kind=prefecture＝regional、他＝local）。正見は region／sub_region の三つ組で county／township を決める、日本は lg_code 一本" },
   lineage_link_level_ok: { mig: [T_LIN], why: "上下級の関連が成り立つか（国→都道府県・市区町村、都道府県→その都道府県内の市区町村）。正見 linkLevelProblem（TS）の日本版、落庫と lineage_links 臂が共有" },
-  lineage_candidate_scope: { mig: [T_LIN], why: "lineage_candidates 臂の対象政策（公開済み・人物が引ける・公約は当選済み／届出済み・表明済みの人のもの）。正見は臂の中に直書き（立法委員の政見を県市の格にも入れる一段は日本版では入れない）" },
+  lineage_candidate_scope: { mig: [T_LIN], why: "lineage_candidates 臂の対象政策（公開済み・人物が引ける・公約は当選済み／届出済み・表明済みの人のもの）。正見は臂の中に直書き（立法委員の政見を県市の格にも入れる一段は日本版では入れない）。**偏離（登記，2026-10-19）**：正見的 lineage_candidate_scope（20261019020000，協議 1.99.0）改成「那一屆已投票而且當選的人的政見才收」（承諾 → 政見 → 脈絡：選前叫承諾、當選後才叫政見、政見串起來才叫脈絡）；日本版的「公約は当選済み、または投票前で届出済み・表明済みの人」還沒跟——待通知日本站（P-日本）決定要不要追" },
   lineage_block_key: { mig: [T_LIN], why: "格（層・団体・分野）の鍵の md5 前 12 字（task_id に空白は入れられない）。正見は region/sub_region/category を task_id にそのまま使う" },
   contribution_auto_tasks_lineage_candidates: { mig: [T_LIN], why: "臂 lineage_candidates：格に複数任期にまたがる政策があり脈絡に入っていないものがあれば 1 件（task_id=auto:lineage_candidate:<格の鍵>:<清單指紋>）。FOLLOWED 正見 20261006034900 の task_type・target 形・confirmed は永久；DEVIATED：lineage_candidate_reviews 表を持たず task_checks confirmed（duplicate_policy と同じ）、cap は規則 params" },
   contribution_auto_tasks_handover_missing: { mig: [T_LIN], why: "臂 handover_missing：首長の任期が終わり後任が就いているのに交接の記録がない → task_id=auto:handover_missing:<脈絡 id>:<交接の指紋>。FOLLOWED 正見の task_type・同一人の再選は出さない；DEVIATED：人物×選挙でなく任期（politician_offices）から任期へ、from/to_policy_ids は落庫で自動" },

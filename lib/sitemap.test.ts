@@ -87,6 +87,22 @@ Deno.test("人物 lastmod＝名下政見 updated_at 最晚的；政見、脈絡�
   assertEquals("/lineage/L2" in meta.lastmod, false);
 });
 
+Deno.test("空脈絡（政見都被拿掉了）不進網站地圖、不寫 lastmod；沒給 policyIds 的當成有政見；資料列不受影響", () => {
+  const meta = buildSitemapMeta({
+    politicians: [],
+    policies: [],
+    lineages: [
+      { id: "has", updatedAt: "2026-10-06T03:00:00+00:00", policyIds: ["p1"] },
+      { id: "empty", updatedAt: "2026-10-19T03:00:00+00:00", policyIds: [] },
+      { id: "unknown", updatedAt: "2026-10-07T03:00:00+00:00" },
+    ],
+  });
+  assertEquals(meta.skip, ["/lineage/empty"]);
+  assertEquals(meta.lastmod["/lineage/has"], "2026-10-06T03:00:00Z");
+  assertEquals(meta.lastmod["/lineage/unknown"], "2026-10-07T03:00:00Z");
+  assertEquals("/lineage/empty" in meta.lastmod, false);
+});
+
 Deno.test("時間缺或不合法 → 不寫 lastmod", () => {
   assertEquals(toLastmod(undefined), null);
   assertEquals(toLastmod(null), null);

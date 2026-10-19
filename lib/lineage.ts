@@ -351,6 +351,15 @@ export function lineageCounts(l: Lineage): { policies: number; people: number; h
   return { policies: l.policyIds.length, people: people.size, handovers: l.handovers.length, links: l.links.length }
 }
 
+/**
+ * 這條脈絡要不要公開列出（脈絡一覽、網站地圖）：一條政見都沒有的空脈絡不列。
+ * 起因（2026-10-19，協議 1.99.0）：脈絡只收那一屆已投票且當選的政見，已在脈絡裡才變得不合格的政見，讀取端不算（lineages_full.policy_ids
+ * 只帶合格的、資料不動），有些脈絡會因此剩 0 條。**資料列不刪**（lineages_full 照常回那一列），舊網址 /lineage/:id 照常能開（不能 404），只是頁面標 noindex、不進網站地圖與一覽。
+ */
+export function isLineageListed(l: { policyIds?: readonly string[] | null }): boolean {
+  return !Array.isArray(l.policyIds) || l.policyIds.length > 0
+}
+
 /** 清單篩選：縣市（「All」不篩；中央層級在每個縣市都列）、分類、關鍵字（標題與摘要） */
 export function filterLineages(list: readonly Lineage[], opts: { region?: string; category?: string; q?: string }): Lineage[] {
   const q = (opts.q ?? '').trim().toLowerCase()

@@ -12,7 +12,7 @@ import { useGlobalState } from '../composables/useGlobalState'
 import { policyMatchesRegion } from '../lib/policy-region'
 import { policyYear } from '../lib/policy-date'
 import { isProgressCase } from '../lib/policy-chain'
-import { filterLineages, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
+import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
 
 /**
  * /analysis：政策脈絡一覽（#349，2026-10-06；原本叫「市政接力」，網址不變）。
@@ -30,7 +30,7 @@ useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(select
 /** 脈絡：中央層級的在每個縣市都列（全國的事每個縣市都受影響）；照層級（中央 → 縣市 → 鄉鎮）、地方、標題排 */
 const LEVEL_ORDER = { national: 0, county: 1, township: 2 } as const
 const lineageList = computed(() =>
-  filterLineages(lineages.value, { region: globalRegion.value, category: selectedCategory.value, q: searchTerm.value })
+  filterLineages(lineages.value.filter(isLineageListed), { region: globalRegion.value, category: selectedCategory.value, q: searchTerm.value })
     .slice()
     .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]
       || (a.region ?? '').localeCompare(b.region ?? '', 'zh-Hant-TW')

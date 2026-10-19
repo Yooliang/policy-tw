@@ -34,9 +34,10 @@ import { missingAncestors, partyInfoIds, partyInfoItems, type PartyRow, planPart
 import { changedElementFields, elementPhrase, POLICY_ELEMENT_LABEL, policyElementValues } from "./policy-elements.ts";
 import {
   changedLineageFields, HANDOVER_FIELDS, HANDOVER_TYPE_LABEL, type HandoverType, handoverValues, LINEAGE_LEVEL_LABEL, type LineageLevel,
-  LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS,
-  participantPhrase, participantValues,
+  LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, lineageIneligibleMessage, type LineageIneligibleReason, type LineageOwnedPolicy, lineagePolicyIneligibleReason,
+  lineageSamePersonMessage, isSamePersonSameTerm, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS, participantPhrase, participantValues, taipeiToday,
 } from "./lineage.ts";
+import { chunksOf } from "./in-chunks.ts";
 import { careerSourceNote } from "./politician-careers.ts";
 import { sourceWriteIsOnlyPath, writeSourcesAfterApply } from "./source-write.ts";
 import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
@@ -982,6 +983,69 @@ export async function resolveLineagePlace(
   return { region: county, sub_region: sub, admin_code: String(row.admin_code) };
 }
 
+/** 判斷一條政見能不能進脈絡要用到的欄位（policies 表的原值） */
+export interface LineagePolicyFacts {
+  id: string;
+  title?: string | null;
+  removed_at?: string | null;
+  politician_id?: string | null;
+  election_id?: number | null;
+}
+
+/**
+ * 這幾條政見裡，哪些不能歸入脈絡（維護者 2026-10-19：脈絡只收那一屆已投票且當選的政見，規則在 lineage.ts 的 lineagePolicyIneligibleReason）。
+ * 回傳只含不合格的，key 是小寫的政見 id；合格的不在裡面。查詢本身出錯就丟例外——落庫會當成技術性失敗重試，
+ * 交件前置檢查（apply-precheck.ts）自己接住、放行（不能讓系統的錯變成擋代理的理由）。
+ */
+export async function lineageIneligiblePolicies(
+  supabase: SupabaseLike, policies: ReadonlyArray<LineagePolicyFacts>, today: string = taipeiToday(),
+): Promise<Map<string, { reason: LineageIneligibleReason; message: string }>> {
+  const out = new Map<string, { reason: LineageIneligibleReason; message: string }>();
+  if (policies.length === 0) return out;
+  const electionIds = [...new Set(policies.map((p) => p.election_id).filter((x): x is number => typeof x === "number"))];
+  const politicianIds = [...new Set(policies.map((p) => p.politician_id).filter((x): x is string => typeof x === "string" && x !== ""))];
+  const dates = new Map<number, string>();
+  for (const chunk of chunksOf(electionIds)) {
+    // query-bounds: ok — id 來自這一批政見所屬的屆別，每段 IN_CHUNK 個，按主鍵取
+    const { data, error } = await supabase.from("elections").select("id, election_date").in("id", chunk);
+    throwIf(error, "elections lookup");
+    for (const r of (data ?? []) as Array<{ id: number; election_date: string }>) dates.set(Number(r.id), String(r.election_date));
+  }
+  const statuses = new Map<string, Array<string | null>>();
+  if (electionIds.length > 0) {
+    for (const chunk of chunksOf(politicianIds)) {
+      // query-bounds: ok — 人物 id 來自這一批政見（每段 IN_CHUNK 個）、屆別只有幾個，一個人一屆只有一兩筆
+      const { data, error } = await supabase.from("politician_elections").select("politician_id, election_id, candidacy_status")
+        .in("politician_id", chunk).in("election_id", electionIds);
+      throwIf(error, "politician_elections lookup");
+      for (const r of (data ?? []) as Array<{ politician_id: string; election_id: number; candidacy_status: string | null }>) {
+        const key = `${String(r.politician_id).toLowerCase()}|${r.election_id}`;
+        statuses.set(key, [...(statuses.get(key) ?? []), r.candidacy_status ?? null]);
+      }
+    }
+  }
+  for (const p of policies) {
+    const electionId = typeof p.election_id === "number" ? p.election_id : null;
+    const own = electionId !== null ? statuses.get(`${String(p.politician_id ?? "").toLowerCase()}|${electionId}`) ?? [] : [];
+    const electionDate = electionId !== null ? dates.get(electionId) ?? null : null;
+    const reason = lineagePolicyIneligibleReason({
+      policy: { removed_at: p.removed_at ?? null, election_id: electionId },
+      election_date: electionDate,
+      candidacy_statuses: own,
+    }, today);
+    if (reason) out.set(String(p.id).toLowerCase(), { reason, message: lineageIneligibleMessage(reason, { policyId: p.id, title: p.title, electionDate, statuses: own }) });
+  }
+  return out;
+}
+
+/** 一條脈絡現在的政見（沒被移除的）：判斷「加入、拿掉之後整條脈絡是不是只剩同一人同一屆」要用。查詢出錯就丟例外（同 lineageIneligiblePolicies） */
+export async function loadLineageMembers(supabase: SupabaseLike, lineageId: string): Promise<LineageOwnedPolicy[]> {
+  // query-bounds: ok — 一條脈絡的政見最多幾十條
+  const { data, error } = await supabase.from("policies").select("id, title, politician_id, election_id").eq("lineage_id", lineageId).is("removed_at", null).limit(500);
+  throwIf(error, "lineage members lookup");
+  return (data ?? []) as LineageOwnedPolicy[];
+}
+
 /** 交了候選清查任務的脈絡或關聯並落庫＝這一份清單看過了；跟 no_change confirmed 寫同一列 */
 async function recordCandidateReview(supabase: SupabaseLike, row: ContributionRow, note: string | null): Promise<boolean> {
   const parsed = parseCandidateTaskId(row.task_id ?? row.payload.task_id);
@@ -1033,12 +1097,13 @@ async function applyLineage(supabase: SupabaseLike, row: ContributionRow): Promi
   if (!lineageId && !nl) return { status: "failed", message: "lineage 要帶 lineage_id（歸入既有的）或 new_lineage（建一條新的）" };
 
   const ids = [...attach, ...detach];
-  const policies = new Map<string, { id: string; title: string; removed_at: string | null; lineage_id: string | null }>();
+  type PolicyRow = { id: string; title: string; removed_at: string | null; lineage_id: string | null; politician_id?: string | null; election_id?: number | null };
+  const policies = new Map<string, PolicyRow>();
   if (ids.length > 0) {
     // query-bounds: ok — 一筆最多 2×LINEAGE_MAX_POLICIES 條（schema 擋）
-    const { data, error } = await supabase.from("policies").select("id, title, removed_at, lineage_id").in("id", ids).limit(100);
+    const { data, error } = await supabase.from("policies").select("id, title, removed_at, lineage_id, politician_id, election_id").in("id", ids).limit(100);
     throwIf(error, "policies read");
-    for (const r of (data ?? []) as Array<{ id: string; title: string; removed_at: string | null; lineage_id: string | null }>) policies.set(String(r.id).toLowerCase(), r);
+    for (const r of (data ?? []) as PolicyRow[]) policies.set(String(r.id).toLowerCase(), r);
   }
   const missing = ids.filter((id) => !policies.has(id));
   if (missing.length > 0) return { status: "failed", message: `找不到政見 ${missing.join("、")}` };
@@ -1063,6 +1128,23 @@ async function applyLineage(supabase: SupabaseLike, row: ContributionRow): Promi
       message: `政見 ${elsewhere.map((id) => `「${policies.get(id)!.title}」（在脈絡 ${policies.get(id)!.lineage_id}）`).join("、")} 已經在另一條脈絡；` +
         "要改歸屬，先交一筆 lineage 對那條脈絡用 detach_policy_ids 拿掉，再歸入這條",
     };
+  }
+  // 脈絡只收那一屆已投票且當選的政見（維護者 2026-10-19，協議 1.99.0）：落庫當下再判一次（交件之後那一屆的狀態可能變了），
+  // 判準跟交件前置檢查同一支（lineageIneligiblePolicies），所以不會比前置檢查寬。已經在這條脈絡裡的不再問（本來就不動它）；
+  // detach_policy_ids 不受限——拿掉不合格的政見正是這條規則要的動作。
+  const toAttach = attach.filter((id) => String(policies.get(id)!.lineage_id ?? "").toLowerCase() !== lineageId);
+  const ineligible = await lineageIneligiblePolicies(supabase, toAttach.map((id) => policies.get(id)!));
+  if (ineligible.size > 0) {
+    return { status: "failed", message: [...ineligible.values()].map((x) => x.message).join("；") };
+  }
+  // 同一人同一屆的多條政見不是脈絡（維護者 2026-10-19，同一個協議版 1.99.0）：建新脈絡時 policy_ids 全都是同一人同一屆就擋；
+  // 歸入既有脈絡時，加入、拿掉之後整條脈絡不能只剩同一人同一屆（只拿掉不歸入的不查——清理不合格的政見不能被這條擋住）
+  if (attach.length > 0) {
+    const detachSet = new Set(detach);
+    const after = new Map<string, LineageOwnedPolicy>();
+    for (const m of lineageId ? await loadLineageMembers(supabase, lineageId) : []) if (!detachSet.has(String(m.id).toLowerCase())) after.set(String(m.id).toLowerCase(), m);
+    for (const id of attach) after.set(id, policies.get(id)!);
+    if (isSamePersonSameTerm([...after.values()])) return { status: "failed", message: lineageSamePersonMessage([...after.values()]) };
   }
 
   const done: string[] = [];

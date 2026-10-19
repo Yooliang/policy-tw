@@ -18,7 +18,7 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead, DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import {
-  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, hasBeenRepresentative, LEVEL_LABEL, LINEAGE_NAME,
+  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, LEVEL_LABEL, LINEAGE_NAME,
   lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
 } from '../lib/lineage'
 import type { Policy } from '../types'
@@ -97,7 +97,8 @@ usePageHead({
     : '一件事在某一層級、某一地方的來龍去脈。'),
   type: 'article',
   // firebase.json 把 /lineage/** rewrite 到殼檔回 200，不存在的 id 也是 200；確定沒資料就標 noindex，免得被當 soft 404 收錄
-  noindex: () => !loading.value && !lineageLoading.value && !lineage.value,
+  // 空脈絡（政見都被拿掉了）也標 noindex：頁面照常 200、舊網址不 404，只是不收錄（lib/lineage.ts 的 isLineageListed）
+  noindex: () => !loading.value && !lineageLoading.value && (!lineage.value || !isLineageListed(lineage.value)),
   jsonLd: () => lineage.value ? {
     '@context': 'https://schema.org',
     '@type': 'CreativeWork',
