@@ -157,7 +157,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
             <span class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
               <span>政見 {{ lineageCounts(l).policies }} 條</span>
               <span>參與者 {{ lineageCounts(l).people }} 位</span>
-              <span>交接 {{ lineageCounts(l).handovers }} 筆</span>
+              <span v-if="lineageCounts(l).handovers > 0">交接 {{ lineageCounts(l).handovers }} 筆</span>
               <span>上下級 {{ lineageCounts(l).links }} 條</span>
             </span>
           </router-link>

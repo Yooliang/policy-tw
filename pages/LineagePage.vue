@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 政策脈絡頁（#349，/lineage/:lineageId）：一件事在某一層級、某一地方的來龍去脈。
- *   前後任：時間軸（一任一任的政見，交接放在後任前面）
+ *   前後任：時間軸（一任一任的政見，交接放在後任前面；交接區只在有交接紀錄、或首長那一任已卸任該有交接時才出現，#670）
  *   同級多人：參與者與角色（官方紀錄為準；本人宣稱另外標）
  *   上下級：這條脈絡的上級、下級脈絡
  * 正見.tw 由 Worker 邊緣渲染（cloudflare/ssr-worker.js），內容在 HTML 裡、連結都是真的 <a href>，canonical 指正見.tw。
@@ -18,8 +18,8 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead, DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { policyStatusLabel } from '../composables/usePageHead'
 import {
-  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, LEVEL_LABEL, LINEAGE_NAME,
-  lineagePath, lineagePlace, LINK_LABEL, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
+  BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, hasBeenRepresentative, LEVEL_LABEL, LINEAGE_NAME,
+  lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
 } from '../lib/lineage'
 import type { Policy } from '../types'
 
@@ -63,8 +63,20 @@ const nameOf = (id: string) => personById.value.get(id)?.name
 const electionDates = computed(() => new Map(elections.value.map((e) => [e.id, e.electionDate])))
 const electionShortName = (id: number | null) => (id === null ? null : elections.value.find((e) => e.id === id)?.shortName ?? null)
 
+// 今天（ISO 日期，同資料庫 CURRENT_DATE 用 UTC）：判斷「那一任卸任了沒」「投票日過了沒」
+const today = new Date().toISOString().slice(0, 10)
+
+/**
+ * 交接區什麼時候出現：已經有交接紀錄；或脈絡裡有首長那一任的政見、而那一任已卸任（跟派交接任務同一個條件，lib/lineage.ts）。
+ * 兩者都沒有（例：選前同場對手的承諾、還在任的首長、民意代表的提案）整個交接區不出現，政見照列。
+ */
+const showHandovers = computed(() => !!lineage.value && (lineage.value.handovers.length > 0
+  || needsHandoverRecord(lineagePolicies.value, (id) => personById.value.get(id), electionDates.value, today)))
+
 const timeline = computed(() => (lineage.value ? buildTimeline(lineagePolicies.value, lineage.value.handovers, electionDates.value) : []))
-const people = computed(() => (lineage.value ? participantRows(lineage.value.participants, lineagePolicies.value, nameOf) : []))
+const people = computed(() => (lineage.value
+  ? participantRows(lineage.value.participants, lineagePolicies.value, nameOf, (id) => hasBeenRepresentative(personById.value.get(id), electionDates.value, today))
+  : []))
 const uppers = computed(() => lineage.value?.links.filter((k) => k.direction === 'upper') ?? [])
 const lowers = computed(() => lineage.value?.links.filter((k) => k.direction === 'lower') ?? [])
 
@@ -81,7 +93,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => (lineage.value
 usePageHead({
   title: () => (lineage.value ? `${lineage.value.title}｜${LINEAGE_NAME}` : LINEAGE_NAME),
   description: () => (lineage.value
-    ? `${place.value}「${lineage.value.title}」的政策脈絡：${lineage.value.summary ? `${lineage.value.summary}。` : ''}${lineagePolicies.value.length} 條政見、${lineage.value.handovers.length} 筆前後任交接、${lineage.value.links.length} 條上下級關聯，每一筆附出處。`
+    ? `${place.value}「${lineage.value.title}」的政策脈絡：${lineage.value.summary ? `${lineage.value.summary}。` : ''}${lineagePolicies.value.length} 條政見、${lineage.value.handovers.length > 0 ? `${lineage.value.handovers.length} 筆前後任交接、` : ''}${lineage.value.links.length} 條上下級關聯，每一筆附出處。`
     : '一件事在某一層級、某一地方的來龍去脈。'),
   type: 'article',
   // firebase.json 把 /lineage/** rewrite 到殼檔回 200，不存在的 id 也是 200；確定沒資料就標 noindex，免得被當 soft 404 收錄
@@ -128,9 +140,10 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
         <div class="lg:col-span-2 space-y-6">
-          <!-- 前後任：時間軸 -->
+          <!-- 前後任：時間軸（沒有交接、也沒到該交接的時候只列政見，標題不講交接） -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-timeline">
-            <h2 class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />時間軸：前後任怎麼交接</h2>
+            <h2 v-if="showHandovers" class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />時間軸：前後任怎麼交接</h2>
+            <h2 v-else class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />脈絡裡的政見</h2>
             <ol class="relative border-l-2 border-slate-200 ml-2 space-y-6">
               <li v-for="item in timeline" :key="item.key" class="pl-6 relative">
                 <template v-if="item.kind === 'term'">
@@ -173,7 +186,7 @@ usePageHead({
                 </template>
               </li>
             </ol>
-            <p v-if="lineage.handovers.length === 0" class="mt-5 text-sm text-slate-500 border-t border-slate-100 pt-4">
+            <p v-if="showHandovers && lineage.handovers.length === 0" class="mt-5 text-sm text-slate-500 border-t border-slate-100 pt-4">
               還沒有交接紀錄。
             </p>
           </section>
@@ -197,7 +210,7 @@ usePageHead({
                   </p>
                   <p v-if="!row.official && !row.claim" class="text-xs text-slate-500">
                     <span class="inline-block px-2 py-0.5 rounded font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">政見提出者</span>
-                    <span class="ml-1">還沒有官方紀錄的角色</span>
+                    <span v-if="row.representative" class="ml-1">還沒有官方紀錄的角色</span>
                   </p>
                   <p v-if="row.policyCount > 0" class="text-xs text-slate-500">在這條脈絡裡有 {{ row.policyCount }} 條政見</p>
                   <p v-if="row.official?.note || row.claim?.note" class="text-xs text-slate-500 break-words">{{ row.official?.note || row.claim?.note }}</p>
