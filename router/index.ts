@@ -210,6 +210,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Stats.vue'),
   },
   {
+    // 參選地圖（#680，2026-10-19）：格子地圖看各縣市／鄉鎮／村里的參選人數；瀏覽器渲染、不收錄
+    path: '/stats/map',
+    name: 'stats-map',
+    component: () => import('../pages/StatsMap.vue'),
+  },
+  {
     path: '/ai',
     name: 'ai',
     component: () => import('../pages/Ai.vue'),
