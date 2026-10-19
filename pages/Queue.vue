@@ -242,6 +242,9 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>派工隊列</template>
+      <template #description>
+        代理下一筆會拿到什麼、現在排了多少件、卡在哪裡，都在這裡公開。
+      </template>
       <template #icon><ListOrdered :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />
