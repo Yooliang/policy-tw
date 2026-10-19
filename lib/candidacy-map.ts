@@ -1,11 +1,12 @@
 /**
- * 參選地圖（/stats/map，#680）的純邏輯：層級切換、座標與人數合併、顏色分段、連結。
+ * 參選地圖（/stats/map，#680）的純邏輯：層級切換、點陣與人數合併、顏色分段、連結。
  *
- * 三層：全國（縣市格）→ 縣市（鄉鎮市區格）→ 鄉鎮市區（村里格）。
- * 座標是預先產生的靜態檔（scripts/build-tw-tile-grid.ts → data/tw-grid-*.json），人數來自資料庫函式
+ * 三層：全國（縣市形狀）→ 縣市（鄉鎮市區形狀）→ 鄉鎮市區（村里形狀）。
+ * 形狀是預先把真實邊界點陣化的靜態檔（scripts/build-tw-raster.ts → data/tw-raster/，點陣化的純函式在 lib/raster-grid.ts），
+ * 人數來自資料庫函式
  * candidacy_map（supabase/migrations/20261019090000_candidacy_map.sql）。畫面只在 pages/StatsMap.vue。
  */
-import { appendTiles } from './tile-layout'
+import type { DecodedRaster } from './raster-grid'
 import { electionPath } from './election-regions'
 
 export type MapLevel = 'county' | 'town' | 'village'
@@ -18,9 +19,6 @@ export interface MapView {
 }
 
 export const NATIONAL_VIEW: MapView = { level: 'county' }
-
-/** 靜態座標檔的一列：[代碼, 名稱, x, y] */
-export type GridRow = [string, string, number, number]
 
 /** candidacy_map() 回傳的一列（bigint／integer 經 PostgREST 可能是字串，先過 normalizeRows） */
 export interface CountRow {
@@ -35,8 +33,8 @@ export interface CountRow {
 export interface MapUnit {
   code: string
   name: string
-  x: number
-  y: number
+  /** 在點陣裡的序號（格值）；資料庫有、點陣沒有的行政區是 -1（只出現在清單） */
+  idx: number
   candidates: number
   /** 中選會登記人數；沒有對得上的列＝null（畫面不顯示） */
   registered: number | null
@@ -45,9 +43,10 @@ export interface MapUnit {
 }
 
 export interface BuiltMap {
+  /** 點陣裡的行政區，依序號排（units[i].idx === i） */
   units: MapUnit[]
-  cols: number
-  rows: number
+  /** 資料庫有、點陣沒有的行政區（官方清單與圖資不同步時才會有），只列在清單 */
+  unshaped: MapUnit[]
   /** 這一層人數最大值（顏色分段的上界） */
   max: number
 }
@@ -116,36 +115,21 @@ export function normalizeRows(rows: ReadonlyArray<Record<string, unknown>>): Cou
 }
 
 /**
- * 把座標與人數合起來。
- * - 以資料庫的名單為準（官方現行行政區）：座標檔有、資料庫沒有的（區劃已調整的舊代碼）不畫。
- * - 資料庫有、座標檔沒有的（新設的村里），補在外框的空格，沒有空格就開新的一列。
- * - 名稱優先用資料庫的（官方現行寫法），沒有才用座標檔的。
+ * 把點陣與人數合起來。
+ * - 名稱與人數以資料庫為準（官方現行行政區與寫法）；點陣有、資料庫沒有的代碼人數當 0、名稱用代碼。
+ * - 資料庫有、點陣沒有的，放進 unshaped，不畫格子。
  */
-export function buildMap(grid: ReadonlyArray<GridRow>, counts: ReadonlyArray<CountRow>): BuiltMap {
+export function buildMap(raster: Pick<DecodedRaster, 'codes'>, counts: ReadonlyArray<CountRow>): BuiltMap {
   const byCode = new Map(counts.map((c) => [c.code, c]))
-  const known = grid.filter((g) => byCode.has(g[0]))
-  const cells = known.map((g) => ({ key: g[0], x: g[2], y: g[3] }))
-  const have = new Set(cells.map((c) => c.key))
-  const missing = counts.filter((c) => !have.has(c.code)).map((c) => c.code)
-  const laid = missing.length ? appendTiles(cells, missing) : {
-    cells,
-    cols: cells.reduce((m, c) => Math.max(m, c.x + 1), 0),
-    rows: cells.reduce((m, c) => Math.max(m, c.y + 1), 0),
+  const unit = (code: string, idx: number): MapUnit => {
+    const row = byCode.get(code)
+    return { code, name: row?.name || code, idx, candidates: row?.candidates ?? 0, registered: row?.registered ?? null, seats: row?.seats ?? null }
   }
-  const units: MapUnit[] = laid.cells.map((c) => {
-    const row = byCode.get(c.key)!
-    return {
-      code: c.key,
-      name: row.name || known.find((g) => g[0] === c.key)?.[1] || c.key,
-      x: c.x,
-      y: c.y,
-      candidates: row.candidates,
-      registered: row.registered,
-      seats: row.seats,
-    }
-  })
-  units.sort((a, b) => a.y - b.y || a.x - b.x)
-  return { units, cols: laid.cols, rows: laid.rows, max: units.reduce((m, u) => Math.max(m, u.candidates), 0) }
+  const units = raster.codes.map((code, idx) => unit(code, idx))
+  const have = new Set(raster.codes)
+  const unshaped = counts.filter((c) => !have.has(c.code)).map((c) => unit(c.code, -1))
+  const max = [...units, ...unshaped].reduce((m, u) => Math.max(m, u.candidates), 0)
+  return { units, unshaped, max }
 }
 
 /**
