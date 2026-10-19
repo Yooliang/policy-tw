@@ -228,7 +228,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </template>
       <BoardNav current="queue" />
     </Hero>
-  <main class="max-w-5xl mx-auto px-4 py-6 mt-4 text-sm text-slate-700 space-y-6">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">
     <div class="flex items-center justify-between gap-2">
       <p class="text-slate-400 tabular-nums">{{ refreshedAt ? `更新於 ${hms(refreshedAt)}` : '' }}</p>
       <div class="flex items-center gap-2">
@@ -245,20 +245,19 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
     <p v-else-if="state === null" class="text-slate-400">載入中…</p>
 
     <template v-if="state && !failed">
-      <section class="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <div v-for="c in cards" :key="c.label" class="rounded border border-slate-200 px-3 py-2">
+      <section class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        <div v-for="c in cards" :key="c.label" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <div class="text-xs text-slate-500">{{ c.label }}</div>
           <div class="text-2xl tabular-nums">{{ fmt(c.n) }}</div>
         </div>
-      </section>
-      <section class="grid gap-3">
-        <div class="rounded border border-slate-200 px-3 py-2">
+        <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <div class="text-xs text-slate-500">24 小時實際派出</div>
-          <div class="text-lg tabular-nums">{{ fmt(dispatched24) }}</div>
+          <div class="text-2xl tabular-nums">{{ fmt(dispatched24) }}</div>
         </div>
       </section>
 
-      <section>
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+        <h3 class="font-black text-navy-900 mb-3">各狀態分布（{{ groupBy === 'type' ? '依類型' : '依來源' }}）</h3>
         <div class="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
           <span v-for="s in STATUSES" :key="s.key" class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-sm" :style="{ background: s.bar }"></i>{{ s.label }}</span>
         </div>
@@ -275,8 +274,8 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
         </div>
       </section>
 
-      <section>
-        <h2 class="mb-1 font-medium">隊頭前 {{ state.head.length }} 名</h2>
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+        <h2 class="font-black text-navy-900 mb-3">隊頭前 {{ state.head.length }} 名</h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[44rem]">
             <thead class="text-left text-xs text-slate-500">
@@ -307,8 +306,8 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
         </div>
       </section>
 
-      <section v-if="parkedTotal > 0">
-        <h2 class="mb-1 font-medium">停放中 {{ fmt(parkedTotal) }} 筆</h2>
+      <section v-if="parkedTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+        <h2 class="font-black text-navy-900 mb-3">停放中 {{ fmt(parkedTotal) }} 筆</h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[36rem]">
             <thead class="text-left text-xs text-slate-500">
@@ -333,8 +332,8 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
         </div>
       </section>
 
-      <section v-if="overvoted && (overTotal > 0 || overItems.length)">
-        <h2 class="mb-1 font-medium">投太多輪 <span class="ml-2 text-xs font-normal text-slate-500 tabular-nums">平均每筆 {{ num2(overvoted.baseline) }} 票；超過 {{ num2(overvoted.flag_votes) }} 票標出、超過 {{ num2(overvoted.stop_votes) }} 票停派；共 {{ fmt(overTotal) }} 筆</span></h2>
+      <section v-if="overvoted && (overTotal > 0 || overItems.length)" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+        <h2 class="font-black text-navy-900 mb-3">投太多輪 <span class="ml-2 text-xs font-normal text-slate-500 tabular-nums">平均每筆 {{ num2(overvoted.baseline) }} 票；超過 {{ num2(overvoted.flag_votes) }} 票標出、超過 {{ num2(overvoted.stop_votes) }} 票停派；共 {{ fmt(overTotal) }} 筆</span></h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[44rem]">
             <thead class="text-left text-xs text-slate-500">
@@ -367,23 +366,23 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </section>
 
       <section class="grid gap-6 md:grid-cols-2">
-        <div>
-          <h2 class="mb-1 font-medium">24 小時實際派出</h2>
+        <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+          <h2 class="font-black text-navy-900 mb-3">24 小時實際派出</h2>
           <p v-if="!disp24Rows.length" class="text-slate-400">沒有</p>
           <ul class="space-y-0.5">
             <li v-for="r in disp24Rows" :key="r.key" class="flex justify-between gap-2"><span class="truncate">{{ r.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(r.n) }}</span></li>
           </ul>
         </div>
-        <div>
-          <h2 class="mb-1 font-medium">可派的距上次派出</h2>
+        <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+          <h2 class="font-black text-navy-900 mb-3">可派的距上次派出</h2>
           <ul class="space-y-0.5">
             <li v-for="g in AGE" :key="g.key" class="flex justify-between gap-2"><span>{{ g.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(state.age_buckets[g.key]) }}</span></li>
           </ul>
         </div>
       </section>
 
-      <section>
-        <h2 class="mb-1 font-medium">驗證佇列</h2>
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+        <h2 class="font-black text-navy-900 mb-3">驗證佇列</h2>
         <p class="mb-2 tabular-nums">等驗證 {{ fmt(state.verify.total) }}　可派 {{ fmt(state.verify.eligible) }}</p>
         <ul class="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
           <li v-for="v in state.verify.by_type" :key="v.contribution_type" class="flex justify-between gap-2 border-b border-slate-100 py-0.5">
