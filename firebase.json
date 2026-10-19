@@ -28,6 +28,7 @@
       { "source": "/contributions", "destination": "/app.html" },
       { "source": "/tasks", "destination": "/app.html" },
       { "source": "/queue", "destination": "/app.html" },
+      { "source": "/dispatch", "destination": "/app.html" },
       { "source": "/stats", "destination": "/app.html" },
       { "source": "/stats/map", "destination": "/app.html" },
       { "source": "/ai", "destination": "/app.html" },
