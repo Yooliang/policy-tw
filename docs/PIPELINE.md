@@ -145,7 +145,7 @@ stateDiagram-v2
 | `policy_source_missing`／`policy_validity` | 政見缺出處／疑似不是政見 | `correction` 補出處／`removal` |
 | `progress_stale` | 90 天沒進度 | `policy_progress`／`candidacy` 補結果 |
 | `candidacy_source_missing` | 參選紀錄沒來源 | `candidacy` |
-| `election_result_missing` | 已投票選舉缺結果 | `candidacy` 帶 `election_result`（可用 `system-one?action=extract` 讓 Jev 選值） |
+| `election_result_missing` | 已投票選舉缺結果；2026-10-19 起只派比對失敗的（名單查無、同名多筆、我們標的跟中選會相反 `target.kind`＝`result_mismatch`；中選會唯一對上且選區已開完的由系統直接寫，見 `cec_results_auto_apply`） | `candidacy` 帶 `election_result`（可用 `system-one?action=extract` 讓 Jev 選值） |
 | `candidate_status_stale` | 登記截止後還標傳聞 | `correction` 改 `candidate_status`（傳聞→登記／不參選走一般級 2 票） |
 | `policy_election_missing`／`policy_election_mismatch` | 政見沒屆別／屆別跟提出日期對不上 | `correction` 改 `election_id` |
 | `duplicate_politician` | 同名同縣市（或同出生年）的兩筆人物 | `merge_politician`（4／6／8 票，軟合併可整筆還原） |

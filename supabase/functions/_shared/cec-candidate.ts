@@ -98,6 +98,33 @@ export function withoutFutureResults(list: readonly CecCandidacy[], today = new 
   return list.map((c) => (c.vote_date && c.vote_date > today ? { ...c, election_result: null } : c));
 }
 
+/**
+ * 整場選舉結果底定要等幾個台北日曆日（投票日 + 這麼多天）。SQL 鏡像：cec_results_settle_days()（20261019100000，守門測試對齊）。
+ * 為什麼：中選會人名查詢（candidates/query）的 is_victor 只有當選才給 "*"，開票途中還沒標的人跟落選長得一模一樣；
+ * `withoutFutureResults` 只擋投票日在今天之後的，投票日當天（台北）與隔天凌晨都還會把「沒標」當「落選」（維護者 2026-10-19，#678 開票夜守門）。
+ */
+export const RESULT_SETTLE_DAYS = 3;
+
+/** 台北日曆日 YYYY-MM-DD（台北沒有夏令時間，固定 UTC+8） */
+export function taipeiDate(now: Date = new Date()): string {
+  return new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** 這場選舉的結果底定了嗎：台北今天 ≥ 投票日 + RESULT_SETTLE_DAYS（投票日格式不對一律當沒底定） */
+export function cecResultsSettled(voteDate: string | null | undefined, now: Date = new Date()): boolean {
+  if (!voteDate || !/^\d{4}-\d{2}-\d{2}/.test(voteDate)) return false;
+  const settleOn = new Date(Date.parse(`${voteDate.slice(0, 10)}T00:00:00Z`) + RESULT_SETTLE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  return taipeiDate(now) >= settleOn;
+}
+
+/**
+ * 沒底定的選舉，中選會名單上的「當選與否」一律當作未知（election_result＝null）：投票日當天與之後 RESULT_SETTLE_DAYS 天內，
+ * 沒標當選的人可能只是還沒開完。涵蓋 withoutFutureResults（未來的選舉一定沒底定）。
+ */
+export function withoutUnsettledResults(list: readonly CecCandidacy[], now: Date = new Date()): CecCandidacy[] {
+  return list.map((c) => (cecResultsSettled(c.vote_date, now) ? c : { ...c, election_result: null }));
+}
+
 /** 挑出某一場選舉（elections.id）的那一筆；同一場多筆（例如立委區域與不分區）回第一筆 */
 export function pickByElectionId(list: readonly CecCandidacy[], electionId: number): CecCandidacy | null {
   return list.find((c) => c.election_id === electionId) ?? null;

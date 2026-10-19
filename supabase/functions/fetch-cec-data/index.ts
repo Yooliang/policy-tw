@@ -27,7 +27,7 @@ const corsHeaders = {
 };
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { CEC_DATA_URL, CEC_QUERY_URL, normalizeCandidacies, withoutFutureResults } from "../_shared/cec-candidate.ts";
+import { CEC_DATA_URL, CEC_QUERY_URL, normalizeCandidacies, withoutUnsettledResults } from "../_shared/cec-candidate.ts";
 import { loadElections } from "../_shared/elections.ts";
 import { CITY_CODES, CITY_NAME_BY_CODE, normalizeCityName as normalizeCity } from "../_shared/cec-city-codes.ts";
 import {
@@ -115,7 +115,7 @@ async function handleByName(name: string, electionId?: number): Promise<Response
   const raw = await res.json();
   // 中選會的場次用投票日對到我們的選舉 id（#344 第二階段 A）：選舉清單查 elections 表
   const electionList = await loadElections(createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!));
-  const all = withoutFutureResults(normalizeCandidacies(raw?.cand_data_list ?? [], electionList));
+  const all = withoutUnsettledResults(normalizeCandidacies(raw?.cand_data_list ?? [], electionList));
   const picked = electionId ? all.filter((c) => c.election_id === electionId) : all;
 
   // 指定屆別時順便把該場的得票抓回來給代理對照（票數站上不顯示、協議不收，資料表的票數欄位 2026-10-07 已刪）

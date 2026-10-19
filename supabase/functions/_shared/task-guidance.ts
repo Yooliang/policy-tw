@@ -127,7 +127,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "一律用 candidacy 重交同一人同一屆，缺的那一欄補上、其餘欄位照那一屆的名冊填（candidate_status 不要順手改；party 填那一屆的推薦政黨，不要照抄他現在的政黨——人會換黨），查不到就 no_change 說明你找過哪裡。" +
     "選區寫法：縣市議員「第NN選舉區」；鄉鎮市民代表、區民代表 sub_region 填鄉鎮市區、electoral_district 填「第NN選舉區」（缺的是 electoral_district 時，target.cec_districts 是名冊那一列的選舉區）；區域立委「第NN選區」；不分區與原住民立委 region 填「全國」、electoral_district 填「不分區」「平地原住民」或「山地原住民」。" +
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
-    "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。 " +
+    "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。中選會名冊唯一對上而且那個選區已開完的，伺服器自己寫了（協議 1.100.0），派到你的是系統寫不了的（選區沒開完、同名多筆、名額沒登錄）。 " +
     // 補號次（2026-10-08）
     "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。" +
     "**target.kind＝cand_no_recheck**：同一個號次單位裡有重複或跳號，target.units 逐單位列出異常，要對公告重查，詳細做法同樣看 hint。",
@@ -135,12 +135,15 @@ export const TASK_GUIDANCE: Record<string, string> = {
   election_result_missing:
     "我們沒有這個人那場已投票選舉的結果——可能是參選紀錄在、結果空白（名下有政見的人），也可能是中選會當選名單上有他、我們連那一屆的參選紀錄都沒有（target.record_missing）。" +
     "到中選會查該選區結果，用 candidacy 補 election_result＝elected／not_elected（得票數、得票率不收，不用查）。" +
-    "**這筆是承諾追蹤的前提**——不知道有沒有當選，就沒辦法問承諾兌現了沒有。查不到官方結果不要猜，用 no_change。",
+    "**這筆是承諾追蹤的前提**——不知道有沒有當選，就沒辦法問承諾兌現了沒有。查不到官方結果不要猜，用 no_change。" +
+    "（協議 1.100.0）能跟中選會名單唯一對上、選區又開完的，伺服器自己寫了；派到你的是比對失敗的：名單查無、同名多筆，或 target.kind＝result_mismatch——我們標的跟中選會名單相反，系統不覆蓋，" +
+    "請核對是不是同一個人、哪一邊錯：我們錯就用 candidacy 改 election_result，名單有誤或是別人就用 no_change 附你查的網址。",
 
   // 整批補選舉結果（2026-10-06）：一個單位一件、一筆交完。系統票是「每一位都對得上中選會名單」才投，
   // 所以代理要做的是逐位核對、只交核對過的；對不上的留在 note，別猜
   election_results_missing:
     "這是**一整個單位**（一屆、一種選舉、一個縣市；村里長與代表到鄉鎮市區）還沒補的選舉結果，名單在 items：每一位附系統比對到的中選會那一列（cec），**那是線索不是答案**。" +
+    "（協議 1.100.0）中選會名單唯一對上、而且選區已開完的，伺服器自己寫了；留給你的是系統確認不了的（應選名額沒登錄、當選數對不上席次、同一位被我們兩筆對到）。" +
     "打開中選會選舉資料庫這個單位的結果表（db.cec.gov.tw，依屆別、選舉、縣市點進去），逐位核對：是不是同一個人（同名不同人看選區、村里、出生年）、當選還是落選。" +
     "核對過的交進**一筆** election_results：election_id／election_type／region／sub_region 照 target 帶，items 每位一項 {politician_election_id, election_result：elected 或 not_elected}。" +
     "**核對不了、或不是同一個人的不要放進 items**，在 note 寫是哪幾位、為什麼——系統會逐位跟中選會名單比，整批都對得上才投系統票，放一位猜的進來整批就要多等一張票。" +

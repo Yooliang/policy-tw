@@ -25,6 +25,7 @@ import { shapeTaskCurrent, shapeVerifyCurrent } from "./task-context.ts";
 import { applyContribution } from "./apply-contribution.ts";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
 import { planRevert } from "./edit-history.ts";
+import { taipeiDate } from "./cec-candidate.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
 import { summarizeContribution } from "./contribution-summary.ts";
 
@@ -224,6 +225,7 @@ function seedCandidacies() {
       { id: 103, election_id: 2022, election_type: "村里長", candidacy_status: "not_elected", politician_id: "p3" },
     ],
     edit_history: [],
+    elections: [{ id: 2022, election_date: "2022-11-26" }],
   };
 }
 const row = (payload: unknown, id = "c-1") => ({ id, contribution_type: ELECTION_RESULTS_TYPE as never, payload: payload as Record<string, unknown>, source_urls: SRC, note: null, agent_name: "tester", contributor_url: null });
@@ -246,6 +248,21 @@ Deno.test("落庫：結果空白的寫進去、每一位一筆 edit_history（�
   // 同一份再交一次：都補過了 → superseded
   const again = await applyContribution(fake.client, row(PAYLOAD, "c-2"));
   assertEquals(again.status, "superseded");
+});
+
+Deno.test("落庫守門：投票日當天（台北日期）還沒過，不寫；過了才寫（開票夜守門，#678）", async () => {
+  const today = taipeiDate();
+  const yesterday = taipeiDate(new Date(Date.now() - 86_400_000));
+  const tomorrow = taipeiDate(new Date(Date.now() + 86_400_000));
+  for (const [voteDate, written] of [[tomorrow, false], [today, false], [yesterday, true]] as const) {
+    const seed = seedCandidacies();
+    seed.elections = [{ id: 2022, election_date: voteDate }];
+    const fake = createFakeSupabase(seed);
+    const out = await applyContribution(fake.client, row(PAYLOAD, `c-${voteDate}`));
+    assertEquals(out.status === "applied", written, `投票日 ${voteDate}：${out.status} ${out.message}`);
+    assertEquals(fake.db.politician_elections.some((r) => r.candidacy_status === "elected"), written, "沒過投票日就一筆都不能寫");
+    assertEquals(fake.db.edit_history.length > 0, written);
+  }
 });
 
 // ── 5. 任務與驗證項 ─────────────────────────────────────────────────
