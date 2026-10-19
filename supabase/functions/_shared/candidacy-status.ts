@@ -40,6 +40,9 @@ export function taipeiToday(now: Date = new Date()): string {
  *      #345 後續的收窄）。這一筆原本就是 declared 的重交 confirmed 原樣不動——不能因為一件不相干的任務把早期匯入的值改掉
  *   ④ registered／qualified → filed；withdrawn／not_running → withdrawn；likely → considering；elected／defeated → 結果
  *   ⑤ 傳聞（rumored）與空值 → null：不收傳聞，呼叫端不寫狀態
+ * 例外（協議 1.98.0）：`explicitCorrection`（落庫端 applyCorrection 傳 true）時，withdrawn／not_running 直接回 withdrawn，不套規則 ②。
+ *   更正是有人明講「這個人沒參選／退選」，規則 ② 把它換算回 not_elected，等於現值，就被判成 superseded 吞掉
+ *   （8d5c8372「劉雁祿」的「沒參選」更正就是這樣不見的）。candidacy 重交照舊套規則 ②。
  * `converted`＝這次把 confirmed 換成了「已登記」（回覆講一聲）。
  */
 export function nextCandidacyStatus(input: {
@@ -47,8 +50,11 @@ export function nextCandidacyStatus(input: {
   electionResult?: string | null;
   listPublished: boolean;
   existing?: string | null;
+  /** 這是 correction 明講要改的值（不是 candidacy 重交）；只放寬 withdrawn／not_running 那一條 */
+  explicitCorrection?: boolean;
 }): { status: CandidacyStatus | null; converted: boolean } {
-  const { candidateStatus, electionResult, listPublished, existing } = input;
+  const { candidateStatus, electionResult, listPublished, existing, explicitCorrection } = input;
+  if (explicitCorrection && (candidateStatus === "withdrawn" || candidateStatus === "not_running")) return { status: "withdrawn", converted: false };
   if (electionResult === "elected" || electionResult === "not_elected") return { status: electionResult, converted: false };
   if (existing === "elected" || existing === "not_elected") return { status: existing, converted: false };
   switch (candidateStatus) {

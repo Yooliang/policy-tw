@@ -13,12 +13,17 @@
  * 這裡只管畫。選區（議員的選舉區、村里長的村里）不在這裡選：跟其他頁籤一樣放在選舉頁右側面板（真連結，網址 district 參數照舊）。
  * 表比畫面寬時整張左右捲動，第一欄（類別）固定在左邊；手機上第一欄縮窄。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Check, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
+import { Copy, Maximize2, Minimize2, Swords } from 'lucide-vue-next'
 import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
 import PolicyElements from '../../components/PolicyElements.vue'
+import MdDrawer, { type MdPick } from '../../components/MdDrawer.vue'
+import { comparisonMarkdown } from '../../lib/comparison-markdown'
+import { cellText, elementCells } from '../../lib/policy-elements'
+import { latestTime } from '../../lib/md/format'
+import { SITE_URL } from '../../lib/site'
 
 const props = defineProps<{
   /** 例如「縣市議員・第08選舉區」 */
@@ -28,6 +33,10 @@ const props = defineProps<{
   /** 勾選的人物 id */
   picked: readonly string[]
   matrix: CompareMatrix<Politician>
+  /** 選舉年份（投票日的年） */
+  year?: string | number
+  /** 縣市名，只用在複製的 Markdown 標題；全國的職位不給（不是選區選擇） */
+  regionLabel?: string
 }>()
 
 defineEmits<{ toggle: [id: string]; all: [] }>()
@@ -35,9 +44,40 @@ defineEmits<{ toggle: [id: string]; all: [] }>()
 // 全畫面（2026-10-16 維護者）：整張比較表蓋滿瀏覽器視窗；Esc 或「還原」離開，期間頁面本身不捲動
 const fullscreen = ref(false)
 watch(fullscreen, (on) => { document.body.style.overflow = on ? 'hidden' : '' })
-const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') fullscreen.value = false }
+// Markdown 抽屜開著時 Esc 只關抽屜（抽屜自己聽），不連全畫面一起退出
+const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !mdOpen.value) fullscreen.value = false }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); document.body.style.overflow = '' })
+
+// 複製 Markdown（全畫面模式）：先開共用的 Markdown 抽屜預覽，從抽屜複製；附本頁網址、資料日期與 CC BY 4.0
+const mdPick = ref<MdPick | null>(null)
+const mdOpen = computed(() => mdPick.value !== null)
+// 抽屜關掉時會把 body 捲動還原；全畫面還開著就再鎖回去
+watch(mdOpen, async (on) => {
+  if (on) return
+  await nextTick()
+  if (fullscreen.value) document.body.style.overflow = 'hidden'
+})
+function policyCell(p: CompareMatrix<Politician>['rows'][number]['cells'][number][number]): string {
+  const els = elementCells(p.elements).map(c => `${c.label}：${cellText(c)}`).join('；')
+  return `**${p.title}**（${els}）`
+}
+function buildMarkdown(): string {
+  const rows = props.matrix.rows
+  const dataDate = latestTime(rows.flatMap(r => r.cells.flat().map(p => p.updatedAt ?? p.lastUpdated)))
+  return comparisonMarkdown({
+    title: props.title,
+    year: props.year ?? '',
+    region: props.regionLabel,
+    pageUrl: `${SITE_URL}${window.location.pathname}${window.location.search}`,
+    dataDate,
+    candidates: props.matrix.columns.map(c => ({ candNo: c.candNo, name: c.name, party: c.party })),
+    rows: rows.map(r => ({ label: r.category, cells: r.cells.map(cell => cell.map(policyCell).join('\n')) })),
+  })
+}
+function openMarkdown(): void {
+  mdPick.value = { id: 'pk', path: '', title: `${props.title}：政見並排比較`, text: buildMarkdown(), copyLabel: '複製 Markdown' }
+}
 
 const isPicked = (id: string | number) => props.picked.includes(String(id))
 </script>
@@ -53,6 +93,14 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
       <div class="px-4 pt-4">
         <div class="flex items-start justify-between gap-3">
           <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
+          <div class="flex shrink-0 items-center gap-2">
+          <button
+            v-if="fullscreen && matrix.policyCount > 0"
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            data-testid="pk-copy-markdown"
+            @click="openMarkdown"
+          ><Copy :size="14" />複製 Markdown</button>
           <button
             type="button"
             class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
@@ -60,6 +108,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
             data-testid="pk-fullscreen"
             @click="fullscreen = !fullscreen"
           ><component :is="fullscreen ? Minimize2 : Maximize2" :size="14" />{{ fullscreen ? '還原' : '全畫面' }}</button>
+          </div>
         </div>
 
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
@@ -121,6 +170,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
           </tbody>
         </table>
       </div>
+      <MdDrawer :pick="mdPick" @close="mdPick = null" />
     </section>
   </div>
 </template>

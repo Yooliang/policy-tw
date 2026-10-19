@@ -18,6 +18,7 @@ import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
+import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
@@ -36,11 +37,19 @@ const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
 const route = useRoute()
 const router = useRouter()
-const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, ensurePolicies, loadPastTerms } = useSupabase()
+const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, loadPoliciesByPolitician, loadPastTerms } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
 // 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
 const campaignView = ref<CampaignView>('cards')
+
+// Markdown 摘要抽屜（components/MdDrawer.vue，跟政見矩陣共用）：開的時候才向 Worker 要 /politician/<id>.md（現場產生）
+const mdPick = ref<MdPick | null>(null)
+function openMarkdown(): void {
+  const p = politician.value
+  if (!p) return
+  mdPick.value = { id: `politician:${p.id}`, path: `/politician/${p.id}.md`, src: `/politician/${p.id}.md`, title: `${p.name}：Markdown 摘要` }
+}
 onMounted(() => {
   try { const v = localStorage.getItem('campaignView'); if (v === 'cards' || v === 'table') campaignView.value = v } catch { /* 隱私模式 */ }
 })
@@ -141,8 +150,8 @@ async function ensurePoliticianLoaded(politicianId: string): Promise<void> {
 }
 
 onMounted(async () => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
+  // 這一頁只要這個人的政見：撈他的，不撈整份清單
+  loadPoliciesByPolitician(String(route.params.politicianId))
   refreshPastTerms(String(route.params.politicianId))
   await ensurePoliticianLoaded(String(route.params.politicianId))
 })
@@ -164,6 +173,7 @@ async function refreshPastTerms(politicianId: string): Promise<void> {
 watch(() => route.params.politicianId, (id) => {
   if (id) ensurePoliticianLoaded(String(id))
   if (id) refreshPastTerms(String(id))
+  if (id) loadPoliciesByPolitician(String(id))
 })
 
 
@@ -403,13 +413,14 @@ usePageHead({
             <Sparkles v-else :size="16" />
             {{ profileRequest.label('查簡介') }}
           </HeroAction>
-          <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：貼給 AI、丟進 NotebookLM 都能直接用 -->
-          <a :href="`/politician/${politician.id}.md`" target="_blank" rel="noopener" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown">.md 摘要</a>
+          <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：開共用抽屜預覽，從抽屜複製給 AI、丟進 NotebookLM -->
+          <button type="button" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown" @click="openMarkdown">.md 摘要</button>
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
+    <MdDrawer :pick="mdPick" @close="mdPick = null" />
     <!-- 麵包屑放在 hero 下方（維護者 2026-10-01） -->
     <Breadcrumbs :items="breadcrumbs" />
 

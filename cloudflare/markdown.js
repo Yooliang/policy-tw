@@ -14,8 +14,13 @@
  * 所有回應：X-Robots-Tag: noindex（不跟 HTML 搶搜尋排名；robots.txt 不得 Disallow .md）。
  */
 
-export const CACHE_TTL_S = 600
+import { FALLBACK_HEADER, LONG_TAIL_TTL_S, headerSafe, withBudget } from './fallback.js'
+
+/** 人物 .md 的新鮮期：長尾頁 1 小時（policy-ops#135；名字沿用，值來自 fallback.js） */
+export const CACHE_TTL_S = LONG_TAIL_TTL_S
 export const STALE_TTL_S = 3600
+/** 存進快取的 s-maxage：新鮮期的兩倍，過了新鮮期還有舊的可以在現場產生逾時時頂上 */
+export const PERSON_S_MAXAGE_S = CACHE_TTL_S * 2
 /** 預產的頁在 Worker 的快取多久重讀一次快取表（便宜的單列查詢）；比排程頻率短，新的一批很快就換上 */
 export const ROW_TTL_S = 300
 /** 排程每小時一次：邊緣 s-maxage 對齊它 */
@@ -26,7 +31,7 @@ export const SCHEDULE_S = 3600
  * 命中時把 max-age 抬到 14400，實測第一次（MISS）是 max-age=0、第二次（HIT）變 max-age=14400。回應前自己再設一次，才是我們要的值。
  */
 export const BROWSER_MAX_AGE_S = 600
-export const PERSON_CACHE_CONTROL = `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${CACHE_TTL_S}, stale-while-revalidate=${STALE_TTL_S}`
+export const PERSON_CACHE_CONTROL = `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${PERSON_S_MAXAGE_S}, stale-while-revalidate=${STALE_TTL_S}`
 export const ROW_CACHE_CONTROL = `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${SCHEDULE_S}, stale-while-revalidate=${ROW_TTL_S}`
 
 const TYPES = { md: 'text/markdown; charset=utf-8', json: 'application/json; charset=utf-8' }
@@ -97,6 +102,7 @@ export function notModified(request, headers) {
  * @property {(what: string) => any} notFoundPage  lib/md/index-page.ts 的 buildNotFoundPage
  * @property {{ match: Function, put: Function }} cache  Cache API（caches.default）
  * @property {() => number} [now]
+ * @property {number} [budgetMs]  現場產生的時間預算（毫秒），測試用；預設 RENDER_BUDGET_MS
  */
 
 /**
@@ -122,6 +128,11 @@ export function adjustForBrowser(request, res) {
   return res
 }
 
+/** decodeURI 遇到壞的百分比編碼（%E0%A4%A）會丟 URIError，爬蟲真的會送；解不開就原樣用 */
+export function safeDecodeURI(s) {
+  try { return decodeURI(s) } catch { return s }
+}
+
 export async function handleMarkdown(request, ctx, deps) {
   return adjustForBrowser(request, await handleMarkdownRaw(request, ctx, deps))
 }
@@ -130,14 +141,15 @@ async function handleMarkdownRaw(request, ctx, deps) {
   const isRead = request.method === 'GET' || request.method === 'HEAD'
   if (!isRead && request.method !== 'OPTIONS') return null
   const url = new URL(request.url)
-  const route = deps.match(url.pathname, url.searchParams)
+  let route
+  try { route = deps.match(url.pathname, url.searchParams) } catch { return null }
   if (!route) return null
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: new Headers({ ...CORS, 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Allow-Headers': 'If-None-Match, If-Modified-Since', 'Access-Control-Max-Age': '86400' }) })
   }
   const now = deps.now ?? Date.now
   const head = request.method === 'HEAD'
-  const nf = (what) => new Response(head ? null : deps.renderPage(deps.notFoundPage(what), decodeURI(url.pathname), now()), { status: 404, headers: baseHeaders('md', { 'Cache-Control': 'public, max-age=0, s-maxage=60' }) })
+  const nf = (what) => new Response(head ? null : deps.renderPage(deps.notFoundPage(what), safeDecodeURI(url.pathname), now()), { status: 404, headers: baseHeaders('md', { 'Cache-Control': 'public, max-age=0, s-maxage=60' }) })
 
   try {
     switch (route.kind) {
@@ -170,7 +182,7 @@ async function handleMarkdownRaw(request, ctx, deps) {
     // 資料庫暫時讀不到：不退回代理（那會回一個 200 的 HTML 殼，冒充 .md），回 503 並請對方稍後重試
     return new Response(head ? null : `# 暫時讀不到\n\n資料庫暫時沒有回應，請稍後重試。\n`, {
       status: 503,
-      headers: baseHeaders('md', { 'Retry-After': '30', 'Cache-Control': 'no-store', 'X-MD-Error': String(e && e.message ? e.message : e).slice(0, 200) }),
+      headers: baseHeaders('md', { 'Retry-After': '30', 'Cache-Control': 'no-store', [FALLBACK_HEADER]: 'unavailable', 'X-MD-Error': headerSafe(e) }),
     })
   }
 }
@@ -213,7 +225,7 @@ async function cached(request, ctx, deps, now, nf, ttl, cacheControl, produce) {
     return new Response(r.text, { status: 200, headers })
   }
   const store = async () => {
-    const r = await produce()
+    const r = await withBudget(produce, deps.budgetMs)
     if (r.text === undefined) return r
     const res = toResponse(r, 'MISS')
     await deps.cache.put(cacheKey, res.clone())

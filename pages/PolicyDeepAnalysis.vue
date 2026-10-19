@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { shortUrlsIn } from '../lib/url'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { PolicyStatus, ElectionType } from '../types'
@@ -27,7 +27,7 @@ import { officeTitles } from '../lib/politician-office'
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, elections, ensurePolicies } = useSupabase()
+const { policies, politicians, elections, loadPolicyContext } = useSupabase()
 
 // 「執行稽核」：把訪客貼的文件網址丟進貢獻任務池（request-task kind=audit），AI 代理來核對與既有政見／進度的落差
 const sourceUrl = ref('')
@@ -161,8 +161,8 @@ usePageHead({
     ? `${politician.value?.name ?? ''}「${selectedPolicy.value.title}」的完整時間軸，進度 ${selectedPolicy.value.progress}%。${selectedPolicy.value.description}`
     : undefined,
 })
-// 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-onMounted(() => { ensurePolicies() })
+// 這一頁只用到這條政見、同一條脈絡的政見與它們的提出者：補撈這些，不撈整份清單。
+watch(policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: true })
 
 </script>
 

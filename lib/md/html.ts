@@ -28,7 +28,8 @@ const marked = new Marked({
   gfm: true,
   breaks: false,
   renderer: {
-    html: ({ text }) => escapeHtml(text),
+    // 只放行單純的換行標籤（比較表的儲存格用 <br> 分行）；其他原始 HTML 一律跳脫
+    html: ({ text }) => (/^<br\s*\/?>$/i.test(text.trim()) ? '<br>' : escapeHtml(text)),
     image: ({ text }) => escapeHtml(text),
     link({ href, title, tokens }) {
       const inner = this.parser.parseInline(tokens)

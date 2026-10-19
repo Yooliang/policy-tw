@@ -5,7 +5,7 @@
  */
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
-import { correctionTouches, correctionOnlyFromRumor } from "./correction.ts";
+import { correctionTouches, correctionOnlyFromRumor, correctionWithdrawsCandidacy } from "./correction.ts";
 import { HANDOVER_TWO_IP_TYPES } from "./lineage.ts";
 
 export const VOTE_WEIGHT = 1;
@@ -437,6 +437,8 @@ export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "
  */
 export function needsTwoIps(contributionType: string, payload?: unknown): boolean {
   if ((SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType)) return true;
+  // 協議 1.98.0：把參選紀錄改成退選／不參選的更正（可能蓋掉既有選舉結果）
+  if (contributionType === "correction") return correctionWithdrawsCandidacy(payload);
   if (contributionType === "lineage_handover") {
     const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
     return (HANDOVER_TWO_IP_TYPES as readonly string[]).includes(String(p.handover_type ?? ""));

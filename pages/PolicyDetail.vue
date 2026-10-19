@@ -41,13 +41,14 @@ import { ListChecks, Scale } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
-const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, ensurePolicies } = useSupabase()
+const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, loadPolicyContext } = useSupabase()
 
 // 這一頁除了主角那筆，還要「同一人的其他政見」與同一條脈絡的其他政見（otherPolicies／lineageMates），
 // 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
 // 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
-// 兩個區塊會憑空變空。所以這一頁明確要整份。
-onMounted(() => { ensurePolicies() })
+// 兩個區塊會憑空變空。所以這一頁補撈「這一人的政見」與「這一條脈絡的政見」（loadPolicyContext），
+// 不撈整份清單（約 70 次分頁請求，而這兩個區塊最多用到幾條）。
+watch(() => route.params.policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: true })
 
 // 讀者表態。以前這裡只有一個 hasVoted 的 local ref——按下去把畫面數字 +1，
 // 什麼都沒存，重新整理就沒了，而旁邊寫著「讓候選人看見選民的聲音」。

@@ -76,7 +76,7 @@ Deno.test("人物：200、標頭固定、第二次命中快取不再查資料庫
   const { calls, get } = setup();
   const a = await get(`/politician/${ID}.md`);
   assertMd(a, 200);
-  assertEquals(a!.headers.get("Cache-Control"), "public, max-age=600, s-maxage=600, stale-while-revalidate=3600");
+  assertEquals(a!.headers.get("Cache-Control"), "public, max-age=600, s-maxage=7200, stale-while-revalidate=3600");
   assertEquals(a!.headers.get("Cache-Control"), PERSON_CACHE_CONTROL);
   assertEquals(a!.headers.get("X-Cache"), "MISS");
   assert(a!.headers.get("ETag")!.startsWith('W/"p-'));
@@ -336,4 +336,52 @@ Deno.test("瀏覽器直接打開（Accept 帶 text/html）回 text/plain 才會�
   assertStringIncludes(prog!.headers.get("Vary") ?? "", "Accept");
   const j = await get("/data/2026/index.json", browser);
   assertEquals(j!.headers.get("Content-Type"), "application/json; charset=utf-8", "JSON 瀏覽器本來就顯示，不動");
+});
+
+// ── policy-ops#135：時間預算與壞輸入 ──────────────────────────────────────
+
+Deno.test("現場產生人物 .md 逾時：503＋Retry-After＋X-SSR-Fallback，不寫進快取（不是 504／例外）", async () => {
+  // 預算是模組內的 5 秒；這裡讓 loadPerson 立刻丟錯模擬資料庫失敗，逾時路徑由 fallback.test.ts 的 withBudget 守
+  const { get, cache } = setup({ loadPerson: () => Promise.reject(new Error("upstream 504")) });
+  const res = (await get(`/politician/${ID}.md`))!;
+  assertEquals(res.status, 503);
+  assertEquals(res.headers.get("Retry-After"), "30");
+  assertEquals(res.headers.get("X-SSR-Fallback"), "unavailable");
+  assertEquals(cache.store.size, 0);
+});
+
+Deno.test("人物 .md 的快取新鮮期是 3600 秒、存進快取的 s-maxage 是兩倍（留舊的）", async () => {
+  assertEquals(CACHE_TTL_S, 3600);
+  assertStringIncludes(PERSON_CACHE_CONTROL, "s-maxage=7200");
+  const { get, nowRef, calls } = setup();
+  await get(`/politician/${ID}.md`);
+  nowRef.t += 3000 * 1000; // 50 分鐘：還在新鮮期，不重算
+  await get(`/politician/${ID}.md`);
+  await Promise.all(calls.waits);
+  assertEquals(calls.person, 1);
+  nowRef.t += 700 * 1000; // 超過 1 小時：先回舊的、背景重算
+  const res = (await get(`/politician/${ID}.md`))!;
+  await Promise.all(calls.waits);
+  assertEquals(res.headers.get("X-Cache"), "HIT");
+  assertEquals(calls.person, 2);
+});
+
+Deno.test("壞的百分比編碼不丟 URIError：回 404 的 Markdown，不是 503／例外", async () => {
+  const { get } = setup({ match: () => ({ kind: "notfound", what: "壞編碼" }) });
+  const res = (await get("/category/%E0%A4%A.md"))!;
+  assertEquals(res.status, 404);
+});
+
+Deno.test("路由比對丟錯：回 null（讓 Worker 照舊處理），不讓例外漏出", async () => {
+  const { get } = setup({ match: () => { throw new Error("bad input"); } });
+  assertEquals(await get("/politician/x.md"), null);
+});
+
+Deno.test("現場產生人物 .md 逾時（資料庫不回）：在預算內回 503＋X-SSR-Fallback，不寫快取", async () => {
+  const { get, cache } = setup({ loadPerson: () => new Promise(() => {}), budgetMs: 20 });
+  const res = (await get(`/politician/${ID}.md`))!;
+  assertEquals(res.status, 503);
+  assertEquals(res.headers.get("X-SSR-Fallback"), "unavailable");
+  assertEquals(res.headers.get("X-MD-Error"), "budget exceeded 20ms");
+  assertEquals(cache.store.size, 0);
 });

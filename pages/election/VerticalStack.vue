@@ -43,11 +43,11 @@ const commLevel = computed(() => [
 const chiefs = computed(() => getPoliciesByLevel(ElectionType.CHIEF))
 
 const levels = computed(() => [
-  { label: '縣市長', colorBorder: 'border-red-400', colorBg: 'bg-red-100 text-red-700', items: mayors.value, cols: 'grid-cols-1', emptyMsg: '縣市長層級尚未針對此議題表態。' },
+  { label: '縣市長', colorBorder: 'border-red-400', colorBg: 'bg-red-100 text-red-700', items: mayors.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '縣市長層級尚未針對此議題表態。' },
   { label: '議員', colorBorder: 'border-blue-400', colorBg: 'bg-blue-100 text-blue-700', items: councilors.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無議員針對此議題提出質詢或預算案。' },
-  { label: '鄉長/區長', colorBorder: 'border-indigo-400', colorBg: 'bg-indigo-100 text-indigo-700', items: adminLevel.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無行政首長層級的規劃。' },
-  { label: '代表', colorBorder: 'border-green-400', colorBg: 'bg-green-100 text-green-700', items: commLevel.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無地方代表層級的具體建議。' },
-  { label: '里長', colorBorder: 'border-amber-400', colorBg: 'bg-amber-100 text-amber-700', items: chiefs.value, cols: 'grid-cols-1 md:grid-cols-3', emptyMsg: '尚無里長層級的具體建議。' },
+  { label: '鄉長/區長', colorBorder: 'border-indigo-400', colorBg: 'bg-indigo-100 text-indigo-700', items: adminLevel.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無行政首長層級的規劃。' },
+  { label: '代表', colorBorder: 'border-green-400', colorBg: 'bg-green-100 text-green-700', items: commLevel.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無地方代表層級的具體建議。' },
+  { label: '里長', colorBorder: 'border-amber-400', colorBg: 'bg-amber-100 text-amber-700', items: chiefs.value, cols: 'grid-cols-1 md:grid-cols-2', emptyMsg: '尚無里長層級的具體建議。' },
 ])
 </script>
 
@@ -60,16 +60,15 @@ const levels = computed(() => [
       </div>
     </div>
 
-    <div class="p-6 grid gap-6 relative">
-      <div class="absolute left-12 top-6 bottom-6 w-1 bg-slate-100 -z-10 hidden md:block"></div>
-
+    <!-- 寬螢幕：層級名直排、色塊上下相連，相鄰兩塊交界處放白底向下箭頭（2026-10-19 維護者）；手機維持橫的膠囊 -->
+    <div class="p-6 flex flex-col gap-6 md:gap-0">
       <template v-for="(level, levelIdx) in levels" :key="level.label">
-        <div v-if="levelIdx > 0" class="hidden md:flex text-slate-300"><div class="w-32 shrink-0 flex justify-center"><ArrowDown :size="24" /></div></div>
-        <div class="flex flex-col md:flex-row gap-6">
-          <div class="w-full md:w-32 shrink-0 flex flex-col items-center justify-center">
-            <span :class="`${level.colorBg} px-3 py-1 rounded-full text-xs font-bold block w-full text-center`">{{ level.label }}</span>
+        <div class="flex flex-col md:flex-row gap-4 md:gap-5">
+          <div class="relative w-full md:w-9 shrink-0 flex flex-col items-center justify-center md:self-stretch">
+            <span :class="`${level.colorBg} px-3 py-1 rounded-full text-xs font-bold block w-full text-center md:h-full md:px-0 md:py-4 md:flex md:items-center md:justify-center md:text-sm md:tracking-widest md:[writing-mode:vertical-rl] md:[text-orientation:upright] ${levelIdx === 0 ? 'md:rounded-b-none' : levelIdx === levels.length - 1 ? 'md:rounded-t-none' : 'md:rounded-none'}`">{{ level.label }}</span>
+            <div v-if="levelIdx > 0" class="hidden md:flex absolute -top-3 left-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-white shadow ring-1 ring-slate-200 items-center justify-center text-slate-500"><ArrowDown :size="14" /></div>
           </div>
-          <div :class="`flex-1 grid ${level.cols} gap-4 text-left`">
+          <div :class="`flex-1 grid ${level.cols} gap-4 text-left md:py-3`">
             <template v-if="level.items.length > 0">
               <router-link
                 v-for="p in level.items"

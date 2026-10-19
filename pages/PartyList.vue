@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 政黨一覽（#346 第一階段，/parties）：正見收錄的人物裡有人屬於它的政黨。
- * 依名稱筆畫排，**不依人數、席次排**；無黨籍不是政黨，不列（日本站同一個原則）。
+ * 預設依名稱筆畫排，可切換依政黨編號排（2026-10-19 維護者）；**不依人數、席次排**；無黨籍不是政黨，不列（日本站同一個原則）。
+ * 切換只在瀏覽器端，預渲染的 HTML 永遠是名稱順序。
  * 政黨資料是內政部政黨名冊（parties，id＝政黨編號）；名冊查無此名稱的另一段列。
  * 預渲染、進網站地圖、canonical 指正見.tw；從站內別頁換頁進來沒有快照就整頁載入（lib/full-load.ts）。
  */
@@ -22,7 +23,14 @@ onMounted(() => {
   if (!partyList.value) reloading.value = reloadForPrerendered('/parties')
 })
 
-const registered = computed(() => (partyList.value ?? []).filter((p) => p.moiNo !== null))
+type SortKey = 'name' | 'no'
+const sortKey = ref<SortKey>('name')
+const SORTS: { key: SortKey; label: string }[] = [{ key: 'name', label: '依名稱' }, { key: 'no', label: '依編號' }]
+// partyList 本身就是名稱筆畫順序（lib/party-pages.ts）；依編號＝政黨編號由小到大
+const registered = computed(() => {
+  const list = (partyList.value ?? []).filter((p) => p.moiNo !== null)
+  return sortKey.value === 'no' ? [...list].sort((a, b) => (a.moiNo ?? 0) - (b.moiNo ?? 0)) : list
+})
 const unregistered = computed(() => (partyList.value ?? []).filter((p) => p.moiNo === null))
 const status = (p: PartySummary) => partyStatusText({ moi_no: p.moiNo, moi_status: p.moiStatus })
 
@@ -55,7 +63,19 @@ usePageHead({
       <div v-if="!partyList" class="text-slate-500 text-center py-20">{{ reloading ? '載入中…' : '這一頁在建置網站時產生，請重新整理。' }}</div>
       <template v-else>
         <section aria-labelledby="registered-h" class="mb-12">
-          <h2 id="registered-h" class="text-2xl font-black text-navy-900 mb-4">內政部政黨名冊上的政黨</h2>
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 id="registered-h" class="text-2xl font-black text-navy-900">內政部政黨名冊上的政黨</h2>
+            <div class="inline-flex bg-slate-100 p-1 rounded-lg" role="group" aria-label="排序" data-testid="party-sort">
+              <button
+                v-for="s in SORTS"
+                :key="s.key"
+                type="button"
+                :aria-pressed="sortKey === s.key"
+                :class="`px-3 py-1.5 rounded-md text-sm font-bold transition-all ${sortKey === s.key ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
+                @click="sortKey = s.key"
+              >{{ s.label }}</button>
+            </div>
+          </div>
           <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <li v-for="p in registered" :key="p.id">
               <a :href="`/party/${p.id}`" class="flex items-center gap-3 bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:shadow-md hover:border-blue-300 transition">
