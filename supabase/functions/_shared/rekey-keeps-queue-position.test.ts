@@ -109,15 +109,15 @@ Deno.test("A4 範圍：不碰 lineage_candidate_scope 與三支臂本體與 task
   assert(MIG.includes("rekey_keep_position BOOLEAN NOT NULL DEFAULT true"));
 });
 
-Deno.test("A5 在途交件比對沒被破壞：三支臂本體仍用「含指紋的完整 task_id」比對 pending 交件（穩定鍵只用在 seed 沿用位置，不放寬臂的排除）", async () => {
-  const lin = await readMig("20261006034900_policy_lineages.sql");
-  assert(lin.includes("AND c.task_id = 'auto:lineage_candidate:' || b.block_key || ':' || b.fp"));
-  assert(lin.includes("AND c.task_id = 'auto:lineage_link_candidate:' || g.lower_id || ':' || g.fp"));
-  // 臂本體的最新定義仍是這個檔（沒有後來的 migration 改掉它）
-  for (const f of ["contribution_auto_tasks_lineage_candidates", "contribution_auto_tasks_lineage_links"]) {
-    const defs: string[] = [];
-    for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${f}(`)) defs.push(n);
-    assertEquals(defs, ["20261006034900_policy_lineages.sql"], `${f} 被改過：這支的沿用位置要重新確認`);
+Deno.test("A5 在途交件比對沒被破壞：兩支脈絡臂的「最新定義」仍用「含指紋的完整 task_id」比對 pending 交件（穩定鍵只用在 seed 沿用位置，不放寬臂的排除；臂本體可以被別的 PR 改，這條要守住）", async () => {
+  for (const [fn, needle] of [
+    ["contribution_auto_tasks_lineage_candidates", "AND c.task_id = 'auto:lineage_candidate:' || b.block_key || ':' || b.fp"],
+    ["contribution_auto_tasks_lineage_links", "AND c.task_id = 'auto:lineage_link_candidate:' || g.lower_id || ':' || g.fp"],
+  ] as const) {
+    const latest = await latestFn(fn);
+    assert(latest.includes(needle), `${fn} 的最新定義少了含指紋的在途比對：${needle}`);
+    // 比對的是 pending／verified／apply_failed 的交件（等票中的先不派）
+    assert(/c\.status IN \('pending', 'verified', 'apply_failed'\)/.test(latest), `${fn}：在途交件的狀態清單變了`);
   }
 });
 
