@@ -414,19 +414,19 @@ export interface PlacedLabel {
 
 const LABEL_SCALES = [1, 0.85, 0.7, 0.6]
 
-/**
- * 標籤擺放：
- * - 位置用最大內接位置（距邊界最遠的格），不用重心——被別區環繞的小區（嘉義市在嘉義縣中間），環狀區的重心會落在小區上。
- * - 小面積的先擺；後擺的大區碰到已擺的標籤就換自己區內別的位置、再不行縮小字級（最小 0.6 倍）、都不行就不放（滑過仍有提示卡）。
- * - 大區的標籤要有一定比例落在自己的格子上；小到字寫不下的區（字比整個區還大）允許字溢出到鄰區，但仍以最大內接位置為中心。
- * @param texts 依行政區序號排的名稱
- * @param baseFs 預設字級（格）
- */
-export function placeLabels(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'codes'>, texts: readonly string[], baseFs: number): PlacedLabel[] {
+interface LabelPrep {
+  stats: Array<UnitStat | null>
+  /** 每個行政區的候選位置 [x, y, 距離]，距離最大的在前 */
+  candidates: Array<Array<[number, number, number]>>
+}
+/** 標籤擺放要用的距離轉換與候選位置，每張點陣只算一次（縮放時重排標籤不再重算） */
+const labelPrepCache = new WeakMap<object, LabelPrep>()
+function labelPrep(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'codes'>): LabelPrep {
+  const hit = labelPrepCache.get(raster.cells)
+  if (hit) return hit
   const { w, h, cells } = raster
   const dist = inscribedDistance(raster)
   const stats = unitStats(raster)
-
   // 每個行政區的候選位置：距離最大的格在前，之後從距離夠大的格裡均勻挑
   const best = raster.codes.map(() => 0)
   for (let i = 0; i < cells.length; i += 1) if (cells[i] >= 0 && dist[i] > best[cells[i]]) best[cells[i]] = dist[i]
@@ -438,11 +438,27 @@ export function placeLabels(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'c
     }
   }
   const candidates = pool.map((list) => {
-    list.sort((a, b) => b[2] - a[2] || a[1] - b[1] || a[0] - b[0])
+    list.sort((p, q) => q[2] - p[2] || p[1] - q[1] || p[0] - q[0])
     if (list.length <= 90) return list
     const stride = Math.ceil((list.length - 1) / 89)
-    return list.filter((_, i) => i === 0 || i % stride === 0)
+    return list.filter((_, k) => k === 0 || k % stride === 0)
   })
+  const prep = { stats, candidates }
+  labelPrepCache.set(raster.cells, prep)
+  return prep
+}
+
+/**
+ * 標籤擺放：
+ * - 位置用最大內接位置（距邊界最遠的格），不用重心——被別區環繞的小區（嘉義市在嘉義縣中間），環狀區的重心會落在小區上。
+ * - 小面積的先擺；後擺的大區碰到已擺的標籤就換自己區內別的位置、再不行縮小字級（最小 0.6 倍）、都不行就不放（滑過仍有提示卡）。
+ * - 大區的標籤要有一定比例落在自己的格子上；小到字寫不下的區（字比整個區還大）允許字溢出到鄰區，但仍以最大內接位置為中心。
+ * @param texts 依行政區序號排的名稱
+ * @param baseFs 預設字級（格）
+ */
+export function placeLabels(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'codes'>, texts: readonly string[], baseFs: number): PlacedLabel[] {
+  const { w, h, cells } = raster
+  const { stats, candidates } = labelPrep(raster)
 
   const placed: Array<{ x0: number; x1: number; y0: number; y1: number }> = []
   const out: PlacedLabel[] = []
