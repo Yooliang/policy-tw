@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
+import MapLayers, { type DrawLayer, type LabelItem } from '../components/map/MapLayers.vue'
 import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
 import MapToggles from '../components/map/MapToggles.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { buildLayer, type Layer } from '../lib/map-layer'
+import { fileCache, rowsCache, rowsKey } from '../lib/map-data-cache'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  buildMap, legendItems, normalizeRows, tooltipLines, unitColor, unitHref,
-  type BuiltMap, type ColorMode, type CountRow, type MapLevel, type MapUnit,
+  legendFor, normalizeRows, tooltipLines, unitColor, unitHref,
+  type ColorMode, type CountRow, type MapLevel, type MapUnit,
 } from '../lib/candidacy-map'
+import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
 import {
-  boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, unitStats,
-  type DecodedRaster, type RasterFile, type UnitStat,
-} from '../lib/raster-grid'
-import {
-  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
+  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, lodFor, pickEvictions, pickVisibleTowns,
   screenToWorld, viewBox, wheelK, zoomAtPoint, type Box, type Lod, type View,
 } from '../lib/map-world'
 import { Map as MapIcon, Plus, Minus, Maximize2, ExternalLink, X } from 'lucide-vue-next'
@@ -28,34 +28,17 @@ import { Map as MapIcon, Plus, Minus, Maximize2, ExternalLink, X } from 'lucide-
  * - 世界座標＝全國層畫布（公里）；縣市層與鄉鎮層 1 公里一格、村里層 200 公尺一格，全部對齊同一條格線
  *   （data/tw-raster/，scripts/build-tw-raster.ts 產生；點陣化的純函式在 lib/raster-grid.ts）。
  * - 細節層（LOD）只看縮放（螢幕上每公里幾像素，lib/map-world.ts）：縮小看縣市、中間看鄉鎮、放大看村里，
- *   切換不換頁、不重設視角。縣市層與鄉鎮層全國一次載入；村里層只載入視窗內看得到的鄉鎮，離開後釋放（上限 MAX_VILLAGE_TOWNS）。
+ *   切換不換頁、不重設視角。縣市層與鄉鎮層全國一次載入；村里層只載入視窗內看得到的鄉鎮，離開後釋放（上限 MAX_VILLAGE_TOWNS 個，釋放的只是解碼後的 path，原始 JSON 與人數留在快取）。
  * - 同一行政區的格子合併成一條 SVG path（不是一格一個元素），所以路徑數：縣市 22、鄉鎮 368、村里層視窗內大約幾百條。
  *   SVG 的平移縮放只改 viewBox，不重畫路徑，評估過 canvas：這個量級 SVG 就夠，而且滑過高亮、點擊、無障礙現成，所以沒用 canvas。
  */
 
 const ELECTION_ID = 2026
 /** 同時留在記憶體裡的村里鄉鎮檔上限（超過就釋放最久沒看的） */
-const MAX_VILLAGE_TOWNS = 60
+const MAX_VILLAGE_TOWNS = 200
 /** 視窗內最多同時要村里的鄉鎮數 */
 const MAX_VISIBLE_TOWNS = 40
 const LABEL_PX = 12
-
-interface Layer {
-  key: string
-  level: MapLevel
-  raster: DecodedRaster
-  /** 一格的邊長（公里）與在世界裡的位置（公里） */
-  u: number
-  tx: number
-  ty: number
-  fills: string[]
-  boundary: string
-  built: BuiltMap
-  stats: Array<UnitStat | null>
-  box: Box
-  transform: string
-}
-interface DrawLayer { layer: Layer; units: MapUnit[] }
 
 const mode = ref<'grid' | 'list'>('grid')
 const colorMode = ref<ColorMode>('coverage')
@@ -63,8 +46,7 @@ const failed = ref(false)
 const pending = ref(0)
 
 // ── 資料 ──────────────────────────────────────────────────────
-const rowCache = new Map<string, CountRow[]>()
-const nameByCode = ref(new Map<string, string>())
+const nameByCode = shallowRef(new Map<string, string>())
 const countyLayer = shallowRef<Layer | null>(null)
 const townLayers = shallowRef<Layer[]>([])
 const villageLayers = shallowRef(new Map<string, Layer>())
@@ -77,29 +59,27 @@ let townsPromise: Promise<void> | null = null
 const townFiles = import.meta.glob<{ default: unknown }>('../data/tw-raster/towns/*.json')
 const villageFiles = import.meta.glob<{ default: unknown }>('../data/tw-raster/villages/*.json')
 
+/**
+ * 人數：依（屆別、層級、上層代碼）在模組層快取（lib/map-data-cache.ts），進行中的同一個請求共用；
+ * 縮放切換細節層、來回捲動、離開頁面再回來都不再重打 candidacy_map。
+ */
 async function fetchRows(level: MapLevel, parent?: string): Promise<CountRow[]> {
-  const key = `${level}:${parent ?? ''}`
-  const hit = rowCache.get(key)
-  if (hit) return hit
-  const { data } = await withTimeoutAndRetry(`參選地圖 ${key}`, (signal) =>
-    supabasePublic.rpc('candidacy_map', { p_election_id: ELECTION_ID, p_level: level, ...(parent ? { p_parent: parent } : {}) })
-      .abortSignal(signal).throwOnError())
-  const rows = normalizeRows((data ?? []) as Array<Record<string, unknown>>)
-  rowCache.set(key, rows)
+  const rows = await rowsCache.get(rowsKey(ELECTION_ID, level, parent), async () => {
+    const { data } = await withTimeoutAndRetry(`參選地圖 ${level}:${parent ?? ''}`, (signal) =>
+      supabasePublic.rpc('candidacy_map', { p_election_id: ELECTION_ID, p_level: level, ...(parent ? { p_parent: parent } : {}) })
+        .abortSignal(signal).throwOnError())
+    return normalizeRows((data ?? []) as Array<Record<string, unknown>>)
+  })
   const names = new Map(nameByCode.value)
-  for (const r of rows) names.set(r.code, r.name)
-  nameByCode.value = names
+  let changed = false
+  for (const r of rows) if (names.get(r.code) !== r.name) { names.set(r.code, r.name); changed = true }
+  if (changed) nameByCode.value = names
   return rows
 }
 
 function makeLayer(key: string, level: MapLevel, file: unknown, rows: CountRow[]): Layer {
-  const raster = decodeRaster(file as RasterFile)
-  const u = raster.cellM / 1000
-  const layer: Layer = {
-    key, level, raster, u, tx: raster.ox * u, ty: raster.oy * u,
-    fills: unitFillPaths(raster), boundary: boundaryPath(raster), built: buildMap(raster, rows),
-    stats: unitStats(raster), box: layerBox(raster), transform: `translate(${raster.ox * u} ${raster.oy * u}) scale(${u})`,
-  }
+  // 解碼、合成 path 只在第一次載入做一次；markRaw 讓 Vue 不深層追蹤這些大陣列與字串
+  const layer = markRaw(buildLayer(key, level, file as RasterFile, rows))
   layerIndex.set(key, layer)
   layer.built.units.forEach((unit, idx) => unitIndex.set(unit.code, { layer, idx }))
   return layer
@@ -109,7 +89,7 @@ async function loadCounty() {
   failed.value = false
   pending.value += 1
   try {
-    const [file, rows] = await Promise.all([import('../data/tw-raster/national.json').then((m) => m.default), fetchRows('county')])
+    const [file, rows] = await Promise.all([fileCache.get('national', () => import('../data/tw-raster/national.json').then((m) => m.default)), fetchRows('county')])
     countyLayer.value = makeLayer('county', 'county', file, rows)
   } catch (e) {
     console.info('[參選地圖] 讀取失敗', e)
@@ -126,7 +106,7 @@ function ensureTowns(): Promise<void> {
   townsPromise = (async () => {
     const [rows, files] = await Promise.all([
       fetchRows('town'),
-      Promise.all(Object.entries(townFiles).map(async ([path, load]) => [path.match(/towns\/(\d+)\.json/)![1], (await load()).default] as const)),
+      Promise.all(Object.entries(townFiles).map(async ([path, load]) => [path.match(/towns\/(\d+)\.json/)![1], await fileCache.get(`towns/${path.match(/towns\/(\d+)\.json/)![1]}`, () => load().then((m) => m.default))] as const)),
     ])
     townLayers.value = files.sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([code, file]) => makeLayer(`town:${code}`, 'town', file, rows))
     refreshVisible()
@@ -154,7 +134,7 @@ function pump() {
     ;(async () => {
       const load = villageFiles[`../data/tw-raster/villages/${code}.json`]
       if (!load) return
-      const [file, rows] = await Promise.all([load().then((m) => m.default), fetchRows('village', code)])
+      const [file, rows] = await Promise.all([fileCache.get(`villages/${code}`, () => load().then((m) => m.default)), fetchRows('village', code)])
       const layer = makeLayer(`village:${code}`, 'village', file, rows)
       const next = new Map(villageLayers.value)
       next.set(code, layer)
@@ -171,31 +151,80 @@ function pump() {
 }
 
 // ── 檢視 ──────────────────────────────────────────────────────
+// 手勢期間的檢視（cur）是普通物件：縮放、平移只改外層 svg 的 viewBox 屬性（rAF 合併，每格最多一次），
+// 不經過 Vue 的反應式、不重新渲染任何 path，也不重畫 SVG（改 CSS transform，瀏覽器直接合成）。停下約 150 毫秒（最久 400 毫秒）後才把 cur 同步給 view，
+// 才做細節層切換、視窗內鄉鎮清單、標籤排版、路徑與網址更新。
 const stage = ref<HTMLElement | null>(null)
 const svgEl = ref<SVGSVGElement | null>(null)
 const size = ref({ w: 900, h: 620 })
+const cur: View = { cx: 0, cy: 0, k: 1 }
 const view = ref<View>({ cx: 0, cy: 0, k: 1 })
 const lod = ref<Lod>('county')
 const world = computed(() => (countyLayer.value ? { w: countyLayer.value.raster.w, h: countyLayer.value.raster.h } : null))
 const kMin = computed(() => (world.value ? fitK(world.value, size.value.w, size.value.h) : 1))
-const vbString = computed(() => {
-  const b = viewBox(view.value, size.value.w, size.value.h)
-  return `${b.x0} ${b.y0} ${b.x1 - b.x0} ${b.y1 - b.y0}`
-})
 let observer: ResizeObserver | null = null
 let animId = 0
 
+// 兩層：viewBox 只在「停下來」（commit）或改版面時才寫；手勢期間只改 svg 元素的 CSS transform（GPU 合成已經畫好的圖，
+// 不重畫任何 path），用 base（上次寫進 viewBox 的視角）與 cur 的差換算成平移加縮放。
+let base: View = { cx: 0, cy: 0, k: 1 }
+let applyQueued = false
+function applyViewBox() {
+  const el = svgEl.value
+  if (!el) return
+  base = { ...cur }
+  const b = viewBox(base, size.value.w, size.value.h)
+  el.setAttribute('viewBox', `${b.x0} ${b.y0} ${b.x1 - b.x0} ${b.y1 - b.y0}`)
+  el.style.transform = ''
+}
+function applyTransform() {
+  const el = svgEl.value
+  if (!el) return
+  const { w, h } = size.value
+  const vx = (v: View) => v.cx - w / (2 * v.k)
+  const vy = (v: View) => v.cy - h / (2 * v.k)
+  const s = cur.k / base.k
+  el.style.transform = `translate(${(vx(base) - vx(cur)) * cur.k}px, ${(vy(base) - vy(cur)) * cur.k}px) scale(${s})`
+}
+function scheduleApply() {
+  if (applyQueued) return
+  applyQueued = true
+  requestAnimationFrame(() => { applyQueued = false; applyTransform() })
+}
+let commitTimer: ReturnType<typeof setTimeout> | undefined
+let commitFirst = 0
+function commitView() {
+  commitFirst = 0
+  applyViewBox()
+  view.value = { ...cur }
+  svgEl.value?.classList.remove('moving')
+}
+function scheduleCommit() {
+  const now = performance.now()
+  if (!commitFirst) commitFirst = now
+  clearTimeout(commitTimer)
+  commitTimer = setTimeout(commitView, Math.max(0, Math.min(150, commitFirst + 400 - now)))
+}
 function setView(v: View) {
-  view.value = world.value ? clampView(v, world.value) : v
+  const c = world.value ? clampView(v, world.value) : v
+  cur.cx = c.cx
+  cur.cy = c.cy
+  cur.k = c.k
+  svgEl.value?.classList.add('moving')
+  scheduleApply()
+  scheduleCommit()
 }
 function fitAll() {
   if (!world.value) return
   animateTo({ cx: world.value.w / 2, cy: world.value.h / 2, k: kMin.value })
 }
+function zoomBy(f: number) {
+  animateTo({ cx: cur.cx, cy: cur.cy, k: Math.min(K_MAX, Math.max(kMin.value, cur.k * f)) }, 220)
+}
 
 function cancelAnim() { animId += 1 }
 function animateTo(target: View, ms = 380) {
-  const from = { ...view.value }
+  const from = { ...cur }
   const id = ++animId
   const t0 = performance.now()
   const lk0 = Math.log(from.k)
@@ -216,6 +245,7 @@ watch(() => view.value.k, (k) => {
 })
 watch(lod, (l) => { if (l !== 'county') void ensureTowns() })
 watch(view, () => scheduleRefresh(), { deep: false })
+watch(svgEl, (el) => { if (el) applyViewBox() }, { flush: 'post' })
 
 // ── 目前要畫哪些層 ────────────────────────────────────────────
 const renderState = shallowRef<{ towns: Layer[]; villages: Layer[]; key: string }>({ towns: [], villages: [], key: '' })
@@ -225,7 +255,9 @@ function scheduleRefresh() {
   refreshQueued = true
   requestAnimationFrame(() => { refreshQueued = false; refreshVisible() })
 }
+let townBoxCache: { src: Layer[]; boxes: Array<{ code: string; box: Box }> } | null = null
 function townBoxes(): Array<{ code: string; box: Box }> {
+  if (townBoxCache && townBoxCache.src === townLayers.value) return townBoxCache.boxes
   const out: Array<{ code: string; box: Box }> = []
   for (const L of townLayers.value) {
     L.built.units.forEach((u, i) => {
@@ -233,6 +265,7 @@ function townBoxes(): Array<{ code: string; box: Box }> {
       if (s) out.push({ code: u.code, box: { x0: L.tx + s.minX * L.u, y0: L.ty + s.minY * L.u, x1: L.tx + s.maxX * L.u, y1: L.ty + s.maxY * L.u } })
     })
   }
+  townBoxCache = { src: townLayers.value, boxes: out }
   return out
 }
 function refreshVisible() {
@@ -283,10 +316,6 @@ const maxByLevel = computed(() => ({
   town: townLayers.value.reduce((m, L) => Math.max(m, L.built.max), 0),
   village: [...villageLayers.value.values()].reduce((m, L) => Math.max(m, L.built.max), 0),
 }))
-function colorOf(layer: Layer, u: MapUnit): string {
-  return unitColor(u, colorMode.value, maxByLevel.value[layer.level])
-}
-
 // ── 滑過、點選、提示卡 ────────────────────────────────────────
 const hover = ref<{ key: string; idx: number } | null>(null)
 const selected = ref<{ key: string; idx: number } | null>(null)
@@ -327,9 +356,14 @@ function zoomToCode(code: string | null, instant = false) {
 }
 
 let suppressClick = false
-function onUnitClick(L: Layer, u: MapUnit) {
+function onHover(hit: { key: string; idx: number } | null) {
+  hover.value = hit
+}
+function onPick(hit: { key: string; idx: number }) {
   if (suppressClick) return
-  selected.value = { key: L.key, idx: u.idx }
+  const u = layerIndex.get(hit.key)?.built.units[hit.idx]
+  if (!u) return
+  selected.value = hit
   zoomToCode(u.code)
 }
 
@@ -337,17 +371,17 @@ function onUnitClick(L: Layer, u: MapUnit) {
 // 滾輪只在游標位於地圖上時攔截（不用按 Ctrl）；已經縮到最小（整張台灣放得下）時再往下滾就放行，讓頁面照常捲動，
 // 所以滿版地圖不會把整頁卡住。觸控板捏合是帶 ctrlKey 的 wheel，一律攔截（不然會變成瀏覽器整頁縮放）。
 function localPoint(e: { clientX: number; clientY: number }): [number, number] {
-  const r = svgEl.value?.getBoundingClientRect()
+  const r = stage.value?.getBoundingClientRect()
   return [e.clientX - (r?.left ?? 0), e.clientY - (r?.top ?? 0)]
 }
 function onWheel(e: WheelEvent) {
   if (!world.value) return
-  if (!e.ctrlKey && e.deltaY > 0 && view.value.k <= kMin.value * 1.001) return
+  if (!e.ctrlKey && e.deltaY > 0 && cur.k <= kMin.value * 1.001) return
   e.preventDefault()
   cancelAnim()
   const [px, py] = localPoint(e)
-  const k2 = wheelK(view.value.k, e.deltaY, e.ctrlKey, kMin.value)
-  setView(zoomAtPoint(view.value, size.value.w, size.value.h, px, py, k2))
+  const k2 = wheelK(cur.k, e.deltaY, e.ctrlKey, kMin.value)
+  setView(zoomAtPoint(cur, size.value.w, size.value.h, px, py, k2))
 }
 
 const pointers = new Map<number, { x: number; y: number }>()
@@ -355,7 +389,7 @@ let drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | nul
 let pinch: { dist: number; view: View; mid: [number, number] } | null = null
 function mid(): [number, number] {
   const [a, b] = [...pointers.values()]
-  const r = svgEl.value?.getBoundingClientRect()
+  const r = stage.value?.getBoundingClientRect()
   return [(a.x + b.x) / 2 - (r?.left ?? 0), (a.y + b.y) / 2 - (r?.top ?? 0)]
 }
 function dist(): number {
@@ -366,8 +400,8 @@ function onPointerDown(e: PointerEvent) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   cancelAnim()
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-  if (pointers.size === 1) drag = { x: e.clientX, y: e.clientY, cx: view.value.cx, cy: view.value.cy, moved: false }
-  else if (pointers.size === 2) { drag = null; pinch = { dist: dist(), view: { ...view.value }, mid: mid() } }
+  if (pointers.size === 1) drag = { x: e.clientX, y: e.clientY, cx: cur.cx, cy: cur.cy, moved: false }
+  else if (pointers.size === 2) { drag = null; pinch = { dist: dist(), view: { ...cur }, mid: mid() } }
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', onPointerUp)
@@ -389,7 +423,7 @@ function onPointerMove(e: PointerEvent) {
     if (!drag.moved && Math.hypot(dx, dy) < 5) return
     drag.moved = true
     suppressClick = true
-    setView({ k: view.value.k, cx: drag.cx - dx / view.value.k, cy: drag.cy - dy / view.value.k })
+    setView({ k: cur.k, cx: drag.cx - dx / cur.k, cy: drag.cy - dy / cur.k })
   }
 }
 function onPointerUp(e: PointerEvent) {
@@ -397,7 +431,7 @@ function onPointerUp(e: PointerEvent) {
   if (pointers.size < 2) pinch = null
   if (pointers.size === 1) {
     const [rest] = [...pointers.values()]
-    drag = { x: rest.x, y: rest.y, cx: view.value.cx, cy: view.value.cy, moved: true }
+    drag = { x: rest.x, y: rest.y, cx: cur.cx, cy: cur.cy, moved: true }
   }
   if (pointers.size === 0) {
     drag = null
@@ -417,7 +451,7 @@ function onSvgMove(e: MouseEvent) {
   const [px, py] = localPoint(e)
   requestAnimationFrame(() => {
     probeQueued = false
-    probe.value = screenToWorld(view.value, size.value.w, size.value.h, px, py)
+    probe.value = screenToWorld(cur, size.value.w, size.value.h, px, py)
   })
 }
 function onSvgLeave() { probe.value = null }
@@ -461,10 +495,10 @@ const fsStep = computed(() => {
   const u = lod.value === 'village' ? 0.2 : 1
   return Math.round(Math.log(LABEL_PX / (view.value.k * u)) / Math.log(1.25))
 })
-const labels = computed(() => {
+const labels = computed<LabelItem[]>(() => {
   const layers = lod.value === 'county' ? (countyLayer.value ? [countyLayer.value] : []) : lod.value === 'town' ? renderState.value.towns : renderState.value.villages
   const step = fsStep.value
-  const out: Array<{ key: string; layer: Layer; code: string; text: string; x: number; y: number; fs: number }> = []
+  const out: LabelItem[] = []
   for (const L of layers) {
     const ck = `${L.key}|${step}`
     let list = labelCache.get(ck)
@@ -473,14 +507,14 @@ const labels = computed(() => {
       list = placeLabels(L.raster, L.built.units.map((u) => u.name), Math.pow(1.25, step)).map((p) => ({ code: L.built.units[p.idx].code, text: p.text, x: p.x, y: p.y, fs: p.fs }))
       labelCache.set(ck, list)
     }
-    for (const p of list) out.push({ key: `${ck}:${p.code}`, layer: L, ...p })
+    for (const p of list) out.push({ key: `${ck}:${p.code}`, transform: L.transform, text: p.text, x: p.x, y: p.y, fs: p.fs })
   }
   return out
 })
 
 const scaleLabel = computed(() => (lod.value === 'village' ? '200 公尺' : '1 公里'))
-const legend = computed(() => legendItems(colorMode.value))
-const maxForLegend = computed(() => maxByLevel.value[lod.value])
+const legend = computed(() => legendFor(colorMode.value, maxByLevel.value[lod.value]))
+const tickClass = (pos: number) => (pos < 0.02 ? '' : pos < 0.85 ? '-translate-x-1/2' : '-translate-x-full')
 
 // ── 清單模式：目前那一層、游標（視窗中心）所在上一層底下的行政區 ─────────
 const listUnits = computed<MapUnit[]>(() => {
@@ -527,8 +561,9 @@ function measure() {
   const el = stage.value
   if (!el) return
   const next = { w: Math.max(200, el.clientWidth), h: Math.max(200, el.clientHeight) }
-  const atFit = world.value ? view.value.k <= fitK(world.value, size.value.w, size.value.h) * 1.001 : true
+  const atFit = world.value ? cur.k <= fitK(world.value, size.value.w, size.value.h) * 1.001 : true
   size.value = next
+  applyViewBox()
   if (world.value && atFit) setView({ cx: world.value.w / 2, cy: world.value.h / 2, k: fitK(world.value, next.w, next.h) })
 }
 watch(stage, (el) => {
@@ -542,6 +577,7 @@ watch(countyLayer, async (L) => {
   if (!L) return
   measure()
   setView({ cx: L.raster.w / 2, cy: L.raster.h / 2, k: kMin.value })
+  commitView()
   await applyAtFromUrl()
 }, { once: true })
 
@@ -550,6 +586,7 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   cancelAnim()
   clearTimeout(urlTimer)
+  clearTimeout(commitTimer)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
@@ -586,25 +623,12 @@ usePageHead({
       </p>
       <p v-else-if="!countyLayer" class="absolute inset-0 flex items-center justify-center text-slate-400 font-bold">讀取中</p>
 
-      <svg v-else ref="svgEl" class="absolute inset-0 block cursor-grab active:cursor-grabbing" :width="size.w" :height="size.h" :viewBox="vbString"
+      <svg v-else ref="svgEl" class="map-svg absolute inset-0 block w-full h-full cursor-grab active:cursor-grabbing"
         style="touch-action: none" role="group" aria-label="參選地圖" data-testid="map-svg"
         @wheel="onWheel" @pointerdown="onPointerDown" @mousemove="onSvgMove" @mouseleave="onSvgLeave">
-        <g v-for="d in drawLayers" :key="d.layer.key" :transform="d.layer.transform">
-          <g shape-rendering="crispEdges">
-            <path v-for="u in d.units" :key="u.code" :d="d.layer.fills[u.idx]" :fill="colorOf(d.layer, u)"
-              class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.candidates} 人`"
-              :data-testid="`cell-${u.code}`" :data-count="u.candidates"
-              @mouseenter="hover = { key: d.layer.key, idx: u.idx }" @mouseleave="hover = null"
-              @focus="hover = { key: d.layer.key, idx: u.idx }" @blur="hover = null"
-              @click="onUnitClick(d.layer, u)" @keydown.enter.prevent="onUnitClick(d.layer, u)" />
-          </g>
-          <path :d="d.layer.boundary" fill="none" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linecap="square" pointer-events="none" opacity="0.85" />
-        </g>
+        <MapLayers :layers="drawLayers" :color-mode="colorMode" :maxes="maxByLevel" :labels="labels" @hover="onHover" @pick="onPick" />
         <g v-if="activeLayer && activeOutline" :transform="activeLayer.transform" pointer-events="none">
           <path :d="activeOutline" fill="none" stroke="#0f172a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" data-testid="map-outline" />
-        </g>
-        <g v-for="l in labels" :key="l.key" :transform="l.layer.transform" pointer-events="none" text-anchor="middle" font-weight="800">
-          <text :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
         </g>
       </svg>
 
@@ -620,22 +644,21 @@ usePageHead({
         <!-- 右下：縮放 -->
         <div :class="['absolute right-3 z-10 flex flex-col gap-1', active ? 'bottom-60 md:bottom-3' : 'bottom-3']" data-testid="map-zoom">
           <button type="button" aria-label="放大" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
-            @click="animateTo({ ...view, k: Math.min(K_MAX, view.k * 1.8) }, 220)"><Plus :size="16" /></button>
+            @click="zoomBy(1.8)"><Plus :size="16" /></button>
           <button type="button" aria-label="縮小" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
-            @click="animateTo({ ...view, k: Math.max(kMin, view.k / 1.8) }, 220)"><Minus :size="16" /></button>
+            @click="zoomBy(1 / 1.8)"><Minus :size="16" /></button>
           <button type="button" aria-label="看全台" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
             @click="fitAll"><Maximize2 :size="16" /></button>
         </div>
         <!-- 左下：圖例與格子尺度 -->
         <div :class="['absolute left-3 bottom-3 z-10 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <template v-if="colorMode === 'count'">
-              <span>0</span>
-              <span v-for="(l, i) in legend" :key="i" class="w-5 h-3 rounded-sm" :style="{ background: l.color }"></span>
-              <span>{{ maxForLegend }}</span>
-            </template>
-            <span v-else v-for="(l, i) in legend" :key="i" class="inline-flex items-center gap-1">
-              <span class="w-4 h-3 rounded-sm" :style="{ background: l.color }"></span>{{ l.label }}
+          <div class="flex flex-wrap items-end gap-x-3 gap-y-1">
+            <div class="relative w-44 sm:w-56 pb-4" data-testid="map-legend-bar">
+              <div class="h-3 rounded" :style="{ background: legend.css }"></div>
+              <span v-for="t in legend.ticks" :key="t.label" :class="['absolute top-3.5 text-[10px] leading-none', tickClass(t.pos)]" :style="{ left: (t.pos * 100) + '%' }">{{ t.label }}</span>
+            </div>
+            <span v-if="legend.noData" class="inline-flex items-center gap-1 pb-4">
+              <span class="w-4 h-3 rounded-sm" :style="{ background: legend.noData.color }"></span>{{ legend.noData.label }}
             </span>
           </div>
           <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
@@ -687,3 +710,20 @@ usePageHead({
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 瀏覽器對可聚焦的 SVG 元素會畫一個矩形圓角的 focus 外框（點格子之後那個大圓角框）：整個拿掉，
+   選中與鍵盤聚焦都改由「沿行政區形狀的描邊」表示（hover ?? selected 的外框 path，見 activeOutline） */
+.map-svg,
+.map-svg * {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+</style>
+
+<style>
+/* 縮放、平移進行中先藏起邊界線與標籤（畫面上最重的部分），停下來再顯示 */
+.map-svg { transform-origin: 0 0; }
+.map-svg.moving { will-change: transform; }
+.map-svg.moving .map-hide-moving { display: none; }
+</style>

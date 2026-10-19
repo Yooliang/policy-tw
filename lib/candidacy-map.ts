@@ -6,6 +6,7 @@
  * 人數來自資料庫函式
  * candidacy_map（supabase/migrations/20261019090000_candidacy_map.sql）。畫面只在 pages/StatsMap.vue。
  */
+import { COUNT_STOPS, COUNT_ZERO_COLOR, COVERAGE_TICKS, NO_DATA_COLOR, countColor, countT, coverageColor, cssGradient, gradientAt } from './color-scale'
 import type { DecodedRaster } from './raster-grid'
 import { electionPath } from './election-regions'
 
@@ -133,17 +134,6 @@ export function buildMap(raster: Pick<DecodedRaster, 'codes'>, counts: ReadonlyA
 }
 
 /**
- * 人數 → 顏色段（0～4）。0 人固定第 0 段（灰）；1 人以上依「占最大值的比例」開根號分成 4 段，
- * 讓一兩人的小格子也看得出跟 0 人不同、又不被少數大格子壓扁。
- */
-export function rampIndex(value: number, max: number): number {
-  if (!(value > 0)) return 0
-  if (max <= 1) return 4
-  const t = Math.min(1, value / max)
-  return 1 + Math.min(3, Math.floor(Math.sqrt(t) * 4))
-}
-
-/**
  * 格子連到既有的選舉頁：縣市格＝縣市頁、鄉鎮市區格＝鄉鎮頁、村里格連到所在的鄉鎮頁（沒有村里頁）。
  * 網址規則在 lib/election-regions.ts（縣市名用「台」）。
  */
@@ -157,25 +147,8 @@ export function unitHref(electionId: number | string, view: MapView, unit: { nam
 
 export type ColorMode = 'coverage' | 'count'
 
-/** 收錄率分段門檻（百分比，含）：≥ 綠、≥ 黃、其餘紅。維護者 10-19：≥90% 綠、50–90% 黃、<50% 紅 */
-export const COVERAGE_GREEN_MIN = 90
-export const COVERAGE_YELLOW_MIN = 50
-
-export type CoverageBand = 'green' | 'yellow' | 'red' | 'none'
-
-/** 固定色碼（不拼 Tailwind class）。none＝沒有登記資料，中性淺灰、不算紅 */
-export const COVERAGE_COLORS: Record<CoverageBand, string> = {
-  green: '#22c55e',
-  yellow: '#facc15',
-  red: '#ef4444',
-  none: '#e5e7eb',
-}
-
-/** 人數模式的中性灰階：0 人最淺，最多的最深（白→淺灰→深灰→黑） */
-export const COUNT_GRAYS = ['#f5f5f5', '#d4d4d4', '#a3a3a3', '#525252', '#171717'] as const
-
 /**
- * 收錄率（整數百分比）＝收錄人數 ÷ 中選會登記人數（同一行政區、同一層）。
+ * 收錄率（整數百分比，提示卡顯示用）＝收錄人數 ÷ 中選會登記人數（同一行政區、同一層）。
  * 登記人數沒有（null）或是 0 → null（沒有可比的分母）。收錄超過登記（>100%）照實回傳。
  */
 export function coveragePercent(u: Pick<MapUnit, 'candidates' | 'registered'>): number | null {
@@ -183,28 +156,45 @@ export function coveragePercent(u: Pick<MapUnit, 'candidates' | 'registered'>): 
   return Math.round((u.candidates / u.registered) * 100)
 }
 
-export function coverageBand(percent: number | null): CoverageBand {
-  if (percent === null) return 'none'
-  if (percent >= COVERAGE_GREEN_MIN) return 'green'
-  if (percent >= COVERAGE_YELLOW_MIN) return 'yellow'
-  return 'red'
-}
-
-/** 一格的顏色：收錄率模式看分段、人數模式看灰階（max＝這一層人數最大值） */
+/**
+ * 一格的顏色（連續漸層，lib/color-scale.ts）：收錄率模式 紅（0%）→ 黃（50%）→ 綠（≥100%），沒有登記資料是中性淺灰；
+ * 人數模式 淺藍→深藍（log 尺度，max＝這一層人數最大值，0 人另一個灰藍）。
+ */
 export function unitColor(u: Pick<MapUnit, 'candidates' | 'registered'>, mode: ColorMode, max: number): string {
-  if (mode === 'coverage') return COVERAGE_COLORS[coverageBand(coveragePercent(u))]
-  return COUNT_GRAYS[rampIndex(u.candidates, max)]
+  if (mode === 'coverage') return coverageColor(u.registered !== null && u.registered > 0 ? u.candidates / u.registered : null)
+  return countColor(u.candidates, max)
 }
 
-/** 圖例：收錄率模式三段＋無登記資料；人數模式 0 到最大值的灰階 */
-export function legendItems(mode: ColorMode): Array<{ color: string; label: string }> {
-  if (mode === 'count') return COUNT_GRAYS.map((color) => ({ color, label: '' }))
-  return [
-    { color: COVERAGE_COLORS.green, label: `${COVERAGE_GREEN_MIN}% 以上` },
-    { color: COVERAGE_COLORS.yellow, label: `${COVERAGE_YELLOW_MIN}–${COVERAGE_GREEN_MIN}%` },
-    { color: COVERAGE_COLORS.red, label: `未滿 ${COVERAGE_YELLOW_MIN}%` },
-    { color: COVERAGE_COLORS.none, label: '無登記資料' },
-  ]
+export interface LegendTick { pos: number; label: string }
+export interface Legend {
+  /** CSS 漸層 */
+  css: string
+  ticks: LegendTick[]
+  /** 另外標示的色塊：收錄率模式是「無登記資料」，人數模式是「0 人」 */
+  noData: { color: string; label: string } | null
+}
+
+/** 圖例：漸層色條加刻度。收錄率刻度 0%、50%、90%、100%；人數刻度 1、10、100…到這一層最大值（太擠的省略） */
+export function legendFor(mode: ColorMode, max: number): Legend {
+  if (mode === 'coverage') {
+    return {
+      css: cssGradient((t) => coverageColor(t)),
+      ticks: COVERAGE_TICKS.map((p) => ({ pos: p / 100, label: `${p}%` })),
+      noData: { color: NO_DATA_COLOR, label: '無登記資料' },
+    }
+  }
+  const values = [1, 10, 100, 1000].filter((v) => v < max)
+  values.push(Math.max(1, max))
+  const ticks: LegendTick[] = []
+  for (const v of [...new Set(values)]) {
+    const pos = countT(v, max)
+    if (ticks.length && pos - ticks[ticks.length - 1].pos < 0.09) {
+      if (v === Math.max(1, max)) ticks.pop()
+      else continue
+    }
+    ticks.push({ pos, label: String(v) })
+  }
+  return { css: cssGradient((t) => gradientAt(COUNT_STOPS, t)), ticks, noData: { color: COUNT_ZERO_COLOR, label: '0 人' } }
 }
 
 /** 提示框的各行（只放標籤與數字；沒有資料的欄不出現） */

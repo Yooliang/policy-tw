@@ -4,7 +4,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, rampIndex,
+  NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf,
   tooltipLines, unitHref, viewKey, type CountRow,
 } from "./candidacy-map.ts";
 
@@ -75,22 +75,6 @@ Deno.test("聚合守門：地圖加清單的人數加總等於資料庫給的人
   const counts = [row("A", { candidates: 7 }), row("B", { candidates: 11 }), row("C", { candidates: 0 }), row("D", { candidates: 4 })];
   const m = buildMap({ codes: ["A", "B", "C"] }, counts);
   assertEquals([...m.units, ...m.unshaped].reduce((s, u) => s + u.candidates, 0), 22);
-});
-
-Deno.test("rampIndex：0 人固定第 0 段，1 人以上 1～4 段、單調不減、最大值落在第 4 段", () => {
-  assertEquals(rampIndex(0, 100), 0);
-  assertEquals(rampIndex(-3, 100), 0);
-  assertEquals(rampIndex(1, 100), 1);
-  assertEquals(rampIndex(100, 100), 4);
-  assertEquals(rampIndex(1, 1), 4, "最大值只有 1 時，有人的格子直接最深");
-  assertEquals(rampIndex(5, 0), 4);
-  let prev = 0;
-  for (let v = 0; v <= 100; v += 1) {
-    const i = rampIndex(v, 100);
-    assert(i >= prev && i >= 0 && i <= 4, `v=${v} i=${i}`);
-    prev = i;
-  }
-  assertEquals(new Set([1, 10, 30, 60, 100].map((v) => rampIndex(v, 100))).size, 4, "四個有人的段都用得到");
 });
 
 Deno.test("unitHref：縣市連縣市頁、鄉鎮連鄉鎮頁、村里連所在鄉鎮頁（照既有網址規則）", () => {
