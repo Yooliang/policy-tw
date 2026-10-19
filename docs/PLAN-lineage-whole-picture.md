@@ -1,6 +1,6 @@
 # 正見「脈絡＝一件事的全貌」計畫書（#675）
 
-> **狀態（2026-10-19）**：計畫，待審（先 agy，再維護者）。**不含任何程式或 migration**；各期由主線配 migration 時間戳與協議版號後才動工。
+> **狀態（2026-10-19）**：計畫，agy 同儕審查已過、主線已依審查修訂一輪（修訂處見 PR 內文），待維護者。**不含任何程式或 migration**；各期由主線配 migration 時間戳與協議版號後才動工。
 > **前提**：以 #670 PR 2（分支 `lineage-elected-only`、協議 1.99.0、migration `20261019020000`）合併後為準——脈絡只收「那一屆已投票且當選」的政見、`lineage_candidate_scope` 只收資格內、apply-precheck 擋不合格、新派工臂 `lineage_ineligible`。**本計畫不重做它**；撰寫時（main 在 `c5a7568`，只含 #670 PR 1）那支分支還沒有提交，下列用到它的地方都標「待 PR 2 合併後核對」。
 > 數字都是 2026-10-19 唯讀查正式庫的結果（方法與可重跑的查詢見附錄 A）；凡是「PR 2 之後的範圍」，我用同一個定義自己算（已投票且 `candidacy_status='elected'`），PR 2 合併後要用它的函式重算一次。
 
@@ -73,6 +73,8 @@
 | 視圖 `lineage_terms`（新） | 任期泳道原料 | 關係圖用：涉及的人與同職位前後任的任期（2.6） | 一 |
 | 函式 `lineage_policy_place()`、`lineage_coverage()`、`lineage_term_df()`、`lineage_norm()` | 新 | 政見的地方（單一真相）、涵蓋地方、專有名詞出現數、文字正規化（2.6） | 一 |
 | 觸發器 `lineage_touch_parent` | 新（六張子表共用：參與者、交接、關聯、立場、事件、現況） | 子表新增／修改／刪除時蓋 `lineages.updated_at`（2.6 的發現） | 一 |
+| 函式 `merge_politician()`（現行定義在 `20261007020000`） | 改本體（簽名不變，不用分兩次上） | 同名人物合併時，一起搬 `lineage_stances` 與 `lineage_events.initiator_politician_id`（2.9）；回傳的 jsonb 多 `moved_stances`、`moved_events` | 一 |
+| 函式 `contribution_auto_tasks_placeholder_politicians()` 的「空殼」那一段 | 改本體 | 「名下什麼都沒有」的判斷要把立場與事件推動者也算進去（2.9） | 一 |
 | `policies`、`politicians`、`handovers`、`lineage_participants` | **不動** | `handovers` 已照人與屆別記，職位由 `from_office_id`／`to_office_id` 與視圖推導 | — |
 
 ### 2.2 `lineages`
@@ -83,7 +85,7 @@
 | CHECK `lineages_place` | **不動** | 主辦仍是「單一層級＋單一地方」，三種組合（中央無地方、縣市要 5 碼、鄉鎮要 8 碼）照舊成立 |
 | 唯一索引 `lineages_same_title_same_place`（層級＋行政區代碼＋標題） | **不動**，但把 `COMMENT` 改成「同一個主辦、同標題不會有兩條」 | 它現在擋的是「同一主辦被建兩次」，一條脈絡跨地方之後這個意思仍成立；它**擋不到**「不同主辦、同一件事」的重複，那個要靠派工（4.2 的 `existing_lineages` 帶涵蓋該縣市的脈絡、4.3 的 `other_lineages` 提示）與驗證，不是索引的事 |
 | 沒有單一主辦（例：中彰投合辦） | 填**牽頭或核定的那一級**；實在找不到填中央 | 不為少數情況新增「多主辦」結構；寫進協議的 `lineage` 段 |
-| `search_terms TEXT[] NOT NULL DEFAULT '{}'` | 新 | 1～5 個、每個 2～12 字、**必須是標題的子字串**（維護者：「用脈絡標題的專有名詞」）。以 CHECK 呼叫 `lineage_terms_in_title(title, search_terms)`（IMMUTABLE）擋；改標題時 CHECK 會要求同步改詞 |
+| `search_terms TEXT[] NOT NULL DEFAULT '{}'` | 新 | **資料庫的 CHECK 允許空陣列**：`cardinality(search_terms) BETWEEN 0 AND 5`，且每個詞 2～12 字、**必須是標題的子字串**（維護者：「用脈絡標題的專有名詞」），由 `lineage_terms_in_title(title, search_terms)`（IMMUTABLE；空陣列回 true）判斷。這樣 `DEFAULT '{}'` 與既有 10 條不會被擋；改標題時 CHECK 會要求同步改詞。「至少一個詞」是**交件與派工那一端**的要求（新建脈絡建議帶、往外擴的選詞步驟會補），不是資料庫約束；空陣列＝沒有專有名詞，不參與往外擴 |
 | 摘要 `summary` | 欄位不動（200 字以內純文字）；**出處走 `source_refs`（目標表 `lineages`）** | 見 2.5；逐句註腳不做，見第 9 節裁決 1 |
 | 空脈絡（合格政見 0 條） | 保留不刪；頁面標 `noindex`、不進網站地圖、一覽不列；派工的 `existing_lineages` 仍列出並標「目前 0 條政見」 | 既有 6 條會因 PR 2 變成 0 條（1.2）。2026-11-28 之後 2026 當選者的政見進場時要能接回原脈絡，不要被重建成重複的一條 |
 
@@ -93,7 +95,8 @@
 |---|---|
 | 意思 | `upper_lineage_id`＝**大計畫**、`lower_lineage_id`＝**項目**；一條項目可屬於多個大計畫（有向、不成環）。欄位名不改（兩次上線規則），前端型別另取別名 `parentId`／`childId` |
 | `link_type` | CHECK 改成 `IN ('top_down','bottom_up','contains')`——**先加不刪**（0 筆資料，但舊程式與在途交件仍可能帶舊值）；新交件只收 `contains`。舊兩個值在確認 0 筆、無在途 `lineage_link` 交件後，由後續一支 migration 刪掉（兩次上線） |
-| 觸發器 `lineage_links_check_levels`（現在：上級必須是中央、或同縣市的縣市） | 新增 `lineage_links_check_contains` 取代它：①項目的主辦層級**不高於**大計畫（中央＞縣市＞鄉鎮），同層級時主辦地方要相同（同縣市的「台南捷運網」包含「藍線一期」成立；縣市大計畫包含中央項目不成立）；②**不成環**（遞迴檢查大計畫不是項目的後代）；③`contains` 以外的舊值保留舊檢查直到刪除 |
+| 觸發器 `lineage_links_check_levels`（現在：上級必須是中央、或同縣市的縣市） | 新增 `lineage_links_check_contains` 取代它，三條：①**層級與地方**（下一列，agy 審查指出「只看層級高低」會讓新北市的大計畫包含花蓮縣的鄉鎮項目通過，所以**地方一定要比**）；②**不成環**（遞迴檢查大計畫不是項目的後代）；③`contains` 以外的舊值保留舊檢查直到刪除 |
+| 　層級與地方的規則 | 大計畫的主辦 → 項目的主辦可以是：**中央** → 中央、任何縣市、任何鄉鎮；**縣市** → 同一個縣市（`region` 相同）的縣市項目、**同縣市（`region` 相同）的鄉鎮項目**；**鄉鎮** → 同一個鄉鎮（`region` 與 `sub_region` 都相同）的鄉鎮項目。項目的層級高於大計畫、或縣市不同，一律擋（`RAISE EXCEPTION`，回應講明哪一條不合）。例：「台南捷運網」（台南市）包含「藍線一期」（台南市）成立；新北市的大計畫包含花蓮縣吉安鄉的項目不成立；縣市大計畫包含中央項目不成立 |
 | 派工臂 `lineage_links` | 第一期：停用規則（`activity_rules` 該列 `enabled=false`，2 件在隊任務被收回；理由是舊說明句「上級立法或補助」與新意思衝突）。第五期：重寫候選＝同類別、大計畫主辦層級不低於項目（同層同地）、**且大計畫的涵蓋地方包含項目的主辦地方**，一條項目一件、同一份候選清單查過不再派 |
 | 畫面 | 主頁寫「屬於」（`direction='upper'`）與「包含」（`direction='lower'`）；`LINK_LABEL` 改成「包含」一個詞 |
 
@@ -125,7 +128,7 @@
 | `date_precision` | TEXT NOT NULL DEFAULT `day` CHECK IN (`day`,`month`,`year`) | 老的質詢紀錄常只確定年份（示意圖就是「2019」） |
 | `quote` | TEXT NOT NULL CHECK 8～300 字 | **原文摘句**，驗證者要在出處找得到一字不差 |
 | `source_url`／`source_locator` | NOT NULL；locator 1～200 字 | 同現有三張子表（網址格式 CHECK、位置＝議事紀錄日期與案由、報導段落等） |
-| `note` | 選填 1～200 字 | |
+| `note` | 選填 1～200 字 | **子表的備註**，對應交件裡「每一項」的 `note`；跟交件外層那個 `note`（交件說明，20～300 字、存在 `contributions.note`）是兩個不同的欄位，協議兩處分開寫、分開命名（外層叫「交件說明」、項目內叫「備註」），避免代理把 201～300 字的說明填進備註而撞 CHECK |
 | `contribution_id`、`created_at`、`updated_at` | 同現有三張子表 | |
 | 唯一鍵 | `UNIQUE (lineage_id, politician_id, stated_on)` | 同一人同一天一筆；重交＝覆蓋，查核履歷記每欄舊值。「現行立場」＝同一人最新一筆，立場變過看全部列 |
 
@@ -141,7 +144,7 @@
 | `description` | TEXT NOT NULL 10～300 字 | 只寫發生了什麼，不寫評價 |
 | `initiator_politician_id` | 選填 → `politicians` | 誰提案或爭取（關係圖畫「爭取 → 核定」的虛線箭頭用；不填就不畫箭頭）；`initiator_note` 選填 2～30 字（例：「縣府提案」「立委爭取」） |
 | `source_url`／`source_locator`、`contribution_id`、時間欄 | 同上 | |
-| 唯一鍵 | `UNIQUE (lineage_id, event_type, occurred_on, decided_by)` | |
+| 唯一鍵 | `UNIQUE (lineage_id, event_type, occurred_on, decided_by)` | **已知取捨**：同一天、同一機關、同一型態的兩項決定（例：議會同日兩筆預算刪減）會撞鍵，後交的覆蓋先交的。協議與任務說明明寫「同日同機關同型態的多項決定合併成一筆、`description` 分點寫」；覆蓋時查核履歷會記下舊值，不會無聲丟失。不把描述雜湊放進鍵，否則同一件事改幾個字重交就變成兩筆 |
 
 **`lineage_statuses`**
 
@@ -153,6 +156,7 @@
 | `as_of` | DATE NOT NULL | 截至日＝**出處講到這個狀態的那個日期**，不是查的日子（防止假新鮮）；晚於今天由交件守門擋 |
 | `source_url`／`source_locator`、`contribution_id`、時間欄 | 同上 | |
 | 唯一鍵 | `UNIQUE (lineage_id, as_of)` | 現行現況＝最大 `as_of` 那一列；歷史留著給查核履歷與日後的「現況變遷」 |
+| **撤回與更正**（agy 審查補） | 交件可帶 `remove: true`（撤回某一列）或 `replace_as_of`（以新內容取代某一列），見 3.1 | 現況是單筆交件，不像立場、事件的陣列可以在同一筆裡「拿掉舊的＋加新的」。**不再用「截至日不得早於現有最新」擋交件**（3.2）：錯填的日期若靠這條擋，後面合法的現況永遠進不來；改成日期較舊的照樣收進歷史、不影響「現行」，同時提供撤回與取代，錯的那一列拿掉後視圖自動退回次新的一列 |
 
 三張表共同：RLS 公開讀、`service_role` 寫（同現有）；`BEFORE UPDATE` 蓋 `updated_at`；`AFTER INSERT/UPDATE OF source_url` 同步 `source_refs`（寫不進出處表就讓落庫失敗）；`AFTER DELETE` 清 `source_refs`；`AFTER INSERT/UPDATE/DELETE` 蓋父脈絡的 `updated_at`（2.6）。
 
@@ -184,7 +188,7 @@
 | `status_stale_days_active` | 90 | 階段是 `approved`／`in_progress` 的現況，截至日超過幾天就派 |
 | `status_stale_days_idle` | 180 | 階段是 `proposed`／`planning`／`paused` |
 | `event_recheck_days` | 180 | 有事件的脈絡，最近一筆事件（或最近現況）超過幾天再派事件缺口 |
-| `stance_recheck_days` | 60 | 立場缺口查無後多久再派 |
+| `gap_not_found_days` | 60 | 立場、事件、現況三支缺口臂：同一條脈絡的同型任務回報 `not_found` 之後，多久內不再派（臂本體自己查 `task_checks`，見 3.4）。比一般任務的 14 天長，因為這三種「查不到」多半是真的還沒有公開資料 |
 | `expand_term_df_cap` | 12 | 專有名詞在合格政見裡出現超過幾條就算太泛（實測見 4.3） |
 | `expand_candidates_max` | 30 | 一件往外擴任務最多列幾條候選政見 |
 | `expand_stop_terms` | 空陣列 | 緊急時加的停用詞（不是常態維護的詞表） |
@@ -207,6 +211,16 @@
 | 在隊的 279 件舊 `lineage_candidate` | 新臂上線後舊 `task_id` 不再由臂產生，seed 依既有規則收回；在途的舊交件照樣可以落庫（落庫只看 payload） | 否 |
 | 舊的 `link_type` 兩個值 | 0 筆，保留到第五期確認後刪 | 否 |
 
+### 2.9 人物合併與移除的連動（agy 審查補；第一期一起做）
+
+新表有人物外鍵，**人物合併與「空殼人物」清理本來就會碰脈絡的表**（現況：`merge_politician` 已搬 `lineage_participants` 與 `handovers`，空殼那一段也把這兩張表算進「名下還有東西」）。不處理的話，同名合併後立場掛在被合併的那位身上（視圖雖然用 `merged_into` 顯示保留者，但外鍵留著孤兒），空殼清理還可能把有立場的人當成空殼移除。
+
+| 物件 | 改什麼 | 守門 |
+|---|---|---|
+| `merge_politician()`（以 main 最新定義為底，現行在 `20261007020000`） | ①`lineage_stances`：同一條脈絡、同一天已有保留者的一列 → 併進來的那列**整列記進 `edit_history` 再刪**；其餘改 `politician_id`（舊→新各記一列履歷）。②`lineage_events.initiator_politician_id`：直接改（沒有唯一鍵衝突）。③回傳多 `moved_stances`、`moved_events` | PGlite 實跑：搬動、撞鍵（同脈絡同日）、履歷、整筆還原；還原驗證＝拿掉搬 `lineage_stances` 的那段 → 測試紅 |
+| `contribution_auto_tasks_placeholder_politicians()` 的 `orphan` 那一段（以 main 最新定義為底） | 「名下什麼都沒有」的 `NOT EXISTS` 再加 `lineage_stances`、`lineage_events.initiator_politician_id` | 測試：名下只剩一筆立場的人不被當空殼；拿掉新條件 → 紅 |
+| 人物 `removal`（整個人移除） | 比照 `lineage_participants` 現況（外鍵不加 `CASCADE`），實作時對照 `removal` 落庫確認它對這兩張表的行為與參與者一致，不另開例外 | 同上對照測試 |
+
 ---
 
 ## 3. 交件型別與協議
@@ -218,9 +232,9 @@
 | 型別 | 欄位（✅＝必填） | 落庫 | 任務 |
 |---|---|---|---|
 | `lineage`（既有，改） | 新增 `new_lineage.search_terms`（選填，1～5 個、2～12 字、須為標題子字串、通過出現數檢查）；更正時可改 `search_terms`，以及**主辦**（`level`／`region`／`sub_region`，與 `new_lineage` 同規則）；`policy_ids` 歸入的政見可以是別的地方、別的層級（不再限同一格）；協議的定義段改寫成「一件事一條」 | 同現有，多寫 `search_terms`、`source_refs`（`lineages`） | `lineage_candidate`（改格）、`lineage_expand`（新）；歸入既有脈絡時 `lineage_id` 必填 |
-| `lineage_stance`（新） | `lineage_id`✅、`stances`✅（1～10 項，每項 `politician_id`✅、`stance`✅、`condition`（有條件必填）、`stated_on`✅、`date_precision`、`quote`✅、`source_locator`✅、`source_url`、`note`、`remove`）；`note`✅（20～300 字：這個人指的是哪件事、為什麼是同一件事） | 以（脈絡＋人＋日期）覆蓋；`remove:true` 拿掉標錯的列 | `lineage_stance_missing` |
-| `lineage_event`（新） | `lineage_id`✅、`events`✅（1～10 項，每項 `event_type`✅、`occurred_on`✅、`date_precision`、`level`✅、`region`／`sub_region`（依層級）、`decided_by`✅、`description`✅、`initiator_politician_id`、`initiator_note`、`source_locator`✅、`source_url`、`remove`） | 以（脈絡＋型態＋日期＋機關）覆蓋 | `lineage_event_missing` |
-| `lineage_status`（新） | `lineage_id`✅、`phase`✅、`text`✅（8～120 字）、`as_of`✅、`source_locator`✅、`source_url`；單筆 | 以（脈絡＋截至日）覆蓋；新截至日＝新增一列 | `lineage_status_stale` |
+| `lineage_stance`（新） | `lineage_id`✅、`stances`✅（1～10 項，每項 `politician_id`✅、`stance`✅、`condition`（有條件必填）、`stated_on`✅、`date_precision`、`quote`✅、`source_locator`✅、`source_url`、**`second_source_url`（這一項的出處不是官方時必填，且要是不同網站，3.2）**、`note`（項目備註，1～200 字）、`remove`）；外層 `note`✅＝交件說明（20～300 字：這個人指的是哪件事、為什麼是同一件事） | 以（脈絡＋人＋日期）覆蓋；`remove:true` 拿掉標錯的列（要改日期＝同一筆裡一項 `remove` 舊的、一項加新的） | `lineage_stance_missing` |
+| `lineage_event`（新） | `lineage_id`✅、`events`✅（1～10 項，每項 `event_type`✅、`occurred_on`✅、`date_precision`、`level`✅、`region`／`sub_region`（依層級）、`decided_by`✅、`description`✅、`initiator_politician_id`、`initiator_note`、`source_locator`✅、`source_url`、**`second_source_url`（同立場）**、`remove`）；外層 `note`✅ | 以（脈絡＋型態＋日期＋機關）覆蓋；要改日期同立場的做法 | `lineage_event_missing` |
+| `lineage_status`（新） | `lineage_id`✅、`phase`✅、`text`✅（8～120 字）、`as_of`✅、`source_locator`✅、`source_url`；單筆。**更正與撤回**：`replace_as_of`（選填，舊的那一列的截至日＝刪那一列、寫這一筆新的）；`remove: true`（只撤回 `as_of` 那一列，其餘內容欄不必填，外層 `note`✅ 寫為什麼是錯的） | 以（脈絡＋截至日）覆蓋；新截至日＝新增一列；撤回與取代都把被動的整列記進查核履歷（可還原） | `lineage_status_stale` |
 | `lineage_link`（既有，改義） | `upper_lineage_id`（大計畫）✅、`lower_lineage_id`（項目）✅、`link_type='contains'`✅、`note`✅、`source_locator`✅ | 同現有，換觸發器檢查 | `lineage_link_candidate`（第五期重寫） |
 | `lineage_handover`、`lineage_participants` | **不動** | | `handover_missing`（4.5 小改）、`lineage_roles_missing` |
 
@@ -232,11 +246,12 @@
 |---|---|---|---|---|
 | 脈絡存在、人物存在且未合併 | ✓ | ✓（推動者） | ✓ | `target_not_found` |
 | 日期不晚於今天 | `stated_on` | `occurred_on` | `as_of` | `date_in_future` |
-| 現況的 `as_of` 不得早於該脈絡已有的最新截至日 | — | — | ✓（要改舊的請用同一截至日覆蓋） | `status_older_than_current` |
+| 現況的撤回與取代：`remove`／`replace_as_of` 指到的那一列要存在 | — | — | ✓ | `target_not_found` |
+| 現況的 `as_of` 比現有最新的舊：**不擋**，照樣收進歷史、不影響「現行」；回應帶 `older_than_current` 提醒（不算被拒）。原本計畫「不得早於最新」會讓一筆填錯的較晚日期永遠擋住後面合法的現況（agy 審查），改成提醒加上撤回機制 | — | — | 提醒 | 提醒碼暫名 `older_than_current` |
 | 條件、原文、描述的長度與必填 | `condition`、`quote` | `description` | `text` | `invalid_payload` |
 | 出處不可是讀不到的社群（臉書、IG、Threads）；不可引用正見本身（1d） | ✓ | ✓ | ✓ | 同現有 |
-| **媒體不能當唯一出處**（1a）：加進 `SOLE_SOURCE_GUARDED_TYPES` | ✓ | ✓ | ✓ | `single_non_official_source` |
-| 專有名詞檢查（`lineage` 的 `search_terms`）：須為標題子字串、2～12 字、不是地名、出現數在上限內 | — | — | — | `term_too_generic`（回應帶每個詞的出現數）、`term_not_in_title` |
+| **媒體不能當唯一出處**（1a）：加進 `SOLE_SOURCE_GUARDED_TYPES`，且**陣列型要逐項檢查**——現行 `soleSourceProblem` 只數外層 `source_urls` 的網站數，一筆交 10 項時，項目 A 只引媒體 1、項目 B 只引媒體 2，外層看起來有 2 個網站就放行，每一項其實都只有單一媒體（agy 審查指出，我核對 `sole-source-guard.ts` 屬實）。新規則：**每一項**的 `source_url` 是官方就過；不是官方就要有 `second_source_url`、而且與前者不同網站（`siteOf` 比），沒有就擋。現況是單筆，外層檢查就夠。錯誤訊息的中文稱謂補「立場」「事件」「現況」（`soleSourceProblem` 現在寫死 政見／交接／政見進度，沒補會把新型別誤稱「政見進度」），`SOLE_SOURCE_TASK_NOTE` 與 `task-guidance.ts` 裡那句型別清單一起改 | ✓（逐項） | ✓（逐項） | ✓（外層） | `single_non_official_source` |
+| 專有名詞檢查（`lineage` 的 `search_terms`，可為空陣列）：每個詞須為標題子字串、2～12 字、不是地名、出現數在上限內 | — | — | — | `term_too_generic`（回應帶每個詞的出現數）、`term_not_in_title` |
 | 事件的地方解析 | — | 縣市／鄉鎮對行政區 | — | `target_not_found` |
 | 一條政見只屬於一條脈絡 | `lineage` 歸入時照現有 | | | `apply_would_fail` |
 | **PR 2 的資格檢查**（歸入的政見要是那一屆已投票且當選） | `lineage` 沿用，不重做 | | | 待 PR 2 合併後核對 |
@@ -252,6 +267,8 @@
 | `lineage_status` | ①`text` 每個字都能在出處找到；②`as_of` 是出處講到那個狀態的日期；③`phase` 與句子一致；④沒有被**更晚**的事件推翻（先看事件列） | 句子超出原文、日期是查詢日、階段與句子矛盾 |
 | `lineage`（新增的往外擴與專有名詞） | 每個 `search_terms` 是這件事的專有名詞（計畫名、路線名、法案名），不是通稱；歸入的別地政見**確實是同一件事**：note 要寫出共同的專有名詞與地點，**同名不同標的（不同縣市的「藍線」）一律不歸入** | 只因為用詞相似就歸入 |
 
+現況的**撤回／取代**：驗證者要確認被指的那一列真的錯（日期對不上出處、句子超出原文），並看外層 `note` 有沒有講清楚為什麼；取代時新內容照 `lineage_status` 那一列驗。立場與事件的 `remove` 項同理。
+
 沿用既有：打不開投 `unsure`；只有確認網頁不存在或與 payload 矛盾才投 `disagree` 並附反證；同一份交件第 1 張 `unsure` 0 分、第 2 張起每張 −1（1.95.0）；系統不給這三種型別系統票、不核第二來源（同現有四種脈絡型別）。
 
 ### 3.4 計分
@@ -260,10 +277,10 @@
 |---|---|---|
 | 目標分數與退件門檻 | **沿用 normal：目標 3、退件 −3**；`contribution_required_agree` 走 `ELSE` | 與現有四種脈絡型別一致；不改計分，所以不需要為計分通知日本站 |
 | 系統票 | 不給（`system_vote_eligible` 不收） | 同現有脈絡型別 |
-| `lineage_event` 的 `cancelled`（喊卡／終止） | **比照交接 `stop` 套 `contribution_needs_two_ips`**：SQL 一處、TS `needsTwoIps` 一處、`lineage.test.ts` 盯兩邊 | 錯的「終止」等於公開說政府把這件事停了，跟 `stop` 同級 |
+| `lineage_event` 的 `cancelled`（喊卡／終止） | **比照交接 `stop` 套 `contribution_needs_two_ips`，但 payload 是陣列，不能照 `stop` 讀純量**（agy 審查指出；`stop` 讀的是 `p_payload->>'handover_type'`，交接是單筆）。①**SQL**：`contribution_needs_two_ips` 加一段 `OR (p_type = 'lineage_event' AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'events') = 'array' THEN p_payload->'events' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND COALESCE(e->>'event_type', '') = 'cancelled'))`，寫法照 `20261018030000` 的 `changes[]` 那段；**必須以 main 最新那一版的整個函式為底重寫**（它已經有 merge／candidacy／removal／reassign／`stop`／退選更正等分支，漏抄一支就把那支的兩台機器規則悄悄拿掉）。②**TS**：`consensus.ts` 的 `needsTwoIps` 對 `lineage_event` 讀 `payload.events`（非陣列當空）、用 `.some()` 找 `event_type === 'cancelled'`（常數另放 `EVENT_TWO_IP_TYPES = ['cancelled']`，仿 `HANDOVER_TWO_IP_TYPES`）。③**混合 payload**：一筆裡只要有一項 `cancelled`（含 `remove` 那項），整筆都要兩台機器。④`lineage.test.ts` 逐案比對 SQL 與 TS，**案例必須包含陣列 payload**（純量讀法在陣列 payload 上永遠是空，守門會靜默失效） | 錯的「終止」等於公開說政府把這件事停了，跟 `stop` 同級 |
 | **發現：兩台機器規則對這些型別實際沒有額外效力** | 單票最高 +2（`contribution_vote_weight`：同意 +1、附的第二來源經系統核過 +2），沒有系統票，目標 3 → **本來就至少要兩個不同來源網段的票**；`stop` 的規則（20261006034900）因此是「明文化」不是「加強」 | 唯讀讀程式與函式得到；真要讓終止更難上線得提高目標分數（改 `contribution_required_agree`、TS 表、skill.md 門檻表、通知日本站），這是改計分，見第 9 節裁決 2 |
 | 立場 `oppose` 要不要加高 | 不加 | 原文逐字與兩站規則已經是主要防線；上線兩週看被退比例再議 |
-| 冷卻 | 三支缺口臂的任務型別加進 `task_cooldown_settings.task_types`（查無：第一次 14 天、第二次起 30 天）；`apply-contribution.ts` 的 `PROGRESS_COOLDOWN_TASK_TYPES` 要**同步改**（CLAUDE.md 村里長那條寫了這個耦合） | 避免「查不到」的任務一直回來 |
+| 冷卻 | **不碰** `task_cooldown_settings.task_types` 與 `apply-contribution.ts` 的 `PROGRESS_COOLDOWN_TASK_TYPES`（agy 審查指出，我核對屬實）：那份清單專屬村里長進度追蹤（#470），`village-progress-cooling.test.ts`（A9）會把常數與 `20261009010000` 的初值逐項比對，加了就紅；而且那條回給代理的句子寫死「已記錄『查無公開進度』」，對立場、事件說不通。**冷卻走 `lineage_settings.gap_not_found_days`**：三支缺口臂的本體各加一個 `NOT EXISTS`，查 `task_checks` 裡 `task_id` 以 `auto:<任務型別>:<脈絡 id>:` 開頭（**不比指紋**，指紋換號也要擋住）、`outcome='not_found'`、`checked_at` 在 `gap_not_found_days` 內的紀錄。一般任務的 14 天冷卻（`task_check_cooldown_days()`，`refresh_dispatch_blocked` 對所有 `auto:` 任務都套）照舊先生效，這個天數只會把它拉長。回給代理的句子走現有的「查過、無異動」那句，不新增文案分支；上線前量這個 `LIKE` 查詢的成本（`task_checks` 有沒有可用索引） | 避免「查不到」的任務一直回來，又不動村里長的守門 |
 
 ### 3.5 協議文件改動（`public/skill-types.md` 與 `skill.md`）
 
@@ -301,7 +318,7 @@
 
 ### 4.2 分組任務跨層級：怎麼分格、幾格、最大多大
 
-**格的定義**：`(縣市, 類別)`；縣市取自 `lineage_policy_place()`（政見持有人那一屆參選紀錄的縣市）。縣市長、縣市議員、鄉鎮市長與區長、區域立委都歸到**自己的縣市**那一格；總統副總統與沒有縣市的（`全國`）歸一個「全國」格（今天只有總統副總統 13 條）。範圍函式 `lineage_cell_scope()`＝PR 2 的資格函式＋`lineage_policy_place()`，一條政見一列；格鍵＝`lineage_cell_key(縣市或空, 類別)`（雜湊前 12 碼，同 `lineage_block_key` 的做法，鍵空間不同所以不會與舊鍵混）。舊的 `lineage_candidate_scope()`、`lineage_block_key()` 留著不刪（刪函式要分兩次上線，且日本站有複本），第五期之後沒有臂再呼叫它們。任務的指紋、`NOT EXISTS` 在途交件、`lineage_candidate_reviews` 清查（鍵 `cell:<格鍵>`）都沿用現有寫法。
+**格的定義**：`(縣市, 類別)`；縣市取自 `lineage_policy_place()`（政見持有人那一屆參選紀錄的縣市）。縣市長、縣市議員、鄉鎮市長與區長、區域立委都歸到**自己的縣市**那一格；總統副總統與沒有縣市的（`全國`）歸一個「全國」格（今天只有總統副總統 13 條）。範圍函式 `lineage_cell_scope()`＝PR 2 的資格函式＋`lineage_policy_place()`，一條政見一列；格鍵＝`lineage_cell_key(縣市或空, 類別)`（雜湊前 12 碼，同 `lineage_block_key` 的做法，鍵空間不同所以不會與舊鍵混）。舊的 `lineage_candidate_scope()`、`lineage_block_key()` 留著不刪（刪函式要分兩次上線，且日本站有複本），第五期之後沒有臂再呼叫它們。任務的指紋、`NOT EXISTS` 在途交件、`lineage_candidate_reviews` 清查都沿用現有寫法：`task_id` 仍是 `auto:lineage_candidate:<12 碼>:<8 碼>`，`parseCandidateTaskId`（`_shared/lineage.ts`）照舊解成 `block:<格鍵>`，**格鍵的雜湊輸入改以 `cell|` 開頭**，與舊格（`level|region|…`）不會相撞，所以解析函式與清查表都不用改。
 
 **實測（2026-10-19，唯讀；範圍＝已投票且當選、六種職位；PR 2 合併後以它的函式重算）**
 
@@ -346,7 +363,7 @@
 | 詞的資格 | ①必須是標題子字串；②2～12 字；③不等於任何行政區名稱；④出現數（不含這條脈絡自己的政見）≤ `expand_term_df_cap`（12，臂每輪即時算，變泛了就自動丟並在 `target.dropped_terms` 告知）；⑤不維護手寫詞表，只留 `lineage_settings.expand_stop_terms`（預設空陣列）給緊急時加 |
 | 候選 | 別的格的合格政見（標題或說明含至少一個合格詞、正規化後比對）、**尚未歸入任何脈絡**；已歸入**別條**脈絡的另列 `target.other_lineages`（最多 10 條，是「同一件事被建成兩條」的警訊），不放進候選 |
 | 排序與上限 | 命中詞數多的先、標題命中先於說明命中、較新的屆別先；一件任務最多 `expand_candidates_max`（30）條 |
-| 任務數 | **一條脈絡一件**；指紋＝候選政見 id＋合格詞的雜湊；查過（`no_change`＝`confirmed`，或歸入已落庫）記 `lineage_candidate_reviews` 鍵 `expand:<脈絡 id>`，同一指紋不再派；之後只有「指紋變了且距上次超過 `expand_recheck_days`」才會再派 |
+| 任務數 | **一條脈絡一件**；指紋＝候選政見 id＋合格詞的雜湊；查過（`no_change`＝`confirmed`，或歸入已落庫）記 `lineage_candidate_reviews` 鍵 `expand:<脈絡 id>`（`parseCandidateTaskId` 要加 `lineage_expand` 這一種；選詞步驟的鍵 `terms:<脈絡 id>`——代理回「這件事沒有專有名詞」＝`confirmed`，記下後不再派選詞，**避免空陣列的脈絡永遠被派選詞**），同一指紋不再派；之後只有「指紋變了且距上次超過 `expand_recheck_days`」才會再派 |
 | 總量 | `open_cap_per_arm`；沒有合格詞或沒有候選的脈絡不派 |
 | 效能 | 上線前實測臂本體（`EXPLAIN ANALYZE`、**把全部輸出欄加總**，不只 `count(*)`，CLAUDE.md）。**判準**：> 300 毫秒或脈絡 > 200 條時改成物化表 `lineage_expand_candidates`（`pg_cron` 每小時重算），臂只讀表；今天 10 條脈絡直接算 |
 | 任務步驟 | `target.step='terms'`（脈絡沒有 `search_terms`）：只附 `suggested_terms`，請代理用 `lineage` 更正交回詞；`target.step='candidates'`：附候選清單與已合格的詞 |
@@ -357,7 +374,7 @@
 
 | 臂 | 派的條件 | 不派／停派的條件 | `task_id`（指紋） | `target` 大致內容 |
 |---|---|---|---|---|
-| `lineage_stances`（立場缺口） | 脈絡有 ≥1 條合格政見；**應有立場的人**＝①主辦與涵蓋地方的**首長**（縣市長、鄉鎮市長、區長，任期與脈絡期間有重疊者，含前任）②政見持有人③參與者；扣掉已有立場紀錄的人，剩下的 ≥1 人 | 在途的 `lineage_stance` 交件；同一份人名單查過 `confirmed`；`not_found` 冷卻（`stance_recheck_days`）；名單上限 30 人 | `auto:lineage_stance_missing:<脈絡 id>:<人名單雜湊 8 碼>` | 脈絡簡述、`people[]`（人、職位與任期、為什麼在名單上）、已有的立場 |
+| `lineage_stances`（立場缺口） | 脈絡有 ≥1 條合格政見；**應有立場的人**＝①主辦與涵蓋地方的**首長**（縣市長、鄉鎮市長、區長，任期與脈絡期間有重疊者，含前任）②政見持有人③參與者；扣掉已有立場紀錄的人，剩下的 ≥1 人 | 在途的 `lineage_stance` 交件；同一份人名單查過 `confirmed`；`not_found` 後 `gap_not_found_days` 內不派（3.4）；名單上限 30 人 | `auto:lineage_stance_missing:<脈絡 id>:<人名單雜湊 8 碼>` | 脈絡簡述、`people[]`（人、職位與任期、為什麼在名單上）、已有的立場 |
 | `lineage_events`（事件缺口） | 有 ≥1 條合格政見，且 ①完全沒有事件，或 ②現況階段是 `planning`／`approved`／`in_progress`／`paused`、而最近一筆事件（沒有事件就看現況截至日）超過 `event_recheck_days` | 階段已是 `completed`／`cancelled` 且至少有一筆事件；在途交件；冷卻 | `auto:lineage_event_missing:<脈絡 id>:<原因 none 或 stale>` | 脈絡、已有事件、現況 |
 | `lineage_status`（現況過期） | 有 ≥1 條合格政見，且 ①沒有現況，或 ②階段 `approved`／`in_progress` 截至日超過 `status_stale_days_active`、其他階段超過 `status_stale_days_idle`，或 ③有比現況截至日更晚的事件 | 階段 `completed`／`cancelled` 且有現況；在途交件；冷卻 | `auto:lineage_status_stale:<脈絡 id>:<目前截至日或 none>` | 現行現況、較新的事件、脈絡 |
 
@@ -387,8 +404,8 @@
 | 標題列 | 標題、**主辦**（層級＋地方）、**涵蓋**（`coverage` 的地名）、**屬於**（`links` 中 `direction='upper'`，真連結）、類別 | 沒有涵蓋或屬於就不印那一格 |
 | 現況 | `status`：階段標籤＋一句＋「截至日」＋出處連結（有存檔附存檔） | 標籤「未調查」 |
 | 這件事 | `summary`＋**出處列**（`sources`，編號、真連結）。**不寫評價**；逐句註腳見第 9 節裁決 1 | 沒有摘要就不印 |
-| 各方立場 | 表：層級｜人｜立場｜何時｜出處。每人取**最新**一筆；立場變過的在該列標「曾變」並連到關係圖；排序：中央→縣市→鄉鎮、再依地區、再依日期新到舊；「條件」寫在立場標籤後。**推導列**（第 9 節裁決 4）：政見持有人若沒有立場紀錄，補一列灰色標籤「提出政見」（日期＝提出日或屆別投票日、出處＝政見頁），**不算進「立場 N 筆」** | 標籤「未調查」 |
-| 大事記 | 事件＋交接合併，新到舊，最近 4 筆，各附出處；底下按鈕「看完整關係圖 →」（真連結，`rel="nofollow"`） | 沒有就只留按鈕 |
+| 各方立場 | 表：層級｜人｜立場｜何時｜出處。每人取**最新**一筆；立場變過的在該列標「曾變」（第四期起才連到關係圖，第三期只是文字標籤）；排序：中央→縣市→鄉鎮、再依地區、再依日期新到舊；「條件」寫在立場標籤後。**推導列**（第 9 節裁決 4）：政見持有人若沒有立場紀錄，補一列灰色標籤「提出政見」（日期＝提出日或屆別投票日、出處＝政見頁），**不算進「立場 N 筆」**；**只在畫面算、不寫任何資料表**，這個人之後有正式表態，就由正式那一列取代、不重複列（agy 審查補的兩點） | 標籤「未調查」 |
+| 大事記 | 事件＋交接合併，新到舊，最近 4 筆，各附出處；第四期起底下有按鈕「看完整關係圖 →」（真連結，`rel="nofollow"`；**路由上線前整個按鈕不渲染**，避免連到不存在的頁） | 沒有就不印這一區（第四期起只留按鈕） |
 | 筆數列 | 「政見 N 條｜交接 N 筆｜事件 N 筆｜立場 N 筆」，每一筆附出處（這句是標籤，不是說明） | 0 也印 |
 | 脈絡裡的政見 | 現有的時間軸改成政見清單，依職位與屆別分組（保留：政見頁的內部連結是搜尋引擎找到政見頁的路） | |
 | 參與者與角色 | 現有元件原樣（官方紀錄、本人宣稱分開） | |
@@ -430,7 +447,7 @@
 | Worker 標頭（防禦，建議做） | `/lineage/<id>/graph` 代理回應補 `X-Robots-Tag: noindex` 與 `Link: <主頁>; rel="canonical"`——殼的 `noindex` 靠 HTML，標頭是第二道；**不要**在 `robots.txt` 擋（擋了爬蟲讀不到 noindex，反而可能只收網址） | `cloudflare/` 加測試 |
 | 預渲染（vite-ssg） | `collectRoutePaths` 不加（沒有列的動態路由不會預渲染） | 測試：`collectRoutePaths` 的輸出不含 `/graph` |
 | 網站地圖 | 不收。`scripts/postbuild-ssg.mjs` 現在對 `/lineage/` 開頭一律放進 `sitemap-policies.xml`，所以**加一道建置檢查**：任何網站地圖網址以 `/graph` 結尾就讓 build 紅，並把群組比對改成排除 `/graph` | 測試＋建置檢查；還原驗證＝把關係圖網址塞進 `edgePaths` 看它變紅 |
-| 主頁的連結 | `<RouterLink :to="…/graph" rel="nofollow">`（真連結給人點；不鼓勵爬蟲順著找） | 測試：主頁有這個連結、`rel` 含 `nofollow` |
+| 主頁的連結 | `<RouterLink :to="…/graph" rel="nofollow">`（真連結給人點；不鼓勵爬蟲順著找）。**與第四期的路由同一個 PR 才加**（第三期不得有，7 節） | 測試：第四期主頁有這個連結、`rel` 含 `nofollow`；第三期主頁沒有任何 `/graph` 連結 |
 | `policy-tw.web.app` | 兩個頁面都回殼檔：主頁 200＋noindex（現況不變，只有正見.tw 做邊緣渲染）、關係圖同樣由瀏覽器畫；資料都是瀏覽器向 Supabase 撈，兩個網域行為一致 | — |
 | 分享預覽 | 關係圖頁沒有伺服器端 `og:` 標籤（殼檔只有站名通用的），分享出去預覽是通用圖；接受（第 8 節風險） | — |
 
@@ -455,15 +472,15 @@
 
 ## 7. 分期與 PR 切法
 
-**依賴**：一 → 二（B1→B2→B3 依序）∥ 三（主頁）→ 四（關係圖）；五在二之後（兩邊都改 `contribution_auto_tasks_arms()`，同時只派一件）、且在 #670 PR 4 之後較好；六在五之後。**每期合併後 Hosting 先綠、`db push` 再跑**（CLAUDE.md 的 CI 順序），所以前端 PR 對還沒套上的新欄位要容忍（`select('*')`，缺欄當空；缺的新視圖退回舊視圖）。migration 時間戳與協議版號由主線配（下表寫 `<配號>`、`1.(N+k).0` 佔位）。
+**依賴**：一 → 二（三種交件**合成一個 PR**）∥ 三（主頁）→ 四（關係圖）；五在二之後（兩邊都改 `contribution_auto_tasks_arms()`，同時只派一件）、且在 #670 PR 4 之後較好；六在五之後。**每期合併後 Hosting 先綠、`db push` 再跑**（CLAUDE.md 的 CI 順序），所以前端 PR 對還沒套上的新欄位要容忍（`select('*')`，缺欄當空；缺的新視圖退回舊視圖）。migration 時間戳與協議版號由主線配（下表寫 `<配號>`、`1.(N+k).0` 佔位）。
 
 | 期 | 內容 | migration／協議 | 為什麼可以單獨上線、不破壞現有資料與網址 |
 |---|---|---|---|
-| **一 定義與骨架** | 裁決檔（`docs/decisions/YYYY-MM-DD-<slug>.md`，**更正 10-06「政策脈絡第一階段」與「畫面」兩條**，再跑 `scripts/decisions-index.ts`）；一支 migration：三張新表＋`lineage_settings`＋`lineages.search_terms`＋`lineage_links` 加 `contains` 與新觸發器＋停用 `lineage_links` 臂＋`source_refs` 清單＋`lineage_touch_parent`＋`lineages_full` 尾端加欄＋`lineages_list`＋`lineage_terms`＋新函式；`lineage` 交件的 `search_terms` 與主辦更正、`term` 檢查；TS 型別與 `mapLineage`（缺欄當空）；`skill-types.md` 的定義段改寫；`CLAUDE.md` 的脈絡描述由主線改 | `<配號 A>`；協議 `1.(N+1).0` | 只加表、欄、視圖尾端欄，沒有任何交件型別開放，頁面與任務照舊；舊 `link_type` 值保留 |
-| **二 三種交件與缺口臂**（B1 現況→B2 事件→B3 立場，各一個 PR） | 各自：CHECK 加型別、`apply-contribution`／`apply-precheck`／`contribution-schema`／`consensus`／`system-one`／`vote-budget`／`task-*`／`verification-sources`／`summary`／`history`／`same-claims`／`task-labels`、`skill-types.md` 型別段與 `type_spec`、新臂三處（總表、臂名清單、規則）、冷卻清單、`needsTwoIps`（B2 的 `cancelled`）、`SOLE_SOURCE_GUARDED_TYPES` | 各一支 `<配號 B1/B2/B3>`；協議 `1.(N+2).0`～`1.(N+4).0` | 型別各自完整（資料、守門、任務、協議）才開；資料先進庫，頁面還沒顯示也不影響。三種拆開是因為各有一條自己的因果鏈，審查與還原驗證才看得清；也可併成一個 PR（版號少一次），主線決定 |
-| **三 主頁** | 第 5.1、5.4 節：`LineagePage.vue` 重排、`lib/lineage.ts` 與 `types.ts` 補型別與純函式、`loadLineagePage`／`lineagePeople()`、一覽頁改讀 `lineages_list`、JSON-LD、空脈絡 noindex、`lineages_list` 缺時退回 | 無 migration；無協議 | 網址不變；新欄還沒資料時各區塊顯示標籤式空值；舊資料 10 條照樣顯示 |
-| **四 關係圖** | 第 5.2、5.3 節：路由、`lib/lineage-graph.ts`、元件與抽屜、`usePageHead` 的 `canonical` 選項、Worker 標頭、網站地圖的建置檢查、`HANDOVER_LABEL` 同步 | 無 migration；若 `HANDOVER_LABEL` 的後端那份動到 `_shared/lineage.ts`，協議文字跟著小改（併在下一次版號） | 新路由，沒有人連到它，不影響既有頁；不進網站地圖 |
-| **五 派工臂改格與往外擴** | 4.2、4.3、4.5：`lineage_cell_scope`／`lineage_cell_key`、改寫 `lineage_candidates`、新 `lineage_expand`、重寫並重新啟用 `lineage_links`、`handover_missing` 小改、協議任務說明；實測臂成本；登記 #670 PR 4 的換號家族 | `<配號 C>`；協議 `1.(N+5).0` | 臂內容換、新舊 `task_id` 不重疊，seed 照規則收回舊的；已落庫與在途交件不受影響；格與往外擴都只產生「請代理判斷」的任務，不直接寫資料 |
+| **一 定義與骨架** | 裁決檔（`docs/decisions/YYYY-MM-DD-<slug>.md`，**更正 10-06「政策脈絡第一階段」與「畫面」兩條**，再跑 `scripts/decisions-index.ts`）；一支 migration：三張新表＋`lineage_settings`＋`lineages.search_terms`＋`lineage_links` 加 `contains` 與新觸發器＋停用 `lineage_links` 臂＋`source_refs` 清單＋`lineage_touch_parent`＋`lineages_full` 尾端加欄＋`lineages_list`＋`lineage_terms`＋新函式＋**改 `merge_politician()` 與空殼人物那一段（2.9，不放到後面期：新表一建好就可能有人物外鍵，合併路徑要同時到位）**；`lineage` 交件的 `search_terms` 與主辦更正、`term` 檢查；TS 型別與 `mapLineage`（缺欄當空）；`skill-types.md` 的定義段改寫；`CLAUDE.md` 的脈絡描述由主線改 | `<配號 A>`；協議 `1.(N+1).0` | 只加表、欄、視圖尾端欄，沒有任何交件型別開放，頁面與任務照舊；舊 `link_type` 值保留 |
+| **二 三種交件與缺口臂**（現況、事件、立場**一個 PR**，主線採 agy 建議：三者改的是同一批約 15 個共用檔案，拆三次要連升三次協議版、連過三次部署佇列，衝突風險比審查便利大；PR 內依現況→事件→立場分三個 commit，審查可以逐段看） | CHECK 加三個型別、`apply-contribution`／`apply-precheck`／`contribution-schema`／`consensus`／`system-one`／`vote-budget`／`task-*`／`verification-sources`／`summary`／`history`／`same-claims`／`task-labels`、`skill-types.md` 三個型別段與 `type_spec`、新臂三處（總表、臂名清單、規則；總表一次加三支）、三支臂的 `gap_not_found_days` 冷卻（**不動** `PROGRESS_COOLDOWN_TASK_TYPES`）、`needsTwoIps` 的 `cancelled`（陣列）、`SOLE_SOURCE_GUARDED_TYPES` 與逐項檢查 | `<配號 B>`；協議**只升一次**：`1.(N+2).0` | 三種型別各自完整（資料、守門、任務、協議）才開；資料先進庫，頁面還沒顯示也不影響 |
+| **三 主頁** | 第 5.1、5.4 節：`LineagePage.vue` 重排、`lib/lineage.ts` 與 `types.ts` 補型別與純函式、`loadLineagePage`／`lineagePeople()`、一覽頁改讀 `lineages_list`、JSON-LD、空脈絡 `noindex`、`lineages_list` 缺時退回。**主頁在這一期完全不出現「看完整關係圖」按鈕、也不出現指向 `/graph` 的任何連結**（含立場表「曾變」那顆；這一期「曾變」只是文字標籤）——路由要到第四期才存在，先放連結讀者會點到不存在的頁（agy 審查，主線選「第四期才出現」，不併三四期，因為關係圖的排版純函式與元件是整份工作量最大的一塊，不該擋住主頁上線） | 無 migration；無協議 | 網址不變；新欄還沒資料時各區塊顯示標籤式空值；舊資料 10 條照樣顯示；沒有指向未上線頁面的連結 |
+| **四 關係圖** | 第 5.2、5.3 節：路由、`lib/lineage-graph.ts`、元件與抽屜、`usePageHead` 的 `canonical` 選項、Worker 標頭、網站地圖的建置檢查、`HANDOVER_LABEL` 同步；**同一個 PR 才把主頁的「看完整關係圖 →」按鈕與「曾變」連結加上去**（路由與連結同時上線，不會有空窗） | 無 migration；若 `HANDOVER_LABEL` 的後端那份動到 `_shared/lineage.ts`，協議文字跟著小改（併在下一次版號） | 新路由，上線前沒有人連到它，不影響既有頁；不進網站地圖 |
+| **五 派工臂改格與往外擴** | 4.2、4.3、4.5：`lineage_cell_scope`／`lineage_cell_key`、改寫 `lineage_candidates`、新 `lineage_expand`、重寫並重新啟用 `lineage_links`、`handover_missing` 小改、協議任務說明；實測臂成本；登記 #670 PR 4 的換號家族 | `<配號 C>`；協議 `1.(N+3).0` | 臂內容換、新舊 `task_id` 不重疊，seed 照規則收回舊的；已落庫與在途交件不受影響；格與往外擴都只產生「請代理判斷」的任務，不直接寫資料 |
 | **六 日本站** | 第 6 節 | `<配號 D>`（`_jp_`）；日本協議版號另算 | 日本站 0 條政見，輸出 0 件；結構先到位 |
 
 ### 各期守門測試與還原驗證
@@ -472,10 +489,10 @@
 
 | 期 | 守門測試（新增，放 `supabase/functions/_shared/` 或 `lib/`） | 還原驗證要點 |
 |---|---|---|
-| 一 | `lineage-whole-picture-schema.test.ts`：PGlite 實跑 migration，驗①三張表 RLS、CHECK、唯一鍵、`condition` 與 `stance` 的互依②`contains` 不成環、同層同地、舊值仍可寫③子表寫入會蓋父脈絡 `updated_at`④`lineages_full` 前面欄位與前一版**一字不差**、新欄在尾端⑤`source_refs` 清單含四個新名字、舊名字一個不少⑥migration 只加不刪（掃 `DROP TABLE`／`DROP COLUMN`）；`lineage.test.ts` 的 SQL／TS 列舉值逐案比對加上立場、事件、現況；`search_terms` 檢查（子字串、字數、地名、出現數） | ①拿掉成環檢查→成環測試要紅②從 CHECK 清單拿掉 `lineage_events`→寫入事件要失敗而測試紅③把 `lineages_full` 新欄插到中間→前綴測試紅④拿掉 `lineage_touch_parent`→`updated_at` 測試紅 |
-| 二 | 每型別一支：落庫冪等（同鍵覆蓋、`remove`）、合併人物、讀不到的社群被擋、日期與截至日規則、`single_non_official_source` 對三型別成立（掃 `SOLE_SOURCE_GUARDED_TYPES`）、`needsTwoIps` 與 SQL `contribution_needs_two_ips` 逐案比對（事件 `cancelled`）、四處清單與 `vote-budget`／`system-one` 欄位表／`TASK_SOURCE_NEEDS`／`task-labels`／`history` 標籤齊全；臂：用假資料測各條件的邊界（過期天數剛好、剛好沒過期、階段終止、在途交件、冷卻、空脈絡不派）、`activity-arms.test.ts` 三處齊全、冷卻清單與 `PROGRESS_COOLDOWN_TASK_TYPES` 一致 | ①把 `lineage_stance` 拿出 `SOLE_SOURCE_GUARDED_TYPES`→測試紅②拿掉臂的「在途交件」`NOT EXISTS`→重複派工測試紅③把空脈絡條件拿掉→測試紅④把 `cancelled` 從 TS 或 SQL 其中一邊拿掉→逐案比對紅 |
-| 三 | 主頁模板**靜態文字白名單**測試（多一句說明就紅）；SSR 轉字串的測試（有現況／摘要出處／立場表／大事記／筆數列、**沒有**關係圖的 SVG）；立場表的「最新一筆」「曾變」「提出政見」不計入筆數；JSON-LD 與 canonical 指自己；空脈絡 `noindex` 且不進網站地圖；對缺欄位的資料（舊視圖）不炸 | ①在模板加一句解釋文字→白名單測試紅②讓「提出政見」列計入筆數→筆數測試紅③把 `lineages_list` 缺的退路拿掉→缺視圖測試紅 |
-| 四 | `lineage-graph` 純函式測試（泳道排序、任期條不重疊、立場落在對的泳道、對不到任期落「其他」、每個職位各一條交接線、下一任虛線、手機版排序新到舊且與桌機同資料）；第 5.3 節那一整張守門表；`HANDOVER_LABEL` 前後端一致 | ①`SSR_ROUTES` 放寬→測試紅②`collectRoutePaths` 加入 `/graph`→紅③postbuild 拿掉 `/graph` 檢查，再把 `/graph` 塞進清單→build 要紅④`usePageHead` 不傳 `canonical`→紅 |
+| 一 | `lineage-whole-picture-schema.test.ts`：PGlite 實跑 migration，驗①三張表 RLS、CHECK、唯一鍵、`condition` 與 `stance` 的互依②`contains` 不成環、同層同地、舊值仍可寫③子表寫入會蓋父脈絡 `updated_at`④`lineages_full` 前面欄位與前一版**一字不差**、新欄在尾端⑤`source_refs` 清單含四個新名字、舊名字一個不少⑥migration 只加不刪（掃 `DROP TABLE`／`DROP COLUMN`）⑦**`contains` 的層級與地方矩陣逐格測**（縣市大計畫包含**不同縣市**的鄉鎮項目要被擋、同縣市的過；鄉鎮對鄉鎮要 `region` 與 `sub_region` 都同）⑧`search_terms` 空陣列可寫入、既有列不被 CHECK 擋；`lineage.test.ts` 的 SQL／TS 列舉值逐案比對加上立場、事件、現況；`search_terms` 檢查（子字串、字數、地名、出現數）⑨`merge_politician` 與空殼清理（2.9） | ①拿掉成環檢查→成環測試要紅②從 CHECK 清單拿掉 `lineage_events`→寫入事件要失敗而測試紅③把 `lineages_full` 新欄插到中間→前綴測試紅④拿掉 `lineage_touch_parent`→`updated_at` 測試紅⑤把觸發器退回「只看層級高低」→跨縣市鄉鎮項目測試紅⑥拿掉 `merge_politician` 搬立場的那段→測試紅 |
+| 二 | 每型別一支：落庫冪等（同鍵覆蓋、`remove`）、讀不到的社群被擋、日期規則、**現況的撤回與取代（`remove`／`replace_as_of`）：錯填較晚日期後，較早的合法現況仍能收進歷史、撤回後「現行」退回次新**、`single_non_official_source` 對三型別成立（掃 `SOLE_SOURCE_GUARDED_TYPES`）且**陣列型逐項檢查**（項目 A 只引媒體 1、項目 B 只引媒體 2 的 10 項交件要被擋）、中文稱謂不再誤稱「政見進度」、`needsTwoIps` 與 SQL `contribution_needs_two_ips` 逐案比對（事件 `cancelled`；**案例含陣列 payload、混合 payload、非陣列、`remove` 項**）、四處清單與 `vote-budget`／`system-one` 欄位表／`TASK_SOURCE_NEEDS`／`task-labels`／`history` 標籤齊全；臂：用假資料測各條件的邊界（過期天數剛好、剛好沒過期、階段終止、在途交件、`gap_not_found_days` 冷卻〔指紋換號也擋〕、空脈絡不派）、`activity-arms.test.ts` 三處齊全、**`village-progress-cooling.test.ts` 不改、照樣綠**（`PROGRESS_COOLDOWN_TASK_TYPES` 與設定表初值沒被動到） | ①把 `lineage_stance` 拿出 `SOLE_SOURCE_GUARDED_TYPES`→測試紅②拿掉臂的「在途交件」`NOT EXISTS`→重複派工測試紅③把空脈絡條件拿掉→測試紅④把 `cancelled` 改成讀純量 `p_payload->>'event_type'`（或 TS 不走 `.some()`）→陣列 payload 案例紅⑤把逐項檢查退回只看外層→跨項引用案例紅⑥把「不得早於最新」守門加回來→錯填日期案例紅 |
+| 三 | 主頁模板**靜態文字白名單**測試（多一句說明就紅）；SSR 轉字串的測試（有現況／摘要出處／立場表／大事記／筆數列、**沒有**關係圖的 SVG）；立場表的「最新一筆」「曾變」「提出政見」不計入筆數；JSON-LD 與 canonical 指自己；空脈絡 `noindex` 且不進網站地圖；對缺欄位的資料（舊視圖）不炸；**合格政見 0 條（`policy_ids` 為空）的脈絡直接開網址不報錯、不白屏**（既有 6 條 PR 2 之後就是這樣）；**主頁輸出的站內連結逐一用 router 解析，每一個都要對到已註冊的路由、而且不是找不到頁**（第三期尤其不得有 `/graph`）；「提出政見」推導列只在畫面算、不寫表，該人物之後有正式表態時以正式的取代、不重複列 | ①在模板加一句解釋文字→白名單測試紅②讓「提出政見」列計入筆數→筆數測試紅③把 `lineages_list` 缺的退路拿掉→缺視圖測試紅④在第三期的主頁加上 `/graph` 按鈕→連結解析測試紅⑤讓空脈絡讀 `policy_ids[0]`→空值測試紅 |
+| 四 | `lineage-graph` 純函式測試（泳道排序、任期條不重疊、立場落在對的泳道、對不到任期落「其他」、每個職位各一條交接線、下一任虛線、手機版排序新到舊且與桌機同資料）；第 5.3 節那一整張守門表；主頁此時**有**指向 `/graph` 的按鈕與「曾變」連結，且連結解析測試仍綠（路由已註冊）；`HANDOVER_LABEL` 前後端一致 | ①`SSR_ROUTES` 放寬→測試紅②`collectRoutePaths` 加入 `/graph`→紅③postbuild 拿掉 `/graph` 檢查，再把 `/graph` 塞進清單→build 要紅④`usePageHead` 不傳 `canonical`→紅 |
 | 五 | `scripts/arms-parity-lineage-cells.ts`（正式庫唯讀快照：舊法對新法的格數、最大格；PR 2 合併後用它的函式重算；空對空要明說）；PGlite 實跑：縣長、議員、鄉鎮市長、區域立委落同一格；總統落全國格；一條政見只回一列；超過 `cell_max_policies` 會拆；往外擴：太泛的詞被丟、地名被排除、已歸入別條的進 `other_lineages` 不進候選、查過同指紋不再派、`expand_recheck_days`、`step='terms'`；臂成本實測寫進 PR 說明 | ①把 `expand_term_df_cap` 調大→「太泛」測試紅②拿掉地名排除→紅③拿掉「已歸入別條」排除→紅④讓立委回兩列→一列測試紅 |
 | 六 | `policy-jp-lineage-whole.test.ts`（結構、型別、`cancelled` 兩台機器、臂 0 件）；漂移測試的登記清單歸零 | 拿掉日本版 `cancelled` 規則→漂移與逐案比對紅 |
 
@@ -485,7 +502,7 @@
 
 | 風險 | 錯了的代價 | 防線 |
 |---|---|---|
-| 同一件事被建成兩條（跨縣市重複） | 立場、事件分散在兩頁，讀者看不到全貌；搜尋引擎看到兩個近似頁 | 格任務的 `existing_lineages` 帶「涵蓋該縣市」的脈絡；往外擴的 `other_lineages` 提示；補救用現有的 `detach`＋`歸入`（不新增「合併脈絡」功能，第 10 節） |
+| 同一件事被建成兩條（跨縣市重複） | 立場、事件分散在兩頁，讀者看不到全貌；搜尋引擎看到兩個近似頁 | 格任務的 `existing_lineages` 帶「涵蓋該縣市」的脈絡；往外擴的 `other_lineages` 提示；補救用現有的 `detach`＋`歸入`（不新增「合併脈絡」功能，第 10 節）。**已知缺口**（agy 審查）：被拿掉政見的那一條若已有立場、事件、現況，這些子表資料**不會跟著搬**，那條會變成「0 條政見、還帶一堆子表資料」的空脈絡（頁面照 2.2 隱藏、資料保留）；第一版接受，重複成常態時另案做合併（要搬六張子表，並照 2.9 處理撞鍵） |
 | **不同件事被併成一條**（同名不同標的，例：兩個縣市各一條「藍線」） | **比上一條嚴重**：把 A 縣的立場與決定算到 B 縣；讀者讀到錯的全貌 | 驗證規則要求 note 寫共同專有名詞與地點、同名不同標的一律不歸入（3.3）；往外擴的預期結果多半是 `no_change`；`lineage` 錯歸入可用 `detach` 還原，查核履歷完整 |
 | 立場被錯誤歸因給某人 | 對具名的人公開錯誤陳述 | 原文逐字、讀不到的社群不收、媒體需兩站、`remove` 與整筆還原；立場表每筆都附出處 |
 | 現況或事件過期、被當成現在 | 讀者以為「施工中」其實早停 | 畫面只印**截至日**（不寫「過期」「N 天前」）；過期派任務；階段 `cancelled`／`completed` 的才停派 |
@@ -498,17 +515,32 @@
 | 日本站漂移 | 日本站落後、複本與正見不同步 | 每期登記偏離、第六期清零 |
 | 2026-11-28 開票後 2026 當選者的政見進場 | 格與可派任務一次增加；6 條空脈絡重新接上 | 格鍵與指紋會自動處理；空脈絡保留（2.2）；`open_cap_per_arm` 可限流 |
 | 首次上線的任務量 | 約 236 件格任務取代現有 279 件，量級相當 | 不新增淨量；`open_cap_per_arm` 備用 |
+| 人物合併或空殼清理沒顧到新表 | 立場掛在被合併者身上留下孤兒外鍵；有立場的人被當空殼移除 | 第一期就改 `merge_politician` 與空殼那一段（2.9），有測試與還原驗證 |
+| 同日同機關同型態的多項事件撞唯一鍵 | 後交的覆蓋先交的 | 協議要求合併成一筆分點寫；覆蓋留查核履歷（2.4） |
+| 錯填的現況日期擋住後面的合法現況 | 「現行現況」卡在錯的那一列 | 不再用「不得早於最新」擋；提供 `remove`／`replace_as_of`（2.4、3.1） |
+| 借用村里長的冷卻清單 | 動到那份清單會讓 `village-progress-cooling.test.ts` 紅、而且回給代理的句子寫「查無公開進度」 | 不碰，冷卻走 `lineage_settings.gap_not_found_days`（3.4） |
+
+### 8.1 已知限制
+
+| 限制 | 說明 |
+|---|---|
+| **異名同案抓不到** | 往外擴靠「標題裡的專有名詞」（標題子字串）比對。同一件事在不同地方、不同人嘴裡叫法不同（例：「北宜高鐵」與「高鐵延伸宜蘭」）就比對不到，這個取向是刻意的：誤併的傷害比漏抓大（風險表第 2 列）。**維護者正在討論要不要做「計畫名稱詞表」（同一計畫的別名對照）；本計畫只把它記為後續選項，不設計。** 在那之前，異名同案只能靠格任務（同縣市同類別的人工判斷）接住 |
+| 沒有縣市的立委（不分區、原住民）與總統副總統 | 落「全國」格，初次分組不會與縣市首長的政見同格；今天資料裡立委政見全部有縣市，全國格只有總統副總統 13 條，影響很小 |
+| 立場只收站上已有的人物 | 機關、團體、非民選官員的表態收不進來；機關的決定走事件的 `decided_by`（第 9 節裁決 3） |
+| 不做合併脈絡 | 見風險表第 1 列的已知缺口 |
 
 ---
 
 ## 9. 需要維護者裁決的點（只列真的需要的）
 
-| # | 要裁決什麼 | 我的建議 | 不裁決的後果 |
+**狀態**：四點主線 2026-10-19 全部**採用我的建議**（下表「狀態」欄標「主線 10-19 採用」）；維護者若有不同意見，在審這份計畫時直接推翻即可，各點的做法都寫在對應章節。
+
+| # | 要裁決什麼 | 建議（＝主線採用的做法） | 狀態 |
 |---|---|---|---|
-| 1 | **摘要的註腳形式**：示意圖的摘要每句後面有［1］［2］。要「逐句註腳」，還是「整段出處列」（摘要下方編號列出這條脈絡的出處）？ | **第一期用整段出處列**。逐句註腳要把摘要結構化成多句、每句各自掛出處，交件與驗證成本約加倍；PR 2 的「逐句核來源」是驗證規則，不需要結構化。真要逐句再做第二版（`lineage_summary_points`，另一張表） | 預設照建議做，示意圖的註腳標記先不畫 |
-| 2 | **兩台機器規則其實沒有額外效力**（第 3.4 節的發現）：沒有系統票的型別，目標 3 本來就要至少兩個不同來源網段。「中止」（`stop`）與事件「終止」（`cancelled`）要不要**真的**加高（例：目標 4）？ | **這期不動**：事件 `cancelled` 照 `stop` 套同一條規則（維持對等），上線兩週看被退比例與誤報再裁。若要加高＝改計分，要改 SQL、TS、`skill.md` 門檻表並通知日本站 | 預設照建議；規則寫進協議時**照實寫成「明文化」**，不寫成「要求更多票」，避免代理誤解 |
-| 3 | **立場持有人的範圍**：只收站上已有的人物（`politicians`），還是也收政府機關、民間團體、非民選官員（例：交通部長）？ | **第一版只收站上人物**（與參與者同規則）；機關與團體的決定已由事件的 `decided_by` 涵蓋。要收機關團體得新增「發言者」實體與身分去重，另案 | 預設限站上人物 |
-| 4 | **立場表要不要補「提出政見」推導列**：政見持有人沒有立場紀錄時，顯示一列灰色「提出政見」（日期＝提出日或屆別投票日、出處＝政見頁），不算進立場筆數 | **要**。否則立場表會漏掉脈絡裡最明顯的一群人（提出者），而且不需要他們再交一次立場；用不同標籤避免把「提出」說成「支持」 | 預設照建議做 |
+| 1 | **摘要的註腳形式**：示意圖的摘要每句後面有［1］［2］。要「逐句註腳」，還是「整段出處列」（摘要下方編號列出這條脈絡的出處）？ | **第一期用整段出處列**。逐句註腳要把摘要結構化成多句、每句各自掛出處，交件與驗證成本約加倍；PR 2 的「逐句核來源」是驗證規則，不需要結構化。真要逐句再做第二版（`lineage_summary_points`，另一張表）。示意圖的註腳標記先不畫 | **主線 10-19 採用** |
+| 2 | **兩台機器規則其實沒有額外效力**（第 3.4 節的發現）：沒有系統票的型別，目標 3 本來就要至少兩個不同來源網段。「中止」（`stop`）與事件「終止」（`cancelled`）要不要**真的**加高（例：目標 4）？ | **這期不動**：事件 `cancelled` 照 `stop` 套同一條規則（維持對等；陣列寫法見 3.4），**上線兩週後看被退比例與誤報再裁**。若要加高＝改計分，要改 SQL、TS、`skill.md` 門檻表並通知日本站。規則寫進協議時**照實寫成「明文化」**，不寫成「要求更多票」，避免代理誤解 | **主線 10-19 採用** |
+| 3 | **立場持有人的範圍**：只收站上已有的人物（`politicians`），還是也收政府機關、民間團體、非民選官員（例：交通部長）？ | **第一版只收站上人物**（與參與者同規則）；機關與團體的決定已由事件的 `decided_by` 涵蓋。要收機關團體得新增「發言者」實體與身分去重，另案 | **主線 10-19 採用** |
+| 4 | **立場表要不要補「提出政見」推導列**：政見持有人沒有立場紀錄時，顯示一列灰色「提出政見」（日期＝提出日或屆別投票日、出處＝政見頁），不算進立場筆數 | **要**。否則立場表會漏掉脈絡裡最明顯的一群人（提出者），而且不需要他們再交一次立場；用不同標籤避免把「提出」說成「支持」；只在畫面算、不寫表，有正式表態就由正式的取代 | **主線 10-19 採用** |
 
 不需要裁決、但審閱時請留意的假設：交接標籤改用示意圖詞彙（照舊做／改做法／縮小／停掉／重新開始，第四期同步改）；沒有單一主辦者填牽頭或核定的那一級（2.2）；空脈絡保留並隱藏（2.2）；格任務上線不設上限（`open_cap_per_arm` 空，與今天一致）。
 
@@ -575,8 +607,8 @@ SELECT CASE WHEN election_type = '總統副總統' OR county IS NULL OR county =
 
 | 範圍 | 檔案 |
 |---|---|
-| SQL | 新 migration（各期）；`contribution_auto_tasks_arms()`、`activity_arm_names()`、`activity_rules`（第二、五期都動，**同時只派一件**）；`contribution_needs_two_ips()`；`system_one_vote_budget_candidates()`；`source_refs` 與 `contributions` 的 CHECK |
-| Edge Function 共用 | `_shared/lineage.ts`、`contribution-schema.ts`、`apply-contribution.ts`、`apply-precheck.ts`、`consensus.ts`、`sole-source-guard.ts`、`system-one.ts`、`vote-budget.ts`、`task-types.ts`、`task-context.ts`、`task-guidance.ts`、`verification-sources.ts`、`contribution-summary.ts`、`summary-lookup.ts`、`history.ts`、`same-claims.ts`、`protocol.ts`（版號）、`type-spec.gen.ts`（產物） |
+| SQL | 新 migration（各期）；`contribution_auto_tasks_arms()`、`activity_arm_names()`、`activity_rules`（第二、五期都動，**同時只派一件**）；`contribution_needs_two_ips()`（以 main 最新一版為底整支重寫）；`system_one_vote_budget_candidates()`；`source_refs` 與 `contributions` 的 CHECK；**`merge_politician()`、`contribution_auto_tasks_placeholder_politicians()`（第一期，2.9）**；不動 `task_cooldown_settings` 與 `PROGRESS_COOLDOWN_TASK_TYPES` |
+| Edge Function 共用 | `_shared/lineage.ts`（含 `parseCandidateTaskId` 加 `lineage_expand`）、`contribution-schema.ts`、`apply-contribution.ts`、`apply-precheck.ts`、`consensus.ts`、`sole-source-guard.ts`、`system-one.ts`、`vote-budget.ts`、`task-types.ts`、`task-context.ts`、`task-guidance.ts`、`verification-sources.ts`、`contribution-summary.ts`、`summary-lookup.ts`、`history.ts`、`same-claims.ts`、`protocol.ts`（版號）、`type-spec.gen.ts`（產物） |
 | 協議與文件 | `public/skill.md`（檔頭版號、第 1a 條、計分表）、`public/skill-types.md`、`public/llms.txt`、`docs/decisions/`（新裁決檔）、`CLAUDE.md`（由主線改）、`docs/PIPELINE.md` |
 | 前端 | `types.ts`、`lib/lineage.ts`、新 `lib/lineage-graph.ts`、`lib/task-labels.ts`、`lib/ssg/page-data.ts`、`lib/ssr/loaders.ts`、`composables/useSupabase.ts`（載入 `lineage_terms`）、`composables/usePageHead.ts`、`router/index.ts`、`pages/LineagePage.vue`、新 `pages/LineageGraphPage.vue`、新 `components/lineage/*`、`pages/PolicyAnalysis.vue` |
 | 建置與邊緣 | `scripts/postbuild-ssg.mjs`、`lib/ssg/server-data.ts`（確認不加 `/graph`）、`cloudflare/ssr-worker.js`（標頭，選做）、`firebase.json`（不改，只加測試） |
