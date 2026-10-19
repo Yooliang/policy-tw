@@ -58,8 +58,14 @@ watch(mdOpen, async (on) => {
   await nextTick()
   if (fullscreen.value) document.body.style.overflow = 'hidden'
 })
+// 按鈕字樣固定「PK 詳情」（2026-10-19 維護者）；範圍寫在抽屜標題與下方說明
 const regionPick = computed(() => props.mdPickFor?.() ?? null)
-const openMd = (category?: string) => { mdPick.value = props.mdPickFor?.(category) ?? null }
+// 抽屜標題照這一場的範圍：「<縣市> <層級>・<選舉區> PK」（跟頁首同一段範圍字）；分類列開的維持「<縣市>全縣市　<分類>」
+const pkScopeTitle = computed(() => `${props.regionLabel ? `${props.regionLabel} ` : ''}${props.title} PK`)
+const openMd = (category?: string) => {
+  const pick = props.mdPickFor?.(category) ?? null
+  mdPick.value = pick && !category ? { ...pick, title: pkScopeTitle.value } : pick
+}
 
 const isPicked = (id: string | number) => props.picked.includes(String(id))
 </script>
@@ -82,7 +88,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
             class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             data-testid="pk-md"
             @click="openMd()"
-          ><FileText :size="16" />{{ regionPick.title }}</button>
+           :title="pkScopeTitle"><FileText :size="16" />PK 詳情</button>
           <button
             type="button"
             class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
