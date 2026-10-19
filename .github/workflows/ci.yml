@@ -134,9 +134,9 @@ jobs:
         # 其中只有一兩個測試讀前端檔，ci-path-filter.test.ts 驗證正規式涵蓋了所有讀前端檔的測試）
         run: |
           set -eo pipefail
-          deno test --allow-read $(grep -v ' ' _shared/frontend-guard-tests.txt | tr '\n' ' ')
+          deno test --allow-read $(tr -d '\r' < _shared/frontend-guard-tests.txt | grep -v ' ' | tr '\n' ' ')
           # 篩選沒符合任何測試時 deno 也回 0（0 passed），所以要自己檢查：測試改名後篩選落空＝守門悄悄沒跑
-          grep ' ' _shared/frontend-guard-tests.txt | while read -r f flt; do
+          tr -d '\r' < _shared/frontend-guard-tests.txt | grep ' ' | while read -r f flt || [ -n "$f" ]; do
             NO_COLOR=1 deno test --allow-read --filter "$flt" "$f" 2>&1 | tee /tmp/guard-filter.log
             if grep -q ' 0 passed' /tmp/guard-filter.log; then echo "::error::篩選 $flt 沒有符合 $f 的任何測試"; exit 1; fi
           done

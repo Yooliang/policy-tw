@@ -23,7 +23,7 @@ Deno.test("分類：只有前端類路徑 → 不是後端類", () => {
 
 Deno.test("分類：協議文件、後端、工作流程、判斷不了的路徑 → 後端類", () => {
   for (const f of [
-    "public/skill.md", "public/skill-types.md", "public/llms.txt", "SKILL.md", "supabase/migrations/20261019000000_x.sql",
+    "public/skill.md", "public/skill-types.md", "public/llms.txt", "public/llms-full.txt", "SKILL.md", "supabase/migrations/20261019000000_x.sql",
     "supabase/functions/_shared/protocol.ts", "supabase/functions/next/index.ts", "scripts/affected-functions.mjs", "scripts/ci-changed-paths.mjs",
     ".github/workflows/ci.yml", "docs/decisions/x.md", "docs/DECISIONS.md", "CLAUDE.md", "package.json", "pnpm-lock.yaml", "vite.config.ts",
     "firebase.json", "wrangler.toml", "tailwind.config.js", "some-new-top-level/file.txt", "pagesX/a.vue", "libs/a.ts", "publicity/a.txt",
@@ -45,7 +45,7 @@ Deno.test("分類：前端白名單只列這幾條（新增前端資料夾要同
 
 /** 會讀前端檔（或整個 repo 掃描）的後端測試：路徑以 ../../../ 指到前端資料夾／根目錄，或 import 它們。 */
 const READS_FRONTEND = new RegExp(
-  String.raw`new URL\("(\.\./){3}"|(\.\./){3}(pages|components|composables|lib|router|data|styles|cloudflare|types\.ts|index\.html|entry-server|main\.ts|App\.vue)`,
+  String.raw`new URL\(["'\x60](\.\./){3}["'\x60]|(\.\./){3}(pages|components|composables|lib|router|data|styles|cloudflare|types\.ts|env\.d\.ts|index\.html|entry-server|main\.ts|App\.vue)`,
 );
 
 /** 清單一行一支：「路徑」整支跑，「路徑 /正規式/」只跑名稱符合的測試。 */

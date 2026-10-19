@@ -24,7 +24,7 @@ import { pathToFileURL } from "node:url";
 export const FRONTEND_PATTERNS = [
   /^(pages|components|composables|lib|router|styles|data|cloudflare)\//,
   // public/ 底下除了協議文件（skill*.md、llms.txt）都是前端靜態檔
-  /^public\/(?!skill[^/]*\.md$|llms\.txt$)/,
+  /^public\/(?!skill[^/]*\.md$|llms[^/]*\.txt$)/,
   // 根目錄的前端進入點
   /^(App\.vue|main\.ts|entry-server\.ts|index\.html|types\.ts|env\.d\.ts)$/,
 ];
@@ -35,7 +35,7 @@ export function isFrontendPath(path) {
 
 /** @param {string[]} files */
 export function classify(files) {
-  const names = files.map((f) => f.trim()).filter(Boolean);
+  const names = files.map((f) => f.trim().replace(/\\/g, "/")).filter(Boolean);
   const backendFiles = names.filter((f) => !isFrontendPath(f));
   return { backend: backendFiles.length > 0, backendFiles, frontendFiles: names.filter(isFrontendPath) };
 }
