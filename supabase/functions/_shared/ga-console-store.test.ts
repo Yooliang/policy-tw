@@ -325,13 +325,25 @@ Deno.test("站內搜尋詞守門：過了 deadline 不開始（skipped，不打 
 
 Deno.test("站內搜尋詞：翻滿頁數上限要標 truncated；(other) 不當成搜尋詞", async () => {
   const full = Array.from({ length: 10000 }, (_, i) => ({ dimensionValues: [{ value: "20261019" }, { value: `t${i}` }, { value: "1" }], metricValues: [{ value: "1" }, { value: "1" }] }));
-  const g = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ rows: full })));
+  const g = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ rows: full, rowCount: 60000 })));
   const mm = memMirror();
   const r = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: mm.mirror, deps: g.deps });
   assertEquals(r.state, "ok");
   assertEquals(r.truncated, true);
   assertEquals(g.calls.length, 1 + 5, "metadata＋5 頁");
-  assert(r.message?.includes("只存了前面"));
+  assert(r.message?.includes("報表共 60000 列"));
+  // 剛好 5 萬列（rowCount 等於拿到的）不算截斷
+  const exact = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ rows: full, rowCount: 50000 })));
+  const r2 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: exact.deps });
+  assertEquals(r2.truncated, false);
+  assertEquals(r2.message, null);
+  // metadata 之後才過 deadline：不打 runReport、回 skipped
+  let t = NOW_MS;
+  const late = fakeDeps((url) => (url.endsWith("/metadata") ? (t = NOW_MS + 10, jsonRes(META_BOTH)) : jsonRes({ rows: full })));
+  late.deps.now = () => t;
+  const r3 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: late.deps, deadlineMs: NOW_MS + 5 });
+  assertEquals(r3.state, "skipped");
+  assertEquals(late.calls.length, 1, "只打了 metadata");
   const rows = parseSearchRows([{ dimensionValues: [{ value: "20261019" }, { value: "(other)" }, { value: "1" }], metricValues: [{ value: "9" }, { value: "9" }] }], "tw", true, "T");
   assertEquals(rows, []);
 });

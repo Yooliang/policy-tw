@@ -312,10 +312,12 @@ async function runGaSearchSyncInner(input: SearchInput): Promise<SearchResult> {
   const fetchedAt = new Date(nowMs).toISOString();
   const all: GaRowLike[] = [];
   let truncated = false;
+  let stoppedByDeadline = false;
+  let rowCount = 0;
   try {
     for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
-      if (page > 0 && input.deadlineMs !== undefined && deps.now() > input.deadlineMs) {
-        truncated = true;
+      if (input.deadlineMs !== undefined && deps.now() > input.deadlineMs) {
+        stoppedByDeadline = true;
         break;
       }
       const body = await callJson(
@@ -327,14 +329,19 @@ async function runGaSearchSyncInner(input: SearchInput): Promise<SearchResult> {
         },
         "GA 站內搜尋詞",
         deps,
-      ) as { rows?: GaRowLike[] } | null;
+      ) as { rows?: GaRowLike[]; rowCount?: number } | null;
       const rows = body?.rows ?? [];
       all.push(...rows);
+      rowCount = Math.max(rowCount, Number(body?.rowCount ?? 0) || 0);
       if (rows.length < SEARCH_PAGE_LIMIT) break;
-      if (page === SEARCH_MAX_PAGES - 1) truncated = true;
     }
+    // GA 回的 rowCount 是整份報表的列數；比實際拿到的多才算截斷（剛好 5 萬列不算）
+    truncated = !stoppedByDeadline && rowCount > all.length;
   } catch (e) {
     return { state: "error", message: `GA 站內搜尋詞抓取失敗：${(e as Error).message}`, results_count_dim: dims.results };
+  }
+  if (stoppedByDeadline && all.length === 0) {
+    return { state: "skipped", message: "查完 metadata 已超過時間，這輪不抓站內搜尋詞（下一輪再抓）", results_count_dim: dims.results };
   }
   const rows = parseSearchRows(all, input.site, dims.results, fetchedAt);
   try {
@@ -342,12 +349,13 @@ async function runGaSearchSyncInner(input: SearchInput): Promise<SearchResult> {
   } catch (e) {
     return { state: "error", message: `ga_search_terms 寫入失敗：${(e as Error).message}`, results_count_dim: dims.results };
   }
-  deps.log("站內搜尋詞：", { rows: rows.length, results_count_dim: dims.results, truncated });
+  deps.log("站內搜尋詞：", { rows: rows.length, results_count_dim: dims.results, truncated, stoppedByDeadline });
   const notes = [
     ...(dims.results ? [] : [`GA 尚未登記 ${RESULTS_COUNT_DIM}，results_count 留空`]),
-    ...(truncated ? [`超過 ${SEARCH_MAX_PAGES * SEARCH_PAGE_LIMIT} 列，只存了前面的`] : []),
+    ...(truncated ? [`報表共 ${rowCount} 列，超過上限 ${SEARCH_MAX_PAGES * SEARCH_PAGE_LIMIT}，只存了前面的`] : []),
+    ...(stoppedByDeadline ? [`時間到，只存了已抓的 ${all.length} 列`] : []),
   ];
-  return { state: "ok", message: notes.length ? notes.join("；") : null, rows: rows.length, results_count_dim: dims.results, truncated };
+  return { state: "ok", message: notes.length ? notes.join("；") : null, rows: rows.length, results_count_dim: dims.results, truncated: truncated || stoppedByDeadline };
 }
 
 /** service role 的 supabase-js → GaMirror（upsert 依主鍵）。db 由 index.ts 建，fetch 帶逾時（makeTimeoutFetch），不會卡住 */
