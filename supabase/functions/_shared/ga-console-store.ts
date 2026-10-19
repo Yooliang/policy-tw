@@ -2,13 +2,13 @@
  * 站務 GA 數字另存一份到 Supabase 私有表（2026-10-20，policy-ops 工作單 #148，migration 20261020010000_ga_console_store.sql）。
  *
  * console-fetch 抓 GA4 之後原本只寫 Firestore（規則只准站長以 Google 登入讀），代理讀不到。這裡做兩件事：
- *   1. teeStore：包住 Firestore 的 Store，寫 `summary/{site}`、`daily/{site}_{date}` 時同一份另外 upsert 進
- *      `ga_summary`、`ga_daily`。Supabase 寫入失敗只記下來（mirror 結果），不丟出去、不影響 Firestore 與 meta/status；
- *      Firestore 寫入照舊會丟錯（主流程原本的語意不變）。
+ *   1. teeStore：包住 Firestore 的 Store，寫 `summary/{site}`、`daily/{site}_{date}` 時把同一份轉成列、先收在記憶體
+ *      （不在 GA 主流程裡打網路，不拖慢、不卡住 Firestore 寫入），主流程跑完再由 flush() 整批 upsert 進 `ga_summary`、`ga_daily`
+ *      （兩次請求）。Supabase 寫入失敗只記進結果，不丟出去、不影響 Firestore 與 meta/status；Firestore 寫入照舊會丟錯。
  *   2. runGaSearchSync：站內搜尋的 GA `search` 事件（lib/search-analytics.ts 送的 search_term、results_count）。
  *      先查 GA metadata 有沒有登記自訂維度 `customEvent:search_term`；沒有就回 unconfigured 並略過（不打報表、不寫表）。
  *      有就抓近 N 天、依 date × search_term（× results_count，有登記才帶）的 eventCount、totalUsers，upsert 進 `ga_search_terms`。
- *      任何一步失敗都回 error，不丟出去。
+ *      任何一步失敗都回 error，不丟出去；主流程已經跑太久（超過 deadline）就回 skipped，不搶 Edge Function 的時間上限。
  *
  * 日期一律是 console-fetch 的 dayOffset（台灣時間）；訊息不含金鑰或權杖。
  */
@@ -87,7 +87,7 @@ const totalsOf = (t: Partial<Totals> | undefined) => {
     users,
     sessions: Math.round(n(t?.sessions)),
     views: Math.round(n(t?.views)),
-    // Firestore 只存平均（小數一位），總秒數由平均×使用者還原（誤差 ≤ 0.05 秒×使用者）
+    // Firestore 只存平均（小數一位），總秒數由平均×使用者還原，是近似值（誤差 ≤ 0.05 秒×使用者）
     engagement_sec: Math.round(avg * users),
     avg_engagement_sec: avg,
   };
@@ -142,49 +142,66 @@ export interface MirrorResult {
 }
 
 /**
- * 包住 Firestore 的 Store：寫 summary／daily 時也 upsert 到 Supabase。
- * 先寫 Supabase（自己吞錯），再寫 Firestore（照舊丟錯）——Firestore 壞掉時 Supabase 那份仍然進得去。
- * mirror 為 null（沒有 service role）時一律記失敗、照樣寫 Firestore。
+ * 包住 Firestore 的 Store：寫 summary／daily 時把列收進記憶體（純計算、不會丟錯），再照舊寫 Firestore（照舊丟錯）。
+ * 列在寫 Firestore 之前就收了——Firestore 壞掉那一天，Supabase 那份仍然會進去。
+ * flush()：主流程跑完後整批 upsert（daily 一次、summary 一次），失敗只記進結果、不丟出去；
+ * mirror 為 null（沒有 service role）時記失敗。
  */
-export function teeStore(primary: Store, mirror: GaMirror | null): { store: Store; result: () => MirrorResult } {
-  let daily = 0, summary = 0, failed = 0;
-  let firstError = "";
-  const record = (e: unknown) => {
-    failed++;
-    firstError ||= (e as Error)?.message ?? String(e);
-  };
-  const mirrorWrite = async (path: string, data: Record<string, unknown>) => {
-    const d = toDailyRow(path, data);
-    const s = d ? null : toSummaryRows(path, data);
-    if (!d && !s) return;
-    if (!mirror) return record(new Error("沒有 SUPABASE_URL／SUPABASE_SERVICE_ROLE_KEY"));
+export function teeStore(primary: Store, mirror: GaMirror | null): { store: Store; flush: () => Promise<MirrorResult> } {
+  const daily = new Map<string, GaDailyRow>();
+  const summary = new Map<string, GaSummaryRow>();
+  const collect = (path: string, data: Record<string, unknown>) => {
     try {
-      if (d) {
-        await mirror.upsertDaily([d]);
-        daily++;
-      } else if (s) {
-        await mirror.upsertSummary(s);
-        summary += s.length;
-      }
-    } catch (e) {
-      record(e);
-    }
+      const d = toDailyRow(path, data);
+      if (d) return void daily.set(`${d.site}|${d.date}`, d);
+      for (const r of toSummaryRows(path, data) ?? []) summary.set(`${r.site}|${r.range}`, r);
+    } catch { /* 轉列失敗不影響 Firestore（flush 時列數會少，看得出來） */ }
   };
   return {
     store: {
       async set(path, data) {
-        await mirrorWrite(path, data);
+        collect(path, data);
         await primary.set(path, data);
       },
       merge: (path, data) => primary.merge(path, data),
     },
-    result: () => ({
-      state: failed ? "error" : "ok",
-      message: failed ? `Supabase 另存失敗 ${failed} 筆：${firstError}` : null,
-      daily,
-      summary,
-      failed,
-    }),
+    async flush() {
+      let failed = 0, ok_daily = 0, ok_summary = 0;
+      const errors: string[] = [];
+      const fail = (n: number, e: unknown) => {
+        failed += n;
+        errors.push((e as Error)?.message ?? String(e));
+      };
+      const d = [...daily.values()];
+      const s = [...summary.values()];
+      if (!mirror) {
+        if (d.length + s.length) fail(d.length + s.length, new Error("沒有 SUPABASE_URL／SUPABASE_SERVICE_ROLE_KEY"));
+      } else {
+        if (d.length) {
+          try {
+            await mirror.upsertDaily(d);
+            ok_daily = d.length;
+          } catch (e) {
+            fail(d.length, e);
+          }
+        }
+        if (s.length) {
+          try {
+            await mirror.upsertSummary(s);
+            ok_summary = s.length;
+          } catch (e) {
+            fail(s.length, e);
+          }
+        }
+      }
+      return {
+        state: failed ? "error" : "ok",
+        message: failed ? `Supabase 另存失敗 ${failed} 列：${errors.join("；")}` : null,
+        daily: ok_daily,
+        summary: ok_summary,
+        failed,
+      };
+    },
   };
 }
 
@@ -223,7 +240,8 @@ export function parseSearchRows(rows: GaRowLike[] | undefined, site: string, wit
     const raw = r.dimensionValues?.[0]?.value ?? "";
     const dm = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
     const term = (r.dimensionValues?.[1]?.value ?? "").trim();
-    if (!dm || !term || term === "(not set)") continue;
+    // (not set)：事件沒帶這個參數；(other)：GA 高基數時把長尾併成一列，都不是真的搜尋詞
+    if (!dm || !term || term === "(not set)" || term === "(other)") continue;
     const rc = withResults ? (r.dimensionValues?.[2]?.value ?? "") : "";
     const results_count = rc === "(not set)" ? "" : rc;
     const date = `${dm[1]}-${dm[2]}-${dm[3]}`;
@@ -240,22 +258,40 @@ export function parseSearchRows(rows: GaRowLike[] | undefined, site: string, wit
 }
 
 export interface SearchResult {
-  state: "ok" | "unconfigured" | "error";
+  state: "ok" | "unconfigured" | "skipped" | "error";
   message: string | null;
   rows?: number;
   results_count_dim?: boolean;
+  /** 翻到 SEARCH_MAX_PAGES 還有下一頁（只存了前面那些） */
+  truncated?: boolean;
 }
 
-export async function runGaSearchSync(input: {
+/** 外層保險：runGaSearchSyncInner 任何意外（包括同步的程式錯誤）都轉成 error，不往外丟 */
+export async function runGaSearchSync(input: SearchInput): Promise<SearchResult> {
+  try {
+    return await runGaSearchSyncInner(input);
+  } catch (e) {
+    return { state: "error", message: `站內搜尋詞意外失敗：${(e as Error)?.message ?? String(e)}` };
+  }
+}
+
+export interface SearchInput {
   site: string;
   propertyId: string;
   getToken: () => Promise<string>;
   mirror: GaMirror | null;
   deps?: Deps;
   days?: number;
-}): Promise<SearchResult> {
+  /** 超過這個時間點（毫秒時間戳）就不開始，回 skipped；index.ts 給「開始＋100 秒」 */
+  deadlineMs?: number;
+}
+
+async function runGaSearchSyncInner(input: SearchInput): Promise<SearchResult> {
   const deps = input.deps ?? realDeps;
   const days = input.days ?? SEARCH_DAYS;
+  if (input.deadlineMs !== undefined && deps.now() > input.deadlineMs) {
+    return { state: "skipped", message: "主流程已用掉太多時間，這輪不抓站內搜尋詞（下一輪再抓）" };
+  }
   if (!input.mirror) return { state: "error", message: "沒有 SUPABASE_URL／SUPABASE_SERVICE_ROLE_KEY" };
   const base = `https://analyticsdata.googleapis.com/v1beta/properties/${input.propertyId}`;
   let token: string;
@@ -275,8 +311,13 @@ export async function runGaSearchSync(input: {
   const nowMs = deps.now();
   const fetchedAt = new Date(nowMs).toISOString();
   const all: GaRowLike[] = [];
+  let truncated = false;
   try {
     for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
+      if (page > 0 && input.deadlineMs !== undefined && deps.now() > input.deadlineMs) {
+        truncated = true;
+        break;
+      }
       const body = await callJson(
         `${base}:runReport`,
         {
@@ -290,6 +331,7 @@ export async function runGaSearchSync(input: {
       const rows = body?.rows ?? [];
       all.push(...rows);
       if (rows.length < SEARCH_PAGE_LIMIT) break;
+      if (page === SEARCH_MAX_PAGES - 1) truncated = true;
     }
   } catch (e) {
     return { state: "error", message: `GA 站內搜尋詞抓取失敗：${(e as Error).message}`, results_count_dim: dims.results };
@@ -300,11 +342,15 @@ export async function runGaSearchSync(input: {
   } catch (e) {
     return { state: "error", message: `ga_search_terms 寫入失敗：${(e as Error).message}`, results_count_dim: dims.results };
   }
-  deps.log("站內搜尋詞：", { rows: rows.length, results_count_dim: dims.results });
-  return { state: "ok", message: dims.results ? null : `GA 尚未登記 ${RESULTS_COUNT_DIM}，results_count 留空`, rows: rows.length, results_count_dim: dims.results };
+  deps.log("站內搜尋詞：", { rows: rows.length, results_count_dim: dims.results, truncated });
+  const notes = [
+    ...(dims.results ? [] : [`GA 尚未登記 ${RESULTS_COUNT_DIM}，results_count 留空`]),
+    ...(truncated ? [`超過 ${SEARCH_MAX_PAGES * SEARCH_PAGE_LIMIT} 列，只存了前面的`] : []),
+  ];
+  return { state: "ok", message: notes.length ? notes.join("；") : null, rows: rows.length, results_count_dim: dims.results, truncated };
 }
 
-/** service role 的 supabase-js → GaMirror（upsert 依主鍵） */
+/** service role 的 supabase-js → GaMirror（upsert 依主鍵）。db 由 index.ts 建，fetch 帶逾時（makeTimeoutFetch），不會卡住 */
 // deno-lint-ignore no-explicit-any
 export function makeSupabaseGaMirror(db: any): GaMirror {
   const up = async (table: string, rows: unknown[], onConflict: string) => {
@@ -318,4 +364,10 @@ export function makeSupabaseGaMirror(db: any): GaMirror {
       for (let i = 0; i < rows.length; i += 500) await up("ga_search_terms", rows.slice(i, i + 500), "site,date,term,results_count");
     },
   };
+}
+
+/** 給 supabase-js 的 fetch：每個請求最多等 ms 毫秒（PostgREST 卡住時不拖到 Edge Function 被砍） */
+export const MIRROR_TIMEOUT_MS = 20_000;
+export function makeTimeoutFetch(ms = MIRROR_TIMEOUT_MS, base: typeof fetch = fetch): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => base(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(ms) })) as typeof fetch;
 }

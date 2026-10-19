@@ -10,6 +10,7 @@ import {
   RESULTS_COUNT_DIM,
   runGaSearchSync,
   SEARCH_TERM_DIM,
+  makeTimeoutFetch,
   searchDimsFromMetadata,
   summaryRangeDates,
   teeStore,
@@ -125,29 +126,50 @@ Deno.test("toSummaryRows：四個區間、日期用台灣時間（UTC 17:00 已�
 });
 
 // ---------- teeStore 守門 ----------
-Deno.test("teeStore 守門：Supabase 寫入失敗不擋 Firestore、不丟錯，只記進結果", async () => {
+Deno.test("teeStore 守門：Supabase 寫入失敗不擋 Firestore、flush 不丟錯，只記進結果", async () => {
   const fs = memStore();
   const mm = memMirror("all");
   const tee = teeStore(fs.store, mm.mirror);
   await tee.store.set("daily/tw_2026-10-19", DAY_DOC);
   await tee.store.set("summary/tw", { propertyId: "1", updatedAt: new Date(NOW_MS).toISOString() });
   assert(fs.sets.has("daily/tw_2026-10-19") && fs.sets.has("summary/tw"), "Firestore 照寫");
-  const r = tee.result();
+  const r = await tee.flush();
   assertEquals(r.state, "error");
-  assertEquals(r.failed, 2);
+  assertEquals(r.failed, 5, "1 列 daily＋4 列 summary");
   assert(r.message?.includes("permission denied"));
 });
 
-Deno.test("teeStore 守門：Firestore 失敗照舊丟錯（主流程語意不變），但 Supabase 那份已經寫進去", async () => {
+Deno.test("teeStore 守門：寫 Firestore 時不打 Supabase（只收列），flush 才整批寫、daily 與 summary 各一次", async () => {
+  const fs = memStore();
+  let calls = 0;
+  const seen: number[] = [];
+  const mirror: GaMirror = {
+    upsertDaily: (r) => (calls++, seen.push(r.length), Promise.resolve()),
+    upsertSummary: (r) => (calls++, seen.push(r.length), Promise.resolve()),
+    upsertSearch: () => Promise.resolve(),
+  };
+  const tee = teeStore(fs.store, mirror);
+  await tee.store.set("daily/tw_2026-10-19", DAY_DOC);
+  await tee.store.set("daily/tw_2026-10-18", DAY_DOC);
+  await tee.store.set("daily/tw_2026-10-18", DAY_DOC); // 同一天寫兩次只留一列
+  await tee.store.set("summary/tw", { propertyId: "1", updatedAt: new Date(NOW_MS).toISOString() });
+  assertEquals(calls, 0, "主流程中不打 Supabase");
+  const r = await tee.flush();
+  assertEquals(calls, 2);
+  assertEquals(seen, [2, 4]);
+  assertEquals(r, { state: "ok", message: null, daily: 2, summary: 4, failed: 0 });
+});
+
+Deno.test("teeStore 守門：Firestore 失敗照舊丟錯（主流程語意不變），但那一天的列已經收下、flush 會寫進 Supabase", async () => {
   const fs = memStore(true);
   const mm = memMirror();
   const tee = teeStore(fs.store, mm.mirror);
   await assertRejects(() => tee.store.set("daily/tw_2026-10-19", DAY_DOC), Error, "Firestore");
+  assertEquals((await tee.flush()).state, "ok");
   assertEquals(mm.daily.length, 1);
-  assertEquals(tee.result().state, "ok");
 });
 
-Deno.test("teeStore：只另存 daily／summary；meta/status 的 merge 與其他路徑原樣交給 Firestore", async () => {
+Deno.test("teeStore：只另存 daily／summary；meta/status 的 merge 與其他路徑原樣交給 Firestore；沒有 service role 記失敗", async () => {
   const fs = memStore();
   const mm = memMirror();
   const tee = teeStore(fs.store, mm.mirror);
@@ -155,10 +177,22 @@ Deno.test("teeStore：只另存 daily／summary；meta/status 的 merge 與其�
   await tee.store.set("other/x", { a: 1 });
   assertEquals(fs.merges, ["meta/status"]);
   assert(fs.sets.has("other/x"));
+  assertEquals((await tee.flush()).daily, 0);
   assertEquals([mm.daily.length, mm.summary.length], [0, 0]);
   const none = teeStore(fs.store, null);
   await none.store.set("daily/tw_2026-10-19", DAY_DOC);
-  assertEquals(none.result().state, "error", "沒有 service role 要記失敗，不是靜默成功");
+  assertEquals((await none.flush()).state, "error", "沒有 service role 要記失敗，不是靜默成功");
+});
+
+Deno.test("makeTimeoutFetch：沒帶 signal 的請求自動加上逾時；有帶就用原本的", async () => {
+  const seen: (AbortSignal | null | undefined)[] = [];
+  const base = ((_u: unknown, i?: RequestInit) => (seen.push(i?.signal), Promise.resolve(new Response("{}")))) as typeof fetch;
+  const f = makeTimeoutFetch(1000, base);
+  await f("https://x/rest/v1/ga_daily", { method: "POST" });
+  const own = new AbortController().signal;
+  await f("https://x", { signal: own });
+  assert(seen[0] instanceof AbortSignal, "要加逾時 signal");
+  assertEquals(seen[1], own);
 });
 
 // ---------- 整條流程：GA 另存與 Firestore 並存 ----------
@@ -189,7 +223,7 @@ Deno.test("整條流程守門：runConsoleFetch 包上 teeStore，Supabase 全�
   assertEquals(res.success, true);
   assert(Object.values(res.sources).every((s) => s.state === "ok"), "GA 來源不受另存失敗影響");
   assertEquals([...fs.sets.keys()].filter((p) => p.startsWith("daily/")).length, 90);
-  assertEquals(tee.result().state, "error");
+  assertEquals((await tee.flush()).state, "error");
 });
 
 Deno.test("整條流程：Supabase 正常時三站各 30 天＋各 4 個區間都另存，數字與 Firestore 同一份", async () => {
@@ -198,13 +232,14 @@ Deno.test("整條流程：Supabase 正常時三站各 30 天＋各 4 個區間�
   const mm = memMirror();
   const tee = teeStore(fs.store, mm.mirror);
   await runConsoleFetch({ config: CONSOLE_CONFIG, env: { GCP_SA_KEY: "x" }, deps: g.deps, store: tee.store, getToken: () => Promise.resolve("t") });
-  assertEquals(mm.daily.filter((r) => r.site === "tw").length, 30);
+  const r = await tee.flush();
+  assertEquals(mm.daily.filter((x) => x.site === "tw").length, 30);
   assertEquals(mm.daily.length, 90);
   assertEquals(mm.summary.length, 12);
-  const d = mm.daily.find((r) => r.site === "tw" && r.date === "2026-10-20")!;
+  const d = mm.daily.find((x) => x.site === "tw" && x.date === "2026-10-20")!;
   assertEquals([d.users, d.sessions, d.views], [10, 12, 30]);
   assertEquals(d.pages, [{ key: "pagePath-v", views: 7, users: 5 }]);
-  assertEquals(tee.result(), { state: "ok", message: null, daily: 90, summary: 12, failed: 0 });
+  assertEquals(r, { state: "ok", message: null, daily: 90, summary: 12, failed: 0 });
 });
 
 // ---------- 站內搜尋詞 ----------
@@ -230,6 +265,7 @@ Deno.test("站內搜尋詞守門：GA 或寫入失敗都回 error、不丟出去
   const bad = fakeDeps(() => jsonRes({ error: { message: "forbidden" } }, 403));
   const r1 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: bad.deps });
   assertEquals(r1.state, "error");
+  assert(r1.message?.startsWith("GA metadata 失敗"), "metadata 失敗要在原地轉成 error（訊息說明是哪一步）");
   const reportFail = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ error: { message: "bad" } }, 400)));
   const r2 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: reportFail.deps });
   assertEquals(r2.state, "error");
@@ -266,6 +302,38 @@ Deno.test("站內搜尋詞：有登記就抓近 30 天 search 事件（台灣時
     ["2026-10-19", "侯友宜", "3", 5, 4],
     ["2026-10-19", "沒這個人", "0", 2, 2],
   ]);
+});
+
+Deno.test("站內搜尋詞守門：過了 deadline 不開始（skipped，不打 GA）；mirror 同步丟錯也不往外丟", async () => {
+  const g = fakeDeps(() => jsonRes(META_BOTH));
+  const r = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: g.deps, deadlineMs: NOW_MS - 1 });
+  assertEquals(r.state, "skipped");
+  assertEquals(g.calls.length, 0);
+  const ok = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ rows: [{ dimensionValues: [{ value: "20261019" }, { value: "x" }, { value: "1" }], metricValues: [{ value: "1" }, { value: "1" }] }] })));
+  const throwing: GaMirror = { upsertDaily: () => Promise.resolve(), upsertSummary: () => Promise.resolve(), upsertSearch: () => { throw new Error("sync boom"); } };
+  const r2 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: throwing, deps: ok.deps });
+  assertEquals(r2.state, "error");
+  const badGetToken = (() => { throw new Error("sync token"); }) as unknown as () => Promise<string>;
+  const r3 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: badGetToken, mirror: memMirror().mirror, deps: ok.deps });
+  assertEquals(r3.state, "error");
+  // 不在任何一步 try 裡的意外（例如時鐘丟錯）也要由外層轉成 error
+  const brokenClock = { ...ok.deps, now: () => { throw new Error("clock"); } };
+  const r4 = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: memMirror().mirror, deps: brokenClock, deadlineMs: 1 });
+  assertEquals(r4.state, "error");
+  assert(r4.message?.includes("意外失敗"));
+});
+
+Deno.test("站內搜尋詞：翻滿頁數上限要標 truncated；(other) 不當成搜尋詞", async () => {
+  const full = Array.from({ length: 10000 }, (_, i) => ({ dimensionValues: [{ value: "20261019" }, { value: `t${i}` }, { value: "1" }], metricValues: [{ value: "1" }, { value: "1" }] }));
+  const g = fakeDeps((url) => (url.endsWith("/metadata") ? jsonRes(META_BOTH) : jsonRes({ rows: full })));
+  const mm = memMirror();
+  const r = await runGaSearchSync({ site: "tw", propertyId: "1", getToken: () => Promise.resolve("t"), mirror: mm.mirror, deps: g.deps });
+  assertEquals(r.state, "ok");
+  assertEquals(r.truncated, true);
+  assertEquals(g.calls.length, 1 + 5, "metadata＋5 頁");
+  assert(r.message?.includes("只存了前面"));
+  const rows = parseSearchRows([{ dimensionValues: [{ value: "20261019" }, { value: "(other)" }, { value: "1" }], metricValues: [{ value: "9" }, { value: "9" }] }], "tw", true, "T");
+  assertEquals(rows, []);
 });
 
 Deno.test("站內搜尋詞：只有 search_term 沒有 results_count 時不帶那個維度、results_count 留空", () => {
@@ -315,6 +383,10 @@ Deno.test("接線守門：index.ts 用 teeStore 包住 Firestore 交給 runConso
   assert(/runConsoleFetch\(\{[^}]*\bstore\b/.test(IDX), "runConsoleFetch 收到的是包過的 store");
   const reject = IDX.indexOf("if (!check.ok) return json(");
   for (const later of ["teeStore(", "runGaSearchSync(", "makeSupabaseGaMirror("]) assert(IDX.indexOf(later) > reject, `${later} 要在驗證之後`);
+  assert(/const ga_store = await tee\.flush\(\);/.test(IDX), "主流程跑完要 flush");
+  assert(IDX.indexOf("tee.flush()") > IDX.indexOf("runConsoleFetch({"), "flush 在 runConsoleFetch 之後");
+  assert(/createClient\(supabaseUrl, serviceRoleKey, \{ global: \{ fetch: makeTimeoutFetch\(\) \} \}\)/.test(IDX), "另存用的連線要帶逾時 fetch");
+  assert(/deadlineMs: started \+ SEARCH_DEADLINE_MS/.test(IDX), "搜尋詞要帶 deadline");
   assert(/result\.success \? 200 : 500/.test(IDX), "狀態碼仍只看 GA／Firestore 的結果");
   assert(!/success:[^,\n]*(ga_store|search)\./.test(IDX), "success 不看 ga_store／search");
 });

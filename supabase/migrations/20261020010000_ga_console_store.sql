@@ -11,7 +11,7 @@
 --
 -- 日期 date 是台灣時間的日曆日（console-fetch 的 dayOffset 以 UTC+8 算；GA 依資源本身的時區解讀這個日期字串）。
 -- 數字欄位與 Firestore 同名同義：users＝activeUsers、sessions、views＝screenPageViews、
--- engagement_sec＝userEngagementDuration 總秒數、avg_engagement_sec＝每位使用者平均互動秒數（Firestore 的 avgEngagementSec）。
+-- engagement_sec＝userEngagementDuration 總秒數的近似值（Firestore 只存平均，平均×使用者還原）、avg_engagement_sec＝每位使用者平均互動秒數（Firestore 的 avgEngagementSec）。
 
 CREATE TABLE IF NOT EXISTS public.ga_daily (
   site               text        NOT NULL CHECK (site ~ '^[a-z]+$'),
