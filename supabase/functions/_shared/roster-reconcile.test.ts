@@ -11,8 +11,8 @@ const T_COUNCIL = "縣市議員";
 const T_VILLAGE = "村里長";
 
 /** 一組涵蓋所有分類的小名冊 */
-async function seedAll(edit?: (m: string) => string) {
-  const { db, mig } = await buildReconcileDb(edit);
+async function seedAll(edit?: (m: string) => string, editFix?: (m: string) => string) {
+  const { db, mig } = await buildReconcileDb(edit, editFix);
   await loadRegs(db, [
     // 縣市議員（台北市）
     { type: T_COUNCIL, region: "台北市", name: "王一", district: "第01選舉區" },   // 都對上
@@ -330,7 +330,7 @@ Deno.test("N10 還原驗證：把對帳判準改壞（12 種），指定的情�
       red: (r) => first(r, "林四").category === "missing_creatable" },
     { name: "拿掉「這一屆已有別筆參選紀錄就不掛」", edit: (m) => mutate(m, "                 AND h.politician_id IS NULL\n", ""),
       red: (r) => byName(r, "蔡五").some((x) => x.category === "missing_creatable") },
-    { name: "已合併的人物也算同名者", edit: (m) => mutate(m, "     WHERE p.merged_into IS NULL\n       AND COALESCE(cec_name_key(p.name)", "     WHERE COALESCE(cec_name_key(p.name)"),
+    { name: "已合併的人物也算同名者", edit: (m) => mutate(m, "     WHERE p.merged_into IS NULL\n       AND roster_name_key(p.name)", "     WHERE roster_name_key(p.name)"),
       red: (r) => first(r, "何十二").person_action !== "new" },
     { name: "系統處理過的（log）不擋重建", edit: (m) => mutate(m, "             WHEN ap.reg_id IS NOT NULL THEN 'missing_ambiguous'\n", ""),
       red: (r) => ["沈十三", "韓十四", "楊十五"].some((n) => first(r, n).category === "missing_creatable") },
@@ -338,7 +338,7 @@ Deno.test("N10 還原驗證：把對帳判準改壞（12 種），指定的情�
       red: (r) => first(r, "周七").category === "both" },
     { name: "一對多也當對上（拿掉 match_ambiguous）", edit: (m) => mutate(m, "             WHEN rd.n >= 1 THEN 'match_ambiguous'\n", ""),
       red: (r) => first(r, "鄭九").category !== "match_ambiguous" },
-    { name: "對帳不比鄉鎮（不同鄉鎮的同名者算對上）", edit: (m) => mutate(m, "                 AND (o.town IS NULL OR g.town IS NULL OR o.town = g.town)\n", ""),
+    { name: "對帳不比鄉鎮（不同鄉鎮的同名者算對上）", edit: (m) => mutate(m, "                 AND o.county = g.county AND o.nn = g.name_key\n                 AND (o.town IS NULL OR g.town IS NULL OR o.town = g.town)\n", "                 AND o.county = g.county AND o.nn = g.name_key\n"),
       red: (r) => byName(r, "吳新").every((x) => x.category === "both") },
     { name: "村里長不看村里（同鄉鎮不同里也掛）", edit: (m) => mutate(m, "                 AND NOT (g.election_type = '村里長' AND g.village_n IS NOT NULL AND va.politician_id IS NOT NULL AND ve.politician_id IS NULL)\n", ""),
       red: (r) => first(r, "甲甲").category === "missing_creatable" },
@@ -348,11 +348,11 @@ Deno.test("N10 還原驗證：把對帳判準改壞（12 種），指定的情�
       red: (r) => first(r, "黨丙").category !== "missing_creatable" },
     { name: "next 不看 settings.actions", edit: (m) => mutate(m, "     AND r.person_action IN (SELECT unnest(s.actions) FROM roster_reconcile_settings s WHERE s.id = 1)\n", ""),
       red: () => false /* 由下面專門檢查 */ },
-    { name: "我們多出來的不列", edit: (m) => mutate(m, "     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)\n       AND (o.status IN", "     WHERE FALSE AND (o.status IN"),
+    { name: "我們多出來的不列", edit: (m) => mutate(m, "     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)\n       AND o.pe_id NOT IN", "     WHERE FALSE AND o.pe_id NOT IN"),
       red: (r) => byName(r, "馬十").length === 0 },
   ];
   for (const m of MUTATIONS.filter((x) => x.name !== "next 不看 settings.actions")) {
-    const { db } = await seedAll(m.edit);
+    const { db } = await seedAll(undefined, m.edit);   // 對帳判準在 20261020030100 的 roster_reconcile_rows
     const rows = await reconcile(db);
     assert(m.red(rows), `還原驗證「${m.name}」：指定的情境應該轉紅`);
     await db.close();

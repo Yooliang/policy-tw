@@ -10,6 +10,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { latestFn, readMig } from "./arms-pglite.ts";
 
 export const MIG_NAME = "20261019120000_roster_reconcile.sql";
+export const FIX_MIG_NAME = "20261020030100_roster_reconcile_match_fix.sql";
 export const REG_SCHEMA_MIG = "20261008130000_cec_registrations.sql";
 
 const between = (s: string, a: string, b: string) => {
@@ -35,7 +36,7 @@ CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, r
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
 `;
 
-export async function buildReconcileDb(edit: (migrationText: string) => string = (s) => s): Promise<{ db: PGlite; mig: string }> {
+export async function buildReconcileDb(edit: (migrationText: string) => string = (s) => s, editFix: (migrationText: string) => string = (s) => s): Promise<{ db: PGlite; mig: string }> {
   const db = new PGlite();
   await db.exec(BASE_SCHEMA_SQL);
   await db.exec(await latestFn("cec_name_norm"));
@@ -45,6 +46,8 @@ export async function buildReconcileDb(edit: (migrationText: string) => string =
   await db.exec(regMig);
   const mig = edit(await readMig(MIG_NAME));   // edit：測試的還原驗證用（把 migration 改壞，指定的情境必須轉紅）
   for (const s of ["tables", "rows", "units", "run"]) await db.exec(stripGrants(section(mig, s)));
+  // 20261020030100：異體字正規化＋同單位先比對，重新定義 roster_reconcile_rows／roster_reconcile_text
+  await db.exec(stripGrants(editFix(await readMig(FIX_MIG_NAME))));
   return { db, mig };
 }
 
