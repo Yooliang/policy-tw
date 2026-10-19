@@ -63,15 +63,33 @@ const STATUSES: { key: Status; label: string; bar: string }[] = [
   { key: 'cooling', label: '冷卻', bar: '#64748b' },
   { key: 'blocked', label: '擋下', bar: '#ef4444' },
 ]
+// 標籤與長條的顏色一律用 inline style（hex），不靠 Tailwind class 被打包
+const CHIP: Record<string, { background: string; color: string }> = {
+  ready: { background: '#dcfce7', color: '#15803d' },
+  dead_end: { background: '#fef3c7', color: '#b45309' },
+  saturated: { background: '#ffedd5', color: '#c2410c' },
+  question_full: { background: '#ede9fe', color: '#6d28d9' },
+  parked: { background: '#cffafe', color: '#0e7490' },
+  cooling: { background: '#e2e8f0', color: '#475569' },
+  blocked: { background: '#fee2e2', color: '#b91c1c' },
+  kind_verify: { background: '#e0f2fe', color: '#0369a1' },
+  kind_task: { background: '#e2e8f0', color: '#475569' },
+  agree: { background: '#dcfce7', color: '#15803d' },
+  disagree: { background: '#fee2e2', color: '#b91c1c' },
+  unsure: { background: '#e2e8f0', color: '#475569' },
+  stopped: { background: '#fee2e2', color: '#b91c1c' },
+  flagged: { background: '#fef3c7', color: '#b45309' },
+}
+const chipStyle = (k: string) => CHIP[k] ?? CHIP.unsure
 const STATUS = Object.fromEntries(STATUSES.map((s) => [s.key, s])) as Record<Status, (typeof STATUSES)[number]>
 const SOURCE_LABEL: Record<string, string> = { auto: '自動缺口', suggested: 'AI 提議', web_request: '網站請求', manual: '維護者', auto_dispute: '裁決', verify: '驗證票' }
-const AGE: { key: keyof State['age_buckets']; label: string }[] = [
-  { key: 'never', label: '從沒派過' },
-  { key: 'lt_1h', label: '1 小時內' },
-  { key: 'h1_6', label: '1–6 小時' },
-  { key: 'h6_24', label: '6–24 小時' },
-  { key: 'd1_3', label: '1–3 天' },
-  { key: 'gt_3d', label: '3 天以上' },
+const AGE: { key: keyof State['age_buckets']; label: string; bar: string }[] = [
+  { key: 'never', label: '從沒派過', bar: '#64748b' },
+  { key: 'lt_1h', label: '1 小時內', bar: '#22c55e' },
+  { key: 'h1_6', label: '1–6 小時', bar: '#059669' },
+  { key: 'h6_24', label: '6–24 小時', bar: '#0ea5e9' },
+  { key: 'd1_3', label: '1–3 天', bar: '#6366f1' },
+  { key: 'gt_3d', label: '3 天以上', bar: '#d946ef' },
 ]
 
 // 左邊框依型別上色：用 inline style，不走 Tailwind 動態 class（要 safelist）
@@ -214,6 +232,8 @@ const disp24Rows = computed(() => {
   }
   return [...m.entries()].map(([k, n]) => ({ key: k, label: groupBy.value === 'type' ? (k === 'verify' ? '驗證票' : taskTypeLabel(k)) : (KIND_LABEL[k] ?? k), n })).sort((a, b) => b.n - a.n)
 })
+const maxDisp = computed(() => Math.max(1, ...disp24Rows.value.map((r) => r.n)))
+const ageTotal = computed(() => AGE.reduce((a, g) => a + (state.value?.age_buckets[g.key] ?? 0), 0))
 const parkedRows = computed(() => state.value?.parked ?? [])
 const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value.length)
 </script>
@@ -291,12 +311,12 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               </tr>
             </thead>
             <tbody>
-              <tr v-for="h in state.head" :key="h.pos" class="border-t border-slate-100">
+              <tr v-for="h in state.head" :key="h.pos" class="border-t border-slate-100" :style="h.status !== 'ready' ? { background: '#fffbeb' } : undefined">
                 <td class="py-1 pr-2 pl-2 tabular-nums" :style="{ borderLeft: '4px solid ' + headColor(h) }">{{ h.pos }}</td>
-                <td class="py-1 pr-2 whitespace-nowrap">{{ h.kind === 'verify' ? '驗證' : '任務' }}</td>
+                <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(h.kind === 'verify' ? 'kind_verify' : 'kind_task')">{{ h.kind === 'verify' ? '驗證票' : '任務' }}</span></td>
                 <td class="py-1 pr-2 whitespace-nowrap">{{ headTypeLabel(h) }}<span class="ml-1 text-xs text-slate-400">{{ sourceLabel(h.source) }}</span></td>
                 <td class="py-1 pr-2 max-w-[16rem] truncate font-medium" :title="h.subject">{{ h.subject || '—' }}</td>
-                <td class="py-1 pr-2 whitespace-nowrap">{{ STATUS[h.status]?.label ?? h.status }}</td>
+                <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(h.status)">{{ STATUS[h.status]?.label ?? h.status }}</span></td>
                 <td class="py-1 pr-2 whitespace-nowrap tabular-nums text-slate-500">{{ when(h.queue_at) }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(h.dispatch_count) }}</td>
                 <td class="py-1 whitespace-nowrap tabular-nums text-slate-500">{{ h.dispatch_count > 0 && h.last_dispatched_at ? when(h.last_dispatched_at) : '—' }}</td>
@@ -346,15 +366,15 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(o, i) in overItems" :key="o.contribution_id ?? i" class="border-t border-slate-100 align-top">
+              <tr v-for="(o, i) in overItems" :key="o.contribution_id ?? i" class="border-t border-slate-100 align-top" :style="isStopped(o) ? { background: '#fef2f2' } : undefined">
                 <td class="py-1 pr-2 whitespace-nowrap">{{ o.contribution_type ? overTypeLabel(o.contribution_type) : '—' }}</td>
                 <td class="py-1 pr-2 max-w-[14rem] truncate" :title="o.subject">{{ o.subject || '—' }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(o.votes ?? 0) }}</td>
-                <td class="py-1 pr-2 whitespace-nowrap">{{ isStopped(o) ? '已停派・轉裁決' : '已標出' }}</td>
+                <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(isStopped(o) ? 'stopped' : 'flagged')">{{ isStopped(o) ? '已停派・轉裁決' : '已標出' }}</span></td>
                 <td class="py-1">
                   <div v-if="!o.verdicts?.length" class="text-slate-400">—</div>
                   <div v-for="(v, j) in o.verdicts ?? []" :key="j" class="flex items-center gap-1.5 py-0.5 text-xs">
-                    <span class="whitespace-nowrap">{{ VERDICT[v.verdict ?? ''] ?? v.verdict ?? '—' }}</span>
+                    <span class="rounded px-1.5 py-0.5 whitespace-nowrap" :style="chipStyle(v.verdict ?? '')">{{ VERDICT[v.verdict ?? ''] ?? v.verdict ?? '—' }}</span>
                     <span class="whitespace-nowrap text-slate-400">{{ v.agent || '—' }}</span>
                     <span v-if="v.reason" class="max-w-[18rem] truncate" :title="v.reason">{{ v.reason }}</span>
                   </div>
@@ -369,14 +389,23 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
         <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <h2 class="font-black text-navy-900 mb-3">24 小時實際派出</h2>
           <p v-if="!disp24Rows.length" class="text-slate-400">沒有</p>
-          <ul class="space-y-0.5">
-            <li v-for="r in disp24Rows" :key="r.key" class="flex justify-between gap-2"><span class="truncate">{{ r.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(r.n) }}</span></li>
-          </ul>
+          <div class="space-y-2">
+            <div v-for="r in disp24Rows" :key="r.key" class="grid grid-cols-[7rem_1fr_3rem] items-center gap-2">
+              <span class="truncate" :title="r.key">{{ r.label }}</span>
+              <div class="h-3 rounded" :style="{ background: '#0ea5e9', width: (r.n / maxDisp) * 100 + '%', minWidth: '3px' }"></div>
+              <span class="text-right tabular-nums text-slate-500">{{ fmt(r.n) }}</span>
+            </div>
+          </div>
         </div>
         <div class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <h2 class="font-black text-navy-900 mb-3">可派的距上次派出</h2>
-          <ul class="space-y-0.5">
-            <li v-for="g in AGE" :key="g.key" class="flex justify-between gap-2"><span>{{ g.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(state.age_buckets[g.key]) }}</span></li>
+          <div class="flex h-4 overflow-hidden rounded bg-slate-100">
+            <template v-for="g in AGE" :key="g.key">
+              <div v-if="state.age_buckets[g.key]" :style="{ background: g.bar, width: (state.age_buckets[g.key] / Math.max(1, ageTotal)) * 100 + '%' }" :title="`${g.label} ${fmt(state.age_buckets[g.key])}`"></div>
+            </template>
+          </div>
+          <ul class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
+            <li v-for="g in AGE" :key="g.key" class="flex items-center justify-between gap-2"><span class="inline-flex items-center gap-1.5 text-slate-500"><i class="inline-block size-2.5 rounded-sm" :style="{ background: g.bar }"></i>{{ g.label }}</span><span class="tabular-nums">{{ fmt(state.age_buckets[g.key]) }}</span></li>
           </ul>
         </div>
       </section>
