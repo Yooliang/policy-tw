@@ -8,10 +8,10 @@ import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, rampIndex,
-  tooltipLines, unitHref, viewKey, type CountRow, type MapUnit, type MapView,
+  NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, legendItems, tooltipLines, unitColor, unitHref, viewKey,
+  type ColorMode, type CountRow, type MapUnit, type MapView,
 } from '../lib/candidacy-map'
-import { boundaryPath, decodeRaster, outlinePath, unitFillPaths, unitStats, type DecodedRaster, type RasterFile } from '../lib/raster-grid'
+import { boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, type DecodedRaster, type RasterFile } from '../lib/raster-grid'
 import { Map as MapIcon, ChevronLeft, LayoutGrid, List, ExternalLink, Plus, Minus, RotateCcw } from 'lucide-vue-next'
 
 /**
@@ -23,11 +23,11 @@ import { Map as MapIcon, ChevronLeft, LayoutGrid, List, ExternalLink, Plus, Minu
  */
 
 const ELECTION_ID = 2026
-/** 顏色分段（0 人灰、其餘由淺到深藍）；SVG 用寫死的色碼，不走 Tailwind 動態 class */
-const RAMP = ['#e2e8f0', '#dbeafe', '#93c5fd', '#3b82f6', '#1e40af'] as const
 
 const view = ref<MapView>(NATIONAL_VIEW)
 const mode = ref<'grid' | 'list'>('grid')
+/** 著色：預設看收錄率（綠黃紅），也可以看人數（中性灰階）。色碼是固定 hex（lib/candidacy-map.ts），不拼 Tailwind class */
+const colorMode = ref<ColorMode>('coverage')
 const loading = ref(false)
 const failed = ref(false)
 const selected = ref<string | null>(null)
@@ -130,7 +130,6 @@ const scaleLabel = computed(() => {
 // 同一行政區的格子合併成一條 path；邊界線整張圖一條
 const fills = computed(() => (raster.value ? unitFillPaths(raster.value) : []))
 const boundary = computed(() => (raster.value ? boundaryPath(raster.value) : ''))
-const stats = computed(() => (raster.value ? unitStats(raster.value) : []))
 
 const active = computed<MapUnit | null>(() => {
   const code = hovered.value ?? selected.value
@@ -149,26 +148,19 @@ const activeOutline = computed(() => {
 })
 const sorted = computed(() => [...allUnits.value].sort((a, b) => b.candidates - a.candidates || a.code.localeCompare(b.code)))
 
-// 名稱標籤：放得下才放（外框寬度夠、高度夠），其餘靠滑過看
+// 名稱標籤：位置取最大內接位置、標籤互相避讓（小面積優先），放不下的不放，滑過仍有提示卡（lib/raster-grid.ts placeLabels）
 const fontSize = computed(() => (raster.value ? Math.max(raster.value.w, raster.value.h) / 36 : 10))
 const labels = computed(() => {
   const b = built.value
-  if (!b) return []
-  const fs = fontSize.value
-  const out: Array<{ code: string; text: string; x: number; y: number }> = []
-  b.units.forEach((u, i) => {
-    const s = stats.value[i]
-    if (!s) return
-    if (s.maxX - s.minX >= u.name.length * fs * 0.95 && s.maxY - s.minY >= fs * 1.3) out.push({ code: u.code, text: u.name, x: s.cx, y: s.cy + fs * 0.35 })
-  })
-  return out
+  if (!raster.value || !b) return []
+  return placeLabels(raster.value, b.units.map((u) => u.name), fontSize.value).map((l) => ({ ...l, code: b.units[l.idx].code }))
 })
 
 function hrefOf(u: MapUnit): string {
   return unitHref(ELECTION_ID, view.value, u, { county: countyName.value, town: townName.value })
 }
 function colorOf(u: MapUnit): string {
-  return RAMP[rampIndex(u.candidates, built.value?.max ?? 0)]
+  return unitColor(u, colorMode.value, built.value?.max ?? 0)
 }
 
 const canHover = () => typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches
@@ -230,7 +222,7 @@ function onUp() {
   drag = null
 }
 
-const legend = computed(() => RAMP.map((color, i) => ({ color, i })))
+const legend = computed(() => legendItems(colorMode.value))
 const levelLabel = computed(() => (view.value.level === 'county' ? '縣市' : view.value.level === 'town' ? '鄉鎮市區' : '村里'))
 
 usePageHead({
@@ -269,6 +261,15 @@ usePageHead({
           </template>
           <span class="ml-2 text-slate-500 font-bold" data-testid="map-total">{{ total }} 人</span>
         </nav>
+        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="著色">
+          <button type="button" :aria-pressed="colorMode === 'coverage'" data-testid="map-color-coverage"
+            :class="['px-3 py-2 text-sm font-black', colorMode === 'coverage' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800']"
+            @click="colorMode = 'coverage'">收錄率</button>
+          <button type="button" :aria-pressed="colorMode === 'count'" data-testid="map-color-count"
+            :class="['px-3 py-2 text-sm font-black', colorMode === 'count' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800']"
+            @click="colorMode = 'count'">人數</button>
+        </div>
         <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="呈現方式">
           <button type="button" :aria-pressed="mode === 'grid'" data-testid="map-mode-grid"
             :class="['px-3 py-2 text-sm font-black inline-flex items-center gap-1.5', mode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600']"
@@ -276,6 +277,7 @@ usePageHead({
           <button type="button" :aria-pressed="mode === 'list'" data-testid="map-mode-list"
             :class="['px-3 py-2 text-sm font-black inline-flex items-center gap-1.5', mode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600']"
             @click="mode = 'list'"><List :size="14" />清單</button>
+        </div>
         </div>
       </div>
 
@@ -310,8 +312,8 @@ usePageHead({
                 <rect v-for="(f, i) in raster.insets" :key="`inset-${i}`" :x="f.ox - 0.5" :y="f.oy - 0.5" :width="f.w + 1" :height="f.h + 1"
                   fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" pointer-events="none" />
                 <path v-if="activeOutline" :d="activeOutline" fill="none" stroke="#0f172a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" pointer-events="none" data-testid="map-outline" />
-                <g pointer-events="none" text-anchor="middle" font-weight="800" :font-size="fontSize">
-                  <text v-for="l in labels" :key="l.code" :x="l.x" :y="l.y" fill="#0f172a" stroke="#ffffff" :stroke-width="fontSize * 0.22" paint-order="stroke" stroke-linejoin="round">{{ l.text }}</text>
+                <g pointer-events="none" text-anchor="middle" font-weight="800">
+                  <text v-for="l in labels" :key="l.code" :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
                 </g>
               </svg>
             </template>
@@ -331,10 +333,15 @@ usePageHead({
             </ul>
 
             <div class="flex flex-wrap items-center justify-between gap-2 mt-4 text-xs font-bold text-slate-500">
-              <div class="flex items-center gap-1" data-testid="map-legend">
-                <span>0</span>
-                <span v-for="l in legend" :key="l.i" class="w-6 h-3 rounded-sm" :style="{ background: l.color }"></span>
-                <span>{{ built.max }}</span>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="map-legend">
+                <template v-if="colorMode === 'count'">
+                  <span>0</span>
+                  <span v-for="(l, i) in legend" :key="i" class="w-6 h-3 rounded-sm" :style="{ background: l.color }"></span>
+                  <span>{{ built.max }}</span>
+                </template>
+                <span v-else v-for="(l, i) in legend" :key="i" class="inline-flex items-center gap-1">
+                  <span class="w-4 h-3 rounded-sm" :style="{ background: l.color }"></span>{{ l.label }}
+                </span>
               </div>
               <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
             </div>
