@@ -35,6 +35,8 @@ const props = defineProps<{
   regionLabel?: string
   /** 選舉頁給的 .md 抽屜：不給分類＝縣市全部分類；回 null＝這一屆沒有預產，不顯示按鈕 */
   mdPickFor?: (category?: string) => MdPick | null
+  /** 這一場比縣市窄：.md 只有全縣市版本，按鈕下方註明 */
+  mdNarrow?: boolean
 }>()
 
 defineEmits<{ toggle: [id: string]; all: [] }>()
@@ -91,6 +93,8 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
           </div>
         </div>
 
+        <p v-if="regionPick && mdNarrow" class="mt-1 text-xs text-slate-500" data-testid="pk-md-scope">Markdown 摘要目前只有全縣市版本（含各層級參選人），不是只有這一場；點表格的分類名可開該分類。</p>
+
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
         <fieldset class="mt-3">
           <legend class="text-xs font-bold text-slate-500 mb-1.5">
@@ -137,7 +141,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
           <tbody>
             <tr v-for="row in matrix.rows" :key="row.category" class="align-top">
               <th scope="row" class="sticky left-0 z-10 bg-white p-2 pl-4 border-b border-slate-100 text-xs font-bold text-slate-600">
-                <button v-if="props.mdPickFor?.(row.category)" type="button" class="inline-flex items-start gap-1 text-left hover:text-violet-700 hover:underline" :title="`${regionLabel}　${row.category}`" @click="openMd(row.category)"><FileText :size="12" class="mt-0.5 shrink-0" />{{ row.category }}</button>
+                <button v-if="props.mdPickFor?.(row.category)" type="button" class="inline-flex items-start gap-1 text-left hover:text-violet-700 hover:underline" :title="props.mdPickFor?.(row.category)?.title" @click="openMd(row.category)"><FileText :size="12" class="mt-0.5 shrink-0" />{{ row.category }}</button>
                 <template v-else>{{ row.category }}</template>
               </th>
               <td v-for="(cell, i) in row.cells" :key="matrix.columns[i].id" class="p-2 border-b border-slate-100">
