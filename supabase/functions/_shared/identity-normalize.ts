@@ -70,6 +70,32 @@ const EMPTY_MARKERS: ReadonlySet<string> = new Set(["", "無", "未知", "未定
 /** 中選會對罕用字的逸出寫法：@ 十六進位碼位 @。匯入端該擋、正規化端該警告，不該當字面值存。 */
 export const CEC_ESCAPE_RE = /@[0-9A-Fa-f]{4,5}@/;
 
+/**
+ * 常見姓名異體字對照（名冊對帳用，2026-10-20）：**只收確實是同一個字的異體**。杰／傑、堃／坤 不收——在台灣是不同的字、常用作不同人名，摺疊會讓不同人被掛在一起。
+ * TS 的 normText 只處理「臺→台」，沒有「黄→黃」，所以 黄→黃 也放在這裡（SQL 的 cec_name_norm 本來就有）。
+ * 試跑出過「張啓楷」（名冊）／「張啟楷」（站上）被當成兩個人的重複人物。SQL 版 roster_name_fold（migration 20261020030100）同一份，
+ * roster-reconcile-match.test.ts 比對兩邊相同。**只用來比對，不改存的姓名**。
+ */
+export const FOLD_PAIRS: ReadonlyArray<readonly [string, string]> = [["啓", "啟"], ["峯", "峰"], ["羣", "群"], ["衞", "衛"], ["敎", "教"], ["綫", "線"], ["裏", "裡"], ["着", "著"], ["温", "溫"], ["寛", "寬"], ["彦", "彥"], ["恒", "恆"], ["眞", "真"], ["硏", "研"], ["徳", "德"], ["爲", "為"], ["淸", "清"], ["靑", "青"], ["栢", "柏"], ["銹", "鏽"], ["强", "強"], ["勛", "勳"], ["崐", "崑"], ["黄", "黃"]];
+export function foldNameVariants(input: string): string {
+  let s = input;
+  for (const [from, to] of FOLD_PAIRS) s = s.split(from).join(to);
+  return s;
+}
+
+/**
+ * 名冊對帳的姓名鍵（TS 版，跟 SQL roster_name_key 同一套）：NFKC → 去空白與中間點（·．.・‧•）→ 臺→台 → 去尾端羅馬拼音（[-'A-Za-z]+$，
+ * 原住民族名「鄭萬正Ipay-Kaeti」→「鄭萬正」；全是拉丁字母的原樣留著）→ 異體字對照。掛上既有人物時的姓名核對用它，
+ * 才不會 SQL 判成同一人、TS 落庫時卻因為中間點／尾端拼音／黄 不同而被擋成 disputed。
+ */
+export function rosterNameKey(input: string | null | undefined): string | null {
+  if (input === null || input === undefined) return null;
+  const s = String(input).normalize("NFKC").replace(/[\s·．.・‧•]/g, "").replace(/臺/g, "台");
+  const stripped = s.replace(/[-'A-Za-z]+$/, "");
+  const base = stripped || s;
+  return base ? foldNameVariants(base) : null;
+}
+
 export function normText(input: string | null | undefined): string | null {
   if (input === null || input === undefined) return null;
   // 中選會逸出碼（@2F97F@ 這種）沒解碼就進來，正規化後永遠比對不上本人（2026-09-21：32 人因此對去重隱形）。
