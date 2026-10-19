@@ -38,3 +38,11 @@ export function policyYear(
   if (policy.lastUpdated) return policy.lastUpdated.slice(0, 4)
   return null
 }
+
+/**
+ * 政見清單的預設規則（2026-10-19 維護者「至少依某個規則」）：提出日期新到舊（沒有就最後更新），同時間比 id。
+ * 政見 id 是隨機 UUID，只拿來當最後的平手規則，不能單獨當排序（之前好幾個清單直接用資料庫的 id 順序，等於亂序）。
+ */
+export function compareByPolicyDateDesc(a: Pick<Policy, 'id' | 'proposedDate' | 'lastUpdated'>, b: Pick<Policy, 'id' | 'proposedDate' | 'lastUpdated'>): number {
+  return policySortDate(b) - policySortDate(a) || String(a.id).localeCompare(String(b.id))
+}

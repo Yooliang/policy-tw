@@ -16,6 +16,7 @@ import { ArrowRight, Users, FileCheck, Vote, Star, CheckCircle2, Activity } from
 import { RouterLink } from 'vue-router'
 import { TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
+import { compareByPolicyDateDesc } from '../lib/policy-date'
 
 const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
 
@@ -66,7 +67,7 @@ const politicianOf = (p: { politicianId: string }) => politicians.value.find(pol
 const notLost = (p: (typeof policies.value)[number]) => !isLostCampaignPromise(p, politicianOf(p))
 
 const checkpointPolicies = computed(() =>
-  policies.value.filter(p => checkpointIds.value.includes(p.id) && notLost(p)).slice(0, 3)
+  policies.value.filter(p => checkpointIds.value.includes(p.id) && notLost(p)).sort(compareByPolicyDateDesc).slice(0, 3)
 )
 
 const statusData = computed(() => [
@@ -102,7 +103,8 @@ const countByStatus = (status: string) => policies.value.filter(p => p.status ==
 const achievedCount = computed(() => countByStatus('Achieved'))
 const inProgressCount = computed(() => countByStatus('In Progress'))
 
-const recentPolicies = computed(() => policies.value.filter(notLost).slice(0, 3))
+// 提出日期新到舊（2026-10-19；之前取資料庫 id 順序前三筆＝隨機）
+const recentPolicies = computed(() => policies.value.filter(notLost).sort(compareByPolicyDateDesc).slice(0, 3))
 
 const barOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false } },

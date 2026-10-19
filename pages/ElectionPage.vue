@@ -7,11 +7,13 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, 
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
-import { PolicyStatus, ElectionType, type Politician } from '../types'
+import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
+import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
+import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { dataRegionCategoryMdPath, dataRegionMdPath } from '../lib/md/format'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
@@ -21,7 +23,7 @@ import {
   Vote, Flag, AlertCircle, Users, MapPin,
   Search, Layers,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, ArrowUpDown, Swords, FileText } from 'lucide-vue-next'
+  Crown, ScrollText, Swords, FileText, Clock, List, Eye } from 'lucide-vue-next'
 import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
@@ -283,23 +285,28 @@ const gridColumns = computed(() => showSidebar.value ? 2 : 3)
 // 地名排序（先字數再筆畫）跟名錄分組共用同一套規則，見 lib/region-name.ts
 const sortByLengthThenStroke = compareRegionName
 
-// 候選人排序（使用者 2026-09-20：多種排序讓人選，預設「最近更新」）。
+// 候選人排序（使用者 2026-09-20：多種排序讓人選）。
 // 原本是資料庫撈出來的順序，等於先建檔的永遠排第一——清單第一格的曝光遠高於後面，系統不該替任何人站台。
+// 2026-10-19 維護者：改成純圖示（components/SortIcons.vue），預設改成不看活動量的規則——有號次照號次、沒有就姓名筆畫；
+// 「最近更新／政見數／關注度」留著讓讀者自己選（更正 09-20 預設「最近更新」與 10-18「有號次不給選」）
 type SortMode = 'ballot' | 'updated' | 'stroke' | 'policies' | 'attention'
-// 頁面上有號次（抽籤後）就一律照號次排、不給排序下拉（維護者 10-18）；之前維持可選，預設「最近更新」
 const sortChoice = ref<SortMode | null>(null)
 const hasBallotNos = computed(() => electionPoliticians.value.some(c => !!getPoliticianElectionData(c, electionId.value)?.candNo))
 const sortMode = computed<SortMode>({
-  get: () => hasBallotNos.value ? 'ballot' : (sortChoice.value ?? 'updated'),
+  get: () => {
+    const v = sortChoice.value
+    if (v === 'ballot' && !hasBallotNos.value) return 'stroke'
+    return v ?? (hasBallotNos.value ? 'ballot' : 'stroke')
+  },
   set: (v) => { sortChoice.value = v },
 })
-const ALL_SORT_OPTIONS: Array<{ key: SortMode; label: string }> = [
-  { key: 'updated', label: '最近更新' },   // 名下政見或進度最近有變動的在前
-  { key: 'stroke', label: '姓名筆畫' },    // 中選會抽籤前的慣例
-  { key: 'policies', label: '政見數' },    // 登錄的政見多的在前
-  { key: 'attention', label: '關注度' },   // 支持、反對、關注的總數
-]
-const SORT_OPTIONS = ALL_SORT_OPTIONS
+const SORT_OPTIONS = computed<SortIconOption<SortMode>[]>(() => [
+  { key: 'updated', label: '最近更新', icon: Clock },   // 名下政見或進度最近有變動的在前
+  { key: 'stroke', label: '姓名筆畫', text: '姓' },     // 中選會抽籤前的慣例
+  { key: 'policies', label: '政見數', icon: List },     // 登錄的政見多的在前
+  { key: 'attention', label: '關注度', icon: Eye },     // 支持、反對、關注的總數
+  ...(hasBallotNos.value ? [{ key: 'ballot' as const, label: '號次', text: 'No' }] : []),
+])
 /** 每位候選人名下政見的統計：最後變動時間、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
 const policyStatsByPolitician = computed(() => {
   const m = new Map<string, { updated: string; count: number; attention: number }>()
@@ -740,6 +747,23 @@ const allCampaignPolicies = computed(() =>
   })
 )
 
+// 政見頁籤的排序（2026-10-19 維護者）：預設照人的姓名筆畫、同一人新到舊；時鐘＝全部照提出日期新到舊。
+// 之前沒有排，用的是資料庫 id（隨機 UUID）順序
+type PledgeSort = 'stroke' | 'recent'
+const pledgeSort = ref<PledgeSort>('stroke')
+const PLEDGE_SORT_OPTIONS: SortIconOption<PledgeSort>[] = [
+  { key: 'recent', label: '最近提出', icon: Clock },
+  { key: 'stroke', label: '姓名筆畫', text: '姓' },
+]
+const sortedCampaignPolicies = computed(() => {
+  const nameOf = new Map(politicians.value.map(c => [c.id, c.name]))
+  const byName = (a: Policy, b: Policy) => sortByLengthThenStroke(nameOf.get(a.politicianId) ?? '', nameOf.get(b.politicianId) ?? '')
+  const cmp = pledgeSort.value === 'recent'
+    ? (a: Policy, b: Policy) => compareByPolicyDateDesc(a, b) || byName(a, b)
+    : (a: Policy, b: Policy) => byName(a, b) || String(a.politicianId).localeCompare(String(b.politicianId)) || compareByPolicyDateDesc(a, b)
+  return [...allCampaignPolicies.value].sort(cmp)
+})
+
 // Issues mode
 const regionPolicies = computed(() =>
   policies.value.filter(p => {
@@ -1027,12 +1051,9 @@ usePageHead({
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
-        <!-- 排序選單：預設最近更新；不讓任何人固定排第一 -->
-        <div v-if="!hasBallotNos" class="flex items-center justify-end gap-2 mb-4 text-sm">
-          <label for="candidate-sort" class="text-slate-400" title="排序"><ArrowUpDown :size="16" /><span class="sr-only">排序</span></label>
-          <select id="candidate-sort" v-model="sortMode" class="border border-slate-300 rounded-lg px-2 py-1 text-sm text-slate-700 bg-white focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
-            <option v-for="o in SORT_OPTIONS" :key="o.key" :value="o.key">{{ o.label }}</option>
-          </select>
+        <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
+        <div class="flex justify-end mb-4">
+          <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
         </div>
         <!--
           分層（2026-10-05 #348 收成設定）：每一頁只畫「這一層＋下一層」，畫哪些職位、什麼順序、
@@ -1130,9 +1151,12 @@ usePageHead({
       </div>
 
       <!-- VIEW: Pledges -->
+      <div v-if="viewMode === 'pledges'" class="flex justify-end mb-4">
+        <SortIcons v-model="pledgeSort" :options="PLEDGE_SORT_OPTIONS" />
+      </div>
       <div v-if="viewMode === 'pledges'" class="animate-fade-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <PolicyCard
-          v-for="policy in allCampaignPolicies"
+          v-for="policy in sortedCampaignPolicies"
           :key="policy.id"
           :policy="policy"
           :politician="politicians.find(c => c.id === policy.politicianId)!"

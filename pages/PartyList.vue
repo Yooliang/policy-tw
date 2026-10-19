@@ -11,6 +11,7 @@ import { Flag } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import PartyBadge from '../components/PartyBadge.vue'
+import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { partyStatusText } from '../lib/parties'
@@ -25,7 +26,7 @@ onMounted(() => {
 
 type SortKey = 'name' | 'no'
 const sortKey = ref<SortKey>('name')
-const SORTS: { key: SortKey; label: string }[] = [{ key: 'name', label: '依名稱' }, { key: 'no', label: '依編號' }]
+const SORTS: SortIconOption<SortKey>[] = [{ key: 'name', label: '名稱筆畫', text: '名' }, { key: 'no', label: '政黨編號', text: 'No' }]
 // partyList 本身就是名稱筆畫順序（lib/party-pages.ts）；依編號＝政黨編號由小到大
 const registered = computed(() => {
   const list = (partyList.value ?? []).filter((p) => p.moiNo !== null)
@@ -65,16 +66,7 @@ usePageHead({
         <section aria-labelledby="registered-h" class="mb-12">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 id="registered-h" class="text-2xl font-black text-navy-900">內政部政黨名冊上的政黨</h2>
-            <div class="inline-flex bg-slate-100 p-1 rounded-lg" role="group" aria-label="排序" data-testid="party-sort">
-              <button
-                v-for="s in SORTS"
-                :key="s.key"
-                type="button"
-                :aria-pressed="sortKey === s.key"
-                :class="`px-3 py-1.5 rounded-md text-sm font-bold transition-all ${sortKey === s.key ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`"
-                @click="sortKey = s.key"
-              >{{ s.label }}</button>
-            </div>
+            <SortIcons v-model="sortKey" :options="SORTS" data-testid="party-sort" />
           </div>
           <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <li v-for="p in registered" :key="p.id">

@@ -10,6 +10,7 @@ import {
   Clock, TrendingUp, ChevronDown, ChevronUp, Loader2
 } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
+import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,14 +27,19 @@ const relatedDiscussions = computed(() =>
   discussions.value.filter(d => d.policyId === discussion.value?.policyId && d.id !== discussion.value?.id)
 )
 
-const commentSort = ref<'latest' | 'hot'>('latest')
+type CommentSort = 'latest' | 'hot'
+const commentSort = ref<CommentSort>('latest')
+// 排序統一用純圖示（components/SortIcons.vue，2026-10-19）
+const COMMENT_SORT_OPTIONS: SortIconOption<CommentSort>[] = [
+  { key: 'latest', label: '最新', icon: Clock },
+  { key: 'hot', label: '最熱門', icon: Eye },
+]
 
 const sortedComments = computed(() => {
   if (!discussion.value) return []
   const list = [...discussion.value.comments]
-  if (commentSort.value === 'hot') {
-    list.sort((a, b) => b.likes - a.likes)
-  }
+  // 「最新」維持資料庫視圖 discussions_full 給的順序（留言的 createdAt 是視圖組好的字串，不拿來比）
+  if (commentSort.value === 'hot') list.sort((a, b) => b.likes - a.likes)
   return list
 })
 
@@ -170,16 +176,7 @@ usePageHead({
             <div class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
               <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-bold text-navy-900">留言 ({{ totalCommentCount }})</h2>
-                <div class="flex gap-2">
-                  <button
-                    @click="commentSort = 'latest'"
-                    :class="['px-3 py-1 rounded-lg text-xs font-bold transition-all', commentSort === 'latest' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-blue-500']"
-                  >最新</button>
-                  <button
-                    @click="commentSort = 'hot'"
-                    :class="['px-3 py-1 rounded-lg text-xs font-bold transition-all', commentSort === 'hot' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-blue-500']"
-                  >最熱門</button>
-                </div>
+                <SortIcons v-model="commentSort" :options="COMMENT_SORT_OPTIONS" />
               </div>
 
               <div class="space-y-6">
