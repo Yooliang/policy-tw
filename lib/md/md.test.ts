@@ -124,9 +124,9 @@ Deno.test("截斷照字算、壓成一行", () => {
   assertEquals(truncate(null, 10), "");
 });
 
-Deno.test("人物排序＝姓名筆畫（同網頁，先字數再筆畫），並列依 id；政見依提出日期新的在前、沒日期的最後、再依 id", () => {
+Deno.test("人物排序＝姓名筆畫（同網頁，不先比字數），並列依 id；政見依提出日期新的在前、沒日期的最後、再依 id", () => {
   const sorted = [{ name: "陳大文", id: "b" }, { name: "李安", id: "c" }, { name: "李安", id: "a" }, { name: "王大明", id: "d" }].sort(compareByName);
-  assertEquals(sorted.map((p) => p.id), ["a", "c", "d", "b"]); // 兩字在前；同名依 id；三字依筆畫（王 4 畫 < 陳 11 畫）
+  assertEquals(sorted.map((p) => p.id), ["d", "a", "c", "b"]); // 不先比字數：王 4 畫 < 李 7 畫 < 陳 11 畫；同名依 id
   const ps = [{ id: "2", proposedDate: null }, { id: "1", proposedDate: "2026-01-01" }, { id: "3", proposedDate: "2026-05-01" }, { id: "0", proposedDate: "2026-05-01" }].sort(comparePolicies);
   assertEquals(ps.map((p) => p.id), ["0", "3", "1", "2"]);
 });

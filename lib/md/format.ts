@@ -8,7 +8,7 @@
  * 也不在內文講排序方式或方法論。例外只有一句：縣市×主題是關鍵字比對、尚未逐筆確認，那是資料本身的狀態，必須明講。
  */
 import { SITE_URL, policyStatusLabel } from '../site'
-import { compareRegionName } from '../region-name'
+import { comparePerson } from '../person-name'
 import type { Election, Policy, SourceRef } from '../../types'
 
 export const FORMAT_VERSION = 1
@@ -177,9 +177,9 @@ export function renderPage(page: MdPage, path: string, generatedAt: number): str
 
 // ───────────────────────── 排序 ─────────────────────────
 
-/** 人物排序＝姓名筆畫（維護者 10-07 裁示）：跟網頁「姓名筆畫」同一個比較（lib/region-name.ts，先字數再筆畫），並列再依 id，輸出才穩定 */
+/** 人物排序＝姓名筆畫（維護者 10-07 裁示）：跟網頁「姓名筆畫」同一個比較（lib/person-name.ts，不先比字數），並列再依 id，輸出才穩定 */
 export function compareByName(a: { name: string; id: string }, b: { name: string; id: string }): number {
-  return compareRegionName(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  return comparePerson(a, b)
 }
 
 /** 同一個人的政見：提出日期新的在前，沒有日期的排後面，再依 id（輸出穩定） */

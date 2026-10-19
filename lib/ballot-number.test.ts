@@ -5,6 +5,7 @@
  *   3. 同一場選舉內有號次的在前、沒有的維持原順序，而且不同場次互不干擾、整份清單的位置不動。
  */
 import { assertEquals } from "jsr:@std/assert@1";
+import { TAIWAN_COUNTIES } from "./election-regions.ts";
 import {
   ballotLabel,
   ballotNo,
@@ -12,6 +13,7 @@ import {
   ballotNoOfElection,
   compareBallotNo,
   listByBallotNo,
+  listByCountyBallot,
   nameWithBallot,
   orderByBallotNo,
   orderPeopleByBallotNo,
@@ -159,4 +161,39 @@ Deno.test("退選的人不因沒號次被隱藏；分不出場次的人原地不
 Deno.test("anyBallotNo：只有合法號次算", () => {
   assertEquals(anyBallotNo([{ candNo: 0 }, { candNo: undefined }]), false);
   assertEquals(anyBallotNo([{}, { candNo: 3 }]), true);
+});
+
+const mayorIn = (id: string, name: string, region: string, candNo?: number, extra: Record<string, unknown> = {}) =>
+  ({ id, name, region, candNo, electionType: "縣市長", ...extra });
+
+Deno.test("listByCountyBallot：跨縣市不交錯，縣市照站上固定順序，同縣市內號次遞增", () => {
+  const list = [
+    mayorIn("a", "謝國樑", "基隆市", 1), mayorIn("b", "黃源甫", "新竹市", 1), mayorIn("c", "張善政", "桃園市", 1),
+    mayorIn("d", "張家豪", "台北市", 1), mayorIn("e", "許忠信", "台南市", 1), mayorIn("f", "陳薇仲", "基隆市", 2),
+    mayorIn("g", "王文娟", "台北市", 2), mayorIn("h", "林姿妙", "宜蘭縣", 1), mayorIn("i", "蔡適應", "基隆市", 3),
+  ];
+  const out = listByCountyBallot(list, TAIWAN_COUNTIES);
+  assertEquals(out.map((p) => p.id), ["d", "g", "c", "e", "a", "f", "i", "b", "h"]);
+  assertEquals(out.map((p) => p.region), ["台北市", "台北市", "桃園市", "台南市", "基隆市", "基隆市", "基隆市", "新竹市", "宜蘭縣"]);
+});
+
+Deno.test("listByCountyBallot：臺／台寫法同一個縣市；不在縣市名單上的排最後", () => {
+  const out = listByCountyBallot([mayorIn("x", "外", "火星市", 1), mayorIn("a", "甲", "臺南市", 1), mayorIn("b", "乙", "台北市", 1)], TAIWAN_COUNTIES);
+  assertEquals(out.map((p) => p.id), ["b", "a", "x"]);
+});
+
+Deno.test("listByCountyBallot：議員同縣市內先選舉區（固定順序）再號次", () => {
+  const c = (id: string, sub: string, no: number) =>
+    ({ id, name: id, region: "新竹縣", subRegion: sub, candNo: no, electionType: "縣市議員" });
+  const out = listByCountyBallot([c("p", "第02選舉區", 1), c("q", "第01選舉區", 2), c("r", "第01選舉區", 1), c("s", "第10選舉區", 1)], TAIWAN_COUNTIES);
+  assertEquals(out.map((p) => p.id), ["r", "q", "p", "s"]);
+});
+
+Deno.test("listByCountyBallot：沒有號次的排該縣市組尾，依姓名筆畫（王 < 張）", () => {
+  const out = listByCountyBallot([
+    mayorIn("n1", "張無", "台北市", undefined, { candidacyStatus: "withdrawn" }),
+    mayorIn("n2", "王無", "台北市", undefined, { candidacyStatus: "withdrawn" }),
+    mayorIn("a", "甲", "台北市", 2), mayorIn("b", "乙", "台北市", 1), mayorIn("c", "丙", "基隆市", 1),
+  ], TAIWAN_COUNTIES);
+  assertEquals(out.map((p) => p.id), ["b", "a", "n2", "n1", "c"]);
 });
