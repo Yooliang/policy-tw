@@ -820,6 +820,16 @@ const issuesMdPick = computed<MdPick | null>(() => {
   }
   return { id: `r:${region}`, row: `/election/${seg}/${region}.md`, path: dataRegionMdPath(seg, region), title: `${region}　全部分類` }
 })
+// 政見 PK 的 .md 抽屜（2026-10-19 維護者）：跟政見矩陣一樣開預產的 /data/<屆>/<縣市>/<分類>.md；沒指定分類開縣市全部分類
+function pkMdPick(category?: string): MdPick | null {
+  const region = selectedRegion.value
+  if (!hasMatrix.value || region === 'All') return null
+  const seg = electionSeg.value
+  if (category && categories.value.includes(category)) {
+    return { id: `${region}|${category}`, row: `/data/${seg}/${region}/${category}.md`, path: dataRegionCategoryMdPath(seg, region, category), title: `${region}　${category}` }
+  }
+  return { id: `r:${region}`, row: `/election/${seg}/${region}.md`, path: dataRegionMdPath(seg, region), title: `${region}　全部分類` }
+}
 const issuesMdOpen = ref<MdPick | null>(null)
 watch([viewMode, selectedRegion], () => { issuesMdOpen.value = null })
 
@@ -1227,6 +1237,7 @@ usePageHead({
           :matrix="pkMatrix"
           :year="electionYear || ''"
           :region-label="selectedRegion !== 'All' ? selectedRegion : ''"
+          :md-pick-for="pkMdPick"
           @toggle="togglePk"
           @all="comparisonPick = ''"
         />

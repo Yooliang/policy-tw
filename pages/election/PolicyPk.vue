@@ -20,10 +20,6 @@ import type { Politician } from '../../types'
 import type { CompareMatrix } from '../../lib/policy-compare'
 import PolicyElements from '../../components/PolicyElements.vue'
 import MdDrawer, { type MdPick } from '../../components/MdDrawer.vue'
-import { comparisonMarkdown } from '../../lib/comparison-markdown'
-import { cellText, elementCells } from '../../lib/policy-elements'
-import { latestTime } from '../../lib/md/format'
-import { SITE_URL } from '../../lib/site'
 
 const props = defineProps<{
   /** 例如「縣市議員・第08選舉區」 */
@@ -35,8 +31,10 @@ const props = defineProps<{
   matrix: CompareMatrix<Politician>
   /** 選舉年份（投票日的年） */
   year?: string | number
-  /** 縣市名，只用在複製的 Markdown 標題；全國的職位不給（不是選區選擇） */
+  /** 縣市名；全國的職位不給（不是選區選擇） */
   regionLabel?: string
+  /** 選舉頁給的 .md 抽屜：不給分類＝縣市全部分類；回 null＝這一屆沒有預產，不顯示按鈕 */
+  mdPickFor?: (category?: string) => MdPick | null
 }>()
 
 defineEmits<{ toggle: [id: string]; all: [] }>()
@@ -49,35 +47,17 @@ const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !mdOpen.value) f
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); document.body.style.overflow = '' })
 
-// 複製 Markdown（一般檢視與全畫面都有）：先開共用的 Markdown 抽屜預覽，從抽屜複製；附本頁網址、資料日期與 CC BY 4.0
+// .md 抽屜（2026-10-19 維護者）：跟政見矩陣一樣，開預產的「縣市×分類」.md（複製給 AI、另開視窗）；不是把比較表轉成 Markdown
 const mdPick = ref<MdPick | null>(null)
 const mdOpen = computed(() => mdPick.value !== null)
-// 抽屜關掉時會把 body 捲動還原；全畫面還開著就再鎖回去
+// 抽屜關掉時會把 body 捲動還原；全畫面還開著就再鎖回去（分類列的按鈕全畫面也能開）
 watch(mdOpen, async (on) => {
   if (on) return
   await nextTick()
   if (fullscreen.value) document.body.style.overflow = 'hidden'
 })
-function policyCell(p: CompareMatrix<Politician>['rows'][number]['cells'][number][number]): string {
-  const els = elementCells(p.elements).map(c => `${c.label}：${cellText(c)}`).join('；')
-  return `**${p.title}**（${els}）`
-}
-function buildMarkdown(): string {
-  const rows = props.matrix.rows
-  const dataDate = latestTime(rows.flatMap(r => r.cells.flat().map(p => p.updatedAt ?? p.lastUpdated)))
-  return comparisonMarkdown({
-    title: props.title,
-    year: props.year ?? '',
-    region: props.regionLabel,
-    pageUrl: `${SITE_URL}${window.location.pathname}${window.location.search}`,
-    dataDate,
-    candidates: props.matrix.columns.map(c => ({ candNo: c.candNo, name: c.name, party: c.party })),
-    rows: rows.map(r => ({ label: r.category, cells: r.cells.map(cell => cell.map(policyCell).join('\n')) })),
-  })
-}
-function openMarkdown(): void {
-  mdPick.value = { id: 'pk', path: '', title: `${props.title}：政見並排比較`, text: buildMarkdown(), copyLabel: '複製 Markdown' }
-}
+const regionPick = computed(() => props.mdPickFor?.() ?? null)
+const openMd = (category?: string) => { mdPick.value = props.mdPickFor?.(category) ?? null }
 
 const isPicked = (id: string | number) => props.picked.includes(String(id))
 </script>
@@ -94,14 +74,13 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
         <div class="flex items-start justify-between gap-3">
           <h3 class="font-bold text-navy-900 text-lg">{{ title }}：並排比較 {{ matrix.columns.length }} 位參選人的政見</h3>
           <div class="flex shrink-0 items-center gap-2">
-          <!-- 複製 Markdown（2026-10-19 維護者）：一般檢視也顯示在「全畫面」旁，樣式同議題串聯的 .md 按鈕；原本只在全畫面才出現 -->
           <button
-            v-if="matrix.policyCount > 0"
+            v-if="!fullscreen && regionPick"
             type="button"
             class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            data-testid="pk-copy-markdown"
-            @click="openMarkdown"
-          ><FileText :size="16" />{{ regionLabel ? `${regionLabel}　` : '' }}政見 PK</button>
+            data-testid="pk-md"
+            @click="openMd()"
+          ><FileText :size="16" />{{ regionPick.title }}</button>
           <button
             type="button"
             class="hidden md:inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-bold text-slate-600 hover:bg-slate-50"
@@ -157,7 +136,10 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
           </thead>
           <tbody>
             <tr v-for="row in matrix.rows" :key="row.category" class="align-top">
-              <th scope="row" class="sticky left-0 z-10 bg-white p-2 pl-4 border-b border-slate-100 text-xs font-bold text-slate-600">{{ row.category }}</th>
+              <th scope="row" class="sticky left-0 z-10 bg-white p-2 pl-4 border-b border-slate-100 text-xs font-bold text-slate-600">
+                <button v-if="props.mdPickFor?.(row.category)" type="button" class="inline-flex items-start gap-1 text-left hover:text-violet-700 hover:underline" :title="`${regionLabel}　${row.category}`" @click="openMd(row.category)"><FileText :size="12" class="mt-0.5 shrink-0" />{{ row.category }}</button>
+                <template v-else>{{ row.category }}</template>
+              </th>
               <td v-for="(cell, i) in row.cells" :key="matrix.columns[i].id" class="p-2 border-b border-slate-100">
                 <template v-if="cell.length > 0">
                   <div v-for="(p, j) in cell" :key="p.id" :class="j > 0 ? 'mt-3 pt-3 border-t border-dashed border-slate-200' : ''">
