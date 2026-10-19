@@ -18,7 +18,7 @@ import { openAvatarChoice } from "./avatar-choice.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
-import { foldNameVariants, normElectionType, normText } from "./identity-normalize.ts";
+import { normElectionType, normText, rosterNameKey } from "./identity-normalize.ts";
 import { renameCollision, renameCollisionMessage } from "./person-identity-guard.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
@@ -175,16 +175,17 @@ type Ensured = { politician_id: string; created: boolean } | { disputed: string 
 export async function nameMismatchMessage(supabase: SupabaseLike, target: { id: string; name: string }, keeperId: string, claimedName: string | null, label: string): Promise<string | null> {
   const claimed = normText(claimedName);
   if (!claimed || claimed === normText(target.name)) return null;
-  // 異體字不算不同人（啓／啟）：名冊對帳掛上既有人物時，名冊的寫法常跟站上不同（foldNameVariants，只用來比對）
-  const targetNorm = normText(target.name);
-  if (targetNorm && foldNameVariants(claimed) === foldNameVariants(targetNorm)) return null;
+  // 異體字、中間點、尾端羅馬拼音不算不同人（啓／啟、黄／黃、谷辣斯．尤達卡／谷辣斯·尤達卡、鄭萬正Ipay-Kaeti／鄭萬正）：
+  // 名冊對帳掛上既有人物時，名冊的寫法常跟站上不同（rosterNameKey，跟 SQL roster_name_key 同一套，只用來比對）
+  const claimedKey = rosterNameKey(claimedName);
+  if (claimedKey && claimedKey === rosterNameKey(target.name)) return null;
   let keeperName: string | null = null;
   if (keeperId !== target.id) {
     const { data: keeper, error: keeperErr } = await supabase.from("politicians").select("id, name").eq("id", keeperId).maybeSingle();
     throwIf(keeperErr, "politicians lookup keeper");
     keeperName = keeper ? String(keeper.name ?? "") : null;
   }
-  if (keeperName !== null && (claimed === normText(keeperName) || foldNameVariants(claimed) === foldNameVariants(normText(keeperName) ?? ""))) return null;
+  if (keeperName !== null && (claimed === normText(keeperName) || (claimedKey !== null && claimedKey === rosterNameKey(keeperName)))) return null;
   const { data: alias } = await supabase.from("politician_keys").select("politician_id")
     .in("politician_id", keeperId === target.id ? [target.id] : [target.id, keeperId]).eq("key_type", "alias_name").eq("key_value", claimed).limit(1).maybeSingle();
   if (alias) return null;

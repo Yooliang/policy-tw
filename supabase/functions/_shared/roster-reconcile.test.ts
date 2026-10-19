@@ -16,24 +16,24 @@ async function seedAll(edit?: (m: string) => string, editFix?: (m: string) => st
   await loadRegs(db, [
     // 縣市議員（台北市）
     { type: T_COUNCIL, region: "台北市", name: "王一", district: "第01選舉區" },   // 都對上
-    { type: T_COUNCIL, region: "台北市", name: "李二" },                            // 全新的人 → 可建 new
+    { type: T_COUNCIL, region: "花蓮縣", name: "李二" },                            // 全新的人 → 可建 new
     { type: T_COUNCIL, region: "台北市", name: "張三" },                            // 全庫剛好一位同名、在台北出現過 → 可建 attach
     { type: T_COUNCIL, region: "台北市", name: "陳四" },                            // 全庫兩位同名 → person_unclear
-    { type: T_COUNCIL, region: "台北市", name: "趙五" },                            // 名冊上同縣市同名兩位 → same_name_multi
-    { type: T_COUNCIL, region: "台北市", name: "趙五" },
+    { type: T_COUNCIL, region: "花蓮縣", name: "趙五" },                            // 名冊上同縣市同名兩位 → same_name_multi
+    { type: T_COUNCIL, region: "花蓮縣", name: "趙五" },
     { type: T_COUNCIL, region: "台北市", name: "孫六" },                            // 我們標 considering → status_mismatch
     { type: T_COUNCIL, region: "台北市", name: "周七" },                            // 我們標 withdrawn、沒標登記後退選 → status_mismatch
     { type: T_COUNCIL, region: "台北市", name: "吳八" },                            // 我們標 withdrawn 且登記後退選 → both
     { type: T_COUNCIL, region: "台北市", name: "鄭九" },                            // 我們有兩筆同名 → match_ambiguous
     { type: T_COUNCIL, region: "台北市", name: "蔡五" },                            // 這個人這一屆在高雄已有一筆參選紀錄 → person_unclear
     { type: T_COUNCIL, region: "台北市", name: "" },                                // 姓名抽不出來 → missing_ambiguous unreadable_name
-    { type: T_COUNCIL, region: "台北市", name: "何十二" },                          // 全庫只有已合併的同名者 → 當作沒有 → 可建 new
-    { type: T_COUNCIL, region: "台北市", name: "沈十三" },                          // 系統試過、建不起來 → system_unresolved
-    { type: T_COUNCIL, region: "台北市", name: "韓十四" },                          // 系統建過但那筆不在了 → system_applied_gone
-    { type: T_COUNCIL, region: "台北市", name: "楊十五" },                          // 系統建了又被還原 → system_reverted
+    { type: T_COUNCIL, region: "花蓮縣", name: "何十二" },                          // 全庫只有已合併的同名者 → 當作沒有 → 可建 new
+    { type: T_COUNCIL, region: "花蓮縣", name: "沈十三" },                          // 系統試過、建不起來 → system_unresolved
+    { type: T_COUNCIL, region: "花蓮縣", name: "韓十四" },                          // 系統建過但那筆不在了 → system_applied_gone
+    { type: T_COUNCIL, region: "花蓮縣", name: "楊十五" },                          // 系統建了又被還原 → system_reverted
     // 村里長（新北市）：鄉鎮層級的選舉，人物要同鄉鎮才掛
     { type: T_VILLAGE, region: "新北市", sub: "板橋區", village: "甲里", name: "郭一" },   // 都對上
-    { type: T_VILLAGE, region: "新北市", sub: "板橋區", village: "乙里", name: "郭二" },   // 全新 → new
+    { type: T_VILLAGE, region: "花蓮縣", sub: "玉里鎮", village: "乙里", name: "郭二" },   // 全新 → new
     { type: T_VILLAGE, region: "新北市", sub: "三重區", village: "丙里", name: "林三" },   // 同名者在三重區出現過 → attach
     { type: T_VILLAGE, region: "新北市", sub: "三重區", village: "丁里", name: "林四" },   // 同名者在板橋區出現過、不是三重區 → person_unclear
     { type: T_VILLAGE, region: "新北市", sub: "板橋區", village: "戊里", name: "同名甲" }, // 不同鄉鎮同名：兩個縣內同名 → same_name_multi（縣市層級）
@@ -161,20 +161,20 @@ Deno.test("N3 單位彙總：refresh 寫 roster_reconcile_units；needs_agent �
   const { rows: units } = await db.query<{ election_type: string; county: string; town: string; total: number; both_n: number; creatable_n: number; needs_agent: boolean }>(
     `SELECT election_type, county, town, total, both_n, creatable_n, needs_agent FROM roster_reconcile_units ORDER BY election_type, county, town`);
   const council = units.find((u) => u.election_type === T_COUNCIL && u.county === "台北市")!;
-  assertEquals([council.total, council.both_n, council.needs_agent], [19, 2, true]);
-  assertEquals(council.creatable_n, 5);
+  assertEquals([council.total, council.both_n, council.needs_agent], [12, 2, true]);
+  assertEquals(council.creatable_n, 3);
   const village = units.filter((u) => u.election_type === T_VILLAGE);
-  assertEquals(village.map((u) => u.town), ["三重區", "板橋區"]);
+  assertEquals(village.map((u) => u.town), ["三重區", "板橋區", "玉里鎮"]);
   // 第二次刷新：沒變 → 0 個單位被改
   assertEquals(Number((await db.query<{ n: number }>(`SELECT roster_reconcile_refresh_units() AS n`)).rows[0].n), 0);
   // 彙總 jsonb
   const { rows: [u] } = await db.query<{ u: { total: number; needs_agent: boolean; people: Array<{ name: string; reason: string }> } }>(
     `SELECT roster_reconcile_unit(2026, '${T_VILLAGE}', '新北市') AS u`);
-  assertEquals(u.u.total, 9);
+  assertEquals(u.u.total, 8);
   assertEquals(u.u.needs_agent, true);
   assertEquals(u.u.people.map((p) => p.name).sort(), ["同名甲", "同名甲", "吳新", "吳新", "林四", "甲甲"].sort());
   const { rows: [ban] } = await db.query<{ u: { total: number; needs_agent: boolean } }>(`SELECT roster_reconcile_unit(2026, '${T_VILLAGE}', '新北市', '板橋區') AS u`);
-  assertEquals([ban.u.total, ban.u.needs_agent], [5, true]);
+  assertEquals([ban.u.total, ban.u.needs_agent], [4, true]);
   const { rows: [none] } = await db.query<{ u: unknown }>(`SELECT roster_reconcile_unit(2026, '${T_VILLAGE}', '高雄市') AS u`);
   assertEquals(none.u, null, "沒有對帳資料的單位回 NULL（派工臂照舊派）");
   // 文字：純中文、只列對不上的人、講明系統會自己建
@@ -348,7 +348,7 @@ Deno.test("N10 還原驗證：把對帳判準改壞（12 種），指定的情�
       red: (r) => first(r, "黨丙").category !== "missing_creatable" },
     { name: "next 不看 settings.actions", edit: (m) => mutate(m, "     AND r.person_action IN (SELECT unnest(s.actions) FROM roster_reconcile_settings s WHERE s.id = 1)\n", ""),
       red: () => false /* 由下面專門檢查 */ },
-    { name: "我們多出來的不列", edit: (m) => mutate(m, "     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)\n       AND o.pe_id NOT IN", "     WHERE FALSE AND o.pe_id NOT IN"),
+    { name: "我們多出來的不列", edit: (m) => mutate(m, "           NULL::TEXT AS person_action, FALSE AS system_applied\n      FROM ours o\n     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)\n", "           NULL::TEXT AS person_action, FALSE AS system_applied\n      FROM ours o\n     WHERE FALSE AND o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)\n"),
       red: (r) => byName(r, "馬十").length === 0 },
   ];
   for (const m of MUTATIONS.filter((x) => x.name !== "next 不看 settings.actions")) {

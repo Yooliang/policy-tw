@@ -15,21 +15,28 @@
 --      名字是名冊名的子字串或反過來（較短的至少 2 字）→ 不建，category＝missing_ambiguous、reason＝similar_name_in_unit（派代理確認）；pe_id／politician_id 帶出那一筆，
 --      那一筆參選紀錄不再另外列成 ours_extra。正規化後相同的（張啓楷／張啟楷）直接對上＝both。
 --
+-- agy 審查（#708）後再加：
+--   3. 姓名鍵再去掉尾端羅馬拼音（[-'A-Za-z]+$）與中間點（cec_name_norm 本來就去）：「鄭萬正Ipay-Kaeti」與「鄭萬正」直接對上（cec_name_key 只去尾端字母、留下連字號）；
+--      名冊那一邊也改用 roster_name_key(name)。異體字再加 强→強、勛→勳、崐→崑、黄→黃（只收確實是同一個字的異體；杰／傑、堃／坤 在台灣是不同的字，不收）。
+--   4. 子字串比對只影響「不建」：站上那筆沒對上名冊的參選紀錄仍然列在 ours_extra（不再因為 sim 無聲移除）；縣市議員的子字串比對雙方都有選舉區時必須同選舉區。
+--   5. 安全網 unm：同單位（同屆、同職位、同縣市；鄉鎮層級要同鄉鎮；縣市議員雙方都有選舉區要同選舉區）只要還有「我們標已表態／已登記／選後（或登記後退選）卻沒對上名冊」的參選紀錄，
+--      名冊那邊沒對上的人不給 new，改 missing_ambiguous／unmatched_candidacy_in_unit 派代理（那一筆多半就是名冊這位換了寫法還沒被認出來）；只擋 new，attach 不受影響。
+--
 -- 只重定義 roster_reconcile_rows()（簽名與屬性不動）與 roster_reconcile_text()（多一個原因的中文標籤）；不碰設定、不碰任何資料列、不動 roster_reconcile_log。
 -- 已撤回的兩位（log 裡 reg_id 唯一、reverted_at 有值）：修好後張啓楷會對上站上的張啟楷（both，不看 log）；佀廣洋全名落在 similar_name_in_unit（派代理），都不會再被建。
 -- 守門：_shared/roster-reconcile-match.test.ts（PGlite）。
 
 CREATE OR REPLACE FUNCTION roster_name_fold(p TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT translate(p, '啓峯羣衞敎綫裏着温寛彦恒眞硏徳爲淸靑栢銹', '啟峰群衛教線裡著溫寬彥恆真研德為清青柏鏽')
+  SELECT translate(p, '啓峯羣衞敎綫裏着温寛彦恒眞硏徳爲淸靑栢銹强勛崐黄', '啟峰群衛教線裡著溫寬彥恆真研德為清青柏鏽強勳崑黃')
 $$;
 COMMENT ON FUNCTION roster_name_fold(TEXT) IS '常見姓名異體字對照（啓→啟、峯→峰…），疊在 cec_name_key 上給名冊對帳用；TS 版 foldNameVariants 同一份對照（2026-10-20）';
 
 CREATE OR REPLACE FUNCTION roster_name_key(p TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT roster_name_fold(COALESCE(cec_name_key(p), NULLIF(cec_name_norm(p), '')))
+  SELECT roster_name_fold(COALESCE(NULLIF(regexp_replace(cec_name_norm(p), '[-''A-Za-z]+$', ''), ''), NULLIF(cec_name_norm(p), '')))
 $$;
-COMMENT ON FUNCTION roster_name_key(TEXT) IS '名冊對帳的姓名鍵：cec_name_key（退回 cec_name_norm）再做異體字對照（2026-10-20）';
+COMMENT ON FUNCTION roster_name_key(TEXT) IS '名冊對帳的姓名鍵：cec_name_norm 去掉尾端的羅馬拼音（[-''A-Za-z]+$，原住民族名「鄭萬正Ipay-Kaeti」→「鄭萬正」；全是拉丁字母的退回原樣）再做異體字對照；cec_name_key 只去尾端字母、留下連字號，所以名冊那一邊也改用這支（2026-10-20）';
 
 CREATE OR REPLACE FUNCTION roster_reconcile_rows()
 RETURNS TABLE (
@@ -43,7 +50,7 @@ AS $$
   WITH reg AS (
     SELECT r.id AS reg_id, r.election_id, r.election_type, replace(r.region, '臺', '台') AS county,
            r.sub_region, replace(r.sub_region, '臺', '台') AS town, r.village, r.district,
-           r.name, roster_name_fold(r.name_key) AS name_key, r.party, r.source_url, r.row_no,
+           r.name, roster_name_key(r.name) AS name_key, r.party, r.source_url, r.row_no,
            NULLIF(btrim(replace(COALESCE(r.village, ''), '臺', '台')), '') AS village_n
       FROM cec_registrations r
       JOIN cec_registration_sources s ON s.source_url = r.source_url AND s.superseded_by IS NULL
@@ -59,7 +66,8 @@ AS $$
            p.name AS pname,
            roster_name_key(p.name) AS nn,
            replace(COALESCE(rg.region, p.region), '臺', '台') AS county,
-           NULLIF(replace(regexp_replace(COALESCE(rg.sub_region, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '') AS town
+           NULLIF(replace(regexp_replace(COALESCE(rg.sub_region, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '') AS town,
+           substring(COALESCE(rg.sub_region, '') FROM '第[0-9]+選舉區') AS district
       FROM politician_elections pe
       JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
       LEFT JOIN regions rg ON rg.id = pe.region_id
@@ -82,10 +90,27 @@ AS $$
       FROM regn g
       JOIN ours o ON o.election_id = g.election_id AND o.election_type = g.election_type AND o.county = g.county
                  AND (o.town IS NULL OR g.town IS NULL OR o.town = g.town)
+                 AND (g.election_type <> '縣市議員' OR o.district IS NULL OR g.district IS NULL OR o.district = g.district)
      WHERE g.name_key IS NOT NULL AND o.nn IS NOT NULL AND o.nn <> g.name_key
        AND g.reg_id NOT IN (SELECT d.reg_id FROM reg_deg d)
        AND ((length(o.nn) >= 2 AND strpos(g.name_key, o.nn) > 0) OR (length(g.name_key) >= 2 AND strpos(o.nn, g.name_key) > 0))
      GROUP BY g.reg_id
+  ),
+  -- 安全網：同單位只要還有「我們標已表態／已登記／選後（或登記後退選）、卻沒對上名冊」的參選紀錄，名冊這邊沒對上的人就不給 new（改派代理，
+  -- reason＝unmatched_candidacy_in_unit）：那一筆多半就是名冊這位換了寫法（異體字、打錯字、純羅馬拼音、暱稱）還沒被比對器認出來，
+  -- 這時候建新人物就是重複人物。單位＝同屆、同職位、同縣市（鄉鎮層級要同鄉鎮、縣市議員雙方都有選舉區時要同選舉區）。只擋 new：attach 掛的是既有人物，不會多出人。
+  unm AS (
+    SELECT o.election_id, o.election_type, o.county, o.town, o.district FROM ours o
+     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)
+       AND (o.status IN ('declared', 'filed', 'elected', 'not_elected') OR (o.status = 'withdrawn' AND o.filed_out))
+  ),
+  unm_hit AS (
+    SELECT DISTINCT g.reg_id
+      FROM regn g
+      JOIN unm u ON u.election_id = g.election_id AND u.election_type = g.election_type AND u.county = g.county
+                AND (u.town IS NULL OR g.town IS NULL OR u.town = g.town)
+                AND (g.election_type <> '縣市議員' OR u.district IS NULL OR g.district IS NULL OR u.district = g.district)
+     WHERE g.reg_id NOT IN (SELECT d.reg_id FROM reg_deg d)
   ),
   -- 人物：全庫同名（姓名鍵相同、未合併）的人有幾位；剛好一位時，他要「看得出是同一個地方的人」（鄉鎮層級的選舉要同縣市同鄉鎮，其餘同縣市）
   -- 而且這一屆還沒有別筆參選紀錄（一人一屆一筆），才能掛上去
@@ -147,6 +172,7 @@ AS $$
              WHEN ap.reg_id IS NOT NULL THEN 'missing_ambiguous'
              WHEN g.dup_n > 1 THEN 'missing_ambiguous'
              WHEN pr.person_action IS NULL THEN 'missing_ambiguous'
+             WHEN pr.person_action = 'new' AND uh.reg_id IS NOT NULL THEN 'missing_ambiguous'
              ELSE 'missing_creatable' END AS category,
            CASE
              WHEN g.name_key IS NULL THEN 'unreadable_name'
@@ -161,8 +187,10 @@ AS $$
                     ELSE 'system_unresolved' END
              WHEN g.dup_n > 1 THEN 'same_name_multi'
              WHEN pr.person_action IS NULL THEN 'person_unclear'
+             WHEN pr.person_action = 'new' AND uh.reg_id IS NOT NULL THEN 'unmatched_candidacy_in_unit'
              END AS reason,
-           CASE WHEN rd.n IS NULL AND ap.reg_id IS NULL AND sm.reg_id IS NULL AND g.name_key IS NOT NULL AND g.dup_n = 1 THEN pr.person_action END AS person_action,
+           CASE WHEN rd.n IS NULL AND ap.reg_id IS NULL AND sm.reg_id IS NULL AND g.name_key IS NOT NULL AND g.dup_n = 1
+                     AND NOT (pr.person_action = 'new' AND uh.reg_id IS NOT NULL) THEN pr.person_action END AS person_action,
            (ap.reg_id IS NOT NULL AND ap.outcome = 'applied' AND ap.reverted_at IS NULL) AS system_applied
       FROM regn g
       LEFT JOIN reg_deg rd ON rd.reg_id = g.reg_id
@@ -170,6 +198,7 @@ AS $$
       LEFT JOIN ours o ON o.pe_id = rd.pe_id
       LEFT JOIN person pr ON pr.reg_id = g.reg_id
       LEFT JOIN sim sm ON sm.reg_id = g.reg_id
+      LEFT JOIN unm_hit uh ON uh.reg_id = g.reg_id
       LEFT JOIN roster_reconcile_log ap ON ap.reg_id = g.reg_id
   ),
   rows_ours AS (
@@ -181,7 +210,6 @@ AS $$
            NULL::TEXT AS person_action, FALSE AS system_applied
       FROM ours o
      WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)
-       AND o.pe_id NOT IN (SELECT s2.pe_id FROM sim s2)   -- 已經由名冊那一列（similar_name_in_unit）帶出來的，不重複列
        AND (o.status IN ('declared', 'filed', 'elected', 'not_elected') OR (o.status = 'withdrawn' AND o.filed_out))
   )
   SELECT x.reg_id, x.election_id, x.election_type, x.county, x.town, x.sub_region, x.village, x.district,
@@ -206,6 +234,7 @@ LANGUAGE sql IMMUTABLE AS $$
             WHEN 'unreadable_name' THEN '名冊姓名抽不出來'
             WHEN 'match_not_one_to_one' THEN '兩邊不是一對一'
             WHEN 'similar_name_in_unit' THEN '同單位已有名字相近的紀錄（可能是同一人：改名、暱稱或全名），請確認'
+            WHEN 'unmatched_candidacy_in_unit' THEN '同單位還有我們標已登記卻對不上名冊的紀錄（可能就是這位換了寫法），請確認'
             WHEN 'system_unresolved' THEN '系統建不起來'
             WHEN 'system_reverted' THEN '系統建了又被還原'
             WHEN 'system_applied_gone' THEN '系統建過但那筆已經不在'
