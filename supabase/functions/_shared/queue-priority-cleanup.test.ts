@@ -79,7 +79,7 @@ Deno.test("A1 改到的三支函式是最後一版，前一版是對的（正見
       if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
     }
     // 之後只允許第二步（20261017010000：seed 多兩個標記區塊，守門在 verify-ticket-follows-task.test.ts）；其餘兩支仍是最後一版
-    const later = fn === "seed_auto_task_queue" ? ["20261017010000_verify_ticket_follows_task.sql"] : [];
+    const later = fn === "seed_auto_task_queue" ? ["20261017010000_verify_ticket_follows_task.sql", "20261019040000_rekey_keeps_queue_position.sql" /* 換號沿用排隊位置，守門在 rekey-keeps-queue-position.test.ts */] : [];
     assertEquals(defining.slice(-(2 + later.length)), [prev, MIG_NAME, ...later], `${fn}：前一版要是 ${prev}、這支之後只能有 ${later.join("、") || "（沒有）"}（之後有人改，以最新那版為底重做）`);
   }
 });

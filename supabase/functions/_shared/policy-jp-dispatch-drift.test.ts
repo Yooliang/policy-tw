@@ -45,6 +45,7 @@
  */
 import { assert, assertEquals, assertNotEquals, assertThrows } from "jsr:@std/assert@1";
 import { fnText, latestFn, migrationNames as listMigrations, readMig } from "./arms-pglite.ts";
+import { REKEY_EDITS } from "./rekey-position-edits.ts";
 
 const MIG = "20261009130000_policy_jp_dispatch.sql";
 const MIG_SQL = await readMig(MIG);
@@ -131,6 +132,18 @@ const SEC_SQL = await readMig(SEC_MIG);
 const SEC_NEW = ["task_queue_key", "activity_priority_seconds", "manual_front_seconds", "verify_inherited_priority_seconds", "task_dispatches_queue_key"];
 const SEC_FOLLOWED = [...SEC_NEW, "refresh_dispatch_blocked", "seed_auto_task_queue", "manual_front_pull", "contribution_tasks_insert_dispatch"];
 
+/**
+ * 換號沿用排隊位置（20261019040100，#670 第 8、9 點；正見 20261019040000）：帶清單指紋的臂換指紋時，新列沿用舊列的排隊位置。
+ * 日本站同形套用：seed_auto_task_queue 多 rekey-position-edits.ts 登記的幾處替換（走樣比對＝正見的舊版加 REKEY_EDITS，兩邊同一份文字），
+ * 新增兩支複本 task_rekey_arms／task_rekey_stable_key（逐字）。下面這幾支改讀這支 migration 的定義（REKEY_FOLLOWED）。
+ * 日本站不跟的：慢性停擺檢查（dispatch_chronic_stall／dispatch_queue_delay_seconds、queue_settings 的 stall_* 欄）——日本站這三臂還沒有列，
+ * 要的時候另開；「日本站不得定義它們」有一條測試守著（要跟就改登記）。
+ */
+const REKEY_JP_MIG = "20261019040100_policy_jp_rekey_keeps_queue_position.sql";
+const REKEY_JP_SQL = await readMig(REKEY_JP_MIG);
+const REKEY_NEW = ["task_rekey_arms", "task_rekey_stable_key"];
+const REKEY_FOLLOWED = [...REKEY_NEW, "seed_auto_task_queue"];
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -197,9 +210,12 @@ const PAIRS: Pair[] = [
   {
     name: "seed_auto_task_queue",
     before: TW_VERIFY_TICKET,
-    note: "取驗證票跟著任務（20261017010000，日本站暫不跟：補驗證列不再呼叫 contribution_queue_at、最後多 refresh_verify_ticket_keys）之前的版本；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；換成日本專屬的「選舉鏈上沒有 polling 里程碑的缺口照日期定層」一段（20261009300000 的偏離，秒數化時照帶，秒數取那一層的秒數）",
-    edits: [{"span": ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], "with": ""}, {"span": ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], "with": "  -- >>> 日本版：選舉發現的層\n  -- 鏈上的臂裡「還沒有選舉列＝沒有 polling 里程碑」的缺口（選舉發現；等團體落庫的選舉的團體任務），規則算不出秒數，改用 target 的日期\n  -- （election_date，沒有就 vote_window_from）定層：60 天內前段、180 天內中段、更遠後段（chain_date_tier），秒數取那一層的 task_priority_tiers.seconds。有 polling 里程碑的照上面規則算的\n  UPDATE _gaps g SET priority_seconds = (SELECT t.seconds FROM task_priority_tiers t WHERE t.id = chain_date_tier(chain_sort_date(g.task_id, g.target))), priority_rule_id = NULL\n   WHERE g.arm IN ('election_discovery', 'local_government_missing', 'regional_stats_missing')\n     AND NOT EXISTS (SELECT 1 FROM election_milestones_all m WHERE m.election_id = NULLIF(g.target->>'election_id', '') AND m.kind = 'polling');\n  -- <<< 日本版：選舉發現的層\n"}],
+    note: "取驗證票跟著任務（20261017010000，日本站暫不跟：補驗證列不再呼叫 contribution_queue_at、最後多 refresh_verify_ticket_keys）之前的版本；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；換成日本專屬的「選舉鏈上沒有 polling 里程碑的缺口照日期定層」一段（20261009300000 的偏離，秒數化時照帶，秒數取那一層的秒數）；再加換號沿用排隊位置（20261019040000／20261019040100，REKEY_EDITS：跟正見同一份替換）",
+    edits: [{"span": ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], "with": ""}, {"span": ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], "with": "  -- >>> 日本版：選舉發現的層\n  -- 鏈上的臂裡「還沒有選舉列＝沒有 polling 里程碑」的缺口（選舉發現；等團體落庫的選舉的團體任務），規則算不出秒數，改用 target 的日期\n  -- （election_date，沒有就 vote_window_from）定層：60 天內前段、180 天內中段、更遠後段（chain_date_tier），秒數取那一層的 task_priority_tiers.seconds。有 polling 里程碑的照上面規則算的\n  UPDATE _gaps g SET priority_seconds = (SELECT t.seconds FROM task_priority_tiers t WHERE t.id = chain_date_tier(chain_sort_date(g.task_id, g.target))), priority_rule_id = NULL\n   WHERE g.arm IN ('election_discovery', 'local_government_missing', 'regional_stats_missing')\n     AND NOT EXISTS (SELECT 1 FROM election_milestones_all m WHERE m.election_id = NULLIF(g.target->>'election_id', '') AND m.kind = 'polling');\n  -- <<< 日本版：選舉發現的層\n"}, ...REKEY_EDITS],
   },
+  // 換號沿用排隊位置（20261019040100）新增的兩支複本（REKEY_NEW）：臂清單與穩定鍵，逐字
+  { name: "task_rekey_arms" },
+  { name: "task_rekey_stable_key" },
   {
     name: "contribution_queue_tasks",
     // 2026-10-17（正見 20261017000301）合格條件全搬進 SQL（查無回報在等票、在途額滿、提問、裁決）；日本站暫不跟（jp-next 的同構問題另開），比對讀這支之前的版本
@@ -316,7 +332,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -423,6 +439,37 @@ Deno.test("走樣（秒數化）：20261011360000 定義的函式＝登記的複
   ]) assert(SEC_SQL.includes(d), `少了：${d}`);
 });
 
+Deno.test("走樣（換號沿用排隊位置）：20261019040100 定義的函式＝登記的複本（REKEY_FOLLOWED）；不碰 public；plpgsql 釘 search_path；seed 的替換與正見同一份（REKEY_EDITS）", async () => {
+  const defined = [...REKEY_JP_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, [...REKEY_FOLLOWED].sort());
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of REKEY_FOLLOWED) assert(copies.has(n), `${n} 要在複本清單 PAIRS 裡`);
+  for (const n of defined) {
+    const t = fnText(REKEY_JP_SQL, `policy_jp.${n}`);
+    if (/LANGUAGE plpgsql/.test(t)) assert(t.includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+    else assert(!/SET search_path/.test(t), `${n}：LANGUAGE sql 的函式不加 SET`);
+  }
+  const stripped = REKEY_JP_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+  // 日本版的 seed＝日本站前一版（20261011360000）加同一份替換（加 policy_jp. 前綴）；正見那邊的比對在 rekey-keeps-queue-position.test.ts A1
+  const { REKEY_EDITS_JP, applyRekeyEdits } = await import("./rekey-position-edits.ts");
+  assertEquals(fnText(REKEY_JP_SQL, "policy_jp.seed_auto_task_queue"), applyRekeyEdits(fnText(SEC_SQL, "policy_jp.seed_auto_task_queue"), REKEY_EDITS_JP));
+  // 還原驗證：少一處替換、或多改一個字，對不上
+  assertNotEquals(fnText(REKEY_JP_SQL, "policy_jp.seed_auto_task_queue").replace("COALESCE(r.dispatch_count, 0)", "0"), applyRekeyEdits(fnText(SEC_SQL, "policy_jp.seed_auto_task_queue"), REKEY_EDITS_JP));
+  // 日本站的 seed 是這支 migration 之後最新的定義
+  const defining: string[] = [];
+  for (const n of await listMigrations()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION policy_jp.seed_auto_task_queue(")) defining.push(n);
+  assertEquals(defining.slice(-2), [SEC_MIG, REKEY_JP_MIG]);
+});
+
+Deno.test("日本站不跟的登記：慢性停擺檢查（dispatch_chronic_stall／dispatch_queue_delay_seconds、queue_settings 的 stall_* 欄）日本站不得定義——要跟就改這裡的登記與走樣比對", async () => {
+  for (const n of await listMigrations()) {
+    if (!n.includes("_policy_jp_")) continue;
+    const stripped = (await readMig(n)).replace(/--[^\n]*/g, "");
+    assert(!/dispatch_chronic_stall|dispatch_queue_delay_seconds|stall_window_days|stall_min_closed|stall_max_contributions/.test(stripped), `${n}：日本站暫不跟慢性停擺檢查（正見 20261019040000）`);
+  }
+});
+
 /** 設定表 dispatch_records_settings 的建表敘述（CREATE TABLE … ( … );）：欄位、預設值、CHECK 範圍 */
 const settingsDdl = (sql: string, name: string): string => {
   const a = sql.indexOf(`CREATE TABLE IF NOT EXISTS ${name} (`);
@@ -441,7 +488,7 @@ Deno.test("走樣：派工紀錄清理的設定表 dispatch_records_settings（�
 
 Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記的非複本（新加函式不登記就紅）", () => {
   const defined = [...MIG_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
-  const registered = [...PAIRS.map((p) => p.name).filter((n) => !SEC_NEW.includes(n)), ...NONCOPY].sort();
+  const registered = [...PAIRS.map((p) => p.name).filter((n) => !SEC_NEW.includes(n) && !REKEY_NEW.includes(n)), ...NONCOPY].sort();
   assertEquals(defined, registered);
   assertEquals(new Set(registered).size, registered.length, "登記重複");
 });
@@ -556,7 +603,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
