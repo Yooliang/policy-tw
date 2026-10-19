@@ -55,7 +55,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**current 有 bulletins 的先看公報**：那是系統推得出來的中選會選舉公報與號次（候選人自己登記的政見原文），照公報交那一屆的政見。" +
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
-    "2026 選舉的政見優先；只找得到現任任期或過去選舉的承諾也可以提交，election_id 填該政見所屬的選舉並在 note 說明。" +
+    "**這件任務要的是 2026 這一屆的承諾**（候選人在 2026 選舉前提出的政見，election_id 填 2026）：現任任期的施政、上屆或過去選舉的政見不是這一屆的承諾，不要為了這件任務交，交了這件任務也不會結束；找不到這一屆的就用 no_change 回報你查了什麼。" +
     gazetteImageNote + notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +
     searchFirst("policy_missing"),
 

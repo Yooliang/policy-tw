@@ -65,7 +65,7 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
     case "policy":
       return {
         title: `補${who}的政見（網站訪客請求）`,
-        description: `有人在網站上按了「請 AI 幫忙查政見」。請找${who}有出處的具體政見，最多 ${MAX_POLICIES_PER_TASK} 筆、每筆一個 policy 型別、各附自己的出處；找到幾筆交幾筆，只找到 1 筆就交 1 筆，不要為了湊數交口號、願景或個人表態。先看 current.existing_policies（已上線）與 current.queued_policies（別人交了還在等票），講同一件事的不要再交。2026 選舉政見優先，找得到現任任期或過去選舉的承諾也可提交，election_id 填該政見所屬選舉並在 note 說明。`,
+        description: `有人在網站上按了「請 AI 幫忙查政見」。請找${who}有出處的具體政見，最多 ${MAX_POLICIES_PER_TASK} 筆、每筆一個 policy 型別、各附自己的出處；找到幾筆交幾筆，只找到 1 筆就交 1 筆，不要為了湊數交口號、願景或個人表態。先看 current.existing_policies（已上線）與 current.queued_policies（別人交了還在等票），講同一件事的不要再交。**要找的是 2026 這一屆的承諾**（候選人在 2026 選舉前提出的政見，election_id 填 2026）：現任任期的施政、上屆或過去選舉的政見不是這一屆的承諾，不要拿來交；找不到這一屆的就用 no_change 回報你查了什麼。`,
         hint_sources: ["候選人官網／官方社群的政見頁", "cec.gov.tw 選舉公報", "cna.com.tw", "pts.org.tw"],
       };
     case "profile":

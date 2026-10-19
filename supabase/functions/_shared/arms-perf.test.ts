@@ -106,7 +106,7 @@ const isMechanical = (n: string, fn: string) => {
 /** 這支之後、已知的後續版本（各自有守門測試以這支為底做機械式替換） */
 const LATER: Record<string, string[]> = {
   [ELEMENTS]: ["20261010100000_policy_elements_config.sql"], // 三要素派工可設定（OPS #61，policy-elements-config.test.ts）
-  [MAYOR]: ["20261011300000_campaign_election_arms.sql"], // 年份與職位改讀當屆選舉與規則參數（campaign-election-arms.test.ts）
+  [MAYOR]: ["20261011300000_campaign_election_arms.sql", "20261019110000_pledge_gap_2026.sql"], // 年份與職位改讀當屆選舉與規則參數（campaign-election-arms.test.ts）；當屆承諾數改用 is_campaign_pledge（policy-missing-current-term.test.ts）
 };
 
 // ============================================================
