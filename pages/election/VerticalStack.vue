@@ -60,15 +60,16 @@ const levels = computed(() => [
       </div>
     </div>
 
+    <!-- 層級高度跟著內容（2026-10-19）：直排字改成絕對定位填滿色塊、不再撐高整列；格子 items-start 不把卡片拉長 -->
     <!-- 寬螢幕：層級名直排、色塊上下相連，相鄰兩塊交界處放白底向下箭頭（2026-10-19 維護者）；手機維持橫的膠囊 -->
     <div class="p-6 flex flex-col gap-6 md:gap-0">
       <template v-for="(level, levelIdx) in levels" :key="level.label">
         <div class="flex flex-col md:flex-row gap-4 md:gap-5">
           <div class="relative w-full md:w-9 shrink-0 flex flex-col items-center justify-center md:self-stretch">
-            <span :class="`${level.colorBg} px-3 py-1 rounded-full text-xs font-bold block w-full text-center md:h-full md:px-0 md:py-4 md:flex md:items-center md:justify-center md:text-sm md:tracking-widest md:[writing-mode:vertical-rl] md:[text-orientation:upright] ${levelIdx === 0 ? 'md:rounded-b-none' : levelIdx === levels.length - 1 ? 'md:rounded-t-none' : 'md:rounded-none'}`">{{ level.label }}</span>
+            <span :class="`${level.colorBg} px-3 py-1 rounded-full text-xs font-bold block w-full text-center md:px-0 md:py-2 md:absolute md:inset-0 md:overflow-hidden md:flex md:items-center md:justify-center md:text-xs md:tracking-normal md:[writing-mode:vertical-rl] md:[text-orientation:upright] ${levelIdx === 0 ? 'md:rounded-b-none' : levelIdx === levels.length - 1 ? 'md:rounded-t-none' : 'md:rounded-none'}`">{{ level.label }}</span>
             <div v-if="levelIdx > 0" class="hidden md:flex absolute -top-3 left-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-white shadow ring-1 ring-slate-200 items-center justify-center text-slate-500"><ArrowDown :size="14" /></div>
           </div>
-          <div :class="`flex-1 grid ${level.cols} gap-4 text-left md:py-3`">
+          <div :class="`flex-1 grid ${level.cols} gap-4 text-left items-start content-start md:py-3`">
             <template v-if="level.items.length > 0">
               <router-link
                 v-for="p in level.items"
