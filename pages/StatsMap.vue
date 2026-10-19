@@ -1,296 +1,574 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
+import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
+import MapToggles from '../components/map/MapToggles.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, legendItems, tooltipLines, unitColor, unitHref, viewKey,
-  type ColorMode, type CountRow, type MapUnit, type MapView,
+  buildMap, legendItems, normalizeRows, tooltipLines, unitColor, unitHref,
+  type BuiltMap, type ColorMode, type CountRow, type MapLevel, type MapUnit,
 } from '../lib/candidacy-map'
-import { boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, unitStats, type DecodedRaster, type RasterFile } from '../lib/raster-grid'
-import { clampCenter, ZOOM_AFTER_DRILL_DOWN, ZOOM_AFTER_DRILL_UP, resolveWheel, type Pt } from '../lib/map-zoom'
-import { Map as MapIcon, ChevronLeft, LayoutGrid, List, ExternalLink, Plus, Minus, RotateCcw } from 'lucide-vue-next'
+import {
+  boundaryPath, decodeRaster, outlinePath, placeLabels, unitFillPaths, unitStats,
+  type DecodedRaster, type RasterFile, type UnitStat,
+} from '../lib/raster-grid'
+import {
+  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
+  screenToWorld, viewBox, wheelK, zoomAtPoint, type Box, type Lod, type View,
+} from '../lib/map-world'
+import { Map as MapIcon, Plus, Minus, Maximize2, ExternalLink, X } from 'lucide-vue-next'
 
 /**
- * 參選地圖（#680）：把真實邊界點陣化成固定尺度的方格（全國與縣市 1 公里一格、村里 200 公尺一格），
- * 每格的顏色＝它所屬行政區的 2026 參選人數；滑過任一格高亮整個行政區，點擊往下鑽，麵包屑回上一層。
- * 形狀是預先產生的靜態檔（data/tw-raster/，產生方式見 scripts/build-tw-raster.ts），執行時不打外部 API；
- * 人數來自資料庫函式 candidacy_map，每次只查目前這一層。村里層只載入選中那一個鄉鎮的形狀與人數。
- * 同一行政區的格子合併成一條 SVG path（lib/raster-grid.ts），不是一格一個元素。純邏輯與測試在 lib/。
+ * 參選地圖（#680）：單一張全國大地圖連續縮放，像線上地圖。
+ * - 世界座標＝全國層畫布（公里）；縣市層與鄉鎮層 1 公里一格、村里層 200 公尺一格，全部對齊同一條格線
+ *   （data/tw-raster/，scripts/build-tw-raster.ts 產生；點陣化的純函式在 lib/raster-grid.ts）。
+ * - 細節層（LOD）只看縮放（螢幕上每公里幾像素，lib/map-world.ts）：縮小看縣市、中間看鄉鎮、放大看村里，
+ *   切換不換頁、不重設視角。縣市層與鄉鎮層全國一次載入；村里層只載入視窗內看得到的鄉鎮，離開後釋放（上限 MAX_VILLAGE_TOWNS）。
+ * - 同一行政區的格子合併成一條 SVG path（不是一格一個元素），所以路徑數：縣市 22、鄉鎮 368、村里層視窗內大約幾百條。
+ *   SVG 的平移縮放只改 viewBox，不重畫路徑，評估過 canvas：這個量級 SVG 就夠，而且滑過高亮、點擊、無障礙現成，所以沒用 canvas。
  */
 
 const ELECTION_ID = 2026
+/** 同時留在記憶體裡的村里鄉鎮檔上限（超過就釋放最久沒看的） */
+const MAX_VILLAGE_TOWNS = 60
+/** 視窗內最多同時要村里的鄉鎮數 */
+const MAX_VISIBLE_TOWNS = 40
+const LABEL_PX = 12
 
-const view = ref<MapView>(NATIONAL_VIEW)
+interface Layer {
+  key: string
+  level: MapLevel
+  raster: DecodedRaster
+  /** 一格的邊長（公里）與在世界裡的位置（公里） */
+  u: number
+  tx: number
+  ty: number
+  fills: string[]
+  boundary: string
+  built: BuiltMap
+  stats: Array<UnitStat | null>
+  box: Box
+  transform: string
+}
+interface DrawLayer { layer: Layer; units: MapUnit[] }
+
 const mode = ref<'grid' | 'list'>('grid')
-/** 著色：預設看收錄率（綠黃紅），也可以看人數（中性灰階）。色碼是固定 hex（lib/candidacy-map.ts），不拼 Tailwind class */
 const colorMode = ref<ColorMode>('coverage')
-const loading = ref(false)
 const failed = ref(false)
-const selected = ref<string | null>(null)
-const hovered = ref<string | null>(null)
+const pending = ref(0)
 
-const countCache = new Map<string, CountRow[]>()
-const rasterCache = new Map<string, DecodedRaster>()
+// ── 資料 ──────────────────────────────────────────────────────
+const rowCache = new Map<string, CountRow[]>()
 const nameByCode = ref(new Map<string, string>())
-const rows = ref<CountRow[]>([])
-const raster = shallowRef<DecodedRaster | null>(null)
+const countyLayer = shallowRef<Layer | null>(null)
+const townLayers = shallowRef<Layer[]>([])
+const villageLayers = shallowRef(new Map<string, Layer>())
+const layerIndex = new Map<string, Layer>()
+const unitIndex = new Map<string, { layer: Layer; idx: number }>()
+const villageUsed = new Map<string, number>()
+const inflight = new Set<string>()
+let townsPromise: Promise<void> | null = null
 
 const townFiles = import.meta.glob<{ default: unknown }>('../data/tw-raster/towns/*.json')
 const villageFiles = import.meta.glob<{ default: unknown }>('../data/tw-raster/villages/*.json')
 
-async function loadCounts(v: MapView): Promise<CountRow[]> {
-  const key = viewKey(v)
-  const hit = countCache.get(key)
+async function fetchRows(level: MapLevel, parent?: string): Promise<CountRow[]> {
+  const key = `${level}:${parent ?? ''}`
+  const hit = rowCache.get(key)
   if (hit) return hit
   const { data } = await withTimeoutAndRetry(`參選地圖 ${key}`, (signal) =>
-    supabasePublic.rpc('candidacy_map', {
-      p_election_id: ELECTION_ID,
-      p_level: v.level,
-      ...(parentCodeOf(v) ? { p_parent: parentCodeOf(v) } : {}),
-    }).abortSignal(signal).throwOnError())
-  const list = normalizeRows((data ?? []) as Array<Record<string, unknown>>)
-  countCache.set(key, list)
-  return list
+    supabasePublic.rpc('candidacy_map', { p_election_id: ELECTION_ID, p_level: level, ...(parent ? { p_parent: parent } : {}) })
+      .abortSignal(signal).throwOnError())
+  const rows = normalizeRows((data ?? []) as Array<Record<string, unknown>>)
+  rowCache.set(key, rows)
+  const names = new Map(nameByCode.value)
+  for (const r of rows) names.set(r.code, r.name)
+  nameByCode.value = names
+  return rows
 }
 
-async function loadRaster(v: MapView): Promise<DecodedRaster> {
-  const key = viewKey(v)
-  const hit = rasterCache.get(key)
-  if (hit) return hit
-  let file: unknown
-  if (v.level === 'county') file = (await import('../data/tw-raster/national.json')).default
-  else {
-    const loaders = v.level === 'town' ? townFiles : villageFiles
-    const dir = v.level === 'town' ? 'towns' : 'villages'
-    const code = v.level === 'town' ? v.countyCode : v.townCode
-    const load = loaders[`../data/tw-raster/${dir}/${code}.json`]
-    if (!load) throw new Error(`沒有 ${code} 的形狀檔`)
-    file = (await load()).default
+function makeLayer(key: string, level: MapLevel, file: unknown, rows: CountRow[]): Layer {
+  const raster = decodeRaster(file as RasterFile)
+  const u = raster.cellM / 1000
+  const layer: Layer = {
+    key, level, raster, u, tx: raster.ox * u, ty: raster.oy * u,
+    fills: unitFillPaths(raster), boundary: boundaryPath(raster), built: buildMap(raster, rows),
+    stats: unitStats(raster), box: layerBox(raster), transform: `translate(${raster.ox * u} ${raster.oy * u}) scale(${u})`,
   }
-  const decoded = decodeRaster(file as RasterFile)
-  rasterCache.set(key, decoded)
-  return decoded
+  layerIndex.set(key, layer)
+  layer.built.units.forEach((unit, idx) => unitIndex.set(unit.code, { layer, idx }))
+  return layer
 }
 
-function rememberNames(list: CountRow[]) {
-  for (const r of list) nameByCode.value.set(r.code, r.name)
-  nameByCode.value = new Map(nameByCode.value)
-}
-
-async function show(v: MapView) {
-  const wanted = viewKey(v)
-  loading.value = true
+async function loadCounty() {
   failed.value = false
+  pending.value += 1
   try {
-    const [counts, shape] = await Promise.all([loadCounts(v), loadRaster(v)])
-    if (viewKey(view.value) !== wanted) return // 切太快：晚回來的舊請求不能蓋掉新的
-    rememberNames(counts)
-    rows.value = counts
-    raster.value = shape
+    const [file, rows] = await Promise.all([import('../data/tw-raster/national.json').then((m) => m.default), fetchRows('county')])
+    countyLayer.value = makeLayer('county', 'county', file, rows)
   } catch (e) {
-    if (viewKey(view.value) !== wanted) return
     console.info('[參選地圖] 讀取失敗', e)
     failed.value = true
   } finally {
-    if (viewKey(view.value) === wanted) loading.value = false
+    pending.value -= 1
   }
 }
 
-/** 換層之後的縮放：往下鑽從 ZOOM_AFTER_DRILL_DOWN 起；回上一層聚焦在剛才那個行政區上（滾輪縮放用） */
-let pendingFocus: { code: string | null; zoom: number } | null = null
-
-function go(v: MapView, focus: { code: string | null; zoom: number } | null = null) {
-  pendingFocus = focus
-  view.value = v
-  rows.value = []
-  raster.value = null
-  selected.value = null
-  hovered.value = null
-  resetZoom()
+/** 鄉鎮層：22 個縣市檔＋全部鄉鎮的人數，一次載入 */
+function ensureTowns(): Promise<void> {
+  if (townsPromise) return townsPromise
+  pending.value += 1
+  townsPromise = (async () => {
+    const [rows, files] = await Promise.all([
+      fetchRows('town'),
+      Promise.all(Object.entries(townFiles).map(async ([path, load]) => [path.match(/towns\/(\d+)\.json/)![1], (await load()).default] as const)),
+    ])
+    townLayers.value = files.sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([code, file]) => makeLayer(`town:${code}`, 'town', file, rows))
+    refreshVisible()
+  })().catch((e) => {
+    console.info('[參選地圖] 鄉鎮層讀取失敗', e)
+    townsPromise = null
+    failed.value = !countyLayer.value
+  }).finally(() => { pending.value -= 1 })
+  return townsPromise
 }
-watch(view, (v) => { void show(v) })
-onMounted(() => {
-  void show(view.value)
-  // 縣市名稱要在鄉鎮層、村里層的麵包屑與連結用；直接進來只會有一層，所以縣市層一律先備好
-  void loadCounts(NATIONAL_VIEW).then(rememberNames).catch(() => {})
+
+const queue: string[] = []
+let running = 0
+function ensureVillage(code: string) {
+  if (villageLayers.value.has(code) || inflight.has(code)) return
+  inflight.add(code)
+  queue.push(code)
+  pump()
+}
+function pump() {
+  while (running < 4 && queue.length) {
+    const code = queue.shift()!
+    running += 1
+    pending.value += 1
+    ;(async () => {
+      const load = villageFiles[`../data/tw-raster/villages/${code}.json`]
+      if (!load) return
+      const [file, rows] = await Promise.all([load().then((m) => m.default), fetchRows('village', code)])
+      const layer = makeLayer(`village:${code}`, 'village', file, rows)
+      const next = new Map(villageLayers.value)
+      next.set(code, layer)
+      villageLayers.value = next
+      villageUsed.set(code, performance.now())
+    })().catch((e) => console.info('[參選地圖] 村里讀取失敗', code, e)).finally(() => {
+      inflight.delete(code)
+      running -= 1
+      pending.value -= 1
+      refreshVisible()
+      pump()
+    })
+  }
+}
+
+// ── 檢視 ──────────────────────────────────────────────────────
+const stage = ref<HTMLElement | null>(null)
+const svgEl = ref<SVGSVGElement | null>(null)
+const size = ref({ w: 900, h: 620 })
+const view = ref<View>({ cx: 0, cy: 0, k: 1 })
+const lod = ref<Lod>('county')
+const world = computed(() => (countyLayer.value ? { w: countyLayer.value.raster.w, h: countyLayer.value.raster.h } : null))
+const kMin = computed(() => (world.value ? fitK(world.value, size.value.w, size.value.h) : 1))
+const vbString = computed(() => {
+  const b = viewBox(view.value, size.value.w, size.value.h)
+  return `${b.x0} ${b.y0} ${b.x1 - b.x0} ${b.y1 - b.y0}`
+})
+let observer: ResizeObserver | null = null
+let animId = 0
+
+function setView(v: View) {
+  view.value = world.value ? clampView(v, world.value) : v
+}
+function fitAll() {
+  if (!world.value) return
+  animateTo({ cx: world.value.w / 2, cy: world.value.h / 2, k: kMin.value })
+}
+
+function cancelAnim() { animId += 1 }
+function animateTo(target: View, ms = 380) {
+  const from = { ...view.value }
+  const id = ++animId
+  const t0 = performance.now()
+  const lk0 = Math.log(from.k)
+  const lk1 = Math.log(target.k)
+  const step = (now: number) => {
+    if (id !== animId) return
+    const t = Math.min(1, (now - t0) / ms)
+    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+    setView({ cx: from.cx + (target.cx - from.cx) * e, cy: from.cy + (target.cy - from.cy) * e, k: Math.exp(lk0 + (lk1 - lk0) * e) })
+    if (t < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
+watch(() => view.value.k, (k) => {
+  const next = lodFor(k, lod.value)
+  if (next !== lod.value) lod.value = next
+})
+watch(lod, (l) => { if (l !== 'county') void ensureTowns() })
+watch(view, () => scheduleRefresh(), { deep: false })
+
+// ── 目前要畫哪些層 ────────────────────────────────────────────
+const renderState = shallowRef<{ towns: Layer[]; villages: Layer[]; key: string }>({ towns: [], villages: [], key: '' })
+let refreshQueued = false
+function scheduleRefresh() {
+  if (refreshQueued) return
+  refreshQueued = true
+  requestAnimationFrame(() => { refreshQueued = false; refreshVisible() })
+}
+function townBoxes(): Array<{ code: string; box: Box }> {
+  const out: Array<{ code: string; box: Box }> = []
+  for (const L of townLayers.value) {
+    L.built.units.forEach((u, i) => {
+      const s = L.stats[i]
+      if (s) out.push({ code: u.code, box: { x0: L.tx + s.minX * L.u, y0: L.ty + s.minY * L.u, x1: L.tx + s.maxX * L.u, y1: L.ty + s.maxY * L.u } })
+    })
+  }
+  return out
+}
+function refreshVisible() {
+  const vb = viewBox(view.value, size.value.w, size.value.h)
+  const padded = expandBox(vb, 0.15)
+  let towns: Layer[] = []
+  let villages: Layer[] = []
+  if (lod.value !== 'county') towns = townLayers.value.filter((L) => boxesIntersect(L.box, padded))
+  if (lod.value === 'village' && townLayers.value.length) {
+    const want = pickVisibleTowns(townBoxes(), vb, MAX_VISIBLE_TOWNS)
+    const now = performance.now()
+    for (const code of want) {
+      ensureVillage(code)
+      if (villageLayers.value.has(code)) villageUsed.set(code, now)
+    }
+    const drop = pickEvictions(new Map([...villageLayers.value.keys()].map((c) => [c, villageUsed.get(c) ?? 0])), new Set(want), MAX_VILLAGE_TOWNS)
+    if (drop.length) {
+      const next = new Map(villageLayers.value)
+      for (const c of drop) {
+        const L = next.get(c)
+        if (L) { layerIndex.delete(L.key); for (const u of L.built.units) unitIndex.delete(u.code) }
+        next.delete(c)
+        villageUsed.delete(c)
+      }
+      villageLayers.value = next
+    }
+    villages = [...villageLayers.value.values()].filter((L) => boxesIntersect(L.box, padded))
+  }
+  const key = `${lod.value}|${towns.map((l) => l.key).join(',')}|${villages.map((l) => l.key).join(',')}`
+  if (key !== renderState.value.key) renderState.value = { towns, villages, key }
+}
+watch([townLayers, villageLayers, countyLayer], () => scheduleRefresh())
+watch(lod, () => refreshVisible())
+
+const hiddenTowns = computed(() => new Set(lod.value === 'village' ? renderState.value.villages.map((L) => L.key.slice('village:'.length)) : []))
+const drawLayers = computed<DrawLayer[]>(() => {
+  const out: DrawLayer[] = []
+  if (!countyLayer.value) return out
+  // 鄉鎮層還沒載好（第一次放大的那一下）先用縣市層墊著，不會空白
+  if (lod.value === 'county' || !townLayers.value.length) return [{ layer: countyLayer.value, units: countyLayer.value.built.units }]
+  for (const L of renderState.value.towns) out.push({ layer: L, units: L.built.units.filter((u) => !hiddenTowns.value.has(u.code)) })
+  for (const L of renderState.value.villages) out.push({ layer: L, units: L.built.units })
+  return out
 })
 
-const built = computed(() => (raster.value ? buildMap(raster.value, rows.value) : null))
-const allUnits = computed(() => (built.value ? [...built.value.units, ...built.value.unshaped] : []))
-const total = computed(() => allUnits.value.reduce((s, u) => s + u.candidates, 0))
-const crumbs = computed(() => breadcrumbs(view.value, (c) => nameByCode.value.get(c)))
-const countyName = computed(() => nameByCode.value.get(view.value.countyCode ?? ''))
-const townName = computed(() => nameByCode.value.get(view.value.townCode ?? ''))
-const drillable = computed(() => canDrill(view.value))
-const scaleLabel = computed(() => {
-  const m = raster.value?.cellM ?? 0
-  return m >= 1000 ? `${m / 1000} 公里` : `${m} 公尺`
-})
+const maxByLevel = computed(() => ({
+  county: countyLayer.value?.built.max ?? 0,
+  town: townLayers.value.reduce((m, L) => Math.max(m, L.built.max), 0),
+  village: [...villageLayers.value.values()].reduce((m, L) => Math.max(m, L.built.max), 0),
+}))
+function colorOf(layer: Layer, u: MapUnit): string {
+  return unitColor(u, colorMode.value, maxByLevel.value[layer.level])
+}
 
-// 同一行政區的格子合併成一條 path；邊界線整張圖一條
-const fills = computed(() => (raster.value ? unitFillPaths(raster.value) : []))
-const boundary = computed(() => (raster.value ? boundaryPath(raster.value) : ''))
-
-const active = computed<MapUnit | null>(() => {
-  const code = hovered.value ?? selected.value
-  return code ? allUnits.value.find((u) => u.code === code) ?? null : null
+// ── 滑過、點選、提示卡 ────────────────────────────────────────
+const hover = ref<{ key: string; idx: number } | null>(null)
+const selected = ref<{ key: string; idx: number } | null>(null)
+const activeRef = computed(() => hover.value ?? selected.value)
+const activeLayer = computed(() => (activeRef.value ? layerIndex.get(activeRef.value.key) ?? null : null))
+const active = computed<MapUnit | null>(() => (activeLayer.value && activeRef.value ? activeLayer.value.built.units[activeRef.value.idx] ?? null : null))
+const outlineCache = new Map<string, string>()
+const activeOutline = computed(() => {
+  const L = activeLayer.value
+  const r = activeRef.value
+  if (!L || !r) return ''
+  const k = `${r.key}:${r.idx}`
+  if (!outlineCache.has(k)) outlineCache.set(k, outlinePath(L.raster, r.idx))
+  return outlineCache.get(k)!
 })
 const activeHref = computed(() => (active.value ? hrefOf(active.value) : null))
-const outlineCache = new WeakMap<DecodedRaster, Map<number, string>>()
-const activeOutline = computed(() => {
-  const r = raster.value
-  const u = active.value
-  if (!r || !u || u.idx < 0) return ''
-  const byIdx = outlineCache.get(r) ?? new Map<number, string>()
-  outlineCache.set(r, byIdx)
-  if (!byIdx.has(u.idx)) byIdx.set(u.idx, outlinePath(r, u.idx))
-  return byIdx.get(u.idx)!
-})
-const sorted = computed(() => [...allUnits.value].sort((a, b) => b.candidates - a.candidates || a.code.localeCompare(b.code)))
-
-// 名稱標籤：位置取最大內接位置、標籤互相避讓（小面積優先），放不下的不放，滑過仍有提示卡（lib/raster-grid.ts placeLabels）
-const fontSize = computed(() => (raster.value ? Math.max(raster.value.w, raster.value.h) / 36 : 10))
-const labels = computed(() => {
-  const b = built.value
-  if (!raster.value || !b) return []
-  return placeLabels(raster.value, b.units.map((u) => u.name), fontSize.value).map((l) => ({ ...l, code: b.units[l.idx].code }))
-})
 
 function hrefOf(u: MapUnit): string {
-  return unitHref(ELECTION_ID, view.value, u, { county: countyName.value, town: townName.value })
-}
-function colorOf(u: MapUnit): string {
-  return unitColor(u, colorMode.value, built.value?.max ?? 0)
+  const level: MapLevel = u.code.length === 5 ? 'county' : u.code.length === 8 ? 'town' : 'village'
+  return unitHref(ELECTION_ID, { level }, u, { county: nameByCode.value.get(u.code.slice(0, 5)), town: nameByCode.value.get(u.code.slice(0, 8)) })
 }
 
-const canHover = () => typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches
-/** 滑鼠：點一下往下鑽。觸控：點一下先選取看數字，再點同一個行政區才往下鑽 */
-function pick(u: MapUnit) {
-  if (suppressClick) return
-  if (drillable.value && (canHover() || selected.value === u.code)) {
-    go(drillDown(view.value, u.code))
-    return
-  }
-  selected.value = u.code
+function boxOfUnit(code: string): Box | null {
+  const hit = unitIndex.get(code)
+  const s = hit ? hit.layer.stats[hit.idx] : null
+  if (!hit || !s) return null
+  const L = hit.layer
+  return { x0: L.tx + s.minX * L.u, y0: L.ty + s.minY * L.u, x1: L.tx + s.maxX * L.u, y1: L.ty + s.maxY * L.u }
 }
-function drill(u: MapUnit) {
-  if (drillable.value) go(drillDown(view.value, u.code))
+/** 放大並置中到某個行政區（點擊格子、點路徑、點清單） */
+function zoomToCode(code: string | null, instant = false) {
+  if (!world.value) return
+  if (!code) { fitAll(); return }
+  const box = boxOfUnit(code)
+  if (!box) return
+  const target = fitBox(box, size.value.w, size.value.h, 1.4, kMin.value)
+  if (instant) { cancelAnim(); setView(target) } else animateTo(target)
 }
 
-// ── 縮放與平移（手機看小行政區用）：按鈕放大縮小、拖曳平移 ──
-const zoom = ref(1)
-const center = ref<[number, number]>([0, 0])
-const svgEl = ref<SVGSVGElement | null>(null)
-let drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null
 let suppressClick = false
-
-const viewBox = computed(() => {
-  const r = raster.value
-  if (!r) return '0 0 1 1'
-  const w = r.w / zoom.value
-  const h = r.h / zoom.value
-  const x = Math.min(r.w - w, Math.max(0, center.value[0] - w / 2))
-  const y = Math.min(r.h - h, Math.max(0, center.value[1] - h / 2))
-  return `${x} ${y} ${w} ${h}`
-})
-function resetZoom() {
-  zoom.value = 1
-  center.value = raster.value ? [raster.value.w / 2, raster.value.h / 2] : [0, 0]
+function onUnitClick(L: Layer, u: MapUnit) {
+  if (suppressClick) return
+  selected.value = { key: L.key, idx: u.idx }
+  zoomToCode(u.code)
 }
-function setZoom(k: number) {
-  zoom.value = Math.min(8, Math.max(1, k))
-}
-watch(raster, (r) => {
-  if (!r) return
-  center.value = [r.w / 2, r.h / 2]
-  const focus = pendingFocus
-  pendingFocus = null
-  if (!focus) return
-  zoom.value = focus.zoom
-  const idx = focus.code ? r.codes.indexOf(focus.code) : -1
-  const s = idx >= 0 ? unitStats(r)[idx] : null
-  if (s) center.value = clampCenter([s.cx, s.cy], focus.zoom, r.w, r.h)
-})
 
-// ── 滾輪縮放（以游標為中心）──
-// 只在游標位於地圖上時攔截滾輪（不用按 Ctrl）：地圖本身就是這頁的主角，要的是「捲一捲就放大」；
-// 游標移到地圖外（兩側、右邊的資料卡、標題區）頁面照常捲動。需要 Ctrl 的做法會讓一般滾輪使用者找不到縮放，
-// 而觸控板的捏合在瀏覽器本來就是帶 Ctrl 的滾輪事件，兩種都走同一條路。
-// 縮放到門檻（lib/map-zoom.ts）自動切到游標下行政區的下一層，縮小回最小倍率再縮一格回上一層；
-// 切層後 450 毫秒內忽略滾輪（慣性捲動不會一路連跳好幾層）。點擊下鑽與麵包屑照舊。
-let wheelLockUntil = 0
+// ── 手勢：滾輪（以游標為中心）、拖曳平移、雙指捏合 ─────────────────
+// 滾輪只在游標位於地圖上時攔截（不用按 Ctrl）；已經縮到最小（整張台灣放得下）時再往下滾就放行，讓頁面照常捲動，
+// 所以滿版地圖不會把整頁卡住。觸控板捏合是帶 ctrlKey 的 wheel，一律攔截（不然會變成瀏覽器整頁縮放）。
+function localPoint(e: { clientX: number; clientY: number }): [number, number] {
+  const r = svgEl.value?.getBoundingClientRect()
+  return [e.clientX - (r?.left ?? 0), e.clientY - (r?.top ?? 0)]
+}
 function onWheel(e: WheelEvent) {
-  const r = raster.value
-  const svg = svgEl.value
-  if (!r || !svg) return
+  if (!world.value) return
+  if (!e.ctrlKey && e.deltaY > 0 && view.value.k <= kMin.value * 1.001) return
   e.preventDefault()
-  if (performance.now() < wheelLockUntil) return
-  const ctm = svg.getScreenCTM()
-  if (!ctm) return
-  const pt = svg.createSVGPoint()
-  pt.x = e.clientX
-  pt.y = e.clientY
-  const p = pt.matrixTransform(ctm.inverse())
-  const gx = Math.floor(p.x)
-  const gy = Math.floor(p.y)
-  const idx = gx >= 0 && gy >= 0 && gx < r.w && gy < r.h ? r.cells[gy * r.w + gx] : -1
-  const unit = idx >= 0 ? built.value?.units[idx] ?? null : null
-  const act = resolveWheel(
-    { zoom: zoom.value, center: center.value as Pt, w: r.w, h: r.h, canDrillDown: drillable.value && !!unit, canDrillUp: view.value.level !== 'county' },
-    e.deltaY, e.ctrlKey, [p.x, p.y],
-  )
-  if (act.type === 'drillDown' && unit) {
-    wheelLockUntil = performance.now() + 450
-    go(drillDown(view.value, unit.code), { code: null, zoom: ZOOM_AFTER_DRILL_DOWN })
-  } else if (act.type === 'drillUp') {
-    wheelLockUntil = performance.now() + 450
-    const from = view.value.level === 'village' ? view.value.townCode : view.value.countyCode
-    go(drillUp(view.value), { code: from ?? null, zoom: ZOOM_AFTER_DRILL_UP })
-  } else if (act.type === 'zoom') {
-    zoom.value = act.zoom
-    center.value = act.center
+  cancelAnim()
+  const [px, py] = localPoint(e)
+  const k2 = wheelK(view.value.k, e.deltaY, e.ctrlKey, kMin.value)
+  setView(zoomAtPoint(view.value, size.value.w, size.value.h, px, py, k2))
+}
+
+const pointers = new Map<number, { x: number; y: number }>()
+let drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null
+let pinch: { dist: number; view: View; mid: [number, number] } | null = null
+function mid(): [number, number] {
+  const [a, b] = [...pointers.values()]
+  const r = svgEl.value?.getBoundingClientRect()
+  return [(a.x + b.x) / 2 - (r?.left ?? 0), (a.y + b.y) / 2 - (r?.top ?? 0)]
+}
+function dist(): number {
+  const [a, b] = [...pointers.values()]
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+function onPointerDown(e: PointerEvent) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  cancelAnim()
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (pointers.size === 1) drag = { x: e.clientX, y: e.clientY, cx: view.value.cx, cy: view.value.cy, moved: false }
+  else if (pointers.size === 2) { drag = null; pinch = { dist: dist(), view: { ...view.value }, mid: mid() } }
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
+}
+function onPointerMove(e: PointerEvent) {
+  const p = pointers.get(e.pointerId)
+  if (!p) return
+  p.x = e.clientX
+  p.y = e.clientY
+  if (pinch && pointers.size >= 2) {
+    suppressClick = true
+    const k2 = Math.min(K_MAX, Math.max(kMin.value, pinch.view.k * (dist() / Math.max(1, pinch.dist))))
+    const v = zoomAtPoint(pinch.view, size.value.w, size.value.h, pinch.mid[0], pinch.mid[1], k2)
+    const m = mid()
+    setView({ k: k2, cx: v.cx - (m[0] - pinch.mid[0]) / k2, cy: v.cy - (m[1] - pinch.mid[1]) / k2 })
+  } else if (drag) {
+    const dx = e.clientX - drag.x
+    const dy = e.clientY - drag.y
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return
+    drag.moved = true
+    suppressClick = true
+    setView({ k: view.value.k, cx: drag.cx - dx / view.value.k, cy: drag.cy - dy / view.value.k })
   }
 }
-function onDown(e: PointerEvent) {
-  drag = { x: e.clientX, y: e.clientY, cx: center.value[0], cy: center.value[1], moved: false }
-}
-function onMove(e: PointerEvent) {
-  if (!drag || !raster.value || !svgEl.value || zoom.value <= 1) return
-  const dx = e.clientX - drag.x
-  const dy = e.clientY - drag.y
-  if (!drag.moved && Math.hypot(dx, dy) < 5) return
-  drag.moved = true
-  const rect = svgEl.value.getBoundingClientRect()
-  const unit = (raster.value.w / zoom.value) / Math.max(1, rect.width)
-  center.value = [drag.cx - dx * unit, drag.cy - dy * unit]
-}
-function onUp() {
-  if (drag?.moved) {
-    suppressClick = true
+function onPointerUp(e: PointerEvent) {
+  pointers.delete(e.pointerId)
+  if (pointers.size < 2) pinch = null
+  if (pointers.size === 1) {
+    const [rest] = [...pointers.values()]
+    drag = { x: rest.x, y: rest.y, cx: view.value.cx, cy: view.value.cy, moved: true }
+  }
+  if (pointers.size === 0) {
+    drag = null
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
     setTimeout(() => { suppressClick = false }, 0)
   }
-  drag = null
 }
 
+// ── 游標或視窗中心所在的縣市／鄉鎮／村里（路徑用）─────────────────
+const probe = ref<[number, number] | null>(null)
+let probeQueued = false
+function onSvgMove(e: MouseEvent) {
+  if (probeQueued || pointers.size) return
+  probeQueued = true
+  const [px, py] = localPoint(e)
+  requestAnimationFrame(() => {
+    probeQueued = false
+    probe.value = screenToWorld(view.value, size.value.w, size.value.h, px, py)
+  })
+}
+function onSvgLeave() { probe.value = null }
+
+const located = computed(() => {
+  const [x, y] = probe.value ?? [view.value.cx, view.value.cy]
+  const out: { county: MapUnit | null; town: MapUnit | null; village: MapUnit | null } = { county: null, town: null, village: null }
+  const cl = countyLayer.value
+  if (cl) { const i = cellAt(cl.raster, x, y); if (i >= 0) out.county = cl.built.units[i] }
+  for (const L of townLayers.value) {
+    if (x < L.box.x0 || x >= L.box.x1 || y < L.box.y0 || y >= L.box.y1) continue
+    const i = cellAt(L.raster, x, y)
+    if (i >= 0) { out.town = L.built.units[i]; break }
+  }
+  for (const L of villageLayers.value.values()) {
+    if (x < L.box.x0 || x >= L.box.x1 || y < L.box.y0 || y >= L.box.y1) continue
+    const i = cellAt(L.raster, x, y)
+    if (i >= 0) { out.village = L.built.units[i]; break }
+  }
+  if (out.town && !out.county) out.county = cl?.built.units.find((u) => u.code === out.town!.code.slice(0, 5)) ?? null
+  return out
+})
+const crumbs = computed<MapCrumb[]>(() => {
+  const out: MapCrumb[] = [{ label: '全國', code: null }]
+  const l = located.value
+  if (l.county) out.push({ label: l.county.name, code: l.county.code })
+  if (l.town && lod.value !== 'county') out.push({ label: l.town.name, code: l.town.code })
+  if (l.village && lod.value === 'village') out.push({ label: l.village.name, code: l.village.code })
+  return out
+})
+const crumbPeople = computed<number | null>(() => {
+  const l = located.value
+  const u = (lod.value === 'village' ? l.village : null) ?? (lod.value !== 'county' ? l.town : null) ?? l.county
+  if (u) return u.candidates
+  return countyLayer.value ? countyLayer.value.built.units.reduce((s, x) => s + x.candidates, 0) : null
+})
+
+// ── 名稱標籤：只畫目前這一層、放得下且不互相蓋住的（lib/raster-grid.ts placeLabels）─────────
+const labelCache = new Map<string, Array<{ code: string; text: string; x: number; y: number; fs: number }>>()
+const fsStep = computed(() => {
+  const u = lod.value === 'village' ? 0.2 : 1
+  return Math.round(Math.log(LABEL_PX / (view.value.k * u)) / Math.log(1.25))
+})
+const labels = computed(() => {
+  const layers = lod.value === 'county' ? (countyLayer.value ? [countyLayer.value] : []) : lod.value === 'town' ? renderState.value.towns : renderState.value.villages
+  const step = fsStep.value
+  const out: Array<{ key: string; layer: Layer; code: string; text: string; x: number; y: number; fs: number }> = []
+  for (const L of layers) {
+    const ck = `${L.key}|${step}`
+    let list = labelCache.get(ck)
+    if (!list) {
+      if (labelCache.size > 400) labelCache.clear()
+      list = placeLabels(L.raster, L.built.units.map((u) => u.name), Math.pow(1.25, step)).map((p) => ({ code: L.built.units[p.idx].code, text: p.text, x: p.x, y: p.y, fs: p.fs }))
+      labelCache.set(ck, list)
+    }
+    for (const p of list) out.push({ key: `${ck}:${p.code}`, layer: L, ...p })
+  }
+  return out
+})
+
+const scaleLabel = computed(() => (lod.value === 'village' ? '200 公尺' : '1 公里'))
 const legend = computed(() => legendItems(colorMode.value))
-const levelLabel = computed(() => (view.value.level === 'county' ? '縣市' : view.value.level === 'town' ? '鄉鎮市區' : '村里'))
+const maxForLegend = computed(() => maxByLevel.value[lod.value])
+
+// ── 清單模式：目前那一層、游標（視窗中心）所在上一層底下的行政區 ─────────
+const listUnits = computed<MapUnit[]>(() => {
+  const l = located.value
+  let units: MapUnit[] = []
+  if (lod.value === 'county' || !l.county) units = countyLayer.value?.built.units ?? []
+  else if (lod.value === 'town' || !l.town) units = townLayers.value.flatMap((L) => L.built.units).filter((u) => u.code.startsWith(l.county!.code))
+  else units = [...villageLayers.value.values()].flatMap((L) => L.built.units).filter((u) => u.code.startsWith(l.town!.code))
+  return [...units].sort((a, b) => b.candidates - a.candidates || a.code.localeCompare(b.code))
+})
+function pickRow(u: MapUnit) {
+  selected.value = null
+  zoomToCode(u.code, true)
+  if (u.code.length === 8) void ensureTowns()
+}
+
+// ── 網址帶視角（?at=縣市或鄉鎮代碼，方便分享）─────────────────────
+const route = useRoute()
+const router = useRouter()
+let urlTimer: ReturnType<typeof setTimeout> | undefined
+watch(view, () => {
+  clearTimeout(urlTimer)
+  urlTimer = setTimeout(() => {
+    const l = located.value
+    const at = lod.value === 'county'
+      ? (view.value.k > kMin.value * 1.3 ? l.county?.code : undefined)
+      : l.town?.code ?? l.county?.code
+    if ((route.query.at ?? undefined) === at) return
+    const query = { ...route.query }
+    if (at) query.at = at
+    else delete query.at
+    void router.replace({ query })
+  }, 700)
+})
+async function applyAtFromUrl() {
+  const at = typeof route.query.at === 'string' ? route.query.at : ''
+  if (!/^\d{5}(\d{3})?$/.test(at)) return
+  if (at.length === 8) await ensureTowns()
+  zoomToCode(at, true)
+}
+
+// ── 啟動與尺寸 ────────────────────────────────────────────────
+function measure() {
+  const el = stage.value
+  if (!el) return
+  const next = { w: Math.max(200, el.clientWidth), h: Math.max(200, el.clientHeight) }
+  const atFit = world.value ? view.value.k <= fitK(world.value, size.value.w, size.value.h) * 1.001 : true
+  size.value = next
+  if (world.value && atFit) setView({ cx: world.value.w / 2, cy: world.value.h / 2, k: fitK(world.value, next.w, next.h) })
+}
+watch(stage, (el) => {
+  observer?.disconnect()
+  if (!el) return
+  observer = new ResizeObserver(measure)
+  observer.observe(el)
+  measure()
+})
+watch(countyLayer, async (L) => {
+  if (!L) return
+  measure()
+  setView({ cx: L.raster.w / 2, cy: L.raster.h / 2, k: kMin.value })
+  await applyAtFromUrl()
+}, { once: true })
+
+onMounted(() => { void loadCounty() })
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  cancelAnim()
+  clearTimeout(urlTimer)
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
+})
 
 usePageHead({
   title: '參選地圖',
-  description: '各縣市、鄉鎮市區、村里的參選人數地圖。',
+  description: '各縣市、鄉鎮市區、村里的參選人收錄地圖。',
   noindex: true,
 })
 </script>
 
 <template>
-  <div class="bg-slate-50 min-h-screen pb-20">
+  <div class="bg-slate-50 min-h-screen">
     <Hero>
       <template #title>參選地圖</template>
+      <template #description>
+        全台各縣市、鄉鎮、村里的 2026 參選人收錄情形，放大就能看到村里。
+      </template>
       <template #icon><MapIcon :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />
@@ -299,134 +577,113 @@ usePageHead({
       <BoardNav current="map" />
     </Hero>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-4" data-testid="candidacy-map">
-      <!-- 麵包屑與切換 -->
-      <div class="flex flex-wrap items-center gap-2 justify-between">
-        <nav class="flex flex-wrap items-center gap-1 text-sm font-black" aria-label="層級" data-testid="map-crumbs">
-          <button v-if="view.level !== 'county'" type="button" aria-label="回上一層" data-testid="map-up"
-            class="p-2 rounded-xl border border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:text-blue-600"
-            @click="go(drillUp(view))">
-            <ChevronLeft :size="16" />
-          </button>
-          <template v-for="(c, i) in crumbs" :key="i">
-            <span v-if="i > 0" class="text-slate-300">/</span>
-            <button v-if="i < crumbs.length - 1" type="button" class="px-2 py-1 rounded-lg text-blue-600 hover:bg-blue-50"
-              :data-testid="`map-crumb-${i}`" @click="go(c.view)">{{ c.label }}</button>
-            <span v-else class="px-2 py-1 text-navy-900" data-testid="map-current">{{ c.label }}</span>
-          </template>
-          <span class="ml-2 text-slate-500 font-bold" data-testid="map-total">{{ total }} 人</span>
-        </nav>
-        <div class="flex flex-wrap items-center gap-2">
-        <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="著色">
-          <button type="button" :aria-pressed="colorMode === 'coverage'" data-testid="map-color-coverage"
-            :class="['px-3 py-2 text-sm font-black', colorMode === 'coverage' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800']"
-            @click="colorMode = 'coverage'">收錄率</button>
-          <button type="button" :aria-pressed="colorMode === 'count'" data-testid="map-color-count"
-            :class="['px-3 py-2 text-sm font-black', colorMode === 'count' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800']"
-            @click="colorMode = 'count'">人數</button>
-        </div>
-        <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="呈現方式">
-          <button type="button" :aria-pressed="mode === 'grid'" data-testid="map-mode-grid"
-            :class="['px-3 py-2 text-sm font-black inline-flex items-center gap-1.5', mode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600']"
-            @click="mode = 'grid'"><LayoutGrid :size="14" />地圖</button>
-          <button type="button" :aria-pressed="mode === 'list'" data-testid="map-mode-list"
-            :class="['px-3 py-2 text-sm font-black inline-flex items-center gap-1.5', mode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600']"
-            @click="mode = 'list'"><List :size="14" />清單</button>
-        </div>
-        </div>
-      </div>
+    <!-- 地圖：滿版寬度、約佔滿剩下的視窗；面板都浮在地圖上 -->
+    <section v-if="mode === 'grid'" ref="stage" class="relative w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
+      :style="{ height: 'calc(100dvh - 4rem)', minHeight: '480px' }" data-testid="map-stage" :aria-busy="pending > 0">
+      <p v-if="failed" class="absolute inset-0 flex items-center justify-center text-slate-500 font-bold" data-testid="map-error">
+        暫時讀不到資料
+        <button type="button" class="ml-2 text-blue-600 underline" @click="loadCounty()">重試</button>
+      </p>
+      <p v-else-if="!countyLayer" class="absolute inset-0 flex items-center justify-center text-slate-400 font-bold">讀取中</p>
 
-      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem] gap-4 items-start">
-        <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-3 sm:p-5 min-h-64 relative" :aria-busy="loading">
-          <p v-if="failed" class="text-slate-500 font-bold py-10 text-center" data-testid="map-error">
-            暫時讀不到資料
-            <button type="button" class="ml-2 text-blue-600 underline" @click="show(view)">重試</button>
-          </p>
-          <p v-else-if="!built" class="text-slate-400 font-bold py-10 text-center">讀取中</p>
+      <svg v-else ref="svgEl" class="absolute inset-0 block cursor-grab active:cursor-grabbing" :width="size.w" :height="size.h" :viewBox="vbString"
+        style="touch-action: none" role="group" aria-label="參選地圖" data-testid="map-svg"
+        @wheel="onWheel" @pointerdown="onPointerDown" @mousemove="onSvgMove" @mouseleave="onSvgLeave">
+        <g v-for="d in drawLayers" :key="d.layer.key" :transform="d.layer.transform">
+          <g shape-rendering="crispEdges">
+            <path v-for="u in d.units" :key="u.code" :d="d.layer.fills[u.idx]" :fill="colorOf(d.layer, u)"
+              class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.candidates} 人`"
+              :data-testid="`cell-${u.code}`" :data-count="u.candidates"
+              @mouseenter="hover = { key: d.layer.key, idx: u.idx }" @mouseleave="hover = null"
+              @focus="hover = { key: d.layer.key, idx: u.idx }" @blur="hover = null"
+              @click="onUnitClick(d.layer, u)" @keydown.enter.prevent="onUnitClick(d.layer, u)" />
+          </g>
+          <path :d="d.layer.boundary" fill="none" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linecap="square" pointer-events="none" opacity="0.85" />
+        </g>
+        <g v-if="activeLayer && activeOutline" :transform="activeLayer.transform" pointer-events="none">
+          <path :d="activeOutline" fill="none" stroke="#0f172a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" data-testid="map-outline" />
+        </g>
+        <g v-for="l in labels" :key="l.key" :transform="l.layer.transform" pointer-events="none" text-anchor="middle" font-weight="800">
+          <text :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
+        </g>
+      </svg>
 
-          <template v-else>
-            <!-- 地圖：每個行政區一條 path（同區格子合併），滑過高亮整區、點擊往下鑽 -->
-            <template v-if="mode === 'grid' && raster">
-              <div class="absolute right-3 top-3 z-10 flex flex-col gap-1" data-testid="map-zoom">
-                <button type="button" aria-label="放大" class="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-blue-600" @click="setZoom(zoom * 1.6)"><Plus :size="16" /></button>
-                <button type="button" aria-label="縮小" class="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-blue-600" @click="setZoom(zoom / 1.6)"><Minus :size="16" /></button>
-                <button v-if="zoom > 1" type="button" aria-label="重設" class="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-blue-600" @click="resetZoom"><RotateCcw :size="16" /></button>
-              </div>
-              <svg ref="svgEl" :viewBox="viewBox" preserveAspectRatio="xMidYMid meet" class="w-full h-auto mx-auto block select-none touch-pan-y"
-                :style="{ maxHeight: '78vh', aspectRatio: `${raster.w} / ${raster.h}`, touchAction: zoom > 1 ? 'none' : 'pan-y', overscrollBehavior: 'contain' }"
-                role="group" :aria-label="`${levelLabel}地圖`" data-testid="map-svg"
-                @wheel="onWheel" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp" @pointerleave="onUp">
-                <g shape-rendering="crispEdges">
-                  <path v-for="u in built.units" :key="u.code" :d="fills[u.idx]" :fill="colorOf(u)"
-                    class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.candidates} 人`"
-                    :data-testid="`cell-${u.code}`" :data-count="u.candidates"
-                    @mouseenter="hovered = u.code" @mouseleave="hovered = null" @focus="hovered = u.code" @blur="hovered = null"
-                    @click="pick(u)" @keydown.enter.prevent="pick(u)" @keydown.space.prevent="pick(u)" />
-                </g>
-                <path :d="boundary" fill="none" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linecap="square" pointer-events="none" opacity="0.9" />
-                <rect v-for="(f, i) in raster.insets" :key="`inset-${i}`" :x="f.ox - 0.5" :y="f.oy - 0.5" :width="f.w + 1" :height="f.h + 1"
-                  fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" pointer-events="none" />
-                <path v-if="activeOutline" :d="activeOutline" fill="none" stroke="#0f172a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" pointer-events="none" data-testid="map-outline" />
-                <g pointer-events="none" text-anchor="middle" font-weight="800">
-                  <text v-for="l in labels" :key="l.code" :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
-                </g>
-              </svg>
+      <template v-if="countyLayer">
+        <!-- 左上：層級路徑與人數 -->
+        <div class="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] md:max-w-[50%] rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2">
+          <MapCrumbs :crumbs="crumbs" :people="crumbPeople" @pick="zoomToCode" />
+        </div>
+        <!-- 右上：著色與呈現切換 -->
+        <div class="absolute right-3 top-3 z-10 max-w-[calc(100%-1.5rem)]">
+          <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
+        </div>
+        <!-- 右下：縮放 -->
+        <div :class="['absolute right-3 z-10 flex flex-col gap-1', active ? 'bottom-60 md:bottom-3' : 'bottom-3']" data-testid="map-zoom">
+          <button type="button" aria-label="放大" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
+            @click="animateTo({ ...view, k: Math.min(K_MAX, view.k * 1.8) }, 220)"><Plus :size="16" /></button>
+          <button type="button" aria-label="縮小" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
+            @click="animateTo({ ...view, k: Math.max(kMin, view.k / 1.8) }, 220)"><Minus :size="16" /></button>
+          <button type="button" aria-label="看全台" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
+            @click="fitAll"><Maximize2 :size="16" /></button>
+        </div>
+        <!-- 左下：圖例與格子尺度 -->
+        <div :class="['absolute left-3 bottom-3 z-10 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <template v-if="colorMode === 'count'">
+              <span>0</span>
+              <span v-for="(l, i) in legend" :key="i" class="w-5 h-3 rounded-sm" :style="{ background: l.color }"></span>
+              <span>{{ maxForLegend }}</span>
             </template>
+            <span v-else v-for="(l, i) in legend" :key="i" class="inline-flex items-center gap-1">
+              <span class="w-4 h-3 rounded-sm" :style="{ background: l.color }"></span>{{ l.label }}
+            </span>
+          </div>
+          <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
+        </div>
+        <p v-if="pending > 0" class="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 rounded-full bg-white/90 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-pending">讀取中</p>
 
-            <!-- 清單：手機上格子太小時用；一列一個行政區，點了一樣往下鑽 -->
-            <ul v-else class="divide-y divide-slate-100" data-testid="map-list">
-              <li v-for="u in sorted" :key="u.code">
-                <button type="button" class="w-full flex items-center gap-3 py-2.5 px-1 text-left hover:bg-slate-50 rounded-lg"
-                  :disabled="!drillable" :data-testid="`row-${u.code}`" @click="drill(u)">
-                  <span class="w-3 h-3 rounded-sm flex-shrink-0" :style="{ background: colorOf(u) }"></span>
-                  <span class="flex-1 font-black text-navy-900">{{ u.name }}</span>
-                  <span class="text-sm text-slate-500 font-bold">
-                    <template v-for="(l, i) in tooltipLines(u)" :key="l.label">{{ i ? '・' : '' }}{{ l.label }} {{ l.value }}</template>
-                  </span>
-                </button>
-              </li>
-            </ul>
-
-            <div class="flex flex-wrap items-center justify-between gap-2 mt-4 text-xs font-bold text-slate-500">
-              <div class="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="map-legend">
-                <template v-if="colorMode === 'count'">
-                  <span>0</span>
-                  <span v-for="(l, i) in legend" :key="i" class="w-6 h-3 rounded-sm" :style="{ background: l.color }"></span>
-                  <span>{{ built.max }}</span>
-                </template>
-                <span v-else v-for="(l, i) in legend" :key="i" class="inline-flex items-center gap-1">
-                  <span class="w-4 h-3 rounded-sm" :style="{ background: l.color }"></span>{{ l.label }}
-                </span>
-              </div>
-              <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
+        <!-- 提示卡：電腦浮在地圖右側，手機是底部抽屜 -->
+        <aside v-if="active" class="absolute z-20 inset-x-0 bottom-0 rounded-t-2xl md:inset-x-auto md:bottom-auto md:top-16 md:right-3 md:w-72 md:rounded-2xl bg-white/95 backdrop-blur border border-slate-200 shadow-xl p-4 sm:p-5" data-testid="map-detail">
+          <button v-if="selected" type="button" class="absolute right-2 top-2 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 md:hidden" aria-label="關閉" @click="selected = null; hover = null"><X :size="16" /></button>
+          <h2 class="text-xl font-black text-navy-900 mb-3" data-testid="map-detail-name">{{ active.name }}</h2>
+          <dl class="space-y-1.5">
+            <div v-for="l in tooltipLines(active)" :key="l.label" class="flex justify-between gap-3">
+              <dt class="text-sm font-bold text-slate-500">{{ l.label }}</dt>
+              <dd class="font-black text-navy-900">{{ l.value }}</dd>
             </div>
-          </template>
-        </section>
-
-        <!-- 滑過或點選的行政區：名稱與三個數字，連到既有的選舉頁 -->
-        <aside class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5 lg:sticky lg:top-24" data-testid="map-detail">
-          <template v-if="active">
-            <h2 class="text-xl font-black text-navy-900 mb-3" data-testid="map-detail-name">{{ active.name }}</h2>
-            <dl class="space-y-1.5">
-              <div v-for="l in tooltipLines(active)" :key="l.label" class="flex justify-between gap-3">
-                <dt class="text-sm font-bold text-slate-500">{{ l.label }}</dt>
-                <dd class="font-black text-navy-900">{{ l.value }}</dd>
-              </div>
-            </dl>
-            <div class="mt-4 flex flex-wrap gap-2">
-              <button v-if="drillable" type="button" data-testid="map-drill"
-                class="px-3 py-2 rounded-xl text-sm font-black bg-blue-600 text-white hover:bg-blue-700" @click="drill(active)">
-                看{{ view.level === 'county' ? '鄉鎮市區' : '村里' }}
-              </button>
-              <RouterLink v-if="activeHref" :to="activeHref" data-testid="map-election-link"
-                class="px-3 py-2 rounded-xl text-sm font-black border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 inline-flex items-center gap-1.5">
-                選舉頁<ExternalLink :size="14" />
-              </RouterLink>
-            </div>
-          </template>
-          <p v-else class="text-slate-400 font-bold text-sm">點選或滑過行政區</p>
+          </dl>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button v-if="activeLayer && active" type="button" data-testid="map-zoom-to"
+              class="px-3 py-2 rounded-xl text-sm font-black bg-blue-600 text-white hover:bg-blue-700" @click="zoomToCode(active.code)">放大到這裡</button>
+            <RouterLink v-if="activeHref" :to="activeHref" data-testid="map-election-link"
+              class="px-3 py-2 rounded-xl text-sm font-black border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 inline-flex items-center gap-1.5">
+              選舉頁<ExternalLink :size="14" />
+            </RouterLink>
+          </div>
         </aside>
+      </template>
+    </section>
+
+    <!-- 清單：一般寬度版面 -->
+    <div v-else class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pb-20 space-y-4">
+      <div class="flex flex-wrap items-center gap-2 justify-between">
+        <MapCrumbs :crumbs="crumbs" :people="crumbPeople" @pick="zoomToCode($event, true)" />
+        <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
       </div>
+      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-3 sm:p-5">
+        <p v-if="!countyLayer" class="text-slate-400 font-bold py-10 text-center">讀取中</p>
+        <ul v-else class="divide-y divide-slate-100" data-testid="map-list">
+          <li v-for="u in listUnits" :key="u.code">
+            <button type="button" class="w-full flex items-center gap-3 py-2.5 px-1 text-left hover:bg-slate-50 rounded-lg" :data-testid="`row-${u.code}`" @click="pickRow(u)">
+              <span class="w-3 h-3 rounded-sm flex-shrink-0" :style="{ background: unitColor(u, colorMode, maxByLevel[u.code.length === 5 ? 'county' : u.code.length === 8 ? 'town' : 'village']) }"></span>
+              <span class="flex-1 font-black text-navy-900">{{ u.name }}</span>
+              <span class="text-sm text-slate-500 font-bold">
+                <template v-for="(l, i) in tooltipLines(u)" :key="l.label">{{ i ? '・' : '' }}{{ l.label }} {{ l.value }}</template>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
     </div>
   </div>
 </template>

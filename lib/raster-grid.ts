@@ -207,6 +207,9 @@ export interface RasterFile {
   /** 畫布大小（格） */
   w: number
   h: number
+  /** 這張圖左上角在「世界」（全國層畫布，單位公里）裡的位置，單位是這個檔自己的格；全國檔沒有（＝0） */
+  ox?: number
+  oy?: number
   /** 行政區代碼，序號即格值 */
   codes: string[]
   layers: RasterLayer[]
@@ -242,6 +245,9 @@ export interface DecodedRaster {
   w: number
   h: number
   cellM: number
+  /** 世界位置（單位：這張圖的格），全國圖是 0 */
+  ox: number
+  oy: number
   codes: string[]
   /** 整張畫布，列優先 */
   cells: Int16Array
@@ -263,7 +269,7 @@ export function decodeRaster(file: RasterFile): DecodedRaster {
     }
     if (layer.inset) insets.push({ ox: layer.ox, oy: layer.oy, w: layer.w, h: layer.h })
   }
-  return { w: file.w, h: file.h, cellM: file.cellM, codes: file.codes, cells, insets }
+  return { w: file.w, h: file.h, cellM: file.cellM, ox: file.ox ?? 0, oy: file.oy ?? 0, codes: file.codes, cells, insets }
 }
 
 // ── 畫面：同一行政區的格子合併成一條 SVG path ─────────────────────
@@ -451,6 +457,8 @@ export function placeLabels(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'c
       const bh = fs * 1.2
       // 字寫不下整個區（外框比字小）：小區例外，可以溢出到鄰區
       const cannotFit = bw > s.maxX - s.minX || bh > s.maxY - s.minY
+      // 只有幾格的區（村里層很多）字溢出去只會蓋住鄰區，不放標籤
+      if (cannotFit && s.count < 6) continue
       let hit: { x: number; y: number } | null = null
       for (const [cx, cy] of candidates[idx]) {
         const cxm = cx + 0.5

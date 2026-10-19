@@ -18,8 +18,12 @@
  *
  * 尺度（固定實際大小，用公里為單位的正弦投影，中央經線 121°E，lib/raster-grid.ts）
  *   全國層、縣市層：1 公里一格；村里層（選了鄉鎮）：200 公尺一格。
- *   山區鄉鎮太大時（長邊超過 MAX_LONG 格）整數倍放大格子，檔內 cellM 如實記錄。
- *   每個行政區至少 1 格（小到點不到的里放在重心最近的海格或鄰區的多餘格）。
+ *    *   每個行政區至少 1 格（小到點不到的里放在重心最近的海格或鄰區的多餘格）。
+ *
+ * 同一個世界座標（連續縮放的大地圖用）：全國層的畫布就是世界，原點在畫布左上、單位公里；主島與三個離島內嵌框各有一個
+ * 「框」（km 座標 → 世界座標的平移）。鄉鎮層（1 公里）與村里層（200 公尺）的格子對齊到同一條格線（格子左上角貼齊該框的
+ * 公里原點），每個檔記下自己在世界裡的位置 ox、oy（單位是該檔自己的格）。澎湖、金門、連江的鄉鎮與村里檔畫在同一個內嵌框裡
+ * （框外的島，例如烏坵，只給 1 格放在框邊）。
  *
  * 輸出（data/tw-raster/）
  *   national.json            全國：主島＋澎湖、金門、連江三個內嵌框（同尺度）
@@ -37,12 +41,12 @@ const OUT = new URL("data/tw-raster/", ROOT);
 
 const COUNTY_CELL_KM = 1;
 const VILLAGE_CELL_KM = 0.2;
-/** 村里層一張圖長邊最多幾格，超過就把格子整數倍放大 */
-const MAX_LONG = 320;
+/** 村里層一張圖長邊最多幾格（超過就報錯，格子不放大，才能維持跟全國同一條格線） */
+const MAX_LONG = 600;
 /** 縣市層一張圖長邊最多幾格（同樣的保險，目前沒有縣市會超過） */
 const MAX_LONG_COUNTY = 400;
 /** 取景時丟掉離本體太遠的飛地（東沙、南沙等）：距離該範圍最大一塊的重心超過這麼多公里 */
-const CORE_RADIUS_KM = { town: 130, village: 60 };
+const CORE_RADIUS_KM = { town: 250, village: 60 };
 
 interface Topology {
   transform?: { scale: Pt; translate: Pt };
@@ -104,7 +108,10 @@ function bigest(polys: RasterPolygon[]) {
 }
 
 /** 一個範圍（縣市或鄉鎮）的點陣化：codes 是這張圖的行政區（序號即格值） */
-function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, maxLong: number, radiusKm: number): RasterFile {
+/** 世界框：km 座標 (x, y) → 世界座標 (ox + x − x0, oy + yTop − y)；clip 是這個框裡畫得到的 km 範圍 */
+interface Frame { /** 破碎的行政區只留靠近主體的塊（離島框不用：框的範圍已經限定） */ filterFragments: boolean; x0: number; yTop: number; ox: number; oy: number; clip: { xMin: number; xMax: number; yMin: number; yMax: number } }
+
+function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, maxLong: number, radiusKm: number, frame: Frame): RasterFile {
   const inputs: RasterInput[] = codes.map((code) => ({ code, polys: geo.get(code)?.polys ?? [] }));
   const all = inputs.flatMap((u) => u.polys.map((p) => ({ p, ...polygonStats(p) })));
   if (!all.length) throw new Error(`${codes[0]} 這一組完全沒有邊界`);
@@ -128,7 +135,7 @@ function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, max
     return Math.hypot(Math.max(0, ref.x0 - b.x1, b.x0 - ref.x1), Math.max(0, ref.y0 - b.y1, b.y0 - ref.y1));
   };
   const core = inputs.map((u) => {
-    if (u.polys.length <= 1) return { code: u.code, polys: u.polys.filter((p) => near(polygonStats(p))) };
+    if (u.polys.length <= 1 || !frame.filterFragments) return { code: u.code, polys: u.polys.filter((p) => near(polygonStats(p))) };
     const kept = u.polys.filter((p) => near(polygonStats(p)) && gapOf(p) <= margin);
     if (kept.length) return { code: u.code, polys: kept };
     const nearest = u.polys.filter((p) => near(polygonStats(p))).sort((a, b) => gapOf(a) - gapOf(b))[0];
@@ -138,11 +145,20 @@ function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, max
   for (const u of core) for (const p of u.polys) for (const [x, y] of p.rings[0]) {
     xMin = Math.min(xMin, x); xMax = Math.max(xMax, x); yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
   }
-  const box = { xMin, xMax, yMin, yMax };
-  let cell = cellKm;
-  const long = Math.max(xMax - xMin, yMax - yMin) / cell;
-  if (long > maxLong) cell = cellKm * Math.ceil(long / maxLong);
-  const rect = rectToGrid(box, cell);
+  // 只畫框裡的範圍，再把格線貼齊世界格線（格子左上角落在框原點的整數格上）
+  xMin = Math.max(xMin, frame.clip.xMin); xMax = Math.min(xMax, frame.clip.xMax);
+  yMin = Math.max(yMin, frame.clip.yMin); yMax = Math.min(yMax, frame.clip.yMax);
+  if (!(xMax > xMin && yMax > yMin)) { xMax = xMin + cellKm; yMax = yMin + cellKm; }
+  const cell = cellKm;
+  const EPS = 1e-9;
+  const gx0 = Math.floor((xMin - frame.x0) / cell + EPS);
+  const gx1 = Math.ceil((xMax - frame.x0) / cell - EPS);
+  const gy0 = Math.floor((frame.yTop - yMax) / cell + EPS);
+  const gy1 = Math.ceil((frame.yTop - yMin) / cell - EPS);
+  const rect = { x0: frame.x0 + gx0 * cell, yTop: frame.yTop - gy0 * cell, w: Math.max(1, gx1 - gx0), h: Math.max(1, gy1 - gy0) };
+  if (Math.max(rect.w, rect.h) > maxLong) throw new Error(`${codes[0]} 這一組太大（${rect.w}×${rect.h} 格）`);
+  const worldOx = Math.round(frame.ox / cell + gx0);
+  const worldOy = Math.round(frame.oy / cell + gy0);
   const cells = rasterize(core, rect, cell);
 
   // 每個行政區至少 1 格：目標＝它最大一塊的重心（沒有邊界的放在整張圖中心）
@@ -159,6 +175,8 @@ function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, max
     cellM: Math.round(cell * 1000),
     w: rect.w,
     h: rect.h,
+    ox: worldOx,
+    oy: worldOy,
     codes,
     layers: [{ ox: 0, oy: 0, w: rect.w, h: rect.h, rle: encodeRle(cells) }],
   };
@@ -172,6 +190,8 @@ await Deno.mkdir(new URL("towns/", OUT), { recursive: true });
 await Deno.mkdir(new URL("villages/", OUT), { recursive: true });
 
 // ── 全國：主島＋三個離島內嵌框，同尺度 ───────────────────────────
+/** 縣市代碼 → 世界框（鄉鎮與村里檔用同一個） */
+const countyFrame = new Map<string, Frame>();
 {
   const codes = childrenOf("", 5);
   const inputs = codes.map((code) => ({ code, polys: countyGeo.get(code)!.polys }));
@@ -212,8 +232,12 @@ await Deno.mkdir(new URL("villages/", OUT), { recursive: true });
 
   let oy = 0;
   const layers: RasterLayer[] = [{ ox: margin, oy: 0, w: mainRect.w, h: mainRect.h, rle: encodeRle(mainCells) }];
+  const mainFrame: Frame = { filterFragments: true, x0: mainRect.x0, yTop: mainRect.yTop, ox: margin, oy: 0, clip: mainBox };
+  for (const c of codes) countyFrame.set(c, mainFrame);
   for (const i of insets) {
     layers.push({ ox: 1, oy, w: i.rect.w, h: i.rect.h, rle: encodeRle(i.cells), inset: true });
+    const fr = frames.find((f) => f.name === i.name)!;
+    countyFrame.set(codes[i.idx], { filterFragments: false, x0: i.rect.x0, yTop: i.rect.yTop, ox: 1, oy, clip: rectKm(fr.lon[0], fr.lon[1], fr.lat[0], fr.lat[1]) });
     oy += i.rect.h + 6;
   }
   const file: RasterFile = { cellM: COUNTY_CELL_KM * 1000, w: margin + mainRect.w, h: Math.max(mainRect.h, oy), codes, layers };
@@ -225,7 +249,7 @@ await Deno.mkdir(new URL("villages/", OUT), { recursive: true });
 let townTotal = 0;
 for (const county of childrenOf("", 5)) {
   const codes = childrenOf(county, 8);
-  const file = rasterScope(codes, townGeo, COUNTY_CELL_KM, MAX_LONG_COUNTY, CORE_RADIUS_KM.town);
+  const file = rasterScope(codes, townGeo, COUNTY_CELL_KM, MAX_LONG_COUNTY, CORE_RADIUS_KM.town, countyFrame.get(county)!);
   await write(`towns/${county}.json`, file);
   townTotal += codes.length;
 }
@@ -234,13 +258,11 @@ console.log(`鄉鎮市區 ${townTotal}`);
 // ── 村里層：每個鄉鎮一個檔 ─────────────────────────────────────
 let villageTotal = 0;
 let missingGeo = 0;
-let scaled = 0;
 for (const town of adminCodes.filter((c) => c.length === 8).sort()) {
   const codes = childrenOf(town, 11);
   missingGeo += codes.filter((c) => !villageGeo.has(c)).length;
-  const file = rasterScope(codes, villageGeo, VILLAGE_CELL_KM, MAX_LONG, CORE_RADIUS_KM.village);
-  if (file.cellM !== VILLAGE_CELL_KM * 1000) scaled += 1;
+  const file = rasterScope(codes, villageGeo, VILLAGE_CELL_KM, MAX_LONG, CORE_RADIUS_KM.village, countyFrame.get(town.slice(0, 5))!);
   await write(`villages/${town}.json`, file);
   villageTotal += codes.length;
 }
-console.log(`村里 ${villageTotal}（官方清單有、圖資沒有邊界的 ${missingGeo}），格子放大過的鄉鎮 ${scaled}`);
+console.log(`村里 ${villageTotal}（官方清單有、圖資沒有邊界的 ${missingGeo}）`);
