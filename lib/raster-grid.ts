@@ -364,3 +364,119 @@ export function boundaryPath(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells'>): 
 export function outlinePath(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells'>, idx: number): string {
   return edgePath(raster, (a, b) => (a === idx) !== (b === idx))
 }
+
+// ── 名稱標籤的位置與避讓 ─────────────────────────────────────────
+
+/**
+ * 每個陸地格到「最近的別區、海或圖邊」的距離（格，格心到邊界的距離，邊界格約 0.5）。
+ * 兩趟 chamfer 近似歐氏距離；海格是 0。距離最大的格就是這個行政區的「最大內接位置」。
+ */
+export function inscribedDistance(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells'>): Float32Array {
+  const { w, h, cells } = raster
+  const d = new Float32Array(w * h).fill(Infinity)
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? -2 : cells[y * w + x])
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const v = cells[y * w + x]
+      if (v < 0) d[y * w + x] = 0
+      else if (at(x - 1, y) !== v || at(x + 1, y) !== v || at(x, y - 1) !== v || at(x, y + 1) !== v) d[y * w + x] = 0.5
+    }
+  }
+  const D = Math.SQRT2
+  const get = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? Infinity : d[y * w + x])
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      d[y * w + x] = Math.min(d[y * w + x], get(x - 1, y) + 1, get(x, y - 1) + 1, get(x - 1, y - 1) + D, get(x + 1, y - 1) + D)
+    }
+  }
+  for (let y = h - 1; y >= 0; y -= 1) {
+    for (let x = w - 1; x >= 0; x -= 1) {
+      d[y * w + x] = Math.min(d[y * w + x], get(x + 1, y) + 1, get(x, y + 1) + 1, get(x + 1, y + 1) + D, get(x - 1, y + 1) + D)
+    }
+  }
+  return d
+}
+
+export interface PlacedLabel {
+  idx: number
+  text: string
+  /** 文字中心（格座標）與字級（格） */
+  x: number
+  y: number
+  fs: number
+}
+
+const LABEL_SCALES = [1, 0.85, 0.7, 0.6]
+
+/**
+ * 標籤擺放：
+ * - 位置用最大內接位置（距邊界最遠的格），不用重心——被別區環繞的小區（嘉義市在嘉義縣中間），環狀區的重心會落在小區上。
+ * - 小面積的先擺；後擺的大區碰到已擺的標籤就換自己區內別的位置、再不行縮小字級（最小 0.6 倍）、都不行就不放（滑過仍有提示卡）。
+ * - 大區的標籤要有一定比例落在自己的格子上；小到字寫不下的區（字比整個區還大）允許字溢出到鄰區，但仍以最大內接位置為中心。
+ * @param texts 依行政區序號排的名稱
+ * @param baseFs 預設字級（格）
+ */
+export function placeLabels(raster: Pick<DecodedRaster, 'w' | 'h' | 'cells' | 'codes'>, texts: readonly string[], baseFs: number): PlacedLabel[] {
+  const { w, h, cells } = raster
+  const dist = inscribedDistance(raster)
+  const stats = unitStats(raster)
+
+  // 每個行政區的候選位置：距離最大的格在前，之後從距離夠大的格裡均勻挑
+  const best = raster.codes.map(() => 0)
+  for (let i = 0; i < cells.length; i += 1) if (cells[i] >= 0 && dist[i] > best[cells[i]]) best[cells[i]] = dist[i]
+  const pool: Array<Array<[number, number, number]>> = raster.codes.map(() => [])
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const v = cells[y * w + x]
+      if (v >= 0 && dist[y * w + x] >= best[v] * 0.55) pool[v].push([x, y, dist[y * w + x]])
+    }
+  }
+  const candidates = pool.map((list) => {
+    list.sort((a, b) => b[2] - a[2] || a[1] - b[1] || a[0] - b[0])
+    if (list.length <= 90) return list
+    const stride = Math.ceil((list.length - 1) / 89)
+    return list.filter((_, i) => i === 0 || i % stride === 0)
+  })
+
+  const placed: Array<{ x0: number; x1: number; y0: number; y1: number }> = []
+  const out: PlacedLabel[] = []
+  const order = raster.codes.map((_, i) => i).filter((i) => stats[i]).sort((a, b) => stats[a]!.count - stats[b]!.count || a - b)
+  for (const idx of order) {
+    const text = texts[idx]
+    const s = stats[idx]!
+    if (!text) continue
+    for (const scale of LABEL_SCALES) {
+      const fs = baseFs * scale
+      const bw = text.length * fs
+      const bh = fs * 1.2
+      // 字寫不下整個區（外框比字小）：小區例外，可以溢出到鄰區
+      const cannotFit = bw > s.maxX - s.minX || bh > s.maxY - s.minY
+      let hit: { x: number; y: number } | null = null
+      for (const [cx, cy] of candidates[idx]) {
+        const cxm = cx + 0.5
+        const cym = cy + 0.5
+        const box = { x0: cxm - bw / 2 - fs * 0.15, x1: cxm + bw / 2 + fs * 0.15, y0: cym - bh / 2 - fs * 0.1, y1: cym + bh / 2 + fs * 0.1 }
+        if (placed.some((p) => box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0)) continue
+        if (!cannotFit) {
+          let inside = 0
+          let total = 0
+          for (let y = Math.floor(cym - bh / 2); y <= Math.floor(cym + bh / 2); y += 1) {
+            for (let x = Math.floor(cxm - bw / 2); x <= Math.floor(cxm + bw / 2); x += 1) {
+              total += 1
+              if (x >= 0 && y >= 0 && x < w && y < h && cells[y * w + x] === idx) inside += 1
+            }
+          }
+          if (inside / total < 0.6) continue
+        }
+        hit = { x: cxm, y: cym }
+        placed.push(box)
+        break
+      }
+      if (hit) {
+        out.push({ idx, text, x: hit.x, y: hit.y, fs })
+        break
+      }
+    }
+  }
+  return out.sort((a, b) => a.idx - b.idx)
+}
