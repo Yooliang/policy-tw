@@ -25,6 +25,9 @@
  * 公里原點），每個檔記下自己在世界裡的位置 ox、oy（單位是該檔自己的格）。澎湖、金門、連江的鄉鎮與村里檔畫在同一個內嵌框裡
  * （框外的島，例如烏坵，只給 1 格放在框邊）。
  *
+ * 每個檔還帶 names（跟 codes 同順序的名稱，取自 scripts/fixtures/admin-names.tsv＝admin_divisions 的官方現行寫法），
+ * 所以畫面一載入幾何就能畫出名稱，不用等人數資料。
+ *
  * 輸出（data/tw-raster/）
  *   national.json            全國：主島＋澎湖、金門、連江三個內嵌框（同尺度）
  *   towns/<縣市代碼>.json     一個縣市，由鄉鎮市區形狀拼成
@@ -92,6 +95,11 @@ async function load(name: string, object: string): Promise<Geo[]> {
 }
 
 const adminCodes = (await Deno.readTextFile(new URL("scripts/fixtures/admin-codes.txt", ROOT))).split(/\r?\n/).filter(Boolean);
+/** 行政區名稱（admin_divisions 的官方現行寫法，縣市「臺」寫「台」）：靜態資料，跟著點陣檔一起存，畫面不用等人數資料 */
+const nameOfCode = new Map(
+  (await Deno.readTextFile(new URL("scripts/fixtures/admin-names.tsv", ROOT))).split(/\r?\n/).filter(Boolean).map((l) => l.split("\t") as [string, string]),
+);
+const namesOf = (codes: string[]) => codes.map((c) => nameOfCode.get(c) ?? c);
 const childrenOf = (parent: string, len: number) => adminCodes.filter((c) => c.length === len && c.startsWith(parent)).sort();
 
 const counties = await load("counties-10t", "counties");
@@ -178,6 +186,7 @@ function rasterScope(codes: string[], geo: Map<string, Geo>, cellKm: number, max
     ox: worldOx,
     oy: worldOy,
     codes,
+    names: namesOf(codes),
     layers: [{ ox: 0, oy: 0, w: rect.w, h: rect.h, rle: encodeRle(cells) }],
   };
 }
@@ -240,7 +249,7 @@ const countyFrame = new Map<string, Frame>();
     countyFrame.set(codes[i.idx], { filterFragments: false, x0: i.rect.x0, yTop: i.rect.yTop, ox: 1, oy, clip: rectKm(fr.lon[0], fr.lon[1], fr.lat[0], fr.lat[1]) });
     oy += i.rect.h + 6;
   }
-  const file: RasterFile = { cellM: COUNTY_CELL_KM * 1000, w: margin + mainRect.w, h: Math.max(mainRect.h, oy), codes, layers };
+  const file: RasterFile = { cellM: COUNTY_CELL_KM * 1000, w: margin + mainRect.w, h: Math.max(mainRect.h, oy), codes, names: namesOf(codes), layers };
   await write("national.json", file);
   console.log(`全國 ${file.w}×${file.h} 格，縣市 ${codes.length}`);
 }

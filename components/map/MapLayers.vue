@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { unitColor, type ColorMode, type MapUnit } from '../../lib/candidacy-map'
 import type { Layer } from '../../lib/map-layer'
+import type { Lod } from '../../lib/map-world'
 
 /**
  * 參選地圖的圖層與標籤（SVG 片段）。獨立成元件是為了效能：縮放、平移只改外層 svg 的 viewBox（頁面直接改屬性），
@@ -14,6 +15,7 @@ defineProps<{
   colorMode: ColorMode
   maxes: { county: number; town: number; village: number }
   labels: LabelItem[]
+  lod: Lod
 }>()
 const emit = defineEmits<{ hover: [hit: { key: string; idx: number } | null]; pick: [hit: { key: string; idx: number }] }>()
 
@@ -37,10 +39,20 @@ function onKey(e: KeyboardEvent) { const h = hitOf(e.target); if (h) { e.prevent
       </g>
       <path class="map-hide-moving" :d="d.layer.boundary" fill="none" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linecap="square" pointer-events="none" opacity="0.85" />
     </g>
-    <g class="map-hide-moving" pointer-events="none" text-anchor="middle" font-weight="800">
-      <g v-for="l in labels" :key="l.key" :transform="l.transform">
-        <text :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
+    <!-- 名稱：縮放手勢中不藏，跟著 svg 的 transform 一起縮放；只有換細節層時淡入淡出 -->
+    <Transition name="map-fade" mode="out-in">
+      <g :key="lod" pointer-events="none" text-anchor="middle" font-weight="800">
+        <g v-for="l in labels" :key="l.key" :transform="l.transform">
+          <text :x="l.x" :y="l.y + l.fs * 0.35" :font-size="l.fs" fill="#0f172a" stroke="#ffffff" :stroke-width="l.fs * 0.22" paint-order="stroke" stroke-linejoin="round" data-testid="map-label">{{ l.text }}</text>
+        </g>
       </g>
-    </g>
+    </Transition>
   </g>
 </template>
+
+<style>
+.map-fade-enter-active,
+.map-fade-leave-active { transition: opacity 0.18s ease; }
+.map-fade-enter-from,
+.map-fade-leave-to { opacity: 0; }
+</style>

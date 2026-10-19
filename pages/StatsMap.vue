@@ -8,8 +8,8 @@ import MapLayers, { type DrawLayer, type LabelItem } from '../components/map/Map
 import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
 import MapToggles from '../components/map/MapToggles.vue'
 import { usePageHead } from '../composables/usePageHead'
-import { buildLayer, type Layer } from '../lib/map-layer'
-import { fileCache, rowsCache, rowsKey } from '../lib/map-data-cache'
+import { applyRows, buildLayer, type Layer } from '../lib/map-layer'
+import { fileCache, labelCache, rowsCache, rowsKey } from '../lib/map-data-cache'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
@@ -70,18 +70,36 @@ async function fetchRows(level: MapLevel, parent?: string): Promise<CountRow[]> 
         .abortSignal(signal).throwOnError())
     return normalizeRows((data ?? []) as Array<Record<string, unknown>>)
   })
-  const names = new Map(nameByCode.value)
-  let changed = false
-  for (const r of rows) if (names.get(r.code) !== r.name) { names.set(r.code, r.name); changed = true }
-  if (changed) nameByCode.value = names
   return rows
+}
+
+/** 人數回來只負責上色：把數字套到已經畫好的圖層（名稱與邊界早就在了），再讓畫面重新上色 */
+const rev = ref(0)
+const rowsFailed = ref(false)
+function loadRowsInto(layers: Layer[], level: MapLevel, parent?: string) {
+  fetchRows(level, parent).then((rows) => {
+    for (const L of layers) applyRows(L, rows)
+    rowsFailed.value = false
+    rev.value += 1
+  }).catch((e) => {
+    console.info('[參選地圖] 人數讀取失敗', level, parent, e)
+    rowsFailed.value = true
+  })
+}
+function retryRows() {
+  rowsFailed.value = false
+  if (countyLayer.value && !countyLayer.value.ready) loadRowsInto([countyLayer.value], 'county')
+  if (townLayers.value.length && !townLayers.value[0].ready) loadRowsInto(townLayers.value, 'town')
+  for (const [code, L] of villageLayers.value) if (!L.ready) loadRowsInto([L], 'village', code)
 }
 
 function makeLayer(key: string, level: MapLevel, file: unknown, rows: CountRow[]): Layer {
   // 解碼、合成 path 只在第一次載入做一次；markRaw 讓 Vue 不深層追蹤這些大陣列與字串
   const layer = markRaw(buildLayer(key, level, file as RasterFile, rows))
   layerIndex.set(key, layer)
-  layer.built.units.forEach((unit, idx) => unitIndex.set(unit.code, { layer, idx }))
+  const names = new Map(nameByCode.value)
+  layer.built.units.forEach((unit, idx) => { unitIndex.set(unit.code, { layer, idx }); names.set(unit.code, unit.name) })
+  nameByCode.value = names
   return layer
 }
 
@@ -89,8 +107,9 @@ async function loadCounty() {
   failed.value = false
   pending.value += 1
   try {
-    const [file, rows] = await Promise.all([fileCache.get('national', () => import('../data/tw-raster/national.json').then((m) => m.default)), fetchRows('county')])
-    countyLayer.value = makeLayer('county', 'county', file, rows)
+    const file = await fileCache.get('national', () => import('../data/tw-raster/national.json').then((m) => m.default))
+    countyLayer.value = makeLayer('county', 'county', file, [])
+    loadRowsInto([countyLayer.value], 'county')
   } catch (e) {
     console.info('[參選地圖] 讀取失敗', e)
     failed.value = true
@@ -104,12 +123,10 @@ function ensureTowns(): Promise<void> {
   if (townsPromise) return townsPromise
   pending.value += 1
   townsPromise = (async () => {
-    const [rows, files] = await Promise.all([
-      fetchRows('town'),
-      Promise.all(Object.entries(townFiles).map(async ([path, load]) => [path.match(/towns\/(\d+)\.json/)![1], await fileCache.get(`towns/${path.match(/towns\/(\d+)\.json/)![1]}`, () => load().then((m) => m.default))] as const)),
-    ])
-    townLayers.value = files.sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([code, file]) => makeLayer(`town:${code}`, 'town', file, rows))
+    const files = await Promise.all(Object.entries(townFiles).map(async ([path, load]) => [path.match(/towns\/(\d+)\.json/)![1], await fileCache.get(`towns/${path.match(/towns\/(\d+)\.json/)![1]}`, () => load().then((m) => m.default))] as const))
+    townLayers.value = files.sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([code, file]) => makeLayer(`town:${code}`, 'town', file, []))
     refreshVisible()
+    loadRowsInto(townLayers.value, 'town')
   })().catch((e) => {
     console.info('[參選地圖] 鄉鎮層讀取失敗', e)
     townsPromise = null
@@ -134,8 +151,9 @@ function pump() {
     ;(async () => {
       const load = villageFiles[`../data/tw-raster/villages/${code}.json`]
       if (!load) return
-      const [file, rows] = await Promise.all([fileCache.get(`villages/${code}`, () => load().then((m) => m.default)), fetchRows('village', code)])
-      const layer = makeLayer(`village:${code}`, 'village', file, rows)
+      const file = await fileCache.get(`villages/${code}`, () => load().then((m) => m.default))
+      const layer = makeLayer(`village:${code}`, 'village', file, [])
+      loadRowsInto([layer], 'village', code)
       const next = new Map(villageLayers.value)
       next.set(code, layer)
       villageLayers.value = next
@@ -302,6 +320,7 @@ watch(lod, () => refreshVisible())
 
 const hiddenTowns = computed(() => new Set(lod.value === 'village' ? renderState.value.villages.map((L) => L.key.slice('village:'.length)) : []))
 const drawLayers = computed<DrawLayer[]>(() => {
+  void rev.value // 人數回來時重建單位陣列（名稱與 path 不變，只重新上色）
   const out: DrawLayer[] = []
   if (!countyLayer.value) return out
   // 鄉鎮層還沒載好（第一次放大的那一下）先用縣市層墊著，不會空白
@@ -311,7 +330,7 @@ const drawLayers = computed<DrawLayer[]>(() => {
   return out
 })
 
-const maxByLevel = computed(() => ({
+const maxByLevel = computed(() => (void rev.value, {
   county: countyLayer.value?.built.max ?? 0,
   town: townLayers.value.reduce((m, L) => Math.max(m, L.built.max), 0),
   village: [...villageLayers.value.values()].reduce((m, L) => Math.max(m, L.built.max), 0),
@@ -321,7 +340,7 @@ const hover = ref<{ key: string; idx: number } | null>(null)
 const selected = ref<{ key: string; idx: number } | null>(null)
 const activeRef = computed(() => hover.value ?? selected.value)
 const activeLayer = computed(() => (activeRef.value ? layerIndex.get(activeRef.value.key) ?? null : null))
-const active = computed<MapUnit | null>(() => (activeLayer.value && activeRef.value ? activeLayer.value.built.units[activeRef.value.idx] ?? null : null))
+const active = computed<MapUnit | null>(() => (void rev.value, activeLayer.value && activeRef.value ? activeLayer.value.built.units[activeRef.value.idx] ?? null : null))
 const outlineCache = new Map<string, string>()
 const activeOutline = computed(() => {
   const L = activeLayer.value
@@ -331,6 +350,12 @@ const activeOutline = computed(() => {
   if (!outlineCache.has(k)) outlineCache.set(k, outlinePath(L.raster, r.idx))
   return outlineCache.get(k)!
 })
+/** 這一區的人數資料回來了沒（沒回來就只顯示名稱，不顯示 0 人） */
+function isReady(u: MapUnit): boolean {
+  void rev.value
+  return unitIndex.get(u.code)?.layer.ready ?? false
+}
+const activeReady = computed(() => (active.value ? isReady(active.value) : false))
 const activeHref = computed(() => (active.value ? hrefOf(active.value) : null))
 
 function hrefOf(u: MapUnit): string {
@@ -457,6 +482,7 @@ function onSvgMove(e: MouseEvent) {
 function onSvgLeave() { probe.value = null }
 
 const located = computed(() => {
+  void rev.value
   const [x, y] = probe.value ?? [view.value.cx, view.value.cy]
   const out: { county: MapUnit | null; town: MapUnit | null; village: MapUnit | null } = { county: null, town: null, village: null }
   const cl = countyLayer.value
@@ -485,12 +511,11 @@ const crumbs = computed<MapCrumb[]>(() => {
 const crumbPeople = computed<number | null>(() => {
   const l = located.value
   const u = (lod.value === 'village' ? l.village : null) ?? (lod.value !== 'county' ? l.town : null) ?? l.county
-  if (u) return u.candidates
-  return countyLayer.value ? countyLayer.value.built.units.reduce((s, x) => s + x.candidates, 0) : null
+  if (u) return isReady(u) ? u.candidates : null
+  return countyLayer.value?.ready ? countyLayer.value.built.units.reduce((s, x) => s + x.candidates, 0) : null
 })
 
 // ── 名稱標籤：只畫目前這一層、放得下且不互相蓋住的（lib/raster-grid.ts placeLabels）─────────
-const labelCache = new Map<string, Array<{ code: string; text: string; x: number; y: number; fs: number }>>()
 const fsStep = computed(() => {
   const u = lod.value === 'village' ? 0.2 : 1
   return Math.round(Math.log(LABEL_PX / (view.value.k * u)) / Math.log(1.25))
@@ -503,7 +528,7 @@ const labels = computed<LabelItem[]>(() => {
     const ck = `${L.key}|${step}`
     let list = labelCache.get(ck)
     if (!list) {
-      if (labelCache.size > 400) labelCache.clear()
+      if (labelCache.size > 2000) labelCache.clear()
       list = placeLabels(L.raster, L.built.units.map((u) => u.name), Math.pow(1.25, step)).map((p) => ({ code: L.built.units[p.idx].code, text: p.text, x: p.x, y: p.y, fs: p.fs }))
       labelCache.set(ck, list)
     }
@@ -518,6 +543,7 @@ const tickClass = (pos: number) => (pos < 0.02 ? '' : pos < 0.85 ? '-translate-x
 
 // ── 清單模式：目前那一層、游標（視窗中心）所在上一層底下的行政區 ─────────
 const listUnits = computed<MapUnit[]>(() => {
+  void rev.value
   const l = located.value
   let units: MapUnit[] = []
   if (lod.value === 'county' || !l.county) units = countyLayer.value?.built.units ?? []
@@ -626,7 +652,7 @@ usePageHead({
       <svg v-else ref="svgEl" class="map-svg absolute inset-0 block w-full h-full cursor-grab active:cursor-grabbing"
         style="touch-action: none" role="group" aria-label="參選地圖" data-testid="map-svg"
         @wheel="onWheel" @pointerdown="onPointerDown" @mousemove="onSvgMove" @mouseleave="onSvgLeave">
-        <MapLayers :layers="drawLayers" :color-mode="colorMode" :maxes="maxByLevel" :labels="labels" @hover="onHover" @pick="onPick" />
+        <MapLayers :layers="drawLayers" :color-mode="colorMode" :maxes="maxByLevel" :labels="labels" :lod="lod" @hover="onHover" @pick="onPick" />
         <g v-if="activeLayer && activeOutline" :transform="activeLayer.transform" pointer-events="none">
           <path :d="activeOutline" fill="none" stroke="#0f172a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" data-testid="map-outline" />
         </g>
@@ -663,18 +689,20 @@ usePageHead({
           </div>
           <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
         </div>
+        <p v-if="rowsFailed" class="absolute left-1/2 -translate-x-1/2 top-16 z-10 rounded-full bg-white/95 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-rows-error">人數暫時讀不到<button type="button" class="ml-2 text-blue-600 underline" @click="retryRows">重試</button></p>
         <p v-if="pending > 0" class="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 rounded-full bg-white/90 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-pending">讀取中</p>
 
         <!-- 提示卡：電腦浮在地圖右側，手機是底部抽屜 -->
         <aside v-if="active" class="absolute z-20 inset-x-0 bottom-0 rounded-t-2xl md:inset-x-auto md:bottom-auto md:top-16 md:right-3 md:w-72 md:rounded-2xl bg-white/95 backdrop-blur border border-slate-200 shadow-xl p-4 sm:p-5" data-testid="map-detail">
           <button v-if="selected" type="button" class="absolute right-2 top-2 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 md:hidden" aria-label="關閉" @click="selected = null; hover = null"><X :size="16" /></button>
           <h2 class="text-xl font-black text-navy-900 mb-3" data-testid="map-detail-name">{{ active.name }}</h2>
-          <dl class="space-y-1.5">
+          <dl v-if="activeReady" class="space-y-1.5">
             <div v-for="l in tooltipLines(active)" :key="l.label" class="flex justify-between gap-3">
               <dt class="text-sm font-bold text-slate-500">{{ l.label }}</dt>
               <dd class="font-black text-navy-900">{{ l.value }}</dd>
             </div>
           </dl>
+          <p v-else class="text-sm font-bold text-slate-400">人數讀取中</p>
           <div class="mt-4 flex flex-wrap gap-2">
             <button v-if="activeLayer && active" type="button" data-testid="map-zoom-to"
               class="px-3 py-2 rounded-xl text-sm font-black bg-blue-600 text-white hover:bg-blue-700" @click="zoomToCode(active.code)">放大到這裡</button>
@@ -700,7 +728,7 @@ usePageHead({
             <button type="button" class="w-full flex items-center gap-3 py-2.5 px-1 text-left hover:bg-slate-50 rounded-lg" :data-testid="`row-${u.code}`" @click="pickRow(u)">
               <span class="w-3 h-3 rounded-sm flex-shrink-0" :style="{ background: unitColor(u, colorMode, maxByLevel[u.code.length === 5 ? 'county' : u.code.length === 8 ? 'town' : 'village']) }"></span>
               <span class="flex-1 font-black text-navy-900">{{ u.name }}</span>
-              <span class="text-sm text-slate-500 font-bold">
+              <span v-if="isReady(u)" class="text-sm text-slate-500 font-bold">
                 <template v-for="(l, i) in tooltipLines(u)" :key="l.label">{{ i ? '・' : '' }}{{ l.label }} {{ l.value }}</template>
               </span>
             </button>

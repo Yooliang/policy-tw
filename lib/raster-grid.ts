@@ -212,6 +212,8 @@ export interface RasterFile {
   oy?: number
   /** 行政區代碼，序號即格值 */
   codes: string[]
+  /** 跟 codes 同順序的名稱（靜態資料，畫面不用等人數就能畫名稱） */
+  names?: string[]
   layers: RasterLayer[]
 }
 
@@ -249,6 +251,7 @@ export interface DecodedRaster {
   ox: number
   oy: number
   codes: string[]
+  names: string[]
   /** 整張畫布，列優先 */
   cells: Int16Array
   /** 內嵌框的位置（畫外框用） */
@@ -269,7 +272,7 @@ export function decodeRaster(file: RasterFile): DecodedRaster {
     }
     if (layer.inset) insets.push({ ox: layer.ox, oy: layer.oy, w: layer.w, h: layer.h })
   }
-  return { w: file.w, h: file.h, cellM: file.cellM, ox: file.ox ?? 0, oy: file.oy ?? 0, codes: file.codes, cells, insets }
+  return { w: file.w, h: file.h, cellM: file.cellM, ox: file.ox ?? 0, oy: file.oy ?? 0, codes: file.codes, names: file.names ?? [], cells, insets }
 }
 
 // ── 畫面：同一行政區的格子合併成一條 SVG path ─────────────────────

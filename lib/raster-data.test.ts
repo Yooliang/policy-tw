@@ -25,6 +25,8 @@ function check(file: RasterFile, expected: string[], what: string) {
     assertEquals(n, layer.w * layer.h, `${what}：游程長度跟塊的大小不符`);
   }
   assert(file.cellM > 0);
+  assertEquals(file.names?.length, file.codes.length, `${what}：名稱數量跟代碼不同`);
+  assert(file.names!.every((n) => n.length > 0), `${what}：有空的名稱`);
 }
 
 Deno.test("官方清單：縣市 22、鄉鎮市區 368、村里 7,781", () => {
