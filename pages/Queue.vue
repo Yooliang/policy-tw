@@ -4,43 +4,75 @@ import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
 import { taskTypeLabel } from '../lib/task-labels'
+import Hero from '../components/Hero.vue'
+import MechanismNav from '../components/MechanismNav.vue'
+import BoardNav from '../components/contributions/BoardNav.vue'
+import { ListOrdered } from 'lucide-vue-next'
 
-// 派工佇列：全站接下來 150 筆會被領走的順序（2026-09-23 維護者：一行一筆、li 排下去、不用標題；2026-10-13 維護者：只顯示前 150 筆，原本 1000）。
-// 資料來自 queue_preview()（migration 20260923000001），跟 /next 同一把尺；不含每個代理各自的排除。
-type Row = { pos: number; kind: 'task' | 'verify'; task_id: string; task_type: string; subject: string | null; region: string | null; queue_at: string }
+// 派工佇列（2026-10-19，#684）：跟站務主控台隊列頁同一份資料，來源是 console_queue_state()（migration 20261017000201 起，anon 可執行、唯讀）。
+// 隊頭前 60 名（任務與驗證票合併，照 /next 順序）；維護者：正式頁不自動重新整理，只有手動「重新整理」。
+// 整頁照搬（維護者 10-19：提供透明度），只拿掉「隊頭第一筆可派」卡片；投太多輪區塊含各票代號與理由，函式本來就是 anon 可讀。
+type Status = 'ready' | 'dead_end' | 'saturated' | 'question_full' | 'parked' | 'cooling' | 'blocked'
+type HeadRow = { pos: number; kind?: 'task' | 'verify'; task_type: string; source: string; status: Status; subject: string; queue_at: string; dispatch_count: number; last_dispatched_at: string | null }
+type OvervotedItem = { contribution_id?: string; contribution_type?: string; subject?: string; status?: string; votes?: number; stopped?: boolean; verdicts?: { verdict?: string; agent?: string; reason?: string }[] }
+type Overvoted = { baseline?: number; flag_votes?: number; stop_votes?: number; total?: number; items?: OvervotedItem[] }
+type State = {
+  by_type: { task_type: string; source: string; status: Status; n: number }[]
+  verify: { total: number; eligible: number; by_type: { contribution_type: string; n: number; eligible: number }[] }
+  head: HeadRow[]
+  first_ready_pos: number | null
+  parked?: { task_id: string; task_type: string; source: string; subject: string; queue_at: string; inflight: number; verify_waiting: number }[]
+  parked_total?: number
+  overvoted?: Overvoted
+  dispatched_24h: { task_type: string; kind: 'verify' | 'auto' | 'manual'; n: number }[]
+  age_buckets: { never: number; lt_1h: number; h1_6: number; h6_24: number; d1_3: number; gt_3d: number }
+}
 
-const QUEUE_LIMIT = 150
-const rows = ref<Row[] | null>(null)
+const state = ref<State | null>(null)
 const failed = ref(false)
-// 誰領走了什麼（2026-09-24 維護者：「a-zhen 領走的應該看的到吧」）：最近 30 分鐘的任務認領與驗證派發，只有代號、沒有 IP
-type Dispatch = { kind: 'task' | 'verify'; task_id: string; agent_name: string; dispatched_at: string; active_until: string }
-const recent = ref<Dispatch[]>([])
-const holderOf = computed(() => {
-  const m = new Map<string, Dispatch>()
-  const now = Date.now()
-  for (const d of recent.value) if (Date.parse(d.active_until) > now && !m.has(d.task_id)) m.set(d.task_id, d)
-  return m
-})
+const loading = ref(false)
+const refreshedAt = ref<Date | null>(null)
+const groupBy = ref<'type' | 'source'>('type')
 
-usePageHead({ title: '派工佇列', description: `接下來 ${QUEUE_LIMIT} 筆會被領走的順序`, noindex: true })
+usePageHead({ title: '派工佇列', description: '接下來 60 筆會被領走的順序', noindex: true })
 
 async function load() {
+  if (loading.value) return
+  loading.value = true
   failed.value = false
   try {
-    const { data } = await withTimeoutAndRetry('queue preview', (signal) =>
-      supabasePublic.rpc('queue_preview', { p_limit: QUEUE_LIMIT }).abortSignal(signal).throwOnError())
-    rows.value = (data ?? []) as Row[]
-    // 派出紀錄讀不到不影響佇列本身
-    try {
-      const { data: rd } = await supabasePublic.rpc('dispatch_recent', { p_minutes: 30 })
-      recent.value = (rd ?? []) as Dispatch[]
-    } catch { recent.value = [] }
+    const { data } = await withTimeoutAndRetry('console queue state', (signal) =>
+      supabasePublic.rpc('console_queue_state').abortSignal(signal).throwOnError())
+    state.value = (data ?? null) as State | null
+    refreshedAt.value = new Date()
   } catch (e) {
     console.info('[佇列] 讀取失敗', e)
     failed.value = true
+  } finally {
+    loading.value = false
   }
 }
 onMounted(load)
+
+const STATUSES: { key: Status; label: string; bar: string }[] = [
+  { key: 'ready', label: '可派', bar: '#22c55e' },
+  { key: 'dead_end', label: '查無等票', bar: '#fbbf24' },
+  { key: 'saturated', label: '額滿', bar: '#f97316' },
+  { key: 'question_full', label: '提問滿額', bar: '#8b5cf6' },
+  { key: 'parked', label: '停放中', bar: '#06b6d4' },
+  { key: 'cooling', label: '冷卻', bar: '#64748b' },
+  { key: 'blocked', label: '擋下', bar: '#ef4444' },
+]
+const STATUS = Object.fromEntries(STATUSES.map((s) => [s.key, s])) as Record<Status, (typeof STATUSES)[number]>
+const SOURCE_LABEL: Record<string, string> = { auto: '自動缺口', suggested: 'AI 提議', web_request: '網站請求', manual: '維護者', auto_dispute: '裁決', verify: '驗證票' }
+const AGE: { key: keyof State['age_buckets']; label: string }[] = [
+  { key: 'never', label: '從沒派過' },
+  { key: 'lt_1h', label: '1 小時內' },
+  { key: 'h1_6', label: '1–6 小時' },
+  { key: 'h6_24', label: '6–24 小時' },
+  { key: 'd1_3', label: '1–3 天' },
+  { key: 'gt_3d', label: '3 天以上' },
+]
 
 // 左邊框依型別上色：用 inline style，不走 Tailwind 動態 class（要 safelist）
 const BORDER: Record<string, string> = {
@@ -99,8 +131,6 @@ const VERIFY_BORDER: Record<string, string> = {
   lineage_link: '#14b8a6',
   party_info: '#7c3aed',        // 政黨資訊：紫
 }
-const typeColor = (r: Row) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
-const KIND_LABEL: Record<string, string> = { task: '任務', verify: '驗證' }
 // 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
 const VERIFY_LABEL: Record<string, string> = {
   policy: '新增政見',
@@ -125,44 +155,244 @@ const VERIFY_LABEL: Record<string, string> = {
   lineage_link: '脈絡上下級',
   party_info: '政黨資訊',
 }
-const typeLabel = (r: Row) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
-const minsLeft = (iso: string) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000))
-const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+
+const KIND_LABEL: Record<string, string> = { verify: '驗證票', auto: '自動缺口', manual: '手動任務' }
+const VERDICT: Record<string, string> = { agree: '同意', disagree: '反對', unsure: '不確定' }
+const num2 = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? String(Math.round(n * 100) / 100) : '—')
+const isStopped = (it: { stopped?: boolean; status?: string }) => it.stopped === true || it.status === 'disputed'
+const overvoted = computed(() => state.value?.overvoted ?? null)
+const overItems = computed(() => (Array.isArray(overvoted.value?.items) ? overvoted.value!.items! : []))
+const overTotal = computed(() => overvoted.value?.total ?? overItems.value.length)
+const overTypeLabel = (t: string) => VERIFY_LABEL[t] ?? taskTypeLabel(t)
+const sourceLabel = (s: string) => SOURCE_LABEL[s] ?? s
+const headTypeLabel = (r: { kind?: string; task_type: string }) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
+const headColor = (r: { kind?: string; task_type: string }) => (r.kind === 'verify' ? VERIFY_BORDER[r.task_type] : BORDER[r.task_type]) ?? '#cbd5e1'
+const fmt = (n: number) => n.toLocaleString('zh-TW')
 const when = (iso: string) => {
   const d = new Date(iso)
-  if (d.getFullYear() < 1990) return '優先'
+  if (d.getFullYear() < 1990) return '插隊'
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
+const hms = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+
+const statusTotal = computed(() => {
+  const t: Record<string, number> = {}
+  for (const r of state.value?.by_type ?? []) t[r.status] = (t[r.status] ?? 0) + r.n
+  return t
+})
+const cards = computed(() => {
+  const t = statusTotal.value
+  return [
+    { label: '可派', n: t.ready ?? 0 },
+    { label: '被擋（查無等票＋額滿＋提問滿額）', n: (t.dead_end ?? 0) + (t.saturated ?? 0) + (t.question_full ?? 0) },
+    { label: '停放中', n: t.parked ?? 0 },
+    { label: '冷卻', n: t.cooling ?? 0 },
+    { label: '擋下', n: t.blocked ?? 0 },
+  ]
+})
+const dispatched24 = computed(() => (state.value?.dispatched_24h ?? []).reduce((a, r) => a + r.n, 0))
+// 各任務型別的狀態分布：一型別一條，各狀態一段
+const typeRows = computed(() => {
+  const m = new Map<string, Record<string, number>>()
+  for (const r of state.value?.by_type ?? []) {
+    const k = groupBy.value === 'type' ? r.task_type : r.source
+    const o = m.get(k) ?? {}
+    o[r.status] = (o[r.status] ?? 0) + r.n
+    m.set(k, o)
+  }
+  return [...m.entries()]
+    .map(([k, o]) => ({ key: k, label: groupBy.value === 'type' ? taskTypeLabel(k) : sourceLabel(k), counts: o, total: Object.values(o).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total)
+})
+const maxTotal = computed(() => Math.max(1, ...typeRows.value.map((r) => r.total)))
+// 24 小時派出：驗證票歸一列「驗證票」，其餘照任務型別
+const disp24Rows = computed(() => {
+  const m = new Map<string, number>()
+  for (const r of state.value?.dispatched_24h ?? []) {
+    const k = groupBy.value === 'type' ? (r.kind === 'verify' ? 'verify' : r.task_type) : r.kind
+    m.set(k, (m.get(k) ?? 0) + r.n)
+  }
+  return [...m.entries()].map(([k, n]) => ({ key: k, label: groupBy.value === 'type' ? (k === 'verify' ? '驗證票' : taskTypeLabel(k)) : (KIND_LABEL[k] ?? k), n })).sort((a, b) => b.n - a.n)
+})
+const parkedRows = computed(() => state.value?.parked ?? [])
+const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value.length)
 </script>
 
 <template>
-  <main class="max-w-5xl mx-auto px-4 py-6 text-sm">
+  <div class="bg-slate-50 min-h-screen pb-20">
+    <Hero>
+      <template #title>派工隊列</template>
+      <template #icon><ListOrdered :size="400" class="text-blue-500" /></template>
+      <template #actions>
+        <MechanismNav current="contributions" />
+      </template>
+      <BoardNav current="queue" />
+    </Hero>
+  <main class="max-w-5xl mx-auto px-4 py-6 mt-4 text-sm text-slate-700 space-y-6">
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-slate-400 tabular-nums">{{ refreshedAt ? `更新於 ${hms(refreshedAt)}` : '' }}</p>
+      <div class="flex items-center gap-2">
+      <span class="inline-flex overflow-hidden rounded border border-slate-300 text-xs">
+        <button type="button" class="px-2.5 py-1" :class="groupBy === 'type' ? 'bg-slate-100' : ''" @click="groupBy = 'type'">依類型</button>
+        <button type="button" class="border-l border-slate-300 px-2.5 py-1" :class="groupBy === 'source' ? 'bg-slate-100' : ''" @click="groupBy = 'source'">依來源</button>
+      </span>
+      <button type="button" class="rounded border border-slate-300 px-2.5 py-1 hover:bg-slate-50 disabled:opacity-50" :disabled="loading" @click="load">
+        {{ loading ? '更新中…' : '重新整理' }}
+      </button>
+      </div>
+    </div>
     <p v-if="failed" class="text-red-600">佇列讀不到，<button class="underline" @click="load">重試</button>。</p>
-    <p v-else-if="rows === null" class="text-slate-400">載入中…</p>
-    <details v-if="rows !== null && recent.length > 0" class="mb-4 text-slate-600">
-      <summary class="cursor-pointer">最近 30 分鐘派出 {{ recent.length }} 筆（驗證 {{ recent.filter((d) => d.kind === 'verify').length }}／任務 {{ recent.filter((d) => d.kind === 'task').length }}）</summary>
-      <ul class="mt-1 space-y-0.5">
-        <li v-for="d in recent" :key="d.kind + d.task_id + d.dispatched_at" class="whitespace-nowrap overflow-hidden text-ellipsis">
-          <span class="text-slate-400 tabular-nums">{{ hhmm(d.dispatched_at) }}</span>
-          <span class="ml-1">{{ d.agent_name }}</span>
-          <span class="ml-1">{{ KIND_LABEL[d.kind] }}</span>
-          <span class="ml-1 text-slate-400">{{ d.task_id }}</span>
-        </li>
-      </ul>
-    </details>
-    <ul v-if="rows !== null && !failed" class="space-y-0.5">
-      <li v-for="r in rows" :key="r.task_id" class="flex items-stretch gap-3 text-slate-700" :title="r.task_id">
-        <span class="w-[30px] shrink-0 rounded-sm" :style="{ background: typeColor(r) }" aria-hidden="true"></span>
-        <span class="py-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
-          <span class="text-slate-400 tabular-nums">{{ r.pos }}.</span>
-          <span class="ml-1">{{ KIND_LABEL[r.kind] }}</span>
-          <span class="ml-1 text-slate-500">{{ typeLabel(r) }}</span>
-          <span v-if="r.subject" class="ml-1 font-medium">{{ r.subject }}</span>
-          <span v-if="r.region" class="ml-1 text-slate-500">{{ r.region }}</span>
-          <span class="ml-1 text-slate-400">{{ when(r.queue_at) }}</span>
-          <span v-if="holderOf.get(r.task_id)" class="ml-1 text-amber-700">{{ holderOf.get(r.task_id)!.agent_name }} 處理中（剩 {{ minsLeft(holderOf.get(r.task_id)!.active_until) }} 分）</span>
-        </span>
-      </li>
-    </ul>
+    <p v-else-if="state === null" class="text-slate-400">載入中…</p>
+
+    <template v-if="state && !failed">
+      <section class="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div v-for="c in cards" :key="c.label" class="rounded border border-slate-200 px-3 py-2">
+          <div class="text-xs text-slate-500">{{ c.label }}</div>
+          <div class="text-2xl tabular-nums">{{ fmt(c.n) }}</div>
+        </div>
+      </section>
+      <section class="grid gap-3">
+        <div class="rounded border border-slate-200 px-3 py-2">
+          <div class="text-xs text-slate-500">24 小時實際派出</div>
+          <div class="text-lg tabular-nums">{{ fmt(dispatched24) }}</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+          <span v-for="s in STATUSES" :key="s.key" class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-sm" :style="{ background: s.bar }"></i>{{ s.label }}</span>
+        </div>
+        <div class="space-y-1.5">
+          <div v-for="r in typeRows" :key="r.key" class="grid grid-cols-[7rem_1fr_3.5rem] items-center gap-2 sm:grid-cols-[10rem_1fr_4rem]">
+            <span class="truncate">{{ r.label }}</span>
+            <div class="flex h-3.5 overflow-hidden rounded bg-slate-100" :style="{ width: (r.total / maxTotal) * 100 + '%', minWidth: '4px' }">
+              <template v-for="s in STATUSES" :key="s.key">
+                <div v-if="r.counts[s.key]" :style="{ background: s.bar, width: (r.counts[s.key] / r.total) * 100 + '%' }" :title="`${s.label} ${fmt(r.counts[s.key])}`"></div>
+              </template>
+            </div>
+            <span class="text-right tabular-nums text-slate-500">{{ fmt(r.total) }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mb-1 font-medium">隊頭前 {{ state.head.length }} 名</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[44rem]">
+            <thead class="text-left text-xs text-slate-500">
+              <tr>
+                <th class="py-1 pr-2 pl-2 font-normal">名次</th>
+                <th class="py-1 pr-2 font-normal">種類</th>
+                <th class="py-1 pr-2 font-normal">類型</th>
+                <th class="py-1 pr-2 font-normal">對象</th>
+                <th class="py-1 pr-2 font-normal">狀態</th>
+                <th class="py-1 pr-2 font-normal">排隊時間</th>
+                <th class="py-1 pr-2 text-right font-normal">派出次數</th>
+                <th class="py-1 font-normal">最後派出</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in state.head" :key="h.pos" class="border-t border-slate-100">
+                <td class="py-1 pr-2 pl-2 tabular-nums" :style="{ borderLeft: '4px solid ' + headColor(h) }">{{ h.pos }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap">{{ h.kind === 'verify' ? '驗證' : '任務' }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap">{{ headTypeLabel(h) }}<span class="ml-1 text-xs text-slate-400">{{ sourceLabel(h.source) }}</span></td>
+                <td class="py-1 pr-2 max-w-[16rem] truncate font-medium" :title="h.subject">{{ h.subject || '—' }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap">{{ STATUS[h.status]?.label ?? h.status }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap tabular-nums text-slate-500">{{ when(h.queue_at) }}</td>
+                <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(h.dispatch_count) }}</td>
+                <td class="py-1 whitespace-nowrap tabular-nums text-slate-500">{{ h.dispatch_count > 0 && h.last_dispatched_at ? when(h.last_dispatched_at) : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-if="parkedTotal > 0">
+        <h2 class="mb-1 font-medium">停放中 {{ fmt(parkedTotal) }} 筆</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[36rem]">
+            <thead class="text-left text-xs text-slate-500">
+              <tr>
+                <th class="py-1 pr-2 font-normal">類型</th>
+                <th class="py-1 pr-2 font-normal">對象</th>
+                <th class="py-1 pr-2 font-normal">排隊時間</th>
+                <th class="py-1 pr-2 text-right font-normal">在途交件</th>
+                <th class="py-1 text-right font-normal">等待驗證票</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in parkedRows" :key="p.task_id" class="border-t border-slate-100">
+                <td class="py-1 pr-2 whitespace-nowrap">{{ taskTypeLabel(p.task_type) }}<span class="ml-1 text-xs text-slate-400">{{ sourceLabel(p.source) }}</span></td>
+                <td class="py-1 pr-2 max-w-[16rem] truncate" :title="p.subject">{{ p.subject || '—' }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap tabular-nums text-slate-500">{{ when(p.queue_at) }}</td>
+                <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(p.inflight) }}</td>
+                <td class="py-1 text-right tabular-nums">{{ fmt(p.verify_waiting) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-if="overvoted && (overTotal > 0 || overItems.length)">
+        <h2 class="mb-1 font-medium">投太多輪 <span class="ml-2 text-xs font-normal text-slate-500 tabular-nums">平均每筆 {{ num2(overvoted.baseline) }} 票；超過 {{ num2(overvoted.flag_votes) }} 票標出、超過 {{ num2(overvoted.stop_votes) }} 票停派；共 {{ fmt(overTotal) }} 筆</span></h2>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[44rem]">
+            <thead class="text-left text-xs text-slate-500">
+              <tr>
+                <th class="py-1 pr-2 font-normal">類型</th>
+                <th class="py-1 pr-2 font-normal">對象</th>
+                <th class="py-1 pr-2 text-right font-normal">票數</th>
+                <th class="py-1 pr-2 font-normal">處置</th>
+                <th class="py-1 font-normal">各票意見</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(o, i) in overItems" :key="o.contribution_id ?? i" class="border-t border-slate-100 align-top">
+                <td class="py-1 pr-2 whitespace-nowrap">{{ o.contribution_type ? overTypeLabel(o.contribution_type) : '—' }}</td>
+                <td class="py-1 pr-2 max-w-[14rem] truncate" :title="o.subject">{{ o.subject || '—' }}</td>
+                <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(o.votes ?? 0) }}</td>
+                <td class="py-1 pr-2 whitespace-nowrap">{{ isStopped(o) ? '已停派・轉裁決' : '已標出' }}</td>
+                <td class="py-1">
+                  <div v-if="!o.verdicts?.length" class="text-slate-400">—</div>
+                  <div v-for="(v, j) in o.verdicts ?? []" :key="j" class="flex items-center gap-1.5 py-0.5 text-xs">
+                    <span class="whitespace-nowrap">{{ VERDICT[v.verdict ?? ''] ?? v.verdict ?? '—' }}</span>
+                    <span class="whitespace-nowrap text-slate-400">{{ v.agent || '—' }}</span>
+                    <span v-if="v.reason" class="max-w-[18rem] truncate" :title="v.reason">{{ v.reason }}</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid gap-6 md:grid-cols-2">
+        <div>
+          <h2 class="mb-1 font-medium">24 小時實際派出</h2>
+          <p v-if="!disp24Rows.length" class="text-slate-400">沒有</p>
+          <ul class="space-y-0.5">
+            <li v-for="r in disp24Rows" :key="r.key" class="flex justify-between gap-2"><span class="truncate">{{ r.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(r.n) }}</span></li>
+          </ul>
+        </div>
+        <div>
+          <h2 class="mb-1 font-medium">可派的距上次派出</h2>
+          <ul class="space-y-0.5">
+            <li v-for="g in AGE" :key="g.key" class="flex justify-between gap-2"><span>{{ g.label }}</span><span class="tabular-nums text-slate-500">{{ fmt(state.age_buckets[g.key]) }}</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mb-1 font-medium">驗證佇列</h2>
+        <p class="mb-2 tabular-nums">等驗證 {{ fmt(state.verify.total) }}　可派 {{ fmt(state.verify.eligible) }}</p>
+        <ul class="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
+          <li v-for="v in state.verify.by_type" :key="v.contribution_type" class="flex justify-between gap-2 border-b border-slate-100 py-0.5">
+            <span>{{ VERIFY_LABEL[v.contribution_type] ?? v.contribution_type }}</span>
+            <span class="tabular-nums text-slate-500">{{ fmt(v.n) }}<template v-if="v.eligible !== v.n">（可派 {{ fmt(v.eligible) }}）</template></span>
+          </li>
+        </ul>
+      </section>
+    </template>
   </main>
+  </div>
 </template>
