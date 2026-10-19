@@ -6,6 +6,7 @@ import { supabasePublic as supabase } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { useSupabase } from '../composables/useSupabase'
 import { electionYearOfDate } from '../lib/election-route'
+import { createSearchTracker } from '../lib/search-analytics'
 
 /**
  * 全站搜尋（2026-09-17）：找人與找政見。
@@ -56,6 +57,8 @@ const policies = ref<PolicyHit[]>([])
 const inputEl = ref<HTMLInputElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let seq = 0
+/** 搜尋視窗網址不變，GA4 內建站內搜尋抓不到，自己送 search 事件（見 lib/search-analytics.ts） */
+const tracker = createSearchTracker()
 
 /** 政見所屬的那場選舉的投票年份（election_id 是 id、不一定是年份） */
 function electionYearText(electionId: number): string {
@@ -150,6 +153,7 @@ async function run(q: string) {
     const ranked = [...byId.values(), ...others].sort((a, b) => tier(a) - tier(b) || rankOf(typeOf(a)) - rankOf(typeOf(b)))
     people.value = ranked.slice(0, 8)
     policies.value = (po.data ?? []) as PolicyHit[]
+    tracker.results(q, people.value.length + policies.value.length)
   } catch {
     if (mine === seq) { people.value = []; policies.value = [] }
   } finally {
@@ -160,7 +164,7 @@ async function run(q: string) {
 watch(term, (v) => {
   if (timer) clearTimeout(timer)
   const q = v.trim()
-  if (q.length === 0) { people.value = []; policies.value = []; loading.value = false; return }
+  if (q.length === 0) { tracker.cancel(); people.value = []; policies.value = []; loading.value = false; return }
   timer = setTimeout(() => run(q), 220)
 })
 
@@ -171,6 +175,8 @@ async function show() {
 }
 
 function close() {
+  tracker.flush()
+  tracker.reset()
   open.value = false
   term.value = ''
   people.value = []
@@ -178,6 +184,7 @@ function close() {
 }
 
 function go(path: string) {
+  tracker.flush()
   close()
   router.push(path)
 }
