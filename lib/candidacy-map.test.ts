@@ -1,11 +1,11 @@
 /**
- * 參選地圖（lib/candidacy-map.ts）的守門：層級切換、座標與人數合併、顏色分段、連結、提示框，
- * 以及預先產生的座標檔（data/tw-grid-*.json）的完整性。
+ * 參選地圖（lib/candidacy-map.ts）的守門：層級切換、點陣與人數合併、顏色分段、連結、提示框。
+ * 點陣檔本身的完整性（每個行政區至少 1 格、代碼跟 admin_divisions 一致）在 raster-data.test.ts。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf, rampIndex,
-  tooltipLines, unitHref, viewKey, type CountRow, type GridRow,
+  tooltipLines, unitHref, viewKey, type CountRow,
 } from "./candidacy-map.ts";
 
 const row = (code: string, over: Partial<CountRow> = {}): CountRow => ({
@@ -55,47 +55,26 @@ Deno.test("normalizeRows：PostgREST 回的字串數字轉成數字，空值維�
   assertEquals(b.seats, 51);
 });
 
-Deno.test("buildMap：座標與人數按代碼合併；資料庫沒有的舊代碼不畫；座標檔沒有的補在空格", () => {
-  const grid: GridRow[] = [
-    ["A", "甲", 0, 0],
-    ["B", "乙", 2, 0],
-    ["OLD", "舊里", 1, 0], // 區劃調整後不存在
-    ["C", "丙", 0, 1],
-  ];
-  const counts = [
+Deno.test("buildMap：點陣的行政區依序號配上人數；資料庫有、點陣沒有的進 unshaped；點陣有、資料庫沒有的人數 0", () => {
+  const raster = { codes: ["A", "B", "OLD"] };
+  const m = buildMap(raster, [
     row("A", { name: "甲", candidates: 5, registered: 9, seats: 3 }),
     row("B", { name: "乙", candidates: 0 }),
-    row("C", { name: "丙", candidates: 2 }),
-    row("NEW", { name: "新里", candidates: 1 }),
-  ];
-  const m = buildMap(grid, counts);
-  assertEquals(m.units.length, 4);
-  assert(!m.units.some((u) => u.code === "OLD"));
-  assertEquals(new Set(m.units.map((u) => `${u.x},${u.y}`)).size, 4);
-  const neu = m.units.find((u) => u.code === "NEW")!;
-  assertEquals([neu.x, neu.y], [1, 0], "補在外框內最前面的空格（舊代碼讓出來的位置）");
-  assertEquals(m.max, 5);
-  const a = m.units.find((u) => u.code === "A")!;
-  assertEquals([a.candidates, a.registered, a.seats], [5, 9, 3]);
-  assertEquals(m.units.find((u) => u.code === "B")!.registered, null);
-  assertEquals([m.cols, m.rows], [3, 2]);
+    row("NEW", { name: "新里", candidates: 8 }),
+  ]);
+  assertEquals(m.units.map((u) => [u.code, u.idx]), [["A", 0], ["B", 1], ["OLD", 2]]);
+  const a = m.units[0];
+  assertEquals([a.name, a.candidates, a.registered, a.seats], ["甲", 5, 9, 3]);
+  assertEquals(m.units[1].registered, null);
+  assertEquals([m.units[2].name, m.units[2].candidates], ["OLD", 0]);
+  assertEquals(m.unshaped.map((u) => [u.code, u.idx, u.candidates]), [["NEW", -1, 8]]);
+  assertEquals(m.max, 8, "顏色上界連沒有形狀的也算，清單的色塊才跟地圖同一把尺");
 });
 
-Deno.test("buildMap：名稱以資料庫為準，空名稱退回座標檔", () => {
-  const m = buildMap([["A", "座標名", 0, 0], ["B", "座標乙", 1, 0]], [row("A", { name: "官方名" }), row("B", { name: "" })]);
-  assertEquals(m.units.map((u) => u.name), ["官方名", "座標乙"]);
-});
-
-Deno.test("buildMap：整層都沒有座標也能排出來", () => {
-  const m = buildMap([], [row("X"), row("Y"), row("Z")]);
-  assertEquals(m.units.length, 3);
-  assertEquals(new Set(m.units.map((u) => `${u.x},${u.y}`)).size, 3);
-});
-
-Deno.test("聚合守門：合併後的人數加總等於資料庫給的人數（不多算、不漏算）", () => {
-  const counts = [row("A", { candidates: 7 }), row("B", { candidates: 11 }), row("C", { candidates: 0 })];
-  const m = buildMap([["A", "a", 0, 0], ["B", "b", 1, 0], ["C", "c", 2, 0]], counts);
-  assertEquals(m.units.reduce((s, u) => s + u.candidates, 0), 18);
+Deno.test("聚合守門：地圖加清單的人數加總等於資料庫給的人數（不多算、不漏算）", () => {
+  const counts = [row("A", { candidates: 7 }), row("B", { candidates: 11 }), row("C", { candidates: 0 }), row("D", { candidates: 4 })];
+  const m = buildMap({ codes: ["A", "B", "C"] }, counts);
+  assertEquals([...m.units, ...m.unshaped].reduce((s, u) => s + u.candidates, 0), 22);
 });
 
 Deno.test("rampIndex：0 人固定第 0 段，1 人以上 1～4 段、單調不減、最大值落在第 4 段", () => {
@@ -114,7 +93,7 @@ Deno.test("rampIndex：0 人固定第 0 段，1 人以上 1～4 段、單調不�
   assertEquals(new Set([1, 10, 30, 60, 100].map((v) => rampIndex(v, 100))).size, 4, "四個有人的段都用得到");
 });
 
-Deno.test("unitHref：縣市格連縣市頁、鄉鎮格連鄉鎮頁、村里格連所在鄉鎮頁（照既有網址規則）", () => {
+Deno.test("unitHref：縣市連縣市頁、鄉鎮連鄉鎮頁、村里連所在鄉鎮頁（照既有網址規則）", () => {
   assertEquals(unitHref(2026, NATIONAL_VIEW, { name: "台北市", code: "63000" }, {}), "/election/2026/" + encodeURIComponent("台北市"));
   const town = drillDown(NATIONAL_VIEW, "63000");
   assertEquals(
@@ -129,56 +108,7 @@ Deno.test("unitHref：縣市格連縣市頁、鄉鎮格連鄉鎮頁、村里格�
 });
 
 Deno.test("tooltipLines：登記人數與席次沒有資料就不出現；0 是真的 0、照樣顯示", () => {
-  const base = { code: "A", name: "甲", x: 0, y: 0, candidates: 3 };
+  const base = { code: "A", name: "甲", idx: 0, candidates: 3 };
   assertEquals(tooltipLines({ ...base, registered: null, seats: null }), [{ label: "收錄參選人", value: "3 人" }]);
   assertEquals(tooltipLines({ ...base, registered: 0, seats: 2 }).map((l) => l.label), ["收錄參選人", "中選會登記", "應選席次"]);
-});
-
-// ── 預先產生的座標檔 ─────────────────────────────────────────────
-
-const adminGrid = JSON.parse(await Deno.readTextFile(new URL("../data/tw-grid-admin.json", import.meta.url))) as {
-  counties: GridRow[];
-  towns: Record<string, GridRow[]>;
-};
-
-function assertNoOverlap(rows: GridRow[], what: string) {
-  const seen = new Set(rows.map((r) => `${r[2]},${r[3]}`));
-  assertEquals(seen.size, rows.length, `${what}有兩格重疊`);
-  assert(rows.every((r) => Number.isInteger(r[2]) && Number.isInteger(r[3]) && r[2] >= 0 && r[3] >= 0), `${what}座標要是非負整數`);
-}
-
-Deno.test("座標檔：縣市 22 格、鄉鎮市區 368 格，代碼層級對得上、每張圖格子不重疊", () => {
-  assertEquals(adminGrid.counties.length, 22);
-  assertNoOverlap(adminGrid.counties, "縣市");
-  let towns = 0;
-  for (const [county, rows] of Object.entries(adminGrid.towns)) {
-    assert(adminGrid.counties.some((c) => c[0] === county), `${county} 不在縣市清單`);
-    assert(rows.every((r) => r[0].length === 8 && r[0].startsWith(county)), `${county} 底下有別縣的鄉鎮`);
-    assertNoOverlap(rows, `${county} 的鄉鎮市區`);
-    towns += rows.length;
-  }
-  assertEquals(towns, 368);
-  assertEquals(Object.keys(adminGrid.towns).length, 22);
-});
-
-Deno.test("座標檔：每個縣市的村里檔存在，村里 11 碼掛在自己的鄉鎮底下、格子不重疊、總數 7,701", async () => {
-  let villages = 0;
-  for (const [county, towns] of Object.entries(adminGrid.towns)) {
-    const file = JSON.parse(await Deno.readTextFile(new URL(`../data/tw-grid-villages/${county}.json`, import.meta.url))) as Record<string, GridRow[]>;
-    const townCodes = towns.map((t) => t[0]).sort();
-    assertEquals(Object.keys(file).sort(), townCodes, `${county} 的村里檔鄉鎮清單跟鄉鎮座標不同`);
-    for (const [town, rows] of Object.entries(file)) {
-      assert(rows.every((r) => r[0].length === 11 && r[0].startsWith(town)), `${town} 底下有別鄉的村里`);
-      assertNoOverlap(rows, `${town} 的村里`);
-      villages += rows.length;
-    }
-  }
-  assertEquals(villages, 7701);
-});
-
-Deno.test("座標檔 → buildMap：縣市格用手排座標，22 縣市都畫得出來", () => {
-  const counts = adminGrid.counties.map((c) => row(c[0], { name: c[1], candidates: 1 }));
-  const m = buildMap(adminGrid.counties, counts);
-  assertEquals(m.units.length, 22);
-  assertEquals(new Set(m.units.map((u) => `${u.x},${u.y}`)).size, 22);
 });
