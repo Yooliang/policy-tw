@@ -101,3 +101,18 @@ Deno.test("/next 驗證現況：policy 附該人既有政見標題；correction 
   const corr = shapeVerifyCurrent("correction", { target_table: "politicians", target_id: "p", field: "birth_year", correct_value: 1966 }, { target: { id: "p", birth_year: 1967 } });
   assertEquals(corr.current_value, 1967);
 });
+
+Deno.test("還沒到可寫的時候（defer，例：投票日當天）不算失敗：不動狀態、不消耗重試次數、不會被退件；真的失敗照舊走重試（#691 審查）", async () => {
+  const row = { id: "c9", contribution_type: "election_results", payload: {}, source_urls: [], note: null, agent_name: "u", contributor_url: null, status: "verified", retry_count: 2 };
+  const fake = fakeSupabase(row);
+  for (let i = 0; i < 6; i++) {
+    const res = await autoApplyContribution(fake.client, "c9", async () => ({ status: "failed" as const, defer: true, message: "投票日當天" }));
+    assertEquals(res.triggered, false);
+    assertEquals(res.status, "verified");
+  }
+  assertEquals(fake.updates.length, 0, "一筆都不能寫：狀態仍是 verified，掃地機下一輪再撿");
+  // 對照：同樣是 failed 但不是 defer → 第 3 次失敗就退件（原本的重試規則，沒有被動到）
+  const real = fakeSupabase(row);
+  const res = await autoApplyContribution(real.client, "c9", async () => ({ status: "failed" as const, message: "真的壞了" }));
+  assertEquals(res.status, "rejected");
+});

@@ -130,8 +130,8 @@ Deno.test("比對規則只有一份：同屆、同選舉、同縣市、cec_name_
   assertStringIncludes(m, "cc.region = x.county AND cc.name_norm = x.nn");
   assertStringIncludes(m, "cec_name_key(p.name) AS nn");
   assertStringIncludes(m, "replace(COALESCE(r.region, p.region), '臺', '台') AS county");
-  assertStringIncludes(m, "(x.town IS NULL OR regexp_replace(COALESCE(cc.sub_region, ''), '(第[0-9]+)?選舉區$', '') = x.town)");
-  assertStringIncludes(m, "(x.village IS NULL OR cc.village = x.village)");
+  assertStringIncludes(m, "(x.town IS NULL OR replace(regexp_replace(COALESCE(cc.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台') = x.town)");
+  assertStringIncludes(m, "(x.village IS NULL OR replace(cc.village, '臺', '台') = x.village)");
   assertStringIncludes(m, "LEFT JOIN cec_candidates c ON m.n = 1 AND c.id = m.cec_id", "只有唯一一列才帶出中選會那一列");
 });
 

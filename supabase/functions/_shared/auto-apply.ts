@@ -94,6 +94,8 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     }
 
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
+    // 還沒到可寫的時候（例：投票日當天）：不算失敗、不動狀態、不消耗重試次數，下一輪掃地機再撿（#691 審查）
+    if (outcome.status === "failed" && outcome.defer) return { triggered: false, status: row.status, outcome };
     if (outcome.status === "failed") throw new Error(outcome.message);
     const status = contributionStatusFor(outcome.status);
     if (status === "rejected") {

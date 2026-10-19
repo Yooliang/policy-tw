@@ -18,6 +18,8 @@
 --   ①只補空白、不覆蓋；②每一筆進 edit_history（agent_name＝cec-results-auto）、cec_results_auto_log 留比對證據（單位、應選席次、當選數、中選會 id）；
 --   ③一次執行是一個 run（cec_auto_apply_runs），整個 run 可由 cec_results_auto_revert() 還原；④單列設定表 cec_results_auto_settings 有開關，
 --   關掉時計畫函式不回任何列，派工臂就退回原本把這些列派給代理（不會有「系統不寫、代理也沒收到」的洞）。
+-- **上線時開關預設關**（維護者 2026-10-19 審查後）：部署後第一輪排程只預熱快取；主線 SELECT cec_results_auto_apply(NULL, true) 乾跑核對數字，
+--   再 UPDATE cec_results_auto_settings SET batch_limit = 100, enabled = true 小批試寫、核對無誤才把 batch_limit 調回 2000。
 -- migration 本身不改任何正式資料：函式建好、排程掛上（cec-results-auto-10min），第一次執行是部署後的排程。
 --
 -- 其他路徑的守門（同一支 migration 或同一個 PR）：
@@ -25,24 +27,64 @@
 --   cec-verify／cec-check／fetch-cec-data 開票後 3 天內不採用中選會人名查詢的「落選」（TS：cec-candidate.ts 的 withoutUnsettledResults）；
 --   整批補結果（applyElectionResults）投票日已過才寫。
 
+-- ── 0. 比對：鄉鎮與村里也臺／台一律當同字（#691 審查）─────────────────
+-- 本體照 20261006220000 的版本，只在鄉鎮（town）與村里（village）的兩邊各包一層 replace(臺→台)；縣市本來就有。
+-- 以前我們寫「臺西鄉」、中選會寫「台西鄉」會對不上，掉進派代理（保守方向），現在對得上。CREATE OR REPLACE 會重設 ROWS，所以接著補回 20261019010000 的 ROWS 16000
+CREATE OR REPLACE FUNCTION election_result_cec_matches(p_ids integer[])
+RETURNS TABLE(politician_election_id integer, politician_id uuid, name text, election_id integer, election_type text, county text, town text, village text, district text, current_result text, cec_hits integer, cec_elected boolean, cec_cand_id integer, cec_theme_id text, cec_sub_region text, cec_village text, cec_birth_year integer)
+LANGUAGE sql STABLE AS $$
+  WITH pe AS (
+    SELECT pe.id, pe.politician_id, p.name, pe.election_id, pe.election_type,
+           CASE WHEN pe.candidacy_status IN ('elected', 'not_elected') THEN pe.candidacy_status END AS election_result,
+           cec_name_key(p.name) AS nn,
+           replace(COALESCE(r.region, p.region), '臺', '台') AS county,
+           -- 鄉鎮層級的選舉：參選紀錄自己那一列的鄉鎮，沒有才看人物的；代表的「麥寮鄉第01選舉區」去掉選舉區只留鄉鎮
+           CASE WHEN pe.election_type IN ('鄉鎮市長', '鄉鎮市民代表', '村里長', '直轄市山地原住民區長', '直轄市山地原住民區民代表')
+                THEN NULLIF(replace(regexp_replace(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.sub_region END, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '')
+           END AS town,
+           CASE WHEN pe.election_type = '村里長'
+                THEN NULLIF(replace(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.village END, p.village, ''), '臺', '台'), '')
+           END AS village,
+           CASE WHEN r.id IS NOT NULL THEN r.sub_region END AS district
+      FROM politician_elections pe
+      JOIN politicians p ON p.id = pe.politician_id
+      LEFT JOIN regions r ON r.id = pe.region_id
+     WHERE pe.id = ANY (p_ids)
+  )
+  SELECT x.id, x.politician_id, x.name, x.election_id, x.election_type,
+         x.county, x.town, x.village, x.district, x.election_result,
+         m.n, c.elected, c.cec_cand_id, c.cec_theme_id, c.sub_region, c.village, c.birth_year
+    FROM pe x
+    LEFT JOIN LATERAL (
+      SELECT count(*)::INTEGER AS n, min(cc.id) AS cec_id
+        FROM cec_candidates cc
+       WHERE cc.election_id = x.election_id AND cc.election_type = x.election_type
+         AND cc.region = x.county AND cc.name_norm = x.nn
+         AND (x.town IS NULL OR replace(regexp_replace(COALESCE(cc.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台') = x.town)
+         AND (x.village IS NULL OR replace(cc.village, '臺', '台') = x.village)
+    ) m ON true
+    LEFT JOIN cec_candidates c ON m.n = 1 AND c.id = m.cec_id
+$$;
+ALTER FUNCTION election_result_cec_matches(INTEGER[]) ROWS 16000;
+
 -- ── 1. 單位鍵 ─────────────────────────────────────────────────
 -- 同一個單位在 cec_candidates 與 election_districts 兩邊的寫法一樣（region／sub_region／village），null 與空字串視為同一個；
 -- 做成一個鍵字串，連接才走雜湊（兩邊的 IS NOT DISTINCT FROM 連接在正式庫實測要 3.9 秒）
 CREATE OR REPLACE FUNCTION cec_unit_key(p_election_id INTEGER, p_election_type TEXT, p_region TEXT, p_sub_region TEXT, p_village TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT p_election_id::TEXT || '|' || COALESCE(p_election_type, '') || '|' || replace(COALESCE(p_region, ''), '臺', '台') || '|' || COALESCE(p_sub_region, '') || '|' || COALESCE(p_village, '')
+  SELECT p_election_id::TEXT || '|' || COALESCE(p_election_type, '') || '|' || replace(COALESCE(p_region, ''), '臺', '台') || '|' || replace(COALESCE(p_sub_region, ''), '臺', '台') || '|' || replace(COALESCE(p_village, ''), '臺', '台')
 $$;
-COMMENT ON FUNCTION cec_unit_key IS '一個開票單位的鍵：屆別｜職位｜縣市（臺→台）｜選舉區或鄉鎮｜村里；cec_candidates 與 election_districts 共用（#678，2026-10-19）';
+COMMENT ON FUNCTION cec_unit_key IS '一個開票單位的鍵：屆別｜職位｜縣市、選舉區或鄉鎮、村里（臺一律→台）；cec_candidates 與 election_districts 共用（#678，2026-10-19）';
 
 -- ── 2. 設定（單列、有開關） ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cec_results_auto_settings (
   id          INTEGER PRIMARY KEY CHECK (id = 1),
-  enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+  enabled     BOOLEAN NOT NULL DEFAULT FALSE,
   batch_limit INTEGER NOT NULL DEFAULT 2000 CHECK (batch_limit BETWEEN 1 AND 20000),
   note        TEXT,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO cec_results_auto_settings (id, note) VALUES (1, '2026-10-19 #678：中選會比對得上由系統寫入；關掉（enabled＝false）計畫函式不回任何列，派工臂退回派給代理') ON CONFLICT (id) DO NOTHING;
+INSERT INTO cec_results_auto_settings (id, note) VALUES (1, '2026-10-19 #678：預設關。上線流程：先 SELECT cec_results_auto_apply(NULL, true) 乾跑核對數字（關著也能乾跑），再 UPDATE batch_limit = 100, enabled = true 小批試寫，核對 cec_results_auto_log／edit_history 無誤再把 batch_limit 調回 2000；關著時計畫函式不回任何列，派工臂照舊派給代理') ON CONFLICT (id) DO NOTHING;
 ALTER TABLE cec_results_auto_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public read" ON cec_results_auto_settings;
 CREATE POLICY "Public read" ON cec_results_auto_settings FOR SELECT USING (true);
@@ -139,7 +181,7 @@ LANGUAGE sql STABLE AS $$
       FROM politician_elections pe
       JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
       JOIN elections e ON e.id = pe.election_id
-     WHERE (SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1)
+     WHERE true
        AND e.election_date < activity_today()
        AND NOT politician_name_is_placeholder(p.name)
   ),
@@ -222,7 +264,7 @@ COMMENT ON TABLE cec_results_auto_state IS '快取是用哪一把鍵算的（一
 CREATE OR REPLACE FUNCTION cec_results_auto_state_key() RETURNS TEXT
 LANGUAGE sql STABLE AS $$
   SELECT COALESCE((SELECT max(c.synced_at)::TEXT FROM cec_candidates c), '') || '|' || activity_today()::TEXT || '|'
-      || COALESCE((SELECT s.enabled::TEXT FROM cec_results_auto_settings s WHERE s.id = 1), '') || '|'
+      || (SELECT count(*)::TEXT || ':' || COALESCE(sum(d.seats), 0)::TEXT FROM election_districts d) || '|'
       || (SELECT count(*)::TEXT || ':' || COALESCE(max(pe.id), 0)::TEXT FROM politician_elections pe)
 $$;
 COMMENT ON FUNCTION cec_results_auto_state_key IS '快取的鍵（便宜：一次掃 cec_candidates 取最大同步時間＋參選紀錄計數）（#678）';
@@ -258,7 +300,8 @@ REVOKE EXECUTE ON FUNCTION cec_results_auto_refresh(BOOLEAN) FROM PUBLIC, anon, 
 GRANT EXECUTE ON FUNCTION cec_results_auto_refresh(BOOLEAN) TO service_role;
 
 -- 派工臂與寫入讀的計畫：只讀快取，再跟參選紀錄現況對一次（寫過的、被人改過的自動退出）。開關關掉就一列都不回
-CREATE OR REPLACE FUNCTION cec_results_auto_plan()
+DROP FUNCTION IF EXISTS cec_results_auto_plan();
+CREATE OR REPLACE FUNCTION cec_results_auto_plan(p_ignore_enabled BOOLEAN DEFAULT FALSE)
 RETURNS TABLE (
   politician_election_id INTEGER, politician_id UUID, name TEXT, election_id INTEGER, election_type TEXT,
   county TEXT, town TEXT, village TEXT,
@@ -277,11 +320,11 @@ LANGUAGE sql STABLE AS $$
            (c.mismatch AND pe.candidacy_status IS NOT DISTINCT FROM c.cur_status) AS mismatch
       FROM cec_results_auto_plan_rows c
       JOIN politician_elections pe ON pe.id = c.politician_election_id
-     WHERE COALESCE((SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1), false)
+     WHERE p_ignore_enabled OR COALESCE((SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1), false)
   ) x
   WHERE x.write_result OR x.write_party OR x.mismatch
 $$;
-ALTER FUNCTION cec_results_auto_plan() ROWS 2000;
+ALTER FUNCTION cec_results_auto_plan(BOOLEAN) ROWS 2000;
 COMMENT ON FUNCTION cec_results_auto_plan IS
   '中選會比對得上、選區已開完的：系統這一刻寫得了的（write_result／write_party）與「我們標的跟中選會相反」的（mismatch）。讀快取（cec_results_auto_plan_rows，有新同步才由 cec_results_auto_refresh 重算），再跟參選紀錄現況對一次；關掉 cec_results_auto_settings.enabled 一列都不回。寫入由 cec_results_auto_apply，派工臂用它排除／派不一致（#678，2026-10-19）';
 
@@ -295,21 +338,27 @@ DECLARE
   v_first BIGINT; v_last BIGINT;
   v_plan_results INTEGER; v_plan_parties INTEGER; v_mismatch INTEGER;
 BEGIN
-  IF NOT COALESCE((SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1), false) THEN
-    RETURN jsonb_build_object('skipped', 'disabled');
-  END IF;
   IF NOT pg_try_advisory_xact_lock(hashtext('cec_results_auto_apply')) THEN
     RETURN jsonb_build_object('skipped', 'locked');
   END IF;
-  -- 有新同步（或日期換了）才重算快取；沒有就直接用上次的結果（便宜）
+  -- 有新同步（或日期換了、名額變了）才重算快取；沒有就直接用上次的結果（便宜）。關著開關也照算：部署後第一輪就是預熱
   PERFORM cec_results_auto_refresh();
+  IF NOT p_dry_run AND NOT COALESCE((SELECT s.enabled FROM cec_results_auto_settings s WHERE s.id = 1), false) THEN
+    RETURN jsonb_build_object('skipped', 'disabled');
+  END IF;
   v_limit := GREATEST(1, LEAST(COALESCE(p_limit, (SELECT s.batch_limit FROM cec_results_auto_settings s WHERE s.id = 1), 2000), 20000));
 
   IF p_dry_run THEN
     SELECT count(*) FILTER (WHERE a.write_result), count(*) FILTER (WHERE a.write_party), count(*) FILTER (WHERE a.mismatch)
       INTO v_plan_results, v_plan_parties, v_mismatch
-      FROM cec_results_auto_plan() a;
-    RETURN jsonb_build_object('dry_run', true, 'would_write_results', v_plan_results, 'would_write_parties', v_plan_parties, 'mismatches', v_mismatch);
+      FROM cec_results_auto_plan(true) a;
+    -- 乾跑（不寫、不看開關）：總數與按 屆別×職位 的分布，讓人在開關打開前核對數字
+    RETURN jsonb_build_object('dry_run', true, 'would_write_results', v_plan_results, 'would_write_parties', v_plan_parties, 'mismatches', v_mismatch,
+      'by_unit', COALESCE((SELECT jsonb_agg(jsonb_build_object('election_id', g.election_id, 'election_type', g.election_type,
+                                                              'results', g.r, 'parties', g.p, 'mismatches', g.m) ORDER BY g.election_id, g.election_type)
+                             FROM (SELECT a.election_id, a.election_type, count(*) FILTER (WHERE a.write_result) AS r, count(*) FILTER (WHERE a.write_party) AS p,
+                                          count(*) FILTER (WHERE a.mismatch) AS m
+                                     FROM cec_results_auto_plan(true) a GROUP BY a.election_id, a.election_type) g), '[]'::jsonb));
   END IF;
 
   INSERT INTO cec_auto_apply_runs DEFAULT VALUES RETURNING id INTO v_run;
@@ -375,7 +424,7 @@ COMMENT ON FUNCTION cec_results_auto_apply IS
   '系統直接寫：中選會名單唯一對上、選區已開完的，補 candidacy_status 與推薦政黨（party_basis＝cec）。只補空白；每筆進 edit_history（agent_name＝cec-results-auto）、cec_results_auto_log 留證據；一次執行一個 run，整次可 cec_results_auto_revert。每 10 分鐘由 pg_cron 叫，一次最多 batch_limit 位（#678，2026-10-19）';
 
 -- 整次還原：edit_history 的現值還是我們寫的那個值才倒回（別人後來改過的不動、算 blocked）。還原後那幾位又成空白，
--- 想讓系統不再補回去，先把 cec_results_auto_settings.enabled 關掉（派工臂這時會把它們派回給代理）
+-- 還原時自動把 cec_results_auto_settings.enabled 關掉（派工臂這時會把它們派回給代理）
 CREATE OR REPLACE FUNCTION cec_results_auto_revert(p_run_id BIGINT, p_by TEXT DEFAULT 'maintainer') RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -416,11 +465,13 @@ BEGIN
   END LOOP;
 
   UPDATE cec_auto_apply_runs SET reverted_at = now(), reverted_by = p_by WHERE id = p_run_id;
-  RETURN jsonb_build_object('run_id', p_run_id, 'reverted', v_reverted, 'blocked', v_blocked);
+  -- 還原後那幾位又成空白，不關開關下一輪排程就會補回去：自動關掉（進 edit_history，activity-audit），派工臂把他們派回代理
+  UPDATE cec_results_auto_settings SET enabled = false, note = left('還原 run ' || p_run_id || ' 時自動關閉（' || p_by || '，' || now()::TEXT || '）；查清楚再打開', 500) WHERE id = 1;
+  RETURN jsonb_build_object('run_id', p_run_id, 'reverted', v_reverted, 'blocked', v_blocked, 'auto_disabled', true);
 END;
 $$;
 COMMENT ON FUNCTION cec_results_auto_revert IS
-  '整次還原 cec_results_auto_apply 的一個 run：現值還是系統寫的那個值才倒回，別人後來改過的不動（blocked）；還原不會擋系統再補，要先關 cec_results_auto_settings.enabled（#678）';
+  '整次還原 cec_results_auto_apply 的一個 run：現值還是系統寫的那個值才倒回，別人後來改過的不動（blocked）；還原時自動把 cec_results_auto_settings.enabled 關掉（不然下一輪排程會補回去）（#678）';
 
 REVOKE EXECUTE ON FUNCTION cec_results_auto_apply(INTEGER, BOOLEAN) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION cec_results_auto_revert(BIGINT, TEXT) FROM PUBLIC, anon, authenticated;
@@ -735,7 +786,7 @@ $$;
 -- ── 8. 狀態視圖與排程 ──────────────────────────────────────────
 -- 正常時 pending_* 在每次排程後歸零（一次最多 batch_limit 位，第一次部署後會分幾輪）；mismatches 是派給代理的不一致件數
 CREATE OR REPLACE VIEW cec_results_auto_status AS
-  WITH p AS MATERIALIZED (SELECT * FROM cec_results_auto_plan())
+  WITH p AS MATERIALIZED (SELECT * FROM cec_results_auto_plan(true))
   SELECT s.enabled, s.batch_limit,
          (SELECT count(*) FROM p WHERE p.write_result)::INTEGER AS pending_results,
          (SELECT count(*) FROM p WHERE p.write_party)::INTEGER AS pending_parties,
@@ -745,14 +796,14 @@ CREATE OR REPLACE VIEW cec_results_auto_status AS
     FROM cec_results_auto_settings s
    WHERE s.id = 1;
 COMMENT ON VIEW cec_results_auto_status IS
-  '系統直接寫入的現況（一列）：還有多少位等著寫（pending_results／pending_parties，排程跑完應歸零）、不一致幾位（派給代理）、最近一次寫入時間、有效的 run 數。關掉開關時 pending 與 mismatches 都是 0（#678）';
+  '系統直接寫入的現況（一列）：還有多少位等著寫（pending_results／pending_parties，排程跑完應歸零）、不一致幾位（派給代理）、最近一次寫入時間、有效的 run 數。不看開關（關著也看得到若打開會寫多少）（#678）';
 
 DO $$
 BEGIN
   IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
     PERFORM cron.unschedule(j.jobid) FROM cron.job j WHERE j.jobname = 'cec-results-auto-10min';
     -- 錯開 seed（*/10）與 cec-sync 開票夜的整點輪
-    EXECUTE $q$SELECT cron.schedule('cec-results-auto-10min', '3,13,23,33,43,53 * * * *', 'SELECT cec_results_auto_apply();')$q$;
+    EXECUTE $q$SELECT cron.schedule('cec-results-auto-10min', '7,17,27,37,47,57 * * * *', 'SELECT cec_results_auto_apply();')$q$;
   END IF;
 END
 $$;

@@ -109,6 +109,14 @@ pe(25, 25, "無此人N", "台北市", "filed");
 cec("亥L", "苗栗縣", true, { election: 2026 }); cec("丑丑L", "苗栗縣", false, { election: 2026 }); seats("苗栗縣", 1, { election: 2026 });
 pe(23, 23, "亥L", "苗栗縣", "filed", { election: 2026 }); pe(24, 24, "丑丑L", "苗栗縣", "filed", { election: 2026 });
 
+// Z 鄉鎮市長 雲林縣台西鄉：我們寫「臺西鄉」、中選會與名額表寫「台西鄉」→ 要對得上（臺／台一律當同字，#691 審查）
+cec("甲Z", "雲林縣", true, { type: "鄉鎮市長", sub: "台西鄉" }); cec("乙Z", "雲林縣", false, { type: "鄉鎮市長", sub: "台西鄉" }); seats("雲林縣", 1, { type: "鄉鎮市長", sub: "台西鄉" });
+pe(26, 26, "甲Z", "雲林縣", "filed", { type: "鄉鎮市長", sub: "臺西鄉" }); pe(27, 27, "乙Z", "雲林縣", "filed", { type: "鄉鎮市長", sub: "臺西鄉" });
+// V 村里長 台北市中山區：我們寫「臺北里」、中選會寫「台北里」
+cec("丙V", "台北市", true, { type: "村里長", sub: "中山區", village: "台北里" }); cec("丁V", "台北市", false, { type: "村里長", sub: "中山區", village: "台北里" });
+seats("台北市", 1, { type: "村里長", sub: "中山區", village: "臺北里" }); // 名額表也可能是臺
+pe(28, 28, "丙V", "台北市", "filed", { type: "村里長", sub: "中山區", village: "臺北里" }); pe(29, 29, "丁V", "台北市", "filed", { type: "村里長", sub: "中山區", village: "臺北里" });
+
 const seedSql = (): string => {
   const out: string[] = [];
   out.push(`INSERT INTO elections VALUES (2022, '2022-11-26_local', '2022-11-26', 'regular'), (2026, '2026-11-28_local', '2026-11-28', 'regular');`);
@@ -135,7 +143,7 @@ const seedSql = (): string => {
 };
 // parties 的 party_id＝9 只是讓「已有政黨依據」的列通過 CHECK（party_id 有值要有依據）；9 不存在於 parties 也沒關係（沒有外鍵）
 
-interface Built { db: PGlite; before: string; after: string; migrationRows: number }
+interface Built { db: PGlite; before: string; after: string; migrationRows: number; defaultEnabled: boolean }
 const snapshot = async (db: PGlite) =>
   JSON.stringify((await db.query(`SELECT id, candidacy_status, party_id, party_basis FROM politician_elections ORDER BY id`)).rows)
   + JSON.stringify((await db.query(`SELECT count(*)::int AS n FROM edit_history WHERE table_name = 'politician_elections'`)).rows);
@@ -154,9 +162,12 @@ async function build(edit: (sql: string) => string = (s) => s, clock: string | n
   const before = await snapshot(db);
   await db.exec(edit(await readMig(MIG)));
   const after = await snapshot(db);
+  // 上線時開關預設關：先記下預設值，再打開（其餘測試都是「已打開」的情境）
+  const defaultEnabled = (await db.query<{ enabled: boolean }>(`SELECT enabled FROM cec_results_auto_settings WHERE id = 1`)).rows[0].enabled;
+  await db.exec(`UPDATE cec_results_auto_settings SET enabled = true WHERE id = 1`);
   if (clock) await db.exec(`SET app.activity_today = '${clock}'`);
   await db.exec(`SELECT cec_results_auto_refresh()`); // 快取：部署後由排程算第一次
-  return { db, before, after, migrationRows: 0 };
+  return { db, before, after, migrationRows: 0, defaultEnabled };
 }
 const clock = async (db: PGlite, d: string) => {
   await db.exec(`SET app.activity_today = '${d}'`);
@@ -189,8 +200,8 @@ async function observe(db: PGlite): Promise<Obs> {
 
 // ── 1～6：計畫、寫入、派工臂 ───────────────────────────────────
 const EXPECT_BEFORE = {
-  writeResult: [1, 2, 9, 20, 21, 22],
-  writeParty: [1, 2, 9, 20, 21, 22],
+  writeResult: [1, 2, 9, 20, 21, 22, 26, 27, 28, 29],
+  writeParty: [1, 2, 9, 20, 21, 22, 26, 27, 28, 29],
   mismatch: [11, 12],
   // 批次：新北（沒標當選）、台中（名額沒登錄）、高雄（庚D 兩筆對到同一位）、宜蘭（超過席次）、花蓮（有空白）；寫得了的（台北、高雄的辛、澎湖的申、村里長）都不在
   batchTasks: [
@@ -224,8 +235,8 @@ Deno.test("計畫與派工臂：唯一對上＋開完的由系統寫、其餘照
 Deno.test("寫入：只補空白、結果與政黨一起、每筆進 edit_history、留證據、一個 run；再跑一次不重寫", async () => {
   const { db } = await build();
   const res = (await rows<{ r: Record<string, unknown> }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r;
-  assertEquals(res.results_written, 6);
-  assertEquals(res.parties_written, 6);
+  assertEquals(res.results_written, 10);
+  assertEquals(res.parties_written, 10);
   const state = await rows<{ id: number; candidacy_status: string | null; party_id: string | null; party_basis: string | null }>(db,
     `SELECT id, candidacy_status, party_id::text AS party_id, party_basis FROM politician_elections ORDER BY id`);
   const by = (id: number) => state.find((s) => s.id === id)!;
@@ -242,19 +253,19 @@ Deno.test("寫入：只補空白、結果與政黨一起、每筆進 edit_histor
   const eh = await rows<{ record_id: string; field: string; old_value: unknown; new_value: unknown; agent_name: string; contribution_id: string | null }>(db,
     `SELECT record_id, field, old_value, new_value, agent_name, contribution_id FROM edit_history WHERE table_name = 'politician_elections' ORDER BY id`);
   assert(eh.every((e) => e.agent_name === "cec-results-auto" && e.contribution_id === null));
-  assertEquals(eh.filter((e) => e.field === "candidacy_status").length, 6);
-  assertEquals(eh.filter((e) => e.field === "party_basis").length, 6);
-  assertEquals(eh.filter((e) => e.field === "party_id").length, 4, "party_id 只有真的有政黨的才記（無黨籍 NULL→NULL 不記）");
+  assertEquals(eh.filter((e) => e.field === "candidacy_status").length, 10);
+  assertEquals(eh.filter((e) => e.field === "party_basis").length, 10);
+  assertEquals(eh.filter((e) => e.field === "party_id").length, 8, "party_id 只有真的有政黨的才記（無黨籍 NULL→NULL 不記）");
   const first = eh.find((e) => e.record_id === "1" && e.field === "candidacy_status")!;
   assertEquals([first.old_value, first.new_value], ["filed", "elected"]);
   // 證據與 run
   const logs = await rows<{ politician_election_id: number; evidence: { source: string; unit: { seats: number; cec_elected: number } } }>(db, `SELECT politician_election_id, evidence FROM cec_results_auto_log ORDER BY 1`);
-  assertEquals(logs.map((l) => Number(l.politician_election_id)), [1, 2, 9, 20, 21, 22]);
+  assertEquals(logs.map((l) => Number(l.politician_election_id)), [1, 2, 9, 20, 21, 22, 26, 27, 28, 29]);
   assertStringIncludes(logs[0].evidence.source, "中選會");
   assertEquals([logs[0].evidence.unit.seats, logs[0].evidence.unit.cec_elected], [1, 1]);
   const runs = await rows<{ results_written: number; parties_written: number; first_edit_id: string; last_edit_id: string }>(db, `SELECT * FROM cec_auto_apply_runs`);
   assertEquals(runs.length, 1);
-  assertEquals([runs[0].results_written, runs[0].parties_written], [6, 6]);
+  assertEquals([runs[0].results_written, runs[0].parties_written], [10, 10]);
   // 再跑一次：沒有東西可寫，不留空 run、不重複寫履歷
   const again = (await rows<{ r: Record<string, unknown> }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r;
   assertEquals([again.results_written, again.parties_written], [0, 0]);
@@ -333,7 +344,10 @@ Deno.test("還原：整個 run 倒回；現值被別人改過的不動（blocked
   const run = (await rows<{ r: { run_id: number } }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r.run_id;
   await db.exec(`UPDATE politician_elections SET candidacy_status = 'elected' WHERE id = 2`); // 別人後來改過（系統寫的是 not_elected）
   const out = (await rows<{ r: { reverted: number; blocked: number } }>(db, `SELECT cec_results_auto_revert(${run}, 'tester') AS r`))[0].r;
-  assertEquals([out.reverted, out.blocked], [5, 1]);
+  assertEquals([out.reverted, out.blocked], [9, 1]);
+  assertEquals((out as unknown as { auto_disabled: boolean }).auto_disabled, true, "還原自動關開關");
+  assertEquals((await rows<{ enabled: boolean }>(db, `SELECT enabled FROM cec_results_auto_settings WHERE id = 1`))[0].enabled, false, "不關的話下一輪排程會補回去");
+  assertEquals((await rows(db, `SELECT 1 FROM edit_history WHERE table_name = 'cec_results_auto_settings' AND agent_name = 'activity-audit'`)).length >= 1, true);
   const st = await rows<{ id: number; candidacy_status: string | null; party_id: string | null; party_basis: string | null }>(db,
     `SELECT id, candidacy_status, party_id::text AS party_id, party_basis FROM politician_elections WHERE id IN (1,2,9,20,21,22) ORDER BY id`);
   assertEquals(st.map((s) => [s.id, s.candidacy_status, s.party_id, s.party_basis]), [
@@ -515,7 +529,11 @@ Deno.test("快取：沒有新同步沿用上次（不重算）；有新同步、
   assertEquals((await stateRow(db)).recomputed, true);
   assertEquals(await refreshed(db), false);
   await db.exec(`UPDATE cec_results_auto_settings SET enabled = false WHERE id = 1`);
-  assertEquals(await refreshed(db), true, "開關變了鍵就變");
+  assertEquals(await refreshed(db), false, "開關不在鍵裡：重算本體不看開關，切換開關不用重算（計畫函式讀的時候才看）");
+  await db.exec(`UPDATE cec_results_auto_settings SET enabled = true WHERE id = 1`);
+  await db.exec(`UPDATE election_districts SET seats = 2 WHERE election_type = '縣市長' AND region = '新北市'`);
+  assertEquals(await refreshed(db), true, "應選名額變了（代理補登／更正）要重算：不然要等到隔天才寫");
+  assertEquals(await refreshed(db), false);
   await db.close();
 });
 
@@ -543,6 +561,56 @@ Deno.test("還原驗證：重算前不先看鍵 → 沒有新同步也重算 →
     assertEquals(await refreshed(db), false, "沒有新同步：沿用上次的結果");
   });
 });
+
+const checkSeatsChangeRecomputes = async (db: PGlite) => {
+  await db.exec(`UPDATE election_districts SET seats = 2 WHERE election_type = '縣市長' AND region = '新北市'`);
+  assertEquals(await refreshed(db), true);
+};
+Deno.test("還原驗證：鍵拿掉『應選名額』→ 名額變了不重算 → 要紅", async () => {
+  await redWhen("鍵裡的名額", SEAT_LINE, "", checkSeatsChangeRecomputes);
+});
+
+Deno.test("上線預設關：部署後先預熱快取、乾跑看得到數字（含按屆別×職位的分布）、排程與寫入都不動；小批試寫後才全開", async () => {
+  const b = await build();
+  assertEquals(b.defaultEnabled, false, "settings 預設 enabled＝false");
+  const db = b.db;
+  await db.exec(`UPDATE cec_results_auto_settings SET enabled = false WHERE id = 1`);
+  assertEquals((await rows(db, `SELECT 1 FROM cec_results_auto_plan()`)).length, 0, "關著：派工臂看到的計畫是空的，照舊派給代理");
+  assertEquals((await rows<{ r: Record<string, unknown> }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r.skipped, "disabled");
+  assertEquals((await rows(db, `SELECT 1 FROM cec_auto_apply_runs`)).length, 0);
+  assertEquals((await rows(db, `SELECT 1 FROM politician_elections WHERE candidacy_status IN ('elected','not_elected') AND id IN (1,2)`)).length, 0);
+  const dry = (await rows<{ r: { dry_run: boolean; would_write_results: number; would_write_parties: number; mismatches: number; by_unit: Array<{ election_id: number; election_type: string; results: number }> } }>(db, `SELECT cec_results_auto_apply(NULL, true) AS r`))[0].r;
+  assertEquals([dry.dry_run, dry.would_write_results, dry.would_write_parties, dry.mismatches], [true, 10, 10, 2], "乾跑關著也能跑，數字＝打開後會寫的");
+  assertEquals(dry.by_unit.reduce((n, u) => n + Number(u.results), 0), 10);
+  assert(dry.by_unit.some((u) => u.election_type === "村里長" && Number(u.results) === 4));
+  assertEquals((await rows<{ c: number }>(db, `SELECT pending_results AS c FROM cec_results_auto_status`))[0].c, 10, "狀態視圖關著也看得到若打開會寫多少");
+  await db.exec(`UPDATE cec_results_auto_settings SET batch_limit = 3, enabled = true WHERE id = 1`);
+  const small = (await rows<{ r: { results_written: number } }>(db, `SELECT cec_results_auto_apply() AS r`))[0].r;
+  assertEquals(small.results_written, 3, "batch_limit 先調 100（測試用 3）小批試寫");
+  await db.close();
+});
+
+Deno.test("臺／台：我們寫臺、中選會與名額表寫台，鄉鎮與村里照樣對上、單位算開完、系統寫入", async () => {
+  const { db } = await build();
+  await checkTaiwanChar(db);
+  await db.close();
+});
+const checkTaiwanChar = async (db: PGlite) => {
+  assertEquals((await ids(db, `SELECT politician_election_id AS id FROM cec_results_auto_plan() WHERE write_result AND politician_election_id IN (26, 27, 28, 29)`)), [26, 27, 28, 29]);
+};
+Deno.test("還原驗證：拿掉臺→台的正規化（單位鍵、比對的鄉鎮／村里）→ 對不上 → 要紅", async () => {
+  await redWhen("單位鍵的鄉鎮村里", KEY_REPL, KEY_PLAIN, checkTaiwanChar);
+  await redWhen("比對的鄉鎮", TOWN_REPL, TOWN_PLAIN, checkTaiwanChar);
+  await redWhen("比對的村里", VIL_REPL, VIL_PLAIN, checkTaiwanChar);
+});
+
+const SEAT_LINE = "      || (SELECT count(*)::TEXT || ':' || COALESCE(sum(d.seats), 0)::TEXT FROM election_districts d) || '|'";
+const KEY_REPL = "|| replace(COALESCE(p_sub_region, ''), '臺', '台') || '|' || replace(COALESCE(p_village, ''), '臺', '台')";
+const KEY_PLAIN = "|| COALESCE(p_sub_region, '') || '|' || COALESCE(p_village, '')";
+const TOWN_REPL = "THEN NULLIF(replace(regexp_replace(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.sub_region END, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '')";
+const TOWN_PLAIN = "THEN NULLIF(regexp_replace(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.sub_region END, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '')";
+const VIL_REPL = "THEN NULLIF(replace(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.village END, p.village, ''), '臺', '台'), '')";
+const VIL_PLAIN = "THEN NULLIF(COALESCE(CASE WHEN r.id IS NOT NULL THEN r.village END, p.village, ''), '')";
 
 // ── TS 端 ────────────────────────────────────────────────────
 Deno.test("RESULT_SETTLE_DAYS 與 SQL 的 cec_results_settle_days() 一致；cecResultsSettled 與 SQL cec_results_settled 逐日對得上", async () => {
