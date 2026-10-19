@@ -51,6 +51,16 @@ export interface EnsurePoliticianOptions {
   extraInsert?: Record<string, unknown>;
   /** 驗證者兩票都指認 "new"：不管比對結果，直接建新人物（比對只用來產 key，不寫回別人） */
   force_new?: boolean;
+  /**
+   * 建新人物時姓名用交件／名冊的原文（只 trim、連續空白壓成一個），不用比對用的正規化鍵（normText 會去掉空白、全形轉半形、臺→台）。
+   * 名冊對帳（系統建立）用：「Laling Yumin」不能變成「LalingYumin」。比對與 identity key 仍用正規化後的姓名。
+   */
+  keep_original_name?: boolean;
+}
+
+/** 顯示用姓名：原文，只 trim、連續空白（含全形空白）壓成一個空白 */
+export function displayNameOf(raw: string | null | undefined): string {
+  return String(raw ?? "").replace(/[\s\u3000]+/g, " ").trim();
 }
 
 export interface EnsurePoliticianResult {
@@ -119,7 +129,7 @@ export async function ensurePolitician(
   const { data: inserted, error } = await supabase
     .from("politicians")
     .insert({
-      name,
+      name: options.keep_original_name ? (displayNameOf(candidate.name) || name) : name,
       party,
       position: candidate.position ?? null,
       region: candidate.region ?? null,
