@@ -161,3 +161,10 @@ Deno.test("ci.yml：部署順序沒動——migration 先、函式後；Worker �
   assert(fn.indexOf("supabase db push") > 0 && fn.indexOf("supabase db push") < fn.indexOf("node scripts/deploy-functions.mjs"));
   assertStringIncludes(jobBlock("ssr-deploy"), "needs: [deploy]");
 });
+
+Deno.test("ci.yml：Worker 跟著 Hosting 上——前端類 push（edge-tests 被略過）不能把 ssr-deploy 連坐略過", () => {
+  const b = jobBlock("ssr-deploy");
+  assertStringIncludes(b, "always()", "ssr-deploy 沒有狀態函式時，隱含的 success() 會因上游 edge-tests 被略過而整個略過");
+  assertStringIncludes(b, "needs.deploy.result == 'success'", "Hosting 成功才部署 Worker（失敗或取消要擋）");
+  assert(!/result == 'skipped'/.test(b), "ssr-deploy：略過不能當通過");
+});
