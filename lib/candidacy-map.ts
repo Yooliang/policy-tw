@@ -207,3 +207,13 @@ export function tooltipLines(u: MapUnit): Array<{ label: string; value: string }
   if (u.seats !== null) lines.push({ label: '應選席次', value: `${u.seats} 席` })
   return lines
 }
+
+/** 統計時間（資料庫排程重算的時間）→ 台灣時間的 HH:MM；不是合法時間回 null */
+export function formatStatsTime(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const parts = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }).formatToParts(d)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00'
+  return `${get('hour') === '24' ? '00' : get('hour')}:${get('minute')}`
+}

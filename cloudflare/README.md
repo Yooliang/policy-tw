@@ -43,5 +43,6 @@ Cache API 10 分鐘＋過期先回舊的；其餘路由照舊代理到 web.app�
 - `/politician/<id>.md`：讀時產生＋Cache API（10 分鐘，過期先回舊的背景重算）。
 - `/election/<屆>/<縣市>.md`、`/data/<屆>/…`、`/category/<分類>.md`、`/data/<屆>/index.(md|json)`：只讀預產快取表 `data_md_cache`（每小時由 `.github/workflows/data-md.yml` 跑 `scripts/build-data-md.ts` 重產；本機 `pnpm build:md` 再 `node dist-md/build-data-md.js --sql-dir out/sql --out-dir out/md` 可以不寫庫看結果）。找不到回 404 的 Markdown，資料庫壞了回 503＋`Retry-After`，都不退回代理。
 - 所有回應 `X-Robots-Tag: noindex`、`Access-Control-Allow-Origin: *`；200 帶 `ETag`／`Last-Modified`／`X-Data-Generated-At`，支援 304。`robots.txt` 不得 Disallow `.md`。
+- `GET /api/map-stats?election=&level=county|town|village|meta&parent=`（`map-stats.js`，參選地圖 #680）：Worker 讀 Supabase 統計表（`candidacy_map` RPC）、回 `Cache-Control: public, max-age=60, s-maxage=300` 並存 Cache API 約 5 分鐘；帶 CORS，前端失敗時退回直接打 Supabase RPC；失敗不快取
 - `POST /__purge` 清某頁時連它的 `.md` 版一起清（只對人物與 Worker 的 Cache API 有效；預產的頁等下一批）。
 - policy-tw.web.app 上的 `.md`、`/data/**` 由 `firebase.json` 的 redirects 301 到正見.tw。

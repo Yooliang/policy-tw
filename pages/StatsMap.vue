@@ -9,11 +9,13 @@ import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
 import MapToggles from '../components/map/MapToggles.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { applyRows, buildLayer, type Layer } from '../lib/map-layer'
-import { fileCache, labelCache, rowsCache, rowsKey } from '../lib/map-data-cache'
+import { mapStatsUrl, type MapStatsLevel } from '../lib/map-stats-url'
+import { SITE_URL } from '../lib/site'
+import { fileCache, labelCache, rowsCache, rowsKey, statsTimeCache } from '../lib/map-data-cache'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  legendFor, normalizeRows, tooltipLines, unitColor, unitHref,
+  formatStatsTime, legendFor, normalizeRows, tooltipLines, unitColor, unitHref,
   type ColorMode, type CountRow, type MapLevel, type MapUnit,
 } from '../lib/candidacy-map'
 import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
@@ -63,14 +65,42 @@ const villageFiles = import.meta.glob<{ default: unknown }>('../data/tw-raster/v
  * 人數：依（屆別、層級、上層代碼）在模組層快取（lib/map-data-cache.ts），進行中的同一個請求共用；
  * 縮放切換細節層、來回捲動、離開頁面再回來都不再重打 candidacy_map。
  */
+/** 先打正見.tw 的 /api/map-stats（Worker 在邊緣快取約 5 分鐘）；任何失敗（沒有 Worker、逾時、回的不是陣列）退回直接呼叫 Supabase RPC */
+async function viaEdge(level: MapStatsLevel, parent?: string | null): Promise<Array<Record<string, unknown>>> {
+  const res = await fetch(mapStatsUrl(SITE_URL, ELECTION_ID, level, parent), { signal: AbortSignal.timeout(6000) })
+  if (!res.ok) throw new Error(`edge ${res.status}`)
+  const data = await res.json()
+  if (!Array.isArray(data)) throw new Error('edge not array')
+  return data as Array<Record<string, unknown>>
+}
 async function fetchRows(level: MapLevel, parent?: string): Promise<CountRow[]> {
   const rows = await rowsCache.get(rowsKey(ELECTION_ID, level, parent), async () => {
-    const { data } = await withTimeoutAndRetry(`參選地圖 ${level}:${parent ?? ''}`, (signal) =>
-      supabasePublic.rpc('candidacy_map', { p_election_id: ELECTION_ID, p_level: level, ...(parent ? { p_parent: parent } : {}) })
-        .abortSignal(signal).throwOnError())
-    return normalizeRows((data ?? []) as Array<Record<string, unknown>>)
+    try {
+      return normalizeRows(await viaEdge(level, parent))
+    } catch {
+      const { data } = await withTimeoutAndRetry(`參選地圖 ${level}:${parent ?? ''}`, (signal) =>
+        supabasePublic.rpc('candidacy_map', { p_election_id: ELECTION_ID, p_level: level, ...(parent ? { p_parent: parent } : {}) })
+          .abortSignal(signal).throwOnError())
+      return normalizeRows((data ?? []) as Array<Record<string, unknown>>)
+    }
   })
   return rows
+}
+
+/** 統計時間（資料庫排程重算的時間）：圖例旁的小標籤；讀不到就不顯示 */
+const statsAt = ref<string | null>(null)
+function loadStatsTime() {
+  statsTimeCache.get(String(ELECTION_ID), async () => {
+    const pick = (data: unknown) => ((data as Array<{ computed_at?: string }> | null)?.[0]?.computed_at ?? null)
+    try {
+      return pick(await viaEdge('meta'))
+    } catch {
+      const { data } = await withTimeoutAndRetry('參選地圖統計時間', (signal) =>
+        supabasePublic.from('candidacy_map_stats').select('computed_at').eq('election_id', ELECTION_ID).eq('scope', 'nation')
+          .order('computed_at', { ascending: false }).limit(1).abortSignal(signal).throwOnError())
+      return pick(data)
+    }
+  }).then((v) => { statsAt.value = formatStatsTime(v) }).catch(() => { statsAt.value = null })
 }
 
 /** 人數回來只負責上色：把數字套到已經畫好的圖層（名稱與邊界早就在了），再讓畫面重新上色 */
@@ -607,7 +637,7 @@ watch(countyLayer, async (L) => {
   await applyAtFromUrl()
 }, { once: true })
 
-onMounted(() => { void loadCounty() })
+onMounted(() => { void loadCounty(); loadStatsTime() })
 onBeforeUnmount(() => {
   observer?.disconnect()
   cancelAnim()
@@ -687,7 +717,7 @@ usePageHead({
               <span class="w-4 h-3 rounded-sm" :style="{ background: legend.noData.color }"></span>{{ legend.noData.label }}
             </span>
           </div>
-          <span data-testid="map-scale">每格 {{ scaleLabel }}</span>
+          <span class="flex flex-wrap gap-x-3"><span data-testid="map-scale">每格 {{ scaleLabel }}</span><span v-if="statsAt" data-testid="map-stats-time">統計時間 {{ statsAt }}</span></span>
         </div>
         <p v-if="rowsFailed" class="absolute left-1/2 -translate-x-1/2 top-16 z-10 rounded-full bg-white/95 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-rows-error">人數暫時讀不到<button type="button" class="ml-2 text-blue-600 underline" @click="retryRows">重試</button></p>
         <p v-if="pending > 0" class="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 rounded-full bg-white/90 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-pending">讀取中</p>

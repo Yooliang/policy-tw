@@ -5,7 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf,
-  tooltipLines, unitHref, viewKey, type CountRow,
+  formatStatsTime, tooltipLines, unitHref, viewKey, type CountRow,
 } from "./candidacy-map.ts";
 
 const row = (code: string, over: Partial<CountRow> = {}): CountRow => ({
@@ -95,4 +95,13 @@ Deno.test("tooltipLines：登記人數與席次沒有資料就不出現；0 是�
   const base = { code: "A", name: "甲", idx: 0, candidates: 3 };
   assertEquals(tooltipLines({ ...base, registered: null, seats: null }), [{ label: "收錄參選人", value: "3 人" }]);
   assertEquals(tooltipLines({ ...base, registered: 0, seats: 2 }).map((l) => l.label), ["收錄參選人", "中選會登記", "應選席次"]);
+});
+
+Deno.test("formatStatsTime：統計時間顯示成台灣時間的 HH:MM；不是時間就不顯示", () => {
+  assertEquals(formatStatsTime("2026-10-20T06:35:12.345Z"), "14:35");
+  assertEquals(formatStatsTime("2026-10-20T16:05:00+00:00"), "00:05", "跨日（台灣 00:05）");
+  assertEquals(formatStatsTime("2026-10-20T00:00:00Z"), "08:00");
+  assertEquals(formatStatsTime(null), null);
+  assertEquals(formatStatsTime(""), null);
+  assertEquals(formatStatsTime("不是時間"), null);
 });

@@ -8,6 +8,7 @@
  *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
  *   /politician/:id.md、/election/:屆/:縣市.md、/category/:分類.md、/data/** → Markdown 檢視（cloudflare/markdown.js；人物讀時產生，其餘讀預產快取表 data_md_cache）
+ *   GET /api/map-stats?election=&level=&parent= → 參選地圖的人數資料（cloudflare/map-stats.js；Worker 讀 Supabase 統計表、邊緣快取約 5 分鐘）
  *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取（連同它們的 .md 版）
  *   /next、/report… 等協議端點名 → 307 轉到 Supabase functions（見 apiRedirect）
  *
@@ -23,6 +24,7 @@ import { HEALTH_PATH, healthResponse } from './health.js'
 import { classifyRead } from './ai-reads.js'
 import { cacheTtlForPath, markFallback, renderOrFallback, sMaxAgeForPath, unavailableResponse, withBudget } from './fallback.js'
 import { handleMarkdown } from './markdown.js'
+import { MAP_STATS_PATH, handleMapStats } from './map-stats.js'
 import { nonPageResponse } from './render-status.js'
 import { stripShellHead } from './shell-head.js'
 import { createShellLoader, shellVersion, shouldRerender } from './shell-version.js'
@@ -276,6 +278,10 @@ export default {
         }
       }
       return new Response(JSON.stringify({ purged: n }), { headers: { 'Content-Type': 'application/json' } })
+    }
+    // 參選地圖的人數資料：邊緣快取約 5 分鐘（s-maxage=300），不用每個人都打一次資料庫（#680）；失敗時前端退回直接打 Supabase RPC
+    if (url.pathname === MAP_STATS_PATH) {
+      return await handleMapStats(request, ctx, { supabaseUrl: SUPABASE_PUBLIC.url, anonKey: SUPABASE_PUBLIC.anonKey, cache: caches.default })
     }
     // Markdown 檢視（2026-10-07）：.md 一律在這裡收掉，不退回代理——代理會把 app.html 當成 200 回給想讀 Markdown 的 AI
     // handleMarkdown 內部已接住大多數錯誤；這裡是最後一道，不讓例外漏出 Worker
