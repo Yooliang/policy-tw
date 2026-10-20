@@ -13,6 +13,8 @@ import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import VerticalStack from './election/VerticalStack.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
+import Pagination from '../components/Pagination.vue'
+import { clampPage, slicePage, totalPagesOf } from '../lib/pagination'
 import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { dataRegionCategoryMdPath, dataRegionMdPath } from '../lib/md/format'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
@@ -203,6 +205,8 @@ watch(selectedSubRegion, () => {
 })
 
 const viewMode = ref<ElectionViewMode>('politicians')
+/** 承諾頁籤的頁碼（網址 ?page=，字串形式給 queryField；實際頁碼看 pledgePage） */
+const pledgePageParam = ref('1')
 const hasSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0)
 const selectedIssueTag = ref('')
 /**
@@ -232,6 +236,8 @@ useRegionQuerySync({
     // 順序要在 type 後面：套網址時一個欄位設完才設下一個
     district: queryField(comparisonDistrict, '', { when: () => viewMode.value === 'comparison' }),
     pick: queryField(comparisonPick, '', { when: () => viewMode.value === 'comparison' }),
+    // 承諾頁籤的頁碼；第 1 頁不帶。放最後：縣市／鄉鎮／頁籤套完才套頁碼
+    page: queryField(pledgePageParam, '1', { when: () => viewMode.value === 'pledges' }),
   },
 })
 
@@ -730,10 +736,12 @@ const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.m
 // policies.election_id 是 elections.id（舊三屆剛好等於年份，新增的選舉不是）——比 id，不比年份（#344 第二階段 A）
 const belongsToThisElection = (p: { electionId?: number }) => p.electionId === electionId.value
 
+/** 人物 id → 人物；承諾迴圈裡查人用，免得每筆都掃一遍整份名單 */
+const politicianById = computed(() => new Map(politicians.value.map(c => [c.id, c])))
 const allCampaignPolicies = computed(() =>
   policies.value.filter(p => {
     if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
-    const politician = politicians.value.find(c => c.id === p.politicianId)
+    const politician = politicianById.value.get(p.politicianId)
     if (!politician) return false
     if (selectedRegion.value !== 'All' && !sameRegionName(politician.region, selectedRegion.value)) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
@@ -766,11 +774,24 @@ const sortedCampaignPolicies = computed(() => {
   return [...allCampaignPolicies.value].sort(cmp)
 })
 
+// 承諾頁籤分頁：每頁 60 張。預渲染只畫第 1 頁；page>1 的 canonical 仍是不帶 query 的網址（canonicalPath 只取 route.path）
+const PLEDGES_PAGE_SIZE = 60
+const pledgeTotalPages = computed(() => totalPagesOf(sortedCampaignPolicies.value.length, PLEDGES_PAGE_SIZE))
+const pledgePage = computed(() => clampPage(pledgePageParam.value, pledgeTotalPages.value))
+const pagedCampaignPolicies = computed(() => slicePage(sortedCampaignPolicies.value, pledgePage.value, PLEDGES_PAGE_SIZE))
+const pledgeListTop = ref<HTMLElement | null>(null)
+function goPledgePage(p: number) {
+  pledgePageParam.value = String(p)
+  void nextTick(() => pledgeListTop.value?.scrollIntoView({ block: 'start' }))
+}
+// 換縣市／鄉鎮／村里／排序回第 1 頁
+watch([selectedRegion, selectedSubRegion, selectedVillage, pledgeSort], () => { pledgePageParam.value = '1' })
+
 // Issues mode
 const regionPolicies = computed(() =>
   policies.value.filter(p => {
     if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
-    const politician = politicians.value.find(c => c.id === p.politicianId)
+    const politician = politicianById.value.get(p.politicianId)
     if (!politician) return false
     if (selectedRegion.value !== 'All' && !sameRegionName(politician.region, selectedRegion.value)) return false
     // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
@@ -1180,17 +1201,18 @@ usePageHead({
       </div>
 
       <!-- VIEW: Pledges -->
-      <div v-if="viewMode === 'pledges'" class="flex justify-end mb-4">
+      <div v-if="viewMode === 'pledges'" ref="pledgeListTop" class="flex justify-end mb-4 scroll-mt-24">
         <SortIcons v-model="pledgeSort" :options="PLEDGE_SORT_OPTIONS" />
       </div>
       <div v-if="viewMode === 'pledges'" class="animate-fade-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <PolicyCard
-          v-for="policy in sortedCampaignPolicies"
+          v-for="policy in pagedCampaignPolicies"
           :key="policy.id"
           :policy="policy"
-          :politician="politicians.find(c => c.id === policy.politicianId)!"
+          :politician="politicianById.get(policy.politicianId)!"
         />
       </div>
+      <Pagination v-if="viewMode === 'pledges'" :page="pledgePage" :total-pages="pledgeTotalPages" @update:page="goPledgePage" />
 
       <!-- VIEW: Issues -->
       <div v-if="viewMode === 'issues'" class="space-y-8 animate-fade-in">
