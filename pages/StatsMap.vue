@@ -15,7 +15,7 @@ import { fileCache, labelCache, rowsCache, rowsKey, statsTimeCache } from '../li
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  formatStatsTime, legendFor, normalizeRows, tooltipLines, unitColor, unitHref,
+  formatStatsTime, legendFor, normalizeRows, tooltipLines, unitHref,
   type ColorMode, type CountRow, type MapLevel, type MapUnit,
 } from '../lib/candidacy-map'
 import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
@@ -42,7 +42,6 @@ const MAX_VILLAGE_TOWNS = 200
 const MAX_VISIBLE_TOWNS = 40
 const LABEL_PX = 12
 
-const mode = ref<'grid' | 'list'>('grid')
 const colorMode = ref<ColorMode>('coverage')
 const failed = ref(false)
 const pending = ref(0)
@@ -423,7 +422,7 @@ function boxOfUnit(code: string): Box | null {
   const L = hit.layer
   return { x0: L.tx + s.minX * L.u, y0: L.ty + s.minY * L.u, x1: L.tx + s.maxX * L.u, y1: L.ty + s.maxY * L.u }
 }
-/** 放大並置中到某個行政區（點擊格子、點路徑、點清單） */
+/** 放大並置中到某個行政區（點擊格子、點路徑） */
 function zoomToCode(code: string | null, instant = false) {
   if (!world.value) return
   if (!code) { fitAll(); return }
@@ -610,22 +609,6 @@ const scaleLabel = computed(() => (lod.value === 'village' ? '200 公尺' : '1 �
 const legend = computed(() => legendFor(colorMode.value, maxByLevel.value[lod.value]))
 const tickClass = (pos: number) => (pos < 0.02 ? '' : pos < 0.85 ? '-translate-x-1/2' : '-translate-x-full')
 
-// ── 清單模式：目前那一層、游標（視窗中心）所在上一層底下的行政區 ─────────
-const listUnits = computed<MapUnit[]>(() => {
-  void rev.value
-  const l = located.value
-  let units: MapUnit[] = []
-  if (lod.value === 'county' || !l.county) units = countyLayer.value?.built.units ?? []
-  else if (lod.value === 'town' || !l.town) units = townLayers.value.flatMap((L) => L.built.units).filter((u) => u.code.startsWith(l.county!.code))
-  else units = [...villageLayers.value.values()].flatMap((L) => L.built.units).filter((u) => u.code.startsWith(l.town!.code))
-  return [...units].sort((a, b) => b.candidates - a.candidates || a.code.localeCompare(b.code))
-})
-function pickRow(u: MapUnit) {
-  selected.value = null
-  zoomToCode(u.code, true)
-  if (u.code.length === 8) void ensureTowns()
-}
-
 // ── 網址帶視角（?at=縣市或鄉鎮代碼，方便分享）─────────────────────
 const route = useRoute()
 const router = useRouter()
@@ -713,7 +696,7 @@ usePageHead({
     </Hero>
 
     <!-- 地圖：滿版寬度、約佔滿剩下的視窗；面板都浮在地圖上 -->
-    <section v-if="mode === 'grid'" ref="stage" class="relative z-0 w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
+    <section ref="stage" class="relative z-0 w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
       :style="{ height: 'calc(100dvh - 4rem)', minHeight: '480px', marginTop: '-50px' }" data-testid="map-stage" :aria-busy="pending > 0">
       <p v-if="failed" class="absolute inset-0 flex items-center justify-center text-slate-500 font-bold" data-testid="map-error">
         暫時讀不到資料
@@ -744,7 +727,7 @@ usePageHead({
         </div>
         <!-- 右上：著色與呈現切換 -->
         <div ref="togglesPanel" class="pointer-events-auto absolute right-0 top-[130px] max-w-full md:top-[66px]">
-          <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
+          <MapToggles v-model:color-mode="colorMode" />
         </div>
         <!-- 右下：縮放 -->
         <div ref="zoomPanel" :class="['pointer-events-auto absolute right-0 flex flex-col gap-1', active ? 'bottom-60 md:bottom-4' : 'bottom-4']" data-testid="map-zoom">
@@ -795,27 +778,6 @@ usePageHead({
       </template>
     </section>
 
-    <!-- 清單：一般寬度版面 -->
-    <div v-else class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pb-20 space-y-4">
-      <div class="flex flex-wrap items-center gap-2 justify-between">
-        <MapCrumbs :crumbs="crumbs" :people="crumbPeople" @pick="zoomToCode($event, true)" />
-        <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
-      </div>
-      <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-3 sm:p-5">
-        <p v-if="!countyLayer" class="text-slate-400 font-bold py-10 text-center">讀取中</p>
-        <ul v-else class="divide-y divide-slate-100" data-testid="map-list">
-          <li v-for="u in listUnits" :key="u.code">
-            <button type="button" class="w-full flex items-center gap-3 py-2.5 px-1 text-left hover:bg-slate-50 rounded-lg" :data-testid="`row-${u.code}`" @click="pickRow(u)">
-              <span class="w-3 h-3 rounded-sm flex-shrink-0" :style="{ background: unitColor(u, colorMode, maxByLevel[u.code.length === 5 ? 'county' : u.code.length === 8 ? 'town' : 'village']) }"></span>
-              <span class="flex-1 font-black text-navy-900">{{ u.name }}</span>
-              <span v-if="isReady(u)" class="text-sm text-slate-500 font-bold">
-                <template v-for="(l, i) in tooltipLines(u)" :key="l.label">{{ i ? '・' : '' }}{{ l.label }} {{ l.value }}</template>
-              </span>
-            </button>
-          </li>
-        </ul>
-      </section>
-    </div>
   </div>
 </template>
 
