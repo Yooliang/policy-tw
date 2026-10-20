@@ -20,8 +20,8 @@ import {
 } from '../lib/candidacy-map'
 import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
 import {
-  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, lodFor, pickEvictions, pickVisibleTowns,
-  screenToWorld, viewBox, wheelK, zoomAtPoint, type Box, type Lod, type View,
+  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, isZoomWheel, lodFor, pickEvictions, pickVisibleTowns,
+  screenToWorld, viewBox, wheelK, zoomAtPoint, zoomModifierLabel, type Box, type Lod, type View,
 } from '../lib/map-world'
 import { Map as MapIcon, Plus, Minus, Maximize2, ExternalLink, X } from 'lucide-vue-next'
 
@@ -423,15 +423,28 @@ function onPick(hit: { key: string; idx: number }) {
 }
 
 // ── 手勢：滾輪（以游標為中心）、拖曳平移、雙指捏合 ─────────────────
-// 滾輪只在游標位於地圖上時攔截（不用按 Ctrl）；已經縮到最小（整張台灣放得下）時再往下滾就放行，讓頁面照常捲動，
-// 所以滿版地圖不會把整頁卡住。觸控板捏合是帶 ctrlKey 的 wheel，一律攔截（不然會變成瀏覽器整頁縮放）。
+// 滾輪：一般滾輪不攔截（捲頁面），Ctrl／⌘＋滾輪才縮放地圖，所以滿版地圖不會把整頁卡住；觸控板捏合是帶 ctrlKey 的 wheel，照樣縮放。
+// 觸控：單指留給頁面捲動（touch-action: pan-y），雙指縮放與平移地圖；滑鼠拖曳平移照舊。
 function localPoint(e: { clientX: number; clientY: number }): [number, number] {
   const r = stage.value?.getBoundingClientRect()
   return [e.clientX - (r?.left ?? 0), e.clientY - (r?.top ?? 0)]
 }
+// 提示：一般滾輪在地圖上時淡入一句「按住 Ctrl（Mac ⌘）再滾動可縮放地圖」，約 1.5 秒淡出
+const wheelHint = ref(false)
+const zoomKey = typeof navigator === 'undefined' ? 'Ctrl' : zoomModifierLabel(navigator.platform || navigator.userAgent)
+let hintTimer: ReturnType<typeof setTimeout> | undefined
+function showWheelHint() {
+  wheelHint.value = true
+  clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => { wheelHint.value = false }, 1500)
+}
 function onWheel(e: WheelEvent) {
   if (!world.value) return
-  if (!e.ctrlKey && e.deltaY > 0 && cur.k <= kMin.value * 1.001) return
+  // 像嵌入式地圖：一般滾輪＝捲頁面（不攔截），Ctrl／⌘＋滾輪（觸控板捏合本來就帶 ctrlKey）＝縮放地圖
+  if (!isZoomWheel(e)) {
+    if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) showWheelHint()
+    return
+  }
   e.preventDefault()
   cancelAnim()
   const [px, py] = localPoint(e)
@@ -440,6 +453,7 @@ function onWheel(e: WheelEvent) {
 }
 
 const pointers = new Map<number, { x: number; y: number }>()
+let touchMode = false
 let drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null
 let pinch: { dist: number; view: View; mid: [number, number] } | null = null
 function mid(): [number, number] {
@@ -455,7 +469,8 @@ function onPointerDown(e: PointerEvent) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   cancelAnim()
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-  if (pointers.size === 1) drag = { x: e.clientX, y: e.clientY, cx: cur.cx, cy: cur.cy, moved: false }
+  touchMode = e.pointerType === 'touch'
+  if (pointers.size === 1 && !touchMode) drag = { x: e.clientX, y: e.clientY, cx: cur.cx, cy: cur.cy, moved: false }
   else if (pointers.size === 2) { drag = null; pinch = { dist: dist(), view: { ...cur }, mid: mid() } }
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
@@ -484,7 +499,7 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp(e: PointerEvent) {
   pointers.delete(e.pointerId)
   if (pointers.size < 2) pinch = null
-  if (pointers.size === 1) {
+  if (pointers.size === 1 && !touchMode) {
     const [rest] = [...pointers.values()]
     drag = { x: rest.x, y: rest.y, cx: cur.cx, cy: cur.cy, moved: true }
   }
@@ -643,6 +658,7 @@ onBeforeUnmount(() => {
   cancelAnim()
   clearTimeout(urlTimer)
   clearTimeout(commitTimer)
+  clearTimeout(hintTimer)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
@@ -657,7 +673,7 @@ usePageHead({
 
 <template>
   <div class="bg-slate-50 min-h-screen">
-    <Hero>
+    <Hero class-name="z-10">
       <template #title>參選地圖</template>
       <template #description>
         全台各縣市、鄉鎮、村里的 2026 參選人收錄情形，放大就能看到村里。
@@ -671,8 +687,8 @@ usePageHead({
     </Hero>
 
     <!-- 地圖：滿版寬度、約佔滿剩下的視窗；面板都浮在地圖上 -->
-    <section v-if="mode === 'grid'" ref="stage" class="relative w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
-      :style="{ height: 'calc(100dvh - 4rem)', minHeight: '480px' }" data-testid="map-stage" :aria-busy="pending > 0">
+    <section v-if="mode === 'grid'" ref="stage" class="relative z-0 w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
+      :style="{ height: 'calc(100dvh - 4rem)', minHeight: '480px', marginTop: '-50px' }" data-testid="map-stage" :aria-busy="pending > 0">
       <p v-if="failed" class="absolute inset-0 flex items-center justify-center text-slate-500 font-bold" data-testid="map-error">
         暫時讀不到資料
         <button type="button" class="ml-2 text-blue-600 underline" @click="loadCounty()">重試</button>
@@ -680,7 +696,7 @@ usePageHead({
       <p v-else-if="!countyLayer" class="absolute inset-0 flex items-center justify-center text-slate-400 font-bold">讀取中</p>
 
       <svg v-else ref="svgEl" class="map-svg absolute inset-0 block w-full h-full cursor-grab active:cursor-grabbing"
-        style="touch-action: none" role="group" aria-label="參選地圖" data-testid="map-svg"
+        style="touch-action: pan-y" role="group" aria-label="參選地圖" data-testid="map-svg"
         @wheel="onWheel" @pointerdown="onPointerDown" @mousemove="onSvgMove" @mouseleave="onSvgLeave">
         <MapLayers :layers="drawLayers" :color-mode="colorMode" :maxes="maxByLevel" :labels="labels" :lod="lod" @hover="onHover" @pick="onPick" />
         <g v-if="activeLayer && activeOutline" :transform="activeLayer.transform" pointer-events="none">
@@ -688,17 +704,24 @@ usePageHead({
         </g>
       </svg>
 
+      <!-- 一般滾輪捲頁面時的提示 -->
+      <Transition name="map-fade">
+        <p v-if="wheelHint" class="pointer-events-none absolute inset-x-0 top-1/2 z-20 mx-auto w-fit max-w-[90%] rounded-full bg-slate-900/80 px-4 py-2 text-sm font-bold text-white" data-testid="map-wheel-hint">按住 {{ zoomKey }} 再滾動可縮放地圖</p>
+      </Transition>
+
       <template v-if="countyLayer">
+        <!-- 浮動面板：跟上方分頁卡片同一個內容寬度（max-w-7xl＋同樣的左右 padding），垂直放在分頁卡片下方（地圖往上疊了 50px） -->
+        <div class="pointer-events-none absolute inset-0 z-10"><div class="mx-auto h-full max-w-7xl px-4 sm:px-6 lg:px-8"><div class="relative h-full">
         <!-- 左上：層級路徑與人數 -->
-        <div class="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] md:max-w-[50%] rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2">
+        <div class="pointer-events-auto absolute left-0 top-[66px] max-w-full md:max-w-[50%] rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2">
           <MapCrumbs :crumbs="crumbs" :people="crumbPeople" @pick="zoomToCode" />
         </div>
         <!-- 右上：著色與呈現切換 -->
-        <div class="absolute right-3 top-3 z-10 max-w-[calc(100%-1.5rem)]">
+        <div class="pointer-events-auto absolute right-0 top-[130px] max-w-full md:top-[66px]">
           <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
         </div>
         <!-- 右下：縮放 -->
-        <div :class="['absolute right-3 z-10 flex flex-col gap-1', active ? 'bottom-60 md:bottom-3' : 'bottom-3']" data-testid="map-zoom">
+        <div :class="['pointer-events-auto absolute right-0 flex flex-col gap-1', active ? 'bottom-60 md:bottom-4' : 'bottom-4']" data-testid="map-zoom">
           <button type="button" aria-label="放大" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
             @click="zoomBy(1.8)"><Plus :size="16" /></button>
           <button type="button" aria-label="縮小" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
@@ -707,7 +730,7 @@ usePageHead({
             @click="fitAll"><Maximize2 :size="16" /></button>
         </div>
         <!-- 左下：圖例與格子尺度 -->
-        <div :class="['absolute left-3 bottom-3 z-10 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
+        <div :class="['pointer-events-auto absolute left-0 bottom-4 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
           <div class="flex flex-wrap items-end gap-x-3 gap-y-1">
             <div class="relative w-44 sm:w-56 pb-4" data-testid="map-legend-bar">
               <div class="h-3 rounded" :style="{ background: legend.css }"></div>
@@ -719,11 +742,11 @@ usePageHead({
           </div>
           <span class="flex flex-wrap gap-x-3"><span data-testid="map-scale">每格 {{ scaleLabel }}</span><span v-if="statsAt" data-testid="map-stats-time">統計時間 {{ statsAt }}</span></span>
         </div>
-        <p v-if="rowsFailed" class="absolute left-1/2 -translate-x-1/2 top-16 z-10 rounded-full bg-white/95 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-rows-error">人數暫時讀不到<button type="button" class="ml-2 text-blue-600 underline" @click="retryRows">重試</button></p>
-        <p v-if="pending > 0" class="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 rounded-full bg-white/90 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-pending">讀取中</p>
+        <p v-if="rowsFailed" class="pointer-events-auto absolute left-1/2 -translate-x-1/2 top-[190px] md:top-[122px] rounded-full bg-white/95 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-rows-error">人數暫時讀不到<button type="button" class="ml-2 text-blue-600 underline" @click="retryRows">重試</button></p>
+        <p v-if="pending > 0" class="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-4 rounded-full bg-white/90 border border-slate-200 shadow px-3 py-1 text-xs font-bold text-slate-500" data-testid="map-pending">讀取中</p>
 
         <!-- 提示卡：電腦浮在地圖右側，手機是底部抽屜 -->
-        <aside v-if="active" class="absolute z-20 inset-x-0 bottom-0 rounded-t-2xl md:inset-x-auto md:bottom-auto md:top-16 md:right-3 md:w-72 md:rounded-2xl bg-white/95 backdrop-blur border border-slate-200 shadow-xl p-4 sm:p-5" data-testid="map-detail">
+        <aside v-if="active" class="pointer-events-auto absolute z-20 inset-x-0 bottom-0 rounded-t-2xl md:inset-x-auto md:bottom-auto md:top-[122px] md:right-0 md:w-72 md:rounded-2xl bg-white/95 backdrop-blur border border-slate-200 shadow-xl p-4 sm:p-5" data-testid="map-detail">
           <button v-if="selected" type="button" class="absolute right-2 top-2 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 md:hidden" aria-label="關閉" @click="selected = null; hover = null"><X :size="16" /></button>
           <h2 class="text-xl font-black text-navy-900 mb-3" data-testid="map-detail-name">{{ active.name }}</h2>
           <dl v-if="activeReady" class="space-y-1.5">
@@ -742,6 +765,7 @@ usePageHead({
             </RouterLink>
           </div>
         </aside>
+        </div></div></div>
       </template>
     </section>
 

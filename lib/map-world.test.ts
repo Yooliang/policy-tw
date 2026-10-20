@@ -4,7 +4,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  K_MAX, TOWN_AT, VILLAGE_AT, boxesIntersect, cellAt, clampView, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
+  K_MAX, TOWN_AT, VILLAGE_AT, boxesIntersect, cellAt, clampView, isZoomWheel, zoomModifierLabel, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
   screenToWorld, viewBox, wheelK, zoomAtPoint,
 } from "./map-world.ts";
 import { decodeRaster, type RasterFile } from "./raster-grid.ts";
@@ -125,4 +125,19 @@ Deno.test("世界座標：村里檔的陸地跟鄉鎮檔的同一鄉鎮重疊並
     const b = layerBox(villages);
     assert(b.x1 > b.x0 && b.y1 > b.y0);
   }
+});
+Deno.test("滾輪只有帶 Ctrl／⌘ 才縮放；Mac 顯示 ⌘、其他顯示 Ctrl", () => {
+  assertEquals(isZoomWheel({ ctrlKey: false, metaKey: false }), false, "一般滾輪留給頁面捲動");
+  assertEquals(isZoomWheel({ ctrlKey: true, metaKey: false }), true);
+  assertEquals(isZoomWheel({ ctrlKey: false, metaKey: true }), true);
+  assertEquals(zoomModifierLabel("MacIntel"), "⌘");
+  assertEquals(zoomModifierLabel("iPhone"), "⌘");
+  assertEquals(zoomModifierLabel("Win32"), "Ctrl");
+  assertEquals(zoomModifierLabel("Linux x86_64"), "Ctrl");
+});
+
+Deno.test("滑鼠 Ctrl＋滾輪一格（deltaY 約 100）跟一般滾輪一樣的靈敏度；觸控板捏合（deltaY 很小）才放大靈敏度", () => {
+  assertEquals(wheelK(5, -100, true, 1), wheelK(5, -100, false, 1));
+  assert(wheelK(5, -100, true, 1) < 5 * 1.5, "一格不會放大到 1.5 倍以上");
+  assert(wheelK(5, -2, true, 1) > wheelK(5, -2, false, 1));
 });
