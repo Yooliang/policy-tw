@@ -170,7 +170,7 @@ defineExpose({ load })
           {{ s ? SOURCE_LABEL[s] : '全部' }}<span v-if="(s ? sourceCounts[s] : allCount) != null" class="ml-1 font-normal opacity-80">{{ s ? sourceCounts[s] : allCount }}</span>
         </button>
       </div>
-      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查政見」「查簡介」「這不是政見？」，就會出現在這裡；有爭議的貢獻不另開任務，反對票累計到門檻就自動退件。派工順序是公民提問優先，再來是這份清單，最後才是右邊的資料缺口。</p>
+      <p class="px-4 sm:px-5 pt-3 text-xs text-slate-500">在政見頁或人物頁按「查進度」「查承諾與政見」「查簡介」「這不是承諾？」「這不是政見？」，就會出現在這裡；有爭議的貢獻不另開任務，反對票累計到門檻就自動退件。派工順序是公民提問優先，再來是這份清單，最後才是右邊的資料缺口。</p>
 
       <div v-if="loading" class="p-10 text-center text-slate-500" data-testid="task-loading">
         <Loader2 :size="28" class="animate-spin mx-auto mb-2 text-blue-500" />載入中…

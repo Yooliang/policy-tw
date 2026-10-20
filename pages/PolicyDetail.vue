@@ -34,7 +34,7 @@ import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import { electionOutcome } from '../lib/candidate-status'
-import { isElectionVoted } from '../lib/policy-stage'
+import { isElectionVoted, stageBadgeLabel, stageOfPolicy, stageWord } from '../lib/policy-stage'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import { ListChecks, Scale } from 'lucide-vue-next'
@@ -59,7 +59,7 @@ const stanceBusy = ref<PolicyStance | null>(null)
 const stanceError = ref<string | null>(null)
 const stanceCounts = ref<StanceCounts | null>(null)
 
-// 「查進度／查兌現情形」「這不是政見？」：按一下就建任務，出現在任務頁（/tasks）
+// 「查進度／查兌現情形」「這不是承諾？／這不是政見？」：按一下就建任務，出現在任務頁（/tasks）
 const progressRequest = useRequestTask()
 const validityRequest = useRequestTask()
 
@@ -164,6 +164,29 @@ const lineageMates = computed(() =>
 const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN)
 
 /**
+ * 這一條現在叫「承諾」還是「政見」（lib/policy-stage.ts，#672）：選前、落選、退選、結果待補叫承諾；當選者那一屆與任內施政叫政見。
+ * 版型（執行歷程、進度條）與字眼都讀這一個值；isCampaign（status）只管查證按鈕那一組，它講的是「有沒有進度可查」。
+ */
+const electionDateOf = (id: number) => getElectionById(id)?.electionDate
+const stage = computed(() => (policy.value ? stageOfPolicy(policy.value, politician.value, electionDateOf) : 'pledge'))
+const isPolicyStage = computed(() => stage.value === 'policy')
+const word = computed(() => stageWord(stage.value))
+/** 政見階段、狀態還停在 Campaign Pledge：沒有任何進度紀錄，畫面印「尚無進度紀錄」不印 0% */
+const noProgressRecord = computed(() => isPolicyStage.value && isCampaign.value)
+/** 別條政見的標籤（側欄「其他承諾與政見」）：承諾、有進度狀態的政見＝追蹤中、還沒有進度的政見＝政見 */
+function otherTag(p: { status: unknown; origin?: unknown; electionId?: unknown }): { text: string; pledge: boolean } {
+  const s = stageOfPolicy(p as Parameters<typeof stageOfPolicy>[0], politician.value, electionDateOf)
+  if (s !== 'policy') return { text: '承諾', pledge: true }
+  return { text: p.status === PolicyStatus.CAMPAIGN ? '政見' : '追蹤中', pledge: false }
+}
+/** 狀態標籤（描述、結構化資料用）：承諾印「承諾」；當選者那一屆還沒有進度的不寫狀態；其餘照狀態 */
+const statusText = computed(() => {
+  if (!policy.value) return ''
+  if (isPolicyStage.value && isCampaign.value) return ''
+  return stageBadgeLabel(String(policy.value.status), stage.value) ?? policyStatusLabel(policy.value.status)
+})
+
+/**
  * 查證按鈕三態，跟後端派任務的條件一致（migration 20260913000004）。
  *
  * 一筆 2026 的競選承諾不可能有執行進度——投票日還沒到。後端已經不對這種政見
@@ -249,11 +272,11 @@ function parseLog(log: { event: string; description?: string | null; sourceUrl?:
   }
 }
 
-const STANCE_OPTIONS: Array<{ key: PolicyStance; label: string; hint: string; icon: Component; count: keyof StanceCounts; active: string }> = [
-  { key: 'support', label: '支持', hint: '希望這項政見被實現', icon: ThumbsUp, count: 'stance_support', active: 'bg-violet-600 text-white border-violet-600' },
-  { key: 'oppose', label: '反對', hint: '不希望這項政見被實現', icon: ThumbsDown, count: 'stance_oppose', active: 'bg-rose-600 text-white border-rose-600' },
+const STANCE_OPTIONS = computed<Array<{ key: PolicyStance; label: string; hint: string; icon: Component; count: keyof StanceCounts; active: string }>>(() => [
+  { key: 'support', label: '支持', hint: `希望這項${word.value}被實現`, icon: ThumbsUp, count: 'stance_support', active: 'bg-violet-600 text-white border-violet-600' },
+  { key: 'oppose', label: '反對', hint: `不希望這項${word.value}被實現`, icon: ThumbsDown, count: 'stance_oppose', active: 'bg-rose-600 text-white border-rose-600' },
   { key: 'priority', label: '關注', hint: '加進我的關注；登入後會計入關注數。可以同時支持或反對', icon: Star, count: 'stance_priority', active: 'bg-amber-500 text-white border-amber-500' },
-]
+])
 
 // 「關注」就是卡片上的⭐（2026-09-18）：存進我的關注，登入的話計入關注數（按⭐的登入帳號數）。
 // 跟支持／反對不再三選一——可以支持又關注。
@@ -353,7 +376,7 @@ const questionTimeline = computed<QuestionEvent[]>(() => {
   if (out.length === 0) {
     // 沒人問過也用同一種樣式，不要一個是子標題、一個是時間軸（2026-09-18）
     if (campaignResult.value === 'not_elected') return []
-    return [{ id: 'invite', at: '', kind: 'invite', text: '想問這項政見的細節？提出問題，AI 代理會去查有出處的資料來回答。' }]
+    return [{ id: 'invite', at: '', kind: 'invite', text: `想問這項${word.value}的細節？提出問題，AI 代理會去查有出處的資料來回答。` }]
   }
   return out.sort((x, y) => y.at.localeCompare(x.at))
 })
@@ -378,8 +401,8 @@ usePageHead({
         party: politician.value?.party,
         electionLabel: policyElection.value?.shortName,
         category: policy.value.category,
-        isPledge: isCampaign.value,
-        statusLabel: policyStatusLabel(policy.value.status),
+        isPledge: !isPolicyStage.value,
+        statusLabel: statusText.value,
         progress: policy.value.progress,
       })
     : undefined,
@@ -393,8 +416,8 @@ usePageHead({
         title: policy.value.title,
         description: policy.value.description,
         category: policy.value.category,
-        isPledge: isCampaign.value,
-        statusLabel: policyStatusLabel(policy.value.status),
+        isPledge: !isPolicyStage.value,
+        statusLabel: statusText.value,
         proposedDate: policy.value.proposedDate,
         updatedAt: policy.value.updatedAt,
         lastUpdated: policy.value.lastUpdated,
@@ -411,6 +434,7 @@ usePageHead({
 const citation = computed(() => policy.value ? citationText({
   title: policy.value.title,
   who: politician.value?.name,
+  kind: word.value,
   url: `${SITE_URL}/policy/${policy.value.id}`,
   updated: policy.value.updatedAt || policy.value.lastUpdated,
 }) : '')
@@ -432,7 +456,7 @@ async function copyCitation() {
           </router-link>
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3 mb-3">
-              <StatusBadge :status="policy.status" />
+              <StatusBadge :status="policy.status" :stage="stage" />
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><Tag :size="14" /> {{ policy.category }}</span>
               <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm flex items-center gap-1"><MapPin :size="14" /> {{ politician.region }}</span>
               <button
@@ -448,7 +472,7 @@ async function copyCitation() {
             <h1 class="text-3xl md:text-4xl font-black text-white leading-tight mb-3">{{ policy.title }}</h1>
             <div class="flex flex-wrap items-center gap-4 text-sm text-slate-300">
               <span v-if="policyElection" class="flex items-center gap-1 bg-white/10 px-2.5 py-0.5 rounded-full text-xs font-bold text-white">
-                {{ policyElection.shortName }}政見
+                {{ policyElection.shortName }}{{ word }}
               </span>
               <span v-if="policy.proposedDate" class="flex items-center gap-1"><Clock :size="16" /> 提出：{{ policy.proposedDate }}</span>
               <span class="flex items-center gap-1" title="狀態是這一天的進度；之後的變化看下方時間軸"><Activity :size="16" /> 狀態截至：{{ policy.lastUpdated }}</span>
@@ -511,7 +535,7 @@ async function copyCitation() {
             <div class="flex flex-col-reverse md:flex-row md:items-start md:justify-between gap-4 sm:gap-6">
               <div class="flex-1 min-w-0">
                 <!-- 跟「查核履歷」一樣帶圖示（2026-09-17），同一頁的區塊標題長得一致 -->
-                <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/政見詳情</h2>
+                <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><FileText class="text-slate-400" :size="22" />重大建設/{{ word }}詳情</h2>
                 <p class="text-slate-700 leading-relaxed text-lg">{{ shortUrlsIn(policy.description) }}</p>
                 <!-- 落選就不會有執行進度：說出來，不要讓人以為是還沒人追（2026-09-18） -->
                 <p v-if="campaignResult === 'not_elected'" class="mt-2 text-xs text-slate-500">這場選舉未當選，所以這項承諾不會有執行進度。</p>
@@ -553,7 +577,7 @@ async function copyCitation() {
                 >
                   <Loader2 v-if="validityRequest.loading.value" :size="14" class="animate-spin" />
                   <AlertTriangle v-else :size="14" />
-                  {{ validityRequest.label('這不是政見？回報給 AI 查證') }}
+                  {{ validityRequest.label(`這不是${word}？回報給 AI 查證`) }}
                 </button>
                 <RequestTaskNotice class="mt-2 text-left" :result="validityRequest.result.value" :error="validityRequest.error.value" />
               </div>
@@ -579,11 +603,11 @@ async function copyCitation() {
                「未說明」＝查過原文沒寫、「未調查」＝還沒有人查，兩者分開標（規則在 lib/policy-elements.ts）。2026-10-06 拿掉了標題下面那段說明文字，只留三格與狀態標。
                伺服器端渲染：要素與出處連結都在 HTML 裡，AI 與爬蟲讀得到。 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="policy-elements-card">
-            <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />政見三要素</h2>
+            <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><ListChecks class="text-slate-400" :size="22" />{{ word }}三要素</h2>
             <PolicyElements :elements="policy.elements" />
             <p v-if="compareLink" class="mt-4 text-sm">
               <router-link :to="{ path: compareLink.path, query: compareLink.query }" class="inline-flex items-center gap-1 font-bold text-violet-700 hover:underline">
-                <Scale :size="16" />政見 PK：跟同選區的{{ compareLink.name }}並排比較政見
+                <Scale :size="16" />政見 PK：跟同選區的{{ compareLink.name }}並排比較{{ pledgeElectionDone ? '承諾與政見' : '承諾' }}
               </router-link>
             </p>
           </section>
@@ -665,7 +689,7 @@ async function copyCitation() {
           </div>
 
           <!-- Timeline -->
-          <div v-if="!isCampaign" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
+          <div v-if="isPolicyStage" class="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <!-- 標題右邊擺一顆動作鈕，跟同一頁的公民提問一致（2026-09-18）：
                  兩張卡都是「這裡有紀錄，也可以請 AI 再去查一次」，只有公民提問給得出下一步
                  看起來像只有它能動。文字沿用 hero 那顆（查進度／查兌現情形），同一件事只有一種叫法。
@@ -693,6 +717,7 @@ async function copyCitation() {
             <!-- 圓點與間距跟查核履歷同一組尺寸（2026-09-17：「時間軸大小不一」）：
                  同一頁兩條時間軸，一條 16px 點、一條 12px 點，看起來像兩套東西 -->
             <div class="relative border-l-2 border-slate-200 ml-2 space-y-4 pb-2">
+              <p v-if="!policy.logs || policy.logs.length === 0" class="pl-6 text-sm font-medium text-slate-500">尚無進度紀錄</p>
               <div v-for="(log, index) in policy.logs" :key="log.id" class="relative pl-6 group">
                 <div :class="`absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 ${
                   index === 0 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-300 ring-slate-100'
@@ -737,7 +762,8 @@ async function copyCitation() {
               </div>
             </router-link>
 
-            <div v-if="!isCampaign" class="mt-6">
+            <div v-if="isPolicyStage && noProgressRecord" class="mt-6 text-sm font-medium text-slate-500" data-testid="no-progress-record">尚無進度紀錄</div>
+            <div v-else-if="isPolicyStage" class="mt-6">
               <div class="flex justify-between text-sm font-medium text-slate-600 mb-1">
                 <span>當前進度</span>
                 <span class="text-blue-600">{{ policy.progress }}%</span>
@@ -756,7 +782,7 @@ async function copyCitation() {
 
           <!-- 2. 該候選人的其他政見 -->
           <div v-if="otherPolicies.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="side-other-policies">
-            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><FileText class="text-slate-400" :size="20" />該候選人的其他政見</h3>
+            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><FileText class="text-slate-400" :size="20" />該候選人的其他承諾與政見</h3>
             <div class="space-y-3">
               <router-link
                 v-for="p in otherPolicies"
@@ -765,8 +791,8 @@ async function copyCitation() {
                 class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
               >
                 <div class="flex justify-between items-start mb-1">
-                  <span :class="`text-xs px-1.5 py-0.5 rounded ${p.status === 'Campaign Pledge' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
-                    {{ p.status === 'Campaign Pledge' ? '承諾' : '追蹤中' }}
+                  <span :class="`text-xs px-1.5 py-0.5 rounded ${otherTag(p).pledge ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
+                    {{ otherTag(p).text }}
                   </span>
                   <span class="text-[10px] text-slate-400">{{ p.category }}</span>
                 </div>
@@ -860,8 +886,8 @@ async function copyCitation() {
   <div v-else class="min-h-screen flex items-center justify-center bg-slate-50">
     <div class="text-center px-4">
       <FileText :size="64" class="mx-auto mb-4 text-slate-300" />
-      <h2 class="text-2xl font-bold text-navy-900 mb-2">找不到該政見</h2>
-      <p class="text-slate-500 mb-6">該政見可能已被移除或連結錯誤。</p>
+      <h2 class="text-2xl font-bold text-navy-900 mb-2">找不到該承諾或政見</h2>
+      <p class="text-slate-500 mb-6">該承諾或政見可能已被移除或連結錯誤。</p>
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
         <button @click="router.push('/tracking')" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all">
           返回追蹤列表

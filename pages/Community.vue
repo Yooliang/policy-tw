@@ -25,10 +25,10 @@ type SortMode = 'stance' | 'latest'
 const route = useRoute()
 const statusFilter = ref<StatusFilter>('all')
 const sortMode = ref<SortMode>('latest')
-// 從 PolicyDetail 的「民眾提問」帶 ?policy= 過來：只看這項政見的提問，且提問表單預設掛在它底下
+// 從 PolicyDetail 的「民眾提問」帶 ?policy= 過來：只看這項承諾或政見的提問，且提問表單預設掛在它底下
 const policyFilter = ref('')
 // ?q=／?politician=：預填問題與掛載人物。這一頁只收民眾自己打字的提問——
-// 政見頁／人物頁的「查進度／查政見／查簡介／這不是政見？」按鈕直接建任務，不經過這裡。
+// 政見頁／人物頁的「查進度／查承諾與政見／查簡介／這不是承諾？／這不是政見？」按鈕直接建任務，不經過這裡。
 const presetQuestion = computed(() => {
   const v = route.query.q
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : undefined
@@ -159,7 +159,7 @@ usePageHead({
       <AskQuestionForm :preset-policy-id="policyFilter || undefined" :preset-policy-title="policyFilterTitle" :preset-question="presetQuestion" :preset-politician-id="presetPoliticianId" class="mb-8" @asked="onAsked" />
 
       <div v-if="policyFilter" class="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg flex items-center justify-between max-w-xl mb-6">
-        <span>只看這項政見的提問：<strong>{{ policyFilterTitle || '（政見）' }}</strong></span>
+        <span>只看這項承諾或政見的提問：<strong>{{ policyFilterTitle || '（承諾或政見）' }}</strong></span>
         <button @click="policyFilter = ''" class="text-sm underline hover:text-blue-900 flex-shrink-0 ml-3">清除</button>
       </div>
 

@@ -141,8 +141,8 @@ Deno.test("摘要沒有固定套話：不同縣市、不同數字，句子就不
 
 Deno.test("政見摘要：誰、哪一屆、類別、狀態與進度、本文", () => {
   assertEquals(
-    policyDescription({ title: "增設托嬰中心", body: "每個行政區至少一處公共托嬰中心。", personName: "王小明", party: "無黨籍", electionLabel: "2026 九合一", category: "社會福利", isPledge: true, statusLabel: "競選承諾", progress: 0 }),
-    "王小明（無黨籍）競選承諾「增設托嬰中心」，類別：社會福利，2026 九合一。每個行政區至少一處公共托嬰中心。",
+    policyDescription({ title: "增設托嬰中心", body: "每個行政區至少一處公共托嬰中心。", personName: "王小明", party: "無黨籍", electionLabel: "2026 九合一", category: "社會福利", isPledge: true, statusLabel: "承諾", progress: 0 }),
+    "王小明（無黨籍）承諾「增設托嬰中心」，類別：社會福利，2026 九合一。每個行政區至少一處公共托嬰中心。",
   );
   const done = policyDescription({ title: "開闢公園", body: "", personName: "李大華", category: "環境", isPledge: false, statusLabel: "進行中", progress: 40 });
   assertEquals(done, "李大華政見「開闢公園」，類別：環境，進行中，進度 40%。");
@@ -154,14 +154,14 @@ Deno.test("非競選承諾進度是 0 也不寫「進度 0%」", () => {
 
 Deno.test("人物頁摘要結尾：兩種都是 0 就不寫，不再是一萬多頁同一句", () => {
   assertEquals(personTrackingText(0, 0), "");
-  assertEquals(personTrackingText(3, 0), "正見已收錄其競選承諾 3 項。");
-  assertEquals(personTrackingText(0, 2), "正見已收錄其過往政績 2 項。");
-  assertEquals(personTrackingText(3, 2), "正見已收錄其競選承諾 3 項、過往政績 2 項。");
+  assertEquals(personTrackingText(3, 0), "正見已收錄其承諾 3 項。");
+  assertEquals(personTrackingText(0, 2), "正見已收錄其政見 2 項。");
+  assertEquals(personTrackingText(3, 2), "正見已收錄其承諾 3 項、政見 2 項。");
 });
 
-Deno.test("競選承諾不寫「進度 0%」，缺的資料整段省略、不留空括號", () => {
-  const s = policyDescription({ title: "T", isPledge: true, statusLabel: "競選承諾", progress: 0 });
-  assertEquals(s, "競選承諾「T」。");
+Deno.test("承諾不寫「進度 0%」，缺的資料整段省略、不留空括號", () => {
+  const s = policyDescription({ title: "T", isPledge: true, statusLabel: "承諾", progress: 0 });
+  assertEquals(s, "承諾「T」。");
   assert(!s.includes("進度") && !s.includes("（）") && !s.includes("類別"));
 });
 

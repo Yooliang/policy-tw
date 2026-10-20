@@ -10,7 +10,7 @@ import type { Election, Policy, Politician } from '../../types'
 import { POSITIONS, positionSpec } from '../election-levels'
 import { compareRegionName } from '../region-name'
 import { participationLabel } from '../participation-label'
-import { isElectionVoted } from '../policy-stage'
+import { isElectionVoted, stageOfPolicy, stageWord } from '../policy-stage'
 import { mdCandidacyNote, runningRecord } from './scope'
 import { pledgesOf } from './pledge'
 import {
@@ -87,8 +87,10 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
         body.push('', `${level} ${r.person.name}${r.person.party ? `（${r.person.party}）` : ''}`, '')
         body.push(`- 參選：${r.line}`)
         body.push(`- 人物頁：${politicianUrl(r.person.id)} ｜ 摘要：${abs(politicianMdPath(r.person.id))}`)
-        body.push(`- 政見 ${r.policies.length} 筆：`)
-        for (const p of r.policies) body.push(...policyBullet(p, { descMax: 120 }).map((l) => `  ${l}`))
+        // 同一個人同一屆的承諾：當選者（已投票）寫「政見」，其餘寫「承諾」（#672）
+        const stageOf = (p: Policy) => stageOfPolicy(p, r.person, () => election.electionDate, input.today)
+        body.push(`- ${stageWord(stageOf(r.policies[0]))} ${r.policies.length} 筆：`)
+        for (const p of r.policies) body.push(...policyBullet(p, { descMax: 120, stage: stageOf(p) }).map((l) => `  ${l}`))
       }
       if (noPolicy.length > 0) {
         body.push('', `尚無政見資料（${noPolicy.length} 位）：${noPolicy.map((r) => `${r.person.name}${r.person.party ? `（${oneLine(r.person.party)}）` : ''}`).join('、')}`)

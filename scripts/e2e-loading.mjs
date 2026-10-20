@@ -54,7 +54,7 @@ try {
   {
     const page = await context.newPage()
     await page.goto(`${base}/policy/does-not-exist`, { waitUntil: 'networkidle' })
-    await page.getByText('找不到該政見').waitFor({ timeout: 15000 })
+    await page.getByText('找不到該承諾或政見').waitFor({ timeout: 15000 })
     const robots = await page.locator('meta[name="robots"]').getAttribute('content')
     check(robots === 'noindex', `不存在的政見頁有 <meta robots=noindex>（實際：${robots}）`)
     await page.close()
@@ -69,10 +69,10 @@ try {
     const retryButton = page.getByRole('button', { name: '重試' })
     await retryButton.waitFor({ timeout: 20000 }).catch(() => {})
     check(await retryButton.count() > 0, 'Supabase 失敗時顯示「重試」按鈕')
-    check(await page.getByText('找不到該政見').count() === 0, 'Supabase 失敗時不顯示「找不到該政見」')
+    check(await page.getByText('找不到該承諾或政見').count() === 0, 'Supabase 失敗時不顯示「找不到該承諾或政見」')
     blocked = false
     await retryButton.click()
-    await page.getByText('找不到該政見').waitFor({ timeout: 15000 })
+    await page.getByText('找不到該承諾或政見').waitFor({ timeout: 15000 })
     check(true, '恢復後按重試變成真正的「找不到」')
     await page.close()
   }
@@ -84,7 +84,7 @@ try {
     await page.goto(`${base}/policy/${policyId}`, { waitUntil: 'networkidle' })
     const title = await page.locator('h1').first().textContent()
     check((title || '').trim().length > 0, `預渲染政見頁在 Supabase 掛掉時仍顯示標題（${(title || '').trim().slice(0, 20)}）`)
-    check(await page.getByText('找不到該政見').count() === 0, '預渲染政見頁不會顯示「找不到」')
+    check(await page.getByText('找不到該承諾或政見').count() === 0, '預渲染政見頁不會顯示「找不到」')
     await page.close()
   }
 } finally {

@@ -11,6 +11,7 @@ import type { Election, Policy } from '../../types'
 import { TAIWAN_COUNTIES } from '../election-regions'
 import { NATIONAL, type ScopedPerson } from './scope'
 import { pledgesOf } from './pledge'
+import { stageOfPolicy, stageWord, taipeiToday } from '../policy-stage'
 import {
   abs, compareByName, comparePolicies, dataCategoryMdPath, dataRegionCategoryMdPath, electionYear, latestTime, policyBullet,
   politicianMdPath, politicianUrl, type MdPage,
@@ -24,6 +25,8 @@ export interface ListContext {
   scoped: ScopedPerson[]
   /** 全部沒被移除的政見（不只收錄的人的、不只這一屆的競選承諾；pledgesOf 再篩） */
   policies: Policy[]
+  /** 今天（台北，YYYY-MM-DD）：判斷這一屆投完票了沒；沒給用台北今天 */
+  today?: string
 }
 
 const REGION_ORDER = new Map<string, number>([...TAIWAN_COUNTIES, NATIONAL].map((r, i) => [r, i]))
@@ -52,13 +55,15 @@ const count = (hs: Hit[]) => hs.reduce((n, h) => n + h.policies.length, 0)
 /** 政見的說明在這兩種頁截到幾個字（給 NotebookLM 問答用，比縣市頁寬一些） */
 const DESC_MAX = 300
 
-function personBlock(h: Hit, heading: string): string[] {
+function personBlock(h: Hit, heading: string, ctx: ListContext): string[] {
   const { politician } = h.person
   const lines = ['', `${heading} ${politician.name}${politician.party ? `（${politician.party}）` : ''}`, '']
   lines.push(`- ${h.person.label}`)
   lines.push(`- 人物頁：${politicianUrl(politician.id)} ｜ 摘要：${abs(politicianMdPath(politician.id))}`)
-  lines.push(`- 政見 ${h.policies.length} 筆：`)
-  for (const p of h.policies) lines.push(...policyBullet(p, { descMax: DESC_MAX }).map((l) => `  ${l}`))
+  // 這些都是同一個人同一屆的承諾：當選者（已投票）寫「政見」，其餘寫「承諾」（#672）
+  const stageOf = (p: Policy) => stageOfPolicy(p, politician, () => ctx.election.electionDate, ctx.today ?? taipeiToday())
+  lines.push(`- ${stageWord(stageOf(h.policies[0]))} ${h.policies.length} 筆：`)
+  for (const p of h.policies) lines.push(...policyBullet(p, { descMax: DESC_MAX, stage: stageOf(p) }).map((l) => `  ${l}`))
   return lines
 }
 
@@ -77,7 +82,7 @@ export function buildCategoryPage(category: string, ctx: ListContext): MdPage {
     const rs = all.filter((h) => h.person.region === region)
     body.push('', `## ${region}（${rs.length} 位、${count(rs)} 筆）`)
     if (region !== NATIONAL) body.push('', `- 這個縣市的${category}政見：${abs(dataRegionCategoryMdPath(ctx.segment, region, category))}`)
-    for (const h of rs) body.push(...personBlock(h, '###'))
+    for (const h of rs) body.push(...personBlock(h, '###', ctx))
   }
   if (all.length === 0) body.push(EMPTY)
   return {
@@ -95,7 +100,7 @@ export function buildCategoryPage(category: string, ctx: ListContext): MdPage {
 export function buildRegionCategoryPage(region: string, category: string, ctx: ListContext): MdPage {
   const hs = hits(ctx, region, category)
   const body: string[] = []
-  for (const h of hs) body.push(...personBlock(h, '##'))
+  for (const h of hs) body.push(...personBlock(h, '##', ctx))
   if (hs.length === 0) body.push(EMPTY)
   return {
     title: `${region} ${electionYear(ctx.election)} ${category}競選承諾`,

@@ -8,6 +8,7 @@
  * 也不在內文講排序方式或方法論。例外只有一句：縣市×主題是關鍵字比對、尚未逐筆確認，那是資料本身的狀態，必須明講。
  */
 import { SITE_URL, policyStatusLabel } from '../site'
+import type { PolicyStage } from '../policy-stage'
 import { comparePerson } from '../person-name'
 import type { Election, Policy, SourceRef } from '../../types'
 
@@ -229,9 +230,20 @@ export function progressText(p: Pick<Policy, 'status' | 'progress'>): string | n
   return typeof p.progress === 'number' ? `進度 ${p.progress}%` : null
 }
 
+/**
+ * 一行裡的狀態欄：Campaign Pledge 在承諾階段維持「競選承諾」（講來源事實），當選者那一屆（政見階段）印「政見」；
+ * 其他狀態照 policyStatusLabel。沒給階段（呼叫端不知道提出者的結果）就照舊。#672 單條規則，status 不動。
+ */
+export function mdStatusCell(p: Pick<Policy, 'status'>, stage?: PolicyStage): string | null {
+  if (stage === 'policy' && String(p.status) === 'Campaign Pledge') return '政見'
+  return policyStatusLabel(String(p.status)) || null
+}
+
 export interface PolicyLineOptions {
   /** 說明截幾個字；0＝不印說明 */
   descMax: number
+  /** 這一條的階段（lib/policy-stage.ts）；沒給就照舊印狀態標籤 */
+  stage?: PolicyStage
   /** 附在這筆政見後面的一小段（例：關鍵字比對到哪些詞） */
   note?: string
 }
@@ -244,7 +256,7 @@ export function policyBullet(p: Policy, opts: PolicyLineOptions): string[] {
   const head = [
     `〈${oneLine(p.title)}〉`,
     p.category || null,
-    policyStatusLabel(String(p.status)) || null,
+    mdStatusCell(p, opts.stage),
     progressText(p),
     p.proposedDate ? `提出 ${p.proposedDate}` : null,
     policyUpdated(p) ? `更新 ${policyUpdated(p)}` : null,

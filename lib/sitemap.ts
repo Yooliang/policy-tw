@@ -11,7 +11,7 @@ import { isLineageListed } from './lineage'
  *   - 脈絡頁 /lineage/:id → lineages.updated_at（觸發器 lineage_touch_updated_at，連參與者、交接、關聯的變動都蓋）。
  *   - 人物頁 /politician/:id → 他名下政見 updated_at 的最大值。politicians 表沒有任何時間欄位，
  *     最近一次已上線貢獻（contributions.applied_at）只有 service_role 讀得到、建置端用的是 anon。
- *     人物頁的主要內容（競選承諾、政績追蹤）就是名下政見，所以這個值跟頁面實質變動同步；
+ *     人物頁的主要內容（承諾、政見兩個分頁）就是名下政見，所以這個值跟頁面實質變動同步；
  *     只改了簡介、照片這類人物欄位時不會動（可接受）。名下沒有政見的候選人（候選人一律收）沒有可靠時間，不寫 lastmod，不拿「建置當天」頂替。
  *   - 選舉頁、縣市頁、鄉鎮頁、人物一覽、政黨頁、社群與靜態頁 → 不寫。elections、parties 沒有時間欄位，
  *     頁面內容是「很多筆資料的合計」（候選人名單、政黨歸屬），任何一筆參選紀錄變動都算；拿政見時間頂替會漏報名單變動。
@@ -25,7 +25,7 @@ import { isLineageListed } from './lineage'
  *      補選與重行選舉也會算進來，會把不是這一輪主戰場的人混進去。只認有參選紀錄，退選的也算（紀錄在、頁面在）；已合併的人物不在建置清單裡。
  *   2. 其餘人物：名下未移除的政見 **≥ SITEMAP_MIN_POLICIES_FOR_PERSON** 才收。
  * 只影響網站地圖——頁面本身不加 noindex，照常可被收錄、可被連結帶進來。
- * 政見數的定義跟人物頁一致：頁面兩個分頁（競選承諾＋過往政績與追蹤）加起來，即全域 state 裡 politicianId 等於他、
+ * 政見數的定義跟人物頁一致：頁面兩個分頁（承諾＋政見）加起來，即全域 state 裡 politicianId 等於他、
  * 且未軟移除（removed_at 空）的政見，不分屆別。
  */
 export const SITEMAP_MIN_POLICIES_FOR_PERSON = 3

@@ -8,7 +8,6 @@ import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type Req
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
-import { PolicyStatus } from '../types'
 import type { Policy, PoliticianElectionData, PoliticianTerm } from '../types'
 import { policySortDate } from '../lib/policy-date'
 import Avatar from '../components/Avatar.vue'
@@ -30,6 +29,7 @@ import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-n
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { newerFirst, segmentOfId } from '../lib/election-route'
+import { stageOfPolicy, taipeiToday } from '../lib/policy-stage'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
@@ -39,7 +39,7 @@ const route = useRoute()
 const router = useRouter()
 const { politicians, policies, elections, loading, error, loadPoliticianById, getElectionById, loadPoliciesByPolitician, loadPastTerms } = useSupabase()
 const activeTab = ref<'campaign' | 'history' | 'profile' | 'peers'>('campaign')
-// 競選承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
+// 承諾的呈現：卡片或表格（2026-09-23 維護者）。選擇記在瀏覽器；預渲染時沒有 window，用預設值
 type CampaignView = 'cards' | 'table'
 const campaignView = ref<CampaignView>('cards')
 
@@ -79,7 +79,7 @@ async function requestLookup(key: LookupKey) {
   }
 }
 
-// 動作列的「查政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
+// 動作列的「查承諾與政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
 const policyRequest = useRequestTask()
 const profileRequest = useRequestTask()
 watch(() => route.params.politicianId, () => { policyRequest.reset(); profileRequest.reset() })
@@ -181,8 +181,18 @@ const politician = computed(() => politicians.value.find(c => c.id === String(ro
 // 軟合併過的人物：舊網址轉向到保留的那一筆（2026-09-19 同名人物流程）
 watch(politician, (p) => { if (p?.mergedInto) router.replace(`/politician/${p.mergedInto}`) }, { immediate: true })
 
-const campaignPledges = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status === PolicyStatus.CAMPAIGN) : [])
-const historicalPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id && p.status !== PolicyStatus.CAMPAIGN) : [])
+// 兩個分頁照「那一條現在叫什麼」分（lib/policy-stage.ts，#672）：
+//   承諾＝選前、落選、退選、已投票但結果待補；政見＝當選者那一屆的承諾加任內施政。status 不動，投票日一過、結果一入庫就自動搬過去。
+// 變數名 campaignPledges／historicalPolicies 留著（seo.test.ts 以原始碼字串釘住它們餵給 personTrackingText）。
+const today = ref(taipeiToday())
+onMounted(() => { today.value = taipeiToday() })
+const personPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id) : [])
+const isPolicyOf = (p: Policy) => stageOfPolicy(p, politician.value, (id) => getElectionById(id)?.electionDate, today.value) === 'policy'
+const campaignPledges = computed(() => personPolicies.value.filter(p => !isPolicyOf(p)))
+const historicalPolicies = computed(() => personPolicies.value.filter(p => isPolicyOf(p)))
+// 沒有承諾、但有政見的人：不留一個空的「承諾」分頁，直接落在「政見」（一筆都沒有的人照舊留著承諾分頁的空狀態）
+const hideCampaignTab = computed(() => campaignPledges.value.length === 0 && historicalPolicies.value.length > 0)
+watch(hideCampaignTab, (hide) => { if (hide && activeTab.value === 'campaign') activeTab.value = 'history' }, { immediate: true })
 
 interface PolicyGroup {
   key: string
@@ -404,7 +414,7 @@ usePageHead({
             <CheckCircle v-else-if="policyRequest.done.value" :size="16" />
             <XCircle v-else-if="policyRequest.error.value" :size="16" />
             <Sparkles v-else :size="16" />
-            {{ policyRequest.label('查政見') }}
+            {{ policyRequest.label('查承諾與政見') }}
           </HeroAction>
           <HeroAction data-testid="hero-query-profile" @click="profileRequest.send({ kind: 'profile', politician_id: politician.id })">
             <Loader2 v-if="profileRequest.loading.value" :size="16" class="animate-spin" />
@@ -427,14 +437,14 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
         <div>
-          <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用四字（競選承諾／政績追蹤／基本資料／候選人，維護者 2026-09-30），390px 寬一排放得下 -->
+          <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用短字（承諾／政見／基本資料／候選人，維護者 2026-09-30 的四字限制現在是兩字），390px 寬一排放得下 -->
           <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
-            <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">競選承諾</span><span class="hidden sm:inline">競選承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
+            <button v-if="!hideCampaignTab" @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
+              <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">承諾</span><span class="hidden sm:inline">承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>
             </button>
             <button @click="activeTab = 'history'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'history' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`">
-              <CheckCircle2 :size="18" class="hidden sm:block" /><span class="sm:hidden">政績追蹤</span><span class="hidden sm:inline">過往政績與追蹤</span><span class="hidden sm:inline bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
+              <CheckCircle2 :size="18" class="hidden sm:block" /><span class="sm:hidden">政見</span><span class="hidden sm:inline">政見</span><span class="hidden sm:inline bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ historicalPolicies.length }}</span>
               <div v-if="activeTab === 'history'" class="absolute bottom-0 left-0 w-full h-1 bg-blue-600 rounded-t-full"></div>
             </button>
             <button @click="activeTab = 'profile'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'profile' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`">
@@ -465,7 +475,7 @@ usePageHead({
                         <thead class="bg-slate-50 text-slate-500 text-xs">
                           <tr>
                             <th class="text-left font-semibold px-3 py-2 w-10">#</th>
-                            <th class="text-left font-semibold px-3 py-2 min-w-[14rem]">政見</th>
+                            <th class="text-left font-semibold px-3 py-2 min-w-[14rem]">承諾</th>
                             <th class="text-left font-semibold px-3 py-2 w-32">類別</th>
                             <th class="text-left font-semibold px-3 py-2 w-28">提出日期</th>
                             <th class="text-left font-semibold px-3 py-2">標籤</th>
@@ -496,11 +506,11 @@ usePageHead({
                   </div>
                 </div>
                 <!-- 已有資料也能再查：次要位置、小按鈕 -->
-                <AiLookupInline :state="lookup.campaign" label="請 AI 補充最新的政見" @click="requestLookup('campaign')" />
+                <AiLookupInline :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <Search :size="48" class="mx-auto mb-4 text-slate-300" />
-                <p class="text-slate-500 mb-6">該候選人尚未發布競選承諾。</p>
+                <p class="text-slate-500 mb-6">該候選人尚未發布承諾。</p>
 
                 <!-- AI Search Button -->
                 <button
@@ -516,7 +526,7 @@ usePageHead({
                 >
                   <Loader2 v-if="lookup.campaign.loading" :size="20" class="animate-spin" />
                   <Sparkles v-else :size="20" />
-                  {{ lookup.campaign.loading ? '送出中…' : lookup.campaign.error ? '重試' : '請 AI 幫忙查政見' }}
+                  {{ lookup.campaign.loading ? '送出中…' : lookup.campaign.error ? '重試' : '請 AI 幫忙查承諾' }}
                 </button>
 
                 <!-- Success State -->
@@ -533,7 +543,7 @@ usePageHead({
                 <p v-if="lookup.campaign.error && !lookup.campaign.result" class="text-red-500 text-sm mt-3">{{ lookup.campaign.error }}</p>
               </div>
             </template>
-            <!-- 只在「過往政績」分頁出現；原本是 v-else，切到「基本資料」時也會跟著出來（2026-09-20） -->
+            <!-- 只在「政見」分頁出現；原本是 v-else，切到「基本資料」時也會跟著出來（2026-09-20） -->
             <template v-else-if="activeTab === 'history'">
               <template v-if="historicalPolicies.length > 0">
                 <div class="space-y-8">
@@ -544,11 +554,11 @@ usePageHead({
                     </div>
                   </div>
                 </div>
-                <AiLookupInline :state="lookup.history" label="請 AI 補充最新的政績" @click="requestLookup('history')" />
+                <AiLookupInline :state="lookup.history" label="請 AI 補充最新的政見" @click="requestLookup('history')" />
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <FileText :size="48" class="mx-auto mb-4 text-slate-300" />
-                <p class="text-slate-500 mb-6">該候選人無過往追蹤紀錄。</p>
+                <p class="text-slate-500 mb-6">該候選人沒有政見的追蹤紀錄。</p>
 
                 <!-- AI Search Button for History -->
                 <button
@@ -564,7 +574,7 @@ usePageHead({
                 >
                   <Loader2 v-if="lookup.history.loading" :size="20" class="animate-spin" />
                   <Sparkles v-else :size="20" />
-                  {{ lookup.history.loading ? '送出中…' : lookup.history.error ? '重試' : '請 AI 幫忙查政績' }}
+                  {{ lookup.history.loading ? '送出中…' : lookup.history.error ? '重試' : '請 AI 幫忙查政見' }}
                 </button>
 
                 <!-- Success State -->
@@ -740,7 +750,7 @@ usePageHead({
             </div>
           </div>
 
-          <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過（只在「競選承諾」「過往政績與追蹤」兩個分頁顯示；用 v-show 保留預渲染內容） -->
+          <!-- 資料來源與查核履歷：這個人的資料被誰查過、誰驗過（只在「承諾」「政見」兩個分頁顯示；用 v-show 保留預渲染內容） -->
           <div v-show="activeTab === 'campaign' || activeTab === 'history'" class="mt-8"><HistoryPanel target="politician" :id="politician.id" title="資料來源與查核履歷" agent-display="icon" /></div>
         </div>
 

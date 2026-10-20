@@ -5,15 +5,15 @@
  * 最後更新、說明、三要素、出處）。政見依屆別分組，屆別新的在前；同屆內依提出日期、再依 id。
  */
 import type { Election, Policy, Politician, PoliticianElectionData } from '../../types'
+import type { PolicyStage } from '../policy-stage'
 import { candidacyNote, officeTitles } from '../politician-office'
 import { participationLabel } from '../participation-label'
 import { newerFirst } from '../election-route'
-import { isElectionVoted } from '../policy-stage'
+import { isElectionVoted, stageOfPolicy } from '../policy-stage'
 import { elementCells } from '../policy-elements'
-import { policyStatusLabel } from '../site'
 import {
   NO_SOURCE, abs, comparePolicies, electionYear, latestTime, oneLine,
-  policyUpdated, politicianMdPath, politicianUrl, primarySource, progressText, renderPage, sourceText, truncate, type MdPage,
+  mdStatusCell, policyUpdated, politicianMdPath, politicianUrl, primarySource, progressText, renderPage, sourceText, truncate, type MdPage,
 } from './format'
 
 export interface PoliticianMdInput {
@@ -49,10 +49,10 @@ function participationLine(rec: PoliticianElectionData, elections: readonly Elec
   return `- ${year} ${what}${e ? `（${e.name}）` : ''}：${bits.join('｜')}`
 }
 
-function policyBlock(p: Policy): string[] {
+function policyBlock(p: Policy, stage?: PolicyStage): string[] {
   const head = [
     p.category || null,
-    policyStatusLabel(String(p.status)) || null,
+    mdStatusCell(p, stage),
     progressText(p),
     p.proposedDate ? `提出 ${p.proposedDate}` : '提出日期未註明',
     policyUpdated(p) ? `最後更新 ${policyUpdated(p)}` : null,
@@ -117,7 +117,7 @@ export function buildPoliticianPage(input: PoliticianMdInput): MdPage {
     for (const k of keys) {
       const list = (byElection.get(k) ?? []).sort(comparePolicies)
       body.push(`### ${k === null ? '未標屆別' : electionName(elections, k)}（${list.length} 筆）`, '')
-      for (const p of list) body.push(...policyBlock(p), '')
+      for (const p of list) body.push(...policyBlock(p, stageOfPolicy(p, pl, (id) => elections.find((e) => e.id === id)?.electionDate, today)), '')
     }
   }
 

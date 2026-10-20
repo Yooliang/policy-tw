@@ -60,7 +60,7 @@ function fmtTime(iso: string): string {
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <span :class="['px-2.5 py-0.5 rounded-full text-xs font-bold border', STATUS_CLASS[question.status]]">{{ STATUS_LABEL[question.status] }}</span>
         <RouterLink v-if="question.policyId && policyTitle" :to="`/policy/${question.policyId}`" @click.stop class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full hover:bg-blue-100 transition-colors line-clamp-1">
-          政見：{{ policyTitle }}
+          承諾或政見：{{ policyTitle }}
         </RouterLink>
         <RouterLink v-if="question.politicianId && politicianName" :to="`/politician/${question.politicianId}`" @click.stop class="text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full hover:bg-slate-200 transition-colors">
           {{ politicianName }}

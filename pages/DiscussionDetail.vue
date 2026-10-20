@@ -245,7 +245,7 @@ usePageHead({
           <div class="lg:col-span-1 space-y-6">
             <!-- Related policy -->
             <div v-if="policy" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-              <h3 class="font-bold text-navy-900 mb-4">相關政見</h3>
+              <h3 class="font-bold text-navy-900 mb-4">相關承諾或政見</h3>
               <router-link
                 :to="'/policy/' + policy.id"
                 class="block cursor-pointer group"
@@ -263,7 +263,7 @@ usePageHead({
 
             <!-- Other discussions on same policy -->
             <div v-if="relatedDiscussions.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-              <h3 class="font-bold text-navy-900 mb-4">同政見討論</h3>
+              <h3 class="font-bold text-navy-900 mb-4">同一筆的討論</h3>
               <ul class="space-y-3">
                 <li v-for="rd in relatedDiscussions" :key="rd.id">
                   <router-link
