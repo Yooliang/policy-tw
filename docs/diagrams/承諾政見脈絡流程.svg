@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="780" viewBox="0 0 1240 780" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1240" height="780" fill="#FFFFFF"/>
+
+  <!-- 階段 -->
+  <text x="40" y="34" font-size="20" font-weight="700" fill="#0F172A">承諾 → 政見 → 脈絡</text>
+  <g font-size="14" fill="#64748B" font-weight="700">
+    <text x="330" y="70" text-anchor="middle">選前</text>
+    <text x="560" y="70" text-anchor="middle">開票</text>
+    <text x="840" y="45" text-anchor="middle">開票後</text>
+  </g>
+
+  <!-- 候選人提出 -->
+  <rect x="40" y="115" width="140" height="50" rx="8" fill="#F8FAFC" stroke="#94A3B8"/>
+  <text x="110" y="145" font-size="15" text-anchor="middle" fill="#0F172A">候選人提出</text>
+  <line x1="180" y1="140" x2="218" y2="140" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- 承諾 -->
+  <rect x="220" y="95" width="220" height="90" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="2"/>
+  <text x="330" y="126" font-size="22" font-weight="700" text-anchor="middle" fill="#92400E">承諾</text>
+  <text x="330" y="150" font-size="13" text-anchor="middle" fill="#78350F">選舉頁、政見 PK、議題串聯可比較</text>
+  <text x="330" y="170" font-size="13" text-anchor="middle" fill="#78350F">不追進度、不進脈絡</text>
+
+  <!-- 退選 -->
+  <line x1="330" y1="185" x2="330" y2="248" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="340" y="222" font-size="13" fill="#475569">退選</text>
+  <rect x="220" y="250" width="220" height="60" rx="10" fill="#F5F5F4" stroke="#A8A29E" stroke-width="2"/>
+  <text x="330" y="276" font-size="16" font-weight="700" text-anchor="middle" fill="#57534E">停在承諾</text>
+  <text x="330" y="297" font-size="13" text-anchor="middle" fill="#57534E">不追進度、不進脈絡</text>
+
+  <!-- 開票 -->
+  <line x1="440" y1="140" x2="498" y2="140" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <polygon points="560,100 620,140 560,180 500,140" fill="#FFFFFF" stroke="#475569" stroke-width="2"/>
+  <text x="560" y="145" font-size="15" font-weight="700" text-anchor="middle" fill="#0F172A">開票</text>
+
+  <!-- 當選 → 政見 -->
+  <line x1="620" y1="140" x2="718" y2="112" stroke="#16A34A" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="655" y="115" font-size="14" font-weight="700" fill="#15803D">當選</text>
+  <rect x="720" y="60" width="240" height="100" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+  <text x="840" y="92" font-size="22" font-weight="700" text-anchor="middle" fill="#14532D">政見</text>
+  <text x="840" y="116" font-size="12" text-anchor="middle" fill="#14532D">當選者的承諾轉成政見（來源：競選承諾）</text>
+  <text x="840" y="138" font-size="12" text-anchor="middle" fill="#14532D">追進度：推動中／已實現／滯後／跳票</text>
+
+  <!-- 落選 -->
+  <polyline points="560,180 560,290 638,290" fill="none" stroke="#A8A29E" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="570" y="240" font-size="14" font-weight="700" fill="#78716C">落選</text>
+  <rect x="640" y="250" width="230" height="80" rx="10" fill="#F5F5F4" stroke="#A8A29E" stroke-width="2"/>
+  <text x="755" y="280" font-size="16" font-weight="700" text-anchor="middle" fill="#57534E">停在承諾</text>
+  <text x="755" y="302" font-size="13" text-anchor="middle" fill="#57534E">留在個人頁</text>
+  <text x="755" y="320" font-size="13" text-anchor="middle" fill="#57534E">不追進度、不進脈絡</text>
+
+  <!-- 任內施政 -->
+  <rect x="1000" y="60" width="210" height="100" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="1105" y="90" font-size="15" font-weight="700" text-anchor="middle" fill="#1E3A8A">任內另外提出的施政</text>
+  <text x="1105" y="113" font-size="13" text-anchor="middle" fill="#1E3A8A">施政報告、議會提案、預算</text>
+  <text x="1105" y="137" font-size="12" text-anchor="middle" fill="#2563EB">直接算政見，來源標這三種</text>
+  <line x1="1000" y1="110" x2="962" y2="110" stroke="#3B82F6" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- 政見 → 脈絡 -->
+  <line x1="920" y1="160" x2="920" y2="378" stroke="#7C3AED" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="932" y="270" font-size="14" font-weight="700" fill="#6D28D9">同一件事</text>
+  <text x="932" y="290" font-size="14" font-weight="700" fill="#6D28D9">歸成脈絡</text>
+
+  <!-- 脈絡 -->
+  <rect x="40" y="380" width="1170" height="330" rx="14" fill="#F5F3FF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="64" y="414" font-size="20" font-weight="700" fill="#4C1D95">脈絡</text>
+  <text x="114" y="414" font-size="14" fill="#5B21B6">一件事的來龍去脈，只收政見</text>
+
+  <!-- 前後任 -->
+  <text x="80" y="446" font-size="14" font-weight="700" fill="#5B21B6">前後任</text>
+  <rect x="80" y="456" width="220" height="80" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+  <text x="190" y="488" font-size="16" font-weight="700" text-anchor="middle" fill="#14532D">前任的政見</text>
+  <text x="190" y="512" font-size="13" text-anchor="middle" fill="#14532D">例：2022 當選那一屆</text>
+  <line x1="300" y1="496" x2="358" y2="496" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="360" y="456" width="250" height="80" rx="10" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2"/>
+  <text x="485" y="486" font-size="16" font-weight="700" text-anchor="middle" fill="#4C1D95">交接</text>
+  <text x="485" y="510" font-size="12" text-anchor="middle" fill="#4C1D95">照舊做／改做法／縮小／停掉／重新開始</text>
+  <text x="485" y="527" font-size="12" text-anchor="middle" fill="#6D28D9">前任卸任後才派任務</text>
+  <line x1="610" y1="496" x2="668" y2="496" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="670" y="456" width="220" height="80" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+  <text x="780" y="488" font-size="16" font-weight="700" text-anchor="middle" fill="#14532D">後任的政見</text>
+  <text x="780" y="512" font-size="13" text-anchor="middle" fill="#14532D">例：2026 當選那一屆</text>
+
+  <!-- 連任 -->
+  <text x="80" y="580" font-size="14" font-weight="700" fill="#5B21B6">連任</text>
+  <rect x="80" y="590" width="220" height="64" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+  <text x="190" y="627" font-size="15" font-weight="700" text-anchor="middle" fill="#14532D">上一屆的政見</text>
+  <line x1="300" y1="622" x2="358" y2="622" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="360" y="590" width="250" height="64" rx="10" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2"/>
+  <text x="485" y="627" font-size="15" font-weight="700" text-anchor="middle" fill="#4C1D95">交接（同一人）</text>
+  <line x1="610" y1="622" x2="668" y2="622" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="670" y="590" width="220" height="64" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="2"/>
+  <text x="780" y="627" font-size="15" font-weight="700" text-anchor="middle" fill="#14532D">這一屆的政見</text>
+
+  <!-- 同級、上下級 -->
+  <rect x="940" y="456" width="240" height="56" rx="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="1060" y="480" font-size="15" font-weight="700" text-anchor="middle" fill="#4C1D95">同級多人</text>
+  <text x="1060" y="500" font-size="12" text-anchor="middle" fill="#4C1D95">民意代表誰提案、誰連署</text>
+  <rect x="940" y="528" width="240" height="56" rx="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="1060" y="552" font-size="15" font-weight="700" text-anchor="middle" fill="#4C1D95">上下級</text>
+  <text x="1060" y="572" font-size="12" text-anchor="middle" fill="#4C1D95">中央立法或補助、縣市執行</text>
+
+  <text x="80" y="690" font-size="13" fill="#5B21B6">後任沒提這件事，交接也照樣記（例如停掉了）；同一場選舉的對手不是前後任。</text>
+
+  <!-- 例子 -->
+  <text x="40" y="738" font-size="13" fill="#334155">來源和階段是兩回事：同一條政見可以「來源＝競選承諾」或「來源＝施政報告／議會提案／預算」，網站照來源分開列。</text>
+  <text x="40" y="760" font-size="13" fill="#334155">例：新北大巨蛋——現在李四川、蘇巧慧兩條都是承諾；11/28 當選者那條轉成政見才進脈絡，落選者那條停在承諾。</text>
+</svg>

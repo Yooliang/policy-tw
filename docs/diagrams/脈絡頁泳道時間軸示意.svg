@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="680" viewBox="0 0 1600 680" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+  <defs>
+    <marker id="arrP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7C3AED"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="680" fill="#FFFFFF"/>
+
+  <!-- ===== 桌機版 ===== -->
+  <text x="40" y="34" font-size="20" font-weight="700" fill="#0F172A">某縣捷運藍線｜完整關係圖（獨立一頁；示意，資料為虛構）</text>
+  <text x="40" y="56" font-size="13" fill="#64748B">← 回脈絡主頁　｜　主辦：某縣　涵蓋：甲市、乙鎮　屬於：前瞻軌道計畫</text>
+
+  <!-- 時間軸 -->
+  <g font-size="12" fill="#64748B" text-anchor="middle">
+    <line x1="220" y1="92" x2="1150" y2="92" stroke="#CBD5E1"/>
+    <text x="220" y="84">2016</text><line x1="220" y1="88" x2="220" y2="96" stroke="#94A3B8"/>
+    <text x="335" y="84">2018</text><line x1="335" y1="88" x2="335" y2="96" stroke="#94A3B8"/>
+    <text x="450" y="84">2020</text><line x1="450" y1="88" x2="450" y2="96" stroke="#94A3B8"/>
+    <text x="565" y="84">2022</text><line x1="565" y1="88" x2="565" y2="96" stroke="#94A3B8"/>
+    <text x="680" y="84">2024</text><line x1="680" y1="88" x2="680" y2="96" stroke="#94A3B8"/>
+    <text x="795" y="84">2026</text><line x1="795" y1="88" x2="795" y2="96" stroke="#94A3B8"/>
+    <text x="910" y="84">2028</text><line x1="910" y1="88" x2="910" y2="96" stroke="#94A3B8"/>
+    <text x="1025" y="84">2030</text><line x1="1025" y1="88" x2="1025" y2="96" stroke="#94A3B8"/>
+    <text x="1140" y="84">2032</text><line x1="1140" y1="88" x2="1140" y2="96" stroke="#94A3B8"/>
+  </g>
+
+  <!-- 泳道 -->
+  <g font-size="13">
+    <rect x="40" y="104" width="1110" height="80" fill="#F8FAFC"/>
+    <text x="52" y="138" font-weight="700" fill="#0F172A">中央</text><text x="52" y="157" fill="#475569">立委（某縣第 1 選區）</text>
+    <rect x="40" y="184" width="1110" height="80" fill="#FFFFFF"/>
+    <text x="52" y="218" font-weight="700" fill="#0F172A">某縣</text><text x="52" y="237" fill="#475569">縣長</text>
+    <rect x="40" y="264" width="1110" height="80" fill="#F8FAFC"/>
+    <text x="52" y="298" font-weight="700" fill="#0F172A">甲市</text><text x="52" y="317" fill="#475569">市長（縣轄市）</text>
+    <rect x="40" y="344" width="1110" height="80" fill="#FFFFFF"/>
+    <text x="52" y="378" font-weight="700" fill="#0F172A">乙鎮</text><text x="52" y="397" fill="#475569">鎮長</text>
+    <rect x="40" y="424" width="1110" height="92" fill="#F8FAFC"/>
+    <text x="52" y="464" font-weight="700" fill="#0F172A">事件</text>
+  </g>
+
+  <!-- 任期條＋立場 -->
+  <g font-size="12" fill="#334155">
+    <rect x="226" y="126" width="222" height="36" rx="8" fill="#E2E8F0"/><text x="236" y="149">立委甲</text>
+    <rect x="455" y="126" width="222" height="36" rx="8" fill="#E2E8F0"/><text x="465" y="149">立委甲</text>
+    <rect x="685" y="126" width="224" height="36" rx="8" fill="#E2E8F0"/><text x="695" y="149">立委乙</text>
+
+    <rect x="390" y="206" width="228" height="36" rx="8" fill="#E2E8F0"/><text x="400" y="229">縣長甲</text>
+    <rect x="622" y="206" width="226" height="36" rx="8" fill="#E2E8F0"/><text x="632" y="229">縣長乙</text>
+    <rect x="852" y="206" width="226" height="36" rx="8" fill="#FFFFFF" stroke="#94A3B8" stroke-dasharray="5 4"/><text x="862" y="229" fill="#64748B">11/28 開票後</text>
+
+    <rect x="390" y="286" width="228" height="36" rx="8" fill="#E2E8F0"/><text x="400" y="309">市長丙</text>
+    <rect x="622" y="286" width="226" height="36" rx="8" fill="#E2E8F0"/><text x="632" y="309">市長丙</text>
+
+    <rect x="390" y="366" width="228" height="36" rx="8" fill="#E2E8F0"/><text x="400" y="389">鎮長丁</text>
+    <rect x="622" y="366" width="226" height="36" rx="8" fill="#E2E8F0"/><text x="632" y="389">鎮長戊</text>
+  </g>
+  <g font-size="11" font-weight="700" text-anchor="middle">
+    <!-- 立場標籤 -->
+    <rect x="392" y="133" width="40" height="20" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="412" y="147" fill="#166534">支持</text>
+    <rect x="852" y="133" width="40" height="20" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="872" y="147" fill="#166534">支持</text>
+    <rect x="560" y="213" width="40" height="20" rx="4" fill="#FEE2E2" stroke="#DC2626"/><text x="580" y="227" fill="#991B1B">反對</text>
+    <rect x="790" y="213" width="40" height="20" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="810" y="227" fill="#166534">支持</text>
+    <rect x="560" y="293" width="40" height="20" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="580" y="307" fill="#166534">支持</text>
+    <rect x="560" y="373" width="40" height="20" rx="4" fill="#FEE2E2" stroke="#DC2626"/><text x="580" y="387" fill="#991B1B">反對</text>
+    <rect x="782" y="373" width="52" height="20" rx="4" fill="#FEF3C7" stroke="#D97706"/><text x="808" y="387" fill="#92400E">有條件</text>
+    <!-- 交接標籤 -->
+    <rect x="428" y="114" width="54" height="18" rx="9" fill="#DCFCE7" stroke="#16A34A"/><text x="455" y="127" fill="#166534">照舊做</text>
+    <rect x="655" y="114" width="54" height="18" rx="9" fill="#DCFCE7" stroke="#16A34A"/><text x="682" y="127" fill="#166534">照舊做</text>
+    <rect x="585" y="194" width="70" height="18" rx="9" fill="#EDE9FE" stroke="#7C3AED"/><text x="620" y="207" fill="#5B21B6">重新開始</text>
+    <rect x="823" y="194" width="54" height="18" rx="9" fill="#F1F5F9" stroke="#94A3B8"/><text x="850" y="207" fill="#475569">待交接</text>
+    <rect x="593" y="354" width="54" height="18" rx="9" fill="#DBEAFE" stroke="#2563EB"/><text x="620" y="367" fill="#1E40AF">改做法</text>
+    <rect x="593" y="274" width="54" height="18" rx="9" fill="#DCFCE7" stroke="#16A34A"/><text x="620" y="287" fill="#166534">照舊做</text>
+  </g>
+
+  <!-- 政見點 -->
+  <g stroke="#FFFFFF" stroke-width="2">
+    <circle cx="300" cy="144" r="8" fill="#3B82F6"/>
+    <circle cx="560" cy="144" r="8" fill="#16A34A"/>
+    <circle cx="760" cy="144" r="8" fill="#3B82F6"/>
+    <circle cx="700" cy="224" r="8" fill="#3B82F6"/>
+    <circle cx="470" cy="304" r="8" fill="#3B82F6"/>
+    <circle cx="790" cy="304" r="8" fill="#3B82F6"/>
+    <circle cx="720" cy="384" r="8" fill="#D97706"/>
+  </g>
+
+  <!-- 事件 -->
+  <g font-size="12" fill="#334155" text-anchor="middle">
+    <polygon points="450,446 460,456 450,466 440,456" fill="#7C3AED"/><text x="450" y="484">縣議會刪除規劃預算</text>
+    <polygon points="536,446 546,456 536,466 526,456" fill="#7C3AED"/><text x="536" y="504">中央核定可行性研究</text>
+    <polygon points="690,446 700,456 690,466 680,456" fill="#7C3AED"/><text x="690" y="484">重新編列預算</text>
+    <polygon points="801,446 811,456 801,466 791,456" fill="#7C3AED"/><text x="801" y="484">動工</text>
+  </g>
+
+  <!-- 跨層級關係 -->
+  <path d="M560,152 C560,300 540,380 537,442" fill="none" stroke="#7C3AED" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrP)"/>
+  <text x="472" y="430" font-size="11" fill="#6D28D9">爭取 → 核定</text>
+  <path d="M700,232 C700,330 692,400 690,442" fill="none" stroke="#7C3AED" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrP)"/>
+  <text x="706" y="420" font-size="11" fill="#6D28D9">縣府提案</text>
+
+  <!-- 今天 -->
+  <line x1="841" y1="96" x2="841" y2="516" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="841" y="530" font-size="12" fill="#DC2626" text-anchor="middle">今天</text>
+
+  <text x="40" y="556" font-size="13" fill="#334155"><tspan font-weight="700">參與者</tspan>　縣議員己 提案（議會紀錄）｜縣議員庚 連署（議會紀錄）｜立委甲 提案（立法院紀錄）</text>
+
+  <!-- 圖例 -->
+  <g font-size="12" fill="#475569">
+    <circle cx="48" cy="586" r="6" fill="#3B82F6"/><text x="60" y="590">推動中</text>
+    <circle cx="118" cy="586" r="6" fill="#16A34A"/><text x="130" y="590">已實現</text>
+    <circle cx="188" cy="586" r="6" fill="#D97706"/><text x="200" y="590">滯後</text>
+    <circle cx="246" cy="586" r="6" fill="#DC2626"/><text x="258" y="590">跳票</text>
+    <polygon points="318,580 324,586 318,592 312,586" fill="#7C3AED"/><text x="330" y="590">事件（政府、議會的決定）</text>
+    <rect x="490" y="579" width="30" height="14" rx="3" fill="#DCFCE7" stroke="#16A34A"/><text x="526" y="590">立場：支持／反對／有條件</text>
+    <line x1="700" y1="586" x2="730" y2="586" stroke="#7C3AED" stroke-dasharray="5 4"/><text x="736" y="590">跨層級關係</text>
+    <text x="40" y="618">交接標籤：照舊做（綠）／改做法（藍）／縮小（黃）／停掉（紅）／重新開始（紫）</text>
+    <text x="40" y="642">每個點、標籤、事件都能點，側邊抽屜打開原文與出處；圖下方是同樣內容的文字清單（給搜尋引擎與讀屏軟體）</text>
+  </g>
+
+  <!-- ===== 手機版 ===== -->
+  <rect x="1210" y="20" width="360" height="620" rx="28" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+  <text x="1230" y="58" font-size="15" font-weight="700" fill="#0F172A">手機：直的時間軸</text>
+  <g font-size="12">
+    <rect x="1230" y="72" width="44" height="24" rx="12" fill="#0F172A"/><text x="1252" y="88" fill="#FFFFFF" text-anchor="middle">全部</text>
+    <rect x="1280" y="72" width="44" height="24" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/><text x="1302" y="88" fill="#334155" text-anchor="middle">中央</text>
+    <rect x="1330" y="72" width="44" height="24" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/><text x="1352" y="88" fill="#334155" text-anchor="middle">某縣</text>
+    <rect x="1380" y="72" width="44" height="24" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/><text x="1402" y="88" fill="#334155" text-anchor="middle">甲市</text>
+    <rect x="1430" y="72" width="44" height="24" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/><text x="1452" y="88" fill="#334155" text-anchor="middle">乙鎮</text>
+  </g>
+  <line x1="1250" y1="112" x2="1250" y2="620" stroke="#CBD5E1" stroke-width="2"/>
+  <g font-size="12" fill="#334155">
+    <text x="1236" y="126" font-weight="700" fill="#0F172A">2026</text>
+    <polygon points="1250,140 1257,147 1250,154 1243,147" fill="#7C3AED"/><text x="1266" y="151">動工</text>
+    <rect x="1244" y="166" width="12" height="12" rx="3" fill="#FEF3C7" stroke="#D97706"/><text x="1266" y="177">乙鎮｜鎮長戊 有條件支持</text>
+
+    <text x="1236" y="208" font-weight="700" fill="#0F172A">2024</text>
+    <polygon points="1250,220 1257,227 1250,234 1243,227" fill="#7C3AED"/><text x="1266" y="231">重新編列預算 ← 縣府提案</text>
+    <rect x="1244" y="246" width="12" height="12" rx="3" fill="#E2E8F0" stroke="#94A3B8"/><text x="1266" y="257">中央｜立委乙接任（照舊做）</text>
+
+    <text x="1236" y="288" font-weight="700" fill="#0F172A">2022</text>
+    <rect x="1244" y="298" width="12" height="12" rx="3" fill="#EDE9FE" stroke="#7C3AED"/><text x="1266" y="309">某縣｜縣長乙接任（重新開始）</text>
+    <rect x="1244" y="322" width="12" height="12" rx="3" fill="#DCFCE7" stroke="#16A34A"/><text x="1266" y="333">某縣｜縣長乙 支持</text>
+    <rect x="1244" y="346" width="12" height="12" rx="3" fill="#DBEAFE" stroke="#2563EB"/><text x="1266" y="357">乙鎮｜鎮長戊接任（改做法）</text>
+    <circle cx="1250" cy="378" r="6" fill="#16A34A" stroke="#FFFFFF" stroke-width="2"/><text x="1266" y="382">中央｜立委甲的政見 已實現</text>
+
+    <text x="1236" y="414" font-weight="700" fill="#0F172A">2021</text>
+    <polygon points="1250,426 1257,433 1250,440 1243,433" fill="#7C3AED"/><text x="1266" y="437">中央核定可行性研究 ← 立委甲爭取</text>
+
+    <text x="1236" y="470" font-weight="700" fill="#0F172A">2020</text>
+    <polygon points="1250,482 1257,489 1250,496 1243,489" fill="#7C3AED"/><text x="1266" y="493">縣議會刪除規劃預算</text>
+    <rect x="1244" y="508" width="12" height="12" rx="3" fill="#FEE2E2" stroke="#DC2626"/><text x="1266" y="519">某縣｜縣長甲 反對</text>
+    <rect x="1244" y="532" width="12" height="12" rx="3" fill="#FEE2E2" stroke="#DC2626"/><text x="1266" y="543">乙鎮｜鎮長丁 反對</text>
+    <text x="1266" y="590" fill="#64748B" font-size="11">新的在上；點一筆打開原文與出處</text>
+  </g>
+</svg>

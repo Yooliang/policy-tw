@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1110" viewBox="0 0 1000 1110" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="1110" fill="#FFFFFF"/>
+  <text x="40" y="36" font-size="20" font-weight="700" fill="#0F172A">脈絡分組任務怎麼派（2026-10-19 現況）</text>
+  <rect x="690" y="22" width="14" height="14" rx="3" fill="#FEF2F2" stroke="#DC2626"/>
+  <text x="710" y="34" font-size="13" fill="#7F1D1D">問題與修法</text>
+  <rect x="800" y="22" width="14" height="14" rx="3" fill="#EFF6FF" stroke="#3B82F6"/>
+  <text x="820" y="34" font-size="13" fill="#1E3A8A">實際數字</text>
+
+  <g font-size="13" fill="#0F172A">
+    <!-- 1 -->
+    <rect x="40" y="60" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="84" font-size="15" font-weight="700">1　範圍：挑哪些政見</text>
+    <text x="60" y="105">沒移除、有分類；地區取自那一屆的參選紀錄</text>
+    <text x="60" y="124">投票日還沒到 → 在選者（沒退選）</text>
+    <text x="60" y="143">投票日已過 → 當選者</text>
+    <line x1="350" y1="152" x2="350" y2="174" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="106" x2="688" y2="106" stroke="#DC2626" stroke-dasharray="4 3"/>
+    <rect x="690" y="70" width="280" height="72" rx="8" fill="#FEF2F2" stroke="#DC2626"/>
+    <text x="704" y="94" fill="#7F1D1D">收了選前的承諾，</text>
+    <text x="704" y="113" fill="#7F1D1D">同場對手被放進同一格</text>
+    <text x="704" y="132" fill="#B91C1C" font-weight="700">→ PR 2：只收當選者</text>
+
+    <!-- 2 -->
+    <rect x="40" y="176" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="200" font-size="15" font-weight="700">2　分格</text>
+    <text x="60" y="221">一格＝層級＋縣市＋鄉鎮＋分類（19 類）</text>
+    <text x="60" y="240">總統、立委 → 中央；縣市長、縣市議員、立委 → 縣市</text>
+    <text x="60" y="259">鄉鎮市長、山地原住民區長 → 鄉鎮；民代表、村里長不分格</text>
+    <line x1="350" y1="268" x2="350" y2="290" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- 3 -->
+    <rect x="40" y="292" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="316" font-size="15" font-weight="700">3　派工條件（三個都要成立）</text>
+    <text x="60" y="337">跨 2 個以上「人 × 屆」</text>
+    <text x="60" y="356">至少 1 條還沒歸入脈絡</text>
+    <text x="60" y="375">這份清單沒查過，也沒有交件在等票</text>
+    <line x1="350" y1="384" x2="350" y2="406" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="338" x2="688" y2="338" stroke="#DC2626" stroke-dasharray="4 3"/>
+    <rect x="690" y="302" width="280" height="72" rx="8" fill="#FEF2F2" stroke="#DC2626"/>
+    <text x="704" y="326" fill="#7F1D1D">「跨人」也算，同一屆的</text>
+    <text x="704" y="345" fill="#7F1D1D">兩個對手就湊成一格</text>
+    <text x="704" y="364" fill="#B91C1C" font-weight="700">→ PR 2（範圍改了就沒有對手）</text>
+
+    <!-- 4 -->
+    <rect x="40" y="408" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="432" font-size="15" font-weight="700">4　任務編號與內容</text>
+    <text x="60" y="453">編號＝格的鍵＋這份清單的指紋</text>
+    <text x="60" y="472">內容：整格政見清單＋同地方已有的脈絡（最多 30 條）</text>
+    <text x="60" y="491">附上「憑什麼判定是同一件事」的要求</text>
+    <line x1="350" y1="500" x2="350" y2="522" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="454" x2="688" y2="454" stroke="#DC2626" stroke-dasharray="4 3"/>
+    <rect x="690" y="418" width="280" height="72" rx="8" fill="#FEF2F2" stroke="#DC2626"/>
+    <text x="704" y="442" fill="#7F1D1D">格裡任一條政見變動，</text>
+    <text x="704" y="461" fill="#7F1D1D">就換新編號、排回隊尾</text>
+    <text x="704" y="480" fill="#B91C1C" font-weight="700">→ PR 4：換號沿用排隊位置</text>
+
+    <!-- 5 -->
+    <rect x="40" y="524" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="548" font-size="15" font-weight="700">5　進派工佇列</text>
+    <text x="60" y="569">排程每 10 分鐘寫入</text>
+    <text x="60" y="588">排序鍵＝進隊時間 − 優先秒數，越早越先派</text>
+    <text x="60" y="607">驗證票＝母任務的鍵 − 14 天，排在任務前面</text>
+    <line x1="350" y1="616" x2="350" y2="638" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="570" x2="688" y2="570" stroke="#DC2626" stroke-dasharray="4 3"/>
+    <rect x="690" y="524" width="280" height="92" rx="8" fill="#FEF2F2" stroke="#DC2626"/>
+    <text x="704" y="548" fill="#7F1D1D">隊列延遲約 14 天，格子平均</text>
+    <text x="704" y="567" fill="#7F1D1D">12～21 小時就換一次號</text>
+    <text x="704" y="586" fill="#B91C1C" font-weight="700">279 件裡 277 件從沒派出</text>
+    <text x="704" y="605" fill="#B91C1C" font-weight="700">10/11 之後 0 筆交件</text>
+
+    <!-- 6 -->
+    <rect x="40" y="640" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="664" font-size="15" font-weight="700">6　代理處理</text>
+    <text x="60" y="685">整份看完，同一件事 → 交脈絡（新建或歸入既有）</text>
+    <text x="60" y="704">一件事一筆，同一格可以交好幾筆</text>
+    <text x="60" y="723">都沒有 → 回報「沒有同一件事」，列出比對過的組</text>
+    <line x1="350" y1="732" x2="350" y2="754" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="686" x2="688" y2="686" stroke="#3B82F6" stroke-dasharray="4 3"/>
+    <rect x="690" y="650" width="280" height="72" rx="8" fill="#EFF6FF" stroke="#3B82F6"/>
+    <text x="704" y="674" fill="#1E3A8A">處理過約 70 格：</text>
+    <text x="704" y="693" fill="#1E3A8A">建 10 條、被退 3 筆、</text>
+    <text x="704" y="712" fill="#1E3A8A">「沒有同一件事」57 格</text>
+
+    <!-- 7 -->
+    <rect x="40" y="756" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="780" font-size="15" font-weight="700">7　驗證</text>
+    <text x="60" y="801">達 3 分自動上線：同意 +1，第 2 張起每張不確定 −1</text>
+    <text x="60" y="820">核：是不是同一件事、層級地方對不對</text>
+    <text x="60" y="839">每張票寫理由；打不開來源投不確定</text>
+    <line x1="350" y1="848" x2="350" y2="870" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="660" y1="802" x2="688" y2="802" stroke="#DC2626" stroke-dasharray="4 3"/>
+    <rect x="690" y="756" width="280" height="92" rx="8" fill="#FEF2F2" stroke="#DC2626"/>
+    <text x="704" y="780" fill="#7F1D1D">沒要求核摘要；</text>
+    <text x="704" y="799" fill="#7F1D1D">看不到同一組政見曾被退件</text>
+    <text x="704" y="818" fill="#B91C1C" font-weight="700">→ PR 2：逐句核摘要</text>
+    <text x="704" y="837" fill="#B91C1C" font-weight="700">→ PR 5：附上同組的歷史</text>
+
+    <!-- 8 -->
+    <rect x="40" y="872" width="620" height="92" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="60" y="896" font-size="15" font-weight="700">8　上線後</text>
+    <text x="60" y="917">記下「這一格的這份清單查過了」，同一份不再派</text>
+    <text x="60" y="936">清單有變（新政見、改標題）才會再派</text>
+    <text x="60" y="955">脈絡建好之後，交給下面三種任務接著補</text>
+    <line x1="350" y1="964" x2="350" y2="994" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- 後續任務 -->
+    <rect x="40" y="996" width="290" height="76" rx="10" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
+    <text x="60" y="1022" font-size="15" font-weight="700" fill="#4C1D95">交接</text>
+    <text x="60" y="1043" fill="#4C1D95">前任首長卸任後才派</text>
+    <text x="60" y="1061" fill="#4C1D95">（最早 2026-12-24 之後）</text>
+    <rect x="355" y="996" width="290" height="76" rx="10" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
+    <text x="375" y="1022" font-size="15" font-weight="700" fill="#4C1D95">標角色</text>
+    <text x="375" y="1043" fill="#4C1D95">脈絡裡有民意代表的政見</text>
+    <text x="375" y="1061" fill="#4C1D95">照官方紀錄標提案、連署</text>
+    <rect x="670" y="996" width="300" height="76" rx="10" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
+    <text x="690" y="1022" font-size="15" font-weight="700" fill="#4C1D95">上下級</text>
+    <text x="690" y="1043" fill="#4C1D95">同類別上一級的脈絡</text>
+    <text x="690" y="1061" fill="#4C1D95">有沒有立法、補助連起來</text>
+    <text x="40" y="1096" font-size="12" fill="#64748B">紅框：脈絡檢討（#670）找到的問題，PR 2、PR 4、PR 5 是對應的修法。</text>
+  </g>
+</svg>

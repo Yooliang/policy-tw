@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="840" viewBox="0 0 900 840" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+  <rect width="900" height="840" fill="#F1F5F9"/>
+  <text x="40" y="36" font-size="13" fill="#64748B">政策脈絡 ／ 某縣 ／ 交通建設</text>
+  <text x="40" y="70" font-size="26" font-weight="700" fill="#0F172A">某縣捷運藍線</text>
+  <text x="40" y="96" font-size="13" fill="#64748B">示意，資料為虛構｜主辦：某縣　涵蓋：甲市、乙鎮　屬於：前瞻軌道計畫</text>
+
+  <!-- 現況 -->
+  <rect x="40" y="116" width="820" height="96" rx="12" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="64" y="146" font-size="13" font-weight="700" fill="#64748B">現況</text>
+  <rect x="64" y="158" width="72" height="30" rx="15" fill="#DBEAFE"/>
+  <text x="100" y="178" font-size="15" font-weight="700" fill="#1E40AF" text-anchor="middle">施工中</text>
+  <text x="152" y="179" font-size="15" fill="#0F172A">第一期 2026-03 動工，預定 2031 年通車</text>
+  <text x="152" y="200" font-size="12" fill="#64748B">截至 2026-09-30｜出處：縣府交通局新聞稿 2026-09-30</text>
+
+  <!-- 摘要 -->
+  <rect x="40" y="226" width="820" height="118" rx="12" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="64" y="256" font-size="13" font-weight="700" fill="#64748B">這件事</text>
+  <text x="64" y="282" font-size="14" fill="#0F172A">縣境第一條捷運，北起甲市、南至乙鎮，全長約 15 公里。<tspan fill="#2563EB" font-size="11">［1］</tspan></text>
+  <text x="64" y="306" font-size="14" fill="#0F172A">2020 年縣議會刪除規劃預算；2021 年中央核定可行性研究；2024 年縣府重新編列預算。<tspan fill="#2563EB" font-size="11">［2］［3］［4］</tspan></text>
+
+  <!-- 立場一覽 -->
+  <rect x="40" y="358" width="820" height="244" rx="12" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="64" y="388" font-size="13" font-weight="700" fill="#64748B">各方立場</text>
+  <g font-size="13">
+    <text x="64" y="418" fill="#64748B">層級</text><text x="150" y="418" fill="#64748B">人</text><text x="340" y="418" fill="#64748B">立場</text><text x="470" y="418" fill="#64748B">何時</text><text x="580" y="418" fill="#64748B">出處</text>
+    <line x1="64" y1="428" x2="836" y2="428" stroke="#E2E8F0"/>
+
+    <text x="64" y="454" fill="#334155">中央</text><text x="150" y="454" fill="#0F172A">立委甲</text>
+    <rect x="340" y="440" width="44" height="22" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="362" y="456" fill="#166534" text-anchor="middle" font-weight="700" font-size="12">支持</text>
+    <text x="470" y="454" fill="#334155">2019</text><text x="580" y="454" fill="#2563EB">立法院質詢紀錄</text>
+
+    <text x="64" y="484" fill="#334155">某縣</text><text x="150" y="484" fill="#0F172A">縣長乙（現任）</text>
+    <rect x="340" y="470" width="44" height="22" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="362" y="486" fill="#166534" text-anchor="middle" font-weight="700" font-size="12">支持</text>
+    <text x="470" y="484" fill="#334155">2022</text><text x="580" y="484" fill="#2563EB">施政報告</text>
+
+    <text x="64" y="514" fill="#334155">某縣</text><text x="150" y="514" fill="#0F172A">縣長甲（前任）</text>
+    <rect x="340" y="500" width="44" height="22" rx="4" fill="#FEE2E2" stroke="#DC2626"/><text x="362" y="516" fill="#991B1B" text-anchor="middle" font-weight="700" font-size="12">反對</text>
+    <text x="470" y="514" fill="#334155">2020</text><text x="580" y="514" fill="#2563EB">議會答詢紀錄</text>
+
+    <text x="64" y="544" fill="#334155">甲市</text><text x="150" y="544" fill="#0F172A">市長丙</text>
+    <rect x="340" y="530" width="44" height="22" rx="4" fill="#DCFCE7" stroke="#16A34A"/><text x="362" y="546" fill="#166534" text-anchor="middle" font-weight="700" font-size="12">支持</text>
+    <text x="470" y="544" fill="#334155">2019</text><text x="580" y="544" fill="#2563EB">市公所新聞稿</text>
+
+    <text x="64" y="574" fill="#334155">乙鎮</text><text x="150" y="574" fill="#0F172A">鎮長戊（現任）</text>
+    <rect x="340" y="560" width="56" height="22" rx="4" fill="#FEF3C7" stroke="#D97706"/><text x="368" y="576" fill="#92400E" text-anchor="middle" font-weight="700" font-size="12">有條件</text>
+    <text x="470" y="574" fill="#334155">2026</text><text x="580" y="574" fill="#2563EB">報導原話</text>
+  </g>
+
+  <!-- 大事記 -->
+  <rect x="40" y="616" width="820" height="150" rx="12" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="64" y="646" font-size="13" font-weight="700" fill="#64748B">大事記（最近 4 筆）</text>
+  <g font-size="13" fill="#0F172A">
+    <text x="64" y="674">2026-03　動工</text>
+    <text x="64" y="698">2024-05　縣府重新編列預算</text>
+    <text x="64" y="722">2022-12　縣長交接：甲 → 乙（重新開始）</text>
+    <text x="64" y="746">2021-08　中央核定可行性研究</text>
+  </g>
+  <rect x="610" y="700" width="226" height="44" rx="10" fill="#0F172A"/>
+  <text x="723" y="728" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">看完整關係圖 →</text>
+
+  <text x="40" y="796" font-size="13" fill="#475569">政見 7 條｜交接 3 筆｜事件 4 筆｜立場 6 筆，每一筆附出處</text>
+  <text x="40" y="820" font-size="12" fill="#94A3B8">主頁可收錄；完整關係圖另一頁（網址 /lineage/:id/graph）</text>
+</svg>
