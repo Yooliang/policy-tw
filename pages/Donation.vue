@@ -134,6 +134,10 @@ usePageHead({
             運轉成本：本月 AI 自動判定 {{ costs.jev_month_calls.toLocaleString() }} 次、花費約 {{ usd(costs.jev_month_usd) }}；
             AI 判定帳戶餘額 {{ usd(costs.balance_usd) }}；資料庫目前 {{ mb(costs.db_bytes) }}。
           </p>
+          <!-- 官方代理的月費（維護者 2026-10-21 提供，固定寫在這裡；方案有變就改這行） -->
+          <p class="mt-1">
+            官方代理（每月）：Claude 20x 方案 3 個、Grok 20x 方案 1 個、DeepSeek API 約 US$65、Gemini（Antigravity）US$20、Codex US$20。
+          </p>
           <p v-if="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD" class="mt-1 font-medium">
             AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
           </p>
