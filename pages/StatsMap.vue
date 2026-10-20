@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import MechanismNav from '../components/MechanismNav.vue'
@@ -20,8 +20,8 @@ import {
 } from '../lib/candidacy-map'
 import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
 import {
-  K_MAX, boxesIntersect, cellAt, clampView, expandBox, fitBox, fitK, isZoomWheel, lodFor, pickEvictions, pickVisibleTowns,
-  screenToWorld, viewBox, wheelK, zoomAtPoint, zoomModifierLabel, type Box, type Lod, type View,
+  K_MAX, NO_INSETS, boxesIntersect, cellAt, clampView, expandBox, fitBoxInsets, fitKInsets, insetsFromRects, isZoomWheel, lodFor, pickEvictions, pickVisibleTowns,
+  screenToWorld, viewBox, wheelK, zoomAtPoint, zoomModifierLabel, type Box, type Insets, type Lod, type View,
 } from '../lib/map-world'
 import { Map as MapIcon, Plus, Minus, Maximize2, ExternalLink, X } from 'lucide-vue-next'
 
@@ -209,7 +209,29 @@ const cur: View = { cx: 0, cy: 0, k: 1 }
 const view = ref<View>({ cx: 0, cy: 0, k: 1 })
 const lod = ref<Lod>('county')
 const world = computed(() => (countyLayer.value ? { w: countyLayer.value.raster.w, h: countyLayer.value.raster.h } : null))
-const kMin = computed(() => (world.value ? fitK(world.value, size.value.w, size.value.h) : 1))
+// 取景要扣掉被遮住的區域（白色分頁卡片疊進來的 50px、上方浮動面板、下方圖例、右下縮放鈕）：
+// 「看全台」「點區放大置中」「初始置中」都放進扣掉之後看得到的那塊，而不是整個畫布；最小縮放也一樣
+const crumbsPanel = ref<HTMLElement | null>(null)
+const togglesPanel = ref<HTMLElement | null>(null)
+const legendPanel = ref<HTMLElement | null>(null)
+const zoomPanel = ref<HTMLElement | null>(null)
+const insets = ref<Insets>({ ...NO_INSETS })
+/** 量實際面板的位置（桌機與手機的排法不同，量出來的就是當下的樣子）；還沒掛上時只扣白色卡片疊進來的那一塊 */
+function updateInsets() {
+  const st = stage.value?.getBoundingClientRect()
+  if (!st) return
+  const rect = (el: HTMLElement | null) => { const r = el?.getBoundingClientRect(); return r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null }
+  insets.value = insetsFromRects(
+    { left: st.left, top: st.top, right: st.right, bottom: st.bottom },
+    { top: [rect(crumbsPanel.value), rect(togglesPanel.value)], bottom: rect(legendPanel.value), side: rect(zoomPanel.value) },
+  )
+}
+const kMin = computed(() => (world.value ? fitKInsets(world.value, size.value.w, size.value.h, insets.value) : 1))
+/** 整個台灣放進看得到的那塊的正中央 */
+function allView(): View {
+  const w = world.value!
+  return fitBoxInsets({ x0: 0, y0: 0, x1: w.w, y1: w.h }, size.value.w, size.value.h, 1, kMin.value, K_MAX, insets.value)
+}
 let observer: ResizeObserver | null = null
 let animId = 0
 
@@ -264,7 +286,8 @@ function setView(v: View) {
 }
 function fitAll() {
   if (!world.value) return
-  animateTo({ cx: world.value.w / 2, cy: world.value.h / 2, k: kMin.value })
+  updateInsets()
+  animateTo(allView())
 }
 function zoomBy(f: number) {
   animateTo({ cx: cur.cx, cy: cur.cy, k: Math.min(K_MAX, Math.max(kMin.value, cur.k * f)) }, 220)
@@ -406,7 +429,8 @@ function zoomToCode(code: string | null, instant = false) {
   if (!code) { fitAll(); return }
   const box = boxOfUnit(code)
   if (!box) return
-  const target = fitBox(box, size.value.w, size.value.h, 1.4, kMin.value)
+  updateInsets()
+  const target = fitBoxInsets(box, size.value.w, size.value.h, 1.4, kMin.value, K_MAX, insets.value)
   if (instant) { cancelAnim(); setView(target) } else animateTo(target)
 }
 
@@ -632,10 +656,11 @@ function measure() {
   const el = stage.value
   if (!el) return
   const next = { w: Math.max(200, el.clientWidth), h: Math.max(200, el.clientHeight) }
-  const atFit = world.value ? cur.k <= fitK(world.value, size.value.w, size.value.h) * 1.001 : true
+  const atFit = world.value ? cur.k <= kMin.value * 1.001 : true
   size.value = next
+  updateInsets()
   applyViewBox()
-  if (world.value && atFit) setView({ cx: world.value.w / 2, cy: world.value.h / 2, k: fitK(world.value, next.w, next.h) })
+  if (world.value && atFit) setView(allView())
 }
 watch(stage, (el) => {
   observer?.disconnect()
@@ -646,8 +671,9 @@ watch(stage, (el) => {
 })
 watch(countyLayer, async (L) => {
   if (!L) return
+  await nextTick() // 面板掛上之後才量得到位置
   measure()
-  setView({ cx: L.raster.w / 2, cy: L.raster.h / 2, k: kMin.value })
+  setView(allView())
   commitView()
   await applyAtFromUrl()
 }, { once: true })
@@ -713,15 +739,15 @@ usePageHead({
         <!-- 浮動面板：跟上方分頁卡片同一個內容寬度（max-w-7xl＋同樣的左右 padding），垂直放在分頁卡片下方（地圖往上疊了 50px） -->
         <div class="pointer-events-none absolute inset-0 z-10"><div class="mx-auto h-full max-w-7xl px-4 sm:px-6 lg:px-8"><div class="relative h-full">
         <!-- 左上：層級路徑與人數 -->
-        <div class="pointer-events-auto absolute left-0 top-[66px] max-w-full md:max-w-[50%] rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2">
+        <div ref="crumbsPanel" class="pointer-events-auto absolute left-0 top-[66px] max-w-full md:max-w-[50%] rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2">
           <MapCrumbs :crumbs="crumbs" :people="crumbPeople" @pick="zoomToCode" />
         </div>
         <!-- 右上：著色與呈現切換 -->
-        <div class="pointer-events-auto absolute right-0 top-[130px] max-w-full md:top-[66px]">
+        <div ref="togglesPanel" class="pointer-events-auto absolute right-0 top-[130px] max-w-full md:top-[66px]">
           <MapToggles v-model:color-mode="colorMode" v-model:mode="mode" />
         </div>
         <!-- 右下：縮放 -->
-        <div :class="['pointer-events-auto absolute right-0 flex flex-col gap-1', active ? 'bottom-60 md:bottom-4' : 'bottom-4']" data-testid="map-zoom">
+        <div ref="zoomPanel" :class="['pointer-events-auto absolute right-0 flex flex-col gap-1', active ? 'bottom-60 md:bottom-4' : 'bottom-4']" data-testid="map-zoom">
           <button type="button" aria-label="放大" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
             @click="zoomBy(1.8)"><Plus :size="16" /></button>
           <button type="button" aria-label="縮小" class="p-2 rounded-lg border border-slate-200 bg-white/95 shadow text-slate-600 hover:text-blue-600"
@@ -730,7 +756,7 @@ usePageHead({
             @click="fitAll"><Maximize2 :size="16" /></button>
         </div>
         <!-- 左下：圖例與格子尺度 -->
-        <div :class="['pointer-events-auto absolute left-0 bottom-4 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
+        <div ref="legendPanel" :class="['pointer-events-auto absolute left-0 bottom-4 rounded-xl bg-white/90 backdrop-blur border border-slate-200 shadow px-3 py-2 text-xs font-bold text-slate-500 flex-col gap-1 max-w-[calc(100%-5rem)]', active ? 'hidden md:flex' : 'flex']" data-testid="map-legend">
           <div class="flex flex-wrap items-end gap-x-3 gap-y-1">
             <div class="relative w-44 sm:w-56 pb-4" data-testid="map-legend-bar">
               <div class="h-3 rounded" :style="{ background: legend.css }"></div>
