@@ -20,6 +20,7 @@
  */
 import { positionSpec, sectionAnchor, type PositionSpec } from './election-levels'
 import { electionSegment } from './election-route'
+import { isElectionVoted, taipeiToday } from './policy-stage'
 import { electionRegionPath, electionTownshipPath, isCounty } from './election-regions'
 import { townshipNameOf } from './township-directory'
 import { isFormalDistrict } from './district-grouping'
@@ -55,7 +56,7 @@ export const PARTICIPANT_WORD = '參選人'
 
 /** 現在是台灣時間的哪一天（YYYY-MM-DD）。投票日是台灣的日期，不能拿 UTC 的日期去比 */
 export function taiwanDate(now: Date): string {
-  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  return taipeiToday(now)
 }
 
 /**
@@ -63,9 +64,8 @@ export function taiwanDate(now: Date): string {
  * 查不到投票日時用「參選人」——那是不論有沒有投過都說得通的字。
  */
 export function candidacyWord(electionDate: string | undefined, now: Date): string {
-  const day = electionDate?.slice(0, 10)
-  if (!day) return PARTICIPANT_WORD
-  return taiwanDate(now) <= day ? CANDIDATE_WORD : PARTICIPANT_WORD
+  if (!electionDate) return PARTICIPANT_WORD
+  return isElectionVoted(electionDate, taiwanDate(now)) ? PARTICIPANT_WORD : CANDIDATE_WORD
 }
 
 /** 分組顯示的職位帶的組名：key 用來對錨點（跟選舉頁分組的 key 同一個），shown 是括號裡的字 */

@@ -12,6 +12,7 @@
  */
 import { candidacyNote, officeTitles, RESULT_PENDING } from './politician-office'
 import { participationLabel } from './participation-label'
+import { isElectionVoted } from './policy-stage'
 import type { Election, Politician } from '../types'
 
 export interface DirectoryEntry {
@@ -134,7 +135,7 @@ export function directoryLabel(pl: Politician, electionDates: ReadonlyMap<number
   if (!latest) return ''
   const what = participationLabel(latest)
   const date = electionDates.get(latest.electionId) ?? ''
-  const note = candidacyNote(latest, date !== '' && date < today)
+  const note = candidacyNote(latest, isElectionVoted(date, today))
   if (!what || !note) return ''
   const year = date.slice(0, 4) || String(latest.electionId)
   return note === RESULT_PENDING ? `${year} ${what}參選人` : `${year} ${what}・${note}`

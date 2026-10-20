@@ -8,6 +8,7 @@
  */
 import type { Election, Politician, PoliticianElectionData } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
+import { isElectionVoted } from '../policy-stage'
 import { isCounty } from '../election-regions'
 import { positionsToLoad } from '../election-levels'
 import { participationLabel } from '../participation-label'
@@ -49,7 +50,7 @@ export function scopeOf(p: Politician, election: Election, today: string): Scope
   if (p.mergedInto) return null
   const rec = runningRecord(p, election.id)
   if (!rec) return null
-  const note = mdCandidacyNote(rec, election.electionDate < today)
+  const note = mdCandidacyNote(rec, isElectionVoted(election.electionDate, today))
   const what = participationLabel(rec) || rec.position || '參選'
   return { politician: p, region: regionOfRecord(rec.region), label: `${election.electionDate.slice(0, 4)} ${what}${note ? `・${note}` : ''}` }
 }

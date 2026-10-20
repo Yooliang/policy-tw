@@ -17,18 +17,18 @@ export interface DatedElection {
   electionReason?: string
 }
 
-const TAIPEI_OFFSET_MS = 8 * 3600 * 1000
+import { isElectionVoted, taipeiToday } from './policy-stage.ts'
 
 /** epoch 毫秒 → 台灣日期 YYYY-MM-DD */
 export function taipeiDay(ms: number): string {
-  return new Date(ms + TAIPEI_OFFSET_MS).toISOString().slice(0, 10)
+  return taipeiToday(ms)
 }
 
 /** 投票日由近到遠的「今後的選舉」（含今天投票的）與由近到遠的「過去的選舉」 */
 export function splitElections<T extends DatedElection>(elections: readonly T[], today: string): { upcoming: T[]; past: T[] } {
   const dated = elections.filter((e) => !!e.electionDate)
-  const upcoming = dated.filter((e) => e.electionDate >= today).sort((a, b) => a.electionDate.localeCompare(b.electionDate))
-  const past = dated.filter((e) => e.electionDate < today).sort((a, b) => b.electionDate.localeCompare(a.electionDate))
+  const upcoming = dated.filter((e) => !isElectionVoted(e.electionDate, today)).sort((a, b) => a.electionDate.localeCompare(b.electionDate))
+  const past = dated.filter((e) => isElectionVoted(e.electionDate, today)).sort((a, b) => b.electionDate.localeCompare(a.electionDate))
   return { upcoming, past }
 }
 

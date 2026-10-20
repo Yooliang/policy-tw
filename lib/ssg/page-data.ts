@@ -2,6 +2,7 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { withElectionData, type DataSnapshot } from '../../composables/useSupabase'
 import type { Lineage, Policy, Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
+import { taipeiToday } from '../policy-stage'
 import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
@@ -66,7 +67,7 @@ const partyListMemo = new WeakMap<DataSnapshot, PartySummary[]>()
 
 /** 判斷「投完票了沒」用的今天：快照的建置日（台北時間），預渲染整個建置期間是同一天 */
 function snapshotDay(full: DataSnapshot): string {
-  return new Date((full.generatedAt ?? Date.now()) + 8 * 3600 * 1000).toISOString().slice(0, 10)
+  return taipeiToday(full.generatedAt ?? Date.now())
 }
 
 export function directoryFor(full: DataSnapshot): { index: DirectoryGroupSummary[]; groups: Map<string, DirectoryGroup> } {

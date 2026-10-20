@@ -89,9 +89,17 @@ Deno.test('參與者：官方角色照 提案 → 共同提案 → 連署 → �
 
 Deno.test('時間軸的職位：當選才寫職位，沒當選或還沒投票寫「參選人」（職稱只能從當選來）；競選承諾不重複印', () => {
   const person = { elections: [{ electionId: 2022, electionType: '縣市長', candidacyStatus: 'elected' }, { electionId: 2026, electionType: '縣市長' }], offices: [] }
-  assertEquals(termRoleLabel(person, 2022), '縣市長')
-  assertEquals(termRoleLabel(person, 2026), '縣市長參選人')
-  assertEquals(termRoleLabel({ elections: [{ electionId: 2022, electionType: '縣市議員' }], offices: [{ electionId: 2022 }] }, 2022), '縣市議員', '參選紀錄沒標當選、但現任公職就是那一屆，也算當選')
+  const dates = new Map([[2022, '2022-11-26'], [2026, '2026-11-28']])
+  const today = '2026-10-20'
+  assertEquals(termRoleLabel(person, 2022, dates, today), '縣市長')
+  assertEquals(termRoleLabel(person, 2026, dates, today), '縣市長參選人')
+  // #672 R6：當選只認 candidacy_status＝elected 而且已投票；現任公職不算當選
+  const officeOnly = { elections: [{ electionId: 2022, electionType: '縣市議員' }], offices: [{ electionId: 2022 }] }
+  assertEquals(termRoleLabel(officeOnly, 2022, dates, today), '縣市議員參選人', '參選紀錄沒標當選，現任公職不拿來補（原本會當成當選）')
+  assertEquals(termRoleLabel(person, 2022, dates, '2022-11-26'), '縣市長參選人', '投票日當天還沒投票')
+  assertEquals(termRoleLabel(person, 2022, dates, '2022-11-27'), '縣市長')
+  assertEquals(termRoleLabel({ elections: [{ electionId: 2022, electionType: '縣市長', candidacyStatus: 'elected', electionDate: '2022-11-26' }] }, 2022, new Map(), today), '縣市長', '沒給投票日對照時用參選紀錄自帶的')
+  assertEquals(termRoleLabel(person, 2022, new Map(), today), '縣市長參選人', '查不到投票日就當還沒投票')
   assertEquals(termRoleLabel(undefined, 2022), '')
   const label = (s: string) => ({ 'Campaign Pledge': '競選承諾', 'In Progress': '進行中' } as Record<string, string>)[s] ?? s
   assertEquals(policyMeta({ origin: 'pledge', status: 'Campaign Pledge' as Policy['status'] }, label), '競選承諾')

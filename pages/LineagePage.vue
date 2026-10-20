@@ -21,6 +21,7 @@ import {
   BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, LEVEL_LABEL, LINEAGE_NAME,
   lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
 } from '../lib/lineage'
+import { taipeiToday } from '../lib/policy-stage'
 import type { Policy } from '../types'
 
 const route = useRoute()
@@ -63,8 +64,8 @@ const nameOf = (id: string) => personById.value.get(id)?.name
 const electionDates = computed(() => new Map(elections.value.map((e) => [e.id, e.electionDate])))
 const electionShortName = (id: number | null) => (id === null ? null : elections.value.find((e) => e.id === id)?.shortName ?? null)
 
-// 今天（ISO 日期，同資料庫 CURRENT_DATE 用 UTC）：判斷「那一任卸任了沒」「投票日過了沒」
-const today = new Date().toISOString().slice(0, 10)
+// 今天（台北日期，同資料庫 activity_today()）：判斷「那一任卸任了沒」「投票日過了沒」
+const today = taipeiToday()
 
 /**
  * 交接區什麼時候出現：已經有交接紀錄；或脈絡裡有首長那一任的政見、而那一任已卸任（跟派交接任務同一個條件，lib/lineage.ts）。
@@ -82,7 +83,7 @@ const lowers = computed(() => lineage.value?.links.filter((k) => k.direction ===
 
 /** 那一任的職位：當選寫職位、沒當選或還沒投票寫「…參選人」（lib/lineage.ts 的 termRoleLabel） */
 function officeOf(politicianId: string, electionId: number | null): string {
-  return termRoleLabel(personById.value.get(politicianId), electionId)
+  return termRoleLabel(personById.value.get(politicianId), electionId, electionDates.value, today)
 }
 
 const place = computed(() => (lineage.value ? lineagePlace(lineage.value) : ''))

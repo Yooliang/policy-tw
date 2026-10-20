@@ -13,6 +13,7 @@
  *
  * 零執行期依賴（只有型別），能被 deno 直接測。
  */
+import { isElectionVoted } from './policy-stage'
 import type { Policy, PolicyElement, PolicyElementKind, PolicyElementSource, RawPolicyElement } from '../types'
 
 export const ELEMENT_KINDS: readonly PolicyElementKind[] = ['target', 'deadline', 'funding']
@@ -127,7 +128,7 @@ export function deadlineDue(policy: Policy, ctx: DueContext): DuePolicy | null {
   if ((policy.logs ?? []).some((l) => typeof l.date === 'string' && l.date.slice(0, 10) > d)) return null
   if (policy.status === 'Campaign Pledge') {
     const vote = ctx.electionDateOf(policy)
-    if (!vote || !(vote < ctx.today)) return null
+    if (!isElectionVoted(vote, ctx.today)) return null
   }
   const result = ctx.candidacyStatusOf(policy)
   if (result === 'not_elected' || result === 'withdrawn') return null
