@@ -21,7 +21,7 @@ import {
   BASIS_LABEL, buildTimeline, HANDOVER_BADGE, HANDOVER_HINT, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, LEVEL_LABEL, LINEAGE_NAME,
   lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, sourceLabel, termRoleLabel,
 } from '../lib/lineage'
-import { taipeiToday } from '../lib/policy-stage'
+import { stageOfPolicy, stageWord, taipeiToday } from '../lib/policy-stage'
 import type { Policy } from '../types'
 
 const route = useRoute()
@@ -84,6 +84,16 @@ const lowers = computed(() => lineage.value?.links.filter((k) => k.direction ===
 /** 那一任的職位：當選寫職位、沒當選或還沒投票寫「…參選人」（lib/lineage.ts 的 termRoleLabel） */
 function officeOf(politicianId: string, electionId: number | null): string {
   return termRoleLabel(personById.value.get(politicianId), electionId, electionDates.value, today)
+}
+
+/** 參與者徽章：這個人在脈絡裡的條目全是承諾寫「承諾提出者」、全是政見寫「政見提出者」、兩種都有寫「承諾與政見提出者」（#672） */
+function proposerBadge(politicianId: string): string {
+  const person = personById.value.get(politicianId)
+  const words = new Set(lineagePolicies.value
+    .filter((p) => String(p.politicianId) === politicianId)
+    .map((p) => stageWord(stageOfPolicy(p, person, (id) => electionDates.value.get(id), today))))
+  if (words.size === 2) return '承諾與政見提出者'
+  return `${[...words][0] ?? '政見'}提出者`
 }
 
 const place = computed(() => (lineage.value ? lineagePlace(lineage.value) : ''))
@@ -211,7 +221,7 @@ usePageHead({
                     <span class="ml-1 text-xs text-slate-500">{{ row.claim.sourceLocator }}｜<a :href="row.claim.sourceUrl" target="_blank" rel="noopener noreferrer" class="text-blue-700 underline underline-offset-2 break-all">{{ sourceLabel(row.claim.source) || row.claim.sourceUrl }}</a></span>
                   </p>
                   <p v-if="!row.official && !row.claim" class="text-xs text-slate-500">
-                    <span class="inline-block px-2 py-0.5 rounded font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">政見提出者</span>
+                    <span class="inline-block px-2 py-0.5 rounded font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">{{ proposerBadge(row.politicianId) }}</span>
                     <span v-if="row.representative" class="ml-1">還沒有官方紀錄的角色</span>
                   </p>
                   <p v-if="row.policyCount > 0" class="text-xs text-slate-500">在這條脈絡裡有 {{ row.policyCount }} 條政見</p>

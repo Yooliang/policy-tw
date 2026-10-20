@@ -87,8 +87,8 @@ try {
 
     const policyBtn = page.locator('[data-testid="hero-query-policy"]')
     const profileBtn = page.locator('[data-testid="hero-query-profile"]')
-    check(await policyBtn.count() === 1 && await profileBtn.count() === 1, '人物頁動作列（返回鈕不計）恰好 2 顆：查政見／查簡介')
-    check((await policyBtn.textContent()).trim() === '查政見', `「查政見」文案逐字：「${(await policyBtn.textContent()).trim()}」`)
+    check(await policyBtn.count() === 1 && await profileBtn.count() === 1, '人物頁動作列（返回鈕不計）恰好 2 顆：查承諾與政見／查簡介')
+    check((await policyBtn.textContent()).trim() === '查承諾與政見', `「查承諾與政見」文案逐字：「${(await policyBtn.textContent()).trim()}」`)
     check((await profileBtn.textContent()).trim() === '查簡介', `「查簡介」文案逐字：「${(await profileBtn.textContent()).trim()}」`)
     check(await page.locator('text=請 AI 補齊這個人的資料').count() === 0, '舊的「請 AI 補齊這個人的資料」已移除')
 
@@ -96,8 +96,8 @@ try {
     await policyBtn.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="hero-query-policy"]')?.textContent.includes('已在任務池中'))
     const scrollAfter = await page.evaluate(() => window.scrollY)
-    check(scrollAfter === scrollBefore, '「查政見」按下後不捲動（就地顯示狀態）')
-    check((await policyBtn.textContent()).includes('已在任務池中'), `「查政見」按下後就地顯示「已在任務池中」：「${(await policyBtn.textContent()).trim()}」`)
+    check(scrollAfter === scrollBefore, '「查承諾與政見」按下後不捲動（就地顯示狀態）')
+    check((await policyBtn.textContent()).includes('已在任務池中'), `「查承諾與政見」按下後就地顯示「已在任務池中」：「${(await policyBtn.textContent()).trim()}」`)
     check(bodies.length === 1 && bodies[0].kind === 'policy' && bodies[0].politician_id === politicianId, `request-task 收到 kind=policy 與正確 politician_id（${JSON.stringify(bodies[0])}）`)
 
     await profileBtn.click()
@@ -134,12 +134,12 @@ try {
     check(policyBodies.length === 1 && policyBodies[0].kind === 'progress' && policyBodies[0].policy_id === policyId, `request-task 收到 kind=progress 與正確 policy_id（${JSON.stringify(policyBodies[0])}）`)
     check(page.url().includes(`/policy/${policyId}`), '「查進度」按下後留在政見頁，不跳去公民提問')
 
-    // 「這不是政見？」：按一下就建 policy_validity 任務，不跳頁、不用填文字
+    // 「這不是承諾？／這不是政見？」（依那一條的階段）：按一下就建 policy_validity 任務，不跳頁、不用填文字
     const validityBtn = page.locator('[data-testid="hero-not-a-policy"]')
     await validityBtn.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="hero-not-a-policy"]')?.textContent.includes('已排入'))
     check(policyBodies.length === 2 && policyBodies[1].kind === 'validity' && policyBodies[1].policy_id === policyId, `request-task 收到 kind=validity 與正確 policy_id（${JSON.stringify(policyBodies[1])}）`)
-    check(page.url().includes(`/policy/${policyId}`), '「這不是政見？」按下後留在政見頁')
+    check(page.url().includes(`/policy/${policyId}`), '「這不是承諾？／這不是政見？」按下後留在政見頁')
     check((await page.locator('a[href="/ai-assistant?tab=tasks"]').count()) >= 1, '送出後有連到任務看板（/ai-assistant?tab=tasks）的連結')
 
     await page.waitForSelector('#history [data-testid="history-panel"]')
@@ -169,11 +169,11 @@ try {
     const sourceBtn = page.locator('[data-testid="hero-policy-source"]')
     const progressBtn = page.locator('[data-testid="hero-progress"]')
     const auditBtn = page.locator('[data-testid="hero-audit-focus"]')
-    check(await sourceBtn.count() === 1 && await progressBtn.count() === 1 && await auditBtn.count() === 1, '分析頁動作列（返回鈕不計）恰好 3 顆：政見原文／查進度／執行稽核')
-    check((await sourceBtn.textContent()).trim() === '政見原文', `「政見原文」文案逐字：「${(await sourceBtn.textContent()).trim()}」`)
+    check(await sourceBtn.count() === 1 && await progressBtn.count() === 1 && await auditBtn.count() === 1, '分析頁動作列（返回鈕不計）恰好 3 顆：承諾原文或政見原文／查進度／執行稽核')
+    check(/^(承諾|政見)原文$/.test((await sourceBtn.textContent()).trim()), `「承諾原文／政見原文」（依那一條的階段）文案逐字：「${(await sourceBtn.textContent()).trim()}」`)
     check((await progressBtn.textContent()).trim() === '查進度', `「查進度」文案逐字：「${(await progressBtn.textContent()).trim()}」`)
     check((await auditBtn.textContent()).trim() === '執行稽核', `「執行稽核」文案逐字：「${(await auditBtn.textContent()).trim()}」`)
-    check(await sourceBtn.getAttribute('href') === `/policy/${analysisId}`, `「政見原文」連到 /policy/${analysisId}`)
+    check(await sourceBtn.getAttribute('href') === `/policy/${analysisId}`, `「承諾原文／政見原文」連到 /policy/${analysisId}`)
 
     await progressBtn.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="hero-progress"]')?.textContent.includes('已排入'))

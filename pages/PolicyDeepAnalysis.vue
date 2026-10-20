@@ -24,6 +24,7 @@ import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } 
 import { policyYear } from '../lib/policy-date'
 import { lineageChain } from '../lib/policy-chain'
 import { officeTitles } from '../lib/politician-office'
+import { stageOfPolicy, stageWord } from '../lib/policy-stage'
 
 const route = useRoute()
 const router = useRouter()
@@ -79,6 +80,8 @@ const selectedPolicy = computed(() => policies.value.find(p => String(p.id) === 
 const lineageChainPolicies = computed(() => lineageChain(selectedPolicy.value, policies.value))
 
 const politician = computed(() => selectedPolicy.value ? politicians.value.find(c => String(c.id) === String(selectedPolicy.value!.politicianId)) : null)
+// 這一條現在叫「承諾」還是「政見」（lib/policy-stage.ts，#672）
+const word = computed(() => selectedPolicy.value ? stageWord(stageOfPolicy(selectedPolicy.value, politician.value, (id) => elections.value.find((e) => e.id === id)?.electionDate)) : '政見')
 
 const allPoliticians = computed(() => {
   const ids = new Set(lineageChainPolicies.value.map(p => String(p.politicianId)))
@@ -182,7 +185,7 @@ watch(policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: 
           <button @click="router.push('/analysis')" :class="HERO_ICON_BUTTON" aria-label="返回">
             <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
           </button>
-          <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> 政見原文</HeroAction>
+          <HeroAction data-testid="hero-policy-source" :to="`/policy/${selectedPolicy.id}`"><FileText :size="16" /> {{ word }}原文</HeroAction>
           <HeroAction data-testid="hero-progress" @click="progressRequest.send({ kind: 'progress', policy_id: selectedPolicy.id })">
             <Loader2 v-if="progressRequest.loading.value" :size="16" class="animate-spin" />
             <CheckCircle v-else-if="progressRequest.done.value" :size="16" />
@@ -204,7 +207,7 @@ watch(policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: 
             v-model="sourceUrl"
             type="url"
             inputmode="url"
-            placeholder="貼上相關文件網址，請 AI 核對與這條政見的落差..."
+            :placeholder="`貼上相關文件網址，請 AI 核對與這條${word}的落差...`"
             :class="['w-full border-none rounded-xl py-3 pl-12 pr-4 text-navy-900 placeholder:text-slate-400 focus:ring-2 transition-all text-sm', auditError ? 'ring-2 ring-red-400 focus:ring-red-400' : 'focus:ring-blue-500']"
             data-testid="audit-url"
             @input="auditError = null"
@@ -384,7 +387,7 @@ watch(policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: 
 
     <!-- 這條政見的查核履歷（同 /policy 頁，target=policy） -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
-      <HistoryPanel target="policy" :id="selectedPolicy.id" title="這條政見的查核履歷" agent-display="icon" />
+      <HistoryPanel target="policy" :id="selectedPolicy.id" :title="`這條${word}的查核履歷`" agent-display="icon" />
     </div>
   </div>
 </template>

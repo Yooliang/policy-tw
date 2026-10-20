@@ -79,3 +79,27 @@ export function policyStage(
   if (statuses.includes('not_elected') || statuses.includes('withdrawn')) return 'lost_pledge'
   return 'pending_result'
 }
+
+/** 單條政見畫面上叫什麼：政見階段叫「政見」，其餘（承諾、落選／退選的承諾、結果待補）叫「承諾」（R3） */
+export function stageWord(stage: PolicyStage): '承諾' | '政見' {
+  return stage === 'policy' ? '政見' : '承諾'
+}
+
+/**
+ * 狀態徽章的字：status 還是 Campaign Pledge 時，承諾階段印「承諾」；當選者那一屆（政見階段、還沒有任何進度紀錄）
+ * 印「提出」（R8，顯示層映射，status 不動）。其他 status 回 null，由呼叫端用原本的狀態標籤。
+ */
+export function stageBadgeLabel(status: string | undefined, stage: PolicyStage): string | null {
+  if (status !== 'Campaign Pledge') return null
+  return stage === 'policy' ? '提出' : '承諾'
+}
+
+/** 「那一條」的階段：用提出者的參選紀錄與選舉清單的投票日（頁面與元件共用，今天用台北日） */
+export function stageOfPolicy(
+  policy: Pick<Policy, 'status' | 'origin' | 'electionId'>,
+  politician: { elections?: readonly StageElectionRecord[] } | null | undefined,
+  electionDateOf?: (electionId: number) => string | null | undefined,
+  today: string = taipeiToday(),
+): PolicyStage {
+  return policyStage(policy, politician?.elections, today, electionDateOf)
+}

@@ -7,7 +7,8 @@ import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyElectionYear, policyYear } from '../lib/policy-date'
 import { electionOutcome } from '../lib/candidate-status'
-import { isElectionVoted } from '../lib/policy-stage'
+import { isElectionVoted, stageOfPolicy, stageWord } from '../lib/policy-stage'
+import { isPledge } from '../lib/pledge-origin'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -33,15 +34,21 @@ const props = withDefaults(defineProps<{
   showStatus?: boolean
 }>(), { showPolitician: true, showStatus: true })
 
-const isCampaign = props.policy.status === PolicyStatus.CAMPAIGN
+// 階段（lib/policy-stage.ts）：承諾版型＝還在承諾（選前、落選／退選、結果待補）；當選者那一屆與任內施政走政見卡（#672 R8）。
+// 版型與字眼都讀這一個值，不再比 status
+const { elections, getElectionById } = useSupabase()
+const stage = computed(() => stageOfPolicy(props.policy, props.politician, (id) => getElectionById(id)?.electionDate))
+const isCampaign = computed(() => stage.value !== 'policy')
+const word = computed(() => stageWord(stage.value))
+// 當選者那一屆、狀態還停在 Campaign Pledge＝沒有任何進度紀錄：印「尚無進度紀錄」，不印 0%
+const noProgressRecord = computed(() => props.policy.status === PolicyStatus.CAMPAIGN)
 
 // 用小卡（無期待度、無⭐）的兩種承諾（2026-09-18）：
 //   1. 那場選舉已經投完票——支持或反對一個 2024 年的承諾改變不了任何事
 //   2. 沒標屆別——不知道是哪一場，就不能當成進行中的來收集民意
 // 「當選了沒」不拿來當依據：已投票屆別的結果（candidacy_status 的當選、落選）目前九成是空的。
-const { elections } = useSupabase()
 const isPastCampaign = computed(() => {
-  if (!isCampaign) return false
+  if (!isCampaign.value) return false
   if (props.policy.electionId == null) return true
   const date = elections.value.find((e) => e.id === props.policy.electionId)?.electionDate
   return isElectionVoted(date)
@@ -56,12 +63,12 @@ const shownFollows = computed(() => followCount(props.policy.id, props.policy.st
 // 那場選舉的結果：落選就標出來，順便解釋為什麼這張卡沒有進度可看。
 // 查不到（過去選舉九成還是空的）就不標，不猜。
 const campaignResult = computed(() => {
-  if (!isCampaign || props.policy.electionId == null) return null
+  if (!isPledge(props.policy) || props.policy.electionId == null) return null
   return electionOutcome(props.politician.elections?.find((e) => e.electionId === props.policy.electionId)?.candidacyStatus)
 })
 
 // 第 3 種狀態（人為主）：競選承諾而且那場還沒投票。其餘走「標題為主軸」
-const personFirst = computed(() => isCampaign && !isPastCampaign.value)
+const personFirst = computed(() => isCampaign.value && !isPastCampaign.value)
 
 const starTitle = computed(() => {
   if (isCheckpointed.value) return '取消關注'
@@ -102,7 +109,7 @@ const toggleCheckpoint = (e: Event) => {
             <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{{ politician.party }}</span>
           </div>
         </div>
-        <StatusBadge v-if="props.showStatus" :status="policy.status" />
+        <StatusBadge v-if="props.showStatus" :status="policy.status" :stage="stage" />
       </div>
 
       <!-- 收藏星星跟標題同一行：原本浮在右上角、還要 hover 才出現，跟狀態標籤也會疊到 -->
@@ -129,7 +136,7 @@ const toggleCheckpoint = (e: Event) => {
         <div class="flex items-center gap-1.5">
           <Calendar :size="12" class="text-slate-300" />
           <!-- 承諾的年份跟屆別走（分組、當選與否都看 election_id；2026-09-20 蔡培慧那筆提出日期 2026 卻標 2024，卡片自己打架），沒屆別才退回提出日期 -->
-          <span>{{ isCampaign ? `${policyElectionYear(policy, elections) ?? policyYear(policy, elections) ?? '—'} 承諾` : `狀態截至 ${policy.lastUpdated.slice(0, 7)}` }}</span>
+          <span>{{ isCampaign || noProgressRecord ? `${policyElectionYear(policy, elections) ?? policyYear(policy, elections) ?? '—'} ${word}` : `狀態截至 ${policy.lastUpdated.slice(0, 7)}` }}</span>
         </div>
         <div v-if="campaignResult" class="flex items-center gap-1.5">
           <span :class="['px-1.5 py-0.5 rounded-full', campaignResult === 'elected' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']"
@@ -161,8 +168,11 @@ const toggleCheckpoint = (e: Event) => {
         </div>
         <span class="flex items-center gap-1 text-rose-600 shrink-0" title="反對">{{ policy.stanceOppose }}<ThumbsDown :size="13" class="fill-current" /></span>
       </div>
-      <!-- 已投票那場的承諾：什麼都不放。進度條對它沒意義（沒當選就不會有執行進度，
-           當選且有進度的話狀態早就不是「競選承諾」了，會落在人物頁的施政那一區） -->
+      <!-- 已投票那場沒當選的承諾：什麼都不放。進度條對它沒意義（沒當選就不會有執行進度）。
+           當選者那一屆走政見卡（#672 R8）：還沒有任何進度紀錄就印「尚無進度紀錄」，不印 0% -->
+      <div v-else-if="!isCampaign && noProgressRecord" class="mt-auto text-[10px] font-black text-slate-400 uppercase tracking-widest" data-testid="no-progress-record">
+        尚無進度紀錄
+      </div>
       <div v-else-if="!isCampaign" class="mt-auto space-y-2">
         <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
           <span class="flex items-center gap-2">當前執行進度<span v-if="policy.noPublicProgress" data-testid="no-public-progress" class="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 normal-case tracking-normal">查無公開進度</span></span>
@@ -189,7 +199,7 @@ const toggleCheckpoint = (e: Event) => {
         <span class="text-slate-200 shrink-0">|</span>
       </template>
       <span :class="`text-[10px] font-black uppercase tracking-widest shrink-0 ${isCampaign ? 'text-violet-500' : 'text-slate-400'} ${isCampaign && !isPastCampaign ? '' : 'flex-1'}`">
-        {{ isCampaign ? '查看承諾詳情' : '查看詳細歷程' }}
+        {{ isCampaign ? '查看承諾詳情' : (noProgressRecord ? '查看政見詳情' : '查看詳細歷程') }}
       </span>
       <ChevronRight :size="14" :class="`shrink-0 ml-auto ${isCampaign ? 'text-violet-300' : 'text-slate-300'} group-hover:translate-x-1 transition-transform`" />
     </div>

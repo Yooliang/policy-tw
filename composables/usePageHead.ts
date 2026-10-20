@@ -58,8 +58,8 @@ export function jsonLdText(data: Record<string, unknown>): string {
  * 引用字串：「〈標題〉，某某的政見。正見，網址（資料更新 日期）」。畫面上的「引用這筆資料」與 llms.txt 講的是同一個格式，
  * AI 轉述時照抄就帶上出處（資料是 CC BY 4.0，本來就要標）。
  */
-export function citationText(opts: { title: string; who?: string; url: string; updated?: string | null }): string {
-  const who = opts.who ? `，${opts.who}的政見` : ''
+export function citationText(opts: { title: string; who?: string; kind?: '承諾' | '政見'; url: string; updated?: string | null }): string {
+  const who = opts.who ? `，${opts.who}的${opts.kind ?? '政見'}` : ''
   const updated = opts.updated ? `（資料更新：${opts.updated.slice(0, 10)}）` : ''
   return `〈${opts.title}〉${who}。資料來源：${SITE_NAME}（正見.tw）${opts.url}${updated}`
 }

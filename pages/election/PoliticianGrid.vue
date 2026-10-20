@@ -194,7 +194,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
                但不能直接藏起來——「這個人還沒有當屆政見」正是要讓人看見、有人去補的事 -->
           <span :class="['inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded mt-2 font-bold',
                          getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
-            <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項政見
+            <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}
           </span>
         </div>
       </div>

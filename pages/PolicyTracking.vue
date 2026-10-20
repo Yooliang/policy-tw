@@ -3,7 +3,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
-import { PolicyStatus } from '../types'
+import type { Policy } from '../types'
+import { stageBadgeLabel, stageOfPolicy } from '../lib/policy-stage'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
@@ -63,6 +64,15 @@ onMounted(() => {
 onUnmounted(() => {
 })
 
+// 「今天」第一次渲染用資料快照的建置日（預渲染與 hydrate 一致），掛載後才換成今天（同選舉一覽頁的做法）。
+// 放在 filteredPolicies 前面：它的階段判斷要用到今天與提出者。
+const today = ref(taipeiDay(dataAsOf.value ?? Date.now()))
+onMounted(() => { today.value = taipeiDay(Date.now()) })
+const politicianById = computed(() => new Map(politicians.value.map(p => [String(p.id), p])))
+const electionDateOf = (id: number) => getElectionById(id)?.electionDate
+/** 這一條現在叫什麼（lib/policy-stage.ts，#672）：這一頁只列「政見」階段的（當選者那一屆與任內施政），承諾不在這裡 */
+const stageOf = (p: Policy) => stageOfPolicy(p, politicianById.value.get(String(p.politicianId)), electionDateOf, today.value)
+
 const filteredPolicies = computed(() => {
   return policies.value.filter(policy => {
     const matchesLocation = policyMatchesRegion(policy, politicians.value, selectedLocation.value)
@@ -70,8 +80,8 @@ const filteredPolicies = computed(() => {
     const matchesSearch = policy.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
                          policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
     const matchesCheckpoints = !showCheckpointsOnly.value || checkpoints.value.includes(policy.id)
-    const isNotCampaign = policy.status !== PolicyStatus.CAMPAIGN
-    return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isNotCampaign
+    const isPolicy = stageOf(policy) === 'policy'
+    return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isPolicy
   })
 })
 
@@ -79,11 +89,7 @@ const filteredPolicies = computed(() => {
  * 期限已到的政見（2026-10-05 #364）：原文寫的達成期限已經過了、還沒標達成或跳票、期限之後也沒有進度紀錄。
  * 條件跟派工臂 deadline_due 同一套（lib/policy-elements.ts 的 deadlineDue）——這些會派給 AI 代理去查做到沒有。
  * 只看縣市篩選（跟這一頁的縣市選擇一致），不看分類與關鍵字：這是一份待查清單，不是搜尋結果。
- * 「今天」第一次渲染用資料快照的建置日（預渲染與 hydrate 一致），掛載後才換成今天（同選舉一覽頁的做法）。
  */
-const today = ref(taipeiDay(dataAsOf.value ?? Date.now()))
-onMounted(() => { today.value = taipeiDay(Date.now()) })
-const politicianById = computed(() => new Map(politicians.value.map(p => [String(p.id), p])))
 const duePolicies = computed(() => dueDeadlinePolicies(
   policies.value.filter(p => policyMatchesRegion(p, politicians.value, selectedLocation.value)),
   {
@@ -93,8 +99,10 @@ const duePolicies = computed(() => dueDeadlinePolicies(
   },
 ))
 const STATUS_TEXT: Record<string, string> = {
-  'Campaign Pledge': '競選承諾', Proposed: '已提出', 'In Progress': '推動中', Stalled: '滯後',
+  Proposed: '已提出', 'In Progress': '推動中', Stalled: '滯後',
 }
+/** 「目前狀態」欄：status 還停在 Campaign Pledge 的，承諾階段印「承諾」、當選者那一屆印「提出」（stageBadgeLabel） */
+const statusText = (p: Policy) => stageBadgeLabel(String(p.status), stageOf(p)) ?? STATUS_TEXT[p.status] ?? p.status
 
 // 以下兩個要放在 filteredPolicies 之後：watch 會立即求值一次來源，
 // 擺在前面會讀到還沒初始化的 const（暫時死區），整個 setup 拋 ReferenceError、
@@ -146,7 +154,7 @@ watch(unrenderablePolicies, (list) => {
 
 usePageHead({
   title: '政見追蹤',
-  description: '持續追蹤全台各縣市首長與民意代表的政見執行進度，依縣市、分類、關鍵字篩選，透過時間軸確認每一項治理承諾都在正確的軌道上。',
+  description: '持續追蹤全台各縣市首長與民意代表的政見執行進度，依縣市、分類、關鍵字篩選，透過時間軸確認每一項政見都在正確的軌道上。',
 })
 </script>
 
@@ -154,7 +162,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen">
     <Hero background-image="/images/heroes/policy-tracking.png">
       <template #title>政見</template>
-      <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項治理承諾都在正確的軌道上。</template>
+      <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項政見都在正確的軌道上。</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
 
       <!-- Hero Actions: 頁籤 -->
@@ -258,7 +266,7 @@ usePageHead({
                   <span class="text-slate-800">{{ d.deadlineText }}</span>
                   <span class="block text-xs text-slate-500">{{ d.deadlineDate }}，已過 {{ d.daysOver }} 天</span>
                 </td>
-                <td class="py-2 border-b border-slate-100 whitespace-nowrap text-slate-600">{{ STATUS_TEXT[d.policy.status] ?? d.policy.status }}</td>
+                <td class="py-2 border-b border-slate-100 whitespace-nowrap text-slate-600">{{ statusText(d.policy) }}</td>
               </tr>
             </tbody>
           </table>
@@ -299,7 +307,7 @@ usePageHead({
         <div v-else class="col-span-full text-center py-32 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-300">
           <template v-if="showCheckpointsOnly">
             <Star :size="48" class="mx-auto mb-4 opacity-20" />
-            <p class="font-bold">你還沒有關注任何政見。按政見旁的⭐就會加進來。</p>
+            <p class="font-bold">你還沒有關注任何承諾或政見。按承諾或政見旁的⭐就會加進來。</p>
             <button @click="showCheckpointsOnly = false" class="mt-4 text-blue-600 font-bold hover:underline">瀏覽全部政見</button>
           </template>
           <template v-else>

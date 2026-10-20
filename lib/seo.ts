@@ -162,9 +162,9 @@ export interface PolicyDescriptionInput {
   /** 屆別簡稱：「2026 九合一」 */
   electionLabel?: string
   category?: string
-  /** 競選承諾（還沒當選前提出的）；其餘是施政或任內政見 */
+  /** 還在承諾階段（選前、落選、退選、結果待補；lib/policy-stage.ts）；其餘（當選者那一屆、任內施政）是政見 */
   isPledge: boolean
-  /** 狀態中文標籤；競選承諾的狀態就是「競選承諾」，不重複寫 */
+  /** 狀態中文標籤；承諾階段的狀態就是「承諾」，不重複寫；空字串＝沒有狀態可寫 */
   statusLabel?: string
   progress?: number
 }
@@ -190,12 +190,12 @@ export function policyBodyForSummary(title: string, body: string | undefined): s
 }
 
 /**
- * 政見頁的摘要：「王小明（民進黨）競選承諾「增設托嬰中心」，類別：社會福利，2026 九合一。<本文>」。
- * 競選承諾沒有進度可說，不寫「進度 0%」；其餘寫狀態與進度。
+ * 政見頁的摘要：「王小明（民進黨）承諾「增設托嬰中心」，類別：社會福利，2026 九合一。<本文>」；當選者那一屆與任內施政寫「政見「…」」。
+ * 承諾沒有進度可說，不寫「進度 0%」；其餘寫狀態與進度。
  */
 export function policyDescription(input: PolicyDescriptionInput): string {
   const who = input.personName ? `${input.personName}${input.party ? `（${input.party}）` : ''}` : ''
-  const lead = `${who}${input.isPledge ? '競選承諾' : '政見'}「${input.title}」`
+  const lead = `${who}${input.isPledge ? '承諾' : '政見'}「${input.title}」`
   // 進度 0% 沒有資訊量（還沒開始就是 0），只在有進度時寫
   const progress = !input.isPledge && input.statusLabel
     ? `${input.statusLabel}${input.progress && input.progress > 0 ? `，進度 ${input.progress}%` : ''}`
@@ -211,11 +211,11 @@ export function policyDescription(input: PolicyDescriptionInput): string {
 }
 
 /**
- * 人物頁摘要最後一句：「正見已收錄其競選承諾 3 項、過往政績 2 項。」
+ * 人物頁摘要最後一句：「正見已收錄其承諾 3 項、政見 2 項。」（兩個數字就是人物頁「承諾」「政見」兩個分頁的筆數）
  * 兩種都沒有就不寫（以前寫「追蹤其競選承諾 0 項、過往政績 0 項」，一萬多位候選人的摘要結尾都一樣）。
  */
 export function personTrackingText(pledges: number, history: number): string {
-  const parts = [pledges > 0 ? `競選承諾 ${pledges} 項` : '', history > 0 ? `過往政績 ${history} 項` : ''].filter(Boolean)
+  const parts = [pledges > 0 ? `承諾 ${pledges} 項` : '', history > 0 ? `政見 ${history} 項` : ''].filter(Boolean)
   return parts.length ? `正見已收錄其${parts.join('、')}。` : ''
 }
 
