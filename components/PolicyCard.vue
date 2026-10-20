@@ -7,6 +7,7 @@ import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyElectionYear, policyYear } from '../lib/policy-date'
 import { electionOutcome } from '../lib/candidate-status'
+import { isElectionVoted } from '../lib/policy-stage'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 
@@ -43,7 +44,7 @@ const isPastCampaign = computed(() => {
   if (!isCampaign) return false
   if (props.policy.electionId == null) return true
   const date = elections.value.find((e) => e.id === props.policy.electionId)?.electionDate
-  return !!date && date < new Date().toISOString().slice(0, 10)
+  return isElectionVoted(date)
 })
 
 // 我的關注改走 useCheckpoints（2026-09-17）：原本這裡直接讀寫 localStorage，

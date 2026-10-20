@@ -6,6 +6,7 @@ import { supabasePublic as supabase } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { useSupabase } from '../composables/useSupabase'
 import { electionYearOfDate } from '../lib/election-route'
+import { isElectionVoted } from '../lib/policy-stage'
 import { createSearchTracker } from '../lib/search-analytics'
 
 /**
@@ -74,7 +75,7 @@ const activeYear = computed(() => refElection.value?.id ?? null)
  */
 const voted = computed(() => {
   const d = refElection.value?.electionDate
-  return !!d && d < new Date().toISOString().slice(0, 10)
+  return isElectionVoted(d)
 })
 /** 選前看候選人，選後看當選人 */
 const highlightStatuses = computed(() => (voted.value ? ['elected'] : RUNNING_STATUSES))
@@ -88,10 +89,9 @@ const highlightStatuses = computed(() => (voted.value ? ['elected'] : RUNNING_ST
  * 同一層之內才按職位位階排。
  */
 const recentVotedYears = computed(() => {
-  const today = new Date().toISOString().slice(0, 10)
   return elections.value
     // 近四年：看投票日的年份，不看 id（新增的選舉 id 不是年份，#344 第二階段 A）
-    .filter((e) => e.electionDate < today && (electionYearOfDate(e.electionDate) ?? 0) >= new Date().getFullYear() - 4)
+    .filter((e) => isElectionVoted(e.electionDate) && (electionYearOfDate(e.electionDate) ?? 0) >= new Date().getFullYear() - 4)
     .map((e) => e.id)
 })
 const hasResults = computed(() => people.value.length > 0 || policies.value.length > 0)

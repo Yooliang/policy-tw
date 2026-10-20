@@ -8,6 +8,7 @@ import type { Election, Policy, Politician, PoliticianElectionData } from '../..
 import { candidacyNote, officeTitles } from '../politician-office'
 import { participationLabel } from '../participation-label'
 import { newerFirst } from '../election-route'
+import { isElectionVoted } from '../policy-stage'
 import { elementCells } from '../policy-elements'
 import { policyStatusLabel } from '../site'
 import {
@@ -36,7 +37,7 @@ function electionName(elections: readonly Election[], id: number): string {
 function participationLine(rec: PoliticianElectionData, elections: readonly Election[], today: string): string {
   const e = elections.find((x) => x.id === rec.electionId)
   const date = rec.electionDate ?? e?.electionDate ?? ''
-  const voted = date !== '' && date < today
+  const voted = isElectionVoted(date, today)
   const status = candidacyNote(rec, voted)
   const what = participationLabel(rec) || rec.position || '參選'
   const year = date.slice(0, 4) || String(rec.electionId)

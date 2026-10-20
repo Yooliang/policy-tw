@@ -10,6 +10,7 @@ import type { Election, Policy, Politician } from '../../types'
 import { POSITIONS, positionSpec } from '../election-levels'
 import { compareRegionName } from '../region-name'
 import { participationLabel } from '../participation-label'
+import { isElectionVoted } from '../policy-stage'
 import { mdCandidacyNote, runningRecord } from './scope'
 import { pledgesOf } from './pledge'
 import {
@@ -49,7 +50,7 @@ export function buildRegionPage(input: RegionMdInput): MdPage {
     const rec = runningRecord(person, election.id)
     if (!rec) continue
     seen.add(person.id)
-    const note = mdCandidacyNote(rec, election.electionDate < input.today)
+    const note = mdCandidacyNote(rec, isElectionVoted(election.electionDate, input.today))
     const what = participationLabel(rec) || rec.position || '參選'
     rows.push({
       person,

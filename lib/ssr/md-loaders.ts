@@ -1,4 +1,5 @@
 import { supabasePublic } from '../supabase'
+import { taipeiToday as policyStageToday } from '../policy-stage'
 import { mapPolicy, mapPolitician } from '../../composables/useSupabase'
 import type { Election, Policy, Politician, RawPolicy, RawPolitician } from '../../types'
 import { fetchAllPages } from '../fetch-all-pages'
@@ -20,7 +21,7 @@ const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** 台北今天（YYYY-MM-DD） */
 export function taipeiToday(now = Date.now()): string {
-  return new Date(now + 8 * 3600 * 1000).toISOString().slice(0, 10)
+  return policyStageToday(now)
 }
 
 export type PersonLoad =

@@ -14,6 +14,7 @@ import type {
   HandoverType, Lineage, LineageHandover, LineageLevel, LineageLink, LineageLinkType, LineageParticipant, LineageSource,
   LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
 } from '../types'
+import { isElectedTerm, isElectionVoted, taipeiToday } from './policy-stage'
 
 export const LINEAGE_NAME = '政策脈絡'
 export const LINEAGE_SHORT_NAME = '脈絡'
@@ -194,17 +195,23 @@ export function buildTimeline(
 }
 
 /**
- * 時間軸上那一任寫什麼職位：那一屆當選（參選紀錄標當選、或現任公職就是那一屆）寫職位本身，例「縣市長」；
- * 沒當選或還沒投票的寫「縣市長參選人」——職稱只能從當選來（2026-10-04 裁決），不能把參選人寫成首長。
+ * 時間軸上那一任寫什麼職位：那一屆已投票而且參選紀錄標當選，寫職位本身，例「縣市長」；
+ * 沒當選、還沒投票的寫「縣市長參選人」——職稱只能從當選來（2026-10-04 裁決），不能把參選人寫成首長。
+ * 「當選」跟全站同一個判斷（lib/policy-stage.ts 的 isElectedTerm，#672 R6）：只認 candidacy_status＝elected 且投票日早於台北今天，
+ * 不看現任公職（現任公職是任期表的事，不是這一屆的結果）。投票日從 electionDates 或參選紀錄自帶的 electionDate 取，兩邊都沒有就當還沒投票。
  */
 export function termRoleLabel(
-  person: { elections?: Array<{ electionId: number; electionType?: string; candidacyStatus?: string }>; offices?: Array<{ electionId: number }> } | undefined,
+  person: { elections?: Array<{ electionId: number; electionType?: string; candidacyStatus?: string; electionDate?: string }> } | undefined,
   electionId: number | null,
+  electionDates: ReadonlyMap<number, string> = new Map(),
+  today: string = taipeiToday(),
 ): string {
   if (!person || electionId === null) return ''
-  const rec = person.elections?.find((e) => e.electionId === electionId)
+  const records = (person.elections ?? []).filter((e) => e.electionId === electionId)
+  const rec = records[0]
   if (!rec?.electionType) return ''
-  const elected = rec.candidacyStatus === 'elected' || (person.offices ?? []).some((o) => o.electionId === electionId)
+  const date = electionDates.get(electionId) ?? records.find((r) => r.electionDate)?.electionDate ?? null
+  const elected = isElectedTerm({ election_date: date, candidacy_statuses: records.map((r) => r.candidacyStatus ?? null) }, today)
   return elected ? rec.electionType : `${rec.electionType}參選人`
 }
 
@@ -286,7 +293,7 @@ export function hasBeenRepresentative(
   return (person?.elections ?? []).some((rec) => {
     if (rec.candidacyStatus !== 'elected' || !rec.electionType || !REPRESENTATIVE_OFFICE_TYPES.includes(rec.electionType)) return false
     const date = electionDateOf(rec, electionDates)
-    return date !== null && date < today
+    return isElectionVoted(date, today)
   })
 }
 

@@ -8,6 +8,7 @@ import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 import { ballotLabel } from '../../lib/ballot-number'
+import { isElectionVoted } from '../../lib/policy-stage'
 
 // 根元素的 id（頁內錨點，人物頁麵包屑連到這裡）由呼叫端當 attribute 傳進來；scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住
 const props = defineProps<{
@@ -60,7 +61,7 @@ const getPledgeCount = (politicianId: string | number) =>
 // 這一屆投完票了沒：投完票之後「已登記」那顆勾與「已登記」標籤沒有意思（人人都在選票上），只講結果
 const voted = computed(() => {
   const d = elections.value.find((e) => e.id === props.electionId)?.electionDate
-  return !!d && d < new Date().toISOString().slice(0, 10)
+  return isElectionVoted(d)
 })
 
 // 參選狀態顯示（選前到選後同一欄 candidacy_status；#345 第二階段 A）

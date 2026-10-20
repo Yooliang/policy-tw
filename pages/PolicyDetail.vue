@@ -34,6 +34,7 @@ import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import { electionOutcome } from '../lib/candidate-status'
+import { isElectionVoted } from '../lib/policy-stage'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import { ListChecks, Scale } from 'lucide-vue-next'
@@ -173,10 +174,9 @@ const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN
  * 已投票屆別的競選承諾      → 查兌現情形
  * 未投票或屆別不明的承諾    → 不給按鈕，改說一句為什麼
  */
-const TODAY = new Date().toISOString().slice(0, 10)
 const pledgeElectionDone = computed(() => {
   const d = policyElection.value?.electionDate
-  return !!d && d < TODAY
+  return isElectionVoted(d)
 })
 /**
  * 落選也不給（2026-09-18）：選輸的人不會去執行這條承諾，「查兌現情形」派出去

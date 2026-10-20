@@ -10,6 +10,7 @@
  */
 import { buildPartyIndex, matchParty, type PartyIndex, type PartyRegistry, type PartyRow } from './parties'
 import { candidacyNote, officeTitles } from './politician-office'
+import { isElectionVoted } from './policy-stage'
 import { electionSegment, newerFirst } from './election-route'
 import { participationLabel } from './participation-label'
 import { POSITIONS, positionSpec } from './election-levels'
@@ -190,7 +191,7 @@ export function partyPage(
           name: pl.name,
           what: placeLabel(rec),
           // 投完票的只講結果（結果還沒補上講「結果待補」），還沒投票的講登記階段（lib/politician-office.ts 的 candidacyNote，跟人物頁、人物一覽同一份）
-          status: candidacyNote(rec, e.electionDate < today),
+          status: candidacyNote(rec, isElectionVoted(e.electionDate, today)),
         },
       })
     }
