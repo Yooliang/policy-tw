@@ -84,9 +84,12 @@ export function clampView(view: View, world: { w: number; h: number }): View {
   return { k: view.k, cx: Math.min(world.w, Math.max(0, view.cx)), cy: Math.min(world.h, Math.max(0, view.cy)) }
 }
 
-/** 一格滾輪換成倍率；捏合（ctrlKey）的 deltaY 很小，靈敏度放大；單次變化有上限（慣性滾輪不會一次衝過頭） */
+/**
+ * 一格滾輪換成倍率；觸控板捏合（瀏覽器送帶 ctrlKey 的 wheel，deltaY 很小）靈敏度放大；
+ * 滑鼠 Ctrl＋滾輪（deltaY 一格約 100）走一般靈敏度，不然一格就放大 2.7 倍。單次變化有上限（慣性滾輪不會一次衝過頭）。
+ */
 export function wheelK(k: number, deltaY: number, ctrlKey: boolean, kMin: number, kMax = K_MAX): number {
-  const rate = ctrlKey ? 0.01 : 0.0015
+  const rate = ctrlKey && Math.abs(deltaY) < 30 ? 0.01 : 0.002
   const next = k * Math.exp(-Math.max(-200, Math.min(200, deltaY)) * rate)
   return Math.min(kMax, Math.max(kMin, next))
 }
@@ -127,4 +130,14 @@ export function pickEvictions(loaded: ReadonlyMap<string, number>, keep: Readonl
     .sort((a, b) => a[1] - b[1])
     .slice(0, extra)
     .map(([code]) => code)
+}
+
+/** 滾輪要不要用來縮放地圖：Ctrl（Windows／Linux、觸控板捏合）或 ⌘（Mac）才縮放，一般滾輪留給頁面捲動 */
+export function isZoomWheel(e: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return e.ctrlKey || e.metaKey
+}
+
+/** 提示用的修飾鍵名稱：Mac 顯示 ⌘，其他顯示 Ctrl */
+export function zoomModifierLabel(platform: string): 'Ctrl' | '⌘' {
+  return /Mac|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl'
 }
