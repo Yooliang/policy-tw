@@ -13,6 +13,9 @@ export const fileCache = createAsyncCache<unknown>()
 /** 標籤避讓結果：依（圖層、縮放級距）快取，回到同一級不重算；名稱是靜態資料，所以不會失效 */
 export const labelCache = new Map<string, Array<{ code: string; text: string; x: number; y: number; fs: number }>>()
 
+/** 統計時間（candidacy_map_stats.computed_at，ISO 字串；沒有統計表資料＝null），跟人數同一個快取週期 */
+export const statsTimeCache = createAsyncCache<string | null>()
+
 export function rowsKey(electionId: number, level: string, parent?: string): string {
   return `${electionId}:${level}:${parent ?? ''}`
 }
