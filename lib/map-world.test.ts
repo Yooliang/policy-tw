@@ -4,7 +4,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  K_MAX, TOWN_AT, VILLAGE_AT, boxesIntersect, cellAt, clampView, isZoomWheel, zoomModifierLabel, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
+  K_MAX, TOWN_AT, VILLAGE_AT, boxesIntersect, cellAt, clampView, fitBoxInsets, fitKInsets, insetsFromRects, NO_INSETS, isZoomWheel, zoomModifierLabel, fitBox, fitK, layerBox, lodFor, pickEvictions, pickVisibleTowns,
   screenToWorld, viewBox, wheelK, zoomAtPoint,
 } from "./map-world.ts";
 import { decodeRaster, type RasterFile } from "./raster-grid.ts";
@@ -140,4 +140,65 @@ Deno.test("滑鼠 Ctrl＋滾輪一格（deltaY 約 100）跟一般滾輪一樣�
   assertEquals(wheelK(5, -100, true, 1), wheelK(5, -100, false, 1));
   assert(wheelK(5, -100, true, 1) < 5 * 1.5, "一格不會放大到 1.5 倍以上");
   assert(wheelK(5, -2, true, 1) > wheelK(5, -2, false, 1));
+});
+
+Deno.test("fitBoxInsets：沒有被遮住的邊就跟 fitBox 一樣", () => {
+  const box = { x0: 10, y0: 20, x1: 30, y1: 40 };
+  assertEquals(fitBoxInsets(box, 800, 400, 1.25, 1, 90, NO_INSETS), fitBox(box, 800, 400, 1.25, 1));
+  assertEquals(fitKInsets({ w: 289, h: 395 }, 1000, 500, NO_INSETS), fitK({ w: 289, h: 395 }, 1000, 500));
+});
+
+Deno.test("fitBoxInsets：上方被遮住 → 縮放變小、範圍整塊落在看得到的那塊裡，不會被遮住的邊蓋到", () => {
+  const W = 1000, H = 600;
+  const world = { w: 289, h: 395 };
+  const insets = { top: 140, right: 60, bottom: 90, left: 12 };
+  const full = fitK(world, W, H);
+  const k = fitKInsets(world, W, H, insets);
+  assert(k < full, "扣掉被遮住的區域之後縮放比較小");
+  const v = fitBoxInsets({ x0: 0, y0: 0, x1: world.w, y1: world.h }, W, H, 1, k, 90, insets);
+  assertEquals(v.k, k);
+  // 世界的四個邊在螢幕上的位置：上緣在被遮住的上方邊界之下、下緣在下方邊界之上、左右同理
+  const screenX = (x: number) => W / 2 + (x - v.cx) * v.k;
+  const screenY = (y: number) => H / 2 + (y - v.cy) * v.k;
+  const eps = 1e-6;
+  assert(screenY(0) >= insets.top - eps, `上緣 ${screenY(0)} 被上方面板蓋住（${insets.top}）`);
+  assert(screenY(world.h) <= H - insets.bottom + eps, "下緣被圖例蓋住");
+  assert(screenX(0) >= insets.left - eps && screenX(world.w) <= W - insets.right + eps, "左右被蓋住");
+  // 有一個方向剛好貼滿（取景是「剛好放進去」，不是縮得更小）
+  const hugs = Math.abs(screenY(0) - insets.top) < 1e-6 || Math.abs(screenX(0) - insets.left) < 1e-6;
+  assert(hugs);
+  // 中心：看得到的那塊的正中央
+  assertEquals(Math.round(screenX(world.w / 2)), Math.round(insets.left + (W - insets.left - insets.right) / 2));
+  assertEquals(Math.round(screenY(world.h / 2)), Math.round(insets.top + (H - insets.top - insets.bottom) / 2));
+});
+
+Deno.test("fitBoxInsets：點區放大置中也扣掉被遮住的區域；被遮住的邊太大也不會算出負的縮放", () => {
+  const insets = { top: 126, right: 60, bottom: 90, left: 12 };
+  const box = { x0: 100, y0: 200, x1: 140, y1: 230 };
+  const v = fitBoxInsets(box, 900, 600, 1.4, 1, 90, insets);
+  const sy0 = 300 + (box.y0 - v.cy) * v.k;
+  const sy1 = 300 + (box.y1 - v.cy) * v.k;
+  assert(sy0 >= insets.top - 1e-6 && sy1 <= 600 - insets.bottom + 1e-6);
+  const huge = fitBoxInsets(box, 300, 200, 1, 1, 90, { top: 400, right: 400, bottom: 400, left: 400 });
+  assert(huge.k >= 1 && Number.isFinite(huge.cx) && Number.isFinite(huge.cy));
+});
+
+Deno.test("insetsFromRects：上方取最低的面板下緣（至少是疊進來的 50px）＋邊距，下方是圖例高度，右邊是縮放鈕那排，量不到的不算", () => {
+  const stage = { left: 0, top: 100, right: 1200, bottom: 800 };
+  const r = (left: number, top: number, right: number, bottom: number) => ({ left, top, right, bottom });
+  const i = insetsFromRects(stage, {
+    top: [r(100, 166, 500, 214), r(900, 166, 1100, 212)], // 路徑面板下緣 214、切換下緣 212 → 相對地圖 114
+    bottom: r(100, 700, 500, 784), // 圖例：離地圖下緣 100，高 84
+    side: r(1140, 600, 1180, 784), // 縮放鈕：從 1140 到地圖右緣 1200 → 60
+  });
+  assertEquals(i, { top: 114 + 12, right: 60 + 12, bottom: 100 + 12, left: 12 });
+  // 沒量到：上方至少扣掉白色卡片疊進來的 50px
+  const none = insetsFromRects(stage, { top: [null], bottom: null, side: null });
+  assertEquals(none, { top: 62, right: 12, bottom: 12, left: 12 });
+  // 寬高為 0（display:none，例如手機提示卡開著時藏起來的圖例）不算
+  const hidden = insetsFromRects(stage, { top: [r(0, 0, 0, 0)], bottom: r(0, 0, 0, 0), side: null });
+  assertEquals(hidden.bottom, 12);
+  assertEquals(hidden.top, 62);
+  // 面板比疊進來的 50px 矮時不會小於 50px（卡片本身就蓋住那 50px）
+  assertEquals(insetsFromRects(stage, { top: [r(0, 100, 10, 120)], bottom: null, side: null }).top, 62);
 });

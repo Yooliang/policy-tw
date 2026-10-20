@@ -141,3 +141,66 @@ export function isZoomWheel(e: { ctrlKey: boolean; metaKey: boolean }): boolean 
 export function zoomModifierLabel(platform: string): 'Ctrl' | '⌘' {
   return /Mac|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl'
 }
+
+// ── 取景要扣掉被遮住的區域 ──────────────────────────────────────
+
+/** 螢幕上被選單、浮動面板蓋住的邊（像素）：取景時地圖要放進「扣掉這些邊」之後看得到的那塊 */
+export interface Insets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+export const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 }
+export interface Rect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/** 看得到的那塊的大小（至少 50 像素，免得面板很大時算出負的） */
+function visible(w: number, h: number, i: Insets) {
+  return { aw: Math.max(50, w - i.left - i.right), ah: Math.max(50, h - i.top - i.bottom) }
+}
+
+/** 整張世界剛好放進「扣掉被遮住的區域」之後看得到的那塊 */
+export function fitKInsets(world: { w: number; h: number }, w: number, h: number, i: Insets): number {
+  const { aw, ah } = visible(w, h, i)
+  return Math.max(0.01, Math.min(aw / world.w, ah / world.h))
+}
+
+/** 把某個範圍放進看得到的那塊的正中央（留 pad 倍邊），縮放夾在 [kMin, kMax]；沒有被遮住的邊就跟 fitBox 一樣 */
+export function fitBoxInsets(box: Box, w: number, h: number, pad: number, kMin: number, kMax: number, i: Insets): View {
+  const { aw, ah } = visible(w, h, i)
+  const bw = Math.max(0.5, box.x1 - box.x0) * pad
+  const bh = Math.max(0.5, box.y1 - box.y0) * pad
+  const k = Math.min(kMax, Math.max(kMin, Math.min(aw / bw, ah / bh)))
+  // 看得到的那塊的中心在螢幕上的位置，要剛好對上範圍的中心
+  const vx = i.left + aw / 2
+  const vy = i.top + ah / 2
+  return { cx: (box.x0 + box.x1) / 2 - (vx - w / 2) / k, cy: (box.y0 + box.y1) / 2 - (vy - h / 2) / k, k }
+}
+
+/**
+ * 從實際量到的面板位置算出被遮住的邊（像素，相對地圖左上角）。
+ * - 上：上方面板（路徑與人數、切換）最低的下緣＋邊距，至少是白色分頁卡片疊進來的那 50px＋邊距
+ * - 下：圖例的高度（加上它離底邊的距離）＋邊距
+ * - 右：縮放鈕那一排佔掉的寬度（從它的左緣到地圖右緣）＋邊距
+ * - 左：只留邊距
+ * 量不到（沒掛上、display:none，寬或高是 0）的面板不算。
+ */
+export function insetsFromRects(
+  stage: Rect,
+  panels: { top: Array<Rect | null>; bottom: Rect | null; side: Rect | null },
+  opts: { overlap?: number; margin?: number } = {},
+): Insets {
+  const overlap = opts.overlap ?? 50
+  const margin = opts.margin ?? 12
+  const real = (r: Rect | null): r is Rect => !!r && r.right - r.left > 0 && r.bottom - r.top > 0
+  let top = overlap
+  for (const r of panels.top) if (real(r)) top = Math.max(top, r.bottom - stage.top)
+  const bottom = real(panels.bottom) ? stage.bottom - panels.bottom.top : 0
+  const right = real(panels.side) ? stage.right - panels.side.left : 0
+  return { top: top + margin, right: right > 0 ? right + margin : margin, bottom: bottom > 0 ? bottom + margin : margin, left: margin }
+}
