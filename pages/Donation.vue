@@ -49,7 +49,11 @@ onMounted(async () => {
   } catch { plans.value = [] }
 })
 const plans = ref<AgentPlan[]>([])
-const plansView = computed(() => agentPlanRows(plans.value))
+const lowBalance = computed(() => costs.value != null && costs.value.balance_usd != null && costs.value.balance_usd < LOW_BALANCE_USD)
+const jevCost = computed(() => costs.value
+  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次・餘額 ${usd(costs.value.balance_usd)}` }
+  : null)
+const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}))
 const usd = (n: number | null | undefined) => (n == null ? '—' : `US$${Number(n).toFixed(2)}`)
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
@@ -135,42 +139,40 @@ usePageHead({
           </div>
         </div>
 
-        <!-- 運轉成本：平常一行小字，餘額低時才變明顯 -->
-        <div v-if="costs" class="text-xs text-slate-500 leading-relaxed" :class="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD ? 'bg-amber-50 border border-amber-300 rounded-xl p-4 text-amber-800' : ''">
-          <p>
-            運轉成本：本月 AI 自動判定 {{ costs.jev_month_calls.toLocaleString() }} 次、花費約 {{ usd(costs.jev_month_usd) }}；
-            AI 判定帳戶餘額 {{ usd(costs.balance_usd) }}；資料庫目前 {{ mb(costs.db_bytes) }}。
-          </p>
-          <!-- 官方代理的月費：資料在設定表 agent_plans，方案有變只改表；讀不到就整張表不顯示 -->
-          <table v-if="plansView.rows.length" class="mt-2 w-full max-w-md text-left border-collapse">
-            <caption class="text-left font-medium mb-1">官方代理（每月）</caption>
-            <thead>
-              <tr class="border-b border-slate-200 text-slate-400">
-                <th class="py-1 pr-2 font-normal">官方代理</th>
-                <th class="py-1 pr-2 font-normal">方案</th>
-                <th class="py-1 pr-2 font-normal text-right">數量</th>
-                <th class="py-1 font-normal text-right">月費小計</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in plansView.rows" :key="r.provider + r.plan" class="border-b border-slate-100">
-                <td class="py-1 pr-2">{{ r.provider }}</td>
-                <td class="py-1 pr-2">{{ r.plan }}</td>
-                <td class="py-1 pr-2 text-right">{{ r.qty }}</td>
-                <td class="py-1 text-right whitespace-nowrap">{{ r.approx ? '約 ' : '' }}{{ usd(r.subtotal) }}</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr class="font-medium">
-                <td class="py-1 pr-2" colspan="3">合計</td>
-                <td class="py-1 text-right whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
-              </tr>
-            </tfoot>
-          </table>
-          <p v-if="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD" class="mt-1 font-medium">
+        <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_summary；讀不到就整塊不顯示 -->
+        <section v-if="costs && plansView.rows.length" class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="lowBalance ? 'border-amber-300' : 'border-slate-200'">
+          <h2 class="font-black text-navy-900 mb-3">運轉成本（每月）</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[22rem] text-left text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th class="px-3 py-1.5 font-medium">項目</th>
+                  <th class="px-3 py-1.5 font-medium">方案</th>
+                  <th class="px-3 py-1.5 text-right font-medium">月費</th>
+                  <th class="px-3 py-1.5 font-medium">本週用量</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100">
+                  <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}</td>
+                  <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}{{ r.label ? '・' + r.label : '' }}</td>
+                  <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + usd(r.monthly) }}</td>
+                  <td class="px-3 py-1.5 tabular-nums text-slate-500">{{ r.usage ?? '—' }}</td>
+                </tr>
+              </tbody>
+              <tfoot class="border-t border-slate-200 bg-slate-50 font-medium text-slate-700">
+                <tr>
+                  <td class="px-3 py-1.5" colspan="2">合計</td>
+                  <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
+                  <td class="px-3 py-1.5"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p v-if="lowBalance" class="mt-2 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800">
             AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
           </p>
-        </div>
+        </section>
       </div>
     </div>
   </div>
