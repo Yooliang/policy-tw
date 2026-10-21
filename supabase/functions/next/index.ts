@@ -300,6 +300,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)),
       },
     };
+    // 額度用完就只派另一種（2026-10-22）：提交額度用完 → 只派驗證票（派任務，代理查完交件吃 429，白做）；
+    // 驗證額度用完 → 只派任務。兩邊都用完、或提交用完又沒有合格驗證票 → 回 none 並說明（見下面 submitFull 那段）。額度還有時一字不變。
+    const submitFull = quota.submit.remaining <= 0;
+    const verifyFull = quota.verify.remaining <= 0;
     // protocol_version：代理拿它跟自己手上那份 skill.md 的版本比，不一樣就要重讀再繼續。
     // 不然協議改了，還在跑的代理會照舊規則做到下一次重啟。
     // agent：伺服器解析出來的身份（序號登入時代理不知道自己的代號是什麼，這裡告訴它；藍圖 §3）
@@ -327,7 +331,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 驗證只試一次認領（2026-10-14）：隊頭是驗證但全被同網段的並行請求認領走了，就改派任務；最後的「任務給不出來退回驗證」不再重試
     let verifyTried = false;
     const serveVerify = async (): Promise<Response | null> => {
-      if (verifyTried) return null;
+      if (verifyTried || verifyFull) return null;
       verifyTried = true;
       mark("verify_start");
       // 單一佇列（2026-09-22）：池子已照 queue_at 排，第一筆就是等最久的（訪客看得到的、被插隊的在 1980 年段）。
@@ -517,7 +521,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const autoHead = taskHead && !manualHead ? taskHead : null;
     // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
     // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
-    const verifyHead = candidates[0] ?? null;
+    const verifyHead = verifyFull ? null : (candidates[0] ?? null);
     const taskHeads = [
       manualHead ? { kind: "manual" as const, queue_at: manualHead.queue_at } : null,
       autoHead ? { kind: "auto" as const, queue_at: autoHead.queue_at } : null,
@@ -530,6 +534,18 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       const served = await serveVerify();
       if (served) return served;
       head = pickQueueHead(taskHeads);
+    }
+    if (submitFull) {
+      // 提交額度用完：隊頭若是任務，驗證還沒試過——先派隊列中最前面那張合格驗證票
+      const servedVerify = await serveVerify();
+      if (servedVerify) return servedVerify;
+      // 驗證票沒派成（沒有合格的、驗證額度也用完、或被同網段並行認領走）就是沒事可做，不派任務
+      const msUntilReset = Date.UTC(todayStart.getUTCFullYear(), todayStart.getUTCMonth(), todayStart.getUTCDate() + 1) - Date.now();
+      const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, Math.ceil(msUntilReset / 60000)) : RETRY_AFTER_MIN;
+      const reason = verifyFull
+        ? "今日額度已用完（提交與驗證都滿了），UTC 零時（台北 08:00）重置；請等重置後再來"
+        : "今日提交額度已用完，UTC 零時（台北 08:00）重置；目前也沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來看有沒有新的待驗證";
+      return json({ ...base, kind: "none", reason, retry_after_min: retryMin });
     }
     // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：驗證與任務只照排序鍵（queue_at）先後，
     // 驗證列本身多 14 天（queue_settings.verify_priority_seconds），自己能驗的就排在前面（docs/decisions/2026-10-13-派工排序改秒數.md）
