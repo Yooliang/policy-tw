@@ -14,7 +14,7 @@
  *     不會每 10 分鐘撞同一面牆，也不會因為「建到一半又重來」多建一個人物。
  */
 
-import { type ApplyOutcome, applySystemCandidacy, type SystemCandidacyRow } from "./apply-contribution.ts";
+import { type ApplyOutcome, applySystemCandidacy, type RegionResolution, resolveCandidacyRegion, type SystemCandidacyRow } from "./apply-contribution.ts";
 import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
 import { displayNameOf } from "./candidate-import.ts";
 
@@ -40,12 +40,28 @@ export interface ReconcileCandidate {
   politician_id: string | null;
 }
 
+/** roster_reconcile_region_next() 回的一列：名冊唯一對上（both）、我們那筆參選紀錄 region_id 還是空的人（#731 補地區） */
+export interface RegionCandidate {
+  reg_id: number | string;
+  pe_id: number;
+  politician_id: string | null;
+  election_id: number;
+  election_type: string;
+  county: string;
+  sub_region: string | null;
+  village: string | null;
+  district: string | null;
+  name: string;
+  source_url: string;
+  row_no: number;
+}
+
 export const DEFAULT_AGENT_NAME = "system:roster-reconcile";
 /** 單次呼叫的時間預算（Edge Function 上限 150 秒；留餘裕給刷新彙總與回應） */
 export const BUDGET_MS = 100_000;
 
 /** 登記彙總表那一列 → 跟代理交 candidacy 一樣的 payload（協議的詞：candidate_status＝registered） */
-export function candidacyPayloadOf(c: ReconcileCandidate): Obj {
+export function candidacyPayloadOf(c: Omit<ReconcileCandidate, "party" | "person_action" | "politician_id"> & { party?: string | null }): Obj {
   return {
     name: displayNameOf(c.name),   // 名冊原文，只 trim、連續空白壓成一個；比對才用 roster_name_key
     election_id: c.election_id,
@@ -81,6 +97,8 @@ export interface ReconcileSummary {
   attached: number;
   unresolved: number;
   errors: number;
+  /** 補地區（#731）：這一輪挑了幾位、寫進幾位、對不到唯一一列的、出錯的；settings.actions 沒有 region 就全是 0 */
+  region: { picked: number; applied: number; unresolved: number; errors: number };
   stopped_by_budget: boolean;
   units_refreshed: number | null;
   samples: Array<{ reg_id: number | string; name: string; election_type: string; county: string; outcome: string; message: string }>;
@@ -91,6 +109,8 @@ export interface RunOptions {
   /** 這一輪最多建幾筆（沒給就讀 roster_reconcile_settings.batch_limit） */
   limit?: number;
   apply?: ApplyFn;
+  /** 補地區：對 regions（測試注入；預設 apply-contribution.ts 的 resolveCandidacyRegion，只讀不建） */
+  resolveRegion?: (supabase: SupabaseLike, electionType: string, payload: Obj) => Promise<RegionResolution>;
   /** 清 SSR 快取（測試注入；預設 ssr-purge.ts 的 purgeSsrPages） */
   purge?: (paths: string[]) => Promise<void>;
   runId?: string;
@@ -102,11 +122,11 @@ export interface RunOptions {
  * 寫處理紀錄。失敗就再試一次，還是失敗就丟錯（整輪中止）：參選紀錄已經落庫卻沒有紀錄，之後無法溯源還原，也會被對帳當成「系統沒處理過」。
  * 唯一鍵衝突（別的執行先寫了同一位）不是遺失，當成功。
  */
-async function writeLog(supabase: SupabaseLike, entry: Obj): Promise<void> {
+async function writeLog(supabase: SupabaseLike, entry: Obj, table = "roster_reconcile_log"): Promise<void> {
   let last = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const { error } = await supabase.from("roster_reconcile_log").insert(entry);
+      const { error } = await supabase.from(table).insert(entry);
       if (!error) return;
       if (String(error.code) === "23505") return;
       last = error.message;
@@ -114,7 +134,7 @@ async function writeLog(supabase: SupabaseLike, entry: Obj): Promise<void> {
       last = e instanceof Error ? e.message : String(e);
     }
   }
-  throw new Error(`roster_reconcile_log 寫入失敗（reg ${String(entry.reg_id)}，已重試一次）：${last}。這一筆參選紀錄可能已落庫，需人工對照 edit_history（agent_name＝system:*）`);
+  throw new Error(`${table} 寫入失敗（reg ${String(entry.reg_id)}，已重試一次）：${last}。這一筆參選紀錄可能已落庫，需人工對照 edit_history（agent_name＝system:*）`);
 }
 
 /** 落庫成功後補參選紀錄的政黨（party_id／party_basis）：交件落庫由資料庫觸發器做，系統寫入沒有 contributions 那一列，所以自己呼叫同一支 SQL 函式 */
@@ -134,11 +154,11 @@ export async function runRosterReconcile(supabase: SupabaseLike, opts: RunOption
   const started = now();
   const summary: ReconcileSummary = {
     run_id: opts.runId ?? crypto.randomUUID(), picked: 0, applied: 0, created_politicians: 0, attached: 0, unresolved: 0, errors: 0,
-    stopped_by_budget: false, units_refreshed: null, samples: [], elapsed_ms: 0,
+    region: { picked: 0, applied: 0, unresolved: 0, errors: 0 }, stopped_by_budget: false, units_refreshed: null, samples: [], elapsed_ms: 0,
   };
 
   const { data: settings, error: sErr } = await supabase.from("roster_reconcile_settings")
-    .select("enabled, batch_limit, agent_name").eq("id", 1).maybeSingle();
+    .select("enabled, batch_limit, agent_name, actions").eq("id", 1).maybeSingle();
   if (sErr) throw new Error(`roster_reconcile_settings: ${sErr.message}`);
   if (!settings) throw new Error("roster_reconcile_settings 沒有設定列（id=1），不執行");
   if (settings.enabled !== true) {
@@ -223,6 +243,11 @@ async function runLocked(supabase: SupabaseLike, opts: RunOptions, settings: Obj
     }
   }
 
+  // 補地區（#731）：settings.actions 有 region 才做；跟上面的建立各自挑、各自記（roster_reconcile_region_log）
+  if (Array.isArray(settings.actions) && (settings.actions as unknown[]).includes("region")) {
+    await runRegionFill(supabase, opts, summary, { runId, agentName, limit, started, budget }, purgePaths);
+  }
+
   // 受影響的人物頁請 Worker 清快取：一輪結束統一清一次（不逐筆發請求）；失敗不影響落庫
   if (purgePaths.size > 0) {
     try {
@@ -237,5 +262,59 @@ async function runLocked(supabase: SupabaseLike, opts: RunOptions, settings: Obj
     else summary.units_refreshed = Number(data ?? 0);
   } catch (e) {
     console.error(`roster_reconcile_refresh_units 例外：${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * 補地區：名冊唯一對上（both）、我們那筆參選紀錄 region_id 為空的人，用名冊的縣市／鄉鎮／村里／選舉區對到 regions 唯一一列，寫進 region_id。
+ * 只補空白、不覆蓋（寫入在資料庫函式 roster_reconcile_set_region 裡 WHERE region_id IS NULL，同一個交易記 edit_history 與 log）；
+ * 找 regions 的邏輯是 applyCandidacy 那一套（resolveCandidacyRegion，只讀不建）；對不到唯一一列就不寫，log 記 unresolved 與原因，不重試。
+ */
+async function runRegionFill(
+  supabase: SupabaseLike, opts: RunOptions, summary: ReconcileSummary,
+  ctx: { runId: string; agentName: string; limit: number; started: number; budget: number }, purgePaths: Set<string>,
+): Promise<void> {
+  const now = opts.now ?? (() => Date.now());
+  const resolve = opts.resolveRegion ?? resolveCandidacyRegion;
+  const { data: picked, error } = await supabase.rpc("roster_reconcile_region_next", { p_limit: ctx.limit });
+  if (error) throw new Error(`roster_reconcile_region_next: ${error.message}`);
+  const list = (picked ?? []) as RegionCandidate[];
+  summary.region.picked = list.length;
+  for (const c of list) {
+    if (now() - ctx.started > ctx.budget) { summary.stopped_by_budget = true; break; }
+    const base = { reg_id: c.reg_id, run_id: ctx.runId, source_url: c.source_url, row_no: c.row_no, politician_election_id: c.pe_id, agent_name: ctx.agentName };
+    const sample = (outcome: string, message: string) => {
+      if (summary.samples.length < 20) summary.samples.push({ reg_id: c.reg_id, name: c.name, election_type: c.election_type, county: c.county, outcome: `region_${outcome}`, message });
+    };
+    let res: RegionResolution;
+    try {
+      res = await resolve(supabase, c.election_type, candidacyPayloadOf(c));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await writeLog(supabase, { ...base, outcome: "error", reason: "exception", message: message.slice(0, 500) }, "roster_reconcile_region_log");
+      summary.region.errors++;
+      sample("error", message);
+      continue;
+    }
+    if (!res.ok) {
+      await writeLog(supabase, { ...base, outcome: "unresolved", reason: res.reason, message: res.message.slice(0, 500) }, "roster_reconcile_region_log");
+      summary.region.unresolved++;
+      sample("unresolved", `${res.reason}：${res.message}`);
+      continue;
+    }
+    // 寫入＋edit_history＋log 在同一個資料庫交易；回 false＝這一筆在挑出來之後已經有人補了地區（不覆蓋），函式自己記 unresolved
+    const { data: wrote, error: wErr } = await supabase.rpc("roster_reconcile_set_region", {
+      p_reg_id: c.reg_id, p_pe_id: c.pe_id, p_region_id: res.region_id, p_run: ctx.runId, p_agent: ctx.agentName,
+      p_source_url: c.source_url, p_row_no: c.row_no, p_level: res.level,
+    });
+    if (wErr) throw new Error(`roster_reconcile_set_region（reg ${String(c.reg_id)}）：${wErr.message}。需人工對照 edit_history（agent_name＝system:*）`);
+    if (wrote === true) {
+      summary.region.applied++;
+      for (const path of purgePathsFor({ politician_id: c.politician_id })) purgePaths.add(path);
+      sample("applied", `region_id＝${res.region_id}（${res.level}）`);
+    } else {
+      summary.region.unresolved++;
+      sample("unresolved", "region_already_set：挑出來之後這筆已經有地區，不覆蓋");
+    }
   }
 }

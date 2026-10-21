@@ -314,8 +314,8 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
  * regions 沒有那一列時，只有「選區有官方根據」才新建（2026-10-05，見 councilDistrictConfirmed）；
  * 其他照舊不動 region_id、不新建——形狀不明的列建下去就是下一批髒列（#348），交給縣市層級退路與回覆。
  */
-async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
-  if (electionType === "立法委員") return await legislatorRegionPatch(supabase, p);
+async function districtRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj, create = true): Promise<Obj> {
+  if (electionType === "立法委員") return await legislatorRegionPatch(supabase, p, create);
   if (electionType !== "縣市議員") return {};
   // 2026-10-05：選區與縣市一律先正規化（councilDistrictKey）——縣市寫「臺」、選區寫「第4選區」、
   // 或只寫在 position（「高雄市第10選舉區」）的，以前在這裡全都對不到，掉到縣市層級
@@ -334,7 +334,7 @@ async function districtRegionPatch(supabase: SupabaseLike, electionType: string,
   // 只在選區有官方根據時才建：中選會名單（已投票屆別，cec_candidates）上有這個縣市這個選區、查證過的
   // 原住民保留議席清單（COUNCIL_ABORIGINAL_DISTRICTS），或 2026 中選會登記彙總表的選區清單（COUNCIL_DISTRICT_COUNT_2026）。
   // 形狀跟既有選區列相同（縣市用「台」＋「第NN選舉區」）。
-  if (!(await councilDistrictConfirmed(supabase, int(p.election_id), key.region, key.sub_region))) return {};
+  if (!create || !(await councilDistrictConfirmed(supabase, int(p.election_id), key.region, key.sub_region))) return {};
   const { data: created } = await supabase.from("regions")
     .insert({ region: key.region, sub_region: key.sub_region, village: null }).select("id").maybeSingle();
   // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
@@ -362,7 +362,7 @@ async function councilDistrictConfirmed(supabase: SupabaseLike, electionId: numb
  * 指到「全國」那一列（規則見 electoral-district.ts 的 legislatorDistrictKey）。
  * 在這之前立委的參選紀錄從來走不到任何一條路，交件給了選區也一樣是 NULL。
  */
-async function legislatorRegionPatch(supabase: SupabaseLike, p: Obj): Promise<Obj> {
+async function legislatorRegionPatch(supabase: SupabaseLike, p: Obj, create = true): Promise<Obj> {
   const key = legislatorDistrictKey(str(p.region), str(p.electoral_district));
   if (!key) return {};
   const find = async () => {
@@ -377,7 +377,7 @@ async function legislatorRegionPatch(supabase: SupabaseLike, p: Obj): Promise<Ob
   };
   const existing = await find();
   if (existing) return { region_id: existing };
-  if (!key.create) return {};
+  if (!key.create || !create) return {};
   // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
   const { data: created } = await supabase.from("regions")
     .insert({ region: key.region, sub_region: key.sub_regions[0], village: null }).select("id").maybeSingle();
@@ -403,7 +403,7 @@ export function localRegionKey(electionType: string, p: Obj): { region: string; 
   return { region, sub_region: township, village };
 }
 
-async function localRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+async function localRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj, create = true): Promise<Obj> {
   const key = localRegionKey(electionType, p);
   if (!key) return {};
   const find = async () => {
@@ -415,6 +415,7 @@ async function localRegionPatch(supabase: SupabaseLike, electionType: string, p:
   };
   const existing = await find();
   if (existing) return { region_id: existing };
+  if (!create) return {};
   const { data: created } = await supabase.from("regions").insert(key).select("id").maybeSingle();
   const id = (created as { id?: number } | null)?.id ?? await find();
   return id ? { region_id: id } : {};
@@ -457,7 +458,7 @@ async function repDistrictConfirmed(
  * 代表交件帶了 electoral_district：region_id 指到 regions 的「<鄉鎮>第NN選舉區」那一列（沒有這一列時，只有選舉區有官方根據才新建，形狀跟既有列相同）。
  * 對不上的回 {}，由 localRegionPatch 退回鄉鎮那一列（跟以前一樣），回覆會講出來（repDistrictNote）。
  */
-async function repDistrictRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj): Promise<Obj> {
+async function repDistrictRegionPatch(supabase: SupabaseLike, electionType: string, p: Obj, create = true): Promise<Obj> {
   const key = repDistrictKey(electionType, p);
   if (!key) return {};
   const names = [...new Set([`${key.town}${key.district}`, `${key.town.replace(/台/g, "臺")}${key.district}`])];
@@ -472,7 +473,7 @@ async function repDistrictRegionPatch(supabase: SupabaseLike, electionType: stri
   };
   const existing = await find();
   if (existing) return { region_id: existing };
-  if (!(await repDistrictConfirmed(supabase, int(p.election_id), electionType, key))) return {};
+  if (!create || !(await repDistrictConfirmed(supabase, int(p.election_id), electionType, key))) return {};
   const { data: created } = await supabase.from("regions").insert({ region: key.region, sub_region: names[0], village: null }).select("id").maybeSingle();
   // 同時兩筆交件撞唯一鍵時 insert 會失敗，再找一次就拿得到對方剛建的那列
   const id = (created as { id?: number } | null)?.id ?? await find();
@@ -609,6 +610,46 @@ async function candidacyCounty(supabase: SupabaseLike, electionType: string | nu
   if (electionType !== "縣市長" || regionId == null) return null;
   const { data } = await supabase.from("regions").select("region").eq("id", regionId).maybeSingle();
   return str((data as { region?: unknown } | null)?.region);
+}
+
+/**
+ * 只讀不建：這筆參選紀錄的 region_id 該指到 regions 的哪一列（名冊對帳「補地區」動作用，#731）。
+ * 跟 applyCandidacy 同一套找法（districtRegionPatch／repDistrictRegionPatch／localRegionPatch／countyRegionPatch，只是 create＝false：
+ * regions 沒有那一列就不建、不降級）。選區層級的選舉（議員、代表、立委）交了選舉區卻對不到那一列，不退回鄉鎮或縣市（退了會把缺口藏起來），回 district_row_missing。
+ */
+export type RegionResolution =
+  | { ok: true; region_id: number; level: "district" | "village" | "town" | "county" }
+  | { ok: false; reason: "village_empty" | "no_town" | "village_row_missing" | "town_row_missing" | "district_row_missing" | "county_row_missing" | "unsupported_type"; message: string };
+
+export async function resolveCandidacyRegion(supabase: SupabaseLike, electionTypeRaw: string, p: Obj): Promise<RegionResolution> {
+  const electionType = normElectionType(electionTypeRaw) ?? electionTypeRaw;
+  const fail = (reason: Extract<RegionResolution, { ok: false }>["reason"], message: string): RegionResolution => ({ ok: false, reason, message });
+  const districtId = regionIdOf({
+    ...(await districtRegionPatch(supabase, electionType, p, false)),
+    ...(await repDistrictRegionPatch(supabase, electionType, p, false)),
+  });
+  if (districtId) return { ok: true, region_id: districtId, level: "district" };
+  const districtGiven = str(p.electoral_district);
+  const districtLevel = electionType === "縣市議員" || electionType === "立法委員" || isRepType(electionType);
+  if (districtLevel && districtGiven) return fail("district_row_missing", `選舉區「${districtGiven}」在 regions 表沒有對應的那一列（不新建、不退回鄉鎮或縣市）`);
+  if ((LOCAL_ELECTION_TYPES as readonly string[]).includes(electionType)) {
+    const key = localRegionKey(electionType, p);
+    if (!key) {
+      return electionType === "村里長" && !str(p.village)
+        ? fail("village_empty", "名冊這一列的村里欄是空的，對不到村里那一列")
+        : fail("no_town", "名冊這一列沒有鄉鎮市區，對不到 regions");
+    }
+    const id = regionIdOf(await localRegionPatch(supabase, electionType, p, false));
+    if (id) return { ok: true, region_id: id, level: key.village ? "village" : "town" };
+    return key.village
+      ? fail("village_row_missing", `regions 沒有「${key.region} ${key.sub_region} ${key.village}」這一列（不新建）`)
+      : fail("town_row_missing", `regions 沒有「${key.region} ${key.sub_region}」這一列（不新建）`);
+  }
+  const county = regionIdOf(await countyRegionPatch(supabase, electionType, p));
+  if (county) return { ok: true, region_id: county, level: "county" };
+  return (COUNTY_FALLBACK_TYPES as readonly string[]).includes(electionType)
+    ? fail("county_row_missing", `regions 沒有縣市層級「${str(p.region) ?? "（空）"}」這一列`)
+    : fail("unsupported_type", `選舉別「${electionType}」不在補地區的範圍`);
 }
 
 async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
