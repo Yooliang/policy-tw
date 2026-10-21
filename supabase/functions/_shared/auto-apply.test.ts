@@ -1,17 +1,19 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
+import { createFakeSupabase } from "./test-fake-supabase.ts";
 import { planRevert } from "./edit-history.ts";
 import { contributionStatusFor, titlesContainEachOther } from "./apply-contribution.ts";
 import { buildLookup, shapeTaskCurrent, shapeVerifyCurrent, truncateFields } from "./task-context.ts";
 
-/** 最小可用的假 supabase：只支援這裡用到的 from().select().eq().maybeSingle() 與 from().update().eq().eq() */
+/** 用共用的記憶體假 supabase；updates＝落庫後寫回狀態的那幾次（認領、釋放這種不帶 status 的不算） */
 function fakeSupabase(row: Record<string, unknown> | null) {
-  const updates: Array<{ table: string; patch: Record<string, unknown> }> = [];
-  const chain = (table: string) => ({
-    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }),
-    update: (patch: Record<string, unknown>) => ({ eq: () => ({ eq: async () => { updates.push({ table, patch }); return { error: null }; } }) }),
-  });
-  return { client: { from: chain }, updates };
+  const fake = createFakeSupabase({ contributions: row ? [row] : [] });
+  return {
+    client: fake.client,
+    get updates() {
+      return fake.log.filter((l) => l.table === "contributions" && l.op === "update" && "status" in (l.payload as object) && l.matched > 0).map((l) => ({ table: l.table, patch: l.payload as Record<string, unknown> }));
+    },
+  };
 }
 
 Deno.test("verified 才自動落庫；轉 verified 時呼叫 applyFn 並把狀態改成 applied", async () => {

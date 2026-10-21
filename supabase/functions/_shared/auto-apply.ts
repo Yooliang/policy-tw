@@ -55,8 +55,30 @@ async function identityFromVotes(supabase: SupabaseLike, contributionId: string)
   return resolveIdentityFromVotes((data ?? []) as IdentityVote[]);
 }
 
+/** 認領的租約：執行中途死掉（逾時、被砍）沒釋放時，超過這麼久別人可以接手；要大於 Edge Function 的最長執行時間 */
+export const APPLY_CLAIM_LEASE_MS = 10 * 60 * 1000;
+
 /**
- * 對一筆 contribution 執行自動落庫並更新狀態。冪等：狀態不是 verified（或 retry 模式下不是可重試的 apply_failed）就不動。
+ * 條件式 UPDATE 搶認領：只有「狀態還是我讀到的、而且沒人持有認領（或租約已過期）」的那一列會被改，回 0 列＝別人搶到了。
+ * 兩步各是單一原子語句（沒人持有 → 租約過期的接手），不用 .or() 是為了測試用的假 client 也能照樣跑。
+ */
+export async function claimForApply(supabase: SupabaseLike, id: string, status: string, nowIso: string): Promise<{ won: boolean; error?: string }> {
+  const staleIso = new Date(Date.parse(nowIso) - APPLY_CLAIM_LEASE_MS).toISOString();
+  const attempts = [
+    () => supabase.from("contributions").update({ apply_claimed_at: nowIso }).eq("id", id).eq("status", status).is("apply_claimed_at", null).select("id"),
+    () => supabase.from("contributions").update({ apply_claimed_at: nowIso }).eq("id", id).eq("status", status).lt("apply_claimed_at", staleIso).select("id"),
+  ];
+  for (const attempt of attempts) {
+    const { data, error } = await attempt();
+    if (error) return { won: false, error: `contributions claim: ${error.message}` };
+    if (Array.isArray(data) && data.length > 0) return { won: true };
+  }
+  return { won: false };
+}
+
+/**
+ * 對一筆 contribution 執行自動落庫並更新狀態。冪等：狀態不是 verified（或 retry 模式下不是可重試的 apply_failed）就不動；
+ * 落庫前先原子認領（claimForApply），並行的第二個執行搶不到就放棄（triggered:false），同一筆只會落庫一次。
  * 失敗不丟出（回 error），讓投票回應仍能成功。
  */
 export async function autoApplyContribution(supabase: SupabaseLike, contributionId: string, applyFn: ApplyFn = applyContribution, options: AutoApplyOptions = {}): Promise<AutoApplyResult> {
@@ -68,8 +90,17 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
 
   const now = new Date().toISOString();
   const lock = { id: contributionId, status: row.status as string }; // 樂觀鎖：只在還是我讀到的狀態時才寫
+
+  // 原子認領（2026-10-21）：跑 applyFn 之前先搶，搶輸的人一個副作用都不寫。
+  // 以前只有最後那次 update 帶樂觀鎖，兩個執行（兩票各觸發、或投票＋掃地機）都讀到 verified，先各自落庫一次才比輸贏，
+  // 輸家 0 列也不報錯——同一筆貢獻建出兩個人物（4010ebc0 陳清泉）。
+  const claim = await claimForApply(supabase, lock.id, lock.status, now);
+  if (claim.error) return { triggered: false, status: row.status, error: claim.error };
+  if (!claim.won) return { triggered: false, status: row.status };
+
+  // 每一次寫回都順手釋放認領（成功、退件、失敗都一樣）；沒寫回的路徑（defer）自己呼叫 releaseClaim
   const update = async (patch: Record<string, unknown>) => {
-    const { error: e } = await supabase.from("contributions").update(patch).eq("id", lock.id).eq("status", lock.status);
+    const { error: e } = await supabase.from("contributions").update({ ...patch, apply_claimed_at: null }).eq("id", lock.id).eq("status", lock.status);
     return e ? `contributions update: ${e.message}` : null;
   };
   // 2026-09-21 使用者裁示：衝突或落庫失敗就**不要硬建**，直接退件。缺口還在，派工佇列之後會再把它派出來，
@@ -95,7 +126,10 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
 
     const outcome = await applyFn(supabase, { ...(row as ContributionRow), resolved_politician_id: resolvedPoliticianId });
     // 還沒到可寫的時候（例：投票日當天）：不算失敗、不動狀態、不消耗重試次數，下一輪掃地機再撿（#691 審查）
-    if (outcome.status === "failed" && outcome.defer) return { triggered: false, status: row.status, outcome };
+    if (outcome.status === "failed" && outcome.defer) {
+      await supabase.from("contributions").update({ apply_claimed_at: null }).eq("id", lock.id).eq("status", lock.status); // 釋放認領，下一輪才撿得到
+      return { triggered: false, status: row.status, outcome };
+    }
     if (outcome.status === "failed") throw new Error(outcome.message);
     const status = contributionStatusFor(outcome.status);
     if (status === "rejected") {

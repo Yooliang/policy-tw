@@ -13,7 +13,17 @@ function fakeWithVotes(row: Record<string, unknown> | null, votes: Array<{ verdi
       ? { select: () => ({ eq: async () => ({ data: votes, error: null }) }) }
       : {
         select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }),
-        update: (patch: Record<string, unknown>) => ({ eq: () => ({ eq: async () => { updates.push({ table, patch }); return { error: null }; } }) }),
+        // 認領（update…select）一律搶得到、不記錄；寫回狀態（帶 status）才記錄；單純釋放認領的不記
+        update: (patch: Record<string, unknown>) => {
+          // deno-lint-ignore no-explicit-any
+          const chain: any = {
+            eq: () => chain, is: () => chain, lt: () => chain,
+            select: async () => ({ data: [{ id: "claimed" }], error: null }),
+            // deno-lint-ignore no-explicit-any
+            then: (resolve: any, reject: any) => { if ("status" in patch) updates.push({ table, patch }); return Promise.resolve({ error: null }).then(resolve, reject); },
+          };
+          return chain;
+        },
       },
   };
   return { client, updates };
