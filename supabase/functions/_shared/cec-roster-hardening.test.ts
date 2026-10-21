@@ -5,7 +5,7 @@
 //   4. 名冊 PDF 太大不在 Edge 上抽字（WORKER_RESOURCE_LIMIT），交人工驗證
 //   5. 政黨名單複本跟 lib/party-seed.json 一致
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { cecRosterText, checkBatch, parseRoster, ROSTER_MAX_BYTES, RosterTooLargeError } from "./cec-roster.ts";
+import { cecRosterText, checkBatch, groupRosterCandidates, parseRoster, ROSTER_MAX_BYTES, RosterTooLargeError } from "./cec-roster.ts";
 import { ROSTER_PARTY_NAMES } from "./party-names.ts";
 
 const readFixture = (f: string) => Deno.readTextFile(new URL(`./fixtures/${f}`, import.meta.url));
@@ -135,4 +135,21 @@ Deno.test("party-names.ts 是 lib/party-seed.json 的複本（名稱＋寫法對
   const want = [...new Set([...seed.parties.map((p: { name: string }) => p.name), ...seed.aliases.map((a: { alias: string }) => a.alias)])].sort();
   assertEquals([...ROSTER_PARTY_NAMES], want);
   for (const p of ["夏潮聯合會", "小民參政歐巴桑聯盟", "三勢團結促進聯盟"]) assert(ROSTER_PARTY_NAMES.includes(p), p);
+});
+
+// ── 6. 精簡交件（只有 politician_id、沒有 name）補姓名 ─────────────────
+Deno.test("roster_batch：只有 politician_id 的候選用姓名表補上並核對；查不到姓名計入 skipped_no_name、不再靜默丟掉", async () => {
+  const url = "https://web.cec.gov.tw/api/file/f1abbda2-229b-4a02-8dfb-58beb3ceca61.pdf";
+  const mk = (id: string, payload: Record<string, unknown>) => ({ id, payload, source_urls: [url] });
+  const cands = [mk("a", { name: "王大明" }), mk("b", { politician_id: "p1" }), mk("c", { politician_id: "p-missing" }), mk("d", {})];
+  const { byUrl, noName } = groupRosterCandidates(cands, new Map([["p1", "李小華"]]));
+  assertEquals(byUrl.get(url)!.map((c) => [c.id, c.payload.name]), [["a", "王大明"], ["b", "李小華"]]);
+  assertEquals(noName.get(url), 2);
+  // 補上的姓名會真的進核對：名冊有李小華 → 通過
+  const rows = parseRoster(HDR + "屏東縣三地門鄉 115/09/01 李小華 無");
+  const check = checkBatch(rows, byUrl.get(url)!.filter((c) => c.id === "b").map((c) => ({ id: c.id, name: String(c.payload.name), party: null, region: null })));
+  assertEquals(check.passed, ["b"]);
+  const src = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
+  assert(src.includes("groupRosterCandidates(todo, nameById)") && src.includes("skipped_no_name"), "system-one 要用補姓名分組並回報 skipped_no_name");
+  assert(src.includes('.from("politicians").select("id, name")'), "要批次查 politicians.name");
 });

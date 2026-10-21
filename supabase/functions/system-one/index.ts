@@ -48,7 +48,7 @@ import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FO
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
-import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
+import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, groupRosterCandidates, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
 import { loadRegistrationRows } from "../_shared/cec-registrations.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
@@ -825,11 +825,16 @@ Deno.serve(async (req) => {
       if (cErr) throw new Error(`roster candidates: ${cErr.message}`);
       const list = (cands ?? []) as Cand[];
       const todo = list;
-      const byUrl = new Map<string, Cand[]>();
-      for (const c of todo) {
-        const url = (c.source_urls ?? []).find((u) => CEC_ROSTER_URL_RE.test(u));
-        if (url && typeof c.payload?.name === "string") byUrl.set(url, [...(byUrl.get(url) ?? []), c]);
+      // 精簡交件只帶 payload.politician_id、沒有 name（村里長 69 筆）：批次查 politicians.name 補上再分組，補不到的計入 skipped_no_name、不再靜默丟掉
+      const needIds = [...new Set(todo.filter((c) => typeof c.payload?.name !== "string" && typeof c.payload?.politician_id === "string").map((c) => c.payload.politician_id as string))];
+      const nameById = new Map<string, string>();
+      for (let i = 0; i < needIds.length; i += 100) {
+        const ids = needIds.slice(i, i + 100);
+        const { data: ps, error: pErr } = await supabase.from("politicians").select("id, name").in("id", ids).limit(ids.length);
+        if (pErr) throw new Error(`roster politicians: ${pErr.message}`);
+        for (const p of (ps ?? []) as Array<{ id: string; name: string | null }>) if (p.name) nameById.set(p.id, p.name);
       }
+      const { byUrl, noName } = groupRosterCandidates(todo, nameById);
       const report: Array<Record<string, unknown>> = [];
       // 先查表（2026-10-08，10-08 缺口盤點 R1）：中選會 115 年登記彙總表九份已解析成 cec_registrations，表裡有這份網址的資料就不下載 PDF——
       // 村里長那份 7.5 MB 不用在 Edge 上抽字，#440 加的 3 MB 保護對它自然解除。查表不吃記憶體，所以不佔下面「一輪 3 份 PDF」的名額；
@@ -878,6 +883,9 @@ Deno.serve(async (req) => {
         }
         report.push({ url, via, rows_parsed: rows.length, checked: group.length, passed: check.passed.length, failed: check.failed.length });
       }
+      // 每個網址帶 skipped_no_name（查不到姓名、這輪沒核對的筆數）；整個網址只剩這種的也補一列
+      for (const [url, n] of noName) if (n > 0 && !report.some((r) => r.url === url)) report.push({ url, checked: 0 });
+      for (const r of report) r.skipped_no_name = noName.get(r.url as string) ?? 0;
       return json({ success: true, candidates: list.length, report });
     }
 
