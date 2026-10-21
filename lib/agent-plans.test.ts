@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { agentPlanRows, usageMap, usageText, type AgentPlan, type AgentUsage } from './agent-plans.ts'
+import { agentPlanRows, amount, usageMap, usageText, type AgentPlan, type AgentUsage } from './agent-plans.ts'
 
 const seed: AgentPlan[] = [
   { provider: 'Codex', plan: '訂閱', qty: 1, monthly_usd: 20, note: null, sort: 50 },
@@ -67,4 +67,10 @@ Deno.test('agentPlanRows：Claude 三列各自帶自己帳號的用量，沒資�
   const r = agentPlanRows(seed, null, m)
   assertEquals(r.rows.slice(0, 3).map((x) => x.usage), ['本週 42%（10/24 重置）', null, '本週 100%（10/24 重置）'])
   assertEquals(r.rows[3].usage, null)
+})
+
+Deno.test('amount：四捨五入到整數、不顯示小數點', () => {
+  assertEquals([amount(200), amount(65), amount(3.4), amount(688.5), amount(0)], ['200', '65', '3', '689', '0'])
+  // 合計用原始值加總再四捨五入：0.4＋0.4＋0.4＝1.2→1（各列先捨入會變 0）
+  assertEquals(amount(agentPlanRows([{ provider: 'X', plan: 'p', qty: 3, monthly_usd: 0.4, note: null, sort: 1 }]).total), '1')
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { agentPlanRows, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
+import { agentPlanRows, amount, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
 import Hero from '../components/Hero.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
@@ -56,10 +56,9 @@ const usage = ref<AgentUsage[]>([])
 const plans = ref<AgentPlan[]>([])
 const lowBalance = computed(() => costs.value != null && costs.value.balance_usd != null && costs.value.balance_usd < LOW_BALANCE_USD)
 const jevCost = computed(() => costs.value
-  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次・餘額 ${usd(costs.value.balance_usd)}` }
+  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次・餘額 ${costs.value.balance_usd == null ? '—' : amount(costs.value.balance_usd)}` }
   : null)
 const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, { ...usageMap(usage.value, Date.now()), ...(costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}) }))
-const usd = (n: number | null | undefined) => (n == null ? '—' : `US$${Number(n).toFixed(2)}`)
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
 usePageHead({
@@ -147,10 +146,9 @@ usePageHead({
           </div>
 
           <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:row-start-1">
-            <h2 class="text-lg font-bold text-navy-900">系統狀態與維運</h2>
             <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_summary；讀不到就整塊不顯示 -->
             <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="lowBalance ? 'border-amber-300' : 'border-slate-200'">
-              <h2 class="font-black text-navy-900 mb-3">運轉成本（每月）</h2>
+              <h2 class="font-black text-navy-900 mb-3">系統狀態與維運（每月 US$）</h2>
               <div class="overflow-x-auto">
                 <table class="w-full min-w-[22rem] text-left text-sm">
                   <thead class="bg-slate-50 text-xs text-slate-500">
@@ -163,16 +161,16 @@ usePageHead({
                   </thead>
                   <tbody>
                     <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100">
-                      <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}</td>
-                      <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}{{ r.label ? '・' + r.label : '' }}</td>
-                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + usd(r.monthly) }}</td>
+                      <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}{{ r.label ? ' ' + r.label : '' }}</td>
+                      <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}</td>
+                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + amount(r.monthly) }}</td>
                       <td class="px-3 py-1.5 tabular-nums text-slate-500">{{ r.usage ?? '—' }}</td>
                     </tr>
                   </tbody>
                   <tfoot class="border-t border-slate-200 bg-slate-50 font-medium text-slate-700">
                     <tr>
                       <td class="px-3 py-1.5" colspan="2">合計</td>
-                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
+                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ amount(plansView.total) }}</td>
                       <td class="px-3 py-1.5"></td>
                     </tr>
                   </tfoot>

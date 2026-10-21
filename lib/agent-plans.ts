@@ -69,3 +69,8 @@ export function agentPlanRows(plans: AgentPlan[], jev: JevCost | null = null, us
   if (jev) rows.push({ provider: 'Jev（AI 自動判定）', plan: 'API 用量計費', label: null, monthly: Number(jev.usd), approx: false, usage: jev.usage })
   return { rows, total: rows.reduce((s, r) => s + (r.monthly ?? 0), 0), approx: rows.some((r) => r.approx) }
 }
+
+/** 表格裡的金額一律四捨五入到整數、只顯示數字（單位寫在卡片標題）；合計用原始值加總後才進這裡 */
+export function amount(n: number): string {
+  return String(Math.round(n))
+}
