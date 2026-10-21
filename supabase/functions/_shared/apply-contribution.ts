@@ -666,7 +666,12 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
     birth_year: int(p.birth_year),
     cec_cand_id: str(p.cec_cand_id) ?? int(p.cec_cand_id),
     cec_theme_id: str(p.cec_theme_id),
-  }, { source: sourceTagOf(row), ...(row.keep_original_name ? { keep_original_name: true } : {}) });
+  }, {
+    source: sourceTagOf(row),
+    ...(row.keep_original_name ? { keep_original_name: true } : {}),
+    // 建新人物時帶身份的地區（比照 applyPolitician）：前台人物卡讀 politicians.sub_region／village，不帶就是空的
+    extraInsert: { sub_region: str(p.sub_region), village: str(p.village) },
+  });
   if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
