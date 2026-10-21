@@ -52,9 +52,8 @@ Deno.test('agentPlanRows：方案與月費留空的列照列出、不計入合�
 const NOW = Date.parse('2026-10-21T12:00:00Z')
 const u = (o: Partial<AgentUsage> = {}): AgentUsage => ({ provider: 'Claude', account_label: '帳號 A', pct: 42.4, resets_at: '2026-10-24T02:00:00Z', captured_at: '2026-10-21T11:50:00Z', ...o })
 
-Deno.test('usageText：本週百分比與台北日期的重置時間', () => {
-  assertEquals(usageText(u(), NOW), '本週 42%（10/24 重置）')
-  assertEquals(usageText(u({ resets_at: '2026-10-24T17:00:00Z' }), NOW), '本週 42%（10/25 重置）')
+Deno.test('usageText：只列本週百分比，不列重置時間', () => {
+  assertEquals(usageText(u(), NOW), '本週 42%')
   assertEquals(usageText(u({ resets_at: null }), NOW), '本週 42%')
 })
 
@@ -65,7 +64,7 @@ Deno.test('usageText：快照超過 6 小時沒更新就不顯示', () => {
 Deno.test('agentPlanRows：Claude 三列各自帶自己帳號的用量，沒資料的帳號顯示空', () => {
   const m = usageMap([u(), u({ account_label: '帳號 C', pct: 100 })], NOW)
   const r = agentPlanRows(seed, null, m)
-  assertEquals(r.rows.slice(0, 3).map((x) => x.usage), ['本週 42%（10/24 重置）', null, '本週 100%（10/24 重置）'])
+  assertEquals(r.rows.slice(0, 3).map((x) => x.usage), ['本週 42%', null, '本週 100%'])
   assertEquals(r.rows[3].usage, null)
 })
 
