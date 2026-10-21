@@ -267,3 +267,22 @@ export async function cecRosterText(url: string, fetchImpl: typeof fetch = fetch
   const { text } = await extractText(await getDocumentProxy(buf), { mergePages: true });
   return Array.isArray(text) ? text.join("\n") : text;
 }
+
+/** roster_batch 分組：沒有 payload.name 的精簡交件（只帶 politician_id，例如村里長）用 nameById 補姓名；補不到的不分組、按網址計入 noName（不再靜默丟掉） */
+export interface RosterCand { id: string; payload: Record<string, unknown>; source_urls: string[] | null }
+export function groupRosterCandidates<T extends RosterCand>(cands: readonly T[], nameById: ReadonlyMap<string, string>): { byUrl: Map<string, T[]>; noName: Map<string, number> } {
+  const byUrl = new Map<string, T[]>();
+  const noName = new Map<string, number>();
+  for (const c of cands) {
+    const url = (c.source_urls ?? []).find((u) => CEC_ROSTER_URL_RE.test(u));
+    if (!url) continue;
+    let name = typeof c.payload?.name === "string" ? c.payload.name : null;
+    if (name === null) {
+      const pid = c.payload?.politician_id;
+      name = typeof pid === "string" ? nameById.get(pid) ?? null : null;
+    }
+    if (name === null || name.trim() === "") { noName.set(url, (noName.get(url) ?? 0) + 1); continue; }
+    byUrl.set(url, [...(byUrl.get(url) ?? []), { ...c, payload: { ...c.payload, name } }]);
+  }
+  return { byUrl, noName };
+}
