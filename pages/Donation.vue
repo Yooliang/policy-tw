@@ -84,95 +84,101 @@ usePageHead({
           </p>
         </div>
 
+        <!-- 兩欄（md 以上）：右欄捐款方式、左欄系統狀態與維運；手機先捐款方式、再系統狀態（DOM 順序），md 以上用 order 對調 -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-          <!-- General Donation -->
-          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg hover:shadow-xl transition-shadow text-left">
-            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2">
-              <img src="/kofi-cup.png" alt="" class="w-6 h-6" />請我們喝杯咖啡
-            </h3>
-            <a
-              :href="KOFI_URL"
-              target="_blank"
-              rel="noopener"
-              class="w-full bg-[#FF5E5B] hover:bg-[#e85450] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
-            >
-              <img src="/kofi-cup.png" alt="" class="w-6 h-6" />到 Ko-fi 贊助
-            </a>
-            <p class="text-xs text-slate-400 mt-3 leading-relaxed">
-              支援信用卡與 PayPal，可以只贊助一次，也可以每月固定支持。金額由你決定。
-            </p>
-          </div>
+          <div class="space-y-6 md:order-2 md:col-start-2">
+            <!-- General Donation -->
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg hover:shadow-xl transition-shadow text-left">
+              <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2">
+                <img src="/kofi-cup.png" alt="" class="w-6 h-6" />請我們喝杯咖啡
+              </h3>
+              <a
+                :href="KOFI_URL"
+                target="_blank"
+                rel="noopener"
+                class="w-full bg-[#FF5E5B] hover:bg-[#e85450] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+              >
+                <img src="/kofi-cup.png" alt="" class="w-6 h-6" />到 Ko-fi 贊助
+              </a>
+              <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+                支援信用卡與 PayPal，可以只贊助一次，也可以每月固定支持。金額由你決定。
+              </p>
+            </div>
 
-          <!-- Crypto Donation -->
-          <div class="bg-navy-900 p-6 rounded-2xl shadow-lg border border-navy-700 text-white text-left">
-            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
-              <span class="text-amber-400">₿</span>加密貨幣捐款
-            </h3>
-            <div class="space-y-2">
-              <template v-for="(wallet, index) in cryptoWallets" :key="wallet.symbol">
-                <div
-                  v-if="index < 2 || showAllCrypto"
-                  class="bg-navy-800 p-2.5 rounded-lg border border-navy-700"
-                >
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-medium text-slate-300 w-24 shrink-0">{{ wallet.name }}</span>
-                    <div class="flex-1 flex items-center gap-1.5 bg-navy-950 px-2 py-1 rounded border border-navy-800 min-w-0">
-                      <code class="text-[10px] text-slate-400 truncate font-mono flex-1">{{ wallet.address }}</code>
-                      <button @click="handleCopy(wallet.address, wallet.symbol)" class="p-0.5 hover:text-white text-slate-500 transition-colors shrink-0">
-                        <Check v-if="copied === wallet.symbol" :size="12" class="text-emerald-500" />
-                        <Copy v-else :size="12" />
-                      </button>
+            <!-- Crypto Donation -->
+            <div class="bg-navy-900 p-6 rounded-2xl shadow-lg border border-navy-700 text-white text-left">
+              <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                <span class="text-amber-400">₿</span>加密貨幣捐款
+              </h3>
+              <div class="space-y-2">
+                <template v-for="(wallet, index) in cryptoWallets" :key="wallet.symbol">
+                  <div
+                    v-if="index < 2 || showAllCrypto"
+                    class="bg-navy-800 p-2.5 rounded-lg border border-navy-700"
+                  >
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-medium text-slate-300 w-24 shrink-0">{{ wallet.name }}</span>
+                      <div class="flex-1 flex items-center gap-1.5 bg-navy-950 px-2 py-1 rounded border border-navy-800 min-w-0">
+                        <code class="text-[10px] text-slate-400 truncate font-mono flex-1">{{ wallet.address }}</code>
+                        <button @click="handleCopy(wallet.address, wallet.symbol)" class="p-0.5 hover:text-white text-slate-500 transition-colors shrink-0">
+                          <Check v-if="copied === wallet.symbol" :size="12" class="text-emerald-500" />
+                          <Copy v-else :size="12" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </template>
-              <!-- Expand/Collapse button -->
-              <button
-                v-if="cryptoWallets.length > 2"
-                @click="showAllCrypto = !showAllCrypto"
-                class="w-full py-2 text-xs text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition-colors"
-              >
-                <span>{{ showAllCrypto ? '收合' : `顯示更多 (${cryptoWallets.length - 2})` }}</span>
-                <ChevronDown :size="14" :class="{ 'rotate-180': showAllCrypto }" class="transition-transform" />
-              </button>
+                </template>
+                <!-- Expand/Collapse button -->
+                <button
+                  v-if="cryptoWallets.length > 2"
+                  @click="showAllCrypto = !showAllCrypto"
+                  class="w-full py-2 text-xs text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1 transition-colors"
+                >
+                  <span>{{ showAllCrypto ? '收合' : `顯示更多 (${cryptoWallets.length - 2})` }}</span>
+                  <ChevronDown :size="14" :class="{ 'rotate-180': showAllCrypto }" class="transition-transform" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_summary；讀不到就整塊不顯示 -->
-        <section v-if="costs && plansView.rows.length" class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="lowBalance ? 'border-amber-300' : 'border-slate-200'">
-          <h2 class="font-black text-navy-900 mb-3">運轉成本（每月）</h2>
-          <div class="overflow-x-auto">
-            <table class="w-full min-w-[22rem] text-left text-sm">
-              <thead class="bg-slate-50 text-xs text-slate-500">
-                <tr>
-                  <th class="px-3 py-1.5 font-medium">項目</th>
-                  <th class="px-3 py-1.5 font-medium">方案</th>
-                  <th class="px-3 py-1.5 text-right font-medium">月費</th>
-                  <th class="px-3 py-1.5 font-medium">本週用量</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100">
-                  <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}</td>
-                  <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}{{ r.label ? '・' + r.label : '' }}</td>
-                  <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + usd(r.monthly) }}</td>
-                  <td class="px-3 py-1.5 tabular-nums text-slate-500">{{ r.usage ?? '—' }}</td>
-                </tr>
-              </tbody>
-              <tfoot class="border-t border-slate-200 bg-slate-50 font-medium text-slate-700">
-                <tr>
-                  <td class="px-3 py-1.5" colspan="2">合計</td>
-                  <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
-                  <td class="px-3 py-1.5"></td>
-                </tr>
-              </tfoot>
-            </table>
+          <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:row-start-1">
+            <h2 class="text-lg font-bold text-navy-900">系統狀態與維運</h2>
+            <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_summary；讀不到就整塊不顯示 -->
+            <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="lowBalance ? 'border-amber-300' : 'border-slate-200'">
+              <h2 class="font-black text-navy-900 mb-3">運轉成本（每月）</h2>
+              <div class="overflow-x-auto">
+                <table class="w-full min-w-[22rem] text-left text-sm">
+                  <thead class="bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th class="px-3 py-1.5 font-medium">項目</th>
+                      <th class="px-3 py-1.5 font-medium">方案</th>
+                      <th class="px-3 py-1.5 text-right font-medium">月費</th>
+                      <th class="px-3 py-1.5 font-medium">本週用量</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100">
+                      <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}</td>
+                      <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}{{ r.label ? '・' + r.label : '' }}</td>
+                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + usd(r.monthly) }}</td>
+                      <td class="px-3 py-1.5 tabular-nums text-slate-500">{{ r.usage ?? '—' }}</td>
+                    </tr>
+                  </tbody>
+                  <tfoot class="border-t border-slate-200 bg-slate-50 font-medium text-slate-700">
+                    <tr>
+                      <td class="px-3 py-1.5" colspan="2">合計</td>
+                      <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
+                      <td class="px-3 py-1.5"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p v-if="lowBalance" class="mt-2 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800">
+                AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
+              </p>
+            </section>
           </div>
-          <p v-if="lowBalance" class="mt-2 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800">
-            AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
-          </p>
-        </section>
+        </div>
       </div>
     </div>
   </div>
