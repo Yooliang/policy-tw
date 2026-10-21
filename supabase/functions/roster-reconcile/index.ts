@@ -9,6 +9,7 @@ import { runRosterReconcile } from "../_shared/roster-reconcile.ts";
  * 對帳在資料庫（視圖 roster_reconcile）；這裡只把「唯一可建」的那幾位（RPC roster_reconcile_next，每輪最多 roster_reconcile_settings.batch_limit 位）
  * 用跟代理交件落庫同一支邏輯（_shared/apply-contribution.ts 的 applyCandidacy）建起來：人物不存在才建、已存在（唯一同名、同地方）就掛上去。
  * 來源記登記彙總表那一列（roster_reconcile_log）、進 edit_history（agent_name＝system:roster-reconcile）、可整筆還原（SQL 函式 roster_reconcile_revert）。
+ * settings.actions 含 region 時另補地區（#731）：名冊唯一對上、我們那筆 region_id 為空的，對到 regions 唯一一列才寫（只補空白），回應多 region 一欄。
  * 說明與規矩見 _shared/roster-reconcile.ts 檔頭與 docs/decisions/2026-10-19-名冊比對表唯一對上由系統建參選紀錄.md。
  *
  * 呼叫者驗證照 bulletin-watch：x-cron-secret（密鑰只在 Vault，函式用 RPC roster_reconcile_cron_secret_ok 請資料庫比對）或 service role bearer。
