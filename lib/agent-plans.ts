@@ -51,16 +51,12 @@ export type AgentUsage = { provider: string; account_label: string; pct: number;
 /** 超過這麼久沒更新就不顯示（快照停了，舊數字比沒有更誤導） */
 export const USAGE_STALE_MS = 6 * 3600_000
 
-/** 「本週 42%（10/24 重置）」；重置時間用台北日期 */
+/** 「本週 42%」；重置時間不列（10-21 小良哥） */
 export function usageText(u: AgentUsage, nowMs: number): string | null {
   if (!Number.isFinite(Number(u.pct))) return null
   const captured = Date.parse(u.captured_at)
   if (!Number.isFinite(captured) || nowMs - captured > USAGE_STALE_MS) return null
-  const pct = `本週 ${Math.round(Number(u.pct))}%`
-  const t = u.resets_at ? Date.parse(u.resets_at) : NaN
-  if (!Number.isFinite(t)) return pct
-  const d = new Date(t + 8 * 3600_000)
-  return `${pct}（${d.getUTCMonth() + 1}/${d.getUTCDate()} 重置）`
+  return `本週 ${Math.round(Number(u.pct))}%`
 }
 
 /** 組成 agentPlanRows 的用量對照：鍵是「供應商|帳號標示」 */

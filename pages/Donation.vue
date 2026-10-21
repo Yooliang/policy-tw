@@ -89,9 +89,9 @@ usePageHead({
           </p>
         </div>
 
-        <!-- 兩欄（md 以上）：右欄捐款方式、左欄系統狀態與維運；手機先捐款方式、再系統狀態（DOM 順序），md 以上用 order 對調 -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-          <div class="space-y-6 md:order-2 md:col-start-2">
+        <!-- 兩欄（md 以上，左 5：右 3）：右欄捐款方式、左欄系統狀態與維運；手機先捐款方式、再系統狀態（DOM 順序），md 以上用 order 對調 -->
+        <div class="grid grid-cols-1 md:grid-cols-8 gap-6 items-start">
+          <div class="space-y-6 md:order-2 md:col-start-6 md:col-span-3">
             <!-- General Donation -->
             <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg hover:shadow-xl transition-shadow text-left">
               <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2">
@@ -146,7 +146,7 @@ usePageHead({
             </div>
           </div>
 
-          <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:row-start-1">
+          <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:col-span-5 md:row-start-1">
             <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_public（只有餘額等級，不含金額）；讀不到就整塊不顯示 -->
             <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="CARD_BORDER[tone]">
               <h2 class="font-black text-navy-900 mb-3">系統狀態與維運（每月 US$）</h2>
