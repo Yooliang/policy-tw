@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { agentPlanRows, type AgentPlan } from '../lib/agent-plans'
 import Hero from '../components/Hero.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
@@ -42,7 +43,13 @@ onMounted(async () => {
     const { data } = await supabasePublic.rpc('platform_cost_summary')
     costs.value = ((data ?? []) as Costs[])[0] ?? null
   } catch { costs.value = null }
+  try {
+    const { data, error } = await supabasePublic.from('agent_plans').select('provider,plan,qty,monthly_usd,note,sort').order('sort').limit(50)
+    plans.value = error ? [] : ((data ?? []) as AgentPlan[])
+  } catch { plans.value = [] }
 })
+const plans = ref<AgentPlan[]>([])
+const plansView = computed(() => agentPlanRows(plans.value))
 const usd = (n: number | null | undefined) => (n == null ? '—' : `US$${Number(n).toFixed(2)}`)
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
@@ -134,10 +141,32 @@ usePageHead({
             運轉成本：本月 AI 自動判定 {{ costs.jev_month_calls.toLocaleString() }} 次、花費約 {{ usd(costs.jev_month_usd) }}；
             AI 判定帳戶餘額 {{ usd(costs.balance_usd) }}；資料庫目前 {{ mb(costs.db_bytes) }}。
           </p>
-          <!-- 官方代理的月費（維護者 2026-10-21 提供，固定寫在這裡；方案有變就改這行） -->
-          <p class="mt-1">
-            官方代理（每月）：Claude 20x 方案 3 個、Grok 20x 方案 1 個、DeepSeek API 約 US$65、Gemini（Antigravity）US$20、Codex US$20。
-          </p>
+          <!-- 官方代理的月費：資料在設定表 agent_plans，方案有變只改表；讀不到就整張表不顯示 -->
+          <table v-if="plansView.rows.length" class="mt-2 w-full max-w-md text-left border-collapse">
+            <caption class="text-left font-medium mb-1">官方代理（每月）</caption>
+            <thead>
+              <tr class="border-b border-slate-200 text-slate-400">
+                <th class="py-1 pr-2 font-normal">官方代理</th>
+                <th class="py-1 pr-2 font-normal">方案</th>
+                <th class="py-1 pr-2 font-normal text-right">數量</th>
+                <th class="py-1 font-normal text-right">月費小計</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in plansView.rows" :key="r.provider + r.plan" class="border-b border-slate-100">
+                <td class="py-1 pr-2">{{ r.provider }}</td>
+                <td class="py-1 pr-2">{{ r.plan }}</td>
+                <td class="py-1 pr-2 text-right">{{ r.qty }}</td>
+                <td class="py-1 text-right whitespace-nowrap">{{ r.approx ? '約 ' : '' }}{{ usd(r.subtotal) }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="font-medium">
+                <td class="py-1 pr-2" colspan="3">合計</td>
+                <td class="py-1 text-right whitespace-nowrap">{{ plansView.approx ? '約 ' : '' }}{{ usd(plansView.total) }}</td>
+              </tr>
+            </tfoot>
+          </table>
           <p v-if="costs.balance_usd != null && costs.balance_usd < LOW_BALANCE_USD" class="mt-1 font-medium">
             AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
           </p>
