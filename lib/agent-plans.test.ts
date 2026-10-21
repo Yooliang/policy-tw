@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { agentPlanRows, usageMap, usageText, type AgentPlan, type AgentUsage } from './agent-plans.ts'
+import { agentPlanRows, amount, balanceTone, levelTone, usageMap, usageText, type AgentPlan, type AgentUsage } from './agent-plans.ts'
 
 const seed: AgentPlan[] = [
   { provider: 'Codex', plan: '訂閱', qty: 1, monthly_usd: 20, note: null, sort: 50 },
@@ -34,7 +34,7 @@ Deno.test('agentPlanRows：資料庫 NUMERIC 以字串回來也能算', () => {
 })
 
 Deno.test('agentPlanRows：Jev 那一列排在最後、計入合計', () => {
-  const r = agentPlanRows(seed, { usd: 3.5, usage: '本月 10 次' })
+  const r = agentPlanRows(seed, { usd: 3.5, usage: '本月 10 次', tone: 'none' })
   assertEquals(r.rows.length, 6)
   assertEquals(r.rows[5].provider, 'Jev（AI 自動判定）')
   assertEquals(r.rows[5].usage, '本月 10 次')
@@ -67,4 +67,24 @@ Deno.test('agentPlanRows：Claude 三列各自帶自己帳號的用量，沒資�
   const r = agentPlanRows(seed, null, m)
   assertEquals(r.rows.slice(0, 3).map((x) => x.usage), ['本週 42%（10/24 重置）', null, '本週 100%（10/24 重置）'])
   assertEquals(r.rows[3].usage, null)
+})
+
+Deno.test('amount：四捨五入到整數、不顯示小數點', () => {
+  assertEquals([amount(200), amount(65), amount(3.4), amount(688.5), amount(0)], ['200', '65', '3', '689', '0'])
+  // 合計用原始值加總再四捨五入：0.4＋0.4＋0.4＝1.2→1（各列先捨入會變 0）
+  assertEquals(amount(agentPlanRows([{ provider: 'X', plan: 'p', qty: 3, monthly_usd: 0.4, note: null, sort: 1 }]).total), '1')
+})
+
+Deno.test('balanceTone：低於 5 黃、低於 3 橘、低於 1 紅，邊界值落在較淺的一段', () => {
+  assertEquals([5, 4.99, 3, 2.99, 1, 0.99, 0, -1].map(balanceTone), ['none', 'yellow', 'yellow', 'orange', 'orange', 'red', 'red', 'red'])
+  assertEquals([balanceTone(null), balanceTone(undefined), balanceTone(100)], ['none', 'none', 'none'])
+})
+
+Deno.test('agentPlanRows：Jev 那列帶餘額色調，其他列不上色', () => {
+  const r = agentPlanRows(seed, { usd: 1, usage: 'x', tone: 'orange' })
+  assertEquals(r.rows.map((x) => x.tone), ['none', 'none', 'none', 'none', 'none', 'orange'])
+})
+
+Deno.test('levelTone：資料庫等級對到色調，ok 與不認得的不上色', () => {
+  assertEquals(['ok', 'yellow', 'orange', 'red', 'weird', null].map(levelTone), ['none', 'yellow', 'orange', 'red', 'none', 'none'])
 })
