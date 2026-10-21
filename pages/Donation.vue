@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { agentPlanRows, type AgentPlan } from '../lib/agent-plans'
+import { agentPlanRows, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
 import Hero from '../components/Hero.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
@@ -47,13 +47,18 @@ onMounted(async () => {
     const { data, error } = await supabasePublic.from('agent_plans').select('provider,plan,qty,monthly_usd,note,sort').order('sort').limit(50)
     plans.value = error ? [] : ((data ?? []) as AgentPlan[])
   } catch { plans.value = [] }
+  try {
+    const { data, error } = await supabasePublic.from('agent_usage').select('provider,account_label,pct,resets_at,captured_at').limit(50)
+    usage.value = error ? [] : ((data ?? []) as AgentUsage[])
+  } catch { usage.value = [] }
 })
+const usage = ref<AgentUsage[]>([])
 const plans = ref<AgentPlan[]>([])
 const lowBalance = computed(() => costs.value != null && costs.value.balance_usd != null && costs.value.balance_usd < LOW_BALANCE_USD)
 const jevCost = computed(() => costs.value
   ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次・餘額 ${usd(costs.value.balance_usd)}` }
   : null)
-const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}))
+const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, { ...usageMap(usage.value, Date.now()), ...(costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}) }))
 const usd = (n: number | null | undefined) => (n == null ? '—' : `US$${Number(n).toFixed(2)}`)
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 

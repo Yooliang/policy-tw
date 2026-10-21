@@ -25,17 +25,45 @@ export type AgentPlanRow = {
 /** 運轉成本裡 Jev（AI 自動判定）那一列：月費＝本月花費 */
 export type JevCost = { usd: number; usage: string }
 
+export type AgentUsage = { provider: string; account_label: string; pct: number; resets_at: string | null; captured_at: string }
+
+/** 超過這麼久沒更新就不顯示（快照停了，舊數字比沒有更誤導） */
+export const USAGE_STALE_MS = 6 * 3600_000
+
+/** 「本週 42%（10/24 重置）」；重置時間用台北日期 */
+export function usageText(u: AgentUsage, nowMs: number): string | null {
+  if (!Number.isFinite(Number(u.pct))) return null
+  const captured = Date.parse(u.captured_at)
+  if (!Number.isFinite(captured) || nowMs - captured > USAGE_STALE_MS) return null
+  const pct = `本週 ${Math.round(Number(u.pct))}%`
+  const t = u.resets_at ? Date.parse(u.resets_at) : NaN
+  if (!Number.isFinite(t)) return pct
+  const d = new Date(t + 8 * 3600_000)
+  return `${pct}（${d.getUTCMonth() + 1}/${d.getUTCDate()} 重置）`
+}
+
+/** 組成 agentPlanRows 的用量對照：鍵是「供應商|帳號標示」 */
+export function usageMap(list: AgentUsage[], nowMs: number): Record<string, string> {
+  const m: Record<string, string> = {}
+  for (const u of list) {
+    const t = usageText(u, nowMs)
+    if (t) m[`${u.provider}|${u.account_label}`] = t
+  }
+  return m
+}
+
 export function accountLabel(i: number): string {
   return `帳號 ${String.fromCharCode(65 + i)}`
 }
 
-export function agentPlanRows(plans: AgentPlan[], jev: JevCost | null = null, usageByProvider: Record<string, string> = {}): { rows: AgentPlanRow[]; total: number; approx: boolean } {
+export function agentPlanRows(plans: AgentPlan[], jev: JevCost | null = null, usage: Record<string, string> = {}): { rows: AgentPlanRow[]; total: number; approx: boolean } {
   const rows: AgentPlanRow[] = []
   for (const p of [...plans].sort((a, b) => a.sort - b.sort)) {
     const qty = Math.max(0, Math.floor(Number(p.qty)))
     const approx = (p.note ?? '').trim().startsWith('約')
     for (let i = 0; i < qty; i++) {
-      rows.push({ provider: p.provider, plan: p.plan, label: qty > 1 ? accountLabel(i) : null, monthly: p.monthly_usd == null ? null : Number(p.monthly_usd), approx, usage: usageByProvider[p.provider] ?? null })
+      const label = qty > 1 ? accountLabel(i) : null
+      rows.push({ provider: p.provider, plan: p.plan, label, monthly: p.monthly_usd == null ? null : Number(p.monthly_usd), approx, usage: usage[`${p.provider}|${label ?? ''}`] ?? usage[p.provider] ?? null })
     }
   }
   if (jev) rows.push({ provider: 'Jev（AI 自動判定）', plan: 'API 用量計費', label: null, monthly: Number(jev.usd), approx: false, usage: jev.usage })
