@@ -924,7 +924,8 @@ Deno.serve(async (req) => {
       const { error } = await supabase.from("platform_costs")
         .upsert({ id: 1, openrouter_credits: credits, openrouter_usage: usage, refreshed_at: new Date().toISOString() }, { onConflict: "id" });
       if (error) throw new Error(`platform_costs upsert: ${error.message}`);
-      return json({ success: true, balance_usd: Number((credits - usage).toFixed(2)) });
+      // 餘額不回（這個端點不驗憑證，回了等於公開；維護者 2026-10-21「不用讓訪客知道我們剩多少」）
+      return json({ success: true });
     }
 
     // ---- submission_followups：補跑——已交的提交補讀一輪說明（2026-09-26 維護者「先補跑一輪」）----

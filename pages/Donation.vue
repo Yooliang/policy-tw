@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { agentPlanRows, amount, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
+import { agentPlanRows, amount, levelTone, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
 import Hero from '../components/Hero.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
@@ -34,13 +34,11 @@ const handleCopy = (address: string, symbol: string) => {
 
 // 運轉成本（2026-09-24 維護者：「不用太顯眼，一個基本的資料就好」）：後端每 15 分鐘更新，這裡只讀。
 // 在瀏覽器才讀（onMounted），不進預渲染——數字會變，預渲染進去就是舊的。讀不到就整塊不顯示。
-type Costs = { balance_usd: number | null; jev_month_calls: number; jev_month_usd: number; db_bytes: number; refreshed_at: string | null }
+type Costs = { balance_level: string; jev_month_calls: number; jev_month_usd: number; db_bytes: number; refreshed_at: string | null }
 const costs = ref<Costs | null>(null)
-/** 餘額低於這個數才加強顯示：歸零之後系統就無法自動核對來源 */
-const LOW_BALANCE_USD = 2
 onMounted(async () => {
   try {
-    const { data } = await supabasePublic.rpc('platform_cost_summary')
+    const { data } = await supabasePublic.rpc('platform_cost_public')
     costs.value = ((data ?? []) as Costs[])[0] ?? null
   } catch { costs.value = null }
   try {
@@ -54,9 +52,12 @@ onMounted(async () => {
 })
 const usage = ref<AgentUsage[]>([])
 const plans = ref<AgentPlan[]>([])
-const lowBalance = computed(() => costs.value != null && costs.value.balance_usd != null && costs.value.balance_usd < LOW_BALANCE_USD)
+/** 餘額色調：資料庫算好的等級（< 5 黃、< 3 橘、< 1 紅），頁面不出現金額也不加提醒字。class 一律寫完整字串，Tailwind 才掃得到 */
+const tone = computed(() => levelTone(costs.value?.balance_level))
+const CARD_BORDER = { none: 'border-slate-200', yellow: 'border-amber-300', orange: 'border-orange-400', red: 'border-red-500' } as const
+const ROW_TONE = { none: '', yellow: 'bg-amber-50 border-l-4 border-l-amber-400', orange: 'bg-orange-100 border-l-4 border-l-orange-500', red: 'bg-red-100 border-l-4 border-l-red-600' } as const
 const jevCost = computed(() => costs.value
-  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次・餘額 ${costs.value.balance_usd == null ? '—' : amount(costs.value.balance_usd)}` }
+  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次`, tone: tone.value }
   : null)
 const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, { ...usageMap(usage.value, Date.now()), ...(costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}) }))
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
@@ -146,8 +147,8 @@ usePageHead({
           </div>
 
           <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:row-start-1">
-            <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_summary；讀不到就整塊不顯示 -->
-            <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="lowBalance ? 'border-amber-300' : 'border-slate-200'">
+            <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_public（只有餘額等級，不含金額）；讀不到就整塊不顯示 -->
+            <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="CARD_BORDER[tone]">
               <h2 class="font-black text-navy-900 mb-3">系統狀態與維運（每月 US$）</h2>
               <div class="overflow-x-auto">
                 <table class="w-full min-w-[22rem] text-left text-sm">
@@ -160,7 +161,7 @@ usePageHead({
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100">
+                    <tr v-for="(r, i) in plansView.rows" :key="i" class="border-t border-slate-100" :class="ROW_TONE[r.tone]">
                       <td class="px-3 py-1.5 text-slate-700">{{ r.provider }}{{ r.label ? ' ' + r.label : '' }}</td>
                       <td class="px-3 py-1.5 text-slate-600">{{ r.plan ?? '—' }}</td>
                       <td class="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{{ r.monthly == null ? '—' : (r.approx ? '約 ' : '') + amount(r.monthly) }}</td>
@@ -176,9 +177,6 @@ usePageHead({
                   </tfoot>
                 </table>
               </div>
-              <p v-if="lowBalance" class="mt-2 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800">
-                AI 判定帳戶餘額偏低：歸零之後，系統就無法自動核對大家附上的來源，資料上線會變慢。
-              </p>
             </section>
           </div>
         </div>

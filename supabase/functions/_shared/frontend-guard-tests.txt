@@ -14,6 +14,7 @@ _shared/lineage.test.ts
 _shared/ops-env-params.test.ts
 _shared/party-alias-parity.test.ts
 _shared/party-followups.test.ts
+_shared/platform-balance-private.test.ts
 _shared/protocol-guard.test.ts
 _shared/proxy-client-ip.test.ts
 _shared/reassign-candidacy.test.ts
