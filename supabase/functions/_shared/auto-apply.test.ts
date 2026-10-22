@@ -118,3 +118,31 @@ Deno.test("還沒到可寫的時候（defer，例：投票日當天）不算失�
   const res = await autoApplyContribution(real.client, "c9", async () => ({ status: "failed" as const, message: "真的壞了" }));
   assertEquals(res.status, "rejected");
 });
+
+Deno.test("系統驗證者先標 verified 再落庫：審核者與備註保留（cec-auto），落庫備註接在後面；同儕驗證（審核者空）行為不變", async () => {
+  const base = { id: "c20", contribution_type: "policy", payload: { title: "x" }, source_urls: ["https://a"], note: null, agent_name: "u", contributor_url: null, status: "verified" };
+  const applyFn = async () => ({ status: "applied" as const, message: "參選紀錄已建立", policy_id: "p1" });
+
+  const cec = fakeSupabase({ ...base, reviewed_by: "cec-auto", review_notes: "中選會自動查證通過（比對 姓名、選區）" });
+  await autoApplyContribution(cec.client, "c20", applyFn);
+  assertEquals(cec.updates[0].patch.reviewed_by, "cec-auto");
+  assertEquals(cec.updates[0].patch.review_notes, "中選會自動查證通過（比對 姓名、選區）\n[auto] 參選紀錄已建立");
+
+  // 重試：先前落庫留下的 [auto] 行不疊加
+  const retried = fakeSupabase({ ...base, status: "apply_failed", retry_count: 1, next_retry_at: "2000-01-01T00:00:00Z", reviewed_by: "cec-auto", review_notes: "中選會自動查證通過（比對 姓名）\n[auto] 落庫失敗（第 1 次）：壞了" });
+  await autoApplyContribution(retried.client, "c20", applyFn, { retry: true });
+  assertEquals(retried.updates[0].patch.review_notes, "中選會自動查證通過（比對 姓名）\n[auto] 參選紀錄已建立");
+  assertEquals(retried.updates[0].patch.reviewed_by, "cec-auto");
+
+  // 一般同儕驗證：審核者與備註皆空 → 照舊
+  const peer = fakeSupabase({ ...base });
+  await autoApplyContribution(peer.client, "c20", applyFn);
+  assertEquals(peer.updates[0].patch.reviewed_by, "auto-apply");
+  assertEquals(peer.updates[0].patch.review_notes, "[auto] 參選紀錄已建立");
+
+  // 名冊整批（只有備註、審核者空）：備註保留，審核者寫 auto-apply
+  const batch = fakeSupabase({ ...base, review_notes: "[batch] 隨名冊清查 r1 整批驗證通過" });
+  await autoApplyContribution(batch.client, "c20", applyFn);
+  assertEquals(batch.updates[0].patch.reviewed_by, "auto-apply");
+  assertEquals(batch.updates[0].patch.review_notes, "[batch] 隨名冊清查 r1 整批驗證通過\n[auto] 參選紀錄已建立");
+});

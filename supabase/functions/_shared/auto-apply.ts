@@ -46,7 +46,7 @@ export function shouldRetry(row: { status: string; retry_count?: number | null; 
 }
 
 // task_id 要撈：上線後拿它判斷所屬任務該不該關（task-fulfilment.ts）；少了它，關任務會默默不做
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id";
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id, reviewed_by, review_notes";
 const IDENTITY_TYPES = new Set(["politician", "candidacy"]);
 
 async function identityFromVotes(supabase: SupabaseLike, contributionId: string): Promise<ReturnType<typeof resolveIdentityFromVotes>> {
@@ -74,6 +74,17 @@ export async function claimForApply(supabase: SupabaseLike, id: string, status: 
     if (Array.isArray(data) && data.length > 0) return { won: true };
   }
   return { won: false };
+}
+
+/**
+ * 落庫寫回時合併審核資訊：系統驗證者（cec-auto、soumu-auto、estat-auto、roster-batch 備註等）先標 verified 並留下「是誰驗的」，
+ * 落庫不能把它蓋掉——審核者保留原值（原本空或已是 auto-apply 才寫 auto-apply），備註＝原備註＋換行＋落庫備註。
+ * 原備註裡先前落庫留下的「[auto]」行（重試時）會先剔除，避免每試一次就疊一段。
+ */
+export function mergeReview(row: { reviewed_by?: string | null; review_notes?: string | null }, autoNote: string): { review_notes: string; reviewed_by: string } {
+  const original = (row.review_notes ?? "").split(/\r?\n/).filter((l) => !l.startsWith("[auto]")).join("\n").trim();
+  const by = row.reviewed_by && row.reviewed_by !== "auto-apply" ? row.reviewed_by : "auto-apply";
+  return { review_notes: original ? `${original}\n${autoNote}` : autoNote, reviewed_by: by };
 }
 
 /**
@@ -114,7 +125,7 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
       const identity = await identityFromVotes(supabase, contributionId);
       if (identity.kind === "conflict") {
         const message = `驗證者指認的人物不一致（${identity.politician_ids.join("、")}），退件。${GAP_RETURNS}`;
-        const err = await update({ status: "rejected", review_notes: `[auto] ${message}`, reviewed_by: "auto-apply", reviewed_at: now });
+        const err = await update({ status: "rejected", ...mergeReview(row, `[auto] ${message}`), reviewed_at: now });
         return { triggered: true, status: "rejected", outcome: { status: "disputed", message }, ...(err ? { error: err } : {}) };
       }
       if (identity.kind === "resolved") resolvedPoliticianId = identity.politician_id;
@@ -134,13 +145,12 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     const status = contributionStatusFor(outcome.status);
     if (status === "rejected") {
       // applyFn 判身份判不出（ambiguous）等情況：一樣退件，不硬建
-      const err = await update({ status, review_notes: `[auto] ${outcome.message}。${GAP_RETURNS}`, reviewed_by: "auto-apply", reviewed_at: now });
+      const err = await update({ status, ...mergeReview(row, `[auto] ${outcome.message}。${GAP_RETURNS}`), reviewed_at: now });
       return { triggered: true, status, outcome, ...(err ? { error: err } : {}) };
     }
     const err = await update({
       status,
-      review_notes: `[auto] ${outcome.message}`,
-      reviewed_by: "auto-apply",
+      ...mergeReview(row, `[auto] ${outcome.message}`),
       reviewed_at: now,
       applied_at: status === "applied" ? now : null,
       applied_politician_id: outcome.politician_id ?? null,
@@ -155,13 +165,13 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     if (plan.give_up) {
       await update({
         status: "rejected", retry_count: plan.retry_count, last_error: message, next_retry_at: null,
-        review_notes: `[auto] 落庫連續 ${plan.retry_count} 次失敗，退件：${message}。${GAP_RETURNS}`, reviewed_by: "auto-apply", reviewed_at: now,
+        ...mergeReview(row, `[auto] 落庫連續 ${plan.retry_count} 次失敗，退件：${message}。${GAP_RETURNS}`), reviewed_at: now,
       });
       return { triggered: true, status: "rejected", error: message };
     }
     await update({
       status: "apply_failed", retry_count: plan.retry_count, last_error: message, next_retry_at: plan.next_retry_at,
-      review_notes: `[auto] 落庫失敗（第 ${plan.retry_count} 次，${plan.next_retry_at?.slice(11, 16)} UTC 後重試）：${message}`, reviewed_by: "auto-apply", reviewed_at: now,
+      ...mergeReview(row, `[auto] 落庫失敗（第 ${plan.retry_count} 次，${plan.next_retry_at?.slice(11, 16)} UTC 後重試）：${message}`), reviewed_at: now,
     });
     return { triggered: true, status: "apply_failed", error: message };
   }
