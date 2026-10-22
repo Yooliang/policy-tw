@@ -544,7 +544,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, Math.ceil(msUntilReset / 60000)) : RETRY_AFTER_MIN;
       const reason = verifyFull
         ? "今日額度已用完（提交與驗證都滿了），UTC 零時（台北 08:00）重置；請等重置後再來"
-        : "今日提交額度已用完，UTC 零時（台北 08:00）重置；目前也沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來看有沒有新的待驗證";
+        : "今日提交額度已用完（UTC 零時＝台北 08:00 重置），但驗證額度還有、驗證還可以做；目前剛好沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來，有新的待驗證票就會派給你";
       return json({ ...base, kind: "none", reason, retry_after_min: retryMin });
     }
     // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：驗證與任務只照排序鍵（queue_at）先後，
