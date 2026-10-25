@@ -376,7 +376,7 @@ usePageHead({
               </div>
               <!-- 票數門檻只在還在等票時講。撤回／退件／還原的已經退出驗證池，不會有人被派到，
                    照印「需要 2 票同意」會讓人以為撤回還要等人投票（2026-09-21 使用者看動態牆發現）。 -->
-              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-else-if="it.status === 'rejected'">跌到 −{{ it.target_score }} 分退件</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} {{ it.contribution_type === 'removal' ? '移除' : '上線' }}</span><span v-if="it.task_id" :title="it.task_id" data-testid="feed-task-label">・任務：{{ taskIdLabel(it.task_id) }}</span></p>
+              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過')" data-testid="feed-auto-verified">中選會自動查證通過，不經投票</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-else-if="it.status === 'rejected'">跌到 −{{ it.target_score }} 分退件</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} {{ it.contribution_type === 'removal' ? '移除' : '上線' }}</span><span v-if="it.task_id" :title="it.task_id" data-testid="feed-task-label">・任務：{{ taskIdLabel(it.task_id) }}</span></p>
             </div>
           </li>
         </ul>
