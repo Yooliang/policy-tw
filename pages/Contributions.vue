@@ -328,7 +328,7 @@ usePageHead({
                   {{ statusLabel(it) }}
                 </span>
                 <!-- 拉鋸條（使用者 2026-09-21）：畫法抽成共用元件，查核履歷也用同一個 -->
-                <ScoreBar :score="it.score" :target="it.target_score" :agree="it.agree_count" :disagree="it.disagree_count" :unsure="it.unsure_count" />
+                <ScoreBar v-if="!(it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過'))" :score="it.score" :target="it.target_score" :agree="it.agree_count" :disagree="it.disagree_count" :unsure="it.unsure_count" />
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
               <p class="text-navy-900 leading-snug break-words">{{ shortUrlsIn(it.summary) }}</p>

@@ -134,7 +134,8 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
                    條件跟 ScoreBar 的填色同一套（lib/score-bar.ts scoreBarFull）。 -->
               <AgentInfo v-if="agentDisplay === 'icon'" :name="e.agent_name" :model="e.agent_tool" label="提交者" />
               <span v-else class="text-slate-500">提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
-              <ScoreBar v-if="!scoreBarFull(e.score, e.target_score)" :score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
+              <!-- 已上線的不畫：中選會自動查證等不經投票的路徑是 0 分上線，條會停在中間像還在等票（維護者 2026-10-25） -->
+              <ScoreBar v-if="e.status !== 'applied' && !scoreBarFull(e.score, e.target_score)":score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
               <span v-if="e.adjudications.length" class="text-slate-500">有裁決</span>
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
             </div>
