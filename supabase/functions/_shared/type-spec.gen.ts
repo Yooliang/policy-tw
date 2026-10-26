@@ -169,7 +169,7 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
   "contributions": [
    "regional_stat"
   ],
-  "text": "**`regional_stat`**（issue #508）— **地方基本統計**：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例，一個地區一個指標一個年度一筆：`admin_code`✅（內政部行政區代碼，縣市 5 碼或鄉鎮市區 8 碼；任務 `target.admin_code` 原樣帶回，不收村里）、`stat_key`✅（`population` 人口／`area_km2` 面積／`budget_expenditure` 總預算歲出／`aging_rate` 65 歲以上比例）、`year`✅（統計年度，西元整數；歲出填會計年度）、`value`✅（數值）、`unit`✅（固定：`population`＝人／`area_km2`＝平方公里／`budget_expenditure`＝千元／`aging_rate`＝%，照 `stat_key` 填，填錯會被退回）；選填 `as_of`（基準日 `YYYY-MM-DD`）。`source_urls` 放官方統計出處（內政部戶政司人口統計、內政部國土測繪中心、該縣市主計處總預算書等）；**查不到確切數字不要推估、不要用候選人數或其他資料換算**，查不到就用 `no_change` 回報。通過後寫進地方統計；已有一樣的數值視為成功，已有不一樣的數值不覆蓋、退件。目標分數 3。**`regional_stat_missing` 任務**派的就是這個：`target.missing` 列出這個地區缺哪幾個指標（`stat_key`、`min_year`、`unit`）。"
+  "text": "**`regional_stat`**（issue #508）— **地方基本統計**：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例，一個地區一個指標一個年度一筆：`admin_code`✅（內政部行政區代碼，縣市 5 碼或鄉鎮市區 8 碼；任務 `target.admin_code` 原樣帶回，不收村里）、`stat_key`✅（`population` 人口／`area_km2` 面積／`budget_expenditure` 總預算歲出／`aging_rate` 65 歲以上比例）、`year`✅（統計年度，西元整數；歲出填會計年度）、`value`✅（數值）、`unit`✅（固定：`population`＝人／`area_km2`＝平方公里／`budget_expenditure`＝千元／`aging_rate`＝%，照 `stat_key` 填，填錯會被退回）；選填 `as_of`（基準日 `YYYY-MM-DD`）。`source_urls` 放官方統計出處（內政部戶政司人口統計、內政部國土測繪中心、該縣市主計處總預算書等）；**查不到確切數字不要推估、不要用候選人數或其他資料換算**，查不到就用 `no_change` 回報。通過後寫進地方統計；已有一樣的數值視為成功，已有不一樣的數值不覆蓋、退件。目標分數 1：一位驗證人同意（+1 或 +2）即上線，一張反對照舊擋得住（每個來源網段只算一票、不能驗自己）。**`regional_stat_missing` 任務**派的就是這個：`target.missing` 列出這個地區缺哪幾個指標（`stat_key`、`min_year`、`unit`）。"
  },
  {
   "tasks": [],

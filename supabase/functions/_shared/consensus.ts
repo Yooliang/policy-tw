@@ -20,10 +20,10 @@ export const VERIFIED_MAX_DISAGREE = 1;
 
 /**
  * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
- * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；
+ * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；regional_stat＝地方基本統計（2026-10-27，目標 1）；
  * removal＝移除既有資料；adjudication＝裁決
  */
-export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "removal" | "adjudication";
+export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "regional_stat" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -40,6 +40,9 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   // 整批補已投票選舉的結果（維護者 2026-10-06：「改批次，票數 2 票，讓 jev 扣下來」）：目標 2；
   // 系統逐位核對中選會名單、整批對得上就投一張系統票（照 3+1 折進目標：2−1＝1），再一張代理同意就上線
   batch_result: { official: 2, media: 2, social: 2, other: 2 },
+  // 地方基本統計（維護者 2026-10-27，#741）：目標 1，一位驗證人同意（+1 或 +2）即上線。數字來自官方統計，協議規定查不到不得推估、
+  // 已有不同值不覆蓋、每網段只算一票、不能驗自己；一張反對照舊擋得住。先例 roster_check 逐位吻合的目標 1。不拿 light（那是 2）。
+  regional_stat: { official: 1, media: 1, social: 1, other: 1 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
@@ -64,6 +67,7 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   // 同名人物合併走 high（官方 4／媒體 6／社群 8）：誤併沒有便宜的回頭路（2026-09-20 審查建議 6；前一天訂 3 票）
   if (contributionType === "merge_politician") return "high";
   if (contributionType === "election_results") return "batch_result";
+  if (contributionType === "regional_stat") return "regional_stat";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
