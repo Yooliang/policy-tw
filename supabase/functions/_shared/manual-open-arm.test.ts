@@ -31,6 +31,7 @@ const MIG = "20261008165000_manual_tasks_as_arm.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
 const POP_MIG = "20261002000006_queue_pop_head.sql";
 const LIN_MIG = "20261006034900_policy_lineages.sql";
+const HOURLY_MIG = "20261027220000_visitor_front_slot_hourly.sql";
 const M = await readMig(MIG);
 const PR = await readMig(P2_PR_MIG);
 const BL = await readMig(BALLOT_MIG);
@@ -294,7 +295,10 @@ async function buildDb(o: BuildOpts = {}): Promise<Db> {
   const db = await buildArmsDb({ branches: BRANCHES, extraBranches: ["ballot_numbers"], afterP1Sql: await PREREQ(), p2: { migs, restub: RESTUB } });
   await db.exec("SET app.activity_today = '2026-10-08'");
   if (o.withTasks ?? true) await db.exec(TASKS_SQL);
-  if (withMine) await applyP2(db, (o.mutateMig ?? ((s) => s))(M), RESTUB);
+  if (withMine) {
+    await applyP2(db, (o.mutateMig ?? ((s) => s))(M), RESTUB);
+    await db.exec(await readMig(HOURLY_MIG)); // 2026-10-27：固定時段從每 6 小時改每小時
+  }
   return db;
 }
 
@@ -382,7 +386,7 @@ Deno.test("B1 派工臂：排進佇列、queue_at、優先層、出生紀錄、�
 Deno.test("B2 固定時段插隊（假時鐘 app.queue_now）：時段內才拉、冪等、時段外不動、只動網站請求與公民提問", async (t) => {
   const db = await buildDb();
   try {
-    await t.step("時段函式：台北 00:00／06:00／12:00／18:00 各前 20 分鐘", async () => {
+    await t.step("時段函式：台北每個整點的前 20 分鐘（2026-10-27 起每小時，原本每 6 小時）", async () => {
       const at = async (ts: string) => (await one<{ s: string | null }>(db, `SELECT to_char(visitor_front_slot_start($1::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') AS s`, [ts])).s;
       const cases: Array<[string, string | null]> = [
         ["2026-10-08 15:59:59+00", null], // 台北 23:59:59
@@ -394,8 +398,9 @@ Deno.test("B2 固定時段插隊（假時鐘 app.queue_now）：時段內才拉�
         ["2026-10-09 04:10:00+00", "2026-10-09T04:00:00"], // 台北 12:10
         ["2026-10-09 10:19:00+00", "2026-10-09T10:00:00"], // 台北 18:19
         ["2026-10-09 10:21:00+00", null],
-        ["2026-10-08 00:05:00+00", null], // 台北 08:05（不是 6 的倍數）
-        ["2026-10-08 12:00:00+00", null], // 台北 20:00
+        ["2026-10-08 00:05:00+00", "2026-10-08T00:00:00"], // 台北 08:05（每小時都有時段）
+        ["2026-10-08 00:25:00+00", null], // 台北 08:25
+        ["2026-10-08 12:00:00+00", "2026-10-08T12:00:00"], // 台北 20:00
       ];
       for (const [ts, want] of cases) assertEquals(await at(ts), want, ts);
       await db.exec(`SET app.queue_now = '2026-10-09 12:00:30+08'`);
@@ -403,7 +408,7 @@ Deno.test("B2 固定時段插隊（假時鐘 app.queue_now）：時段內才拉�
       await db.exec(`RESET app.queue_now`);
     });
 
-    await seed(db, "2026-10-09 10:00:00+08"); // 時段外：第一輪 seed，建立所有列
+    await seed(db, "2026-10-09 10:30:00+08"); // 時段外：第一輪 seed，建立所有列
     // 派出時間的劇本（台北時間）：W1、W2、M1、S1 在 11:00～11:30 派出過（都在 12:00 這個時段開始之前）
     await dispatchAt(db, W1, "2026-10-09 11:30:00+08");
     await dispatchAt(db, W2, "2026-10-09 11:00:00+08");
@@ -441,7 +446,7 @@ Deno.test("B2 固定時段插隊（假時鐘 app.queue_now）：時段內才拉�
       assertEquals((await one<{ n: number }>(db, `SELECT manual_front_pull() AS n`)).n, 0, "再跑一次什麼都沒有可拉");
     });
 
-    await t.step("時段結束（12:20）之後什麼都不動：18:00 這個時段再拉一次", async () => {
+    await t.step("時段結束（12:20）之後什麼都不動：下一個整點（18:00）再拉一次", async () => {
       await dispatchAt(db, W1, "2026-10-09 12:15:00+08");
       await seed(db, "2026-10-09 12:20:00+08");
       assert(await isTail(db, W1) && await isTail(db, W2));

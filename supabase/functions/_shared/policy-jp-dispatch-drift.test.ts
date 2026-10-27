@@ -199,7 +199,7 @@ const PAIRS: Pair[] = [
   },
   { name: "refresh_verify_targets" },
   { name: "rebalance_queue" },
-  { name: "visitor_front_slot_hours" },
+  { name: "visitor_front_slot_hours", before: "20261027220000_visitor_front_slot_hourly.sql", note: "取台灣改每小時插隊（20261027220000，日本站暫不跟：維持每 6 小時）之前的版本" },
   { name: "visitor_front_window_minutes" },
   { name: "visitor_front_at" },
   { name: "visitor_front_slot_start" },
