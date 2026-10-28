@@ -579,3 +579,106 @@ Deno.test("B8 /tasks、/request-task（contribution_auto_tasks）：停放的缺
   assert(open.length > 0);
   await bad.close();
 });
+
+// ============================================================
+// D. no_change 的驗證票往後排（migration 20261028120000_no_change_verify_defer.sql，維護者 2026-10-28）
+//    進隊延後 1 天、被派出去回隊列延後 2 天（不累加）、既有待審一次延後 10 天；網站請求來源與其他型別不延後
+// ============================================================
+const DEFER_MIG_NAME = "20261028120000_no_change_verify_defer.sql";
+const DEFER_MIG = await readMig(DEFER_MIG_NAME);
+
+/** 套上延後這支 migration 的環境（uuid_if_canonical 取 20261019010000 的定義，測試用的 SCHEMA 沒有它） */
+async function envDefer(mutateMig: (sql: string) => string = (s) => s): Promise<PGlite> {
+  const db = await env(true);
+  await db.exec(fnText(await readMig("20261019010000_slow_queries.sql"), "uuid_if_canonical"));
+  await db.exec(mutateMig(DEFER_MIG));
+  return db;
+}
+
+Deno.test("D1 no_change 驗證票：進隊延後 1 天；別的型別（correction）和網站請求來源的 no_change 不延後", async () => {
+  const db = await envDefer();
+  const p = await parent(db, { prio: 3 * DAY, agoDays: 2 });
+  const fix = await submit(db, { type: "correction", task: p });
+  const nc = await submit(db, { type: "no_change", task: p });
+  near(await secs(db, fix.vid), 5 * DAY + VS, "correction 不延後");
+  near(await secs(db, nc.vid), 5 * DAY + VS - DAY, "no_change 延後 1 天（排序鍵晚 1 天＝離現在少 1 天）");
+  // 網站請求來源：母任務是 contribution_tasks.source='web_request'
+  const wid = uid();
+  await db.exec(`INSERT INTO contribution_tasks (id, task_type, source) VALUES ('${wid}', 'policy_missing', 'web_request')`);
+  const wp = await parent(db, { id: wid, prio: 3 * DAY, agoDays: 2 });
+  const wnc = await submit(db, { type: "no_change", task: wp });
+  near(await secs(db, wnc.vid), 5 * DAY + VS, "網站請求來源的 no_change 不延後");
+  // 手動任務（維護者建）不是網站請求：照樣延後
+  const mid = uid();
+  await db.exec(`INSERT INTO contribution_tasks (id, task_type, source) VALUES ('${mid}', 'policy_missing', 'manual')`);
+  const mp = await parent(db, { id: mid, prio: 3 * DAY, agoDays: 2 });
+  const mnc = await submit(db, { type: "no_change", task: mp });
+  near(await secs(db, mnc.vid), 5 * DAY + VS - DAY, "手動任務的 no_change 照樣延後");
+  await db.close();
+});
+
+Deno.test("D2 被派出去沒湊滿票回隊列：延後改成 2 天（不累加）；再派一次還是 2 天", async () => {
+  const db = await envDefer();
+  const p = await parent(db, { prio: 3 * DAY, agoDays: 2 });
+  const nc = await submit(db, { type: "no_change", task: p });
+  await dispatch(db, nc.vid);
+  near(await secs(db, nc.vid), 3 * DAY + VS - 2 * DAY, "派出後：派出時間 − 優先秒數 − 14 天，再加 2 天");
+  await dispatch(db, nc.vid);
+  near(await secs(db, nc.vid), 3 * DAY + VS - 2 * DAY, "再派一次：還是 2 天，沒有累加成 4 天");
+  const fix = await submit(db, { type: "correction", task: p });
+  await dispatch(db, fix.vid);
+  near(await secs(db, fix.vid), 3 * DAY + VS, "別的型別派出後照舊");
+  await db.close();
+});
+
+Deno.test("D3 延後秒數在 queue_settings：改 0＝不延後；refresh 不會把延後洗掉", async () => {
+  const db = await envDefer();
+  const p = await parent(db, { prio: 3 * DAY, agoDays: 2 });
+  const a = await submit(db, { type: "no_change", task: p });
+  await db.exec("SELECT refresh_verify_ticket_keys()");
+  near(await secs(db, a.vid), 5 * DAY + VS - DAY, "refresh 之後延後還在");
+  await db.exec("UPDATE queue_settings SET no_change_verify_defer_seconds = 0, no_change_verify_redispatch_defer_seconds = 0 WHERE id = 1");
+  const b = await submit(db, { type: "no_change", task: p });
+  near(await secs(db, b.vid), 5 * DAY + VS, "設 0：新進的不延後");
+  await dispatch(db, b.vid);
+  near(await secs(db, b.vid), 3 * DAY + VS, "設 0：派出後也不延後");
+  await db.close();
+});
+
+Deno.test("D4 既有待審的 no_change 驗證票：套 migration 時一次延後 10 天（網站請求來源、別的型別、已不是待審的除外）", async () => {
+  const db = await env(true);
+  await db.exec(fnText(await readMig("20261019010000_slow_queries.sql"), "uuid_if_canonical"));
+  const p = await parent(db, { prio: 3 * DAY, agoDays: 2 });
+  const wid = uid();
+  await db.exec(`INSERT INTO contribution_tasks (id, task_type, source) VALUES ('${wid}', 'policy_missing', 'web_request')`);
+  const wp = await parent(db, { id: wid, prio: 3 * DAY, agoDays: 2 });
+  const nc = await submit(db, { type: "no_change", task: p });
+  const wnc = await submit(db, { type: "no_change", task: wp });
+  const fix = await submit(db, { type: "correction", task: p });
+  const done = await submit(db, { type: "no_change", task: p, status: "applied" });
+  await db.exec(DEFER_MIG);
+  near(await secs(db, nc.vid), 5 * DAY + VS - 10 * DAY, "既有待審 no_change：延後 10 天");
+  near(await secs(db, wnc.vid), 5 * DAY + VS, "網站請求來源：不動");
+  near(await secs(db, fix.vid), 5 * DAY + VS, "別的型別：不動");
+  const d = await db.query<{ defer_seconds: number }>(`SELECT defer_seconds FROM task_dispatches WHERE task_id = '${done.vid}'`);
+  assert(d.rows.length === 0 || d.rows[0]!.defer_seconds === 0, "已經不是待審的不延後");
+  await db.close();
+});
+
+Deno.test("D5 還原驗證：延後函式永遠回 0／觸發器不帶延後 → D1、D2 必須紅", async () => {
+  const noDefer = (s: string) => s.replace("SELECT COALESCE((\n    SELECT CASE WHEN p_redispatched", "SELECT 0 + COALESCE((\n    SELECT 0 * CASE WHEN p_redispatched");
+  assert(noDefer(DEFER_MIG) !== DEFER_MIG, "替換要真的改到");
+  const db = await envDefer(noDefer);
+  const p = await parent(db, { prio: 3 * DAY, agoDays: 2 });
+  const nc = await submit(db, { type: "no_change", task: p });
+  const got = await secs(db, nc.vid);
+  assert(Math.abs(got - (5 * DAY + VS - DAY)) > 5, "拿掉延後之後 D1 的期望必須落空");
+  await db.close();
+  const noTrig = (s: string) => s.replace("NEW.queue_at := verify_queue_key(NEW.task_id, NEW.verify_follows_task, NEW.last_dispatched_at, NEW.priority_seconds, NEW.boost_seconds, NEW.defer_seconds);", "NEW.queue_at := verify_queue_key(NEW.task_id, NEW.verify_follows_task, NEW.last_dispatched_at, NEW.priority_seconds, NEW.boost_seconds, 0);");
+  assert(noTrig(DEFER_MIG) !== DEFER_MIG, "替換要真的改到");
+  const db2 = await envDefer(noTrig);
+  const p2 = await parent(db2, { prio: 3 * DAY, agoDays: 2 });
+  const nc2 = await submit(db2, { type: "no_change", task: p2 });
+  assert(Math.abs((await secs(db2, nc2.vid)) - (5 * DAY + VS - DAY)) > 5, "觸發器不帶延後秒數：D1 的期望必須落空");
+  await db2.close();
+});

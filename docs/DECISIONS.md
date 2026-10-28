@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-10-28
+
+- [「查無變更」（no_change）的驗證票往後排（2026-10-28，維護者；migratio…](decisions/2026-10-28-no_change驗證票往後排.md)
+
 ## 2026-10-27
 
 - [地方基本統計（`regional_stat`）共識目標分數由 3 降為 1，現有 pending…](decisions/2026-10-27-區域統計目標分數降為1.md)
