@@ -7,6 +7,8 @@ defineProps<{
   className?: string
   backgroundImage?: string
   fullWidth?: boolean
+  /** 內容很長（例如人物頁的長簡介）時讓標題區跟著長高，不要被固定高度裁掉頭像與名字 */
+  autoHeight?: boolean
 }>()
 </script>
 
@@ -14,7 +16,7 @@ defineProps<{
   <div :class="`relative ${className || ''}`">
     <!-- Dark Section -->
     <section
-      class="bg-navy-900 text-white relative min-h-[370px] pt-16 md:pt-0 md:h-[370px] flex items-end overflow-hidden"
+      :class="['bg-navy-900 text-white relative min-h-[370px] flex items-end overflow-hidden', autoHeight ? 'pt-16 md:pt-16' : 'pt-16 md:pt-0 md:h-[370px]']"
       :style="backgroundImage ? {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: 'cover',
