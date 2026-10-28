@@ -33,6 +33,20 @@ const total = ref<number | null>(null)
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
 const expanded = ref<Set<string>>(new Set())
+/**
+ * 時間軸：貢獻紀錄加上網站請求，依日期新到舊排在一起（維護者 2026-10-28）。
+ * 貢獻是分頁載入的：還有更多頁時，只放得進「不早於已載入最舊那筆」的網站請求，免得更舊的請求跑到還沒載入的紀錄前面。
+ */
+type TimelineItem = { kind: 'entry'; key: string; at: string; e: HistoryEntry } | { kind: 'web'; key: string; at: string; r: HistoryWebRequest }
+const timeline = computed<TimelineItem[]>(() => {
+  const oldestLoaded = entries.value.length ? entries.value[entries.value.length - 1].at : null
+  const items: TimelineItem[] = entries.value.map((e) => ({ kind: 'entry', key: 'e:' + e.id, at: e.at, e }))
+  for (const r of webRequests.value) {
+    if (hasMore.value && oldestLoaded && Date.parse(r.created_at) < Date.parse(oldestLoaded)) continue
+    items.push({ kind: 'web', key: 'w:' + r.id, at: r.created_at, r })
+  }
+  return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+})
 const appliedCount = computed(() => entries.value.filter(e => e.status === 'applied').length)
 
 const STATUS_CLASS: Record<string, string> = {
@@ -96,21 +110,6 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
     />
 
     <div v-if="open" class="mt-4" data-testid="history-body">
-      <!-- 網站請求（2026-10-28）：訪客按「請 AI 幫忙查」留下的紀錄，只有日期、查什麼、狀態 -->
-      <div v-if="webRequests.length > 0" class="mb-4" data-testid="history-web-requests">
-        <p class="text-xs font-bold text-slate-500 mb-2">網站請求（{{ webRequests.length }}）</p>
-        <ol class="relative border-l-2 border-slate-200 ml-2 space-y-3">
-          <li v-for="r in webRequests" :key="r.id" class="relative pl-6" data-testid="history-web-request" :data-status="r.status">
-            <span :title="r.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 ring-slate-100', r.status === 'closed' ? 'bg-emerald-500' : r.status === 'parked' ? 'bg-slate-300' : 'bg-amber-400']"></span>
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-              <span class="font-mono text-slate-400">{{ formatDate(r.created_at) }}</span>
-              <span class="px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">網站請求</span>
-              <span class="text-slate-700">{{ r.kind_label }}</span>
-              <span class="text-slate-500">{{ r.status_label }}<template v-if="r.closed_at">（{{ formatDate(r.closed_at) }}）</template></span>
-            </div>
-          </li>
-        </ol>
-      </div>
       <div v-if="loading && entries.length === 0" class="py-6 text-center text-xs text-slate-500"><Loader2 :size="22" class="animate-spin mx-auto mb-1 text-blue-500" />載入中…</div>
       <div v-else-if="error" class="py-4 text-center text-xs" data-testid="history-error">
         <AlertCircle :size="22" class="mx-auto mb-1 text-red-500" />
@@ -131,8 +130,35 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
           </div>
         </TimelineNote>
       </div>
-      <ol v-else class="relative border-l-2 border-slate-200 ml-2 space-y-4" data-testid="history-list">
-        <li v-for="e in entries" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
+      <ol v-if="!error && !(loading && entries.length === 0) && timeline.length > 0" :class="['relative border-l-2 border-slate-200 ml-2 space-y-4', entries.length === 0 ? 'mt-4' : '']" data-testid="history-list">
+        <template v-for="item in timeline" :key="item.key">
+        <!-- 網站請求（2026-10-28）：跟貢獻紀錄排在同一條時間軸上依日期排，點開看提出的細節與之後有人交了什麼 -->
+        <li v-if="item.kind === 'web'" class="relative pl-6" data-testid="history-web-request" :data-status="item.r.status">
+          <span :title="item.r.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 ring-slate-100', item.r.status === 'closed' ? 'bg-emerald-500' : item.r.status === 'parked' ? 'bg-slate-300' : 'bg-amber-400']"></span>
+          <div class="flex flex-wrap items-center gap-2 text-xs cursor-pointer" @click="toggleEntry('w:' + item.r.id)">
+            <span class="font-mono text-slate-400">{{ formatDate(item.r.created_at) }}</span>
+            <span class="px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">網站請求</span>
+            <span class="text-slate-500">{{ item.r.status_label }}<template v-if="item.r.closed_at">（{{ formatDate(item.r.closed_at) }}）</template></span>
+            <component :is="expanded.has('w:' + item.r.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
+          </div>
+          <button type="button" class="w-full text-left" :aria-expanded="expanded.has('w:' + item.r.id)" @click="toggleEntry('w:' + item.r.id)">
+            <p class="mt-1 text-xs text-navy-900 leading-snug break-words">有人請 AI 幫忙{{ item.r.kind_label }}</p>
+          </button>
+          <div v-if="expanded.has('w:' + item.r.id)" class="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs space-y-1.5" data-testid="history-web-request-detail">
+            <p><span class="text-slate-500">提出：</span>{{ formatDate(item.r.created_at) }}</p>
+            <p><span class="text-slate-500">查什麼：</span>{{ item.r.kind_label }}</p>
+            <p><span class="text-slate-500">目前：</span>{{ item.r.status_label }}<template v-if="item.r.closed_at">，{{ formatDate(item.r.closed_at) }} 處理完</template></p>
+            <div v-if="item.r.reports?.length">
+              <p class="text-slate-500">之後代理的回報：</p>
+              <ul class="list-disc pl-5 space-y-0.5">
+                <li v-for="rep in item.r.reports" :key="rep.id">{{ formatDate(rep.created_at) }}　{{ rep.type_label }}（{{ rep.status_label }}）<span v-if="rep.agent_name" class="text-slate-400">・{{ rep.agent_name }}</span></li>
+              </ul>
+            </div>
+            <p v-else class="text-slate-500">還沒有代理交件回報。</p>
+          </div>
+        </li>
+        <template v-else>
+        <li v-for="e in [item.e]" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
           <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : e.status === 'rejected' ? 'bg-red-700 ring-red-100' : 'bg-amber-400 ring-amber-100']"></span>
           <!-- 日期那一列放在按鈕外面、自己接點擊：列尾有 AgentInfo（本身是按鈕），按鈕不能包按鈕。
                鍵盤展開／收合走下面摘要那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
@@ -165,6 +191,8 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
             <HistoryEntryDetail :entry="e" :agent-display="agentDisplay" />
           </div>
         </li>
+        </template>
+        </template>
       </ol>
       <div v-if="hasMore" class="mt-4 text-center">
         <button type="button" class="px-4 py-2 rounded-lg bg-white border border-slate-300 text-xs text-navy-900 hover:bg-slate-50" :disabled="loading" @click="load(nextCursor)" data-testid="history-more">

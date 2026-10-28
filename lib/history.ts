@@ -43,7 +43,8 @@ export interface HistoryEntry {
   adjudications: HistoryAdjudication[]
 }
 export interface HistoryOrigin { kind: 'contributions' | 'imported' | 'unknown'; note: string | null; source_url?: string | null; source?: HistorySource | null; source_notes?: string[] }
-export interface HistoryWebRequest { id: string; task_type: string; kind_label: string; status: 'open' | 'parked' | 'closed'; status_label: string; created_at: string; closed_at: string | null }
+export interface HistoryWebRequestReport { id: string; type_label: string; status: string; status_label: string; created_at: string; agent_name: string | null }
+export interface HistoryWebRequest { id: string; task_type: string; kind_label: string; status: 'open' | 'parked' | 'closed'; status_label: string; created_at: string; closed_at: string | null; reports?: HistoryWebRequestReport[] }
 export interface HistoryResponse {
   success: boolean
   target: HistoryTarget
