@@ -76,11 +76,28 @@ if (!hostedVersion) {
   console.log(`✔ 版本順序沒問題：線上 skill.md ${hostedVersion} ≥ 程式 ${codeVersion}`);
 }
 
+// 逾時多半是 Supabase 伺服器端去抓 jsr.io 失敗（2026-10-28 一天內整輪重跑 6 次），
+// 單支重試就會過，所以每支最多試 3 次、間隔遞增，不要讓一支逾時拖累整批。
+const MAX_TRIES = 3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const deploySha = process.env.DEPLOY_SHA; // CI 才有；有的話每支成功就各自記一個 tag
 let failed = 0;
 for (const fn of fns) {
-  console.log(`\n→ 部署 ${fn}`);
-  // --use-api：伺服器端打包，不需要本機（或 CI runner 上）有 Docker 在跑。
-  const r = spawnSync("npx", ["supabase", "functions", "deploy", fn, "--use-api"], { stdio: "inherit", shell: true });
-  if (r.status !== 0) { console.error(`✖ ${fn} 部署失敗`); failed++; }
+  let ok = false;
+  for (let i = 1; i <= MAX_TRIES && !ok; i++) {
+    console.log(`\n→ 部署 ${fn}（第 ${i}/${MAX_TRIES} 次）`);
+    // --use-api：伺服器端打包，不需要本機（或 CI runner 上）有 Docker 在跑。
+    const r = spawnSync("npx", ["supabase", "functions", "deploy", fn, "--use-api"], { stdio: "inherit", shell: true });
+    ok = r.status === 0;
+    if (!ok && i < MAX_TRIES) await sleep(i * 15000);
+  }
+  if (!ok) { console.error(`✖ ${fn} 部署失敗`); failed++; continue; }
+  // 每支各自記「上次成功部署的 commit」：整批只有一兩支失敗時，下次只重試失敗的，
+  // 成功的不會因為全域 tag 沒移動而被一起重部（affected-functions.mjs 讀 edge-fn/<名稱>）。
+  if (deploySha) {
+    const t = spawnSync("git", ["tag", "-f", `edge-fn/${fn}`, deploySha], { stdio: "inherit" });
+    const u = t.status === 0 && spawnSync("git", ["push", "-f", "origin", `refs/tags/edge-fn/${fn}`], { stdio: "inherit" });
+    if (!u || u.status !== 0) console.error(`（${fn} 已部署，但記錄 edge-fn/${fn} tag 失敗；下次會多重部一次，無害）`);
+  }
 }
 process.exit(failed > 0 ? 1 : 0);
