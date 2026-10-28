@@ -126,6 +126,10 @@ export async function ensurePolitician(
 
   // 測試資料的姓名不建人物（2026-10-06）：管理端的匯入端點與交件落庫都走這裡；資料庫另有觸發器再擋一層
   if (isPlaceholderName(name)) throw new Error(`姓名「${name}」看起來是測試資料，不建立人物`);
+  // position／region 是 NOT NULL：缺的話講清楚缺什麼，不要讓資料庫約束的錯誤（apply_failed）無限重試
+  if (!candidate.position || !candidate.region) {
+    throw new Error(`建新人物缺必填欄位：${[!candidate.position && "position", !candidate.region && "region"].filter(Boolean).join("、")}（交件請補上，或在內文寫明縣市）`);
+  }
   const { data: inserted, error } = await supabase
     .from("politicians")
     .insert({
@@ -292,4 +296,32 @@ export async function upsertParticipation(
   throwIf(insertError, "politician_elections insert");
   if (!inserted) throw new Error("politician_elections insert 沒有回傳 id");
   return { outcome: "created", id: inserted.id, previous_status: null };
+}
+
+const COUNTY_CITY_NAMES = [
+  "台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市", "新竹市", "嘉義市",
+  "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣",
+  "澎湖縣", "金門縣", "連江縣",
+] as const;
+
+/**
+ * 人物類交件沒帶 position／region 時，建新人物用的預設（politicians 這兩欄 NOT NULL，
+ * type_spec 卻寫選填；2026-10-28 5835103a 張愉婕：驗證者指認 new 後落庫撞 NOT NULL，apply_failed 一直重試）。
+ * position：選舉別組「○○候選人」（同 applyCandidacy 的寫法）→ current_position；都沒有回 null。
+ * region：只認明確寫出的縣市（交件的 region，或 bio 裡第一個縣市名），推不出來回 null，由呼叫端退件講清楚，不塞假值。
+ */
+export function newPoliticianDefaults(p: {
+  position?: string | null;
+  region?: string | null;
+  election_type?: string | null;
+  current_position?: string | null;
+  bio?: string | null;
+}): { position: string | null; region: string | null } {
+  const position = p.position || (p.election_type ? `${p.election_type}候選人` : null) || p.current_position || null;
+  let region = p.region || null;
+  if (!region && p.bio) {
+    const bio = p.bio.replace(/臺/g, "台");
+    region = COUNTY_CITY_NAMES.find((c) => bio.includes(c)) ?? null;
+  }
+  return { position, region };
 }
