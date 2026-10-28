@@ -51,7 +51,7 @@ const appliedCount = computed(() => entries.value.filter(e => e.status === 'appl
 
 const STATUS_CLASS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800', verified: 'bg-sky-100 text-sky-800', applied: 'bg-emerald-100 text-emerald-800',
-  apply_failed: 'bg-amber-100 text-amber-800', disputed: 'bg-orange-100 text-orange-800', rejected: 'bg-slate-100 text-slate-600', reverted: 'bg-slate-200 text-slate-700',
+  apply_failed: 'bg-amber-100 text-amber-800', disputed: 'bg-orange-100 text-orange-800', rejected: 'bg-slate-100 text-slate-600', withdrawn: 'bg-slate-100 text-slate-600', reverted: 'bg-slate-200 text-slate-700',
 }
 
 async function load(cursor: string | null = null) {
@@ -159,7 +159,7 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
         </li>
         <template v-else>
         <li v-for="e in [item.e]" :key="e.id" class="relative pl-6" data-testid="history-entry" :data-status="e.status">
-          <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : e.status === 'rejected' ? 'bg-red-700 ring-red-100' : 'bg-amber-400 ring-amber-100']"></span>
+          <span :title="e.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2', e.reverted ? 'bg-slate-300 ring-slate-100' : e.status === 'applied' ? 'bg-emerald-500 ring-emerald-100' : e.status === 'disputed' ? 'bg-orange-500 ring-orange-100' : e.status === 'rejected' || e.status === 'withdrawn' ? 'bg-red-700 ring-red-100' : 'bg-amber-400 ring-amber-100']"></span>
           <!-- 日期那一列放在按鈕外面、自己接點擊：列尾有 AgentInfo（本身是按鈕），按鈕不能包按鈕。
                鍵盤展開／收合走下面摘要那顆按鈕，這一列只是讓滑鼠與手指點到這裡也一樣能開合。 -->
           <div class="flex flex-wrap items-center gap-2 text-xs cursor-pointer" @click="toggleEntry(e.id)">
@@ -178,7 +178,7 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
               <AgentInfo v-if="agentDisplay === 'icon'" :name="e.agent_name" :model="e.agent_tool" label="提交者" />
               <span v-else class="text-slate-500">提交：<span class="text-slate-700">{{ e.agent_name ?? '?' }}</span><span v-if="e.agent_tool" class="text-slate-400">・{{ e.agent_tool }}</span></span>
               <!-- 已上線的不畫：中選會自動查證等不經投票的路徑是 0 分上線，條會停在中間像還在等票（維護者 2026-10-25） -->
-              <ScoreBar v-if="e.status !== 'applied' && !scoreBarFull(e.score, e.target_score)":score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
+              <ScoreBar v-if="e.status !== 'applied' && e.status !== 'withdrawn' && !scoreBarFull(e.score, e.target_score)":score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
               <span v-if="e.adjudications.length" class="text-slate-500">有裁決</span>
               <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
             </div>
