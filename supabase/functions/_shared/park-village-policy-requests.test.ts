@@ -11,6 +11,7 @@ import { fnText, readMig } from "./arms-pglite.ts";
 const MIG_NAME = "20261028130000_park_village_policy_web_requests.sql";
 const MIG = await readMig(MIG_NAME);
 const PREV = await readMig("20261008165000_manual_tasks_as_arm.sql");
+const FIX = await readMig("20261028150000_park_uses_bulletin_date.sql");  // 預計上架日不是空的：改看「日期為空或還沒到」
 
 Deno.test("A1 臂本體：新定義＝前一版加停放那一段，拿掉後一字不差", () => {
   const neu = fnText(MIG, "contribution_auto_tasks_manual");
@@ -37,11 +38,12 @@ CREATE FUNCTION manual_task_is_visitor(p_source TEXT, p_task_type TEXT) RETURNS 
 let n = 0;
 const uid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
 
-async function env(mutate: (s: string) => string = (s) => s): Promise<PGlite> {
+async function env(mutate: (s: string) => string = (s) => s, mutateFix: (s: string) => string = (s) => s): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(SCHEMA);
   await db.exec("INSERT INTO elections VALUES ('2026', current_date + 30, NULL), ('2022', current_date - 900, current_date - 920)");
   await db.exec(mutate(MIG));
+  await db.exec(mutateFix(FIX));
   return db;
 }
 async function req(db: PGlite, o: { type?: string; source?: string; level?: string; election?: string }): Promise<string> {
@@ -78,8 +80,11 @@ Deno.test("B2 公報上架日一填就放出來；任務本身一直是 open（�
   const village = await req(db, { level: "村里長" });
   assert(!(await visible(db)).has(village));
   assertEquals((await db.query<{ status: string }>(`SELECT status FROM contribution_tasks WHERE id = '${village}'`)).rows[0]!.status, "open");
+  // 預計上架日（未來）不算上架：仍停放
+  await db.exec("UPDATE elections SET bulletin_published_on = current_date + 10 WHERE id = '2026'");
+  assert(!(await visible(db)).has(village), "預計上架日還沒到：仍停放");
   await db.exec("UPDATE elections SET bulletin_published_on = current_date WHERE id = '2026'");
-  assert((await visible(db)).has(village), "公報上架後放出來");
+  assert((await visible(db)).has(village), "公報上架日到了：放出來");
   await db.close();
 });
 
@@ -98,6 +103,7 @@ Deno.test("B3 既有派工列：migration 內一次收回停放的請求（其�
   const village = await mk("村里長"), council = await mk("縣市議員");
   await db.exec("INSERT INTO task_dispatches (task_id) VALUES ('auto:profile_gap:1'), ('verify:abc')");
   await db.exec(MIG);
+  await db.exec(FIX);
   const left = new Set((await db.query<{ task_id: string }>("SELECT task_id FROM task_dispatches")).rows.map((r) => r.task_id));
   assert(!left.has(village), "停放的收回");
   for (const id of [council, "auto:profile_gap:1", "verify:abc"]) assert(left.has(id), `${id} 不動`);
@@ -111,9 +117,9 @@ Deno.test("C 還原驗證：拿掉停放條件／停放函式永遠回 false →
   const village = await req(db, { level: "村里長" });
   assert((await visible(db)).has(village), "拿掉條件：村里長請求又出現");
   await db.close();
-  const noPark = (s: string) => s.replace("AND e.bulletin_published_on IS NULL", "AND false");
-  assert(noPark(MIG) !== MIG);
-  const db2 = await env(noPark);
+  const noPark = (s: string) => s.replace("(e.bulletin_published_on IS NULL OR e.bulletin_published_on > CURRENT_DATE)", "false");
+  assert(noPark(FIX) !== FIX);
+  const db2 = await env(undefined, noPark);
   const v2 = await req(db2, { level: "村里長" });
   assert((await visible(db2)).has(v2), "停放函式永遠 false：村里長請求又出現");
   await db2.close();
