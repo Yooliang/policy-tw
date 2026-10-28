@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { DEFAULT_PRIORITY, describeManualTask, QUESTION_PRIORITY, taskTarget, validateTaskInput } from "./task-admin.ts";
-import { buildRequestTaskText, decideRequest, KIND_TO_TASK_TYPE, POLICY_KINDS, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
+import { buildRequestTaskText, decideRequest, KIND_TO_TASK_TYPE, pickRecentlyHandled, POLICY_KINDS, RECENT_CHECK_DAYS, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
 
@@ -118,4 +118,31 @@ Deno.test("news_sweep 是合法的 task_type（task_suggestion 才提議得動�
     source_urls: ["https://about.pts.org.tw/"],
   });
   assert(v.ok, `news_sweep 應該是合法 task_type，卻被擋：${JSON.stringify(v.ok ? [] : v.errors)}`);
+});
+
+Deno.test("request-task 近期處理過（5 天）：任務結束或有人交了貢獻／查無變更 → recently_checked；限額先於它；被退回的不算", () => {
+  assertEquals(RECENT_CHECK_DAYS, 5);
+  const now = Date.parse("2026-10-28T06:00:00Z");
+  const since = now - RECENT_CHECK_DAYS * 86400000;
+  const day = (d: number) => new Date(now - d * 86400000).toISOString();
+  // 任務在期限內結束
+  assertEquals(pickRecentlyHandled([{ closed_at: day(2) }], [], since), { at: day(2), outcome: "closed" });
+  // 期限外結束 → 沒有
+  assertEquals(pickRecentlyHandled([{ closed_at: day(9) }], [], since), null);
+  // 還開著的任務沒有 closed_at → 沒有
+  assertEquals(pickRecentlyHandled([{ closed_at: null }], [], since), null);
+  // 查無變更（待審也算）／有人交資料；挑最近的一次
+  assertEquals(pickRecentlyHandled([], [{ created_at: day(3), contribution_type: "no_change", status: "pending" }], since), { at: day(3), outcome: "no_change" });
+  assertEquals(
+    pickRecentlyHandled([{ closed_at: day(4) }], [{ created_at: day(1), contribution_type: "policy", status: "applied" }, { created_at: day(3), contribution_type: "no_change", status: "applied" }], since),
+    { at: day(1), outcome: "updated" },
+  );
+  // 被退回、撤回、被取代的不算；期限外的不算
+  for (const status of ["rejected", "withdrawn", "superseded"]) assertEquals(pickRecentlyHandled([], [{ created_at: day(1), contribution_type: "policy", status }], since), null);
+  assertEquals(pickRecentlyHandled([], [{ created_at: day(6), contribution_type: "policy", status: "applied" }], since), null);
+  // 決策順序：限額 → 近期處理過 → 已有 open 任務
+  const recent = { at: day(1), outcome: "no_change" as const };
+  assertEquals(decideRequest({ usedToday: 0, recentlyHandled: recent, existingOpenTask: { id: "t1" }, autoGapTaskId: null }), { action: "recently_checked", at: day(1), outcome: "no_change" });
+  assertEquals(decideRequest({ usedToday: REQUEST_DAILY_LIMIT_PER_IP, recentlyHandled: recent, existingOpenTask: null, autoGapTaskId: null }), { action: "rate_limited" });
+  assertEquals(decideRequest({ usedToday: 0, recentlyHandled: null, existingOpenTask: { id: "t1" }, autoGapTaskId: null }), { action: "already_queued", task_id: "t1", reason: "open_task" });
 });

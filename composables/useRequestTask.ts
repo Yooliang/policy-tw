@@ -1,5 +1,5 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import { requestTask, type RequestTaskInput, type RequestTaskResult } from '../lib/request-task'
+import { requestTask, requestTaskDoneLabel, type RequestTaskInput, type RequestTaskResult } from '../lib/request-task'
 
 /**
  * 政見頁／人物頁「請 AI 幫忙查」按鈕的送出狀態：按一下就建任務、就地顯示結果，不換頁。
@@ -40,7 +40,7 @@ export function useRequestTask(): RequestTaskState {
 
   function label(idle: string): string {
     if (loading.value) return '送出中…'
-    if (result.value) return result.value.status === 'already_queued' ? '已在任務池中' : '已排入任務池'
+    if (result.value) return requestTaskDoneLabel(result.value)
     if (error.value) return `${idle}（重試）`
     return idle
   }

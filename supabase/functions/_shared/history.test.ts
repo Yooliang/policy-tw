@@ -1,7 +1,7 @@
 // 查核履歷：政見／人物／單筆貢獻三種對象，與完全沒有紀錄時的來源說明
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { createFakeSupabase } from "./test-fake-supabase.ts";
-import { buildHistory, collectHistory, describeOrigin, HISTORY_ENTRY_COLUMNS, pageEntries } from "./history.ts";
+import { buildHistory, buildWebRequests, collectHistory, collectWebRequests, describeOrigin, HISTORY_ENTRY_COLUMNS, pageEntries } from "./history.ts";
 
 const POL = "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9";
 const POLICY = "0c9c1a5e-1111-4222-8333-444444444444";
@@ -211,4 +211,28 @@ Deno.test("履歷：candidacy 有 candidacy_status 變動或整列新增時，�
   const d = suData("無");
   d.edits = [{ ...d.edits[1], field: "candidacy_status", old_value: "declared", new_value: "filed" }];
   assertEquals(buildHistory(d as never)[0].summary, "將 蘇清吉 2026 高雄市村里長參選狀態改為「已登記」，推薦政黨「無黨籍」");
+});
+
+Deno.test("履歷的網站請求：新到舊、標清楚查什麼與狀態；停放中標等公報；已結束標已處理；不帶任何來源識別", () => {
+  const rows = [
+    { id: "r1", task_type: "policy_missing", status: "open", created_at: "2026-10-20T01:00:00Z", closed_at: null },
+    { id: "r2", task_type: "profile_gap", status: "closed", created_at: "2026-10-25T01:00:00Z", closed_at: "2026-10-26T01:00:00Z" },
+    { id: "r3", task_type: "policy_missing", status: "open", created_at: "2026-10-27T01:00:00Z", closed_at: null },
+    { id: "r4", task_type: "mystery", status: "open", created_at: "2026-10-01T01:00:00Z", closed_at: null },
+  ];
+  const out = buildWebRequests(rows, new Set(["r3"]));
+  assertEquals(out.map((r) => r.id), ["r3", "r2", "r1", "r4"], "新到舊");
+  assertEquals(out[0], { id: "r3", task_type: "policy_missing", kind_label: "查承諾與政見", status: "parked", status_label: "等官方選舉公報上架後處理", created_at: "2026-10-27T01:00:00Z", closed_at: null });
+  assertEquals([out[1]!.status, out[1]!.status_label, out[1]!.kind_label], ["closed", "已處理完", "查簡介與學經歷"]);
+  assertEquals([out[2]!.status, out[2]!.status_label], ["open", "排隊處理中"]);
+  assertEquals(out[3]!.kind_label, "查資料", "不認得的任務型別有預設說法");
+  // 已結束的就算在停放名單裡也不標停放
+  assertEquals(buildWebRequests([rows[1]!], new Set(["r2"]))[0]!.status, "closed");
+  for (const r of out) assertEquals(Object.keys(r).sort(), ["closed_at", "created_at", "id", "kind_label", "status", "status_label", "task_type"]);
+});
+
+Deno.test("履歷的網站請求：只有人物與政見對象會撈；貢獻、提問對象直接回空，不碰資料庫", async () => {
+  const boom = { from: () => { throw new Error("不該查"); }, rpc: () => { throw new Error("不該查"); } };
+  assertEquals(await collectWebRequests(boom, "contribution", C_POLICY), []);
+  assertEquals(await collectWebRequests(boom, "question", C_POLICY), []);
 });

@@ -464,6 +464,69 @@ async function originRowFor(supabase: SupabaseLike, target: HistoryTarget, id: s
   return { row: null, notes: [] };
 }
 
+// ------------------------------------------------------------
+// 網站請求（維護者 2026-10-28：資料來源與查核履歷也列網站請求）
+// 訪客在人物頁／政見頁按「請 AI 幫忙查」建的任務（contribution_tasks.source='web_request'）。
+// 只回日期、查什麼、狀態；不回來源 IP 或雜湊、不回是誰按的。
+// ------------------------------------------------------------
+export interface HistoryWebRequest {
+  id: string;
+  task_type: string;
+  kind_label: string;
+  /** open＝排隊處理中；parked＝停放（等官方公報）；closed＝已處理完 */
+  status: "open" | "parked" | "closed";
+  status_label: string;
+  created_at: string;
+  closed_at: string | null;
+}
+const WEB_REQUEST_KIND_LABEL: Record<string, string> = {
+  policy_missing: "查承諾與政見", profile_gap: "查簡介與學經歷", progress_stale: "查政見進度", policy_validity: "查政見是否有效", audit: "核對文件與政見",
+};
+export const WEB_REQUEST_LIMIT = 30;
+
+/** 純函式：任務列 → 履歷上的網站請求（新到舊）。parkedIds＝目前停放中的任務 id */
+export function buildWebRequests(
+  rows: ReadonlyArray<{ id: string; task_type: string; status: string; created_at: string; closed_at: string | null }>,
+  parkedIds: ReadonlySet<string> = new Set(),
+): HistoryWebRequest[] {
+  return rows
+    .map((r): HistoryWebRequest => {
+      const closed = r.status !== "open";
+      const parked = !closed && parkedIds.has(String(r.id));
+      return {
+        id: String(r.id),
+        task_type: r.task_type,
+        kind_label: WEB_REQUEST_KIND_LABEL[r.task_type] ?? "查資料",
+        status: closed ? "closed" : parked ? "parked" : "open",
+        status_label: closed ? "已處理完" : parked ? "等官方選舉公報上架後處理" : "排隊處理中",
+        created_at: r.created_at,
+        closed_at: r.closed_at ?? null,
+      };
+    })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** 碰 DB：某人物（或政見）被網站訪客請求查過的紀錄；其他對象（貢獻、提問）沒有 */
+export async function collectWebRequests(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryWebRequest[]> {
+  if (target !== "politician" && target !== "policy") return [];
+  const key = target === "policy" ? "target->>policy_id" : "target->>politician_id";
+  const rows = ok<Array<{ id: string; task_type: string; status: string; created_at: string; closed_at: string | null }>>(
+    await supabase.from("contribution_tasks").select("id, task_type, status, created_at, closed_at")
+      .eq("source", "web_request").eq(key, id).order("created_at", { ascending: false }).limit(WEB_REQUEST_LIMIT),
+    "web requests",
+  );
+  // 停放中的（等官方公報）：失敗就當沒停放，不讓履歷整份讀不出來
+  const parked = new Set<string>();
+  for (const r of rows) {
+    if (r.status !== "open") continue;
+    try {
+      const res = await supabase.rpc("web_request_parked", { p_task_id: r.id });
+      if (!res.error && res.data === true) parked.add(String(r.id));
+    } catch { /* 當沒停放 */ }
+  }
+  return buildWebRequests(rows, parked);
+}
+
 /** 純函式：cursor 分頁（cursor 是上一頁最後一筆的 at） */
 export function pageEntries(entries: HistoryEntry[], limit: number, cursor: string | null): { items: HistoryEntry[]; has_more: boolean; next_cursor: string | null } {
   const filtered = cursor ? entries.filter((e) => e.at < cursor) : entries;

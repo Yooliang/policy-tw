@@ -4,7 +4,7 @@ import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase, withElectionData } from '../composables/useSupabase'
-import { BOARD_PATH, requestTask, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
+import { BOARD_PATH, requestTask, requestTaskDoneLabel, requestTaskHeading, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
@@ -533,7 +533,7 @@ usePageHead({
                 <div v-if="lookup.campaign.result" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto" data-testid="request-task-done">
                   <div class="flex items-center gap-2 text-emerald-700 font-bold mb-2">
                     <CheckCircle :size="20" />
-                    已交給 AI 代理
+                    {{ requestTaskHeading(lookup.campaign.result!) }}
                   </div>
                   <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.campaign.result) }}</p>
                   <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
@@ -581,7 +581,7 @@ usePageHead({
                 <div v-if="lookup.history.result" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto" data-testid="request-task-done">
                   <div class="flex items-center gap-2 text-emerald-700 font-bold mb-2">
                     <CheckCircle :size="20" />
-                    已交給 AI 代理
+                    {{ requestTaskHeading(lookup.history.result!) }}
                   </div>
                   <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.history.result) }}</p>
                   <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
@@ -704,7 +704,7 @@ usePageHead({
                       <CheckCircle v-else-if="lookup.bio.result" :size="16" />
                       <XCircle v-else-if="lookup.bio.error" :size="16" />
                       <User v-else :size="16" />
-                      {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? (lookup.bio.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
+                      {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? requestTaskDoneLabel(lookup.bio.result) : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
                     </button>
 
                     <!-- Search Avatar Button -->
@@ -724,7 +724,7 @@ usePageHead({
                       <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
                       <XCircle v-else-if="lookup.avatar.error" :size="16" />
                       <Camera v-else :size="16" />
-                      {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? (lookup.avatar.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
+                      {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? requestTaskDoneLabel(lookup.avatar.result) : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
                     </button>
 
                     <!-- Error messages -->

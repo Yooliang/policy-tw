@@ -43,6 +43,7 @@ export interface HistoryEntry {
   adjudications: HistoryAdjudication[]
 }
 export interface HistoryOrigin { kind: 'contributions' | 'imported' | 'unknown'; note: string | null; source_url?: string | null; source?: HistorySource | null; source_notes?: string[] }
+export interface HistoryWebRequest { id: string; task_type: string; kind_label: string; status: 'open' | 'parked' | 'closed'; status_label: string; created_at: string; closed_at: string | null }
 export interface HistoryResponse {
   success: boolean
   target: HistoryTarget
@@ -52,6 +53,8 @@ export interface HistoryResponse {
   has_more: boolean
   next_cursor: string | null
   origin: HistoryOrigin
+  /** 網站訪客請求查這個對象的紀錄（新到舊）；舊版後端沒有這欄 */
+  web_requests?: HistoryWebRequest[]
   entries: HistoryEntry[]
 }
 

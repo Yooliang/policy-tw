@@ -2,13 +2,14 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { siteUrl } from "../_shared/site.ts";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
-import { createTask, findOpenTaskForTarget, findRecentAuditTask } from "../_shared/task-admin.ts";
+import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, RECENT_CHECK_DAYS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
+import { createTask, findOpenTaskForTarget, findRecentAuditTask, findRecentlyHandled } from "../_shared/task-admin.ts";
 
 /**
  * request-task — 網站「請 AI 幫忙查」按鈕（公開、無金鑰、每 IP 每日 20 次）。
  * POST { politician_id?, policy_id?, kind: "policy"|"profile"|"progress"|"validity", requester?: "web" }
  *   → 同目標已有同型別 open 任務或對應自動缺口：{ status:"already_queued", task_id, queue_position, open_tasks, board_url }
+ *   → 同目標同型別近 5 天內處理過（任務結束、或有人交了貢獻／查無變更）：{ status:"recently_checked", checked_at, outcome, … }（不建任務，網頁改跳提示）
  *   → 否則建一筆 contribution_tasks（source=web_request、priority 2，排在公民提問之後）：{ status:"queued", task_id, … }
  * POST { kind: "audit", source_url, policy_id?, politician_id?, note? }（政見深度分析頁「執行稽核」）
  *   → 同網址＋同目標 24 小時內已建過：already_queued（reason=duplicate_url）；否則建 task_type=audit、target.source_url=網址
@@ -82,6 +83,8 @@ Deno.serve(async (req) => {
       if (gapError) throw new Error(`auto tasks: ${gapError.message}`);
       autoGap = ((gaps ?? []) as Array<{ task_id: string }>).find((g) => g.task_id.endsWith(`:${targetId}`)) ?? null;
     }
+    const recentlyHandled = kind === "audit" || !targetId ? null
+      : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType }, RECENT_CHECK_DAYS);
     const duplicateAudit = kind === "audit" && sourceUrl ? await findRecentAuditTask(supabase, { source_url: sourceUrl, politician_id: pid, policy_id: policyId }) : null;
 
     const [{ count: openManual }, { data: counts }] = await Promise.all([
@@ -93,12 +96,16 @@ Deno.serve(async (req) => {
 
     const decision = decideRequest({
       usedToday: usedToday ?? 0,
+      recentlyHandled,
       existingOpenTask: existing ? { id: String(existing.id) } : null,
       autoGapTaskId: autoGap?.task_id ?? null,
       duplicateAuditTask: duplicateAudit ? { id: String(duplicateAudit.id) } : null,
     });
     if (decision.action === "rate_limited") {
       return json({ success: false, error: "rate_limited", message: `每個來源每日最多 ${REQUEST_DAILY_LIMIT_PER_IP} 次，明天再試`, ...base }, 429);
+    }
+    if (decision.action === "recently_checked") {
+      return json({ success: true, status: "recently_checked", checked_at: decision.at, outcome: decision.outcome, window_days: RECENT_CHECK_DAYS, message: `近 ${RECENT_CHECK_DAYS} 天內已經查過，暫時不重複建立`, ...base });
     }
     if (decision.action === "already_queued") {
       return json({ success: true, status: "already_queued", task_id: decision.task_id, reason: decision.reason, message: "這個項目已在任務池中，AI 代理會來查", ...base });

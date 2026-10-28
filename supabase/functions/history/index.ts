@@ -1,12 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { buildHistory, collectHistory, describeOrigin, HISTORY_MAX_LIMIT, HISTORY_TARGETS, type HistoryTarget, pageEntries } from "../_shared/history.ts";
+import { buildHistory, collectHistory, collectWebRequests, describeOrigin, HISTORY_MAX_LIMIT, HISTORY_TARGETS, type HistoryTarget, pageEntries } from "../_shared/history.ts";
 
 /**
  * history — 查核履歷（公開唯讀）。
  * GET ?target=politician|policy|contribution&id=<uuid>&limit=20&cursor=<at>
  *   → { entries: [ { type_label, summary, agent_name, agent_tool, source_urls, verifiers[], edits[], adjudications[], reverted, … } ], origin }
  * 依時間新到舊；每筆＝一筆貢獻：誰交的、誰驗的（理由／反證）、edit_history 欄位舊值新值、是否還原、有沒有裁決。不回 ip_hash。
+ * web_requests：網站訪客請求查這個人物／政見的紀錄（日期、查什麼、狀態；不含來源 IP），新到舊，最多 30 筆。
  * 沒有任何貢獻紀錄時 entries=[]，origin 說明資料哪來的（匯入的 source_url／source_note）。
  */
 
@@ -34,6 +35,7 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const data = await collectHistory(supabase, target, id);
+    const webRequests = await collectWebRequests(supabase, target, id);
     const entries = buildHistory(data);
     const page = pageEntries(entries, limit, cursor);
     const origin = describeOrigin(target, data.origin_row, data.election_notes, entries.length > 0);
@@ -48,6 +50,7 @@ Deno.serve(async (req) => {
       has_more: page.has_more,
       next_cursor: page.next_cursor,
       origin,
+      web_requests: webRequests,
       entries: page.items,
     });
   } catch (error: unknown) {

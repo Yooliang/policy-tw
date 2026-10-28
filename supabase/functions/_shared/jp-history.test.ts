@@ -19,7 +19,9 @@ const TW_SPANS = [
   { from: 'import "jsr:@supabase/functions-js/edge-runtime.d.ts";', to: "*/", why: "檔頭與 import" },
   { from: "const UUID_RE =", to: "const UUID_RE =", why: "id 的格式（日本站依對象不同）" },
   { from: "if (!UUID_RE.test(id))", to: "const supabase = createClient(", why: "id 檢查與 client" },
+  { from: "const webRequests = await collectWebRequests(", to: "const webRequests = await collectWebRequests(", why: "網站請求（日本站沒有這個按鈕；2026-10-28）" },
   { from: "const origin = describeOrigin(", to: 'if (target !== "contribution"', why: "沒有紀錄時的來源說明" },
+  { from: "web_requests: webRequests,", to: "web_requests: webRequests,", why: "網站請求（同上）" },
   { from: 'console.error("history error:"', to: 'console.error("history error:"', why: "日誌名稱" },
 ];
 

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { Sparkles, Loader2, CheckCircle, XCircle } from 'lucide-vue-next'
-import { BOARD_PATH, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
+import { BOARD_PATH, requestTaskDoneLabel, requestTaskMessage, type RequestTaskResult } from '../lib/request-task'
 
 /**
  * 「請 AI 幫忙查」的次要版：區塊已經有資料時放在底部的小按鈕（有資料也能再查、補最新的），
  * 不佔內容區的黃金位置。空狀態的大按鈕仍由頁面自己渲染。
- * 後端 24 小時內重複請求回 already_queued，這裡當成功顯示「已在任務池中」，不當錯誤。
+ * 後端 24 小時內重複請求回 already_queued、近 5 天處理過回 recently_checked，這裡都當成功顯示（「已在任務池中」「近期已查過」），不當錯誤。
  */
 export interface LookupState {
   loading: boolean
@@ -45,7 +45,7 @@ defineEmits<{ click: [] }>()
       <CheckCircle v-else-if="state.result" :size="14" />
       <XCircle v-else-if="state.error" :size="14" />
       <Sparkles v-else :size="14" />
-      {{ state.loading ? '送出中…' : state.result ? (state.result.status === 'already_queued' ? '已在任務池中' : '已排入任務池') : state.error ? '重試' : label }}
+      {{ state.loading ? '送出中…' : state.result ? requestTaskDoneLabel(state.result) : state.error ? '重試' : label }}
     </button>
   </div>
 </template>

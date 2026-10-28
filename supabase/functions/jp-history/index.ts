@@ -45,6 +45,8 @@ Deno.serve(async (req) => {
     const supabase = jpClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     // jp-only:end
     const data = await collectHistory(supabase, target, id);
+    // jp-only:begin 網站請求（日本站沒有這個按鈕）
+    // jp-only:end
     const entries = buildHistory(data);
     const page = pageEntries(entries, limit, cursor);
     // jp-only:begin 沒有紀錄時的來源說明（日本站沒有匯入的資料）
@@ -61,6 +63,8 @@ Deno.serve(async (req) => {
       has_more: page.has_more,
       next_cursor: page.next_cursor,
       origin,
+      // jp-only:begin 網站請求（日本站沒有這個按鈕）
+      // jp-only:end
       entries: page.items,
     });
   } catch (error: unknown) {
