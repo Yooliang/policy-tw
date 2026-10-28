@@ -34,7 +34,8 @@ Deno.serve(async (req) => {
     if (!UUID_RE.test(id)) return json({ success: false, error: "id 要是 uuid" }, 400);
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const [data, webRequests] = await Promise.all([collectHistory(supabase, target, id), collectWebRequests(supabase, target, id)]);
+    const data = await collectHistory(supabase, target, id);
+    const webRequests = await collectWebRequests(supabase, target, id);
     const entries = buildHistory(data);
     const page = pageEntries(entries, limit, cursor);
     const origin = describeOrigin(target, data.origin_row, data.election_notes, entries.length > 0);
