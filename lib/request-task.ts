@@ -5,14 +5,9 @@
 
 export type RequestKind = 'policy' | 'profile' | 'progress' | 'validity' | 'audit'
 
-export interface RequestTaskResult {
-  status: 'queued' | 'already_queued'
-  task_id: string
-  queue_position: number
-  open_tasks: number
-  board_url: string
-  message: string
-}
+export type { RequestTaskResult } from './request-task-text'
+export { requestTaskDoneLabel, requestTaskHeading, requestTaskMessage } from './request-task-text'
+import type { RequestTaskResult } from './request-task-text'
 
 /** 任務看板：按鈕建的任務都列在這一頁的「任務」分頁 */
 export const BOARD_PATH = '/tasks'
@@ -52,11 +47,4 @@ export async function requestTask(input: RequestTaskInput): Promise<RequestTaskR
   if (res.status === 429) throw new Error(body?.message || '今天請求次數已達上限，明天再試')
   if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
   return body as RequestTaskResult
-}
-
-/** 成功／已存在的一句話 */
-export function requestTaskMessage(r: RequestTaskResult): string {
-  return r.status === 'already_queued'
-    ? `這個項目已在任務池中，AI 代理會來查；目前有 ${r.queue_position} 件任務排隊`
-    : `已加入任務池，AI 代理會來查；目前有 ${r.queue_position} 件任務排隊`
 }

@@ -4,6 +4,7 @@
  */
 
 import { TASK_TYPES } from "./contribution-schema.ts";
+import { pickRecentlyHandled, type RecentlyHandled } from "./request-task.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -190,6 +191,38 @@ export async function closeTask(supabase: SupabaseLike, taskId: string, closedBy
  * 有給 task_type 就只比同型別：同一筆政見「查進度」與「這不是政見？」是兩件不同的事，
  * 也不該因為有人對它發了一題公民提問，按鈕就回「已在任務池中」。
  */
+/**
+ * 這個目標、這一類請求，近 days 天內有沒有處理過（網站按鈕「近期查過就跳提示」，維護者 2026-10-28）。
+ * 看三處：同目標同型別的任務（任何狀態，期限內結束的算）、掛在這些任務上的貢獻（task_id 或 no_change 的 payload.task_id）、
+ * 掛在對應自動缺口（task_id 以 auto:<型別>:<目標 id> 開頭）上的貢獻。純挑選邏輯在 pickRecentlyHandled。
+ */
+export async function findRecentlyHandled(
+  supabase: SupabaseLike,
+  target: { politician_id?: string | null; policy_id?: string | null; task_type: string },
+  days: number,
+  now: number = Date.now(),
+): Promise<RecentlyHandled | null> {
+  const targetId = target.policy_id ?? target.politician_id ?? null;
+  if (!targetId) return null;
+  const sinceMs = now - days * 86400000;
+  const sinceIso = new Date(sinceMs).toISOString();
+  let tq = supabase.from("contribution_tasks").select("id, closed_at").eq("task_type", target.task_type).limit(50);
+  tq = target.policy_id ? tq.eq("target->>policy_id", target.policy_id) : tq.eq("target->>politician_id", target.politician_id);
+  const { data: tasks, error: tErr } = await tq;
+  if (tErr) throw new Error(`contribution_tasks recent lookup: ${tErr.message}`);
+  const taskRows = (tasks ?? []) as Array<{ id: string; closed_at: string | null }>;
+  const ids = taskRows.map((t) => String(t.id));
+  const cols = "created_at, contribution_type, status";
+  const [byTask, byPayload, byAuto] = await Promise.all([
+    ids.length ? supabase.from("contributions").select(cols).in("task_id", ids).gte("created_at", sinceIso).limit(50) : Promise.resolve({ data: [], error: null }),
+    ids.length ? supabase.from("contributions").select(cols).eq("contribution_type", "no_change").is("task_id", null).in("payload->>task_id", ids).gte("created_at", sinceIso).limit(50) : Promise.resolve({ data: [], error: null }),
+    supabase.from("contributions").select(cols).like("task_id", `auto:${target.task_type}:${targetId}%`).gte("created_at", sinceIso).limit(50),
+  ]);
+  for (const r of [byTask, byPayload, byAuto]) if (r.error) throw new Error(`contributions recent lookup: ${r.error.message}`);
+  const contributions = [...(byTask.data ?? []), ...(byPayload.data ?? []), ...(byAuto.data ?? [])] as Array<{ created_at: string; contribution_type: string; status: string }>;
+  return pickRecentlyHandled(taskRows, contributions, sinceMs);
+}
+
 export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null }): Promise<Obj | null> {
   let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at").eq("status", "open").limit(1);
   if (target.task_type) q = q.eq("task_type", target.task_type);

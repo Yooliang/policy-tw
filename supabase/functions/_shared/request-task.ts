@@ -101,8 +101,37 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
   }
 }
 
+/** 同一個目標、同一類請求，這麼多天內處理過就不再建新任務（維護者 2026-10-28：近期處理過改跳提示） */
+export const RECENT_CHECK_DAYS = 5;
+
+export type RecentOutcome = "no_change" | "updated" | "closed";
+export interface RecentlyHandled { at: string; outcome: RecentOutcome }
+
+/**
+ * 純函式：從「這個目標這一類的任務」與「掛在這些任務（或對應自動缺口）上的貢獻」挑出最近一次處理。
+ * 處理＝任務在期限內結束（closed_at），或期限內有人交了還在或已經通過的貢獻（pending／verified／applied；被退回、撤回、被取代的不算）。
+ * no_change＝查過、沒有新資料（也算查過，避免查無資料的人被反覆按）。
+ */
+export function pickRecentlyHandled(
+  tasks: ReadonlyArray<{ closed_at: string | null }>,
+  contributions: ReadonlyArray<{ created_at: string; contribution_type: string; status: string }>,
+  sinceMs: number,
+): RecentlyHandled | null {
+  const found: RecentlyHandled[] = [];
+  for (const t of tasks) if (t.closed_at && Date.parse(t.closed_at) >= sinceMs) found.push({ at: t.closed_at, outcome: "closed" });
+  for (const c of contributions) {
+    if (!["pending", "verified", "applied"].includes(c.status)) continue;
+    if (Date.parse(c.created_at) < sinceMs) continue;
+    found.push({ at: c.created_at, outcome: c.contribution_type === "no_change" ? "no_change" : "updated" });
+  }
+  found.sort((a, b) => b.at.localeCompare(a.at));
+  return found[0] ?? null;
+}
+
 export interface RequestDecisionInput {
   usedToday: number;
+  /** 近 RECENT_CHECK_DAYS 天內處理過（kind=audit 不看） */
+  recentlyHandled?: RecentlyHandled | null;
   existingOpenTask: { id: string } | null;
   autoGapTaskId: string | null;
   /** kind=audit：24 小時內同網址＋同目標已建過的任務 */
@@ -111,12 +140,14 @@ export interface RequestDecisionInput {
 
 export type RequestDecision =
   | { action: "rate_limited" }
+  | { action: "recently_checked"; at: string; outcome: RecentOutcome }
   | { action: "already_queued"; task_id: string; reason: "open_task" | "auto_gap" | "duplicate_url" }
   | { action: "create" };
 
-/** 純函式：限額 → 已有 open 手動任務 → 已有對應自動缺口 → 同網址重複 → 建立 */
+/** 純函式：限額 → 近期處理過 → 已有 open 手動任務 → 已有對應自動缺口 → 同網址重複 → 建立 */
 export function decideRequest(input: RequestDecisionInput): RequestDecision {
   if (input.usedToday >= REQUEST_DAILY_LIMIT_PER_IP) return { action: "rate_limited" };
+  if (input.recentlyHandled) return { action: "recently_checked", at: input.recentlyHandled.at, outcome: input.recentlyHandled.outcome };
   if (input.existingOpenTask) return { action: "already_queued", task_id: input.existingOpenTask.id, reason: "open_task" };
   if (input.autoGapTaskId) return { action: "already_queued", task_id: input.autoGapTaskId, reason: "auto_gap" };
   if (input.duplicateAuditTask) return { action: "already_queued", task_id: input.duplicateAuditTask.id, reason: "duplicate_url" };

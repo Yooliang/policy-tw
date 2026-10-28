@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2 } from 'lucide-vue-next'
-import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget } from '../../lib/history'
+import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget, type HistoryWebRequest } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
@@ -28,6 +28,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const entries = ref<HistoryEntry[]>([])
 const origin = ref<HistoryOrigin | null>(null)
+const webRequests = ref<HistoryWebRequest[]>([])
 const total = ref<number | null>(null)
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
@@ -46,6 +47,7 @@ async function load(cursor: string | null = null) {
     const body = await fetchHistory(props.target, props.id, { limit: 20, cursor })
     entries.value = cursor ? [...entries.value, ...body.entries] : body.entries
     origin.value = body.origin
+    if (!cursor) webRequests.value = body.web_requests ?? []
     total.value = body.total
     hasMore.value = body.has_more
     nextCursor.value = body.next_cursor
@@ -68,7 +70,7 @@ function toggleEntry(id: string) {
 const countBadge = computed(() => (total.value !== null && total.value > 0 ? total.value : null))
 
 onMounted(() => { load() })
-watch(() => props.id, () => { entries.value = []; total.value = null; expanded.value = new Set(); load() })
+watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.value = null; expanded.value = new Set(); load() })
 </script>
 
 <template>
@@ -94,6 +96,21 @@ watch(() => props.id, () => { entries.value = []; total.value = null; expanded.v
     />
 
     <div v-if="open" class="mt-4" data-testid="history-body">
+      <!-- 網站請求（2026-10-28）：訪客按「請 AI 幫忙查」留下的紀錄，只有日期、查什麼、狀態 -->
+      <div v-if="webRequests.length > 0" class="mb-4" data-testid="history-web-requests">
+        <p class="text-xs font-bold text-slate-500 mb-2">網站請求（{{ webRequests.length }}）</p>
+        <ol class="relative border-l-2 border-slate-200 ml-2 space-y-3">
+          <li v-for="r in webRequests" :key="r.id" class="relative pl-6" data-testid="history-web-request" :data-status="r.status">
+            <span :title="r.status_label" :class="['absolute -left-[7px] top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2 ring-slate-100', r.status === 'closed' ? 'bg-emerald-500' : r.status === 'parked' ? 'bg-slate-300' : 'bg-amber-400']"></span>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span class="font-mono text-slate-400">{{ formatDate(r.created_at) }}</span>
+              <span class="px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">網站請求</span>
+              <span class="text-slate-700">{{ r.kind_label }}</span>
+              <span class="text-slate-500">{{ r.status_label }}<template v-if="r.closed_at">（{{ formatDate(r.closed_at) }}）</template></span>
+            </div>
+          </li>
+        </ol>
+      </div>
       <div v-if="loading && entries.length === 0" class="py-6 text-center text-xs text-slate-500"><Loader2 :size="22" class="animate-spin mx-auto mb-1 text-blue-500" />載入中…</div>
       <div v-else-if="error" class="py-4 text-center text-xs" data-testid="history-error">
         <AlertCircle :size="22" class="mx-auto mb-1 text-red-500" />
