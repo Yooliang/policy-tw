@@ -222,17 +222,31 @@ Deno.test("履歷的網站請求：新到舊、標清楚查什麼與狀態；停
   ];
   const out = buildWebRequests(rows, new Set(["r3"]));
   assertEquals(out.map((r) => r.id), ["r3", "r2", "r1", "r4"], "新到舊");
-  assertEquals(out[0], { id: "r3", task_type: "policy_missing", kind_label: "查承諾與政見", status: "parked", status_label: "等官方選舉公報上架後處理", created_at: "2026-10-27T01:00:00Z", closed_at: null });
+  assertEquals(out[0], { id: "r3", task_type: "policy_missing", kind_label: "查承諾與政見", status: "parked", status_label: "等官方選舉公報上架後處理", created_at: "2026-10-27T01:00:00Z", closed_at: null, reports: [] });
   assertEquals([out[1]!.status, out[1]!.status_label, out[1]!.kind_label], ["closed", "已處理完", "查簡介與學經歷"]);
   assertEquals([out[2]!.status, out[2]!.status_label], ["open", "排隊處理中"]);
   assertEquals(out[3]!.kind_label, "查資料", "不認得的任務型別有預設說法");
   // 已結束的就算在停放名單裡也不標停放
   assertEquals(buildWebRequests([rows[1]!], new Set(["r2"]))[0]!.status, "closed");
-  for (const r of out) assertEquals(Object.keys(r).sort(), ["closed_at", "created_at", "id", "kind_label", "status", "status_label", "task_type"]);
+  for (const r of out) assertEquals(Object.keys(r).sort(), ["closed_at", "created_at", "id", "kind_label", "reports", "status", "status_label", "task_type"]);
 });
 
 Deno.test("履歷的網站請求：只有人物與政見對象會撈；貢獻、提問對象直接回空，不碰資料庫", async () => {
   const boom = { from: () => { throw new Error("不該查"); }, rpc: () => { throw new Error("不該查"); } };
   assertEquals(await collectWebRequests(boom, "contribution", C_POLICY), []);
   assertEquals(await collectWebRequests(boom, "question", C_POLICY), []);
+});
+
+Deno.test("履歷的網站請求：掛在任務上的貢獻（task_id 欄或 no_change 的 payload.task_id）列在展開用的 reports，新到舊", () => {
+  const rows = [{ id: "r1", task_type: "policy_missing", status: "open", created_at: "2026-10-20T01:00:00Z", closed_at: null }, { id: "r2", task_type: "profile_gap", status: "open", created_at: "2026-10-21T01:00:00Z", closed_at: null }];
+  const out = buildWebRequests(rows, new Set(), [
+    { id: "c1", task_id: "r1", contribution_type: "policy", status: "applied", created_at: "2026-10-21T00:00:00Z", agent_name: "a1" },
+    { id: "c2", task_id: null, payload: { task_id: "r1" }, contribution_type: "no_change", status: "pending", created_at: "2026-10-22T00:00:00Z", agent_name: "a2" },
+    { id: "c3", task_id: "other", contribution_type: "policy", status: "applied", created_at: "2026-10-22T00:00:00Z", agent_name: "a3" },
+  ]);
+  const r1 = out.find((r) => r.id === "r1")!;
+  assertEquals(r1.reports.map((x) => x.id), ["c2", "c1"], "新到舊、只收掛在這個任務上的");
+  assertEquals(r1.reports[0]!.agent_name, "a2");
+  assertEquals(out.find((r) => r.id === "r2")!.reports, []);
+  assert(!JSON.stringify(out).includes("ip_hash"));
 });

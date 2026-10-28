@@ -469,6 +469,8 @@ async function originRowFor(supabase: SupabaseLike, target: HistoryTarget, id: s
 // 訪客在人物頁／政見頁按「請 AI 幫忙查」建的任務（contribution_tasks.source='web_request'）。
 // 只回日期、查什麼、狀態；不回來源 IP 或雜湊、不回是誰按的。
 // ------------------------------------------------------------
+/** 這筆網站請求之後有人交的貢獻（掛在這個任務上的）：展開時列出，讓人看得到「誰回報了什麼、現在到哪一步」 */
+export interface HistoryWebRequestReport { id: string; type_label: string; status: string; status_label: string; created_at: string; agent_name: string | null }
 export interface HistoryWebRequest {
   id: string;
   task_type: string;
@@ -478,6 +480,8 @@ export interface HistoryWebRequest {
   status_label: string;
   created_at: string;
   closed_at: string | null;
+  /** 掛在這個任務上的貢獻（新到舊）；沒有就是還沒有代理交件 */
+  reports: HistoryWebRequestReport[];
 }
 const WEB_REQUEST_KIND_LABEL: Record<string, string> = {
   policy_missing: "查承諾與政見", profile_gap: "查簡介與學經歷", progress_stale: "查政見進度", policy_validity: "查政見是否有效", audit: "核對文件與政見",
@@ -488,7 +492,17 @@ export const WEB_REQUEST_LIMIT = 30;
 export function buildWebRequests(
   rows: ReadonlyArray<{ id: string; task_type: string; status: string; created_at: string; closed_at: string | null }>,
   parkedIds: ReadonlySet<string> = new Set(),
+  contributions: ReadonlyArray<{ id: string; task_id: string | null; payload?: Obj | null; contribution_type: string; status: string; created_at: string; agent_name: string | null }> = [],
 ): HistoryWebRequest[] {
+  const reportsBy = new Map<string, HistoryWebRequestReport[]>();
+  for (const c of contributions) {
+    const tid = c.task_id ?? (typeof c.payload?.task_id === "string" ? c.payload.task_id : null);
+    if (!tid) continue;
+    reportsBy.set(tid, [...(reportsBy.get(tid) ?? []), {
+      id: c.id, type_label: TYPE_LABEL[c.contribution_type] ?? c.contribution_type, status: c.status,
+      status_label: STATUS_LABEL[c.status] ?? c.status, created_at: c.created_at, agent_name: c.agent_name ?? null,
+    }]);
+  }
   return rows
     .map((r): HistoryWebRequest => {
       const closed = r.status !== "open";
@@ -501,6 +515,7 @@ export function buildWebRequests(
         status_label: closed ? "已處理完" : parked ? "等官方選舉公報上架後處理" : "排隊處理中",
         created_at: r.created_at,
         closed_at: r.closed_at ?? null,
+        reports: (reportsBy.get(String(r.id)) ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at)),
       };
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -524,7 +539,14 @@ export async function collectWebRequests(supabase: SupabaseLike, target: History
       if (!res.error && res.data === true) parked.add(String(r.id));
     } catch { /* 當沒停放 */ }
   }
-  return buildWebRequests(rows, parked);
+  // 掛在這些任務上的貢獻（task_id 欄，或 no_change 只寫在 payload.task_id）
+  const ids = rows.map((r) => String(r.id));
+  const cols = "id, task_id, payload, contribution_type, status, created_at, agent_name";
+  const [byTask, byPayload] = ids.length === 0 ? [[], []] : await Promise.all([
+    supabase.from("contributions").select(cols).in("task_id", ids).limit(200),
+    supabase.from("contributions").select(cols).eq("contribution_type", "no_change").is("task_id", null).in("payload->>task_id", ids).limit(200),
+  ]).then(([a, b]) => [ok<Array<Obj>>(a, "web request reports"), ok<Array<Obj>>(b, "web request reports (no_change)")]);
+  return buildWebRequests(rows, parked, [...byTask, ...byPayload] as never);
 }
 
 /** 純函式：cursor 分頁（cursor 是上一頁最後一筆的 at） */
