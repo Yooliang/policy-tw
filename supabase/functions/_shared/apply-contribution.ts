@@ -10,7 +10,7 @@
  */
 
 import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape, isRegionalStatAdminCode, REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
-import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
+import { ensurePolitician, newPoliticianDefaults, upsertParticipation } from "./candidate-import.ts";
 import { changedFields, electionResultLabel } from "./candidacy-result.ts";
 import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
@@ -249,12 +249,17 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     const problem = await checkAvatarUrl(avatar);
     if (problem) { avatarNote = `；照片沒套用：${problem}`; p.avatar_url = null; }
   }
+  // position／region 在 politicians 是 NOT NULL，交件可以不帶：補預設，補不出來就講清楚缺什麼（不讓落庫撞約束一直重試）
+  const defaults = newPoliticianDefaults({
+    position: str(p.position), region: str(p.region), election_type: str(p.election_type),
+    current_position: str(p.current_position), bio: str(p.bio),
+  });
   const ensured = await ensureOrResolve(supabase, row, {
     name: String(p.name),
     party: str(p.party),
-    region: str(p.region),
+    region: defaults.region,
     election_type: str(p.election_type),
-    position: str(p.position),
+    position: defaults.position,
     current_position: str(p.current_position),
     birth_year: int(p.birth_year),
   }, {
