@@ -77,7 +77,7 @@ BEGIN
     IF (TG_OP = 'UPDATE' AND NEW.dispatch_count IS DISTINCT FROM OLD.dispatch_count) OR (TG_OP = 'INSERT' AND COALESCE(NEW.dispatch_count, 0) > 0) THEN
       NEW.verify_follows_task := false;
     END IF;
-    -- >>> no_change 往後排（20261028120000）：進隊與每次被派出去回隊列時重算延後秒數；其他更新沿用現有值
+    -- >>> no_change 往後排（20261028140000）：進隊與每次被派出去回隊列時重算延後秒數；其他更新沿用現有值
     IF TG_OP = 'INSERT' THEN
       NEW.defer_seconds := verify_ticket_defer_seconds(NEW.task_id, COALESCE(NEW.dispatch_count, 0) > 0);
     ELSIF NEW.dispatch_count IS DISTINCT FROM OLD.dispatch_count THEN

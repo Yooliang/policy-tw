@@ -581,10 +581,10 @@ Deno.test("B8 /tasks、/request-task（contribution_auto_tasks）：停放的缺
 });
 
 // ============================================================
-// D. no_change 的驗證票往後排（migration 20261028120000_no_change_verify_defer.sql，維護者 2026-10-28）
+// D. no_change 的驗證票往後排（migration 20261028140000_no_change_verify_defer.sql，維護者 2026-10-28）
 //    進隊延後 1 天、被派出去回隊列延後 2 天（不累加）、既有待審一次延後 10 天；網站請求來源與其他型別不延後
 // ============================================================
-const DEFER_MIG_NAME = "20261028120000_no_change_verify_defer.sql";
+const DEFER_MIG_NAME = "20261028140000_no_change_verify_defer.sql";
 const DEFER_MIG = await readMig(DEFER_MIG_NAME);
 
 /** 套上延後這支 migration 的環境（uuid_if_canonical 取 20261019010000 的定義，測試用的 SCHEMA 沒有它） */
