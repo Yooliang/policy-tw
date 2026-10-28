@@ -112,15 +112,35 @@ if (!base) {
 } else {
   try {
     const sharedGraph = buildSharedGraph();
-    const changedRel = new Set(
-      changedFiles(base, head)
-        .filter((f) => f.startsWith(`${FUNCTIONS_DIR}/`))
-        .map((f) => relative(FUNCTIONS_DIR, f).replace(/\\/g, "/"))
-    );
+    // 每支函式可以有自己的基準 tag edge-fn/<名稱>（deploy-functions.mjs 部署成功時記的）：
+    // 上次整批只有幾支失敗、全域 tag 沒移動時，成功的那幾支從自己的 tag 比，不會被重部。
+    // 沒有自己的 tag（或讀不到）就用全域 base，往「多部署」倒。
+    const changedByBase = new Map();
+    const changedSince = (b) => {
+      if (!changedByBase.has(b)) {
+        changedByBase.set(b, new Set(
+          changedFiles(b, head)
+            .filter((f) => f.startsWith(`${FUNCTIONS_DIR}/`))
+            .map((f) => relative(FUNCTIONS_DIR, f).replace(/\\/g, "/"))
+        ));
+      }
+      return changedByBase.get(b);
+    };
+    const baseOf = (fn) => {
+      try {
+        const t = execFileSync("git", ["rev-parse", "-q", "--verify", `refs/tags/edge-fn/${fn}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+        // 只在它比全域 base 新（全域 base 是它的祖先）時才採用，否則舊 tag 會多部署
+        execFileSync("git", ["merge-base", "--is-ancestor", base, t], { stdio: "ignore" });
+        return t;
+      } catch {
+        return base;
+      }
+    };
     // 先收集完再一次印出：計算中途才噴例外的話，不要留下「印了一半」的殘餘輸出，
     // 讓下面的 catch 乾淨地補上「全部」，不要兩份混在一起變成重複。
     affectedFns = allFns.filter((fn) => {
       const deps = sharedDepsOf(fn, sharedGraph);
+      const changedRel = changedSince(baseOf(fn));
       return changedRel.has(`${fn}/index.ts`) || [...deps].some((d) => changedRel.has(d));
     });
   } catch (e) {

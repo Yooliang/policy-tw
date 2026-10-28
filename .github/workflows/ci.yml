@@ -366,6 +366,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           AFFECTED_FUNCTIONS: ${{ steps.affected.outputs.list }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: node scripts/deploy-functions.mjs $AFFECTED_FUNCTIONS
 
       # 只有前面全部成功才移動這個 tag。失敗的話 tag 留在原地不動，下一次成功的
@@ -375,3 +376,6 @@ jobs:
         run: |
           git tag -f edge-functions-deployed "${{ github.sha }}"
           git push origin -f edge-functions-deployed
+          # 全域基準追上了，各函式自己的 edge-fn/* 基準用不到，清掉免得日後比全域舊
+          OLD=$(git ls-remote --tags --refs origin 'refs/tags/edge-fn/*' | awk '{print $2}')
+          [ -z "$OLD" ] || git push origin --delete $OLD || true
