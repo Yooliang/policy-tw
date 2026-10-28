@@ -347,7 +347,7 @@ usePageHead({
 
 <template>
   <div v-if="politician" class="bg-slate-50 min-h-screen">
-    <Hero>
+    <Hero auto-height>
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
