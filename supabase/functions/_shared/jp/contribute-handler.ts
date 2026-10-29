@@ -37,6 +37,7 @@ import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBin
 import { loadQuotaLimits, type QuotaLimits } from "../quota-settings.ts";
 import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
 import { machineVerifyInline } from "./machine-verify.ts";
+import { avatarProblems, type CommonsLookup, commonsLookupViaApi } from "./commons-avatar.ts";
 import { decideSameClaim, isSameClaimType, parseResolvedClaim, type SameClaimMatches } from "../same-claims.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -246,6 +247,8 @@ export async function handleContribute(
   dispatchSecret?: string,
   // 落庫函式：重複提交併成的同意票剛好讓那一筆變 verified 時，由這一票落庫（沒給＝交給排程 apply_verified_pending）
   applyFn?: JpApplyFn,
+  // Commons 照會（試驗用に差し替え可）。politician_avatar の機器核對に使う
+  commonsLookup: CommonsLookup = commonsLookupViaApi,
 ): Promise<HandlerResult> {
   // 派工憑證：帶了就驗憑證（簽章、期限、task 相符），無效回 403 invalid_dispatch_token，不默默當作沒帶。
   // 通過時，額度、併票、提交者網段都用領任務時的網段（憑證裡簽的），跟 jp-next 回報給代理的額度同一把尺。
@@ -278,6 +281,21 @@ export async function handleContribute(
   const kanaProblems = await kanaRequiredProblems(supabase, validation.items);
   if (kanaProblems.length > 0) {
     return { status: 400, body: { success: false, error: "validation_failed", message: "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）", errors: kanaProblems } };
+  }
+  // 人物頭像（policy-ops#162）：Wikimedia Commons の自由授權寫真だけ。Commons API で圖檔・授權・作者を照合し、一致しなければ整批不收（不算退件）。
+  // Commons に繋がらないときは 503（交件側の誤りではない。しばらくしてもう一度）
+  const avatarIssues = await avatarProblems(validation.items, commonsLookup);
+  if (avatarIssues.length > 0) {
+    const unavailable = avatarIssues.some((p) => p.unavailable);
+    return {
+      status: unavailable ? 503 : 422,
+      body: {
+        success: false,
+        error: unavailable ? "avatar_check_unavailable" : "avatar_check_failed",
+        message: unavailable ? "Commons の照合ができませんでした（一時的な接続の問題です）。整批未收，しばらくしてからもう一度送ってください。這不算被拒。" : "頭像が Commons の実データと照合できませんでした。整批未收，errors を直して送り直してください。這不算被拒。",
+        errors: avatarIssues.map((p) => ({ index: p.index, path: p.path, message: p.message })),
+      },
+    };
   }
   // 出處不得引用本站或正見（照搬正見 1.84.0 #486；日本協議 0.8.0）：引自己的網站是循環引用。整批不收、不算被拒，講清楚是哪個網址。
   const selfCited = selfCitationProblems(validation.items);

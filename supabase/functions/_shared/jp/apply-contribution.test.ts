@@ -38,7 +38,7 @@ Deno.test("jpApplyViaRpc：rpc 自體出錯就丟（verify-handler 會攔住，�
   await assertRejects(() => jpApplyViaRpc(fakeSupabase({ error: { message: "function policy_jp.apply_contribution does not exist" } }), CID), Error, "apply_contribution");
 });
 
-Deno.test("落庫する型別は十六（task_suggestion／correction は含まない）", () => {
-  assertEquals([...JP_APPLY_TYPES].sort(), ["candidacy", "district_seats", "election", "lineage", "lineage_handover", "lineage_link", "lineage_participants", "local_government", "no_change", "party_info", "policy", "policy_elements", "policy_progress", "politician", "regional_stat", "removal"]);
+Deno.test("落庫する型別は十七（task_suggestion／correction は含まない）", () => {
+  assertEquals([...JP_APPLY_TYPES].sort(), ["candidacy", "district_seats", "election", "lineage", "lineage_handover", "lineage_link", "lineage_participants", "local_government", "no_change", "party_info", "policy", "policy_elements", "policy_progress", "politician", "politician_avatar", "regional_stat", "removal"]);
   assert(!(JP_APPLY_TYPES as readonly string[]).includes("correction"));
 });
