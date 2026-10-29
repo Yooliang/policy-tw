@@ -15,6 +15,17 @@ export interface RpcResult {
 /** 呼叫一支 RPC（single row）；真正的實作在 index.ts 用 supabase-js 的 .rpc(fn, args).single() 包一層 */
 export type RpcClient = (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
 
+/**
+ * 額度設定四個數字的欄位與上下限（#769；照 migration 20261029080000_quota_settings.sql 的 CHECK）。
+ * 前端 src/lib/quota.ts 有一份同樣的表，改這裡要一起改。
+ */
+export const QUOTA_FIELDS = [
+  { key: "per_ip_submit", min: 10, max: 2000 },
+  { key: "per_ip_verify", min: 10, max: 5000 },
+  { key: "per_ditrust_submit", min: 10, max: 5000 },
+  { key: "per_ditrust_verify", min: 10, max: 10000 },
+] as const;
+
 /** 站台白名單（2026-10-10 日本站）：body.site 只收這兩個字面值，永遠不接受 schema 名稱。 */
 export const CONSOLE_SITES = ["tw", "jp"] as const;
 export type ConsoleSite = typeof CONSOLE_SITES[number];
@@ -170,7 +181,28 @@ export async function handleConsoleAdmin(req: Request, deps: ConsoleAdminDeps): 
       return json({ success: true, row: data });
     }
 
-    return json({ success: false, error: `不認得的 action：${String(action)}（要是 override_create／override_revoke／milestone_set／rule_save）` }, 400);
+    if (action === "quota_settings_save") {
+      // 額度設定（#769）：RPC 在 public、用 p_site 分站（同 rule_save，不管 site 都走台灣站 client）；
+      // 這裡先擋整數與上下限，資料庫 CHECK 是第二道
+      for (const f of QUOTA_FIELDS) {
+        const v = body[f.key];
+        if (typeof v !== "number" || !Number.isInteger(v)) return json({ success: false, error: `${f.key} 要是整數` }, 400);
+        if (v < f.min || v > f.max) return json({ success: false, error: `${f.key} 要在 ${f.min}～${f.max} 之間` }, 400);
+      }
+      const { data, error } = await deps.rpc("console_admin_quota_settings_save", {
+        p_site: site,
+        p_per_ip_submit: body.per_ip_submit,
+        p_per_ip_verify: body.per_ip_verify,
+        p_per_ditrust_submit: body.per_ditrust_submit,
+        p_per_ditrust_verify: body.per_ditrust_verify,
+        p_reason: body.reason,
+        p_set_by: agentEmail,
+      });
+      if (error) throw error;
+      return json({ success: true, row: data });
+    }
+
+    return json({ success: false, error: `不認得的 action：${String(action)}（要是 override_create／override_revoke／milestone_set／rule_save／quota_settings_save）` }, 400);
   } catch (e) {
     // RPC 的 RAISE EXCEPTION（reason 必填、找不到可撤銷的覆寫、kind 不合法）與 CHECK 違反都是使用者端的輸入問題，回 400；
     // 其他（連線失敗等）才是伺服器端的問題。supabase-js 把 RPC 的錯誤都包成同一種形狀，這裡沒辦法細分，一律 400
