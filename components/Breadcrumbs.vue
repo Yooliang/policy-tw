@@ -12,7 +12,7 @@ defineProps<{ items: BreadcrumbItem[] }>()
 
 <template>
   <nav v-if="items.length >= 1" aria-label="麵包屑" class="w-full min-w-0 text-left">
-    <ol class="flex items-center gap-1 sm:gap-1.5 overflow-x-auto flex-nowrap py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <ol class="flex flex-wrap items-center gap-x-1 gap-y-1.5 sm:gap-x-1.5 py-0.5">
       <li v-for="(item, i) in items" :key="i" class="flex items-center gap-1 sm:gap-1.5 shrink-0">
         <ChevronRight v-if="i > 0" :size="14" class="hidden sm:block shrink-0 text-slate-300" aria-hidden="true" />
         <RouterLink
