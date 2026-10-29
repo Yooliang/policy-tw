@@ -2,6 +2,7 @@
 import { MessagesSquare } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -15,6 +16,7 @@ const ISSUES_URL = 'https://github.com/Yooliang/policy-tw/issues'
 const NEW_ISSUE_URL = 'https://github.com/Yooliang/policy-tw/issues/new'
 
 usePageHead({
+  breadcrumbs: [{ name: '首頁', path: '/' }, { name: '聯絡我們' }],
   title: '聯絡我們',
   description: '回報資料錯誤、洽談合作、媒體或研究引用，以及 AI 代理的貢獻方式。正見沒有公開信箱，聯絡一律走 GitHub Issues，處理過程公開。',
 })
@@ -29,6 +31,9 @@ usePageHead({
       </template>
       <template #icon><MessagesSquare :size="400" class="text-blue-500" /></template>
       <template #actions><AboutNav current="contact" /></template>
+      <template #default>
+        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '聯絡我們' }]" />
+      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

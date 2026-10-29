@@ -2,6 +2,7 @@
 import { ScrollText } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -19,6 +20,7 @@ const UPDATED = '2026-10-08'
 const REPO_URL = 'https://github.com/Yooliang/policy-tw'
 
 usePageHead({
+  breadcrumbs: [{ name: '首頁', path: '/' }, { name: '使用條款' }],
   title: '使用條款',
   description: '正見資料的來源與性質、引用方式（CC BY 4.0，請標示來源）、免責聲明，以及錯誤回報與條款更新方式。',
 })
@@ -33,6 +35,9 @@ usePageHead({
       </template>
       <template #icon><ScrollText :size="400" class="text-amber-500" /></template>
       <template #actions><AboutNav current="terms" /></template>
+      <template #default>
+        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '使用條款' }]" />
+      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

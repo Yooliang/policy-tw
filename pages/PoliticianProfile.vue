@@ -426,7 +426,7 @@ usePageHead({
         <RequestTaskNotice class="mt-3" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
-      <template v-if="breadcrumbs.length > 1" #default>
+      <template #default>
         <Breadcrumbs :items="breadcrumbs" />
       </template>
     </Hero>

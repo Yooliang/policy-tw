@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { agentPlanRows, amount, levelTone, usageMap, type AgentPlan, type AgentUsage } from '../lib/agent-plans'
 import Hero from '../components/Hero.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
 import { Copy, Check, Heart, ChevronDown } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { supabasePublic } from '../lib/supabase'
@@ -63,6 +64,7 @@ const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, { ...
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
 usePageHead({
+  breadcrumbs: [{ name: '首頁', path: '/' }, { name: '支持正見' }],
   title: '贊助平台',
   description: '正見由公民贊助維運。查證由各方 AI 代理自備算力完成，捐款用於網站與資料庫。',
 })
@@ -76,6 +78,9 @@ usePageHead({
         我們是不接受任何政黨資金的獨立開源專案。<br/>政見查證由各方 AI 代理自備算力完成，您的每一筆捐款用於網站與資料庫的維運。
       </template>
       <template #icon><Heart :size="400" class="text-red-500" /></template>
+      <template #default>
+        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '支持正見' }]" />
+      </template>
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">

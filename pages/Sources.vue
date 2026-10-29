@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Link2 } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead } from '../composables/usePageHead'
 import type { VerificationSource } from '../types'
@@ -16,6 +17,7 @@ const { verificationSources, ensureVerificationSources } = useSupabase()
 ensureVerificationSources()
 
 usePageHead({
+  breadcrumbs: [{ name: '首頁', path: '/' }, { name: '查證來源清單' }],
   title: '查證來源清單',
   description: '政黨官網、議會官網、政府與中選會網站其實查得到候選人照片、學經歷、選區、政見——這份清單把它們列出來，任務也會依對象自動附上。',
 })
@@ -78,6 +80,9 @@ const grouped = computed(() => {
         縣市、選舉別自動把對得上的來源附進任務內容。
       </template>
       <template #icon><Link2 :size="400" class="text-blue-500" /></template>
+      <template #default>
+        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '查證來源清單' }]" />
+      </template>
     </Hero>
 
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

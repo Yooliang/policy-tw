@@ -82,7 +82,7 @@ usePageHead({
         </span>
       </template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
-      <template v-if="breadcrumbs.length > 1" #default>
+      <template #default>
         <Breadcrumbs :items="breadcrumbs" />
       </template>
     </Hero>

@@ -512,7 +512,7 @@ async function copyCitation() {
         </div>
         <RequestTaskNotice class="mt-3 ml-0 md:ml-44" :result="progressRequest.result.value" :error="progressRequest.error.value" on-dark />
       </template>
-      <template v-if="breadcrumbs.length > 1" #default>
+      <template #default>
         <Breadcrumbs :items="breadcrumbs" />
       </template>
     </Hero>

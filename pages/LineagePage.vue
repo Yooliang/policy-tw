@@ -146,7 +146,7 @@ usePageHead({
         <span class="bg-white/15 px-3 py-1 rounded-full text-sm font-bold">{{ place }}</span>
         <span v-if="lineage.category" class="bg-white/15 px-3 py-1 rounded-full text-sm font-bold">{{ lineage.category }}</span>
       </template>
-      <template v-if="breadcrumbs.length > 1" #default>
+      <template #default>
         <Breadcrumbs :items="breadcrumbs" />
       </template>
     </Hero>
