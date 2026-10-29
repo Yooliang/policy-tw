@@ -230,6 +230,7 @@ Deno.test("TS：politician_avatar は avatar_missing の任務でだけ受け、
   assert(item({}, "auto:profile_gap:p-1").errors.some((e) => e.path === "task_id"), "別の任務型別");
   assert(item({}, AV_TASK("p-1"), ["https://example.com/"]).errors.some((e) => e.path === "source_urls"), "file_page_url が source_urls にない");
   assert(item({ license: "CC BY-NC 4.0" }, undefined).errors.some((e) => e.path === "payload.license"));
+  assertEquals(validateContributionRequest({ ...base, contribution_type: "politician_avatar", payload: AV("pol-ses-1"), source_urls: [FILE], task_id: AV_TASK("pol-ses-1") }).errors, [], "id に s を含む人物");
   assert(item({ x: 1 }, undefined).errors.some((e) => e.path === "payload.x"));
   assert(!JP_APPLY_TYPES.includes("nope" as never));
 });

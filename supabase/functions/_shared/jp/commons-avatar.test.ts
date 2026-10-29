@@ -36,7 +36,7 @@ Deno.test("白名單は SQL（表の CHECK・落庫）と一字違わない", as
   assert(sql.includes(`'${asPg}'`), `SQL に同じ正規式がない: ${asPg}`);
   assertEquals(sql.split(`'${asPg}'`).length - 1, 2, "表の CHECK と落庫の 2 か所");
   assert(sql.includes("'^https://upload\\.wikimedia\\.org/wikipedia/commons/[^[:space:]]+$'"));
-  assert(sql.includes("'^https://commons\\.wikimedia\\.org/wiki/File:[^[:space:]#?]+$'"));
+  assert(sql.includes("'^https://commons\\.wikimedia\\.org/wiki/File:[^[:space:]#?|]+$'"));
   // TS の網址正規式は、SQL と同じ集合を通す
   assert(COMMONS_IMAGE_URL_RE.test(IMG) && COMMONS_FILE_PAGE_RE.test(FILE));
 });
@@ -51,6 +51,7 @@ Deno.test("形：Commons 以外の網址・非白名單・作者なしを拒む"
   assertEquals(bad({ file_page_url: "https://commons.wikimedia.org/wiki/Category:X" }), "payload.file_page_url");
   assertEquals(bad({ file_page_url: "https://commons.wikimedia.org.evil.example/wiki/File:X.jpg" }), "payload.file_page_url");
   assertEquals(bad({ license: "CC BY-NC 4.0" }), "payload.license");
+  assertEquals(bad({ file_page_url: "https://commons.wikimedia.org/wiki/File:A.jpg|File:B.jpg" }), "payload.file_page_url");
   assertEquals(bad({ author: "" }), "payload.author");
   assertEquals(bad({ author: "  " }), "payload.author");
   assertEquals(bad({ author: "あ".repeat(301) }), "payload.author");
@@ -70,6 +71,7 @@ Deno.test("ファイル名・画像の照合", () => {
   assertEquals(commonsTitleOf(FILE), "File:Taro Yamada 2024.jpg");
   assertEquals(commonsTitleOf("https://commons.wikimedia.org/wiki/File:%E5%B1%B1%E7%94%B0.jpg"), "File:山田.jpg");
   assertEquals(commonsTitleOf("https://commons.wikimedia.org/wiki/Main_Page"), null);
+  assertEquals(commonsTitleOf("https://commons.wikimedia.org/wiki/File:A.jpg%7CFile:B.jpg"), null, "複数タイトル（| 区切り）は拒む");
   assert(isSameCommonsImage(IMG, IMG));
   assert(isSameCommonsImage(IMG, THUMB), "縮小画像");
   assert(!isSameCommonsImage(IMG, "https://upload.wikimedia.org/wikipedia/commons/c/cd/Other.jpg"));

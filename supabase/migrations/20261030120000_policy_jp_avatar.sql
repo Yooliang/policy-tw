@@ -27,7 +27,7 @@ ALTER TABLE policy_jp.politicians DROP CONSTRAINT IF EXISTS politicians_avatar_c
 ALTER TABLE policy_jp.politicians ADD CONSTRAINT politicians_avatar_check CHECK (
   (avatar_url IS NULL AND avatar_file_page_url IS NULL AND avatar_license IS NULL AND avatar_author IS NULL AND avatar_retrieved_on IS NULL)
   OR (avatar_url ~ '^https://upload\.wikimedia\.org/wikipedia/commons/[^[:space:]]+$' AND char_length(avatar_url) <= 600
-      AND avatar_file_page_url ~ '^https://commons\.wikimedia\.org/wiki/File:[^[:space:]#?]+$' AND char_length(avatar_file_page_url) <= 600
+      AND avatar_file_page_url ~ '^https://commons\.wikimedia\.org/wiki/File:[^[:space:]#?|]+$' AND char_length(avatar_file_page_url) <= 600
       AND avatar_license ~* '^(CC0( 1\.0)?|Public domain|PD[ -].+|CC BY(-SA)? [0-9]\.[0-9]( [a-z]{2,3}(-[a-z]+)?)?)$'
       AND btrim(avatar_author) <> '' AND char_length(avatar_author) <= 300
       AND avatar_retrieved_on IS NOT NULL));
@@ -78,7 +78,7 @@ BEGIN
   IF v_img !~ '^https://upload\.wikimedia\.org/wikipedia/commons/[^[:space:]]+$' OR char_length(v_img) > 600 THEN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', 'image_url は Wikimedia Commons（upload.wikimedia.org/wikipedia/commons/）の画像 URL だけ');
   END IF;
-  IF v_page !~ '^https://commons\.wikimedia\.org/wiki/File:[^[:space:]#?]+$' OR char_length(v_page) > 600 THEN
+  IF v_page !~ '^https://commons\.wikimedia\.org/wiki/File:[^[:space:]#?|]+$' OR char_length(v_page) > 600 THEN
     RETURN jsonb_build_object('outcome', 'invalid', 'message', 'file_page_url は commons.wikimedia.org/wiki/File:… のファイルページだけ');
   END IF;
   IF v_lic !~* '^(CC0( 1\.0)?|Public domain|PD[ -].+|CC BY(-SA)? [0-9]\.[0-9]( [a-z]{2,3}(-[a-z]+)?)?)$' THEN

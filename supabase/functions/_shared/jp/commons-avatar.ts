@@ -20,7 +20,7 @@ export const COMMONS_USER_AGENT = "HustingsJP-avatar-check/1.0 (https://jp.husti
 /** 圖片網址：upload.wikimedia.org 的 commons 圖檔（原圖或縮圖）。SQL 的 politicians CHECK 與前端同一條 */
 export const COMMONS_IMAGE_URL_RE = /^https:\/\/upload\.wikimedia\.org\/wikipedia\/commons\/\S+$/;
 /** 檔案頁：commons.wikimedia.org/wiki/File:… */
-export const COMMONS_FILE_PAGE_RE = /^https:\/\/commons\.wikimedia\.org\/wiki\/File:[^\s#?]+$/;
+export const COMMONS_FILE_PAGE_RE = /^https:\/\/commons\.wikimedia\.org\/wiki\/File:[^\s#?|]+$/;
 /** 授權白名單（LicenseShortName）。SQL／前端同一條，改一邊要改全部（守門 commons-avatar.test.ts 對 SQL） */
 export const AVATAR_LICENSE_RE = /^(CC0( 1\.0)?|Public domain|PD[ -].+|CC BY(-SA)? \d\.\d( [a-z]{2,3}(-[a-z]+)?)?)$/i;
 export const AVATAR_AUTHOR_MAX = 300;
@@ -85,7 +85,7 @@ export function commonsTitleOf(filePageUrl: string): string | null {
   if (!COMMONS_FILE_PAGE_RE.test(filePageUrl)) return null;
   try {
     const t = decodeURIComponent(filePageUrl.slice("https://commons.wikimedia.org/wiki/".length)).replace(/_/g, " ").trim();
-    return /^File:.+/.test(t) ? t : null;
+    return /^File:[^|]+$/.test(t) ? t : null;
   } catch {
     return null;
   }

@@ -305,7 +305,7 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   }
   // avatar_missing（E 期）：task_id の末尾は人物 id。1 つの任務は 1 人だけ（politician_avatar の payload.politician_id がその人物）
   if (arm === "avatar_missing") {
-    if (!m[2] || /s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:avatar_missing:<人物 id>）"); return; }
+    if (!m[2] || /\s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:avatar_missing:<人物 id>）"); return; }
     if (payload.politician_id !== m[2]) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${m[2]}）不一致：一個任務只回報它問的那一位`);
     return;
   }
@@ -587,7 +587,7 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
     case "politician_avatar": {
       // 人物頭像（E 期）：Wikimedia Commons の自由授權寫真だけ。形はここ（avatarShapeProblem）、Commons API との照合は contribute-handler（avatarProblems）。
       // 落庫は SQL policy_jp.apply_politician_avatar（20261030120000）：空欄を埋めるだけ、上書きしない。同一件事の登記表には入れない（落庫が冪等〔同じ画像は unchanged〕）
-      if (!isStr(p.politician_id, 1, 64) || /s/.test(p.politician_id)) push("payload.politician_id", "politician_id 必填（任務 target.politician_id の値）");
+      if (!isStr(p.politician_id, 1, 64) || /\s/.test(p.politician_id)) push("payload.politician_id", "politician_id 必填（任務 target.politician_id の値）");
       for (const k of Object.keys(p)) if (!["politician_id", "image_url", "file_page_url", "license", "author"].includes(k)) push(`payload.${k}`, "この型別で受け付ける欄位は politician_id・image_url・file_page_url・license・author だけです：この欄位を拿掉");
       const shape = avatarShapeProblem(p as Partial<AvatarClaim>);
       if (shape) push(shape.path, shape.message);
