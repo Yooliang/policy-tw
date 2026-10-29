@@ -243,9 +243,11 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_needs_two_ips",
-    note: "拿掉 lineage_handover 一句（政策脈絡是台灣專用）、拿掉 correction 改成退選要 ≥2 來源 IP 的一段（協議 1.98.0，20261018030000，日本站暫不跟）",
+    note: "拿掉 lineage_handover 一句（政策脈絡是台灣專用）、拿掉 correction 改成退選要 ≥2 來源 IP 的一段（協議 1.98.0，20261018030000，日本站暫不跟）、拿掉號次免兩台機器的例外（20261029100000，維護者 2026-10-29，日本站暫不跟）",
     edits: [["'reassign_candidacy')\n      OR (p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop')", "'reassign_candidacy')"],
-      ["\n      OR (p_type = 'correction'\n          AND COALESCE(p_payload->>'target_table', '') = 'politician_elections'\n          AND (\n            (COALESCE(p_payload->>'field', '') = 'candidate_status'\n              AND COALESCE(p_payload->>'correct_value', '') IN ('not_running', 'withdrawn'))\n            OR EXISTS (\n              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'changes') = 'array' THEN p_payload->'changes' ELSE '[]'::jsonb END) c\n              WHERE jsonb_typeof(c) = 'object'\n                AND COALESCE(c->>'field', '') = 'candidate_status'\n                AND COALESCE(c->>'correct_value', '') IN ('not_running', 'withdrawn')\n            )\n          ))", ""]],
+      ["\n      OR (p_type = 'correction'\n          AND COALESCE(p_payload->>'target_table', '') = 'politician_elections'\n          AND (\n            (COALESCE(p_payload->>'field', '') = 'candidate_status'\n              AND COALESCE(p_payload->>'correct_value', '') IN ('not_running', 'withdrawn'))\n            OR EXISTS (\n              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'changes') = 'array' THEN p_payload->'changes' ELSE '[]'::jsonb END) c\n              WHERE jsonb_typeof(c) = 'object'\n                AND COALESCE(c->>'field', '') = 'candidate_status'\n                AND COALESCE(c->>'correct_value', '') IN ('not_running', 'withdrawn')\n            )\n          ))", ""],
+      ["  SELECT NOT COALESCE(\n           p_type = 'candidacy'\n           AND p_payload->>'cand_no' ~ '^0*[1-9][0-9]{0,5}$'\n           AND NOT COALESCE(\n             p_payload->>'election_result' IN ('elected', 'not_elected')\n             AND p_payload->>'politician_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',\n             FALSE)\n           , FALSE)\n     AND (\n      p_type IN (", "  SELECT p_type IN ("],
+      ["'reassign_candidacy')\n     )\n$$", "'reassign_candidacy')\n$$"]],
   },
   { name: "system_one_min_probability" },
   { name: "system_vote_eligible" },

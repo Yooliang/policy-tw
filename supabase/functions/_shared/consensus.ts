@@ -43,7 +43,7 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   // 地方基本統計（維護者 2026-10-27，#741）：目標 1，一位驗證人同意（+1 或 +2）即上線。數字來自官方統計，協議規定查不到不得推估、
   // 已有不同值不覆蓋、每網段只算一票、不能驗自己；一張反對照舊擋得住。先例 roster_check 逐位吻合的目標 1。不拿 light（那是 2）。
   regional_stat: { official: 1, media: 1, social: 1, other: 1 },
-  // 號次交件（維護者 2026-10-29）：candidacy 帶正整數 cand_no 的目標固定 1，一張同意即過。兩台機器規則照舊（candidacy 仍在 SCORE_TWO_IP_TYPES）；
+  // 號次交件（維護者 2026-10-29）：candidacy 帶正整數 cand_no 的目標固定 1，一張同意即過。2026-10-29 同日維護者指示也拿掉兩台機器（見 needsTwoIps）；
   // 號次重複的系統票 not_supported 仍 +1（重複時要 2 張）、一張反對照舊擋得住。SQL：contribution_required_agree（20261029020000）
   cand_no: { official: 1, media: 1, social: 1, other: 1 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
@@ -453,6 +453,9 @@ export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "
  * 分數、目標分數、退件門檻都不變：只決定「分數到了之後，還要不要第二台機器」。
  */
 export function needsTwoIps(contributionType: string, payload?: unknown): boolean {
+  // 補號次（維護者 2026-10-29 指示拿掉兩台機器）：candidacy 帶正整數 cand_no 且不是補已投票結果（past_result）→ 一張同意、目標 1 就上線。
+  // SQL 鏡像：contribution_needs_two_ips（migration 20261029100000）。其餘 SCORE_TWO_IP_TYPES 照舊。
+  if (contributionType === "candidacy" && riskLevel(contributionType, payload) === "cand_no") return false;
   if ((SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType)) return true;
   // 協議 1.98.0：把參選紀錄改成退選／不參選的更正（可能蓋掉既有選舉結果）
   if (contributionType === "correction") return correctionWithdrawsCandidacy(payload);
