@@ -61,13 +61,35 @@ const VIL_EDITS: Edit[] = [
 const reverse = (fn: string, edits: Edit[]) => edits.reduce((s, [from, to]) => mutate(s, to, from), fn);
 const headerOf = (fn: string) => fn.slice(0, fn.indexOf("$function$") >= 0 ? fn.indexOf("$function$") : fn.indexOf("$$"));
 
-Deno.test("A1 前一版是對的：兩支臂的新定義緊接著現行版，而且新 migration 是它們的最後一版（之後有人改了，要以最新那版為底重做）", async () => {
-  for (const [fn, prev] of [[RAW, PREV_RAW_MIG], [VIL, PREV_VIL_MIG]] as const) {
+// 村里長臂在 2026-10-29 又被 20261029030000 重定義（名冊批次上限 150 → 80，只換說明文字一句）：它成了村里長臂的最後一版，
+// 本檔的 20261019120000 是它的前一版；raw 的最後一版仍是 20261019120000。
+const VIL_CAP_MIG = "20261029030000_roster_batch_cap_80.sql";
+const CAP_FROM = "一次最多 150 筆（整批都是 candidacy";
+const CAP_TO = "一次最多 80 筆（整批都是 candidacy";
+
+Deno.test("A1 前一版是對的：兩支臂的新定義緊接著現行版；raw 的最後一版是本 migration，村里長臂的最後一版是其後的 20261029030000（之後有人改了，要以最新那版為底重做）", async () => {
+  for (const [fn, prev, last] of [[RAW, PREV_RAW_MIG, MIG_NAME], [VIL, PREV_VIL_MIG, VIL_CAP_MIG]] as const) {
     const defining: string[] = [];
     for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
-    assertEquals(defining.at(-1), MIG_NAME, `${fn} 的最後一版應該是 ${MIG_NAME}`);
-    assertEquals(defining.at(-2), prev, `${fn} 的前一版應該是 ${prev}；有人在中間改了，要以那一版為底重做`);
+    assertEquals(defining.at(-1), last, `${fn} 的最後一版應該是 ${last}`);
+    const i = defining.indexOf(MIG_NAME);
+    assert(i > 0, `${MIG_NAME} 要在 ${fn} 的定義清單裡`);
+    assertEquals(defining[i - 1], prev, `${fn} 的前一版應該是 ${prev}；有人在中間改了，要以那一版為底重做`);
   }
+  // 村里長臂：本 migration 之後只允許 20261029030000 這一支
+  const vilDefs: string[] = [];
+  for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${VIL}(`)) vilDefs.push(n);
+  assertEquals(vilDefs.slice(vilDefs.indexOf(MIG_NAME) + 1), [VIL_CAP_MIG]);
+});
+
+Deno.test("A3 20261029030000 的村里長臂＝緊接在前的 20261019120000 定義，只有說明裡的批次上限一句（150 → 80）不同", async () => {
+  const capFn = fnText(await readMig(VIL_CAP_MIG), VIL);
+  assertEquals(headerOf(capFn), headerOf(NEW_VIL));
+  assertEquals(NEW_VIL.split(CAP_FROM).length - 1, 1, "前一版應該恰好有一處「一次最多 150 筆」");
+  assertEquals(capFn, NEW_VIL.replace(CAP_FROM, CAP_TO));
+  // 整支 migration 除了註解與這個函式，沒有別的陳述式
+  const rest = (await readMig(VIL_CAP_MIG)).replace(/^--.*$/gm, "").replace(capFn, "").trim();
+  assertEquals(rest, "");
 });
 
 Deno.test("A2 新定義＝前一版＋四處機械替換：反向替換回去逐字等於前一版", () => {
