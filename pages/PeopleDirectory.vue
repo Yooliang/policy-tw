@@ -79,7 +79,9 @@ usePageHead({
         <template v-else>依姓氏筆畫分組的政治人物名單。</template>
       </template>
       <template #icon><Users :size="400" class="text-blue-500" /></template>
-      <Breadcrumbs :items="breadcrumbs" />
+      <template v-if="breadcrumbs.length > 1" #default>
+        <Breadcrumbs :items="breadcrumbs" />
+      </template>
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-left">

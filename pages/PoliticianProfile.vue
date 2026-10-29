@@ -429,7 +429,9 @@ usePageHead({
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
-      <Breadcrumbs :items="breadcrumbs" />
+      <template v-if="breadcrumbs.length > 1" #default>
+        <Breadcrumbs :items="breadcrumbs" />
+      </template>
     </Hero>
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
 
