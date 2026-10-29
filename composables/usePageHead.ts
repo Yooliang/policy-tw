@@ -84,6 +84,8 @@ export interface BreadcrumbItem {
   name: string
   /** 站內路徑；最後一層（本頁）可以不給 */
   path?: string
+  /** 手機版（<sm）的短標籤；沒給就手機也顯示 name。結構化資料（BreadcrumbList）不用它，一律用 name */
+  short?: string
 }
 
 /** 每頁統一的 <title>／description／robots／Open Graph。輸入可為 ref／getter，資料到位後會自動更新。 */

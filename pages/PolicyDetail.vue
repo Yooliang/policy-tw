@@ -14,7 +14,7 @@ import AgentInfo from '../components/AgentInfo.vue'
 import { Calendar, MapPin, Tag, Bot, ThumbsDown, Star, Activity, CheckCircle2, Clock, ChevronLeft, ChevronRight, ThumbsUp, MessageCircleQuestion, Share2, FileText, Briefcase, GraduationCap, Loader2, Sparkles, CheckCircle, XCircle, ExternalLink, Newspaper, History, AlertTriangle, Quote } from 'lucide-vue-next'
 import HeroAction from '../components/HeroAction.vue'
 import LoadError from '../components/LoadError.vue'
-import { HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
+import { HERO_ACTION_BASE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, SITE_URL } from '../composables/usePageHead'
 import { compareByPolicyDateDesc, policyElectionYear, policyYear } from '../lib/policy-date'
@@ -125,7 +125,7 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   const rec = electionRecordFor(pol, policy.value.electionId)
   const items: BreadcrumbItem[] = rec ? candidacyCrumbs(rec, getElectionById(rec.electionId), new Date()) : []
   items.push({ name: pol.name, path: `/politician/${pol.id}` })
-  items.push({ name: policy.value.title })
+  items.push({ name: policy.value.title, short: '政見' })
   return items
 })
 
@@ -485,9 +485,6 @@ async function copyCitation() {
       </template>
       <template #actions>
         <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-44">
-          <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
-            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
-          </button>
           <span v-if="!canVerify" data-testid="hero-progress-blocked" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, 'bg-white/10 text-white/70 border border-white/20']">
             <Clock :size="16" /> {{ verifyBlockedReason }}
           </span>

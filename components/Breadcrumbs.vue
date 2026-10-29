@@ -19,12 +19,12 @@ defineProps<{ items: BreadcrumbItem[] }>()
           v-if="item.path && i < items.length - 1"
           :to="item.path"
           class="inline-flex items-center px-3 py-1.5 rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-500 whitespace-nowrap hover:text-blue-600 hover:border-blue-300 transition-colors"
-        >{{ item.name }}</RouterLink>
+        ><span class="sm:hidden">{{ item.short ?? item.name }}</span><span class="hidden sm:inline">{{ item.name }}</span></RouterLink>
         <span
           v-else
           class="inline-flex items-center px-3 py-1.5 rounded-full bg-blue-600 text-white text-sm font-bold whitespace-nowrap"
           aria-current="page"
-        >{{ item.name }}</span>
+        ><span class="sm:hidden">{{ item.short ?? item.name }}</span><span class="hidden sm:inline">{{ item.name }}</span></span>
       </li>
     </ol>
   </nav>

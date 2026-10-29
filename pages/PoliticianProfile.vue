@@ -18,7 +18,7 @@ import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, Us
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import HeroAction from '../components/HeroAction.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
-import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE, HERO_ICON_BUTTON, HERO_ICON_SIZE } from '../lib/hero-action-styles'
+import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
@@ -405,9 +405,6 @@ usePageHead({
       </template>
       <template #actions>
         <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-48">
-          <button @click="router.go(-1)" :class="HERO_ICON_BUTTON" aria-label="返回">
-            <ChevronLeft :size="HERO_ICON_SIZE" class="group-hover:-translate-x-1 transition-transform" />
-          </button>
           <!-- 按一下就建任務，出現在任務看板；跟政見頁的按鈕同一套（composables/useRequestTask.ts） -->
           <HeroAction data-testid="hero-query-policy" @click="policyRequest.send({ kind: 'policy', politician_id: politician.id })">
             <Loader2 v-if="policyRequest.loading.value" :size="16" class="animate-spin" />
