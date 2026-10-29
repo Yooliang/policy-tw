@@ -11,7 +11,7 @@
  *   - #364 政見三要素指到不存在或已移除的政見
  *
  * 一律唯讀；查詢本身出錯（資料庫錯誤）不擋交件，只 console.error——不能讓系統自己的錯擋掉代理。
- * 查詢批次化：同型別的 id 合成 `.in()`，**每 IN_CHUNK（40）個一查再合併**（in-chunks.ts）——一批可到 MAX_BATCH_ROSTER（150）筆，150 個 uuid 的網址約 5.5 KB 會超過網址長度上限（#455 審查），符合 query-bounds 的「變數 in() 有界」判準。
+ * 查詢批次化：同型別的 id 合成 `.in()`，**每 IN_CHUNK（40）個一查再合併**（in-chunks.ts）——一批可到 MAX_BATCH_ROSTER（80）筆，80 個 uuid 的網址約 5.5 KB 會超過網址長度上限（#455 審查），符合 query-bounds 的「變數 in() 有界」判準。
  */
 
 import { chunksOf, IN_CHUNK } from "./in-chunks.ts";

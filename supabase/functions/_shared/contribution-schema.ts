@@ -128,7 +128,7 @@ export const MAX_BATCH = 20;
  * 這裡只看結構——整批每一筆都是 candidacy、而且 source_urls 引用中選會登記名冊 PDF；「逐位吻合」要查名冊資料表，在 contribute-handler
  * （rosterBatchProblems），超過 MAX_BATCH 筆的批次每一筆都要跟名冊的姓名、縣市、鄉鎮、政黨、選舉區對上才收。
  */
-export const MAX_BATCH_ROSTER = 150;
+export const MAX_BATCH_ROSTER = 80;
 /** 整批都是引用中選會登記名冊 PDF 的 candidacy（結構判斷，不查資料庫） */
 export function isRosterCandidacyBatch(list: readonly unknown[]): boolean {
   return list.length > 0 && list.every((raw) => {

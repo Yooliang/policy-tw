@@ -3,7 +3,7 @@
  *
  * 兩道關：①結構（contribution-schema）：超過 20 筆時整批都要是 candidacy 而且 source_urls 引用中選會登記名冊 PDF，上限 150；
  * ②逐位吻合（contribute-handler → roster-batch-gate）：超過 20 筆的每一筆都跟名冊資料表對得上才收，有一筆對不上、
- * 或引用的名冊沒有解析成資料表，整批未收。這裡守的是「放寬的範圍沒有外溢」：別的型別、沒有名冊網址、混型別、151 筆都不行。
+ * 或引用的名冊沒有解析成資料表，整批未收。這裡守的是「放寬的範圍沒有外溢」：別的型別、沒有名冊網址、混型別、81 筆都不行。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { isRosterCandidacyBatch, MAX_BATCH, MAX_BATCH_ROSTER, validateContributionRequest } from "./contribution-schema.ts";
@@ -29,21 +29,21 @@ const candidacyOf = (r: (typeof records)[number], over: Record<string, unknown> 
 });
 const batch = (n: number, over?: Record<string, unknown>) => ({ agent_name: "roster-batch-test", contributions: records.slice(0, n).map((r) => candidacyOf(r, over)) });
 
-Deno.test("上限常數：一般 20、名冊逐位吻合的 candidacy 150；任務附的缺額名單一件最多也是 150", () => {
+Deno.test("上限常數：一般 20、名冊逐位吻合的 candidacy 80；任務附的缺額名單一件最多也是 80", () => {
   assertEquals(MAX_BATCH, 20);
-  assertEquals(MAX_BATCH_ROSTER, 150);
-  assertEquals(ROSTER_GAP_LIMIT, 150);
+  assertEquals(MAX_BATCH_ROSTER, 80);
+  assertEquals(ROSTER_GAP_LIMIT, 80);
 });
 
-Deno.test("結構：整批都是 candidacy 而且引用名冊 PDF → 21～150 筆收；151 筆不收", () => {
-  for (const n of [20, 21, 100, 150]) {
+Deno.test("結構：整批都是 candidacy 而且引用名冊 PDF → 21～80 筆收；81 筆不收", () => {
+  for (const n of [20, 21, 50, 80]) {
     const r = validateContributionRequest(batch(n));
     assertEquals(r.ok, true, `${n} 筆應該收：${JSON.stringify(r.errors?.slice(0, 2))}`);
     assertEquals(r.ok && r.items.length, n);
   }
-  const over = validateContributionRequest(batch(151));
+  const over = validateContributionRequest(batch(81));
   assertEquals(over.ok, false);
-  assert(over.errors.some((e) => e.index === -1 && e.message.includes("最多 150 筆")));
+  assert(over.errors.some((e) => e.index === -1 && e.message.includes("最多 80 筆")));
 });
 
 Deno.test("結構：放寬的範圍沒有外溢——沒有名冊網址、混了別的型別、整批都是別的型別，超過 20 筆都不收", () => {
@@ -78,9 +78,9 @@ function fakeClient(sourceRows: typeof records | null) {
 const allRecords = toRegistrationRecords(VILLAGE, rows, towns);
 const items = (n: number, over?: Record<string, unknown>) => records.slice(0, n).map((r) => candidacyOf(r, over)).map((c) => ({ ...c, source_urls: c.source_urls }));
 
-Deno.test("逐位吻合：150 筆照名冊原樣 → 收；改一筆的政黨／鄉鎮／村里 → 整批未收，errors 逐筆寫原因", async () => {
+Deno.test("逐位吻合：80 筆照名冊原樣 → 收；改一筆的政黨／鄉鎮／村里 → 整批未收，errors 逐筆寫原因", async () => {
   const db = fakeClient(allRecords);
-  assertEquals(await rosterBatchProblems(db, items(150)), { ok: true });
+  assertEquals(await rosterBatchProblems(db, items(80)), { ok: true });
   for (const [field, value, expect] of [["party", "不存在的政黨", "名冊上的政黨"], ["sub_region", "不存在區", "名冊上的地名"], ["village", "不存在里", "名冊上的地名"], ["region", "高雄市台北", "名冊上的縣市"]] as const) {
     const list = items(60);
     (list[12].payload as Record<string, unknown>)[field] = value;
@@ -115,7 +115,7 @@ Deno.test("contribute-handler：只有超過 MAX_BATCH 筆才查名冊，而且�
   assert(src.slice(src.lastIndexOf("if (", at), at).includes("validation.items.length > MAX_BATCH"));
   assert(at < src.indexOf("const sq = submitQuotaFor("), "要在配額檢查之前");
   assert(at < src.indexOf('.from("contributions").insert('), "要在寫入之前");
-  assert(src.includes("hashes.slice(i, i + 40)"), "150 個雜湊的去重查詢要分批（網址長度）");
+  assert(src.includes("hashes.slice(i, i + 40)"), "80 個雜湊的去重查詢要分批（網址長度）");
 });
 
 // ── 還原驗證：把被守的東西拿掉，測試要紅 ──────────────────────────────
@@ -146,7 +146,7 @@ Deno.test("還原驗證：放寬沒有限定型別與名冊網址（isRosterCand
 });
 
 Deno.test("還原驗證：上限改回 20 → 100 筆名冊批次被擋（測試要紅）", async () => {
-  const mod = await mutantModule("contribution-schema.ts", "export const MAX_BATCH_ROSTER = 150;", "export const MAX_BATCH_ROSTER = 20;");
+  const mod = await mutantModule("contribution-schema.ts", "export const MAX_BATCH_ROSTER = 80;", "export const MAX_BATCH_ROSTER = 20;");
   await expectRed("MAX_BATCH_ROSTER", () => assertEquals(mod.validateContributionRequest(batch(100)).ok, true));
 });
 

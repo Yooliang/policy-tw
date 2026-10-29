@@ -54,3 +54,19 @@ for (const entryPath of ["../next/index.ts", "../jp-next/index.ts"]) {
     }
   });
 }
+
+// 批次大小不可大於單次時段額度：否則這種批次永遠交不出去（2026-10-29 名冊批次 150 > 提交額度 80 就出過這個事）。
+import { MAX_BATCH, MAX_BATCH_ROSTER } from "./contribution-schema.ts";
+import { ROSTER_GAP_LIMIT } from "./task-context.ts";
+
+Deno.test("批次大小上限 ≤ 單次時段提交額度（正見匿名與日本站），之後調額度或批次都不會出現交不出去的批次", () => {
+  const smallestQuota = Math.min(CONTRIBUTE_DAILY_LIMIT_PER_IP, CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, jpC.CONTRIBUTE_DAILY_LIMIT_PER_IP, jpC.CONTRIBUTE_DAILY_LIMIT_PER_DITRUST);
+  assert(MAX_BATCH <= smallestQuota, `MAX_BATCH ${MAX_BATCH} > 時段提交額度 ${smallestQuota}`);
+  assert(MAX_BATCH_ROSTER <= smallestQuota, `MAX_BATCH_ROSTER ${MAX_BATCH_ROSTER} > 時段提交額度 ${smallestQuota}：名冊大批次會被 429 擋掉`);
+  assert(ROSTER_GAP_LIMIT <= MAX_BATCH_ROSTER, "任務附的缺額名單一件不該比能一次交的還多");
+});
+
+Deno.test("派工臂文字的名冊批次上限＝MAX_BATCH_ROSTER（最新定義 20261029030000）", async () => {
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261029030000_roster_batch_cap_80.sql", import.meta.url));
+  assert(sql.includes(`一次最多 ${MAX_BATCH_ROSTER} 筆（整批都是 candidacy`));
+});

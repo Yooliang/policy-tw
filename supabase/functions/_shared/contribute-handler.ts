@@ -97,7 +97,7 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
   const taskIds = [...new Set(items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))];
   if (taskIds.length === 0) return new Set();
   const manualIds = taskIds.filter((t) => !t.startsWith("auto:") && UUID_RE.test(t));
-  // 名冊大批次最多 150 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
+  // 名冊大批次最多 80 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
   const [manualResList, inFlightResList] = await Promise.all([
     Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, task_type").in("id", chunk))),
     Promise.all(chunksOf(taskIds).map((chunk) => supabase.from("contributions").select("task_id").eq("contributor_ip_hash", ipHash)
@@ -192,7 +192,7 @@ async function fetchClaimCandidates(
     groups.set(gk, g);
   }
   if (groups.size === 0) return [];
-  // 名冊大批次的 candidacy 一批最多 150 個 politician_id：每 IN_CHUNK 個一查再合併（網址長度，#455 審查）
+  // 名冊大批次的 candidacy 一批最多 80 個 politician_id：每 IN_CHUNK 個一查再合併（網址長度，#455 審查）
   const rows = await Promise.all([...groups.values()].flatMap((g) => chunksOf([...g.values]).map(async (chunk) => {
     const { data, error } = await supabase.from("contributions")
       .select("id, contribution_type, payload, agent_name, contributor_ip_hash, status")
@@ -623,7 +623,7 @@ export async function handleContribute(
 
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
-  // 名冊大批次最多 150 筆：64 字元的雜湊 150 個放進一條網址太長，每 40 個一查
+  // 名冊大批次最多 80 筆：64 字元的雜湊 80 個放進一條網址太長，每 40 個一查
   type ExistingRow = { id: string; payload_hash: string; status: string };
   const existing: ExistingRow[] = [];
   for (let i = 0; i < hashes.length; i += 40) {
