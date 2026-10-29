@@ -420,7 +420,7 @@ BEGIN
   RETURN jsonb_build_object('status', 'applied', 'outcome', v_out->>'outcome', 'message', v_msg, 'table_name', v_out->>'table_name', 'record_id', v_out->>'record_id');
 END;
 $$;
-COMMENT ON FUNCTION policy_jp.chain_step_rank IS '選舉鏈の步驟順位（層内排序用）：20261011240000 の版に avatar_missing（9、任期中の追跡と同じ鎖の最後）を足しただけ。登録のない auto 型別も 9';
+COMMENT ON FUNCTION policy_jp.chain_step_rank IS '選舉鏈の步驟順位（層内排序用）：手動任務 0、election_discovery／placeholder_politician 1、local_government_missing 2、regional_stats_missing 3、roster_check／party_missing／party_info_missing／candidate_status_stale／not_running_recheck／candidacy_source_missing／district_seats_missing 4、profile_gap／profile_detail_gap 5、policy_missing 6、election_result_missing 7、policy_elements_missing／duplicate_policy／term_policy_missing／policy_validity／policy_election_mismatch 8、progress_stale／deadline_due／lineage_candidate／handover_missing／lineage_roles_missing／lineage_link_candidate／avatar_missing 9（任期中の追跡と政策の継承は鎖の最後）。登録のない auto 型別も 9';
 
 -- ------------------------------------------------------------
 -- 5. 規則（enabled・常時窓）・優先層（後段）・主控台の段（冪等）

@@ -85,7 +85,8 @@ Deno.test("隔離：測試名人物の他臂の任務は総表に出ない（pla
   await installOld(db);
   await clock(db, addDays(POLLING, -10));
   const before = await rows<{ task_id: string; arm: string; target: Record<string, unknown> }>(db, `SELECT task_id, arm, target FROM policy_jp.contribution_auto_tasks_arms_before_isolation()`);
-  const after = await rows<{ task_id: string; arm: string }>(db, `SELECT task_id, arm FROM ${ARMS}()`);
+  // 前の版（240000）には news_discovery・avatar_missing の分支がない；avatar_missing は別の守門（policy-jp-avatar.test.ts）が見る
+  const after = await rows<{ task_id: string; arm: string }>(db, `SELECT task_id, arm FROM ${ARMS}() WHERE arm <> 'avatar_missing'`);
   const mentionsT = (x: { target: Record<string, unknown> }) => JSON.stringify(x.target).includes(t.pid);
   const tOther = before.filter((x) => mentionsT(x) && x.arm !== "placeholder_politicians");
   assert(tOther.length > 0, "前提：隔離がなければ、テスト名の人物にも他臂の任務が出る（出ないならこのテストは何も守っていない）");
