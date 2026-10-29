@@ -10,7 +10,7 @@ import { jpDispatchTokenSecretFrom, createJpSecretWarner } from "../_shared/jp/d
 import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
-import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
+import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
 import { MIN_PROBABILITY } from "../_shared/system-one.ts";
 import { issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
@@ -60,6 +60,8 @@ async function handle(req: Request): Promise<Response> {
     agentName = actor.handle;
     const nameProblem = agentNameProblem(agentName);
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
+    const reservedBlock = await anonReservedBlock(supabase, actor, "jp/next", ipHash);
+    if (reservedBlock) return json({ success: false, error: reservedBlock.code, message: reservedBlock.message }, reservedBlock.status);
     const quotaLimits = await loadQuotaLimits(supabase, "jp", QUOTA_DEFAULTS); // quota_settings（site=jp），讀不到退回常數
     const submitQuota = submitQuotaFor(actor, ipHash, quotaLimits);
     const verifyQuota = verifyQuotaFor(actor, ipHash, quotaLimits);
@@ -152,7 +154,7 @@ async function handle(req: Request): Promise<Response> {
       verify: { limit: verifyQuota.limit, used: ipVoteRes.count ?? 0, remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)) },
     };
     const toolNotice = await agentToolNoticeOnce(supabase, agentName, agentTool, true);
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: JP_PROTOCOL_VERSION, docs: JP_PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
+    const base = { success: true, ...nextIdentityFields(actor, agentName), agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: JP_PROTOCOL_VERSION, docs: JP_PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
     // 派工憑證：派出的那一筆簽一張；鑰匙加了 policy_jp 鹽，正見的憑證在這裡驗不過（dispatch-secret.ts）
     const dispatchSecret = jpDispatchTokenSecretFrom((k) => Deno.env.get(k));

@@ -10,7 +10,7 @@ import { withTaskPolitician } from "../_shared/task-politician.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
-import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
+import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
 import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
@@ -89,6 +89,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     agentName = actor.handle;
     const nameProblem = agentNameProblem(agentName);
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
+    const reservedBlock = await anonReservedBlock(supabase, actor, "tw/next", ipHashForIdentity);
+    if (reservedBlock) return json({ success: false, error: reservedBlock.code, message: reservedBlock.message }, reservedBlock.status);
     const ipHash = ipHashForIdentity;
     const windowStart = quotaWindowStart(); // 額度時段起點（2026-10-29 起每 4 小時一段，台北 00／04／08／12／16／20 點）
     const seed = `${agentName}|${ipHash}|${Date.now()}`;
@@ -313,7 +315,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // notice：agent_tool 只填別名（claude-code/haiku）拆不出版本，統計頁只能歸進「未標版本」一列。
     // 不擋派工——agent_tool 選填、也驗不了真假；每輪提醒一次，代理下次就改得掉（協議 1.44.0）。
     const toolNotice = await agentToolNoticeOnce(supabase, agentName, agentTool);
-    const base = { success: true, agent_name: agentName, agent_tool: agentTool, agent: { handle: actor.handle, level: actor.level }, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
+    const base = { success: true, ...nextIdentityFields(actor, agentName), agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: PROTOCOL_VERSION, docs: PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
     // 派工憑證（#484，協議 1.81.0）：派出的那一筆簽一張，綁 task_id、派出時間、自報代號與這次領任務的來源網段，期限同認領期。
     // 不寫資料庫、不新增清單查詢；沒有鑰匙時不發（代理照舊走網段比對）。追查只進 log：只有識別碼與雜湊前 8 碼。
