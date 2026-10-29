@@ -60,8 +60,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
     ipHash = chk.payload.h;
     tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, agent: chk.payload.a };
   }
-  const identity = await resolveIdentity(body, ipHash);
-  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  const identity = await resolveIdentity(body, ipHash, supabase, "jp/verify");
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: identity.code ?? "identity_invalid", message: identity.error } };
   body = identity.body;
   const actor: Actor = identity.actor;
   const v = validateVerifyRequest(body);

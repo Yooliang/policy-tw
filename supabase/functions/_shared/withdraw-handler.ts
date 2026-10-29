@@ -67,8 +67,8 @@ export async function handleWithdraw(supabase: SupabaseLike, body: unknown, ipHa
     ipHash = tokenCheck.payload.h;
     viaToken = true;
   }
-  const identity = await resolveIdentity(body, ipHash);
-  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  const identity = await resolveIdentity(body, ipHash, supabase, "tw/withdraw");
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: identity.code ?? "identity_invalid", message: identity.error } };
   body = identity.body;
   const actor: Actor = identity.actor;
 

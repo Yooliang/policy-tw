@@ -9,7 +9,7 @@ import { rosterBatchProblems } from "./roster-batch-gate.ts";
 import { clientIpFrom, networkOf, proxySecretFromEnv } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
-import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
+import { type Actor, anonReservedBlock, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { PROTOCOL_URL } from "./protocol.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
@@ -248,8 +248,8 @@ export async function handleContribute(
     tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, taskId: chk.payload.t, agent: chk.payload.a };
   }
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵，再做格式驗證（序號不能當代號收進去）
-  const identity = await resolveIdentity(body, ipHash);
-  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  const identity = await resolveIdentity(body, ipHash, supabase, "tw/contribute");
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: identity.code ?? "identity_invalid", message: identity.error } };
   body = identity.body;
   const actor: Actor = identity.actor;
   // 允許的選舉 id 與 election_key 以資料庫 elections 表為準（#344 第二階段 A），驗證本身仍是純函式
@@ -987,13 +987,17 @@ export async function handleContribute(
 }
 
 /** 把 body.agent_name 從 ditrust:<序號> 換成代號；回新的 body 與身份。一般代號原樣通過 */
-export async function resolveIdentity(body: unknown, ipHash: string): Promise<
-  { ok: true; body: unknown; actor: Actor } | { ok: false; status: number; error: string }
+// deno-lint-ignore no-explicit-any
+export async function resolveIdentity(body: unknown, ipHash: string, db?: { from: (t: string) => any } | null, route: string = "tw/report"): Promise<
+  { ok: true; body: unknown; actor: Actor } | { ok: false; status: number; error: string; code?: string }
 > {
   const raw = (body && typeof body === "object") ? body as Record<string, unknown> : null;
   const name = raw && typeof raw.agent_name === "string" ? raw.agent_name : "";
   const outcome = await resolveActorFromRequest(name, ipHash);
   if (!outcome.ok) return outcome;
+  // 匿名用了 DiTrust 顯示名（2026-10-29）：擋掉，DiTrust 登入的 actor 是 ditrust 等級不會走這裡
+  const reserved = await anonReservedBlock(db, outcome.actor, route, ipHash);
+  if (reserved) return { ok: false, status: reserved.status, error: reserved.message, code: reserved.code };
   const next = raw && outcome.actor.level !== "ip" ? { ...raw, agent_name: outcome.actor.handle } : body;
   return { ok: true, body: next, actor: outcome.actor };
 }

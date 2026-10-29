@@ -92,8 +92,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     tokenBinding = { tokenId: chk.tokenId, issuedNet: chk.payload.h, agent: chk.payload.a };
   }
   // 身份：agent_name 可能是 ditrust:<序號>，先換成代號與身份鍵（序號不能當代號收進去）
-  const identity = await resolveIdentity(body, ipHash);
-  if (!identity.ok) return { status: identity.status, body: { success: false, error: "identity_invalid", message: identity.error } };
+  const identity = await resolveIdentity(body, ipHash, supabase, "tw/verify");
+  if (!identity.ok) return { status: identity.status, body: { success: false, error: identity.code ?? "identity_invalid", message: identity.error } };
   body = identity.body;
   const actor: Actor = identity.actor;
   const v = validateVerifyRequest(body);

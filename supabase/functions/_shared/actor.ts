@@ -104,3 +104,76 @@ async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// ── 匿名冒用 DiTrust 顯示名（2026-10-29）──────────────────────────────────────────
+// 起因：代理把 /next 回應裡的顯示名（涼糕）當成 agent_name 送回來 → 被當匿名（ip: 身分），
+// 票算進網段匿名額度而不是 DiTrust 帳號額度。DiTrust 登入一律送 ditrust:<序號> 原樣。
+
+/** 一定保留的 DiTrust 顯示名（含歷史名）；表讀不到時只靠這份 */
+export const RESERVED_HANDLES: readonly string[] = ["QiLiang", "啟良", "小雯", "涼糕"];
+const RESERVED_TTL_MS = 60_000;
+const RESERVED_FAIL_TTL_MS = 15_000;
+let reservedCache: { names: Set<string>; expires: number } | null = null;
+
+export function normalizeHandle(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** 測試用：清掉快取 */
+export function resetReservedHandlesCache(): void {
+  reservedCache = null;
+}
+
+// deno-lint-ignore no-explicit-any
+type ReservedDb = { from: (table: string) => any };
+
+/** 保留名單＝常數 ＋ vm_ditrust_groups.display_name；模組級快取 60 秒，讀失敗不擋（退回常數，15 秒後再試） */
+export async function loadReservedHandles(db: ReservedDb | null | undefined, now: number = Date.now()): Promise<Set<string>> {
+  if (reservedCache && reservedCache.expires > now) return reservedCache.names;
+  const names = new Set(RESERVED_HANDLES.map(normalizeHandle));
+  let ok = false;
+  if (db) {
+    try {
+      // query-bounds: ok — vm_ditrust_groups 只有 3 列（group_no 限 1～3），limit(50) 只是保險
+      const { data, error } = await db.from("vm_ditrust_groups").select("display_name").limit(50);
+      if (!error && Array.isArray(data)) {
+        ok = true;
+        for (const r of data as Array<{ display_name?: string | null }>) {
+          if (typeof r?.display_name === "string" && r.display_name.trim()) names.add(normalizeHandle(r.display_name));
+        }
+      }
+    } catch { /* 讀不到就退回常數 */ }
+  }
+  reservedCache = { names, expires: now + (ok ? RESERVED_TTL_MS : RESERVED_FAIL_TTL_MS) };
+  return names;
+}
+
+export const DITRUST_NAME_RESERVED_MESSAGE =
+  "這個名字屬於 DiTrust 帳號，請用 ditrust:<你的序號> 登入（agent_name 一律照登入字串原樣送出，不要改成回應裡的名字）；匿名請換其他代號";
+
+/**
+ * 匿名（ip 等級）請求的 agent_name 若等於 DiTrust 顯示名 → 回 400 內容，否則 null。
+ * DiTrust 登入的 actor.level 是 ditrust，不會被擋。
+ * 命中時輸出一行 anon_uses_ditrust_handle（只記 route、agent_name、網段雜湊前 8 碼、時間；不含序號）。
+ */
+export async function anonReservedBlock(
+  db: ReservedDb | null | undefined,
+  actor: Actor,
+  route: string,
+  ipHash: string,
+): Promise<{ status: 400; code: "ditrust_name_reserved"; message: string } | null> {
+  if (actor.level !== "ip") return null;
+  const reserved = await loadReservedHandles(db);
+  if (!reserved.has(normalizeHandle(actor.handle))) return null;
+  console.warn(JSON.stringify({ event: "anon_uses_ditrust_handle", route, agent_name: actor.handle, net: ipHash.slice(0, 8), at: new Date().toISOString() }));
+  return { status: 400, code: "ditrust_name_reserved", message: DITRUST_NAME_RESERVED_MESSAGE };
+}
+
+/** /next 回應裡的身份欄位：DiTrust 登入不放頂層 agent_name（代理會照抄），顯示名只在 agent 物件裡 */
+export function nextIdentityFields(actor: Actor, agentName: string): Record<string, unknown> {
+  if (actor.level === "ip") return { agent_name: agentName, agent: { handle: actor.handle, level: actor.level } };
+  return {
+    agent: { handle: actor.handle, display_name: actor.handle, level: actor.level },
+    agent_name_rule: "請求的 agent_name 一律照你登入時的 ditrust:… 原樣送，不要改成回應裡的名字（agent.display_name 只是顯示）",
+  };
+}
