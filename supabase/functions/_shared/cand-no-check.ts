@@ -19,3 +19,29 @@ export function candNoCheckForVerify(state: Record<string, unknown> | null | und
       "這一票不是系統反對：系統只是多要一張人票（目標 +1），不會退件。",
   };
 }
+
+/** 號次檢查每次撈的預設筆數與減半重試的下限（2026-10-30：200 筆約 20 秒，超過 authenticator 的 8 秒 statement_timeout 整批被取消） */
+export const CAND_NO_CHECK_DEFAULT_LIMIT = 50;
+export const CAND_NO_CHECK_MIN_LIMIT = 5;
+
+/** statement timeout：SQLSTATE 57014 或訊息含 statement timeout */
+export function isStatementTimeout(err: { code?: string; message?: string } | null | undefined): boolean {
+  if (!err) return false;
+  return err.code === "57014" || /statement timeout|canceling statement/i.test(err.message ?? "");
+}
+
+type CheckRpc = (limit: number) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>;
+
+/** 呼叫號次檢查；遇到 statement timeout 就把 limit 減半再試，下限 CAND_NO_CHECK_MIN_LIMIT，到下限仍超時就丟錯。回傳帶實際用的 limit 與重試次數 */
+export async function runCandNoCheck(rpc: CheckRpc, limit: number): Promise<Record<string, unknown>> {
+  let cur = Math.max(limit, CAND_NO_CHECK_MIN_LIMIT);
+  let retries = 0;
+  for (;;) {
+    const { data, error } = await rpc(cur);
+    if (!error) return { ...((data ?? {}) as Record<string, unknown>), limit_used: cur, retries };
+    if (!isStatementTimeout(error)) throw new Error(`cand_no_dup_check_pending: ${error.message}`);
+    if (cur <= CAND_NO_CHECK_MIN_LIMIT) throw new Error(`cand_no_dup_check_pending: statement timeout 到下限 ${cur} 筆仍超時（已重試 ${retries} 次）：${error.message}`);
+    cur = Math.max(Math.floor(cur / 2), CAND_NO_CHECK_MIN_LIMIT);
+    retries++;
+  }
+}

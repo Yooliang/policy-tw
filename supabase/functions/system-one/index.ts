@@ -41,6 +41,7 @@ import { MAX_CHECKED_SOURCES, perSourceCount, perSourceQuestions, pickIndependen
  *   3. state 不能是空的。
  */
 
+import { CAND_NO_CHECK_DEFAULT_LIMIT, runCandNoCheck } from "../_shared/cand-no-check.ts";
 import { cecCandidacyPage } from "../_shared/cec-check.ts";
 import { loadElections } from "../_shared/elections.ts";
 import { protocolStatusFromCandidacy } from "../_shared/candidacy-status.ts";
@@ -914,10 +915,10 @@ Deno.serve(async (req) => {
     // 交件的 cand_no 跟同一個號次單位（縣市長＝縣市、議員＝選舉區、鄉鎮市長與區長＝鄉鎮市區、村里長＝村里）裡已上線或等票中的另一位同號 → source_support／not_supported（目標 +1）。
     // 內部一致性檢查，不核對來源；規則只在 SQL 一份（cand_no_dup_system_check）。排程 cand-no-check-10min 叫；冪等（標過的不再標）
     if (action === "cand_no_check") {
-      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 1000);
-      const { data, error } = await supabase.rpc("cand_no_dup_check_pending", { p_limit: limit });
-      if (error) throw new Error(`cand_no_dup_check_pending: ${error.message}`);
-      return json({ success: true, ...((data ?? {}) as Record<string, unknown>) });
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || CAND_NO_CHECK_DEFAULT_LIMIT, 1), 1000);
+      // 超時就減半重試（下限 5 筆），回應帶實際用的 limit 與處理筆數（checked）
+      const result = await runCandNoCheck((n) => supabase.rpc("cand_no_dup_check_pending", { p_limit: n }), limit);
+      return json({ success: true, ...result });
     }
 
     // ---- costs：AI 判定帳戶的儲值與已用，存給捐款頁（2026-09-24）。排程每 15 分鐘；不回任何金鑰相關內容 ----
