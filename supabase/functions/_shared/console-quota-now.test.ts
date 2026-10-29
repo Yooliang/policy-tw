@@ -14,6 +14,7 @@ import { CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, CONTRIBUTE_DAILY_LIMIT_PER_IP } fro
 import { VERIFY_DAILY_LIMIT_PER_DITRUST, VERIFY_DAILY_LIMIT_PER_IP } from "./verify-handler.ts";
 
 const SQL = await readMig("20261029060000_console_quota_now.sql");
+const SQL2 = await readMig("20261029070000_console_quota_now_split.sql"); // 網段／代理拆匿名與 DiTrust
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 
@@ -21,10 +22,11 @@ async function db(): Promise<PGlite> {
   const d = new PGlite();
   await d.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
-    CREATE TABLE contributions (id serial PRIMARY KEY, agent_name text, contributor_ip_hash text, created_at timestamptz);
-    CREATE TABLE contribution_votes (id serial PRIMARY KEY, agent_name text, verifier_ip_hash text, created_at timestamptz);
+    CREATE TABLE contributions (id serial PRIMARY KEY, agent_name text, contributor_ip_hash text, actor_id text, created_at timestamptz);
+    CREATE TABLE contribution_votes (id serial PRIMARY KEY, agent_name text, verifier_ip_hash text, actor_id text, created_at timestamptz);
   `);
   await d.exec(SQL);
+  await d.exec(SQL2);
   return d;
 }
 
@@ -86,7 +88,47 @@ Deno.test("沒有資料時回空陣列；權限比照 console_queue_state", asyn
   const d = await db();
   const j = (await d.query<{ j: any }>(`SELECT console_quota_now() AS j`)).rows[0].j;
   assertEquals([j.per_agent, j.per_network], [[], []]);
-  assertStringIncludes(SQL, "SECURITY DEFINER");
-  assertStringIncludes(SQL, "REVOKE ALL ON FUNCTION console_quota_now() FROM PUBLIC");
-  assertStringIncludes(SQL, "GRANT EXECUTE ON FUNCTION console_quota_now() TO anon, authenticated, service_role");
+  for (const sql of [SQL, SQL2]) {
+    assertStringIncludes(sql, "SECURITY DEFINER");
+    assertStringIncludes(sql, "REVOKE ALL ON FUNCTION console_quota_now() FROM PUBLIC");
+    assertStringIncludes(sql, "GRANT EXECUTE ON FUNCTION console_quota_now() TO anon, authenticated, service_role");
+  }
+});
+
+Deno.test("網段拆匿名與 DiTrust：合計＝兩者和；is_ditrust 只標有 DiTrust 紀錄的代理", async () => {
+  const d = await db();
+  await d.exec(`
+    INSERT INTO contributions (agent_name, contributor_ip_hash, actor_id, created_at) VALUES
+      ('anon1', '${HASH_A}', 'ip:${HASH_A}', now()), ('anon1', '${HASH_A}', 'ip:${HASH_A}', now()),
+      ('legacy', '${HASH_A}', NULL, now()),
+      ('涼糕', '${HASH_A}', 'ditrust:u1', now()), ('涼糕', '${HASH_A}', 'ditrust:u1', now()), ('涼糕', '${HASH_A}', 'ditrust:u1', now()),
+      ('QiLiang', '${HASH_B}', 'ditrust:u2', now());
+    INSERT INTO contribution_votes (agent_name, verifier_ip_hash, actor_id, created_at) VALUES
+      ('anon1', '${HASH_A}', 'ip:${HASH_A}', now()),
+      ('涼糕', '${HASH_A}', 'ditrust:u1', now()), ('涼糕', '${HASH_A}', 'ditrust:u1', now()),
+      ('QiLiang', '${HASH_B}', 'ditrust:u2', now());
+  `);
+  const j = (await d.query<{ j: any }>(`SELECT console_quota_now() AS j`)).rows[0].j;
+  const net = Object.fromEntries(j.per_network.map((n: any) => [n.network, n]));
+  // A：提交 匿名 3（含 actor_id 為空的舊資料）＋DiTrust 3＝6；驗證 匿名 1＋DiTrust 2＝3
+  assertEquals([net.A.submits, net.A.submits_anon, net.A.submits_ditrust], [6, 3, 3]);
+  assertEquals([net.A.votes, net.A.votes_anon, net.A.votes_ditrust], [3, 1, 2]);
+  // B：只有 DiTrust，匿名用量為 0
+  assertEquals([net.B.submits, net.B.submits_anon, net.B.submits_ditrust, net.B.votes, net.B.votes_anon, net.B.votes_ditrust], [1, 0, 1, 1, 0, 1]);
+  for (const n of j.per_network) {
+    assertEquals(n.submits, n.submits_anon + n.submits_ditrust);
+    assertEquals(n.votes, n.votes_anon + n.votes_ditrust);
+  }
+  const ag = Object.fromEntries(j.per_agent.map((a: any) => [a.agent_name, a.is_ditrust]));
+  assertEquals(ag, { anon1: false, legacy: false, "涼糕": true, QiLiang: true });
+  // 原有欄位保留
+  const lk = j.per_agent.find((a: any) => a.agent_name === "涼糕");
+  assertEquals([lk.submits, lk.votes], [3, 2]);
+});
+
+Deno.test("沒有資料時新欄位不出錯（空陣列）", async () => {
+  const d = await db();
+  const j = (await d.query<{ j: any }>(`SELECT console_quota_now() AS j`)).rows[0].j;
+  assertEquals([j.per_agent, j.per_network], [[], []]);
+  assertEquals(j.per_ditrust_submit_limit, 500);
 });
