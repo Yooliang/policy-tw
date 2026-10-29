@@ -93,7 +93,7 @@ const TYPE_LABEL: Record<string, string> = {
   party_info: "政黨資訊",
 };
 const STATUS_LABEL: Record<string, string> = {
-  pending: "待驗證", verified: "已驗證", applied: "已上線", apply_failed: "上線中（自動重試）", superseded: "同宣稱已由他筆上線", disputed: "裁決中", rejected: "退件", reverted: "已還原",
+  pending: "待驗證", verified: "已驗證", applied: "已上線", apply_failed: "上線中（自動重試）", superseded: "同宣稱已由他筆上線", disputed: "裁決中", rejected: "退件", withdrawn: "已撤回", reverted: "已還原",
 };
 const FIELD_LABEL: Record<string, string> = {
   name: "姓名", party: "政黨", birth_year: "出生年", current_position: "現職", region: "縣市", sub_region: "選區", education_level: "學歷", bio: "簡介", avatar_url: "照片網址",
