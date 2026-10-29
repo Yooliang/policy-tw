@@ -138,6 +138,7 @@ const VERIFY_BORDER: Record<string, string> = {
   roster_check: '#0284c7',      // 名單清查：天藍
   district_seats: '#0e7490',    // 應選名額：深青
   election_results: '#334155',  // 整批選舉結果：深灰
+  cand_numbers: '#475569',      // 整批號次：灰藍
   reassign_candidacy: '#9f1239', // 參選紀錄改掛：深玫紅
   question_answer: '#db2777',   // 提問回答：粉
   merge_politician: '#4338ca',  // 人物合併：靛
@@ -161,6 +162,7 @@ const VERIFY_LABEL: Record<string, string> = {
   roster_check: '名單清查',
   district_seats: '應選名額',
   election_results: '整批選舉結果',
+  cand_numbers: '整批號次',
   reassign_candidacy: '參選紀錄改掛',
   question_answer: '提問回答',
   removal: '建議移除',

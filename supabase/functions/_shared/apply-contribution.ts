@@ -44,6 +44,7 @@ import { purgePathsFor, purgeSsrPages } from "./ssr-purge.ts";
 import { fetchPrimarySourceUrls } from "./source-read.ts";
 import { type ExistingCandidacy, MAX_RESULTS_PER_SUBMISSION, planElectionResults, resultItems, resultsUnitLabel } from "./election-results.ts";
 import { loadReassignContext, personLabel, reassignProblems } from "./reassign-candidacy.ts";
+import { type ExistingCandNo, candNoItems, candNumbersUnitLabel, flaggedRows, MAX_CAND_NUMBERS_PER_SUBMISSION, planCandNumbers } from "./cand-numbers.ts";
 import { taipeiDate } from "./cec-candidate.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -1849,6 +1850,68 @@ async function applyElectionResults(supabase: SupabaseLike, row: ContributionRow
 }
 
 /**
+ * 整批補號次（2026-10-30，#781）：一個單位一份，items 每位一列 {politician_election_id, cand_no}。
+ *
+ * - 只補空白、不覆蓋（planCandNumbers）：cand_no 已有不同值的跳過、回覆講出來
+ * - 驗證者在 agree 票標錯的列（contribution_votes.bad_items）不寫；號次重複檢查（SQL cand_no_batch_conflicts：同批同號、已上線他人同號）擋下的列不寫
+ * - 沒寫的列 cand_no 仍空，補號次臂自然重派；寫了的每列各記一筆 edit_history，整筆可還原
+ * - 一列都沒寫：是別人先補了（superseded）或全被標錯／同號（rejected，缺口回到佇列）
+ */
+async function applyCandNumbers(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const electionId = int(p.election_id);
+  const electionType = str(p.election_type);
+  const items = candNoItems(p);
+  if (!electionId || !electionType || items.length === 0) return { status: "failed", message: "缺 election_id／election_type，或 items 是空的" };
+
+  // query-bounds: ok — 一筆最多 MAX_CAND_NUMBERS_PER_SUBMISSION（150）位，按主鍵取
+  const { data: existing, error: readError } = await supabase.from("politician_elections")
+    .select("id, election_id, election_type, cand_no")
+    .in("id", items.map((it) => it.politician_election_id)).limit(MAX_CAND_NUMBERS_PER_SUBMISSION + 10);
+  throwIf(readError, "politician_elections read");
+  // query-bounds: ok — 一份交件的票數很少（目標分 1）；上限 100 足夠
+  const { data: votes, error: voteError } = await supabase.from("contribution_votes").select("verdict, bad_items").eq("contribution_id", row.id).limit(100);
+  throwIf(voteError, "contribution_votes read");
+  const flagged = flaggedRows((votes ?? []) as Array<{ verdict: string; bad_items?: unknown }>);
+  const { data: conflictRows, error: conflictError } = await supabase.rpc("cand_no_batch_conflicts", { p_items: items });
+  throwIf(conflictError, "cand_no_batch_conflicts");
+  const conflicts = new Map<number, string>(((conflictRows ?? []) as Array<{ politician_election_id: number; reason: string }>).map((c) => [c.politician_election_id, c.reason]));
+
+  const plan = planCandNumbers((existing ?? []) as ExistingCandNo[], items, electionId, electionType, flagged, conflicts);
+  const returned = [
+    plan.flagged.length > 0 ? `${plan.flagged.length} 位被驗證者標錯、沒寫（參選紀錄 ${plan.flagged.join("、")}）` : "",
+    plan.conflicted.length > 0 ? `${plan.conflicted.length} 位號次重複、沒寫（${plan.conflicted.map((c) => `${c.id}：${c.reason}`).join("；")}）` : "",
+    plan.occupied.length > 0 ? `${plan.occupied.length} 位已經有不同的號次、沒有覆蓋（參選紀錄 ${plan.occupied.map((c) => `${c.id}現${c.current}／交${c.claimed}`).join("、")}）` : "",
+    plan.stray.length > 0 ? `${plan.stray.length} 位的參選紀錄不是這一屆這種選舉、略過（${plan.stray.join("、")}）` : "",
+  ].filter(Boolean);
+  const gapNote = "；沒寫的列缺口回到任務佇列重派";
+  if (plan.writes.length === 0) {
+    if (plan.flagged.length + plan.conflicted.length > 0) {
+      return { status: "disputed", message: `${candNumbersUnitLabel(p)} 這一份沒有可寫的列：${returned.join("；")}${gapNote}` };
+    }
+    return { status: "superseded", message: `${candNumbersUnitLabel(p)} 這一份沒有要寫的：${plan.unchanged.length > 0 ? `${plan.unchanged.length} 位已經是同一個號次（別人先補了）` : "這幾位的號次已經有了"}${returned.length > 0 ? `；${returned.join("；")}` : ""}` };
+  }
+  const written: number[] = [];
+  for (const w of plan.writes) {
+    // 只寫還沒有號次的（等票期間別人可能先補了）：再篩一次，不覆蓋
+    const { data: updated, error } = await supabase.from("politician_elections").update({ cand_no: w.cand_no })
+      .eq("id", w.politician_election_id).is("cand_no", null).select("id");
+    throwIf(error, "politician_elections cand_no update");
+    if (Array.isArray(updated) && updated.length > 0) {
+      written.push(w.politician_election_id);
+      await recordUpdate(supabase, ctx, "politician_elections", String(w.politician_election_id), "cand_no", null, w.cand_no);
+    }
+  }
+  if (written.length === 0) return { status: "superseded", message: `${candNumbersUnitLabel(p)} 這幾位的號次在等票期間已經被別人補上了，不重複寫入` };
+  return {
+    status: "applied",
+    message: `${candNumbersUnitLabel(p)} 號次已補 ${written.length} 位${plan.unchanged.length > 0 ? `；${plan.unchanged.length} 位已經是同一個號次、略過` : ""}${returned.length > 0 ? `；${returned.join("；")}${gapNote}` : ""}`,
+  };
+}
+
+
+/**
  * 同名人物接錯：一筆參選紀錄改掛到正確的人（2026-10-06，reassign_candidacy）。
  *
  * - 交件時檢查過的（同名、不是同一人、出處的出生年對得上、改掛後同一屆不會有兩筆）落庫前再檢查一次——等票期間資料可能變了
@@ -2460,6 +2523,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "district_seats": return await applyDistrictSeats(supabase, row);
     case "party_info": return await applyPartyInfo(supabase, row);
     case "election_results": return await applyElectionResults(supabase, row);
+    case "cand_numbers": return await applyCandNumbers(supabase, row);
     case "reassign_candidacy": return await applyReassignCandidacy(supabase, row);
     case "policy_elements": return await applyPolicyElements(supabase, row);
     case "lineage": return await applyLineage(supabase, row);

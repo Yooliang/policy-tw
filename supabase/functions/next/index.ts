@@ -15,7 +15,7 @@ import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
-import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
+import { buildLookup, isBallotNumbersTask, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../_shared/verification-sources.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { policyLikenessNotice } from "../_shared/policy-likeness.ts";
@@ -626,11 +626,11 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         ...t,
         target: withElectionKey(t.target, await loadElections(supabase)),
         source: "auto",
-        suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
+        suggested_contribution_type: isBallotNumbersTask(t.task_type, autoTarget) ? "cand_numbers" : (SUGGESTED_TYPE[t.task_type] ?? null),
         current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget), { task_id: t.task_id ?? null, target: autoTarget }),
         lookup: buildLookup(autoTarget),
         // 這種任務的做法＋可能收尾的每一種交件型別的欄位（協議 1.93.0：從 skill.md 搬出來，隨派工送）
-        type_spec: typeSpecForTask(t.task_type),
+        type_spec: typeSpecForTask(t.task_type, isBallotNumbersTask(t.task_type, autoTarget) ? "cand_numbers" : undefined),
       },
       how_to: howTo,
     });

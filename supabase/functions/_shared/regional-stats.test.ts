@@ -156,7 +156,7 @@ Deno.test("DB CHECK：contributions_contribution_type_check 收 regional_stat（
   assertStringIncludes(mig, "ADD CONSTRAINT contributions_contribution_type_check");
   const chk = mig.slice(mig.indexOf("ADD CONSTRAINT contributions_contribution_type_check"), mig.indexOf(";", mig.indexOf("ADD CONSTRAINT contributions_contribution_type_check")));
   assertStringIncludes(chk, "'regional_stat'");
-  for (const t of CONTRIBUTION_TYPES) assertStringIncludes(chk, `'${t}'`, `CHECK 漏了既有型別 ${t}`);
+  for (const t of CONTRIBUTION_TYPES.filter((x) => x !== "cand_numbers")) assertStringIncludes(chk, `'${t}'`, `CHECK 漏了既有型別 ${t}`); // cand_numbers 由 20261030100000 加進 CHECK
 });
 
 // ── 5. 派工臂接進總表、沒有掉臂 ──────────────────────────────────────
