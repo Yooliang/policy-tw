@@ -636,6 +636,7 @@ const T_CAND = "20261010040000"; // 選舉鏈第 2 步：參選人有誰（roste
 const T_PROFILE = "20261010050000"; // 選舉鏈第 3 步：參選人建檔（profile_gap／profile_detail_gap＋politician）
 const T_POLICY = "20261010060000"; // 選舉鏈第 4 步：這次的政見（policy_missing＋policy）
 const T_KANA = "20261010120000"; // 告示前の読み（kana）は選填＋roster_check の not_found 冷卻を告示日で打ち切る（policy-ops#60）
+const T_QUOTA = "20261029075900"; // 日本站額度設定 policy_jp.quota_settings（#769；日本站不碰 public，維護者 2026-10-29）
 const T_TIMELINE = "20261010110100"; // 主控台派工開關的選舉時間軸（policy-ops #63；正見版在 20261010110000）
 const T_PER_ELECTION = "20261010140100"; // 時間軸日常與當屆選舉拆開（policy-ops #69；正見版在 20261010140000）
 const T_SET_BASED = "20261010200100"; // 件數改成一次集合查詢（#569 上線後 console_timeline 逾時；正見版在 20261010200000）
@@ -801,6 +802,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   election_notice_date: { mig: [T_KANA], why: "選挙の告示日（election_milestones_all の announced・整場。里程碑表の列が優先、無ければ elections.notice_date）；記録がなければ NULL" },
   candidacy_kana_required: { mig: [T_KANA], why: "candidacy に kana が要るか＝告示日以降か。告示日の記録がない選挙は告示前扱い。apply_candidacy と jp-report の入口（contribute-handler）が同じ関数を見る" },
   roster_not_found_released: { mig: [T_KANA], why: "roster_check の not_found を、告示日が来たので冷卻に数えないか（冷卻＝min(14 日, 告示日の前日まで)）。refresh_dispatch_blocked・task_unavailable・chain_task_checked が共有する一つの判定" },
+  quota_settings_audit: { mig: [T_QUOTA], why: "額度設定表 policy_jp.quota_settings 的審計觸發器函式（改前改後整列寫 policy_jp.edit_history，record_id＝site；表主鍵是 site 不是 id，所以不能用 activity_audit）" },
 
   // ---- 20261010060000 chain_policy：選舉鏈第 4 步（這次的政見）；被重新定義的函式與視圖已在上面各自的 mig 清單裡加了這一支 ----
   chain_policy_subjects: { mig: [T_POLICY], why: "公約的對象：開著的、已上線的選舉裡 declared／filed／elected／not_elected 的上線參選紀錄（considering 與退選不派）" },

@@ -1,7 +1,8 @@
 -- 額度的四個數字做成可在主控台調整的設定（2026-10-29 維護者同意的第一批「可調參數」，issue #769）
 -- ============================================================
 --
--- 單列設定表 quota_settings：正見（site='tw'）與日本站（site='jp'）各一列，主鍵 site。
+-- 單列設定表 quota_settings：public.quota_settings 只放正見一列（site='tw'）；日本站的設定在 policy_jp.quota_settings
+-- （同欄位、同上下限，見 20261029075900_policy_jp_quota_settings.sql，維護者 2026-10-29：日本站不碰 public）。
 --   per_ip_submit／per_ip_verify：每個來源網段每時段最多提交／驗證幾筆（匿名）
 --   per_ditrust_submit／per_ditrust_verify：每個 DiTrust 帳號每時段最多提交／驗證幾筆
 -- 初值＝現行常數（80／200／500／1000，與 contribute-handler／verify-handler 的常數由測試比對）。
@@ -17,11 +18,12 @@
 -- console_quota_now() 的上限欄位來自 quota_limits()；這支改成讀本表的 'tw' 那一列（讀不到列退回初值），
 -- console_quota_now 本體與其他欄位不動。
 --
+-- 注意：寫入與讀取 RPC 引用 policy_jp.quota_settings，它由 20261029075900_policy_jp_quota_settings.sql 先建（本檔的函式建立時就要解析型別）。
 -- 引用到的既有物件：edit_history(table_name, record_id, field, old_value, new_value, agent_name)、activity_touch_updated_at()、
 -- auth.role()、quota_limits()／console_quota_now()（20261029060000、20261029070000）。
 
 CREATE TABLE IF NOT EXISTS quota_settings (
-  site               TEXT PRIMARY KEY CHECK (site IN ('tw', 'jp')),
+  site               TEXT PRIMARY KEY CHECK (site = 'tw'),
   per_ip_submit      INTEGER NOT NULL DEFAULT 80   CHECK (per_ip_submit      BETWEEN 10 AND 2000),
   per_ip_verify      INTEGER NOT NULL DEFAULT 200  CHECK (per_ip_verify      BETWEEN 10 AND 5000),
   per_ditrust_submit INTEGER NOT NULL DEFAULT 500  CHECK (per_ditrust_submit BETWEEN 10 AND 5000),
@@ -30,8 +32,8 @@ CREATE TABLE IF NOT EXISTS quota_settings (
   updated_by         TEXT
 );
 COMMENT ON TABLE quota_settings IS
-  '每時段額度上限（正見 tw、日本站 jp 各一列，2026-10-29，#769）。主控台經 console_admin_quota_settings_save 改；Edge Function 讀這張表、模組級快取 60 秒，讀不到退回常數。';
-INSERT INTO quota_settings (site, updated_by) VALUES ('tw', '初值'), ('jp', '初值') ON CONFLICT (site) DO NOTHING;
+  '每時段額度上限（正見，單列 site=tw；日本站在 policy_jp.quota_settings，2026-10-29，#769）。主控台經 console_admin_quota_settings_save 改；Edge Function 讀這張表、模組級快取 60 秒，讀不到退回常數。';
+INSERT INTO quota_settings (site, updated_by) VALUES ('tw', '初值') ON CONFLICT (site) DO NOTHING;
 
 ALTER TABLE quota_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public read" ON quota_settings;
@@ -66,13 +68,15 @@ CREATE TRIGGER trg_quota_settings_audit AFTER INSERT OR UPDATE OR DELETE ON quot
 CREATE OR REPLACE FUNCTION console_admin_quota_settings_save(
   p_site TEXT, p_per_ip_submit INT, p_per_ip_verify INT, p_per_ditrust_submit INT, p_per_ditrust_verify INT,
   p_reason TEXT, p_set_by TEXT DEFAULT NULL
-) RETURNS quota_settings
+) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_row quota_settings;
+  v_jp policy_jp.quota_settings;
+  v_out jsonb;
   v_who TEXT := 'console:' || COALESCE(NULLIF(btrim(p_set_by), ''), '未知');
 BEGIN
   IF p_reason IS NULL OR length(btrim(p_reason, E' \t\r\n')) = 0 THEN
@@ -85,25 +89,39 @@ BEGIN
     RAISE EXCEPTION '四個額度都要給';
   END IF;
 
-  UPDATE quota_settings
-     SET per_ip_submit = p_per_ip_submit, per_ip_verify = p_per_ip_verify,
-         per_ditrust_submit = p_per_ditrust_submit, per_ditrust_verify = p_per_ditrust_verify,
-         updated_by = v_who
-   WHERE site = p_site
-  RETURNING * INTO v_row;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION '找不到 % 站的額度設定', p_site;
+  IF p_site = 'tw' THEN
+    UPDATE quota_settings
+       SET per_ip_submit = p_per_ip_submit, per_ip_verify = p_per_ip_verify,
+           per_ditrust_submit = p_per_ditrust_submit, per_ditrust_verify = p_per_ditrust_verify,
+           updated_by = v_who
+     WHERE site = 'tw'
+    RETURNING * INTO v_row;
+    IF NOT FOUND THEN RAISE EXCEPTION '找不到 tw 站的額度設定'; END IF;
+    v_out := to_jsonb(v_row);
+    -- 改前改後由觸發器 quota_settings_audit 記；這裡補上「誰、為什麼」
+    INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, agent_name)
+    VALUES ('quota_settings', 'tw', 'reason', NULL, to_jsonb(btrim(p_reason, E' 	
+')), v_who);
+  ELSE
+    -- 日本站：寫 policy_jp.quota_settings，履歷記在 policy_jp.edit_history（同 console_admin_rule_save 的日本站做法）
+    UPDATE policy_jp.quota_settings
+       SET per_ip_submit = p_per_ip_submit, per_ip_verify = p_per_ip_verify,
+           per_ditrust_submit = p_per_ditrust_submit, per_ditrust_verify = p_per_ditrust_verify,
+           updated_by = v_who
+     WHERE site = 'jp'
+    RETURNING * INTO v_jp;
+    IF NOT FOUND THEN RAISE EXCEPTION '找不到 jp 站的額度設定'; END IF;
+    v_out := to_jsonb(v_jp);
+    INSERT INTO policy_jp.edit_history (table_name, record_id, field, old_value, new_value, agent_name)
+    VALUES ('quota_settings', 'jp', 'reason', NULL, to_jsonb(btrim(p_reason, E' 	
+')), v_who);
   END IF;
 
-  -- 改前改後由觸發器 quota_settings_audit 記；這裡補上「誰、為什麼」
-  INSERT INTO edit_history (table_name, record_id, field, old_value, new_value, agent_name)
-  VALUES ('quota_settings', p_site, 'reason', NULL, to_jsonb(btrim(p_reason, E' \t\r\n')), v_who);
-
-  RETURN v_row;
+  RETURN v_out;
 END;
 $$;
 COMMENT ON FUNCTION console_admin_quota_settings_save(TEXT, INT, INT, INT, INT, TEXT, TEXT) IS
-  '主控台改額度（2026-10-29，#769）：四個數字一起給、理由必填；CHECK 擋超出上下限；改前改後進 edit_history。只給 service_role（console-admin 驗過擁有者才呼叫）。';
+  '主控台改額度（2026-10-29，#769）：p_site 為 tw 寫 public.quota_settings、jp 寫 policy_jp.quota_settings；四個數字一起給、理由必填；CHECK 擋超出上下限；改前改後進該站 edit_history。回傳新值（jsonb）。只給 service_role（console-admin 驗過擁有者才呼叫）。';
 REVOKE ALL ON FUNCTION console_admin_quota_settings_save(TEXT, INT, INT, INT, INT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION console_admin_quota_settings_save(TEXT, INT, INT, INT, INT, TEXT, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION console_admin_quota_settings_save(TEXT, INT, INT, INT, INT, TEXT, TEXT) FROM authenticated;
@@ -118,7 +136,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
            'per_ip_submit', per_ip_submit, 'per_ip_verify', per_ip_verify,
            'per_ditrust_submit', per_ditrust_submit, 'per_ditrust_verify', per_ditrust_verify,
            'updated_at', updated_at, 'updated_by', updated_by)), '{}'::jsonb)
-    FROM quota_settings
+    FROM (SELECT * FROM public.quota_settings UNION ALL SELECT * FROM policy_jp.quota_settings) q
 $$;
 COMMENT ON FUNCTION console_quota_settings IS '主控台讀額度設定：{tw:{…}, jp:{…}}，只有四個數字與 updated_at／updated_by。2026-10-29';
 REVOKE ALL ON FUNCTION console_quota_settings() FROM PUBLIC;

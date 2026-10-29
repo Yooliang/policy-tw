@@ -1,7 +1,7 @@
 /**
  * 額度四個數字可在主控台調整（2026-10-29，#769；migration 20261029080000_quota_settings.sql）。
  *
- * SQL（PGlite 實跑）：
+ * SQL（PGlite 實跑；public.quota_settings 只有 tw 一列、policy_jp.quota_settings 只有 jp 一列，20261029075900＋20261029080000）：
  *   1. 表初值＝handler 常數（正見、日本站各一列）；CHECK 上下限（邊界內可、邊界外不可）與 TS QUOTA_BOUNDS 相同
  *   2. console_admin_quota_settings_save：只有 service_role 能叫；理由必填（空字串、純空白、NULL 都 RAISE）；site 不對、有 NULL 擋；
  *      回傳新值；改前改後（觸發器）與理由（RPC）進 edit_history；updated_by 記 console:<信箱>
@@ -9,7 +9,7 @@
  *   4. console_quota_now 的上限欄位讀這張表（正見那一列），日本站那列不影響；表裡沒有 tw 列時退回初值
  * TS：
  *   5. loadQuotaLimits：讀表生效；壞值（非整數、超界、字串、NULL）逐欄退回常數；查詢丟錯／回 error／空結果退回常數；
- *      快取 60 秒（59.9 秒內不再查、滿 60 秒重查）；站別各自一份；日本站走 .schema("public")
+ *      快取 60 秒（59.9 秒內不再查、滿 60 秒重查）；站別各自一份；兩站都用各自 client 的預設 schema（日本站不碰 public）
  *   6. submitQuotaFor／verifyQuotaFor 帶 limits 後額度生效（DiTrust 與匿名各自）；不帶用常數
  *   7. 名冊批次上限 min(80, 網段提交額度)、驗證函式吃 rosterBatchCap
  *   8. 接線：四個入口／handler 都有讀表並把值傳進 *QuotaFor（原始碼掃描）
@@ -41,6 +41,8 @@ const candidacyOf = (r: (typeof records)[number]) => ({
 
 const MIG_NAME = "20261029080000_quota_settings.sql";
 const MIG = await readMig(MIG_NAME);
+const JP_MIG_NAME = "20261029075900_policy_jp_quota_settings.sql";
+const JP_MIG = await readMig(JP_MIG_NAME);
 const Q1 = await readMig("20261029060000_console_quota_now.sql");
 const Q2 = await readMig("20261029070000_console_quota_now_split.sql");
 
@@ -51,19 +53,23 @@ async function db(): Promise<PGlite> {
     CREATE SCHEMA auth;
     CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT COALESCE(current_setting('request.jwt.role', true), current_user) $$;
     CREATE TABLE edit_history (id serial PRIMARY KEY, table_name text, record_id text, field text, old_value jsonb, new_value jsonb, agent_name text, created_at timestamptz DEFAULT now());
+    CREATE SCHEMA policy_jp;
+    CREATE TABLE policy_jp.edit_history (id serial PRIMARY KEY, table_name text, record_id text, field text, old_value jsonb, new_value jsonb, agent_name text, created_at timestamptz DEFAULT now());
+    CREATE FUNCTION policy_jp.activity_touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := now() + interval '1 second'; RETURN NEW; END $$;
     CREATE FUNCTION activity_touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := now() + interval '1 second'; RETURN NEW; END $$;
     CREATE TABLE contributions (id serial PRIMARY KEY, agent_name text, contributor_ip_hash text, actor_id text, created_at timestamptz);
     CREATE TABLE contribution_votes (id serial PRIMARY KEY, agent_name text, verifier_ip_hash text, actor_id text, created_at timestamptz);
   `);
   await d.exec(Q1);
   await d.exec(Q2);
+  await d.exec(JP_MIG);
   await d.exec(MIG);
   await d.exec(`GRANT SELECT ON quota_settings TO anon, authenticated`);
   return d;
 }
 
 type Row = { site: string; per_ip_submit: number; per_ip_verify: number; per_ditrust_submit: number; per_ditrust_verify: number; updated_by: string | null };
-const SAVE = `SELECT site, per_ip_submit, per_ip_verify, per_ditrust_submit, per_ditrust_verify, updated_by FROM console_admin_quota_settings_save($1, $2, $3, $4, $5, $6, 'owner@example.com')`;
+const SAVE = `SELECT x->>'site' AS site, (x->>'per_ip_submit')::int AS per_ip_submit, (x->>'per_ip_verify')::int AS per_ip_verify, (x->>'per_ditrust_submit')::int AS per_ditrust_submit, (x->>'per_ditrust_verify')::int AS per_ditrust_verify, x->>'updated_by' AS updated_by FROM console_admin_quota_settings_save($1, $2, $3, $4, $5, $6, 'owner@example.com') AS x`;
 async function save(d: PGlite, site: string, v: [number | null, number | null, number | null, number | null], reason: string | null, role = "service_role"): Promise<Row> {
   return await d.transaction(async (tx) => {
     await tx.exec(`SET LOCAL ROLE ${role}`);
@@ -73,8 +79,10 @@ async function save(d: PGlite, site: string, v: [number | null, number | null, n
 
 Deno.test(`1. 初值＝handler 常數（正見、日本站各一列）；CHECK 上下限（${MIG_NAME}）`, async () => {
   const d = await db();
-  const rows = (await d.query<Row>(`SELECT * FROM quota_settings ORDER BY site`)).rows;
-  assertEquals(rows.map((r) => r.site), ["jp", "tw"]);
+  const twRows = (await d.query<Row>(`SELECT * FROM quota_settings`)).rows;
+  const jpRows = (await d.query<Row>(`SELECT * FROM policy_jp.quota_settings`)).rows;
+  assertEquals([twRows.map((r) => r.site), jpRows.map((r) => r.site)], [["tw"], ["jp"]], "public 只有 tw、policy_jp 只有 jp");
+  const rows = [...twRows, ...jpRows];
   for (const r of rows) {
     assertEquals([r.per_ip_submit, r.per_ip_verify, r.per_ditrust_submit, r.per_ditrust_verify], [80, 200, 500, 1000]);
   }
@@ -87,24 +95,35 @@ Deno.test(`1. 初值＝handler 常數（正見、日本站各一列）；CHECK �
 
   // 上下限：SQL CHECK 與 TS QUOTA_BOUNDS 同一份
   const cols = Object.keys(QUOTA_BOUNDS) as Array<keyof typeof QUOTA_BOUNDS>;
-  for (const c of cols) {
-    const [lo, hi] = QUOTA_BOUNDS[c];
-    for (const ok of [lo, hi]) await d.exec(`UPDATE quota_settings SET ${c} = ${ok} WHERE site = 'tw'`);
-    for (const bad of [lo - 1, hi + 1, 0, -5]) {
-      await assertRejects(() => d.exec(`UPDATE quota_settings SET ${c} = ${bad} WHERE site = 'tw'`), Error, "check", `${c}=${bad} 該被擋`);
+  for (const [tbl, site] of [["quota_settings", "tw"], ["policy_jp.quota_settings", "jp"]]) {
+    for (const c of cols) {
+      const [lo, hi] = QUOTA_BOUNDS[c];
+      for (const ok of [lo, hi]) await d.exec(`UPDATE ${tbl} SET ${c} = ${ok} WHERE site = '${site}'`);
+      for (const bad of [lo - 1, hi + 1, 0, -5]) {
+        await assertRejects(() => d.exec(`UPDATE ${tbl} SET ${c} = ${bad} WHERE site = '${site}'`), Error, "check", `${tbl}.${c}=${bad} 該被擋`);
+      }
+      await d.exec(`UPDATE ${tbl} SET ${c} = ${c === "per_ip_submit" ? 80 : c === "per_ip_verify" ? 200 : c === "per_ditrust_submit" ? 500 : 1000} WHERE site = '${site}'`);
     }
-    await d.exec(`UPDATE quota_settings SET ${c} = ${c === "per_ip_submit" ? 80 : c === "per_ip_verify" ? 200 : c === "per_ditrust_submit" ? 500 : 1000} WHERE site = 'tw'`);
   }
   assertEquals(QUOTA_BOUNDS, { per_ip_submit: [10, 2000], per_ip_verify: [10, 5000], per_ditrust_submit: [10, 5000], per_ditrust_verify: [10, 10000] });
   await assertRejects(() => d.exec(`INSERT INTO quota_settings (site) VALUES ('xx')`), Error, "check");
+  await assertRejects(() => d.exec(`INSERT INTO quota_settings (site) VALUES ('jp')`), Error, "check", "public 不放日本站");
+  await assertRejects(() => d.exec(`INSERT INTO policy_jp.quota_settings (site) VALUES ('tw')`), Error, "check", "policy_jp 不放正見");
+  // policy_jp 的表比照 policy_jp.queue_settings：anon／authenticated 不能直接讀，只有 service_role
+  for (const role of ["anon", "authenticated"]) {
+    await assertRejects(() => d.transaction(async (tx) => { await tx.exec(`SET LOCAL ROLE ${role}`); await tx.query(`SELECT * FROM policy_jp.quota_settings`); }), Error, "permission denied", role);
+  }
+  assertStringIncludes(JP_MIG, "REVOKE ALL ON policy_jp.quota_settings FROM PUBLIC, anon, authenticated");
+  assertStringIncludes(JP_MIG, "GRANT ALL ON policy_jp.quota_settings TO service_role");
 });
 
 Deno.test("2. 寫入 RPC：回傳新值、記履歷、updated_by；其他站不動", async () => {
   const d = await db();
   const r = await save(d, "tw", [60, 150, 400, 900], "先收緊一點");
   assertEquals(r, { site: "tw", per_ip_submit: 60, per_ip_verify: 150, per_ditrust_submit: 400, per_ditrust_verify: 900, updated_by: "console:owner@example.com" });
-  const jp = (await d.query<Row>(`SELECT * FROM quota_settings WHERE site = 'jp'`)).rows[0];
+  const jp = (await d.query<Row>(`SELECT * FROM policy_jp.quota_settings`)).rows[0];
   assertEquals([jp.per_ip_submit, jp.updated_by], [80, "初值"]);
+  assertEquals((await d.query(`SELECT 1 FROM policy_jp.edit_history`)).rows.length, 0, "改正見不動日本站履歷");
 
   const hist = (await d.query<{ field: string; record_id: string; agent_name: string; old_value: any; new_value: any }>(
     `SELECT field, record_id, agent_name, old_value, new_value FROM edit_history WHERE table_name = 'quota_settings' ORDER BY id`,
@@ -119,9 +138,18 @@ Deno.test("2. 寫入 RPC：回傳新值、記履歷、updated_by；其他站不�
   // 沒給 p_set_by 也能叫（六個參數）
   const six = await d.transaction(async (tx) => {
     await tx.exec(`SET LOCAL ROLE service_role`);
-    return (await tx.query<Row>(`SELECT updated_by FROM console_admin_quota_settings_save('jp', 90, 210, 510, 1010, '日本放寬')`)).rows[0];
+    return (await tx.query<Row>(`SELECT x->>'updated_by' AS updated_by FROM console_admin_quota_settings_save('jp', 90, 210, 510, 1010, '日本放寬') AS x`)).rows[0];
   });
   assertEquals(six.updated_by, "console:未知");
+  // 日本站寫 policy_jp.quota_settings、履歷進 policy_jp.edit_history；public 的不動
+  const jp2 = (await d.query<Row>(`SELECT * FROM policy_jp.quota_settings`)).rows[0];
+  assertEquals([jp2.per_ip_submit, jp2.per_ip_verify, jp2.per_ditrust_submit, jp2.per_ditrust_verify, jp2.updated_by], [90, 210, 510, 1010, "console:未知"]);
+  const tw2 = (await d.query<Row>(`SELECT * FROM quota_settings`)).rows[0];
+  assertEquals(tw2.per_ip_submit, 60);
+  const jh = (await d.query<{ field: string; table_name: string; record_id: string; new_value: any }>(`SELECT field, table_name, record_id, new_value FROM policy_jp.edit_history ORDER BY id`)).rows;
+  assertEquals(jh.map((h) => [h.table_name, h.record_id, h.field]), [["quota_settings", "jp", "*"], ["quota_settings", "jp", "reason"]]);
+  assertEquals(jh[1].new_value, "日本放寬");
+  assertEquals((await d.query(`SELECT 1 FROM edit_history WHERE record_id = 'jp'`)).rows.length, 0, "日本站履歷不寫 public.edit_history");
 });
 
 Deno.test("2b. 寫入 RPC：理由必填、site 與 NULL、CHECK 上下限都擋；權限只有 service_role", async () => {
@@ -184,19 +212,20 @@ Deno.test("4. console_quota_now 的上限欄位讀這張表（正見列），其
 
 type Resp = { data: unknown; error: unknown };
 function fakeClient(respond: (site: string) => Resp | Promise<Resp>, log: string[] = []) {
-  const make = (schemaName: string) => ({
+  return {
     from: (table: string) => ({
       select: (_cols: string) => ({
         eq: (_c: string, site: string) => ({
           limit: async (_n: number) => {
-            log.push(`${schemaName}.${table}:${site}`);
+            log.push(`${table}:${site}`);
             return await respond(site);
           },
         }),
       }),
     }),
-  });
-  return { ...make("default"), schema: (s: string) => make(s) };
+    // 若有人又去用 .schema("public")，這裡直接丟錯讓測試紅（日本站端點不碰 public）
+    schema: (_s: string) => { throw new Error("不該呼叫 .schema()：兩站都用 client 預設 schema"); },
+  };
 }
 const DEF = { per_ip_submit: 80, per_ip_verify: 200, per_ditrust_submit: 500, per_ditrust_verify: 1000 };
 const row = (o: Record<string, unknown> = {}) => ({ data: [{ per_ip_submit: 40, per_ip_verify: 90, per_ditrust_submit: 300, per_ditrust_verify: 700, ...o }], error: null });
@@ -214,7 +243,7 @@ Deno.test("5. loadQuotaLimits：讀表生效、壞值逐欄退回常數、缺表
   resetQuotaCache();
   assertEquals(await loadQuotaLimits(fakeClient(() => row({ per_ip_submit: 9 })), "tw", DEF, 1000), { ...DEF, per_ip_verify: 90, per_ditrust_submit: 300, per_ditrust_verify: 700 });
 
-  // 缺表（PostgREST 回 error）、丟例外、空結果、沒有 schema 方法的舊假 client
+  // 缺表（PostgREST 回 error）、丟例外、空結果、舊假 client
   const cases: Array<[string, unknown]> = [
     ["error", fakeClient(() => ({ data: null, error: { message: 'relation "quota_settings" does not exist' } }))],
     ["throw", fakeClient(() => { throw new Error("boom"); })],
@@ -230,7 +259,7 @@ Deno.test("5. loadQuotaLimits：讀表生效、壞值逐欄退回常數、缺表
   assert(!isValidQuotaValue("per_ip_submit", 2001) && !isValidQuotaValue("per_ip_submit", NaN));
 });
 
-Deno.test("5b. 快取 60 秒、站別各一份、日本站讀 public schema 的 jp 列", async () => {
+Deno.test("5b. 快取 60 秒、站別各一份、日本站讀自己的 jp 列（不用 .schema）", async () => {
   resetQuotaCache();
   const log: string[] = [];
   let ip = 40;
@@ -243,10 +272,10 @@ Deno.test("5b. 快取 60 秒、站別各一份、日本站讀 public schema 的 
   assertEquals((await loadQuotaLimits(c, "tw", DEF, t0 + QUOTA_CACHE_MS)).per_ip_submit, 55, "滿 60 秒重查");
   assertEquals(log.length, 2);
 
-  // 站別各自一份；jp 走 .schema("public")
+  // 站別各自一份
   const jpLimits = await loadQuotaLimits(c, "jp", { ...DEF, per_ip_submit: 77 }, t0 + QUOTA_CACHE_MS);
   assertEquals(jpLimits.per_ip_submit, 55);
-  assertEquals(log, ["public.quota_settings:tw", "public.quota_settings:tw", "public.quota_settings:jp"]);
+  assertEquals(log, ["quota_settings:tw", "quota_settings:tw", "quota_settings:jp"]);
 
   // 壞掉的結果（退回常數）也快取，不會每個請求都去敲資料庫
   resetQuotaCache();

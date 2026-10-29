@@ -1,7 +1,8 @@
 /**
  * 額度的四個數字從資料表 quota_settings 讀（2026-10-29，#769；migration 20261029080000）。
  *
- * - 正見讀 site='tw'、日本站讀 site='jp'（表在 public schema，日本站的 client 預設 schema 是 policy_jp，所以用 .schema("public")）。
+ * - 正見讀 public.quota_settings（site='tw'）、日本站讀 policy_jp.quota_settings（site='jp'）：兩邊都用各自 client 的預設 schema，
+ *   日本站端點不碰 public（維護者 2026-10-29 裁示）。
  * - 模組級快取 60 秒（每個 site 一份）；查不到、表不存在、查詢丟錯、值不合法（非整數或超出 CHECK 上下限）的欄位，
  *   一律退回呼叫端給的常數（CONTRIBUTE_DAILY_LIMIT_PER_IP 等），行為與沒有這張表時一樣。
  * - 退回的結果也快取 60 秒，避免表壞掉時每個請求都去敲資料庫。
@@ -51,8 +52,7 @@ export async function loadQuotaLimits(supabase: SupabaseLike, site: QuotaSite, d
   if (hit && now - hit.at < QUOTA_CACHE_MS && now >= hit.at) return hit.limits;
   let row: Record<string, unknown> | null = null;
   try {
-    const root = typeof supabase?.schema === "function" ? supabase.schema("public") : supabase;
-    const { data, error } = await root.from("quota_settings").select("per_ip_submit,per_ip_verify,per_ditrust_submit,per_ditrust_verify").eq("site", site).limit(1);
+    const { data, error } = await supabase.from("quota_settings").select("per_ip_submit,per_ip_verify,per_ditrust_submit,per_ditrust_verify").eq("site", site).limit(1);
     if (!error && Array.isArray(data) && data.length > 0 && data[0] && typeof data[0] === "object") row = data[0] as Record<string, unknown>;
   } catch { /* 表不存在、網路錯、假 client 不支援：退回常數 */ }
   const limits = { ...defaults };
