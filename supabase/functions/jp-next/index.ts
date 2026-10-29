@@ -2,7 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { JP_PROTOCOL_URL, JP_PROTOCOL_VERSION } from "../_shared/jp/protocol.ts";
 import { jpClient } from "../_shared/jp/client.ts";
 import { QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
-import { ipHashOf, submitQuotaFor } from "../_shared/jp/contribute-handler.ts";
+import { ipHashOf, QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/jp/contribute-handler.ts";
+import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/jp/verify-handler.ts";
 import { requiredAgree } from "../_shared/jp/consensus.ts";
 import { jpDispatchTokenSecretFrom, createJpSecretWarner } from "../_shared/jp/dispatch-secret.ts";
@@ -59,8 +60,9 @@ async function handle(req: Request): Promise<Response> {
     agentName = actor.handle;
     const nameProblem = agentNameProblem(agentName);
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
-    const submitQuota = submitQuotaFor(actor, ipHash);
-    const verifyQuota = verifyQuotaFor(actor, ipHash);
+    const quotaLimits = await loadQuotaLimits(supabase, "jp", QUOTA_DEFAULTS); // quota_settings（site=jp），讀不到退回常數
+    const submitQuota = submitQuotaFor(actor, ipHash, quotaLimits);
+    const verifyQuota = verifyQuotaFor(actor, ipHash, quotaLimits);
     const windowStart = quotaWindowStart(); // 額度時段起點（同正見，2026-10-29 起每 4 小時一段，台北時間）
     const seed = `${agentName}|${ipHash}|${Date.now()}`;
 

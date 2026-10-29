@@ -823,11 +823,12 @@ export function lineageSourceProblems(type: string, payload: unknown, sourceUrls
 }
 
 /** 把請求 body 正規化成清單並逐筆驗證；有任何錯就整批不收（讓 AI 一次修完再送）。 */
-export function validateContributionRequest(body: unknown, elections?: readonly ElectionRef[]): ValidationResult {
+/** opts.rosterBatchCap：名冊大批次的上限（呼叫端算好：min(MAX_BATCH_ROSTER, 目前生效的網段提交額度)，2026-10-29 額度可調）；沒給用 MAX_BATCH_ROSTER */
+export function validateContributionRequest(body: unknown, elections?: readonly ElectionRef[], opts?: { rosterBatchCap?: number }): ValidationResult {
   const previous = activeElections;
   activeElections = elections && elections.length > 0 ? elections : FALLBACK_ELECTIONS;
   try {
-    return validateContributionRequestInner(body);
+    return validateContributionRequestInner(body, opts?.rosterBatchCap ?? MAX_BATCH_ROSTER);
   } finally {
     activeElections = previous;
   }
@@ -861,7 +862,7 @@ function resolveElectionKeys(p: Obj, push: (path: string, message: string) => vo
   }
 }
 
-function validateContributionRequestInner(body: unknown): ValidationResult {
+function validateContributionRequestInner(body: unknown, rosterCap: number): ValidationResult {
   const errors: ValidationError[] = [];
   const items: ContributionInput[] = [];
   const contributor: Contributor = { agent_name: "" };
@@ -896,9 +897,9 @@ function validateContributionRequestInner(body: unknown): ValidationResult {
   const rawList: unknown[] = Array.isArray(body.contributions) ? body.contributions : [body];
   if (Array.isArray(body.contributions) && rawList.length === 0) errors.push({ index: -1, path: "contributions", message: "contributions 不能是空陣列" });
   // 超過 MAX_BATCH 筆只有一種例外：整批都是引用中選會登記名冊的 candidacy（上限 MAX_BATCH_ROSTER；逐位吻合名冊由 contribute-handler 查表把關）
-  const batchCap = rawList.length > MAX_BATCH && isRosterCandidacyBatch(rawList) ? MAX_BATCH_ROSTER : MAX_BATCH;
+  const batchCap = rawList.length > MAX_BATCH && isRosterCandidacyBatch(rawList) ? rosterCap : MAX_BATCH;
   if (rawList.length > batchCap) {
-    errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆（整批都是 candidacy、source_urls 引用中選會登記名冊 PDF 而且逐位吻合名冊的，最多 ${MAX_BATCH_ROSTER} 筆）` });
+    errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆（整批都是 candidacy、source_urls 引用中選會登記名冊 PDF 而且逐位吻合名冊的，最多 ${rosterCap} 筆）` });
   }
 
   rawList.slice(0, batchCap).forEach((raw, index) => {

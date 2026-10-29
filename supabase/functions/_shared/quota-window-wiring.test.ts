@@ -66,6 +66,17 @@ Deno.test("批次大小上限 ≤ 單次時段提交額度（正見匿名與日�
   assert(ROSTER_GAP_LIMIT <= MAX_BATCH_ROSTER, "任務附的缺額名單一件不該比能一次交的還多");
 });
 
+// 額度改成可在主控台調（quota_settings，下限 10）之後，常數 MAX_BATCH_ROSTER 80 可能大於「目前生效的」額度；
+// 守門的精神改由有效上限承接：名冊批次上限＝min(常數, 網段提交額度)，永遠不會大於額度（除了一般批次 20 本來就有的底線）。
+import { effectiveRosterBatchCap } from "./quota-settings.ts";
+Deno.test("名冊批次的有效上限 ≤ 目前生效的網段提交額度（額度在 CHECK 範圍內任何值都成立）", () => {
+  for (const quota of [10, 20, 40, 79, 80, 81, 500, 2000]) {
+    const cap = effectiveRosterBatchCap(MAX_BATCH_ROSTER, quota, MAX_BATCH);
+    assert(cap <= MAX_BATCH_ROSTER, `quota ${quota}: cap ${cap} 超過常數`);
+    assert(cap <= Math.max(quota, MAX_BATCH), `quota ${quota}: cap ${cap} 大於額度，這種批次會被 429 擋掉`);
+  }
+});
+
 Deno.test("派工臂文字的名冊批次上限＝MAX_BATCH_ROSTER（最新定義 20261029030000）", async () => {
   const sql = await Deno.readTextFile(new URL("../../migrations/20261029030000_roster_batch_cap_80.sql", import.meta.url));
   assert(sql.includes(`一次最多 ${MAX_BATCH_ROSTER} 筆（整批都是 candidacy`));

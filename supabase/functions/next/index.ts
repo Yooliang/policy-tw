@@ -11,7 +11,8 @@ import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionT
 import { requiredAgree } from "../_shared/consensus.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, resolveActorFromRequest } from "../_shared/actor.ts";
-import { submitQuotaFor } from "../_shared/contribute-handler.ts";
+import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
+import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
 import { buildLookup, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
@@ -81,8 +82,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const timed = <T,>(name: string, p: PromiseLike<T>): Promise<T> => Promise.resolve(p).then((v) => { mark("q_" + name); return v; });
     if (!identity.ok) return json({ success: false, error: "identity_invalid", message: identity.error }, identity.status);
     // 提交額度：DiTrust 帳號按帳號算（600）、匿名按來源 IP（200）；跟 contribute-handler 用同一支判斷
-    const submitQuota = submitQuotaFor(identity.actor, ipHashForIdentity);
-    const verifyQuota = verifyQuotaFor(identity.actor, ipHashForIdentity);
+    const quotaLimits = await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS); // quota_settings（主控台可調），讀不到退回常數
+    const submitQuota = submitQuotaFor(identity.actor, ipHashForIdentity, quotaLimits);
+    const verifyQuota = verifyQuotaFor(identity.actor, ipHashForIdentity, quotaLimits);
     const actor = identity.actor;
     agentName = actor.handle;
     const nameProblem = agentNameProblem(agentName);
