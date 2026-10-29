@@ -1,7 +1,7 @@
 /**
  * `.in()` 一次最多帶幾個值（2026-10-08，#455 審查）。
  *
- * 名冊逐位吻合的 candidacy 一批可到 150 筆（MAX_BATCH_ROSTER），150 個 uuid（36 字元）放進一條 PostgREST 網址約 5.5 KB、
+ * 名冊逐位吻合的 candidacy 一批可到 80 筆（2026-10-29 起；原 150）（MAX_BATCH_ROSTER），150 個 uuid（原上限）（36 字元）放進一條 PostgREST 網址約 5.5 KB、
  * 150 個雜湊（64 字元）約 10 KB，超過 Kong／PostgREST 的網址長度上限就回 414，沒接住的例外變成 500。
  * 所以交件這一路所有 `.in()` 都改成每 IN_CHUNK 個一查、結果合併。
  */

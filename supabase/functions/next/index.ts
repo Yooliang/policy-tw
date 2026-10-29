@@ -26,6 +26,7 @@ import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
 import { fetchDisputeContext } from "../_shared/dispute-verify.ts";
+import { minutesUntilReset, QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
 import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
 /**
@@ -87,8 +88,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const nameProblem = agentNameProblem(agentName);
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
     const ipHash = ipHashForIdentity;
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
+    const windowStart = quotaWindowStart(); // 額度時段起點（2026-10-29 起每 4 小時一段，台北 00／04／08／12／16／20 點）
     const seed = `${agentName}|${ipHash}|${Date.now()}`;
 
     // 跳過＝「這題我不答」（使用者 2026-09-20）：跟派過一樣排到後面，不再按 IP 記 24 小時不派（會連坐同機的其他代理）。
@@ -147,12 +147,12 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
       // 過渡期（#481，1.79.0）：切換前的票存單一 IP 雜湊，新票存網段雜湊，兩個都查（_shared/my-votes.ts）
       fetchMyVotedRows(supabase, voterHashes(ipHash, legacyIpHash))),
-      timed("ip_contrib", // 匿名：「每個來源 IP 每日」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
+      timed("ip_contrib", // 匿名：「每個來源 IP 每個時段」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
       // DiTrust 帳號：按帳號（actor_id）數，見 submitQuotaFor。
       supabase.from("contributions").select("id", { count: "exact", head: true })
-        .eq(submitQuota.column, submitQuota.value).gte("created_at", todayStart.toISOString())),
+        .eq(submitQuota.column, submitQuota.value).gte("created_at", windowStart.toISOString())),
       timed("ip_vote", supabase.from("contribution_votes").select("id", { count: "exact", head: true })
-        .eq(verifyQuota.column, verifyQuota.value).gte("created_at", todayStart.toISOString())),
+        .eq(verifyQuota.column, verifyQuota.value).gte("created_at", windowStart.toISOString())),
       timed("my_answers", // 這個代理（同代號或同來源 IP）答過的提問，含已上線：question_answers 只記代號，換代號就擋不住。
       // 含 applied 表示這份只會成長、不會退場，跟「my votes」同一類，要翻頁撈（2026-09-19）
       fetchAllRows<{ task_id: string }>("my answered questions", (from, to) =>
@@ -288,7 +288,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 額度直接回給代理：以前它只能一直做到撞上 429 才知道用完了，
     // 而 429 是在 POST /report 才發生——那時候查證的工都已經做完，白費。
     const quota = {
-      scope: `提交：${submitQuota.scope}；驗證：${verifyQuota.scope}。UTC 零時重置；同一台機器的多個匿名代號共用`,
+      scope: `提交：${submitQuota.scope}；驗證：${verifyQuota.scope}。${QUOTA_WINDOW_NOTE}；這個時段到 ${taipeiClock(quotaWindowEnd())}（台北）重置；同一台機器的多個匿名代號共用`,
+      ...quotaWindowFields(),
       submit: {
         limit: submitQuota.limit,
         used: ipContribRes.count ?? 0,
@@ -540,11 +541,11 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       const servedVerify = await serveVerify();
       if (servedVerify) return servedVerify;
       // 驗證票沒派成（沒有合格的、驗證額度也用完、或被同網段並行認領走）就是沒事可做，不派任務
-      const msUntilReset = Date.UTC(todayStart.getUTCFullYear(), todayStart.getUTCMonth(), todayStart.getUTCDate() + 1) - Date.now();
-      const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, Math.ceil(msUntilReset / 60000)) : RETRY_AFTER_MIN;
+      const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, minutesUntilReset()) : RETRY_AFTER_MIN;
+      const resetClock = taipeiClock(quotaWindowEnd());
       const reason = verifyFull
-        ? "今日額度已用完（提交與驗證都滿了），UTC 零時（台北 08:00）重置；請等重置後再來"
-        : "今日提交額度已用完（UTC 零時＝台北 08:00 重置），但驗證額度還有、驗證還可以做；目前剛好沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來，有新的待驗證票就會派給你";
+        ? `這個時段額度已用完（提交與驗證都滿了），${resetClock}（台北，${quotaWindowEnd().toISOString()}）重置；請等重置後再來`
+        : `這個時段提交額度已用完（${resetClock} 台北重置），但驗證額度還有、驗證還可以做；目前剛好沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來，有新的待驗證票就會派給你`;
       return json({ ...base, kind: "none", reason, retry_after_min: retryMin });
     }
     // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：驗證與任務只照排序鍵（queue_at）先後，

@@ -3,7 +3,7 @@
  *
  * 複製自 ../verify-handler.ts 的 handleVerify／handleVerifyInner／verifyQuotaFor，結構與函式名照舊。
  * 保留的：派工憑證（含 revise 過期放行）、身份、不能驗自己、派發即綁定（verify_dispatches）、每個來源一票與 revise 改票、
- *   盲反對改記 unsure、備註三道守門（重複／抄襲／太薄）、每日額度（匿名 800、DiTrust 2400）、
+ *   盲反對改記 unsure、備註三道守門（重複／抄襲／太薄）、額度（2026-10-29 起每時段：匿名 200、DiTrust 1000）、
  *   contribution_effective_agree RPC（系統票折進去的有效門檻）、回應格式。
  * 拿掉的：中選會筆數核對（cec-count）、gate_rejections 寫入、legacyIpHash 過渡、裁決（adjudication）型別的利益迴避、
  *   resolved_politician_id、agentToolNotice 之外的正見專屬提示。
@@ -15,6 +15,7 @@ import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-
 import { isSelfCitationUrl } from "../self-hosts.ts";
 import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { type Actor } from "../actor.ts";
+import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "../quota-window.ts";
 import { resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
 import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
 import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
@@ -28,9 +29,9 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 /** 落庫函式（_shared/jp/apply-contribution.ts 的 jpApplyViaRpc；給了才會在狀態變 verified 時呼叫）。回 null＝這個型別不落庫，不算觸發 */
 export type JpApplyFn = (supabase: SupabaseLike, contributionId: string) => Promise<{ status?: string; message?: string } | null>;
 
-/** 每個來源網段每日最多驗幾筆（同正見） */
-export const VERIFY_DAILY_LIMIT_PER_IP = 800;
-export const VERIFY_DAILY_LIMIT_PER_DITRUST = 2400;
+/** 每個來源網段每時段最多驗幾筆（同正見） */
+export const VERIFY_DAILY_LIMIT_PER_IP = 200;
+export const VERIFY_DAILY_LIMIT_PER_DITRUST = 1000;
 
 export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
@@ -78,15 +79,14 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   // 投錯了要改：同一筆再送一次帶 revise:true，就覆寫自己那一個來源的票，計分不變一票
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  const windowStart = quotaWindowStart();
   const vq = verifyQuotaFor(actor, ipHash);
   const { count: used, error: countError } = await supabase
     .from("contribution_votes").select("id", { count: "exact", head: true })
-    .eq(vq.column, vq.value).gte("created_at", todayStart.toISOString());
+    .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
   if ((used ?? 0) >= vq.limit) {
-    return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每日最多驗 ${vq.limit} 筆` } };
+    return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
 
   const { data: contribution, error: cError } = await supabase

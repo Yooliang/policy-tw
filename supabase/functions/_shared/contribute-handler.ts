@@ -7,6 +7,7 @@ import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, sha256Hex, valid
 import { rosterBatchProblems } from "./roster-batch-gate.ts";
 import { clientIpFrom, networkOf, proxySecretFromEnv } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
+import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
 import { PROTOCOL_URL } from "./protocol.ts";
@@ -41,18 +42,18 @@ import { detailsOfPayload, sourceLevelNotice } from "./source-write.ts";
 type SupabaseLike = any;
 
 /**
- * 每個來源 IP 每日最多提交幾筆。
+ * 每個來源網段「每個時段」最多提交幾筆（2026-10-29：由每日 200 改為每 4 小時時段 80，見 quota-window.ts；更正 09-14 的每日額度）。
  * 2026-09-14：「初期改 200 筆」——現在瓶頸是沒人來貢獻，不是有人灌水，
  * 額度卡住的是自己人。等真的有外部代理進來、也真的出現濫用再往下收。
  */
-export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 200;
+export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 80;
 /**
- * DiTrust 帳號（agent_name=ditrust:<序號>）的每日提交上限，按帳號算、不按 IP（2026-10-02 維護者裁示）。
+ * DiTrust 帳號（agent_name=ditrust:<序號>）的每時段提交上限（2026-10-29 由每日 600 改每時段 500），按帳號算、不按 IP（2026-10-02 維護者裁示）。
  * 藍圖 docs/BLUEPRINT-agent-identity.md §6：「帳號多拿的是額度（註冊誘因）與貢獻榜歸屬，不是票」——
  * 投票照舊每個來源 IP 一票，獨立核對的防護不變。匿名代理照舊每 IP 200。
  * 起因：雲端 VM 關機再開只會輪到同一小撮臨時 IP（10-03 凌晨三個 IP 輪流），撞到當天已交滿的 IP 那一輪就交不出東西。
  */
-export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 600;
+export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 500;
 
 /** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
 export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
@@ -96,7 +97,7 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
   const taskIds = [...new Set(items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))];
   if (taskIds.length === 0) return new Set();
   const manualIds = taskIds.filter((t) => !t.startsWith("auto:") && UUID_RE.test(t));
-  // 名冊大批次最多 150 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
+  // 名冊大批次最多 80 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
   const [manualResList, inFlightResList] = await Promise.all([
     Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, task_type").in("id", chunk))),
     Promise.all(chunksOf(taskIds).map((chunk) => supabase.from("contributions").select("task_id").eq("contributor_ip_hash", ipHash)
@@ -191,7 +192,7 @@ async function fetchClaimCandidates(
     groups.set(gk, g);
   }
   if (groups.size === 0) return [];
-  // 名冊大批次的 candidacy 一批最多 150 個 politician_id：每 IN_CHUNK 個一查再合併（網址長度，#455 審查）
+  // 名冊大批次的 candidacy 一批最多 80 個 politician_id：每 IN_CHUNK 個一查再合併（網址長度，#455 審查）
   const rows = await Promise.all([...groups.values()].flatMap((g) => chunksOf([...g.values]).map(async (chunk) => {
     const { data, error } = await supabase.from("contributions")
       .select("id, contribution_type, payload, agent_name, contributor_ip_hash, status")
@@ -295,18 +296,17 @@ export async function handleContribute(
     if (!gate.ok) return { status: 400, body: { success: false, error: gate.error, message: gate.message, errors: gate.errors } };
   }
 
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  const windowStart = quotaWindowStart();
   const sq = submitQuotaFor(actor, ipHash);
   const { count: usedToday, error: countError } = await supabase
     .from("contributions").select("id", { count: "exact", head: true })
-    .eq(sq.column, sq.value).gte("created_at", todayStart.toISOString());
+    .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
   const used = usedToday ?? 0;
   if (used + validation.items.length > sq.limit) {
     return {
       status: 429,
-      body: { success: false, error: "rate_limited", message: `${sq.scope}每日最多 ${sq.limit} 筆，今日已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: "tomorrow (UTC)" },
+      body: { success: false, error: "rate_limited", message: `${sq.scope}每個時段最多 ${sq.limit} 筆，這個時段已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() },
     };
   }
 
@@ -623,7 +623,7 @@ export async function handleContribute(
 
   const hashes = await Promise.all(validation.items.map((item) => sha256Hex(canonicalPayload(item))));
   const since = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 3600 * 1000).toISOString();
-  // 名冊大批次最多 150 筆：64 字元的雜湊 150 個放進一條網址太長，每 40 個一查
+  // 名冊大批次最多 80 筆：64 字元的雜湊 80 個放進一條網址太長，每 40 個一查
   type ExistingRow = { id: string; payload_hash: string; status: string };
   const existing: ExistingRow[] = [];
   for (let i = 0; i < hashes.length; i += 40) {
@@ -974,7 +974,7 @@ export async function handleContribute(
       ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
-      daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size },
+      daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size, ...quotaWindowFields() },
       ...(toolNotice || strippedCount > 0 || levelNotice ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : "", levelNotice].filter(Boolean).join("\n") } : {}),
       docs: PROTOCOL_URL,
     },

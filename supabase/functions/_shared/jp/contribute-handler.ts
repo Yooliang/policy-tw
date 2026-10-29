@@ -3,7 +3,7 @@
  *
  * 複製自 ../contribute-handler.ts 的 handleContribute／submitQuotaFor／ipHashOf／resolveIdentity，結構與函式名照舊。
  * 保留的：派工憑證（task 比對、來源記領任務的網段）、身份（ditrust:<序號> 換代號）、schema 驗證、
- *   每日額度（匿名按來源網段 200、DiTrust 按帳號 600，UTC 零時重置）、24 小時內相同內容去重、
+ *   額度（2026-10-29 起按時段：匿名按來源網段每時段 80、DiTrust 按帳號每時段 500，台北 00／04／08／12／16／20 點起每 4 小時重置）、24 小時內相同內容去重、
  *   重複宣稱併成同意票（duplicate-claim.ts 原封沿用）、同一台機器重複宣稱的提示、提交後釋放任務認領、回應格式。
  * 落庫：重複提交併成的同意票若讓那一筆變 verified，由這一票呼叫 applyFn 落庫（沒給 applyFn 就交給排程）。
  * 日本站加的：local_government／regional_stat 交件當下跟官方的表核對（machine-verify.ts，照正見 cec-verify）。
@@ -19,12 +19,13 @@
  *   no_change＋unreachable 當場試抓與直接記錄（要落庫，本 PR 不做；日本站的 unreachable 照常進投票）、
  *   落庫前置檢查（precheckApplyTargets）、政見口號提示、得票數提示、gate_rejections 寫入（日本站不一定有這張表）、
  *   出處等級 source_details、legacyIpHash（日本站沒有 1.79.0 以前的資料）。
- * 時區：正見這支只有登記截止日用 +8（已拿掉）；額度重置本來就是 UTC，日本站照舊，沒有要改的時區。
+ * 時區：正見這支只有登記截止日用 +8（已拿掉）；額度時段 2026-10-29 起同正見，用台北時間切（_shared/quota-window.ts）。
  */
 
 import { canonicalPayload, ENCODING_INVALID_MESSAGE, policyTitleKey, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
 import { selfCitationProblems } from "../self-hosts.ts";
 import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
+import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "../quota-window.ts";
 import { clientIpFrom, networkOf, proxySecretFromEnv } from "../ip-network.ts";
 import { chunksOf } from "../in-chunks.ts";
 import { type Actor, resolveActor, resolveActorFromRequest } from "../actor.ts";
@@ -40,10 +41,10 @@ import { decideSameClaim, isSameClaimType, parseResolvedClaim, type SameClaimMat
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
-/** 每個來源網段每日最多提交幾筆（同正見 CONTRIBUTE_DAILY_LIMIT_PER_IP） */
-export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 200;
-/** DiTrust 帳號每日提交上限，按帳號算（同正見 CONTRIBUTE_DAILY_LIMIT_PER_DITRUST） */
-export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 600;
+/** 每個來源網段每時段最多提交幾筆（同正見 CONTRIBUTE_DAILY_LIMIT_PER_IP） */
+export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 80;
+/** DiTrust 帳號每時段提交上限，按帳號算（同正見 CONTRIBUTE_DAILY_LIMIT_PER_DITRUST） */
+export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 500;
 export const DEDUPE_WINDOW_HOURS = 24;
 
 /** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源網段。 */
@@ -305,18 +306,17 @@ export async function handleContribute(
     }
   }
 
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  const windowStart = quotaWindowStart();
   const sq = submitQuotaFor(actor, ipHash);
   const { count: usedToday, error: countError } = await supabase
     .from("contributions").select("id", { count: "exact", head: true })
-    .eq(sq.column, sq.value).gte("created_at", todayStart.toISOString());
+    .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
   const used = usedToday ?? 0;
   if (used + validation.items.length > sq.limit) {
     return {
       status: 429,
-      body: { success: false, error: "rate_limited", message: `${sq.scope}每日最多 ${sq.limit} 筆，今日已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: "tomorrow (UTC)" },
+      body: { success: false, error: "rate_limited", message: `${sq.scope}每個時段最多 ${sq.limit} 筆，這個時段已用 ${used}，這批 ${validation.items.length} 筆放不下`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() },
     };
   }
 
@@ -529,7 +529,7 @@ export async function handleContribute(
       ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
-      daily_quota: { limit: sq.limit, used: used + inserted.length },
+      daily_quota: { limit: sq.limit, used: used + inserted.length, ...quotaWindowFields() },
       ...(machineVerify ? { machine_verify: { ...machineVerify, by: "公的な表との自動照合（地方公共団体＝総務省「全国地方公共団体コード」、地域の統計＝令和7年国勢調査）。一致＝確定して反映、不一致＝差し戻し、判断できないもの＝同儕の検証待ち" } } : {}),
       ...(toolNotice ? { notice: toolNotice } : {}),
       docs: JP_PROTOCOL_URL,

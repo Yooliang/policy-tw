@@ -1,8 +1,8 @@
 /**
- * 名冊逐位吻合的 candidacy 大批次（150 筆）走真的 handleContribute（假 supabase）的整合測試（#455 agy 審查要求）。
+ * 名冊逐位吻合的 candidacy 大批次（80 筆）走真的 handleContribute（假 supabase）的整合測試（#455 agy 審查要求）。
  *
  * 守的是：
- *  1. 網址過長：150 個 politician_id／雜湊／task_id 放進一個 .in() 會 414——假 client 對超過 IN_CHUNK 的 in() 回 error，並記下來
+ *  1. 網址過長：80 個 politician_id／雜湊／task_id 放進一個 .in() 會 414——假 client 對超過 IN_CHUNK 的 in() 回 error，並記下來
  *  2. 整表載入：核對只撈這一批的縣市＋鄉鎮，不把村里長 14,100 列整份拉回來（rowsServed、fullScans）
  *  3. 同一批裡同一位候選人重複：整批 400（gate），一般型別的重複只寫第一筆、回應不會被覆寫成同一個編號
  *  4. 沒有名冊網址的項目不能靜默略過
@@ -51,30 +51,30 @@ const itemOf = (r: (typeof records)[number], i: number, over: Record<string, unk
   source_urls: [URL_],
   task_id: `auto:roster_check:2026:${r.region}${r.sub_region}:村里長`,
 });
-const body150 = (rs = pick(150), over?: (i: number) => Record<string, unknown>) => ({ agent_name: "roster-bulk-test", contributions: rs.map((r, i) => itemOf(r, i, over?.(i))) });
+const body150 = (rs = pick(80), over?: (i: number) => Record<string, unknown>) => ({ agent_name: "roster-bulk-test", contributions: rs.map((r, i) => itemOf(r, i, over?.(i))) });
 const call = (client: unknown, b: unknown) => handleContribute(client, "https://x", b, "ip-roster-1", noVote, "contribute", okFetch);
 const fresh = () => clearElectionCaches();
 
-Deno.test("整合：150 筆名冊逐位吻合的 candidacy 走完整個交件流程 → 201、寫進 150 筆、編號各不相同；沒有任何 in() 超過 IN_CHUNK", async () => {
+Deno.test("整合：80 筆名冊逐位吻合的 candidacy 走完整個交件流程 → 201、寫進 80 筆、編號各不相同；沒有任何 in() 超過 IN_CHUNK", async () => {
   fresh();
-  const { client, log } = fakeRosterSupabase(tablesFor(150));
+  const { client, log } = fakeRosterSupabase(tablesFor(80));
   const res = await call(client, body150());
   assertEquals(res.status, 201, JSON.stringify(res.body).slice(0, 600));
   const rows = log.inserted.filter((x) => x.table === "contributions");
-  assertEquals(rows.length, 150);
+  assertEquals(rows.length, 80);
   const results = (res.body as { results: Array<{ contribution_id: string; status: string }> }).results;
-  assertEquals(results.length, 150);
-  assertEquals(new Set(results.map((r) => r.contribution_id)).size, 150, "每一筆各自一個編號");
+  assertEquals(results.length, 80);
+  assertEquals(new Set(results.map((r) => r.contribution_id)).size, 80, "每一筆各自一個編號");
   assert(results.every((r) => r.status === "pending"));
   assertEquals(log.oversize, [], "有 in() 一次帶超過 IN_CHUNK 個值（網址過長）");
-  // 150 個人物 id 確實是分批查的（不是被略過）
+  // 80 個人物 id 確實是分批查的（不是被略過）
   assert(log.inSizes.some((x) => x.table === "politicians" && x.n === IN_CHUNK), "人物 id 沒有分批查");
   assert(log.inSizes.some((x) => x.col === "payload_hash" && x.n === IN_CHUNK), "雜湊沒有分批查");
 });
 
 Deno.test("整合：核對只撈這一批的範圍——不把村里長 14,100 列整份拉回來", async () => {
   fresh();
-  const { client, log } = fakeRosterSupabase(tablesFor(150));
+  const { client, log } = fakeRosterSupabase(tablesFor(80));
   const res = await call(client, body150());
   assertEquals(res.status, 201, JSON.stringify(res.body).slice(0, 300));
   assertEquals(log.fullScans, 0, "有查詢沒帶 region 條件（整表掃）");
@@ -184,28 +184,28 @@ const handlerOk = async (mod: { handleContribute: typeof handleContribute }, b: 
   return { res, log };
 };
 
-Deno.test("還原驗證：重複宣稱查詢（fetchClaimCandidates）不分批 → 150 個 id 一次帶，網址過長（測試要紅）", async () => {
+Deno.test("還原驗證：重複宣稱查詢（fetchClaimCandidates）不分批 → 80 個 id 一次帶，網址過長（測試要紅）", async () => {
   const { mod } = await mutant("contribute-handler.ts", [["chunksOf([...g.values]).map(async (chunk) => {", "[[...g.values]].map(async (chunk) => {"]]);
   await expectRed("fetchClaimCandidates 分批", async () => {
-    const { res, log } = await handlerOk(mod, body150(), tablesFor(150));
+    const { res, log } = await handlerOk(mod, body150(), tablesFor(80));
     assertEquals(log.oversize, []);
     assertEquals(res.status, 201);
   });
 });
 
-Deno.test("還原驗證：去重雜湊不分批 → 150 個雜湊一次帶（測試要紅）", async () => {
+Deno.test("還原驗證：去重雜湊不分批 → 80 個雜湊一次帶（測試要紅）", async () => {
   const { mod } = await mutant("contribute-handler.ts", [[".in(\"payload_hash\", hashes.slice(i, i + 40))", ".in(\"payload_hash\", hashes)"]]);
   await expectRed("雜湊分批", async () => {
-    const { log } = await handlerOk(mod, body150(), tablesFor(150));
+    const { log } = await handlerOk(mod, body150(), tablesFor(80));
     assertEquals(log.oversize, []);
   });
 });
 
-Deno.test("還原驗證：落庫前置檢查（apply-precheck）的人物查詢不分批 → 150 個 id 一次帶（測試要紅）", async () => {
+Deno.test("還原驗證：落庫前置檢查（apply-precheck）的人物查詢不分批 → 80 個 id 一次帶（測試要紅）", async () => {
   const pre = await mutant("apply-precheck.ts", [["for (const chunk of chunksOf(ids)) {\n      // query-bounds: ok — ids 來自這一批交件，每段 IN_CHUNK 個，變數 in()\n      const { data, error } = await supabase.from(\"politicians\")", "for (const chunk of [ids]) {\n      // query-bounds: ok — ids 來自這一批交件，每段 IN_CHUNK 個，變數 in()\n      const { data, error } = await supabase.from(\"politicians\")"]]);
   const { mod } = await mutant("contribute-handler.ts", [], { "apply-precheck.ts": pre.url });
   await expectRed("apply-precheck 分批", async () => {
-    const { log } = await handlerOk(mod, body150(), tablesFor(150));
+    const { log } = await handlerOk(mod, body150(), tablesFor(80));
     assertEquals(log.oversize, []);
   });
 });
@@ -215,7 +215,7 @@ Deno.test("還原驗證：核對整表載入（不帶縣市條件）→ 14,100 �
   const gate = await mutant("roster-batch-gate.ts", [], { "cec-registrations.ts": reg.url });
   const { mod } = await mutant("contribute-handler.ts", [], { "roster-batch-gate.ts": gate.url });
   await expectRed("縣市範圍", async () => {
-    const { log } = await handlerOk(mod, body150(), tablesFor(150));
+    const { log } = await handlerOk(mod, body150(), tablesFor(80));
     assertEquals(log.fullScans, 0);
     assert(log.rowsServed < records.length / 4);
   });

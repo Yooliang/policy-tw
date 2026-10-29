@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { JP_PROTOCOL_URL, JP_PROTOCOL_VERSION } from "../_shared/jp/protocol.ts";
 import { jpClient } from "../_shared/jp/client.ts";
+import { QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
 import { ipHashOf, submitQuotaFor } from "../_shared/jp/contribute-handler.ts";
 import { verifyQuotaFor } from "../_shared/jp/verify-handler.ts";
 import { requiredAgree } from "../_shared/jp/consensus.ts";
@@ -60,8 +61,7 @@ async function handle(req: Request): Promise<Response> {
     if (nameProblem) return json({ success: false, error: nameProblem }, 400);
     const submitQuota = submitQuotaFor(actor, ipHash);
     const verifyQuota = verifyQuotaFor(actor, ipHash);
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
+    const windowStart = quotaWindowStart(); // 額度時段起點（同正見，2026-10-29 起每 4 小時一段，台北時間）
     const seed = `${agentName}|${ipHash}|${Date.now()}`;
 
     // 跳過＝「這題我不答」：跟派過一樣排到後面（task_dispatched），skips 表只留紀錄
@@ -89,9 +89,9 @@ async function handle(req: Request): Promise<Response> {
       supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName }),
       fetchMyVotedRows(supabase, voterHashes(ipHash)),
       supabase.from("contributions").select("id", { count: "exact", head: true })
-        .eq(submitQuota.column, submitQuota.value).gte("created_at", todayStart.toISOString()),
+        .eq(submitQuota.column, submitQuota.value).gte("created_at", windowStart.toISOString()),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true })
-        .eq(verifyQuota.column, verifyQuota.value).gte("created_at", todayStart.toISOString()),
+        .eq(verifyQuota.column, verifyQuota.value).gte("created_at", windowStart.toISOString()),
     ]);
     for (const r of [pendingRes, countsRes, ipContribRes, ipVoteRes]) {
       if (r.error) throw new Error(r.error.message);
@@ -144,7 +144,8 @@ async function handle(req: Request): Promise<Response> {
     const openTasks = Object.values(autoTotals).reduce((a: number, b: number) => a + b, 0);
 
     const quota = {
-      scope: `提交：${submitQuota.scope}；驗證：${verifyQuota.scope}。UTC 零時重置；同一台機器的多個匿名代號共用`,
+      scope: `提交：${submitQuota.scope}；驗證：${verifyQuota.scope}。${QUOTA_WINDOW_NOTE}；這個時段到 ${taipeiClock(quotaWindowEnd())}（台北）重置；同一台機器的多個匿名代號共用`,
+      ...quotaWindowFields(),
       submit: { limit: submitQuota.limit, used: ipContribRes.count ?? 0, remaining: Math.max(0, submitQuota.limit - (ipContribRes.count ?? 0)) },
       verify: { limit: verifyQuota.limit, used: ipVoteRes.count ?? 0, remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)) },
     };
