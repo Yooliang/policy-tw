@@ -42,7 +42,7 @@ Deno.test("candidacy 一整圈：領 roster_check 任務、帶憑證交 candidac
     // 全部の REST 請求が policy_jp の schema ヘッダ付き
     for (const c of report.calls) {
       const ro = c.method === "GET" || c.method === "HEAD";
-      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], c.target.includes("quota_settings") ? "public" : "policy_jp", `${c.method} ${c.target}`);
     }
     // candidacy は same_claim 登記表の型別ではない（resolved_claim を要求せず、same_claim_matches も呼ばない）
     assertEquals(callsTo(report.calls, "rpc/same_claim_matches").length, 0);
@@ -205,7 +205,7 @@ Deno.test("politician 一整圈：領 profile_gap 任務（item.current.same_cla
     assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
     for (const c of report.calls) {
       const ro = c.method === "GET" || c.method === "HEAD";
-      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], c.target.includes("quota_settings") ? "public" : "policy_jp", `${c.method} ${c.target}`);
     }
   });
 });
@@ -259,7 +259,7 @@ Deno.test("policy 一整圈：領 policy_missing 任務（同一件事の探査�
     assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
     for (const c of report.calls) {
       const ro = c.method === "GET" || c.method === "HEAD";
-      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+      assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], c.target.includes("quota_settings") ? "public" : "policy_jp", `${c.method} ${c.target}`);
     }
   });
 });
@@ -396,7 +396,7 @@ Deno.test("A 期の一整圈：candidate_status_stale を領して filed を can
       assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
       for (const c of report.calls) {
         const ro = c.method === "GET" || c.method === "HEAD";
-        assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], "policy_jp", `${c.method} ${c.target}`);
+        assertEquals(c.headers[ro ? "accept-profile" : "content-profile"], c.target.includes("quota_settings") ? "public" : "policy_jp", `${c.method} ${c.target}`);
       }
     });
   }

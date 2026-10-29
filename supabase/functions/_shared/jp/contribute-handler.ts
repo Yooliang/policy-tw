@@ -34,6 +34,7 @@ import { JP_PROTOCOL_URL } from "./protocol.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "../duplicate-claim.ts";
 import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
+import { loadQuotaLimits, type QuotaLimits } from "../quota-settings.ts";
 import { handleVerify, type JpApplyFn } from "./verify-handler.ts";
 import { machineVerifyInline } from "./machine-verify.ts";
 import { decideSameClaim, isSameClaimType, parseResolvedClaim, type SameClaimMatches } from "../same-claims.ts";
@@ -47,11 +48,14 @@ export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 80;
 export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 500;
 export const DEDUPE_WINDOW_HOURS = 24;
 
-/** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源網段。 */
-export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
+/** 資料表 quota_settings（site=jp）讀不到時退回的常數 */
+export const QUOTA_DEFAULTS: QuotaLimits = { per_ip_submit: CONTRIBUTE_DAILY_LIMIT_PER_IP, per_ip_verify: 200, per_ditrust_submit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, per_ditrust_verify: 1000 };
+
+/** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源網段。limits 是 quota_settings 目前的值，沒給用常數。 */
+export function submitQuotaFor(actor: Actor, ipHash: string, limits?: Pick<QuotaLimits, "per_ip_submit" | "per_ditrust_submit">): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
-    ? { limit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
+    ? { limit: limits?.per_ditrust_submit ?? CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: limits?.per_ip_submit ?? CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 
 export interface HandlerResult {
@@ -307,7 +311,7 @@ export async function handleContribute(
   }
 
   const windowStart = quotaWindowStart();
-  const sq = submitQuotaFor(actor, ipHash);
+  const sq = submitQuotaFor(actor, ipHash, await loadQuotaLimits(supabase, "jp", QUOTA_DEFAULTS));
   const { count: usedToday, error: countError } = await supabase
     .from("contributions").select("id", { count: "exact", head: true })
     .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());

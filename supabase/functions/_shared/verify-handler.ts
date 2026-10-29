@@ -9,7 +9,8 @@ import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
-import { resolveIdentity } from "./contribute-handler.ts";
+import { QUOTA_DEFAULTS, resolveIdentity } from "./contribute-handler.ts";
+import { loadQuotaLimits, type QuotaLimits } from "./quota-settings.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
@@ -35,10 +36,10 @@ export const VERIFY_DAILY_LIMIT_PER_IP = 200;
 export const VERIFY_DAILY_LIMIT_PER_DITRUST = 1000;
 
 /** 這個身份的驗證額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
-export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
+export function verifyQuotaFor(actor: Actor, ipHash: string, limits?: Pick<QuotaLimits, "per_ip_verify" | "per_ditrust_verify">): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
-    ? { limit: VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
+    ? { limit: limits?.per_ditrust_verify ?? VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: limits?.per_ip_verify ?? VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 
 /**
@@ -116,7 +117,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 
   const windowStart = quotaWindowStart();
-  const vq = verifyQuotaFor(actor, ipHash);
+  const vq = verifyQuotaFor(actor, ipHash, await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS));
   const { count: used, error: countError } = await supabase
     .from("contribution_votes").select("id", { count: "exact", head: true })
     .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());

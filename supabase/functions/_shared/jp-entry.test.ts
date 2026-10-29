@@ -93,13 +93,13 @@ const NO_CHANGE = {
 };
 const taskRow = { task_id: TASK, task_type: "policy_missing", target: { politician_id: "22222222-2222-4222-8222-222222222222" }, what_we_need: "公約を探す", hint_sources: [], reward: 1, queue_at: "2026-10-01T00:00:00Z" };
 
-/** 每個 REST 請求都要帶 policy_jp 的 schema 標頭 */
+/** 每個 REST 請求都要帶 policy_jp 的 schema 標頭（唯一例外：讀額度設定表 public.quota_settings 的 site=jp 那列，2026-10-29，帶 accept-profile=public） */
 function assertAllJpSchema(calls: RestCall[]) {
   assert(calls.length > 0, "應該有 REST 請求");
   for (const c of calls) {
     const readOnly = c.method === "GET" || c.method === "HEAD";
     const h = c.headers[readOnly ? "accept-profile" : "content-profile"];
-    assertEquals(h, "policy_jp", `${c.method} ${c.target} 沒帶 policy_jp（${readOnly ? "accept" : "content"}-profile=${h}）`);
+    assertEquals(h, c.target.includes("quota_settings") && readOnly ? "public" : "policy_jp", `${c.method} ${c.target} 沒帶 policy_jp（${readOnly ? "accept" : "content"}-profile=${h}）`);
     assert(c.headers[readOnly ? "content-profile" : "accept-profile"] === undefined || c.headers[readOnly ? "content-profile" : "accept-profile"] === "policy_jp");
   }
 }

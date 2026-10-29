@@ -3,7 +3,8 @@
  * 只寫 contributions（待審佇列）；schema 驗證、來源網址格式、每 IP 每日限額、24 小時去重。
  */
 
-import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { canonicalPayload, ENCODING_INVALID_MESSAGE, MAX_BATCH, MAX_BATCH_ROSTER, sha256Hex, validateContributionRequest } from "./contribution-schema.ts";
+import { effectiveRosterBatchCap, loadQuotaLimits, type QuotaLimits } from "./quota-settings.ts";
 import { rosterBatchProblems } from "./roster-batch-gate.ts";
 import { clientIpFrom, networkOf, proxySecretFromEnv } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
@@ -55,11 +56,14 @@ export const CONTRIBUTE_DAILY_LIMIT_PER_IP = 80;
  */
 export const CONTRIBUTE_DAILY_LIMIT_PER_DITRUST = 500;
 
-/** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
-export function submitQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
+/** 資料表 quota_settings 讀不到時退回的常數（四個數字；驗證那兩個在 verify-handler） */
+export const QUOTA_DEFAULTS: QuotaLimits = { per_ip_submit: CONTRIBUTE_DAILY_LIMIT_PER_IP, per_ip_verify: 200, per_ditrust_submit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, per_ditrust_verify: 1000 };
+
+/** 這個身份的提交額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。limits 是 quota_settings 目前的值（2026-10-29 起可在主控台調，沒給用常數）。 */
+export function submitQuotaFor(actor: Actor, ipHash: string, limits?: Pick<QuotaLimits, "per_ip_submit" | "per_ditrust_submit">): { limit: number; column: "actor_id" | "contributor_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
-    ? { limit: CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
+    ? { limit: limits?.per_ditrust_submit ?? CONTRIBUTE_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: limits?.per_ip_submit ?? CONTRIBUTE_DAILY_LIMIT_PER_IP, column: "contributor_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 export const DEDUPE_WINDOW_HOURS = 24;
 
@@ -250,7 +254,8 @@ export async function handleContribute(
   const actor: Actor = identity.actor;
   // 允許的選舉 id 與 election_key 以資料庫 elections 表為準（#344 第二階段 A），驗證本身仍是純函式
   const elections = await loadElections(supabase);
-  const validation = validateContributionRequest(body, elections);
+  const quotaLimits = await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS);
+  const validation = validateContributionRequest(body, elections, { rosterBatchCap: effectiveRosterBatchCap(MAX_BATCH_ROSTER, quotaLimits.per_ip_submit, MAX_BATCH) });
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
     const category = validation.errors.some((e) => e.code === "category_invalid");
@@ -297,7 +302,7 @@ export async function handleContribute(
   }
 
   const windowStart = quotaWindowStart();
-  const sq = submitQuotaFor(actor, ipHash);
+  const sq = submitQuotaFor(actor, ipHash, quotaLimits);
   const { count: usedToday, error: countError } = await supabase
     .from("contributions").select("id", { count: "exact", head: true })
     .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());

@@ -16,7 +16,8 @@ import { isSelfCitationUrl } from "../self-hosts.ts";
 import { JP_SELF_CITATION_MESSAGE } from "./self-citation.ts";
 import { type Actor } from "../actor.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "../quota-window.ts";
-import { resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
+import { QUOTA_DEFAULTS, resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
+import { loadQuotaLimits, type QuotaLimits } from "../quota-settings.ts";
 import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
 import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
@@ -33,10 +34,10 @@ export type JpApplyFn = (supabase: SupabaseLike, contributionId: string) => Prom
 export const VERIFY_DAILY_LIMIT_PER_IP = 200;
 export const VERIFY_DAILY_LIMIT_PER_DITRUST = 1000;
 
-export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
+export function verifyQuotaFor(actor: Actor, ipHash: string, limits?: Pick<QuotaLimits, "per_ip_verify" | "per_ditrust_verify">): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
   return actor.level === "ditrust"
-    ? { limit: VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
-    : { limit: VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
+    ? { limit: limits?.per_ditrust_verify ?? VERIFY_DAILY_LIMIT_PER_DITRUST, column: "actor_id", value: actor.actor_id, scope: "每個 DiTrust 帳號" }
+    : { limit: limits?.per_ip_verify ?? VERIFY_DAILY_LIMIT_PER_IP, column: "verifier_ip_hash", value: ipHash, scope: "每個來源網段（IPv4 /24、IPv6 /64）" };
 }
 
 export async function handleVerify(supabase: SupabaseLike, body: unknown, reportIpHash: string, applyFn?: JpApplyFn, via = "verify", dispatchSecret?: string): Promise<HandlerResult> {
@@ -80,7 +81,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 
   const windowStart = quotaWindowStart();
-  const vq = verifyQuotaFor(actor, ipHash);
+  const vq = verifyQuotaFor(actor, ipHash, await loadQuotaLimits(supabase, "jp", QUOTA_DEFAULTS));
   const { count: used, error: countError } = await supabase
     .from("contribution_votes").select("id", { count: "exact", head: true })
     .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
