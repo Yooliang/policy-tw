@@ -58,7 +58,7 @@ Deno.test("縣市長／縣市議員的號次缺口與驗證列拉到 3 ×，其�
   assertEquals(b["gap-mayor"], 3 * Y);
   assertEquals(b["gap-council"], 3 * Y);
   assertEquals(b["gap-village"], 2 * Y);
-  assertEquals(b["gap-town"], 2 * Y);
+  assertEquals(b["gap-town"], 2.5 * Y); // 20261030050000 起清單第一個有列的職位拿 2.5 ×
   assertEquals(b["verify:1"], 3 * Y); // 縣市長號次驗證票
   assertEquals(b["verify:2"], 2 * Y); // 村里長號次驗證票
   assertEquals(b["verify:3"], 0); // 沒帶號次的驗證票不動
