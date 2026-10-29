@@ -90,8 +90,10 @@ usePageHead({
         正見收錄的每一場選舉。點進去看全台與各縣市的候選人、政見與出處；過去的選舉留著當選人與當時的競選承諾，之後可以對照兌現了沒。
       </template>
       <template #icon><Vote :size="400" class="text-blue-500" /></template>
+      <template v-if="breadcrumbs.length > 1" #default>
+        <Breadcrumbs :items="breadcrumbs" />
+      </template>
     </Hero>
-    <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
       <div v-if="elections.length === 0" class="text-slate-500 text-center py-20">

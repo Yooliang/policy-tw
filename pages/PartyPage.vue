@@ -82,8 +82,10 @@ usePageHead({
         </span>
       </template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
+      <template v-if="breadcrumbs.length > 1" #default>
+        <Breadcrumbs :items="breadcrumbs" />
+      </template>
     </Hero>
-    <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-left">
       <div v-if="!page" class="text-slate-500 text-center py-20">
