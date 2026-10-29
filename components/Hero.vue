@@ -66,7 +66,7 @@ defineProps<{
     </section>
 
     <!-- Overlapping Bottom Slot Area
-         寬度與置中寫在卡片自己身上、不靠外層容器：AdSense 自動廣告會把這一塊包進 <div class="google-auto-placed" style="width:100%">
+         寬度與置中寫在卡片自己身上、不靠外層容器：AdSense 自動廣告會把這一塊包進 div.google-auto-placed（style width:100%）
          （2026-10-29 線上實測，人物頁的卡因此左右撐滿整個視窗、時有時無）。算式＝max-w-7xl 扣掉 px-4／sm:px-6／lg:px-8 的左右留白。 -->
     <div
       v-if="$slots.default"
