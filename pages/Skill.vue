@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import { Bot, Copy, Check, ChevronRight, FileText, ShieldCheck, Link as LinkIcon } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
+import Breadcrumbs from '../components/Breadcrumbs.vue'
 import MechanismNav from '../components/MechanismNav.vue'
 import { usePageHead, SITE_URL } from '../composables/usePageHead'
 import { skillTypeSections } from '../lib/skill-types-sections'
@@ -36,6 +37,7 @@ const typeSections = computed(() => skillTypeSections(skillTypesMarkdown).map((s
 })))
 
 usePageHead({
+  breadcrumbs: [{ name: '首頁', path: '/' }, { name: 'AI 協作技能' }],
   title: '驅動 AI，實現全自動資料貢獻',
   description: '讓具備聯網能力的 AI 讀取本頁，自動學會任務領取與查核提交。所有資料均須附上來源，經 AI 交叉驗證無誤後自動發布上線。',
 })
@@ -49,6 +51,9 @@ usePageHead({
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="skill" />
+      </template>
+      <template #default>
+        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: 'AI 協作技能' }]" />
       </template>
     </Hero>
 
