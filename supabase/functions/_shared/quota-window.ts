@@ -6,7 +6,8 @@
  * 台北 00:00＝UTC 16:00，8 小時是 4 小時的整數倍，所以時段起點剛好落在 UTC 的 0／4／8／12／16／20 點。
  * 這裡仍明寫「先換成台北時間再切」，不靠這個巧合，測試用獨立的台北日期算法逐案對。
  * 正見（next／contribute／verify）與日本站（jp-next／jp 的 contribute／verify）共用這一個函式。
- * 資料庫沒有任何額度用量的計算（用量都是端點對 contributions／contribution_votes 數 created_at），所以沒有對應的 SQL 函式。
+ * 端點的用量都是對 contributions／contribution_votes 數 created_at。唯讀的 SQL 版（主控台 VM 頁用）是 quota_window_start()／quota_limits()／console_quota_now()
+ * （migration 20261029060000），console-quota-now.test.ts 逐案比對這裡的時段與四個上限，改這裡要一起改那邊。
  */
 
 /** 一個時段的長度（小時） */
