@@ -60,22 +60,22 @@ Deno.test("1 提交額度用完、驗證額度還有、有合格驗證票 → �
   assertEquals((r.body.quota as { submit: { remaining: number } }).submit.remaining, 0);
 });
 
-Deno.test("2 提交額度用完、沒有合格驗證票 → none，說明今日額度用完與 UTC 零時重置，不派任務", async () => {
+Deno.test("2 提交額度用完、沒有合格驗證票 → none，說明這個時段提交額度用完與重置時間，不派任務", async () => {
   const r = await run({ ...base, submitUsed: FULL, pool: false });
   assertEquals(r.body.kind, "none");
-  assertStringIncludes(String(r.body.reason), "今日");
-  assertStringIncludes(String(r.body.reason), "UTC 零時");
-  assertStringIncludes(String(r.body.reason), "08:00");
+  assertStringIncludes(String(r.body.reason), "這個時段");
+  assertStringIncludes(String(r.body.reason), "台北重置");
   assertEquals(typeof r.body.retry_after_min, "number");
   assertEquals(r.body.item, undefined);
   assertEquals(tasksLeased(r.calls).length, 0, "不該認領任務");
 });
 
-Deno.test("2 提交與驗證額度都用完 → none，等到 UTC 零時（retry_after_min 不小於一般等待）", async () => {
+Deno.test("2 提交與驗證額度都用完 → none，等到時段重置（retry_after_min 不小於一般等待）", async () => {
   const r = await run({ ...base, submitUsed: FULL, verifyUsed: FULL });
   assertEquals(r.body.kind, "none");
-  assertStringIncludes(String(r.body.reason), "UTC 零時");
-  assert((r.body.retry_after_min as number) >= 5);
+  assertStringIncludes(String(r.body.reason), "這個時段額度已用完");
+  assertStringIncludes(String(r.body.reason), String((r.body.quota as { window_resets_at: string }).window_resets_at));
+  assert((r.body.retry_after_min as number) >= 5 && (r.body.retry_after_min as number) <= 240);
   assertEquals(tasksLeased(r.calls).length, 0);
   assert(!r.calls.some((c) => c.target === "verify_dispatches" && c.method === "POST"), "不該派驗證票");
 });

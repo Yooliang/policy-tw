@@ -8,6 +8,7 @@ import { votePickProblem } from "./vote-pick-guard.ts";
 import { ENCODING_INVALID_MESSAGE, validateVerifyRequest } from "./contribution-schema.ts";
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 import { type Actor } from "./actor.ts";
+import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
 import { resolveIdentity } from "./contribute-handler.ts";
 import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
@@ -23,15 +24,15 @@ import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
 type SupabaseLike = any;
 
 /**
- * 每個來源 IP 每日最多驗幾筆。提交的四倍：驗證比提交便宜，而且待驗證的量
+ * 每個來源網段「每個時段」最多驗幾筆（2026-10-29：由每日 800 改為每 4 小時時段 200，見 quota-window.ts）。以下舊說明的數字是當時的每日值。提交的四倍：驗證比提交便宜，而且待驗證的量
  * （目前 198 筆 pending）本來就該讓人一次消化得完。2026-09-14 從 200 調到 800。
  */
-export const VERIFY_DAILY_LIMIT_PER_IP = 800;
+export const VERIFY_DAILY_LIMIT_PER_IP = 200;
 /**
- * DiTrust 帳號的每日驗證上限，按帳號算（2026-10-02 維護者裁示，跟提交額度同一個理由，見 contribute-handler）。
+ * DiTrust 帳號的每時段驗證上限（2026-10-29 由每日 2400 改每時段 1000），按帳號算（2026-10-02 維護者裁示，跟提交額度同一個理由，見 contribute-handler）。
  * 這只是「一天最多投幾票」的總量；「同一筆貢獻每個來源 IP 只算一票」的去重（tallyByIp）完全不動，獨立核對的防護不變。
  */
-export const VERIFY_DAILY_LIMIT_PER_DITRUST = 2400;
+export const VERIFY_DAILY_LIMIT_PER_DITRUST = 1000;
 
 /** 這個身份的驗證額度按什麼算：DiTrust 帳號按 actor_id、匿名按來源 IP。 */
 export function verifyQuotaFor(actor: Actor, ipHash: string): { limit: number; column: "actor_id" | "verifier_ip_hash"; value: string; scope: string } {
@@ -114,15 +115,14 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 指認，投錯代價高。同一筆再送一次帶 revise:true，就覆寫自己那張票（同 IP 那張），計分不變一票。
   const revise = isObj(body) && (body as Record<string, unknown>).revise === true;
 
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  const windowStart = quotaWindowStart();
   const vq = verifyQuotaFor(actor, ipHash);
   const { count: used, error: countError } = await supabase
     .from("contribution_votes").select("id", { count: "exact", head: true })
-    .eq(vq.column, vq.value).gte("created_at", todayStart.toISOString());
+    .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
   if ((used ?? 0) >= vq.limit) {
-    return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每日最多驗 ${vq.limit} 筆` } };
+    return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
 
   const { data: contribution, error: cError } = await supabase
