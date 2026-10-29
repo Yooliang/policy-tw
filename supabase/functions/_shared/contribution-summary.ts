@@ -177,10 +177,12 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       // 補政黨的交件（party_roster 臂）也是 candidacy：帶 party 就把推薦政黨講出來，不然標題只剩「參選狀態改為」，看不出補了什麼
       const party = partyDisplayName(str(p.party));
       const partyPart = party ? `，推薦政黨「${party}」` : "";
-      detail = result ? `${unit}選舉結果：${result}` : party ? `${unit}：${status}${partyPart}` : `${unit}參選狀態改為「${status}」`;
+      // 號次（2026-10-29）：正整數 number 才寫出來，放在地區／選舉別之後；沒有的交件文字與原本一模一樣
+      const candNo = typeof p.cand_no === "number" && Number.isInteger(p.cand_no) && p.cand_no > 0 ? ` 號次 ${p.cand_no}` : "";
+      detail = result ? `${unit}選舉結果：${result}` : party ? `${unit}${candNo}：${status}${partyPart}` : candNo ? `${unit}${candNo}・參選狀態改為「${status}」` : `${unit}參選狀態改為「${status}」`;
       summary = result
         ? `補 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}選舉結果：${result}`
-        : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}參選狀態改為「${status}」${partyPart}`;
+        : `將 ${name || "（未填姓名）"} ${str(p.election_id)} ${str(p.region)}${str(p.election_type)}${candNo ? `${candNo}・` : ""}參選狀態改為「${status}」${partyPart}`;
       break;
     }
     case "policy": {

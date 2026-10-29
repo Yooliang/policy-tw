@@ -250,3 +250,17 @@ Deno.test("履歷的網站請求：掛在任務上的貢獻（task_id 欄或 no_
   assertEquals(out.find((r) => r.id === "r2")!.reports, []);
   assert(!JSON.stringify(out).includes("ip_hash"));
 });
+
+Deno.test("履歷：號次交件（payload.cand_no 正整數）標題與摘要把號次寫在地區／選舉別之後；沒有或不是正整數的文字與原本一模一樣", () => {
+  const mk = (candNo: unknown) => buildHistory({
+    contributions: [mkCand("c-no", { payload: { name: "董宜忠", region: "宜蘭縣", sub_region: "大同鄉", village: "茂安村", election_id: 2026, election_type: "村里長", candidate_status: "registered", ...(candNo === undefined ? {} : { cand_no: candNo }) }, agent_name: "n", created_at: "2026-10-29T01:00:00Z", applied_at: "2026-10-29T02:00:00Z" })],
+    votes: [], adjudications: [], tasks: [], edits: [],
+    summary_lookup: { politicians: { [SU]: "董宜忠" } },
+  } as never)[0];
+  const base = "將 董宜忠 2026 宜蘭縣村里長參選狀態改為「已登記」";
+  const withNo = mk(1);
+  assertEquals(withNo.summary, "將 董宜忠 2026 宜蘭縣村里長 號次 1・參選狀態改為「已登記」");
+  assertEquals(withNo.detail, "2026 宜蘭縣村里長 號次 1・參選狀態改為「已登記」");
+  assertEquals(mk(undefined).summary, base);
+  for (const bad of ["1", 0, -3, 1.5, null]) assertEquals(mk(bad).summary, base, `cand_no=${JSON.stringify(bad)}`);
+});
