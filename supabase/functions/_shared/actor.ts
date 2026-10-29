@@ -134,7 +134,8 @@ export async function loadReservedHandles(db: ReservedDb | null | undefined, now
   let ok = false;
   if (db) {
     try {
-      const { data, error } = await db.from("vm_ditrust_groups").select("display_name");
+      // query-bounds: ok — vm_ditrust_groups 只有 3 列（group_no 限 1～3），limit(50) 只是保險
+      const { data, error } = await db.from("vm_ditrust_groups").select("display_name").limit(50);
       if (!error && Array.isArray(data)) {
         ok = true;
         for (const r of data as Array<{ display_name?: string | null }>) {

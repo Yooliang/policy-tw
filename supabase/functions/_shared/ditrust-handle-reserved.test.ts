@@ -14,11 +14,13 @@ const dittoActor = { level: "ditrust" as const, actor_id: "ditrust:11111111-2222
 function fakeDb(rows: Array<{ display_name: string | null }> | "throw" | "error", counter = { n: 0 }) {
   return {
     from: (_t: string) => ({
-      select: (_c: string) => {
-        counter.n++;
-        if (rows === "throw") throw new Error("boom");
-        return Promise.resolve(rows === "error" ? { data: null, error: { message: "x" } } : { data: rows, error: null });
-      },
+      select: (_c: string) => ({
+        limit: (_n: number) => {
+          counter.n++;
+          if (rows === "throw") throw new Error("boom");
+          return Promise.resolve(rows === "error" ? { data: null, error: { message: "x" } } : { data: rows, error: null });
+        },
+      }),
     }),
   };
 }
