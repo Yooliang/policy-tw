@@ -404,7 +404,7 @@ usePageHead({
         </div>
       </template>
       <template #actions>
-        <div class="flex flex-wrap items-center gap-2 sm:gap-3 ml-0 md:ml-48">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
           <!-- 按一下就建任務，出現在任務看板；跟政見頁的按鈕同一套（composables/useRequestTask.ts） -->
           <HeroAction data-testid="hero-query-policy" @click="policyRequest.send({ kind: 'policy', politician_id: politician.id })">
             <Loader2 v-if="policyRequest.loading.value" :size="16" class="animate-spin" />
@@ -423,8 +423,8 @@ usePageHead({
           <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：開共用抽屜預覽，從抽屜複製給 AI、丟進 NotebookLM -->
           <button type="button" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown" @click="openMarkdown">.md 摘要</button>
         </div>
-        <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
-        <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
+        <RequestTaskNotice class="mt-3" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
+        <RequestTaskNotice class="mt-3" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
       <template v-if="breadcrumbs.length > 1" #default>
         <Breadcrumbs :items="breadcrumbs" />
