@@ -13,6 +13,7 @@
 
 - [新表 `vm_ditrust_groups` 記「VM 的 DiTrust 代號組別 -> Di…](decisions/2026-10-29-DiTrust序號組對照表.md)
 - [DiTrust 顯示名不外洩、匿名冒用顯示名擋下（協議 1.105.0）](decisions/2026-10-29-DiTrust顯示名不外洩與匿名冒用擋下.md)
+- [號次交件（`candidacy` 且 payload 帶正整數 `cand_no`）不再要求「至…](decisions/2026-10-29-號次免兩台機器.md)
 - [號次交件（`candidacy` 且 payload 帶正整數 `cand_no`，補號次臂 `…](decisions/2026-10-29-號次目標分降為一.md)
 - [額度的四個數字（網段提交／驗證、DiTrust 帳號提交／驗證）改成資料表設定，可從主控台調整，…](decisions/2026-10-29-額度參數可在主控台調整.md)
 - [交件與驗證額度由「每來源網段每天」改成「每天 6 個時段、每時段各自額度」（協議 1.104.0…](decisions/2026-10-29-額度改每四小時時段.md)
