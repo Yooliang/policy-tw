@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
-import { buildLookup, fetchTaskContext, shapeTaskCurrent } from "../_shared/task-context.ts";
+import { buildLookup, fetchTaskContext, isBallotNumbersTask, shapeTaskCurrent } from "../_shared/task-context.ts";
 import { describeManualTask } from "../_shared/task-admin.ts";
 import { SUGGESTED_TYPE } from "../_shared/task-types.ts";
 import { summarizeTaskVotes, type VoteContribution } from "../_shared/task-votes.ts";
@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     const votesByTask = await fetchTaskVotes(supabase, manual);
     const manualWithVotes = manual.map((t) => ({ ...t, votes: votesByTask.get(t.task_id) ?? { submissions: 0, leading: null } }));
     // deno-lint-ignore no-explicit-any
-    const auto = (autoRes.data ?? []).map((t: any) => ({ ...t, source: "auto", suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null }));
+    const auto = (autoRes.data ?? []).map((t: any) => ({ ...t, source: "auto", suggested_contribution_type: isBallotNumbersTask(t.task_type, t.target) ? "cand_numbers" : (SUGGESTED_TYPE[t.task_type] ?? null) }));
     // 每筆附現況與 lookup（?with_current=0 可關掉，省查詢）
     const withCurrent = url.searchParams.get("with_current") !== "0";
     const picked = (source ? manualWithVotes : [...manualWithVotes, ...auto]).slice(0, limit);

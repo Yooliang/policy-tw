@@ -8,7 +8,12 @@
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_ballot_numbers()
 RETURNS TABLE(task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, region text)
 LANGUAGE sql STABLE AS $$
-  WITH g_all AS (
+  WITH pending_batch AS MATERIALIZED (
+    SELECT cb.payload->>'election_id' AS election_id, bi->>'politician_election_id' AS pe_id
+      FROM contributions cb, jsonb_array_elements(CASE WHEN jsonb_typeof(cb.payload->'items') = 'array' THEN cb.payload->'items' ELSE '[]'::jsonb END) bi
+     WHERE cb.contribution_type = 'cand_numbers' AND cb.status IN ('pending', 'verified')
+  ),
+  g_all AS (
     SELECT pe.id AS pe_id, pe.election_id, pe.election_type, pe.cand_no, p.id AS politician_id, p.name,
            replace(COALESCE(r.region, p.region), '臺', '台') AS county,
            -- 名單公告是一個鄉鎮一份的：鄉鎮市長、直轄市山地原住民區長、村里長、鄉鎮市民代表、直轄市山地原住民區民代表再細到鄉鎮市區
@@ -41,10 +46,9 @@ LANGUAGE sql STABLE AS $$
     SELECT rk.*
       FROM ranked rk
      WHERE rk.cand_no IS NULL
-       -- 整批交件（cand_numbers，#781）還在等票（pending／verified）而且 items 涵蓋他的先不派（退件了就會再派；落庫時被標錯或同號的列沒寫，缺口還在就會重派）
-       AND NOT EXISTS (SELECT 1 FROM contributions cb, jsonb_array_elements(CASE WHEN jsonb_typeof(cb.payload->'items') = 'array' THEN cb.payload->'items' ELSE '[]'::jsonb END) bi
-                        WHERE cb.contribution_type = 'cand_numbers' AND cb.status IN ('pending', 'verified')
-                          AND cb.payload->>'election_id' = rk.election_id::TEXT AND bi->>'politician_election_id' = rk.pe_id::TEXT)
+       -- 整批交件（cand_numbers，#781）還在等票（pending／verified）而且 items 涵蓋他的先不派（退件了就會再派；落庫時被標錯或同號的列沒寫，缺口還在就會重派）；
+       -- 等票中的整批在 pending_batch 只算一次（雜湊反連接），不是每個候選列各展開一遍
+       AND NOT EXISTS (SELECT 1 FROM pending_batch pb WHERE pb.election_id = rk.election_id::TEXT AND pb.pe_id = rk.pe_id::TEXT)
        -- 已經有人交了這一人這一屆帶號次的 candidacy、還在等票（pending／verified）的先不派（退件了就會再派）；
        -- 交件可以只給姓名、沒給 politician_id（協議允許）：沒給的用姓名＋選舉別＋縣市對
        AND NOT EXISTS (SELECT 1 FROM contributions c
