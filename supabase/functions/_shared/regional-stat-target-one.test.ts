@@ -69,7 +69,8 @@ Deno.test("其他型別門檻不變", () => {
 
 Deno.test("SQL 與 TS 一致：最新的 contribution_required_agree 是這支 migration，regional_stat 目標 1，其他列不變", async () => {
   const { name, body } = await latestRequiredAgree();
-  assertEquals(name, MIG, "之後若有人再改這支函式，請改看新的那支");
+  assert(name >= MIG, "最新的定義不能比這支更早");
+  assertStringIncludes(body, "WHEN v_risk = 'regional_stat' THEN CASE v_kind WHEN 'official' THEN 1", "之後的改版（例如 20261029020000 號次）必須保留 regional_stat 這列");
   const fn = body.slice(0, body.indexOf("$$;", body.indexOf("$$") + 2));
   assertStringIncludes(fn, "WHEN p_type = 'regional_stat' THEN 'regional_stat'");
   assertStringIncludes(fn, "WHEN v_risk = 'regional_stat' THEN CASE v_kind WHEN 'official' THEN 1 WHEN 'media' THEN 1 WHEN 'social' THEN 1 ELSE 1 END");

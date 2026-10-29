@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-10-29
+
+- [號次交件（`candidacy` 且 payload 帶正整數 `cand_no`，補號次臂 `…](decisions/2026-10-29-號次目標分降為一.md)
+
 ## 2026-10-28
 
 - [「查無變更」（no_change）的驗證票往後排（2026-10-28，維護者；migratio…](decisions/2026-10-28-no_change驗證票往後排.md)

@@ -20,10 +20,10 @@ export const VERIFIED_MAX_DISAGREE = 1;
 
 /**
  * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
- * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；regional_stat＝地方基本統計（2026-10-27，目標 1）；
+ * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；regional_stat＝地方基本統計（2026-10-27，目標 1）；cand_no＝補號次的參選紀錄（2026-10-29，目標 1）；
  * removal＝移除既有資料；adjudication＝裁決
  */
-export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "regional_stat" | "removal" | "adjudication";
+export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "regional_stat" | "cand_no" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -43,6 +43,9 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   // 地方基本統計（維護者 2026-10-27，#741）：目標 1，一位驗證人同意（+1 或 +2）即上線。數字來自官方統計，協議規定查不到不得推估、
   // 已有不同值不覆蓋、每網段只算一票、不能驗自己；一張反對照舊擋得住。先例 roster_check 逐位吻合的目標 1。不拿 light（那是 2）。
   regional_stat: { official: 1, media: 1, social: 1, other: 1 },
+  // 號次交件（維護者 2026-10-29）：candidacy 帶正整數 cand_no 的目標固定 1，一張同意即過。兩台機器規則照舊（candidacy 仍在 SCORE_TWO_IP_TYPES）；
+  // 號次重複的系統票 not_supported 仍 +1（重複時要 2 張）、一張反對照舊擋得住。SQL：contribution_required_agree（20261029020000）
+  cand_no: { official: 1, media: 1, social: 1, other: 1 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
@@ -61,6 +64,14 @@ export function isPastElectionResult(contributionType: string, payload: unknown)
   return (result === "elected" || result === "not_elected") && typeof p.politician_id === "string" && UUID_RE.test(p.politician_id);
 }
 
+/** payload.cand_no 是不是正整數（SQL 鏡像：p_payload->>'cand_no' ~ '^0*[1-9][0-9]{0,5}$'） */
+export function hasCandNo(payload: unknown): boolean {
+  const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const n = p.cand_no;
+  if (typeof n === "number") return Number.isInteger(n) && n > 0 && n <= 999999;
+  return typeof n === "string" && /^0*[1-9][0-9]{0,5}$/.test(n);
+}
+
 export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "removal") return "removal";
@@ -69,6 +80,8 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (contributionType === "election_results") return "batch_result";
   if (contributionType === "regional_stat") return "regional_stat";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
+  // 補號次（2026-10-29）：放在 past_result 之後、candidacy 一般級之前
+  if (contributionType === "candidacy" && hasCandNo(payload)) return "cand_no";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
   if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) {

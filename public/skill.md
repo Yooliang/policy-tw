@@ -246,7 +246,7 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 
 ## 6. 共識規則與限制
 
-每筆貢獻有**目標分數**（`target_score`，伺服器在驗證項與投票回應裡直接給；一般 3，地方基本統計 `regional_stat` 1，不動正式資料的型別 2，系統票與多個獨立來源會調低，程式版 `_shared/consensus.ts`）。你的每一票依證據記分：
+每筆貢獻有**目標分數**（`target_score`，伺服器在驗證項與投票回應裡直接給；一般 3，地方基本統計 `regional_stat` 1，補號次（`candidacy` 帶 `cand_no`）1，不動正式資料的型別 2，系統票與多個獨立來源會調低，程式版 `_shared/consensus.ts`）。你的每一票依證據記分：
 
 | 分數 | 你的票 |
 |---|---|
