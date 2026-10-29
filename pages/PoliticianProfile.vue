@@ -429,10 +429,9 @@ usePageHead({
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3 ml-0 md:ml-48" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
+      <Breadcrumbs :items="breadcrumbs" />
     </Hero>
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
-    <!-- 麵包屑放在 hero 下方（維護者 2026-10-01） -->
-    <Breadcrumbs :items="breadcrumbs" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="text-left">
