@@ -70,7 +70,7 @@ Deno.test('接線：卡片、徽章、政見頁、人物頁、追蹤頁都讀階
   assertStringIncludes(detail, '找不到該承諾或政見');
   const profile = await source('pages/PoliticianProfile.vue');
   assertStringIncludes(profile, 'stageOfPolicy(p, politician.value');
-  assertStringIncludes(profile, 'hideCampaignTab');
+  assertStringIncludes(profile, 'landOnHistory');
   assertStringIncludes(profile, '<span class="hidden sm:inline">承諾</span>');
   assertStringIncludes(profile, '<span class="hidden sm:inline">政見</span>');
   assert(!profile.includes('過往政績') && !profile.includes('政績追蹤'), '人物頁分頁不再有「政績」');

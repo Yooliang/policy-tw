@@ -190,9 +190,9 @@ const personPolicies = computed(() => politician.value ? policies.value.filter(p
 const isPolicyOf = (p: Policy) => stageOfPolicy(p, politician.value, (id) => getElectionById(id)?.electionDate, today.value) === 'policy'
 const campaignPledges = computed(() => personPolicies.value.filter(p => !isPolicyOf(p)))
 const historicalPolicies = computed(() => personPolicies.value.filter(p => isPolicyOf(p)))
-// 沒有承諾、但有政見的人：不留一個空的「承諾」分頁，直接落在「政見」（一筆都沒有的人照舊留著承諾分頁的空狀態）
-const hideCampaignTab = computed(() => campaignPledges.value.length === 0 && historicalPolicies.value.length > 0)
-watch(hideCampaignTab, (hide) => { if (hide && activeTab.value === 'campaign') activeTab.value = 'history' }, { immediate: true })
+// 沒有承諾、但有政見的人：預設落在「政見」，但「承諾」分頁照常顯示（沒有就是空狀態；維護者 2026-10-29「很多人都有空白的頁面」，原本會把空的承諾分頁藏起來，造成有的人有、有的人沒有）
+const landOnHistory = computed(() => campaignPledges.value.length === 0 && historicalPolicies.value.length > 0)
+watch(landOnHistory, (land) => { if (land && activeTab.value === 'campaign') activeTab.value = 'history' }, { immediate: true })
 
 interface PolicyGroup {
   key: string
@@ -437,7 +437,7 @@ usePageHead({
         <div>
           <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用短字（承諾／政見／基本資料／候選人，維護者 2026-09-30 的四字限制現在是兩字），390px 寬一排放得下 -->
           <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
-            <button v-if="!hideCampaignTab" @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
+            <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
               <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">承諾</span><span class="hidden sm:inline">承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>
             </button>
