@@ -91,6 +91,8 @@ const TYPE_LABEL: Record<string, string> = {
   lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯",
   // 政黨（#346 第二階段）
   party_info: "政黨資訊",
+  // 日本站人物頭像（policy-ops#162）
+  politician_avatar: "人物頭像",
 };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待驗證", verified: "已驗證", applied: "已上線", apply_failed: "上線中（自動重試）", superseded: "同宣稱已由他筆上線", disputed: "裁決中", rejected: "退件", withdrawn: "已撤回", reverted: "已還原",

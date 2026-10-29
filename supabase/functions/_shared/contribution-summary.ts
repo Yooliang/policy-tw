@@ -297,6 +297,11 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "politician_avatar": {
+      // 日本站人物頭像（policy-ops#162）
+      summary = `為「${find(lk.politicians, politicianId) || "某位政治人物"}」補頭像（Wikimedia Commons，${str(p.license) || "授權未填"}）`;
+      break;
+    }
     case "party_info": {
       // 政黨資訊（#346 第二階段）：讀者要看得出補了哪個政黨的哪一欄
       const items = (Array.isArray(p.parties) ? p.parties : []).filter((it): it is Obj => !!it && typeof it === "object");

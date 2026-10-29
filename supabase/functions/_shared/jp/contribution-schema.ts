@@ -40,6 +40,7 @@ import { checkSourceSet } from "../source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "../consensus.ts";
 import { MAX_CORRECTION_CHANGES, normalizeCorrection } from "../correction.ts";
 import { ENCODING_INVALID_MESSAGE, findEncodingProblems, sha256Hex } from "../contribution-schema.ts";
+import { type AvatarClaim, avatarShapeProblem } from "./commons-avatar.ts";
 import { isJpDate, lgCodeValid, lgPrefCode } from "./lg-code.ts";
 import { isJpOfficialSource, jpSourceKind } from "./source-kind.ts";
 import { isSameClaimType, parseResolvedClaim, RESOLVED_CLAIM_HELP } from "../same-claims.ts";
@@ -47,7 +48,7 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 
 export { ENCODING_INVALID_MESSAGE, sha256Hex };
 
-export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
+export const JP_CONTRIBUTION_TYPES = ["no_change", "task_suggestion", "correction", "election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "politician_avatar"] as const;
 /** policy_progress の status（policy_jp.policies.status の 6 値。正見の Campaign Pledge／Proposed／In Progress／Achieved／Stalled／Failed ではない） */
 export const JP_POLICY_STATUSES = ["not_started", "in_progress", "partial", "achieved", "discontinued", "unfulfilled"] as const;
 /** policy_progress の note と date の範囲（SQL apply_policy_progress と同じ） */
@@ -240,11 +241,13 @@ export const JP_TASK_ARMS = {
   placeholder_politician: "removal",
   policy_validity: "policy",
   policy_election_mismatch: "correction",
+  // E 期（policy-ops#162）：人物頭像（Wikimedia Commons の自由授權寫真）。avatar_missing の答えは politician_avatar（見つからなければ no_change not_found、90 日冷卻）
+  avatar_missing: "politician_avatar",
 } as const satisfies Record<string, JpContributionType>;
 /** 任務の型別（JP_TASK_ARMS）のほかに受ける交件型別（task_id が指す政策に対する removal だけ。落ちるのは checkTaskAgreement の target_id 照合） */
 export const JP_TASK_ALSO: Readonly<Record<string, readonly JpContributionType[]>> = { progress_stale: ["removal"], policy_validity: ["removal"], policy_election_mismatch: ["removal"] };
-const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info"] as const;
-const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate|party_missing|party_info_missing|placeholder_politician|policy_validity|policy_election_mismatch):(.+)$/;
+const DATA_TYPES = ["election", "local_government", "regional_stat", "candidacy", "politician", "policy", "policy_elements", "district_seats", "removal", "policy_progress", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "politician_avatar"] as const;
+const TASK_ID_RE = /^auto:(election_discovery|local_government_missing|regional_stats_missing|roster_check|profile_gap|profile_detail_gap|policy_missing|term_policy_missing|policy_elements_missing|district_seats_missing|duplicate_policy|progress_stale|deadline_due|candidate_status_stale|not_running_recheck|candidacy_source_missing|election_result_missing|lineage_candidate|handover_missing|lineage_roles_missing|lineage_link_candidate|party_missing|party_info_missing|placeholder_politician|policy_validity|policy_election_mismatch|avatar_missing):(.+)$/;
 /** 参選紀錄 id（policy_jp.politician_elections.id＝<人物 id>:<選挙 id>:<district_kind>）。選挙 id は日付_種類_団体碼 */
 const JP_PE_ID_RE = /^[^\s:]{1,64}:\d{4}-\d{2}-\d{2}_[a-z_]+_\d{6}:(district|proportional|at_large)$/;
 /** duplicate_policy の task_id 末尾：<参選紀錄 id>:<清單指紋（md5 32 字）> */
@@ -298,6 +301,12 @@ export function checkTaskAgreement(type: JpContributionType, payload: Obj, taskI
   // party_info_missing（D 期）：task_id の末尾は書き方の鍵の md5 前 12 字。答えは書き方（aliases／independent_aliases）に任務の書き方が入ることだが、鍵の計算は SQL（NFKC）なので落庫側が結ぶ。ここは形だけ
   if (arm === "party_info_missing") {
     if (!/^[0-9a-f]{12}$/.test(m[2])) push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:party_info_missing:<12 桁>）");
+    return;
+  }
+  // avatar_missing（E 期）：task_id の末尾は人物 id。1 つの任務は 1 人だけ（politician_avatar の payload.politician_id がその人物）
+  if (arm === "avatar_missing") {
+    if (!m[2] || /s/.test(m[2])) { push("task_id", "task_id 的格式不對：要照抄 jp-next 給的值（auto:avatar_missing:<人物 id>）"); return; }
+    if (payload.politician_id !== m[2]) push("payload.politician_id", `payload.politician_id（${String(payload.politician_id ?? "未填")}）跟這個任務問的人物（${m[2]}）不一致：一個任務只回報它問的那一位`);
     return;
   }
   // placeholder_politician（D 期）：task_id の末尾は人物 id。1 つの任務は 1 人だけ（removal の target_table は politicians、target_id がその人物）
@@ -573,6 +582,15 @@ function validatePayload(type: JpContributionType, p: Obj, push: (path: string, 
       const nLen = typeof p.note === "string" ? cpLen(jpTrim(p.note)) : 0;
       if (nLen < JP_LINEAGE_REL_NOTE_MIN || nLen > JP_LINEAGE_REL_NOTE_MAX) push("payload.note", `note 必填（${JP_LINEAGE_REL_NOTE_MIN}～${JP_LINEAGE_REL_NOTE_MAX} 字：どの法令・補助・計画が二つの件をつないでいるか）`);
       if (!isStr(p.source_locator, 1, JP_LINEAGE_LOCATOR_MAX)) push("payload.source_locator", `source_locator 必填（1～${JP_LINEAGE_LOCATOR_MAX} 字：条文・決定通知の番号・計画書の頁）`);
+      break;
+    }
+    case "politician_avatar": {
+      // 人物頭像（E 期）：Wikimedia Commons の自由授權寫真だけ。形はここ（avatarShapeProblem）、Commons API との照合は contribute-handler（avatarProblems）。
+      // 落庫は SQL policy_jp.apply_politician_avatar（20261030120000）：空欄を埋めるだけ、上書きしない。同一件事の登記表には入れない（落庫が冪等〔同じ画像は unchanged〕）
+      if (!isStr(p.politician_id, 1, 64) || /s/.test(p.politician_id)) push("payload.politician_id", "politician_id 必填（任務 target.politician_id の値）");
+      for (const k of Object.keys(p)) if (!["politician_id", "image_url", "file_page_url", "license", "author"].includes(k)) push(`payload.${k}`, "この型別で受け付ける欄位は politician_id・image_url・file_page_url・license・author だけです：この欄位を拿掉");
+      const shape = avatarShapeProblem(p as Partial<AvatarClaim>);
+      if (shape) push(shape.path, shape.message);
       break;
     }
     case "party_info": {
@@ -952,6 +970,11 @@ export function validateContributionRequest(body: unknown): ValidationResult {
           push(`payload.participants[${i}].source_url`, "basis=official_record（公的な記録）には official 等級の出典が要ります（*.go.jp・*.lg.jp、議会・自治体の公式サイト）。公的な記録でなければ basis=self_claim");
         }
       });
+    }
+    // politician_avatar：source_urls に file_page_url（Commons のファイルページ）を含める。人物の同一性を検証者が確かめる先がそこ
+    if (raw.contribution_type === "politician_avatar" && Array.isArray(sourceUrls) && typeof raw.payload.file_page_url === "string"
+        && !(sourceUrls as unknown[]).includes(raw.payload.file_page_url)) {
+      push("source_urls", "source_urls に payload.file_page_url（Commons のファイルページ）を含めてください");
     }
     // candidacy_source_missing（#589 審查の後続）：この任務は「選管の公表ページ（official 等級）を足す」こと。報道だけの candidacy は
     // 同じ状態の unchanged で落庫され派工は収回されるが、official の出典は付かないので次の seed で同じ任務がまた開く（無限に再派工）。入口で断る
