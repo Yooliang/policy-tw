@@ -12,17 +12,17 @@ defineProps<{ items: BreadcrumbItem[] }>()
 
 <template>
   <nav v-if="items.length > 1" aria-label="麵包屑" class="w-full min-w-0 text-left">
-    <ol class="flex items-center gap-1.5 overflow-x-auto flex-nowrap py-0.5">
-      <li v-for="(item, i) in items" :key="i" class="flex items-center gap-1.5 shrink-0">
+    <ol class="flex items-center gap-1 sm:gap-1.5 overflow-x-auto flex-nowrap py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <li v-for="(item, i) in items" :key="i" class="flex items-center gap-1 sm:gap-1.5 shrink-0">
         <ChevronRight v-if="i > 0" :size="14" class="hidden sm:block shrink-0 text-slate-300" aria-hidden="true" />
         <RouterLink
           v-if="item.path && i < items.length - 1"
           :to="item.path"
-          class="inline-flex items-center px-3 py-1.5 rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-500 whitespace-nowrap hover:text-blue-600 hover:border-blue-300 transition-colors"
+          class="inline-flex items-center px-2.5 sm:px-3 py-1.5 rounded-full border border-slate-200 bg-white text-[13px] sm:text-sm font-bold text-slate-500 whitespace-nowrap hover:text-blue-600 hover:border-blue-300 transition-colors"
         ><span class="sm:hidden">{{ item.short ?? item.name }}</span><span class="hidden sm:inline">{{ item.name }}</span></RouterLink>
         <span
           v-else
-          class="inline-flex items-center px-3 py-1.5 rounded-full bg-blue-600 text-white text-sm font-bold whitespace-nowrap"
+          class="inline-flex items-center px-2.5 sm:px-3 py-1.5 rounded-full bg-blue-600 text-white text-[13px] sm:text-sm font-bold whitespace-nowrap"
           aria-current="page"
         ><span class="sm:hidden">{{ item.short ?? item.name }}</span><span class="hidden sm:inline">{{ item.name }}</span></span>
       </li>
