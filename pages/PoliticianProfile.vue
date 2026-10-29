@@ -82,7 +82,12 @@ async function requestLookup(key: LookupKey) {
 // 動作列的「查承諾與政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
 const policyRequest = useRequestTask()
 const profileRequest = useRequestTask()
-watch(() => route.params.politicianId, () => { policyRequest.reset(); profileRequest.reset() })
+// 同選區候選人等站內連結換到另一位人物時，元件會被重用：分頁與捲動位置要回到最上面的「承諾」，不然像是沒跳頁（維護者 2026-10-29）
+watch(() => route.params.politicianId, () => {
+  policyRequest.reset(); profileRequest.reset()
+  activeTab.value = "campaign"
+  if (typeof window !== "undefined") window.scrollTo({ top: 0 })
+})
 
 // Get election name by ID
 function getElectionName(electionId: number): string {
