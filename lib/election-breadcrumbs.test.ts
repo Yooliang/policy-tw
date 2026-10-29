@@ -33,9 +33,9 @@ const enc = encodeURIComponent;
 Deno.test("縣市長（未投票）：年 › 縣市 › 縣市長候選人 › 連到縣市頁的 #縣市長", () => {
   const rec: CrumbRecord = { electionId: 2026, electionType: "縣市長", region: "金門縣" };
   assertEquals(candidacyCrumbs(rec, E2026, NOW), [
-    { name: "2026 九合一選舉", path: "/election/2026" },
-    { name: "金門縣", path: `/election/2026/${enc("金門縣")}` },
-    { name: "縣市長候選人", path: `/election/2026/${enc("金門縣")}#${enc("縣市長")}` },
+    { name: "2026 九合一選舉", path: "/election/2026", short: "2026" },
+    { name: "金門縣", path: `/election/2026/${enc("金門縣")}`, short: "金門縣" },
+    { name: "縣市長候選人", path: `/election/2026/${enc("金門縣")}#${enc("縣市長")}`, short: "縣市長" },
   ]);
 });
 
@@ -55,9 +55,9 @@ Deno.test("縣市長：連結是完整的百分比編碼字面值（釘住長相
 Deno.test("縣市議員（未投票）：帶選舉區，連到該選區那一組", () => {
   const rec: CrumbRecord = { electionId: 2026, electionType: "縣市議員", region: "金門縣", subRegion: "第01選舉區" };
   assertEquals(candidacyCrumbs(rec, E2026, NOW), [
-    { name: "2026 九合一選舉", path: "/election/2026" },
-    { name: "金門縣", path: `/election/2026/${enc("金門縣")}` },
-    { name: "縣市議員候選人（第01選舉區）", path: `/election/2026/${enc("金門縣")}#${enc("縣市議員-第01選舉區")}` },
+    { name: "2026 九合一選舉", path: "/election/2026", short: "2026" },
+    { name: "金門縣", path: `/election/2026/${enc("金門縣")}`, short: "金門縣" },
+    { name: "縣市議員候選人（第01選舉區）", path: `/election/2026/${enc("金門縣")}#${enc("縣市議員-第01選舉區")}`, short: "議員" },
   ]);
 });
 
@@ -87,8 +87,8 @@ Deno.test("議員帶著不是議員選區的字串（立委選區、鄉鎮名）
 Deno.test("立法委員（縣市層、卡片排法）：不帶選區，連到 #立法委員", () => {
   const rec: CrumbRecord = { electionId: 2024, electionType: "立法委員", region: "台南市", subRegion: "第02選舉區" };
   assertEquals(candidacyCrumbs(rec, E2024, NOW).slice(1), [
-    { name: "台南市", path: `/election/2024/${enc("台南市")}` },
-    { name: "立法委員參選人", path: `/election/2024/${enc("台南市")}#${enc("立法委員")}` },
+    { name: "台南市", path: `/election/2024/${enc("台南市")}`, short: "台南市" },
+    { name: "立法委員參選人", path: `/election/2024/${enc("台南市")}#${enc("立法委員")}`, short: "立法委員" },
   ]);
 });
 
@@ -98,10 +98,10 @@ Deno.test("村里長（已投票）：多一層鄉鎮，職位帶里名，連到
   const rec: CrumbRecord = { electionId: 2022, electionType: "村里長", region: "金門縣", subRegion: "金城鎮", village: "東門里" };
   const township = electionTownshipPath(2022, "金門縣", "金城鎮");
   assertEquals(candidacyCrumbs(rec, E2022, NOW), [
-    { name: "2022 九合一選舉", path: "/election/2022" },
-    { name: "金門縣", path: `/election/2022/${enc("金門縣")}` },
-    { name: "金城鎮", path: township },
-    { name: "村里長參選人（東門里）", path: `${township}#${enc("村里長-東門里")}` },
+    { name: "2022 九合一選舉", path: "/election/2022", short: "2022" },
+    { name: "金門縣", path: `/election/2022/${enc("金門縣")}`, short: "金門縣" },
+    { name: "金城鎮", path: township, short: "金城鎮" },
+    { name: "村里長參選人（東門里）", path: `${township}#${enc("村里長-東門里")}`, short: "村里長" },
   ]);
 });
 
@@ -114,10 +114,10 @@ Deno.test("鄉鎮市長：年 › 縣市 › 鄉鎮 › 鄉鎮市長候選人，
   const rec: CrumbRecord = { electionId: 2026, electionType: "鄉鎮市長", region: "金門縣", subRegion: "金沙鎮" };
   const township = electionTownshipPath(2026, "金門縣", "金沙鎮");
   assertEquals(candidacyCrumbs(rec, E2026, NOW), [
-    { name: "2026 九合一選舉", path: "/election/2026" },
-    { name: "金門縣", path: `/election/2026/${enc("金門縣")}` },
-    { name: "金沙鎮", path: township },
-    { name: "鄉鎮市長候選人", path: `${township}#${enc("鄉鎮市長")}` },
+    { name: "2026 九合一選舉", path: "/election/2026", short: "2026" },
+    { name: "金門縣", path: `/election/2026/${enc("金門縣")}`, short: "金門縣" },
+    { name: "金沙鎮", path: township, short: "金沙鎮" },
+    { name: "鄉鎮市長候選人", path: `${township}#${enc("鄉鎮市長")}`, short: "鄉鎮市長" },
   ]);
 });
 
@@ -131,8 +131,8 @@ Deno.test("原住民區代表：鄉鎮取「那瑪夏區」，括號只留選舉
   const rec: CrumbRecord = { electionId: 2022, electionType: "直轄市山地原住民區民代表", region: "高雄市", subRegion: "那瑪夏區第02選舉區" };
   const township = electionTownshipPath(2022, "高雄市", "那瑪夏區");
   assertEquals(candidacyCrumbs(rec, E2022, NOW).slice(2), [
-    { name: "那瑪夏區", path: township },
-    { name: "原住民區代表參選人（第02選舉區）", path: `${township}#${enc("原住民區代表-那瑪夏區第02選舉區")}` },
+    { name: "那瑪夏區", path: township, short: "那瑪夏區" },
+    { name: "原住民區代表參選人（第02選舉區）", path: `${township}#${enc("原住民區代表-那瑪夏區第02選舉區")}`, short: "原住民區代表" },
   ]);
 });
 
@@ -151,8 +151,8 @@ Deno.test("鄉鎮頁網址只從 electionTownshipPath 來：麵包屑的鄉鎮�
 Deno.test("里長缺鄉鎮：沒有鄉鎮層，職位層退到縣市頁、不帶找不到的錨點", () => {
   const rec: CrumbRecord = { electionId: 2022, electionType: "村里長", region: "金門縣", village: "東門里" };
   assertEquals(candidacyCrumbs(rec, E2022, NOW).slice(1), [
-    { name: "金門縣", path: `/election/2022/${enc("金門縣")}` },
-    { name: "村里長參選人（東門里）", path: `/election/2022/${enc("金門縣")}` },
+    { name: "金門縣", path: `/election/2022/${enc("金門縣")}`, short: "金門縣" },
+    { name: "村里長參選人（東門里）", path: `/election/2022/${enc("金門縣")}`, short: "村里長" },
   ]);
 });
 
@@ -166,8 +166,8 @@ Deno.test("里長缺里名：不帶括號，連到整個村里長區塊（#村�
 Deno.test("不分區立委（地區是全國）：沒有縣市層，職位層連到年頁、不帶錨點", () => {
   const rec: CrumbRecord = { electionId: 2024, electionType: "立法委員", region: "全國" };
   assertEquals(candidacyCrumbs(rec, E2024, NOW), [
-    { name: "2024 總統大選", path: "/election/2024" },
-    { name: "立法委員參選人", path: "/election/2024" },
+    { name: "2024 總統大選", path: "/election/2024", short: "2024" },
+    { name: "立法委員參選人", path: "/election/2024", short: "立法委員" },
   ]);
 });
 
@@ -176,6 +176,7 @@ Deno.test("總統副總統：全台頁的 #總統副總統", () => {
   assertEquals(candidacyCrumbs(rec, E2024, NOW).at(-1), {
     name: "總統副總統參選人",
     path: `/election/2024#${enc("總統副總統")}`,
+    short: "總統副總統",
   });
 });
 
@@ -310,4 +311,17 @@ Deno.test("麵包屑：舊三屆網址照舊 /election/2022…；新增的選舉
   assertEquals(crumbs[0].name, "2022 嘉義市長重行選舉");
   assertEquals(candidacyCrumbs({ electionId: 2022, electionType: "縣市長", region: "台北市" }, legacy, NOW)[0].path, "/election/2022", "舊三屆有 key 也照舊用 id");
   assertEquals(candidacyCrumbs({ electionId: 2022, electionType: "縣市長", region: "台北市" }, E2022, NOW)[0].path, "/election/2022", "沒給 key（舊快取）退回 id");
+});
+
+
+Deno.test("手機短標籤：議員／代表縮短，其餘沿用；人名層與結構化資料不受影響", () => {
+  const shorts = (rec: CrumbRecord, e: CrumbElection = E2026) => candidacyCrumbs(rec, e, NOW).map((c) => c.short);
+  assertEquals(shorts({ electionId: 2026, electionType: "縣市議員", region: "嘉義市", subRegion: "第01選舉區" }), ["2026", "嘉義市", "議員"]);
+  assertEquals(shorts({ electionId: 2026, electionType: "縣市議員", region: "嘉義市" }), ["2026", "嘉義市", "議員"]);
+  assertEquals(shorts({ electionId: 2026, electionType: "縣市長", region: "嘉義市" }), ["2026", "嘉義市", "縣市長"]);
+  assertEquals(shorts({ electionId: 2026, electionType: "鄉鎮市民代表", region: "金門縣", subRegion: "金沙鎮" }), ["2026", "金門縣", "金沙鎮", "代表"]);
+  assertEquals(shorts({ electionId: 2026, electionType: "鄉鎮市長", region: "金門縣", subRegion: "金沙鎮" }), ["2026", "金門縣", "金沙鎮", "鄉鎮市長"]);
+  assertEquals(shorts({ electionId: 2022, electionType: "村里長", region: "金門縣", subRegion: "金城鎮", village: "東門里" }, E2022), ["2022", "金門縣", "金城鎮", "村里長"]);
+  // 年層取不到四位數字年份就不給短標籤
+  assertEquals(candidacyCrumbs({ electionId: 1 }, { name: "全名" }, NOW)[0].short, undefined);
 });

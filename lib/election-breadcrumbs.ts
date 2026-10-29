@@ -30,6 +30,8 @@ import { pkGroupLabel, pkQuery } from './policy-compare'
 export interface Crumb {
   name: string
   path?: string
+  /** 手機版的短標籤（2026-10-29）：桌機顯示 name，手機（<sm）顯示 short；沒給就手機也顯示 name。結構化資料一律用 name */
+  short?: string
 }
 
 /** 一筆參選紀錄裡麵包屑用得到的欄位（跟 PoliticianElectionData 同名，可以直接傳） */
@@ -49,6 +51,17 @@ export interface CrumbElection {
   electionKey?: string
   /** 投票日，YYYY-MM-DD（台灣日期） */
   electionDate?: string
+}
+
+/** 年層短標籤：從「2026 九合一選舉」取年份數字；取不到就不給（手機也顯示完整） */
+export function yearShort(name: string): string | undefined {
+  return name.match(/\d{4}/)?.[0]
+}
+
+/** 職位層短標籤：不帶「候選人／參選人」與選舉區括號；縣市議員 → 議員、鄉鎮市民代表 → 代表，其餘沿用職位名稱 */
+const POSITION_SHORT: Record<string, string> = { 縣市議員: '議員', 鄉鎮市民代表: '代表' }
+export function positionShort(label: string): string {
+  return POSITION_SHORT[label] ?? label
 }
 
 export const CANDIDATE_WORD = '候選人'
@@ -101,12 +114,13 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
     ? electionSegment({ id: rec.electionId, electionKey: election.electionKey, electionDate: election.electionDate ?? '' })
     : String(rec.electionId)
   const yearPath = `/election/${seg}`
-  const crumbs: Crumb[] = [{ name: election?.shortName || election?.name || `選舉 ${rec.electionId}`, path: yearPath }]
+  const yearName = election?.shortName || election?.name || `選舉 ${rec.electionId}`
+  const crumbs: Crumb[] = [{ name: yearName, path: yearPath, short: yearShort(yearName) }]
 
   const region = rec.region?.trim()
   const county = isCounty(region) ? region : undefined
   const countyPath = county ? electionRegionPath(seg, county) : undefined
-  if (county && countyPath) crumbs.push({ name: county, path: countyPath })
+  if (county && countyPath) crumbs.push({ name: county, path: countyPath, short: county })
 
   const spec = positionSpec(rec.electionType ?? '')
   if (!spec) return crumbs
@@ -115,7 +129,7 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
   const belowCounty = spec.level === 'township' || spec.level === 'village'
   const township = county && belowCounty ? townshipNameOf(rec.subRegion?.trim()) : undefined
   const townshipPath = county && township ? electionTownshipPath(seg, county, township) : undefined
-  if (township && townshipPath) crumbs.push({ name: township, path: townshipPath })
+  if (township && townshipPath) crumbs.push({ name: township, path: townshipPath, short: township })
 
   // 職位的區塊畫在哪一頁（跟選舉頁的分層一致，見 election-levels.ts 檔頭的表）：
   // 全國層在年頁、縣市層在縣市頁、鄉鎮層與村里層在鄉鎮頁（村里長是鄉鎮頁的「下一層」）
@@ -129,6 +143,7 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
   crumbs.push({
     name: `${spec.label}${candidacyWord(election?.electionDate, now)}${group ? `（${group.shown}）` : ''}`,
     path: anchor ? `${page.path}#${encodeURIComponent(anchor)}` : page.path,
+    short: positionShort(spec.label),
   })
   return crumbs
 }
