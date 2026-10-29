@@ -359,6 +359,7 @@ usePageHead({
           <div class="relative">
             <Avatar :src="politician.avatarUrl" :name="politician.name" size="2xl" class="border-4 border-white shadow-xl" />
             <PartyBadge :party="politician.party" :size="8" class="absolute bottom-2 right-2 shadow-md" />
+            <span v-if="ballot" class="absolute top-2 left-2 w-8 h-8 rounded-full bg-navy-900 text-white border-2 border-white shadow-md flex items-center justify-center text-sm font-bold" :title="`號次 ${ballot}`" :aria-label="`號次 ${ballot}`" data-testid="hero-cand-no">{{ ballot }}</span>
             <!-- Avatar search button - always visible -->
             <button
               v-if="!lookup.avatar.result"
