@@ -640,16 +640,6 @@ const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [.
 /** 縣市議員選舉區包含好幾個鄉鎮，排在「鄉鎮市區」上面；鄉鎮市民代表／區代表的選舉區在鄉鎮之內，排在下面（層級：議員選舉區 → 鄉鎮市區 → 代表選舉區 → 村里） */
 const councilorDistrictPanels = computed(() => districtPanels.value.filter(p => p.type === '縣市議員'))
 const inTownshipDistrictPanels = computed(() => districtPanels.value.filter(p => p.type !== '縣市議員'))
-/** 選了議員選舉區時，鄉鎮市區只列該選區涵蓋的鄉鎮（對應表查不到就維持全列） */
-const visibleSubRegions = computed(() => {
-  const district = selectedDistrict.value
-  if (district === 'All' || !councilorDistrictPanels.value.length) return availableSubRegions.value
-  const inDistrict = new Set(electoralDistrictAreas.value
-    .filter(m => sameRegionName(m.region, selectedRegion.value) && m.election_id === electionYear.value && sameRegionName(m.electoral_district, district))
-    .map(m => m.township))
-  const shown = availableSubRegions.value.filter(t => inDistrict.has(t))
-  return shown.length > 0 ? shown : availableSubRegions.value
-})
 
 /**
  * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
@@ -1314,7 +1304,7 @@ usePageHead({
       <!-- 右側：篩選區（手機版顯示在上方） -->
       <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
-          <!-- 縣市議員選舉區（排在鄉鎮市區上面；點了只看那一區，鄉鎮市區也只列該選區的鄉鎮，再點一次取消） -->
+          <!-- 縣市議員選舉區（排在鄉鎮市區上面；點了只看那一區，再點一次取消） -->
           <div v-for="panel in councilorDistrictPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-blue-500" />
@@ -1352,7 +1342,7 @@ usePageHead({
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
               >全部</RouterLink>
               <RouterLink
-                v-for="subRegion in visibleSubRegions"
+                v-for="subRegion in availableSubRegions"
                 :key="subRegion"
                 :to="townshipLink(subRegion)"
                 :aria-current="selectedSubRegion === subRegion ? 'page' : undefined"
