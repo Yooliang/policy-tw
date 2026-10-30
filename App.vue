@@ -6,12 +6,14 @@ import AdSlot from './components/AdSlot.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
 import { onBeforeUnmount, onMounted } from 'vue'
 import { isMobileViewport, useMobileShell } from './composables/useMobileShell'
+import { useScrollHide } from './composables/useScrollHide'
 import { inHorizontalScroller } from './composables/useSwipeTabs'
 
 // 手機版（X 式版面）：往右滑拉出左側選單。
 // - 從畫面左緣起手：任何地方都行
 // - 沒有分頁的頁面：內容區任何地方往右滑（排除輸入框、橫向捲動區、data-no-swipe）
 // - 有分頁的區塊（標了 data-swipe-tabs）：「在最左一頁再往右拉」由 useSwipeTabs 處理，這裡讓位
+useScrollHide()
 const { openDrawer } = useMobileShell()
 const EDGE_PX = 28
 let ex = 0

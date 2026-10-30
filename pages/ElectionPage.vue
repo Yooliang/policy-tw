@@ -1240,7 +1240,7 @@ useSwipeTabs(swipeEl, {
   <div v-if="election" class="bg-slate-50 min-h-screen">
 
     <!-- 手機版版面順序：頁首 → 類型分頁條（吸頂，緊接頁首）→ 縮小的標題區（含檢視膠囊）→ 內容 -->
-    <div v-if="viewMode === 'politicians'" class="md:hidden sticky top-14 z-30 shadow-sm" data-testid="mobile-sticky">
+    <div v-if="viewMode === 'politicians'" class="md:hidden sticky top-14 z-30 shadow-sm" data-chrome-follow data-testid="mobile-sticky">
       <SwipeTabStrip :tabs="mobileTabs" :model-value="mobileActiveType" @update:model-value="setMobileTab" />
     </div>
 

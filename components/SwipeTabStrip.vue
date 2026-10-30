@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { swipeStrips } from '../composables/useSwipeTabs'
 
 // 手機版的頂部分頁條（X 的「為你推薦／正在跟隨」那種）：一排文字、選中的底下一條線，放不下就橫向捲動。
-// 內容區的左右滑動由 useSwipeTabs 負責，這裡只畫條並在選中的分頁變了時把它捲進畫面。
+// 內容區的左右滑動由 useSwipeTabs 負責；底線是一個獨立元素，拖曳時由手勢直接改它的 transform（不經 Vue 響應式），
+// 放開後用同一段時間移到定位的分頁。
 const props = defineProps<{
   tabs: { key: string; label: string }[]
   modelValue: string
@@ -10,16 +12,57 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'update:modelValue', key: string): void }>()
 
 const strip = ref<HTMLElement | null>(null)
+const bar = ref<HTMLElement | null>(null)
+const BAR_W = 40
+let centers: number[] = []
+
+function measure() {
+  const el = strip.value
+  if (!el) return
+  centers = Array.from(el.querySelectorAll<HTMLElement>('[role="tab"]')).map(b => b.offsetLeft + b.offsetWidth / 2)
+}
+function place(pos: number, animated = false) {
+  const b = bar.value
+  if (!b || centers.length === 0) return
+  const p = Math.max(0, Math.min(centers.length - 1, pos))
+  const lo = Math.floor(p), hi = Math.ceil(p)
+  const c = centers[lo]! + (centers[hi]! - centers[lo]!) * (p - lo)
+  b.style.transition = animated ? 'transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'
+  b.style.transform = `translate3d(${c - BAR_W / 2}px,0,0)`
+  b.style.opacity = '1'
+}
+const currentIndex = () => Math.max(0, props.tabs.findIndex(t => t.key === props.modelValue))
+
+let ro: ResizeObserver | null = null
+onMounted(() => {
+  const el = strip.value
+  if (!el) return
+  swipeStrips.set(el, { prepare: measure, update: place })
+  measure()
+  place(currentIndex())
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => { measure(); place(currentIndex()) })
+    ro.observe(el)
+  }
+})
+onBeforeUnmount(() => {
+  if (strip.value) swipeStrips.delete(strip.value)
+  ro?.disconnect()
+})
+
 watch(() => props.modelValue, async () => {
   await nextTick()
+  measure()
+  place(currentIndex(), true)
   const on = strip.value?.querySelector<HTMLElement>('[aria-selected="true"]')
   const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   on?.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: calm ? 'auto' : 'smooth' })
 }, { flush: 'post' })
+watch(() => props.tabs.length, async () => { await nextTick(); measure(); place(currentIndex()) }, { flush: 'post' })
 </script>
 
 <template>
-  <div ref="strip" role="tablist" data-testid="swipe-tab-strip" class="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-slate-200 bg-white">
+  <div ref="strip" role="tablist" data-testid="swipe-tab-strip" class="relative flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-slate-200 bg-white">
     <button
       v-for="t in tabs"
       :key="t.key"
@@ -32,7 +75,7 @@ watch(() => props.modelValue, async () => {
       @click="emit('update:modelValue', t.key)"
     >
       {{ t.label }}
-      <span v-if="t.key === modelValue" class="absolute bottom-0 left-1/2 h-1 w-10 -translate-x-1/2 rounded-full bg-blue-600"></span>
     </button>
+    <span ref="bar" data-testid="swipe-tab-bar" class="pointer-events-none absolute bottom-0 left-0 h-1 w-10 rounded-full bg-blue-600 opacity-0 will-change-transform"></span>
   </div>
 </template>

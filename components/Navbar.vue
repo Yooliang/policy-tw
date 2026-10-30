@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { useSupabase } from '../composables/useSupabase'
@@ -12,6 +12,7 @@ import MobileMenu from './MobileMenu.vue'
 import MobileDrawer from './MobileDrawer.vue'
 import { useMobileShell } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
+import { searchPageTerm } from '../composables/useGlobalSearch'
 
 const isLoginModalOpen = ref(false)
 const { openDrawer } = useMobileShell()
@@ -70,28 +71,40 @@ const PAGE_TITLES: Record<string, string> = {
   elections: '選舉', election: '選舉', 'election-region': '選舉', 'election-township': '選舉', 'election-matrix': '政見矩陣',
   politicians: '政治人物', 'politicians-group': '政治人物', parties: '政黨', party: '政黨', community: '公民提問', discussion: '公民提問',
   donation: '贊助', vision: '願景', privacy: '隱私權政策', terms: '服務條款', contact: '聯絡我們', 'regional-data': '地方資料',
-  skill: 'Skill', sources: '資料來源', stats: '參與貢獻', 'stats-map': '參與貢獻', contributions: '貢獻紀錄', profile: '帳號',
+  skill: 'Skill', sources: '資料來源', stats: '參與貢獻', search: '搜尋', 'stats-map': '參與貢獻', contributions: '貢獻紀錄', profile: '帳號',
 }
 const isHome = computed(() => route.name === 'home' || route.path === '/')
 const isElectionRoute = computed(() => ['election', 'election-region', 'election-township'].includes(String(route.name)))
 const pageTitle = computed(() => PAGE_TITLES[String(route.name)] ?? '正見')
-const personOnRoute = computed(() => route.name === 'politician' ? person.value : null)
+// 麵包屑、姓名、返回鈕都來自模組級狀態或 history.state：預渲染時是別頁殘留的（或空的）、瀏覽器第一次渲染時又不同，
+// 直接渲染會造成 hydration 不一致（全台頁的警告）。掛載完才採用，之前兩邊都畫頁面名稱。
+const mounted = ref(false)
+onMounted(() => { mounted.value = true })
+const personOnRoute = computed(() => mounted.value && route.name === 'politician' ? person.value : null)
 /** 麵包屑太長（超過 14 字）就只留最後兩段 */
 const shownCrumbs = computed(() => {
-  const list = isElectionRoute.value ? crumbs.value : null
+  const list = mounted.value && isElectionRoute.value ? crumbs.value : null
   if (!list || list.length === 0) return null
   const total = list.reduce((n, c) => n + c.label.length, 0)
   return total > 14 && list.length > 2 ? list.slice(-2) : list
 })
+// 搜尋頁：頁首正中是搜尋框，進頁面自動聚焦
+const isSearchRoute = computed(() => route.name === 'search')
+const searchInput = ref<HTMLInputElement | null>(null)
+watch(isSearchRoute, async (on) => {
+  if (!on) return
+  await nextTick()
+  searchInput.value?.focus()
+}, { immediate: true, flush: 'post' })
 const TAB_ROOTS = ['/', '/tracking', '/stats']
 const canBack = computed(() => {
   void route.fullPath
-  return !isHome.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
+  return mounted.value && !isHome.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
 })
 </script>
 
 <template>
-  <nav class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200">
+  <nav data-chrome="top" class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200">
     <!-- 手機版頁首（md 以下，X 式）：左選單鈕（開左側抽屜）、正中間站徽、右搜尋；主選單搬到畫面下方的 MobileTabBar -->
     <div class="md:hidden relative flex items-center h-14 px-2" data-testid="mobile-header">
       <button
@@ -107,6 +120,11 @@ const canBack = computed(() => {
       <RouterLink v-if="isHome" to="/" class="absolute left-1/2 -translate-x-1/2 flex items-center" aria-label="正見 首頁">
         <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x" alt="正見" width="72" height="40" class="h-8 w-auto object-contain" />
       </RouterLink>
+      <div v-else-if="isSearchRoute" class="min-w-0 flex-1 flex items-center gap-2 rounded-full bg-slate-100 px-3 h-9" data-testid="header-search">
+        <Search :size="16" class="shrink-0 text-slate-400" />
+        <input ref="searchInput" v-model="searchPageTerm" type="text" enterkeyhint="search" autocomplete="off" placeholder="搜尋人物或政見…" class="flex-1 min-w-0 bg-transparent outline-none text-base placeholder:text-slate-400" data-testid="global-search-input" />
+        <button v-if="searchPageTerm" type="button" class="shrink-0 text-slate-400" aria-label="清除" @click="searchPageTerm = ''"><X :size="16" /></button>
+      </div>
       <nav v-else-if="shownCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-crumbs">
         <template v-for="(c, i) in shownCrumbs" :key="i">
           <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
@@ -118,7 +136,7 @@ const canBack = computed(() => {
         <div v-if="personOnRoute.sub" class="truncate text-[11px] text-slate-500">{{ personOnRoute.sub }}</div>
       </div>
       <div v-else class="min-w-0 flex-1 truncate px-1 text-center text-[15px] font-bold text-navy-900" data-testid="header-title">{{ pageTitle }}</div>
-      <div class="pr-1" :class="isHome ? 'ml-auto' : ''"><GlobalSearch /></div>
+      <div v-if="!isSearchRoute" class="w-10 shrink-0" :class="isHome ? 'ml-auto' : ''" aria-hidden="true"></div>
     </div>
 
     <div class="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

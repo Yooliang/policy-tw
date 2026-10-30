@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { House, TrendingUp, Vote, Milestone } from 'lucide-vue-next'
+import { House, TrendingUp, Vote, Milestone, Search } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { useSupabase } from '../composables/useSupabase'
@@ -18,6 +18,7 @@ const items = computed(() => {
   ]
   if (activeElection.value) list.push({ name: '選舉', path: electionPath(electionSegment(activeElection.value)), icon: Vote, exact: false })
   list.push({ name: '參與', path: '/stats', icon: Milestone, exact: false })
+  list.push({ name: '搜尋', path: '/search', icon: Search, exact: false })
   return list
 })
 const isActive = (item: { path: string; exact: boolean }) => item.exact ? route.path === item.path : route.path === item.path || route.path.startsWith(item.path + '/')
@@ -27,6 +28,7 @@ const isActive = (item: { path: string; exact: boolean }) => item.exact ? route.
   <nav
     class="md:hidden fixed inset-x-0 bottom-0 z-40 flex border-t border-slate-200 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
     aria-label="主選單"
+    data-chrome="bottom"
     data-testid="mobile-tab-bar"
   >
     <RouterLink
