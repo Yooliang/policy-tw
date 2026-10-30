@@ -7,6 +7,7 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, 
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
+import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -712,6 +713,11 @@ function queueAnchorScroll() {
 onMounted(queueAnchorScroll)
 onActivated(queueAnchorScroll)
 watch(() => route.hash, queueAnchorScroll)
+
+/** 手機版地區抽屜（右下角浮動按鈕開關）：抽屜裡就是右側面板同一個節點，桌機版不受影響；換頁（切縣市、鄉鎮）時自動收起 */
+const regionDrawerOpen = ref(false)
+watch(() => route.fullPath, () => { regionDrawerOpen.value = false })
+const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selectedVillage.value : selectedSubRegion.value !== 'All' ? selectedSubRegion.value : selectedRegion.value !== 'All' ? selectedRegion.value : '地區')
 watch([thisLevelSections, nextLevelSections, selectedSubRegion, electionLoading], () => { void nextTick(scrollToPendingAnchor) })
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
@@ -1303,8 +1309,22 @@ usePageHead({
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
-      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
+      <div
+        v-if="selectedRegion !== 'All' && availableSubRegions.length > 0"
+        :class="['md:order-last md:w-1/3 shrink-0 md:block', regionDrawerOpen ? 'fixed inset-x-0 bottom-0 z-[70] max-h-[85vh] overflow-y-auto overscroll-contain rounded-t-2xl bg-slate-50 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:static md:z-auto md:max-h-none md:overflow-visible md:rounded-none md:bg-transparent md:p-0 md:shadow-none' : 'hidden']"
+        data-testid="region-drawer"
+      >
         <div class="md:sticky md:top-[4.5rem] space-y-4">
+          <!-- 手機版抽屜標頭與縣市（同一個縣市選擇元件，真連結） -->
+          <div class="md:hidden">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-base font-black text-slate-800">地區</span>
+              <button type="button" class="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-bold" @click="regionDrawerOpen = false">完成</button>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+              <GlobalRegionSelector :current="selectedRegion" :link-for="regionLink" />
+            </div>
+          </div>
           <!-- 地區卡：鄉鎮市區 → 村里（連動） -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
@@ -1406,6 +1426,16 @@ usePageHead({
       </div>
 
       </div><!-- flex 結束 -->
+
+      <!-- 手機版：抽屜背板與右下角「地區」浮動按鈕 -->
+      <div v-if="regionDrawerOpen" class="fixed inset-0 z-[65] bg-black/40 md:hidden" @click="regionDrawerOpen = false"></div>
+      <button
+        v-if="selectedRegion !== 'All' && availableSubRegions.length > 0 && !regionDrawerOpen"
+        type="button"
+        class="md:hidden fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg active:scale-95"
+        data-testid="region-fab"
+        @click="regionDrawerOpen = true"
+      ><MapPin :size="16" />{{ regionFabLabel }}</button>
     </div>
   </div>
 
