@@ -100,3 +100,27 @@ $$;
 COMMENT ON FUNCTION cand_no_batch_conflicts IS '整批號次（cand_numbers）落庫前的逐列重複檢查：回傳不能寫的列（同批同號、或已上線的他人同號）與原因；沒衝突回空。號次單位同 cand_no_dup_conflicts（#781）';
 REVOKE EXECUTE ON FUNCTION cand_no_batch_conflicts(JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION cand_no_batch_conflicts(JSONB) TO service_role;
+
+-- 5. 票數預算影子排程的候選型別：TS 的 VOTE_DIMENSIONS 有 cand_numbers，SQL 候選清單要同步（vote-budget-cron.test.ts 盯兩邊一致）。以 20261009240100 的定義為底，只多 'cand_numbers'
+CREATE OR REPLACE FUNCTION system_one_vote_budget_candidates(p_limit INTEGER DEFAULT 20)
+RETURNS TABLE (id UUID, contribution_type TEXT, payload JSONB, source_urls TEXT[])
+LANGUAGE sql STABLE AS $$
+  SELECT c.id, c.contribution_type, c.payload, c.source_urls
+  FROM contributions c
+  WHERE c.status = 'pending'
+    AND c.contribution_type IN ('policy', 'candidacy', 'correction', 'no_change', 'politician', 'policy_progress',
+                                'removal', 'merge_politician', 'question_answer', 'adjudication', 'roster_check', 'task_suggestion',
+                                'district_seats', 'policy_elements', 'lineage', 'lineage_participants', 'lineage_handover', 'lineage_link',
+                                'party_info', 'election_results', 'reassign_candidacy', 'regional_stat', 'cand_numbers')
+    AND NOT EXISTS (
+      SELECT 1 FROM jev_decisions j
+      WHERE j.subject_type = 'contribution' AND j.subject_id = c.id::TEXT AND j.question = 'vote_budget'
+        AND (c.contribution_type <> 'no_change' OR j.state->'target' ? 'outcome')
+    )
+    AND (c.contribution_type <> 'no_change' OR (
+      SELECT COUNT(*) FROM jev_decisions j
+      WHERE j.subject_type = 'contribution' AND j.subject_id = c.id::TEXT AND j.question = 'vote_budget') < 2)
+  -- 新的先：新件的影子結果之後才對得到它的實際結果；舊件一天內也會輪到
+  ORDER BY c.created_at DESC
+  LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 20), 60));
+$$;

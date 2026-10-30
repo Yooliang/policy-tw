@@ -87,7 +87,7 @@ Deno.test("hasCandNo 邊界", () => {
 
 Deno.test("SQL 與 TS 逐案一致：最新 contribution_required_agree 是這支 migration；矩陣列、判斷順序、號次 regex 與 hasCandNo 同結論", async () => {
   const { name, fn } = await latestFn();
-  assertEquals(name, "20261030100000_cand_numbers.sql", "之後若有人再改這支函式，請改看新的那支並保留 cand_no 規則（20261030100000 多了 cand_numbers 一行，其餘同本檔）");
+  assertEquals(name, "20261030130000_cand_numbers.sql", "之後若有人再改這支函式，請改看新的那支並保留 cand_no 規則（20261030130000 多了 cand_numbers 一行，其餘同本檔）");
   assertStringIncludes(fn, "WHEN v_risk = 'cand_no' THEN CASE v_kind WHEN 'official' THEN 1 WHEN 'media' THEN 1 WHEN 'social' THEN 1 ELSE 1 END");
   assertStringIncludes(fn, "WHEN v_risk = 'normal' THEN CASE v_kind WHEN 'official' THEN 3");
   assertStringIncludes(fn, "WHEN v_risk = 'high' THEN CASE v_kind WHEN 'official' THEN 3");

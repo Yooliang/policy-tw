@@ -1,5 +1,5 @@
 /**
- * 號次整批交件：一個單位一份交件、一張驗證票（issue #781，維護者 2026-10-30 批准；migration 20261030100000／20261030100100）。
+ * 號次整批交件：一個單位一份交件、一張驗證票（issue #781，維護者 2026-10-30 批准；migration 20261030130000／20261030130100）。
  *
  * 守住：
  *   1. 一份交件＝一筆貢獻（一張驗證票）：schema 收整批 items、不收一人一份以外的鍵；風險等級 cand_no（目標 1、免兩台機器）
@@ -25,8 +25,8 @@ import { buildReportTemplate } from "./task-guidance.ts";
 import { isBallotNumbersTask, shapeVerifyCurrent } from "./task-context.ts";
 import { typeSpecForTask, typeSpecForVerify } from "./type-spec-for.ts";
 
-const M1 = await readMig("20261030100000_cand_numbers.sql");
-const M2 = await readMig("20261030100100_ballot_numbers_cand_numbers.sql");
+const M1 = await readMig("20261030130000_cand_numbers.sql");
+const M2 = await readMig("20261030130100_ballot_numbers_cand_numbers.sql");
 const N = await readMig("20261009070000_rep_district_ballot_unit.sql");
 const B = await readMig(BALLOT_MIG);
 

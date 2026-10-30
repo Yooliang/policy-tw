@@ -1,4 +1,4 @@
--- 補號次臂：整批交件說明＋等票中的 cand_numbers 不重複派（issue #781，維護者 2026-10-30 批准；接 20261030100000）
+-- 補號次臂：整批交件說明＋等票中的 cand_numbers 不重複派（issue #781，維護者 2026-10-30 批准；接 20261030130000）
 --
 -- 以 20261009070000 的現行定義為底，只動兩處（其餘一字不差，重查 cand_no_recheck 那一支完全不動）：
 --   1. numbered：多一條 NOT EXISTS——等票中（pending／verified）的 cand_numbers 交件 items 涵蓋的人先不派（跟既有的「等票中的 candidacy 帶號次」同一個意思）；

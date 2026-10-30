@@ -79,7 +79,7 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (contributionType === "merge_politician") return "high";
   if (contributionType === "election_results") return "batch_result";
   if (contributionType === "regional_stat") return "regional_stat";
-  // 整批補號次（2026-10-30，#781）：跟單人補號次同一級（目標 1、不看來源）；SQL 鏡像 contribution_required_agree（20261030100000）
+  // 整批補號次（2026-10-30，#781）：跟單人補號次同一級（目標 1、不看來源）；SQL 鏡像 contribution_required_agree（20261030130000）
   if (contributionType === "cand_numbers") return "cand_no";
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   // 補號次（2026-10-29）：放在 past_result 之後、candidacy 一般級之前
