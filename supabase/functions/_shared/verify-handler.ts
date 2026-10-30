@@ -20,6 +20,7 @@ import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBin
 import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
 import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
+import { candNoItems } from "./cand-numbers.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -273,6 +274,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       };
     }
   }
+  // 整批號次（cand_numbers，#781）：agree 票可用 bad_items 標出抄錯的列；只收這一型、只收 agree、每個 id 都要在這份交件的 items 裡。
+  // 落庫時被標的列不寫、缺口重派；沒標的列照過。標得再多也不改這票的分數（一份一張票）。
+  if (input.bad_items && input.bad_items.length > 0) {
+    const claimed = new Set(candNoItems(contribution.payload).map((it) => it.politician_election_id));
+    const stray = input.bad_items.filter((id) => !claimed.has(id));
+    if (contribution.contribution_type !== "cand_numbers") return { status: 400, body: { success: false, error: "bad_items_unsupported", message: "bad_items 只用在整批號次（cand_numbers）的驗證票" } };
+    if (input.verdict !== "agree") return { status: 400, body: { success: false, error: "bad_items_need_agree", message: "bad_items 是「整份大致對、只有這幾列不對」的同意票附的；整份不對請投 disagree（附 evidence_url 與 note）" } };
+    if (stray.length > 0) return { status: 400, body: { success: false, error: "bad_items_not_in_items", message: `bad_items 裡的 ${stray.join("、")} 不在這份交件的 items 裡（用 politician_election_id）` } };
+  }
   // 防從眾（#7 的配套，2026-09-21）：既有票的理由現在公開了，「跟別人說一樣的話」不是問題，
   // 「跟別人說一樣的話而且拿不出自己的東西」才是。note 帶逐字引文（數字／引號）或帶 evidence_url → 放行不管多像；
   // 沒引文、沒來源、又跟既有票一字不差 → 退回補寫。金門 7 筆同一份名冊不同列句型必然相同，所以只擋一字不差。
@@ -340,6 +350,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     resolved_politician_id: input.resolved_politician_id ?? null,
     // 從哪個端點進來的（2026-09-21）；修訂的標成 <via>:revise，稽核分得出
     via: revising ? `${via}:revise` : via,
+    // 整批號次標錯的列（2026-10-30，#781）；修訂時也重設（沒帶＝清掉）
+    bad_items: input.bad_items && input.bad_items.length > 0 ? input.bad_items : null,
   };
   // 修訂＝UPDATE 自己那張；BEFORE 觸發器重算 weight、AFTER 觸發器重算分數，跟新投一張走同一條路
   const { data: vote, error: insertError } = revising

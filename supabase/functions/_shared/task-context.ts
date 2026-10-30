@@ -20,6 +20,7 @@ import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
 import { partyInfoIds, partyInfoItems } from "./party-info.ts";
 import { type CompareRow, resultsUnitLabel, shapeResultsRows } from "./election-results.ts";
+import { candNoItems, candNumbersUnitLabel, MAX_CAND_NUMBERS_PER_SUBMISSION } from "./cand-numbers.ts";
 import { resultOfCandidacyStatus } from "./candidacy-status.ts";
 import { fetchPendingOnTarget, scopeOfPayload, scopeOfTarget, shapePendingOnTarget, type PendingOnTarget } from "./pending-on-target.ts";
 import { loadReassignContext, personLabel, type ReassignContext, reassignProblems } from "./reassign-candidacy.ts";
@@ -270,12 +271,13 @@ export const BALLOT_NUMBERS_HINT =
   "去哪裡找：①該縣市選舉委員會網站（web.cec.gov.tw/<縣市代碼>ec/）的「候選人名單公告」或抽籤結果（2022 年桃園市長名單 https://web.cec.gov.tw/tyec/article/37003 的長相：「（1）張善政（2）賴香伶…」括號裡就是號次；" +
   "議員按選舉區、村里長與代表常是逐列表「選舉區 抽籤號次 姓名 推薦之政黨」）；②名單公告後的中選會選舉公報（eebulletin.cec.gov.tw 每位候選人那一欄印著號次）；" +
   "③村里長、代表也看鄉鎮市區公所的候選人登記冊（2022 年苗栗縣 10-21 當天就公布了逐里的抽籤號次表）。**不要用登記彙總表（web.cec.gov.tw/central/article/64709）當號次的來源——它沒有號次。**" +
-  "找到的每位用 candidacy 重交同一人同一屆（一個請求最多 20 筆，一件可以分幾次交）：politician_id、name、election_id、election_type 照 target，region 填 target.region，" +
-  "target.sub_region 有值就填 sub_region、items 裡有 village／electoral_district 就照填，cand_no 填公告上的號次（正整數），candidate_status 照 target.candidate_status；政黨與其他欄位不用帶、不要改。" +
-  "source_urls 第一個放你看到他號次的那一頁公告（縣市選委會的公告頁或選舉公報），note 寫「公告第幾頁、第幾選舉區／哪個里、他是幾號」。" +
+  "**整個任務交一份 cand_numbers（不要一人一份 candidacy）**：contribution_type 填 cand_numbers，task_id 照這一件；payload 的 election_id、election_type 照 target，region 填 target.region，target.sub_region 有值就填 sub_region，" +
+  "items 每位一列 {politician_election_id（照 target.items 那一位的 politician_election_id）, cand_no（公告上的號次，正整數）}，最多 150 列；公告上找不到的人不要放進 items。" +
+  "驗證者只開一次公告逐列核對，抄錯的列會被標出來、只退那幾列（其餘照過）；沒寫進去的列缺口會回到佇列重派。" +
+  "source_urls 第一個放你看到他號次的那一頁公告（縣市選委會的公告頁或選舉公報），payload.note 寫「公告第幾頁、第幾選舉區／哪個里」與沒放進 items 的是哪幾位、為什麼。" +
   "同名同姓要連選舉區、村里一起對，對不上或公告上沒有這個人的就不要交那一位。" +
   "**公告還沒出來、或打不開時不要回 no_change not_found**（會 14 天內不再派，錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。" +
-  "號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的，同一個單位不會有兩位同號：交件的號次跟同一個單位裡已上線或等票中的另一位相同，系統會多要一張同意票（not_supported，目標 +1），所以同號就是有人抄錯，先回頭看公告。";
+  "號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的，同一個單位不會有兩位同號：落庫前系統會逐列檢查同一個號次單位裡有沒有同號（整批內部、與已上線的他人），同號的列不寫、回到缺口重派，所以同號就是有人抄錯，先回頭看公告。";
 
 /**
  * 驗證帶號次（cand_no）的 candidacy（補號次，2026-10-08）：系統不核號次（登記彙總表沒有號次），這一票就是唯一的核對。
@@ -402,7 +404,7 @@ export function shapeTaskCurrent(
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
   // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
-  const suggested = newsItem && target?.suggestion === "progress" ? "policy_progress" : (SUGGESTED_TYPE[taskType] ?? "");
+  const suggested = newsItem && target?.suggestion === "progress" ? "policy_progress" : ballot ? "cand_numbers" : (SUGGESTED_TYPE[taskType] ?? "");
   const shape = PAYLOAD_SHAPE[suggested];
   // 骨架把已知的 id 先填好。candidate_status_stale 要改 politician_elections 的某一列卻沒給
   // 那一列的 id，代理只能猜複合鍵——那個 id 其實一直在 task_id 裡（2026-09-21 實測回報）。
@@ -1134,6 +1136,9 @@ export interface VerifyContextData {
   lineage_policies?: Obj[];
   /** election_results（2026-10-06）：逐位跟中選會名單比的結果（SQL election_results_compare） */
   results_compare?: Obj[];
+  /** cand_numbers（2026-10-30）：items 對到的參選紀錄（姓名、地區、現有號次）與落庫前的重複檢查結果 */
+  cand_rows?: Obj[];
+  cand_conflicts?: Obj[];
   /** reassign_candidacy（2026-10-06）：這筆參選紀錄、新舊兩人、兩人各自的參選紀錄、中選會名冊唯一對上的那一列 */
   reassign?: { ctx: ReassignContext; from_elections: Obj[]; to_elections: Obj[]; cec: Obj | null } | null;
   /** regional_stat（#508）：admin_divisions 查到的縣市／鄉鎮名稱（地區代碼對不到就是 null） */
@@ -1516,6 +1521,35 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
           "其實是同一個人（例如真的換縣市參選，有報導）或要改掛的對象不對，投 disagree 並附反證；查不到投 unsure。",
       };
     }
+    case "cand_numbers": {
+      // 整批補號次（2026-10-30，#781）：逐列列出交件的號次、我們現有的號次、落庫前重複檢查的結果；驗證者開一次公告逐列核對
+      const byId = new Map((data.cand_rows ?? []).map((r) => [Number(r.id), r]));
+      const conflicts = new Map((data.cand_conflicts ?? []).map((c) => [Number(c.politician_election_id), String(c.reason ?? "")]));
+      const rows = candNoItems(payload).map((it) => {
+        const r = byId.get(it.politician_election_id);
+        const reg = (r?.regions && typeof r.regions === "object" ? r.regions : {}) as Obj;
+        const who = (r?.politicians && typeof r.politicians === "object" ? r.politicians : {}) as Obj;
+        return {
+          politician_election_id: it.politician_election_id,
+          name: who.name ?? null,
+          place: [reg.region, reg.sub_region, reg.village].filter(Boolean).join(" ") || null,
+          claimed_cand_no: it.cand_no,
+          current_cand_no: r?.cand_no ?? null,
+          ...(conflicts.has(it.politician_election_id) ? { server_conflict: conflicts.get(it.politician_election_id) } : {}),
+        };
+      });
+      const conflicted = rows.filter((r) => "server_conflict" in r).length;
+      return {
+        unit: candNumbersUnitLabel(payload),
+        items: rows,
+        items_count: rows.length,
+        server_conflict_count: conflicted,
+        hint: "**開一次 source_urls 的公告，逐列核對 items**：每一列找到他本人那一格（姓名、縣市，議員要對選舉區、村里長要對村里），公告上印的號次必須剛好等於 claimed_cand_no；只在登記彙總表看到名字不算（它沒有號次）。" +
+          "**全部對得上投 agree**（note 寫公告頁碼與核對了幾位）。**只有少數幾列不對，仍投 agree，並附 bad_items（那幾列的 politician_election_id 陣列）與 note（每個錯列在公告上實際是幾號、哪一頁）**：" +
+          "有標的列不會寫入、會回到缺口重派，沒標的列照過，不會整批作廢。大部分列都不對、公告打不開或不是這個單位的，投 disagree（附 evidence_url 與 note）；確認不了投 unsure。" +
+          (conflicted > 0 ? `系統預先檢查有 ${conflicted} 列與同一個號次單位裡的另一位同號（server_conflict）：那些列落庫時不會寫，你不必替它們標 bad_items，但請順便看公告上到底是誰抄錯，寫進 note。` : ""),
+      };
+    }
     case "election_results": {
       // 整批補選舉結果（2026-10-06）：逐位列出系統跟中選會名單比的結果，對不上的排前面
       const rows = shapeResultsRows((data.results_compare ?? []) as unknown as CompareRow[]);
@@ -1596,6 +1630,14 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     } catch (e) {
       console.error("reassign verify context:", e instanceof Error ? e.message : String(e));
     }
+  }
+  if (contributionType === "cand_numbers") {
+    const items = candNoItems(payload);
+    // query-bounds: ok — 一份最多 150 位，按主鍵取
+    const { data: crow, error: cerr } = await supabase.from("politician_elections").select("id, election_id, election_type, cand_no, politicians(name), regions(region, sub_region, village)").in("id", items.map((it) => it.politician_election_id)).limit(MAX_CAND_NUMBERS_PER_SUBMISSION + 10);
+    if (!cerr) data.cand_rows = (crow ?? []) as Obj[];
+    const { data: conf, error: ferr } = await supabase.rpc("cand_no_batch_conflicts", { p_items: items });
+    if (!ferr) data.cand_conflicts = (conf ?? []) as Obj[];
   }
   if (contributionType === "election_results" && contributionId) {
     const { data: rows, error } = await supabase.rpc("election_results_compare", { p_contribution_id: contributionId });

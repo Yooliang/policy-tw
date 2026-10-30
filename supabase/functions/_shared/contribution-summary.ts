@@ -54,6 +54,7 @@ import { normalizeCorrection } from "./correction.ts";
 import { partyDisplayName } from "./party-alias.ts";
 import { electionResultLabel } from "./candidacy-result.ts";
 import { resultItems, resultsUnitLabel } from "./election-results.ts";
+import { candNoItems, candNumbersUnitLabel } from "./cand-numbers.ts";
 import { elementPhrase } from "./policy-elements.ts";
 import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
 import { REGIONAL_STAT_LABEL, type RegionalStatKey } from "./contribution-schema.ts";
@@ -333,6 +334,12 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       const items = resultItems(p);
       const elected = items.filter((it) => it.election_result === "elected").length;
       summary = `補 ${resultsUnitLabel(p)} 的選舉結果：${items.length} 位（當選 ${elected}、落選 ${items.length - elected}）`;
+      targetName = null;
+      break;
+    }
+    case "cand_numbers": {
+      const items = candNoItems(p);
+      summary = `補 ${candNumbersUnitLabel(p)} 的號次：${items.length} 位`;
       targetName = null;
       break;
     }

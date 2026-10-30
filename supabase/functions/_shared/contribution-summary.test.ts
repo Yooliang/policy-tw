@@ -178,6 +178,7 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     party_info: { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }, { party_id: 10001, valid_to: "2019-04-30" }],
       note: "內政部政黨資訊網記載台灣團結聯盟更名為台聯黨" },
     regional_stat: { admin_code: "65000", stat_key: "population", year: 2024, value: 2800000, unit: "人" },
+    cand_numbers: { election_id: 2026, election_type: "縣市長", region: "台北市", items: [{ politician_election_id: 101, cand_no: 1 }] },
   };
 
   for (const type of CONTRIBUTION_TYPES) {

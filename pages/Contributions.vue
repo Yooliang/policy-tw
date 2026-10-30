@@ -85,6 +85,7 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'roster_check', label: '名單清查' },
   { key: 'district_seats', label: '應選名額' },
   { key: 'election_results', label: '選舉結果' },
+  { key: 'cand_numbers', label: '整批號次' },
   { key: 'reassign_candidacy', label: '改掛參選' },
   { key: 'question_answer', label: '提問回答' },
   { key: 'removal', label: '建議移除' },

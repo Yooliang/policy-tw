@@ -174,7 +174,7 @@ Deno.test("A5 臂本體：沒有寫死的年份、日期；單位與拆件規則
 
 Deno.test("A6 任務提示、驗證提示、skill.md、協議版號、system-one 的守門都在；roster_batch 的過濾在 SQL 不在記憶體", async () => {
   assert(BALLOT_NUMBERS_HINT.includes("target.items") && BALLOT_NUMBERS_HINT.includes("登記彙總表") && BALLOT_NUMBERS_HINT.includes("unreachable") && BALLOT_NUMBERS_HINT.includes("不要回 no_change not_found"));
-  assert(BALLOT_NUMBERS_HINT.includes("各自從 1 編起") && BALLOT_NUMBERS_HINT.includes("not_supported"));
+  assert(BALLOT_NUMBERS_HINT.includes("各自從 1 編起") && BALLOT_NUMBERS_HINT.includes("cand_numbers")); // 2026-10-30（#781）：整批交件，重複改在落庫前逐列檢查
   assert(BALLOT_NUMBERS_RECHECK_HINT.includes("duplicate") && BALLOT_NUMBERS_RECHECK_HINT.includes("gap") && BALLOT_NUMBERS_RECHECK_HINT.includes("units[].members") && BALLOT_NUMBERS_RECHECK_HINT.includes("no_change"));
   assert(CAND_NO_VERIFY_HINT.includes("payload.cand_no") && CAND_NO_VERIFY_HINT.includes("剛好等於"));
   const md = (await readSkillWithTypes()).replace(/\r\n/g, "\n");
@@ -206,12 +206,11 @@ Deno.test("A8 任務現況與提示：補號次任務走 BALLOT_NUMBERS_HINT、�
   assertEquals(cur.items_count, 2);
   assert(!("politician_election" in cur), "整個單位一件，沒有單一人物的現況");
   const tpl = (cur.report_template as { payload: Record<string, unknown> }).payload;
-  assertEquals((cur.report_template as { contribution_type: string }).contribution_type, "candidacy");
-  assertEquals(tpl.politician_id, "00000000-0000-4000-8000-000000000001");
+  assertEquals((cur.report_template as { contribution_type: string }).contribution_type, "cand_numbers"); // 2026-10-30（#781）：補號次任務改交一份整批
   assertEquals(tpl.election_id, 2026);
-  assertEquals(tpl.electoral_district, "第01選舉區");
-  assertEquals(tpl.candidate_status, "registered");
-  assert(typeof tpl.cand_no === "string" && (tpl.cand_no as string).includes("號次"));
+  const tplItems = tpl.items as Array<Record<string, unknown>>;
+  assertEquals(tplItems.map((i) => i.politician_election_id), [1, 2], "target.items 每一位一列");
+  assert(tplItems.every((i) => typeof i.cand_no === "string" && (i.cand_no as string).includes("號次")), "號次不預填");
   // 重查
   const rt = {
     kind: "cand_no_recheck", election_id: 2026, election_type: "村里長", region: "台北市", sub_region: "中山區", candidate_status: "qualified", units_count: 1,

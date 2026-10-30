@@ -21,6 +21,7 @@ import { isSamePersonSameTerm, type LineageOwnedPolicy, lineageSamePersonMessage
 import { lineageIneligiblePolicies, loadLineageMembers, loadPartyChain, politicianRemovalBlockers, resolveLineagePlace } from "./apply-contribution.ts";
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 import { resultItems } from "./election-results.ts";
+import { candNoItems } from "./cand-numbers.ts";
 import { loadReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -304,8 +305,8 @@ export async function precheckApplyTargets(
   // 整批補選舉結果（2026-10-06）：每一位的參選紀錄要在、而且是這一屆這種選舉這個縣市的
   const resultIds = new Set<number>();
   for (const { item } of entries) {
-    if (item.contribution_type !== "election_results") continue;
-    for (const it of resultItems(item.payload)) resultIds.add(it.politician_election_id);
+    if (item.contribution_type !== "election_results" && item.contribution_type !== "cand_numbers") continue;
+    for (const it of (item.contribution_type === "cand_numbers" ? candNoItems(item.payload) : resultItems(item.payload))) resultIds.add(it.politician_election_id);
   }
 
   const [politicians, policies, electionRows, tasks, participations, lineages, resultRows] = await Promise.all([
@@ -492,12 +493,13 @@ export async function precheckApplyTargets(
         }
         break;
       }
+      case "cand_numbers":
       case "election_results": {
         if (!resultRows.ok) break;
         const electionId = int(p.election_id), electionType = str(p.election_type);
         const county = (str(p.region) ?? "").replace(/臺/g, "台");
         const missing: number[] = [], stray: string[] = [];
-        for (const it of resultItems(p)) {
+        for (const it of (item.contribution_type === "cand_numbers" ? candNoItems(p) : resultItems(p))) {
           const row = resultRows.rows.get(it.politician_election_id);
           if (!row) { missing.push(it.politician_election_id); continue; }
           const rowCounty = (row.county ?? "").replace(/臺/g, "台");

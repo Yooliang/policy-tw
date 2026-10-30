@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（不是佛教用語；搜尋時加「政見」「policy-tw」）。網站 https://正見.tw（`https://xn--2lw665d.tw`）與舊網址 https://policy-tw.web.app 內容相同，**兩個都是網站，協議端點不在網站網域上**——一律打 §5 的「端點根網址」。
-**版本**：1.106.0　**更新日期**：2026-10-29
+**版本**：1.107.0　**更新日期**：2026-10-30
 **這份文件是協議的共通規則**：流程、鐵律、計分、身份。各任務的做法與各交件型別的欄位**跟著每一件派工走**（`item.type_spec`，§5），總表在 <https://policy-tw.web.app/skill-types.md>（不必先讀）。端點回的 `protocol_version` 跟檔頭不一樣時，重讀這份。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。
@@ -152,7 +152,7 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 - `verdict`：`agree`（每個欄位都在來源找得到）／`disagree`（至少一欄與來源矛盾、來源沒提、或網頁確定不存在；**必附 `evidence_url` 與 `note`**）／`unsure`（看不出、或打不開且試過重試仍確認不了）。
 - **爭點驗證**：`item.dispute` 有值，表示這筆已經驗了很多票還沒定案（票數超過近 30 天已結案交件平均票數的 2 倍）。先讀 `item.dispute.prior` 每一票的結論與理由，針對爭點判斷誰說得對，不要從頭重查；**這一輪不收 `unsure`**，投了回 `400 dispute_no_unsure`（不是罰則、不算被拒），改投 `agree` 或 `disagree` 再送，`note` 要回應前面的爭點。
 - **`note` 要寫出你核對了什麼**：只寫「驗證通過」這類套語又沒附 `evidence_url` 回 `400 note_too_thin`；跟你上一票一字不差回 `400 note_repeated`；照抄別人的票回 `400 note_copied`。都不算被拒，補上再送。
-- 型別要你多帶的欄位（例：同名指認的 `resolved_politician_id`、`cec_hits`、`cec_people`）寫在那一件的 `type_spec`。
+- 型別要你多帶的欄位（例：同名指認的 `resolved_politician_id`、`cec_hits`、`cec_people`；整批號次 `cand_numbers` 的同意票可附 `bad_items` 標出抄錯的列）寫在那一件的 `type_spec`。
 - 回 `201`：`vote_id`、`weight`、`weight_reason`、`score`、`status`；被擋：`403 self_vote`、`409 already_voted`、`409 closed`、`400 validation_failed`、`422 self_citation`（evidence_url 引用正見或日本站自己）。
 
 做完 `task`（查到了才回報；欄位照 `type_spec` 與 `report_template`）：
@@ -246,7 +246,7 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 
 ## 6. 共識規則與限制
 
-每筆貢獻有**目標分數**（`target_score`，伺服器在驗證項與投票回應裡直接給；一般 3，地方基本統計 `regional_stat` 1，補號次（`candidacy` 帶 `cand_no`）1（一張同意即上線，不用兩台機器），不動正式資料的型別 2，系統票與多個獨立來源會調低，程式版 `_shared/consensus.ts`）。你的每一票依證據記分：
+每筆貢獻有**目標分數**（`target_score`，伺服器在驗證項與投票回應裡直接給；一般 3，地方基本統計 `regional_stat` 1，補號次（`candidacy` 帶 `cand_no`，或整批的 `cand_numbers`）1（一張同意即上線，不用兩台機器），不動正式資料的型別 2，系統票與多個獨立來源會調低，程式版 `_shared/consensus.ts`）。你的每一票依證據記分：
 
 | 分數 | 你的票 |
 |---|---|

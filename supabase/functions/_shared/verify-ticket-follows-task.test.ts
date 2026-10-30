@@ -119,7 +119,7 @@ Deno.test("A5 「新增」型清單只有一處（verify_ticket_is_new）；每�
   const NEW_ALWAYS = ["policy", "question_answer", "task_suggestion"];
   const NEW_WHEN_ROSTER_CHECK = ["candidacy", "politician"];
   const NOT_NEW = ["policy_progress", "correction", "no_change", "adjudication", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage",
-    "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat"];
+    "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers"];
   const UNSURE = ["policy_progress", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "regional_stat"];
   assertEquals([...NEW_ALWAYS, ...NEW_WHEN_ROSTER_CHECK, ...NOT_NEW].sort(), [...CONTRIBUTION_TYPES].sort(), "每個貢獻型別都要在這三組之一：新增貢獻型別時請決定它是不是「新增」型");
   for (const u of UNSURE) assert(NOT_NEW.includes(u), `${u} 不確定的暫列一般任務`);

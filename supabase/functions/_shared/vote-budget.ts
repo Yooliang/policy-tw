@@ -355,6 +355,16 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 整批補號次（2026-10-30，#781）：出錯的方式是「號次不是公告那一格印的」；系統不核號次，全靠人眼逐列核對
+  cand_numbers: [
+    {
+      key: "number_not_on_notice",
+      instructions: "交上來的每一列號次，公告（source_urls 第一個）上本人那一格真的印著這個號次嗎？還是只是依名單順序推的、或看的是登記彙總表（它沒有號次）？",
+      hit: { key: "unverified", means: "看不出逐列對過公告，像是依順序推或抄別處" },
+      miss: { key: "verified", means: "note 或來源顯示逐列對過公告上本人那一格的號次" },
+    },
+  ],
+
   // 政見三要素（#364，2026-10-05）：影子模式一樣只記錄。要防的是「幫候選人補數字」與「把沒查當成沒寫」
   policy_elements: [
     {

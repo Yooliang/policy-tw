@@ -11,6 +11,7 @@ import { partyInfoProblems } from "./party-info.ts";
 import { isPlaceholderName, PLACEHOLDER_NAME_MSG } from "./placeholder-name.ts";
 import { DISTRICT_SEAT_KINDS, DISTRICT_SEAT_TYPES, MAX_DISTRICTS_PER_SUBMISSION, MAX_SEATS_PER_DISTRICT, normalizeSeatDistrict } from "./district-seats.ts";
 import { MAX_RESULTS_PER_SUBMISSION } from "./election-results.ts";
+import { MAX_CAND_NUMBERS_PER_SUBMISSION } from "./cand-numbers.ts";
 import { CEC_ROSTER_URL_RE } from "./cec-roster.ts";
 import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_ELEMENT_KINDS, POLICY_ELEMENT_LOCATOR_MAX, POLICY_ELEMENT_TEXT_MAX } from "./policy-elements.ts";
 import {
@@ -33,8 +34,9 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // policy_elements（政見三要素，#364，2026-10-05）：DB CHECK、這份清單、skill.md、標籤四處一起加（thresholds.test 盯 CHECK）
 // lineage／lineage_participants／lineage_handover／lineage_link（政策脈絡，#349，2026-10-06）：同樣四處一起加
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
+// cand_numbers（整批補號次，2026-10-30，#781）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
 export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "other"] as const;
@@ -210,6 +212,8 @@ export interface VerifyInput {
   cec_hits?: number;
   /** 帶指認的同意票：那些紀錄依出生年收斂成幾個人（1.29.0） */
   cec_people?: number;
+  /** 整批型別（cand_numbers）的 agree 票：標出抄錯的列（politician_election_id）；落庫時那幾列不寫、缺口重派（2026-10-30，#781） */
+  bad_items?: number[];
 }
 
 export interface VerifyValidation {
@@ -651,6 +655,35 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串（沒放進 items 的是哪幾位、為什麼）");
       break;
     }
+    case "cand_numbers": {
+      // 整批補號次（2026-10-30，#781）：一個補號次任務（單位）一份，items 每位一列 {politician_election_id, cand_no}。
+      // 公告上找不到的人不要放進 items（不要猜）；驗證者在 agree 票可用 bad_items 標出抄錯的列，落庫時那幾列不寫、缺口重派。
+      if (!(isKnownElectionId(p.election_id))) push("payload.election_id", `election_id 要是 ${electionIdsText()}（任務 target 原樣帶回）`);
+      if (!oneOf(ELECTION_TYPES, p.election_type)) push("payload.election_type", `election_type 要是 ${ELECTION_TYPES.join("／")} 之一（任務 target 原樣帶回）`);
+      if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
+      if (p.sub_region !== undefined && p.sub_region !== null && !isStr(p.sub_region, 1, 20)) push("payload.sub_region", "sub_region 要是鄉鎮市區名稱（任務 target 有才帶）");
+      if (!Array.isArray(p.items) || p.items.length === 0 || p.items.length > MAX_CAND_NUMBERS_PER_SUBMISSION) {
+        push("payload.items", `items 必填：這個單位你在公告上找到號次的每一位一項 {politician_election_id, cand_no}（1～${MAX_CAND_NUMBERS_PER_SUBMISSION} 項）`);
+      } else {
+        const seen = new Set<number>();
+        (p.items as unknown[]).forEach((raw, i) => {
+          const at = `payload.items[${i}]`;
+          if (!isObj(raw)) { push(at, "每一項要是物件：{politician_election_id, cand_no}"); return; }
+          const itemKeys = new Set<string>();
+          for (const k of ["politician_election_id", "cand_no"]) itemKeys.add(k);
+          for (const k of Object.keys(raw)) {
+            if (!itemKeys.has(k)) push(`${at}.${k}`, `每一項只收 politician_election_id 與 cand_no，${k} 不收`);
+          }
+          const id = raw.politician_election_id;
+          if (!(isInt(id) && id > 0)) push(`${at}.politician_election_id`, "politician_election_id 要是正整數（任務 target.items 裡那一位的參選紀錄 id）");
+          else if (seen.has(id)) push(`${at}.politician_election_id`, `${id} 重複了`);
+          else seen.add(id);
+          if (!(isInt(raw.cand_no) && raw.cand_no > 0 && raw.cand_no <= 999999)) push(`${at}.cand_no`, "cand_no 要是公告上的號次（正整數）");
+        });
+      }
+      if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串（沒放進 items 的是哪幾位、為什麼）");
+      break;
+    }
     case "reassign_candidacy": {
       // 同名人物接錯（2026-10-06）：一筆參選紀錄改掛到既有的另一位（to_politician_id）或新建一位（new_politician）。
       // 分辨根據是這一型的核心：evidence 寫出處上這一筆的出生年／推薦政黨／選舉區（至少一項），reason 寫憑什麼分辨。
@@ -987,6 +1020,14 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
   if (body.verdict === "disagree" && !isStr(body.note, 5, 2000)) errors.push({ path: "note", message: "投 disagree 要寫 note（至少 5 字）說明依據" });
   else if (body.note !== undefined && !isStr(body.note, 1, 2000)) errors.push({ path: "note", message: "要是 1～2000 字" });
   if (body.resolved_politician_id !== undefined && body.resolved_politician_id !== null && !isIdentityPick(body.resolved_politician_id)) errors.push({ path: "resolved_politician_id", message: "要是 uuid（current.identity_candidates 裡的 id）或 \"new\"（都不是，建新人物）" });
+  if (body.bad_items !== undefined && body.bad_items !== null) {
+    const b = body.bad_items;
+    if (!Array.isArray(b) || b.length > MAX_CAND_NUMBERS_PER_SUBMISSION || !b.every((x) => Number.isInteger(x) && (x as number) > 0)) {
+      errors.push({ path: "bad_items", message: `bad_items 要是 politician_election_id 的正整數陣列（最多 ${MAX_CAND_NUMBERS_PER_SUBMISSION} 項）` });
+    } else if (b.length > 0 && !isStr(body.note, 10, 2000)) {
+      errors.push({ path: "note", message: "標了 bad_items 就要寫 note（至少 10 字）：每個錯列在公告上實際是幾號、哪一頁" });
+    }
+  }
   for (const k of ["cec_hits", "cec_people"] as const) {
     if (body[k] !== undefined && !(Number.isInteger(body[k]) && (body[k] as number) >= 0 && (body[k] as number) <= 10000)) errors.push({ path: k, message: "要是 0 以上的整數" });
   }
@@ -1004,6 +1045,7 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
       ...(typeof body.resolved_politician_id === "string" ? { resolved_politician_id: body.resolved_politician_id } : {}),
       ...(typeof body.cec_hits === "number" ? { cec_hits: body.cec_hits } : {}),
       ...(typeof body.cec_people === "number" ? { cec_people: body.cec_people } : {}),
+      ...(Array.isArray(body.bad_items) && body.bad_items.length > 0 ? { bad_items: [...new Set(body.bad_items as number[])] } : {}),
     },
   };
 }

@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-10-30
+
+- [補號次改「一個單位一份交件、一張驗證票」：新增貢獻型別 `cand_numbers`，驗證者可逐…](decisions/2026-10-30-號次整批交件一張驗證票.md)
+
 ## 2026-10-29
 
 - [新表 `vm_ditrust_groups` 記「VM 的 DiTrust 代號組別 -> Di…](decisions/2026-10-29-DiTrust序號組對照表.md)

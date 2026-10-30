@@ -129,7 +129,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
     "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。中選會名冊唯一對上而且那個選區已開完的，伺服器自己寫了（協議 1.100.0），派到你的是系統寫不了的（選區沒開完、同名多筆、名額沒登錄）。 " +
     // 補號次（2026-10-08）
-    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。" +
+    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件、**交一份 cand_numbers（payload.items 每位一列，不要一人一份 candidacy）**，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。" +
     "**target.kind＝cand_no_recheck**：同一個號次單位裡有重複或跳號，target.units 逐單位列出異常，要對公告重查，詳細做法同樣看 hint。",
 
   election_result_missing:
@@ -380,6 +380,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：election_id、election_type、region、sub_region（四個照任務 target 原樣帶回；target 沒有 sub_region 就不填）、" +
     "items（你核對過的每一位一項 {politician_election_id：current.items 裡那一位的參選紀錄 id、election_result：elected 當選／not_elected 落選}，一筆最多 120 位）、" +
     "note（沒放進 items 的是哪幾位、為什麼；選填）。source_urls 第一個放中選會選舉資料庫那一頁。",
+  cand_numbers:
+    "payload：election_id、election_type、region、sub_region（四個照任務 target 原樣帶回；target 沒有 sub_region 就不填）、" +
+    "items（你在公告上找到號次的每一位一項 {politician_election_id：target.items 裡那一位的參選紀錄 id、cand_no：公告上的號次，正整數}，一筆最多 150 位；公告上找不到的人不要放）、" +
+    "note（沒放進 items 的是哪幾位、為什麼；選填）。source_urls 第一個放你看到號次的那一頁公告。整個任務只交一份。",
   reassign_candidacy:
     "payload：politician_election_id（要改掛的那一筆參選紀錄，整數 id）、from_politician_id（這筆現在掛的那一位的 uuid）、to_politician_id（改掛到既有的另一位，uuid）或 new_politician（新建一位：{name 同名、birth_year、party，可帶 region}）二擇一、" +
     "evidence（出處上這一筆的分辨資料 {birth_year, party, district}，至少一項）、reason（≥20 字：憑什麼分辨不是現在掛的那位）。source_urls 放中選會名冊或報導。",
@@ -678,6 +682,23 @@ function buildPayload(
         new_politician: { name: t.name ?? "（同名）", birth_year: "（西元四位數，照名冊）", party: "（名冊的推薦政黨；無黨籍填「無黨籍」）" },
         evidence: { birth_year: "（出處上這一筆的出生年）", party: "（推薦政黨）", district: "（選舉區或村里）" },
         reason: "（≥20 字：名冊上的出生年／推薦政黨／選舉區，跟兩個人各自怎麼對）",
+      };
+    }
+    case "cand_numbers": {
+      // 整批補號次（2026-10-30，#781）：單位四欄照 target 填好；items 把 target.items 每一位列出，號次留給代理照公告填
+      const people = Array.isArray(t.items) ? (t.items as unknown[]) : [];
+      return {
+        election_id: t.election_id ?? "（選舉年份）",
+        election_type: t.election_type ?? "（選舉類型）",
+        region: t.region ?? "（縣市）",
+        ...(t.sub_region ? { sub_region: t.sub_region } : {}),
+        items: people.length > 0
+          ? people.map((p) => {
+              const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+              return { politician_election_id: o.politician_election_id ?? "（target.items 裡那一位的參選紀錄 id）", cand_no: "（公告上他的號次，正整數；公告上找不到他就把這一項整個拿掉）" };
+            })
+          : [{ politician_election_id: "（target.items 裡那一位的參選紀錄 id）", cand_no: "（公告上他的號次，正整數）" }],
+        note: "（沒放進 items 的是哪幾位、為什麼；都放了就刪掉這一欄）",
       };
     }
     case "election_results": {
