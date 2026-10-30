@@ -713,127 +713,6 @@ onMounted(queueAnchorScroll)
 onActivated(queueAnchorScroll)
 watch(() => route.hash, queueAnchorScroll)
 
-/**
- * 手機版地區抽屜（右下角「地區」浮動鈕）：滾輪選擇器（iOS 日期滾輪那種），桌機右側面板不受影響。
- * 一共五個滾輪排成一條軌道，畫面永遠只看到三個，分兩段：
- * 第一段（縣市層）縣市｜縣市議員選區｜鄉鎮市區；在鄉鎮輪點一個鄉鎮 → 軌道向左滑，進第二段（鄉鎮層）鄉鎮｜代表選區｜村里。
- * 停住不套用，一律按「確定」才套用；「取消」回到開啟前的網址。縣市、鄉鎮換了才有新的選區／村里資料，
- * 所以這兩輪停住時就先換頁預覽（replace，不堆歷史），取消再換回開啟前的網址。
- */
-const regionDrawerOpen = ref(false)
-const regionDrawerEl = ref<HTMLElement | null>(null)
-const drawerStage = ref<1 | 2>(1)
-const drawerOrigin = ref('')
-/** 還沒套用的選擇：滾輪 id → 項目 key；換頁後清掉，以頁面現況為準 */
-const wheelSel = ref<Record<string, string>>({})
-type DrawerChip = { key: string; text: string; active: boolean; apply?: () => void }
-type DrawerWheel = { id: string; label: string; chips: DrawerChip[] }
-function openRegionDrawer() {
-  drawerOrigin.value = route.fullPath
-  drawerStage.value = pageTownship.value ? 2 : 1
-  wheelSel.value = {}
-  regionDrawerOpen.value = true
-}
-watch(() => route.fullPath, () => { wheelSel.value = {} })
-const drawerWheels = computed<DrawerWheel[]>(() => {
-  const hasRegion = selectedRegion.value !== 'All'
-  const hasSub = hasRegion && availableSubRegions.value.length > 0
-  const isCouncil = (type: string) => type === ElectionType.COUNCILOR
-  const districtChips = (pick: (type: string) => boolean): DrawerChip[] => {
-    const panels = districtPanels.value.filter(p => pick(p.type))
-    const out: DrawerChip[] = []
-    for (const p of panels) {
-      const pre = panels.length > 1 ? p.title + ' ' : ''
-      out.push({ key: p.type + '|All', text: pre + '全部', active: selectedDistrict.value === 'All', apply: () => { selectedDistrict.value = 'All' } })
-      for (const d of p.chips) out.push({ key: p.type + '|' + d, text: pre + shortDistrict(d), active: selectedDistrict.value === d, apply: () => { selectedDistrict.value = d } })
-    }
-    const pk = pkDistrictPanel.value
-    if (pk) for (const d of pk.links) out.push({ key: 'pk|' + d.label, text: d.label, active: !!d.active, apply: () => { void router.push(d.to) } })
-    return out
-  }
-  const townChips: DrawerChip[] = !hasSub ? [] : [
-    { key: 'All', text: '全部', active: selectedSubRegion.value === 'All', apply: () => { void router.replace(townshipLink('All')) } },
-    ...availableSubRegions.value.map(t => ({ key: t, text: t, active: selectedSubRegion.value === t, apply: () => { void router.replace(townshipLink(t)) } })),
-  ]
-  const hasTown = !!pageTownship.value
-  return [
-    { id: 'county', label: '縣市', chips: [
-      { key: 'All', text: '全台', active: selectedRegion.value === 'All', apply: () => { void router.replace(regionLink('All')) } },
-      ...TAIWAN_COUNTIES.map(c => ({ key: c, text: c, active: selectedRegion.value === c, apply: () => { void router.replace(regionLink(c)) } })),
-    ] },
-    { id: 'council', label: '議員選區', chips: hasRegion && !hasTown ? districtChips(isCouncil) : [] },
-    { id: 'town', label: '鄉鎮市區', chips: townChips },
-    { id: 'rep', label: '代表選區', chips: hasTown ? districtChips(t => !isCouncil(t)) : [] },
-    { id: 'village', label: '村里', chips: hasTown && availableVillages.value.length > 0 && viewMode.value !== 'comparison' ? [
-      { key: 'All', text: '全部', active: selectedVillage.value === 'All', apply: () => { selectedVillage.value = 'All' } },
-      ...availableVillages.value.map(v => ({ key: v, text: v, active: selectedVillage.value === v, apply: () => { selectedVillage.value = v } })),
-    ] : [] },
-  ]
-})
-function wheelSelectedKey(w: DrawerWheel): string | undefined {
-  return wheelSel.value[w.id] ?? w.chips.find(c => c.active)?.key ?? w.chips[0]?.key
-}
-function confirmRegionDrawer() {
-  const pending = (id: string) => {
-    const w = drawerWheels.value.find(x => x.id === id)
-    const key = wheelSel.value[id]
-    const chip = !w || key === undefined ? undefined : w.chips.find(c => c.key === key)
-    return chip && !chip.active ? chip : undefined
-  }
-  if (drawerStage.value === 1) {
-    pending('council')?.apply?.()
-    pending('town')?.apply?.()
-  } else {
-    pending('rep')?.apply?.()
-    pending('village')?.apply?.()
-  }
-  regionDrawerOpen.value = false
-}
-function cancelRegionDrawer() {
-  regionDrawerOpen.value = false
-  if (route.fullPath !== drawerOrigin.value) void router.replace(drawerOrigin.value)
-}
-const WHEEL_ITEM = 44
-const wheelTimers = new Map<string, ReturnType<typeof setTimeout>>()
-/** 滾動停住約 150ms 後，中間那項就是選中；縣市輪（以及第二段的鄉鎮輪）選了就先換頁預覽 */
-function onWheelScroll(w: DrawerWheel, ev: Event) {
-  const el = ev.currentTarget as HTMLElement
-  clearTimeout(wheelTimers.get(w.id))
-  wheelTimers.set(w.id, setTimeout(() => {
-    const c = w.chips[Math.max(0, Math.min(w.chips.length - 1, Math.round(el.scrollTop / WHEEL_ITEM)))]
-    if (!c || c.key === wheelSelectedKey(w)) return
-    wheelSel.value = { ...wheelSel.value, [w.id]: c.key }
-    if (c.active) return
-    if (w.id === 'county' || (w.id === 'town' && drawerStage.value === 2)) c.apply?.()
-  }, 150))
-}
-/** 點一項：捲到中間；在第一段點鄉鎮（不是「全部」）→ 換到那個鄉鎮並進第二段 */
-function wheelClick(w: DrawerWheel, c: DrawerChip, i: number, ev: Event) {
-  ;(ev.currentTarget as HTMLElement).parentElement?.scrollTo({ top: i * WHEEL_ITEM, behavior: 'smooth' })
-  if (w.id === 'town' && drawerStage.value === 1 && c.key !== 'All') {
-    wheelSel.value = { ...wheelSel.value, town: c.key }
-    if (!c.active) c.apply?.()
-    drawerStage.value = 2
-  }
-}
-function onWheelKey(ev: KeyboardEvent) {
-  const dy = ev.key === 'ArrowDown' ? WHEEL_ITEM : ev.key === 'ArrowUp' ? -WHEEL_ITEM : 0
-  if (!dy) return
-  ev.preventDefault();
-  (ev.currentTarget as HTMLElement).scrollBy({ top: dy, behavior: 'smooth' })
-}
-// 打開、換段、內容或選擇變了：每個滾輪捲到自己選中的那一項
-watch([regionDrawerOpen, drawerStage, drawerWheels, wheelSel], async () => {
-  if (!regionDrawerOpen.value) return
-  await nextTick()
-  for (const w of drawerWheels.value) {
-    const list = regionDrawerEl.value?.querySelector<HTMLElement>('[data-wheel="' + w.id + '"]')
-    if (!list) continue
-    const idx = Math.max(0, w.chips.findIndex(c => c.key === wheelSelectedKey(w)))
-    if (Math.abs(list.scrollTop - idx * WHEEL_ITEM) > 2) list.scrollTo({ top: idx * WHEEL_ITEM, behavior: 'auto' })
-  }
-}, { flush: 'post' })
-const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selectedVillage.value : selectedSubRegion.value !== 'All' ? selectedSubRegion.value : selectedRegion.value !== 'All' ? selectedRegion.value : '地區')
 watch([thisLevelSections, nextLevelSections, selectedSubRegion, electionLoading], () => { void nextTick(scrollToPendingAnchor) })
 
 // 檢查本次選舉是否有地方層級候選人（議員、鄉鎮市長、代表、村里長）
@@ -1204,6 +1083,129 @@ usePageHead({
     })
   },
 })
+
+// 放在最後：滾輪 watch 建立時就會讀取上面各 computed，宣告在前面會踩到暫時性死區
+/**
+ * 手機版地區抽屜（右下角「地區」浮動鈕）：滾輪選擇器（iOS 日期滾輪那種），桌機右側面板不受影響。
+ * 一共五個滾輪排成一條軌道，畫面永遠只看到三個，分兩段：
+ * 第一段（縣市層）縣市｜縣市議員選區｜鄉鎮市區；在鄉鎮輪點一個鄉鎮 → 軌道向左滑，進第二段（鄉鎮層）鄉鎮｜代表選區｜村里。
+ * 停住不套用，一律按「確定」才套用；「取消」回到開啟前的網址。縣市、鄉鎮換了才有新的選區／村里資料，
+ * 所以這兩輪停住時就先換頁預覽（replace，不堆歷史），取消再換回開啟前的網址。
+ */
+const regionDrawerOpen = ref(false)
+const regionDrawerEl = ref<HTMLElement | null>(null)
+const drawerStage = ref<1 | 2>(1)
+const drawerOrigin = ref('')
+/** 還沒套用的選擇：滾輪 id → 項目 key；換頁後清掉，以頁面現況為準 */
+const wheelSel = ref<Record<string, string>>({})
+type DrawerChip = { key: string; text: string; active: boolean; apply?: () => void }
+type DrawerWheel = { id: string; label: string; chips: DrawerChip[] }
+function openRegionDrawer() {
+  drawerOrigin.value = route.fullPath
+  drawerStage.value = pageTownship.value ? 2 : 1
+  wheelSel.value = {}
+  regionDrawerOpen.value = true
+}
+watch(() => route.fullPath, () => { wheelSel.value = {} })
+const drawerWheels = computed<DrawerWheel[]>(() => {
+  const hasRegion = selectedRegion.value !== 'All'
+  const hasSub = hasRegion && availableSubRegions.value.length > 0
+  const isCouncil = (type: string) => type === ElectionType.COUNCILOR
+  const districtChips = (pick: (type: string) => boolean): DrawerChip[] => {
+    const panels = districtPanels.value.filter(p => pick(p.type))
+    const out: DrawerChip[] = []
+    for (const p of panels) {
+      const pre = panels.length > 1 ? p.title + ' ' : ''
+      out.push({ key: p.type + '|All', text: pre + '全部', active: selectedDistrict.value === 'All', apply: () => { selectedDistrict.value = 'All' } })
+      for (const d of p.chips) out.push({ key: p.type + '|' + d, text: pre + shortDistrict(d), active: selectedDistrict.value === d, apply: () => { selectedDistrict.value = d } })
+    }
+    const pk = pkDistrictPanel.value
+    if (pk) for (const d of pk.links) out.push({ key: 'pk|' + d.label, text: d.label, active: !!d.active, apply: () => { void router.push(d.to) } })
+    return out
+  }
+  const townChips: DrawerChip[] = !hasSub ? [] : [
+    { key: 'All', text: '全部', active: selectedSubRegion.value === 'All', apply: () => { void router.replace(townshipLink('All')) } },
+    ...availableSubRegions.value.map(t => ({ key: t, text: t, active: selectedSubRegion.value === t, apply: () => { void router.replace(townshipLink(t)) } })),
+  ]
+  const hasTown = !!pageTownship.value
+  return [
+    { id: 'county', label: '縣市', chips: [
+      { key: 'All', text: '全台', active: selectedRegion.value === 'All', apply: () => { void router.replace(regionLink('All')) } },
+      ...TAIWAN_COUNTIES.map(c => ({ key: c, text: c, active: selectedRegion.value === c, apply: () => { void router.replace(regionLink(c)) } })),
+    ] },
+    { id: 'council', label: '議員選區', chips: hasRegion && !hasTown ? districtChips(isCouncil) : [] },
+    { id: 'town', label: '鄉鎮市區', chips: townChips },
+    { id: 'rep', label: '代表選區', chips: hasTown ? districtChips(t => !isCouncil(t)) : [] },
+    { id: 'village', label: '村里', chips: hasTown && availableVillages.value.length > 0 && viewMode.value !== 'comparison' ? [
+      { key: 'All', text: '全部', active: selectedVillage.value === 'All', apply: () => { selectedVillage.value = 'All' } },
+      ...availableVillages.value.map(v => ({ key: v, text: v, active: selectedVillage.value === v, apply: () => { selectedVillage.value = v } })),
+    ] : [] },
+  ]
+})
+function wheelSelectedKey(w: DrawerWheel): string | undefined {
+  return wheelSel.value[w.id] ?? w.chips.find(c => c.active)?.key ?? w.chips[0]?.key
+}
+function confirmRegionDrawer() {
+  const pending = (id: string) => {
+    const w = drawerWheels.value.find(x => x.id === id)
+    const key = wheelSel.value[id]
+    const chip = !w || key === undefined ? undefined : w.chips.find(c => c.key === key)
+    return chip && !chip.active ? chip : undefined
+  }
+  if (drawerStage.value === 1) {
+    pending('council')?.apply?.()
+    pending('town')?.apply?.()
+  } else {
+    pending('rep')?.apply?.()
+    pending('village')?.apply?.()
+  }
+  regionDrawerOpen.value = false
+}
+function cancelRegionDrawer() {
+  regionDrawerOpen.value = false
+  if (route.fullPath !== drawerOrigin.value) void router.replace(drawerOrigin.value)
+}
+const WHEEL_ITEM = 44
+const wheelTimers = new Map<string, ReturnType<typeof setTimeout>>()
+/** 滾動停住約 150ms 後，中間那項就是選中；縣市輪（以及第二段的鄉鎮輪）選了就先換頁預覽 */
+function onWheelScroll(w: DrawerWheel, ev: Event) {
+  const el = ev.currentTarget as HTMLElement
+  clearTimeout(wheelTimers.get(w.id))
+  wheelTimers.set(w.id, setTimeout(() => {
+    const c = w.chips[Math.max(0, Math.min(w.chips.length - 1, Math.round(el.scrollTop / WHEEL_ITEM)))]
+    if (!c || c.key === wheelSelectedKey(w)) return
+    wheelSel.value = { ...wheelSel.value, [w.id]: c.key }
+    if (c.active) return
+    if (w.id === 'county' || (w.id === 'town' && drawerStage.value === 2)) c.apply?.()
+  }, 150))
+}
+/** 點一項：捲到中間；在第一段點鄉鎮（不是「全部」）→ 換到那個鄉鎮並進第二段 */
+function wheelClick(w: DrawerWheel, c: DrawerChip, i: number, ev: Event) {
+  ;(ev.currentTarget as HTMLElement).parentElement?.scrollTo({ top: i * WHEEL_ITEM, behavior: 'smooth' })
+  if (w.id === 'town' && drawerStage.value === 1 && c.key !== 'All') {
+    wheelSel.value = { ...wheelSel.value, town: c.key }
+    if (!c.active) c.apply?.()
+    drawerStage.value = 2
+  }
+}
+function onWheelKey(ev: KeyboardEvent) {
+  const dy = ev.key === 'ArrowDown' ? WHEEL_ITEM : ev.key === 'ArrowUp' ? -WHEEL_ITEM : 0
+  if (!dy) return
+  ev.preventDefault();
+  (ev.currentTarget as HTMLElement).scrollBy({ top: dy, behavior: 'smooth' })
+}
+// 打開、換段、內容或選擇變了：每個滾輪捲到自己選中的那一項
+watch([regionDrawerOpen, drawerStage, drawerWheels, wheelSel], async () => {
+  if (!regionDrawerOpen.value) return
+  await nextTick()
+  for (const w of drawerWheels.value) {
+    const list = regionDrawerEl.value?.querySelector<HTMLElement>('[data-wheel="' + w.id + '"]')
+    if (!list) continue
+    const idx = Math.max(0, w.chips.findIndex(c => c.key === wheelSelectedKey(w)))
+    if (Math.abs(list.scrollTop - idx * WHEEL_ITEM) > 2) list.scrollTo({ top: idx * WHEEL_ITEM, behavior: 'auto' })
+  }
+}, { flush: 'post' })
+const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selectedVillage.value : selectedSubRegion.value !== 'All' ? selectedSubRegion.value : selectedRegion.value !== 'All' ? selectedRegion.value : '地區')
 </script>
 
 <template>
