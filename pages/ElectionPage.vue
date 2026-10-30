@@ -26,7 +26,7 @@ import {
   Vote, Flag, AlertCircle, Users, MapPin,
   Search, Layers,
   Building2, Mountain, Landmark, MessageCircle, Hash, Loader2,
-  Crown, ScrollText, Swords, FileText, Clock, List, Eye } from 'lucide-vue-next'
+  Crown, ScrollText, Swords, FileText, Clock, List, Eye, ChevronDown } from 'lucide-vue-next'
 import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
@@ -50,6 +50,9 @@ import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
+import SwipeTabStrip from '../components/SwipeTabStrip.vue'
+import { useSwipeTabs } from '../composables/useSwipeTabs'
+import { useMobileShell } from '../composables/useMobileShell'
 
 const router = useRouter()
 const route = useRoute()
@@ -205,6 +208,8 @@ watch(selectedSubRegion, () => {
 })
 
 const viewMode = ref<ElectionViewMode>('politicians')
+/** 手機版（X 式版面）目前停在哪一種參選人類型（網址 ?tab=；空字串＝這一頁第一個有資料的類型） */
+const mobileTab = ref('')
 /** 承諾頁籤的頁碼（網址 ?page=，字串形式給 queryField；實際頁碼看 pledgePage） */
 const pledgePageParam = ref('1')
 const hasSidebar = computed(() => selectedRegion.value !== 'All' && availableSubRegions.value.length > 0)
@@ -232,6 +237,8 @@ useRegionQuerySync({
   village: selectedVillage,
   extra: {
     view: queryField(viewMode, 'politicians', { allowed: VIEW_MODES }),
+    // 手機版的類型分頁；換地區時帶過去，盡量停在原本的類型
+    tab: queryField(mobileTab, '', { when: () => viewMode.value === 'politicians' }),
     type: queryField(comparisonLevel, '', { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
     // 順序要在 type 後面：套網址時一個欄位設完才設下一個
     district: queryField(comparisonDistrict, '', { when: () => viewMode.value === 'comparison' }),
@@ -252,7 +259,7 @@ function regionLink(region: string): RouteLocationRaw {
 /** 換頁時要帶過去的頁籤參數（view／type）；鄉鎮與村里不帶 */
 function tabQuery(): Record<string, string> {
   const query: Record<string, string> = {}
-  for (const key of ['view', 'type']) {
+  for (const key of ['view', 'type', 'tab']) {
     const v = route.query[key]
     if (typeof v === 'string' && v) query[key] = v
   }
@@ -1205,7 +1212,52 @@ watch([regionDrawerOpen, drawerStage, drawerWheels, wheelSel], async () => {
     if (Math.abs(list.scrollTop - idx * WHEEL_ITEM) > 2) list.scrollTo({ top: idx * WHEEL_ITEM, behavior: 'auto' })
   }
 }, { flush: 'post' })
-const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selectedVillage.value : selectedSubRegion.value !== 'All' ? selectedSubRegion.value : selectedRegion.value !== 'All' ? selectedRegion.value : '地區')
+
+// ---- 手機版 X 式版面（md 以下）：地區列＋類型分頁條＋內容區左右滑動 ----
+// 左右滑切的是「類型」（縣市長、縣市議員…），地區不變；換地區後只留該地區有資料的類型，盡量停在原本的類型。
+const { openDrawer } = useMobileShell()
+const regionPathLabel = computed(() => {
+  const parts = [selectedRegion.value, selectedSubRegion.value, selectedVillage.value].filter(p => p && p !== 'All')
+  return parts.length > 0 ? parts.join(' › ') : '全台'
+})
+/** 直轄市的首長與議員，分頁條上叫「直轄市長」「直轄市議員」（資料裡是同一個職位類型） */
+function mobileTypeLabel(spec: PositionSpec): string {
+  if (selectedRegion.value !== 'All' && isSpecialMunicipality.value) {
+    if (spec.type === ElectionType.CHIEF) return '直轄市長'
+    if (spec.type === ElectionType.COUNCILOR) return '直轄市議員'
+  }
+  return spec.label
+}
+const mobileTabs = computed(() => [...thisLevelSections.value, ...nextLevelSections.value]
+  .filter(s => !s.empty)
+  .map(s => ({ key: s.spec.type as string, label: mobileTypeLabel(s.spec) })))
+const mobileActiveType = computed(() => mobileTabs.value.some(t => t.key === mobileTab.value) ? mobileTab.value : (mobileTabs.value[0]?.key ?? ''))
+const mobileIndex = computed(() => Math.max(0, mobileTabs.value.findIndex(t => t.key === mobileActiveType.value)))
+function setMobileTab(key: string) { mobileTab.value = key }
+/** 手機版只畫目前這個類型的區塊（桌面照舊全畫）；沒有分頁可選時全畫 */
+function mobileHide(type: string): string {
+  return mobileActiveType.value && type !== mobileActiveType.value ? 'max-md:hidden' : ''
+}
+/** 屬於某個類型的附屬區塊（全台頁的立委引導、縣市頁的鄉鎮名錄）：那個類型沒有分頁時一直顯示 */
+function mobileShowOn(type: string): string {
+  return !mobileActiveType.value || mobileActiveType.value === type || !mobileTabs.value.some(t => t.key === type) ? '' : 'max-md:hidden'
+}
+/** 該類型內容最上方的選區晶片（議員選區、代表選區）；不到兩個選區就沒有 */
+function mobileChips(type: string): Array<{ key: string; text: string; value: string; active: boolean }> | null {
+  const panel = districtPanels.value.find(p => p.type === type)
+  if (!panel) return null
+  return [
+    { key: 'All', text: '全部', value: 'All', active: selectedDistrict.value === 'All' },
+    ...panel.chips.map(d => ({ key: d, text: shortDistrict(d), value: d, active: selectedDistrict.value === d })),
+  ]
+}
+const swipeEl = ref<HTMLElement | null>(null)
+useSwipeTabs(swipeEl, {
+  index: () => mobileIndex.value,
+  count: () => viewMode.value === 'politicians' ? mobileTabs.value.length : 0,
+  go: (i) => { const t = mobileTabs.value[i]; if (t) setMobileTab(t.key) },
+  onPastStart: openDrawer,
+})
 </script>
 
 <template>
@@ -1217,6 +1269,22 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
       @select="viewMode = $event"
     />
 
+
+    <!-- 手機版：地區列（點開兩段式滾輪抽屜）＋參選人類型分頁條，黏在頁首下方 -->
+    <div class="md:hidden sticky top-14 z-30 bg-white shadow-sm" data-testid="mobile-sticky">
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 border-b border-slate-100 px-4 py-2.5 text-left text-sm font-bold text-navy-900"
+        data-testid="region-row"
+        aria-haspopup="dialog"
+        @click="openRegionDrawer"
+      >
+        <MapPin :size="16" class="shrink-0 text-blue-600" />
+        <span class="min-w-0 flex-1 truncate">{{ regionPathLabel }}</span>
+        <ChevronDown :size="16" class="shrink-0 text-slate-400" />
+      </button>
+      <SwipeTabStrip v-if="viewMode === 'politicians' && mobileTabs.length > 1" :tabs="mobileTabs" :model-value="mobileActiveType" @update:model-value="setMobileTab" />
+    </div>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
@@ -1232,7 +1300,7 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
+      <div ref="swipeEl" data-testid="swipe-area" :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
 
       <!-- VIEW: Politicians -->
 
@@ -1254,7 +1322,17 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
           每個區塊標題列有一顆「政見 PK」（2026-10-06，取代 #364 放在區塊底下的並排比較）：連到 PK 頁籤、選好職位與那一場，
           規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
-        <template v-for="section in thisLevelSections" :key="section.spec.type">
+        <div v-for="section in thisLevelSections" :key="section.spec.type" :class="mobileHide(section.spec.type)">
+          <div v-if="mobileActiveType === section.spec.type && mobileChips(section.spec.type)" class="md:hidden -mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="mobile-district-chips">
+            <button
+              v-for="c in mobileChips(section.spec.type)!"
+              :key="c.key"
+              type="button"
+              class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
+              :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+              @click="selectedDistrict = c.value"
+            >{{ c.text }}</button>
+          </div>
           <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
@@ -1265,12 +1343,22 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
-        </template>
+        </div>
 
         <!-- 直轄市一般區：區長市府指派，這一層沒有職位，一行小字說明，不擋里長名單 -->
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
-        <template v-for="section in nextLevelSections" :key="section.spec.type">
+        <div v-for="section in nextLevelSections" :key="section.spec.type" :class="mobileHide(section.spec.type)">
+          <div v-if="mobileActiveType === section.spec.type && mobileChips(section.spec.type)" class="md:hidden -mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="mobile-district-chips">
+            <button
+              v-for="c in mobileChips(section.spec.type)!"
+              :key="c.key"
+              type="button"
+              class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
+              :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+              @click="selectedDistrict = c.value"
+            >{{ c.text }}</button>
+          </div>
           <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
@@ -1281,14 +1369,14 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
             :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
-        </template>
+        </div>
 
         <!--
           全台頁的立委引導：立法委員不在全台層——資料裡的立委全部是綁縣市選區的區域立委（2024 那 312 位每一位
           都掛在「XX第NN選區」底下），列在全台頁既不是全國層級，也跟縣市頁完全重複。
           引導要能直接點過去，不是叫人自己去上面找（CLAUDE.md：換頁一律真連結，爬蟲才跟得到）。
         -->
-        <section v-if="levelPlan.scope === 'national' && hasLegislatorRace" class="mb-12 text-left">
+        <section v-if="levelPlan.scope === 'national' && hasLegislatorRace" class="mb-12 text-left" :class="mobileShowOn('縣市長')">
           <p class="text-sm text-slate-600 mb-3">區域立委依選區劃分，請選擇縣市查看：</p>
           <div class="flex flex-wrap gap-1.5">
             <RouterLink
@@ -1301,7 +1389,7 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
         </section>
 
         <!-- 縣市頁的鄉鎮市區參選人名錄：名字連結，收合在各鄉鎮底下（預渲染頁裡唯一通往村里長人物頁的連結） -->
-        <section v-if="levelPlan.scope === 'county' && townshipDirectoryGroups.length > 0" class="mb-12 text-left">
+        <section v-if="levelPlan.scope === 'county' && townshipDirectoryGroups.length > 0" class="mb-12 text-left" :class="mobileShowOn('鄉鎮市長')">
           <h3 class="text-xl font-bold text-navy-900 mb-2 flex items-center gap-2 border-l-4 border-blue-500 pl-3">
             <Building2 class="text-indigo-500" /> 鄉鎮市區參選人名錄 ({{ townshipDirectoryTotal }})
           </h3>
@@ -1533,13 +1621,6 @@ const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selected
 
       <!-- 手機版：抽屜背板、右下角「地區」浮動按鈕、底部抽屜（滾輪選擇器，一次最多看到三個滾輪，分縣市層／鄉鎮層兩段） -->
       <div v-if="regionDrawerOpen" class="fixed inset-0 z-[65] bg-black/40 md:hidden" @click="cancelRegionDrawer"></div>
-      <button
-        v-if="!regionDrawerOpen"
-        type="button"
-        class="md:hidden fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg active:scale-95"
-        data-testid="region-fab"
-        @click="openRegionDrawer"
-      ><MapPin :size="16" />{{ regionFabLabel }}</button>
       <div
         v-if="regionDrawerOpen"
         ref="regionDrawerEl"

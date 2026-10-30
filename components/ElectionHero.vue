@@ -99,6 +99,6 @@ const timeLeft = computed(() => {
     </template>
 
     <!-- 縣市是真連結（/election/2026/台北市），點起來跟以前一樣切縣市，爬蟲也走得到 -->
-    <GlobalRegionSelector :current="region" :link-for="regionLink" />
+    <GlobalRegionSelector class="max-md:hidden" :current="region" :link-for="regionLink" />
   </Hero>
 </template>

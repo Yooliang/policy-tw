@@ -2,6 +2,8 @@
 import { shortUrlsIn } from '../lib/url'
 import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { useSwipeTabs } from '../composables/useSwipeTabs'
+import { useMobileShell } from '../composables/useMobileShell'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase, withElectionData } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskDoneLabel, requestTaskHeading, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
@@ -261,6 +263,32 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   return items
 })
 // 卡片要顯示那一屆的號次／選區，跟選舉頁一樣先套上該屆的參選資料
+// 手機版（X 式）：內容區左右滑動切換分頁（承諾／政見／基本資料，有同選區候選人時再加一頁），停在哪頁記在網址 ?tab=
+type ProfileTab = 'campaign' | 'history' | 'profile' | 'peers'
+const tabOrder = computed<ProfileTab[]>(() => ['campaign', 'history', 'profile', ...(peers.value.length > 0 ? ['peers' as const] : [])])
+const defaultTab = computed<ProfileTab>(() => landOnHistory.value ? 'history' : 'campaign')
+const swipeEl = ref<HTMLElement | null>(null)
+const { openDrawer } = useMobileShell()
+useSwipeTabs(swipeEl, {
+  index: () => Math.max(0, tabOrder.value.indexOf(activeTab.value)),
+  count: () => tabOrder.value.length,
+  go: (i) => { const t = tabOrder.value[i]; if (t) activeTab.value = t },
+  onPastStart: openDrawer,
+})
+onMounted(() => {
+  const q = route.query.tab
+  if (typeof q === 'string' && (tabOrder.value as string[]).includes(q)) activeTab.value = q as ProfileTab
+})
+watch(activeTab, (tab) => {
+  const want = tab === defaultTab.value ? undefined : tab
+  const have = typeof route.query.tab === 'string' ? route.query.tab : undefined
+  if (want === have || route.name !== 'politician') return
+  const query = { ...route.query }
+  if (want) query.tab = want
+  else delete query.tab
+  void router.replace({ query, hash: route.hash })
+})
+
 const peers = computed(() => {
   const rec = primaryRecord.value
   const list = electionPeers(politician.value, politicians.value)
@@ -439,10 +467,10 @@ usePageHead({
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="text-left">
+      <div class="text-left" ref="swipeEl" data-testid="swipe-area">
         <div>
           <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用短字（承諾／政見／基本資料／候選人，維護者 2026-09-30 的四字限制現在是兩字），390px 寬一排放得下 -->
-          <div class="flex border-b border-slate-200 mb-6 overflow-x-auto">
+          <div class="flex border-b border-slate-200 mb-6 overflow-x-auto max-md:sticky max-md:top-14 max-md:z-30 max-md:-mx-4 max-md:px-4 max-md:bg-slate-50">
             <button @click="activeTab = 'campaign'" :class="`pb-3 sm:pb-4 px-2.5 sm:px-6 font-bold text-base sm:text-lg flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-all relative ${activeTab === 'campaign' ? 'text-violet-600' : 'text-slate-400 hover:text-slate-600'}`">
               <Megaphone :size="18" class="hidden sm:block" /><span class="sm:hidden">承諾</span><span class="hidden sm:inline">承諾</span><span class="hidden sm:inline bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs ml-1">{{ campaignPledges.length }}</span>
               <div v-if="activeTab === 'campaign'" class="absolute bottom-0 left-0 w-full h-1 bg-violet-600 rounded-t-full"></div>

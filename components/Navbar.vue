@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2 } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { useSupabase } from '../composables/useSupabase'
@@ -9,8 +9,11 @@ import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
 import MobileMenu from './MobileMenu.vue'
+import MobileDrawer from './MobileDrawer.vue'
+import { useMobileShell } from '../composables/useMobileShell'
 
 const isLoginModalOpen = ref(false)
+const { openDrawer } = useMobileShell()
 const isLoggingIn = ref(false)
 const route = useRoute()
 const router = useRouter()
@@ -62,7 +65,24 @@ const isActive = (path: string) => route.path === path
 
 <template>
   <nav class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <!-- 手機版頁首（md 以下，X 式）：左選單鈕（開左側抽屜）、正中間站徽、右搜尋；主選單搬到畫面下方的 MobileTabBar -->
+    <div class="md:hidden relative flex items-center h-14 px-2" data-testid="mobile-header">
+      <button
+        type="button"
+        class="w-10 h-10 rounded-full flex items-center justify-center text-navy-900 active:bg-slate-100"
+        aria-label="開啟選單"
+        data-testid="mobile-menu-open"
+        @click="openDrawer"
+      >
+        <Menu :size="24" />
+      </button>
+      <RouterLink to="/" class="absolute left-1/2 -translate-x-1/2 flex items-center" aria-label="正見 首頁">
+        <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x" alt="正見" width="72" height="40" class="h-8 w-auto object-contain" />
+      </RouterLink>
+      <div class="ml-auto pr-1"><GlobalSearch /></div>
+    </div>
+
+    <div class="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center flex-shrink-0">
           <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
@@ -208,4 +228,11 @@ const isActive = (path: string) => route.path === path
       </div>
     </div>
   </nav>
+  <MobileDrawer
+    :is-authenticated="isAuthenticated"
+    :user-display-name="userDisplayName"
+    :user-avatar-url="userAvatarUrl"
+    @login="isLoginModalOpen = true"
+    @profile="router.push('/profile')"
+  />
 </template>
