@@ -1176,7 +1176,8 @@ const indigenousDistricts = computed(() => {
 interface MobilePick { level: 'county' | 'sub' | 'village'; title: string; options: string[] }
 function pickFor(type: string): MobilePick | null {
   const need = TAB_NEEDS[type]
-  if (selectedRegion.value === 'All') return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
+  // 2026-10-31：縣市長分頁全台就直接列全部縣市長（依縣市分組），不先要人挑縣市
+  if (selectedRegion.value === 'All' && type !== ElectionType.MAYOR) return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (need === 'county') return null
   if (selectedSubRegion.value === 'All') {
     if (allSub.value) return null // 按了鄉鎮列的「全部」：直接顯示該縣市全部鄉鎮的名單
@@ -1407,6 +1408,10 @@ const mobilePanels = computed<MobilePanel[]>(() => {
 })
 const mobileAdjacent = (type: string) => adjacentPanelClass(MOBILE_TAB_TYPES.indexOf(type) - mobileIndex.value)
 let mobilePrerenderTimer: ReturnType<typeof setTimeout> | undefined
+const mobilePrerenderIdle = (fn: () => void) => {
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+  if (ric) ric(fn, { timeout: 3000 }); else setTimeout(fn, 0)
+}
 let mobileVisitedKey = ''
 watch([mobileReady, mobileActiveType, mobilePanelKey], ([ready, type, key]) => {
   if (!ready) return
@@ -1414,12 +1419,16 @@ watch([mobileReady, mobileActiveType, mobilePanelKey], ([ready, type, key]) => {
   else if (!mobileVisited.value.includes(type)) mobileVisited.value = [...mobileVisited.value, type]
   clearTimeout(mobilePrerenderTimer)
   if (typeof window === 'undefined' || !isMobileViewport()) return
-  mobilePrerenderTimer = setTimeout(() => {
+  // 閒置預畫相鄰分頁：等瀏覽器閒下來（requestIdleCallback，逾時 3 秒仍要畫）才掛，且一次只掛一個分頁，不跟首屏、捲動搶主執行緒
+  const run = () => {
     if (mobilePanelKey.value !== key) return
     const i = MOBILE_TAB_TYPES.indexOf(mobileActiveType.value)
     const want = [MOBILE_TAB_TYPES[i - 1], MOBILE_TAB_TYPES[i + 1]].filter((t): t is string => !!t && !mobileVisited.value.includes(t))
-    if (want.length > 0) mobileVisited.value = [...mobileVisited.value, ...want]
-  }, 350)
+    if (want.length === 0) return
+    mobileVisited.value = [...mobileVisited.value, want[0]!]
+    if (want.length > 1) mobilePrerenderTimer = setTimeout(() => { mobilePrerenderIdle(run) }, 600)
+  }
+  mobilePrerenderTimer = setTimeout(() => { mobilePrerenderIdle(run) }, 1200)
 }, { immediate: true })
 onBeforeUnmount(() => clearTimeout(mobilePrerenderTimer))
 

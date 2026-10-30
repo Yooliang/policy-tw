@@ -1,6 +1,6 @@
 import { displayCurrentPosition, participationLabel } from '../lib/participation-label'
 import { electionArea } from '../lib/election-area'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
   Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
@@ -33,8 +33,9 @@ const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
 
 // Global shared state
 const elections = ref<Election[]>([])
-const politicians = ref<Politician[]>([])  // 目前已載入的候選人（可能來自多個選舉）
-const policies = ref<Policy[]>([])
+// 2026-10-31：候選人／政見是整批換掉的不可變資料（要改一律整個陣列重指派），用 shallowRef 免掉幾千個物件的深層代理（手機追蹤裡 get/track 佔了 15 秒）
+const politicians = shallowRef<Politician[]>([])  // 目前已載入的候選人（可能來自多個選舉）
+const policies = shallowRef<Policy[]>([])
 const discussions = ref<Discussion[]>([])
 const categories = ref<string[]>([])
 const locations = ref<string[]>([])
@@ -701,7 +702,24 @@ function fetchPoliticianPage(
  *   嘉義縣大林鎮           708 位 → 43 位
  *   台南市北區           1,240 位（兩頁）→ 58 位
  */
-async function loadPoliticiansByElection(
+// 2026-10-31：同參數的載入共用同一個 promise（追蹤裡 get_politicians_by_level／get_election_types 各抓兩次，
+// 是頁面 watcher 與晶片列同時發同一組請求）；結束就移除，之後的呼叫走 loadedRegions 內存快取
+const politiciansInflight = new Map<string, Promise<Politician[]>>()
+const electionTypesInflight = new Map<number, Promise<RawElectionTypeRow[]>>()
+function loadPoliticiansByElection(
+  electionId: number,
+  region: string = 'All',
+  subRegion: string = 'All',
+  onlyTypes?: readonly string[],
+): Promise<Politician[]> {
+  const key = `${electionId}|${region}|${subRegion}|${onlyTypes ? onlyTypes.join('+') : ''}`
+  const running = politiciansInflight.get(key)
+  if (running) return running
+  const p = loadPoliticiansByElectionImpl(electionId, region, subRegion, onlyTypes).finally(() => { politiciansInflight.delete(key) })
+  politiciansInflight.set(key, p)
+  return p
+}
+async function loadPoliticiansByElectionImpl(
   electionId: number,
   region: string = 'All',
   subRegion: string = 'All',
@@ -733,8 +751,13 @@ async function loadPoliticiansByElection(
     // 直接從 DB 載入（不使用 IndexedDB 快取）
 
     // 2. 先查詢該選舉有哪些類型
-    const { data: typeData } = await supabase
-      .rpc('get_election_types', { p_election_id: electionId })
+    let typesReq = electionTypesInflight.get(electionId)
+    if (!typesReq) {
+      typesReq = Promise.resolve(supabase.rpc('get_election_types', { p_election_id: electionId })).then(r => { if (r.error || !r.data?.length) electionTypesInflight.delete(electionId); return (r.data || []) as RawElectionTypeRow[] })
+      electionTypesInflight.set(electionId, typesReq)
+      typesReq.catch(() => electionTypesInflight.delete(electionId))
+    }
+    const typeData = await typesReq
 
     const availableTypes = (typeData || []).map((t: RawElectionTypeRow) => t.election_type)
     availableElectionTypes.value = availableTypes
@@ -799,7 +822,7 @@ async function loadPoliticiansByElection(
 
     // 新增不存在的候選人
     const newPols = Array.from(polsMap.values())
-    politicians.value.push(...newPols)
+    if (newPols.length > 0) politicians.value = [...politicians.value, ...newPols]
     loadedRegions.value.add(cacheKey)
     loadedElections.value.add(electionId)
 
@@ -1026,7 +1049,7 @@ export function useSupabase() {
       // 加入到 state（避免重複）
       const existingIds = new Set(politicians.value.map(p => p.id))
       if (!existingIds.has(pol.id)) {
-        politicians.value.push(pol)
+        politicians.value = [...politicians.value, pol]
       }
 
       return pol
@@ -1083,7 +1106,7 @@ export function useSupabase() {
 
       const existingIds = new Set(policies.value.map(p => p.id))
       if (!existingIds.has(mapped.id)) {
-        policies.value.push(mapped)
+        policies.value = [...policies.value, mapped]
       }
 
       return mapped
