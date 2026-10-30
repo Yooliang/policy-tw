@@ -39,6 +39,17 @@ export interface SwipeStripController {
   prepare: () => void
   update: (pos: number, animated?: boolean) => void
 }
+/**
+ * 拖曳時左右相鄰分頁要看得到（已渲染的內容）：分頁面板平時用 v-show 藏起來，拖曳中外層（group/sw）帶 data-swiping，
+ * 相鄰那一頁用這組 class 被強制顯示、絕對定位在左右一個螢幕寬的位置，跟著內容區一起被手指拖出來；其餘分頁維持隱藏。
+ * offset：1＝下一頁（在右邊）、-1＝上一頁（在左邊），其他＝不是相鄰頁、不加 class。
+ */
+const ADJ_BASE = 'group-data-[swiping]/sw:!block group-data-[swiping]/sw:!absolute group-data-[swiping]/sw:top-0 group-data-[swiping]/sw:w-full'
+export function adjacentPanelClass(offset: number): string {
+  if (offset === 1) return ADJ_BASE + ' group-data-[swiping]/sw:left-[100vw]'
+  if (offset === -1) return ADJ_BASE + ' group-data-[swiping]/sw:left-[-100vw]'
+  return ''
+}
 export const swipeStrips = new WeakMap<HTMLElement, SwipeStripController>()
 const STRIP_SELECTOR = '[data-testid="swipe-tab-strip"]'
 
@@ -91,12 +102,14 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     strip = stripEl ? swipeStrips.get(stripEl) : undefined
     strip?.prepare()
     dragging = true
+    node.setAttribute('data-swiping', '')
     node.style.willChange = 'transform'
     document.documentElement.style.overflowX = 'clip'
   }
   function finish(node: HTMLElement) {
     node.style.transform = ''
     node.style.willChange = ''
+    node.removeAttribute('data-swiping')
     document.documentElement.style.overflowX = ''
     dragging = false
     mode = 'idle'
@@ -110,9 +123,8 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     const done = () => {
       finish(node)
       if (dir === 0) { settling = false; return }
-      opts.go(idx + dir) // 動畫結束後才切換分頁狀態（改網址、載入資料、渲染新內容）
+      opts.go(idx + dir) // 動畫結束後才切換分頁狀態（改網址）；各分頁內容已各自掛載保留，切過去不重畫、不閃空白
       void nextTick().then(() => {
-        node.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' })
         settling = false
       })
     }

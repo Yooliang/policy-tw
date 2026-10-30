@@ -43,7 +43,7 @@ const isActive = (item: { path: string; exact: boolean }) => item.exact ? route.
     >
       <span
         v-if="item.badge"
-        class="absolute left-1/2 top-[-20px] h-14 w-14 -translate-x-1/2 rounded-full bg-white p-[3px] shadow-lg shadow-slate-900/30 motion-safe:transition-[filter] motion-safe:duration-200"
+        class="absolute left-1/2 top-[-20px] h-14 w-14 -translate-x-1/2 rounded-full shadow-lg shadow-slate-900/30 motion-safe:transition-[filter] motion-safe:duration-200"
         :class="isActive(item) ? '[filter:drop-shadow(0_0_6px_rgb(251_191_36/0.75))]' : ''"
         aria-hidden="true"
       >

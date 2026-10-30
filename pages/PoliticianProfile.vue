@@ -3,7 +3,7 @@ import { shortUrlsIn } from '../lib/url'
 import PartyBadge from '../components/PartyBadge.vue'
 import { ref, computed, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
 import { useMobileHeader } from '../composables/useMobileHeader'
-import { useSwipeTabs } from '../composables/useSwipeTabs'
+import { useSwipeTabs, adjacentPanelClass } from '../composables/useSwipeTabs'
 import { useMobileShell } from '../composables/useMobileShell'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase, withElectionData } from '../composables/useSupabase'
@@ -89,6 +89,7 @@ const profileRequest = useRequestTask()
 watch(() => route.params.politicianId, () => {
   policyRequest.reset(); profileRequest.reset()
   activeTab.value = "campaign"
+  tabSeen.campaign = true; tabSeen.history = false
   if (typeof window !== "undefined") window.scrollTo({ top: 0 })
 })
 
@@ -269,6 +270,24 @@ type ProfileTab = 'campaign' | 'history' | 'profile' | 'peers'
 const tabOrder = computed<ProfileTab[]>(() => ['campaign', 'history', 'profile', ...(peers.value.length > 0 ? ['peers' as const] : [])])
 const defaultTab = computed<ProfileTab>(() => landOnHistory.value ? 'history' : 'campaign')
 const swipeEl = ref<HTMLElement | null>(null)
+/**
+ * 各分頁內容各自掛載並保留（2026-10-31 小良哥：左右切換時舊內容不要清掉，拖曳時相鄰頁也要看得到）：
+ * 承諾與政見兩頁看過就留著（v-show 切換、不重畫）；閒置時預先畫好相鄰那一頁。基本資料與同選區候選人本來就一直在。
+ * 換到另一位人物時只留承諾（舊人物的政見頁釋放）。
+ */
+const tabSeen = reactive({ campaign: true, history: false })
+let tabPrerenderTimer: ReturnType<typeof setTimeout> | undefined
+watch(activeTab, (tab) => {
+  if (tab === 'campaign' || tab === 'history') tabSeen[tab] = true
+  if (typeof window === 'undefined') return
+  clearTimeout(tabPrerenderTimer)
+  tabPrerenderTimer = setTimeout(() => {
+    const i = tabOrder.value.indexOf(activeTab.value)
+    for (const t of [tabOrder.value[i - 1], tabOrder.value[i + 1]]) if (t === 'campaign' || t === 'history') tabSeen[t] = true
+  }, 350)
+}, { immediate: true })
+onBeforeUnmount(() => clearTimeout(tabPrerenderTimer))
+const panelClass = (tab: ProfileTab) => adjacentPanelClass(tabOrder.value.indexOf(tab) - tabOrder.value.indexOf(activeTab.value))
 const { openDrawer } = useMobileShell()
 useSwipeTabs(swipeEl, {
   index: () => Math.max(0, tabOrder.value.indexOf(activeTab.value)),
@@ -472,7 +491,7 @@ usePageHead({
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="text-left" ref="swipeEl" data-testid="swipe-area">
+      <div class="text-left group/sw" ref="swipeEl" data-testid="swipe-area">
         <div>
           <!-- 四個分頁在手機上會被擠成直排（2026-09-20 截圖）：手機不放數字與圖示、縮內距，標籤用短字（承諾／政見／基本資料／候選人，維護者 2026-09-30 的四字限制現在是兩字），390px 寬一排放得下 -->
           <div data-chrome-follow class="flex border-b border-slate-200 mb-6 overflow-x-auto max-md:sticky max-md:top-14 max-md:z-30 max-md:-mx-4 max-md:px-4 max-md:bg-slate-50">
@@ -494,8 +513,8 @@ usePageHead({
               <div v-if="activeTab === 'peers'" class="absolute bottom-0 left-0 w-full h-1 bg-amber-500 rounded-t-full"></div>
             </button>
           </div>
-          <div class="space-y-6">
-            <template v-if="activeTab === 'campaign'">
+          <div class="relative">
+            <div v-if="tabSeen.campaign" v-show="activeTab === 'campaign'" :class="['space-y-6', panelClass('campaign')]" data-testid="profile-panel-campaign">
               <template v-if="campaignPledges.length > 0">
                 <div class="flex justify-end -mt-2">
                   <div class="inline-flex bg-slate-100 p-1 rounded-lg">
@@ -579,9 +598,9 @@ usePageHead({
                 <!-- Error Message -->
                 <p v-if="lookup.campaign.error && !lookup.campaign.result" class="text-red-500 text-sm mt-3">{{ lookup.campaign.error }}</p>
               </div>
-            </template>
+            </div>
             <!-- 只在「政見」分頁出現；原本是 v-else，切到「基本資料」時也會跟著出來（2026-09-20） -->
-            <template v-else-if="activeTab === 'history'">
+            <div v-if="tabSeen.history" v-show="activeTab === 'history'" :class="['space-y-6', panelClass('history')]" data-testid="profile-panel-history">
               <template v-if="historicalPolicies.length > 0">
                 <div class="space-y-8">
                   <div v-for="group in historyGroups" :key="group.key">
@@ -627,11 +646,11 @@ usePageHead({
                 <!-- Error Message -->
                 <p v-if="lookup.history.error && !lookup.history.result" class="text-red-500 text-sm mt-3">{{ lookup.history.error }}</p>
               </div>
-            </template>
+            </div>
             <!-- 基本資料：原本的右側欄（政黨、選區、參選紀錄、現職、經歷、學歷、請 AI 幫忙查），2026-09-20 改成分頁。
                  用 v-show 不用 v-if：預渲染的 HTML 要有這一段，否則沒政見的人物頁 <main> 不到 120 字，
                  postbuild 的空殼檢查會把 14,137 頁擋下（#107 上線時建置紅在這裡） -->
-            <div v-show="activeTab === 'profile'">
+            <div v-show="activeTab === 'profile'" :class="panelClass('profile')">
               <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <div class="space-y-4">
                 <div>
@@ -779,7 +798,7 @@ usePageHead({
             </div>
             </div>
             <!-- 同選區候選人分頁：用 v-show，非作用中時 HTML 裡仍有每個人的 <a href>（爬蟲走得到）；卡片重用選舉頁的 PoliticianGrid -->
-            <div v-if="peers.length > 0" v-show="activeTab === 'peers'" data-testid="election-peers">
+            <div v-if="peers.length > 0" v-show="activeTab === 'peers'" :class="panelClass('peers')" data-testid="election-peers">
               <PoliticianGrid :politicians="peers" :title="peerDistrict" :columns="3" :election-id="primaryRecord?.electionId" />
               <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(segmentOfId(elections, primaryRecord.electionId), primaryRecord.region)" class="inline-block -mt-6 text-sm font-bold text-violet-700 hover:underline">
                 看 {{ primaryRecord.region }} 全部候選人 →

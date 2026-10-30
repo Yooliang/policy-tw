@@ -3,7 +3,7 @@ export default { name: 'ElectionPage' }
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Component } from 'vue'
+import { ref, shallowRef, computed, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Component } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
@@ -51,7 +51,7 @@ import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
-import { useSwipeTabs } from '../composables/useSwipeTabs'
+import { useSwipeTabs, adjacentPanelClass } from '../composables/useSwipeTabs'
 import { useMobileShell, isMobileViewport } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
 import { fileCache } from '../lib/map-data-cache'
@@ -102,6 +102,8 @@ watch(() => route.params.electionId, (seg) => {
   if (target) router.replace({ name: route.name as string, params: { ...route.params, electionId: target }, query: route.query, hash: route.hash })
 }, { immediate: true })
 const electionLoading = ref(false)
+/** 最近一次載完的「屆別｜縣市｜鄉鎮」：手機版分頁面板用它判斷目前畫面上的資料是不是這個地區的（不是就先保留舊地區的內容並淡化） */
+const mobileLoadedKey = ref('')
 // 政見矩陣只做最新一屆定期選舉（lib/md/scope.ts 的 latestLocalElection，跟預產的 .md 同一個判斷）
 const hasMatrix = computed(() => !!election.value && latestLocalElection(elections.value)?.id === election.value.id)
 
@@ -140,7 +142,7 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
   try {
     await loadPoliticiansByElection(id, region, subRegion)
   } finally {
-    if (seq === loadSeq) electionLoading.value = false
+    if (seq === loadSeq) { electionLoading.value = false; mobileLoadedKey.value = `${id}|${region}|${subRegion}` }
   }
   // 名錄只有縣市頁要，而且跟卡片分開撈（它要列到村里長，卡片只到下一層）。
   // 不 await 在上面那個 try 裡：名錄慢或失敗都不該讓卡片等它或跟著掛掉。
@@ -1136,18 +1138,20 @@ const indigenousDistricts = computed(() => {
 })
 
 /** 這個分頁的定位夠不夠：不夠就回「下一層要挑什麼」，夠了回 null */
-const mobilePick = computed<{ level: 'county' | 'sub' | 'village'; title: string; options: string[] } | null>(() => {
-  const need = TAB_NEEDS[mobileActiveType.value]
+interface MobilePick { level: 'county' | 'sub' | 'village'; title: string; options: string[] }
+function pickFor(type: string): MobilePick | null {
+  const need = TAB_NEEDS[type]
   if (selectedRegion.value === 'All') return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (need === 'county') return null
   if (selectedSubRegion.value === 'All') {
-    const indigenousOnly = isSpecialMunicipality.value && need === 'sub'
-    return { level: 'sub', title: `選擇${subRegionLabel.value}`, options: indigenousOnly ? indigenousDistricts.value : availableSubRegions.value }
+    // 鄉鎮層一律列該縣市全部鄉鎮市區（不依有沒有該類選舉過濾）；沒有該類選舉的區，內容區顯示「無此類選舉」，定位照樣設定
+    return { level: 'sub', title: `選擇${subRegionLabel.value}`, options: [...mobileSubOptions.value] }
   }
   if (need === 'sub') return null
   if (selectedVillage.value === 'All') return { level: 'village', title: `選擇${villageLabel.value}`, options: availableVillages.value }
   return null
-})
+}
+const mobilePick = computed(() => pickFor(mobileActiveType.value))
 /** 挑完選項：設定共用定位（縣市／鄉鎮走網址，村里走 ?village=） */
 function pickLocation(level: 'county' | 'sub' | 'village', value: string) {
   if (level === 'county') void router.replace(regionLink(value))
@@ -1156,9 +1160,8 @@ function pickLocation(level: 'county' | 'sub' | 'village', value: string) {
 }
 
 /** 手機版各分頁的內容（定位夠了才有）；人從已載入的資料取，鄉鎮與村里層級用現成的 levelPlan 區塊 */
-const mobileSection = computed<LevelSection | null>(() => {
-  if (mobilePick.value) return null
-  const type = mobileActiveType.value
+function sectionFor(type: string): LevelSection | null {
+  if (pickFor(type)) return null
   if (type === ElectionType.MAYOR) return buildSection(positionSpec(type)!)
   if (type === ElectionType.COUNCILOR) {
     // 整個縣市的議員（不照鄉鎮縮小），依選區分組
@@ -1171,7 +1174,8 @@ const mobileSection = computed<LevelSection | null>(() => {
   if (type === ElectionType.CHIEF) return nextLevelSections.value.find(s => s.spec.type === ElectionType.CHIEF) ?? null
   const role = type === ElectionType.TOWNSHIP_MAYOR ? 'head' : 'council'
   return thisLevelSections.value.find(s => s.spec.level === 'township' && s.spec.role === role) ?? null
-})
+}
+const mobileSection = computed(() => sectionFor(mobileActiveType.value))
 const mobileSectionTitle = (s: LevelSection) => `${mobileTypeLabel(s.spec.type)}參選人`
 /**
  * 標題區下方的晶片列＝該分頁的「同層切換列」（排序列之上），每個分頁只有一排：
@@ -1228,7 +1232,7 @@ function siteNames(raster: string[] | null, site: readonly string[]): readonly s
 }
 interface MobileChip { key: string; text: string; active: boolean; pick: () => void }
 const chipOf = (value: string, text: string, active: boolean, pick: () => void): MobileChip => ({ key: value, text, active, pick })
-const mobileSubOptions = computed(() => isSpecialMunicipality.value && TAB_NEEDS[mobileActiveType.value] === 'sub' ? indigenousDistricts.value : siteNames(rasterSubs.value, availableSubRegions.value))
+const mobileSubOptions = computed(() => siteNames(rasterSubs.value, availableSubRegions.value))
 const mobileChipRows = computed<MobileChip[][]>(() => {
   const pickRow = (level: 'county' | 'sub' | 'village', options: readonly string[], current: string): MobileChip[] =>
     options.map(o => chipOf(o, o, o === current, () => pickLocation(level, o)))
@@ -1270,13 +1274,51 @@ watch(mobileChipRows, () => {
   })
 }, { immediate: true, flush: 'post' })
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
-const mobileEmptyText = computed(() => {
-  const need = TAB_NEEDS[mobileActiveType.value]
+function emptyTextFor(type: string): string {
   if (electionLoading.value) return '載入中…'
-  const place = [selectedRegion.value, selectedSubRegion.value].filter(p => p && p !== 'All').join('')
-  if (need === 'sub' && isSpecialMunicipality.value) return `${place || selectedRegion.value}沒有${mobileTypeLabel(mobileActiveType.value)}選舉（只有山地原住民區才有）`
   return '無此類選舉'
+}
+
+/**
+ * 五個分頁各自掛載並保留（2026-10-31 小良哥：左右切換時舊內容不要清掉，拖曳時相鄰頁也要看得到）：
+ * - 看過的分頁（mobileVisited）都留在畫面上、用 v-show 切換；切回去不重畫、不重新載入，資料本來就在記憶體快取。
+ *   還沒看過的分頁，要等動畫結束切過去時才第一次渲染；閒置時順便預先畫好左右相鄰兩頁（只畫記憶體裡的資料、不發請求），拖曳時才不會是空白。
+ * - 換地區（縣市／鄉鎮）時，舊地區的內容留著並淡化，等新地區的資料載好才換掉；換掉後只保留新地區目前這一頁（舊地區的面板釋放，資料快取不動）。
+ */
+interface MobilePanel { type: string; pick: MobilePick | null; section: LevelSection | null; emptyText: string }
+const mobilePanelOf = (type: string): MobilePanel => ({ type, pick: pickFor(type), section: sectionFor(type), emptyText: emptyTextFor(type) })
+const mobileVisited = ref<string[]>([])
+const mobileRenderTypes = computed(() => {
+  const set = new Set([...mobileVisited.value, mobileActiveType.value])
+  return MOBILE_TAB_TYPES.filter(t => set.has(t))
 })
+const mobileLive = computed(() => Object.fromEntries(mobileRenderTypes.value.map(t => [t, mobilePanelOf(t)])) as Record<string, MobilePanel>)
+const mobilePanelKey = computed(() => `${electionId.value}|${selectedRegion.value}|${selectedSubRegion.value}`)
+const mobileReady = computed(() => mobileLoadedKey.value === mobilePanelKey.value)
+const mobileLastGood = shallowRef<Record<string, MobilePanel> | null>(null)
+watch([mobileLive, mobileReady], ([live, ready]) => { if (ready) mobileLastGood.value = live }, { immediate: true })
+const mobileStale = computed(() => !mobileReady.value && mobileLastGood.value !== null)
+const mobilePanels = computed<MobilePanel[]>(() => {
+  const src = mobileStale.value ? mobileLastGood.value! : mobileLive.value
+  return mobileRenderTypes.value.map(t => src[t] ?? { type: t, pick: null, section: null, emptyText: '載入中…' })
+})
+const mobileAdjacent = (type: string) => adjacentPanelClass(MOBILE_TAB_TYPES.indexOf(type) - mobileIndex.value)
+let mobilePrerenderTimer: ReturnType<typeof setTimeout> | undefined
+let mobileVisitedKey = ''
+watch([mobileReady, mobileActiveType, mobilePanelKey], ([ready, type, key]) => {
+  if (!ready) return
+  if (key !== mobileVisitedKey) { mobileVisitedKey = key; mobileVisited.value = [type] }
+  else if (!mobileVisited.value.includes(type)) mobileVisited.value = [...mobileVisited.value, type]
+  clearTimeout(mobilePrerenderTimer)
+  if (typeof window === 'undefined' || !isMobileViewport()) return
+  mobilePrerenderTimer = setTimeout(() => {
+    if (mobilePanelKey.value !== key) return
+    const i = MOBILE_TAB_TYPES.indexOf(mobileActiveType.value)
+    const want = [MOBILE_TAB_TYPES[i - 1], MOBILE_TAB_TYPES[i + 1]].filter((t): t is string => !!t && !mobileVisited.value.includes(t))
+    if (want.length > 0) mobileVisited.value = [...mobileVisited.value, ...want]
+  }, 350)
+}, { immediate: true })
+onBeforeUnmount(() => clearTimeout(mobilePrerenderTimer))
 
 // 縣市層以下有定位時，縣市長與議員的資料也要在（分層載入只撈「這一層＋下一層」，直接開鄉鎮網址不會有縣市層）
 function ensureCountyLevelLoaded() {
@@ -1356,7 +1398,7 @@ useSwipeTabs(swipeEl, {
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div ref="swipeEl" data-testid="swipe-area" :class="selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0'">
+      <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw', selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0']">
 
       <!-- VIEW: Politicians -->
 
@@ -1482,33 +1524,35 @@ useSwipeTabs(swipeEl, {
         </div><!-- 桌機區塊結束 -->
 
         <!-- 手機版（X 式）：固定五個類型分頁。定位夠了顯示資料；不夠就在這裡列出下一層的選項（點了設定共用定位） -->
-        <div class="md:hidden" data-testid="mobile-panel">
-          <template v-if="mobilePick">
-            <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ mobilePick.title }}<span class="ml-2 text-xs font-normal text-slate-400">從上方選一個，或在下面挑</span></h3>
-            <div v-if="mobilePick.options.length > 0" class="flex flex-wrap gap-2" data-testid="mobile-pick-options">
-              <button
-                v-for="o in mobilePick.options"
-                :key="o"
-                type="button"
-                class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 active:bg-blue-50"
-                @click="pickLocation(mobilePick.level, o)"
-              >{{ o }}</button>
-            </div>
-            <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-pick-empty">{{ mobileEmptyText }}</p>
-          </template>
-          <template v-else-if="mobileSection && !mobileSection.empty">
-            <PoliticianGrid v-if="mobileSection.spec.display === 'grid'" :id="mobileSection.anchor" :politicians="mobileSection.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(mobileSection)" :pk-link="sectionPkLink(mobileSection)"><template #icon><component :is="LEVEL_ICONS[mobileSection.spec.icon]" :class="mobileSection.spec.iconClass" /></template></PoliticianGrid>
-            <ChipFilteredGroups
-              v-else
-              :id="mobileSection.anchor"
-              :groups="mobileSection.groups"
-              :columns="3"
-              :election-id="electionId"
-              :title-prefix="mobileSection.spec.display === 'district' ? mobileTypeLabel(mobileSection.spec.type) : undefined"
-              :pk-link-for="groupPkLinkFor(mobileSection.spec.type)"
-            ><template #icon><component :is="LEVEL_ICONS[mobileSection.spec.icon]" :class="mobileSection.spec.iconClass" /></template></ChipFilteredGroups>
-          </template>
-          <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-empty">{{ mobileEmptyText }}</p>
+        <div class="md:hidden relative transition-opacity duration-200" :class="mobileStale ? 'opacity-50' : ''" data-testid="mobile-panel">
+          <div v-for="panel in mobilePanels" :key="panel.type" v-show="panel.type === mobileActiveType" :class="mobileAdjacent(panel.type)" :data-testid="`mobile-panel-${panel.type}`">
+            <template v-if="panel.pick">
+              <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}<span class="ml-2 text-xs font-normal text-slate-400">從上方選一個，或在下面挑</span></h3>
+              <div v-if="panel.pick.options.length > 0" class="flex flex-wrap gap-2" data-testid="mobile-pick-options">
+                <button
+                  v-for="o in panel.pick.options"
+                  :key="o"
+                  type="button"
+                  class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 active:bg-blue-50"
+                  @click="pickLocation(panel.pick.level, o)"
+                >{{ o }}</button>
+              </div>
+              <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-pick-empty">{{ panel.emptyText }}</p>
+            </template>
+            <template v-else-if="panel.section && !panel.section.empty">
+              <PoliticianGrid v-if="panel.section.spec.display === 'grid'" :id="panel.section.anchor" :politicians="panel.section.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(panel.section)" :pk-link="sectionPkLink(panel.section)"><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></PoliticianGrid>
+              <ChipFilteredGroups
+                v-else
+                :id="panel.section.anchor"
+                :groups="panel.section.groups"
+                :columns="3"
+                :election-id="electionId"
+                :title-prefix="panel.section.spec.display === 'district' ? mobileTypeLabel(panel.section.spec.type) : undefined"
+                :pk-link-for="groupPkLinkFor(panel.section.spec.type)"
+              ><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></ChipFilteredGroups>
+            </template>
+            <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-empty">{{ panel.emptyText }}</p>
+          </div>
         </div>
       </div>
 
