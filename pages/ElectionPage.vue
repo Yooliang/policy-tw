@@ -54,6 +54,7 @@ import SwipeTabStrip from '../components/SwipeTabStrip.vue'
 import { useSwipeTabs } from '../composables/useSwipeTabs'
 import { useMobileShell, isMobileViewport } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
+import { fileCache } from '../lib/map-data-cache'
 
 const router = useRouter()
 const route = useRoute()
@@ -1172,15 +1173,102 @@ const mobileSection = computed<LevelSection | null>(() => {
   return thisLevelSections.value.find(s => s.spec.level === 'township' && s.spec.role === role) ?? null
 })
 const mobileSectionTitle = (s: LevelSection) => `${mobileTypeLabel(s.spec.type)}參選人`
-/** 議員、代表分頁在有資料時最上方的一排選區晶片 */
-const mobileChips = computed(() => {
-  const s = mobileSection.value
-  if (!s || s.empty || !(s.spec.display === 'district' || s.spec.type === ElectionType.REPRESENTATIVE) || s.chips.length < 2) return null
-  return [
-    { key: 'All', text: '全部', value: 'All', active: selectedDistrict.value === 'All' },
-    ...s.chips.map(d => ({ key: d, text: shortDistrict(d), value: d, active: selectedDistrict.value === d })),
+/**
+ * 標題區下方的晶片列＝該分頁的「同層切換列」（排序列之上），每個分頁只有一排：
+ *   縣市長：全台＋各縣市｜議員：該縣市的選區｜鄉鎮市長：該縣市各鄉鎮｜代表：該鄉鎮的選區｜村里長：該鄉鎮各村里
+ * 定位缺層時（內容區正在列完整選項），晶片列就顯示該缺的那一層。
+ * 縣市／鄉鎮／村里清單來自地圖的點陣靜態檔（data/tw-raster，與 StatsMap 共用 fileCache）：
+ *   national.json 只取縣市代碼（約 16KB，縣市名單本身用現成常數），towns/<縣市碼>.json（約 0.5–1KB）、villages/<鄉鎮碼>.json（約 1–3KB）。
+ */
+const rasterTownFiles = import.meta.glob<{ default: RasterNames }>('../data/tw-raster/towns/*.json')
+const rasterVillageFiles = import.meta.glob<{ default: RasterNames }>('../data/tw-raster/villages/*.json')
+interface RasterNames { codes: string[]; names: string[] }
+const normName = (n: string) => n.replace(/臺/g, '台')
+async function loadRasterNames(kind: 'national' | 'towns' | 'villages', code?: string): Promise<RasterNames | null> {
+  try {
+    if (kind === 'national') return await fileCache.get('national', () => import('../data/tw-raster/national.json').then(m => m.default)) as RasterNames
+    const load = (kind === 'towns' ? rasterTownFiles : rasterVillageFiles)[`../data/tw-raster/${kind}/${code}.json`]
+    return load ? await fileCache.get(`${kind}/${code}`, () => load().then(m => m.default)) as RasterNames : null
+  } catch { return null }
+}
+/** 目前縣市的鄉鎮名單、目前鄉鎮的村里名單（來自點陣檔；讀不到就維持 null，改用參選資料取得的清單） */
+const rasterSubs = ref<string[] | null>(null)
+const rasterVillages = ref<string[] | null>(null)
+const rasterCountyCode = ref<string | null>(null)
+const rasterTownCode = ref<string | null>(null)
+interface DistrictCache { election: number; council: Record<string, string[]>; rep: Record<string, string[]> }
+const districtCache = ref<DistrictCache | null>(null)
+let rasterSeq = 0
+watch([selectedRegion, selectedSubRegion], async ([region, sub]) => {
+  const seq = ++rasterSeq
+  rasterSubs.value = null
+  rasterVillages.value = null
+  rasterCountyCode.value = null
+  rasterTownCode.value = null
+  if (!isMobileViewport() || region === 'All') return
+  const national = await loadRasterNames('national')
+  const ci = national ? national.names.findIndex(n => normName(n) === normName(region)) : -1
+  if (!national || ci < 0) return
+  rasterCountyCode.value = national.codes[ci]!
+  if (!districtCache.value) districtCache.value = await import('../data/tw-districts/2026.json').then(m => m.default as DistrictCache).catch(() => null)
+  const towns = await loadRasterNames('towns', national.codes[ci])
+  if (!towns || seq !== rasterSeq) return
+  rasterSubs.value = towns.names
+  if (sub === 'All') return
+  const ti = towns.names.findIndex(n => normName(n) === normName(sub))
+  if (ti < 0) return
+  rasterTownCode.value = towns.codes[ti]!
+  const villages = await loadRasterNames('villages', towns.codes[ti])
+  if (villages && seq === rasterSeq) rasterVillages.value = villages.names
+}, { immediate: true })
+/** 點陣檔的名稱對回網站資料用的寫法（臺／台），對不上就照原樣 */
+function siteNames(raster: string[] | null, site: readonly string[]): readonly string[] {
+  if (!raster) return site
+  return raster.map(n => site.find(x => normName(x) === normName(n)) ?? n)
+}
+interface MobileChip { key: string; text: string; active: boolean; pick: () => void }
+const chipOf = (value: string, text: string, active: boolean, pick: () => void): MobileChip => ({ key: value, text, active, pick })
+const mobileSubOptions = computed(() => isSpecialMunicipality.value && TAB_NEEDS[mobileActiveType.value] === 'sub' ? indigenousDistricts.value : siteNames(rasterSubs.value, availableSubRegions.value))
+const mobileChipRows = computed<MobileChip[][]>(() => {
+  const pickRow = (level: 'county' | 'sub' | 'village', options: readonly string[], current: string): MobileChip[] =>
+    options.map(o => chipOf(o, o, o === current, () => pickLocation(level, o)))
+  const type = mobileActiveType.value
+  const countyRow = (): MobileChip[] => [
+    ...(type === ElectionType.MAYOR ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
+    ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value),
   ]
+  const s = mobileSection.value
+  // 選區：優先用選區快取（data/tw-districts，2026 登記名冊），沒有才用參選資料推；快取的標籤對回參選資料的寫法（臺／台）
+  const districtRow = (): MobileChip[] => {
+    const code = type === ElectionType.COUNCILOR ? rasterCountyCode.value : rasterTownCode.value
+    const cached = electionId.value === 2026 && code ? (type === ElectionType.COUNCILOR ? districtCache.value?.council : districtCache.value?.rep)?.[code] : undefined
+    const live = s && !s.empty ? s.chips : []
+    const list = cached && cached.length > 0 ? cached.map(d => live.find(x => normName(x) === normName(d)) ?? d) : live
+    if (list.length < 2) return []
+    return [
+      chipOf('All', '全部', selectedDistrict.value === 'All', () => { selectedDistrict.value = 'All' }),
+      ...list.map(d => chipOf(d, shortDistrict(d), selectedDistrict.value === d, () => { selectedDistrict.value = d })),
+    ]
+  }
+  let row: MobileChip[]
+  if (selectedRegion.value === 'All') row = countyRow()
+  else if (type === ElectionType.MAYOR) row = countyRow()
+  else if (type === ElectionType.COUNCILOR) row = districtRow()
+  else if (selectedSubRegion.value === 'All' || type === ElectionType.TOWNSHIP_MAYOR) row = pickRow('sub', mobileSubOptions.value, selectedSubRegion.value)
+  else if (type === ElectionType.REPRESENTATIVE) row = districtRow()
+  else row = pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value)
+  return row.length > 0 ? [row] : []
 })
+const mobileChipsEl = ref<HTMLElement | null>(null)
+// 選中的晶片自動捲到橫向可見（只動橫向，不動頁面捲動）
+watch(mobileChipRows, () => {
+  void nextTick(() => {
+    mobileChipsEl.value?.querySelectorAll<HTMLElement>('[data-active="true"]').forEach(el => {
+      const box = el.parentElement
+      if (box) box.scrollLeft = el.offsetLeft - (box.clientWidth - el.offsetWidth) / 2
+    })
+  })
+}, { immediate: true, flush: 'post' })
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 const mobileEmptyText = computed(() => {
   const need = TAB_NEEDS[mobileActiveType.value]
@@ -1274,15 +1362,24 @@ useSwipeTabs(swipeEl, {
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <!-- 手機版：選區晶片放在排序工具列之上（標題區 → 選區 → 排序 → 卡片） -->
-        <div v-if="mobileChips && !mobilePick" class="md:hidden -mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="mobile-district-chips">
-          <button
-            v-for="c in mobileChips"
-            :key="c.key"
-            type="button"
-            class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
-            :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
-            @click="selectedDistrict = c.value"
-          >{{ c.text }}</button>
+        <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" class="md:hidden" data-testid="mobile-district-chips">
+          <div
+            v-for="(row, ri) in mobileChipRows"
+            :key="ri"
+            class="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden relative"
+            data-no-swipe
+            data-testid="mobile-chip-row"
+          >
+            <button
+              v-for="c in row"
+              :key="c.key"
+              type="button"
+              class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
+              :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+              :data-active="c.active ? 'true' : 'false'"
+              @click="c.pick()"
+            >{{ c.text }}</button>
+          </div>
         </div>
         <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
         <div class="flex justify-end mb-2 md:mb-4">
@@ -1387,7 +1484,7 @@ useSwipeTabs(swipeEl, {
         <!-- 手機版（X 式）：固定五個類型分頁。定位夠了顯示資料；不夠就在這裡列出下一層的選項（點了設定共用定位） -->
         <div class="md:hidden" data-testid="mobile-panel">
           <template v-if="mobilePick">
-            <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ mobilePick.title }}</h3>
+            <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ mobilePick.title }}<span class="ml-2 text-xs font-normal text-slate-400">從上方選一個，或在下面挑</span></h3>
             <div v-if="mobilePick.options.length > 0" class="flex flex-wrap gap-2" data-testid="mobile-pick-options">
               <button
                 v-for="o in mobilePick.options"

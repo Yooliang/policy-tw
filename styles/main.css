@@ -34,6 +34,7 @@ html.dark .bg-slate-300 { background-color: #475569; }
 html.dark .bg-white\/50 { background-color: rgb(30 41 59 / 0.5); }
 html.dark .bg-white\/80 { background-color: rgb(30 41 59 / 0.8); }
 html.dark .bg-white\/90 { background-color: rgb(30 41 59 / 0.9); }
+html.dark .bg-white\/95 { background-color: rgb(30 41 59 / 0.95); } /* 手機底部分頁列 MobileTabBar */
 html.dark .bg-slate-50\/50 { background-color: rgb(15 23 42 / 0.5); }
 html.dark .bg-slate-50\/90 { background-color: rgb(15 23 42 / 0.9); }
 html.dark .bg-slate-200\/50 { background-color: rgb(51 65 85 / 0.5); }
