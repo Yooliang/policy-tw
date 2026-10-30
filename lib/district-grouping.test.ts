@@ -129,11 +129,12 @@ Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選
   assert(!/chips|selected/.test(groups.slice(groups.indexOf("defineProps"), groups.indexOf("</script>"))), "分組元件不收 chips／selected");
   assertEquals(page.match(/<ChipFilteredGroups[^>]*:chips=/g)?.length ?? 0, 0);
   assert(!/<ChipFilteredGroups(?:\s+[^>\s]+)*\s+:selected=/.test(page));
-  // 右側面板：選舉區（標題「○○選舉區」）在鄉鎮市區之後、村里之前；只在候選人頁籤，其他頁籤用不到
+  // 右側面板：縣市議員選舉區在鄉鎮市區之前；鄉鎮市民代表／區代表的選舉區在鄉鎮市區之後、村里之前；只在候選人頁籤，其他頁籤用不到
   const sub = page.indexOf("<span class=\"text-sm font-bold text-slate-700\">鄉鎮市區</span>");
-  const dist = page.indexOf('data-testid="district-panel"');
+  const council = page.indexOf('v-for="panel in councilorDistrictPanels"');
+  const dist = page.indexOf('v-for="panel in inTownshipDistrictPanels"');
   const village = page.indexOf("<!-- 村里篩選 -->");
-  assert(sub > 0 && dist > sub && village > dist, "順序：鄉鎮市區、選舉區、村里");
+  assert(council > 0 && sub > council && dist > sub && village > dist, "順序：議員選舉區、鄉鎮市區、代表選舉區、村里");
   assert(/const districtPanels = computed\(\(\) => viewMode\.value !== 'politicians' \? \[\]/.test(page));
   assert(page.includes("`${sec.spec.label}選舉區`"), "標題是「縣市議員選舉區」這種寫法");
   assert(/@click="toggleDistrictChip\(district\)"/.test(page) && /@click="selectedDistrict = 'All'"/.test(page));

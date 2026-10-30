@@ -637,6 +637,19 @@ const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
   .filter(sec => (sec.spec.display === 'district' || sec.spec.type === '鄉鎮市民代表') && !sec.empty && sec.chips.length > 1)
   .map(sec => ({ type: sec.spec.type, title: `${sec.spec.label}選舉區`, chips: sec.chips })))
+/** 縣市議員選舉區包含好幾個鄉鎮，排在「鄉鎮市區」上面；鄉鎮市民代表／區代表的選舉區在鄉鎮之內，排在下面（層級：議員選舉區 → 鄉鎮市區 → 代表選舉區 → 村里） */
+const councilorDistrictPanels = computed(() => districtPanels.value.filter(p => p.type === '縣市議員'))
+const inTownshipDistrictPanels = computed(() => districtPanels.value.filter(p => p.type !== '縣市議員'))
+/** 選了議員選舉區時，鄉鎮市區只列該選區涵蓋的鄉鎮（對應表查不到就維持全列） */
+const visibleSubRegions = computed(() => {
+  const district = selectedDistrict.value
+  if (district === 'All' || !councilorDistrictPanels.value.length) return availableSubRegions.value
+  const inDistrict = new Set(electoralDistrictAreas.value
+    .filter(m => sameRegionName(m.region, selectedRegion.value) && m.election_id === electionYear.value && sameRegionName(m.electoral_district, district))
+    .map(m => m.township))
+  const shown = availableSubRegions.value.filter(t => inDistrict.has(t))
+  return shown.length > 0 ? shown : availableSubRegions.value
+})
 
 /**
  * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
@@ -1301,6 +1314,30 @@ usePageHead({
       <!-- 右側：篩選區（手機版顯示在上方） -->
       <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
+          <!-- 縣市議員選舉區（排在鄉鎮市區上面；點了只看那一區，鄉鎮市區也只列該選區的鄉鎮，再點一次取消） -->
+          <div v-for="panel in councilorDistrictPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+            <div class="flex items-center gap-2 mb-3">
+              <MapPin :size="16" class="text-blue-500" />
+              <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
+            </div>
+            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+              <button
+                type="button"
+                @click="selectedDistrict = 'All'"
+                :aria-pressed="selectedDistrict === 'All'"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+              >全部</button>
+              <button
+                v-for="district in panel.chips"
+                :key="district"
+                type="button"
+                @click="toggleDistrictChip(district)"
+                :aria-pressed="selectedDistrict === district"
+                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+              >{{ district }}</button>
+            </div>
+          </div>
+
           <!-- 鄉鎮市區篩選 -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
@@ -1315,7 +1352,7 @@ usePageHead({
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
               >全部</RouterLink>
               <RouterLink
-                v-for="subRegion in availableSubRegions"
+                v-for="subRegion in visibleSubRegions"
                 :key="subRegion"
                 :to="townshipLink(subRegion)"
                 :aria-current="selectedSubRegion === subRegion ? 'page' : undefined"
@@ -1325,7 +1362,7 @@ usePageHead({
           </div>
 
           <!-- 選舉區篩選（議員、原住民區代表；2026-10-06 從列表上方移到這裡）：點了只看那一區，再點一次取消 -->
-          <div v-for="panel in districtPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+          <div v-for="panel in inTownshipDistrictPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-blue-500" />
               <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
