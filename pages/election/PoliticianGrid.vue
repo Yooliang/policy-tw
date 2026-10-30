@@ -6,6 +6,7 @@ import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
 import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
+import { thumbFor } from '../../composables/useAvatarThumb'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 import { ballotLabel } from '../../lib/ballot-number'
 import { isElectionVoted } from '../../lib/policy-stage'
@@ -39,6 +40,10 @@ const collapsed = ref(false)
  * 沒有就全寬 → 六欄，兩種卡片一樣大。預渲染與瀏覽器是同一種卡片（以前預渲染出清單版、掛載後才換，畫面會跳）。
  */
 const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
+// 2026-10-31：有縮圖就用縮圖＋srcset（卡片寬約 33vw～180px），縮圖載入失敗退回原圖
+const brokenThumbs = ref<Set<string>>(new Set())
+const portraitThumb = (p: Politician) => (p.avatarUrl && !brokenThumbs.value.has(p.avatarUrl)) ? thumbFor(p.avatarUrl) : null
+function onPortraitError(p: Politician) { if (p.avatarUrl && portraitThumb(p)) brokenThumbs.value = new Set(brokenThumbs.value).add(p.avatarUrl) }
 // columns === 2 就是右側有篩選欄（ElectionPage 的 gridColumns）
 const portraitGridClass = computed(() => props.columns === 2
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
@@ -163,7 +168,13 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
-          <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" />
+          <img
+            :src="portraitThumb(politician)?.src ?? portraitSrc(politician)"
+            :srcset="portraitThumb(politician)?.srcset"
+            :sizes="portraitThumb(politician) ? '(min-width: 1024px) 180px, 34vw' : undefined"
+            :alt="politician.name" loading="lazy" decoding="async" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
+            @error="onPortraitError(politician)"
+          />
           <!-- 有號次（名單公告、抽籤後）就顯示「N號」；已登記＝綠色小勾 -->
           <span
             v-if="ballotLabel(politician.candNo)"
