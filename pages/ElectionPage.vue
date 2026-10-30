@@ -7,7 +7,6 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, 
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
-import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -717,6 +716,44 @@ watch(() => route.hash, queueAnchorScroll)
 /** 手機版地區抽屜（右下角浮動按鈕開關）：抽屜裡就是右側面板同一個節點，桌機版不受影響；換頁（切縣市、鄉鎮）時自動收起 */
 const regionDrawerOpen = ref(false)
 watch(() => route.fullPath, () => { regionDrawerOpen.value = false })
+const regionDrawerEl = ref<HTMLElement | null>(null)
+type DrawerChip = { key: string; text: string; active: boolean; to?: RouteLocationRaw; onClick?: () => void }
+/** 手機抽屜四列：縣市（全台＋各縣市，全台頁也有）／鄉鎮市區／村里／選區（多種選區並存時晶片前加短標籤）；沒資料的列不出現 */
+const drawerRows = computed(() => {
+  const rows: { key: string; label: string; chips: DrawerChip[] }[] = []
+  rows.push({ key: 'county', label: '縣市', chips: [
+    { key: 'All', text: '全台', active: selectedRegion.value === 'All', to: regionLink('All') },
+    ...TAIWAN_COUNTIES.map(c => ({ key: c, text: c, active: selectedRegion.value === c, to: regionLink(c) })),
+  ] })
+  if (selectedRegion.value !== 'All' && availableSubRegions.value.length > 0) {
+    rows.push({ key: 'town', label: '鄉鎮', chips: [
+      { key: 'All', text: '全部', active: selectedSubRegion.value === 'All', to: townshipLink('All') },
+      ...availableSubRegions.value.map(t => ({ key: t, text: t, active: selectedSubRegion.value === t, to: townshipLink(t) })),
+    ] })
+    if (availableVillages.value.length > 0 && viewMode.value !== 'comparison') {
+      rows.push({ key: 'village', label: '村里', chips: [
+        { key: 'All', text: '全部', active: selectedVillage.value === 'All', onClick: () => { selectedVillage.value = 'All' } },
+        ...availableVillages.value.map(v => ({ key: v, text: v, active: selectedVillage.value === v, onClick: () => { selectedVillage.value = v } })),
+      ] })
+    }
+    const dChips: DrawerChip[] = []
+    const many = districtPanels.value.length > 1
+    for (const p of districtPanels.value) {
+      const pre = many ? p.title + ' ' : ''
+      dChips.push({ key: p.type + 'All', text: pre + '全部', active: selectedDistrict.value === 'All', onClick: () => { selectedDistrict.value = 'All' } })
+      for (const d of p.chips) dChips.push({ key: p.type + d, text: pre + shortDistrict(d), active: selectedDistrict.value === d, onClick: () => toggleDistrictChip(d) })
+    }
+    if (pkDistrictPanel.value) for (const d of pkDistrictPanel.value.links) dChips.push({ key: 'pk' + d.label, text: d.label, active: !!d.active, to: d.to })
+    if (dChips.length > 0) rows.push({ key: 'district', label: '選區', chips: dChips })
+  }
+  return rows
+})
+// 抽屜打開（或換頁後資料到齊）時，每列選中的晶片捲到可見
+watch([regionDrawerOpen, drawerRows], async () => {
+  if (!regionDrawerOpen.value) return
+  await nextTick()
+  regionDrawerEl.value?.querySelectorAll<HTMLElement>('[data-active="1"]').forEach(el => el.scrollIntoView({ inline: 'center', block: 'nearest' }))
+}, { flush: 'post' })
 const regionFabLabel = computed(() => selectedVillage.value !== 'All' ? selectedVillage.value : selectedSubRegion.value !== 'All' ? selectedSubRegion.value : selectedRegion.value !== 'All' ? selectedRegion.value : '地區')
 watch([thisLevelSections, nextLevelSections, selectedSubRegion, electionLoading], () => { void nextTick(scrollToPendingAnchor) })
 
@@ -1309,25 +1346,11 @@ usePageHead({
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
-      <div
-        v-if="selectedRegion !== 'All' && availableSubRegions.length > 0"
-        :class="['md:order-last md:w-1/3 shrink-0 md:block', regionDrawerOpen ? 'fixed inset-x-0 bottom-0 z-[70] max-h-[85vh] overflow-y-auto overscroll-contain rounded-t-2xl bg-slate-50 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:static md:z-auto md:max-h-none md:overflow-visible md:rounded-none md:bg-transparent md:p-0 md:shadow-none' : 'hidden']"
-        data-testid="region-drawer"
-      >
+      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="hidden md:block md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
-          <!-- 手機版抽屜標頭與縣市（同一個縣市選擇元件，真連結） -->
-          <div class="md:hidden">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-base font-black text-slate-800">地區</span>
-              <button type="button" class="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-bold" @click="regionDrawerOpen = false">完成</button>
-            </div>
-            <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
-              <GlobalRegionSelector :current="selectedRegion" :link-for="regionLink" />
-            </div>
-          </div>
           <!-- 地區卡：鄉鎮市區 → 村里（連動） -->
-          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <div class="flex items-center gap-2 mb-3">
+          <div class="bg-white rounded-xl border border-slate-200 p-2.5 md:p-4 shadow-sm">
+            <div class="flex items-center gap-2 mb-1.5 md:mb-3">
               <MapPin :size="16" class="text-slate-400" />
               <span class="text-sm font-bold text-slate-700">鄉鎮市區</span>
             </div>
@@ -1368,7 +1391,7 @@ usePageHead({
           </div>
 
           <!-- 選區卡（議員、鄉鎮市民代表、原住民區代表各一列；只篩自己那一種卡，不連動鄉鎮／村里；再點一次取消） -->
-          <div v-if="districtPanels.length > 0" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+          <div v-if="districtPanels.length > 0" class="bg-white rounded-xl border border-blue-200 p-2.5 md:p-4 shadow-sm" data-testid="district-panel">
             <template v-for="(panel, i) in districtPanels" :key="panel.type">
               <div :class="`flex items-center gap-2 mb-3 ${i > 0 ? 'mt-4' : ''}`">
                 <MapPin :size="16" class="text-blue-500" />
@@ -1394,7 +1417,7 @@ usePageHead({
           </div>
 
           <!-- 政見 PK 的選區（跟其他頁籤的選舉區、村里同一個位置；真連結，網址 district 參數照舊） -->
-          <div v-if="pkDistrictPanel" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="pk-district-panel">
+          <div v-if="pkDistrictPanel" class="bg-white rounded-xl border border-blue-200 p-2.5 md:p-4 shadow-sm" data-testid="pk-district-panel">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-blue-500" />
               <span class="text-sm font-bold text-slate-700">{{ pkDistrictPanel.title }}</span>
@@ -1427,15 +1450,35 @@ usePageHead({
 
       </div><!-- flex 結束 -->
 
-      <!-- 手機版：抽屜背板與右下角「地區」浮動按鈕 -->
+      <!-- 手機版：抽屜背板、右下角「地區」浮動按鈕、底部抽屜（四列：縣市／鄉鎮／村里／選區，各列單行橫向滑動） -->
       <div v-if="regionDrawerOpen" class="fixed inset-0 z-[65] bg-black/40 md:hidden" @click="regionDrawerOpen = false"></div>
       <button
-        v-if="selectedRegion !== 'All' && availableSubRegions.length > 0 && !regionDrawerOpen"
+        v-if="!regionDrawerOpen"
         type="button"
         class="md:hidden fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg active:scale-95"
         data-testid="region-fab"
         @click="regionDrawerOpen = true"
       ><MapPin :size="16" />{{ regionFabLabel }}</button>
+      <div
+        v-if="regionDrawerOpen"
+        ref="regionDrawerEl"
+        class="md:hidden fixed inset-x-0 bottom-0 z-[70] max-h-[40dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-slate-50 px-3 pt-2 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+        data-testid="region-drawer"
+      >
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-black text-slate-800">地區</span>
+          <button type="button" class="px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold" @click="regionDrawerOpen = false">完成</button>
+        </div>
+        <div v-for="row in drawerRows" :key="row.key" class="flex items-center gap-2 py-1" :data-testid="'region-row-' + row.key">
+          <span class="shrink-0 w-9 text-[11px] font-black text-slate-400">{{ row.label }}</span>
+          <div class="flex flex-1 min-w-0 gap-1 overflow-x-auto flex-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <template v-for="c in row.chips" :key="c.key">
+              <RouterLink v-if="c.to" :to="c.to" :data-active="c.active ? '1' : undefined" :aria-current="c.active ? 'page' : undefined" :class="`shrink-0 px-3 h-8 inline-flex items-center rounded-lg text-xs font-bold whitespace-nowrap transition-all ${c.active ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`">{{ c.text }}</RouterLink>
+              <button v-else type="button" :data-active="c.active ? '1' : undefined" :aria-pressed="c.active" @click="c.onClick?.()" :class="`shrink-0 px-3 h-8 inline-flex items-center rounded-lg text-xs font-bold whitespace-nowrap transition-all ${c.active ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`">{{ c.text }}</button>
+            </template>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
