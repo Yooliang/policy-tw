@@ -3,16 +3,17 @@ import { electionPath } from './election-regions'
 /**
  * 選舉頁 Hero 的檢視頁籤，選舉頁與政見矩陣頁共用（維護者 2026-10-07：矩陣頁進去要像第五個頁籤，頁首一致）。
  * VIEW_MODES 是網址參數 ?view= 的合法值；VIEW_TABS 是頁籤的文字（圖示在 components/ElectionHero.vue）。
+ * 順序（2026-10-31）：候選人｜承諾｜PK 一組，串聯｜矩陣 一組（手機膠囊列在 PK 與串聯之間畫分隔線）。
  * short 是手機版用的兩字短標（使用者 2026-09-19：四顆要放進一排）。
  */
-export const VIEW_MODES = ['politicians', 'pledges', 'issues', 'comparison'] as const
+export const VIEW_MODES = ['politicians', 'pledges', 'comparison', 'issues'] as const
 export type ElectionViewMode = typeof VIEW_MODES[number]
 
 export const VIEW_TABS: ReadonlyArray<{ key: ElectionViewMode; label: string; short: string }> = [
   { key: 'politicians', label: '候選人', short: '候選人' },
   { key: 'pledges', label: '競選承諾', short: '承諾' },
-  { key: 'issues', label: '議題串聯', short: '串聯' },
   { key: 'comparison', label: '政見 PK', short: 'PK' },
+  { key: 'issues', label: '議題串聯', short: '串聯' },
 ]
 
 /**

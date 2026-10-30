@@ -99,7 +99,8 @@ watch(isSearchRoute, async (on) => {
 const TAB_ROOTS = ['/', '/tracking', '/stats']
 const canBack = computed(() => {
   void route.fullPath
-  return mounted.value && !isHome.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
+  // 選舉頁（含承諾／PK 等各檢視）不放返回鈕：退層靠頁首麵包屑（2026-10-31）
+  return mounted.value && !isHome.value && !isElectionRoute.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
 })
 </script>
 

@@ -705,6 +705,8 @@ async function loadPoliticiansByElection(
   electionId: number,
   region: string = 'All',
   subRegion: string = 'All',
+  /** 指定就只撈這幾種職位（跟這一屆有的職位取交集）：手機版「鄉鎮列／村里列的全部」要一次看整個縣市的代表、村里長，分層載入預設不帶這兩種 */
+  onlyTypes?: readonly string[],
 ): Promise<Politician[]> {
   // 切換不同選舉時，清掉上一個選舉載進來的候選人避免無限膨脹——
   // 但「有政見的人物」要留著：全清會把 fetchAll 載進來的那批一起清掉，
@@ -720,7 +722,7 @@ async function loadPoliticiansByElection(
 
   // 快取鍵要帶鄉鎮：同一個縣市的兩個鄉鎮撈的是不同職位、不同範圍，
   // 只用 electionId_region 當鍵會讓第二個鄉鎮直接吃到第一個的快取，名單是別人的。
-  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}_${subRegion}`
+  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}_${subRegion}${onlyTypes ? '_' + onlyTypes.join('+') : ''}`
 
   // 已經載入過就跳過（僅內存快取，不用 IndexedDB）
   if (loadedRegions.value.has(cacheKey)) {
@@ -744,11 +746,11 @@ async function loadPoliticiansByElection(
     // 沒正規化就是靜靜地回 0 筆。RPC 那一端也做同樣的轉換（migration 20261005000001）。
     const regionParam = region === 'All' ? null : normalizeRegionName(region)
     const subRegionParam = subRegion === 'All' ? null : normalizeRegionName(subRegion)
-    const electionTypes = positionsToLoad({
+    const electionTypes = (onlyTypes ?? positionsToLoad({
       region,
       subRegion,
       isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
-    }).filter(t => availableTypes.includes(t))
+    })).filter(t => availableTypes.includes(t))
 
     if (electionTypes.length === 0) {
       loadedRegions.value.add(cacheKey)

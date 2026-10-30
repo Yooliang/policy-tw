@@ -25,7 +25,9 @@ function onTouchStart(e: TouchEvent) {
   const mobile = e.touches.length === 1 && !!t && isMobileViewport()
   fromEdge = mobile && t!.clientX <= EDGE_PX
   const target = e.target instanceof HTMLElement ? e.target : null
-  fromBody = mobile && !fromEdge && !!target && !target.closest('[data-swipe-tabs], [role="dialog"], [data-testid="mobile-drawer"]') && !inHorizontalScroller(target, null)
+  // 頁面上有分頁滑動區（選舉頁）時，通用的「任何地方往右滑開選單」整個停用：留白處也歸分頁滑動管，開選單只剩左緣與「第一頁再往右拉」
+  const tabbedPage = !!document.querySelector('[data-swipe-tabs]')
+  fromBody = mobile && !tabbedPage && !fromEdge && !!target && !target.closest('[data-swipe-tabs], [role="dialog"], [data-testid="mobile-drawer"]') && !inHorizontalScroller(target, null)
   if (t) { ex = t.clientX; ey = t.clientY }
 }
 function onTouchEnd(e: TouchEvent) {
@@ -62,7 +64,8 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
       </RouterView>
     </main>
     <AdSlot />
-    <Footer />
+    <!-- 手機版不顯示頁尾（連結都在左側抽屜選單裡）；只用 CSS 隱藏，預渲染的 HTML 仍在，桌機不變 -->
+    <Footer class="max-md:hidden" />
     <MobileTabBar />
   </div>
 </template>

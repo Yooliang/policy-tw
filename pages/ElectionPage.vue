@@ -52,9 +52,11 @@ import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
 import { useSwipeTabs, adjacentPanelClass } from '../composables/useSwipeTabs'
-import { useMobileShell, isMobileViewport } from '../composables/useMobileShell'
+import { useMobileShell, isMobileViewport, MOBILE_QUERY } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
 import { fileCache } from '../lib/map-data-cache'
+import rasterIndex from '../data/tw-raster-index.json'
+import districtCacheData from '../data/tw-districts/2026.json'
 
 const router = useRouter()
 const route = useRoute()
@@ -242,7 +244,7 @@ useRegionQuerySync({
   extra: {
     view: queryField(viewMode, 'politicians', { allowed: VIEW_MODES }),
     // 手機版的類型分頁；換地區時帶過去，盡量停在原本的類型
-    tab: queryField(mobileTab, '', { when: () => viewMode.value === 'politicians' }),
+    tab: queryField(mobileTab, ''),
     type: queryField(comparisonLevel, '', { allowed: Object.values(ElectionType), when: () => viewMode.value === 'comparison' }),
     // 順序要在 type 後面：套網址時一個欄位設完才設下一個
     district: queryField(comparisonDistrict, '', { when: () => viewMode.value === 'comparison' }),
@@ -578,6 +580,8 @@ interface LevelSection {
   /** 卡片排法（grid）實際要畫的人：鄉鎮市民代表依右側選的選舉區篩過；其餘等於 people */
   shown: Politician[]
   empty: boolean
+  /** 人多的「全部」名單：畫面分批載入 */
+  batch?: boolean
   /** 整個職位區塊的頁內錨點 id（人物頁麵包屑的職位層連到這裡，見 lib/election-levels.ts 的 sectionAnchor） */
   anchor?: string
 }
@@ -760,6 +764,32 @@ const electionPoliticianIds = computed(() => new Set(electionPoliticians.value.m
 // policies.election_id 是 elections.id（舊三屆剛好等於年份，新增的選舉不是）——比 id，不比年份（#344 第二階段 A）
 const belongsToThisElection = (p: { electionId?: number }) => p.electionId === electionId.value
 
+/**
+ * 手機版（X 式版面）承諾／串聯／PK 跟候選人檢視共用同一組層級分頁與地區：依目前分頁的職位篩（直轄市的鄉鎮市長／代表＝原住民區長／區代表）。
+ * 桌機版不分層級，維持原樣——所以這個篩選只在瀏覽器判斷為手機寬度之後才套用（這三個檢視不進預渲染，不會有 hydration 差異）。
+ */
+const isMobileNow = ref(false)
+const INDIGENOUS_ALIAS: Record<string, string> = {
+  [ElectionType.TOWNSHIP_MAYOR]: ElectionType.INDIGENOUS_DISTRICT_CHIEF,
+  [ElectionType.REPRESENTATIVE]: ElectionType.INDIGENOUS_DISTRICT_REP,
+}
+function matchesMobileTab(politician: Politician): boolean {
+  if (!isMobileNow.value) return true
+  const data = withCurrentElectionData(politician) as Politician
+  const t = getElectionType(data)
+  const a = mobileActiveType.value
+  if (t !== a && t !== INDIGENOUS_ALIAS[a]) return false
+  if (selectedVillage.value !== 'All' && a === ElectionType.CHIEF && !sameRegionName(data.village, selectedVillage.value)) return false
+  if (selectedDistrict.value !== 'All' && (a === ElectionType.COUNCILOR || a === ElectionType.REPRESENTATIVE) && data.subRegion !== selectedDistrict.value) return false
+  return true
+}
+onMounted(() => {
+  const mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(MOBILE_QUERY) : null
+  if (!mq) return
+  isMobileNow.value = mq.matches
+  mq.addEventListener('change', (e) => { isMobileNow.value = e.matches })
+})
+
 /** 人物 id → 人物；承諾迴圈裡查人用，免得每筆都掃一遍整份名單 */
 const politicianById = computed(() => new Map(politicians.value.map(c => [c.id, c])))
 const allCampaignPolicies = computed(() =>
@@ -777,7 +807,7 @@ const allCampaignPolicies = computed(() =>
         if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
-    return true
+    return matchesMobileTab(politician)
   })
 )
 
@@ -827,7 +857,7 @@ const regionPolicies = computed(() =>
         if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
       }
     }
-    return true
+    return matchesMobileTab(politician)
   })
 )
 
@@ -1002,6 +1032,11 @@ const electionLevels = computed(() => {
  * 第一個有政見可比的職位 → 第一個有人可比的職位 → 第一個職位。網址上的 type 不改寫，換頁回來照樣認。
  */
 const pkLevel = computed<ElectionType>(() => {
+  // 手機版：職位跟著上方的層級分頁走（直轄市的鄉鎮市長／代表＝原住民區長／區代表）
+  if (isMobileNow.value) {
+    const a = mobileActiveType.value
+    return (isSpecialMunicipality.value ? INDIGENOUS_ALIAS[a] ?? a : a) as ElectionType
+  }
   const levels = visibleLevels.value
   const explicit = levels.find(l => l.type === comparisonLevel.value)
   if (explicit) return explicit.type
@@ -1144,14 +1179,84 @@ function pickFor(type: string): MobilePick | null {
   if (selectedRegion.value === 'All') return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (need === 'county') return null
   if (selectedSubRegion.value === 'All') {
+    if (allSub.value) return null // 按了鄉鎮列的「全部」：直接顯示該縣市全部鄉鎮的名單
     // 鄉鎮層一律列該縣市全部鄉鎮市區（不依有沒有該類選舉過濾）；沒有該類選舉的區，內容區顯示「無此類選舉」，定位照樣設定
     return { level: 'sub', title: `選擇${subRegionLabel.value}`, options: [...mobileSubOptions.value] }
   }
   if (need === 'sub') return null
-  if (selectedVillage.value === 'All') return { level: 'village', title: `選擇${villageLabel.value}`, options: availableVillages.value }
+  if (selectedVillage.value === 'All' && !allVillage.value) return { level: 'village', title: `選擇${villageLabel.value}`, options: availableVillages.value }
   return null
 }
 const mobilePick = computed(() => pickFor(mobileActiveType.value))
+/**
+ * 鄉鎮列、村里列最前面的「全部」（縣市列是「全台」、選區列是「全部」）：
+ * allSub＝按了鄉鎮列的「全部」（清掉鄉鎮與村里定位，顯示該縣市全部鄉鎮的名單）；allVillage＝按了村里列的「全部」（顯示該鄉鎮全部村里）。
+ * 換縣市、挑了具體的鄉鎮／村里就解除。
+ */
+const allSub = ref(false)
+/** 縣市層「全部」／其他檢視要把整個縣市的代表、村里長另外撈進來時，撈的過程中 */
+const countyWideLoading = ref(false)
+const allVillage = ref(false)
+watch(selectedRegion, () => { allSub.value = false; allVillage.value = false })
+watch(selectedSubRegion, (v) => { if (v !== 'All') allSub.value = false; allVillage.value = false })
+watch(selectedVillage, (v) => { if (v !== 'All') allVillage.value = false })
+function pickAll(level: 'sub' | 'village') {
+  if (level === 'sub') {
+    allSub.value = true
+    allVillage.value = false
+    selectedVillage.value = 'All'
+    if (selectedSubRegion.value !== 'All') void router.replace(regionLink(selectedRegion.value))
+  } else {
+    allVillage.value = true
+    selectedVillage.value = 'All'
+  }
+}
+/** 鄉鎮列「全部」的內容：該縣市全部鄉鎮的參選人，依鄉鎮（代表再依選區、村里長再依村里）分組；直轄市鄉鎮市長／代表＝山地原住民區長／區代表 */
+function allSubSection(type: string): LevelSection | null {
+  const realType = isSpecialMunicipality.value
+    ? (type === ElectionType.TOWNSHIP_MAYOR ? ElectionType.INDIGENOUS_DISTRICT_CHIEF : type === ElectionType.REPRESENTATIVE ? ElectionType.INDIGENOUS_DISTRICT_REP : type)
+    : type
+  const base = positionSpec(realType) ?? positionSpec(type)
+  if (!base) return null
+  const people = peopleOf(realType)
+  const townOf = (c: Politician) => (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? c.subRegion.replace(/第d+選舉區$/, '') : '未標示')
+  const labelOf = (c: Politician) => {
+    if (realType === ElectionType.CHIEF) return `${townOf(c)} ${c.village || '未標示里別'}`
+    if (realType === ElectionType.REPRESENTATIVE || realType === ElectionType.INDIGENOUS_DISTRICT_REP) return c.subRegion || townOf(c)
+    return townOf(c)
+  }
+  const byLabel = new Map<string, Politician[]>()
+  for (const c of people) { const k = labelOf(c); const arr = byLabel.get(k); if (arr) arr.push(c); else byLabel.set(k, [c]) }
+  const spec: PositionSpec = { ...base, display: 'district' }
+  const groups = withAnchors(spec, [...byLabel.entries()].sort((x, y) => sortByLengthThenStroke(x[0], y[0])).map(([label, ps]) => ({ label, people: ps })))
+  return { spec, people, shown: people, groups, chips: [], empty: groups.length === 0, anchor: sectionAnchor(spec.type), batch: true }
+}
+/** 人多的「全部」名單分批畫（一次畫上千張卡片會卡住）：每批約 BATCH 位，捲到底再加一批 */
+const BATCH = 90
+const mobileShown = ref<Record<string, number>>({})
+watch([selectedRegion, selectedSubRegion, selectedVillage, allSub, allVillage], () => { mobileShown.value = {} })
+function batchedGroups(panel: MobilePanel) {
+  const sec = panel.section!
+  if (!sec.batch) return { groups: sec.groups, more: false, shown: 0, total: 0 }
+  const limit = mobileShown.value[panel.type] ?? BATCH
+  const out: typeof sec.groups = []
+  let n = 0
+  for (const g of sec.groups) {
+    if (n >= limit) break
+    out.push(g)
+    n += g.people.length
+  }
+  return { groups: out, more: out.length < sec.groups.length, shown: n, total: sec.people.length }
+}
+function showMoreOf(type: string) { mobileShown.value = { ...mobileShown.value, [type]: (mobileShown.value[type] ?? BATCH) + BATCH } }
+const vLoadMore = {
+  mounted(el: HTMLElement & { _io?: IntersectionObserver }, b: { value: () => void }) {
+    if (typeof IntersectionObserver === 'undefined') return
+    el._io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) b.value() }, { rootMargin: '800px' })
+    el._io.observe(el)
+  },
+  unmounted(el: HTMLElement & { _io?: IntersectionObserver }) { el._io?.disconnect() },
+}
 /** 挑完選項：設定共用定位（縣市／鄉鎮走網址，村里走 ?village=） */
 function pickLocation(level: 'county' | 'sub' | 'village', value: string) {
   if (level === 'county') void router.replace(regionLink(value))
@@ -1162,6 +1267,7 @@ function pickLocation(level: 'county' | 'sub' | 'village', value: string) {
 /** 手機版各分頁的內容（定位夠了才有）；人從已載入的資料取，鄉鎮與村里層級用現成的 levelPlan 區塊 */
 function sectionFor(type: string): LevelSection | null {
   if (pickFor(type)) return null
+  if (selectedSubRegion.value === 'All' && TAB_NEEDS[type] !== 'county' && type !== ElectionType.COUNCILOR) return allSubSection(type)
   if (type === ElectionType.MAYOR) return buildSection(positionSpec(type)!)
   if (type === ElectionType.COUNCILOR) {
     // 整個縣市的議員（不照鄉鎮縮小），依選區分組
@@ -1184,46 +1290,43 @@ const mobileSectionTitle = (s: LevelSection) => `${mobileTypeLabel(s.spec.type)}
  * 縣市／鄉鎮／村里清單來自地圖的點陣靜態檔（data/tw-raster，與 StatsMap 共用 fileCache）：
  *   national.json 只取縣市代碼（約 16KB，縣市名單本身用現成常數），towns/<縣市碼>.json（約 0.5–1KB）、villages/<鄉鎮碼>.json（約 1–3KB）。
  */
-const rasterTownFiles = import.meta.glob<{ default: RasterNames }>('../data/tw-raster/towns/*.json')
 const rasterVillageFiles = import.meta.glob<{ default: RasterNames }>('../data/tw-raster/villages/*.json')
 interface RasterNames { codes: string[]; names: string[] }
 const normName = (n: string) => n.replace(/臺/g, '台')
-async function loadRasterNames(kind: 'national' | 'towns' | 'villages', code?: string): Promise<RasterNames | null> {
-  try {
-    if (kind === 'national') return await fileCache.get('national', () => import('../data/tw-raster/national.json').then(m => m.default)) as RasterNames
-    const load = (kind === 'towns' ? rasterTownFiles : rasterVillageFiles)[`../data/tw-raster/${kind}/${code}.json`]
-    return load ? await fileCache.get(`${kind}/${code}`, () => load().then(m => m.default)) as RasterNames : null
-  } catch { return null }
-}
-/** 目前縣市的鄉鎮名單、目前鄉鎮的村里名單（來自點陣檔；讀不到就維持 null，改用參選資料取得的清單） */
-const rasterSubs = ref<string[] | null>(null)
+/**
+ * 縣市與鄉鎮清單直接來自精簡名稱索引（data/tw-raster-index.json，約 10KB，由 scripts/build-tw-raster-index.mjs 產生）：
+ * 跟著頁面 JS 一起到，預渲染時就算得出來，晶片列不必等任何請求。只有村里清單（每個鄉鎮一個檔）仍是用到才載入。
+ */
+const rasterTowns = (rasterIndex as { towns: Record<string, RasterNames> }).towns
+const rasterCountyCode = computed<string | null>(() => {
+  const region = selectedRegion.value
+  if (region === 'All') return null
+  const ci = rasterIndex.counties.names.findIndex(n => normName(n) === normName(region))
+  return ci < 0 ? null : rasterIndex.counties.codes[ci]!
+})
+const rasterTownList = computed<RasterNames | null>(() => rasterCountyCode.value ? rasterTowns[rasterCountyCode.value] ?? null : null)
+/** 目前縣市的鄉鎮名單（索引裡沒有就 null，改用參選資料取得的清單） */
+const rasterSubs = computed<string[] | null>(() => rasterTownList.value?.names ?? null)
+const rasterTownCode = computed<string | null>(() => {
+  const list = rasterTownList.value
+  if (!list || selectedSubRegion.value === 'All') return null
+  const ti = list.names.findIndex(n => normName(n) === normName(selectedSubRegion.value))
+  return ti < 0 ? null : list.codes[ti]!
+})
+/** 目前鄉鎮的村里名單（來自點陣檔，用到才載入；讀不到就維持 null，改用參選資料取得的清單） */
 const rasterVillages = ref<string[] | null>(null)
-const rasterCountyCode = ref<string | null>(null)
-const rasterTownCode = ref<string | null>(null)
 interface DistrictCache { election: number; council: Record<string, string[]>; rep: Record<string, string[]> }
-const districtCache = ref<DistrictCache | null>(null)
+const districtCache = shallowRef<DistrictCache | null>(districtCacheData as DistrictCache)
 let rasterSeq = 0
-watch([selectedRegion, selectedSubRegion], async ([region, sub]) => {
+watch(rasterTownCode, async (code) => {
   const seq = ++rasterSeq
-  rasterSubs.value = null
   rasterVillages.value = null
-  rasterCountyCode.value = null
-  rasterTownCode.value = null
-  if (!isMobileViewport() || region === 'All') return
-  const national = await loadRasterNames('national')
-  const ci = national ? national.names.findIndex(n => normName(n) === normName(region)) : -1
-  if (!national || ci < 0) return
-  rasterCountyCode.value = national.codes[ci]!
-  if (!districtCache.value) districtCache.value = await import('../data/tw-districts/2026.json').then(m => m.default as DistrictCache).catch(() => null)
-  const towns = await loadRasterNames('towns', national.codes[ci])
-  if (!towns || seq !== rasterSeq) return
-  rasterSubs.value = towns.names
-  if (sub === 'All') return
-  const ti = towns.names.findIndex(n => normName(n) === normName(sub))
-  if (ti < 0) return
-  rasterTownCode.value = towns.codes[ti]!
-  const villages = await loadRasterNames('villages', towns.codes[ti])
-  if (villages && seq === rasterSeq) rasterVillages.value = villages.names
+  if (!code || !isMobileViewport()) return
+  try {
+    const load = rasterVillageFiles[`../data/tw-raster/villages/${code}.json`]
+    const villages = load ? await fileCache.get(`villages/${code}`, () => load().then(m => m.default)) as RasterNames : null
+    if (villages && seq === rasterSeq) rasterVillages.value = villages.names
+  } catch { /* 讀不到就用參選資料的清單 */ }
 }, { immediate: true })
 /** 點陣檔的名稱對回網站資料用的寫法（臺／台），對不上就照原樣 */
 function siteNames(raster: string[] | null, site: readonly string[]): readonly string[] {
@@ -1258,9 +1361,9 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   if (selectedRegion.value === 'All') row = countyRow()
   else if (type === ElectionType.MAYOR) row = countyRow()
   else if (type === ElectionType.COUNCILOR) row = districtRow()
-  else if (selectedSubRegion.value === 'All' || type === ElectionType.TOWNSHIP_MAYOR) row = pickRow('sub', mobileSubOptions.value, selectedSubRegion.value)
+  else if (selectedSubRegion.value === 'All' || type === ElectionType.TOWNSHIP_MAYOR) row = [chipOf('All', '全部', allSub.value && selectedSubRegion.value === 'All', () => pickAll('sub')), ...pickRow('sub', mobileSubOptions.value, selectedSubRegion.value)]
   else if (type === ElectionType.REPRESENTATIVE) row = districtRow()
-  else row = pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value)
+  else row = [chipOf('All', '全部', allVillage.value && selectedVillage.value === 'All', () => pickAll('village')), ...pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value)]
   return row.length > 0 ? [row] : []
 })
 const mobileChipsEl = ref<HTMLElement | null>(null)
@@ -1275,7 +1378,7 @@ watch(mobileChipRows, () => {
 }, { immediate: true, flush: 'post' })
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 function emptyTextFor(type: string): string {
-  if (electionLoading.value) return '載入中…'
+  if (electionLoading.value || countyWideLoading.value) return '載入中…'
   return '無此類選舉'
 }
 
@@ -1326,11 +1429,25 @@ function ensureCountyLevelLoaded() {
   loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All').catch(() => {})
 }
 watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
+/**
+ * 縣市層沒挑鄉鎮、但分頁要看的是鄉鎮層以下的人（鄉鎮列／村里列按「全部」，或承諾／串聯／PK 檢視切到代表、村里長）：
+ * 分層載入預設只帶到鄉鎮市長，代表與村里長要另外把整個縣市的撈進來（只撈那幾種職位，已撈過的有快取不重撈）。
+ */
+async function ensureCountyWideLoaded() {
+  if (!isMobileViewport() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
+  const type = mobileActiveType.value
+  if (TAB_NEEDS[type] === 'county' || type === ElectionType.TOWNSHIP_MAYOR) return
+  if (viewMode.value === 'politicians' && !allSub.value) return
+  const types = type === ElectionType.CHIEF ? [ElectionType.CHIEF] : [ElectionType.REPRESENTATIVE, ElectionType.INDIGENOUS_DISTRICT_REP]
+  countyWideLoading.value = true
+  try { await loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All', types) } catch { /* 載不到就維持現有名單 */ } finally { countyWideLoading.value = false }
+}
+watch([electionId, selectedRegion, selectedSubRegion, mobileActiveType, allSub, viewMode], ensureCountyWideLoaded)
 
 // 頁首正中間的定位麵包屑：點任一段退到那一層（清掉更下層），分頁內容就改列該層的選項
 /** 手機版分頁在縣市層（縣市長／議員）不顯示鄉鎮與村里、在鄉鎮層（鄉鎮市長／代表）不顯示村里：共用定位不清掉，換到更下層的分頁再顯示回來 */
-const mobileShowSub = computed(() => viewMode.value !== 'politicians' || TAB_NEEDS[mobileActiveType.value] !== 'county')
-const mobileShowVillage = computed(() => viewMode.value !== 'politicians' || TAB_NEEDS[mobileActiveType.value] === 'village')
+const mobileShowSub = computed(() => TAB_NEEDS[mobileActiveType.value] !== 'county')
+const mobileShowVillage = computed(() => TAB_NEEDS[mobileActiveType.value] === 'village')
 const headerCrumbs = computed(() => {
   const list = [{ label: '全台', go: () => { void router.replace(regionLink('All')) } }]
   if (selectedRegion.value !== 'All') list.push({ label: selectedRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(regionLink(selectedRegion.value)) } })
@@ -1363,7 +1480,7 @@ watch([selectedRegion, selectedSubRegion, selectedVillage], saveLocation)
 const swipeEl = ref<HTMLElement | null>(null)
 useSwipeTabs(swipeEl, {
   index: () => mobileIndex.value,
-  count: () => viewMode.value === 'politicians' ? mobileTabs.value.length : 0,
+  count: () => mobileTabs.value.length,
   go: (i) => { const t = mobileTabs.value[i]; if (t) setMobileTab(t.key) },
   onPastStart: openDrawer,
 })
@@ -1373,7 +1490,7 @@ useSwipeTabs(swipeEl, {
   <div v-if="election" class="bg-slate-50 min-h-screen">
 
     <!-- 手機版版面順序：頁首 → 類型分頁條（吸頂，緊接頁首）→ 縮小的標題區（含檢視膠囊）→ 內容 -->
-    <div v-if="viewMode === 'politicians'" class="md:hidden sticky top-14 z-30 shadow-sm" data-chrome-follow data-testid="mobile-sticky">
+    <div class="md:hidden sticky top-14 z-30 shadow-sm" data-chrome-follow data-testid="mobile-sticky">
       <SwipeTabStrip :tabs="mobileTabs" :model-value="mobileActiveType" @update:model-value="setMobileTab" />
     </div>
 
@@ -1398,31 +1515,32 @@ useSwipeTabs(swipeEl, {
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw', selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0']">
+      <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw max-md:min-h-[calc(100dvh-10rem-env(safe-area-inset-bottom))]', selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0']">
+
+      <!-- 手機版：晶片列放在內容最上面，四個檢視（候選人／承諾／PK／串聯）共用同一組定位與分頁（標題區 → 晶片 → 排序 → 內容） -->
+      <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" class="md:hidden" data-testid="mobile-district-chips">
+        <div
+          v-for="(row, ri) in mobileChipRows"
+          :key="ri"
+          class="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden relative"
+          data-no-swipe
+          data-testid="mobile-chip-row"
+        >
+          <button
+            v-for="c in row"
+            :key="c.key"
+            type="button"
+            class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
+            :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+            :data-active="c.active ? 'true' : 'false'"
+            @click="c.pick()"
+          >{{ c.text }}</button>
+        </div>
+      </div>
 
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
-        <!-- 手機版：選區晶片放在排序工具列之上（標題區 → 選區 → 排序 → 卡片） -->
-        <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" class="md:hidden" data-testid="mobile-district-chips">
-          <div
-            v-for="(row, ri) in mobileChipRows"
-            :key="ri"
-            class="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden relative"
-            data-no-swipe
-            data-testid="mobile-chip-row"
-          >
-            <button
-              v-for="c in row"
-              :key="c.key"
-              type="button"
-              class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
-              :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
-              :data-active="c.active ? 'true' : 'false'"
-              @click="c.pick()"
-            >{{ c.text }}</button>
-          </div>
-        </div>
         <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
         <div class="flex justify-end mb-2 md:mb-4">
           <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
@@ -1544,7 +1662,7 @@ useSwipeTabs(swipeEl, {
               <ChipFilteredGroups
                 v-else
                 :id="panel.section.anchor"
-                :groups="panel.section.groups"
+                :groups="batchedGroups(panel).groups"
                 :columns="3"
                 :election-id="electionId"
                 :title-prefix="panel.section.spec.display === 'district' ? mobileTypeLabel(panel.section.spec.type) : undefined"
@@ -1552,6 +1670,14 @@ useSwipeTabs(swipeEl, {
               ><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></ChipFilteredGroups>
             </template>
             <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-empty">{{ panel.emptyText }}</p>
+            <button
+              v-if="panel.section && !panel.pick && panel.type === mobileActiveType && batchedGroups(panel).more"
+              v-load-more="() => showMoreOf(panel.type)"
+              type="button"
+              class="mx-auto my-4 block rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600"
+              data-testid="mobile-load-more"
+              @click="showMoreOf(panel.type)"
+            >載入更多（已顯示 {{ batchedGroups(panel).shown }} / {{ batchedGroups(panel).total }} 位）</button>
           </div>
         </div>
       </div>
@@ -1606,7 +1732,7 @@ useSwipeTabs(swipeEl, {
            預渲染時 viewMode 一律是「候選人」（網址參數在掛載後才套用），帶 ?view=comparison 的網址 canonical 指回選舉頁本身 -->
       <div v-if="viewMode === 'comparison'" class="animate-fade-in space-y-6">
         <!-- 職位：真連結，換職位時選區與勾選重設 -->
-        <div class="flex justify-start overflow-x-auto pb-2">
+        <div class="flex justify-start overflow-x-auto pb-2 max-md:hidden">
           <div class="inline-flex bg-slate-100 p-1 rounded-lg shrink-0">
             <RouterLink
               v-for="level in visibleLevels"

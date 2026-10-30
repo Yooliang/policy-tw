@@ -24,6 +24,8 @@ const OFF = props.dark ? 'border-white/25 bg-white/10 text-white' : 'border-slat
 <template>
   <div class="flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="view-pills">
     <template v-for="v in VIEW_TABS" :key="v.key">
+      <!-- 候選人｜承諾｜PK ‖ 串聯｜矩陣：前三個一組、後兩個一組，中間一條細直線 -->
+      <span v-if="v.key === 'issues'" class="my-1.5 w-px shrink-0" :class="dark ? 'bg-white/30' : 'bg-slate-300'" aria-hidden="true" data-testid="view-pills-divider"></span>
       <RouterLink v-if="viewLink" :to="viewLink(v.key)" :class="[BASE, view === v.key ? ON : OFF]">{{ v.short }}</RouterLink>
       <button v-else type="button" :class="[BASE, view === v.key ? ON : OFF]" :aria-pressed="view === v.key" @click="$emit('select', v.key)">{{ v.short }}</button>
     </template>
