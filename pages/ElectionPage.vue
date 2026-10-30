@@ -564,6 +564,8 @@ interface LevelSection {
   groups: Array<{ label: string; people: Politician[]; anchor?: string }>
   /** 選舉區快篩（district 排法才有；村里在右側面板的「村里」，選舉區在右側面板的「○○選舉區」，列表上方不放選擇，2026-10-06） */
   chips: readonly string[]
+  /** 卡片排法（grid）實際要畫的人：鄉鎮市民代表依右側選的選舉區篩過；其餘等於 people */
+  shown: Politician[]
   empty: boolean
   /** 整個職位區塊的頁內錨點 id（人物頁麵包屑的職位層連到這裡，見 lib/election-levels.ts 的 sectionAnchor） */
   anchor?: string
@@ -581,15 +583,21 @@ function buildSection(spec: PositionSpec): LevelSection {
     // 議員與原住民區代表共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
     // 不會同時在畫面上，而換縣市或換鄉鎮時 watch 會把它重設。
     const groups = withAnchors(spec, groupsByDistrict(people, spec.type))
-    return { spec, people, groups, chips: districtsOf(people, spec.type), empty: groups.length === 0, anchor }
+    return { spec, people, shown: people, groups, chips: districtsOf(people, spec.type), empty: groups.length === 0, anchor }
   }
   if (spec.display === 'village') {
     // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，
     // 這裡自然只剩一組。村里是空值或對不上的人收進最後一組「未標示里別」（lib/village-grouping.ts）。
     const groups = withAnchors(spec, groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people })))
-    return { spec, people, groups, chips: [], empty: groups.length === 0, anchor }
+    return { spec, people, shown: people, groups, chips: [], empty: groups.length === 0, anchor }
   }
-  return { spec, people, groups: [], chips: [], empty: people.length === 0, anchor }
+  if (spec.type === '鄉鎮市民代表') {
+    // 鄉鎮市民代表是卡片排法，但同一個鄉鎮有好幾個選舉區（subRegion＝「湖口鄉第01選舉區」）：
+    // 快篩清單照目前這一頁的代表蒐集，選了只畫那一區（selectedDistrict；鄉鎮頁沒有議員，不會互相打架）。
+    const shown = selectedDistrict.value === 'All' ? people : people.filter(c => c.subRegion === selectedDistrict.value)
+    return { spec, people, shown, groups: [], chips: districtsOf(people, spec.type), empty: people.length === 0, anchor }
+  }
+  return { spec, people, shown: people, groups: [], chips: [], empty: people.length === 0, anchor }
 }
 
 function sectionsOf(types: readonly string[]): LevelSection[] {
@@ -627,7 +635,7 @@ const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
  * 縣市頁的縣市議員、原住民區頁的區代表（只在「候選人」頁籤，其他頁籤不用選舉區）；選區不到兩個就不需要選。選了只看那一區（selectedDistrict，議員與區代表共用）。
  */
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
-  .filter(sec => sec.spec.display === 'district' && !sec.empty && sec.chips.length > 1)
+  .filter(sec => (sec.spec.display === 'district' || sec.spec.type === '鄉鎮市民代表') && !sec.empty && sec.chips.length > 1)
   .map(sec => ({ type: sec.spec.type, title: `${sec.spec.label}選舉區`, chips: sec.chips })))
 
 /**
@@ -1119,7 +1127,7 @@ usePageHead({
           規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1135,7 +1143,7 @@ usePageHead({
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <template v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
