@@ -32,7 +32,7 @@ import { latestLocalElection } from '../lib/md/scope'
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
 import { issueTagsOf } from '../lib/issue-tags'
-import { VIEW_MODES, type ElectionViewMode } from '../lib/election-view-tabs'
+import { VIEW_MODES, VIEW_TABS, type ElectionViewMode } from '../lib/election-view-tabs'
 import LoadError from '../components/LoadError.vue'
 import { canonicalPath, SITE_URL, usePageHead } from '../composables/usePageHead'
 import { candidateListItems, itemListLd, regionDescription, type LevelCount } from '../lib/seo'
@@ -52,14 +52,21 @@ import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
 import { useSwipeTabs, adjacentPanelClass } from '../composables/useSwipeTabs'
-import { useMobileShell, isMobileViewport, MOBILE_QUERY } from '../composables/useMobileShell'
+import { useMobileShell, isMobileViewport } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
+import { useDeskNav, type DeskGroup, type DeskItem, type DeskNavModel } from '../composables/useDeskNav'
 import { fileCache } from '../lib/map-data-cache'
 import rasterIndex from '../data/tw-raster-index.json'
 import districtCacheData from '../data/tw-districts/2026.json'
 
 const router = useRouter()
 const route = useRoute()
+/**
+ * 「分頁面板版面」（層級分頁＋共用定位，原本只有手機版）：2026-10-31 桌面版也改成這一套——層級與地區由左邊延伸欄選（DeskExtNav），
+ * 內容區跟手機版同一組面板。只在瀏覽器判斷（預渲染與 hydrate 第一次都是 false），所以桌面也走手機版那些載入邏輯；
+ * 上次定位的還原（restoreLocation）仍只限手機寬度。
+ */
+const panelLayout = () => typeof window !== 'undefined'
 const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
@@ -143,7 +150,7 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
   electionLoading.value = true
   try {
     // 手機版全台、停在議員／鄉鎮市長／代表分頁：先讓那一分頁的第一批撈完（最多等 8 秒），再撈全台縣市長（60KB，這個分頁用不到），不跟第一屏搶頻寬
-    if (region === 'All' && subRegion === 'All' && isMobileViewport() && NATIONWIDE_TYPES[mobileActiveType.value]) {
+    if (region === 'All' && subRegion === 'All' && panelLayout() && NATIONWIDE_TYPES[mobileActiveType.value]) {
       await Promise.race([fillNationwide(mobileActiveType.value, BATCH), new Promise(r => setTimeout(r, 8000))])
     }
     await loadPoliticiansByElection(id, region, subRegion)
@@ -787,12 +794,8 @@ function matchesMobileTab(politician: Politician): boolean {
   if (selectedDistrict.value !== 'All' && (a === ElectionType.COUNCILOR || a === ElectionType.REPRESENTATIVE) && data.subRegion !== selectedDistrict.value) return false
   return true
 }
-onMounted(() => {
-  const mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(MOBILE_QUERY) : null
-  if (!mq) return
-  isMobileNow.value = mq.matches
-  mq.addEventListener('change', (e) => { isMobileNow.value = e.matches })
-})
+// 桌面版也走層級分頁面板（見 panelLayout），掛載後一律套用
+onMounted(() => { isMobileNow.value = true })
 
 /** 人物 id → 人物；承諾迴圈裡查人用，免得每筆都掃一遍整份名單 */
 const politicianById = computed(() => new Map(politicians.value.map(c => [c.id, c])))
@@ -1407,7 +1410,7 @@ let rasterSeq = 0
 watch(rasterTownCode, async (code) => {
   const seq = ++rasterSeq
   rasterVillages.value = null
-  if (!code || !isMobileViewport()) return
+  if (!code || !panelLayout()) return
   try {
     const load = rasterVillageFiles[`../data/tw-raster/villages/${code}.json`]
     const villages = load ? await fileCache.get(`villages/${code}`, () => load().then(m => m.default)) as RasterNames : null
@@ -1486,7 +1489,7 @@ const mobilePanelKey = computed(() => `${electionId.value}|${selectedRegion.valu
 const mobileReady = computed(() => mobileLoadedKey.value === mobilePanelKey.value)
 // 切到全台的議員／鄉鎮市長／代表分頁（任何檢視：候選人、承諾、PK、串聯），先撈第一批
 watch([electionId, selectedRegion, mobileActiveType], () => {
-  if (isMobileViewport() && electionId.value && nwActive(mobileActiveType.value)) void fillNationwide(mobileActiveType.value, BATCH)
+  if (panelLayout() && electionId.value && nwActive(mobileActiveType.value)) void fillNationwide(mobileActiveType.value, BATCH)
 }, { immediate: true })
 const mobileLastGood = shallowRef<Record<string, MobilePanel> | null>(null)
 watch([mobileLive, mobileReady], ([live, ready]) => { if (ready) mobileLastGood.value = live }, { immediate: true })
@@ -1507,7 +1510,7 @@ watch([mobileReady, mobileActiveType, mobilePanelKey], ([ready, type, key]) => {
   if (key !== mobileVisitedKey) { mobileVisitedKey = key; mobileVisited.value = [type] }
   else if (!mobileVisited.value.includes(type)) mobileVisited.value = [...mobileVisited.value, type]
   clearTimeout(mobilePrerenderTimer)
-  if (typeof window === 'undefined' || !isMobileViewport()) return
+  if (typeof window === 'undefined' || !panelLayout()) return
   // 閒置預畫相鄰分頁：等瀏覽器閒下來（requestIdleCallback，逾時 3 秒仍要畫）才掛，且一次只掛一個分頁，不跟首屏、捲動搶主執行緒
   const run = () => {
     if (mobilePanelKey.value !== key) return
@@ -1523,7 +1526,7 @@ onBeforeUnmount(() => clearTimeout(mobilePrerenderTimer))
 
 // 縣市層以下有定位時，縣市長與議員的資料也要在（分層載入只撈「這一層＋下一層」，直接開鄉鎮網址不會有縣市層）
 function ensureCountyLevelLoaded() {
-  if (!isMobileViewport() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value === 'All') return
+  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value === 'All') return
   loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All').catch(() => {})
 }
 watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
@@ -1532,7 +1535,7 @@ watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
  * 分層載入預設只帶到鄉鎮市長，代表與村里長要另外把整個縣市的撈進來（只撈那幾種職位，已撈過的有快取不重撈）。
  */
 async function ensureCountyWideLoaded() {
-  if (!isMobileViewport() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
+  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
   const type = mobileActiveType.value
   if (TAB_NEEDS[type] === 'county' || type === ElectionType.TOWNSHIP_MAYOR) return
   if (type === ElectionType.CHIEF && viewMode.value === 'politicians') return // 村里長分頁沒選鄉鎮時只列鄉鎮選擇區
@@ -1575,6 +1578,45 @@ function restoreLocation() {
 onMounted(() => { restoreLocation(); ensureCountyLevelLoaded() })
 watch([selectedRegion, selectedSubRegion, selectedVillage], saveLocation)
 
+// ---- 桌面版延伸欄的篩選模型（DeskExtNav 讀；點了就是呼叫上面手機版同一批函式，狀態與網址共用） ----
+const { setElectionNav } = useDeskNav()
+const deskNavModel = computed<DeskNavModel>(() => {
+  const item = (key: string, label: string, active: boolean, select: () => void): DeskItem => ({ key, label, active, select })
+  const needsSub = TAB_NEEDS[mobileActiveType.value] === 'county'
+  // 在縣市層的分頁（縣市長／議員）點鄉鎮或村里＝想看更下層：順手換到對應的分頁
+  const toLevel = (type: string) => { if (needsSub || (type === ElectionType.CHIEF && TAB_NEEDS[mobileActiveType.value] !== 'village')) setMobileTab(type) }
+  const groups: DeskGroup[] = []
+  const views = VIEW_TABS.map(v => item(v.key, v.short, viewMode.value === v.key, () => { viewMode.value = v.key }))
+  const matrix: DeskItem[] = hasMatrix.value ? [{ key: 'matrix', label: '矩陣', active: false, to: `/election/${electionSeg.value}/matrix` }] : []
+  groups.push({ key: 'views', title: '內容類型', blocks: [views.slice(0, 3), [...views.slice(3), ...matrix]] })
+  groups.push({ key: 'levels', title: '層級', blocks: [mobileTabs.value.map(t => item(t.key, t.label, t.key === mobileActiveType.value, () => setMobileTab(t.key)))] })
+  groups.push({ key: 'county', title: '縣市', scroll: true, blocks: [[
+    item('All', '全台', selectedRegion.value === 'All', () => pickLocation('county', 'All')),
+    ...TAIWAN_COUNTIES.map(c => item(c, c, selectedRegion.value === c, () => pickLocation('county', c))),
+  ]] })
+  if (selectedRegion.value !== 'All') {
+    groups.push({ key: 'sub', title: subRegionLabel.value, scroll: true, blocks: [[
+      item('All', '全部', selectedSubRegion.value === 'All', () => pickAll('sub')),
+      ...mobileSubOptions.value.map(o => item(o, o, selectedSubRegion.value === o, () => { pickLocation('sub', o); toLevel(ElectionType.TOWNSHIP_MAYOR) })),
+    ]] })
+  }
+  if (selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All' && (mobileActiveType.value === ElectionType.CHIEF || availableVillages.value.length > 0)) {
+    groups.push({ key: 'village', title: villageLabel.value, scroll: true, blocks: [[
+      item('All', '全部', selectedVillage.value === 'All', () => { pickAll('village'); toLevel(ElectionType.CHIEF) }),
+      ...siteNames(rasterVillages.value, availableVillages.value).map(v => item(v, v, selectedVillage.value === v, () => { pickLocation('village', v); toLevel(ElectionType.CHIEF) })),
+    ]] })
+  }
+  const t = mobileActiveType.value
+  const districtLevel = (t === ElectionType.COUNCILOR && selectedRegion.value !== 'All') || (t === ElectionType.REPRESENTATIVE && selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All')
+  const row = districtLevel ? mobileChipRows.value[0] ?? [] : []
+  if (row.length > 0) groups.push({ key: 'district', title: '選區', scroll: true, blocks: [row.map(c => item(c.key, c.text, c.active, c.pick))] })
+  return { title: `${electionYear.value || ''} 選舉`.trim(), groups }
+})
+onMounted(() => setElectionNav(deskNavModel))
+onActivated(() => setElectionNav(deskNavModel))
+onDeactivated(() => setElectionNav(null))
+onBeforeUnmount(() => setElectionNav(null))
+
 const swipeEl = ref<HTMLElement | null>(null)
 useSwipeTabs(swipeEl, {
   index: () => mobileIndex.value,
@@ -1599,7 +1641,7 @@ useSwipeTabs(swipeEl, {
     />
 
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6">
 
       <!--
         名單撈不完整時一定要講。少人比整頁空白難發現得多：高雄市 2022 曾經只載到村里長，
@@ -1613,7 +1655,7 @@ useSwipeTabs(swipeEl, {
       <div class="flex flex-col md:flex-row gap-8">
 
       <!-- 左側：主要內容 -->
-      <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw max-md:min-h-[calc(100dvh-10rem-env(safe-area-inset-bottom))]', selectedRegion !== 'All' && availableSubRegions.length > 0 ? 'flex-1 min-w-0 md:w-2/3' : 'w-full min-w-0']">
+      <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw max-md:min-h-[calc(100dvh-10rem-env(safe-area-inset-bottom))]', 'w-full min-w-0']">
 
       <!-- 手機版：晶片列放在內容最上面，四個檢視（候選人／承諾／PK／串聯）共用同一組定位與分頁（標題區 → 晶片 → 排序 → 內容） -->
       <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" class="md:hidden" data-testid="mobile-district-chips">
@@ -1656,7 +1698,7 @@ useSwipeTabs(swipeEl, {
           每個區塊標題列有一顆「政見 PK」（2026-10-06，取代 #364 放在區塊底下的並排比較）：連到 PK 頁籤、選好職位與那一場，
           規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
-        <div class="max-md:hidden">
+        <div class="hidden">
         <div v-for="section in thisLevelSections" :key="section.spec.type">
           <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
@@ -1740,10 +1782,10 @@ useSwipeTabs(swipeEl, {
         </div><!-- 桌機區塊結束 -->
 
         <!-- 手機版（X 式）：固定五個類型分頁。定位夠了顯示資料；不夠就在這裡列出下一層的選項（點了設定共用定位） -->
-        <div class="md:hidden relative transition-opacity duration-200" :class="mobileStale ? 'opacity-50' : ''" data-testid="mobile-panel">
+        <div class="relative transition-opacity duration-200" :class="mobileStale ? 'opacity-50' : ''" data-testid="mobile-panel">
           <div v-for="panel in mobilePanels" :key="panel.type" v-show="panel.type === mobileActiveType" :class="mobileAdjacent(panel.type)" :data-testid="`mobile-panel-${panel.type}`">
             <template v-if="panel.pick">
-              <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}<span class="ml-2 text-xs font-normal text-slate-400">從上方選一個，或在下面挑</span></h3>
+              <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}<span class="ml-2 text-xs font-normal text-slate-400"><span class="md:hidden">從上方選一個，或在下面挑</span><span class="max-md:hidden">從左側選一個，或在下面挑</span></span></h3>
               <div v-if="panel.pick.options.length > 0" class="flex flex-wrap gap-2" data-testid="mobile-pick-options">
                 <button
                   v-for="o in panel.pick.options"
@@ -1784,7 +1826,7 @@ useSwipeTabs(swipeEl, {
       <div v-if="viewMode === 'pledges'" ref="pledgeListTop" class="flex justify-end mb-4 scroll-mt-24">
         <SortIcons v-model="pledgeSort" :options="PLEDGE_SORT_OPTIONS" />
       </div>
-      <div v-if="viewMode === 'pledges'" class="animate-fade-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-if="viewMode === 'pledges'" class="animate-fade-in grid grid-cols-1 md:[grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))] gap-6">
         <PolicyCard
           v-for="policy in pagedCampaignPolicies"
           :key="policy.id"
@@ -1830,7 +1872,7 @@ useSwipeTabs(swipeEl, {
            預渲染時 viewMode 一律是「候選人」（網址參數在掛載後才套用），帶 ?view=comparison 的網址 canonical 指回選舉頁本身 -->
       <div v-if="viewMode === 'comparison'" class="animate-fade-in space-y-6">
         <!-- 職位：真連結，換職位時選區與勾選重設 -->
-        <div class="flex justify-start overflow-x-auto pb-2 max-md:hidden">
+        <div class="flex justify-start overflow-x-auto pb-2 hidden">
           <div class="inline-flex bg-slate-100 p-1 rounded-lg shrink-0">
             <RouterLink
               v-for="level in visibleLevels"
@@ -1846,8 +1888,8 @@ useSwipeTabs(swipeEl, {
         <!-- 縣市由上方的縣市選擇器、鄉鎮與選區由右側面板決定，PK 不另做一組；範圍還不夠就提示去哪裡選 -->
         <div v-if="pkMissing" class="text-center py-16 text-slate-500 border border-dashed border-slate-300 rounded-xl" data-testid="pk-pick-region">
           <Swords :size="48" class="mx-auto mb-4 opacity-50" />
-          <p v-if="pkMissing === 'county'" class="font-bold text-slate-700">先在上方選擇縣市</p>
-          <p v-else class="font-bold text-slate-700">先在右側選擇鄉鎮市區</p>
+          <p v-if="pkMissing === 'county'" class="font-bold text-slate-700">先選擇縣市</p>
+          <p v-else class="font-bold text-slate-700">先在左側選擇鄉鎮市區</p>
           <p class="text-sm mt-1">{{ levelLabel(pkLevel) }}的政見 PK 是一個{{ pkMissing === 'county' ? '縣市' : '鄉鎮市區' }}一場，選好之後就會並排這一場的參選人。</p>
         </div>
         <PolicyPk
@@ -1867,11 +1909,12 @@ useSwipeTabs(swipeEl, {
 
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
         <MdDrawer :pick="issuesMdOpen" @close="issuesMdOpen = null" />
-        <RegionalStatsPanel v-if="pageCounty && !hasSidebar" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
+        <!-- 桌面版右側面板拿掉後，地方基本統計一律放在內容最下面（統計數字在瀏覽器端才載入，用 ClientOnly 避免預渲染與 hydrate 不一致） -->
+        <ClientOnly><RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" /></ClientOnly>
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
-      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="hidden md:block md:order-last md:w-1/3 shrink-0">
+      <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="hidden">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
           <!-- 地區卡：鄉鎮市區 → 村里（連動） -->
           <div class="bg-white rounded-xl border border-slate-200 p-2.5 md:p-4 shadow-sm">
@@ -1968,8 +2011,6 @@ useSwipeTabs(swipeEl, {
             </div>
           </div>
 
-          <!-- 地方基本統計（2026-10-16 維護者：從內容上方移到右側面板最下方） -->
-          <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact />
         </div>
       </div>
 

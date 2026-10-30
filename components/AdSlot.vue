@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { pushAd } from '../lib/ad-request'
 import { whenContentReady } from '../lib/ad-ready'
+import { AD_CLIENT, adHiddenPath } from '../lib/ad-pages'
 
 /**
  * Footer 上方的 AdSense 橫幅（版位「下方 橫」）。整站只有一個。
@@ -17,12 +18,10 @@ import { whenContentReady } from '../lib/ad-ready'
  *   切回可顯示的頁面時元件重新掛載、重新 push，拿到的是新的一次請求，這是正確行為。
  * - 後台、登入回呼、AI 助理、個人頁不顯示（那些頁面沒有內容給讀者，也不該有廣告）。
  */
-const AD_CLIENT = 'ca-pub-6687848895101003'
 const AD_SLOT = '9455802665'
-const HIDDEN_PREFIXES = ['/admin', '/auth', '/contributions', '/tasks', '/stats', '/ai', '/profile']
 
 const route = useRoute()
-const visible = computed(() => !HIDDEN_PREFIXES.some((p) => route.path.startsWith(p)))
+const visible = computed(() => !adHiddenPath(route.path))
 
 const root = ref<HTMLElement | null>(null)
 /** 每次要廣告領一個號碼；換頁或卸載就作廢前一個，晚到的請求不會對著已經換掉的版位推 */

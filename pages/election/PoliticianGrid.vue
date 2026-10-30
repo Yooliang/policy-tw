@@ -79,7 +79,7 @@ onBeforeUnmount(() => io?.disconnect())
 // columns === 2 就是右側有篩選欄（ElectionPage 的 gridColumns）
 const portraitGridClass = computed(() => props.columns === 2
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
-  : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
+  : 'grid grid-cols-3 sm:grid-cols-4 md:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))] gap-3')
 
 /**
  * 卡片上的現任職稱（2026-10-04 維護者：職稱跟參選狀況分開）。

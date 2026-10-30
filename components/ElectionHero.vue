@@ -55,7 +55,12 @@ const timeLeft = computed(() => {
     <div class="mb-2 truncate px-4 text-base font-black">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
     <ElectionViewPills dark :view="view" :has-matrix="hasMatrix" :election-seg="electionSeg" :view-link="viewLink" @select="$emit('select', $event)" />
   </section>
-  <Hero class="max-md:hidden" full-width :background-image="heroBackgroundImage">
+  <!-- 桌面版（md 以上）：細標題列。檢視切換、縣市選擇都在左邊延伸欄，這裡不再重複膠囊與縣市選擇器 -->
+  <section class="max-md:hidden border-b border-slate-200 bg-white px-6 py-4" data-testid="desk-hero">
+    <h1 class="text-xl font-black text-navy-900">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-2 text-amber-500">候選人與政見</span></h1>
+  </section>
+  <!-- 大標題區只留在 DOM（預渲染的 h1 與連結給爬蟲），畫面上不顯示 -->
+  <Hero class="hidden" full-width :background-image="heroBackgroundImage">
     <template #title>
       <div class="relative w-full">
         <div v-if="county">

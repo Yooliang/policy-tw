@@ -2,7 +2,7 @@
 import { nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, X, Loader2 } from 'lucide-vue-next'
-import { useGlobalSearch } from '../composables/useGlobalSearch'
+import { useGlobalSearch, useGlobalSearchOpen } from '../composables/useGlobalSearch'
 import SearchResults from './SearchResults.vue'
 
 /**
@@ -10,6 +10,10 @@ import SearchResults from './SearchResults.vue'
  * 手機版的搜尋頁（pages/SearchPage.vue）共用同一份。
  */
 const router = useRouter()
+// bare：不畫搜尋鈕，只留視窗（桌面版左欄的「搜尋」鈕透過 useGlobalSearchOpen 開它）
+defineProps<{ bare?: boolean }>()
+const { requests } = useGlobalSearchOpen()
+watch(requests, () => { void show() })
 const open = ref(false)
 const term = ref('')
 const search = useGlobalSearch(term)
@@ -35,6 +39,7 @@ function go(path: string) {
 
 <template>
   <button
+    v-if="!bare"
     type="button"
     class="bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full flex items-center justify-center transition-colors border border-slate-200"
     aria-label="搜尋"

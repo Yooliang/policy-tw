@@ -179,3 +179,9 @@ export function useGlobalSearch(term: Ref<string>) {
 
   return { loading, people, policies, hasResults, voted, activeYear, isRunning, electionYearText, tracker, reset }
 }
+
+/** 桌面版左欄的「搜尋」鈕要開全站搜尋視窗：視窗元件（GlobalSearch）看這個請求計數，變了就打開 */
+const searchOpenRequests = ref(0)
+export function useGlobalSearchOpen() {
+  return { requests: searchOpenRequests, openSearch: () => { searchOpenRequests.value++ } }
+}

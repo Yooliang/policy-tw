@@ -151,3 +151,9 @@ html.dark .dir-list .dl { color: #94a3b8; }
 @media (max-width: 767.98px) and (prefers-reduced-motion: no-preference) {
   [data-chrome], [data-chrome-follow] { transition: transform 200ms ease-out; }
 }
+
+/* 桌面版外殼（App.vue 的 [data-desk-main]，md 以上）：內容區滿版，拿掉各頁的 max-w-7xl／6xl 置中容器，內容在區內自行排版 */
+@media (min-width: 768px) {
+  [data-desk-main] main .max-w-7xl,
+  [data-desk-main] main .max-w-6xl { max-width: none; }
+}

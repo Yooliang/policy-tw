@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
-import { electionPath } from '../lib/election-regions'
-import { electionSegment } from '../lib/election-route'
-import { useSupabase } from '../composables/useSupabase'
+import { Heart, X, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
-import MobileMenu from './MobileMenu.vue'
+import { useDeskNav } from '../composables/useDeskNav'
+import { sectionOfRoute } from '../lib/desk-sections'
 import MobileDrawer from './MobileDrawer.vue'
 import { useMobileShell } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
@@ -19,7 +17,6 @@ const { openDrawer } = useMobileShell()
 const isLoggingIn = ref(false)
 const route = useRoute()
 const router = useRouter()
-const { getActiveElection } = useSupabase()
 const { isAuthenticated, userDisplayName, userAvatarUrl, signInWithGoogle, loading: authLoading } = useAuth()
 
 const handleGoogleLogin = async () => {
@@ -33,36 +30,6 @@ const handleGoogleLogin = async () => {
   }
 }
 
-
-const activeElection = computed(() => getActiveElection())
-
-const navItems = computed(() => {
-  const items = [
-    // 「跨任期接力」（/analysis）不在主選單：它是「政見」底下的一種看法，
-    // 入口在 PolicyViewNav。放兩個地方會讓人以為是兩件不同的事。
-    // 「政見追蹤」而不是「政見」（2026-09-17）：這一頁是追進度的，
-    // 只寫「政見」會讓人以為是政見列表。手機仍用兩個字，不然會擠掉旁邊兩項。
-    { name: '政見追蹤', shortName: '政見', path: '/tracking', icon: TrendingUp },
-    // 「參與貢獻」連 /stats（貢獻紀錄），不是 /community（維護者 2026-10-02）：
-    // /community 在 MechanismNav 的標籤是「公民提問」，導覽列寫「參與貢獻」卻連到那裡，
-    // 按下去看到的是提問討論、不是貢獻。/community 的入口還在 MechanismNav 與政見頁的「去提問」。
-    { name: '參與貢獻', shortName: '參與', path: '/stats', icon: Milestone },
-  ]
-
-  if (activeElection.value) {
-    items.push({
-      name: activeElection.value.shortName,
-      shortName: '選舉',
-      path: electionPath(electionSegment(activeElection.value)),
-      icon: Vote
-    })
-  }
-
-  return items
-})
-
-
-const isActive = (path: string) => route.path === path
 
 // ---- 手機版頁首正中間（X 式，每頁不同）：首頁＝站徽；選舉頁＝定位麵包屑；候選人頁＝姓名；其他頁＝頁面名稱 ----
 const { crumbs, person } = useMobileHeader()
@@ -102,6 +69,31 @@ const canBack = computed(() => {
   // 選舉頁（含承諾／PK 等各檢視）不放返回鈕：退層靠頁首麵包屑（2026-10-31）
   return mounted.value && !isHome.value && !isElectionRoute.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
 })
+
+// ---- 桌面版細頁首的麵包屑：首頁 › 區塊 › 頁面（選舉頁接定位麵包屑、候選人頁接姓名） ----
+const { openDeskDrawer } = useDeskNav()
+const SECTION_ROOT: Record<string, { label: string; to: string }> = {
+  policy: { label: '政見', to: '/tracking' }, election: { label: '選舉', to: '/elections' }, join: { label: '參與', to: '/stats' },
+  search: { label: '搜尋', to: '/search' }, about: { label: '關於', to: '/vision' },
+}
+const deskSection = computed(() => sectionOfRoute(route.name))
+const deskHasExt = computed(() => deskSection.value !== null && deskSection.value !== 'home' && deskSection.value !== 'search')
+interface DeskCrumb { label: string; to?: string; go?: () => void }
+const deskCrumbs = computed<DeskCrumb[]>(() => {
+  const list: DeskCrumb[] = [{ label: '首頁', to: '/' }]
+  const sec = deskSection.value
+  if (!sec || sec === 'home') return [{ label: '正見' }]
+  const root = SECTION_ROOT[sec]
+  if (root) list.push({ label: root.label, to: root.to })
+  if (isElectionRoute.value && mounted.value && crumbs.value && crumbs.value.length > 0) {
+    crumbs.value.forEach((c, i, all) => list.push(i === all.length - 1 ? { label: c.label } : { label: c.label, go: c.go }))
+  } else if (route.name === 'politician') {
+    list.push({ label: personOnRoute.value?.name ?? '候選人' })
+  } else if (sec !== 'search' && PAGE_TITLES[String(route.name)] && PAGE_TITLES[String(route.name)] !== root?.label) {
+    list.push({ label: PAGE_TITLES[String(route.name)]! })
+  }
+  return list
+})
 </script>
 
 <template>
@@ -140,106 +132,29 @@ const canBack = computed(() => {
       <div v-if="!isSearchRoute" class="w-10 shrink-0" :class="isHome ? 'ml-auto' : ''" aria-hidden="true"></div>
     </div>
 
-    <div class="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <div class="flex items-center flex-shrink-0">
-          <RouterLink to="/" class="flex-shrink-0 flex items-center gap-0.5 group">
-            <!-- 站徽（2026-09-17）：水墨「正見」，兩字都由五個政黨色暈染而成。
-                 兩字間距是字高的 10%——原圖間隔超過半個字寬，縮到 4% 又會讓
-                 「正」的收筆撞上「見」的起筆。srcset 給 2x 螢幕用。 -->
-            <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x"
-              alt="正見" width="72" height="40"
-              class="h-8 sm:h-10 w-auto object-contain group-hover:scale-105 transition-transform" />
-          </RouterLink>
-        </div>
-
-        <!-- Nav Items: Always visible, shorter text on mobile -->
-        <div class="flex-1 flex justify-center">
-          <!-- 桌面版（lg 以上）圖示與文字左右排，兩者都放大；窄螢幕維持上下疊，
-               不然三個項目加起來會擠掉右邊的登入鈕（2026-09-17）。 -->
-          <div class="flex items-center space-x-0.5 sm:space-x-1 lg:space-x-2">
-            <RouterLink
-              v-for="item in navItems"
-              :key="item.name"
-              :to="item.path"
-              :class="`flex flex-col lg:flex-row items-center justify-center lg:gap-2 px-2 sm:px-4 lg:px-5 py-1.5 lg:py-2.5 rounded-xl text-[10px] sm:text-xs lg:text-base font-bold transition-colors duration-200 min-w-[48px] sm:min-w-[72px] ${
-                isActive(item.path)
-                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-navy-900'
-              }`"
-            >
-              <component :is="item.icon" :size="18" class="mb-0.5 sm:mb-1 lg:mb-0 lg:w-[22px] lg:h-[22px]" />
-              <span class="sm:hidden">{{ item.shortName }}</span>
-              <span class="hidden sm:inline">{{ item.name }}</span>
-            </RouterLink>
-          </div>
-        </div>
-
-        <!-- Right Side Actions -->
-        <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-          <GlobalSearch />
-
-          <!-- 手機版（sm 以下）：Aa、登入／帳號、贊助收成一顆選單（2026-10-07，維護者）。
-               四顆圓鈕排在一起，360 寬時中間的三個主選單會被擠到跟站徽重疊。 -->
-          <MobileMenu
-            class="sm:hidden"
-            :is-authenticated="isAuthenticated"
-            :user-display-name="userDisplayName"
-            :user-avatar-url="userAvatarUrl"
-            @login="isLoginModalOpen = true"
-            @profile="router.push('/profile')"
-          />
-
-          <!-- 桌面版（sm 以上）維持原樣：Aa、登入／帳號、愛心各一顆 -->
-          <AppearanceMenu class="hidden sm:block" />
-
-          <!-- User Avatar (Logged In) -->
-          <template v-if="isAuthenticated">
-            <button
-              @click="router.push('/profile')"
-              class="hidden sm:flex items-center gap-1 sm:gap-2 bg-slate-100 hover:bg-slate-200 text-navy-900 p-1.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-bold transition-all border border-slate-200"
-            >
-              <img
-                v-if="userAvatarUrl"
-                :src="userAvatarUrl"
-                :alt="userDisplayName"
-                class="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover"
-              />
-              <div v-else class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                {{ userDisplayName.charAt(0).toUpperCase() }}
-              </div>
-              <span class="hidden sm:inline max-w-[100px] truncate">{{ userDisplayName }}</span>
-            </button>
-          </template>
-
-          <!-- Login Button (Not Logged In) -->
-          <template v-else>
-            <!-- 登入改成一個人的形象（2026-09-17），跟旁邊的愛心一樣是圓鈕。
-                 文字拿掉了，所以 aria-label 與 title 一定要留，不然讀螢幕的人不知道這是什麼。 -->
-            <button
-              @click="isLoginModalOpen = true"
-              class="hidden sm:flex bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full items-center justify-center transition-colors border border-slate-200"
-              aria-label="登入"
-              title="登入"
-            >
-              <CircleUserRound :size="22" />
-            </button>
-          </template>
-
-          <!-- 贊助：只用一顆愛心（2026-09-16：「主選單那邊用個愛心即可」）；
-               文字拿掉了，所以要有 aria-label 與 title，讀螢幕的人與滑過去的人才知道它是什麼 -->
-          <RouterLink
-            to="/donation"
-            class="hidden sm:flex bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full items-center justify-center transition-all shadow-lg hover:shadow-red-500/20"
-            aria-label="贊助平台"
-            title="贊助平台"
-          >
-            <Heart :size="16" class="fill-current" />
-          </RouterLink>
-        </div>
+    <!-- 桌面版細頁首（md 以上）：左邊麵包屑（窄桌面多一顆開延伸欄抽屜的鈕），右邊顯示設定／登入／贊助；主選單在最左窄欄（DeskRail） -->
+    <div class="hidden md:flex h-12 items-center gap-3 px-4 lg:px-6" data-testid="desk-header">
+      <button v-if="deskHasExt" type="button" class="lg:hidden flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-navy-900 hover:bg-slate-100" aria-label="開啟子選單" data-testid="desk-drawer-open" @click="openDeskDrawer"><Menu :size="20" /></button>
+      <nav class="min-w-0 flex-1 flex items-center gap-0.5 text-sm font-bold text-slate-500" aria-label="目前位置" data-testid="desk-crumbs">
+        <template v-for="(c, i) in deskCrumbs" :key="i">
+          <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-300" />
+          <RouterLink v-if="c.to" :to="c.to" class="truncate rounded px-1 py-1 hover:text-navy-900">{{ c.label }}</RouterLink>
+          <button v-else-if="c.go" type="button" class="truncate rounded px-1 py-1 hover:text-navy-900" @click="c.go()">{{ c.label }}</button>
+          <span v-else class="truncate px-1 py-1 text-navy-900">{{ c.label }}</span>
+        </template>
+      </nav>
+      <div class="flex shrink-0 items-center gap-2">
+        <GlobalSearch bare />
+        <AppearanceMenu />
+        <button v-if="isAuthenticated" @click="router.push('/profile')" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-navy-900 p-1.5 lg:px-3 lg:py-1.5 rounded-full text-sm font-bold transition-all border border-slate-200">
+          <img v-if="userAvatarUrl" :src="userAvatarUrl" :alt="userDisplayName" class="w-7 h-7 rounded-full object-cover" />
+          <div v-else class="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">{{ userDisplayName.charAt(0).toUpperCase() }}</div>
+          <span class="hidden lg:inline max-w-[100px] truncate">{{ userDisplayName }}</span>
+        </button>
+        <button v-else @click="isLoginModalOpen = true" class="flex bg-slate-100 hover:bg-slate-200 text-navy-900 w-9 h-9 rounded-full items-center justify-center transition-colors border border-slate-200" aria-label="登入" title="登入"><CircleUserRound :size="22" /></button>
+        <RouterLink to="/donation" class="flex bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-full items-center justify-center transition-all shadow-lg hover:shadow-red-500/20" aria-label="贊助平台" title="贊助平台"><Heart :size="16" class="fill-current" /></RouterLink>
       </div>
     </div>
-
 
     <!-- Login Modal (only for non-logged-in users) -->
     <div v-if="isLoginModalOpen && !isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="isLoginModalOpen = false">

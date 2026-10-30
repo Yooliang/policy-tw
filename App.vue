@@ -4,7 +4,14 @@ import Navbar from './components/Navbar.vue'
 import Footer from './components/Footer.vue'
 import AdSlot from './components/AdSlot.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
-import { onBeforeUnmount, onMounted } from 'vue'
+import DeskRail from './components/DeskRail.vue'
+import DeskExtNav from './components/DeskExtNav.vue'
+import AdRail from './components/AdRail.vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { DESK_LG, DESK_MD, DESK_XL, useDeskLayout, useDeskNav } from './composables/useDeskNav'
+import { sectionOfRoute } from './lib/desk-sections'
+import { adHiddenPath } from './lib/ad-pages'
 import { isMobileViewport, useMobileShell } from './composables/useMobileShell'
 import { useScrollHide } from './composables/useScrollHide'
 import { inHorizontalScroller } from './composables/useSwipeTabs'
@@ -14,6 +21,16 @@ import { inHorizontalScroller } from './composables/useSwipeTabs'
 // - 沒有分頁的頁面：內容區任何地方往右滑（排除輸入框、橫向捲動區、data-no-swipe）
 // - 有分頁的區塊（標了 data-swipe-tabs）：「在最左一頁再往右拉」由 useSwipeTabs 處理，這裡讓位
 useScrollHide()
+
+// 桌面版（md 以上）外殼：最左窄圖示欄＋延伸欄＋內容＋右側廣告欄；md 以下維持手機版（頂部頁首＋底部分頁列）
+const route = useRoute()
+const { width } = useDeskLayout()
+const { drawerOpen: deskDrawer, closeDeskDrawer } = useDeskNav()
+const isDesk = computed(() => width.value >= DESK_MD)
+const showRail = computed(() => width.value >= DESK_XL && !adHiddenPath(route.path))
+// 首頁、搜尋沒有子項目，延伸欄整欄收起
+const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null && s !== 'home' && s !== 'search' })
+const drawerShown = computed(() => deskDrawer.value && hasExt.value && width.value >= DESK_MD && width.value < DESK_LG)
 const { openDrawer } = useMobileShell()
 const EDGE_PX = 28
 let ex = 0
@@ -54,19 +71,30 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
 </script>
 
 <template>
-  <div class="flex flex-col min-h-screen font-sans pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-    <Navbar />
-    <main class="flex-grow">
-      <RouterView v-slot="{ Component }">
-        <KeepAlive :include="['ElectionPage']">
-          <component :is="Component" />
-        </KeepAlive>
-      </RouterView>
-    </main>
-    <AdSlot />
-    <!-- 手機版不顯示頁尾（連結都在左側抽屜選單裡）；只用 CSS 隱藏，預渲染的 HTML 仍在，桌機不變 -->
-    <Footer class="max-md:hidden" />
-    <MobileTabBar />
+  <div class="font-sans md:flex md:min-h-screen">
+    <!-- 桌面版最左窄欄與延伸欄（md 以上；延伸欄 lg 以上固定顯示，窄桌面收成抽屜） -->
+    <div class="hidden md:block sticky top-0 z-40 h-screen shrink-0 self-start" data-chrome="rail"><DeskRail /></div>
+    <div v-if="hasExt" class="hidden lg:block sticky top-0 z-30 h-screen shrink-0 self-start" data-chrome="ext"><DeskExtNav /></div>
+    <div v-if="drawerShown" class="fixed inset-0 z-[70] hidden md:block lg:hidden" data-testid="desk-drawer">
+      <div class="absolute inset-0 bg-black/40" @click="closeDeskDrawer"></div>
+      <div class="absolute inset-y-0 left-[72px] shadow-2xl"><DeskExtNav drawer @close="closeDeskDrawer" /></div>
+    </div>
+
+    <div class="flex min-h-screen min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" data-desk-main>
+      <Navbar />
+      <main class="flex-grow">
+        <RouterView v-slot="{ Component }">
+          <KeepAlive :include="['ElectionPage']">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
+      </main>
+      <!-- 桌面版廣告在右欄；頁尾橫幅只留給手機（桌面不渲染，AdSense 不允許把已渲染的廣告藏起來） -->
+      <AdSlot v-if="!isDesk" class="md:hidden" />
+      <!-- 頁尾（桌面與手機都只用 CSS 隱藏，預渲染的 HTML 仍在，連結給爬蟲走；連結在左欄與延伸欄／抽屜選單） -->
+      <Footer class="hidden" />
+      <MobileTabBar />
+    </div>
+    <div v-if="showRail" class="hidden xl:block shrink-0"><AdRail /></div>
   </div>
 </template>
-
