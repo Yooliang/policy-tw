@@ -713,58 +713,108 @@ onMounted(queueAnchorScroll)
 onActivated(queueAnchorScroll)
 watch(() => route.hash, queueAnchorScroll)
 
-/** 手機版地區抽屜（右下角浮動按鈕開關）：抽屜裡就是右側面板同一個節點，桌機版不受影響；換頁（切縣市、鄉鎮）時自動收起 */
+/**
+ * 手機版地區抽屜（右下角「地區」浮動鈕）：滾輪選擇器（iOS 日期滾輪那種），桌機右側面板不受影響。
+ * 一共五個滾輪排成一條軌道，畫面永遠只看到三個，分兩段：
+ * 第一段（縣市層）縣市｜縣市議員選區｜鄉鎮市區；在鄉鎮輪點一個鄉鎮 → 軌道向左滑，進第二段（鄉鎮層）鄉鎮｜代表選區｜村里。
+ * 停住不套用，一律按「確定」才套用；「取消」回到開啟前的網址。縣市、鄉鎮換了才有新的選區／村里資料，
+ * 所以這兩輪停住時就先換頁預覽（replace，不堆歷史），取消再換回開啟前的網址。
+ */
 const regionDrawerOpen = ref(false)
 const regionDrawerEl = ref<HTMLElement | null>(null)
-type DrawerChip = { key: string; text: string; active: boolean; to?: RouteLocationRaw; onClick?: () => void }
-/** 手機抽屜四欄（由左到右）：縣市（全台＋各縣市，全台頁也有）／鄉鎮市區／村里／選區（多種選區並存時前面加短標籤）；沒資料的欄顯示「—」 */
-const drawerRows = computed(() => {
-  const rows: { key: string; label: string; chips: DrawerChip[] }[] = []
-  rows.push({ key: 'county', label: '縣市', chips: [
-    { key: 'All', text: '全台', active: selectedRegion.value === 'All', to: regionLink('All') },
-    ...TAIWAN_COUNTIES.map(c => ({ key: c, text: c, active: selectedRegion.value === c, to: regionLink(c) })),
-  ] })
-  const hasSub = selectedRegion.value !== 'All' && availableSubRegions.value.length > 0
-  rows.push({ key: 'town', label: '鄉鎮', chips: !hasSub ? [] : [
-    { key: 'All', text: '全部', active: selectedSubRegion.value === 'All', to: townshipLink('All') },
-    ...availableSubRegions.value.map(t => ({ key: t, text: t, active: selectedSubRegion.value === t, to: townshipLink(t) })),
-  ] })
-  rows.push({ key: 'village', label: '村里', chips: !hasSub || availableVillages.value.length === 0 || viewMode.value === 'comparison' ? [] : [
-    { key: 'All', text: '全部', active: selectedVillage.value === 'All', onClick: () => { selectedVillage.value = 'All' } },
-    ...availableVillages.value.map(v => ({ key: v, text: v, active: selectedVillage.value === v, onClick: () => { selectedVillage.value = v } })),
-  ] })
-  const dChips: DrawerChip[] = []
-  if (hasSub) {
-    const many = districtPanels.value.length > 1
-    for (const p of districtPanels.value) {
-      const pre = many ? p.title + ' ' : ''
-      dChips.push({ key: p.type + 'All', text: pre + '全部', active: selectedDistrict.value === 'All', onClick: () => { selectedDistrict.value = 'All' } })
-      for (const d of p.chips) dChips.push({ key: p.type + d, text: pre + shortDistrict(d), active: selectedDistrict.value === d, onClick: () => toggleDistrictChip(d) })
+const drawerStage = ref<1 | 2>(1)
+const drawerOrigin = ref('')
+/** 還沒套用的選擇：滾輪 id → 項目 key；換頁後清掉，以頁面現況為準 */
+const wheelSel = ref<Record<string, string>>({})
+type DrawerChip = { key: string; text: string; active: boolean; apply?: () => void }
+type DrawerWheel = { id: string; label: string; chips: DrawerChip[] }
+function openRegionDrawer() {
+  drawerOrigin.value = route.fullPath
+  drawerStage.value = pageTownship.value ? 2 : 1
+  wheelSel.value = {}
+  regionDrawerOpen.value = true
+}
+watch(() => route.fullPath, () => { wheelSel.value = {} })
+const drawerWheels = computed<DrawerWheel[]>(() => {
+  const hasRegion = selectedRegion.value !== 'All'
+  const hasSub = hasRegion && availableSubRegions.value.length > 0
+  const isCouncil = (type: string) => type === ElectionType.COUNCILOR
+  const districtChips = (pick: (type: string) => boolean): DrawerChip[] => {
+    const panels = districtPanels.value.filter(p => pick(p.type))
+    const out: DrawerChip[] = []
+    for (const p of panels) {
+      const pre = panels.length > 1 ? p.title + ' ' : ''
+      out.push({ key: p.type + '|All', text: pre + '全部', active: selectedDistrict.value === 'All', apply: () => { selectedDistrict.value = 'All' } })
+      for (const d of p.chips) out.push({ key: p.type + '|' + d, text: pre + shortDistrict(d), active: selectedDistrict.value === d, apply: () => { selectedDistrict.value = d } })
     }
-    if (pkDistrictPanel.value) for (const d of pkDistrictPanel.value.links) dChips.push({ key: 'pk' + d.label, text: d.label, active: !!d.active, to: d.to })
+    const pk = pkDistrictPanel.value
+    if (pk) for (const d of pk.links) out.push({ key: 'pk|' + d.label, text: d.label, active: !!d.active, apply: () => { void router.push(d.to) } })
+    return out
   }
-  rows.push({ key: 'district', label: '選區', chips: dChips })
-  return rows
+  const townChips: DrawerChip[] = !hasSub ? [] : [
+    { key: 'All', text: '全部', active: selectedSubRegion.value === 'All', apply: () => { void router.replace(townshipLink('All')) } },
+    ...availableSubRegions.value.map(t => ({ key: t, text: t, active: selectedSubRegion.value === t, apply: () => { void router.replace(townshipLink(t)) } })),
+  ]
+  const hasTown = !!pageTownship.value
+  return [
+    { id: 'county', label: '縣市', chips: [
+      { key: 'All', text: '全台', active: selectedRegion.value === 'All', apply: () => { void router.replace(regionLink('All')) } },
+      ...TAIWAN_COUNTIES.map(c => ({ key: c, text: c, active: selectedRegion.value === c, apply: () => { void router.replace(regionLink(c)) } })),
+    ] },
+    { id: 'council', label: '議員選區', chips: hasRegion && !hasTown ? districtChips(isCouncil) : [] },
+    { id: 'town', label: '鄉鎮市區', chips: townChips },
+    { id: 'rep', label: '代表選區', chips: hasTown ? districtChips(t => !isCouncil(t)) : [] },
+    { id: 'village', label: '村里', chips: hasTown && availableVillages.value.length > 0 && viewMode.value !== 'comparison' ? [
+      { key: 'All', text: '全部', active: selectedVillage.value === 'All', apply: () => { selectedVillage.value = 'All' } },
+      ...availableVillages.value.map(v => ({ key: v, text: v, active: selectedVillage.value === v, apply: () => { selectedVillage.value = v } })),
+    ] : [] },
+  ]
 })
-/**
- * 滾輪選擇器（iOS 日期滾輪那種）：每欄 scroll-snap 停在中間選取帶的那一項就是選中，停止滾動約 150ms 後才觸發，
- * 右邊的滾輪跟著換內容並回到「全部」；點某一項也是先捲到中間再選。每項高 44px，上下各留 88px 讓頭尾項目能停在中間。
- */
+function wheelSelectedKey(w: DrawerWheel): string | undefined {
+  return wheelSel.value[w.id] ?? w.chips.find(c => c.active)?.key ?? w.chips[0]?.key
+}
+function confirmRegionDrawer() {
+  const pending = (id: string) => {
+    const w = drawerWheels.value.find(x => x.id === id)
+    const key = wheelSel.value[id]
+    const chip = !w || key === undefined ? undefined : w.chips.find(c => c.key === key)
+    return chip && !chip.active ? chip : undefined
+  }
+  if (drawerStage.value === 1) {
+    pending('council')?.apply?.()
+    pending('town')?.apply?.()
+  } else {
+    pending('rep')?.apply?.()
+    pending('village')?.apply?.()
+  }
+  regionDrawerOpen.value = false
+}
+function cancelRegionDrawer() {
+  regionDrawerOpen.value = false
+  if (route.fullPath !== drawerOrigin.value) void router.replace(drawerOrigin.value)
+}
 const WHEEL_ITEM = 44
 const wheelTimers = new Map<string, ReturnType<typeof setTimeout>>()
-function onWheelScroll(row: { key: string; chips: DrawerChip[] }, ev: Event) {
+/** 滾動停住約 150ms 後，中間那項就是選中；縣市輪（以及第二段的鄉鎮輪）選了就先換頁預覽 */
+function onWheelScroll(w: DrawerWheel, ev: Event) {
   const el = ev.currentTarget as HTMLElement
-  clearTimeout(wheelTimers.get(row.key))
-  wheelTimers.set(row.key, setTimeout(() => {
-    const c = row.chips[Math.max(0, Math.min(row.chips.length - 1, Math.round(el.scrollTop / WHEEL_ITEM)))]
-    if (!c || c.active) return
-    if (c.to) void router.push(c.to)
-    else c.onClick?.()
+  clearTimeout(wheelTimers.get(w.id))
+  wheelTimers.set(w.id, setTimeout(() => {
+    const c = w.chips[Math.max(0, Math.min(w.chips.length - 1, Math.round(el.scrollTop / WHEEL_ITEM)))]
+    if (!c || c.key === wheelSelectedKey(w)) return
+    wheelSel.value = { ...wheelSel.value, [w.id]: c.key }
+    if (c.active) return
+    if (w.id === 'county' || (w.id === 'town' && drawerStage.value === 2)) c.apply?.()
   }, 150))
 }
-function wheelTo(ev: Event, i: number) {
-  const list = (ev.currentTarget as HTMLElement).parentElement
-  list?.scrollTo({ top: i * WHEEL_ITEM, behavior: 'smooth' })
+/** 點一項：捲到中間；在第一段點鄉鎮（不是「全部」）→ 換到那個鄉鎮並進第二段 */
+function wheelClick(w: DrawerWheel, c: DrawerChip, i: number, ev: Event) {
+  ;(ev.currentTarget as HTMLElement).parentElement?.scrollTo({ top: i * WHEEL_ITEM, behavior: 'smooth' })
+  if (w.id === 'town' && drawerStage.value === 1 && c.key !== 'All') {
+    wheelSel.value = { ...wheelSel.value, town: c.key }
+    if (!c.active) c.apply?.()
+    drawerStage.value = 2
+  }
 }
 function onWheelKey(ev: KeyboardEvent) {
   const dy = ev.key === 'ArrowDown' ? WHEEL_ITEM : ev.key === 'ArrowUp' ? -WHEEL_ITEM : 0
@@ -772,14 +822,14 @@ function onWheelKey(ev: KeyboardEvent) {
   ev.preventDefault();
   (ev.currentTarget as HTMLElement).scrollBy({ top: dy, behavior: 'smooth' })
 }
-// 抽屜打開、或選擇後內容換了：每個滾輪捲到自己選中的那一項
-watch([regionDrawerOpen, drawerRows], async () => {
+// 打開、換段、內容或選擇變了：每個滾輪捲到自己選中的那一項
+watch([regionDrawerOpen, drawerStage, drawerWheels, wheelSel], async () => {
   if (!regionDrawerOpen.value) return
   await nextTick()
-  for (const row of drawerRows.value) {
-    const list = regionDrawerEl.value?.querySelector<HTMLElement>('[data-wheel="' + row.key + '"]')
+  for (const w of drawerWheels.value) {
+    const list = regionDrawerEl.value?.querySelector<HTMLElement>('[data-wheel="' + w.id + '"]')
     if (!list) continue
-    const idx = Math.max(0, row.chips.findIndex(c => c.active))
+    const idx = Math.max(0, w.chips.findIndex(c => c.key === wheelSelectedKey(w)))
     if (Math.abs(list.scrollTop - idx * WHEEL_ITEM) > 2) list.scrollTo({ top: idx * WHEEL_ITEM, behavior: 'auto' })
   }
 }, { flush: 'post' })
@@ -1479,55 +1529,72 @@ usePageHead({
 
       </div><!-- flex 結束 -->
 
-      <!-- 手機版：抽屜背板、右下角「地區」浮動按鈕、底部抽屜（四欄並排：縣市／鄉鎮／村里／選區，各欄上下捲動） -->
-      <div v-if="regionDrawerOpen" class="fixed inset-0 z-[65] bg-black/40 md:hidden" @click="regionDrawerOpen = false"></div>
+      <!-- 手機版：抽屜背板、右下角「地區」浮動按鈕、底部抽屜（滾輪選擇器，一次最多看到三個滾輪，分縣市層／鄉鎮層兩段） -->
+      <div v-if="regionDrawerOpen" class="fixed inset-0 z-[65] bg-black/40 md:hidden" @click="cancelRegionDrawer"></div>
       <button
         v-if="!regionDrawerOpen"
         type="button"
         class="md:hidden fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg active:scale-95"
         data-testid="region-fab"
-        @click="regionDrawerOpen = true"
+        @click="openRegionDrawer"
       ><MapPin :size="16" />{{ regionFabLabel }}</button>
       <div
         v-if="regionDrawerOpen"
         ref="regionDrawerEl"
-        class="md:hidden fixed inset-x-0 bottom-0 z-[70] max-h-[85dvh] overflow-y-auto rounded-t-2xl bg-slate-50 px-2 pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl"
+        class="md:hidden fixed inset-x-0 bottom-0 z-[70] max-h-[85dvh] overflow-y-auto rounded-t-2xl bg-slate-50 px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl"
         data-testid="region-drawer"
+        :data-stage="drawerStage"
       >
-        <div class="flex items-center justify-between mb-1 px-1">
-          <span class="text-sm font-black text-slate-800">地區</span>
-          <button type="button" class="px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold" @click="regionDrawerOpen = false">完成</button>
-        </div>
-        <div class="grid grid-cols-4 gap-1.5">
-          <div v-for="row in drawerRows" :key="row.key" class="min-w-0" :data-testid="'region-col-' + row.key">
-            <div class="px-1 pb-1 text-center text-[11px] font-black text-slate-400">{{ row.label }}</div>
-            <div v-if="row.chips.length === 0" class="h-[220px] flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-300">—</div>
-            <div v-else class="relative h-[220px] rounded-lg bg-white border border-slate-200 overflow-hidden">
-              <div
-                :data-wheel="row.key"
-                role="listbox"
-                tabindex="0"
-                :aria-label="row.label"
-                class="h-full overflow-y-auto overscroll-contain snap-y snap-mandatory py-[88px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                @scroll="onWheelScroll(row, $event)"
-                @keydown="onWheelKey($event)"
-              >
-                <button
-                  v-for="(c, i) in row.chips"
-                  :key="c.key"
-                  type="button"
-                  role="option"
-                  :aria-selected="c.active"
-                  class="snap-center w-full h-11 px-1 text-center text-sm leading-tight break-words flex items-center justify-center transition-opacity"
-                  :class="c.active ? 'font-black text-blue-700' : 'text-slate-500 opacity-70'"
-                  @click="wheelTo($event, i)"
-                >{{ c.text }}</button>
+        <div class="overflow-hidden">
+          <div
+            class="grid gap-x-2 transition-transform duration-300 ease-out motion-reduce:transition-none"
+            :style="{ gridTemplateColumns: 'repeat(5, calc((100% - 1rem) / 3))', transform: drawerStage === 2 ? 'translateX(calc((100% - 1rem) * -2 / 3 - 1rem))' : 'none' }"
+          >
+            <div
+              v-for="(w, wi) in drawerWheels"
+              :key="w.id"
+              class="min-w-0"
+              :data-testid="'region-col-' + w.id"
+              :inert="(drawerStage === 1 ? wi > 2 : wi < 2) || undefined"
+              :aria-hidden="(drawerStage === 1 ? wi > 2 : wi < 2) || undefined"
+            >
+              <div class="px-1 pb-1 text-center text-[11px] font-black text-slate-400 h-5 flex items-center justify-center">
+                <button v-if="w.id === 'town' && drawerStage === 2" type="button" class="text-blue-600" @click="drawerStage = 1">‹ 返回</button>
+                <template v-else>{{ w.label }}</template>
               </div>
-              <div class="pointer-events-none absolute inset-x-0 top-0 h-[88px] bg-gradient-to-b from-white via-white/80 to-transparent"></div>
-              <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[88px] bg-gradient-to-t from-white via-white/80 to-transparent"></div>
-              <div class="pointer-events-none absolute inset-x-1 top-[88px] h-11 border-y border-blue-300"></div>
+              <div v-if="w.chips.length === 0" class="h-[220px] flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-300">—</div>
+              <div v-else class="relative h-[220px] rounded-lg bg-white border border-slate-200 overflow-hidden">
+                <div
+                  :data-wheel="w.id"
+                  role="listbox"
+                  tabindex="0"
+                  :aria-label="w.label"
+                  class="h-full overflow-y-auto overscroll-contain snap-y snap-mandatory py-[88px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  @scroll="onWheelScroll(w, $event)"
+                  @keydown="onWheelKey($event)"
+                >
+                  <button
+                    v-for="(c, i) in w.chips"
+                    :key="c.key"
+                    type="button"
+                    role="option"
+                    :aria-selected="c.key === wheelSelectedKey(w)"
+                    class="snap-center w-full h-11 px-1 text-center text-sm leading-tight break-words flex items-center justify-center transition-opacity"
+                    :class="c.key === wheelSelectedKey(w) ? 'font-black text-blue-700' : 'text-slate-500 opacity-70'"
+                    @click="wheelClick(w, c, i, $event)"
+                  >{{ c.text }}</button>
+                </div>
+                <div class="pointer-events-none absolute inset-x-0 top-0 h-[88px] bg-gradient-to-b from-white via-white/80 to-transparent"></div>
+                <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[88px] bg-gradient-to-t from-white via-white/80 to-transparent"></div>
+                <div class="pointer-events-none absolute inset-x-1 top-[88px] h-11 border-y border-blue-300"></div>
+              </div>
             </div>
           </div>
+        </div>
+        <div class="mt-3 flex justify-end gap-2">
+          <button v-if="drawerStage === 1" type="button" class="px-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-600 text-sm font-bold" @click="cancelRegionDrawer">取消</button>
+          <button v-else type="button" class="px-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-600 text-sm font-bold" @click="drawerStage = 1">返回</button>
+          <button type="button" class="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold" @click="confirmRegionDrawer">確定</button>
         </div>
       </div>
     </div>
