@@ -1875,7 +1875,12 @@ async function applyCandNumbers(supabase: SupabaseLike, row: ContributionRow): P
   throwIf(voteError, "contribution_votes read");
   const flagged = flaggedRows((votes ?? []) as Array<{ verdict: string; bad_items?: unknown }>);
   const { data: conflictRows, error: conflictError } = await supabase.rpc("cand_no_batch_conflicts", { p_items: items });
-  throwIf(conflictError, "cand_no_batch_conflicts");
+  // 重複檢查本身出錯（逾時等）≠ 這份交件有問題：不退件、不消耗 apply_failed 的重試次數（defer），貢獻留在 verified，apply-verified 每 10 分鐘再撿；
+  // 還沒有任何寫入，重試安全。逾時退件事故（2026-10-30，203 件整批被誤退）之後的保守做法：寧可暫緩，不可在無法確認時寫入、也不可把好的整批退掉
+  if (conflictError) {
+    console.error("cand_no_batch_conflicts failed, deferring", row.id, conflictError.message);
+    return { status: "failed", defer: true, message: `號次重複檢查暫時出錯（${conflictError.message}），這份先不處理、稍後自動重試` };
+  }
   const conflicts = new Map<number, string>(((conflictRows ?? []) as Array<{ politician_election_id: number; reason: string }>).map((c) => [c.politician_election_id, c.reason]));
 
   const plan = planCandNumbers((existing ?? []) as ExistingCandNo[], items, electionId, electionType, flagged, conflicts);

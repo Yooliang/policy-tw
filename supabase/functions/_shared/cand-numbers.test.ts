@@ -27,6 +27,8 @@ import { typeSpecForTask, typeSpecForVerify } from "./type-spec-for.ts";
 
 const M1 = await readMig("20261030130000_cand_numbers.sql");
 const M2 = await readMig("20261030130100_ballot_numbers_cand_numbers.sql");
+// 20261031090000：號次重複檢查改 set-based（修逾時）、補號次臂排除同單位同名不同人、同名人物配對多一個來源、進度多兩欄。函式以這支為最新定義
+const M3 = await readMig("20261031090000_cand_no_dupcheck_timeout.sql");
 const N = await readMig("20261009070000_rep_district_ballot_unit.sql");
 const B = await readMig(BALLOT_MIG);
 
@@ -250,7 +252,7 @@ async function conflictDb(mutateM1?: (s: string) => string): Promise<PGlite> {
     CREATE TABLE politicians (id uuid PRIMARY KEY, name text, region text, merged_into uuid);
     CREATE TABLE politician_elections (id integer PRIMARY KEY, election_id integer, politician_id uuid, election_type text, region_id integer, candidacy_status text, cand_no integer);
     ${fnText(N, "ballot_number_unit")}
-    ${fnText(mutateM1 ? mutateM1(M1) : M1, "cand_no_batch_conflicts")}`);
+    ${fnText(mutateM1 ? mutateM1(M3) : M3, "cand_no_batch_conflicts")}`);
   await db.exec(`INSERT INTO regions VALUES (1, '台北市', '第01選舉區', NULL), (2, '台北市', '第02選舉區', NULL), (3, '台北市', '中山區', '新生里'), (4, '台北市', '中山區', '長安里')`);
   const people = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛"];
   for (const [i, n] of people.entries()) await db.query(`INSERT INTO politicians VALUES ($1, $2, '台北市', NULL)`, [U(i + 1), n]);
@@ -314,7 +316,7 @@ async function armDb(mutateM2?: (s: string) => string): Promise<PGlite> {
     ${fnText(B, "ballot_number_missing")}
     ${dupViews(N, "ballot_number_units")}
     ${dupViews(B, "ballot_number_anomalies")}
-    ${fnText(mutateM2 ? mutateM2(M2) : M2, "contribution_auto_tasks_ballot_numbers")}`);
+    ${fnText(mutateM2 ? mutateM2(M3) : M3, "contribution_auto_tasks_ballot_numbers")}`);
   await db.exec(`INSERT INTO elections VALUES (2026, '2026-11-28')`);
   await db.exec(`INSERT INTO election_milestones_all VALUES (2026, 'draw', NULL, '2026-10-23', 'announced')`);
   for (let i = 1; i <= 4; i++) {
@@ -372,4 +374,124 @@ Deno.test("四處清點：DB CHECK 含 cand_numbers、contribution_votes.bad_ite
   assertStringIncludes(skill, "bad_items");
   assertStringIncludes(skill, "整個任務交一份 `cand_numbers`");
   assertEquals(PROTOCOL_VERSION >= "1.107.0", true);
+});
+
+// ── 7. 重複檢查逾時修正（20261031090000）──────────────────────────────
+Deno.test("落庫：重複檢查本身出錯（逾時）→ 暫緩重試（defer），不退件、不寫任何列、不消耗重試次數", async () => {
+  const fake = createFakeSupabase(seed([{ verdict: "agree" }]), noConflict);
+  const broken = { ...fake.client, rpc: async () => ({ data: null, error: { message: "canceling statement due to statement timeout" } }) };
+  const out = await applyContribution(broken as never, row(PAYLOAD));
+  assertEquals(out.status, "failed");
+  assertEquals(out.defer, true, "defer＝auto-apply 不當失敗、不退件，貢獻留在 verified 下一輪再撿");
+  assertStringIncludes(out.message, "暫時出錯");
+  assertEquals(fake.db.politician_elections.filter((r) => [101, 102, 103].includes(r.id as number)).map((r) => r.cand_no), [null, null, null], "無法確認有沒有重複，一列都不寫");
+  assertEquals(fake.db.edit_history.length, 0);
+});
+
+Deno.test("SQL 檢查走 set-based：已上線那側只依號次取一次；索引存在且不用 CONCURRENTLY（migration 在交易裡跑）", () => {
+  const body = fnText(M3, "cand_no_batch_conflicts");
+  assertStringIncludes(body, "live AS MATERIALIZED");
+  assert(!/JOIN politician_elections pe2 ON pe2\.election_id = a\.election_id/.test(body), "不能回到對每個 item 各撈一次全國同號紀錄");
+  assertStringIncludes(M3, "CREATE INDEX IF NOT EXISTS idx_politician_elections_cand_no ON politician_elections (election_id, election_type, cand_no) WHERE cand_no IS NOT NULL");
+  assert(!/CREATE INDEX CONCURRENTLY/i.test(M3));
+});
+
+Deno.test("SQL 檢查：同號次大量已上線時結果仍正確（30 筆已上線 1 號，只有同村的算衝突）", async () => {
+  const db = await conflictDb();
+  for (let i = 0; i < 30; i++) {
+    const id = 100 + i;
+    await db.query(`INSERT INTO politicians VALUES ($1, $2, '台北市', NULL)`, [U(id), `路人${i}`]);
+    await db.query(`INSERT INTO politician_elections VALUES ($1, 2026, $2, '村里長', $3, 'filed', 1)`, [id, U(id), i % 2 ? 3 : 4]);
+  }
+  const r = await conflicts(db, [[5, 1], [6, 1]]);
+  assertEquals(r.map((x) => x.politician_election_id), [5, 6], "新生里（5）與長安里（6）各有已上線的 1 號");
+  assert(r.every((x) => x.reason.includes("路人")));
+  assertEquals(await conflicts(db, [[5, 9], [6, 9]]), []);
+  await db.close();
+});
+
+Deno.test("補號次臂：同選舉同單位同名不同人、對方已有號次的列不派（其餘照派）；還原驗證：拿掉條件會被派", async () => {
+  async function run(mutateM?: (s: string) => string) {
+    const db = await armDb(mutateM);
+    await db.exec(`INSERT INTO regions VALUES (1, '台北市', '中山區', '新生里'), (2, '台北市', '中山區', '長安里')`);
+    for (const [pid, name] of [[11, "王小明"], [12, "王小明"], [13, "王小明"], [14, "李大同"]] as const) await db.query(`INSERT INTO politicians VALUES ($1, $2, '台北市', NULL)`, [U(pid), name]);
+    // 11 新生里 沒號次（被擋）、12 新生里 已有 1 號、13 長安里 沒號次（別的村里，照派）、14 新生里 沒號次（不同名，照派）
+    await db.exec(`INSERT INTO politician_elections VALUES
+      (11, 2026, '${U(11)}', '村里長', 1, 'filed', NULL), (12, 2026, '${U(12)}', '村里長', 1, 'filed', 1),
+      (13, 2026, '${U(13)}', '村里長', 2, 'filed', NULL), (14, 2026, '${U(14)}', '村里長', 1, 'filed', NULL)`);
+    const ids = (await armItems(db)).map(Number).sort((x, y) => x - y);
+    await db.close();
+    return ids;
+  }
+  assertEquals(await run(), [1, 2, 3, 4, 13, 14], "11 被擋；12 本來就有號次；13、14 照派");
+  const without = await run((s) => mutate(s, "AND o.cand_no IS NOT NULL AND o.politician_id <> rk.politician_id AND rk.unit IS NOT NULL", "AND false"));
+  assert(without.includes(11), "拿掉排除條件，11 會被派（還原驗證）");
+});
+
+Deno.test("同名人物配對：同單位同名、一邊有號次一邊沒有 → 派 duplicate_politician（縣市不同也派），帶 cand_no_gap；其餘配對規則不變；還原驗證", async () => {
+  async function run(mutateM?: (s: string) => string) {
+    const db = new PGlite();
+    await db.exec(`
+      CREATE TABLE elections (id integer PRIMARY KEY, election_date date);
+      CREATE TABLE regions (id integer PRIMARY KEY, region text, sub_region text, village text);
+      CREATE TABLE politicians (id uuid PRIMARY KEY, name text, party text, region text, birth_year integer, current_position text, merged_into uuid);
+      CREATE TABLE politician_elections (id integer PRIMARY KEY, election_id integer, politician_id uuid, election_type text, region_id integer, candidacy_status text, cand_no integer);
+      CREATE TABLE politician_pair_resolutions (pair_key text);
+      CREATE TABLE jev_decisions (subject_type text, question text, subject_id text, choice text, probability numeric, asked_at timestamptz);
+      CREATE TABLE contributions (id serial PRIMARY KEY, contribution_type text, status text, payload jsonb);
+      CREATE FUNCTION activity_today() RETURNS date LANGUAGE sql STABLE AS $$ SELECT date '2026-10-31' $$;
+      CREATE FUNCTION system_one_min_probability() RETURNS numeric LANGUAGE sql AS $$ SELECT 0.8 $$;
+      CREATE FUNCTION jev_pair_exclusion_days() RETURNS integer LANGUAGE sql AS $$ SELECT 90 $$;
+      CREATE FUNCTION politician_pair_key(a uuid, b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(a, b)::text || '|' || GREATEST(a, b)::text $$;
+      ${fnText(N, "ballot_number_unit")}
+      ${fnText(mutateM ? mutateM(M3) : M3, "contribution_auto_tasks_dup")}`);
+    await db.exec(`INSERT INTO elections VALUES (2026, '2026-11-28')`);
+    await db.exec(`INSERT INTO regions VALUES (1, '新竹市', '香山區', '鹽水里'), (2, '新竹市', '香山區', '朝山里'), (3, '台北市', '中山區', '新生里')`);
+    // 21／22：同名、縣市不同（台北市／新竹市）、同村（鹽水里）、22 有 1 號 → 要派；23／24：同名不同縣市、不同村 → 不派；25／26：同名同縣市、都沒號次 → 照舊派（沒有 cand_no_gap）
+    const people: Array<[number, string, string]> = [[21, "陳文榮", "台北市"], [22, "陳文榮", "新竹市"], [23, "張三", "台北市"], [24, "張三", "新竹市"], [25, "李四", "新竹市"], [26, "李四", "新竹市"]];
+    for (const [i, name, region] of people) await db.query(`INSERT INTO politicians VALUES ($1, $2, NULL, $3, NULL, NULL, NULL)`, [U(i), name, region]);
+    await db.exec(`INSERT INTO politician_elections VALUES
+      (21, 2026, '${U(21)}', '村里長', 1, 'filed', NULL), (22, 2026, '${U(22)}', '村里長', 1, 'filed', 1),
+      (23, 2026, '${U(23)}', '村里長', 3, 'filed', NULL), (24, 2026, '${U(24)}', '村里長', 2, 'filed', 2),
+      (25, 2026, '${U(25)}', '村里長', 2, 'filed', NULL), (26, 2026, '${U(26)}', '村里長', 2, 'filed', NULL)`);
+    const rows = (await db.query<{ task_id: string; target: Record<string, unknown> }>(`SELECT task_id, target FROM contribution_auto_tasks_dup() ORDER BY task_id`)).rows;
+    await db.close();
+    return rows;
+  }
+  const rows = await run();
+  const gap = rows.filter((r) => r.target.cand_no_gap === true);
+  assertEquals(gap.map((r) => r.task_id), [`auto:duplicate_politician:${U(21)}|${U(22)}`]);
+  assertEquals(gap[0].target.cand_no_unit, "新竹市 香山區 鹽水里");
+  assertEquals(rows.map((r) => r.task_id).sort(), [`auto:duplicate_politician:${U(21)}|${U(22)}`, `auto:duplicate_politician:${U(25)}|${U(26)}`].sort(), "不同縣市又不同村的張三不派；同縣市的李四照舊派");
+  assertEquals(rows.find((r) => r.task_id.endsWith(`${U(25)}|${U(26)}`))!.target.cand_no_gap, undefined);
+  const without = await run((s) => mutate(s, "OR up.a_id IS NOT NULL)", ")"));
+  assertEquals(without.some((r) => r.target.cand_no_gap === true), false, "拿掉這個來源，跨縣市的那一對就配不到（還原驗證）");
+  assertEquals(without.length, 1);
+});
+
+Deno.test("cand_no_front_pull：擋住號次缺口的合併任務（target.cand_no_gap）拉到最前（3 ×）", () => {
+  assertStringIncludes(fnText(M3, "cand_no_front_pull"), "d2.target->>'cand_no_gap' = 'true' THEN v_top");
+});
+
+Deno.test("cand_no_progress：多兩欄＝今天因逾時／號次重複退件的整批數，只回數字", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE contributions (id serial PRIMARY KEY, contribution_type text, status text, payload jsonb, review_notes text, created_at timestamptz DEFAULT now());
+    CREATE TABLE contribution_votes (id serial PRIMARY KEY, contribution_id integer, created_at timestamptz DEFAULT now());
+    CREATE TABLE task_dispatches (task_id text, target jsonb, boost_seconds bigint DEFAULT 0);
+    CREATE TABLE politician_elections (id integer PRIMARY KEY, election_id integer, candidacy_status text, cand_no integer);
+    ${fnText(M3, "public.cand_no_progress")}`);
+  const ins = (type: string, status: string, notes: string | null, ago = "0 days") => db.query(`INSERT INTO contributions (contribution_type, status, payload, review_notes, created_at) VALUES ($1, $2, '{}'::jsonb, $3, now() - $4::interval)`, [type, status, notes, ago]);
+  const timeout = "[auto] 落庫連續 3 次失敗，退件：cand_no_batch_conflicts: canceling statement due to statement timeout。這筆不落庫";
+  await ins("cand_numbers", "rejected", timeout);
+  await ins("cand_numbers", "rejected", timeout);
+  await ins("cand_numbers", "rejected", "[auto] 新竹市香山區 2026 村里長 這一份沒有可寫的列：1 位號次重複、沒寫");
+  await ins("cand_numbers", "rejected", "[auto] 這一份沒有可寫的列：1 位號次重複", "3 days");
+  await ins("cand_numbers", "rejected", "[auto] 別的原因");
+  await ins("cand_numbers", "apply_failed", "[auto] 落庫失敗：statement timeout");
+  const j = (await db.query<{ j: Record<string, unknown> }>(`SELECT public.cand_no_progress() AS j`)).rows[0].j;
+  assertEquals(j.batch_timeout_rejected_today, 2, "只算已退件（apply_failed 還在重試不算）");
+  assertEquals(j.batch_dup_rejected_today, 1, "3 天前的、逾時的、其他原因的都不算");
+  assertEquals(Object.values(j).every((v) => typeof v === "number" || typeof v === "string"), true, "只回數字（與 as_of 時間戳）");
+  await db.close();
 });
