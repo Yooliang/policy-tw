@@ -636,10 +636,11 @@ const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
  */
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
   .filter(sec => (sec.spec.display === 'district' || sec.spec.type === '鄉鎮市民代表') && !sec.empty && sec.chips.length > 1)
-  .map(sec => ({ type: sec.spec.type, title: `${sec.spec.label}選舉區`, chips: sec.chips })))
-/** 縣市議員選舉區包含好幾個鄉鎮，排在「鄉鎮市區」上面；鄉鎮市民代表／區代表的選舉區在鄉鎮之內，排在下面（層級：議員選舉區 → 鄉鎮市區 → 代表選舉區 → 村里） */
-const councilorDistrictPanels = computed(() => districtPanels.value.filter(p => p.type === '縣市議員'))
-const inTownshipDistrictPanels = computed(() => districtPanels.value.filter(p => p.type !== '縣市議員'))
+  .map(sec => ({ type: sec.spec.type, title: sec.spec.label, chips: sec.chips })))
+/** 選區晶片的短寫：「第01選舉區」「湖口鄉第01選舉區」都顯示成「第01區」（篩選仍用完整的 subRegion） */
+function shortDistrict(d: string): string {
+  return d.replace(/^.*?(第d+)選舉區$/, '$1區')
+}
 
 /**
  * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
@@ -1304,31 +1305,7 @@ usePageHead({
       <!-- 右側：篩選區（手機版顯示在上方） -->
       <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
-          <!-- 縣市議員選舉區（排在鄉鎮市區上面；點了只看那一區，再點一次取消） -->
-          <div v-for="panel in councilorDistrictPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
-            <div class="flex items-center gap-2 mb-3">
-              <MapPin :size="16" class="text-blue-500" />
-              <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
-            </div>
-            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
-              <button
-                type="button"
-                @click="selectedDistrict = 'All'"
-                :aria-pressed="selectedDistrict === 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >全部</button>
-              <button
-                v-for="district in panel.chips"
-                :key="district"
-                type="button"
-                @click="toggleDistrictChip(district)"
-                :aria-pressed="selectedDistrict === district"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >{{ district }}</button>
-            </div>
-          </div>
-
-          <!-- 鄉鎮市區篩選 -->
+          <!-- 地區卡：鄉鎮市區 → 村里（連動） -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-slate-400" />
@@ -1349,30 +1326,51 @@ usePageHead({
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === subRegion ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
               >{{ subRegion }}</RouterLink>
             </div>
+            <!-- 村里 -->
+            <template v-if="availableVillages.length > 0 && viewMode !== 'comparison'">
+              <div class="flex items-center gap-2 mt-4 mb-3">
+                <MapPin :size="16" class="text-amber-500" />
+                <span class="text-sm font-bold text-slate-700">村里</span>
+              </div>
+              <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+                <button
+                  @click="selectedVillage = 'All'"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === 'All' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+                >全部</button>
+                <button
+                  v-for="village in availableVillages"
+                  :key="village"
+                  @click="selectedVillage = village"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === village ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+                >{{ village }}</button>
+              </div>
+            </template>
           </div>
 
-          <!-- 選舉區篩選（議員、原住民區代表；2026-10-06 從列表上方移到這裡）：點了只看那一區，再點一次取消 -->
-          <div v-for="panel in inTownshipDistrictPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
-            <div class="flex items-center gap-2 mb-3">
-              <MapPin :size="16" class="text-blue-500" />
-              <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
-            </div>
-            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
-              <button
-                type="button"
-                @click="selectedDistrict = 'All'"
-                :aria-pressed="selectedDistrict === 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >全部</button>
-              <button
-                v-for="district in panel.chips"
-                :key="district"
-                type="button"
-                @click="toggleDistrictChip(district)"
-                :aria-pressed="selectedDistrict === district"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >{{ district }}</button>
-            </div>
+          <!-- 選區卡（議員、鄉鎮市民代表、原住民區代表各一列；只篩自己那一種卡，不連動鄉鎮／村里；再點一次取消） -->
+          <div v-if="districtPanels.length > 0" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+            <template v-for="(panel, i) in districtPanels" :key="panel.type">
+              <div :class="`flex items-center gap-2 mb-3 ${i > 0 ? 'mt-4' : ''}`">
+                <MapPin :size="16" class="text-blue-500" />
+                <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
+              </div>
+              <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  @click="selectedDistrict = 'All'"
+                  :aria-pressed="selectedDistrict === 'All'"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+                >全部</button>
+                <button
+                  v-for="district in panel.chips"
+                  :key="district"
+                  type="button"
+                  @click="toggleDistrictChip(district)"
+                  :aria-pressed="selectedDistrict === district"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+                >{{ shortDistrict(district) }}</button>
+              </div>
+            </template>
           </div>
 
           <!-- 政見 PK 的選區（跟其他頁籤的選舉區、村里同一個位置；真連結，網址 district 參數照舊） -->
@@ -1389,26 +1387,6 @@ usePageHead({
                 :aria-current="d.active ? 'page' : undefined"
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${d.active ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
               >{{ d.label }}</RouterLink>
-            </div>
-          </div>
-
-          <!-- 村里篩選 -->
-          <div v-if="availableVillages.length > 0 && viewMode !== 'comparison'" class="bg-white rounded-xl border border-amber-200 p-4 shadow-sm">
-            <div class="flex items-center gap-2 mb-3">
-              <MapPin :size="16" class="text-amber-500" />
-              <span class="text-sm font-bold text-slate-700">村里</span>
-            </div>
-            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
-              <button
-                @click="selectedVillage = 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === 'All' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
-              >全部</button>
-              <button
-                v-for="village in availableVillages"
-                :key="village"
-                @click="selectedVillage = village"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === village ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
-              >{{ village }}</button>
             </div>
           </div>
 
