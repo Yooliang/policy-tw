@@ -27,6 +27,8 @@ const props = defineProps<{
   viewLink?: (view: ElectionViewMode) => RouteLocationRaw
   county?: string
   township?: string
+  /** 手機版縮小標題區用的鄉鎮；沒給就只寫縣市（縣市層分頁不暗示候選人屬於某鄉鎮） */
+  mobileTownship?: string
 }>()
 defineEmits<{ select: [view: ElectionViewMode] }>()
 
@@ -50,7 +52,7 @@ const timeLeft = computed(() => {
 <template>
   <!-- 手機版（md 以下）：縮小的標題區，一行標題＋一行可橫滑的檢視膠囊，約 90px；桌機的大標題區照舊 -->
   <section class="md:hidden bg-navy-900 py-3 text-white" data-testid="mobile-hero">
-    <div class="mb-2 truncate px-4 text-base font-black">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${township ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
+    <div class="mb-2 truncate px-4 text-base font-black">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
     <ElectionViewPills dark :view="view" :has-matrix="hasMatrix" :election-seg="electionSeg" :view-link="viewLink" @select="$emit('select', $event)" />
   </section>
   <Hero class="max-md:hidden" full-width :background-image="heroBackgroundImage">

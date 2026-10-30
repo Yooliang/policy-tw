@@ -647,7 +647,7 @@ const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [.
   .map(sec => ({ type: sec.spec.type, title: sec.spec.label, chips: sec.chips })))
 /** 選區晶片的短寫：「第01選舉區」「湖口鄉第01選舉區」都顯示成「第01區」（篩選仍用完整的 subRegion） */
 function shortDistrict(d: string): string {
-  return d.replace(/^.*?(第d+)選舉區$/, '$1區')
+  return d.replace(/^.*?(第\d+)選舉區$/, '$1區')
 }
 
 /**
@@ -1198,11 +1198,14 @@ function ensureCountyLevelLoaded() {
 watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
 
 // 頁首正中間的定位麵包屑：點任一段退到那一層（清掉更下層），分頁內容就改列該層的選項
+/** 手機版分頁在縣市層（縣市長／議員）不顯示鄉鎮與村里、在鄉鎮層（鄉鎮市長／代表）不顯示村里：共用定位不清掉，換到更下層的分頁再顯示回來 */
+const mobileShowSub = computed(() => viewMode.value !== 'politicians' || TAB_NEEDS[mobileActiveType.value] !== 'county')
+const mobileShowVillage = computed(() => viewMode.value !== 'politicians' || TAB_NEEDS[mobileActiveType.value] === 'village')
 const headerCrumbs = computed(() => {
   const list = [{ label: '全台', go: () => { void router.replace(regionLink('All')) } }]
   if (selectedRegion.value !== 'All') list.push({ label: selectedRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(regionLink(selectedRegion.value)) } })
-  if (selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All') list.push({ label: selectedSubRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(townshipLink(selectedSubRegion.value)) } })
-  if (selectedVillage.value !== 'All') list.push({ label: selectedVillage.value, go: () => { /* 最深一層，點了不動 */ } })
+  if (mobileShowSub.value && selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All') list.push({ label: selectedSubRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(townshipLink(selectedSubRegion.value)) } })
+  if (mobileShowSub.value && mobileShowVillage.value && selectedVillage.value !== 'All') list.push({ label: selectedVillage.value, go: () => { /* 最深一層，點了不動 */ } })
   return list
 })
 watch(headerCrumbs, v => setCrumbs(v), { immediate: true })
@@ -1246,7 +1249,7 @@ useSwipeTabs(swipeEl, {
 
     <ElectionHero
       :election="election" :election-seg="electionSeg" :view="viewMode" :has-matrix="hasMatrix"
-      :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="pageTownship"
+      :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="pageTownship" :mobile-township="mobileShowSub ? pageTownship : undefined"
       @select="viewMode = $event"
     />
 
@@ -1270,6 +1273,17 @@ useSwipeTabs(swipeEl, {
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
+        <!-- 手機版：選區晶片放在排序工具列之上（標題區 → 選區 → 排序 → 卡片） -->
+        <div v-if="mobileChips && !mobilePick" class="md:hidden -mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="mobile-district-chips">
+          <button
+            v-for="c in mobileChips"
+            :key="c.key"
+            type="button"
+            class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
+            :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+            @click="selectedDistrict = c.value"
+          >{{ c.text }}</button>
+        </div>
         <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
         <div class="flex justify-end mb-2 md:mb-4">
           <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
@@ -1386,16 +1400,6 @@ useSwipeTabs(swipeEl, {
             <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-pick-empty">{{ mobileEmptyText }}</p>
           </template>
           <template v-else-if="mobileSection && !mobileSection.empty">
-            <div v-if="mobileChips" class="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-no-swipe data-testid="mobile-district-chips">
-              <button
-                v-for="c in mobileChips"
-                :key="c.key"
-                type="button"
-                class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
-                :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
-                @click="selectedDistrict = c.value"
-              >{{ c.text }}</button>
-            </div>
             <PoliticianGrid v-if="mobileSection.spec.display === 'grid'" :id="mobileSection.anchor" :politicians="mobileSection.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(mobileSection)" :pk-link="sectionPkLink(mobileSection)"><template #icon><component :is="LEVEL_ICONS[mobileSection.spec.icon]" :class="mobileSection.spec.iconClass" /></template></PoliticianGrid>
             <ChipFilteredGroups
               v-else
