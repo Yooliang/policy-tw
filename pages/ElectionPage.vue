@@ -564,6 +564,8 @@ interface LevelSection {
   groups: Array<{ label: string; people: Politician[]; anchor?: string }>
   /** 選舉區快篩（district 排法才有；村里在右側面板的「村里」，選舉區在右側面板的「○○選舉區」，列表上方不放選擇，2026-10-06） */
   chips: readonly string[]
+  /** 卡片排法（grid）實際要畫的人：鄉鎮市民代表依右側選的選舉區篩過；其餘等於 people */
+  shown: Politician[]
   empty: boolean
   /** 整個職位區塊的頁內錨點 id（人物頁麵包屑的職位層連到這裡，見 lib/election-levels.ts 的 sectionAnchor） */
   anchor?: string
@@ -581,15 +583,21 @@ function buildSection(spec: PositionSpec): LevelSection {
     // 議員與原住民區代表共用同一個 selectedDistrict：議員只出現在縣市頁、區代表只出現在原住民區頁，
     // 不會同時在畫面上，而換縣市或換鄉鎮時 watch 會把它重設。
     const groups = withAnchors(spec, groupsByDistrict(people, spec.type))
-    return { spec, people, groups, chips: districtsOf(people, spec.type), empty: groups.length === 0, anchor }
+    return { spec, people, shown: people, groups, chips: districtsOf(people, spec.type), empty: groups.length === 0, anchor }
   }
   if (spec.display === 'village') {
     // 順序照 availableVillages（已排好序），每組只留真的有候選人的村里；選了特定村里時名單已經先篩過，
     // 這裡自然只剩一組。村里是空值或對不上的人收進最後一組「未標示里別」（lib/village-grouping.ts）。
     const groups = withAnchors(spec, groupByVillage(people, availableVillages.value).map(g => ({ label: g.village, people: g.people })))
-    return { spec, people, groups, chips: [], empty: groups.length === 0, anchor }
+    return { spec, people, shown: people, groups, chips: [], empty: groups.length === 0, anchor }
   }
-  return { spec, people, groups: [], chips: [], empty: people.length === 0, anchor }
+  if (spec.type === '鄉鎮市民代表') {
+    // 鄉鎮市民代表是卡片排法，但同一個鄉鎮有好幾個選舉區（subRegion＝「湖口鄉第01選舉區」）：
+    // 快篩清單照目前這一頁的代表蒐集，選了只畫那一區（selectedDistrict；鄉鎮頁沒有議員，不會互相打架）。
+    const shown = selectedDistrict.value === 'All' ? people : people.filter(c => c.subRegion === selectedDistrict.value)
+    return { spec, people, shown, groups: [], chips: districtsOf(people, spec.type), empty: people.length === 0, anchor }
+  }
+  return { spec, people, shown: people, groups: [], chips: [], empty: people.length === 0, anchor }
 }
 
 function sectionsOf(types: readonly string[]): LevelSection[] {
@@ -627,8 +635,12 @@ const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
  * 縣市頁的縣市議員、原住民區頁的區代表（只在「候選人」頁籤，其他頁籤不用選舉區）；選區不到兩個就不需要選。選了只看那一區（selectedDistrict，議員與區代表共用）。
  */
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
-  .filter(sec => sec.spec.display === 'district' && !sec.empty && sec.chips.length > 1)
-  .map(sec => ({ type: sec.spec.type, title: `${sec.spec.label}選舉區`, chips: sec.chips })))
+  .filter(sec => (sec.spec.display === 'district' || sec.spec.type === '鄉鎮市民代表') && !sec.empty && sec.chips.length > 1)
+  .map(sec => ({ type: sec.spec.type, title: sec.spec.label, chips: sec.chips })))
+/** 選區晶片的短寫：「第01選舉區」「湖口鄉第01選舉區」都顯示成「第01區」（篩選仍用完整的 subRegion） */
+function shortDistrict(d: string): string {
+  return d.replace(/^.*?(第d+)選舉區$/, '$1區')
+}
 
 /**
  * 頁內錨點（2026-10-05）：人物頁麵包屑的職位層連到這一頁的區塊，例如 /election/2026/金門縣#縣市長、
@@ -1119,7 +1131,7 @@ usePageHead({
           規則在上面的 sectionPkLink／groupPkLinkFor。
         -->
         <template v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1135,7 +1147,7 @@ usePageHead({
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <template v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.people" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1293,7 +1305,7 @@ usePageHead({
       <!-- 右側：篩選區（手機版顯示在上方） -->
       <div v-if="selectedRegion !== 'All' && availableSubRegions.length > 0" class="order-first md:order-last md:w-1/3 shrink-0">
         <div class="md:sticky md:top-[4.5rem] space-y-4">
-          <!-- 鄉鎮市區篩選 -->
+          <!-- 地區卡：鄉鎮市區 → 村里（連動） -->
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="flex items-center gap-2 mb-3">
               <MapPin :size="16" class="text-slate-400" />
@@ -1314,30 +1326,51 @@ usePageHead({
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedSubRegion === subRegion ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`"
               >{{ subRegion }}</RouterLink>
             </div>
+            <!-- 村里 -->
+            <template v-if="availableVillages.length > 0 && viewMode !== 'comparison'">
+              <div class="flex items-center gap-2 mt-4 mb-3">
+                <MapPin :size="16" class="text-amber-500" />
+                <span class="text-sm font-bold text-slate-700">村里</span>
+              </div>
+              <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+                <button
+                  @click="selectedVillage = 'All'"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === 'All' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+                >全部</button>
+                <button
+                  v-for="village in availableVillages"
+                  :key="village"
+                  @click="selectedVillage = village"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === village ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
+                >{{ village }}</button>
+              </div>
+            </template>
           </div>
 
-          <!-- 選舉區篩選（議員、原住民區代表；2026-10-06 從列表上方移到這裡）：點了只看那一區，再點一次取消 -->
-          <div v-for="panel in districtPanels" :key="panel.type" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
-            <div class="flex items-center gap-2 mb-3">
-              <MapPin :size="16" class="text-blue-500" />
-              <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
-            </div>
-            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
-              <button
-                type="button"
-                @click="selectedDistrict = 'All'"
-                :aria-pressed="selectedDistrict === 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >全部</button>
-              <button
-                v-for="district in panel.chips"
-                :key="district"
-                type="button"
-                @click="toggleDistrictChip(district)"
-                :aria-pressed="selectedDistrict === district"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
-              >{{ district }}</button>
-            </div>
+          <!-- 選區卡（議員、鄉鎮市民代表、原住民區代表各一列；只篩自己那一種卡，不連動鄉鎮／村里；再點一次取消） -->
+          <div v-if="districtPanels.length > 0" class="bg-white rounded-xl border border-blue-200 p-4 shadow-sm" data-testid="district-panel">
+            <template v-for="(panel, i) in districtPanels" :key="panel.type">
+              <div :class="`flex items-center gap-2 mb-3 ${i > 0 ? 'mt-4' : ''}`">
+                <MapPin :size="16" class="text-blue-500" />
+                <span class="text-sm font-bold text-slate-700">{{ panel.title }}</span>
+              </div>
+              <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  @click="selectedDistrict = 'All'"
+                  :aria-pressed="selectedDistrict === 'All'"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === 'All' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+                >全部</button>
+                <button
+                  v-for="district in panel.chips"
+                  :key="district"
+                  type="button"
+                  @click="toggleDistrictChip(district)"
+                  :aria-pressed="selectedDistrict === district"
+                  :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedDistrict === district ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
+                >{{ shortDistrict(district) }}</button>
+              </div>
+            </template>
           </div>
 
           <!-- 政見 PK 的選區（跟其他頁籤的選舉區、村里同一個位置；真連結，網址 district 參數照舊） -->
@@ -1354,26 +1387,6 @@ usePageHead({
                 :aria-current="d.active ? 'page' : undefined"
                 :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${d.active ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`"
               >{{ d.label }}</RouterLink>
-            </div>
-          </div>
-
-          <!-- 村里篩選 -->
-          <div v-if="availableVillages.length > 0 && viewMode !== 'comparison'" class="bg-white rounded-xl border border-amber-200 p-4 shadow-sm">
-            <div class="flex items-center gap-2 mb-3">
-              <MapPin :size="16" class="text-amber-500" />
-              <span class="text-sm font-bold text-slate-700">村里</span>
-            </div>
-            <div class="flex flex-wrap gap-0.5 max-h-64 overflow-y-auto">
-              <button
-                @click="selectedVillage = 'All'"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === 'All' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
-              >全部</button>
-              <button
-                v-for="village in availableVillages"
-                :key="village"
-                @click="selectedVillage = village"
-                :class="`px-3 py-1.5 rounded-lg text-sm font-medium transition-all min-w-[50px] text-center ${selectedVillage === village ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`"
-              >{{ village }}</button>
             </div>
           </div>
 
