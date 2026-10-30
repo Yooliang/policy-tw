@@ -138,7 +138,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
 
 <template>
   <div class="mb-12 scroll-mt-20">
-    <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
+    <h3 class="text-xl font-bold text-navy-900 mb-3 md:mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> <span class="min-w-0">{{ title }} ({{ politicians.length }})</span>
       <RouterLink
         v-if="pkLink"

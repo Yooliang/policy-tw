@@ -23,7 +23,7 @@ const MIN_DX = 56
 const DOMINANCE = 1.6
 const MAX_MS = 900
 
-function inHorizontalScroller(target: EventTarget | null, root: HTMLElement): boolean {
+export function inHorizontalScroller(target: EventTarget | null, root: HTMLElement | null): boolean {
   let el = target instanceof HTMLElement ? target : null
   while (el && el !== root) {
     if (el.hasAttribute('data-no-swipe')) return true
@@ -72,6 +72,7 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
 
   function unbind() {
     if (!bound) return
+    bound.removeAttribute('data-swipe-tabs')
     bound.removeEventListener('touchstart', onStart)
     bound.removeEventListener('touchend', onEnd)
     bound = null
@@ -80,6 +81,7 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     unbind()
     if (!node) return
     bound = node
+    node.setAttribute('data-swipe-tabs', '') // 外殼（App.vue）的全頁右滑開選單看到這個標記就讓位
     node.addEventListener('touchstart', onStart, { passive: true })
     node.addEventListener('touchend', onEnd, { passive: true })
   }, { immediate: true, flush: 'post' })

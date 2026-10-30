@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu } from 'lucide-vue-next'
+import { TrendingUp, Heart, X, Vote, Milestone, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { useSupabase } from '../composables/useSupabase'
@@ -11,6 +11,7 @@ import AppearanceMenu from './AppearanceMenu.vue'
 import MobileMenu from './MobileMenu.vue'
 import MobileDrawer from './MobileDrawer.vue'
 import { useMobileShell } from '../composables/useMobileShell'
+import { useMobileHeader } from '../composables/useMobileHeader'
 
 const isLoginModalOpen = ref(false)
 const { openDrawer } = useMobileShell()
@@ -61,6 +62,32 @@ const navItems = computed(() => {
 
 
 const isActive = (path: string) => route.path === path
+
+// ---- 手機版頁首正中間（X 式，每頁不同）：首頁＝站徽；選舉頁＝定位麵包屑；候選人頁＝姓名；其他頁＝頁面名稱 ----
+const { crumbs, person } = useMobileHeader()
+const PAGE_TITLES: Record<string, string> = {
+  tracking: '政見追蹤', policy: '政見', analysis: '跨任期接力', 'analysis-detail': '跨任期接力', lineage: '政見脈絡',
+  elections: '選舉', election: '選舉', 'election-region': '選舉', 'election-township': '選舉', 'election-matrix': '政見矩陣',
+  politicians: '政治人物', 'politicians-group': '政治人物', parties: '政黨', party: '政黨', community: '公民提問', discussion: '公民提問',
+  donation: '贊助', vision: '願景', privacy: '隱私權政策', terms: '服務條款', contact: '聯絡我們', 'regional-data': '地方資料',
+  skill: 'Skill', sources: '資料來源', stats: '參與貢獻', 'stats-map': '參與貢獻', contributions: '貢獻紀錄', profile: '帳號',
+}
+const isHome = computed(() => route.name === 'home' || route.path === '/')
+const isElectionRoute = computed(() => ['election', 'election-region', 'election-township'].includes(String(route.name)))
+const pageTitle = computed(() => PAGE_TITLES[String(route.name)] ?? '正見')
+const personOnRoute = computed(() => route.name === 'politician' ? person.value : null)
+/** 麵包屑太長（超過 14 字）就只留最後兩段 */
+const shownCrumbs = computed(() => {
+  const list = isElectionRoute.value ? crumbs.value : null
+  if (!list || list.length === 0) return null
+  const total = list.reduce((n, c) => n + c.label.length, 0)
+  return total > 14 && list.length > 2 ? list.slice(-2) : list
+})
+const TAB_ROOTS = ['/', '/tracking', '/stats']
+const canBack = computed(() => {
+  void route.fullPath
+  return !isHome.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
+})
 </script>
 
 <template>
@@ -76,10 +103,22 @@ const isActive = (path: string) => route.path === path
       >
         <Menu :size="24" />
       </button>
-      <RouterLink to="/" class="absolute left-1/2 -translate-x-1/2 flex items-center" aria-label="正見 首頁">
+      <button v-if="canBack" type="button" class="w-9 h-10 -ml-1 rounded-full flex items-center justify-center text-navy-900 active:bg-slate-100" aria-label="返回" data-testid="mobile-back" @click="router.back()"><ChevronLeft :size="22" /></button>
+      <RouterLink v-if="isHome" to="/" class="absolute left-1/2 -translate-x-1/2 flex items-center" aria-label="正見 首頁">
         <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x" alt="正見" width="72" height="40" class="h-8 w-auto object-contain" />
       </RouterLink>
-      <div class="ml-auto pr-1"><GlobalSearch /></div>
+      <nav v-else-if="shownCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-crumbs">
+        <template v-for="(c, i) in shownCrumbs" :key="i">
+          <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
+          <button type="button" class="truncate rounded px-1 py-1.5 active:bg-slate-100" :class="i === shownCrumbs.length - 1 ? 'text-navy-900' : 'text-slate-500'" @click="c.go()">{{ c.label }}</button>
+        </template>
+      </nav>
+      <div v-else-if="personOnRoute" class="min-w-0 flex-1 px-1 text-center leading-tight" data-testid="header-person">
+        <div class="truncate text-[15px] font-bold text-navy-900">{{ personOnRoute.name }}</div>
+        <div v-if="personOnRoute.sub" class="truncate text-[11px] text-slate-500">{{ personOnRoute.sub }}</div>
+      </div>
+      <div v-else class="min-w-0 flex-1 truncate px-1 text-center text-[15px] font-bold text-navy-900" data-testid="header-title">{{ pageTitle }}</div>
+      <div class="pr-1" :class="isHome ? 'ml-auto' : ''"><GlobalSearch /></div>
     </div>
 
     <div class="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

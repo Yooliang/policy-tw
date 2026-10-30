@@ -5,6 +5,7 @@ import { Clock, Grid3x3, Layers, LayoutGrid, Megaphone, Scale } from 'lucide-vue
 import Hero from './Hero.vue'
 import HeroAction from './HeroAction.vue'
 import GlobalRegionSelector from './GlobalRegionSelector.vue'
+import ElectionViewPills from './ElectionViewPills.vue'
 import { VIEW_TABS, type ElectionViewMode } from '../lib/election-view-tabs'
 import { electionYearOfDate } from '../lib/election-route'
 import type { Election } from '../types'
@@ -47,7 +48,12 @@ const timeLeft = computed(() => {
 </script>
 
 <template>
-  <Hero full-width :background-image="heroBackgroundImage">
+  <!-- 手機版（md 以下）：縮小的標題區，一行標題＋一行可橫滑的檢視膠囊，約 90px；桌機的大標題區照舊 -->
+  <section class="md:hidden bg-navy-900 py-3 text-white" data-testid="mobile-hero">
+    <div class="mb-2 truncate px-4 text-base font-black">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${township ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
+    <ElectionViewPills dark :view="view" :has-matrix="hasMatrix" :election-seg="electionSeg" :view-link="viewLink" @select="$emit('select', $event)" />
+  </section>
+  <Hero class="max-md:hidden" full-width :background-image="heroBackgroundImage">
     <template #title>
       <div class="relative w-full">
         <div v-if="county">

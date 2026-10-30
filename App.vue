@@ -6,21 +6,30 @@ import AdSlot from './components/AdSlot.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
 import { onBeforeUnmount, onMounted } from 'vue'
 import { isMobileViewport, useMobileShell } from './composables/useMobileShell'
+import { inHorizontalScroller } from './composables/useSwipeTabs'
 
-// 手機版（X 式版面）：從畫面左緣往右滑拉出左側選單。分頁區「在最左一頁再往右拉」另由 useSwipeTabs 處理。
+// 手機版（X 式版面）：往右滑拉出左側選單。
+// - 從畫面左緣起手：任何地方都行
+// - 沒有分頁的頁面：內容區任何地方往右滑（排除輸入框、橫向捲動區、data-no-swipe）
+// - 有分頁的區塊（標了 data-swipe-tabs）：「在最左一頁再往右拉」由 useSwipeTabs 處理，這裡讓位
 const { openDrawer } = useMobileShell()
 const EDGE_PX = 28
 let ex = 0
 let ey = 0
 let fromEdge = false
+let fromBody = false
 function onTouchStart(e: TouchEvent) {
   const t = e.touches[0]
-  fromEdge = e.touches.length === 1 && !!t && t.clientX <= EDGE_PX && isMobileViewport()
+  const mobile = e.touches.length === 1 && !!t && isMobileViewport()
+  fromEdge = mobile && t!.clientX <= EDGE_PX
+  const target = e.target instanceof HTMLElement ? e.target : null
+  fromBody = mobile && !fromEdge && !!target && !target.closest('[data-swipe-tabs], [role="dialog"], [data-testid="mobile-drawer"]') && !inHorizontalScroller(target, null)
   if (t) { ex = t.clientX; ey = t.clientY }
 }
 function onTouchEnd(e: TouchEvent) {
-  if (!fromEdge) return
+  if (!fromEdge && !fromBody) return
   fromEdge = false
+  fromBody = false
   const t = e.changedTouches[0]
   if (!t) return
   const dx = t.clientX - ex

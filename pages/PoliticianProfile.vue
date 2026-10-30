@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { shortUrlsIn } from '../lib/url'
 import PartyBadge from '../components/PartyBadge.vue'
-import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
+import { useMobileHeader } from '../composables/useMobileHeader'
 import { useSwipeTabs } from '../composables/useSwipeTabs'
 import { useMobileShell } from '../composables/useMobileShell'
 import { useRoute, useRouter } from 'vue-router'
@@ -308,6 +309,10 @@ const peerDistrict = computed(() => {
  * 規則在 lib/politician-office.ts，判「是不是現任」在資料庫（視圖 politician_offices）。
  */
 const titles = computed(() => officeTitles(politician.value?.offices))
+// 手機版頁首正中間顯示姓名＋小字現任職稱（X 式）
+const { setPerson } = useMobileHeader()
+watch([() => politician.value?.name, titles], ([name, t]) => { setPerson(name ? { name, sub: t[0] } : null) }, { immediate: true })
+onBeforeUnmount(() => setPerson(null))
 /**
  * 「這一屆」＝還沒投票（含今天）裡最近的一屆定期改選；都投完票了（例如 2027 年）就取最近投完的那一屆。
  * 看投票日（lib/election-list.ts 的 currentElection），不看 id、不看 startDate／endDate（#344 第二階段 A）：
