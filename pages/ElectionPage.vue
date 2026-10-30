@@ -142,6 +142,10 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
   const seq = ++loadSeq
   electionLoading.value = true
   try {
+    // 手機版全台、停在議員／鄉鎮市長／代表分頁：先讓那一分頁的第一批撈完（最多等 8 秒），再撈全台縣市長（60KB，這個分頁用不到），不跟第一屏搶頻寬
+    if (region === 'All' && subRegion === 'All' && isMobileViewport() && NATIONWIDE_TYPES[mobileActiveType.value]) {
+      await Promise.race([fillNationwide(mobileActiveType.value, BATCH), new Promise(r => setTimeout(r, 8000))])
+    }
     await loadPoliticiansByElection(id, region, subRegion)
   } finally {
     if (seq === loadSeq) { electionLoading.value = false; mobileLoadedKey.value = `${id}|${region}|${subRegion}` }
@@ -1175,17 +1179,14 @@ const indigenousDistricts = computed(() => {
 /** 這個分頁的定位夠不夠：不夠就回「下一層要挑什麼」，夠了回 null */
 interface MobilePick { level: 'county' | 'sub' | 'village'; title: string; options: string[] }
 function pickFor(type: string): MobilePick | null {
-  const need = TAB_NEEDS[type]
-  // 2026-10-31：縣市長分頁全台就直接列全部縣市長（依縣市分組），不先要人挑縣市
-  if (selectedRegion.value === 'All' && type !== ElectionType.MAYOR) return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
-  if (need === 'county') return null
+  // 2026-10-31 小良哥：鄉鎮與村里的預設都是「全部」，各分頁一開就直接列出參選人；
+  // 唯一例外是村里長分頁沒選鄉鎮：全台先挑縣市、選了縣市先挑鄉鎮（鄉鎮選了就是該鄉鎮全部村里，依村里分組）
+  if (type !== ElectionType.CHIEF) return null
+  if (selectedRegion.value === 'All') return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (selectedSubRegion.value === 'All') {
-    if (allSub.value) return null // 按了鄉鎮列的「全部」：直接顯示該縣市全部鄉鎮的名單
     // 鄉鎮層一律列該縣市全部鄉鎮市區（不依有沒有該類選舉過濾）；沒有該類選舉的區，內容區顯示「無此類選舉」，定位照樣設定
     return { level: 'sub', title: `選擇${subRegionLabel.value}`, options: [...mobileSubOptions.value] }
   }
-  if (need === 'sub') return null
-  if (selectedVillage.value === 'All' && !allVillage.value) return { level: 'village', title: `選擇${villageLabel.value}`, options: availableVillages.value }
   return null
 }
 const mobilePick = computed(() => pickFor(mobileActiveType.value))
@@ -1194,21 +1195,16 @@ const mobilePick = computed(() => pickFor(mobileActiveType.value))
  * allSub＝按了鄉鎮列的「全部」（清掉鄉鎮與村里定位，顯示該縣市全部鄉鎮的名單）；allVillage＝按了村里列的「全部」（顯示該鄉鎮全部村里）。
  * 換縣市、挑了具體的鄉鎮／村里就解除。
  */
-const allSub = ref(false)
+// 2026-10-31：預設就是「全部」，不再需要旗標——沒挑鄉鎮＝全部鄉鎮、沒挑村里＝全部村里
+const allSub = computed(() => selectedSubRegion.value === 'All')
 /** 縣市層「全部」／其他檢視要把整個縣市的代表、村里長另外撈進來時，撈的過程中 */
 const countyWideLoading = ref(false)
-const allVillage = ref(false)
-watch(selectedRegion, () => { allSub.value = false; allVillage.value = false })
-watch(selectedSubRegion, (v) => { if (v !== 'All') allSub.value = false; allVillage.value = false })
-watch(selectedVillage, (v) => { if (v !== 'All') allVillage.value = false })
+const allVillage = computed(() => selectedVillage.value === 'All')
 function pickAll(level: 'sub' | 'village') {
   if (level === 'sub') {
-    allSub.value = true
-    allVillage.value = false
     selectedVillage.value = 'All'
     if (selectedSubRegion.value !== 'All') void router.replace(regionLink(selectedRegion.value))
   } else {
-    allVillage.value = true
     selectedVillage.value = 'All'
   }
 }
@@ -1220,7 +1216,7 @@ function allSubSection(type: string): LevelSection | null {
   const base = positionSpec(realType) ?? positionSpec(type)
   if (!base) return null
   const people = peopleOf(realType)
-  const townOf = (c: Politician) => (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? c.subRegion.replace(/第d+選舉區$/, '') : '未標示')
+  const townOf = (c: Politician) => (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? c.subRegion.replace(/第\d+選舉區$/, '') : '未標示')
   const labelOf = (c: Politician) => {
     if (realType === ElectionType.CHIEF) return `${townOf(c)} ${c.village || '未標示里別'}`
     if (realType === ElectionType.REPRESENTATIVE || realType === ElectionType.INDIGENOUS_DISTRICT_REP) return c.subRegion || townOf(c)
@@ -1247,14 +1243,102 @@ function batchedGroups(panel: MobilePanel) {
     out.push(g)
     n += g.people.length
   }
-  return { groups: out, more: out.length < sec.groups.length, shown: n, total: sec.people.length }
+  const remote = nwRemaining(panel.type)
+  return { groups: out, more: out.length < sec.groups.length || remote, shown: n, total: sec.people.length, remote }
 }
-function showMoreOf(type: string) { mobileShown.value = { ...mobileShown.value, [type]: (mobileShown.value[type] ?? BATCH) + BATCH } }
+function showMoreOf(type: string) {
+  if (nwActive(type)) {
+    if (nwLoading.value[nwKey(type)]) return // 還在撈上一批：不重複加碼
+    const limit = (mobileShown.value[type] ?? BATCH) + BATCH
+    mobileShown.value = { ...mobileShown.value, [type]: limit }
+    void fillNationwide(type, limit)
+    return
+  }
+  mobileShown.value = { ...mobileShown.value, [type]: (mobileShown.value[type] ?? BATCH) + BATCH }
+}
+// ---- 全台（沒挑縣市）的議員、鄉鎮市長、鄉鎮市民代表：伺服器端分頁 ----
+// 全台議員約 2,400、代表約 3,400，不能一次撈。依縣市順序（TAIWAN_COUNTIES）一次撈三個縣市（各一個既有的 get_politicians_by_level 請求，
+// 只帶該分頁的職位），累積到約一批（BATCH＝90 位）就停，使用者捲近底部才撈下一批。每個縣市整個撈完，才不會一組只出現一半的人。
+const NATIONWIDE_TYPES: Record<string, string[]> = {
+  [ElectionType.COUNCILOR]: [ElectionType.COUNCILOR],
+  [ElectionType.TOWNSHIP_MAYOR]: [ElectionType.TOWNSHIP_MAYOR, ElectionType.INDIGENOUS_DISTRICT_CHIEF],
+  [ElectionType.REPRESENTATIVE]: [ElectionType.REPRESENTATIVE, ElectionType.INDIGENOUS_DISTRICT_REP],
+}
+const nwKey = (type: string) => `${electionId.value}|${type}`
+/** 這個分頁現在走全台分頁撈法（沒挑縣市、且是那三種分頁） */
+const nwActive = (type: string) => selectedRegion.value === 'All' && !!NATIONWIDE_TYPES[type]
+/** 已撈到第幾個縣市（TAIWAN_COUNTIES 的索引上界） */
+const nwNext = ref<Record<string, number>>({})
+const nwLoading = ref<Record<string, boolean>>({})
+const nwWant = new Map<string, number>()
+const nwInflight = new Map<string, Promise<void>>()
+const nwRemaining = (type: string) => nwActive(type) && (nwNext.value[nwKey(type)] ?? 0) < TAIWAN_COUNTIES.length
+/** 還沒開始撈、或正在撈第一批：內容區顯示「載入中」而不是「無此類選舉」 */
+const nwPending = (type: string) => nwActive(type) && ((nwNext.value[nwKey(type)] ?? 0) === 0 || !!nwLoading.value[nwKey(type)])
+function nwCount(type: string): number {
+  const types = NATIONWIDE_TYPES[type]!
+  let n = 0
+  for (const c of politicians.value) {
+    if (!c.electionIds?.includes(electionId.value)) continue
+    const t = getElectionType(c)
+    if (t && types.includes(t)) n++
+  }
+  return n
+}
+function fillNationwide(type: string, want: number): Promise<void> {
+  const key = nwKey(type)
+  if (!NATIONWIDE_TYPES[type] || !electionId.value) return Promise.resolve()
+  nwWant.set(key, Math.max(want, nwWant.get(key) ?? 0))
+  const running = nwInflight.get(key)
+  if (running) return running
+  const id = electionId.value
+  const run = (async () => {
+    nwLoading.value = { ...nwLoading.value, [key]: true }
+    try {
+      while ((nwNext.value[key] ?? 0) < TAIWAN_COUNTIES.length && nwCount(type) < (nwWant.get(key) ?? 0)) {
+        const from = nwNext.value[key] ?? 0
+        const counties = TAIWAN_COUNTIES.slice(from, from + 3)
+        await Promise.allSettled(counties.map(c => loadPoliticiansByElection(id, c, 'All', NATIONWIDE_TYPES[type])))
+        if (electionId.value !== id) return
+        nwNext.value = { ...nwNext.value, [key]: from + counties.length }
+      }
+    } finally {
+      nwLoading.value = { ...nwLoading.value, [key]: false }
+      nwInflight.delete(key)
+    }
+  })()
+  nwInflight.set(key, run)
+  return run
+}
+watch(electionId, () => { nwNext.value = {}; nwLoading.value = {}; nwWant.clear(); nwInflight.clear() })
+/** 全台分頁的內容：已撈到的縣市依 TAIWAN_COUNTIES 順序分組，每組標題帶人數 */
+function nationwideSection(type: string): LevelSection | null {
+  const base = positionSpec(type)
+  if (!base) return null
+  const types = NATIONWIDE_TYPES[type]!
+  const people = filteredPoliticians.value.filter(c => { const t = getElectionType(c); return !!t && types.includes(t) })
+  const by = new Map<string, Politician[]>()
+  for (const c of people) {
+    const county = TAIWAN_COUNTIES.find(x => sameRegionName(c.region, x)) ?? c.region ?? '未標示'
+    const arr = by.get(county); if (arr) arr.push(c); else by.set(county, [c])
+  }
+  const order = (k: string) => { const i = (TAIWAN_COUNTIES as readonly string[]).indexOf(k); return i < 0 ? 999 : i }
+  const spec: PositionSpec = { ...base, display: 'district' }
+  const groups = withAnchors(spec, [...by.entries()].sort((x, y) => order(x[0]) - order(y[0])).map(([label, ps]) => ({ label, people: ps })))
+  return { spec, people, shown: people, groups, chips: [], empty: groups.length === 0, anchor: sectionAnchor(spec.type), batch: true }
+}
 const vLoadMore = {
   mounted(el: HTMLElement & { _io?: IntersectionObserver }, b: { value: () => void }) {
     if (typeof IntersectionObserver === 'undefined') return
-    el._io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) b.value() }, { rootMargin: '800px' })
-    el._io.observe(el)
+    // 觸發後暫時取消再重新觀察：按鈕加載後仍在可視範圍內時，才會接著載下一批
+    const io = new IntersectionObserver(es => {
+      if (!es.some(e => e.isIntersecting)) return
+      b.value()
+      io.unobserve(el)
+      setTimeout(() => { if (el.isConnected) io.observe(el) }, 400)
+    }, { rootMargin: '800px' })
+    el._io = io
+    io.observe(el)
   },
   unmounted(el: HTMLElement & { _io?: IntersectionObserver }) { el._io?.disconnect() },
 }
@@ -1268,6 +1352,7 @@ function pickLocation(level: 'county' | 'sub' | 'village', value: string) {
 /** 手機版各分頁的內容（定位夠了才有）；人從已載入的資料取，鄉鎮與村里層級用現成的 levelPlan 區塊 */
 function sectionFor(type: string): LevelSection | null {
   if (pickFor(type)) return null
+  if (selectedRegion.value === 'All' && NATIONWIDE_TYPES[type]) return nationwideSection(type)
   if (selectedSubRegion.value === 'All' && TAB_NEEDS[type] !== 'county' && type !== ElectionType.COUNCILOR) return allSubSection(type)
   if (type === ElectionType.MAYOR) return buildSection(positionSpec(type)!)
   if (type === ElectionType.COUNCILOR) {
@@ -1342,7 +1427,7 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
     options.map(o => chipOf(o, o, o === current, () => pickLocation(level, o)))
   const type = mobileActiveType.value
   const countyRow = (): MobileChip[] => [
-    ...(type === ElectionType.MAYOR ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
+    ...(type === ElectionType.MAYOR || selectedRegion.value === 'All' ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
     ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value),
   ]
   const s = mobileSection.value
@@ -1379,7 +1464,7 @@ watch(mobileChipRows, () => {
 }, { immediate: true, flush: 'post' })
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 function emptyTextFor(type: string): string {
-  if (electionLoading.value || countyWideLoading.value) return '載入中…'
+  if (electionLoading.value || countyWideLoading.value || nwPending(type)) return '載入中…'
   return '無此類選舉'
 }
 
@@ -1399,6 +1484,10 @@ const mobileRenderTypes = computed(() => {
 const mobileLive = computed(() => Object.fromEntries(mobileRenderTypes.value.map(t => [t, mobilePanelOf(t)])) as Record<string, MobilePanel>)
 const mobilePanelKey = computed(() => `${electionId.value}|${selectedRegion.value}|${selectedSubRegion.value}`)
 const mobileReady = computed(() => mobileLoadedKey.value === mobilePanelKey.value)
+// 切到全台的議員／鄉鎮市長／代表分頁（任何檢視：候選人、承諾、PK、串聯），先撈第一批
+watch([electionId, selectedRegion, mobileActiveType], () => {
+  if (isMobileViewport() && electionId.value && nwActive(mobileActiveType.value)) void fillNationwide(mobileActiveType.value, BATCH)
+}, { immediate: true })
 const mobileLastGood = shallowRef<Record<string, MobilePanel> | null>(null)
 watch([mobileLive, mobileReady], ([live, ready]) => { if (ready) mobileLastGood.value = live }, { immediate: true })
 const mobileStale = computed(() => !mobileReady.value && mobileLastGood.value !== null)
@@ -1446,7 +1535,7 @@ async function ensureCountyWideLoaded() {
   if (!isMobileViewport() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
   const type = mobileActiveType.value
   if (TAB_NEEDS[type] === 'county' || type === ElectionType.TOWNSHIP_MAYOR) return
-  if (viewMode.value === 'politicians' && !allSub.value) return
+  if (type === ElectionType.CHIEF && viewMode.value === 'politicians') return // 村里長分頁沒選鄉鎮時只列鄉鎮選擇區
   const types = type === ElectionType.CHIEF ? [ElectionType.CHIEF] : [ElectionType.REPRESENTATIVE, ElectionType.INDIGENOUS_DISTRICT_REP]
   countyWideLoading.value = true
   try { await loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All', types) } catch { /* 載不到就維持現有名單 */ } finally { countyWideLoading.value = false }
@@ -1686,7 +1775,7 @@ useSwipeTabs(swipeEl, {
               class="mx-auto my-4 block rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600"
               data-testid="mobile-load-more"
               @click="showMoreOf(panel.type)"
-            >載入更多（已顯示 {{ batchedGroups(panel).shown }} / {{ batchedGroups(panel).total }} 位）</button>
+            >{{ batchedGroups(panel).remote ? `載入更多（已顯示 ${batchedGroups(panel).shown} 位）` : `載入更多（已顯示 ${batchedGroups(panel).shown} / ${batchedGroups(panel).total} 位）` }}</button>
           </div>
         </div>
       </div>
