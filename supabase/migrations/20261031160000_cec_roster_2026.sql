@@ -16,6 +16,8 @@
 --      只比「該單位 JSON 近 3 天內抓成功」的範圍。dup 配對由 cec_roster_refresh_dups() 寫進 cec_roster_dup_pairs（查詢用）。
 --   3. 名單清查 roster_check 的 target.registration（函式 roster_registration_gap）：2026 屆、該單位有新鮮的鏡像資料時，改以 cec_roster_2026 為名冊來源
 --      （造字代碼姓名也比得上），沒有鏡像資料才退回 9 月登記彙總表（cec_registrations）；missing／needs_status／系統自動建（target.reconcile）照舊流程。
+--      派工判準（名單清查何時派，讀 roster_reconcile_units）與系統自動建人物（roster_reconcile_next）也走同一個來源選擇（共用函式 cec_roster_mirror_units／cec_roster_unit_mirrored）：
+--      重定義 roster_reconcile_rows，只換名冊那一段；村里長 JSON 沒有村里名，系統建不起來，仍用登記彙總表。
 --   「站上有、官方名冊沒有」的人不另建任務：cec_roster_diff() 的 extra 供手動打網站請求用（scripts/cec-roster-extra.sql）。
 -- 守門：_shared/cec-roster-diff.test.ts。
 
@@ -378,18 +380,239 @@ GRANT EXECUTE ON FUNCTION cec_roster_refresh_dups() TO service_role;
 GRANT EXECUTE ON FUNCTION cec_roster_reconcile_if_due() TO service_role;
 -- ▲▲ SECTION: auth ▲▲
 
+-- ▼▼ SECTION: source ▼▼
+-- 名冊來源的共用判斷（派工判準 roster_reconcile_rows、系統自動建人物、任務附的名冊 roster_registration_gap 三處同一個定義）：
+-- 該單位（屆別 2026、選舉別、縣市；村里長到鄉鎮）有 3 天內成功抓取、而且有資料的中選會 JSON → 用 cec_roster_2026，沒有才用 9 月登記彙總表。
+-- p_for_build＝true（給系統建人物與派工判準用）時村里長不算：JSON 只有村里序號、沒有村里名，系統建不起來，村里長仍用登記彙總表。
+CREATE OR REPLACE FUNCTION cec_roster_mirror_units(p_for_build BOOLEAN DEFAULT false)
+RETURNS TABLE (election_type TEXT, county TEXT, town TEXT)
+LANGUAGE sql STABLE AS $$
+  SELECT DISTINCT u.election_type, replace(u.county, '臺', '台'), CASE WHEN u.election_type = '村里長' THEN replace(u.town, '臺', '台') ELSE '' END
+    FROM cec_roster_units u
+   WHERE u.status = 'ok' AND u.row_count > 0 AND u.fetched_at > now() - INTERVAL '3 days'
+     AND NOT (p_for_build AND u.election_type = '村里長')
+$$;
+COMMENT ON FUNCTION cec_roster_mirror_units IS '有新鮮官方名冊鏡像（3 天內成功抓取且有資料）的單位清單；名冊來源選擇的唯一定義。p_for_build＝true 時排除村里長（JSON 沒有村里名）。2026-10-31';
+
+CREATE OR REPLACE FUNCTION cec_roster_unit_mirrored(p_election_id INTEGER, p_election_type TEXT, p_county TEXT, p_town TEXT DEFAULT NULL) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+  SELECT p_election_id = 2026 AND EXISTS (
+    SELECT 1 FROM cec_roster_mirror_units(false) m
+     WHERE m.election_type = p_election_type AND m.county = replace(p_county, '臺', '台')
+       AND (m.town = '' OR (p_town IS NOT NULL AND m.town = replace(p_town, '臺', '台'))))
+$$;
+COMMENT ON FUNCTION cec_roster_unit_mirrored IS '這個單位的名冊要不要用官方 JSON 鏡像（roster_registration_gap 用；村里長要給鄉鎮）。2026-10-31';
+
+-- ▲▲ SECTION: source ▲▲
+
+-- ▼▼ SECTION: rows ▼▼
+CREATE OR REPLACE FUNCTION roster_reconcile_rows()
+RETURNS TABLE (
+  reg_id BIGINT, election_id INTEGER, election_type TEXT, county TEXT, town TEXT, sub_region TEXT, village TEXT, district TEXT,
+  name TEXT, party TEXT, source_url TEXT, row_no INTEGER, pe_id INTEGER, politician_id UUID, our_status TEXT,
+  category TEXT, reason TEXT, person_action TEXT, system_applied BOOLEAN, announce_id BIGINT, announce_state TEXT
+)
+LANGUAGE sql STABLE
+SET enable_nestloop = off  -- 見檔頭：不關的話 CTE 列數被估成 1，選巢狀迴圈，10.6 秒；關掉 0.5 秒
+AS $$
+  WITH reg AS (
+    SELECT r.id AS reg_id, r.election_id, r.election_type, replace(r.region, '臺', '台') AS county,
+           r.sub_region, replace(r.sub_region, '臺', '台') AS town, r.village, r.district,
+           r.name, roster_name_key(r.name) AS name_key, r.party, r.source_url, r.row_no,
+           NULLIF(btrim(replace(COALESCE(r.village, ''), '臺', '台')), '') AS village_n
+      FROM cec_registrations r
+      JOIN cec_registration_sources s ON s.source_url = r.source_url AND s.superseded_by IS NULL
+     -- >>> 官方名冊鏡像（20261031160000）：該單位有 3 天內成功抓取的中選會 JSON 就不用登記彙總表（村里長 JSON 沒有村里名，系統建不起來，仍用登記彙總表）
+     WHERE NOT EXISTS (SELECT 1 FROM cec_roster_mirror_units(true) mu
+                        WHERE mu.election_type = r.election_type AND mu.county = replace(r.region, '臺', '台')
+                          AND (mu.town = '' OR mu.town = COALESCE(replace(r.sub_region, '臺', '台'), '')))
+    UNION ALL
+    -- reg_id：鏡像列每天重抓、id 會變，改用內容（單位、選區、號次、姓名）算出的穩定負數，跟登記彙總表的正數 id 不會撞；log 的「每位只處理一次」靠它
+    SELECT -abs(hashtextextended(x.election_type || '|' || x.county || '|' || x.town || '|' || x.area_code || '|' || COALESCE(x.cand_no::TEXT, '') || '|' || x.name, 0)),
+           2026, x.election_type, replace(x.county, '臺', '台'),
+           CASE WHEN x.election_type = '縣市議員' THEN NULL ELSE NULLIF(x.town, '') END,
+           NULLIF(replace(x.town, '臺', '台'), ''), NULL::TEXT,
+           CASE WHEN x.area_code <> '' THEN '第' || lpad(regexp_replace(x.area_code, '^0+', ''), 2, '0') || '選舉區' END,
+           x.name, roster_name_key(x.name), COALESCE(x.party, '無'), x.unit_url, COALESCE(x.cand_no, 0), NULL::TEXT
+      FROM cec_roster_2026 x
+     WHERE EXISTS (SELECT 1 FROM cec_roster_mirror_units(true) mu
+                    WHERE mu.election_type = x.election_type AND mu.county = replace(x.county, '臺', '台')
+                      AND (mu.town = '' OR mu.town = replace(x.town, '臺', '台')))
+    -- <<< 官方名冊鏡像
+  ),
+  regn AS (
+    SELECT g.*, CASE WHEN g.name_key IS NULL THEN NULL
+                     ELSE count(*) OVER (PARTITION BY g.election_id, g.election_type, g.county, g.name_key) END AS dup_n
+      FROM reg g
+  ),
+  ours AS MATERIALIZED (
+    SELECT pe.id AS pe_id, pe.politician_id, pe.election_id, pe.election_type::TEXT AS election_type,
+           pe.candidacy_status AS status, COALESCE(pe.withdrawn_after_filing, FALSE) AS filed_out,
+           p.name AS pname,
+           roster_name_key(p.name) AS nn,
+           replace(COALESCE(rg.region, p.region), '臺', '台') AS county,
+           NULLIF(replace(regexp_replace(COALESCE(rg.sub_region, p.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '') AS town,
+           substring(COALESCE(rg.sub_region, '') FROM '第[0-9]+選舉區') AS district
+      FROM politician_elections pe
+      JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
+      LEFT JOIN regions rg ON rg.id = pe.region_id
+     WHERE (pe.election_id, pe.election_type::TEXT) IN (SELECT DISTINCT x.election_id, x.election_type FROM reg x)
+  ),
+  hit AS (
+    SELECT g.reg_id, o.pe_id
+      FROM regn g
+      JOIN ours o ON o.election_id = g.election_id AND o.election_type = g.election_type
+                 AND o.county = g.county AND o.nn = g.name_key
+                 AND (o.town IS NULL OR g.town IS NULL OR o.town = g.town)
+  ),
+  reg_deg AS (SELECT h.reg_id, count(*) AS n, min(h.pe_id) AS pe_id FROM hit h GROUP BY h.reg_id),
+  pe_deg AS (SELECT h.pe_id, count(*) AS n FROM hit h GROUP BY h.pe_id),
+  -- 同單位先比對（優先於全庫同名規則）：名冊這位沒有名字相同的紀錄，但同屆、同職位、同縣市（鄉鎮層級的選舉要同鄉鎮）已有一筆
+  -- 參選紀錄（含已經對上名冊別一列的：正式庫的名冊真的有「佀廣洋」與長名兩列），名字是名冊名的子字串或反過來（較短的那個至少 2 字）——改過名、暱稱與全名、名冊寫法較長：
+  -- 多半是同一個人，系統不建（建了就是重複人物），派代理確認（reason＝similar_name_in_unit）
+  sim AS (
+    SELECT g.reg_id, min(o.pe_id) AS pe_id, min(o.politician_id::TEXT)::UUID AS politician_id
+      FROM regn g
+      JOIN ours o ON o.election_id = g.election_id AND o.election_type = g.election_type AND o.county = g.county
+                 AND (o.town IS NULL OR g.town IS NULL OR o.town = g.town)
+                 AND (g.election_type <> '縣市議員' OR o.district IS NULL OR g.district IS NULL OR o.district = g.district)
+     WHERE g.name_key IS NOT NULL AND o.nn IS NOT NULL AND o.nn <> g.name_key
+       AND g.reg_id NOT IN (SELECT d.reg_id FROM reg_deg d)
+       AND ((length(o.nn) >= 2 AND strpos(g.name_key, o.nn) > 0) OR (length(g.name_key) >= 2 AND strpos(o.nn, g.name_key) > 0))
+     GROUP BY g.reg_id
+  ),
+  -- 安全網：同單位只要還有「我們標已表態／已登記／選後（或登記後退選）、卻沒對上名冊」的參選紀錄，名冊這邊沒對上的人就不給 new（改派代理，
+  -- reason＝unmatched_candidacy_in_unit）：那一筆多半就是名冊這位換了寫法（異體字、打錯字、純羅馬拼音、暱稱）還沒被比對器認出來，
+  -- 這時候建新人物就是重複人物。單位＝同屆、同職位、同縣市（鄉鎮層級要同鄉鎮、縣市議員雙方都有選舉區時要同選舉區）。只擋 new：attach 掛的是既有人物，不會多出人。
+  unm AS (
+    SELECT o.election_id, o.election_type, o.county, o.town, o.district FROM ours o
+     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)
+       AND (o.status IN ('declared', 'filed', 'elected', 'not_elected') OR (o.status = 'withdrawn' AND o.filed_out))
+  ),
+  unm_hit AS (
+    SELECT DISTINCT g.reg_id
+      FROM regn g
+      JOIN unm u ON u.election_id = g.election_id AND u.election_type = g.election_type AND u.county = g.county
+                AND (u.town IS NULL OR g.town IS NULL OR u.town = g.town)
+                AND (g.election_type <> '縣市議員' OR u.district IS NULL OR g.district IS NULL OR u.district = g.district)
+     WHERE g.reg_id NOT IN (SELECT d.reg_id FROM reg_deg d)
+  ),
+  -- 人物：全庫同名（姓名鍵相同、未合併）的人有幾位；剛好一位時，他要「看得出是同一個地方的人」（鄉鎮層級的選舉要同縣市同鄉鎮，其餘同縣市）
+  -- 而且這一屆還沒有別筆參選紀錄（一人一屆一筆），才能掛上去
+  pn AS MATERIALIZED (
+    SELECT p.id, roster_name_key(p.name) AS nn, replace(p.region, '臺', '台') AS pregion, p.party
+      FROM politicians p
+     WHERE p.merged_into IS NULL
+       AND roster_name_key(p.name) IN (SELECT x.name_key FROM regn x WHERE x.name_key IS NOT NULL)
+  ),
+  pn_n AS (SELECT q.nn, count(*) AS n, min(q.id::TEXT)::UUID AS one_id, min(q.pregion) AS pregion, min(q.party) AS party FROM pn q GROUP BY q.nn),
+  pplace AS (
+    SELECT DISTINCT pe.politician_id, replace(rg.region, '臺', '台') AS county,
+           NULLIF(replace(regexp_replace(COALESCE(rg.sub_region, ''), '(第[0-9]+)?選舉區$', ''), '臺', '台'), '') AS town,
+           NULLIF(btrim(replace(COALESCE(rg.village, ''), '臺', '台')), '') AS village
+      FROM politician_elections pe JOIN regions rg ON rg.id = pe.region_id
+     WHERE pe.politician_id IN (SELECT z.one_id FROM pn_n z WHERE z.n = 1)
+  ),
+  pplace_c AS (SELECT DISTINCT q.politician_id, q.county FROM pplace q),
+  pplace_t AS (SELECT DISTINCT q.politician_id, q.county, q.town FROM pplace q WHERE q.town IS NOT NULL),
+  -- 村里長：既有的參選紀錄在這個鄉鎮「有明確村里」（pv_any）而名冊的村里跟其中任何一個都不同（沒有 pv_eq）→ 不掛（同鄉鎮不同里的同名者是兩個人）
+  pv_any AS (SELECT DISTINCT q.politician_id, q.county, q.town FROM pplace q WHERE q.town IS NOT NULL AND q.village IS NOT NULL),
+  pv_eq AS (SELECT DISTINCT q.politician_id, q.county, q.town, q.village FROM pplace q WHERE q.town IS NOT NULL AND q.village IS NOT NULL),
+  p_has AS (
+    SELECT DISTINCT pe.politician_id, pe.election_id
+      FROM politician_elections pe WHERE pe.politician_id IN (SELECT z.one_id FROM pn_n z WHERE z.n = 1)
+  ),
+  -- 全部用相等連接（不用相關子查詢：關掉 nested loop 之後，相關子查詢逐列掃整張暫存表，20 秒）
+  person AS (
+    SELECT g.reg_id,
+           CASE WHEN COALESCE(n.n, 0) = 0 THEN 'new'
+                WHEN n.n = 1
+                 AND h.politician_id IS NULL
+                 AND (CASE WHEN g.town IS NULL THEN (n.pregion = g.county OR pc.politician_id IS NOT NULL)
+                           ELSE pt.politician_id IS NOT NULL END)
+                 AND NOT (g.election_type = '村里長' AND g.village_n IS NOT NULL AND va.politician_id IS NOT NULL AND ve.politician_id IS NULL)
+                 -- 政黨互斥（兩邊都不是無黨籍、而且不同黨）不自動掛
+                 AND NOT (COALESCE(btrim(g.party), '') NOT IN ('', '無', '無黨籍') AND COALESCE(btrim(n.party), '') NOT IN ('', '無', '無黨籍')
+                          AND strpos(n.party, g.party) = 0 AND strpos(g.party, n.party) = 0)
+                THEN 'attach' END AS person_action,
+           CASE WHEN n.n = 1 THEN n.one_id END AS one_id
+      FROM regn g
+      LEFT JOIN pn_n n ON n.nn = g.name_key
+      LEFT JOIN p_has h ON h.politician_id = n.one_id AND h.election_id = g.election_id
+      LEFT JOIN pplace_c pc ON pc.politician_id = n.one_id AND pc.county = g.county
+      LEFT JOIN pplace_t pt ON pt.politician_id = n.one_id AND pt.county = g.county AND pt.town = g.town
+      LEFT JOIN pv_any va ON va.politician_id = n.one_id AND va.county = g.county AND va.town = g.town
+      LEFT JOIN pv_eq ve ON ve.politician_id = n.one_id AND ve.county = g.county AND ve.town = g.town AND ve.village = g.village_n
+     WHERE g.name_key IS NOT NULL AND g.reg_id NOT IN (SELECT d.reg_id FROM reg_deg d)
+  ),
+  rows_reg AS (
+    SELECT g.reg_id, g.election_id, g.election_type, g.county, COALESCE(g.town, '') AS town, g.sub_region, g.village, g.district,
+           g.name, g.party, g.source_url, g.row_no, COALESCE(o.pe_id, sm.pe_id) AS pe_id, COALESCE(o.politician_id, sm.politician_id, pr.one_id) AS politician_id, o.status AS our_status,
+           CASE
+             WHEN g.name_key IS NULL THEN 'missing_ambiguous'
+             WHEN rd.n = 1 AND pd.n = 1 THEN
+               CASE WHEN o.status = 'considering' OR (o.status = 'withdrawn' AND NOT o.filed_out) THEN 'status_mismatch' ELSE 'both' END
+             WHEN rd.n >= 1 THEN 'match_ambiguous'
+             WHEN sm.reg_id IS NOT NULL THEN 'missing_ambiguous'
+             WHEN ap.reg_id IS NOT NULL THEN 'missing_ambiguous'
+             WHEN g.dup_n > 1 THEN 'missing_ambiguous'
+             WHEN pr.person_action IS NULL THEN 'missing_ambiguous'
+             WHEN pr.person_action = 'new' AND uh.reg_id IS NOT NULL THEN 'missing_ambiguous'
+             ELSE 'missing_creatable' END AS category,
+           CASE
+             WHEN g.name_key IS NULL THEN 'unreadable_name'
+             WHEN rd.n = 1 AND pd.n = 1 THEN
+               CASE WHEN o.status = 'considering' THEN 'ours_considering'
+                    WHEN o.status = 'withdrawn' AND NOT o.filed_out THEN 'ours_withdrawn_not_after_filing' END
+             WHEN rd.n >= 1 THEN 'match_not_one_to_one'
+             WHEN sm.reg_id IS NOT NULL THEN 'similar_name_in_unit'
+             WHEN ap.reg_id IS NOT NULL THEN
+               CASE WHEN ap.reverted_at IS NOT NULL THEN 'system_reverted'
+                    WHEN ap.outcome = 'applied' THEN 'system_applied_gone'
+                    ELSE 'system_unresolved' END
+             WHEN g.dup_n > 1 THEN 'same_name_multi'
+             WHEN pr.person_action IS NULL THEN 'person_unclear'
+             WHEN pr.person_action = 'new' AND uh.reg_id IS NOT NULL THEN 'unmatched_candidacy_in_unit'
+             END AS reason,
+           CASE WHEN rd.n IS NULL AND ap.reg_id IS NULL AND sm.reg_id IS NULL AND g.name_key IS NOT NULL AND g.dup_n = 1
+                     AND NOT (pr.person_action = 'new' AND uh.reg_id IS NOT NULL) THEN pr.person_action END AS person_action,
+           (ap.reg_id IS NOT NULL AND ap.outcome = 'applied' AND ap.reverted_at IS NULL) AS system_applied
+      FROM regn g
+      LEFT JOIN reg_deg rd ON rd.reg_id = g.reg_id
+      LEFT JOIN pe_deg pd ON pd.pe_id = rd.pe_id
+      LEFT JOIN ours o ON o.pe_id = rd.pe_id
+      LEFT JOIN person pr ON pr.reg_id = g.reg_id
+      LEFT JOIN sim sm ON sm.reg_id = g.reg_id
+      LEFT JOIN unm_hit uh ON uh.reg_id = g.reg_id
+      LEFT JOIN roster_reconcile_log ap ON ap.reg_id = g.reg_id
+  ),
+  rows_ours AS (
+    SELECT NULL::BIGINT AS reg_id, o.election_id, o.election_type, o.county, COALESCE(o.town, '') AS town, o.town AS sub_region, NULL::TEXT AS village, NULL::TEXT AS district,
+           o.pname AS name, NULL::TEXT AS party, NULL::TEXT AS source_url, NULL::INTEGER AS row_no,
+           o.pe_id, o.politician_id, o.status AS our_status,
+           CASE WHEN o.status IN ('declared', 'filed', 'elected', 'not_elected') THEN 'ours_extra' ELSE 'status_mismatch' END AS category,
+           CASE WHEN o.status IN ('declared', 'filed', 'elected', 'not_elected') THEN 'not_in_registration' ELSE 'filed_flag_no_registration' END AS reason,
+           NULL::TEXT AS person_action, FALSE AS system_applied
+      FROM ours o
+     WHERE o.pe_id NOT IN (SELECT d.pe_id FROM pe_deg d)
+       AND (o.status IN ('declared', 'filed', 'elected', 'not_elected') OR (o.status = 'withdrawn' AND o.filed_out))
+  )
+  SELECT x.reg_id, x.election_id, x.election_type, x.county, x.town, x.sub_region, x.village, x.district,
+         x.name, x.party, x.source_url, x.row_no, x.pe_id, x.politician_id, x.our_status,
+         x.category, x.reason, x.person_action, x.system_applied,
+         NULL::BIGINT AS announce_id, NULL::TEXT AS announce_state
+    FROM (SELECT * FROM rows_reg UNION ALL SELECT * FROM rows_ours) x
+$$;
+-- ▲▲ SECTION: rows ▲▲
+
 -- ▼▼ SECTION: gap ▼▼
 CREATE OR REPLACE FUNCTION roster_registration_gap(
   p_election_id INTEGER, p_election_type TEXT, p_county TEXT, p_town TEXT DEFAULT NULL, p_limit INTEGER DEFAULT 120
 ) RETURNS JSONB
 LANGUAGE sql STABLE AS $$
   WITH mir AS MATERIALIZED (
-    -- >>> 官方名冊鏡像（20261031160000）：2026 屆、該單位有新鮮的鏡像資料就用它（村里長要給鄉鎮，一個鄉鎮一檔），否則退回登記彙總表
-    SELECT p_election_id = 2026 AND (p_election_type <> '村里長' OR p_town IS NOT NULL) AND EXISTS (
-             SELECT 1 FROM cec_roster_units u
-              WHERE u.status = 'ok' AND u.row_count > 0 AND u.fetched_at > now() - INTERVAL '3 days'
-                AND u.election_type = p_election_type AND replace(u.county, '臺', '台') = replace(p_county, '臺', '台')
-                AND (u.election_type <> '村里長' OR replace(u.town, '臺', '台') = replace(p_town, '臺', '台'))) AS on_
+    -- >>> 官方名冊鏡像（20261031160000）：用不用鏡像由共用函式 cec_roster_unit_mirrored 決定（派工判準與系統自動建人物的 roster_reconcile_rows 用同一個定義）
+    SELECT cec_roster_unit_mirrored(p_election_id, p_election_type, p_county, p_town) AS on_
     -- <<< 官方名冊鏡像
   ),
   reg AS (

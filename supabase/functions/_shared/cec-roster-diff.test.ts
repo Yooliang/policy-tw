@@ -44,7 +44,7 @@ async function buildDb(mutateMig: (s: string) => string = (s) => s): Promise<PGl
   // 登記彙總表的資料表與 candidacy_is_listed（roster_registration_gap 退回用）
   const REG = await readMig("20261008130000_cec_registrations.sql");
   await db.exec(REG.slice(0, REG.indexOf("CREATE OR REPLACE FUNCTION roster_registration_gap(")));
-  for (const s of ["tables", "match", "mirror", "reconcile", "gap"]) await db.exec(strip(section(mig, s)));
+  for (const s of ["tables", "match", "mirror", "reconcile", "source", "gap"]) await db.exec(strip(section(mig, s)));
   return db;
 }
 
@@ -183,7 +183,7 @@ Deno.test("還原驗證：拿掉造字萬用字元，registration 把「陳@2F97
   const noGlyph = await buildDb((s) => mutate(s, "(reg.glyph AND cec_name_fuzzy_eq(o.nn, reg.name_key, NULL, NULL))", "false"));
   await scenario(noGlyph);
   assertEquals((await gap(noGlyph, "台北市"))!.missing_count, 3);
-  const noMirror = await buildDb((s) => mutate(s, "SELECT p_election_id = 2026 AND (p_election_type", "SELECT false AND (p_election_type"));
+  const noMirror = await buildDb((s) => mutate(s, "SELECT p_election_id = 2026 AND EXISTS (", "SELECT false AND EXISTS ("));
   await scenario(noMirror);
   assertEquals(await gap(noMirror, "台北市"), null);   // 沒有登記彙總表資料＝NULL（退回舊來源）
 });
