@@ -43,6 +43,8 @@ Deno.serve(async (req) => {
     const policyId = typeof body.policy_id === "string" && UUID_RE.test(body.policy_id) ? body.policy_id : null;
     if (!isRequestKind(kind)) return json({ success: false, error: "kind 要是 policy／profile／progress／validity／audit" }, 400);
     const sourceUrl = kind === "audit" && isAuditUrl(body.source_url) ? String(body.source_url).trim() : null;
+    // 範圍化（kind=policy）：某一屆。當選與否後端自己查，不信前端傳的
+    const electionId = kind === "policy" && Number.isInteger(body.election_id) && body.election_id > 0 ? Number(body.election_id) : null;
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, AUDIT_NOTE_MAX) : null;
     if (kind === "audit" && !sourceUrl) return json({ success: false, error: "invalid_url", message: "請貼可以打開的 http(s) 網址" }, 400);
     const isPolicyKind = POLICY_KINDS.includes(kind);
@@ -66,6 +68,18 @@ Deno.serve(async (req) => {
       politician = data;
     }
 
+    let election: { id: number; short_name: string } | null = null;
+    let elected = false;
+    if (electionId !== null) {
+      const { data, error } = await supabase.from("elections").select("id, short_name").eq("id", electionId).maybeSingle();
+      if (error) throw new Error(`elections lookup: ${error.message}`);
+      if (!data) return json({ success: false, error: "not_found", message: "找不到這場選舉" }, 404);
+      election = data;
+      const { data: pe, error: peError } = await supabase.from("politician_elections").select("candidacy_status").eq("politician_id", pid).eq("election_id", electionId).maybeSingle();
+      if (peError) throw new Error(`politician_elections lookup: ${peError.message}`);
+      elected = pe?.candidacy_status === "elected";
+    }
+
     // 限額（用 contribution_tasks 自己的列數算）
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
@@ -75,16 +89,16 @@ Deno.serve(async (req) => {
 
     // 已有 open 任務？已有對應自動缺口？（audit 不看這兩項，改看同網址 24 小時去重）
     const taskType = KIND_TO_TASK_TYPE[kind];
-    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType });
+    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId });
     const targetId = isPolicyKind ? policyId : pid;
     let autoGap: { task_id: string } | null = null;
-    if (kind !== "audit" && targetId) {
+    if (kind !== "audit" && targetId && electionId === null) {
       const { data: gaps, error: gapError } = await supabase.rpc("contribution_auto_tasks", { p_type: taskType, p_region: null, p_limit: 100000, p_seed: "" });
       if (gapError) throw new Error(`auto tasks: ${gapError.message}`);
       autoGap = ((gaps ?? []) as Array<{ task_id: string }>).find((g) => g.task_id.endsWith(`:${targetId}`)) ?? null;
     }
     const recentlyHandled = kind === "audit" || !targetId ? null
-      : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType }, RECENT_CHECK_DAYS);
+      : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId }, RECENT_CHECK_DAYS);
     const duplicateAudit = kind === "audit" && sourceUrl ? await findRecentAuditTask(supabase, { source_url: sourceUrl, politician_id: pid, policy_id: policyId }) : null;
 
     const [{ count: openManual }, { data: counts }] = await Promise.all([
@@ -111,10 +125,11 @@ Deno.serve(async (req) => {
       return json({ success: true, status: "already_queued", task_id: decision.task_id, reason: decision.reason, message: "這個項目已在任務池中，AI 代理會來查", ...base });
     }
 
-    const text = buildRequestTaskText({ kind, politician_id: pid, policy_id: policyId, politician_name: politician?.name ?? null, region: politician?.region ?? null, policy_title: policy?.title ?? null, source_url: sourceUrl, note });
+    const text = buildRequestTaskText({ kind, politician_id: pid, policy_id: policyId, politician_name: politician?.name ?? null, region: politician?.region ?? null, policy_title: policy?.title ?? null, source_url: sourceUrl, note, election_id: electionId, election_name: election?.short_name ?? null, elected });
     const task = await createTask(supabase, {
       title: text.title, description: text.description, task_type: taskType,
       target_politician_id: pid, target_policy_id: policyId, region: politician?.region ?? null, hint_sources: text.hint_sources, source_url: sourceUrl,
+      ...(electionId !== null ? { target_extra: { election_id: electionId, elected } } : {}),
     }, { source: "web_request", created_by: typeof body.requester === "string" ? body.requester.slice(0, 40) : "web", requester_ip_hash: ipHash });
 
     return json({ success: true, status: "queued", task_id: task.id, message: "已加入任務池，AI 代理會來查", ...base, queue_position: (openManual ?? 0) + 1, open_tasks: base.open_tasks + 1 }, 201);

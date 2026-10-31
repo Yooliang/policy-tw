@@ -75,6 +75,28 @@ interface LookupState { loading: boolean; result: RequestTaskResult | null; erro
 const idle = (): LookupState => ({ loading: false, result: null, error: null })
 const lookup = reactive<Record<LookupKey, LookupState>>({ campaign: idle(), history: idle(), bio: idle(), avatar: idle() })
 
+// 每一屆段落尾端的大卡：按各屆結果決定查什麼——當選的查「政見」（任內執行追蹤），沒當選或還沒選的查「承諾」。
+// 請求帶這一屆的 election_id，後端任務標題與說明會寫明「查某人 2022 九合一（當選）的政見」。
+const groupLookup = reactive<Record<string, LookupState>>({})
+const groupLookupState = (g: PolicyGroup): LookupState => groupLookup[g.key] ?? idle()
+const electedIn = (electionId: number | null) => electionId !== null && politician.value?.elections?.some(e => e.electionId === electionId && e.candidacyStatus === 'elected') === true
+function groupLookupLabel(g: PolicyGroup): string {
+  const name = g.electionId !== null ? getElectionById(g.electionId)?.shortName : undefined
+  const what = electedIn(g.electionId) ? '政見' : '承諾'
+  return name ? `請 AI 補充 ${name}的${what}` : `請 AI 補充最新的${what}`
+}
+async function requestGroupLookup(g: PolicyGroup) {
+  const pol = politician.value
+  if (!pol || groupLookupState(g).loading) return
+  groupLookup[g.key] = { loading: true, result: null, error: null }
+  try {
+    const result = await requestTask({ kind: 'policy', politician_id: pol.id, ...(g.electionId !== null ? { election_id: g.electionId } : {}) })
+    groupLookup[g.key] = { loading: false, result, error: null }
+  } catch (err: unknown) {
+    groupLookup[g.key] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
+  }
+}
+
 async function requestLookup(key: LookupKey) {
   const pol = politician.value
   if (!pol || lookup[key].loading) return
@@ -211,6 +233,7 @@ watch(landOnHistory, (land) => { if (land && activeTab.value === 'campaign') act
 interface PolicyGroup {
   key: string
   label: string | null // null＝不顯示分組標題
+  electionId: number | null // 這一組所屬的選舉；沒標屆別的舊資料是 null
   policies: Policy[]
 }
 
@@ -243,7 +266,7 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
   const groups = orderedKeys.map((id): PolicyGroup => {
     const groupPolicies = [...(byElection.get(id) ?? [])].sort((a, b) => policySortDate(b) - policySortDate(a))
     const label = id === null ? '未標註屆別' : `${getElectionById(id)?.shortName ?? `${id} 年`}${suffix}`
-    return { key: id === null ? 'unlabeled' : String(id), label, policies: groupPolicies }
+    return { key: id === null ? 'unlabeled' : String(id), label, electionId: id, policies: groupPolicies }
   })
 
   const onlyGroupNeedsNoLabel = groups.length === 1
@@ -594,7 +617,7 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
-                      <AiLookupCard v-if="group.key === campaignGroups[campaignGroups.length - 1]?.key" :state="lookup.campaign" label="請 AI 補充最新的承諾" hint="查有出處的最新承諾" @click="requestLookup('campaign')" />
+                      <AiLookupCard :state="groupLookupState(group)" :label="groupLookupLabel(group)" hint="查有出處的資料" @click="requestGroupLookup(group)" />
                     </div>
                   </div>
                 </div>
@@ -644,7 +667,7 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" />
-                      <AiLookupCard v-if="group.key === historyGroups[historyGroups.length - 1]?.key" :state="lookup.history" label="請 AI 補充最新的政見" hint="查有出處的最新政見" @click="requestLookup('history')" />
+                      <AiLookupCard :state="groupLookupState(group)" :label="groupLookupLabel(group)" hint="查有出處的資料" @click="requestGroupLookup(group)" />
                     </div>
                   </div>
                 </div>

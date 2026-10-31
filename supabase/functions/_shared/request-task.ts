@@ -56,6 +56,17 @@ export interface RequestTarget {
   policy_title?: string | null;
   source_url?: string | null;
   note?: string | null;
+  /** kind=policy：只查這一屆（人物頁各屆段落尾的卡片）；election_name 是「2022 九合一」這種簡稱 */
+  election_id?: number | null;
+  election_name?: string | null;
+  /** 這個人在這一屆當選了嗎：true＝查任內政見（執行追蹤）、false／null＝查選前承諾 */
+  elected?: boolean | null;
+}
+
+/** 範圍化的政見請求（帶 election_id）：標題與說明寫明「查某人 2022 九合一（當選）的政見」 */
+export function electionScopeLabel(t: Pick<RequestTarget, "election_name" | "election_id" | "elected">): { what: "政見" | "承諾"; scope: string } {
+  const name = t.election_name || `選舉 ${t.election_id}`;
+  return t.elected ? { what: "政見", scope: `${name}（當選）` } : { what: "承諾", scope: `${name}（未當選或尚未投票）` };
 }
 
 /** 組給代理看的標題與說明（人話） */
@@ -63,6 +74,17 @@ export function buildRequestTaskText(t: RequestTarget): { title: string; descrip
   const who = t.politician_name ? `「${t.politician_name}」` : "這位政治人物";
   switch (t.kind) {
     case "policy":
+      if (t.election_id != null) {
+        const { what, scope } = electionScopeLabel(t);
+        const detail = t.elected
+          ? `這位人物在${t.election_name || `選舉 ${t.election_id}`}當選，要找的是他**任內**的具體政見與施政（含該屆選前承諾與任內推動、執行的項目），election_id 填 ${t.election_id}`
+          : `這位人物在${t.election_name || `選舉 ${t.election_id}`}沒有當選（或這場還沒投票），要找的是他在這場選舉**選前提出**的具體承諾，election_id 填 ${t.election_id}；不要拿現任任期的施政或其他屆的政見來交`;
+        return {
+          title: `查${who}${scope}的${what}（網站訪客請求）`,
+          description: `有人在人物頁「${t.election_name || `選舉 ${t.election_id}`}」那一段按了「請 AI 補充${what}」。範圍明確只有這一屆：${detail}。請找有出處的具體${what}，最多 ${MAX_POLICIES_PER_TASK} 筆、每筆一個 policy 型別、各附自己的出處；找到幾筆交幾筆，不要為了湊數交口號、願景或個人表態。先看 current.existing_policies（已上線）與 current.queued_policies（別人交了還在等票），講同一件事的不要再交；找不到就用 no_change 回報你查了什麼。`,
+          hint_sources: ["候選人官網／官方社群的政見頁", "cec.gov.tw 選舉公報", "cna.com.tw", "pts.org.tw"],
+        };
+      }
       return {
         title: `補${who}的政見（網站訪客請求）`,
         description: `有人在網站上按了「請 AI 幫忙查政見」。請找${who}有出處的具體政見，最多 ${MAX_POLICIES_PER_TASK} 筆、每筆一個 policy 型別、各附自己的出處；找到幾筆交幾筆，只找到 1 筆就交 1 筆，不要為了湊數交口號、願景或個人表態。先看 current.existing_policies（已上線）與 current.queued_policies（別人交了還在等票），講同一件事的不要再交。**要找的是 2026 這一屆的承諾**（候選人在 2026 選舉前提出的政見，election_id 填 2026）：現任任期的施政、上屆或過去選舉的政見不是這一屆的承諾，不要拿來交；找不到這一屆的就用 no_change 回報你查了什麼。`,

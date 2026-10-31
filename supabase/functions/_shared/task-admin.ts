@@ -198,7 +198,7 @@ export async function closeTask(supabase: SupabaseLike, taskId: string, closedBy
  */
 export async function findRecentlyHandled(
   supabase: SupabaseLike,
-  target: { politician_id?: string | null; policy_id?: string | null; task_type: string },
+  target: { politician_id?: string | null; policy_id?: string | null; task_type: string; election_id?: number | null },
   days: number,
   now: number = Date.now(),
 ): Promise<RecentlyHandled | null> {
@@ -208,6 +208,8 @@ export async function findRecentlyHandled(
   const sinceIso = new Date(sinceMs).toISOString();
   let tq = supabase.from("contribution_tasks").select("id, closed_at").eq("task_type", target.task_type).limit(50);
   tq = target.policy_id ? tq.eq("target->>policy_id", target.policy_id) : tq.eq("target->>politician_id", target.politician_id);
+  // 範圍化的請求（某一屆）：只比同一屆的任務，也不看對應的整體自動缺口（那是整個人的缺口）
+  if (target.election_id != null) tq = tq.eq("target->>election_id", String(target.election_id));
   const { data: tasks, error: tErr } = await tq;
   if (tErr) throw new Error(`contribution_tasks recent lookup: ${tErr.message}`);
   const taskRows = (tasks ?? []) as Array<{ id: string; closed_at: string | null }>;
@@ -216,19 +218,20 @@ export async function findRecentlyHandled(
   const [byTask, byPayload, byAuto] = await Promise.all([
     ids.length ? supabase.from("contributions").select(cols).in("task_id", ids).gte("created_at", sinceIso).limit(50) : Promise.resolve({ data: [], error: null }),
     ids.length ? supabase.from("contributions").select(cols).eq("contribution_type", "no_change").is("task_id", null).in("payload->>task_id", ids).gte("created_at", sinceIso).limit(50) : Promise.resolve({ data: [], error: null }),
-    supabase.from("contributions").select(cols).like("task_id", `auto:${target.task_type}:${targetId}%`).gte("created_at", sinceIso).limit(50),
+    target.election_id != null ? Promise.resolve({ data: [], error: null }) : supabase.from("contributions").select(cols).like("task_id", `auto:${target.task_type}:${targetId}%`).gte("created_at", sinceIso).limit(50),
   ]);
   for (const r of [byTask, byPayload, byAuto]) if (r.error) throw new Error(`contributions recent lookup: ${r.error.message}`);
   const contributions = [...(byTask.data ?? []), ...(byPayload.data ?? []), ...(byAuto.data ?? [])] as Array<{ created_at: string; contribution_type: string; status: string }>;
   return pickRecentlyHandled(taskRows, contributions, sinceMs);
 }
 
-export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null }): Promise<Obj | null> {
+export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null }): Promise<Obj | null> {
   let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at").eq("status", "open").limit(1);
   if (target.task_type) q = q.eq("task_type", target.task_type);
   if (target.policy_id) q = q.eq("target->>policy_id", target.policy_id);
   else if (target.politician_id) q = q.eq("target->>politician_id", target.politician_id);
   else return null;
+  if (target.election_id != null) q = q.eq("target->>election_id", String(target.election_id));
   const { data, error } = await q;
   if (error) throw new Error(`contribution_tasks lookup: ${error.message}`);
   return ((data ?? []) as Obj[])[0] ?? null;
