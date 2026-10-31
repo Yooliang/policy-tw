@@ -197,3 +197,19 @@ Deno.test("listByCountyBallot：沒有號次的排該縣市組尾，依姓名筆
   ], TAIWAN_COUNTIES);
   assertEquals(out.map((p) => p.id), ["b", "a", "n2", "n1", "c"]);
 });
+
+Deno.test("listByCountyBallot：非村里長的人帶著別場留下的 village，也照同選區內的號次排（不先比 village）", () => {
+  const rep = (id: string, candNo: number, village?: string) =>
+    ({ id, name: id, region: "桃園市", subRegion: "復興區第01選舉區", candNo, electionType: "直轄市山地原住民區民代表", village });
+  // 2022 當過村里長的人物物件會帶 village；2026 這場他們的號次是 7、1，不可因此排到最後
+  const list = [rep("n2", 2), rep("n3", 3), rep("v7", 7, "高義里"), rep("n4", 4), rep("v1", 1, "三民里"), rep("n5", 5)];
+  assertEquals(listByCountyBallot(list, TAIWAN_COUNTIES).map((p) => p.candNo), [1, 2, 3, 4, 5, 7]);
+});
+
+Deno.test("listByCountyBallot：村里長同選區（鄉鎮）內仍先依村里再號次", () => {
+  const chief = (id: string, candNo: number, village: string) =>
+    ({ id, name: id, region: "桃園市", subRegion: "復興區", candNo, electionType: "村里長", village });
+  const out = listByCountyBallot([chief("a", 2, "高義里"), chief("b", 1, "高義里"), chief("c", 1, "三民里")], TAIWAN_COUNTIES);
+  assertEquals(out.map((p) => p.village), ["三民里", "高義里", "高義里"]);
+  assertEquals(out.filter((p) => p.village === "高義里").map((p) => p.candNo), [1, 2]);
+});
