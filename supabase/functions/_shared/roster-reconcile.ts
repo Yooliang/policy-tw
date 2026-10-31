@@ -82,7 +82,9 @@ export function systemRowOf(c: ReconcileCandidate, agentName: string): SystemCan
     payload: candidacyPayloadOf(c),
     source_urls: [c.source_url],
     resolved_politician_id: c.person_action === "new" ? "new" : String(c.politician_id),
-    note: `名冊對帳：中選會登記彙總表第 ${c.row_no} 列（${c.source_url}）`,
+    note: /^https:\/\/info\.cec\.gov\.tw\/vote2026\/static\/json\//.test(c.source_url)
+      ? `名冊對帳：中選會選舉專區候選人名單 JSON（${c.source_url}）${c.row_no ? `，號次 ${c.row_no}` : ""}`
+      : `名冊對帳：中選會登記彙總表第 ${c.row_no} 列（${c.source_url}）`,
   };
 }
 

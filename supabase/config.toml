@@ -565,6 +565,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/roster-reconcile/index.ts"
 
+[functions.cec-roster-mirror]
+enabled = true
+# 中選會選舉專區名冊鏡像（pg_cron UTC 18-21 時每 5 分鐘一輪）。閘道不驗 JWT 讓 pg_cron 打得到，函式自己驗 x-cron-secret（同 roster-reconcile）或 service role bearer
+verify_jwt = false
+entrypoint = "./functions/cec-roster-mirror/index.ts"
+
 [functions.console-admin]
 enabled = true
 # 站務主控台（policy-console）手動調整派工開關與選舉里程碑（#518）。呼叫者帶的是 Firebase ID Token（policy-console 的 Google 登入），
