@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Sparkles, Loader2, CheckCircle, XCircle } from 'lucide-vue-next'
 import { BOARD_PATH, requestTaskDoneLabel, requestTaskMessage } from '../lib/request-task'
@@ -13,6 +14,8 @@ defineProps<{
   state: LookupState
   label: string
   hint?: string
+  /** 閒置時的大圖示，沒給用星星 */
+  icon?: Component
 }>()
 defineEmits<{ click: [] }>()
 </script>
@@ -37,7 +40,7 @@ defineEmits<{ click: [] }>()
     <Loader2 v-if="state.loading" :size="40" class="animate-spin" />
     <CheckCircle v-else-if="state.result" :size="40" />
     <XCircle v-else-if="state.error" :size="40" />
-    <Sparkles v-else :size="40" />
+    <component :is="icon ?? Sparkles" v-else :size="40" />
     <p class="text-lg font-black">{{ state.loading ? '送出中…' : state.result ? requestTaskDoneLabel(state.result) : state.error ? '重試' : label }}</p>
     <p v-if="state.error" class="text-xs text-red-500">{{ state.error }}</p>
     <p v-else-if="state.result" class="text-xs">

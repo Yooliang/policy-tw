@@ -8,8 +8,6 @@ import { useMobileShell } from '../composables/useMobileShell'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase, withElectionData } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskDoneLabel, requestTaskHeading, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
-import { useRequestTask } from '../composables/useRequestTask'
-import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
 import type { Policy, PoliticianElectionData, PoliticianTerm } from '../types'
 import { policySortDate } from '../lib/policy-date'
@@ -19,7 +17,6 @@ import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
-import HeroAction from '../components/HeroAction.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
@@ -75,6 +72,42 @@ interface LookupState { loading: boolean; result: RequestTaskResult | null; erro
 const idle = (): LookupState => ({ loading: false, result: null, error: null })
 const lookup = reactive<Record<LookupKey, LookupState>>({ campaign: idle(), history: idle(), bio: idle(), avatar: idle() })
 
+// 每一屆段落尾端的大卡：查什麼跟著分頁走——「承諾」分頁查承諾（pledge）、「政見」分頁查政見（tenure，政見分頁只列當選過的屆）。
+// 請求帶這一屆的 election_id 與範圍，後端任務標題與說明會寫明「查某人 2022 九合一選舉（當選）的政見」。
+type LookupScope = 'pledge' | 'tenure'
+const groupLookup = reactive<Record<string, LookupState>>({})
+const groupLookupState = (g: PolicyGroup, scope: LookupScope): LookupState => groupLookup[`${scope}:${g.key}`] ?? idle()
+const electedIn = (electionId: number | null) => electionId !== null && politician.value?.elections?.some(e => e.electionId === electionId && e.candidacyStatus === 'elected') === true
+function groupLookupLabel(g: PolicyGroup, scope: LookupScope): string {
+  const name = g.electionId !== null ? getElectionById(g.electionId)?.shortName : undefined
+  const what = scope === 'tenure' ? '政見' : '承諾'
+  return name ? `請 AI 補充 ${name}的${what}` : `請 AI 補充最新的${what}`
+}
+/** 這個人每一屆參選紀錄各一個段落（新的在上）：空狀態與「還沒有資料的那一屆」的卡片都用它 */
+const personElectionGroups = computed<PolicyGroup[]>(() => {
+  const ids = [...new Set((politician.value?.elections ?? []).map(e => e.electionId))]
+  const dateOf = (id: number) => getElectionById(id)?.electionDate
+  return ids.sort((a, b) => newerFirst({ electionId: a, electionDate: dateOf(a) }, { electionId: b, electionDate: dateOf(b) }))
+    .map((id): PolicyGroup => ({ key: String(id), label: null, electionId: id, policies: [] }))
+})
+/** 政見分頁只列他當選過的屆 */
+const electedElectionGroups = computed(() => personElectionGroups.value.filter(g => electedIn(g.electionId)))
+/** 已經有政見／承諾段落的屆以外，還沒有任何資料的那幾屆（一樣各給一張卡） */
+const withoutGroup = (all: PolicyGroup[], shown: PolicyGroup[]) => all.filter(g => !shown.some(x => x.key === g.key))
+
+async function requestGroupLookup(g: PolicyGroup, scope: LookupScope) {
+  const pol = politician.value
+  if (!pol || groupLookupState(g, scope).loading) return
+  const k = `${scope}:${g.key}`
+  groupLookup[k] = { loading: true, result: null, error: null }
+  try {
+    const result = await requestTask({ kind: 'policy', politician_id: pol.id, ...(g.electionId !== null ? { election_id: g.electionId, scope } : {}) })
+    groupLookup[k] = { loading: false, result, error: null }
+  } catch (err: unknown) {
+    groupLookup[k] = { loading: false, result: null, error: err instanceof Error ? err.message : '送出失敗，請稍後再試' }
+  }
+}
+
 async function requestLookup(key: LookupKey) {
   const pol = politician.value
   if (!pol || lookup[key].loading) return
@@ -87,12 +120,8 @@ async function requestLookup(key: LookupKey) {
   }
 }
 
-// 動作列的「查承諾與政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
-const policyRequest = useRequestTask()
-const profileRequest = useRequestTask()
 // 同選區候選人等站內連結換到另一位人物時，元件會被重用：分頁與捲動位置要回到最上面的「承諾」，不然像是沒跳頁（維護者 2026-10-29）
 watch(() => route.params.politicianId, () => {
-  policyRequest.reset(); profileRequest.reset()
   activeTab.value = "campaign"
   tabSeen.campaign = true; tabSeen.history = false
   if (typeof window !== "undefined") window.scrollTo({ top: 0 })
@@ -211,6 +240,7 @@ watch(landOnHistory, (land) => { if (land && activeTab.value === 'campaign') act
 interface PolicyGroup {
   key: string
   label: string | null // null＝不顯示分組標題
+  electionId: number | null // 這一組所屬的選舉；沒標屆別的舊資料是 null
   policies: Policy[]
 }
 
@@ -243,7 +273,7 @@ function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] 
   const groups = orderedKeys.map((id): PolicyGroup => {
     const groupPolicies = [...(byElection.get(id) ?? [])].sort((a, b) => policySortDate(b) - policySortDate(a))
     const label = id === null ? '未標註屆別' : `${getElectionById(id)?.shortName ?? `${id} 年`}${suffix}`
-    return { key: id === null ? 'unlabeled' : String(id), label, policies: groupPolicies }
+    return { key: id === null ? 'unlabeled' : String(id), label, electionId: id, policies: groupPolicies }
   })
 
   const onlyGroupNeedsNoLabel = groups.length === 1
@@ -502,26 +532,9 @@ usePageHead({
       </template>
       <template #actions>
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-          <!-- 按一下就建任務，出現在任務看板；跟政見頁的按鈕同一套（composables/useRequestTask.ts） -->
-          <HeroAction data-testid="hero-query-policy" @click="policyRequest.send({ kind: 'policy', politician_id: politician.id })">
-            <Loader2 v-if="policyRequest.loading.value" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="policyRequest.done.value" :size="16" />
-            <XCircle v-else-if="policyRequest.error.value" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ policyRequest.label('查承諾與政見') }}
-          </HeroAction>
-          <HeroAction data-testid="hero-query-profile" @click="profileRequest.send({ kind: 'profile', politician_id: politician.id })">
-            <Loader2 v-if="profileRequest.loading.value" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="profileRequest.done.value" :size="16" />
-            <XCircle v-else-if="profileRequest.error.value" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ profileRequest.label('查簡介') }}
-          </HeroAction>
           <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：開共用抽屜預覽，從抽屜複製給 AI、丟進 NotebookLM -->
           <button type="button" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown" @click="openMarkdown">.md 摘要</button>
         </div>
-        <RequestTaskNotice class="mt-3" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
-        <RequestTaskNotice class="mt-3" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
@@ -594,12 +607,23 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
-                      <AiLookupCard v-if="group.key === campaignGroups[campaignGroups.length - 1]?.key" :state="lookup.campaign" label="請 AI 補充最新的承諾" hint="查有出處的最新承諾" @click="requestLookup('campaign')" />
+                      <AiLookupCard :state="groupLookupState(group, 'pledge')" :label="groupLookupLabel(group, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(group, 'pledge')" />
                     </div>
                   </div>
                 </div>
                 <!-- 已有資料也能再查：卡片檢視是格線最後一張動作卡，表格檢視用小按鈕 -->
-                <AiLookupInline v-if="campaignView === 'table'" :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
+                <AiLookupInline v-if="campaignView === 'table' && personElectionGroups.length > 0" :state="groupLookupState(personElectionGroups[0], 'pledge')" :label="groupLookupLabel(personElectionGroups[0], 'pledge')" @click="requestGroupLookup(personElectionGroups[0], 'pledge')" />
+                <AiLookupInline v-else-if="campaignView === 'table'" :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
+                <!-- 還沒有任何承諾的那幾屆也各給一張卡 -->
+                <div v-if="campaignView !== 'table' && withoutGroup(personElectionGroups, campaignGroups).length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  <AiLookupCard v-for="g in withoutGroup(personElectionGroups, campaignGroups)" :key="g.key" :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
+                </div>
+              </template>
+              <template v-else-if="personElectionGroups.length > 0">
+                <p class="text-slate-500">該候選人尚未發布承諾。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  <AiLookupCard v-for="g in personElectionGroups" :key="g.key" :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
+                </div>
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <Search :size="48" class="mx-auto mb-4 text-slate-300" />
@@ -644,44 +668,23 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" />
-                      <AiLookupCard v-if="group.key === historyGroups[historyGroups.length - 1]?.key" :state="lookup.history" label="請 AI 補充最新的政見" hint="查有出處的最新政見" @click="requestLookup('history')" />
+                      <AiLookupCard v-if="electedIn(group.electionId)" :state="groupLookupState(group, 'tenure')" :label="groupLookupLabel(group, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(group, 'tenure')" />
                     </div>
                   </div>
                 </div>
-              </template>
-              <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
-                <FileText :size="48" class="mx-auto mb-4 text-slate-300" />
-                <p class="text-slate-500 mb-6">該候選人沒有政見的追蹤紀錄。</p>
-
-                <!-- AI Search Button for History -->
-                <button
-                  v-if="!lookup.history.result"
-                  @click="requestLookup('history')"
-                  :disabled="lookup.history.loading"
-                  :class="[
-                    'px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 mx-auto',
-                    lookup.history.error
-                      ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20'
-                  ]"
-                >
-                  <Loader2 v-if="lookup.history.loading" :size="20" class="animate-spin" />
-                  <Sparkles v-else :size="20" />
-                  {{ lookup.history.loading ? '送出中…' : lookup.history.error ? '重試' : '請 AI 幫忙查政見' }}
-                </button>
-
-                <!-- Success State -->
-                <div v-if="lookup.history.result" class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 max-w-md mx-auto" data-testid="request-task-done">
-                  <div class="flex items-center gap-2 text-emerald-700 font-bold mb-2">
-                    <CheckCircle :size="20" />
-                    {{ requestTaskHeading(lookup.history.result!) }}
-                  </div>
-                  <p class="text-sm text-emerald-600">{{ requestTaskMessage(lookup.history.result) }}</p>
-                  <RouterLink :to="BOARD_PATH" class="inline-block mt-2 text-sm font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
+                <div v-if="withoutGroup(electedElectionGroups, historyGroups).length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  <AiLookupCard v-for="g in withoutGroup(electedElectionGroups, historyGroups)" :key="g.key" :state="groupLookupState(g, 'tenure')" :label="groupLookupLabel(g, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(g, 'tenure')" />
                 </div>
-
-                <!-- Error Message -->
-                <p v-if="lookup.history.error && !lookup.history.result" class="text-red-500 text-sm mt-3">{{ lookup.history.error }}</p>
+              </template>
+              <template v-else-if="electedElectionGroups.length > 0">
+                <p class="text-slate-500">該候選人沒有政見的追蹤紀錄。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  <AiLookupCard v-for="g in electedElectionGroups" :key="g.key" :state="groupLookupState(g, 'tenure')" :label="groupLookupLabel(g, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(g, 'tenure')" />
+                </div>
+              </template>
+              <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300" data-testid="history-no-elected">
+                <FileText :size="48" class="mx-auto mb-4 text-slate-300" />
+                <p class="text-slate-500">沒有當選紀錄，沒有政見可追蹤。</p>
               </div>
             </div>
             <!-- 基本資料：原本的右側欄（政黨、選區、參選紀錄、現職、經歷、學歷、請 AI 幫忙查），2026-09-20 改成分頁。
@@ -778,57 +781,9 @@ usePageHead({
                 <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
                 <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
                   <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
-                  <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；已有資料也可以再查，補新的或更新；不需登入。</p>
-                  <div class="space-y-3">
-                    <!-- Search Bio Button -->
-                    <button
-                      @click="requestLookup('bio')"
-                      :disabled="lookup.bio.loading"
-                      :class="[
-                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                        lookup.bio.result
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : lookup.bio.error
-                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                            : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
-                      ]"
-                    >
-                      <Loader2 v-if="lookup.bio.loading" :size="16" class="animate-spin" />
-                      <CheckCircle v-else-if="lookup.bio.result" :size="16" />
-                      <XCircle v-else-if="lookup.bio.error" :size="16" />
-                      <User v-else :size="16" />
-                      {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? requestTaskDoneLabel(lookup.bio.result) : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
-                    </button>
-
-                    <!-- Search Avatar Button -->
-                    <button
-                      @click="requestLookup('avatar')"
-                      :disabled="lookup.avatar.loading"
-                      :class="[
-                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                        lookup.avatar.result
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : lookup.avatar.error
-                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                            : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
-                      ]"
-                    >
-                      <Loader2 v-if="lookup.avatar.loading" :size="16" class="animate-spin" />
-                      <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
-                      <XCircle v-else-if="lookup.avatar.error" :size="16" />
-                      <Camera v-else :size="16" />
-                      {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? requestTaskDoneLabel(lookup.avatar.result) : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
-                    </button>
-
-                    <!-- Error messages -->
-                    <p v-if="lookup.bio.error" class="text-red-500 text-xs">{{ lookup.bio.error }}</p>
-                    <p v-if="lookup.avatar.error" class="text-red-500 text-xs">{{ lookup.avatar.error }}</p>
-
-                    <!-- Success hint -->
-                    <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
-                      <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
-                      <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
-                    </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <AiLookupCard :state="lookup.bio" :icon="User" :label="politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷'" hint="查有出處的簡介與學經歷" @click="requestLookup('bio')" />
+                    <AiLookupCard :state="lookup.avatar" :icon="Camera" :label="politician.avatarUrl ? '更新正確或新的照片' : '請 AI 找照片'" hint="找官方或新聞用的正確照片" @click="requestLookup('avatar')" />
                   </div>
                 </div>
               </div>

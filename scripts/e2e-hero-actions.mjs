@@ -1,4 +1,4 @@
-// 三頁 Hero 動作列 Playwright 抽驗：人物頁／政見頁／分析頁的動作列顆數、文案逐字、按下後就地狀態變化、
+// Hero 動作列 Playwright 抽驗：政見頁／分析頁的動作列顆數（人物頁 hero 的查詢鈕已由各分頁的 AI 卡取代，2026-11-01），人物頁只留手機版不溢出、文案逐字、按下後就地狀態變化、
 // 查核履歷捲動、稽核輸入框聚焦、手機 390px 不橫向溢出、console 無錯誤與 Vue warn。
 // 用法：先 pnpm build，再 node scripts/e2e-hero-actions.mjs [port]。request-task 用假回應攔截，不打 prod（頁面資料走 Supabase anon 唯讀）。
 import { spawn } from 'node:child_process'
@@ -77,39 +77,6 @@ async function routeRequestTask(page, replyStatus) {
 
 const browser = await chromium.launch()
 try {
-  // ---------- 桌面：人物頁 ----------
-  {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-    const page = await context.newPage()
-    const guard = attachConsoleGuard(page, '人物頁-desktop')
-    const bodies = await routeRequestTask(page, 'already_queued')
-    await page.goto(`http://localhost:${PORT}/politician/${politicianId}`, { waitUntil: 'networkidle' })
-
-    const policyBtn = page.locator('[data-testid="hero-query-policy"]')
-    const profileBtn = page.locator('[data-testid="hero-query-profile"]')
-    check(await policyBtn.count() === 1 && await profileBtn.count() === 1, '人物頁動作列（返回鈕不計）恰好 2 顆：查承諾與政見／查簡介')
-    check((await policyBtn.textContent()).trim() === '查承諾與政見', `「查承諾與政見」文案逐字：「${(await policyBtn.textContent()).trim()}」`)
-    check((await profileBtn.textContent()).trim() === '查簡介', `「查簡介」文案逐字：「${(await profileBtn.textContent()).trim()}」`)
-    check(await page.locator('text=請 AI 補齊這個人的資料').count() === 0, '舊的「請 AI 補齊這個人的資料」已移除')
-
-    const scrollBefore = await page.evaluate(() => window.scrollY)
-    await policyBtn.click()
-    await page.waitForFunction(() => document.querySelector('[data-testid="hero-query-policy"]')?.textContent.includes('已在任務池中'))
-    const scrollAfter = await page.evaluate(() => window.scrollY)
-    check(scrollAfter === scrollBefore, '「查承諾與政見」按下後不捲動（就地顯示狀態）')
-    check((await policyBtn.textContent()).includes('已在任務池中'), `「查承諾與政見」按下後就地顯示「已在任務池中」：「${(await policyBtn.textContent()).trim()}」`)
-    check(bodies.length === 1 && bodies[0].kind === 'policy' && bodies[0].politician_id === politicianId, `request-task 收到 kind=policy 與正確 politician_id（${JSON.stringify(bodies[0])}）`)
-
-    await profileBtn.click()
-    await page.waitForFunction(() => document.querySelector('[data-testid="hero-query-profile"]')?.textContent.includes('已在任務池中'))
-    check((await profileBtn.textContent()).includes('已在任務池中'), `「查簡介」按下後就地顯示「已在任務池中」：「${(await profileBtn.textContent()).trim()}」`)
-    check(bodies.length === 2 && bodies[1].kind === 'profile' && bodies[1].politician_id === politicianId, `request-task 收到 kind=profile 與正確 politician_id（${JSON.stringify(bodies[1])}）`)
-
-    check(guard.problems.length === 0 && guard.badResponses.length === 0, `${guard.label}: console 無錯誤/Vue warn，無非預期資源載入失敗（${[...guard.problems, ...guard.badResponses].join(' | ')}）`)
-    await page.screenshot({ path: path.join(OUT, 'hero-politician-desktop.png'), fullPage: false })
-    await context.close()
-  }
-
   // ---------- 桌面：政見頁 ----------
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })

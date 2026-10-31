@@ -21,6 +21,10 @@ export interface RequestTaskInput {
   kind: RequestKind
   politician_id?: string
   policy_id?: string
+  /** kind=policy：只查這一屆（人物頁各屆的 AI 卡）；當選與否由後端查資料判斷，任務文字會寫明屆別與結果 */
+  election_id?: number
+  /** 搭配 election_id：pledge＝查承諾、tenure＝查政見（任內），由人物頁卡片所在的分頁決定 */
+  scope?: 'pledge' | 'tenure'
   /** kind=audit：要核對的文件網址 */
   source_url?: string
   note?: string
