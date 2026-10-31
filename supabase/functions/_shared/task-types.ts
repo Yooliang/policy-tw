@@ -70,4 +70,6 @@ export const SUGGESTED_TYPE: Record<string, string> = {
   regional_stat_missing: "regional_stat",
   // 照片二選一（2026-10-11，policy-ops#89）：挑新交的那張 → correction 改 avatar_url；留現有的 → no_change confirmed
   avatar_choice: "correction",
+  // 參選紀錄縣市對不上（2026-10-31）：現有的錯 → correction 改 region_id；現有的對 → no_change confirmed
+  region_mismatch: "correction",
 };

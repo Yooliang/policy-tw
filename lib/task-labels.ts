@@ -50,6 +50,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   regional_stat_missing: '缺地方統計',
   // 2026-10-11：已經有照片又有人交了另一張，代理挑一張比較合適的
   avatar_choice: '照片二選一',
+  // 2026-10-31：參選紀錄記的縣市跟交件寫的不同，代理查公告裁決
+  region_mismatch: '縣市對不上',
   other: '其他',
 }
 
