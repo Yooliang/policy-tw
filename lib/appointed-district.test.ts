@@ -15,5 +15,5 @@ Deno.test("直轄市一般區派任：大安區灰、烏來區不灰、縣市層
 Deno.test("ElectionPage 用 isAppointedDistrict 讓兩個分頁變灰（手機分頁條與桌面層級清單）", () => {
   const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
   assert(page.includes("isAppointedDistrict(") && page.includes("APPOINTED_EMPTY_TEXT"));
-  assert(/dim: appointedTabs\.has\(t\.key\)/.test(page));
+  assert(/dim: appointedTabs\.value\.has\(t\)/.test(page));
 });
