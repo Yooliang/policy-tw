@@ -21,7 +21,7 @@ import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { dataRegionCategoryMdPath, dataRegionMdPath } from '../lib/md/format'
 import ChipFilteredGroups from './election/ChipFilteredGroups.vue'
 import PolicyPk from './election/PolicyPk.vue'
-import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkNeeds, pkQuery, sameDistrict } from '../lib/policy-compare'
+import { buildPick, comparablePeople, compareMatrix, hasPk, hasPolicies, parsePick, pickGroup, pkGroups, pkLocationLabel, pkNeeds, pkPickForLocation, pkQuery, sameDistrict } from '../lib/policy-compare'
 import { renderPkMd } from '../lib/policy-pk-md'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import {
@@ -1015,8 +1015,17 @@ const pkGroupList = computed(() => pkMissing.value ? [] : pkGroups(comparisonPoo
 const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
 /** PK 的選區跟內容區的選區晶片共用 selectedDistrict（網址 ?district= 是 PK 自己點的，優先；晶片一換就清掉它，見下面的 watch） */
 const chipDistrictLabel = computed(() => selectedDistrict.value === 'All' ? '' : selectedDistrict.value.replace(/^.*?(第\d+選舉區)$/, '$1'))
-watch(selectedDistrict, () => { comparisonDistrict.value = '' })
-const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value || chipDistrictLabel.value, groupHasPolicies))
+// 村里、鄉鎮的定位一換也清掉 PK 自己的選場（?district=），一律以共用定位為準
+watch([selectedDistrict, selectedVillage, selectedSubRegion], () => { comparisonDistrict.value = '' })
+/**
+ * PK 比較哪一場＝跟目前共用定位走（2026-10-31 正式站 bug：楠梓區村里長晶片選五常里，PK 卻是久昌里）：
+ *   村里長＝選中的村里；鄉鎮市長＝選中的鄉鎮（組名就是鄉鎮）；議員／代表＝選中的選區晶片；縣市長＝縣市（頁面範圍已定）。
+ * 沒選（全部）回空字串，沿用 pickGroup 的預設（第一個有政見的場），並由下面的 watch 把實際比較的那一項同步回晶片。
+ */
+const pkWantedLabel = computed(() => comparisonDistrict.value || pkLocationLabel(pkLevel.value, { village: selectedVillage.value, subRegion: selectedSubRegion.value, districtLabel: chipDistrictLabel.value }))
+// 共用定位選了某一場（村里、鄉鎮、選區）就只比那一場：那一場不到兩位（沒有 PK）時畫「尚無資料」，不退去比別場（楠梓區五常里 → 久昌里 的 bug）；
+// 網址 ?district= 帶了這一頁沒有的組名仍照舊退回預設（舊連結）
+const pkGroup = computed(() => pkPickForLocation(pkGroupList.value, pkWantedLabel.value, !!comparisonDistrict.value, groupHasPolicies))
 const pkCandidates = computed(() => pkGroup.value ? comparablePeople(pkGroup.value.people) : [])
 const pkIds = computed(() => pkCandidates.value.map(c => String(c.id)))
 const pkPicked = computed(() => parsePick(comparisonPick.value, pkIds.value))
@@ -1482,6 +1491,21 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   return row.length > 0 ? [row] : []
 })
 const mobileChipsEl = ref<HTMLElement | null>(null)
+/**
+ * PK 預設挑了某一場（定位選「全部」時）：把它同步回共用定位，晶片與麵包屑就會高亮實際比較的那一項（不得出現晶片寫全部、PK 卻是別場）。
+ * 只在 PK 檢視、且 PK 層級就是目前的層級分頁時做；已經有定位（pkWantedLabel 非空）不動。
+ */
+watch([pkGroup, viewMode], ([g, vm]) => {
+  if (vm !== 'comparison' || !g || pkWantedLabel.value || pkMissing.value) return
+  const t = pkLevel.value
+  if (t !== mobileActiveType.value) return
+  if (t === ElectionType.CHIEF) { if (selectedVillage.value === 'All') selectedVillage.value = g.label }
+  else if (t === ElectionType.TOWNSHIP_MAYOR) { if (selectedSubRegion.value === 'All') pickLocation('sub', g.label) }
+  else if (t === ElectionType.COUNCILOR || t === ElectionType.REPRESENTATIVE) {
+    const chip = (mobileChipRows.value[0] ?? []).find(c => c.key !== 'All' && c.key.endsWith(g.label))
+    if (chip && selectedDistrict.value === 'All') selectedDistrict.value = chip.key
+  }
+})
 /** 桌面版：縣市那一列（全台頁、縣市長分頁）延伸欄已經有，不重複；鄉鎮／選區／村里列在桌面也顯示 */
 const deskChipsHidden = computed(() => selectedRegion.value === 'All' || mobileActiveType.value === ElectionType.MAYOR)
 // 選中的晶片自動捲到橫向可見（只動橫向，不動頁面捲動）

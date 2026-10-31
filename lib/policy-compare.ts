@@ -122,6 +122,35 @@ export function pkGroups<T extends ComparePerson>(people: readonly T[], election
     .sort((a, b) => byPlace ? compareRegionName(a.label, b.label) : a.label.localeCompare(b.label, 'zh-Hant-TW', { numeric: true }))
 }
 
+/**
+ * PK 要比哪一場＝跟目前共用定位走（2026-10-31 正式站 bug：楠梓區村里長晶片選五常里，PK 卻是久昌里）：
+ *   村里長＝選中的村里；鄉鎮市長＝選中的鄉鎮（組名就是鄉鎮）；縣市長＝空（頁面範圍已定）；其餘（議員、代表）＝選區晶片的組名。
+ * 沒選（全部）回空字串。
+ */
+export function pkLocationLabel(
+  electionType: string,
+  loc: { village: string; subRegion: string; districtLabel: string },
+): string {
+  if (electionType === '村里長') return loc.village !== 'All' ? loc.village : ''
+  if (electionType === '鄉鎮市長') return loc.subRegion !== 'All' ? loc.subRegion : ''
+  if (electionType === '縣市長') return ''
+  return loc.districtLabel
+}
+
+/**
+ * 依共用定位挑 PK 那一場：定位選了某一場就只比那一場，那一場不到兩位（不在 groups 裡）回 undefined——畫「尚無資料」，不退去比別場；
+ * 沒選定位、或是網址 ?district= 明確帶的（explicit，舊連結可能帶這一頁沒有的組名）才用 pickGroup 的預設（第一個 prefer 成立的場）。
+ */
+export function pkPickForLocation<T>(
+  groups: readonly CompareGroup<T>[],
+  wanted: string,
+  explicit: boolean,
+  prefer?: (g: CompareGroup<T>) => boolean,
+): CompareGroup<T> | undefined {
+  if (wanted && !explicit) return groups.find((g) => g.label === wanted)
+  return pickGroup(groups, wanted, prefer)
+}
+
 /** 至少兩位會出現在選票上的人才有 PK 可看（區塊標題列的「政見 PK」按鈕照這個決定給不給） */
 export function hasPk<T extends ComparePerson>(group: CompareGroup<T> | undefined): boolean {
   return !!group && comparablePeople(group.people).length >= 2
