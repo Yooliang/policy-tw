@@ -1538,6 +1538,17 @@ watch(mobileChipRows, () => {
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 function emptyTextFor(type: string): string {
   if (electionLoading.value || countyWideLoading.value || nwPending(type)) return '載入中…'
+  // 直轄市的一般區區長官派、沒有區代表選舉：只有山地原住民區（資料裡有原民區長／區代表候選人）才有這兩類選舉
+  if (isSpecialMunicipality.value && selectedRegion.value !== 'All' && (type === ElectionType.TOWNSHIP_MAYOR || type === ElectionType.REPRESENTATIVE)) {
+    const sub = selectedSubRegion.value
+    // 山地原住民區看選區資料（data/tw-districts 的區代表選區：直轄市底下有區代表選區的只會是原民區），不看有沒有人登記；候選人資料有的也算
+    const repKeys = Object.keys(districtCacheData.rep ?? {})
+    const county = rasterCountyCode.value
+    const isIndigenous = sub === 'All'
+      ? indigenousDistricts.value.length > 0 || (!!county && repKeys.some(k => k.startsWith(county)))
+      : indigenousDistricts.value.some(d => sameRegionName(d, sub)) || (!!rasterTownCode.value && repKeys.includes(rasterTownCode.value))
+    if (!isIndigenous) return '無此類選舉'
+  }
   return '尚無參選人'
 }
 
@@ -1881,13 +1892,13 @@ useSwipeTabs(swipeEl, {
         <div class="relative transition-opacity duration-200" :class="mobileStale ? 'opacity-50' : ''" data-testid="mobile-panel">
           <div v-for="panel in mobilePanels" :key="panel.type" v-show="panel.type === mobileActiveType" :class="mobileAdjacent(panel.type)" :data-testid="`mobile-panel-${panel.type}`">
             <template v-if="panel.pick">
-              <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}<span class="ml-2 text-xs font-normal text-slate-400"><span class="md:hidden">從上方選一個，或在下面挑</span><span class="max-md:hidden">從左側選一個，或在下面挑</span></span></h3>
-              <div v-if="panel.pick.options.length > 0" class="flex flex-wrap gap-2" data-testid="mobile-pick-options">
+              <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}</h3>
+              <div v-if="panel.pick.options.length > 0" :class="['grid gap-2 md:flex md:flex-wrap', panel.pick.options.some(o => o.length > 3) ? 'grid-cols-3' : 'grid-cols-4']" data-testid="mobile-pick-options">
                 <button
                   v-for="o in panel.pick.options"
                   :key="o"
                   type="button"
-                  class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 active:bg-blue-50"
+                  class="whitespace-nowrap rounded-full border border-slate-200 bg-white px-1 py-2 text-center text-[13px] font-bold text-slate-700 active:bg-blue-50 md:px-4 md:text-sm"
                   @click="pickLocation(panel.pick.level, o)"
                 >{{ o }}</button>
               </div>

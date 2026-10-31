@@ -7,14 +7,16 @@ import MobileTabBar from './components/MobileTabBar.vue'
 import DeskRail from './components/DeskRail.vue'
 import DeskExtNav from './components/DeskExtNav.vue'
 import AdRail from './components/AdRail.vue'
-import { computed, onBeforeUnmount, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import SwipeTabStrip from './components/SwipeTabStrip.vue'
+import { sectionTabsFor } from './lib/mobile-section-tabs'
 import { DESK_LG, DESK_MD, DESK_XL, useDeskLayout, useDeskNav } from './composables/useDeskNav'
 import { sectionOfRoute } from './lib/desk-sections'
 import { adHiddenPath } from './lib/ad-pages'
 import { isMobileViewport, useMobileShell } from './composables/useMobileShell'
 import { useScrollHide } from './composables/useScrollHide'
-import { inHorizontalScroller } from './composables/useSwipeTabs'
+import { inHorizontalScroller, useSwipeTabs } from './composables/useSwipeTabs'
 
 // 手機版（X 式版面）：往右滑拉出左側選單。
 // - 從畫面左緣起手：任何地方都行
@@ -33,6 +35,20 @@ const showRail = computed(() => width.value >= DESK_XL && route.path !== '/' && 
 const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null })
 const drawerShown = computed(() => deskDrawer.value && hasExt.value && width.value >= DESK_MD && width.value < DESK_LG)
 const { openDrawer } = useMobileShell()
+// 手機版政見／參與／搜尋三區：頁首下方的頁籤條，切換＝導航到對應路由（動畫結束後才導航，外殼不重掛）
+const router = useRouter()
+const sectionTabs = computed(() => sectionTabsFor(route.path, route.query))
+const mainRef = ref<HTMLElement | null>(null)
+// 只在頁籤路由上綁手勢（其他頁維持原本的全頁右滑開選單）
+const mainEl = ref<HTMLElement | null>(null)
+watch([mainRef, sectionTabs], () => { mainEl.value = sectionTabs.value ? mainRef.value : null }, { immediate: true, flush: 'post' })
+useSwipeTabs(mainEl, {
+  index: () => { const s = sectionTabs.value; return s ? Math.max(0, s.tabs.findIndex(t => t.key === s.active)) : 0 },
+  count: () => sectionTabs.value?.tabs.length ?? 0,
+  go: (i) => { const t = sectionTabs.value?.tabs[i]; if (t) void router.push(t.to) },
+  onPastStart: openDrawer,
+})
+function pickSectionTab(key: string) { const t = sectionTabs.value?.tabs.find(x => x.key === key); if (t && key !== sectionTabs.value?.active) void router.push(t.to) }
 const EDGE_PX = 28
 let ex = 0
 let ey = 0
@@ -91,7 +107,10 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
 
     <div class="flex min-h-screen min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0 md:pt-12" data-desk-main>
       <Navbar />
-      <main class="flex-grow">
+      <div v-if="sectionTabs" class="md:hidden sticky top-14 z-30 shadow-sm" data-chrome-follow data-testid="mobile-section-tabs">
+        <SwipeTabStrip :tabs="sectionTabs.tabs" :model-value="sectionTabs.active" @update:model-value="pickSectionTab" />
+      </div>
+      <main ref="mainRef" class="flex-grow -mt-px">
         <RouterView v-slot="{ Component }">
           <KeepAlive :include="['ElectionPage']">
             <component :is="Component" />
