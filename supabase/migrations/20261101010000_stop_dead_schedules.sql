@@ -12,7 +12,7 @@
 --    contribution_vote_baseline_refresh()），沒有獨立排程，故不需另停；
 --    contribution_vote_baseline() 讀不到單列時會退回現算，/report、/next 的爭點資料與主控台不受影響。
 --    恢復（需先經維護者同意，並改 overvoted-adjudication-pause.test.ts）：
---      SELECT cron.schedule('overvoted-tick-10min', '3,13,23,33,43,53 * * * *', $$SELECT contribution_overvoted_tick();$$);
+--      以 20261017020100 第 220 行的排程（名稱 overvoted-tick-10min、頻率 '3,13,23,33,43,53 * * * *'、呼叫 contribution_overvoted_tick()）重新排回。
 
 SELECT cron.unschedule('news-sweep-refresh') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'news-sweep-refresh');
 SELECT cron.unschedule('overvoted-tick-10min') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'overvoted-tick-10min');
