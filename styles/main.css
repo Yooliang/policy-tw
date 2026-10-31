@@ -166,3 +166,11 @@ html.dark .dir-list .dl { color: #94a3b8; }
 @media (min-width: 768px) {
   html.dark nav[data-chrome="top"] { box-shadow: 0 1px 0 0 #334155; }
 }
+
+/* 橫向捲動列的邊緣漸層（components/ScrollRow.vue）：起色＝列後面的底色（預設頁面底色 slate-50，白底的列加 sr-fade-white） */
+.sr-fade { --sr-from: #f8fafc; }
+.sr-fade.sr-fade-white { --sr-from: #ffffff; }
+.sr-fade-l { background: linear-gradient(to right, var(--sr-from), transparent); }
+.sr-fade-r { background: linear-gradient(to left, var(--sr-from), transparent); }
+html.dark .sr-fade { --sr-from: #0f172a; }
+html.dark .sr-fade.sr-fade-white { --sr-from: #1e293b; }

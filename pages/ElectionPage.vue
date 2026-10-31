@@ -7,6 +7,7 @@ import { ref, shallowRef, computed, watch, nextTick, onMounted, onActivated, onD
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
+import ScrollRow from '../components/ScrollRow.vue'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -1696,7 +1697,8 @@ useSwipeTabs(swipeEl, {
 
       <!-- 手機版：晶片列放在內容最上面，四個檢視（候選人／承諾／PK／串聯）共用同一組定位與分頁（標題區 → 晶片 → 排序 → 內容） -->
       <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" :class="deskChipsHidden ? 'md:hidden' : ''" data-testid="mobile-district-chips">
-        <div
+        <!-- 桌面有滑鼠時兩端出現箭頭與漸層（ScrollRow）；所有 class／data 屬性都落在真正捲動的那一層 -->
+        <ScrollRow
           v-for="(row, ri) in mobileChipRows"
           :key="ri"
           class="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden relative"
@@ -1712,7 +1714,7 @@ useSwipeTabs(swipeEl, {
             :data-active="c.active ? 'true' : 'false'"
             @click="c.pick()"
           >{{ c.text }}</button>
-        </div>
+        </ScrollRow>
       </div>
 
       <!-- VIEW: Politicians -->
