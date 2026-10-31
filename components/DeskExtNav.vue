@@ -21,12 +21,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const route = useRoute()
 const { elections, getActiveElection, categories } = useSupabase()
-const { electionNav } = useDeskNav()
+const { electionNav, personNav } = useDeskNav()
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
 
 const section = computed<DeskSection | null>(() => sectionOfRoute(route.name))
 const model = computed(() => (mounted.value && electionNav.value ? electionNav.value.value : null))
+/** 人物頁：該屆的層級與縣市（取代通用的「選舉」「一覽」兩組；內容類型維持） */
+const person = computed(() => (mounted.value && route.name === 'politician' && personNav.value ? personNav.value.value : null))
 
 const link = (key: string, label: string, to: string): DeskItem => ({ key, label, to, active: false })
 const POLICY: DeskGroup[] = [
@@ -77,6 +79,7 @@ const overviewOnly = computed(() => OVERVIEW_ROUTES.has(String(route.name)))
 const title = computed(() => {
   if (overviewOnly.value && section.value === 'election') return '選舉'
   if (section.value === 'election') {
+    if (person.value) return person.value.title
     if (model.value) return model.value.title
     const e = activeElection.value
     const y = e ? electionYearOfDate(e.electionDate) : null
@@ -91,13 +94,15 @@ const groups = computed<DeskGroup[]>(() => {
     case 'home':
     case 'about': return ABOUT
     case 'search': return [searchGroup, moreElection]
-    case 'election': if (overviewOnly.value) return [moreElection]; return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組
+    case 'election': if (overviewOnly.value) return [moreElection]; if (person.value) return [...genericElection.value.filter(g => g.key === 'views'), ...person.value.groups]
+      return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組
     default: return []
   }
 })
 
 function isOn(item: DeskItem): boolean {
   if (!item.to) return item.active
+  if (item.active) return true // 人物頁的層級／縣市連結：選中與否由人物頁決定（目前網址是人物頁，比不出來）
   const [path, qs] = item.to.split('?')
   // 一覽組：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也高亮對應那項
   if (['/politicians', '/parties'].includes(path)) { if (!(route.path === path || route.path.startsWith(path + '/'))) return false } else if (route.path !== path) return false

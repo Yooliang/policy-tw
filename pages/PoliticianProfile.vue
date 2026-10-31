@@ -25,14 +25,18 @@ import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/her
 import AiLookupInline from '../components/AiLookupInline.vue'
 import AiLookupCard from '../components/AiLookupCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
+import { positionSpec } from '../lib/election-levels'
+import { yearShort } from '../lib/election-breadcrumbs'
+import type { PersonCrumb } from '../composables/useMobileHeader'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { personShareImage, personTrackingText, publicImageUrl } from '../lib/seo'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-number'
-import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { electionPath, electionRegionPath, isCounty } from '../lib/election-regions'
+import { levelCountyGroups, LEVEL_TAB_TYPES } from '../lib/desk-level-groups'
+import { useDeskNav } from '../composables/useDeskNav'
 import { currentElection, taipeiDay } from '../lib/election-list'
-import { newerFirst, segmentOfId } from '../lib/election-route'
+import { electionYearOfDate, newerFirst, segmentOfId } from '../lib/election-route'
 import { stageOfPolicy, taipeiToday } from '../lib/policy-stage'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
@@ -330,11 +334,43 @@ const peerDistrict = computed(() => {
  */
 const titles = computed(() => officeTitles(politician.value?.offices))
 // 手機版頁首正中間顯示姓名＋小字現任職稱（X 式）
-const { setPerson, setPageCrumbs } = useMobileHeader()
+const { setPerson, setPageCrumbs, setPersonCrumbs } = useMobileHeader()
 // 桌面細頁首：首頁 › 選舉名稱（連該場選舉）› 縣市 ›（鄉鎮）› 人物；職位層（#鄉鎮市長…）不放，細頁首只寫到地區
 watch(breadcrumbs, (items) => { setPageCrumbs(items.length > 0 ? items.filter(i => !(i.path ?? '').includes('#')).map((i, k, all) => ({ label: i.name, to: k < all.length - 1 ? i.path : undefined })) : null) }, { immediate: true })
 watch([() => politician.value?.name, titles], ([name, t]) => { setPerson(name ? { name, sub: t[0] } : null) }, { immediate: true })
-onBeforeUnmount(() => { setPerson(null); setPageCrumbs(null) })
+// 手機頁首：跟選舉頁同一種麵包屑（屆別 › 縣市 ›（鄉鎮）›（村里）› 人名）；職位層不放，鄉鎮放不下時由頁首省成「…」
+watch([breadcrumbs, primaryRecord, () => politician.value?.name], ([items, rec, name]) => {
+  if (!name || items.length === 0) { setPersonCrumbs(null); return }
+  const out: PersonCrumb[] = []
+  items.forEach((i, k) => {
+    if (k === items.length - 1 || (k === items.length - 2 && positionSpec(rec?.electionType ?? ''))) return // 人名與職位層由下面接
+    out.push(k === 0 ? { label: yearShort(i.name) ?? i.name, to: i.path } : { label: i.name, to: i.path, short: i.name.replace(/[市縣]$/, ''), skip: /\/election\/[^/]+\/[^/]+\/[^/]+$/.test(i.path ?? '') })
+  })
+  const village = rec?.village?.trim()
+  if (village && positionSpec(rec?.electionType ?? '')?.level === 'village') out.push({ label: village })
+  out.push({ label: name })
+  setPersonCrumbs(out)
+}, { immediate: true })
+onBeforeUnmount(() => { setPerson(null); setPageCrumbs(null); setPersonCrumbs(null) })
+// 桌面延伸欄下半段（2026-11-01 小良哥）：改成「該屆的層級、縣市」，跟選舉頁同一份清單（lib/desk-level-groups.ts），
+// 把這個人的層級與縣市標成選中，點下去到該屆選舉頁對應的分頁與縣市。屆別＝目前這一屆（最新一屆參選紀錄）
+const { setPersonNav } = useDeskNav()
+const deskPersonNav = computed(() => {
+  const rec = primaryRecord.value
+  const election = rec ? getElectionById(rec.electionId) : undefined
+  if (!rec || !election) return null
+  const seg = segmentOfId(elections.value, rec.electionId)
+  const type = LEVEL_TAB_TYPES.includes(rec.electionType ?? '') ? rec.electionType! : ''
+  const county = isCounty(rec.region) ? rec.region : 'All'
+  const to = (region: string, tab: string) => ({ to: electionPath(seg, region === 'All' ? null : region) + (tab ? `?tab=${encodeURIComponent(tab)}` : '') })
+  const groups = levelCountyGroups(type, county, (kind, key, label, active, dim) => ({
+    key, label, active, dim, ...(kind === 'level' ? to(county, key) : to(key, type)),
+  }))
+  const y = electionYearOfDate(election.electionDate)
+  return { title: y ? `${y} 選舉` : '選舉', groups }
+})
+onMounted(() => setPersonNav(deskPersonNav))
+onBeforeUnmount(() => setPersonNav(null))
 /**
  * 「這一屆」＝還沒投票（含今天）裡最近的一屆定期改選；都投完票了（例如 2027 年）就取最近投完的那一屆。
  * 看投票日（lib/election-list.ts 的 currentElection），不看 id、不看 startDate／endDate（#344 第二階段 A）：
@@ -486,9 +522,6 @@ usePageHead({
         </div>
         <RequestTaskNotice class="mt-3" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
         <RequestTaskNotice class="mt-3" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
-      </template>
-      <template #default>
-        <Breadcrumbs :items="breadcrumbs" />
       </template>
     </Hero>
     <MdDrawer :pick="mdPick" @close="mdPick = null" />

@@ -29,6 +29,8 @@ export interface DeskNavModel {
 }
 
 const electionNav = shallowRef<ComputedRef<DeskNavModel> | null>(null)
+/** 人物頁登記的「該屆層級＋縣市」兩組（延伸欄下半段；點了是連結到該屆選舉頁） */
+const personNav = shallowRef<ComputedRef<DeskNavModel | null> | null>(null)
 const drawerOpen = ref(false)
 const width = ref(0)
 
@@ -36,6 +38,8 @@ export function useDeskNav() {
   return {
     electionNav,
     setElectionNav: (m: ComputedRef<DeskNavModel> | null) => { electionNav.value = m },
+    personNav,
+    setPersonNav: (m: ComputedRef<DeskNavModel | null> | null) => { personNav.value = m },
     drawerOpen,
     openDeskDrawer: () => { drawerOpen.value = true },
     closeDeskDrawer: () => { drawerOpen.value = false },

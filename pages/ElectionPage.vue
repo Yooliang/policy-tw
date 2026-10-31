@@ -58,6 +58,7 @@ import SwipeTabStrip from '../components/SwipeTabStrip.vue'
 import { useSwipeTabs, adjacentPanelClass } from '../composables/useSwipeTabs'
 import { useMobileShell, isMobileViewport } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
+import { levelCountyGroups, levelTabLabel, displayLabel, LEVEL_TAB_TYPES, type DeskItemMaker } from '../lib/desk-level-groups'
 import { useDeskNav, type DeskGroup, type DeskItem, type DeskNavModel } from '../composables/useDeskNav'
 import { fileCache } from '../lib/map-data-cache'
 import rasterIndex from '../data/tw-raster-index.json'
@@ -66,8 +67,6 @@ import districtCacheData from '../data/tw-districts/2026.json'
 const router = useRouter()
 const route = useRoute()
 /** 顯示用名稱（必須宣告在最前面：usePageHead 的 description 在 setup 就會算到 townshipLevelCounts，晚宣告會在鄉鎮頁炸 TDZ「Cannot access before initialization」，2026-10-31 上線後抓到）：鄉鎮市長→鄉鎮市區長、鄉鎮市民代表→鄉鎮市區民代表（只改畫面文字；資料庫 election_type 值、錨點與比對一律用原名） */
-const DISPLAY_LABELS: Record<string, string> = { 鄉鎮市長: '鄉鎮市區長', 鄉鎮市民代表: '鄉鎮市區民代表' }
-const displayLabel = (label: string) => DISPLAY_LABELS[label] ?? label
 /**
  * 「分頁面板版面」（層級分頁＋共用定位，原本只有手機版）：2026-10-31 桌面版也改成這一套——層級與地區由左邊延伸欄選（DeskExtNav），
  * 內容區跟手機版同一組面板。只在瀏覽器判斷（預渲染與 hydrate 第一次都是 false），所以桌面也走手機版那些載入邏輯；
@@ -1179,7 +1178,7 @@ usePageHead({
 const { openDrawer } = useMobileShell()
 const { setCrumbs } = useMobileHeader()
 
-const MOBILE_TAB_TYPES: string[] = [ElectionType.MAYOR, ElectionType.COUNCILOR, ElectionType.TOWNSHIP_MAYOR, ElectionType.REPRESENTATIVE, ElectionType.CHIEF]
+const MOBILE_TAB_TYPES: string[] = LEVEL_TAB_TYPES
 const TAB_NEEDS: Record<string, 'county' | 'sub' | 'village'> = {
   [ElectionType.MAYOR]: 'county', [ElectionType.COUNCILOR]: 'county',
   [ElectionType.TOWNSHIP_MAYOR]: 'sub', [ElectionType.REPRESENTATIVE]: 'sub', [ElectionType.CHIEF]: 'village',
@@ -1189,14 +1188,7 @@ const TAB_NEEDS: Record<string, 'county' | 'sub' | 'village'> = {
  * 根因（2026-10-30）：以前判斷寫成 ElectionType.CHIEF（那是「村里長」），縣市長是 MAYOR，所以直轄市頁一直沒換成功；
  * 而且分頁條與區塊標題是兩個名稱來源（區塊標題直接用 POSITIONS 的 label），只改一邊不會生效——現在兩處都走這個函式。
  */
-function mobileTypeLabel(type: string): string {
-  if (selectedRegion.value !== 'All' && isSpecialMunicipality.value) {
-    if (type === ElectionType.MAYOR) return '直轄市長'
-    if (type === ElectionType.COUNCILOR) return '直轄市議員'
-  }
-  const l = positionSpec(type)?.label ?? type
-  return displayLabel(l)
-}
+function mobileTypeLabel(type: string): string { return levelTabLabel(type, selectedRegion.value) }
 const mobileTabs = computed(() => MOBILE_TAB_TYPES.map(t => ({ key: t, label: mobileTypeLabel(t), dim: appointedTabs.value.has(t) })))
 const mobileActiveType = computed(() => MOBILE_TAB_TYPES.includes(mobileTab.value) ? mobileTab.value : MOBILE_TAB_TYPES[0]!)
 const mobileIndex = computed(() => Math.max(0, MOBILE_TAB_TYPES.indexOf(mobileActiveType.value)))
@@ -1701,11 +1693,10 @@ const deskNavModel = computed<DeskNavModel>(() => {
   const views = VIEW_TABS.map(v => item(v.key, v.short, viewMode.value === v.key, () => { viewMode.value = v.key }))
   const matrix: DeskItem[] = hasMatrix.value ? [{ key: 'matrix', label: '矩陣', active: false, to: `/election/${electionSeg.value}/matrix` }] : []
   groups.push({ key: 'views', title: '內容類型', blocks: [views.slice(0, 3), [...views.slice(3), ...matrix]] })
-  groups.push({ key: 'levels', title: '層級', blocks: [mobileTabs.value.map(t => ({ ...item(t.key, t.label, t.key === mobileActiveType.value, () => setMobileTab(t.key)), dim: t.dim }))] })
-  groups.push({ key: 'county', title: '縣市', blocks: [[
-    item('All', '全台', selectedRegion.value === 'All', () => pickLocation('county', 'All')),
-    ...TAIWAN_COUNTIES.map(c => item(c, c, selectedRegion.value === c, () => pickLocation('county', c))),
-  ]] })
+  const make: DeskItemMaker = (kind, key, label, active, dim) => kind === 'level'
+    ? { ...item(key, label, active, () => setMobileTab(key)), dim }
+    : item(key, label, active, () => pickLocation('county', key))
+  groups.push(...levelCountyGroups(mobileActiveType.value, selectedRegion.value, make, t => appointedTabs.value.has(t)))
   // 鄉鎮／村里／選區的選擇不在延伸欄：桌面與手機一樣放在內容區最上面的晶片列（2026-10-31）
   return { title: `${electionYear.value || ''} 選舉`.trim(), groups }
 })
