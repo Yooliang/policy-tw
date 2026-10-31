@@ -6,6 +6,7 @@ import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { sectionOfRoute, type DeskSection } from '../lib/desk-sections'
 import { useSupabase } from '../composables/useSupabase'
+import { useDeskNav } from '../composables/useDeskNav'
 
 /**
  * 桌面版最左窄圖示欄（md 以上，固定全高）：站徽＋主選單五項（首頁／政見／選舉／參與／搜尋）＋最下面的「關於」。
@@ -13,6 +14,9 @@ import { useSupabase } from '../composables/useSupabase'
  * 搜尋不換頁，開全站搜尋視窗（GlobalSearch，跟桌面版原本的搜尋鈕同一個）。
  */
 const route = useRoute()
+const { drawerOpen, closeDeskDrawer } = useDeskNav()
+// 抽屜開著時：點別的區＝照常導覽、抽屜內容跟著換成那一區（不關）；點目前這一區的圖示＝關抽屜
+function onPick(e: Event, key: string) { if (drawerOpen.value && current.value === key) { e.preventDefault(); closeDeskDrawer() } }
 const { getActiveElection } = useSupabase()
 const rawSection = computed<DeskSection | null>(() => sectionOfRoute(route.name))
 // 首頁與「關於」合併成同一項（2026-10-31）：關於區的頁面也讓首頁那顆亮；首頁的延伸欄顯示關於那組
@@ -36,7 +40,7 @@ const itemClass = (on: boolean) => ['group relative flex w-14 flex-col items-cen
       <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x" alt="正見" width="72" height="40" class="h-8 w-auto max-w-full object-contain" />
     </RouterLink>
     <div class="flex flex-col items-center gap-1">
-      <RouterLink v-for="item in items" :key="item.key" :to="item.to" :class="itemClass(current === item.key)" :aria-current="current === item.key ? 'page' : undefined" :data-testid="`desk-rail-${item.key}`">
+      <RouterLink v-for="item in items" :key="item.key" :to="item.to" @click="onPick($event, item.key)" :class="itemClass(current === item.key)" :aria-current="current === item.key ? 'page' : undefined" :data-testid="`desk-rail-${item.key}`">
         <component :is="item.icon" v-if="item.icon" :size="22" :stroke-width="current === item.key ? 2.6 : 2" />
         <!-- 選舉徽章（縮小版）：同手機底部分頁列的金／紅／深藍，id 加 dr- 前綴避免和它撞名 -->
         <svg v-else viewBox="0 0 100 100" class="h-[26px] w-[26px] shrink-0" :class="current === 'election' ? '[filter:drop-shadow(0_0_4px_rgb(251_191_36/0.8))]' : ''" aria-hidden="true">
@@ -61,7 +65,7 @@ const itemClass = (on: boolean) => ['group relative flex w-14 flex-col items-cen
         </svg>
         <span>{{ item.label }}</span>
       </RouterLink>
-      <RouterLink to="/search" :class="itemClass(current === 'search')" :aria-current="current === 'search' ? 'page' : undefined" aria-label="搜尋人物與政見" data-testid="desk-rail-search">
+      <RouterLink to="/search" @click="onPick($event, 'search')" :class="itemClass(current === 'search')" :aria-current="current === 'search' ? 'page' : undefined" aria-label="搜尋人物與政見" data-testid="desk-rail-search">
         <Search :size="22" />
         <span>搜尋</span>
       </RouterLink>

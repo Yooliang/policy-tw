@@ -58,11 +58,14 @@ function onTouchEnd(e: TouchEvent) {
   const dy = t.clientY - ey
   if (dx > 56 && dx > Math.abs(dy) * 1.5) openDrawer()
 }
+function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape' && deskDrawer.value) closeDeskDrawer() }
 onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
   document.addEventListener('touchstart', onTouchStart, { passive: true })
   document.addEventListener('touchend', onTouchEnd, { passive: true })
 })
 onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
   document.removeEventListener('touchstart', onTouchStart)
   document.removeEventListener('touchend', onTouchEnd)
 })
@@ -74,11 +77,13 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
 <template>
   <div class="font-sans md:flex md:min-h-screen">
     <!-- 桌面版最左窄欄與延伸欄（md 以上；延伸欄 lg 以上固定顯示，窄桌面收成抽屜） -->
-    <div class="hidden md:block sticky top-0 z-40 h-screen shrink-0 self-start" data-chrome="rail"><DeskRail /></div>
+    <!-- 窄圖示欄永遠在最上層（z-[70]，高於抽屜與背板的 z-[60]），抽屜開著時照樣明亮可點 -->
+    <div class="hidden md:block sticky top-0 z-[70] h-screen shrink-0 self-start" data-chrome="rail"><DeskRail /></div>
     <div v-if="hasExt" class="hidden lg:block sticky top-0 z-30 h-screen shrink-0 self-start" data-chrome="ext"><DeskExtNav /></div>
-    <div v-if="drawerShown" class="fixed inset-0 z-[70] hidden md:block lg:hidden" data-testid="desk-drawer">
+    <!-- 抽屜與背板從圖示欄右側（72px）起，背板只蓋內容區 -->
+    <div v-if="drawerShown" class="fixed inset-y-0 left-[72px] right-0 z-[60] hidden md:block lg:hidden" data-testid="desk-drawer">
       <div class="absolute inset-0 bg-black/40" @click="closeDeskDrawer"></div>
-      <div class="absolute inset-y-0 left-[72px] shadow-2xl"><DeskExtNav drawer @close="closeDeskDrawer" /></div>
+      <div class="absolute inset-y-0 left-0 shadow-2xl"><DeskExtNav drawer @close="closeDeskDrawer" /></div>
     </div>
 
     <div class="flex min-h-screen min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" data-desk-main>

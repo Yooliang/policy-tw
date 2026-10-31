@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import PartyBadge from '../components/PartyBadge.vue'
-import { ref, computed, onMounted, watch, type Component } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, type Component } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
 import { useRequestTask } from '../composables/useRequestTask'
 import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import { PolicyStatus, type SourceRef } from '../types'
+import { useMobileHeader } from '../composables/useMobileHeader'
 import StatusBadge from '../components/StatusBadge.vue'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
@@ -119,6 +120,7 @@ const policyElection = computed(() => policy.value?.electionId != null ? getElec
  * 規則與測試在 lib/election-breadcrumbs.ts，人物頁共用）。選舉到職位取政見所屬那一屆的參選紀錄，沒有就用人物最新一屆；
  * 人物沒有任何參選紀錄就只剩「人物 › 政見」。
  */
+const { setPageCrumbs } = useMobileHeader()
 const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   const pol = politician.value
   if (!policy.value || !pol) return []
@@ -128,6 +130,28 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
   items.push({ name: policy.value.title, short: '政見' })
   return items
 })
+
+/**
+ * 桌面細頁首：首頁 › 選舉名稱（連該場選舉全台頁）› 候選人姓名（連人物頁）› 政見標題（過長截斷、不可點）。
+ * 規則：政見是選舉承諾（有 electionId 且是競選政見）→ 第二段是政見所屬那一屆的選舉名稱；
+ * 任內政見（已當選者的施政，不是選舉承諾）→ 第二段改成該人那場參選的職位層級（職位層麵包屑，例「縣市長」），不掛選舉名稱。
+ */
+watch([breadcrumbs, policy], ([items, p]) => {
+  if (!p || items.length === 0) { setPageCrumbs(null); return }
+  const isCampaign = p.status === PolicyStatus.CAMPAIGN
+  const election = items[0]
+  const position = items.find(i => (i.path ?? '').includes('#'))
+  const lead = isCampaign ? election : (position ?? election)
+  const person = items[items.length - 2]
+  const title = items[items.length - 1]
+  const cut = (s: string) => (s.length > 24 ? `${s.slice(0, 24)}…` : s)
+  setPageCrumbs([
+    ...(lead && lead !== person ? [{ label: lead.name, to: lead.path }] : []),
+    ...(person ? [{ label: person.name, to: person.path }] : []),
+    { label: cut(title.name) },
+  ])
+}, { immediate: true })
+onBeforeUnmount(() => setPageCrumbs(null))
 
 /**
  * 「政見 PK」連結（#364；2026-10-06 並排比較併進選舉頁的「政見 PK」頁籤）：到選舉頁那個職位區塊所在的那一頁，

@@ -329,9 +329,11 @@ const peerDistrict = computed(() => {
  */
 const titles = computed(() => officeTitles(politician.value?.offices))
 // 手機版頁首正中間顯示姓名＋小字現任職稱（X 式）
-const { setPerson } = useMobileHeader()
+const { setPerson, setPageCrumbs } = useMobileHeader()
+// 桌面細頁首：首頁 › 選舉名稱（連該場選舉）› 縣市 ›（鄉鎮）› 人物；職位層（#鄉鎮市長…）不放，細頁首只寫到地區
+watch(breadcrumbs, (items) => { setPageCrumbs(items.length > 0 ? items.filter(i => !(i.path ?? '').includes('#')).map((i, k, all) => ({ label: i.name, to: k < all.length - 1 ? i.path : undefined })) : null) }, { immediate: true })
 watch([() => politician.value?.name, titles], ([name, t]) => { setPerson(name ? { name, sub: t[0] } : null) }, { immediate: true })
-onBeforeUnmount(() => setPerson(null))
+onBeforeUnmount(() => { setPerson(null); setPageCrumbs(null) })
 /**
  * 「這一屆」＝還沒投票（含今天）裡最近的一屆定期改選；都投完票了（例如 2027 年）就取最近投完的那一屆。
  * 看投票日（lib/election-list.ts 的 currentElection），不看 id、不看 startDate／endDate（#344 第二階段 A）：

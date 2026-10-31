@@ -6,6 +6,7 @@ import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
 import { useDeskNav } from '../composables/useDeskNav'
+import { useSupabase } from '../composables/useSupabase'
 import { sectionOfRoute } from '../lib/desk-sections'
 import MobileDrawer from './MobileDrawer.vue'
 import { useMobileShell } from '../composables/useMobileShell'
@@ -32,7 +33,7 @@ const handleGoogleLogin = async () => {
 
 
 // ---- 手機版頁首正中間（X 式，每頁不同）：首頁＝站徽；選舉頁＝定位麵包屑；候選人頁＝姓名；其他頁＝頁面名稱 ----
-const { crumbs, person } = useMobileHeader()
+const { crumbs, person, pageCrumbs } = useMobileHeader()
 const PAGE_TITLES: Record<string, string> = {
   tracking: '政見追蹤', policy: '政見', analysis: '跨任期接力', 'analysis-detail': '跨任期接力', lineage: '政見脈絡',
   elections: '選舉', election: '選舉', 'election-region': '選舉', 'election-township': '選舉', 'election-matrix': '政見矩陣',
@@ -77,21 +78,33 @@ const SECTION_ROOT: Record<string, { label: string; to: string }> = {
   search: { label: '搜尋', to: '/search' }, about: { label: '關於', to: '/vision' },
 }
 const deskSection = computed(() => sectionOfRoute(route.name))
-const deskHasExt = computed(() => deskSection.value !== null && deskSection.value !== 'home' && deskSection.value !== 'search')
+// 選舉頁的細頁首第二段寫具體選舉名稱（「2026 九合一選舉」），連回該場選舉的全台頁 /election/2026（不是選舉一覽）
+const { getElectionBySegment } = useSupabase()
+const electionSegParam = computed(() => { const p = route.params.electionId; return Array.isArray(p) ? p[0] : p })
+const electionOnRoute = computed(() => (electionSegParam.value ? getElectionBySegment(electionSegParam.value) : undefined))
+const deskHasExt = computed(() => deskSection.value !== null)
 interface DeskCrumb { label: string; to?: string; go?: () => void }
 const deskCrumbs = computed<DeskCrumb[]>(() => {
   const list: DeskCrumb[] = [{ label: '首頁', to: '/' }]
   const sec = deskSection.value
   if (!sec || sec === 'home') return [{ label: '正見' }]
+  // 候選人頁、政見詳情頁：頁面自己算好的路徑（選舉名稱 › 地區 › 人物 › 政見標題）
+  if (mounted.value && pageCrumbs.value && (route.name === 'politician' || route.name === 'policy')) {
+    return [...list, ...pageCrumbs.value.map(c => ({ label: c.label, to: c.to }))]
+  }
   const root = SECTION_ROOT[sec]
-  if (root) list.push({ label: root.label, to: root.to })
+  const named = sec === 'election' && electionOnRoute.value && electionSegParam.value
+  if (named) list.push({ label: electionOnRoute.value!.shortName || electionOnRoute.value!.name, to: `/election/${electionSegParam.value}` })
+  else if (root) list.push({ label: sec === 'election' ? '選舉一覽' : root.label, to: root.to })
   if (isElectionRoute.value && mounted.value && crumbs.value && crumbs.value.length > 0) {
-    crumbs.value.forEach((c, i, all) => list.push(i === all.length - 1 ? { label: c.label } : { label: c.label, go: c.go }))
+    crumbs.value.slice(1).forEach((c, i, all) => list.push(i === all.length - 1 ? { label: c.label } : { label: c.label, go: c.go }))
   } else if (route.name === 'politician') {
     list.push({ label: personOnRoute.value?.name ?? '候選人' })
   } else if (sec !== 'search' && PAGE_TITLES[String(route.name)] && PAGE_TITLES[String(route.name)] !== root?.label) {
     list.push({ label: PAGE_TITLES[String(route.name)]! })
   }
+  // 全台頁自己：最後一段是目前所在，不可點
+  if (named && isElectionRoute.value && list.length === 2) list[1] = { label: list[1].label }
   return list
 })
 </script>
