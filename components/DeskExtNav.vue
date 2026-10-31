@@ -66,7 +66,7 @@ const genericElection = computed<DeskGroup[]>(() => {
 const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
-const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', scroll: true, blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
+const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
 const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
@@ -109,17 +109,10 @@ function onPick(item: DeskItem, e: Event) {
   if (item.select) { e.preventDefault(); item.select() }
 }
 
-// 選中的項目捲到清單可見處（只動清單自己的捲動，不動頁面）
+// 清單一律整份列出（不再有各組自己的高度上限與捲動框）；整欄比螢幕高時整欄自己捲，選中的項目捲到可見處（欄是 fixed，不會動到頁面）
 const rootEl = ref<HTMLElement | null>(null)
 watch([groups, () => route.fullPath], () => {
-  void nextTick(() => {
-    rootEl.value?.querySelectorAll<HTMLElement>('[data-scroll-list]').forEach(box => {
-      const el = box.querySelector<HTMLElement>('[data-active="true"]')
-      if (!el) return
-      const top = el.offsetTop - box.offsetTop
-      if (top < box.scrollTop || top + el.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top - (box.clientHeight - el.offsetHeight) / 2
-    })
-  })
+  void nextTick(() => { rootEl.value?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' }) })
 }, { flush: 'post' })
 
 const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-left text-sm font-bold transition-colors', on ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-navy-900']
@@ -134,7 +127,7 @@ const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-le
     <div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-4">
       <section v-for="g in groups" :key="g.key" :data-testid="`desk-group-${g.key}`">
         <h3 class="mb-1.5 px-3 text-xs font-bold text-slate-400">{{ g.title }}</h3>
-        <div :class="g.scroll ? 'max-h-60 overflow-y-auto overscroll-contain' : ''" :data-scroll-list="g.scroll ? '' : undefined">
+        <div>
           <template v-for="(block, bi) in g.blocks" :key="bi">
             <hr v-if="bi > 0" class="my-1.5 border-slate-200" data-testid="desk-group-divider" />
             <ul class="space-y-0.5">

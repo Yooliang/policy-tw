@@ -20,8 +20,6 @@ export interface DeskGroup {
   title: string
   /** 同一組內再分塊（內容類型：候選人｜承諾｜PK ‖ 串聯｜矩陣），塊與塊之間畫分隔線 */
   blocks: DeskItem[][]
-  /** 清單很長時可捲動 */
-  scroll?: boolean
 }
 export interface DeskNavModel {
   title: string
