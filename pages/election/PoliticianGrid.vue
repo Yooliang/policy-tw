@@ -5,7 +5,7 @@ import { isMobileViewport } from '../../composables/useMobileShell'
 import { avatarThumbUrl } from '../../lib/avatar-thumb'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
-import { Megaphone, ChevronDown, ChevronUp, Check } from 'lucide-vue-next'
+import { Megaphone, Check } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 import { ballotLabel } from '../../lib/ballot-number'
@@ -31,7 +31,6 @@ const props = defineProps<{
 }>()
 
 const { policies, elections } = useSupabase()
-const collapsed = ref(false)
 
 /**
  * 卡片（2026-09-28 維護者試作大頭照版，參考民眾黨候選人頁；2026-10-06 維護者：拿掉「大頭照／清單」切換，只留這種卡片）：
@@ -181,17 +180,9 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
   <div class="mb-12 scroll-mt-20">
     <h3 class="text-xl font-bold text-navy-900 mb-3 md:mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> <span class="min-w-0">{{ title }} ({{ politicians.length }})</span>
-      <button
-        @click="collapsed = !collapsed"
-        :class="['p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0 ml-auto']"
-        :title="collapsed ? '展開' : '收合'"
-      >
-        <ChevronUp v-if="!collapsed" :size="20" />
-        <ChevronDown v-else :size="20" />
-      </button>
     </h3>
     <!-- 卡片：直式人像 -->
-    <div v-if="!collapsed && politicians.length > 0" :class="portraitGridClass">
+    <div v-if="politicians.length > 0" :class="portraitGridClass">
       <div
         v-for="politician in shown"
         :key="politician.id"
@@ -234,9 +225,9 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         </div>
       </div>
     </div>
-    <div v-else-if="!collapsed" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
+    <div v-else class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
       尚無此區域的{{ title }}資料
     </div>
-    <div v-if="!collapsed && shown.length < politicians.length" ref="sentinel" class="h-px" aria-hidden="true"></div>
+    <div v-if="shown.length < politicians.length" ref="sentinel" class="h-px" aria-hidden="true"></div>
   </div>
 </template>

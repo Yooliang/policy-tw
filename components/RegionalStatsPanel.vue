@@ -53,7 +53,7 @@ const loading = computed(() => officialRegionalStats.value.length === 0)
 <template>
   <!-- 窄欄（選舉頁右欄與手機內容最下方）：標題＋地名，2×2 數據格（上小標籤、下大數值，數值連到出處）；缺值的格子顯示淡色「—」，四項全缺收成一行 -->
   <!-- 窄欄（選舉頁右欄與手機內容最下方）：只留下方一條框線、無外框圓角；標題只寫地名；2×2 格（icon＋短標題、下面精簡數值，完整數字在 title）；缺值淡色「—」，全缺與載入中也照常畫 2×2（高度不變，載入中數值是脈動骨架） -->
-  <div v-if="region && compact" class="w-full border-b border-slate-200 pb-4" data-testid="regional-stats-panel">
+  <div v-if="region && compact" class="w-full border-b border-slate-200 pb-4 pt-4" data-testid="regional-stats-panel">
     <div class="mb-2.5 truncate text-xs font-bold text-slate-500">{{ placeName }}</div>
     <dl class="grid grid-cols-2 gap-x-3 gap-y-3">
       <div v-for="row in rows" :key="row.statKey" class="min-w-0">
