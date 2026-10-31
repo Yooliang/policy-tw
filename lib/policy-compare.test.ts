@@ -8,7 +8,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  belongsToElection, buildPick, compareColumnOrder, compareMatrix, comparablePeople, hasPk, hasPolicies, parsePick, pickGroup, pkGroupLabel, pkGroups, pkNeeds, pkQuery,
+  belongsToElection, buildPick, compareColumnOrder, compareMatrix, comparablePeople, hasPk, hasPolicies, parsePick, pickGroup, pkGroupLabel, pkGroups, pkLocationLabel, pkNeeds, pkPickForLocation, pkQuery,
   type ComparePerson,
 } from "./policy-compare.ts";
 import type { Policy } from "../types.ts";
@@ -228,4 +228,28 @@ Deno.test("選舉頁沒有自己的地區選擇：PK 本體不收選區、不畫
   assert(/'w-full min-w-0'/.test(page), "內容欄 min-w-0");
   // 桌機捲動時右側面板停在頁首（Navbar h-16＝4rem）下方，不被蓋住；手機版面板在上方、不 sticky
   assert(/<div class="md:sticky md:top-\[4\.5rem\] space-y-4">/.test(page), "右側面板 sticky 距頂 4.5rem");
+});
+
+Deno.test("pkLocationLabel：PK 比哪一場跟共用定位走（村里長＝村里、鄉鎮市長＝鄉鎮、議員／代表＝選區晶片、縣市長＝空）", () => {
+  const loc = { village: "五常里", subRegion: "湖口鄉", districtLabel: "第03選舉區" };
+  assertEquals(pkLocationLabel("村里長", loc), "五常里");
+  assertEquals(pkLocationLabel("鄉鎮市長", loc), "湖口鄉");
+  assertEquals(pkLocationLabel("縣市議員", loc), "第03選舉區");
+  assertEquals(pkLocationLabel("直轄市山地原住民區民代表", loc), "第03選舉區");
+  assertEquals(pkLocationLabel("縣市長", loc), "");
+  // 沒選（全部）＝空，沿用預設
+  assertEquals(pkLocationLabel("村里長", { ...loc, village: "All" }), "");
+  assertEquals(pkLocationLabel("鄉鎮市長", { ...loc, subRegion: "All" }), "");
+  assertEquals(pkLocationLabel("縣市議員", { ...loc, districtLabel: "" }), "");
+});
+
+Deno.test("pkPickForLocation：選了村里就只比那一村；那一村沒有 PK（不到兩位）回 undefined，不退去比別村（楠梓區五常里 → 久昌里 的 bug）", () => {
+  const groups = [{ label: "久昌里", people: [1, 2] }, { label: "樂群里", people: [3, 4] }];
+  assertEquals(pkPickForLocation(groups, "樂群里", false)?.label, "樂群里");
+  assertEquals(pkPickForLocation(groups, "五常里", false), undefined);
+  // 沒選定位：預設第一個 prefer 成立的場
+  assertEquals(pkPickForLocation(groups, "", false, (g) => g.label === "樂群里")?.label, "樂群里");
+  assertEquals(pkPickForLocation(groups, "", false)?.label, "久昌里");
+  // 網址明確帶的組名這一頁沒有（舊連結）：照舊退回預設，不是空表
+  assertEquals(pkPickForLocation(groups, "不存在", true)?.label, "久昌里");
 });
