@@ -130,6 +130,7 @@
 - [公報入口讀 `elections`，不在程式裡寫年份對照](decisions/2026-10-07-公報入口讀elections不在.md)
 - [公開統計 RPC 加「日期區間」多載：`contribution_leaderboard`／`m…](decisions/2026-10-07-公開統計RPC加日期區間多載co.md)
 - [名單清查說明的選舉時程讀 `roster_check_scope`，過了日期的不再出現](decisions/2026-10-07-名單清查說明的選舉時程讀rost.md)
+- [拆除後台三頁（`/admin/dashboard`、`/admin/duplicates`、`/admin/ai`）與管理員判斷；舊 `/admin/**` 301 到首頁](decisions/2026-10-31-拆除後台三頁.md)
 - [後台「資料匯入」頁與 `batch-import-candidates` 一併拆除（維護者 10…](decisions/2026-10-07-後台資料匯入頁與batchimp.md)
 - [政見的 Markdown 檢視（第一期）：主題就用既有分類、第二期取消；摘要每小時預產快取，人物…](decisions/2026-10-07-政見的Markdown檢視第一期.md)
 - [營運值參數化：只搬「營運值」，計分、門檻、冷卻天數、派工比例不搬](decisions/2026-10-07-營運值參數化只搬營運值計分門檻冷.md)
