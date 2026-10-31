@@ -50,6 +50,7 @@ import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
+import { chipOptions } from '../lib/chip-options'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
@@ -1455,28 +1456,45 @@ function siteNames(raster: string[] | null, site: readonly string[]): readonly s
   if (!raster) return site
   return raster.map(n => site.find(x => normName(x) === normName(n)) ?? n)
 }
-interface MobileChip { key: string; text: string; active: boolean; pick: () => void }
-const chipOf = (value: string, text: string, active: boolean, pick: () => void): MobileChip => ({ key: value, text, active, pick })
+interface MobileChip { key: string; text: string; active: boolean; pick: () => void; /** 該分頁在這個地區沒有任何參選人（參選人讀完才會 true；仍可按） */ dim?: boolean }
+const chipOf = (value: string, text: string, active: boolean, pick: () => void, dim = false): MobileChip => ({ key: value, text, active, pick, dim })
+/** 選區快取（data/tw-districts）適用於這一場：用網址的選舉段比（立刻有），不等選舉清單讀完才有的 electionId——那會讓選區晶片要等網路才出現 */
+const districtCacheApplies = computed(() => !!districtCache.value && (String(districtCache.value.election) === electionSeg.value || electionId.value === districtCache.value.election))
+/** 參選人資料讀完了嗎（晶片列標灰要等它；讀取中維持一般樣式） */
+const chipDataReady = computed(() => !electionLoading.value && !countyWideLoading.value && mobileLoadedKey.value === `${electionId.value}|${selectedRegion.value}|${selectedSubRegion.value}`)
+/** 這一屆、目前縣市、指定職位的參選人（晶片標灰用；不受目前選的鄉鎮／選區篩選影響） */
+function populatedPeople(types: readonly string[]) {
+  return electionPoliticians.value.map(withCurrentElectionData).filter(c => types.includes(getElectionType(c)) && (selectedRegion.value === 'All' || sameRegionName(c.region, selectedRegion.value)))
+}
+const townOfPerson = (c: Politician) => (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? c.subRegion.replace(/第d+選舉區$/, '') : '')
 const mobileSubOptions = computed(() => siteNames(rasterSubs.value, availableSubRegions.value))
 const mobileChipRows = computed<MobileChip[][]>(() => {
-  const pickRow = (level: 'county' | 'sub' | 'village', options: readonly string[], current: string): MobileChip[] =>
-    options.map(o => chipOf(o, o, o === current, () => pickLocation(level, o)))
+  // 選項一律來自地區快取；populated＝讀完後有參選人的地區（null＝還在讀，不標灰）
+  const pickRow = (level: 'county' | 'sub' | 'village', options: readonly string[], current: string, populated: ReadonlySet<string> | null = null): MobileChip[] =>
+    chipOptions(options, populated, normName).map(({ value: o, dim }) => chipOf(o, o, o === current, () => pickLocation(level, o), dim))
   const type = mobileActiveType.value
+  const ready = chipDataReady.value
+  const special = isSpecialMunicipality.value
+  const typesOf = (t: string): string[] => t === ElectionType.TOWNSHIP_MAYOR ? [special ? ElectionType.INDIGENOUS_DISTRICT_CHIEF : ElectionType.TOWNSHIP_MAYOR]
+    : t === ElectionType.REPRESENTATIVE ? [special ? ElectionType.INDIGENOUS_DISTRICT_REP : ElectionType.REPRESENTATIVE] : [t]
+  const subPopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople(typesOf(type)).map(c => normName(townOfPerson(c)))) : null
+  const villagePopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople([ElectionType.CHIEF]).filter(c => selectedSubRegion.value === 'All' || inTownship(c.subRegion, selectedSubRegion.value)).map(c => normName(c.village ?? ''))) : null
+  const countyPopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople([ElectionType.MAYOR]).map(c => normName(c.region))) : null
   const countyRow = (): MobileChip[] => [
     ...(type === ElectionType.MAYOR || selectedRegion.value === 'All' ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
-    ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value),
+    ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value, countyPopulated()),
   ]
   const s = mobileSection.value
   // 選區：優先用選區快取（data/tw-districts，2026 登記名冊），沒有才用參選資料推；快取的標籤對回參選資料的寫法（臺／台）
   const districtRow = (): MobileChip[] => {
     const code = type === ElectionType.COUNCILOR ? rasterCountyCode.value : rasterTownCode.value
-    const cached = electionId.value === 2026 && code ? (type === ElectionType.COUNCILOR ? districtCache.value?.council : districtCache.value?.rep)?.[code] : undefined
+    const cached = districtCacheApplies.value && code ? (type === ElectionType.COUNCILOR ? districtCache.value?.council : districtCache.value?.rep)?.[code] : undefined
     const live = s && !s.empty ? s.chips : []
     const list = cached && cached.length > 0 ? cached.map(d => live.find(x => normName(x) === normName(d)) ?? d) : live
     if (list.length < 2) return []
     return [
       chipOf('All', '全部', selectedDistrict.value === 'All', () => { selectedDistrict.value = 'All' }),
-      ...list.map(d => chipOf(d, shortDistrict(d), selectedDistrict.value === d, () => { selectedDistrict.value = d })),
+      ...list.map(d => chipOf(d, shortDistrict(d), selectedDistrict.value === d, () => { selectedDistrict.value = d }, ready && !live.some(x => normName(x) === normName(d)))),
     ]
   }
   // 全台的議員／鄉鎮市區長／代表／村里長分頁：內容區已經是縣市選擇區，不再重複一排縣市晶片
@@ -1485,9 +1503,9 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   if (selectedRegion.value === 'All') row = countyRow()
   else if (type === ElectionType.MAYOR) row = countyRow()
   else if (type === ElectionType.COUNCILOR) row = districtRow()
-  else if (selectedSubRegion.value === 'All' || type === ElectionType.TOWNSHIP_MAYOR) row = [chipOf('All', '全部', allSub.value && selectedSubRegion.value === 'All', () => pickAll('sub')), ...pickRow('sub', mobileSubOptions.value, selectedSubRegion.value)]
+  else if (selectedSubRegion.value === 'All' || type === ElectionType.TOWNSHIP_MAYOR) row = [chipOf('All', '全部', allSub.value && selectedSubRegion.value === 'All', () => pickAll('sub')), ...pickRow('sub', mobileSubOptions.value, selectedSubRegion.value, subPopulated())]
   else if (type === ElectionType.REPRESENTATIVE) row = districtRow()
-  else row = [chipOf('All', '全部', allVillage.value && selectedVillage.value === 'All', () => pickAll('village')), ...pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value)]
+  else row = [chipOf('All', '全部', allVillage.value && selectedVillage.value === 'All', () => pickAll('village')), ...pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value, villagePopulated())]
   return row.length > 0 ? [row] : []
 })
 const mobileChipsEl = ref<HTMLElement | null>(null)
@@ -1750,7 +1768,8 @@ useSwipeTabs(swipeEl, {
             :key="c.key"
             type="button"
             class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold"
-            :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'"
+                  :class="c.active ? 'border-blue-600 bg-blue-600 text-white' : c.dim ? 'border-slate-100 bg-slate-50 text-slate-300' : 'border-slate-200 bg-white text-slate-600'"
+            :data-dim="c.dim ? 'true' : undefined"
             :data-active="c.active ? 'true' : 'false'"
             @click="c.pick()"
           >{{ c.text }}</button>
