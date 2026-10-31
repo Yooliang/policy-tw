@@ -29,12 +29,12 @@
 - **邊緣渲染，不預渲染**（2026-09-24 起；清單由 `server-data.ts` 寫進 `dist/.edge-routes.json` 給 postbuild 產網站地圖，規則在 `cloudflare/ssr-worker.js` 的 `SSR_ROUTES`）：`/politician/:id`、`/policy/:id`、`/lineage/:id`。下面其餘各條都還是預渲染
 - `/election/:id`（每個選舉；網址那一段：舊三屆用 id、新增的選舉用 `election_key`，`lib/election-route.ts` 的 `electionSegment`，#344 第二階段 A；舊三屆的 key 寫法 301 到年份寫法，不預渲染）、`/election/:id/:縣市`（2026-09-30：每屆有候選人的縣市各一頁，含該縣市所有候選人的連結；vite-ssg 寫在中文目錄，postbuild 搬到 `election/:id/_r/<UTF-8 十六進位>/`，正見.tw 的 Worker 代理時換路徑，見 `cloudflare/region-path.js`；舊的 `?region=` 由 Worker 301、客戶端也會換成路徑）、`/election/:id/:縣市/:鄉鎮`（2026-10-05：每屆「鄉鎮頁會列出的職位」——鄉鎮市長、代表、原住民區長、區代表、村里長——有人在選的鄉鎮市區各一頁，規則在 `lib/election-townships.ts`；搬到 `election/:id/_r/<縣市十六進位>/<鄉鎮十六進位>/`；舊的 `?sub=` 由 Worker 301、客戶端也會換成路徑；一位都沒有的鄉鎮不出頁，舊網址轉過去落到 app 殼，見下面 Firebase 那節）、`/community/:id`（每個討論串）
 - `/analysis/:id` 只出「分析列表實際會連到」的那幾條（與 `PolicyAnalysis.relayCases` 同邏輯），不是全部政見
-- **不**預渲染：`/admin/*`、`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
+- **不**預渲染：`/auth/callback`、`/verify`、`/contributions`、`/tasks`、`/stats`、`/profile`、`/election-2026`（redirect）、catch-all
 
 ## Firebase Hosting 行為（firebase.json）
 
 - `cleanUrls: true`，輸出為 `dirStyle: nested`（`/politician/123` → `dist/politician/123/index.html`），有無尾斜線都命中
-- 拿掉 `** → /index.html` 萬用 rewrite；工具頁與 `/admin/**` rewrite 到 `/app.html`（200 ＋ noindex，客戶端渲染）
+- 拿掉 `** → /index.html` 萬用 rewrite；工具頁 rewrite 到 `/app.html`（200 ＋ noindex，客戶端渲染）
 - 其餘找不到的路徑 Firebase 自動回 `404.html`（HTTP 404），殼會啟動 app 在客戶端渲染，所以建置後才新增的政治人物頁直接打開仍能顯示，只是狀態是 404
 - 選舉頁的縣市頁／鄉鎮頁（2026-10-05 起三條，`lib/election-regions.test.ts` 守著）：
   - `/election/*/*`、`regex ^/election/[^/]+/[^/_][^/]*/[^/]+/?$` → `app.html`：直接打 policy-tw.web.app 的中文縣市頁、鄉鎮頁網址只給 app 殼（200＋noindex），預渲染檔在 ASCII 路徑、只有正見.tw 的 Worker 會去拿。regex 刻意排除 `_r` 開頭的第二段，不然亂打的縣市（Worker 換成 `_r/<十六進位>`）會從 404 變 200

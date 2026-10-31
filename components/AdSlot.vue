@@ -15,11 +15,11 @@ import { whenContentReady } from '../lib/ad-ready'
  *   不會留下空殼。
  * - 用 v-if 而不是 v-show：被排除的頁面不該渲染 <ins>。AdSense 不允許把已渲染的廣告藏起來。
  *   切回可顯示的頁面時元件重新掛載、重新 push，拿到的是新的一次請求，這是正確行為。
- * - 後台、登入回呼、AI 助理、個人頁不顯示（那些頁面沒有內容給讀者，也不該有廣告）。
+ * - 登入回呼、AI 助理、個人頁不顯示（那些頁面沒有內容給讀者，也不該有廣告）。
  */
 const AD_CLIENT = 'ca-pub-6687848895101003'
 const AD_SLOT = '9455802665'
-const HIDDEN_PREFIXES = ['/admin', '/auth', '/contributions', '/tasks', '/stats', '/ai', '/profile']
+const HIDDEN_PREFIXES = ['/auth', '/contributions', '/tasks', '/stats', '/ai', '/profile']
 
 const route = useRoute()
 const visible = computed(() => !HIDDEN_PREFIXES.some((p) => route.path.startsWith(p)))

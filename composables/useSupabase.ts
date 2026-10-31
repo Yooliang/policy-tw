@@ -413,7 +413,7 @@ async function fetchAllInner() {
   try {
     // 首屏只載「每一頁都要用」的東西。
     // regions（178 KB）、electoral_district_areas（77 KB）、discussions 改成按需載入——
-    // 那 255 KB 只有區域資料頁、後台統計頁、選舉頁、討論頁會用到，
+    // 那 255 KB 只有區域資料頁、選舉頁、討論頁會用到，
     // 卻讓每一個訪客的第一次連線都付這個成本（改之前首屏是 605 KB／9 個請求）。
     //
     // 2026-09-13 政見清單（257 KB）＋有政見的人物（91 KB）也移出去了，見 ensurePolicies。
@@ -484,7 +484,7 @@ function getActiveElection(): Election {
 // 按需載入的三塊重資料。
 //
 // 改之前首屏是 605 KB／9 個請求，其中 255 KB（regions 178、選舉區對應 77）只有
-// 區域資料頁、後台統計、選舉頁會用到。每個只看政見或提問的訪客都在白付這個成本。
+// 區域資料頁、選舉頁會用到。每個只看政見或提問的訪客都在白付這個成本。
 //
 // 三個共通的形狀：冪等（promise 快取）、已經有資料就直接回（預渲染頁的切片會先塞好，
 // 不要重打一次）、失敗清掉快取讓下一次能重試。
@@ -494,7 +494,7 @@ let officialRegionalStatsPromise: Promise<void> | null = null
 let districtsPromise: Promise<void> | null = null
 let discussionsPromise: Promise<void> | null = null
 
-/** 縣市統計：區域資料頁與後台統計頁用（178 KB） */
+/** 縣市統計：區域資料頁用（178 KB） */
 export function ensureRegionStats(): Promise<void> {
   if (regionStats.value.length > 0) return Promise.resolve()
   if (!regionStatsPromise) {
