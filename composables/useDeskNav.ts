@@ -57,4 +57,4 @@ export function useDeskLayout() {
 }
 export const DESK_MD = 768
 export const DESK_LG = 1024
-export const DESK_XL = 1280
+export const DESK_XL = 1200

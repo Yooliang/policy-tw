@@ -11,7 +11,13 @@ import { AD_CLIENT, adHiddenPath } from '../lib/ad-pages'
  *
  * RAIL_AD_SLOT：直式 300x600 版位。空字串時畫一個佔位框（看得到位置與尺寸），不借頁尾橫幅的版位。
  */
-const RAIL_AD_SLOT = '8052230819' // 直式 300x600（2026-10-31 小良哥提供）
+// 右欄整欄 200px 寬（2026-10-31 小良哥）：視窗夠高（≥760px，扣掉頁首與資料卡後放得下）用 200x600，較矮用 200x400，讓它不出捲軸也能 sticky
+const SLOT_TALL = '4555838935' // 200x600
+const SLOT_SHORT = '6738102968' // 200x400
+const TALL_MIN_VIEWPORT = 760
+const tall = typeof window === 'undefined' || window.innerHeight >= TALL_MIN_VIEWPORT
+const RAIL_AD_SLOT = tall ? SLOT_TALL : SLOT_SHORT
+const AD_HEIGHT = tall ? 600 : 400
 
 const route = useRoute()
 const visible = computed(() => !adHiddenPath(route.path))
@@ -38,19 +44,19 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
 </script>
 
 <template>
-  <aside v-if="visible" :key="route.path" ref="root" class="w-[300px] shrink-0 px-0 py-4" aria-label="廣告" data-testid="ad-rail">
+  <aside v-if="visible" :key="route.path" ref="root" class="w-[200px] shrink-0 px-0 pb-4 pt-0" aria-label="廣告" data-testid="ad-rail">
     <!-- 地區資料統計卡的落點（選舉頁 Teleport 進來；沒有就是空的、不佔位） -->
     <div id="desk-rail-top" class="mb-4 empty:hidden"></div>
     <!-- 只有廣告 sticky（卡片隨頁捲動）；視窗高度不夠放 600px 廣告時不 sticky，右欄不出現自己的捲軸 -->
-    <div class="h-[600px] w-[300px] overflow-hidden [@media(min-height:720px)]:sticky [@media(min-height:720px)]:top-[calc(3rem+1px+1rem)]">
+    <div :style="{ height: AD_HEIGHT + 'px' }" class="w-[200px] overflow-hidden rounded-xl sticky top-[calc(3rem+1px+1rem)]">
     <ins
       v-if="RAIL_AD_SLOT"
       class="adsbygoogle"
-      style="display: inline-block; width: 300px; height: 600px"
+      :style="`display: inline-block; width: 200px; height: ${AD_HEIGHT}px`"
       :data-ad-client="AD_CLIENT"
       :data-ad-slot="RAIL_AD_SLOT"
     ></ins>
-    <div v-else class="flex h-[600px] max-h-full w-full items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400" data-testid="ad-rail-placeholder">廣告位 300 × 600</div>
+    <div v-else :style="{ height: AD_HEIGHT + 'px' }" class="flex w-full items-center justify-center rounded-xl border border-dashed border-slate-300 text-xs text-slate-400" data-testid="ad-rail-placeholder">廣告位 200 × {{ AD_HEIGHT }}</div>
     </div>
   </aside>
 </template>

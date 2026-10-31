@@ -602,6 +602,14 @@ function withAnchors(spec: PositionSpec, groups: Array<{ label: string; people: 
   return groups.map(g => ({ ...g, anchor: sectionAnchor(spec.type, g.label) }))
 }
 
+/** 代表的分組標題：「民雄鄉 第01區」＝鄉鎮（鄉鎮內分組標題的前半）＋選區簡稱；選區欄沒有「第NN選舉區」就只寫鄉鎮 */
+function repGroupLabel(c: Politician): string {
+  const sub = c.subRegion ?? ''
+  const m = sub.match(/^(.*?)(第\d+)選舉區$/)
+  const town = (m ? m[1] : sub) || (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? sub : '未標示')
+  return m ? `${town} ${m[2]}區` : town
+}
+
 function buildSection(spec: PositionSpec): LevelSection {
   const people = peopleOf(spec.type)
   const anchor = sectionAnchor(spec.type)
@@ -621,6 +629,13 @@ function buildSection(spec: PositionSpec): LevelSection {
     // 鄉鎮市民代表是卡片排法，但同一個鄉鎮有好幾個選舉區（subRegion＝「湖口鄉第01選舉區」）：
     // 快篩清單照目前這一頁的代表蒐集，選了只畫那一區（selectedDistrict；鄉鎮頁沒有議員，不會互相打架）。
     const shown = selectedDistrict.value === 'All' ? people : people.filter(c => c.subRegion === selectedDistrict.value)
+    // 依鄉鎮、組內再依選區分組（標題「民雄鄉 第01區 (n)」），跟議員依選區分組同一個分組元件；只有一組就照舊平面排
+    const by = new Map<string, Politician[]>()
+    for (const c of shown) { const k = repGroupLabel(c); const a = by.get(k); if (a) a.push(c); else by.set(k, [c]) }
+    if (by.size > 1) {
+      const groups = withAnchors(spec, [...by.entries()].sort((x, y) => sortByLengthThenStroke(x[0], y[0])).map(([label, ps]) => ({ label, people: ps })))
+      return { spec: { ...spec, display: 'district' }, people, shown, groups, chips: districtsOf(people, spec.type), empty: people.length === 0, anchor }
+    }
     return { spec, people, shown, groups: [], chips: districtsOf(people, spec.type), empty: people.length === 0, anchor }
   }
   if (spec.type === ElectionType.MAYOR && selectedRegion.value === 'All' && people.length > 0) {
@@ -982,7 +997,7 @@ const pkMissing = computed(() => pkNeeds(pkLevel.value, selectedRegion.value, se
 const pkGroupList = computed(() => pkMissing.value ? [] : pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
 const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
 /** PK 的選區跟內容區的選區晶片共用 selectedDistrict（網址 ?district= 是 PK 自己點的，優先；晶片一換就清掉它，見下面的 watch） */
-const chipDistrictLabel = computed(() => selectedDistrict.value === 'All' ? '' : selectedDistrict.value.replace(/^.*?(第d+選舉區)$/, '$1'))
+const chipDistrictLabel = computed(() => selectedDistrict.value === 'All' ? '' : selectedDistrict.value.replace(/^.*?(第\d+選舉區)$/, '$1'))
 watch(selectedDistrict, () => { comparisonDistrict.value = '' })
 const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value || chipDistrictLabel.value, groupHasPolicies))
 const pkCandidates = computed(() => pkGroup.value ? comparablePeople(pkGroup.value.people) : [])
@@ -1219,7 +1234,7 @@ function allSubSection(type: string): LevelSection | null {
   const townOf = (c: Politician) => (c.subRegion ? townshipOfSubRegion(c.subRegion) ?? c.subRegion.replace(/第\d+選舉區$/, '') : '未標示')
   const labelOf = (c: Politician) => {
     if (realType === ElectionType.CHIEF) return `${townOf(c)} ${c.village || '未標示里別'}`
-    if (realType === ElectionType.REPRESENTATIVE || realType === ElectionType.INDIGENOUS_DISTRICT_REP) return c.subRegion || townOf(c)
+    if (realType === ElectionType.REPRESENTATIVE || realType === ElectionType.INDIGENOUS_DISTRICT_REP) return repGroupLabel(c)
     return townOf(c)
   }
   const byLabel = new Map<string, Politician[]>()
@@ -1601,10 +1616,10 @@ onActivated(() => setElectionNav(deskNavModel))
 onDeactivated(() => setElectionNav(null))
 onBeforeUnmount(() => setElectionNav(null))
 
-// 右欄（AdRail）上方的統計卡落點：≥1280px 且右欄已渲染才有
+// 右欄（AdRail）上方的統計卡落點：≥1200px 且右欄已渲染才有
 const railTarget = ref<HTMLElement | null>(null)
 function syncRailTarget() {
-  railTarget.value = typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches ? document.getElementById('desk-rail-top') : null
+  railTarget.value = typeof window !== 'undefined' && window.matchMedia('(min-width: 1200px)').matches ? document.getElementById('desk-rail-top') : null
 }
 let railTimer = 0
 function syncRailSoon() { void nextTick(syncRailTarget); window.clearTimeout(railTimer); railTimer = window.setTimeout(syncRailTarget, 400) }
@@ -1904,7 +1919,7 @@ useSwipeTabs(swipeEl, {
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
         <MdDrawer :pick="issuesMdOpen" @close="issuesMdOpen = null" />
         <!-- 桌面版右側面板拿掉後，地方基本統計一律放在內容最下面（統計數字在瀏覽器端才載入，用 ClientOnly 避免預渲染與 hydrate 不一致） -->
-        <!-- 桌面（≥1280px）：搬到右欄、廣告位上方（Teleport 到 AdRail 的 #desk-rail-top）；右欄收起時回到內容最下面 -->
+        <!-- 桌面（≥1200px）：搬到右欄、廣告位上方（Teleport 到 AdRail 的 #desk-rail-top）；右欄收起時回到內容最下面 -->
         <ClientOnly><template v-if="pageCounty"><Teleport v-if="railTarget" :to="railTarget"><RegionalStatsPanel :region="pageCounty" :sub-region="pageTownship" compact /></Teleport><RegionalStatsPanel v-else :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" /></template></ClientOnly>
       </div><!-- 左側內容結束 -->
 
