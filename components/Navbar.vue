@@ -96,7 +96,7 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
     list.push({ label: personOnRoute.value?.name ?? '候選人' })
   } else if (route.name === 'tracking') {
     list.push({ label: route.query.view === 'mine' ? '我的關注' : '全部政見' })
-  } else if (sec !== 'search' && PAGE_TITLES[String(route.name)] && PAGE_TITLES[String(route.name)] !== root?.label) {
+  } else if (!(sec === 'search' && route.name === 'search') && PAGE_TITLES[String(route.name)] && PAGE_TITLES[String(route.name)] !== root?.label) {
     list.push({ label: PAGE_TITLES[String(route.name)]! })
   }
   // 全台頁自己：最後一段是目前所在，不可點
