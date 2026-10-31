@@ -99,3 +99,29 @@ Deno.test("B. cand_numbers 驗證列倍數比照缺口任務；單人 candidacy 
   assertEquals(b["verify:8"], 0);
   assertEquals(b["gap-鄉鎮市長"], 2.5 * Y);
 });
+
+// ── C. 補號次缺口的 no_change 驗證票要插隊，且函式不得寫成逐列相關子查詢（20261031140000 版在正式庫撞 statement timeout、整支回滾）──
+Deno.test("C. no_change（task_id 在 payload、contributions 無 task_id 欄）補號次缺口票 3 ×，其他 no_change 不動", async () => {
+  const b = await run(
+    [
+      { id: 21, type: "no_change", payload: { task_id: "auto:candidacy_source_missing:cand_no:2026:村里長:苗栗縣:頭份市:p2" } },
+      { id: 22, type: "no_change", payload: { task_id: "auto:candidacy_source_missing:cand_no:2026:村里長:屏東縣:霧臺鄉" } },
+      { id: 23, type: "no_change", payload: { task_id: "auto:policy_missing:abc" } },
+      { id: 24, type: "no_change", payload: {} },
+      { id: 25, type: "no_change", payload: { task_id: "auto:candidacy_source_missing:cand_no_recheck:2026:村里長:苗栗縣" } },
+    ],
+    ["村里長"],
+  );
+  assertEquals(b["verify:21"], 3 * Y);
+  assertEquals(b["verify:22"], 3 * Y);
+  assertEquals(b["verify:23"], 0);
+  assertEquals(b["verify:24"], 0);
+  assertEquals(b["verify:25"], 0);
+});
+
+Deno.test("C2. cand_no_front_pull 用集合式 CTE 連接，不得對每列 task_dispatches 跑 'verify:' || c.id 的相關子查詢", async () => {
+  const fn = await latestFnText();
+  assert(/WITH v AS \(/.test(fn), "要先用 CTE 一次算好每張驗證票的秒數");
+  assert(/LEFT JOIN v ON v\.tid = d2\.task_id/.test(fn), "要用 task_id 等值連接");
+  assert(!/d2\.task_id\s*=\s*'verify:'\s*\|\|/.test(fn), "不可再寫逐列相關子查詢（無法走索引，會逾時）");
+});
