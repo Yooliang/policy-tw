@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { pushAd } from '../lib/ad-request'
+import { cancelAd, pushAd } from '../lib/ad-request'
 import { whenContentReady } from '../lib/ad-ready'
 import { AD_CLIENT, adHiddenPath } from '../lib/ad-pages'
 
@@ -23,8 +23,16 @@ const route = useRoute()
 const visible = computed(() => !adHiddenPath(route.path))
 const root = ref<HTMLElement | null>(null)
 let ticket = 0
+/** 這個元件目前推過的 <ins>；換頁、卸載時請求若還在佇列裡（載入器未到）要抽掉 */
+let pushedIns: Element | null = null
+function cancelPending(): void {
+  const q = (window as unknown as { adsbygoogle?: unknown[] }).adsbygoogle
+  if (q && pushedIns) cancelAd(pushedIns, q)
+  pushedIns = null
+}
 
 async function requestAd(): Promise<void> {
+  cancelPending() // 前一個 <ins> 即將被換掉，它沒被消化的請求作廢
   const mine = ++ticket
   if (!visible.value || !RAIL_AD_SLOT) return
   await nextTick()
@@ -33,13 +41,14 @@ async function requestAd(): Promise<void> {
   try {
     const w = window as unknown as { adsbygoogle?: unknown[] }
     w.adsbygoogle = w.adsbygoogle || []
-    pushAd(root.value?.querySelector('ins.adsbygoogle'), w.adsbygoogle)
+    const ins = root.value?.querySelector('ins.adsbygoogle')
+    if (pushAd(ins, w.adsbygoogle) === 'pushed') pushedIns = ins ?? null
   } catch (err) {
     console.info('[ads] adsbygoogle push 沒有成功：', err)
   }
 }
 onMounted(requestAd)
-onBeforeUnmount(() => { ticket++ })
+onBeforeUnmount(() => { ticket++; cancelPending() })
 watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
 </script>
 

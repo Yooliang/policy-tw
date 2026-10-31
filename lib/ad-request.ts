@@ -16,6 +16,8 @@ export interface AdInsLike {
 }
 
 const pushed = new WeakSet<object>()
+/** 這個 <ins> 排進佇列的那個請求物件（取消用） */
+const requests = new WeakMap<object, object>()
 
 export type PushResult = 'pushed' | 'no-element' | 'detached' | 'already-pushed' | 'already-filled'
 
@@ -27,6 +29,24 @@ export function pushAd(ins: AdInsLike | null | undefined, queue: unknown[]): Pus
   // 載入器處理過的 <ins> 會被標上這個屬性（done／filled／unfilled）
   if (ins.getAttribute('data-adsbygoogle-status')) return 'already-filled'
   pushed.add(ins)
-  queue.push({})
+  const req = {}
+  requests.set(ins, req)
+  queue.push(req)
   return 'pushed'
+}
+
+/**
+ * 這個 <ins> 要被換掉或卸載了：如果它的請求還在佇列裡（載入器還沒到，從沒被處理），把它抽掉。
+ * 不抽的話載入器一到會對「現在 DOM 裡的 <ins>」重播所有舊請求，丟「All 'ins' elements ... already have ads」。
+ * 載入器已到、請求已被消化時佇列裡找不到，什麼都不做。
+ */
+export function cancelAd(ins: object | null | undefined, queue: unknown[]): boolean {
+  if (!ins) return false
+  const req = requests.get(ins)
+  if (!req || !Array.isArray(queue)) return false // 載入器到了之後 window.adsbygoogle 不再是陣列
+  requests.delete(ins)
+  const i = queue.indexOf(req)
+  if (i < 0) return false
+  queue.splice(i, 1)
+  return true
 }
