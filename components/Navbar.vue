@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { Heart, X, CircleUserRound, Loader2, Menu, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
+import { Heart, X, CircleUserRound, Loader2, Menu, ChevronRight, Search } from 'lucide-vue-next'
 import { useAuth } from '../composables/useAuth'
 import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
@@ -64,12 +64,6 @@ watch(isSearchRoute, async (on) => {
   await nextTick()
   searchInput.value?.focus()
 }, { immediate: true, flush: 'post' })
-const TAB_ROOTS = ['/', '/tracking', '/stats']
-const canBack = computed(() => {
-  void route.fullPath
-  // 選舉頁（含承諾／PK 等各檢視）不放返回鈕：退層靠頁首麵包屑（2026-10-31）
-  return mounted.value && !isHome.value && !isElectionRoute.value && !TAB_ROOTS.includes(route.path) && !/^\/election\/[^/]+\/?$/.test(route.path) && typeof history !== 'undefined' && !!history.state?.back
-})
 
 // ---- 桌面版細頁首的麵包屑：首頁 › 區塊 › 頁面（選舉頁接定位麵包屑、候選人頁接姓名） ----
 const { openDeskDrawer } = useDeskNav()
@@ -126,7 +120,6 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
       >
         <Menu :size="24" />
       </button>
-      <button v-if="canBack" type="button" class="w-9 h-10 -ml-1 rounded-full flex items-center justify-center text-navy-900 active:bg-slate-100" aria-label="返回" data-testid="mobile-back" @click="router.back()"><ChevronLeft :size="22" /></button>
       <RouterLink v-if="isHome" to="/" class="absolute left-1/2 -translate-x-1/2 flex items-center" aria-label="正見 首頁">
         <img src="/brand/logo-zhengjian.png" srcset="/brand/logo-zhengjian.png 1x, /brand/logo-zhengjian@2x.png 2x" alt="正見" width="72" height="40" class="h-8 w-auto object-contain" />
       </RouterLink>
