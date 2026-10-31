@@ -13,6 +13,7 @@ import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
 import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
+import { idbGet, idbPut } from '../lib/idb-cache'
 import { positionsToLoad } from '../lib/election-levels'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
@@ -652,7 +653,30 @@ const loadedRegions = ref<Set<string>>(new Set())
  */
 let levelRpcMissing = false
 
-function fetchPoliticianPage(
+/**
+ * 參選人清單頁的 stale-while-revalidate（2026-10-31）：10 分鐘內有 IndexedDB 快取就先用快取回（頁面立刻有第一批卡片），
+ * 同時背景重抓一份寫回快取（下次開頁就是新的）；沒快取或過期就照常打網路。只在瀏覽器端、讀寫失敗當沒有快取。
+ */
+async function fetchPoliticianPage(
+  electionId: number,
+  region: string | null,
+  subRegion: string | null,
+  electionTypes: readonly string[],
+  from: number,
+  to: number,
+): Promise<PageResponse<RawPolitician>> {
+  const key = `pol|${electionId}|${region ?? ''}|${subRegion ?? ''}|${[...electionTypes].sort().join('+')}|${from}-${to}`
+  const hit = typeof window === 'undefined' ? undefined : await idbGet<PageResponse<RawPolitician>>(key)
+  if (hit) {
+    void fetchPoliticianPageNet(electionId, region, subRegion, electionTypes, from, to).then(r => idbPut(key, r)).catch(() => {})
+    return hit
+  }
+  const fresh = await fetchPoliticianPageNet(electionId, region, subRegion, electionTypes, from, to)
+  if (typeof window !== 'undefined') void idbPut(key, fresh)
+  return fresh
+}
+
+function fetchPoliticianPageNet(
   electionId: number,
   region: string | null,
   subRegion: string | null,

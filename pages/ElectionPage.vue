@@ -1541,6 +1541,29 @@ watch([mobileReady, mobileActiveType, mobilePanelKey], ([ready, type, key]) => {
 }, { immediate: true })
 onBeforeUnmount(() => clearTimeout(mobilePrerenderTimer))
 
+/**
+ * 預抓相鄰分頁的資料（2026-10-31）：目前分頁的資料到了、瀏覽器閒下來（requestIdleCallback）之後，把左右相鄰分頁需要但還沒載入的職位撈進記憶體
+ * （只抓資料、不渲染；同參數的請求有去重與 IndexedDB 快取），滑過去時已有資料。
+ * 全台時只有縣市長分頁直接列人、本來就已載入，不預抓；網路省流量（saveData）或 2g／slow-2g 不預抓。
+ */
+let prefetchKey = ''
+function prefetchAdjacent() {
+  if (typeof window === 'undefined' || !panelLayout() || !electionId.value || !mobileReady.value) return
+  if (selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
+  const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+  if (conn && (conn.saveData || /(^|-)2g$/.test(conn.effectiveType ?? ''))) return
+  const key = `${electionId.value}|${selectedRegion.value}|${mobileActiveType.value}`
+  if (key === prefetchKey) return
+  prefetchKey = key
+  const i = MOBILE_TAB_TYPES.indexOf(mobileActiveType.value)
+  for (const t of [MOBILE_TAB_TYPES[i - 1], MOBILE_TAB_TYPES[i + 1]]) {
+    if (!t) continue
+    const types = t === ElectionType.CHIEF ? [ElectionType.CHIEF] : t === ElectionType.REPRESENTATIVE ? [ElectionType.REPRESENTATIVE, ElectionType.INDIGENOUS_DISTRICT_REP] : null
+    if (types) loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All', types).catch(() => {})
+  }
+}
+watch([mobileReady, mobileActiveType, selectedRegion, selectedSubRegion], () => { mobilePrerenderIdle(prefetchAdjacent) }, { immediate: true })
+
 // 縣市層以下有定位時，縣市長與議員的資料也要在（分層載入只撈「這一層＋下一層」，直接開鄉鎮網址不會有縣市層）
 function ensureCountyLevelLoaded() {
   if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value === 'All') return
