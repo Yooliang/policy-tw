@@ -1676,7 +1676,13 @@ useSwipeTabs(swipeEl, {
       :election="election" :election-seg="electionSeg" :view="viewMode" :has-matrix="hasMatrix"
       :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="pageTownship" :mobile-township="mobileShowSub ? pageTownship : undefined"
       @select="viewMode = $event"
-    />
+    >
+      <!-- 桌面排序工具列：放在標題列右側（手機維持在內容區原位置，上面各檢視的排序列在桌面隱藏） -->
+      <template #desk-actions>
+        <SortIcons v-if="viewMode === 'politicians'" v-model="sortMode" :options="SORT_OPTIONS" />
+        <SortIcons v-else-if="viewMode === 'pledges'" v-model="pledgeSort" :options="PLEDGE_SORT_OPTIONS" />
+      </template>
+    </ElectionHero>
 
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-6">
@@ -1721,7 +1727,7 @@ useSwipeTabs(swipeEl, {
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
         <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
-        <div class="flex justify-end mb-2 md:mb-4">
+        <div class="flex justify-end mb-2 md:hidden">
           <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
         </div>
         <!--
@@ -1859,7 +1865,7 @@ useSwipeTabs(swipeEl, {
       </div>
 
       <!-- VIEW: Pledges -->
-      <div v-if="viewMode === 'pledges'" ref="pledgeListTop" class="flex justify-end mb-4 scroll-mt-24">
+      <div v-if="viewMode === 'pledges'" ref="pledgeListTop" class="flex justify-end mb-4 scroll-mt-24 md:invisible md:mb-0 md:h-0">
         <SortIcons v-model="pledgeSort" :options="PLEDGE_SORT_OPTIONS" />
       </div>
       <div v-if="viewMode === 'pledges'" class="animate-fade-in grid grid-cols-1 md:[grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))] gap-6">
