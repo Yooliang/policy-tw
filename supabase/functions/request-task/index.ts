@@ -45,6 +45,7 @@ Deno.serve(async (req) => {
     const sourceUrl = kind === "audit" && isAuditUrl(body.source_url) ? String(body.source_url).trim() : null;
     // 範圍化（kind=policy）：某一屆。當選與否後端自己查，不信前端傳的
     const electionId = kind === "policy" && Number.isInteger(body.election_id) && body.election_id > 0 ? Number(body.election_id) : null;
+    const electionScope = body.scope === "tenure" || body.scope === "pledge" ? body.scope : null;
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, AUDIT_NOTE_MAX) : null;
     if (kind === "audit" && !sourceUrl) return json({ success: false, error: "invalid_url", message: "請貼可以打開的 http(s) 網址" }, 400);
     const isPolicyKind = POLICY_KINDS.includes(kind);
@@ -125,11 +126,11 @@ Deno.serve(async (req) => {
       return json({ success: true, status: "already_queued", task_id: decision.task_id, reason: decision.reason, message: "這個項目已在任務池中，AI 代理會來查", ...base });
     }
 
-    const text = buildRequestTaskText({ kind, politician_id: pid, policy_id: policyId, politician_name: politician?.name ?? null, region: politician?.region ?? null, policy_title: policy?.title ?? null, source_url: sourceUrl, note, election_id: electionId, election_name: election?.short_name ?? null, elected });
+    const text = buildRequestTaskText({ kind, politician_id: pid, policy_id: policyId, politician_name: politician?.name ?? null, region: politician?.region ?? null, policy_title: policy?.title ?? null, source_url: sourceUrl, note, election_id: electionId, election_name: election?.short_name ?? null, elected, scope: electionScope });
     const task = await createTask(supabase, {
       title: text.title, description: text.description, task_type: taskType,
       target_politician_id: pid, target_policy_id: policyId, region: politician?.region ?? null, hint_sources: text.hint_sources, source_url: sourceUrl,
-      ...(electionId !== null ? { target_extra: { election_id: electionId, elected } } : {}),
+      ...(electionId !== null ? { target_extra: { election_id: electionId, elected, ...(electionScope ? { scope: electionScope } : {}) } } : {}),
     }, { source: "web_request", created_by: typeof body.requester === "string" ? body.requester.slice(0, 40) : "web", requester_ip_hash: ipHash });
 
     return json({ success: true, status: "queued", task_id: task.id, message: "已加入任務池，AI 代理會來查", ...base, queue_position: (openManual ?? 0) + 1, open_tasks: base.open_tasks + 1 }, 201);
