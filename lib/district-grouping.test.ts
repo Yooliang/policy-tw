@@ -140,14 +140,12 @@ Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選
   assert(/@click="toggleDistrictChip\(district\)"/.test(page) && /@click="selectedDistrict = 'All'"/.test(page));
 });
 
-Deno.test("ElectionPage：displayLabel 必須宣告在所有使用處之前（usePageHead 的 description 在 setup 就會用到，晚宣告會在鄉鎮頁 TDZ 炸掉）", () => {
+Deno.test("ElectionPage：displayLabel 從 lib/desk-level-groups 匯入（import 會提升，不會有 setup 順序的 TDZ；表與函式在 lib 裡表先於函式）", () => {
   const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
-  const def = page.indexOf("const displayLabel = ");
-  const defLabels = page.indexOf("const DISPLAY_LABELS");
-  const firstUse = page.indexOf("displayLabel(", def + 10);
+  const lib = Deno.readTextFileSync(new URL("./desk-level-groups.ts", import.meta.url));
+  assert(/import \{[^}]*displayLabel[^}]*\} from '..\/lib\/desk-level-groups'/.test(page), "ElectionPage 從共用 lib 匯入 displayLabel");
+  assert(!page.includes("const displayLabel"), "ElectionPage 不再自己宣告第二份");
+  const def = lib.indexOf("export const displayLabel = ");
+  const defLabels = lib.indexOf("const DISPLAY_LABELS");
   assert(def > 0 && defLabels > 0 && defLabels < def, "表先於函式");
-  // 找出第一個「不是宣告本身」的使用；它必須在宣告之後（以 setup 順序而言宣告在前）
-  const uses = [...page.matchAll(/displayLabel\(/g)].map((m) => m.index!).filter((i) => i !== def + "const ".length);
-  assert(uses.length > 0 && uses.every((i) => i > def), "所有使用都在宣告之後");
-  assert(firstUse > def);
 });
