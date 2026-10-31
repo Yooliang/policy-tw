@@ -7,6 +7,7 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onDeactivated, 
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
+import { runAfterRender } from '../lib/after-render'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -53,7 +54,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
+const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, ensureOfficialRegionalStats, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -145,13 +146,22 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
 }
 
 onMounted(() => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
-  // 選舉區對應表 77 KB，只有這一頁篩議員選區要用，改成按需載入
-  ensureDistricts()
-  if (electionId.value) {
-    loadElectionData(electionId.value, selectedRegion.value, selectedSubRegion.value)
-  }
+  // 首屏只要候選人清單（路由解析時已經先發了，這裡接手同一個 promise，見 router/index.ts）。
+  // 次要資料等第一批卡片載完、畫上去之後才抓（2026-10-31，載入順序優化）：
+  // 政見清單 257 KB 與選舉區對應 77 KB 以前在這裡一掛載就發，在行動網路上跟卡片搶頻寬。
+  // 這幾份資料到之前，畫面用的是既有的空狀態／載入狀態（政見數 0、選區選單暫空、基本統計「未調查」），
+  // 跟以前資料還沒回來時一樣。
+  const firstCards = electionId.value
+    ? loadElectionData(electionId.value, selectedRegion.value, selectedSubRegion.value)
+    : Promise.resolve()
+  void firstCards.catch(() => undefined).then(() => runAfterRender(() => {
+    // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
+    ensurePolicies()
+    // 選舉區對應表 77 KB，只有這一頁篩議員選區要用，改成按需載入
+    ensureDistricts()
+    // 地方基本統計（RegionalStatsPanel 在這一頁不自己抓，由這裡統一排）
+    ensureOfficialRegionalStats()
+  }, nextTick))
 })
 
 // 這一頁被 App.vue 的 <KeepAlive> 快取著，切回來時 onMounted 不會再跑；
@@ -1299,7 +1309,7 @@ usePageHead({
 
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
         <MdDrawer :pick="issuesMdOpen" @close="issuesMdOpen = null" />
-        <RegionalStatsPanel v-if="pageCounty && !hasSidebar" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" />
+        <RegionalStatsPanel v-if="pageCounty && !hasSidebar" :region="pageCounty" :sub-region="pageTownship" compact defer-load class="mt-8 md:max-w-sm" />
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->
@@ -1401,7 +1411,7 @@ usePageHead({
           </div>
 
           <!-- 地方基本統計（2026-10-16 維護者：從內容上方移到右側面板最下方） -->
-          <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact />
+          <RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact defer-load />
         </div>
       </div>
 

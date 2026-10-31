@@ -12,10 +12,12 @@ const props = defineProps<{
   subRegion?: string | null
   /** 窄欄（選舉頁右側面板）：固定兩欄 */
   compact?: boolean
+  /** 由上層排程去抓資料（選舉頁要等第一批卡片之後才抓）；沒給＝掛載就抓 */
+  deferLoad?: boolean
 }>()
 
 const { officialRegionalStats, ensureOfficialRegionalStats } = useSupabase()
-ensureOfficialRegionalStats()
+if (!props.deferLoad) ensureOfficialRegionalStats()
 
 const rows = computed(() => {
   if (!props.region) return []
