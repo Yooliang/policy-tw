@@ -79,6 +79,9 @@
             else loadThirdParty();
           }, 1500);
         }
+        // 絕對上限：從頁面開始（performance.now() 起算）最晚 5000ms 就插入，不論 load 是否已觸發；
+        // load＋1.5 秒（＋idle）若較早到則照那個時間，旗標 started 保證只插一次。
+        setTimeout(loadThirdParty, Math.max(0, 5000 - performance.now()));
         if (document.readyState === 'complete') afterLoad();
         else window.addEventListener('load', afterLoad);
       })();
