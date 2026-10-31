@@ -31,3 +31,22 @@ Deno.test("ElectionPage：選區快取不靠 electionId（它要等選舉清單�
   assert(!/electionId\.value === 2026 && code \?/.test(page), "不再用 electionId 當選區快取的閘門");
   assert(page.includes("chipOptions("), "晶片列用 chipOptions");
 });
+
+import { countyPopulatedSet } from "./chip-options.ts";
+
+Deno.test("縣市晶片：選了某縣市時不標灰（回 null），不會把其他縣市全灰", () => {
+  const set = countyPopulatedSet("新竹市", true, () => ["新竹市"]);
+  assertEquals(set, null);
+  assert(chipOptions(["新竹市", "台北市"], set).every((o) => !o.dim));
+});
+
+Deno.test("縣市晶片：全台已讀才依參選人標灰；讀取中不標灰", () => {
+  const set = countyPopulatedSet("All", true, () => ["新竹市"]);
+  assertEquals(chipOptions(["新竹市", "台北市"], set).map((o) => o.dim), [false, true]);
+  assertEquals(countyPopulatedSet("All", false, () => ["新竹市"]), null);
+});
+
+Deno.test("ElectionPage：縣市晶片標灰一律經 countyPopulatedSet（不得直接用目前縣市的參選人）", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  assert(/const countyPopulated = \(\)[^\n]*countyPopulatedSet\(selectedRegion\.value/.test(page));
+});

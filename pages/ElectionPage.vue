@@ -51,7 +51,7 @@ import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
-import { chipOptions } from '../lib/chip-options'
+import { chipOptions, countyPopulatedSet } from '../lib/chip-options'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
@@ -1480,7 +1480,7 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
     : t === ElectionType.REPRESENTATIVE ? [special ? ElectionType.INDIGENOUS_DISTRICT_REP : ElectionType.REPRESENTATIVE] : [t]
   const subPopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople(typesOf(type)).map(c => normName(townOfPerson(c)))) : null
   const villagePopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople([ElectionType.CHIEF]).filter(c => selectedSubRegion.value === 'All' || inTownship(c.subRegion, selectedSubRegion.value)).map(c => normName(c.village ?? ''))) : null
-  const countyPopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople([ElectionType.MAYOR]).map(c => normName(c.region))) : null
+  const countyPopulated = (): ReadonlySet<string> | null => countyPopulatedSet(selectedRegion.value, ready, () => populatedPeople([ElectionType.MAYOR]).map(c => normName(c.region)))
   const countyRow = (): MobileChip[] => [
     ...(type === ElectionType.MAYOR || selectedRegion.value === 'All' ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
     ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value, countyPopulated()),
