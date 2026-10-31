@@ -8,8 +8,6 @@ import { useMobileShell } from '../composables/useMobileShell'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupabase, withElectionData } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskDoneLabel, requestTaskHeading, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
-import { useRequestTask } from '../composables/useRequestTask'
-import RequestTaskNotice from '../components/RequestTaskNotice.vue'
 import LoadError from '../components/LoadError.vue'
 import type { Policy, PoliticianElectionData, PoliticianTerm } from '../types'
 import { policySortDate } from '../lib/policy-date'
@@ -19,7 +17,6 @@ import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
-import HeroAction from '../components/HeroAction.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
@@ -96,8 +93,6 @@ const personElectionGroups = computed<PolicyGroup[]>(() => {
 const electedElectionGroups = computed(() => personElectionGroups.value.filter(g => electedIn(g.electionId)))
 /** 已經有政見／承諾段落的屆以外，還沒有任何資料的那幾屆（一樣各給一張卡） */
 const withoutGroup = (all: PolicyGroup[], shown: PolicyGroup[]) => all.filter(g => !shown.some(x => x.key === g.key))
-/** 最新一屆（hero 的「查承諾與政見」與表格檢視的小按鈕用） */
-const latestPersonElectionId = computed<number | null>(() => personElectionGroups.value[0]?.electionId ?? null)
 
 async function requestGroupLookup(g: PolicyGroup) {
   const pol = politician.value
@@ -123,12 +118,8 @@ async function requestLookup(key: LookupKey) {
   }
 }
 
-// 動作列的「查承諾與政見」「查簡介」：按一下就建任務（kind=policy／profile），出現在任務看板
-const policyRequest = useRequestTask()
-const profileRequest = useRequestTask()
 // 同選區候選人等站內連結換到另一位人物時，元件會被重用：分頁與捲動位置要回到最上面的「承諾」，不然像是沒跳頁（維護者 2026-10-29）
 watch(() => route.params.politicianId, () => {
-  policyRequest.reset(); profileRequest.reset()
   activeTab.value = "campaign"
   tabSeen.campaign = true; tabSeen.history = false
   if (typeof window !== "undefined") window.scrollTo({ top: 0 })
@@ -539,26 +530,9 @@ usePageHead({
       </template>
       <template #actions>
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-          <!-- 按一下就建任務，出現在任務看板；跟政見頁的按鈕同一套（composables/useRequestTask.ts） -->
-          <HeroAction data-testid="hero-query-policy" @click="policyRequest.send({ kind: 'policy', politician_id: politician.id, ...(latestPersonElectionId !== null ? { election_id: latestPersonElectionId } : {}) })">
-            <Loader2 v-if="policyRequest.loading.value" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="policyRequest.done.value" :size="16" />
-            <XCircle v-else-if="policyRequest.error.value" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ policyRequest.label('查承諾與政見') }}
-          </HeroAction>
-          <HeroAction data-testid="hero-query-profile" @click="profileRequest.send({ kind: 'profile', politician_id: politician.id })">
-            <Loader2 v-if="profileRequest.loading.value" :size="16" class="animate-spin" />
-            <CheckCircle v-else-if="profileRequest.done.value" :size="16" />
-            <XCircle v-else-if="profileRequest.error.value" :size="16" />
-            <Sparkles v-else :size="16" />
-            {{ profileRequest.label('查簡介') }}
-          </HeroAction>
           <!-- 本頁的 Markdown 版（網址加 .md，Worker 現場產生）：開共用抽屜預覽，從抽屜複製給 AI、丟進 NotebookLM -->
           <button type="button" :class="[HERO_ACTION_BASE, HERO_ACTION_SIZE, HERO_ACTION_IDLE]" data-testid="hero-markdown" @click="openMarkdown">.md 摘要</button>
         </div>
-        <RequestTaskNotice class="mt-3" :result="policyRequest.result.value" :error="policyRequest.error.value" on-dark />
-        <RequestTaskNotice class="mt-3" :result="profileRequest.result.value" :error="profileRequest.error.value" on-dark />
       </template>
     </Hero>
     <MdDrawer :pick="mdPick" @close="mdPick = null" />
@@ -805,57 +779,9 @@ usePageHead({
                 <!-- AI Lookup Section - Always visible（動作列那顆會捲到這裡） -->
                 <div :id="AI_LOOKUP_SECTION_ID" class="pt-4 border-t border-slate-100 scroll-mt-24">
                   <h3 class="font-bold text-navy-900 mb-4 flex items-center gap-2"><Sparkles class="text-violet-500" :size="18" /> 請 AI 幫忙查</h3>
-                  <p class="text-xs text-slate-500 mb-3">按下去會把這位人物加進貢獻任務池，由 AI 代理查證後提交、經同儕驗證上線；已有資料也可以再查，補新的或更新；不需登入。</p>
-                  <div class="space-y-3">
-                    <!-- Search Bio Button -->
-                    <button
-                      @click="requestLookup('bio')"
-                      :disabled="lookup.bio.loading"
-                      :class="[
-                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                        lookup.bio.result
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : lookup.bio.error
-                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                            : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
-                      ]"
-                    >
-                      <Loader2 v-if="lookup.bio.loading" :size="16" class="animate-spin" />
-                      <CheckCircle v-else-if="lookup.bio.result" :size="16" />
-                      <XCircle v-else-if="lookup.bio.error" :size="16" />
-                      <User v-else :size="16" />
-                      {{ lookup.bio.loading ? '送出中…' : lookup.bio.result ? requestTaskDoneLabel(lookup.bio.result) : lookup.bio.error ? '重試' : (politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷') }}
-                    </button>
-
-                    <!-- Search Avatar Button -->
-                    <button
-                      @click="requestLookup('avatar')"
-                      :disabled="lookup.avatar.loading"
-                      :class="[
-                        'w-full px-4 py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm',
-                        lookup.avatar.result
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : lookup.avatar.error
-                            ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
-                            : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
-                      ]"
-                    >
-                      <Loader2 v-if="lookup.avatar.loading" :size="16" class="animate-spin" />
-                      <CheckCircle v-else-if="lookup.avatar.result" :size="16" />
-                      <XCircle v-else-if="lookup.avatar.error" :size="16" />
-                      <Camera v-else :size="16" />
-                      {{ lookup.avatar.loading ? '送出中…' : lookup.avatar.result ? requestTaskDoneLabel(lookup.avatar.result) : lookup.avatar.error ? '重試' : (politician.avatarUrl ? '更新正確或新的照片' : '照片更新') }}
-                    </button>
-
-                    <!-- Error messages -->
-                    <p v-if="lookup.bio.error" class="text-red-500 text-xs">{{ lookup.bio.error }}</p>
-                    <p v-if="lookup.avatar.error" class="text-red-500 text-xs">{{ lookup.avatar.error }}</p>
-
-                    <!-- Success hint -->
-                    <div v-if="lookup.bio.result || lookup.avatar.result" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="request-task-done">
-                      <p class="text-xs text-emerald-600">{{ requestTaskMessage((lookup.bio.result || lookup.avatar.result)!) }}</p>
-                      <RouterLink :to="BOARD_PATH" class="inline-block mt-1 text-xs font-bold text-emerald-800 underline underline-offset-2">到任務看板看進度</RouterLink>
-                    </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <AiLookupCard :state="lookup.bio" :icon="User" :label="politician.bio || politician.education?.length || politician.experience?.length ? '請 AI 補充最新的簡介／學經歷' : '請 AI 查簡介／學經歷'" hint="查有出處的簡介與學經歷" @click="requestLookup('bio')" />
+                    <AiLookupCard :state="lookup.avatar" :icon="Camera" :label="politician.avatarUrl ? '更新正確或新的照片' : '請 AI 找照片'" hint="找官方或新聞用的正確照片" @click="requestLookup('avatar')" />
                   </div>
                 </div>
               </div>
