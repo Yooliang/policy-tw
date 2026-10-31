@@ -143,7 +143,7 @@ Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選
 Deno.test("ElectionPage：displayLabel 從 lib/desk-level-groups 匯入（import 會提升，不會有 setup 順序的 TDZ；表與函式在 lib 裡表先於函式）", () => {
   const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
   const lib = Deno.readTextFileSync(new URL("./desk-level-groups.ts", import.meta.url));
-  assert(/import \{[^}]*displayLabel[^}]*\} from '..\/lib\/desk-level-groups'/.test(page), "ElectionPage 從共用 lib 匯入 displayLabel");
+  assert(/import \{[^}]*displayLabel[^}]*\} from '..\/lib\/desk-level-groups'/.test(page), "ElectionPage 從共用 lib 匯入 displayLabel");
   assert(!page.includes("const displayLabel"), "ElectionPage 不再自己宣告第二份");
   const def = lib.indexOf("export const displayLabel = ");
   const defLabels = lib.indexOf("const DISPLAY_LABELS");
