@@ -91,14 +91,15 @@ function regionLink(r: string): RouteLocationRaw {
 /** 四個檢視頁籤回選舉頁；有選縣市就回那個縣市的選舉頁（/election/2026/台南市?view=pledges） */
 function viewLink(view: ElectionViewMode): RouteLocationRaw {
   if (scopeRegion.value !== 'All') return electionViewLink(segment.value, view, scopeRegion.value)
-  // 矩陣自己維持全國資料；但從矩陣回選舉頁要回到離開前的定位（選舉頁存在 localStorage 'zj.location'：縣市、鄉鎮、村里、層級分頁），不回全台
+  // 矩陣自己維持全國資料；但從矩陣回選舉頁要回到離開前的定位（選舉頁存在 localStorage 'zj.location'：縣市、鄉鎮、村里、層級分頁、選區），不回全台
   try {
-    const saved = JSON.parse(localStorage.getItem('zj.location') || 'null') as { region?: string; sub?: string; village?: string; tab?: string } | null
+    const saved = JSON.parse(localStorage.getItem('zj.location') || 'null') as { region?: string; sub?: string; village?: string; tab?: string; area?: string } | null
     if (saved?.region && saved.region !== 'All') {
       const sub = saved.sub && saved.sub !== 'All' ? saved.sub : undefined
       const query: Record<string, string> = {}
       if (view !== 'politicians') query.view = view
       if (saved.tab) query.tab = saved.tab
+      if (saved.area && saved.area !== 'All') query.area = saved.area
       if (saved.village && saved.village !== 'All' && sub) query.village = saved.village
       return { path: electionPath(segment.value, saved.region, sub), query }
     }

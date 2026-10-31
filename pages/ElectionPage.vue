@@ -243,6 +243,8 @@ const comparisonPick = ref('')
 // 縣市／鄉鎮／村里／頁籤／PK 層級、選區、勾選 ↔ 網址，可貼連結直達（PK 的參數規則在 lib/policy-compare.ts 的 pkQuery）
 // 縣市與鄉鎮在路徑上（/election/2022/嘉義縣/大林鎮，鄉鎮 2026-10-05 起），村里／頁籤仍是 query（?village=&view=&type=）；
 // 舊的 ?region=、?sub= 進來會換成路徑的寫法（正見.tw 上 Worker 已經先 301 過了，這裡接住 web.app 與站內舊連結）
+/** 議員／代表的選區快篩（內容區晶片列）；放在這裡是因為要寫進網址（?area=，從矩陣回來時帶回選區），後面的說明見 toggleDistrict */
+const selectedDistrict = ref<string>('All')
 useRegionQuerySync({
   routeName: ['election', 'election-region', 'election-township'],
   regionPath: {
@@ -260,6 +262,8 @@ useRegionQuerySync({
     // 順序要在 type 後面：套網址時一個欄位設完才設下一個
     district: queryField(comparisonDistrict, '', { when: () => viewMode.value === 'comparison' }),
     pick: queryField(comparisonPick, '', { when: () => viewMode.value === 'comparison' }),
+    // 選區晶片（議員、代表）；換縣市／鄉鎮時 watch 會重設成 All
+    area: queryField(selectedDistrict, 'All'),
     // 承諾頁籤的頁碼；第 1 頁不帶。放最後：縣市／鄉鎮／頁籤套完才套頁碼
     page: queryField(pledgePageParam, '1', { when: () => viewMode.value === 'pledges' }),
   },
@@ -540,7 +544,6 @@ const wardKind = computed(() => classifyWard({
  * 沒有正式選區的人（2022 有 44 筆、2026 有 105 筆議員只到縣市）會被分組函式收進「選區待補」那一組，
  * 不會從畫面上消失；那一組不進快篩清單，因為它不是一個點得下去的選區。
  */
-const selectedDistrict = ref<string>('All')
 function toggleDistrictChip(district: string) {
   selectedDistrict.value = selectedDistrict.value === district ? 'All' : district
 }
@@ -1578,7 +1581,7 @@ onBeforeUnmount(() => setCrumbs(null))
 // localStorage 記住上次的定位（縣市、鄉鎮、村里）：網址是全台、沒有任何定位時，手機版啟動後套回上次的；讀寫都包 try/catch
 const LOCATION_KEY = 'zj.location'
 function saveLocation() {
-  try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ region: selectedRegion.value, sub: selectedSubRegion.value, village: selectedVillage.value, tab: mobileTab.value })) } catch { /* 無痕或封鎖時略過 */ }
+  try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ region: selectedRegion.value, sub: selectedSubRegion.value, village: selectedVillage.value, tab: mobileTab.value, area: selectedDistrict.value })) } catch { /* 無痕或封鎖時略過 */ }
 }
 function restoreLocation() {
   if (!isMobileViewport() || routeRegion.value || selectedRegion.value !== 'All') return
@@ -1590,7 +1593,7 @@ function restoreLocation() {
   } catch { /* 讀不到就維持全台 */ }
 }
 onMounted(() => { restoreLocation(); ensureCountyLevelLoaded() })
-watch([selectedRegion, selectedSubRegion, selectedVillage, mobileTab], saveLocation)
+watch([selectedRegion, selectedSubRegion, selectedVillage, mobileTab, selectedDistrict], saveLocation)
 
 // ---- 桌面版延伸欄的篩選模型（DeskExtNav 讀；點了就是呼叫上面手機版同一批函式，狀態與網址共用） ----
 const { setElectionNav } = useDeskNav()
