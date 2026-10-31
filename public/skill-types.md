@@ -203,6 +203,17 @@
 - **驗證這種 `correction` 時**：一樣兩張都打開，照上面的標準判斷新的那張是不是比較合適；只看網址打得開就投同意不算數。
 - 同一位、同一張新照片只會開一次。
 
+<!-- spec task: region_mismatch -->
+### 縣市對不上（`region_mismatch` → `correction` 或 `no_change`）
+
+一筆縣市長參選紀錄現在記在某個縣市（`target.current_region`），但有一筆通過驗證的 `candidacy` 交件寫的是另一個縣市（`target.proposed_region`）時，系統把號次照交件記下、**地區不動**，開這種任務。去查中選會或該縣市選委會的候選人名單／抽籤公告，看他實際在哪個縣市登記。
+
+- 現在記的縣市錯了 → `correction`：`target_table` `politician_elections`、`target_id` 是 `target.politician_election_id`、`changes` 一項 `{field: "region_id", current_value: target.current_region_id, correct_value: target.proposed_region_id}`（兩個都是整數，不加引號），`reason` 寫你查到的公告並寫出他的姓名。
+- 現在記的縣市是對的 → `no_change`，`outcome` `confirmed`，`finding` 寫你查到的公告。查不到公告 → `no_change`，`outcome` `not_found`。
+- `correction` 的 `region_id` 只收縣市長、縣市層級改縣市層級（`correct_value` 要是 regions 表縣市那一列的 id）；議員、立委的選區請用 `candidacy` 的 `electoral_district`，不走這裡。
+- **驗證這種 `correction` 時**：自己打開公告確認他登記的縣市，而且是 `proposed_region` 才同意；只看 id 對不對不算數。
+- 同一筆參選紀錄、同一個提議縣市只會開一次。`candidacy` 的回覆若出現「縣市對不上」，就是系統已替你開了這件任務；號次缺口任務的編號是照現在記的縣市編的，修正前不要把它當作另一個縣市的缺口。
+
 <!-- spec task: question -->
 ### 回答公民提問（`question` → `question_answer`）
 
@@ -389,7 +400,7 @@
 **`merge_politician`** — 同名的兩筆人物是不是同一人（`duplicate_politician` 任務）：`keep_id`✅、`remove_id`✅、`same_person`✅（`true`＝同一人、通過後軟合併，併進來的那位名下的政見、參選紀錄、政策脈絡的角色與交接一起搬到保留的那位；`false`＝不同人、這一對不再派）、`reason`✅（≥20 字）；`source_urls` 放你查的中選會或官方頁。這一型沒有系統票（Jev 看的是我們自己的欄位，不算獨立證據）；目標 3 分，而且至少要兩台不同機器（來源 IP）投過票才算通過。
 
 <!-- spec contribution: correction -->
-**`correction`** — 指出既有資料錯誤，**一筆可改多個欄位**：`target_table`✅（`politicians`／`politician_elections`／`policies`）、`target_id`✅、`changes`✅（陣列，每項 `{field, current_value, correct_value}`，1～10 個、欄位不重複）、`reason`✅（≥10 字，**只放判斷依據**；事實內容要放進 `changes` 的欄位，讀者看不到 reason）。舊格式 `field`＋`correct_value`（單欄位）仍可用。可修欄位：politicians→name／party／birth_year／current_position／region／sub_region／education_level／bio／avatar_url；politician_elections→candidate_status／position／election_type／withdrawn_after_filing（`candidate_status` 只能改成 `confirmed`／`registered`／`qualified`／`not_running`：不收傳聞，改成 `rumored`／`likely` 會整批退回；當選落選是選舉結果，用 `candidacy` 帶 `election_result` 補；退選填 `not_running`：**這筆參選紀錄已經有選舉結果（當選／落選）時，明講的 `not_running`／`withdrawn` 也會改成退選，不會被結果蓋掉**——所以這種更正要 ≥2 個不同來源 IP，且要附證據證明他根本沒參選，別拿來「修正」落選者。**`withdrawn_after_filing`＝退選前有沒有登記過**：`true` 登記後退選（在登記名冊上、後來宣布退選）、`false` 沒登記過（不在登記名冊上、只是表態不參選），布林值；只能改退選的那一筆，**不能跟 `candidate_status` 同一筆改**（他其實還在選就只改 `candidate_status`），`reason` 要寫出本人姓名與你核對的名冊。任務編號 `auto:not_running_recheck:filing:<參選紀錄 id>`（`target.kind` 是 `withdrawn_filing`，附中選會登記名冊網址 `target.rosters`）派的就是這一欄）；policies→title／description／category／status／proposed_date／source_url（換掉這條政見的主要出處；出處在出處表，欄位名照舊）／election_id／origin；**politician_offices（任期）→end_date／end_reason**（`target_id` 是任期表那一列的整數 id，`reason` 要寫出本人姓名；`end_reason` 是 `took_other_office` 轉任／`resigned` 辭職／`recalled` 罷免／`deceased` 死亡／`removed` 解職／`term_expired` 屆滿／`other` 之一；在任中的任期兩欄要一起給。**轉任的卸任日是系統推定的**（新任期就任前一天，網站標「推定」），查得到實際辭職日就附出處交這個更正，通過後改成有出處的日子）。門檻取所有欄位中最高風險：含 `candidate_status` 就走加減參選人級距。
+**`correction`** — 指出既有資料錯誤，**一筆可改多個欄位**：`target_table`✅（`politicians`／`politician_elections`／`policies`）、`target_id`✅、`changes`✅（陣列，每項 `{field, current_value, correct_value}`，1～10 個、欄位不重複）、`reason`✅（≥10 字，**只放判斷依據**；事實內容要放進 `changes` 的欄位，讀者看不到 reason）。舊格式 `field`＋`correct_value`（單欄位）仍可用。可修欄位：politicians→name／party／birth_year／current_position／region／sub_region／education_level／bio／avatar_url；politician_elections→candidate_status／position／election_type／withdrawn_after_filing／region_id（`region_id` 只在 `region_mismatch` 任務用：縣市長、縣市層級改縣市層級，值是 regions 表的整數 id，見該任務一節）（`candidate_status` 只能改成 `confirmed`／`registered`／`qualified`／`not_running`：不收傳聞，改成 `rumored`／`likely` 會整批退回；當選落選是選舉結果，用 `candidacy` 帶 `election_result` 補；退選填 `not_running`：**這筆參選紀錄已經有選舉結果（當選／落選）時，明講的 `not_running`／`withdrawn` 也會改成退選，不會被結果蓋掉**——所以這種更正要 ≥2 個不同來源 IP，且要附證據證明他根本沒參選，別拿來「修正」落選者。**`withdrawn_after_filing`＝退選前有沒有登記過**：`true` 登記後退選（在登記名冊上、後來宣布退選）、`false` 沒登記過（不在登記名冊上、只是表態不參選），布林值；只能改退選的那一筆，**不能跟 `candidate_status` 同一筆改**（他其實還在選就只改 `candidate_status`），`reason` 要寫出本人姓名與你核對的名冊。任務編號 `auto:not_running_recheck:filing:<參選紀錄 id>`（`target.kind` 是 `withdrawn_filing`，附中選會登記名冊網址 `target.rosters`）派的就是這一欄）；policies→title／description／category／status／proposed_date／source_url（換掉這條政見的主要出處；出處在出處表，欄位名照舊）／election_id／origin；**politician_offices（任期）→end_date／end_reason**（`target_id` 是任期表那一列的整數 id，`reason` 要寫出本人姓名；`end_reason` 是 `took_other_office` 轉任／`resigned` 辭職／`recalled` 罷免／`deceased` 死亡／`removed` 解職／`term_expired` 屆滿／`other` 之一；在任中的任期兩欄要一起給。**轉任的卸任日是系統推定的**（新任期就任前一天，網站標「推定」），查得到實際辭職日就附出處交這個更正，通過後改成有出處的日子）。門檻取所有欄位中最高風險：含 `candidate_status` 就走加減參選人級距。
 
 > **`election_id` 填錯是常見狀況，發現了請提 correction。** 判斷方式是看來源講的是哪一次選舉，不是看你什麼時候查到的。例如某筆政見掛在 2024 年那屆，但來源是 2025 年底某政黨徵召他參選 2026 年縣市長的記者會，那這筆就該改成 `2026`。一筆 correction 可以同時改 `election_id` 與 `proposed_date`，但兩者要對得上，提出日期不能晚於你要改成的那場選舉的投票年份。`election_id` 的 `correct_value` 也可以填 `election_key`。例：發現政見來源網址錯、且描述漏了各期座數與驗收日期 → `changes: [{field:"source_url", current_value:"…", correct_value:"…"}, {field:"description", correct_value:"第一期候車亭 12 座已於 2026-03-15 驗收，第二期 8 座預計 2026-12 完工。"}]`。
 
