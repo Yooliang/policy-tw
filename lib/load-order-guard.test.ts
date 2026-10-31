@@ -58,3 +58,9 @@ Deno.test('4. 次要資料（政見清單、選舉區對應、基本統計）不
   assert(mounted.includes('firstCards'), '要等候選人那批卡片')
   assert(page.includes('defer-load'), '基本統計面板在這一頁不能自己抓')
 })
+
+Deno.test('1c. 第三方腳本有絕對上限：頁面開始 5000ms 內一定插入、且只插一次', async () => {
+  const h = head(await read('../index.html'))
+  assert(/setTimeout\(loadThirdParty, Math\.max\(0, 5000 - performance\.now\(\)\)\)/.test(h), '要有 5000ms 絕對上限（performance.now() 起算）')
+  assertEquals((h.match(/function loadThirdParty\(\) \{\s*if \(started\) return;\s*started = true;/g) || []).length, 1, '要有旗標防重複插入')
+})
