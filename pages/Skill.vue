@@ -3,7 +3,6 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import { Bot, Copy, Check, ChevronRight, FileText, ShieldCheck, Link as LinkIcon } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import { usePageHead, SITE_URL } from '../composables/usePageHead'
 import { skillTypeSections } from '../lib/skill-types-sections'
 // 單一真相是 public/skill.md（AI 直接讀的那份）；這頁只是把同一份渲染給人看。
@@ -48,9 +47,6 @@ usePageHead({
       <template #title>驅動 AI，實現全自動資料貢獻</template>
       <template #description>讓 AI 讀本頁就學會領任務與查核提交，附來源、交叉驗證後上線</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: 'AI 協作技能' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">
