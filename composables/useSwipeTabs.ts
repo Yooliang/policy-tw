@@ -26,12 +26,25 @@ export interface SwipeTabsOptions {
   onPastStart?: () => void
 }
 
-const MIN_DX = 56
-const DOMINANCE = 1.6
-const LOCK_PX = 8
+/** 放開時位移至少這麼多 px 才算「滑得夠遠」（與下面的寬度比例取大者；390 寬螢幕約 60px） */
+const MIN_DX = 60
+/** 放開時橫向位移需為垂直位移的幾倍以上才算左右滑 */
+const DOMINANCE = 1.2
+/** 起手：水平位移超過這麼多 px 且為垂直位移的 LOCK_DOMINANCE 倍以上，就鎖定為左右滑 */
+const LOCK_PX = 10
+const LOCK_DOMINANCE = 1.2
 const SETTLE_MS = 250
-const COMMIT_RATIO = 0.25
-const FLICK_PX_PER_MS = 0.45
+/** 位移達螢幕寬度的這個比例就切換（2026-10-31 由 0.25 縮短為 0.15） */
+const COMMIT_RATIO = 0.15
+/** 甩動速度（px/ms）超過此值，即使距離短也切換（0.45 → 0.3） */
+const FLICK_PX_PER_MS = 0.3
+/** 甩動切換仍需的最小位移 px，避免輕點誤觸 */
+const FLICK_MIN_PX = 24
+/** 切換動畫結束後這段時間（ms）內，頁首／底部分頁列不允許收合（切分頁造成的高度變化與捲動不算使用者往下捲） */
+export const CHROME_LOCK_MS = 400
+let chromeLockUntil = 0
+/** 拖曳中或切換後 CHROME_LOCK_MS 內為 true */
+export const isSwipeChromeLocked = () => dragging || Date.now() < chromeLockUntil
 const EASE = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 
 /** 分頁條提供給手勢用的控制器（底線跟著拖曳進度）；pos 是「小數頁號」：0＝第一頁、1.5＝第二與第三頁正中 */
@@ -105,13 +118,18 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     node.setAttribute('data-swiping', '')
     node.style.willChange = 'transform'
     document.documentElement.style.overflowX = 'clip'
+    // 相鄰分頁在左右一個螢幕外，會把手機的版面視窗撐寬（innerWidth 390→731）、fixed 的底部分頁列跟著被推出畫面：
+    // 在外層也剪裁橫向溢出（clip 不產生捲動容器，吸頂不受影響）
+    if (node.parentElement) node.parentElement.style.overflowX = 'clip'
   }
   function finish(node: HTMLElement) {
     node.style.transform = ''
     node.style.willChange = ''
     node.removeAttribute('data-swiping')
     document.documentElement.style.overflowX = ''
+    if (node.parentElement) node.parentElement.style.overflowX = ''
     dragging = false
+    chromeLockUntil = Date.now() + CHROME_LOCK_MS // go() 在動畫後才執行，鎖定要涵蓋它造成的高度變化
     mode = 'idle'
     dx = 0
   }
@@ -125,6 +143,7 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
       if (dir === 0) { settling = false; return }
       opts.go(idx + dir) // 動畫結束後才切換分頁狀態（改網址）；各分頁內容已各自掛載保留，切過去不重畫、不閃空白
       void nextTick().then(() => {
+        chromeLockUntil = Date.now() + CHROME_LOCK_MS
         settling = false
       })
     }
@@ -150,7 +169,7 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     const mx = t.clientX - sx, my = t.clientY - sy
     if (mode === 'pending') {
       if (Math.abs(mx) < LOCK_PX && Math.abs(my) < LOCK_PX) return
-      if (Math.abs(mx) <= Math.abs(my) * 1.2) { blocked = true; mode = 'idle'; return } // 直向為主：交給瀏覽器捲動
+      if (Math.abs(mx) <= Math.abs(my) * LOCK_DOMINANCE) { blocked = true; mode = 'idle'; return } // 直向為主：交給瀏覽器捲動
       mode = 'drag'
       if (!reducedMotion()) begin(bound)
     }
@@ -177,8 +196,10 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     const calm = reducedMotion()
     const mx = (t ? t.clientX : lastX) - sx, my = (t ? t.clientY : lastY) - sy
     const i = opts.index(), n = opts.count()
-    const w = Math.max(1, window.innerWidth)
-    const fast = Math.abs(vx) > FLICK_PX_PER_MS && Math.abs(mx) >= 24
+    // 用拖曳起手時量好的寬度：拖曳中相鄰分頁絕對定位在左右一個螢幕外，手機瀏覽器的 innerWidth 會被撐寬（實測 390→731），
+    // 放開時再讀會讓「寬度比例」門檻變成近一半螢幕、慢滑 100px 都不切換
+    const w = calm ? Math.max(1, window.innerWidth) : width
+    const fast = Math.abs(vx) > FLICK_PX_PER_MS && Math.abs(mx) >= FLICK_MIN_PX
     const far = Math.abs(mx) >= Math.max(MIN_DX, w * COMMIT_RATIO)
     const horizontal = Math.abs(mx) >= Math.abs(my) * DOMINANCE
     const want = horizontal && (far || fast) && Date.now() - st < 4000 ? (mx < 0 ? 1 : -1) : 0

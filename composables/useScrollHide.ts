@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { isMobileViewport, useMobileShell } from './useMobileShell'
-import { isSwipeDragging } from './useSwipeTabs'
+import { isSwipeChromeLocked } from './useSwipeTabs'
 
 /**
  * 手機版（X 式）：往下捲時頁首（含吸頂分頁條）往上滑出、底部分頁列往下滑出，一往回捲就立刻滑回；捲到最頂一定顯示。
@@ -29,15 +29,22 @@ export function useScrollHide() {
   function blocked(): boolean {
     const a = document.activeElement
     const typing = !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')
-    return drawerOpen.value || typing || isSwipeDragging()
+    return drawerOpen.value || typing || isSwipeChromeLocked()
+  }
+  /** 縮小標題區（[data-testid="mobile-hero"]）還有一部分在畫面內時不收合，避免頁首原本佔的位置露出空白；沒有標題區的頁面不受影響 */
+  function heroStillVisible(): boolean {
+    const h = document.querySelector('[data-testid="mobile-hero"]')
+    return !!h && h.getBoundingClientRect().bottom > 0
   }
   function step() {
     raf = 0
     const y = window.scrollY
     const dy = y - lastY
     lastY = y
+    // 拖曳分頁中或切換後 400ms 內：頁面高度變化、捲動位置重設造成的 scroll 不算使用者往下捲，一律顯示並同步基準
     if (!isMobileViewport() || y <= 0 || blocked()) { down = 0; set(false); return }
     if (dy > 0) {
+      if (heroStillVisible()) { down = 0; return }
       down += dy
       if (down > HIDE_AFTER_PX) set(true)
     } else if (dy < 0) {

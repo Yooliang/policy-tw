@@ -662,7 +662,7 @@ const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
  */
 const districtPanels = computed(() => viewMode.value !== 'politicians' ? [] : [...thisLevelSections.value, ...nextLevelSections.value]
   .filter(sec => (sec.spec.display === 'district' || sec.spec.type === '鄉鎮市民代表') && !sec.empty && sec.chips.length > 1)
-  .map(sec => ({ type: sec.spec.type, title: sec.spec.label, chips: sec.chips })))
+  .map(sec => ({ type: sec.spec.type, title: displayLabel(sec.spec.label), chips: sec.chips })))
 /** 選區晶片的短寫：「第01選舉區」「湖口鄉第01選舉區」都顯示成「第01區」（篩選仍用完整的 subRegion） */
 function shortDistrict(d: string): string {
   return d.replace(/^.*?(第\d+)選舉區$/, '$1區')
@@ -1023,9 +1023,9 @@ const ALL_LEVELS = [
   { type: ElectionType.LEGISLATOR, label: '立法委員' },
   { type: ElectionType.MAYOR, label: '縣市長' },
   { type: ElectionType.COUNCILOR, label: '縣市議員' },
-  { type: ElectionType.TOWNSHIP_MAYOR, label: '鄉鎮市長' },
+  { type: ElectionType.TOWNSHIP_MAYOR, label: '鄉鎮市區長' },
   { type: ElectionType.INDIGENOUS_DISTRICT_CHIEF, label: '原民區長' },
-  { type: ElectionType.REPRESENTATIVE, label: '鄉鎮市民代表' },
+  { type: ElectionType.REPRESENTATIVE, label: '鄉鎮市區民代表' },
   { type: ElectionType.INDIGENOUS_DISTRICT_REP, label: '原民區代表' },
   { type: ElectionType.CHIEF, label: '村里長' }
 ]
@@ -1088,7 +1088,7 @@ function policyCountOf(people: ReadonlyArray<{ id: string | number }>): number {
  */
 const pageTownship = computed(() => pageCounty.value && selectedSubRegion.value !== 'All' ? selectedSubRegion.value : undefined)
 const townshipSections = computed(() => [...thisLevelSections.value, ...nextLevelSections.value].filter(s => s.people.length > 0))
-const townshipLevelCounts = computed<LevelCount[]>(() => townshipSections.value.map(s => ({ label: s.spec.label, n: s.people.length })))
+const townshipLevelCounts = computed<LevelCount[]>(() => townshipSections.value.map(s => ({ label: displayLabel(s.spec.label), n: s.people.length })))
 usePageHead({
   // 縣市頁有 Markdown 版（/election/<屆>/<縣市>.md，lib/md/region.ts）；全台頁與鄉鎮頁沒有
   markdown: () => !!election.value && !!pageCounty.value && !pageTownship.value,
@@ -1154,12 +1154,16 @@ const TAB_NEEDS: Record<string, 'county' | 'sub' | 'village'> = {
  * 根因（2026-10-30）：以前判斷寫成 ElectionType.CHIEF（那是「村里長」），縣市長是 MAYOR，所以直轄市頁一直沒換成功；
  * 而且分頁條與區塊標題是兩個名稱來源（區塊標題直接用 POSITIONS 的 label），只改一邊不會生效——現在兩處都走這個函式。
  */
+/** 顯示用名稱：鄉鎮市長→鄉鎮市區長、鄉鎮市民代表→鄉鎮市區民代表（只改畫面文字；資料庫 election_type 值、錨點與比對一律用原名） */
+const DISPLAY_LABELS: Record<string, string> = { 鄉鎮市長: '鄉鎮市區長', 鄉鎮市民代表: '鄉鎮市區民代表' }
+const displayLabel = (label: string) => DISPLAY_LABELS[label] ?? label
 function mobileTypeLabel(type: string): string {
   if (selectedRegion.value !== 'All' && isSpecialMunicipality.value) {
     if (type === ElectionType.MAYOR) return '直轄市長'
     if (type === ElectionType.COUNCILOR) return '直轄市議員'
   }
-  return positionSpec(type)?.label ?? type
+  const l = positionSpec(type)?.label ?? type
+  return displayLabel(l)
 }
 const mobileTabs = computed(() => MOBILE_TAB_TYPES.map(t => ({ key: t, label: mobileTypeLabel(t) })))
 const mobileActiveType = computed(() => MOBILE_TAB_TYPES.includes(mobileTab.value) ? mobileTab.value : MOBILE_TAB_TYPES[0]!)
@@ -1700,7 +1704,7 @@ useSwipeTabs(swipeEl, {
         -->
         <div class="hidden">
         <div v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
@@ -1716,7 +1720,7 @@ useSwipeTabs(swipeEl, {
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <div v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${section.spec.label}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="section.spec.display !== 'grid' && !section.empty"
             :id="section.anchor"
