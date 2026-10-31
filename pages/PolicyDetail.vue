@@ -475,7 +475,7 @@ async function copyCitation() {
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
           <router-link :to="`/politician/${politician.id}`" class="relative block cursor-pointer" :aria-label="politician.name">
-            <Avatar :src="politician.avatarUrl" :name="politician.name" class="w-28 h-28 md:w-36 md:h-36 border-4 border-white shadow-xl" />
+            <Avatar :src="politician.avatarUrl" :name="politician.name" sizes="(min-width: 768px) 144px, 112px" class="w-28 h-28 md:w-36 md:h-36 border-4 border-white shadow-xl" />
             <PartyBadge :party="politician.party" :size="8" class="absolute bottom-2 right-2 shadow-md" />
           </router-link>
           <div class="flex-1">

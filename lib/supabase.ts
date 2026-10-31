@@ -5,7 +5,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 /**
  * 有登入狀態的 client。只給真的需要知道「現在是誰」的地方用：
- * useAuth、AuthCallback、後台頁面。
+ * useAuth、AuthCallback。
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 

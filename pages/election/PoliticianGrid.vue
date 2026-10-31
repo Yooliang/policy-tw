@@ -2,11 +2,11 @@
 import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { isMobileViewport } from '../../composables/useMobileShell'
-import { avatarThumbUrl } from '../../lib/avatar-thumb'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
 import { Megaphone, Check } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
+import { thumbFor } from '../../composables/useAvatarThumb'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 import { ballotLabel } from '../../lib/ballot-number'
 import { isElectionVoted } from '../../lib/policy-stage'
@@ -37,18 +37,11 @@ const { policies, elections } = useSupabase()
  * 大張直式人像、名字＋號次＋政黨＋選區。欄數跟著版面寬度走（09-29 維護者）：右側有「鄉鎮市區」篩選欄時主欄只剩 2/3 寬 → 四欄，
  * 沒有就全寬 → 六欄，兩種卡片一樣大。預渲染與瀏覽器是同一種卡片（以前預渲染出清單版、掛載後才換，畫面會跳）。
  */
-const portraitSrc = (p: Politician) => {
-  const src = getAvatarUrl(p.avatarUrl ?? null, p.name)
-  return p.avatarUrl ? avatarThumbUrl(src) : src
-}
-// 縮圖載不到就退回原圖，原圖也掛了才換預設圖
-const onPortraitError = (e: Event, p: Politician) => {
-  const img = e.target as HTMLImageElement
-  const original = getAvatarUrl(p.avatarUrl ?? null, p.name)
-  if (p.avatarUrl && img.dataset.fb !== '1' && img.src !== original) { img.dataset.fb = '1'; img.src = original; return }
-  const fallback = getAvatarUrl(null, p.name)
-  if (img.dataset.fb !== '2' && img.src !== fallback) { img.dataset.fb = '2'; img.src = fallback }
-}
+const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
+// 2026-10-31：有縮圖就用縮圖＋srcset（卡片寬約 33vw～180px），縮圖載入失敗退回原圖
+const brokenThumbs = ref<Set<string>>(new Set())
+const portraitThumb = (p: Politician) => (p.avatarUrl && !brokenThumbs.value.has(p.avatarUrl)) ? thumbFor(p.avatarUrl) : null
+function onPortraitError(p: Politician) { if (p.avatarUrl && portraitThumb(p)) brokenThumbs.value = new Set(brokenThumbs.value).add(p.avatarUrl) }
 
 /**
  * 分批渲染（2026-10-31 手機效能）：一個職位幾百人時整批掛 DOM 會卡好幾秒。手機先畫第一屏（INITIAL 張），
@@ -189,7 +182,13 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
-          <img :src="portraitSrc(politician)" :alt="politician.name" loading="lazy" decoding="async" width="240" height="320" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform" @error="onPortraitError($event, politician)" />
+          <img
+            :src="portraitThumb(politician)?.src ?? portraitSrc(politician)"
+            :srcset="portraitThumb(politician)?.srcset"
+            :sizes="portraitThumb(politician) ? '(min-width: 1024px) 180px, 34vw' : undefined"
+            :alt="politician.name" loading="lazy" decoding="async" width="240" height="320" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
+            @error="onPortraitError(politician)"
+          />
           <!-- 有號次（名單公告、抽籤後）就顯示「N號」；已登記＝綠色小勾 -->
           <span
             v-if="ballotLabel(politician.candNo)"

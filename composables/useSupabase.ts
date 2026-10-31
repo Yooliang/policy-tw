@@ -15,6 +15,7 @@ import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetr
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
 import { idbGet, idbPut } from '../lib/idb-cache'
 import { positionsToLoad } from '../lib/election-levels'
+import { electionPageLoadArgs } from '../lib/election-prefetch'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { findElectionBySegment, newerFirst } from '../lib/election-route'
@@ -414,7 +415,7 @@ async function fetchAllInner() {
   try {
     // 首屏只載「每一頁都要用」的東西。
     // regions（178 KB）、electoral_district_areas（77 KB）、discussions 改成按需載入——
-    // 那 255 KB 只有區域資料頁、後台統計頁、選舉頁、討論頁會用到，
+    // 那 255 KB 只有區域資料頁、選舉頁、討論頁會用到，
     // 卻讓每一個訪客的第一次連線都付這個成本（改之前首屏是 605 KB／9 個請求）。
     //
     // 2026-09-13 政見清單（257 KB）＋有政見的人物（91 KB）也移出去了，見 ensurePolicies。
@@ -451,6 +452,18 @@ function getElectionById(id: number): Election | undefined {
   return elections.value.find(e => e.id === id)
 }
 
+/**
+ * 路由解析時預先發起選舉頁的候選人請求（2026-10-31）：不等 ElectionPage 的 chunk 載完與掛載。
+ * 只在瀏覽器端呼叫（router/index.ts）；參數規則與頁面一致（lib/election-prefetch.ts），
+ * 元件掛載後呼叫 loadPoliticiansByElection 會接手同一個 promise。失敗不在這裡處理——
+ * 元件掛載時若已失敗會重新請求並走原本的錯誤處理。
+ */
+function prefetchElectionPage(params: Record<string, unknown>, globalRegion: string): void {
+  const args = electionPageLoadArgs(params, seg => getElectionBySegment(seg)?.id, globalRegion)
+  if (!args) return
+  loadPoliticiansByElection(args.electionId, args.region, args.subRegion).catch(() => undefined)
+}
+
 /** 網址上的一段（舊三屆是 id、其他是 election_key）→ 選舉；還沒載入或找不到回 undefined */
 function getElectionBySegment(segment: unknown): Election | undefined {
   return findElectionBySegment(elections.value, segment)
@@ -473,7 +486,7 @@ function getActiveElection(): Election {
 // 按需載入的三塊重資料。
 //
 // 改之前首屏是 605 KB／9 個請求，其中 255 KB（regions 178、選舉區對應 77）只有
-// 區域資料頁、後台統計、選舉頁會用到。每個只看政見或提問的訪客都在白付這個成本。
+// 區域資料頁、選舉頁會用到。每個只看政見或提問的訪客都在白付這個成本。
 //
 // 三個共通的形狀：冪等（promise 快取）、已經有資料就直接回（預渲染頁的切片會先塞好，
 // 不要重打一次）、失敗清掉快取讓下一次能重試。
@@ -483,7 +496,7 @@ let officialRegionalStatsPromise: Promise<void> | null = null
 let districtsPromise: Promise<void> | null = null
 let discussionsPromise: Promise<void> | null = null
 
-/** 縣市統計：區域資料頁與後台統計頁用（178 KB） */
+/** 縣市統計：區域資料頁用（178 KB） */
 export function ensureRegionStats(): Promise<void> {
   if (regionStats.value.length > 0) return Promise.resolve()
   if (!regionStatsPromise) {
@@ -637,6 +650,8 @@ async function loadPoliticiansWithPolicies(): Promise<void> {
 }
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
+/** 正在飛的候選人請求（鍵同 loadedRegions）：預先發起與元件掛載後的呼叫共用同一個 promise，不重複請求 */
+const inflightLoads = new Map<string, Promise<Politician[]>>()
 
 /**
  * 撈一頁參選人。
@@ -771,39 +786,46 @@ async function loadPoliticiansByElectionImpl(
     return politicians.value.filter(p => p.electionIds?.includes(electionId))
   }
 
+  // 同一組參數已經有請求在飛（路由解析時預先發起的，或同一頁的重複呼叫）就接手同一個 promise，不重複請求。
+  const running = inflightLoads.get(cacheKey)
+  if (running) return running
+  const job = runLoadPoliticians(electionId, region, subRegion, cacheKey, onlyTypes)
+  inflightLoads.set(cacheKey, job)
+  try {
+    return await job
+  } finally {
+    if (inflightLoads.get(cacheKey) === job) inflightLoads.delete(cacheKey)
+  }
+}
+
+/** loadPoliticiansByElection 真正撈資料的部分（去重與快取檢查在呼叫端）。 */
+async function runLoadPoliticians(
+  electionId: number,
+  region: string,
+  subRegion: string,
+  cacheKey: string,
+  /** 指定就只撈這幾種職位（手機／桌面分頁面板要一次看整個縣市的代表、村里長，分層載入預設不帶這兩種） */
+  onlyTypes?: readonly string[],
+): Promise<Politician[]> {
   try {
     // 直接從 DB 載入（不使用 IndexedDB 快取）
 
-    // 2. 先查詢該選舉有哪些類型
-    let typesReq = electionTypesInflight.get(electionId)
-    if (!typesReq) {
-      typesReq = Promise.resolve(supabase.rpc('get_election_types', { p_election_id: electionId })).then(r => { if (r.error || !r.data?.length) electionTypesInflight.delete(electionId); return (r.data || []) as RawElectionTypeRow[] })
-      electionTypesInflight.set(electionId, typesReq)
-      typesReq.catch(() => electionTypesInflight.delete(electionId))
-    }
-    const typeData = await typesReq
-
-    const availableTypes = (typeData || []).map((t: RawElectionTypeRow) => t.election_type)
-    availableElectionTypes.value = availableTypes
-
-    // 3. 這一層＋下一層要哪些職位（lib/election-levels.ts），再跟「這一屆真的有選的職位」取交集。
-    //    取交集是為了「只列那一年真的有選的職位」：2022 沒有總統也沒有立委，
-    //    撈了也是零筆，但交集之後整個層級沒職位可撈時可以連查詢都不用發。
+    // 這一層＋下一層要哪些職位（lib/election-levels.ts）。
     // 地名正規化成「台」再送進 RPC：資料庫裡「臺」與「台」混用（lib/region-name.ts），
     // 沒正規化就是靜靜地回 0 筆。RPC 那一端也做同樣的轉換（migration 20261005000001）。
     const regionParam = region === 'All' ? null : normalizeRegionName(region)
     const subRegionParam = subRegion === 'All' ? null : normalizeRegionName(subRegion)
-    const electionTypes = (onlyTypes ?? positionsToLoad({
+    const wantedTypes = onlyTypes ?? positionsToLoad({
       region,
       subRegion,
       isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
-    })).filter(t => availableTypes.includes(t))
+    })
 
-    if (electionTypes.length === 0) {
-      loadedRegions.value.add(cacheKey)
-      return []
-    }
-
+    // 2026-10-31 去串行：以前先 await get_election_types、取交集之後才撈候選人，兩趟網路來回排在一起。
+    // 取交集只是為了「只列那一年真的有選的職位」——沒選的職位撈了也是零筆（p_election_types 是 text[]，
+    // 不在清單裡的值不會報錯），所以兩支請求同時發，回來再用交集決定要不要採用結果；
+    // 整個層級沒職位可撈時（例：2022 的全台頁）結果丟掉、跟以前一樣回空。
+    const typesRequest = supabase.rpc('get_election_types', { p_election_id: electionId })
     // 4. 撈。分頁是必要的安全網而不是常態：分層之後單頁都遠低於 1000 筆
     //    （高雄市縣市頁 128、大林鎮 43），但 PostgREST 的 1000 列上限是靜默截斷——
     //    回前 1000 列、HTTP 200、不報錯（見 lib/fetch-all-pages.ts 的實例），
@@ -812,10 +834,26 @@ async function loadPoliticiansByElectionImpl(
     //    .order('id') 是分頁的前提：沒有全序的排序，每頁順序不保證一致，
     //    會同一位回兩次、另一位一次都沒回。get_politicians_by_level 用 EXISTS，
     //    一個人就是一列，所以 id 是全序。
-    const { rows, truncated } = await fetchAllPages<RawPolitician>(
-      `參選人 ${electionId}/${region}/${subRegion}`,
-      (from, to) => fetchPoliticianPage(electionId, regionParam, subRegionParam, electionTypes, from, to),
-    )
+    const pagesRequest = wantedTypes.length === 0
+      ? null
+      : fetchAllPages<RawPolitician>(
+        `參選人 ${electionId}/${region}/${subRegion}`,
+        (from, to) => fetchPoliticianPage(electionId, regionParam, subRegionParam, wantedTypes, from, to),
+      )
+    // 結果被丟掉的路徑上不會有人 await 它，先掛上 catch 免得變成 unhandled rejection
+    pagesRequest?.catch(() => undefined)
+
+    const { data: typeData } = await typesRequest
+    const availableTypes = (typeData || []).map((t: RawElectionTypeRow) => t.election_type)
+    availableElectionTypes.value = availableTypes
+
+    // 跟「這一屆真的有選的職位」取交集；交集為空＝這一層沒有可撈的職位
+    if (!pagesRequest || !wantedTypes.some(t => availableTypes.includes(t))) {
+      loadedRegions.value.add(cacheKey)
+      return []
+    }
+
+    const { rows, truncated } = await pagesRequest
 
     if (truncated) politicianListIncomplete.value = true
 
@@ -1284,6 +1322,7 @@ export function useSupabase() {
     fetchAll,
     getElectionById,
     getElectionBySegment,
+    prefetchElectionPage,
     getElectionByYear,
     getActiveElection,
     loadPoliticiansByElection,  // 新增：按選舉載入

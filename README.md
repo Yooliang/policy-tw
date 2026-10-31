@@ -66,9 +66,9 @@
 
 ## 正在進行的大方向：把管理員頁面拆掉
 
-`pages/Admin*.vue` 那幾頁（目前剩儀表板、重複人物、AI、匯入四頁；掃描器頁已隨 `add-politician` 在 2026-09-23 下架）是這個專案目前最不乾淨的地方，它們是還沒被拆解的人工決策。方向是把裡面每一個動作都變成任務。
+原本的後台管理頁（儀表板、重複人物、AI、匯入、掃描器）已全部拆除（最後三頁於 2026-10-31，見 [docs/decisions/2026-10-31-拆除後台三頁.md](docs/decisions/2026-10-31-拆除後台三頁.md)）；裡面的每一個動作都改成任務，由主控台與貢獻任務承接。
 
-設計與拆解順序寫在 **[docs/BLUEPRINT-admin-to-tasks.md](docs/BLUEPRINT-admin-to-tasks.md)**。想接手其中一項，直接開 PR。
+當初的設計與拆解順序留在 [docs/BLUEPRINT-admin-to-tasks.md](docs/BLUEPRINT-admin-to-tasks.md)（歷史文件）。
 
 ---
 

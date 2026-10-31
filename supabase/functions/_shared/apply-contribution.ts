@@ -15,6 +15,7 @@ import { changedFields, electionResultLabel } from "./candidacy-result.ts";
 import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
 import { openAvatarChoice } from "./avatar-choice.ts";
+import { openRegionMismatch, regionIdCorrectionProblem } from "./region-mismatch.ts";
 import { normalizeAvatarUrl } from "./avatar-url.ts";
 import { politicianIdFromTask } from "./task-politician.ts";
 import { findPoliticianByNameStrict } from "./politician-identity.ts";
@@ -762,13 +763,33 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
       await recordUpdate(supabase, ctx, "politician_elections", String(participation.id), field, oldValue, newValue);
     }
   }
+  // 縣市對不上（2026-10-31）：現有地區是縣市層級、交件的縣市是另一個——號次照舊記下，但不默默丟掉地區差異，開任務讓代理查公告改正
+  let mismatchNote = "";
+  if (electionType === "縣市長" && beforeRegionId !== null && beforeFit?.fit === "county") {
+    const proposedId = regionIdOf(await countyRegionPatch(supabase, electionType, p));
+    if (proposedId !== null && proposedId !== beforeRegionId) {
+      mismatchNote = await openRegionMismatch(supabase, {
+        politician_election_id: participation.id,
+        politician_id: ensured.politician_id,
+        name: str(p.name),
+        election_id: electionId,
+        election_type: electionType,
+        cand_no: int(p.cand_no),
+        current_region_id: beforeRegionId,
+        current_region: beforeFit.label,
+        proposed_region_id: proposedId,
+        proposed_region: normalizeCityName(str(p.region) ?? undefined) || String(str(p.region)),
+        contribution_id: row.id ?? null,
+      });
+    }
+  }
   const resultLabel = electionResultLabel(p);
   return {
     status: "applied",
     politician_id: ensured.politician_id,
     created_politician: ensured.created,
     politician_election_id: String(participation.id),
-    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidacyStatus ?? "（狀態沒改）"}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}`,
+    message: `參選紀錄已${participation.outcome === "created" ? "建立" : "更新"}為 ${candidacyStatus ?? "（狀態沒改）"}${resultLabel ? `，選舉結果 ${resultLabel}` : ""}${narrowed.converted ? CONFIRMED_NARROWED_NOTE : ""}${regionNote}${mismatchNote}`,
   };
 }
 
@@ -1519,6 +1540,13 @@ async function applyCorrection(supabase: SupabaseLike, row: ContributionRow): Pr
       delete patch.avatar_url; avatarNote = `；照片沒套用：${problem}`;
     }
   }
+  // 參選紀錄的 region_id（縣市對不上任務的更正路，2026-10-31）：只收縣市長、縣市層級改縣市層級
+  if (table === "politician_elections" && "region_id" in patch) {
+    const cur = current as { election_type?: string | null; region_id?: number | null };
+    const problem = await regionIdCorrectionProblem(supabase, cur.election_type, cur.region_id, patch.region_id);
+    if (problem) return { status: "failed", message: problem };
+    patch.region_id = Number(patch.region_id);
+  }
   // #3／#6（2026-09-22）：等票期間別人可能先修好了。全部一樣 → superseded，不寫假的 edit_history；
   // 部分一樣 → 只改真的會改的欄位，一樣的那幾欄寫進訊息讓提交者知道。
   const { changed, noop } = splitNoOpChanges(patch, current as Record<string, unknown>);
@@ -1875,7 +1903,12 @@ async function applyCandNumbers(supabase: SupabaseLike, row: ContributionRow): P
   throwIf(voteError, "contribution_votes read");
   const flagged = flaggedRows((votes ?? []) as Array<{ verdict: string; bad_items?: unknown }>);
   const { data: conflictRows, error: conflictError } = await supabase.rpc("cand_no_batch_conflicts", { p_items: items });
-  throwIf(conflictError, "cand_no_batch_conflicts");
+  // 重複檢查本身出錯（逾時等）≠ 這份交件有問題：不退件、不消耗 apply_failed 的重試次數（defer），貢獻留在 verified，apply-verified 每 10 分鐘再撿；
+  // 還沒有任何寫入，重試安全。逾時退件事故（2026-10-30，203 件整批被誤退）之後的保守做法：寧可暫緩，不可在無法確認時寫入、也不可把好的整批退掉
+  if (conflictError) {
+    console.error("cand_no_batch_conflicts failed, deferring", row.id, conflictError.message);
+    return { status: "failed", defer: true, message: `號次重複檢查暫時出錯（${conflictError.message}），這份先不處理、稍後自動重試` };
+  }
   const conflicts = new Map<number, string>(((conflictRows ?? []) as Array<{ politician_election_id: number; reason: string }>).map((c) => [c.politician_election_id, c.reason]));
 
   const plan = planCandNumbers((existing ?? []) as ExistingCandNo[], items, electionId, electionType, flagged, conflicts);

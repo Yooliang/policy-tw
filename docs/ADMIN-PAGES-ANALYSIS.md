@@ -1,3 +1,5 @@
+> **頁面已於 2026-10-31 拆除**（見 decisions/2026-10-31-拆除後台三頁.md）。
+>
 > **歷史文件（2026-02）**：描述的是 Claude-PM／`ai_prompts` 輪詢與管理頁架構，已被外部貢獻協議（`public/skill.md`、`CONTRIBUTIONS-ADMIN.md`）與 `BLUEPRINT-admin-to-tasks.md` 取代。保留供查歷史脈絡，不代表現況。
 
 # 管理頁面功能分析報告

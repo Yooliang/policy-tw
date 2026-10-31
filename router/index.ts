@@ -1,5 +1,6 @@
 import type { Router, RouteRecordRaw } from 'vue-router'
-import { useAuth } from '../composables/useAuth'
+import { useGlobalState } from '../composables/useGlobalState'
+import { useSupabase } from '../composables/useSupabase'
 import type { PageSnapshot } from '../lib/ssg/page-data'
 import { handleChunkLoadError, isChunkLoadError, setPendingPath } from '../lib/chunk-reload'
 // 記下第一次載入的路徑（人物一覽、政黨頁換頁進來要整頁載入預渲染那一份，見 lib/full-load.ts）
@@ -7,7 +8,6 @@ import '../lib/full-load'
 
 declare module 'vue-router' {
   interface RouteMeta {
-    requiresAdmin?: boolean
     /** SSG 建置時：本路由渲染所用的資料切片（同一份會序列化進 initialState 給客戶端 hydrate）。 */
     ssgSnapshot?: PageSnapshot
   }
@@ -166,26 +166,6 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Sources.vue'),
   },
   {
-    path: '/admin/dashboard',
-    component: () => import('../pages/AdminDashboard.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
-    path: '/admin/duplicates',
-    component: () => import('../pages/AdminDuplicates.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
-    path: '/admin/ai',
-    component: () => import('../pages/AdminAI.vue'),
-    meta: { requiresAdmin: true },
-  },
-  {
-    path: '/admin/import',
-    // 資料匯入頁 2026-10-07 拆除；舊網址轉到後台首頁，不 404
-    redirect: '/admin/dashboard',
-  },
-  {
     path: '/verify',
     component: () => import('../pages/VerifyContent.vue'),
   },
@@ -246,24 +226,25 @@ export const routes: RouteRecordRaw[] = [
   },
 ]
 
-/** 後台頁需登入且為管理員；只在瀏覽器端有意義（建置時不預渲染 /admin）。 */
+/** 路由守衛：記下換頁中的路徑、預取選舉頁資料、處理舊 chunk 載入失敗。 */
 export function installRouterGuards(router: Router): void {
   router.beforeEach(async (to) => {
     setPendingPath(to.fullPath)
-    if (to.meta.requiresAdmin) {
-      const { isAuthenticated, isAdmin, authReady, initAuth } = useAuth()
-
-      // Wait for auth to initialize
-      if (!authReady.value) {
-        await initAuth()
-      }
-
-      if (!isAuthenticated.value || !isAdmin.value) {
-        return '/'
-      }
-    }
   })
   router.afterEach(() => setPendingPath(null))
+
+  // 選舉頁的候選人清單提早發（2026-10-31 載入順序優化）：不等頁面元件的 chunk 載完與 onMounted。
+  // 放在 beforeEach 是為了跟 chunk 下載並行；元件掛載後的 loadPoliticiansByElection 會接手同一個 promise。
+  // 預渲染（SSR）不發：建置端的資料走 ensureFullDataset，且不該多打 Supabase。
+  if (!import.meta.env.SSR) {
+    const { globalRegion } = useGlobalState()
+    const { prefetchElectionPage } = useSupabase()
+    router.beforeEach((to) => {
+      if (to.name === 'election' || to.name === 'election-region' || to.name === 'election-township') {
+        prefetchElectionPage(to.params, globalRegion.value)
+      }
+    })
+  }
 
   // 部署新版後舊分頁載入舊 chunk 404：硬重載到目標路徑（60 秒內同路徑只一次，再失敗顯示提示）
   if (!import.meta.env.SSR) {
