@@ -78,8 +78,11 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
   <div class="font-sans md:flex md:min-h-screen">
     <!-- 桌面版最左窄欄與延伸欄（md 以上；延伸欄 lg 以上固定顯示，窄桌面收成抽屜） -->
     <!-- 窄圖示欄永遠在最上層（z-[70]，高於抽屜與背板的 z-[60]），抽屜開著時照樣明亮可點 -->
-    <div class="hidden md:block sticky top-0 z-[70] h-screen shrink-0 self-start" data-chrome="rail"><DeskRail /></div>
-    <div v-if="hasExt" class="hidden lg:block sticky top-0 z-30 h-screen shrink-0 self-start" data-chrome="ext"><DeskExtNav /></div>
+    <!-- 窄欄與延伸欄改 fixed（inset-y-0，不用 100vh 也不用 sticky）＋同寬佔位：sticky＋h-screen 在頁面底部／小數點縮放（125%、150%）時會被容器邊界推 0.2px，窄欄圖示就跟著上下抖 -->
+    <div class="hidden md:block w-[72px] shrink-0" aria-hidden="true"></div>
+    <div class="hidden md:block fixed inset-y-0 left-0 z-[70] w-[72px]" data-chrome="rail"><DeskRail /></div>
+    <div v-if="hasExt" class="hidden lg:block w-[176px] shrink-0" aria-hidden="true"></div>
+    <div v-if="hasExt" class="hidden lg:block fixed inset-y-0 left-[72px] z-30 w-[176px]" data-chrome="ext"><DeskExtNav /></div>
     <!-- 抽屜與背板從圖示欄右側（72px）起，背板只蓋內容區 -->
     <div v-if="drawerShown" class="fixed inset-y-0 left-[72px] right-0 z-[60] hidden md:block lg:hidden" data-testid="desk-drawer">
       <div class="absolute inset-0 bg-black/40" @click="closeDeskDrawer"></div>

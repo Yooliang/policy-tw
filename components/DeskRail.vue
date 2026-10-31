@@ -31,7 +31,7 @@ const items = computed(() => [
   { key: 'election' as const, label: '選舉', to: electionTo.value, icon: null },
   { key: 'join' as const, label: '參與', to: '/stats', icon: Milestone },
 ])
-const itemClass = (on: boolean) => ['group relative flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-bold leading-none transition-colors', on ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100 hover:text-navy-900']
+const itemClass = (on: boolean) => ['group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold leading-none transition-colors', on ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100 hover:text-navy-900']
 </script>
 
 <template>
