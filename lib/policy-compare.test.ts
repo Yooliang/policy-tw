@@ -165,15 +165,11 @@ Deno.test("pick：全部勾選不寫（預設），勾掉幾位才寫；對不�
   assertEquals(parsePick("777", ids), ids, "全對不上＝全部，不是空表");
 });
 
-Deno.test("選舉頁真的把「政見 PK」按鈕掛在每個區塊標題列：卡片區塊與分組區塊、這一層與下一層各一處；切換鈕拿掉了", () => {
+Deno.test("區塊標題列沒有「政見 PK」按鈕（2026-10-31 拿掉，上方檢視列已有 PK 入口）；切換鈕也拿掉了", () => {
   const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
   const grid = Deno.readTextFileSync(new URL("../pages/election/PoliticianGrid.vue", import.meta.url));
   const chips = Deno.readTextFileSync(new URL("../pages/election/ChipFilteredGroups.vue", import.meta.url));
-  // 屬性要真的落在元件標籤上（寫到 > 後面會變成被丟掉的文字，畫面上就沒有按鈕——2026-10-06 實際踩過）
-  assertEquals(page.match(/<PoliticianGrid [^>]*:pk-link="sectionPkLink\(section\)"[^>]*>/g)?.length, 2);
-  assertEquals(page.match(/<ChipFilteredGroups(?:\s+[^>\s]+)*\s+:pk-link-for="groupPkLinkFor\(section\.spec\.type\)"\s*>/g)?.length, 2);
-  assert(/:pk-link="pkLinkFor\?\.\(group\)"/.test(chips));
-  assert(/<RouterLink\s+v-if="pkLink"\s+:to="pkLink"/.test(grid), "按鈕是真連結");
+  assert(!page.includes(":pk-link") && !chips.includes("pkLinkFor") && !grid.includes("pk-link"), "區塊標題列不再掛 PK 按鈕");
   assert(!grid.includes("顯示方式") && !grid.includes("localStorage"), "大頭照／清單切換拿掉了");
 });
 
@@ -219,17 +215,17 @@ Deno.test("選舉頁沒有自己的地區選擇：PK 本體不收選區、不畫
   assert(!/regions?\??:|counties|townships?\??:|subRegions?\??:|districts\??:/.test(props), "PolicyPk 的屬性裡沒有縣市／鄉鎮／選區");
   assert(!pk.includes('aria-label="選區"'), "PK 主欄沒有選區列");
   // 範圍不夠：提示在 PolicyPk 之前，PolicyPk 用 v-else
-  assert(/v-if="pkMissing"[^>]*data-testid="pk-pick-region"[\s\S]*?先在上方選擇縣市[\s\S]*?先在右側選擇鄉鎮市區[\s\S]*?<PolicyPk\s+v-else/.test(page), "提示先選縣市／鄉鎮市區，取代 PK 本體");
-  assertEquals(page.match(/pkNeeds\(/g)?.length, 5, "區塊按鈕兩處（卡片與分組）、頁籤的範圍檢查、職位預設、職位列各看一次");
+  assert(/v-if="pkMissing"[^>]*data-testid="pk-pick-region"[\s\S]*?先選擇縣市[\s\S]*?先在左側選擇鄉鎮市區[\s\S]*?<PolicyPk\s+v-else/.test(page), "提示先選縣市／鄉鎮市區，取代 PK 本體");
+  assertEquals(page.match(/pkNeeds\(/g)?.length, 3, "頁籤的範圍檢查、職位預設、職位列各看一次（區塊按鈕拿掉後少兩處）");
   assert(/const pkGroupList = computed\(\(\) => pkMissing\.value \? \[\]/.test(page), "範圍不夠時沒有選區");
   // 選區在右側面板（真連結），村里長的村里在 PK 頁籤只出現一份
   assert(/<div v-if="pkDistrictPanel"[^>]*data-testid="pk-district-panel"/.test(page));
   assert(/v-if="availableVillages\.length > 0 && viewMode !== 'comparison'"/.test(page), "PK 頁籤的村里選擇只有 PK 的那一份");
   // 全台頁的職位列：有全國一場的職位就只列它（區域立委不列，舊網址 type=立法委員 退回第一個職位）
   assert(/const national = levels\.filter\(l => !pkNeeds\(l\.type[^)]*\)\)\s*return selectedRegion\.value === 'All' && national\.length > 0 \? national : levels/.test(page), "全台頁的職位列只列全國性職位");
-  // 右側子地區面板的條件只看縣市與有沒有鄉鎮，不看頁籤；左欄可以縮（表很寬時不把右欄擠出畫面）
-  assert(/<div v-if="selectedRegion !== 'All' && availableSubRegions\.length > 0" class="order-first md:order-last md:w-1\/3 shrink-0">/.test(page), "子地區面板不分頁籤都在");
-  assert(/'flex-1 min-w-0 md:w-2\/3'/.test(page), "左欄 min-w-0");
+  // 桌面改版（2026-10-31）：右側篩選面板收起（class="hidden"，選擇改在內容區晶片列與延伸欄），條件仍只看縣市與有沒有鄉鎮、不看頁籤；內容欄 min-w-0（表很寬時不把右欄擠出畫面）
+  assert(/<div v-if="selectedRegion !== 'All' && availableSubRegions\.length > 0" class="hidden">/.test(page), "子地區面板不分頁籤都在（收起狀態）");
+  assert(/'w-full min-w-0'/.test(page), "內容欄 min-w-0");
   // 桌機捲動時右側面板停在頁首（Navbar h-16＝4rem）下方，不被蓋住；手機版面板在上方、不 sticky
   assert(/<div class="md:sticky md:top-\[4\.5rem\] space-y-4">/.test(page), "右側面板 sticky 距頂 4.5rem");
 });

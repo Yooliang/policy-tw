@@ -74,7 +74,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
   <div class="text-left" data-testid="policy-pk">
     <div v-if="candidates.length < 2" class="text-center py-16 text-slate-400 border border-dashed border-slate-300 rounded-xl">
       <Swords :size="48" class="mx-auto mb-4 opacity-50" />
-      <p>這一層還沒有同一場、兩位以上的參選人可以並排。</p>
+      <p class="font-bold">尚無資料</p>
     </div>
 
     <section v-else :class="fullscreen ? 'fixed inset-0 z-[100] overflow-auto bg-white' : 'bg-white rounded-xl border border-slate-200 shadow-sm'">

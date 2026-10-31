@@ -23,19 +23,27 @@ const rows = computed(() => {
   const byKey = new Map(found.map((f) => [f.statKey, f.stat]))
   return REGIONAL_STAT_KEYS.map((statKey) => ({ statKey, label: REGIONAL_STAT_LABEL[statKey], stat: byKey.get(statKey) ?? null }))
 })
+/** 卡片標題的地名：有鄉鎮寫鄉鎮，否則縣市 */
+const placeName = computed(() => props.subRegion && props.subRegion !== 'All' ? props.subRegion : props.region ?? '')
+/** 四項全缺：整張卡收成一行淡色字（2026-10-31 小良哥：不要「未調查」重複四次） */
+const allMissing = computed(() => rows.value.length > 0 && rows.value.every(r => !r.stat))
 </script>
 
 <template>
-  <!-- 窄欄（選舉頁右側面板，2026-10-16 維護者）：一張卡片、一項一列，只顯示數值；數值本身連到出處 -->
-  <div v-if="region && compact" class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm" data-testid="regional-stats-panel">
-    <dl class="divide-y divide-slate-100 text-sm">
-      <div v-for="row in rows" :key="row.statKey" class="flex items-baseline justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
-        <dt class="text-slate-500">{{ row.label }}</dt>
-        <dd v-if="row.stat" class="text-right">
-          <a :href="row.stat.sourceUrl" target="_blank" rel="noopener noreferrer" :title="`${row.stat.year} 年`" class="font-bold text-navy-900 hover:text-blue-700">{{ row.stat.value.toLocaleString('zh-TW') }}</a>
-          <span class="text-xs text-slate-500 ml-1">{{ row.stat.unit }}</span>
+  <!-- 窄欄（選舉頁右欄與手機內容最下方）：標題＋地名，2×2 數據格（上小標籤、下大數值，數值連到出處）；缺值的格子顯示淡色「—」，四項全缺收成一行 -->
+  <p v-if="region && compact && allMissing" class="px-1 text-xs text-slate-400" data-testid="regional-stats-panel">{{ placeName }}地區資料未調查</p>
+  <div v-else-if="region && compact" class="w-full max-w-[300px] rounded-xl border border-slate-200 bg-white p-4" data-testid="regional-stats-panel">
+    <div class="mb-3 flex items-baseline gap-2 text-xs">
+      <span class="font-bold text-slate-500">地區資料</span>
+      <span class="truncate text-slate-400">{{ placeName }}</span>
+    </div>
+    <dl class="grid grid-cols-2 gap-x-4 gap-y-3">
+      <div v-for="row in rows" :key="row.statKey" class="min-w-0">
+        <dt class="text-[11px] text-slate-500">{{ row.label }}</dt>
+        <dd v-if="row.stat" class="mt-0.5 tabular-nums leading-tight">
+          <a :href="row.stat.sourceUrl" target="_blank" rel="noopener noreferrer" :title="`${row.stat.year} 年`" class="text-lg font-bold text-navy-900 hover:text-blue-700">{{ row.stat.value.toLocaleString('zh-TW') }}</a><span class="ml-0.5 text-[11px] text-slate-500">{{ row.stat.unit }}</span>
         </dd>
-        <dd v-else class="text-slate-400">未調查</dd>
+        <dd v-else class="mt-0.5 text-lg leading-tight text-slate-300">—</dd>
       </div>
     </dl>
   </div>

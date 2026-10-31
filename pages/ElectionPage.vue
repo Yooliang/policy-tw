@@ -640,29 +640,9 @@ function sectionsOf(types: readonly string[]): LevelSection[] {
 }
 const thisLevelSections = computed(() => sectionsOf(levelPlan.value.thisLevel))
 
-/**
- * 區塊標題列的「政見 PK」按鈕（2026-10-06 維護者：取代區塊底下的並排比較，功能併進 PK 頁籤）。
- * 連到這一頁的 PK 頁籤、選好這個職位與這一場、帶入這一組全部的參選人；真連結，預渲染的 HTML 裡就有。
- *   卡片排法的區塊可能含好幾場（縣市頁的立委好幾個選區、鄉鎮市長好幾個鄉鎮）：只有一場就帶那一場，好幾場就只帶職位、到 PK 再選
- *   分組排法的區塊（議員依選區、村里長依里）：每一組各一顆，帶那一組；「選區待補」「未標示里別」不知道是哪一場，不給
- *   同一場不到兩位會出現在選票上的人：沒有 PK 可看，不給
- */
+/** PK 頁籤的連結（選好職位與這一場）；區塊標題列的「政見 PK」按鈕 2026-10-31 拿掉，上方檢視列已有 PK 入口 */
 function pkLink(type: string, district?: string): RouteLocationRaw {
   return { path: electionPath(electionSeg.value, selectedRegion.value, selectedSubRegion.value), query: pkQuery(type, district) }
-}
-function sectionPkLink(section: LevelSection): RouteLocationRaw | undefined {
-  // 全台頁的縣市長、縣市頁的鄉鎮市長等區塊：PK 要先選縣市／鄉鎮，區塊上不放按鈕（請用上方的縣市選擇器與右側的鄉鎮市區）
-  if (pkNeeds(section.spec.type, selectedRegion.value, selectedSubRegion.value)) return undefined
-  const groups = pkGroups(section.people, section.spec.type).filter(hasPk)
-  if (groups.length === 0) return undefined
-  return pkLink(section.spec.type, groups.length === 1 ? groups[0].label : undefined)
-}
-function groupPkLinkFor(type: string) {
-  return (group: { label: string; people: Politician[] }): RouteLocationRaw | undefined => {
-    if (pkNeeds(type, selectedRegion.value, selectedSubRegion.value)) return undefined
-    const g = pkGroups(group.people, type).find(x => x.label === group.label.trim())
-    return hasPk(g) ? pkLink(type, g!.label) : undefined
-  }
 }
 const nextLevelSections = computed(() => sectionsOf(levelPlan.value.nextLevel))
 /**
@@ -1200,8 +1180,9 @@ interface MobilePick { level: 'county' | 'sub' | 'village'; title: string; optio
 function pickFor(type: string): MobilePick | null {
   // 2026-10-31 小良哥：鄉鎮與村里的預設都是「全部」，各分頁一開就直接列出參選人；
   // 唯一例外是村里長分頁沒選鄉鎮：全台先挑縣市、選了縣市先挑鄉鎮（鄉鎮選了就是該鄉鎮全部村里，依村里分組）
+  // 全台時：只有縣市長分頁直接列人（依縣市分組）；其餘四個分頁先挑縣市，不列全台灣的人
+  if (selectedRegion.value === 'All' && type !== ElectionType.MAYOR) return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (type !== ElectionType.CHIEF) return null
-  if (selectedRegion.value === 'All') return { level: 'county', title: '選擇縣市', options: [...TAIWAN_COUNTIES] }
   if (selectedSubRegion.value === 'All') {
     // 鄉鎮層一律列該縣市全部鄉鎮市區（不依有沒有該類選舉過濾）；沒有該類選舉的區，內容區顯示「無此類選舉」，定位照樣設定
     return { level: 'sub', title: `選擇${subRegionLabel.value}`, options: [...mobileSubOptions.value] }
@@ -1278,11 +1259,9 @@ function showMoreOf(type: string) {
 // ---- 全台（沒挑縣市）的議員、鄉鎮市長、鄉鎮市民代表：伺服器端分頁 ----
 // 全台議員約 2,400、代表約 3,400，不能一次撈。依縣市順序（TAIWAN_COUNTIES）一次撈三個縣市（各一個既有的 get_politicians_by_level 請求，
 // 只帶該分頁的職位），累積到約一批（BATCH＝90 位）就停，使用者捲近底部才撈下一批。每個縣市整個撈完，才不會一組只出現一半的人。
-const NATIONWIDE_TYPES: Record<string, string[]> = {
-  [ElectionType.COUNCILOR]: [ElectionType.COUNCILOR],
-  [ElectionType.TOWNSHIP_MAYOR]: [ElectionType.TOWNSHIP_MAYOR, ElectionType.INDIGENOUS_DISTRICT_CHIEF],
-  [ElectionType.REPRESENTATIVE]: [ElectionType.REPRESENTATIVE, ElectionType.INDIGENOUS_DISTRICT_REP],
-}
+// 2026-10-31 小良哥更正：全台時議員／鄉鎮市區長／代表／村里長分頁不列全台灣的人，改成先在內容區挑縣市（見 pickFor），
+// 所以不再有「全台分批載入」。留空物件讓下面這一整套（nwActive、nationwideSection、fillNationwide）全部停用；縣市內的分批載入不受影響。
+const NATIONWIDE_TYPES: Record<string, string[]> = {}
 const nwKey = (type: string) => `${electionId.value}|${type}`
 /** 這個分頁現在走全台分頁撈法（沒挑縣市、且是那三種分頁） */
 const nwActive = (type: string) => selectedRegion.value === 'All' && !!NATIONWIDE_TYPES[type]
@@ -1462,6 +1441,8 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
       ...list.map(d => chipOf(d, shortDistrict(d), selectedDistrict.value === d, () => { selectedDistrict.value = d })),
     ]
   }
+  // 全台的議員／鄉鎮市區長／代表／村里長分頁：內容區已經是縣市選擇區，不再重複一排縣市晶片
+  if (selectedRegion.value === 'All' && type !== ElectionType.MAYOR) return []
   let row: MobileChip[]
   if (selectedRegion.value === 'All') row = countyRow()
   else if (type === ElectionType.MAYOR) row = countyRow()
@@ -1486,7 +1467,7 @@ watch(mobileChipRows, () => {
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 function emptyTextFor(type: string): string {
   if (electionLoading.value || countyWideLoading.value || nwPending(type)) return '載入中…'
-  return '無此類選舉'
+  return '尚無參選人'
 }
 
 /**
@@ -1715,7 +1696,7 @@ useSwipeTabs(swipeEl, {
         -->
         <div class="hidden">
         <div v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="(section.spec.display !== 'grid' || section.groups.length > 0) && !section.empty"
             :id="section.anchor"
@@ -1723,7 +1704,6 @@ useSwipeTabs(swipeEl, {
             :columns="gridColumns"
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
-            :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </div>
 
@@ -1731,7 +1711,7 @@ useSwipeTabs(swipeEl, {
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <div v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
             v-else-if="(section.spec.display !== 'grid' || section.groups.length > 0) && !section.empty"
             :id="section.anchor"
@@ -1739,7 +1719,6 @@ useSwipeTabs(swipeEl, {
             :columns="gridColumns"
             :election-id="electionId"
             :title-prefix="section.spec.display === 'district' ? section.spec.label : undefined"
-            :pk-link-for="groupPkLinkFor(section.spec.type)"
           ><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></ChipFilteredGroups>
         </div>
 
@@ -1813,7 +1792,7 @@ useSwipeTabs(swipeEl, {
               <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-pick-empty">{{ panel.emptyText }}</p>
             </template>
             <template v-else-if="panel.section && !panel.section.empty">
-              <PoliticianGrid v-if="panel.section.spec.display === 'grid' && panel.section.groups.length === 0" :id="panel.section.anchor" :politicians="panel.section.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(panel.section)" :pk-link="sectionPkLink(panel.section)"><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></PoliticianGrid>
+              <PoliticianGrid v-if="panel.section.spec.display === 'grid' && panel.section.groups.length === 0" :id="panel.section.anchor" :politicians="panel.section.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(panel.section)"><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></PoliticianGrid>
               <ChipFilteredGroups
                 v-else
                 :id="panel.section.anchor"
@@ -1821,7 +1800,6 @@ useSwipeTabs(swipeEl, {
                 :columns="3"
                 :election-id="electionId"
                 :title-prefix="panel.section.spec.display === 'district' ? mobileTypeLabel(panel.section.spec.type) : undefined"
-                :pk-link-for="groupPkLinkFor(panel.section.spec.type)"
               ><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></ChipFilteredGroups>
             </template>
             <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-empty">{{ panel.emptyText }}</p>
@@ -1879,7 +1857,7 @@ useSwipeTabs(swipeEl, {
           </div>
           <div v-else class="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
             <AlertCircle :size="48" class="mx-auto mb-4 opacity-50" />
-            <p>尚未偵測到議題串聯。</p>
+            <p class="font-bold">尚無資料</p>
           </div>
         </template>
       </div>

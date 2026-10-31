@@ -38,9 +38,11 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
 </script>
 
 <template>
-  <aside v-if="visible" :key="route.path" ref="root" class="w-[300px] shrink-0 self-start sticky top-0 h-screen overflow-y-auto px-0 py-4" aria-label="廣告" data-testid="ad-rail">
+  <aside v-if="visible" :key="route.path" ref="root" class="w-[300px] shrink-0 px-0 py-4" aria-label="廣告" data-testid="ad-rail">
     <!-- 地區資料統計卡的落點（選舉頁 Teleport 進來；沒有就是空的、不佔位） -->
     <div id="desk-rail-top" class="mb-4 empty:hidden"></div>
+    <!-- 只有廣告 sticky（卡片隨頁捲動）；視窗高度不夠放 600px 廣告時不 sticky，右欄不出現自己的捲軸 -->
+    <div class="h-[600px] w-[300px] overflow-hidden [@media(min-height:720px)]:sticky [@media(min-height:720px)]:top-[calc(3rem+1px+1rem)]">
     <ins
       v-if="RAIL_AD_SLOT"
       class="adsbygoogle"
@@ -49,5 +51,6 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
       :data-ad-slot="RAIL_AD_SLOT"
     ></ins>
     <div v-else class="flex h-[600px] max-h-full w-full items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400" data-testid="ad-rail-placeholder">廣告位 300 × 600</div>
+    </div>
   </aside>
 </template>

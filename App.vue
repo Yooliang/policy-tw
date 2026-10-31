@@ -96,6 +96,7 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
       <Footer class="hidden" />
       <MobileTabBar />
     </div>
-    <div v-if="showRail" class="hidden xl:block shrink-0"><AdRail /></div>
+    <!-- 右欄從桌面頁首（h-12＋下框線）下緣開始，跟內容區頂端對齊；頁首桌面版不收合，所以 sticky 的 top 也是頁首高度 -->
+    <div v-if="showRail" class="hidden xl:flex shrink-0 pt-[calc(3rem+1px)]"><AdRail /></div>
   </div>
 </template>

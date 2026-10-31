@@ -3,10 +3,9 @@ import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { isMobileViewport } from '../../composables/useMobileShell'
 import { avatarThumbUrl } from '../../lib/avatar-thumb'
-import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
-import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
+import { Megaphone, ChevronDown, ChevronUp, Check } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
 import { ballotLabel } from '../../lib/ballot-number'
@@ -29,7 +28,6 @@ const props = defineProps<{
    * 選舉頁「政見 PK」頁籤、已選好這個區塊的職位與選區、帶入這一組全部的參選人（網址規則在 lib/policy-compare.ts）。
    * 真的 <a href>；沒給就不出現（同一場不到兩位、或不知道是哪一場）。
    */
-  pkLink?: RouteLocationRaw
 }>()
 
 const { policies, elections } = useSupabase()
@@ -183,15 +181,9 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
   <div class="mb-12 scroll-mt-20">
     <h3 class="text-xl font-bold text-navy-900 mb-3 md:mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> <span class="min-w-0">{{ title }} ({{ politicians.length }})</span>
-      <RouterLink
-        v-if="pkLink"
-        :to="pkLink"
-        class="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-bold text-violet-700 hover:bg-violet-100 transition-colors"
-        data-testid="pk-link"
-      ><Scale :size="15" />政見 PK</RouterLink>
       <button
         @click="collapsed = !collapsed"
-        :class="['p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0', pkLink ? '' : 'ml-auto']"
+        :class="['p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0 ml-auto']"
         :title="collapsed ? '展開' : '收合'"
       >
         <ChevronUp v-if="!collapsed" :size="20" />
