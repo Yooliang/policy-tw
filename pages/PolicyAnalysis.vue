@@ -68,6 +68,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
     <Hero background-image="/images/heroes/ai.png">
       <template #title>{{ LINEAGE_NAME }}</template>
+      <template #description>一件事在不同任期、不同層級的來龍去脈</template>
       <template #icon><Waypoints :size="400" class="text-blue-500" /></template>
 
       <template #actions>

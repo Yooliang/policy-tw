@@ -23,9 +23,7 @@ usePageHead({
   <div>
     <Hero>
       <template #title>專案願景</template>
-      <template #description>
-        選舉過後，政見就消失了。<br/>我們想把它留下來——而且每一筆都查得到出處。
-      </template>
+      <template #description>選舉過後政見就消失了，我們想留下來並附上出處</template>
       <template #icon><Telescope :size="400" class="text-blue-500" /></template>
       <template #actions><AboutNav current="vision" /></template>
       <template #default>

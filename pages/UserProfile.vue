@@ -231,7 +231,7 @@ usePageHead({ title: '個人頁面', noindex: true })
   <div class="min-h-screen bg-slate-50">
     <Hero>
       <template #title>我的帳戶</template>
-      <template #description>查看您的貢獻、追蹤政見與帳戶設定</template>
+      <template #description>您的貢獻、追蹤政見與帳戶設定</template>
       <template #icon><User :size="400" class="text-violet-500" /></template>
 
       <template #actions>

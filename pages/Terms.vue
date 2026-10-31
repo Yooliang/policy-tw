@@ -30,9 +30,7 @@ usePageHead({
   <div>
     <Hero>
       <template #title>使用條款</template>
-      <template #description>
-        這一頁說明「正見」的資料從哪裡來、怎麼引用，以及使用上的限制。<br/>最後更新：{{ UPDATED }}
-      </template>
+      <template #description>資料從哪裡來、怎麼引用與使用限制（最後更新 {{ UPDATED }}）</template>
       <template #icon><ScrollText :size="400" class="text-amber-500" /></template>
       <template #actions><AboutNav current="terms" /></template>
       <template #default>

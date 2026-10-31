@@ -15,7 +15,6 @@
  * 頁內錨點（2026-10-05）：整個職位的 id 由呼叫端當 attribute 傳進來（落在根元素上），每一組的 id 用
  * groups[].anchor；根元素的 scroll-mt-20 讓錨點捲到時不被置頂的導覽列蓋住。
  */
-import type { RouteLocationRaw } from 'vue-router'
 import PoliticianGrid from './PoliticianGrid.vue'
 import type { Politician } from '../../types'
 
@@ -29,8 +28,6 @@ defineProps<{
   titlePrefix?: string
   columns?: 2 | 3
   electionId?: number
-  /** 每一組標題列的「政見 PK」按鈕連到哪裡（2026-10-06）；回 undefined 的組不給按鈕（選區待補、不到兩位） */
-  pkLinkFor?: (group: { label: string; people: Politician[] }) => RouteLocationRaw | undefined
 }>()
 
 </script>
@@ -45,7 +42,6 @@ defineProps<{
       :columns="columns"
       :election-id="electionId"
       :title="titlePrefix ? `${titlePrefix}・${group.label}` : group.label"
-      :pk-link="pkLinkFor?.(group)"
     ><template #icon><slot name="icon" /></template></PoliticianGrid>
   </div>
 </template>

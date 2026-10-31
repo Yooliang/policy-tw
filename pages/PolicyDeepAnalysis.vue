@@ -175,10 +175,7 @@ watch(policyId, (id) => { if (id) loadPolicyContext(String(id)) }, { immediate: 
     <Hero :back-action="() => router.push('/analysis')">
       <template #icon><Database :size="400" class="text-blue-500" /></template>
       <template #title>{{ selectedPolicy.title }}</template>
-      <template #description>
-        超越單一任期。AI 自動偵測該案件在行政體系中的「接力軌跡」，<br class="hidden lg:block" />
-        確保治理透明度與政策延續性，讓每一份行政努力都能被溯源。
-      </template>
+      <template #description>AI 偵測政策在行政體系的接力軌跡，讓努力可溯源</template>
 
       <template #actions>
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">

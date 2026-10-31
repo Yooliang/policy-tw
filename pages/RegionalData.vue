@@ -189,7 +189,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
     <Hero>
       <template #title>全台各縣市數據分佈</template>
-      <template #description>即時統計各行政區的人員分佈與政見規模，<br class="hidden lg:block" />深入了解各縣市的政治生態與治理脈絡。</template>
+      <template #description>各行政區的人員分佈與政見規模</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
       <div class="space-y-6">

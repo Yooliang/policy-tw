@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import PartyBadge from '../../components/PartyBadge.vue'
-import { ref, computed } from 'vue'
-import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { isMobileViewport } from '../../composables/useMobileShell'
 import { useSupabase } from '../../composables/useSupabase'
 import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
-import { Megaphone, ChevronDown, ChevronUp, Check, Scale } from 'lucide-vue-next'
+import { Megaphone, Check } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { thumbFor } from '../../composables/useAvatarThumb'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
@@ -28,11 +28,9 @@ const props = defineProps<{
    * 選舉頁「政見 PK」頁籤、已選好這個區塊的職位與選區、帶入這一組全部的參選人（網址規則在 lib/policy-compare.ts）。
    * 真的 <a href>；沒給就不出現（同一場不到兩位、或不知道是哪一場）。
    */
-  pkLink?: RouteLocationRaw
 }>()
 
 const { policies, elections } = useSupabase()
-const collapsed = ref(false)
 
 /**
  * 卡片（2026-09-28 維護者試作大頭照版，參考民眾黨候選人頁；2026-10-06 維護者：拿掉「大頭照／清單」切換，只留這種卡片）：
@@ -44,10 +42,34 @@ const portraitSrc = (p: Politician) => getAvatarUrl(p.avatarUrl ?? null, p.name)
 const brokenThumbs = ref<Set<string>>(new Set())
 const portraitThumb = (p: Politician) => (p.avatarUrl && !brokenThumbs.value.has(p.avatarUrl)) ? thumbFor(p.avatarUrl) : null
 function onPortraitError(p: Politician) { if (p.avatarUrl && portraitThumb(p)) brokenThumbs.value = new Set(brokenThumbs.value).add(p.avatarUrl) }
+
+/**
+ * 分批渲染（2026-10-31 手機效能）：一個職位幾百人時整批掛 DOM 會卡好幾秒。手機先畫第一屏（INITIAL 張），
+ * 捲近底部的哨兵再加一批；桌機與預渲染（SSR／hydrate 第一次）照舊全畫，HTML 與預渲染一致、連結給爬蟲走。
+ */
+const INITIAL = 18
+const STEP = 18
+const limit = ref(Number.POSITIVE_INFINITY)
+const shown = computed(() => limit.value >= props.politicians.length ? props.politicians : props.politicians.slice(0, limit.value))
+const sentinel = ref<HTMLElement | null>(null)
+let io: IntersectionObserver | undefined
+function watchSentinel() {
+  io?.disconnect()
+  if (!sentinel.value || typeof IntersectionObserver === 'undefined') return
+  io = new IntersectionObserver((entries) => {
+    if (entries.some(en => en.isIntersecting) && limit.value < props.politicians.length) limit.value += STEP
+  }, { rootMargin: '800px 0px' })
+  io.observe(sentinel.value)
+}
+onMounted(() => { if (isMobileViewport()) limit.value = INITIAL })
+// 哨兵出現（還有沒畫的）或每加一批後重新觀察：新一批畫完哨兵仍在視窗內時 observer 不會再觸發，要重接
+watch([sentinel, limit, () => props.politicians.length], async () => { await nextTick(); watchSentinel() }, { flush: 'post' })
+watch(() => props.politicians, () => { if (limit.value !== Number.POSITIVE_INFINITY) limit.value = INITIAL })
+onBeforeUnmount(() => io?.disconnect())
 // columns === 2 就是右側有篩選欄（ElectionPage 的 gridColumns）
 const portraitGridClass = computed(() => props.columns === 2
   ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'
-  : 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3')
+  : 'grid grid-cols-3 sm:grid-cols-4 md:[grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))] gap-3')
 
 /**
  * 卡片上的現任職稱（2026-10-04 維護者：職稱跟參選狀況分開）。
@@ -56,12 +78,18 @@ const portraitGridClass = computed(() => props.columns === 2
  */
 const currentTitle = (p: Politician) => officeTitles(p.offices).join('、')
 
-const getPledgeCount = (politicianId: string | number) =>
-  policies.value.filter(p =>
-    String(p.politicianId) === String(politicianId) &&
-    p.status === PolicyStatus.CAMPAIGN &&
-    (props.electionId === undefined || p.electionId === props.electionId)
-  ).length
+// 一次掃過全部政見建好「人 → 當屆承諾數」，卡片只查表（原本每張卡片各掃一次全部政見，手機追蹤裡這段自身就 4.2 秒）
+const pledgeCounts = computed(() => {
+  const m = new Map<string, number>()
+  for (const p of policies.value) {
+    if (p.status !== PolicyStatus.CAMPAIGN) continue
+    if (props.electionId !== undefined && p.electionId !== props.electionId) continue
+    const k = String(p.politicianId)
+    m.set(k, (m.get(k) ?? 0) + 1)
+  }
+  return m
+})
+const getPledgeCount = (politicianId: string | number) => pledgeCounts.value.get(String(politicianId)) ?? 0
 
 // 這一屆投完票了沒：投完票之後「已登記」那顆勾與「已登記」標籤沒有意思（人人都在選票上），只講結果
 const voted = computed(() => {
@@ -143,27 +171,13 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
 
 <template>
   <div class="mb-12 scroll-mt-20">
-    <h3 class="text-xl font-bold text-navy-900 mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
+    <h3 class="text-xl font-bold text-navy-900 mb-3 md:mb-6 flex items-center gap-2 border-l-4 border-blue-500 pl-3 text-left">
       <slot name="icon" /> <span class="min-w-0">{{ title }} ({{ politicians.length }})</span>
-      <RouterLink
-        v-if="pkLink"
-        :to="pkLink"
-        class="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-sm font-bold text-violet-700 hover:bg-violet-100 transition-colors"
-        data-testid="pk-link"
-      ><Scale :size="15" />政見 PK</RouterLink>
-      <button
-        @click="collapsed = !collapsed"
-        :class="['p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0', pkLink ? '' : 'ml-auto']"
-        :title="collapsed ? '展開' : '收合'"
-      >
-        <ChevronUp v-if="!collapsed" :size="20" />
-        <ChevronDown v-else :size="20" />
-      </button>
     </h3>
     <!-- 卡片：直式人像 -->
-    <div v-if="!collapsed && politicians.length > 0" :class="portraitGridClass">
+    <div v-if="politicians.length > 0" :class="portraitGridClass">
       <div
-        v-for="politician in politicians"
+        v-for="politician in shown"
         :key="politician.id"
         class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
       >
@@ -172,7 +186,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
             :src="portraitThumb(politician)?.src ?? portraitSrc(politician)"
             :srcset="portraitThumb(politician)?.srcset"
             :sizes="portraitThumb(politician) ? '(min-width: 1024px) 180px, 34vw' : undefined"
-            :alt="politician.name" loading="lazy" decoding="async" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
+            :alt="politician.name" loading="lazy" decoding="async" width="240" height="320" class="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
             @error="onPortraitError(politician)"
           />
           <!-- 有號次（名單公告、抽籤後）就顯示「N號」；已登記＝綠色小勾 -->
@@ -210,8 +224,9 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         </div>
       </div>
     </div>
-    <div v-else-if="!collapsed" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
+    <div v-else class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400">
       尚無此區域的{{ title }}資料
     </div>
+    <div v-if="shown.length < politicians.length" ref="sentinel" class="h-px" aria-hidden="true"></div>
   </div>
 </template>

@@ -136,7 +136,9 @@ export function listByCountyBallot<T extends ComparePerson>(list: readonly T[], 
     (typeIdx.get(a.electionType ?? '') ?? 0) - (typeIdx.get(b.electionType ?? '') ?? 0) ||
     rankOfCounty(a) - rankOfCounty(b) ||
     compareRegionName(a.subRegion ?? '', b.subRegion ?? '') ||
-    compareRegionName(a.village ?? '', b.village ?? '') ||
+    // 村里只對村里長有意義：其他職位的人物物件常帶著別場（2022 村里長）的 village，拿來排會讓有村里的人整批掉到同選區的最後
+    //（2026-10-31，復興區原住民區代表 2,3,4,5,6,8,7,1 的根因）
+    (a.electionType === '村里長' ? compareRegionName(a.village ?? '', b.village ?? '') : 0) ||
     compareBallotNo(a.candNo, b.candNo) ||
     comparePerson(a, b),
   )

@@ -59,7 +59,9 @@ export function yearShort(name: string): string | undefined {
 }
 
 /** 職位層短標籤：不帶「候選人／參選人」與選舉區括號；縣市議員 → 議員、鄉鎮市民代表 → 代表，其餘沿用職位名稱 */
-const POSITION_SHORT: Record<string, string> = { 縣市議員: '議員', 鄉鎮市民代表: '代表' }
+const POSITION_SHORT: Record<string, string> = { 縣市議員: '議員', 鄉鎮市民代表: '代表', 鄉鎮市長: '鄉鎮市區長' }
+/** 麵包屑的職位顯示名（只改畫面文字，錨點／比對仍用原名）：鄉鎮市長→鄉鎮市區長、鄉鎮市民代表→鄉鎮市區民代表 */
+const POSITION_DISPLAY: Record<string, string> = { 鄉鎮市長: '鄉鎮市區長', 鄉鎮市民代表: '鄉鎮市區民代表' }
 export function positionShort(label: string): string {
   return POSITION_SHORT[label] ?? label
 }
@@ -141,7 +143,7 @@ export function candidacyCrumbs(rec: CrumbRecord, election: CrumbElection | unde
   const group = groupOf(spec, rec, county, township)
   const anchor = page.hasSection ? sectionAnchor(spec.type, group?.key) : undefined
   crumbs.push({
-    name: `${spec.label}${candidacyWord(election?.electionDate, now)}${group ? `（${group.shown}）` : ''}`,
+    name: `${POSITION_DISPLAY[spec.label] ?? spec.label}${candidacyWord(election?.electionDate, now)}${group ? `（${group.shown}）` : ''}`,
     path: anchor ? `${page.path}#${encodeURIComponent(anchor)}` : page.path,
     short: positionShort(spec.label),
   })

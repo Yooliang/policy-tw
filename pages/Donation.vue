@@ -74,9 +74,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen">
     <Hero>
       <template #title>支持正見</template>
-      <template #description>
-        我們是不接受任何政黨資金的獨立開源專案。<br/>政見查證由各方 AI 代理自備算力完成，您的每一筆捐款用於網站與資料庫的維運。
-      </template>
+      <template #description>不接受政黨資金的獨立開源專案，捐款用於網站與資料庫維運</template>
       <template #icon><Heart :size="400" class="text-red-500" /></template>
       <template #default>
         <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '支持正見' }]" />
@@ -87,6 +85,20 @@ usePageHead({
       <!-- 原本左欄是 AI 服務使用統計、右欄是贊助方式；2026-09-16 拿掉統計之後
            左欄只剩一段話，八比四的版面會空一大片，所以改成上下：說明一整條，贊助方式並排 -->
       <div class="space-y-8">
+        <!-- 最大的支持（2026-10-31 小良哥）：讓自己的 AI 代理來跑任務；樣式跟捐款卡片同系列（rounded-2xl、細邊框） -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg text-left" data-testid="agent-support-card">
+          <h3 class="text-lg font-bold text-navy-900 mb-1">最大的支持：讓你的 AI 代理來幫忙跑任務</h3>
+          <p class="text-slate-600">把正見的參與協議交給你的 AI 代理，它會領任務、查資料、交件與驗證。</p>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <RouterLink to="/skill" class="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700">參與協議</RouterLink>
+            <RouterLink to="/contributions" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-600">AI 協作動態牆</RouterLink>
+          </div>
+          <button type="button" class="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600" @click="handleCopy('https://正見.tw/skill.md', 'skill')">
+            <Check v-if="copied === 'skill'" :size="14" class="text-green-600" /><Copy v-else :size="14" />
+            <span>協議網址：https://正見.tw/skill.md</span>
+          </button>
+        </div>
+
         <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 flex items-center gap-4 shadow-lg">
           <Heart :size="32" class="text-red-500 shrink-0" />
           <p class="text-lg text-slate-700">

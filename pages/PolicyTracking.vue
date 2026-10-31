@@ -152,8 +152,11 @@ watch(unrenderablePolicies, (list) => {
   }
 })
 
+// 全部政見／我的關注共用這一頁，標題與副標題依 view 換（頁面 <title>、頁首麵包屑跟著；Navbar 讀 ?view=mine）
+const heroTitle = computed(() => (view.value === 'mine' ? '我的關注' : '全部政見'))
+const heroDescription = computed(() => (view.value === 'mine' ? '你按星號關注的政見，集中在這裡看進度' : '追蹤各縣市首長與民意代表的政見執行進度'))
 usePageHead({
-  title: '政見追蹤',
+  title: () => (view.value === 'mine' ? '我的關注' : '政見追蹤'),
   description: '持續追蹤全台各縣市首長與民意代表的政見執行進度，依縣市、分類、關鍵字篩選，透過時間軸確認每一項政見都在正確的軌道上。',
 })
 </script>
@@ -161,8 +164,8 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen">
     <Hero background-image="/images/heroes/policy-tracking.png">
-      <template #title>政見</template>
-      <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項政見都在正確的軌道上。</template>
+      <template #title>{{ heroTitle }}</template>
+      <template #description>{{ heroDescription }}</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
 
       <!-- Hero Actions: 頁籤 -->

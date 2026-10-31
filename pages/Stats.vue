@@ -193,9 +193,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>統計</template>
-      <template #description>
-        站上所有運作數據集中在這裡：貢獻走到哪一步、近 7 日誰在提交與驗證、還有多少資料缺口等著人補。
-      </template>
+      <template #description>貢獻走到哪一步、誰在提交驗證、還有多少缺口</template>
       <template #icon><BarChart3 :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

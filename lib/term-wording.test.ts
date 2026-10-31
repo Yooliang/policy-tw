@@ -81,7 +81,8 @@ Deno.test('接線：卡片、徽章、政見頁、人物頁、追蹤頁都讀階
 
 Deno.test('品牌字不動（R2）：導覽、頁型名、站名描述仍是「政見追蹤」「政見」', async () => {
   const tracking = await source('pages/PolicyTracking.vue');
-  assertStringIncludes(tracking, "title: '政見追蹤'");
+  // 全部政見的頁面標題仍是「政見追蹤」；「我的關注」（?view=mine）換成自己的標題（2026-10-31）
+  assertStringIncludes(tracking, "view.value === 'mine' ? '我的關注' : '政見追蹤'");
   const nav = await source('components/Navbar.vue');
   assertStringIncludes(nav, '政見追蹤');
 });

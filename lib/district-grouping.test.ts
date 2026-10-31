@@ -135,7 +135,7 @@ Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選
   const dist = page.indexOf('data-testid="district-panel"');
   assert(sub > 0 && village > sub && dist > village, "順序：鄉鎮市區、村里、選區卡");
   assert(/const districtPanels = computed\(\(\) => viewMode\.value !== 'politicians' \? \[\]/.test(page));
-  assert(page.includes("title: sec.spec.label"), "選區卡每列標題是職位名");
+  assert(page.includes("title: displayLabel(sec.spec.label)"), "選區卡每列標題是職位名（顯示名：鄉鎮市區民代表等，見 displayLabel）");
   assert(page.includes("shortDistrict(district)"), "晶片顯示短寫");
   assert(/@click="toggleDistrictChip\(district\)"/.test(page) && /@click="selectedDistrict = 'All'"/.test(page));
 });

@@ -159,7 +159,7 @@ usePageHead({
 
 <template>
   <div class="min-h-screen pb-20">
-    <Hero background-image="/images/hero-background.png">
+    <Hero large background-image="/images/hero-background.png">
       <template #title>匯聚多元視角，智能解析政見<br /><span class="text-blue-400">讓正確被看見</span></template>
       <template #description>正見是一個超越黨派色彩的政策歷史追蹤平台。我們記錄政見的提出與執行，利用 AI 進行客觀分析，消除資訊不對稱。</template>
     </Hero>

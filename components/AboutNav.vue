@@ -20,7 +20,10 @@ const ITEMS: Array<{ key: AboutPage; to: string; label: string; icon: typeof Inf
 </script>
 
 <template>
+  <!-- 桌面（md 以上）左邊延伸欄已經有同一組連結，這排只留給手機（手機沒有延伸欄）；contents 讓外包的 div 不影響版面 -->
+  <div class="contents md:hidden">
   <HeroAction v-for="item in ITEMS" :key="item.key" :to="item.key === current ? undefined : item.to" :active="item.key === current">
     <component :is="item.icon" :size="16" /> {{ item.label }}
   </HeroAction>
+  </div>
 </template>

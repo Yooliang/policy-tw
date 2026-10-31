@@ -1,6 +1,6 @@
 import { displayCurrentPosition, participationLabel } from '../lib/participation-label'
 import { electionArea } from '../lib/election-area'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
 import type {
   Election, Politician, Policy, Discussion, TrackingLog, PoliticianElectionData,
@@ -13,6 +13,7 @@ import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
 import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
+import { idbGet, idbPut } from '../lib/idb-cache'
 import { positionsToLoad } from '../lib/election-levels'
 import { electionPageLoadArgs } from '../lib/election-prefetch'
 import { SPECIAL_MUNICIPALITIES } from '../lib/election-regions'
@@ -34,8 +35,9 @@ const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
 
 // Global shared state
 const elections = ref<Election[]>([])
-const politicians = ref<Politician[]>([])  // 目前已載入的候選人（可能來自多個選舉）
-const policies = ref<Policy[]>([])
+// 2026-10-31：候選人／政見是整批換掉的不可變資料（要改一律整個陣列重指派），用 shallowRef 免掉幾千個物件的深層代理（手機追蹤裡 get/track 佔了 15 秒）
+const politicians = shallowRef<Politician[]>([])  // 目前已載入的候選人（可能來自多個選舉）
+const policies = shallowRef<Policy[]>([])
 const discussions = ref<Discussion[]>([])
 const categories = ref<string[]>([])
 const locations = ref<string[]>([])
@@ -666,7 +668,30 @@ const inflightLoads = new Map<string, Promise<Politician[]>>()
  */
 let levelRpcMissing = false
 
-function fetchPoliticianPage(
+/**
+ * 參選人清單頁的 stale-while-revalidate（2026-10-31）：10 分鐘內有 IndexedDB 快取就先用快取回（頁面立刻有第一批卡片），
+ * 同時背景重抓一份寫回快取（下次開頁就是新的）；沒快取或過期就照常打網路。只在瀏覽器端、讀寫失敗當沒有快取。
+ */
+async function fetchPoliticianPage(
+  electionId: number,
+  region: string | null,
+  subRegion: string | null,
+  electionTypes: readonly string[],
+  from: number,
+  to: number,
+): Promise<PageResponse<RawPolitician>> {
+  const key = `pol|${electionId}|${region ?? ''}|${subRegion ?? ''}|${[...electionTypes].sort().join('+')}|${from}-${to}`
+  const hit = typeof window === 'undefined' ? undefined : await idbGet<PageResponse<RawPolitician>>(key)
+  if (hit) {
+    void fetchPoliticianPageNet(electionId, region, subRegion, electionTypes, from, to).then(r => idbPut(key, r)).catch(() => {})
+    return hit
+  }
+  const fresh = await fetchPoliticianPageNet(electionId, region, subRegion, electionTypes, from, to)
+  if (typeof window !== 'undefined') void idbPut(key, fresh)
+  return fresh
+}
+
+function fetchPoliticianPageNet(
   electionId: number,
   region: string | null,
   subRegion: string | null,
@@ -716,10 +741,29 @@ function fetchPoliticianPage(
  *   嘉義縣大林鎮           708 位 → 43 位
  *   台南市北區           1,240 位（兩頁）→ 58 位
  */
-async function loadPoliticiansByElection(
+// 2026-10-31：同參數的載入共用同一個 promise（追蹤裡 get_politicians_by_level／get_election_types 各抓兩次，
+// 是頁面 watcher 與晶片列同時發同一組請求）；結束就移除，之後的呼叫走 loadedRegions 內存快取
+const politiciansInflight = new Map<string, Promise<Politician[]>>()
+const electionTypesInflight = new Map<number, Promise<RawElectionTypeRow[]>>()
+function loadPoliticiansByElection(
   electionId: number,
   region: string = 'All',
   subRegion: string = 'All',
+  onlyTypes?: readonly string[],
+): Promise<Politician[]> {
+  const key = `${electionId}|${region}|${subRegion}|${onlyTypes ? onlyTypes.join('+') : ''}`
+  const running = politiciansInflight.get(key)
+  if (running) return running
+  const p = loadPoliticiansByElectionImpl(electionId, region, subRegion, onlyTypes).finally(() => { politiciansInflight.delete(key) })
+  politiciansInflight.set(key, p)
+  return p
+}
+async function loadPoliticiansByElectionImpl(
+  electionId: number,
+  region: string = 'All',
+  subRegion: string = 'All',
+  /** 指定就只撈這幾種職位（跟這一屆有的職位取交集）：手機版「鄉鎮列／村里列的全部」要一次看整個縣市的代表、村里長，分層載入預設不帶這兩種 */
+  onlyTypes?: readonly string[],
 ): Promise<Politician[]> {
   // 切換不同選舉時，清掉上一個選舉載進來的候選人避免無限膨脹——
   // 但「有政見的人物」要留著：全清會把 fetchAll 載進來的那批一起清掉，
@@ -735,7 +779,7 @@ async function loadPoliticiansByElection(
 
   // 快取鍵要帶鄉鎮：同一個縣市的兩個鄉鎮撈的是不同職位、不同範圍，
   // 只用 electionId_region 當鍵會讓第二個鄉鎮直接吃到第一個的快取，名單是別人的。
-  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}_${subRegion}`
+  const cacheKey = `${CACHE_KEY_PREFIX_ELECTION}${electionId}_${region}_${subRegion}${onlyTypes ? '_' + onlyTypes.join('+') : ''}`
 
   // 已經載入過就跳過（僅內存快取，不用 IndexedDB）
   if (loadedRegions.value.has(cacheKey)) {
@@ -745,7 +789,7 @@ async function loadPoliticiansByElection(
   // 同一組參數已經有請求在飛（路由解析時預先發起的，或同一頁的重複呼叫）就接手同一個 promise，不重複請求。
   const running = inflightLoads.get(cacheKey)
   if (running) return running
-  const job = runLoadPoliticians(electionId, region, subRegion, cacheKey)
+  const job = runLoadPoliticians(electionId, region, subRegion, cacheKey, onlyTypes)
   inflightLoads.set(cacheKey, job)
   try {
     return await job
@@ -760,6 +804,8 @@ async function runLoadPoliticians(
   region: string,
   subRegion: string,
   cacheKey: string,
+  /** 指定就只撈這幾種職位（手機／桌面分頁面板要一次看整個縣市的代表、村里長，分層載入預設不帶這兩種） */
+  onlyTypes?: readonly string[],
 ): Promise<Politician[]> {
   try {
     // 直接從 DB 載入（不使用 IndexedDB 快取）
@@ -769,7 +815,7 @@ async function runLoadPoliticians(
     // 沒正規化就是靜靜地回 0 筆。RPC 那一端也做同樣的轉換（migration 20261005000001）。
     const regionParam = region === 'All' ? null : normalizeRegionName(region)
     const subRegionParam = subRegion === 'All' ? null : normalizeRegionName(subRegion)
-    const wantedTypes = positionsToLoad({
+    const wantedTypes = onlyTypes ?? positionsToLoad({
       region,
       subRegion,
       isSpecialMunicipality: SPECIAL_MUNICIPALITIES.includes(region as typeof SPECIAL_MUNICIPALITIES[number]),
@@ -838,7 +884,7 @@ async function runLoadPoliticians(
 
     // 新增不存在的候選人
     const newPols = Array.from(polsMap.values())
-    politicians.value.push(...newPols)
+    if (newPols.length > 0) politicians.value = [...politicians.value, ...newPols]
     loadedRegions.value.add(cacheKey)
     loadedElections.value.add(electionId)
 
@@ -1065,7 +1111,7 @@ export function useSupabase() {
       // 加入到 state（避免重複）
       const existingIds = new Set(politicians.value.map(p => p.id))
       if (!existingIds.has(pol.id)) {
-        politicians.value.push(pol)
+        politicians.value = [...politicians.value, pol]
       }
 
       return pol
@@ -1122,7 +1168,7 @@ export function useSupabase() {
 
       const existingIds = new Set(policies.value.map(p => p.id))
       if (!existingIds.has(mapped.id)) {
-        policies.value.push(mapped)
+        policies.value = [...policies.value, mapped]
       }
 
       return mapped

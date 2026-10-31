@@ -117,14 +117,14 @@ Deno.test("鄉鎮市長：年 › 縣市 › 鄉鎮 › 鄉鎮市長候選人，
     { name: "2026 九合一選舉", path: "/election/2026", short: "2026" },
     { name: "金門縣", path: `/election/2026/${enc("金門縣")}`, short: "金門縣" },
     { name: "金沙鎮", path: township, short: "金沙鎮" },
-    { name: "鄉鎮市長候選人", path: `${township}#${enc("鄉鎮市長")}`, short: "鄉鎮市長" },
+    { name: "鄉鎮市區長候選人", path: `${township}#${enc("鄉鎮市長")}`, short: "鄉鎮市區長" },
   ]);
 });
 
 Deno.test("鄉鎮市民代表：同樣在鄉鎮之下", () => {
   const rec: CrumbRecord = { electionId: 2026, electionType: "鄉鎮市民代表", region: "嘉義縣", subRegion: "大林鎮" };
   const crumbs = candidacyCrumbs(rec, E2026, NOW);
-  assertEquals(crumbs.map((c) => c.name), ["2026 九合一選舉", "嘉義縣", "大林鎮", "鄉鎮市民代表候選人"]);
+  assertEquals(crumbs.map((c) => c.name), ["2026 九合一選舉", "嘉義縣", "大林鎮", "鄉鎮市區民代表候選人"]);
 });
 
 Deno.test("原住民區代表：鄉鎮取「那瑪夏區」，括號只留選舉區，錨點用完整選區字串", () => {
@@ -320,7 +320,7 @@ Deno.test("手機短標籤：議員／代表縮短，其餘沿用；人名層與
   assertEquals(shorts({ electionId: 2026, electionType: "縣市議員", region: "嘉義市" }), ["2026", "嘉義市", "議員"]);
   assertEquals(shorts({ electionId: 2026, electionType: "縣市長", region: "嘉義市" }), ["2026", "嘉義市", "縣市長"]);
   assertEquals(shorts({ electionId: 2026, electionType: "鄉鎮市民代表", region: "金門縣", subRegion: "金沙鎮" }), ["2026", "金門縣", "金沙鎮", "代表"]);
-  assertEquals(shorts({ electionId: 2026, electionType: "鄉鎮市長", region: "金門縣", subRegion: "金沙鎮" }), ["2026", "金門縣", "金沙鎮", "鄉鎮市長"]);
+  assertEquals(shorts({ electionId: 2026, electionType: "鄉鎮市長", region: "金門縣", subRegion: "金沙鎮" }), ["2026", "金門縣", "金沙鎮", "鄉鎮市區長"]);
   assertEquals(shorts({ electionId: 2022, electionType: "村里長", region: "金門縣", subRegion: "金城鎮", village: "東門里" }, E2022), ["2022", "金門縣", "金城鎮", "村里長"]);
   // 年層取不到四位數字年份就不給短標籤
   assertEquals(candidacyCrumbs({ electionId: 1 }, { name: "全名" }, NOW)[0].short, undefined);

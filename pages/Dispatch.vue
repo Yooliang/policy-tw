@@ -16,7 +16,7 @@ import {
 // console_timeline_elections()、console_timeline()、console_passive()（20261010110000 起），資料與主控台同一份。
 // 拿掉主控台的下載、臨時開關／覆寫、段落編號與「開」標籤；長條圖自帶刻度、圖例與滑過提示。維護者：正式頁不自動重新整理。
 
-usePageHead({ title: '派工日程', description: '各類任務在一場選舉前後的哪一段時間開放派工', noindex: true })
+usePageHead({ title: '任務排派日程', description: '各類任務在一場選舉前後的哪一段時間開放派工', noindex: true })
 
 const elections = ref<TimelineElection[]>([])
 const electionId = ref('')
@@ -243,10 +243,8 @@ const FUNNEL: [string, string][] = [
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>派工日程</template>
-      <template #description>
-        每一類任務在選舉前後的哪一段時間開放派工，選一場選舉就看得到它的日程，也看得到現在還排了多少件。
-      </template>
+      <template #title>任務排派日程</template>
+      <template #description>各類任務在選舉前後何時開放派工，與目前排了多少件</template>
       <template #icon><CalendarRange :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

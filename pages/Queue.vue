@@ -34,7 +34,7 @@ const loading = ref(false)
 const refreshedAt = ref<Date | null>(null)
 const groupBy = ref<'type' | 'source'>('type')
 
-usePageHead({ title: '派工佇列', description: '接下來 60 筆會被領走的順序', noindex: true })
+usePageHead({ title: '派工隊列', description: '接下來 60 筆會被領走的順序', noindex: true })
 
 async function load() {
   if (loading.value) return
@@ -244,9 +244,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>派工隊列</template>
-      <template #description>
-        代理下一筆會拿到什麼、現在排了多少件、卡在哪裡，都在這裡公開。
-      </template>
+      <template #description>代理下一筆拿什麼、排了多少件、卡在哪裡</template>
       <template #icon><ListOrdered :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

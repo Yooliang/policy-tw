@@ -5,6 +5,7 @@ import { Clock, Grid3x3, Layers, LayoutGrid, Megaphone, Scale } from 'lucide-vue
 import Hero from './Hero.vue'
 import HeroAction from './HeroAction.vue'
 import GlobalRegionSelector from './GlobalRegionSelector.vue'
+import ElectionViewPills from './ElectionViewPills.vue'
 import { VIEW_TABS, type ElectionViewMode } from '../lib/election-view-tabs'
 import { electionYearOfDate } from '../lib/election-route'
 import type { Election } from '../types'
@@ -26,6 +27,8 @@ const props = defineProps<{
   viewLink?: (view: ElectionViewMode) => RouteLocationRaw
   county?: string
   township?: string
+  /** 手機版縮小標題區用的鄉鎮；沒給就只寫縣市（縣市層分頁不暗示候選人屬於某鄉鎮） */
+  mobileTownship?: string
 }>()
 defineEmits<{ select: [view: ElectionViewMode] }>()
 
@@ -47,7 +50,20 @@ const timeLeft = computed(() => {
 </script>
 
 <template>
-  <Hero full-width :background-image="heroBackgroundImage">
+  <!-- 手機版（md 以下）：縮小的標題區，一行標題＋一行可橫滑的檢視膠囊，約 90px；桌機的大標題區照舊 -->
+  <!-- before：背景往上延伸 6rem 到頁首／吸頂分頁條後方，頁首收起時露出的是同一個底色，不是空白（頁首與分頁條 z 較高、不透明，平時蓋住它） -->
+  <section class="md:hidden relative bg-navy-900 py-3 text-white before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-24 before:bg-navy-900" data-testid="mobile-hero">
+    <div class="mb-2 truncate px-4 text-base font-black">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
+    <ElectionViewPills dark :view="view" :has-matrix="hasMatrix" :election-seg="electionSeg" :view-link="viewLink" @select="$emit('select', $event)" />
+  </section>
+  <!-- 桌面版（md 以上）：細標題列。檢視切換、縣市選擇都在左邊延伸欄，這裡不再重複膠囊與縣市選擇器 -->
+  <section class="max-md:hidden flex items-center gap-4 border-b border-slate-200 bg-white px-6 py-4" data-testid="desk-hero">
+    <h1 class="min-w-0 truncate text-xl font-black text-navy-900">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-2 text-amber-500">候選人與政見</span></h1>
+    <!-- 排序工具列（桌面）：跟標題同一列、靠右、垂直置中；標題過長時標題截斷、工具列不被擠壓換行（2026-10-31） -->
+    <div class="ml-auto shrink-0"><slot name="desk-actions" /></div>
+  </section>
+  <!-- 大標題區只留在 DOM（預渲染的 h1 與連結給爬蟲），畫面上不顯示 -->
+  <Hero class="hidden" full-width :background-image="heroBackgroundImage">
     <template #title>
       <div class="relative w-full">
         <div v-if="county">
@@ -99,6 +115,6 @@ const timeLeft = computed(() => {
     </template>
 
     <!-- 縣市是真連結（/election/2026/台北市），點起來跟以前一樣切縣市，爬蟲也走得到 -->
-    <GlobalRegionSelector :current="region" :link-for="regionLink" />
+    <GlobalRegionSelector class="max-md:hidden" :current="region" :link-for="regionLink" />
   </Hero>
 </template>

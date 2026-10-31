@@ -74,11 +74,7 @@ const grouped = computed(() => {
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>查證來源清單</template>
-      <template #description>
-        代理常只查中央社、自由時報首頁就回「查無」——其實政黨官網、議會官網、政府與中選會網站
-        查得到候選人照片、學經歷、選區、政見。這份清單把它們列出來；有人物對象的任務也會依政黨、
-        縣市、選舉別自動把對得上的來源附進任務內容。
-      </template>
+      <template #description>政黨、議會、政府與中選會網站，查得到候選人資料</template>
       <template #icon><Link2 :size="400" class="text-blue-500" /></template>
       <template #default>
         <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '查證來源清單' }]" />

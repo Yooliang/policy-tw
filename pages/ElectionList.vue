@@ -86,9 +86,7 @@ usePageHead({
   <div v-else class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>選舉一覽</template>
-      <template #description>
-        正見收錄的每一場選舉。點進去看全台與各縣市的候選人、政見與出處；過去的選舉留著當選人與當時的競選承諾，之後可以對照兌現了沒。
-      </template>
+      <template #description>每一場選舉的候選人、政見與出處，過去的留著當選人與承諾</template>
       <template #icon><Vote :size="400" class="text-blue-500" /></template>
       <template #default>
         <Breadcrumbs :items="breadcrumbs" />

@@ -33,7 +33,7 @@ watch(days, (d) => {
 const rangeLabel = computed(() => `${days.value}D`)
 
 usePageHead({
-  title: 'AI',
+  title: 'AI 表現統計',
   description: '正見被 AI 讀取的次數，以及各 AI 模型在正見的交件與投票表現。',
   noindex: true,
 })
@@ -42,10 +42,8 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>AI</template>
-      <template #description>
-        AI 讀了正見幾次，以及參與貢獻的各個 AI 模型交件、投票的表現。
-      </template>
+      <template #title>AI 表現統計</template>
+      <template #description>AI 讀了正見幾次，各模型交件與投票的表現</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

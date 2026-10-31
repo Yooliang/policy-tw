@@ -55,7 +55,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20" data-testid="party-list">
     <Hero>
       <template #title>政黨一覽</template>
-      <template #description>正見收錄的人物所屬的政黨。點進去看各黨的現職首長、民意代表與歷屆參選人。<br />政黨名稱與狀態依<a href="https://party.moi.gov.tw/PartyMain.aspx?n=16100&amp;sms=13073" target="_blank" rel="noopener" class="underline hover:text-white">內政部政黨資訊網的政黨名冊</a>。</template>
+      <template #description>各黨的現職首長、民代與歷屆參選人，名冊依<a href="https://party.moi.gov.tw/PartyMain.aspx?n=16100&amp;sms=13073" target="_blank" rel="noopener" class="underline hover:text-white">內政部政黨資訊網</a></template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
       <template #default>
         <Breadcrumbs :items="breadcrumbs" />

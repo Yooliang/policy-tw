@@ -191,6 +191,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Dispatch.vue'),
   },
   {
+    // 手機版搜尋頁（底部分頁列的「搜尋」）：瀏覽器渲染、不收錄
+    path: '/search',
+    name: 'search',
+    component: () => import('../pages/SearchPage.vue'),
+  },
+  {
     path: '/stats',
     name: 'stats',
     component: () => import('../pages/Stats.vue'),

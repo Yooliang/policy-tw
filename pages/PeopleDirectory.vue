@@ -46,7 +46,7 @@ usePageHead({
     if (isIndex.value) {
       return `正見收錄的 ${fmt(total.value)} 位政治人物（含全台村里長），依姓氏筆畫分組：點姓氏看那一組的名單，點姓名看人物的參選紀錄、政見與出處。`
     }
-    if (!group.value) return '人物一覽：依姓氏筆畫分組的政治人物名單。'
+    if (!group.value) return '人物一覽：依姓氏筆畫分組的政治人物'
     const chars = sections.value.slice(0, 12).map((s) => s.char).join('、')
     return `姓氏${group.value.label}的 ${fmt(group.value.entries.length)} 位政治人物：${chars}${sections.value.length > 12 ? '等' : ''}姓。每位附現任職稱或最近一次參選，點姓名看參選紀錄、政見與出處。`
   },
@@ -74,8 +74,8 @@ usePageHead({
     <Hero>
       <template #title>{{ isIndex ? '人物一覽' : `姓氏${groupLabel(groupKey)}` }}</template>
       <template #description>
-        <template v-if="isIndex">正見收錄的每一位政治人物（含全台村里長）。點姓氏看那一組的名單，點姓名到人物頁看參選紀錄、政見與出處。</template>
-        <template v-else-if="group">姓氏{{ group.label }}的 {{ fmt(group.entries.length) }} 位政治人物。點姓名到人物頁看參選紀錄、政見與出處。</template>
+        <template v-if="isIndex">每一位政治人物，點姓氏看名單、點姓名看紀錄與政見</template>
+        <template v-else-if="group">姓氏{{ group.label }}的 {{ fmt(group.entries.length) }} 位政治人物，點姓名看紀錄與政見</template>
         <template v-else>依姓氏筆畫分組的政治人物名單。</template>
       </template>
       <template #icon><Users :size="400" class="text-blue-500" /></template>
