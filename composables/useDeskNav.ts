@@ -14,6 +14,8 @@ export interface DeskItem {
   /** 有 to 就是連結（預渲染也走得到）；沒有就是按鈕，點了呼叫 select */
   to?: string
   select?: () => void
+  /** 淡色（仍可點）：例如直轄市一般區沒有的選舉類別 */
+  dim?: boolean
 }
 export interface DeskGroup {
   key: string

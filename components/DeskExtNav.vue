@@ -115,7 +115,7 @@ watch([groups, () => route.fullPath], () => {
   void nextTick(() => { rootEl.value?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' }) })
 }, { flush: 'post' })
 
-const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-left text-sm font-bold transition-colors', on ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-navy-900']
+const itemClass = (on: boolean, dim = false) => [dim ? 'opacity-50' : '', 'block w-full rounded-lg px-3 py-1.5 text-left text-sm font-bold transition-colors', on ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-navy-900']
 </script>
 
 <template>
@@ -134,7 +134,7 @@ const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-le
               <li v-for="item in block" :key="item.key">
                 <a v-if="item.to && FULL_LOAD.has(item.to)" :href="item.to" :class="itemClass(isOn(item))" :data-active="isOn(item) ? 'true' : 'false'" :aria-current="isOn(item) ? 'page' : undefined">{{ item.label }}</a>
                 <RouterLink v-else-if="item.to" :to="item.to" :class="itemClass(isOn(item))" :data-active="isOn(item) ? 'true' : 'false'" :aria-current="isOn(item) ? 'page' : undefined">{{ item.label }}</RouterLink>
-                <button v-else type="button" :class="itemClass(item.active)" :data-active="item.active ? 'true' : 'false'" :aria-pressed="item.active" @click="onPick(item, $event)">{{ item.label }}</button>
+                <button v-else type="button" :class="itemClass(item.active, item.dim)" :data-dim="item.dim ? 'true' : undefined" :data-active="item.active ? 'true' : 'false'" :aria-pressed="item.active" @click="onPick(item, $event)">{{ item.label }}</button>
               </li>
             </ul>
           </template>

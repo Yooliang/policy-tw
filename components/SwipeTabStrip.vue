@@ -6,7 +6,7 @@ import { swipeStrips } from '../composables/useSwipeTabs'
 // 內容區的左右滑動由 useSwipeTabs 負責；底線是一個獨立元素，拖曳時由手勢直接改它的 transform（不經 Vue 響應式），
 // 放開後用同一段時間移到定位的分頁。
 const props = defineProps<{
-  tabs: { key: string; label: string }[]
+  tabs: { key: string; label: string; dim?: boolean }[]
   modelValue: string
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', key: string): void }>()
@@ -71,7 +71,8 @@ watch(() => props.tabs.length, async () => { await nextTick(); measure(); place(
       :aria-selected="t.key === modelValue"
       :data-tab="t.key"
       class="relative shrink-0 grow px-4 py-3 text-[15px] font-bold whitespace-nowrap transition-colors"
-      :class="t.key === modelValue ? 'text-navy-900' : 'text-slate-400'"
+      :class="t.key === modelValue ? (t.dim ? 'text-slate-400' : 'text-navy-900') : (t.dim ? 'text-slate-300' : 'text-slate-400')"
+      :data-dim="t.dim ? 'true' : undefined"
       @click="emit('update:modelValue', t.key)"
     >
       {{ t.label }}
