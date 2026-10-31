@@ -36,8 +36,8 @@ const POLICY: DeskGroup[] = [
 // 「貢獻統計」就是 /stats（BoardNav 的「統計」），所以看板組不再重複放「統計」。
 const JOIN: DeskGroup[] = [
   { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
-  { key: 'board', title: '看板', blocks: [[link('contributions', '貢獻', '/contributions'), link('map', '地圖', '/stats/map'), link('ai', 'AI', '/ai')]] },
-  { key: 'work', title: '工作', blocks: [[link('tasks', '任務', '/tasks'), link('queue', '隊列', '/queue'), link('dispatch', '日程', '/dispatch')]] },
+  { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('ai', 'AI 表現統計', '/ai')]] },
+  { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch')]] },
 ]
 const ABOUT: DeskGroup[] = [
   { key: 'about', title: '關於', blocks: [[link('vision', '關於正見', '/vision'), link('contact', '聯絡我們', '/contact'), link('terms', '使用條款', '/terms'), link('privacy', '隱私權政策', '/privacy'), link('donation', '贊助支持', '/donation')]] },
@@ -77,12 +77,13 @@ const title = computed(() => {
     const y = e ? electionYearOfDate(e.electionDate) : null
     return y ? `${y} 選舉` : '選舉'
   }
-  return ({ policy: '政見', join: '參與', about: '關於', home: '正見', search: '搜尋' } as Record<string, string>)[section.value ?? ''] ?? '正見'
+  return ({ policy: '政見', join: '參與', about: '關於', home: '關於', search: '搜尋' } as Record<string, string>)[section.value ?? ''] ?? '正見'
 })
 const groups = computed<DeskGroup[]>(() => {
   switch (section.value) {
     case 'policy': return [...POLICY, ...policyCategories.value]
     case 'join': return JOIN
+    case 'home':
     case 'about': return ABOUT
     case 'search': return [moreElection]
     case 'election': if (overviewOnly.value) return [moreElection]; return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組

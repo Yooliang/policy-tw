@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { House, TrendingUp, Milestone, Search, Info } from 'lucide-vue-next'
+import { House, TrendingUp, Milestone, Search } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { sectionOfRoute, type DeskSection } from '../lib/desk-sections'
@@ -14,7 +14,9 @@ import { useSupabase } from '../composables/useSupabase'
  */
 const route = useRoute()
 const { getActiveElection } = useSupabase()
-const current = computed<DeskSection | null>(() => sectionOfRoute(route.name))
+const rawSection = computed<DeskSection | null>(() => sectionOfRoute(route.name))
+// 首頁與「關於」合併成同一項（2026-10-31）：關於區的頁面也讓首頁那顆亮；首頁的延伸欄顯示關於那組
+const current = computed<DeskSection | null>(() => (rawSection.value === 'about' ? 'home' : rawSection.value))
 const electionTo = computed(() => {
   const e = getActiveElection()
   return e ? electionPath(electionSegment(e)) : '/elections'
@@ -62,12 +64,6 @@ const itemClass = (on: boolean) => ['group relative flex w-14 flex-col items-cen
       <RouterLink to="/search" :class="itemClass(current === 'search')" :aria-current="current === 'search' ? 'page' : undefined" aria-label="搜尋人物與政見" data-testid="desk-rail-search">
         <Search :size="22" />
         <span>搜尋</span>
-      </RouterLink>
-    </div>
-    <div class="mt-auto flex flex-col items-center gap-1">
-      <RouterLink to="/vision" :class="itemClass(current === 'about')" :aria-current="current === 'about' ? 'page' : undefined" data-testid="desk-rail-about">
-        <Info :size="22" :stroke-width="current === 'about' ? 2.6 : 2" />
-        <span>關於</span>
       </RouterLink>
     </div>
   </nav>

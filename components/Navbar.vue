@@ -38,7 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   elections: '選舉', election: '選舉', 'election-region': '選舉', 'election-township': '選舉', 'election-matrix': '政見矩陣',
   politicians: '政治人物', 'politicians-group': '政治人物', parties: '政黨', party: '政黨', community: '公民提問', discussion: '公民提問',
   donation: '贊助', vision: '願景', privacy: '隱私權政策', terms: '服務條款', contact: '聯絡我們', 'regional-data': '地方資料',
-  skill: 'Skill', sources: '資料來源', stats: '參與貢獻', search: '搜尋', 'stats-map': '參與貢獻', contributions: '貢獻紀錄', profile: '帳號',
+  skill: 'Skill', sources: '資料來源', stats: '參與貢獻', search: '搜尋', 'stats-map': '參與貢獻', contributions: 'AI 協作動態牆', profile: '帳號',
 }
 const isHome = computed(() => route.name === 'home' || route.path === '/')
 const isElectionRoute = computed(() => ['election', 'election-region', 'election-township'].includes(String(route.name)))

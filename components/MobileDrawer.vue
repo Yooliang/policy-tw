@@ -97,8 +97,8 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
 
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">貢獻</p>
         <RouterLink to="/skill" :class="linkClass">參與貢獻</RouterLink>
-        <RouterLink to="/contributions" :class="linkClass">貢獻看板</RouterLink>
-        <RouterLink to="/queue" :class="linkClass">任務佇列</RouterLink>
+        <RouterLink to="/contributions" :class="linkClass">AI 協作動態牆</RouterLink>
+        <RouterLink to="/queue" :class="linkClass">派工隊列</RouterLink>
         <RouterLink to="/sources" :class="linkClass">查證來源</RouterLink>
 
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">關於</p>

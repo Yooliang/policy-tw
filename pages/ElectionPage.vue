@@ -623,6 +623,15 @@ function buildSection(spec: PositionSpec): LevelSection {
     const shown = selectedDistrict.value === 'All' ? people : people.filter(c => c.subRegion === selectedDistrict.value)
     return { spec, people, shown, groups: [], chips: districtsOf(people, spec.type), empty: people.length === 0, anchor }
   }
+  if (spec.type === ElectionType.MAYOR && selectedRegion.value === 'All' && people.length > 0) {
+    // 全台的縣市長一百位上下，攤平了找不到自己的縣市：依縣市分組（順序照縣市標準排序），用跟議員依選舉區分組同一個元件與樣式；
+    // 選了某縣市時名單已先篩過，只剩一組（照舊畫平面清單，不分組）。沒填縣市的收進最後一組
+    const by = new Map<string, Politician[]>()
+    for (const p of people) { const k = p.region && TAIWAN_COUNTIES.includes(p.region as typeof TAIWAN_COUNTIES[number]) ? p.region : '其他'; (by.get(k) ?? by.set(k, []).get(k)!).push(p) }
+    const order = [...TAIWAN_COUNTIES as readonly string[], '其他']
+    const groups = withAnchors(spec, order.filter(k => by.has(k)).map(k => ({ label: k, people: by.get(k)! })))
+    if (groups.length > 1) return { spec, people, shown: people, groups, chips: [], empty: false, anchor }
+  }
   return { spec, people, shown: people, groups: [], chips: [], empty: people.length === 0, anchor }
 }
 
@@ -1706,9 +1715,9 @@ useSwipeTabs(swipeEl, {
         -->
         <div class="hidden">
         <div v-for="section in thisLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
-            v-else-if="section.spec.display !== 'grid' && !section.empty"
+            v-else-if="(section.spec.display !== 'grid' || section.groups.length > 0) && !section.empty"
             :id="section.anchor"
             :groups="section.groups"
             :columns="gridColumns"
@@ -1722,9 +1731,9 @@ useSwipeTabs(swipeEl, {
         <p v-if="levelPlan.scope === 'township' && isSpecialMunicipality && levelPlan.thisLevel.length === 0" class="text-xs text-slate-400 mb-4">{{ selectedSubRegion }}的區長由市政府指派，不是選舉產生。</p>
 
         <div v-for="section in nextLevelSections" :key="section.spec.type">
-          <PoliticianGrid v-if="section.spec.display === 'grid' && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
+          <PoliticianGrid v-if="section.spec.display === 'grid' && section.groups.length === 0 && !section.empty" :id="section.anchor" :politicians="section.shown" :columns="gridColumns" :election-id="electionId" :title="`${displayLabel(section.spec.label)}參選人`" :pk-link="sectionPkLink(section)"><template #icon><component :is="LEVEL_ICONS[section.spec.icon]" :class="section.spec.iconClass" /></template></PoliticianGrid>
           <ChipFilteredGroups
-            v-else-if="section.spec.display !== 'grid' && !section.empty"
+            v-else-if="(section.spec.display !== 'grid' || section.groups.length > 0) && !section.empty"
             :id="section.anchor"
             :groups="section.groups"
             :columns="gridColumns"
@@ -1804,7 +1813,7 @@ useSwipeTabs(swipeEl, {
               <p v-else class="py-10 text-center text-sm text-slate-500" data-testid="mobile-pick-empty">{{ panel.emptyText }}</p>
             </template>
             <template v-else-if="panel.section && !panel.section.empty">
-              <PoliticianGrid v-if="panel.section.spec.display === 'grid'" :id="panel.section.anchor" :politicians="panel.section.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(panel.section)" :pk-link="sectionPkLink(panel.section)"><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></PoliticianGrid>
+              <PoliticianGrid v-if="panel.section.spec.display === 'grid' && panel.section.groups.length === 0" :id="panel.section.anchor" :politicians="panel.section.shown" :columns="3" :election-id="electionId" :title="mobileSectionTitle(panel.section)" :pk-link="sectionPkLink(panel.section)"><template #icon><component :is="LEVEL_ICONS[panel.section.spec.icon]" :class="panel.section.spec.iconClass" /></template></PoliticianGrid>
               <ChipFilteredGroups
                 v-else
                 :id="panel.section.anchor"

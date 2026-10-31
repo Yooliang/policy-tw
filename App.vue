@@ -27,9 +27,10 @@ const route = useRoute()
 const { width } = useDeskLayout()
 const { drawerOpen: deskDrawer, closeDeskDrawer } = useDeskNav()
 const isDesk = computed(() => width.value >= DESK_MD)
-const showRail = computed(() => width.value >= DESK_XL && !adHiddenPath(route.path))
+// 右欄：首頁不放，其他頁（包含沒有地區資料的頁，那就只放廣告）都放，排除清單見 lib/ad-pages.ts
+const showRail = computed(() => width.value >= DESK_XL && route.path !== '/' && !adHiddenPath(route.path))
 // 首頁沒有子項目，延伸欄整欄收起
-const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null && s !== 'home' })
+const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null })
 const drawerShown = computed(() => deskDrawer.value && hasExt.value && width.value >= DESK_MD && width.value < DESK_LG)
 const { openDrawer } = useMobileShell()
 const EDGE_PX = 28

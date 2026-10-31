@@ -34,7 +34,7 @@ const loading = ref(false)
 const refreshedAt = ref<Date | null>(null)
 const groupBy = ref<'type' | 'source'>('type')
 
-usePageHead({ title: '派工佇列', description: '接下來 60 筆會被領走的順序', noindex: true })
+usePageHead({ title: '派工隊列', description: '接下來 60 筆會被領走的順序', noindex: true })
 
 async function load() {
   if (loading.value) return

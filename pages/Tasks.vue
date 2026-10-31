@@ -29,7 +29,7 @@ watch(typeFilter, (v) => {
 })
 
 usePageHead({
-  title: '任務',
+  title: '任務清單',
   description: '正見的 AI 代理任務清單：公民提問、網站請求與系統發現的資料問題，依序派給代理處理。',
   noindex: true,
 })
@@ -38,7 +38,7 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>任務</template>
+      <template #title>任務清單</template>
       <template #description>
         在政見頁或人物頁按「查進度」「查承諾與政見」「查簡介」「這不是承諾？」「這不是政見？」，就會在這裡排隊等 AI 代理處理。有爭議的貢獻不另開任務：反對票會把分數往下推，跌到門檻就自動退件。
       </template>

@@ -9,6 +9,8 @@ defineProps<{
   fullWidth?: boolean
   /** 內容很長（例如人物頁的長簡介）時讓標題區跟著長高，不要被固定高度裁掉頭像與名字 */
   autoHeight?: boolean
+  /** 大版標題區（只有首頁用）；其他頁一律是縮小版，高度約原本的一半（2026-10-31） */
+  large?: boolean
 }>()
 </script>
 
@@ -16,7 +18,7 @@ defineProps<{
   <div :class="`relative ${className || ''}`">
     <!-- Dark Section -->
     <section
-      :class="['bg-navy-900 text-white relative min-h-[370px] flex items-end overflow-hidden', autoHeight ? 'pt-16 md:pt-16' : 'pt-16 md:pt-0 md:h-[370px]']"
+      :class="['bg-navy-900 text-white relative flex items-end overflow-hidden', large ? 'min-h-[370px]' : 'min-h-[185px]', large ? (autoHeight ? 'pt-16 md:pt-16' : 'pt-16 md:pt-0 md:h-[370px]') : (autoHeight ? 'pt-8 md:pt-8' : 'pt-8 md:pt-0')]"
       :style="backgroundImage ? {
         backgroundImage: `url(${backgroundImage})`,
         backgroundSize: 'cover',
@@ -27,7 +29,7 @@ defineProps<{
       <!-- Background Overlay -->
       <div v-if="backgroundImage" class="absolute inset-0 bg-navy-900/80"></div>
 
-      <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 text-left pb-16">
+      <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 text-left" :class="large ? 'pb-16' : ($slots.default ? 'pb-14 md:pb-6' : 'pb-6')">
         <!-- Decorative Background Icon -->
         <div v-if="$slots.icon && !backgroundImage" class="absolute bottom-0 right-0 p-10 -mb-[120px] opacity-10 pointer-events-none z-10">
           <slot name="icon" />
@@ -38,12 +40,12 @@ defineProps<{
           <!-- 標題上方的標誌（選用，例如政黨頁的黨徽） -->
           <div v-if="$slots.logo" class="mb-4"><slot name="logo" /></div>
 
-          <h1 class="text-4xl md:text-5xl lg:text-6xl font-black mb-6 tracking-tight leading-tight">
+          <h1 :class="['font-black tracking-tight leading-tight', large ? 'text-4xl md:text-5xl lg:text-6xl mb-6' : 'text-3xl md:text-4xl lg:text-5xl mb-3']">
 
             <slot name="title" />
           </h1>
 
-          <p v-if="$slots.description" class="text-lg lg:text-xl text-slate-400 leading-relaxed mb-8">
+          <p v-if="$slots.description" :class="['text-slate-400 leading-relaxed', large ? 'text-lg lg:text-xl mb-8' : 'text-base lg:text-lg mb-3 line-clamp-1']">
             <slot name="description" />
           </p>
 
@@ -58,7 +60,7 @@ defineProps<{
           </button>
 
           <!-- Actions Area：間距跟按鈕一樣手機縮一級。按鈕尺寸見 lib/hero-action-styles.ts -->
-          <div v-if="$slots.actions" class="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div v-if="$slots.actions" :class="['flex flex-wrap items-center', large ? 'gap-2 sm:gap-3' : 'gap-2']">
             <slot name="actions" />
           </div>
         </div>
