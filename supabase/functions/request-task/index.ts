@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
 
     // 已有 open 任務？已有對應自動缺口？（audit 不看這兩項，改看同網址 24 小時去重）
     const taskType = KIND_TO_TASK_TYPE[kind];
-    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId });
+    const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId, scope: electionScope });
     const targetId = isPolicyKind ? policyId : pid;
     let autoGap: { task_id: string } | null = null;
     if (kind !== "audit" && targetId && electionId === null) {
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
       autoGap = ((gaps ?? []) as Array<{ task_id: string }>).find((g) => g.task_id.endsWith(`:${targetId}`)) ?? null;
     }
     const recentlyHandled = kind === "audit" || !targetId ? null
-      : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId }, RECENT_CHECK_DAYS);
+      : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId, scope: electionScope }, RECENT_CHECK_DAYS);
     const duplicateAudit = kind === "audit" && sourceUrl ? await findRecentAuditTask(supabase, { source_url: sourceUrl, politician_id: pid, policy_id: policyId }) : null;
 
     const [{ count: openManual }, { data: counts }] = await Promise.all([

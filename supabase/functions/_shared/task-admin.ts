@@ -198,7 +198,7 @@ export async function closeTask(supabase: SupabaseLike, taskId: string, closedBy
  */
 export async function findRecentlyHandled(
   supabase: SupabaseLike,
-  target: { politician_id?: string | null; policy_id?: string | null; task_type: string; election_id?: number | null },
+  target: { politician_id?: string | null; policy_id?: string | null; task_type: string; election_id?: number | null; scope?: string | null },
   days: number,
   now: number = Date.now(),
 ): Promise<RecentlyHandled | null> {
@@ -210,6 +210,8 @@ export async function findRecentlyHandled(
   tq = target.policy_id ? tq.eq("target->>policy_id", target.policy_id) : tq.eq("target->>politician_id", target.politician_id);
   // 範圍化的請求（某一屆）：只比同一屆的任務，也不看對應的整體自動缺口（那是整個人的缺口）
   if (target.election_id != null) tq = tq.eq("target->>election_id", String(target.election_id));
+  // 同人同屆的承諾請求與政見請求互不擋
+  if (target.scope) tq = tq.eq("target->>scope", target.scope);
   const { data: tasks, error: tErr } = await tq;
   if (tErr) throw new Error(`contribution_tasks recent lookup: ${tErr.message}`);
   const taskRows = (tasks ?? []) as Array<{ id: string; closed_at: string | null }>;
@@ -225,13 +227,14 @@ export async function findRecentlyHandled(
   return pickRecentlyHandled(taskRows, contributions, sinceMs);
 }
 
-export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null }): Promise<Obj | null> {
+export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null; scope?: string | null }): Promise<Obj | null> {
   let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at").eq("status", "open").limit(1);
   if (target.task_type) q = q.eq("task_type", target.task_type);
   if (target.policy_id) q = q.eq("target->>policy_id", target.policy_id);
   else if (target.politician_id) q = q.eq("target->>politician_id", target.politician_id);
   else return null;
   if (target.election_id != null) q = q.eq("target->>election_id", String(target.election_id));
+  if (target.scope) q = q.eq("target->>scope", target.scope);
   const { data, error } = await q;
   if (error) throw new Error(`contribution_tasks lookup: ${error.message}`);
   return ((data ?? []) as Obj[])[0] ?? null;

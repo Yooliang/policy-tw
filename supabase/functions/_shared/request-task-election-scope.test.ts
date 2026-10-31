@@ -34,3 +34,37 @@ Deno.test("卡片所在的分頁決定查什麼：政見分頁查政見、承諾
   assert(pledgeElected.title.includes("2022 九合一（當選）的承諾"), pledgeElected.title);
   assert(pledgeElected.description.includes("選前提出"));
 });
+
+// ---- 去重：scope 要進查詢條件（同人同屆的承諾請求與政見請求互不擋） ----
+import { findOpenTaskForTarget, findRecentlyHandled } from "./task-admin.ts";
+
+// deno-lint-ignore no-explicit-any
+function recorder(): { supabase: any; eqs: Array<[string, unknown]> } {
+  const eqs: Array<[string, unknown]> = [];
+  // deno-lint-ignore no-explicit-any
+  const q: any = {
+    select: () => q, limit: () => q, in: () => q, gte: () => q, like: () => q, is: () => q,
+    eq: (col: string, v: unknown) => { eqs.push([col, v]); return q; },
+    then: (res: (v: unknown) => unknown) => res({ data: [], error: null }),
+  };
+  return { supabase: { from: () => q }, eqs };
+}
+const has = (eqs: Array<[string, unknown]>, col: string, v: unknown) => eqs.some(([c, x]) => c === col && x === v);
+
+Deno.test("已有 open 任務的判斷：帶 scope 就只比同範圍，承諾與政見互不擋", async () => {
+  for (const scope of ["pledge", "tenure"]) {
+    const r = recorder();
+    await findOpenTaskForTarget(r.supabase, { politician_id: "p1", task_type: "policy_missing", election_id: 7, scope });
+    assert(has(r.eqs, "target->>election_id", "7"));
+    assert(has(r.eqs, "target->>scope", scope), `要比 scope=${scope}`);
+  }
+  const none = recorder();
+  await findOpenTaskForTarget(none.supabase, { politician_id: "p1", task_type: "policy_missing" });
+  assert(!none.eqs.some(([c]) => c === "target->>scope"), "沒帶 scope 不加條件（舊行為）");
+});
+
+Deno.test("近期處理過的判斷：帶 scope 一樣只比同範圍", async () => {
+  const r = recorder();
+  await findRecentlyHandled(r.supabase, { politician_id: "p1", task_type: "policy_missing", election_id: 7, scope: "tenure" }, 5);
+  assert(has(r.eqs, "target->>scope", "tenure"));
+});
