@@ -1,7 +1,7 @@
 /**
  * region_mismatch_sweep()（migration 20261101100000）的守門測試。
  * 原案：吳炳輝 2026 縣市長掛台南市，三份通過驗證的 candidacy 交件寫雲林縣；落庫之外的來源（匯入腳本的 COALESCE(region_id, …)、合併、手動 SQL、
- * #795 之前已落庫的交件）不會經過 openRegionMismatch，沒人被通知。這支每小時對一次帳，只開任務、不改地區。
+ * #795 之前已落庫的交件）不會經過 openRegionMismatch，沒人被通知。這支每天對一次帳，只開任務、不改地區。
  * 守門：
  *   1. 縣市不同 → 開一件、target 欄位跟落庫端（buildRegionMismatchTask）同一組鍵；再跑不重開（冪等）；關掉的任務也算已開過
  *   2. 不開：臺／台寫法不同、現在的地區是選區層級、不是縣市長、交件縣市是「全國」或空、交件還沒落庫（verified）

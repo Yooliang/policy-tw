@@ -4,7 +4,7 @@
 -- 落庫對「已經有縣市層級地區」的紀錄一律保留原本的 region_id（地區要經驗證流程改，落庫不直接動——這是 #795 的設計，沿用），
 -- #795（10/31）之前沒人被通知，之後落庫端才會在交件當下開 region_mismatch 任務。
 -- 這支補的是「不經過落庫」的來源：匯入腳本（2026-registered 的 COALESCE(region_id, …) 就是把舊地區原樣留下）、合併人物、手動 SQL、
--- 以及 #795 上線前已經落庫的交件。20261031120000 是一次性的回填；這裡把同一套條件做成可重跑的函式，每小時對一次帳。
+-- 以及 #795 上線前已經落庫的交件。20261031120000 是一次性的回填；這裡把同一套條件做成可重跑的函式，每天對一次帳。
 --
 -- 條件（跟落庫程式、回填同一套）：縣市長；參選紀錄現在的地區是縣市層級；同一人同一屆「最新一筆已落庫的 candidacy 交件」的縣市
 -- （臺／台視為相同，「全國」不算）對得到另一個縣市層級的 regions 列；同一筆參選紀錄、同一個提議縣市已有任務（開著或關了）就不再開。
@@ -58,13 +58,13 @@ BEGIN
   RETURN v_n;
 END;
 $$;
-COMMENT ON FUNCTION region_mismatch_sweep IS '縣市長參選紀錄的縣市（縣市層級）跟最新一筆已落庫 candidacy 交件的縣市不同時開 region_mismatch 任務（只開任務、不改地區）；落庫之外來源的對帳，pg_cron 每小時第 33 分；2026-11-01';
+COMMENT ON FUNCTION region_mismatch_sweep IS '縣市長參選紀錄的縣市（縣市層級）跟最新一筆已落庫 candidacy 交件的縣市不同時開 region_mismatch 任務（只開任務、不改地區）；落庫之外來源的對帳，pg_cron 每天 UTC 19:33（台灣 03:33）；2026-11-01';
 
 DO $do$
 BEGIN
   IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
-    PERFORM cron.unschedule(j.jobid) FROM cron.job j WHERE j.jobname = 'region-mismatch-sweep-hourly';
-    PERFORM cron.schedule('region-mismatch-sweep-hourly', '33 * * * *', 'SELECT region_mismatch_sweep();');
+    PERFORM cron.unschedule(j.jobid) FROM cron.job j WHERE j.jobname = 'region-mismatch-sweep-daily';
+    PERFORM cron.schedule('region-mismatch-sweep-daily', '33 19 * * *', 'SELECT region_mismatch_sweep();');
   END IF;
 END
 $do$;
