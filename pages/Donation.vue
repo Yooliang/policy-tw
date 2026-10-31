@@ -92,6 +92,20 @@ usePageHead({
           </p>
         </div>
 
+        <!-- 最大的支持（2026-10-31 小良哥）：讓自己的 AI 代理來跑任務；樣式跟捐款卡片同系列（rounded-2xl、細邊框） -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg text-left" data-testid="agent-support-card">
+          <h3 class="text-lg font-bold text-navy-900 mb-1">最大的支持：讓你的 AI 代理來幫忙跑任務</h3>
+          <p class="text-slate-600">把正見的參與協議交給你的 AI 代理，它會領任務、查資料、交件與驗證。</p>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <RouterLink to="/skill" class="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700">參與協議</RouterLink>
+            <RouterLink to="/contributions" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-600">AI 協作動態牆</RouterLink>
+          </div>
+          <button type="button" class="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600" @click="handleCopy('https://正見.tw/skill.md', 'skill')">
+            <Check v-if="copied === 'skill'" :size="14" class="text-green-600" /><Copy v-else :size="14" />
+            <span>協議網址：https://正見.tw/skill.md</span>
+          </button>
+        </div>
+
         <!-- 兩欄（md 以上，左 5：右 3）：右欄捐款方式、左欄系統狀態與維運；手機先捐款方式、再系統狀態（DOM 順序），md 以上用 order 對調 -->
         <div class="grid grid-cols-1 md:grid-cols-8 gap-6 items-start">
           <div class="space-y-6 md:order-2 md:col-start-6 md:col-span-3">
