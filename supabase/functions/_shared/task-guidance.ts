@@ -136,7 +136,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     // 參選紀錄缺政黨（#346 第二階段，協議 1.56.0）
     "**缺的是政黨（target.missing＝party，任務編號 auto:candidacy_source_missing:party:…）**：party 照中選會名冊那一屆的推薦政黨填（target.cec.party），不要填他現在的政黨——人會換黨。中選會名冊唯一對上而且那個選區已開完的，伺服器自己寫了（協議 1.100.0），派到你的是系統寫不了的（選區沒開完、同名多筆、名額沒登錄）。 " +
     // 補號次（2026-10-08）
-    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件、**交一份 cand_numbers（payload.items 每位一列，不要一人一份 candidacy）**，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。" +
+    "**缺的是號次（target.kind＝cand_no，任務編號 auto:candidacy_source_missing:cand_no:…）**：整個單位一件、**交一份 cand_numbers（payload.items 每位一列，不要一人一份 candidacy）**，名單在 target.items；號次要等中選會抽籤之後，到該縣市選舉委員會公告的候選人名單或選舉公報上找，系統不核號次來源，詳細做法看這一件任務的 hint。2026 屆 target.cec_json_url（也是 hint_sources 第一個）是中選會選舉專區的候選人 JSON，已含每位的號次 candNo，直接 GET、以姓名對應即可。" +
     "**target.kind＝cand_no_recheck**：同一個號次單位裡有重複或跳號，target.units 逐單位列出異常，要對公告重查，詳細做法同樣看 hint。",
 
   election_result_missing:

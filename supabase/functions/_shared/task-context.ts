@@ -276,8 +276,33 @@ export const BALLOT_NUMBERS_HINT =
   "驗證者只開一次公告逐列核對，抄錯的列會被標出來、只退那幾列（其餘照過）；沒寫進去的列缺口會回到佇列重派。" +
   "source_urls 第一個放你看到他號次的那一頁公告（縣市選委會的公告頁或選舉公報），payload.note 寫「公告第幾頁、第幾選舉區／哪個里」與沒放進 items 的是哪幾位、為什麼。" +
   "同名同姓要連選舉區、村里一起對，對不上或公告上沒有這個人的就不要交那一位。" +
+  "**2026 屆先看 target.cec_json_url 與 hint_sources 第一個**：中選會選舉專區的候選人 JSON（info.cec.gov.tw/vote2026/static/json/…，靜態檔直接 GET、不必跑 JS）已含每位的號次 candNo，請以姓名對應（議員、代表連選舉區，村里長連 birth 與 liCode），source_urls 可直接放這個 JSON 網址；這份裡找不到的人才退回縣市選委會公告。" +
   "**公告還沒出來、或打不開時不要回 no_change not_found**（號次任務的查無冷卻 2 天，公告還沒出來時白白冷卻、錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。" +
   "號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的，同一個單位不會有兩位同號：落庫前系統會逐列檢查同一個號次單位裡有沒有同號（整批內部、與已上線的他人），同號的列不寫、回到缺口重派，所以同號就是有人抄錯，先回頭看公告。";
+
+/**
+ * 補號次缺口任務的 task_id：auto:candidacy_source_missing:cand_no:<屆別>:<選舉別>:<縣市>[:<鄉鎮市區>][:pN]（對應 contribution_auto_tasks_ballot_numbers）。
+ * 不是這種任務或格式不對回 null。
+ */
+export function parseCandNoTaskId(taskId: unknown): { election_id: number; election_type: string; county: string; town: string | null } | null {
+  if (typeof taskId !== "string") return null;
+  const parts = taskId.split(":");
+  if (parts.length < 6 || parts[0] !== "auto" || parts[1] !== "candidacy_source_missing" || parts[2] !== "cand_no") return null;
+  const eid = Number(parts[3]);
+  if (!Number.isInteger(eid)) return null;
+  const rest = parts.slice(6).filter((x) => !/^p\d+$/.test(x));
+  return { election_id: eid, election_type: parts[4], county: parts[5], town: rest[0] ?? null };
+}
+
+/** 補號次缺口的 no_change 驗證票（2026-10-31）：JSON 已有號次就不成立 */
+export function cecNoChangeVerifyHint(url: string): string {
+  return `**這是補號次缺口任務的「找不到號次」回報。中選會選舉專區的候選人 JSON 已含號次（candNo）：${url}**（靜態檔，直接 GET）。請先打開它：若該單位候選人在 JSON 裡已有 candNo，這筆 no_change 不成立，請投 disagree，evidence_url 填這個 JSON 網址、note 寫你對到的人與 candNo（缺口任務會解除擋住、帶新的 hint 重派）；JSON 沒有這個單位的人、或都沒有號次，才照下面核對後投 agree。`;
+}
+
+/** 補號次驗證票附的中選會選舉專區 JSON（2026-10-31）：驗證者對同一份檔核對，提交者看的是同一份 */
+export function cecJsonVerifyHint(url: string): string {
+  return `**中選會選舉專區的候選人 JSON 已含號次（candNo）：${url}**（靜態檔，直接 GET；以姓名對應，議員與代表連選舉區、村里長連 birth 與 liCode）。請對這份檔核對提交的號次，不必只靠公告 PDF；`;
+}
 
 /**
  * 驗證帶號次（cand_no）的 candidacy（補號次，2026-10-08）：系統不核號次（登記彙總表沒有號次），這一票就是唯一的核對。
@@ -1139,6 +1164,8 @@ export interface VerifyContextData {
   /** cand_numbers（2026-10-30）：items 對到的參選紀錄（姓名、地區、現有號次）與落庫前的重複檢查結果 */
   cand_rows?: Obj[];
   cand_conflicts?: Obj[];
+  /** 補號次的驗證票（cand_numbers、帶號次的 candidacy）：這個單位對應的中選會選舉專區候選人 JSON 網址（SQL cec_vote2026_cand_url；2026 屆才有） */
+  cec_json_url?: string | null;
   /** reassign_candidacy（2026-10-06）：這筆參選紀錄、新舊兩人、兩人各自的參選紀錄、中選會名冊唯一對上的那一列 */
   reassign?: { ctx: ReassignContext; from_elections: Obj[]; to_elections: Obj[]; cec: Obj | null } | null;
   /** regional_stat（#508）：admin_divisions 查到的縣市／鄉鎮名稱（地區代碼對不到就是 null） */
@@ -1181,6 +1208,7 @@ export const SOURCE_HINTS: ReadonlyArray<{ host: RegExp; hint: string }> = [
   { host: /(^|\.)web\.cec\.gov\.tw$/, hint: "中選會登記公告：名單在頁面的 PDF 附件裡（候選人登記情形一覽表），系統不解析 PDF，你要自己下載讀。逐欄印的名冊不要用 pdftotext -layout（會錯配），各欄各抓成清單再 zip，三欄長度要相等。" },
   { host: /(^|\.)bulletin\.cec\.gov\.tw$/, hint: "中選會選舉公報：PDF，政見常做成圖，pdftotext 抽到空字串不代表沒有——裁切渲染成圖目視核對。圖片版要先依候選人姓名定位到他自己那一欄再放大看，不要看成相鄰候選人的欄位。" },
   { host: /(^|\.)db\.cec\.gov\.tw$/, hint: "中選會候選人資料庫：頁面是 SPA、抓不到正文；直接用 API `/query/api/v1/elections/candidates/query?cand_name=<姓名>`——它證明「這個人是誰」（出生年、歷屆），證明不了「本屆有沒有登記」（只有已投票的選舉，2026 登記期不在裡面）；系統核到 election_id／candidate_status absent 回 cannot_tell 是對的。" },
+  { host: /(^|\.)info\.cec\.gov\.tw$/, hint: "中選會選舉專區：static/json/cand/… 是靜態 JSON（直接 GET，不必跑 JS），每位候選人有 name、candNo（選票號次）、party、home、birth（村里長另有 liCode）；核號次就拿姓名在這份檔裡對 candNo。縣市長／議員／鄉鎮市長／代表一檔涵蓋整個縣市，村里長每鄉鎮一檔。" },
   { host: /(^|\.)cna\.com\.tw$/, hint: "中央社：不帶瀏覽器 User-Agent 會 403，帶了就 200。" },
   { host: /(^|\.)chinatimes\.com$/, hint: "中時：Cloudflare 擋程式，帶 UA 仍常 403；改抓 web.archive.org/web/2026/<網址> 的快照。" },
   { host: /(^|\.)upmedia\.mg$/, hint: "上報：常 403；改抓 archive.org 快照。" },
@@ -1365,7 +1393,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         elections,
         hint: (decision && decision in IDENTITY_HINT ? IDENTITY_HINT[decision as keyof typeof IDENTITY_HINT] : "同名多位時，用 payload 的政黨／縣市／現職／出生年判斷是不是同一人") +
           "；candidacy 要看該人是否已有這場選舉的紀錄。逐欄核對來源後投 agree／disagree（附 evidence_url 與 note）／unsure" +
-          (payload.cand_no !== undefined && payload.cand_no !== null ? CAND_NO_VERIFY_HINT : ""),
+          (payload.cand_no !== undefined && payload.cand_no !== null ? CAND_NO_VERIFY_HINT + (data.cec_json_url ? cecJsonVerifyHint(data.cec_json_url) : "") : ""),
+        ...(data.cec_json_url ? { cec_json_url: data.cec_json_url } : {}),
       };
     }
     case "policy":
@@ -1544,7 +1573,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         items: rows,
         items_count: rows.length,
         server_conflict_count: conflicted,
-        hint: "**開一次 source_urls 的公告，逐列核對 items**：每一列找到他本人那一格（姓名、縣市，議員要對選舉區、村里長要對村里），公告上印的號次必須剛好等於 claimed_cand_no；只在登記彙總表看到名字不算（它沒有號次）。" +
+        ...(data.cec_json_url ? { cec_json_url: data.cec_json_url } : {}),
+        hint: (data.cec_json_url ? cecJsonVerifyHint(data.cec_json_url) : "") + "**開一次 source_urls 的公告，逐列核對 items**：每一列找到他本人那一格（姓名、縣市，議員要對選舉區、村里長要對村里），公告上印的號次必須剛好等於 claimed_cand_no；只在登記彙總表看到名字不算（它沒有號次）。" +
           "**全部對得上投 agree**（note 寫公告頁碼與核對了幾位）。**只有少數幾列不對，仍投 agree，並附 bad_items（那幾列的 politician_election_id 陣列）與 note（每個錯列在公告上實際是幾號、哪一頁）**：" +
           "有標的列不會寫入、會回到缺口重派，沒標的列照過，不會整批作廢。大部分列都不對、公告打不開或不是這個單位的，投 disagree（附 evidence_url 與 note）；確認不了投 unsure。" +
           (conflicted > 0 ? `系統預先檢查有 ${conflicted} 列與同一個號次單位裡的另一位同號（server_conflict）：那些列落庫時不會寫，你不必替它們標 bad_items，但請順便看公告上到底是誰抄錯，寫進 note。` : ""),
@@ -1567,7 +1597,11 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       };
     }
     case "no_change":
-      return { task: data.task ?? null, hint: "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）" };
+      return {
+        task: data.task ?? null,
+        ...(data.cec_json_url ? { cec_json_url: data.cec_json_url } : {}),
+        hint: (data.cec_json_url ? cecNoChangeVerifyHint(data.cec_json_url) : "") + "看提交者說查了哪些網址、為什麼沒有可交的東西；你自己也查一下，真的沒有就 agree（這筆會讓那個缺口 14 天不再派）",
+      };
     case "policy_elements":
       return {
         policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "status", "election_id", "source_url"])!, ["description"]) : null,
@@ -1638,6 +1672,17 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     if (!cerr) data.cand_rows = (crow ?? []) as Obj[];
     const { data: conf, error: ferr } = await supabase.rpc("cand_no_batch_conflicts", { p_items: items });
     if (!ferr) data.cand_conflicts = (conf ?? []) as Obj[];
+  }
+  if (contributionType === "no_change") {
+    const u = parseCandNoTaskId(payload.task_id);
+    if (u && u.election_id === 2026) {
+      const { data: cu, error: cuerr } = await supabase.rpc("cec_vote2026_cand_url", { p_election_type: u.election_type, p_county: u.county, p_town: u.town ?? "" });
+      if (!cuerr && typeof cu === "string") data.cec_json_url = cu;
+    }
+  }
+  if ((contributionType === "cand_numbers" || (contributionType === "candidacy" && payload.cand_no !== undefined && payload.cand_no !== null)) && Number(payload.election_id) === 2026 && typeof payload.election_type === "string") {
+    const { data: cu, error: cuerr } = await supabase.rpc("cec_vote2026_cand_url", { p_election_type: payload.election_type, p_county: String(payload.region ?? ""), p_town: String(payload.sub_region ?? "") });
+    if (!cuerr && typeof cu === "string") data.cec_json_url = cu;
   }
   if (contributionType === "election_results" && contributionId) {
     const { data: rows, error } = await supabase.rpc("election_results_compare", { p_contribution_id: contributionId });
