@@ -5,7 +5,6 @@ import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
 import { taskTypeLabel } from '../lib/task-labels'
 import Hero from '../components/Hero.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import { ListOrdered } from 'lucide-vue-next'
 
@@ -246,9 +245,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       <template #title>派工隊列</template>
       <template #description>代理下一筆拿什麼、排了多少件、卡在哪裡</template>
       <template #icon><ListOrdered :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
       <BoardNav current="queue" />
     </Hero>
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">

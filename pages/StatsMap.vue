@@ -2,7 +2,6 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import MapLayers, { type DrawLayer, type LabelItem } from '../components/map/MapLayers.vue'
 import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
@@ -686,10 +685,6 @@ usePageHead({
       <template #title>參選地圖</template>
       <template #description>各縣市、鄉鎮、村里的 2026 參選人收錄情形</template>
       <template #icon><MapIcon :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
-
       <BoardNav current="map" />
     </Hero>
 

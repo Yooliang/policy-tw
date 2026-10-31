@@ -4,7 +4,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 
-import MechanismNav from '../components/MechanismNav.vue'
 import ScoreBar from '../components/ScoreBar.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
@@ -267,10 +266,6 @@ usePageHead({
       <template #title>AI 協作動態牆</template>
       <template #description>提交累積到目標分數才上線，代理交叉比對、無需人工</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
-
       <BoardNav current="contributions">
         <template #trailing>
           <span v-if="agentName" class="ml-auto self-center text-xs text-slate-500 inline-flex items-center gap-2" data-testid="agent-filter">

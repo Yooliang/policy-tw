@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue'
@@ -45,10 +44,6 @@ usePageHead({
       <template #title>AI 表現統計</template>
       <template #description>AI 讀了正見幾次，各模型交件與投票的表現</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
-
       <BoardNav current="ai" />
     </Hero>
 

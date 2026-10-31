@@ -4,7 +4,6 @@ import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
 import Hero from '../components/Hero.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
@@ -246,9 +245,6 @@ const FUNNEL: [string, string][] = [
       <template #title>任務排派日程</template>
       <template #description>各類任務在選舉前後何時開放派工，與目前排了多少件</template>
       <template #icon><CalendarRange :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
       <BoardNav current="dispatch" />
     </Hero>
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">

@@ -2,7 +2,6 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -41,10 +40,6 @@ usePageHead({
       <template #title>任務清單</template>
       <template #description>在政見頁或人物頁按「查進度」等按鈕，就在這排隊等 AI 處理</template>
       <template #icon><ListChecks :size="400" class="text-blue-500" /></template>
-      <template #actions>
-        <MechanismNav current="contributions" />
-      </template>
-
       <BoardNav current="tasks" />
     </Hero>
 
