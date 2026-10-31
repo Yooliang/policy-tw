@@ -7,22 +7,7 @@ const user = ref<User | null>(null)
 const session = ref<Session | null>(null)
 const loading = ref(true)
 const initialized = ref(false)
-const isAdminRef = ref(false)
 const authReady = ref(false)
-
-// Check admin status from DB
-async function checkAdminStatus(userId: string) {
-  try {
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('is_admin')
-      .eq('id', userId)
-      .single()
-    isAdminRef.value = data?.is_admin === true
-  } catch {
-    isAdminRef.value = false
-  }
-}
 
 // Initialize auth state
 let initPromise: Promise<void> | null = null
@@ -38,19 +23,10 @@ async function initAuth() {
       session.value = currentSession
       user.value = currentSession?.user ?? null
 
-      if (currentSession?.user) {
-        await checkAdminStatus(currentSession.user.id)
-      }
-
       // Listen for auth changes
       supabase.auth.onAuthStateChange(async (_event, newSession) => {
         session.value = newSession
         user.value = newSession?.user ?? null
-        if (newSession?.user) {
-          await checkAdminStatus(newSession.user.id)
-        } else {
-          isAdminRef.value = false
-        }
       })
 
       initialized.value = true
@@ -99,7 +75,6 @@ async function signOut() {
   }
   user.value = null
   session.value = null
-  isAdminRef.value = false
 }
 
 // Computed properties
@@ -113,7 +88,6 @@ const userAvatarUrl = computed(() => {
   return user.value.user_metadata?.avatar_url || user.value.user_metadata?.picture || ''
 })
 const userEmail = computed(() => user.value?.email || '')
-const isAdmin = computed(() => isAdminRef.value)
 
 export function useAuth() {
   // Initialize on first use（建置預渲染時沒有瀏覽器 session，跳過；客戶端 hydrate 後才初始化）
@@ -127,7 +101,6 @@ export function useAuth() {
     loading,
     authReady,
     isAuthenticated,
-    isAdmin,
     userDisplayName,
     userAvatarUrl,
     userEmail,

@@ -28,7 +28,7 @@
 ```
 瀏覽器 → Cloudflare（憑證）→ Worker
   ├─ /assets/*、/brand/*、/skill.md、/ads.txt、/robots.txt → Static Assets（build 產物）
-  ├─ /contributions /tasks /queue /stats /verify /profile /auth/* /admin/* → app.html（客戶端渲染，照舊）
+  ├─ /contributions /tasks /queue /stats /verify /profile /auth/* → app.html（客戶端渲染，照舊）
   ├─ /sitemap.xml → DB 函式 sitemap_entries()（快取 1 小時）
   └─ 其餘（/、/election/:id、/politician/:id、/policy/:id、/analysis…）
        → Cache API 命中就回；沒命中或過期 → loadPageData → renderToString → 塞 __INITIAL_STATE__ → 回應並寫入快取
