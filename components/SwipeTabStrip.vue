@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { swipeStrips } from '../composables/useSwipeTabs'
+import { tabStripSignature } from '../lib/tab-strip-signature'
 
 // 手機版的頂部分頁條（X 的「為你推薦／正在跟隨」那種）：一排文字、選中的底下一條線，放不下就橫向捲動。
 // 內容區的左右滑動由 useSwipeTabs 負責；底線是一個獨立元素，拖曳時由手勢直接改它的 transform（不經 Vue 響應式），
@@ -58,7 +59,7 @@ watch(() => props.modelValue, async () => {
   const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   on?.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: calm ? 'auto' : 'smooth' })
 }, { flush: 'post' })
-watch(() => props.tabs.length, async () => { await nextTick(); measure(); place(currentIndex()) }, { flush: 'post' })
+watch(() => tabStripSignature(props.tabs), async () => { await nextTick(); measure(); place(currentIndex()) }, { flush: 'post' })
 </script>
 
 <template>
