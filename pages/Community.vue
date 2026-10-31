@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import MechanismNav from '../components/MechanismNav.vue'
 import AskQuestionForm from '../components/community/AskQuestionForm.vue'
 import CitizenQuestionCard from '../components/community/CitizenQuestionCard.vue'
 import { Clock, Eye, Loader2, MessageCircleQuestion } from 'lucide-vue-next'
@@ -147,10 +146,6 @@ usePageHead({
       <template #title>公民提問</template>
       <template #description>提出關心的問題，AI 代理查有出處的資料回答</template>
       <template #icon><MessageCircleQuestion :size="400" class="text-blue-500" /></template>
-
-      <template #actions>
-        <MechanismNav current="community" />
-      </template>
 
       <GlobalRegionSelector />
     </Hero>

@@ -9,7 +9,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { Flag } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import PartyBadge from '../components/PartyBadge.vue'
 import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { useSupabase } from '../composables/useSupabase'
@@ -57,9 +56,6 @@ usePageHead({
       <template #title>政黨一覽</template>
       <template #description>各黨的現職首長、民代與歷屆參選人，名冊依<a href="https://party.moi.gov.tw/PartyMain.aspx?n=16100&amp;sms=13073" target="_blank" rel="noopener" class="underline hover:text-white">內政部政黨資訊網</a></template>
       <template #icon><Flag :size="400" class="text-blue-500" /></template>
-      <template #default>
-        <Breadcrumbs :items="breadcrumbs" />
-      </template>
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-left">

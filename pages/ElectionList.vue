@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { CalendarDays, ChevronRight, Vote } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import LoadError from '../components/LoadError.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
@@ -88,9 +87,6 @@ usePageHead({
       <template #title>選舉一覽</template>
       <template #description>每一場選舉的候選人、政見與出處，過去的留著當選人與承諾</template>
       <template #icon><Vote :size="400" class="text-blue-500" /></template>
-      <template #default>
-        <Breadcrumbs :items="breadcrumbs" />
-      </template>
     </Hero>
 
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

@@ -5,7 +5,6 @@ import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import Avatar from '../components/Avatar.vue'
 import { Search, Waypoints, ArrowRight, Activity } from 'lucide-vue-next'
-import PolicyViewNav from '../components/PolicyViewNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
@@ -70,10 +69,6 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
       <template #title>{{ LINEAGE_NAME }}</template>
       <template #description>一件事在不同任期、不同層級的來龍去脈</template>
       <template #icon><Waypoints :size="400" class="text-blue-500" /></template>
-
-      <template #actions>
-        <PolicyViewNav current="relay" />
-      </template>
 
       <GlobalRegionSelector />
     </Hero>

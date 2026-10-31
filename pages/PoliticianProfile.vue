@@ -23,6 +23,7 @@ import HeroAction from '../components/HeroAction.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
+import AiLookupCard from '../components/AiLookupCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
 import Breadcrumbs from '../components/Breadcrumbs.vue'
 import type { BreadcrumbItem } from '../composables/usePageHead'
@@ -560,11 +561,12 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
+                      <AiLookupCard v-if="group.key === campaignGroups[campaignGroups.length - 1]?.key" :state="lookup.campaign" label="請 AI 補充最新的承諾" hint="查有出處的最新承諾" @click="requestLookup('campaign')" />
                     </div>
                   </div>
                 </div>
-                <!-- 已有資料也能再查：次要位置、小按鈕 -->
-                <AiLookupInline :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
+                <!-- 已有資料也能再查：卡片檢視是格線最後一張動作卡，表格檢視用小按鈕 -->
+                <AiLookupInline v-if="campaignView === 'table'" :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <Search :size="48" class="mx-auto mb-4 text-slate-300" />
@@ -609,10 +611,10 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" />
+                      <AiLookupCard v-if="group.key === historyGroups[historyGroups.length - 1]?.key" :state="lookup.history" label="請 AI 補充最新的政見" hint="查有出處的最新政見" @click="requestLookup('history')" />
                     </div>
                   </div>
                 </div>
-                <AiLookupInline :state="lookup.history" label="請 AI 補充最新的政見" @click="requestLookup('history')" />
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
                 <FileText :size="48" class="mx-auto mb-4 text-slate-300" />

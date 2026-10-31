@@ -63,6 +63,8 @@ const genericElection = computed<DeskGroup[]>(() => {
   groups.push({ key: 'elections', title: '選舉', blocks: [electionList.value.map(x => link(`e${x.id}`, x.shortName, electionPath(electionSegment(x))))] })
   return groups
 })
+// 搜尋區：目前沒有「近期搜尋」紀錄功能，先放連到搜尋頁的項目（2026-11-01）
+const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link('recent', '近期搜尋', '/search')]] }
 const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
@@ -73,7 +75,7 @@ const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group'
 const overviewOnly = computed(() => OVERVIEW_ROUTES.has(String(route.name)))
 
 const title = computed(() => {
-  if (overviewOnly.value) return '選舉'
+  if (overviewOnly.value && section.value === 'election') return '選舉'
   if (section.value === 'election') {
     if (model.value) return model.value.title
     const e = activeElection.value
@@ -88,7 +90,7 @@ const groups = computed<DeskGroup[]>(() => {
     case 'join': return JOIN
     case 'home':
     case 'about': return ABOUT
-    case 'search': return [moreElection]
+    case 'search': return [searchGroup, moreElection]
     case 'election': if (overviewOnly.value) return [moreElection]; return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組
     default: return []
   }

@@ -10,8 +10,6 @@ import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { Search, TrendingUp, Star } from 'lucide-vue-next'
-import HeroAction from '../components/HeroAction.vue'
-import PolicyViewNav from '../components/PolicyViewNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { policyMatchesRegion } from '../lib/policy-region'
@@ -38,7 +36,7 @@ watch(selectedLocation, (newVal) => {
 })
 
 const searchTerm = ref('')
-// 「我的關注」從網址進來（PolicyViewNav 指 /tracking?view=mine），不能只是本頁的 local 狀態，
+// 「我的關注」從網址進來（頁籤指 /tracking?view=mine），不能只是本頁的 local 狀態，
 // 不然從別頁點那顆按鈕會落到全部政見。
 const view = ref<'all' | 'mine'>('all')
 const showCheckpointsOnly = computed({
@@ -167,11 +165,6 @@ usePageHead({
       <template #title>{{ heroTitle }}</template>
       <template #description>{{ heroDescription }}</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
-
-      <!-- Hero Actions: 頁籤 -->
-      <template #actions>
-        <PolicyViewNav :current="showCheckpointsOnly ? 'mine' : 'list'" />
-      </template>
 
       <GlobalRegionSelector />
     </Hero>

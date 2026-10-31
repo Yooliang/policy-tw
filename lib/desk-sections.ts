@@ -7,8 +7,8 @@ export type DeskSection = 'home' | 'policy' | 'election' | 'join' | 'search' | '
 const BY_ROUTE: Record<string, DeskSection> = {
   home: 'home',
   tracking: 'policy', policy: 'policy', analysis: 'policy', 'analysis-detail': 'policy', lineage: 'policy', 'regional-data': 'policy',
-  elections: 'election', election: 'election', 'election-region': 'election', 'election-township': 'election', 'election-matrix': 'election',
-  politician: 'election', politicians: 'election', 'politicians-group': 'election', parties: 'election', party: 'election',
+  elections: 'search', election: 'election', 'election-region': 'election', 'election-township': 'election', 'election-matrix': 'election',
+  politician: 'election', politicians: 'search', 'politicians-group': 'search', parties: 'search', party: 'election',
   stats: 'join', 'stats-map': 'join', skill: 'join', contributions: 'join', queue: 'join', tasks: 'join', community: 'join', discussion: 'join', sources: 'join', dispatch: 'join', ai: 'join',
   search: 'search',
   vision: 'about', contact: 'about', terms: 'about', privacy: 'about', donation: 'about',
