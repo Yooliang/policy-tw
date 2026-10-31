@@ -72,8 +72,8 @@ usePageHead({
     <Hero>
       <template #title>{{ party?.name ?? '政黨' }}</template>
       <template #description>
-        <template v-if="page">這個政黨在正見收錄的人物：現職首長、現職民意代表與歷屆參選人。</template>
-        <template v-else>政黨：現職首長、民意代表與歷屆參選人。</template>
+        <template v-if="page">現職首長、民意代表與歷屆參選人</template>
+        <template v-else>現職首長、民意代表與歷屆參選人</template>
       </template>
       <template v-if="emblem && party" #logo>
         <!-- 黨徽放在白底方塊上：頁首是深色底，有些黨徽是深色或透明底，直接放會看不清楚 -->

@@ -39,8 +39,11 @@ const JOIN: DeskGroup[] = [
   { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('ai', 'AI 表現統計', '/ai')]] },
   { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch')]] },
 ]
+// 首頁區（首頁與「關於」合併，2026-10-31 小良哥）：首頁＋關於區各頁，分三組；名稱用頁面現有名稱（使用條款的頁面標題就是「使用條款」）
 const ABOUT: DeskGroup[] = [
-  { key: 'about', title: '關於', blocks: [[link('vision', '關於正見', '/vision'), link('contact', '聯絡我們', '/contact'), link('terms', '使用條款', '/terms'), link('privacy', '隱私權政策', '/privacy'), link('donation', '贊助支持', '/donation')]] },
+  { key: 'site', title: '正見', blocks: [[link('home', '首頁', '/'), link('vision', '關於正見', '/vision')]] },
+  { key: 'support', title: '支持', blocks: [[link('donation', '支持正見', '/donation'), link('contact', '聯絡我們', '/contact')]] },
+  { key: 'terms', title: '條款', blocks: [[link('terms', '使用條款', '/terms'), link('privacy', '隱私權政策', '/privacy')]] },
 ]
 
 const activeElection = computed(() => getActiveElection())
@@ -77,7 +80,7 @@ const title = computed(() => {
     const y = e ? electionYearOfDate(e.electionDate) : null
     return y ? `${y} 選舉` : '選舉'
   }
-  return ({ policy: '政見', join: '參與', about: '關於', home: '關於', search: '搜尋' } as Record<string, string>)[section.value ?? ''] ?? '正見'
+  return ({ policy: '政見', join: '參與', about: '正見', home: '正見', search: '搜尋' } as Record<string, string>)[section.value ?? ''] ?? '正見'
 })
 const groups = computed<DeskGroup[]>(() => {
   switch (section.value) {

@@ -47,7 +47,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>驅動 AI，實現全自動資料貢獻</template>
-      <template #description>讓具備聯網能力的 AI 讀取本頁，自動學會任務領取與查核提交。所有資料均須附上來源，經 AI 交叉驗證無誤後自動發布上線。</template>
+      <template #description>讓 AI 讀本頁就學會領任務與查核提交，附來源、交叉驗證後上線</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="skill" />

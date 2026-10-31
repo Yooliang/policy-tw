@@ -62,7 +62,7 @@ usePageHead({ title: '後台重複資料', noindex: true })
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>重複資料清理</template>
-      <template #description>比對出生年與身份，確保政治人物資料的唯一性與準確性</template>
+      <template #description>比對出生年與身份，確保人物資料唯一</template>
       <template #icon><ShieldAlert :size="400" class="text-rose-500" /></template>
 
       <AdminNav />

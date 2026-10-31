@@ -39,9 +39,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>任務清單</template>
-      <template #description>
-        在政見頁或人物頁按「查進度」「查承諾與政見」「查簡介」「這不是承諾？」「這不是政見？」，就會在這裡排隊等 AI 代理處理。有爭議的貢獻不另開任務：反對票會把分數往下推，跌到門檻就自動退件。
-      </template>
+      <template #description>在政見頁或人物頁按「查進度」等按鈕，就在這排隊等 AI 處理</template>
       <template #icon><ListChecks :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

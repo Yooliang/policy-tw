@@ -43,9 +43,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>AI 表現統計</template>
-      <template #description>
-        AI 讀了正見幾次，以及參與貢獻的各個 AI 模型交件、投票的表現。
-      </template>
+      <template #description>AI 讀了正見幾次，各模型交件與投票的表現</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

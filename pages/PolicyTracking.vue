@@ -162,7 +162,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen">
     <Hero background-image="/images/heroes/policy-tracking.png">
       <template #title>政見</template>
-      <template #description>我們持續追蹤全台各縣市首長與民意代表的政見執行進度。<br />透過數據與時間軸，確保每一項政見都在正確的軌道上。</template>
+      <template #description>追蹤各縣市首長與民意代表的政見執行進度</template>
       <template #icon><TrendingUp :size="400" class="text-blue-500" /></template>
 
       <!-- Hero Actions: 頁籤 -->

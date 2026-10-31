@@ -26,9 +26,7 @@ usePageHead({
   <div>
     <Hero>
       <template #title>聯絡我們</template>
-      <template #description>
-        資料有誤、想合作、要引用，<br/>都從 GitHub Issues 開始。
-      </template>
+      <template #description>資料有誤、想合作、要引用，都從 GitHub Issues 開始</template>
       <template #icon><MessagesSquare :size="400" class="text-blue-500" /></template>
       <template #actions><AboutNav current="contact" /></template>
       <template #default>

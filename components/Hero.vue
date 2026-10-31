@@ -45,7 +45,7 @@ defineProps<{
             <slot name="title" />
           </h1>
 
-          <p v-if="$slots.description" :class="['text-slate-400 leading-relaxed', large ? 'text-lg lg:text-xl mb-8' : 'text-base lg:text-lg mb-3 line-clamp-1']">
+          <p v-if="$slots.description" :class="['text-slate-400 leading-relaxed', large ? 'text-lg lg:text-xl mb-8' : 'text-base lg:text-lg mb-3']">
             <slot name="description" />
           </p>
 

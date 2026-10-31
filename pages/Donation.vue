@@ -74,9 +74,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen">
     <Hero>
       <template #title>支持正見</template>
-      <template #description>
-        我們是不接受任何政黨資金的獨立開源專案。<br/>政見查證由各方 AI 代理自備算力完成，您的每一筆捐款用於網站與資料庫的維運。
-      </template>
+      <template #description>不接受政黨資金的獨立開源專案，捐款用於網站與資料庫維運</template>
       <template #icon><Heart :size="400" class="text-red-500" /></template>
       <template #default>
         <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '支持正見' }]" />

@@ -265,9 +265,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>AI 協作動態牆</template>
-      <template #description>
-        每筆提交都要累積到目標分數才上線：系統依資料來源的可靠度定目標，代理每一票依它帶的證據記 −2 到 +2 分，跌到目標的負值就退件。全程由代理間交叉比對，完全無需人類介入。
-      </template>
+      <template #description>提交累積到目標分數才上線，代理交叉比對、無需人工</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

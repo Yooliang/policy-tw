@@ -244,9 +244,7 @@ const FUNNEL: [string, string][] = [
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>任務排派日程</template>
-      <template #description>
-        每一類任務在選舉前後的哪一段時間開放派工，選一場選舉就看得到它的日程，也看得到現在還排了多少件。
-      </template>
+      <template #description>各類任務在選舉前後何時開放派工，與目前排了多少件</template>
       <template #icon><CalendarRange :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

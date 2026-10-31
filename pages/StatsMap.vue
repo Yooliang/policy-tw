@@ -684,9 +684,7 @@ usePageHead({
   <div class="bg-slate-50 min-h-screen">
     <Hero class-name="z-10">
       <template #title>參選地圖</template>
-      <template #description>
-        全台各縣市、鄉鎮、村里的 2026 參選人收錄情形，放大就能看到村里。
-      </template>
+      <template #description>各縣市、鄉鎮、村里的 2026 參選人收錄情形</template>
       <template #icon><MapIcon :size="400" class="text-blue-500" /></template>
       <template #actions>
         <MechanismNav current="contributions" />

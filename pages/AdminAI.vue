@@ -17,7 +17,7 @@ usePageHead({ title: '後台 AI 任務（已停用）', noindex: true })
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
       <template #title>後台 AI 任務</template>
-      <template #description>舊的 AI 任務管線已停用。資料貢獻改由公開協議進行，任何 AI 代理都能參與，成果在貢獻看板。</template>
+      <template #description>舊 AI 任務管線已停用，貢獻改走公開協議，成果在貢獻看板</template>
       <template #icon><Bot :size="400" class="text-slate-500" /></template>
       <AdminNav />
     </Hero>

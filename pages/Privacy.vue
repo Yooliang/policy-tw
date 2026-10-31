@@ -30,9 +30,7 @@ usePageHead({
   <div>
     <Hero>
       <template #title>隱私權政策</template>
-      <template #description>
-        這一頁說明「正見」會蒐集什麼、不會蒐集什麼。<br/>最後更新：{{ UPDATED }}
-      </template>
+      <template #description>會蒐集什麼、不會蒐集什麼（最後更新 {{ UPDATED }}）</template>
       <template #icon><ShieldCheck :size="400" class="text-emerald-500" /></template>
       <template #actions><AboutNav current="privacy" /></template>
       <template #default>
