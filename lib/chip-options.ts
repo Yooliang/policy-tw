@@ -25,3 +25,16 @@ export function chipOptions(
 ): ChipOption[] {
   return options.map((value) => ({ value, dim: populated !== null && !populated.has(norm(value)) }))
 }
+
+/**
+ * 縣市晶片列的「有參選人縣市」集合。populatedPeople 只含目前縣市的參選人，
+ * 所以只有 selectedRegion === 'All'（全台資料已讀）時才能依參選人標灰；選了某縣市時回 null（不標灰）。
+ * @param mayorRegions 市長參選人的縣市名稱（已正規化）
+ */
+export function countyPopulatedSet(
+  selectedRegion: string,
+  ready: boolean,
+  mayorRegions: () => Iterable<string>,
+): ReadonlySet<string> | null {
+  return ready && selectedRegion === 'All' ? new Set(mayorRegions()) : null
+}
