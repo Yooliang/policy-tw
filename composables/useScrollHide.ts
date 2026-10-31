@@ -36,6 +36,12 @@ export function useScrollHide() {
     const h = document.querySelector('[data-testid="mobile-hero"]')
     return !!h && h.getBoundingClientRect().bottom > 0
   }
+  /** 吸頂分頁條（[data-chrome-follow]）還沒吸到頁首下緣（top > 頁首高度 3.5rem＝56px）時不收合：
+   *  收合是 translateY 位移，還在文流位置的分頁條會往上滑進上方的內容（人物頁的麵包屑卡片）蓋住它；吸住之後位移才是從頁首下方滑出畫面 */
+  function followNotPinned(): boolean {
+    const f = document.querySelector('[data-chrome-follow]')
+    return !!f && f.getBoundingClientRect().top > 57
+  }
   function step() {
     raf = 0
     const y = window.scrollY
@@ -44,7 +50,7 @@ export function useScrollHide() {
     // 拖曳分頁中或切換後 400ms 內：頁面高度變化、捲動位置重設造成的 scroll 不算使用者往下捲，一律顯示並同步基準
     if (!isMobileViewport() || y <= 0 || blocked()) { down = 0; set(false); return }
     if (dy > 0) {
-      if (heroStillVisible()) { down = 0; return }
+      if (heroStillVisible() || (!hidden && followNotPinned())) { down = 0; return }
       down += dy
       if (down > HIDE_AFTER_PX) set(true)
     } else if (dy < 0) {
