@@ -112,8 +112,9 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
 </script>
 
 <template>
-  <!-- 桌面（md 以上）下框線改用不佔版面的 box-shadow（深色版見 styles/main.css）：border-b 在 125%／150% 縮放下是 0.8／0.67px，頁首高度變成 48.8px 的小數，捲動時 sticky 邊界在像素之間來回吸附就會抖；陰影不佔高度，頁首固定 48px，並自成合成層 -->
-  <nav data-chrome="top" class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200 md:border-b-0 md:shadow-[0_1px_0_0_#e2e8f0] md:[will-change:transform]">
+  <!-- 桌面（md 以上）頁首改 fixed（左邊讓出窄欄 72px、lg 再讓出延伸欄 176px，右邊到頭，橫跨內容與右欄），高度固定 48px，內容欄用 md:pt-12 佔位（App.vue）：
+       sticky 在 125%／150% 縮放下捲動時邊界會在像素之間吸附而抖；fixed 不參與捲動。下框線改用不佔版面的 box-shadow（深色版見 styles/main.css），border-b 在縮放下是 0.8／0.67px、會讓高度變小數 -->
+  <nav data-chrome="top" class="bg-white text-navy-900 sticky top-0 z-50 shadow-sm border-b border-slate-200 md:fixed md:inset-x-auto md:left-[72px] md:right-0 md:h-12 md:border-b-0 md:shadow-[0_1px_0_0_#e2e8f0] lg:left-[248px]">
     <!-- 手機版頁首（md 以下，X 式）：左選單鈕（開左側抽屜）、正中間站徽、右搜尋；主選單搬到畫面下方的 MobileTabBar -->
     <div class="md:hidden relative flex items-center h-14 px-2" data-testid="mobile-header">
       <button

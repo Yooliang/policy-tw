@@ -89,7 +89,7 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
       <div class="absolute inset-y-0 left-0 shadow-2xl"><DeskExtNav drawer @close="closeDeskDrawer" /></div>
     </div>
 
-    <div class="flex min-h-screen min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" data-desk-main>
+    <div class="flex min-h-screen min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0 md:pt-12" data-desk-main>
       <Navbar />
       <main class="flex-grow">
         <RouterView v-slot="{ Component }">
