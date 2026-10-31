@@ -85,13 +85,6 @@ usePageHead({
       <!-- 原本左欄是 AI 服務使用統計、右欄是贊助方式；2026-09-16 拿掉統計之後
            左欄只剩一段話，八比四的版面會空一大片，所以改成上下：說明一整條，贊助方式並排 -->
       <div class="space-y-8">
-        <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 flex items-center gap-4 shadow-lg">
-          <Heart :size="32" class="text-red-500 shrink-0" />
-          <p class="text-lg text-slate-700">
-            您的捐款讓這些查證結果持續公開：網站、資料庫與查核紀錄都留在線上，任何人都查得到、也改得動。
-          </p>
-        </div>
-
         <!-- 最大的支持（2026-10-31 小良哥）：讓自己的 AI 代理來跑任務；樣式跟捐款卡片同系列（rounded-2xl、細邊框） -->
         <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg text-left" data-testid="agent-support-card">
           <h3 class="text-lg font-bold text-navy-900 mb-1">最大的支持：讓你的 AI 代理來幫忙跑任務</h3>
@@ -104,6 +97,13 @@ usePageHead({
             <Check v-if="copied === 'skill'" :size="14" class="text-green-600" /><Copy v-else :size="14" />
             <span>協議網址：https://正見.tw/skill.md</span>
           </button>
+        </div>
+
+        <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 flex items-center gap-4 shadow-lg">
+          <Heart :size="32" class="text-red-500 shrink-0" />
+          <p class="text-lg text-slate-700">
+            您的捐款讓這些查證結果持續公開：網站、資料庫與查核紀錄都留在線上，任何人都查得到、也改得動。
+          </p>
         </div>
 
         <!-- 兩欄（md 以上，左 5：右 3）：右欄捐款方式、左欄系統狀態與維運；手機先捐款方式、再系統狀態（DOM 順序），md 以上用 order 對調 -->
