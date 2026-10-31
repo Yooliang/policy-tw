@@ -98,6 +98,13 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "挑新交的那張 → correction 把 politicians 的 avatar_url 從現有那張改成新那張（current_value 照 candidates 裡的現有照片原樣抄），reason 寫兩張各自的缺點、為什麼選它；" +
     "現有那張比較合適 → no_change，outcome=confirmed，finding 寫兩張的比較。兩張都不是本人 → no_change，outcome=not_found，finding 說明。",
 
+  // 參選紀錄縣市對不上（2026-10-31）
+  region_mismatch:
+    "這一屆縣市長的參選紀錄現在記在 target.current_region，但有交件寫的是 target.proposed_region（號次已照交件記下）。" +
+    "請查中選會或該縣市選委會的候選人名單／抽籤公告，看他實際在哪個縣市登記、號次是幾號。" +
+    "**現在記的縣市錯了** → correction：target_table 填 politician_elections、target_id 填 target.politician_election_id，changes 一項 field＝region_id、current_value＝target.current_region_id、correct_value＝target.proposed_region_id（整數，不加引號），reason 寫你查到的公告；" +
+    "**現在記的縣市是對的** → no_change，outcome=confirmed，finding 寫你查到的公告。查不到公告 → no_change，outcome=not_found。",
+
   candidate_status_stale:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "登記截止後還標著「傳聞參選」「可能參選」的，只有兩種可能：**在登記名單上** → correction 把 candidate_status 改成 registered；**不在名單上** → 改成 not_running。兩者都要附得出你查的那份名單（該縣市選委會的登記公告，或媒體整理的完整登記名單）。" +
@@ -428,6 +435,7 @@ const TARGET_TABLE: Record<string, string> = {
   policy_validity: "policies",
   placeholder_politician: "politicians",
   avatar_choice: "politicians",
+  region_mismatch: "politician_elections",
   legacy_audit: "policies",
   duplicate_policy: "policies",
 };
@@ -489,6 +497,14 @@ function buildPayload(
           target_id: rowTarget ?? "（人物 id）",
           changes: [{ field: "avatar_url", current_value: t.current_avatar_url ?? null, correct_value: t.new_avatar_url ?? "（新交的照片網址）" }],
           reason: "（兩張各自的缺點、為什麼新交的那張比較合適；留現有那張的話不要交這一筆，改交 no_change）",
+        };
+      }
+      if (taskType === "region_mismatch") {
+        return {
+          target_table: table,
+          target_id: asText(t.politician_election_id) ?? rowTarget ?? "（這一列的 id）",
+          changes: [{ field: "region_id", current_value: t.current_region_id ?? null, correct_value: t.proposed_region_id ?? "（正確縣市的 regions id）" }],
+          reason: "（你查到的公告：他實際登記的縣市；現在記的縣市是對的就不要交這一筆，改交 no_change）",
         };
       }
       return {
@@ -876,6 +892,8 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   candidacy_owner_mismatch: ["reassign_candidacy", "no_change"],
   // 照片二選一（2026-10-11）：挑新的 → correction；留現有的 → no_change confirmed
   avatar_choice: ["correction", "no_change"],
+  // 參選紀錄縣市對不上（2026-10-31）：現有的錯 → correction 改 region_id；現有的對 → no_change confirmed
+  region_mismatch: ["correction", "no_change"],
 };
 
 /** 這一種任務所有可能的回報骨架，key 是貢獻型別。單分支的回 null（用 report_template 就好）。 */
