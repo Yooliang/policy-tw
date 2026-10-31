@@ -33,7 +33,7 @@ const handleGoogleLogin = async () => {
 
 
 // ---- 手機版頁首正中間（X 式，每頁不同）：首頁＝站徽；選舉頁＝定位麵包屑；候選人頁＝姓名；其他頁＝頁面名稱 ----
-const { crumbs, person, pageCrumbs } = useMobileHeader()
+const { crumbs, person, pageCrumbs, personCrumbs } = useMobileHeader()
 const PAGE_TITLES: Record<string, string> = {
   tracking: '政見追蹤', policy: '政見', analysis: '跨任期接力', 'analysis-detail': '跨任期接力', lineage: '政見脈絡',
   elections: '選舉', election: '選舉', 'election-region': '選舉', 'election-township': '選舉', 'election-matrix': '政見矩陣',
@@ -55,6 +55,13 @@ const shownCrumbs = computed(() => {
   if (!list || list.length === 0) return null
   const total = list.reduce((n, c) => n + c.label.length, 0)
   return total > 14 && list.length > 2 ? list.slice(-2) : list
+})
+/** 人物頁：全部寫出來放得下就全寫；超過 14 字就把鄉鎮省成「…」、縣市換短名，屆別與人名完整 */
+const shownPersonCrumbs = computed(() => {
+  const list = mounted.value && route.name === 'politician' ? personCrumbs.value : null
+  if (!list || list.length === 0) return null
+  if (list.reduce((n, c) => n + c.label.length, 0) <= 14) return list
+  return list.map(c => c.skip ? { ...c, label: '…', to: undefined } : { ...c, label: c.short ?? c.label })
 })
 // 搜尋頁：頁首正中是搜尋框，進頁面自動聚焦
 const isSearchRoute = computed(() => route.name === 'search')
@@ -128,6 +135,13 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
         <input ref="searchInput" v-model="searchPageTerm" type="text" enterkeyhint="search" autocomplete="off" placeholder="搜尋人物或政見…" class="flex-1 min-w-0 bg-transparent outline-none text-base placeholder:text-slate-400" data-testid="global-search-input" />
         <button v-if="searchPageTerm" type="button" class="shrink-0 text-slate-400" aria-label="清除" @click="searchPageTerm = ''"><X :size="16" /></button>
       </div>
+      <nav v-else-if="shownPersonCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-person-crumbs">
+        <template v-for="(c, i) in shownPersonCrumbs" :key="i">
+          <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
+          <RouterLink v-if="c.to && i < shownPersonCrumbs.length - 1" :to="c.to" class="whitespace-nowrap rounded px-1 py-1.5 text-slate-500 active:bg-slate-100">{{ c.label }}</RouterLink>
+          <span v-else class="px-1 py-1.5" :class="i === shownPersonCrumbs.length - 1 ? 'min-w-0 truncate text-navy-900' : 'text-slate-500'">{{ c.label }}</span>
+        </template>
+      </nav>
       <nav v-else-if="shownCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-crumbs">
         <template v-for="(c, i) in shownCrumbs" :key="i">
           <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
