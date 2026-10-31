@@ -6,8 +6,8 @@
          這個檔的 <head> 會被預渲染的每一頁繼承，app.html／404.html 也是從它複製出去的。 -->
     <meta name="google-adsense-account" content="ca-pub-6687848895101003" />
     <meta name="referrer" content="no-referrer-when-downgrade" />
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-ED8EZ1503S"></script>
+    <!-- Google tag (gtag.js)：gtag() 先建好、事件先排進 dataLayer；gtag.js 本體等頁面載完再載（見下方「第三方腳本延後載入」），
+         載入後會把排好的 config／事件一次送出，首次 page_view 只是晚一點到。 -->
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
@@ -48,12 +48,41 @@
     <!-- 字型 CSS 不阻塞首次繪製：先以 print 載入（不阻塞），載完再切成 all。系統字型會先頂著。 -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <noscript><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet"></noscript>
-    <!-- AdSense 載入器。放這裡而不是元件裡：Vue 的 template 不會執行 inline <script>，
-         而且預渲染的每一頁都繼承這個 <head>，一處就全站到位。版位本身在 AdSlot.vue。 -->
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6687848895101003" crossorigin="anonymous"></script>
-    <!-- Converly（adotone）聯盟連結載入器（2026-09-23 維護者加）。第三方腳本，隱私頁有列。 -->
-    <script>var ConverlyCustomData = {channelId: null};</script>
-    <script async defer src="https://cdn.adotone.com/production/adlinks/16e47b94303361f357282e345ad014c0f9eece0eb5939859058c86334e107547.js"></script>
+    <!-- 第三方腳本延後載入（2026-10-31，載入順序優化）：GTM／gtag.js、AdSense 載入器、Converly（adotone）
+         以前在 <head> 直接 async 載，在行動網路上跟 app.js 與首屏資料搶頻寬（量測：GTM 182 KB、AdSense 57 KB）。
+         現在等 window load 之後再過 1.5 秒、而且瀏覽器閒下來（requestIdleCallback，取較晚者）才一起插入。
+         - AdSense 載入器放這裡而不是元件裡：Vue 的 template 不會執行 inline <script>，
+           而且預渲染的每一頁都繼承這個 <head>，一處就全站到位。版位本身在 AdSlot.vue——
+           它對 window.adsbygoogle 做 push，載入器還沒到時只是排進陣列，載入器到了自己處理，所以版位不用改。
+         - Converly（adotone）聯盟連結載入器是 2026-09-23 維護者加的。第三方腳本，隱私頁有列。 -->
+    <script>
+      var ConverlyCustomData = {channelId: null};
+      (function () {
+        var started = false;
+        function add(src, attrs) {
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = src;
+          for (var k in attrs) s.setAttribute(k, attrs[k]);
+          document.head.appendChild(s);
+        }
+        function loadThirdParty() {
+          if (started) return;
+          started = true;
+          add('https://www.googletagmanager.com/gtag/js?id=G-ED8EZ1503S');
+          add('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6687848895101003', { crossorigin: 'anonymous' });
+          add('https://cdn.adotone.com/production/adlinks/16e47b94303361f357282e345ad014c0f9eece0eb5939859058c86334e107547.js', { defer: '' });
+        }
+        function afterLoad() {
+          setTimeout(function () {
+            if (window.requestIdleCallback) window.requestIdleCallback(loadThirdParty, { timeout: 3000 });
+            else loadThirdParty();
+          }, 1500);
+        }
+        if (document.readyState === 'complete') afterLoad();
+        else window.addEventListener('load', afterLoad);
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-800 antialiased">
     <div id="app"></div>

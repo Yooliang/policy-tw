@@ -1,5 +1,7 @@
 import type { Router, RouteRecordRaw } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import { useGlobalState } from '../composables/useGlobalState'
+import { useSupabase } from '../composables/useSupabase'
 import type { PageSnapshot } from '../lib/ssg/page-data'
 import { handleChunkLoadError, isChunkLoadError, setPendingPath } from '../lib/chunk-reload'
 // 記下第一次載入的路徑（人物一覽、政黨頁換頁進來要整頁載入預渲染那一份，見 lib/full-load.ts）
@@ -258,6 +260,19 @@ export function installRouterGuards(router: Router): void {
     }
   })
   router.afterEach(() => setPendingPath(null))
+
+  // 選舉頁的候選人清單提早發（2026-10-31 載入順序優化）：不等頁面元件的 chunk 載完與 onMounted。
+  // 放在 beforeEach 是為了跟 chunk 下載並行；元件掛載後的 loadPoliticiansByElection 會接手同一個 promise。
+  // 預渲染（SSR）不發：建置端的資料走 ensureFullDataset，且不該多打 Supabase。
+  if (!import.meta.env.SSR) {
+    const { globalRegion } = useGlobalState()
+    const { prefetchElectionPage } = useSupabase()
+    router.beforeEach((to) => {
+      if (to.name === 'election' || to.name === 'election-region' || to.name === 'election-township') {
+        prefetchElectionPage(to.params, globalRegion.value)
+      }
+    })
+  }
 
   // 部署新版後舊分頁載入舊 chunk 404：硬重載到目標路徑（60 秒內同路徑只一次，再失敗顯示提示）
   if (!import.meta.env.SSR) {
