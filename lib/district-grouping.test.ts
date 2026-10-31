@@ -139,3 +139,15 @@ Deno.test("參選人列表上方沒有選擇列：分組元件只畫分組；選
   assert(page.includes("shortDistrict(district)"), "晶片顯示短寫");
   assert(/@click="toggleDistrictChip\(district\)"/.test(page) && /@click="selectedDistrict = 'All'"/.test(page));
 });
+
+Deno.test("ElectionPage：displayLabel 必須宣告在所有使用處之前（usePageHead 的 description 在 setup 就會用到，晚宣告會在鄉鎮頁 TDZ 炸掉）", () => {
+  const page = Deno.readTextFileSync(new URL("../pages/ElectionPage.vue", import.meta.url));
+  const def = page.indexOf("const displayLabel = ");
+  const defLabels = page.indexOf("const DISPLAY_LABELS");
+  const firstUse = page.indexOf("displayLabel(", def + 10);
+  assert(def > 0 && defLabels > 0 && defLabels < def, "表先於函式");
+  // 找出第一個「不是宣告本身」的使用；它必須在宣告之後（以 setup 順序而言宣告在前）
+  const uses = [...page.matchAll(/displayLabel\(/g)].map((m) => m.index!).filter((i) => i !== def + "const ".length);
+  assert(uses.length > 0 && uses.every((i) => i > def), "所有使用都在宣告之後");
+  assert(firstUse > def);
+});

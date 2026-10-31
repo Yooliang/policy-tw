@@ -63,6 +63,9 @@ import districtCacheData from '../data/tw-districts/2026.json'
 
 const router = useRouter()
 const route = useRoute()
+/** 顯示用名稱（必須宣告在最前面：usePageHead 的 description 在 setup 就會算到 townshipLevelCounts，晚宣告會在鄉鎮頁炸 TDZ「Cannot access before initialization」，2026-10-31 上線後抓到）：鄉鎮市長→鄉鎮市區長、鄉鎮市民代表→鄉鎮市區民代表（只改畫面文字；資料庫 election_type 值、錨點與比對一律用原名） */
+const DISPLAY_LABELS: Record<string, string> = { 鄉鎮市長: '鄉鎮市區長', 鄉鎮市民代表: '鄉鎮市區民代表' }
+const displayLabel = (label: string) => DISPLAY_LABELS[label] ?? label
 /**
  * 「分頁面板版面」（層級分頁＋共用定位，原本只有手機版）：2026-10-31 桌面版也改成這一套——層級與地區由左邊延伸欄選（DeskExtNav），
  * 內容區跟手機版同一組面板。只在瀏覽器判斷（預渲染與 hydrate 第一次都是 false），所以桌面也走手機版那些載入邏輯；
@@ -1175,9 +1178,6 @@ const TAB_NEEDS: Record<string, 'county' | 'sub' | 'village'> = {
  * 根因（2026-10-30）：以前判斷寫成 ElectionType.CHIEF（那是「村里長」），縣市長是 MAYOR，所以直轄市頁一直沒換成功；
  * 而且分頁條與區塊標題是兩個名稱來源（區塊標題直接用 POSITIONS 的 label），只改一邊不會生效——現在兩處都走這個函式。
  */
-/** 顯示用名稱：鄉鎮市長→鄉鎮市區長、鄉鎮市民代表→鄉鎮市區民代表（只改畫面文字；資料庫 election_type 值、錨點與比對一律用原名） */
-const DISPLAY_LABELS: Record<string, string> = { 鄉鎮市長: '鄉鎮市區長', 鄉鎮市民代表: '鄉鎮市區民代表' }
-const displayLabel = (label: string) => DISPLAY_LABELS[label] ?? label
 function mobileTypeLabel(type: string): string {
   if (selectedRegion.value !== 'All' && isSpecialMunicipality.value) {
     if (type === ElectionType.MAYOR) return '直轄市長'
