@@ -32,8 +32,12 @@ const link = (key: string, label: string, to: string): DeskItem => ({ key, label
 const POLICY: DeskGroup[] = [
   { key: 'policy', title: '政見', blocks: [[link('list', '全部政見', '/tracking'), link('relay', '政策脈絡', '/analysis'), link('mine', '我的關注', '/tracking?view=mine'), link('regional', '縣市數據分佈', '/regional-data')]] },
 ]
+// 參與區三組（2026-10-31 小良哥）：看板／工作那幾項就是貢獻看板列（components/contributions/BoardNav.vue）的分頁；
+// 「貢獻統計」就是 /stats（BoardNav 的「統計」），所以看板組不再重複放「統計」。
 const JOIN: DeskGroup[] = [
-  { key: 'join', title: '參與', blocks: [[link('stats', '貢獻紀錄', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community'), link('contributions', '貢獻看板', '/contributions'), link('queue', '任務佇列', '/queue'), link('sources', '查證來源', '/sources')]] },
+  { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
+  { key: 'board', title: '看板', blocks: [[link('contributions', '貢獻', '/contributions'), link('map', '地圖', '/stats/map'), link('ai', 'AI', '/ai')]] },
+  { key: 'work', title: '工作', blocks: [[link('tasks', '任務', '/tasks'), link('queue', '隊列', '/queue'), link('dispatch', '日程', '/dispatch')]] },
 ]
 const ABOUT: DeskGroup[] = [
   { key: 'about', title: '關於', blocks: [[link('vision', '關於正見', '/vision'), link('contact', '聯絡我們', '/contact'), link('terms', '使用條款', '/terms'), link('privacy', '隱私權政策', '/privacy'), link('donation', '贊助支持', '/donation')]] },
@@ -61,7 +65,12 @@ const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('
 const FULL_LOAD = new Set(['/politicians', '/parties'])
 const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', scroll: true, blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
 
+/** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
+const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
+const overviewOnly = computed(() => OVERVIEW_ROUTES.has(String(route.name)))
+
 const title = computed(() => {
+  if (overviewOnly.value) return '選舉'
   if (section.value === 'election') {
     if (model.value) return model.value.title
     const e = activeElection.value
@@ -75,7 +84,8 @@ const groups = computed<DeskGroup[]>(() => {
     case 'policy': return [...POLICY, ...policyCategories.value]
     case 'join': return JOIN
     case 'about': return ABOUT
-    case 'election': return [...(model.value ? model.value.groups : genericElection.value), moreElection]
+    case 'search': return [moreElection]
+    case 'election': if (overviewOnly.value) return [moreElection]; return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組
     default: return []
   }
 })
@@ -83,7 +93,8 @@ const groups = computed<DeskGroup[]>(() => {
 function isOn(item: DeskItem): boolean {
   if (!item.to) return item.active
   const [path, qs] = item.to.split('?')
-  if (route.path !== path) return false
+  // 一覽組：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也高亮對應那項
+  if (['/politicians', '/parties'].includes(path)) { if (!(route.path === path || route.path.startsWith(path + '/'))) return false } else if (route.path !== path) return false
   const want = new URLSearchParams(qs ?? '')
   if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : want.has('category') ? route.query.category === want.get('category') : !route.query.view && !route.query.category
   if (want.has('view')) return route.query.view === want.get('view')
@@ -111,7 +122,7 @@ const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-le
 </script>
 
 <template>
-  <aside ref="rootEl" class="flex h-full w-[260px] flex-col border-r border-slate-200 bg-white" :aria-label="`${title}選單`" data-testid="desk-ext">
+  <aside ref="rootEl" class="flex h-full w-[176px] flex-col border-r border-slate-200 bg-white" :aria-label="`${title}選單`" data-testid="desk-ext">
     <div class="flex h-14 shrink-0 items-center justify-between border-b border-slate-100 px-4">
       <h2 class="truncate text-lg font-black text-navy-900" data-testid="desk-ext-title">{{ title }}</h2>
       <button v-if="drawer" type="button" class="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100" aria-label="關閉選單" @click="emit('close')"><X :size="18" /></button>
@@ -124,7 +135,7 @@ const itemClass = (on: boolean) => ['block w-full rounded-lg px-3 py-1.5 text-le
             <hr v-if="bi > 0" class="my-1.5 border-slate-200" data-testid="desk-group-divider" />
             <ul class="space-y-0.5">
               <li v-for="item in block" :key="item.key">
-                <a v-if="item.to && FULL_LOAD.has(item.to)" :href="item.to" :class="itemClass(false)">{{ item.label }}</a>
+                <a v-if="item.to && FULL_LOAD.has(item.to)" :href="item.to" :class="itemClass(isOn(item))" :data-active="isOn(item) ? 'true' : 'false'" :aria-current="isOn(item) ? 'page' : undefined">{{ item.label }}</a>
                 <RouterLink v-else-if="item.to" :to="item.to" :class="itemClass(isOn(item))" :data-active="isOn(item) ? 'true' : 'false'" :aria-current="isOn(item) ? 'page' : undefined">{{ item.label }}</RouterLink>
                 <button v-else type="button" :class="itemClass(item.active)" :data-active="item.active ? 'true' : 'false'" :aria-pressed="item.active" @click="onPick(item, $event)">{{ item.label }}</button>
               </li>

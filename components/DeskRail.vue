@@ -6,7 +6,6 @@ import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
 import { sectionOfRoute, type DeskSection } from '../lib/desk-sections'
 import { useSupabase } from '../composables/useSupabase'
-import { useGlobalSearchOpen } from '../composables/useGlobalSearch'
 
 /**
  * 桌面版最左窄圖示欄（md 以上，固定全高）：站徽＋主選單五項（首頁／政見／選舉／參與／搜尋）＋最下面的「關於」。
@@ -15,7 +14,6 @@ import { useGlobalSearchOpen } from '../composables/useGlobalSearch'
  */
 const route = useRoute()
 const { getActiveElection } = useSupabase()
-const { openSearch } = useGlobalSearchOpen()
 const current = computed<DeskSection | null>(() => sectionOfRoute(route.name))
 const electionTo = computed(() => {
   const e = getActiveElection()
@@ -61,10 +59,10 @@ const itemClass = (on: boolean) => ['group relative flex w-14 flex-col items-cen
         </svg>
         <span>{{ item.label }}</span>
       </RouterLink>
-      <button type="button" :class="itemClass(current === 'search')" aria-label="搜尋人物與政見" data-testid="desk-rail-search" @click="openSearch">
+      <RouterLink to="/search" :class="itemClass(current === 'search')" :aria-current="current === 'search' ? 'page' : undefined" aria-label="搜尋人物與政見" data-testid="desk-rail-search">
         <Search :size="22" />
         <span>搜尋</span>
-      </button>
+      </RouterLink>
     </div>
     <div class="mt-auto flex flex-col items-center gap-1">
       <RouterLink to="/vision" :class="itemClass(current === 'about')" :aria-current="current === 'about' ? 'page' : undefined" data-testid="desk-rail-about">

@@ -70,7 +70,7 @@ defineProps<{
          （2026-10-29 線上實測，人物頁的卡因此左右撐滿整個視窗、時有時無）。算式＝max-w-7xl 扣掉 sm:px-6／lg:px-8 的左右留白；手機（<sm）撐滿 100%、不圓角，內距 px-4 與上方按鈕左緣對齊（維護者 2026-10-29）。 -->
     <div
       v-if="$slots.default"
-      class="bg-white px-4 sm:px-6 py-4 rounded-none sm:rounded-2xl shadow-2xl border border-slate-200 border-x-0 sm:border-x min-h-[86px] flex items-center -mt-12 relative z-30 mx-auto w-full max-w-none sm:w-[calc(100%-3rem)] sm:max-w-[calc(80rem-3rem)] lg:w-[calc(100%-4rem)] lg:max-w-[calc(80rem-4rem)]"
+      class="bg-white px-4 sm:px-6 py-4 rounded-none sm:rounded-2xl shadow-2xl border border-slate-200 border-x-0 sm:border-x min-h-[86px] flex md:hidden items-center -mt-12 relative z-30 mx-auto w-full max-w-none sm:w-[calc(100%-3rem)] sm:max-w-[calc(80rem-3rem)] lg:w-[calc(100%-4rem)] lg:max-w-[calc(80rem-4rem)]"
     >
       <div class="w-full">
         <slot />

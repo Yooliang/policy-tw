@@ -38,7 +38,9 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
 </script>
 
 <template>
-  <aside v-if="visible" :key="route.path" ref="root" class="w-[300px] shrink-0 self-start sticky top-0 h-screen overflow-hidden px-0 py-4" aria-label="廣告" data-testid="ad-rail">
+  <aside v-if="visible" :key="route.path" ref="root" class="w-[300px] shrink-0 self-start sticky top-0 h-screen overflow-y-auto px-0 py-4" aria-label="廣告" data-testid="ad-rail">
+    <!-- 地區資料統計卡的落點（選舉頁 Teleport 進來；沒有就是空的、不佔位） -->
+    <div id="desk-rail-top" class="mb-4 empty:hidden"></div>
     <ins
       v-if="RAIL_AD_SLOT"
       class="adsbygoogle"

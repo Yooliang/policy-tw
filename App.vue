@@ -28,8 +28,8 @@ const { width } = useDeskLayout()
 const { drawerOpen: deskDrawer, closeDeskDrawer } = useDeskNav()
 const isDesk = computed(() => width.value >= DESK_MD)
 const showRail = computed(() => width.value >= DESK_XL && !adHiddenPath(route.path))
-// 首頁、搜尋沒有子項目，延伸欄整欄收起
-const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null && s !== 'home' && s !== 'search' })
+// 首頁沒有子項目，延伸欄整欄收起
+const hasExt = computed(() => { const s = sectionOfRoute(route.name); return s !== null && s !== 'home' })
 const drawerShown = computed(() => deskDrawer.value && hasExt.value && width.value >= DESK_MD && width.value < DESK_LG)
 const { openDrawer } = useMobileShell()
 const EDGE_PX = 28

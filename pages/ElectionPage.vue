@@ -992,7 +992,10 @@ const subRegionIgnoredNote = computed(() =>
 const pkMissing = computed(() => pkNeeds(pkLevel.value, selectedRegion.value, selectedSubRegion.value))
 const pkGroupList = computed(() => pkMissing.value ? [] : pkGroups(comparisonPool.value, pkLevel.value).filter(hasPk))
 const groupHasPolicies = (g: { people: Politician[] }) => hasPolicies(g.people, policies.value, electionId.value)
-const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value, groupHasPolicies))
+/** PK 的選區跟內容區的選區晶片共用 selectedDistrict（網址 ?district= 是 PK 自己點的，優先；晶片一換就清掉它，見下面的 watch） */
+const chipDistrictLabel = computed(() => selectedDistrict.value === 'All' ? '' : selectedDistrict.value.replace(/^.*?(第d+選舉區)$/, '$1'))
+watch(selectedDistrict, () => { comparisonDistrict.value = '' })
+const pkGroup = computed(() => pickGroup(pkGroupList.value, comparisonDistrict.value || chipDistrictLabel.value, groupHasPolicies))
 const pkCandidates = computed(() => pkGroup.value ? comparablePeople(pkGroup.value.people) : [])
 const pkIds = computed(() => pkCandidates.value.map(c => String(c.id)))
 const pkPicked = computed(() => parsePick(comparisonPick.value, pkIds.value))
@@ -1460,6 +1463,8 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   return row.length > 0 ? [row] : []
 })
 const mobileChipsEl = ref<HTMLElement | null>(null)
+/** 桌面版：縣市那一列（全台頁、縣市長分頁）延伸欄已經有，不重複；鄉鎮／選區／村里列在桌面也顯示 */
+const deskChipsHidden = computed(() => selectedRegion.value === 'All' || mobileActiveType.value === ElectionType.MAYOR)
 // 選中的晶片自動捲到橫向可見（只動橫向，不動頁面捲動）
 watch(mobileChipRows, () => {
   void nextTick(() => {
@@ -1568,7 +1573,7 @@ onBeforeUnmount(() => setCrumbs(null))
 // localStorage 記住上次的定位（縣市、鄉鎮、村里）：網址是全台、沒有任何定位時，手機版啟動後套回上次的；讀寫都包 try/catch
 const LOCATION_KEY = 'zj.location'
 function saveLocation() {
-  try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ region: selectedRegion.value, sub: selectedSubRegion.value, village: selectedVillage.value })) } catch { /* 無痕或封鎖時略過 */ }
+  try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ region: selectedRegion.value, sub: selectedSubRegion.value, village: selectedVillage.value, tab: mobileTab.value })) } catch { /* 無痕或封鎖時略過 */ }
 }
 function restoreLocation() {
   if (!isMobileViewport() || routeRegion.value || selectedRegion.value !== 'All') return
@@ -1580,7 +1585,7 @@ function restoreLocation() {
   } catch { /* 讀不到就維持全台 */ }
 }
 onMounted(() => { restoreLocation(); ensureCountyLevelLoaded() })
-watch([selectedRegion, selectedSubRegion, selectedVillage], saveLocation)
+watch([selectedRegion, selectedSubRegion, selectedVillage, mobileTab], saveLocation)
 
 // ---- 桌面版延伸欄的篩選模型（DeskExtNav 讀；點了就是呼叫上面手機版同一批函式，狀態與網址共用） ----
 const { setElectionNav } = useDeskNav()
@@ -1594,32 +1599,29 @@ const deskNavModel = computed<DeskNavModel>(() => {
   const matrix: DeskItem[] = hasMatrix.value ? [{ key: 'matrix', label: '矩陣', active: false, to: `/election/${electionSeg.value}/matrix` }] : []
   groups.push({ key: 'views', title: '內容類型', blocks: [views.slice(0, 3), [...views.slice(3), ...matrix]] })
   groups.push({ key: 'levels', title: '層級', blocks: [mobileTabs.value.map(t => item(t.key, t.label, t.key === mobileActiveType.value, () => setMobileTab(t.key)))] })
-  groups.push({ key: 'county', title: '縣市', scroll: true, blocks: [[
+  groups.push({ key: 'county', title: '縣市', blocks: [[
     item('All', '全台', selectedRegion.value === 'All', () => pickLocation('county', 'All')),
     ...TAIWAN_COUNTIES.map(c => item(c, c, selectedRegion.value === c, () => pickLocation('county', c))),
   ]] })
-  if (selectedRegion.value !== 'All') {
-    groups.push({ key: 'sub', title: subRegionLabel.value, scroll: true, blocks: [[
-      item('All', '全部', selectedSubRegion.value === 'All', () => pickAll('sub')),
-      ...mobileSubOptions.value.map(o => item(o, o, selectedSubRegion.value === o, () => { pickLocation('sub', o); toLevel(ElectionType.TOWNSHIP_MAYOR) })),
-    ]] })
-  }
-  if (selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All' && (mobileActiveType.value === ElectionType.CHIEF || availableVillages.value.length > 0)) {
-    groups.push({ key: 'village', title: villageLabel.value, scroll: true, blocks: [[
-      item('All', '全部', selectedVillage.value === 'All', () => { pickAll('village'); toLevel(ElectionType.CHIEF) }),
-      ...siteNames(rasterVillages.value, availableVillages.value).map(v => item(v, v, selectedVillage.value === v, () => { pickLocation('village', v); toLevel(ElectionType.CHIEF) })),
-    ]] })
-  }
-  const t = mobileActiveType.value
-  const districtLevel = (t === ElectionType.COUNCILOR && selectedRegion.value !== 'All') || (t === ElectionType.REPRESENTATIVE && selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All')
-  const row = districtLevel ? mobileChipRows.value[0] ?? [] : []
-  if (row.length > 0) groups.push({ key: 'district', title: '選區', scroll: true, blocks: [row.map(c => item(c.key, c.text, c.active, c.pick))] })
+  // 鄉鎮／村里／選區的選擇不在延伸欄：桌面與手機一樣放在內容區最上面的晶片列（2026-10-31）
   return { title: `${electionYear.value || ''} 選舉`.trim(), groups }
 })
 onMounted(() => setElectionNav(deskNavModel))
 onActivated(() => setElectionNav(deskNavModel))
 onDeactivated(() => setElectionNav(null))
 onBeforeUnmount(() => setElectionNav(null))
+
+// 右欄（AdRail）上方的統計卡落點：≥1280px 且右欄已渲染才有
+const railTarget = ref<HTMLElement | null>(null)
+function syncRailTarget() {
+  railTarget.value = typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches ? document.getElementById('desk-rail-top') : null
+}
+let railTimer = 0
+function syncRailSoon() { void nextTick(syncRailTarget); window.clearTimeout(railTimer); railTimer = window.setTimeout(syncRailTarget, 400) }
+onMounted(() => { syncRailSoon(); window.addEventListener('resize', syncRailSoon) })
+onActivated(syncRailSoon)
+onBeforeUnmount(() => { window.removeEventListener('resize', syncRailSoon); window.clearTimeout(railTimer) })
+watch(() => route.path, syncRailSoon)
 
 const swipeEl = ref<HTMLElement | null>(null)
 useSwipeTabs(swipeEl, {
@@ -1662,7 +1664,7 @@ useSwipeTabs(swipeEl, {
       <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw max-md:min-h-[calc(100dvh-10rem-env(safe-area-inset-bottom))]', 'w-full min-w-0']">
 
       <!-- 手機版：晶片列放在內容最上面，四個檢視（候選人／承諾／PK／串聯）共用同一組定位與分頁（標題區 → 晶片 → 排序 → 內容） -->
-      <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" class="md:hidden" data-testid="mobile-district-chips">
+      <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" :class="deskChipsHidden ? 'md:hidden' : ''" data-testid="mobile-district-chips">
         <div
           v-for="(row, ri) in mobileChipRows"
           :key="ri"
@@ -1838,6 +1840,7 @@ useSwipeTabs(swipeEl, {
           :politician="politicianById.get(policy.politicianId)!"
         />
       </div>
+      <p v-if="viewMode === 'pledges' && pagedCampaignPolicies.length === 0 && !loading" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400" data-testid="pledges-empty">尚無承諾</p>
       <Pagination v-if="viewMode === 'pledges'" :page="pledgePage" :total-pages="pledgeTotalPages" @update:page="goPledgePage" />
 
       <!-- VIEW: Issues -->
@@ -1914,7 +1917,8 @@ useSwipeTabs(swipeEl, {
         <!-- 地方基本統計：沒有右側面板時放在內容最下面（有面板時在面板最下方，2026-10-16 維護者） -->
         <MdDrawer :pick="issuesMdOpen" @close="issuesMdOpen = null" />
         <!-- 桌面版右側面板拿掉後，地方基本統計一律放在內容最下面（統計數字在瀏覽器端才載入，用 ClientOnly 避免預渲染與 hydrate 不一致） -->
-        <ClientOnly><RegionalStatsPanel v-if="pageCounty" :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" /></ClientOnly>
+        <!-- 桌面（≥1280px）：搬到右欄、廣告位上方（Teleport 到 AdRail 的 #desk-rail-top）；右欄收起時回到內容最下面 -->
+        <ClientOnly><template v-if="pageCounty"><Teleport v-if="railTarget" :to="railTarget"><RegionalStatsPanel :region="pageCounty" :sub-region="pageTownship" compact /></Teleport><RegionalStatsPanel v-else :region="pageCounty" :sub-region="pageTownship" compact class="mt-8 md:max-w-sm" /></template></ClientOnly>
       </div><!-- 左側內容結束 -->
 
       <!-- 右側：篩選區（手機版顯示在上方） -->

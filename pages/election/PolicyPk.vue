@@ -99,7 +99,7 @@ const isPicked = (id: string | number) => props.picked.includes(String(id))
           </div>
         </div>
 
-        <p v-if="regionPick && mdNarrow" class="mt-1 text-xs text-slate-500" data-testid="pk-md-scope">「PK 詳情」只列這一場的參選人；點表格的分類名開的是該分類的全縣市版本，不是只有這一場。</p>
+        <p v-if="regionPick && mdNarrow" class="max-md:hidden mt-1 text-xs text-slate-500" data-testid="pk-md-scope">「PK 詳情」只列這一場的參選人；點表格的分類名開的是該分類的全縣市版本，不是只有這一場。</p>
 
         <!-- 勾選要並排的人：預設這一組全部；至少留一位 -->
         <fieldset class="mt-3">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, X, Loader2 } from 'lucide-vue-next'
 import { useGlobalSearch, useGlobalSearchOpen } from '../composables/useGlobalSearch'
@@ -19,10 +19,9 @@ const term = ref('')
 const search = useGlobalSearch(term)
 const inputEl = ref<HTMLInputElement | null>(null)
 
+// 2026-10-31：桌面版不再開搜尋視窗，所有入口（左欄搜尋、頁首搜尋鈕）改導到 /search 頁（那頁自動聚焦搜尋框）
 async function show() {
-  open.value = true
-  await nextTick()
-  inputEl.value?.focus()
+  await router.push('/search')
 }
 
 function close() {
