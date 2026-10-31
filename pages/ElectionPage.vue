@@ -9,6 +9,7 @@ import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 import ScrollRow from '../components/ScrollRow.vue'
 import { runAfterRender } from '../lib/after-render'
+import { APPOINTED_EMPTY_TEXT, hasIndigenousElection, isAppointedDistrict, type IndigenousInput } from '../lib/appointed-district'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -1196,7 +1197,7 @@ function mobileTypeLabel(type: string): string {
   const l = positionSpec(type)?.label ?? type
   return displayLabel(l)
 }
-const mobileTabs = computed(() => MOBILE_TAB_TYPES.map(t => ({ key: t, label: mobileTypeLabel(t) })))
+const mobileTabs = computed(() => MOBILE_TAB_TYPES.map(t => ({ key: t, label: mobileTypeLabel(t), dim: appointedTabs.value.has(t) })))
 const mobileActiveType = computed(() => MOBILE_TAB_TYPES.includes(mobileTab.value) ? mobileTab.value : MOBILE_TAB_TYPES[0]!)
 const mobileIndex = computed(() => Math.max(0, MOBILE_TAB_TYPES.indexOf(mobileActiveType.value)))
 function setMobileTab(key: string) { mobileTab.value = key }
@@ -1535,19 +1536,26 @@ watch(mobileChipRows, () => {
     })
   })
 }, { immediate: true, flush: 'post' })
+function appointedInput(): IndigenousInput {
+  return {
+    isSpecialMunicipality: isSpecialMunicipality.value && selectedRegion.value !== 'All',
+    sub: selectedSubRegion.value,
+    indigenousDistricts: indigenousDistricts.value,
+    repKeys: Object.keys(districtCacheData.rep ?? {}),
+    countyCode: rasterCountyCode.value,
+    townCode: rasterTownCode.value,
+    sameName: sameRegionName,
+  }
+}
+/** 直轄市一般區：區長市政府派任、無區民代表 → 這兩個分頁變灰（仍可點） */
+const appointedTabs = computed(() => isAppointedDistrict(appointedInput()) ? new Set<string>([ElectionType.TOWNSHIP_MAYOR, ElectionType.REPRESENTATIVE]) : new Set<string>())
 /** 沒有選項可挑、或定位夠了卻沒有這類選舉時的說明 */
 function emptyTextFor(type: string): string {
   if (electionLoading.value || countyWideLoading.value || nwPending(type)) return '載入中…'
   // 直轄市的一般區區長官派、沒有區代表選舉：只有山地原住民區（資料裡有原民區長／區代表候選人）才有這兩類選舉
   if (isSpecialMunicipality.value && selectedRegion.value !== 'All' && (type === ElectionType.TOWNSHIP_MAYOR || type === ElectionType.REPRESENTATIVE)) {
-    const sub = selectedSubRegion.value
     // 山地原住民區看選區資料（data/tw-districts 的區代表選區：直轄市底下有區代表選區的只會是原民區），不看有沒有人登記；候選人資料有的也算
-    const repKeys = Object.keys(districtCacheData.rep ?? {})
-    const county = rasterCountyCode.value
-    const isIndigenous = sub === 'All'
-      ? indigenousDistricts.value.length > 0 || (!!county && repKeys.some(k => k.startsWith(county)))
-      : indigenousDistricts.value.some(d => sameRegionName(d, sub)) || (!!rasterTownCode.value && repKeys.includes(rasterTownCode.value))
-    if (!isIndigenous) return '無此類選舉'
+    if (!hasIndigenousElection(appointedInput())) return APPOINTED_EMPTY_TEXT
   }
   return '尚無參選人'
 }
@@ -1693,7 +1701,7 @@ const deskNavModel = computed<DeskNavModel>(() => {
   const views = VIEW_TABS.map(v => item(v.key, v.short, viewMode.value === v.key, () => { viewMode.value = v.key }))
   const matrix: DeskItem[] = hasMatrix.value ? [{ key: 'matrix', label: '矩陣', active: false, to: `/election/${electionSeg.value}/matrix` }] : []
   groups.push({ key: 'views', title: '內容類型', blocks: [views.slice(0, 3), [...views.slice(3), ...matrix]] })
-  groups.push({ key: 'levels', title: '層級', blocks: [mobileTabs.value.map(t => item(t.key, t.label, t.key === mobileActiveType.value, () => setMobileTab(t.key)))] })
+  groups.push({ key: 'levels', title: '層級', blocks: [mobileTabs.value.map(t => ({ ...item(t.key, t.label, t.key === mobileActiveType.value, () => setMobileTab(t.key)), dim: t.dim }))] })
   groups.push({ key: 'county', title: '縣市', blocks: [[
     item('All', '全台', selectedRegion.value === 'All', () => pickLocation('county', 'All')),
     ...TAIWAN_COUNTIES.map(c => item(c, c, selectedRegion.value === c, () => pickLocation('county', c))),
