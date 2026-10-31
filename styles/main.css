@@ -163,3 +163,6 @@ html.dark .dir-list .dl { color: #94a3b8; }
 @media (min-width: 768px) {
   html { scrollbar-gutter: stable; }
 }
+@media (min-width: 768px) {
+  html.dark nav[data-chrome="top"] { box-shadow: 0 1px 0 0 #334155; }
+}

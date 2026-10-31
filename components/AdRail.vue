@@ -48,7 +48,7 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
     <!-- 地區資料統計卡的落點（選舉頁 Teleport 進來；沒有就是空的、不佔位） -->
     <div id="desk-rail-top" class="mb-4 empty:hidden"></div>
     <!-- 只有廣告 sticky（卡片隨頁捲動）；視窗高度不夠放 600px 廣告時不 sticky，右欄不出現自己的捲軸 -->
-    <div :style="{ height: AD_HEIGHT + 'px' }" class="w-[200px] overflow-hidden rounded-xl sticky top-[calc(3rem+1px+1rem)]">
+    <div :style="{ height: AD_HEIGHT + 'px' }" class="w-[200px] overflow-hidden rounded-xl sticky top-[calc(3rem+1rem)]">
     <ins
       v-if="RAIL_AD_SLOT"
       class="adsbygoogle"
