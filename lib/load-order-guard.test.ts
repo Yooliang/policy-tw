@@ -64,3 +64,12 @@ Deno.test('1c. 第三方腳本有絕對上限：頁面開始 5000ms 內一定插
   assert(/setTimeout\(loadThirdParty, Math\.max\(0, 5000 - performance\.now\(\)\)\)/.test(h), '要有 5000ms 絕對上限（performance.now() 起算）')
   assertEquals((h.match(/function loadThirdParty\(\) \{\s*if \(started\) return;\s*started = true;/g) || []).length, 1, '要有旗標防重複插入')
 })
+
+Deno.test('5. 廣告位換頁／卸載時要把還在佇列裡的舊請求抽掉，且用 path 當 key 換 <ins>', async () => {
+  for (const f of ['../components/AdSlot.vue', '../components/AdRail.vue']) {
+    const src = await read(f)
+    assert(src.includes('cancelAd('), `${f} 要呼叫 cancelAd`)
+    assert(src.includes('onBeforeUnmount(() => { ticket++; cancelPending() })'), `${f} 卸載時要抽掉請求`)
+    assert(src.includes(':key="route.path"'), `${f} 要用 route.path 當 key（不用 fullPath：同頁 query 不換）`)
+  }
+})

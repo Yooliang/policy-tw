@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { pushAd } from '../lib/ad-request'
+import { cancelAd, pushAd } from '../lib/ad-request'
 import { whenContentReady } from '../lib/ad-ready'
 import { AD_CLIENT, adHiddenPath } from '../lib/ad-pages'
 
@@ -26,12 +26,20 @@ const visible = computed(() => !adHiddenPath(route.path))
 const root = ref<HTMLElement | null>(null)
 /** 每次要廣告領一個號碼；換頁或卸載就作廢前一個，晚到的請求不會對著已經換掉的版位推 */
 let ticket = 0
+/** 這個元件目前推過的 <ins>；換頁、卸載時請求若還在佇列裡（載入器未到）要抽掉 */
+let pushedIns: Element | null = null
+function cancelPending(): void {
+  const q = (window as unknown as { adsbygoogle?: unknown[] }).adsbygoogle
+  if (q && pushedIns) cancelAd(pushedIns, q)
+  pushedIns = null
+}
 
 /**
  * 對目前 DOM 裡的那個 <ins> 要一次廣告。每個 <ins> 只能對應一次 push（lib/ad-request.ts 把關）。
  * 換頁時路由先變、頁面內容後到：先等 <main> 有內容、DOM 安靜下來再要，不然 AdSense 看到的是空白的載入畫面（2026-10-06）。
  */
 async function requestAd(): Promise<void> {
+  cancelPending() // 前一個 <ins> 即將被換掉，它沒被消化的請求作廢
   const mine = ++ticket // 不管這頁顯不顯示，先作廢前一個請求
   if (!visible.value) return
   await nextTick() // 等 <ins> 真的進 DOM，push 之後 AdSense 才找得到它
@@ -41,7 +49,8 @@ async function requestAd(): Promise<void> {
     // 載入器是 async 的，可能還沒到；push 進陣列會排隊，等它載完自行處理
     const w = window as unknown as { adsbygoogle?: unknown[] }
     w.adsbygoogle = w.adsbygoogle || []
-    pushAd(root.value?.querySelector('ins.adsbygoogle'), w.adsbygoogle)
+    const ins = root.value?.querySelector('ins.adsbygoogle')
+    if (pushAd(ins, w.adsbygoogle) === 'pushed') pushedIns = ins ?? null
   } catch (err) {
     // 被阻擋器擋掉是常態，不是錯誤；使用者不需要知道，留給要看的人
     console.info('[ads] adsbygoogle push 沒有成功：', err)
@@ -49,7 +58,7 @@ async function requestAd(): Promise<void> {
 }
 
 onMounted(requestAd)
-onBeforeUnmount(() => { ticket++ })
+onBeforeUnmount(() => { ticket++; cancelPending() })
 
 // 元件在 App.vue 裡，整個 session 只掛載一次——onMounted 只跑一次。
 // 換頁就換一則（維護者 2026-10-01）：外層 div 用 route.path 當 key，換頁時 <ins> 是新的，
