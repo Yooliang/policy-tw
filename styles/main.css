@@ -157,3 +157,9 @@ html.dark .dir-list .dl { color: #94a3b8; }
   [data-desk-main] main .max-w-7xl,
   [data-desk-main] main .max-w-6xl { max-width: none; }
 }
+
+/* 桌面版：捲軸一律佔位（2026-10-31）。頁面高度在「剛好超過／不到一個螢幕」之間變動（切分頁、載入更多、折疊）時，
+   傳統捲軸出現／消失會讓整個版面寬度跳 15px——預留捲軸位置就不會左右抖動；手機是浮動捲軸，不受影響 */
+@media (min-width: 768px) {
+  html { scrollbar-gutter: stable; }
+}

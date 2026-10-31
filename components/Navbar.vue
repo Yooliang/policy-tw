@@ -43,7 +43,7 @@ const PAGE_TITLES: Record<string, string> = {
 }
 const isHome = computed(() => route.name === 'home' || route.path === '/')
 const isElectionRoute = computed(() => ['election', 'election-region', 'election-township'].includes(String(route.name)))
-const pageTitle = computed(() => PAGE_TITLES[String(route.name)] ?? '正見')
+const pageTitle = computed(() => (route.name === 'tracking' && route.query.view === 'mine' ? '我的關注' : PAGE_TITLES[String(route.name)] ?? '正見'))
 // 麵包屑、姓名、返回鈕都來自模組級狀態或 history.state：預渲染時是別頁殘留的（或空的）、瀏覽器第一次渲染時又不同，
 // 直接渲染會造成 hydration 不一致（全台頁的警告）。掛載完才採用，之前兩邊都畫頁面名稱。
 const mounted = ref(false)
@@ -100,6 +100,8 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
     crumbs.value.slice(1).forEach((c, i, all) => list.push(i === all.length - 1 ? { label: c.label } : { label: c.label, go: c.go }))
   } else if (route.name === 'politician') {
     list.push({ label: personOnRoute.value?.name ?? '候選人' })
+  } else if (route.name === 'tracking') {
+    list.push({ label: route.query.view === 'mine' ? '我的關注' : '全部政見' })
   } else if (sec !== 'search' && PAGE_TITLES[String(route.name)] && PAGE_TITLES[String(route.name)] !== root?.label) {
     list.push({ label: PAGE_TITLES[String(route.name)]! })
   }

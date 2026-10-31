@@ -44,7 +44,7 @@ watch(() => route.path, (now, was) => { if (now !== was) requestAd() })
 </script>
 
 <template>
-  <aside v-if="visible" :key="route.path" ref="root" class="w-[200px] shrink-0 px-0 pb-4 pt-0" aria-label="廣告" data-testid="ad-rail">
+  <aside v-if="visible" :key="route.path" ref="root" class="w-[213px] shrink-0 border-l border-slate-200 pb-4 pl-3 pt-0" aria-label="廣告" data-testid="ad-rail">
     <!-- 地區資料統計卡的落點（選舉頁 Teleport 進來；沒有就是空的、不佔位） -->
     <div id="desk-rail-top" class="mb-4 empty:hidden"></div>
     <!-- 只有廣告 sticky（卡片隨頁捲動）；視窗高度不夠放 600px 廣告時不 sticky，右欄不出現自己的捲軸 -->
