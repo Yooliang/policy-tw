@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync } from '../composables/useRegionQuerySync'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 
 const router = useRouter()
+const route = useRoute()
+// 右欄（AdRail）上方的統計卡落點：≥1200px 且右欄已渲染才有（同選舉頁）；否則放內容最下方
+const railTarget = ref<HTMLElement | null>(null)
+function syncRailTarget() {
+  railTarget.value = typeof window !== 'undefined' && window.matchMedia('(min-width: 1200px)').matches ? document.getElementById('desk-rail-top') : null
+}
+let railTimer = 0
+function syncRailSoon() { void nextTick(syncRailTarget); window.clearTimeout(railTimer); railTimer = window.setTimeout(syncRailTarget, 400) }
+onMounted(() => { syncRailSoon(); window.addEventListener('resize', syncRailSoon) })
+onBeforeUnmount(() => { window.removeEventListener('resize', syncRailSoon); window.clearTimeout(railTimer) })
+watch(() => route.path, syncRailSoon)
 const { regionStats, ensureRegionStats } = useSupabase()
 // 這一頁才需要的重資料，改成按需載入（見 useSupabase 的 ensure*）
 ensureRegionStats()
@@ -250,7 +261,6 @@ usePageHead({
 
         <!-- District Grid -->
         <div class="lg:col-span-2 space-y-6">
-        <RegionalStatsPanel v-if="!isNational" :region="selectedRegion" />
         <div class="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm">
            <div class="flex items-center justify-between mb-8">
               <h4 class="font-bold text-navy-900 flex items-center gap-2">
@@ -275,5 +285,7 @@ usePageHead({
         </div>
       </div>
     </div>
+    <!-- 縣市資料卡（同選舉頁的 RegionalStatsPanel）：桌面（≥1200px）在右欄廣告位上方，手機在內容最下方 -->
+    <div class="max-w-7xl mx-auto px-4"><ClientOnly><template v-if="!isNational"><Teleport v-if="railTarget" :to="railTarget"><RegionalStatsPanel :region="selectedRegion" compact /></Teleport><RegionalStatsPanel v-else :region="selectedRegion" compact class="mt-8 md:max-w-sm" /></template></ClientOnly></div>
   </div>
 </template>
