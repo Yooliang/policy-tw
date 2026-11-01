@@ -32,12 +32,12 @@ export function loadIssueSummary(electionId: number, region: string): Promise<Is
   }))
 }
 
-export function loadIssuePage(electionId: number, region: string, issue: string, level: IssueLevel | null, offset: number): Promise<{ cards: IssueCard[]; total: number }> {
-  const key = pageKey(electionId, region, issue, level, offset)
+export function loadIssuePage(electionId: number, region: string, issue: string, level: IssueLevel | null, offset: number, limit: number = ISSUE_PAGE_SIZE): Promise<{ cards: IssueCard[]; total: number }> {
+  const key = `${pageKey(electionId, region, issue, level, offset)}|${limit}`
   return pageCache.get(key, () => viaIdb(key, async () => {
     const { data } = await withTimeoutAndRetry(`issues_page ${region} ${issue} ${offset}`, (signal) =>
       supabase.rpc('issues_page', {
-        p_election_id: electionId, p_region: region, p_issue: issue, p_level: level, p_offset: offset, p_limit: ISSUE_PAGE_SIZE,
+        p_election_id: electionId, p_region: region, p_issue: issue, p_level: level, p_offset: offset, p_limit: limit,
       }).abortSignal(signal).throwOnError())
     return mapPageRows(data)
   }))

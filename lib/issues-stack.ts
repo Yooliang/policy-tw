@@ -8,6 +8,8 @@ export const ISSUE_LEVELS = ['縣市長', '議員', '鄉鎮市區長', '代表',
 export type IssueLevel = typeof ISSUE_LEVELS[number]
 
 export const ISSUE_PAGE_SIZE = 30
+/** 串聯一次取回一個議題的全部承諾（資料庫函式單次上限 100；實測各縣市×議題最多 35 筆） */
+export const ISSUE_FETCH_LIMIT = 100
 
 /** 串聯只認縣市，快取鍵也只帶屆別與縣市（臺／台視為同一個） */
 export const normRegion = (region: string) => region.replace(/臺/g, '台')
