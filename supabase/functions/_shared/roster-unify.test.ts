@@ -21,6 +21,8 @@ const MAN_MIG = "20261008165000_manual_tasks_as_arm.sql";
 const TRAFFIC_MIG = "20261008190000_page_traffic_boost.sql";
 const QP_MIG = "20261008090000_queue_priority_tiers.sql";
 const MIG_SQL = await readMig(MIG);
+const FIX_MIG = "20261101040000_roster_result_findings_voted_only.sql";
+const FIX_SQL = await readMig(FIX_MIG);
 const VIEW_SQL = await readMig("20261007150000_sources_stage2b_drop_legacy.sql");
 const ROSTER_MIG = await readMig("20261031160000_cec_roster_2026.sql");
 const OLD_ARMS = ["party_gap", "party_roster", "township_gap", "region_gap", "elected_missing", "election_results", "owner_mismatch"] as const;
@@ -185,7 +187,7 @@ const FIXTURE: Record<string, GapRow[]> = {
     { election_id: 2022, election_type: "縣市長", region: "台北市", politician_election_ids: [105, 106] })],
 };
 
-async function buildDb(o: { mig?: (s: string) => string; branches?: Record<string, GapRow[]> } = {}): Promise<Db> {
+async function buildDb(o: { mig?: (s: string) => string; fix?: (s: string) => string; branches?: Record<string, GapRow[]> } = {}): Promise<Db> {
   const db = await buildBase(o.branches ?? FIXTURE);
   await applyP2(db, await readMig(TW_MIG), RESTUB);
   await db.exec(`
@@ -213,6 +215,7 @@ async function buildDb(o: { mig?: (s: string) => string; branches?: Record<strin
       (105, '${U(105)}', '孫五', 2022, '縣市長', '台北市', NULL, NULL, NULL, NULL, 1, true, 5, 't', NULL, NULL, 1962),
       (106, '${U(106)}', '周六', 2022, '縣市長', '台北市', NULL, NULL, NULL, NULL, 1, false, 6, 't', NULL, NULL, 1963);`);
   await applyP2(db, (o.mig ?? ((s) => s))(MIG_SQL), RESTUB);
+  await applyP2(db, (o.fix ?? ((s) => s))(FIX_SQL), RESTUB);
   return db;
 }
 
@@ -319,6 +322,29 @@ Deno.test({ name: "B5 縣市長縣市不符：官方名冊有他而我們記的�
   await db.close();
 } });
 
+/** 2026（投票日未到）也冒出一筆結果空白（election_results 臂不比日期）：世界多一位 2026 縣市議員 301 */
+const WITH_2026_RESULT: Record<string, GapRow[]> = {
+  ...FIXTURE,
+  election_results: [...FIXTURE.election_results, G("election_result_missing:301", "election_result_missing", { election_id: 2026, election_type: "縣市議員", region: "台北市" })],
+};
+async function build2026Result(fix?: (s: string) => string): Promise<Db> {
+  const db = await buildDb({ branches: WITH_2026_RESULT, fix });
+  await db.exec(`
+    INSERT INTO politicians (id, name, region) VALUES ('${U(301)}', '錢七', '台北市');
+    INSERT INTO politician_elections (id, politician_id, election_id, election_type, region_id, candidacy_status) VALUES (301, '${U(301)}', 2026, '縣市議員', 1, 'filed');
+    INSERT INTO _cm VALUES (301, '${U(301)}', '錢七', 2026, '縣市議員', '台北市', NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, 1970);`);
+  return db;
+}
+const resultFindings = (db: Db) => rows<{ election_id: number; name: string }>(db, `SELECT election_id, name FROM roster_diff_findings() WHERE kind = '結果' ORDER BY 1, 2`);
+
+Deno.test({ name: "D1 結果類差異只算投票日已過的屆：2026（未投票）沒有，2022（已投票）照舊；單位 items 也不含 2026 結果", ...opts, fn: async () => {
+  const db = await build2026Result();
+  assertEquals(await resultFindings(db), [{ election_id: 2022, name: "周六" }, { election_id: 2022, name: "孫五" }]);
+  const t26 = (await armRows(db)).find((r) => r.task_id === T26);
+  assert(!kindsOf(t26).includes("結果"), "2026 單位的 items 不該有結果項");
+  await db.close();
+} });
+
 // ============================================================
 // C. 還原驗證（拿掉被守的東西，B 的斷言要不成立）
 // ============================================================
@@ -347,5 +373,11 @@ Deno.test({ name: "C4 還原驗證：總表沒把 items 掛上既有的 roster_c
   const db = await buildDb({ mig: (s) => mutate(s, "LEFT JOIN fnd f ON t0.task_type = 'roster_check' AND f.task_id = t0.task_id", "LEFT JOIN fnd f ON false") });
   const t = (await armRows(db)).find((r) => r.task_id === T26);
   assert(!t!.target.items, "改壞後既有的 roster_check 沒有 items");
+  await db.close();
+} });
+
+Deno.test({ name: "C5 還原驗證：拿掉投票日條件 → 2026 冒出結果差異（D1 會紅）", ...opts, fn: async () => {
+  const db = await build2026Result((s) => s.replaceAll("AND ev.election_date < CURRENT_DATE", "AND true").replace("WHERE ev.election_date < CURRENT_DATE", "WHERE true"));
+  assert((await resultFindings(db)).some((f) => f.election_id === 2026), "拿掉條件後 2026 要有結果差異");
   await db.close();
 } });
