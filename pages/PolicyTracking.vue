@@ -197,7 +197,8 @@ usePageHead({
         </select>
       </div>
 
-      <div class="hidden sm:flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+      <!-- lg 以上左側延伸區已有「政見分類」，這塊只留給沒有延伸區的中間寬度（sm～lg） -->
+      <div class="hidden sm:flex lg:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
         <!-- Left: 全部 -->
         <div class="shrink-0 flex items-center gap-3">
           <button
