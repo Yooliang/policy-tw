@@ -849,7 +849,30 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
   // 不 await：落庫這條路不能依賴 OpenRouter 的可用性。漏掉的由 system-one 的 backfill 每 15 分鐘補——
   // 事件是加速，補漏才是保證（docs/BLUEPRINT-jev-decisions.md §6）。
   notifySystemOne("policy", inserted.id);
-  return { status: "applied", policy_id: inserted.id, politician_id: politicianId, message: "政見已建立" };
+  // 議題細項（policy-ops#173 P1b）：選填 subtopic 寫進 policy_subtopics（大類 = policy_subtopic_issue）。
+  // 細項是附帶資料，寫不進去（沒有大類議題、跟大類同名、資料庫錯誤）不擋承諾本身，只在訊息說明
+  let subtopicNote = "";
+  const subtopic = str(p.subtopic);
+  if (subtopic) subtopicNote = await writeNewPolicySubtopic(supabase, ctx, row.id, inserted.id, subtopic);
+  return { status: "applied", policy_id: inserted.id, politician_id: politicianId, message: "政見已建立" + subtopicNote };
+}
+
+/** 新承諾帶的 subtopic 寫進 policy_subtopics；回要附在訊息後面的說明（成功或略過的原因） */
+async function writeNewPolicySubtopic(supabase: SupabaseLike, ctx: EditContext, contributionId: string, policyId: string, subtopic: string): Promise<string> {
+  try {
+    const { data: issue, error: issueError } = await supabase.rpc("policy_subtopic_issue", { p_policy_id: policyId });
+    throwIf(issueError, "policy_subtopic_issue");
+    if (typeof issue !== "string" || !issue) return "；細項未寫入（這筆承諾沒有大類議題）";
+    if (issue === subtopic) return "；細項未寫入（跟大類議題同名）";
+    const { data: inserted, error } = await supabase.from("policy_subtopics")
+      .insert({ policy_id: policyId, issue, subtopic, contribution_id: contributionId }).select("*").maybeSingle();
+    throwIf(error, "policy_subtopics insert");
+    if (inserted) await recordInsert(supabase, ctx, "policy_subtopics", String(inserted.id), inserted);
+    return `；細項「${subtopic}」已歸入「${issue}」`;
+  } catch (e) {
+    console.warn(`[policy_subtopics] 新承諾的細項沒寫進去：${e instanceof Error ? e.message : String(e)}`);
+    return "；細項未寫入（資料庫錯誤）";
+  }
 }
 
 /** 叫 system-one 的 ask 動作。只有 service role 叫得動，所以帶 service key；失敗只記 log */
