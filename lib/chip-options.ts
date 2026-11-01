@@ -90,3 +90,36 @@ export function cachedVillageSet(cache: ChipCountCache | null, townCode: string 
   const z = new Set(zero.map(norm))
   return new Set(options.map(norm).filter((n) => !z.has(n)))
 }
+
+/**
+ * 地圖選區用：縣市（county）或某縣市的鄉鎮（town）在這些職位的合計人數，鍵是正規化後的名稱。
+ * 縣市層快取只有縣市長、議員；其他職位（鄉鎮市長、代表、村里長）用鄉鎮層快取依代碼前 5 碼（縣市碼）加總。
+ * 快取不是這一屆、或這一層沒有任何這些職位的資料回 null（不下判斷，地圖不標灰也不顯示人數）。
+ */
+export function cachedCountMap(
+  cache: ChipCountCache | null,
+  level: 'county' | 'town',
+  list: CodeNames | null,
+  types: readonly string[],
+  norm: (n: string) => string = (n) => n,
+): Map<string, number> | null {
+  if (!cache || !list) return null
+  const has = (table: Record<string, Record<string, number>>) => Object.values(table).some((row) => types.some((t) => t in row))
+  const out = new Map<string, number>()
+  if (level === 'town') {
+    if (!list.codes.some((c) => cache.town[c]) || !has(cache.town)) return null
+    list.codes.forEach((code, i) => out.set(norm(list.names[i]!), types.reduce((s, t) => s + (cache.town[code]?.[t] ?? 0), 0)))
+    return out
+  }
+  if (has(cache.county)) {
+    list.codes.forEach((code, i) => out.set(norm(list.names[i]!), types.reduce((s, t) => s + (cache.county[code]?.[t] ?? 0), 0)))
+    return out
+  }
+  if (!has(cache.town)) return null
+  list.codes.forEach((code, i) => {
+    let sum = 0
+    for (const [tc, row] of Object.entries(cache.town)) if (tc.startsWith(code)) sum += types.reduce((s, t) => s + (row[t] ?? 0), 0)
+    out.set(norm(list.names[i]!), sum)
+  })
+  return out
+}
