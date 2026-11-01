@@ -1045,6 +1045,59 @@ async function applyRegionalStat(supabase: SupabaseLike, row: ContributionRow): 
   return { status: "applied", message: `新增 ${adminCode} ${year} 年的${label} ＝ ${value} ${unit}` };
 }
 
+// ── 議題拆分細項（policy-ops#173 P1，2026-11-02）────────────────────────────────
+/**
+ * 把一批承諾歸進細項。寫進 policy_subtopics（承諾×議題→細項），不碰 policies.tags，大類判定不受影響。
+ * 保護：承諾必須在「這一屆、這個縣市、這個大類議題」的範圍內（policy_subtopic_scope，issues_scoped）；
+ * 已經有細項的承諾不覆蓋（一個承諾在一個議題下只有一個細項，先到先得）；範圍外與已有細項的列略過並在訊息說明。
+ */
+async function applyPolicySubtopics(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const electionId = int(p.election_id);
+  const region = str(p.region);
+  const issue = str(p.issue);
+  const assignments = Array.isArray(p.assignments) ? (p.assignments as Obj[]) : [];
+  if (electionId === null || !region || !issue || assignments.length === 0) {
+    return { status: "failed", message: "policy_subtopics 要帶 election_id、region、issue、assignments" };
+  }
+  const wanted = new Map<string, string>(); // policy_id → 細項
+  for (const a of assignments) {
+    const pid = str(a.policy_id)?.toLowerCase();
+    const sub = str(a.subtopic);
+    if (pid && sub && !wanted.has(pid)) wanted.set(pid, sub);
+  }
+  const ids = [...wanted.keys()];
+
+  const { data: inScope, error: scopeError } = await supabase.rpc("policy_subtopic_scope", {
+    p_election_id: electionId, p_region: region, p_issue: issue, p_ids: ids,
+  });
+  throwIf(scopeError, "policy_subtopic_scope");
+  const scoped = new Set<string>(((inScope ?? []) as Obj[]).map((r) => String(r.policy_id ?? r).toLowerCase()));
+  const outOfScope = ids.filter((id) => !scoped.has(id));
+  if (scoped.size === 0) {
+    return { status: "failed", message: `提交的承諾沒有任何一筆在 ${electionId} 年${region}「${issue}」議題的範圍內，請照任務 target.policies 重交` };
+  }
+
+  // query-bounds: ok — 單次最多 400 個 policy_id（交件驗證擋），再加 issue 條件
+  const { data: existing, error: readError } = await supabase.from("policy_subtopics")
+    .select("policy_id, subtopic").eq("issue", issue).in("policy_id", [...scoped]);
+  throwIf(readError, "policy_subtopics read");
+  const had = new Set<string>(((existing ?? []) as Obj[]).map((r) => String(r.policy_id).toLowerCase()));
+
+  const toInsert = [...scoped].filter((id) => !had.has(id)).map((id) => ({
+    policy_id: id, issue, subtopic: wanted.get(id)!, contribution_id: row.id,
+  }));
+  const skipNote = `（範圍外略過 ${outOfScope.length} 筆、先前已有細項略過 ${had.size} 筆）`;
+  if (toInsert.length === 0) {
+    return { status: "superseded", message: `這批承諾在「${issue}」底下都已經有細項了，不覆蓋${skipNote}` };
+  }
+  const { data: inserted, error } = await supabase.from("policy_subtopics").insert(toInsert).select("*");
+  throwIf(error, "policy_subtopics insert");
+  for (const r of (inserted ?? []) as Obj[]) await recordInsert(supabase, ctx, "policy_subtopics", String(r.id), r);
+  return { status: "applied", message: `${region}「${issue}」新增 ${toInsert.length} 筆細項歸類${skipNote}` };
+}
+
 // ── 政策脈絡（#349，2026-10-06）──────────────────────────────────────────────────
 // 四種型別各自落一張表；每個新增／更動／刪除都寫 edit_history（整筆還原：新增的刪掉、改的倒回、刪的放回去）。
 // 出處由資料表觸發器把脈絡角色／交接／關聯自己的 source_url 同步進 source_refs（migration 20261006034900），這裡不必另外寫。
@@ -2578,6 +2631,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "lineage_handover": return await applyLineageHandover(supabase, row);
     case "lineage_link": return await applyLineageLink(supabase, row);
     case "regional_stat": return await applyRegionalStat(supabase, row);
+    case "policy_subtopics": return await applyPolicySubtopics(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };
   }
 }

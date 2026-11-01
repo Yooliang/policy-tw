@@ -375,6 +375,14 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "policy_subtopics": {
+      // 議題拆分細項（policy-ops#173 P1）：讀者要看得出哪個縣市、哪個議題、拆成哪幾個細項、歸了幾筆
+      const subs = Array.isArray(p.subtopics) ? (p.subtopics as unknown[]).filter((x) => typeof x === "string").join("、") : "";
+      const n = Array.isArray(p.assignments) ? p.assignments.length : 0;
+      summary = `${str(p.region)}「${str(p.issue)}」拆成細項 ${subs}，歸類 ${n} 筆承諾`;
+      targetName = null;
+      break;
+    }
     default:
       summary = `（${input.contribution_type}）`;
   }

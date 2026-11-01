@@ -68,7 +68,7 @@ Deno.test("A1 總表＝前一版套三處機械替換，緊接在前一版之後
   const prev = fnText(await readMig(PREV_ARMS_MIG), "contribution_auto_tasks_arms");
   assertEquals(fnText(MIG_SQL, "contribution_auto_tasks_arms"), mechanicalArms(prev));
   const d = await definers("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(");
-  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_ARMS_MIG, MIG], "總表在這支前後又被別支重新定義：要以最新那版為底重做");
+  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_ARMS_MIG, MIG, "20261102010000_issue_subtopics.sql" /* 議題細項：只多一行 UNION，守門在 issue-subtopics.test.ts */], "總表在這支前後又被別支重新定義：要以最新那版為底重做");
 });
 
 Deno.test("A2 原臂的函式一個都沒動（臂停用不刪程式）；seed、臂名清單沒重寫", () => {

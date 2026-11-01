@@ -199,6 +199,13 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "查內政部政黨資訊網的政黨頁、內政部的公告或政黨自己的公告，用 party_info 交：parties 每個政黨一項，改名要新舊兩筆一起交；" +
     "**查不到確切的日子就不要交那一欄**（不要填月初、年初湊）；名字像不算改名，要有來源講明是同一個政黨改名。查不到就用 no_change 說明你查了哪些網址。",
   // 地方基本統計（#508，2026-10-09）：縣市與鄉鎮市區缺人口／面積／總預算歲出／65歲以上比例
+  // 議題過寬拆細項（policy-ops#173 P1，2026-11-02）：某縣市×議題的承諾太多，請提細項標籤並逐筆歸類
+  issue_too_broad:
+    "target.policies 是這個縣市這個大類議題（target.issue）底下還沒有細項的承諾（policy_id、title、level），target.total 是總筆數（清單最多列 target.list_cap 筆）。" +
+    "請讀完承諾，提出 2～6 個細項標籤（每個 2～12 字，例如「托育」「敬老津貼」；不含頓號、逗號、斜線、空白），再逐筆歸類。" +
+    "**target.existing_subtopics 是全站這個議題已經存在的細項名，優先沿用**（意思一樣就用同一個名字，不要換同義詞另取）；真的沒有合適的才新取名。" +
+    "一筆承諾只歸一個最貼切的細項；歸不進去的就不要放進 assignments（不要硬塞）。大類議題不會被改，細項是在大類底下再分一層。" +
+    "用一份 policy_subtopics 交（election_id、region、issue 照 target 原樣帶回），source_urls 放 target.source_url。",
   regional_stat_missing:
     "target.missing 列出這個地區缺哪幾個指標（stat_key、min_year、unit）。請查官方統計：人口（內政部戶政司人口統計，https://www.ris.gov.tw/）、" +
     "面積（內政部國土測繪中心全國土地面積統計）、總預算歲出（該縣市主計處總預算書）、65 歲以上人口比例（內政部戶政司人口統計或國家發展委員會的人口推估）。" +
@@ -380,6 +387,9 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   district_seats:
     "payload：election_id、election_type、region（三個照任務 target 原樣帶回）、districts（每個選舉區一項 {district, seats}，原住民選舉區加 kind）、note（公告上沒有的選舉區、或其他要說明的）。source_urls 第一個放選舉公告。",
   // 地方基本統計（#508）：admin_code 用任務 target 帶回的代碼；unit 要照 stat_key 固定的單位（人／平方公里／千元／%）
+  policy_subtopics:
+    "payload：election_id、region、issue（三個照任務 target 原樣帶回）、subtopics（你用到的細項名，2～6 個，每個 2～12 字，優先沿用任務裡已存在的細項名）、" +
+    "assignments（逐筆歸類 [{policy_id, subtopic}]，policy_id 取自 target.policies，subtopic 必須在 subtopics 裡，每個細項至少一筆承諾）、note（選填）、task_id（選填，照抄）。source_urls 放 target.source_url。",
   regional_stat:
     "payload：admin_code（縣市 5 碼或鄉鎮市區 8 碼，照任務 target.admin_code 原樣帶回）、stat_key（population 人口／area_km2 面積／budget_expenditure 總預算歲出／aging_rate 65歲以上比例）、" +
     "year（統計年度，西元；歲出填會計年度）、value（數值）、unit（固定：population＝人／area_km2＝平方公里／budget_expenditure＝千元／aging_rate＝%）、as_of（基準日，選填）。source_urls 放官方統計出處。",
@@ -889,6 +899,7 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   audit: ["correction", "policy_progress", "no_change"],
   placeholder_politician: ["removal", "no_change"],
   party_info_missing: ["party_info", "no_change"],
+  issue_too_broad: ["policy_subtopics", "no_change"],
   // 參選紀錄疑似掛錯人（2026-10-06）：不是同一人就改掛，是同一人就 no_change confirmed
   candidacy_owner_mismatch: ["reassign_candidacy", "no_change"],
   // 照片二選一（2026-10-11）：挑新的 → correction；留現有的 → no_change confirmed

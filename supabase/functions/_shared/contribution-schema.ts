@@ -36,10 +36,10 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
 // cand_numbers（整批補號次，2026-10-30，#781）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers", "policy_subtopics"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other", "issue_too_broad"] as const;
 
 /**
  * 地方基本統計（issue #508）：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例。
@@ -59,6 +59,15 @@ export const REGIONAL_STAT_LABEL: Readonly<Record<RegionalStatKey, string>> = {
   budget_expenditure: "總預算歲出",
   aging_rate: "65 歲以上人口比例",
 };
+/**
+ * 議題拆分細項（policy-ops#173 P1）：同一個縣市×議題一份交件，細項 2～6 個、每個 2～12 字，一份最多歸 400 筆承諾。
+ * 跟 SQL 的 policy_subtopics 表（migration 20261102010000）的 CHECK 一致；細項名不能含頓號逗號斜線冒號（日後串聯畫面用來分隔）。
+ */
+export const SUBTOPIC_MIN_COUNT = 2;
+export const SUBTOPIC_MAX_COUNT = 6;
+export const SUBTOPIC_MAX_ASSIGNMENTS = 400;
+export const isSubtopicName = (v: unknown): v is string =>
+  typeof v === "string" && v === v.trim() && [...v].length >= 2 && [...v].length <= 12 && !/[、,，;；/／:：s]/.test(v);
 /** admin_divisions 的縣市（5 碼）或鄉鎮市區（8 碼）代碼；不收村里（11 碼） */
 export const isRegionalStatAdminCode = (v: unknown): v is string => typeof v === "string" && /^\d{5}(\d{3})?$/.test(v);
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
@@ -611,6 +620,45 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         });
       }
       if (p.note !== undefined && !isStr(p.note, 1, 2000)) push("payload.note", "要是非空字串");
+      break;
+    }
+    case "policy_subtopics": {
+      // 議題拆分細項（policy-ops#173 P1，2026-11-02）：一個縣市×議題一份，subtopics 2～6 個、assignments 每筆承諾歸一個細項。
+      // 細項獨立存放（policy_subtopics 表），不改 policies.tags，大類判定不受影響；承諾要不要在範圍內由落庫時查資料庫。
+      if (!isKnownElectionId(p.election_id)) push("payload.election_id", `election_id 要是 ${electionIdsText()}（任務 target 原樣帶回）`);
+      if (!isStr(p.region, 2, 20)) push("payload.region", "region 必填（任務 target 裡的縣市，原樣帶回）");
+      if (!isStr(p.issue, 2, 20)) push("payload.issue", "issue 必填（任務 target 裡的大類議題，原樣帶回）");
+      if (p.task_id !== undefined && p.task_id !== null && !isTaskIdShape(p.task_id)) push("payload.task_id", "task_id 要照抄 /next 給的值（auto:issue_too_broad:…）");
+      const subs: string[] = [];
+      if (!Array.isArray(p.subtopics) || p.subtopics.length < SUBTOPIC_MIN_COUNT || p.subtopics.length > SUBTOPIC_MAX_COUNT) {
+        push("payload.subtopics", `subtopics 必填：${SUBTOPIC_MIN_COUNT}～${SUBTOPIC_MAX_COUNT} 個細項名（優先沿用 target.existing_subtopics 已存在的）`);
+      } else {
+        (p.subtopics as unknown[]).forEach((raw, i) => {
+          if (!isSubtopicName(raw)) push(`payload.subtopics[${i}]`, "細項名要是 2～12 字、前後沒有空白、不含頓號逗號斜線冒號");
+          else if (raw === p.issue) push(`payload.subtopics[${i}]`, "細項名不能跟大類議題同名");
+          else if (subs.includes(raw)) push(`payload.subtopics[${i}]`, `${raw} 重複了`);
+          else subs.push(raw);
+        });
+      }
+      if (!Array.isArray(p.assignments) || p.assignments.length === 0 || p.assignments.length > SUBTOPIC_MAX_ASSIGNMENTS) {
+        push("payload.assignments", `assignments 必填：逐筆歸類 [{policy_id, subtopic}]（1～${SUBTOPIC_MAX_ASSIGNMENTS} 筆）`);
+      } else {
+        const seen = new Set<string>();
+        const used = new Set<string>();
+        (p.assignments as unknown[]).forEach((raw, i) => {
+          const at = `payload.assignments[${i}]`;
+          if (!isObj(raw)) { push(at, "每一項要是物件：{policy_id, subtopic}"); return; }
+          for (const k of Object.keys(raw)) if (k !== "policy_id" && k !== "subtopic") push(`${at}.${k}`, `每一項只收 policy_id 與 subtopic，${k} 不收`);
+          if (!isUuid(raw.policy_id)) push(`${at}.policy_id`, "policy_id 要是 target.policies 裡那筆承諾的 uuid");
+          else if (seen.has(raw.policy_id.toLowerCase())) push(`${at}.policy_id`, "同一筆承諾只能歸一個細項，重複了");
+          else seen.add(raw.policy_id.toLowerCase());
+          if (typeof raw.subtopic !== "string" || !subs.includes(raw.subtopic)) push(`${at}.subtopic`, "subtopic 要是 payload.subtopics 裡的其中一個");
+          else used.add(raw.subtopic);
+        });
+        const unused = subs.filter((s2) => !used.has(s2));
+        if (unused.length > 0) push("payload.subtopics", `這些細項沒有任何承諾歸進去，請拿掉：${unused.join("、")}`);
+      }
+      if (p.note !== undefined && p.note !== null && !isStr(p.note, 1, 2000)) push("payload.note", "note 要是非空字串（選填）");
       break;
     }
     case "regional_stat": {
