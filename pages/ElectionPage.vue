@@ -51,7 +51,7 @@ import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
-import { chipOptions, countyPopulatedSet } from '../lib/chip-options'
+import { cachedCountySet, cachedTownSet, cachedVillageSet, chipOptions, countyPopulatedSet, resolvePopulated, type ChipCountCache } from '../lib/chip-options'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
@@ -63,6 +63,7 @@ import { useDeskNav, type DeskGroup, type DeskItem, type DeskNavModel } from '..
 import { fileCache } from '../lib/map-data-cache'
 import rasterIndex from '../data/tw-raster-index.json'
 import districtCacheData from '../data/tw-districts/2026.json'
+import chipCountsData from '../data/tw-chip-counts/2026.json'
 
 const router = useRouter()
 const route = useRoute()
@@ -1433,6 +1434,9 @@ const rasterTownCode = computed<string | null>(() => {
 const rasterVillages = ref<string[] | null>(null)
 interface DistrictCache { election: number; council: Record<string, string[]>; rep: Record<string, string[]> }
 const districtCache = shallowRef<DistrictCache | null>(districtCacheData as DistrictCache)
+/** 人數快取（data/tw-chip-counts，建置期寫進打包）：晶片一出來就能灰／亮；參選人讀完後以即時為準 */
+const chipCounts = chipCountsData as ChipCountCache
+const chipCountsApply = computed(() => String(chipCounts.election) === electionSeg.value || electionId.value === chipCounts.election)
 let rasterSeq = 0
 watch(rasterTownCode, async (code) => {
   const seq = ++rasterSeq
@@ -1470,9 +1474,15 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   const special = isSpecialMunicipality.value
   const typesOf = (t: string): string[] => t === ElectionType.TOWNSHIP_MAYOR ? [special ? ElectionType.INDIGENOUS_DISTRICT_CHIEF : ElectionType.TOWNSHIP_MAYOR]
     : t === ElectionType.REPRESENTATIVE ? [special ? ElectionType.INDIGENOUS_DISTRICT_REP : ElectionType.REPRESENTATIVE] : [t]
-  const subPopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople(typesOf(type)).map(c => normName(townOfPerson(c)))) : null
-  const villagePopulated = (): ReadonlySet<string> | null => ready ? new Set(populatedPeople([ElectionType.CHIEF]).filter(c => selectedSubRegion.value === 'All' || inTownship(c.subRegion, selectedSubRegion.value)).map(c => normName(c.village ?? ''))) : null
-  const countyPopulated = (): ReadonlySet<string> | null => countyPopulatedSet(selectedRegion.value, ready, () => populatedPeople([ElectionType.MAYOR]).map(c => normName(c.region)))
+  const cache = chipCountsApply.value ? chipCounts : null
+  // 村里長分頁：縣市層級只載了一部分村里長（鄉鎮晶片用即時資料會誤灰），所以這一分頁以全縣市的快取為準，快取沒有才用即時
+  const subPopulated = (): ReadonlySet<string> | null => {
+    const live = ready ? new Set(populatedPeople(typesOf(type)).map(c => normName(townOfPerson(c)))) : null
+    const cached = cachedTownSet(cache, rasterTownList.value, typesOf(type), normName)
+    return type === ElectionType.CHIEF ? resolvePopulated(cached, live) : resolvePopulated(live, cached)
+  }
+  const villagePopulated = (): ReadonlySet<string> | null => resolvePopulated(ready ? new Set(populatedPeople([ElectionType.CHIEF]).filter(c => selectedSubRegion.value === 'All' || inTownship(c.subRegion, selectedSubRegion.value)).map(c => normName(c.village ?? ''))) : null, cachedVillageSet(cache, rasterTownCode.value, siteNames(rasterVillages.value, availableVillages.value), normName))
+  const countyPopulated = (): ReadonlySet<string> | null => resolvePopulated(countyPopulatedSet(selectedRegion.value, ready, () => populatedPeople([ElectionType.MAYOR]).map(c => normName(c.region))), cachedCountySet(cache, rasterIndex.counties, [ElectionType.MAYOR], normName))
   const countyRow = (): MobileChip[] => [
     ...(type === ElectionType.MAYOR || selectedRegion.value === 'All' ? [chipOf('All', '全台', selectedRegion.value === 'All', () => { void router.replace(regionLink('All')) })] : []),
     ...pickRow('county', TAIWAN_COUNTIES, selectedRegion.value, countyPopulated()),
