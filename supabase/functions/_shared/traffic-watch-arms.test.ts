@@ -67,7 +67,7 @@ Deno.test("A1 總表＝前一版套四處機械替換，緊接在前一版之後
   const prev = fnText(await readMig(PREV_ARMS_MIG), "contribution_auto_tasks_arms");
   assertEquals(fnText(MIG_SQL, "contribution_auto_tasks_arms"), mechanicalArms(prev));
   const d = await definers("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(");
-  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_ARMS_MIG, MIG, "20261101020000_roster_check_unify.sql" /* 名單清查收斂，守門在 roster-unify.test.ts */], "總表在這支前後又被別支重新定義：要以最新那版為底重做");
+  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_ARMS_MIG, MIG, "20261101020000_roster_check_unify.sql" /* 名單清查收斂，守門在 roster-unify.test.ts */, "20261102010000_issue_subtopics.sql" /* 議題細項，守門在 issue-subtopics.test.ts */], "總表在這支前後又被別支重新定義：要以最新那版為底重做");
 });
 
 Deno.test("A2 臂名清單＝前一版最後多三個流量臂名，是最後一版", async () => {
@@ -75,7 +75,7 @@ Deno.test("A2 臂名清單＝前一版最後多三個流量臂名，是最後一
   const want = mutate(prev, "    'regional_stats_missing'\n  ]", "    'regional_stats_missing',\n" + TRAFFIC_ARMS.map((a) => `    '${a}'`).join(",\n") + "\n  ]");
   assertEquals(fnText(MIG_SQL, "activity_arm_names"), want);
   const d = await definers("CREATE OR REPLACE FUNCTION activity_arm_names(");
-  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_NAMES_MIG, MIG]);
+  assertEquals(d.slice(d.indexOf(MIG) - 1), [PREV_NAMES_MIG, MIG, "20261102010000_issue_subtopics.sql" /* 議題細項，加一個臂名 */]);
 });
 
 Deno.test("A3 總表不再讀 requires_traffic；流量條件只看臂名", () => {

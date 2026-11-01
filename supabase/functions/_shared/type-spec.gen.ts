@@ -41,6 +41,15 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
  },
  {
   "tasks": [
+   "issue_too_broad"
+  ],
+  "contributions": [
+   "policy_subtopics"
+  ],
+  "text": "### 拆分議題（`issue_too_broad` → `policy_subtopics`，1.110.0）\n\n串聯（依縣市、依議題看各級承諾）要比的是「同一件事」。某個縣市的某個大類議題（例：社會福利混了托育、敬老、生育）在 2026 的承諾超過門檻（目前 150 筆，還沒有細項的才算）就派這一件，一個縣市×議題一張。\n\n1. `target.policies` 是這批承諾（`policy_id`、`title`、`level`，一張最多列 `target.list_cap` 筆；`target.total` 是總筆數，剩下的下一輪再派）。`target.existing_subtopics` 是全站這個議題已經存在的細項名。\n2. 讀完承諾，提出 **2～6 個細項**（每個 2～12 字，不含頓號、逗號、斜線、空白）。**優先沿用 `existing_subtopics`**：意思一樣就用同一個名字，不要換同義詞另取（例如已有「托育」就不要再取「托嬰」）；真的沒有合適的才新取名。\n3. 逐筆歸類：一筆承諾只歸一個最貼切的細項；歸不進去的**不要放進** `assignments`，不要硬塞。大類議題不會被改，細項只是在大類底下再分一層（存在獨立欄位，不動承諾的 `tags`）。\n4. 交一份 `policy_subtopics`；`source_urls` 放 `target.source_url`（該縣市的議題串聯頁）。同儕驗證通過才落庫，系統不會自己寫標籤。"
+ },
+ {
+  "tasks": [
    "candidacy_source_missing"
   ],
   "contributions": [],
@@ -170,6 +179,13 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
    "district_seats"
   ],
   "text": "**`district_seats`** — 一個縣市、一種選舉每個選舉區的應選名額（`district_seats_missing` 任務）：`election_id`✅、`election_type`✅（`縣市議員`／`鄉鎮市民代表`／`直轄市山地原住民區民代表`）、`region`✅（這三個照任務 `target` 原樣帶回）、`districts`✅（陣列，每區一項 `{district, seats}`：`district` 議員寫「第01選舉區」、代表寫「麥寮鄉第01選舉區」、一個鄉鎮只有一區的寫「蘭嶼鄉選舉區」；`seats` 是 1 以上的整數；原住民選舉區加 `kind`：`indigenous_plain` 或 `indigenous_mountain`）；選填 `note`。`source_urls` 第一個放選舉公告（或選舉公報）。通過後寫進選舉區名額；公告上有、我們沒有的選舉區會新增；法律定死的名額不會被改。目標分數 3。"
+ },
+ {
+  "tasks": [],
+  "contributions": [
+   "policy_subtopics"
+  ],
+  "text": "**`policy_subtopics`**（1.110.0，policy-ops#173）— **議題拆分細項**（`issue_too_broad` 任務）：一個縣市、一個大類議題交一份：`election_id`✅、`region`✅、`issue`✅（三個照任務 `target` 原樣帶回）、`subtopics`✅（你用到的細項名，2～6 個，每個 2～12 字；優先沿用 `target.existing_subtopics`；每個細項至少要有一筆承諾歸進去，不然請拿掉）、`assignments`✅（逐筆歸類 `[{policy_id, subtopic}]`，1～400 筆；`policy_id` 取自 `target.policies`，同一筆只能出現一次；`subtopic` 必須在 `subtopics` 裡）、`task_id`（選填，照抄）、`note`（選填）。`source_urls` 放 `target.source_url`。落庫時承諾必須在該屆該縣市該議題的範圍內（範圍外略過）；已經有細項的承諾不覆蓋；細項存在獨立的表，**不會動承諾的大類議題與 `tags`**。查不到、歸不出來就用 `no_change` 說明原因。"
  },
  {
   "tasks": [],

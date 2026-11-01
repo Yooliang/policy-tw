@@ -185,6 +185,16 @@
 
 已經有結果的那一位不會被覆蓋（批次只補空白）；要改一位的結果，一位一筆用 `candidacy` 交。中選會名單上同縣市同名的不只一位、或名單上找不到的，系統不放進批次，那幾位各自派 `election_result_missing`（附名單上的同名者 `target.cec_same_name`，請你指認）。
 
+<!-- spec task: issue_too_broad | contribution: policy_subtopics -->
+### 拆分議題（`issue_too_broad` → `policy_subtopics`，1.110.0）
+
+串聯（依縣市、依議題看各級承諾）要比的是「同一件事」。某個縣市的某個大類議題（例：社會福利混了托育、敬老、生育）在 2026 的承諾超過門檻（目前 150 筆，還沒有細項的才算）就派這一件，一個縣市×議題一張。
+
+1. `target.policies` 是這批承諾（`policy_id`、`title`、`level`，一張最多列 `target.list_cap` 筆；`target.total` 是總筆數，剩下的下一輪再派）。`target.existing_subtopics` 是全站這個議題已經存在的細項名。
+2. 讀完承諾，提出 **2～6 個細項**（每個 2～12 字，不含頓號、逗號、斜線、空白）。**優先沿用 `existing_subtopics`**：意思一樣就用同一個名字，不要換同義詞另取（例如已有「托育」就不要再取「托嬰」）；真的沒有合適的才新取名。
+3. 逐筆歸類：一筆承諾只歸一個最貼切的細項；歸不進去的**不要放進** `assignments`，不要硬塞。大類議題不會被改，細項只是在大類底下再分一層（存在獨立欄位，不動承諾的 `tags`）。
+4. 交一份 `policy_subtopics`；`source_urls` 放 `target.source_url`（該縣市的議題串聯頁）。同儕驗證通過才落庫，系統不會自己寫標籤。
+
 <!-- spec task: candidacy_source_missing -->
 ### 補選票號次（`candidacy_source_missing`，`target.kind` 是 `cand_no`）
 
@@ -384,6 +394,9 @@
 
 <!-- spec contribution: district_seats -->
 **`district_seats`** — 一個縣市、一種選舉每個選舉區的應選名額（`district_seats_missing` 任務）：`election_id`✅、`election_type`✅（`縣市議員`／`鄉鎮市民代表`／`直轄市山地原住民區民代表`）、`region`✅（這三個照任務 `target` 原樣帶回）、`districts`✅（陣列，每區一項 `{district, seats}`：`district` 議員寫「第01選舉區」、代表寫「麥寮鄉第01選舉區」、一個鄉鎮只有一區的寫「蘭嶼鄉選舉區」；`seats` 是 1 以上的整數；原住民選舉區加 `kind`：`indigenous_plain` 或 `indigenous_mountain`）；選填 `note`。`source_urls` 第一個放選舉公告（或選舉公報）。通過後寫進選舉區名額；公告上有、我們沒有的選舉區會新增；法律定死的名額不會被改。目標分數 3。
+
+<!-- spec contribution: policy_subtopics -->
+**`policy_subtopics`**（1.110.0，policy-ops#173）— **議題拆分細項**（`issue_too_broad` 任務）：一個縣市、一個大類議題交一份：`election_id`✅、`region`✅、`issue`✅（三個照任務 `target` 原樣帶回）、`subtopics`✅（你用到的細項名，2～6 個，每個 2～12 字；優先沿用 `target.existing_subtopics`；每個細項至少要有一筆承諾歸進去，不然請拿掉）、`assignments`✅（逐筆歸類 `[{policy_id, subtopic}]`，1～400 筆；`policy_id` 取自 `target.policies`，同一筆只能出現一次；`subtopic` 必須在 `subtopics` 裡）、`task_id`（選填，照抄）、`note`（選填）。`source_urls` 放 `target.source_url`。落庫時承諾必須在該屆該縣市該議題的範圍內（範圍外略過）；已經有細項的承諾不覆蓋；細項存在獨立的表，**不會動承諾的大類議題與 `tags`**。查不到、歸不出來就用 `no_change` 說明原因。
 
 <!-- spec contribution: regional_stat -->
 **`regional_stat`**（issue #508）— **地方基本統計**：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例，一個地區一個指標一個年度一筆：`admin_code`✅（內政部行政區代碼，縣市 5 碼或鄉鎮市區 8 碼；任務 `target.admin_code` 原樣帶回，不收村里）、`stat_key`✅（`population` 人口／`area_km2` 面積／`budget_expenditure` 總預算歲出／`aging_rate` 65 歲以上比例）、`year`✅（統計年度，西元整數；歲出填會計年度）、`value`✅（數值）、`unit`✅（固定：`population`＝人／`area_km2`＝平方公里／`budget_expenditure`＝千元／`aging_rate`＝%，照 `stat_key` 填，填錯會被退回）；選填 `as_of`（基準日 `YYYY-MM-DD`）。`source_urls` 放官方統計出處（內政部戶政司人口統計、內政部國土測繪中心、該縣市主計處總預算書等）；**查不到確切數字不要推估、不要用候選人數或其他資料換算**，查不到就用 `no_change` 回報。通過後寫進地方統計；已有一樣的數值視為成功，已有不一樣的數值不覆蓋、退件。目標分數 1：一位驗證人同意（+1 或 +2）即上線，一張反對照舊擋得住（每個來源網段只算一票、不能驗自己）。**`regional_stat_missing` 任務**派的就是這個：`target.missing` 列出這個地區缺哪幾個指標（`stat_key`、`min_year`、`unit`）。

@@ -472,6 +472,22 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
   ],
 
+  // 議題拆分細項（policy-ops#173 P1）：出錯的方式是「承諾被歸進明顯不對的細項」與「細項名太雜（同義詞各取一個）」
+  policy_subtopics: [
+    {
+      key: "misfiled",
+      instructions: "抽看幾筆承諾的標題：它被歸進的細項，跟標題講的事相符嗎？還是明顯歸錯、或硬塞進不相干的細項？",
+      hit: { key: "misfiled", means: "有承諾被歸進明顯不對的細項" },
+      miss: { key: "fits", means: "抽看的承諾都歸在合理的細項" },
+    },
+    {
+      key: "synonym_subtopics",
+      instructions: "提出的幾個細項名，彼此是不是同一件事的不同說法（例如「托育」與「托嬰」），或跟既有細項名重複卻另取新名？",
+      hit: { key: "overlap", means: "細項名之間或跟既有細項名意思重疊" },
+      miss: { key: "distinct", means: "細項名各自獨立、沒有重疊" },
+    },
+  ],
+
   task_suggestion: [
     {
       key: "not_actionable",
