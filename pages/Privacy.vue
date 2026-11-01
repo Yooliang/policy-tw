@@ -38,7 +38,7 @@ usePageHead({
       <div class="space-y-10 text-slate-700 leading-relaxed">
 
         <section>
-          <h2 class="text-2xl font-black text-navy-900 mb-3">一句話版本</h2>
+          <h2 class="text-2xl font-black text-navy-900 mb-3">免登入，不儲存你的 IP</h2>
           <p>
             瀏覽這個網站不需要登入，也不需要提供任何個人資料。我們<strong>不儲存你的原始 IP 位址</strong>；
             網站使用 Google Analytics 與 Google AdSense，它們會在你的瀏覽器放置 Cookie。

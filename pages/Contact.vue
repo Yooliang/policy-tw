@@ -34,7 +34,7 @@ usePageHead({
       <div class="space-y-10 text-slate-700 leading-relaxed">
 
         <section>
-          <h2 class="text-2xl font-black text-navy-900 mb-3">一句話版本</h2>
+          <h2 class="text-2xl font-black text-navy-900 mb-3">一律透過 GitHub Issues 聯絡</h2>
           <p class="mb-4">
             正見沒有公開信箱或電話，所有聯絡都走
             <a :href="ISSUES_URL" target="_blank" rel="noopener" class="text-blue-600 underline underline-offset-2">GitHub Issues</a>。
