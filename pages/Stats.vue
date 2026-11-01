@@ -9,6 +9,7 @@ import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
 import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { STATS_RANGES, findStatsRange, type StatsRangeKey } from '../lib/stats-range'
@@ -152,6 +153,8 @@ async function loadActivity() {
 }
 watch(range, loadActivity)
 onMounted(loadActivity)
+// 即時數字：頁面留在分頁容器裡，切回來時背景重抓（先顯示舊的）
+onPaneShown(() => { void load(); void loadLeaderboard(); void loadActivity() })
 
 const chartSeries = computed(() => {
   const rows = activity.value ?? []

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { usePaneActive } from '../composables/usePane'
 import { useRoute, useRouter } from 'vue-router'
 import { Loader2, Search } from 'lucide-vue-next'
 import { searchPageTerm, useGlobalSearch } from '../composables/useGlobalSearch'
@@ -26,6 +27,9 @@ usePageHead({ title: '搜尋', description: '搜尋政治人物與政見。', no
 
 function clear() { searchPageTerm.value = ''; search.reset() }
 onDeactivated(clear)
+// 分頁容器裡切走（背景 pane 還在）：搜尋框一樣清掉
+const paneActive = usePaneActive()
+watch(paneActive, (a) => { if (!a) clear() })
 onBeforeUnmount(clear)
 </script>
 

@@ -11,6 +11,7 @@ import { useGlobalState } from '../composables/useGlobalState'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 import type { AskQuestionResult } from '../lib/citizen-questions'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useRoute } from 'vue-router'
 
@@ -128,6 +129,8 @@ function toggleQuestion(id: string) {
 
 // 表態的狀態與流程在 useCitizenQuestions（政見頁也用同一份）
 onMounted(loadMyStances)
+// 即時討論：頁面留在分頁容器裡，切回來時背景重抓（先顯示舊的）
+onPaneShown(() => { loadQuestions(); loadMyStances() })
 
 // 提問成功：重新整理列表，讓新題目馬上出現
 function onAsked(_result: AskQuestionResult) {

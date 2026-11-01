@@ -115,6 +115,7 @@ export function useSwipeTabs(el: Ref<HTMLElement | null>, opts: SwipeTabsOptions
     strip = stripEl ? swipeStrips.get(stripEl) : undefined
     strip?.prepare()
     dragging = true
+    window.dispatchEvent(new Event('swipetabs:begin')) // 分頁容器（SectionPager）據此排好相鄰 pane
     node.setAttribute('data-swiping', '')
     node.style.willChange = 'transform'
     document.documentElement.style.overflowX = 'clip'
