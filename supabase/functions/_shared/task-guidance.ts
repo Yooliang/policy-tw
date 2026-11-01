@@ -880,7 +880,8 @@ export const TASK_BRANCHES: Record<string, string[]> = {
   candidate_status_stale: ["correction", "no_change"],
   policy_validity: ["removal", "correction", "no_change"],
   duplicate_policy: ["removal", "correction", "no_change"],
-  roster_check: ["roster_check", "candidacy"],
+  // 名單清查（2026-11-01 起併進名冊類差異，target.items 逐項各用既有型別交件）：同一個單位清查底下可能出現這幾種
+  roster_check: ["roster_check", "candidacy", "correction", "election_results", "reassign_candidacy", "no_change"],
   progress_stale: ["policy_progress", "candidacy", "removal", "no_change"],
   policy_election_missing: ["correction", "no_change"],
   policy_election_mismatch: ["correction", "no_change"],
