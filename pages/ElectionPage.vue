@@ -1946,7 +1946,7 @@ useSwipeTabs(swipeEl, {
         <div v-if="selectedRegion === 'All'" class="text-center py-20 bg-white border border-dashed border-slate-300 rounded-xl">
           <Layers :size="48" class="mx-auto mb-4 text-slate-300" />
           <h3 class="text-lg font-bold text-navy-900 mb-2">請選擇特定縣市</h3>
-          <p class="text-slate-500 max-w-md mx-auto">「議題串聯」功能需要針對特定行政區進行垂直分析。</p>
+          <p class="text-slate-500 max-w-md mx-auto">議題串聯以縣市為單位，從縣市長到村里長看同一個議題。</p>
         </div>
         <template v-else>
           <div v-if="issuesMdPick" class="flex justify-end">
