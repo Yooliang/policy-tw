@@ -49,7 +49,7 @@ usePageHead({
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
     </Hero>
 
-    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">
       <section class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 space-y-4">
         <p class="text-sm font-bold text-slate-500 uppercase tracking-widest">貼給你的 AI</p>
 
