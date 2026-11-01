@@ -38,3 +38,55 @@ export function countyPopulatedSet(
 ): ReadonlySet<string> | null {
   return ready && selectedRegion === 'All' ? new Set(mayorRegions()) : null
 }
+
+/**
+ * 建置期人數快取（data/tw-chip-counts/<屆>.json，scripts/build-tw-chip-counts.ts 產生）：
+ * 晶片一出來就能決定灰／亮，不用等參選人讀完。
+ *   county / town：{ 官方碼: { 選舉類型: 人數 } }；village：{ 鄉鎮碼: [沒有登記者的村里名] }
+ */
+export interface ChipCountCache {
+  election: number
+  county: Record<string, Record<string, number>>
+  town: Record<string, Record<string, number>>
+  village: Record<string, string[]>
+}
+interface CodeNames { codes: readonly string[]; names: readonly string[] }
+
+/** 即時資料讀完（live 非 null）以即時為準；還沒讀完就用快取（可能也是 null＝都不灰） */
+export function resolvePopulated(live: ReadonlySet<string> | null, cached: ReadonlySet<string> | null): ReadonlySet<string> | null {
+  return live ?? cached
+}
+
+/** 快取裡「這些職位任一有人」的地區名稱集合（名稱已正規化）；quota 為單位表（縣市或鄉鎮） */
+function populatedByType(
+  table: Record<string, Record<string, number>>,
+  list: CodeNames,
+  types: readonly string[],
+  norm: (n: string) => string,
+): ReadonlySet<string> {
+  const out = new Set<string>()
+  list.codes.forEach((code, i) => {
+    const row = table[code]
+    if (row && types.some((t) => (row[t] ?? 0) > 0)) out.add(norm(list.names[i]!))
+  })
+  return out
+}
+
+/** 縣市層：快取沒有（或不是這一屆）回 null */
+export function cachedCountySet(cache: ChipCountCache | null, counties: CodeNames, types: readonly string[], norm: (n: string) => string = (n) => n): ReadonlySet<string> | null {
+  return cache ? populatedByType(cache.county, counties, types, norm) : null
+}
+
+/** 鄉鎮層：快取沒有、或該縣市的鄉鎮一個都不在快取裡回 null（不下判斷） */
+export function cachedTownSet(cache: ChipCountCache | null, towns: CodeNames | null, types: readonly string[], norm: (n: string) => string = (n) => n): ReadonlySet<string> | null {
+  if (!cache || !towns || !towns.codes.some((c) => cache.town[c])) return null
+  return populatedByType(cache.town, towns, types, norm)
+}
+
+/** 村里層：快取沒有這個鄉鎮回 null；否則「選項裡不在灰名單的」就是有人 */
+export function cachedVillageSet(cache: ChipCountCache | null, townCode: string | null, options: readonly string[], norm: (n: string) => string = (n) => n): ReadonlySet<string> | null {
+  const zero = cache && townCode ? cache.village[townCode] : undefined
+  if (!zero) return null
+  const z = new Set(zero.map(norm))
+  return new Set(options.map(norm).filter((n) => !z.has(n)))
+}
