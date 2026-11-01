@@ -357,7 +357,8 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   policy:
     `payload：title（4–200 字）、description（≥20 字）、category（要是這 19 個之一：${POLICY_CATEGORIES.join("／")}）、` +
     `status（${POLICY_STATUSES.join("／")}）、election_id（選舉年份）、politician_id 或 name。source_urls 放證明這筆政見的網址。` +
-    "可帶 origin（政見從哪裡來：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算；不帶的競選承諾自動標 pledge）。",
+    "可帶 origin（政見從哪裡來：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算；不帶的競選承諾自動標 pledge）。" +
+    "競選承諾若有明確的細項（例：社會福利底下的「托育」「敬老津貼」），可再帶選填的 subtopic（2～12 字）；優先沿用站上已存在的細項名，沒有明確細項就不要填。",
   // education_level 是固定值域（生產資料的實際分布），不是自由文字——
   // 實測回報代理只能猜（2026-09-21）
   politician:

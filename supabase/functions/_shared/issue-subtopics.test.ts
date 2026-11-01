@@ -320,3 +320,79 @@ Deno.test("E4 還原：落庫改成覆蓋已有細項 → C4 會紅（程式碼�
   assertStringIncludes(src, "const toInsert = [...scoped].filter((id) => !had.has(id))");
   assertStringIncludes(src, 'rpc("policy_subtopic_scope"');
 });
+
+// ============================================================
+// F. P1b：新承諾交件可帶選填 subtopic（20261102020000_policy_subtopic_issue.sql）
+// ============================================================
+const MIG_B_NAME = "20261102020000_policy_subtopic_issue.sql";
+const MIG_B = await readMig(MIG_B_NAME);
+const POLICY_BASE = { politician_id: u(2), title: "公托再增設十處", description: "任期內在議員選區增設十處公共托育中心並延長開放時間。", category: "社會福利", election_id: 2026 };
+const checkPolicy = (payload: Record<string, unknown>) =>
+  validateContributionRequest({ agent_name: "tester", contributions: [{ contribution_type: "policy", payload, source_urls: ["https://example.gov.tw/a"] }] }).errors;
+
+Deno.test("F1 policy 交件：subtopic 選填；有填要是合法細項名", () => {
+  assertFalse(checkPolicy({ ...POLICY_BASE }).some((e) => e.path === "payload.subtopic"), "不帶照舊過");
+  assertFalse(checkPolicy({ ...POLICY_BASE, subtopic: "托育" }).some((e) => e.path === "payload.subtopic"));
+  for (const bad of ["a", "托、育", "十三個字的細項名稱超過上限啦啦啦", " 托育", ""]) {
+    assert(checkPolicy({ ...POLICY_BASE, subtopic: bad }).some((e) => e.path === "payload.subtopic"), `應擋：${JSON.stringify(bad)}`);
+  }
+});
+
+Deno.test("F2 policy_subtopic_issue（PGlite）：大類優先取 category，其次字母序；沒有議題回 NULL", async () => {
+  const db = await build();
+  await db.exec(MIG_B.replace(/REVOKE[^;]*;|GRANT[^;]*;|COMMENT[^;]*;|NOTIFY[^;]*;/g, ""));
+  const issue = async (id: string) => (await q(db, "SELECT policy_subtopic_issue($1::uuid) AS i", [id]))[0].i;
+  assertEquals(await issue(u(101)), "社會福利");
+  await db.exec(`UPDATE policies SET tags = ARRAY['交通建設','社會福利'] WHERE id = '${u(101)}'`);
+  assertEquals(await issue(u(101)), "社會福利", "category 在議題之中就用它");
+  await db.exec(`UPDATE policies SET category = '其他', tags = ARRAY['交通建設','社會福利'] WHERE id = '${u(101)}'`);
+  assertEquals(await issue(u(101)), "交通建設", "否則字母序第一個");
+  await db.exec(`UPDATE policies SET category = '其他', tags = NULL WHERE id = '${u(101)}'`);
+  assertEquals(await issue(u(101)), null, "沒有議題回 NULL");
+});
+
+const policyRow = (payload: Record<string, unknown>) => ({
+  id: "c-p1", contribution_type: "policy" as (typeof CONTRIBUTION_TYPES)[number], payload, source_urls: ["https://example.gov.tw/a"], note: null, agent_name: "tester", contributor_url: null,
+});
+const seedPol = () => ({ politicians: [{ id: u(2), name: "李大華" }], policies: [], policy_subtopics: [], edit_history: [] });
+
+Deno.test("F3 落庫：帶 subtopic 的新承諾 → 寫進 policy_subtopics（大類由函式決定），tags 不動", async () => {
+  const fake = createFakeSupabase(seedPol(), { policy_subtopic_issue: () => "社會福利" });
+  const out = await applyContribution(fake.client, policyRow({ ...POLICY_BASE, subtopic: "托育", tags: ["社會福利"] }));
+  assertEquals(out.status, "applied", out.message);
+  assertEquals(fake.db.policies.length, 1);
+  assertEquals(fake.db.policies[0].tags, ["社會福利"], "tags 照交件原樣，沒有被細項動到");
+  assertEquals(fake.db.policy_subtopics.map((r) => [r.policy_id, r.issue, r.subtopic, r.contribution_id]), [[fake.db.policies[0].id, "社會福利", "托育", "c-p1"]]);
+  assert(fake.db.edit_history.some((e) => e.table_name === "policy_subtopics"));
+});
+
+Deno.test("F4 落庫：沒帶 subtopic 不寫；沒有大類議題或跟大類同名只略過細項、承諾照建", async () => {
+  const none = createFakeSupabase(seedPol(), { policy_subtopic_issue: () => "社會福利" });
+  assertEquals((await applyContribution(none.client, policyRow({ ...POLICY_BASE }))).status, "applied");
+  assertEquals(none.db.policy_subtopics.length, 0);
+
+  const noIssue = createFakeSupabase(seedPol(), { policy_subtopic_issue: () => null });
+  const o1 = await applyContribution(noIssue.client, policyRow({ ...POLICY_BASE, subtopic: "托育" }));
+  assertEquals([o1.status, noIssue.db.policies.length, noIssue.db.policy_subtopics.length], ["applied", 1, 0]);
+  assertStringIncludes(o1.message, "細項未寫入");
+
+  const same = createFakeSupabase(seedPol(), { policy_subtopic_issue: () => "托育" });
+  const o2 = await applyContribution(same.client, policyRow({ ...POLICY_BASE, subtopic: "托育" }));
+  assertEquals([o2.status, same.db.policy_subtopics.length], ["applied", 0]);
+});
+
+Deno.test("F5 清點：協議版號、skill-types 有 subtopic 說明（優先沿用）、不叫代理把細項寫進 tags", async () => {
+  const skill = await readSkillWithTypes();
+  assertStringIncludes(skill, "`subtopic`（選填");
+  assertStringIncludes(skill, "不要把細項放進 `tags`");
+  assertFalse(skill.includes("要給到細項層級"), "P1 時決定不叫代理把細項寫進 tags");
+  assert(MIG_B.includes("CREATE OR REPLACE FUNCTION policy_subtopic_issue(p_policy_id uuid)"));
+  assertFalse(/UPDATE\s+policies\b|INSERT\s+INTO\s+policies\b/i.test(MIG_B));
+});
+
+Deno.test("F6 還原：落庫拿掉 subtopic 處理 → F3 會紅；拿掉 validator → F1 會紅（程式碼層級）", async () => {
+  const apply = (await Deno.readTextFile(new URL("./apply-contribution.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  assertStringIncludes(apply, "writeNewPolicySubtopic(supabase, ctx, row.id, inserted.id, subtopic)");
+  const schema = (await Deno.readTextFile(new URL("./contribution-schema.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  assertStringIncludes(schema, 'push("payload.subtopic"');
+});

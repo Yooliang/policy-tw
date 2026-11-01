@@ -390,6 +390,8 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (!isStr(p.title, 4, 200)) push("payload.title", "政見標題必填（4～200 字）");
       if (!isStr(p.description, MIN_POLICY_DESCRIPTION, 5000)) push("payload.description", `政見內容必填（至少 ${MIN_POLICY_DESCRIPTION} 字，寫清楚承諾了什麼）`);
       if (!isCanonicalCategory(p.category)) push("payload.category", categoryErrorMessage(p.category), "category_invalid");
+      // 議題細項（policy-ops#173 P1b）：選填，有明確細項才填，優先沿用站上已存在的細項名；落庫寫進 policy_subtopics，不動 tags
+      if (p.subtopic !== undefined && p.subtopic !== null && !isSubtopicName(p.subtopic)) push("payload.subtopic", "subtopic 要是 2～12 字的細項名（不含頓號、逗號、斜線、冒號、空白），沒有明確細項就不要填");
       if (p.status !== undefined && !oneOf(POLICY_STATUSES, p.status)) push("payload.status", `要是 ${POLICY_STATUSES.join("／")} 之一`);
       if (p.election_id !== undefined && !(isKnownElectionId(p.election_id))) push("payload.election_id", `要是 ${electionIdsText()}`);
       validateProposedDate(p.proposed_date, p.election_id, push, p.status);
