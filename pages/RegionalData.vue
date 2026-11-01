@@ -191,7 +191,7 @@ const getSubRegionStats = (subRegion: string) => {
 }
 
 usePageHead({
-  title: '全台各縣市數據分佈',
+  title: '數據分佈',
   description: '統計全台 22 縣市與各鄉鎮市區的政治人物人數與政見規模，了解各縣市的政治生態與治理脈絡。',
 })
 </script>
@@ -199,7 +199,7 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20 text-left">
     <Hero>
-      <template #title>全台各縣市數據分佈</template>
+      <template #title>數據分佈</template>
       <template #description>各行政區的人員分佈與政見規模</template>
       <template #icon><Database :size="400" class="text-blue-500" /></template>
 
