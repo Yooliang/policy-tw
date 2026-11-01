@@ -925,8 +925,9 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // 還沒投票的屆別（2026）：名冊資料表算出這個單位缺誰，一起附上（2026-10-08）。已投票屆別（list_source＝cec）的缺口在任務 target.missing，不查。
       // 函式還沒上線（migration 比函式晚套上的那幾分鐘）、出錯、這個單位名冊裡沒人（回 NULL）都不給，不擋派工
       let registration: Obj | null = null;
-      if (target.list_source !== "cec" && target.findings_only !== true) {
-        const gap = await supabase.rpc("roster_registration_gap", {
+      if (target.list_source !== "cec") {
+        // findings_only（只有名冊差異的單位）沒有「找名單」這一步，不查登記名冊
+        const gap = target.findings_only === true ? { error: true, data: null } : await supabase.rpc("roster_registration_gap", {
           p_election_id: electionId, p_election_type: electionType, p_county: scope.county, p_town: scope.township, p_limit: ROSTER_GAP_LIMIT,
         });
         if (!gap.error && gap.data && typeof gap.data === "object") registration = gap.data as Obj;
