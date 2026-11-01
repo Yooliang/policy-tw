@@ -11,6 +11,7 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'tracking', label: '全部政見', to: '/tracking' },
     { key: 'analysis', label: '政策脈絡', to: '/analysis' },
     { key: 'mine', label: '我的關注', to: '/tracking?view=mine' },
+    { key: 'regional-data', label: '數據分佈', to: '/regional-data' },
   ],
   // 參與
   [
@@ -32,7 +33,7 @@ export function sectionTabsFor(path: string, query: Record<string, unknown>): { 
   const p = path.length > 1 ? path.replace(/\/+$/, '') : path
   let key: string | null = null
   if (p === '/tracking') key = query.view === 'mine' ? 'mine' : 'tracking'
-  else if (['/analysis', '/stats', '/skill', '/community', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
+  else if (['/analysis', '/regional-data', '/stats', '/skill', '/community', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
   if (!key) return null
   const tabs = MOBILE_SECTION_TABS.find(g => g.some(t => t.key === key))
   return tabs ? { tabs, active: key } : null

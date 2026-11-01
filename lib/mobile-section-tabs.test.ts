@@ -5,7 +5,7 @@ Deno.test("路由對到頁籤：政見三頁，我的關注看 view=mine", () =>
   assertEquals(sectionTabsFor("/tracking", {})?.active, "tracking");
   assertEquals(sectionTabsFor("/tracking", { view: "mine" })?.active, "mine");
   assertEquals(sectionTabsFor("/analysis", {})?.active, "analysis");
-  assertEquals(sectionTabsFor("/analysis", {})?.tabs.map((t) => t.to), ["/tracking", "/analysis", "/tracking?view=mine"]);
+  assertEquals(sectionTabsFor("/analysis", {})?.tabs.map((t) => t.to), ["/tracking", "/analysis", "/tracking?view=mine", "/regional-data"]);
 });
 
 Deno.test("參與與搜尋兩組", () => {
@@ -28,7 +28,6 @@ Deno.test("詳情頁與其他頁不顯示頁籤", () => {
   assertEquals(sectionTabsFor("/policy/abc", {}), null);
   assertEquals(sectionTabsFor("/politicians/x", {}), null);
   assertEquals(sectionTabsFor("/", {}), null);
-  assertEquals(sectionTabsFor("/regional-data", {}), null);
 });
 
 Deno.test("每個頁籤自己的路由都回到同一組、自己是 active", () => {
