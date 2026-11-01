@@ -1,6 +1,7 @@
 import { nextTick, onActivated, onDeactivated, onMounted, watch, type Ref } from 'vue'
 import { useRoute, useRouter, type LocationQuery, type LocationQueryValue } from 'vue-router'
 import { useGlobalState } from './useGlobalState'
+import { usePaneActive } from './usePane'
 
 /**
  * 全站共用的縣市選擇器狀態 ↔ 網址 query（?region=&sub=&village=…）雙向同步，每個有選擇器的頁都掛一份。
@@ -131,6 +132,8 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   const regionPath = options.regionPath
   let active = false
   let applying = false
+  // 分頁容器的背景 pane 只讀自己頁籤網址帶的參數（例如 ?view=mine），不動網址、不動全站縣市；變成目前頁才照一般流程
+  const paneActive = usePaneActive()
 
   const isOwnRoute = () => routeNames.includes(String(route.name ?? ''))
   /** 鄉鎮也放在路徑上嗎（舊的 ?sub= 要換成路徑） */
@@ -147,12 +150,13 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   const hasOwnKeys = (query: LocationQuery) => !!regionPath?.get() || fields.some((f) => query[f.key] !== undefined)
 
   // 頁面既有的 watcher 會在上層變動時把下層重設（縣市變 → 鄉鎮／村里回 All），所以一個欄位設完等 watcher 跑完再設下一個
-  async function applyQuery(query: LocationQuery): Promise<void> {
+  async function applyQuery(query: LocationQuery, onlyPresent = false): Promise<void> {
     const target = parseRegionQuery(fields, effectiveQuery(query))
     applying = true
     try {
       for (const field of fields) {
         if (field.ref.value === target[field.key]) continue
+        if (onlyPresent && first(effectiveQuery(query)[field.key]) === '') continue
         field.ref.value = target[field.key]
         await nextTick()
       }
@@ -163,7 +167,7 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   }
 
   function syncUrl(): void {
-    if (!active || applying || !isOwnRoute()) return
+    if (!active || applying || !isOwnRoute() || !paneActive.value) return
     const query = buildRegionQuery(fields, route.query)
     if (!regionPath) {
       if (sameQuery(query, route.query)) return
@@ -191,6 +195,7 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
 
   function onEnter(): void {
     active = true
+    if (!paneActive.value) { if (hasOwnKeys(route.query)) void applyQuery(route.query, true); return }
     if (hasOwnKeys(route.query)) void applyAndNormalize(route.query)
     else syncUrl()
   }
@@ -198,12 +203,13 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   onMounted(onEnter)
   onActivated(onEnter)
   onDeactivated(() => { active = false })
+  watch(paneActive, (now) => { if (now) onEnter(); else active = false })
 
   watch(fields.map((f) => f.ref), syncUrl)
 
   // 同一頁上換了帶不同參數的連結（例如貼上分享連結、點縣市頁或鄉鎮頁連結）：以網址為準
   watch([() => route.query, () => regionPath?.get(), () => regionPath?.getSub?.()], () => {
-    if (!active || applying || !isOwnRoute()) return
+    if (!active || applying || !isOwnRoute() || !paneActive.value) return
     const query = route.query
     if (regionPath) {
       const target = parseRegionQuery(fields, effectiveQuery(query))

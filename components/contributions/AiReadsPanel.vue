@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import { onPaneShown } from '../../composables/usePane'
 import { Bot } from 'lucide-vue-next'
 import { supabasePublic } from '../../lib/supabase'
 import { withTimeoutAndRetry } from '../../lib/retry'
@@ -58,6 +59,7 @@ async function load() {
   }
 }
 onMounted(load)
+onPaneShown(load)
 watch(() => props.days, load)
 
 const totalOf = (kind: string) => rows.value.filter((r) => r.kind === kind).reduce((s, r) => s + r.hits, 0)

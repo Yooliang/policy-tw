@@ -32,10 +32,9 @@ const person = computed(() => (mounted.value && route.name === 'politician' && p
 
 const link = (key: string, label: string, to: string): DeskItem => ({ key, label, to, active: false })
 const POLICY: DeskGroup[] = [
-  { key: 'policy', title: '政見', blocks: [[link('list', '全部政見', '/tracking'), link('relay', '政策脈絡', '/analysis'), link('mine', '我的關注', '/tracking?view=mine'), link('regional', '縣市數據分佈', '/regional-data')]] },
+  { key: 'policy', title: '政見', blocks: [[link('list', '全部政見', '/tracking'), link('relay', '政策脈絡', '/analysis'), link('mine', '我的關注', '/tracking?view=mine'), link('regional', '數據分佈', '/regional-data')]] },
 ]
-// 參與區三組（2026-10-31 小良哥）：看板／工作那幾項就是貢獻看板列（components/contributions/BoardNav.vue）的分頁；
-// 「貢獻統計」就是 /stats（BoardNav 的「統計」），所以看板組不再重複放「統計」。
+// 參與區三組（2026-10-31 小良哥）：看板／工作各頁的切換只在這裡與手機頁籤條（頁面內原本的切換列已拿掉）。
 const JOIN: DeskGroup[] = [
   { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
   { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('ai', 'AI 表現統計', '/ai')]] },

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { onPaneShown } from '../../composables/usePane'
 import { Cpu, ChevronRight } from 'lucide-vue-next'
 import LoadError from '../LoadError.vue'
 import { supabasePublic } from '../../lib/supabase'
@@ -44,6 +45,7 @@ async function load() {
   }
 }
 onMounted(load)
+onPaneShown(load)
 watch(days, load)
 
 const contrib = computed(() => summarizeContributions(contribRows.value ?? []))

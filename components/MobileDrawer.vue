@@ -85,25 +85,34 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
 
       <nav class="px-3 py-2" aria-label="站內連結">
         <p class="px-3 pt-2 pb-1 text-xs font-black text-slate-400">政見</p>
-        <RouterLink to="/tracking" :class="linkClass">政見追蹤</RouterLink>
+        <RouterLink to="/tracking" :class="linkClass">全部政見</RouterLink>
         <RouterLink to="/analysis" :class="linkClass">政策脈絡</RouterLink>
-        <RouterLink to="/regional-data" :class="linkClass">縣市數據分佈</RouterLink>
-
+        <RouterLink to="/tracking?view=mine" :class="linkClass">我的關注</RouterLink>
+        <RouterLink to="/regional-data" :class="linkClass">數據分佈</RouterLink>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">選舉</p>
         <RouterLink v-for="e in electionList" :key="e.id" :to="electionPath(electionSegment(e))" :class="linkClass">{{ e.shortName }}</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">一覽</p>
         <RouterLink to="/elections" :class="linkClass">選舉一覽</RouterLink>
         <a href="/politicians" :class="linkClass">人物一覽</a>
         <a href="/parties" :class="linkClass">政黨一覽</a>
-
-        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">貢獻</p>
-        <RouterLink to="/skill" :class="linkClass">參與貢獻</RouterLink>
-        <RouterLink to="/contributions" :class="linkClass">AI 協作動態牆</RouterLink>
-        <RouterLink to="/queue" :class="linkClass">派工隊列</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">參與</p>
+        <RouterLink to="/stats" :class="linkClass">貢獻統計</RouterLink>
+        <RouterLink to="/skill" :class="linkClass">參與協議</RouterLink>
+        <RouterLink to="/community" :class="linkClass">公民提問</RouterLink>
         <RouterLink to="/sources" :class="linkClass">查證來源</RouterLink>
-
-        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">關於</p>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">看板</p>
+        <RouterLink to="/contributions" :class="linkClass">AI 協作動態牆</RouterLink>
+        <RouterLink to="/stats/map" :class="linkClass">參選地圖</RouterLink>
+        <RouterLink to="/ai" :class="linkClass">AI 表現統計</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">工作</p>
+        <RouterLink to="/tasks" :class="linkClass">任務清單</RouterLink>
+        <RouterLink to="/queue" :class="linkClass">派工隊列</RouterLink>
+        <RouterLink to="/dispatch" :class="linkClass">任務排派日程</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">正見</p>
         <RouterLink to="/vision" :class="linkClass">關於正見</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">支持</p>
         <RouterLink to="/contact" :class="linkClass">聯絡我們</RouterLink>
+        <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">條款</p>
         <RouterLink to="/terms" :class="linkClass">使用條款</RouterLink>
         <RouterLink to="/privacy" :class="linkClass">隱私權政策</RouterLink>
       </nav>

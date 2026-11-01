@@ -1,6 +1,7 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useHead } from '@unhead/vue'
 import { useRoute } from 'vue-router'
+import { usePaneActive } from './usePane'
 
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
 import { defaultShareImage, shareImageMeta, type ShareImage } from '../lib/seo'
@@ -98,16 +99,18 @@ export function usePageHead(options: PageHeadOptions): void {
   // 每頁自己的 canonical／og:url（2026-09-23）：以前只有 index.html 寫死的首頁 og:url，每一頁分享出去都指首頁。
   // 用路由的 path（不含 query）：選舉頁的 ?region= 那些篩選不該各自成一個 canonical。
   const route = useRoute()
+  // 在分頁容器的背景 pane 裡：不輸出任何文件標題／meta（只有目前頁的算數）
+  const paneActive = usePaneActive()
   // 中文路徑（縣市頁 /election/2026/台北市）一律寫成 percent-encoded：預渲染時 route.path 是原字、瀏覽器裡是編碼過的，兩邊要一致
   const pageUrl = computed(() => `${SITE_URL}${canonicalPath(route.path)}`)
 
   useHead({
-    title,
-    link: computed(() => [
+    title: computed(() => (paneActive.value ? title.value : undefined)),
+    link: computed(() => !paneActive.value ? [] : [
       { rel: 'canonical', href: pageUrl.value },
       ...(toValue(options.markdown) ? [{ rel: 'alternate', type: 'text/markdown', href: `${pageUrl.value}.md` }] : []),
     ]),
-    meta: computed(() => [
+    meta: computed(() => !paneActive.value ? [] : [
       { name: 'description', content: description.value },
       { property: 'og:site_name', content: SITE_NAME },
       { property: 'og:type', content: options.type ?? 'website' },
@@ -118,6 +121,7 @@ export function usePageHead(options: PageHeadOptions): void {
       ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
     ]),
     script: computed(() => {
+      if (!paneActive.value) return []
       const ld = toValue(options.jsonLd)
       const crumbs = toValue(options.breadcrumbs)
       return [

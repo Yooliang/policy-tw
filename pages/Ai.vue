@@ -2,10 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown, usePaneActive } from '../composables/usePane'
 import { Bot } from 'lucide-vue-next'
 
 /**
@@ -25,7 +25,9 @@ function parseDays(v: unknown): AiReadsDays {
 }
 // ?days= 讓網址可以分享
 const days = ref<AiReadsDays>(parseDays(route.query.days))
+const paneActive = usePaneActive()
 watch(days, (d) => {
+  if (!paneActive.value) return
   const { days: _drop, ...rest } = route.query
   router.replace({ query: { ...rest, days: String(d) } })
 })
@@ -44,7 +46,6 @@ usePageHead({
       <template #title>AI 表現統計</template>
       <template #description>AI 讀了正見幾次，各模型交件與投票的表現</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
-      <BoardNav current="ai" />
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6" data-testid="ai-page">

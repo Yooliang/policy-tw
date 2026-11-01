@@ -174,3 +174,21 @@ html.dark .dir-list .dl { color: #94a3b8; }
 .sr-fade-r { background: linear-gradient(to left, var(--sr-from), transparent); }
 html.dark .sr-fade { --sr-from: #0f172a; }
 html.dark .sr-fade.sr-fade-white { --sr-from: #1e293b; }
+
+/* 手機版分頁容器（components/SectionPager.vue）：拖曳中（外層 main 帶 data-swiping）左右相鄰的 pane 顯示出來，
+   放在左右一個寬度外，高度＝一個螢幕、內容位移到它自己的捲動位置；沒拖曳時相鄰 pane 是 display:none */
+[data-swiping] .section-pane[data-pane-offset="1"],
+[data-swiping] .section-pane[data-pane-offset="-1"] {
+  display: block !important;
+  position: absolute;
+  width: 100%;
+  top: var(--pane-top, 0);
+  height: var(--pane-h, 100dvh);
+  overflow: hidden;
+}
+[data-swiping] .section-pane[data-pane-offset="1"] { left: 100%; }
+[data-swiping] .section-pane[data-pane-offset="-1"] { left: -100%; }
+[data-swiping] .section-pane[data-pane-offset="1"] > .section-pane-inner,
+[data-swiping] .section-pane[data-pane-offset="-1"] > .section-pane-inner {
+  transform: translateY(var(--pane-ty, 0));
+}

@@ -11,12 +11,19 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'tracking', label: '全部政見', to: '/tracking' },
     { key: 'analysis', label: '政策脈絡', to: '/analysis' },
     { key: 'mine', label: '我的關注', to: '/tracking?view=mine' },
+    { key: 'regional-data', label: '數據分佈', to: '/regional-data' },
   ],
   // 參與
   [
     { key: 'stats', label: '貢獻統計', to: '/stats' },
     { key: 'skill', label: '參與協議', to: '/skill' },
     { key: 'community', label: '公民提問', to: '/community' },
+    { key: 'contributions', label: 'AI 協作動態牆', to: '/contributions' },
+    { key: 'stats-map', label: '參選地圖', to: '/stats/map' },
+    { key: 'ai', label: 'AI 表現統計', to: '/ai' },
+    { key: 'tasks', label: '任務清單', to: '/tasks' },
+    { key: 'queue', label: '派工隊列', to: '/queue' },
+    { key: 'dispatch', label: '任務排派日程', to: '/dispatch' },
   ],
   // 搜尋
   [
@@ -32,7 +39,8 @@ export function sectionTabsFor(path: string, query: Record<string, unknown>): { 
   const p = path.length > 1 ? path.replace(/\/+$/, '') : path
   let key: string | null = null
   if (p === '/tracking') key = query.view === 'mine' ? 'mine' : 'tracking'
-  else if (['/analysis', '/stats', '/skill', '/community', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
+  else if (['/analysis', '/regional-data', '/stats', '/skill', '/community', '/contributions', '/ai', '/tasks', '/queue', '/dispatch', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
+  else if (p === '/stats/map') key = 'stats-map'
   if (!key) return null
   const tabs = MOBILE_SECTION_TABS.find(g => g.some(t => t.key === key))
   return tabs ? { tabs, active: key } : null

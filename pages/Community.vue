@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import Hero from '../components/Hero.vue'
-import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import AskQuestionForm from '../components/community/AskQuestionForm.vue'
 import CitizenQuestionCard from '../components/community/CitizenQuestionCard.vue'
 import { Clock, Eye, Loader2, MessageCircleQuestion } from 'lucide-vue-next'
 import SortIcons, { type SortIconOption } from '../components/SortIcons.vue'
 import { useSupabase } from '../composables/useSupabase'
-import { useGlobalState } from '../composables/useGlobalState'
 import { useCitizenQuestions } from '../composables/useCitizenQuestions'
 import type { AskQuestionResult } from '../lib/citizen-questions'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useRoute } from 'vue-router'
 
 const { policies, politicians, loadPoliticianById, loadPolicyById } = useSupabase()
-const { globalRegion } = useGlobalState()
 const { questions, loadingQuestions, questionsError, loadQuestions, answersByQuestion, loadAnswers, votedStances, voteBusyIds, voteErrors, loadMyStances, castVote } = useCitizenQuestions()
 
 type StatusFilter = 'all' | 'open' | 'answered'
@@ -101,7 +99,6 @@ watch(policyFilter, (id) => { if (id) ensurePolicyTitle(id) }, { immediate: true
 
 const filteredQuestions = computed(() => {
   let list = questions.value
-  if (globalRegion.value !== 'All') list = list.filter(q => q.region === globalRegion.value)
   if (policyFilter.value) list = list.filter(q => q.policyId === policyFilter.value)
   if (statusFilter.value !== 'all') list = list.filter(q => q.status === statusFilter.value)
 
@@ -128,6 +125,8 @@ function toggleQuestion(id: string) {
 
 // 表態的狀態與流程在 useCitizenQuestions（政見頁也用同一份）
 onMounted(loadMyStances)
+// 即時討論：頁面留在分頁容器裡，切回來時背景重抓（先顯示舊的）
+onPaneShown(() => { loadQuestions(); loadMyStances() })
 
 // 提問成功：重新整理列表，讓新題目馬上出現
 function onAsked(_result: AskQuestionResult) {
@@ -147,7 +146,6 @@ usePageHead({
       <template #description>提出關心的問題，AI 代理查有出處的資料回答</template>
       <template #icon><MessageCircleQuestion :size="400" class="text-blue-500" /></template>
 
-      <GlobalRegionSelector />
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

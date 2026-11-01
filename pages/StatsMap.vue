@@ -2,11 +2,11 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import MapLayers, { type DrawLayer, type LabelItem } from '../components/map/MapLayers.vue'
 import MapCrumbs, { type MapCrumb } from '../components/map/MapCrumbs.vue'
 import MapToggles from '../components/map/MapToggles.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { usePaneActive } from '../composables/usePane'
 import { applyRows, buildLayer, type Layer } from '../lib/map-layer'
 import { mapStatsUrl, type MapStatsLevel } from '../lib/map-stats-url'
 import { SITE_URL } from '../lib/site'
@@ -612,9 +612,11 @@ const tickClass = (pos: number) => (pos < 0.02 ? '' : pos < 0.85 ? '-translate-x
 const route = useRoute()
 const router = useRouter()
 let urlTimer: ReturnType<typeof setTimeout> | undefined
+const paneActive = usePaneActive()
 watch(view, () => {
   clearTimeout(urlTimer)
   urlTimer = setTimeout(() => {
+    if (!paneActive.value) return
     const l = located.value
     const at = lod.value === 'county'
       ? (view.value.k > kMin.value * 1.3 ? l.county?.code : undefined)
@@ -685,11 +687,10 @@ usePageHead({
       <template #title>參選地圖</template>
       <template #description>各縣市、鄉鎮、村里的 2026 參選人收錄情形</template>
       <template #icon><MapIcon :size="400" class="text-blue-500" /></template>
-      <BoardNav current="map" />
     </Hero>
 
     <!-- 地圖：滿版寬度、約佔滿剩下的視窗；面板都浮在地圖上 -->
-    <section ref="stage" class="relative z-0 w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
+    <section ref="stage" data-no-swipe class="relative z-0 w-full overflow-hidden bg-slate-100 border-y border-slate-200 select-none"
       :style="{ height: 'calc(100dvh - 4rem)', minHeight: '480px', marginTop: '-50px' }" data-testid="map-stage" :aria-busy="pending > 0">
       <p v-if="failed" class="absolute inset-0 flex items-center justify-center text-slate-500 font-bold" data-testid="map-error">
         暫時讀不到資料

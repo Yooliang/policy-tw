@@ -16,6 +16,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { usePageHead, PUBLISHER_LD, SITE_URL, type BreadcrumbItem } from '../composables/usePageHead'
 import { groupLabel, groupTag, isGroupKey, sectionsBySurname, surnameAnchor } from '../lib/people-directory'
 import { reloadForPrerendered } from '../lib/full-load'
+import { onPaneShown, usePaneActive } from '../composables/usePane'
 
 const route = useRoute()
 const { peopleIndex, peopleGroup } = useSupabase()
@@ -28,9 +29,12 @@ const sections = computed(() => (group.value ? sectionsBySurname(group.value.ent
 const missing = computed(() => (isIndex.value ? !peopleIndex.value : !group.value))
 const reloading = ref(false)
 
-onMounted(() => {
-  if (missing.value && (isIndex.value || isGroupKey(groupKey.value))) reloading.value = reloadForPrerendered(route.fullPath)
-})
+const paneActive = usePaneActive()
+function reloadIfMissing() {
+  if (paneActive.value && missing.value && (isIndex.value || isGroupKey(groupKey.value))) reloading.value = reloadForPrerendered(route.fullPath)
+}
+onMounted(reloadIfMissing)
+onPaneShown(reloadIfMissing)
 
 const fmt = (n: number) => n.toLocaleString('zh-TW')
 const groupPath = (key: string) => `/politicians/${key}`

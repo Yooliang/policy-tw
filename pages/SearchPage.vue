@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { usePaneActive } from '../composables/usePane'
 import { useRoute, useRouter } from 'vue-router'
 import { Loader2, Search } from 'lucide-vue-next'
 import { searchPageTerm, useGlobalSearch } from '../composables/useGlobalSearch'
 import SearchResults from '../components/SearchResults.vue'
 import { usePageHead } from '../composables/usePageHead'
+import Hero from '../components/Hero.vue'
 
 /**
  * 手機版搜尋頁（底部分頁列的「搜尋」，最小版）：頁首正中是搜尋框（Navbar 讀 searchPageTerm），
@@ -26,11 +28,18 @@ usePageHead({ title: '搜尋', description: '搜尋政治人物與政見。', no
 
 function clear() { searchPageTerm.value = ''; search.reset() }
 onDeactivated(clear)
+// 分頁容器裡切走（背景 pane 還在）：搜尋框一樣清掉
+const paneActive = usePaneActive()
+watch(paneActive, (a) => { if (!a) clear() })
 onBeforeUnmount(clear)
 </script>
 
 <template>
   <div class="bg-white min-h-[60vh]" data-testid="search-page">
+    <Hero background-image="/images/heroes/election-default.png">
+      <template #title>搜尋</template>
+      <template #description>搜尋政治人物與政見</template>
+    </Hero>
     <div class="hidden md:flex items-center gap-2 border-b border-slate-200 px-6 py-3">
       <Search :size="18" class="shrink-0 text-slate-400" />
       <input ref="deskInput" v-model="searchPageTerm" type="text" enterkeyhint="search" autocomplete="off" placeholder="搜尋人物或政見…" class="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-400" data-testid="search-page-input" />

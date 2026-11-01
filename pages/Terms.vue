@@ -38,7 +38,7 @@ usePageHead({
       <div class="space-y-10 text-slate-700 leading-relaxed">
 
         <section>
-          <h2 class="text-2xl font-black text-navy-900 mb-3">一句話版本</h2>
+          <h2 class="text-2xl font-black text-navy-900 mb-3">自由引用，請標示來源</h2>
           <p>
             網站上的資料可以自由引用，但要<strong>標示來源</strong>；資料可能有誤，
             <strong>一切以官方公告為準，選舉資訊以中央選舉委員會為準</strong>。

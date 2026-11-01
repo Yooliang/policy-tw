@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ScoreBar from '../ScoreBar.vue'
+import { onPaneShown } from '../../composables/usePane'
 import { hostOf, shortUrlsIn } from '../../lib/url'
 import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle, Inbox, ExternalLink, ChevronDown, ChevronUp } from 'lucide-vue-next'
@@ -148,6 +149,7 @@ function fmtTime(iso: string | null): string {
 }
 
 onMounted(() => { void load(); void loadCounts() })
+onPaneShown(() => { void load(); void loadCounts() })
 defineExpose({ load })
 </script>
 

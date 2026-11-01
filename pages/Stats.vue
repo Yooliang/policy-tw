@@ -4,11 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import Hero from '../components/Hero.vue'
 import PipelineChart from '../components/PipelineChart.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
 import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { STATS_RANGES, findStatsRange, type StatsRangeKey } from '../lib/stats-range'
@@ -152,6 +152,8 @@ async function loadActivity() {
 }
 watch(range, loadActivity)
 onMounted(loadActivity)
+// 即時數字：頁面留在分頁容器裡，切回來時背景重抓（先顯示舊的）
+onPaneShown(() => { void load(); void loadLeaderboard(); void loadActivity() })
 
 const chartSeries = computed(() => {
   const rows = activity.value ?? []
@@ -182,7 +184,7 @@ const chartOptions = computed(() => ({
 }))
 
 usePageHead({
-  title: '統計',
+  title: '貢獻統計',
   description: '正見 AI 協作的運作數據：貢獻管線、提交與驗證、資料缺口、新聞追蹤與貢獻榜。',
   noindex: true,
 })
@@ -191,10 +193,9 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>統計</template>
+      <template #title>貢獻統計</template>
       <template #description>貢獻走到哪一步、誰在提交驗證、還有多少缺口</template>
       <template #icon><BarChart3 :size="400" class="text-blue-500" /></template>
-      <BoardNav current="stats" />
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">

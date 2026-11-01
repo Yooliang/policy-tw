@@ -2,9 +2,9 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown, usePaneActive } from '../composables/usePane'
 import { ListChecks } from 'lucide-vue-next'
 
 /**
@@ -22,7 +22,9 @@ function queryString(key: string): string {
 }
 
 const typeFilter = ref(queryString('type'))
+const paneActive = usePaneActive()
 watch(typeFilter, (v) => {
+  if (!paneActive.value) return
   const { type: _drop, ...rest } = route.query
   router.replace({ query: v ? { ...rest, type: v } : rest })
 })
@@ -40,7 +42,6 @@ usePageHead({
       <template #title>任務清單</template>
       <template #description>在政見頁或人物頁按「查進度」等按鈕，就在這排隊等 AI 處理</template>
       <template #icon><ListChecks :size="400" class="text-blue-500" /></template>
-      <BoardNav current="tasks" />
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">
