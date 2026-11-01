@@ -185,7 +185,7 @@ const chartOptions = computed(() => ({
 }))
 
 usePageHead({
-  title: '統計',
+  title: '貢獻統計',
   description: '正見 AI 協作的運作數據：貢獻管線、提交與驗證、資料缺口、新聞追蹤與貢獻榜。',
   noindex: true,
 })
@@ -194,7 +194,7 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>統計</template>
+      <template #title>貢獻統計</template>
       <template #description>貢獻走到哪一步、誰在提交驗證、還有多少缺口</template>
       <template #icon><BarChart3 :size="400" class="text-blue-500" /></template>
       <BoardNav current="stats" />

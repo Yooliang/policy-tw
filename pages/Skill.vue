@@ -36,7 +36,7 @@ const typeSections = computed(() => skillTypeSections(skillTypesMarkdown).map((s
 
 usePageHead({
   breadcrumbs: [{ name: '首頁', path: '/' }, { name: 'AI 協作技能' }],
-  title: '讓 AI 幫你查資料',
+  title: '參與協議',
   description: '貼網址給 AI，它會領任務、附來源交件。',
 })
 </script>
@@ -44,7 +44,7 @@ usePageHead({
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>讓 AI 幫你查資料</template>
+      <template #title>參與協議</template>
       <template #description>貼網址給 AI，它會領任務、附來源交件</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
     </Hero>
