@@ -55,6 +55,8 @@ export interface RegionQuerySyncOptions {
     /** sub 只在有 getSub 時傳入（'All' 之外的值） */
     build: (region: string, sub?: string) => string
   }
+  /** 本頁沒有縣市選擇器（公民提問頁）：不讀也不寫 region，舊網址帶的 ?region= 同步網址時順手拿掉 */
+  noRegion?: boolean
   /** 鄉鎮市區（依賴 region） */
   sub?: Ref<string>
   /** 村里（依賴 sub） */
@@ -77,7 +79,7 @@ function first(value: LocationQueryValue | LocationQueryValue[] | undefined): st
 }
 
 function resolveFields(options: RegionQuerySyncOptions, region: Ref<string>): ResolvedField[] {
-  const fields: ResolvedField[] = [{ key: 'region', ref: region, default: ALL }]
+  const fields: ResolvedField[] = options.noRegion ? [] : [{ key: 'region', ref: region, default: ALL }]
   if (options.sub) fields.push({ key: 'sub', ref: options.sub, default: ALL, dependsOn: 'region' })
   if (options.village) fields.push({ key: 'village', ref: options.village, default: ALL, dependsOn: options.sub ? 'sub' : 'region' })
   for (const [key, field] of Object.entries(options.extra ?? {})) fields.push({ key, ...field })
@@ -169,6 +171,7 @@ export function useRegionQuerySync(options: RegionQuerySyncOptions): void {
   function syncUrl(): void {
     if (!active || applying || !isOwnRoute() || !paneActive.value) return
     const query = buildRegionQuery(fields, route.query)
+    if (options.noRegion) delete query.region
     if (!regionPath) {
       if (sameQuery(query, route.query)) return
       void router.replace({ query })

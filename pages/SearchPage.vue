@@ -36,9 +36,10 @@ onBeforeUnmount(clear)
 
 <template>
   <div class="bg-white min-h-[60vh]" data-testid="search-page">
-    <Hero background-image="/images/heroes/election-default.png">
+    <Hero>
       <template #title>搜尋</template>
       <template #description>搜尋政治人物與政見</template>
+      <template #icon><Search :size="400" class="text-blue-500" /></template>
     </Hero>
     <div class="hidden md:flex items-center gap-2 border-b border-slate-200 px-6 py-3">
       <Search :size="18" class="shrink-0 text-slate-400" />

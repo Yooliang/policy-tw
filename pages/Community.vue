@@ -35,9 +35,10 @@ const presetPoliticianId = computed(() => {
   return typeof v === 'string' && v ? v : undefined
 })
 
-// 縣市（全站共用）、狀態、排序 ↔ 網址 ?region=&status=&sort=&policy=
+// 狀態、排序 ↔ 網址 ?status=&sort=&policy=（本頁沒有縣市選擇器，舊網址的 ?region= 忽略並拿掉）
 useRegionQuerySync({
   routeName: 'community',
+  noRegion: true,
   extra: {
     status: queryField(statusFilter, 'all', { allowed: ['all', 'open', 'answered'] as const }),
     sort: queryField(sortMode, 'latest', { allowed: ['stance', 'latest'] as const }),
