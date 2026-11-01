@@ -15,7 +15,7 @@ import { PolicyStatus, ElectionType, type Politician, type Policy } from '../typ
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import PoliticianGrid from './election/PoliticianGrid.vue'
-import VerticalStack from './election/VerticalStack.vue'
+import IssuesStack from './election/IssuesStack.vue'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import Pagination from '../components/Pagination.vue'
 import { clampPage, slicePage, totalPagesOf } from '../lib/pagination'
@@ -35,7 +35,6 @@ import { latestLocalElection } from '../lib/md/scope'
 
 import { useGlobalState } from '../composables/useGlobalState'
 import { isRunningCandidate } from '../lib/candidate-status'
-import { issueTagsOf } from '../lib/issue-tags'
 import { VIEW_MODES, VIEW_TABS, type ElectionViewMode } from '../lib/election-view-tabs'
 import LoadError from '../components/LoadError.vue'
 import { canonicalPath, SITE_URL, usePageHead } from '../composables/usePageHead'
@@ -154,6 +153,8 @@ const selectedVillage = ref<string>('All')    // 村里
 let loadSeq = 0
 async function loadElectionData(id: number, region: string, subRegion: string) {
   if (!id) return
+  // 串聯檢視只認縣市、資料走資料庫函式（pages/election/IssuesStack.vue），不撈整個縣市的參選人；離開串聯時由 viewMode 的 watch 補載
+  if (viewMode.value === 'issues' && region !== 'All') return
   const seq = ++loadSeq
   electionLoading.value = true
   try {
@@ -183,9 +184,8 @@ onMounted(() => {
     : Promise.resolve()
   void firstCards.catch(() => undefined).then(() => runAfterRender(() => {
     // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-    ensurePolicies()
-    // 選舉區對應表 77 KB，只有這一頁篩議員選區要用，改成按需載入
-    ensureDistricts()
+    // 串聯檢視不需要整份政見與選舉區（離開串聯時補載）
+    if (viewMode.value !== 'issues') { ensurePolicies(); ensureDistricts() }
     // 地方基本統計（RegionalStatsPanel 在這一頁不自己抓，由這裡統一排）
     ensureOfficialRegionalStats()
   }, nextTick))
@@ -242,6 +242,13 @@ watch(selectedSubRegion, () => {
 })
 
 const viewMode = ref<ElectionViewMode>('politicians')
+// 從串聯切到別的檢視：串聯期間跳過的參選人、政見、選舉區在這裡補載
+watch(viewMode, (now, before) => {
+  if (before !== 'issues' || now === 'issues' || !electionId.value) return
+  void loadElectionData(electionId.value, selectedRegion.value, selectedSubRegion.value)
+  void ensurePolicies()
+  void ensureDistricts()
+})
 /** 手機版（X 式版面）目前停在哪一種參選人類型（網址 ?tab=；空字串＝這一頁第一個有資料的類型） */
 const mobileTab = ref('')
 /** 承諾頁籤的頁碼（網址 ?page=，字串形式給 queryField；實際頁碼看 pledgePage） */
@@ -872,49 +879,7 @@ function goPledgePage(p: number) {
 // 換縣市／鄉鎮／村里／排序回第 1 頁
 watch([selectedRegion, selectedSubRegion, selectedVillage, pledgeSort], () => { pledgePageParam.value = '1' })
 
-// Issues mode
-const regionPolicies = computed(() =>
-  policies.value.filter(p => {
-    if (p.status !== PolicyStatus.CAMPAIGN || !belongsToThisElection(p) || !electionPoliticianIds.value.has(p.politicianId)) return false
-    const politician = politicianById.value.get(p.politicianId)
-    if (!politician) return false
-    if (selectedRegion.value !== 'All' && !sameRegionName(politician.region, selectedRegion.value)) return false
-    // 鄉鎮市區篩選（議員透過對應表查詢選舉區）
-    if (selectedSubRegion.value !== 'All' && selectedRegion.value !== 'All') {
-      if (getElectionType(politician) === ElectionType.COUNCILOR) {
-        const electoralDistrict = getElectoralDistrictByTownship(selectedRegion.value, selectedSubRegion.value, electionYear.value)
-        if (electoralDistrict && !sameDistrict(politician.subRegion, electoralDistrict)) return false
-      } else {
-        if (!inTownship(politician.subRegion, selectedSubRegion.value)) return false
-      }
-    }
-    return matchesMobileTab(politician)
-  })
-)
-
-
-// 議題頁的標籤要是「講什麼事」：候選人名、年份、「2026新北市長」、來源、口號都濾掉（lib/issue-tags.ts，2026-09-22）；
-// 完全沒可用標籤的政見退回它的類別，不然 177／223 筆 2026 政見在議題頁根本不出現
-// 「不是議題的名字」：候選人名＋該縣市的鄉鎮市區名（楊梅、中壢、蘆竹這種標籤是地名不是議題），去掉「區／鄉／鎮／市」後綴也算
-const electionPoliticianNames = computed(() => {
-  const names = new Set(electionPoliticians.value.map(c => c.name))
-  for (const sub of availableSubRegions.value) {
-    names.add(sub)
-    names.add(sub.replace(/[區鄉鎮市]$/, ''))
-  }
-  return names
-})
-const tagCounts = computed(() => {
-  const counts: { [key: string]: number } = {}
-  regionPolicies.value.forEach(p => {
-    issueTagsOf(p, electionPoliticianNames.value).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
-  })
-  return counts
-})
-
-const availableTags = computed(() =>
-  Object.keys(tagCounts.value).filter(tag => tagCounts.value[tag] > 0).sort((a, b) => tagCounts.value[b] - tagCounts.value[a])
-)
+// Issues mode：資料由 pages/election/IssuesStack.vue 向資料庫函式 issues_summary／issues_page 取（只認縣市，不撈整個縣市的參選人與政見）
 
 // 議題串聯的 .md 抽屜（components/MdDrawer.vue，跟政見矩陣同一份預產快取 data_md_cache，2026-10-19 維護者）：
 // 只有最新一屆有預產；標籤剛好是分類名（九成以上的政見沒有自由標籤、退回分類）就開「縣市×分類」那份，其他開縣市全部分類
@@ -957,14 +922,6 @@ function pkMdPick(category?: string): MdPick | null {
 const pkMdNarrow = computed(() => pkLevel.value !== ElectionType.MAYOR || pkTitle.value !== levelLabel(pkLevel.value))
 const issuesMdOpen = ref<MdPick | null>(null)
 watch([viewMode, selectedRegion], () => { issuesMdOpen.value = null })
-
-watch([() => selectedRegion.value, () => selectedSubRegion.value, availableTags], () => {
-  if (availableTags.value.length > 0 && (!selectedIssueTag.value || !availableTags.value.includes(selectedIssueTag.value))) {
-    selectedIssueTag.value = availableTags.value[0]
-  } else if (availableTags.value.length === 0) {
-    selectedIssueTag.value = ''
-  }
-})
 
 // Comparison mode
 /** 選區是整個縣市（或全國）的層級：鄉鎮篩選對它沒有意義，不套用（2026-09-22：台東縣＋大武鄉把縣市長 PK 篩成空池） */
@@ -1646,7 +1603,7 @@ onBeforeUnmount(() => clearTimeout(mobilePrerenderTimer))
  */
 let prefetchKey = ''
 function prefetchAdjacent() {
-  if (typeof window === 'undefined' || !panelLayout() || !electionId.value || !mobileReady.value) return
+  if (typeof window === 'undefined' || !panelLayout() || !electionId.value || !mobileReady.value || viewMode.value === 'issues') return
   if (selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
   const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection
   if (conn && (conn.saveData || /(^|-)2g$/.test(conn.effectiveType ?? ''))) return
@@ -1664,7 +1621,7 @@ watch([mobileReady, mobileActiveType, selectedRegion, selectedSubRegion], () => 
 
 // 縣市層以下有定位時，縣市長與議員的資料也要在（分層載入只撈「這一層＋下一層」，直接開鄉鎮網址不會有縣市層）
 function ensureCountyLevelLoaded() {
-  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value === 'All') return
+  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value === 'All' || viewMode.value === 'issues') return
   loadPoliticiansByElection(electionId.value, selectedRegion.value, 'All').catch(() => {})
 }
 watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
@@ -1673,7 +1630,7 @@ watch([electionId, selectedRegion, selectedSubRegion], ensureCountyLevelLoaded)
  * 分層載入預設只帶到鄉鎮市長，代表與村里長要另外把整個縣市的撈進來（只撈那幾種職位，已撈過的有快取不重撈）。
  */
 async function ensureCountyWideLoaded() {
-  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All') return
+  if (!panelLayout() || !electionId.value || selectedRegion.value === 'All' || selectedSubRegion.value !== 'All' || viewMode.value === 'issues') return
   const type = mobileActiveType.value
   if (TAB_NEEDS[type] === 'county' || type === ElectionType.TOWNSHIP_MAYOR) return
   if (type === ElectionType.CHIEF && viewMode.value === 'politicians') return // 村里長分頁沒選鄉鎮時只列鄉鎮選擇區
@@ -1690,8 +1647,8 @@ const mobileShowVillage = computed(() => TAB_NEEDS[mobileActiveType.value] === '
 const headerCrumbs = computed(() => {
   const list = [{ label: '全台', go: () => { void router.replace(regionLink('All')) } }]
   if (selectedRegion.value !== 'All') list.push({ label: selectedRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(regionLink(selectedRegion.value)) } })
-  if (mobileShowSub.value && selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All') list.push({ label: selectedSubRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(townshipLink(selectedSubRegion.value)) } })
-  if (mobileShowSub.value && mobileShowVillage.value && selectedVillage.value !== 'All') list.push({ label: selectedVillage.value, go: () => { /* 最深一層，點了不動 */ } })
+  if (viewMode.value !== 'issues' && mobileShowSub.value && selectedRegion.value !== 'All' && selectedSubRegion.value !== 'All') list.push({ label: selectedSubRegion.value, go: () => { selectedVillage.value = 'All'; void router.replace(townshipLink(selectedSubRegion.value)) } })
+  if (viewMode.value !== 'issues' && mobileShowSub.value && mobileShowVillage.value && selectedVillage.value !== 'All') list.push({ label: selectedVillage.value, go: () => { /* 最深一層，點了不動 */ } })
   return list
 })
 watch(headerCrumbs, v => setCrumbs(v), { immediate: true })
@@ -1730,7 +1687,8 @@ const deskNavModel = computed<DeskNavModel>(() => {
   const make: DeskItemMaker = (kind, key, label, active, dim) => kind === 'level'
     ? { ...item(key, label, active, () => setMobileTab(key)), dim }
     : item(key, label, active, () => pickLocation('county', key))
-  groups.push(...levelCountyGroups(mobileActiveType.value, selectedRegion.value, make, t => appointedTabs.value.has(t)))
+  // 串聯只認縣市，不放層級那組
+  groups.push(...levelCountyGroups(mobileActiveType.value, selectedRegion.value, make, t => appointedTabs.value.has(t)).filter(g => viewMode.value !== 'issues' || g.key !== 'levels'))
   // 鄉鎮／村里／選區的選擇不在延伸欄：桌面與手機一樣放在內容區最上面的晶片列（2026-10-31）
   return { title: `${electionYear.value || ''} 選舉`.trim(), groups }
 })
@@ -1765,12 +1723,12 @@ useSwipeTabs(swipeEl, {
 
     <!-- 手機版版面順序：頁首 → 類型分頁條（吸頂，緊接頁首）→ 縮小的標題區（含檢視膠囊）→ 內容 -->
     <div class="md:hidden sticky top-14 z-30 shadow-sm" data-chrome-follow data-testid="mobile-sticky">
-      <SwipeTabStrip :tabs="mobileTabs" :model-value="mobileActiveType" @update:model-value="setMobileTab" />
+      <SwipeTabStrip v-if="viewMode !== 'issues'" :tabs="mobileTabs" :model-value="mobileActiveType" @update:model-value="setMobileTab" />
     </div>
 
     <ElectionHero
       :election="election" :election-seg="electionSeg" :view="viewMode" :has-matrix="hasMatrix"
-      :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="pageTownship" :mobile-township="mobileShowSub ? pageTownship : undefined"
+      :region="selectedRegion" :region-link="regionLink" :county="pageCounty" :township="viewMode === 'issues' ? undefined : pageTownship" :mobile-township="mobileShowSub && viewMode !== 'issues' ? pageTownship : undefined"
       @select="viewMode = $event"
     >
       <!-- 桌面排序工具列：放在標題列右側（手機維持在內容區原位置，上面各檢視的排序列在桌面隱藏） -->
@@ -1798,7 +1756,7 @@ useSwipeTabs(swipeEl, {
       <div ref="swipeEl" data-testid="swipe-area" :class="['group/sw max-md:min-h-[calc(100dvh-10rem-env(safe-area-inset-bottom))]', 'w-full min-w-0']">
 
       <!-- 手機版：晶片列放在內容最上面，四個檢視（候選人／承諾／PK／串聯）共用同一組定位與分頁（標題區 → 晶片 → 排序 → 內容） -->
-      <div v-if="mobileChipRows.length > 0" ref="mobileChipsEl" :class="deskChipsHidden ? 'md:hidden' : ''" data-testid="mobile-district-chips">
+      <div v-if="mobileChipRows.length > 0 && viewMode !== 'issues'" ref="mobileChipsEl" :class="deskChipsHidden ? 'md:hidden' : ''" data-testid="mobile-district-chips">
         <!-- 桌面有滑鼠時兩端出現箭頭與漸層（ScrollRow）；所有 class／data 屬性都落在真正捲動的那一層 -->
         <ScrollRow
           v-for="(row, ri) in mobileChipRows"
@@ -1988,30 +1946,13 @@ useSwipeTabs(swipeEl, {
         <div v-if="selectedRegion === 'All'" class="text-center py-20 bg-white border border-dashed border-slate-300 rounded-xl">
           <Layers :size="48" class="mx-auto mb-4 text-slate-300" />
           <h3 class="text-lg font-bold text-navy-900 mb-2">請選擇特定縣市</h3>
-          <p class="text-slate-500 max-w-md mx-auto">「議題串聯」功能需要針對特定行政區進行垂直分析。</p>
+          <p class="text-slate-500 max-w-md mx-auto">議題串聯以縣市為單位，從縣市長到村里長看同一個議題。</p>
         </div>
         <template v-else>
-          <div v-if="availableTags.length > 0" class="space-y-6">
-            <!-- 議題分類篩選拿掉了（2026-10-19 維護者）：九成以上的政見沒有自由標籤、標籤就是退回的分類，兩排是同一份東西；標籤照筆數排、換行排滿 -->
-            <div class="flex flex-wrap items-center gap-2 mb-2">
-              <button
-                v-for="tag in availableTags"
-                :key="tag"
-                @click="selectedIssueTag = tag"
-                :class="`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1 ${selectedIssueTag === tag ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`"
-              >
-                <Hash :size="12" /> {{ tag }}
-              </button>
-            </div>
-            <div v-if="issuesMdPick" class="flex justify-end -mt-4">
-              <a :href="issuesMdPick.path" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" data-testid="issues-md" @click.prevent="issuesMdOpen = issuesMdPick"><FileText :size="16" />{{ issuesMdPick.title }}</a>
-            </div>
-            <VerticalStack v-if="selectedIssueTag" :tag="selectedIssueTag" :policies="regionPolicies" :election-politicians="electionPoliticians.map(withCurrentElectionData)" :junk-names="electionPoliticianNames" />
+          <div v-if="issuesMdPick" class="flex justify-end">
+            <a :href="issuesMdPick.path" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" data-testid="issues-md" @click.prevent="issuesMdOpen = issuesMdPick"><FileText :size="16" />{{ issuesMdPick.title }}</a>
           </div>
-          <div v-else class="text-center py-20 text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
-            <AlertCircle :size="48" class="mx-auto mb-4 opacity-50" />
-            <p class="font-bold">尚無資料</p>
-          </div>
+          <IssuesStack :election-id="electionId" :region="selectedRegion" @select="selectedIssueTag = $event" />
         </template>
       </div>
 
