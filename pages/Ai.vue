@@ -6,6 +6,7 @@ import BoardNav from '../components/contributions/BoardNav.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
 import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown, usePaneActive } from '../composables/usePane'
 import { Bot } from 'lucide-vue-next'
 
 /**
@@ -25,7 +26,9 @@ function parseDays(v: unknown): AiReadsDays {
 }
 // ?days= 讓網址可以分享
 const days = ref<AiReadsDays>(parseDays(route.query.days))
+const paneActive = usePaneActive()
 watch(days, (d) => {
+  if (!paneActive.value) return
   const { days: _drop, ...rest } = route.query
   router.replace({ query: { ...rest, days: String(d) } })
 })

@@ -5,6 +5,7 @@ import Hero from '../components/Hero.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import TaskBoard from '../components/contributions/TaskBoard.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown, usePaneActive } from '../composables/usePane'
 import { ListChecks } from 'lucide-vue-next'
 
 /**
@@ -22,7 +23,9 @@ function queryString(key: string): string {
 }
 
 const typeFilter = ref(queryString('type'))
+const paneActive = usePaneActive()
 watch(typeFilter, (v) => {
+  if (!paneActive.value) return
   const { type: _drop, ...rest } = route.query
   router.replace({ query: v ? { ...rest, type: v } : rest })
 })

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { taskTypeLabel } from '../lib/task-labels'
 import Hero from '../components/Hero.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
@@ -52,6 +53,7 @@ async function load() {
   }
 }
 onMounted(load)
+onPaneShown(load)
 
 const STATUSES: { key: Status; label: string; bar: string }[] = [
   { key: 'ready', label: '可派', bar: '#22c55e' },

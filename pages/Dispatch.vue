@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
 import BoardNav from '../components/contributions/BoardNav.vue'
 import { CalendarRange } from 'lucide-vue-next'
@@ -77,6 +78,7 @@ async function load() {
   }
 }
 onMounted(load)
+onPaneShown(load)
 watch(electionId, () => {
   timeline.value = null
   expanded.value = new Set()

@@ -10,6 +10,7 @@ import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
 import { fetchHistory, type HistoryEntry, type HistorySource } from '../lib/history'
 import SourceMeta from '../components/SourceMeta.vue'
 import { usePageHead } from '../composables/usePageHead'
+import { onPaneShown } from '../composables/usePane'
 import { activityText, relativeTime } from '../lib/activity'
 import { taskIdLabel } from '../lib/task-id-label'
 import {
@@ -252,6 +253,7 @@ function clearAgentFilter() {
 
 watch([status, type], () => { load() })
 onMounted(load)
+onPaneShown(load) // 即時資料：切回來時背景重抓
 
 usePageHead({
   title: 'AI 協作動態牆',
