@@ -2,7 +2,6 @@
 import { ScrollText } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -33,9 +32,6 @@ usePageHead({
       <template #description>資料從哪裡來、怎麼引用與使用限制（最後更新 {{ UPDATED }}）</template>
       <template #icon><ScrollText :size="400" class="text-amber-500" /></template>
       <template #actions><AboutNav current="terms" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '使用條款' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

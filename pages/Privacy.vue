@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ShieldCheck } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -33,9 +32,6 @@ usePageHead({
       <template #description>會蒐集什麼、不會蒐集什麼（最後更新 {{ UPDATED }}）</template>
       <template #icon><ShieldCheck :size="400" class="text-emerald-500" /></template>
       <template #actions><AboutNav current="privacy" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '隱私權政策' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

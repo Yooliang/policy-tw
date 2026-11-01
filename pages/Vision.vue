@@ -2,7 +2,6 @@
 import { Telescope } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -26,9 +25,6 @@ usePageHead({
       <template #description>選舉過後政見就消失了，我們想留下來並附上出處</template>
       <template #icon><Telescope :size="400" class="text-blue-500" /></template>
       <template #actions><AboutNav current="vision" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '專案願景' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

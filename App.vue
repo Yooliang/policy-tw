@@ -49,6 +49,26 @@ useSwipeTabs(mainEl, {
   onPastStart: openDrawer,
 })
 function pickSectionTab(key: string) { const t = sectionTabs.value?.tabs.find(x => x.key === key); if (t && key !== sectionTabs.value?.active) void router.push(t.to) }
+// 手機版頁籤切換不白屏：頁籤頁各自保留（切回去瞬間出現、不重掛不重抓），相鄰頁籤的程式塊在閒置時預先載入。
+// 貢獻統計、公民提問是即時數字／討論，不保留（每次進來都是新的）。
+const KEEP_ALIVE_PAGES = ['ElectionPage', 'PolicyTracking', 'PolicyAnalysis', 'Skill', 'SearchPage', 'ElectionList', 'PeopleDirectory', 'PartyList']
+function prefetchSectionChunks() {
+  const tabs = sectionTabs.value?.tabs
+  if (!tabs || !isMobileViewport()) return
+  for (const t of tabs) {
+    for (const rec of router.resolve(t.to).matched) {
+      const c = rec.components?.default
+      // 只預載尚未解析的惰性元件（() => import(...)）；瀏覽器會快取，之後導航不用再等
+      if (typeof c === 'function' && !(c as { __vccOpts?: unknown }).__vccOpts) void (c as () => Promise<unknown>)().catch(() => {})
+    }
+  }
+}
+watch(sectionTabs, (v, old) => {
+  if (typeof window === 'undefined' || !v || v.tabs === old?.tabs) return
+  const run = () => prefetchSectionChunks()
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 })
+  else setTimeout(run, 300)
+}, { immediate: true, flush: 'post' })
 const EDGE_PX = 28
 let ex = 0
 let ey = 0
@@ -112,7 +132,7 @@ useHead({ htmlAttrs: { lang: 'zh-TW' } })
       </div>
       <main ref="mainRef" class="flex-grow -mt-px">
         <RouterView v-slot="{ Component }">
-          <KeepAlive :include="['ElectionPage']">
+          <KeepAlive :include="KEEP_ALIVE_PAGES">
             <component :is="Component" />
           </KeepAlive>
         </RouterView>

@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { Link2 } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import { useSupabase } from '../composables/useSupabase'
 import { usePageHead } from '../composables/usePageHead'
 import type { VerificationSource } from '../types'
@@ -76,9 +75,6 @@ const grouped = computed(() => {
       <template #title>查證來源清單</template>
       <template #description>政黨、議會、政府與中選會網站，查得到候選人資料</template>
       <template #icon><Link2 :size="400" class="text-blue-500" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '查證來源清單' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">

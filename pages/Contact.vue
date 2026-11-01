@@ -2,7 +2,6 @@
 import { MessagesSquare } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import Hero from '../components/Hero.vue'
-import Breadcrumbs from '../components/Breadcrumbs.vue'
 import AboutNav from '../components/AboutNav.vue'
 import { usePageHead } from '../composables/usePageHead'
 
@@ -29,9 +28,6 @@ usePageHead({
       <template #description>資料有誤、想合作、要引用，都從 GitHub Issues 開始</template>
       <template #icon><MessagesSquare :size="400" class="text-blue-500" /></template>
       <template #actions><AboutNav current="contact" /></template>
-      <template #default>
-        <Breadcrumbs :items="[{ name: '首頁', path: '/' }, { name: '聯絡我們' }]" />
-      </template>
     </Hero>
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-left">
