@@ -112,6 +112,21 @@
 
 `registration.missing`（上一段）仍會列出名冊上所有我們沒有的人，**其中不在 `target.reconcile.people` 的，系統會自己建**；先處理 `people`，其餘不用補。**例外：`target.reconcile.truncated` 為真**＝對不上的人超過 40 位、`people` 只列了前 40 位——沒列出來的**不是**系統會建的，補完這一批回報後下一輪會列出下一批。另外系統建立預設只建「全庫沒有同名者」的新人物；要掛上既有人物（`attach`）的那一類，維護者開了才做，沒開之前它們會留在 `registration.missing` 裡，照一般缺的人補。處理完 `people` 就交 `roster_check`（`cec_count` 照舊填名冊總數）。第二階段（11/17 名單公告匯入、加入對帳變三方）上線後，「兩份來源對不起來」的人也會出現在 `people`。
 
+**名單清查一張任務對完這個單位所有名冊類差異（2026-11-01，協議 1.109.0）。** 以前「缺政黨」「缺鄉鎮」「缺縣市或選區」「當選名單有我們沒有」「結果空白或不一致」「參選紀錄掛錯人」「縣市長縣市不符」各自一人一張任務（`party_roster`、`party_gap`、`township_gap`、`region_gap`、`elected_missing`、`election_results`、`owner_mismatch`、`region_mismatch`），同一位候選人可能同時掛在好幾張上、你一次只能補一個欄位。現在這些都併進單位的 `roster_check`：**任務 `target.items`（也在 `item.current.items`）列出這個單位所有差異，一項一列**，欄位：`kind`（種類：缺人／狀態／政黨／鄉鎮／縣市／結果／掛錯人）、`name`、`politician_id`、`politician_election_id`、`current`（我們的現值）、`official`（官方值）、`source_url`（官方來源網址）、`origin_task_id`（併進來的舊任務編號，僅供對照）。`items_count` 是總項數，`items_truncated` 為真代表一件只列前 120 項，處理完下一輪列出剩下的。單位裡只有這些差異、沒有其他名單缺口時，`target.findings_only` 為真：沒有「找名單」這一步，名單差異就是 `items`。
+
+怎麼做：逐項到 `source_url` 核對（同名不代表同一人，先分辨 `current` 與 `official` 是不是同一人）後，**每一項各用既有的交件型別交，各走自己的驗證門檻**，同一張任務底下可以交很多筆：
+
+| `kind` | 交什麼 |
+|---|---|
+| 缺人 | `candidacy` 補一筆（地區欄照 `official`／任務說明）；已投票屆的當選名單缺人一樣 |
+| 狀態 | `correction` 改 `candidate_status`（`politician_election_id` 是 `target_id`） |
+| 政黨、鄉鎮、縣市 | `candidacy` 重交同一人同一屆（`politician_id`、`election_id`、`election_type` 照 item），補上缺的那一欄；政黨照官方原字，不要填他現在的政黨 |
+| 縣市（`official.proposed_region_id` 有值＝縣市長縣市不符） | `correction`：`target_table` 填 `politician_elections`、`target_id` 填 `politician_election_id`、`changes` 填 `[{field:"region_id", current_value:current.region_id, correct_value:official.proposed_region_id}]`；現有縣市才對就 `no_change`（`outcome`＝`confirmed`）說明 |
+| 結果 | `candidacy` 補 `election_result`（帶 `politician_id`），同單位多位可用 `election_results` 整批交 |
+| 掛錯人 | `reassign_candidacy`（不是這個人）；確認是同一人用 `no_change`（`outcome`＝`confirmed`） |
+
+官方資料有誤、現值才對的項目，用 `no_change` 說明並附來源，不要硬改。全部處理完才交 `roster_check` 收尾（`election_id`、`region`、`election_type` 照 target 原樣帶回；`findings_only` 的單位 `cec_count` 可留空，`note` 寫處理了哪幾項）；只處理一部分就不要交，剩下的項目系統下一輪還會列出。2026 單位的登記名冊缺人與要改狀態仍在 `registration`，`current.items` 也會一併列出。補號次（`candidacy_source_missing` 的 `cand_no`）不在這張任務裡，維持獨立任務。
+
 **名單有兩個階段，補進來的東西不一樣。** 任務的 `target.list_announced_on` 是官方審定名單的公告日，`target.official_list_published` 告訴你現在過了沒有：
 
 | 階段 | 去哪裡找 | `candidate_status` 填什麼 |

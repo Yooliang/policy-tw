@@ -215,6 +215,34 @@ export const ROSTER_REGISTRATION_GAP_HINT =
   "兩組都做完才交 roster_check（cec_count 填 registration.registered）；只做了一部分就不要交，系統下一輪會再派。" +
   "registration.unnamed_count 不是 0 時，名冊上有幾列的姓名欄是空的（罕用字抽不出來），不在 missing 裡，要打開名冊 PDF 自己看。";
 
+/**
+ * 名單清查的名冊差異清單（2026-11-01，協議 1.109.0）：同一個單位的缺人、政黨、鄉鎮、縣市、結果、掛錯人一張任務一次對完，
+ * 每項在 target.items（kind、name、current 現值、official 官方值、source_url、origin_task_id）；各項各用既有的交件型別、各走自己的驗證門檻。
+ */
+export const ROSTER_ITEMS_HINT =
+  "這個單位的名冊差異都列在 current.items（也在 target.items）：每項 kind 是缺人／狀態／政黨／鄉鎮／縣市／結果／掛錯人，附 current（我們的現值）、official（官方值）、source_url（官方來源網址）。" +
+  "逐項核對後各用既有型別交件，每筆各走自己的驗證門檻：缺人→candidacy；政黨、鄉鎮、縣市、結果空白→candidacy 重交同一人同一屆（補上該欄）；狀態→correction 改 candidate_status；" +
+  "縣市長縣市不符（official.proposed_region_id）→correction 改 region_id；結果整批→election_results；掛錯人→reassign_candidacy，確認是同一人用 no_change。" +
+  "官方有誤或現值才對的用 no_change 說明並附來源。全部處理完才交 roster_check 收尾；只處理一部分就不要交，剩下的下一輪還會列出。" +
+  "target.findings_only 為真的單位沒有「找名單」這一步，名單差異就是 items。";
+
+/** 2026 的登記名冊比對結果（registration.missing／needs_status）轉成 items 同形狀的項，讓一個單位所有差異在同一份清單裡 */
+export function registrationItems(reg: Obj | null | undefined): Obj[] {
+  if (!reg) return [];
+  const url = Array.isArray(reg.source_urls) && typeof reg.source_urls[0] === "string" ? reg.source_urls[0] as string : undefined;
+  const out: Obj[] = [];
+  for (const m of (Array.isArray(reg.missing) ? reg.missing : []) as Obj[]) {
+    out.push({ kind: "缺人", name: m.name, current: { record: null }, official: pick(m, ["party", "sub_region", "village", "district", "row_no"]), ...(url ? { source_url: url } : {}) });
+  }
+  for (const m of (Array.isArray(reg.needs_status) ? reg.needs_status : []) as Obj[]) {
+    out.push({
+      kind: "狀態", name: m.name, politician_id: m.politician_id, politician_election_id: m.politician_election_id,
+      current: { candidacy_status: m.candidacy_status }, official: { on_roster: true }, ...(url ? { source_url: url } : {}),
+    });
+  }
+  return out;
+}
+
 /** 名單缺口附給代理的名冊比對結果（roster_registration_gap 的回傳）；一件最多列這麼多位（2026-10-08 起 150，2026-10-29 改 80，跟名冊吻合的 candidacy 一次交件上限 MAX_BATCH_ROSTER 一樣） */
 export const ROSTER_GAP_LIMIT = 80;
 
@@ -436,9 +464,14 @@ export function shapeTaskCurrent(
   // 照片二選一：骨架的 current_value 用人物表的現值（任務開了之後現有照片可能被換過）
   const tplTarget = taskType === "avatar_choice" && target ? { ...target, current_avatar_url: data.politician?.avatar_url ?? null } : target;
   const template = task ? buildReportTemplate(taskType, suggested, tplTarget, task.task_id) : null;
+  // 名單清查的 items（目標上的名冊差異）原樣附在現況上；2026 的登記名冊缺人／要改狀態也轉成同形狀的項
+  const rosterItems = taskType === "roster_check" && Array.isArray(target?.items) ? (target!.items as unknown[]) : null;
+  const regItems = taskType === "roster_check" ? registrationItems(((data.roster ?? null) as { registration?: Obj | null } | null)?.registration) : [];
+  const allItems = rosterItems || regItems.length > 0 ? [...(rosterItems ?? []), ...regItems] : null;
   return {
     ...inner,
-    ...(hint ? { hint } : {}),
+    ...(allItems ? { items: allItems, items_count: allItems.length } : {}),
+    ...(hint ? { hint: rosterItems && target?.findings_only ? ROSTER_ITEMS_HINT : rosterItems ? `${hint} ${ROSTER_ITEMS_HINT}` : hint } : {}),
     ...(shape ? { payload_shape: shape } : {}),
     ...(template ? { report_template: template } : {}),
     // 查不到東西那一條路也要有骨架：教了 outcome 三選一卻沒示範怎麼送，
@@ -892,7 +925,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
       // 還沒投票的屆別（2026）：名冊資料表算出這個單位缺誰，一起附上（2026-10-08）。已投票屆別（list_source＝cec）的缺口在任務 target.missing，不查。
       // 函式還沒上線（migration 比函式晚套上的那幾分鐘）、出錯、這個單位名冊裡沒人（回 NULL）都不給，不擋派工
       let registration: Obj | null = null;
-      if (target.list_source !== "cec") {
+      if (target.list_source !== "cec" && target.findings_only !== true) {
         const gap = await supabase.rpc("roster_registration_gap", {
           p_election_id: electionId, p_election_type: electionType, p_county: scope.county, p_town: scope.township, p_limit: ROSTER_GAP_LIMIT,
         });

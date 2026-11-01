@@ -767,7 +767,16 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   let mismatchNote = "";
   if (electionType === "縣市長" && beforeRegionId !== null && beforeFit?.fit === "county") {
     const proposedId = regionIdOf(await countyRegionPatch(supabase, electionType, p));
+    // 名單清查收斂（2026-11-01）：這個差異單位清查（roster_check 的 target.items）已經列出來的，不再另開一件 region_mismatch；
+    // 函式不存在（migration 比函式晚套上）、出錯、官方名冊還沒涵蓋這個人的照舊開任務
+    let listedInRoster = false;
     if (proposedId !== null && proposedId !== beforeRegionId) {
+      const listed = await supabase.rpc("roster_unify_lists_region_mismatch", { p_pe_id: participation.id, p_proposed_region_id: proposedId });
+      listedInRoster = !listed.error && listed.data === true;
+    }
+    if (listedInRoster) {
+      mismatchNote = `；注意：這筆參選紀錄現在記在「${beforeFit.label}」，你交件的縣市跟它不同，地區沒有改（號次已記下）。這個差異已列在該縣市的名單清查（roster_check 的 target.items，kind＝縣市），由那張任務用 correction 改正。`;
+    } else if (proposedId !== null && proposedId !== beforeRegionId) {
       mismatchNote = await openRegionMismatch(supabase, {
         politician_election_id: participation.id,
         politician_id: ensured.politician_id,

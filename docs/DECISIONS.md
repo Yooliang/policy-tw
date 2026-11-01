@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-11-01
+
+- [名冊類差異併進單位的 `roster_check`，原「一人一張」的派工臂停用（協議 1.109…](decisions/2026-11-01-名冊類差異併進單位清查roster_check.md)
+
 ## 2026-10-31
 
 - [拆除後台三頁（`/admin/dashboard`、`/admin/duplicates`、`/…](decisions/2026-10-31-拆除後台三頁.md)
