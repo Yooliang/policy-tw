@@ -7,6 +7,7 @@ import { ref, shallowRef, computed, watch, nextTick, onMounted, onActivated, onD
 import { useSupabase } from '../composables/useSupabase'
 import ElectionHero from '../components/ElectionHero.vue'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
+import RegionPickMap, { type PickMapItem } from '../components/RegionPickMap.vue'
 import ScrollRow from '../components/ScrollRow.vue'
 import { runAfterRender } from '../lib/after-render'
 import { APPOINTED_EMPTY_TEXT, hasIndigenousElection, isAppointedDistrict, type IndigenousInput } from '../lib/appointed-district'
@@ -51,7 +52,7 @@ import { DIRECTORY_LEVELS, buildTownshipDirectory, directoryTotal } from '../lib
 import { compareRegionName, normalizeRegionName, sameRegionName } from '../lib/region-name'
 import { comparePerson, comparePersonName } from '../lib/person-name'
 import { inTownship, townshipOfSubRegion } from '../lib/election-townships'
-import { cachedCountySet, cachedTownSet, cachedVillageSet, chipOptions, countyPopulatedSet, resolvePopulated, type ChipCountCache } from '../lib/chip-options'
+import { cachedCountMap, cachedCountySet, cachedTownSet, cachedVillageSet, chipOptions, countyPopulatedSet, resolvePopulated, type ChipCountCache } from '../lib/chip-options'
 import { listByBallotNo, listByCountyBallot } from '../lib/ballot-number'
 import type { RouteLocationRaw } from 'vue-router'
 import SwipeTabStrip from '../components/SwipeTabStrip.vue'
@@ -1511,6 +1512,29 @@ const mobileChipRows = computed<MobileChip[][]>(() => {
   else row = [chipOf('All', '全部', allVillage.value && selectedVillage.value === 'All', () => pickAll('village')), ...pickRow('village', siteNames(rasterVillages.value, availableVillages.value), selectedVillage.value, villagePopulated())]
   return row.length > 0 ? [row] : []
 })
+/**
+ * 內容區「選擇縣市／選擇鄉鎮市區」的地圖用的選項：灰亮與人數來自建置期人數快取（跟晶片列一致）；
+ * 直轄市一般區的區長／區民代表分頁（市政府派任）因為快取裡沒有這兩類人，自然是灰的。
+ */
+function pickMapItems(pick: MobilePick, type: string): PickMapItem[] {
+  const special = isSpecialMunicipality.value
+  const types: string[] = type === ElectionType.TOWNSHIP_MAYOR ? [special ? ElectionType.INDIGENOUS_DISTRICT_CHIEF : ElectionType.TOWNSHIP_MAYOR]
+    : type === ElectionType.REPRESENTATIVE ? [special ? ElectionType.INDIGENOUS_DISTRICT_REP : ElectionType.REPRESENTATIVE] : [type]
+  const cache = chipCountsApply.value ? chipCounts : null
+  const counts = pick.level === 'county'
+    ? cachedCountMap(cache, 'county', rasterIndex.counties, types, normName)
+    : cachedCountMap(cache, 'town', rasterTownList.value, types, normName)
+  return pick.options.map(name => {
+    const c = counts?.get(normName(name)) ?? null
+    return { name, count: c, dim: c === 0 }
+  })
+}
+/** 寬度夠（640px 以上）才畫地圖；手機太窄，小區點不準，維持原本的按鈕格。掛載後才判斷（預渲染與水合一致） */
+const isWideViewport = ref(false)
+let wideMq: MediaQueryList | null = null
+const syncWide = () => { isWideViewport.value = !!wideMq?.matches }
+onMounted(() => { wideMq = window.matchMedia('(min-width: 640px)'); syncWide(); wideMq.addEventListener('change', syncWide) })
+onBeforeUnmount(() => wideMq?.removeEventListener('change', syncWide))
 const mobileChipsEl = ref<HTMLElement | null>(null)
 /**
  * PK 預設挑了某一場（定位選「全部」時）：把它同步回共用定位，晶片與麵包屑就會高亮實際比較的那一項（不得出現晶片寫全部、PK 卻是別場）。
@@ -1902,7 +1926,14 @@ useSwipeTabs(swipeEl, {
           <div v-for="panel in mobilePanels" :key="panel.type" v-show="panel.type === mobileActiveType" :class="mobileAdjacent(panel.type)" :data-testid="`mobile-panel-${panel.type}`">
             <template v-if="panel.pick">
               <h3 class="mb-3 text-base font-bold text-navy-900" data-testid="mobile-pick-title">{{ panel.pick.title }}</h3>
-              <div v-if="panel.pick.options.length > 0" :class="['grid gap-2 md:flex md:flex-wrap', panel.pick.options.some(o => o.length > 3) ? 'grid-cols-3' : 'grid-cols-4']" data-testid="mobile-pick-options">
+              <RegionPickMap
+                v-if="panel.pick.options.length > 0 && panel.type === mobileActiveType && isWideViewport && (panel.pick.level === 'county' || rasterCountyCode)"
+                :level="panel.pick.level === 'county' ? 'county' : 'sub'"
+                :county-code="rasterCountyCode"
+                :items="pickMapItems(panel.pick, panel.type)"
+                @pick="o => pickLocation(panel.pick!.level, o)"
+              />
+              <div v-else-if="panel.pick.options.length > 0" :class="['grid gap-2 md:flex md:flex-wrap', panel.pick.options.some(o => o.length > 3) ? 'grid-cols-3' : 'grid-cols-4']" data-testid="mobile-pick-options">
                 <button
                   v-for="o in panel.pick.options"
                   :key="o"
