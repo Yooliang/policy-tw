@@ -275,6 +275,7 @@ Deno.test("D2 migration 清點：CHECK 收新型別與全部既有型別、臂�
   assertStringIncludes(fnText(MIG, "contribution_auto_tasks_arms"), "UNION ALL SELECT 'issue_too_broad' AS arm, t.* FROM contribution_auto_tasks_issue_too_broad() t");
   assertStringIncludes(MIG, "INSERT INTO activity_rules (activity, window_kind, params, note)");
   assertStringIncludes(fnText(MIG, "system_one_vote_budget_candidates"), "'policy_subtopics'");
+  assertStringIncludes(MIG, "('issue_too_broad', 1,");
   assertFalse(MIG.includes("FUNCTION contribution_required_agree("), "沒有動計分：新型別走預設的 normal 目標分數 3");
 });
 

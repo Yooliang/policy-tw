@@ -329,6 +329,13 @@ SELECT 'issue_too_broad', 'always',
  WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = 'issue_too_broad');
 
 -- ------------------------------------------------------------
+-- 6b. 主控台時期（一般資料缺口那一段，跟區域統計同一組）
+-- ------------------------------------------------------------
+INSERT INTO console_arm_stage_map (arm, stage, note) VALUES
+  ('issue_too_broad', 1, '議題過寬拆細項')
+ON CONFLICT (arm) DO UPDATE SET stage = EXCLUDED.stage, note = EXCLUDED.note;
+
+-- ------------------------------------------------------------
 -- 7. 自我檢查：新臂漏登記規則、門檻不是正整數、總表漏了新臂都讓這支 migration 失敗
 -- ------------------------------------------------------------
 DO $$

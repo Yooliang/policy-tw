@@ -8,6 +8,7 @@ _shared/district-seats.test.ts
 _shared/drop-related-policies.test.ts
 _shared/election-districts.test.ts
 _shared/election-results.test.ts
+_shared/issue-subtopics.test.ts /^D1 /
 _shared/latest-election-sync.test.ts
 _shared/lineage-elected-only.test.ts /^F4 /
 _shared/lineage.test.ts
