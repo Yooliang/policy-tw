@@ -36,22 +36,22 @@ const typeSections = computed(() => skillTypeSections(skillTypesMarkdown).map((s
 
 usePageHead({
   breadcrumbs: [{ name: '首頁', path: '/' }, { name: 'AI 協作技能' }],
-  title: '驅動 AI，實現全自動資料貢獻',
-  description: '讓具備聯網能力的 AI 讀取本頁，自動學會任務領取與查核提交。所有資料均須附上來源，經 AI 交叉驗證無誤後自動發布上線。',
+  title: '讓 AI 幫你查資料',
+  description: '貼網址給 AI，它會領任務、附來源交件。',
 })
 </script>
 
 <template>
   <div class="bg-slate-50 min-h-screen pb-20">
     <Hero>
-      <template #title>驅動 AI，實現全自動資料貢獻</template>
-      <template #description>讓 AI 讀本頁就學會領任務與查核提交，附來源、交叉驗證後上線</template>
+      <template #title>讓 AI 幫你查資料</template>
+      <template #description>貼網址給 AI，它會領任務、附來源交件</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
     </Hero>
 
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 space-y-6">
       <section class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 space-y-4">
-        <p class="text-sm font-bold text-slate-500 uppercase tracking-widest">把這個網址貼給你的 AI</p>
+        <p class="text-sm font-bold text-slate-500 uppercase tracking-widest">貼給你的 AI</p>
 
         <div class="flex items-stretch gap-2">
           <div class="flex-1 flex items-center gap-2 bg-slate-100 rounded-xl px-4 py-3 font-mono text-sm text-navy-900 overflow-x-auto">
@@ -67,10 +67,10 @@ usePageHead({
         <div class="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900 flex gap-3">
           <LinkIcon :size="18" class="flex-shrink-0 mt-0.5" />
           <div class="space-y-2 flex-1">
-            <p>可以直接這樣對 AI 說：</p>
+            <p>直接對 AI 說：</p>
             <p class="font-mono text-xs bg-white rounded-lg px-3 py-2 border border-blue-100 break-all">{{ PROMPT }}</p>
             <button type="button" class="text-xs font-bold underline underline-offset-2" @click="copy(PROMPT, 'prompt')">
-              {{ copied === 'prompt' ? '已複製提示' : '複製這句話' }}
+              {{ copied === 'prompt' ? '已複製' : '複製這句' }}
             </button>
           </div>
         </div>
@@ -85,7 +85,7 @@ usePageHead({
 
       <article class="skill-doc bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-10" v-html="html" />
       <section class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-10 space-y-4">
-        <h2 class="text-xl font-black text-navy-900">各型別的做法與交件欄位</h2>
+        <h2 class="text-xl font-black text-navy-900">各型別做法與欄位</h2>
         <p class="text-sm text-slate-600">AI 領到任務時，這裡和那一件有關的段落會跟著任務一起送出（<code>item.type_spec</code>），原檔在 <a :href="SKILL_TYPES_MD_URL" class="text-blue-600 underline underline-offset-2">skill-types.md</a>。</p>
         <div class="divide-y divide-slate-200 border-y border-slate-200">
           <details v-for="(s, i) in typeSections" :key="i" class="type-section group">
