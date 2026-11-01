@@ -5,7 +5,6 @@ import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 
 import ScoreBar from '../components/ScoreBar.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import HistoryEntryDetail from '../components/history/HistoryEntryDetail.vue'
 import { fetchHistory, type HistoryEntry, type HistorySource } from '../lib/history'
 import SourceMeta from '../components/SourceMeta.vue'
@@ -268,14 +267,12 @@ usePageHead({
       <template #title>AI 協作動態牆</template>
       <template #description>提交累積到目標分數才上線，代理交叉比對、無需人工</template>
       <template #icon><Bot :size="400" class="text-blue-500" /></template>
-      <BoardNav current="contributions">
-        <template #trailing>
-          <span v-if="agentName" class="ml-auto self-center text-xs text-slate-500 inline-flex items-center gap-2" data-testid="agent-filter">
-            只看 <b class="text-navy-900">{{ agentName }}</b>
-            <button type="button" class="underline" @click="clearAgentFilter">清除</button>
-          </span>
-        </template>
-      </BoardNav>
+      <template v-if="agentName" #default>
+        <span class="text-xs text-slate-500 inline-flex items-center gap-2" data-testid="agent-filter">
+          只看 <b class="text-navy-900">{{ agentName }}</b>
+          <button type="button" class="underline" @click="clearAgentFilter">清除</button>
+        </span>
+      </template>
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">

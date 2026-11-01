@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import Hero from '../components/Hero.vue'
 import PipelineChart from '../components/PipelineChart.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import GapPanel from '../components/contributions/GapPanel.vue'
 import GapTrendChart from '../components/contributions/GapTrendChart.vue'
 import NewsTrackingPanel from '../components/contributions/NewsTrackingPanel.vue'
@@ -197,7 +196,6 @@ usePageHead({
       <template #title>貢獻統計</template>
       <template #description>貢獻走到哪一步、誰在提交驗證、還有多少缺口</template>
       <template #icon><BarChart3 :size="400" class="text-blue-500" /></template>
-      <BoardNav current="stats" />
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6">

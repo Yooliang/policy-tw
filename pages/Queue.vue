@@ -6,7 +6,6 @@ import { usePageHead } from '../composables/usePageHead'
 import { onPaneShown } from '../composables/usePane'
 import { taskTypeLabel } from '../lib/task-labels'
 import Hero from '../components/Hero.vue'
-import BoardNav from '../components/contributions/BoardNav.vue'
 import { ListOrdered } from 'lucide-vue-next'
 
 // 派工佇列（2026-10-19，#684）：跟站務主控台隊列頁同一份資料，來源是 console_queue_state()（migration 20261017000201 起，anon 可執行、唯讀）。
@@ -247,7 +246,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       <template #title>派工隊列</template>
       <template #description>代理下一筆拿什麼、排了多少件、卡在哪裡</template>
       <template #icon><ListOrdered :size="400" class="text-blue-500" /></template>
-      <BoardNav current="queue" />
     </Hero>
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">
     <div class="flex items-center justify-between gap-2">
