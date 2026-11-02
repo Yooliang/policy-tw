@@ -92,8 +92,6 @@ const personElectionGroups = computed<PolicyGroup[]>(() => {
 })
 /** 政見分頁只列他當選過的屆 */
 const electedElectionGroups = computed(() => personElectionGroups.value.filter(g => electedIn(g.electionId)))
-/** 已經有政見／承諾段落的屆以外，還沒有任何資料的那幾屆（一樣各給一張卡） */
-const withoutGroup = (all: PolicyGroup[], shown: PolicyGroup[]) => all.filter(g => !shown.some(x => x.key === g.key))
 
 async function requestGroupLookup(g: PolicyGroup, scope: LookupScope) {
   const pol = politician.value
@@ -257,8 +255,10 @@ const latestElectionId = computed<number | null>(() => {
 // 分成多組一定要標；只有一組時，本屆與沒有屆別的舊資料都不必標
 // （年份在政見卡片上本來就看得到），只有往屆單獨一組時要標出來，
 // 不然只有 2024 屆政見的人物頁會讓人誤以為在看本屆。
-function groupPoliciesByElection(list: Policy[], suffix: string): PolicyGroup[] {
+function groupPoliciesByElection(list: Policy[], suffix: string, emptyIds: number[] = []): PolicyGroup[] {
   const byElection = new Map<number | null, Policy[]>()
+  // 還沒有資料的那幾屆也各成一組（只放一張請 AI 補充的卡），才有自己的分組標題；不然那張卡會懸在上一組底下沒標題
+  for (const id of emptyIds) if (!byElection.has(id)) byElection.set(id, [])
   for (const p of list) {
     const key = p.electionId ?? null
     byElection.set(key, [...(byElection.get(key) ?? []), p])
@@ -424,8 +424,10 @@ const ballot = computed(() => ballotNoOfElection(politician.value?.elections, th
 const identity = computed(() => titles.value.join('、') || (candidacy.value?.running ? `${candidacy.value.what}候選人` : ''))
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
-const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾'))
-const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見'))
+const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', personElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
+const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見', electedElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
+/** 承諾分頁的請求卡：當選的那一屆要補的是上任後的政見（tenure），落選或還沒投票的才是選前承諾（pledge） */
+const campaignScope = (g: PolicyGroup): LookupScope => electedIn(g.electionId) ? 'tenure' : 'pledge'
 
 usePageHead({
   type: 'article',
@@ -569,7 +571,7 @@ usePageHead({
                   </div>
                 </div>
                 <div v-if="campaignView === 'table'" class="space-y-8">
-                  <div v-for="group in campaignGroups" :key="group.key">
+                  <div v-for="group in campaignGroups.filter(x => x.policies.length > 0)" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-3">{{ group.label }}</h3>
                     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                       <!-- 手機上表格保持一定寬度、外框左右捲動（維護者 2026-10-01），不要把欄位擠成一字寬 -->
@@ -604,22 +606,23 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
-                      <AiLookupCard :state="groupLookupState(group, 'pledge')" :label="groupLookupLabel(group, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(group, 'pledge')" />
+                      <AiLookupCard :state="groupLookupState(group, campaignScope(group))" :label="groupLookupLabel(group, campaignScope(group))" hint="查有出處的資料" @click="requestGroupLookup(group, campaignScope(group))" />
                     </div>
                   </div>
                 </div>
                 <!-- 已有資料也能再查：卡片檢視是格線最後一張動作卡，表格檢視用小按鈕 -->
-                <AiLookupInline v-if="campaignView === 'table' && personElectionGroups.length > 0" :state="groupLookupState(personElectionGroups[0], 'pledge')" :label="groupLookupLabel(personElectionGroups[0], 'pledge')" @click="requestGroupLookup(personElectionGroups[0], 'pledge')" />
+                <AiLookupInline v-if="campaignView === 'table' && personElectionGroups.length > 0" :state="groupLookupState(personElectionGroups[0], campaignScope(personElectionGroups[0]))" :label="groupLookupLabel(personElectionGroups[0], campaignScope(personElectionGroups[0]))" @click="requestGroupLookup(personElectionGroups[0], campaignScope(personElectionGroups[0]))" />
                 <AiLookupInline v-else-if="campaignView === 'table'" :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
-                <!-- 還沒有任何承諾的那幾屆也各給一張卡 -->
-                <div v-if="campaignView !== 'table' && withoutGroup(personElectionGroups, campaignGroups).length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <AiLookupCard v-for="g in withoutGroup(personElectionGroups, campaignGroups)" :key="g.key" :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
-                </div>
               </template>
               <template v-else-if="personElectionGroups.length > 0">
                 <p class="text-slate-500">該候選人尚未發布承諾。</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <AiLookupCard v-for="g in personElectionGroups" :key="g.key" :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
+                <div class="space-y-8">
+                  <div v-for="g in campaignGroups" :key="g.key">
+                    <h3 v-if="g.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ g.label }}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      <AiLookupCard :state="groupLookupState(g, campaignScope(g))" :label="groupLookupLabel(g, campaignScope(g))" hint="查有出處的資料" @click="requestGroupLookup(g, campaignScope(g))" />
+                    </div>
+                  </div>
                 </div>
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
@@ -669,14 +672,16 @@ usePageHead({
                     </div>
                   </div>
                 </div>
-                <div v-if="withoutGroup(electedElectionGroups, historyGroups).length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <AiLookupCard v-for="g in withoutGroup(electedElectionGroups, historyGroups)" :key="g.key" :state="groupLookupState(g, 'tenure')" :label="groupLookupLabel(g, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(g, 'tenure')" />
-                </div>
               </template>
               <template v-else-if="electedElectionGroups.length > 0">
                 <p class="text-slate-500">該候選人沒有政見的追蹤紀錄。</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <AiLookupCard v-for="g in electedElectionGroups" :key="g.key" :state="groupLookupState(g, 'tenure')" :label="groupLookupLabel(g, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(g, 'tenure')" />
+                <div class="space-y-8">
+                  <div v-for="g in historyGroups" :key="g.key">
+                    <h3 v-if="g.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ g.label }}</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      <AiLookupCard :state="groupLookupState(g, 'tenure')" :label="groupLookupLabel(g, 'tenure')" hint="查有出處的資料" @click="requestGroupLookup(g, 'tenure')" />
+                    </div>
+                  </div>
                 </div>
               </template>
               <div v-else class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300" data-testid="history-no-elected">
