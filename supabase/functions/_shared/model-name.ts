@@ -73,6 +73,12 @@ export const MODEL_NAME_RULES: ReadonlyArray<readonly [string, string]> = [
   ["gemini-?(\\d+)-?flash", "Gemini \\1 Flash"],
   ["gemini-?(\\d+)", "Gemini \\1"],
   ["gemini", "Gemini（未標版本）"],
+  // MiniMax、Grok：有版本號的歸「系列＋版本」。只寫 grok（無版本）不另立規則，免得吃掉 grok-bot 這種產品名（走最後一條）
+  ["minimax-m(\\d+(?:\\.\\d+)?)-flash", "MiniMax M\\1 Flash"],
+  ["minimax-m(\\d+(?:\\.\\d+)?)", "MiniMax M\\1"],
+  ["minimax", "MiniMax（未標版本）"],
+  ["grok-(\\d+(?:\\.\\d+)?)-([a-z]+)", "Grok \\1 \\2"],
+  ["grok-(\\d+(?:\\.\\d+)?)", "Grok \\1"],
   // 最後一條：前面都沒認出模型，但寫成「<工具>/<像識別碼的產品名>」→ 歸到產品名（平台不揭露模型，例 Grok Bot）
   ["^[^/]+/([a-z0-9][a-z0-9.-]{1,39})$", "\\1" + UNDISCLOSED_SUFFIX],
 ];
