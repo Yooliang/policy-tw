@@ -53,10 +53,10 @@ jobs:
           PROJECT_REF: wiiqoaytpqvegtknlbue
         run: |
           set -e
-          npx supabase link --project-ref "$PROJECT_REF"
+          npx -y supabase@2 link --project-ref "$PROJECT_REF"
           for f in $(ls out/sql/*.sql 2>/dev/null | sort); do
             echo "套用 $f（$(wc -c < "$f") 位元組）"
             # 失敗要看得到錯誤（CLI 失敗結束碼非 0、錯誤寫在輸出裡）；成功時輸出沒有用，不印
-            if ! npx supabase db query --linked -f "$f" > out/apply.log 2>&1; then cat out/apply.log; exit 1; fi
+            if ! npx -y supabase@2 db query --linked -f "$f" > out/apply.log 2>&1; then cat out/apply.log; exit 1; fi
           done
           cat out/sql/summary.json
