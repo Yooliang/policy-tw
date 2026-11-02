@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { onPaneShown } from '../../composables/usePane'
 import { Cpu, ChevronRight } from 'lucide-vue-next'
 import LoadError from '../LoadError.vue'
+import SankeyChart from './SankeyChart.vue'
+import { buildContribFlow, buildVoteFlow, fallbackFlowRows, type FlowRow } from '../../lib/model-flow'
 import { supabasePublic } from '../../lib/supabase'
 import { withTimeoutAndRetry } from '../../lib/retry'
 import {
@@ -19,6 +21,7 @@ import {
 const days = ref<number>(DEFAULT_MODEL_STATS_DAYS)
 const contribRows = ref<ContribStatsRow[] | null>(null)
 const voteRows = ref<VoteStatsRow[] | null>(null)
+const flowRows = ref<FlowRow[]>([])
 const failed = ref(false)
 const loading = ref(false)
 
@@ -37,6 +40,16 @@ async function load() {
     if (d !== days.value) return
     contribRows.value = (c.data ?? []) as ContribStatsRow[]
     voteRows.value = (v.data ?? []) as VoteStatsRow[]
+    // 分流量：函式還沒上線時退回現有兩支 stats 組出前 3 層
+    try {
+      const f = await withTimeoutAndRetry(`model_flow_stats ${d}d`, (signal) =>
+        supabasePublic.rpc('model_flow_stats', { p_days: d }).abortSignal(signal).throwOnError())
+      if (d !== days.value) return
+      flowRows.value = (f.data ?? []) as FlowRow[]
+    } catch (e) {
+      console.info('[統計] 分流量讀取失敗，改用現有彙總', e)
+      flowRows.value = fallbackFlowRows(contribRows.value, voteRows.value)
+    }
   } catch (e) {
     console.info('[統計] 各模型表現讀取失敗', e)
     if (d === days.value) failed.value = true
@@ -49,6 +62,8 @@ onPaneShown(load)
 watch(days, load)
 
 const contrib = computed(() => summarizeContributions(contribRows.value ?? []))
+const contribFlow = computed(() => buildContribFlow(flowRows.value))
+const voteFlow = computed(() => buildVoteFlow(flowRows.value))
 const votes = computed(() => summarizeVotes(voteRows.value ?? []))
 
 const expanded = ref<Set<string>>(new Set())
@@ -83,8 +98,13 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
     <LoadError v-if="failed" inline message="各模型表現暫時讀不到" @retry="load" />
     <p v-else-if="contribRows === null" class="text-sm text-slate-400">讀取中</p>
     <template v-else>
+      <h4 class="font-bold text-slate-700 text-sm mt-2 mb-1">交件分流</h4>
+      <SankeyChart :graph="contribFlow" name="交件分流" :class="{ 'opacity-60': loading }" />
+      <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">投票分流</h4>
+      <SankeyChart :graph="voteFlow" name="投票分流" :class="{ 'opacity-60': loading }" />
+
       <!-- A. 交件 -->
-      <h4 class="font-bold text-slate-700 text-sm mt-2 mb-1">交件</h4>
+      <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">交件</h4>
       <p class="text-xs text-slate-500 mb-2">
         上線率、退件率只算已有結果（上線＋退件）的件數；等票中、已被取代、撤回另外列件數，加總等於交件數。
         「無異動查無」是無異動回報裡寫回查無或打不開的比例；「資料型退件」只看新增政見、人物資料、參選紀錄、資料更正。
