@@ -158,7 +158,7 @@ Deno.test("ci.yml：部署條件——測試失敗擋部署；後端類一定要
 
 Deno.test("ci.yml：部署順序沒動——migration 先、函式後；Worker 排在 Hosting 之後", () => {
   const fn = jobBlock("deploy-functions");
-  assert(fn.indexOf("supabase db push") > 0 && fn.indexOf("supabase db push") < fn.indexOf("node scripts/deploy-functions.mjs"));
+  assert(fn.indexOf("supabase@2 db push") > 0 && fn.indexOf("supabase@2 db push") < fn.indexOf("node scripts/deploy-functions.mjs"));
   assertStringIncludes(jobBlock("ssr-deploy"), "needs: [deploy]");
 });
 
