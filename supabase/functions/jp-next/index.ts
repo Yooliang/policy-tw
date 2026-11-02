@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { JP_PROTOCOL_URL, JP_PROTOCOL_VERSION } from "../_shared/jp/protocol.ts";
+import { typeSpecForJpTask, typeSpecForJpVerify } from "../_shared/jp/type-spec-for.ts";
 import { jpClient } from "../_shared/jp/client.ts";
 import { minutesUntilReset, QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
 import { ipHashOf, QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/jp/contribute-handler.ts";
@@ -250,6 +251,7 @@ async function handle(req: Request): Promise<Response> {
           required_agree: typeof pick.effective_required === "number" ? pick.effective_required : requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
           ...(dispute ? { dispute } : {}),
+          type_spec: typeSpecForJpVerify(pick.contribution_type),
         },
         how_to: (dispute ? `${dispute.instruction}（前面每一票在 item.dispute.prior。）` : "") + (pick.contribution_type === "no_change"
           ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
@@ -350,6 +352,7 @@ async function handle(req: Request): Promise<Response> {
           task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: t.target,
           what_we_need: t.description ? `${t.title}：${t.description}` : t.title,
           hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: null,
+          type_spec: typeSpecForJpTask(t.task_type),
         },
         how_to: howTo,
       });
@@ -375,7 +378,7 @@ async function handle(req: Request): Promise<Response> {
       kind: "task",
       lease_minutes: LEASE_MINUTES,
       ...(await tokenFor(t.task_id)),
-      item: { ...t, source: "auto", suggested_contribution_type: null, ...(sameClaims ? { current: { same_claims: sameClaims } } : {}) },
+      item: { ...t, source: "auto", suggested_contribution_type: null, type_spec: typeSpecForJpTask(t.task_type), ...(sameClaims ? { current: { same_claims: sameClaims } } : {}) },
       how_to: sameClaims ? `${howTo} 交件前先看 item.current.same_claims：${RESOLVED_CLAIM_HELP}。` : howTo,
     });
   } catch (error: unknown) {
