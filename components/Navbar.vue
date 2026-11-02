@@ -7,7 +7,7 @@ import GlobalSearch from './GlobalSearch.vue'
 import AppearanceMenu from './AppearanceMenu.vue'
 import { useDeskNav } from '../composables/useDeskNav'
 import { useSupabase } from '../composables/useSupabase'
-import { sectionOfRoute } from '../lib/desk-sections'
+import { useDeskSection } from '../composables/useDeskSection'
 import MobileDrawer from './MobileDrawer.vue'
 import { useMobileShell } from '../composables/useMobileShell'
 import { useMobileHeader } from '../composables/useMobileHeader'
@@ -78,7 +78,7 @@ const SECTION_ROOT: Record<string, { label: string; to: string }> = {
   policy: { label: '政見', to: '/tracking' }, election: { label: '選舉', to: '/elections' }, join: { label: '參與', to: '/stats' },
   search: { label: '搜尋', to: '/search' }, about: { label: '關於', to: '/vision' },
 }
-const deskSection = computed(() => sectionOfRoute(route.name))
+const { section: deskSection } = useDeskSection()
 // 選舉頁的細頁首第二段寫具體選舉名稱（「2026 九合一選舉」），連回該場選舉的全台頁 /election/2026（不是選舉一覽）
 const { getElectionBySegment } = useSupabase()
 const electionSegParam = computed(() => { const p = route.params.electionId; return Array.isArray(p) ? p[0] : p })

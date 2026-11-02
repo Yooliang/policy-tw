@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { X } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useDeskNav, type DeskGroup, type DeskItem } from '../composables/useDeskNav'
-import { sectionOfRoute, type DeskSection } from '../lib/desk-sections'
+import { useDeskSection } from '../composables/useDeskSection'
 import { footerElections, taipeiDay } from '../lib/election-list'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment, electionYearOfDate } from '../lib/election-route'
@@ -25,7 +25,7 @@ const { electionNav, personNav } = useDeskNav()
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
 
-const section = computed<DeskSection | null>(() => sectionOfRoute(route.name))
+const { section, pledgeElection } = useDeskSection()
 const model = computed(() => (mounted.value && electionNav.value ? electionNav.value.value : null))
 /** 人物頁：該屆的層級與縣市（取代通用的「選舉」「一覽」兩組；內容類型維持） */
 const person = computed(() => (mounted.value && route.name === 'politician' && personNav.value ? personNav.value.value : null))
@@ -47,7 +47,7 @@ const ABOUT: DeskGroup[] = [
   { key: 'terms', title: '條款', blocks: [[link('terms', '使用條款', '/terms'), link('privacy', '隱私權政策', '/privacy')]] },
 ]
 
-const activeElection = computed(() => getActiveElection())
+const activeElection = computed(() => pledgeElection.value ?? getActiveElection())
 const electionList = computed(() => footerElections(elections.value, taipeiDay(Date.now())))
 /** 選舉區的一般子項（不在選舉頁、或還沒掛載時）：內容類型連結＋選舉清單＋一覽 */
 const genericElection = computed<DeskGroup[]>(() => {

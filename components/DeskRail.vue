@@ -4,7 +4,8 @@ import { RouterLink, useRoute } from 'vue-router'
 import { House, TrendingUp, Milestone, Search } from 'lucide-vue-next'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment } from '../lib/election-route'
-import { sectionOfRoute, type DeskSection } from '../lib/desk-sections'
+import { useDeskSection } from '../composables/useDeskSection'
+import type { DeskSection } from '../lib/desk-sections'
 import { useSupabase } from '../composables/useSupabase'
 import { useDeskNav } from '../composables/useDeskNav'
 
@@ -18,11 +19,11 @@ const { drawerOpen, closeDeskDrawer } = useDeskNav()
 // 抽屜開著時：點別的區＝照常導覽、抽屜內容跟著換成那一區（不關）；點目前這一區的圖示＝關抽屜
 function onPick(e: Event, key: string) { if (drawerOpen.value && current.value === key) { e.preventDefault(); closeDeskDrawer() } }
 const { getActiveElection } = useSupabase()
-const rawSection = computed<DeskSection | null>(() => sectionOfRoute(route.name))
+const { section: rawSection, pledgeElection } = useDeskSection()
 // 首頁與「關於」合併成同一項（2026-10-31）：關於區的頁面也讓首頁那顆亮；首頁的延伸欄顯示關於那組
 const current = computed<DeskSection | null>(() => (rawSection.value === 'about' ? 'home' : rawSection.value))
 const electionTo = computed(() => {
-  const e = getActiveElection()
+  const e = pledgeElection.value ?? getActiveElection()
   return e ? electionPath(electionSegment(e)) : '/elections'
 })
 const items = computed(() => [
