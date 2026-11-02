@@ -18,7 +18,7 @@ import { balanceTone, BALANCE_ORANGE_USD, BALANCE_RED_USD, BALANCE_YELLOW_USD } 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const ROOT = new URL("../../../", import.meta.url);
 const MIG = "20261021040000_platform_balance_private.sql";
-const MIG_SPLIT = "20261102130000_platform_cost_typesafe_split.sql";
+const MIG_SPLIT = "20261102150000_platform_cost_typesafe_split.sql";
 const read = async (url: URL) => (await Deno.readTextFile(url)).replace(/\r\n/g, "\n");
 const MIG_SQL = await read(new URL(MIG, MIGRATIONS));
 const MIG_SPLIT_SQL = await read(new URL(MIG_SPLIT, MIGRATIONS));
