@@ -144,6 +144,27 @@ const REKEY_JP_SQL = await readMig(REKEY_JP_MIG);
 const REKEY_NEW = ["task_rekey_arms", "task_rekey_stable_key"];
 const REKEY_FOLLOWED = [...REKEY_NEW, "seed_auto_task_queue"];
 
+/**
+ * 不確定第 2 張起每張 −1、投太多輪、爭點驗證（20261102190000，policy-ops#178 A／#128；正見 20261017020000／020100／030000／040000，協議 1.95.0／1.96.0）：
+ * 日本站跟上。contribution_apply_consensus／manual_front_seconds 改讀這支的定義，走樣比對對正見的現行定義（拿掉中選會名冊兩處，登記在 PAIRS）；
+ * contribution_verify_pool 以日本站 130000 的版本為底、只多投太多輪那一段（正見 LEGACY 之前的版本＋PAIRS 的 edits 登記那一段）；
+ * 其餘 8 支（OV_NEW）是新增的逐字複本。日本站不移植的：contribution_overvoted_escalate／tick（停派後轉裁決；日本站沒有裁決流程，正見也已暫停）、
+ * console_queue_state 的 overvoted 區（日本站主控台另案）。
+ */
+const OV_MIG = "20261102190000_policy_jp_unsure_overvoted.sql";
+const OV_SQL = await readMig(OV_MIG);
+const OV_NEW = [
+  "contribution_unsure_penalty", "contribution_vote_baseline_compute", "contribution_vote_baseline_refresh", "contribution_vote_baseline",
+  "contribution_overvoted_flag_votes", "contribution_overvoted_stop_votes", "contribution_dispute_votes", "contribution_dispute_context",
+];
+const OV_FOLLOWED = [...OV_NEW, "contribution_apply_consensus", "manual_front_seconds", "contribution_verify_pool"];
+/** 驗證池多出來的投太多輪條件（日本站版，註解是日本站自己的字）；PAIRS 的 edits 與 OV_MIG 逐字同一份 */
+const OV_POOL_CLAUSE =
+  "    -- 投太多輪（20261017020100 の日本版）：票數超過 平均 × overvoted_stop_multiplier 的不再派；裁決（adjudication）本身不適用。\n" +
+  "    -- 日本站沒有裁決流程，不自動轉 disputed（見檔頭）。條件在 LIMIT 之前；(SELECT …) 讓規劃器只算一次\n" +
+  "    AND (c.contribution_type = 'adjudication'\n" +
+  "         OR c.agree_count + c.disagree_count + c.unsure_count <= (SELECT contribution_overvoted_stop_votes()))\n";
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -163,8 +184,6 @@ const VILLAGE = "20261009010000_village_chief_progress_cooling.sql";
 const LEGACY = "20261009060000_verify_pool_legacy_hash.sql";
 /** 2026-10-17 正見第二步（驗證票的排序跟著母任務、任務有交件在途就停放）：這支改了下面三支複本，日本站暫不跟（「日本站還沒跟」的登記偏離），比對讀這支之前的版本 */
 const TW_VERIFY_TICKET = "20261017010000_verify_ticket_follows_task.sql";
-/** 2026-10-17 正見「不確定」第 2 張起每張 −1（20261017020000）與投太多輪（20261017020100）：日本站暫不跟（登記偏離），contribution_apply_consensus 的比對讀 20261017020000 之前的版本 */
-const TW_UNSURE = "20261017020000_unsure_penalty.sql";
 
 const PAIRS: Pair[] = [
   { name: "activity_today" },
@@ -224,7 +243,12 @@ const PAIRS: Pair[] = [
   },
   { name: "contribution_queue_task_counts" },
   { name: "contribution_auto_tasks", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：多一段合格：任務停放）之前的版本" },
-  { name: "contribution_verify_pool", before: LEGACY, note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本" },
+  {
+    name: "contribution_verify_pool",
+    before: LEGACY,
+    note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本；多投太多輪停派一段（20261102190000，正見 20261017020100 的日本版，OV_POOL_CLAUSE）",
+    edits: [["    AND c.status = 'pending'\n    AND (p_type IS NULL", "    AND c.status = 'pending'\n" + OV_POOL_CLAUSE + "    AND (p_type IS NULL"]],
+  },
   { name: "contribution_vote_weight" },
   { name: "contribution_reject_floor" },
   {
@@ -264,9 +288,8 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_apply_consensus",
-    // 2026-10-17（正見 20261017020000 不確定第 2 張起每張 −1、20261017020100 投太多輪的 disputed 守衛）；日本站暫不跟（主線會通知日本站執行緒），比對讀這兩支之前的版本
-    before: TW_UNSURE,
-    note: "取不確定第 2 張起每張 −1（20261017020000，日本站暫不跟）之前的版本；拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
+    // 2026-11-02 日本站跟上（20261102190000）：不確定第 2 張起每張 −1、投太多輪的 disputed 守衛，比對讀正見現行定義
+    note: "拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
     edits: [
       [
         "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)) THEN",
@@ -297,7 +320,9 @@ const PAIRS: Pair[] = [
   // 20261011360000 新增的複本（SEC_NEW）
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
-  { name: "manual_front_seconds", before: "20261017030000_overvoted_adjudication_pause.sql", note: "取投太多輪的裁決不插隊（20261017030000，日本站暫不跟：日本站沒有 auto-overvoted 裁決）之前的版本" },
+  { name: "manual_front_seconds" },
+  // 20261102190000 新增的複本（OV_NEW）
+  ...OV_NEW.map((name) => ({ name })),
   { name: "verify_inherited_priority_seconds" },
   { name: "task_dispatches_queue_key", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：驗證列改走 verify_queue_key、拿掉 1970／1980 年段）之前的版本" },
 ];
@@ -334,7 +359,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(OV_FOLLOWED.includes(name) ? OV_SQL : REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -464,6 +489,29 @@ Deno.test("走樣（換號沿用排隊位置）：20261019040100 定義的函式
   assertEquals(defining.slice(-2), [SEC_MIG, REKEY_JP_MIG]);
 });
 
+Deno.test("走樣（不確定罰則・投太多輪・爭點驗證）：20261102190000 定義的函式＝登記的複本（OV_FOLLOWED）；不碰 public；plpgsql 釘 search_path；不移植轉裁決；驗證池只多登記的那一段", async () => {
+  const defined = [...OV_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, [...OV_FOLLOWED].sort());
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of OV_FOLLOWED) assert(copies.has(n), `${n} 要在複本清單 PAIRS 裡`);
+  for (const n of defined) {
+    const t = fnText(OV_SQL, `policy_jp.${n}`);
+    if (/LANGUAGE plpgsql/.test(t)) assert(t.includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+    else assert(!/SET search_path/.test(t), `${n}：LANGUAGE sql 的函式不加 SET`);
+  }
+  const stripped = OV_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+  assert(!/contribution_overvoted_(escalate|tick)/.test(stripped), "日本站不移植轉裁決（沒有裁決流程；正見也已暫停）——要跟就改這裡的登記與走樣比對");
+  // 驗證池：日本站 130000 的版本 ＋ 登記的那一段 ＝ 現在的版本（其餘一個字都不准動）
+  const poolClauseJp = OV_POOL_CLAUSE.replaceAll("(SELECT contribution_overvoted_stop_votes())", "(SELECT policy_jp.contribution_overvoted_stop_votes())");
+  assertEquals(fnText(OV_SQL, "policy_jp.contribution_verify_pool"), applyEdits(fnText(MIG_SQL, "policy_jp.contribution_verify_pool"), [["    AND c.status = 'pending'\n    AND (p_type IS NULL", "    AND c.status = 'pending'\n" + poolClauseJp + "    AND (p_type IS NULL"]]));
+  // 還原驗證：不確定罰則那一行拿掉，這份複本就跟正見對不上
+  const ac = fnText(OV_SQL, "policy_jp.contribution_apply_consensus");
+  const expected = applyEdits(await latestFn("contribution_apply_consensus"), PAIRS.find((x) => x.name === "contribution_apply_consensus")!.edits);
+  assertEquals(reverse(ac), expected);
+  assertNotEquals(reverse(ac.replace("v_score := v_score - policy_jp.contribution_unsure_penalty(v_unsure);", "")), expected);
+});
+
 Deno.test("日本站不跟的登記：慢性停擺檢查（dispatch_chronic_stall／dispatch_queue_delay_seconds、queue_settings 的 stall_* 欄）日本站不得定義——要跟就改這裡的登記與走樣比對", async () => {
   for (const n of await listMigrations()) {
     if (!n.includes("_policy_jp_")) continue;
@@ -490,7 +538,7 @@ Deno.test("走樣：派工紀錄清理的設定表 dispatch_records_settings（�
 
 Deno.test("走樣：migration 裡的 policy_jp 函式＝登記的複本＋登記的非複本（新加函式不登記就紅）", () => {
   const defined = [...MIG_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
-  const registered = [...PAIRS.map((p) => p.name).filter((n) => !SEC_NEW.includes(n) && !REKEY_NEW.includes(n)), ...NONCOPY].sort();
+  const registered = [...PAIRS.map((p) => p.name).filter((n) => !SEC_NEW.includes(n) && !REKEY_NEW.includes(n) && !OV_NEW.includes(n)), ...NONCOPY].sort();
   assertEquals(defined, registered);
   assertEquals(new Set(registered).size, registered.length, "登記重複");
 });
@@ -605,7 +653,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1])) && !(name === OV_MIG && OV_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");

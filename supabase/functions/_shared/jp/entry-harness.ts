@@ -57,7 +57,9 @@ export async function loadEntry(path: string, env: Record<string, string | undef
       const call: RestCall = { method: req.method, target, url, body, headers: Object.fromEntries(req.headers.entries()) };
       calls.push(call);
       const routed = router(call);
-      const headers = { "content-type": "application/json", "content-range": "*/0" };
+      // HEAD（count: exact）預設 0；router 回 { __count: n } 就把總數設成 n（額度之類靠 count 的路徑；同正見 entry-harness）
+      const headCount = routed && typeof routed === "object" && "__count" in (routed as object) ? Number((routed as { __count: number }).__count) : 0;
+      const headers = { "content-type": "application/json", "content-range": `*/${headCount}` };
       if (req.method === "HEAD") return new Response(null, { headers });
       let data: unknown = routed === undefined ? ((req.method === "POST" && !target.startsWith("rpc/")) ? [] : []) : routed;
       const accept = req.headers.get("accept") ?? "";

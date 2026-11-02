@@ -20,6 +20,7 @@ import { QUOTA_DEFAULTS, resolveIdentity, type HandlerResult } from "./contribut
 import { loadQuotaLimits, type QuotaLimits } from "../quota-settings.ts";
 import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
 import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
+import { disputeNoUnsureMessage, disputeVotesNow } from "../dispute-verify.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
 import { VERIFY_BINDING_DAYS } from "../dispatch.ts";
 
@@ -206,6 +207,14 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
       },
     };
   }
+  // 爭點驗證（協議 1.96.0，同正見；日本站 policy-ops#178 A）：票數超過線的交件不收不確定（盲反對會被改記 unsure，一併算）。系統配對票（merge）不經這裡。
+  // 以回報當下為準：派出之後票數才跨線也擋；擋下不算被拒，改投同意或反對再送。讀不到時放行並記 log。
+  if (via !== "merge" && (blind || input.verdict === "unsure")) {
+    const disputeVotes = await disputeVotesNow(supabase, contribution.id);
+    if (disputeVotes !== null) {
+      return { status: 400, body: { success: false, error: "dispute_no_unsure", message: disputeNoUnsureMessage(disputeVotes, blind), votes: disputeVotes } };
+    }
+  }
   const finalVerdict = blind ? "unsure" : input.verdict;
   const finalNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
 
@@ -271,7 +280,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
       ...(revising ? { revised: true, note_revise: "已覆寫你原本那張票；分數依新的 verdict 重算，仍只算一票" } : {}),
       ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。反對票要寫出哪一欄與來源矛盾、或附反證網址；來源打不開請投 unsure 並列出試過的網址" } : {}),
       weight,
-      weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url)),
+      weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url), finalVerdict === "unsure" ? (after?.unsure_count ?? 0) : 0),
       ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
         ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票" }
         : {}),
