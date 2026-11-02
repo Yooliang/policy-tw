@@ -1,5 +1,5 @@
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
-import { buildContribFlow, buildVoteFlow, parseDimOrder, nodeText, linkText, CONTRIB_DIMS, type FlowRow } from "./model-flow.ts";
+import { buildContribFlow, buildVoteFlow, parseDimOrder, nodeText, linkText, selectionStats, selNodeText, CONTRIB_DIMS, type FlowRow } from "./model-flow.ts";
 
 const outSum = (g: { links: { source: string; value: number }[] }, id: string) =>
   g.links.filter((l) => l.source === id).reduce((a, l) => a + l.value, 0);
@@ -82,4 +82,51 @@ Deno.test("標籤：比例模式只有百分比，沒有件數也沒有「僅 N 
   for (const t of [nodeText("pct", n), linkText("pct", { from: "甲", to: "乙", raw: 18, share: 18 })]) assertEquals(/件/.test(t), false);
   assertEquals(nodeText("count", n), "投錯（僅 3 件）");
   assertEquals(nodeText("count", { ...n, raw: 18 }), "投錯（18 件）");
+});
+
+Deno.test("選中某模型：各層節點的條件佔比各加總 100；沒經過的節點為 0；任意維度順序", () => {
+  for (const order of perms(["model", "type", "result", "reason"])) {
+    const g = buildContribFlow(ROWS, order);
+    const st = selectionStats(g, "model:小");
+    for (const dim of order) {
+      const sum = g.nodes.filter((n) => n.id.startsWith(dim + ":")).reduce((a, n) => a + st.get(n.id)!.share, 0);
+      assertAlmostEquals(sum, 100, 1e-6, order.join());
+    }
+    assertEquals(st.get("model:大")!.share, 0);
+    assertEquals(st.get("model:大")!.raw, 0);
+    assertEquals(st.get("result:pending")!.share, 0); // 小模型沒有等票中
+    assertEquals(st.get("result:pending")!.raw, 0);
+    assertAlmostEquals(st.get("result:applied")!.share, 75, 1e-6); // 3 / 4
+    assertEquals(st.get("result:applied")!.raw, 3);
+  }
+});
+
+Deno.test("選中結果節點：子集合只含退件路徑，模型佔比以件數權重重新彙總", () => {
+  const g = buildContribFlow(ROWS, ["model", "result", "reason", "type"]);
+  const st = selectionStats(g, "result:rejected");
+  assertAlmostEquals(st.get("model:大")!.share + st.get("model:小")!.share, 100, 1e-6);
+  assertEquals(st.get("result:applied")!.share, 0);
+  assertEquals(st.get("reason:none")!.raw, 0);
+  assertEquals(st.get("reason:data")!.raw, 150);
+});
+
+Deno.test("投票分流：選中節點同樣可重新彙總", () => {
+  const V: FlowRow[] = [
+    { layer: "vote", model: "甲", key1: "agree", key2: "right", n: 8 },
+    { layer: "vote", model: "甲", key1: "disagree", key2: "wrong", n: 2 },
+    { layer: "vote", model: "乙", key1: "agree", key2: "wrong", n: 5 },
+  ];
+  for (const order of perms(["model", "verdict", "outcome"])) {
+    const g = buildVoteFlow(V, order);
+    const st = selectionStats(g, "model:甲");
+    assertEquals(st.get("model:乙")!.raw, 0);
+    assertEquals(st.get("outcome:right")!.raw, 8);
+    assertAlmostEquals(st.get("verdict:agree")!.share, 80, 1e-6);
+  }
+});
+
+Deno.test("selNodeText：比例模式帶全體對照、數量模式只顯示子集件數", () => {
+  assertEquals(selNodeText("pct", { label: "上線", raw: 1, share: 91.2, allShare: 84.6 }), "上線 91.2%（全體 84.6%）");
+  assertEquals(selNodeText("pct", { label: "上線", raw: 1, share: 91.2, allShare: 84.6, withAll: false }), "上線 91.2%");
+  assertEquals(selNodeText("count", { label: "退件", raw: 0, share: 0, allShare: 5 }), "退件（0 件）");
 });

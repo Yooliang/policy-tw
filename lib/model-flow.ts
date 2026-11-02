@@ -16,7 +16,9 @@ export type Tone = 'good' | 'bad' | 'neutral' | 'group'
 export interface FlowNode { id: string; label: string; tone: Tone }
 /** value＝佔比權重（每個模型出流量加總 100）；raw＝原始件數 */
 export interface FlowLink { source: string; target: string; value: number; tone: Tone; raw: number }
-export interface FlowGraph { nodes: FlowNode[]; links: FlowLink[] }
+/** 一條完整路徑：依目前維度順序走過的節點 id、原始件數、佔比權重（同 FlowLink.value 的算法） */
+export interface FlowPath { ids: string[]; n: number; w: number }
+export interface FlowGraph { nodes: FlowNode[]; links: FlowLink[]; paths: FlowPath[] }
 
 const MAX_MODELS = 8
 const MAX_TYPES = 7
@@ -88,9 +90,11 @@ function assemble(tuples: Tuple[], order: readonly string[]): FlowGraph {
   const totals = sumBy(tuples, (t) => t.model, (t) => t.n)
   const nodes = new Map<string, FlowNode>()
   const links = new Map<string, FlowLink>()
+  const paths: FlowPath[] = []
   for (const t of tuples) {
     if (t.n <= 0) continue
     const sc = 100 / (totals.get(t.model) || 1)
+    paths.push({ ids: order.map((d) => t.cells[d].id), n: t.n, w: t.n * sc })
     let prev: Cell | null = null
     for (const dim of order) {
       const cell = t.cells[dim]
@@ -104,7 +108,7 @@ function assemble(tuples: Tuple[], order: readonly string[]): FlowGraph {
       prev = cell
     }
   }
-  return { nodes: [...nodes.values()], links: [...links.values()] }
+  return { nodes: [...nodes.values()], links: [...links.values()], paths }
 }
 
 export function buildContribFlow(rows: FlowRow[], order: readonly string[] = DEFAULT_CONTRIB_ORDER): FlowGraph {
@@ -171,6 +175,27 @@ export function nodeText(mode: 'pct' | 'count' | undefined, o: { label: string; 
 }
 export function linkText(mode: 'pct' | 'count' | undefined, o: { from: string; to: string; raw: number; share: number }): string {
   return mode === 'count' ? `${o.from} → ${o.to}：${o.raw.toLocaleString()} 件` : `${o.from} → ${o.to}：${pct1(o.share)}`
+}
+
+export interface SelStat { raw: number; share: number }
+/**
+ * 選中某節點後，每個節點在「選中子集合」裡的值：只取經過選中節點的完整路徑重新彙總。
+ * share＝子集合內流經該節點的權重佔子集合總權重（%）；沒經過的節點為 0。
+ */
+export function selectionStats(graph: FlowGraph, selId: string): Map<string, SelStat> {
+  const sub = graph.paths.filter((p) => p.ids.includes(selId))
+  const total = sub.reduce((a, p) => a + p.w, 0) || 1
+  const out = new Map<string, SelStat>()
+  for (const n of graph.nodes) out.set(n.id, { raw: 0, share: 0 })
+  for (const p of sub) for (const id of p.ids) { const s = out.get(id)!; s.raw += p.n; s.share += (p.w / total) * 100 }
+  return out
+}
+
+/** 選中時的節點標籤：比例模式「名稱 子集佔比%（全體 x%）」，數量模式「名稱（子集件數）」 */
+export function selNodeText(mode: 'pct' | 'count' | undefined, o: { label: string; raw: number; share: number; allShare: number; hideShare?: boolean; withAll?: boolean }): string {
+  if (mode === 'count') return `${o.label}（${o.raw.toLocaleString()} 件）`
+  if (o.hideShare) return o.label
+  return o.withAll === false ? `${o.label} ${pct1(o.share)}` : `${o.label} ${pct1(o.share)}（全體 ${pct1(o.allShare)}）`
 }
 
 /** 分流函式還沒上線時的退路：用現有兩支 stats 組出前 3 層（沒有退件原因、沒有投對投錯） */
