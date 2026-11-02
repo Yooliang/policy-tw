@@ -1,6 +1,6 @@
 /**
  * 日本站跟上正見：不確定第 2 張起每張 −1、投太多輪（2 倍標出、3 倍停派）、爭點驗證、單邊額度用完（policy-ops#178 A、#128）。
- * migration 20261102220000_policy_jp_unsure_overvoted.sql；jp-next／jp-report 的行為。
+ * migration 20261102230000_policy_jp_unsure_overvoted.sql；jp-next／jp-report 的行為。
  *
  *   1. SQL（PGlite，套全部 policy_jp migration）：不確定罰則（0／0／−1／−2…）、weight 欄不被動、罰則把交件推向退件線、
  *      投太多輪的基準（近 30 天已結案平均）與兩條票數線、驗證池停派、爭點驗證兩支函式、權限、套兩次都成功、不移植轉裁決
@@ -14,7 +14,7 @@ import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@
 import { freshDb, one, readMig, rows } from "./policy-jp-chain-db.ts";
 import { loadEntry, type RestCall } from "./jp/entry-harness.ts";
 
-const MIG = "20261102220000_policy_jp_unsure_overvoted.sql";
+const MIG = "20261102230000_policy_jp_unsure_overvoted.sql";
 const MIG_SQL = await readMig(MIG);
 
 type Db = Awaited<ReturnType<typeof freshDb>>;

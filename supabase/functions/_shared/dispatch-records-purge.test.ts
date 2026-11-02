@@ -811,8 +811,8 @@ Deno.test("C9 policy_jp 程式端：日本版派工綁定拿掉 .gte、日本站
 });
 
 Deno.test("C10 policy_jp SQL 端：驗證池 15 分鐘→30 天、日本站新增沒有時限的函式、前綴決定屬於哪邊——紅；public 不受牽連", () => {
-  // 日本站的驗證池最新版在 20261102220000（跟上投太多輪）；測試只取每支函式的最後一版，所以改那一支
-  const pool = mutateMig(REAL, "20261102220000_policy_jp_unsure_overvoted.sql", "AND vd.dispatched_at > now() - interval '15 minutes'", "AND vd.dispatched_at > now() - interval '30 days'");
+  // 日本站的驗證池最新版在 20261102230000（跟上投太多輪）；測試只取每支函式的最後一版，所以改那一支
+  const pool = mutateMig(REAL, "20261102230000_policy_jp_unsure_overvoted.sql", "AND vd.dispatched_at > now() - interval '15 minutes'", "AND vd.dispatched_at > now() - interval '30 days'");
   const p1 = allProblems(pool);
   assert(jpOnly(p1).some((p) => p.includes("contribution_verify_pool")), p1.join("\n"));
   assertEquals(publicOnly(p1), []);

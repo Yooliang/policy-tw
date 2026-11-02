@@ -145,13 +145,13 @@ const REKEY_NEW = ["task_rekey_arms", "task_rekey_stable_key"];
 const REKEY_FOLLOWED = [...REKEY_NEW, "seed_auto_task_queue"];
 
 /**
- * 不確定第 2 張起每張 −1、投太多輪、爭點驗證（20261102220000，policy-ops#178 A／#128；正見 20261017020000／020100／030000／040000，協議 1.95.0／1.96.0）：
+ * 不確定第 2 張起每張 −1、投太多輪、爭點驗證（20261102230000，policy-ops#178 A／#128；正見 20261017020000／020100／030000／040000，協議 1.95.0／1.96.0）：
  * 日本站跟上。contribution_apply_consensus／manual_front_seconds 改讀這支的定義，走樣比對對正見的現行定義（拿掉中選會名冊兩處，登記在 PAIRS）；
  * contribution_verify_pool 以日本站 130000 的版本為底、只多投太多輪那一段（正見 LEGACY 之前的版本＋PAIRS 的 edits 登記那一段）；
  * 其餘 8 支（OV_NEW）是新增的逐字複本。日本站不移植的：contribution_overvoted_escalate／tick（停派後轉裁決；日本站沒有裁決流程，正見也已暫停）、
  * console_queue_state 的 overvoted 區（日本站主控台另案）。
  */
-const OV_MIG = "20261102220000_policy_jp_unsure_overvoted.sql";
+const OV_MIG = "20261102230000_policy_jp_unsure_overvoted.sql";
 const OV_SQL = await readMig(OV_MIG);
 const OV_NEW = [
   "contribution_unsure_penalty", "contribution_vote_baseline_compute", "contribution_vote_baseline_refresh", "contribution_vote_baseline",
@@ -246,7 +246,7 @@ const PAIRS: Pair[] = [
   {
     name: "contribution_verify_pool",
     before: LEGACY,
-    note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本；多投太多輪停派一段（20261102220000，正見 20261017020100 的日本版，OV_POOL_CLAUSE）",
+    note: "取加 p_legacy_ip_hash（#484，台灣 IP 雜湊過渡）之前的版本；多投太多輪停派一段（20261102230000，正見 20261017020100 的日本版，OV_POOL_CLAUSE）",
     edits: [["    AND c.status = 'pending'\n    AND (p_type IS NULL", "    AND c.status = 'pending'\n" + OV_POOL_CLAUSE + "    AND (p_type IS NULL"]],
   },
   { name: "contribution_vote_weight" },
@@ -288,7 +288,7 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_apply_consensus",
-    // 2026-11-02 日本站跟上（20261102220000）：不確定第 2 張起每張 −1、投太多輪的 disputed 守衛，比對讀正見現行定義
+    // 2026-11-02 日本站跟上（20261102230000）：不確定第 2 張起每張 −1、投太多輪的 disputed 守衛，比對讀正見現行定義
     note: "拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
     edits: [
       [
@@ -321,7 +321,7 @@ const PAIRS: Pair[] = [
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
   { name: "manual_front_seconds" },
-  // 20261102220000 新增的複本（OV_NEW）
+  // 20261102230000 新增的複本（OV_NEW）
   ...OV_NEW.map((name) => ({ name })),
   { name: "verify_inherited_priority_seconds" },
   { name: "task_dispatches_queue_key", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：驗證列改走 verify_queue_key、拿掉 1970／1980 年段）之前的版本" },
@@ -489,7 +489,7 @@ Deno.test("走樣（換號沿用排隊位置）：20261019040100 定義的函式
   assertEquals(defining.slice(-2), [SEC_MIG, REKEY_JP_MIG]);
 });
 
-Deno.test("走樣（不確定罰則・投太多輪・爭點驗證）：20261102220000 定義的函式＝登記的複本（OV_FOLLOWED）；不碰 public；plpgsql 釘 search_path；不移植轉裁決；驗證池只多登記的那一段", async () => {
+Deno.test("走樣（不確定罰則・投太多輪・爭點驗證）：20261102230000 定義的函式＝登記的複本（OV_FOLLOWED）；不碰 public；plpgsql 釘 search_path；不移植轉裁決；驗證池只多登記的那一段", async () => {
   const defined = [...OV_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
   assertEquals(defined, [...OV_FOLLOWED].sort());
   const copies = new Set(PAIRS.map((p) => p.name));
