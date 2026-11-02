@@ -108,7 +108,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
   candidate_status_stale:
     "**官方登記名冊在 <https://web.cec.gov.tw/central/article/64709>**（每一屆都會有）：那頁掛著各級選舉的候選人登記彙總表 PDF，逐列寫著選區、登記日期、姓名、政黨。下載後用 `pdftotext -enc UTF-8 -layout` 解析——**`-enc UTF-8` 不加會整段變空白**（CID 字型）。這比媒體整理的名單可靠，是唯一的官方名冊。" +
     "登記截止後還標著「傳聞參選」「可能參選」的，只有兩種可能：**在登記名單上** → correction 把 candidate_status 改成 registered；**不在名單上** → 改成 not_running。兩者都要附得出你查的那份名單（該縣市選委會的登記公告，或媒體整理的完整登記名單）。" +
-    "**查不到該縣市的名單就用 no_change 回報，不要用猜的把人留在「傳聞」。**",
+    "**查不到該縣市的名單就用 no_change 回報，不要用猜的把人留在「傳聞」。**" +
+    "**target.origin＝cec_roster_extra（站上已登記、中選會名單查無此人）的，號次也在這張交：** 名單上其實有他（只是姓名寫法不同）、查得到號次時，用 candidacy 交（不是 correction）——politician_id 照 target.politician_id、election_id 2026、election_type 與 region 照 target、candidate_status 填 registered（該縣市選委會名單公告後填 qualified）、cand_no 填名單上的號次（中選會選舉專區候選人 JSON 的 candNo）、source_urls 放那份名單網址；姓名寫法不同要改的另交 correction 改 politicians.name。這張開著時，同一人的補號次缺口（candidacy_source_missing 的 cand_no）不再另派；這張結案後仍缺號次，缺口才回來。",
 
   policy_validity:
     "**先問這一筆是不是政見。** 先看有沒有 source_url：有就打開它查證；**沒有的話（系統掃到的多半是這種）自己去找原始出處**。然後三條路選一條：整筆不該存在 → removal；分類或狀態標錯、或是政見但缺出處 → correction（缺出處就補 policies.source_url）；有出處而且是有效的承諾 → no_change 並在 note 說明你查到什麼。" +
@@ -888,7 +889,8 @@ export function buildReportTemplate(
 export const TASK_BRANCHES: Record<string, string[]> = {
   legacy_audit: ["no_change", "correction", "removal"],
   not_running_recheck: ["correction", "no_change"],
-  candidate_status_stale: ["correction", "no_change"],
+  // 2026-11-02（policy-ops#175）：來源是中選會名單查無此人（target.origin＝cec_roster_extra）的，名單上其實有他時用 candidacy 連號次一起交
+  candidate_status_stale: ["correction", "candidacy", "no_change"],
   policy_validity: ["removal", "correction", "no_change"],
   duplicate_policy: ["removal", "correction", "no_change"],
   // 名單清查（2026-11-01 起併進名冊類差異，target.items 逐項各用既有型別交件）：同一個單位清查底下可能出現這幾種
