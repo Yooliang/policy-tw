@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { JP_PROTOCOL_URL, JP_PROTOCOL_VERSION } from "../_shared/jp/protocol.ts";
 import { jpClient } from "../_shared/jp/client.ts";
-import { QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
+import { minutesUntilReset, QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
 import { ipHashOf, QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/jp/contribute-handler.ts";
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/jp/verify-handler.ts";
@@ -17,6 +17,7 @@ import { issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-toke
 import { isSameClaimType, RESOLVED_CLAIM_HELP } from "../_shared/same-claims.ts";
 import { jpSameClaimProbe } from "../_shared/jp/same-claim-probe.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
+import { fetchDisputeContext } from "../_shared/dispute-verify.ts";
 
 /**
  * jp-next — 日本站統一派工端點（對應正見的 next）。無金鑰，誰都能用（同正見 next，沒有白名單）。
@@ -153,6 +154,10 @@ async function handle(req: Request): Promise<Response> {
       submit: { limit: submitQuota.limit, used: ipContribRes.count ?? 0, remaining: Math.max(0, submitQuota.limit - (ipContribRes.count ?? 0)) },
       verify: { limit: verifyQuota.limit, used: ipVoteRes.count ?? 0, remaining: Math.max(0, verifyQuota.limit - (ipVoteRes.count ?? 0)) },
     };
+    // 額度用完就只派另一種（同正見 /next 協議 1.102.0，2026-10-22；日本站 policy-ops#178 A）：提交額度用完 → 只派驗證票（派任務，代理查完交件吃 429，白做）；
+    // 驗證額度用完 → 只派任務。兩邊都用完、或提交用完又沒有合格驗證票 → 回 none 並說明（見下面 submitFull 那段）。額度還有時一字不變。
+    const submitFull = quota.submit.remaining <= 0;
+    const verifyFull = quota.verify.remaining <= 0;
     const toolNotice = await agentToolNoticeOnce(supabase, agentName, agentTool, true);
     const base = { success: true, ...nextIdentityFields(actor, agentName), agent_tool: agentTool, total_pending: totalPending, open_tasks: openTasks, queue: "single", quota, protocol_version: JP_PROTOCOL_VERSION, docs: JP_PROTOCOL_URL, ...(toolNotice ? { notice: toolNotice } : {}) };
 
@@ -186,7 +191,7 @@ async function handle(req: Request): Promise<Response> {
     // 驗證只試一次認領（同正見 /next，2026-10-14）
     let verifyTried = false;
     const serveVerify = async (): Promise<Response | null> => {
-      if (verifyTried) return null;
+      if (verifyTried || verifyFull) return null;
       verifyTried = true;
       // 派發即綁定＋原子認領：同網段並行的請求認領不到就換下一筆（_shared/verify-claim.ts，rpc 落在 policy_jp）
       const claim = await claimVerifyCandidate(supabase, candidates, { ipHash, agentName });
@@ -224,6 +229,8 @@ async function handle(req: Request): Promise<Response> {
         const sc = await sameClaimsFor(pick.contribution_type, pick.payload, pick.id);
         if (sc) verifyCurrent.same_claims = sc;
       }
+      // 爭點驗證（協議 1.96.0，同正見 /next）：票數超過「平均 × 標出倍數」就附前面每一票的結論與理由，這一輪不收 unsure；讀不到不擋派工
+      const dispute = await fetchDisputeContext(supabase, pick.id);
       return json({
         ...base,
         kind: "verify",
@@ -242,11 +249,12 @@ async function handle(req: Request): Promise<Response> {
           unsure_count: pick.unsure_count,
           required_agree: typeof pick.effective_required === "number" ? pick.effective_required : requiredAgree(pick.contribution_type, pick.payload, pick.source_urls ?? []),
           created_at: pick.created_at,
+          ...(dispute ? { dispute } : {}),
         },
-        how_to: (pick.contribution_type === "no_change"
+        how_to: (dispute ? `${dispute.instruction}（前面每一票在 item.dispute.prior。）` : "") + (pick.contribution_type === "no_change"
           ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
           : "打開 source_urls，逐欄核對 payload 與來源原文對不對得上。") +
-          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST jp-report {kind:'verify', contribution_id, verdict: agree|disagree|unsure, evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回）；不確定投 unsure，不要猜。",
+          "再逐筆打開 source_urls 核對 payload 每個欄位 → POST jp-report {kind:'verify', contribution_id, verdict: " + (dispute ? "agree|disagree（這一輪不收 unsure）" : "agree|disagree|unsure") + ", evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回）；" + (dispute ? "這一輪是爭點驗證、不收 unsure，請選同意或反對。" : "不確定投 unsure，不要猜。"),
       });
     };
 
@@ -280,7 +288,7 @@ async function handle(req: Request): Promise<Response> {
     const taskHead = pickQueueTaskHead(freeQueue, seed);
     const manualHead = taskHead && isManualTaskId(taskHead.task_id) ? taskHead : null;
     const autoHead = taskHead && !manualHead ? taskHead : null;
-    const verifyHead = candidates[0] ?? null;
+    const verifyHead = verifyFull ? null : (candidates[0] ?? null);
     const taskHeads = [
       manualHead ? { kind: "manual" as const, queue_at: manualHead.queue_at } : null,
       autoHead ? { kind: "auto" as const, queue_at: autoHead.queue_at } : null,
@@ -293,6 +301,18 @@ async function handle(req: Request): Promise<Response> {
       const served = await serveVerify();
       if (served) return served;
       head = pickQueueHead(taskHeads);
+    }
+    if (submitFull) {
+      // 提交額度用完：隊頭若是任務，驗證還沒試過——先派隊列中最前面那張合格驗證票（同正見 /next）
+      const servedVerify = await serveVerify();
+      if (servedVerify) return servedVerify;
+      // 驗證票沒派成（沒有合格的、驗證額度也用完、或被同網段並行認領走）就是沒事可做，不派任務
+      const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, minutesUntilReset()) : RETRY_AFTER_MIN;
+      const resetClock = taipeiClock(quotaWindowEnd());
+      const reason = verifyFull
+        ? `這個時段額度已用完（提交與驗證都滿了），${resetClock}（台北，${quotaWindowEnd().toISOString()}）重置；請等重置後再來`
+        : `這個時段提交額度已用完（${resetClock} 台北重置），但驗證額度還有、驗證還可以做；目前剛好沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來，有新的待驗證票就會派給你`;
+      return json({ ...base, kind: "none", reason, retry_after_min: retryMin });
     }
     // 每台機器自己的 2:1（插隊期間 1:2）2026-10-13 起拿掉（同正見 /next，20261011330000）：驗證與任務只照排序鍵（queue_at）先後，
     // 驗證列本身多 14 天（policy_jp.queue_settings.verify_priority_seconds，20261011360000）
