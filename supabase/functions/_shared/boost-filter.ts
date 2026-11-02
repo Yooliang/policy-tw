@@ -2,12 +2,15 @@
  * 插隊條件的白名單驗證（2026-09-22）。端點無金鑰，所以條件只能是固定詞彙、固定型別、有上限，
  * 不能有任何自由文字進 SQL。詞彙與 SQL 端 task_boost_matches 一致。
  */
-export const BOOST_FILTER_KEYS = ["regions", "election_id", "election_types", "task_types", "missing_avatar", "politician_ids", "kinds"] as const;
+export const BOOST_FILTER_KEYS = ["regions", "election_id", "election_types", "task_types", "missing_avatar", "politician_ids", "kinds", "task_ids"] as const;
 export type BoostFilterKey = typeof BOOST_FILTER_KEYS[number];
 export const BOOST_KINDS = ["task", "verify"] as const;
 export const BOOST_LABEL_MAX = 60;
 /** 同一個來源 IP 一小時最多幾次：插隊是一次性的，連按沒有意義，只會把別人的插隊往後推 */
 export const BOOST_PER_IP_PER_HOUR = 6;
+
+/** 佇列項的 task_id：verify:<uuid>、auto:<型別>:<…>、手動任務 uuid——只收這些字元，不能有空白與引號 */
+const TASK_ID_RE = /^[A-Za-z0-9:_.\-]{1,200}$/;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,6 +55,11 @@ export function validateBoostFilter(raw: unknown): { ok: true; filter: Record<st
       case "missing_avatar": {
         if (typeof v !== "boolean") return { ok: false, error: "missing_avatar 要是 true／false" };
         if (v) out.missing_avatar = true; break;
+      }
+      case "task_ids": {
+        if (!Array.isArray(v) || v.length === 0 || v.length > 50) return { ok: false, error: "task_ids 要是 1～50 個佇列項 task_id 的陣列（verify:<貢獻 id>、auto:…、手動任務 id）" };
+        if (v.some((x) => typeof x !== "string" || !TASK_ID_RE.test(x))) return { ok: false, error: "task_ids 每一項要是 task_id 字串（只含英數與 : _ . -，最長 200 字）" };
+        out.task_ids = [...new Set(v as string[])]; break;
       }
       case "politician_ids": {
         if (!Array.isArray(v) || v.length === 0 || v.length > 200) return { ok: false, error: "politician_ids 要是 1～200 個 uuid 的陣列" };
