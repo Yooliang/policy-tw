@@ -171,7 +171,7 @@ export interface Legend {
   /** CSS 漸層 */
   css: string
   ticks: LegendTick[]
-  /** 另外標示的色塊：收錄率模式是「無登記資料」，人數模式是「0 人」 */
+  /** 另外標示的色塊：收錄率模式是「無中選會資料」，人數模式是「0 人」 */
   noData: { color: string; label: string } | null
 }
 
@@ -181,7 +181,7 @@ export function legendFor(mode: ColorMode, max: number): Legend {
     return {
       css: cssGradient((t) => coverageColor(t)),
       ticks: COVERAGE_TICKS.map((p) => ({ pos: p / 100, label: `${p}%` })),
-      noData: { color: NO_DATA_COLOR, label: '無登記資料' },
+      noData: { color: NO_DATA_COLOR, label: '無中選會資料' },
     }
   }
   const values = [1, 10, 100, 1000].filter((v) => v < max)
@@ -198,12 +198,22 @@ export function legendFor(mode: ColorMode, max: number): Legend {
   return { css: cssGradient((t) => gradientAt(COUNT_STOPS, t)), ticks, noData: { color: COUNT_ZERO_COLOR, label: '0 人' } }
 }
 
+/** 缺口＝中選會人數 − 有號次人數；沒有中選會人數（null）回 null；有號次比中選會多時不顯示負數（回 0） */
+export function gapOf(u: Pick<MapUnit, 'candidates' | 'registered'>): number | null {
+  return u.registered === null ? null : Math.max(0, u.registered - u.candidates)
+}
+
+/** 麵包屑旁的「有號次／中選會」寫法；沒有中選會人數就只寫有號次 */
+export function ratioText(candidates: number, registered: number | null): string {
+  return registered === null ? `${candidates} 人` : `${candidates}／${registered} 人`
+}
+
 /** 提示框的各行（只放標籤與數字；沒有資料的欄不出現） */
 export function tooltipLines(u: MapUnit): Array<{ label: string; value: string }> {
-  const lines = [{ label: '收錄參選人', value: `${u.candidates} 人` }]
-  if (u.registered !== null) lines.push({ label: '中選會登記', value: `${u.registered} 人` })
-  const pct = coveragePercent(u)
-  if (pct !== null) lines.push({ label: '收錄率', value: `${pct}%` })
+  const lines = [{ label: '有號次', value: `${u.candidates} 人` }]
+  if (u.registered !== null) lines.push({ label: '中選會', value: `${u.registered} 人` })
+  const gap = gapOf(u)
+  if (gap !== null && gap > 0) lines.push({ label: '缺', value: `${gap} 人` })
   if (u.seats !== null) lines.push({ label: '應選席次', value: `${u.seats} 席` })
   return lines
 }

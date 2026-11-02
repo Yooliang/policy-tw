@@ -4,7 +4,7 @@ export interface MapCrumb {
   label: string
   code: string | null
 }
-defineProps<{ crumbs: MapCrumb[]; people: number | null }>()
+defineProps<{ crumbs: MapCrumb[]; people: string | null }>()
 defineEmits<{ pick: [code: string | null] }>()
 </script>
 
@@ -16,6 +16,6 @@ defineEmits<{ pick: [code: string | null] }>()
         :data-testid="`map-crumb-${i}`" @click="$emit('pick', c.code)">{{ c.label }}</button>
       <span v-else class="px-1.5 py-0.5 text-navy-900" data-testid="map-current">{{ c.label }}</span>
     </template>
-    <span v-if="people !== null" class="ml-1 text-slate-500 font-bold" data-testid="map-total">{{ people }} 人</span>
+    <span v-if="people !== null" class="ml-1 text-slate-500 font-bold" data-testid="map-total">{{ people }}</span>
   </nav>
 </template>

@@ -34,7 +34,7 @@ function onKey(e: KeyboardEvent) { const h = hitOf(e.target); if (h) { e.prevent
     <g v-for="d in layers" :key="d.layer.key" :transform="d.layer.transform">
       <g shape-rendering="crispEdges">
         <path v-for="u in d.units" :key="u.code" :d="d.layer.fills[u.idx]" :fill="unitColor(u, colorMode, maxes[d.layer.level])"
-          class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.candidates} 人`"
+          class="cursor-pointer" role="button" tabindex="0" :aria-label="`${u.name} ${u.registered === null ? u.candidates : u.candidates + '／' + u.registered} 人`"
           :data-k="d.layer.key" :data-i="u.idx" :data-testid="`cell-${u.code}`" :data-count="u.candidates" />
       </g>
       <path class="map-hide-moving" :d="d.layer.boundary" fill="none" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linecap="square" pointer-events="none" opacity="0.85" />

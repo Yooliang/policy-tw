@@ -14,7 +14,7 @@ import { fileCache, labelCache, rowsCache, rowsKey, statsTimeCache } from '../li
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  formatStatsTime, legendFor, normalizeRows, tooltipLines, unitHref,
+  formatStatsTime, legendFor, normalizeRows, ratioText, tooltipLines, unitHref,
   type ColorMode, type CountRow, type MapLevel, type MapUnit,
 } from '../lib/candidacy-map'
 import { outlinePath, placeLabels, type RasterFile } from '../lib/raster-grid'
@@ -575,11 +575,12 @@ const crumbs = computed<MapCrumb[]>(() => {
   if (l.village && lod.value === 'village') out.push({ label: l.village.name, code: l.village.code })
   return out
 })
-const crumbPeople = computed<number | null>(() => {
+const crumbPeople = computed<string | null>(() => {
   const l = located.value
   const u = (lod.value === 'village' ? l.village : null) ?? (lod.value !== 'county' ? l.town : null) ?? l.county
-  if (u) return isReady(u) ? u.candidates : null
-  return countyLayer.value?.ready ? countyLayer.value.built.units.reduce((s, x) => s + x.candidates, 0) : null
+  if (u) return isReady(u) ? ratioText(u.candidates, u.registered) : null
+  const units = countyLayer.value?.ready ? countyLayer.value.built.units : null
+  return units ? ratioText(units.reduce((s, x) => s + x.candidates, 0), units.every((x) => x.registered !== null) ? units.reduce((s, x) => s + (x.registered ?? 0), 0) : null) : null
 })
 
 // ── 名稱標籤：只畫目前這一層、放得下且不互相蓋住的（lib/raster-grid.ts placeLabels）─────────
