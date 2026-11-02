@@ -2,15 +2,18 @@
  * /ai 頁分流圖（policy-ops#174）：把 model_flow_stats 的流量列組成桑基圖的節點與連線。
  * 交件 4 層：模型 → 任務類型 → 交件結果 → 退件原因（只有退件往下分）。
  * 投票 4 層：模型 → 投票 → 同意／不同意／不確定 → 事後證明投對／投錯。
+ * 線寬不用件數：每個模型各自正規化成 100，往後各層是該模型在這條路徑的佔比（量大的模型不會把小模型擠沒）；
+ * 件數另存在 raw，給提示與標籤顯示。
  */
-import { CONTRIBUTION_TYPE_LABEL, type ContribStatsRow, type VoteStatsRow } from './model-quality'
+import { CONTRIBUTION_TYPE_LABEL, type ContribStatsRow, type VoteStatsRow } from './model-quality.ts'
 
 export interface FlowRow { layer: 'contrib' | 'reject' | 'vote'; model: string | null; key1: string | null; key2: string | null; n: number }
 
 /** 色調：綠＝好、紅＝壞、灰＝未定／中性、藍灰＝模型與類型等分類節點 */
 export type Tone = 'good' | 'bad' | 'neutral' | 'group'
 export interface FlowNode { id: string; label: string; tone: Tone }
-export interface FlowLink { source: string; target: string; value: number; tone: Tone }
+/** value＝佔比權重（每個模型出流量加總 100）；raw＝原始件數 */
+export interface FlowLink { source: string; target: string; value: number; tone: Tone; raw: number }
 export interface FlowGraph { nodes: FlowNode[]; links: FlowLink[] }
 
 const MAX_MODELS = 8
@@ -39,12 +42,13 @@ class Builder {
   nodes = new Map<string, FlowNode>()
   links = new Map<string, FlowLink>()
   node(id: string, label: string, tone: Tone) { if (!this.nodes.has(id)) this.nodes.set(id, { id, label, tone }) }
-  link(source: string, target: string, value: number, tone: Tone) {
-    if (value <= 0) return
-    const k = `${source}\u0000${target}`
+  link(source: string, target: string, raw: number, scale: number, tone: Tone) {
+    if (raw <= 0) return
+    const value = raw * scale
+    const k = `${source}|${target}`
     const cur = this.links.get(k)
-    if (cur) cur.value += value
-    else this.links.set(k, { source, target, value, tone })
+    if (cur) { cur.value += value; cur.raw += raw }
+    else this.links.set(k, { source, target, value, tone, raw })
   }
   graph(): FlowGraph {
     const used = new Set<string>()
@@ -73,22 +77,30 @@ export function buildContribFlow(rows: FlowRow[]): FlowGraph {
   const b = new Builder()
   const m2 = (m: string) => (models.has(m) ? m : OTHER_MODEL)
   const t2 = (t: string) => (types.has(t) ? t : OTHER_TYPE)
+  const totals = sumBy(c, (r) => m2(r.model!), (r) => r.n)
+  const scaleOf = (m: string) => 100 / (totals.get(m) || 1)
   for (const r of c) {
     const mid = `m:${m2(r.model!)}`
     const tid = `t:${t2(r.key1!)}`
     const res = RESULT[r.key2!] ?? RESULT.other
-    const rid = `r:${r.key2 in RESULT ? r.key2 : 'other'}`
+    const rid = `r:${r.key2! in RESULT ? r.key2 : 'other'}`
     b.node(mid, m2(r.model!), 'group')
     b.node(tid, types.has(r.key1!) ? (CONTRIBUTION_TYPE_LABEL[r.key1!] ?? r.key1!) : OTHER_TYPE, 'group')
     b.node(rid, res.label, res.tone)
-    b.link(mid, tid, r.n, 'group')
-    b.link(tid, rid, r.n, res.tone)
+    const sc = scaleOf(m2(r.model!))
+    b.link(mid, tid, r.n, sc, 'group')
+    b.link(tid, rid, r.n, sc, res.tone)
   }
-  for (const r of rows) {
-    if (r.layer !== 'reject' || !r.key1) continue
+  // 退件原因：有模型的照該模型正規化；沒帶模型的用「退件總佔比／退件總件數」的平均比例
+  const rej = rows.filter((r) => r.layer === 'reject' && r.key1)
+  const rejRaw = c.filter((r) => r.key2 === 'rejected').reduce((a, r) => a + r.n, 0)
+  const rejWeight = c.filter((r) => r.key2 === 'rejected').reduce((a, r) => a + r.n * scaleOf(m2(r.model!)), 0)
+  const avgScale = rejRaw > 0 ? rejWeight / rejRaw : 0
+  for (const r of rej) {
     b.node('r:rejected', RESULT.rejected.label, 'bad')
-    b.node(`x:${r.key1}`, REASON[r.key1] ?? '其他原因', 'bad')
-    b.link('r:rejected', `x:${r.key1}`, r.n, 'bad')
+    b.node(`x:${r.key1}`, REASON[r.key1!] ?? '其他原因', 'bad')
+    const sc = r.model && totals.has(m2(r.model)) ? scaleOf(m2(r.model)) : avgScale
+    b.link('r:rejected', `x:${r.key1}`, r.n, sc, 'bad')
   }
   return b.graph()
 }
@@ -97,18 +109,21 @@ export function buildVoteFlow(rows: FlowRow[]): FlowGraph {
   const v = rows.filter((r) => r.layer === 'vote' && r.model && r.key1)
   const models = topKeys(sumBy(v, (r) => r.model, (r) => r.n), MAX_MODELS, (k) => k === '系統票（Jev）')
   const b = new Builder()
-  for (const r of v) {
-    const name = models.has(r.model!) ? r.model! : OTHER_MODEL
+  const nameOf = (m: string) => (models.has(m) ? m : OTHER_MODEL)
+  const valid = v.filter((r) => VERDICT[r.key1!])
+  const totals = sumBy(valid, (r) => nameOf(r.model!), (r) => r.n)
+  for (const r of valid) {
+    const name = nameOf(r.model!)
     const ver = VERDICT[r.key1!]
-    if (!ver) continue
+    const sc = 100 / (totals.get(name) || 1)
     b.node(`m:${name}`, name, 'group')
     b.node('v', '投票', 'group')
     b.node(`d:${r.key1}`, ver.label, ver.tone)
-    b.link(`m:${name}`, 'v', r.n, 'group')
-    b.link('v', `d:${r.key1}`, r.n, ver.tone)
+    b.link(`m:${name}`, 'v', r.n, sc, 'group')
+    b.link('v', `d:${r.key1}`, r.n, sc, ver.tone)
     if (r.key2 === 'right' || r.key2 === 'wrong') {
       b.node(`o:${r.key2}`, r.key2 === 'right' ? '投對' : '投錯', r.key2 === 'right' ? 'good' : 'bad')
-      b.link(`d:${r.key1}`, `o:${r.key2}`, r.n, r.key2 === 'right' ? 'good' : 'bad')
+      b.link(`d:${r.key1}`, `o:${r.key2}`, r.n, sc, r.key2 === 'right' ? 'good' : 'bad')
     }
   }
   return b.graph()

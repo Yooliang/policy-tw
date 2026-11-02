@@ -25,7 +25,14 @@ function parseDays(v: unknown): AiReadsDays {
 }
 // ?days= 讓網址可以分享
 const days = ref<AiReadsDays>(parseDays(route.query.days))
+// ?flow=count 切到「數量」；預設「比例」
+const flow = ref<'pct' | 'count'>(route.query.flow === 'count' ? 'count' : 'pct')
 const paneActive = usePaneActive()
+watch(flow, (f) => {
+  if (!paneActive.value) return
+  const { flow: _drop, ...rest } = route.query
+  router.replace({ query: f === 'count' ? { ...rest, flow: 'count' } : rest })
+})
 watch(days, (d) => {
   if (!paneActive.value) return
   const { days: _drop, ...rest } = route.query
@@ -60,7 +67,7 @@ usePageHead({
           </div>
         </template>
       </AiReadsPanel>
-      <ModelQualityPanel />
+      <ModelQualityPanel v-model:flow="flow" />
     </div>
   </div>
 </template>
