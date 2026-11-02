@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { sankey, sankeyLeft } from 'd3-sankey'
-import type { FlowGraph, Tone } from '../../lib/model-flow'
+import { linkText, nodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
 
 /** 桑基圖：寬螢幕橫向、手機直向。點節點只亮經過它的線（上下游全部），再點一次或點空白處取消。 */
 const props = defineProps<{ graph: FlowGraph; name: string; mode?: 'pct' | 'count' }>()
@@ -18,8 +18,6 @@ onBeforeUnmount(() => mq?.removeEventListener('change', onMq))
 interface LNode { id: string; label: string; tone: Tone; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
 interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone }
 
-const SMALL_SAMPLE = 10
-const pct = (v: number) => `${(Math.round(v * 10) / 10).toFixed(1)}%`
 
 const layout = computed(() => {
   const g = props.graph
@@ -46,19 +44,18 @@ const layout = computed(() => {
   }
   const rawOf = (id: string) => Math.max(inRaw.get(id) ?? 0, outRaw.get(id) ?? 0)
   const rootTotal = nodes.filter((n) => n.layer === 0).reduce((a, n) => a + n.value, 0) || 1
-  const countText = (id: string) => {
-    const n = rawOf(id)
-    return n < SMALL_SAMPLE ? `僅 ${n.toLocaleString()} 件` : `${n.toLocaleString()} 件`
-  }
-  const count = props.mode === 'count'
-  const nodeText = (n: LNode) => (n.layer === 0 || count ? `${n.label}（${countText(n.id)}）` : `${n.label} ${pct((n.value / rootTotal) * 100)}（${countText(n.id)}）`)
+  // 比例模式只顯示百分比（不帶件數、不提示樣本少）；數量模式才顯示件數
+  const nodeLabel = (n: LNode) => nodeText(props.mode, {
+    label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100,
+    hideShare: n.layer === 0 && n.id.startsWith('model:'), // 模型是各自等寬的 100%，節點不標百分比
+  })
   const links = res.links.map((l) => {
     const s = byId.get(l.source.id)!
     const t = byId.get(l.target.id)!
     const d = vertical
       ? `M${l.y0},${s.y1} C${l.y0},${(s.y1 + t.y0) / 2} ${l.y1},${(s.y1 + t.y0) / 2} ${l.y1},${t.y0}`
       : `M${s.x1},${l.y0} C${(s.x1 + t.x0) / 2},${l.y0} ${(s.x1 + t.x0) / 2},${l.y1} ${t.x0},${l.y1}`
-    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: `${s.label} → ${t.label}：${pct((l.value / (s.value || 1)) * 100)}（${l.raw.toLocaleString()} 件）` }
+    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
   })
   const W = vertical ? span : flowLen
   const H = vertical ? flowLen : span
@@ -67,7 +64,7 @@ const layout = computed(() => {
   const labels: { id: string; x: number; y: number; anchor: string; text: string }[] = []
   const lastRight = new Map<number, number>()
   for (const n of [...nodes].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0)) {
-    const text = nodeText(n)
+    const text = nodeLabel(n)
     if (!vertical) {
       const left = n.layer === maxLayer
       labels.push({ id: n.id, x: left ? n.x0 - 5 : n.x1 + 5, y: (n.y0 + n.y1) / 2 + 4, anchor: left ? 'end' : 'start', text })
@@ -80,7 +77,7 @@ const layout = computed(() => {
       labels.push({ id: n.id, x: start, y: n.y0 - 4, anchor: 'start', text })
     }
   }
-  const nodeTitle = new Map(nodes.map((n) => [n.id, nodeText(n)]))
+  const nodeTitle = new Map(nodes.map((n) => [n.id, nodeLabel(n)]))
   return { nodes, links, W, H, labels, nodeTitle }
 })
 

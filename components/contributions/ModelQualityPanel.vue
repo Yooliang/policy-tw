@@ -1,26 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { onPaneShown } from '../../composables/usePane'
 import { Cpu, ChevronRight } from 'lucide-vue-next'
 import LoadError from '../LoadError.vue'
 import SankeyChart from './SankeyChart.vue'
-import { buildContribFlow, buildVoteFlow, fallbackFlowRows, type FlowRow } from '../../lib/model-flow'
+import FlowDimOrder from './FlowDimOrder.vue'
+import { CONTRIB_DIMS, VOTE_DIMS, buildContribFlow, buildVoteFlow, fallbackFlowRows, type FlowRow } from '../../lib/model-flow'
 import { supabasePublic } from '../../lib/supabase'
 import { withTimeoutAndRetry } from '../../lib/retry'
 import {
-  DEFAULT_MODEL_STATS_DAYS, MIN_TYPE_N, MODEL_STATS_DAYS, SMALL_SAMPLE, formatPct, isSmallSample, summarizeContributions, summarizeVotes,
+  DEFAULT_MODEL_STATS_DAYS, MIN_TYPE_N, SMALL_SAMPLE, formatPct, isSmallSample, summarizeContributions, summarizeVotes,
   type ContribStatsRow, type Ratio, type RawTool, type VoteStatsRow,
 } from '../../lib/model-quality'
 
 /**
  * 各模型表現（2026-10-03 維護者：各 AI 模型的交件與投票表現做成固定功能，不用每次叫主線手動查）。
  * 彙總在資料庫做（model_contribution_stats／model_vote_stats），模型名稱由 model_display_name() 正規化；
- * 期間自己一組（7／14／30 天，預設 14），不跟整頁的時間窗：樣本要夠大比例才有意義，24 小時沒有用。
+ * 期間固定 14 天（2026-11-02 維護者：拿掉期間切換）：樣本要夠大比例才有意義，24 小時沒有用。
+ * 顯示三選一：比例／數量（桑基圖，維度順序可拖曳）／表格（原本的各模型表現表）。
  */
 
-const flowMode = defineModel<'pct' | 'count'>('flow', { default: 'pct' })
-const FLOW_MODES = [{ id: 'pct', label: '比例' }, { id: 'count', label: '數量' }] as const
-const days = ref<number>(DEFAULT_MODEL_STATS_DAYS)
+const flowMode = defineModel<'pct' | 'count' | 'table'>('flow', { default: 'pct' })
+const contribOrder = defineModel<string[]>('dims', { required: true })
+const voteOrder = defineModel<string[]>('vdims', { required: true })
+const FLOW_MODES = [{ id: 'pct', label: '比例' }, { id: 'count', label: '數量' }, { id: 'table', label: '表格' }] as const
+const days = DEFAULT_MODEL_STATS_DAYS
 const contribRows = ref<ContribStatsRow[] | null>(null)
 const voteRows = ref<VoteStatsRow[] | null>(null)
 const flowRows = ref<FlowRow[]>([])
@@ -28,7 +32,7 @@ const failed = ref(false)
 const loading = ref(false)
 
 async function load() {
-  const d = days.value
+  const d = days
   failed.value = false
   loading.value = true
   try {
@@ -38,15 +42,12 @@ async function load() {
       withTimeoutAndRetry(`model_vote_stats ${d}d`, (signal) =>
         supabasePublic.rpc('model_vote_stats', { p_days: d }).abortSignal(signal).throwOnError()),
     ])
-    // 切太快時，晚回來的舊請求不能蓋掉新的
-    if (d !== days.value) return
     contribRows.value = (c.data ?? []) as ContribStatsRow[]
     voteRows.value = (v.data ?? []) as VoteStatsRow[]
-    // 分流量：函式還沒上線時退回現有兩支 stats 組出前 3 層
+    // 分流量（完整路徑）：函式還沒上線時退回現有兩支 stats 組出前 3 層
     try {
-      const f = await withTimeoutAndRetry(`model_flow_stats ${d}d`, (signal) =>
-        supabasePublic.rpc('model_flow_stats', { p_days: d }).abortSignal(signal).throwOnError())
-      if (d !== days.value) return
+      const f = await withTimeoutAndRetry(`model_flow_paths ${d}d`, (signal) =>
+        supabasePublic.rpc('model_flow_paths', { p_days: d }).abortSignal(signal).throwOnError())
       flowRows.value = (f.data ?? []) as FlowRow[]
     } catch (e) {
       console.info('[統計] 分流量讀取失敗，改用現有彙總', e)
@@ -54,18 +55,17 @@ async function load() {
     }
   } catch (e) {
     console.info('[統計] 各模型表現讀取失敗', e)
-    if (d === days.value) failed.value = true
+    failed.value = true
   } finally {
-    if (d === days.value) loading.value = false
+    loading.value = false
   }
 }
 onMounted(load)
 onPaneShown(load)
-watch(days, load)
 
 const contrib = computed(() => summarizeContributions(contribRows.value ?? []))
-const contribFlow = computed(() => buildContribFlow(flowRows.value))
-const voteFlow = computed(() => buildVoteFlow(flowRows.value))
+const contribFlow = computed(() => buildContribFlow(flowRows.value, contribOrder.value))
+const voteFlow = computed(() => buildVoteFlow(flowRows.value, voteOrder.value))
 const votes = computed(() => summarizeVotes(voteRows.value ?? []))
 
 const expanded = ref<Set<string>>(new Set())
@@ -84,15 +84,15 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="model-quality">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
       <h3 class="font-black text-navy-900 flex items-center gap-2"><Cpu :size="18" class="text-indigo-600" />各模型表現（近 {{ days }} 天）</h3>
-      <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="期間" data-testid="model-quality-range">
-        <button v-for="d in MODEL_STATS_DAYS" :key="d" type="button"
-          :class="['px-3 py-1.5 text-sm font-black transition-colors whitespace-nowrap', days === d ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:text-blue-600']"
-          :aria-pressed="days === d" @click="days = d">
-          {{ d }}天
+      <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="顯示方式" data-testid="model-flow-mode">
+        <button v-for="m in FLOW_MODES" :key="m.id" type="button"
+          :class="['px-3 py-1.5 text-sm font-black transition-colors whitespace-nowrap', flowMode === m.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:text-blue-600']"
+          :aria-pressed="flowMode === m.id" @click="flowMode = m.id">
+          {{ m.label }}
         </button>
       </div>
     </div>
-    <p class="text-xs text-slate-500 mb-3">
+    <p v-if="flowMode === 'table'" class="text-xs text-slate-500 mb-3">
       模型名稱依代理自報的「工具/模型」歸類；只寫系列、沒寫版本的（例如只寫 haiku）分不出是哪一代，單獨一列。
       百分比底下的小字是分母件數，不到 {{ SMALL_SAMPLE }} 件的淡色顯示。點模型名稱看各型別細表與歸進這一列的原始寫法。
     </p>
@@ -100,22 +100,21 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
     <LoadError v-if="failed" inline message="各模型表現暫時讀不到" @retry="load" />
     <p v-else-if="contribRows === null" class="text-sm text-slate-400">讀取中</p>
     <template v-else>
-      <div class="flex justify-end mt-2">
-        <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="分流圖單位" data-testid="model-flow-mode">
-          <button v-for="m in FLOW_MODES" :key="m.id" type="button"
-            :class="['px-3 py-1.5 text-sm font-black transition-colors whitespace-nowrap', flowMode === m.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:text-blue-600']"
-            :aria-pressed="flowMode === m.id" @click="flowMode = m.id">
-            {{ m.label }}
-          </button>
+      <template v-if="flowMode !== 'table'">
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-3 mb-1">
+          <h4 class="font-bold text-slate-700 text-sm">交件分流</h4>
+          <FlowDimOrder v-model:order="contribOrder" :dims="CONTRIB_DIMS" name="交件分流" />
         </div>
-      </div>
-      <h4 class="font-bold text-slate-700 text-sm mt-2 mb-1">交件分流</h4>
-      <SankeyChart :graph="contribFlow" :mode="flowMode" name="交件分流" :class="{ 'opacity-60': loading }" />
-      <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">投票分流</h4>
-      <SankeyChart :graph="voteFlow" :mode="flowMode" name="投票分流" :class="{ 'opacity-60': loading }" />
-
+        <SankeyChart :graph="contribFlow" :mode="flowMode" name="交件分流" :class="{ 'opacity-60': loading }" />
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-5 mb-1">
+          <h4 class="font-bold text-slate-700 text-sm">投票分流</h4>
+          <FlowDimOrder v-model:order="voteOrder" :dims="VOTE_DIMS" name="投票分流" />
+        </div>
+        <SankeyChart :graph="voteFlow" :mode="flowMode" name="投票分流" :class="{ 'opacity-60': loading }" />
+      </template>
+      <template v-else>
       <!-- A. 交件 -->
-      <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">交件</h4>
+      <h4 class="font-bold text-slate-700 text-sm mt-3 mb-1">交件</h4>
       <p class="text-xs text-slate-500 mb-2">
         上線率、退件率只算已有結果（上線＋退件）的件數；等票中、已被取代、撤回另外列件數，加總等於交件數。
         「無異動查無」是無異動回報裡寫回查無或打不開的比例；「資料型退件」只看新增政見、人物資料、參選紀錄、資料更正。
@@ -221,6 +220,7 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
           </tbody>
         </table>
       </div>
+      </template>
     </template>
   </section>
 </template>
