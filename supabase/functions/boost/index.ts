@@ -32,6 +32,7 @@ const USAGE = {
     { label: "六都 2026 全部", filter: { regions: ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市"], election_id: 2026 } },
     { label: "缺照片的人", filter: { missing_avatar: true, task_types: ["profile_gap"] } },
     { label: "2026 縣市長 政見", filter: { election_id: 2026, election_types: ["縣市長"], task_types: ["policy_missing"] } },
+    { label: "只插兩件驗證票", filter: { task_ids: ["verify:<貢獻 id>", "verify:<貢獻 id>"] } },
     { label: "只推驗證", filter: { regions: ["台南市"], kinds: ["verify"] } },
   ],
   docs: `${PROTOCOL_URL}#8-輔助端點`,

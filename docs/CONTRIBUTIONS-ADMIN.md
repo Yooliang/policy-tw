@@ -169,6 +169,7 @@ POST /boost
 - `task_types`（字串陣列）：任務型別（`GET /tasks` 看得到）；驗證項目用 `contribution_type` 比
 - `missing_avatar`（布林）：只要沒有頭像的人物
 - `politician_ids`（uuid 陣列）：指定人物
+- `task_ids`（字串陣列，1～50 個）：佇列項的 task_id，單一項目插隊；驗證票是 `verify:<貢獻 id>`、缺口是 `auto:…`，可單獨使用
 - `kinds`（字串陣列）：只插 `task` 或 `verify`，預設兩種都插
 
 回應帶 `matched_tasks`／`matched_verifies`；`GET /boost` 列最近 20 次與各自還剩多少沒領。誰插的、插了什麼都是公開紀錄（`task_boosts`）。
