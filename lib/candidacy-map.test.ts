@@ -5,7 +5,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   NATIONAL_VIEW, breadcrumbs, buildMap, canDrill, drillDown, drillUp, normalizeRows, parentCodeOf,
-  formatStatsTime, tooltipLines, unitHref, viewKey, type CountRow,
+  formatStatsTime, tooltipLines, gapOf, ratioText, unitHref, viewKey, type CountRow,
 } from "./candidacy-map.ts";
 
 const row = (code: string, over: Partial<CountRow> = {}): CountRow => ({
@@ -93,8 +93,8 @@ Deno.test("unitHref：縣市連縣市頁、鄉鎮連鄉鎮頁、村里連所在�
 
 Deno.test("tooltipLines：登記人數與席次沒有資料就不出現；0 是真的 0、照樣顯示", () => {
   const base = { code: "A", name: "甲", idx: 0, candidates: 3 };
-  assertEquals(tooltipLines({ ...base, registered: null, seats: null }), [{ label: "收錄參選人", value: "3 人" }]);
-  assertEquals(tooltipLines({ ...base, registered: 0, seats: 2 }).map((l) => l.label), ["收錄參選人", "中選會登記", "應選席次"]);
+  assertEquals(tooltipLines({ ...base, registered: null, seats: null }), [{ label: "有號次", value: "3 人" }]);
+  assertEquals(tooltipLines({ ...base, registered: 0, seats: 2 }).map((l) => l.label), ["有號次", "中選會", "應選席次"]);
 });
 
 Deno.test("formatStatsTime：統計時間顯示成台灣時間的 HH:MM；不是時間就不顯示", () => {
@@ -104,4 +104,12 @@ Deno.test("formatStatsTime：統計時間顯示成台灣時間的 HH:MM；不是
   assertEquals(formatStatsTime(null), null);
   assertEquals(formatStatsTime(""), null);
   assertEquals(formatStatsTime("不是時間"), null);
+});
+
+Deno.test("gapOf／ratioText：缺口＝中選會−有號次、不出現負數；沒有中選會人數就沒有缺口", () => {
+  assertEquals(gapOf({ candidates: 45, registered: 50 }), 5);
+  assertEquals(gapOf({ candidates: 12, registered: 10 }), 0);
+  assertEquals(gapOf({ candidates: 3, registered: null }), null);
+  assertEquals(ratioText(45, 50), "45／50 人");
+  assertEquals(ratioText(3, null), "3 人");
 });

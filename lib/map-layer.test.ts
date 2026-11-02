@@ -37,7 +37,7 @@ Deno.test("人數資料回來只重新上色：名稱、path、邊界原封不�
   const u = layer.built.units[0];
   assertEquals([u.candidates, u.registered, u.seats], [30, 40, 5]);
   assert(unitColor(u, "coverage", 30) !== colorBefore, "有登記資料後才有顏色（之前是中性灰）");
-  assertEquals(tooltipLines(u).map((l) => l.label), ["收錄參選人", "中選會登記", "收錄率", "應選席次"]);
+  assertEquals(tooltipLines(u).map((l) => l.label), ["有號次", "中選會", "缺", "應選席次"]);
 });
 
 Deno.test("buildMap：靜態名稱優先，沒有才用資料庫的、再沒有用代碼", () => {

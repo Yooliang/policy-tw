@@ -119,7 +119,7 @@ Deno.test("圖例：收錄率是漸層色條加 0%、50%、90%、100% 刻度與�
   assertEquals(cov.ticks.map((t) => t.label), ["0%", "50%", "90%", "100%"]);
   assertEquals(cov.ticks.map((t) => t.pos), [0, 0.5, 0.9, 1]);
   assert(cov.css.startsWith("linear-gradient(to right,") && cov.css.includes(COVERAGE_STOPS[0][1]) && cov.css.includes(COVERAGE_STOPS[2][1]));
-  assertEquals(cov.noData, { color: NO_DATA_COLOR, label: "無登記資料" });
+  assertEquals(cov.noData, { color: NO_DATA_COLOR, label: "無中選會資料" });
 
   const cnt = legendFor("count", 800);
   assertEquals(cnt.ticks[0].label, "1");
@@ -131,14 +131,14 @@ Deno.test("圖例：收錄率是漸層色條加 0%、50%、90%、100% 刻度與�
   assertEquals(tiny.ticks.map((t) => t.label), ["1"]);
 });
 
-Deno.test("tooltipLines：有登記人數就帶收錄率（照實顯示 >100%）；沒登記或登記 0 就沒有收錄率", () => {
+Deno.test("tooltipLines：有中選會人數就帶缺口（有缺才顯示）；沒有中選會人數就只有有號次", () => {
   assertEquals(tooltipLines(unit(45, 50, 7)), [
-    { label: "收錄參選人", value: "45 人" },
-    { label: "中選會登記", value: "50 人" },
-    { label: "收錄率", value: "90%" },
+    { label: "有號次", value: "45 人" },
+    { label: "中選會", value: "50 人" },
+    { label: "缺", value: "5 人" },
     { label: "應選席次", value: "7 席" },
   ]);
-  assertEquals(tooltipLines(unit(12, 10)).find((l) => l.label === "收錄率")?.value, "120%");
-  assertEquals(tooltipLines(unit(5, null)).map((l) => l.label), ["收錄參選人"]);
-  assertEquals(tooltipLines(unit(5, 0)).map((l) => l.label), ["收錄參選人", "中選會登記"]);
+  assertEquals(tooltipLines(unit(12, 10)).map((l) => l.label), ["有號次", "中選會"], "有號次比中選會多＝沒有缺口，不顯示");
+  assertEquals(tooltipLines(unit(5, null)).map((l) => l.label), ["有號次"]);
+  assertEquals(tooltipLines(unit(5, 0)).map((l) => l.label), ["有號次", "中選會"]);
 });
