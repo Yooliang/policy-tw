@@ -87,7 +87,7 @@ for (const fn of fns) {
   for (let i = 1; i <= MAX_TRIES && !ok; i++) {
     console.log(`\n→ 部署 ${fn}（第 ${i}/${MAX_TRIES} 次）`);
     // --use-api：伺服器端打包，不需要本機（或 CI runner 上）有 Docker 在跑。
-    const r = spawnSync("npx", ["supabase", "functions", "deploy", fn, "--use-api"], { stdio: "inherit", shell: true });
+    const r = spawnSync("npx", ["-y", "supabase@2", "functions", "deploy", fn, "--use-api"], { stdio: "inherit", shell: true });
     ok = r.status === 0;
     if (!ok && i < MAX_TRIES) await sleep(i * 15000);
   }
