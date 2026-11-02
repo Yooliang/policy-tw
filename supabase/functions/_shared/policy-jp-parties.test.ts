@@ -64,7 +64,7 @@ Deno.test("結構：表・臂名・総表・規則・優先層・順位・主控
   const rule = (a: string) => one<Record<string, unknown>>(shared, `SELECT window_kind, from_kind, from_offset, until_kind, until_offset, after_step, enabled, params FROM policy_jp.activity_rules WHERE activity = $1 AND priority IS NULL`, [a]);
   assertEquals(await rule("party_roster"), { window_kind: "event", from_kind: null, from_offset: 0, until_kind: "polling", until_offset: 0, after_step: null, enabled: true, params: { cap: 200 } });
   assertEquals(await rule("party_gap"), { window_kind: "event", from_kind: "polling", from_offset: 1, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 200 } });
-  assertEquals(await rule("party_info"), { window_kind: "always", from_kind: null, from_offset: 0, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 100, seed_parties: (await rule("party_info")).params.seed_parties } });
+  assertEquals(await rule("party_info"), { window_kind: "always", from_kind: null, from_offset: 0, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 100, seed_parties: ((await rule("party_info")).params as Record<string, unknown>).seed_parties } });
   for (const a of ["party_roster", "party_gap"]) assertEquals(await count(shared, `SELECT 1 FROM policy_jp.activity_rules WHERE activity = 'priority:${a}' AND priority IN (1, 3)`), 2, a);
   assertEquals(await count(shared, `SELECT 1 FROM policy_jp.activity_rules WHERE activity = 'priority:party_info'`), 0, "party_info は選挙に属さない＝既定の層");
   const rank = (id: string, t: string) => one<{ r: number }>(shared, `SELECT policy_jp.chain_step_rank($1, $2) AS r`, [id, t]).then((x) => x.r);
