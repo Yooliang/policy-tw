@@ -64,7 +64,7 @@ Deno.test("結構：表・臂名・総表・規則・優先層・順位・主控
   const rule = (a: string) => one<Record<string, unknown>>(shared, `SELECT window_kind, from_kind, from_offset, until_kind, until_offset, after_step, enabled, params FROM policy_jp.activity_rules WHERE activity = $1 AND priority IS NULL`, [a]);
   assertEquals(await rule("party_roster"), { window_kind: "event", from_kind: null, from_offset: 0, until_kind: "polling", until_offset: 0, after_step: null, enabled: true, params: { cap: 200 } });
   assertEquals(await rule("party_gap"), { window_kind: "event", from_kind: "polling", from_offset: 1, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 200 } });
-  assertEquals(await rule("party_info"), { window_kind: "always", from_kind: null, from_offset: 0, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 100 } });
+  assertEquals(await rule("party_info"), { window_kind: "always", from_kind: null, from_offset: 0, until_kind: null, until_offset: 0, after_step: null, enabled: true, params: { cap: 100, seed_parties: (await rule("party_info")).params.seed_parties } });
   for (const a of ["party_roster", "party_gap"]) assertEquals(await count(shared, `SELECT 1 FROM policy_jp.activity_rules WHERE activity = 'priority:${a}' AND priority IN (1, 3)`), 2, a);
   assertEquals(await count(shared, `SELECT 1 FROM policy_jp.activity_rules WHERE activity = 'priority:party_info'`), 0, "party_info は選挙に属さない＝既定の層");
   const rank = (id: string, t: string) => one<{ r: number }>(shared, `SELECT policy_jp.chain_step_rank($1, $2) AS r`, [id, t]).then((x) => x.r);
@@ -164,7 +164,7 @@ Deno.test("candidacy＋party：政党／無所属／名簿にない書き方；�
   assertEquals(await pe(db, x1.peid), { party_id: null, party_basis: null, party_text: "みらい刷新党" });
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.parties`), 0);
   await seed(db);
-  const info = await dispatches(db, INFO);
+  const info = (await dispatches(db, INFO)).filter((d) => d.target.kind !== "seed_party");
   assertEquals(info.length, 1, "書き方の鍵ごと一件");
   assertEquals(info[0].target.count, 2);
   assertEquals(info[0].target.party_text, "みらい刷新党");
@@ -182,7 +182,7 @@ Deno.test("candidacy＋party：政党／無所属／名簿にない書き方；�
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.edit_history WHERE table_name = 'politician_elections' AND field = 'party_id' AND record_id = ANY ($1)`, [[x1.peid, x2.peid]]), 2);
   assertEquals(await count(db, `SELECT 1 FROM policy_jp.source_refs WHERE target_table = 'parties' AND target_id = '${party.id}'`), 1);
   await seed(db);
-  assertEquals(await dispatchIds(db, INFO), []);
+  assertEquals((await dispatches(db, INFO)).filter((d) => d.target.kind !== "seed_party").map((d) => d.task_id), []);
   assertEquals(await lastClosedReason(db, info[0].task_id), "filled");
   // 名簿にある書き方（略称）と party_id
   const y = await addCand(db, "既知三郎", "きちさぶろう", "declared", { party: "みらい" });
@@ -335,4 +335,52 @@ Deno.test("還原驗證：candidacy の入口を元に戻す／窓を壊す／al
   const db2 = await freshDb();
   await db2.exec(noBranch).then(() => assert(false, "分支を消した migration は自我検査で失敗するはず"), (e) => assert(String(e).includes("総表")));
   assertEquals(JP_APPLY_TYPES.includes("party_info"), true);
+});
+
+// =============================================================================================
+// e. 内容三洞（policy-ops#178 C）：政党の種子、「測試」override 解除
+// =============================================================================================
+const HOLES = await readMig("20261102200000_policy_jp_content_holes.sql");
+
+Deno.test("種子：主要政党が target.kind=seed_party の party_info_missing として出る；落庫（同名の政党が入る）と消える；使われている書き方とは 1 件にまとまる", async () => {
+  const db = await freshDb();
+  await seed(db);
+  const seeds = async () => (await dispatches(db, INFO)).filter((d) => d.target.kind === "seed_party");
+  const first = await seeds();
+  assert(first.length >= 10, `種子 ${first.length} 件`);
+  assert(first.every((d) => d.task_id.length === "auto:party_info_missing:".length + 12 && d.what_we_need.includes("総務省")));
+  const ldp = first.find((d) => d.target.party_text === "自由民主党");
+  assert(ldp, "自由民主党の種子");
+  assertEquals(ldp.target.kana_hint, "じゆうみんしゅとう");
+  // 代理が party_info を交件して落庫 → その種子は消え、ほかは残る
+  const out = await partyInfo(db, { name: "自由民主党", kana: "じゆうみんしゅとう", short_name: "自民党", aliases: ["自民"] });
+  assertEquals(out.outcome, "applied", JSON.stringify(out));
+  await seed(db);
+  const after = await seeds();
+  assertEquals(after.length, first.length - 1);
+  assert(!after.some((d) => d.target.party_text === "自由民主党"));
+  assertEquals(await lastClosedReason(db, ldp.task_id), "filled");
+  // 別名だけ先に結ばれた種子（例：公明党を別名として）も消える
+  const komei = after.find((d) => d.target.party_text === "公明党")!;
+  assert(komei);
+  await partyInfo(db, { name: "公明党", kana: "こうめいとう" });
+  await seed(db);
+  assert(!(await seeds()).some((d) => d.target.party_text === "公明党"));
+});
+
+Deno.test("種子：規則の seed_parties を空にすると種子は出ない（還原驗證：種子の腕が効いている）", async () => {
+  const db = await freshDb();
+  await db.exec(`UPDATE policy_jp.activity_rules SET params = params - 'seed_parties' WHERE activity = 'party_info' AND priority IS NULL`);
+  await seed(db);
+  assertEquals((await dispatches(db, INFO)).filter((d) => d.target.kind === "seed_party").length, 0);
+});
+
+Deno.test("manual 臂の「測試」override だけが消える（ほかの理由・ほかの臂は残る）", async () => {
+  const db = await freshDb();
+  await db.exec(`INSERT INTO policy_jp.activity_overrides (activity, "force", reason) VALUES
+    ('manual_visitor', 'closed', '測試'), ('manual_open', 'closed', '測試'), ('manual_open', 'closed', '調査中'), ('election_results', 'closed', '測試')`);
+  const stmt = /DELETE FROM policy_jp\.activity_overrides[\s\S]*?;/.exec(HOLES)![0];
+  await db.exec(stmt);
+  const left = await rows<{ activity: string; reason: string }>(db, `SELECT activity, reason FROM policy_jp.activity_overrides ORDER BY activity, reason`);
+  assertEquals(left, [{ activity: "election_results", reason: "測試" }, { activity: "manual_open", reason: "調査中" }]);
 });

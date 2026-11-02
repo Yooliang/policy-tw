@@ -222,3 +222,16 @@ Deno.test("還原驗證：news-screen.ts の除外（NEGATIVE_AFTER／FAMILY_BET
   assertEquals(l("一宮市長に辞職勧告決議案"), 1, "除外を外すと勧告が線索になる");
   assertEquals(l("一宮市長の父が死去"), 1, "除外を外すと親族の死去が線索になる");
 });
+
+Deno.test("篩い：団体名と首長の語のあいだに「の」＋人名が入る形（NHK の書き方）も拾う", () => {
+  assertEquals(leads("北海道の鈴木知事が辞職の意向"), ["010006:head:resignation"]);
+  assertEquals(leads("愛知県の大村知事が辞職願を提出"), ["230006:head:resignation"]);
+  assertEquals(leads("一宮市の市長が死去"), ["232033:head:death"]);
+  assertEquals(leads("名古屋市の河村市長が急逝"), ["231002:head:death"]);
+  // 別人・対象外：前・元・副は首長ではない、人名の長さ上限、勧告
+  assertEquals(leads("一宮市の前市長が死去"), [], "前市長");
+  assertEquals(leads("一宮市の副市長が辞職"), [], "副市長");
+  assertEquals(leads("愛知県の元知事が死去"), [], "元知事");
+  assertEquals(leads("一宮市の方針を決める会議で、市長が辞職"), [], "の＋6 字以内に収まらない（別の主語）");
+  assertEquals(leads("名古屋市の河村市長に辞職勧告"), []);
+});

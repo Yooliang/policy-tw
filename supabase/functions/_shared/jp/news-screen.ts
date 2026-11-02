@@ -42,6 +42,21 @@ export function sentencesOf(text: string): string[] {
   return text.normalize("NFKC").split(/[。！？\n\r]+/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
+/**
+ * 団体名の直後に来る首長の語の長さ（なければ 0）。
+ *   直接：都道府県＝「知事」、それ以外＝「長」（団体名の末尾の 市・町・村・区 に続けて 市長・町長…）。
+ *   「の」をはさむ形（NHK の見出し・要約に実在：「沖縄県の古謝知事」「御前崎市の市長」「福岡市の高島市長」）：
+ *   の＋6 字以内＋その職の語。前・元・故・副・旧が間に混じるものは別人なので捨てる。
+ */
+function headLen(after: string, e: LgEntry): number {
+  if (e.kind === "prefecture" ? after.startsWith("知事") : after.startsWith("長")) return e.kind === "prefecture" ? 2 : 1;
+  if (!after.startsWith("の")) return 0;
+  const word = e.kind === "prefecture" ? "知事" : e.name.slice(-1) + "長";
+  const m = new RegExp(`^の([^\\s、。「」（）()]{0,6}?)${word}`).exec(after);
+  if (!m || /[前元故副旧]/.test(m[1])) return 0;
+  return m[0].length;
+}
+
 interface Entity { entry: LgEntry; role: OfficeKind; start: number; end: number }
 
 /** 文の中の「団体＋職」。左に漢字が続くものは別の名前の一部として捨てる（直前が所属の都道府県名ならよい） */
@@ -55,9 +70,9 @@ function entitiesIn(sentence: string, idx: LgIndex): { found: Entity[]; ambiguou
       const prev = sentence[at - 1];
       const after = sentence.slice(at + name.length);
       // 候補の職：都道府県は 知事／議会、それ以外は 長／議会
-      const roles: Array<{ role: OfficeKind; len: number; ok: (e: LgEntry) => boolean }> = [
-        { role: "head", len: after.startsWith("知事") ? 2 : 1, ok: (e) => (e.kind === "prefecture" ? after.startsWith("知事") : after.startsWith("長")) },
-        { role: "assembly", len: 2, ok: () => after.startsWith("議会") },
+      const roles: Array<{ role: OfficeKind; ok: (e: LgEntry) => boolean }> = [
+        { role: "head", ok: (e) => headLen(after, e) > 0 },
+        { role: "assembly", ok: () => after.startsWith("議会") },
       ];
       for (const r of roles) {
         const cands = entries.filter((e) => {
@@ -73,7 +88,7 @@ function entitiesIn(sentence: string, idx: LgIndex): { found: Entity[]; ambiguou
           pick = cands.filter((e) => sentence.includes(e.pref_name));
           if (pick.length !== 1) { ambiguous = true; continue; }
         }
-        found.push({ entry: pick[0], role: r.role, start: at, end: at + name.length + (r.role === "head" ? r.len : 2) });
+        found.push({ entry: pick[0], role: r.role, start: at, end: at + name.length + (r.role === "head" ? headLen(after, pick[0]) : 2) });
       }
       at = sentence.indexOf(name, at + 1);
     }

@@ -652,6 +652,7 @@ const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策
 const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
 const T_CLAIM = "20261011370100"; // 驗證派工的原子認領（正見 20261011370000 的日本版；兩支本體只差 schema，逐字比對在 verify-claim.test.ts）
 const T_NEWS = "20261011250000"; // 新聞線 news_discovery（突発の選挙）＋測試名人物の入力拒否・総表での隔離（policy-ops#95）
+const T_HOLES = "20261102200000"; // 内容三洞：party_info 臂に種子（seed_parties）、manual 臂の「測試」override 解除（policy-ops#178 C）
 const T_AVATAR = "20261030120000"; // 人物頭像 avatar_missing＋交件型別 politician_avatar（Wikimedia Commons の自由授權寫真、policy-ops#162）
 const T_CONS = "20261011240000"; // 派工臂對齊正見 D 期：資料一致性 placeholder_politicians／policy_validity／mismatch＋removal 加 target_table=politicians（policy-ops#95）
 const T_PARTY = "20261011230000"; // 派工臂對齊正見 D 期：政党名簿 party_roster／party_gap／party_info＋交件型別 party_info＋party_aliases（policy-ops#95）
@@ -835,7 +836,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   party_missing_tasks: { mig: [T_PARTY], why: "party_roster／party_gap の共通本体（臂名で規則を引く）。task_type=party_missing、task_id=auto:party_missing:<参選 id>。正見は candidacy_source_missing の kind=party/party_roster だが、日本の candidacy_source_missing は official 出典を足す任務で衝突するため別型別" },
   contribution_auto_tasks_party_roster: { mig: [T_PARTY], why: "臂 party_roster（投票日 +0 まで）：party_missing_tasks の薄い包み。FOLLOWED 正見 party_roster の窓；DEVIATED 型別は party_missing" },
   contribution_auto_tasks_party_gap: { mig: [T_PARTY], why: "臂 party_gap（投票日 +1 から）：party_missing_tasks の薄い包み。FOLLOWED 正見 party_gap の窓；DEVIATED 型別は party_missing" },
-  contribution_auto_tasks_party_info: { mig: [T_PARTY], why: "臂 party_info（task_type=party_info_missing）：参選に書かれた政党の書き方が party_aliases に当たらない → 書き方の鍵ごと一件。正見 party_info_missing の前半だけ（改名・解散日の派工は未移植）" },
+  contribution_auto_tasks_party_info: { mig: [T_PARTY, T_HOLES], why: "臂 party_info（task_type=party_info_missing）：参選に書かれた政党の書き方が party_aliases に当たらない → 書き方の鍵ごと一件。正見 party_info_missing の前半だけ（改名・解散日の派工は未移植）" },
   apply_party_info: { mig: [T_PARTY], why: "party_info 交件落庫（正見 applyPartyInfo の日本版＋新規作成）：name＋kana で作る／既存は空欄だけ補完／alias を足す（奪わない）／書き方が当たった参選へ party_id を反映" },
   apply_politician_avatar: { mig: [T_AVATAR], why: "politician_avatar 交件落庫：Wikimedia Commons の寫真だけ（URL 形・授權白名單を SQL でも検査）、空欄を埋めるだけで上書きしない（同じファイルは unchanged、別の画像は conflict）。正見に頭像の交件型別はない（正見は correction の avatar_url）" },
   avatar_subjects: { mig: [T_AVATAR], why: "頭像を集める対象の人：開いている選挙の立候補者（chain_profile_subjects）＋任期中の現職。日本站の新しい臂 avatar_missing の入力。正見に対応物なし（正見は /find-avatar 技能で人が探す）" },
