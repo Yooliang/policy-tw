@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 import AiReadsPanel from '../components/contributions/AiReadsPanel.vue'
@@ -7,38 +7,33 @@ import ModelQualityPanel from '../components/contributions/ModelQualityPanel.vue
 import { usePageHead } from '../composables/usePageHead'
 import { onPaneShown, usePaneActive } from '../composables/usePane'
 import { Bot } from 'lucide-vue-next'
+import { CONTRIB_DIMS, DEFAULT_CONTRIB_ORDER, DEFAULT_VOTE_ORDER, VOTE_DIMS, parseDimOrder } from '../lib/model-flow'
 
 /**
  * AI 頁（2026-10-03 維護者）：AI 讀取、各模型表現從統計頁搬過來，統計頁只留貢獻管線本身的數字。
- * AI 讀取的期間在這頁自己一組（7／14／30 天，預設 7）；各模型表現本來就自帶一組，不動。
+ * 2026-11-02：兩組期間一律固定近 14 天（舊網址的 ?days= 直接忽略）；各模型表現改「比例／數量／表格」三選一。
+ * 網址：?flow=count｜table（預設比例）、?dims=model,result,reason,type（交件分流順序）、?vdims=model,outcome,verdict（投票分流順序）。
  */
 
-const AI_READS_DAYS = [7, 14, 30] as const
-type AiReadsDays = typeof AI_READS_DAYS[number]
-const DEFAULT_AI_READS_DAYS: AiReadsDays = 7
+const DAYS = 14
 
 const route = useRoute()
 const router = useRouter()
-function parseDays(v: unknown): AiReadsDays {
-  const n = Number(v)
-  return (AI_READS_DAYS as readonly number[]).includes(n) ? (n as AiReadsDays) : DEFAULT_AI_READS_DAYS
-}
-// ?days= 讓網址可以分享
-const days = ref<AiReadsDays>(parseDays(route.query.days))
-// ?flow=count 切到「數量」；預設「比例」
-const flow = ref<'pct' | 'count'>(route.query.flow === 'count' ? 'count' : 'pct')
 const paneActive = usePaneActive()
-watch(flow, (f) => {
+const flow = ref<'pct' | 'count' | 'table'>(route.query.flow === 'count' || route.query.flow === 'table' ? route.query.flow : 'pct')
+const dims = ref<string[]>(parseDimOrder(route.query.dims, CONTRIB_DIMS, DEFAULT_CONTRIB_ORDER))
+const vdims = ref<string[]>(parseDimOrder(route.query.vdims, VOTE_DIMS, DEFAULT_VOTE_ORDER))
+const same = (a: readonly string[], b: readonly string[]) => a.join() === b.join()
+function syncQuery() {
   if (!paneActive.value) return
-  const { flow: _drop, ...rest } = route.query
-  router.replace({ query: f === 'count' ? { ...rest, flow: 'count' } : rest })
-})
-watch(days, (d) => {
-  if (!paneActive.value) return
-  const { days: _drop, ...rest } = route.query
-  router.replace({ query: { ...rest, days: String(d) } })
-})
-const rangeLabel = computed(() => `${days.value}D`)
+  const { flow: _f, dims: _d, vdims: _v, days: _days, ...rest } = route.query
+  const q: Record<string, any> = { ...rest }
+  if (flow.value !== 'pct') q.flow = flow.value
+  if (!same(dims.value, DEFAULT_CONTRIB_ORDER)) q.dims = dims.value.join(',')
+  if (!same(vdims.value, DEFAULT_VOTE_ORDER)) q.vdims = vdims.value.join(',')
+  router.replace({ query: q })
+}
+watch([flow, dims, vdims], syncQuery)
 
 usePageHead({
   title: 'AI 表現統計',
@@ -56,18 +51,8 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-6" data-testid="ai-page">
-      <AiReadsPanel :days="days" :range-label="rangeLabel">
-        <template #actions>
-          <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="期間" data-testid="ai-reads-range">
-            <button v-for="d in AI_READS_DAYS" :key="d" type="button"
-              :class="['px-3 py-1.5 text-sm font-black transition-colors whitespace-nowrap', days === d ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:text-blue-600']"
-              :aria-pressed="days === d" @click="days = d">
-              {{ d }}天
-            </button>
-          </div>
-        </template>
-      </AiReadsPanel>
-      <ModelQualityPanel v-model:flow="flow" />
+      <AiReadsPanel :days="DAYS" range-label="近 14 天" />
+      <ModelQualityPanel v-model:flow="flow" v-model:dims="dims" v-model:vdims="vdims" />
     </div>
   </div>
 </template>

@@ -17,8 +17,8 @@ const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
  * 2026-10-03 維護者：代理讀協議改成列表裡的一列、只放數字（原本是表格下方一句註解）；不畫進折線圖。
  */
 
-// 時間窗由外層頁面決定（2026-10-03 起在 /ai 頁，頁上自己一組 7／14／30 天）
-const props = withDefaults(defineProps<{ days?: number; rangeLabel?: string }>(), { days: 7, rangeLabel: '7D' })
+// 時間窗由外層頁面決定（/ai 頁固定近 14 天）
+const props = withDefaults(defineProps<{ days?: number; rangeLabel?: string }>(), { days: 14, rangeLabel: '近 14 天' })
 
 interface Row { kind: string; agent: string; hits: number }
 interface DayRow { day: string; kind: string; hits: number }
@@ -112,7 +112,7 @@ const chartOptions = computed(() => ({
 <template>
   <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="ai-reads">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-      <h3 class="font-black text-navy-900 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取({{ rangeLabel }})</h3>
+      <h3 class="font-black text-navy-900 flex items-center gap-2"><Bot :size="18" class="text-violet-600" />AI 讀取（{{ rangeLabel }}）</h3>
       <slot name="actions" />
     </div>
     <p class="text-xs text-slate-500 mb-3">AI 讀完正見直接回答使用者，不一定有人點進來；這裡數的是正見.tw 被讀了幾次（每日，對數刻度）。</p>

@@ -75,6 +75,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   lineage_handover: '脈絡交接',
   lineage_link: '脈絡上下級',
   party_info: '政黨資訊',
+  regional_stat: '地區統計',
 }
 
 const n = (v: unknown): number => Number(v ?? 0) || 0
