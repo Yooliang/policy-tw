@@ -228,6 +228,17 @@
 - **驗證這種 `correction` 時**：一樣兩張都打開，照上面的標準判斷新的那張是不是比較合適；只看網址打得開就投同意不算數。
 - 同一位、同一張新照片只會開一次。
 
+<!-- spec task: candidate_status_stale -->
+### 查參選狀態（`candidate_status_stale`；來源是名冊查無此人的，連號次一起交）
+
+`target.origin` 是 `cec_roster_extra` 的這種任務：站上標「已登記」，但中選會 2026 候選人名單查無此人。結果有三種：
+
+- 退選或根本沒登記 → `correction`（`politician_elections`、`target_id` 是 `target.politician_election_id`，`candidate_status` 改 `not_running`），附得出出處。
+- **名單上其實有他、只是姓名寫法不同（異體字、同音字）→ 用 `candidacy` 交，連號次一起交**（協議 1.112.0 起）：`politician_id` 照 `target.politician_id`、`election_id` 2026、`election_type` 與 `region` 照 `target`、`candidate_status` 填 `registered`（該縣市選委會的候選人名單公告後填 `qualified`）、`cand_no` 填名單上的號次（中選會選舉專區候選人 JSON 的 `candNo`），`source_urls` 放那份名單網址。姓名寫法要改的另交 `correction` 改 `politicians.name`。驗證與計分照 `candidacy` 補號次的規則（見上方分數表；號次與同單位他人重複會被擋）。
+- 查不到明確結果 → `no_change`，`finding` 寫你看了哪些地方；不要用猜的改成退選。
+
+這種任務開著時，同一筆參選紀錄的補號次缺口（`candidacy_source_missing`、`target.kind` 是 `cand_no`）**不再另派**，避免同一個人同一件事兩張單；這張結案後仍缺號次，缺口才回來。
+
 <!-- spec task: region_mismatch -->
 ### 縣市對不上（`region_mismatch` → `correction` 或 `no_change`）
 
