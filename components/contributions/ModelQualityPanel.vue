@@ -18,6 +18,8 @@ import {
  * 期間自己一組（7／14／30 天，預設 14），不跟整頁的時間窗：樣本要夠大比例才有意義，24 小時沒有用。
  */
 
+const flowMode = defineModel<'pct' | 'count'>('flow', { default: 'pct' })
+const FLOW_MODES = [{ id: 'pct', label: '比例' }, { id: 'count', label: '數量' }] as const
 const days = ref<number>(DEFAULT_MODEL_STATS_DAYS)
 const contribRows = ref<ContribStatsRow[] | null>(null)
 const voteRows = ref<VoteStatsRow[] | null>(null)
@@ -98,10 +100,19 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
     <LoadError v-if="failed" inline message="各模型表現暫時讀不到" @retry="load" />
     <p v-else-if="contribRows === null" class="text-sm text-slate-400">讀取中</p>
     <template v-else>
+      <div class="flex justify-end mt-2">
+        <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm" role="group" aria-label="分流圖單位" data-testid="model-flow-mode">
+          <button v-for="m in FLOW_MODES" :key="m.id" type="button"
+            :class="['px-3 py-1.5 text-sm font-black transition-colors whitespace-nowrap', flowMode === m.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 hover:text-blue-600']"
+            :aria-pressed="flowMode === m.id" @click="flowMode = m.id">
+            {{ m.label }}
+          </button>
+        </div>
+      </div>
       <h4 class="font-bold text-slate-700 text-sm mt-2 mb-1">交件分流</h4>
-      <SankeyChart :graph="contribFlow" name="交件分流" :class="{ 'opacity-60': loading }" />
+      <SankeyChart :graph="contribFlow" :mode="flowMode" name="交件分流" :class="{ 'opacity-60': loading }" />
       <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">投票分流</h4>
-      <SankeyChart :graph="voteFlow" name="投票分流" :class="{ 'opacity-60': loading }" />
+      <SankeyChart :graph="voteFlow" :mode="flowMode" name="投票分流" :class="{ 'opacity-60': loading }" />
 
       <!-- A. 交件 -->
       <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">交件</h4>
