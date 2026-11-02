@@ -652,7 +652,7 @@ const T_LIN = "20261011210000"; // 派工臂對齊正見 C 期第 6 步：政策
 const T_ARCH = "20261011220000"; // 存檔網址（Wayback／archive.today／WARP）照原網址分級（正見 1.89.0 source_unwrap_archive 的日本版，policy-ops#95）
 const T_CLAIM = "20261011370100"; // 驗證派工的原子認領（正見 20261011370000 的日本版；兩支本體只差 schema，逐字比對在 verify-claim.test.ts）
 const T_NEWS = "20261011250000"; // 新聞線 news_discovery（突発の選挙）＋測試名人物の入力拒否・総表での隔離（policy-ops#95）
-const T_HOLES = "20261102200000"; // 内容三洞：party_info 臂に種子（seed_parties）、manual 臂の「測試」override 解除（policy-ops#178 C）
+const T_HOLES = "20261102220000"; // 内容三洞：party_info 臂に種子（seed_parties）、manual 臂の「測試」override 解除（policy-ops#178 C）
 const T_AVATAR = "20261030120000"; // 人物頭像 avatar_missing＋交件型別 politician_avatar（Wikimedia Commons の自由授權寫真、policy-ops#162）
 const T_CONS = "20261011240000"; // 派工臂對齊正見 D 期：資料一致性 placeholder_politicians／policy_validity／mismatch＋removal 加 target_table=politicians（policy-ops#95）
 const T_PARTY = "20261011230000"; // 派工臂對齊正見 D 期：政党名簿 party_roster／party_gap／party_info＋交件型別 party_info＋party_aliases（policy-ops#95）

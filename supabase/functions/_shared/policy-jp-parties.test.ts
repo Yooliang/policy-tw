@@ -340,7 +340,7 @@ Deno.test("還原驗證：candidacy の入口を元に戻す／窓を壊す／al
 // =============================================================================================
 // e. 内容三洞（policy-ops#178 C）：政党の種子、「測試」override 解除
 // =============================================================================================
-const HOLES = await readMig("20261102200000_policy_jp_content_holes.sql");
+const HOLES = await readMig("20261102220000_policy_jp_content_holes.sql");
 
 Deno.test("種子：主要政党が target.kind=seed_party の party_info_missing として出る；落庫（同名の政党が入る）と消える；使われている書き方とは 1 件にまとまる", async () => {
   const db = await freshDb();
