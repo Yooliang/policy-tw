@@ -18,8 +18,10 @@ import { balanceTone, BALANCE_ORANGE_USD, BALANCE_RED_USD, BALANCE_YELLOW_USD } 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const ROOT = new URL("../../../", import.meta.url);
 const MIG = "20261021040000_platform_balance_private.sql";
+const MIG_SPLIT = "20261102130000_platform_cost_typesafe_split.sql";
 const read = async (url: URL) => (await Deno.readTextFile(url)).replace(/\r\n/g, "\n");
 const MIG_SQL = await read(new URL(MIG, MIGRATIONS));
+const MIG_SPLIT_SQL = await read(new URL(MIG_SPLIT, MIGRATIONS));
 
 function mutate(sql: string, from: string, to: string): string {
   const n = sql.split(from).length - 1;
@@ -27,7 +29,7 @@ function mutate(sql: string, from: string, to: string): string {
   return sql.replace(from, () => to);
 }
 
-async function freshDb(mig: string = MIG_SQL): Promise<PGlite> {
+async function freshDb(mig: string = MIG_SQL, migSplit: string = MIG_SPLIT_SQL): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
     CREATE ROLE anon NOLOGIN;
@@ -47,9 +49,11 @@ async function freshDb(mig: string = MIG_SQL): Promise<PGlite> {
     CREATE POLICY platform_costs_public_read ON platform_costs FOR SELECT USING (true);
     CREATE TABLE jev_decisions (asked_at TIMESTAMPTZ, model TEXT, cost_usd NUMERIC);
     INSERT INTO platform_costs VALUES (1, 100, 97.5, now());
-    INSERT INTO jev_decisions VALUES (now(), 'typesafe/x', 0.25);
+    INSERT INTO jev_decisions VALUES (now(), 'typesafe/jev-1.13-20260917', 0.10);
+    INSERT INTO jev_decisions VALUES (now(), 'typesafe/jev-1.13.0', 0.25);
   `);
   await db.exec(mig);
+  if (migSplit) await db.exec(migSplit);
   return db;
 }
 
@@ -86,7 +90,15 @@ Deno.test("A2 platform_cost_public()：anon 只拿得到等級，欄位與內容
     const rows = await asRole<Record<string, unknown>>(db, role, "SELECT * FROM platform_cost_public()");
     assertEquals(rows.length, 1);
     assertEquals(rows[0].balance_level, "orange"); // 100 − 97.5 = 2.5
-    assertEquals(Object.keys(rows[0]).sort(), ["balance_level", "db_bytes", "jev_month_calls", "jev_month_usd", "refreshed_at"]);
+    assertEquals(Object.keys(rows[0]).sort(), [
+      "balance_level",
+      "db_bytes",
+      "openrouter_month_calls",
+      "openrouter_month_usd",
+      "refreshed_at",
+      "typesafe_month_calls",
+      "typesafe_month_usd",
+    ]);
     const text = JSON.stringify(rows, (_k, v) => (typeof v === "bigint" ? Number(v) : v));
     assert(!text.includes("97.5") && !text.includes('"2.5"') && !text.includes(":2.5"), "不得帶出餘額、儲值或已用");
   }
@@ -98,8 +110,23 @@ Deno.test("A3 舊的 platform_cost_summary() 的 balance_usd 一律 NULL，其�
   for (const role of PUBLIC_ROLES) {
     const rows = await asRole<{ balance_usd: unknown; jev_month_calls: unknown }>(db, role, "SELECT * FROM platform_cost_summary()");
     assertEquals(rows[0].balance_usd, null);
-    assertEquals(Number(rows[0].jev_month_calls), 1);
+    assertEquals(Number(rows[0].jev_month_calls), 2);
   }
+  await db.close();
+});
+
+Deno.test("A2b platform_cost_public()：OpenRouter 與 TypeSafe 直連分開加總", async () => {
+  const db = await freshDb();
+  const rows = await asRole<{
+    openrouter_month_calls: unknown;
+    openrouter_month_usd: unknown;
+    typesafe_month_calls: unknown;
+    typesafe_month_usd: unknown;
+  }>(db, "anon", "SELECT openrouter_month_calls, openrouter_month_usd, typesafe_month_calls, typesafe_month_usd FROM platform_cost_public()");
+  assertEquals(Number(rows[0].openrouter_month_calls), 1);
+  assertEquals(Number(rows[0].typesafe_month_calls), 1);
+  assertEquals(Number(rows[0].openrouter_month_usd), 0.1);
+  assertEquals(Number(rows[0].typesafe_month_usd), 0.25);
   await db.close();
 });
 
@@ -143,7 +170,7 @@ Deno.test("B 文字層：前端不碰 platform_costs／balance_usd；system-one 
   assert(costs.length > 200 && costs.includes("platform_costs"), "抽到 costs 區段");
   assert(!/balance_usd|credits\s*-\s*usage/.test(costs.replace(/\/\/.*$/gm, "")), "costs 回應不得帶餘額");
   const names = [];
-  for await (const e of Deno.readDir(MIGRATIONS)) if (e.name > MIG && e.name.endsWith(".sql")) names.push(e.name);
+  for await (const e of Deno.readDir(MIGRATIONS)) if (e.name > MIG_SPLIT && e.name.endsWith(".sql")) names.push(e.name);
   for (const n of names) {
     const t = await read(new URL(n, MIGRATIONS));
     assert(!/CREATE POLICY[^;]*ON\s+platform_costs/i.test(t) && !/GRANT[^;]*ON\s+(TABLE\s+)?platform_costs[^;]*TO[^;]*(anon|authenticated|PUBLIC)/i.test(t), `${n} 不該重開 platform_costs 的公開讀取`);
@@ -154,7 +181,7 @@ Deno.test("C 還原驗證：拿掉 DROP POLICY 與 REVOKE，A1 的檢查必須�
   let bad = mutate(MIG_SQL, "DROP POLICY IF EXISTS platform_costs_public_read ON platform_costs;", "");
   bad = mutate(bad, "REVOKE ALL ON TABLE platform_costs FROM anon;", "");
   bad = mutate(bad, "REVOKE ALL ON TABLE platform_costs FROM authenticated;", "");
-  const db = await freshDb(bad);
+  const db = await freshDb(bad, "");
   await assertRejects(() => checkBlocked(db));
   await db.close();
 });

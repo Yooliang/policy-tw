@@ -43,8 +43,9 @@ export function levelTone(level: string | null | undefined): BalanceTone {
   return level === 'yellow' || level === 'orange' || level === 'red' ? level : 'none'
 }
 
-/** 運轉成本裡 Jev（AI 自動判定）那一列：月費＝本月花費 */
-export type JevCost = { usd: number; usage: string; tone: BalanceTone }
+/** 運轉成本裡 Jev 判定：OpenRouter 儲值帳戶（餘額等級上色）與 TypeSafe 直連（依判定紀錄推算） */
+export type JevAccountCost = { usd: number; calls: number; tone: BalanceTone; plan: string; usageNote?: string | null }
+export type PlatformJevCosts = { openrouter: JevAccountCost; typesafe: JevAccountCost }
 
 export type AgentUsage = { provider: string; account_label: string; pct: number; resets_at: string | null; captured_at: string }
 
@@ -73,7 +74,12 @@ export function accountLabel(i: number): string {
   return `帳號 ${String.fromCharCode(65 + i)}`
 }
 
-export function agentPlanRows(plans: AgentPlan[], jev: JevCost | null = null, usage: Record<string, string> = {}): { rows: AgentPlanRow[]; total: number; approx: boolean } {
+function jevUsageLine(calls: number, note?: string | null): string {
+  const base = `本月 ${Math.max(0, Math.floor(Number(calls))).toLocaleString()} 次`
+  return note ? `${base}（${note}）` : base
+}
+
+export function agentPlanRows(plans: AgentPlan[], jev: PlatformJevCosts | null = null, usage: Record<string, string> = {}): { rows: AgentPlanRow[]; total: number; approx: boolean } {
   const rows: AgentPlanRow[] = []
   for (const p of [...plans].sort((a, b) => a.sort - b.sort)) {
     const qty = Math.max(0, Math.floor(Number(p.qty)))
@@ -83,7 +89,26 @@ export function agentPlanRows(plans: AgentPlan[], jev: JevCost | null = null, us
       rows.push({ provider: p.provider, plan: p.plan, label, monthly: p.monthly_usd == null ? null : Number(p.monthly_usd), approx, usage: usage[`${p.provider}|${label ?? ''}`] ?? usage[p.provider] ?? null, tone: 'none' })
     }
   }
-  if (jev) rows.push({ provider: 'Jev（AI 自動判定）', plan: 'API 用量計費', label: null, monthly: Number(jev.usd), approx: false, usage: jev.usage, tone: jev.tone })
+  if (jev) {
+    rows.push({
+      provider: 'OpenRouter（AI 判定帳戶）',
+      plan: jev.openrouter.plan,
+      label: null,
+      monthly: Number(jev.openrouter.usd),
+      approx: false,
+      usage: jevUsageLine(jev.openrouter.calls, jev.openrouter.usageNote),
+      tone: jev.openrouter.tone,
+    })
+    rows.push({
+      provider: 'TypeSafe（Jev 直連）',
+      plan: jev.typesafe.plan,
+      label: null,
+      monthly: Number(jev.typesafe.usd),
+      approx: true,
+      usage: jevUsageLine(jev.typesafe.calls, jev.typesafe.usageNote),
+      tone: jev.typesafe.tone,
+    })
+  }
   return { rows, total: rows.reduce((s, r) => s + (r.monthly ?? 0), 0), approx: rows.some((r) => r.approx) }
 }
 
