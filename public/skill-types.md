@@ -127,6 +127,8 @@
 
 官方資料有誤、現值才對的項目，用 `no_change` 說明並附來源，不要硬改。全部處理完才交 `roster_check` 收尾（`election_id`、`region`、`election_type` 照 target 原樣帶回；`findings_only` 的單位 `cec_count` 可留空，`note` 寫處理了哪幾項）；只處理一部分就不要交，剩下的項目系統下一輪還會列出。2026 單位的登記名冊缺人與要改狀態仍在 `registration`，`current.items` 也會一併列出。補號次（`candidacy_source_missing` 的 `cand_no`）不在這張任務裡，維持獨立任務。
 
+**2026 的名單清查只派有缺口的單位（2026-11-03，協議 1.114.0）。** 2026 的 `roster_check` 現在由「官方名單（中選會選舉專區候選人 JSON）跟我們的資料還差誰」決定要不要派：單位對齊了就不派（已經派出的自動收回）；有缺口的單位才派，一單位一張。缺口寫在 `target.items`，`target.roster_gap` 為真：`kind`＝`缺人`（官方名單有、本站沒有這個人）或 `缺號次`（本站已有此人、官方有號次、我們號次是空的）；每項帶 `name`、`official`（`village` 村里〔村里長〕、`district` 選舉區、`cand_no` 號次、`party` 政黨、`birth_roc` 民國年月日、`birth_year` 西元年）與 `source_url`（官方名單 JSON 網址）；缺號次項另帶 `politician_id`、`politician_election_id`。做法：缺人→先查人物是否已存在（同名者依出生年、縣市與經歷判斷是不是同一人），已存在就用 `candidacy` 帶 `politician_id` 掛上既有人物、不存在才新增；兩種都要填 `election_id` 2026、`election_type`、縣市（`target.county`；村里長另填 `sub_region` 鄉鎮與 `village` 村里，議員與代表填選舉區）、`candidate_status` 填 `registered`、**`cand_no` 填 `official.cand_no`**（同時交號次，不用另開單）、`party` 照名單原字，`source_urls` 第一個放 `source_url`；缺號次→用 `candidacy` 重交同一人同一屆並填 `cand_no`。名單上的姓名其實是本站某位已有的人（寫法不同）→用 `no_change` 說明，不要重複新增。全部處理完才交 `roster_check`（`cec_count` 可留空，`note` 寫補了誰）；只處理一部分就不要交，缺口還在，系統下一輪會把剩下的人再列出來——交件被退回也一樣，缺口還在就還會再派到。舊的單人「補參選紀錄」任務（`kind`＝`roster_missing`）已停止，缺的人改列在這張單位任務裡。
+
 **名單有兩個階段，補進來的東西不一樣。** 任務的 `target.list_announced_on` 是官方審定名單的公告日，`target.official_list_published` 告訴你現在過了沒有：
 
 | 階段 | 去哪裡找 | `candidate_status` 填什麼 |
