@@ -18,6 +18,7 @@ import LoadError from '../components/LoadError.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import { usePageHead } from '../composables/usePageHead'
 import { citationText, DATA_LICENSE_URL, policyStatusLabel, SITE_URL } from '../composables/usePageHead'
+import { splitOtherPolicies } from '../lib/other-policies'
 import { compareByPolicyDateDesc, policyElectionYear, policyYear } from '../lib/policy-date'
 import { personShareImage, policyDescription, policyLd } from '../lib/seo'
 import { lineageChain } from '../lib/policy-chain'
@@ -35,6 +36,7 @@ import { electionRecordFor } from '../lib/election-peers'
 import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import { electionOutcome } from '../lib/candidate-status'
+import type { Policy as PolicyT } from '../types'
 import { isElectionVoted, stageBadgeLabel, stageOfPolicy, stageWord } from '../lib/policy-stage'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
@@ -45,7 +47,7 @@ const route = useRoute()
 const router = useRouter()
 const { policies, politicians, loading, error, elections, getElectionById, loadPoliticianById, loadPolicyById, loadPolicyContext } = useSupabase()
 
-// 這一頁除了主角那筆，還要「同一人的其他政見」與同一條脈絡的其他政見（otherPolicies／lineageMates），
+// 這一頁除了主角那筆，還要「同一人的其他政見」與同一條脈絡的其他政見（otherSplit／lineageMates），
 // 兩者都讀全域的 policies。直接開這一頁時預渲染的切片已經把那些一起嵌好了，
 // 但從公民提問頁之類的地方換頁進來時清單裡只有 loadPolicyById 撈到的那一筆，
 // 兩個區塊會憑空變空。所以這一頁補撈「這一人的政見」與「這一條脈絡的政見」（loadPolicyContext），
@@ -166,12 +168,14 @@ const compareLink = computed(() => {
   return pkLinkFor(rec, getElectionById(rec.electionId), new Date())
 })
 
-const otherPolicies = computed(() =>
-  politician.value
-    ? policies.value.filter(p => String(p.politicianId) === String(politician.value!.id) && p.id !== policy.value?.id).sort(compareByPolicyDateDesc).slice(0, 3)
-    : []
-)
-
+// 側欄分兩區：其他承諾／政見（分法見 lib/other-policies.ts）；stage 要等下面宣告，這裡只在 computed 內才用
+const otherSplit = computed(() => {
+  const pol = politician.value
+  const cur = policy.value
+  if (!pol || !cur) return { pledges: [], policies: [] }
+  const mine = policies.value.filter(p => String(p.politicianId) === String(pol.id))
+  return splitOtherPolicies<PolicyT>(mine, cur, stage.value, p => stageOfPolicy(p, pol, electionDateOf), compareByPolicyDateDesc)
+})
 
 // 同一條政策脈絡裡的其他政見，照提出時間排，列在「所屬脈絡」卡裡（#349 第二階段 A；原本讀 related_policies 互指，那張表線上 0 列、不再讀）
 const lineageMates = computed(() =>
@@ -197,12 +201,6 @@ const isPolicyStage = computed(() => stage.value === 'policy')
 const word = computed(() => stageWord(stage.value))
 /** 政見階段、狀態還停在 Campaign Pledge：沒有任何進度紀錄，畫面印「尚無進度紀錄」不印 0% */
 const noProgressRecord = computed(() => isPolicyStage.value && isCampaign.value)
-/** 別條政見的標籤（側欄「其他承諾與政見」）：承諾、有進度狀態的政見＝追蹤中、還沒有進度的政見＝政見 */
-function otherTag(p: { status: unknown; origin?: unknown; electionId?: unknown }): { text: string; pledge: boolean } {
-  const s = stageOfPolicy(p as Parameters<typeof stageOfPolicy>[0], politician.value, electionDateOf)
-  if (s !== 'policy') return { text: '承諾', pledge: true }
-  return { text: p.status === PolicyStatus.CAMPAIGN ? '政見' : '追蹤中', pledge: false }
-}
 /** 狀態標籤（描述、結構化資料用）：承諾印「承諾」；當選者那一屆還沒有進度的不寫狀態；其餘照狀態 */
 const statusText = computed(() => {
   if (!policy.value) return ''
@@ -802,31 +800,36 @@ async function copyCitation() {
             </div>
           </div>
 
-          <!-- 2. 該候選人的其他政見 -->
-          <div v-if="otherPolicies.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="side-other-policies">
-            <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><FileText class="text-slate-400" :size="20" />該候選人的其他承諾與政見</h3>
-            <div class="space-y-3">
-              <router-link
-                v-for="p in otherPolicies"
-                :key="p.id"
-                :to="`/policy/${p.id}`"
-                class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
-              >
-                <div class="flex justify-between items-start mb-1">
-                  <span :class="`text-xs px-1.5 py-0.5 rounded ${otherTag(p).pledge ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`">
-                    {{ otherTag(p).text }}
-                  </span>
-                  <span class="text-[10px] text-slate-400">{{ p.category }}</span>
-                </div>
-                <h5 class="text-sm font-medium text-navy-900 group-hover:text-blue-600 line-clamp-1">{{ p.title }}</h5>
-              </router-link>
-              <router-link
-                v-if="otherPolicies.length >= 3"
-                :to="`/politician/${politician.id}`"
-                class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
-              >
-                查看更多 <ChevronRight :size="12" />
-              </router-link>
+          <!-- 2. 該候選人的其他承諾、政見：兩區各自有標題，沒資料的區整區不顯示 -->
+          <div
+            v-for="sec in [
+              { key: 'pledges', title: '其他承諾', list: otherSplit.pledges },
+              { key: 'policies', title: '政見', list: otherSplit.policies },
+            ]"
+            :key="sec.key"
+          >
+            <div v-if="sec.list.length > 0" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" :data-testid="`side-other-${sec.key}`">
+              <h3 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><FileText class="text-slate-400" :size="20" />{{ sec.title }}</h3>
+              <div class="space-y-3">
+                <router-link
+                  v-for="p in sec.list"
+                  :key="p.id"
+                  :to="`/policy/${p.id}`"
+                  class="block group cursor-pointer bg-slate-50 hover:bg-white border border-slate-100 hover:border-blue-200 p-3 rounded-lg transition-all"
+                >
+                  <div class="flex justify-end items-start mb-1">
+                    <span class="text-[10px] text-slate-400">{{ p.category }}</span>
+                  </div>
+                  <h5 class="text-sm font-medium text-navy-900 group-hover:text-blue-600 line-clamp-1">{{ p.title }}</h5>
+                </router-link>
+                <router-link
+                  v-if="sec.list.length >= 3"
+                  :to="`/politician/${politician.id}`"
+                  class="w-full text-center text-xs text-slate-500 hover:text-blue-600 mt-2 flex items-center justify-center gap-1"
+                >
+                  查看更多 <ChevronRight :size="12" />
+                </router-link>
+              </div>
             </div>
           </div>
 
