@@ -92,6 +92,8 @@ const personElectionGroups = computed<PolicyGroup[]>(() => {
 })
 /** 政見分頁只列他當選過的屆 */
 const electedElectionGroups = computed(() => personElectionGroups.value.filter(g => electedIn(g.electionId)))
+/** 承諾分頁只列落選、退選或還沒投票的屆；同一人同一屆只會在承諾、政見其中一個分頁出現 */
+const pledgeElectionGroups = computed(() => personElectionGroups.value.filter(g => !electedIn(g.electionId)))
 
 async function requestGroupLookup(g: PolicyGroup, scope: LookupScope) {
   const pol = politician.value
@@ -424,10 +426,8 @@ const ballot = computed(() => ballotNoOfElection(politician.value?.elections, th
 const identity = computed(() => titles.value.join('、') || (candidacy.value?.running ? `${candidacy.value.what}候選人` : ''))
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
-const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', personElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
+const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', pledgeElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
 const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見', electedElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
-/** 承諾分頁的請求卡：當選的那一屆要補的是上任後的政見（tenure），落選或還沒投票的才是選前承諾（pledge） */
-const campaignScope = (g: PolicyGroup): LookupScope => electedIn(g.electionId) ? 'tenure' : 'pledge'
 
 usePageHead({
   type: 'article',
@@ -606,21 +606,21 @@ usePageHead({
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <PolicyCard v-for="policy in group.policies" :key="policy.id" :policy="policy" :politician="politician" :show-politician="false" :show-status="false" />
-                      <AiLookupCard :state="groupLookupState(group, campaignScope(group))" :label="groupLookupLabel(group, campaignScope(group))" hint="查有出處的資料" @click="requestGroupLookup(group, campaignScope(group))" />
+                      <AiLookupCard :state="groupLookupState(group, 'pledge')" :label="groupLookupLabel(group, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(group, 'pledge')" />
                     </div>
                   </div>
                 </div>
                 <!-- 已有資料也能再查：卡片檢視是格線最後一張動作卡，表格檢視用小按鈕 -->
-                <AiLookupInline v-if="campaignView === 'table' && personElectionGroups.length > 0" :state="groupLookupState(personElectionGroups[0], campaignScope(personElectionGroups[0]))" :label="groupLookupLabel(personElectionGroups[0], campaignScope(personElectionGroups[0]))" @click="requestGroupLookup(personElectionGroups[0], campaignScope(personElectionGroups[0]))" />
+                <AiLookupInline v-if="campaignView === 'table' && pledgeElectionGroups.length > 0" :state="groupLookupState(pledgeElectionGroups[0], 'pledge')" :label="groupLookupLabel(pledgeElectionGroups[0], 'pledge')" @click="requestGroupLookup(pledgeElectionGroups[0], 'pledge')" />
                 <AiLookupInline v-else-if="campaignView === 'table'" :state="lookup.campaign" label="請 AI 補充最新的承諾" @click="requestLookup('campaign')" />
               </template>
-              <template v-else-if="personElectionGroups.length > 0">
+              <template v-else-if="pledgeElectionGroups.length > 0">
                 <p class="text-slate-500">該候選人尚未發布承諾。</p>
                 <div class="space-y-8">
                   <div v-for="g in campaignGroups" :key="g.key">
                     <h3 v-if="g.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ g.label }}</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                      <AiLookupCard :state="groupLookupState(g, campaignScope(g))" :label="groupLookupLabel(g, campaignScope(g))" hint="查有出處的資料" @click="requestGroupLookup(g, campaignScope(g))" />
+                      <AiLookupCard :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
                     </div>
                   </div>
                 </div>
