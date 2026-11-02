@@ -7,26 +7,8 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, type ComputedRef } from 'v
  * - 延伸欄在窄桌面（< lg）收成抽屜，開關在這裡。
  * - 視窗寬度旗標：只在瀏覽器掛載後才有值（預渲染與第一次 hydrate 都是 false），要在畫面上做差異的地方用 CSS 斷點，只有「要不要渲染廣告」這類需要 JS 的才讀旗標。
  */
-export interface DeskItem {
-  key: string
-  label: string
-  active: boolean
-  /** 有 to 就是連結（預渲染也走得到）；沒有就是按鈕，點了呼叫 select */
-  to?: string
-  select?: () => void
-  /** 淡色（仍可點）：例如直轄市一般區沒有的選舉類別 */
-  dim?: boolean
-}
-export interface DeskGroup {
-  key: string
-  title: string
-  /** 同一組內再分塊（內容類型：候選人｜承諾｜PK ‖ 串聯｜矩陣），塊與塊之間畫分隔線 */
-  blocks: DeskItem[][]
-}
-export interface DeskNavModel {
-  title: string
-  groups: DeskGroup[]
-}
+export type { DeskItem, DeskGroup, DeskNavModel } from '../lib/desk-nav-types'
+import type { DeskNavModel } from '../lib/desk-nav-types'
 
 const electionNav = shallowRef<ComputedRef<DeskNavModel> | null>(null)
 /** 人物頁登記的「該屆層級＋縣市」兩組（延伸欄下半段；點了是連結到該屆選舉頁） */

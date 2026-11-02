@@ -25,7 +25,7 @@ const { electionNav, personNav } = useDeskNav()
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
 
-const { section, pledgeElection } = useDeskSection()
+const { section, pledgeElection, pledgeLevelGroups } = useDeskSection()
 const model = computed(() => (mounted.value && electionNav.value ? electionNav.value.value : null))
 /** 人物頁：該屆的層級與縣市（取代通用的「選舉」「一覽」兩組；內容類型維持） */
 const person = computed(() => (mounted.value && route.name === 'politician' && personNav.value ? personNav.value.value : null))
@@ -94,6 +94,7 @@ const groups = computed<DeskGroup[]>(() => {
     case 'about': return ABOUT
     case 'search': return [searchGroup, moreElection]
     case 'election': if (overviewOnly.value) return [moreElection]; if (person.value) return [...genericElection.value.filter(g => g.key === 'views'), ...person.value.groups]
+      if (mounted.value && pledgeElection.value) return [...genericElection.value.filter(g => g.key === 'views'), ...pledgeLevelGroups.value] // 承諾頁：內容類型＋推導出的層級／縣市（掛載前是一般子項，兩邊 HTML 才一致）
       return model.value ? model.value.groups : [...genericElection.value, moreElection] // 選舉頁的延伸欄只留內容類型／層級／縣市三組
     default: return []
   }

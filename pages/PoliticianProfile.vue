@@ -29,8 +29,8 @@ import type { BreadcrumbItem } from '../composables/usePageHead'
 import { personShareImage, personTrackingText, publicImageUrl } from '../lib/seo'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-number'
-import { electionPath, electionRegionPath, isCounty } from '../lib/election-regions'
-import { levelCountyGroups, LEVEL_TAB_TYPES } from '../lib/desk-level-groups'
+import { electionRegionPath, isCounty } from '../lib/election-regions'
+import { levelCountyLinkGroups, LEVEL_TAB_TYPES } from '../lib/desk-level-groups'
 import { useDeskNav } from '../composables/useDeskNav'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { electionYearOfDate, newerFirst, segmentOfId } from '../lib/election-route'
@@ -392,10 +392,7 @@ const deskPersonNav = computed(() => {
   const seg = segmentOfId(elections.value, rec.electionId)
   const type = LEVEL_TAB_TYPES.includes(rec.electionType ?? '') ? rec.electionType! : ''
   const county = isCounty(rec.region) ? rec.region : 'All'
-  const to = (region: string, tab: string) => ({ to: electionPath(seg, region === 'All' ? null : region) + (tab ? `?tab=${encodeURIComponent(tab)}` : '') })
-  const groups = levelCountyGroups(type, county, (kind, key, label, active, dim) => ({
-    key, label, active, dim, ...(kind === 'level' ? to(county, key) : to(key, type)),
-  }))
+  const groups = levelCountyLinkGroups(seg, type, county)
   const y = electionYearOfDate(election.electionDate)
   return { title: y ? `${y} 選舉` : '選舉', groups }
 })
