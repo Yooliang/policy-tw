@@ -34,7 +34,15 @@ const handleCopy = (address: string, symbol: string) => {
 
 // 運轉成本（2026-09-24 維護者：「不用太顯眼，一個基本的資料就好」）：後端每 15 分鐘更新，這裡只讀。
 // 在瀏覽器才讀（onMounted），不進預渲染——數字會變，預渲染進去就是舊的。讀不到就整塊不顯示。
-type Costs = { balance_level: string; jev_month_calls: number; jev_month_usd: number; db_bytes: number; refreshed_at: string | null }
+type Costs = {
+  balance_level: string
+  openrouter_month_calls: number
+  openrouter_month_usd: number
+  typesafe_month_calls: number
+  typesafe_month_usd: number
+  db_bytes: number
+  refreshed_at: string | null
+}
 const costs = ref<Costs | null>(null)
 onMounted(async () => {
   try {
@@ -56,9 +64,26 @@ const plans = ref<AgentPlan[]>([])
 const tone = computed(() => levelTone(costs.value?.balance_level))
 const CARD_BORDER = { none: 'border-slate-200', yellow: 'border-amber-300', orange: 'border-orange-400', red: 'border-red-500' } as const
 const ROW_TONE = { none: '', yellow: 'bg-amber-50 border-l-4 border-l-amber-400', orange: 'bg-orange-100 border-l-4 border-l-orange-500', red: 'bg-red-100 border-l-4 border-l-red-600' } as const
-const jevCost = computed(() => costs.value
-  ? { usd: Number(costs.value.jev_month_usd), usage: `本月 ${costs.value.jev_month_calls.toLocaleString()} 次`, tone: tone.value }
-  : null)
+const jevCost = computed(() => {
+  if (!costs.value) return null
+  const c = costs.value
+  return {
+    openrouter: {
+      usd: Number(c.openrouter_month_usd),
+      calls: Number(c.openrouter_month_calls),
+      tone: tone.value,
+      plan: 'API 用量計費',
+      usageNote: null,
+    },
+    typesafe: {
+      usd: Number(c.typesafe_month_usd),
+      calls: Number(c.typesafe_month_calls),
+      tone: 'none' as const,
+      plan: '依判定紀錄推算',
+      usageNote: '依判定紀錄推算',
+    },
+  }
+})
 const plansView = computed(() => agentPlanRows(plans.value, jevCost.value, { ...usageMap(usage.value, Date.now()), ...(costs.value ? { Supabase: mb(costs.value.db_bytes) } : {}) }))
 const mb = (b: number) => `${Math.round(b / 1024 / 1024)} MB`
 
@@ -160,7 +185,7 @@ usePageHead({
           </div>
 
           <div v-if="costs && plansView.rows.length" class="space-y-4 md:order-1 md:col-start-1 md:col-span-5 md:row-start-1">
-            <!-- 運轉成本：官方代理來自設定表 agent_plans，Jev 來自 platform_cost_public（只有餘額等級，不含金額）；讀不到就整塊不顯示 -->
+            <!-- 運轉成本：官方代理來自 agent_plans；OpenRouter 餘額等級與 TypeSafe 直連花費來自 platform_cost_public；讀不到就整塊不顯示 -->
             <section class="bg-white rounded-2xl shadow-lg border p-4 sm:p-5" :class="CARD_BORDER[tone]">
               <h2 class="font-black text-navy-900 mb-3">系統狀態與維運（每月 US$）</h2>
               <div class="overflow-x-auto">

@@ -33,12 +33,20 @@ Deno.test('agentPlanRows：資料庫 NUMERIC 以字串回來也能算', () => {
   assertEquals(r.total, 25)
 })
 
-Deno.test('agentPlanRows：Jev 那一列排在最後、計入合計', () => {
-  const r = agentPlanRows(seed, { usd: 3.5, usage: '本月 10 次', tone: 'none' })
-  assertEquals(r.rows.length, 6)
-  assertEquals(r.rows[5].provider, 'Jev（AI 自動判定）')
-  assertEquals(r.rows[5].usage, '本月 10 次')
-  assertEquals(r.total, 688.5)
+const jevBoth = {
+  openrouter: { usd: 1.2, calls: 4, tone: 'yellow' as const, plan: 'API 用量計費', usageNote: null },
+  typesafe: { usd: 3.5, calls: 10, tone: 'none' as const, plan: '依判定紀錄推算', usageNote: '依判定紀錄推算' },
+}
+
+Deno.test('agentPlanRows：OpenRouter 與 TypeSafe 各一列排在最後、計入合計', () => {
+  const r = agentPlanRows(seed, jevBoth)
+  assertEquals(r.rows.length, 7)
+  assertEquals(r.rows[5].provider, 'OpenRouter（AI 判定帳戶）')
+  assertEquals(r.rows[5].usage, '本月 4 次')
+  assertEquals(r.rows[6].provider, 'TypeSafe（Jev 直連）')
+  assertEquals(r.rows[6].usage, '本月 10 次（依判定紀錄推算）')
+  assertEquals(r.rows[6].approx, true)
+  assertEquals(r.total, 689.7)
   assertEquals(agentPlanRows(seed, null).total, 685)
 })
 
@@ -79,9 +87,9 @@ Deno.test('balanceTone：低於 5 黃、低於 3 橘、低於 1 紅，邊界值�
   assertEquals([balanceTone(null), balanceTone(undefined), balanceTone(100)], ['none', 'none', 'none'])
 })
 
-Deno.test('agentPlanRows：Jev 那列帶餘額色調，其他列不上色', () => {
-  const r = agentPlanRows(seed, { usd: 1, usage: 'x', tone: 'orange' })
-  assertEquals(r.rows.map((x) => x.tone), ['none', 'none', 'none', 'none', 'none', 'orange'])
+Deno.test('agentPlanRows：OpenRouter 那列帶餘額色調，TypeSafe 與其他列不上色', () => {
+  const r = agentPlanRows(seed, { ...jevBoth, openrouter: { ...jevBoth.openrouter, tone: 'orange' } })
+  assertEquals(r.rows.map((x) => x.tone), ['none', 'none', 'none', 'none', 'none', 'orange', 'none'])
 })
 
 Deno.test('levelTone：資料庫等級對到色調，ok 與不認得的不上色', () => {
