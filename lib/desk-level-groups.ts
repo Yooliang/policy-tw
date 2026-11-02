@@ -4,9 +4,9 @@
  * 兩邊只差「每一項怎麼做出來」（make），層級順序、名稱、縣市清單都在這裡。
  */
 import { ElectionType } from '../types'
-import type { DeskGroup, DeskItem } from '../composables/useDeskNav'
+import type { DeskGroup, DeskItem } from '../lib/desk-nav-types'
 import { positionSpec } from './election-levels'
-import { SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from './election-regions'
+import { electionPath, isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from './election-regions'
 
 /** 層級分頁（固定五個，順序＝選舉頁分頁條） */
 export const LEVEL_TAB_TYPES: string[] = [ElectionType.MAYOR, ElectionType.COUNCILOR, ElectionType.TOWNSHIP_MAYOR, ElectionType.REPRESENTATIVE, ElectionType.CHIEF]
@@ -35,4 +35,27 @@ export function levelCountyGroups(activeType: string, region: string, make: Desk
       ...TAIWAN_COUNTIES.map(c => make('county', c, c, region === c)),
     ]] },
   ]
+}
+
+/** 連結版（人物頁、承諾頁）：層級連結到該屆選舉頁的 ?tab=，縣市連結到該屆該縣市頁（沿用選舉頁自己的網址格式） */
+export function levelCountyLinkGroups(seg: string, type: string, county: string): DeskGroup[] {
+  const to = (region: string, tab: string) => ({ to: electionPath(seg, region === 'All' ? null : region) + (tab ? `?tab=${encodeURIComponent(tab)}` : '') })
+  return levelCountyGroups(type, county, (kind, key, label, active, dim) => ({
+    key, label, active, dim, ...(kind === 'level' ? to(county, key) : to(key, type)),
+  }))
+}
+
+/**
+ * 承諾 → 提出者在該屆的參選紀錄 → 層級與縣市；沒有該屆參選紀錄才退回承諾自己（所屬脈絡）的縣市（層級就不標）。
+ * 縣市不是 22 縣市之一（全台、中央、空白）一律當「全台」。
+ */
+export function pledgeLevelRegion(
+  records: ReadonlyArray<{ electionId: number; electionType?: string; region?: string }> | null | undefined,
+  electionId: number,
+  policyRegion?: string | null,
+): { type: string; county: string } {
+  const rec = records?.find(r => r.electionId === electionId)
+  const type = rec && LEVEL_TAB_TYPES.includes(rec.electionType ?? '') ? rec.electionType! : ''
+  const region = (rec ? rec.region : policyRegion) ?? ''
+  return { type, county: isCounty(region) ? region : 'All' }
 }

@@ -27,3 +27,34 @@ Deno.test('其他路由照名稱歸區', () => {
   assertEquals(sectionOfRoute('policy'), 'policy')
   assertEquals(sectionOfRoute('election'), 'election')
 })
+
+import { levelCountyLinkGroups, pledgeLevelRegion } from './desk-level-groups.ts'
+
+Deno.test('承諾→提出者該屆參選紀錄→層級與縣市', () => {
+  const recs = [{ electionId: 2022, electionType: '縣市議員', region: '高雄市' }, { electionId: 2026, electionType: '縣市長', region: '台南市' }]
+  assertEquals(pledgeLevelRegion(recs, 2026, '台北市'), { type: '縣市長', county: '台南市' }, '有該屆參選紀錄就用紀錄，不用承諾自己的縣市')
+  assertEquals(pledgeLevelRegion(recs, 2022, null), { type: '縣市議員', county: '高雄市' })
+})
+
+Deno.test('沒有該屆參選紀錄才退回承諾自己的縣市；非縣市當全台', () => {
+  assertEquals(pledgeLevelRegion([], 2026, '台北市'), { type: '', county: '台北市' })
+  assertEquals(pledgeLevelRegion(undefined, 2026, '全台'), { type: '', county: 'All' })
+  assertEquals(pledgeLevelRegion([{ electionId: 2026, electionType: '不明', region: '中央' }], 2026, '台北市'), { type: '', county: 'All' })
+})
+
+Deno.test('層級／縣市連結帶正確網址參數且選中推導的項目', () => {
+  const g = levelCountyLinkGroups('2026', '縣市長', '台南市')
+  const items = g.flatMap(x => x.blocks.flat())
+  const lvl = items.find(i => i.key === '縣市議員')!
+  const cty = items.find(i => i.key === '高雄市')!
+  assertEquals(decodeURI(lvl.to!).includes('/election/2026/台南市?tab='), true, '換層級留在目前縣市')
+  assertEquals(decodeURI(cty.to!).includes('/election/2026/高雄市?tab=縣市長'), true, '換縣市帶目前層級')
+  assertEquals(items.filter(i => i.active).map(i => i.key).sort(), ['台南市', '縣市長'].sort())
+})
+
+Deno.test('接線守門：延伸欄在承諾頁用推導出的層級／縣市，人物頁與承諾頁共用同一個產生函式', () => {
+  const read = (f: string) => Deno.readTextFileSync(new URL(f, import.meta.url))
+  assertEquals(/pledgeElection\.value\) return \[[^\]]*pledgeLevelGroups\.value/.test(read('../components/DeskExtNav.vue')), true)
+  assertEquals(read('../composables/useDeskSection.ts').includes('levelCountyLinkGroups('), true)
+  assertEquals(read('../pages/PoliticianProfile.vue').includes('levelCountyLinkGroups('), true)
+})
