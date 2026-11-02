@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { sankey, sankeyLeft } from 'd3-sankey'
-import { linkText, nodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
+import { linkText, nodeText, selectionStats, selNodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
 
 /** 桑基圖：寬螢幕橫向、手機直向。點節點只亮經過它的線（上下游全部），再點一次或點空白處取消。 */
 const props = defineProps<{ graph: FlowGraph; name: string; mode?: 'pct' | 'count' }>()
@@ -18,6 +18,7 @@ onBeforeUnmount(() => mq?.removeEventListener('change', onMq))
 interface LNode { id: string; label: string; tone: Tone; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
 interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone }
 
+const selected = ref<string | null>(null)
 
 const layout = computed(() => {
   const g = props.graph
@@ -45,10 +46,16 @@ const layout = computed(() => {
   const rawOf = (id: string) => Math.max(inRaw.get(id) ?? 0, outRaw.get(id) ?? 0)
   const rootTotal = nodes.filter((n) => n.layer === 0).reduce((a, n) => a + n.value, 0) || 1
   // 比例模式只顯示百分比（不帶件數、不提示樣本少）；數量模式才顯示件數
-  const nodeLabel = (n: LNode) => nodeText(props.mode, {
-    label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100,
-    hideShare: n.layer === 0 && n.id.startsWith('model:'), // 模型是各自等寬的 100%，節點不標百分比
-  })
+  const sel = selected.value
+  const stats = sel ? selectionStats(g, sel) : null
+  const nodeLabel = (n: LNode) => {
+    const hideShare = n.layer === 0 && n.id.startsWith('model:') // 模型是各自等寬的 100%，節點不標百分比
+    const all = { label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100, hideShare }
+    // 選中時：其餘節點顯示「選中子集合」的值，選中的節點本身維持全體值
+    if (!stats || n.id === sel) return nodeText(props.mode, all)
+    const s = stats.get(n.id)!
+    return selNodeText(props.mode, { label: n.label, raw: s.raw, share: s.share, allShare: all.share, hideShare, withAll: !vertical })
+  }
   const links = res.links.map((l) => {
     const s = byId.get(l.source.id)!
     const t = byId.get(l.target.id)!
@@ -81,7 +88,6 @@ const layout = computed(() => {
   return { nodes, links, W, H, labels, nodeTitle }
 })
 
-const selected = ref<string | null>(null)
 const lit = computed(() => {
   const L = layout.value
   const sel = selected.value
