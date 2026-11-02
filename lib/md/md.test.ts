@@ -540,7 +540,7 @@ Deno.test("預產排程：每小時、用 CLI 管理權杖寫入，不碰 servic
   assert(/cron:\s*'\d+ \* \* \* \*'/.test(yml), "每小時一次");
   assertStringIncludes(yml, "workflow_run");
   assertStringIncludes(yml, "SUPABASE_ACCESS_TOKEN");
-  assertStringIncludes(yml, "supabase db query --linked");
+  assertStringIncludes(yml, "supabase@2 db query --linked");
   assert(!/secrets\.[A-Z_]*SERVICE_ROLE/i.test(yml), "不得用 service_role 金鑰");
 });
 
