@@ -17,3 +17,14 @@ const BY_ROUTE: Record<string, DeskSection> = {
 export function sectionOfRoute(name: unknown): DeskSection | null {
   return typeof name === 'string' ? BY_ROUTE[name] ?? null : null
 }
+
+/**
+ * 政見詳情頁（路由 policy）的歸屬看資料不看網址：還在「承諾」階段（選前、落選／退選、結果待補）而且屬於某一屆選舉的條目，
+ * 主選單亮「選舉」、延伸欄顯示那一屆的選舉選單；當選後的「政見」與任內施政維持「政見」區。
+ * 網址不變（/policy/:id），這裡只決定左側選單怎麼亮。
+ * @param stage 該條的階段（lib/policy-stage.ts 的 PolicyStage）
+ * @param electionId 該條所屬選舉；沒標屆別＝不屬於任何一屆
+ */
+export function sectionOfPolicy(stage: string | null | undefined, electionId: number | null | undefined): DeskSection {
+  return stage && stage !== 'policy' && typeof electionId === 'number' ? 'election' : 'policy'
+}
