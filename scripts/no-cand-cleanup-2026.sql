@@ -11,6 +11,9 @@
 --
 -- 條件（全部成立才改；沒號次的 extra 就是要清的對象，不列入條件）：
 --   ① cec_roster_diff() 的 missing＝0     ② dup＝0     ③ 帶號次的 extra＝0
+--   ⑥ 同名待合併＝0：2026 非退選的參選紀錄裡，同選舉別、同選舉單位（region_id；沒有就退到縣市）、同姓名鍵（roster_name_key）
+--      卻掛在不同人物（politicians，未被合併）的配對數；已被判定「不同人」的配對（politician_pair_resolutions.resolution＝different）不算。
+--      這項是「合併完」的條件：配對裡有對象本人也照算，要先合併（不能靠這支把其中一筆改成退選就當處理完）
 --   ④ 2026 帶號次人數（非退選、七種名冊涵蓋的選舉別、人物未被合併）＝cec_roster_2026 人數
 --   ⑤ 對象＝2026、candidacy_status＝filed、cand_no 空、且是 diff 的 extra；它必須恰好等於「全部已登記沒號次的人」，
 --     也必須等於「全部沒號次的 extra」（否則有人不在這次的狀態值範圍，要人判斷，中止）
@@ -41,6 +44,7 @@ DECLARE
   v_missing BIGINT; v_dup BIGINT; v_extra_no BIGINT; v_extra_nocand BIGINT;
   v_numbered BIGINT; v_roster BIGINT;
   v_filed_nocand BIGINT; v_target BIGINT; v_filed_nocand_not_target BIGINT; v_extra_nocand_not_target BIGINT;
+  v_samename BIGINT;
   v_bad TEXT[] := ARRAY[]::TEXT[];
 BEGIN
   SELECT count(*) FILTER (WHERE kind = 'missing'),
@@ -57,9 +61,25 @@ BEGIN
      AND pe.candidacy_status IS DISTINCT FROM 'withdrawn' AND pe.cand_no IS NOT NULL;
   SELECT count(*) INTO v_roster FROM cec_roster_2026;
 
+  SELECT count(*) INTO v_samename
+    FROM (SELECT pe.politician_id AS pid, pe.election_type, roster_name_key(p.name) AS nkey,
+                 COALESCE(pe.region_id::TEXT, 'c:' || COALESCE(rg.region, p.region, '?')) AS unit
+            FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
+            LEFT JOIN regions rg ON rg.id = pe.region_id
+           WHERE pe.election_id = 2026 AND pe.candidacy_status IS DISTINCT FROM 'withdrawn') a
+    JOIN (SELECT pe.politician_id AS pid, pe.election_type, roster_name_key(p.name) AS nkey,
+                 COALESCE(pe.region_id::TEXT, 'c:' || COALESCE(rg.region, p.region, '?')) AS unit
+            FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
+            LEFT JOIN regions rg ON rg.id = pe.region_id
+           WHERE pe.election_id = 2026 AND pe.candidacy_status IS DISTINCT FROM 'withdrawn') b
+      ON a.nkey = b.nkey AND a.election_type = b.election_type AND a.unit = b.unit AND a.pid < b.pid
+   WHERE NOT EXISTS (SELECT 1 FROM politician_pair_resolutions x
+                      WHERE x.pair_key = politician_pair_key(a.pid, b.pid) AND x.resolution = 'different');
+
   IF v_missing <> 0 THEN v_bad := v_bad || format('missing=%s（要 0）', v_missing); END IF;
   IF v_dup <> 0 THEN v_bad := v_bad || format('dup=%s（要 0）', v_dup); END IF;
   IF v_extra_no <> 0 THEN v_bad := v_bad || format('帶號次的 extra=%s（要 0）', v_extra_no); END IF;
+  IF v_samename <> 0 THEN v_bad := v_bad || format('同名待合併=%s 對（要 0；同選舉別、同單位、同姓名鍵卻是不同人物）', v_samename); END IF;
   IF v_numbered <> v_roster THEN v_bad := v_bad || format('帶號次人數=%s、中選會名單=%s（要相等）', v_numbered, v_roster); END IF;
 
   -- 對象

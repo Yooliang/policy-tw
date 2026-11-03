@@ -40,6 +40,8 @@ CREATE TABLE politician_elections (id serial PRIMARY KEY, election_id integer NO
   CONSTRAINT politician_elections_withdrawn_after_filing_check CHECK (withdrawn_after_filing IS NULL OR candidacy_status = 'withdrawn'));
 CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, record_id text NOT NULL, field text NOT NULL, old_value jsonb, new_value jsonb,
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
+CREATE TABLE politician_pair_resolutions (pair_key text PRIMARY KEY, a uuid, b uuid, resolution text NOT NULL);
+CREATE FUNCTION politician_pair_key(p_a uuid, p_b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(p_a, p_b)::text || '|' || GREATEST(p_a, p_b)::text $$;
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text, task_type text, target jsonb, status text NOT NULL DEFAULT 'open',
   source text, closed_at timestamptz);
 `;
@@ -144,6 +146,7 @@ Deno.test("條件不成立整段退回：缺人、帶號次的 extra、已登記
   const cases: [string, (db: PGlite) => Promise<void>, string][] = [
     ["缺人", async (db) => { await loadCouncil(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "吳九", no: 7 }]); }, "missing=1"],
     ["帶號次的 extra", async (db) => { await ours(db, "趙某某", 9); }, "帶號次的 extra=1"],
+    ["同名待合併（同單位同名不同人物）", async (db) => { await ours(db, "王小明", 3); }, "同名待合併=1"],
     ["已登記沒號次但單位沒抓（不是 extra）", async (db) => { await ours(db, "高雄人", null, "filed", "高雄市", "第01選舉區"); }, "不是 extra"],
   ];
   for (const [name, tweak, needle] of cases) {
@@ -182,4 +185,16 @@ Deno.test("還原腳本：狀態與任務改回去；之後被別人改過的不
   assertEquals(t.rows.map((y) => y.status), ["open", "open"]);
   const rev = await db.query<{ n: number }>(`SELECT count(*)::int n FROM edit_history WHERE agent_name = 'no-cand-cleanup-2026-11' AND reverted_at IS NOT NULL`);
   assertEquals(rev.rows[0].n, 2); // e1 的兩列
+});
+
+Deno.test("同名但已判定不同人的配對不擋", async () => {
+  const db = await buildDb();
+  const dup = await ours(db, "王小明", 3);
+  await base(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "王小明", no: 3 }]);
+  const pids = (await db.query<{ id: string }>(`SELECT politician_id id FROM politician_elections WHERE id IN (SELECT id FROM politician_elections WHERE cand_no = 1 UNION SELECT $1::int)`, [dup])).rows.map((x) => x.id);
+  assertEquals(pids.length, 2);
+  await failsWith(db, commit(SCRIPT), "同名待合併=1");
+  await db.query(`INSERT INTO politician_pair_resolutions (pair_key, a, b, resolution) VALUES (politician_pair_key($1::uuid, $2::uuid), $1::uuid, $2::uuid, 'different')`, pids);
+  await db.exec(commit(SCRIPT));
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
 });
