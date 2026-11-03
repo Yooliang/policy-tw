@@ -139,7 +139,7 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
         <template v-for="(c, i) in shownPersonCrumbs" :key="i">
           <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
           <RouterLink v-if="c.to && i < shownPersonCrumbs.length - 1" :to="c.to" class="whitespace-nowrap rounded px-1 py-1.5 text-slate-500 active:bg-slate-100">{{ c.label }}</RouterLink>
-          <span v-else class="px-1 py-1.5" :class="i === shownPersonCrumbs.length - 1 ? 'min-w-0 truncate text-navy-900' : 'text-slate-500'">{{ c.label }}</span>
+          <span v-else class="px-1 py-1.5" :class="i === shownPersonCrumbs.length - 1 ? 'min-w-0 shrink-[0.1] truncate text-navy-900' : c.label === '…' ? 'shrink-0 text-slate-500' : 'min-w-0 truncate text-slate-500'">{{ c.label }}</span>
         </template>
       </nav>
       <nav v-else-if="shownCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-crumbs">
@@ -153,7 +153,7 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
         <div v-if="personOnRoute.sub" class="truncate text-[11px] text-slate-500">{{ personOnRoute.sub }}</div>
       </div>
       <div v-else class="min-w-0 flex-1 truncate px-1 text-center text-[15px] font-bold text-navy-900" data-testid="header-title">{{ pageTitle }}</div>
-      <div v-if="!isSearchRoute" class="w-10 shrink-0" :class="isHome ? 'ml-auto' : ''" aria-hidden="true"></div>
+      <div v-if="!isSearchRoute && !shownPersonCrumbs" class="w-10 shrink-0" :class="isHome ? 'ml-auto' : ''" aria-hidden="true"></div>
     </div>
 
     <!-- 桌面版細頁首（md 以上）：左邊麵包屑（窄桌面多一顆開延伸欄抽屜的鈕），右邊顯示設定／登入／贊助；主選單在最左窄欄（DeskRail） -->
