@@ -10,6 +10,7 @@ import { useSupabase, withElectionData } from '../composables/useSupabase'
 import { BOARD_PATH, requestTask, requestTaskDoneLabel, requestTaskHeading, requestTaskMessage, type RequestKind, type RequestTaskResult } from '../lib/request-task'
 import LoadError from '../components/LoadError.vue'
 import type { Policy, PoliticianElectionData, PoliticianTerm } from '../types'
+import { ElectionType } from '../types'
 import { policySortDate } from '../lib/policy-date'
 import Avatar from '../components/Avatar.vue'
 import PolicyCard from '../components/PolicyCard.vue'
@@ -368,7 +369,28 @@ const titles = computed(() => officeTitles(politician.value?.offices))
 // 手機版頁首正中間顯示姓名＋小字現任職稱（X 式）
 const { setPerson, setPageCrumbs, setPersonCrumbs } = useMobileHeader()
 // 桌面細頁首：首頁 › 選舉名稱（連該場選舉）› 縣市 ›（鄉鎮）› 人物；職位層（#鄉鎮市長…）不放，細頁首只寫到地區
-watch(breadcrumbs, (items) => { setPageCrumbs(items.length > 0 ? items.filter(i => !(i.path ?? '').includes('#')).map((i, k, all) => ({ label: i.name, to: k < all.length - 1 ? i.path : undefined })) : null) }, { immediate: true })
+// 頁首麵包屑點上去要停在這個人的層級，不要掉回選舉頁預設的縣市長分頁（原住民區長、區代表併在鄉鎮市長、代表分頁）
+const crumbLevelTab = computed(() => {
+  const type = primaryRecord.value?.electionType ?? ''
+  if (type === ElectionType.INDIGENOUS_DISTRICT_CHIEF) return ElectionType.TOWNSHIP_MAYOR
+  if (type === ElectionType.INDIGENOUS_DISTRICT_REP) return ElectionType.REPRESENTATIVE
+  return LEVEL_TAB_TYPES.includes(type) ? type : ''
+})
+const crumbTo = (path?: string) => (path && crumbLevelTab.value ? `${path}?tab=${encodeURIComponent(crumbLevelTab.value)}` : path)
+// 村里長多一層村里：連到鄉鎮頁、停在村里長分頁並篩到這個村里；鄉鎮定不出來就只顯示文字（手機頁首共用）
+const villageCrumb = computed(() => {
+  const rec = primaryRecord.value
+  const village = rec?.village?.trim()
+  if (!village || positionSpec(rec?.electionType ?? '')?.level !== 'village') return null
+  const town = breadcrumbs.value.find(i => /\/election\/[^/]+\/[^/]+\/[^/#]+$/.test(i.path ?? ''))
+  return { label: village, to: town?.path ? `${town.path}?tab=${encodeURIComponent(rec!.electionType!)}&village=${encodeURIComponent(village)}` : undefined }
+})
+watch([breadcrumbs, villageCrumb, crumbLevelTab], ([items, village]) => {
+  if (items.length === 0) { setPageCrumbs(null); return }
+  const out: { label: string; to?: string }[] = items.filter(i => !(i.path ?? '').includes('#')).map((i, k, all) => ({ label: i.name, to: k < all.length - 1 ? crumbTo(i.path) : undefined }))
+  if (village) out.splice(out.length - 1, 0, village)
+  setPageCrumbs(out)
+}, { immediate: true })
 watch([() => politician.value?.name, titles], ([name, t]) => { setPerson(name ? { name, sub: t[0] } : null) }, { immediate: true })
 // 手機頁首：跟選舉頁同一種麵包屑（屆別 › 縣市 ›（鄉鎮）›（村里）› 人名）；職位層不放，鄉鎮放不下時由頁首省成「…」
 watch([breadcrumbs, primaryRecord, () => politician.value?.name], ([items, rec, name]) => {
@@ -376,14 +398,9 @@ watch([breadcrumbs, primaryRecord, () => politician.value?.name], ([items, rec, 
   const out: PersonCrumb[] = []
   items.forEach((i, k) => {
     if (k === items.length - 1 || (k === items.length - 2 && positionSpec(rec?.electionType ?? ''))) return // 人名與職位層由下面接
-    out.push(k === 0 ? { label: yearShort(i.name) ?? i.name, to: i.path } : { label: i.name, to: i.path, short: i.name.replace(/[市縣]$/, ''), skip: /\/election\/[^/]+\/[^/]+\/[^/]+$/.test(i.path ?? '') })
+    out.push(k === 0 ? { label: yearShort(i.name) ?? i.name, to: crumbTo(i.path) } : { label: i.name, to: crumbTo(i.path), short: i.name.replace(/[市縣]$/, ''), skip: /\/election\/[^/]+\/[^/]+\/[^/]+$/.test(i.path ?? '') })
   })
-  const village = rec?.village?.trim()
-  // 村里連到鄉鎮頁、停在村里長分頁並篩到這個村里；鄉鎮定不出來就只顯示文字
-  if (village && positionSpec(rec?.electionType ?? '')?.level === 'village') {
-    const town = out.find(c => c.skip)
-    out.push({ label: village, to: town?.to ? `${town.to}?tab=${encodeURIComponent(rec!.electionType!)}&village=${encodeURIComponent(village)}` : undefined })
-  }
+  if (villageCrumb.value) out.push(villageCrumb.value)
   out.push({ label: name })
   setPersonCrumbs(out)
 }, { immediate: true })
