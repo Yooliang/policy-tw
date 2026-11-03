@@ -379,7 +379,11 @@ watch([breadcrumbs, primaryRecord, () => politician.value?.name], ([items, rec, 
     out.push(k === 0 ? { label: yearShort(i.name) ?? i.name, to: i.path } : { label: i.name, to: i.path, short: i.name.replace(/[市縣]$/, ''), skip: /\/election\/[^/]+\/[^/]+\/[^/]+$/.test(i.path ?? '') })
   })
   const village = rec?.village?.trim()
-  if (village && positionSpec(rec?.electionType ?? '')?.level === 'village') out.push({ label: village })
+  // 村里連到鄉鎮頁、停在村里長分頁並篩到這個村里；鄉鎮定不出來就只顯示文字
+  if (village && positionSpec(rec?.electionType ?? '')?.level === 'village') {
+    const town = out.find(c => c.skip)
+    out.push({ label: village, to: town?.to ? `${town.to}?tab=${encodeURIComponent(rec!.electionType!)}&village=${encodeURIComponent(village)}` : undefined })
+  }
   out.push({ label: name })
   setPersonCrumbs(out)
 }, { immediate: true })
