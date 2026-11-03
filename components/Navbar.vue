@@ -138,7 +138,7 @@ const deskCrumbs = computed<DeskCrumb[]>(() => {
       <nav v-else-if="shownPersonCrumbs" class="min-w-0 flex-1 flex items-center justify-center gap-0.5 px-1 text-[15px] font-bold text-navy-900" aria-label="目前定位" data-testid="header-person-crumbs">
         <template v-for="(c, i) in shownPersonCrumbs" :key="i">
           <ChevronRight v-if="i > 0" :size="14" class="shrink-0 text-slate-400" />
-          <RouterLink v-if="c.to && i < shownPersonCrumbs.length - 1" :to="c.to" class="whitespace-nowrap rounded px-1 py-1.5 text-slate-500 active:bg-slate-100">{{ c.label }}</RouterLink>
+          <RouterLink v-if="c.to && i < shownPersonCrumbs.length - 1" :to="c.to" class="whitespace-nowrap rounded px-1 py-1.5 text-slate-500 active:bg-slate-100" :class="i === shownPersonCrumbs.length - 2 ? 'min-w-0 truncate' : ''">{{ c.label }}</RouterLink>
           <span v-else class="px-1 py-1.5" :class="i === shownPersonCrumbs.length - 1 ? 'min-w-0 shrink-[0.1] truncate text-navy-900' : c.label === '…' ? 'shrink-0 text-slate-500' : 'min-w-0 truncate text-slate-500'">{{ c.label }}</span>
         </template>
       </nav>
