@@ -198,3 +198,13 @@ Deno.test("同名但已判定不同人的配對不擋", async () => {
   await db.exec(commit(SCRIPT));
   assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
 });
+
+Deno.test("還原驗證：拿掉同名待合併檢查，同名案例就不再被它擋下（改完對帳歸零，直接放行）", async () => {
+  const db = await buildDb();
+  await ours(db, "王小明", 3);
+  await base(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "王小明", no: 3 }]);
+  await failsWith(db, commit(SCRIPT), "同名待合併=1"); // 原版：擋
+  const weak = commit(mutate(SCRIPT, "IF v_samename <> 0 THEN", "IF false THEN"));
+  await db.exec(weak); // 拿掉檢查：不再中止
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
+});
