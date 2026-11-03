@@ -36,12 +36,20 @@ const SCHEMA = `
 CREATE TABLE politicians (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, party text, region text, sub_region text, merged_into uuid);
 CREATE TABLE regions (id serial PRIMARY KEY, region text, sub_region text, village text);
 CREATE TABLE politician_elections (id serial PRIMARY KEY, election_id integer NOT NULL, election_type text, politician_id uuid NOT NULL,
-  region_id integer, candidacy_status text, cand_no integer, withdrawn_after_filing boolean, source_note text,
+  region_id integer, candidacy_status text, cand_no integer, withdrawn_after_filing boolean, source_note text, verified boolean,
   CONSTRAINT politician_elections_withdrawn_after_filing_check CHECK (withdrawn_after_filing IS NULL OR candidacy_status = 'withdrawn'));
 CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, record_id text NOT NULL, field text NOT NULL, old_value jsonb, new_value jsonb,
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
 CREATE TABLE politician_pair_resolutions (pair_key text PRIMARY KEY, a uuid, b uuid, resolution text NOT NULL);
 CREATE FUNCTION politician_pair_key(p_a uuid, p_b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(p_a, p_b)::text || '|' || GREATEST(p_a, p_b)::text $$;
+CREATE TABLE elections (id integer PRIMARY KEY, election_date date);
+CREATE TABLE roster_check_scope (election_id integer, election_type text, registration_closed_on date);
+CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contribution_type text, status text, payload jsonb, task_id text, applied_at timestamptz);
+CREATE TABLE verification_sources (id serial PRIMARY KEY, kind text, status text, list_url text, sort int, provides text[], election_types text[], regions text[]);
+CREATE TABLE cec_candidates (election_id integer, election_type text, region text, sub_region text, village text, name_norm text);
+INSERT INTO elections VALUES (2026, '2026-11-28');
+INSERT INTO roster_check_scope VALUES (2026, '縣市議員', '2026-09-04');
+CREATE FUNCTION candidacy_list_published(p_election_id integer, p_election_type text, p_on date) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$;
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text, task_type text, target jsonb, status text NOT NULL DEFAULT 'open',
   source text, closed_at timestamptz);
 `;
@@ -54,6 +62,10 @@ async function buildDb(): Promise<PGlite> {
   await db.exec(`CREATE TRIGGER trg_politician_elections_withdrawn_flag BEFORE INSERT OR UPDATE OF candidacy_status ON politician_elections
     FOR EACH ROW EXECUTE FUNCTION politician_elections_withdrawn_flag();`);
   for (const f of ["cec_name_norm", "cec_name_key", "roster_name_fold", "roster_name_key", "ballot_number_unit"]) await db.exec(await latestFn(f));
+  // 退選之後會被派工的兩條臂：真實 migration 的最新定義
+  await db.exec(fnText(await readMig("20261006220000_candidacy_read_side.sql"), "candidacy_protocol_status"));
+  await db.exec(await latestFn("contribution_auto_tasks_not_running"));
+  await db.exec(await latestFn("contribution_auto_tasks_withdrawn_filing"));
   await db.exec(HINT.slice(0, HINT.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_ballot_numbers()")));
   const REG = await readMig("20261008130000_cec_registrations.sql");
   await db.exec(REG.slice(0, REG.indexOf("CREATE OR REPLACE FUNCTION roster_registration_gap(")));
@@ -207,4 +219,57 @@ Deno.test("還原驗證：拿掉同名待合併檢查，同名案例就不再被
   const weak = commit(mutate(SCRIPT, "IF v_samename <> 0 THEN", "IF false THEN"));
   await db.exec(weak); // 拿掉檢查：不再中止
   assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
+});
+
+// ── 清理後不會被後續派工臂重新派出 ─────────────────────────────
+const armIds = async (db: PGlite, fn: "contribution_auto_tasks_not_running" | "contribution_auto_tasks_withdrawn_filing") =>
+  (await db.query<{ id: string }>(`SELECT target->>'politician_election_id' AS id FROM ${fn}()`)).rows.map((r) => Number(r.id)).sort((a, b) => a - b);
+
+/** 對照組：退選、旗標 false、沒履歷（not_running 會派）；退選、旗標空（withdrawn_filing 會派）——證明兩個函式在這個測試庫裡真的會回東西 */
+async function controls(db: PGlite) {
+  const nr = await ours(db, "對照甲", null, "withdrawn");
+  await db.query(`UPDATE politician_elections SET withdrawn_after_filing = false WHERE id = $1`, [nr]);
+  return nr;
+}
+
+Deno.test("清理後 not_running 與 withdrawn_filing 兩條臂都不回這批人（對照組仍會被派）", async () => {
+  const db = await buildDb();
+  const { e1, e2, w } = await base(db);
+  const ctrl = await controls(db);
+  assertEquals(await armIds(db, "contribution_auto_tasks_not_running"), [ctrl]);
+  assertEquals(await armIds(db, "contribution_auto_tasks_withdrawn_filing"), [w]);
+  await db.exec(commit(SCRIPT));
+  const nr = await armIds(db, "contribution_auto_tasks_not_running");
+  const wf = await armIds(db, "contribution_auto_tasks_withdrawn_filing");
+  assertEquals(nr, [ctrl]);
+  assertEquals(wf, [w]);
+  for (const id of [e1, e2]) assert(!nr.includes(id) && !wf.includes(id), `pe ${id} 被後續臂重新派出`);
+});
+
+Deno.test("還原驗證：不寫 withdrawn_after_filing 的履歷，not_running 就會把這批人派出去", async () => {
+  const db = await buildDb();
+  const { e1, e2 } = await base(db);
+  const block = `
+  UNION ALL
+  SELECT 'politician_elections', s.id::TEXT, 'withdrawn_after_filing', to_jsonb(s.withdrawn_after_filing), to_jsonb(false), 'no-cand-cleanup-2026-11'
+    FROM politician_elections_no_cand_snapshot_20261103 s;`;
+  const weak = commit(mutate(SCRIPT, block, ";"));
+  assert(weak !== SCRIPT && !weak.includes("'withdrawn_after_filing', to_jsonb(s.withdrawn_after_filing)"), "履歷那段沒被拿掉");
+  await db.exec(weak);
+  // 前提都成立（腳本跑完、狀態已改）才看結果：拿掉履歷後，兩個人都被 not_running 派出
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn" && y.withdrawn_after_filing === false).length, 2); // 這批兩位（退選甲的旗標本來是空的）
+  assertEquals(await armIds(db, "contribution_auto_tasks_not_running"), [e1, e2]);
+});
+
+Deno.test("還原腳本之後（改回 filed）兩條臂也不派這批人", async () => {
+  const db = await buildDb();
+  const { e1, e2, w } = await base(db);
+  await db.exec(commit(SCRIPT));
+  await db.exec(commit(RESTORE));
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "filed").length, 4);
+  const nr = await armIds(db, "contribution_auto_tasks_not_running");
+  const wf = await armIds(db, "contribution_auto_tasks_withdrawn_filing");
+  assertEquals(nr, []);
+  assertEquals(wf, [w]);
+  for (const id of [e1, e2]) assert(!nr.includes(id) && !wf.includes(id));
 });
