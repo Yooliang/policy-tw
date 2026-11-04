@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { boostCaller } from "../_shared/boost-auth.ts";
 import { BOOST_FILTER_KEYS, BOOST_PER_IP_PER_HOUR, validateBoostFilter, validateBoostLabel } from "../_shared/boost-filter.ts";
 import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
 
@@ -8,7 +9,7 @@ import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
  * boost — 插隊（2026-09-22，使用者裁示）。
  *
  * POST {label, filter, agent_name?}：符合 filter 的佇列項目（自動缺口、手動任務、待驗證貢獻）一次性排到最前；
- *   領走後回到時間軸，沒做完想再推就再打一次。無金鑰：條件是固定詞彙（_shared/boost-filter.ts 白名單），
+ *   領走後回到時間軸，沒做完想再推就再打一次。POST 要維護者憑證（_shared/boost-auth.ts，2026-11-04）；條件是固定詞彙（_shared/boost-filter.ts 白名單），
  *   不能塞自由文字；同一個來源 IP 一小時最多 BOOST_PER_IP_PER_HOUR 次；誰插的、插了什麼都記在 task_boosts（公開可讀）。
  * GET：最近 20 次插隊與各自還剩多少沒領。
  *
@@ -61,6 +62,9 @@ Deno.serve(async (req) => {
     }
 
     if (req.method !== "POST") return json({ success: false, error: "method_not_allowed", usage: USAGE }, 405);
+    // 寫入要維護者憑證（service role bearer 或 x-cron-secret）；沒帶或不對 401，驗證服務壞掉 503，都在讀 body 與寫任何東西之前
+    const caller = await boostCaller(req.headers, supabase, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
+    if (!caller.ok) return json({ success: false, error: caller.status === 401 ? "unauthorized" : "auth_unavailable" }, caller.status);
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") return json({ success: false, error: "body 要是 JSON 物件", usage: USAGE }, 400);
     const label = validateBoostLabel((body as Record<string, unknown>).label);
