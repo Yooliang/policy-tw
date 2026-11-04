@@ -12,6 +12,7 @@
  */
 import { TAIWAN_COUNTIES } from './election-regions.ts'
 import type { DimDef, FlowGraph, FlowLink, FlowNode, Tone } from './model-flow.ts'
+import { ageColorOf, categoricalColorAt, NEUTRAL, partyColorOf, type FlowColor } from './party-flow-colors.ts'
 
 export interface PartyFlowRow {
   p: string
@@ -168,6 +169,20 @@ function dimOrder(dim: string, rows: readonly PartyFlowRow[]): string[] {
   return ordered
 }
 
+/** 第一維度各節點的顏色：政黨用政黨色、年齡用單色相深淺、其餘用類別色（依節點順序）；「未提供」與小黨是灰 */
+function firstDimColors(dim: string, order: readonly string[], cells: ReadonlyMap<string, Cell>): Map<string, FlowColor> {
+  const out = new Map<string, FlowColor>()
+  let k = 0
+  for (const id of order) {
+    const cell = cells.get(id)!
+    if (id === `${dim}:none`) out.set(id, NEUTRAL)
+    else if (dim === 'party') out.set(id, partyColorOf(cell.label))
+    else if (dim === 'age') out.set(id, ageColorOf(Number(id.slice('age:'.length))))
+    else out.set(id, categoricalColorAt(k++))
+  }
+  return out
+}
+
 export interface PartyFlowGraph extends FlowGraph {
   /** 目前篩選後的總人數 */
   total: number
@@ -195,6 +210,7 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
   const colOf = (i: number) => i + (hasTowns && countyAt >= 0 && i > countyAt ? 1 : 0)
   const nodeCount = new Map<string, number>()
   const linkCount = new Map<string, number>()
+  const pathCount = new Map<string, { ids: string[]; n: number }>()
   const cells = new Map<string, Cell>()
   const townNodes = new Map<string, { county: string; label: string }>()
   const bump = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k) ?? 0) + n)
@@ -212,15 +228,24 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
         path.push(tid)
       }
     })
-    for (let i = 1; i < path.length; i++) bump(linkCount, `${path[i - 1]}\u0000${path[i]}`, r.n)
+    // 第一欄出來的線不用拆；之後的線依第一維度的值拆開（同一組 source→target 可有多條，各帶自己的人數）
+    for (let i = 1; i < path.length; i++) bump(linkCount, `${i === 1 ? '' : path[0]}\u0000${path[i - 1]}\u0000${path[i]}`, r.n)
+    // 完整路徑（選中某節點時，其他節點顯示經過它的人數）：同一條路徑的列併在一起
+    const pk = path.join('\u0000')
+    const cur = pathCount.get(pk)
+    if (cur) cur.n += r.n
+    else pathCount.set(pk, { ids: path, n: r.n })
   }
   const nodes: FlowNode[] = []
   const colTotals: number[] = []
+  const firstOrder = dims.length ? dimOrder(dims[0], rows) : []
+  const firstColors = dims.length ? firstDimColors(dims[0], firstOrder, cells) : new Map<string, FlowColor>()
   dims.forEach((d, i) => {
     let total = 0
     for (const id of dimOrder(d, rows)) {
       const cell = cells.get(id)!
-      nodes.push({ id, label: cell.label, tone: cell.tone, col: colOf(i) })
+      const c = i === 0 ? firstColors.get(id)! : NEUTRAL
+      nodes.push({ id, label: cell.label, tone: cell.tone, col: colOf(i), color: c.color, colorDark: c.colorDark })
       total += nodeCount.get(id) ?? 0
     }
     colTotals.push(total)
@@ -230,18 +255,23 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
     const order = countyOrder(rows)
     const list = [...townNodes.entries()].sort((a, b) => order.indexOf(a[1].county) - order.indexOf(b[1].county) || STROKE_ORDER.compare(a[1].label, b[1].label))
     for (const [id, t] of list) {
-      nodes.push({ id, label: t.label, tone: 'group', col: colOf(countyAt) + 1 })
+      nodes.push({ id, label: t.label, tone: 'group', col: colOf(countyAt) + 1, color: NEUTRAL.color, colorDark: NEUTRAL.colorDark })
       townTotal += nodeCount.get(id) ?? 0
     }
   }
   const rank = new Map(nodes.map((n, i) => [n.id, i]))
   const links: FlowLink[] = [...linkCount.entries()]
     .map(([k, n]) => {
-      const [source, target] = k.split('\u0000')
-      return { source, target, value: n, raw: n, tone: (target.startsWith('town:') ? 'neutral' : 'group') as Tone }
+      const [series, source, target] = k.split('\u0000')
+      // 顏色跟著第一維度：第一欄出來的線取來源節點的色，其餘取它所屬的第一維度值的色
+      const c = firstColors.get(series || source) ?? NEUTRAL
+      const link: FlowLink = { source, target, value: n, raw: n, tone: (target.startsWith('town:') ? 'neutral' : 'group') as Tone, color: c.color, colorDark: c.colorDark, series: cells.get(series || source)?.label }
+      return { link, order: series ? firstOrder.indexOf(series) : -1 }
     })
-    .sort((a, b) => rank.get(a.source)! - rank.get(b.source)! || rank.get(a.target)! - rank.get(b.target)!)
-  return { nodes, links, paths: [], total: sumRows(rows), columns: dims.map((d, i) => ({ dim: d, total: colTotals[i] })), townTotal }
+    .sort((a, b) => rank.get(a.link.source)! - rank.get(b.link.source)! || rank.get(a.link.target)! - rank.get(b.link.target)! || a.order - b.order)
+    .map((x) => x.link)
+  const paths = [...pathCount.values()].map((p) => ({ ids: p.ids, n: p.n, w: p.n }))
+  return { nodes, links, paths, total: sumRows(rows), columns: dims.map((d, i) => ({ dim: d, total: colTotals[i] })), townTotal }
 }
 
 /** 網址參數 ←→ 狀態。逗號分隔；不認得的值丟掉 */
@@ -285,3 +315,31 @@ export function toQuery(s: { election: number; types: readonly string[] | null; 
 
 /** 加入或移除（切換）一個值，保持原順序 */
 export const toggle = (xs: readonly string[], x: string): string[] => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x])
+
+/**
+ * 選中某節點後要亮哪些節點與線（政黨分流圖用）。只看「經過選中節點的完整路徑」：
+ * 節點＝這些路徑經過的節點；線＝這些路徑上連續的 source→target，而且屬於同一個第一維度的值（link.series 等於該路徑第一個節點的名稱）。
+ * 這樣點「國民黨」只亮國民黨的線，不會因為共用同一個縣市就把別黨的線一起點亮。回傳的線是輸入 links 的索引。
+ */
+export function litByPaths(
+  graph: { nodes: readonly { id: string; label: string }[]; paths: readonly { ids: readonly string[] }[] },
+  links: readonly { source: string; target: string; series?: string }[],
+  sel: string,
+): { nodes: Set<string>; links: Set<number> } {
+  const label = new Map(graph.nodes.map((n) => [n.id, n.label]))
+  const nodes = new Set<string>()
+  const keys = new Set<string>()
+  for (const p of graph.paths) {
+    if (!p.ids.includes(sel)) continue
+    const series = label.get(p.ids[0]) ?? ''
+    for (let k = 0; k < p.ids.length; k++) {
+      nodes.add(p.ids[k])
+      if (k > 0) keys.add(`${series}\u0000${p.ids[k - 1]}\u0000${p.ids[k]}`)
+    }
+  }
+  const out = new Set<number>()
+  links.forEach((l, i) => {
+    if (l.series !== undefined ? keys.has(`${l.series}\u0000${l.source}\u0000${l.target}`) : [...keys].some((k) => k.endsWith(`\u0000${l.source}\u0000${l.target}`))) out.add(i)
+  })
+  return { nodes, links: out }
+}

@@ -4,8 +4,10 @@
  * （有鄉鎮的人多走一欄鄉鎮，沒有鄉鎮的人直接跳到下一欄）；缺值不會丟人。
  */
 import { assertEquals } from "jsr:@std/assert@1";
+import { selectionStats } from "./model-flow.ts";
+import { ageColorOf, categoricalColorAt, NEUTRAL } from "./party-flow-colors.ts";
 import {
-  ageLabel, availableDims, buildPartyFlow, countyOrder, defaultTypesFor, filterRows, FLOW_DIMS, MISSING, NO_PARTY, normalizeDims,
+  ageLabel, availableDims, litByPaths, buildPartyFlow, countyOrder, defaultTypesFor, filterRows, FLOW_DIMS, MISSING, NO_PARTY, normalizeDims,
   parseQuery, parseRows, partyOrder, resolveTypes, sumRows, toggle, toQuery, typeOrder, type PartyFlowRow,
 } from "./party-flow.ts";
 
@@ -109,7 +111,10 @@ Deno.test("鑽取：展開台北市，鄉鎮接在縣市後面；沒有鄉鎮的
   // 台北市共 1+10+4+5+3＝23，其中有鄉鎮的 12
   assertEquals(g.townTotal, 12);
   assertEquals(g.columns.map((c) => c.total), [TOTAL, TOTAL, TOTAL]);
-  assertEquals(g.links.filter((l) => l.source === "county:台北市" && l.target.startsWith("town:")).map((l) => [l.target, l.raw]), [["town:台北市/大安區", 9], ["town:台北市/信義區", 3]]);
+  // 縣市 → 鄉鎮 的線依第一維度（政黨）拆開，同一個鄉鎮合計不變
+  const byTown = new Map<string, number>();
+  for (const l of g.links) if (l.source === "county:台北市" && l.target.startsWith("town:")) byTown.set(l.target, (byTown.get(l.target) ?? 0) + l.raw);
+  assertEquals([...byTown], [["town:台北市/大安區", 9], ["town:台北市/信義區", 3]]);
   // 沒有鄉鎮的縣市長、議員：縣市 → 年齡 直接相連（跳過鄉鎮欄）
   assertEquals(g.links.filter((l) => l.source === "county:台北市" && l.target.startsWith("age:")).reduce((a, l) => a + l.raw, 0), 11);
   // 鄉鎮 → 年齡 合計＝有鄉鎮的人
@@ -189,4 +194,161 @@ Deno.test("normalizeDims、toggle", () => {
   assertEquals(normalizeDims(["age", "result"], ["age", "party", "county"]), ["party", "county"], "只剩一個認得的就退回預設");
   assertEquals(toggle(["a", "b"], "c"), ["a", "b", "c"]);
   assertEquals(toggle(["a", "b", "c"], "b"), ["a", "c"]);
+});
+
+Deno.test("paths：合計＝人數，每條路徑走滿所有維度（有鄉鎮的多一站）", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"], ["台北市"]);
+  assertEquals(g.paths.reduce((a, p) => a + p.n, 0), TOTAL);
+  assertEquals(g.paths.every((p) => p.w === p.n), true);
+  assertEquals(g.paths.map((p) => p.ids.length).sort(), g.paths.map((p) => (p.ids.some((i) => i.startsWith("town:")) ? 4 : 3)).sort());
+  // 同一條路徑的列併在一起：民進黨台北市縣市長／議員／村里長年齡不同，不併；相同路徑才併
+  const merged = buildPartyFlow([R("甲", "台北市", "", "縣市長", 40, "男", null, 2), R("甲", "台北市", "", "縣市議員", 40, "女", null, 3)], ["party", "county", "age"]);
+  assertEquals(merged.paths.map((p) => [p.ids.join(">"), p.n]), [["party:甲>county:台北市>age:40", 5]]);
+});
+
+Deno.test("選中節點後：每一欄的子集合計等於選中節點人數（任意維度順序、含鄉鎮展開）；沒經過的節點是 0", () => {
+  const cases: [string[], string[]][] = [];
+  for (const dims of permutations(ALL_DIMS, 3)) cases.push([dims, []], [dims, ["台北市", "新北市"]]);
+  for (const [dims, open] of cases) {
+    const g = buildPartyFlow(ROWS, dims, open);
+    const colOf = new Map(g.nodes.map((n) => [n.id, n.col!]));
+    for (const sel of g.nodes) {
+      const stats = selectionStats(g, sel.id);
+      const own = g.paths.filter((p) => p.ids.includes(sel.id)).reduce((a, p) => a + p.n, 0);
+      assertEquals(stats.get(sel.id)!.raw, own);
+      assertEquals(own > 0, true, `${sel.id} 有路徑經過`);
+      const perCol = new Map<number, number>();
+      for (const n of g.nodes) perCol.set(colOf.get(n.id)!, (perCol.get(colOf.get(n.id)!) ?? 0) + stats.get(n.id)!.raw);
+      const townCol = g.nodes.find((n) => n.id.startsWith("town:"))?.col;
+      for (const [c, sum] of perCol) {
+        if (c === townCol) assertEquals(sum <= own, true, "鄉鎮欄只算有鄉鎮的人");
+        else { assertEquals(sum, own, `${dims.join(",")} 選 ${sel.id} 的第 ${c} 欄`); assertEquals(sum > 0, true); }
+      }
+      // 選中的是鄉鎮：鄉鎮欄也等於它自己
+      if (sel.id.startsWith("town:")) assertEquals(perCol.get(townCol!), own);
+    }
+  }
+});
+
+Deno.test("選中縣市長：年齡欄是縣市長裡的人數，不是全體", () => {
+  const g = buildPartyFlow(ROWS, ["type", "age"]);
+  const s = selectionStats(g, "type:縣市長");
+  assertEquals(s.get("age:50")!.raw, 1);
+  assertEquals(s.get("age:40")!.raw, 0);
+  assertEquals(buildPartyFlow(ROWS, ["type", "age"]).paths.filter((p) => p.ids.includes("age:40")).reduce((a, p) => a + p.n, 0), 10, "全體的 40～49 歲是 10");
+});
+
+Deno.test("上色：線條依第一維度的值分開，各帶顏色、人數與第一維度名稱；每欄與相鄰欄合計不變", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"]);
+  // 第一欄出來的線不拆：政黨 → 縣市 每組一條
+  const first = g.links.filter((l) => l.source.startsWith("party:"));
+  assertEquals(new Set(first.map((l) => `${l.source}>${l.target}`)).size, first.length);
+  // 縣市 → 年齡：同一組 source→target 可有多條（不同政黨），顏色＝該政黨的顏色，series＝政黨名
+  const second = g.links.filter((l) => l.source === "county:台北市" && l.target === "age:50" || l.source === "county:新北市" && l.target === "age:20");
+  assertEquals(second.map((l) => [l.series, l.raw]), [["民主進步黨", 1], [NO_PARTY, 20]]);
+  const dpp = g.links.find((l) => l.series === "民主進步黨")!;
+  assertEquals(dpp.color, "#16a34a");
+  assertEquals(g.links.find((l) => l.series === "中國國民黨")!.color, "#2563eb");
+  assertEquals(g.links.find((l) => l.series === NO_PARTY)!.color, NEUTRAL.color);
+  // 第一欄節點上色、其他欄中性灰
+  assertEquals(g.nodes.find((n) => n.id === "party:民主進步黨")!.color, "#16a34a");
+  assertEquals(g.nodes.find((n) => n.id === "county:台北市")!.color, NEUTRAL.color);
+  // 拆開後連線合計仍等於總人數
+  const col = new Map(g.nodes.map((n) => [n.id, n.col!]));
+  for (let i = 0; i < 2; i++) assertEquals(g.links.filter((l) => col.get(l.source) === i).reduce((a, l) => a + l.raw, 0), TOTAL);
+  // 年齡當第一維度：用年齡色階；「未提供」灰
+  const ga = buildPartyFlow(ROWS, ["age", "party"]);
+  assertEquals(ga.nodes.find((n) => n.id === "age:20")!.color, ageColorOf(20).color);
+  assertEquals(ga.nodes.find((n) => n.id === "age:none")!.color, NEUTRAL.color);
+  // 縣市當第一維度（類別色，依順序循環）：台北市第 1 色、新北市第 2 色
+  const gc = buildPartyFlow(ROWS, ["county", "gender"]);
+  assertEquals(gc.nodes.find((n) => n.id === "county:台北市")!.color, categoricalColorAt(0).color);
+  assertEquals(gc.nodes.find((n) => n.id === "county:新北市")!.color, categoricalColorAt(1).color);
+  // 深色版
+  assertEquals(gc.nodes.find((n) => n.id === "county:台北市")!.colorDark, categoricalColorAt(0).colorDark);
+});
+
+Deno.test("上色：任意維度順序下連線合計仍等於總人數，且每條線都有顏色與第一維度名稱", () => {
+  for (const dims of permutations(ALL_DIMS, 3)) {
+    const g = buildPartyFlow(ROWS, dims, ["台北市"]);
+    const col = new Map(g.nodes.map((n) => [n.id, n.col!]));
+    for (const l of g.links) { assertEquals(typeof l.color, "string"); assertEquals(typeof l.series, "string"); }
+    for (let i = 0; i < 2; i++) {
+      const sum = g.links.filter((l) => col.get(l.source) === i && col.get(l.target) === i + 1).reduce((a, l) => a + l.raw, 0);
+      assertEquals(sum <= TOTAL && sum > 0, true, dims.join(","));
+    }
+    assertEquals(g.links.filter((l) => col.get(l.source) === 0).every((l) => l.series === g.nodes.find((n) => n.id === l.source)!.label), true);
+  }
+});
+
+// 點選高亮：只亮經過選中節點的完整路徑，且線屬於同一個第一維度的值
+const litLinks = (g: ReturnType<typeof buildPartyFlow>, sel: string) => {
+  const lit = litByPaths(g, g.links, sel);
+  return { nodes: lit.nodes, links: [...lit.links].map((i) => g.links[i]) };
+};
+
+Deno.test("高亮：三維、點第一欄只亮同系列的線，不會因為共用縣市把別黨的線一起亮", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"]);
+  const lit = litLinks(g, "party:中國國民黨");
+  assertEquals(lit.links.length > 0, true);
+  assertEquals(lit.links.every((l) => l.series === "中國國民黨"), true);
+  assertEquals(lit.nodes.has("county:台北市") && lit.nodes.has("county:新北市"), true);
+  assertEquals(lit.nodes.has("county:台南市"), false, "國民黨沒有人的縣市不亮");
+  // 台北市 → 年齡 的線有民進黨與國民黨兩個系列，點國民黨只亮國民黨那幾條
+  const out = g.links.filter((l) => l.source === "county:台北市" && l.target.startsWith("age:"));
+  assertEquals(out.some((l) => l.series === "民主進步黨"), true);
+  assertEquals(lit.links.filter((l) => l.source === "county:台北市").every((l) => l.series === "中國國民黨"), true);
+  // 亮的線合計＝國民黨的人數（第一欄 15 人，往右每一欄各 15）
+  assertEquals(lit.links.filter((l) => l.source.startsWith("party:")).reduce((a, l) => a + l.raw, 0), 15);
+  assertEquals(lit.links.filter((l) => l.source.startsWith("county:")).reduce((a, l) => a + l.raw, 0), 15);
+});
+
+Deno.test("高亮：點中間欄，上下游都對，且只亮經過它的路徑", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"]);
+  const lit = litLinks(g, "county:新北市");
+  // 新北市有國民黨（板橋 7）與無黨籍（20）；民進黨的線不亮
+  assertEquals(lit.nodes.has("party:民主進步黨"), false);
+  assertEquals(lit.nodes.has("party:中國國民黨") && lit.nodes.has(`party:${NO_PARTY}`), true);
+  assertEquals(lit.links.some((l) => l.series === "民主進步黨"), false);
+  assertEquals(lit.links.filter((l) => l.target === "county:新北市").reduce((a, l) => a + l.raw, 0), 27, "上游進新北市的合計");
+  assertEquals(lit.links.filter((l) => l.source === "county:新北市").reduce((a, l) => a + l.raw, 0), 27, "下游出新北市的合計");
+});
+
+Deno.test("高亮：含展開鄉鎮（點鄉鎮只亮經過它的路徑）；沒有路徑的節點不亮", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"], ["台北市"]);
+  const lit = litLinks(g, "town:台北市/大安區");
+  assertEquals(lit.nodes.has("town:台北市/信義區"), false);
+  assertEquals(lit.nodes.has("party:民主進步黨") && lit.nodes.has("party:中國國民黨"), true);
+  assertEquals(lit.links.filter((l) => l.source === "county:台北市").reduce((a, l) => a + l.raw, 0), 9);
+  assertEquals(lit.links.filter((l) => l.source === "town:台北市/大安區").reduce((a, l) => a + l.raw, 0), 9);
+  // 沒有路徑經過的 id：什麼都不亮
+  const none = litByPaths(g, g.links, "party:不存在");
+  assertEquals(none.nodes.size, 0);
+  assertEquals(none.links.size, 0);
+});
+
+Deno.test("高亮：任意三維順序，亮的線都屬於經過選中節點的路徑，且該節點每一側的亮線合計＝經過它的人數", () => {
+  for (const dims of permutations(ALL_DIMS, 3)) {
+    const g = buildPartyFlow(ROWS, dims);
+    const col = new Map(g.nodes.map((n) => [n.id, n.col!]));
+    for (const sel of g.nodes) {
+      const own = g.paths.filter((p) => p.ids.includes(sel.id)).reduce((a, p) => a + p.n, 0);
+      const lit = litLinks(g, sel.id);
+      assertEquals(lit.nodes.has(sel.id), true);
+      const c = col.get(sel.id)!;
+      if (c > 0) assertEquals(lit.links.filter((l) => col.get(l.target) === c).reduce((a, l) => a + l.raw, 0), own, `${dims.join(",")} ${sel.id} 上游`);
+      if (c < dims.length - 1) assertEquals(lit.links.filter((l) => col.get(l.source) === c).reduce((a, l) => a + l.raw, 0), own, `${dims.join(",")} ${sel.id} 下游`);
+    }
+  }
+});
+
+Deno.test("高亮：兩黨在同一縣市、同一年齡組（同一組 source→target 兩條線）時，點一黨只亮它自己那條", () => {
+  const rows = [R("甲黨", "台北市", "", "縣市長", 40, "男", null, 3), R("乙黨", "台北市", "", "縣市長", 40, "女", null, 5)];
+  const g = buildPartyFlow(rows, ["party", "county", "age"]);
+  const both = g.links.filter((l) => l.source === "county:台北市" && l.target === "age:40");
+  assertEquals(both.map((l) => [l.series, l.raw]), [["乙黨", 5], ["甲黨", 3]].sort((a, b) => new Intl.Collator("zh-Hant-TW").compare(String(a[0]), String(b[0]))));
+  const lit = litLinks(g, "party:甲黨");
+  assertEquals(lit.links.filter((l) => l.source === "county:台北市").map((l) => [l.series, l.raw]), [["甲黨", 3]]);
+  const lit2 = litLinks(g, "age:40");
+  assertEquals(lit2.links.filter((l) => l.source === "county:台北市").reduce((a, l) => a + l.raw, 0), 8, "點共用的節點，兩條都亮");
 });

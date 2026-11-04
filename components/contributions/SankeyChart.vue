@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { litByPaths } from '../../lib/party-flow'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { sankey, sankeyLeft } from 'd3-sankey'
 import { linkText, nodeText, selectionStats, selNodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
@@ -9,7 +10,7 @@ const props = defineProps<{
   /** 以下為政黨分流圖用（/ai 都不傳）：照輸入順序排節點、最小跨度、窄螢幕不轉直向而是橫向捲動、自訂標籤 */
   keepOrder?: boolean; minSpan?: number; scroll?: boolean
   nodeLabel?: (label: string, raw: number) => string
-  linkLabel?: (from: string, to: string, raw: number) => string
+  linkLabel?: (from: string, to: string, raw: number, series?: string) => string
 }>()
 const emit = defineEmits<{ pick: [id: string] }>()
 
@@ -22,8 +23,16 @@ const onMq = () => { narrow.value = !!mq?.matches }
 onMounted(() => { mq = window.matchMedia('(max-width: 639px)'); onMq(); mq.addEventListener('change', onMq) })
 onBeforeUnmount(() => mq?.removeEventListener('change', onMq))
 
-interface LNode { id: string; label: string; tone: Tone; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
-interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone }
+// 深色模式（html.dark）：節點與線條有自訂顏色時改用深色版
+const dark = ref(false)
+let mo: MutationObserver | null = null
+const syncDark = () => { dark.value = document.documentElement.classList.contains('dark') }
+onMounted(() => { syncDark(); mo = new MutationObserver(syncDark); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] }) })
+onBeforeUnmount(() => mo?.disconnect())
+const pickColor = (o: { color?: string; colorDark?: string; tone: Tone }) => (dark.value ? o.colorDark ?? o.color : o.color) ?? COLOR[o.tone]
+
+interface LNode { id: string; label: string; tone: Tone; color?: string; colorDark?: string; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
+interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone; color?: string; colorDark?: string; series?: string }
 
 const selected = ref<string | null>(null)
 
@@ -64,7 +73,11 @@ const layout = computed(() => {
     const hideShare = n.layer === 0 && n.id.startsWith('model:') // 模型是各自等寬的 100%，節點不標百分比
     const all = { label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100, hideShare }
     // 選中時：其餘節點顯示「選中子集合」的值，選中的節點本身維持全體值
-    if (props.nodeLabel) return props.nodeLabel(n.label, all.raw)
+    if (props.nodeLabel) {
+      // 自訂標籤（政黨分流圖）：選中時其餘節點顯示選中子集的人數，選中的節點維持全體值；選中的節點已不在圖裡就不套用
+      const s = stats && n.id !== sel && g.nodes.some((x) => x.id === sel) ? stats.get(n.id) : undefined
+      return props.nodeLabel(n.label, s ? s.raw : all.raw)
+    }
     if (!stats || n.id === sel) return nodeText(props.mode, all)
     const s = stats.get(n.id)!
     return selNodeText(props.mode, { label: n.label, raw: s.raw, share: s.share, allShare: all.share, hideShare, withAll: !vertical })
@@ -75,7 +88,7 @@ const layout = computed(() => {
     const d = vertical
       ? `M${l.y0},${s.y1} C${l.y0},${(s.y1 + t.y0) / 2} ${l.y1},${(s.y1 + t.y0) / 2} ${l.y1},${t.y0}`
       : `M${s.x1},${l.y0} C${(s.x1 + t.x0) / 2},${l.y0} ${(s.x1 + t.x0) / 2},${l.y1} ${t.x0},${l.y1}`
-    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
+    return { d, width: Math.max(1, l.width), tone: l.tone, color: l.color, colorDark: l.colorDark, source: s.id, target: t.id, series: l.series, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw, l.series) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
   })
   const W = vertical ? span : flowLen
   const H = vertical ? flowLen : span
@@ -105,6 +118,8 @@ const lit = computed(() => {
   const L = layout.value
   const sel = selected.value
   if (!L || !sel || !L.nodes.some((n) => n.id === sel)) return null
+  // 政黨分流圖（有 linkLabel）：只亮經過選中節點的完整路徑，線還要屬於同一個第一維度的值
+  if (props.linkLabel) return litByPaths(props.graph, L.links, sel)
   const nodes = new Set<string>([sel])
   const links = new Set<number>()
   for (const dir of ['down', 'up'] as const) {
@@ -123,21 +138,39 @@ const lit = computed(() => {
   return { nodes, links }
 })
 const pick = (id: string) => { selected.value = selected.value === id ? null : id; emit('pick', id) }
+
+// 線條人數（只有傳 linkLabel 時）：滑過（桌機）或點一下（手機）在圖上方固定一行顯示；點空白處清掉
+const hoverLink = ref<number | null>(null)
+const pinnedLink = ref<number | null>(null)
+const activeLinkText = computed(() => {
+  const L = layout.value
+  const i = hoverLink.value ?? pinnedLink.value
+  return L && i !== null && L.links[i] ? L.links[i].label : ''
+})
+const pinLink = (i: number) => { pinnedLink.value = pinnedLink.value === i ? null : i }
+const clearBlank = () => { selected.value = null; pinnedLink.value = null }
 </script>
 
 <template>
   <div v-if="layout" class="w-full" :class="scroll ? 'overflow-x-auto' : ''">
+    <!-- 固定一行（預留高度，不跳動）；捲動時黏在左邊 -->
+    <p v-if="linkLabel" class="sticky left-0 mb-1 h-6 w-max max-w-[calc(100vw-4rem)] truncate text-sm font-bold text-navy-900" data-testid="sankey-link-text" aria-live="polite">{{ activeLinkText || ' ' }}</p>
     <svg :viewBox="`0 0 ${layout.W} ${layout.H}`" class="w-full h-auto select-none" :style="scroll ? { minWidth: `${layout.W}px` } : undefined" role="img" :aria-label="name" :data-testid="`sankey-${name}`"
-      @click="selected = null">
+      @click="clearBlank">
       <g fill="none">
-        <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="COLOR[l.tone]" :stroke-width="l.width"
+        <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="pickColor(l)" :stroke-width="l.width"
           :stroke-opacity="lit ? (lit.links.has(i) ? 0.55 : 0.07) : 0.28">
           <title>{{ l.label }}</title>
         </path>
       </g>
+      <!-- 較粗的透明命中區：只有傳 linkLabel 時才有（細線不好點） -->
+      <g v-if="linkLabel" fill="none" stroke="transparent">
+        <path v-for="(l, i) in layout.links" :key="`hit-${i}`" :d="l.d" :stroke-width="Math.max(l.width, 14)" pointer-events="stroke" class="cursor-pointer"
+          :data-testid="`sankey-link-${i}`" @mouseenter="hoverLink = i" @mouseleave="hoverLink = null" @click.stop="pinLink(i)" />
+      </g>
       <g>
         <rect v-for="n in layout.nodes" :key="n.id" :x="n.x0" :y="n.y0" :width="Math.max(1, n.x1 - n.x0)" :height="Math.max(1, n.y1 - n.y0)"
-          :fill="COLOR[n.tone]" :opacity="lit && !lit.nodes.has(n.id) ? 0.25 : 1" class="cursor-pointer" @click.stop="pick(n.id)">
+          :fill="pickColor(n)" :opacity="lit && !lit.nodes.has(n.id) ? 0.25 : 1" class="cursor-pointer" @click.stop="pick(n.id)">
           <title>{{ layout.nodeTitle.get(n.id) }}</title>
         </rect>
       </g>

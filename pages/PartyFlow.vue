@@ -104,7 +104,8 @@ const onPick = (id: string) => {
 const setDims = (v: string[]) => { dims.value = normalizeDims(v, dimPool.value.map((d) => d.id)) }
 const setTypes = (v: string[]) => { requestedTypes.value = v }
 const nodeLabel = (label: string, raw: number) => `${label} ${raw.toLocaleString()}`
-const linkLabel = (from: string, to: string, raw: number) => `${from} → ${to}：${raw.toLocaleString()} 人`
+// 帶第一維度的值：「中國國民黨：縣市長 → 30～39 歲：12 人」；第一欄出來的線本身就含第一維度，不重複
+const linkLabel = (from: string, to: string, raw: number, series?: string) => `${series && series !== from ? `${series}：` : ''}${from} → ${to}：${raw.toLocaleString()} 人`
 const chip = (on: boolean) => ['px-3 py-1 rounded-full text-sm border transition', on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:border-blue-400']
 const typesAreAll = computed(() => types.value.length === 0)
 
