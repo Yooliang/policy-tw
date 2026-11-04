@@ -15,6 +15,8 @@ import { rejectFloor, scoreStatus, unsurePenalty, voteWeight, weightReason } fro
 
 const MIG = "20261017020000_unsure_penalty.sql";
 const SQL = await readMig(MIG);
+// 計票函式的現行定義在 20261104130000（投票不看 IP）：下面的 PGlite 測試跑它，跟 TS 逐案比對
+const NOIP_SQL = await readMig("20261104130000_vote_no_ip.sql");
 const REJECT_SQL = await readMig("20260923000007_reject_floor.sql");
 const SCORE_SQL = await readMig("20260921000021_score_consensus.sql");
 
@@ -54,27 +56,26 @@ async function db(): Promise<PGlite> {
     CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text, payload jsonb DEFAULT '{}', status text DEFAULT 'pending',
       agree_count int DEFAULT 0, disagree_count int DEFAULT 0, unsure_count int DEFAULT 0, score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0,
       verified_at timestamptz, review_notes text, batch_verified_by text, created_at timestamptz DEFAULT now());
-    CREATE TABLE contribution_votes (id serial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, verdict text, judge_backed boolean DEFAULT false,
+    CREATE TABLE contribution_votes (id serial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, agent_name text, actor_id text, verdict text, judge_backed boolean DEFAULT false,
       weight smallint, created_at timestamptz DEFAULT now());
+    CREATE TABLE contribution_tasks (id uuid, task_type text, status text, created_by text, target jsonb);
     CREATE FUNCTION contribution_effective_agree(uuid) RETURNS int LANGUAGE sql AS 'SELECT 3';
-    CREATE FUNCTION contribution_needs_two_ips(text, jsonb) RETURNS boolean LANGUAGE sql AS 'SELECT false';
-    CREATE FUNCTION contribution_roster_matched(uuid) RETURNS boolean LANGUAGE sql AS 'SELECT false';
     ${fnText(SCORE_SQL, "contribution_vote_weight")}
     ${fnText(REJECT_SQL, "contribution_reject_floor")}
     ${fnText(SQL, "contribution_unsure_penalty")}
-    ${fnText(SQL, "contribution_apply_consensus")}
+    ${fnText(NOIP_SQL, "contribution_apply_consensus")}
   `);
   return d;
 }
 
-/** 開一份交件、依序投票（verdict 或 [verdict, ip]），回 [狀態, 分數, unsure_count] */
+/** 開一份交件、依序投票（verdict 或 [verdict, 投票人代號]），回 [狀態, 分數, unsure_count]。所有票都來自同一個網段 same-net：證明計票不看 IP */
 async function score(d: PGlite, n: number, type: string, votes: Array<string | [string, string]>): Promise<[string, number, number]> {
   await d.query(`INSERT INTO contributions (id, contribution_type) VALUES ($1, $2)`, [ID(n), type]);
   let i = 0;
   for (const v of votes) {
-    const [verdict, ip] = Array.isArray(v) ? v : [v, `ip-${++i}`];
-    await d.query(`INSERT INTO contribution_votes (contribution_id, verifier_ip_hash, verdict, weight, created_at) VALUES ($1, $2, $3, contribution_vote_weight($3, false), now() + $4 * interval '1 second')`,
-      [ID(n), ip, verdict, ++i]);
+    const [verdict, voter] = Array.isArray(v) ? v : [v, `voter-${++i}`];
+    await d.query(`INSERT INTO contribution_votes (contribution_id, agent_name, verifier_ip_hash, verdict, weight, created_at) VALUES ($1, $2, 'same-net', $3, contribution_vote_weight($3, false), now() + $4 * interval '1 second')`,
+      [ID(n), voter, verdict, ++i]);
   }
   await d.query(`SELECT contribution_apply_consensus($1)`, [ID(n)]);
   const r = (await d.query<{ status: string; score: number; unsure_count: number }>(`SELECT status, score, unsure_count FROM contributions WHERE id = $1`, [ID(n)])).rows[0];
@@ -104,11 +105,11 @@ Deno.test("SQL 行為：退件門檻不變（3，輕型別 2）；不確定把�
   await d.close();
 });
 
-Deno.test("SQL 行為：只看張數不看順序；同一個來源 IP 只算最新一票；重算永遠一致", async () => {
+Deno.test("SQL 行為：只看張數不看順序；同一個投票人（代號，不分大小寫）只算最新一票；重算永遠一致", async () => {
   const d = await db();
-  // 同一 IP 先 unsure 再改 agree：只剩 agree，沒有不確定
-  assertEquals(await score(d, 20, "policy", [["unsure", "ip-x"], ["agree", "ip-x"]]), ["pending", 1, 0]);
-  // 同一 IP 兩次 unsure 只算一張
+  // 同一投票人先 unsure 再改 agree：只剩 agree，沒有不確定（大小寫不分）
+  assertEquals(await score(d, 20, "policy", [["unsure", "ip-x"], ["agree", "IP-X"]]), ["pending", 1, 0]);
+  // 同一投票人兩次 unsure 只算一張
   assertEquals(await score(d, 21, "policy", [["unsure", "ip-y"], ["unsure", "ip-y"], "unsure"]), ["pending", -1, 2]);
   // 順序無關：unsure 排在 agree 前或後，分數相同
   const a = await score(d, 22, "policy", ["unsure", "unsure", "agree"]);

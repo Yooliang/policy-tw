@@ -159,15 +159,18 @@ Deno.test("端到端：同一個網段 N1 領、N1 內另一個 IP 交——不�
   });
 });
 
-Deno.test("端到端：同一張憑證換網段、換代號再投 → 409，仍只有一張票", async () => {
+Deno.test("端到端：同一張憑證換網段再投：同代號 → 409，仍只有一張票；換代號＝另一個投票人（2026-11-04 投票不看 IP）→ 201", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
     const token = (await getNext(next, N1)).json.dispatch_token as string;
     assertEquals((await post(report, R, voteBody({ dispatch_token: token }))).status, 201);
-    const again = await post(report, "10.3.3.3", voteBody({ dispatch_token: token, agent_name: "erin", note: "另一個代號打開來源核對，欄位都對得上（erin）" }));
+    const again = await post(report, "10.3.3.3", voteBody({ dispatch_token: token }));
     assertEquals(again.status, 409, JSON.stringify(again.json));
     assertEquals(again.json.error, "already_voted");
     assertEquals(db.votes.length, 1);
+    const other = await post(report, "10.3.3.3", voteBody({ dispatch_token: token, agent_name: "erin", note: "另一個代號打開來源核對，欄位都對得上（erin）" }));
+    assertEquals(other.status, 201, JSON.stringify(other.json));
+    assertEquals(db.votes.length, 2, "別的代號是另一票；去重鍵是代號不是網段");
   });
 });
 
@@ -393,7 +396,7 @@ Deno.test("憑證只有一種寫法：簽章尾端非零位元的變體被拒（
 
 // ── contribution_verify_pool 舊簽名相容 ──────────────────────────────────────
 
-Deno.test("/next 對驗證池：IP 認不得（新舊雜湊同值）時用舊簽名的參數呼叫；認得時才多傳 p_legacy_ip_hash", async () => {
+Deno.test("/next 對驗證池：不再傳 p_legacy_ip_hash（投票不看 IP）；匿名只傳 p_agent_name，不傳 p_actor_id", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
     // 沒有 x-forwarded-for → clientIp＝"unknown"，網段雜湊與舊雜湊同值
@@ -402,11 +405,11 @@ Deno.test("/next 對驗證池：IP 認不得（新舊雜湊同值）時用舊簽
     // 兩個入口共用同一個假 fetch，最後安裝的是 report 那份，所以呼叫紀錄在它身上
     const pools = report.calls.filter((c) => c.target === "rpc/contribution_verify_pool");
     assertEquals(pools.length, 2);
-    assertEquals(Object.keys(pools[0].body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "舊簽名（沒有 p_legacy_ip_hash；p_agent_name 是 policy-ops#70 加的）");
-    const legacy = await legacyIpHashOf(new Request("https://x/", at(N1)), SALT);
-    assertEquals((pools[1].body as Row).p_legacy_ip_hash, legacy);
+    for (const p of pools) {
+      assertEquals(Object.keys(p.body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "不帶 p_legacy_ip_hash；匿名沒有 p_actor_id");
+    }
     assertEquals((pools[1].body as Row).p_ip_hash, await netHash(N1));
-    assertNotEquals(legacy, await netHash(N1));
+    assertEquals((pools[1].body as Row).p_agent_name, "dave");
   });
 });
 

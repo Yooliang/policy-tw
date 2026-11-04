@@ -22,7 +22,7 @@ import {
   LINEAGE_TITLE_MIN, linkLevelProblem, LINK_NOTE_MAX, LINK_NOTE_MIN, LINK_TYPES, LOCATOR_MAX, parseCandidateTaskId, PARTICIPANT_BASES,
   PARTICIPANT_ROLES, POLICY_ORIGINS,
 } from "./lineage.ts";
-import { needsTwoIps, riskLevel, SCORE_TWO_IP_TYPES, scoreStatus } from "./consensus.ts";
+import { needsTwoIps, riskLevel, scoreStatus } from "./consensus.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { SINGLE_ANSWER_TASK_TYPES } from "./single-answer-guard.ts";
 import { buildReportTemplate, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
@@ -165,23 +165,25 @@ Deno.test("policies_with_logs 重建：前面的 p.*、logs、related_policy_ids
 
 // ── 2. 「中止」交接要兩台機器（不動計分）──────────────────────────────────────
 
-Deno.test("中止交接要兩台機器：TS needsTwoIps 跟 SQL contribution_needs_two_ips 同一條規則", () => {
+// 這一段守「這支 migration 當時的定義」（歷史）；2026-11-04 起 contribution_needs_two_ips 恆為 FALSE，現行值由下一則與 vote-no-ip 的測試守。
+Deno.test("中止交接要兩台機器（歷史定義）；現行：TS needsTwoIps 恆 false，跟 SQL 現行定義同一條規則", () => {
   const fn = between(sql, "CREATE OR REPLACE FUNCTION contribution_needs_two_ips", "$$;");
   const list = fn.match(/p_type IN \(([^)]+)\)/)![1];
   // 這支 migration 當時的清單：既有三種原樣保留（之後的型別加在後面的 migration，最新那一份跟 SCORE_TWO_IP_TYPES 的比對在 reassign-candidacy.test.ts）
   assertEquals(quoted(list), ["merge_politician", "candidacy", "removal"], "既有的三種型別原樣保留");
   assertStringIncludes(fn, "p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop'");
   assertEquals([...HANDOVER_TWO_IP_TYPES], ["stop"]);
-  for (const t of SCORE_TWO_IP_TYPES) assert(needsTwoIps(t, {}), `${t} 照舊要兩台機器`);
-  assert(needsTwoIps("lineage_handover", { handover_type: "stop" }), "中止要兩台機器");
+  // 現行（維護者 2026-11-04：投票不看 IP）：不分型別一律 false；現行 SQL 定義也是恆 FALSE
+  for (const t of ["merge_politician", "candidacy", "removal", "reassign_candidacy"]) assert(!needsTwoIps(t, {}), `${t} 不再要兩台機器`);
+  assert(!needsTwoIps("lineage_handover", { handover_type: "stop" }), "中止也不再要兩台機器");
   for (const t of ["keep", "pivot", "shrink", "resume"]) assert(!needsTwoIps("lineage_handover", { handover_type: t }), `${t} 走一般規則`);
   for (const t of ["lineage", "lineage_participants", "lineage_link", "policy"]) assert(!needsTwoIps(t, {}), `${t} 不用兩台機器`);
 });
 
-Deno.test("中止交接：分數到了但只有一台機器 → 還在等；兩台 → 上線。接手一台就上線（目標分數一樣是 3）", () => {
+Deno.test("中止交接：分數到了單一來源也上線（2026-11-04 起不看 IP）；分數不夠仍在等（目標分數一樣是 3）", () => {
   const base = { target: 3, current: "pending", contributionType: "lineage_handover" };
-  assertEquals(scoreStatus({ ...base, score: 3, distinctIps: 1, payload: { handover_type: "stop" } }), "pending");
-  assertEquals(scoreStatus({ ...base, score: 3, distinctIps: 2, payload: { handover_type: "stop" } }), "verified");
+  assertEquals(scoreStatus({ ...base, score: 3, distinctIps: 1, payload: { handover_type: "stop" } }), "verified");
+  assertEquals(scoreStatus({ ...base, score: 2, distinctIps: 2, payload: { handover_type: "stop" } }), "pending");
   assertEquals(scoreStatus({ ...base, score: 3, distinctIps: 1, payload: { handover_type: "keep" } }), "verified");
   for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) {
     assertEquals(riskLevel(t, { handover_type: "stop" }), "normal", `${t} 門檻照一般資料，不動計分`);
@@ -578,10 +580,11 @@ Deno.test("驗證說明：四種都講得出核什麼、投什麼；中止明講
   assertStringIncludes(LINEAGE_VERIFY_HINT.lineage_participants, "新聞轉述不是官方紀錄");
 });
 
-Deno.test("協議（skill.md）講了四種型別、中止要兩台機器、官方紀錄要官方網址、臉書不收", async () => {
+Deno.test("協議（skill.md）講了四種型別、中止不再要兩台機器（2026-11-04）、官方紀錄要官方網址、臉書不收", async () => {
   const skill = await readSkillWithTypes();
   for (const t of ["lineage", "lineage_participants", "lineage_handover", "lineage_link"]) assertStringIncludes(skill, `**\`${t}\`** — `);
-  assertStringIncludes(skill, "`handover_type=stop` 的 `lineage_handover` 另外要求分數來自**至少 2 個不同來源 IP**");
+  assertStringIncludes(skill, "全部型別都不再要求分數來自 ≥2 個不同來源 IP");
+  assert(!skill.includes("另外要求分數來自**至少 2 個不同來源 IP**"), "舊的「中止要兩個來源 IP」說法要移掉");
   assertStringIncludes(skill, "出處**一定要是官方網址**");
   assertStringIncludes(skill, "**臉書、IG、Threads 讀不到，不收**");
   assertStringIncludes(skill, "**後任的政見清單裡沒有這件事，不等於中止**");

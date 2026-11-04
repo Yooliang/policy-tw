@@ -8,7 +8,7 @@ import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/jp/verify-handler.ts";
 import { requiredAgree } from "../_shared/jp/consensus.ts";
 import { jpDispatchTokenSecretFrom, createJpSecretWarner } from "../_shared/jp/dispatch-secret.ts";
-import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
+import { fetchMyVotedRows } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -83,7 +83,7 @@ async function handle(req: Request): Promise<Response> {
     }
 
     // 待驗證池：在 SQL 裡就排掉自己提交的、投過的、已達門檻的
-    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL });
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(actor.level === "ditrust" ? { p_actor_id: actor.actor_id } : {}) });
 
     const [pendingRes, countsRes, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes] = await Promise.all([
       pendingQuery,
@@ -93,7 +93,7 @@ async function handle(req: Request): Promise<Response> {
         supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
           .in("status", ["pending", "verified"]).not("task_id", "is", null).order("created_at", { ascending: false }).range(from, to)),
       supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: 30, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName }),
-      fetchMyVotedRows(supabase, voterHashes(ipHash)),
+      fetchMyVotedRows(supabase, { agentName, actorId: actor.actor_id }),
       supabase.from("contributions").select("id", { count: "exact", head: true })
         .eq(submitQuota.column, submitQuota.value).gte("created_at", windowStart.toISOString()),
       supabase.from("contribution_votes").select("id", { count: "exact", head: true })

@@ -8,6 +8,9 @@
  * 系統票可投型別縮成日本站有的 candidacy・correction・politician・policy（no_change／task_suggestion 在正見也不拿系統票；SQL 的 system_vote_eligible 是正見複本、多收日本站沒有的型別）、
  * needsTwoIps／scoreStatus（計分由 SQL 觸發器做，TS 這邊不鏡像）。投系統票的端點是 jp-system-one（20261011110000；目前只對 candidacy／politician／policy 投，correction 的宣稱形狀未定）。
  *
+ * 2026-11-04（維護者本人裁定）：全部型別不再要求兩個不同來源網段，同網段的兩個代理各算一票；contribution_needs_two_ips 恆為 FALSE，
+ *   下面各段提到「2 網段」的敘述是歷史；一人一票的單位＝DiTrust 帳號按 actor_id、匿名按代號（voterKey，從正見轉出）。
+ *
  * 門檻要跟日本站 SQL 一致（policy_jp.contribution_required_agree／contribution_reject_floor，由另一份 migration 提供）：
  *   no_change／task_suggestion 目標 2，correction 目標 3；退件門檻 no_change／task_suggestion −2，其餘 −3。
  * election（查到的選舉日程，PR②）、local_government、regional_stat（落庫那一批 PR）：SQL 的 contribution_required_agree 走 ELSE 的 normal，目標 3、退件 −3；
@@ -33,6 +36,7 @@ export {
   isRepeatedNote,
   isRubberStampAgree,
   isSelfVote,
+  voterKey,
   isValidAgentName,
   isValidAgentTool,
   sameSiteAsSubmitted,

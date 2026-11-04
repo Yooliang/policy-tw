@@ -11,6 +11,7 @@ import { readMig } from "./arms-pglite.ts";
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const MIG = "20261029020000_cand_no_target_one.sql";
 const NO_TWO_MIG = "20261029100000_cand_no_one_machine.sql";
+const NO_IP_MIG = "20261104130000_vote_no_ip.sql";
 const SRC = ["https://db.cec.gov.tw/ElecTable/Election/ElecTickets"];
 const UUID = "0b8d3a52-1111-4222-8333-444455556666";
 const CAND_NO = { name: "王小明", election_id: 1, election_type: "city_councilor", cand_no: 7 };
@@ -116,29 +117,32 @@ Deno.test("migration 不碰資料：只有函式定義，沒有 UPDATE／INSERT�
 });
 
 
-Deno.test("拿掉兩台機器只限 cand_no：一般 candidacy、past_result、其他兩台型別照舊；一張反對仍擋得住", () => {
+Deno.test("投票不看 IP（2026-11-04）：所有型別都不需要兩台機器；分數到了單一來源就 verified，一張反對仍擋得住", () => {
   const PAST = { ...CAND_NO, election_result: "elected", politician_id: UUID };
-  for (const p of [{ name: "王小明" }, {}, { cand_no: 0 }, { cand_no: "abc" }, { cand_no: 1000000 }, PAST, { ...PAST, election_result: "not_elected" }]) {
-    assert(needsTwoIps("candidacy", p), `candidacy ${JSON.stringify(p)} 仍要兩台`);
+  for (const p of [{ name: "王小明" }, {}, { cand_no: 0 }, { cand_no: "abc" }, { cand_no: 1000000 }, PAST, { ...PAST, election_result: "not_elected" }, CAND_NO]) {
+    assert(!needsTwoIps("candidacy", p), `candidacy ${JSON.stringify(p)} 不再要兩台`);
   }
-  // election_result 有、politician_id 不是 UUID → 不是 past_result，視為一般 cand_no 件
-  assert(!needsTwoIps("candidacy", { ...CAND_NO, election_result: "elected", politician_id: "x" }));
-  for (const t of ["merge_politician", "removal", "reassign_candidacy"]) assert(needsTwoIps(t, CAND_NO), `${t} 帶 cand_no 也照舊兩台`);
-  assert(needsTwoIps("lineage_handover", { handover_type: "stop" }));
-  assert(needsTwoIps("correction", { target_table: "politician_elections", field: "candidate_status", correct_value: "withdrawn", cand_no: 7 }), "退選更正照舊兩台");
+  for (const t of ["merge_politician", "removal", "reassign_candidacy"]) assert(!needsTwoIps(t, CAND_NO), `${t} 不再要兩台`);
+  assert(!needsTwoIps("lineage_handover", { handover_type: "stop" }));
+  assert(!needsTwoIps("correction", { target_table: "politician_elections", field: "candidate_status", correct_value: "withdrawn", cand_no: 7 }), "退選更正也不再要兩台");
   const gate = (p: Record<string, unknown>, score: number, ips: number) => scoreStatus({ score, target: requiredAgree("candidacy", p, SRC), distinctIps: ips, contributionType: "candidacy", payload: p, current: "pending" });
-  assertEquals(gate({ name: "王小明" }, 3, 1), "pending", "一般 candidacy 分數夠了但一台 → 等");
-  assertEquals(gate(PAST, 3, 1), "pending", "past_result 分數夠了但一台 → 等");
-  assertEquals(gate(PAST, 3, 2), "verified");
+  assertEquals(gate({ name: "王小明" }, 3, 1), "verified", "一般 candidacy 分數夠了、單一來源也過");
+  assertEquals(gate({ name: "王小明" }, 2, 1), "pending", "分數不夠仍等");
+  assertEquals(gate(PAST, 3, 1), "verified");
   assertEquals(gate(CAND_NO, 1, 1), "verified");
   assertEquals(gate(CAND_NO, 0, 1), "pending", "一同意一反對 → 0，擋得住");
   assertEquals(gate(CAND_NO, -3, 1), "rejected");
 });
 
-Deno.test("SQL contribution_needs_two_ips 真的跑（PGlite）：逐案跟 TS needsTwoIps 一致", async () => {
+Deno.test("SQL contribution_needs_two_ips 真的跑（PGlite）：舊定義逐案跟舊規則一致由其他測試守；新 migration 後恆為 FALSE 且跟 TS needsTwoIps 一致", async () => {
   const d = new PGlite();
   await d.exec(await readMig("20261018030000_correction_withdraw_two_ips.sql"));
   await d.exec(await readMig(NO_TWO_MIG));
+  // 新 migration 整支含 policy_jp 與驗證池函式，PGlite 沒有那些表：只取 public.contribution_needs_two_ips 那一段
+  const noIp = await readMig(NO_IP_MIG);
+  const at = noIp.indexOf("CREATE OR REPLACE FUNCTION contribution_needs_two_ips(");
+  assert(at >= 0, "新 migration 要重定義 contribution_needs_two_ips");
+  await d.exec(noIp.slice(at, noIp.indexOf("$$;", at) + 3));
   const PAST = { ...CAND_NO, election_result: "elected", politician_id: UUID };
   const cases: Array<[string, Record<string, unknown>]> = [
     ["candidacy", CAND_NO], ["candidacy", { ...CAND_NO, cand_no: "007" }], ["candidacy", { ...CAND_NO, cand_no: "7" }],
@@ -150,8 +154,9 @@ Deno.test("SQL contribution_needs_two_ips 真的跑（PGlite）：逐案跟 TS n
   ];
   for (const [t, p] of cases) {
     const r = await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips($1, $2::jsonb) AS v", [t, JSON.stringify(p)]);
-    assertEquals(r.rows[0].v, needsTwoIps(t, p), `${t} ${JSON.stringify(p)}`);
+    assertEquals(r.rows[0].v, false, `${t} ${JSON.stringify(p)}`);
+    assertEquals(r.rows[0].v, needsTwoIps(t, p), `${t} ${JSON.stringify(p)} 要跟 TS 一致`);
   }
-  assertEquals((await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('candidacy', NULL) AS v")).rows[0].v, true, "payload NULL 不能變成 NULL 結果");
+  assertEquals((await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('candidacy', NULL) AS v")).rows[0].v, false, "payload NULL 也是 FALSE");
   await d.close();
 });

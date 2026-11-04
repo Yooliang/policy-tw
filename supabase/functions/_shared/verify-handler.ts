@@ -1,6 +1,6 @@
 /**
  * verify 的核心邏輯：POST /verify 與 POST /report{kind:"verify"} 共用。
- * 規則：不能驗自己提交的（agent_name 或 ip_hash 任一相同）；同一筆每個 agent_name 與每個來源 IP 各一票；
+ * 規則：不能驗自己提交的（同代號或同 DiTrust 帳號）；同一筆每個投票人（DiTrust 按 actor_id、匿名按代號）一票，不看來源 IP（2026-11-04）；
  *       disagree 必附 evidence_url；共識由 DB 觸發器算。
  */
 
@@ -11,7 +11,7 @@ import { type Actor } from "./actor.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
 import { QUOTA_DEFAULTS, resolveIdentity } from "./contribute-handler.ts";
 import { loadQuotaLimits, type QuotaLimits } from "./quota-settings.ts";
-import { isDuplicateVote, isSelfVote, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
+import { isSelfVote, voterKey, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
@@ -129,7 +129,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count, score")
+    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -137,17 +137,16 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
   }
-  // 憑證路徑：領任務的網段與交件當下的網段，哪一個是提交者的都算自己
-  const isReportNet = (stored: string | null | undefined) => tokenBinding !== null && !!stored && stored === reportIpHash;
-  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(contribution.contributor_ip_hash, legacyIpHash) || isReportNet(contribution.contributor_ip_hash)) {
-    return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同 agent_name 或同一來源 IP）提交的貢獻，請跳過這筆" } };
+  // 不能驗自己：同一個投票人（DiTrust 同帳號、匿名同代號）。不再比來源網段（維護者 2026-11-04）
+  const voter = { agent_name: input.agent_name, actor_id: actor.actor_id };
+  if (isSelfVote(contribution, voter)) {
+    return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同代號或同一個 DiTrust 帳號）提交的貢獻，請跳過這筆" } };
   }
   // 裁決的驗證：原貢獻的提交者也不能投（利益相關）
   if (contribution.contribution_type === "adjudication") {
     const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
-    const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash").eq("id", originalId).maybeSingle() : { data: null };
-    // 過渡期（#481）：原貢獻若是切換前交的，存的是單一 IP 雜湊，也要比舊雜湊
-    if (original && (isSelfVote(original, { agent_name: input.agent_name, ip_hash: ipHash }) || isLegacySource(original.contributor_ip_hash, legacyIpHash) || isReportNet(original.contributor_ip_hash))) {
+    const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash, actor_id").eq("id", originalId).maybeSingle() : { data: null };
+    if (original && isSelfVote(original, voter)) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
   }
@@ -192,53 +191,31 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   }
 
   const { data: existing, error: eError } = await supabase
-    .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
+    .from("contribution_votes").select("id, agent_name, actor_id, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
+  const myKey = voterKey(voter);
+  type ExistingVote = { id: string; agent_name: string; actor_id?: string | null; verifier_ip_hash: string | null };
+  const mine = ((existing ?? []) as ExistingVote[]).find((x) => voterKey(x) === myKey);
   if (expiredRevise) {
-    // 過期憑證只能用來改「自己那個來源」已經投的票：領任務的網段或回報網段在這筆上已有票才放行，並以那張票的來源為準
-    const own = ((existing ?? []) as Array<{ verifier_ip_hash: string | null }>)
-      .find((x) => !!x.verifier_ip_hash && (x.verifier_ip_hash === ipHash || x.verifier_ip_hash === reportIpHash));
-    if (!own) return invalidTokenResult("expired");
-    ipHash = own.verifier_ip_hash as string;
+    // 過期憑證只能用來改「自己（同一個投票人）」已經投的票：這筆上沒有自己的票就不放行（2026-11-04 起以投票人為準，不再看網段）
+    if (!mine) return invalidTokenResult("expired");
+    if (mine.verifier_ip_hash) ipHash = mine.verifier_ip_hash;
   }
-  if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
-      .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
-    if (!revise || !mine) {
+  if (mine) {
+    if (!revise) {
       return {
         status: 409,
         body: {
           success: false,
           error: "already_voted",
-          // 2026-09-21：代理做完整套查證才吃到這個錯，而它不知道自己沒做錯——
-          // 同一台機器上有別的代理在跑，在它回報前投掉了同一筆。講清楚，不然它會以為是自己的問題。
-          // 2026-10-14：拿掉「不算白做」（這次查證實際上沒有計分）；帶出那張票的代號，連線中斷後重送的人才分得出是不是自己那張。
-          message: `這筆你這個來源（同一個網段）已經有一票了${mine ? `（投票的代號：${mine.agent_name}）` : ""}，一個網段一筆只算一票，換代號也不會多一票；**這次送的票沒有計入**。如果那張票就是你自己投的（例如上一次送出時連線中斷，其實已經送到），不用再送。如果是同一台機器上另一個代理先投了，這次的查證不會計分（不是你做錯），請直接領下一筆；同一台機器開好幾個視窗跑驗證時，盡量讓它們錯開領取。**要改這個來源那張票**：同一筆再送一次並帶 \`revise: true\`，會覆寫它。`,
+          // 一人一票的單位是投票人（DiTrust 帳號按 actor_id、匿名按代號），不是來源網段；同網段的別的代理仍可各投一票（維護者 2026-11-04）。
+          // 帶出那張票的代號，連線中斷後重送的人才分得出是不是自己那張。
+          message: `這筆你（同一個代號／帳號）已經投過一票了（投票的代號：${mine.agent_name}）；**這次送的票沒有計入**。如果那張票就是你的、想改它：同一筆再送一次並帶 \`revise: true\`，會覆寫它；否則請直接領下一筆。`,
         },
       };
     }
     revising = { id: mine.id };
-  }
-  else {
-    // 過渡期（#481）：切換前用單一 IP 雜湊投的票也算同一個來源，不能再投第二張。
-    // 但那張舊票可以 revise：代理依 evidence_warning 之類的提示要改票時不該卡死，
-    // 而且改的時候 verifier_ip_hash 一併升級成網段雜湊（voteRow 本來就寫新的），舊票就此退場。
-    const legacyVote = ((existing ?? []) as Array<{ id: string; verifier_ip_hash: string | null }>)
-      .find((x) => isLegacySource(x.verifier_ip_hash, legacyIpHash));
-    if (legacyVote) {
-      if (!revise) {
-        return {
-          status: 409,
-          body: {
-            success: false,
-            error: "already_voted",
-            message: "這筆你這個來源在 1.79.0 改用網段之前已經投過票了（同一個來源只能投一次）。如果你是要改自己那張票：同一筆再送一次並帶 `revise: true`，會覆寫它；否則請直接領下一筆。",
-          },
-        };
-      }
-      revising = { id: legacyVote.id };
-    }
   }
 
   // 盲反對改記 unsure（2026-09-19）：備註是「打不開／確認不了」的 disagree 沒有反證，不能算反對
@@ -259,8 +236,9 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 那 29 票的 note 全是同一句；而它真的查過的前 6 票，每一票的 note 都不一樣。
   // 訊號乾淨，而且不要求代理多做任何事——兩次查證本來就不會產生一模一樣的描述。
   if (input.verdict === "agree" && input.note && !revising) {
+    // 「自己上一票」＝同一個投票人的上一票（DiTrust 按 actor_id、匿名按代號）；同網段別的代理的票不算（2026-11-04）
     const { data: prev } = await supabase.from("contribution_votes")
-      .select("note").eq("verifier_ip_hash", ipHash)
+      .select("note").eq(...(actor.level === "ditrust" ? ["actor_id", actor.actor_id] as const : ["agent_name", input.agent_name] as const))
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (prev && isRepeatedNote(input.note, (prev as { note?: string }).note)) {
       return {

@@ -215,53 +215,61 @@ Deno.test("3 帶了無效的憑證 → 403 invalid_dispatch_token，不退回網
   assertEquals(nokey.body.reason, "no_secret");
 });
 
-Deno.test("4 同一張憑證不能投兩票：第二次（換網段、換代號）被擋；去重沒被繞過", async () => {
+Deno.test("4 同一張憑證不能讓同一個投票人投兩票：同代號換網段再投被擋；換代號是另一個投票人（2026-11-04 投票不看 IP）", async () => {
   const { client, votes } = fakeDb({ dispatchedHash: null });
   const issued = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "dave", ipHash: NET_A });
   assert(issued);
   const first = await handleVerify(client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
   assertEquals(first.status, 201, JSON.stringify(first.body));
-  // 同一張憑證，從第三個網段、換一個代號再投
-  const second = await handleVerify(client, vote("erin", { dispatch_token: issued.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
+  // 同一張憑證，從第三個網段、同一個代號再投：被擋
+  const second = await handleVerify(client, vote("dave", { dispatch_token: issued.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
   assertEquals(second.status, 409, JSON.stringify(second.body));
   assertEquals(second.body.error, "already_voted");
   assertEquals(votes.length, 1, "仍然只有一張票");
+  // 換一個代號：去重鍵是代號，不是網段，算另一個投票人
+  const erin = await handleVerify(client, vote("erin", { dispatch_token: issued.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
+  assertEquals(erin.status, 201, JSON.stringify(erin.body));
+  assertEquals(votes.length, 2);
   // 同樣的重複不帶 revise → 還是 409；而不是靜默覆寫
   const third = await handleVerify(client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
   assertEquals(third.status, 409);
-  assertEquals(votes.length, 1);
+  assertEquals(votes.length, 2);
 });
 
-Deno.test("4 憑證不繞過「每個來源一票」：同一個網段領了兩張憑證，也只能投一票", async () => {
+Deno.test("4 憑證不繞過「每個投票人一票」：同一個網段領了兩張憑證，同代號只能投一票、不同代號各一票", async () => {
   const { client, votes } = fakeDb({ dispatchedHash: null });
   const t1 = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "dave", ipHash: NET_A });
-  const t2 = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "erin", ipHash: NET_A, now: Date.now() + 1000 });
+  const t2 = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "dave", ipHash: NET_A, now: Date.now() + 1000 });
   assert(t1 && t2);
   assertNotEquals(t1.token, t2.token);
   assertEquals((await handleVerify(client, vote("dave", { dispatch_token: t1.token }), NET_B, undefined, "report", undefined, undefined, SECRET)).status, 201);
-  const res = await handleVerify(client, vote("erin", { dispatch_token: t2.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
+  const res = await handleVerify(client, vote("dave", { dispatch_token: t2.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
   assertEquals(res.status, 409);
   assertEquals(res.body.error, "already_voted");
   assertEquals(votes.length, 1);
+  assertEquals((await handleVerify(client, vote("erin", { dispatch_token: t2.token }), NET_C, undefined, "report", undefined, undefined, SECRET)).status, 201, "別的代號不受同網段那一票影響");
+  assertEquals(votes.length, 2);
 });
 
-Deno.test("4 自己不能驗自己：提交者的網段是領任務的網段、或是交件當下的網段，都擋", async () => {
+Deno.test("4 自己不能驗自己：只看代號；提交者的網段即使是領任務的網段、或交件當下的網段，不同代號都不擋（2026-11-04）", async () => {
   const issued = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "dave", ipHash: NET_A });
   assert(issued);
-  // 提交者是領任務的網段 A
+  // 提交者是領任務的網段 A、別的代號：不是自己
   const a = fakeDb({ contribution: { contributor_ip_hash: NET_A } });
   const ra = await handleVerify(a.client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
-  assertEquals(ra.status, 403);
-  assertEquals(ra.body.error, "self_vote");
-  // 提交者是交件當下的網段 B（領任務在 A、交件在 B，B 正是它自己交過那筆的網段）
+  assertEquals(ra.status, 201, JSON.stringify(ra.body));
+  // 提交者是交件當下的網段 B、別的代號：不是自己
   const b = fakeDb({ contribution: { contributor_ip_hash: NET_B } });
   const rb = await handleVerify(b.client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
-  assertEquals(rb.status, 403);
-  assertEquals(rb.body.error, "self_vote");
-  // 同代號也擋（照舊）
-  const c = fakeDb({ contribution: { agent_name: "dave" } });
-  assertEquals((await handleVerify(c.client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET)).status, 403);
-  assertEquals(a.votes.length + b.votes.length + c.votes.length, 0);
+  assertEquals(rb.status, 201, JSON.stringify(rb.body));
+  // 同代號擋（不分大小寫），不管提交者在哪個網段
+  for (const ip of ["ip-other", NET_A, NET_B]) {
+    const c = fakeDb({ contribution: { agent_name: "Dave", contributor_ip_hash: ip } });
+    const rc = await handleVerify(c.client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
+    assertEquals(rc.status, 403);
+    assertEquals(rc.body.error, "self_vote");
+    assertEquals(c.votes.length, 0);
+  }
 });
 
 Deno.test("合併票（via merge）不收憑證路徑：系統配對的票照舊放行，且不受 body 裡的 dispatch_token 影響", async () => {

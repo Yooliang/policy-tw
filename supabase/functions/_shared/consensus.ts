@@ -5,8 +5,7 @@
  */
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
-import { correctionTouches, correctionOnlyFromRumor, correctionWithdrawsCandidacy } from "./correction.ts";
-import { HANDOVER_TWO_IP_TYPES } from "./lineage.ts";
+import { correctionTouches, correctionOnlyFromRumor } from "./correction.ts";
 
 export const VOTE_WEIGHT = 1;
 /** consensusStatus 的預設門檻（呼叫端一律傳 requiredAgree 算出的值） */
@@ -293,45 +292,57 @@ export function tally(votes: readonly { verdict: Verdict }[]): VoteCounts {
 export interface ContributionIdentity {
   agent_name: string;
   contributor_ip_hash: string;
+  /** 身份鍵（contributions.actor_id）；只有 DiTrust 帳號（`ditrust:` 開頭）拿來比，匿名的 actor_id 是網段雜湊、不當身份 */
+  actor_id?: string | null;
 }
 
 export interface VoterIdentity {
   agent_name: string;
-  ip_hash: string;
+  /** 來源網段雜湊：只留著給記錄用，投票身份不再看它（維護者 2026-11-04：投票不看 IP） */
+  ip_hash?: string;
+  /** DiTrust 帳號的身份鍵（`ditrust:<id>`）；匿名不給 */
+  actor_id?: string | null;
 }
 
-/** 不能驗自己提交的：agent_name 相同或 ip_hash 相同，任一命中就擋。 */
+const isDitrustActor = (id: string | null | undefined): id is string => typeof id === "string" && id.startsWith("ditrust:");
+
+/**
+ * 投票人的鍵（維護者 2026-11-04：一人一票的單位，不再看來源網段）：
+ * DiTrust 帳號＝actor_id，匿名＝小寫的 agent_name。SQL 鏡像：`CASE WHEN actor_id LIKE 'ditrust:%' THEN actor_id ELSE lower(agent_name) END`。
+ */
+export function voterKey(v: { agent_name: string; actor_id?: string | null }): string {
+  return isDitrustActor(v.actor_id) ? v.actor_id : v.agent_name.toLowerCase();
+}
+
+/** 不能驗自己提交的：同一個投票人（DiTrust 同 actor_id、匿名同代號）。不再比來源網段。 */
 export function isSelfVote(contribution: ContributionIdentity, voter: VoterIdentity): boolean {
-  return contribution.agent_name.toLowerCase() === voter.agent_name.toLowerCase() || contribution.contributor_ip_hash === voter.ip_hash;
+  return contribution.agent_name.toLowerCase() === voter.agent_name.toLowerCase()
+    || (isDitrustActor(voter.actor_id) && contribution.actor_id === voter.actor_id);
 }
 
 /**
- * 同一筆貢獻，同一個 agent_name 或同一個來源 IP 只能投一次。
- *
- * 原本只比 agent_name，同一台機器換個代號就能再投一票，於是一個人自己
- * 就能把票數投到門檻。計票端（contribution_apply_consensus）也改成依來源 IP
- * 去重，這裡先把重複的票擋在門外並講清楚原因，不要靜靜收下卻不計入。
+ * 同一筆貢獻，同一個投票人只能投一次（維護者 2026-11-04：投票不看 IP，同網段的兩個代理各算一票）。
+ * 投票人＝DiTrust 帳號按 actor_id、匿名按代號（小寫）。計票端（contribution_apply_consensus）用同一把鍵去重。
+ * 2026-09-19 的「身份是來源 IP」裁決由此取代。
  */
 export function isDuplicateVote(existing: readonly VoteRecord[], voter: VoterIdentity): boolean {
-  // 2026-09-19 裁決：身份是來源 IP，不是代號。代號是自報的、兩個人可以共用同一個；
-  // 同一個代號在兩台機器各投一票，那是兩個人。只有舊票（還沒記 IP 雜湊的年代）才退回比代號。
-  return existing.some((v) =>
-    v.verifier_ip_hash ? v.verifier_ip_hash === voter.ip_hash : v.agent_name.toLowerCase() === voter.agent_name.toLowerCase()
-  );
+  const key = voterKey(voter);
+  return existing.some((v) => voterKey(v) === key);
 }
 
 export interface VoteRecord {
   agent_name: string;
+  actor_id?: string | null;
   verifier_ip_hash?: string | null;
 }
 
-/** 依來源 IP 去重的票數，鏡射 SQL 的 COUNT(DISTINCT verifier_ip_hash)；unsure 不影響狀態，算總筆數。 */
-export function tallyByIp(votes: readonly { verdict: Verdict; verifier_ip_hash?: string | null }[]): VoteCounts {
+/** 依投票人去重的票數，鏡射 SQL 的去重（voterKey）；unsure 不影響狀態，算總筆數。 */
+export function tallyByVoter(votes: readonly { verdict: Verdict; agent_name: string; actor_id?: string | null }[]): VoteCounts {
   const seen: Record<Verdict, Set<string>> = { agree: new Set(), disagree: new Set(), unsure: new Set() };
   let unsure = 0;
   for (const v of votes) {
     if (v.verdict === "unsure") { unsure += VOTE_WEIGHT; continue; }
-    seen[v.verdict].add(v.verifier_ip_hash ?? "");
+    seen[v.verdict].add(voterKey(v));
   }
   return { agree: seen.agree.size, disagree: seen.disagree.size, unsure };
 }
@@ -443,28 +454,10 @@ export function sameSiteAsSubmitted(evidenceUrl: string | null | undefined, sour
 }
 
 /**
- * 高風險型別：分數不得由單一來源 IP 湊足。
- * reassign_candidacy（2026-10-06，同名人物接錯改掛）比照 merge_politician：改錯了＝把一筆參選紀錄從對的人身上拿走
+ * 舊的「高風險型別要兩個不同來源 IP」規則已於 2026-11-04 取消（維護者本人裁定：全部型別不再要求 2 個不同來源，同網段的兩個代理各算一票）。
+ * 函式留著只為相容；SQL 鏡像 contribution_needs_two_ips 同樣恆為 FALSE（migration 20261104130000）。
  */
-export const SCORE_TWO_IP_TYPES = ["merge_politician", "candidacy", "removal", "reassign_candidacy"] as const;
-
-/**
- * 這一筆要不要兩台不同機器投過才上線（SQL 鏡像：contribution_needs_two_ips，migration 20261006034900）。
- * 除了上面三種型別，「中止」交接也要（#349，維護者 2026-10-05：中止要較高票數，比照 merge_politician 的兩台機器規則）——
- * 錯的「中止」等於公開記錄「某任首長把這件事停了」，跟誤併人物同一級的傷害。其他交接型態走一般規則。
- * 分數、目標分數、退件門檻都不變：只決定「分數到了之後，還要不要第二台機器」。
- */
-export function needsTwoIps(contributionType: string, payload?: unknown): boolean {
-  // 補號次（維護者 2026-10-29 指示拿掉兩台機器）：candidacy 帶正整數 cand_no 且不是補已投票結果（past_result）→ 一張同意、目標 1 就上線。
-  // SQL 鏡像：contribution_needs_two_ips（migration 20261029100000）。其餘 SCORE_TWO_IP_TYPES 照舊。
-  if (contributionType === "candidacy" && riskLevel(contributionType, payload) === "cand_no") return false;
-  if ((SCORE_TWO_IP_TYPES as readonly string[]).includes(contributionType)) return true;
-  // 協議 1.98.0：把參選紀錄改成退選／不參選的更正（可能蓋掉既有選舉結果）
-  if (contributionType === "correction") return correctionWithdrawsCandidacy(payload);
-  if (contributionType === "lineage_handover") {
-    const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
-    return (HANDOVER_TWO_IP_TYPES as readonly string[]).includes(String(p.handover_type ?? ""));
-  }
+export function needsTwoIps(_contributionType?: string, _payload?: unknown): boolean {
   return false;
 }
 
@@ -478,12 +471,11 @@ export function rejectFloor(contributionType: string): number {
 }
 
 /** 總分 → 狀態。只在 pending／verified／disputed 之間轉；其餘狀態由維護者或系統決定。 */
-export function scoreStatus(input: { score: number; target: number; distinctIps: number; contributionType: string; current: string; rosterMatched?: boolean; payload?: unknown }): string {
-  const { score, target, distinctIps, contributionType, current } = input;
+export function scoreStatus(input: { score: number; target: number; distinctIps?: number; contributionType: string; current: string; rosterMatched?: boolean; payload?: unknown }): string {
+  const { score, target, contributionType, current } = input;
   if (current !== "pending" && current !== "verified" && current !== "disputed") return current;
   if (score <= -rejectFloor(contributionType)) return "rejected";
-  // 名冊逐位吻合的免兩台機器（2026-10-01）：系統已逐位核過官方名冊，目標 1 若還要兩台機器就等於沒降
-  const needTwoIps = needsTwoIps(contributionType, input.payload) && !input.rosterMatched;
-  if (score >= target && (!needTwoIps || distinctIps >= 2)) return "verified";
+  // 不看來源網段（維護者 2026-11-04）：分數到了就過；distinctIps、rosterMatched 保留參數但不再影響結果
+  if (score >= target) return "verified";
   return "pending";
 }

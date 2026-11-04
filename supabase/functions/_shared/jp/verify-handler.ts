@@ -18,7 +18,7 @@ import { type Actor } from "../actor.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "../quota-window.ts";
 import { QUOTA_DEFAULTS, resolveIdentity, type HandlerResult } from "./contribute-handler.ts";
 import { loadQuotaLimits, type QuotaLimits } from "../quota-settings.ts";
-import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, isDuplicateVote, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
+import { BLIND_DISAGREE_NOTE, isBlindDisagree, isCopiedNote, voterKey, isRepeatedNote, isRubberStampAgree, isSelfVote, rejectFloor, requiredAgree, sameSiteAsSubmitted, voteWeight, weightReason } from "./consensus.ts";
 import { agentToolNoticeOnce } from "../agent-tool-hint.ts";
 import { disputeNoUnsureMessage, disputeVotesNow } from "../dispute-verify.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "../dispatch-token.ts";
@@ -93,7 +93,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, agree_count, disagree_count, unsure_count, score")
+    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -101,10 +101,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
   }
-  // 憑證路徑：領任務的網段與交件當下的網段，哪一個是提交者的都算自己
-  const isReportNet = (stored: string | null | undefined) => tokenBinding !== null && !!stored && stored === reportIpHash;
-  if (isSelfVote(contribution, { agent_name: input.agent_name, ip_hash: ipHash }) || isReportNet(contribution.contributor_ip_hash)) {
-    return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同 agent_name 或同一來源網段）提交的貢獻，請跳過這筆" } };
+  // 不能驗自己：同一個投票人（DiTrust 同帳號、匿名同代號）。不再比來源網段（維護者 2026-11-04）
+  if (isSelfVote(contribution, { agent_name: input.agent_name, actor_id: actor.actor_id })) {
+    return { status: 403, body: { success: false, error: "self_vote", message: "不能驗證自己（同代號或同一個 DiTrust 帳號）提交的貢獻，請跳過這筆" } };
   }
 
   // 派發即綁定：只收「/next 派給你的那一筆」（via merge 例外：重複提交被系統配對成同意票）
@@ -136,25 +135,27 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   }
 
   const { data: existing, error: eError } = await supabase
-    .from("contribution_votes").select("id, agent_name, verifier_ip_hash, note").eq("contribution_id", contribution.id);
+    .from("contribution_votes").select("id, agent_name, actor_id, verifier_ip_hash, note").eq("contribution_id", contribution.id);
   if (eError) throw new Error(`votes lookup: ${eError.message}`);
   let revising: { id: string } | null = null;
+  const voter = { agent_name: input.agent_name, actor_id: actor.actor_id };
+  const myKey = voterKey(voter);
+  type ExistingVote = { id: string; agent_name: string; actor_id?: string | null; verifier_ip_hash: string | null };
+  const mine = ((existing ?? []) as ExistingVote[]).find((x) => voterKey(x) === myKey);
   if (expiredRevise) {
-    const own = ((existing ?? []) as Array<{ verifier_ip_hash: string | null }>)
-      .find((x) => !!x.verifier_ip_hash && (x.verifier_ip_hash === ipHash || x.verifier_ip_hash === reportIpHash));
-    if (!own) return invalidTokenResult("expired");
-    ipHash = own.verifier_ip_hash as string;
+    // 過期憑證只能用來改「自己（同一個投票人）」已經投的票（2026-11-04 起以投票人為準，不再看網段）
+    if (!mine) return invalidTokenResult("expired");
+    if (mine.verifier_ip_hash) ipHash = mine.verifier_ip_hash;
   }
-  if (isDuplicateVote(existing ?? [], { agent_name: input.agent_name, ip_hash: ipHash })) {
-    const mine = ((existing ?? []) as Array<{ id: string; agent_name: string; verifier_ip_hash: string | null }>)
-      .find((x) => x.verifier_ip_hash ? x.verifier_ip_hash === ipHash : x.agent_name.toLowerCase() === input.agent_name.toLowerCase());
-    if (!revise || !mine) {
+  if (mine) {
+    if (!revise) {
       return {
         status: 409,
         body: {
           success: false,
           error: "already_voted",
-          message: `這筆你這個來源（同一個網段）已經有一票了${mine ? `（投票的代號：${mine.agent_name}）` : ""}，一個網段一筆只算一票，換代號也不會多一票；**這次送的票沒有計入**。如果那張票就是你自己投的（例如上一次送出時連線中斷，其實已經送到），不用再送。如果是同一台機器上另一個代理先投了，這次的查證不會計分（不是你做錯），請直接領下一筆；同一台機器開好幾個視窗跑驗證時，盡量讓它們錯開領取。**要改這個來源那張票**：同一筆再送一次並帶 \`revise: true\`，會覆寫它。`,
+          // 一人一票的單位是投票人（DiTrust 帳號按 actor_id、匿名按代號），不是來源網段；同網段的別的代理仍可各投一票（維護者 2026-11-04）。
+          message: `這筆你（同一個代號／帳號）已經投過一票了（投票的代號：${mine.agent_name}）；**這次送的票沒有計入**。如果那張票就是你的、想改它：同一筆再送一次並帶 \`revise: true\`，會覆寫它；否則請直接領下一筆。`,
         },
       };
     }
@@ -169,7 +170,7 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   // 罐頭同意票退回重寫：跟自己上一票一字不差
   if (input.verdict === "agree" && input.note && !revising) {
     const { data: prev } = await supabase.from("contribution_votes")
-      .select("note").eq("verifier_ip_hash", ipHash)
+      .select("note").eq(...(actor.level === "ditrust" ? ["actor_id", actor.actor_id] as const : ["agent_name", input.agent_name] as const))
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (prev && isRepeatedNote(input.note, (prev as { note?: string }).note)) {
       return {

@@ -2,8 +2,8 @@ import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
 import { loadElections, withElectionKey } from "../_shared/elections.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
-import { fetchMyVotedRows, voterHashes } from "../_shared/my-votes.ts";
+import { ipHashOf } from "../_shared/contribute-handler.ts";
+import { fetchMyVotedRows } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
@@ -75,7 +75,6 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
     const ipHashForIdentity = await ipHashOf(req, ipSalt);
     // 1.79.0 以前的單一 IP 雜湊：只用來查切換前投過的票（fetchMyVotedRows），其他一律用網段雜湊（#481）
-    const legacyIpHash = await legacyIpHashOf(req, ipSalt);
     const identity = await resolveActorFromRequest(agentName, ipHashForIdentity);
     mark("identity");
     // 逐一記 11 個平行查詢各自完成的時間（累計毫秒；起點都差不多，約等於各自耗時）
@@ -120,10 +119,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
 
     // 待驗證池：在 SQL 裡就排掉這台機器提交的、投過的、已達門檻的，撈出來的就是真的能投的最早 N 筆。
     // 原本先取最早 30 筆再在這裡排，機器投完那 30 筆就整池是死的，第 31 筆之後永遠看不到（2026-09-19）。
-    // 身份用來源 IP：代號是自報的、可以共用；IP 雜湊不會重複。
-    // 過渡期（#484）：切換前交的貢獻存單一 IP 雜湊，自交排除要新舊一起比（舊雜湊與新的同值＝IP 認不得，不傳）
-    const legacyForPool = legacyIpHash !== ipHash ? legacyIpHash : undefined;
-    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(legacyForPool ? { p_legacy_ip_hash: legacyForPool } : {}) });
+    // 投票人是誰（維護者 2026-11-04：投票不看 IP）：DiTrust 帳號按 actor_id、匿名按代號；網段雜湊只留著記錄與額度。
+    const poolActorId = actor.level === "ditrust" ? actor.actor_id : null;
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(poolActorId ? { p_actor_id: poolActorId } : {}) });
 
     // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
     // 而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了
@@ -150,7 +148,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
       // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
       // 過渡期（#481，1.79.0）：切換前的票存單一 IP 雜湊，新票存網段雜湊，兩個都查（_shared/my-votes.ts）
-      fetchMyVotedRows(supabase, voterHashes(ipHash, legacyIpHash))),
+      fetchMyVotedRows(supabase, { agentName, actorId: actor.actor_id })),
       timed("ip_contrib", // 匿名：「每個來源 IP 每個時段」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
       // DiTrust 帳號：按帳號（actor_id）數，見 submitQuotaFor。
       supabase.from("contributions").select("id", { count: "exact", head: true })
@@ -201,7 +199,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       queue_at?: string | null;
     };
     // deno-lint-ignore no-explicit-any
-    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds, ...(legacyForPool ? { legacy_ip_hash: legacyForPool } : {}) };
+    const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
     const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
     // 裁決的驗證不派給原貢獻的提交者。
     // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，

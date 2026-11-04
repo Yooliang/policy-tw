@@ -53,12 +53,17 @@ Deno.test("task_suggestion：同對象同型別、不同代理不同 IP → 走�
 });
 
 
-Deno.test("task_suggestion：同對象但既有那筆是同一台機器交的 → 不併票、201 帶 note 叫它別再交", async () => {
-  const { api, inserted } = fakeSupabase([{ ...EXISTING, contributor_ip_hash: "ip-me", agent_name: "another-name-same-machine" }]);
+Deno.test("task_suggestion：同對象但既有那筆是同一個代號交的 → 不併票、201 帶 note 叫它別再交（同 IP 不同代號可併，2026-11-04）", async () => {
+  const sameNet = fakeSupabase([{ ...EXISTING, contributor_ip_hash: "ip-me", agent_name: "another-name-same-machine" }]);
+  const netCalls: unknown[] = [];
+  await handleContribute(sameNet.api, "https://x", ITEM, "ip-me", (_s, body) => { netCalls.push(body); return Promise.resolve({ status: 201, body: { agree_count: 1, required_agree: 2, status: "pending" } }); });
+  assertEquals(netCalls.length, 1, "同網段不同代號＝另一個投票人，照樣併票");
+  assertEquals(sameNet.inserted.length, 0);
+  const { api, inserted } = fakeSupabase([{ ...EXISTING, contributor_ip_hash: "ip-other", agent_name: ITEM.agent_name }]);
   const calls: unknown[] = [];
   const res = await handleContribute(api, "https://x", ITEM, "ip-me", (_s, body) => { calls.push(body); return Promise.resolve({ status: 201, body: {} }); });
   const b = res.body as Record<string, unknown>;
-  assertEquals(calls.length, 0, "同機不能投自己那台的票");
+  assertEquals(calls.length, 0, "同代號不能投自己的票");
   assertEquals(res.status, 201);
   assertEquals(inserted.length, 1, "照原路收下");
   assertEquals(String(b.note ?? "").includes("不會"), true, JSON.stringify(b).slice(0, 300));

@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { findSuperseded, claimKey, claimTarget, DUPLICATE_ELIGIBLE_TYPES, type ExistingClaim, findMergeTarget, sameClaim } from "./duplicate-claim.ts";
+import { findSuperseded, claimKey, claimTarget, DUPLICATE_ELIGIBLE_TYPES, type ExistingClaim, findMergeTarget, findSameMachineClaim, sameClaim } from "./duplicate-claim.ts";
 
 // 案例取自 2026-09-18 線上 1,207 筆 pending 的實測配對
 const P1 = "98b8b1ff-d085-4597-8384-a02461f773f6";
@@ -77,7 +77,7 @@ Deno.test("臺／台、空白、大小寫不算不同", () => {
   assert(sameClaim(a, b));
 });
 
-Deno.test("findMergeTarget：同代號或同 IP 一律不算，最早那筆優先", () => {
+Deno.test("findMergeTarget：同代號一律不算、同 IP 不同代號可併（2026-11-04 投票不看 IP），最早那筆優先", () => {
   const incoming = { contribution_type: "removal", payload: { target_id: "2db8cc91", reason: "口號" } };
   const me = { agent_name: "linmen", ip_hash: "ip-me" };
   const mk = (over: Partial<ExistingClaim>): ExistingClaim => ({
@@ -87,7 +87,9 @@ Deno.test("findMergeTarget：同代號或同 IP 一律不算，最早那筆優�
 
   assertEquals(findMergeTarget(incoming, me, [mk({ id: "first" }), mk({ id: "second" })])?.id, "first", "取最早那筆，票才會集中");
   assertEquals(findMergeTarget(incoming, me, [mk({ agent_name: "LinMen" })]), null, "同代號（不分大小寫）不算");
-  assertEquals(findMergeTarget(incoming, me, [mk({ contributor_ip_hash: "ip-me" })]), null, "同一台機器不算");
+  assertEquals(findMergeTarget(incoming, me, [mk({ contributor_ip_hash: "ip-me" })])?.id, "c1", "同網段不同代號＝另一個投票人，可併票");
+  assertEquals(findSameMachineClaim(incoming, me, [mk({ contributor_ip_hash: "ip-me" })]), null, "同網段不同代號不是同機提示");
+  assertEquals(findSameMachineClaim(incoming, me, [mk({ agent_name: "LINMEN" })])?.id, "c1", "同代號才是同機提示");
   assertEquals(findMergeTarget(incoming, me, [mk({ status: "applied" })]), null, "已定案的不收票");
   assertEquals(findMergeTarget(incoming, me, [mk({ payload: { target_id: "different" } })]), null);
   assertEquals(findMergeTarget({ contribution_type: "policy", payload: { title: "x" } }, me, [mk({ contribution_type: "policy" })]), null, "自由文字型別不合併");

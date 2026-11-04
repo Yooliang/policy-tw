@@ -46,7 +46,8 @@ Deno.test("名冊吻合的參選紀錄：一張同意（一台機器）就通過
   const base = { target: 1, contributionType: "candidacy", current: "pending" };
   assertEquals(scoreStatus({ ...base, score: 1, distinctIps: 1, rosterMatched: true }), "verified", "一張 +1 就到目標，系統逐位核過名冊算另一雙眼睛");
   assertEquals(scoreStatus({ ...base, score: 0, distinctIps: 2, rosterMatched: true }), "pending", "反對照舊能擋");
-  assertEquals(scoreStatus({ ...base, score: 1, distinctIps: 1 }), "pending", "不是名冊吻合的參選紀錄仍要兩台機器");
+  assertEquals(scoreStatus({ ...base, score: 1, distinctIps: 1 }), "verified", "2026-11-04 起任何參選紀錄都不再要兩台機器：分數到目標就過");
+  assertEquals(scoreStatus({ ...base, target: 3, score: 2, distinctIps: 5 }), "pending", "分數沒到不因來源多而過");
 });
 
 Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器都在最新的計票函式裡", async () => {
@@ -64,10 +65,9 @@ Deno.test("SQL 與 TS 一致：名冊吻合判斷、目標 1、免兩台機器�
 
   const fn = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
   // 2026-10-06（#349）起「要兩台機器」的判斷抽成 contribution_needs_two_ips（多看 payload：中止交接），名冊吻合的例外照舊
-  assert(
-    fn.sql.includes("v_type NOT IN ('merge_politician', 'candidacy', 'removal') OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)")
-      || fn.sql.includes("NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)"),
-    "名冊吻合的參選紀錄免兩台機器，否則目標 1 也要兩票");
+  // 2026-11-04（20261104130000，投票不看 IP）起整個「兩台機器」條件都拿掉：分數到目標就 verified，名冊吻合的目標 1 自然一票就過
+  assert(!fn.sql.includes("contribution_needs_two_ips") && !fn.sql.includes("v_ips >= 2") && !fn.sql.includes("contribution_roster_matched"), "計票函式不再看兩台機器／名冊吻合的例外");
+  assert(fn.sql.includes("ELSIF v_score >= v_target THEN"), "分數到目標就 verified");
 
   // 讓現有符合條件的 pending 立刻重算
   // 2026-10-09（policy-ops#39）起 contribution_effective_agree 由 20261009320000 重新定義，重算那一段留在名冊那支 migration（定義 contribution_roster_matched 的那支）

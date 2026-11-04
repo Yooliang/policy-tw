@@ -142,13 +142,14 @@ export interface ExistingClaim {
 /**
  * 在既有的待驗證貢獻裡找「同一個宣稱」的那一筆。
  *
- * 同代號或同來源 IP 一律不算——那是同一個人自己交兩次，不是兩份獨立查證
- * （跟 consensus.ts 的 isSelfVote 同一條規則；投票端也會再擋一次）。
+ * 同代號一律不算——那是同一個人自己交兩次，不是兩份獨立查證
+ * （跟 consensus.ts 的 isSelfVote 同一條規則；投票端也會再擋一次，DiTrust 帳號在那裡按 actor_id 擋）。
+ * 同來源網段不同代號的提交可以併票（維護者 2026-11-04：投票不看 IP，兩個代理就是兩個意見）。
  * 多筆命中時取最早那筆：票集中在同一筆才會達標，分散在兩筆等於沒進展。
  */
 export function findMergeTarget(
   incoming: { contribution_type: string; payload: unknown },
-  submitter: { agent_name: string; ip_hash: string },
+  submitter: { agent_name: string; ip_hash?: string },
   candidates: readonly ExistingClaim[],
 ): ExistingClaim | null {
   const key = claimKey(incoming.contribution_type, incoming.payload);
@@ -157,16 +158,15 @@ export function findMergeTarget(
     c.status === "pending" &&
     c.contribution_type === incoming.contribution_type &&
     claimKey(c.contribution_type, c.payload) === key &&
-    (c.agent_name ?? "").toLowerCase() !== submitter.agent_name.toLowerCase() &&
-    c.contributor_ip_hash !== submitter.ip_hash
+    (c.agent_name ?? "").toLowerCase() !== submitter.agent_name.toLowerCase()
   );
   return hits[0] ?? null;
 }
 
-/** 同一宣稱、但既有那筆是同一台機器交的（同 IP 或同代號）——併不成票，只能提示（2026-09-22） */
+/** 同一宣稱、但既有那筆是同一個代號交的——併不成票，只能提示（2026-09-22；2026-11-04 起不再看同 IP） */
 export function findSameMachineClaim(
   incoming: { contribution_type: string; payload: unknown },
-  submitter: { agent_name: string; ip_hash: string },
+  submitter: { agent_name: string; ip_hash?: string },
   candidates: readonly ExistingClaim[],
 ): ExistingClaim | null {
   const key = claimKey(incoming.contribution_type, incoming.payload);
@@ -175,7 +175,7 @@ export function findSameMachineClaim(
     c.status === "pending" &&
     c.contribution_type === incoming.contribution_type &&
     claimKey(c.contribution_type, c.payload) === key &&
-    ((c.agent_name ?? "").toLowerCase() === submitter.agent_name.toLowerCase() || c.contributor_ip_hash === submitter.ip_hash)
+    (c.agent_name ?? "").toLowerCase() === submitter.agent_name.toLowerCase()
   ) ?? null;
 }
 
