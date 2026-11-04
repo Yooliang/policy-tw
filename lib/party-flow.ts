@@ -17,6 +17,10 @@ export const NO_PARTY = '無黨籍'
 /** 名冊裡有的七種選舉別，照層級由大到小（畫面上的篩選鈕順序） */
 export const ELECTION_TYPES = ['縣市長', '縣市議員', '鄉鎮市長', '直轄市山地原住民區長', '鄉鎮市民代表', '直轄市山地原住民區民代表', '村里長'] as const
 
+/** 沒指定選舉別時的預設篩選；網址 type=all 才是全部類別 */
+export const DEFAULT_TYPES: readonly string[] = ['縣市長', '縣市議員']
+export const typesAreDefault = (xs: readonly string[]): boolean => xs.length === DEFAULT_TYPES.length && DEFAULT_TYPES.every((t) => xs.includes(t))
+
 const STROKE_ORDER = new Intl.Collator('zh-Hant-TW')
 
 /** 「臺」「台」混寫一律用「台」 */
@@ -131,12 +135,14 @@ const list = (v: unknown): string[] => {
 
 export function parseQuery(q: Record<string, unknown>, known: { types?: readonly string[]; parties?: readonly string[]; counties?: readonly string[] } = {}): PartyFlowQuery {
   const keep = (xs: string[], ok?: readonly string[]) => [...new Set(ok ? xs.filter((x) => ok.includes(x)) : xs)]
-  return { types: keep(list(q.type), known.types), parties: keep(list(q.party), known.parties), open: keep(list(q.open), known.counties) }
+  const types = q.type === undefined ? [...DEFAULT_TYPES] : q.type === 'all' ? [] : keep(list(q.type), known.types)
+  return { types, parties: keep(list(q.party), known.parties), open: keep(list(q.open), known.counties) }
 }
 
 export function toQuery(s: { types: readonly string[]; parties: readonly string[]; open: readonly string[] }): Record<string, string> {
   const q: Record<string, string> = {}
-  if (s.types.length) q.type = s.types.join(',')
+  if (s.types.length === 0) q.type = 'all'
+  else if (!typesAreDefault(s.types)) q.type = s.types.join(',')
   if (s.parties.length) q.party = s.parties.join(',')
   if (s.open.length) q.open = s.open.join(',')
   return q

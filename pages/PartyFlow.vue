@@ -16,7 +16,7 @@ import { usePaneActive } from '../composables/usePane'
 import { supabasePublic } from '../lib/supabase'
 import { withTimeoutAndRetry } from '../lib/retry'
 import {
-  buildPartyFlow, countyOrder, ELECTION_TYPES, filterRows, parseQuery, parseRows, partyOrder, toggle, toQuery,
+  buildPartyFlow, countyOrder, DEFAULT_TYPES, ELECTION_TYPES, filterRows, parseQuery, parseRows, partyOrder, toggle, toQuery, typesAreDefault,
   type PartyFlowRow,
 } from '../lib/party-flow'
 
@@ -101,6 +101,9 @@ usePageHead({
           <div>
             <div class="text-sm font-bold text-navy-900 mb-2">選舉類別</div>
             <div class="flex flex-wrap gap-2">
+              <button type="button" class="px-3 py-1 rounded-full text-sm border transition"
+                :class="types.length === 0 ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:border-blue-400'"
+                :aria-pressed="types.length === 0" @click="types = []">全部</button>
               <button v-for="t in ELECTION_TYPES" :key="t" type="button"
                 class="px-3 py-1 rounded-full text-sm border transition"
                 :class="types.includes(t) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700 hover:border-blue-400'"
@@ -118,7 +121,7 @@ usePageHead({
           </details>
           <div class="flex flex-wrap items-center gap-2 text-sm text-slate-600">
             <span data-testid="party-flow-total">共 {{ graph.total.toLocaleString() }} 人</span>
-            <button v-if="types.length || parties.length" type="button" class="underline text-blue-600" @click="types = []; parties = []">清除篩選</button>
+            <button v-if="!typesAreDefault(types) || parties.length" type="button" class="underline text-blue-600" @click="types = [...DEFAULT_TYPES]; parties = []">清除篩選</button>
             <template v-if="open.length">
               <span class="text-slate-400">|</span>
               <span>已展開</span>

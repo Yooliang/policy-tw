@@ -90,8 +90,18 @@ Deno.test("網址參數來回、丟掉不認得的值、臺→台", () => {
   const q = parseQuery({ type: "縣市長,亂寫,縣市長", party: "中國國民黨", open: "臺北市,火星" }, known);
   assertEquals(q, { types: ["縣市長"], parties: ["中國國民黨"], open: ["台北市"] });
   assertEquals(toQuery(q), { type: "縣市長", party: "中國國民黨", open: "台北市" });
-  assertEquals(toQuery({ types: [], parties: [], open: [] }), {});
-  assertEquals(parseQuery({}), { types: [], parties: [], open: [] });
+});
+
+Deno.test("預設選舉別：沒帶參數＝縣市長＋縣市議員，網址不帶；type=all 才是全部類別", () => {
+  assertEquals(parseQuery({}), { types: ["縣市長", "縣市議員"], parties: [], open: [] });
+  assertEquals(toQuery({ types: ["縣市議員", "縣市長"], parties: [], open: [] }), {});
+  assertEquals(parseQuery({ type: "all" }).types, []);
+  assertEquals(toQuery({ types: [], parties: [], open: [] }), { type: "all" });
+  // 來回一次狀態不變
+  assertEquals(parseQuery(toQuery({ types: [], parties: [], open: [] })).types, []);
+  assertEquals(parseQuery(toQuery({ types: ["村里長"], parties: [], open: [] })).types, ["村里長"]);
+  // 頁面載入後用空字串核對：已選全部時不能被改回預設
+  assertEquals(parseQuery({ type: "" }, { types: ["縣市長"] }).types, []);
 });
 
 Deno.test("toggle：加入、移除、保持順序", () => {
