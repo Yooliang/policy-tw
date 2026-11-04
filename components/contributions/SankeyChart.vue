@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { litByPaths } from '../../lib/party-flow'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { sankey, sankeyLeft } from 'd3-sankey'
 import { linkText, nodeText, selectionStats, selNodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
@@ -87,7 +88,7 @@ const layout = computed(() => {
     const d = vertical
       ? `M${l.y0},${s.y1} C${l.y0},${(s.y1 + t.y0) / 2} ${l.y1},${(s.y1 + t.y0) / 2} ${l.y1},${t.y0}`
       : `M${s.x1},${l.y0} C${(s.x1 + t.x0) / 2},${l.y0} ${(s.x1 + t.x0) / 2},${l.y1} ${t.x0},${l.y1}`
-    return { d, width: Math.max(1, l.width), tone: l.tone, color: l.color, colorDark: l.colorDark, source: s.id, target: t.id, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw, l.series) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
+    return { d, width: Math.max(1, l.width), tone: l.tone, color: l.color, colorDark: l.colorDark, source: s.id, target: t.id, series: l.series, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw, l.series) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
   })
   const W = vertical ? span : flowLen
   const H = vertical ? flowLen : span
@@ -117,6 +118,8 @@ const lit = computed(() => {
   const L = layout.value
   const sel = selected.value
   if (!L || !sel || !L.nodes.some((n) => n.id === sel)) return null
+  // 政黨分流圖（有 linkLabel）：只亮經過選中節點的完整路徑，線還要屬於同一個第一維度的值
+  if (props.linkLabel) return litByPaths(props.graph, L.links, sel)
   const nodes = new Set<string>([sel])
   const links = new Set<number>()
   for (const dir of ['down', 'up'] as const) {

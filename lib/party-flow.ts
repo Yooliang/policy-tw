@@ -315,3 +315,31 @@ export function toQuery(s: { election: number; types: readonly string[] | null; 
 
 /** 加入或移除（切換）一個值，保持原順序 */
 export const toggle = (xs: readonly string[], x: string): string[] => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x])
+
+/**
+ * 選中某節點後要亮哪些節點與線（政黨分流圖用）。只看「經過選中節點的完整路徑」：
+ * 節點＝這些路徑經過的節點；線＝這些路徑上連續的 source→target，而且屬於同一個第一維度的值（link.series 等於該路徑第一個節點的名稱）。
+ * 這樣點「國民黨」只亮國民黨的線，不會因為共用同一個縣市就把別黨的線一起點亮。回傳的線是輸入 links 的索引。
+ */
+export function litByPaths(
+  graph: { nodes: readonly { id: string; label: string }[]; paths: readonly { ids: readonly string[] }[] },
+  links: readonly { source: string; target: string; series?: string }[],
+  sel: string,
+): { nodes: Set<string>; links: Set<number> } {
+  const label = new Map(graph.nodes.map((n) => [n.id, n.label]))
+  const nodes = new Set<string>()
+  const keys = new Set<string>()
+  for (const p of graph.paths) {
+    if (!p.ids.includes(sel)) continue
+    const series = label.get(p.ids[0]) ?? ''
+    for (let k = 0; k < p.ids.length; k++) {
+      nodes.add(p.ids[k])
+      if (k > 0) keys.add(`${series}\u0000${p.ids[k - 1]}\u0000${p.ids[k]}`)
+    }
+  }
+  const out = new Set<number>()
+  links.forEach((l, i) => {
+    if (l.series !== undefined ? keys.has(`${l.series}\u0000${l.source}\u0000${l.target}`) : [...keys].some((k) => k.endsWith(`\u0000${l.source}\u0000${l.target}`))) out.add(i)
+  })
+  return { nodes, links: out }
+}
