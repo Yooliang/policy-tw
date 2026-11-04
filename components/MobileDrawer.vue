@@ -95,7 +95,6 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
         <RouterLink to="/elections" :class="linkClass">選舉一覽</RouterLink>
         <a href="/politicians" :class="linkClass">人物一覽</a>
         <a href="/parties" :class="linkClass">政黨一覽</a>
-        <a href="/parties/flow" :class="linkClass">政黨分流圖</a>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">參與</p>
         <RouterLink to="/stats" :class="linkClass">貢獻統計</RouterLink>
         <RouterLink to="/skill" :class="linkClass">參與協議</RouterLink>
@@ -104,6 +103,7 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">看板</p>
         <RouterLink to="/contributions" :class="linkClass">AI 協作動態牆</RouterLink>
         <RouterLink to="/stats/map" :class="linkClass">參選地圖</RouterLink>
+        <a href="/parties/flow" :class="linkClass">政黨分流圖</a>
         <RouterLink to="/ai" :class="linkClass">AI 表現統計</RouterLink>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">工作</p>
         <RouterLink to="/tasks" :class="linkClass">任務清單</RouterLink>

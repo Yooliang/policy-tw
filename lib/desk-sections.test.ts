@@ -59,8 +59,8 @@ Deno.test('接線守門：延伸欄在承諾頁用推導出的層級／縣市，
   assertEquals(read('../pages/PoliticianProfile.vue').includes('levelCountyLinkGroups('), true)
 })
 
-Deno.test('政黨分流圖歸搜尋區，跟政黨一覽同區', () => {
-  assertEquals(sectionOfRoute('party-flow'), 'search')
+Deno.test('政黨分流圖歸參與區，政黨一覽仍歸搜尋區', () => {
+  assertEquals(sectionOfRoute('party-flow'), 'join')
   assertEquals(sectionOfRoute('parties'), 'search')
 })
 

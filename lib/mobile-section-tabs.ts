@@ -20,6 +20,7 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'community', label: '公民提問', to: '/community' },
     { key: 'contributions', label: 'AI 協作動態牆', to: '/contributions' },
     { key: 'stats-map', label: '參選地圖', to: '/stats/map' },
+    { key: 'party-flow', label: '政黨分流圖', to: '/parties/flow' },
     { key: 'ai', label: 'AI 表現統計', to: '/ai' },
     { key: 'tasks', label: '任務清單', to: '/tasks' },
     { key: 'queue', label: '派工隊列', to: '/queue' },
@@ -31,7 +32,6 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'elections', label: '選舉一覽', to: '/elections' },
     { key: 'politicians', label: '人物一覽', to: '/politicians' },
     { key: 'parties', label: '政黨一覽', to: '/parties' },
-    { key: 'party-flow', label: '政黨分流圖', to: '/parties/flow' },
   ],
 ]
 

@@ -8,7 +8,7 @@ const BY_ROUTE: Record<string, DeskSection> = {
   home: 'home',
   tracking: 'policy', policy: 'policy', analysis: 'policy', 'analysis-detail': 'policy', lineage: 'policy', 'regional-data': 'policy',
   elections: 'search', election: 'election', 'election-region': 'election', 'election-township': 'election', 'election-matrix': 'election',
-  politician: 'election', politicians: 'search', 'politicians-group': 'search', parties: 'search', 'party-flow': 'search', party: 'election',
+  politician: 'election', politicians: 'search', 'politicians-group': 'search', parties: 'search', 'party-flow': 'join', party: 'election',
   stats: 'join', 'stats-map': 'join', skill: 'join', contributions: 'join', queue: 'join', tasks: 'join', community: 'join', discussion: 'join', sources: 'join', dispatch: 'join', ai: 'join',
   search: 'search',
   vision: 'about', contact: 'about', terms: 'about', privacy: 'about', donation: 'about',

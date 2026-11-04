@@ -38,7 +38,7 @@ const POLICY: DeskGroup[] = [
 // 參與區三組（2026-10-31 小良哥）：看板／工作各頁的切換只在這裡與手機頁籤條（頁面內原本的切換列已拿掉）。
 const JOIN: DeskGroup[] = [
   { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
-  { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('ai', 'AI 表現統計', '/ai')]] },
+  { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('party-flow', '政黨分流圖', '/parties/flow'), link('ai', 'AI 表現統計', '/ai')]] },
   { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch')]] },
 ]
 // 首頁區（首頁與「關於」合併，2026-10-31 小良哥）：首頁＋關於區各頁，分三組；名稱用頁面現有名稱（使用條款的頁面標題就是「使用條款」）
@@ -67,13 +67,13 @@ const genericElection = computed<DeskGroup[]>(() => {
 })
 // 搜尋區：目前沒有「近期搜尋」紀錄功能，先放連到搜尋頁的項目（2026-11-01）
 const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link('recent', '近期搜尋', '/search')]] }
-const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties'), link('party-flow', '政黨分流圖', '/parties/flow')]] }
+const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
 const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
-const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party-flow', 'party'])
+const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
 const overviewOnly = computed(() => OVERVIEW_ROUTES.has(String(route.name)))
 
 const title = computed(() => {
