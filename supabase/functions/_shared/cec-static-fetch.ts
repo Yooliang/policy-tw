@@ -110,6 +110,15 @@ export function parseBirthYear(raw: string | number | undefined): number | undef
   return year;
 }
 
+/**
+ * 中選會 cand_sex（1＝男、2＝女）→ 性別文字。其他值與空值回 null（不硬分；policy-ops#193）。
+ * cec_candidates.gender（cec-sync）與候選人 API 回應（fetch-cec-data）共用這一份。
+ */
+export function genderFromCandSex(raw: string | number | null | undefined): "男" | "女" | null {
+  const s = String(raw ?? "").trim();
+  return s === "1" ? "男" : s === "2" ? "女" : null;
+}
+
 export function normalizeParty(raw: string | undefined): string {
   const p = (raw || "").trim();
   if (!p || p === "無" || p === "無黨籍及未經政黨推薦" || p === "無黨籍及未經政黨推薦者") return "無黨籍";
