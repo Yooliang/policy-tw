@@ -125,12 +125,13 @@ Deno.test("A5 在途交件比對沒被破壞：兩支脈絡臂的「最新定義
 // B. PGlite
 // ============================================================
 const SCHEMA = `
-CREATE TABLE queue_settings (id smallint PRIMARY KEY, note text);
+-- verify_inherit_negative、dispatch_base_at：task_dispatches_queue_key 的最新版（20261104120000）派出任務列時讀／寫它們（驗證票排序，policy-ops#198）；這支測的是換號沿用排隊位置，欄位只是讓觸發器能跑
+CREATE TABLE queue_settings (id smallint PRIMARY KEY, note text, verify_inherit_negative boolean NOT NULL DEFAULT false);
 INSERT INTO queue_settings (id) VALUES (1);
 CREATE TABLE task_dispatches (task_id text PRIMARY KEY, last_dispatched_at timestamptz NOT NULL DEFAULT now(), dispatch_count integer NOT NULL DEFAULT 1, refreshed_at timestamptz,
   queue_at timestamptz NOT NULL DEFAULT now(), task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
   blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, verify_target integer, priority_seconds integer NOT NULL DEFAULT 0,
-  boost_seconds bigint NOT NULL DEFAULT 0, cool_until timestamptz, opened_at timestamptz, opened_by jsonb, verify_follows_task boolean NOT NULL DEFAULT true);
+  boost_seconds bigint NOT NULL DEFAULT 0, cool_until timestamptz, opened_at timestamptz, opened_by jsonb, verify_follows_task boolean NOT NULL DEFAULT true, dispatch_base_at timestamptz);
 CREATE TABLE gap_events (id BIGSERIAL PRIMARY KEY, task_id TEXT NOT NULL, task_type TEXT, event TEXT NOT NULL CHECK (event IN ('opened', 'closed', 'reopened')),
   at TIMESTAMPTZ NOT NULL DEFAULT now(), rule_id BIGINT, election_id INTEGER, milestone_kind TEXT, milestone_on_date DATE,
   reason TEXT CHECK (reason IS NULL OR reason IN ('window', 'filled', 'override', 'rule_change')), detail JSONB);
@@ -488,8 +489,9 @@ Deno.test("B6 activity_health 視圖（這支 migration 的原文）建得起來
     CREATE FUNCTION queue_head_stale() RETURNS TABLE (head_task_id text, head_task_type text, last_dispatch_at timestamptz) LANGUAGE sql STABLE AS $f$ SELECT NULL::text, NULL::text, NULL::timestamptz WHERE false $f$;
     ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS boost_seconds bigint NOT NULL DEFAULT 0;
     ALTER TABLE contributions ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}'::jsonb;
-    CREATE TABLE queue_settings (id smallint PRIMARY KEY, note text);
+    CREATE TABLE queue_settings (id smallint PRIMARY KEY, note text, verify_inherit_negative boolean NOT NULL DEFAULT false);
     INSERT INTO queue_settings (id) VALUES (1);
+    ALTER TABLE task_dispatches ADD COLUMN IF NOT EXISTS dispatch_base_at timestamptz;
     CREATE FUNCTION contribution_queue_tasks(p_type text DEFAULT NULL, p_region text DEFAULT NULL, p_limit integer DEFAULT 20, p_seed text DEFAULT '', p_ip_hash text DEFAULT NULL, p_agent text DEFAULT NULL)
       RETURNS TABLE (task_id text, task_type text, target jsonb, what_we_need text, hint_sources text[], reward integer, queue_at timestamptz) LANGUAGE sql STABLE AS $f$
       SELECT d.task_id, d.task_type, d.target, d.what_we_need, d.hint_sources, d.reward, d.queue_at FROM task_dispatches d

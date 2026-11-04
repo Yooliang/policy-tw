@@ -164,18 +164,23 @@ const DO_BLOCK = (() => {
 const QUEUE_FN = await latestFn("task_dispatches_queue_key");
 const KEY_FN = await latestFn("task_queue_key");
 const SCHEMA = `
-CREATE TABLE queue_settings (id INT PRIMARY KEY, boost_seconds BIGINT, verify_priority_seconds BIGINT DEFAULT 0);
+CREATE TABLE queue_settings (id INT PRIMARY KEY, boost_seconds BIGINT, verify_priority_seconds BIGINT DEFAULT 0, verify_inherit_negative BOOLEAN NOT NULL DEFAULT false);
 INSERT INTO queue_settings VALUES (1, ${BS}, 0);
 CREATE TABLE task_boosts (id BIGINT PRIMARY KEY, label TEXT, filter JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE edit_history (id BIGSERIAL PRIMARY KEY, table_name TEXT, record_id TEXT, field TEXT, old_value JSONB, new_value JSONB, agent_name TEXT);
 CREATE TABLE task_dispatches (task_id TEXT PRIMARY KEY, boost_seconds BIGINT NOT NULL DEFAULT 0, last_dispatched_at TIMESTAMPTZ, priority_seconds INT, cool_until TIMESTAMPTZ,
-  dispatch_count INT NOT NULL DEFAULT 0, defer_seconds BIGINT NOT NULL DEFAULT 0, verify_follows_task BOOLEAN NOT NULL DEFAULT true, queue_at TIMESTAMPTZ);
+  dispatch_count INT NOT NULL DEFAULT 0, defer_seconds BIGINT NOT NULL DEFAULT 0, verify_follows_task BOOLEAN NOT NULL DEFAULT true, dispatch_base_at TIMESTAMPTZ, queue_at TIMESTAMPTZ);
 -- 命中名單：假的 task_boost_matches（回放 _hits）
 CREATE TABLE _hits (task_id TEXT, kind TEXT);
 CREATE FUNCTION task_boost_matches(p_filter JSONB) RETURNS TABLE(task_id TEXT, kind TEXT) LANGUAGE sql AS $f$ SELECT task_id, kind FROM _hits $f$;
 CREATE FUNCTION verify_ticket_priority_seconds(p_task_id TEXT) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
 CREATE FUNCTION verify_inherited_priority_seconds(p_task_id TEXT) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
 CREATE FUNCTION verify_ticket_defer_seconds(p_task_id TEXT, p_flag BOOLEAN) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
+-- 驗證列的新排序鍵（20261104120000，policy-ops#198）：這支測的是取消 #92（任務列），驗證列只要能入列
+CREATE FUNCTION verify_ticket_base(a TEXT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;
+CREATE FUNCTION verify_ticket_step_seconds(a TEXT) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
+CREATE FUNCTION verify_ticket_freeze_base(a TIMESTAMPTZ, b INT, c BIGINT, d INT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT a $f$;
+CREATE FUNCTION verify_ticket_key(a TIMESTAMPTZ, b INT, c BIGINT, d INT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;
 CREATE FUNCTION verify_queue_key(a TEXT, b BOOLEAN, c TIMESTAMPTZ, d INT, e BIGINT, f BIGINT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;
 CREATE TABLE _refreshed (n INT);
 CREATE FUNCTION refresh_verify_ticket_keys() RETURNS INTEGER LANGUAGE plpgsql AS $f$ BEGIN INSERT INTO _refreshed VALUES (1); RETURN 1; END $f$;
