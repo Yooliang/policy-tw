@@ -184,6 +184,8 @@ const VILLAGE = "20261009010000_village_chief_progress_cooling.sql";
 const LEGACY = "20261009060000_verify_pool_legacy_hash.sql";
 /** 2026-10-17 正見第二步（驗證票的排序跟著母任務、任務有交件在途就停放）：這支改了下面三支複本，日本站暫不跟（「日本站還沒跟」的登記偏離），比對讀這支之前的版本 */
 const TW_VERIFY_TICKET = "20261017010000_verify_ticket_follows_task.sql";
+/** 2026-11-04 正見驗證票排序改成「任務派出前的位置 − 14 天 ＋ 步長 × 領走次數」（policy-ops#198）：改了 task_dispatches_queue_key、refresh_verify_ticket_keys，新增 verify_ticket_*；日本站暫不跟（登記偏離，見檔尾的測試）。上面 PAIRS 比對讀的仍是 TW_VERIFY_TICKET 之前的版本 */
+const TW_VERIFY_TICKET_KEY = "20261104120000_verify_ticket_key.sql";
 
 const PAIRS: Pair[] = [
   { name: "activity_today" },
@@ -1117,4 +1119,18 @@ Deno.test("走樣：所有 policy_jp migration 定義的函式與視圖＝複本
 
   // 七、公開統計的複本被後面的 migration 重新定義紅
   assertEquals(otherCopiesElsewhere(biteScan({ [FAKE]: fn("model_vote_stats") })), ["model_vote_stats"]);
+});
+
+Deno.test("日本站暫不跟正見的驗證票排序改版（20261104120000，policy-ops#198）：日本站的複本沒有 dispatch_base_at／verify_ticket_*，正見那支確實重新定義了被複本的函式", async () => {
+  const tw = await readMig(TW_VERIFY_TICKET_KEY);
+  for (const fn of ["task_dispatches_queue_key", "refresh_verify_ticket_keys"]) assert(tw.includes(`CREATE OR REPLACE FUNCTION ${fn}(`), `正見這支重新定義了 ${fn}`);
+  assert(tw.includes("verify_ticket_key(") && tw.includes("dispatch_base_at"));
+  // 日本站的 policy_jp migration 一個字都沒帶到（要跟就拿掉這個登記、把複本改成逐字比對）
+  for (const name of (await listMigrations()).filter((n) => n.includes("_policy_jp_"))) {
+    const sql = await readMig(name);
+    assert(!/dispatch_base_at|verify_ticket_key|verify_ticket_step_seconds|verify_redispatch_seconds/.test(sql), `${name} 不該帶到正見驗證票排序的新東西（日本站暫不跟）`);
+  }
+  // 日本站的 task_dispatches_queue_key 複本仍是跟著 TW_VERIFY_TICKET 之前那一版（上面的 PAIRS 已逐字比對），沒有新規則的痕跡
+  const jp = await latestFn("policy_jp.task_dispatches_queue_key").catch(() => "");
+  assert(!jp.includes("dispatch_base_at"));
 });
