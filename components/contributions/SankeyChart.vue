@@ -4,7 +4,14 @@ import { sankey, sankeyLeft } from 'd3-sankey'
 import { linkText, nodeText, selectionStats, selNodeText, type FlowGraph, type Tone } from '../../lib/model-flow'
 
 /** 桑基圖：寬螢幕橫向、手機直向。點節點只亮經過它的線（上下游全部），再點一次或點空白處取消。 */
-const props = defineProps<{ graph: FlowGraph; name: string; mode?: 'pct' | 'count' }>()
+const props = defineProps<{
+  graph: FlowGraph; name: string; mode?: 'pct' | 'count'
+  /** 以下為政黨分流圖用（/ai 都不傳）：照輸入順序排節點、最小跨度、窄螢幕不轉直向而是橫向捲動、自訂標籤 */
+  keepOrder?: boolean; minSpan?: number; scroll?: boolean
+  nodeLabel?: (label: string, raw: number) => string
+  linkLabel?: (from: string, to: string, raw: number) => string
+}>()
+const emit = defineEmits<{ pick: [id: string] }>()
 
 const COLOR: Record<Tone, string> = { good: '#16a34a', bad: '#dc2626', neutral: '#94a3b8', group: '#6366f1' }
 const NODE_W = 14
@@ -23,16 +30,18 @@ const selected = ref<string | null>(null)
 const layout = computed(() => {
   const g = props.graph
   if (g.links.length === 0) return null
-  const vertical = narrow.value
+  const vertical = narrow.value && !props.scroll
   // 流向長度固定，並排方向的跨度隨節點數變化
   const flowLen = vertical ? 620 : 700
-  const span = Math.max(vertical ? 300 : 240, Math.min(12, g.nodes.length) * (vertical ? 28 : 30))
+  const span = Math.max(props.minSpan ?? 0, vertical ? 300 : 240, Math.min(12, g.nodes.length) * (vertical ? 28 : 30))
   // 直向時先照橫向排（流向當 x），最後再把座標對調
   const res = sankey<any, any>()
     .nodeId((d: any) => d.id)
     .nodeAlign(sankeyLeft)
+    .nodeSort(props.keepOrder ? null : undefined)
+    .linkSort(props.keepOrder ? null : undefined)
     .nodeWidth(NODE_W)
-    .nodePadding(vertical ? 12 : 10)
+    .nodePadding(props.scroll ? 14 : vertical ? 12 : 10)
     .extent([[6, 6], [flowLen - 6, span - 6]])({ nodes: g.nodes.map((n) => ({ ...n })), links: g.links.map((l) => ({ ...l, value: props.mode === 'count' ? l.raw : l.value })) }) as { nodes: LNode[]; links: LLink[] }
   const nodes = res.nodes.map((n) => (vertical ? { ...n, x0: n.y0, x1: n.y1, y0: n.x0, y1: n.x1 } : n)) as LNode[]
   const byId = new Map(nodes.map((n) => [n.id, n]))
@@ -52,6 +61,7 @@ const layout = computed(() => {
     const hideShare = n.layer === 0 && n.id.startsWith('model:') // 模型是各自等寬的 100%，節點不標百分比
     const all = { label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100, hideShare }
     // 選中時：其餘節點顯示「選中子集合」的值，選中的節點本身維持全體值
+    if (props.nodeLabel) return props.nodeLabel(n.label, all.raw)
     if (!stats || n.id === sel) return nodeText(props.mode, all)
     const s = stats.get(n.id)!
     return selNodeText(props.mode, { label: n.label, raw: s.raw, share: s.share, allShare: all.share, hideShare, withAll: !vertical })
@@ -62,7 +72,7 @@ const layout = computed(() => {
     const d = vertical
       ? `M${l.y0},${s.y1} C${l.y0},${(s.y1 + t.y0) / 2} ${l.y1},${(s.y1 + t.y0) / 2} ${l.y1},${t.y0}`
       : `M${s.x1},${l.y0} C${(s.x1 + t.x0) / 2},${l.y0} ${(s.x1 + t.x0) / 2},${l.y1} ${t.x0},${l.y1}`
-    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
+    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
   })
   const W = vertical ? span : flowLen
   const H = vertical ? flowLen : span
@@ -91,7 +101,7 @@ const layout = computed(() => {
 const lit = computed(() => {
   const L = layout.value
   const sel = selected.value
-  if (!L || !sel) return null
+  if (!L || !sel || !L.nodes.some((n) => n.id === sel)) return null
   const nodes = new Set<string>([sel])
   const links = new Set<number>()
   for (const dir of ['down', 'up'] as const) {
@@ -109,12 +119,12 @@ const lit = computed(() => {
   }
   return { nodes, links }
 })
-const pick = (id: string) => { selected.value = selected.value === id ? null : id }
+const pick = (id: string) => { selected.value = selected.value === id ? null : id; emit('pick', id) }
 </script>
 
 <template>
-  <div v-if="layout" class="w-full">
-    <svg :viewBox="`0 0 ${layout.W} ${layout.H}`" class="w-full h-auto select-none" role="img" :aria-label="name" :data-testid="`sankey-${name}`"
+  <div v-if="layout" class="w-full" :class="scroll ? 'overflow-x-auto' : ''">
+    <svg :viewBox="`0 0 ${layout.W} ${layout.H}`" class="w-full h-auto select-none" :style="scroll ? { minWidth: `${layout.W}px` } : undefined" role="img" :aria-label="name" :data-testid="`sankey-${name}`"
       @click="selected = null">
       <g fill="none">
         <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="COLOR[l.tone]" :stroke-width="l.width"

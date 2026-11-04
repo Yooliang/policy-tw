@@ -34,6 +34,7 @@
       { "source": "/stats", "destination": "/app.html" },
       { "source": "/stats/map", "destination": "/app.html" },
       { "source": "/ai", "destination": "/app.html" },
+      { "source": "/parties/flow", "destination": "/app.html" },
       { "source": "/verify", "destination": "/app.html" },
       { "source": "/profile", "destination": "/app.html" },
       { "source": "/auth/callback", "destination": "/app.html" },
