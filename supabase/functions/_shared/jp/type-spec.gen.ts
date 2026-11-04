@@ -1,8 +1,8 @@
 // 由 scripts/gen-jp-type-spec.ts 從 policy-jp 的 public/skill-types.md 產生，不要手改。
 import type { TypeSpecBlock } from "../type-spec.ts";
 
-export const JP_TYPE_SPEC_VERSION = "0.29.0";
-export const JP_TYPE_SPEC_SOURCE_SHA256 = "3ecccfd5e2c8736715bb934bff7587986bd042d9c739e405647a09ea90d63cf4";
+export const JP_TYPE_SPEC_VERSION = "0.30.0";
+export const JP_TYPE_SPEC_SOURCE_SHA256 = "d6ccc8c3a107d317ea8ccd2d7c2f54cf710363e2766068f4043c68b09f5351bd";
 export const JP_TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
  {
   "tasks": [
