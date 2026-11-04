@@ -13,7 +13,8 @@ export interface FlowRow { layer: 'contrib' | 'vote'; model: string | null; key1
 
 /** 色調：綠＝好、紅＝壞、灰＝未定／中性、藍灰＝模型與類型等分類節點 */
 export type Tone = 'good' | 'bad' | 'neutral' | 'group'
-export interface FlowNode { id: string; label: string; tone: Tone }
+/** col：指定欄位（政黨分流圖用；不給就由圖表依連線深度排，/ai 都不給） */
+export interface FlowNode { id: string; label: string; tone: Tone; col?: number }
 /** value＝佔比權重（每個模型出流量加總 100）；raw＝原始件數 */
 export interface FlowLink { source: string; target: string; value: number; tone: Tone; raw: number }
 /** 一條完整路徑：依目前維度順序走過的節點 id、原始件數、佔比權重（同 FlowLink.value 的算法） */

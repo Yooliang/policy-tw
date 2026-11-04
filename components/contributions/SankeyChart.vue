@@ -32,12 +32,15 @@ const layout = computed(() => {
   if (g.links.length === 0) return null
   const vertical = narrow.value && !props.scroll
   // 流向長度固定，並排方向的跨度隨節點數變化
-  const flowLen = vertical ? 620 : 700
+  // 節點自帶欄位（col）時照欄位排，捲動模式每欄至少留 170 寬放標籤
+  const hasCols = g.nodes.some((n) => n.col !== undefined)
+  const nCols = hasCols ? Math.max(...g.nodes.map((n) => n.col ?? 0)) + 1 : 0
+  const flowLen = vertical ? 620 : props.scroll && hasCols ? Math.max(700, nCols * 170) : 700
   const span = Math.max(props.minSpan ?? 0, vertical ? 300 : 240, Math.min(12, g.nodes.length) * (vertical ? 28 : 30))
   // 直向時先照橫向排（流向當 x），最後再把座標對調
   const res = sankey<any, any>()
     .nodeId((d: any) => d.id)
-    .nodeAlign(sankeyLeft)
+    .nodeAlign(hasCols ? ((n: any) => n.col) : sankeyLeft)
     .nodeSort(props.keepOrder ? null : undefined)
     .linkSort(props.keepOrder ? null : undefined)
     .nodeWidth(NODE_W)
