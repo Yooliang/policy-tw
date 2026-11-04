@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { BOOST_FILTER_KEYS, BOOST_PER_IP_PER_HOUR, validateBoostFilter, validateBoostLabel } from "../_shared/boost-filter.ts";
-import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
+import { PROTOCOL_VERSION } from "../_shared/protocol.ts";
 
 /**
  * boost — 插隊（2026-09-22，使用者裁示）。
@@ -35,7 +35,6 @@ const USAGE = {
     { label: "只插兩件驗證票", filter: { task_ids: ["verify:<貢獻 id>", "verify:<貢獻 id>"] } },
     { label: "只推驗證", filter: { regions: ["台南市"], kinds: ["verify"] } },
   ],
-  docs: `${PROTOCOL_URL}#8-輔助端點`,
 };
 
 Deno.serve(async (req) => {
