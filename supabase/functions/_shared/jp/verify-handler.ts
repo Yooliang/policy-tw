@@ -108,6 +108,8 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
 
   // 派發即綁定：只收「/next 派給你的那一筆」（via merge 例外：重複提交被系統配對成同意票）
   if (tokenBinding) {
+    // 憑證只能由領任務的那個代號用（2026-11-04 投票不看 IP 後，一張憑證不能換任意多個代號各一票）；DiTrust 的代號＝帳號顯示名，等於比帳號
+    if (tokenBinding.agent.toLowerCase() !== input.agent_name.toLowerCase()) return invalidTokenResult("agent_mismatch");
     logDispatchBinding({
       event: "dispatch_binding", endpoint: `jp:${via}`, binding: expiredRevise ? "token_expired_revise" : "token", task_id: `verify:${contribution.id}`,
       agent_name: input.agent_name, token_id: tokenBinding.tokenId, issued_net: tokenBinding.issuedNet, report_net: reportIpHash,
@@ -116,9 +118,11 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
     // 只認派出後 VERIFY_BINDING_DAYS 天內的紀錄（派工紀錄會定時清掉更舊的，#485；時限明寫，清理前後結果才一樣）
     const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
     const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
-      .select("contribution_id").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle();
+      .select("contribution_id, agent_name").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle();
     if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
-    if (!dispatched) {
+    // 派工紀錄記了領的代號：別的代號不能拿這筆網段綁定來投（記錄上沒代號的舊列放行）
+    const dispatchedTo = (dispatched as { agent_name?: string | null } | null)?.agent_name;
+    if (!dispatched || (dispatchedTo && dispatchedTo.toLowerCase() !== input.agent_name.toLowerCase())) {
       return {
         status: 409,
         body: {
@@ -142,9 +146,12 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
   const myKey = voterKey(voter);
   type ExistingVote = { id: string; agent_name: string; actor_id?: string | null; verifier_ip_hash: string | null };
   const mine = ((existing ?? []) as ExistingVote[]).find((x) => voterKey(x) === myKey);
+  // 改票要驗本人：匿名的投票人鍵只是自報代號，所以改別人的票要擋——票上存的來源網段必須是這次的領取網段或回報網段（DiTrust 的鍵是帳號，本來就是本人）。
+  // 這是身分判斷，不是投票條件。票上沒記網段的舊票放行。
+  const ownedByMe = (v: ExistingVote) => actor.level === "ditrust" || !v.verifier_ip_hash || v.verifier_ip_hash === ipHash || v.verifier_ip_hash === reportIpHash;
   if (expiredRevise) {
     // 過期憑證只能用來改「自己（同一個投票人）」已經投的票（2026-11-04 起以投票人為準，不再看網段）
-    if (!mine) return invalidTokenResult("expired");
+    if (!mine || !ownedByMe(mine)) return invalidTokenResult("expired");
     if (mine.verifier_ip_hash) ipHash = mine.verifier_ip_hash;
   }
   if (mine) {
@@ -158,6 +165,9 @@ export async function handleVerify(supabase: SupabaseLike, body: unknown, report
           message: `這筆你（同一個代號／帳號）已經投過一票了（投票的代號：${mine.agent_name}）；**這次送的票沒有計入**。如果那張票就是你的、想改它：同一筆再送一次並帶 \`revise: true\`，會覆寫它；否則請直接領下一筆。`,
         },
       };
+    }
+    if (!ownedByMe(mine)) {
+      return { status: 403, body: { success: false, error: "not_your_vote", message: "這張票不是從你的來源投的，不能改。這次送的票沒有計入。" } };
     }
     revising = { id: mine.id };
   }

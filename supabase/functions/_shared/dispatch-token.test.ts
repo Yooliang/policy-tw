@@ -226,9 +226,15 @@ Deno.test("4 同一張憑證不能讓同一個投票人投兩票：同代號換�
   assertEquals(second.status, 409, JSON.stringify(second.body));
   assertEquals(second.body.error, "already_voted");
   assertEquals(votes.length, 1, "仍然只有一張票");
-  // 換一個代號：去重鍵是代號，不是網段，算另一個投票人
+  // 換一個代號拿這張憑證：擋下（憑證只能由領任務的代號用），不是另一票
   const erin = await handleVerify(client, vote("erin", { dispatch_token: issued.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
-  assertEquals(erin.status, 201, JSON.stringify(erin.body));
+  assertEquals(erin.status, 403, JSON.stringify(erin.body));
+  assertEquals(erin.body.reason, "agent_mismatch");
+  assertEquals(votes.length, 1);
+  // erin 自己領一張（同網段）就是另一個投票人，算一票
+  const erinOwn = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "erin", ipHash: NET_A });
+  assert(erinOwn);
+  assertEquals((await handleVerify(client, vote("erin", { dispatch_token: erinOwn.token }), NET_C, undefined, "report", undefined, undefined, SECRET)).status, 201);
   assertEquals(votes.length, 2);
   // 同樣的重複不帶 revise → 還是 409；而不是靜默覆寫
   const third = await handleVerify(client, vote("dave", { dispatch_token: issued.token }), NET_B, undefined, "report", undefined, undefined, SECRET);
@@ -247,7 +253,12 @@ Deno.test("4 憑證不繞過「每個投票人一票」：同一個網段領了�
   assertEquals(res.status, 409);
   assertEquals(res.body.error, "already_voted");
   assertEquals(votes.length, 1);
-  assertEquals((await handleVerify(client, vote("erin", { dispatch_token: t2.token }), NET_C, undefined, "report", undefined, undefined, SECRET)).status, 201, "別的代號不受同網段那一票影響");
+  const wrong = await handleVerify(client, vote("erin", { dispatch_token: t2.token }), NET_C, undefined, "report", undefined, undefined, SECRET);
+  assertEquals(wrong.status, 403, "別人的憑證換代號用：擋下");
+  assertEquals(wrong.body.reason, "agent_mismatch");
+  const t3 = await issueDispatchToken(SECRET, { taskId: `verify:${CID}`, agentName: "erin", ipHash: NET_A });
+  assert(t3);
+  assertEquals((await handleVerify(client, vote("erin", { dispatch_token: t3.token }), NET_C, undefined, "report", undefined, undefined, SECRET)).status, 201, "erin 自己領的憑證：不受同網段那一票影響");
   assertEquals(votes.length, 2);
 });
 

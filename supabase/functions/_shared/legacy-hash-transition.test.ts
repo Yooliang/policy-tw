@@ -241,7 +241,7 @@ Deno.test("3 /next 接線：my_votes 走 fetchMyVotedRows({agentName, actorId})�
 
 // ── 4 同代號重投與改票 ──────────────────────────────────────────────────────
 
-const myVote = { id: "v-mine", agent_name: "Dave", verifier_ip_hash: "ip-from-before", note: "以前的備註" };
+const myVote = { id: "v-mine", agent_name: "Dave", verifier_ip_hash: NEW, note: "以前的備註" };
 
 Deno.test("4 同代號（不管 IP）再投 → 409，而且講得出怎麼改票", async () => {
   const { client, inserted, updated } = fakeVerifyDb({ votes: [myVote], dispatchedHash: NEW });

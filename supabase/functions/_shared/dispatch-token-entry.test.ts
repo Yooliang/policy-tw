@@ -159,7 +159,7 @@ Deno.test("端到端：同一個網段 N1 領、N1 內另一個 IP 交——不�
   });
 });
 
-Deno.test("端到端：同一張憑證換網段再投：同代號 → 409，仍只有一張票；換代號＝另一個投票人（2026-11-04 投票不看 IP）→ 201", async () => {
+Deno.test("端到端：同一張憑證換網段再投：同代號 → 409，仍只有一張票；別的代號拿這張憑證 → 403 agent_mismatch（憑證只能由領任務的代號用）", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
     const token = (await getNext(next, N1)).json.dispatch_token as string;
@@ -169,8 +169,10 @@ Deno.test("端到端：同一張憑證換網段再投：同代號 → 409，仍�
     assertEquals(again.json.error, "already_voted");
     assertEquals(db.votes.length, 1);
     const other = await post(report, "10.3.3.3", voteBody({ dispatch_token: token, agent_name: "erin", note: "另一個代號打開來源核對，欄位都對得上（erin）" }));
-    assertEquals(other.status, 201, JSON.stringify(other.json));
-    assertEquals(db.votes.length, 2, "別的代號是另一票；去重鍵是代號不是網段");
+    assertEquals(other.status, 403, JSON.stringify(other.json));
+    assertEquals(other.json.error, "invalid_dispatch_token");
+    assertEquals(other.json.reason, "agent_mismatch");
+    assertEquals(db.votes.length, 1, "一次派工不能換任意多個代號各投一票");
   });
 });
 

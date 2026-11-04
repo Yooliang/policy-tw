@@ -107,7 +107,7 @@ Deno.test("SQL 行為：DiTrust 同 actor_id 換代號只算一票；DiTrust 與
   const dtSame: V[] = [agree("alice", "ip-1", "ditrust:u1"), agree("alice-new", "ip-2", "ditrust:u1")];
   const r1 = await run(d, 30, "policy", dtSame);
   assertEquals(r1.agree, 1);
-  const mixed: V[] = [agree("alice", "net-1", "ditrust:u1"), agree("alice", "net-1")]; // 同顯示名：DiTrust 與匿名
+  const mixed: V[] = [agree("alice", "net-1", "ditrust:u1"), agree("Alice", "net-1")]; // 正式表有 UNIQUE(貢獻, agent_name)（區分大小寫）：DiTrust 顯示名與匿名只可能差大小寫，鍵仍分開（現狀：兩票；DiTrust 與匿名互轉可投兩票，已知限制）
   const r2 = await run(d, 31, "policy", mixed);
   assertEquals(r2.agree, 2, "DiTrust 與同名匿名是兩個投票人");
   // 匿名票的 actor_id 是網段雜湊，不當身份
