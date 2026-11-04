@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { ChevronLeft, ChevronRight, GripVertical, Plus, X } from 'lucide-vue-next'
 import type { DimDef } from '../../lib/model-flow'
 
 /**
  * 分流圖的維度順序：標籤可以拖曳換位置（桌機），每個標籤兩側也有左右箭頭可以點（手機）。
  * 順序由外層持有（寫進網址），這裡只送出新的完整順序。
  */
-const props = defineProps<{ dims: readonly DimDef[]; order: readonly string[]; name: string }>()
+const props = defineProps<{
+  dims: readonly DimDef[]; order: readonly string[]; name: string
+  /** 政黨分流圖用（/ai 不傳）：可開關的維度；沒開的維度顯示成「＋」鈕，開著的有「✕」鈕，最少留 minOn 個 */
+  available?: readonly DimDef[]; minOn?: number
+}>()
 const emit = defineEmits<{ (e: 'update:order', v: string[]): void }>()
 
+const off = computed(() => (props.available ?? []).filter((d) => !props.order.includes(d.id)))
+const canClose = computed(() => props.available !== undefined && props.order.length > (props.minOn ?? 2))
+const close = (id: string) => { if (canClose.value) emit('update:order', props.order.filter((x) => x !== id)) }
+const open = (id: string) => emit('update:order', [...props.order, id])
 const labelOf = (id: string) => props.dims.find((d) => d.id === id)?.label ?? id
 const dragging = ref<number | null>(null)
 const over = ref<number | null>(null)
@@ -43,7 +51,11 @@ function onDrop(to: number) {
         <span class="inline-flex items-center gap-0.5 px-0.5 text-navy-900 cursor-grab whitespace-nowrap"><GripVertical :size="12" class="text-slate-300" aria-hidden="true" />{{ labelOf(id) }}</span>
         <button type="button" class="px-1 py-1 text-slate-400 hover:text-blue-600 disabled:opacity-25 disabled:hover:text-slate-400" :disabled="i === order.length - 1"
           :aria-label="`${labelOf(id)}往後移`" @click="move(i, i + 1)"><ChevronRight :size="14" /></button>
+        <button v-if="available" type="button" class="px-1 py-1 text-slate-400 hover:text-red-600 disabled:opacity-25 disabled:hover:text-slate-400" :disabled="!canClose"
+          :aria-label="`關掉${labelOf(id)}`" :data-testid="`flow-dim-off-${id}`" @click="close(id)"><X :size="12" /></button>
       </div>
     </template>
+    <button v-for="d in off" :key="d.id" type="button" class="inline-flex items-center gap-0.5 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-xs font-bold text-slate-500 hover:border-blue-400 hover:text-blue-600"
+      :aria-label="`開啟${d.label}`" :data-testid="`flow-dim-on-${d.id}`" @click="open(d.id)"><Plus :size="12" />{{ d.label }}</button>
   </div>
 </template>
