@@ -1,14 +1,14 @@
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { handleVerify } from "./verify-handler.ts";
 import { handleContribute, ipHashOf, legacyIpHashOf } from "./contribute-handler.ts";
-import { fetchMyVotedRows, voterHashes } from "./my-votes.ts";
+import { fetchMyVotedRows } from "./my-votes.ts";
 import { excludeOwnAdjudications } from "./dispatch.ts";
 
 /**
- * 來源身份改看網段（#481，1.79.0）的過渡期：切換前存的是單一 IP 的舊雜湊（legacyIpHash），切換後是網段雜湊。
- * agy 同儕審查（PR #482）找到的缺口，逐點守住：
- *   1 裁決驗證要同時比新舊雜湊　2 重複宣稱併票要帶舊雜湊　3 /next 的 my_votes 新舊都查
- *   4 舊票可以 revise 並升級成新雜湊　5 輪換 IP 的情境要真的測（含舊資料認不出輪換 IP 的限制）
+ * 檔名沿用（原本守 #481 單一 IP 舊雜湊的過渡期）。2026-11-04 維護者裁定「投票不看 IP」後，舊雜湊／網段雜湊的過渡概念消失，
+ * 這裡改守新語意：投票人＝代號（匿名）或 DiTrust 帳號；來源網段不影響自交、重投、/next 的已投排除、併票。
+ *   1 裁決的利益迴避只看代號　2 併票：同網段不同代號可併、同代號擋　3 /next 的 my_votes 按代號／帳號查
+ *   4 同代號重投 409＋revise 覆寫　5 輪換 IP：派工綁定仍認網段（那不是投票條件），去重不看網段
  */
 const CID = "11111111-2222-3333-4444-555555555555";
 const ORIG = "99999999-2222-3333-4444-555555555555";
@@ -76,10 +76,10 @@ const voteWrites = (rows: Row[]) => rows.filter((r) => r.table === "contribution
 
 const adjudication = { contribution_type: "adjudication", payload: { contribution_id: ORIG, outcome: "uphold" } };
 
-Deno.test("1 裁決：原貢獻是切換前（舊雜湊）交的，同一個來源不能投裁決票", async () => {
+Deno.test("1 裁決：原貢獻是同一個代號交的（不管 IP）→ 不能投裁決票", async () => {
   const { client, inserted } = fakeVerifyDb({
     contribution: adjudication,
-    original: { agent_name: "proposer", contributor_ip_hash: OLD },
+    original: { agent_name: "Dave", contributor_ip_hash: "ip-whatever" },
     dispatchedHash: NEW,
   });
   const res = await handleVerify(client, base, NEW, undefined, "verify", cec, OLD);
@@ -89,25 +89,16 @@ Deno.test("1 裁決：原貢獻是切換前（舊雜湊）交的，同一個來�
   assertEquals(voteWrites(inserted).length, 0);
 });
 
-Deno.test("1 裁決：原貢獻是別人交的（新舊雜湊都不同）→ 不會被誤擋", async () => {
-  const { client } = fakeVerifyDb({
-    contribution: adjudication,
-    original: { agent_name: "proposer", contributor_ip_hash: "someone-elses" },
-    dispatchedHash: NEW,
-  });
-  const res = await handleVerify(client, base, NEW, undefined, "verify", cec, OLD);
-  assertNotEquals(res.body.error, "self_vote", JSON.stringify(res.body));
-});
-
-Deno.test("1 裁決：原貢獻是切換後（新網段雜湊）交的，照舊擋", async () => {
-  const { client } = fakeVerifyDb({
-    contribution: adjudication,
-    original: { agent_name: "proposer", contributor_ip_hash: NEW },
-    dispatchedHash: NEW,
-  });
-  const res = await handleVerify(client, base, NEW, undefined, "verify", cec, OLD);
-  assertEquals(res.status, 403);
-  assertEquals(res.body.error, "self_vote");
+Deno.test("1 裁決：原貢獻是同網段、不同代號交的 → 不擋（投票不看 IP）", async () => {
+  for (const ip of [NEW, OLD]) {
+    const { client } = fakeVerifyDb({
+      contribution: adjudication,
+      original: { agent_name: "proposer", contributor_ip_hash: ip },
+      dispatchedHash: NEW,
+    });
+    const res = await handleVerify(client, base, NEW, undefined, "verify", cec, OLD);
+    assertNotEquals(res.body.error, "self_vote", JSON.stringify(res.body));
+  }
 });
 
 // ── 2 重複宣稱併票 ───────────────────────────────────────────────────────────
@@ -117,7 +108,7 @@ const CLAIM = {
   contribution_type: "correction",
   payload: { target_table: "politician_elections", target_id: "9827", changes: [{ field: "candidate_status", correct_value: "registered" }] },
   agent_name: "a-zhen",
-  contributor_ip_hash: OLD, // 切換前自己這個來源交的待審宣稱
+  contributor_ip_hash: NEW, // 同一個網段、別的代號交的待審宣稱
   status: "pending",
   source_urls: ["https://news.ltn.com.tw/news/politics/breakingnews/1"],
   agree_count: 0, disagree_count: 0, unsure_count: 0, score: 0,
@@ -126,11 +117,11 @@ const ITEM = {
   contribution_type: "correction",
   payload: { target_table: "politician_elections", target_id: "9827", changes: [{ field: "candidate_status", correct_value: "registered" }], reason: "自由時報 2026-09-04 報導已完成登記" },
   source_urls: ["https://news.ltn.com.tw/news/politics/breakingnews/1"],
-  agent_name: "lampstand", // 換了代號
+  agent_name: "lampstand",
   agent_tool: "pi/deepseek-v4-flash",
 };
 
-function fakeContributeDb() {
+function fakeContributeDb(claim: Row) {
   const inserted: unknown[][] = [];
   const api = {
     from(table: string) {
@@ -142,7 +133,7 @@ function fakeContributeDb() {
         insert: (rows: unknown[]) => { inserted.push(rows); return { select: () => ({ data: (rows as Array<{ payload_hash: string }>).map((r, i) => ({ id: `new-${i}`, payload_hash: r.payload_hash })), error: null }) }; },
         delete: () => ({ in: () => ({ error: null }) }),
         then: (res: (v: { data: unknown; error: null; count: number }) => unknown) => {
-          if (table === "contributions" && q.status === "pending") return res({ data: [CLAIM], error: null, count: 0 });
+          if (table === "contributions" && q.status === "pending") return res({ data: [claim], error: null, count: 0 });
           if (table === "politician_elections") return res({ data: [{ id: 9827 }], error: null, count: 0 });
           if (table === "politicians") return res({ data: [{ id: "22222222-2222-4222-8222-222222222222", merged_into: null }], error: null, count: 0 });
           return res({ data: [], error: null, count: 0 });
@@ -154,98 +145,106 @@ function fakeContributeDb() {
   return { api, inserted };
 }
 
-Deno.test("2 併票：handleContribute 把舊雜湊交給投票端（不是 undefined）", async () => {
-  const { api } = fakeContributeDb();
-  let seen: string | undefined = "unset";
-  let via: string | undefined;
-  await handleContribute(api, "https://x", ITEM, NEW, (_s, _b, _ip, _apply, v, _cec, legacy) => {
-    seen = legacy; via = v;
-    return Promise.resolve({ status: 201, body: { agree_count: 1, required_agree: 2, status: "pending" } });
+Deno.test("2 併票：同網段、不同代號交過同一宣稱 → 併成一票（不看 IP）", async () => {
+  const { api, inserted } = fakeContributeDb(CLAIM);
+  const verifyDb = fakeVerifyDb({ contribution: CLAIM });
+  const votesTried: Row[] = [];
+  await handleContribute(api, "https://x", ITEM, NEW, async (_s, body, ip, apply, via, cecFetch, legacy) => {
+    const r = await handleVerify(verifyDb.client, body, ip, apply, via, cecFetch, legacy);
+    votesTried.push({ status: r.status, error: (r.body as Row).error ?? null });
+    return r;
   }, "report", undefined, undefined, OLD);
-  assertEquals(via, "merge");
-  assertEquals(seen, OLD);
+  assertEquals(votesTried.length, 1, "要嘗試併票");
+  assertNotEquals(votesTried[0].error, "self_vote", "同網段不同代號不是自己");
+  assertEquals(inserted.length, 0, "併成票就不另收一筆");
 });
 
-Deno.test("2 併票：切換前自己交的待審宣稱，換代號再交一次 → 併不成自己的票，照原路收成新的一筆", async () => {
-  const { api, inserted } = fakeContributeDb();
-  const verifyDb = fakeVerifyDb({ contribution: CLAIM });
+Deno.test("2 併票：自己（同代號）交的待審宣稱，再交一次 → 併不成自己的票，照原路收成新的一筆", async () => {
+  const mine = { ...CLAIM, agent_name: "lampstand", contributor_ip_hash: "ip-elsewhere" };
+  const { api, inserted } = fakeContributeDb(mine);
+  const verifyDb = fakeVerifyDb({ contribution: mine });
   const votesTried: Row[] = [];
   const res = await handleContribute(api, "https://x", ITEM, NEW, async (_s, body, ip, apply, via, cecFetch, legacy) => {
     const r = await handleVerify(verifyDb.client, body, ip, apply, via, cecFetch, legacy);
     votesTried.push({ status: r.status, error: (r.body as Row).error });
     return r;
   }, "report", undefined, undefined, OLD);
-  assertEquals(votesTried, [{ status: 403, error: "self_vote" }], "投票端要認出這是自己切換前交的");
+  assert(votesTried.length === 0 || (votesTried[0].status === 403 && votesTried[0].error === "self_vote"), JSON.stringify(votesTried));
   assertEquals(voteWrites(verifyDb.inserted).length, 0, "不該寫進任何一張票");
   assertEquals(inserted.length, 1, "投不成就照常建這一筆，不能默默丟掉");
   assertEquals((res.body as Row).status, "pending");
 });
 
-Deno.test("2 接線：report／contribute 兩個端點都把舊雜湊傳進 handleContribute", async () => {
-  for (const f of ["../report/index.ts", "../contribute/index.ts"]) {
-    const code = await Deno.readTextFile(new URL(f, import.meta.url));
-    assert(/handleContribute\([^;]*legacyIpHash|handleContribute\([^;]*legacyIpHashOf/.test(code), `${f} 沒把舊雜湊傳給 handleContribute`);
-  }
-});
-
 // ── 3 /next 的 my_votes ─────────────────────────────────────────────────────
 
-function fakeVotesDb(rows: Array<{ contribution_id: string; verifier_ip_hash: string }>) {
+function fakeVotesDb(rows: Array<{ contribution_id: string; agent_name: string; actor_id?: string | null }>) {
+  const calls: Array<{ op: string; col: string; val: string }> = [];
   return {
+    calls,
     from(_t: string) {
-      let want: string[] = [];
+      let pred: (r: Row) => boolean = () => true;
       const chain = {
         select() { return chain; },
-        in(_c: string, vs: string[]) { want = vs; return chain; },
-        eq(_c: string, v: string) { want = [v]; return chain; },
+        eq(c: string, v: string) { calls.push({ op: "eq", col: c, val: v }); pred = (r) => r[c] === v; return chain; },
+        // ilike 不分大小寫；跳脫字元（反斜線＋字元）還原成字元本身
+        ilike(c: string, v: string) {
+          calls.push({ op: "ilike", col: c, val: v });
+          const want = v.replace(/\\(.)/g, "$1").toLowerCase();
+          pred = (r) => String(r[c]).toLowerCase() === want;
+          return chain;
+        },
         order() { return chain; },
-        range() { return Promise.resolve({ data: rows.filter((r) => want.includes(r.verifier_ip_hash)).map((r) => ({ contribution_id: r.contribution_id })), error: null }); },
+        range() { return Promise.resolve({ data: rows.filter((r) => pred(r as Row)).map((r) => ({ contribution_id: r.contribution_id })), error: null }); },
       };
       return chain;
     },
   };
 }
 
-Deno.test("3 /next：my_votes 新舊雜湊都查，切換前投過票的爭議案件不會又派回給自己裁決", async () => {
+Deno.test("3 /next：my_votes 按代號（匿名）或帳號（DiTrust）查；同網段別人投過的不算我的", async () => {
   const db = fakeVotesDb([
-    { contribution_id: "A-before-switch", verifier_ip_hash: OLD },
-    { contribution_id: "B-after-switch", verifier_ip_hash: NEW },
-    { contribution_id: "C-someone-else", verifier_ip_hash: "other" },
+    { contribution_id: "A-mine", agent_name: "Dave" },
+    { contribution_id: "B-mine-2", agent_name: "dave" },
+    { contribution_id: "C-same-net-other-agent", agent_name: "someone-else" },
+    { contribution_id: "D-ditrust", agent_name: "dave-handle", actor_id: "ditrust:u1" },
   ]);
-  const rows = await fetchMyVotedRows(db, voterHashes(NEW, OLD));
-  const voted = new Set(rows.map((r) => r.contribution_id));
-  assertEquals([...voted].sort(), ["A-before-switch", "B-after-switch"]);
+  const anon = await fetchMyVotedRows(db, { agentName: "dave", actorId: "net-hash" });
+  assertEquals(anon.map((r) => r.contribution_id).sort(), ["A-mine", "B-mine-2"], "匿名的 actor_id 是網段雜湊，不當身份");
+  assertEquals(db.calls[0].op, "ilike");
+  const dt = await fetchMyVotedRows(db, { agentName: "whatever", actorId: "ditrust:u1" });
+  assertEquals(dt.map((r) => r.contribution_id), ["D-ditrust"], "DiTrust 按 actor_id，換代號也算");
+  assertEquals(db.calls.at(-1), { op: "eq", col: "actor_id", val: "ditrust:u1" });
+  // 代號裡的 _ 是 ilike 萬用字元，要跳脫，不然 a_b 會撈到 aXb
+  const esc = fakeVotesDb([{ contribution_id: "X", agent_name: "aXb" }, { contribution_id: "Y", agent_name: "a_b" }]);
+  assertEquals((await fetchMyVotedRows(esc, { agentName: "a_b" })).map((r) => r.contribution_id), ["Y"]);
 
-  // 接上 /next 實際用的排除：裁決的原貢獻是 A（我切換前投過）→ 這筆裁決不派給我
+  // 接上 /next 實際用的排除：裁決的原貢獻是我投過的 → 這筆裁決不派給我
+  const voted = new Set(anon.map((r) => r.contribution_id));
   const adj = (target: string) => ({
     contribution_type: "adjudication", payload: { contribution_id: target },
     id: `adj-${target}`, agent_name: "x", contributor_ip_hash: "y", source_urls: [], status: "pending",
   });
-  const cands = [adj("A-before-switch"), adj("B-after-switch"), adj("C-someone-else")];
+  const cands = [adj("A-mine"), adj("C-same-net-other-agent")];
   // deno-lint-ignore no-explicit-any
   const kept = excludeOwnAdjudications(cands as any, [], { agent_name: "dave", ip_hash: NEW, voted_ids: voted }, voted);
-  assertEquals(kept.map((c) => (c.payload as Row).contribution_id), ["C-someone-else"]);
+  assertEquals(kept.map((c) => (c.payload as Row).contribution_id), ["C-same-net-other-agent"]);
 });
 
-Deno.test("3 /next：舊雜湊與新雜湊同值（IP 認不得）時只查一個；沒有舊雜湊也一樣", () => {
-  assertEquals(voterHashes(NEW, NEW), [NEW]);
-  assertEquals(voterHashes(NEW, undefined), [NEW]);
-  assertEquals(voterHashes(NEW, OLD), [NEW, OLD]);
-});
-
-Deno.test("3 /next 接線：my_votes 走 fetchMyVotedRows(voterHashes(新, 舊))，不再只 eq 新雜湊", async () => {
+Deno.test("3 /next 接線：my_votes 走 fetchMyVotedRows({agentName, actorId})，不再用雜湊；驗證池不傳舊雜湊", async () => {
   const code = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  assert(code.includes("fetchMyVotedRows(supabase, voterHashes(ipHash, legacyIpHash))"), "my_votes 要新舊都查");
-  assert(code.includes("legacyIpHashOf(req, ipSalt)"), "/next 要算舊雜湊");
-  assert(!/"my votes"/.test(code), "舊的只查新雜湊那段不該還在");
+  assert(code.includes("fetchMyVotedRows(supabase, { agentName, actorId: actor.actor_id })"), "my_votes 要按代號／帳號查");
+  assert(!code.includes("voterHashes"), "voterHashes 已刪");
+  assert(!code.includes("p_legacy_ip_hash"), "驗證池不再傳舊雜湊");
+  assert(!code.includes("legacyIpHashOf"), "/next 不再算舊雜湊");
+  assert(!/"my votes"/.test(code), "舊的只查雜湊那段不該還在");
 });
 
-// ── 4 舊票 revise ───────────────────────────────────────────────────────────
+// ── 4 同代號重投與改票 ──────────────────────────────────────────────────────
 
-const legacyVote = { id: "v-legacy", agent_name: "dave-old-name", verifier_ip_hash: OLD, note: "以前的備註" };
+const myVote = { id: "v-mine", agent_name: "Dave", verifier_ip_hash: NEW, note: "以前的備註" };
 
-Deno.test("4 舊票沒帶 revise → 409，而且講得出怎麼改票", async () => {
-  const { client, inserted, updated } = fakeVerifyDb({ votes: [legacyVote], dispatchedHash: NEW });
+Deno.test("4 同代號（不管 IP）再投 → 409，而且講得出怎麼改票", async () => {
+  const { client, inserted, updated } = fakeVerifyDb({ votes: [myVote], dispatchedHash: NEW });
   const res = await handleVerify(client, base, NEW, undefined, "verify", cec, OLD);
   assertEquals(res.status, 409);
   assertEquals(res.body.error, "already_voted");
@@ -254,26 +253,30 @@ Deno.test("4 舊票沒帶 revise → 409，而且講得出怎麼改票", async (
   assertEquals(updated.filter((u) => u.patch.table === "contribution_votes").length, 0);
 });
 
-Deno.test("4 舊票帶 revise:true → 覆寫那張票（UPDATE 不 INSERT），verifier_ip_hash 升級成新的網段雜湊", async () => {
-  const { client, inserted, updated } = fakeVerifyDb({ votes: [legacyVote], dispatchedHash: NEW });
+Deno.test("4 同代號帶 revise:true → 覆寫那張票（UPDATE 不 INSERT）", async () => {
+  const { client, inserted, updated } = fakeVerifyDb({ votes: [myVote], dispatchedHash: NEW });
   const res = await handleVerify(client, { ...base, revise: true, note: "換了不同網域的來源重新核對，欄位都對得上" }, NEW, undefined, "verify", cec, OLD);
   assertEquals(res.status, 201, JSON.stringify(res.body));
   assertEquals(res.body.revised, true);
   assertEquals(voteWrites(inserted).length, 0, "不該新增第二張票");
   const u = updated.find((x) => x.patch.table === "contribution_votes");
-  assert(u, "要 UPDATE 那張舊票");
-  assertEquals(u!.id, "v-legacy");
-  assertEquals(u!.patch.verifier_ip_hash, NEW, "舊雜湊要升級成網段雜湊");
+  assert(u, "要 UPDATE 那張票");
+  assertEquals(u!.id, "v-mine");
   assertEquals(u!.patch.via, "verify:revise");
 });
 
-Deno.test("4 別人的舊票不受影響：帶 revise 但沒有自己的票 → 照常當新票", async () => {
-  const { client, inserted, updated } = fakeVerifyDb({ votes: [{ id: "v-x", agent_name: "zed", verifier_ip_hash: "someone-else", note: null }], dispatchedHash: NEW });
-  const res = await handleVerify(client, { ...base, revise: true }, NEW, undefined, "verify", cec, OLD);
-  assertEquals(res.status, 201, JSON.stringify(res.body));
-  assertEquals(res.body.revised, undefined);
-  assertEquals(voteWrites(inserted).length, 1);
-  assertEquals(updated.filter((x) => x.patch.table === "contribution_votes").length, 0);
+Deno.test("4 同網段別的代號的票不擋：同 IP、不同代號 → 照常當新票；帶 revise 但沒有自己的票也是新票", async () => {
+  const other = { id: "v-x", agent_name: "zed", verifier_ip_hash: NEW, note: null };
+  const a = fakeVerifyDb({ votes: [other], dispatchedHash: NEW });
+  const r1 = await handleVerify(a.client, base, NEW, undefined, "verify", cec, OLD);
+  assertEquals(r1.status, 201, JSON.stringify(r1.body));
+  assertEquals(voteWrites(a.inserted).length, 1);
+  const b = fakeVerifyDb({ votes: [other], dispatchedHash: NEW });
+  const r2 = await handleVerify(b.client, { ...base, revise: true }, NEW, undefined, "verify", cec, OLD);
+  assertEquals(r2.status, 201, JSON.stringify(r2.body));
+  assertEquals(r2.body.revised, undefined);
+  assertEquals(voteWrites(b.inserted).length, 1);
+  assertEquals(b.updated.filter((x) => x.patch.table === "contribution_votes").length, 0);
 });
 
 // ── 5 輪換 IP ───────────────────────────────────────────────────────────────
@@ -291,7 +294,7 @@ Deno.test("5 輪換 IP：/next 從 .21、/report 從 .22（同一個 /24）→ �
   assertEquals((voteWrites(inserted)[0]).verifier_ip_hash, atReport);
 });
 
-Deno.test("5 輪換 IP：/report 來自別的 /24 → 仍是 409 not_dispatched（網段不同就是不同來源）", async () => {
+Deno.test("5 輪換 IP：/report 來自別的 /24 → 仍是 409 not_dispatched（派工綁定仍認網段；那是「這筆是 /next 派的」的證明，不是投票條件）", async () => {
   const salt = "s";
   const atNext = await ipHashOf(req("160.79.106.21"), salt);
   const other = req("160.79.107.22");
@@ -301,30 +304,18 @@ Deno.test("5 輪換 IP：/report 來自別的 /24 → 仍是 409 not_dispatched�
   assertEquals(res.body.error, "not_dispatched");
 });
 
-Deno.test("5 過渡期的限制：舊票只認得「同一個 IP」——固定 IP 認得出，輪換到同網段別的 IP 認不出（單向雜湊換算不了網段）", async () => {
+Deno.test("5 去重不看 IP：同代號的舊票不管這次從哪個 IP 來都擋；同 IP 的別人票不擋", async () => {
   const salt = "s";
-  const oldVote = { id: "v-before", agent_name: "dave", verifier_ip_hash: await legacyIpHashOf(req("160.79.106.19"), salt), note: null };
-
-  // 切換後還是從 .19 來（固定 IP 的機器）：認得出，擋下
-  const same = req("160.79.106.19");
-  const a = fakeVerifyDb({ votes: [oldVote], dispatchedHash: await ipHashOf(same, salt) });
-  const resSame = await handleVerify(a.client, base, await ipHashOf(same, salt), undefined, "verify", cec, await legacyIpHashOf(same, salt));
-  assertEquals(resSame.status, 409);
-  assertEquals(resSame.body.error, "already_voted");
-
-  // 切換後從 .21 來（同一個 /24，IP 輪換）：舊票是 hash(.19)，這次的舊雜湊是 hash(.21)，對不上。
-  // 這是數學上的限制，不是疏漏——文件（skill.md、DECISIONS）不能說輪換 IP 的舊資料也認得出來。
-  const rotated = req("160.79.106.21");
-  const b = fakeVerifyDb({ votes: [oldVote], dispatchedHash: await ipHashOf(rotated, salt) });
-  const resRot = await handleVerify(b.client, base, await ipHashOf(rotated, salt), undefined, "verify", cec, await legacyIpHashOf(rotated, salt));
-  assertEquals(resRot.status, 201, "輪換 IP 認不出切換前那張票；切換後新投的票是網段雜湊，之後的重複由新雜湊擋");
-  assertEquals(voteWrites(b.inserted)[0].verifier_ip_hash, await ipHashOf(rotated, salt));
-
-  // 而切換後留下的票（網段雜湊）不管 IP 怎麼輪都擋得住
-  const after = { id: "v-after", agent_name: "dave", verifier_ip_hash: await ipHashOf(req("160.79.106.21"), salt), note: null };
-  const third = req("160.79.106.27");
-  const c = fakeVerifyDb({ votes: [after], dispatchedHash: await ipHashOf(third, salt) });
-  const resAfter = await handleVerify(c.client, base, await ipHashOf(third, salt), undefined, "verify", cec, await legacyIpHashOf(third, salt));
-  assertEquals(resAfter.status, 409);
-  assertEquals(resAfter.body.error, "already_voted");
+  const oldVote = { id: "v-before", agent_name: "dave", verifier_ip_hash: await ipHashOf(req("160.79.106.19"), salt), note: null };
+  for (const ip of ["160.79.106.19", "160.79.106.21", "8.8.8.8"]) {
+    const r = req(ip);
+    const a = fakeVerifyDb({ votes: [oldVote], dispatchedHash: await ipHashOf(r, salt) });
+    const res = await handleVerify(a.client, base, await ipHashOf(r, salt), undefined, "verify", cec, await legacyIpHashOf(r, salt));
+    assertEquals(res.status, 409, ip);
+    assertEquals(res.body.error, "already_voted", ip);
+  }
+  const r = req("160.79.106.19");
+  const others = fakeVerifyDb({ votes: [{ ...oldVote, agent_name: "erin" }], dispatchedHash: await ipHashOf(r, salt) });
+  const ok = await handleVerify(others.client, base, await ipHashOf(r, salt), undefined, "verify", cec, await legacyIpHashOf(r, salt));
+  assertEquals(ok.status, 201, "同 IP 不同代號＝另一票");
 });

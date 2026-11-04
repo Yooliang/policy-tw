@@ -25,7 +25,9 @@ Deno.test("S1 這支是 contribution_verify_pool／candidacy_owner_mismatch_sign
   for (const fn of ["contribution_verify_pool", "candidacy_owner_mismatch_signals"]) {
     const later: string[] = [];
     for (const n of names) if (n > MIG && (await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) later.push(n);
-    assertEquals(later, [], `${fn} 在這支之後又有人改了，這裡抄的底就過期`);
+    // 2026-11-04 投票不看 IP（20261104130000）重新定義了驗證池（排除改按代號／帳號）：這是已知的後續版本，再有別的就紅
+    const expected = fn === "contribution_verify_pool" ? ["20261104130000_vote_no_ip.sql"] : [];
+    assertEquals(later, expected, `${fn} 在這支之後又有人改了，這裡抄的底就過期`);
   }
   assert(!/DROP\s+FUNCTION/i.test(SQL), "簽名沒變，不必 DROP");
   assert(!SQL.replace(/--[^\n]*/g, "").includes("CONCURRENTLY"), "migration 在交易裡跑，CONCURRENTLY 會失敗");

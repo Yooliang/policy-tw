@@ -536,8 +536,8 @@ CREATE FUNCTION cron.schedule(n text, s text, c text) RETURNS bigint LANGUAGE sq
 CREATE FUNCTION cron.unschedule(n text) RETURNS boolean LANGUAGE sql AS $$ DELETE FROM cron.job WHERE jobname = n RETURNING true $$;
 CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text DEFAULT 'candidacy', payload jsonb DEFAULT '{}', source_urls text[], note text, task_id text,
   agent_name text, contributor_ip_hash text, status text DEFAULT 'pending', agree_count int DEFAULT 0, disagree_count int DEFAULT 0, unsure_count int DEFAULT 0,
-  created_at timestamptz DEFAULT now(), score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0);
-CREATE TABLE contribution_votes (id bigserial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, agent_name text, created_at timestamptz DEFAULT now());
+  created_at timestamptz DEFAULT now(), score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0, actor_id text);
+CREATE TABLE contribution_votes (id bigserial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, agent_name text, actor_id text, created_at timestamptz DEFAULT now());
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text);
 CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, agent_name text, ip_hash text, leased_until timestamptz);
 CREATE TABLE task_dispatches (task_id text PRIMARY KEY, queue_at timestamptz NOT NULL DEFAULT now(), verify_target int);
@@ -716,7 +716,8 @@ Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成�
 
 Deno.test("C4 SQL 端回看期改大：驗證池 15 分鐘→30 天、dispatch_recent 上限 240→100000 分鐘，紅", () => {
   const poolMig = finalDefs(REAL.migs).get(defKey("function", "public", "contribution_verify_pool"))!.file; // 驗證池最後一版在哪支就改哪支
-  const pool = mutateMig(REAL, poolMig, "AND vd.dispatched_at > now() - interval '15 minutes'", "AND vd.dispatched_at > now() - interval '30 days'");
+  // 2026-11-04 起正見與日本站的驗證池都在 20261104130000：同一支 migration 裡 15 分鐘出現兩次，用「FROM 哪張表」當錨點只改 public 那一處
+  const pool = mutateMig(REAL, poolMig, "FROM verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '15 minutes'", "FROM verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '30 days'");
   assert(hasProblem(allProblems(pool), "contribution_verify_pool"), allProblems(pool).join("\n"));
   const recent = mutateMig(REAL, "20260924000007_dispatch_recent.sql", "COALESCE(p_minutes, 30), 1), 240))\n  ORDER BY 4", "COALESCE(p_minutes, 30), 1), 100000))\n  ORDER BY 4");
   assert(hasProblem(allProblems(recent), "dispatch_recent"), allProblems(recent).join("\n"));
@@ -811,8 +812,8 @@ Deno.test("C9 policy_jp 程式端：日本版派工綁定拿掉 .gte、日本站
 });
 
 Deno.test("C10 policy_jp SQL 端：驗證池 15 分鐘→30 天、日本站新增沒有時限的函式、前綴決定屬於哪邊——紅；public 不受牽連", () => {
-  // 日本站的驗證池最新版在 20261102230000（跟上投太多輪）；測試只取每支函式的最後一版，所以改那一支
-  const pool = mutateMig(REAL, "20261102230000_policy_jp_unsure_overvoted.sql", "AND vd.dispatched_at > now() - interval '15 minutes'", "AND vd.dispatched_at > now() - interval '30 days'");
+  // 日本站的驗證池最新版在 20261104130000（投票不看 IP）；測試只取每支函式的最後一版，所以改那一支（同檔 public 那份用「FROM 哪張表」區分）
+  const pool = mutateMig(REAL, "20261104130000_vote_no_ip.sql", "FROM policy_jp.verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '15 minutes'", "FROM policy_jp.verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '30 days'");
   const p1 = allProblems(pool);
   assert(jpOnly(p1).some((p) => p.includes("contribution_verify_pool")), p1.join("\n"));
   assertEquals(publicOnly(p1), []);

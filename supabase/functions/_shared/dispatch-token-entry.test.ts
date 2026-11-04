@@ -159,15 +159,20 @@ Deno.test("端到端：同一個網段 N1 領、N1 內另一個 IP 交——不�
   });
 });
 
-Deno.test("端到端：同一張憑證換網段、換代號再投 → 409，仍只有一張票", async () => {
+Deno.test("端到端：同一張憑證換網段再投：同代號 → 409，仍只有一張票；別的代號拿這張憑證 → 403 agent_mismatch（憑證只能由領任務的代號用）", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
     const token = (await getNext(next, N1)).json.dispatch_token as string;
     assertEquals((await post(report, R, voteBody({ dispatch_token: token }))).status, 201);
-    const again = await post(report, "10.3.3.3", voteBody({ dispatch_token: token, agent_name: "erin", note: "另一個代號打開來源核對，欄位都對得上（erin）" }));
+    const again = await post(report, "10.3.3.3", voteBody({ dispatch_token: token }));
     assertEquals(again.status, 409, JSON.stringify(again.json));
     assertEquals(again.json.error, "already_voted");
     assertEquals(db.votes.length, 1);
+    const other = await post(report, "10.3.3.3", voteBody({ dispatch_token: token, agent_name: "erin", note: "另一個代號打開來源核對，欄位都對得上（erin）" }));
+    assertEquals(other.status, 403, JSON.stringify(other.json));
+    assertEquals(other.json.error, "invalid_dispatch_token");
+    assertEquals(other.json.reason, "agent_mismatch");
+    assertEquals(db.votes.length, 1, "一次派工不能換任意多個代號各投一票");
   });
 });
 
@@ -393,7 +398,7 @@ Deno.test("憑證只有一種寫法：簽章尾端非零位元的變體被拒（
 
 // ── contribution_verify_pool 舊簽名相容 ──────────────────────────────────────
 
-Deno.test("/next 對驗證池：IP 認不得（新舊雜湊同值）時用舊簽名的參數呼叫；認得時才多傳 p_legacy_ip_hash", async () => {
+Deno.test("/next 對驗證池：不再傳 p_legacy_ip_hash（投票不看 IP）；匿名只傳 p_agent_name，不傳 p_actor_id", async () => {
   const db = makeDb();
   await withEntries(db, env(), async ({ next, report }) => {
     // 沒有 x-forwarded-for → clientIp＝"unknown"，網段雜湊與舊雜湊同值
@@ -402,11 +407,11 @@ Deno.test("/next 對驗證池：IP 認不得（新舊雜湊同值）時用舊簽
     // 兩個入口共用同一個假 fetch，最後安裝的是 report 那份，所以呼叫紀錄在它身上
     const pools = report.calls.filter((c) => c.target === "rpc/contribution_verify_pool");
     assertEquals(pools.length, 2);
-    assertEquals(Object.keys(pools[0].body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "舊簽名（沒有 p_legacy_ip_hash；p_agent_name 是 policy-ops#70 加的）");
-    const legacy = await legacyIpHashOf(new Request("https://x/", at(N1)), SALT);
-    assertEquals((pools[1].body as Row).p_legacy_ip_hash, legacy);
+    for (const p of pools) {
+      assertEquals(Object.keys(p.body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "不帶 p_legacy_ip_hash；匿名沒有 p_actor_id");
+    }
     assertEquals((pools[1].body as Row).p_ip_hash, await netHash(N1));
-    assertNotEquals(legacy, await netHash(N1));
+    assertEquals((pools[1].body as Row).p_agent_name, "dave");
   });
 });
 
@@ -483,4 +488,32 @@ Deno.test("進階端點 /verify、/contribute 也收憑證（同一個處理器�
     assertEquals(ok.status, 201, await ok.text());
     assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
   } finally { contribute.restore(); }
+});
+
+Deno.test("端到端：DiTrust 登入（agent_name=ditrust:<序號>）領憑證再投票要成功；別的代號拿同一張憑證被擋（憑證比對不會把 DiTrust 全擋掉）", async () => {
+  const db = makeDb();
+  const secret = "ab".repeat(32); // 假序號：64 位十六進位
+  const baseRouter = db.router;
+  db.router = (c: RestCall) => {
+    if (c.target.endsWith("agents-verify")) return { agent_id: "11111111-aaaa-4bbb-8ccc-222222222222", display_name: "測試帳號" };
+    return baseRouter(c);
+  };
+  await withEntries(db, env(), async ({ next, report }) => {
+    const login = `ditrust:${secret}`;
+    const got = await getNext(next, N1, login);
+    assertEquals(got.status, 200, JSON.stringify(got.json));
+    const token = got.json.dispatch_token as string;
+    assert(token, "DiTrust 登入也要拿得到憑證");
+    const other = await post(report, R, voteBody({ agent_name: "mallory", dispatch_token: token }));
+    assertEquals(other.status, 403, JSON.stringify(other.json));
+    assertEquals(other.json.reason, "agent_mismatch");
+    const res = await post(report, R, voteBody({ agent_name: login, dispatch_token: token }));
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals(db.votes.length, 1);
+    assertEquals(db.votes[0].actor_id, "ditrust:11111111-aaaa-4bbb-8ccc-222222222222");
+    assertEquals(db.votes[0].agent_name, "測試帳號", "寫進去的是顯示名，不是序號");
+    const again = await post(report, R, voteBody({ agent_name: login, dispatch_token: token }));
+    assertEquals(again.status, 409, JSON.stringify(again.json));
+    assertEquals(db.votes.length, 1);
+  });
 });

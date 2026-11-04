@@ -10,7 +10,7 @@
  */
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { readSkillWithTypes } from "./skill-text.ts";
-import { CEC_CHECK_ONLY_TYPES, needsTwoIps, rejectFloor, requiredAgree, riskLevel, SCORE_TWO_IP_TYPES, scoreStatus, SYSTEM_VOTE_ELIGIBLE_TYPES } from "./consensus.ts";
+import { CEC_CHECK_ONLY_TYPES, needsTwoIps, rejectFloor, requiredAgree, riskLevel, scoreStatus, SYSTEM_VOTE_ELIGIBLE_TYPES } from "./consensus.ts";
 import {
   OWNER_MISMATCH_TASK, REASSIGN_MODEL_PREFIX, REASSIGN_TYPE, type ReassignContext, reassignProblems, reassignSystemVote, sameNameOrAlias,
 } from "./reassign-candidacy.ts";
@@ -83,22 +83,22 @@ Deno.test("伺服器檢查：出處的出生年要對得上新的、不能是舊
 });
 
 // ── 2. 門檻與系統票 ─────────────────────────────────────────────────
-Deno.test("門檻：比照合併要兩台機器、分數門檻一般值 3、退件門檻 3", () => {
+Deno.test("門檻：分數門檻一般值 3、退件門檻 3；2026-11-04 起不再要兩台機器（投票不看 IP），分數到了單一來源就過", () => {
   assertEquals(riskLevel(REASSIGN_TYPE, P), "normal");
   assertEquals(requiredAgree(REASSIGN_TYPE, P, ["https://web.cec.gov.tw/x"]), 3);
   assertEquals(rejectFloor(REASSIGN_TYPE), 3);
-  assert(needsTwoIps(REASSIGN_TYPE, P));
-  assert((SCORE_TWO_IP_TYPES as readonly string[]).includes("merge_politician") && (SCORE_TWO_IP_TYPES as readonly string[]).includes(REASSIGN_TYPE));
-  assertEquals(scoreStatus({ score: 4, target: 3, distinctIps: 1, contributionType: REASSIGN_TYPE, current: "pending" }), "pending", "分數到了只有一台機器 → 還在等");
-  assertEquals(scoreStatus({ score: 3, target: 3, distinctIps: 2, contributionType: REASSIGN_TYPE, current: "pending" }), "verified");
+  assert(!needsTwoIps(REASSIGN_TYPE, P));
+  assert(!needsTwoIps("merge_politician", {}));
+  assertEquals(scoreStatus({ score: 4, target: 3, distinctIps: 1, contributionType: REASSIGN_TYPE, current: "pending" }), "verified", "分數到了、單一來源也過");
+  assertEquals(scoreStatus({ score: 2, target: 3, distinctIps: 2, contributionType: REASSIGN_TYPE, current: "pending" }), "pending", "分數沒到仍等");
   assertEquals(MIN_DISTINCT_VOTERS[REASSIGN_TYPE], 2, "票數預算的人數地板也比照合併");
 });
 
-Deno.test("SQL 與 TS 一致：兩台機器的型別清單、系統票合格型別、名單核對專屬型別", async () => {
+Deno.test("SQL 與 TS 一致：contribution_needs_two_ips 恆為 FALSE（TS needsTwoIps 同）、系統票合格型別、名單核對專屬型別", async () => {
   const two = await fnBody("contribution_needs_two_ips");
-  const list = [...two.slice(two.indexOf("p_type IN (")).split(")")[0].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  assertEquals(list, [...SCORE_TWO_IP_TYPES], "contribution_needs_two_ips 的型別清單要跟 SCORE_TWO_IP_TYPES 一樣");
-  assertStringIncludes(two, "p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop'", "中止交接那一條照舊");
+  assert(/AS \$\$ SELECT FALSE\s*$/.test(two), "最新定義（20261104130000）恆為 FALSE");
+  assert(!two.includes("p_type IN ("), "不再有型別清單");
+  for (const t of ["merge_politician", "candidacy", "removal", REASSIGN_TYPE, "lineage_handover", "correction"]) assert(!needsTwoIps(t, { handover_type: "stop" }), `TS 同為 false：${t}`);
   const elig = await fnBody("system_vote_eligible");
   for (const t of SYSTEM_VOTE_ELIGIBLE_TYPES) assertStringIncludes(elig, `'${t}'`);
   const only = await fnBody("system_vote_cec_only");

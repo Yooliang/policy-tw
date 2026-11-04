@@ -70,7 +70,7 @@ Deno.test("計分：cand_numbers 風險等級 cand_no、目標 1、免兩台機�
   assertEquals(requiredAgree("candidacy", single, SRC), 1);
   assertEquals(needsTwoIps("candidacy", single), false);
   assertEquals(riskLevel("candidacy", { ...single, cand_no: undefined }), "high");
-  assertEquals(needsTwoIps("candidacy", { ...single, cand_no: undefined }), true);
+  assertEquals(needsTwoIps("candidacy", { ...single, cand_no: undefined }), false, "投票不看 IP（2026-11-04）：沒號次的 candidacy 也不再要兩台");
 });
 
 Deno.test("SQL 計分鏡像：contribution_required_agree 認得 cand_numbers → cand_no 級（目標 1）", () => {

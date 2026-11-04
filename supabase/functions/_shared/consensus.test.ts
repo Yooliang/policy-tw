@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, tally, isBlindDisagree } from "./consensus.ts";
+import { consensusStatus, isDuplicateVote, isSelfVote, isValidAgentName, isValidAgentTool, tally, tallyByVoter, voterKey, needsTwoIps, scoreStatus, isBlindDisagree } from "./consensus.ts";
 import { validateVerifyRequest } from "./contribution-schema.ts";
 
 Deno.test("共識：2 agree、0 disagree → verified", () => {
@@ -16,24 +16,53 @@ Deno.test("共識：2 disagree → disputed；1 agree 1 disagree 維持 pending�
 });
 
 
-Deno.test("不能驗自己提交的：agent_name 或 ip_hash 任一相同就擋", () => {
+// 2026-11-04（維護者：投票不看 IP）：投票人的鍵＝DiTrust 帳號按 actor_id、匿名按小寫代號；來源網段不參與。
+Deno.test("不能驗自己提交的：只看代號（不分大小寫）與 DiTrust actor_id，不看 IP", () => {
   const c = { agent_name: "xiaoliang", contributor_ip_hash: "ip-A" };
   assert(isSelfVote(c, { agent_name: "XiaoLiang", ip_hash: "ip-B" }), "同名（不分大小寫）");
-  assert(isSelfVote(c, { agent_name: "someone", ip_hash: "ip-A" }), "同機");
-  assert(!isSelfVote(c, { agent_name: "someone", ip_hash: "ip-B" }), "不同名不同機才可以");
+  assert(!isSelfVote(c, { agent_name: "someone", ip_hash: "ip-A" }), "同機不同代號＝不是自己");
+  assert(!isSelfVote(c, { agent_name: "someone", ip_hash: "ip-B" }), "不同名不同機當然可以");
+  const d = { agent_name: "alice", contributor_ip_hash: "ip-A", actor_id: "ditrust:u1" };
+  assert(isSelfVote(d, { agent_name: "alice-2", actor_id: "ditrust:u1" }), "DiTrust 同帳號換代號仍是自己");
+  assert(!isSelfVote(d, { agent_name: "alice-2", actor_id: "ditrust:u2" }), "不同帳號不同代號不是自己");
+  assert(!isSelfVote({ agent_name: "a", contributor_ip_hash: "x", actor_id: "ip-net-1" }, { agent_name: "b", actor_id: "ip-net-1" }), "匿名的 actor_id 是網段雜湊，不當身份");
 });
 
-Deno.test("舊票（沒記 IP 雜湊）退回比代號：同名重投被擋、不同名不算", () => {
-  const existing = [{ agent_name: "gemini-tester" }];
-  assert(isDuplicateVote(existing, { agent_name: "gemini-tester", ip_hash: "x" }));
-  assert(!isDuplicateVote(existing, { agent_name: "gpt-tester", ip_hash: "x" }));
+Deno.test("voterKey：DiTrust＝actor_id、匿名＝小寫代號；DiTrust 與同名匿名分開", () => {
+  assertEquals(voterKey({ agent_name: "Alice", actor_id: "ditrust:u1" }), "ditrust:u1");
+  assertEquals(voterKey({ agent_name: "Alice", actor_id: "net-hash" }), "alice");
+  assertEquals(voterKey({ agent_name: "Alice" }), "alice");
+  assert(voterKey({ agent_name: "alice", actor_id: "ditrust:u1" }) !== voterKey({ agent_name: "alice" }), "同顯示名的 DiTrust 與匿名不同鍵");
 });
 
-// 2026-09-19 裁決：身份是來源 IP。代號是自報的、可以共用；同一個代號在兩台機器是兩個人。
-Deno.test("有記 IP 的票：同機換代號算重投；同代號換機器不算", () => {
+Deno.test("重複投票：同代號（不分 IP）重投算重複；同 IP 不同代號不算；DiTrust 同 actor_id 換代號算重複", () => {
   const existing = [{ agent_name: "gemini-tester", verifier_ip_hash: "ip-A" }];
-  assert(isDuplicateVote(existing, { agent_name: "someone-else", ip_hash: "ip-A" }), "同機換代號");
-  assert(!isDuplicateVote(existing, { agent_name: "gemini-tester", ip_hash: "ip-B" }), "同代號不同機＝兩個人");
+  assert(isDuplicateVote(existing, { agent_name: "Gemini-Tester", ip_hash: "ip-B" }), "同代號換機器＝同一個投票人");
+  assert(!isDuplicateVote(existing, { agent_name: "someone-else", ip_hash: "ip-A" }), "同機換代號＝另一票");
+  const old = [{ agent_name: "gemini-tester" }];
+  assert(isDuplicateVote(old, { agent_name: "gemini-tester", ip_hash: "x" }));
+  assert(!isDuplicateVote(old, { agent_name: "gpt-tester", ip_hash: "x" }));
+  const dt = [{ agent_name: "alice", actor_id: "ditrust:u1", verifier_ip_hash: "ip-A" }];
+  assert(isDuplicateVote(dt, { agent_name: "alice-new-handle", actor_id: "ditrust:u1" }), "同帳號換代號仍重複");
+  assert(!isDuplicateVote(dt, { agent_name: "alice" }), "同顯示名的匿名＝不同鍵，不算重複");
+  assert(!isDuplicateVote(dt, { agent_name: "alice", actor_id: "ditrust:u2" }), "另一個 DiTrust 帳號不算");
+});
+
+Deno.test("tallyByVoter：同一個投票人多張只算一張；同 IP 不同代號各算一張；unsure 算總筆數", () => {
+  const c = tallyByVoter([
+    { verdict: "agree", agent_name: "a" }, { verdict: "agree", agent_name: "A" },
+    { verdict: "agree", agent_name: "b" }, { verdict: "disagree", agent_name: "c" },
+    { verdict: "unsure", agent_name: "d" }, { verdict: "unsure", agent_name: "d" },
+  ]);
+  assertEquals(c, { agree: 2, disagree: 1, unsure: 2 });
+});
+
+Deno.test("needsTwoIps 全部型別恆為 false；scoreStatus 單一投票人分數到了就 verified（含高風險型別）", () => {
+  for (const t of ["candidacy", "merge_politician", "removal", "reassign_candidacy", "correction", "lineage_handover", "politician", "no_change"]) {
+    assertEquals(needsTwoIps(t, { handover_type: "abort", new_status: "withdrawn" }), false, t);
+    assertEquals(scoreStatus({ score: 2, target: 2, distinctIps: 1, contributionType: t, current: "pending" }), "verified", t);
+    assertEquals(scoreStatus({ score: 1, target: 2, distinctIps: 5, contributionType: t, current: "pending" }), "pending", t);
+  }
 });
 
 Deno.test("agent_name 格式：2～64 字、字母數字與 ._-（不含 @，模型名放 agent_tool）", () => {

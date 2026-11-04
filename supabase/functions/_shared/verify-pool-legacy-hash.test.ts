@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { excludeOwnAdjudications, filterVerifyCandidates, isMySource } from "./dispatch.ts";
+import { excludeOwnAdjudications, filterVerifyCandidates } from "./dispatch.ts";
 
 /**
  * #482 遺留的過渡期小洞（#484 一併處理）：
@@ -16,38 +16,35 @@ const row = (id: string, contributor: string, extra: Record<string, unknown> = {
   agree_count: 0, status: "pending", score: 0, target_score: 3, ...extra,
 });
 
-Deno.test("isMySource：新網段雜湊或過渡期舊雜湊都算自己；空值不算", () => {
-  assert(isMySource(NEW, { ip_hash: NEW }));
-  assert(isMySource(OLD, { ip_hash: NEW, legacy_ip_hash: OLD }));
-  assert(!isMySource(OLD, { ip_hash: NEW }), "沒有舊雜湊（IP 認不得）就只比新的");
-  assert(!isMySource("other", { ip_hash: NEW, legacy_ip_hash: OLD }));
-  assert(!isMySource(null, { ip_hash: NEW, legacy_ip_hash: OLD }));
-  assert(!isMySource(undefined, { ip_hash: "", legacy_ip_hash: "" }));
+// 2026-11-04（維護者：投票不看 IP）：isMySource 與舊雜湊的自交排除都刪了，下面三則改守新語意——自交只看代號，來源雜湊（新或舊）不參與。
+Deno.test("dispatch.ts 不再有 isMySource；Requester 的 legacy_ip_hash 不再影響排除", async () => {
+  const mod = await import("./dispatch.ts");
+  assertEquals("isMySource" in mod, false);
 });
 
-Deno.test("filterVerifyCandidates：切換前（舊雜湊）自己交的不派給自己；沒傳舊雜湊時行為不變", () => {
-  const rows = [row("a", OLD), row("b", NEW), row("c", "someone-else")];
+Deno.test("filterVerifyCandidates：只排除同代號的；同網段（新舊雜湊）不同代號的照派", () => {
+  const rows = [row("a", OLD), row("b", NEW), row("c", "someone-else"), row("d", "x", { agent_name: "Dave" })];
   const me = { agent_name: "dave", ip_hash: NEW, voted_ids: new Set<string>() };
-  assertEquals(filterVerifyCandidates(rows, { ...me, legacy_ip_hash: OLD }).map((r) => r.id), ["c"]);
-  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["a", "c"], "沒傳舊雜湊＝照舊（a 會留下，這就是被修的洞）");
+  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["a", "b", "c"]);
+  assertEquals(filterVerifyCandidates(rows, { ...me, legacy_ip_hash: OLD }).map((r) => r.id), ["a", "b", "c"], "傳不傳舊雜湊結果一樣");
 });
 
-Deno.test("excludeOwnAdjudications：原貢獻是切換前（舊雜湊）自己交的 → 這筆裁決不派給自己", () => {
+Deno.test("excludeOwnAdjudications：原貢獻是同代號交的 → 這筆裁決不派給自己；同網段別的代號交的不排除", () => {
   const adj = (target: string) => ({
     contribution_type: "adjudication", payload: { contribution_id: target },
     id: `adj-${target}`, agent_name: "x", contributor_ip_hash: "y", source_urls: [], status: "pending", agree_count: 0,
   });
   const cands = [adj("A"), adj("B"), adj("C")];
   const originals = [
-    { id: "A", agent_name: "other-name", contributor_ip_hash: OLD }, // 切換前我交的
-    { id: "B", agent_name: "other-name", contributor_ip_hash: NEW }, // 切換後我交的
-    { id: "C", agent_name: "other-name", contributor_ip_hash: "someone-else" },
+    { id: "A", agent_name: "Dave", contributor_ip_hash: "whatever" }, // 我交的（不分大小寫）
+    { id: "B", agent_name: "other-name", contributor_ip_hash: NEW }, // 同網段別人交的
+    { id: "C", agent_name: "other-name", contributor_ip_hash: OLD },
   ];
   const me = { agent_name: "dave", ip_hash: NEW, voted_ids: new Set<string>() };
   // deno-lint-ignore no-explicit-any
   const kept = (m: any) => excludeOwnAdjudications(cands as any, originals, m).map((c) => (c.payload as Record<string, unknown>).contribution_id);
-  assertEquals(kept({ ...me, legacy_ip_hash: OLD }), ["C"]);
-  assertEquals(kept(me), ["A", "C"], "沒傳舊雜湊＝只擋新的（A 會漏，這就是被修的洞）");
+  assertEquals(kept(me), ["B", "C"]);
+  assertEquals(kept({ ...me, legacy_ip_hash: OLD }), ["B", "C"]);
 });
 
 // ── SQL：現行定義＋機械替換 ─────────────────────────────────────────────────

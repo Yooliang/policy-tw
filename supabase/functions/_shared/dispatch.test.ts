@@ -38,7 +38,7 @@ Deno.test("/next 單一佇列：同一時刻驗證先、手動次之、自動最
   assertEquals(pickQueueHead([{ kind: "verify", queue_at: null }, { kind: "auto", queue_at: t }]), "auto");
 });
 
-Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agree 已達門檻的", () => {
+Deno.test("/next 排除自己提交的（同名；不看 IP，2026-11-04）、已投過的、agree 已達門檻的", () => {
   const base = { contribution_type: "policy", payload: {}, source_urls: ["https://www.cna.com.tw/x"] }; // 媒體來源：門檻 2
   const rows = [
     { ...base, id: "a", agent_name: "xiaoliang", contributor_ip_hash: "ip-1", agree_count: 0, status: "pending" },
@@ -52,7 +52,7 @@ Deno.test("/next 排除自己提交的（同名或同機）、已投過的、agr
     { id: "h", contribution_type: "candidacy", payload: { candidate_status: "registered" }, source_urls: ["https://www.cna.com.tw/x"], agent_name: "other", contributor_ip_hash: "ip-3", agree_count: 6, status: "pending" },
   ];
   const me = { agent_name: "XiaoLiang", ip_hash: "ip-1", voted_ids: new Set(["e"]) };
-  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["c", "d", "g"], "目標一律 3：agree 2 的 d／g 還沒達標，h（6）已達標");
+  assertEquals(filterVerifyCandidates(rows, me).map((r) => r.id), ["b", "c", "d", "g"], "b 與自己同網段但不同代號＝可派（不看 IP）；目標一律 3：agree 2 的 d／g 還沒達標，h（6）已達標");
 });
 
 // 2026-09-21 票數→分數：池子回 score／target_score 就照它們排除已達標的，不再看 agree_count／effective_required。

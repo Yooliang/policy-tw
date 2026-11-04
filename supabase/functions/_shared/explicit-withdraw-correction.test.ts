@@ -110,11 +110,11 @@ const WITHDRAW_PAYLOADS: Array<[string, unknown, boolean]> = [
   ["changes 不是陣列不炸", { target_table: "politician_elections", changes: "x" }, false],
 ];
 
-Deno.test("門檻（TS）：改成退選的更正要 ≥2 個不同來源 IP；其他更正不變", () => {
-  for (const [label, payload, two] of WITHDRAW_PAYLOADS) assertEquals(needsTwoIps("correction", payload), two, label);
+Deno.test("門檻（TS）：投票不看 IP（2026-11-04）——改成退選的更正也不再要兩個來源；分數到了就過", () => {
+  for (const [label, payload] of WITHDRAW_PAYLOADS) assertEquals(needsTwoIps("correction", payload), false, label);
   const wd = correction("not_running").payload;
-  assertEquals(scoreStatus({ score: 3, target: 3, distinctIps: 1, contributionType: "correction", current: "pending", payload: wd }), "pending", "一個 IP 湊足分數還在等");
-  assertEquals(scoreStatus({ score: 3, target: 3, distinctIps: 2, contributionType: "correction", current: "pending", payload: wd }), "verified");
+  assertEquals(scoreStatus({ score: 3, target: 3, distinctIps: 1, contributionType: "correction", current: "pending", payload: wd }), "verified", "一個來源湊足分數就過");
+  assertEquals(scoreStatus({ score: 2, target: 3, distinctIps: 5, contributionType: "correction", current: "pending", payload: wd }), "pending", "分數不夠不因來源多而過");
   assertEquals(scoreStatus({ score: 3, target: 3, distinctIps: 1, contributionType: "correction", current: "pending", payload: correction("registered").payload }), "verified", "其他更正不受影響");
 });
 
@@ -122,6 +122,7 @@ Deno.test("門檻（SQL 與 TS 一致）：contribution_needs_two_ips 真的跑�
   const sql = await readMig("20261018030000_correction_withdraw_two_ips.sql");
   const d = new PGlite();
   await d.exec(sql);
+  // 這一段守「2026-10-18 那支 migration 當時的定義」；2026-11-04 之後的現行定義在最後面另外驗
   for (const [label, payload, two] of WITHDRAW_PAYLOADS) {
     const r = await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('correction', $1::jsonb) AS v", [JSON.stringify(payload)]);
     assertEquals(r.rows[0].v, two, `SQL ${label}`);
@@ -131,5 +132,17 @@ Deno.test("門檻（SQL 與 TS 一致）：contribution_needs_two_ips 真的跑�
   }
   assertEquals((await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('lineage_handover', '{\"handover_type\":\"stop\"}'::jsonb) AS v")).rows[0].v, true);
   assertEquals((await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('policy', '{}'::jsonb) AS v")).rows[0].v, false);
+  // 現行定義（20261104130000）：全部恆為 FALSE，跟 TS needsTwoIps 一致
+  const noIp = await readMig("20261104130000_vote_no_ip.sql");
+  const at = noIp.indexOf("CREATE OR REPLACE FUNCTION contribution_needs_two_ips(");
+  await d.exec(noIp.slice(at, noIp.indexOf("$$;", at) + 3));
+  for (const [label, payload] of WITHDRAW_PAYLOADS) {
+    const r = await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips('correction', $1::jsonb) AS v", [JSON.stringify(payload)]);
+    assertEquals(r.rows[0].v, false, `現行 SQL ${label}`);
+    assertEquals(r.rows[0].v, needsTwoIps("correction", payload), `TS 一致 ${label}`);
+  }
+  for (const t of ["merge_politician", "candidacy", "removal", "reassign_candidacy", "lineage_handover"]) {
+    assertEquals((await d.query<{ v: boolean }>("SELECT contribution_needs_two_ips($1, '{\"handover_type\":\"stop\"}'::jsonb) AS v", [t])).rows[0].v, false, `現行 ${t}`);
+  }
   await d.close();
 });

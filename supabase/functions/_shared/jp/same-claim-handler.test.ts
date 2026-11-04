@@ -201,8 +201,15 @@ Deno.test("claimKey 型別（no_change）：併票投不成、或同一台機器
   assertEquals(c.inserted.length, 0, "第二筆不另收");
   assertEquals(((res3.body as R).results as R[]).map((r) => [r.status, r.error ?? null]), [["counted_as_vote", null], ["not_accepted", "already_voted"]]);
 
-  const b = fakeSupabase({ candidates: [{ ...other, contributor_ip_hash: "ip-me" }] });
+  // 投票不看 IP（2026-11-04）：同一個代號交過同一件事才擋；同網段不同代號是另一個人，併成一票
+  const b = fakeSupabase({ candidates: [{ ...other, agent_name: "tester-1" }] });
   const res2 = await handleContribute(b.api, "https://x", body(item), "ip-me", noVote);
-  assertEquals([res2.status, (res2.body as R).error], [409, "already_voted"], "同一台機器交過同一件事");
+  assertEquals([res2.status, (res2.body as R).error], [409, "already_voted"], "同一個代號交過同一件事");
   assertEquals(b.inserted.length, 0);
+  const sameNet = fakeSupabase({ candidates: [{ ...other, contributor_ip_hash: "ip-me" }] });
+  const netVotes: R[] = [];
+  const res4 = await handleContribute(sameNet.api, "https://x", body(item), "ip-me", (_s, v) => { netVotes.push(v as R); return okVote(); });
+  assertEquals(netVotes.length, 1, "同網段不同代號：照樣併票");
+  assertEquals(res4.status, 201, "併成一票就是投票端的回應");
+  assertEquals(sameNet.inserted.length, 0);
 });

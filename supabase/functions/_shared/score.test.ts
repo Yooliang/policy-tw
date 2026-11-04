@@ -66,11 +66,13 @@ Deno.test("裁決退場：兩張反對不再變 disputed，而是依分數退件
   assertEquals(scoreStatus({ ...base, score: -3 }), "rejected");
 });
 
-Deno.test("高風險型別：單一 IP 湊到分數也不過", () => {
+Deno.test("高風險型別：2026-11-04 起不看來源 IP——單一來源湊到分數就過，分數沒到不因來源多而過", () => {
   const base = { score: 4, target: 4, current: "pending" };
-  assertEquals(scoreStatus({ ...base, distinctIps: 1, contributionType: "candidacy" }), "pending");
+  assertEquals(scoreStatus({ ...base, distinctIps: 1, contributionType: "candidacy" }), "verified");
   assertEquals(scoreStatus({ ...base, distinctIps: 2, contributionType: "candidacy" }), "verified");
   assertEquals(scoreStatus({ ...base, distinctIps: 1, contributionType: "policy" }), "verified");
+  assertEquals(scoreStatus({ ...base, score: 3, distinctIps: 9, contributionType: "candidacy" }), "pending");
+  assertEquals(scoreStatus({ ...base, distinctIps: 0, contributionType: "removal" }), "verified", "沒給來源數也不影響");
 });
 
 Deno.test("已定案的狀態不受分數影響", () => {

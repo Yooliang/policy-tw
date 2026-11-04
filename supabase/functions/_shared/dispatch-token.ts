@@ -40,7 +40,7 @@ export interface DispatchTokenPayload {
   h: string;
 }
 
-export type TokenFailure = "malformed" | "bad_signature" | "expired" | "task_mismatch" | "no_secret";
+export type TokenFailure = "malformed" | "bad_signature" | "expired" | "task_mismatch" | "no_secret" | "agent_mismatch";
 export type TokenCheck = { ok: true; payload: DispatchTokenPayload; tokenId: string } | { ok: false; reason: TokenFailure };
 
 const enc = new TextEncoder();
@@ -173,6 +173,7 @@ const REASON_MESSAGE: Record<TokenFailure, string> = {
   bad_signature: "dispatch_token 驗不過（被改過，或不是這個伺服器發的）。請原樣帶 GET /next 給的那一張。",
   expired: `dispatch_token 已過期（有效 ${DISPATCH_TOKEN_MINUTES} 分鐘，與認領期同長）。重新 GET /next 領一筆；或不帶憑證，改用原本的來源網段比對。`,
   task_mismatch: "dispatch_token 是派給別的任務的，不能拿來交這一筆。每筆任務／驗證各有自己的憑證，請用 GET /next 派這一筆時給的那一張。",
+  agent_mismatch: "dispatch_token 是派給另一個代號的，agent_name 要跟 GET /next 當時用的代號一致（不分大小寫）。一張憑證只能由領任務的那個代號交。",
   no_secret: "伺服器目前沒有可用的憑證鑰匙，無法驗憑證。請不帶 dispatch_token 重送（改用來源網段比對）。",
 };
 

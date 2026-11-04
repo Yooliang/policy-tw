@@ -1,7 +1,7 @@
 // 門檻 = 型別風險 × 來源等級；計票依來源 IP 去重。SQL（migration 000013）與 TS（consensus.ts／source-priority.ts）必須一致
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { CONTRIBUTION_TYPES } from "./contribution-schema.ts";
-import { AGREE_THRESHOLDS, consensusStatus, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByIp } from "./consensus.ts";
+import { AGREE_THRESHOLDS, consensusStatus, effectiveRequiredAgree, isDuplicateVote, requiredAgree, riskLevel, SYSTEM_VOTE_ELIGIBLE_TYPES, tally, tallyByVoter } from "./consensus.ts";
 import { SOURCE_PRIORITY, sourceKind } from "./source-priority.ts";
 
 /** 找最後一支（檔名排序最大）重新定義某個 SQL 物件的 migration，回傳從定義處起的內容 */
@@ -112,49 +112,43 @@ Deno.test("SQL 與 TS 一致：網域清單與門檻矩陣等於 source-priority
   assert(sql.includes("contribution_required_agree(contribution_type, payload, source_urls)"), "共識函式改用三參數");
 });
 
-Deno.test("同一個來源 IP 一筆貢獻只算一票：SQL 用 COUNT(DISTINCT verifier_ip_hash)，TS 的 tallyByIp 要一致", async () => {
-  const sql = await Deno.readTextFile(new URL("../../migrations/20260912000013_distinct_ip_votes_and_official_two.sql", import.meta.url));
-  const fn = sql.slice(sql.indexOf("FUNCTION contribution_apply_consensus"));
-  assert(fn.includes("COUNT(DISTINCT verifier_ip_hash) FILTER (WHERE verdict = 'agree')"), "agree 依來源 IP 去重");
-  assert(fn.includes("COUNT(DISTINCT verifier_ip_hash) FILTER (WHERE verdict = 'disagree')"), "disagree 也要去重，否則一個人就能把資料打成爭議");
+Deno.test("一個投票人一筆貢獻只算一票（2026-11-04 投票不看 IP）：SQL 依 voter_key 去重，TS 的 tallyByVoter 要一致", async () => {
+  const sql = await latestMigrationDefining("FUNCTION contribution_apply_consensus");
+  const fn = sql.slice(0, sql.indexOf("$$;", sql.indexOf("$$") + 2));
+  assert(fn.includes("DISTINCT ON (voter_key)"), "每個投票人只算最新一票");
+  assert(fn.includes("CASE WHEN actor_id LIKE 'ditrust:%' THEN actor_id ELSE lower(agent_name) END AS voter_key"), "鍵＝DiTrust actor_id／匿名小寫代號，跟 TS voterKey 同一條");
+  assert(!fn.includes("verifier_ip_hash"), "計票不再看來源 IP");
 
-  // 同一台機器換三個代號投同意 → 只算一票，過不了官方兩票的門檻
-  const sameMachine = [
-    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
-    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
-    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
+  // 同一個代號換三次機器投同意 → 只算一票，過不了門檻
+  const sameVoter = [
+    { verdict: "agree" as const, agent_name: "aaa" },
+    { verdict: "agree" as const, agent_name: "AAA" },
+    { verdict: "agree" as const, agent_name: "aaa" },
   ];
-  assertEquals(tallyByIp(sameMachine).agree, 1);
-  assertEquals(consensusStatus(tallyByIp(sameMachine), "pending", AGREE_THRESHOLDS.normal.official), "pending");
+  assertEquals(tallyByVoter(sameVoter).agree, 1);
+  assertEquals(consensusStatus(tallyByVoter(sameVoter), "pending", AGREE_THRESHOLDS.normal.official), "pending");
 
-  // 三台不同機器 → 三票，達目標 3（2026-09-21 一律 3；兩台不夠）
-  const twoMachines = [
-    { verdict: "agree" as const, verifier_ip_hash: "aaa" },
-    { verdict: "agree" as const, verifier_ip_hash: "bbb" },
-  ];
-  assertEquals(tallyByIp(twoMachines).agree, 2);
-  assertEquals(consensusStatus(tallyByIp(twoMachines), "pending", AGREE_THRESHOLDS.normal.official), "pending", "兩票不夠 3");
-  const threeMachines = [...twoMachines, { verdict: "agree" as const, verifier_ip_hash: "ccc" }];
-  assertEquals(consensusStatus(tallyByIp(threeMachines), "pending", AGREE_THRESHOLDS.normal.official), "verified");
+  // 三個不同投票人（即使同一網段）→ 三票，達目標 3
+  const two = [{ verdict: "agree" as const, agent_name: "aaa" }, { verdict: "agree" as const, agent_name: "bbb" }];
+  assertEquals(tallyByVoter(two).agree, 2);
+  assertEquals(consensusStatus(tallyByVoter(two), "pending", AGREE_THRESHOLDS.normal.official), "pending", "兩票不夠 3");
+  const three = [...two, { verdict: "agree" as const, agent_name: "ccc" }];
+  assertEquals(consensusStatus(tallyByVoter(three), "pending", AGREE_THRESHOLDS.normal.official), "verified");
 
-  // 同一台機器投反對也只算一票，湊不到爭議所需的兩票
-  const sameMachineDisagree = [
-    { verdict: "disagree" as const, verifier_ip_hash: "ccc" },
-    { verdict: "disagree" as const, verifier_ip_hash: "ccc" },
-  ];
-  assertEquals(tallyByIp(sameMachineDisagree).disagree, 1);
-  assertEquals(consensusStatus(tallyByIp(sameMachineDisagree), "pending", AGREE_THRESHOLDS.normal.official), "pending");
+  // 同一個投票人投反對也只算一票
+  const dis = [{ verdict: "disagree" as const, agent_name: "ccc" }, { verdict: "disagree" as const, agent_name: "ccc" }];
+  assertEquals(tallyByVoter(dis).disagree, 1);
+  assertEquals(consensusStatus(tallyByVoter(dis), "pending", AGREE_THRESHOLDS.normal.official), "pending");
 
   // unsure 不影響狀態，維持總筆數
-  assertEquals(tallyByIp([{ verdict: "unsure", verifier_ip_hash: "ddd" }, { verdict: "unsure", verifier_ip_hash: "ddd" }]).unsure, 2);
+  assertEquals(tallyByVoter([{ verdict: "unsure", agent_name: "ddd" }, { verdict: "unsure", agent_name: "ddd" }]).unsure, 2);
 });
 
-// 2026-09-19 裁決：投票身份是來源 IP，不是代號。代號自報、可共用；同代號在兩台機器是兩個人。
-// 原本是「同代號或同 IP 都擋」，同代號換機器會被當重投——那會擋掉共用代號的另一個人。
-Deno.test("投票去重：同一筆貢獻，同一個來源 IP 只能投一次；代號不是身份", () => {
+// 2026-11-04 取代 2026-09-19「身份是來源 IP」：投票身份是代號（匿名）或 DiTrust 帳號。
+Deno.test("投票去重：同一筆貢獻，同一個投票人只能投一次；來源 IP 不是身份", () => {
   const existing = [{ agent_name: "alice", verifier_ip_hash: "aaa" }];
-  assert(!isDuplicateVote(existing, { agent_name: "alice", ip_hash: "zzz" }), "同代號換機器＝另一個人，可以");
-  assert(isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號不行");
+  assert(isDuplicateVote(existing, { agent_name: "alice", ip_hash: "zzz" }), "同代號換機器＝同一個投票人");
+  assert(!isDuplicateVote(existing, { agent_name: "bob", ip_hash: "aaa" }), "同機器換代號＝另一票");
   assert(!isDuplicateVote(existing, { agent_name: "bob", ip_hash: "bbb" }), "不同人不同機器可以");
   assertEquals(isDuplicateVote([], { agent_name: "alice", ip_hash: "aaa" }), false);
 });
@@ -249,8 +243,10 @@ Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveV
   assert(pool.includes("LEFT JOIN task_dispatches d ON d.task_id = 'verify:' || c.id")
       || (pool.includes("d.task_id LIKE 'verify:%'") && pool.includes("substring(d.task_id FROM 8)::uuid")),
     "驗證列的鍵是 verify:<id>");
-  assert(pool.includes("v2.verifier_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決");
-  assert(pool.includes("o.contributor_ip_hash = p_ip_hash"), "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決");
+  // 2026-11-04 起以代號／DiTrust 帳號為準，不再比來源網段
+  assert(pool.includes("lower(v2.agent_name) = lower(p_agent_name)") && pool.includes("v2.actor_id = p_actor_id"), "裁決的合格判斷要在 SQL 裡：對原貢獻投過票的人不該拿到那筆裁決");
+  assert(pool.includes("lower(o.agent_name) = lower(p_agent_name)") && pool.includes("o.actor_id = p_actor_id"), "裁決的合格判斷要在 SQL 裡：原貢獻的提交者不該拿到那筆裁決");
+  assert(!pool.includes("v2.verifier_ip_hash") && !pool.includes("o.contributor_ip_hash = p_ip_hash"), "不再用 IP 雜湊判斷");
   const serve = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
   const at = serve.indexOf("const serveVerify");
   assert(at > 0, "找不到 serveVerify");

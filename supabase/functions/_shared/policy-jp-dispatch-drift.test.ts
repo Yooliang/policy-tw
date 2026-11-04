@@ -165,6 +165,24 @@ const OV_POOL_CLAUSE =
   "    AND (c.contribution_type = 'adjudication'\n" +
   "         OR c.agree_count + c.disagree_count + c.unsure_count <= (SELECT contribution_overvoted_stop_votes()))\n";
 
+/**
+ * 投票不看 IP（20261104130000，維護者 2026-11-04，policy-ops#199）：正見與日本站的 contribution_needs_two_ips／contribution_apply_consensus／
+ * contribution_verify_pool／verify_dispatch_claim 在同一支 migration 裡一起改。檔名不帶 _policy_jp_，「後續 policy_jp migration」的掃描掃不到它，
+ * 所以另有「走樣（投票不看 IP）」一條守：日本站在這支重新定義的函式＝登記的清單；needs_two_ips／apply_consensus／verify_dispatch_claim 還原後逐字＝同檔 public；
+ * 驗證池因簽名與型別比對（uuid_if_canonical）不同，用結構檢查（見該條）。PAIRS 的 contribution_verify_pool 仍讀 OV_MIG 那一版對 LEGACY 之前的 public 比（歷史複本）。
+ */
+const NOIP_MIG = "20261104130000_vote_no_ip.sql";
+const NOIP_SQL = await readMig(NOIP_MIG);
+const NOIP_FOLLOWED = ["contribution_needs_two_ips", "contribution_apply_consensus"];
+/** OV_MIG（2026-11-02）那一版 apply_consensus 對應的 public（NOIP_MIG 之前的版本）要扣掉的片段：名冊兩處 */
+const OV_AC_EDITS: Edit[] = [
+  [
+    "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)) THEN",
+    "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2) THEN",
+  ],
+  { span: ["    ELSIF (SELECT batch_verified_by", "      v_new := 'verified';\n"], with: "" },
+];
+
 /** 不比對的函式（原因見檔頭） */
 const NONCOPY = [
   "election_id_or_null", "activity_level", "activity_jurisdiction", "activity_arm_names", "contribution_auto_tasks_manual", "contribution_auto_tasks_arms",
@@ -269,11 +287,8 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_needs_two_ips",
-    note: "拿掉 lineage_handover 一句（政策脈絡是台灣專用）、拿掉 correction 改成退選要 ≥2 來源 IP 的一段（協議 1.98.0，20261018030000，日本站暫不跟）、拿掉號次免兩台機器的例外（20261029100000，維護者 2026-10-29，日本站暫不跟）",
-    edits: [["'reassign_candidacy')\n      OR (p_type = 'lineage_handover' AND COALESCE(p_payload->>'handover_type', '') = 'stop')", "'reassign_candidacy')"],
-      ["\n      OR (p_type = 'correction'\n          AND COALESCE(p_payload->>'target_table', '') = 'politician_elections'\n          AND (\n            (COALESCE(p_payload->>'field', '') = 'candidate_status'\n              AND COALESCE(p_payload->>'correct_value', '') IN ('not_running', 'withdrawn'))\n            OR EXISTS (\n              SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'changes') = 'array' THEN p_payload->'changes' ELSE '[]'::jsonb END) c\n              WHERE jsonb_typeof(c) = 'object'\n                AND COALESCE(c->>'field', '') = 'candidate_status'\n                AND COALESCE(c->>'correct_value', '') IN ('not_running', 'withdrawn')\n            )\n          ))", ""],
-      ["  SELECT NOT COALESCE(\n           p_type = 'candidacy'\n           AND p_payload->>'cand_no' ~ '^0*[1-9][0-9]{0,5}$'\n           AND NOT COALESCE(\n             p_payload->>'election_result' IN ('elected', 'not_elected')\n             AND p_payload->>'politician_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',\n             FALSE)\n           , FALSE)\n     AND (\n      p_type IN (", "  SELECT p_type IN ("],
-      ["'reassign_candidacy')\n     )\n$$", "'reassign_candidacy')\n$$"]],
+    // 2026-11-04（維護者：投票不看 IP）：兩邊都恆為 FALSE（20261104130000），本體逐字相同，不再有台灣專用片段可拿掉
+    note: "投票不看 IP 之後恆為 FALSE，日本站與正見逐字相同（原本拿掉的 lineage_handover／correction 退選／號次三段都隨規則消失）",
   },
   { name: "system_one_min_probability" },
   { name: "system_vote_eligible" },
@@ -290,13 +305,9 @@ const PAIRS: Pair[] = [
   },
   {
     name: "contribution_apply_consensus",
-    // 2026-11-02 日本站跟上（20261102230000）：不確定第 2 張起每張 −1、投太多輪的 disputed 守衛，比對讀正見現行定義
-    note: "拿掉中選會名冊兩處（contribution_roster_matched 例外、batch_verified_by 整批驗證分支）",
+    // 2026-11-04 日本站跟上（20261104130000，投票不看 IP）：比對讀同檔 public 的定義；2026-11-02（OV_MIG）那一版對應的是當時的 public，見 OV_AC_EDITS
+    note: "拿掉中選會名冊整批驗證分支（batch_verified_by）；v_ips >= 2／名冊吻合的條件已隨投票不看 IP 消失",
     edits: [
-      [
-        "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2 OR contribution_roster_matched(p_contribution_id)) THEN",
-        "      AND (NOT contribution_needs_two_ips(v_type, v_payload) OR v_ips >= 2) THEN",
-      ],
       { span: ["    ELSIF (SELECT batch_verified_by", "      v_new := 'verified';\n"], with: "" },
     ],
   },
@@ -361,7 +372,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(OV_FOLLOWED.includes(name) ? OV_SQL : REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(NOIP_FOLLOWED.includes(name) ? NOIP_SQL : OV_FOLLOWED.includes(name) ? OV_SQL : REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -509,9 +520,40 @@ Deno.test("走樣（不確定罰則・投太多輪・爭點驗證）：202611022
   assertEquals(fnText(OV_SQL, "policy_jp.contribution_verify_pool"), applyEdits(fnText(MIG_SQL, "policy_jp.contribution_verify_pool"), [["    AND c.status = 'pending'\n    AND (p_type IS NULL", "    AND c.status = 'pending'\n" + poolClauseJp + "    AND (p_type IS NULL"]]));
   // 還原驗證：不確定罰則那一行拿掉，這份複本就跟正見對不上
   const ac = fnText(OV_SQL, "policy_jp.contribution_apply_consensus");
-  const expected = applyEdits(await latestFn("contribution_apply_consensus"), PAIRS.find((x) => x.name === "contribution_apply_consensus")!.edits);
+  // 這一版是 2026-11-02 的複本：對應當時的 public（NOIP_MIG 之前的版本）扣掉名冊兩處；現行版由「走樣（投票不看 IP）」守
+  const expected = applyEdits(await latestFn("contribution_apply_consensus", NOIP_MIG), OV_AC_EDITS);
   assertEquals(reverse(ac), expected);
   assertNotEquals(reverse(ac.replace("v_score := v_score - policy_jp.contribution_unsure_penalty(v_unsure);", "")), expected);
+});
+
+Deno.test("走樣（投票不看 IP）：20261104130000 在日本站重新定義的函式＝登記的清單；三支還原後逐字＝同檔 public；驗證池的排除只看代號與帳號，不看 IP；不是複本的跟進版不能悄悄多出來", () => {
+  const defined = [...NOIP_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, ["contribution_apply_consensus", "contribution_needs_two_ips", "contribution_verify_pool", "verify_dispatch_claim"]);
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of NOIP_FOLLOWED) assert(copies.has(n), `${n} 要在複本清單 PAIRS 裡`);
+  for (const n of defined) {
+    const t = fnText(NOIP_SQL, `policy_jp.${n}`);
+    if (/LANGUAGE plpgsql/.test(t)) assert(t.includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+  }
+  // 逐字：還原後＝同檔 public 的定義（apply_consensus 扣掉登記的名冊整批驗證段）
+  for (const n of [...NOIP_FOLLOWED, "verify_dispatch_claim"]) {
+    const edits = PAIRS.find((x) => x.name === n)?.edits;
+    assertEquals(reverse(fnText(NOIP_SQL, `policy_jp.${n}`)), applyEdits(fnText(NOIP_SQL, n), edits), n);
+  }
+  // 驗證池：兩邊都只按代號／帳號排除，網段只留在「剛派過」的 15 分鐘窗口（且只看同一個代號）
+  const pools: Array<[string, string]> = [["public", fnText(NOIP_SQL, "contribution_verify_pool")], ["policy_jp", fnText(NOIP_SQL, "policy_jp.contribution_verify_pool")]];
+  for (const [label, t] of pools) {
+    const body = t.replace(/--[^\n]*/g, "");
+    for (const must of [
+      "lower(c.agent_name) <> lower(p_agent_name)", "c.actor_id IS DISTINCT FROM p_actor_id",
+      "lower(v.agent_name) = lower(p_agent_name)", "v.actor_id = p_actor_id",
+      "lower(vd.agent_name) = lower(p_agent_name)", "vd.dispatched_at > now() - interval '15 minutes'",
+    ]) assert(body.includes(must), `${label} 驗證池少了：${must}`);
+    assert(!/(contributor|verifier)_ip_hash\s*(=|<>|!=|IN\b)/i.test(body), `${label} 驗證池不該再用 IP 雜湊排除`);
+    assert(!/voter_ips|contribution_needs_two_ips/.test(body), `${label} 驗證池不該再看 voter_ips／兩台機器`);
+    assert(!/p_legacy_ip_hash\s*(=|<>|IS|IN)/.test(body), `${label} 驗證池不該再比舊雜湊`);
+  }
+  assert(/p_legacy_ip_hash/.test(pools[0][1]) && !/p_legacy_ip_hash/.test(pools[1][1]), "public 留著 p_legacy_ip_hash 相容參數（不使用）；日本站本來就沒有");
 });
 
 Deno.test("日本站不跟的登記：慢性停擺檢查（dispatch_chronic_stall／dispatch_queue_delay_seconds、queue_settings 的 stall_* 欄）日本站不得定義——要跟就改這裡的登記與走樣比對", async () => {
