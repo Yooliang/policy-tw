@@ -41,7 +41,7 @@ const layout = computed(() => {
     .nodeSort(props.keepOrder ? null : undefined)
     .linkSort(props.keepOrder ? null : undefined)
     .nodeWidth(NODE_W)
-    .nodePadding(vertical ? 12 : 10)
+    .nodePadding(props.scroll ? 14 : vertical ? 12 : 10)
     .extent([[6, 6], [flowLen - 6, span - 6]])({ nodes: g.nodes.map((n) => ({ ...n })), links: g.links.map((l) => ({ ...l, value: props.mode === 'count' ? l.raw : l.value })) }) as { nodes: LNode[]; links: LLink[] }
   const nodes = res.nodes.map((n) => (vertical ? { ...n, x0: n.y0, x1: n.y1, y0: n.x0, y1: n.x1 } : n)) as LNode[]
   const byId = new Map(nodes.map((n) => [n.id, n]))
@@ -101,7 +101,7 @@ const layout = computed(() => {
 const lit = computed(() => {
   const L = layout.value
   const sel = selected.value
-  if (!L || !sel) return null
+  if (!L || !sel || !L.nodes.some((n) => n.id === sel)) return null
   const nodes = new Set<string>([sel])
   const links = new Set<number>()
   for (const dir of ['down', 'up'] as const) {
