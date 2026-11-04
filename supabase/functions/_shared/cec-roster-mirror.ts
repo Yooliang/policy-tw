@@ -17,6 +17,8 @@ export interface RosterRow {
   party: string | null;
   birth: string | null;
   home: string | null;
+  /** 性別：中選會原始值照存（"男"／"女"，缺值為 null），不轉換 */
+  gender: string | null;
   district: string;
   area_code: string;
   dept_code: string;
@@ -30,6 +32,7 @@ const candRow = (c: Obj, extra: Partial<RosterRow>): RosterRow => ({
   party: str(c.party) || null,
   birth: str(c.birth) || null,
   home: str(c.home) || null,
+  gender: str(c.gender) || null,
   district: "",
   area_code: "",
   dept_code: str(c.deptCode),

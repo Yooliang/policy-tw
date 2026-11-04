@@ -16,7 +16,7 @@
  */
 
 import type { CecRow, FetchOutcome, LocatedRow } from "./cec-static-fetch.ts";
-import { CEC_BASE, LEGISLATOR_AT_LARGE_SUBJECTS, locateRow, parseBirthYear, SUBJECT_MAP } from "./cec-static-fetch.ts";
+import { CEC_BASE, genderFromCandSex, LEGISLATOR_AT_LARGE_SUBJECTS, locateRow, parseBirthYear, SUBJECT_MAP } from "./cec-static-fetch.ts";
 import { ALL_REGIONS, CITY_CODES, DIRECT_CITIES } from "./cec-city-codes.ts";
 
 /** 中選會罕見字逸出寫法：@十六進位碼位@ */
@@ -321,6 +321,8 @@ export interface CecCandidateRow {
   cec_cand_id: number | null;
   /** 推薦政黨（中選會原字；見 cecPartyText） */
   party: string | null;
+  /** 性別：cand_sex 1＝男、2＝女，其他與空值為 null（policy-ops#193） */
+  gender: string | null;
 }
 
 export interface RowContext {
@@ -359,6 +361,7 @@ export function toCecCandidateRow(row: CecRow, ticket: CecRow | undefined, ctx: 
     cec_cand_id: merged.cand_id ?? null,
     // 候選人檔與得票檔都有政黨；merged 以候選人檔為準
     party: cecPartyText(merged.party_name),
+    gender: genderFromCandSex(merged.cand_sex),
   };
 }
 

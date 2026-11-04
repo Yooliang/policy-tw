@@ -39,6 +39,7 @@ import {
   parseBirthYear,
   SUBJECT_MAP,
   USER_AGENT,
+  genderFromCandSex,
 } from "../_shared/cec-static-fetch.ts";
 
 
@@ -241,7 +242,7 @@ Deno.serve(async (req) => {
           cecCandId: merged.cand_id,
           cecThemeId: themeId,
           candNo: merged.cand_no,
-          gender: merged.cand_sex === "1" ? "男" : merged.cand_sex === "2" ? "女" : undefined,
+          gender: genderFromCandSex(merged.cand_sex) ?? undefined,
           birthday: merged.cand_birthday || undefined,
           isCurrent: merged.is_current === "Y",
           votes: ticket?.ticket_num,

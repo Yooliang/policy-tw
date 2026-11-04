@@ -221,6 +221,7 @@ Deno.test("toCecCandidateRow：候選人檔＋得票檔合併，得票檔的 is_
     cand_name: "黄大牛",
     cand_no: 3,
     cand_birthyear: "70",
+    cand_sex: "2",
     prv_code: "10",
     city_code: "007",
     area_name: "彰化縣第01選舉區",
@@ -248,6 +249,7 @@ Deno.test("toCecCandidateRow：候選人檔＋得票檔合併，得票檔的 is_
     cec_theme_id: "theme-abc",
     cec_cand_id: 12345,
     party: "中國國民黨",
+    gender: "女",
   });
 });
 
