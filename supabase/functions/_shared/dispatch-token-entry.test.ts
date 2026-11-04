@@ -489,3 +489,31 @@ Deno.test("進階端點 /verify、/contribute 也收憑證（同一個處理器�
     assertEquals(db.contributions[0].contributor_ip_hash, await netHash(N1));
   } finally { contribute.restore(); }
 });
+
+Deno.test("端到端：DiTrust 登入（agent_name=ditrust:<序號>）領憑證再投票要成功；別的代號拿同一張憑證被擋（憑證比對不會把 DiTrust 全擋掉）", async () => {
+  const db = makeDb();
+  const secret = "ab".repeat(32); // 假序號：64 位十六進位
+  const baseRouter = db.router;
+  db.router = (c: RestCall) => {
+    if (c.target.endsWith("agents-verify")) return { agent_id: "11111111-aaaa-4bbb-8ccc-222222222222", display_name: "測試帳號" };
+    return baseRouter(c);
+  };
+  await withEntries(db, env(), async ({ next, report }) => {
+    const login = `ditrust:${secret}`;
+    const got = await getNext(next, N1, login);
+    assertEquals(got.status, 200, JSON.stringify(got.json));
+    const token = got.json.dispatch_token as string;
+    assert(token, "DiTrust 登入也要拿得到憑證");
+    const other = await post(report, R, voteBody({ agent_name: "mallory", dispatch_token: token }));
+    assertEquals(other.status, 403, JSON.stringify(other.json));
+    assertEquals(other.json.reason, "agent_mismatch");
+    const res = await post(report, R, voteBody({ agent_name: login, dispatch_token: token }));
+    assertEquals(res.status, 201, JSON.stringify(res.json));
+    assertEquals(db.votes.length, 1);
+    assertEquals(db.votes[0].actor_id, "ditrust:11111111-aaaa-4bbb-8ccc-222222222222");
+    assertEquals(db.votes[0].agent_name, "測試帳號", "寫進去的是顯示名，不是序號");
+    const again = await post(report, R, voteBody({ agent_name: login, dispatch_token: token }));
+    assertEquals(again.status, 409, JSON.stringify(again.json));
+    assertEquals(db.votes.length, 1);
+  });
+});

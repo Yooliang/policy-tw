@@ -14,6 +14,7 @@ const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => "\\" + c);
 // deno-lint-ignore no-explicit-any
 export function fetchMyVotedRows(supabase: any, me: MyVoter): Promise<Array<{ contribution_id: string }>> {
   return fetchAllRows<{ contribution_id: string }>("my votes", (from, to) => {
+    // query-bounds: ok — 篩選接在這條之後，緊接著 .order().range(from, to) 由 fetchAllRows 逐頁翻
     const q = supabase.from("contribution_votes").select("contribution_id");
     const filtered = typeof me.actorId === "string" && me.actorId.startsWith("ditrust:")
       ? q.eq("actor_id", me.actorId)
