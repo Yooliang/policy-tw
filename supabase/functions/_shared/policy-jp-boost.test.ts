@@ -513,7 +513,7 @@ async function call(method: string, body?: unknown, opts: { count?: number } = {
       }) as typeof fetch;
     }
     const res = await entry.call(new Request("https://x/jp-boost", {
-      method, headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9" }, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9", authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` }, body: body === undefined ? undefined : JSON.stringify(body),
     }));
     return { status: res.status, json: JSON.parse(await res.text()) as Row, calls: entry.calls };
   } finally { entry.restore(); }
