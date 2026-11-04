@@ -39,10 +39,12 @@ Deno.test("A1 任務列分支一字不動：新觸發器 ＝ 前一版（2026102
   assertEquals(rest.filter((l) => !prevLines.has(l)), [], "標記區塊以外的每一行都來自前一版");
   // 前一版有而新定義沒有的行：只有舊的 boost 歸零（IF 區塊）與舊的 queue_at 呼叫
   const neuLines = new Set(norm(neu).split("\n"));
-  assertEquals([...prevLines].filter((l) => !neuLines.has(l)).sort(), [
-    "IF TG_OP = 'UPDATE' AND NEW.dispatch_count IS DISTINCT FROM OLD.dispatch_count THEN",
-    "NEW.queue_at := verify_queue_key(NEW.task_id, NEW.verify_follows_task, NEW.last_dispatched_at, NEW.priority_seconds, NEW.boost_seconds, NEW.defer_seconds);",
-  ].sort());
+  // 前一版有而新定義沒有的行：舊的 boost 歸零 IF、舊的 queue_at 呼叫，以及 no_change 的 1～2 天延後（20261028140000）那一段
+  const gone = [...prevLines].filter((l) => !neuLines.has(l));
+  assert(gone.some((l) => l.includes("verify_queue_key(")), "舊的 queue_at 呼叫");
+  assert(gone.some((l) => l.includes("verify_ticket_defer_seconds(")), "延後那一段拿掉");
+  assert(!neu.includes("NEW.defer_seconds :="), "新觸發器不再寫 defer_seconds");
+  assert(gone.every((l) => /verify_queue_key\(|verify_ticket_defer_seconds\(|^IF TG_OP|^ELSIF NEW\.dispatch_count|^END IF;$|^NEW\.defer_seconds/.test(l)), `只該少掉這幾類行：${gone.join(" | ")}`);
 });
 
 Deno.test("A2 舊 verify_queue_key 與 verify_follows_task 保留（改簽名要分兩次上）；日本站與 task_boost 不在這支裡；新參數有 CHECK", () => {
@@ -254,22 +256,29 @@ Deno.test("B4 驗證票的插隊不因派出歸零；母任務之後被插隊或
   await db.close();
 });
 
-Deno.test("B5 no_change 的延後保留：第一次進隊 1 天、被領走後 2 天（不累加）；網站請求來源不延後", async () => {
+Deno.test("B5 no_change：第 1 次也是 B − 14 天，之後每次領走往後 14 天（一般票 7 天）；1～2 天延後不再算（欄位保留、不再寫）；網站請求來源也一樣", async () => {
   const db = await newEnv();
   const p = await task(db, { entered: "2026-10-05" });
   await dispatch(db, p);
   const nc = await submit(db, { type: "no_change", task: p });
-  assertEquals(await at(db, nc.vid), iso("2026-10-05", -14 + 1), "進隊：基準 − 14 天 ＋ 1 天延後");
-  await dispatch(db, nc.vid);
-  assertEquals(await at(db, nc.vid), iso("2026-10-05", -14 + 7 + 2), "領走一次：＋7 天 ＋ 2 天延後");
-  await dispatch(db, nc.vid);
-  assertEquals(await at(db, nc.vid), iso("2026-10-05", -14 + 14 + 2), "再領一次：延後不累加（仍 2 天），＋7 天累加");
+  const co = await submit(db, { type: "correction", task: p });
+  for (let k = 0; k <= 4; k++) {
+    assertEquals(await at(db, nc.vid), iso("2026-10-05", -14 + 14 * k), `no_change 領走 ${k} 次：B − 14 天 ＋ ${14 * k} 天`);
+    assertEquals(await at(db, co.vid), iso("2026-10-05", -14 + 7 * k), `一般票領走 ${k} 次：B − 14 天 ＋ ${7 * k} 天`);
+    if (k < 4) { await dispatch(db, nc.vid); await dispatch(db, co.vid); }
+  }
+  assertEquals((await db.query<{ d: number }>(`SELECT defer_seconds AS d FROM task_dispatches WHERE task_id = '${nc.vid}'`)).rows[0]!.d, 0, "觸發器不再寫 defer_seconds");
   const web = uid();
   await db.exec(`INSERT INTO contribution_tasks (id, task_type, source) VALUES ('${web}', 'policy_missing', 'web_request')`);
   await task(db, { id: web, type: "policy_missing", entered: "2026-10-05" });
   await dispatch(db, web);
   const wnc = await submit(db, { type: "no_change", task: web });
-  assertEquals(await at(db, wnc.vid), iso("2026-10-05", -14), "網站請求來源的 no_change 不延後");
+  assertEquals(await at(db, wnc.vid), iso("2026-10-05", -14), "網站請求來源的 no_change 也是 B − 14 天");
+  // 兩個步長都是參數
+  await db.exec(`UPDATE queue_settings SET verify_no_change_redispatch_seconds = ${2 * DAY} WHERE id = 1`);
+  await db.exec("SELECT refresh_verify_ticket_keys()");
+  assertEquals(await at(db, nc.vid), iso("2026-10-05", -14 + 2 * 4), "改 no_change 步長（2 天）後依凍結值重算");
+  assertEquals(await at(db, co.vid), iso("2026-10-05", -14 + 7 * 4), "一般票不受影響");
   await db.close();
 });
 
@@ -298,7 +307,7 @@ Deno.test("B6 既有的票過渡：套 migration 前後 queue_at 一張都沒動
   const was = await at(db, vid);
   await dispatch(db, vid);
   const wasMs = Date.parse(was + "Z");
-  assertEquals(Date.parse((await at(db, vid)) + "Z") - wasMs, 7 * DAY * 1000, "領走一次剛好 ＋7 天（no_change 的延後本來就是 2 天，已在凍結值裡）");
+  assertEquals(Date.parse((await at(db, vid)) + "Z") - wasMs, 14 * DAY * 1000, "領走一次剛好 ＋14 天（no_change 的步長；既有的 1～2 天延後已在凍結值裡）");
   assertEquals((await db.query<{ b: string }>(`SELECT boost_seconds::text AS b FROM task_dispatches WHERE task_id = '${vid}'`)).rows[0]!.b, String(BOOST));
   await db.close();
 });
@@ -336,16 +345,28 @@ Deno.test("C3 還原驗證：驗證票派出也歸零插隊 → 劇本的插隊�
   assertEquals(boost, "0");
 });
 
-Deno.test("C4 還原驗證：拿掉每次領走的 7 天（公式少乘 dispatch_count）→ 票的位置翻面", async () => {
-  const bad = mutate(MIG, "s.step::double precision * COALESCE(p_dispatch_count, 0) + COALESCE(p_defer_seconds, 0))\n    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs,\n                 COALESCE((SELECT q.verify_redispatch_seconds FROM queue_settings q WHERE q.id = 1), 0) AS step) s\n$$;\nCOMMENT ON FUNCTION verify_ticket_key",
-    "COALESCE(p_defer_seconds, 0))\n    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs,\n                 COALESCE((SELECT q.verify_redispatch_seconds FROM queue_settings q WHERE q.id = 1), 0) AS step) s\n$$;\nCOMMENT ON FUNCTION verify_ticket_key");
+Deno.test("C4 還原驗證：拿掉每次領走的步長（公式少乘 dispatch_count）→ 票的位置翻面", async () => {
+  const bad = mutate(MIG, `+ make_interval(secs => COALESCE(p_step_seconds, 0)::double precision * COALESCE(p_dispatch_count, 0))
+    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs) s
+$$;
+COMMENT ON FUNCTION verify_ticket_key`,
+    `
+    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs) s
+$$;
+COMMENT ON FUNCTION verify_ticket_key");
   const [, pos] = await scenario(bad);
-  assert(pos !== "2026-10-04T23:43:20");
+  assert(pos !== "2026-10-04T23:43:20`);
 });
 
-Deno.test("C5 還原驗證：回填基準少減一項（不減 dispatch_count × 7 天）→ 自我檢查讓 migration 失敗", async () => {
-  const bad = mutate(MIG, "- make_interval(secs => s.step::double precision * COALESCE(p_dispatch_count, 0) + COALESCE(p_defer_seconds, 0))\n    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs,\n                 COALESCE((SELECT q.verify_redispatch_seconds FROM queue_settings q WHERE q.id = 1), 0) AS step) s\n$$;\nCOMMENT ON FUNCTION verify_ticket_freeze_base",
-    "- make_interval(secs => COALESCE(p_defer_seconds, 0))\n    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs,\n                 COALESCE((SELECT q.verify_redispatch_seconds FROM queue_settings q WHERE q.id = 1), 0) AS step) s\n$$;\nCOMMENT ON FUNCTION verify_ticket_freeze_base");
+Deno.test("C5 還原驗證：回填基準少減步長 × dispatch_count → 自我檢查讓 migration 失敗", async () => {
+  const bad = mutate(MIG, `- make_interval(secs => COALESCE(p_step_seconds, 0)::double precision * COALESCE(p_dispatch_count, 0))
+    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs) s
+$$;
+COMMENT ON FUNCTION verify_ticket_freeze_base`,
+    `
+    FROM (SELECT COALESCE((SELECT q.verify_priority_seconds FROM queue_settings q WHERE q.id = 1), 0) AS vs) s
+$$;
+COMMENT ON FUNCTION verify_ticket_freeze_base`);
   const db = await oldEnv();
   const p = await task(db, { entered: "2026-10-05" });
   await dispatch(db, p);
