@@ -6,6 +6,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { useDeskNav, type DeskGroup, type DeskItem } from '../composables/useDeskNav'
 import { useDeskSection } from '../composables/useDeskSection'
 import { footerElections, taipeiDay } from '../lib/election-list'
+import { overviewItemOn } from '../lib/desk-sections'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment, electionYearOfDate } from '../lib/election-route'
 
@@ -66,13 +67,13 @@ const genericElection = computed<DeskGroup[]>(() => {
 })
 // 搜尋區：目前沒有「近期搜尋」紀錄功能，先放連到搜尋頁的項目（2026-11-01）
 const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link('recent', '近期搜尋', '/search')]] }
-const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
+const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties'), link('party-flow', '政黨分流圖', '/parties/flow')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
 const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
-const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
+const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party-flow', 'party'])
 const overviewOnly = computed(() => OVERVIEW_ROUTES.has(String(route.name)))
 
 const title = computed(() => {
@@ -105,7 +106,7 @@ function isOn(item: DeskItem): boolean {
   if (item.active) return true // 人物頁的層級／縣市連結：選中與否由人物頁決定（目前網址是人物頁，比不出來）
   const [path, qs] = item.to.split('?')
   // 一覽組：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也高亮對應那項
-  if (['/politicians', '/parties'].includes(path)) { if (!(route.path === path || route.path.startsWith(path + '/'))) return false } else if (route.path !== path) return false
+  if (['/politicians', '/parties'].includes(path)) { if (!overviewItemOn(path, route.path)) return false } else if (route.path !== path) return false
   const want = new URLSearchParams(qs ?? '')
   if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : want.has('category') ? route.query.category === want.get('category') : !route.query.view && !route.query.category
   if (want.has('view')) return route.query.view === want.get('view')

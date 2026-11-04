@@ -3,7 +3,7 @@
  *   承諾（選前、落選／退選、結果待補，且屬於某一屆）→ 選舉；當選後的政見、任內施政、沒標屆別 → 政見
  */
 import { assertEquals } from 'jsr:@std/assert@1'
-import { sectionOfPolicy, sectionOfRoute } from './desk-sections.ts'
+import { overviewItemOn, sectionOfPolicy, sectionOfRoute } from './desk-sections.ts'
 import { policyStage } from './policy-stage.ts'
 
 Deno.test('承諾頁歸選舉、政見頁歸政見', () => {
@@ -57,4 +57,18 @@ Deno.test('接線守門：延伸欄在承諾頁用推導出的層級／縣市，
   assertEquals(/pledgeElection\.value\) return \[[^\]]*pledgeLevelGroups\.value/.test(read('../components/DeskExtNav.vue')), true)
   assertEquals(read('../composables/useDeskSection.ts').includes('levelCountyLinkGroups('), true)
   assertEquals(read('../pages/PoliticianProfile.vue').includes('levelCountyLinkGroups('), true)
+})
+
+Deno.test('政黨分流圖歸搜尋區，跟政黨一覽同區', () => {
+  assertEquals(sectionOfRoute('party-flow'), 'search')
+  assertEquals(sectionOfRoute('parties'), 'search')
+})
+
+Deno.test('一覽組高亮：開分流圖只亮分流圖，政黨一覽不跟著亮；其他子頁行為不變', () => {
+  assertEquals(overviewItemOn('/parties', '/parties/flow'), false)
+  assertEquals(overviewItemOn('/parties/flow', '/parties/flow'), true)
+  assertEquals(overviewItemOn('/parties', '/parties'), true)
+  assertEquals(overviewItemOn('/parties', '/parties/12'), true)
+  assertEquals(overviewItemOn('/politicians', '/politicians/5'), true)
+  assertEquals(overviewItemOn('/politicians', '/parties'), false)
 })

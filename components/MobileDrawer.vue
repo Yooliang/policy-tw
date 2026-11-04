@@ -95,6 +95,7 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
         <RouterLink to="/elections" :class="linkClass">選舉一覽</RouterLink>
         <a href="/politicians" :class="linkClass">人物一覽</a>
         <a href="/parties" :class="linkClass">政黨一覽</a>
+        <a href="/parties/flow" :class="linkClass">政黨分流圖</a>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">參與</p>
         <RouterLink to="/stats" :class="linkClass">貢獻統計</RouterLink>
         <RouterLink to="/skill" :class="linkClass">參與協議</RouterLink>
