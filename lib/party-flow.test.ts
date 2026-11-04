@@ -4,6 +4,7 @@
  * （有鄉鎮的人多走一欄鄉鎮，沒有鄉鎮的人直接跳到下一欄）；缺值不會丟人。
  */
 import { assertEquals } from "jsr:@std/assert@1";
+import { selectionStats } from "./model-flow.ts";
 import {
   ageLabel, availableDims, buildPartyFlow, countyOrder, defaultTypesFor, filterRows, FLOW_DIMS, MISSING, NO_PARTY, normalizeDims,
   parseQuery, parseRows, partyOrder, resolveTypes, sumRows, toggle, toQuery, typeOrder, type PartyFlowRow,
@@ -189,4 +190,45 @@ Deno.test("normalizeDims、toggle", () => {
   assertEquals(normalizeDims(["age", "result"], ["age", "party", "county"]), ["party", "county"], "只剩一個認得的就退回預設");
   assertEquals(toggle(["a", "b"], "c"), ["a", "b", "c"]);
   assertEquals(toggle(["a", "b", "c"], "b"), ["a", "c"]);
+});
+
+Deno.test("paths：合計＝人數，每條路徑走滿所有維度（有鄉鎮的多一站）", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"], ["台北市"]);
+  assertEquals(g.paths.reduce((a, p) => a + p.n, 0), TOTAL);
+  assertEquals(g.paths.every((p) => p.w === p.n), true);
+  assertEquals(g.paths.map((p) => p.ids.length).sort(), g.paths.map((p) => (p.ids.some((i) => i.startsWith("town:")) ? 4 : 3)).sort());
+  // 同一條路徑的列併在一起：民進黨台北市縣市長／議員／村里長年齡不同，不併；相同路徑才併
+  const merged = buildPartyFlow([R("甲", "台北市", "", "縣市長", 40, "男", null, 2), R("甲", "台北市", "", "縣市議員", 40, "女", null, 3)], ["party", "county", "age"]);
+  assertEquals(merged.paths.map((p) => [p.ids.join(">"), p.n]), [["party:甲>county:台北市>age:40", 5]]);
+});
+
+Deno.test("選中節點後：每一欄的子集合計等於選中節點人數（任意維度順序、含鄉鎮展開）；沒經過的節點是 0", () => {
+  const cases: [string[], string[]][] = [];
+  for (const dims of permutations(ALL_DIMS, 3)) cases.push([dims, []], [dims, ["台北市", "新北市"]]);
+  for (const [dims, open] of cases) {
+    const g = buildPartyFlow(ROWS, dims, open);
+    const colOf = new Map(g.nodes.map((n) => [n.id, n.col!]));
+    for (const sel of g.nodes) {
+      const stats = selectionStats(g, sel.id);
+      const own = g.paths.filter((p) => p.ids.includes(sel.id)).reduce((a, p) => a + p.n, 0);
+      assertEquals(stats.get(sel.id)!.raw, own);
+      const perCol = new Map<number, number>();
+      for (const n of g.nodes) perCol.set(colOf.get(n.id)!, (perCol.get(colOf.get(n.id)!) ?? 0) + stats.get(n.id)!.raw);
+      const townCol = g.nodes.find((n) => n.id.startsWith("town:"))?.col;
+      for (const [c, sum] of perCol) {
+        if (c === townCol) assertEquals(sum <= own, true, "鄉鎮欄只算有鄉鎮的人");
+        else assertEquals(sum, own, `${dims.join(",")} 選 ${sel.id} 的第 ${c} 欄`);
+      }
+      // 選中的是鄉鎮：鄉鎮欄也等於它自己
+      if (sel.id.startsWith("town:")) assertEquals(perCol.get(townCol!), own);
+    }
+  }
+});
+
+Deno.test("選中縣市長：年齡欄是縣市長裡的人數，不是全體", () => {
+  const g = buildPartyFlow(ROWS, ["type", "age"]);
+  const s = selectionStats(g, "type:縣市長");
+  assertEquals(s.get("age:50")!.raw, 1);
+  assertEquals(s.get("age:40")!.raw, 0);
+  assertEquals(buildPartyFlow(ROWS, ["type", "age"]).paths.filter((p) => p.ids.includes("age:40")).reduce((a, p) => a + p.n, 0), 10, "全體的 40～49 歲是 10");
 });

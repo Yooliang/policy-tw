@@ -195,6 +195,7 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
   const colOf = (i: number) => i + (hasTowns && countyAt >= 0 && i > countyAt ? 1 : 0)
   const nodeCount = new Map<string, number>()
   const linkCount = new Map<string, number>()
+  const pathCount = new Map<string, { ids: string[]; n: number }>()
   const cells = new Map<string, Cell>()
   const townNodes = new Map<string, { county: string; label: string }>()
   const bump = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k) ?? 0) + n)
@@ -213,6 +214,11 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
       }
     })
     for (let i = 1; i < path.length; i++) bump(linkCount, `${path[i - 1]}\u0000${path[i]}`, r.n)
+    // 完整路徑（選中某節點時，其他節點顯示經過它的人數）：同一條路徑的列併在一起
+    const pk = path.join('\u0000')
+    const cur = pathCount.get(pk)
+    if (cur) cur.n += r.n
+    else pathCount.set(pk, { ids: path, n: r.n })
   }
   const nodes: FlowNode[] = []
   const colTotals: number[] = []
@@ -241,7 +247,8 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
       return { source, target, value: n, raw: n, tone: (target.startsWith('town:') ? 'neutral' : 'group') as Tone }
     })
     .sort((a, b) => rank.get(a.source)! - rank.get(b.source)! || rank.get(a.target)! - rank.get(b.target)!)
-  return { nodes, links, paths: [], total: sumRows(rows), columns: dims.map((d, i) => ({ dim: d, total: colTotals[i] })), townTotal }
+  const paths = [...pathCount.values()].map((p) => ({ ids: p.ids, n: p.n, w: p.n }))
+  return { nodes, links, paths, total: sumRows(rows), columns: dims.map((d, i) => ({ dim: d, total: colTotals[i] })), townTotal }
 }
 
 /** 網址參數 ←→ 狀態。逗號分隔；不認得的值丟掉 */

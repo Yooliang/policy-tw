@@ -64,7 +64,11 @@ const layout = computed(() => {
     const hideShare = n.layer === 0 && n.id.startsWith('model:') // 模型是各自等寬的 100%，節點不標百分比
     const all = { label: n.label, raw: rawOf(n.id), share: (n.value / rootTotal) * 100, hideShare }
     // 選中時：其餘節點顯示「選中子集合」的值，選中的節點本身維持全體值
-    if (props.nodeLabel) return props.nodeLabel(n.label, all.raw)
+    if (props.nodeLabel) {
+      // 自訂標籤（政黨分流圖）：選中時其餘節點顯示選中子集的人數，選中的節點維持全體值；選中的節點已不在圖裡就不套用
+      const s = stats && n.id !== sel && g.nodes.some((x) => x.id === sel) ? stats.get(n.id) : undefined
+      return props.nodeLabel(n.label, s ? s.raw : all.raw)
+    }
     if (!stats || n.id === sel) return nodeText(props.mode, all)
     const s = stats.get(n.id)!
     return selNodeText(props.mode, { label: n.label, raw: s.raw, share: s.share, allShare: all.share, hideShare, withAll: !vertical })
@@ -123,17 +127,35 @@ const lit = computed(() => {
   return { nodes, links }
 })
 const pick = (id: string) => { selected.value = selected.value === id ? null : id; emit('pick', id) }
+
+// 線條人數（只有傳 linkLabel 時）：滑過（桌機）或點一下（手機）在圖上方固定一行顯示；點空白處清掉
+const hoverLink = ref<number | null>(null)
+const pinnedLink = ref<number | null>(null)
+const activeLinkText = computed(() => {
+  const L = layout.value
+  const i = hoverLink.value ?? pinnedLink.value
+  return L && i !== null && L.links[i] ? L.links[i].label : ''
+})
+const pinLink = (i: number) => { pinnedLink.value = pinnedLink.value === i ? null : i }
+const clearBlank = () => { selected.value = null; pinnedLink.value = null }
 </script>
 
 <template>
   <div v-if="layout" class="w-full" :class="scroll ? 'overflow-x-auto' : ''">
+    <!-- 固定一行（預留高度，不跳動）；捲動時黏在左邊 -->
+    <p v-if="linkLabel" class="sticky left-0 mb-1 h-6 w-max max-w-[calc(100vw-4rem)] truncate text-sm font-bold text-navy-900" data-testid="sankey-link-text" aria-live="polite">{{ activeLinkText || ' ' }}</p>
     <svg :viewBox="`0 0 ${layout.W} ${layout.H}`" class="w-full h-auto select-none" :style="scroll ? { minWidth: `${layout.W}px` } : undefined" role="img" :aria-label="name" :data-testid="`sankey-${name}`"
-      @click="selected = null">
+      @click="clearBlank">
       <g fill="none">
         <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="COLOR[l.tone]" :stroke-width="l.width"
           :stroke-opacity="lit ? (lit.links.has(i) ? 0.55 : 0.07) : 0.28">
           <title>{{ l.label }}</title>
         </path>
+      </g>
+      <!-- 較粗的透明命中區：只有傳 linkLabel 時才有（細線不好點） -->
+      <g v-if="linkLabel" fill="none" stroke="transparent">
+        <path v-for="(l, i) in layout.links" :key="`hit-${i}`" :d="l.d" :stroke-width="Math.max(l.width, 14)" pointer-events="stroke" class="cursor-pointer"
+          :data-testid="`sankey-link-${i}`" @mouseenter="hoverLink = i" @mouseleave="hoverLink = null" @click.stop="pinLink(i)" />
       </g>
       <g>
         <rect v-for="n in layout.nodes" :key="n.id" :x="n.x0" :y="n.y0" :width="Math.max(1, n.x1 - n.x0)" :height="Math.max(1, n.y1 - n.y0)"
