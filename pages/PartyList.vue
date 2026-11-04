@@ -64,6 +64,7 @@ usePageHead({
         <section aria-labelledby="registered-h" class="mb-12">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 id="registered-h" class="text-2xl font-black text-navy-900">內政部政黨名冊上的政黨</h2>
+            <a href="/parties/flow" class="text-sm font-bold text-blue-600 hover:underline" data-testid="party-flow-link">政黨分流圖</a>
             <SortIcons v-model="sortKey" :options="SORTS" data-testid="party-sort" />
           </div>
           <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

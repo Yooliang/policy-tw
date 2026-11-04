@@ -111,6 +111,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/PartyList.vue'),
   },
   {
+    // 政黨分流圖（policy-ops#193）：中選會名冊 政黨→縣市→鄉鎮；瀏覽器渲染、不收錄
+    path: '/parties/flow',
+    name: 'party-flow',
+    component: () => import('../pages/PartyFlow.vue'),
+  },
+  {
     path: '/party/:partyId',
     name: 'party',
     component: () => import('../pages/PartyPage.vue'),
