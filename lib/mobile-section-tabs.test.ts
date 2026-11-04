@@ -9,8 +9,10 @@ Deno.test("路由對到頁籤：政見三頁，我的關注看 view=mine", () =>
 });
 
 Deno.test("參與與搜尋兩組", () => {
-  assertEquals(sectionTabsFor("/stats", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "ai", "tasks", "queue", "dispatch"]);
+  assertEquals(sectionTabsFor("/stats", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch"]);
   assertEquals(sectionTabsFor("/parties", {})?.tabs.map((t) => t.key), ["search", "elections", "politicians", "parties"]);
+  assertEquals(sectionTabsFor("/parties/flow", {})?.active, "party-flow");
+  assertEquals(sectionTabsFor("/parties/flow/", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch"]);
   assertEquals(sectionTabsFor("/search/", {})?.active, "search");
 });
 

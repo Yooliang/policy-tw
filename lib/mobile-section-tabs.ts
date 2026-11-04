@@ -20,6 +20,7 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'community', label: '公民提問', to: '/community' },
     { key: 'contributions', label: 'AI 協作動態牆', to: '/contributions' },
     { key: 'stats-map', label: '參選地圖', to: '/stats/map' },
+    { key: 'party-flow', label: '政黨分流圖', to: '/parties/flow' },
     { key: 'ai', label: 'AI 表現統計', to: '/ai' },
     { key: 'tasks', label: '任務清單', to: '/tasks' },
     { key: 'queue', label: '派工隊列', to: '/queue' },
@@ -41,6 +42,7 @@ export function sectionTabsFor(path: string, query: Record<string, unknown>): { 
   if (p === '/tracking') key = query.view === 'mine' ? 'mine' : 'tracking'
   else if (['/analysis', '/regional-data', '/stats', '/skill', '/community', '/contributions', '/ai', '/tasks', '/queue', '/dispatch', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
   else if (p === '/stats/map') key = 'stats-map'
+  else if (p === '/parties/flow') key = 'party-flow'
   if (!key) return null
   const tabs = MOBILE_SECTION_TABS.find(g => g.some(t => t.key === key))
   return tabs ? { tabs, active: key } : null

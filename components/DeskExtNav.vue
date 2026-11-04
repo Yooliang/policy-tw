@@ -6,6 +6,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { useDeskNav, type DeskGroup, type DeskItem } from '../composables/useDeskNav'
 import { useDeskSection } from '../composables/useDeskSection'
 import { footerElections, taipeiDay } from '../lib/election-list'
+import { overviewItemOn } from '../lib/desk-sections'
 import { electionPath } from '../lib/election-regions'
 import { electionSegment, electionYearOfDate } from '../lib/election-route'
 
@@ -37,7 +38,7 @@ const POLICY: DeskGroup[] = [
 // 參與區三組（2026-10-31 小良哥）：看板／工作各頁的切換只在這裡與手機頁籤條（頁面內原本的切換列已拿掉）。
 const JOIN: DeskGroup[] = [
   { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
-  { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('ai', 'AI 表現統計', '/ai')]] },
+  { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('party-flow', '政黨分流圖', '/parties/flow'), link('ai', 'AI 表現統計', '/ai')]] },
   { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch')]] },
 ]
 // 首頁區（首頁與「關於」合併，2026-10-31 小良哥）：首頁＋關於區各頁，分三組；名稱用頁面現有名稱（使用條款的頁面標題就是「使用條款」）
@@ -105,7 +106,7 @@ function isOn(item: DeskItem): boolean {
   if (item.active) return true // 人物頁的層級／縣市連結：選中與否由人物頁決定（目前網址是人物頁，比不出來）
   const [path, qs] = item.to.split('?')
   // 一覽組：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也高亮對應那項
-  if (['/politicians', '/parties'].includes(path)) { if (!(route.path === path || route.path.startsWith(path + '/'))) return false } else if (route.path !== path) return false
+  if (['/politicians', '/parties'].includes(path)) { if (!overviewItemOn(path, route.path)) return false } else if (route.path !== path) return false
   const want = new URLSearchParams(qs ?? '')
   if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : want.has('category') ? route.query.category === want.get('category') : !route.query.view && !route.query.category
   if (want.has('view')) return route.query.view === want.get('view')

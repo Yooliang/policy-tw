@@ -65,6 +65,7 @@ const footerList = computed(() => footerElections(elections.value, taipeiDay(Dat
           <ul class="space-y-2 text-sm">
             <li><RouterLink to="/skill" class="hover:text-blue-400 transition-colors">參與貢獻</RouterLink></li>
             <li><RouterLink to="/contributions" class="hover:text-blue-400 transition-colors">貢獻看板</RouterLink></li>
+            <li><a href="/parties/flow" class="hover:text-blue-400 transition-colors">政黨分流圖</a></li>
             <li><RouterLink to="/queue" class="hover:text-blue-400 transition-colors">任務佇列</RouterLink></li>
             <li><RouterLink to="/sources" class="hover:text-blue-400 transition-colors">查證來源</RouterLink></li>
           </ul>

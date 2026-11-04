@@ -8,7 +8,7 @@ const BY_ROUTE: Record<string, DeskSection> = {
   home: 'home',
   tracking: 'policy', policy: 'policy', analysis: 'policy', 'analysis-detail': 'policy', lineage: 'policy', 'regional-data': 'policy',
   elections: 'search', election: 'election', 'election-region': 'election', 'election-township': 'election', 'election-matrix': 'election',
-  politician: 'election', politicians: 'search', 'politicians-group': 'search', parties: 'search', party: 'election',
+  politician: 'election', politicians: 'search', 'politicians-group': 'search', parties: 'search', 'party-flow': 'join', party: 'election',
   stats: 'join', 'stats-map': 'join', skill: 'join', contributions: 'join', queue: 'join', tasks: 'join', community: 'join', discussion: 'join', sources: 'join', dispatch: 'join', ai: 'join',
   search: 'search',
   vision: 'about', contact: 'about', terms: 'about', privacy: 'about', donation: 'about',
@@ -27,4 +27,13 @@ export function sectionOfRoute(name: unknown): DeskSection | null {
  */
 export function sectionOfPolicy(stage: string | null | undefined, electionId: number | null | undefined): DeskSection {
   return stage && stage !== 'policy' && typeof electionId === 'number' ? 'election' : 'policy'
+}
+
+/**
+ * 延伸欄「一覽」組的高亮：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也亮對應那項；
+ * 但 /parties/flow（政黨分流圖）自己是一項，不算政黨一覽的子頁。
+ */
+export function overviewItemOn(itemPath: string, routePath: string): boolean {
+  if (itemPath === '/parties' && (routePath === '/parties/flow' || routePath.startsWith('/parties/flow/'))) return false
+  return routePath === itemPath || routePath.startsWith(itemPath + '/')
 }
