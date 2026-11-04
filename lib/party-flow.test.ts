@@ -5,6 +5,7 @@
  */
 import { assertEquals } from "jsr:@std/assert@1";
 import { selectionStats } from "./model-flow.ts";
+import { ageColorOf, categoricalColorAt, NEUTRAL } from "./party-flow-colors.ts";
 import {
   ageLabel, availableDims, buildPartyFlow, countyOrder, defaultTypesFor, filterRows, FLOW_DIMS, MISSING, NO_PARTY, normalizeDims,
   parseQuery, parseRows, partyOrder, resolveTypes, sumRows, toggle, toQuery, typeOrder, type PartyFlowRow,
@@ -110,7 +111,10 @@ Deno.test("鑽取：展開台北市，鄉鎮接在縣市後面；沒有鄉鎮的
   // 台北市共 1+10+4+5+3＝23，其中有鄉鎮的 12
   assertEquals(g.townTotal, 12);
   assertEquals(g.columns.map((c) => c.total), [TOTAL, TOTAL, TOTAL]);
-  assertEquals(g.links.filter((l) => l.source === "county:台北市" && l.target.startsWith("town:")).map((l) => [l.target, l.raw]), [["town:台北市/大安區", 9], ["town:台北市/信義區", 3]]);
+  // 縣市 → 鄉鎮 的線依第一維度（政黨）拆開，同一個鄉鎮合計不變
+  const byTown = new Map<string, number>();
+  for (const l of g.links) if (l.source === "county:台北市" && l.target.startsWith("town:")) byTown.set(l.target, (byTown.get(l.target) ?? 0) + l.raw);
+  assertEquals([...byTown], [["town:台北市/大安區", 9], ["town:台北市/信義區", 3]]);
   // 沒有鄉鎮的縣市長、議員：縣市 → 年齡 直接相連（跳過鄉鎮欄）
   assertEquals(g.links.filter((l) => l.source === "county:台北市" && l.target.startsWith("age:")).reduce((a, l) => a + l.raw, 0), 11);
   // 鄉鎮 → 年齡 合計＝有鄉鎮的人
@@ -231,4 +235,47 @@ Deno.test("選中縣市長：年齡欄是縣市長裡的人數，不是全體", 
   assertEquals(s.get("age:50")!.raw, 1);
   assertEquals(s.get("age:40")!.raw, 0);
   assertEquals(buildPartyFlow(ROWS, ["type", "age"]).paths.filter((p) => p.ids.includes("age:40")).reduce((a, p) => a + p.n, 0), 10, "全體的 40～49 歲是 10");
+});
+
+Deno.test("上色：線條依第一維度的值分開，各帶顏色、人數與第一維度名稱；每欄與相鄰欄合計不變", () => {
+  const g = buildPartyFlow(ROWS, ["party", "county", "age"]);
+  // 第一欄出來的線不拆：政黨 → 縣市 每組一條
+  const first = g.links.filter((l) => l.source.startsWith("party:"));
+  assertEquals(new Set(first.map((l) => `${l.source}>${l.target}`)).size, first.length);
+  // 縣市 → 年齡：同一組 source→target 可有多條（不同政黨），顏色＝該政黨的顏色，series＝政黨名
+  const second = g.links.filter((l) => l.source === "county:台北市" && l.target === "age:50" || l.source === "county:新北市" && l.target === "age:20");
+  assertEquals(second.map((l) => [l.series, l.raw]), [["民主進步黨", 1], [NO_PARTY, 20]]);
+  const dpp = g.links.find((l) => l.series === "民主進步黨")!;
+  assertEquals(dpp.color, "#16a34a");
+  assertEquals(g.links.find((l) => l.series === "中國國民黨")!.color, "#2563eb");
+  assertEquals(g.links.find((l) => l.series === NO_PARTY)!.color, NEUTRAL.color);
+  // 第一欄節點上色、其他欄中性灰
+  assertEquals(g.nodes.find((n) => n.id === "party:民主進步黨")!.color, "#16a34a");
+  assertEquals(g.nodes.find((n) => n.id === "county:台北市")!.color, NEUTRAL.color);
+  // 拆開後連線合計仍等於總人數
+  const col = new Map(g.nodes.map((n) => [n.id, n.col!]));
+  for (let i = 0; i < 2; i++) assertEquals(g.links.filter((l) => col.get(l.source) === i).reduce((a, l) => a + l.raw, 0), TOTAL);
+  // 年齡當第一維度：用年齡色階；「未提供」灰
+  const ga = buildPartyFlow(ROWS, ["age", "party"]);
+  assertEquals(ga.nodes.find((n) => n.id === "age:20")!.color, ageColorOf(20).color);
+  assertEquals(ga.nodes.find((n) => n.id === "age:none")!.color, NEUTRAL.color);
+  // 縣市當第一維度（類別色，依順序循環）：台北市第 1 色、新北市第 2 色
+  const gc = buildPartyFlow(ROWS, ["county", "gender"]);
+  assertEquals(gc.nodes.find((n) => n.id === "county:台北市")!.color, categoricalColorAt(0).color);
+  assertEquals(gc.nodes.find((n) => n.id === "county:新北市")!.color, categoricalColorAt(1).color);
+  // 深色版
+  assertEquals(gc.nodes.find((n) => n.id === "county:台北市")!.colorDark, categoricalColorAt(0).colorDark);
+});
+
+Deno.test("上色：任意維度順序下連線合計仍等於總人數，且每條線都有顏色與第一維度名稱", () => {
+  for (const dims of permutations(ALL_DIMS, 3)) {
+    const g = buildPartyFlow(ROWS, dims, ["台北市"]);
+    const col = new Map(g.nodes.map((n) => [n.id, n.col!]));
+    for (const l of g.links) { assertEquals(typeof l.color, "string"); assertEquals(typeof l.series, "string"); }
+    for (let i = 0; i < 2; i++) {
+      const sum = g.links.filter((l) => col.get(l.source) === i && col.get(l.target) === i + 1).reduce((a, l) => a + l.raw, 0);
+      assertEquals(sum <= TOTAL && sum > 0, true, dims.join(","));
+    }
+    assertEquals(g.links.filter((l) => col.get(l.source) === 0).every((l) => l.series === g.nodes.find((n) => n.id === l.source)!.label), true);
+  }
 });

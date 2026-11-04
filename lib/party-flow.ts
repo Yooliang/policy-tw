@@ -12,6 +12,7 @@
  */
 import { TAIWAN_COUNTIES } from './election-regions.ts'
 import type { DimDef, FlowGraph, FlowLink, FlowNode, Tone } from './model-flow.ts'
+import { ageColorOf, categoricalColorAt, NEUTRAL, partyColorOf, type FlowColor } from './party-flow-colors.ts'
 
 export interface PartyFlowRow {
   p: string
@@ -168,6 +169,20 @@ function dimOrder(dim: string, rows: readonly PartyFlowRow[]): string[] {
   return ordered
 }
 
+/** 第一維度各節點的顏色：政黨用政黨色、年齡用單色相深淺、其餘用類別色（依節點順序）；「未提供」與小黨是灰 */
+function firstDimColors(dim: string, order: readonly string[], cells: ReadonlyMap<string, Cell>): Map<string, FlowColor> {
+  const out = new Map<string, FlowColor>()
+  let k = 0
+  for (const id of order) {
+    const cell = cells.get(id)!
+    if (id === `${dim}:none`) out.set(id, NEUTRAL)
+    else if (dim === 'party') out.set(id, partyColorOf(cell.label))
+    else if (dim === 'age') out.set(id, ageColorOf(Number(id.slice('age:'.length))))
+    else out.set(id, categoricalColorAt(k++))
+  }
+  return out
+}
+
 export interface PartyFlowGraph extends FlowGraph {
   /** 目前篩選後的總人數 */
   total: number
@@ -213,7 +228,8 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
         path.push(tid)
       }
     })
-    for (let i = 1; i < path.length; i++) bump(linkCount, `${path[i - 1]}\u0000${path[i]}`, r.n)
+    // 第一欄出來的線不用拆；之後的線依第一維度的值拆開（同一組 source→target 可有多條，各帶自己的人數）
+    for (let i = 1; i < path.length; i++) bump(linkCount, `${i === 1 ? '' : path[0]}\u0000${path[i - 1]}\u0000${path[i]}`, r.n)
     // 完整路徑（選中某節點時，其他節點顯示經過它的人數）：同一條路徑的列併在一起
     const pk = path.join('\u0000')
     const cur = pathCount.get(pk)
@@ -222,11 +238,14 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
   }
   const nodes: FlowNode[] = []
   const colTotals: number[] = []
+  const firstOrder = dims.length ? dimOrder(dims[0], rows) : []
+  const firstColors = dims.length ? firstDimColors(dims[0], firstOrder, cells) : new Map<string, FlowColor>()
   dims.forEach((d, i) => {
     let total = 0
     for (const id of dimOrder(d, rows)) {
       const cell = cells.get(id)!
-      nodes.push({ id, label: cell.label, tone: cell.tone, col: colOf(i) })
+      const c = i === 0 ? firstColors.get(id)! : NEUTRAL
+      nodes.push({ id, label: cell.label, tone: cell.tone, col: colOf(i), color: c.color, colorDark: c.colorDark })
       total += nodeCount.get(id) ?? 0
     }
     colTotals.push(total)
@@ -236,17 +255,21 @@ export function buildPartyFlow(rows: readonly PartyFlowRow[], dims: readonly str
     const order = countyOrder(rows)
     const list = [...townNodes.entries()].sort((a, b) => order.indexOf(a[1].county) - order.indexOf(b[1].county) || STROKE_ORDER.compare(a[1].label, b[1].label))
     for (const [id, t] of list) {
-      nodes.push({ id, label: t.label, tone: 'group', col: colOf(countyAt) + 1 })
+      nodes.push({ id, label: t.label, tone: 'group', col: colOf(countyAt) + 1, color: NEUTRAL.color, colorDark: NEUTRAL.colorDark })
       townTotal += nodeCount.get(id) ?? 0
     }
   }
   const rank = new Map(nodes.map((n, i) => [n.id, i]))
   const links: FlowLink[] = [...linkCount.entries()]
     .map(([k, n]) => {
-      const [source, target] = k.split('\u0000')
-      return { source, target, value: n, raw: n, tone: (target.startsWith('town:') ? 'neutral' : 'group') as Tone }
+      const [series, source, target] = k.split('\u0000')
+      // 顏色跟著第一維度：第一欄出來的線取來源節點的色，其餘取它所屬的第一維度值的色
+      const c = firstColors.get(series || source) ?? NEUTRAL
+      const link: FlowLink = { source, target, value: n, raw: n, tone: (target.startsWith('town:') ? 'neutral' : 'group') as Tone, color: c.color, colorDark: c.colorDark, series: cells.get(series || source)?.label }
+      return { link, order: series ? firstOrder.indexOf(series) : -1 }
     })
-    .sort((a, b) => rank.get(a.source)! - rank.get(b.source)! || rank.get(a.target)! - rank.get(b.target)!)
+    .sort((a, b) => rank.get(a.link.source)! - rank.get(b.link.source)! || rank.get(a.link.target)! - rank.get(b.link.target)! || a.order - b.order)
+    .map((x) => x.link)
   const paths = [...pathCount.values()].map((p) => ({ ids: p.ids, n: p.n, w: p.n }))
   return { nodes, links, paths, total: sumRows(rows), columns: dims.map((d, i) => ({ dim: d, total: colTotals[i] })), townTotal }
 }

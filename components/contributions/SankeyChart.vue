@@ -9,7 +9,7 @@ const props = defineProps<{
   /** 以下為政黨分流圖用（/ai 都不傳）：照輸入順序排節點、最小跨度、窄螢幕不轉直向而是橫向捲動、自訂標籤 */
   keepOrder?: boolean; minSpan?: number; scroll?: boolean
   nodeLabel?: (label: string, raw: number) => string
-  linkLabel?: (from: string, to: string, raw: number) => string
+  linkLabel?: (from: string, to: string, raw: number, series?: string) => string
 }>()
 const emit = defineEmits<{ pick: [id: string] }>()
 
@@ -22,8 +22,16 @@ const onMq = () => { narrow.value = !!mq?.matches }
 onMounted(() => { mq = window.matchMedia('(max-width: 639px)'); onMq(); mq.addEventListener('change', onMq) })
 onBeforeUnmount(() => mq?.removeEventListener('change', onMq))
 
-interface LNode { id: string; label: string; tone: Tone; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
-interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone }
+// 深色模式（html.dark）：節點與線條有自訂顏色時改用深色版
+const dark = ref(false)
+let mo: MutationObserver | null = null
+const syncDark = () => { dark.value = document.documentElement.classList.contains('dark') }
+onMounted(() => { syncDark(); mo = new MutationObserver(syncDark); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] }) })
+onBeforeUnmount(() => mo?.disconnect())
+const pickColor = (o: { color?: string; colorDark?: string; tone: Tone }) => (dark.value ? o.colorDark ?? o.color : o.color) ?? COLOR[o.tone]
+
+interface LNode { id: string; label: string; tone: Tone; color?: string; colorDark?: string; x0: number; x1: number; y0: number; y1: number; value: number; layer: number }
+interface LLink { source: LNode; target: LNode; value: number; raw: number; width: number; y0: number; y1: number; tone: Tone; color?: string; colorDark?: string; series?: string }
 
 const selected = ref<string | null>(null)
 
@@ -79,7 +87,7 @@ const layout = computed(() => {
     const d = vertical
       ? `M${l.y0},${s.y1} C${l.y0},${(s.y1 + t.y0) / 2} ${l.y1},${(s.y1 + t.y0) / 2} ${l.y1},${t.y0}`
       : `M${s.x1},${l.y0} C${(s.x1 + t.x0) / 2},${l.y0} ${(s.x1 + t.x0) / 2},${l.y1} ${t.x0},${l.y1}`
-    return { d, width: Math.max(1, l.width), tone: l.tone, source: s.id, target: t.id, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
+    return { d, width: Math.max(1, l.width), tone: l.tone, color: l.color, colorDark: l.colorDark, source: s.id, target: t.id, label: props.linkLabel ? props.linkLabel(s.label, t.label, l.raw, l.series) : linkText(props.mode, { from: s.label, to: t.label, raw: l.raw, share: (l.value / (s.value || 1)) * 100 }) }
   })
   const W = vertical ? span : flowLen
   const H = vertical ? flowLen : span
@@ -147,7 +155,7 @@ const clearBlank = () => { selected.value = null; pinnedLink.value = null }
     <svg :viewBox="`0 0 ${layout.W} ${layout.H}`" class="w-full h-auto select-none" :style="scroll ? { minWidth: `${layout.W}px` } : undefined" role="img" :aria-label="name" :data-testid="`sankey-${name}`"
       @click="clearBlank">
       <g fill="none">
-        <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="COLOR[l.tone]" :stroke-width="l.width"
+        <path v-for="(l, i) in layout.links" :key="i" :d="l.d" :stroke="pickColor(l)" :stroke-width="l.width"
           :stroke-opacity="lit ? (lit.links.has(i) ? 0.55 : 0.07) : 0.28">
           <title>{{ l.label }}</title>
         </path>
@@ -159,7 +167,7 @@ const clearBlank = () => { selected.value = null; pinnedLink.value = null }
       </g>
       <g>
         <rect v-for="n in layout.nodes" :key="n.id" :x="n.x0" :y="n.y0" :width="Math.max(1, n.x1 - n.x0)" :height="Math.max(1, n.y1 - n.y0)"
-          :fill="COLOR[n.tone]" :opacity="lit && !lit.nodes.has(n.id) ? 0.25 : 1" class="cursor-pointer" @click.stop="pick(n.id)">
+          :fill="pickColor(n)" :opacity="lit && !lit.nodes.has(n.id) ? 0.25 : 1" class="cursor-pointer" @click.stop="pick(n.id)">
           <title>{{ layout.nodeTitle.get(n.id) }}</title>
         </rect>
       </g>
