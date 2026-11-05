@@ -100,7 +100,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
         </select>
       </div>
 
-      <div class="hidden sm:flex gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+      <div class="hidden sm:flex lg:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
         <div class="shrink-0 flex items-center gap-3">
           <button
             @click="selectedCategory = 'All'"

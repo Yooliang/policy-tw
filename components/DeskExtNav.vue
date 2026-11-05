@@ -70,7 +70,12 @@ const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link(
 const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
-const policyCategories = computed<DeskGroup[]>(() => categories.value.length === 0 ? [] : [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/tracking?category=${encodeURIComponent(c)}`))] }])
+// 分類連結留在目前的清單：在政策脈絡頁就篩政策脈絡（該頁電腦版的分類只放這裡，2026-11-05 維護者），其他頁到全部政見
+const policyCategories = computed<DeskGroup[]>(() => {
+  if (categories.value.length === 0) return []
+  const base = route.path === '/analysis' ? '/analysis' : '/tracking'
+  return [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `${base}?category=${encodeURIComponent(c)}`))] }]
+})
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
 const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
@@ -109,6 +114,7 @@ function isOn(item: DeskItem): boolean {
   if (['/politicians', '/parties'].includes(path)) { if (!overviewItemOn(path, route.path)) return false } else if (route.path !== path) return false
   const want = new URLSearchParams(qs ?? '')
   if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : want.has('category') ? route.query.category === want.get('category') : !route.query.view && !route.query.category
+  if (path === '/analysis') return want.has('category') ? route.query.category === want.get('category') : !route.query.category
   if (want.has('view')) return route.query.view === want.get('view')
   if (path.startsWith('/election/') && !path.endsWith('/matrix')) return !route.query.view
   return true
