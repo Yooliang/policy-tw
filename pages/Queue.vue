@@ -194,7 +194,6 @@ const headColor = (r: { kind?: string; task_type: string }) => (r.kind === 'veri
 const fmt = (n: number) => n.toLocaleString('zh-TW')
 const when = (iso: string) => {
   const d = new Date(iso)
-  if (d.getFullYear() < 1990) return '插隊'
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 const hms = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
@@ -308,7 +307,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
                 <th class="py-1 pr-2 font-normal">類型</th>
                 <th class="py-1 pr-2 font-normal">對象</th>
                 <th class="py-1 pr-2 font-normal">狀態</th>
-                <th class="py-1 pr-2 font-normal">排隊時間</th>
                 <th class="py-1 pr-2 text-right font-normal">派出次數</th>
                 <th class="py-1 font-normal">最後派出</th>
               </tr>
@@ -320,7 +318,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
                 <td class="py-1 pr-2 whitespace-nowrap">{{ headTypeLabel(h) }}<span class="ml-1 text-xs text-slate-400">{{ sourceLabel(h.source) }}</span></td>
                 <td class="py-1 pr-2 max-w-[16rem] truncate font-medium" :title="h.subject">{{ h.subject || '—' }}</td>
                 <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(h.status)">{{ STATUS[h.status]?.label ?? h.status }}</span></td>
-                <td class="py-1 pr-2 whitespace-nowrap tabular-nums text-slate-500">{{ when(h.queue_at) }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(h.dispatch_count) }}</td>
                 <td class="py-1 whitespace-nowrap tabular-nums text-slate-500">{{ h.dispatch_count > 0 && h.last_dispatched_at ? when(h.last_dispatched_at) : '—' }}</td>
               </tr>
@@ -337,7 +334,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               <tr>
                 <th class="py-1 pr-2 font-normal">類型</th>
                 <th class="py-1 pr-2 font-normal">對象</th>
-                <th class="py-1 pr-2 font-normal">排隊時間</th>
                 <th class="py-1 pr-2 text-right font-normal">在途交件</th>
                 <th class="py-1 text-right font-normal">等待驗證票</th>
               </tr>
@@ -346,7 +342,6 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               <tr v-for="p in parkedRows" :key="p.task_id" class="border-t border-slate-100">
                 <td class="py-1 pr-2 whitespace-nowrap">{{ taskTypeLabel(p.task_type) }}<span class="ml-1 text-xs text-slate-400">{{ sourceLabel(p.source) }}</span></td>
                 <td class="py-1 pr-2 max-w-[16rem] truncate" :title="p.subject">{{ p.subject || '—' }}</td>
-                <td class="py-1 pr-2 whitespace-nowrap tabular-nums text-slate-500">{{ when(p.queue_at) }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(p.inflight) }}</td>
                 <td class="py-1 text-right tabular-nums">{{ fmt(p.verify_waiting) }}</td>
               </tr>
