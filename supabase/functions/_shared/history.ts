@@ -88,7 +88,7 @@ const TYPE_LABEL: Record<string, string> = {
   politician: "更新人物欄位", candidacy: "參選狀態", policy: "新增政見", policy_progress: "進度更新", correction: "更正",
   task_suggestion: "任務提議", no_change: "無異動", adjudication: "裁決", answer: "回答提問", audit: "文件核對",
   // 政策脈絡（#349）
-  lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯",
+  lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯", lineage_status: "脈絡現況",
   // 政黨（#346 第二階段）
   party_info: "政黨資訊",
   // 日本站人物頭像（policy-ops#162）

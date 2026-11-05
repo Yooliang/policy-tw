@@ -74,6 +74,7 @@ export const CONTRIBUTION_TYPE_LABEL: Readonly<Record<string, string>> = {
   lineage_participants: '脈絡參與角色',
   lineage_handover: '脈絡交接',
   lineage_link: '脈絡上下級',
+  lineage_status: '脈絡現況',
   party_info: '政黨資訊',
   regional_stat: '地區統計',
 }

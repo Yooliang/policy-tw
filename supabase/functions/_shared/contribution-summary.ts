@@ -292,6 +292,14 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       targetName = null;
       break;
     }
+    case "lineage_status": {
+      // 脈絡現況（policy-ops#201 第 2 期）：撤回要看得出來
+      summary = p.remove === true
+        ? `撤回政策脈絡「${lineageTitle(p.lineage_id)}」截至 ${str(p.as_of)} 的現況——${clip(p.note, 60)}`
+        : `記政策脈絡「${lineageTitle(p.lineage_id)}」的現況（截至 ${str(p.as_of)}）：${clip(p.text, 80)}`;
+      targetName = null;
+      break;
+    }
     case "lineage_link": {
       const label = LINK_TYPE_LABEL[str(p.link_type) as keyof typeof LINK_TYPE_LABEL] ?? str(p.link_type);
       summary = `記政策脈絡的上下級關聯（${label}）：「${lineageTitle(p.upper_lineage_id)}」→「${lineageTitle(p.lower_lineage_id)}」——${clip(p.note, 60)}`;

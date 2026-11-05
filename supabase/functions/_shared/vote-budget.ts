@@ -431,6 +431,21 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       miss: { key: "right_pair", means: "前後任正確" },
     },
   ],
+  // 脈絡現況（policy-ops#201 第 2 期）：出錯的方式是「句子超出出處寫的」與「截至日是查詢日，不是出處講的那天」
+  lineage_status: [
+    {
+      key: "beyond_source",
+      instructions: "現況那一句的每個字，出處都找得到嗎？還是加了預測、推論或評價（例如「預計明年完工」出處沒寫）？",
+      hit: { key: "beyond_source", means: "句子超出出處寫的" },
+      miss: { key: "within_source", means: "句子的每個事實都在出處" },
+    },
+    {
+      key: "fake_fresh_date",
+      instructions: "截至日是出處講到這個狀態的日期嗎？還是看起來是交件當天或查詢日（假新鮮）？",
+      hit: { key: "query_date", means: "截至日像是查詢日，不是出處的日期" },
+      miss: { key: "source_date", means: "截至日就是出處講到的日期" },
+    },
+  ],
   lineage_link: [
     {
       key: "topic_only",

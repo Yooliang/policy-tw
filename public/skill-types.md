@@ -57,7 +57,7 @@
   `GET https://api.hustings.net/tw/rest/v1/policies_with_logs?select=id,title,status,progress,sources&politician_id=eq.<uuid>`
 - **`policy_elements`**（政見三要素）：`policy_id`、`element`（target／deadline／funding）、`stated`、`text`、`deadline_date`、`source_url`、`source_locator`。**某條政見查不到某個要素的列＝還沒調查**；有列而 `stated=false`＝查過原文、沒寫。出處的等級與存檔看 `source_refs`（`target_table=eq.policy_elements`）與 `sources`
   `GET https://api.hustings.net/tw/rest/v1/policy_elements?select=element,stated,text,deadline_date,source_locator&policy_id=eq.<uuid>`
-- **`lineages_full`**（view，政策脈絡一條一列）：`id`、`title`、`summary`、`category`、`level`（national／county／township）、`region`、`sub_region`、`policy_ids`（照投票日排）、`participants`（每項 `politician_id`、`name`、`role`、`basis`、出處）、`handovers`（每項前後任、`handover_type`、`note`、出處；`from_office_id`／`to_office_id` 是任期表 `politician_offices` 的那一列，系統自動對，對不到為空）、`links`（每項 `direction`＝upper／lower、對方脈絡、`link_type`）。政見本身的 `lineage_id`、`origin` 在 `policies`
+- **`lineages_full`**（view，政策脈絡一條一列）：`id`、`title`、`summary`、`category`、`level`（national／county／township）、`region`、`sub_region`、`policy_ids`（照投票日排）、`participants`（每項 `politician_id`、`name`、`role`、`basis`、出處）、`handovers`（每項前後任、`handover_type`、`note`、出處；`from_office_id`／`to_office_id` 是任期表 `politician_offices` 的那一列，系統自動對，對不到為空）、`links`（每項 `direction`＝upper／lower、對方脈絡、`link_type`）、`status`（現行現況：`phase`、`text`、`as_of`、出處；還沒有現況是空）。政見本身的 `lineage_id`、`origin` 在 `policies`
   `GET https://api.hustings.net/tw/rest/v1/lineages_full?select=id,title,level,region,policy_ids&region=eq.台中市`
 
 
@@ -398,6 +398,14 @@
 <!-- spec contribution: lineage_link -->
 **`lineage_link`** — **記脈絡關聯（上下級）**：`upper_lineage_id`✅（上一級那條）、`lower_lineage_id`✅（下一級那條）、`link_type`✅（`top_down`：上級立法或補助，下級執行／`bottom_up`：下級爭取，上級採納）、`note`✅（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）、`source_locator`✅、`source_url`。上一級的意思：中央在縣市與鄉鎮之上、縣市在**同縣市**的鄉鎮之上；層級不對會當場退回。只是同一個主題、找不到實際的法規或預算連結的，不算上下級。`lineage_link_candidate` 逐條看完都沒有 → `no_change`，`outcome=confirmed`；這一份候選清單就不會再派。
 
+<!-- spec contribution: lineage_status -->
+**`lineage_status`**（1.118.0，policy-ops#201）— **脈絡現況**（`lineage_status_stale` 任務）：一條脈絡「現在到哪」的**一句**話，單筆：`lineage_id`✅、`phase`✅（`proposed` 提案階段／`planning` 規劃中／`approved` 已核定／`in_progress` 進行中／`completed` 已完成／`paused` 暫緩／`cancelled` 已終止）、`text`✅（8～120 字，**只寫出處有的事實**，不評價、不預測）、`as_of`✅（`YYYY-MM-DD`：**出處講到這個狀態的那一天**，不是你查的日子，不能是未來）、`source_locator`✅（這句話在出處的哪裡）、`source_url`（出自 `source_urls` 的哪一個，不填＝第一個）。
+- 一條脈絡一個截至日一列：同一個 `as_of` 重交＝覆蓋（每欄記查核履歷）；新的 `as_of`＝新增一列，網站顯示最大 `as_of` 那一列，舊的留作歷史。日期比現有最新還舊的照樣收進歷史，不影響網站顯示。
+- **現況沒變、但你找得到近期有日期的文件證明仍如此**：用那份文件的日期交新的一筆；**沒有新消息不等於新截至日**，不要拿今天的日期湊。
+- **撤回**：`remove: true`＋`as_of`（要撤回的那一列的截至日）＋`note`✅（20～300 字，為什麼那一列是錯的），不必填其他欄，也不要求兩個網站的出處。**取代**：照一般新內容交，另加 `replace_as_of`（被取代的那一列的截至日；那一列要存在）——舊的那一列刪掉、寫這一筆新的。刪掉的整列都留在查核履歷，可還原。
+- 第 2 節 1a 條「媒體不能當唯一出處」也適用（撤回除外）。目標分數 3，系統不給票、不核第二來源。
+- **驗證時**：①打開出處，`text` 的**每個字**都找得到（超出原文的推論、預測、評價投 `disagree`）；②`as_of` 是出處講到這個狀態的日期，不是查詢日；③`phase` 與句子一致；④沒有更晚的公開文件把它推翻。撤回與取代：確認被指的那一列真的錯了、`note` 講清楚為什麼；取代的新內容照上面四點驗。打不開投 `unsure`。
+
 <!-- spec contribution: lineage, lineage_participants, lineage_handover, lineage_link -->
 **驗證政策脈絡時**：`lineage` 核「是不是同一件事、層級地方對不對」，還要**逐句**核摘要與來源（新脈絡的 `summary` 每個事實句都要能在附的來源找到；摘要有來源沒寫的事、或寫了各人的立場或承諾，投 `disagree` 並寫是哪一句），並確認歸入的每一條政見都在資格內（那一屆已投票、提出者在那一屆當選；拿掉政見的，確認那幾條確實不在資格內、沒有動到資格內的），而且整條脈絡不是只剩同一位政治人物在同一屆的多條政見（那是重複政見、不是脈絡，投 `disagree` 並寫改走重複清查）；`lineage_participants` 打開官方紀錄核名單與角色、確認本人宣稱沒被當成官方角色；`lineage_handover` 核前後任對不對、型態有沒有來源明寫（**只因為後任沒提就判中止，投 disagree**）；`lineage_link` 核有沒有實際連結、方向對不對。全部對得上投 `agree`，任何一項不對投 `disagree` 並寫是哪一項，打不開投 `unsure`。這四種系統不核第二來源，驗證票一票 +1。
 
@@ -498,6 +506,15 @@
 
 <!-- spec task: handover_missing, lineage_roles_missing -->
 **這種任務的 `current` 帶什麼**：`handover_missing`／`lineage_roles_missing` 給 `lineage`（那條脈絡的參與者、交接、關聯）＋`lineage_policies`。
+
+<!-- spec task: lineage_status_stale | contribution: lineage_status -->
+### 寫脈絡現況（`lineage_status_stale` → `lineage_status`，1.118.0）
+
+有合格政見的脈絡，**還沒有現況**（`target.reason`＝`none`）或**現況過期了**（`stale`：階段是 `approved`／`in_progress` 的超過 90 天、其他未結案階段超過 180 天；`completed`／`cancelled` 不會過期）就派這一件。`current` 給 `lineage`（那條脈絡，含目前的現況）＋`lineage_policies`；`target.current` 是過期的那一列。
+
+1. 找這件事**最新的公開文件**（政府公告、議會議事錄、預算書、新聞稿、可靠報導），寫一句現況，用 `lineage_status` 交。
+2. `as_of` 填文件講到那個狀態的日期，不是今天。查不到比現有更新的消息：現況沒變但找得到近期有日期的文件證明 → 用那份文件的日期交新的一筆；什麼都沒有 → `no_change`、`outcome=not_found`，`checked_urls` 列你查過的網址（查無之後 60 天內這條脈絡不再派現況任務）。
+3. `target.current` 那一列寫錯了 → 用撤回或取代（見 `lineage_status` 欄位說明）。
 
 <!-- spec task: lineage_link_candidate -->
 **這種任務的 `current` 帶什麼**：`lineage_link_candidate` 另給 `upper_candidates`（候選的上一級脈絡）。

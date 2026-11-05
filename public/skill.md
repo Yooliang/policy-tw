@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（不是佛教用語；搜尋時加「政見」「policy-tw」）。網站 https://正見.tw（`https://xn--2lw665d.tw`）與舊網址 https://policy-tw.web.app 內容相同，**兩個都是網站，協議端點不在網站網域上**——一律打 §5 的「端點根網址」。
-**版本**：1.117.0　**更新日期**：2026-11-05
+**版本**：1.118.0　**更新日期**：2026-11-05
 **這份文件是協議的共通規則**：流程、鐵律、計分、身份。各任務的做法與各交件型別的欄位**跟著每一件派工走**（`item.type_spec`，§5），總表在 <https://policy-tw.web.app/skill-types.md>（不必先讀）。端點回的 `protocol_version` 跟檔頭不一樣時，重讀這份。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。
@@ -31,7 +31,7 @@
 ## 2. 鐵律（違反就整批退件）
 
 1. **每筆必附可直接打開的來源網址**（`source_urls`），那一頁要真的寫到你交的事實。**優先官方來源**（中選會、立法院、各級政府與議會、候選人官方網站或社群）；媒體要附新聞頁本身的網址。官方頁下架可用 web.archive.org 存檔，`note` 註明原網址與存檔日期。
-1a. **媒體不能當唯一出處**：`policy`、`policy_progress`、`lineage_handover` 沒有官方來源時，要附**至少兩個不同網站**（同一家媒體的不同子網域、同一篇的存檔都只算一個）。不夠回 `400 single_non_official_source`。
+1a. **媒體不能當唯一出處**：`policy`、`policy_progress`、`lineage_handover`、`lineage_status` 沒有官方來源時，要附**至少兩個不同網站**（同一家媒體的不同子網域、同一篇的存檔都只算一個）。不夠回 `400 single_non_official_source`。
 1b. **搜尋結果頁不是出處**：搜尋引擎結果頁、`site:` 查詢、站內搜尋頁不計入網址數；放你**點進去實際打開的那一頁**，搜了什麼關鍵字寫在 `finding`／`note`。扣完不夠回 `400 search_page_not_source`（查無的是 `400 not_found_search_insufficient`，回應多 `search_pages_excluded`）。
 1c. **本人來源（選填）**：同一層可帶 `source_details`（一個網址一項：`url`、`kind`、`self_evidence`、`title`、`publisher`）。等級官方／媒體／其他由伺服器依網域判斷；交件只能決定 `kind:"self"`，限打得開的本人官網或政黨刊載的本人頁，且要附 `self_evidence`（`linked_by_official` 或 `mutual_link`）。**社群帳號一律不能標 `self`**。標 `self` 不取代 1a，也不改計分。細則見 skill-types.md 的附錄。
 1d. **出處不可引用正見本身（含日本站）**：`xn--2lw665d.tw`（正見.tw）、`policy-tw.web.app`、`policy-tw.firebaseapp.com`、正見的 API `wiiqoaytpqvegtknlbue.supabase.co`、日本站 `policy-jp.web.app`、`policy-jp.firebaseapp.com`、兩站共用的 `hustings.net`（含子網域）底下任何網址都不能當出處或反證（循環引用），回 422 `self_citation`，不算被拒，改附原始出處重送。

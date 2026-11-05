@@ -121,6 +121,7 @@ const BORDER: Record<string, string> = {
   handover_missing: '#115e59',
   lineage_roles_missing: '#134e4a',
   lineage_link_candidate: '#14b8a6',
+  lineage_status_stale: '#0d9488',
   placeholder_politician: '#64748b', // 疑似測試資料：灰
   party_info_missing: '#7c3aed',     // 補政黨資訊：紫
   deadline_due: '#15803d',              // 期限到了查進度：深綠（同進度那一族）
@@ -148,6 +149,7 @@ const VERIFY_BORDER: Record<string, string> = {
   lineage_participants: '#134e4a',
   lineage_handover: '#115e59',
   lineage_link: '#14b8a6',
+  lineage_status: '#0d9488',
   party_info: '#7c3aed',        // 政黨資訊：紫
 }
 // 驗證項目的 task_type 是 contribution_type：用貢獻牆同一套中文名，讀得出「在驗什麼」
@@ -174,6 +176,7 @@ const VERIFY_LABEL: Record<string, string> = {
   lineage_participants: '脈絡參與角色',
   lineage_handover: '脈絡交接',
   lineage_link: '脈絡上下級',
+  lineage_status: '脈絡現況',
   party_info: '政黨資訊',
 }
 

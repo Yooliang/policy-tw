@@ -112,6 +112,24 @@ async function lookupLineages(supabase: SupabaseLike, ids: readonly string[]): P
   return { rows, ok: true };
 }
 
+/** 現況的撤回／取代指到的那一列（脈絡＋截至日）存不存在：回「脈絡 id|截至日」的集合 */
+async function lookupStatusDates(supabase: SupabaseLike, ids: readonly string[]): Promise<LookupResult<Set<string>>> {
+  const rows = new Set<string>();
+  if (ids.length === 0) return { rows, ok: true };
+  try {
+    for (const chunk of chunksOf(ids)) {
+      // query-bounds: ok — ids 來自這一批交件（每筆一條脈絡），每段 IN_CHUNK 個；一條脈絡的現況歷史最多幾十列
+      const { data, error } = await supabase.from("lineage_statuses").select("lineage_id, as_of").in("lineage_id", chunk).limit(1000);
+      if (error) { console.error("precheck lineage_statuses lookup failed:", error.message); return { rows, ok: false }; }
+      for (const r of (data ?? []) as Array<{ lineage_id: string; as_of: string }>) rows.add(`${String(r.lineage_id).toLowerCase()}|${String(r.as_of).slice(0, 10)}`);
+    }
+  } catch (e) {
+    console.error("precheck lineage_statuses lookup threw:", e instanceof Error ? e.message : String(e));
+    return { rows, ok: false };
+  }
+  return { rows, ok: true };
+}
+
 async function lookupElectionRows(supabase: SupabaseLike, ids: readonly number[]): Promise<LookupResult<Set<number>>> {
   const rows = new Set<number>();
   if (ids.length === 0) return { rows, ok: true };
@@ -208,6 +226,7 @@ export async function precheckApplyTargets(
   const electionRowIds = new Set<number>();
   const taskIds = new Set<string>();
   const lineageIds = new Set<string>();
+  const statusLookupIds = new Set<string>();
   interface CandidacyCheck { index: number; politicianId: string; electionId: number; electionType: string; position: string | null }
   const candidacyChecks: CandidacyCheck[] = [];
 
@@ -299,6 +318,15 @@ export async function precheckApplyTargets(
         for (const k of ["upper_lineage_id", "lower_lineage_id"]) { const lid = str(p[k]); if (lid) lineageIds.add(lid.toLowerCase()); }
         break;
       }
+      // 現況：脈絡要在；撤回、取代指到的那一列也要在（只有這兩種才多查一次現況表）
+      case "lineage_status": {
+        const lid = str(p.lineage_id);
+        if (lid) {
+          lineageIds.add(lid.toLowerCase());
+          if (p.remove === true || str(p.replace_as_of)) statusLookupIds.add(lid.toLowerCase());
+        }
+        break;
+      }
     }
   }
 
@@ -309,7 +337,7 @@ export async function precheckApplyTargets(
     for (const it of (item.contribution_type === "cand_numbers" ? candNoItems(item.payload) : resultItems(item.payload))) resultIds.add(it.politician_election_id);
   }
 
-  const [politicians, policies, electionRows, tasks, participations, lineages, resultRows] = await Promise.all([
+  const [politicians, policies, electionRows, tasks, participations, lineages, resultRows, statusDates] = await Promise.all([
     lookupPoliticians(supabase, [...politicianIds]),
     lookupPolicies(supabase, [...policyIds]),
     lookupElectionRows(supabase, [...electionRowIds]),
@@ -317,6 +345,7 @@ export async function precheckApplyTargets(
     lookupParticipations(supabase, [...new Set(candidacyChecks.map((c) => c.politicianId))], [...new Set(candidacyChecks.map((c) => c.electionId))]),
     lookupLineages(supabase, [...lineageIds]),
     lookupResultCandidacies(supabase, [...resultIds]),
+    lookupStatusDates(supabase, [...statusLookupIds]),
   ]);
   const politicianRows = politicians.rows, policyRows = policies.rows, electionRowExists = electionRows.rows, taskRows = tasks.rows;
   const lineageRows = lineages.rows;
@@ -481,6 +510,20 @@ export async function precheckApplyTargets(
         for (const k of ["from_politician_id", "to_politician_id"]) {
           const pid = str(p[k]);
           if (pid) checkPolitician(i, pid, `payload.${k}`, "記不了交接");
+        }
+        break;
+      }
+      case "lineage_status": {
+        const lid = str(p.lineage_id)?.toLowerCase() ?? null;
+        const row = lid ? checkLineage(i, lid, "payload.lineage_id") : null;
+        // 撤回（remove）指 as_of 那一列、取代指 replace_as_of 那一列：要真的存在，不然落庫時沒有東西可拿掉
+        const remove = p.remove === true;
+        const target = remove ? str(p.as_of) : str(p.replace_as_of);
+        if (lid && row && target && statusDates.ok && !statusDates.rows.has(`${lid}|${target}`)) {
+          problems.push({
+            index: i, code: "target_not_found", path: remove ? "payload.as_of" : "payload.replace_as_of",
+            message: `脈絡「${row.title}」沒有截至 ${target} 的現況，${remove ? "沒有東西可以撤回" : "沒有東西可以取代"}：請照任務 target.current（或脈絡頁）的截至日帶`,
+          });
         }
         break;
       }

@@ -12,7 +12,7 @@
  */
 import type {
   HandoverType, Lineage, LineageHandover, LineageLevel, LineageLink, LineageLinkType, LineageParticipant, LineageSource,
-  LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
+  LineageStatus, LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
 } from '../types'
 import { isElectedTerm, isElectionVoted, taipeiToday } from './policy-stage'
 
@@ -105,12 +105,17 @@ export function mapLineage(row: RawLineage): Lineage | null {
       region: str(k.region), subRegion: str(k.sub_region), linkType: k.link_type as LineageLinkType, note: k.note,
       sourceUrl: k.source_url, sourceLocator: k.source_locator, source: mapSource(k.source, k.source_url),
     }))
+  const st = row.status
+  const status: LineageStatus | null = st && typeof st.text === 'string' && st.text && typeof st.as_of === 'string' && st.as_of && typeof st.source_url === 'string' && st.source_url
+    ? { phase: str(st.phase) ?? '', text: st.text, asOf: st.as_of.slice(0, 10), sourceUrl: st.source_url, source: mapSource(st.source, st.source_url) }
+    : null
   return {
     ...base,
     policyIds: (row.policy_ids ?? []).filter((x): x is string => typeof x === 'string'),
     participants,
     handovers,
     links,
+    status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

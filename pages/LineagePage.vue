@@ -9,7 +9,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowRight, ChevronLeft, FileText, GitFork, Loader2, Users, Waypoints } from 'lucide-vue-next'
+import { Activity, ArrowRight, ChevronLeft, FileText, GitFork, Loader2, Users, Waypoints } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import Avatar from '../components/Avatar.vue'
@@ -157,6 +157,14 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
         <div class="lg:col-span-2 space-y-6">
+          <!-- 現況：一句、截至日（出處講到這個狀態的日期）、出處；還沒有現況就整塊不出現 -->
+          <section v-if="lineage.status" class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-status">
+            <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><Activity class="text-slate-400" :size="22" />現況</h2>
+            <p class="text-slate-800 leading-relaxed break-words">{{ lineage.status.text }}</p>
+            <p class="mt-2 text-xs text-slate-500 break-words">
+              截至 {{ lineage.status.asOf }}<span class="text-slate-300">｜</span>出處：<a :href="lineage.status.sourceUrl" target="_blank" rel="noopener noreferrer" class="text-blue-700 underline underline-offset-2 break-all">{{ sourceLabel(lineage.status.source) || lineage.status.sourceUrl }}</a>
+            </p>
+          </section>
           <!-- 前後任：時間軸（沒有交接、也沒到該交接的時候只列政見，標題不講交接） -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-timeline">
             <h2 v-if="showHandovers" class="text-xl font-bold text-navy-900 mb-5 flex items-center gap-2"><Waypoints class="text-slate-400" :size="22" />時間軸：前後任怎麼交接</h2>

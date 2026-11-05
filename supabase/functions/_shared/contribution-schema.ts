@@ -17,6 +17,7 @@ import { charLength, DEADLINE_YEAR_MAX, DEADLINE_YEAR_MIN, isRealDate, POLICY_EL
 import {
   HANDOVER_TYPES, isOfficialUrl, isUnreadableSocial, LINEAGE_LEVELS, LINEAGE_MAX_POLICIES, LINEAGE_NOTE_MAX, LINEAGE_NOTE_MIN,
   LINEAGE_SUMMARY_MAX, LINEAGE_TITLE_MAX, LINEAGE_TITLE_MIN, LINK_NOTE_MAX, LINK_NOTE_MIN, LINK_TYPES, LOCATOR_MAX, MAX_PARTICIPANTS,
+  STATUS_NOTE_MAX, STATUS_NOTE_MIN, STATUS_PHASES, STATUS_TEXT_MAX, STATUS_TEXT_MIN, taipeiToday,
   PARTICIPANT_BASES, PARTICIPANT_NOTE_MAX, PARTICIPANT_ROLES, POLICY_ORIGINS,
 } from "./lineage.ts";
 
@@ -36,10 +37,10 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
 // cand_numbers（整批補號次，2026-10-30，#781）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers", "policy_subtopics"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers", "policy_subtopics", "lineage_status"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other", "issue_too_broad"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other", "issue_too_broad", "lineage_status_stale"] as const;
 
 /**
  * 地方基本統計（issue #508）：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例。
@@ -567,6 +568,34 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       if (p.source_url !== undefined && p.source_url !== null && p.source_url !== "" && !isHttpUrl(p.source_url)) push("payload.source_url", "source_url 要是 http(s) 網址，而且是這筆 source_urls 的其中一個");
       break;
     }
+    case "lineage_status": {
+      // 脈絡現況（policy-ops#201 第 2 期，協議 1.118.0）：單筆，一條脈絡一個截至日一列。
+      // 撤回（remove:true）只要 lineage_id＋as_of＋note；取代（replace_as_of）＝刪舊截至日那一列、寫這一筆新的。
+      if (!isUuid(p.lineage_id)) push("payload.lineage_id", "lineage_id 必填（這條脈絡的 uuid，任務的 target.lineage_id）");
+      if (!isRealDate(p.as_of)) push("payload.as_of", "as_of 必填（YYYY-MM-DD）：出處講到這個狀態的日期，不是你查的日子");
+      else if (p.as_of > taipeiToday()) push("payload.as_of", "as_of 不能是未來的日期（出處講到這個狀態的那一天；以台北日期為準）");
+      const remove = p.remove === true;
+      if (p.remove !== undefined && p.remove !== null && typeof p.remove !== "boolean") push("payload.remove", "remove 要是 true（撤回 as_of 那一列）或不填");
+      if (p.replace_as_of !== undefined && p.replace_as_of !== null && p.replace_as_of !== "") {
+        if (remove) push("payload.replace_as_of", "撤回（remove）不能同時取代（replace_as_of）：要嘛撤回 as_of 那一列，要嘛用新的一筆取代舊截至日那一列");
+        else if (!isRealDate(p.replace_as_of)) push("payload.replace_as_of", "replace_as_of 要是 YYYY-MM-DD：被取代的那一列的截至日");
+        else if (isRealDate(p.as_of) && p.replace_as_of === p.as_of) push("payload.replace_as_of", "replace_as_of 跟 as_of 一樣就是同一列：直接用新內容交（同一個截至日重交＝覆蓋），不必填 replace_as_of");
+      }
+      if (remove) {
+        if (!isStr(p.note, STATUS_NOTE_MIN, STATUS_NOTE_MAX)) push("payload.note", `撤回要在 note 寫為什麼那一列是錯的（${STATUS_NOTE_MIN}～${STATUS_NOTE_MAX} 字）`);
+        break;
+      }
+      if (!oneOf(STATUS_PHASES, p.phase)) push("payload.phase", "phase 要是 proposed（提案）／planning（規劃中）／approved（已核定）／in_progress（進行中）／completed（已完成）／paused（暫緩）／cancelled（已終止）之一");
+      if (!isStr(p.text, STATUS_TEXT_MIN, STATUS_TEXT_MAX)) push("payload.text", `text 必填（${STATUS_TEXT_MIN}～${STATUS_TEXT_MAX} 字）：一句現況，只寫出處有的事實、不評價`);
+      if (p.note !== undefined && p.note !== null && p.note !== "" && !isStr(p.note, 1, STATUS_NOTE_MAX)) push("payload.note", `note 最多 ${STATUS_NOTE_MAX} 字`);
+      for (const k of ["source_locator", "source_url"]) {
+        if (p[k] !== undefined && p[k] !== null && typeof p[k] !== "string") push(`payload.${k}`, "要是字串");
+      }
+      const locator = typeof p.source_locator === "string" ? p.source_locator.trim() : "";
+      if (!locator || charLength(locator) > LOCATOR_MAX) push("payload.source_locator", `source_locator 必填（1～${LOCATOR_MAX} 字）：這句現況在出處的哪裡（公告第幾點、議事錄日期與案由、報導哪一段）`);
+      if (p.source_url !== undefined && p.source_url !== null && p.source_url !== "" && !isHttpUrl(p.source_url)) push("payload.source_url", "source_url 要是 http(s) 網址，而且是這筆 source_urls 的其中一個");
+      break;
+    }
     case "lineage_link": {
       // 記脈絡關聯（#349，協議 1.52.0）：上下級是不同的脈絡，互相關聯。上級要在下級的上一層（落庫再對一次）。
       if (!isUuid(p.upper_lineage_id)) push("payload.upper_lineage_id", "upper_lineage_id 必填（上一級那條脈絡的 uuid）");
@@ -899,7 +928,7 @@ export function lineageSourceProblems(type: string, payload: unknown, sourceUrls
       if (!isObj(item) || item.remove === true) return;
       check(item.source_url, `payload.participants[${i}]`, item.basis === "official_record");
     });
-  } else if (type === "lineage_handover" || type === "lineage_link") {
+  } else if (type === "lineage_handover" || type === "lineage_link" || (type === "lineage_status" && p.remove !== true)) {
     check(p.source_url, "payload", false);
   }
   return out;
@@ -1018,7 +1047,7 @@ function validateContributionRequestInner(body: unknown, rosterCap: number): Val
       });
     }
     // 政策脈絡（#349）：角色、交接、關聯各自的出處要是這筆 source_urls 之一；臉書讀不到不收；官方紀錄要附官方網址
-    if (Array.isArray(sourceUrls) && (raw.contribution_type === "lineage_participants" || raw.contribution_type === "lineage_handover" || raw.contribution_type === "lineage_link")) {
+    if (Array.isArray(sourceUrls) && (raw.contribution_type === "lineage_participants" || raw.contribution_type === "lineage_handover" || raw.contribution_type === "lineage_link" || raw.contribution_type === "lineage_status")) {
       for (const problem of lineageSourceProblems(raw.contribution_type, raw.payload, sourceUrls as unknown[])) push(problem.path, problem.message);
     }
     // 政黨資訊（#346）：臉書、IG、Threads 讀不到（驗證者與系統都打不開），不算出處——跟學經歷、政策脈絡同一份清單

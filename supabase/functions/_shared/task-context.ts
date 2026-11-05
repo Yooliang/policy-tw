@@ -144,6 +144,8 @@ function shapeLineageBrief(row: Obj | null | undefined): Obj | null {
     participants: Array.isArray(row.participants) ? (row.participants as Obj[]).map((x) => pick(x, ["politician_id", "name", "role", "basis", "source_url", "source_locator"])) : [],
     handovers: Array.isArray(row.handovers) ? (row.handovers as Obj[]).map((x) => pick(x, ["from_politician_id", "from_name", "from_election_id", "to_politician_id", "to_name", "to_election_id", "handover_type", "decided_on", "note", "source_url"])) : [],
     links: Array.isArray(row.links) ? (row.links as Obj[]).map((x) => pick(x, ["direction", "lineage_id", "title", "level", "region", "link_type", "note"])) : [],
+    // 現行現況（policy-ops#201）：有才帶，沒有就不出現這一欄（既有脈絡任務的輸出在現況表有資料之前一個字不變）
+    ...(row.status && typeof row.status === "object" ? { status: pick(row.status as Obj, ["phase", "text", "as_of", "source_url", "source_locator"]) } : {}),
   };
 }
 
@@ -616,6 +618,7 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
       };
     case "handover_missing":
     case "lineage_roles_missing":
+    case "lineage_status_stale":
       return {
         lineage: shapeLineageBrief(data.lineage),
         lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
@@ -821,7 +824,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.lineage_policies = pols.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
     data.related_lineages = lins;
   }
-  if ((taskType === "handover_missing" || taskType === "lineage_roles_missing" || taskType === "lineage_link_candidate") && typeof target.lineage_id === "string") {
+  if ((taskType === "handover_missing" || taskType === "lineage_roles_missing" || taskType === "lineage_link_candidate" || taskType === "lineage_status_stale") && typeof target.lineage_id === "string") {
     const uppers = taskType === "lineage_link_candidate" && Array.isArray(target.upper_candidates)
       ? (target.upper_candidates as Obj[]).map((x) => String(x.lineage_id ?? "")) : [];
     const [lins, pols] = await Promise.all([
@@ -1229,6 +1232,11 @@ export const LINEAGE_VERIFY_HINT: Record<string, string> = {
     "核對交接：前後兩任要是這件事在這個地方真正的前任與後任；交接型態要有來源寫出後任實際怎麼處理——" +
     "接手、轉向、縮小、中止、重新開始各自對得上來源的描述；**中止要有來源明確寫出停止、喊卡、解約或終止**，只因為後任政見裡沒提就判中止的，投 disagree。" +
     "中止這一型要兩台不同機器的同意票才會上線。對得上投 agree；型態或前後任不對投 disagree 並寫來源實際怎麼說；打不開投 unsure。",
+  lineage_status:
+    "核對現況：①打開出處，text 的**每個字**都能在出處找到（超出原文的推論、預測、評價投 disagree）②as_of 是出處講到這個狀態的日期，不是查詢日、不是報導日以外的日子；" +
+    "只知道報導日的，報導日就是上限，日期比出處晚的投 disagree ③phase 與句子一致（句子寫「已核定」階段卻填 planning 就不對）④沒有更晚的公開文件把它推翻（簡單搜一下這件事的最新消息）。" +
+    "撤回（remove）：確認被指的那一列（as_of 那天）真的錯了（日期對不上出處、句子超出原文），note 有講清楚為什麼；取代（replace_as_of）：舊的那一列確實該換，新內容照上面四點驗。" +
+    "對得上投 agree；句子超出原文、日期是查詢日、階段與句子矛盾投 disagree 並寫是哪一點；打不開投 unsure（確認網頁不存在或與 payload 矛盾才投 disagree 並附反證）。",
   lineage_link:
     "核對上下級：upper 要在 lower 的上一級（中央之於縣市或鄉鎮、縣市之於同縣市的鄉鎮），兩件事之間要有實際的法規、補助核定或執行計畫連結，" +
     "方向對（top_down＝上級立法或補助、下級執行；bottom_up＝下級爭取、上級採納）。只是主題相近投 disagree；對得上投 agree；打不開投 unsure。",
@@ -1394,6 +1402,7 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
     }
     case "lineage_participants":
     case "lineage_handover":
+    case "lineage_status":
       return {
         lineage: shapeLineageBrief((data.lineages ?? [])[0]),
         lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
@@ -1735,9 +1744,10 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     data.lineages = lins;
     data.lineage_policies = pols;
   }
-  if ((contributionType === "lineage_participants" || contributionType === "lineage_handover") && typeof payload.lineage_id === "string") {
+  if ((contributionType === "lineage_participants" || contributionType === "lineage_handover" || contributionType === "lineage_status") && typeof payload.lineage_id === "string") {
     const people = contributionType === "lineage_participants"
       ? (Array.isArray(payload.participants) ? payload.participants as Obj[] : []).map((x) => String(x?.politician_id ?? ""))
+      : contributionType === "lineage_status" ? []
       : [String(payload.from_politician_id ?? ""), String(payload.to_politician_id ?? "")];
     const list = [...new Set(people.filter((x) => /^[0-9a-f-]{36}$/i.test(x)))];
     const [lins, pols, ps] = await Promise.all([
