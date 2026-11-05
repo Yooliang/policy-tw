@@ -24,6 +24,17 @@ Deno.test('目前是政見：其他承諾不含落選那屆，同屆排前面', 
   assertEquals(ids(r.policies), [6].map(String))
 })
 
+Deno.test('施政跟政見同區（政見區），目前是施政時行為同政見', () => {
+  const g = [mk(1, 2026, 'pledge'), mk(2, 2022, 'governance'), mk(3, 2022, 'policy'), mk(4, 2022, 'lost_pledge'), mk(5, 2018, 'pending_result')]
+  const split = (cur: T) => splitOtherPolicies(g, cur, cur.stage, (p) => p.stage, (a, b) => Number(b.id) - Number(a.id))
+  const a = split(mk(1, 2026, 'pledge'))
+  assertEquals(ids(a.policies), [3, 2].map(String), '目前是承諾：施政與政見都進政見區')
+  assertEquals(ids(a.pledges), [])
+  const b = split(mk(9, 2022, 'governance'))
+  assertEquals(ids(b.policies), [3, 2].map(String))
+  assertEquals(ids(b.pledges), [5, 1].map(String), '目前是施政：不列落選那屆，同 policy')
+})
+
 Deno.test('每區上限與空區', () => {
   const r = splitOtherPolicies([mk(1, 1, 'policy')], mk(9, 1, 'pledge'), 'pledge', (p) => p.stage, () => 0)
   assertEquals(r.pledges, [])

@@ -7,7 +7,7 @@
  */
 import { assertEquals } from 'jsr:@std/assert@1'
 import * as shared from '../supabase/functions/_shared/elected-term.ts'
-import { isElectedTerm, isElectionVoted, policyStage, taipeiToday, type StageElectionRecord } from './policy-stage.ts'
+import { isElectedTerm, isPostElectionStage, isElectionVoted, policyStage, taipeiToday, type StageElectionRecord } from './policy-stage.ts'
 import type { Policy } from '../types.ts'
 
 type P = Pick<Policy, 'status' | 'origin' | 'electionId'>
@@ -32,14 +32,14 @@ Deno.test('四種階段：承諾、政見、落選／退選的承諾、結果待
   assertEquals(policyStage(pledge(1999), [rec(1999, 'elected')], T, dateOf), 'pledge', '查不到投票日＝承諾')
 })
 
-Deno.test('任內提出的施政（origin 不是 pledge）一律是政見，不看結果', () => {
+Deno.test('任內提出的施政（origin 不是 pledge）一律是施政，不看結果', () => {
   const T = '2026-12-01'
   for (const origin of ['policy_address', 'assembly', 'budget'] as const) {
-    assertEquals(policyStage(pledge(2022, { origin, status: 'In Progress' as Policy['status'] }), [rec(2022, 'not_elected')], T, dateOf), 'policy', origin)
+    assertEquals(policyStage(pledge(2022, { origin, status: 'In Progress' as Policy['status'] }), [rec(2022, 'not_elected')], T, dateOf), 'governance', origin)
   }
-  assertEquals(policyStage(pledge(2022, { origin: 'policy_address' }), [], T, dateOf), 'policy', 'origin 標了施政就算 status 還是 Campaign Pledge')
+  assertEquals(policyStage(pledge(2022, { origin: 'policy_address' }), [], T, dateOf), 'governance', 'origin 標了施政就算 status 還是 Campaign Pledge')
   // origin 沒標：看 status
-  assertEquals(policyStage({ status: 'In Progress' as Policy['status'], origin: null, electionId: 2022 as number }, [], T, dateOf), 'policy')
+  assertEquals(policyStage({ status: 'In Progress' as Policy['status'], origin: null, electionId: 2022 as number }, [], T, dateOf), 'governance')
   assertEquals(policyStage({ status: 'Campaign Pledge' as Policy['status'], origin: null, electionId: 2022 as number }, [rec(2022, 'elected')], T, dateOf), 'policy')
   assertEquals(policyStage({ status: 'Campaign Pledge' as Policy['status'], origin: null, electionId: 2026 as number }, [rec(2026, 'elected')], '2026-11-01', dateOf), 'pledge')
   // origin=pledge 但 status 已離開 Campaign Pledge：仍是承諾來源，照結果判
@@ -95,4 +95,32 @@ Deno.test('底層函式跟 _shared/elected-term.ts 逐案一致（同一批資�
   for (const t of [0, Date.parse('2026-11-28T15:59:59Z'), Date.parse('2026-11-28T16:00:00Z'), Date.parse('2030-06-30T23:59:59Z')]) {
     assertEquals(taipeiToday(t), shared.taipeiToday(new Date(t)))
   }
+})
+
+Deno.test('施政：當選那一屆的承諾，狀態離開還沒開始（含跳票）＝施政；停在 Campaign Pledge／Proposed ＝政見', () => {
+  const T = '2026-12-01'
+  const elected = [rec(2022, 'elected')]
+  for (const status of ['Campaign Pledge', 'Proposed']) {
+    assertEquals(policyStage(pledge(2022, { status: status as Policy['status'] }), elected, T, dateOf), 'policy', status)
+  }
+  for (const status of ['In Progress', 'Achieved', 'Stalled', 'Failed']) {
+    assertEquals(policyStage(pledge(2022, { status: status as Policy['status'] }), elected, T, dateOf), 'governance', status)
+  }
+  // origin 沒標、靠 status 判來源：Proposed／In Progress 不是 Campaign Pledge ＝ 非承諾來源 ＝ 施政
+  assertEquals(policyStage({ status: 'Proposed' as Policy['status'], origin: null, electionId: 2022 as number }, elected, T, dateOf), 'governance')
+})
+
+Deno.test('施政只在當選那一屆分出來：落選、結果待補、選前仍是承諾階段，status 不影響', () => {
+  const T = '2026-12-01'
+  const prog = { status: 'In Progress' as Policy['status'] }
+  assertEquals(policyStage(pledge(2022, prog), [rec(2022, 'not_elected')], T, dateOf), 'lost_pledge')
+  assertEquals(policyStage(pledge(2022, prog), [rec(2022, 'withdrawn')], T, dateOf), 'lost_pledge')
+  assertEquals(policyStage(pledge(2022, prog), [rec(2022)], T, dateOf), 'pending_result')
+  assertEquals(policyStage(pledge(2026, prog), [rec(2026, 'elected')], '2026-11-01', dateOf), 'pledge')
+  assertEquals(policyStage(pledge(2022, { status: 'Failed' as Policy['status'] }), [rec(2022, 'not_elected')], T, dateOf), 'lost_pledge')
+})
+
+Deno.test('isPostElectionStage：政見與施政是選後，其餘不是', () => {
+  const got = (['pledge', 'policy', 'governance', 'lost_pledge', 'pending_result'] as const).map(isPostElectionStage)
+  assertEquals(got, [false, true, true, false, false])
 })

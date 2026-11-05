@@ -37,7 +37,7 @@ import { candidacyCrumbs, pkLinkFor } from '../lib/election-breadcrumbs'
 import { officeTitles } from '../lib/politician-office'
 import { electionOutcome } from '../lib/candidate-status'
 import type { Policy as PolicyT } from '../types'
-import { isElectionVoted, stageBadgeLabel, stageOfPolicy, stageWord } from '../lib/policy-stage'
+import { isElectionVoted, isPostElectionStage, stageBadgeLabel, stageOfPolicy, stageWord } from '../lib/policy-stage'
 import PolicyElements from '../components/PolicyElements.vue'
 import PolicyLineageCard from '../components/PolicyLineageCard.vue'
 import { ListChecks, Scale } from 'lucide-vue-next'
@@ -197,7 +197,7 @@ const isCampaign = computed(() => policy.value?.status === PolicyStatus.CAMPAIGN
  */
 const electionDateOf = (id: number) => getElectionById(id)?.electionDate
 const stage = computed(() => (policy.value ? stageOfPolicy(policy.value, politician.value, electionDateOf) : 'pledge'))
-const isPolicyStage = computed(() => stage.value === 'policy')
+const isPolicyStage = computed(() => isPostElectionStage(stage.value))
 const word = computed(() => stageWord(stage.value))
 /** 政見階段、狀態還停在 Campaign Pledge：沒有任何進度紀錄，畫面印「尚無進度紀錄」不印 0% */
 const noProgressRecord = computed(() => isPolicyStage.value && isCampaign.value)
@@ -424,6 +424,7 @@ usePageHead({
         electionLabel: policyElection.value?.shortName,
         category: policy.value.category,
         isPledge: !isPolicyStage.value,
+        word: word.value,
         statusLabel: statusText.value,
         progress: policy.value.progress,
       })
@@ -439,6 +440,7 @@ usePageHead({
         description: policy.value.description,
         category: policy.value.category,
         isPledge: !isPolicyStage.value,
+        word: word.value,
         statusLabel: statusText.value,
         proposedDate: policy.value.proposedDate,
         updatedAt: policy.value.updatedAt,

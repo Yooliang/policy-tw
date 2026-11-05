@@ -3,7 +3,7 @@ import type { CandidacyStatus, Policy } from '../types.ts'
 /**
  * 政見階段的單一判斷（維護者 2026-10-19，issue #672「承諾→政見」，R1、R6、R7）。
  *
- * 選前叫「承諾」；開票後當選者那一屆的承諾叫「政見」；落選、退選停在「承諾」；任內提出的施政（origin 不是 pledge）也是「政見」。
+ * 選前叫「承諾」；開票後當選者那一屆的承諾叫「政見」（內部稱政見（選後）），進度離開還沒開始就叫「施政」；落選、退選停在「承諾」；任內提出的（origin 不是 pledge）也是「施政」（2026-11-05 加施政）。
  * **讀取端推導、status 不動**：結果入庫、投票日一過就自動換階段，結果被更正也自動回去，沒有任何資料被寫。
  *
  * 全站問「已投票」「當選」只問這個檔：
@@ -43,11 +43,13 @@ export interface StageElectionRecord {
 /**
  * 政見的階段：
  *   pledge         承諾：選前（那一屆還沒投票）、沒標屆別、查不到投票日
- *   policy         政見：任內提出的施政；或那一屆已投票且提出者當選
+ *   policy         政見（選後）：那一屆已投票且提出者當選的承諾，狀態還在 Campaign Pledge／Proposed（還沒開始）
+ *   governance     施政：任內提出的（origin 不是 pledge）；或當選那一屆的承諾、狀態已離開「還沒開始」
+ *                  （In Progress／Achieved／Stalled／Failed；跳票也算，跟日本站 status != not_started 同一個意思）
  *   lost_pledge    落選、退選的承諾（停在承諾）
  *   pending_result 已投票但結果還沒補上（R5：維持「承諾」，畫面印現成小標「結果待補」）
  */
-export type PolicyStage = 'pledge' | 'policy' | 'lost_pledge' | 'pending_result'
+export type PolicyStage = 'pledge' | 'policy' | 'governance' | 'lost_pledge' | 'pending_result'
 
 /**
  * 來源是競選承諾：origin 標了 pledge；origin 沒標時看 status 是不是 Campaign Pledge（過渡期，同 lib/pledge-origin.ts）。
@@ -56,6 +58,14 @@ export type PolicyStage = 'pledge' | 'policy' | 'lost_pledge' | 'pending_result'
 function isPledgeSource(p: Pick<Policy, 'status' | 'origin'>): boolean {
   if (p.origin) return p.origin === 'pledge'
   return String(p.status) === 'Campaign Pledge'
+}
+
+/** 還沒開始的狀態：當選那一屆的承諾停在這兩個＝政見（選後）；離開這兩個＝施政 */
+const NOT_STARTED: ReadonlySet<string> = new Set(['Campaign Pledge', 'Proposed'])
+
+/** 選後的階段（政見（選後）、施政）：版型走「有進度可看」那一套，跟承諾階段分開。呼叫端問「選後或施政」一律用這個，不要比字串 */
+export function isPostElectionStage(stage: PolicyStage): boolean {
+  return stage === 'policy' || stage === 'governance'
 }
 
 /**
@@ -68,21 +78,26 @@ export function policyStage(
   today: string = taipeiToday(),
   electionDateOf?: (electionId: number) => string | null | undefined,
 ): PolicyStage {
-  if (!isPledgeSource(policy)) return 'policy'
+  if (!isPledgeSource(policy)) return 'governance'
   const eid = typeof policy.electionId === 'number' ? policy.electionId : null
   if (eid === null) return 'pledge'
   const records = (politicianElections ?? []).filter((r) => r.electionId === eid)
   const date = electionDateOf?.(eid) ?? records.find((r) => r.electionDate)?.electionDate ?? null
   if (!isElectionVoted(date, today)) return 'pledge'
   const statuses = records.map((r) => r.candidacyStatus ?? null)
-  if (isElectedTerm({ election_date: date, candidacy_statuses: statuses }, today)) return 'policy'
+  if (isElectedTerm({ election_date: date, candidacy_statuses: statuses }, today)) return NOT_STARTED.has(String(policy.status)) ? 'policy' : 'governance'
   if (statuses.includes('not_elected') || statuses.includes('withdrawn')) return 'lost_pledge'
   return 'pending_result'
 }
 
-/** 單條政見畫面上叫什麼：政見階段叫「政見」，其餘（承諾、落選／退選的承諾、結果待補）叫「承諾」（R3） */
-export function stageWord(stage: PolicyStage): '承諾' | '政見' {
-  return stage === 'policy' ? '政見' : '承諾'
+/**
+ * 單條畫面上叫什麼（維護者 2026-11-05「承諾 → 政見（選後）→ 施政 → 脈絡」）：
+ * 政見階段畫面上叫「政見」（「政見（選後）」只是內部用來分清階段的名字，不顯示，維護者 2026-11-05）、施政階段叫「施政」，其餘（承諾、落選／退選的承諾、結果待補）叫「承諾」（R3）。
+ * 只管單條的階段字；導覽、頁面標題、分類名稱的「政見」不走這裡。
+ */
+export function stageWord(stage: PolicyStage): '承諾' | '政見' | '施政' {
+  if (stage === 'policy') return '政見'
+  return stage === 'governance' ? '施政' : '承諾'
 }
 
 /**
@@ -91,7 +106,7 @@ export function stageWord(stage: PolicyStage): '承諾' | '政見' {
  */
 export function stageBadgeLabel(status: string | undefined, stage: PolicyStage): string | null {
   if (status !== 'Campaign Pledge') return null
-  return stage === 'policy' ? '提出' : '承諾'
+  return isPostElectionStage(stage) ? '提出' : '承諾'
 }
 
 /** 「那一條」的階段：用提出者的參選紀錄與選舉清單的投票日（頁面與元件共用，今天用台北日） */

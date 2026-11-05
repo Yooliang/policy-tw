@@ -35,7 +35,7 @@ import { levelCountyLinkGroups, LEVEL_TAB_TYPES } from '../lib/desk-level-groups
 import { useDeskNav } from '../composables/useDeskNav'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { electionYearOfDate, newerFirst, segmentOfId } from '../lib/election-route'
-import { stageOfPolicy, taipeiToday } from '../lib/policy-stage'
+import { isPostElectionStage, stageOfPolicy, taipeiToday } from '../lib/policy-stage'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
@@ -231,7 +231,7 @@ watch(politician, (p) => { if (p?.mergedInto) router.replace(`/politician/${p.me
 const today = ref(taipeiToday())
 onMounted(() => { today.value = taipeiToday() })
 const personPolicies = computed(() => politician.value ? policies.value.filter(p => p.politicianId === politician.value!.id) : [])
-const isPolicyOf = (p: Policy) => stageOfPolicy(p, politician.value, (id) => getElectionById(id)?.electionDate, today.value) === 'policy'
+const isPolicyOf = (p: Policy) => isPostElectionStage(stageOfPolicy(p, politician.value, (id) => getElectionById(id)?.electionDate, today.value))
 const campaignPledges = computed(() => personPolicies.value.filter(p => !isPolicyOf(p)))
 const historicalPolicies = computed(() => personPolicies.value.filter(p => isPolicyOf(p)))
 // 沒有承諾、但有政見的人：預設落在「政見」，但「承諾」分頁照常顯示（沒有就是空狀態；維護者 2026-10-29「很多人都有空白的頁面」，原本會把空的承諾分頁藏起來，造成有的人有、有的人沒有）

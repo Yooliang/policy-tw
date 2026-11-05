@@ -164,6 +164,8 @@ export interface PolicyDescriptionInput {
   category?: string
   /** 還在承諾階段（選前、落選、退選、結果待補；lib/policy-stage.ts）；其餘（當選者那一屆、任內施政）是政見 */
   isPledge: boolean
+  /** 單條的階段字（lib/policy-stage.ts 的 stageWord）；非承諾時用來取代預設的「政見」 */
+  word?: string
   /** 狀態中文標籤；承諾階段的狀態就是「承諾」，不重複寫；空字串＝沒有狀態可寫 */
   statusLabel?: string
   progress?: number
@@ -195,7 +197,7 @@ export function policyBodyForSummary(title: string, body: string | undefined): s
  */
 export function policyDescription(input: PolicyDescriptionInput): string {
   const who = input.personName ? `${input.personName}${input.party ? `（${input.party}）` : ''}` : ''
-  const lead = `${who}${input.isPledge ? '承諾' : '政見'}「${input.title}」`
+  const lead = `${who}${input.isPledge ? '承諾' : (input.word ?? '政見')}「${input.title}」`
   // 進度 0% 沒有資訊量（還沒開始就是 0），只在有進度時寫
   const progress = !input.isPledge && input.statusLabel
     ? `${input.statusLabel}${input.progress && input.progress > 0 ? `，進度 ${input.progress}%` : ''}`
@@ -289,6 +291,8 @@ export interface PolicyLdInput {
   description?: string
   category?: string
   isPledge: boolean
+  /** 單條的階段字；非承諾時當 additionalType（沒給＝政見） */
+  word?: string
   statusLabel?: string
   /** 提出日（YYYY-MM-DD）；多數政見沒有，沒有就不放 datePublished（不拿別的日期充數） */
   proposedDate?: string | null
@@ -326,7 +330,7 @@ export function policyLd(input: PolicyLdInput, siteUrl: string = SITE_URL): Reco
   return {
     '@context': 'https://schema.org',
     '@type': 'CreativeWork',
-    additionalType: input.isPledge ? '競選承諾' : '政見',
+    additionalType: input.isPledge ? '競選承諾' : (input.word ?? '政見'),
     name: input.title,
     headline: input.title,
     ...(description ? { description } : {}),

@@ -11,6 +11,7 @@ Deno.test('承諾頁歸選舉、政見頁歸政見', () => {
   assertEquals(sectionOfPolicy('lost_pledge', 2022), 'election')
   assertEquals(sectionOfPolicy('pending_result', 2022), 'election')
   assertEquals(sectionOfPolicy('policy', 2022), 'policy')
+  assertEquals(sectionOfPolicy('governance', 2022), 'policy', '施政留在政見區')
   assertEquals(sectionOfPolicy('pledge', null), 'policy', '沒標屆別不屬於任何一屆')
   assertEquals(sectionOfPolicy(null, 2026), 'policy')
 })

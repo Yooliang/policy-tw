@@ -11,10 +11,10 @@ import { mdStatusCell, policyBullet } from './md/format.ts'
 import { policyDescription } from './seo.ts'
 import type { Policy } from '../types.ts'
 
-const STAGES: PolicyStage[] = ['pledge', 'policy', 'lost_pledge', 'pending_result']
+const STAGES: PolicyStage[] = ['pledge', 'policy', 'governance', 'lost_pledge', 'pending_result']
 
-Deno.test('階段 → 單條叫什麼：只有政見階段叫政見，其餘（含落選、結果待補）叫承諾', () => {
-  assertEquals(STAGES.map(stageWord), ['承諾', '政見', '承諾', '承諾'])
+Deno.test('階段 → 單條叫什麼：政見階段叫政見、施政階段叫施政，其餘（含落選、結果待補）叫承諾', () => {
+  assertEquals(STAGES.map(stageWord), ['承諾', '政見', '施政', '承諾', '承諾'])
 })
 
 Deno.test('徽章：Campaign Pledge 承諾階段印「承諾」、政見階段印「提出」；其他 status 不管階段都不動', () => {
@@ -22,6 +22,7 @@ Deno.test('徽章：Campaign Pledge 承諾階段印「承諾」、政見階段�
   assertEquals(stageBadgeLabel('Campaign Pledge', 'lost_pledge'), '承諾')
   assertEquals(stageBadgeLabel('Campaign Pledge', 'pending_result'), '承諾')
   assertEquals(stageBadgeLabel('Campaign Pledge', 'policy'), '提出')
+  assertEquals(stageBadgeLabel('Campaign Pledge', 'governance'), '提出')
   for (const s of ['Proposed', 'In Progress', 'Achieved', 'Stalled', 'Failed', undefined]) {
     for (const stage of STAGES) assertEquals(stageBadgeLabel(s, stage), null, `${s} ${stage}`)
   }
@@ -30,6 +31,7 @@ Deno.test('徽章：Campaign Pledge 承諾階段印「承諾」、政見階段�
 Deno.test('md 一行的狀態欄：政見階段的 Campaign Pledge 印「政見」，承諾維持「競選承諾」（來源事實），其他狀態照舊', () => {
   const cp = { status: 'Campaign Pledge' as Policy['status'] }
   assertEquals(mdStatusCell(cp, 'policy'), '政見')
+  assertEquals(mdStatusCell(cp, 'governance'), '施政')
   assertEquals(mdStatusCell(cp, 'pledge'), '競選承諾')
   assertEquals(mdStatusCell(cp, 'lost_pledge'), '競選承諾')
   assertEquals(mdStatusCell(cp), '競選承諾', '呼叫端不知道階段就照舊')
@@ -42,6 +44,7 @@ Deno.test('md 一行的狀態欄：政見階段的 Campaign Pledge 印「政見�
 Deno.test('引用文字與單條描述依階段換字', () => {
   // 政見階段、還沒有進度的當選者那一屆：描述寫「政見「…」」，沒有狀態可寫就不寫（不印 0%）
   assertEquals(policyDescription({ title: 'T', isPledge: false, statusLabel: '', progress: 0, personName: '甲' }), '甲政見「T」。');
+  assertEquals(policyDescription({ title: 'T', isPledge: false, word: '施政', statusLabel: '進行中', progress: 40, personName: '甲' }), '甲施政「T」，進行中，進度 40%。');
   assertEquals(policyDescription({ title: 'T', isPledge: true, statusLabel: '承諾', progress: 0, personName: '甲' }), '甲承諾「T」。');
 })
 
@@ -51,7 +54,7 @@ async function source(rel: string): Promise<string> {
 
 Deno.test('引用文字依階段換字（usePageHead 載入會要 env，這裡釘原始碼）', async () => {
   const head = await source('composables/usePageHead.ts');
-  assertStringIncludes(head, "kind?: '承諾' | '政見'");
+  assertStringIncludes(head, "kind?: '承諾' | '政見' | '施政'");
   assertStringIncludes(head, '`，${opts.who}的${opts.kind ?? \'政見\'}`');
   assertStringIncludes(await source('pages/PolicyDetail.vue'), 'kind: word.value');
 });
@@ -76,7 +79,7 @@ Deno.test('接線：卡片、徽章、政見頁、人物頁、追蹤頁都讀階
   assert(!profile.includes('過往政績') && !profile.includes('政績追蹤'), '人物頁分頁不再有「政績」');
   assert(!profile.includes('<span class="hidden sm:inline">競選承諾</span>'), '承諾分頁字是「承諾」');
   const tracking = await source('pages/PolicyTracking.vue');
-  assertStringIncludes(tracking, "stageOf(policy) === 'policy'");
+  assertStringIncludes(tracking, 'isPostElectionStage(stageOf(policy))');
 });
 
 Deno.test('品牌字不動（R2）：導覽、頁型名、站名描述仍是「政見追蹤」「政見」', async () => {

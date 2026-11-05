@@ -4,7 +4,7 @@ import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import type { Policy } from '../types'
-import { stageBadgeLabel, stageOfPolicy } from '../lib/policy-stage'
+import { isPostElectionStage, stageBadgeLabel, stageOfPolicy } from '../lib/policy-stage'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
@@ -78,7 +78,7 @@ const filteredPolicies = computed(() => {
     const matchesSearch = policy.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
                          policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
     const matchesCheckpoints = !showCheckpointsOnly.value || checkpoints.value.includes(policy.id)
-    const isPolicy = stageOf(policy) === 'policy'
+    const isPolicy = isPostElectionStage(stageOf(policy))
     return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isPolicy
   })
 })

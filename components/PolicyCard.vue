@@ -7,7 +7,7 @@ import Avatar from './Avatar.vue'
 import { Calendar, Tag, ChevronRight, ThumbsUp, Star, ThumbsDown, Flame } from 'lucide-vue-next'
 import { policyElectionYear, policyYear } from '../lib/policy-date'
 import { electionOutcome } from '../lib/candidate-status'
-import { isElectionVoted, stageOfPolicy, stageWord } from '../lib/policy-stage'
+import { isElectionVoted, isPostElectionStage, stageOfPolicy, stageWord } from '../lib/policy-stage'
 import { isPledge } from '../lib/pledge-origin'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
@@ -38,7 +38,7 @@ const props = withDefaults(defineProps<{
 // 版型與字眼都讀這一個值，不再比 status
 const { elections, getElectionById } = useSupabase()
 const stage = computed(() => stageOfPolicy(props.policy, props.politician, (id) => getElectionById(id)?.electionDate))
-const isCampaign = computed(() => stage.value !== 'policy')
+const isCampaign = computed(() => !isPostElectionStage(stage.value))
 const word = computed(() => stageWord(stage.value))
 // 當選者那一屆、狀態還停在 Campaign Pledge＝沒有任何進度紀錄：印「尚無進度紀錄」，不印 0%
 const noProgressRecord = computed(() => props.policy.status === PolicyStatus.CAMPAIGN)
