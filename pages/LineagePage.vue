@@ -92,8 +92,11 @@ function proposerBadge(politicianId: string): string {
   const words = new Set(lineagePolicies.value
     .filter((p) => String(p.politicianId) === politicianId)
     .map((p) => stageWord(stageOfPolicy(p, person, (id) => electionDates.value.get(id), today))))
-  if (words.size === 2) return '承諾與政見提出者'
-  return `${[...words][0] ?? '政見'}提出者`
+  // 固定順序：承諾、政見、施政；一種＝「X提出者」，兩種以上＝「X與Y提出者」（三種＝「X、Y與Z提出者」）
+  const ordered = (['承諾', '政見', '施政'] as const).filter((w) => words.has(w))
+  if (ordered.length === 0) return '政見提出者'
+  if (ordered.length === 1) return `${ordered[0]}提出者`
+  return `${ordered.slice(0, -1).join('、')}與${ordered[ordered.length - 1]}提出者`
 }
 
 const place = computed(() => (lineage.value ? lineagePlace(lineage.value) : ''))

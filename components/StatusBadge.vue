@@ -24,7 +24,7 @@ const styles = computed(() => {
       return 'bg-red-100 text-red-800 border-red-200'
     case PolicyStatus.CAMPAIGN:
       // 當選者那一屆的承諾（政見階段）印「提出」，配色跟「提出」一樣（#672 R8）
-      if (props.stage === 'policy') return 'bg-slate-100 text-slate-800 border-slate-200'
+      if (props.stage === 'policy' || props.stage === 'governance') return 'bg-slate-100 text-slate-800 border-slate-200'
       return 'bg-violet-100 text-violet-800 border-violet-200 font-bold'
     default:
       return 'bg-gray-100 text-gray-800'

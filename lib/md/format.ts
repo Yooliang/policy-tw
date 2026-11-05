@@ -8,7 +8,7 @@
  * 也不在內文講排序方式或方法論。例外只有一句：縣市×主題是關鍵字比對、尚未逐筆確認，那是資料本身的狀態，必須明講。
  */
 import { SITE_URL, policyStatusLabel } from '../site'
-import type { PolicyStage } from '../policy-stage'
+import { stageWord, type PolicyStage } from '../policy-stage'
 import { comparePerson } from '../person-name'
 import type { Election, Policy, SourceRef } from '../../types'
 
@@ -235,7 +235,7 @@ export function progressText(p: Pick<Policy, 'status' | 'progress'>): string | n
  * 其他狀態照 policyStatusLabel。沒給階段（呼叫端不知道提出者的結果）就照舊。#672 單條規則，status 不動。
  */
 export function mdStatusCell(p: Pick<Policy, 'status'>, stage?: PolicyStage): string | null {
-  if (stage === 'policy' && String(p.status) === 'Campaign Pledge') return '政見'
+  if ((stage === 'policy' || stage === 'governance') && String(p.status) === 'Campaign Pledge') return stageWord(stage)
   return policyStatusLabel(String(p.status)) || null
 }
 

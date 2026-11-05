@@ -26,7 +26,7 @@ export function sectionOfRoute(name: unknown): DeskSection | null {
  * @param electionId 該條所屬選舉；沒標屆別＝不屬於任何一屆
  */
 export function sectionOfPolicy(stage: string | null | undefined, electionId: number | null | undefined): DeskSection {
-  return stage && stage !== 'policy' && typeof electionId === 'number' ? 'election' : 'policy'
+  return stage && stage !== 'policy' && stage !== 'governance' && typeof electionId === 'number' ? 'election' : 'policy'
 }
 
 /**
