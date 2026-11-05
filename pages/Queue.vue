@@ -59,7 +59,7 @@ const STATUSES: { key: Status; label: string; bar: string }[] = [
   { key: 'dead_end', label: '查無等票', bar: '#fbbf24' },
   { key: 'saturated', label: '額滿', bar: '#f97316' },
   { key: 'question_full', label: '提問滿額', bar: '#8b5cf6' },
-  { key: 'parked', label: '停放中', bar: '#06b6d4' },
+  { key: 'parked', label: '等驗證', bar: '#06b6d4' },
   { key: 'cooling', label: '冷卻', bar: '#64748b' },
   { key: 'blocked', label: '擋下', bar: '#ef4444' },
 ]
@@ -208,7 +208,7 @@ const cards = computed(() => {
   return [
     { label: '可派', n: t.ready ?? 0 },
     { label: '被擋（查無等票＋額滿＋提問滿額）', n: (t.dead_end ?? 0) + (t.saturated ?? 0) + (t.question_full ?? 0) },
-    { label: '停放中', n: t.parked ?? 0 },
+    { label: '等驗證', n: t.parked ?? 0 },
     { label: '冷卻', n: t.cooling ?? 0 },
     { label: '擋下', n: t.blocked ?? 0 },
   ]
@@ -327,7 +327,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </section>
 
       <section v-if="parkedTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-        <h2 class="font-black text-navy-900 mb-3">停放中 {{ fmt(parkedTotal) }} 筆</h2>
+        <h2 class="font-black text-navy-900 mb-3">已交件、等驗證 {{ fmt(parkedTotal) }} 筆</h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[36rem]">
             <thead class="text-left text-xs text-slate-500">
