@@ -50,7 +50,7 @@ Deno.test('進度過半的政見：不是競選承諾而且進度大於 50；不
 Deno.test('讀取端不再讀 related_policies：型別、轉換、預渲染、邊緣渲染、三張頁面都不碰互指欄位', async () => {
   const files = [
     '../types.ts', '../composables/useSupabase.ts', './ssg/page-data.ts', './ssr/loaders.ts',
-    '../pages/PolicyDetail.vue', '../pages/PolicyAnalysis.vue', '../pages/PolicyDeepAnalysis.vue',
+    '../pages/PolicyDetail.vue', '../pages/PolicyAnalysis.vue', '../pages/PolicyTracking.vue', '../pages/PolicyDeepAnalysis.vue',
   ]
   for (const f of files) {
     const text = await Deno.readTextFile(new URL(f, import.meta.url))
@@ -67,5 +67,7 @@ Deno.test('讀取端不再讀 related_policies：型別、轉換、預渲染、�
   for (const f of ['PolicyDetail.vue', 'PolicyDeepAnalysis.vue']) {
     assert((await Deno.readTextFile(new URL(`../pages/${f}`, import.meta.url))).includes('lineageChain'), `${f} 要用 lineageChain`)
   }
-  assert((await Deno.readTextFile(new URL('../pages/PolicyAnalysis.vue', import.meta.url))).includes('isProgressCase'))
+  // 進度過半的政見移到全部政見（#201）：/tracking 的進度篩選用同一支，/analysis 只剩政策脈絡
+  assert((await Deno.readTextFile(new URL('../pages/PolicyTracking.vue', import.meta.url))).includes('isProgressCase'))
+  assertFalse((await Deno.readTextFile(new URL('../pages/PolicyAnalysis.vue', import.meta.url))).includes('isProgressCase'), '/analysis 只列政策脈絡')
 })

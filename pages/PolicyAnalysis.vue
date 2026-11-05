@@ -3,22 +3,18 @@ import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import Avatar from '../components/Avatar.vue'
-import { Search, Waypoints, ArrowRight, Activity } from 'lucide-vue-next'
+import { Search, Waypoints } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
-import { policyMatchesRegion } from '../lib/policy-region'
-import { policyYear } from '../lib/policy-date'
-import { isProgressCase } from '../lib/policy-chain'
 import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
 
 /**
  * /analysis：政策脈絡一覽（#349，2026-10-06；原本叫「市政接力」，網址不變）。
  * 上半是政策脈絡（一件事在某一層級、某一地方的來龍去脈，點進 /lineage/:id）；
- * 下半保留原本的「進度過半的政見」卡片，連到 /analysis/:policyId——那些網址已經被收錄，要繼續有站內連結。
+ * 「進度過半的政見」是政見不是脈絡，已移到全部政見（/tracking?focus=progress，#201）；/analysis/:policyId 深度分析頁照舊。
  */
-const { policies, politicians, categories, elections, ensurePolicies, lineages, ensureLineages } = useSupabase()
+const { categories, lineages, ensureLineages } = useSupabase()
 const { globalRegion } = useGlobalState()
 const searchTerm = ref('')
 const selectedCategory = ref('All')
@@ -35,32 +31,11 @@ const lineageList = computed(() =>
       || (a.region ?? '').localeCompare(b.region ?? '', 'zh-Hant-TW')
       || a.title.localeCompare(b.title, 'zh-Hant-TW')))
 
-// 縣市過濾：與政見追蹤頁同一套判斷（政見所屬政治人物的 region）；選了縣市而 0 筆就顯示空狀態
-const regionPolicies = computed(() =>
-  policies.value.filter(policy => policyMatchesRegion(policy, politicians.value, globalRegion.value))
-)
-
-/**
- * 進度過半的政見（原本的「市政接力」卡片）：每一張卡一條政見——不是競選承諾、進度過半（lib/policy-chain.ts 的 isProgressCase，
- * lib/ssg/page-data.ts 的 analysisListedPolicyIds 用同一支，預渲染的 /analysis/:policyId 就是這些）。
- * #349 第二階段 A 拿掉了原本沿 related_policies 把接力鏈併成一張卡的那一支（那張表線上 0 列）；同一件事的關聯看上面的政策脈絡。
- */
-const progressCases = computed(() => {
-  let result = regionPolicies.value.filter(isProgressCase).map(policy => ({
-    id: `case-${policy.id}`, targetId: policy.id, title: policy.title, category: policy.category, description: policy.description,
-    politicianIds: [policy.politicianId], startYear: policyYear(policy, elections.value), progress: policy.progress,
-  }))
-  if (selectedCategory.value !== 'All') result = result.filter(c => c.category === selectedCategory.value)
-  if (searchTerm.value.trim()) result = result.filter(c => c.title.toLowerCase().includes(searchTerm.value.toLowerCase()))
-  return result
-})
-
 usePageHead({
   title: LINEAGE_NAME,
   description: '政策脈絡：一件事在某一層級、某一地方的來龍去脈。',
 })
-// 政見清單與脈絡都是按需載入的；這一頁兩份都要整份
-onMounted(() => { ensurePolicies(); ensureLineages() })
+onMounted(() => { ensureLineages() })
 </script>
 
 <template>
@@ -81,7 +56,7 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
           <input
             v-model="searchTerm"
             type="text"
-            placeholder="搜尋政策脈絡或政見（如：捷運、社會住宅）..."
+            placeholder="搜尋政策脈絡（如：捷運、社會住宅）..."
             class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400 shadow-sm"
           />
         </div>
@@ -155,44 +130,6 @@ onMounted(() => { ensurePolicies(); ensureLineages() })
               <span>參與者 {{ lineageCounts(l).people }} 位</span>
               <span v-if="lineageCounts(l).handovers > 0">交接 {{ lineageCounts(l).handovers }} 筆</span>
               <span>上下級 {{ lineageCounts(l).links }} 條</span>
-            </span>
-          </router-link>
-        </div>
-      </section>
-
-      <!-- 進度過半的政見（原本的卡片，連到 /analysis/:policyId，網址照舊） -->
-      <section data-testid="progress-cases">
-        <h2 class="text-2xl font-black text-navy-900 mb-6 flex items-center gap-2"><Activity class="text-emerald-600" :size="24" />進度過半的政見</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div v-if="progressCases.length === 0" class="col-span-full text-center py-16 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-300">
-            <Search :size="40" class="mx-auto mb-3 opacity-20" />
-            <p class="font-bold">沒有找到符合條件的政見。</p>
-            <p class="text-sm mt-1">試試其他縣市或分類。</p>
-          </div>
-          <router-link
-            v-for="c in progressCases"
-            :key="c.id"
-            :to="`/analysis/${c.targetId}`"
-            class="group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:border-blue-400 transition-all p-6 flex flex-col"
-          >
-            <span class="text-xs font-bold text-slate-500 mb-2">{{ c.category }}<template v-if="c.startYear">・{{ c.startYear }} 起</template></span>
-            <span class="text-xl font-black text-navy-900 group-hover:text-blue-700 leading-snug break-words">{{ c.title }}</span>
-            <span class="text-sm text-slate-600 mt-2 line-clamp-2">{{ c.description }}</span>
-            <span class="mt-4 h-2 w-full bg-slate-100 rounded-full overflow-hidden block">
-              <span class="block h-full bg-blue-600 rounded-full" :style="{ width: `${c.progress}%` }"></span>
-            </span>
-            <span class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
-              <span class="flex -space-x-2">
-                <Avatar
-                  v-for="pid in c.politicianIds"
-                  :key="pid"
-                  :src="politicians.find(pol => pol.id === pid)?.avatarUrl"
-                  :name="politicians.find(pol => pol.id === pid)?.name || ''"
-                  size="sm"
-                  class="border-2 border-white"
-                />
-              </span>
-              <span class="text-sm font-bold text-blue-700 inline-flex items-center gap-1">看深度分析 <ArrowRight :size="16" /></span>
             </span>
           </router-link>
         </div>

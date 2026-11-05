@@ -14,6 +14,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { policyMatchesRegion } from '../lib/policy-region'
 import { dueDeadlinePolicies } from '../lib/policy-elements'
+import { isProgressCase } from '../lib/policy-chain'
 import { taipeiDay } from '../lib/election-list'
 import { RouterLink } from 'vue-router'
 import { CalendarClock } from 'lucide-vue-next'
@@ -39,6 +40,9 @@ const searchTerm = ref('')
 // 「我的關注」從網址進來（頁籤指 /tracking?view=mine），不能只是本頁的 local 狀態，
 // 不然從別頁點那顆按鈕會落到全部政見。
 const view = ref<'all' | 'mine'>('all')
+// 進度／期限快篩（#201）：全部、進度過半（isProgressCase）、期限已到（deadlineDue）；?focus=progress|due
+const FOCUS_OPTIONS = [['all', '全部'], ['progress', '進度過半'], ['due', '期限已到']] as const
+const focus = ref<'all' | 'progress' | 'due'>('all')
 const showCheckpointsOnly = computed({
   get: () => view.value === 'mine',
   set: (v: boolean) => { view.value = v ? 'mine' : 'all' },
@@ -48,6 +52,7 @@ const showCheckpointsOnly = computed({
 useRegionQuerySync({ routeName: 'tracking', extra: {
   category: queryField(selectedCategory, 'All'),
   view: queryField(view, 'all', { allowed: ['all', 'mine'] as const }),
+  focus: queryField(focus, 'all', { allowed: ['all', 'progress', 'due'] as const }),
 } })
 // 我的關注改走 useCheckpoints（2026-09-17）
 const { checkpoints } = useCheckpoints()
@@ -79,14 +84,15 @@ const filteredPolicies = computed(() => {
                          policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
     const matchesCheckpoints = !showCheckpointsOnly.value || checkpoints.value.includes(policy.id)
     const isPolicy = isPostElectionStage(stageOf(policy))
-    return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isPolicy
+    const matchesFocus = focus.value === 'all' || (focus.value === 'progress' ? isProgressCase(policy) : dueIds.value.has(policy.id))
+    return matchesLocation && matchesCategory && matchesSearch && matchesCheckpoints && isPolicy && matchesFocus
   })
 })
 
 /**
  * 期限已到的政見（2026-10-05 #364）：原文寫的達成期限已經過了、還沒標達成或跳票、期限之後也沒有進度紀錄。
  * 條件跟派工臂 deadline_due 同一套（lib/policy-elements.ts 的 deadlineDue）——這些會派給 AI 代理去查做到沒有。
- * 只看縣市篩選（跟這一頁的縣市選擇一致），不看分類與關鍵字：這是一份待查清單，不是搜尋結果。
+ * 期限已到只是 focus 篩選的一種：與縣市、分類、關鍵字一起疊加（#201）。
  */
 const duePolicies = computed(() => dueDeadlinePolicies(
   policies.value.filter(p => policyMatchesRegion(p, politicians.value, selectedLocation.value)),
@@ -96,6 +102,9 @@ const duePolicies = computed(() => dueDeadlinePolicies(
     candidacyStatusOf: (p) => politicianById.value.get(String(p.politicianId))?.elections?.find(e => e.electionId === p.electionId)?.candidacyStatus,
   },
 ))
+const dueIds = computed(() => new Set(duePolicies.value.map(d => d.policy.id)))
+/** 期限已到的表：疊加分類與關鍵字後的清單（filteredPolicies 已含 focus=due 的判斷） */
+const dueRows = computed(() => { const ok = new Set(filteredPolicies.value.map(p => p.id)); return duePolicies.value.filter(d => ok.has(d.policy.id)) })
 const STATUS_TEXT: Record<string, string> = {
   Proposed: '已提出', 'In Progress': '推動中', Stalled: '滯後',
 }
@@ -142,7 +151,7 @@ function goToPage(n: number) {
   page.value = Math.min(Math.max(1, n), pageCount.value)
   listTop.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-watch([selectedLocation, selectedCategory, searchTerm, view], () => { page.value = 1 })
+watch([selectedLocation, selectedCategory, searchTerm, view, focus], () => { page.value = 1 })
 // 畫面上只說「有幾筆顯示不出來」；要 debug 的人才需要 id，那進 devtools
 watch(unrenderablePolicies, (list) => {
   if (list.length > 0) {
@@ -181,6 +190,22 @@ usePageHead({
             class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-navy-900 font-medium placeholder:text-slate-400 shadow-sm"
           />
         </div>
+      </div>
+
+      <!-- 進度／期限快篩 -->
+      <div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="進度與期限" data-testid="tracking-focus">
+        <button
+          v-for="[key, label] in FOCUS_OPTIONS"
+          :key="key"
+          type="button"
+          :aria-pressed="focus === key"
+          :data-testid="`focus-${key}`"
+          @click="focus = key"
+          :class="[
+            'px-4 py-2 rounded-full text-sm font-bold border transition-all',
+            focus === key ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+          ]"
+        >{{ label }}</button>
       </div>
 
       <!-- 分類篩選：手機版用下拉選單。18 個分類攤開會佔掉整個首屏，
@@ -237,12 +262,12 @@ usePageHead({
       </div>
 
       <!-- 期限已到的政見（#364）：一張待查清單，表格裡的政見與人物都是真連結 -->
-      <section v-if="!showCheckpointsOnly" class="mb-10 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 text-left" data-testid="due-policies">
+      <section v-if="focus === 'due'" class="mb-10 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 text-left" data-testid="due-policies">
         <h2 class="text-lg font-bold text-navy-900 flex items-center gap-2">
           <CalendarClock :size="20" class="text-amber-600" />期限已到的政見
-          <span class="text-sm font-medium text-slate-500">（{{ duePolicies.length }}）</span>
+          <span class="text-sm font-medium text-slate-500">（{{ dueRows.length }}）</span>
         </h2>
-        <p v-if="duePolicies.length === 0" class="mt-4 text-sm text-slate-400">目前沒有期限已到、還沒有後續的政見。</p>
+        <p v-if="dueRows.length === 0" class="mt-4 text-sm text-slate-400">沒有找到符合條件的政見。</p>
         <div v-else class="mt-4 overflow-x-auto -mx-5 px-5 sm:mx-0 sm:px-0">
           <table class="w-full min-w-[36rem] text-sm text-left border-collapse">
             <thead>
@@ -254,7 +279,7 @@ usePageHead({
               </tr>
             </thead>
             <tbody>
-              <tr v-for="d in duePolicies" :key="d.policy.id" class="align-top">
+              <tr v-for="d in dueRows" :key="d.policy.id" class="align-top">
                 <td class="py-2 pr-3 border-b border-slate-100"><RouterLink :to="`/policy/${d.policy.id}`" class="font-bold text-navy-900 hover:text-blue-700 hover:underline">{{ d.policy.title }}</RouterLink></td>
                 <td class="py-2 pr-3 border-b border-slate-100 whitespace-nowrap">
                   <RouterLink v-if="politicianById.get(String(d.policy.politicianId))" :to="`/politician/${d.policy.politicianId}`" class="text-blue-700 hover:underline">{{ politicianById.get(String(d.policy.politicianId))!.name }}</RouterLink>
@@ -284,7 +309,7 @@ usePageHead({
         </div>
       </div>
 
-      <div v-else ref="listTop" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left scroll-mt-24">
+      <div v-else-if="focus !== 'due'" ref="listTop" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 text-left scroll-mt-24">
         <template v-if="filteredPolicies.length > 0">
           <PolicyCard
             v-for="policy in pagedPolicies"
