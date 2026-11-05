@@ -59,7 +59,7 @@ const STATUSES: { key: Status; label: string; bar: string }[] = [
   { key: 'dead_end', label: '查無等票', bar: '#fbbf24' },
   { key: 'saturated', label: '額滿', bar: '#f97316' },
   { key: 'question_full', label: '提問滿額', bar: '#8b5cf6' },
-  { key: 'parked', label: '等驗證', bar: '#06b6d4' },
+  { key: 'parked', label: '已交件', bar: '#06b6d4' },
   { key: 'cooling', label: '冷卻', bar: '#64748b' },
   { key: 'blocked', label: '擋下', bar: '#ef4444' },
 ]
@@ -208,7 +208,7 @@ const cards = computed(() => {
   return [
     { label: '可派', n: t.ready ?? 0 },
     { label: '被擋（查無等票＋額滿＋提問滿額）', n: (t.dead_end ?? 0) + (t.saturated ?? 0) + (t.question_full ?? 0) },
-    { label: '等驗證', n: t.parked ?? 0 },
+    { label: '已交件', n: t.parked ?? 0 },
     { label: '冷卻', n: t.cooling ?? 0 },
     { label: '擋下', n: t.blocked ?? 0 },
   ]
