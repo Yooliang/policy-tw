@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Undo2 } from 'lucide-vue-next'
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget, type HistoryWebRequest } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
+import RequestReports from './RequestReports.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
@@ -150,9 +151,7 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
             <p><span class="text-slate-500">目前：</span>{{ item.r.status_label }}<template v-if="item.r.closed_at">，{{ formatDate(item.r.closed_at) }} 處理完</template></p>
             <div v-if="item.r.reports?.length">
               <p class="text-slate-500">之後代理的回報：</p>
-              <ul class="list-disc pl-5 space-y-0.5">
-                <li v-for="rep in item.r.reports" :key="rep.id">{{ formatDate(rep.created_at) }}　{{ rep.type_label }}（{{ rep.status_label }}）<span v-if="rep.agent_name" class="text-slate-400">・{{ rep.agent_name }}</span></li>
-              </ul>
+              <RequestReports :reports="item.r.reports" :agent-display="agentDisplay" />
             </div>
             <p v-else class="text-slate-500">還沒有代理交件回報。</p>
           </div>
