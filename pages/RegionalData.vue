@@ -92,7 +92,7 @@ const regionInfo = computed(() => {
     let township_mayor_count = 0
     let representative_count = 0
     let village_chief_count = 0
-    let policy_count = 0
+    let elected_policy_count = 0
 
     for (const county of allCounties) {
       const cityLevel = regionStats.value.find(s => s.region === county && s.sub_region === null)
@@ -104,7 +104,7 @@ const regionInfo = computed(() => {
         township_mayor_count += cityLevel.township_mayor_count || 0
         representative_count += cityLevel.representative_count || 0
         village_chief_count += cityLevel.village_chief_count || 0
-        policy_count += cityLevel.policy_count || 0
+        elected_policy_count += cityLevel.elected_policy_count || 0
       } else {
         // 沒有縣市層級，加總鄉鎮區統計
         const subRegionStats = regionStats.value.filter(s => s.region === county && s.sub_region !== null && s.village === null)
@@ -114,7 +114,7 @@ const regionInfo = computed(() => {
         township_mayor_count += subRegionStats.reduce((sum, s) => sum + (s.township_mayor_count || 0), 0)
         representative_count += subRegionStats.reduce((sum, s) => sum + (s.representative_count || 0), 0)
         village_chief_count += subRegionStats.reduce((sum, s) => sum + (s.village_chief_count || 0), 0)
-        policy_count += subRegionStats.reduce((sum, s) => sum + (s.policy_count || 0), 0)
+        elected_policy_count += subRegionStats.reduce((sum, s) => sum + (s.elected_policy_count || 0), 0)
       }
     }
 
@@ -125,7 +125,7 @@ const regionInfo = computed(() => {
       township_mayor_count,
       representative_count,
       village_chief_count,
-      policy_count,
+      elected_policy_count,
     }
   }
 
@@ -151,7 +151,7 @@ const regionInfo = computed(() => {
       township_mayor_count: subRegionStats.reduce((sum, s) => sum + (s.township_mayor_count || 0), 0),
       representative_count: subRegionStats.reduce((sum, s) => sum + (s.representative_count || 0), 0),
       village_chief_count: subRegionStats.reduce((sum, s) => sum + (s.village_chief_count || 0), 0),
-      policy_count: subRegionStats.reduce((sum, s) => sum + (s.policy_count || 0), 0),
+      elected_policy_count: subRegionStats.reduce((sum, s) => sum + (s.elected_policy_count || 0), 0),
     }
   }
 
@@ -162,7 +162,7 @@ const regionInfo = computed(() => {
     township_mayor_count: 0,
     representative_count: 0,
     village_chief_count: 0,
-    policy_count: 0
+    elected_policy_count: 0
   }
 })
 
@@ -175,7 +175,7 @@ const getSubRegionStats = (subRegion: string) => {
     )
     return {
       politicians: stats?.total_politicians || 0,
-      policies: stats?.policy_count || 0
+      policies: stats?.elected_policy_count || 0
     }
   }
   // 一般模式：subRegion 是鄉鎮區名稱
@@ -186,7 +186,7 @@ const getSubRegionStats = (subRegion: string) => {
   )
   return {
     politicians: stats?.total_politicians || 0,
-    policies: stats?.policy_count || 0
+    policies: stats?.elected_policy_count || 0
   }
 }
 
@@ -221,13 +221,13 @@ usePageHead({
 
             <div class="space-y-4">
               <div class="grid grid-cols-2 gap-3">
-                <div class="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                  <span class="text-sm font-bold text-slate-500">政治人物</span>
-                  <span class="text-2xl font-black text-navy-900">{{ regionInfo.total_politicians }}</span>
+                <div class="p-4 bg-slate-50 rounded-2xl">
+                  <p class="text-sm font-bold text-slate-500 whitespace-nowrap mb-1">政治人物</p>
+                  <p class="text-2xl font-black text-navy-900">{{ regionInfo.total_politicians }}</p>
                 </div>
-                <div class="flex items-center justify-between p-4 bg-blue-50 rounded-2xl">
-                  <span class="text-sm font-bold text-slate-500">政見數</span>
-                  <span class="text-2xl font-black text-blue-600">{{ regionInfo.policy_count || 0 }}</span>
+                <div class="p-4 bg-blue-50 rounded-2xl">
+                  <p class="text-sm font-bold text-slate-500 whitespace-nowrap mb-1">政見數</p>
+                  <p class="text-2xl font-black text-blue-600">{{ regionInfo.elected_policy_count || 0 }}</p>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-3">
