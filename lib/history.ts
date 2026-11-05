@@ -93,10 +93,10 @@ function headers(): Record<string, string> {
   return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
 }
 
-export async function fetchHistory(target: HistoryTarget, id: string, opts: { limit?: number; cursor?: string | null } = {}): Promise<HistoryResponse> {
+export async function fetchHistory(target: HistoryTarget, id: string, opts: { limit?: number; cursor?: string | null; signal?: AbortSignal } = {}): Promise<HistoryResponse> {
   const params = new URLSearchParams({ target, id, limit: String(opts.limit ?? 20) })
   if (opts.cursor) params.set('cursor', opts.cursor)
-  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/history?${params}`, { headers: headers() })
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/history?${params}`, { headers: headers(), signal: opts.signal })
   const body = await res.json().catch(() => null)
   if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
   return body as HistoryResponse

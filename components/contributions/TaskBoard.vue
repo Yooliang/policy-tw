@@ -5,6 +5,11 @@ import { hostOf, shortUrlsIn } from '../../lib/url'
 import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, AlertCircle, Inbox, ExternalLink, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { TASK_TYPE_LABEL, taskTypeLabel } from '../../lib/task-labels'
+import { fetchHistory, type HistoryWebRequestReport } from '../../lib/history'
+import { withTimeoutAndRetry } from '../../lib/retry'
+import RequestReports from '../history/RequestReports.vue'
+import ContributionDetail from '../history/ContributionDetail.vue'
+import LoadError from '../LoadError.vue'
 
 /**
  * 看板「任務」分頁：手動任務（維護者建／代理提議／網站請求／系統裁決）的 open 與 closed，加上自動缺口的數量。
@@ -32,7 +37,7 @@ interface BoardTask {
   /** 代理針對這筆任務交的貢獻：筆數與最接近通過那一筆的票數（後端 _shared/task-votes.ts） */
   votes?: {
     submissions: number
-    leading: { contribution_type?: string; status: string; agree_count: number; disagree_count: number; required_agree: number; score: number; target_score: number; unsure_count: number; verdict: string | null } | null
+    leading: { contribution_id?: string; contribution_type?: string; status: string; agree_count: number; disagree_count: number; required_agree: number; score: number; target_score: number; unsure_count: number; verdict: string | null } | null
   }
 }
 
@@ -118,8 +123,40 @@ const expanded = ref<Set<string>>(new Set())
 function toggle(id: string) {
   const next = new Set(expanded.value)
   if (next.has(id)) next.delete(id)
-  else next.add(id)
+  else {
+    next.add(id)
+    const t = tasks.value.find(x => x.task_id === id)
+    if (t) void loadReports(t)
+  }
   expanded.value = next
+}
+
+/**
+ * 網站請求底下的交件內容：展開時才讀。履歷端點（人物／政見）本來就帶這個請求的全部交件 id，
+ * 用任務 target 的人物或政見去讀；target 缺或找不到時，退回任務票數摘要帶的那一筆。
+ */
+type ReportsState = { status: 'loading' } | { status: 'error' } | { status: 'ok'; reports: HistoryWebRequestReport[]; fallbackId: string | null }
+const reportsOf = ref<Record<string, ReportsState>>({})
+function okOf(t: BoardTask) {
+  const r = reportsOf.value[t.task_id]
+  return r?.status === 'ok' ? r : null
+}
+async function loadReports(t: BoardTask) {
+  if (t.source !== 'web_request' || !t.votes?.submissions) return
+  if (reportsOf.value[t.task_id]?.status === 'loading' || reportsOf.value[t.task_id]?.status === 'ok') return
+  reportsOf.value = { ...reportsOf.value, [t.task_id]: { status: 'loading' } }
+  try {
+    const tg = t.target ?? {}
+    const [kind, id] = typeof tg.policy_id === 'string' ? ['policy', tg.policy_id] as const : typeof tg.politician_id === 'string' ? ['politician', tg.politician_id] as const : [null, null]
+    let reports: HistoryWebRequestReport[] = []
+    if (kind && id) {
+      const body = await withTimeoutAndRetry(`history ${kind} ${id}`, (signal) => fetchHistory(kind, id, { limit: 1, signal }))
+      reports = body.web_requests?.find(r => r.id === t.task_id)?.reports ?? []
+    }
+    reportsOf.value = { ...reportsOf.value, [t.task_id]: { status: 'ok', reports, fallbackId: t.votes.leading?.contribution_id ?? null } }
+  } catch {
+    reportsOf.value = { ...reportsOf.value, [t.task_id]: { status: 'error' } }
+  }
 }
 
 const openTasks = computed(() => tasks.value.filter(t => t.status === 'open'))
@@ -236,6 +273,14 @@ defineExpose({ load })
               <template v-if="t.votes"><dt class="text-slate-400">交件</dt><dd class="text-slate-700">{{ t.votes.submissions > 0 ? `${t.votes.submissions} 筆` : '還沒有人提交' }}<template v-if="t.votes.leading">・{{ voteTitle(t) }}</template></dd></template>
               <template v-if="contributionIdOf(t)"><dt class="text-slate-400">貢獻</dt><dd class="font-mono text-slate-500">{{ contributionIdOf(t)!.slice(0, 8) }}</dd></template>
             </dl>
+            <div v-if="t.source === 'web_request' && t.votes?.submissions" data-testid="task-reports">
+              <p v-if="reportsOf[t.task_id]?.status === 'loading'" class="text-xs text-slate-400 inline-flex items-center gap-1"><Loader2 :size="12" class="animate-spin" /> 載入中…</p>
+              <LoadError v-else-if="reportsOf[t.task_id]?.status === 'error'" inline message="交件內容暫時讀不到" @retry="loadReports(t)" />
+              <template v-else-if="reportsOf[t.task_id]?.status === 'ok'">
+                <RequestReports v-if="okOf(t)!.reports.length" :reports="okOf(t)!.reports" />
+                <ContributionDetail v-else-if="okOf(t)!.fallbackId" :id="okOf(t)!.fallbackId!" />
+              </template>
+            </div>
           </div>
         </li>
       </ul>
