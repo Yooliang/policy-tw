@@ -487,6 +487,7 @@ export interface RegionStats {
   representative_count: number;
   village_chief_count: number;
   policy_count: number;
+  elected_policy_count: number;
   updated_at: string;
 }
 

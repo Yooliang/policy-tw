@@ -21,6 +21,7 @@ _shared/proxy-client-ip.test.ts
 _shared/reassign-candidacy.test.ts
 _shared/reassign-merge-followups.test.ts
 _shared/regional-stats.test.ts
+_shared/regions-elected-policy-count.test.ts
 _shared/round2-followups.test.ts
 _shared/second-source.test.ts
 _shared/seed-skip-unchanged.test.ts /^A6 /
