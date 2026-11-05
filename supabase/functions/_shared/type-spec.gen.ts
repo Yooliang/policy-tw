@@ -166,6 +166,13 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
  {
   "tasks": [],
   "contributions": [
+   "lineage_status"
+  ],
+  "text": "**`lineage_status`**（1.118.0，policy-ops#201）— **脈絡現況**（`lineage_status_stale` 任務）：一條脈絡「現在到哪」的**一句**話，單筆：`lineage_id`✅、`phase`✅（`proposed` 提案階段／`planning` 規劃中／`approved` 已核定／`in_progress` 進行中／`completed` 已完成／`paused` 暫緩／`cancelled` 已終止）、`text`✅（8～120 字，**只寫出處有的事實**，不評價、不預測）、`as_of`✅（`YYYY-MM-DD`：**出處講到這個狀態的那一天**，不是你查的日子，不能是未來）、`source_locator`✅（這句話在出處的哪裡）、`source_url`（出自 `source_urls` 的哪一個，不填＝第一個）。\n- 一條脈絡一個截至日一列：同一個 `as_of` 重交＝覆蓋（每欄記查核履歷）；新的 `as_of`＝新增一列，網站顯示最大 `as_of` 那一列，舊的留作歷史。日期比現有最新還舊的照樣收進歷史，不影響網站顯示。\n- **現況沒變、但你找得到近期有日期的文件證明仍如此**：用那份文件的日期交新的一筆；**沒有新消息不等於新截至日**，不要拿今天的日期湊。\n- **撤回**：`remove: true`＋`as_of`（要撤回的那一列的截至日）＋`note`✅（20～300 字，為什麼那一列是錯的），不必填其他欄，也不要求兩個網站的出處。**取代**：照一般新內容交，另加 `replace_as_of`（被取代的那一列的截至日；那一列要存在）——舊的那一列刪掉、寫這一筆新的。刪掉的整列都留在查核履歷，可還原。\n- 第 2 節 1a 條「媒體不能當唯一出處」也適用（撤回除外）。目標分數 3，系統不給票、不核第二來源。\n- **驗證時**：①打開出處，`text` 的**每個字**都找得到（超出原文的推論、預測、評價投 `disagree`）；②`as_of` 是出處講到這個狀態的日期，不是查詢日；③`phase` 與句子一致；④沒有更晚的公開文件把它推翻。撤回與取代：確認被指的那一列真的錯了、`note` 講清楚為什麼；取代的新內容照上面四點驗。打不開投 `unsure`。"
+ },
+ {
+  "tasks": [],
+  "contributions": [
    "lineage",
    "lineage_participants",
    "lineage_handover",
@@ -378,6 +385,15 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
   ],
   "contributions": [],
   "text": "**這種任務的 `current` 帶什麼**：`handover_missing`／`lineage_roles_missing` 給 `lineage`（那條脈絡的參與者、交接、關聯）＋`lineage_policies`。"
+ },
+ {
+  "tasks": [
+   "lineage_status_stale"
+  ],
+  "contributions": [
+   "lineage_status"
+  ],
+  "text": "### 寫脈絡現況（`lineage_status_stale` → `lineage_status`，1.118.0）\n\n有合格政見的脈絡，**還沒有現況**（`target.reason`＝`none`）或**現況過期了**（`stale`：階段是 `approved`／`in_progress` 的超過 90 天、其他未結案階段超過 180 天；`completed`／`cancelled` 不會過期）就派這一件。`current` 給 `lineage`（那條脈絡，含目前的現況）＋`lineage_policies`；`target.current` 是過期的那一列。\n\n1. 找這件事**最新的公開文件**（政府公告、議會議事錄、預算書、新聞稿、可靠報導），寫一句現況，用 `lineage_status` 交。\n2. `as_of` 填文件講到那個狀態的日期，不是今天。查不到比現有更新的消息：現況沒變但找得到近期有日期的文件證明 → 用那份文件的日期交新的一筆；什麼都沒有 → `no_change`、`outcome=not_found`，`checked_urls` 列你查過的網址（查無之後 60 天內這條脈絡不再派現況任務）。\n3. `target.current` 那一列寫錯了 → 用撤回或取代（見 `lineage_status` 欄位說明）。"
  },
  {
   "tasks": [

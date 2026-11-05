@@ -316,12 +316,23 @@ export interface LineageLink {
   source: LineageSource | null;
 }
 
+/** 脈絡的現況（lineages_full.status，policy-ops#201）：一句、截至日（出處講到這個狀態的日期）、出處 */
+export interface LineageStatus {
+  phase: string;
+  text: string;
+  asOf: string;
+  sourceUrl: string;
+  source: LineageSource | null;
+}
+
 /** 一條政策脈絡（視圖 lineages_full 一列，#349）：一件事在某一層級、某一地方的來龍去脈 */
 export interface Lineage extends LineageSummary {
   policyIds: string[];
   participants: LineageParticipant[];
   handovers: LineageHandover[];
   links: LineageLink[];
+  /** 現行現況；還沒有就是 null（畫面不顯示） */
+  status?: LineageStatus | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -661,6 +672,7 @@ export interface RawLineage extends RawLineageSummary {
   participants?: Array<{ id: string; politician_id: string; name?: string | null; role: string; basis: string; source_url: string; source_locator: string; note?: string | null; source?: RawLineageSource | null }> | null;
   handovers?: Array<{ id: string; from_politician_id: string; from_name?: string | null; from_election_id?: number | null; to_politician_id: string; to_name?: string | null; to_election_id?: number | null; handover_type: string; decided_on?: string | null; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
   links?: Array<{ id: string; direction: string; lineage_id: string; title: string; level: string; region?: string | null; sub_region?: string | null; link_type: string; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  status?: { phase?: string | null; text?: string | null; as_of?: string | null; source_url?: string | null; source?: RawLineageSource | null } | null;
 }
 
 export interface RawPolicyElement {

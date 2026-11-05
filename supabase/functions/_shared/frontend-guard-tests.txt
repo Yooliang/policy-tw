@@ -11,6 +11,7 @@ _shared/election-results.test.ts
 _shared/issue-subtopics.test.ts /^D1 /
 _shared/latest-election-sync.test.ts
 _shared/lineage-elected-only.test.ts /^F4 /
+_shared/lineage-status.test.ts /^E1 /
 _shared/lineage.test.ts
 _shared/ops-env-params.test.ts
 _shared/party-alias-parity.test.ts

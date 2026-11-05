@@ -129,6 +129,8 @@ Deno.test("payload 形狀提到的欄位，schema 裡要真的有（拼錯的欄
     "area_km2", "budget_expenditure", "aging_rate",
     // 議題細項（policy-ops#173）：assignments 每一項的子欄位 policy_id，不是 payload 的欄位
     "policy_id", "source_url",
+    // 脈絡現況（policy-ops#201）：phase 的值 in_progress，不是欄位名
+    "in_progress",
   ]);
   for (const [type, shape] of Object.entries(PAYLOAD_SHAPE)) {
     const known = all[type];

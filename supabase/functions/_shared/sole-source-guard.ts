@@ -23,7 +23,8 @@
 import { sourceKind, type SourceKind } from "./source-priority.ts";
 
 // lineage_handover（交接，#349，協議 1.52.0）：講的是「後任把這件事怎麼了」，跟政見進度同一類事實，同一條規則
-export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress", "lineage_handover"] as const;
+// lineage_status（脈絡現況，policy-ops#201 第 2 期）：一句「這件事現在到哪」，是事實斷言，單筆，外層檢查就夠（撤回那一種沒有出處，不受限，見下）
+export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress", "lineage_handover", "lineage_status"] as const;
 /** 沒有官方來源時，至少要幾個不同網站 */
 export const MIN_DISTINCT_SITES_WITHOUT_OFFICIAL = 2;
 
@@ -81,7 +82,7 @@ export function soleSourceProblem(index: number, contributionType: string, sourc
   if (sources.some((s) => s.kind === "official")) return null;
   const sites = new Set(sources.map((s) => s.site).filter((s): s is string => s !== null)).size;
   if (sites >= MIN_DISTINCT_SITES_WITHOUT_OFFICIAL) return null;
-  const what = contributionType === "policy" ? "政見" : contributionType === "lineage_handover" ? "交接" : "政見進度";
+  const what = contributionType === "policy" ? "政見" : contributionType === "lineage_handover" ? "交接" : contributionType === "lineage_status" ? "現況" : "政見進度";
   return {
     index,
     contribution_type: contributionType,
@@ -98,9 +99,11 @@ export const SOLE_SOURCE_TASK_NOTE =
   "**媒體不能當唯一出處**（協議 1.45.0）：交 policy／policy_progress 時，source_urls 沒有官方來源（選舉公報、中選會、政府或議會網站）的話，要附至少兩個不同網站的來源（例如兩家媒體、候選人臉書加一篇報導）；只有一篇報導或一則貼文會被當場退回（不算被拒）。";
 
 /** 整批檢查：回傳所有有問題的筆（空陣列＝通過） */
-export function soleSourceProblems(items: ReadonlyArray<{ contribution_type: string; source_urls?: readonly string[] | null }>): SoleSourceProblem[] {
+export function soleSourceProblems(items: ReadonlyArray<{ contribution_type: string; source_urls?: readonly string[] | null; payload?: unknown }>): SoleSourceProblem[] {
   const out: SoleSourceProblem[] = [];
   items.forEach((it, i) => {
+    // 現況的撤回（remove:true）是「那一列錯了」，不是新的事實斷言，不要求兩個網站（理由寫在 note）
+    if (it.contribution_type === "lineage_status" && (it.payload as { remove?: unknown } | null | undefined)?.remove === true) return;
     const p = soleSourceProblem(i, it.contribution_type, it.source_urls ?? []);
     if (p) out.push(p);
   });

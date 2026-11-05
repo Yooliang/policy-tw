@@ -223,6 +223,50 @@ export function changedLineageFields<T extends object>(current: Obj, next: T, fi
   return fields.filter((k) => norm(current[k]) !== norm((next as Obj)[k]));
 }
 
+// ── 現況（policy-ops#201 第 2 期，協議 1.118.0；SQL：migration 20261105200000_lineage_status.sql 的 lineage_statuses）──
+// 一條脈絡一個截至日一列；現行＝最大 as_of 那一列。階段七值、句子 8～120 字跟 SQL CHECK 同一組（lineage-status.test.ts 盯著）。
+export const STATUS_PHASES = ["proposed", "planning", "approved", "in_progress", "completed", "paused", "cancelled"] as const;
+export type StatusPhase = (typeof STATUS_PHASES)[number];
+export const STATUS_PHASE_LABEL: Record<StatusPhase, string> = {
+  proposed: "提案階段",
+  planning: "規劃中",
+  approved: "已核定",
+  in_progress: "進行中",
+  completed: "已完成",
+  paused: "暫緩",
+  cancelled: "已終止",
+};
+export const STATUS_TEXT_MIN = 8;
+export const STATUS_TEXT_MAX = 120;
+/** 外層 note（撤回、取代時為什麼是錯的）的長度，沿用交接的 note 範圍 */
+export const STATUS_NOTE_MIN = 20;
+export const STATUS_NOTE_MAX = 300;
+
+/** lineage_status 交件 → 要寫進 lineage_statuses 的值（schema 已驗過形狀；source_url 沒給就是這筆交件的第一個來源） */
+export interface StatusValues {
+  phase: StatusPhase;
+  text: string;
+  as_of: string;
+  source_url: string;
+  source_locator: string;
+}
+export function statusValues(p: Obj, sourceUrls: readonly string[]): StatusValues {
+  return {
+    phase: String(p.phase) as StatusPhase,
+    text: String(p.text ?? "").trim(),
+    as_of: String(p.as_of),
+    source_url: trimOrNull(p.source_url) ?? (sourceUrls[0] ?? ""),
+    source_locator: String(p.source_locator ?? "").trim(),
+  };
+}
+export const STATUS_FIELDS = ["phase", "text", "source_url", "source_locator"] as const;
+
+/** 現況給人看的一句話：「進行中（截至 2026-10-01）：…」 */
+export function statusPhrase(s: { phase?: unknown; as_of?: unknown; text?: unknown }): string {
+  const label = STATUS_PHASE_LABEL[s.phase as StatusPhase] ?? String(s.phase ?? "?");
+  return `${label}（截至 ${String(s.as_of ?? "?").slice(0, 10)}）：${String(s.text ?? "")}`;
+}
+
 export const PARTICIPANT_FIELDS = ["role", "source_url", "source_locator", "note"] as const;
 export const HANDOVER_FIELDS = ["handover_type", "decided_on", "note", "source_url", "source_locator"] as const;
 export const LINK_FIELDS = ["link_type", "note", "source_url", "source_locator"] as const;

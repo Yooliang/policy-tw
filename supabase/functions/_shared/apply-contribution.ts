@@ -37,6 +37,7 @@ import {
   changedLineageFields, HANDOVER_FIELDS, HANDOVER_TYPE_LABEL, type HandoverType, handoverValues, LINEAGE_LEVEL_LABEL, type LineageLevel,
   LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, lineageIneligibleMessage, type LineageIneligibleReason, type LineageOwnedPolicy, lineagePolicyIneligibleReason,
   lineageSamePersonMessage, isSamePersonSameTerm, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS, participantPhrase, participantValues, taipeiToday,
+  STATUS_FIELDS, statusPhrase, statusValues,
 } from "./lineage.ts";
 import { chunksOf } from "./in-chunks.ts";
 import { careerSourceNote } from "./politician-careers.ts";
@@ -1496,6 +1497,68 @@ async function applyLineageHandover(supabase: SupabaseLike, row: ContributionRow
   return { status: "applied", message: `脈絡「${lineage.title}」的交接已更正：${phrase}` };
 }
 
+/**
+ * 記現況（policy-ops#201 第 2 期）：一條脈絡一個截至日一列，重交同一個截至日＝覆蓋（每欄記履歷）；新截至日＝新增一列。
+ * 日期較舊的照樣收進歷史（現行永遠是最大 as_of 那列）。撤回（remove:true）刪 as_of 那一列、取代（replace_as_of）刪舊截至日那一列再寫新的；
+ * 被刪的整列都記進 edit_history（field='*'、old＝整列、new＝null），還原＝整列放回去。
+ */
+async function applyLineageStatus(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const lineageId = str(p.lineage_id)?.toLowerCase();
+  const asOf = str(p.as_of);
+  if (!lineageId || !asOf) return { status: "failed", message: "lineage_status 要帶 lineage_id 與 as_of" };
+  const { data: lineage, error: lineageError } = await supabase.from("lineages").select("id, title").eq("id", lineageId).maybeSingle();
+  throwIf(lineageError, "lineages read");
+  if (!lineage) return { status: "failed", message: `找不到脈絡 ${lineageId}` };
+
+  const readAt = async (date: string): Promise<Obj | null> => {
+    const { data, error } = await supabase.from("lineage_statuses").select("*").eq("lineage_id", lineageId).eq("as_of", date).maybeSingle();
+    throwIf(error, "lineage_statuses read");
+    return (data as Obj | null) ?? null;
+  };
+  const removeRow = async (current: Obj): Promise<void> => {
+    const { error } = await supabase.from("lineage_statuses").delete().eq("id", current.id);
+    throwIf(error, "lineage_statuses delete");
+    // 整列記下：還原時放回去
+    await recordUpdate(supabase, ctx, "lineage_statuses", String(current.id), "*", current, null);
+  };
+
+  if (p.remove === true) {
+    const current = await readAt(asOf);
+    if (!current) return { status: "superseded", message: `脈絡「${lineage.title}」截至 ${asOf} 的現況本來就沒有，不重複撤回` };
+    await removeRow(current);
+    return { status: "applied", message: `脈絡「${lineage.title}」撤回現況：${statusPhrase(current)}` };
+  }
+
+  const values = statusValues(p, row.source_urls);
+  const notes: string[] = [];
+  const replaceAsOf = str(p.replace_as_of);
+  if (replaceAsOf && replaceAsOf !== asOf) {
+    const old = await readAt(replaceAsOf);
+    if (old) { await removeRow(old); notes.push(`取代截至 ${replaceAsOf} 的舊現況`); }
+  }
+  const current = await readAt(asOf);
+  const phrase = statusPhrase(values);
+  if (!current) {
+    const { data: inserted, error } = await supabase.from("lineage_statuses").insert({ lineage_id: lineageId, ...values, contribution_id: row.id }).select("*").maybeSingle();
+    throwIf(error, "lineage_statuses insert");
+    if (!inserted) throw new Error("lineage_statuses insert 沒有回傳 id");
+    await recordInsert(supabase, ctx, "lineage_statuses", String(inserted.id), inserted);
+    return { status: "applied", message: `脈絡「${lineage.title}」記下現況：${phrase}${notes.length > 0 ? `（${notes.join("；")}）` : ""}` };
+  }
+  const fields = changedLineageFields(current, values, [...STATUS_FIELDS]);
+  if (fields.length === 0) {
+    if (notes.length > 0) return { status: "applied", message: `脈絡「${lineage.title}」的現況：${notes.join("；")}，新的內容跟已有的一樣（${phrase}）` };
+    return { status: "superseded", message: `脈絡「${lineage.title}」截至 ${asOf} 已經有一樣的現況（${phrase}），不重複寫入` };
+  }
+  const patch: Obj = Object.fromEntries(fields.map((f) => [f, values[f]]));
+  const { error } = await supabase.from("lineage_statuses").update({ ...patch, contribution_id: row.id }).eq("id", current.id);
+  throwIf(error, "lineage_statuses update");
+  for (const f of fields) await recordUpdate(supabase, ctx, "lineage_statuses", String(current.id), f, current[f] ?? null, values[f]);
+  return { status: "applied", message: `脈絡「${lineage.title}」截至 ${asOf} 的現況已更正：${phrase}${notes.length > 0 ? `（${notes.join("；")}）` : ""}` };
+}
+
 /** 記脈絡關聯：一對上下級只有一筆，重交＝覆蓋；上級要在下級的上一層 */
 async function applyLineageLink(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
@@ -2653,6 +2716,7 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "lineage_participants": return await applyLineageParticipants(supabase, row);
     case "lineage_handover": return await applyLineageHandover(supabase, row);
     case "lineage_link": return await applyLineageLink(supabase, row);
+    case "lineage_status": return await applyLineageStatus(supabase, row);
     case "regional_stat": return await applyRegionalStat(supabase, row);
     case "policy_subtopics": return await applyPolicySubtopics(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };

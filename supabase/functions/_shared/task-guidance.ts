@@ -294,6 +294,15 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "本人在官網、新聞、答辯書裡自稱「我提的」「我推動的」：照官方紀錄標他的角色，另外加一項 basis 填 self_claim（本人宣稱）——本人宣稱不當作主導的證據。臉書、IG 讀不到，不收。" +
     "已經標過的角色寫錯了，重交同一人同一種依據就會覆蓋；標錯人用 remove=true 拿掉。官方紀錄裡查不到 → no_change，outcome=not_found，checked_urls 列你查過的議事系統頁面。",
 
+  lineage_status_stale:
+    "寫脈絡的現況：target.lineage_title 這件事（target.reason＝none 是還沒有現況；stale 是 target.current 的現況已過期）現在進行到哪。" +
+    "找這件事**最新的公開文件**（政府公告、議會議事錄、預算書、新聞稿、可靠報導），寫**一句**現況：phase 七選一（proposed 提案階段／planning 規劃中／approved 已核定／in_progress 進行中／completed 已完成／paused 暫緩／cancelled 已終止）、" +
+    "text 8～120 字，只寫出處有的事實、不評價、不預測；as_of 填**出處講到這個狀態的日期**（不是你查的日子，不能是未來）；source_locator 寫這句話在出處的哪裡。" +
+    "現況其實沒變、但你找得到近期有日期的文件證明仍如此 → 用那份文件的日期交新的一筆；**沒有新消息不等於新截至日**，不要拿今天的日期湊。" +
+    "target.current 的那一列寫錯了（日期對不上出處、句子超出原文）→ 用同一個 lineage_status 加 remove=true 撤回（as_of 填那一列的截至日，note 寫為什麼是錯的），或用 replace_as_of 取代。" +
+    "什麼都查不到 → no_change，outcome=not_found，checked_urls 列你查過的網址。" +
+    SOLE_SOURCE_TASK_NOTE.replace("交 policy／policy_progress 時", "交 policy／policy_progress／lineage_handover／lineage_status 時"),
+
   lineage_link_candidate:
     "判斷上下級：這條脈絡（target.lineage_id）跟 target.upper_candidates 裡上一級的脈絡，有沒有**實際的法規、預算或政策連結**。" +
     "上級立法或補助、這裡配套執行 → top_down（例：中央條例或前瞻補助核定 → 縣市的執行計畫）；這裡先做或爭取、上級後來採納 → bottom_up（例：縣市試辦或連署 → 中央入法、編列預算）。" +
@@ -432,6 +441,10 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：lineage_id、from_politician_id、from_election_id、to_politician_id、to_election_id（照任務 target 帶；那一屆不在網站上就不填）、" +
     "handover_type（keep 接手／pivot 轉向／shrink 縮小／stop 中止／resume 重新開始）、decided_on（判定依據的日期，選填）、note（20～500 字：依據哪份文件、文件怎麼說）、" +
     "source_locator（依據在出處的哪裡）、source_url（出自 source_urls 的哪一個，不填＝第一個）。中止要兩台不同機器的驗證票。",
+  lineage_status:
+    "payload：lineage_id（照任務 target）、phase（proposed 提案階段／planning 規劃中／approved 已核定／in_progress 進行中／completed 已完成／paused 暫緩／cancelled 已終止）、" +
+    "text（8～120 字的一句現況，只寫出處有的事實）、as_of（出處講到這個狀態的日期 YYYY-MM-DD，不是查詢日、不能是未來）、source_locator（這句話在出處的哪裡）、" +
+    "source_url（出自 source_urls 的哪一個，不填＝第一個）。撤回：remove=true＋as_of（要撤回的那一列的截至日）＋note（20～300 字，為什麼是錯的），不必填其他欄；取代：replace_as_of（被取代的那一列的截至日）＋新內容。",
   lineage_link:
     "payload：upper_lineage_id（上一級那條）、lower_lineage_id（下一級那條）、link_type（top_down 上級立法或補助，下級執行／bottom_up 下級爭取，上級採納）、" +
     "note（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）、source_locator（條文、公文字號或頁碼）、source_url（選填，不填＝第一個）。",
@@ -797,6 +810,14 @@ function buildPayload(
         decided_on: "（YYYY-MM-DD；不知道就刪掉這一欄）",
         note: "（20～500 字：依據哪份文件、文件怎麼說）",
         source_locator: "（依據在出處的哪裡）",
+      };
+    case "lineage_status":
+      return {
+        lineage_id: asText(t.lineage_id) ?? "（脈絡 id）",
+        phase: "（proposed／planning／approved／in_progress／completed／paused／cancelled）",
+        text: "（8～120 字：一句現況，只寫出處有的事實）",
+        as_of: "（YYYY-MM-DD：出處講到這個狀態的日期，不是查詢日）",
+        source_locator: "（這句話在出處的哪裡）",
       };
     case "lineage_link": {
       const uppers = Array.isArray(t.upper_candidates) ? t.upper_candidates as Array<Record<string, unknown>> : [];

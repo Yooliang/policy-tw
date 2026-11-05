@@ -270,7 +270,7 @@ Deno.test("D1 型別清點：CONTRIBUTION_TYPES／TASK_TYPES／SUGGESTED_TYPE／
 Deno.test("D2 migration 清點：CHECK 收新型別與全部既有型別、臂名清單、總表接上、規則種子、不動計分函式", () => {
   const a = MIG.indexOf("ADD CONSTRAINT contributions_contribution_type_check");
   const chk = MIG.slice(a, MIG.indexOf(";", a));
-  for (const t of CONTRIBUTION_TYPES) assertStringIncludes(chk, `'${t}'`, `CHECK 漏了 ${t}`);
+  for (const t of CONTRIBUTION_TYPES.filter((x) => x !== "lineage_status")) assertStringIncludes(chk, `'${t}'`, `CHECK 漏了 ${t}`); // lineage_status 由 20261105200000 加進 CHECK
   assertStringIncludes(fnText(MIG, "activity_arm_names"), "'issue_too_broad'");
   assertStringIncludes(fnText(MIG, "contribution_auto_tasks_arms"), "UNION ALL SELECT 'issue_too_broad' AS arm, t.* FROM contribution_auto_tasks_issue_too_broad() t");
   assertStringIncludes(MIG, "INSERT INTO activity_rules (activity, window_kind, params, note)");
