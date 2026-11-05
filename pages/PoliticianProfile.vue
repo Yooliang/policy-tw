@@ -36,6 +36,7 @@ import { useDeskNav } from '../composables/useDeskNav'
 import { currentElection, taipeiDay } from '../lib/election-list'
 import { electionYearOfDate, newerFirst, segmentOfId } from '../lib/election-route'
 import { isPostElectionStage, stageOfPolicy, taipeiToday } from '../lib/policy-stage'
+import { isPledge } from '../lib/pledge-origin'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
@@ -234,6 +235,12 @@ const personPolicies = computed(() => politician.value ? policies.value.filter(p
 const isPolicyOf = (p: Policy) => isPostElectionStage(stageOfPolicy(p, politician.value, (id) => getElectionById(id)?.electionDate, today.value))
 const campaignPledges = computed(() => personPolicies.value.filter(p => !isPolicyOf(p)))
 const historicalPolicies = computed(() => personPolicies.value.filter(p => isPolicyOf(p)))
+// 政見分頁的來源篩選（維護者 2026-11-06）：來源是固定標籤，同一條承諾當選後、開始做都不換；任內提出的另一類
+type SourceFilter = 'all' | 'pledge' | 'term'
+const sourceFilter = ref<SourceFilter>('all')
+const sourceCounts = computed(() => ({ all: historicalPolicies.value.length, pledge: historicalPolicies.value.filter(isPledge).length, term: historicalPolicies.value.filter(p => !isPledge(p)).length }))
+const shownHistorical = computed(() => sourceFilter.value === 'all' ? historicalPolicies.value : historicalPolicies.value.filter(p => (sourceFilter.value === 'pledge') === isPledge(p)))
+const SOURCE_FILTERS: { key: SourceFilter; label: string }[] = [{ key: 'all', label: '全部' }, { key: 'pledge', label: '競選承諾' }, { key: 'term', label: '任內提出' }]
 // 沒有承諾、但有政見的人：預設落在「政見」，但「承諾」分頁照常顯示（沒有就是空狀態；維護者 2026-10-29「很多人都有空白的頁面」，原本會把空的承諾分頁藏起來，造成有的人有、有的人沒有）
 const landOnHistory = computed(() => campaignPledges.value.length === 0 && historicalPolicies.value.length > 0)
 watch(landOnHistory, (land) => { if (land && activeTab.value === 'campaign') activeTab.value = 'history' }, { immediate: true })
@@ -336,6 +343,17 @@ useSwipeTabs(swipeEl, {
 onMounted(() => {
   const q = route.query.tab
   if (typeof q === 'string' && (tabOrder.value as string[]).includes(q)) activeTab.value = q as ProfileTab
+  const src = route.query.source
+  if (src === 'pledge' || src === 'term') sourceFilter.value = src
+})
+watch(sourceFilter, (v) => {
+  const have = typeof route.query.source === 'string' ? route.query.source : undefined
+  const want = v === 'all' ? undefined : v
+  if (want === have || route.name !== 'politician') return
+  const query = { ...route.query }
+  if (want) query.source = want
+  else delete query.source
+  void router.replace({ query, hash: route.hash })
 })
 watch(activeTab, (tab) => {
   const want = tab === defaultTab.value ? undefined : tab
@@ -448,7 +466,7 @@ const identity = computed(() => titles.value.join('、') || (candidacy.value?.ru
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
 const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', pledgeElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
-const historyGroups = computed(() => groupPoliciesByElection(historicalPolicies.value, '政見', electedElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
+const historyGroups = computed(() => groupPoliciesByElection(shownHistorical.value, '政見', electedElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
 
 usePageHead({
   type: 'article',
@@ -684,6 +702,12 @@ usePageHead({
             <!-- 只在「政見」分頁出現；原本是 v-else，切到「基本資料」時也會跟著出來（2026-09-20） -->
             <div v-if="tabSeen.history" v-show="activeTab === 'history'" :class="['space-y-6', panelClass('history')]" data-testid="profile-panel-history">
               <template v-if="historicalPolicies.length > 0">
+                <div v-if="sourceCounts.pledge > 0 && sourceCounts.term > 0" class="flex flex-wrap gap-2" role="group" aria-label="來源" data-testid="history-source-filter">
+                  <button v-for="f in SOURCE_FILTERS" :key="f.key" type="button" :aria-pressed="sourceFilter === f.key" @click="sourceFilter = f.key"
+                    :class="['px-3 py-1.5 rounded-full text-sm font-bold border transition-colors', sourceFilter === f.key ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400']">
+                    {{ f.label }} <span class="tabular-nums opacity-70">{{ sourceCounts[f.key] }}</span>
+                  </button>
+                </div>
                 <div class="space-y-8">
                   <div v-for="group in historyGroups" :key="group.key">
                     <h3 v-if="group.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ group.label }}</h3>
