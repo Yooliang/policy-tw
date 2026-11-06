@@ -244,7 +244,7 @@ const PAIRS: Pair[] = [
   { name: "visitor_front_slot_start" },
   { name: "manual_task_is_visitor" },
   { name: "manual_front_at" },
-  { name: "manual_front_pull" },
+  { name: "manual_front_pull", before: "20261107010000_manual_front_pull_skips_not_found_cooling.sql", note: "取台灣加「查無冷卻中不拉」（20261107010000，日本站手動任務不走正見的 not_found 2 天冷卻，暫不跟）之前的版本" },
   { name: "manual_task_closes_on_applied" },
   {
     name: "seed_auto_task_queue",
