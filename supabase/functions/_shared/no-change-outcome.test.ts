@@ -256,16 +256,20 @@ Deno.test("手動任務打不開、但任務已經不存在：記成 superseded�
   assertEquals(updates.length, 0);
 });
 
-Deno.test("手動任務查完有結果（confirmed／not_found）：照常關閉任務，不受這次改動影響", async () => {
+Deno.test("手動任務查完 confirmed：照常關閉任務", async () => {
   const MANUAL = "66666666-6666-4666-8666-666666666666";
-  for (const outcome of ["confirmed", "not_found"]) {
-    const { db, updates } = fakeManualTaskDb(MANUAL);
-    const out = await applyContribution(db, row(MANUAL, outcome));
-    assertEquals(out.status, "applied");
-    assertEquals(
-      updates.filter((u) => u.table === "contribution_tasks" && u.patch.status === "closed").length,
-      1,
-      `outcome=${outcome} 應該照常關閉任務——只有 unreachable 才不關`,
-    );
-  }
+  const { db, updates } = fakeManualTaskDb(MANUAL);
+  const out = await applyContribution(db, row(MANUAL, "confirmed"));
+  assertEquals(out.status, "applied");
+  assertEquals(updates.filter((u) => u.table === "contribution_tasks" && u.patch.status === "closed").length, 1, "confirmed 應該照常關閉任務");
+});
+
+// 2026-11-07（小良）：查無不關手動任務，記一筆 task_checks 冷卻 2 天後重派
+Deno.test("手動任務查完 not_found：不關任務，記 task_checks 進冷卻", async () => {
+  const MANUAL = "66666666-6666-4666-8666-666666666666";
+  const { db, inserted, updates } = fakeManualTaskDb(MANUAL);
+  const out = await applyContribution(db, row(MANUAL, "not_found"));
+  assertEquals(out.status, "applied");
+  assertEquals(updates.filter((u) => u.table === "contribution_tasks" && u.patch.status === "closed").length, 0, "not_found 不該關任務");
+  assertEquals(inserted.filter((i) => i.table === "task_checks" && i.row.outcome === "not_found" && i.row.task_id === MANUAL).length, 1, "要記一筆 not_found 的 task_checks");
 });

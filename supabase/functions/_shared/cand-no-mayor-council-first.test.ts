@@ -32,7 +32,9 @@ async function build(): Promise<PGlite> {
   await db.exec(`
     CREATE TABLE queue_settings (id integer PRIMARY KEY, visitor_front_seconds bigint);
     INSERT INTO queue_settings VALUES (1, ${Y});
-    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, target jsonb, boost_seconds bigint NOT NULL DEFAULT 0, cooling boolean NOT NULL DEFAULT true);
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, target jsonb, boost_seconds bigint NOT NULL DEFAULT 0, cooling boolean NOT NULL DEFAULT true, cool_until timestamptz);
+    CREATE TABLE task_checks (task_id text, outcome text, checked_at timestamptz);
+    CREATE FUNCTION task_not_found_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 2 $$;
     CREATE TABLE contributions (id integer PRIMARY KEY, status text, contribution_type text, payload jsonb);
     CREATE FUNCTION activity_today() RETURNS date LANGUAGE sql AS $$ SELECT date '2026-10-30' $$;
     ${await latestFn()}`);

@@ -307,7 +307,7 @@ export const BALLOT_NUMBERS_HINT =
   "source_urls 第一個放你看到他號次的那一頁公告（縣市選委會的公告頁或選舉公報），payload.note 寫「公告第幾頁、第幾選舉區／哪個里」與沒放進 items 的是哪幾位、為什麼。" +
   "同名同姓要連選舉區、村里一起對，對不上或公告上沒有這個人的就不要交那一位。" +
   "**2026 屆先看 target.cec_json_url 與 hint_sources 第一個**：中選會選舉專區的候選人 JSON（info.cec.gov.tw/vote2026/static/json/…，靜態檔直接 GET、不必跑 JS）已含每位的號次 candNo，請以姓名對應（議員、代表連選舉區，村里長連 birth 與 liCode），source_urls 可直接放這個 JSON 網址；這份裡找不到的人才退回縣市選委會公告。" +
-  "**公告還沒出來、或打不開時不要回 no_change not_found**（號次任務的查無冷卻 2 天，公告還沒出來時白白冷卻、錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。" +
+  "**公告還沒出來、或打不開時不要回 no_change not_found**（查無會直接記錄、不用投票，這個任務 2 天內不會再派、之後會重新派出；公告還沒出來時白白冷卻、可能錯過名單公告日）：沒東西可交就直接略過這一件，系統之後會再派；真要回報，outcome 填 unreachable（2 天後換人再試）。" +
   "號次是每個選舉區（村里長是每個村里、鄉鎮市長是每個鄉鎮）各自從 1 編起的，同一個單位不會有兩位同號：落庫前系統會逐列檢查同一個號次單位裡有沒有同號（整批內部、與已上線的他人），同號的列不寫、回到缺口重派，所以同號就是有人抄錯，先回頭看公告。";
 
 /**
@@ -352,7 +352,7 @@ export const BALLOT_NUMBERS_RECHECK_HINT =
   "每個單位的成員與目前記的號次在 units[].members。做法：打開該單位的候選人名單公告或選舉公報（去哪找同補號次的提示：縣市選委會網站的候選人名單公告、選舉公報、公所登記冊），逐位對號次：" +
   "我們記錯的，用 candidacy 重交那一位（politician_id、name、election_id、election_type、region 照 target，sub_region／village／electoral_district 照 units，cand_no 填公告上的號次，candidate_status 照 target.candidate_status），**只交跟公告不同的**；" +
   "公告上有、我們名單沒有的人，用 candidacy 補進來（附同一份公告）；公告本身就跳號（候選人退選或資格不符、號次沒有遞補）而我們的號次都跟公告一致，用 no_change（outcome 填 confirmed）回報，finding 寫公告上的號次與頁碼。" +
-  "公告還沒出來、或打不開時略過這一件，不要回 no_change not_found（14 天內不再派）。" +
+  "公告還沒出來、或打不開時略過這一件，不要回 no_change not_found（查無直接記錄、不用投票，2 天內不再派，之後會重新派出）。" +
   "名單人數不到齊的單位不會被當成跳號；代表（鄉鎮市民代表、區民代表）的號次單位是選舉區：記了選舉區的才檢查，只記到鄉鎮的系統不檢查（補選區任務會請代理補）。";
 
 /** candidacy_source_missing 的 cand_no 那一種（補號次，整個單位一件） */

@@ -16,7 +16,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { readSkillWithTypes } from "./skill-text.ts";
 import type { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { applyContribution, PROGRESS_REPEAT_COOLDOWN_DAYS, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
+import { applyContribution, NOT_FOUND_COOLDOWN_DAYS, PROGRESS_REPEAT_COOLDOWN_DAYS, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 import { applyP2, buildArmsDb, fnText, type GapRow, latestFn, migrationNames, mutate, P0_MIG, P2_ER_MIG, P2_PG_MIG, P2_PR_MIG, readMig } from "./arms-pglite.ts";
 
 const MIG = "20261009010000_village_chief_progress_cooling.sql";
@@ -240,7 +240,7 @@ Deno.test("A9 回給代理的那句話：進度追蹤類查無說明遞增冷卻
   const POLICY_ID = "0c9c1a5e-1111-4222-8333-444444444444";
   for (const t of ["progress_stale", "deadline_due"]) {
     const m = await say(`auto:${t}:${POLICY_ID}`, "not_found");
-    assert(m.includes("查無公開進度") && m.includes(String(TASK_CHECK_COOLDOWN_DAYS)) && m.includes(String(PROGRESS_REPEAT_COOLDOWN_DAYS)), m);
+    assert(m.includes("查無公開進度") && m.includes(String(NOT_FOUND_COOLDOWN_DAYS)) && m.includes(String(PROGRESS_REPEAT_COOLDOWN_DAYS)), m);
   }
   // 別的型別、別的 outcome：話沒變（不提 30 天）
   for (const [t, o] of [["policy_missing", "not_found"], ["progress_stale", "confirmed"], ["deadline_due", "unreachable"]] as const) {
