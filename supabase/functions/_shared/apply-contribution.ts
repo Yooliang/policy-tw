@@ -2361,11 +2361,17 @@ async function applyQuestionAnswer(supabase: SupabaseLike, row: ContributionRow)
 export const TASK_CHECK_COOLDOWN_DAYS = 14;
 /** 跟 SQL 的 task_unreachable_cooldown_days() 同一個數字；「我拿不到來源」是換人再試，不是結案 */
 export const TASK_UNREACHABLE_COOLDOWN_DAYS = 2;
-/** 號次缺口任務（candidacy_source_missing 的 cand_no）的 not_found 冷卻天數；跟 SQL task_check_cooldown_days_for 的號次那一條（20261030150100）同一個數字，cand-no-not-found-cooldown.test.ts 盯著 */
-export const CAND_NO_NOT_FOUND_COOLDOWN_DAYS = 2;
+/**
+ * 任何任務的 no_change＋not_found（「查無」）冷卻天數（2026-11-07，小良）：不進投票、直接落庫，冷卻 2 天後重新派出。
+ * 跟 SQL task_check_cooldown_days_for 的 not_found 那一條（20261107000000）同一個數字，not-found-direct.test.ts 盯著。
+ * 手動任務（uuid）也一樣：記一筆 task_checks 進冷卻、不關任務。
+ */
+export const NOT_FOUND_COOLDOWN_DAYS = 2;
+/** 「查無」直接落庫時 contributions.reviewed_by 的值（contribute-handler 與 20261107000000 的舊資料清理共用） */
+export const NOT_FOUND_DIRECT_REVIEWER = "system:not-found-direct";
 /**
  * 進度追蹤類（progress_stale、deadline_due）同一個任務第二次起回報查無（not_found）的冷卻天數：跟 SQL 設定表 task_cooldown_settings.not_found_repeat_days 的初值同一個數字。
- * 設定表可調（一行 UPDATE），這裡只用在回給代理的那句話；village-progress-cooling.test.ts 盯著兩邊的初值一致。第一次查無沿用 TASK_CHECK_COOLDOWN_DAYS（設定表 not_found_first_days 的初值）。
+ * 設定表可調（一行 UPDATE），這裡只用在回給代理的那句話；village-progress-cooling.test.ts 盯著兩邊的初值一致。第一次查無一律 NOT_FOUND_COOLDOWN_DAYS（2026-11-07 起不再讀設定表的 not_found_first_days）。
  */
 export const PROGRESS_REPEAT_COOLDOWN_DAYS = 30;
 /**
@@ -2491,12 +2497,12 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     if (outcome === "unreachable") {
       return { status: "applied", message: `已記錄「拿不到來源、未能確認」，這筆缺口 ${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試（不是結案）`, task_id: taskId };
     }
-    if (outcome === "not_found" && taskId.split(":")[1] === "candidacy_source_missing" && taskId.split(":")[2] === "cand_no") {
-      return { status: "applied", message: `已記錄「查無」，這筆號次缺口 ${CAND_NO_NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人（公告還沒出來時別回查無，略過就好）`, task_id: taskId };
-    }
     if (outcome === "not_found" && (PROGRESS_COOLDOWN_TASK_TYPES as readonly string[]).includes(taskId.split(":")[1])) {
-      // 進度追蹤類查無冷卻遞增（#470）：同一個任務第一次 14 天，第二次起 30 天
-      return { status: "applied", message: `已記錄「查無公開進度」：這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人（同一個任務第二次起回報查無，冷卻改 ${PROGRESS_REPEAT_COOLDOWN_DAYS} 天）；期間資料若補齊也會自行消失`, task_id: taskId };
+      // 進度追蹤類查無冷卻遞增（#470）：同一個任務第一次 2 天（2026-11-07 起，原 14 天），第二次起 30 天
+      return { status: "applied", message: `已記錄「查無公開進度」，不需要別人驗證：這筆缺口 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（同一個任務第二次起回報查無，冷卻改 ${PROGRESS_REPEAT_COOLDOWN_DAYS} 天）；期間資料若補齊也會自行消失`, task_id: taskId };
+    }
+    if (outcome === "not_found") {
+      return { status: "applied", message: `已記錄「查無」，不需要別人驗證：這筆缺口 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（公告還沒出來時別回查無，略過就好）`, task_id: taskId };
     }
     return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
@@ -2520,6 +2526,22 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   if (outcome === "unreachable") {
     if (!manualTask) return { status: "superseded", message: `任務 ${taskId} 已不存在，這筆無異動沒有可關的任務，不重試` };
     return { status: "applied", message: `已記錄「拿不到來源、未能確認」：任務 ${taskId} 留著給別人接手，不會關閉`, task_id: taskId };
+  }
+  if (outcome === "not_found") {
+    // 「查無」不關手動任務（2026-11-07，小良）：跟 auto: 任務同一個規則——記一筆 task_checks 進冷卻 NOT_FOUND_COOLDOWN_DAYS 天（refresh_dispatch_blocked
+    // 對所有非 verify: 的派工列都讀 task_checks），冷卻過了任務自己回到佇列。任務留著 open，不寫 recordUpdate（沒有狀態變動）。
+    if (!manualTask) return { status: "superseded", message: `任務 ${taskId} 已不存在，這筆「查無」沒有可冷卻的任務，不重試` };
+    const check = {
+      task_id: taskId,
+      agent_name: row.agent_name,
+      note: str(row.payload.finding) ?? str(row.payload.note) ?? row.note ?? null,
+      contribution_id: row.id,
+      outcome,
+    };
+    const { error: checkError } = await supabase.from("task_checks").insert(check);
+    throwIf(checkError, "task_checks insert (manual not_found)");
+    await recordInsert(supabase, ctxOf(row), "task_checks", taskId, check);
+    return { status: "applied", message: `已記錄「查無」，不需要別人驗證：任務 ${taskId} ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（不會關閉；公告還沒出來時別回查無，略過就好）`, task_id: taskId };
   }
   const task = await closeTask(supabase, taskId, row.agent_name);
   // 任務已經不存在（被刪了）：沒有東西可關，重試也不會變（2026-09-25 第一次出現 apply_failed，重試三次後會被當落庫失敗退件）

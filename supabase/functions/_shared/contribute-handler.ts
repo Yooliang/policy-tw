@@ -20,7 +20,7 @@ import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
-import { applyContribution, contributionStatusFor, followMergedInto, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
+import { applyContribution, contributionStatusFor, followMergedInto, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
 import { identityNameProblems, NAME_MISMATCH_HINT, renameCollision, renameCollisionMessage, renameOf } from "./person-identity-guard.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
@@ -731,7 +731,8 @@ export async function handleContribute(
   // no_change＋outcome:unreachable：伺服器當場試抓一次（2026-09-26 裁決，見上方 precheckUnreachable）。
   // 抓得到就整批 400 退回（不算被拒，代理照系統抓到的內容改判 confirmed／not_found）；
   // 全部抓不到，這筆改成落庫時就是 applied、不進投票——bypassNotes 記著要寫進 review_notes 的話。
-  const bypassNotes = new Map<number, string>();
+  // 值是 { note, reviewedBy }：note 寫進 review_notes、reviewedBy 寫進 reviewed_by（打不開與「查無」兩種直接落庫的理由不同，後台要分得出來）
+  const bypassNotes = new Map<number, { note: string; reviewedBy: string }>();
   {
     const unreachableCandidates = validation.items
       .map((item, i) => ({ item, i }))
@@ -760,7 +761,7 @@ export async function handleContribute(
           };
         }
         const tried = check.attempts.map((a) => `${a.url}（${a.note}）`).join("；") || "沒有可試的網址";
-        bypassNotes.set(i, `[系統] 打不開：伺服器也抓不到——${tried}。只記一次嘗試，不進投票。`);
+        bypassNotes.set(i, { note: `[系統] 打不開：伺服器也抓不到——${tried}。只記一次嘗試，不進投票。`, reviewedBy: "system:unreachable-precheck" });
       } catch (e) {
         // 試抓本身出錯（程式例外）：不能讓系統自己的錯擋掉代理，照舊收成 pending
         console.error("unreachable precheck failed:", e instanceof Error ? e.message : String(e));
@@ -772,6 +773,14 @@ export async function handleContribute(
   // 每次都是事後補一條守門，投過票的人白投也看不出會失敗。這裡在寫入 contributions 之前，把 apply-contribution.ts
   // 實際會查的對象（人物、政見、參選紀錄、任務）先唯讀查一遍，查到「一定落不了庫」就整批 400，不算被拒。
   // 已被其他守門處理過的（併成同意票、單一答案已交過、24 小時內重複）不用再查。
+  // 「查無」直接落庫（2026-11-07，小良）：先不放進 bypassNotes——precheck 要照常查（任務已被刪就整批 400，不算被拒），查完再併進去
+  const notFoundDirect = validation.items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item, i }) =>
+      item.contribution_type === "no_change" && !blocked.has(i) && !mergedByIndex.has(i) && !existingByHash.has(hashes[i]) && !bypassNotes.has(i) &&
+      (item.payload as Record<string, unknown>).outcome === "not_found"
+    )
+    .map(({ i }) => i);
   const precheckSkip = new Set<number>([...blocked, ...mergedByIndex.keys(), ...bypassNotes.keys(), ...validation.items.map((_, i) => i).filter((i) => existingByHash.has(hashes[i]))]);
   const precheckProblems = await precheckApplyTargets(supabase, validation.items, precheckSkip);
   if (precheckProblems.length > 0) {
@@ -789,6 +798,20 @@ export async function handleContribute(
         errors: precheckProblems.map(({ index, code: c, path, message }) => ({ index, code: c, path, message })),
       },
     };
+  }
+
+  // 任何任務的 no_change＋not_found（「查無」）不進投票：直接落庫為 applied，任務冷卻 NOT_FOUND_COOLDOWN_DAYS 天後再派（2026-11-07，小良）。
+  // 投票原本是為了擋「錯報查無就鎖 14 天」；冷卻只剩 2 天，錯報的代價很小，票是浪費。confirmed 的 no_change 不變，仍要票。
+  {
+    const seenNotFound = new Set<string>();
+    for (const i of notFoundDirect) {
+      if (seenNotFound.has(hashes[i])) continue; // 同批完全相同的只直接落庫第一筆，其餘走下面既有的同批去重
+      seenNotFound.add(hashes[i]);
+      bypassNotes.set(i, {
+        note: `[系統] 已記錄「查無」，不需要別人驗證；這個任務 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派，之後會重新派出（公告還沒出來時別回查無，略過就好）`,
+        reviewedBy: NOT_FOUND_DIRECT_REVIEWER,
+      });
+    }
   }
 
   // 同一批裡內容完全相同（雜湊相同）的只寫第一筆：不然 150 筆複製貼上會寫進 149 筆重複的貢獻，回應的編號還會被 Map 覆寫成同一個（#455 審查）
@@ -829,7 +852,7 @@ export async function handleContribute(
   // 打不開、系統也抓不到的 no_change：直接寫進 contributions 再立刻落庫為 applied，不進投票佇列
   // （applyNoChange 自己知道 auto: 任務要記 task_checks、手動任務只記錄不關，見 apply-contribution.ts）
   const bypassResults = new Map<number, { id: string; outcome: ApplyOutcome }>();
-  for (const [i, reviewNote] of bypassNotes) {
+  for (const [i, { note: reviewNote, reviewedBy }] of bypassNotes) {
     const item = validation.items[i];
     const insertRow = {
       contribution_type: item.contribution_type,
@@ -846,9 +869,9 @@ export async function handleContribute(
       via,
     };
     const { data: insertedRow, error: insertError } = await supabase.from("contributions").insert(insertRow).select("id").maybeSingle();
-    if (insertError) throw new Error(`contributions insert (unreachable bypass): ${insertError.message}`);
+    if (insertError) throw new Error(`contributions insert (direct bypass): ${insertError.message}`);
     const id = (insertedRow as { id?: string } | null)?.id;
-    if (!id) throw new Error("contributions insert (unreachable bypass) 沒有回傳 id");
+    if (!id) throw new Error("contributions insert (direct bypass) 沒有回傳 id");
     const outcome = await applyContribution(supabase, {
       id,
       contribution_type: item.contribution_type,
@@ -864,11 +887,11 @@ export async function handleContribute(
     const { error: updateError } = await supabase.from("contributions").update({
       status,
       review_notes: reviewNote,
-      reviewed_by: "system:unreachable-precheck",
+      reviewed_by: reviewedBy,
       reviewed_at: now,
       applied_at: status === "applied" ? now : null,
     }).eq("id", id);
-    if (updateError) console.error("unreachable bypass status update failed:", updateError.message);
+    if (updateError) console.error("direct bypass status update failed:", updateError.message);
     bypassResults.set(i, { id, outcome });
   }
 
@@ -889,7 +912,7 @@ export async function handleContribute(
         contribution_type: item.contribution_type,
         contribution_id: bypass.id,
         status: "applied",
-        message: `已記錄這次嘗試：${bypass.outcome.message}。不需要別人驗證。`,
+        message: `已記錄：${bypass.outcome.message}。不需要別人驗證。`,
         task_id: bypass.outcome.task_id,
         review_url: `${supabaseUrl}/functions/v1/contribution-status?id=${bypass.id}`,
       };
@@ -972,7 +995,7 @@ export async function handleContribute(
       message: [
         `已收到 ${inserted.length} 筆新貢獻`,
         mergedByIndex.size > 0 ? `${mergedByIndex.size} 筆與別人交過的是同一件事，改記為對那幾筆的同意票` : "",
-        bypassResults.size > 0 ? `${bypassResults.size} 筆打不開、系統也抓不到，已直接記錄這次嘗試（不進投票）` : "",
+        bypassResults.size > 0 ? `${bypassResults.size} 筆（打不開、系統也抓不到，或回報「查無」）已直接記錄（不進投票）` : "",
         results.length - inserted.length - mergedByIndex.size - bypassResults.size > 0
           ? `${results.length - inserted.length - mergedByIndex.size - bypassResults.size} 筆重複`
           : "",
