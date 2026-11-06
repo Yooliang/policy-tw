@@ -1,0 +1,275 @@
+/**
+ * scripts/no-cand-cleanup-2026.sql（policy-ops#182）的守門：2026 已登記沒號次一次改狀態的一次性腳本。
+ * PGlite 上跑真的腳本（結尾 ROLLBACK 換成 COMMIT）與還原腳本。
+ *
+ * 守住：
+ *   1. 條件全成立：只改「已登記、沒號次、是 extra」的人，改成 withdrawn＋withdrawn_after_filing=false（不是觸發器寫的 true），
+ *      留快照、edit_history（agent_name 標記）、收掉他們的查參選狀態任務，改完 cec_roster_diff 歸零；其他人一個字不動
+ *   2. 任一條件不成立（缺人、帶號次的 extra、已登記沒號次卻不是 extra）整段退回，什麼都沒改、沒留快照表
+ *   3. 還原腳本把狀態、任務改回去
+ *   4. 預設（沒換 COMMIT）是演練：什麼都不留
+ * 還原驗證：拿掉缺人檢查，「缺人」那個案例就不再被條件檢查擋下。
+ */
+import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
+import { fnText, latestFn, mutate, readMig } from "./arms-pglite.ts";
+
+const M = await readMig("20261031160000_cec_roster_2026.sql");
+const HINT = await readMig("20261031140000_cand_no_cec_json_hint.sql");
+const DROP = await readMig("20261007140000_candidacy_drop_legacy.sql");
+const read = async (rel: string) => (await Deno.readTextFile(new URL(rel, import.meta.url))).replace(/\r\n/g, "\n");
+const SCRIPT = await read("../../../scripts/no-cand-cleanup-2026.sql");
+const RESTORE = await read("../../../scripts/no-cand-cleanup-2026-restore.sql");
+const section = (sql: string, name: string) => {
+  const a = sql.indexOf(`-- ▼▼ SECTION: ${name} ▼▼`);
+  const b = sql.indexOf(`-- ▲▲ SECTION: ${name} ▲▲`);
+  assert(a >= 0 && b > a, `找不到段落 ${name}`);
+  return sql.slice(a, b);
+};
+const strip = (s: string) => s.replace(/^(REVOKE|GRANT)\b[^;]*;\s*$/gm, "");
+const commit = (s: string) => {
+  assert(/^ROLLBACK;/m.test(s), "腳本結尾應是 ROLLBACK 演練");
+  return s.replace(/^ROLLBACK;.*$/m, "COMMIT;");
+};
+
+const SCHEMA = `
+CREATE TABLE politicians (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, party text, region text, sub_region text, merged_into uuid);
+CREATE TABLE regions (id serial PRIMARY KEY, region text, sub_region text, village text);
+CREATE TABLE politician_elections (id serial PRIMARY KEY, election_id integer NOT NULL, election_type text, politician_id uuid NOT NULL,
+  region_id integer, candidacy_status text, cand_no integer, withdrawn_after_filing boolean, source_note text, verified boolean,
+  CONSTRAINT politician_elections_withdrawn_after_filing_check CHECK (withdrawn_after_filing IS NULL OR candidacy_status = 'withdrawn'));
+CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, record_id text NOT NULL, field text NOT NULL, old_value jsonb, new_value jsonb,
+  contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
+CREATE TABLE politician_pair_resolutions (pair_key text PRIMARY KEY, a uuid, b uuid, resolution text NOT NULL);
+CREATE FUNCTION politician_pair_key(p_a uuid, p_b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(p_a, p_b)::text || '|' || GREATEST(p_a, p_b)::text $$;
+CREATE TABLE elections (id integer PRIMARY KEY, election_date date);
+CREATE TABLE roster_check_scope (election_id integer, election_type text, registration_closed_on date);
+CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contribution_type text, status text, payload jsonb, task_id text, applied_at timestamptz);
+CREATE TABLE verification_sources (id serial PRIMARY KEY, kind text, status text, list_url text, sort int, provides text[], election_types text[], regions text[]);
+CREATE TABLE cec_candidates (election_id integer, election_type text, region text, sub_region text, village text, name_norm text);
+INSERT INTO elections VALUES (2026, '2026-11-28');
+INSERT INTO roster_check_scope VALUES (2026, '縣市議員', '2026-09-04');
+CREATE FUNCTION candidacy_list_published(p_election_id integer, p_election_type text, p_on date) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT false $$;
+CREATE TABLE contribution_tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text, task_type text, target jsonb, status text NOT NULL DEFAULT 'open',
+  source text, closed_at timestamptz);
+`;
+
+async function buildDb(): Promise<PGlite> {
+  const db = new PGlite();
+  await db.exec(SCHEMA);
+  // 退選旗標觸發器：正式庫的原樣（filed → withdrawn 會自動寫 true）
+  await db.exec(fnText(DROP, "politician_elections_withdrawn_flag"));
+  await db.exec(`CREATE TRIGGER trg_politician_elections_withdrawn_flag BEFORE INSERT OR UPDATE OF candidacy_status ON politician_elections
+    FOR EACH ROW EXECUTE FUNCTION politician_elections_withdrawn_flag();`);
+  for (const f of ["cec_name_norm", "cec_name_key", "roster_name_fold", "roster_name_key", "ballot_number_unit"]) await db.exec(await latestFn(f));
+  // 退選之後會被派工的兩條臂：真實 migration 的最新定義
+  await db.exec(fnText(await readMig("20261006220000_candidacy_read_side.sql"), "candidacy_protocol_status"));
+  await db.exec(await latestFn("contribution_auto_tasks_not_running"));
+  await db.exec(await latestFn("contribution_auto_tasks_withdrawn_filing"));
+  await db.exec(HINT.slice(0, HINT.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_ballot_numbers()")));
+  const REG = await readMig("20261008130000_cec_registrations.sql");
+  await db.exec(REG.slice(0, REG.indexOf("CREATE OR REPLACE FUNCTION roster_registration_gap(")));
+  for (const s of ["tables", "match", "mirror", "reconcile", "source", "gap"]) await db.exec(strip(section(M, s)));
+  return db;
+}
+
+async function region(db: PGlite, r: string, sub: string): Promise<number> {
+  const ex = await db.query<{ id: number }>(`SELECT id FROM regions WHERE region = $1 AND sub_region = $2`, [r, sub]);
+  if (ex.rows[0]) return ex.rows[0].id;
+  return (await db.query<{ id: number }>(`INSERT INTO regions (region, sub_region) VALUES ($1, $2) RETURNING id`, [r, sub])).rows[0].id;
+}
+async function ours(db: PGlite, name: string, no: number | null, status = "filed", county = "台北市", sub = "第07選舉區"): Promise<number> {
+  const pid = (await db.query<{ id: string }>(`INSERT INTO politicians (name, region) VALUES ($1, $2) RETURNING id`, [name, county])).rows[0].id;
+  const rid = await region(db, county, sub);
+  return (await db.query<{ id: number }>(
+    `INSERT INTO politician_elections (election_id, election_type, politician_id, region_id, candidacy_status, cand_no) VALUES (2026, '縣市議員', $1, $2, $3, $4) RETURNING id`,
+    [pid, rid, status, no],
+  )).rows[0].id;
+}
+async function task(db: PGlite, peId: number, origin = "cec_roster_extra") {
+  await db.query(
+    `INSERT INTO contribution_tasks (title, task_type, target, source) VALUES ('查', 'candidate_status_stale', $1::jsonb, 'manual')`,
+    [JSON.stringify({ politician_election_id: peId, origin })]);
+}
+const T_URL = "https://info.cec.gov.tw/vote2026/static/json/cand/T/63000.json";
+async function loadCouncil(db: PGlite, rows: { name: string; no: number }[]) {
+  await db.query(`SELECT cec_roster_seed_units()`);
+  const res = await db.query<{ r: string }>(`SELECT cec_roster_replace_unit($1, 200, $2::jsonb) AS r`, [
+    T_URL, JSON.stringify(rows.map((r) => ({ name: r.name, cand_no: r.no, party: "無", birth: "0600101", home: "", district: "臺北市第7選舉區", area_code: "07", dept_code: "", li_code: "" }))),
+  ]);
+  assertEquals(res.rows[0].r, "ok");
+}
+
+/** 條件成立的基本盤：兩位對得上、兩位已登記沒號次且名單查無（extra）、一位退選 */
+async function base(db: PGlite, roster = [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }]) {
+  await ours(db, "王小明", 1);
+  await ours(db, "李大華", 2);
+  const e1 = await ours(db, "林某某", null);
+  const e2 = await ours(db, "陳某某", null);
+  const w = await ours(db, "退選甲", null, "withdrawn");
+  await task(db, e1);
+  await task(db, e2);
+  await task(db, e2, "other_origin"); // 不是這批來源的任務：不收
+  await loadCouncil(db, roster);
+  return { e1, e2, w };
+}
+const rows = async (db: PGlite) =>
+  (await db.query<{ id: number; candidacy_status: string; withdrawn_after_filing: boolean | null }>(
+    `SELECT id, candidacy_status, withdrawn_after_filing FROM politician_elections ORDER BY id`)).rows;
+const tableExists = async (db: PGlite, t: string) =>
+  (await db.query<{ n: number }>(`SELECT count(*)::int n FROM pg_tables WHERE tablename = $1`, [t])).rows[0].n === 1;
+async function failsWith(db: PGlite, sql: string, needle: string) {
+  const err = await assertRejects(() => db.exec(sql));
+  assert(String((err as Error).message).includes(needle), `訊息應含「${needle}」：${(err as Error).message}`);
+  await db.exec("ROLLBACK").catch(() => {});
+}
+
+Deno.test("條件成立：只改已登記沒號次的 extra，旗標寫 false、留快照與履歷、收任務、對帳歸零", async () => {
+  const db = await buildDb();
+  const { e1, e2, w } = await base(db);
+  await db.exec(commit(SCRIPT));
+  const r = await rows(db);
+  for (const id of [e1, e2]) {
+    const x = r.find((y) => y.id === id)!;
+    assertEquals([x.candidacy_status, x.withdrawn_after_filing], ["withdrawn", false]);
+  }
+  assertEquals(r.filter((y) => y.candidacy_status === "filed").length, 2); // 有號次的兩位沒動
+  assertEquals(r.find((y) => y.id === w)!.withdrawn_after_filing, null);   // 本來就退選的沒動
+  const snap = await db.query<{ id: number; candidacy_status: string }>(`SELECT id, candidacy_status FROM politician_elections_no_cand_snapshot_20261103 ORDER BY id`);
+  assertEquals(snap.rows.map((x) => [x.id, x.candidacy_status]), [[e1, "filed"], [e2, "filed"]]);
+  const h = await db.query<{ n: number }>(`SELECT count(*)::int n FROM edit_history WHERE agent_name = 'no-cand-cleanup-2026-11' AND contribution_id IS NULL`);
+  assertEquals(h.rows[0].n, 4);
+  const t = await db.query<{ status: string; o: string }>(`SELECT status, target->>'origin' o FROM contribution_tasks ORDER BY o, status`);
+  assertEquals(t.rows.map((x) => `${x.o}:${x.status}`), ["cec_roster_extra:closed", "cec_roster_extra:closed", "other_origin:open"]);
+  const d = await db.query<{ n: number }>(`SELECT count(*)::int n FROM cec_roster_diff()`);
+  assertEquals(d.rows[0].n, 0);
+});
+
+Deno.test("預設是演練：結尾 ROLLBACK，什麼都不留", async () => {
+  const db = await buildDb();
+  await base(db);
+  await db.exec(SCRIPT);
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "filed").length, 4);
+  assertEquals(await tableExists(db, "politician_elections_no_cand_snapshot_20261103"), false);
+  assertEquals((await db.query(`SELECT 1 FROM edit_history`)).rows.length, 0);
+});
+
+Deno.test("條件不成立整段退回：缺人、帶號次的 extra、已登記沒號次卻不是 extra", async () => {
+  const cases: [string, (db: PGlite) => Promise<void>, string][] = [
+    ["缺人", async (db) => { await loadCouncil(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "吳九", no: 7 }]); }, "missing=1"],
+    ["帶號次的 extra", async (db) => { await ours(db, "趙某某", 9); }, "帶號次的 extra=1"],
+    ["同名待合併（同單位同名不同人物）", async (db) => { await ours(db, "王小明", 3); }, "同名待合併=1"],
+    ["已登記沒號次但單位沒抓（不是 extra）", async (db) => { await ours(db, "高雄人", null, "filed", "高雄市", "第01選舉區"); }, "不是 extra"],
+  ];
+  for (const [name, tweak, needle] of cases) {
+    const db = await buildDb();
+    await base(db);
+    await tweak(db);
+    await failsWith(db, commit(SCRIPT), needle);
+    const left = (await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length;
+    assertEquals(left, 1, `${name}：不該有任何人被改（只有原本退選的那位）`);
+    assertEquals(await tableExists(db, "politician_elections_no_cand_snapshot_20261103"), false, name);
+  }
+});
+
+Deno.test("還原驗證：拿掉 missing 檢查，缺人的案例就不再被條件檢查擋下", async () => {
+  const db = await buildDb();
+  await base(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "吳九", no: 7 }]);
+  const weak = commit(mutate(SCRIPT, "IF v_missing <> 0 THEN", "IF false THEN"));
+  // 缺人時帶號次人數也對不上名單，這條還是會擋；但 missing 那一項訊息不該再出現
+  const err = await assertRejects(() => db.exec(weak));
+  const msg = String((err as Error).message);
+  assert(!msg.includes("missing="), msg);
+  await db.exec("ROLLBACK").catch(() => {});
+});
+
+Deno.test("還原腳本：狀態與任務改回去；之後被別人改過的不蓋", async () => {
+  const db = await buildDb();
+  const { e1, e2 } = await base(db);
+  await db.exec(commit(SCRIPT));
+  await db.query(`UPDATE politician_elections SET candidacy_status = 'declared' WHERE id = $1`, [e2]); // 之後有人改過
+  await db.exec(commit(RESTORE));
+  const r = await rows(db);
+  const x = r.find((y) => y.id === e1)!;
+  assertEquals([x.candidacy_status, x.withdrawn_after_filing], ["filed", null]);
+  assertEquals(r.find((y) => y.id === e2)!.candidacy_status, "declared");
+  const t = await db.query<{ status: string }>(`SELECT status FROM contribution_tasks WHERE target->>'origin' = 'cec_roster_extra'`);
+  assertEquals(t.rows.map((y) => y.status), ["open", "open"]);
+  const rev = await db.query<{ n: number }>(`SELECT count(*)::int n FROM edit_history WHERE agent_name = 'no-cand-cleanup-2026-11' AND reverted_at IS NOT NULL`);
+  assertEquals(rev.rows[0].n, 2); // e1 的兩列
+});
+
+Deno.test("同名但已判定不同人的配對不擋", async () => {
+  const db = await buildDb();
+  const dup = await ours(db, "王小明", 3);
+  await base(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "王小明", no: 3 }]);
+  const pids = (await db.query<{ id: string }>(`SELECT politician_id id FROM politician_elections WHERE id IN (SELECT id FROM politician_elections WHERE cand_no = 1 UNION SELECT $1::int)`, [dup])).rows.map((x) => x.id);
+  assertEquals(pids.length, 2);
+  await failsWith(db, commit(SCRIPT), "同名待合併=1");
+  await db.query(`INSERT INTO politician_pair_resolutions (pair_key, a, b, resolution) VALUES (politician_pair_key($1::uuid, $2::uuid), $1::uuid, $2::uuid, 'different')`, pids);
+  await db.exec(commit(SCRIPT));
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
+});
+
+Deno.test("還原驗證：拿掉同名待合併檢查，同名案例就不再被它擋下（改完對帳歸零，直接放行）", async () => {
+  const db = await buildDb();
+  await ours(db, "王小明", 3);
+  await base(db, [{ name: "王小明", no: 1 }, { name: "李大華", no: 2 }, { name: "王小明", no: 3 }]);
+  await failsWith(db, commit(SCRIPT), "同名待合併=1"); // 原版：擋
+  const weak = commit(mutate(SCRIPT, "IF v_samename <> 0 THEN", "IF false THEN"));
+  await db.exec(weak); // 拿掉檢查：不再中止
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn").length, 3);
+});
+
+// ── 清理後不會被後續派工臂重新派出 ─────────────────────────────
+const armIds = async (db: PGlite, fn: "contribution_auto_tasks_not_running" | "contribution_auto_tasks_withdrawn_filing") =>
+  (await db.query<{ id: string }>(`SELECT target->>'politician_election_id' AS id FROM ${fn}()`)).rows.map((r) => Number(r.id)).sort((a, b) => a - b);
+
+/** 對照組：退選、旗標 false、沒履歷（not_running 會派）；退選、旗標空（withdrawn_filing 會派）——證明兩個函式在這個測試庫裡真的會回東西 */
+async function controls(db: PGlite) {
+  const nr = await ours(db, "對照甲", null, "withdrawn");
+  await db.query(`UPDATE politician_elections SET withdrawn_after_filing = false WHERE id = $1`, [nr]);
+  return nr;
+}
+
+Deno.test("清理後 not_running 與 withdrawn_filing 兩條臂都不回這批人（對照組仍會被派）", async () => {
+  const db = await buildDb();
+  const { e1, e2, w } = await base(db);
+  const ctrl = await controls(db);
+  assertEquals(await armIds(db, "contribution_auto_tasks_not_running"), [ctrl]);
+  assertEquals(await armIds(db, "contribution_auto_tasks_withdrawn_filing"), [w]);
+  await db.exec(commit(SCRIPT));
+  const nr = await armIds(db, "contribution_auto_tasks_not_running");
+  const wf = await armIds(db, "contribution_auto_tasks_withdrawn_filing");
+  assertEquals(nr, [ctrl]);
+  assertEquals(wf, [w]);
+  for (const id of [e1, e2]) assert(!nr.includes(id) && !wf.includes(id), `pe ${id} 被後續臂重新派出`);
+});
+
+Deno.test("還原驗證：不寫 withdrawn_after_filing 的履歷，not_running 就會把這批人派出去", async () => {
+  const db = await buildDb();
+  const { e1, e2 } = await base(db);
+  const block = `
+  UNION ALL
+  SELECT 'politician_elections', s.id::TEXT, 'withdrawn_after_filing', to_jsonb(s.withdrawn_after_filing), to_jsonb(false), 'no-cand-cleanup-2026-11'
+    FROM politician_elections_no_cand_snapshot_20261103 s;`;
+  const weak = commit(mutate(SCRIPT, block, ";"));
+  assert(weak !== SCRIPT && !weak.includes("'withdrawn_after_filing', to_jsonb(s.withdrawn_after_filing)"), "履歷那段沒被拿掉");
+  await db.exec(weak);
+  // 前提都成立（腳本跑完、狀態已改）才看結果：拿掉履歷後，兩個人都被 not_running 派出
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "withdrawn" && y.withdrawn_after_filing === false).length, 2); // 這批兩位（退選甲的旗標本來是空的）
+  assertEquals(await armIds(db, "contribution_auto_tasks_not_running"), [e1, e2]);
+});
+
+Deno.test("還原腳本之後（改回 filed）兩條臂也不派這批人", async () => {
+  const db = await buildDb();
+  const { e1, e2, w } = await base(db);
+  await db.exec(commit(SCRIPT));
+  await db.exec(commit(RESTORE));
+  assertEquals((await rows(db)).filter((y) => y.candidacy_status === "filed").length, 4);
+  const nr = await armIds(db, "contribution_auto_tasks_not_running");
+  const wf = await armIds(db, "contribution_auto_tasks_withdrawn_filing");
+  assertEquals(nr, []);
+  assertEquals(wf, [w]);
+  for (const id of [e1, e2]) assert(!nr.includes(id) && !wf.includes(id));
+});
