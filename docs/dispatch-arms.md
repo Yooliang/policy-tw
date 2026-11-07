@@ -22,7 +22,7 @@
 
   - 進隊時間 ＝ `last_dispatched_at`（新列＝出生當下；派出後＝派出的當下，所以派過就回到隊尾）。
   - `priority_seconds`：缺口的優先秒數，正數＝往前、負數＝往後（第 2.2 節）。
-  - `cool_until`：冷卻結束時間，當下限——冷卻沒過，鍵不會比它早（第 2.5 節）。
+  - `cool_until`：冷卻結束時間，**沒插隊時**是排序鍵下限——冷卻沒過，鍵不會比它早；有 `boost_seconds` 時是在 `GREATEST` 外層扣減，鍵會早於它（第 1.2、2.5 節）。
   - `boost_seconds`：插隊秒數，一次性，**派出就歸零**（觸發器在 `dispatch_count` 變動時清）。
 - 設定在單列表 `queue_settings`（2026-11-07 正式庫）：`dispatch_horizon_seconds` 86400（1 天）、`boost_seconds` 157680000（5 年，維護者 `/boost` 一次加的份量）、`manual_front_seconds` 157680000（5 年）、`visitor_front_seconds` 315360000（10 年）、`verify_priority_seconds` 1209600（14 天）、`verify_redispatch_seconds` 604800（7 天）、`verify_no_change_redispatch_seconds` 1209600（14 天）、`verify_inherit_negative` false。
 - 來源：`20261011320000_queue_priority_seconds.sql`（秒數制）、`20261011350000_queue_priority_cleanup.sql`、`20261104120000_verify_ticket_key.sql`（驗證票）。
@@ -98,7 +98,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 | `lineage_candidate` / `lineage_link_candidate` / `lineage_roles_missing` | 政見脈絡的候選、連結、角色缺口 |
 | `candidacy_source_missing` | 參選紀錄缺來源；`target.kind` 為 `cand_no`（補號次）或 `cand_no_recheck`（複查），其餘為一般來源缺口 |
 | `roster_check` | 名冊對帳（中選會登記彙總 vs 我們的參選紀錄，多／缺／重複） |
-| `progress_stale` / `deadline_due` | 進度追蹤（逾期未更新、到期）；冷卻走設定表（第 2.5 節）；村里長不主動追進度，有人看才追（`20261009010000`，細節見 `village-progress-cooling.test.ts` 檔頭，本文未逐行核對） |
+| `progress_stale` / `deadline_due` | 進度追蹤（逾期未更新、到期）；冷卻走設定表（第 2.5 節）；村里長不主動追進度，有人看才追（`20261009010000`：規則 5／24／36 以 `except_election_types=ARRAY['村里長']` 排除村里長；規則 45／46／47 對村里長設 `requires_traffic=true`，人物或政見進 `page_traffic_hot` 才開窗；`village-progress-cooling.test.ts`） |
 | `regional_stat_missing` | 地方統計（人口・面積・總預算歲出・65 歲以上比例） |
 | `policy_election_mismatch` / `policy_election_missing` | 政見的選舉歸屬錯／缺 |
 | `legacy_audit`、`profile_detail_gap`、`party_info_missing`、`policy_validity`、`district_seats_missing` | 量少的雜項臂（`legacy_audit` 為舊資料稽核） |
@@ -121,15 +121,15 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 （`manual_front_seconds(task_id)` 定義：`auto-overvoted` 0；visitor 10 年；`manual`／`auto_dispute` 5 年；其餘 0。）
 
-> 未查證：`suggested` 由誰、在哪一行寫入 `contribution_tasks`（cron `system-one?action=followups&since_hours=1` 與 `task_suggestion` 貢獻落庫都可能）；「多為投票備註的跟進」是觀察到的 `task_type='other'` 與名稱推得。
+> `suggested` 的寫入點（2026-11-07 Gemini審查核對）：① `task_suggestion` 貢獻通過後 `applyTaskSuggestion`（`_shared/apply-contribution.ts` 約 1757 行，`created_by`＝提議代理）；② `system-one?action=followups`：交件說明跟進 `settleSubmissionFollowup`（`system-one/index.ts` 約 130 行）與投票備註跟進 `settleVoteFollowup`（約 220 行），`task_type='other'`、`created_by='jev-followup'`——佔絕大多數；③ `system-one?action=bio-gap` 的 `bioGapTask`（約 1332 行，`created_by='jev-bio'`）。
 
 **插隊來源一覽**
 
 | 機制 | 做什麼 | 注意 |
 |---|---|---|
-| 維護者 `/boost`（Edge Function `boost`，RPC `task_boost`） | 對命中的列加一份 `queue_settings.boost_seconds`（5 年），`cooling=false`；母任務被插隊，其驗證票跟著動 | 2026-11-04 起 POST 要維護者憑證（`20261104110000`，`boost-auth`）；不再先跑 seed（`20261019050000`，否則逾時）；只對已在佇列的列生效。**明確的 `/boost` 照舊可蓋過冷卻** |
-| `cand_no_front_pull()` | 每小時 :03（pg_cron `cand-no-front-pull-hourly`）把補號次的任務、`cand_numbers`／含號次的 `candidacy` 驗證票、補號次的 `no_change` 驗證票往前拉：一般 2×`visitor_front_seconds`、縣市長／縣市議員 3×、當前提前職位（鄉鎮市長→原住民區長→鄉鎮市民代表→原住民區民代表→村里長，第一個還有缺口的）2.5× | **2026-11-28 之後直接回 0**；2026-11-07（`20261107000000`）起，`cool_until` 未過或 2 天內有 `not_found` 查核的不拉 |
-| `manual_front_pull()` | seed 內叫；台北時間每小時前 20 分鐘（`visitor_front_slot_start()`，`visitor_front_slot_hours()`=1，視窗長度未另行核對）把 visitor 臂 open 的列（從沒派過、或最後派出早於本時段）設成 `visitor_front_seconds` | 2026-11-07（`20261107010000`）起，2 天內有 `not_found` 查核的不拉 |
+| 維護者 `/boost`（Edge Function `boost`，RPC `task_boost`） | 對命中的列加一份 `queue_settings.boost_seconds`（5 年），`cooling=false`；**已存在的驗證票不隨母任務移位**（`20261104120000` 起票的基準凍結在 `dispatch_base_at`），要插某張票用 `/boost` 的 `task_ids` 指定票本身；母任務在派出前被插隊，派出後新產生的票基準會繼承那個位置 | 2026-11-04 起 POST 要維護者憑證（`20261104110000`，`boost-auth`）；不再先跑 seed（`20261019050000`，否則逾時）；只對已在佇列的列生效。**明確的 `/boost` 照舊可蓋過冷卻** |
+| `cand_no_front_pull()` | 每小時 :03（pg_cron `cand-no-front-pull-hourly`）把補號次的任務、`cand_numbers`／含號次的 `candidacy` 驗證票、補號次的 `no_change` 驗證票，以及擋住號次缺口的同名人物合併任務（`target.cand_no_gap`，3×）往前拉：一般 2×`visitor_front_seconds`、縣市長／縣市議員 3×、當前提前職位（鄉鎮市長→原住民區長→鄉鎮市民代表→原住民區民代表→村里長，第一個還有缺口的）2.5× | **2026-11-28 之後直接回 0**；2026-11-07（`20261107000000`）起，`cool_until` 未過或 2 天內有 `not_found` 查核的不拉 |
+| `manual_front_pull()` | seed 內叫；台北時間每小時前 20 分鐘（`visitor_front_slot_start()`，`visitor_front_slot_hours()`=1、`visitor_front_window_minutes()`=20（`20261008165000`），即每小時 :00、:10 兩輪 seed）把 visitor 臂 open 的列（從沒派過、或最後派出早於本時段）設成 `visitor_front_seconds` | 2026-11-07（`20261107010000`）起，2 天內有 `not_found` 查核的不拉 |
 | 出生插隊 | 新手動任務的 `boost_seconds ＝ manual_front_seconds(task_id)`（上表） | BEFORE INSERT 觸發器 `trg_task_dispatches_nf_cooling_no_boost`（`20261107010000`）：uuid 任務出生時若 2 天內有 `not_found`，插隊歸零 |
 | 一次性 migration | `20261029010000`（補號次 5 年）、`20261029040000`（號次驗證票）、`20261101050000` 與 `20261107020000`（`auto:roster_check:2026*` 沒插隊的各加一份；後者略過查無冷卻中與 blocked 的） | 只動當時已在佇列的列；派出歸零所以是一次性；7 天重開的新列不會自動插隊 |
 
@@ -185,7 +185,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 - `candidacy_source_missing` 的 32 列：`cand_no` 10（村里長 8、鄉鎮市民代表 1、原住民區民代表 1）、`cand_no_recheck` 22（村里長 15、縣市議員 2、鄉鎮市民代表 5）；其中 cooling 11。號次已幾乎補完。
 - `roster_check` 311 列依職位：鄉鎮市民代表 144（cooling 134）、村里長 113（boosted 70）、縣市議員 23、縣市長 17、原住民區民代表 7、鄉鎮市長 3、立委 2、總統 1、原住民區長 1。
-- `contribution_tasks`（手動任務表）open／closed：`web_request` 1,076／4,571、`suggested` 2,273／533、`manual` 168／462、`auto_dispute` 7／233；本表 open 比佇列列數多，差在停放（`web_request_parked`）與已被臂輸出濾掉的。（差額來源未逐項核對。）
+- `contribution_tasks`（手動任務表）open／closed：`web_request` 1,076／4,571、`suggested` 2,273／533、`manual` 168／462、`auto_dispute` 7／233；本表 open 比佇列列數多，差在停放（`web_request_parked`）與已被臂輸出濾掉的。差額來自 `contribution_auto_tasks_manual`（`20261028130000`）的兩道過濾：`NOT web_request_parked(t.id)`（村里長、鄉鎮市民代表缺政見的網站請求在公報前停放，佔絕大部分）與已收滿答案的公民提問。
 - 以 `policy_missing` 的**中位列**為準，它前面（可派、`queue_at` 更早）有：`profile_gap` 4,058、`policy_missing` 自己 857、驗證票 653、手動任務 228、`duplicate_policy` 196、`roster_check` 92、`lineage_candidate` 90，其餘各 ≤ 17。
 
 ## 4. 已知的坑（2026-11-07 查到的）
@@ -240,7 +240,7 @@ SELECT task_id, boost_seconds, cooling, cool_until, dispatch_count, queue_at
   FROM task_dispatches WHERE boost_seconds > 0 AND cool_until > now() ORDER BY queue_at LIMIT 50;
 ```
 
-2026-11-07 查到 1 列：`auto:candidacy_source_missing:cand_no:2026:村里長:新竹市:香山區`（`boost_seconds` 630720000＝20 年，`cool_until` 11-15、`dispatch_count` 0）；與 `20261107000000` 之前先拉、之後才有查核紀錄的時序相符，未深究。
+2026-11-07 查到 1 列：`auto:candidacy_source_missing:cand_no:2026:村里長:新竹市:香山區`（`boost_seconds` 630720000＝20 年，`cool_until` 11-15、`dispatch_count` 0）。原因：`20261107000000` 之前被 `cand_no_front_pull` 拉到 20 年；它最近的查核是 `confirmed`（冷卻 14 天）而不是 `not_found`，該 migration 第 4 節只清「2 天內有 `not_found`」的列的殘留秒數，所以沒被清。現在的 `cand_no_front_pull` 不會再拉它，派出一次就歸零。
 
 **D. 現在真正的隊頭是誰、哪些是同機器可領的**（隊頭預覽；真實 `/next` 還要再套認領與同機器過濾）
 
