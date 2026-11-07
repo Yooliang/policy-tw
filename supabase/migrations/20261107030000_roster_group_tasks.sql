@@ -325,6 +325,23 @@ $$;
 COMMENT ON FUNCTION roster_group_tasks_sweep IS '分組任務對帳（每小時）：人不在 roster_group_people() 且該單位官方名冊鏡像新鮮＝處理完；全部處理完就 closed，否則更新說明與標題的人數。回傳關掉的張數。2026-11-07';
 REVOKE ALL ON FUNCTION roster_group_tasks_sweep() FROM PUBLIC, anon, authenticated;
 
+-- 每小時再插隊（2026-11-07 40珊宜審查補）：派出一次插隊就歸零、回到 1.2 萬件後面，單人任務就是這樣餓死的；
+-- 選前有時限，還開著的分組任務每小時補回一份 boost_seconds（冷卻中、擋住的不補）。全部處理完關掉後自然不再補。
+CREATE OR REPLACE FUNCTION roster_group_tasks_reboost() RETURNS INTEGER
+LANGUAGE plpgsql AS $$
+DECLARE n INTEGER;
+BEGIN
+  UPDATE task_dispatches d
+     SET boost_seconds = q.boost_seconds
+    FROM queue_settings q, contribution_tasks t
+   WHERE q.id = 1 AND t.id::TEXT = d.task_id AND t.status = 'open' AND t.target->>'origin' = 'roster_group'
+     AND d.boost_seconds = 0 AND NOT d.blocked AND (d.cool_until IS NULL OR d.cool_until <= now());
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END;
+$$;
+REVOKE ALL ON FUNCTION roster_group_tasks_reboost() FROM PUBLIC, anon, authenticated;
+
 -- cec-extra-sweep 的單人任務：人已不在 extra 差異（過時，且該單位名冊新鮮）或已被分組任務收進去的，關掉。回傳關掉的張數
 CREATE OR REPLACE FUNCTION roster_group_close_extra_singles() RETURNS INTEGER
 LANGUAGE plpgsql AS $$
@@ -380,7 +397,7 @@ DO $do$
 BEGIN
   IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
     PERFORM cron.unschedule(j.jobid) FROM cron.job j WHERE j.jobname = 'roster-group-tasks-hourly';
-    PERFORM cron.schedule('roster-group-tasks-hourly', '50 * * * *', $q$SELECT roster_group_tasks_sweep();$q$);
+    PERFORM cron.schedule('roster-group-tasks-hourly', '50 * * * *', $q$SELECT roster_group_tasks_sweep(); SELECT roster_group_tasks_reboost();$q$);
   END IF;
 END
 $do$;
